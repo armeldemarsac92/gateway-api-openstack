@@ -240,6 +240,11 @@ func TestGatewayAPICRDReconcilePredicate(t *testing.T) {
 		Type: apiextensionsv1.Established,
 	})
 	testPredicateUpdate(t, pred, definition, statusChanged, false, "CRD status")
+	channelChanged := definition.DeepCopy()
+	channelChanged.Annotations[gatewayconsts.ChannelAnnotation] = "experimental"
+	if !pred.Update(event.UpdateEvent{ObjectOld: definition, ObjectNew: channelChanged}) {
+		t.Fatal("Gateway API CRD channel change was ignored")
+	}
 	annotationChanged := definition.DeepCopy()
 	annotationChanged.Annotations[gatewayconsts.BundleVersionAnnotation] = "v1.5.0"
 	testPredicateUpdate(t, pred, definition, annotationChanged, true, "bundle version annotation")

@@ -50,7 +50,7 @@ func (r *Reconciler) setGatewayUnsupportedVersion(
 	gateway = scope.gateway
 	recheckVersion := false
 	if controller.GatewayClassSupportsInstalledVersion(gatewayClass) {
-		versionErr := controller.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader)
+		versionErr := r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader)
 		if versionErr == nil {
 			return ctrl.Result{}, errGatewayChanged
 		}

@@ -173,6 +173,14 @@ func TestGatewayClassReconcileRejectsParametersRef(t *testing.T) {
 }
 
 func TestGatewayClassReconcileReportsUnsupportedGatewayAPIVersion(t *testing.T) {
+	mixedChannels := supportedGatewayAPICRDs()
+	for _, crd := range mixedChannels {
+		channel := "standard"
+		if crd.GetName() == "httproutes.gateway.networking.k8s.io" {
+			channel = "experimental"
+		}
+		crd.GetAnnotations()[gatewayconsts.ChannelAnnotation] = channel
+	}
 	experimentalMismatch := gatewayAPICRD("xbackendtrafficpolicies.gateway.networking.x-k8s.io", "v2.0.0")
 	experimentalMismatch.Spec.Group = gatewayAPIExperimentalGroup
 	terminatingRouteCRD := gatewayAPICRD("httproutes.gateway.networking.k8s.io", gatewayconsts.BundleVersion)
@@ -184,6 +192,11 @@ func TestGatewayClassReconcileReportsUnsupportedGatewayAPIVersion(t *testing.T) 
 		definitions []client.Object
 		wantMessage string
 	}{
+		{
+			name:        "channels differ at the same bundle version",
+			definitions: mixedChannels,
+			wantMessage: "httproutes.gateway.networking.k8s.io uses channel experimental",
+		},
 		{
 			name: "required CRD is missing",
 			definitions: []client.Object{
@@ -233,11 +246,8 @@ func TestGatewayClassReconcileReportsUnsupportedGatewayAPIVersion(t *testing.T) 
 			wantMessage: "gateways.gateway.networking.k8s.io uses bundle version v1.5.0",
 		},
 		{
-			name: "another Gateway API CRD uses an unknown version",
-			definitions: append(
-				supportedGatewayAPICRDs(),
-				gatewayAPICRD("grpcroutes.gateway.networking.k8s.io", "v2.0.0"),
-			),
+			name:        "another Gateway API CRD uses an unknown version",
+			definitions: []client.Object{gatewayAPICRD("grpcroutes.gateway.networking.k8s.io", "v2.0.0")},
 			wantMessage: "grpcroutes.gateway.networking.k8s.io uses bundle version v2.0.0",
 		},
 		{
@@ -684,7 +694,7 @@ func supportedGatewayAPICRDs() []client.Object {
 }
 
 func gatewayAPICRD(name, bundleVersion string) *apiextensionsv1.CustomResourceDefinition {
-	annotations := map[string]string{}
+	annotations := map[string]string{gatewayconsts.ChannelAnnotation: "standard"}
 	if bundleVersion != "" {
 		annotations[gatewayconsts.BundleVersionAnnotation] = bundleVersion
 	}

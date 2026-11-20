@@ -127,7 +127,8 @@ func GatewayAPICRDReconcilePredicate() predicate.Predicate {
 			return generationOrDeletionChanged(event.ObjectOld, event.ObjectNew) ||
 				event.ObjectOld.GetName() != event.ObjectNew.GetName() ||
 				event.ObjectOld.GetAnnotations()[gatewayconsts.BundleVersionAnnotation] !=
-					event.ObjectNew.GetAnnotations()[gatewayconsts.BundleVersionAnnotation]
+					event.ObjectNew.GetAnnotations()[gatewayconsts.BundleVersionAnnotation] ||
+				event.ObjectOld.GetAnnotations()[gatewayconsts.ChannelAnnotation] != event.ObjectNew.GetAnnotations()[gatewayconsts.ChannelAnnotation]
 		},
 		GenericFunc: func(event event.GenericEvent) bool {
 			return isGatewayAPICRD(event.Object)

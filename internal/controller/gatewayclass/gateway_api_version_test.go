@@ -27,11 +27,14 @@ import (
 )
 
 func TestObserveGatewayAPIVersionReturnsDeterministicIssues(t *testing.T) {
-	definitions := []client.Object{
-		gatewayAPICRD("httproutes.gateway.networking.k8s.io", gatewayconsts.BundleVersion),
-		gatewayAPICRD("referencegrants.gateway.networking.k8s.io", gatewayconsts.BundleVersion),
-		gatewayAPICRD("gateways.gateway.networking.k8s.io", ""),
-		gatewayAPICRD("gatewayclasses.gateway.networking.k8s.io", "v1.5.0"),
+	definitions := supportedGatewayAPICRDs()
+	for _, crd := range definitions {
+		switch crd.GetName() {
+		case "gateways.gateway.networking.k8s.io":
+			delete(crd.GetAnnotations(), gatewayconsts.BundleVersionAnnotation)
+		case "gatewayclasses.gateway.networking.k8s.io":
+			crd.GetAnnotations()[gatewayconsts.BundleVersionAnnotation] = "v1.5.0"
+		}
 	}
 	otherGroup := gatewayAPICRD("widgets.example.com", "")
 	otherGroup.Spec.Group = "example.com"
@@ -41,7 +44,7 @@ func TestObserveGatewayAPIVersionReturnsDeterministicIssues(t *testing.T) {
 	baseReader := indexedFakeClientBuilder(testScheme(t), testConfig()).WithObjects(definitions...).Build()
 	reader := &metadataOnlyCRDReader{Reader: baseReader}
 
-	observation, err := ObserveGatewayAPIVersion(context.Background(), reader)
+	observation, err := testConfig().ObserveGatewayAPIVersion(context.Background(), reader)
 	if err != nil {
 		t.Fatalf("ObserveGatewayAPIVersion() error = %v", err)
 	}

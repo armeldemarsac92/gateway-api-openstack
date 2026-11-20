@@ -56,12 +56,7 @@ var (
 	SetCondition = controller.SetCondition
 )
 
-var requiredGatewayAPICRDs = []string{
-	"gatewayclasses.gateway.networking.k8s.io",
-	"gateways.gateway.networking.k8s.io",
-	"httproutes.gateway.networking.k8s.io",
-	"referencegrants.gateway.networking.k8s.io",
-}
+var requiredGatewayAPICRDs = (controller.Config{}).GatewayAPICRDNames()
 
 type recordingProvider struct {
 	gatewaySpecs     []cloud.GatewaySpec
@@ -220,19 +215,7 @@ func (b *controllerTestClientBuilder) Build() client.WithWatch {
 		b.builder = b.builder.WithObjects(testClassParameters())
 	}
 	if !b.hasGatewayAPICRDs {
-		definitions := make([]client.Object, 0, len(requiredGatewayAPICRDs))
-		for _, name := range requiredGatewayAPICRDs {
-			definitions = append(definitions, &apiextensionsv1.CustomResourceDefinition{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: name,
-					Annotations: map[string]string{
-						gatewayconsts.BundleVersionAnnotation: gatewayconsts.BundleVersion,
-					},
-				},
-				Spec: apiextensionsv1.CustomResourceDefinitionSpec{Group: gatewayv1.GroupName},
-			})
-		}
-		b.builder = b.builder.WithObjects(definitions...)
+		b.builder = b.builder.WithObjects(supportedGatewayAPICRDs()...)
 	}
 	return b.builder.Build()
 }
@@ -259,7 +242,7 @@ func supportedGatewayAPICRDs() []client.Object {
 }
 
 func gatewayAPICRD(name, bundleVersion string) *apiextensionsv1.CustomResourceDefinition {
-	annotations := map[string]string{}
+	annotations := map[string]string{gatewayconsts.ChannelAnnotation: "standard"}
 	if bundleVersion != "" {
 		annotations[gatewayconsts.BundleVersionAnnotation] = bundleVersion
 	}

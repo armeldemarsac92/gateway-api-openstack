@@ -77,25 +77,27 @@ func run(ctx context.Context) error {
 		return err
 	}
 	var (
-		controllerName   string
-		clusterID        string
-		region           string
-		microversion     string
-		cloudsYAML       string
-		cloudName        string
-		metricsAddress   string
-		healthAddress    string
-		leaderElection   bool
-		allowInsecure    bool
-		operationTimeout time.Duration
-		pollInterval     time.Duration
-		resyncInterval   time.Duration
-		apiQPS           float64
-		apiBurst         int
+		controllerName    string
+		gatewayAPIChannel string
+		clusterID         string
+		region            string
+		microversion      string
+		cloudsYAML        string
+		cloudName         string
+		metricsAddress    string
+		healthAddress     string
+		leaderElection    bool
+		allowInsecure     bool
+		operationTimeout  time.Duration
+		pollInterval      time.Duration
+		resyncInterval    time.Duration
+		apiQPS            float64
+		apiBurst          int
 	)
 	zapOptions := zap.Options{Development: false}
 	zapOptions.BindFlags(flag.CommandLine)
 	flag.StringVar(&controllerName, "controller-name", envOr("GATEWAY_OPENSTACK_CONTROLLER_NAME", configv1alpha1.GroupName+"/gateway-api-openstack"), "Gateway API controllerName for this installation")
+	flag.StringVar(&gatewayAPIChannel, "gateway-api-channel", envOr("GATEWAY_OPENSTACK_GATEWAY_API_CHANNEL", "standard"), "Gateway API release channel: standard or experimental")
 	flag.StringVar(&clusterID, "cluster-id", envOr("GATEWAY_OPENSTACK_CLUSTER_ID", ""), "stable unique identifier for this Kubernetes cluster (required)")
 	flag.StringVar(&region, "openstack-region", envOr("OS_REGION_NAME", ""), "OpenStack region; defaults to clouds.yaml or OS_REGION_NAME")
 	flag.StringVar(&microversion, "octavia-microversion", "2.5", "Octavia API microversion (2.5 or later is required for resource tags)")
@@ -128,6 +130,7 @@ func run(ctx context.Context) error {
 	controllerConfig := controller.Config{
 		ControllerName:          gatewayv1.GatewayController(controllerName),
 		ControllerVersion:       version,
+		GatewayAPIChannel:       gatewayAPIChannel,
 		ClusterID:               clusterID,
 		OpenStackResyncInterval: resyncInterval,
 	}
@@ -215,6 +218,7 @@ func run(ctx context.Context) error {
 		"Starting controller manager",
 		"version", version,
 		"controllerName", controllerConfig.ControllerName,
+		"gatewayAPIChannel", controllerConfig.GatewayAPIChannel,
 		"clusterID", controllerConfig.ClusterID,
 		"octaviaProvider", "amphora",
 		"memberMode", "NodePort",
@@ -241,7 +245,7 @@ func requireGatewayAPIs(restConfig *rest.Config) error {
 	}
 	resourceList, err := discoveryClient.ServerResourcesForGroupVersion(gatewayv1.GroupVersion.String())
 	if err != nil {
-		return fmt.Errorf("required Gateway API v1 CRDs are unavailable; install Gateway API Standard %s before starting the controller: %w", gatewayconsts.BundleVersion, err)
+		return fmt.Errorf("required Gateway API v1 CRDs are unavailable; install the selected Gateway API %s bundle before starting the controller: %w", gatewayconsts.BundleVersion, err)
 	}
 	availableResources := make([]string, 0, len(resourceList.APIResources))
 	for _, resource := range resourceList.APIResources {
@@ -249,7 +253,7 @@ func requireGatewayAPIs(restConfig *rest.Config) error {
 	}
 	for _, required := range []string{"gatewayclasses", "gateways", "httproutes", "referencegrants"} {
 		if !slices.Contains(availableResources, required) {
-			return fmt.Errorf("required Gateway API resource %s is missing from %s; install Gateway API Standard %s", required, gatewayv1.GroupVersion, gatewayconsts.BundleVersion)
+			return fmt.Errorf("required Gateway API resource %s is missing from %s; install the selected Gateway API %s bundle", required, gatewayv1.GroupVersion, gatewayconsts.BundleVersion)
 		}
 	}
 	return nil

@@ -67,7 +67,7 @@ func (r *Reconciler) setRouteUnsupportedVersion(
 	}
 	recheckVersion := false
 	if !liveClassUnsupported {
-		versionErr := controller.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader)
+		versionErr := r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader)
 		if versionErr == nil {
 			return ctrl.Result{}, errHTTPRouteChanged
 		}

@@ -20,6 +20,8 @@ package controller_test
 
 import (
 	"context"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -32,8 +34,10 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -65,6 +69,7 @@ func TestControllerEnvtest(t *testing.T) {
 
 	testEnvironment := &envtest.Environment{
 		Scheme:                   scheme,
+		UseExistingCluster:       ptr.To(false),
 		CRDDirectoryPaths:        []string{crdDirectory, "../../config/crd"},
 		ErrorIfCRDPathMissing:    true,
 		DownloadBinaryAssets:     false,
@@ -92,6 +97,7 @@ func TestControllerEnvtest(t *testing.T) {
 		t.Fatalf("create envtest manager: %v", err)
 	}
 	config := testConfig()
+	config.GatewayAPIChannel = os.Getenv("GATEWAY_API_CHANNEL")
 	if err := controller.SetupIndexes(t.Context(), manager.GetFieldIndexer(), config); err != nil {
 		t.Fatalf("set up controller indexes: %v", err)
 	}
@@ -125,6 +131,42 @@ func TestControllerEnvtest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create envtest API client: %v", err)
 	}
+	t.Run("genuine Gateway API release bundle", func(t *testing.T) {
+		// envtest installs CRDs from a directory. The release also ships two
+		// admission resources in this multi-document manifest.
+		file, err := os.Open(filepath.Join(crdDirectory, "gateway.networking.k8s.io_vap_safeupgrades.yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer file.Close()
+		decoder := yaml.NewYAMLOrJSONDecoder(file, 4096)
+		for _, kind := range []string{"ValidatingAdmissionPolicy", "ValidatingAdmissionPolicyBinding"} {
+			var obj unstructured.Unstructured
+			if err := decoder.Decode(&obj); err != nil {
+				t.Fatal(err)
+			}
+			if obj.GetKind() != kind || obj.GetName() != "safe-upgrades.gateway.networking.k8s.io" {
+				t.Fatalf("unexpected release admission resource %s/%s", obj.GetKind(), obj.GetName())
+			}
+			if err := apiClient.Create(t.Context(), &obj); err != nil {
+				t.Fatalf("install release %s: %v", kind, err)
+			}
+		}
+		if err := decoder.Decode(&unstructured.Unstructured{}); !errors.Is(err, io.EOF) {
+			t.Fatalf("unexpected document after the release admission binding, error: %v", err)
+		}
+		if err := config.ValidateInstalledGatewayAPIVersion(t.Context(), apiClient); err != nil {
+			t.Fatalf("configured channel rejected its genuine release CRDs: %v", err)
+		}
+		other := config
+		other.GatewayAPIChannel = "experimental"
+		if config.GatewayAPIChannel == "experimental" {
+			other.GatewayAPIChannel = "standard"
+		}
+		if err := other.ValidateInstalledGatewayAPIVersion(t.Context(), apiClient); !errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) {
+			t.Fatalf("a controller configured for the other channel accepted this installation: %v", err)
+		}
+	})
 	cacheClient := manager.GetClient()
 	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "controller-envtest"}}
 	if err := apiClient.Create(t.Context(), namespace); err != nil {

@@ -27,6 +27,7 @@ import (
 	"time"
 
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	"sigs.k8s.io/gateway-api/pkg/features"
 )
 
 // DefaultOpenStackResyncInterval controls how often a converged resource is
@@ -39,6 +40,8 @@ var gatewayControllerNamePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0
 type Config struct {
 	// ControllerName is the exact Gateway API ownership identifier.
 	ControllerName gatewayv1.GatewayController
+	// GatewayAPIChannel selects the release CRDs accepted by this installation. Empty selects Standard.
+	GatewayAPIChannel string
 	// ControllerVersion is recorded as trace metadata on cloud resources.
 	ControllerVersion string
 	// OpenStackProjectID is the authenticated project used in ownership checks.
@@ -51,6 +54,11 @@ type Config struct {
 
 // Validate rejects configuration that could make ownership ambiguous.
 func (c Config) Validate() error {
+	switch c.GatewayAPIChannel {
+	case "", features.FeatureChannelStandard, features.FeatureChannelExperimental:
+	default:
+		return fmt.Errorf("unknown Gateway API channel %q, expected standard or experimental", c.GatewayAPIChannel)
+	}
 	if !IsValidControllerName(c.ControllerName) {
 		return fmt.Errorf("controller name %q must be a domain prefixed path", c.ControllerName)
 	}

@@ -137,7 +137,7 @@ func (r *Reconciler) sealGatewayMutationSnapshot(
 	ctx context.Context,
 	snapshot *gatewayMutationSnapshot,
 ) error {
-	if err := controller.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
+	if err := r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
 		return err
 	}
 
@@ -306,7 +306,7 @@ func (r *Reconciler) observeGatewayCleanupSnapshot(
 		&gatewayClass,
 	); err != nil {
 		if apierrors.IsNotFound(err) {
-			if versionErr := controller.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); versionErr != nil {
+			if versionErr := r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); versionErr != nil {
 				return nil, versionErr
 			}
 			return snapshot, nil
@@ -319,7 +319,7 @@ func (r *Reconciler) observeGatewayCleanupSnapshot(
 	if !controller.GatewayClassSupportsInstalledVersion(&gatewayClass) {
 		return nil, controller.ErrUnsupportedGatewayAPIVersion
 	}
-	if err := controller.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
+	if err := r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
 		return nil, err
 	}
 	listener, validationErr := Validate(&gateway)

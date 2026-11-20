@@ -404,7 +404,7 @@ func (r *Reconciler) sealRouteMutationSnapshot(
 // sealRouteOwnershipSnapshot checks durable route and Gateway authority. The
 // graph writer validates shared backend inputs once after all route fences.
 func (r *Reconciler) sealRouteOwnershipSnapshot(ctx context.Context, snapshot routeValidationSnapshot, bindingRequirement routeBindingRequirement) error {
-	if err := controller.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
+	if err := r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
 		return err
 	}
 	var route gatewayv1.HTTPRoute
@@ -506,7 +506,7 @@ func (r *Reconciler) buildRouteCleanupSnapshot(
 	if routeCleanupAllowedDuringVersionMismatch(parentObservations, stored) {
 		return snapshot, nil
 	}
-	if err := controller.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
+	if err := r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
 		return routeCleanupSnapshot{}, err
 	}
 	parentObservations, err = r.observeRouteParentsForCleanup(ctx, &route)

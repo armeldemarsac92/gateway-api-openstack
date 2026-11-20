@@ -8,6 +8,8 @@ metadata:
 data:
   # Each GatewayClass must select this exact controller identity.
   GATEWAY_OPENSTACK_CONTROLLER_NAME: gateway-api-openstack.github.io/gateway-api-openstack
+  # Select the release channel installed by the platform operator.
+  GATEWAY_OPENSTACK_GATEWAY_API_CHANNEL: standard
   # This value must remain stable for the lifetime of managed OpenStack resources.
   GATEWAY_OPENSTACK_CLUSTER_ID: replace-with-stable-cluster-id
   # Base interval for observing converged OpenStack resources again.
