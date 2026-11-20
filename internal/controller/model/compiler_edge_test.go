@@ -157,6 +157,21 @@ func TestCompileUnsupportedTCPDoesNotConflictWithHTTP(t *testing.T) {
 	}
 }
 
+func TestCompileRejectsUnsupportedListenerFilters(t *testing.T) {
+	gateway := edgeGateway()
+	gateway.Spec.Listeners[0].Filters = &gatewayv1.ListenerFilters{Requests: []gatewayv1.ListenerFilter{{Type: gatewayv1.ListenerFilterExtensionRef, ExtensionRef: &gatewayv1.LocalObjectReference{Group: "example.net", Kind: "Policy", Name: "authorization"}}}}
+	compiled, err := Compile(Input{Gateway: gateway, Routes: []gatewayv1.HTTPRoute{edgeRoute(gateway)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener := compiled.Listeners[0]
+	if listener.AttachedRoutes != 0 || !slices.ContainsFunc(listener.Diagnostics, func(d Diagnostic) bool {
+		return d.Condition == string(gatewayv1.ListenerConditionAccepted) && d.Reason == string(gatewayv1.ListenerReasonUnsupportedValue)
+	}) {
+		t.Fatalf("listener with an unsupported request filter = %#v", listener)
+	}
+}
+
 func edgeGateway() *gatewayv1.Gateway {
 	return &gatewayv1.Gateway{
 		ObjectMeta: metav1.ObjectMeta{Namespace: "infrastructure", Name: "gateway", UID: "gateway-uid"},

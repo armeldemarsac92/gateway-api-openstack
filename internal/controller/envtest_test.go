@@ -179,6 +179,41 @@ func TestControllerEnvtest(t *testing.T) {
 	testServicePortUpdatePredicate(t, apiClient, namespace.Name)
 	gatewayClass := createEnvtestGatewayClass(t, apiClient, cacheClient, config)
 	testGatewayClassStatusSubresource(t, apiClient, cacheClient, config, gatewayClass)
+	if config.GatewayAPIChannel == "experimental" {
+		t.Run("unsupported listener filter stops provisioning", func(t *testing.T) {
+			gw := &gatewayv1.Gateway{
+				ObjectMeta: metav1.ObjectMeta{Namespace: namespace.Name, Name: "filtered"},
+				Spec: gatewayv1.GatewaySpec{GatewayClassName: gatewayv1.ObjectName(gatewayClass.Name), Listeners: []gatewayv1.Listener{{
+					Name: "http", Port: 80, Protocol: gatewayv1.HTTPProtocolType,
+					Filters: &gatewayv1.ListenerFilters{Requests: []gatewayv1.ListenerFilter{{
+						Type:         gatewayv1.ListenerFilterExtensionRef,
+						ExtensionRef: &gatewayv1.LocalObjectReference{Group: "example.net", Kind: "Policy", Name: "authorization"},
+					}}},
+				}}},
+			}
+			if err := apiClient.Create(t.Context(), gw); err != nil {
+				t.Fatal(err)
+			}
+			key := client.ObjectKeyFromObject(gw)
+			waitForGatewayResourceVersion(t, cacheClient, key, gw.ResourceVersion, false)
+			provider := &recordingProvider{}
+			r := newEnvtestGatewayReconciler(cacheClient, apiClient, provider, config)
+			if _, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: key}); err != nil {
+				t.Fatal(err)
+			}
+			if err := apiClient.Get(t.Context(), key, gw); err != nil {
+				t.Fatal(err)
+			}
+			if len(gw.Status.Listeners) != 1 || !meta.IsStatusConditionFalse(gw.Status.Listeners[0].Conditions, "Accepted") ||
+				len(gw.Finalizers) != 0 || len(provider.gatewaySpecs) != 0 || len(provider.deletedGateways) != 0 {
+				t.Fatal("the filtered listener must be rejected before any binding or cloud mutation")
+			}
+			if err := apiClient.Delete(t.Context(), gw); err != nil {
+				t.Fatal(err)
+			}
+			waitForGatewayDeletion(t, cacheClient, key)
+		})
+	}
 	testGatewayBindingConflict(t, apiClient, cacheClient, config, namespace.Name, gatewayClass.Name)
 
 	gateway := createEnvtestGateway(t, apiClient, cacheClient, namespace.Name, "edge", gatewayClass.Name)

@@ -24,7 +24,7 @@ This project does not adopt or migrate its resources.
 - Unsupported or unrepresentable behavior is rejected through status.
 
 The current profile supports one HTTP listener, one selected HTTPRoute in the Gateway namespace, one rule, and one Service backend. A Service in another namespace requires a live ReferenceGrant in that namespace.
-It supports an exact hostname with Exact or PathPrefix matching.
+It supports an exact hostname with Exact or PathPrefix matching. On the Experimental channel, a nonempty pre-routing filter list rejects the listener. For an existing binding, the controller closes its owned traffic path, including during unrelated bundle skew.
 NodePort is the default member mode.
 The opt-in IPv4 Endpoint implementation awaits live network validation under [ADR 0007](adr/0007-direct-endpoint-members.md).
 Multiple listeners, multiple desired routes, TLS, cross-namespace ParentRefs, requested addresses, and backend policies remain unsupported.

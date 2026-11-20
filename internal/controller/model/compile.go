@@ -85,6 +85,11 @@ func compileListeners(gateway *gatewayv1.Gateway) []Listener {
 			compiled.Hostname = string(*listener.Hostname)
 		}
 		switch {
+		case listener.Filters != nil && len(listener.Filters.Requests) > 0:
+			compiled.Diagnostics = append(compiled.Diagnostics, Diagnostic{
+				Condition: string(gatewayv1.ListenerConditionAccepted), Reason: string(gatewayv1.ListenerReasonUnsupportedValue),
+				Message: "pre-routing request filters are not implemented by the HTTP compiler",
+			})
 		case listener.Protocol != gatewayv1.HTTPProtocolType:
 			compiled.Diagnostics = append(compiled.Diagnostics, Diagnostic{
 				Condition: string(gatewayv1.ListenerConditionAccepted), Reason: string(gatewayv1.ListenerReasonUnsupportedProtocol),

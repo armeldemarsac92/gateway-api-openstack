@@ -19,6 +19,7 @@ package gateway
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
@@ -29,6 +30,12 @@ type gatewayValidationError struct {
 	message           string
 	invalidRouteKinds bool
 	gatewayReason     gatewayv1.GatewayConditionReason
+}
+
+func hasListenerRequestFilters(gateway *gatewayv1.Gateway) bool {
+	return slices.ContainsFunc(gateway.Spec.Listeners, func(l gatewayv1.Listener) bool {
+		return l.Filters != nil && len(l.Filters.Requests) != 0
+	})
 }
 
 func (e *gatewayValidationError) Error() string { return e.message }
@@ -78,6 +85,9 @@ func Validate(gateway *gatewayv1.Gateway) (*gatewayv1.Listener, error) {
 	listener := &gateway.Spec.Listeners[0]
 	if listener.Protocol != gatewayv1.HTTPProtocolType || listener.TLS != nil {
 		return nil, fmt.Errorf("only a plain HTTP listener is supported")
+	}
+	if hasListenerRequestFilters(gateway) {
+		return nil, fmt.Errorf("listener request filters cannot be enforced by the stock Amphora HTTP profile")
 	}
 	if listener.Hostname != nil {
 		return nil, fmt.Errorf("listener hostname is not supported. Set an exact hostname on HTTPRoute")

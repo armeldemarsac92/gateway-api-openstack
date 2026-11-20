@@ -98,17 +98,25 @@ func TestGatewayReconcileProgramsAddressAndConditions(t *testing.T) {
 func TestGatewayInvalidSpecCleanupPreservesTopologyForRecovery(t *testing.T) {
 	scheme := testScheme(t)
 	cfg := testConfig()
+	cfg.GatewayAPIChannel = "experimental"
 	class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "openstack"}, Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName}}
+	version := Condition(string(gatewayv1.GatewayClassConditionStatusSupportedVersion), metav1.ConditionFalse, string(gatewayv1.GatewayClassReasonUnsupportedVersion), "unrelated bundle skew", class.Generation)
+	class.Status.Conditions = []metav1.Condition{version}
 	gateway := &gatewayv1.Gateway{
 		ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "edge", UID: "gateway-uid", Finalizers: []string{cfg.GatewayFinalizer()}, Annotations: gatewayBindingAnnotations(cfg, "443")},
 		Spec: gatewayv1.GatewaySpec{
 			GatewayClassName: "openstack",
-			Listeners:        []gatewayv1.Listener{{Name: "https", Protocol: gatewayv1.HTTPSProtocolType, Port: 443}},
+			Listeners: []gatewayv1.Listener{{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 443,
+				Filters: &gatewayv1.ListenerFilters{Requests: []gatewayv1.ListenerFilter{{
+					Type:         gatewayv1.ListenerFilterExtensionRef,
+					ExtensionRef: &gatewayv1.LocalObjectReference{Group: "example.net", Kind: "Policy", Name: "authorization"},
+				}}},
+			}},
 		},
 	}
-	kubeClient := indexedFakeClientBuilder(scheme, testConfig()).WithStatusSubresource(gateway).WithObjects(class, gateway).Build()
+	kubeClient := indexedFakeClientBuilder(scheme, cfg).WithStatusSubresource(class, gateway).WithObjects(class, gateway).Build()
 	provider := &recordingProvider{}
-	reconciler := *newTestReconciler(Reconciler{Client: kubeClient, Coordinator: &graph.Coordinator{}, APIReader: kubeClient, Config: cfg}, provider)
+	reconciler := *newTestReconciler(Reconciler{Client: kubeClient, Coordinator: &graph.Coordinator{}, APIReader: liveReaderWithUnsupportedVersion(kubeClient), Config: cfg}, provider)
 	request := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: gateway.Namespace, Name: gateway.Name}}
 	if result, err := reconciler.Reconcile(context.Background(), request); err != nil {
 		t.Fatalf("Reconcile() error = %v", err)
@@ -138,7 +146,15 @@ func TestGatewayInvalidSpecCleanupPreservesTopologyForRecovery(t *testing.T) {
 	if err := kubeClient.Delete(context.Background(), testClassParameters()); err != nil {
 		t.Fatal(err)
 	}
-	got.Spec.Listeners[0].Protocol = gatewayv1.HTTPProtocolType
+	if err := kubeClient.Get(t.Context(), types.NamespacedName{Name: class.Name}, class); err != nil {
+		t.Fatal(err)
+	}
+	class.Status.Conditions[0].Status = metav1.ConditionTrue
+	class.Status.Conditions[0].Reason = string(gatewayv1.GatewayClassReasonSupportedVersion)
+	if err := kubeClient.Status().Update(t.Context(), class); err != nil {
+		t.Fatal(err)
+	}
+	got.Spec.Listeners[0].Filters = nil
 	got.Generation++
 	if err := kubeClient.Update(context.Background(), &got); err != nil {
 		t.Fatal(err)
@@ -427,6 +443,9 @@ func TestValidateGatewayRejectsUnsupportedGatewayWideFields(t *testing.T) {
 		{name: "infrastructure", mutate: func(spec *gatewayv1.GatewaySpec) { spec.Infrastructure = &gatewayv1.GatewayInfrastructure{} }},
 		{name: "allowed listeners", mutate: func(spec *gatewayv1.GatewaySpec) { spec.AllowedListeners = &gatewayv1.AllowedListeners{} }},
 		{name: "gateway TLS", mutate: func(spec *gatewayv1.GatewaySpec) { spec.TLS = &gatewayv1.GatewayTLSConfig{} }},
+		{name: "listener authorization", mutate: func(spec *gatewayv1.GatewaySpec) {
+			spec.Listeners[0].Filters = &gatewayv1.ListenerFilters{Requests: []gatewayv1.ListenerFilter{{Type: gatewayv1.ListenerFilterExternalAuth}}}
+		}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

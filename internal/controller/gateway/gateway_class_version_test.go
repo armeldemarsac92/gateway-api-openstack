@@ -61,7 +61,7 @@ func TestGatewayClassVersionConditionFailsClosed(t *testing.T) {
 					Listeners:        []gatewayv1.Listener{{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80}},
 				},
 			}
-			objects := append([]client.Object{gatewayClass, gateway}, supportedGatewayAPICRDs()...)
+			objects := append([]client.Object{gatewayClass, gateway}, supportedGatewayAPICRDs(testConfig())...)
 			kubeClient := rawIndexedFakeClientBuilder(testScheme(t), cfg).
 				WithStatusSubresource(gateway).
 				WithObjects(objects...).
