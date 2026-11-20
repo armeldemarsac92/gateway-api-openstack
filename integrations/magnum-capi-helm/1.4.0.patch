@@ -30,7 +30,7 @@ index abf039f7f3d22d3638e9b5c342b577e94b170c72..9d7b3a6b46f56dcc74a0a5a3b3da7494
          "kubeconfig_file",
          default="",
 diff --git a/magnum_capi_helm/driver.py b/magnum_capi_helm/driver.py
-index b2713c2985172b93095f69e89038f241cdc83a58..82cdedbc170cfbe387d1e5cb4d9b0e9c1c54272f 100644
+index b2713c2985172b93095f69e89038f241cdc83a58..105570f4a816d5b0214540bc8a804ae079a7dae1 100644
 --- a/magnum_capi_helm/driver.py
 +++ b/magnum_capi_helm/driver.py
 @@ -31,6 +31,7 @@ from magnum_capi_helm.common import ca_certificates
@@ -54,30 +54,41 @@ index b2713c2985172b93095f69e89038f241cdc83a58..82cdedbc170cfbe387d1e5cb4d9b0e9c
          for addon in addons:
              addon_phase = addon.get("status", {}).get("phase")
              if addon_phase and addon_phase in {"Failed", "Unknown"}:
-@@ -337,7 +344,12 @@ class Driver(driver.Driver):
+@@ -337,7 +344,17 @@ class Driver(driver.Driver):
          )
          cluster.save()
 
 +    def _gateway_api_state(self, cluster):
-+        if driver_utils.chart_release_name(cluster):
-+            return gateway_api.state(self._k8s_client, cluster)
++        return gateway_api.state(self._k8s_client, cluster)
++
++    def _require_gateway_teardown(self, cluster):
++        if gateway_api.needs_drain_check(cluster):
++            gateway_api.require_drained(
++                self._gateway_api_state(cluster), cluster
++            )
 +
      def _update_status_deleting(self, context, cluster):
-+        gateway_api.require_drained(self._gateway_api_state(cluster), cluster)
++        self._require_gateway_teardown(cluster)
          # Fetch the current app cred ID before we delete all secrets
          app_cred_id = self._get_app_cred_id(cluster)
 
-@@ -999,6 +1011,13 @@ class Driver(driver.Driver):
+@@ -547,8 +564,9 @@ class Driver(driver.Driver):
+             if entry.strip()
+         ]
+
+-    def _get_chart_version(self, cluster):
+-        version = cluster.cluster_template.labels.get(
++    def _get_chart_version(self, cluster, cluster_template=None):
++        template = cluster_template or cluster.cluster_template
++        version = template.labels.get(
+             "capi_helm_chart_version",
+             CONF.capi_helm.default_helm_chart_version,
+         )
+@@ -999,6 +1017,7 @@ class Driver(driver.Driver):
          return nodegroup_set
 
      def _update_helm_release(self, context, cluster, nodegroups=None):
 +        gateway_state = self._gateway_api_state(cluster)
-+        if gateway_state is None and gateway_api.selected(
-+            cluster.cluster_template_id
-+        ):
-+            raise exception.MagnumException(
-+                message="The Gateway addon management marker is missing."
-+            )
          lconf = CONF.capi_helm_cluster_labels
          if nodegroups is None:
              nodegroups = cluster.nodegroups
@@ -100,49 +111,77 @@ index b2713c2985172b93095f69e89038f241cdc83a58..82cdedbc170cfbe387d1e5cb4d9b0e9c
              namespace=driver_utils.cluster_namespace(cluster),
          )
 
-@@ -1250,6 +1274,8 @@ class Driver(driver.Driver):
-         self._k8s_client.ensure_namespace(
-             driver_utils.cluster_namespace(cluster)
-         )
-+        if gateway_api.selected(cluster.cluster_template_id):
+@@ -1240,6 +1264,18 @@ class Driver(driver.Driver):
+         nodegroups = cluster.nodegroups
+         for ng in nodegroups:
+             self._validate_allowed_flavor(context, ng.flavor_id)
++        enrolling = not driver_utils.chart_release_name(
++            cluster
++        ) and gateway_api.selected(cluster.cluster_template_id)
++        namespace = driver_utils.cluster_namespace(cluster)
++        if enrolling:
++            self._k8s_client.ensure_namespace(namespace)
 +            gateway_api.register(self._k8s_client, cluster)
++        gateway_state = self._gateway_api_state(cluster)
++        if enrolling and gateway_state is not gateway_api.State.ACTIVE:
++            raise exception.MagnumException(
++                message="Gateway addon enrollment was not recorded."
++            )
+         # we generate this name (on the initial create call only)
+         # so we hit no issues with duplicate cluster names
+         # and it makes renaming clusters in the API possible
+@@ -1247,9 +1283,8 @@ class Driver(driver.Driver):
+
+         # NOTE(johngarbutt) all node groups should already
+         # be in the CREATE_IN_PROGRESS state
+-        self._k8s_client.ensure_namespace(
+-            driver_utils.cluster_namespace(cluster)
+-        )
++        if not enrolling:
++            self._k8s_client.ensure_namespace(namespace)
          self._create_appcred_secret(context, cluster)
          self._ensure_certificate_secrets(context, cluster)
 
-@@ -1262,6 +1288,7 @@ class Driver(driver.Driver):
+@@ -1262,6 +1297,7 @@ class Driver(driver.Driver):
          self._update_helm_release(context, cluster)
 
      def delete_cluster(self, context, cluster):
-+        gateway_api.require_drained(self._gateway_api_state(cluster), cluster)
++        self._require_gateway_teardown(cluster)
          LOG.info("Starting to delete cluster %s", cluster.uuid)
 
          # Copy the helm driver by marking all node groups
-@@ -1309,6 +1336,19 @@ class Driver(driver.Driver):
+@@ -1309,6 +1345,25 @@ class Driver(driver.Driver):
          scale_manager=None,
          rollback=False,
      ):
-+        gateway_state = self._gateway_api_state(cluster)
-+        target_opted_in = gateway_api.selected(cluster_template.uuid)
-+        if (
-+            gateway_state is gateway_api.State.ACTIVE
-+            and not target_opted_in
-+            or gateway_state is None
-+            and target_opted_in
-+        ):
-+            raise exception.MagnumException(
-+                message="The Gateway addon cannot be enabled by upgrade or "
-+                "disabled before its teardown is acknowledged."
-+            )
++        try:
++            gateway_state = self._gateway_api_state(cluster)
++            if gateway_state is gateway_api.State.ACTIVE:
++                if cluster_template.driver != "k8s_capi_helm_v1":
++                    raise exception.MagnumException(
++                        message="An enrolled Gateway cluster must keep the same Magnum driver."
++                    )
++                gateway_api.validate_chart(
++                    self._get_chart_version(cluster, cluster_template)
++                )
++        except exception.MagnumException as exc:
++            # Magnum 23 preserves the cluster and nodegroup state on
++            # NotSupported, so an operator can recover and retry the upgrade.
++            raise exception.NotSupported(operation=str(exc)) from exc
++        except requests.exceptions.RequestException as exc:
++            raise exception.NotSupported(
++                operation="Upgrading before Gateway addon enrollment can be read"
++            ) from exc
 +
          # TODO(mkjpryor) check that the upgrade is viable
          # e.g. not a downgrade, not an upgrade by more than one minor version
 
 diff --git a/magnum_capi_helm/gateway_api.py b/magnum_capi_helm/gateway_api.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..1549206e99a655f6e3f7dfc257189ac2ee5774c4
+index 0000000000000000000000000000000000000000..6fa8f1ebf952e6f0f61bacb66130486033027512
 --- /dev/null
 +++ b/magnum_capi_helm/gateway_api.py
-@@ -0,0 +1,283 @@
+@@ -0,0 +1,334 @@
 +# Licensed under the Apache License, Version 2.0 (the "License"); you may
 +# not use this file except in compliance with the License. You may obtain
 +# a copy of the License at
@@ -163,6 +202,7 @@ index 0000000000000000000000000000000000000000..1549206e99a655f6e3f7dfc257189ac2
 +from uuid import UUID
 +
 +from magnum.common import exception
++from magnum.objects import fields
 +import yaml
 +
 +from magnum_capi_helm import conf
@@ -179,6 +219,7 @@ index 0000000000000000000000000000000000000000..1549206e99a655f6e3f7dfc257189ac2
 +MANIFEST = "gateway-controller.yaml"
 +CLEANUP_EVIDENCE = "gateway-api-openstack.github.io/cleanup-evidence"
 +OWNER_LABEL = "gateway-api-openstack.github.io/cluster-uuid"
++ENROLLMENT_ANNOTATION = "gateway-api-openstack.github.io/enrolled-cluster"
 +CREDENTIAL_REFERENCE = f"{NAMESPACE}/openstack-clouds"
 +WORKLOAD_OBJECTS = {
 +    (
@@ -229,8 +270,9 @@ index 0000000000000000000000000000000000000000..1549206e99a655f6e3f7dfc257189ac2
 +    )
 +
 +
-+def _marker_name(cluster):
-+    return f"gateway-addon-{_cluster_identity(cluster)}"
++def _record_names(cluster):
++    identity = _cluster_identity(cluster)
++    return f"gateway-enrollment-{identity}", f"gateway-addon-{identity}"
 +
 +
 +def _marker_data(cluster):
@@ -244,24 +286,41 @@ index 0000000000000000000000000000000000000000..1549206e99a655f6e3f7dfc257189ac2
 +    }
 +
 +
-+def state(client, cluster):
-+    if not driver_utils.chart_release_name(cluster):
-+        return None
-+    marker = client.get_secret(
-+        _marker_name(cluster), driver_utils.cluster_namespace(cluster)
-+    )
-+    if marker is None:
-+        return None
-+    metadata = marker.get("metadata", {})
++def _validated_record(record, cluster):
++    metadata = record.get("metadata", {})
 +    if (
-+        marker.get("immutable") is not True
-+        or marker.get("data") != _marker_data(cluster)
++        record.get("immutable") is not True
++        or record.get("data") != _marker_data(cluster)
 +        or metadata.get("labels", {}).get(OWNER_LABEL) != cluster.uuid
 +        or metadata.get("deletionTimestamp") is not None
 +    ):
 +        raise exception.MagnumException(
-+            message="Invalid Gateway addon management marker."
++            message="Invalid Gateway addon enrollment record or marker."
 +        )
++    return metadata
++
++
++def state(client, cluster):
++    namespace = driver_utils.cluster_namespace(cluster)
++    enrollment_name, marker_name = _record_names(cluster)
++    enrollment = client.get_secret(enrollment_name, namespace)
++    marker = client.get_secret(marker_name, namespace)
++    if enrollment is None and marker is None:
++        # The installed CAPI Cluster retains an independent enrollment clue if
++        # both records are accidentally removed from the management namespace.
++        release = driver_utils.chart_release_name(cluster)
++        capi = client.get_capi_cluster(release, namespace) if release else None
++        if ENROLLMENT_ANNOTATION not in (capi or {}).get("metadata", {}).get(
++            "annotations", {}
++        ):
++            return None
++    if enrollment is None or marker is None:
++        raise exception.MagnumException(
++            message="Gateway addon enrollment record or marker is missing. "
++            "Recover the cluster's enrollment records before continuing."
++        )
++    _validated_record(enrollment, cluster)
++    metadata = _validated_record(marker, cluster)
 +    evidence = metadata.get("annotations", {}).get(CLEANUP_EVIDENCE, "")
 +    if not evidence:
 +        return State.ACTIVE
@@ -273,27 +332,51 @@ index 0000000000000000000000000000000000000000..1549206e99a655f6e3f7dfc257189ac2
 +
 +
 +def register(client, cluster):
-+    # Never overwrite an existing marker or a cleanup acknowledgement on retry.
-+    if state(client, cluster) is not None:
-+        return
-+    client.apply_secret(
-+        _marker_name(cluster),
-+        {
-+            "metadata": {
-+                "labels": {OWNER_LABEL: cluster.uuid},
-+                "annotations": {},
-+            },
-+            "immutable": True,
-+            "data": _marker_data(cluster),
-+        },
-+        driver_utils.cluster_namespace(cluster),
++    # This is called before the release name is saved or any provider resources
++    # can be created. In this phase a retry may complete a partial registration.
++    namespace = driver_utils.cluster_namespace(cluster)
++    body = {
++        "metadata": {"labels": {OWNER_LABEL: cluster.uuid}},
++        "immutable": True,
++        "data": _marker_data(cluster),
++    }
++    enrollment, marker = _record_names(cluster)
++    for name in (enrollment, marker):
++        existing = client.get_secret(name, namespace)
++        if existing is not None:
++            _validated_record(existing, cluster)
++        else:
++            client.apply_secret(name, body, namespace)
++
++
++def needs_drain_check(cluster):
++    # A partial registration can be cleaned up once CREATE_FAILED is
++    # recorded. The driver saves its release name before provider writes.
++    return bool(driver_utils.chart_release_name(cluster)) or (
++        cluster.status
++        not in {
++            fields.ClusterStatus.CREATE_FAILED,
++            fields.ClusterStatus.DELETE_IN_PROGRESS,
++        }
 +    )
 +
 +
 +def require_drained(current, cluster):
-+    if current is State.ACTIVE or (
-+        current is None and selected(cluster.cluster_template_id)
++    # A rejected delete while create runs makes Magnum set DELETE_FAILED.
++    if (
++        current is not State.DRAINED
++        and not driver_utils.chart_release_name(cluster)
++        and cluster.status
++        in {
++            fields.ClusterStatus.CREATE_IN_PROGRESS,
++            fields.ClusterStatus.DELETE_FAILED,
++        }
++        and selected(cluster.cluster_template_id)
 +    ):
++        raise exception.MagnumException(
++            message="Wait for Gateway addon create to finish before deleting this cluster."
++        )
++    if current is State.ACTIVE:
 +        raise exception.MagnumException(
 +            message="Gateway addon teardown requires a verified allocation fence, "
 +            "an empty cluster-owned cloud inventory and an operator acknowledgement."
@@ -381,7 +464,7 @@ index 0000000000000000000000000000000000000000..1549206e99a655f6e3f7dfc257189ac2
 +    return manifest
 +
 +
-+def install(helm_client, cluster, values, chart_version):
++def validate_chart(chart_version):
 +    if (
 +        CONF.capi_helm.helm_chart_name != "openstack-cluster"
 +        or chart_version != "0.10.1"
@@ -389,6 +472,10 @@ index 0000000000000000000000000000000000000000..1549206e99a655f6e3f7dfc257189ac2
 +        raise exception.MagnumException(
 +            message="Gateway addon requires the pinned openstack-cluster 0.10.1 chart."
 +        )
++
++
++def install(helm_client, cluster, values, chart_version):
++    validate_chart(chart_version)
 +    if not CONF.capi_helm.gateway_api_artifacts_dir:
 +        raise exception.MagnumException(
 +            message="Gateway addon requires a pinned local artifact directory."
@@ -405,6 +492,9 @@ index 0000000000000000000000000000000000000000..1549206e99a655f6e3f7dfc257189ac2
 +            },
 +        }
 +    }
++    values.setdefault("clusterAnnotations", {})[
++        ENROLLMENT_ANNOTATION
++    ] = cluster.uuid
 +    # Helm consumes a private copy of the bytes checked above and never fetches a mutable repo entry.
 +    with TemporaryDirectory(prefix="magnum-gateway-") as workdir:
 +        archive = Path(workdir) / ARCHIVE
@@ -446,10 +536,10 @@ index a72d69ed7be97016b1dfdead917f366c521da37b..648ef19e19850fa6c2a2d61371c8e70e
              name="cluster_example_$A",
 diff --git a/magnum_capi_helm/tests/test_gateway_api.py b/magnum_capi_helm/tests/test_gateway_api.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..0a17f1e1e8ac456649b3875a097d8b9e149d5f39
+index 0000000000000000000000000000000000000000..199110ec78e61c754f55ea9197c479459d23f6ed
 --- /dev/null
 +++ b/magnum_capi_helm/tests/test_gateway_api.py
-@@ -0,0 +1,336 @@
+@@ -0,0 +1,451 @@
 +# Licensed under the Apache License, Version 2.0 (the "License"); you may
 +# not use this file except in compliance with the License. You may obtain
 +# a copy of the License at
@@ -461,6 +551,7 @@ index 0000000000000000000000000000000000000000..0a17f1e1e8ac456649b3875a097d8b9e
 +# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 +# License for the specific language governing permissions and limitations
 +# under the License.
++from copy import deepcopy
 +import hashlib
 +import json
 +import os
@@ -476,6 +567,7 @@ index 0000000000000000000000000000000000000000..0a17f1e1e8ac456649b3875a097d8b9e
 +from magnum.objects import fields
 +from magnum_capi_helm import conf
 +from magnum_capi_helm import driver
++from magnum_capi_helm import gateway_api
 +from magnum_capi_helm import kubernetes
 +from magnum_capi_helm.tests import base
 +
@@ -487,6 +579,7 @@ index 0000000000000000000000000000000000000000..0a17f1e1e8ac456649b3875a097d8b9e
 +            uuid="9ab04c57-4e7f-4387-82bd-095516abfb9e",
 +            cluster_template_id="3131b9ca-998e-4355-bdbe-e81edb09ff89",
 +            stack_id="gateway-test-4bsu35idib7p",
++            name="gateway-test",
 +            project_id="project22",
 +            cluster_template=SimpleNamespace(
 +                image_id="image-test",
@@ -508,7 +601,16 @@ index 0000000000000000000000000000000000000000..0a17f1e1e8ac456649b3875a097d8b9e
 +        self.driver = driver.Driver()
 +        self.driver._helm_client._run = mock.Mock(return_value="{}")
 +        self.client = mock.Mock(spec=kubernetes.Client)
-+        self.client.get_secret.return_value = None
++        self.secrets = {}
++        self.client.get_secret.side_effect = lambda name, _: self.secrets.get(
++            name
++        )
++        self.client.apply_secret.side_effect = (
++            lambda name, body, _: self.secrets.__setitem__(
++                name, deepcopy(body)
++            )
++        )
++        self.client.get_capi_cluster.return_value = None
 +        self.client.get_secret_value.return_value = None
 +        mock_load = mock.patch.object(
 +            kubernetes.Client, "load", return_value=self.client
@@ -537,7 +639,7 @@ index 0000000000000000000000000000000000000000..0a17f1e1e8ac456649b3875a097d8b9e
 +                return_value="external-network-test",
 +            ),
 +        ):
-+            self.driver._update_helm_release(None, self.cluster)
++            self.driver.resize_cluster(None, self.cluster, None, 1, None)
 +
 +    def test_cluster_labels_cannot_enable_addon(self):
 +        self.cluster.labels["gateway_api_cluster_templates"] = (
@@ -555,8 +657,6 @@ index 0000000000000000000000000000000000000000..0a17f1e1e8ac456649b3875a097d8b9e
 +        self.assertIn("0.10.1", command)
 +
 +    def _register(self):
-+        from magnum_capi_helm import gateway_api
-+
 +        self._options(
 +            gateway_api_cluster_templates=[self.cluster.cluster_template_id]
 +        )
@@ -564,24 +664,35 @@ index 0000000000000000000000000000000000000000..0a17f1e1e8ac456649b3875a097d8b9e
 +        name, document, namespace = self.client.apply_secret.call_args.args
 +        self.assertEqual("magnum-project22", namespace)
 +        self.assertEqual(f"gateway-addon-{self.cluster.uuid}", name)
-+        self.client.get_secret.return_value = document
-+        return document
++        self.assertEqual(document, self.secrets[name])
++        return self.secrets[name]
 +
 +    def test_create_registers_selected_template_before_cloud_credentials(self):
++        self.cluster.stack_id = None
 +        self._options(
 +            gateway_api_cluster_templates=[self.cluster.cluster_template_id]
 +        )
 +
 +        def check_marker(*_):
-+            self.client.apply_secret.assert_called_once()
++            self.assertEqual(
++                [
++                    f"gateway-enrollment-{self.cluster.uuid}",
++                    f"gateway-addon-{self.cluster.uuid}",
++                ],
++                list(self.secrets),
++            )
++            self.assertIsNone(self.cluster.stack_id)
 +
 +        with (
 +            mock.patch.object(self.driver, "_validate_allowed_flavor"),
-+            mock.patch.object(
-+                self.driver, "_create_appcred_secret", side_effect=check_marker
-+            ),
++            mock.patch.object(self.driver, "_create_appcred_secret"),
 +            mock.patch.object(self.driver, "_ensure_certificate_secrets"),
 +            mock.patch.object(self.driver, "_update_helm_release") as update,
++            mock.patch.object(
++                driver.short_id,
++                "generate_id",
++                side_effect=lambda: check_marker() or "4bsu35idib7p",
++            ),
 +        ):
 +            self.driver.create_cluster(None, self.cluster, 10)
 +        update.assert_called_once_with(None, self.cluster)
@@ -610,7 +721,7 @@ index 0000000000000000000000000000000000000000..0a17f1e1e8ac456649b3875a097d8b9e
 +            uninstall.assert_not_called()
 +            self.client.delete_all_secrets_by_label.assert_not_called()
 +
-+            marker["metadata"]["annotations"][
++            marker["metadata"].setdefault("annotations", {})[
 +                "gateway-api-openstack.github.io/cleanup-evidence"
 +            ] = ("sha256:" + "a" * 64)
 +            self.driver.delete_cluster(None, self.cluster)
@@ -627,12 +738,100 @@ index 0000000000000000000000000000000000000000..0a17f1e1e8ac456649b3875a097d8b9e
 +                "magnum-project22",
 +            )
 +
-+    def test_opted_in_cluster_without_marker_is_held(self):
++    def test_missing_marker_blocks_template_change_before_side_effects(self):
++        self._register()
++        del self.secrets[f"gateway-addon-{self.cluster.uuid}"]
++        old_template = self.cluster.cluster_template_id
++        nodegroup = SimpleNamespace(status="CREATE_COMPLETE", save=mock.Mock())
++        self.cluster.nodegroups = [nodegroup]
++        for eligible_templates in ([old_template], []):
++            self._options(gateway_api_cluster_templates=eligible_templates)
++            with mock.patch.object(
++                self.driver, "_validate_allowed_flavor"
++            ) as validate:
++                self.assertRaisesRegex(
++                    exception.NotSupported,
++                    "marker",
++                    self.driver.upgrade_cluster,
++                    None,
++                    self.cluster,
++                    SimpleNamespace(uuid="unselected"),
++                    1,
++                    nodegroup,
++                )
++                validate.assert_not_called()
++        self.assertEqual(old_template, self.cluster.cluster_template_id)
++        self.assertEqual("CREATE_COMPLETE", nodegroup.status)
++        self.cluster.save.assert_not_called()
++        nodegroup.save.assert_not_called()
++        self.driver._helm_client._run.assert_not_called()
++
++    def test_stock_cluster_stays_stock_when_template_is_added_to_allowlist(
++        self,
++    ):
 +        self._options(
 +            gateway_api_cluster_templates=[self.cluster.cluster_template_id]
 +        )
++        self.cluster.status = fields.ClusterStatus.CREATE_COMPLETE
++        self._update()
++        self.assertNotIn(
++            "custom",
++            json.loads(
++                self.driver._helm_client._run.call_args.kwargs["process_input"]
++            )["addons"],
++        )
++        self.driver.delete_cluster(None, self.cluster)
++        self.assertEqual(
++            "uninstall", self.driver._helm_client._run.call_args.args[0][0]
++        )
++
++    def test_initial_create_failure_can_clean_up_before_stack_is_saved(self):
++        self._options(
++            gateway_api_cluster_templates=[self.cluster.cluster_template_id]
++        )
++        self.cluster.stack_id = None
 +        self.assertRaisesRegex(
-+            exception.MagnumException, "marker", self._update
++            exception.MagnumException,
++            "create",
++            self.driver.delete_cluster,
++            None,
++            self.cluster,
++        )
++        self.cluster.status = fields.ClusterStatus.DELETE_FAILED
++        self.assertRaisesRegex(
++            exception.MagnumException,
++            "create",
++            self.driver.delete_cluster,
++            None,
++            self.cluster,
++        )
++        self.cluster.status = fields.ClusterStatus.CREATE_FAILED
++        self._register()
++        del self.secrets[f"gateway-addon-{self.cluster.uuid}"]
++        self.driver.delete_cluster(None, self.cluster)
++        self.driver._helm_client._run.assert_not_called()
++        self.cluster.status = fields.ClusterStatus.DELETE_IN_PROGRESS
++        self.driver._update_status_deleting(None, self.cluster)
++        self.assertEqual(
++            fields.ClusterStatus.DELETE_COMPLETE, self.cluster.status
++        )
++
++    def test_installed_capi_annotation_holds_delete_when_both_records_missing(
++        self,
++    ):
++        self.client.get_capi_cluster.return_value = {
++            "metadata": {
++                "annotations": {
++                    gateway_api.ENROLLMENT_ANNOTATION: self.cluster.uuid,
++                }
++            }
++        }
++        self.assertRaisesRegex(
++            exception.MagnumException,
++            "enrollment record or marker is missing",
++            self.driver.delete_cluster,
++            None,
++            self.cluster,
 +        )
 +        self.driver._helm_client._run.assert_not_called()
 +
@@ -687,6 +886,7 @@ index 0000000000000000000000000000000000000000..0a17f1e1e8ac456649b3875a097d8b9e
 +        self.driver._helm_client._run.side_effect = render
 +        self._update()
 +        marker = self._register()
++        self._options(gateway_api_cluster_templates=[])
 +        self._update()
 +        off = list(
 +            yaml.safe_load_all((directory / "render-off.yaml").read_text())
@@ -709,6 +909,11 @@ index 0000000000000000000000000000000000000000..0a17f1e1e8ac456649b3875a097d8b9e
 +            and obj["spec"]["releaseName"] == "openstack-gw"
 +        )
 +        self.assertEqual(self.cluster.stack_id, addon["spec"]["clusterName"])
++        capi = next(obj for obj in on if obj and obj["kind"] == "Cluster")
++        self.assertEqual(
++            self.cluster.uuid,
++            capi["metadata"]["annotations"][gateway_api.ENROLLMENT_ANNOTATION],
++        )
 +        self.assertEqual(
 +            "openstack-gateway-system", addon["spec"]["targetNamespace"]
 +        )
@@ -779,7 +984,7 @@ index 0000000000000000000000000000000000000000..0a17f1e1e8ac456649b3875a097d8b9e
 +        self.assertRaisesRegex(
 +            exception.MagnumException, "digest", self._update
 +        )
-+        marker["metadata"]["annotations"][
++        marker["metadata"].setdefault("annotations", {})[
 +            "gateway-api-openstack.github.io/cleanup-evidence"
 +        ] = ("sha256:" + "a" * 64)
 +        self._update()
