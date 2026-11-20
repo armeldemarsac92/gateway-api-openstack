@@ -22,8 +22,11 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -48,6 +51,36 @@ func TestGatewayRejectsMissingComponentOutcome(t *testing.T) {
 	}
 	if !reflect.DeepEqual(current.Status, gateway.Status) {
 		t.Fatalf("invalid component result changed status: %#v", current.Status)
+	}
+}
+
+func TestGatewayDoesNotReportNewHostnameProgrammedWhileRoutesProgress(t *testing.T) {
+	cfg := testConfig()
+	gateway := programmedTestGateway(cfg)
+	gateway.Generation++
+	gateway.Spec.Listeners[0].Hostname = ptr.To(gatewayv1.Hostname("*.example.test"))
+	class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "openstack"}, Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName}}
+	kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gateway).WithObjects(class, gateway).Build()
+	result := cloud.GatewayGraphResult{
+		Outcome: cloud.ProgressingOutcome("Disabling Octavia routing policy", time.Second),
+		Gateway: cloud.GatewayResult{
+			Outcome: cloud.ReadyOutcome(),
+			State:   cloud.GatewayState{LoadBalancerID: "load-balancer", ListenerID: "listener", VIPAddress: "192.0.2.10"},
+		},
+	}
+	reconciler := newTestReconciler(Reconciler{Client: kubeClient, APIReader: kubeClient, Config: cfg, Writer: fixedGatewayGraph{result: result}}, nil)
+	if _, err := reconciler.Reconcile(t.Context(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(gateway)}); err != nil {
+		t.Fatal(err)
+	}
+	current := &gatewayv1.Gateway{}
+	if err := kubeClient.Get(t.Context(), client.ObjectKeyFromObject(gateway), current); err != nil {
+		t.Fatal(err)
+	}
+	accepted := meta.FindStatusCondition(current.Status.Conditions, string(gatewayv1.GatewayConditionAccepted))
+	programmed := meta.FindStatusCondition(current.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed))
+	if accepted == nil || accepted.Status != metav1.ConditionTrue || accepted.ObservedGeneration != gateway.Generation ||
+		programmed == nil || (programmed.Status == metav1.ConditionTrue && programmed.ObservedGeneration == gateway.Generation) {
+		t.Fatalf("new hostname should be accepted while its policy update is pending: %v", current.Status.Conditions)
 	}
 }
 

@@ -1,7 +1,6 @@
 # Gateway API conformance
 
-The current Amphora routing target is Gateway API v1.7.0 Standard Channel and the `GATEWAY-HTTP` profile.
-Its Core feature set contains Gateway, HTTPRoute, and ReferenceGrant, including HTTPS termination for HTTPRoute. [v1.7.0 profile definitions](https://github.com/kubernetes-sigs/gateway-api/blob/v1.7.0/conformance/utils/suite/profiles.go)
+The first Amphora traffic target is a Standard-channel HTTPRoute. The complete Gateway API v1.7.0 qualification covers five Gateway profiles and two mesh profiles. The HTTP Core profile includes Gateway, HTTPRoute, ReferenceGrant and HTTPS termination. [v1.7.0 profile definitions](https://github.com/kubernetes-sigs/gateway-api/blob/v1.7.0/conformance/utils/suite/profiles.go)
 The [Hibiscus qualification runner](qualification/v1.7.0/live-runs.md) can exercise all seven profiles on the two channels. The [qualification record](qualification/v1.7.0/README.md) tracks those runs.
 
 ## Implementation gaps
@@ -11,9 +10,9 @@ The [compatibility record](providers/compatibility.md) summarizes the available 
 
 | Area | Current implementation | Remaining Core work |
 | --- | --- | --- |
-| Listeners | One HTTP listener without a listener hostname | Multiple listeners and their lifecycle, hostname matching, HTTPS, and certificate validation |
+| Listeners | One active HTTP listener with an optional exact or wildcard hostname. Unsupported protocols on separate ports receive their own listener status. | Multiple active listeners, HTTPS and certificate validation |
 | Route attachment | One selected HTTPRoute with one parent in the Gateway namespace | Multiple routes and parents, namespace selection, and precedence |
-| Matching | One rule and match, Exact or PathPrefix, and at most one exact hostname | Multiple rules and matches, wildcard and multiple hostnames, and exact header matching |
+| Matching | One rule and match, Exact or PathPrefix, and one effective hostname after listener and route intersection | Multiple rules, matches and route hostnames, values beyond the provider limit, and exact header matching |
 | Service inputs | One authorized Service, with NodePort forwarding or opt-in IPv4 Endpoint forwarding | Live proof for ClusterIP, headless, and manually managed EndpointSlice inputs in a verified network environment |
 | Backend selection and errors | One backend | Weighted backends, weight zero, unmatched-request HTTP 404, and required responses for omitted or invalid backends |
 | Filters | No filters | RequestHeaderModifier and Core RequestRedirect behavior |

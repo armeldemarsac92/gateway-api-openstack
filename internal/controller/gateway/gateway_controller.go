@@ -21,6 +21,8 @@ import (
 	"errors"
 	"fmt"
 
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -210,12 +212,21 @@ func (r *Reconciler) reconcileGatewayGraph(
 	if err := gatewayResult.Outcome.Validate(); err != nil {
 		return ctrl.Result{}, fmt.Errorf("validate Gateway component outcome: %w", err)
 	}
-	if gatewayResult.Outcome.State == cloud.OutcomeProgressing {
-		message := controller.ProviderProgressMessage(gatewayResult.Outcome, "Octavia resources for the Gateway are still progressing")
+	// A new listener hostname takes effect through its route policies. Only a
+	// complete graph proves that the current Gateway generation restricts them.
+	progress := gatewayResult.Outcome
+	if decision.listener.Hostname != nil && graphResult.Outcome.State == cloud.OutcomeProgressing && progress.State == cloud.OutcomeReady {
+		programmed := meta.FindStatusCondition(scope.gateway.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed))
+		if programmed == nil || programmed.Status != metav1.ConditionTrue || programmed.ObservedGeneration != scope.gateway.Generation {
+			progress = graphResult.Outcome
+		}
+	}
+	if progress.State == cloud.OutcomeProgressing {
+		message := controller.ProviderProgressMessage(progress, "Octavia resources for the Gateway are still progressing")
 		if err := r.setGatewayProgressing(ctx, scope.gateway, decision.listener, message); err != nil {
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{RequeueAfter: controller.ProviderProgressRequeueAfter(gatewayResult.Outcome, scope.gateway.UID)}, nil
+		return ctrl.Result{RequeueAfter: controller.ProviderProgressRequeueAfter(progress, scope.gateway.UID)}, nil
 	}
 	gatewayState := gatewayResult.State
 	log.FromContext(ctx).V(1).Info("Ensured OpenStack resources for Gateway", "loadBalancerID", gatewayState.LoadBalancerID, "listenerID", gatewayState.ListenerID)

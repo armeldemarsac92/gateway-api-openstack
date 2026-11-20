@@ -34,7 +34,7 @@ The controller uses Gateway API v1.7.0 and defaults to the Standard Channel. Its
 
 - One HTTP listener and one selected HTTPRoute in the Gateway namespace
 - One rule, one backend Service, and Exact or PathPrefix matching
-- At most one exact route hostname
+- An optional exact or wildcard hostname on the listener and at most one on the HTTPRoute. Only the names shared by both reach the backend.
 - Eligible worker NodePort members with Local or Cluster traffic policy
 - An opt-in IPv4 Endpoint mode for ClusterIP, headless, and NodePort Services, pending live network validation
 - Typed GatewayClass configuration with topology settings fixed for each Gateway

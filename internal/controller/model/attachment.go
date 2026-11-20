@@ -51,7 +51,7 @@ func attachParent(input Input, route *gatewayv1.HTTPRoute, parentIndex int, list
 		} else if !allowsRoute(listener, input.Gateway.Namespace, route.Namespace, input.Namespaces) {
 			attachment.Diagnostics = append(attachment.Diagnostics, routeDiagnostic(gatewayv1.RouteReasonNotAllowedByListeners, "listener does not allow this HTTPRoute kind or namespace"))
 		} else {
-			attachment.Hostnames = intersectHostnames(listener.Hostname, route.Spec.Hostnames)
+			attachment.Hostnames = IntersectHostnames(listener.Hostname, route.Spec.Hostnames)
 			if len(attachment.Hostnames) == 0 {
 				attachment.Diagnostics = append(attachment.Diagnostics, routeDiagnostic(gatewayv1.RouteReasonNoMatchingListenerHostname, "route and listener hostnames do not intersect"))
 			} else {
@@ -133,9 +133,10 @@ func allowsRoute(listener *gatewayv1.Listener, gatewayNamespace, routeNamespace 
 	return false
 }
 
-// intersectHostnames preserves the effective hostname constraints for the
-// pinned HTTP profile, including nested wildcard suffixes and apex exclusion.
-func intersectHostnames(listener *gatewayv1.Hostname, routes []gatewayv1.Hostname) []string {
+// IntersectHostnames returns the effective hostname constraints, including
+// nested wildcard suffixes and apex exclusion. An empty result means the
+// route cannot attach. A single empty string matches any hostname.
+func IntersectHostnames(listener *gatewayv1.Hostname, routes []gatewayv1.Hostname) []string {
 	listenerName := ""
 	if listener != nil {
 		listenerName = string(*listener)

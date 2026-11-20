@@ -21,21 +21,21 @@ import (
 	"testing"
 )
 
-func TestExactHostnameRuleValueChecksOctaviaLengthLimit(t *testing.T) {
+func TestHostnameRuleValueChecksOctaviaLengthLimit(t *testing.T) {
 	// The hostname, escaped separators, and optional port expression all count.
 	label := strings.Repeat("a", 63)
 	hostname := strings.Join([]string{label, label, label, strings.Repeat("b", 48)}, ".")
-	value, err := ExactHostnameRuleValue(hostname)
+	value, err := HostnameRuleValue(hostname)
 	if err != nil || len(value) != 255 {
 		t.Fatalf("encoding the boundary hostname returned length %d and error %v, want 255 and nil", len(value), err)
 	}
-	if _, err := ExactHostnameRuleValue(hostname + "b"); err == nil {
+	if _, err := HostnameRuleValue(hostname + "b"); err == nil {
 		t.Fatal("expected the 256-character encoding to be rejected")
 	}
 }
 
-func TestExactHostnameRuleValueRejectsInvalidHostname(t *testing.T) {
-	if _, err := ExactHostnameRuleValue("api.example.com|other.example.com"); err == nil {
+func TestHostnameRuleValueRejectsInvalidHostname(t *testing.T) {
+	if _, err := HostnameRuleValue("api.example.com|other.example.com"); err == nil {
 		t.Fatal("expected a hostname outside the DNS label grammar to be rejected")
 	}
 }

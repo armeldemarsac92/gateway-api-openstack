@@ -19,6 +19,7 @@ package httproute
 import (
 	"context"
 	"errors"
+	"strconv"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -29,6 +30,8 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	gatewaycontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
 func (r *Reconciler) setRouteUnsupportedVersion(
@@ -119,14 +122,28 @@ func (r *Reconciler) setRouteUnsupportedVersion(
 	return result, nil
 }
 
-// routeForwardingEstablished proves that the declared backend belongs to the
-// last programmed route revision. A binding alone does not record that revision.
+// routeForwardingEstablished requires the current route revision and proof
+// that the established forwarding fits within the current listener hostname.
 func (r *Reconciler) routeForwardingEstablished(route *gatewayv1.HTTPRoute, parents []managedRouteParent, identity cloud.Identity) bool {
 	if len(route.Spec.ParentRefs) != 1 || len(parents) != 1 ||
 		!controller.SameGatewayIdentity(identity, controller.RouteIdentity(r.Config, parents[0].gateway, route)) {
 		return false
 	}
-	return r.currentRouteProgrammedCondition(route, parents[0].ref) != nil
+	parent := parents[0]
+	listener, err := gatewaycontroller.Validate(parent.gateway)
+	if err != nil || parent.gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] != strconv.Itoa(int(listener.Port)) {
+		return false
+	}
+	if validateRouteParent(route, parent) != nil || r.currentRouteProgrammedCondition(route, parent.ref) == nil {
+		return false
+	}
+	if listener.Hostname == nil || gatewayProgrammedForGeneration(parent.gateway) {
+		return true
+	}
+	// A declared hostname bounds forwarding for this route revision even if
+	// the Gateway has not yet programmed its current hostname restriction.
+	effective := model.IntersectHostnames(listener.Hostname, route.Spec.Hostnames)
+	return len(route.Spec.Hostnames) == 1 && len(effective) == 1 && effective[0] == string(route.Spec.Hostnames[0])
 }
 
 func (r *Reconciler) currentRouteProgrammedCondition(

@@ -220,6 +220,163 @@ func TestUnsupportedGatewayAPIVersionFreezesBoundGraph(t *testing.T) {
 	}
 }
 
+func TestListenerHostnameChangesRemoveStaleRouteForwarding(t *testing.T) {
+	for _, test := range []struct {
+		name                string
+		versionSkew         bool
+		routeHost           gatewayv1.Hostname
+		initialListenerHost gatewayv1.Hostname
+		updatedListenerHost gatewayv1.Hostname
+		wantAccepted        metav1.ConditionStatus
+		wantReason          string
+	}{
+		{
+			name: "apex outside wildcard", routeHost: "example.test", updatedListenerHost: "*.example.test",
+			wantAccepted: metav1.ConditionFalse, wantReason: "NoMatchingListenerHostname",
+		},
+		{
+			name: "new listener restriction during skew", versionSkew: true, updatedListenerHost: "*.example.test",
+			wantAccepted: metav1.ConditionUnknown, wantReason: "Pending",
+		},
+		{
+			name: "different exact hostname during skew", versionSkew: true, routeHost: "*.example.test",
+			initialListenerHost: "api.example.test", updatedListenerHost: "other.example.test",
+			wantAccepted: metav1.ConditionUnknown, wantReason: "Pending",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := t.Context()
+			cfg := testConfig()
+			class := unsupportedVersionGatewayClass(cfg)
+			class.Status.Conditions = nil
+			gateway := programmedTestGateway(cfg)
+			if test.initialListenerHost != "" {
+				gateway.Spec.Listeners[0].Hostname = &test.initialListenerHost
+			}
+			route := mapperTestHTTPRoute(gateway.Namespace, "api", gatewayv1.ParentReference{Name: "edge"}, "backend")
+			route.UID, route.Generation = "route-uid", 1
+			if test.routeHost != "" {
+				route.Spec.Hostnames = []gatewayv1.Hostname{test.routeHost}
+			}
+			service, endpoints, node := validNodePortBackend(gateway.Namespace, "backend")
+			kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).
+				WithStatusSubresource(class, gateway, route).
+				WithObjects(class, gateway, route, service, endpoints, node).
+				Build()
+			provider := &recordingProvider{}
+			reconciler := newTestReconciler(Reconciler{
+				Client: kubeClient, APIReader: kubeClient,
+				Coordinator: &graph.Coordinator{}, Config: cfg,
+			}, provider)
+			reconcile := func() {
+				t.Helper()
+				if _, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(route)}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			reconcile()
+			reconcile()
+			if len(provider.routeSpecs) != 1 {
+				t.Fatalf("route was never programmed: %v", provider.routeSpecs)
+			}
+			if test.versionSkew {
+				if err := kubeClient.Get(ctx, client.ObjectKeyFromObject(class), class); err != nil {
+					t.Fatal(err)
+				}
+				class.Status = unsupportedVersionGatewayClass(cfg).Status
+				if err := kubeClient.Status().Update(ctx, class); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := kubeClient.Get(ctx, client.ObjectKeyFromObject(gateway), gateway); err != nil {
+				t.Fatal(err)
+			}
+			gateway.Spec.Listeners[0].Hostname = &test.updatedListenerHost
+			gateway.Generation++
+			if err := kubeClient.Update(ctx, gateway); err != nil {
+				t.Fatal(err)
+			}
+			for range 4 {
+				reconcile()
+			}
+			if len(provider.deletedRoutes) != 1 || provider.deletedRoutes[0] != provider.routeSpecs[0].Identity ||
+				len(provider.routeSpecs) != 1 || len(provider.deletedGateways) != 0 {
+				t.Fatalf("expected cleanup of only the stale route graph, got route ensures %v, route deletions %v, Gateway deletions %v",
+					provider.routeSpecs, provider.deletedRoutes, provider.deletedGateways)
+			}
+			if err := kubeClient.Get(ctx, client.ObjectKeyFromObject(route), route); err != nil {
+				t.Fatal(err)
+			}
+			if len(route.Status.Parents) != 1 {
+				t.Fatalf("expected one route parent, got %v", route.Status.Parents)
+			}
+			accepted := meta.FindStatusCondition(route.Status.Parents[0].Conditions, "Accepted")
+			if accepted == nil || accepted.Status != test.wantAccepted || accepted.Reason != test.wantReason {
+				t.Fatalf("route Accepted = %+v, want %s/%s", accepted, test.wantAccepted, test.wantReason)
+			}
+		})
+	}
+}
+
+func TestUnsupportedGatewayAPIVersionKeepsExactForwardingUnderWildcard(t *testing.T) {
+	ctx := t.Context()
+	cfg := testConfig()
+	class, gateway := providerRouteParentObjects(cfg)
+	gateway.Spec.Listeners[0].Hostname = ptr.To(gatewayv1.Hostname("*.example.test"))
+	route := mapperTestHTTPRoute(gateway.Namespace, "api", gatewayv1.ParentReference{Name: "edge"}, "backend")
+	route.UID, route.Generation = "route-uid", 1
+	route.Spec.Hostnames = []gatewayv1.Hostname{"api.example.test"}
+	service, endpoints, node := validNodePortBackend(gateway.Namespace, "backend")
+	kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).
+		WithStatusSubresource(class, gateway, route).
+		WithObjects(class, gateway, route, service, endpoints, node).Build()
+	provider := &recordingProvider{}
+	reconciler := newTestReconciler(Reconciler{
+		Client: kubeClient, APIReader: kubeClient, Coordinator: &graph.Coordinator{}, Config: cfg,
+	}, provider)
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(route)}
+	reconcile := func() {
+		t.Helper()
+		if _, err := reconciler.Reconcile(ctx, request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reconcile()
+	reconcile()
+	if len(provider.routeSpecs) != 1 || provider.routeSpecs[0].Hostname != "api.example.test" {
+		t.Fatalf("initial forwarding = %#v, want one exact hostname", provider.routeSpecs)
+	}
+	if err := kubeClient.Get(ctx, client.ObjectKeyFromObject(gateway), gateway); err != nil {
+		t.Fatal(err)
+	}
+	gateway.Spec.Listeners = append(gateway.Spec.Listeners, gatewayv1.Listener{
+		Name: "unsupported", Port: 8443, Protocol: "custom.example/test",
+	})
+	gateway.Generation++
+	if err := kubeClient.Update(ctx, gateway); err != nil {
+		t.Fatal(err)
+	}
+	if err := kubeClient.Get(ctx, client.ObjectKeyFromObject(class), class); err != nil {
+		t.Fatal(err)
+	}
+	class.Status = unsupportedVersionGatewayClass(cfg).Status
+	if err := kubeClient.Status().Update(ctx, class); err != nil {
+		t.Fatal(err)
+	}
+	for range 4 {
+		reconcile()
+	}
+	if err := kubeClient.Get(ctx, request.NamespacedName, route); err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.routeSpecs) != 1 || len(provider.deletedRoutes) != 0 ||
+		!controllerutil.ContainsFinalizer(route, cfg.RouteFinalizer()) ||
+		reconciler.currentRouteProgrammedCondition(route, route.Spec.ParentRefs[0]) == nil {
+		t.Fatalf("unrelated listener edit changed established forwarding: ensures = %d, deletes = %d, finalizers = %v, status = %#v",
+			len(provider.routeSpecs), len(provider.deletedRoutes), route.Finalizers, route.Status)
+	}
+}
+
 func TestUnsupportedGatewayAPIVersionRevokesBoundServiceReference(t *testing.T) {
 	t.Run("unchanged backend", func(t *testing.T) { testServiceReferenceRevocationDuringVersionSkew(t, false) })
 	t.Run("edited backend", func(t *testing.T) { testServiceReferenceRevocationDuringVersionSkew(t, true) })

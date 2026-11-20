@@ -103,7 +103,7 @@ func (p *Provider) buildDesiredRoute(spec cloud.RouteSpec) (desiredRoute, error)
 
 	var hostnameRuleValue string
 	if spec.Hostname != "" {
-		hostnameRuleValue, err = amphora.ExactHostnameRuleValue(spec.Hostname)
+		hostnameRuleValue, err = amphora.HostnameRuleValue(spec.Hostname)
 		if err != nil {
 			return invalid(err)
 		}

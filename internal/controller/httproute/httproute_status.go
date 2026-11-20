@@ -282,6 +282,8 @@ func statusForRouteBuildError(err error) routeReconcileStatus {
 			return unresolvedRouteStatus(string(gatewayv1.RouteReasonUnsupportedProtocol), buildError.message)
 		case routeErrorNoMatchingParent:
 			return rejectedRouteStatus(string(gatewayv1.RouteReasonNoMatchingParent), buildError.message)
+		case routeErrorNoMatchingHostname:
+			return rejectedRouteStatus(string(gatewayv1.RouteReasonNoMatchingListenerHostname), buildError.message)
 		case routeErrorNotAllowed:
 			return rejectedRouteStatus(string(gatewayv1.RouteReasonNotAllowedByListeners), buildError.message)
 		case routeErrorPending:

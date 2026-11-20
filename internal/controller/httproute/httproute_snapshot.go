@@ -136,8 +136,13 @@ func (r *Reconciler) buildRouteValidationSnapshotFromInputs(
 	if err != nil || snapshot.disposition == routeValidationGatewayPending {
 		return snapshot, err
 	}
-	if purpose == routeSnapshotForBinding && !snapshot.gatewayProgrammed {
-		return routeValidationSnapshot{}, errHTTPRouteChanged
+	if err := r.observeRouteBinding(&snapshot); err != nil {
+		return routeValidationSnapshot{}, err
+	}
+	if purpose == routeSnapshotForBinding {
+		if err := r.validateRouteBindingTransition(snapshot); err != nil {
+			return routeValidationSnapshot{}, err
+		}
 	}
 
 	if inputs == nil {
@@ -158,8 +163,8 @@ func (r *Reconciler) buildRouteValidationSnapshotFromInputs(
 	snapshot.desired = desired
 	snapshot.backends = inputs
 
-	if err := r.finishRouteBindingSnapshot(&snapshot, purpose); err != nil {
-		return routeValidationSnapshot{}, err
+	if purpose == routeSnapshotForEnsure {
+		r.setRouteBindingDisposition(&snapshot)
 	}
 	return snapshot, nil
 }
@@ -297,17 +302,14 @@ func (r *Reconciler) selectAndBuildRouteModel(
 		))
 	}
 
-	desired, err := r.buildRouteModelFromInputs(ctx, r.APIReader, snapshot.route, snapshot.gateway, inputs)
+	desired, err := r.buildRouteModelFromInputs(ctx, r.APIReader, snapshot.route, snapshot.gateway, snapshot.listener, inputs)
 	if err != nil {
 		return routeSelectionSnapshot{}, cloud.RouteSpec{}, routeSnapshotReadError(purpose, err)
 	}
 	return selection, desired, nil
 }
 
-func (r *Reconciler) finishRouteBindingSnapshot(
-	snapshot *routeValidationSnapshot,
-	purpose routeSnapshotPurpose,
-) error {
+func (r *Reconciler) observeRouteBinding(snapshot *routeValidationSnapshot) error {
 	if snapshot.route.Annotations[r.Config.RouteLifecycleAnnotation()] == controller.RouteDetaching {
 		return errHTTPRouteChanged
 	}
@@ -316,29 +318,26 @@ func (r *Reconciler) finishRouteBindingSnapshot(
 		return err
 	}
 	desiredIdentity := controller.RouteIdentity(r.Config, snapshot.gateway, snapshot.route)
-	binding := routeBindingSnapshot{
+	snapshot.binding = routeBindingSnapshot{
 		identity:       storedIdentity,
 		present:        bindingPresent,
 		hasFinalizer:   controllerutil.ContainsFinalizer(snapshot.route, r.Config.RouteFinalizer()),
 		matchesDesired: bindingPresent && storedIdentity == desiredIdentity,
 	}
-	snapshot.binding = binding
+	return nil
+}
 
-	if purpose == routeSnapshotForBinding {
-		return r.validateRouteBindingTransition(*snapshot)
-	}
-
-	boundToCurrentGateway := binding.matchesDesired && binding.hasFinalizer
+func (r *Reconciler) setRouteBindingDisposition(snapshot *routeValidationSnapshot) {
+	boundToCurrentGateway := snapshot.binding.matchesDesired && snapshot.binding.hasFinalizer
 	if !snapshot.gatewayProgrammed && !boundToCurrentGateway {
 		snapshot.disposition = routeValidationGatewayPending
-		return nil
+		return
 	}
 	desiredBinding := snapshot.route.DeepCopy()
 	r.applyRouteBinding(desiredBinding, snapshot.gateway)
 	if !routeBindingMetadataEqual(snapshot.route, desiredBinding) {
 		snapshot.disposition = routeValidationBindingRequired
 	}
-	return nil
 }
 
 // validateRouteBindingTransition prevents a binding checkpoint from adopting
@@ -346,7 +345,12 @@ func (r *Reconciler) finishRouteBindingSnapshot(
 // It is pure so an ensure snapshot can be reused without rebuilding the
 // backend model.
 func (r *Reconciler) validateRouteBindingTransition(snapshot routeValidationSnapshot) error {
-	if !snapshot.gatewayProgrammed {
+	// Both finalizers and the stored identity prove this attached route already
+	// belongs to the Gateway. Its metadata must be complete before the graph
+	// writer can program a newer Gateway generation.
+	completesAttachedBinding := snapshot.binding.matchesDesired && snapshot.binding.hasFinalizer &&
+		snapshot.route.Annotations[r.Config.RouteLifecycleAnnotation()] == controller.RouteAttached
+	if !snapshot.gatewayProgrammed && !completesAttachedBinding {
 		return errHTTPRouteChanged
 	}
 	if !snapshot.binding.present && snapshot.binding.hasFinalizer {
@@ -615,9 +619,7 @@ func (r *Reconciler) observeRouteParentsForCleanup(
 		observation.gatewayClass = &gatewayClass
 		if gatewayClass.Spec.ControllerName == r.Config.ControllerName {
 			observation.managed = true
-			if len(gateway.Spec.Listeners) == 1 {
-				observation.listener = &gateway.Spec.Listeners[0]
-			}
+			observation.listener, _ = gatewaycontroller.HTTPListener(&gateway)
 		}
 		parents = append(parents, observation)
 	}

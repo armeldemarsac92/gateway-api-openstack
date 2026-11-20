@@ -232,6 +232,111 @@ func TestHTTPRouteReconcileBuildsNodePortMembers(t *testing.T) {
 	}
 }
 
+func TestHTTPRouteProgramsOnlyHTTPListenerOnMixedGateway(t *testing.T) {
+	for _, explicit := range []bool{false, true} {
+		name := "implicit parent"
+		if explicit {
+			name = "explicit parent"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := t.Context()
+			cfg := testConfig()
+			class, gateway := providerRouteParentObjects(cfg)
+			http := gateway.Spec.Listeners[0]
+			http.Hostname = ptr.To(gatewayv1.Hostname("api.example.test"))
+			rejected := gatewayv1.Listener{Name: "aaa-rejected", Port: 8443, Protocol: "custom.example/test"}
+			gateway.Spec.Listeners = []gatewayv1.Listener{rejected, http}
+			foreign := controller.Condition("example.net/Custom", metav1.ConditionTrue, "Preserve", "Foreign status", gateway.Generation)
+			gateway.Status.Listeners = []gatewayv1.ListenerStatus{
+				{Name: rejected.Name, Conditions: []metav1.Condition{foreign}},
+				{Name: http.Name, Conditions: []metav1.Condition{foreign}},
+			}
+			parent := gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name)}
+			if explicit {
+				parent.SectionName, parent.Port = &http.Name, &http.Port
+			}
+			route := mapperTestHTTPRoute(gateway.Namespace, "api", parent, "backend")
+			route.UID, route.Generation = "api-route", 1
+			rejectedParent := gatewayv1.ParentReference{Name: parent.Name, SectionName: &rejected.Name}
+			if explicit {
+				rejectedParent.SectionName, rejectedParent.Port = nil, &rejected.Port
+			}
+			other := mapperTestHTTPRoute(gateway.Namespace, "aaa-rejected", rejectedParent, "backend")
+			other.UID, other.Generation = "rejected-route", 1
+			mismatched := mapperTestHTTPRoute(gateway.Namespace, "aaa-mismatched", gatewayv1.ParentReference{
+				Name: parent.Name, SectionName: &rejected.Name, Port: &http.Port,
+			}, "backend")
+			mismatched.UID, mismatched.Generation = "mismatched-route", 1
+			service, endpoints, node := validNodePortBackend(gateway.Namespace, "backend")
+			kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gateway, route, other, mismatched).
+				WithObjects(class, gateway, route, other, mismatched, service, endpoints, node).Build()
+			provider := &recordingProvider{}
+			coordinator := &graph.Coordinator{}
+			gatewayReconciler := newTestGatewayReconciler(gatewaycontroller.Reconciler{
+				Client: kubeClient, APIReader: kubeClient, Coordinator: coordinator, Config: cfg,
+			}, provider)
+			reconciler := &Reconciler{
+				Client: kubeClient, APIReader: kubeClient, Coordinator: coordinator, Writer: gatewayReconciler.Writer, Config: cfg,
+			}
+			gatewayRequest := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(gateway)}
+			if _, err := gatewayReconciler.Reconcile(ctx, gatewayRequest); err != nil {
+				t.Fatal(err)
+			}
+			if len(provider.gatewaySpecs) != 1 || provider.gatewaySpecs[0].ListenerPort != int(http.Port) {
+				t.Fatalf("provider Gateway listeners = %#v, want only %s", provider.gatewaySpecs, http.Name)
+			}
+			for _, candidate := range []*gatewayv1.HTTPRoute{other, mismatched, route, route} {
+				if _, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(candidate)}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if len(provider.routeSpecs) != 1 {
+				t.Fatalf("provider routes = %#v, want one programmed HTTPRoute", provider.routeSpecs)
+			}
+			spec := provider.routeSpecs[0]
+			if spec.Identity.RouteUID != string(route.UID) || spec.GatewayRequirements.ListenerPort != int(http.Port) ||
+				spec.Hostname != string(*http.Hostname) || len(spec.Members) != 1 {
+				t.Fatalf("route graph = %#v, want HTTPRoute only on %s:%d with backend members", spec, *http.Hostname, http.Port)
+			}
+			for _, rejectedRoute := range []struct {
+				route  *gatewayv1.HTTPRoute
+				reason gatewayv1.RouteConditionReason
+			}{
+				{other, gatewayv1.RouteReasonNotAllowedByListeners},
+				{mismatched, gatewayv1.RouteReasonNoMatchingParent},
+			} {
+				route := rejectedRoute.route
+				if err := kubeClient.Get(ctx, client.ObjectKeyFromObject(route), route); err != nil {
+					t.Fatal(err)
+				}
+				if len(route.Status.Parents) != 1 {
+					t.Fatalf("route %s parent statuses = %#v", route.Name, route.Status.Parents)
+				}
+				accepted := meta.FindStatusCondition(route.Status.Parents[0].Conditions, string(gatewayv1.RouteConditionAccepted))
+				if accepted == nil || accepted.Status != metav1.ConditionFalse || accepted.Reason != string(rejectedRoute.reason) {
+					t.Fatalf("route %s Accepted = %#v, want False/%s", route.Name, accepted, rejectedRoute.reason)
+				}
+			}
+			if _, err := gatewayReconciler.Reconcile(ctx, gatewayRequest); err != nil {
+				t.Fatal(err)
+			}
+			if err := kubeClient.Get(ctx, gatewayRequest.NamespacedName, gateway); err != nil {
+				t.Fatal(err)
+			}
+			listeners := gateway.Status.Listeners
+			if len(listeners) != 2 || listeners[0].Name != rejected.Name || listeners[0].AttachedRoutes != 0 || len(listeners[0].SupportedKinds) != 0 ||
+				listeners[1].Name != http.Name || listeners[1].AttachedRoutes != 1 || !meta.IsStatusConditionTrue(listeners[1].Conditions, string(gatewayv1.ListenerConditionProgrammed)) {
+				t.Fatalf("listener statuses = %#v", listeners)
+			}
+			for _, status := range listeners {
+				if !meta.IsStatusConditionTrue(status.Conditions, foreign.Type) {
+					t.Fatalf("missing foreign condition in listener status %#v", status)
+				}
+			}
+		})
+	}
+}
+
 func TestHTTPRouteDetachDeletesStoredResourcesAndMetadata(t *testing.T) {
 	scheme := testScheme(t)
 	cfg := testConfig()
@@ -472,8 +577,8 @@ func TestUnsupportedRouteCannotReserveGatewaySlot(t *testing.T) {
 		change func(*gatewayv1.HTTPRoute)
 		kind   routeErrorKind
 	}{
-		{name: "wildcard hostname", change: func(route *gatewayv1.HTTPRoute) {
-			route.Spec.Hostnames = []gatewayv1.Hostname{"*.example.test"}
+		{name: "multiple hostnames", change: func(route *gatewayv1.HTTPRoute) {
+			route.Spec.Hostnames = []gatewayv1.Hostname{"a.example.test", "b.example.test"}
 		}, kind: routeErrorUnsupported},
 		{name: "hostname exceeds Octavia L7 rule value limit after encoding", change: func(route *gatewayv1.HTTPRoute) {
 			label := strings.Repeat("a", 60)

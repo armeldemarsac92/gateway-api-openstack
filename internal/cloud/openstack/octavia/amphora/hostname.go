@@ -22,25 +22,47 @@ import (
 	"fmt"
 	"net/netip"
 	"regexp"
+	"strings"
 )
 
-const maxL7RuleValueLength = 255
+const (
+	maxL7RuleValueLength = 255
+	maxDNSHostnameLength = 253
+	dnsLabel             = `[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?`
+)
 
-var exactDNSHostname = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$`)
+var exactDNSHostname = regexp.MustCompile(`^` + dnsLabel + `(\.` + dnsLabel + `)*$`)
 
-// ExactHostnameRuleValue encodes one exact DNS hostname for an Amphora HOST_NAME
+// ValidateHostname checks a DNS name or leading wildcard label before
+// attachment. Only the resulting intersection has to fit in an L7 rule.
+func ValidateHostname(hostname string) error {
+	if _, err := netip.ParseAddr(hostname); err == nil ||
+		len(hostname) > maxDNSHostnameLength ||
+		!exactDNSHostname.MatchString(strings.TrimPrefix(hostname, "*.")) {
+		return errors.New("hostname must be a DNS name with an optional leading wildcard label")
+	}
+	return nil
+}
+
+// HostnameRuleValue encodes one effective hostname for an Amphora HOST_NAME
 // REGEX rule. The stock renderer applies case-insensitive matching to the
 // Host value. Match an optional numeric port without changing the header.
-func ExactHostnameRuleValue(hostname string) (string, error) {
-	if _, err := netip.ParseAddr(hostname); err == nil || !exactDNSHostname.MatchString(hostname) {
-		return "", errors.New("only exact DNS hostnames are supported by the Octavia HTTP profile")
+func HostnameRuleValue(hostname string) (string, error) {
+	if err := ValidateHostname(hostname); err != nil {
+		return "", err
 	}
-
-	value := "^" + regexp.QuoteMeta(hostname) + `(:[0-9]+)?$`
-	// The public Octavia L7 rule API limits the encoded value rather than the
-	// input hostname. Both the DNS name and its regex encoding are ASCII.
+	prefix := "^"
+	suffix, wildcard := strings.CutPrefix(hostname, "*.")
+	if wildcard {
+		// At least one complete label must precede the suffix. A wildcard
+		// matches deeper subdomains as well, while excluding the suffix apex.
+		prefix += `(` + dnsLabel + `\.)+`
+	}
+	value := prefix + regexp.QuoteMeta(suffix) + `(:[0-9]+)?$`
+	// The public Octavia L7 rule API limits the encoded value. Both the
+	// DNS name and its regex encoding are ASCII.
 	if len(value) > maxL7RuleValueLength {
-		return "", fmt.Errorf("exact hostname requires an Octavia L7 rule value of %d characters, exceeding the %d character limit", len(value), maxL7RuleValueLength)
+		return "", fmt.Errorf("hostname requires an Octavia L7 rule value of %d characters, exceeding the %d character limit", len(value), maxL7RuleValueLength)
 	}
 	return value, nil
 }

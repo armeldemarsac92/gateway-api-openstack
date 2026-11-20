@@ -101,6 +101,9 @@ func TestControllerEnvtest(t *testing.T) {
 	if err := controller.SetupIndexes(t.Context(), manager.GetFieldIndexer(), config); err != nil {
 		t.Fatalf("set up controller indexes: %v", err)
 	}
+	statusConfig := config
+	statusConfig.ControllerName = "status.example.com/gateway-api-openstack"
+	startGatewayStatusReconcilers(t, manager, statusConfig)
 
 	managerContext, stopManager := context.WithCancel(context.Background())
 	managerResult := make(chan error, 1)
@@ -138,7 +141,7 @@ func TestControllerEnvtest(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 		decoder := yaml.NewYAMLOrJSONDecoder(file, 4096)
 		for _, kind := range []string{"ValidatingAdmissionPolicy", "ValidatingAdmissionPolicyBinding"} {
 			var obj unstructured.Unstructured
@@ -168,6 +171,9 @@ func TestControllerEnvtest(t *testing.T) {
 		}
 	})
 	cacheClient := manager.GetClient()
+	t.Run("upstream Gateway status cases", func(t *testing.T) {
+		testUpstreamGatewayStatus(t, apiClient, statusConfig)
+	})
 	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "controller-envtest"}}
 	if err := apiClient.Create(t.Context(), namespace); err != nil {
 		t.Fatalf("create test Namespace: %v", err)

@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -29,8 +28,8 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
-	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia/amphora"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	gatewaycontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
@@ -42,6 +41,7 @@ const (
 	routeErrorRefNotPermitted     routeErrorKind = "RefNotPermitted"
 	routeErrorUnsupportedProtocol routeErrorKind = "UnsupportedProtocol"
 	routeErrorNoMatchingParent    routeErrorKind = "NoMatchingParent"
+	routeErrorNoMatchingHostname  routeErrorKind = "NoMatchingListenerHostname"
 	routeErrorNotAllowed          routeErrorKind = "NotAllowedByListeners"
 	routeErrorPending             routeErrorKind = "Pending"
 )
@@ -69,16 +69,7 @@ func structurallySupportedRoute(route *gatewayv1.HTTPRoute) bool {
 // The logical compiler can represent a wider configuration without enabling it.
 func validateRouteStructure(route *gatewayv1.HTTPRoute) (gatewayv1.BackendObjectReference, error) {
 	if len(route.Spec.Hostnames) > 1 {
-		return gatewayv1.BackendObjectReference{}, newRouteBuildError(routeErrorUnsupported, "at most one exact hostname is supported")
-	}
-	if len(route.Spec.Hostnames) == 1 {
-		hostname := string(route.Spec.Hostnames[0])
-		if strings.HasPrefix(hostname, "*.") {
-			return gatewayv1.BackendObjectReference{}, newRouteBuildError(routeErrorUnsupported, "wildcard hostnames are not supported")
-		}
-		if _, err := amphora.ExactHostnameRuleValue(hostname); err != nil {
-			return gatewayv1.BackendObjectReference{}, newRouteBuildError(routeErrorUnsupported, "%s", err)
-		}
+		return gatewayv1.BackendObjectReference{}, newRouteBuildError(routeErrorUnsupported, "at most one hostname is supported")
 	}
 	if len(route.Spec.Rules) != 1 {
 		return gatewayv1.BackendObjectReference{}, newRouteBuildError(routeErrorUnsupported, "exactly one HTTPRoute rule is supported")
@@ -133,11 +124,18 @@ func (r *Reconciler) buildRouteModelWithReader(
 	if _, err := validateRouteStructure(route); err != nil {
 		return cloud.RouteSpec{}, err
 	}
+	listener, err := gatewaycontroller.Validate(gateway)
+	if err != nil {
+		return cloud.RouteSpec{}, newRouteBuildError(routeErrorUnsupported, "%s", err)
+	}
+	if err := validateRouteHostnames(listener.Hostname, route.Spec.Hostnames); err != nil {
+		return cloud.RouteSpec{}, err
+	}
 	inputs, err := collectRouteModelInputs(ctx, reader, gateway, []gatewayv1.HTTPRoute{*route})
 	if err != nil {
 		return cloud.RouteSpec{}, err
 	}
-	return r.buildRouteModelFromInputs(ctx, reader, route, gateway, inputs)
+	return r.buildRouteModelFromInputs(ctx, reader, route, gateway, *listener, inputs)
 }
 
 func (r *Reconciler) buildRouteModelFromInputs(
@@ -145,6 +143,7 @@ func (r *Reconciler) buildRouteModelFromInputs(
 	reader client.Reader,
 	route *gatewayv1.HTTPRoute,
 	gateway *gatewayv1.Gateway,
+	listener gatewayv1.Listener,
 	inputs *routeModelInputs,
 ) (cloud.RouteSpec, error) {
 	reference, err := validateRouteStructure(route)
@@ -170,7 +169,7 @@ func (r *Reconciler) buildRouteModelFromInputs(
 	// Route selection is still the current single-route contract. Preserve every
 	// rule and backend of that route so unsupported groups cannot disappear here.
 	logical := inputs.selectedRoute(route)
-	match, backend, err := supportedRouteModel(logical, mode)
+	match, backend, err := supportedRouteModel(logical, listener, mode)
 	if err != nil {
 		return cloud.RouteSpec{}, err
 	}
@@ -189,7 +188,7 @@ func (r *Reconciler) buildRouteModelFromInputs(
 			Provider:          "amphora",
 			VIPSubnetID:       topology.Topology.VIPSubnetID,
 			ExternalNetworkID: topology.Topology.ExternalNetworkID,
-			ListenerPort:      int(logical.Listeners[0].Port),
+			ListenerPort:      int(listener.Port),
 			FlavorID:          topology.Topology.FlavorID, AvailabilityZone: topology.Topology.AvailabilityZone,
 			VIPSecurityGroupIDs: slices.Clone(topology.Topology.VIPSecurityGroupIDs),
 		},
@@ -206,19 +205,32 @@ func (r *Reconciler) buildRouteModelFromInputs(
 
 // supportedRouteModel lowers only the currently implemented graph shape. Model
 // diagnostics never grant authority to drop a fragment or choose a fallback.
-func supportedRouteModel(logical model.Gateway, mode cloud.MemberMode) (model.RouteMatch, model.BackendGroup, error) {
+func supportedRouteModel(logical model.Gateway, selected gatewayv1.Listener, mode cloud.MemberMode) (model.RouteMatch, model.BackendGroup, error) {
 	unsupported := func() (model.RouteMatch, model.BackendGroup, error) {
 		return model.RouteMatch{}, model.BackendGroup{}, newRouteBuildError(routeErrorUnsupported, "logical Gateway configuration is outside the supported HTTP profile")
 	}
-	if len(logical.Diagnostics) != 0 || len(logical.Listeners) != 1 || len(logical.Routes) != 1 {
+	if len(logical.Diagnostics) != 0 || len(logical.Routes) != 1 {
 		return unsupported()
 	}
-	listener, route := logical.Listeners[0], logical.Routes[0]
-	if len(listener.Diagnostics) != 0 || len(route.Diagnostics) != 0 || len(listener.Rules) != 1 || len(route.Rules) != 1 || len(route.Parents) != 1 {
+	var listener *model.Listener
+	for i := range logical.Listeners {
+		candidate := &logical.Listeners[i]
+		if candidate.Name == selected.Name && candidate.Port == selected.Port && candidate.Protocol == gatewayv1.HTTPProtocolType && listener == nil {
+			listener = candidate
+			continue
+		}
+		// A rejected protocol on a separate port has no HTTP forwarding.
+		if candidate.Protocol == gatewayv1.HTTPProtocolType || candidate.Port == selected.Port || candidate.Name == selected.Name ||
+			candidate.AttachedRoutes != 0 || len(candidate.Rules) != 0 {
+			return unsupported()
+		}
+	}
+	route := logical.Routes[0]
+	if listener == nil || len(listener.Diagnostics) != 0 || len(route.Diagnostics) != 0 || len(listener.Rules) != 1 || len(route.Rules) != 1 || len(route.Parents) != 1 {
 		return unsupported()
 	}
 	match := listener.Rules[0]
-	if listener.Hostname != "" || route.Source.Namespace != logical.Source.Namespace || len(match.Match.Headers) != 0 || strings.HasPrefix(match.Hostname, "*.") {
+	if route.Source.Namespace != logical.Source.Namespace || len(match.Match.Headers) != 0 {
 		return unsupported()
 	}
 	rule, parent := route.Rules[0], route.Parents[0]

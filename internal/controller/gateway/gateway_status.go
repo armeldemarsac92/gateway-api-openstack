@@ -19,6 +19,7 @@ package gateway
 import (
 	"context"
 	"errors"
+	"slices"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -34,7 +35,6 @@ func (r *Reconciler) setGatewayFailure(gateway *gatewayv1.Gateway, validationErr
 	message := validationErr.Error()
 	var detailed *gatewayValidationError
 	errors.As(validationErr, &detailed)
-	invalidRouteKinds := detailed != nil && detailed.invalidRouteKinds
 	gatewayReason := gatewayv1.GatewayReasonListenersNotValid
 	listenerSpecific := detailed == nil || detailed.gatewayReason == ""
 	if detailed != nil {
@@ -48,39 +48,78 @@ func (r *Reconciler) setGatewayFailure(gateway *gatewayv1.Gateway, validationErr
 	controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionProgrammed), metav1.ConditionFalse, string(gatewayv1.GatewayReasonInvalid), message, gateway.Generation))
 	gateway.Status.Listeners = make([]gatewayv1.ListenerStatus, 0, len(gateway.Spec.Listeners))
 	for _, listener := range gateway.Spec.Listeners {
-		listenerStatus := gatewayv1.ListenerStatus{
-			Name:       listener.Name,
-			Conditions: existingListenerConditionsFrom(existingListeners, listener.Name),
-		}
-		if !invalidRouteKinds || listenerAllowsHTTPRoute(listener) {
-			listenerStatus.SupportedKinds = supportedHTTPRouteKinds()
-		}
-		acceptedStatus := metav1.ConditionFalse
-		acceptedReason := string(gatewayv1.ListenerReasonUnsupportedValue)
-		acceptedMessage := message
-		programmedReason := string(gatewayv1.ListenerReasonInvalid)
-		if !listenerSpecific {
-			acceptedStatus = metav1.ConditionTrue
-			acceptedReason = string(gatewayv1.ListenerReasonAccepted)
-			acceptedMessage = "Listener configuration is accepted"
-			programmedReason = string(gatewayv1.ListenerReasonPending)
-		} else if listener.Protocol != gatewayv1.HTTPProtocolType {
-			acceptedReason = string(gatewayv1.ListenerReasonUnsupportedProtocol)
-		}
-		controller.SetCondition(&listenerStatus.Conditions, controller.Condition(string(gatewayv1.ListenerConditionAccepted), acceptedStatus, acceptedReason, acceptedMessage, gateway.Generation))
-		resolvedStatus := metav1.ConditionTrue
-		resolvedReason := string(gatewayv1.ListenerReasonResolvedRefs)
-		resolvedMessage := "Listener has no unresolved references"
-		if invalidRouteKinds {
-			resolvedStatus = metav1.ConditionFalse
-			resolvedReason = string(gatewayv1.ListenerReasonInvalidRouteKinds)
-			resolvedMessage = message
-		}
-		controller.SetCondition(&listenerStatus.Conditions, controller.Condition(string(gatewayv1.ListenerConditionResolvedRefs), resolvedStatus, resolvedReason, resolvedMessage, gateway.Generation))
-		controller.SetCondition(&listenerStatus.Conditions, controller.Condition(string(gatewayv1.ListenerConditionConflicted), metav1.ConditionFalse, string(gatewayv1.ListenerReasonNoConflicts), "Listener has no conflicts", gateway.Generation))
-		controller.SetCondition(&listenerStatus.Conditions, controller.Condition(string(gatewayv1.ListenerConditionProgrammed), metav1.ConditionFalse, programmedReason, message, gateway.Generation))
-		gateway.Status.Listeners = append(gateway.Status.Listeners, listenerStatus)
+		gateway.Status.Listeners = append(gateway.Status.Listeners, unprogrammedListenerStatus(
+			listener, existingListeners, gateway.Generation, listenerSpecific, message,
+		))
 	}
+}
+
+func unprogrammedListenerStatus(
+	listener gatewayv1.Listener,
+	existing []gatewayv1.ListenerStatus,
+	generation int64,
+	listenerSpecific bool,
+	message string,
+) gatewayv1.ListenerStatus {
+	status := gatewayv1.ListenerStatus{
+		Name:       listener.Name,
+		Conditions: existingListenerConditionsFrom(existing, listener.Name),
+	}
+	protocolSupported := listener.Protocol == gatewayv1.HTTPProtocolType
+	if protocolSupported && listenerAllowsHTTPRoute(listener) {
+		status.SupportedKinds = supportedHTTPRouteKinds()
+	}
+	acceptedStatus := metav1.ConditionFalse
+	acceptedReason := gatewayv1.ListenerReasonUnsupportedValue
+	acceptedMessage := message
+	programmedReason := gatewayv1.ListenerReasonInvalid
+	if !protocolSupported {
+		acceptedReason = gatewayv1.ListenerReasonUnsupportedProtocol
+		acceptedMessage = "Listener protocol is unsupported"
+	} else if !listenerSpecific {
+		acceptedStatus = metav1.ConditionTrue
+		acceptedReason = gatewayv1.ListenerReasonAccepted
+		acceptedMessage = "Listener configuration is accepted"
+		programmedReason = gatewayv1.ListenerReasonPending
+	}
+	controller.SetCondition(&status.Conditions, controller.Condition(string(gatewayv1.ListenerConditionAccepted), acceptedStatus, string(acceptedReason), acceptedMessage, generation))
+	resolvedStatus := metav1.ConditionTrue
+	resolvedReason := gatewayv1.ListenerReasonResolvedRefs
+	resolvedMessage := "Listener has no unresolved references"
+	if listener.AllowedRoutes != nil && slices.ContainsFunc(listener.AllowedRoutes.Kinds, func(kind gatewayv1.RouteGroupKind) bool {
+		return !protocolSupported || !isHTTPRouteGroupKind(kind)
+	}) {
+		resolvedStatus = metav1.ConditionFalse
+		resolvedReason = gatewayv1.ListenerReasonInvalidRouteKinds
+		resolvedMessage = "One or more allowed route kinds are unsupported on this listener"
+	}
+	controller.SetCondition(&status.Conditions, controller.Condition(string(gatewayv1.ListenerConditionResolvedRefs), resolvedStatus, string(resolvedReason), resolvedMessage, generation))
+	controller.SetCondition(&status.Conditions, controller.Condition(string(gatewayv1.ListenerConditionConflicted), metav1.ConditionFalse, string(gatewayv1.ListenerReasonNoConflicts), "Listener has no conflicts", generation))
+	controller.SetCondition(&status.Conditions, controller.Condition(string(gatewayv1.ListenerConditionProgrammed), metav1.ConditionFalse, string(programmedReason), message, generation))
+	return status
+}
+
+func setGatewayAcceptedListeners(gateway *gatewayv1.Gateway, accepted gatewayv1.ListenerStatus) {
+	reason := gatewayv1.GatewayReasonAccepted
+	message := "Gateway configuration is accepted"
+	if len(gateway.Spec.Listeners) > 1 {
+		reason = gatewayv1.GatewayReasonListenersNotValid
+		message = "The HTTP listener is accepted. Other listener protocols are unsupported"
+	}
+	controller.SetCondition(&gateway.Status.Conditions, controller.Condition(
+		string(gatewayv1.GatewayConditionAccepted), metav1.ConditionTrue, string(reason), message, gateway.Generation,
+	))
+	listeners := make([]gatewayv1.ListenerStatus, 0, len(gateway.Spec.Listeners))
+	for _, listener := range gateway.Spec.Listeners {
+		if listener.Name == accepted.Name {
+			listeners = append(listeners, accepted)
+		} else {
+			listeners = append(listeners, unprogrammedListenerStatus(
+				listener, gateway.Status.Listeners, gateway.Generation, true, "Listener protocol is unsupported",
+			))
+		}
+	}
+	gateway.Status.Listeners = listeners
 }
 
 func supportedHTTPRouteKinds() []gatewayv1.RouteGroupKind {
@@ -257,6 +296,10 @@ func (r *Reconciler) setGatewayCleanupFailure(
 		programmedGeneration,
 	))
 	for index := range gateway.Status.Listeners {
+		accepted := meta.FindStatusCondition(gateway.Status.Listeners[index].Conditions, string(gatewayv1.ListenerConditionAccepted))
+		if accepted != nil && accepted.Status == metav1.ConditionFalse && accepted.Reason == string(gatewayv1.ListenerReasonUnsupportedProtocol) {
+			continue
+		}
 		listenerGeneration := controller.ConditionObservedGeneration(
 			gateway.Status.Listeners[index].Conditions,
 			string(gatewayv1.ListenerConditionProgrammed),
@@ -293,7 +336,6 @@ func (r *Reconciler) setGatewayProvisioningStatus(
 		gateway.Generation,
 		advanceProgrammedGeneration,
 	)
-	controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionAccepted), metav1.ConditionTrue, string(gatewayv1.GatewayReasonAccepted), "Gateway configuration is accepted", gateway.Generation))
 	controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionProgrammed), programmed, string(gatewayReason), message, programmedGeneration))
 	listenerStatus := gatewayv1.ListenerStatus{
 		Name:           listener.Name,
@@ -309,7 +351,7 @@ func (r *Reconciler) setGatewayProvisioningStatus(
 		advanceProgrammedGeneration,
 	)
 	controller.SetCondition(&listenerStatus.Conditions, controller.Condition(string(gatewayv1.ListenerConditionProgrammed), programmed, string(listenerReason), message, listenerProgrammedGeneration))
-	gateway.Status.Listeners = []gatewayv1.ListenerStatus{listenerStatus}
+	setGatewayAcceptedListeners(gateway, listenerStatus)
 	return nil
 }
 
@@ -320,7 +362,6 @@ func (r *Reconciler) setGatewayProgrammed(ctx context.Context, gateway *gatewayv
 	}
 	addressType := gatewayv1.IPAddressType
 	gateway.Status.Addresses = []gatewayv1.GatewayStatusAddress{{Type: &addressType, Value: gatewayState.Address()}}
-	controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionAccepted), metav1.ConditionTrue, string(gatewayv1.GatewayReasonAccepted), "Gateway configuration is accepted", gateway.Generation))
 	controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionProgrammed), metav1.ConditionTrue, string(gatewayv1.GatewayReasonProgrammed), "Octavia load balancer and listener are active", gateway.Generation))
 	listenerStatus := gatewayv1.ListenerStatus{
 		Name:           listener.Name,
@@ -330,7 +371,7 @@ func (r *Reconciler) setGatewayProgrammed(ctx context.Context, gateway *gatewayv
 	}
 	setAcceptedListenerConditions(&listenerStatus.Conditions, gateway.Generation)
 	controller.SetCondition(&listenerStatus.Conditions, controller.Condition(string(gatewayv1.ListenerConditionProgrammed), metav1.ConditionTrue, string(gatewayv1.ListenerReasonProgrammed), "Octavia listener is active", gateway.Generation))
-	gateway.Status.Listeners = []gatewayv1.ListenerStatus{listenerStatus}
+	setGatewayAcceptedListeners(gateway, listenerStatus)
 	return nil
 }
 

@@ -434,6 +434,22 @@ func TestValidateGatewayRejectsUnsupportedAllowedRouteKinds(t *testing.T) {
 	}
 }
 
+func TestValidateGatewayRejectsNonIsolatedHTTP(t *testing.T) {
+	for _, peer := range []gatewayv1.Listener{
+		{Name: "other-http", Port: 81, Protocol: gatewayv1.HTTPProtocolType},
+		{Name: "same-port", Port: 80, Protocol: "custom.example/test"},
+	} {
+		t.Run(string(peer.Name), func(t *testing.T) {
+			gateway := &gatewayv1.Gateway{Spec: gatewayv1.GatewaySpec{Listeners: []gatewayv1.Listener{
+				{Name: "http", Port: 80, Protocol: gatewayv1.HTTPProtocolType}, peer,
+			}}}
+			if _, err := Validate(gateway); err == nil {
+				t.Fatal("Gateway accepted HTTP from an ambiguous listener set")
+			}
+		})
+	}
+}
+
 func TestValidateGatewayRejectsUnsupportedGatewayWideFields(t *testing.T) {
 	base := gatewayv1.GatewaySpec{Listeners: []gatewayv1.Listener{{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80}}}
 	tests := []struct {

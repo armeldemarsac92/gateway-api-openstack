@@ -19,13 +19,17 @@ package httproute
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia/amphora"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	gatewaycontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
 type managedRouteParent struct {
@@ -70,10 +74,7 @@ func (r *Reconciler) managedParentsWithReader(
 		if class.Spec.ControllerName != r.Config.ControllerName {
 			continue
 		}
-		var listener *gatewayv1.Listener
-		if len(gateway.Spec.Listeners) == 1 {
-			listener = &gateway.Spec.Listeners[0]
-		}
+		listener, _ := gatewaycontroller.HTTPListener(&gateway)
 		parents = append(parents, managedRouteParent{ref: parentRef, gateway: &gateway, gatewayClass: &class, listener: listener})
 	}
 	return parents, nil
@@ -87,17 +88,21 @@ func validateRouteParent(route *gatewayv1.HTTPRoute, parent managedRouteParent) 
 		return newRouteBuildError(routeErrorNotAllowed, "cross-namespace parentRefs are not supported")
 	}
 	if parent.listener == nil {
-		return newRouteBuildError(routeErrorUnsupported, "parent Gateway must have exactly one listener")
+		return newRouteBuildError(routeErrorUnsupported, "parent Gateway must have one HTTP listener on its own port")
 	}
 	listener := parent.listener
+	selectsListener := func(candidate gatewayv1.Listener) bool {
+		return (parent.ref.SectionName == nil || *parent.ref.SectionName == candidate.Name) &&
+			(parent.ref.Port == nil || *parent.ref.Port == candidate.Port)
+	}
+	if !selectsListener(*listener) {
+		if slices.ContainsFunc(parent.gateway.Spec.Listeners, selectsListener) {
+			return newRouteBuildError(routeErrorNotAllowed, "selected listener does not support HTTPRoute")
+		}
+		return newRouteBuildError(routeErrorNoMatchingParent, "parentRef does not select a Gateway listener")
+	}
 	if listener.Protocol != gatewayv1.HTTPProtocolType || listener.TLS != nil {
 		return newRouteBuildError(routeErrorUnsupported, "parent listener is not a supported plain HTTP listener")
-	}
-	if parent.ref.SectionName != nil && *parent.ref.SectionName != listener.Name {
-		return newRouteBuildError(routeErrorNoMatchingParent, "parentRef sectionName %q does not select listener %q", *parent.ref.SectionName, listener.Name)
-	}
-	if parent.ref.Port != nil && *parent.ref.Port != listener.Port {
-		return newRouteBuildError(routeErrorNoMatchingParent, "parentRef port %d does not select listener port %d", *parent.ref.Port, listener.Port)
 	}
 	if listener.AllowedRoutes != nil {
 		allowsHTTPRoute := len(listener.AllowedRoutes.Kinds) == 0
@@ -116,6 +121,33 @@ func validateRouteParent(route *gatewayv1.HTTPRoute, parent managedRouteParent) 
 		if listener.AllowedRoutes.Namespaces != nil && listener.AllowedRoutes.Namespaces.From != nil &&
 			*listener.AllowedRoutes.Namespaces.From != gatewayv1.NamespacesFromSame {
 			return newRouteBuildError(routeErrorNotAllowed, "listeners only allow same-namespace HTTPRoutes")
+		}
+	}
+	return validateRouteHostnames(listener.Hostname, route.Spec.Hostnames)
+}
+
+func validateRouteHostnames(listener *gatewayv1.Hostname, hostnames []gatewayv1.Hostname) error {
+	if len(hostnames) > 1 {
+		return newRouteBuildError(routeErrorUnsupported, "at most one hostname is supported")
+	}
+	if listener != nil {
+		if err := amphora.ValidateHostname(string(*listener)); err != nil {
+			return newRouteBuildError(routeErrorUnsupported, "invalid listener hostname: %s", err)
+		}
+	}
+	if len(hostnames) == 1 {
+		if err := amphora.ValidateHostname(string(hostnames[0])); err != nil {
+			return newRouteBuildError(routeErrorUnsupported, "invalid HTTPRoute hostname: %s", err)
+		}
+	}
+
+	effective := model.IntersectHostnames(listener, hostnames)
+	if len(effective) == 0 {
+		return newRouteBuildError(routeErrorNoMatchingHostname, "HTTPRoute and listener hostnames do not intersect")
+	}
+	if effective[0] != "" {
+		if _, err := amphora.HostnameRuleValue(effective[0]); err != nil {
+			return newRouteBuildError(routeErrorUnsupported, "%s", err)
 		}
 	}
 	return nil

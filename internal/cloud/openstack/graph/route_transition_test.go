@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"regexp"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -528,14 +529,25 @@ func TestEnsureRouteOperationTimeoutStopsObservation(t *testing.T) {
 
 func TestEnsureRouteConvergesWithOneMutationPerCall(t *testing.T) {
 	t.Run("new hostname rule", func(t *testing.T) {
-		testEnsureRouteHostnameRule(t, false)
+		testEnsureRouteHostnameRule(t, false, "api.example.com",
+			[]string{"api.example.com", "API.Example.COM", "API.Example.COM:1234"},
+			[]string{"api.example.net:1234", "sub.api.example.com", "apiXexample.com", "api.example.com.attacker.net", "api.example.com:invalid"})
 	})
 	t.Run("upgrade existing hostname rule", func(t *testing.T) {
-		testEnsureRouteHostnameRule(t, true)
+		testEnsureRouteHostnameRule(t, true, "api.example.com",
+			[]string{"API.Example.COM:1234"}, []string{"sub.api.example.com"})
 	})
 }
 
-func testEnsureRouteHostnameRule(t *testing.T, upgrade bool) {
+func TestEnsureRouteWildcardsMatchOnlyDNSSubdomains(t *testing.T) {
+	testEnsureRouteHostnameRule(t, true, "*.example.com",
+		[]string{"app.example.com", "DEEP.App.Example.COM:8080", "a-b.example.com"},
+		[]string{"example.com", "example.com:80", "badexample.com", "app.example.com.other",
+			"app..example.com", "-app.example.com", "app-.example.com", "_.example.com",
+			"app.example.com:invalid", strings.Repeat("a", 64) + ".example.com"})
+}
+
+func testEnsureRouteHostnameRule(t *testing.T, upgrade bool, hostname string, matches, misses []string) {
 	t.Helper()
 	identity := safetyTestIdentity(t)
 	loadBalancerTags := safetyGatewayTags(t, identity, roleLoadBalancer)
@@ -697,10 +709,12 @@ func testEnsureRouteHostnameRule(t *testing.T, upgrade bool) {
 		ProjectID:    "project-a",
 	}, ProviderConfig{PollInterval: time.Second})
 
+	spec := routeTransitionSpec(identity)
+	spec.Hostname = hostname
 	ready := false
 	for attempt := 0; attempt < 10; attempt++ {
 		before := len(requests.mutationPaths())
-		result, err := provider.EnsureRoute(context.Background(), routeTransitionSpec(identity))
+		result, err := provider.EnsureRoute(context.Background(), spec)
 		if err != nil {
 			t.Fatalf("EnsureRoute() attempt %d error = %v", attempt+1, err)
 		}
@@ -742,12 +756,12 @@ func testEnsureRouteHostnameRule(t *testing.T, upgrade bool) {
 	if err != nil {
 		t.Fatalf("invalid hostname rule %q: %v", hostRule.Value, err)
 	}
-	for _, host := range []string{"api.example.com", "API.Example.COM", "API.Example.COM:1234"} {
+	for _, host := range matches {
 		if !expression.MatchString(host) {
 			t.Errorf("hostname rule %q rejected %q", hostRule.Value, host)
 		}
 	}
-	for _, host := range []string{"api.example.net:1234", "sub.api.example.com", "apiXexample.com", "api.example.com.attacker.net", "api.example.com:invalid"} {
+	for _, host := range misses {
 		if expression.MatchString(host) {
 			t.Errorf("hostname rule %q incorrectly matched %q", hostRule.Value, host)
 		}
