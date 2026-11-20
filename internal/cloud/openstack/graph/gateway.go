@@ -180,11 +180,11 @@ func (p *Provider) findGatewayFloatingIP(ctx context.Context, identity Identity,
 	return owned, nil
 }
 
-func (p *Provider) enableLoadBalancer(ctx context.Context, loadBalancerID string) error {
+func (p *Provider) setLoadBalancerAdminState(ctx context.Context, loadBalancerID string, enabled bool) error {
 	if _, err := p.octavia.UpdateLoadBalancer(ctx, loadBalancerID, loadbalancers.UpdateOpts{
-		AdminStateUp: boolPointer(true),
+		AdminStateUp: boolPointer(enabled),
 	}); err != nil {
-		return fmt.Errorf("enable load balancer: %w", classifyOctaviaMutationError(err))
+		return fmt.Errorf("set load balancer %s admin_state_up=%t: %w", loadBalancerID, enabled, classifyOctaviaMutationError(err))
 	}
 	return nil
 }

@@ -174,6 +174,12 @@ func buildGatewayTrafficRestorationPlan(desired desiredGatewayGraph, actual obse
 }
 
 func gatewayGraphDeletionPlan(actual observedGatewayGraph) []graphMutation {
+	// Removing a predicate from a serving L7 policy can widen its match.
+	// Close all frontends first. The next pass waits for ACTIVE and revalidates
+	// the graph before changing any of its L7 resources.
+	if actual.loadBalancer != nil && actual.loadBalancer.AdminStateUp && len(actual.deletion.routes) > 0 {
+		return []graphMutation{{kind: graphDisableLoadBalancer, message: "Disabling Octavia load balancer before removing routes"}}
+	}
 	plan := make([]graphMutation, 0)
 	for _, step := range actual.deletion.orderedSteps() {
 		plan = append(plan, graphMutation{kind: graphDeleteChild, deletion: step, message: fmt.Sprintf("Deleting controller-owned %s", step.resource)})
@@ -257,8 +263,8 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 		return p.executeRouteMutation(ctx, route, step.route)
 	case graphEnableListener:
 		return p.enableListener(ctx, actual.state.ListenerID)
-	case graphEnableLoadBalancer:
-		return p.enableLoadBalancer(ctx, actual.state.LoadBalancerID)
+	case graphEnableLoadBalancer, graphDisableLoadBalancer:
+		return p.setLoadBalancerAdminState(ctx, actual.state.LoadBalancerID, step.kind == graphEnableLoadBalancer)
 	case graphDeleteChild:
 		return p.executeGatewayDeletionStep(ctx, step.deletion)
 	case graphDeleteLoadBalancer:

@@ -411,15 +411,12 @@ func TestReconcileGatewayGraphDeletionValidatesEveryChildBeforeOneMutation(t *te
 	requests := &gatewayTransitionRequests{}
 	base := convergedRouteGraphHandler(t, requests, identity, true, true)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-		if request.Method == http.MethodDelete {
+		if request.Method == http.MethodPut && request.URL.Path == "/lbaas/loadbalancers/load-balancer-1" {
 			requests.record(request)
-			if request.URL.Path != "/lbaas/l7policies/policy-1/rules/rule-host" {
-				t.Errorf("first deletion = %s", request.URL.Path)
-			}
 			if requests.count(http.MethodGet, "/lbaas/pools/pool-1/members") != 1 {
-				t.Error("deleted rule before validating pool descendants")
+				t.Error("closed frontends before validating pool descendants")
 			}
-			w.WriteHeader(http.StatusNotFound)
+			safetyWriteJSON(t, w, map[string]any{"loadbalancer": map[string]string{"id": "load-balancer-1", "provisioning_status": "PENDING_UPDATE"}})
 			return
 		}
 		base.ServeHTTP(w, request)

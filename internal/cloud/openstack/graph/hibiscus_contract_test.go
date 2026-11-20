@@ -17,6 +17,7 @@ limitations under the License.
 package graph
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -34,7 +35,7 @@ import (
 
 // Exercise the public Octavia v2 shapes with the real adapter and SDK. The
 // fixture represents settled inventory at each pass, including a lost reply
-// after an applied delete. See docs/qualification/v1.7.0/cloud-contract.md.
+// after an applied administrative update. See docs/qualification/v1.7.0/cloud-contract.md.
 func TestHibiscusHTTPContractRecoversAndDeletesOnlyOwnedGraph(t *testing.T) {
 	ctx := t.Context()
 	identity := safetyTestIdentity(t)
@@ -49,7 +50,8 @@ func TestHibiscusHTTPContractRecoversAndDeletesOnlyOwnedGraph(t *testing.T) {
 		policies    = "/v2/lbaas/l7policies"
 		policy      = policies + "/policy-1"
 		rules       = policy + "/rules"
-		rule        = rules + "/rule-1"
+		hostRule    = rules + "/rule-host"
+		pathRule    = rules + "/rule-path"
 		pools       = "/v2/lbaas/pools"
 		pool        = pools + "/pool-1"
 		members     = pool + "/members"
@@ -74,7 +76,11 @@ func TestHibiscusHTTPContractRecoversAndDeletesOnlyOwnedGraph(t *testing.T) {
 			"listener_id": path.Base(listener), "action": "REDIRECT_TO_POOL", "redirect_pool_id": path.Base(pool),
 			"position": 1, "admin_state_up": true, "tags": safetyRouteTags(t, identity, rolePolicyExact),
 		},
-		rule: {
+		hostRule: {
+			"type": "HOST_NAME", "compare_type": "REGEX", "value": `^api\.example\.com(:[0-9]+)?$`, "admin_state_up": true,
+			"tags": safetyRouteTags(t, identity, roleRuleHost),
+		},
+		pathRule: {
 			"type": "PATH", "compare_type": "EQUAL_TO", "value": "/api", "admin_state_up": true,
 			"tags": safetyRouteTags(t, identity, roleRulePath),
 		},
@@ -104,7 +110,7 @@ func TestHibiscusHTTPContractRecoversAndDeletesOnlyOwnedGraph(t *testing.T) {
 	}{
 		listeners:   {"listeners", listener, "loadbalancer_id", path.Base(gatewayLB)},
 		policies:    {"l7policies", policy, "listener_id", path.Base(listener)},
-		rules:       {"rules", rule, "", ""},
+		rules:       {"rules", "", "", ""},
 		pools:       {"pools", pool, "loadbalancer_id", path.Base(gatewayLB)},
 		members:     {"members", member, "", ""},
 		monitors:    {"healthmonitors", monitor, "pool_id", path.Base(pool)},
@@ -124,9 +130,10 @@ func TestHibiscusHTTPContractRecoversAndDeletesOnlyOwnedGraph(t *testing.T) {
 	}
 	slices.Sort(discoveryTags)
 	projectQuery := url.Values{"project_id": {projectID}}
-	wantDeletes := []string{rule, policy, monitor, member, pool, listener, floatingIP, gatewayLB}
+	wantDeletes := []string{hostRule, pathRule, policy, monitor, member, pool, listener, floatingIP, gatewayLB}
 	var deletes []string
-	discoveries := 0
+	discoveries, closeRequests := 0, 0
+	trafficOpen, observedClosed := true, false
 	handler := http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		resource := request.URL.Path
 		switch {
@@ -160,6 +167,8 @@ func TestHibiscusHTTPContractRecoversAndDeletesOnlyOwnedGraph(t *testing.T) {
 			safetyWriteJSON(t, w, map[string]any{"loadbalancers": items})
 		case request.Method == http.MethodGet && resource == gatewayLB && inventory[gatewayLB] != nil:
 			if requireQuery(w, request, url.Values{}) {
+				observedClosed = !trafficOpen && inventory[gatewayLB]["admin_state_up"] == false &&
+					inventory[gatewayLB]["provisioning_status"] == "ACTIVE"
 				safetyWriteJSON(t, w, map[string]any{"loadbalancer": inventory[gatewayLB]})
 			}
 		case request.Method == http.MethodGet && collections[resource].key != "":
@@ -172,12 +181,38 @@ func TestHibiscusHTTPContractRecoversAndDeletesOnlyOwnedGraph(t *testing.T) {
 				return
 			}
 			items := []map[string]any{}
-			if data := inventory[collection.resource]; data != nil {
-				items = append(items, data)
+			resources := []string{collection.resource}
+			if resource == rules {
+				resources = []string{hostRule, pathRule}
+			}
+			for _, item := range resources {
+				if data := inventory[item]; data != nil {
+					items = append(items, data)
+				}
 			}
 			safetyWriteJSON(t, w, map[string]any{collection.key: items})
+		case request.Method == http.MethodPut && resource == gatewayLB && closeRequests == 0:
+			if !requireQuery(w, request, url.Values{}) {
+				return
+			}
+			var body map[string]map[string]bool
+			want := map[string]map[string]bool{"loadbalancer": {"admin_state_up": false}}
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil || !reflect.DeepEqual(body, want) {
+				t.Errorf("load balancer update = %v, err = %v, want %v", body, err, want)
+				http.Error(w, "unexpected load balancer update", http.StatusBadRequest)
+				return
+			}
+			closeRequests++
+			inventory[gatewayLB]["admin_state_up"] = false
+			inventory[gatewayLB]["provisioning_status"] = "PENDING_UPDATE"
+			safetyWriteJSON(t, w, map[string]any{"loadbalancer": inventory[gatewayLB]})
 		case request.Method == http.MethodDelete && len(deletes) < len(wantDeletes) && resource == wantDeletes[len(deletes)]:
 			if !requireQuery(w, request, url.Values{}) {
+				return
+			}
+			if trafficOpen || !observedClosed {
+				t.Errorf("DELETE %s before observing the traffic path closed", resource)
+				http.Error(w, "traffic closure still pending", http.StatusConflict)
 				return
 			}
 			delete(inventory, resource)
@@ -188,14 +223,14 @@ func TestHibiscusHTTPContractRecoversAndDeletesOnlyOwnedGraph(t *testing.T) {
 			http.Error(w, "unexpected request", http.StatusBadRequest)
 		}
 	})
-	newProvider := func(dropDeleteResponse bool) *Provider {
+	newProvider := func(dropCloseResponse bool) *Provider {
 		lb := safetyServiceClient(handler)
 		lb.ResourceBase = lb.Endpoint + "v2/"
-		if dropDeleteResponse {
+		if dropCloseResponse {
 			transport := lb.HTTPClient.Transport
 			lb.HTTPClient.Transport = safetyRoundTripper(func(request *http.Request) (*http.Response, error) {
 				response, err := transport.RoundTrip(request)
-				if err == nil && request.Method == http.MethodDelete && request.URL.Path == rule && response.StatusCode == http.StatusNoContent {
+				if err == nil && request.Method == http.MethodPut && request.URL.Path == gatewayLB && response.StatusCode == http.StatusOK {
 					_ = response.Body.Close()
 					return nil, io.ErrUnexpectedEOF
 				}
@@ -209,7 +244,6 @@ func TestHibiscusHTTPContractRecoversAndDeletesOnlyOwnedGraph(t *testing.T) {
 	provider := newProvider(true)
 	spec := completeGraphSpec(identity)
 	spec.Routes[0].Spec.Gateway = cloud.GatewayState{}
-	spec.Routes[0].Spec.Hostname = ""
 	spec.Gateway.Spec.ExternalNetworkID = "public-network"
 	spec.Routes[0].Spec.GatewayRequirements.ExternalNetworkID = "public-network"
 
@@ -221,20 +255,26 @@ func TestHibiscusHTTPContractRecoversAndDeletesOnlyOwnedGraph(t *testing.T) {
 	result, err := provider.ReconcileGatewayGraph(ctx, spec)
 	if err != nil || result.Outcome.State != cloud.OutcomeReady || result.Gateway.State.LoadBalancerID != path.Base(gatewayLB) ||
 		len(result.Routes) != 1 || result.Routes[0].Result.Outcome.State != cloud.OutcomeReady ||
-		len(deletes) != 0 || discoveries != 1 {
+		len(deletes) != 0 || closeRequests != 0 || discoveries != 1 {
 		t.Fatalf("initial Gateway graph = %#v, err = %v, deletes = %v, discoveries = %d", result, err, deletes, discoveries)
 	}
 	spec = cloud.GatewayGraphSpec{Identity: spec.Identity, Gateway: cloud.GatewayGraphNode{Disposition: cloud.GraphDelete}}
-	if _, err := provider.ReconcileGatewayGraph(ctx, spec); !errors.Is(err, io.ErrUnexpectedEOF) || !slices.Equal(deletes, wantDeletes[:1]) {
-		t.Fatalf("lost response = %v, applied deletes = %v", err, deletes)
+	if _, err := provider.ReconcileGatewayGraph(ctx, spec); !errors.Is(err, io.ErrUnexpectedEOF) || closeRequests != 1 || len(deletes) != 0 {
+		t.Fatalf("lost close response = %v, close requests = %d, deletes = %v", err, closeRequests, deletes)
 	}
 
 	provider = newProvider(false)
-	for index, want := range wantDeletes[1:] {
+	result, err = provider.ReconcileGatewayGraph(ctx, spec)
+	if err != nil || result.Outcome.State != cloud.OutcomeProgressing || closeRequests != 1 || len(deletes) != 0 {
+		t.Fatalf("pending close after restart: outcome = %#v, err = %v, close requests = %d, deletes = %v", result.Outcome, err, closeRequests, deletes)
+	}
+	trafficOpen = false
+	inventory[gatewayLB]["provisioning_status"] = "ACTIVE"
+	for index, want := range wantDeletes {
 		previousDiscoveries := discoveries
 		result, err = provider.ReconcileGatewayGraph(ctx, spec)
 		if err != nil || result.Outcome.State != cloud.OutcomeProgressing || discoveries != previousDiscoveries+1 ||
-			!slices.Equal(deletes, wantDeletes[:index+2]) {
+			!slices.Equal(deletes, wantDeletes[:index+1]) {
 			t.Fatalf("apply DELETE %s after restart: outcome = %#v, err = %v, deletes = %v", want, result.Outcome, err, deletes)
 		}
 	}

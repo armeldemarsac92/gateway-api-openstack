@@ -57,6 +57,7 @@ const (
 	graphRouteMutation
 	graphEnableListener
 	graphEnableLoadBalancer
+	graphDisableLoadBalancer
 	graphDeleteChild
 	graphDeleteLoadBalancer
 )
