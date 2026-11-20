@@ -113,6 +113,43 @@ func TestReconcileGatewayGraphConvergedPassesMakeNoMutation(t *testing.T) {
 	}
 }
 
+func TestReconcileGatewayGraphRejectsUnprovenDefaultPoolBeforeReopening(t *testing.T) {
+	for _, foreignPoolVisible := range []bool{false, true} {
+		name := "unknown pool"
+		if foreignPoolVisible {
+			name = "foreign pool"
+		}
+		t.Run(name, func(t *testing.T) {
+			identity := safetyTestIdentity(t)
+			requests := &gatewayTransitionRequests{}
+			base := gatewayDriftHandler(t, requests, safetyGatewayTags(t, identity, roleLoadBalancer), nil, false, []any{map[string]any{
+				"id": "listener-1", "protocol": "HTTP", "protocol_port": 80, "admin_state_up": true,
+				"tags": safetyGatewayTags(t, identity, roleListener), "default_pool_id": "unowned-pool",
+			}})
+			handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if foreignPoolVisible && req.Method == http.MethodGet && req.URL.Path == "/lbaas/pools" {
+					requests.record(req)
+					safetyWriteJSON(t, w, map[string]any{"pools": []any{map[string]any{
+						"id": "unowned-pool", "project_id": "project-a", "tags": []string{"kube_service"},
+					}}})
+					return
+				}
+				base.ServeHTTP(w, req)
+			})
+			provider := completeGraphProvider(t, handler, requests)
+			spec := completeGraphSpec(identity)
+			spec.Routes = nil
+			result, err := provider.ReconcileGatewayGraph(t.Context(), spec)
+			if !errors.Is(err, cloud.ErrOwnershipConflict) || result.Gateway.Outcome.State == cloud.OutcomeReady {
+				t.Fatalf("reconcile = %#v, %v, want ownership conflict and Gateway unready", result, err)
+			}
+			if writes := requests.mutationPaths(); len(writes) != 0 {
+				t.Fatalf("mutation with an unproven default pool = %v, want none", writes)
+			}
+		})
+	}
+}
+
 func TestReconcileGatewayGraphRejectsUnaccountedChildrenBeforeGatewayRepair(t *testing.T) {
 	identity := safetyTestIdentity(t)
 	requests := &gatewayTransitionRequests{}

@@ -88,6 +88,12 @@ func (p *Provider) GetGateway(
 	if !listener.AdminStateUp {
 		return cloud.GatewayProgressingResult("Octavia listener is administratively disabled", p.pollInterval), true, nil
 	}
+	if listener.DefaultPoolID != "" {
+		return cloud.GatewayProgressingResult("Octavia listener has an unexpected default pool", p.pollInterval), true, nil
+	}
+	if listener.ProvisioningStatus == "ERROR" {
+		return cloud.GatewayResult{}, false, cloud.NewProviderError(cloud.ErrorCategoryResourceFailure, fmt.Errorf("octavia listener %s provisioning status is ERROR", listener.ID))
+	}
 
 	state := cloud.GatewayState{
 		LoadBalancerID: loadBalancer.ID,
@@ -185,15 +191,6 @@ func (p *Provider) setLoadBalancerAdminState(ctx context.Context, loadBalancerID
 		AdminStateUp: boolPointer(enabled),
 	}); err != nil {
 		return fmt.Errorf("set load balancer %s admin_state_up=%t: %w", loadBalancerID, enabled, classifyOctaviaMutationError(err))
-	}
-	return nil
-}
-
-func (p *Provider) enableListener(ctx context.Context, listenerID string) error {
-	if _, err := p.octavia.UpdateListener(ctx, listenerID, listeners.UpdateOpts{
-		AdminStateUp: boolPointer(true),
-	}); err != nil {
-		return fmt.Errorf("enable listener: %w", classifyOctaviaMutationError(err))
 	}
 	return nil
 }

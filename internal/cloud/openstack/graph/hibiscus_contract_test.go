@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"path"
@@ -33,6 +34,22 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/loadbalancers"
 )
 
+const hibiscusProject = "project-a"
+
+func hibiscusControlLoadBalancers(collection string) map[string]map[string]any {
+	return map[string]map[string]any{
+		collection + "/magnum-api-server": {"id": "magnum-api-server", "name": "magnum-api-server", "project_id": hibiscusProject, "provider": "amphora", "vip_address": "192.0.2.20", "tags": []string{"magnum"}},
+		collection + "/occm-service":      {"id": "occm-service", "name": "occm-service", "project_id": hibiscusProject, "provider": "amphora", "vip_address": "192.0.2.30", "tags": []string{"kube_service"}},
+	}
+}
+
+func hibiscusServiceClients(handler http.Handler) ServiceClients {
+	lb, network := safetyServiceClient(handler), safetyServiceClient(handler)
+	lb.ResourceBase = lb.Endpoint + "v2/"
+	network.ResourceBase = network.Endpoint + "v2.0/"
+	return ServiceClients{LoadBalancer: lb, Network: network, ProjectID: hibiscusProject}
+}
+
 // Exercise the public Octavia v2 shapes with the real adapter and SDK. The
 // fixture represents settled inventory at each pass, including a lost reply
 // after an applied administrative update. See docs/qualification/v1.7.0/cloud-contract.md.
@@ -40,7 +57,7 @@ func TestHibiscusHTTPContractRecoversAndDeletesOnlyOwnedGraph(t *testing.T) {
 	ctx := t.Context()
 	identity := safetyTestIdentity(t)
 	const (
-		projectID   = "project-a"
+		projectID   = hibiscusProject
 		lbList      = "/v2/lbaas/loadbalancers"
 		gatewayLB   = lbList + "/load-balancer-1"
 		magnumLB    = lbList + "/magnum-api-server"
@@ -66,8 +83,6 @@ func TestHibiscusHTTPContractRecoversAndDeletesOnlyOwnedGraph(t *testing.T) {
 	}
 	inventory := map[string]map[string]any{
 		gatewayLB: gatewayTransitionLoadBalancer(safetyGatewayTags(t, identity, roleLoadBalancer), "ACTIVE"),
-		magnumLB:  {"name": "magnum-api-server", "provider": "amphora", "vip_address": "192.0.2.20", "tags": []string{"magnum"}},
-		occmLB:    {"name": "occm-service", "provider": "amphora", "vip_address": "192.0.2.30", "tags": []string{"kube_service"}},
 		listener: {
 			"loadbalancers": parents(path.Base(gatewayLB)), "protocol": "HTTP", "protocol_port": 80, "admin_state_up": true,
 			"tags": safetyGatewayTags(t, identity, roleListener),
@@ -105,6 +120,7 @@ func TestHibiscusHTTPContractRecoversAndDeletesOnlyOwnedGraph(t *testing.T) {
 	for resourcePath, data := range inventory {
 		data["id"], data["project_id"] = path.Base(resourcePath), projectID
 	}
+	maps.Copy(inventory, hibiscusControlLoadBalancers(lbList))
 	collections := map[string]struct {
 		key, resource, parentFilter, parentID string
 	}{
@@ -133,6 +149,7 @@ func TestHibiscusHTTPContractRecoversAndDeletesOnlyOwnedGraph(t *testing.T) {
 	wantDeletes := []string{hostRule, pathRule, policy, monitor, member, pool, listener, floatingIP, gatewayLB}
 	var deletes []string
 	discoveries, closeRequests := 0, 0
+	var listenerUpdates []string
 	trafficOpen, observedClosed := true, false
 	handler := http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		resource := request.URL.Path
@@ -191,6 +208,34 @@ func TestHibiscusHTTPContractRecoversAndDeletesOnlyOwnedGraph(t *testing.T) {
 				}
 			}
 			safetyWriteJSON(t, w, map[string]any{collection.key: items})
+		case request.Method == http.MethodPut && resource == listener:
+			if !requireQuery(w, request, url.Values{}) {
+				return
+			}
+			var body map[string]map[string]any
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil ||
+				len(body) != 1 || inventory[gatewayLB]["provisioning_status"] != "ACTIVE" || inventory[listener]["provisioning_status"] != "ACTIVE" {
+				t.Errorf("listener update while not ACTIVE or invalid body: %v, err = %v", body, err)
+				http.Error(w, "unexpected listener update", http.StatusBadRequest)
+				return
+			}
+			fields := body["listener"]
+			switch {
+			case len(listenerUpdates) == 0 && reflect.DeepEqual(fields, map[string]any{"admin_state_up": false}):
+				listenerUpdates = append(listenerUpdates, "close")
+			case len(listenerUpdates) == 1 && reflect.DeepEqual(fields, map[string]any{"default_pool_id": nil}):
+				listenerUpdates = append(listenerUpdates, "clear")
+			case len(listenerUpdates) == 2 && reflect.DeepEqual(fields, map[string]any{"admin_state_up": true}):
+				listenerUpdates = append(listenerUpdates, "reopen")
+			default:
+				t.Errorf("unexpected listener update %v after %v", fields, listenerUpdates)
+				http.Error(w, "unexpected listener update", http.StatusBadRequest)
+				return
+			}
+			maps.Copy(inventory[listener], fields)
+			inventory[listener]["provisioning_status"] = "PENDING_UPDATE"
+			inventory[gatewayLB]["provisioning_status"] = "PENDING_UPDATE"
+			safetyWriteJSON(t, w, map[string]any{"listener": inventory[listener]})
 		case request.Method == http.MethodPut && resource == gatewayLB && closeRequests == 0:
 			if !requireQuery(w, request, url.Values{}) {
 				return
@@ -224,9 +269,9 @@ func TestHibiscusHTTPContractRecoversAndDeletesOnlyOwnedGraph(t *testing.T) {
 		}
 	})
 	newProvider := func(dropCloseResponse bool) *Provider {
-		lb := safetyServiceClient(handler)
-		lb.ResourceBase = lb.Endpoint + "v2/"
+		clients := hibiscusServiceClients(handler)
 		if dropCloseResponse {
+			lb := clients.LoadBalancer
 			transport := lb.HTTPClient.Transport
 			lb.HTTPClient.Transport = safetyRoundTripper(func(request *http.Request) (*http.Response, error) {
 				response, err := transport.RoundTrip(request)
@@ -237,9 +282,7 @@ func TestHibiscusHTTPContractRecoversAndDeletesOnlyOwnedGraph(t *testing.T) {
 				return response, err
 			})
 		}
-		network := safetyServiceClient(handler)
-		network.ResourceBase = network.Endpoint + "v2.0/"
-		return newTestProvider(t, ServiceClients{LoadBalancer: lb, Network: network, ProjectID: projectID}, ProviderConfig{})
+		return newTestProvider(t, clients, ProviderConfig{})
 	}
 	provider := newProvider(true)
 	spec := completeGraphSpec(identity)
@@ -258,6 +301,37 @@ func TestHibiscusHTTPContractRecoversAndDeletesOnlyOwnedGraph(t *testing.T) {
 		len(deletes) != 0 || closeRequests != 0 || discoveries != 1 {
 		t.Fatalf("initial Gateway graph = %#v, err = %v, deletes = %v, discoveries = %d", result, err, deletes, discoveries)
 	}
+	inventory[listener]["default_pool_id"] = path.Base(pool)
+	inventory[listener]["provisioning_status"] = "ACTIVE"
+	observed, found, err := provider.GetGateway(ctx, spec.Identity)
+	if err != nil || !found || observed.Outcome.State != cloud.OutcomeProgressing || len(listenerUpdates) != 0 {
+		t.Fatalf("read-only discovery with a default pool = %#v, found = %t, err = %v, listener updates = %v", observed, found, err, listenerUpdates)
+	}
+	wantListenerUpdates := []string{"close", "clear", "reopen"}
+	for index, action := range wantListenerUpdates {
+		result, err = newProvider(false).ReconcileGatewayGraph(ctx, spec)
+		if err != nil || result.Outcome.State != cloud.OutcomeProgressing || result.Gateway.Outcome.State != cloud.OutcomeProgressing ||
+			len(result.Routes) != 1 || result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing ||
+			!slices.Equal(listenerUpdates, wantListenerUpdates[:index+1]) {
+			t.Fatalf("%s listener = %#v, err = %v, listener updates = %v", action, result, err, listenerUpdates)
+		}
+		if action != "reopen" {
+			result, err = newProvider(false).ReconcileGatewayGraph(ctx, spec)
+			if err != nil || result.Outcome.State != cloud.OutcomeProgressing || result.Gateway.Outcome.State != cloud.OutcomeProgressing ||
+				!slices.Equal(listenerUpdates, wantListenerUpdates[:index+1]) {
+				t.Fatalf("%s pending at Octavia = %#v, err = %v, listener updates = %v", action, result, err, listenerUpdates)
+			}
+		}
+		inventory[gatewayLB]["provisioning_status"] = "ACTIVE"
+		inventory[listener]["provisioning_status"] = "ACTIVE"
+	}
+	result, err = newProvider(false).ReconcileGatewayGraph(ctx, spec)
+	if err != nil || result.Outcome.State != cloud.OutcomeReady || result.Gateway.Outcome.State != cloud.OutcomeReady ||
+		len(result.Routes) != 1 || result.Routes[0].Result.Outcome.State != cloud.OutcomeReady ||
+		result.Routes[0].Result.State.PoolID != path.Base(pool) || !slices.Equal(listenerUpdates, wantListenerUpdates) || len(deletes) != 0 || closeRequests != 0 {
+		t.Fatalf("re-observed graph after default pool repair = %#v, err = %v, listener updates = %v", result, err, listenerUpdates)
+	}
+
 	spec = cloud.GatewayGraphSpec{Identity: spec.Identity, Gateway: cloud.GatewayGraphNode{Disposition: cloud.GraphDelete}}
 	if _, err := provider.ReconcileGatewayGraph(ctx, spec); !errors.Is(err, io.ErrUnexpectedEOF) || closeRequests != 1 || len(deletes) != 0 {
 		t.Fatalf("lost close response = %v, close requests = %d, deletes = %v", err, closeRequests, deletes)

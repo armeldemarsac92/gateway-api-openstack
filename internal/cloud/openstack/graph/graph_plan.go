@@ -48,7 +48,8 @@ func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual obs
 	}
 	externalAddressReady := actual.floatingIP == nil && desired.spec.Gateway.Spec.ExternalNetworkID == "" ||
 		actual.floatingIP != nil && actual.floatingIP.PortID != ""
-	gatewayReady := actual.loadBalancer != nil && actual.listener != nil && actual.loadBalancer.AdminStateUp && actual.listener.AdminStateUp && externalAddressReady && len(plan) == 0
+	gatewayReady := actual.loadBalancer != nil && actual.listener != nil && actual.loadBalancer.AdminStateUp &&
+		actual.listener.AdminStateUp && actual.listener.DefaultPoolID == "" && externalAddressReady && len(plan) == 0
 	if !gatewayReady {
 		result.Gateway.Outcome = p.progressingOutcome("Waiting for the Gateway infrastructure")
 	}
@@ -138,6 +139,15 @@ func buildGatewayPrerequisitePlan(desired desiredGatewayGraph, actual observedGa
 	if actual.floatingIP != nil && networkID != "" && actual.floatingIP.FloatingNetworkID != networkID {
 		return nil, fmt.Errorf("%w: Gateway Floating IP network differs from its binding", cloud.ErrOwnershipConflict)
 	}
+	if actual.listener != nil && actual.listener.DefaultPoolID != "" {
+		// Octavia may return a cleared field before Amphora applies it. Keep the
+		// frontend closed across that pending update so readback alone cannot
+		// mark the Gateway programmed before the data plane has changed.
+		if actual.loadBalancer.AdminStateUp && actual.listener.AdminStateUp {
+			return []graphMutation{{kind: graphDisableListener, message: "Disabling Octavia listener before clearing its default pool"}}, nil
+		}
+		return []graphMutation{{kind: graphClearListenerDefaultPool, message: "Clearing unexpected Octavia listener default pool"}}, nil
+	}
 	if networkID == "" && actual.floatingIP != nil {
 		plan = append(plan, graphMutation{kind: graphDeleteFloatingIP, message: "Removed a no-longer-configured Floating IP"})
 	}
@@ -148,7 +158,7 @@ func buildGatewayPrerequisitePlan(desired desiredGatewayGraph, actual observedGa
 }
 
 func buildGatewayTrafficRestorationPlan(desired desiredGatewayGraph, actual observedGatewayGraph) ([]graphMutation, error) {
-	if desired.spec.Gateway.Disposition != cloud.GraphEnsure || actual.loadBalancer == nil || actual.listener == nil {
+	if desired.spec.Gateway.Disposition != cloud.GraphEnsure || actual.loadBalancer == nil || actual.listener == nil || actual.listener.DefaultPoolID != "" {
 		return nil, nil
 	}
 	var plan []graphMutation
@@ -257,12 +267,17 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 			LoadbalancerID: actual.state.LoadBalancerID, Protocol: listeners.ProtocolHTTP, ProtocolPort: spec.ListenerPort,
 			Name: spec.ListenerName, Description: desired.identity.Description(roleListener), AdminStateUp: boolPointer(true), Tags: tags,
 		})
+	case graphClearListenerDefaultPool:
+		// Gophercloud encodes an explicit empty DefaultPoolID as JSON null.
+		noDefaultPool := ""
+		_, err = p.octavia.UpdateListener(ctx, actual.state.ListenerID, listeners.UpdateOpts{DefaultPoolID: &noDefaultPool})
 	case graphRouteMutation:
 		route := desired.routes[step.routeIndex]
 		route.spec.Gateway = actual.state
 		return p.executeRouteMutation(ctx, route, step.route)
-	case graphEnableListener:
-		return p.enableListener(ctx, actual.state.ListenerID)
+	case graphEnableListener, graphDisableListener:
+		enabled := step.kind == graphEnableListener
+		_, err = p.octavia.UpdateListener(ctx, actual.state.ListenerID, listeners.UpdateOpts{AdminStateUp: boolPointer(enabled)})
 	case graphEnableLoadBalancer, graphDisableLoadBalancer:
 		return p.setLoadBalancerAdminState(ctx, actual.state.LoadBalancerID, step.kind == graphEnableLoadBalancer)
 	case graphDeleteChild:

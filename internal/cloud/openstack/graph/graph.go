@@ -54,6 +54,8 @@ const (
 	graphAssociateFloatingIP
 	graphDeleteFloatingIP
 	graphCreateListener
+	graphDisableListener
+	graphClearListenerDefaultPool
 	graphRouteMutation
 	graphEnableListener
 	graphEnableLoadBalancer
@@ -221,6 +223,10 @@ func observedGatewayResult(desired desiredGatewayGraph, actual observedGatewayGr
 		return result
 	}
 	if desired.spec.Gateway.Disposition == cloud.GraphEnsure {
+		if actual.listener.DefaultPoolID != "" || actual.listener.ProvisioningStatus == "ERROR" ||
+			actual.listener.Protocol != string(listeners.ProtocolHTTP) || actual.listener.ProtocolPort != desired.spec.Gateway.Spec.ListenerPort {
+			return result
+		}
 		networkID := desired.spec.Gateway.Spec.ExternalNetworkID
 		if networkID == "" && actual.floatingIP != nil || networkID != "" && (actual.floatingIP == nil || actual.floatingIP.FloatingNetworkID != networkID || actual.floatingIP.PortID == "") {
 			return result
@@ -313,6 +319,9 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 		if desired.spec.Gateway.Disposition == cloud.GraphEnsure && actual.listener.ProtocolPort != desired.spec.Gateway.Spec.ListenerPort {
 			return actual, fmt.Errorf("%w: Gateway listener port differs from its binding", cloud.ErrOwnershipConflict)
 		}
+		if desired.spec.Gateway.Disposition == cloud.GraphEnsure && actual.listener.ProvisioningStatus == "ERROR" {
+			return actual, cloud.NewProviderError(cloud.ErrorCategoryResourceFailure, fmt.Errorf("octavia listener %s provisioning status is ERROR", actual.listener.ID))
+		}
 		if len(lb.VIPSecurityGroupIDs) > 0 && len(actual.listener.AllowedCIDRs) > 0 {
 			return actual, fmt.Errorf("%w: custom VIP security groups cannot be combined with listener allowed CIDRs", cloud.ErrOwnershipConflict)
 		}
@@ -328,7 +337,18 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 		identities[index] = route.identity
 	}
 	actual.routes, err = p.observeGatewayRoutes(ctx, identities, actual.state)
-	return actual, err
+	if err != nil {
+		return actual, err
+	}
+	if desired.spec.Gateway.Disposition == cloud.GraphEnsure && actual.listener != nil && actual.listener.DefaultPoolID != "" {
+		defaultPoolID := actual.listener.DefaultPoolID
+		if !slices.ContainsFunc(actual.routes, func(route observedRouteGraph) bool {
+			return route.pool != nil && route.pool.ID == defaultPoolID
+		}) {
+			return actual, fmt.Errorf("%w: Gateway listener %s references an unproven default pool %s", cloud.ErrOwnershipConflict, actual.listener.ID, defaultPoolID)
+		}
+	}
+	return actual, nil
 }
 
 // observeAbsentGateway checks independently allocated Neutron resources before
