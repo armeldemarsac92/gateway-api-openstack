@@ -12,6 +12,14 @@ linters:
     - staticcheck
     - unused
 
+  exclusions:
+    rules:
+      # A successful Kubernetes checkpoint uses the workqueue's configured
+      # rate limiter. RequeueAfter would replace its backoff with a fixed delay.
+      - path: ^internal/controller/
+        linters: [staticcheck]
+        text: 'SA1019: \(sigs\.k8s\.io/controller-runtime(?:/pkg/reconcile)?\.Result\)\.Requeue is deprecated'
+
 formatters:
   enable:
     - gofmt

@@ -162,7 +162,10 @@ lint-fix: ## Apply safe golangci-lint fixes when installed.
 	$(GOLANGCI_LINT) run --fix
 
 .PHONY: verify
-verify: fmt-check vet test test-e2e-unit ## Run the checks required by CI.
+verify: fmt-check vet test test-e2e-unit ## Run fast local checks without installing envtest or a linter.
+
+.PHONY: ci
+ci: fmt-check lint test-race test-e2e-unit test-core-mapping test-envtest build container-build ## Run the same checks as pull requests, with prepared envtest assets.
 
 .PHONY: tidy
 tidy: ## Update module metadata.

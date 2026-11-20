@@ -273,13 +273,15 @@ func reportTestRecords(scope Scope) (OwnershipRecord, OwnershipRecord) {
 	routeIdentity.RouteNamespace = "default"
 	routeIdentity.RouteName = "app"
 	routeIdentity.RouteUID = "route-uid"
-	return OwnershipRecord{
-			Identity: gatewayIdentity,
-			Objects:  []ObjectReference{reportTestObject("Gateway", "default", "edge", "gateway-uid")},
-		}, OwnershipRecord{
-			Identity: routeIdentity,
-			Objects:  []ObjectReference{reportTestObject("HTTPRoute", "default", "app", "route-uid")},
-		}
+	gateway := OwnershipRecord{
+		Identity: gatewayIdentity,
+		Objects:  []ObjectReference{reportTestObject("Gateway", "default", "edge", "gateway-uid")},
+	}
+	route := OwnershipRecord{
+		Identity: routeIdentity,
+		Objects:  []ObjectReference{reportTestObject("HTTPRoute", "default", "app", "route-uid")},
+	}
+	return gateway, route
 }
 
 func reportTestObject(kind, namespace, name, uid string) ObjectReference {

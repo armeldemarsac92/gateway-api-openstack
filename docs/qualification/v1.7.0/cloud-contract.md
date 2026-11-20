@@ -3,7 +3,7 @@
 Run the adapter scenario locally.
 
 ```sh
-rtk proxy go test ./internal/cloud/openstack/graph -run '^TestHibiscusHTTPContractRecoversAndDeletesOnlyOwnedGraph$' -count=1
+go test ./internal/cloud/openstack/graph -run '^TestHibiscusHTTPContractRecoversAndDeletesOnlyOwnedGraph$' -count=1
 ```
 
 The [test](../../../internal/cloud/openstack/graph/hibiscus_contract_test.go) drives `ReconcileGatewayGraph` and Gophercloud against the existing in-memory HTTP transport. One project contains a Gateway with an Amphora load balancer, an HTTP listener, one HTTPRoute graph with a NodePort member, and a Floating IP. Two other load balancers represent the Magnum API server and an OCCM Service.

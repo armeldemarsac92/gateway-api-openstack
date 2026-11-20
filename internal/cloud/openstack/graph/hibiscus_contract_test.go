@@ -192,8 +192,8 @@ func TestHibiscusHTTPContractRecoversAndDeletesOnlyOwnedGraph(t *testing.T) {
 		lb := safetyServiceClient(handler)
 		lb.ResourceBase = lb.Endpoint + "v2/"
 		if dropDeleteResponse {
-			transport := lb.ProviderClient.HTTPClient.Transport
-			lb.ProviderClient.HTTPClient.Transport = safetyRoundTripper(func(request *http.Request) (*http.Response, error) {
+			transport := lb.HTTPClient.Transport
+			lb.HTTPClient.Transport = safetyRoundTripper(func(request *http.Request) (*http.Response, error) {
 				response, err := transport.RoundTrip(request)
 				if err == nil && request.Method == http.MethodDelete && request.URL.Path == rule && response.StatusCode == http.StatusNoContent {
 					_ = response.Body.Close()

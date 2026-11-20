@@ -155,7 +155,7 @@ func compileRoute(route *gatewayv1.HTTPRoute, input Input) Route {
 	supportedRules := 0
 	for i, rule := range route.Spec.Rules {
 		compiled := Rule{Index: i, Backends: ResolveBackends(route, rule, input)}
-		if rule.Name != nil || rule.Timeouts != nil || rule.Retry != nil || rule.SessionPersistence != nil {
+		if rule.Name != nil || rule.Timeouts != nil || rule.Retry != nil || rule.SessionPersistence != nil { //nolint:staticcheck // The release still serves this deprecated Experimental field.
 			compiled.Diagnostics = append(compiled.Diagnostics, *unsupported("named rules, timeouts, retries, and session persistence are not implemented", ScopeRule))
 		}
 		for _, filter := range rule.Filters {
