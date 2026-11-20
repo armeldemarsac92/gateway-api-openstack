@@ -24,10 +24,12 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
+	configv1alpha1 "github.com/gateway-api-openstack/gateway-api-openstack/api/v1alpha1"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
@@ -92,6 +94,70 @@ func TestGatewayReconcileProgramsAddressAndConditions(t *testing.T) {
 	}
 	if got.ResourceVersion != resourceVersion {
 		t.Fatalf("converged resync changed Gateway resourceVersion from %s to %s", resourceVersion, got.ResourceVersion)
+	}
+}
+
+func TestGatewayProgramsEmptyIPAddressUsingClassTopology(t *testing.T) {
+	const externalNetworkID = "55555555-5555-5555-5555-555555555555"
+	for _, tc := range []struct {
+		name            string
+		addressType     *gatewayv1.AddressType
+		externalNetwork string
+		floatingIP      string
+		wantAddress     string
+	}{
+		{name: "default type and private VIP", wantAddress: "192.0.2.11"},
+		{name: "explicit type and floating IP", addressType: ptr.To(gatewayv1.IPAddressType),
+			externalNetwork: externalNetworkID, floatingIP: "198.51.100.42", wantAddress: "198.51.100.42"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := testConfig()
+			class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "openstack"}, Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName}}
+			parameters := testClassParameters()
+			if tc.externalNetwork != "" {
+				parameters.Spec.FloatingIP = configv1alpha1.FloatingIPConfig{
+					Mode: configv1alpha1.FloatingIPAllocate, ExternalNetwork: &configv1alpha1.ResourceReference{ID: tc.externalNetwork},
+				}
+			}
+			gateway := &gatewayv1.Gateway{
+				ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "edge", UID: "gateway-uid"},
+				Spec: gatewayv1.GatewaySpec{
+					GatewayClassName: "openstack",
+					Addresses:        []gatewayv1.GatewaySpecAddress{{Type: tc.addressType}},
+					Listeners:        []gatewayv1.Listener{{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80}},
+				},
+			}
+			kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gateway).WithObjects(class, parameters, gateway).Build()
+			ready := cloud.GatewayReadyResult(cloud.GatewayState{
+				LoadBalancerID: "lb-1", ListenerID: "listener-1", VIPAddress: "192.0.2.11", FloatingIPAddress: tc.floatingIP,
+			})
+			provider := &recordingProvider{gatewayResult: &ready}
+			reconciler := newTestReconciler(Reconciler{Client: kubeClient, Coordinator: &graph.Coordinator{}, APIReader: kubeClient, Config: cfg}, provider)
+			request := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: gateway.Namespace, Name: gateway.Name}}
+			if result, err := reconciler.Reconcile(t.Context(), request); err != nil || !result.Requeue || len(provider.gatewaySpecs) != 0 {
+				t.Fatalf("binding checkpoint = %#v, error = %v, EnsureGateway calls = %d", result, err, len(provider.gatewaySpecs))
+			}
+			if _, err := reconciler.Reconcile(t.Context(), request); err != nil {
+				t.Fatal(err)
+			}
+			if len(provider.gatewaySpecs) != 1 {
+				t.Fatalf("EnsureGateway calls = %d, want one", len(provider.gatewaySpecs))
+			}
+			spec := provider.gatewaySpecs[0]
+			if spec.Identity.GatewayUID != string(gateway.UID) || spec.VIPSubnetID != testVIPSubnetID || spec.ExternalNetworkID != tc.externalNetwork {
+				t.Fatalf("provider received unexpected Gateway identity or topology: %#v", spec)
+			}
+			if err := kubeClient.Get(t.Context(), request.NamespacedName, gateway); err != nil {
+				t.Fatal(err)
+			}
+			if !meta.IsStatusConditionTrue(gateway.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed)) {
+				t.Fatalf("Gateway conditions = %#v", gateway.Status.Conditions)
+			}
+			got := gateway.Status.Addresses
+			if len(got) != 1 || got[0].Type == nil || *got[0].Type != gatewayv1.IPAddressType || got[0].Value != tc.wantAddress {
+				t.Fatalf("Gateway addresses = %#v, want IPAddress %s", got, tc.wantAddress)
+			}
+		})
 	}
 }
 
@@ -379,42 +445,90 @@ func TestGatewayOpenStackFailurePreservesAttachedRouteCount(t *testing.T) {
 	}
 }
 
-func TestGatewayUnsupportedAddressUsesGatewayLevelReason(t *testing.T) {
-	scheme := testScheme(t)
-	cfg := testConfig()
-	class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "openstack"}, Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName}}
-	addressType := gatewayv1.IPAddressType
-	gateway := &gatewayv1.Gateway{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "edge", UID: "gateway-uid"},
-		Spec: gatewayv1.GatewaySpec{
-			GatewayClassName: "openstack",
-			Addresses:        []gatewayv1.GatewaySpecAddress{{Type: &addressType, Value: "192.0.2.20"}},
-			Listeners:        []gatewayv1.Listener{{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80}},
-		},
-	}
-	kubeClient := indexedFakeClientBuilder(scheme, testConfig()).WithStatusSubresource(gateway).WithObjects(class, gateway).Build()
-	provider := &recordingProvider{}
-	reconciler := *newTestReconciler(Reconciler{Client: kubeClient, APIReader: kubeClient, Config: cfg}, provider)
-	if _, err := reconciler.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: gateway.Namespace, Name: gateway.Name}}); err != nil {
-		t.Fatalf("Reconcile() error = %v", err)
-	}
-	var got gatewayv1.Gateway
-	if err := kubeClient.Get(context.Background(), types.NamespacedName{Namespace: gateway.Namespace, Name: gateway.Name}, &got); err != nil {
-		t.Fatal(err)
-	}
-	accepted := meta.FindStatusCondition(got.Status.Conditions, string(gatewayv1.GatewayConditionAccepted))
-	if accepted == nil || accepted.Status != metav1.ConditionFalse || accepted.Reason != string(gatewayv1.GatewayReasonUnsupportedAddress) {
-		t.Fatalf("Gateway Accepted condition = %#v", accepted)
-	}
-	if len(got.Status.Listeners) != 1 {
-		t.Fatalf("Listener status = %#v", got.Status.Listeners)
-	}
-	listenerAccepted := meta.FindStatusCondition(got.Status.Listeners[0].Conditions, string(gatewayv1.ListenerConditionAccepted))
-	if listenerAccepted == nil || listenerAccepted.Status != metav1.ConditionTrue {
-		t.Fatalf("Listener Accepted condition = %#v", listenerAccepted)
-	}
-	if len(provider.gatewaySpecs) != 0 {
-		t.Fatalf("EnsureGateway calls = %d, want 0", len(provider.gatewaySpecs))
+func TestGatewayRefusedAddressesPublishSpecificConditions(t *testing.T) {
+	emptyHostname := gatewayv1.GatewaySpecAddress{Type: ptr.To(gatewayv1.HostnameAddressType)}
+	staticIP := gatewayv1.GatewaySpecAddress{Value: "192.0.2.20"}
+	for _, tc := range []struct {
+		name            string
+		addresses       []gatewayv1.GatewaySpecAddress
+		invalidListener bool
+		accepted        gatewayv1.GatewayConditionReason
+		programmed      gatewayv1.GatewayConditionReason
+	}{
+		{name: "static IP", addresses: []gatewayv1.GatewaySpecAddress{staticIP},
+			accepted: gatewayv1.GatewayReasonAccepted, programmed: gatewayv1.GatewayReasonAddressNotUsable},
+		{name: "multiple static IPs", addresses: []gatewayv1.GatewaySpecAddress{staticIP, {Value: "192.0.2.21"}},
+			accepted: gatewayv1.GatewayReasonAccepted, programmed: gatewayv1.GatewayReasonAddressNotUsable},
+		{name: "empty hostname", addresses: []gatewayv1.GatewaySpecAddress{emptyHostname},
+			accepted: gatewayv1.GatewayReasonUnsupportedAddress, programmed: gatewayv1.GatewayReasonAddressNotAssigned},
+		{name: "static IP with empty hostname", addresses: []gatewayv1.GatewaySpecAddress{staticIP, emptyHostname},
+			accepted: gatewayv1.GatewayReasonUnsupportedAddress, programmed: gatewayv1.GatewayReasonAddressNotAssigned},
+		{name: "multiple dynamic addresses", addresses: []gatewayv1.GatewaySpecAddress{{}, {}},
+			accepted: gatewayv1.GatewayReasonInvalid, programmed: gatewayv1.GatewayReasonAddressNotAssigned},
+		{name: "cluster routability", addresses: []gatewayv1.GatewaySpecAddress{{Routability: gatewayv1.GatewayAddressRoutabilityCluster}},
+			accepted: gatewayv1.GatewayReasonInvalid, programmed: gatewayv1.GatewayReasonAddressNotAssigned},
+		{name: "static IP with invalid listener", addresses: []gatewayv1.GatewaySpecAddress{staticIP}, invalidListener: true,
+			accepted: gatewayv1.GatewayReasonListenersNotValid, programmed: gatewayv1.GatewayReasonInvalid},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			scheme := testScheme(t)
+			cfg := testConfig()
+			class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "openstack"}, Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName}}
+			gateway := &gatewayv1.Gateway{
+				ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "edge", UID: "gateway-uid"},
+				Spec: gatewayv1.GatewaySpec{
+					GatewayClassName: "openstack",
+					Addresses:        tc.addresses,
+					Listeners:        []gatewayv1.Listener{{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80}},
+				},
+			}
+			if tc.invalidListener {
+				gateway.Spec.Listeners[0].Protocol = gatewayv1.HTTPSProtocolType
+			}
+			kubeClient := indexedFakeClientBuilder(scheme, testConfig()).WithStatusSubresource(gateway).WithObjects(class, gateway).Build()
+			provider := &recordingProvider{}
+			reconciler := *newTestReconciler(Reconciler{Client: kubeClient, APIReader: kubeClient, Config: cfg}, provider)
+			request := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: gateway.Namespace, Name: gateway.Name}}
+			for range 2 {
+				if _, err := reconciler.Reconcile(t.Context(), request); err != nil {
+					t.Fatalf("Reconcile() error = %v", err)
+				}
+			}
+			var got gatewayv1.Gateway
+			if err := kubeClient.Get(context.Background(), types.NamespacedName{Namespace: gateway.Namespace, Name: gateway.Name}, &got); err != nil {
+				t.Fatal(err)
+			}
+			accepted := meta.FindStatusCondition(got.Status.Conditions, string(gatewayv1.GatewayConditionAccepted))
+			wantAccepted := metav1.ConditionFalse
+			if tc.accepted == gatewayv1.GatewayReasonAccepted {
+				wantAccepted = metav1.ConditionTrue
+			}
+			if accepted == nil || accepted.Status != wantAccepted || accepted.Reason != string(tc.accepted) {
+				t.Fatalf("Gateway Accepted condition = %#v, want %s with reason %s", accepted, wantAccepted, tc.accepted)
+			}
+			programmed := meta.FindStatusCondition(got.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed))
+			if programmed == nil || programmed.Status != metav1.ConditionFalse || programmed.Reason != string(tc.programmed) {
+				t.Fatalf("Gateway Programmed condition = %#v, want False with reason %s", programmed, tc.programmed)
+			}
+			if len(got.Status.Addresses) != 0 {
+				t.Fatalf("rejected Gateway addresses = %#v", got.Status.Addresses)
+			}
+			if len(got.Status.Listeners) != 1 {
+				t.Fatalf("Listener status = %#v", got.Status.Listeners)
+			}
+			listenerAccepted := meta.FindStatusCondition(got.Status.Listeners[0].Conditions, string(gatewayv1.ListenerConditionAccepted))
+			wantListenerAccepted := metav1.ConditionTrue
+			if tc.invalidListener {
+				wantListenerAccepted = metav1.ConditionFalse
+			}
+			if listenerAccepted == nil || listenerAccepted.Status != wantListenerAccepted {
+				t.Fatalf("Listener Accepted condition = %#v", listenerAccepted)
+			}
+			if len(got.Finalizers) != 0 || len(provider.gatewaySpecs) != 0 || len(provider.deletedGateways) != 0 {
+				t.Fatalf("unbound Gateway acquired finalizers %v or made provider calls: %d ensures, %d deletes",
+					got.Finalizers, len(provider.gatewaySpecs), len(provider.deletedGateways))
+			}
+		})
 	}
 }
 

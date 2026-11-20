@@ -24,6 +24,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -32,6 +33,7 @@ import (
 	"sigs.k8s.io/gateway-api/conformance/utils/config"
 	"sigs.k8s.io/gateway-api/conformance/utils/kubernetes"
 	"sigs.k8s.io/gateway-api/conformance/utils/suite"
+	"sigs.k8s.io/yaml"
 
 	configv1alpha1 "github.com/gateway-api-openstack/gateway-api-openstack/api/v1alpha1"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
@@ -74,10 +76,54 @@ func testUpstreamGatewayStatus(t *testing.T, c client.Client, cfg controller.Con
 		Client: c, DisableParallelTests: true, CleanupTestResources: true,
 		Applier: kubernetes.Applier{GatewayClass: className, ControllerName: string(cfg.ControllerName), ManifestFS: []fs.FS{&conformance.Manifests}},
 		TimeoutConfig: config.TimeoutConfig{GWCMustBeAccepted: envtestWaitTimeout, LatestObservedGenerationSet: envtestWaitTimeout,
-			GatewayMustHaveCondition: envtestWaitTimeout, GatewayStatusMustHaveListeners: envtestWaitTimeout},
+			GatewayMustHaveCondition: envtestWaitTimeout, GatewayStatusMustHaveListeners: envtestWaitTimeout,
+			GatewayMustHaveAddress: envtestWaitTimeout},
 	}
 	config.SetupTimeoutConfig(&s.TimeoutConfig)
 	kubernetes.GWCMustHaveAcceptedConditionTrue(t, c, s.TimeoutConfig, className)
+	// The v1.7.0 suite Applier strips this fixture's address while processing
+	// static address placeholders. Apply it directly to preserve the request.
+	// Envtest exercises Gateway status without the upstream workload wait.
+	t.Run(tests.GatewayOptionalAddressValue.ShortName+" Gateway status", func(t *testing.T) {
+		manifest, err := fs.ReadFile(&conformance.Manifests, tests.GatewayOptionalAddressValue.Manifests[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var gateway gatewayv1.Gateway
+		if err := yaml.Unmarshal(manifest, &gateway); err != nil {
+			t.Fatal(err)
+		}
+		gateway.Spec.GatewayClassName = gatewayv1.ObjectName(className)
+		if err := c.Create(t.Context(), &gateway); err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			if err := c.Delete(t.Context(), &gateway); err != nil {
+				t.Error(err)
+			}
+		}()
+		key := client.ObjectKeyFromObject(&gateway)
+		var persisted gatewayv1.Gateway
+		if err := c.Get(t.Context(), key, &persisted); err != nil {
+			t.Fatal(err)
+		}
+		addresses := persisted.Spec.Addresses
+		if len(addresses) != 1 || ptr.Deref(addresses[0].Type, "") != gatewayv1.IPAddressType || addresses[0].Value != "" {
+			t.Fatalf("Gateway address request = %#v, want an IPAddress with no value", addresses)
+		}
+		kubernetes.GatewayMustHaveLatestConditions(t, c, s.TimeoutConfig, key)
+		kubernetes.GatewayMustHaveCondition(t, c, s.TimeoutConfig, key, metav1.Condition{
+			Type: string(gatewayv1.GatewayConditionAccepted), Status: metav1.ConditionTrue, Reason: string(gatewayv1.GatewayReasonAccepted),
+		})
+		kubernetes.GatewayMustHaveCondition(t, c, s.TimeoutConfig, key, metav1.Condition{
+			Type: string(gatewayv1.GatewayConditionProgrammed), Status: metav1.ConditionTrue, Reason: string(gatewayv1.GatewayReasonProgrammed),
+		})
+		address, err := kubernetes.WaitForGatewayAddress(t, c, s.TimeoutConfig, kubernetes.NewGatewayRef(key, "http"))
+		if err != nil || address != "192.0.2.10:8080" {
+			t.Fatalf("Gateway address = %q, error = %v, want 192.0.2.10:8080", address, err)
+		}
+	})
+
 	for _, tc := range []suite.ConformanceTest{tests.GatewayClassObservedGenerationBump, tests.GatewayInvalidRouteKind, tests.GatewayInvalidParametersRef, tests.GatewayListenerUnsupportedProtocol} {
 		t.Run(tc.ShortName, func(t *testing.T) {
 			s.RunTest = tc.ShortName

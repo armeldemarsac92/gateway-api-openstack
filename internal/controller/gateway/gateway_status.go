@@ -36,16 +36,27 @@ func (r *Reconciler) setGatewayFailure(gateway *gatewayv1.Gateway, validationErr
 	var detailed *gatewayValidationError
 	errors.As(validationErr, &detailed)
 	gatewayReason := gatewayv1.GatewayReasonListenersNotValid
+	programmedReason := gatewayv1.GatewayReasonInvalid
 	listenerSpecific := detailed == nil || detailed.gatewayReason == ""
 	if detailed != nil {
 		if detailed.gatewayReason != "" {
 			gatewayReason = detailed.gatewayReason
 		}
+		if detailed.programmedReason != "" {
+			programmedReason = detailed.programmedReason
+		}
+	}
+	accepted := metav1.ConditionFalse
+	if gatewayReason == gatewayv1.GatewayReasonAccepted {
+		accepted = metav1.ConditionTrue
+		if len(gateway.Spec.Listeners) > 1 {
+			gatewayReason = gatewayv1.GatewayReasonListenersNotValid
+		}
 	}
 	existingListeners := append([]gatewayv1.ListenerStatus(nil), gateway.Status.Listeners...)
 	gateway.Status.Addresses = nil
-	controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionAccepted), metav1.ConditionFalse, string(gatewayReason), message, gateway.Generation))
-	controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionProgrammed), metav1.ConditionFalse, string(gatewayv1.GatewayReasonInvalid), message, gateway.Generation))
+	controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionAccepted), accepted, string(gatewayReason), message, gateway.Generation))
+	controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionProgrammed), metav1.ConditionFalse, string(programmedReason), message, gateway.Generation))
 	gateway.Status.Listeners = make([]gatewayv1.ListenerStatus, 0, len(gateway.Spec.Listeners))
 	for _, listener := range gateway.Spec.Listeners {
 		gateway.Status.Listeners = append(gateway.Status.Listeners, unprogrammedListenerStatus(

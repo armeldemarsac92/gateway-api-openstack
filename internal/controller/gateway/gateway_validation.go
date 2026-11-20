@@ -19,6 +19,7 @@ package gateway
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"slices"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -29,8 +30,9 @@ import (
 )
 
 type gatewayValidationError struct {
-	message       string
-	gatewayReason gatewayv1.GatewayConditionReason
+	message          string
+	gatewayReason    gatewayv1.GatewayConditionReason
+	programmedReason gatewayv1.GatewayConditionReason
 }
 
 func hasListenerRequestFilters(gateway *gatewayv1.Gateway) bool {
@@ -56,12 +58,6 @@ func (r *Reconciler) getGatewayClass(ctx context.Context, gateway *gatewayv1.Gat
 // Validate checks whether a Gateway can be represented by the current HTTP
 // profile and returns its single supported listener.
 func Validate(gateway *gatewayv1.Gateway) (*gatewayv1.Listener, error) {
-	if len(gateway.Spec.Addresses) != 0 {
-		return nil, &gatewayValidationError{
-			message:       "spec.addresses is not supported",
-			gatewayReason: gatewayv1.GatewayReasonUnsupportedAddress,
-		}
-	}
 	if gateway.Spec.Infrastructure != nil {
 		return nil, &gatewayValidationError{
 			message:       "spec.infrastructure is not supported",
@@ -107,7 +103,73 @@ func Validate(gateway *gatewayv1.Gateway) (*gatewayv1.Listener, error) {
 			}
 		}
 	}
+	if err := validateAddresses(gateway.Spec.Addresses); err != nil {
+		return nil, err
+	}
 	return listener, nil
+}
+
+func validateAddresses(addresses []gatewayv1.GatewaySpecAddress) error {
+	var unsupportedType bool
+	for _, request := range addresses {
+		if request.Type == nil || *request.Type == gatewayv1.IPAddressType {
+			continue
+		}
+		unsupportedType = true
+		if request.Value == "" {
+			return &gatewayValidationError{
+				message:          "the requested Gateway address type cannot be allocated. Request an IPAddress",
+				gatewayReason:    gatewayv1.GatewayReasonUnsupportedAddress,
+				programmedReason: gatewayv1.GatewayReasonAddressNotAssigned,
+			}
+		}
+	}
+	if unsupportedType {
+		return &gatewayValidationError{
+			message:       "only the IPAddress Gateway address type is supported",
+			gatewayReason: gatewayv1.GatewayReasonUnsupportedAddress,
+		}
+	}
+
+	var staticIP string
+	for _, request := range addresses {
+		if request.Value != "" {
+			address, err := netip.ParseAddr(request.Value)
+			if err != nil || address.Zone() != "" {
+				return &gatewayValidationError{
+					message:       "the requested Gateway IP address is invalid",
+					gatewayReason: gatewayv1.GatewayReasonInvalid,
+				}
+			}
+			staticIP = request.Value
+		}
+		if request.Routability != gatewayv1.GatewayAddressRoutabilityDefault {
+			reason := gatewayv1.GatewayReasonAddressNotAssigned
+			if request.Value != "" {
+				reason = gatewayv1.GatewayReasonAddressNotUsable
+			}
+			return &gatewayValidationError{
+				message:          "only default Gateway address routability is supported",
+				gatewayReason:    gatewayv1.GatewayReasonInvalid,
+				programmedReason: reason,
+			}
+		}
+	}
+	if staticIP != "" {
+		return &gatewayValidationError{
+			message:          fmt.Sprintf("static Gateway IP address %s cannot be used. Omit the address value to request dynamic allocation", staticIP),
+			gatewayReason:    gatewayv1.GatewayReasonAccepted,
+			programmedReason: gatewayv1.GatewayReasonAddressNotUsable,
+		}
+	}
+	if len(addresses) > 1 {
+		return &gatewayValidationError{
+			message:          "only one Gateway address may be requested",
+			gatewayReason:    gatewayv1.GatewayReasonInvalid,
+			programmedReason: gatewayv1.GatewayReasonAddressNotAssigned,
+		}
+	}
+	return nil
 }
 
 // HTTPListener selects the sole HTTP listener when each listener has its own

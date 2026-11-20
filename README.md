@@ -32,19 +32,19 @@ The [architecture](docs/design/architecture.md) defines ownership, resource mapp
 
 The controller uses Gateway API v1.7.0 and defaults to the Standard Channel. Its implemented routing scope includes:
 
-- One HTTP listener and one selected HTTPRoute in the Gateway namespace
+- One active HTTP listener and one selected HTTPRoute in the Gateway namespace. An unsupported protocol on a separate port gets its own listener status.
 - One rule, one backend Service, and Exact or PathPrefix matching
 - An optional exact or wildcard hostname on the listener and at most one on the HTTPRoute. Only the names shared by both reach the backend.
 - Eligible worker NodePort members with Local or Cluster traffic policy
 - An opt-in IPv4 Endpoint mode for ClusterIP, headless, and NodePort Services, pending live network validation
 - Typed GatewayClass configuration with topology settings fixed for each Gateway
-- Optional Floating IP allocation and recovery after detachment
+- Automatic allocation for a single `IPAddress` request with no value. Gateway status reports the private VIP or, when the class enables one, the allocated Floating IP. Floating IP recovery also handles detachment.
 - Referenced frontend and backend security groups without changing their rules
 - Read-only environment diagnostics
 - Ownership validation, restart recovery, and ordered cleanup
 
 The [class configuration reference](docs/reference/class-configuration.md) describes member modes and their network prerequisites.
-The HTTPRoute may select a Service in another namespace when a ReferenceGrant in the Service namespace authorizes it. Multiple listeners, multiple routes and HTTPS are still open. [Grant and revocation evidence](docs/qualification/v1.7.0/service-grants.md)
+The HTTPRoute may select a Service in another namespace when a ReferenceGrant in the Service namespace authorizes it. Multiple active listeners, multiple routes and HTTPS are still open. [Grant and revocation evidence](docs/qualification/v1.7.0/service-grants.md)
 The stock pilot targets Amphora. Other Gateway profiles, the two mesh profiles and the Experimental resources are tracked in the [v1.7.0 feature matrix](docs/qualification/v1.7.0/matrix/README.md).
 
 ## Development status

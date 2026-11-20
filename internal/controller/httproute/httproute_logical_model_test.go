@@ -50,6 +50,7 @@ func TestNodePortRouteUsesLogicalMatchAndSharedEndpointObservation(t *testing.T)
 			route := mapperTestHTTPRoute(gateway.Namespace, "api", gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name)}, "backend")
 			route.UID = "route-uid"
 			gateway.Spec.Listeners[0].Hostname = ptr.To(test.listener)
+			gateway.Spec.Addresses = []gatewayv1.GatewaySpecAddress{{Type: ptr.To(gatewayv1.IPAddressType)}}
 			if test.route != "" {
 				route.Spec.Hostnames = []gatewayv1.Hostname{test.route}
 			}
