@@ -1,0 +1,73 @@
+octavia: 93689cb7701da65b5aad387bb824c477c64b0f2b
+octavia-lib: bc03e1856b60517e1b75db4fdf9b3edf55f3a019
+ovn-octavia-provider: 485b18e661d368feb82f87c499777052ee749458
+SUPPORTED_L7POLICY_ACTIONS = ['REJECT', 'REDIRECT_TO_URL', 'REDIRECT_TO_POOL', 'REDIRECT_PREFIX']
+SUPPORTED_L7RULE_TYPES = ['HOST_NAME', 'PATH', 'FILE_TYPE', 'HEADER', 'COOKIE', 'SSL_CONN_HAS_CERT', 'SSL_VERIFY_RESULT', 'SSL_DN_FIELD']
+SUPPORTED_L7RULE_COMPARE_TYPES = ['REGEX', 'STARTS_WITH', 'ENDS_WITH', 'CONTAINS', 'EQUAL_TO']
+SUPPORTED_L7POLICY_REDIRECT_HTTP_CODES = [301, 302, 303, 307, 308]
+SUPPORTED_HTTP_HEADERS = ['X-Forwarded-For', 'X-Forwarded-Port', 'X-Forwarded-Proto', 'X-Forwarded-IP', 'X-Client-IP', 'X-Real-IP']
+SUPPORTED_SSL_HEADERS = ['X-SSL-Client-Verify', 'X-SSL-Client-Has-Cert', 'X-SSL-Client-DN', 'X-SSL-Client-CN', 'X-SSL-Issuer', 'X-SSL-Client-SHA1', 'X-SSL-Client-Not-Before', 'X-SSL-Client-Not-After']
+SUPPORTED_ALPN_PROTOCOLS = ['h2', 'http/1.1', 'http/1.0']
+MIN_WEIGHT = 0
+MAX_WEIGHT = 256
+OVN_NATIVE_LB_PROTOCOLS = ['TCP', 'UDP', 'SCTP']
+OVN_NATIVE_LB_ALGORITHMS = ['SOURCE_IP_PORT', 'SOURCE_IP']
+ListenerPOST: name, description, admin_state_up, protocol, protocol_port, connection_limit, default_tls_container_ref, sni_container_refs, project_id, default_pool_id, default_pool, l7policies, insert_headers, loadbalancer_id, timeout_client_data, timeout_member_connect, timeout_member_data, timeout_tcp_inspect, tags, client_ca_tls_container_ref, client_authentication, client_crl_container_ref, allowed_cidrs, tls_ciphers, tls_versions, alpn_protocols, hsts_max_age, hsts_include_subdomains, hsts_preload
+  protocol = wtypes.wsattr(wtypes.Enum(str, *lib_constants.LISTENER_SUPPORTED_PROTOCOLS), mandatory=True)
+  insert_headers = wtypes.wsattr(wtypes.DictType(str, wtypes.StringType(max_length=255)))
+  timeout_tcp_inspect = wtypes.wsattr(wtypes.IntegerType(minimum=constants.MIN_TIMEOUT, maximum=constants.MAX_TIMEOUT))
+  alpn_protocols = wtypes.wsattr(wtypes.ArrayType(types.AlpnProtocolType()))
+ListenerPUT: name, description, admin_state_up, connection_limit, default_tls_container_ref, sni_container_refs, default_pool_id, insert_headers, timeout_client_data, timeout_member_connect, timeout_member_data, timeout_tcp_inspect, tags, client_ca_tls_container_ref, client_authentication, client_crl_container_ref, allowed_cidrs, tls_ciphers, tls_versions, alpn_protocols, hsts_max_age, hsts_include_subdomains, hsts_preload
+  insert_headers = wtypes.wsattr(wtypes.DictType(str, wtypes.StringType(max_length=255)))
+  timeout_tcp_inspect = wtypes.wsattr(wtypes.IntegerType(minimum=constants.MIN_TIMEOUT, maximum=constants.MAX_TIMEOUT))
+  alpn_protocols = wtypes.wsattr(wtypes.ArrayType(types.AlpnProtocolType()))
+ListenerSingleCreate: name, description, admin_state_up, protocol, protocol_port, connection_limit, default_tls_container_ref, sni_container_refs, default_pool_id, default_pool, l7policies, insert_headers, timeout_client_data, timeout_member_connect, timeout_member_data, timeout_tcp_inspect, tags, client_ca_tls_container_ref, client_authentication, client_crl_container_ref, allowed_cidrs, tls_ciphers, tls_versions, alpn_protocols, hsts_max_age, hsts_include_subdomains, hsts_preload
+  protocol = wtypes.wsattr(wtypes.Enum(str, *lib_constants.LISTENER_SUPPORTED_PROTOCOLS), mandatory=True)
+  insert_headers = wtypes.wsattr(wtypes.DictType(str, wtypes.StringType(max_length=255)))
+  timeout_tcp_inspect = wtypes.wsattr(wtypes.IntegerType(minimum=constants.MIN_TIMEOUT, maximum=constants.MAX_TIMEOUT))
+  alpn_protocols = wtypes.wsattr(wtypes.ArrayType(types.AlpnProtocolType()))
+PoolPOST: name, description, admin_state_up, listener_id, loadbalancer_id, protocol, lb_algorithm, session_persistence, project_id, healthmonitor, members, tags, tls_container_ref, ca_tls_container_ref, crl_container_ref, tls_enabled, tls_ciphers, tls_versions, alpn_protocols
+  protocol = wtypes.wsattr(wtypes.Enum(str, *lib_constants.POOL_SUPPORTED_PROTOCOLS), mandatory=True)
+  tls_enabled = wtypes.wsattr(bool, default=False)
+  alpn_protocols = wtypes.wsattr(wtypes.ArrayType(types.AlpnProtocolType()))
+PoolPUT: name, description, admin_state_up, lb_algorithm, session_persistence, tags, tls_container_ref, ca_tls_container_ref, crl_container_ref, tls_enabled, tls_ciphers, tls_versions, alpn_protocols
+  tls_enabled = wtypes.wsattr(bool)
+  alpn_protocols = wtypes.wsattr(wtypes.ArrayType(types.AlpnProtocolType()))
+PoolSingleCreate: name, description, admin_state_up, protocol, lb_algorithm, session_persistence, healthmonitor, members, tags, tls_container_ref, ca_tls_container_ref, crl_container_ref, tls_enabled, tls_ciphers, tls_versions, alpn_protocols
+  protocol = wtypes.wsattr(wtypes.Enum(str, *lib_constants.POOL_SUPPORTED_PROTOCOLS))
+  tls_enabled = wtypes.wsattr(bool, default=False)
+  alpn_protocols = wtypes.wsattr(wtypes.ArrayType(types.AlpnProtocolType()))
+MemberPOST: name, admin_state_up, address, protocol_port, weight, backup, subnet_id, project_id, monitor_port, monitor_address, tags, request_sriov
+  weight = wtypes.wsattr(wtypes.IntegerType(minimum=constants.MIN_WEIGHT, maximum=constants.MAX_WEIGHT), default=constants.DEFAULT_WEIGHT)
+MemberPUT: name, admin_state_up, weight, backup, monitor_port, monitor_address, tags
+  weight = wtypes.wsattr(wtypes.IntegerType(minimum=constants.MIN_WEIGHT, maximum=constants.MAX_WEIGHT))
+MemberSingleCreate: name, admin_state_up, address, protocol_port, weight, backup, subnet_id, monitor_port, monitor_address, tags, request_sriov
+  weight = wtypes.wsattr(wtypes.IntegerType(minimum=constants.MIN_WEIGHT, maximum=constants.MAX_WEIGHT), default=constants.DEFAULT_WEIGHT)
+L7PolicyPOST: name, description, admin_state_up, project_id, action, redirect_pool_id, redirect_url, redirect_prefix, position, listener_id, rules, tags, redirect_http_code
+  action = wtypes.wsattr(wtypes.Enum(str, *constants.SUPPORTED_L7POLICY_ACTIONS), mandatory=True)
+  redirect_pool_id = wtypes.wsattr(wtypes.UuidType())
+  redirect_http_code = wtypes.wsattr(wtypes.Enum(int, *constants.SUPPORTED_L7POLICY_REDIRECT_HTTP_CODES))
+L7PolicyPUT: name, description, admin_state_up, action, redirect_pool_id, redirect_url, redirect_prefix, position, tags, redirect_http_code
+  action = wtypes.wsattr(wtypes.Enum(str, *constants.SUPPORTED_L7POLICY_ACTIONS))
+  redirect_pool_id = wtypes.wsattr(wtypes.UuidType())
+  redirect_http_code = wtypes.wsattr(wtypes.Enum(int, *constants.SUPPORTED_L7POLICY_REDIRECT_HTTP_CODES))
+L7PolicySingleCreate: name, description, admin_state_up, action, redirect_pool, redirect_url, redirect_prefix, position, rules, tags, redirect_http_code
+  action = wtypes.wsattr(wtypes.Enum(str, *constants.SUPPORTED_L7POLICY_ACTIONS), mandatory=True)
+  redirect_http_code = wtypes.wsattr(wtypes.Enum(int, *constants.SUPPORTED_L7POLICY_REDIRECT_HTTP_CODES))
+L7RulePOST: type, compare_type, key, value, invert, admin_state_up, project_id, tags
+  type = wtypes.wsattr(wtypes.Enum(str, *constants.SUPPORTED_L7RULE_TYPES), mandatory=True)
+  compare_type = wtypes.wsattr(wtypes.Enum(str, *constants.SUPPORTED_L7RULE_COMPARE_TYPES), mandatory=True)
+  key = wtypes.wsattr(wtypes.StringType(max_length=255, pattern='^[^\\r\\n]*$'))
+  value = wtypes.wsattr(wtypes.StringType(max_length=255, pattern='^[^\\r\\n]*$'), mandatory=True)
+L7RulePUT: type, compare_type, key, value, invert, admin_state_up, tags
+  type = wtypes.wsattr(wtypes.Enum(str, *constants.SUPPORTED_L7RULE_TYPES))
+  compare_type = wtypes.wsattr(wtypes.Enum(str, *constants.SUPPORTED_L7RULE_COMPARE_TYPES))
+  key = wtypes.wsattr(wtypes.StringType(max_length=255, pattern='^[^\\r\\n]*$'))
+  value = wtypes.wsattr(wtypes.StringType(max_length=255, pattern='^[^\\r\\n]*$'))
+L7RuleSingleCreate: type, compare_type, key, value, invert, admin_state_up, tags
+  type = wtypes.wsattr(wtypes.Enum(str, *constants.SUPPORTED_L7RULE_TYPES), mandatory=True)
+  compare_type = wtypes.wsattr(wtypes.Enum(str, *constants.SUPPORTED_L7RULE_COMPARE_TYPES), mandatory=True)
+  key = wtypes.wsattr(wtypes.StringType(max_length=255))
+  value = wtypes.wsattr(wtypes.StringType(max_length=255), mandatory=True)
+VALID_L7POLICY_LISTENER_PROTOCOLS = ['HTTP', 'TERMINATED_HTTPS']
+Octavia discovery CURRENT: v2.30

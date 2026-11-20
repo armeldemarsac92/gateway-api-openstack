@@ -4,12 +4,9 @@
 > This project is pre-alpha and is not ready for production.
 > No supported controller environment profile has been published.
 
-gateway-api-openstack implements Kubernetes [Gateway API](https://gateway-api.sigs.k8s.io/) using OpenStack Octavia Amphora load balancers.
-It currently supports a limited HTTP profile and aims to become a Conformant implementation for HTTP and terminated HTTPS.
-It uses Octavia directly without an in-cluster proxy data plane.
+This fork ports Gateway API for OpenStack to Kubernetes Gateway API v1.7.0 and adds an opt-in workload addon for clusters created by Magnum and magnum-capi-helm. The first traffic target is a private Amphora VIP forwarding HTTP to a worker NodePort. The [Hibiscus qualification record](docs/qualification/v1.7.0/README.md) covers all seven release profiles, the available evidence and the operator procedure.
 
-The project lives at [gateway-api-openstack/gateway-api-openstack](https://github.com/gateway-api-openstack/gateway-api-openstack).
-Its API group is `gateway-api-openstack.github.io`, and its Go module is `github.com/gateway-api-openstack/gateway-api-openstack`.
+The controller uses public OpenStack APIs. It keeps the upstream API group `gateway-api-openstack.github.io` and Go module path. [Personal Hibiscus fork](https://github.com/armeldemarsac92/gateway-api-openstack/tree/hibiscus/v1.7.0) · [Upstream project](https://github.com/gateway-api-openstack/gateway-api-openstack)
 
 ## How it works
 
@@ -47,8 +44,8 @@ The controller uses Gateway API v1.7.0 and defaults to the Standard Channel. Its
 - Ownership validation, restart recovery, and ordered cleanup
 
 The [class configuration reference](docs/reference/class-configuration.md) describes member modes and their network prerequisites.
-Multiple listeners and routes, HTTPS, and cross-namespace forwarding remain unimplemented.
-OVN, non-HTTP Route kinds, existing resource adoption, and proxy data planes are outside the current product scope.
+The HTTPRoute may select a Service in another namespace when a ReferenceGrant in the Service namespace authorizes it. Multiple listeners, multiple routes and HTTPS are still open. [Grant and revocation evidence](docs/qualification/v1.7.0/service-grants.md)
+The stock pilot targets Amphora. Other Gateway profiles, the two mesh profiles and the Experimental resources are tracked in the [v1.7.0 feature matrix](docs/qualification/v1.7.0/matrix/README.md).
 
 ## Development status
 
@@ -57,7 +54,7 @@ Phase 5 includes the logical HTTP model, shared backend input collection, refere
 See the [compatibility record](docs/providers/compatibility.md) for completed checks and outstanding evidence.
 Development results do not establish general OpenStack support or Gateway API conformance.
 
-The [roadmap](ROADMAP.md) targets complete GATEWAY-HTTP Core support and all declared Extended features.
+The [upstream roadmap](ROADMAP.md) targets complete GATEWAY-HTTP Core support and all declared Extended features. The [Hibiscus plan](docs/superpowers/plans/2026-11-20-hibiscus.md) extends the target to the full v1.7.0 release.
 It allows feature implementation and traffic validation to proceed alongside Octavia development after the corresponding design is accepted.
 The [feasibility assessment](docs/design/conformance-feasibility.md) records the API blockers for individual features.
 The [conformance guide](docs/testing-conformance.md) describes the required suite and reporting workflow.

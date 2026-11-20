@@ -23,11 +23,11 @@ This project does not adopt or migrate its resources.
 - Existing OpenStack resources are not adopted.
 - Unsupported or unrepresentable behavior is rejected through status.
 
-The current profile supports one HTTP listener, one selected HTTPRoute in the Gateway namespace, one rule, and one Service backend in the route namespace.
+The current profile supports one HTTP listener, one selected HTTPRoute in the Gateway namespace, one rule, and one Service backend. A Service in another namespace requires a live ReferenceGrant in that namespace.
 It supports an exact hostname with Exact or PathPrefix matching.
 NodePort is the default member mode.
 The opt-in IPv4 Endpoint implementation awaits live network validation under [ADR 0007](adr/0007-direct-endpoint-members.md).
-Multiple listeners, multiple desired routes, TLS, cross-namespace forwarding, requested addresses, and backend policies remain unsupported.
+Multiple listeners, multiple desired routes, TLS, cross-namespace ParentRefs, requested addresses, and backend policies remain unsupported.
 
 ## Design principles
 
@@ -176,7 +176,7 @@ Binding creation performs the same inventory and dependency checks before persis
 Cleanup requests rely on durable bindings and do not require Service, EndpointSlice, or ReferenceGrant reads.
 These checks detect observed changes without claiming an atomic Kubernetes snapshot.
 Cached indexes drive event mapping, not proof of inventory completeness.
-Collecting an authorized backend in another namespace does not expand the route inventory or enable cross-namespace provisioning.
+For a Service in another namespace, the writer rechecks the ReferenceGrant before programming and detaches the route fragment when permission is revoked. The route and parent Gateway must share a namespace. [Service grant behavior](../qualification/v1.7.0/service-grants.md)
 
 Bound routes require an explicit `Attached` or `Detaching` marker.
 The route reconciler makes the applicable status and cleanup checkpoint durable before changing the marker to `Detaching`.
