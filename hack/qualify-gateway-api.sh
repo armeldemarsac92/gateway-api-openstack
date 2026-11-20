@@ -225,12 +225,14 @@ kube_read "$admission/validatingadmissionpolicybindings/$policy" ValidatingAdmis
 evidence preflight "$channel" "$revision" "$source_dir" "$experimental"
 
 run_mode() {
-    local mode=$1 profiles=$2 exempt=$3 status=0
+    local mode=$1 profiles=$2 exempt=$3 status=0 deployed_revision
+    python3 -E "$repo/hack/qualify-workload.py" "$mode" "$revision" || return 1
+    deployed_revision=$(cat "$mode-revision")
     (
         cd -- "$source_dir" || exit 1
         GOFLAGS='' GOTOOLCHAIN=local GOWORK="$source_dir/go.work" go test -mod=readonly -json -count=1 \
             -run '^TestConformance$' -timeout=150m ./conformance -args \
-            --conformance-options-file="$run_dir/options.yaml" --version="$revision" \
+            --conformance-options-file="$run_dir/$mode-options.yaml" --version="$deployed_revision" \
             --conformance-profiles="$profiles" --all-features=true --exempt-features="$exempt$channel_exempt" \
             --skip-tests= --run-test= --skip-provisional-tests=false --fail-fast=false \
             --allow-crds-mismatch=false --cleanup-base-resources=true --cleanup-test-resources=true \

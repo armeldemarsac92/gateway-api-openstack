@@ -18,7 +18,7 @@ Designate separate disposable control planes and cloud scopes for Standard and E
 
 Apply each published manifest with server-side apply against its designated context. The Experimental HTTPRoute CRD exceeds the annotation size limit used by client-side apply. On an empty disposable control plane the release installs with `kubectl --context "$DISPOSABLE_CONTEXT" apply --server-side -f "$RELEASE_FILE"`. The preflight compares each persisted CRD and admission spec with the published asset after API-server defaulting.
 
-Use a dedicated Linux runner for each channel. Provide Git, Go 1.27.4, `curl`, `kubectl`, Python 3 with PyYAML, and access to the Kubernetes API and the pinned upstream source, release files, Go dependencies and test images. Keep the runner directory on private persistent storage outside the checkout. Provide these files under that directory.
+Use a dedicated Linux runner for each channel. Provide Git, Go 1.27.4, `curl`, `kubectl`, Skopeo with read access to the immutable images, Python 3 with PyYAML, and access to the Kubernetes API and the pinned upstream source, release files, Go dependencies and test images. Keep the runner directory on private persistent storage outside the checkout. Provide these files under that directory.
 
 | File | Contents |
 | --- | --- |
@@ -34,13 +34,33 @@ channel: standard
 clusterUID: <kube-system namespace UID>
 controllerRevision: <full fork commit SHA from the deployed image build>
 controllerImage: <running repository@sha256:digest>
+gatewayWorkload:
+  controllerName: gateway-api-openstack.github.io/magnum-gateway
+  namespace: openstack-gateway-system
+  deployment: magnum-openstack-gateway-controller
+  container: controller
+  pod: <ready Pod from this Deployment>
+# Supply the mesh implementation and its build record when the mode is installed.
+meshWorkload:
+  controllerName: <controller name of the selected XMesh, if present>
+  namespace: <mesh namespace>
+  deployment: <mesh controller Deployment>
+  container: <controller container>
+  pod: <ready Pod from this Deployment>
+  image: <mesh controller repository@sha256:digest>
+  revision: <full mesh source commit>
+  implementation:
+    organization: <mesh implementation organization>
+    project: <mesh implementation name>
+    url: <mesh project URL>
+    contact: [<mesh project contact>]
 environment:
   cloud: <Hibiscus cloud, Magnum, Octavia and provider version inventory>
-  mesh: <deployed mesh build and workload enrollment setup>
+  mesh: <workload enrollment setup and dataplane versions>
   topology: <private runner, VIP, worker and cloud scope details>
 ```
 
-Set `gatewayClassName` and provide `implementation.organization`, `implementation.project`, a valid `implementation.url`, and at least one `implementation.contact` in the options file. The runner supplies `implementation.version` as the requested commit SHA. Use `namespaceLabels` and `namespaceAnnotations` as required by the mesh, and `usableNetworkAddresses` and `unusableNetworkAddresses` for the static IP cases. The pinned [upstream option definitions](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/utils/suite/suite.go) describe the accepted fields.
+Set `gatewayClassName` and provide `implementation.organization`, `implementation.project`, a valid `implementation.url`, and at least one `implementation.contact` in the options file. Each pass verifies the deployed Pod through its owning ReplicaSet and rolled-out Deployment, checks its reported image ID against the published manifest or config digest, and records those identities privately. The Gateway pass verifies the selected class and the fork image’s source label. The mesh pass records its own implementation, image and revision and checks an explicitly selected XMesh. An absent mesh workload leaves that pass unrun. For a third-party mesh image without a source label, keep the provider’s build record tying its digest to the stated revision. Use `namespaceLabels` and `namespaceAnnotations` as required by the mesh, and `usableNetworkAddresses` and `unusableNetworkAddresses` for the static IP cases. The pinned [upstream option definitions](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/utils/suite/suite.go) describe the accepted fields.
 
 For GitHub Actions, protect the `gateway-qualification-standard` and `gateway-qualification-experimental` environments for the default branch and assign each matching label to its dedicated runner. Set the environment secret `GATEWAY_QUALIFICATION_ROOT` to that runner's absolute private directory. Dispatch **Gateway API v1.7.0 qualification** on the fork's default branch with the full controller source SHA. For a runner with these prerequisites, use the same command locally from the reviewed fork checkout.
 
