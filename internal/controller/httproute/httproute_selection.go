@@ -23,6 +23,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
@@ -108,17 +109,14 @@ func (r *Reconciler) evaluateRouteSlotWithReader(
 	key, _ := model.BackendServiceReference(route.Namespace, backend.BackendObjectReference)
 	if key.Namespace != route.Namespace {
 		// Cached selection must not rely on a stale grant to inspect a Service.
-		if r.APIReader == nil {
-			return routeSlotDecision{}, controller.ErrAPIReaderRequired
-		}
-		reader = r.APIReader
-		grants, err := graph.ListBackendReferenceGrants(ctx, reader, key.Namespace)
+		rejection, err := r.liveBackendReferenceRejection(ctx, route.Namespace, key)
 		if err != nil {
 			return routeSlotDecision{}, err
 		}
-		if err := checkBackendReference(route.Namespace, key, grants); err != nil {
-			return routeSlotDecision{rejection: err}, nil
+		if rejection != nil {
+			return routeSlotDecision{rejection: rejection}, nil
 		}
+		reader = r.APIReader
 	}
 	var service corev1.Service
 	if err := reader.Get(ctx, key, &service); err != nil {
@@ -128,6 +126,35 @@ func (r *Reconciler) evaluateRouteSlotWithReader(
 		return routeSlotDecision{}, fmt.Errorf("get candidate backend Service: %w", err)
 	}
 	return routeSlotForService(&service, *backend.Port, topology.Topology.MemberMode), nil
+}
+
+func (r *Reconciler) liveBackendReferenceRejection(ctx context.Context, namespace string, key types.NamespacedName) (*routeBuildError, error) {
+	if key.Namespace == namespace {
+		return nil, nil
+	}
+	if r.APIReader == nil {
+		return nil, controller.ErrAPIReaderRequired
+	}
+	grants, err := graph.ListBackendReferenceGrants(ctx, r.APIReader, key.Namespace)
+	if err != nil {
+		return nil, err
+	}
+	return backendReferenceRejection(namespace, key, grants), nil
+}
+
+// liveRouteBackendReferenceRejection checks the grant independently of the
+// bundle version and Service readiness. Cleanup needs only the single backend
+// reference understood by the forwarding profile.
+func (r *Reconciler) liveRouteBackendReferenceRejection(ctx context.Context, route *gatewayv1.HTTPRoute) (*routeBuildError, error) {
+	if len(route.Spec.Rules) != 1 || len(route.Spec.Rules[0].BackendRefs) != 1 {
+		return nil, nil
+	}
+	ref := route.Spec.Rules[0].BackendRefs[0].BackendObjectReference
+	key, supported := model.BackendServiceReference(route.Namespace, ref)
+	if !supported {
+		return nil, nil
+	}
+	return r.liveBackendReferenceRejection(ctx, route.Namespace, key)
 }
 
 func routeSlotForService(service *corev1.Service, port gatewayv1.PortNumber, mode cloud.MemberMode) routeSlotDecision {

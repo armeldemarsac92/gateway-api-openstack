@@ -76,14 +76,28 @@ func (r *Reconciler) setRouteUnsupportedVersion(
 		}
 		recheckVersion = true
 	}
+	rejection, err := r.liveRouteBackendReferenceRejection(ctx, &current)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
 	updates := make([]parentStatusUpdate, 0, len(parents)+1)
 	for _, parent := range parents {
+		status := r.unsupportedGatewayAPIVersionRouteStatus(&current, parent.ref)
+		if rejection != nil {
+			unresolved := statusForRouteBuildError(rejection)
+			unresolved.accepted, unresolved.acceptedReason, unresolved.acceptedMessage =
+				status.accepted, status.acceptedReason, status.acceptedMessage
+			status = unresolved
+		}
 		updates = append(updates, parentStatusUpdate{
 			parent: parent.ref,
-			status: r.unsupportedGatewayAPIVersionRouteStatus(&current, parent.ref),
+			status: status,
 		})
 	}
 	*route = current
+	if rejection != nil && controller.RouteHasControllerBinding(r.Config, &current) {
+		return r.setRouteStatusesAndDetach(ctx, scope, updates)
+	}
 	scope.setStatuses(updates)
 	result := ctrl.Result{}
 	if recheckVersion {

@@ -117,9 +117,9 @@ func validateRouteStructure(route *gatewayv1.HTTPRoute) (gatewayv1.BackendObject
 	return backend.BackendObjectReference, nil
 }
 
-func checkBackendReference(namespace string, target types.NamespacedName, grants []gatewayv1.ReferenceGrant) error {
+func backendReferenceRejection(namespace string, target types.NamespacedName, grants []gatewayv1.ReferenceGrant) *routeBuildError {
 	if !model.BackendReferenceAllowed(namespace, target, grants) {
-		return newRouteBuildError(routeErrorRefNotPermitted, "backend Service %s is not permitted by a ReferenceGrant", target)
+		return &routeBuildError{kind: routeErrorRefNotPermitted, message: fmt.Sprintf("backend Service %s is not permitted by a ReferenceGrant", target)}
 	}
 	return nil
 }
@@ -152,7 +152,7 @@ func (r *Reconciler) buildRouteModelFromInputs(
 		return cloud.RouteSpec{}, err
 	}
 	key, _ := model.BackendServiceReference(route.Namespace, reference)
-	if err := checkBackendReference(route.Namespace, key, inputs.input.ReferenceGrants); err != nil {
+	if err := backendReferenceRejection(route.Namespace, key, inputs.input.ReferenceGrants); err != nil {
 		return cloud.RouteSpec{}, err
 	}
 	service := inputs.service(key)

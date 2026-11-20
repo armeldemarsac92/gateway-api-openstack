@@ -97,9 +97,10 @@ const (
 )
 
 type routeCleanupSnapshot struct {
-	route       *gatewayv1.HTTPRoute
-	identity    cloud.Identity
-	disposition routeCleanupDisposition
+	route            *gatewayv1.HTTPRoute
+	identity         cloud.Identity
+	disposition      routeCleanupDisposition
+	referenceRevoked bool
 }
 
 type routeParentObservation struct {
@@ -270,7 +271,7 @@ func (r *Reconciler) selectAndBuildRouteModel(
 	evaluate := func(route *gatewayv1.HTTPRoute) (routeSlotDecision, error) {
 		reference := route.Spec.Rules[0].BackendRefs[0]
 		key, _ := model.BackendServiceReference(route.Namespace, reference.BackendObjectReference)
-		if err := checkBackendReference(route.Namespace, key, inputs.input.ReferenceGrants); err != nil {
+		if err := backendReferenceRejection(route.Namespace, key, inputs.input.ReferenceGrants); err != nil {
 			return routeSlotDecision{rejection: err}, nil
 		}
 		service := inputs.service(key)
@@ -511,6 +512,14 @@ func (r *Reconciler) buildRouteCleanupSnapshot(
 	if routeCleanupAllowedDuringVersionMismatch(parentObservations, stored) {
 		return snapshot, nil
 	}
+	rejection, err := r.liveRouteBackendReferenceRejection(ctx, &route)
+	if err != nil {
+		return routeCleanupSnapshot{}, err
+	}
+	if rejection != nil {
+		snapshot.referenceRevoked = true
+		return snapshot, nil
+	}
 	if err := r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
 		return routeCleanupSnapshot{}, err
 	}
@@ -670,6 +679,15 @@ func (r *Reconciler) sealRouteCleanupSnapshot(
 	}
 	if !present || stored != snapshot.identity {
 		return errHTTPRouteChanged
+	}
+	if snapshot.referenceRevoked {
+		rejection, err := r.liveRouteBackendReferenceRejection(ctx, &route)
+		if err != nil {
+			return err
+		}
+		if rejection == nil {
+			return errHTTPRouteChanged
+		}
 	}
 	return nil
 }

@@ -220,6 +220,109 @@ func TestUnsupportedGatewayAPIVersionFreezesBoundGraph(t *testing.T) {
 	}
 }
 
+func TestUnsupportedGatewayAPIVersionRevokesBoundServiceReference(t *testing.T) {
+	ctx := t.Context()
+	cfg := testConfig()
+	gatewayClass := unsupportedVersionGatewayClass(cfg)
+	gatewayClass.Status.Conditions = nil
+	gateway := programmedTestGateway(cfg)
+	route := mapperTestHTTPRoute(gateway.Namespace, "api", gatewayv1.ParentReference{Name: "edge"}, "backend")
+	route.UID, route.Generation = "route-uid", 1
+	route.Spec.Rules[0].BackendRefs[0].Namespace = ptr.To(gatewayv1.Namespace("shared"))
+	service, endpoints, node := validNodePortBackend("shared", "backend")
+	grant := serviceReferenceGrant(service.Namespace, route.Namespace, service.Name)
+	kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).
+		WithStatusSubresource(gatewayClass, route).
+		WithObjects(gatewayClass, gateway, route, service, endpoints, node, grant).
+		Build()
+	provider := &recordingProvider{}
+	reconciler := newTestReconciler(Reconciler{
+		Client: kubeClient, APIReader: kubeClient,
+		Coordinator: &graph.Coordinator{}, Config: cfg,
+	}, provider)
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(route)}
+	reconcile := func() {
+		t.Helper()
+		if _, err := reconciler.Reconcile(ctx, request); err != nil {
+			t.Fatalf("reconcile HTTPRoute: %v", err)
+		}
+	}
+	reconcile()
+	reconcile()
+	if len(provider.routeSpecs) != 1 {
+		t.Fatalf("programming with a valid grant produced %d route ensures, want one", len(provider.routeSpecs))
+	}
+	identity := provider.routeSpecs[0].Identity
+
+	var crd apiextensionsv1.CustomResourceDefinition
+	if err := kubeClient.Get(ctx, client.ObjectKey{Name: "gatewayclasses.gateway.networking.k8s.io"}, &crd); err != nil {
+		t.Fatal(err)
+	}
+	supportedVersion := crd.Annotations[gatewayconsts.BundleVersionAnnotation]
+	crd.Annotations[gatewayconsts.BundleVersionAnnotation] = "v1.6.1"
+	if err := kubeClient.Update(ctx, &crd); err != nil {
+		t.Fatal(err)
+	}
+	if err := kubeClient.Get(ctx, client.ObjectKeyFromObject(gatewayClass), gatewayClass); err != nil {
+		t.Fatal(err)
+	}
+	supportedClassStatus := gatewayClass.Status.DeepCopy()
+	gatewayClass.Status = unsupportedVersionGatewayClass(cfg).Status
+	if err := kubeClient.Status().Update(ctx, gatewayClass); err != nil {
+		t.Fatal(err)
+	}
+	reconcile()
+	if len(provider.routeSpecs) != 1 || len(provider.deletedRoutes) != 0 {
+		t.Fatal("version skew changed forwarding while the grant remained valid")
+	}
+
+	if err := kubeClient.Delete(ctx, grant); err != nil {
+		t.Fatal(err)
+	}
+	for range 4 {
+		reconcile()
+	}
+	if len(provider.deletedRoutes) != 1 || provider.deletedRoutes[0] != identity || len(provider.deletedGateways) != 0 || len(provider.routeSpecs) != 1 {
+		t.Fatalf("expected a single deletion for the originally bound route during skew, got routes %v, gateway deletions %v, and %d route ensures",
+			provider.deletedRoutes, provider.deletedGateways, len(provider.routeSpecs))
+	}
+	var current gatewayv1.HTTPRoute
+	if err := kubeClient.Get(ctx, request.NamespacedName, &current); err != nil {
+		t.Fatal(err)
+	}
+	if controllerutil.ContainsFinalizer(&current, cfg.RouteFinalizer()) || len(current.Status.Parents) != 1 {
+		t.Fatalf("expected the route to be detached with retained diagnostics: %#v", current)
+	}
+	conditions := current.Status.Parents[0].Conditions
+	resolved := meta.FindStatusCondition(conditions, "ResolvedRefs")
+	programmed := meta.FindStatusCondition(conditions, cfg.Domain()+"/Programmed")
+	if resolved == nil || resolved.Status != metav1.ConditionFalse || resolved.Reason != "RefNotPermitted" ||
+		programmed == nil || programmed.Status != metav1.ConditionFalse {
+		t.Fatalf("expected revoked reference and stopped forwarding: %#v", conditions)
+	}
+
+	if err := kubeClient.Create(ctx, serviceReferenceGrant(service.Namespace, route.Namespace, service.Name)); err != nil {
+		t.Fatal(err)
+	}
+	reconcile()
+	if len(provider.routeSpecs) != 1 || len(provider.deletedRoutes) != 1 {
+		t.Fatal("restoring permission changed forwarding while provisioning was frozen")
+	}
+	crd.Annotations[gatewayconsts.BundleVersionAnnotation] = supportedVersion
+	if err := kubeClient.Update(ctx, &crd); err != nil {
+		t.Fatal(err)
+	}
+	gatewayClass.Status = *supportedClassStatus
+	if err := kubeClient.Status().Update(ctx, gatewayClass); err != nil {
+		t.Fatal(err)
+	}
+	reconcile()
+	reconcile()
+	if len(provider.routeSpecs) != 2 || provider.routeSpecs[1].Identity != identity || len(provider.deletedRoutes) != 1 {
+		t.Fatalf("expected forwarding to recover on the same Gateway after the bundle recovers, got routes %v", provider.routeSpecs)
+	}
+}
+
 func TestUnsupportedVersionStatusUsesLiveHTTPRouteProgrammedState(t *testing.T) {
 	cfg := testConfig()
 	gateway := programmedTestGateway(cfg)

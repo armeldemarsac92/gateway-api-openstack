@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -70,6 +71,14 @@ func (r *Reconciler) setRouteStatusesAndDetach(
 		return result, nil
 	}
 	if errors.Is(cleanupErr, controller.ErrUnsupportedGatewayAPIVersion) {
+		// A restored grant can invalidate the cleanup decision while the bundle
+		// is still unsupported. Reconcile again from the current inputs.
+		if slices.ContainsFunc(updates, func(update parentStatusUpdate) bool {
+			return update.status.resolvedReason == string(gatewayv1.RouteReasonRefNotPermitted)
+		}) {
+			scope.statusPlan = nil
+			return ctrl.Result{}, errHTTPRouteChanged
+		}
 		_, present, bindingErr := r.storedRouteIdentity(route)
 		if bindingErr != nil {
 			return ctrl.Result{}, bindingErr
