@@ -53,7 +53,7 @@ build-probe: ## Build the Phase 0 capability probe.
 .PHONY: container-build
 container-build: ## Build the controller container image.
 ifeq ($(notdir $(CONTAINER_TOOL)),podman)
-	$(CONTAINER_TOOL) build --timestamp=0 --build-arg VERSION=$(VERSION) -t $(IMAGE) .
+	$(CONTAINER_TOOL) build --timestamp=0 --identity-label=false --build-arg VERSION=$(VERSION) -t $(IMAGE) .
 else
 	$(CONTAINER_TOOL) build --build-arg SOURCE_DATE_EPOCH=0 --build-arg VERSION=$(VERSION) -t $(IMAGE) .
 endif

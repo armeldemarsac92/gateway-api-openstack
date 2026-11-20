@@ -1,0 +1,46 @@
+name: Hibiscus development image
+
+on:
+  push:
+    tags:
+      - 'hibiscus-dev-*'
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: github.repository == 'armeldemarsac92/gateway-api-openstack'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the named development revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          revision="$(git rev-parse HEAD)"
+          test "$GITHUB_REF_NAME" = "hibiscus-dev-$revision"
+          image="ghcr.io/$GITHUB_REPOSITORY:$GITHUB_REF_NAME"
+          make container-build CONTAINER_TOOL=podman IMAGE="$image" VERSION="$revision"
+          printf 'IMAGE=%s\n' "$image" >> "$GITHUB_ENV"
+      - name: Publish and verify the registry digest
+        shell: bash
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          authfile="$RUNNER_TEMP/hibiscus-registry.json"
+          trap 'rm -f "$authfile"' EXIT
+          printf '%s' "$REGISTRY_TOKEN" | podman login --authfile "$authfile" --username "$GITHUB_ACTOR" --password-stdin ghcr.io
+          podman push --authfile "$authfile" --format oci --digestfile "$RUNNER_TEMP/image-digest" "$IMAGE"
+          digest="$(cat "$RUNNER_TEMP/image-digest")"
+          image_ref="ghcr.io/$GITHUB_REPOSITORY@$digest"
+          actual="$(skopeo inspect --authfile "$authfile" --raw "docker://$image_ref" | sha256sum | cut -d' ' -f1)"
+          test "sha256:$actual" = "$digest"
+          printf 'Registry image `%s` (linux/amd64)\n' "$image_ref" >> "$GITHUB_STEP_SUMMARY"
