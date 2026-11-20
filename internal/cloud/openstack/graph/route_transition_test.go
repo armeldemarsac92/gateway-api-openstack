@@ -21,10 +21,13 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"regexp"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
 )
 
 func TestEnsureRoutePendingReturnsWithoutMutation(t *testing.T) {
@@ -524,6 +527,16 @@ func TestEnsureRouteOperationTimeoutStopsObservation(t *testing.T) {
 }
 
 func TestEnsureRouteConvergesWithOneMutationPerCall(t *testing.T) {
+	t.Run("new hostname rule", func(t *testing.T) {
+		testEnsureRouteHostnameRule(t, false)
+	})
+	t.Run("upgrade existing hostname rule", func(t *testing.T) {
+		testEnsureRouteHostnameRule(t, true)
+	})
+}
+
+func testEnsureRouteHostnameRule(t *testing.T, upgrade bool) {
+	t.Helper()
 	identity := safetyTestIdentity(t)
 	loadBalancerTags := safetyGatewayTags(t, identity, roleLoadBalancer)
 	listenerTags := safetyGatewayTags(t, identity, roleListener)
@@ -535,13 +548,19 @@ func TestEnsureRouteConvergesWithOneMutationPerCall(t *testing.T) {
 	hostRuleTags := safetyRouteTags(t, identity, roleRuleHost)
 	requests := &gatewayTransitionRequests{}
 
-	poolCreated := false
-	memberCreated := false
-	monitorCreated := false
-	policyCreated := false
-	pathRuleCreated := false
-	hostRuleCreated := false
-	policyEnabled := false
+	poolCreated := upgrade
+	memberCreated := upgrade
+	monitorCreated := upgrade
+	policyCreated := upgrade
+	pathRuleCreated := upgrade
+	policyEnabled := upgrade
+	hostRule := l7policies.Rule{}
+	if upgrade {
+		hostRule = l7policies.Rule{
+			ID: "rule-host", RuleType: "HOST_NAME", CompareType: "EQUAL_TO", Value: "api.example.com",
+			AdminStateUp: true, Tags: hostRuleTags,
+		}
+	}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		requests.record(request)
 		switch {
@@ -602,11 +621,8 @@ func TestEnsureRouteConvergesWithOneMutationPerCall(t *testing.T) {
 					"value": "/api", "admin_state_up": true, "tags": pathRuleTags,
 				})
 			}
-			if hostRuleCreated {
-				items = append(items, map[string]any{
-					"id": "rule-host", "type": "HOST_NAME", "compare_type": "EQUAL_TO",
-					"value": "api.example.com", "admin_state_up": true, "tags": hostRuleTags,
-				})
+			if hostRule.ID != "" {
+				items = append(items, hostRule)
 			}
 			safetyWriteJSON(t, w, map[string]any{"rules": items})
 		case request.Method == http.MethodPost && request.URL.Path == "/lbaas/pools":
@@ -626,15 +642,50 @@ func TestEnsureRouteConvergesWithOneMutationPerCall(t *testing.T) {
 			w.WriteHeader(http.StatusCreated)
 			safetyWriteJSON(t, w, map[string]any{"l7policy": map[string]any{"id": "policy-1"}})
 		case request.Method == http.MethodPost && request.URL.Path == "/lbaas/l7policies/policy-1/rules":
+			var body struct {
+				Rule l7policies.Rule `json:"rule"`
+			}
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+				t.Fatalf("decode rule create: %v", err)
+			}
 			if pathRuleCreated {
-				hostRuleCreated = true
+				if policyEnabled || !slices.Equal(body.Rule.Tags, hostRuleTags) {
+					t.Fatalf("hostname rule must be created under a disabled policy with hostname ownership tags: %+v", body.Rule)
+				}
+				hostRule = body.Rule
+				hostRule.ID = "rule-host"
 			} else {
+				if body.Rule.RuleType != "PATH" || body.Rule.CompareType != "EQUAL_TO" || body.Rule.Value != "/api" {
+					t.Fatalf("exact path rule = %+v", body.Rule)
+				}
 				pathRuleCreated = true
 			}
 			w.WriteHeader(http.StatusCreated)
 			safetyWriteJSON(t, w, map[string]any{"rule": map[string]any{"id": "rule-created"}})
+		case request.Method == http.MethodPut && request.URL.Path == "/lbaas/l7policies/policy-1/rules/rule-host":
+			if !upgrade || policyEnabled {
+				t.Fatal("only the legacy hostname rule can be updated, with its policy disabled")
+			}
+			var body struct {
+				Rule l7policies.Rule `json:"rule"`
+			}
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+				t.Fatalf("decode rule update: %v", err)
+			}
+			hostRule = body.Rule
+			hostRule.ID = "rule-host"
+			hostRule.Tags = hostRuleTags
+			safetyWriteJSON(t, w, map[string]any{"rule": hostRule})
 		case request.Method == http.MethodPut && request.URL.Path == "/lbaas/l7policies/policy-1":
-			policyEnabled = true
+			var body struct {
+				Policy struct {
+					AdminStateUp *bool `json:"admin_state_up"`
+				} `json:"l7policy"`
+			}
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil || body.Policy.AdminStateUp == nil {
+				t.Fatalf("decode policy state update: %+v, %v", body.Policy, err)
+			}
+			policyEnabled = *body.Policy.AdminStateUp
 			safetyWriteJSON(t, w, map[string]any{"l7policy": map[string]any{"id": "policy-1"}})
 		default:
 			t.Errorf("unexpected request: %s %s", request.Method, request.URL.RequestURI())
@@ -673,6 +724,33 @@ func TestEnsureRouteConvergesWithOneMutationPerCall(t *testing.T) {
 		"/lbaas/l7policies/policy-1/rules",
 		"/lbaas/l7policies/policy-1/rules",
 		"/lbaas/l7policies/policy-1",
+	}
+	if upgrade {
+		want = []string{
+			"/lbaas/l7policies/policy-1",
+			"/lbaas/l7policies/policy-1/rules/rule-host",
+			"/lbaas/l7policies/policy-1",
+		}
+	}
+	if hostRule.RuleType != "HOST_NAME" || hostRule.CompareType != "REGEX" ||
+		!hostRule.AdminStateUp || hostRule.Invert || hostRule.Key != "" {
+		t.Fatalf("expected enabled, non-inverted HOST_NAME REGEX rule without a key, got %+v", hostRule)
+	}
+	// Stock Amphora applies -i to HOST_NAME rules. Use the API value as the
+	// regular expression and check it under that case-insensitive match.
+	expression, err := regexp.Compile("(?i)" + hostRule.Value)
+	if err != nil {
+		t.Fatalf("invalid hostname rule %q: %v", hostRule.Value, err)
+	}
+	for _, host := range []string{"api.example.com", "API.Example.COM", "API.Example.COM:1234"} {
+		if !expression.MatchString(host) {
+			t.Errorf("hostname rule %q rejected %q", hostRule.Value, host)
+		}
+	}
+	for _, host := range []string{"api.example.net:1234", "sub.api.example.com", "apiXexample.com", "api.example.com.attacker.net", "api.example.com:invalid"} {
+		if expression.MatchString(host) {
+			t.Errorf("hostname rule %q incorrectly matched %q", hostRule.Value, host)
+		}
 	}
 	if got := requests.mutationPaths(); !equalGatewayTransitionPaths(got, want) {
 		t.Fatalf("route mutation order = %v, want %v", got, want)
@@ -1096,8 +1174,8 @@ func convergedRouteGraphHandler(
 					"value": "/api", "admin_state_up": true, "tags": pathRuleTags,
 				},
 				map[string]any{
-					"id": "rule-host", "type": "HOST_NAME", "compare_type": "EQUAL_TO",
-					"value": "api.example.com", "admin_state_up": true, "tags": hostRuleTags,
+					"id": "rule-host", "type": "HOST_NAME", "compare_type": "REGEX",
+					"value": `^api\.example\.com(:[0-9]+)?$`, "admin_state_up": true, "tags": hostRuleTags,
 				},
 			}})
 		case request.Method == http.MethodPut && request.URL.Path == "/lbaas/listeners/listener-1":

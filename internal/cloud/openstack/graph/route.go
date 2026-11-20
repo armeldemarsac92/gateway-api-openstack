@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia/amphora"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
 )
 
@@ -42,11 +43,12 @@ type desiredRule struct {
 }
 
 type desiredRoute struct {
-	identity      Identity
-	spec          cloud.RouteSpec
-	members       []cloud.Member
-	healthMonitor cloud.HealthMonitorConfig
-	policies      []desiredPolicy
+	identity          Identity
+	spec              cloud.RouteSpec
+	members           []cloud.Member
+	healthMonitor     cloud.HealthMonitorConfig
+	policies          []desiredPolicy
+	hostnameRuleValue string
 }
 
 func (p *Provider) buildDesiredRoute(spec cloud.RouteSpec) (desiredRoute, error) {
@@ -99,6 +101,14 @@ func (p *Provider) buildDesiredRoute(spec cloud.RouteSpec) (desiredRoute, error)
 		return invalid(fmt.Errorf("unsupported path match type %q", spec.PathType))
 	}
 
+	var hostnameRuleValue string
+	if spec.Hostname != "" {
+		hostnameRuleValue, err = amphora.ExactHostnameRuleValue(spec.Hostname)
+		if err != nil {
+			return invalid(err)
+		}
+	}
+
 	membersByKey := make(map[string]cloud.Member, len(spec.Members))
 	for _, member := range spec.Members {
 		if member.Port < 1 || member.Port > 65535 {
@@ -144,11 +154,12 @@ func (p *Provider) buildDesiredRoute(spec cloud.RouteSpec) (desiredRoute, error)
 		return invalid(errors.New("health monitor requires positive intervals, timeout below delay, and retry counts within 1-10"))
 	}
 	return desiredRoute{
-		identity:      identity,
-		spec:          spec,
-		members:       members,
-		healthMonitor: monitor,
-		policies:      policiesFor(spec),
+		identity:          identity,
+		spec:              spec,
+		members:           members,
+		healthMonitor:     monitor,
+		policies:          policiesFor(spec),
+		hostnameRuleValue: hostnameRuleValue,
 	}, nil
 }
 
@@ -173,19 +184,19 @@ func policiesFor(spec cloud.RouteSpec) []desiredPolicy {
 	}
 }
 
-func rulesFor(policy desiredPolicy, hostname string) []desiredRule {
+func rulesFor(policy desiredPolicy, hostnameRuleValue string) []desiredRule {
 	rules := []desiredRule{{
 		role:        roleRulePath,
 		ruleType:    l7policies.TypePath,
 		compareType: policy.compareType,
 		value:       policy.path,
 	}}
-	if hostname != "" {
+	if hostnameRuleValue != "" {
 		rules = append(rules, desiredRule{
 			role:        roleRuleHost,
 			ruleType:    l7policies.TypeHostName,
-			compareType: l7policies.CompareTypeEqual,
-			value:       hostname,
+			compareType: l7policies.CompareTypeRegex,
+			value:       hostnameRuleValue,
 		})
 	}
 	return rules

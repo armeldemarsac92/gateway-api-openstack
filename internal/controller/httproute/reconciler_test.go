@@ -475,6 +475,10 @@ func TestUnsupportedRouteCannotReserveGatewaySlot(t *testing.T) {
 		{name: "wildcard hostname", change: func(route *gatewayv1.HTTPRoute) {
 			route.Spec.Hostnames = []gatewayv1.Hostname{"*.example.test"}
 		}, kind: routeErrorUnsupported},
+		{name: "hostname exceeds Octavia L7 rule value limit after encoding", change: func(route *gatewayv1.HTTPRoute) {
+			label := strings.Repeat("a", 60)
+			route.Spec.Hostnames = []gatewayv1.Hostname{gatewayv1.Hostname(strings.Join([]string{label, label, label, label}, "."))}
+		}, kind: routeErrorUnsupported},
 		{name: "backend kind", change: func(route *gatewayv1.HTTPRoute) {
 			route.Spec.Rules[0].BackendRefs[0].Kind = ptr.To(gatewayv1.Kind("Pod"))
 		}, kind: routeErrorInvalidKind},
@@ -509,6 +513,12 @@ func TestUnsupportedRouteCannotReserveGatewaySlot(t *testing.T) {
 			var buildError *routeBuildError
 			if !errors.As(err, &buildError) || buildError.kind != test.kind {
 				t.Fatalf("unsupported route error = %v, want %s before backend lookup", err, test.kind)
+			}
+			if test.kind == routeErrorUnsupported {
+				status := statusForRouteBuildError(err)
+				if status.accepted != metav1.ConditionFalse || status.acceptedReason != string(gatewayv1.RouteReasonUnsupportedValue) {
+					t.Fatalf("unsupported route status = %+v, want Accepted=False/UnsupportedValue", status)
+				}
 			}
 		})
 	}

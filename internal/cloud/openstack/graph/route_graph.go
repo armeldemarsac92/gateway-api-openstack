@@ -459,7 +459,7 @@ func buildRoutePolicyPlan(
 			plan = append(plan, routeMutation{kind: routeMutationUpdatePolicy, id: policy.ID, parentID: poolID, policy: wantedPolicy})
 		}
 
-		wantedRules := rulesFor(wantedPolicy, desired.spec.Hostname)
+		wantedRules := rulesFor(wantedPolicy, desired.hostnameRuleValue)
 		actualRules := make(map[string]observedRouteRule, len(observedPolicy.rules))
 		for _, rule := range observedPolicy.rules {
 			actualRules[rule.role] = rule

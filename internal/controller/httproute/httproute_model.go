@@ -29,6 +29,7 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia/amphora"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
@@ -70,8 +71,14 @@ func validateRouteStructure(route *gatewayv1.HTTPRoute) (gatewayv1.BackendObject
 	if len(route.Spec.Hostnames) > 1 {
 		return gatewayv1.BackendObjectReference{}, newRouteBuildError(routeErrorUnsupported, "at most one exact hostname is supported")
 	}
-	if len(route.Spec.Hostnames) == 1 && strings.HasPrefix(string(route.Spec.Hostnames[0]), "*.") {
-		return gatewayv1.BackendObjectReference{}, newRouteBuildError(routeErrorUnsupported, "wildcard hostnames are not supported")
+	if len(route.Spec.Hostnames) == 1 {
+		hostname := string(route.Spec.Hostnames[0])
+		if strings.HasPrefix(hostname, "*.") {
+			return gatewayv1.BackendObjectReference{}, newRouteBuildError(routeErrorUnsupported, "wildcard hostnames are not supported")
+		}
+		if _, err := amphora.ExactHostnameRuleValue(hostname); err != nil {
+			return gatewayv1.BackendObjectReference{}, newRouteBuildError(routeErrorUnsupported, "%s", err)
+		}
 	}
 	if len(route.Spec.Rules) != 1 {
 		return gatewayv1.BackendObjectReference{}, newRouteBuildError(routeErrorUnsupported, "exactly one HTTPRoute rule is supported")
