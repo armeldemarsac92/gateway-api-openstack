@@ -177,7 +177,7 @@ func newE2EReport(startedAt time.Time, config e2eConfig) *e2eReport {
 		Suite:                 "OpenStack E2E foundations",
 		Status:                statusNotRun,
 		StartedAt:             startedAt.UTC(),
-		GatewayAPIBundle:      "v1.6.1 Standard Channel",
+		GatewayAPIBundle:      "Unverified",
 		ControllerRevision:    config.ControllerRevision,
 		ControllerImageDigest: config.ControllerImageDigest,
 		ProjectMode:           config.Project.Mode,

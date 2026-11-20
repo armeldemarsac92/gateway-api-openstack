@@ -17,7 +17,6 @@ limitations under the License.
 package controllercontract
 
 import (
-	"context"
 	"testing"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -40,12 +39,18 @@ func TestRequireGatewayAPICRDsChecksEveryInstalledDefinition(t *testing.T) {
 	}{
 		{name: "pinned Standard bundle"},
 		{name: "missing required CRD", change: func(objects []client.Object) []client.Object { return objects[1:] }, wantErr: true},
-		{name: "extra CRD from different version", change: func(objects []client.Object) []client.Object {
-			return append(objects, &apiextensionsv1.CustomResourceDefinition{ObjectMeta: metav1.ObjectMeta{Name: "grpcroutes.gateway.networking.k8s.io", Annotations: map[string]string{gatewayconsts.BundleVersionAnnotation: "v0.0.0"}}})
+		{name: "CRD from previous release", change: func(objects []client.Object) []client.Object {
+			objects[0].GetAnnotations()[gatewayconsts.BundleVersionAnnotation] = "v1.6.1"
+			return objects
 		}, wantErr: true},
-		{name: "experimental channel", change: func(objects []client.Object) []client.Object {
+		{name: "mixed channels", change: func(objects []client.Object) []client.Object {
 			objects[0].GetAnnotations()[gatewayconsts.ChannelAnnotation] = "experimental"
 			return objects
+		}, wantErr: true},
+		{name: "unexpected Gateway API CRD", change: func(objects []client.Object) []client.Object {
+			extra := objects[0].DeepCopyObject().(client.Object)
+			extra.SetName("xbackends.gateway.networking.x-k8s.io")
+			return append(objects, extra)
 		}, wantErr: true},
 		{name: "deleting CRD", change: func(objects []client.Object) []client.Object {
 			now := metav1.Now()
@@ -56,7 +61,7 @@ func TestRequireGatewayAPICRDsChecksEveryInstalledDefinition(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var objects []client.Object
-			for _, name := range []string{"gatewayclasses", "gateways", "httproutes", "referencegrants"} {
+			for _, name := range []string{"backendtlspolicies", "gatewayclasses", "gateways", "grpcroutes", "httproutes", "listenersets", "referencegrants", "tcproutes", "tlsroutes", "udproutes"} {
 				objects = append(objects, &apiextensionsv1.CustomResourceDefinition{ObjectMeta: metav1.ObjectMeta{
 					Name:        name + ".gateway.networking.k8s.io",
 					Annotations: map[string]string{gatewayconsts.BundleVersionAnnotation: gatewayconsts.BundleVersion, gatewayconsts.ChannelAnnotation: "standard"},
@@ -67,8 +72,13 @@ func TestRequireGatewayAPICRDsChecksEveryInstalledDefinition(t *testing.T) {
 				objects = test.change(objects)
 			}
 			reader := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
-			if err := RequireGatewayAPICRDs(context.Background(), reader); (err != nil) != test.wantErr {
-				t.Fatalf("RequireGatewayAPICRDs() = %v, want error %t", err, test.wantErr)
+			label, err := RequireGatewayAPICRDs(t.Context(), reader)
+			if test.wantErr {
+				if err == nil || label != "" {
+					t.Fatalf("RequireGatewayAPICRDs() = %q, %v, want error and no label", label, err)
+				}
+			} else if err != nil || label != "v1.7.0 Standard Channel" {
+				t.Fatalf("RequireGatewayAPICRDs() = %q, %v, want v1.7.0 Standard Channel", label, err)
 			}
 		})
 	}

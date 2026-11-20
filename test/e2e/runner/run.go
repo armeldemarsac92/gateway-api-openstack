@@ -254,7 +254,7 @@ func preflightKubernetes(ctx context.Context, kubeClient client.Client, config r
 	if err := runconfig.RequireClusterIdentity(ctx, kubeClient, config); err != nil {
 		return err
 	}
-	if err := controllercontract.RequireGatewayAPICRDs(ctx, kubeClient); err != nil {
+	if _, err := controllercontract.RequireGatewayAPICRDs(ctx, kubeClient); err != nil {
 		return err
 	}
 	if err := controllercontract.RequireClassConfigCRD(ctx, kubeClient); err != nil {

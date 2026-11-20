@@ -28,34 +28,43 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 )
 
-// RequireGatewayAPICRDs verifies the pinned Standard bundle without changing it.
-func RequireGatewayAPICRDs(ctx context.Context, reader client.Reader) error {
+// RequireGatewayAPICRDs returns the release label after verifying the installed
+// Standard CRD inventory, version and channel against the pinned release.
+func RequireGatewayAPICRDs(ctx context.Context, reader client.Reader) (string, error) {
+	missing := map[string]struct{}{
+		"backendtlspolicies.gateway.networking.k8s.io": {},
+		"gatewayclasses.gateway.networking.k8s.io":     {},
+		"gateways.gateway.networking.k8s.io":           {},
+		"grpcroutes.gateway.networking.k8s.io":         {},
+		"httproutes.gateway.networking.k8s.io":         {},
+		"listenersets.gateway.networking.k8s.io":       {},
+		"referencegrants.gateway.networking.k8s.io":    {},
+		"tcproutes.gateway.networking.k8s.io":          {},
+		"tlsroutes.gateway.networking.k8s.io":          {},
+		"udproutes.gateway.networking.k8s.io":          {},
+	}
 	var definitions metav1.PartialObjectMetadataList
 	definitions.SetGroupVersionKind(apiextensionsv1.SchemeGroupVersion.WithKind("CustomResourceDefinitionList"))
 	if err := reader.List(ctx, &definitions); err != nil {
-		return fmt.Errorf("list installed Gateway API CRDs: %w", err)
+		return "", fmt.Errorf("list installed Gateway API CRDs: %w", err)
 	}
-	present := make(map[string]struct{})
+	var version string
 	for _, definition := range definitions.Items {
 		if !controller.IsGatewayAPICRDName(definition.Name) {
 			continue
 		}
-		present[definition.Name] = struct{}{}
+		version = definition.Annotations[gatewayconsts.BundleVersionAnnotation]
+		_, expected := missing[definition.Name]
 		if !definition.DeletionTimestamp.IsZero() ||
-			definition.Annotations[gatewayconsts.BundleVersionAnnotation] != gatewayconsts.BundleVersion ||
-			definition.Annotations[gatewayconsts.ChannelAnnotation] != "standard" {
-			return fmt.Errorf("an installed Gateway API CRD is not from the pinned Standard bundle or is being deleted")
+			version != gatewayconsts.BundleVersion ||
+			definition.Annotations[gatewayconsts.ChannelAnnotation] != "standard" ||
+			!expected {
+			return "", fmt.Errorf("an installed Gateway API CRD is not from the pinned Standard bundle or is being deleted")
 		}
+		delete(missing, definition.Name)
 	}
-	for _, name := range []string{
-		"gatewayclasses.gateway.networking.k8s.io",
-		"gateways.gateway.networking.k8s.io",
-		"httproutes.gateway.networking.k8s.io",
-		"referencegrants.gateway.networking.k8s.io",
-	} {
-		if _, found := present[name]; !found {
-			return fmt.Errorf("a required Gateway API CRD is absent")
-		}
+	if len(missing) > 0 {
+		return "", fmt.Errorf("a required Gateway API CRD is absent")
 	}
-	return nil
+	return version + " Standard Channel", nil
 }

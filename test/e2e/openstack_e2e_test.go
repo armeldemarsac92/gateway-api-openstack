@@ -336,7 +336,12 @@ func (s *openStackSuite) verifyExplicitContext() error {
 }
 
 func (s *openStackSuite) verifyGatewayAPIBundle(ctx context.Context) error {
-	return controllercontract.RequireGatewayAPICRDs(ctx, s.client)
+	bundle, err := controllercontract.RequireGatewayAPICRDs(ctx, s.client)
+	if err != nil {
+		return err
+	}
+	s.report.GatewayAPIBundle = bundle
+	return nil
 }
 
 func (s *openStackSuite) verifyControllerDeployment(ctx context.Context) error {
