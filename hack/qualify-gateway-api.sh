@@ -133,7 +133,9 @@ elif action == 'preflight':
     channel_key = 'gateway.networking.k8s.io/channel'
     groups = {'gateway.networking.k8s.io', 'gateway.networking.x-k8s.io'}
     expected = list(yaml.safe_load_all(Path('bundle.yaml').read_text()))
-    observed = {obj['metadata']['name']: obj for obj in json_file('crds.json')['items']
+    definitions = json_file('crds.json')
+    assert definitions['apiVersion'] == 'apiextensions.k8s.io/v1' and definitions['kind'] == 'CustomResourceDefinitionList'
+    observed = {obj['metadata']['name']: obj for obj in definitions['items']
                 if obj['spec']['group'] in groups or version_key in obj['metadata'].get('annotations', {})
                 or channel_key in obj['metadata'].get('annotations', {})}
     assert observed.keys() == {obj['metadata']['name'] for obj in expected if obj['kind'] == 'CustomResourceDefinition'}, 'CRD inventory differs from the release'
@@ -141,12 +143,17 @@ elif action == 'preflight':
         name, kind = released['metadata']['name'], released['kind']
         if kind == 'CustomResourceDefinition':
             live = observed[name]
+            # The typed list carries its items' GVK in the list envelope on the wire.
+            live.setdefault('kind', 'CustomResourceDefinition')
+            live.setdefault('apiVersion', definitions['apiVersion'])
             assert any(c['type'] == 'Established' and c['status'] == 'True' for c in live['status']['conditions']), name
         else:
             live = json_file(f'{kind}.json')
         for key in (version_key, channel_key):
             assert live['metadata'].get('annotations', {}).get(key) == released['metadata']['annotations'][key], (name, key)
-        assert live['kind'] == kind and live['metadata']['name'] == name and spec(live) == spec(released), (kind, name)
+        assert not live['metadata'].get('deletionTimestamp'), (kind, name, 'terminating')
+        assert live['apiVersion'] == released['apiVersion'] and live['kind'] == kind and live['metadata']['name'] == name, (kind, name)
+        assert spec(live) == spec(released), (kind, name, 'spec differs from the release')
 else:
     mode, profiles = mode_args
     outcomes = {'pass': 'PASS', 'fail': 'FAIL', 'skip': 'SKIP'}

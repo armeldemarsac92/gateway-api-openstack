@@ -16,6 +16,8 @@ Both channel runs are **UNRUN**. A designated disposable Hibiscus environment an
 
 Designate separate disposable control planes and cloud scopes for Standard and Experimental. Install the respective v1.7.0 release bundles before qualification. Set the controller to the same channel as the bundle. Provide the selected GatewayClass and an enrolled mesh dataplane for the Service-parent cases. The upstream Gateway fixtures use multiple listeners, HTTPS and Kubernetes Service backends. Allow the runner to reach the private VIPs, the provider to reach backend endpoints, and enrolled clients to reach the mesh Services. Check the cloud resource budget and provide real usable and unusable addresses for the static address tests. See the [release bundles](https://github.com/kubernetes-sigs/gateway-api/releases/tag/v1.7.0) and [controller installation guide](../../getting-started.md).
 
+Apply each published manifest with server-side apply against its designated context. The Experimental HTTPRoute CRD exceeds the annotation size limit used by client-side apply. On an empty disposable control plane the release installs with `kubectl --context "$DISPOSABLE_CONTEXT" apply --server-side -f "$RELEASE_FILE"`. The preflight compares each persisted CRD and admission spec with the published asset after API-server defaulting.
+
 Use a dedicated Linux runner for each channel. Provide Git, Go 1.27.4, `curl`, `kubectl`, Python 3 with PyYAML, and access to the Kubernetes API and the pinned upstream source, release files, Go dependencies and test images. Keep the runner directory on private persistent storage outside the checkout. Provide these files under that directory.
 
 | File | Contents |
