@@ -2,8 +2,6 @@ name: OpenStack E2E
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '23 3 * * 1'
 
 permissions:
   contents: read
@@ -15,13 +13,13 @@ concurrency:
 jobs:
   e2e:
     if: >-
-      github.repository == 'gateway-api-openstack/gateway-api-openstack' &&
-      github.ref == 'refs/heads/main' && vars.OPENSTACK_E2E_ENABLED == 'true'
+      github.ref_type == 'branch' && github.ref_name == github.event.repository.default_branch &&
+      vars.OPENSTACK_E2E_ENABLED == 'true'
     environment: openstack-e2e
     runs-on: [self-hosted, linux, openstack-e2e]
     timeout-minutes: 360
     env:
-      E2E_CONFIG: ${{ vars.OPENSTACK_E2E_CONFIG }}
+      E2E_CONFIG: ${{ secrets.OPENSTACK_E2E_CONFIG }}
     steps:
       - name: Check durable run state before checkout
         shell: bash
@@ -32,16 +30,17 @@ jobs:
             echo '::error::Configure an absolute private E2E config path on the runner'
             exit 1
           fi
-          config="$(realpath -e -- "${E2E_CONFIG}")"
+          config="$(realpath -e -- "${E2E_CONFIG}" 2>/dev/null)"
           workspace="$(realpath -m -- "${GITHUB_WORKSPACE}")"
-          if [[ "${config}" == "${workspace}" || "${config}" == "${workspace}/"* ]]; then
-            echo '::error::E2E config and pending state must be outside the checkout'
+          if [[ "${config}" == "${workspace}" || "${config}" == "${workspace}/"* || "${config}" == *$'\n'* || "${config}" == *$'\r'* ]]; then
+            echo '::error::Use a single-line private E2E config path outside the checkout'
             exit 1
           fi
           if ! mkdir -- "${config}.pending" 2>/dev/null; then
             echo '::error::A previous run needs cleanup review before another run can start'
             exit 1
           fi
+          echo "::add-mask::${config//%/%25}"
           printf 'E2E_CONFIG=%s\n' "${config}" >>"${GITHUB_ENV}"
 
       - name: Check out reviewed source
