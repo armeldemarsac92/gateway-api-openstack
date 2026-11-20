@@ -57,11 +57,12 @@ type routeProviderWarning struct {
 }
 
 type httpRouteScope struct {
-	route      *gatewayv1.HTTPRoute
-	statusPlan *routeStatusPlan
-	warning    *routeProviderWarning
-	patchCause error
-	skipPatch  bool
+	route       *gatewayv1.HTTPRoute
+	statusPlan  *routeStatusPlan
+	warning     *routeProviderWarning
+	patchCause  error
+	skipPatch   bool
+	versionSkew bool
 }
 
 func (r *Reconciler) newHTTPRouteScope(

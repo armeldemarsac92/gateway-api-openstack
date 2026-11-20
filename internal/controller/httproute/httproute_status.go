@@ -71,9 +71,9 @@ func (r *Reconciler) setRouteStatusesAndDetach(
 		return result, nil
 	}
 	if errors.Is(cleanupErr, controller.ErrUnsupportedGatewayAPIVersion) {
-		// A restored grant can invalidate the cleanup decision while the bundle
-		// is still unsupported. Reconcile again from the current inputs.
-		if slices.ContainsFunc(updates, func(update parentStatusUpdate) bool {
+		// Retry if the live cleanup check no longer confirms the reason for
+		// taking forwarding down during the freeze.
+		if scope.versionSkew || slices.ContainsFunc(updates, func(update parentStatusUpdate) bool {
 			return update.status.resolvedReason == string(gatewayv1.RouteReasonRefNotPermitted)
 		}) {
 			scope.statusPlan = nil

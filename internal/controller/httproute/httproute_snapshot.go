@@ -521,6 +521,10 @@ func (r *Reconciler) buildRouteCleanupSnapshot(
 		return snapshot, nil
 	}
 	if err := r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
+		if errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) &&
+			!r.routeForwardingEstablished(&route, managedParentsFromObservations(parentObservations), stored) {
+			return snapshot, nil
+		}
 		return routeCleanupSnapshot{}, err
 	}
 	parentObservations, err = r.observeRouteParentsForCleanup(ctx, &route)
@@ -533,6 +537,9 @@ func (r *Reconciler) buildRouteCleanupSnapshot(
 	}
 	parent := managedParents[0]
 	if !controller.GatewayClassSupportsInstalledVersion(parent.gatewayClass) {
+		if !r.routeForwardingEstablished(&route, managedParents, stored) {
+			return snapshot, nil
+		}
 		return routeCleanupSnapshot{}, controller.ErrUnsupportedGatewayAPIVersion
 	}
 	if validateRouteParent(&route, parent) != nil || !structurallySupportedRoute(&route) {

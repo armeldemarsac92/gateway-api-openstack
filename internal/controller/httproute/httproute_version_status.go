@@ -27,6 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 )
 
@@ -80,14 +81,25 @@ func (r *Reconciler) setRouteUnsupportedVersion(
 	if err != nil {
 		return ctrl.Result{}, err
 	}
+	identity, bound, err := r.storedRouteIdentity(&current)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	detach := bound && (rejection != nil || !r.routeForwardingEstablished(&current, parents, identity))
 	updates := make([]parentStatusUpdate, 0, len(parents)+1)
 	for _, parent := range parents {
-		status := r.unsupportedGatewayAPIVersionRouteStatus(&current, parent.ref)
+		status := unsupportedGatewayAPIVersionRouteStatus()
 		if rejection != nil {
 			unresolved := statusForRouteBuildError(rejection)
 			unresolved.accepted, unresolved.acceptedReason, unresolved.acceptedMessage =
 				status.accepted, status.acceptedReason, status.acceptedMessage
 			status = unresolved
+		} else if !detach {
+			if programmed := r.currentRouteProgrammedCondition(&current, parent.ref); programmed != nil {
+				status.programmed = programmed.Status
+				status.programmedReason = programmed.Reason
+				status.programmedMessage = programmed.Message
+			}
 		}
 		updates = append(updates, parentStatusUpdate{
 			parent: parent.ref,
@@ -95,7 +107,8 @@ func (r *Reconciler) setRouteUnsupportedVersion(
 		})
 	}
 	*route = current
-	if rejection != nil && controller.RouteHasControllerBinding(r.Config, &current) {
+	if detach {
+		scope.versionSkew = true
 		return r.setRouteStatusesAndDetach(ctx, scope, updates)
 	}
 	scope.setStatuses(updates)
@@ -106,11 +119,20 @@ func (r *Reconciler) setRouteUnsupportedVersion(
 	return result, nil
 }
 
-func (r *Reconciler) unsupportedGatewayAPIVersionRouteStatus(
+// routeForwardingEstablished proves that the declared backend belongs to the
+// last programmed route revision. A binding alone does not record that revision.
+func (r *Reconciler) routeForwardingEstablished(route *gatewayv1.HTTPRoute, parents []managedRouteParent, identity cloud.Identity) bool {
+	if len(route.Spec.ParentRefs) != 1 || len(parents) != 1 ||
+		!controller.SameGatewayIdentity(identity, controller.RouteIdentity(r.Config, parents[0].gateway, route)) {
+		return false
+	}
+	return r.currentRouteProgrammedCondition(route, parents[0].ref) != nil
+}
+
+func (r *Reconciler) currentRouteProgrammedCondition(
 	route *gatewayv1.HTTPRoute,
 	parentRef gatewayv1.ParentReference,
-) routeReconcileStatus {
-	status := unsupportedGatewayAPIVersionRouteStatus()
+) *metav1.Condition {
 	for _, parent := range route.Status.Parents {
 		if parent.ControllerName != r.Config.ControllerName ||
 			!controller.ParentRefsEqual(parent.ParentRef, route.Namespace, parentRef, route.Namespace) {
@@ -119,11 +141,9 @@ func (r *Reconciler) unsupportedGatewayAPIVersionRouteStatus(
 		programmed := meta.FindStatusCondition(parent.Conditions, r.Config.Domain()+"/Programmed")
 		if programmed != nil && programmed.Status == metav1.ConditionTrue &&
 			programmed.ObservedGeneration == route.Generation {
-			status.programmed = programmed.Status
-			status.programmedReason = programmed.Reason
-			status.programmedMessage = programmed.Message
+			return programmed
 		}
 		break
 	}
-	return status
+	return nil
 }
