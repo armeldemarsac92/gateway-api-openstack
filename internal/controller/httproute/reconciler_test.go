@@ -502,7 +502,7 @@ func TestUnsupportedRouteCannotReserveGatewaySlot(t *testing.T) {
 			current.CreationTimestamp = metav1.NewTime(time.Unix(2, 0))
 			kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).WithObjects(older, current).Build()
 			gateway := programmedTestGateway(cfg)
-			reconciler := newTestReconciler(Reconciler{Client: kubeClient, Config: cfg}, nil)
+			reconciler := newTestReconciler(Reconciler{Client: kubeClient, APIReader: kubeClient, Config: cfg}, nil)
 			selected, err := reconciler.isSelectedRoute(t.Context(), current, managedRouteParent{
 				ref: parent, gateway: gateway, listener: &gateway.Spec.Listeners[0],
 			})

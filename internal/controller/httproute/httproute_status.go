@@ -334,8 +334,11 @@ func rejectedRouteStatus(reason, message string) routeReconcileStatus {
 	}
 }
 
-func rejectedServiceProfileStatus(err error) routeReconcileStatus {
+func routeSlotRejectionStatus(err error) routeReconcileStatus {
 	status := statusForRouteBuildError(err)
+	if status.resolvedReason == string(gatewayv1.RouteReasonRefNotPermitted) {
+		return status
+	}
 	status.accepted = metav1.ConditionFalse
 	status.acceptedReason = string(gatewayv1.RouteReasonUnsupportedValue)
 	status.acceptedMessage = err.Error()

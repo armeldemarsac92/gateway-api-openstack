@@ -1,0 +1,9 @@
+# Service ReferenceGrants
+
+An HTTPRoute attached to a Gateway in the route's namespace can refer to a core Service in a different namespace. A non-deleting ReferenceGrant in the Service's namespace must allow the HTTPRoute's group, kind, and namespace, and the core Service kind. When the grant specifies a target name, it must match the referenced Service. The Gateway's configured NodePort or Endpoint member mode still determines how the authorized Service is resolved.
+
+The route reconciler checks live grants before reading a cross-namespace Service for route selection. The Gateway-UID graph writer rebuilds and checks backend inputs before programming the route. ReferenceGrant changes enqueue affected routes, including those whose references were previously denied. If a reference loses authorization, reconciliation sets `ResolvedRefs=False` with reason `RefNotPermitted` and removes forwarding through the existing cleanup path for the bound Gateway.
+
+The controller envtest uses the Gateway API v1.7.0 CRDs, a Kubernetes API server, and a recording cloud provider. It checks denial before granting, forwarding to the remote Service's NodePort despite a local Service with the same name, and removal of the bound route fragment when the matching grant starts deleting.
+
+The stock Amphora path removes forwarding on denial. The required Core HTTP 500 for an invalid backend remains blocked by the [Octavia response API](../../design/conformance-feasibility.md#required-http-responses). Live traffic and full cross-namespace ReferenceGrant conformance remain unqualified.

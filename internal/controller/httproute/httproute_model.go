@@ -110,18 +110,18 @@ func validateRouteStructure(route *gatewayv1.HTTPRoute) (gatewayv1.BackendObject
 	if backend.Kind != nil && *backend.Kind != gatewayv1.Kind("Service") {
 		return gatewayv1.BackendObjectReference{}, newRouteBuildError(routeErrorInvalidKind, "backendRef kind %q is unsupported; use Service", *backend.Kind)
 	}
-	backendNamespace := route.Namespace
-	if backend.Namespace != nil {
-		backendNamespace = string(*backend.Namespace)
-	}
-	if backendNamespace != route.Namespace {
-		return gatewayv1.BackendObjectReference{}, newRouteBuildError(routeErrorRefNotPermitted, "cross-namespace backendRefs require ReferenceGrant and are deferred until Phase 5")
-	}
 	if backend.Port == nil {
 		return gatewayv1.BackendObjectReference{}, newRouteBuildError(routeErrorUnsupported, "backendRef port is required")
 	}
 
 	return backend.BackendObjectReference, nil
+}
+
+func checkBackendReference(namespace string, target types.NamespacedName, grants []gatewayv1.ReferenceGrant) error {
+	if !model.BackendReferenceAllowed(namespace, target, grants) {
+		return newRouteBuildError(routeErrorRefNotPermitted, "backend Service %s is not permitted by a ReferenceGrant", target)
+	}
+	return nil
 }
 
 func (r *Reconciler) buildRouteModelWithReader(
@@ -151,7 +151,10 @@ func (r *Reconciler) buildRouteModelFromInputs(
 	if err != nil {
 		return cloud.RouteSpec{}, err
 	}
-	key := types.NamespacedName{Namespace: route.Namespace, Name: string(reference.Name)}
+	key, _ := model.BackendServiceReference(route.Namespace, reference)
+	if err := checkBackendReference(route.Namespace, key, inputs.input.ReferenceGrants); err != nil {
+		return cloud.RouteSpec{}, err
+	}
 	service := inputs.service(key)
 	if service == nil {
 		return cloud.RouteSpec{}, fmt.Errorf("get backend Service: %w", apierrors.NewNotFound(corev1.Resource("services"), key.Name))
@@ -223,7 +226,7 @@ func supportedRouteModel(logical model.Gateway, mode cloud.MemberMode) (model.Ro
 		return unsupported()
 	}
 	backend := rule.Backends[0]
-	if backend.Diagnostic != nil || backend.Port == nil || backend.Weight == 0 || backend.Service.Namespace != route.Source.Namespace {
+	if backend.Diagnostic != nil || backend.Port == nil || backend.Weight == 0 || backend.Authorization != model.BackendAuthorizationAllowed {
 		return unsupported()
 	}
 	if mode == cloud.MemberModeNodePort && backend.Port.NodePort == 0 {

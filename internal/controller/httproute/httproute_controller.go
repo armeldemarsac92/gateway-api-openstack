@@ -199,7 +199,7 @@ func (r *Reconciler) validateCachedRouteDecision(
 			decision.disposition = cachedRouteDetach
 			decision.statusUpdates = []parentStatusUpdate{{
 				parent: parent.ref,
-				status: rejectedServiceProfileStatus(slot.rejection),
+				status: routeSlotRejectionStatus(slot.rejection),
 			}}
 			return decision, nil
 		}

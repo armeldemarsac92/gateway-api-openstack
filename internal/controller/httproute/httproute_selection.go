@@ -23,12 +23,13 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
 func (r *Reconciler) isSelectedRoute(ctx context.Context, route *gatewayv1.HTTPRoute, parent managedRouteParent) (bool, error) {
@@ -104,8 +105,23 @@ func (r *Reconciler) evaluateRouteSlotWithReader(
 		return routeSlotDecision{}, err
 	}
 	backend := route.Spec.Rules[0].BackendRefs[0]
+	key, _ := model.BackendServiceReference(route.Namespace, backend.BackendObjectReference)
+	if key.Namespace != route.Namespace {
+		// Cached selection must not rely on a stale grant to inspect a Service.
+		if r.APIReader == nil {
+			return routeSlotDecision{}, controller.ErrAPIReaderRequired
+		}
+		reader = r.APIReader
+		grants, err := graph.ListBackendReferenceGrants(ctx, reader, key.Namespace)
+		if err != nil {
+			return routeSlotDecision{}, err
+		}
+		if err := checkBackendReference(route.Namespace, key, grants); err != nil {
+			return routeSlotDecision{rejection: err}, nil
+		}
+	}
 	var service corev1.Service
-	if err := reader.Get(ctx, types.NamespacedName{Namespace: route.Namespace, Name: string(backend.Name)}, &service); err != nil {
+	if err := reader.Get(ctx, key, &service); err != nil {
 		if apierrors.IsNotFound(err) {
 			return routeSlotDecision{canReserve: true}, nil
 		}

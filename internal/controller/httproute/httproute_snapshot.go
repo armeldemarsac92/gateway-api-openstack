@@ -34,6 +34,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	gatewaycontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
 type routeSnapshotPurpose int
@@ -268,7 +269,11 @@ func (r *Reconciler) selectAndBuildRouteModel(
 	}
 	evaluate := func(route *gatewayv1.HTTPRoute) (routeSlotDecision, error) {
 		reference := route.Spec.Rules[0].BackendRefs[0]
-		service := inputs.service(types.NamespacedName{Namespace: route.Namespace, Name: string(reference.Name)})
+		key, _ := model.BackendServiceReference(route.Namespace, reference.BackendObjectReference)
+		if err := checkBackendReference(route.Namespace, key, inputs.input.ReferenceGrants); err != nil {
+			return routeSlotDecision{rejection: err}, nil
+		}
+		service := inputs.service(key)
 		return routeSlotForService(service, *reference.Port, topology.Topology.MemberMode), nil
 	}
 	selection := routeSelectionSnapshot{}

@@ -34,6 +34,7 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
 func (r *Reconciler) enqueueHTTPRoutePeers(ctx context.Context, object client.Object) []reconcile.Request {
@@ -156,7 +157,12 @@ func (r *Reconciler) enqueueHTTPRoutesForNode(ctx context.Context, object client
 			continue
 		}
 		backend := route.Spec.Rules[0].BackendRefs[0]
-		serviceKey := types.NamespacedName{Namespace: route.Namespace, Name: string(backend.Name)}
+		serviceKey, _ := model.BackendServiceReference(route.Namespace, backend.BackendObjectReference)
+		if serviceKey.Namespace != route.Namespace {
+			// Let reconciliation check the live grant before reading this Service.
+			keys[client.ObjectKeyFromObject(route)] = struct{}{}
+			continue
+		}
 		service, err := inputs.service(ctx, r.Client, serviceKey)
 		if err != nil {
 			if !apierrors.IsNotFound(err) {

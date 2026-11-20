@@ -189,6 +189,9 @@ func TestControllerEnvtest(t *testing.T) {
 		testHTTPRouteReferenceIndexUpdates(t, apiClient, cacheClient)
 	})
 	testGraphWriterTriggerEquivalence(t, apiClient, cacheClient, config, gateway)
+	t.Run("HTTPRoute Service ReferenceGrant lifecycle", func(t *testing.T) {
+		testHTTPRouteServiceReferenceGrant(t, apiClient, cacheClient, config, gateway)
+	})
 	testFinalizersWithNewReconciler(t, apiClient, cacheClient, config, gatewayClass, gateway)
 	t.Run("GatewayClass topology isolation", func(t *testing.T) {
 		testGatewayClassTopologyIsolation(t, apiClient, cacheClient, config)

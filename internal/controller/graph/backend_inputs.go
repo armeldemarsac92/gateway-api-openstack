@@ -62,11 +62,11 @@ func CollectBackendInputs(ctx context.Context, reader client.Reader, gateway *ga
 		}
 	}
 	for _, namespace := range slices.Sorted(maps.Keys(grantNamespaces)) {
-		var grants gatewayv1.ReferenceGrantList
-		if err := reader.List(ctx, &grants, client.InNamespace(namespace)); err != nil {
-			return model.Input{}, fmt.Errorf("list backend ReferenceGrants in namespace %s: %w", namespace, err)
+		grants, err := ListBackendReferenceGrants(ctx, reader, namespace)
+		if err != nil {
+			return model.Input{}, err
 		}
-		input.ReferenceGrants = append(input.ReferenceGrants, grants.DeepCopy().Items...)
+		input.ReferenceGrants = append(input.ReferenceGrants, grants...)
 	}
 	slices.SortFunc(input.ReferenceGrants, func(a, b gatewayv1.ReferenceGrant) int {
 		return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
@@ -108,6 +108,15 @@ func CollectBackendInputs(ctx context.Context, reader client.Reader, gateway *ga
 		return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
 	})
 	return input, nil
+}
+
+// ListBackendReferenceGrants reads a Service target namespace before backend access.
+func ListBackendReferenceGrants(ctx context.Context, reader client.Reader, namespace string) ([]gatewayv1.ReferenceGrant, error) {
+	var grants gatewayv1.ReferenceGrantList
+	if err := reader.List(ctx, &grants, client.InNamespace(namespace)); err != nil {
+		return nil, fmt.Errorf("list backend ReferenceGrants in namespace %s: %w", namespace, err)
+	}
+	return grants.DeepCopy().Items, nil
 }
 
 func backendServiceReferences(routes []gatewayv1.HTTPRoute) map[types.NamespacedName]map[string]struct{} {
