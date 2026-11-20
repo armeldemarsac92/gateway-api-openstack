@@ -2,7 +2,7 @@
 
 ## Boundary and versions
 
-This is source and package evidence, not a deployed-inventory or runtime result. [Hibiscus release index](https://releases.openstack.org/hibiscus/) lists Magnum **23.0.0**, commit `1910928b7d9f788b8a959877efe3806e2c623e09`, as both first and latest Hibiscus release at inspection. The independent [Magnum release index](https://releases.openstack.org/teams/magnum.html) lists **magnum-capi-helm 1.4.0**, `a8b82c2480a286a10b60ecc1d94c6cd9f1d01823`, as latest 1.4 release. These are baselines, not evidence of what any deployment runs. Driver selection is request/template, image property, configured default, then registered-driver fallback; [validation](https://github.com/openstack/magnum/blob/1910928b7d9f788b8a959877efe3806e2c623e09/magnum/api/validation.py#L65) writes the resolved driver into the template. Inspect the real template, service packages and configuration before applying these findings.
+This report covers source, package and local Kubernetes API evidence. [Hibiscus release index](https://releases.openstack.org/hibiscus/) lists Magnum **23.0.0**, commit `1910928b7d9f788b8a959877efe3806e2c623e09`, as both first and latest Hibiscus release at inspection. The independent [Magnum release index](https://releases.openstack.org/teams/magnum.html) lists **magnum-capi-helm 1.4.0**, `a8b82c2480a286a10b60ecc1d94c6cd9f1d01823`, as latest 1.4 release. These are baselines, not evidence of what any deployment runs. Driver selection is request/template, image property, configured default, then registered-driver fallback; [validation](https://github.com/openstack/magnum/blob/1910928b7d9f788b8a959877efe3806e2c623e09/magnum/api/validation.py#L65) writes the resolved driver into the template. Inspect the real template, service packages and configuration before applying these findings.
 
 ## Real chart and render path
 
@@ -22,7 +22,21 @@ The actual packaged `openstack-cluster/charts/cluster-addons/templates/custom-ad
 * [Upgrade](https://github.com/openstack/magnum-capi-helm/blob/a8b82c2480a286a10b60ecc1d94c6cd9f1d01823/magnum_capi_helm/driver.py#L1299) changes template and re-renders; viability validation is TODO. `rollback` parameters on update/upgrade are not used in the inspected path. Helm history is not an automatic verified rollback. Define version compatibility and recovery before upgrading shared CRDs or controller.
 * [Delete](https://github.com/openstack/magnum-capi-helm/blob/a8b82c2480a286a10b60ecc1d94c6cd9f1d01823/magnum_capi_helm/driver.py#L1266) marks nodegroups deleting and uninstalls management release asynchronously; not-found uninstall is tolerated, other errors propagate ([helm client](https://github.com/openstack/magnum-capi-helm/blob/a8b82c2480a286a10b60ecc1d94c6cd9f1d01823/magnum_capi_helm/helm.py#L113)). Once CAPI Cluster disappears, [cleanup](https://github.com/openstack/magnum-capi-helm/blob/a8b82c2480a286a10b60ecc1d94c6cd9f1d01823/magnum_capi_helm/driver.py#L340) removes labeled management Secrets and credential; credential deletion errors become status_reason while status becomes DELETE_COMPLETE. No Gateway graph cleanup gate is established in this path. An addon must finalize Gateway resources while workload API, controller and credential remain available, confirm identity-scoped cloud absence, and only then uninstall/revoke. A bounded failure/retry and explicit operator orphan-recovery path is required if the workload API is lost; do not delete by broad project or generic LB description. Preserve API-server and OCCM Service LBs, other tenants, shared CRDs, GatewayClasses and admission resources owned elsewhere.
 
-## Minimal acceptance and missing inputs
+## Local lifecycle rehearsal
+
+The patched driver rendered the checksum-verified parent chart with Helm 3.19.4. The first render used the resize path for an enrolled fixture. The next render used a compatible template upgrade after removing the original template from the allowlist. The CAPI enrollment annotation, controller name and cluster UUID stayed bound to the same cluster. Both image inputs were synthetic digest references.
+
+Kubernetes 1.36.2 envtest served the management addon and its source Secret and the workload objects. The upstream cluster-api-addon-provider 0.6.1 `Manifests` model, Jinja loader and chart builder read that Secret and built the workload charts. With Helm readiness waiting disabled, the Helm client installed revision 1, upgraded to revision 2 and rolled back to the first chart as revision 3. The Deployment's UID and the external GatewayClass survived, and rollback restored the first image digest.
+
+Replacing the dedicated workload Secret updated `clouds.yaml` and its CA key while retaining the Secret UID. Omitting the old key from `stringData` in an apply left it behind. Updating the full data map with the current resource version removed it. The Secret update left the Deployment template unchanged until a rollout restart request changed it. The restarted template referenced the complete Secret volume. Helm upgrade and rollback kept the replacement data and the retired key stayed absent.
+
+Helm uninstall removed the five release objects. The independently owned workload namespace, Cloud Secret, GatewayClass and control ClusterRole kept their UIDs, as did the sampled HTTPRoute and addon Manifests CRDs. The workload Secret still contained the replacement data. This exercise used the workload chart on envtest. A full cluster delete must also drain the live provider graph and run the management-plane deletion flow.
+
+A separate test starts fresh production Go service clients against a loopback Keystone HTTPS endpoint. After replacement at the same file paths, the new clients authenticate and discover the same region and Octavia and Neutron endpoints. Trusting only the retired CA stops authentication during the TLS handshake. The replacement CA and retired credential receive HTTP 401. [Client rotation test](../../../internal/cloud/openstack/clients/rotation_test.go)
+
+The local control plane ran without a scheduler, kubelet or full addon reconciliation loop. Pod startup, projection into a running controller, authentication with deployed Keystone and continuity of Gateway traffic still need a live cluster.
+
+## Live acceptance and missing inputs
 
 | Scenario | Status | Required proof / inputs |
 |---|---|---|
@@ -33,4 +47,4 @@ The actual packaged `openstack-cluster/charts/cluster-addons/templates/custom-ad
 | Upgrade/rollback | Unrun | Explicit compatibility and shared CRD owner; pinned pre/post versions, traffic and ownership, failed upgrade recovery without deleting existing graphs. |
 | Disable/uninstall and delete | Unrun | Stop creation, finalize routes/Gateways while controller/credential alive, audit zero identity-owned cloud resources, retain other LBs and shared CRDs; retry and operator orphan recovery when API is unavailable. |
 
-This source inspection verified the package digest and templates; no cloud calls, cloud credentials, tests against a cluster, provider traffic or deletion were performed. The fork’s [operator guide](magnum-operator.md) covers the opt-in patch, the real driver render check and the deployment steps. The published chart URL and archive checksum above identify the package used in this inspection.
+The fork’s [operator guide](magnum-operator.md) covers the opt-in patch, the driver render check and the deployment steps. The published chart URL and archive checksum above identify the package used in the local rehearsal.

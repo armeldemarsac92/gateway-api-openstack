@@ -9,6 +9,18 @@ resources:
   - ../../../config/manager
 
 patches:
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: openstack-gateway-controller
+      spec:
+        template:
+          spec:
+            volumes:
+              - name: openstack-clouds
+                secret:
+                  items: null
   - target:
       kind: ConfigMap
       name: openstack-gateway-controller-config

@@ -536,10 +536,10 @@ index a72d69ed7be97016b1dfdead917f366c521da37b..648ef19e19850fa6c2a2d61371c8e70e
              name="cluster_example_$A",
 diff --git a/magnum_capi_helm/tests/test_gateway_api.py b/magnum_capi_helm/tests/test_gateway_api.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..199110ec78e61c754f55ea9197c479459d23f6ed
+index 0000000000000000000000000000000000000000..cfcef16869518a1c299c27445a5038adfeee0385
 --- /dev/null
 +++ b/magnum_capi_helm/tests/test_gateway_api.py
-@@ -0,0 +1,451 @@
+@@ -0,0 +1,462 @@
 +# Licensed under the Apache License, Version 2.0 (the "License"); you may
 +# not use this file except in compliance with the License. You may obtain
 +# a copy of the License at
@@ -957,9 +957,20 @@ index 0000000000000000000000000000000000000000..199110ec78e61c754f55ea9197c47945
 +            conf.CONF.capi_helm.gateway_api_controller_image,
 +            pod["containers"][0]["image"],
 +        )
-+        self.assertEqual(
-+            "openstack-clouds", pod["volumes"][0]["secret"]["secretName"]
++        volume = next(
++            volume
++            for volume in pod["volumes"]
++            if volume.get("secret", {}).get("secretName") == "openstack-clouds"
 +        )
++        mount = next(
++            mount
++            for mount in pod["containers"][0]["volumeMounts"]
++            if mount["name"] == volume["name"]
++        )
++        self.assertEqual("/etc/openstack", mount["mountPath"])
++        self.assertNotIn("items", volume["secret"])
++        self.assertNotIn("subPath", mount)
++        self.assertNotIn("subPathExpr", mount)
 +        binding = next(
 +            resource
 +            for resource in resources
