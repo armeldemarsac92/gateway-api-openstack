@@ -12,7 +12,25 @@ The first reconciliation observes the complete Gateway graph with an enabled hos
 
 The fixture uses Octavia 19.0.0 at `93689cb7701da65b5aad387bb824c477c64b0f2b` for the public paths, list filters, response shapes and HTTP 204 deletion. Octavia accepts a conjunction of discovery tags as repeated or comma-separated query values. Dedicated child lists supply the full child records and their tags. Neutron supplies the independent Floating IP inventory. [Octavia load balancer controller][loadbalancer] · [Octavia list filtering][filtering] · [Octavia response types][types] · [Neutron Networking API][neutron]
 
-Evidence level is local simulation. The fixture models the administrative update as pending until the load balancer configuration has converged. Live Magnum and OCCM lifecycle, authentication and authorization, Octavia provisioning, traffic and Gateway API conformance require a designated Hibiscus deployment.
+The fixture models the administrative update as pending until the load balancer configuration has converged. Live Octavia provisioning, Magnum and OCCM reachability, and the full Gateway API suite require the private test environment.
+
+## HTTP traffic from the adapter's own writes
+
+The [loopback pilot](../../../internal/cloud/openstack/graph/hibiscus_traffic_test.go) starts with two unrelated control load balancers. It runs the production graph reconciler through Gophercloud against a small in-memory Octavia transport. The stock Octavia Python renderer reads the resulting listener, pool, member, monitor and L7 policies. A real HAProxy process serves its configuration and a local HTTP backend echoes the Host. The frontend and member ports are bound on loopback.
+
+Use Linux with unprivileged user namespaces and util-linux `unshare`, a HAProxy binary, and a dedicated Python environment with the two tagged distributions. The local run used HAProxy 3.0.19.
+
+```sh
+python3 -m venv /tmp/hibiscus-octavia
+/tmp/hibiscus-octavia/bin/python -m pip install 'octavia==19.0.0' 'octavia-lib==3.12.0'
+HIBISCUS_OCTAVIA_PYTHON=/tmp/hibiscus-octavia/bin/python \
+HIBISCUS_HAPROXY=/absolute/path/to/haproxy \
+  go test -count=1 -v -run '^TestHibiscusPrivateHTTPTraffic$' ./internal/cloud/openstack/graph
+```
+
+Before and after creating a fresh provider instance, `GET /api` with `Host: API.Example.COM:1234` returned `200` and `hibiscus-node-backend API.Example.COM:1234`. HAProxy also reached the backend health endpoint. Reconciliation after restart rediscovered the settled graph without a new cloud write. A different valid hostname or path returned `503`, documenting the stock gap against the required route-miss `404`. The disabled configuration refused a new connection before the owned graph was removed. The final inventory contained the two original controls.
+
+This exercises a real TCP connection, HTTP client, HAProxy process, stock renderer and echo backend. Keystone, Amphora orchestration, the worker NodePort, controller Pod restart and traffic through both control load balancers remain live qualification steps.
 
 [loadbalancer]: https://opendev.org/openstack/octavia/src/commit/93689cb7701da65b5aad387bb824c477c64b0f2b/octavia/api/v2/controllers/load_balancer.py
 [filtering]: https://opendev.org/openstack/octavia/src/commit/93689cb7701da65b5aad387bb824c477c64b0f2b/octavia/api/common/pagination.py
