@@ -44,7 +44,16 @@ make test-envtest GATEWAY_API_CHANNEL=experimental
 
 Local verification passed the pinned linter, Go race tests, tagged E2E helper tests, HTTP Core inventory, Standard envtest, binary and image builds. A separate Experimental envtest also passed. The qualification preflight accepted the two published release assets after server-side installation on separate Kubernetes 1.36.2 API servers. Its raw reads returned 10 and 14 established CRDs respectively, with one safe-upgrades policy and binding per channel.
 
-The [Hibiscus adapter test](cloud-contract.md) injects a lost response after Octavia accepts the request to disable the owned load balancer. A two-rule policy remains intact until the load balancer is observed disabled and ACTIVE. A fresh adapter discovers the remaining graph and the test checks the final inventory, including the Magnum API server and OCCM Service controls. The [hostname check](../../providers/hibiscus-exact-hostname.md) sent HTTP requests through standalone HAProxy using the stock Octavia L7 rule template. The [ReferenceGrant check](service-grants.md) exercised authorization and revocation on a local API server. The [Magnum test](magnum-operator.md#offline-evidence-and-limits) renders the pinned parent chart through the patched driver. The [provider cases](provider/provider-feasibility.md) identify what the stock public API can express and the design changes required for additional behavior.
+| Local evidence | Observation |
+|---|---|
+| [Upstream status cases](../../../internal/controller/envtest_upstream_status_test.go) | The real controller watches process the v1.7.0 fixtures for `GatewayClassObservedGenerationBump`, `GatewayInvalidParametersRef`, `GatewayInvalidRouteKind` and `GatewayListenerUnsupportedProtocol`. Each fixture runs with its upstream assertions. The full profile runs are recorded separately above. |
+| [Stock Amphora rendering and HTTP traffic](cloud-contract.md#http-traffic-from-the-adapters-own-writes) | A real HAProxy sent a matching request to the echo backend before and after recreation of the Octavia adapter. Both responses were HTTP 200 with the original Host. A route miss returned HTTP 503 where v1.7.0 requires 404. |
+| [Gateway and route hostname intersection](../../providers/hibiscus-exact-hostname.md) | An exact name and a wildcard can narrow one another. Nested matching subdomains reach the backend. The wildcard excludes its apex. |
+| [Provider cleanup](cloud-contract.md) | After the adapter loses the response to a disable request, a fresh instance waits for the owned load balancer to be disabled and ACTIVE. It then removes the graph and leaves the two fixture control load balancers intact. |
+| [ReferenceGrant](service-grants.md) | The controller observes authorization and revocation for a cross-namespace Service on a local Kubernetes API server. |
+| [Magnum lifecycle](magnum-driver.md#local-lifecycle-rehearsal) | Helm installed, upgraded, rolled back and removed the workload addon. Uninstall removed all five chart objects and preserved the sampled external resources and updated Cloud Secret. A separate TLS check exercised client startup with the replacement credential and CA. |
+
+The [provider study](provider/provider-feasibility.md) describes the proposed Octavia policy extension for request headers and an opt-in waypoint for Service traffic. Both proposals require implementation and on-cloud qualification.
 
 ## First live run
 

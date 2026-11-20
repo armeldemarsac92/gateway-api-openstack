@@ -76,6 +76,8 @@ Registry totals: **64 features**, **7 profiles**, **170 registered cases**. The 
 
 ## Complete registered test inventory
 
+Four of these 170 v1.7.0 cases ran individually on the local API server with their upstream fixtures and assertions. They are `GatewayClassObservedGenerationBump`, `GatewayInvalidParametersRef`, `GatewayInvalidRouteKind` and `GatewayListenerUnsupportedProtocol`. The other 166 cases have no recorded upstream execution for this fork. Both channels still await all seven live profile runs. [Local case entry point](../../../../internal/controller/envtest_upstream_status_test.go) · [Channel and profile records](../README.md#profile-records)
+
 Every row is an available upstream test, not an executed test. Feature lists describe prerequisites, including combinations not assigned to a profile. `provisional` is upstream metadata.
 
 | Case | Features required | Provisional |
