@@ -1,0 +1,62 @@
+name: Gateway API v1.7.0 qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      controller_revision:
+        description: Full Git commit SHA of the deployed controller to qualify
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gateway-api-qualification
+  cancel-in-progress: false
+
+jobs:
+  conformance:
+    if: github.ref_type == 'branch' && github.ref_name == github.event.repository.default_branch
+    strategy:
+      fail-fast: false
+      matrix:
+        channel: [standard, experimental]
+    environment: gateway-qualification-${{ matrix.channel }}
+    runs-on: [self-hosted, linux, 'gateway-qualification-${{ matrix.channel }}']
+    timeout-minutes: 360
+    steps:
+      - name: Check out reviewed workflow source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check out upstream Gateway API v1.7.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: kubernetes-sigs/gateway-api
+          ref: e26d183dbbc1bb782b78addbd26faba03955c152
+          path: upstream-gateway-api
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - id: qualification
+        name: Preflight and run upstream Gateway and mesh profiles
+        shell: bash
+        env:
+          GATEWAY_QUALIFICATION_ROOT: ${{ secrets.GATEWAY_QUALIFICATION_ROOT }}
+          CHANNEL: ${{ matrix.channel }}
+          CONTROLLER_REVISION: ${{ inputs.controller_revision }}
+        run: bash hack/qualify-gateway-api.sh "$CHANNEL" "$CONTROLLER_REVISION" "$GITHUB_WORKSPACE/upstream-gateway-api"
+
+      - name: Record a runner setup failure
+        if: ${{ failure() && steps.qualification.outcome == 'skipped' }}
+        shell: bash
+        run: |
+          echo 'Checkout or Go setup failed. All profiles are UNRUN.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'GATEWAY-HTTP, GATEWAY-TLS, GATEWAY-TCP, GATEWAY-UDP, GATEWAY-GRPC, MESH-HTTP, MESH-GRPC' >> "$GITHUB_STEP_SUMMARY"
