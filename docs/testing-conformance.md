@@ -2,7 +2,7 @@
 
 The current Amphora routing target is Gateway API v1.7.0 Standard Channel and the `GATEWAY-HTTP` profile.
 Its Core feature set contains Gateway, HTTPRoute, and ReferenceGrant, including HTTPS termination for HTTPRoute. [v1.7.0 profile definitions](https://github.com/kubernetes-sigs/gateway-api/blob/v1.7.0/conformance/utils/suite/profiles.go)
-The repository does not yet provide a full-profile runner.
+The [Hibiscus qualification runner](qualification/v1.7.0/live-runs.md) can exercise all seven profiles on the two channels. The [qualification record](qualification/v1.7.0/README.md) tracks those runs.
 
 ## Implementation gaps
 
@@ -14,10 +14,10 @@ The [compatibility record](providers/compatibility.md) summarizes the available 
 | Listeners | One HTTP listener without a listener hostname | Multiple listeners and their lifecycle, hostname matching, HTTPS, and certificate validation |
 | Route attachment | One selected HTTPRoute with one parent in the Gateway namespace | Multiple routes and parents, namespace selection, and precedence |
 | Matching | One rule and match, Exact or PathPrefix, and at most one exact hostname | Multiple rules and matches, wildcard and multiple hostnames, and exact header matching |
-| Service inputs | One Service in the route namespace, with NodePort forwarding or opt-in IPv4 Endpoint forwarding | Live proof for ClusterIP, headless, and manually managed EndpointSlice inputs in a verified network environment |
+| Service inputs | One authorized Service, with NodePort forwarding or opt-in IPv4 Endpoint forwarding | Live proof for ClusterIP, headless, and manually managed EndpointSlice inputs in a verified network environment |
 | Backend selection and errors | One backend | Weighted backends, weight zero, unmatched-request HTTP 404, and required responses for omitted or invalid backends |
 | Filters | No filters | RequestHeaderModifier and Core RequestRedirect behavior |
-| References | References within the route namespace | ReferenceGrant for Service and certificate references |
+| References | Same-namespace Services and cross-namespace Services authorized by a live ReferenceGrant | Certificate references, full invalid-backend wire behavior and live revocation |
 | Partial validity and status | Conditions and listener status for the supported subset | Required behavior for invalid siblings, reference errors, listener changes, and generation updates |
 
 The Endpoint mode implementation removes the NodePort requirement from Service input handling, but local tests do not close the Core traffic gap.
@@ -91,7 +91,7 @@ This record does not replace the suite-generated conformance report.
 Upstream lists [Conformant and Partially Conformant implementations](https://gateway-api.sigs.k8s.io/docs/implementations/list/).
 This project's target requires the complete Core profile and all declared Extended features to pass.
 An eligible partial report can support an earlier listing during Phase 5 development, but does not satisfy that target or close Phase 4.
-The current adapted single-test diagnostic is not an eligible profile report, and this repository still needs a reusable report-producing runner.
+The historical single-test diagnostic cannot be submitted as a profile report. Use the [manual full-profile runner](qualification/v1.7.0/live-runs.md) to produce original upstream reports.
 The current empty `supportedFeatures` list also blocks the suite's default inferred-feature setup.
 Resolve submission eligibility without declaring unverified features or overriding feature selection merely to qualify.
 

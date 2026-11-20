@@ -18,7 +18,7 @@ These files include the OpenStackGatewayClassConfig CRD, controller installation
 A release also contains a source archive and `checksums.txt` with SHA-256 checksums.
 
 Public controller image publication still needs an agreed registry.
-The [scheduled OpenStack E2E workflow](testing-openstack-e2e.md#recurring-dedicated-validation) is opt-in and needs an approved dedicated environment and private configuration before activation.
+The [manual OpenStack E2E workflow](testing-openstack-e2e.md#recurring-dedicated-validation) is opt-in and needs an approved dedicated environment and private configuration before activation.
 Helm charts, signatures, provenance, and SBOMs also remain roadmap work, with signing identity and promotion policy decisions still open.
 Do not describe the binary bundle as a published controller image or claim those software supply chain guarantees.
 

@@ -374,11 +374,11 @@ Set `artifacts.root` to an existing absolute directory outside the checkout, inc
 The second profile starts only after the first passes its audit and removes its controller installation.
 Any failure or cancellation stops the sequence.
 
-The workflow in `.github/workflows/openstack-e2e.yml` can run weekly or through manual dispatch.
-It accepts only `main` in the project repository and remains disabled unless the repository variable `OPENSTACK_E2E_ENABLED` is `true`.
+The workflow in `.github/workflows/openstack-e2e.yml` runs through manual dispatch.
+It accepts the default branch of the personal fork and remains disabled unless the repository variable `OPENSTACK_E2E_ENABLED` is `true`.
 Configure the protected `openstack-e2e` environment and one dedicated Linux runner carrying the `openstack-e2e` label.
 That runner must have the approved API and VIP connectivity, tools, credentials, and immutable images described above.
-Set `OPENSTACK_E2E_CONFIG` to a private configuration file outside the checkout on persistent storage.
+Set the protected environment secret `OPENSTACK_E2E_CONFIG` to the absolute path of a private configuration file outside the checkout on persistent storage.
 Keep the configuration path stable so successive jobs use the same pending marker.
 
 Before checkout, the workflow creates an exclusive `<config-path>.pending` directory.
