@@ -1,6 +1,9 @@
 GO ?= go
-GOFMT ?= gofmt
+export GOTOOLCHAIN := go$(shell sed -n 's/^go //p' go.mod)
+GOFMT ?= $(shell $(GO) env GOROOT)/bin/gofmt
 GOLANGCI_LINT ?= golangci-lint
+# The v2.13.0 release cannot read the export data emitted by Go 1.27.4.
+GOLANGCI_LINT_VERSION := 2.15.0
 GORELEASER ?= goreleaser
 CONTAINER_TOOL ?= docker
 BINARY_DIR ?= bin
@@ -13,6 +16,7 @@ SETUP_ENVTEST_VERSION ?= v0.24.1
 ENVTEST_ASSETS_DIR ?= $(abspath $(BINARY_DIR)/envtest)
 ENVTEST_K8S_VERSION ?= 1.36.2
 ENVTEST_RELEASE_INDEX ?= https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/3311c8d50e5c8a976266e08f1f92f827439bd34a/envtest-releases.yaml
+GATEWAY_API_CHANNEL ?= standard
 E2E_CONFIG ?=
 VERSION ?= dev
 IMAGE ?= openstack-gateway-controller:$(VERSION)
@@ -48,7 +52,11 @@ build-probe: ## Build the Phase 0 capability probe.
 
 .PHONY: container-build
 container-build: ## Build the controller container image.
-	$(CONTAINER_TOOL) build --build-arg VERSION=$(VERSION) -t $(IMAGE) .
+ifeq ($(notdir $(CONTAINER_TOOL)),podman)
+	$(CONTAINER_TOOL) build --timestamp=0 --build-arg VERSION=$(VERSION) -t $(IMAGE) .
+else
+	$(CONTAINER_TOOL) build --build-arg SOURCE_DATE_EPOCH=0 --build-arg VERSION=$(VERSION) -t $(IMAGE) .
+endif
 
 .PHONY: test
 test: ## Run unit tests.
@@ -63,10 +71,15 @@ test-envtest: ## Run controller tests against a real API server and etcd.
 	@test -x "$(SETUP_ENVTEST)" || { printf 'Run make envtest-assets first.\n'; exit 1; }
 	@test "$$($(SETUP_ENVTEST) version)" = "setup-envtest version: $(SETUP_ENVTEST_VERSION)" || { printf 'Run make envtest-assets to install setup-envtest %s.\n' "$(SETUP_ENVTEST_VERSION)"; exit 1; }
 	@set -eu; \
+	case "$(GATEWAY_API_CHANNEL)" in standard|experimental) ;; *) printf 'GATEWAY_API_CHANNEL must be standard or experimental.\n' >&2; exit 1;; esac; \
 	assets="$$($(SETUP_ENVTEST) --installed-only --bin-dir "$(ENVTEST_ASSETS_DIR)" --print path use "$(ENVTEST_K8S_VERSION)")"; \
 	gateway_api_module="$$($(GO) list -mod=readonly -m -f '{{.Dir}}' sigs.k8s.io/gateway-api)"; \
+	kubeconfig="$$(mktemp)"; \
+	trap 'rm -f "$$kubeconfig"' EXIT; \
+	USE_EXISTING_CLUSTER=false KUBECONFIG="$$kubeconfig" \
 	KUBEBUILDER_ASSETS="$$assets" \
-	GATEWAY_API_CRD_PATH="$$gateway_api_module/config/crd/standard" \
+	GATEWAY_API_CHANNEL="$(GATEWAY_API_CHANNEL)" \
+	GATEWAY_API_CRD_PATH="$$gateway_api_module/config/crd/$(GATEWAY_API_CHANNEL)" \
 	$(GO) test -tags=envtest -count=1 -run '^TestControllerEnvtest$$' -timeout=5m ./internal/controller
 
 .PHONY: test-e2e-compile
@@ -135,8 +148,13 @@ fmt-check: ## Fail when Go source files need formatting.
 vet: ## Run go vet.
 	$(GO) vet ./...
 
+.PHONY: lint-version
+lint-version:
+	@printf 'v%s\n' '$(GOLANGCI_LINT_VERSION)'
+
 .PHONY: lint
-lint: ## Run golangci-lint when installed.
+lint: ## Run the pinned golangci-lint release.
+	@test "$$($(GOLANGCI_LINT) version --short)" = "$(GOLANGCI_LINT_VERSION)" || { printf 'Install golangci-lint v%s.\n' '$(GOLANGCI_LINT_VERSION)' >&2; exit 1; }
 	$(GOLANGCI_LINT) run
 
 .PHONY: lint-fix
