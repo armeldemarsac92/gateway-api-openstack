@@ -21,6 +21,15 @@ Use [api-field-catalog.csv](api-field-catalog.csv) to filter 473 Go struct field
 | [Implementation-specific infrastructure and extension points](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/apis/v1/gateway_types.go) | Decide and document supported addresses, configuration, annotation propagation, and extension kinds. Test invalid provider configuration fails clearly; no arbitrary provider-specific behavior should be inferred from a CRD field's presence. |
 | [gRPC and L4 routes](https://github.com/kubernetes-sigs/gateway-api/tree/e26d183dbbc1bb782b78addbd26faba03955c152/apis/v1) | gRPC method matching requires gRPC-aware data plane; TCP/UDP need protocol-correct listener/pool; TLS passthrough needs SNI routing beyond raw TCP. Separate class/provider selection and representative protocol traffic are open before any claim. |
 
+## Contracts exercised by this fork
+
+| Contract | Input, observed result and remaining boundary |
+|---|---|
+| Complete release inventory and `SupportedVersion` | Separate local Kubernetes API servers accept each genuine selected v1.7.0 bundle. A controller configured for the opposite channel rejects it. A same-version fixture with mixed channel annotations blocks provisioning. [Controller checks](../../../../internal/controller/envtest_test.go) |
+| Exact HTTP hostname within the supported single-route topology | The provider writes a bounded anchored host predicate and preserves the original Host header. Standalone HAProxy with the stock Octavia template forwarded an uppercase hostname with an explicit port and rejected an unrelated domain. Listener/route hostname intersection and production Amphora are open. [Hostname evidence](../../../providers/hibiscus-exact-hostname.md) |
+| Service reference permission | A grant in the backend namespace authorizes the remote NodePort. During grant deletion, the controller reports `RefNotPermitted` and removes only the route fragment. Cross-namespace Gateway attachment and the specified invalid-backend HTTP 500 remain open. [ReferenceGrant evidence](../service-grants.md) |
+| Owned graph deletion after a lost response | A fresh Gophercloud adapter discovers the remaining graph and deletes only owned resources. The simulated inventory retains both control load balancers. [Scoped cleanup evidence](../cloud-contract.md) |
+
 ## Four Experimental-only resource families
 
 | Resource and type contract | Required design and proposed smallest behavioral check |

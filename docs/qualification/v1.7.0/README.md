@@ -41,6 +41,8 @@ make ci
 make test-envtest GATEWAY_API_CHANNEL=experimental
 ```
 
+Local verification passed the pinned linter, Go race tests, tagged E2E helper tests, HTTP Core inventory, Standard envtest, binary and image builds. A separate Experimental envtest also passed. The qualification preflight accepted the two published release assets after server-side installation on separate Kubernetes 1.36.2 API servers. Its raw reads returned 10 and 14 established CRDs respectively, with one safe-upgrades policy and binding per channel.
+
 The [Hibiscus adapter test](cloud-contract.md) injects a lost response after Octavia applies an L7-rule DELETE. A fresh adapter discovers the remaining graph and the test checks the final inventory, including the Magnum API server and OCCM Service controls. The [hostname check](../../providers/hibiscus-exact-hostname.md) sent HTTP requests through standalone HAProxy using the stock Octavia L7 rule template. The [ReferenceGrant check](service-grants.md) exercised authorization and revocation on a local API server. The [Magnum test](magnum-operator.md#offline-evidence-and-limits) renders the pinned parent chart through the patched driver. The [provider cases](provider/provider-feasibility.md) identify what the stock public API can express and the design changes required for additional behavior.
 
 ## First live run
