@@ -84,6 +84,8 @@ var ErrUnsupportedGatewayAPIVersion = errors.New("installed Gateway API CRD vers
 type GatewayAPIVersionObservation struct {
 	// Supported reports whether every required CRD uses the supported bundle.
 	Supported bool
+	// Version is the observed bundle annotation, populated only for a supported installation.
+	Version string
 	// Message summarizes the observed bundle state for status reporting.
 	Message string
 }
@@ -101,6 +103,7 @@ func (c Config) ObserveGatewayAPIVersion(ctx context.Context, reader client.Read
 
 	expected := c.GatewayAPICRDNames()
 	channel := cmp.Or(c.GatewayAPIChannel, features.FeatureChannelStandard)
+	var observedVersion string
 	present := make(map[string]struct{}, len(expected))
 	issues := make([]string, 0)
 	for _, definition := range definitions.Items {
@@ -125,6 +128,8 @@ func (c Config) ObserveGatewayAPIVersion(ctx context.Context, reader client.Read
 			issues = append(issues, fmt.Sprintf("%s uses channel %s (expected %s)", definition.Name, installedChannel, channel))
 		case !slices.Contains(expected, definition.Name):
 			issues = append(issues, fmt.Sprintf("%s is outside the %s bundle", definition.Name, channel))
+		default:
+			observedVersion = installedVersion
 		}
 	}
 	for _, name := range expected {
@@ -136,6 +141,7 @@ func (c Config) ObserveGatewayAPIVersion(ctx context.Context, reader client.Read
 	if len(issues) == 0 {
 		return GatewayAPIVersionObservation{
 			Supported: true,
+			Version:   observedVersion,
 			Message:   fmt.Sprintf("Installed Gateway API CRDs use supported bundle version %s (%s)", gatewayconsts.BundleVersion, channel),
 		}, nil
 	}
