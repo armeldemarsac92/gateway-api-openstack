@@ -33,7 +33,7 @@ The [architecture](docs/design/architecture.md) defines ownership, resource mapp
 
 ## Current implementation
 
-The controller uses Gateway API v1.6.1 Standard Channel and supports:
+The controller uses Gateway API v1.7.0 and defaults to the Standard Channel. Its implemented routing scope includes:
 
 - One HTTP listener and one selected HTTPRoute in the Gateway namespace
 - One rule, one backend Service, and Exact or PathPrefix matching

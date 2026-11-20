@@ -46,10 +46,11 @@ make test-envtest
 ```
 
 The first command downloads the pinned Kubernetes control plane binaries.
-The envtest suite installs the Gateway API Standard Channel CRDs pinned by this repository.
+The envtest suite starts its own local control plane and installs the pinned Gateway API v1.7.0 Standard bundle.
+Use `make test-envtest GATEWAY_API_CHANNEL=experimental` to install and test the Experimental bundle on a separate local control plane.
 It does not run Octavia, send traffic, or provide Gateway API conformance evidence.
 
-Run `make lint` when `golangci-lint` is installed.
+Install the `golangci-lint` release printed by `make lint-version`, then run `make lint`.
 Use `make fmt` for Go source formatting.
 Do not run `make manifests`, `make generate`, or Kubebuilder scaffolding commands.
 This repository consumes upstream Gateway API types and maintains its class configuration API, CRD, Kustomize, and RBAC files by hand.

@@ -27,8 +27,8 @@ Confirm these settings before changing anything:
 - The cluster ID has not changed.
 - The credential is scoped to the original OpenStack project.
 - The configured region still selects the same Octavia and Neutron endpoints.
-- The Gateway API v1.6.1 CRDs are installed as one Standard Channel bundle.
-  A bundle mismatch blocks provisioning and repair, but it does not block finalization.
+- The Gateway API v1.7.0 CRDs come from the channel selected by the controller. The default is Standard.
+  A bundle mismatch blocks provisioning and repair. Finalization can continue while the required Kubernetes APIs are served.
 - Octavia and Neutron are reachable, the project has enough quota, and the controller credential can read and delete the resources it owns.
 
 Authentication, authorization, quota, rate limiting, and service failures are different conditions.

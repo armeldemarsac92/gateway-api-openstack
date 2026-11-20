@@ -42,10 +42,10 @@ The controller uses Gophercloud rather than shelling out to the OpenStack CLI.
 
 ### Installed Gateway API version
 
-The controller uses Gateway API v1.6.1 Standard Channel.
+The controller uses Gateway API v1.7.0. Standard is the default. Experimental requires explicitly selecting `--gateway-api-channel=experimental` or setting `GATEWAY_OPENSTACK_GATEWAY_API_CHANNEL=experimental` with the matching bundle.
 It checks installed Gateway API CRD bundle annotations and reports the result through GatewayClass `SupportedVersion`.
-A missing required CRD, missing version annotation, or mixed bundle blocks new bindings, provisioning, and repair.
-It does not authorize deletion of an existing graph or prevent explicit finalization and cleanup after controller handoff.
+A missing required CRD, missing bundle annotation, version mismatch, or channel mismatch blocks new bindings, provisioning, and repair.
+Explicit finalization of previously bound resources can continue while the APIs needed for cleanup are served.
 
 Normal reconciliation uses the GatewayClass condition as its cached signal.
 Before acquiring a binding or mutating the cloud, the controller checks the live controller selection and a metadata-only view of installed CRDs.

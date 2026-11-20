@@ -13,7 +13,7 @@ The [conformance plan](testing-conformance.md) describes the separate Gateway AP
 
 ## Prerequisites
 
-- A Kubernetes cluster with the Gateway API Standard Channel v1.6.1 CRDs.
+- A Kubernetes cluster with the Gateway API v1.7.0 Standard bundle.
 - An OpenStack project with Octavia and Neutron access.
   The controller accepts only Amphora.
   Support claims are limited to environment profiles with published compatibility evidence.
@@ -33,16 +33,20 @@ The experimental [direct endpoint mode](reference/class-configuration.md#direct-
 The controller does not create networks, subnets, routers, or backend security groups and does not attach security groups to worker ports.
 Establish that connectivity before creating a Gateway.
 
-Install the pinned Standard Channel CRDs if the cluster does not already have them:
+Install the complete Standard bundle if the cluster does not already have it. Use the intended workload cluster context for both commands.
 
 ```sh
-kubectl apply -f \
-  https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.6.1/standard-install.yaml
+gateway_api_manifest=https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.7.0/standard-install.yaml
+kubectl apply --server-side -f "$gateway_api_manifest"
+kubectl get -f "$gateway_api_manifest" -o 'custom-columns=KIND:.kind,NAME:.metadata.name,VERSION:.metadata.annotations.gateway\.networking\.k8s\.io/bundle-version,CHANNEL:.metadata.annotations.gateway\.networking\.k8s\.io/channel'
 ```
 
-Startup requires GatewayClass, Gateway, and HTTPRoute to be available.
-The controller validates installed bundle annotations through the GatewayClass `SupportedVersion` condition.
-A version mismatch blocks provisioning and repair without preventing finalization, as described in the [API version contract](design/architecture.md#installed-gateway-api-version).
+The Standard manifest contains ten CRDs in `gateway.networking.k8s.io` and the `safe-upgrades.gateway.networking.k8s.io` admission policy and binding. Each has the v1.7.0 and `standard` annotations. Check the manifest inventory and any other installed Gateway API CRDs before proceeding.
+For Experimental qualification on a separate cluster, use `experimental-install.yaml` from the same release and set `GATEWAY_OPENSTACK_GATEWAY_API_CHANNEL` to `experimental` in the controller ConfigMap. That manifest has the same ten CRDs plus four in `gateway.networking.x-k8s.io`, all annotated `experimental`. The policy and binding carry `standard` in both manifests.
+
+Startup requires GatewayClass, Gateway, HTTPRoute, and ReferenceGrant to be available.
+The controller reports bundle version and channel validation through the GatewayClass `SupportedVersion` condition.
+A mismatch blocks provisioning and repair. Finalization can continue while the required Kubernetes APIs are served. [Installed Gateway API version](design/architecture.md#installed-gateway-api-version)
 
 ## Prepare OpenStack credentials
 
@@ -105,7 +109,7 @@ Set `CONTAINER_TOOL=podman` on the `make` command when Podman is preferred.
 The base installation includes the cluster-scoped OpenStackGatewayClassConfig CRD.
 Inspect its effect on any other installation using this API before applying or removing the base manifests.
 The controller also needs Namespace `get`, `list`, and `watch` access and ReferenceGrant `list` and `watch` access for backend input collection and reference events.
-Its startup and bundle checks require the ReferenceGrant API from the pinned Standard Channel bundle.
+Its startup and bundle checks require the ReferenceGrant API from the selected v1.7.0 bundle.
 Render and inspect the resources, then install them:
 
 ```sh
@@ -131,6 +135,7 @@ The ConfigMap uses the environment variables accepted by the controller binary.
 | --- | --- | --- |
 | Controller identity | `GATEWAY_OPENSTACK_CONTROLLER_NAME` | Defaults to `gateway-api-openstack.github.io/gateway-api-openstack`. Must exactly match GatewayClass. |
 | Cluster identity | `GATEWAY_OPENSTACK_CLUSTER_ID` | Required and stable. |
+| Gateway API channel | `GATEWAY_OPENSTACK_GATEWAY_API_CHANNEL` | Defaults to `standard`. Use `experimental` with the complete Experimental bundle. |
 | OpenStack resync | `GATEWAY_OPENSTACK_RESYNC_INTERVAL` | Base interval for observing converged resources again. Defaults to `10m` |
 | OpenStack request rate | `GATEWAY_OPENSTACK_API_QPS` | Average request limit shared by Keystone, Octavia, and Neutron. Defaults to `10` per second |
 | OpenStack request burst | `GATEWAY_OPENSTACK_API_BURST` | Short request burst allowed for the process. Defaults to `20` |

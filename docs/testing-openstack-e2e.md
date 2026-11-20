@@ -16,7 +16,7 @@ The runner cannot prove that no one else uses the cluster.
 
 Prepare all of the following:
 
-- Gateway API v1.6.1 Standard Channel CRDs on the cluster.
+- The complete Gateway API v1.7.0 Standard bundle on the cluster. This pilot runner checks the Standard CRD inventory, version, and channel before installing its controller.
 - The OpenStackGatewayClassConfig CRD from the revision under test, installed by the operator before starting the runner.
 - A kubeconfig and explicit context that can create, inspect, update, and delete the run-scoped workloads, controller objects, and cluster-scoped RBAC.
   The test gets Namespaces, including `kube-system` when the cluster identity is pinned, and its ConfigMaps and Secrets.
@@ -431,6 +431,7 @@ See the [ownership audit contract](design/architecture.md#ownership-audit) for i
 
 The runner writes `report.json` and `report.md` in a new artifact directory.
 They record the tested artifact, configuration summary, check results, and aggregate audit and metrics evidence without cloud resource IDs or backend selector values.
+They report the Gateway API version and channel once the suite verifies the CRDs. Reports written before that check succeeds label the bundle `Unverified`.
 Failures retain a fixed classification and the failed check, while raw API and audit errors remain excluded from the report.
 Review them under the [publication policy](../CONTRIBUTING.md#test-evidence-and-publication) before sharing.
 
