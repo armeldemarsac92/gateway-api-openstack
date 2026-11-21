@@ -245,7 +245,7 @@ func intersectSNIHostnames(listener *gatewayv1.Listener, route *gatewayv1.TLSRou
 	hostnames := model.IntersectHostnames(listener.Hostname, route.Spec.Hostnames)
 	for _, hostname := range hostnames {
 		if err := amphora.ValidateExactHostname(hostname); err != nil {
-			return nil, fmt.Errorf("Octavia SNI passthrough requires exact DNS names, and the intersection includes %q", hostname)
+			return nil, fmt.Errorf("cannot forward the intersecting hostname %q through an exact SNI rule", hostname)
 		}
 	}
 	return hostnames, nil

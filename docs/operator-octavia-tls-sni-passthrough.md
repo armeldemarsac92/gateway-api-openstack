@@ -36,6 +36,14 @@ The controller forwards the exact names shared by the listener and the route. Fo
 
 When two routes claim an effective name, the more specific original route hostname takes precedence. Equally specific claims use creation time, then namespace and name. The chosen route must have an authorized backend before that name can serve traffic. A revoked grant closes its names even when a lower-priority route also claims them. Each accepted route counts once in `attachedRoutes`.
 
+## Upgrade an existing exact-name Gateway
+
+The first SNI release (`6c74e8eaa940`) closed an exact name claimed by two routes. This release can start serving that name on upgrade. Check overlapping route declarations and confirm the winning route and Service before rolling out the new controller. Each effective name uses one Octavia pool, one policy, one rule and one member per resolved endpoint. Allow for those resources when adding aliases.
+
+Before rolling back to `6c74e8eaa940`, drain Gateways that use the new hostname shapes, or restore one exact name per route and remove the listener hostname and duplicate claims. With the newer controller still running, verify the resulting parent status, pools, policies and fresh TLS connections. Then roll out the earlier image.
+
+## Check the routes
+
 Check the current-generation Gateway `Programmed=True` and both routes' managed parent conditions `Accepted=True`, `ResolvedRefs=True` and `gateway-api-openstack.github.io/Programmed=True` (using the configured controller's domain). The listener should report `supportedKinds` including TLSRoute and `attachedRoutes: 2`. Use a CA file that trusts both backend certificates.
 
 ```sh
