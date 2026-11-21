@@ -247,14 +247,21 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 				safetyWriteJSON(f.t, w, map[string]any{kind.name: entry})
 				return
 			}
-			if resource == tcpMember {
+			if listPath == memberCollection && resource != listPath {
 				weight, ok := payload["weight"].(float64)
-				if f.inventory[tcpListener]["default_pool_id"] != nil || !ok || weight < 0 || weight > 256 || payload["admin_state_up"] != true {
+				pool := f.inventory[strings.TrimSuffix(memberCollection, "/members")]
+				attached := slices.ContainsFunc(f.children(tcpListeners), func(listener map[string]any) bool {
+					return listener["default_pool_id"] == pool["id"]
+				})
+				if attached || !ok || weight < 0 || weight > 256 || payload["admin_state_up"] != true {
 					reject()
 					return
 				}
+				if backup, found := payload["backup"]; found {
+					entry["backup"] = backup
+				}
 				entry["weight"], entry["admin_state_up"], entry["provisioning_status"] = weight, true, "PENDING_UPDATE"
-				f.inventory[tcpPool]["provisioning_status"] = "PENDING_UPDATE"
+				pool["provisioning_status"] = "PENDING_UPDATE"
 				safetyWriteJSON(f.t, w, map[string]any{kind.name: entry})
 				return
 			}
@@ -1001,6 +1008,78 @@ func testTransportGraphReconcilesEndpointWeight(t *testing.T, protocol string) {
 	if observed["weight"] != float64(0) || f.inventory[tcpListener]["default_pool_id"] != nil ||
 		!slices.Equal(f.writes[before:], []string{"PUT " + tcpListener, "PUT " + tcpMember}) {
 		t.Fatalf("draining member weight = %v, default pool = %v, writes %v", observed["weight"], f.inventory[tcpListener]["default_pool_id"], f.writes[before:])
+	}
+}
+
+func TestTransportGraphRepairsBackupOnlyForWeightedTCPEndpoints(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		protocol   string
+		weights    [2]int
+		wantRepair bool
+	}{
+		{"weighted TCP", cloud.ListenerProtocolTCP, [2]int{7, 3}, true},
+		{"unweighted TCP", cloud.ListenerProtocolTCP, [2]int{0, 0}, false},
+		{"weighted UDP", cloud.ListenerProtocolUDP, [2]int{7, 3}, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := newTransportGraphFixture(t, test.protocol)
+			route := &f.spec.Routes[0].Spec
+			route.MemberMode = cloud.MemberModeEndpoint
+			route.Members[0].Weight = test.weights[0]
+			for range 6 {
+				f.reconcile(f.provider())
+			}
+			listener, pool := f.inventory[tcpListener], f.inventory[tcpPool]
+			listener["provisioning_status"] = "ACTIVE"
+			secondEndpoint := route.Members[0]
+			secondEndpoint.Address, secondEndpoint.Weight = "192.0.2.180", test.weights[1]
+			route.Members = append(route.Members, secondEndpoint)
+			second := maps.Clone(f.inventory[tcpMember])
+			second["id"], second["address"], second["weight"], second["backup"] = "member-two", secondEndpoint.Address, float64(max(1, secondEndpoint.Weight)), true
+			const secondPath = tcpMembers + "/member-two"
+			f.inventory[secondPath] = second
+			before := len(f.writes)
+			result := f.reconcile(f.provider())
+			if !test.wantRepair {
+				if result.Routes[0].Result.Outcome.State != cloud.OutcomeReady || len(f.writes) != before || second["backup"] != true {
+					t.Fatalf("backup flag changed the existing %s contract: outcome %v, writes %v", test.name, result.Outcome.State, f.writes[before:])
+				}
+				return
+			}
+			if result.Routes[0].Result.Outcome.State == cloud.OutcomeReady || listener["default_pool_id"] != nil ||
+				!slices.Equal(f.writes[before:], []string{"PUT " + tcpListener}) {
+				t.Fatalf("a backup member cannot serve the desired 70:30 share: outcome %v, pool %v, writes %v",
+					result.Routes[0].Result.Outcome.State, listener["default_pool_id"], f.writes[before:])
+			}
+			listener["provisioning_status"] = "ACTIVE"
+			f.reconcile(f.provider())
+			if second["backup"] != false || second["weight"] != float64(3) || listener["default_pool_id"] != nil ||
+				!slices.Equal(f.writes[before+1:], []string{"PUT " + secondPath}) {
+				t.Fatalf("expected repair confined to the detached backup member: backup %v, weight %v, writes %v",
+					second["backup"], second["weight"], f.writes[before+1:])
+			}
+			if result := f.reconcile(f.provider()); result.Outcome.State == cloud.OutcomeReady || len(f.writes) != before+2 {
+				t.Fatalf("pending member update changed forwarding: outcome %v, writes %v", result.Outcome.State, f.writes[before:])
+			}
+			// A fresh provider must hold the pool if readback still shows backup=true.
+			second["backup"], second["provisioning_status"], pool["provisioning_status"] = true, "ACTIVE", "ACTIVE"
+			f.reconcile(f.provider())
+			if listener["default_pool_id"] != nil || !slices.Equal(f.writes[before+2:], []string{"PUT " + secondPath}) {
+				t.Fatalf("listener reattached without confirmed backup readback: writes %v", f.writes[before+2:])
+			}
+			second["provisioning_status"], pool["provisioning_status"] = "ACTIVE", "ACTIVE"
+			f.reconcile(f.provider())
+			listener["provisioning_status"] = "ACTIVE"
+			if result := f.reconcile(f.provider()); result.Routes[0].Result.Outcome.State != cloud.OutcomeReady ||
+				!slices.Equal(f.writes[before+3:], []string{"PUT " + tcpListener}) || listener["default_pool_id"] != "pool" {
+				t.Fatalf("confirmed repair did not restore the serving pool: outcome %v, writes %v", result.Outcome.State, f.writes[before+3:])
+			}
+			second["backup"] = nil
+			if result := f.reconcile(f.provider()); result.Outcome.State != cloud.OutcomeReady || len(f.writes) != before+4 {
+				t.Fatalf("null backup caused a mutation: outcome %v, writes %v", result.Outcome.State, f.writes[before+4:])
+			}
+		})
 	}
 }
 

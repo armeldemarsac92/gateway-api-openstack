@@ -418,6 +418,7 @@ type routeMutation struct {
 	rule                 desiredRule
 	retry                bool
 	clearPoolPersistence bool
+	clearMemberBackup    bool
 }
 
 func (s routeMutation) message() string {
@@ -496,12 +497,15 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 			state.MemberIDs = append(state.MemberIDs, member.ID)
 			delete(desiredMembers, key)
 			weight := desiredMemberWeight(desired.spec.MemberMode, wanted)
-			if !member.AdminStateUp || weight != nil && member.Weight != *weight {
+			// HAProxy excludes backup members while any regular member is up.
+			clearBackup := desired.protocol() == cloud.ListenerProtocolTCP && wanted.Weight > 0 && !wanted.Draining && member.Backup
+			if !member.AdminStateUp || weight != nil && member.Weight != *weight || clearBackup {
 				nonPolicyPlan = append(nonPolicyPlan, routeMutation{
-					kind:     routeMutationUpdateMember,
-					id:       member.ID,
-					parentID: pool.ID,
-					member:   wanted,
+					kind:              routeMutationUpdateMember,
+					id:                member.ID,
+					parentID:          pool.ID,
+					member:            wanted,
+					clearMemberBackup: clearBackup,
 				})
 			}
 		}
@@ -709,10 +713,14 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 			Weight:       desiredMemberWeight(desired.spec.MemberMode, step.member),
 		})
 	case routeMutationUpdateMember:
-		_, err = p.octavia.UpdateMember(ctx, step.parentID, step.id, pools.UpdateMemberOpts{
+		opts := pools.UpdateMemberOpts{
 			AdminStateUp: boolPointer(true),
 			Weight:       desiredMemberWeight(desired.spec.MemberMode, step.member),
-		})
+		}
+		if step.clearMemberBackup {
+			opts.Backup = boolPointer(false)
+		}
+		_, err = p.octavia.UpdateMember(ctx, step.parentID, step.id, opts)
 	case routeMutationCreateMonitor:
 		tags, tagErr := desired.identity.RouteTags(roleMonitor)
 		if tagErr != nil {
