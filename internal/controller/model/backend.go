@@ -24,6 +24,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -174,7 +175,8 @@ func ResolveTransportServicePort(service *corev1.Service, selected *gatewayv1.Po
 func ResolveServiceEndpoints(service *corev1.Service, servicePort *corev1.ServicePort, endpointSlices []discoveryv1.EndpointSlice) []Endpoint {
 	observations := map[Endpoint]struct{}{}
 	for _, endpointSlice := range endpointSlices {
-		if !endpointSlice.DeletionTimestamp.IsZero() || endpointSlice.Namespace != service.Namespace || endpointSlice.Labels[discoveryv1.LabelServiceName] != service.Name {
+		if !endpointSlice.DeletionTimestamp.IsZero() || endpointSlice.Namespace != service.Namespace || endpointSlice.Labels[discoveryv1.LabelServiceName] != service.Name ||
+			!EndpointSliceOwnerMatchesService(&endpointSlice, service) {
 			continue
 		}
 		if endpointSlice.AddressType != discoveryv1.AddressTypeIPv4 && endpointSlice.AddressType != discoveryv1.AddressTypeIPv6 {
@@ -194,6 +196,30 @@ func ResolveServiceEndpoints(service *corev1.Service, servicePort *corev1.Servic
 	}
 	slices.SortFunc(endpoints, compareEndpoints)
 	return endpoints
+}
+
+// EndpointSliceOwnerMatchesService checks the identity of a controlling core
+// Service when the backend Service has a UID. Other slices rely on the Service label.
+func EndpointSliceOwnerMatchesService(slice *discoveryv1.EndpointSlice, service *corev1.Service) bool {
+	owner := endpointSliceServiceOwner(slice)
+	return service.UID == "" || owner == nil || (owner.UID == service.UID && owner.Name == service.Name)
+}
+
+// EndpointSliceServiceOwnerChanged compares the controller identity used to select members.
+func EndpointSliceServiceOwnerChanged(oldSlice, newSlice *discoveryv1.EndpointSlice) bool {
+	oldOwner, newOwner := endpointSliceServiceOwner(oldSlice), endpointSliceServiceOwner(newSlice)
+	if oldOwner == nil || newOwner == nil {
+		return oldOwner != newOwner
+	}
+	return oldOwner.UID != newOwner.UID || oldOwner.Name != newOwner.Name
+}
+
+func endpointSliceServiceOwner(slice *discoveryv1.EndpointSlice) *metav1.OwnerReference {
+	owner := metav1.GetControllerOfNoCopy(slice)
+	if owner == nil || owner.APIVersion != corev1.SchemeGroupVersion.String() || owner.Kind != "Service" {
+		return nil
+	}
+	return owner
 }
 
 func servicePortProtocol(port *corev1.ServicePort) corev1.Protocol {

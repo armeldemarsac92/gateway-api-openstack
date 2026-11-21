@@ -65,6 +65,8 @@ func kindUDPCaseSelection(selector string) ([]suite.ConformanceTest, error) {
 		return kindUDPCases, nil
 	case "profile":
 		return tests.ConformanceTests, nil
+	case "grant-traffic":
+		return []suite.ConformanceTest{weightedUDPGrantTraffic}, nil
 	}
 	var selected []suite.ConformanceTest
 	seen := make(map[string]bool)
@@ -158,12 +160,16 @@ func TestKindUpstreamUDPTraffic(t *testing.T) {
 	if literalProfile {
 		options.ConformanceProfiles = []suite.ConformanceProfileName{suite.GatewayUDPConformanceProfileName}
 		t.Logf("Upstream GATEWAY-UDP profile attempt on %s with the original upstream base", channel)
+	} else if selection == "grant-traffic" {
+		t.Logf("Local packet check of weighted UDP grant revocation on %s (base %s)", channel, baseManifests)
 	} else if baseManifests == "base/manifests.yaml" {
 		t.Logf("Selected upstream UDP cases on %s with the original upstream base", channel)
 	} else {
 		t.Logf("Focused upstream UDP cases on %s with the HTTPS Gateway omitted from the shared base", channel)
 	}
-	t.Log("UDPRouteNotAllowedByListeners requires TLSRoute and is excluded when selected")
+	if selection != "grant-traffic" {
+		t.Log("UDPRouteNotAllowedByListeners requires TLSRoute and is excluded when selected")
+	}
 	s, err := suite.NewConformanceTestSuite(suite.ConformanceOptions{
 		ConfigurableOptions: options,
 		Client:              apiClient,

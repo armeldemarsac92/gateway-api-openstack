@@ -204,3 +204,54 @@ func TestNodePortMemberWeightIsNotReconciled(t *testing.T) {
 		t.Fatalf("NodePort weight caused a mutation: plan=%+v, error=%v", plan, err)
 	}
 }
+
+func TestInvalidEndpointWeightsFailBeforeCloudAccess(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		protocol  string
+		mode      cloud.MemberMode
+		weight    int
+		duplicate bool
+	}{
+		{name: "negative", protocol: cloud.ListenerProtocolUDP, mode: cloud.MemberModeEndpoint, weight: -1},
+		{name: "above Octavia maximum", protocol: cloud.ListenerProtocolUDP, mode: cloud.MemberModeEndpoint, weight: 257},
+		{name: "conflicting duplicate", protocol: cloud.ListenerProtocolUDP, mode: cloud.MemberModeEndpoint, weight: 3, duplicate: true},
+		{name: "UDP NodePort", protocol: cloud.ListenerProtocolUDP, mode: cloud.MemberModeNodePort, weight: 1},
+		{name: "TCP Endpoint", protocol: cloud.ListenerProtocolTCP, mode: cloud.MemberModeEndpoint, weight: 1},
+		{name: "HTTP Endpoint", protocol: cloud.ListenerProtocolHTTP, mode: cloud.MemberModeEndpoint, weight: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			spec := completeGraphSpec(safetyTestIdentity(t))
+			if test.protocol != cloud.ListenerProtocolHTTP {
+				spec = newTransportGraphFixture(t, test.protocol).spec
+			}
+			route := &spec.Routes[0].Spec
+			route.MemberMode, route.Members[0].Weight = test.mode, test.weight
+			if test.duplicate {
+				duplicate := route.Members[0]
+				duplicate.Weight = 7
+				route.Members = append(route.Members, duplicate)
+			}
+			reject := http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+				t.Errorf("cloud request for invalid member weight: %s %s", request.Method, request.URL)
+				w.WriteHeader(http.StatusBadRequest)
+			})
+			provider := newTestProvider(t, hibiscusServiceClients(reject), ProviderConfig{})
+			if _, err := provider.ReconcileGatewayGraph(t.Context(), spec); !errors.Is(err, cloud.ErrTerminalValidation) {
+				t.Fatalf("error = %v, want terminal validation", err)
+			}
+		})
+	}
+}
+
+func TestUnweightedMemberKeepsForwardingTargetJSON(t *testing.T) {
+	member := cloud.Member{Address: "10.0.0.10", Port: 30080, ProviderID: "openstack:///worker"}
+	encoded, err := json.Marshal(member)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = `{"Address":"10.0.0.10","Port":30080,"Draining":false,"ProviderID":"openstack:///worker"}`
+	if string(encoded) != want {
+		t.Fatalf("unweighted member JSON = %s, want %s", encoded, want)
+	}
+}

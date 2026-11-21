@@ -42,7 +42,7 @@ type routeGraphSnapshot struct {
 	revisions  []string
 	candidates []routeCandidateRevision
 	winner     types.UID
-	backend    objectRevision
+	backends   []objectRevision
 	gateway    *gatewayv1.Gateway
 	class      objectRevision
 }
@@ -173,14 +173,14 @@ func (r *Reconciler) observeRoutes(ctx context.Context, request graph.Request, e
 		snapshot.revisions = append(snapshot.revisions, route.GetResourceVersion())
 	}
 	if winner != nil && !peerAttached {
-		spec, backend, class, err := r.ensureRouteNode(ctx, winner, observedGateway, listener)
+		spec, backends, class, err := r.ensureRouteNode(ctx, winner, observedGateway, listener)
 		if err != nil {
 			return snapshot, err
 		}
 		if spec != nil {
 			snapshot.nodes[winnerIndex].Disposition = cloud.GraphEnsure
 			snapshot.nodes[winnerIndex].Spec = *spec
-			snapshot.backend, snapshot.class = backend, class
+			snapshot.backends, snapshot.class = backends, class
 		}
 	}
 	if trigger != nil {
@@ -208,36 +208,38 @@ func (r *Reconciler) liveGateway(ctx context.Context, identity cloud.Identity, e
 	return gateway, nil
 }
 
-func (r *Reconciler) ensureRouteNode(ctx context.Context, route *transportRoute, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) (*cloud.RouteSpec, objectRevision, objectRevision, error) {
+func (r *Reconciler) ensureRouteNode(ctx context.Context, route *transportRoute, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) (*cloud.RouteSpec, []objectRevision, objectRevision, error) {
 	class, err := r.gatewayClass(ctx, gateway)
 	if err != nil || class == nil || !controller.GatewayClassSupportsInstalledVersion(class) {
-		return nil, objectRevision{}, objectRevision{}, err
+		return nil, nil, objectRevision{}, err
 	}
 	if err := r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
 		if errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) {
 			err = nil
 		}
-		return nil, objectRevision{}, objectRevision{}, err
+		return nil, nil, objectRevision{}, err
 	}
 	topology, valid, err := r.gatewayTopology(gateway, listener)
 	if err != nil || !valid {
-		return nil, objectRevision{}, objectRevision{}, err
+		return nil, nil, objectRevision{}, err
 	}
-	ref, diagnostic, err := r.authorizedBackend(ctx, route)
-	if err != nil || diagnostic != nil || ref.disabled {
-		return nil, objectRevision{}, objectRevision{}, err
+	// Zero-weight references affect status only. Their authorization and
+	// revisions cannot change the serving destinations of the sealed graph.
+	refs, rejections, err := r.authorizedBackends(ctx, route, false)
+	if err != nil || rejections.active != nil || len(refs) == 0 {
+		return nil, nil, objectRevision{}, err
 	}
-	service, diagnostic, err := r.backendService(ctx, ref)
-	if err != nil || diagnostic != nil {
-		return nil, objectRevision{}, objectRevision{}, err
+	services, rejections, err := r.backendServices(ctx, refs, false)
+	if err != nil || rejections.active != nil || len(services) == 0 {
+		return nil, nil, objectRevision{}, err
 	}
-	spec, diagnostic, err := r.routeSpec(ctx, route, gateway, listener, ref, service, topology)
-	if err != nil || diagnostic != nil {
-		return nil, objectRevision{}, objectRevision{}, err
+	spec, target, diagnostic, err := r.routeSpec(ctx, route, gateway, listener, services, topology)
+	if err != nil || diagnostic != nil || r.currentTarget(route, route.parentRefs[0], target) == nil {
+		return nil, nil, objectRevision{}, err
 	}
-	target, err := r.forwardingTarget(service, ref, spec)
-	if err != nil || r.currentTarget(route, route.parentRefs[0], target) == nil {
-		return nil, objectRevision{}, objectRevision{}, err
+	backends := make([]objectRevision, 0, len(services))
+	for _, service := range services {
+		backends = append(backends, revisionOf(service.service))
 	}
-	return &spec, revisionOf(service), revisionOf(class), nil
+	return &spec, backends, revisionOf(class), nil
 }

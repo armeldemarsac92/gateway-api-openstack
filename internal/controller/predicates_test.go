@@ -278,7 +278,7 @@ func TestGatewayAPICRDReconcilePredicate(t *testing.T) {
 }
 
 func TestServicePredicate(t *testing.T) {
-	service := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "backend", Generation: 1}}
+	service := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "backend", UID: "previous", Generation: 1}}
 	pred := ServicePredicate()
 	statusChanged := service.DeepCopy()
 	statusChanged.Status.LoadBalancer.Ingress = []corev1.LoadBalancerIngress{{IP: "192.0.2.10"}}
@@ -292,6 +292,9 @@ func TestServicePredicate(t *testing.T) {
 	metadataChanged := service.DeepCopy()
 	metadataChanged.Labels = map[string]string{"example.com/label": "value"}
 	testPredicateUpdate(t, pred, service, metadataChanged, false, "unrelated Service metadata")
+	recreated := service.DeepCopy()
+	recreated.UID = "current"
+	testPredicateUpdate(t, pred, service, recreated, true, "recreated Service UID")
 }
 
 func TestEndpointSlicePredicate(t *testing.T) {
@@ -345,6 +348,19 @@ func TestEndpointSlicePredicate(t *testing.T) {
 	serviceChanged := base.DeepCopy()
 	serviceChanged.Labels[discoveryv1.LabelServiceName] = "other-backend"
 	testPredicateUpdate(t, pred, base, serviceChanged, true, "Service label")
+
+	controlled := base.DeepCopy()
+	controlled.OwnerReferences = []metav1.OwnerReference{{APIVersion: "v1", Kind: "Service", Name: "backend", UID: "previous", Controller: ptr.To(true)}}
+	testPredicateUpdate(t, pred, base, controlled, true, "controlling Service added")
+	ownerChanged := controlled.DeepCopy()
+	ownerChanged.OwnerReferences[0].UID = "current"
+	testPredicateUpdate(t, pred, controlled, ownerChanged, true, "controlling Service UID changed")
+	ownerChanged.OwnerReferences[0].Name = "other-backend"
+	ownerChanged.OwnerReferences[0].UID = "previous"
+	testPredicateUpdate(t, pred, controlled, ownerChanged, true, "controlling Service name changed")
+	ownerChanged.OwnerReferences[0].Controller = ptr.To(false)
+	testPredicateUpdate(t, pred, controlled, ownerChanged, true, "controlling Service removed")
+	testPredicateUpdate(t, pred, base, ownerChanged, false, "non-controlling Service owner")
 
 	portsChanged := base.DeepCopy()
 	portsChanged.Ports = []discoveryv1.EndpointPort{{Port: ptr.To(int32(8080))}}

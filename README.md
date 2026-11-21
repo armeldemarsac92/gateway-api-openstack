@@ -36,7 +36,7 @@ The controller uses Gateway API v1.7.0 and defaults to the Standard Channel. Its
 - One rule, one match and one backend Service per HTTPRoute. Across routes the listener orders matching hostnames, Exact and PathPrefix paths, route age and names.
 - An optional exact or wildcard hostname on the listener and at most one on the HTTPRoute. Only the names shared by both reach the backend.
 - One TCP listener on a dedicated Gateway. It forwards opaque streams to one Service port from the oldest attached TCPRoute. A newer attached route takes over when the older route detaches. [TCP example](docs/getting-started.md#forward-tcp-to-a-service)
-- One UDP listener on a dedicated Gateway. The oldest attached UDPRoute selects one UDP Service port for the Amphora listener's default pool. [UDP example](docs/getting-started.md#forward-udp-to-a-service)
+- One UDP listener on a dedicated Gateway. The oldest attached UDPRoute selects the Amphora listener's default pool. Endpoint mode supports weighted UDP Services with routable pod IPs. NodePort mode accepts a single Service. [UDP example](docs/getting-started.md#forward-udp-to-a-service)
 - Eligible worker NodePort members with Local or Cluster traffic policy
 - An opt-in IPv4 Endpoint mode for ClusterIP, headless, and NodePort Services, pending live network validation
 - Typed GatewayClass configuration with topology settings fixed for each Gateway

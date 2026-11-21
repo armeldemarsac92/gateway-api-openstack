@@ -29,6 +29,9 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/monitors"
 )
 
+// Octavia's public member create and update APIs accept weights from 0 to 256.
+const maxOctaviaMemberWeight = 256
+
 type desiredPolicy struct {
 	role        string
 	position    int32
@@ -141,6 +144,12 @@ func (p *Provider) buildDesiredRoute(spec cloud.RouteSpec) (desiredRoute, error)
 		if member.Port < 1 || member.Port > 65535 {
 			return invalid(fmt.Errorf("member %s has invalid port %d", member.Address, member.Port))
 		}
+		if member.Weight != 0 && (protocol != cloud.ListenerProtocolUDP || spec.MemberMode != cloud.MemberModeEndpoint) {
+			return invalid(errors.New("explicit member weights require UDP endpoint mode"))
+		}
+		if member.Weight < 0 || member.Weight > maxOctaviaMemberWeight {
+			return invalid(fmt.Errorf("explicit member weight %d is outside 1-%d", member.Weight, maxOctaviaMemberWeight))
+		}
 		address, err := netip.ParseAddr(member.Address)
 		if err != nil {
 			return invalid(fmt.Errorf("member address %q is not a valid IP address: %w", member.Address, err))
@@ -157,7 +166,7 @@ func (p *Provider) buildDesiredRoute(spec cloud.RouteSpec) (desiredRoute, error)
 		}
 		member.Address = address.String()
 		key := memberKey(member.Address, member.Port)
-		if existing, duplicate := membersByKey[key]; duplicate && (existing.ProviderID != member.ProviderID || existing.Draining != member.Draining) {
+		if existing, duplicate := membersByKey[key]; duplicate && existing != member {
 			return invalid(errors.New("members with the same address and port must have consistent state"))
 		}
 		membersByKey[key] = member

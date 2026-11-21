@@ -26,6 +26,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -39,7 +40,7 @@ import (
 
 func TestUDPNodePortSelectsVIPFamilyOnDualStackWorker(t *testing.T) {
 	gateway, _, route := udpRouteFixture()
-	service := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "backend", Namespace: route.Namespace}, Spec: corev1.ServiceSpec{
+	service := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "backend", Namespace: route.Namespace, UID: "udp-service"}, Spec: corev1.ServiceSpec{
 		Type: corev1.ServiceTypeNodePort, IPFamilies: []corev1.IPFamily{corev1.IPv6Protocol, corev1.IPv4Protocol},
 		Ports: []corev1.ServicePort{{Name: "udp", Protocol: corev1.ProtocolUDP, Port: 8080, NodePort: 32000}},
 	}}
@@ -57,9 +58,10 @@ func TestUDPNodePortSelectsVIPFamilyOnDualStackWorker(t *testing.T) {
 	r := testReconciler(t, objects...)
 	r.Protocol = gatewayv1.UDPProtocolType
 	placement := classconfig.Resolved{Topology: cloud.Topology{MemberMode: cloud.MemberModeNodePort}, NodeAddressType: corev1.NodeInternalIP}
+	backends := []serviceBackend{{ref: serviceReference{port: ptr.To(gatewayv1.PortNumber(8080)), weight: 1}, service: service, port: &service.Spec.Ports[0]}}
 	for _, tc := range []struct{ vip, workerIP string }{{"192.0.2.30", "192.0.2.44"}, {"2001:db8::30", "2001:db8::44"}} {
 		gateway.Status.Addresses = []gatewayv1.GatewayStatusAddress{{Value: tc.vip}}
-		spec, diagnostic, err := r.routeSpec(t.Context(), viewRoute(route), gateway, &gateway.Spec.Listeners[0], serviceReference{port: ptr.To(gatewayv1.PortNumber(8080))}, service, placement)
+		spec, _, diagnostic, err := r.routeSpec(t.Context(), viewRoute(route), gateway, &gateway.Spec.Listeners[0], backends, placement)
 		if err != nil || diagnostic != nil || len(spec.Members) != 1 || spec.Members[0].Address != tc.workerIP || spec.Members[0].Port != 32000 {
 			t.Errorf("VIP %s requires UDP NodePort on %s: members %v, diagnostic %v, error %v", tc.vip, tc.workerIP, spec.Members, diagnostic, err)
 		}
@@ -68,7 +70,7 @@ func TestUDPNodePortSelectsVIPFamilyOnDualStackWorker(t *testing.T) {
 		t.Fatal(err)
 	}
 	gateway.Status.Addresses = []gatewayv1.GatewayStatusAddress{{Value: "192.0.2.30"}}
-	spec, diagnostic, err := r.routeSpec(t.Context(), viewRoute(route), gateway, &gateway.Spec.Listeners[0], serviceReference{port: ptr.To(gatewayv1.PortNumber(8080))}, service, placement)
+	spec, _, diagnostic, err := r.routeSpec(t.Context(), viewRoute(route), gateway, &gateway.Spec.Listeners[0], backends, placement)
 	if err != nil || diagnostic == nil || diagnostic.Reason != "Pending" || len(spec.Members) != 0 {
 		t.Fatalf("IPv4 VIP with only IPv6 endpoints: members %v, diagnostic %v, error %v", spec.Members, diagnostic, err)
 	}
@@ -85,6 +87,207 @@ func udpRouteFixture() (*gatewayv1.Gateway, *gatewayv1.GatewayClass, *gatewayv1.
 		},
 	}
 	return gateway, class, route
+}
+
+func TestUDPRouteProgramsWeightedEndpointPool(t *testing.T) {
+	gateway, class, route := udpRouteFixture()
+	grant := &gatewayv1.ReferenceGrant{ObjectMeta: metav1.ObjectMeta{Namespace: "other", Name: "allow-disabled"},
+		Spec: gatewayv1.ReferenceGrantSpec{
+			From: []gatewayv1.ReferenceGrantFrom{{Group: gatewayv1.GroupName, Kind: "UDPRoute", Namespace: gatewayv1.Namespace(route.Namespace)}},
+			To:   []gatewayv1.ReferenceGrantTo{{Kind: "Service", Name: ptr.To(gatewayv1.ObjectName("disabled"))}},
+		},
+	}
+	objects := []client.Object{gateway, class, route, grant}
+	var refs []gatewayv1.BackendRef
+	for _, backend := range []struct {
+		name      string
+		weight    int32
+		addresses []string
+	}{
+		{"primary", 70, []string{"10.1.2.1", "10.1.2.2"}},
+		{"secondary", 30, []string{"10.1.2.3"}},
+		{"disabled", 0, []string{"10.1.2.4"}},
+	} {
+		namespace := route.Namespace
+		if backend.weight == 0 {
+			namespace = grant.Namespace
+		}
+		ref, service, endpoints := udpBackendFixture(namespace, backend.name, backend.weight, backend.addresses...)
+		if namespace != route.Namespace {
+			ref.Namespace = ptr.To(gatewayv1.Namespace(namespace))
+		}
+		refs = append(refs, ref)
+		objects = append(objects, service, endpoints)
+	}
+	route.Spec.Rules[0].BackendRefs = refs
+	r := testReconciler(t, objects...)
+	r.Protocol = gatewayv1.UDPProtocolType
+	identity := bindFixture(t, r, gateway, route, cloud.MemberModeEndpoint)
+	route = reconcileUDPRouteWithGraph(t, r, route, identity, func(nodes []cloud.RouteGraphNode) {
+		members := nodes[0].Spec.Members
+		if len(members) != 3 || members[0].Address != "10.1.2.1" || members[1].Address != "10.1.2.2" || members[2].Address != "10.1.2.3" ||
+			members[0].Weight <= 0 || members[0].Weight != members[1].Weight || members[0].Weight*6 != members[2].Weight*7 ||
+			members[0].Port != 9090 || members[1].Port != 9090 || members[2].Port != 9090 {
+			t.Fatalf("expected endpoint shares 35:35:30 and no zero-weight backend, got %+v", members)
+		}
+	})
+	checkRouteCondition(t, route, r.Config.ControllerName, r.Config.Domain()+"/Programmed", metav1.ConditionTrue, "Programmed")
+	disabled := &corev1.Service{}
+	if err := r.Get(t.Context(), client.ObjectKey{Namespace: grant.Namespace, Name: "disabled"}, disabled); err != nil {
+		t.Fatal(err)
+	}
+	disabled.Spec.Type = corev1.ServiceTypeExternalName
+	disabled.Spec.ExternalName = "disabled.example.com"
+	if err := r.Update(t.Context(), disabled); err != nil {
+		t.Fatal(err)
+	}
+	current := reconcileUDPRoute(t, r, route)
+	checkRouteCondition(t, current, r.Config.ControllerName, "ResolvedRefs", metav1.ConditionFalse, "UnsupportedValue")
+	checkRouteCondition(t, current, r.Config.ControllerName, r.Config.Domain()+"/Programmed", metav1.ConditionTrue, "Programmed")
+	if err := r.Delete(t.Context(), grant); err != nil {
+		t.Fatal(err)
+	}
+	r.APIReader = denyServiceRead{Reader: r.Client, namespace: grant.Namespace}
+	current = reconcileUDPRoute(t, r, current)
+	checkRouteCondition(t, current, r.Config.ControllerName, "ResolvedRefs", metav1.ConditionFalse, "RefNotPermitted")
+	checkRouteCondition(t, current, r.Config.ControllerName, r.Config.Domain()+"/Programmed", metav1.ConditionTrue, "Programmed")
+}
+
+func TestWeightedUDPRouteWithUnsupportedRatioWithdrawsPool(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		denied    bool
+		resolved  metav1.ConditionStatus
+		refReason string
+	}{
+		{name: "resolved references", resolved: metav1.ConditionTrue, refReason: "ResolvedRefs"},
+		{name: "denied zero-weight reference", denied: true, resolved: metav1.ConditionFalse, refReason: "RefNotPermitted"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			gateway, class, route := udpRouteFixture()
+			firstRef, first, firstEndpoints := udpBackendFixture(route.Namespace, "primary", 70, "10.1.2.1")
+			secondRef, second, secondEndpoints := udpBackendFixture(route.Namespace, "secondary", 30, "10.1.2.2")
+			route.Spec.Rules[0].BackendRefs = []gatewayv1.BackendRef{firstRef, secondRef}
+			r := testReconciler(t, gateway, class, route, first, firstEndpoints, second, secondEndpoints)
+			r.Protocol = gatewayv1.UDPProtocolType
+			identity := bindFixture(t, r, gateway, route, cloud.MemberModeEndpoint)
+			route = reconcileUDPRouteWithGraph(t, r, route, identity, nil)
+			route.Spec.Rules[0].BackendRefs[0].Weight = ptr.To(int32(257))
+			route.Spec.Rules[0].BackendRefs[1].Weight = ptr.To(int32(1))
+			if test.denied {
+				route.Spec.Rules[0].BackendRefs = append(route.Spec.Rules[0].BackendRefs, gatewayv1.BackendRef{
+					BackendObjectReference: gatewayv1.BackendObjectReference{Name: "disabled", Namespace: ptr.To(gatewayv1.Namespace("other")), Port: firstRef.Port},
+					Weight:                 ptr.To(int32(0)),
+				})
+			}
+			route.Generation++
+			if err := r.Update(t.Context(), route); err != nil {
+				t.Fatal(err)
+			}
+			current := reconcileUDPRoute(t, r, route)
+			checkRouteCondition(t, current, r.Config.ControllerName, "ResolvedRefs", test.resolved, test.refReason)
+			checkRouteCondition(t, current, r.Config.ControllerName, r.Config.Domain()+"/Programmed", metav1.ConditionFalse, "UnsupportedValue")
+			if current.Annotations[r.Config.RouteLifecycleAnnotation()] != controller.RouteDetaching {
+				t.Fatal("a ratio outside Octavia's member-weight range did not checkpoint pool withdrawal")
+			}
+		})
+	}
+}
+
+func TestWeightedUDPRouteWithdrawsWhenReferenceGrantIsRevoked(t *testing.T) {
+	gateway, class, route := udpRouteFixture()
+	localRef, local, localEndpoints := udpBackendFixture(route.Namespace, "primary", 70, "10.1.2.1")
+	remoteRef, remote, remoteEndpoints := udpBackendFixture("other", "secondary", 30, "10.1.2.2")
+	remoteRef.Namespace = ptr.To(gatewayv1.Namespace(remote.Namespace))
+	route.Spec.Rules[0].BackendRefs = []gatewayv1.BackendRef{localRef, remoteRef}
+	grant := &gatewayv1.ReferenceGrant{ObjectMeta: metav1.ObjectMeta{Namespace: remote.Namespace, Name: "allow-udp"},
+		Spec: gatewayv1.ReferenceGrantSpec{
+			From: []gatewayv1.ReferenceGrantFrom{{Group: gatewayv1.GroupName, Kind: "UDPRoute", Namespace: gatewayv1.Namespace(route.Namespace)}},
+			To:   []gatewayv1.ReferenceGrantTo{{Kind: "Service", Name: &remoteRef.Name}},
+		},
+	}
+	r := testReconciler(t, gateway, class, route, local, localEndpoints, remote, remoteEndpoints, grant)
+	r.Protocol = gatewayv1.UDPProtocolType
+	identity := bindFixture(t, r, gateway, route, cloud.MemberModeEndpoint)
+	route = reconcileUDPRouteWithGraph(t, r, route, identity, nil)
+	request := graph.Request{Identity: identity, Action: graph.Ensure, Gateway: gateway, UDPRoute: route}
+	input, err := r.ObserveRouteGraph(t.Context(), request, gateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Delete(t.Context(), grant); err != nil {
+		t.Fatal(err)
+	}
+	if keys := r.enqueueGrant(t.Context(), grant); len(keys) != 1 || keys[0].NamespacedName != client.ObjectKeyFromObject(route) {
+		t.Fatalf("deleting the grant should enqueue the weighted route, got %+v", keys)
+	}
+	r.APIReader = denyServiceRead{Reader: r.Client}
+	if err := input.Validate(t.Context()); !errors.Is(err, controller.ErrGraphInputChanged) {
+		t.Fatalf("revoking a grant must invalidate the sealed graph, got %v", err)
+	}
+	route = reconcileUDPRoute(t, r, route)
+	checkRouteCondition(t, route, r.Config.ControllerName, "ResolvedRefs", metav1.ConditionFalse, "RefNotPermitted")
+	if route.Annotations[r.Config.RouteLifecycleAnnotation()] != controller.RouteDetaching {
+		t.Fatal("revoking a weighted backend grant did not checkpoint pool withdrawal")
+	}
+	r.Writer = applyRouteGraphFunc(func(ctx context.Context, request graph.Request) (cloud.GatewayGraphResult, error) {
+		input, err := r.ObserveRouteGraph(ctx, request, nil)
+		if err != nil {
+			return cloud.GatewayGraphResult{}, err
+		}
+		if request.Action != graph.DeleteRoute || len(input.Nodes) != 1 || input.Nodes[0].Disposition != cloud.GraphDelete || input.Nodes[0].Spec.Identity != identity {
+			t.Fatalf("expected withdrawal of the owned UDP pool, got %+v", input.Nodes)
+		}
+		return readyUDPGraphResult(identity), input.Validate(ctx)
+	})
+	if current := reconcileUDPRoute(t, r, route); controller.RouteHasControllerBinding(r.Config, current) {
+		t.Fatal("confirmed deletion of the weighted pool did not clear its binding")
+	}
+}
+
+func udpBackendFixture(namespace, name string, weight int32, addresses ...string) (gatewayv1.BackendRef, *corev1.Service, *discoveryv1.EndpointSlice) {
+	ref := gatewayv1.BackendRef{BackendObjectReference: gatewayv1.BackendObjectReference{Name: gatewayv1.ObjectName(name), Port: ptr.To(gatewayv1.PortNumber(8080))}, Weight: &weight}
+	service := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: name, UID: types.UID(name + "-uid")},
+		Spec:       corev1.ServiceSpec{Ports: []corev1.ServicePort{{Name: "udp", Port: 8080, Protocol: corev1.ProtocolUDP}}},
+	}
+	endpoints := &discoveryv1.EndpointSlice{
+		ObjectMeta:  metav1.ObjectMeta{Namespace: namespace, Name: name, Labels: map[string]string{discoveryv1.LabelServiceName: name}},
+		AddressType: discoveryv1.AddressTypeIPv4,
+		Ports:       []discoveryv1.EndpointPort{{Name: ptr.To("udp"), Protocol: ptr.To(corev1.ProtocolUDP), Port: ptr.To(int32(9090))}},
+	}
+	for _, address := range addresses {
+		endpoints.Endpoints = append(endpoints.Endpoints, discoveryv1.Endpoint{Addresses: []string{address}})
+	}
+	return ref, service, endpoints
+}
+
+func reconcileUDPRouteWithGraph(t *testing.T, r *Reconciler, route *gatewayv1.UDPRoute, identity cloud.Identity, check func([]cloud.RouteGraphNode)) *gatewayv1.UDPRoute {
+	t.Helper()
+	r.Coordinator = &graph.Coordinator{}
+	r.Writer = applyRouteGraphFunc(func(ctx context.Context, request graph.Request) (cloud.GatewayGraphResult, error) {
+		input, err := r.ObserveRouteGraph(ctx, request, request.Gateway)
+		if err != nil {
+			return cloud.GatewayGraphResult{}, err
+		}
+		if request.Action != graph.Ensure || len(input.Nodes) != 1 || input.Nodes[0].Disposition != cloud.GraphEnsure || input.Nodes[0].Spec.Identity != identity ||
+			input.Nodes[0].Spec.GatewayRequirements.ListenerProtocol != cloud.ListenerProtocolUDP {
+			t.Fatalf("expected one owned UDP pool graph, got %+v", input.Nodes)
+		}
+		if check != nil {
+			check(input.Nodes)
+		}
+		return readyUDPGraphResult(identity), input.Validate(ctx)
+	})
+	current := reconcileUDPRoute(t, r, route)
+	checkRouteCondition(t, current, r.Config.ControllerName, "ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")
+	return current
+}
+
+func readyUDPGraphResult(identity cloud.Identity) cloud.GatewayGraphResult {
+	return cloud.GatewayGraphResult{Outcome: cloud.ReadyOutcome(), Routes: []cloud.RouteGraphResult{
+		{Identity: identity, Result: cloud.RouteResult{Outcome: cloud.ReadyOutcome()}},
+	}}
 }
 
 func reconcileUDPRoute(t *testing.T, r *Reconciler, route *gatewayv1.UDPRoute) *gatewayv1.UDPRoute {

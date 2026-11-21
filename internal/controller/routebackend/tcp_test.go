@@ -39,3 +39,23 @@ func TestDeletingEndpointSliceWithdrawsNodePort(t *testing.T) {
 		t.Fatalf("a deleting EndpointSlice kept a worker eligible: nodes=%v diagnostic=%v", nodes, diagnostic)
 	}
 }
+
+func TestRecreatedServiceIgnoresStaleNodePortReadiness(t *testing.T) {
+	service := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "database", UID: "current"}}
+	port := &corev1.ServicePort{Name: "db", Protocol: corev1.ProtocolTCP}
+	owner := metav1.NewControllerRef(service, corev1.SchemeGroupVersion.WithKind("Service"))
+	owner.UID = "previous"
+	slice := discoveryv1.EndpointSlice{ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{*owner}}, AddressType: discoveryv1.AddressTypeIPv4,
+		Ports:     []discoveryv1.EndpointPort{{Name: ptr.To("db"), Port: ptr.To(int32(5432))}},
+		Endpoints: []discoveryv1.Endpoint{{NodeName: ptr.To("worker"), Addresses: []string{"10.1.2.11"}}},
+	}
+	nodes, diagnostic := ReadyBackendNodes(service, port, []discoveryv1.EndpointSlice{slice})
+	if len(nodes) != 0 || diagnostic == nil || diagnostic.Reason != string(gatewayv1.RouteReasonPending) {
+		t.Fatalf("stale slice kept a worker eligible: nodes=%v diagnostic=%v", nodes, diagnostic)
+	}
+	slice.OwnerReferences[0].UID = service.UID
+	nodes, diagnostic = ReadyBackendNodes(service, port, []discoveryv1.EndpointSlice{slice})
+	if _, ready := nodes[discoveryv1.AddressTypeIPv4]["worker"]; !ready || diagnostic != nil {
+		t.Fatalf("current slice did not make worker eligible: nodes=%v diagnostic=%v", nodes, diagnostic)
+	}
+}

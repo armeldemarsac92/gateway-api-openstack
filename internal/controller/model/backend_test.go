@@ -307,6 +307,39 @@ func TestBackendEndpointObservationsRetainConditions(t *testing.T) {
 	}
 }
 
+func TestRecreatedServiceIgnoresEndpointSlicesOwnedByPreviousService(t *testing.T) {
+	service := backendService("echo")
+	service.UID = "current"
+	currentOwner := metav1.NewControllerRef(&service, corev1.SchemeGroupVersion.WithKind("Service"))
+	staleOwner, foreignOwner, nonServiceOwner, nonController := *currentOwner, *currentOwner, *currentOwner, *currentOwner
+	staleOwner.UID = "previous"
+	foreignOwner.Name = "other"
+	nonServiceOwner.APIVersion = "example.com/v1"
+	nonController.UID, nonController.Controller = "unrelated", ptr.To(false)
+
+	current := backendSlice("echo", "192.0.2.10")
+	current.OwnerReferences = []metav1.OwnerReference{nonController, *currentOwner}
+	manual := backendSlice("echo", "192.0.2.11")
+	managed := backendSlice("echo", "192.0.2.12")
+	managed.OwnerReferences = []metav1.OwnerReference{nonServiceOwner}
+	stale := backendSlice("echo", "192.0.2.13")
+	stale.OwnerReferences = []metav1.OwnerReference{staleOwner}
+	foreign := backendSlice("echo", "192.0.2.14")
+	foreign.OwnerReferences = []metav1.OwnerReference{foreignOwner}
+
+	endpointSlices := []discoveryv1.EndpointSlice{current, manual, managed, stale, foreign}
+	endpoints := ResolveServiceEndpoints(&service, &service.Spec.Ports[0], endpointSlices)
+	if want := []string{"192.0.2.10", "192.0.2.11", "192.0.2.12"}; !slices.EqualFunc(endpoints, want, func(endpoint Endpoint, address string) bool {
+		return endpoint.Address == address
+	}) {
+		t.Fatalf("endpoints from recreated Service = %v, want addresses %v", endpoints, want)
+	}
+	service.UID = ""
+	if endpoints = ResolveServiceEndpoints(&service, &service.Spec.Ports[0], endpointSlices); len(endpoints) != len(endpointSlices) {
+		t.Fatalf("endpoints without a Service UID = %v, want all %d slices", endpoints, len(endpointSlices))
+	}
+}
+
 func TestBackendModelDoesNotAliasInputs(t *testing.T) {
 	reference := backendReference("echo", ptr.To(int32(5)))
 	reference.Group = ptr.To(gatewayv1.Group(""))

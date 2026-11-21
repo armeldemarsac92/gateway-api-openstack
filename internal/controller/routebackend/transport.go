@@ -41,6 +41,17 @@ func unsupported(format string, args ...any) *model.Diagnostic {
 	return &model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: fmt.Sprintf(format, args...)}
 }
 
+// ValidateEndpointService checks the Service constraints for direct endpoint forwarding.
+func ValidateEndpointService(service *corev1.Service) *model.Diagnostic {
+	if service.Spec.Type != "" && service.Spec.Type != corev1.ServiceTypeClusterIP && service.Spec.Type != corev1.ServiceTypeNodePort {
+		return unsupported("backend Service %s must be ClusterIP or NodePort", service.Name)
+	}
+	if len(service.Spec.IPFamilies) != 0 && !slices.Contains(service.Spec.IPFamilies, corev1.IPv4Protocol) {
+		return unsupported("endpoint members require an IPv4 Service")
+	}
+	return nil
+}
+
 // TransportMembers resolves a TCP or UDP Service through the Gateway's frozen member mode.
 // The caller authorizes the Service reference before reading it.
 func TransportMembers(ctx context.Context, reader client.Reader, service *corev1.Service, port *gatewayv1.PortNumber, protocol corev1.Protocol, topology classconfig.Resolved, gatewayAddresses []gatewayv1.GatewayStatusAddress) ([]cloud.Member, *model.Diagnostic, error) {
@@ -58,11 +69,8 @@ func TransportMembers(ctx context.Context, reader client.Reader, service *corev1
 			return nil, unsupported("backend Service %s requires an allocated NodePort", service.Name), nil
 		}
 	case cloud.MemberModeEndpoint:
-		if service.Spec.Type != "" && service.Spec.Type != corev1.ServiceTypeClusterIP && service.Spec.Type != corev1.ServiceTypeNodePort {
-			return nil, unsupported("backend Service %s must be ClusterIP or NodePort", service.Name), nil
-		}
-		if len(service.Spec.IPFamilies) != 0 && !slices.Contains(service.Spec.IPFamilies, corev1.IPv4Protocol) {
-			return nil, unsupported("endpoint members require an IPv4 Service"), nil
+		if diagnostic := ValidateEndpointService(service); diagnostic != nil {
+			return nil, diagnostic, nil
 		}
 	default:
 		return nil, unsupported("backend member mode is unsupported"), nil

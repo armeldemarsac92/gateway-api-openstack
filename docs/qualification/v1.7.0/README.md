@@ -64,7 +64,7 @@ Local verification passed the pinned linter, Go race tests, tagged E2E helper te
 | [ReferenceGrant](service-grants.md) | The controller observes authorization and revocation for a cross-namespace Service on a local Kubernetes API server. |
 | [Magnum lifecycle](magnum-driver.md#local-lifecycle-rehearsal) | Helm installed, upgraded, rolled back and removed the workload addon. Uninstall removed all five chart objects and preserved the sampled external resources and updated Cloud Secret. A separate TLS check exercised client startup with the replacement credential and CA. |
 
-The controller supports one dedicated UDP listener and uses the oldest attached UDPRoute to select one authorized UDP Service port. [UDPRoute controller](../../../internal/controller/l4route) · [Operator example](../../getting-started.md#forward-udp-to-a-service) · [Remaining UDPRoute contract](matrix/named-contracts.md)
+The controller supports one dedicated UDP listener. Its oldest attached UDPRoute can select weighted core Services in Endpoint mode, or a single Service in NodePort mode. [UDPRoute controller](../../../internal/controller/l4route) · [Operator example](../../getting-started.md#forward-udp-to-a-service) · [Remaining UDPRoute contract](matrix/named-contracts.md)
 
 The [provider study](provider/provider-feasibility.md) describes the proposed Octavia policy extension for request headers and an opt-in waypoint for Service traffic. Both proposals require implementation and on-cloud qualification.
 

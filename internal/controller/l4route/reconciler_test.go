@@ -171,10 +171,13 @@ func checkRouteCondition(t *testing.T, object client.Object, name gatewayv1.Gate
 	t.Fatalf("%s has no parent status from %s", route.GetName(), name)
 }
 
-type denyServiceRead struct{ client.Reader }
+type denyServiceRead struct {
+	client.Reader
+	namespace string
+}
 
 func (r denyServiceRead) Get(ctx context.Context, key client.ObjectKey, object client.Object, opts ...client.GetOption) error {
-	if _, service := object.(*corev1.Service); service {
+	if _, service := object.(*corev1.Service); service && (r.namespace == "" || key.Namespace == r.namespace) {
 		return errors.New("read an unauthorized Service")
 	}
 	return r.Reader.Get(ctx, key, object, opts...)

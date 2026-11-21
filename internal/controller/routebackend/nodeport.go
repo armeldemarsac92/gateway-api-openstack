@@ -43,7 +43,7 @@ func ReadyBackendNodes(service *corev1.Service, servicePort *corev1.ServicePort,
 	readyEndpoint := false
 	localNodes := BackendNodes{}
 	for _, slice := range slices {
-		if !slice.DeletionTimestamp.IsZero() || !sliceSupportsServicePort(service, servicePort, slice) {
+		if !slice.DeletionTimestamp.IsZero() || !model.EndpointSliceOwnerMatchesService(&slice, service) || !sliceSupportsServicePort(service, servicePort, slice) {
 			continue
 		}
 		for _, endpoint := range slice.Endpoints {

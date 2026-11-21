@@ -33,12 +33,16 @@ func routeCondition(route *transportRoute, typ string, status metav1.ConditionSt
 	return controller.Condition(typ, status, reason, message, route.GetGeneration())
 }
 
-func (p *routePlan) rejectBackend(route *transportRoute, diagnostic *model.Diagnostic) {
+func (p *routePlan) setResolvedRefs(route *transportRoute, diagnostic *model.Diagnostic) {
 	if diagnostic == nil {
 		p.resolved = routeCondition(route, "ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs", "Backend references are resolved")
 		return
 	}
 	p.resolved = routeCondition(route, "ResolvedRefs", metav1.ConditionFalse, diagnostic.Reason, diagnostic.Message)
+}
+
+func (p *routePlan) rejectBackend(route *transportRoute, diagnostic *model.Diagnostic) {
+	p.setResolvedRefs(route, diagnostic)
 	if p.programmed.Reason != "NotSelected" {
 		p.programmed = routeCondition(route, "Programmed", metav1.ConditionFalse, diagnostic.Reason, diagnostic.Message)
 	}

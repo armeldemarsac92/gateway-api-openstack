@@ -400,13 +400,14 @@ const (
 )
 
 type routeMutation struct {
-	kind     routeMutationKind
-	id       string
-	parentID string
-	member   cloud.Member
-	policy   desiredPolicy
-	rule     desiredRule
-	retry    bool
+	kind                 routeMutationKind
+	id                   string
+	parentID             string
+	member               cloud.Member
+	policy               desiredPolicy
+	rule                 desiredRule
+	retry                bool
+	clearPoolPersistence bool
 }
 
 func (s routeMutation) message() string {
@@ -465,8 +466,11 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 		if pool.Protocol != desired.protocol() {
 			return nil, cloud.RouteState{}, fmt.Errorf("%w: pool %s has protocol %s", cloud.ErrOwnershipConflict, pool.ID, pool.Protocol)
 		}
-		if pool.LBMethod != string(pools.LBMethodRoundRobin) || !pool.AdminStateUp {
-			nonPolicyPlan = append(nonPolicyPlan, routeMutation{kind: routeMutationUpdatePool, id: pool.ID})
+		clearPersistence := pool.Persistence != (pools.SessionPersistence{}) &&
+			desired.protocol() == cloud.ListenerProtocolUDP && desired.spec.MemberMode == cloud.MemberModeEndpoint &&
+			slices.ContainsFunc(desired.members, func(member cloud.Member) bool { return !member.Draining && member.Weight > 0 })
+		if pool.LBMethod != string(pools.LBMethodRoundRobin) || !pool.AdminStateUp || clearPersistence {
+			nonPolicyPlan = append(nonPolicyPlan, routeMutation{kind: routeMutationUpdatePool, id: pool.ID, clearPoolPersistence: clearPersistence})
 		}
 
 		desiredMembers := make(map[string]cloud.Member, len(desired.members))
@@ -670,10 +674,15 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 			Tags:           tags,
 		})
 	case routeMutationUpdatePool:
-		_, err = p.octavia.UpdatePool(ctx, step.id, pools.UpdateOpts{
+		opts := pools.UpdateOpts{
 			LBMethod:     pools.LBMethodRoundRobin,
 			AdminStateUp: boolPointer(true),
-		})
+		}
+		if step.clearPoolPersistence {
+			// Gophercloud encodes a non-nil empty persistence as a JSON null.
+			opts.Persistence = &pools.SessionPersistence{}
+		}
+		_, err = p.octavia.UpdatePool(ctx, step.id, opts)
 	case routeMutationDeleteMember:
 		err = p.octavia.DeleteMember(ctx, step.parentID, step.id)
 	case routeMutationCreateMember:
@@ -798,15 +807,17 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 	return nil
 }
 
-// Endpoint weight represents readiness, not the Service backend's traffic share.
-// NodePort mode retains Octavia's default and does not own member weights.
+// Endpoint mode owns weight for readiness and explicit UDP traffic shares.
 func desiredMemberWeight(mode cloud.MemberMode, member cloud.Member) *int {
 	if mode != cloud.MemberModeEndpoint {
 		return nil
 	}
-	weight := 1
-	if member.Draining {
+	weight := member.Weight
+	switch {
+	case member.Draining:
 		weight = 0
+	case weight == 0:
+		weight = 1
 	}
 	return &weight
 }

@@ -99,12 +99,7 @@ func (route observedRouteGraph) validateDefaultPoolChildren() error {
 		}
 		members[member.ID] = true
 	}
-	for _, reference := range route.pool.Members {
-		if !members[reference.ID] {
-			return fmt.Errorf("%w: pool %s references unproven member %s", cloud.ErrOwnershipConflict, route.pool.ID, reference.ID)
-		}
-	}
-	return nil
+	return crossCheckChildInventory("pool", route.pool.ID, "member", route.pool.Members, route.members, func(member pools.Member) string { return member.ID })
 }
 
 func defaultPoolOwner(listener *listeners.Listener, routes []observedRouteGraph) int {

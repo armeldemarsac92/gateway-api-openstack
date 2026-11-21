@@ -34,6 +34,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	gatewayconsts "sigs.k8s.io/gateway-api/pkg/consts"
+
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
 func updatePredicate(changed func(client.Object, client.Object) bool) predicate.Predicate {
@@ -194,7 +196,7 @@ func GatewayForHTTPRoutePredicate(config Config) predicate.Predicate {
 	})
 }
 
-// EndpointSlicePredicate selects changes to backend addresses or readiness.
+// EndpointSlicePredicate selects changes to backend membership and readiness.
 func EndpointSlicePredicate() predicate.Predicate {
 	return updatePredicate(func(oldObject, newObject client.Object) bool {
 		oldSlice, oldOK := oldObject.(*discoveryv1.EndpointSlice)
@@ -206,6 +208,7 @@ func EndpointSlicePredicate() predicate.Predicate {
 			!equality.Semantic.DeepEqual(oldSlice.Ports, newSlice.Ports) ||
 			oldSlice.Labels[discoveryv1.LabelServiceName] != newSlice.Labels[discoveryv1.LabelServiceName] ||
 			oldSlice.DeletionTimestamp.IsZero() != newSlice.DeletionTimestamp.IsZero() ||
+			model.EndpointSliceServiceOwnerChanged(oldSlice, newSlice) ||
 			!maps.Equal(endpointSliceBackendState(oldSlice), endpointSliceBackendState(newSlice))
 	})
 }
@@ -226,8 +229,8 @@ func NodePredicate(addressType corev1.NodeAddressType) predicate.Predicate {
 	})
 }
 
-// ServicePredicate selects Service spec and deletion changes. The core Service
-// API does not increment generation when its spec changes.
+// ServicePredicate selects Service identity, spec and deletion changes. The
+// core Service API does not increment generation when its spec changes.
 func ServicePredicate() predicate.Predicate {
 	return updatePredicate(func(oldObject, newObject client.Object) bool {
 		oldService, oldOK := oldObject.(*corev1.Service)
@@ -235,7 +238,8 @@ func ServicePredicate() predicate.Predicate {
 		if !oldOK || !newOK {
 			return true
 		}
-		return !equality.Semantic.DeepEqual(oldService.Spec, newService.Spec) ||
+		return oldService.UID != newService.UID ||
+			!equality.Semantic.DeepEqual(oldService.Spec, newService.Spec) ||
 			!equality.Semantic.DeepEqual(oldService.DeletionTimestamp, newService.DeletionTimestamp)
 	})
 }

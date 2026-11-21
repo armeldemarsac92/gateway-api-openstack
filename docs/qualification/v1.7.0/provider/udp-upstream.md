@@ -4,6 +4,16 @@ The upstream client sends UDP datagrams to the IP published in Gateway status an
 
 The fixture supplies subnet discovery, VIP allocation, RPC completion and delivery of each changed listener configuration. It runs HTTP base Gateways through the public API and installs the UDP listeners in the guest dataplane. Testing a deployed Amphora, Neutron access rules and Magnum lifecycle requires an OpenStack environment. [Live qualification ledger](../live-runs.md)
 
+The runner executes cases serially and sets the upstream namespace readiness timeout to 90 seconds. The case bodies, workload images and case manifests come from the tagged v1.7.0 module.
+
+## Baseline on the single-Service controller
+
+At controller revision `3819e699441970e51d7e546582dd53a827e6a320`, five upstream UDP cases passed on Standard. The simple route returned its expected Service and namespace. The cross-namespace Service answered with a grant, and deleting it produced `ResolvedRefs=False/RefNotPermitted`. Both competing routes were accepted, the listener counted two attached routes, and all 20 probes identified the older route's backend. The denied and missing backend reference cases also passed. [Upstream grant case](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/udproute-reference-grant.go) · [Competing routes case](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/udproute-multiple-routes-attachment.go)
+
+Three cases failed. Both multi-listener Gateways reported `Accepted=False/ListenersNotValid`. The valid three-Service route specified weights of 70, 30 and 0. It reported `ResolvedRefs=False/UnsupportedValue`, and none of the ten upstream distribution attempts could send a full batch. The TLS-listener rejection case was recorded as a skip because its upstream assertion body returns immediately without TLSRoute support. [Upstream weighted case](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/udproute-weighted-routing.go) · [TLS prerequisite](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/udproute-not-allowed-by-listeners.go)
+
+On both channels the literal GATEWAY-UDP Core invocation with the original base stopped during setup. All 23 upstream pods were Ready. The `same-namespace-with-https-listener` Gateway requested four HTTPS listeners on port 443 and reported `Accepted=False/ListenersNotValid` and `Programmed=False/Invalid`. Zero profile test bodies ran. The scoped results above use the base with that Gateway omitted. [Upstream base](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/base/manifests.yaml)
+
 ## Reproduce the local run
 
 1. Start a fresh disposable Linux guest with rootful Podman, kind v0.33.0, kubectl v1.36.4, Keepalived, iproute2, ipvsadm, util-linux and the `ip_vs_wrr` module. Use one control-plane node and one worker, the kind bridge `10.89.0.0/24` and the default IPv4 pod subnet `10.244.0.0/16`. Name the cluster `hibiscus-udp-standard` or `hibiscus-udp-experimental`. Pin the node image to `kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed`. Install the matching release bundle and the fork's class-configuration CRD. Use a fresh cluster for the other channel. [Bundle verification and scoped base recipe](udp-kind.md#rerun)
@@ -30,3 +40,5 @@ chmod 700 "$out/run" "$out/apply"
 ```
 
 Retain the output and exit status for each run, then delete the named kind cluster and discard the guest. A failed common setup leaves every profile case unrun. A scoped case that fails or skips stays visible in the Go test output.
+
+For the additional packet check, run the scoped setup with `HIBISCUS_UDP_CASES=grant-traffic`. It uses the upstream grant manifest and adds the local UDP Service as a second backend. Both Services must answer before grant deletion. New sockets must stop receiving replies with the denied reference at positive weight. After its weight changes to zero, all 20 new probes must identify the permitted Service while `ResolvedRefs` remains false. This is a separately named local test. [Grant withdrawal test](../../../../internal/controller/kind_udp_grant_test.go)

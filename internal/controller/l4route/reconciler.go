@@ -17,6 +17,7 @@ limitations under the License.
 package l4route
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -138,12 +139,12 @@ func (r *Reconciler) planRoute(ctx context.Context, route *transportRoute, bindi
 		plan.detach = true
 		return plan, nil
 	}
-	ref, diagnostic, err := r.authorizedBackend(ctx, route)
+	refs, authRejections, err := r.authorizedBackends(ctx, route, true)
 	if err != nil {
 		return routePlan{}, err
 	}
-	if diagnostic != nil || ref.disabled && bound {
-		plan.rejectBackend(route, diagnostic)
+	if authRejections.active != nil {
+		plan.rejectBackend(route, authRejections.active)
 		plan.detach = bound
 		return plan, nil
 	}
@@ -164,12 +165,25 @@ func (r *Reconciler) planRoute(ctx context.Context, route *transportRoute, bindi
 	if plan.detach {
 		return plan, nil
 	}
-	service, diagnostic, err := r.backendService(ctx, ref)
+	// Multiple UDP references require Endpoint mode. Validate disabled Services
+	// against its constraints without resolving any endpoints for them.
+	backends, serviceRejections, err := r.backendServices(ctx, refs, len(route.backendRefs) > 1)
 	if err != nil {
 		return routePlan{}, err
 	}
-	plan.rejectBackend(route, diagnostic)
-	if diagnostic != nil {
+	if serviceRejections.active != nil {
+		plan.rejectBackend(route, serviceRejections.active)
+		plan.detach = bound
+		return plan, nil
+	}
+	inactiveRejection := cmp.Or(authRejections.inactive, serviceRejections.inactive)
+	plan.setResolvedRefs(route, inactiveRejection)
+	if len(backends) == 0 {
+		if inactiveRejection != nil {
+			plan.rejectBackend(route, inactiveRejection)
+		} else if plan.programmed.Reason != "NotSelected" {
+			plan.programmed = routeCondition(route, "Programmed", metav1.ConditionFalse, "ZeroWeight", "All backend references have weight zero")
+		}
 		plan.detach = bound
 		return plan, nil
 	}
@@ -178,12 +192,8 @@ func (r *Reconciler) planRoute(ctx context.Context, route *transportRoute, bindi
 		return routePlan{}, err
 	}
 	if err != nil || !controller.GatewayClassSupportsInstalledVersion(parent.class) {
-		err := r.planVersionSkew(ctx, route, &plan, ref, service, bound)
+		err := r.planVersionSkew(ctx, route, &plan, backends, bound)
 		return plan, err
-	}
-	if ref.disabled {
-		plan.programmed = routeCondition(route, "Programmed", metav1.ConditionFalse, "ZeroWeight", "The only backend has weight zero")
-		return plan, nil
 	}
 	if parent.listener == nil || plan.programmed.Reason == "NotSelected" {
 		return plan, nil
@@ -196,13 +206,13 @@ func (r *Reconciler) planRoute(ctx context.Context, route *transportRoute, bindi
 		plan.requeue = 5 * time.Second
 		return plan, nil
 	}
-	desired, diagnostic, err := r.routeSpec(ctx, route, parent.gateway, parent.listener, ref, service, topology)
+	desired, target, diagnostic, err := r.routeSpec(ctx, route, parent.gateway, parent.listener, backends, topology)
 	if err != nil {
 		return routePlan{}, err
 	}
 	if diagnostic != nil {
-		if diagnostic.Reason == string(gatewayv1.RouteReasonPending) {
-			// The Service and port resolved. Member readiness controls forwarding.
+		if diagnostic.Condition == "Programmed" || diagnostic.Reason == string(gatewayv1.RouteReasonPending) {
+			// The backend references are evaluated separately from pool readiness and limits.
 			plan.programmed = routeCondition(route, "Programmed", metav1.ConditionFalse, diagnostic.Reason, diagnostic.Message)
 		} else {
 			plan.rejectBackend(route, diagnostic)
@@ -210,10 +220,7 @@ func (r *Reconciler) planRoute(ctx context.Context, route *transportRoute, bindi
 		plan.detach = bound
 		return plan, nil
 	}
-	plan.target, err = r.forwardingTarget(service, ref, desired)
-	if err != nil {
-		return routePlan{}, err
-	}
+	plan.target = target
 	plan.desired = &desired
 	return plan, nil
 }
@@ -247,12 +254,31 @@ func gatewayProgrammed(gateway *gatewayv1.Gateway) bool {
 	return condition != nil && condition.Status == metav1.ConditionTrue && condition.ObservedGeneration == gateway.Generation
 }
 
-func (r *Reconciler) routeSpec(ctx context.Context, route *transportRoute, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, ref serviceReference, service *corev1.Service, topology classconfig.Resolved) (cloud.RouteSpec, *model.Diagnostic, error) {
-	members, diagnostic, err := routebackend.TransportMembers(ctx, r.APIReader, service, ref.port, corev1.Protocol(r.protocol()), topology, gateway.Status.Addresses)
-	if err != nil || diagnostic != nil {
-		return cloud.RouteSpec{}, diagnostic, err
+func (r *Reconciler) routeSpec(ctx context.Context, route *transportRoute, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, backends []serviceBackend, topology classconfig.Resolved) (cloud.RouteSpec, string, *model.Diagnostic, error) {
+	weighted := len(route.backendRefs) > 1
+	if weighted && topology.Topology.MemberMode != cloud.MemberModeEndpoint {
+		return cloud.RouteSpec{}, "", backendRejection(gatewayv1.RouteReasonUnsupportedValue, "UDP forwarding with multiple backend references requires Endpoint member mode"), nil
 	}
-	return cloud.RouteSpec{
+	groups := make([]weightedServiceMembers, len(backends))
+	for i, backend := range backends {
+		members, diagnostic, err := routebackend.TransportMembers(ctx, r.APIReader, backend.service, backend.ref.port, corev1.Protocol(r.protocol()), topology, gateway.Status.Addresses)
+		if err != nil || diagnostic != nil {
+			return cloud.RouteSpec{}, "", diagnostic, err
+		}
+		groups[i] = weightedServiceMembers{weight: backend.ref.weight, members: members}
+	}
+	members := groups[0].members
+	if weighted {
+		var err error
+		members, err = weightedUDPMembers(groups)
+		if errors.Is(err, errUDPBackendWithoutReadyEndpoints) {
+			return cloud.RouteSpec{}, "", &model.Diagnostic{Reason: string(gatewayv1.RouteReasonPending), Message: "Waiting for eligible endpoints in every positive-weight UDP backend"}, nil
+		}
+		if err != nil {
+			return cloud.RouteSpec{}, "", &model.Diagnostic{Condition: "Programmed", Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: err.Error()}, nil
+		}
+	}
+	spec := cloud.RouteSpec{
 		Identity: controller.RouteIdentity(r.Config, gateway, route),
 		GatewayRequirements: cloud.GatewayRequirements{
 			Provider: "amphora", ListenerProtocol: string(r.protocol()), ListenerPort: int(listener.Port),
@@ -263,7 +289,9 @@ func (r *Reconciler) routeSpec(ctx context.Context, route *transportRoute, gatew
 		MemberMode: topology.Topology.MemberMode, MemberSubnetID: topology.Topology.MemberSubnetID,
 		BackendSecurityGroupIDs: topology.Topology.BackendSecurityGroupIDs,
 		HealthMonitor:           topology.HealthMonitor, Members: members,
-	}, nil, nil
+	}
+	target, err := forwardingTarget(backends, groups, weighted, spec)
+	return spec, target, nil, err
 }
 
 func (r *Reconciler) ensure(ctx context.Context, route *transportRoute, plan *routePlan) (ctrl.Result, error) {

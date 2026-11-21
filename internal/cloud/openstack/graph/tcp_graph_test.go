@@ -19,6 +19,7 @@ package graph
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"slices"
 	"testing"
@@ -46,6 +47,7 @@ type tcpGraphFixture struct {
 	writes                 []string
 	loseNextListenerUpdate bool
 	hiddenChild            string
+	extraListedMembers     []map[string]any
 	rejectMonitorDelay     float64
 }
 
@@ -121,6 +123,9 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 				if entry != nil && entryPath != f.hiddenChild {
 					items = append(items, entry)
 				}
+				if listPath == tcpMembers {
+					items = append(items, f.extraListedMembers...)
+				}
 				safetyWriteJSON(f.t, w, map[string]any{kind.name + "s": items})
 			} else if entry == nil {
 				w.WriteHeader(http.StatusNotFound)
@@ -186,14 +191,35 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 		case http.MethodPut:
 			f.writes = append(f.writes, req.Method+" "+resource)
 			var body map[string]map[string]any
-			if resource != tcpListener || entry == nil || json.NewDecoder(req.Body).Decode(&body) != nil {
+			if entry == nil || json.NewDecoder(req.Body).Decode(&body) != nil {
 				reject()
 				return
 			}
 			payload := body[kind.name]
+			if resource == tcpPool {
+				persistence, found := payload["session_persistence"]
+				if f.inventory[tcpListener]["default_pool_id"] != nil || !found || persistence != nil {
+					reject()
+					return
+				}
+				entry["session_persistence"], entry["provisioning_status"] = nil, "PENDING_UPDATE"
+				safetyWriteJSON(f.t, w, map[string]any{kind.name: entry})
+				return
+			}
+			if resource == tcpMember {
+				weight, ok := payload["weight"].(float64)
+				if f.inventory[tcpListener]["default_pool_id"] != nil || !ok || weight < 0 || weight > 256 || payload["admin_state_up"] != true {
+					reject()
+					return
+				}
+				entry["weight"], entry["admin_state_up"], entry["provisioning_status"] = weight, true, "PENDING_UPDATE"
+				f.inventory[tcpPool]["provisioning_status"] = "PENDING_UPDATE"
+				safetyWriteJSON(f.t, w, map[string]any{kind.name: entry})
+				return
+			}
 			target, ok := payload["default_pool_id"]
 			monitorRequired := f.spec.Routes[0].Spec.HealthMonitor != (cloud.HealthMonitorConfig{})
-			if !ok || len(payload) != 1 || target != nil && (target != "pool" || f.inventory[tcpMember]["provisioning_status"] != "ACTIVE" ||
+			if resource != tcpListener || !ok || len(payload) != 1 || target != nil && (target != "pool" || f.inventory[tcpMember]["provisioning_status"] != "ACTIVE" ||
 				f.inventory[tcpPool]["provisioning_status"] != "ACTIVE" || monitorRequired && f.inventory[tcpMonitor]["provisioning_status"] != "ACTIVE") {
 				reject()
 				return
@@ -332,11 +358,12 @@ func TestTCPGraphGatewayCleanupProvesOwnershipBeforeDetaching(t *testing.T) {
 	for _, scenario := range []struct {
 		name    string
 		corrupt func(*tcpGraphFixture)
+		wantErr error
 	}{
-		{name: "unproven default", corrupt: func(f *tcpGraphFixture) { f.inventory[tcpListener]["default_pool_id"] = "unproven" }},
-		{name: "foreign project", corrupt: func(f *tcpGraphFixture) { f.inventory[tcpMember]["project_id"] = "other-project" }},
-		{name: "stale route UID", corrupt: func(f *tcpGraphFixture) { f.spec.Routes[0].Spec.Identity.RouteUID = "new-route-uid" }},
-		{name: "unproven member", corrupt: func(f *tcpGraphFixture) {
+		{name: "unproven default", wantErr: cloud.ErrOwnershipConflict, corrupt: func(f *tcpGraphFixture) { f.inventory[tcpListener]["default_pool_id"] = "unproven" }},
+		{name: "foreign project", wantErr: cloud.ErrOwnershipConflict, corrupt: func(f *tcpGraphFixture) { f.inventory[tcpMember]["project_id"] = "other-project" }},
+		{name: "stale route UID", wantErr: cloud.ErrOwnershipConflict, corrupt: func(f *tcpGraphFixture) { f.spec.Routes[0].Spec.Identity.RouteUID = "new-route-uid" }},
+		{name: "unlisted member", wantErr: cloud.ErrDependencyNotReady, corrupt: func(f *tcpGraphFixture) {
 			f.inventory[tcpPool]["members"] = []map[string]string{{"id": "hidden-member"}}
 		}},
 		{name: "owned graph"},
@@ -353,7 +380,7 @@ func TestTCPGraphGatewayCleanupProvesOwnershipBeforeDetaching(t *testing.T) {
 			if scenario.corrupt != nil {
 				scenario.corrupt(f)
 				_, err := provider.ReconcileGatewayGraph(t.Context(), f.spec)
-				if !errors.Is(err, cloud.ErrOwnershipConflict) || len(f.writes) != 6 {
+				if !errors.Is(err, scenario.wantErr) || len(f.writes) != 6 {
 					t.Fatalf("unproven default = %v, writes %v", err, f.writes)
 				}
 				return
@@ -535,6 +562,163 @@ func TestUDPGraphDetachesWithoutMembersInTheVIPFamily(t *testing.T) {
 	if result := f.reconcile(f.provider()); result.Routes[0].Result.Outcome.State == cloud.OutcomeReady ||
 		!slices.Equal(f.writes[7:], []string{"DELETE " + tcpMember}) || f.inventory[tcpListener]["default_pool_id"] != nil {
 		t.Fatalf("an IPv6 member behind an IPv4 VIP was accepted: %#v, writes %v", result, f.writes[7:])
+	}
+}
+
+func TestUDPGraphReconcilesEndpointWeightThroughThePublicAPI(t *testing.T) {
+	f := newTransportGraphFixture(t, cloud.ListenerProtocolUDP)
+	route := &f.spec.Routes[0].Spec
+	route.MemberMode = cloud.MemberModeEndpoint
+	member := &route.Members[0]
+	member.Weight = 256
+	for range 6 {
+		f.reconcile(f.provider())
+	}
+	observed := f.inventory[tcpMember]
+	if observed["weight"] != float64(256) {
+		t.Fatalf("created member weight = %v, want 256", observed["weight"])
+	}
+	f.inventory[tcpListener]["provisioning_status"] = "ACTIVE"
+	assertWriteFree := func(want cloud.OutcomeState) {
+		t.Helper()
+		before := len(f.writes)
+		if result := f.reconcile(f.provider()); result.Outcome.State != want || len(f.writes) != before {
+			t.Fatalf("rediscovery = %v, writes %v, want %v without writes", result.Outcome.State, f.writes[before:], want)
+		}
+	}
+	assertWriteFree(cloud.OutcomeReady)
+	for _, change := range []struct {
+		name          string
+		desiredWeight int
+		observedDrift bool
+		want          float64
+	}{
+		{name: "change weight", desiredWeight: 7, want: 7},
+		{name: "recover drift at zero", desiredWeight: 7, observedDrift: true, want: 7},
+		{name: "remove explicit weight", want: 1},
+	} {
+		member.Weight = change.desiredWeight
+		if change.observedDrift {
+			observed["weight"] = float64(0)
+		}
+		before := len(f.writes)
+		f.reconcile(f.provider())
+		if f.inventory[tcpListener]["default_pool_id"] != nil || !slices.Equal(f.writes[before:], []string{"PUT " + tcpListener}) {
+			t.Fatalf("%s: serving pool was not detached before weight update, writes %v", change.name, f.writes[before:])
+		}
+		assertWriteFree(cloud.OutcomeProgressing)
+		f.inventory[tcpListener]["provisioning_status"] = "ACTIVE"
+		f.reconcile(f.provider())
+		if observed["weight"] != change.want || f.inventory[tcpListener]["default_pool_id"] != nil {
+			t.Fatalf("%s: detached member weight = %v, want %v", change.name, observed["weight"], change.want)
+		}
+		observed["provisioning_status"] = "ACTIVE"
+		assertWriteFree(cloud.OutcomeProgressing)
+		f.inventory[tcpPool]["provisioning_status"] = "ACTIVE"
+		f.reconcile(f.provider())
+		f.inventory[tcpListener]["provisioning_status"] = "ACTIVE"
+		assertWriteFree(cloud.OutcomeReady)
+		want := []string{"PUT " + tcpListener, "PUT " + tcpMember, "PUT " + tcpListener}
+		if !slices.Equal(f.writes[before:], want) || f.inventory[tcpListener]["default_pool_id"] != "pool" {
+			t.Fatalf("%s: weight transition writes = %v, want %v and an attached pool", change.name, f.writes[before:], want)
+		}
+	}
+	member.Weight, member.Draining = 7, true
+	before := len(f.writes)
+	f.reconcile(f.provider())
+	f.inventory[tcpListener]["provisioning_status"] = "ACTIVE"
+	f.reconcile(f.provider())
+	observed["provisioning_status"], f.inventory[tcpPool]["provisioning_status"] = "ACTIVE", "ACTIVE"
+	assertWriteFree(cloud.OutcomeProgressing)
+	if observed["weight"] != float64(0) || f.inventory[tcpListener]["default_pool_id"] != nil ||
+		!slices.Equal(f.writes[before:], []string{"PUT " + tcpListener, "PUT " + tcpMember}) {
+		t.Fatalf("draining member weight = %v, default pool = %v, writes %v", observed["weight"], f.inventory[tcpListener]["default_pool_id"], f.writes[before:])
+	}
+}
+
+func TestWeightedUDPGraphClearsSourceIPPersistenceBeforeAttaching(t *testing.T) {
+	f := newTransportGraphFixture(t, cloud.ListenerProtocolUDP)
+	route := &f.spec.Routes[0].Spec
+	route.MemberMode = cloud.MemberModeEndpoint
+	for range 6 {
+		f.reconcile(f.provider())
+	}
+	listener, pool := f.inventory[tcpListener], f.inventory[tcpPool]
+	listener["provisioning_status"] = "ACTIVE"
+	sticky := map[string]any{"type": "SOURCE_IP"}
+	pool["session_persistence"] = sticky
+	if result := f.reconcile(f.provider()); result.Outcome.State != cloud.OutcomeReady || len(f.writes) != 6 {
+		t.Fatalf("legacy endpoint pool changed: %v, writes %v", result.Outcome.State, f.writes)
+	}
+
+	// An explicit weight of 1 is also used when weighted backend shares are equal.
+	route.Members[0].Weight = 1
+	f.reconcile(f.provider())
+	if listener["default_pool_id"] != nil || !slices.Equal(f.writes[6:], []string{"PUT " + tcpListener}) {
+		t.Fatalf("pool with source persistence did not detach first, writes %v", f.writes[6:])
+	}
+	listener["provisioning_status"] = "ACTIVE"
+	f.reconcile(f.provider())
+	if pool["session_persistence"] != nil || !slices.Equal(f.writes[7:], []string{"PUT " + tcpPool}) {
+		t.Fatalf("pool update did not explicitly clear persistence, writes %v", f.writes[7:])
+	}
+	if result := f.reconcile(f.provider()); result.Outcome.State != cloud.OutcomeProgressing || len(f.writes) != 8 {
+		t.Fatalf("pending pool update was treated as ready: %v, writes %v", result.Outcome.State, f.writes[6:])
+	}
+	pool["provisioning_status"], pool["session_persistence"] = "ACTIVE", sticky
+	f.reconcile(f.provider())
+	if listener["default_pool_id"] != nil || !slices.Equal(f.writes[8:], []string{"PUT " + tcpPool}) {
+		t.Fatalf("sticky pool was reattached without clear readback, writes %v", f.writes[8:])
+	}
+	pool["provisioning_status"] = "ACTIVE"
+	f.reconcile(f.provider())
+	listener["provisioning_status"] = "ACTIVE"
+	if result := f.reconcile(f.provider()); result.Outcome.State != cloud.OutcomeReady || listener["default_pool_id"] != "pool" ||
+		!slices.Equal(f.writes[9:], []string{"PUT " + tcpListener}) {
+		t.Fatalf("cleared pool did not converge: %v, writes %v", result.Outcome.State, f.writes[9:])
+	}
+}
+
+func TestUDPGraphBlocksMutationWhenPoolMemberInventoryDisagrees(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		references any
+		extra      bool
+		wantErr    error
+	}{
+		{name: "omitted"},
+		{name: "null", references: json.RawMessage(`null`)},
+		{name: "matching", references: []map[string]string{{"id": "member"}}},
+		{name: "explicit empty", references: []map[string]string{}, wantErr: cloud.ErrDependencyNotReady},
+		{name: "detailed list has extra member", references: []map[string]string{{"id": "member"}}, extra: true, wantErr: cloud.ErrDependencyNotReady},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := newTransportGraphFixture(t, cloud.ListenerProtocolUDP)
+			for range 6 {
+				f.reconcile(f.provider())
+			}
+			f.inventory[tcpListener]["provisioning_status"] = "ACTIVE"
+			if test.references != nil {
+				f.inventory[tcpPool]["members"] = test.references
+			}
+			if test.extra {
+				extra := maps.Clone(f.inventory[tcpMember])
+				extra["id"], extra["address"] = "extra", "10.0.0.11"
+				f.extraListedMembers = []map[string]any{extra}
+			}
+			// The desired destination changed and would cause a detach if observation were trusted.
+			f.spec.Routes[0].Spec.Members[0].Port++
+			result, err := f.provider().ReconcileGatewayGraph(t.Context(), f.spec)
+			if test.wantErr != nil {
+				if !errors.Is(err, test.wantErr) || len(f.writes) != 6 {
+					t.Fatalf("inconsistent inventory = %v, writes %v", err, f.writes[6:])
+				}
+				return
+			}
+			if err != nil || result.Outcome.State != cloud.OutcomeProgressing || !slices.Equal(f.writes[6:], []string{"PUT " + tcpListener}) {
+				t.Fatalf("valid inventory = %v, %v, writes %v", result.Outcome.State, err, f.writes[6:])
+			}
+		})
 	}
 }
 
