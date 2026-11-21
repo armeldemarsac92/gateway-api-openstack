@@ -52,6 +52,21 @@ func ValidateExactHostname(hostname string) error {
 	return ValidateHostname(hostname)
 }
 
+// ValidateSNIHostname accepts the provider's exact and wildcard DNS syntax.
+func ValidateSNIHostname(hostname string) error {
+	if err := ValidateHostname(hostname); err != nil {
+		return err
+	}
+	return ValidateExactHostname(strings.TrimPrefix(hostname, "*."))
+}
+
+// SNISuffixCovers reports whether a wildcard selector covers a different,
+// more specific exact or wildcard selector.
+func SNISuffixCovers(pattern, hostname string) bool {
+	return strings.HasPrefix(pattern, "*.") && pattern != hostname &&
+		len(hostname) > len(pattern)-1 && strings.HasSuffix(hostname, pattern[1:])
+}
+
 // HostnameRuleValue encodes one effective hostname for an Amphora HOST_NAME
 // REGEX rule. The stock renderer applies case-insensitive matching to the
 // Host value. Match an optional numeric port without changing the header.

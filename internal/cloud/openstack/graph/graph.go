@@ -190,7 +190,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 			return result, err
 		}
 	}
-	if spec.Gateway.Disposition == cloud.GraphEnsure && (len(plan) == 0 || plan[0].kind != graphClearListenerDefaultPool && !plan[0].withdrawHTTPPolicy && !plan[0].sniWithdrawal) {
+	if spec.Gateway.Disposition == cloud.GraphEnsure && (len(plan) == 0 || plan[0].kind != graphClearListenerDefaultPool && !plan[0].withdrawHTTPPolicy && !plan[0].isRestrictiveSNI()) {
 		if err := p.validateGraphTrafficSecurity(ctx, desired); err != nil {
 			result.Routes = observedRouteDeleteCompletions(desired, actual)
 			return result, err
@@ -231,6 +231,11 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		}
 		if step.kind == graphRouteMutation {
 			return result, &cloud.GraphError{Identity: desired.routes[step.routeIndex].spec.Identity, Err: err}
+		}
+		if step.kind == graphSNIMutation && step.isRestrictiveSNI() {
+			// An unsuccessful denial write cannot establish forwarding.
+			// Unaffected siblings can retain an existing checkpoint.
+			deferReadySNIReadback(&result, result.Outcome)
 		}
 		return result, err
 	}
@@ -409,6 +414,11 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 		if !ensure && !cleanup || spec.Gateway.Spec.ScopedListeners != nil || len(spec.Routes) != 0 ||
 			spec.Gateway.Spec.ListenerPort < 1 || spec.Gateway.Spec.ListenerPort > 65535 {
 			return invalid("invalid TLS SNI profile or TLS SNI passthrough is disabled")
+		}
+		if !p.tlsSNISuffix && slices.ContainsFunc(spec.Gateway.TLSSNIRoutes, func(route cloud.TLSSNIRoute) bool {
+			return route.Deny || sniCompareType(route.Hostname) == sniEndsWith
+		}) {
+			return invalid("TLS SNI suffix support is disabled")
 		}
 		targets, err := buildSNITargets(spec.Identity, spec.Gateway.TLSSNIRoutes)
 		if err != nil {

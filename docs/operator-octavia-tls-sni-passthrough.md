@@ -1,6 +1,6 @@
 # TLS passthrough by SNI on Amphora
 
-A dedicated Gateway can serve two TLS applications on the same port. Amphora reads the exact DNS name in the ClientHello and forwards the TCP stream to the matching Service. Each application terminates TLS and presents its own certificate.
+A dedicated Gateway can serve two TLS applications on the same port. Amphora reads the DNS name in the ClientHello and forwards the TCP stream to the matching Service. Operators can enable exact names on their own or add wildcard names for the same listener. Each application terminates TLS and presents its own certificate.
 
 ## Enable the capability
 
@@ -9,7 +9,7 @@ A dedicated Gateway can serve two TLS applications on the same port. Amphora rea
 3. Set `enabled_tls_sni_providers = amphora` in the `[api_settings]` section of the region's Octavia API configuration. With the controller's project credentials and regional load-balancer endpoint, check that `GET /v2/lbaas/providers/amphora/gateway_capabilities` returns `tls_sni_passthrough_v1` in `gateway_capabilities`.
 4. For standalone, pin the matching controller image by digest in an operator kustomization based on `config/octavia-tls-sni-passthrough`. For Magnum, render and inspect the artifact below and pin its SHA-256 and the matching controller image in the conductor configuration. Select the Endpoint class for the workload. [Magnum operator setup](qualification/v1.7.0/magnum-operator.md#build-and-configure)
 
-   Pin `ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:4328c81191c1c9daba6ec011d39f1f3a049bd477a90e15fe8c8673f5b23002b7`. [Controller release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-f150a6e006d027106da2aaed6b82cb262bcf1b1a) · [TLSRoute hostname qualification](qualification/v1.7.0/provider/tls-hostname-intersection.md)
+   Pin `ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:523db1c10771c4c520c2d1b8cd9e2c616b2987bf9d3cc470a7e6108c3901e0a4`. [Controller release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-633e0efb0ca141adfd693f5474ed08a8b0777f3c) · [Exact-name qualification](qualification/v1.7.0/provider/tls-hostname-intersection.md) · [Wildcard qualification](qualification/v1.7.0/provider/tls-sni-suffix.md)
 
 ```sh
 kubectl kustomize config/octavia-tls-sni-passthrough
@@ -32,9 +32,19 @@ kubectl -n tls-demo get tlsroute alpha beta -o yaml
 
 A Gateway in this mode has one `TLS` listener in `Passthrough` mode, without certificate references or TLS options. Its hostname may be omitted, an exact DNS name, or a leading wildcard such as `*.example.test`. Each TLSRoute has one Gateway parent and one rule selecting one IPv4 Endpoint Service at weight 1.
 
-The controller forwards the exact names shared by the listener and the route. For example, a listener with `*.example.test` and a route with `alpha.example.test`, `alias.example.test` and `elsewhere.example.org` sends the first two names to that Service. Its backend certificate must cover both. An exact listener can also narrow a wildcard route to that listener's name. When the names are disjoint, the route reports `Accepted=False/NoMatchingListenerHostname`. A remaining wildcard forwarding target requires a provider capability beyond this Octavia release.
+The controller forwards the exact names shared by the listener and the route. For example, a listener with `*.example.test` and a route with `alpha.example.test`, `alias.example.test` and `elsewhere.example.org` sends the first two names to that Service. Its backend certificate must cover both. An exact listener can also narrow a wildcard route to that listener's name. When the names are disjoint, the route reports `Accepted=False/NoMatchingListenerHostname`. To serve an intersection such as `*.shop.example.test`, enable wildcard routing in the region and on the controller.
 
 When two routes claim an effective name, the more specific original route hostname takes precedence. Equally specific claims use creation time, then namespace and name. The chosen route must have an authorized backend before that name can serve traffic. A revoked grant closes its names even when a lower-priority route also claims them. Each accepted route counts once in `attachedRoutes`.
+
+## Serve a wildcard TLS name
+
+Install Octavia 19.0.1.dev5 on the API and workers in the selected region and qualify its Amphora fleet. It uses the exact-SNI database schema and the same octavia-lib wheel as the exact-name release. [Wildcard Octavia release and wheel](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-tls-sni-suffix-83653eade75a)
+
+Keep `enabled_tls_sni_providers = amphora` and add `enabled_tls_sni_suffix_providers = amphora` in Octavia's `[api_settings]`. With the controller's project credentials, read the regional capability endpoint from step 3. Expect both `tls_sni_passthrough_v1` and `tls_sni_suffix_v1`. Then add `--octavia-tls-sni-suffix` to the controller container arguments in the standalone or Magnum workload manifest that already enables `--octavia-tls-sni-passthrough`. Both flags default to disabled. Render and pin the resulting manifest and image before rollout.
+
+On a dedicated wildcard-enabled listener, `vip.shop.example.test` wins over `*.shop.example.test`, which wins over `*.example.test`. The name `shop.example.test` matches only the broader suffix in this example. When the narrower route loses its cross-namespace ReferenceGrant, its names close on fresh connections. The more specific exact name and the broader route's other names can still serve. Restoring the grant makes the narrower names eligible to serve again after reconciliation.
+
+Before disabling wildcard routing or downgrading a worker, withdraw wildcard routes with the matching controller, API, workers and both capabilities still active. Verify their policies have been removed through Octavia, check that fresh connections reach only the remaining intended backends, then remove the controller suffix flag and the Octavia suffix enrollment. The region can continue to serve exact names with its exact-SNI capability.
 
 ## Upgrade an existing exact-name Gateway
 

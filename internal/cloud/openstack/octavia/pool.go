@@ -256,3 +256,8 @@ func (s *Service) UpdateMember(ctx context.Context, poolID, memberID string, opt
 func (s *Service) DeleteMember(ctx context.Context, poolID, memberID string) error {
 	return pools.DeleteMember(ctx, s.client, poolID, memberID).ExtractErr()
 }
+
+// ClearMembers removes every member without changing the pool or its policies.
+func (s *Service) ClearMembers(ctx context.Context, poolID string) error {
+	return pools.BatchUpdateMembers(ctx, s.client, poolID, []pools.BatchUpdateMemberOpts{}).ExtractErr()
+}

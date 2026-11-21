@@ -540,7 +540,7 @@ func (r *Reconciler) attachedRouteCounts(ctx context.Context, gateway *gatewayv1
 					continue
 				}
 				if tlsRoute, ok := route.(*gatewayv1.TLSRoute); ok {
-					hostnames, err := intersectSNIHostnames(listener, tlsRoute)
+					hostnames, err := intersectSNIHostnames(listener, tlsRoute, r.Config.TLSSNISuffix)
 					if err != nil || len(hostnames) == 0 || !listenerAllowsRouteKind(*listener, tlsRouteKind) {
 						continue
 					}

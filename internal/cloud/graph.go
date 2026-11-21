@@ -52,8 +52,10 @@ type GatewayGraphNode struct {
 	TLSSNIRoutes []TLSSNIRoute
 }
 
-// TLSSNIRoute is a single exact hostname and its authorized TCP destinations.
+// TLSSNIRoute is one effective hostname and its authorized TCP destinations.
 type TLSSNIRoute struct {
+	// Deny selects an empty pool so the hostname cannot fall through to a broader suffix.
+	Deny                    bool `json:",omitempty"`
 	Identity                Identity
 	Hostname                string
 	ServiceUID              string

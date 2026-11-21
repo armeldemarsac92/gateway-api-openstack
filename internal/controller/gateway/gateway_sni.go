@@ -80,6 +80,7 @@ type sniRouteStatus struct {
 	resolvedReason  gatewayv1.RouteConditionReason
 	resolvedMessage string
 	targets         []cloud.TLSSNIRoute
+	denied          []cloud.TLSSNIRoute
 }
 
 type sniRouteObservation []sniRouteStatus
@@ -88,12 +89,13 @@ func (observation sniRouteObservation) targets() []cloud.TLSSNIRoute {
 	var targets []cloud.TLSSNIRoute
 	for _, entry := range observation {
 		targets = append(targets, entry.targets...)
+		targets = append(targets, entry.denied...)
 	}
 	return targets
 }
 
-// sameInputs ignores status-only writes. Targets include the exact hostnames,
-// authorized Service UID and ready members used for the provider mutation.
+// sameInputs ignores status-only writes. Targets include effective hostnames,
+// authorized Service UIDs, ready members and claims requiring a denial.
 func (observation sniRouteObservation) sameInputs(other sniRouteObservation) bool {
 	return slices.EqualFunc(observation, other, func(a, b sniRouteStatus) bool {
 		if a.route.UID != b.route.UID || a.route.Generation != b.route.Generation ||
@@ -140,13 +142,26 @@ func (r *Reconciler) observeSNIRoutes(ctx context.Context, snapshot *gatewayMuta
 		}
 		observation = append(observation, entry)
 	}
-	owners := observation.hostnameOwners(snapshot.listener)
+	owners := observation.hostnameOwners()
 	for i := range observation {
 		entry := &observation[i]
 		if entry.acceptedReason == gatewayv1.RouteReasonAccepted {
 			entry.hostnames = slices.DeleteFunc(entry.hostnames, func(hostname string) bool { return owners[hostname].index != i })
 			if err := r.resolveSNIBackend(ctx, snapshot, entry); err != nil {
 				return nil, err
+			}
+			if r.Config.TLSSNISuffix && len(entry.targets) == 0 {
+				for _, hostname := range entry.hostnames {
+					for broader := range owners {
+						if amphora.SNISuffixCovers(broader, hostname) {
+							entry.denied = append(entry.denied, cloud.TLSSNIRoute{
+								Identity: controller.RouteIdentity(r.Config, snapshot.gateway, entry.route),
+								Hostname: hostname, Deny: true,
+							})
+							break
+						}
+					}
+				}
 			}
 		}
 	}
@@ -160,15 +175,11 @@ type sniHostnameOwner struct {
 
 // hostnameOwners selects the winner for each SNI name before resolving any
 // backend. Losing authorization must withdraw the winner's forwarding target.
-func (observation sniRouteObservation) hostnameOwners(listener *gatewayv1.Listener) map[string]sniHostnameOwner {
+func (observation sniRouteObservation) hostnameOwners() map[string]sniHostnameOwner {
 	owners := make(map[string]sniHostnameOwner)
 	for i, entry := range observation {
 		for _, hostname := range entry.hostnames {
-			original := hostname
-			// Only an exact listener can make a wildcard route hostname exact.
-			if listener.Hostname != nil && string(*listener.Hostname) == hostname {
-				original = model.MatchingRouteHostname(hostname, entry.route.Spec.Hostnames)
-			}
+			original := model.MatchingRouteHostname(hostname, entry.route.Spec.Hostnames)
 			if owner, ok := owners[hostname]; ok {
 				old := observation[owner.index].route
 				route := entry.route
@@ -221,7 +232,7 @@ func (r *Reconciler) admitSNIRoute(ctx context.Context, snapshot *gatewayMutatio
 		entry.reject(gatewayv1.RouteReasonNotAllowedByListeners, "The listener does not allow this TLSRoute kind or namespace")
 		return nil
 	}
-	hostnames, err := intersectSNIHostnames(listener, route)
+	hostnames, err := intersectSNIHostnames(listener, route, r.Config.TLSSNISuffix)
 	if err != nil {
 		entry.reject(gatewayv1.RouteReasonUnsupportedValue, err.Error())
 		return nil
@@ -240,10 +251,14 @@ func (r *Reconciler) admitSNIRoute(ctx context.Context, snapshot *gatewayMutatio
 	return nil
 }
 
-func intersectSNIHostnames(listener *gatewayv1.Listener, route *gatewayv1.TLSRoute) ([]string, error) {
+func intersectSNIHostnames(listener *gatewayv1.Listener, route *gatewayv1.TLSRoute, allowSuffix bool) ([]string, error) {
 	hostnames := model.IntersectHostnames(listener.Hostname, route.Spec.Hostnames)
 	for _, hostname := range hostnames {
-		if err := amphora.ValidateExactHostname(hostname); err != nil {
+		if allowSuffix {
+			if err := amphora.ValidateSNIHostname(hostname); err != nil {
+				return nil, fmt.Errorf("cannot forward the intersecting hostname %q through a DNS SNI rule", hostname)
+			}
+		} else if err := amphora.ValidateExactHostname(hostname); err != nil {
 			return nil, fmt.Errorf("cannot forward the intersecting hostname %q through an exact SNI rule", hostname)
 		}
 	}
