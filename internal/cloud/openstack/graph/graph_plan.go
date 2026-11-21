@@ -24,7 +24,6 @@ import (
 	"slices"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
-	openstackidentity "github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/identity"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/loadbalancers"
@@ -296,8 +295,10 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 		if len(routePlan) != 0 {
 			routeResult.Outcome = p.progressingOutcome(routePlan[0].message())
 		}
-		if route.redirectIssue != "" {
-			routeResult.Outcome = p.progressingOutcome(route.redirectIssue)
+		if errors.Is(route.redirectIssue, errExactHeaderRedirectPrecedence) {
+			routeResult.UnsupportedMatch = route.redirectIssue.Error()
+		} else if route.redirectIssue != nil {
+			routeResult.Outcome = p.progressingOutcome(route.redirectIssue.Error())
 		}
 		if route.targetsPending {
 			canRestoreTraffic = false
@@ -621,37 +622,6 @@ func routeStateFromObservation(actual observedRouteGraph) cloud.RouteState {
 	return state
 }
 
-// missingExactHeaderWithdrawal protects policies whose last verified
-// rendering is no longer authorized by the effective Octavia provider.
-func (p *Provider) missingExactHeaderWithdrawal(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph) (graphMutation, bool) {
-	if !p.httpHeaderExact || desired.protocol != cloud.ListenerProtocolHTTP || desired.spec.Gateway.Disposition != cloud.GraphEnsure {
-		return graphMutation{}, false
-	}
-	for index, observed := range actual.routes {
-		if desired.spec.Routes[index].Disposition != cloud.GraphEnsure {
-			continue
-		}
-		for _, part := range observed.parts() {
-			for _, policy := range part.policies {
-				retry := policy.policy.ProvisioningStatus == "ERROR"
-				if !policy.adminObserved || policy.pending() || !policy.policy.AdminStateUp && !retry ||
-					!slices.ContainsFunc(policy.rules, func(rule observedRouteRule) bool {
-						return rule.base == openstackidentity.RoleRuleHTTPHeaderExact
-					}) {
-					continue
-				}
-				if err := p.verifyGatewayHTTPCapabilities(ctx, desired, actual, []string{octavia.GatewayCapabilityHTTPHeaderExact}); err == nil {
-					return graphMutation{}, false
-				}
-				return graphMutation{kind: graphRouteMutation, routeIndex: index, withdrawHTTPPolicy: true,
-					route:   routeMutation{kind: routeMutationDisablePolicy, id: policy.policy.ID, retry: retry},
-					message: "Disabling an exact HTTP header policy until Octavia advertises its capability"}, true
-			}
-		}
-	}
-	return graphMutation{}, false
-}
-
 type unavailableRouteCapability struct {
 	error
 	capability                 string
@@ -661,8 +631,8 @@ type unavailableRouteCapability struct {
 func (e *unavailableRouteCapability) Unwrap() error { return e.error }
 
 // prepareNextGraphMutation can stage a sibling's owned backend during a
-// route capability outage. Preserve the planned policy order and leave
-// policy programming and frontend restoration to a fresh observation.
+// route capability outage. A policy on another physical listener has an
+// independent order and can also proceed when exact headers are unavailable.
 func (p *Provider) prepareNextGraphMutation(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, plan []graphMutation, result *cloud.GatewayGraphResult) (graphMutation, bool, error) {
 	first := plan[0]
 	step, err := p.prepareGraphMutation(ctx, desired, actual, first)
@@ -680,6 +650,7 @@ func (p *Provider) prepareNextGraphMutation(ctx context.Context, desired desired
 		}
 	}
 	recordBlocked(first, blocked)
+	blockedExactHeaders := blocked.capability == octavia.GatewayCapabilityHTTPHeaderExact
 	result.Outcome = result.Routes[first.routeIndex].Result.Outcome
 	seen := map[poolRouteOwner]bool{{route: first.routeIndex, backend: first.backendKey}: true}
 	for _, sibling := range plan[1:] {
@@ -693,17 +664,20 @@ func (p *Provider) prepareNextGraphMutation(ctx context.Context, desired desired
 		// Each pool can contribute only its first planned action. Subsequent
 		// actions may rely on a write whose result has yet to be observed.
 		seen[owner] = true
+		independentListener := blockedExactHeaders && first.listenerID != "" && sibling.listenerID != "" && first.listenerID != sibling.listenerID
 		switch sibling.route.kind {
 		case routeMutationCreatePool, routeMutationUpdatePool, routeMutationCreateMember, routeMutationUpdateMember:
-			// The complete graph ties each of these pools to its own route.
-			// A sibling backend mutation cannot publish or reorder a policy.
-			prepared, err := p.prepareGraphMutation(ctx, desired, actual, sibling)
-			if err == nil {
-				return prepared, true, nil
+		default:
+			if !independentListener || !isHTTPPolicyMutation(sibling.route.kind) {
+				continue
 			}
-			if errors.As(err, &blocked) {
-				recordBlocked(sibling, blocked)
-			}
+		}
+		prepared, err := p.prepareGraphMutation(ctx, desired, actual, sibling)
+		if err == nil {
+			return prepared, true, nil
+		}
+		if errors.As(err, &blocked) {
+			recordBlocked(sibling, blocked)
 		}
 	}
 	return graphMutation{}, false, nil

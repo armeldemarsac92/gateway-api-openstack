@@ -87,7 +87,7 @@ func (p *Provider) buildDesiredGatewayRoute(spec cloud.RouteSpec, forwards []clo
 			part := desiredRoute{identity: route.identity, spec: route.spec, backendKey: redirectPartKey(key), redirect: true}
 			cells, err := redirectCells(match, forwards)
 			if err != nil {
-				part.redirectIssue = err.Error()
+				part.redirectIssue = err
 				route.httpParts[selected.index] = part
 				continue
 			}

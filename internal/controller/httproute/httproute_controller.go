@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -342,6 +343,16 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 		// The graph writer returned a validated cloud outcome.
 	default:
 		return ctrl.Result{}, fmt.Errorf("invalid HTTPRoute binding state %d", graphResult.bindingState)
+	}
+	if graphResult.UnsupportedMatch != "" {
+		status := programmedRouteStatus()
+		status.accepted, status.acceptedReason, status.acceptedMessage = metav1.ConditionFalse, string(gatewayv1.RouteReasonUnsupportedValue), graphResult.UnsupportedMatch
+		status.programmed, status.programmedReason, status.programmedMessage = metav1.ConditionFalse, "Invalid", graphResult.UnsupportedMatch
+		scope.setStatuses([]parentStatusUpdate{{parent: parent.ref, status: status.withBackendDiagnostic(graphResult.backendDiagnostic)}})
+		if graphResult.Outcome.State == cloud.OutcomeProgressing {
+			return ctrl.Result{RequeueAfter: controller.ProviderProgressRequeueAfter(graphResult.Outcome, httpRoute.UID)}, nil
+		}
+		return ctrl.Result{RequeueAfter: controller.OpenStackResyncAfter(r.Config.OpenStackResyncInterval, httpRoute.UID)}, nil
 	}
 	if graphResult.Outcome.State == cloud.OutcomeProgressing {
 		if graphResult.backendDiagnostic.Reason == "" && graphResult.UnsupportedBackendProtocol != "" {

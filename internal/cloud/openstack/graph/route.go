@@ -72,7 +72,7 @@ type desiredRoute struct {
 	unavailable            bool
 	redirect               bool
 	redirectRanks          []int
-	redirectIssue          string
+	redirectIssue          error
 	fixedResponse          bool
 	weightedTargets        []desiredHTTPWeightedTarget
 	targetsPending         bool

@@ -17,6 +17,7 @@ limitations under the License.
 package graph
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
@@ -38,6 +39,8 @@ type redirectGuard struct {
 	compareType l7policies.CompareType
 	value       string
 }
+
+var errExactHeaderRedirectPrecedence = errors.New("Octavia cannot preserve redirect precedence with an overlapping higher-priority forwarding rule that adds an exact HTTP header condition")
 
 type redirectCell struct {
 	hostname string
@@ -202,7 +205,7 @@ func redirectCells(match cloud.HTTPPathMatch, forwards []cloud.HTTPPathMatch) ([
 		return nil, nil
 	}
 	if unsupportedHeaders {
-		return nil, fmt.Errorf("Octavia cannot preserve redirect precedence with an overlapping higher-priority forwarding rule that adds an exact HTTP header condition")
+		return nil, errExactHeaderRedirectPrecedence
 	}
 	// A wildcard ancestor has fewer literal DNS labels than its descendants.
 	sort.Slice(ordered[1:], func(i, j int) bool {

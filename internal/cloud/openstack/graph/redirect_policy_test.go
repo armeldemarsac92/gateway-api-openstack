@@ -505,3 +505,34 @@ func TestStockRedirectGuardsHigherFixedAndWeightedMatches(t *testing.T) {
 		t.Fatalf("redirect must exclude both higher actions and allow the lower match: %#v", guards)
 	}
 }
+
+func TestExactHTTPHeaderRedirectConflictKeepsForwardPolicy(t *testing.T) {
+	spec := redirectGraphSpec(t)
+	route := &spec.Routes[0].Spec
+	template := completeGraphSpec(safetyTestIdentity(t)).Routes[0].Spec
+	route.MemberSubnetID, route.HealthMonitor = template.MemberSubnetID, template.HealthMonitor
+	route.HTTPBackends = []cloud.HTTPBackend{{
+		Namespace: "default", Name: "backend", Port: 80, Members: template.Members,
+		Matches: []cloud.HTTPPathMatch{{Hostname: "*.example.test", PathType: cloud.PathMatchExact,
+			PathValue: "/app/health", Headers: []cloud.HTTPHeaderMatch{{Name: "version", Value: "one"}}}},
+	}}
+	p := &Provider{projectID: "project-a", httpHeaderExact: true}
+	desired, err := p.buildDesiredGatewayGraph(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var forwarding bool
+	for _, part := range desired.routes[0].httpParts {
+		if !part.redirect && len(part.policies) == 1 && len(part.policies[0].headers) == 1 {
+			forwarding = true
+		}
+		if part.redirect && (len(part.policies) != 0 || !errors.Is(part.redirectIssue, errExactHeaderRedirectPrecedence)) {
+			t.Fatalf("unsafe redirect was programmed or its permanent diagnosis lost: %#v", part)
+		}
+	}
+	_, result, err := p.buildGatewayGraphPlan(desired, observedGatewayGraph{protocol: cloud.ListenerProtocolHTTP})
+	if err != nil || !forwarding || len(result.Routes) != 1 ||
+		result.Routes[0].Result.UnsupportedMatch != errExactHeaderRedirectPrecedence.Error() {
+		t.Fatalf("missing forwarding or route diagnosis: %t %#v %v", forwarding, result.Routes, err)
+	}
+}

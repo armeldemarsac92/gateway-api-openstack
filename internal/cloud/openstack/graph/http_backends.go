@@ -116,6 +116,9 @@ func (p *Provider) buildHTTPRoutePartsGraphPlan(desired desiredGatewayGraph, act
 		if fragment.Result.Outcome.State != cloud.OutcomeReady {
 			combined.Outcome = fragment.Result.Outcome
 		}
+		if combined.UnsupportedMatch == "" {
+			combined.UnsupportedMatch = fragment.Result.UnsupportedMatch
+		}
 		if combined.UnsupportedBackendProtocol == "" {
 			combined.UnsupportedBackendProtocol = fragment.Result.UnsupportedBackendProtocol
 		}

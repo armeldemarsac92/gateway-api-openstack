@@ -31,6 +31,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
+	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/pools"
 )
 
 func TestHTTPListenerWritesRequireEffectiveProviderCapabilities(t *testing.T) {
@@ -730,33 +731,103 @@ func TestExactHTTPHeadersUseCapableProviderAndLiteralRuleRequest(t *testing.T) {
 	}
 }
 
-func TestExactHTTPHeaderDeletionSurvivesCapabilityWithdrawal(t *testing.T) {
+func TestExactHTTPHeaderCapabilityLossClosesOnlyItsListener(t *testing.T) {
 	identity := safetyTestIdentity(t)
 	spec := completeGraphSpec(identity)
+	var replyCode = http.StatusServiceUnavailable
+	var capabilities []string
 	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodGet || request.URL.Path != "/lbaas/providers/amphora/gateway_capabilities" {
 			t.Errorf("unexpected request %s %s", request.Method, request.URL.Path)
 		}
+		w.WriteHeader(replyCode)
+		safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": capabilities})
+	}))
+	p := NewProvider(ServiceClients{LoadBalancer: client}, ProviderConfig{HTTPHeaderExact: true})
+	wanted := desiredPolicy{role: "guarded", position: 1, path: "/", compareType: l7policies.CompareTypeEqual,
+		headers: []cloud.HTTPHeaderMatch{{Name: "color", Value: "blue"}}}
+	part := desiredRoute{backendKey: "backend", policies: []desiredPolicy{wanted}}
+	part.spec.ScopedListenerPorts = []int{80}
+	desired := desiredGatewayGraph{spec: spec, protocol: cloud.ListenerProtocolHTTP, routes: []desiredRoute{{httpParts: []desiredRoute{part}}}}
+	lb := safetyObservedLoadBalancer()
+	lb.Provider = "amphora"
+	policy := observedRoutePolicy{adminObserved: true, role: wanted.role, policy: l7policies.L7Policy{
+		ID: "guarded", ListenerID: "affected", AdminStateUp: true, ProvisioningStatus: "ACTIVE", Position: 1,
+		Action: string(l7policies.ActionRedirectToPool), RedirectPoolID: "backend",
+	}}
+	for _, rule := range rulesFor(wanted, "") {
+		base := openstackidentity.RoleRulePath
+		if rule.key != "" {
+			base = openstackidentity.RoleRuleHTTPHeaderExact
+		}
+		policy.rules = append(policy.rules, observedRouteRule{base: base, flagsObserved: true, rule: l7policies.Rule{
+			CompareType: string(rule.compareType), RuleType: string(rule.ruleType), Key: rule.key, Value: rule.value,
+			AdminStateUp: true, ProvisioningStatus: "ACTIVE",
+		}})
+	}
+	partGraph := &observedRouteGraph{pool: &pools.Pool{ID: "backend"}, policies: []observedRoutePolicy{policy}}
+	actual := observedGatewayGraph{loadBalancer: lb, scoped: true, scopedListeners: []listeners.Listener{
+		{ID: "affected", ProtocolPort: 80, AdminStateUp: true, ProvisioningStatus: "ACTIVE"},
+		{ID: "unrelated", ProtocolPort: 8080, AdminStateUp: true, ProvisioningStatus: "ACTIVE"},
+	}, adminObserved: map[string]bool{"affected": true, "unrelated": true},
+		routes: []observedRouteGraph{{httpParts: map[string]*observedRouteGraph{"backend": partGraph}}}}
+
+	observe := func(plan ...graphMutation) []graphMutation {
+		result := cloud.GatewayGraphResult{Routes: []cloud.RouteGraphResult{{}}}
+		return p.protectExactHeaderTraffic(t.Context(), desired, actual, plan, &result)
+	}
+	guardedRemoval := graphMutation{kind: graphRouteMutation, withdrawHTTPPolicy: true,
+		route: routeMutation{kind: routeMutationDisablePolicy, id: "guarded"}}
+	if steps := observe(guardedRemoval); len(steps) != 0 {
+		t.Fatalf("temporary discovery failure would withdraw the last verified policy: %#v", steps)
+	}
+	replyCode = http.StatusOK
+	if steps := observe(guardedRemoval); len(steps) != 1 || steps[0].kind != graphDisableListener || steps[0].listenerID != "affected" {
+		t.Fatalf("confirmed loss should close the affected listener before touching its policy: %#v", steps)
+	}
+	actual.scopedListeners[0].AdminStateUp = false
+	restore := graphMutation{kind: graphEnableListener, listenerID: "affected"}
+	unrelated := graphMutation{kind: graphEnableListener, listenerID: "unrelated"}
+	if steps := observe(restore, unrelated); len(steps) != 1 || steps[0].listenerID != "unrelated" {
+		t.Fatalf("closed affected listener must wait independently for the capability: %#v", steps)
+	}
+	capabilities = []string{octavia.GatewayCapabilityHTTPHeaderExact}
+	if steps := observe(restore); len(steps) != 1 || steps[0].kind != graphEnableListener {
+		t.Fatalf("recovery did not allow the verified listener to reopen: %#v", steps)
+	}
+	partGraph.policies[0].policy.AdminStateUp = false
+	if steps := observe(restore); len(steps) != 0 {
+		t.Fatalf("a closed listener cannot reopen before its predicate is active: %#v", steps)
+	}
+	capabilities = nil
+	desired.spec.Routes[0].Disposition = cloud.GraphDelete
+	if steps := observe(guardedRemoval); len(steps) != 1 || steps[0].kind != graphRouteMutation {
+		t.Fatalf("owned policy cleanup must continue after the listener is closed: %#v", steps)
+	}
+	partGraph.policies = nil
+	if steps := observe(restore); len(steps) != 1 {
+		t.Fatalf("stock listener could not reopen after exact policy cleanup: %#v", steps)
+	}
+}
+
+func TestExactHTTPHeadersUnavailableDoNotBlockAnIndependentStockPolicy(t *testing.T) {
+	calls := 0
+	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		calls++
 		safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": []string{}})
 	}))
 	p := NewProvider(ServiceClients{LoadBalancer: client}, ProviderConfig{HTTPHeaderExact: true})
-	desired := desiredGatewayGraph{spec: spec, protocol: cloud.ListenerProtocolHTTP, routes: []desiredRoute{{}}}
 	lb := safetyObservedLoadBalancer()
 	lb.Provider = "amphora"
-	policy := observedRoutePolicy{
-		adminObserved: true,
-		policy:        l7policies.L7Policy{ID: "guarded", AdminStateUp: true, ProvisioningStatus: "ACTIVE"},
-		rules: []observedRouteRule{{base: openstackidentity.RoleRuleHTTPHeaderExact,
-			rule: l7policies.Rule{ID: "header", ProvisioningStatus: "ACTIVE"}}},
-	}
-	actual := observedGatewayGraph{loadBalancer: lb, routes: []observedRouteGraph{{policies: []observedRoutePolicy{policy}}}}
-	step, withdraw := p.missingExactHeaderWithdrawal(t.Context(), desired, actual)
-	if !withdraw || !step.withdrawHTTPPolicy || step.route.kind != routeMutationDisablePolicy || step.route.id != "guarded" {
-		t.Fatalf("missing capability did not close the guarded policy: %#v", step)
-	}
-	for _, deletion := range buildRouteDeletionPlan(actual.routes[0]) {
-		if _, err := p.prepareGraphMutation(t.Context(), desired, actual, graphMutation{kind: graphRouteMutation, route: deletion}); err != nil {
-			t.Fatalf("cleanup unexpectedly requires a capability: %v", err)
-		}
+	desired := desiredGatewayGraph{protocol: cloud.ListenerProtocolHTTP, routes: make([]desiredRoute, 3)}
+	result := cloud.GatewayGraphResult{Routes: make([]cloud.RouteGraphResult, 3)}
+	blocked := graphMutation{kind: graphRouteMutation, listenerID: "header-port",
+		route: routeMutation{kind: routeMutationEnablePolicy, requiresExactHeaders: true}}
+	samePort := graphMutation{kind: graphRouteMutation, routeIndex: 1, listenerID: "header-port", route: routeMutation{kind: routeMutationEnablePolicy}}
+	otherPort := graphMutation{kind: graphRouteMutation, routeIndex: 2, listenerID: "stock-port", route: routeMutation{kind: routeMutationEnablePolicy}}
+	step, prepared, err := p.prepareNextGraphMutation(t.Context(), desired, observedGatewayGraph{loadBalancer: lb},
+		[]graphMutation{blocked, samePort, otherPort}, &result)
+	if err != nil || !prepared || step.listenerID != otherPort.listenerID || calls != 1 {
+		t.Fatalf("independent stock policy = %#v, prepared=%t reads=%d err=%v", step, prepared, calls, err)
 	}
 }

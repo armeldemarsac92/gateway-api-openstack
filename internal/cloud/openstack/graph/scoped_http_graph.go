@@ -322,7 +322,7 @@ func deferredScopedHTTPRoutes(desired desiredGatewayGraph, actual observedGatewa
 		}
 		steps, _, err := buildRouteEnsurePlan(route, observed)
 		_, withdrawalHold := httpMemberWithdrawal(observed)
-		deferred[i] = err == nil && route.redirectIssue == "" && len(steps) == 0 && (!route.unavailable || withdrawalHold == "")
+		deferred[i] = err == nil && route.redirectIssue == nil && len(steps) == 0 && (!route.unavailable || withdrawalHold == "")
 	}
 	return deferred
 }
