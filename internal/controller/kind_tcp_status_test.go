@@ -48,12 +48,14 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 )
 
+var kindTCPStatusCases = []suite.ConformanceTest{
+	tests.TCPRouteInvalidNonTCPListener,
+	tests.TCPRouteInvalidCrossNamespaceBackendRef,
+	tests.TCPRouteInvalidBackendRefNonexistent,
+}
+
 func TestKindUpstreamTCPStatus(t *testing.T) {
-	runKindUpstreamStatus(t, "kind-upstream-status", "standard", features.SupportTCPRoute, []suite.ConformanceTest{
-		tests.TCPRouteInvalidNonTCPListener,
-		tests.TCPRouteInvalidCrossNamespaceBackendRef,
-		tests.TCPRouteInvalidBackendRefNonexistent,
-	})
+	runKindUpstreamStatus(t, "kind-upstream-status", "standard", features.SupportTCPRoute, kindTCPStatusCases)
 }
 
 func TestKindUpstreamUDPStatus(t *testing.T) {
