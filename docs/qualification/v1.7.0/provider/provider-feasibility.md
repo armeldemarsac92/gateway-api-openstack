@@ -14,7 +14,7 @@ Stock Octavia accepted three distinct UDP ports on one load balancer and allowed
 
 The public Octavia API can attach one TCP pool to several distinct TCP ports on one VIP. The stock loopback probes exercised detachment and deletion while a sibling used the shared pool, including a configuration reload through the Amphora agent routes. The Kubernetes Endpoint-mode runs exercise a Gateway-wide parent and exact `port` and `sectionName` selection. [Stock TCP API and reload probes](stock-tcp.md#reproduce-the-multiple-listener-probes) · [Upstream multiport cases](tcp-upstream.md#multiple-tcp-listeners-on-one-gateway)
 
-For TCP in Endpoint mode, the unmodified weight case sent 350, 150 and 0 of 500 new connections to three Services on each local channel. The default NodePort mode continues to select one Service. [Upstream connection counts](tcp-upstream.md#weighted-tcp-connections)
+For TCP in Endpoint mode, the unmodified weight case sent 350, 150 and 0 of 500 new connections to three Services on each local channel. Controller tests verify that NodePort mode programs exact member weights across eligible worker NodePorts for valid Services. The NodePort test covers the adapter's API requests. [Upstream endpoint connection counts](tcp-upstream.md#weighted-tcp-connections) · [NodePort request test](../../../../internal/cloud/openstack/graph/tcp_graph_test.go)
 
 A fixed-destination HTTP redirect can preserve the path and query using the stock `REDIRECT_PREFIX` action. A broad redirect also intercepted an Exact forwarding rule on the same listener even when the forwarding policy had a higher Octavia position. [Provider requests, paths and precedence](stock-http-redirect.md)
 

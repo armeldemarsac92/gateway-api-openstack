@@ -1,6 +1,6 @@
 # Local qualification of named HTTPRoute and GRPCRoute rules
 
-The original Gateway API v1.7.0 Go cases ran with their unmodified route manifests. The two cases use a Gateway parent and a mix of named and unnamed rules on the same Route. The manager came from the [recorded linux/amd64 OCI image](../image.json) and reported source revision `adb6f0fc44dee7d9016bca79442e68f94eb6e15e` at startup. [Pinned upstream tests](https://github.com/kubernetes-sigs/gateway-api/tree/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests)
+The original Gateway API v1.7.0 Go cases ran with their unmodified route manifests. The two cases use a Gateway parent and a mix of named and unnamed rules on the same Route. The manager came from the [recorded linux/amd64 OCI image](named-route-rules-evidence/image.json) and reported source revision `adb6f0fc44dee7d9016bca79442e68f94eb6e15e` at startup. [Pinned upstream tests](https://github.com/kubernetes-sigs/gateway-api/tree/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests)
 
 | Upstream case | Standard | Experimental | Observed backend selection |
 | --- | --- | --- | --- |

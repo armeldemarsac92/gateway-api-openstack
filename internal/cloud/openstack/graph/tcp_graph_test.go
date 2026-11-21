@@ -179,6 +179,9 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 			if listPath == tcpMonitors && data["pool_id"] == "pool-secondary" {
 				entryPath = tcpMonitor + "-secondary"
 			}
+			if listPath == memberCollection && f.inventory[entryPath] != nil {
+				entryPath += "-" + data["address"].(string) + "-" + strconv.Itoa(int(data["protocol_port"].(float64)))
+			}
 			if f.inventory[entryPath] != nil {
 				reject()
 				return
@@ -948,23 +951,60 @@ func TestTransportGraphReconcilesEndpointWeightThroughThePublicAPI(t *testing.T)
 	}
 }
 
-func TestUDPGraphReconcilesNodePortWeightThroughThePublicAPI(t *testing.T) {
-	testTransportGraphReconcilesWeight(t, cloud.ListenerProtocolUDP, cloud.MemberModeNodePort)
-}
-
-func TestUDPGraphKeepsLegacyNodePortMemberDrainedAcrossRestart(t *testing.T) {
-	f := newTransportGraphFixture(t, cloud.ListenerProtocolUDP)
-	for range 6 {
+func TestTCPGraphSendsExactNodePortWeightsToOctavia(t *testing.T) {
+	f := newTCPGraphFixture(t)
+	route := &f.spec.Routes[0].Spec
+	route.MemberMode = cloud.MemberModeNodePort
+	route.Members = []cloud.Member{
+		{Address: "192.0.2.44", Port: 32000, Weight: 3},
+		{Address: "192.0.2.44", Port: 32001, Weight: 2},
+		{Address: "192.0.2.45", Port: 32000, Weight: 3},
+	}
+	// Create the Gateway, listener, pool, three members and monitor, then attach.
+	for range 8 {
 		f.reconcile(f.provider())
 	}
-	listener, member := f.inventory[tcpListener], f.inventory[tcpMember]
-	listener["provisioning_status"], member["weight"] = "ACTIVE", float64(0)
-	before := len(f.writes)
-	result := f.reconcile(f.provider())
-	if result.Outcome.State != cloud.OutcomeReady || len(f.writes) != before ||
-		listener["default_pool_id"] != "pool" || member["weight"] != float64(0) {
-		t.Fatalf("cold reconcile changed an operator-drained legacy NodePort: outcome %v, default pool %v, weight %v, writes %v",
-			result.Outcome.State, listener["default_pool_id"], member["weight"], f.writes[before:])
+	got := make(map[string]float64)
+	for _, member := range f.children(tcpMembers) {
+		key := memberKey(member["address"].(string), int(member["protocol_port"].(float64)))
+		got[key] = member["weight"].(float64)
+	}
+	want := map[string]float64{
+		"192.0.2.44:32000": 3,
+		"192.0.2.44:32001": 2,
+		"192.0.2.45:32000": 3,
+	}
+	if !maps.Equal(got, want) || f.inventory[tcpListener]["default_pool_id"] != "pool" {
+		t.Fatalf("Octavia received NodePort weights %v with default pool %v, want %v on the selected pool",
+			got, f.inventory[tcpListener]["default_pool_id"], want)
+	}
+}
+
+func TestTransportGraphReconcilesNodePortWeightThroughThePublicAPI(t *testing.T) {
+	for _, protocol := range []string{cloud.ListenerProtocolTCP, cloud.ListenerProtocolUDP} {
+		t.Run(protocol, func(t *testing.T) {
+			testTransportGraphReconcilesWeight(t, protocol, cloud.MemberModeNodePort)
+		})
+	}
+}
+
+func TestTransportGraphKeepsLegacyNodePortMemberDrainedAcrossRestart(t *testing.T) {
+	for _, protocol := range []string{cloud.ListenerProtocolTCP, cloud.ListenerProtocolUDP} {
+		t.Run(protocol, func(t *testing.T) {
+			f := newTransportGraphFixture(t, protocol)
+			for range 6 {
+				f.reconcile(f.provider())
+			}
+			listener, member := f.inventory[tcpListener], f.inventory[tcpMember]
+			listener["provisioning_status"], member["weight"] = "ACTIVE", float64(0)
+			before := len(f.writes)
+			result := f.reconcile(f.provider())
+			if result.Outcome.State != cloud.OutcomeReady || len(f.writes) != before ||
+				listener["default_pool_id"] != "pool" || member["weight"] != float64(0) {
+				t.Fatalf("cold reconcile changed an operator-drained legacy NodePort: outcome %v, default pool %v, weight %v, writes %v",
+					result.Outcome.State, listener["default_pool_id"], member["weight"], f.writes[before:])
+			}
+		})
 	}
 }
 
@@ -981,9 +1021,9 @@ func testTransportGraphReconcilesWeight(t *testing.T, protocol string, mode clou
 	if observed["weight"] != float64(256) {
 		t.Fatalf("created member weight = %v, want 256", observed["weight"])
 	}
-	const weightTag = "gateway-api-openstack.udp-nodeport-weight=v1"
+	weightTag := "gateway-api-openstack." + strings.ToLower(protocol) + "-nodeport-weight=v1"
 	if mode == cloud.MemberModeNodePort && !slices.Contains(pilotTags(observed["tags"]), weightTag) {
-		t.Fatal("weighted UDP NodePort create did not persist weight ownership")
+		t.Fatal("weighted NodePort create did not persist weight ownership")
 	}
 	f.inventory[tcpListener]["provisioning_status"] = "ACTIVE"
 	assertWriteFree := func(want cloud.OutcomeState) {
@@ -1032,7 +1072,7 @@ func testTransportGraphReconcilesWeight(t *testing.T, protocol string, mode clou
 	}
 	if mode == cloud.MemberModeNodePort {
 		if slices.Contains(pilotTags(observed["tags"]), weightTag) {
-			t.Fatal("returning to a single UDP backend retained explicit weight ownership")
+			t.Fatal("returning to a single backend retained explicit weight ownership")
 		}
 		observed["weight"] = float64(0)
 		assertWriteFree(cloud.OutcomeReady)
