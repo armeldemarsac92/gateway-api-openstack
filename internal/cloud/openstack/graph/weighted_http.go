@@ -156,6 +156,7 @@ func servingWeightedListenerID(actual observedGatewayGraph, route desiredRoute) 
 func resolveWeightedHTTPPart(part desiredRoute, route desiredRoute, observed observedRouteGraph, listenerID string) desiredRoute {
 	part.policies = slices.Clone(part.policies)
 	ready := make(map[string]bool)
+	denied := deniedBackendTLSKeys(route)
 	for _, target := range part.weightedTargets {
 		if backend := observed.httpParts[target.backendKey]; target.weight > 0 && backend != nil && backend.pool != nil {
 			if _, checked := ready[target.backendKey]; !checked {
@@ -169,7 +170,7 @@ func resolveWeightedHTTPPart(part desiredRoute, route desiredRoute, observed obs
 		plan := &weightedHTTPPolicyPlan{}
 		for _, target := range part.weightedTargets {
 			resolved := octavia.WeightedHTTPTarget{Weight: target.weight}
-			if target.backendKey != "" {
+			if target.backendKey != "" && !denied[target.backendKey] {
 				backend := observed.httpParts[target.backendKey]
 				if backend != nil && backend.pool != nil {
 					resolved.PoolID = backend.pool.ID
@@ -217,7 +218,7 @@ func weightedBackendReady(route desiredRoute, key string, observed observedRoute
 		return false
 	}
 	backend := route.httpParts[index]
-	if backend.backendTransportNeedsWithdrawal(observed) {
+	if !backend.backendTLS.allowsMembers() || backend.backendTransportNeedsWithdrawal(observed) {
 		return false
 	}
 	backend.policies, observed.policies = nil, nil
@@ -306,6 +307,7 @@ func observedWeightedPoolWeights(demand map[string]int, observed observedRouteGr
 // closes genuine revocations when an edit removed the predicate altogether.
 func weightedPolicyAuthorizations(route desiredRoute, actual observedRouteGraph, routeDemand map[string]int) map[string]map[string]int {
 	var out map[string]map[string]int
+	denied := deniedBackendTLSKeys(route)
 	for _, part := range actual.httpParts {
 		for _, policy := range part.policies {
 			if !isObservedWeightedHTTPPolicy(policy) {
@@ -318,10 +320,26 @@ func weightedPolicyAuthorizations(route desiredRoute, actual observedRouteGraph,
 			if out == nil {
 				out = make(map[string]map[string]int)
 			}
-			out[policy.policy.ID] = observedWeightedPoolWeights(demand, actual)
+			weights := observedWeightedPoolWeights(demand, actual)
+			for key := range denied {
+				if backend := actual.httpParts[key]; backend != nil && backend.pool != nil {
+					delete(weights, backend.pool.ID)
+				}
+			}
+			out[policy.policy.ID] = weights
 		}
 	}
 	return out
+}
+
+func deniedBackendTLSKeys(route desiredRoute) map[string]bool {
+	denied := make(map[string]bool)
+	for _, backend := range route.httpParts {
+		if backend.backendTLS.denies() {
+			denied[backend.backendKey] = true
+		}
+	}
+	return denied
 }
 
 func matchingWeightedPolicyReplacement(route desiredRoute, policy observedRoutePolicy) *desiredRoute {

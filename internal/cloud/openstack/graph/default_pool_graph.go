@@ -89,7 +89,14 @@ func validateDefaultPool(pool pools.Pool, loadBalancerID string, listener *liste
 }
 
 func validateDefaultPoolParent(pool pools.Pool, loadBalancerID, protocol string) error {
-	if pool.ID == "" || pool.Protocol != protocol || pool.TLSEnabled ||
+	if pool.TLSEnabled {
+		return fmt.Errorf("%w: %s pool %s has unexpected TLS settings", cloud.ErrOwnershipConflict, protocol, pool.ID)
+	}
+	return validateBoundPoolParent(pool, loadBalancerID, protocol)
+}
+
+func validateBoundPoolParent(pool pools.Pool, loadBalancerID, protocol string) error {
+	if pool.ID == "" || pool.Protocol != protocol ||
 		len(pool.Loadbalancers) != 1 || pool.Loadbalancers[0].ID != loadBalancerID {
 		return fmt.Errorf("%w: %s pool %s has an unexpected protocol, identity or load balancer", cloud.ErrOwnershipConflict, protocol, pool.ID)
 	}

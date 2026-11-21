@@ -43,3 +43,34 @@ func TestListMembersWithAdminStateRequiresExplicitReadback(t *testing.T) {
 		t.Fatalf("members = %#v, unknown state = %v, err = %v", members, unknown, err)
 	}
 }
+
+func TestPoolInventoryRequiresExplicitTLSReadback(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.Method != http.MethodGet || req.URL.Path != "/lbaas/pools" {
+			t.Fatalf("unexpected Octavia operation %s %s", req.Method, req.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"pools":[
+			{"id":"plain","backend_tls_hostname":null,"ca_tls_container_ref":null,"tls_enabled":false,"admin_state_up":true},
+			{"id":"missing-boolean","backend_tls_hostname":null,"ca_tls_container_ref":null,"admin_state_up":true},
+			{"id":"missing-nullable","tls_enabled":false,"admin_state_up":true},
+			{"id":"protected","backend_tls_hostname":"backend.example.test","ca_tls_container_ref":"http://barbican.test/example","tls_enabled":true,"admin_state_up":false}
+		]}`))
+	})
+	service := NewService(&gophercloud.ServiceClient{
+		ProviderClient: &gophercloud.ProviderClient{HTTPClient: http.Client{Transport: loadBalancerTestTransport{handler}}},
+		Endpoint:       "http://octavia.test/",
+	})
+	inventory, err := service.ListPoolInventory(t.Context(), pools.ListOpts{})
+	if err != nil || len(inventory.Items) != 4 {
+		t.Fatalf("list pools: %v", err)
+	}
+	if !inventory.BackendTLS["plain"].Complete() || !inventory.Items[0].AdminStateUp || inventory.Items[0].TLSEnabled ||
+		inventory.BackendTLS["missing-boolean"].Complete() || inventory.BackendTLS["missing-nullable"].Complete() {
+		t.Fatal("an omitted TLS field was treated as an explicit plain setting")
+	}
+	if protected := inventory.Items[3]; !protected.TLSEnabled || protected.AdminStateUp || protected.CATLSContainerRef == "" ||
+		!inventory.BackendTLS["protected"].Complete() || inventory.BackendTLS["protected"].Hostname != "backend.example.test" {
+		t.Fatal("the protected pool settings were not preserved")
+	}
+}
