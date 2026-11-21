@@ -34,7 +34,7 @@ Helm uninstall removed the five release objects. The independently owned workloa
 
 A separate test starts fresh production Go service clients against a loopback Keystone HTTPS endpoint. After replacement at the same file paths, the new clients authenticate and discover the same region and Octavia and Neutron endpoints. Trusting only the retired CA stops authentication during the TLS handshake. The replacement CA and retired credential receive HTTP 401. [Client rotation test](../../../internal/cloud/openstack/clients/rotation_test.go)
 
-The local control plane ran without a scheduler, kubelet or full addon reconciliation loop. Pod startup, projection into a running controller, authentication with deployed Keystone and continuity of Gateway traffic still need a live cluster.
+The initial lifecycle rehearsal ran on an API server without a scheduler or kubelet. The workload rotation rehearsal used two real controller Pods and a synthetic TLS service catalog. Replacing the projected Secret and restarting the Deployment gave both new Pods working credentials and a new CA. A separate check received HTTP 401 with the retired credential. [Runtime and cleanup](magnum-projected-rotation.md) Authentication through deployed Keystone and production Gateway traffic still require a disposable Hibiscus cluster.
 
 ## Live acceptance and missing inputs
 

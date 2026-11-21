@@ -54,3 +54,5 @@ Floating IP publishes only its observed Floating IP as the client address.
   tests exercised fixed IP allocation and release using the stock database IPAM
   driver. Live Neutron allocation, Amphora convergence and traffic require
   separate qualification.
+
+The previous controller and this controller read the same saved Gateway in the local rollback check. The previous revision classified the explicit fixed request as invalid. After the operator cleared the request with the newer controller, the previous revision kept its actual address and unchanged binding without issuing a Gateway delete. [Operator rollback](../../../operator-recovery.md#roll-back-a-fixed-private-gateway-address) · [Test sources and receipts](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-455798411c13fd42f5c1568357f2c35cec2b2169/hibiscus-private-ipv4-455798411c13.tar.gz)

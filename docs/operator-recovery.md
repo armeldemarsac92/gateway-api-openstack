@@ -41,6 +41,12 @@ For TCP or UDP, compare the listener's `default_pool_id`, the load balancer's li
 
 A Gateway enrolled in multi-listener UDP retains its original listener port in the frozen binding, including after it shrinks to one listener. A controller from before this feature rejects the new binding and leaves the resources in place. To roll back to that controller, clean up the enrolled Gateway with a version that understands the binding, wait for deletion to finish, then recreate the Gateway with a single UDP listener. Before enrollment the controller seals the frozen port on each bound UDPRoute. Older controllers also hold those route bindings, including if enrollment is interrupted. Keep the newer controller running until cleanup finishes. Editing the binding annotations by hand leaves the checkpoints invalid.
 
+## Roll back a fixed private Gateway address
+
+Keep the newer controller running while preparing each Gateway. Record its observed private VIP, remove `spec.addresses`, and wait for `Programmed=True` at the new generation with the same VIP. Verify that its existing routes still serve traffic. Then roll back the controller. The previous controller treats an explicit fixed request as an invalid Gateway and can withdraw its owned graph. Clearing the request leaves future replacement load balancers eligible for automatic allocation.
+
+A local two-version reader test stored the newer controller’s bound Gateway, cleared the address, and reconciled that exact serialized object with the previous controller. Its binding and observed VIP survived. A deployed rollback and live traffic remain outstanding. [Reader test and results](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-455798411c13fd42f5c1568357f2c35cec2b2169/hibiscus-private-ipv4-455798411c13.tar.gz)
+
 ## HTTPRoute hostname rollback
 
 Before restoring a controller that accepts at most one declared hostname, inspect HTTPRoutes with multiple declarations. Reduce each affected route to the single hostname that preserves its effective match and its precedence on this listener. Verify the intended backend after the change. Rolling back with several declarations still present causes the older reconciler to withdraw that route. [Hostname selection and local traffic](qualification/v1.7.0/provider/http-host-intersection.md)

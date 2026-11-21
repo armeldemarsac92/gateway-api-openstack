@@ -93,6 +93,8 @@ Configure VIP and member placement in the OpenStackGatewayClassConfig in `exampl
 Replace its synthetic subnet IDs with existing resources in the controller project.
 The [class configuration reference](reference/class-configuration.md#fields-and-defaults) covers Floating IP selection, health settings, and optional placement.
 
+To request a particular private IPv4 address, use a GatewayClass with `floatingIP.mode: None` and set one `IPAddress` value in `spec.addresses`. An empty value requests automatic allocation. Before using the VIP, check `Programmed=True` for the current Gateway generation and read `status.addresses`. See the [fixed private IPv4 instructions](qualification/v1.7.0/provider/private-gateway-address.md).
+
 Set the image override in your deployment overlay. The checked-in `config/default/kustomization.yaml` starts with an `example.invalid` placeholder. For the published linux/amd64 image, use the `repository` from the build record as `newName` and the `manifestDigest` as `digest`, and remove the placeholder `newTag`. [Current digest](qualification/v1.7.0/image.json)
 
 For an operator build, build the selected revision and push the resulting image to your registry.

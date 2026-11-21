@@ -27,7 +27,7 @@ The current profile supports one active HTTP listener shared by HTTPRoutes that 
 The listener and route may use an exact hostname or a leading wildcard with Exact or PathPrefix path matching. On the Experimental channel, a nonempty pre-routing filter list rejects the listener. For an existing binding, the controller closes its owned traffic path, including during unrelated bundle skew.
 NodePort is the default member mode.
 The opt-in IPv4 Endpoint implementation awaits live network validation under [ADR 0007](adr/0007-direct-endpoint-members.md).
-The listener accepts a route according to its Same, All or Selector namespace policy. A dedicated TCP or UDP Gateway can use distinct ports on the same VIP. The Gateway-UID writer elects a route per listener and tracks every listener that shares a route-owned pool. Multiple active HTTP listeners, TLS, static address allocation and backend policies remain open.
+The listener accepts a route according to its Same, All or Selector namespace policy. A dedicated TCP or UDP Gateway can use distinct ports on the same VIP. The Gateway-UID writer elects a route per listener and tracks every listener that shares a route-owned pool. A private class can allocate one requested IPv4 address when it creates the load balancer. Multiple active HTTP listeners, TLS and backend policies remain open. [Private address contract](../qualification/v1.7.0/provider/private-gateway-address.md)
 
 ## Design principles
 
@@ -92,7 +92,7 @@ Ownership of a security group alone is insufficient authority to change a port.
 | GatewayClass | Controller selection and a class configuration reference | Exact controller ownership and validated parameters. |
 | OpenStackGatewayClassConfig | Resolved topology and class health defaults | Cluster-scoped `gateway-api-openstack.github.io/v1alpha1`. |
 | Gateway | Amphora load balancer | One per Gateway. |
-| Gateway address | Allocated Floating IP or load balancer VIP | Existing addresses are not adopted, and requested Gateway addresses are unsupported. |
+| Gateway address | Allocated Floating IP or load balancer VIP | A private class can request one IPv4 address at creation. The controller retains ownership checks on every allocated address. |
 | Listener | HTTP listener | One listener. Terminated HTTPS remains planned. |
 | HTTPRoute rule and match | Pool, ordered L7 policies, and conjunctive rules | One pool per bound route. L7 policy positions implement hostname and path precedence across routes. |
 | NodePort mode | Members on eligible worker Node addresses and NodePorts | Requires a NodePort Service. |

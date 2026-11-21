@@ -32,6 +32,7 @@ The [architecture](docs/design/architecture.md) defines ownership, resource mapp
 
 The controller uses Gateway API v1.7.0 and defaults to the Standard Channel. Its implemented routing scope includes:
 
+- A Gateway can request one private IPv4 VIP at creation on a class with Floating IP mode `None`. [Configuration and allocation results](docs/qualification/v1.7.0/provider/private-gateway-address.md)
 - One active HTTP listener shared by multiple HTTPRoutes. The listener accepts its own namespace by default and can opt into all namespaces or a namespace label selector. An unsupported protocol on a separate port gets its own listener status.
 - One rule, one match and one backend Service per HTTPRoute. Across routes the listener orders matching hostnames, Exact and PathPrefix paths, route age and names.
 - HTTP/1.1 WebSocket Upgrade to a TCP Service port declaring `appProtocol: kubernetes.io/ws`. [Operator instructions](docs/getting-started.md) · [Qualification](docs/qualification/v1.7.0/provider/http-websocket.md)
