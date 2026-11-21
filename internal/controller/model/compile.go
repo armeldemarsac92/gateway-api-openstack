@@ -170,6 +170,14 @@ func compileRoute(route *gatewayv1.HTTPRoute, input Input) Route {
 			} else {
 				compiled.Redirect = &redirect
 			}
+		} else if input.RequestHeaderModifier && len(rule.Filters) == 1 &&
+			rule.Filters[0].Type == gatewayv1.HTTPRouteFilterRequestHeaderModifier {
+			operations, err := NormalizeRequestHeaderModifier(rule.Filters)
+			if err != nil {
+				compiled.Diagnostics = append(compiled.Diagnostics, *unsupported(err.Error(), ScopeRule))
+			} else {
+				compiled.RequestHeaderOperations = operations
+			}
 		} else {
 			for _, filter := range rule.Filters {
 				scope := ScopeRule

@@ -234,7 +234,11 @@ func planFixedResponseDuringMemberWithdrawal(desired desiredRoute, observed obse
 			if policy.fixedResponse && policy.policy.ProvisioningStatus == "ERROR" ||
 				!policy.fixedResponse && policy.policy.Action == string(l7policies.ActionRedirectToPool) &&
 					policy.policy.RedirectPoolID == observed.pool.ID {
-				return routeMutation{kind: routeMutationSetPolicyTarget, id: policy.policy.ID}, true
+				var operations []cloud.HTTPHeaderOperation
+				if policy.requestHeaderOperations != nil {
+					operations = []cloud.HTTPHeaderOperation{}
+				}
+				return routeMutation{kind: routeMutationSetPolicyTarget, id: policy.policy.ID, requestHeaderOperations: operations}, true
 			}
 		}
 	}
@@ -242,10 +246,11 @@ func planFixedResponseDuringMemberWithdrawal(desired desiredRoute, observed obse
 }
 
 type httpPolicyHandovers struct {
-	protected map[string]bool
-	ports     map[int]bool
-	drain     map[int]bool
-	stages    map[int]httpPolicyStage
+	protected                map[string]bool
+	ports                    map[int]bool
+	drain                    map[int]bool
+	stages                   map[int]httpPolicyStage
+	headerHandoverPredicates map[string]bool
 }
 
 type httpPolicyStage struct {
@@ -300,10 +305,19 @@ func observedHTTPPredicateMatches(policy observedRoutePolicy, rules []desiredRul
 	return true
 }
 
+func observedForwardPolicySettled(policy observedRoutePolicy) bool {
+	return policy.adminObserved && policy.policy.ProvisioningStatus == "ACTIVE" &&
+		!slices.ContainsFunc(policy.rules, func(rule observedRouteRule) bool {
+			return !rule.flagsObserved || rule.rule.ProvisioningStatus != "ACTIVE"
+		})
+}
+
+func observedPolicyDisabled(policy observedRoutePolicy) bool {
+	return policy.adminObserved && !policy.policy.AdminStateUp && policy.policy.ProvisioningStatus == "ACTIVE"
+}
+
 func observedForwardPolicyMatches(route desiredRoute, observed observedRouteGraph, policy observedRoutePolicy) bool {
-	if !policy.adminObserved || policy.policy.ProvisioningStatus != "ACTIVE" || slices.ContainsFunc(policy.rules, func(rule observedRouteRule) bool {
-		return !rule.flagsObserved || rule.rule.ProvisioningStatus != "ACTIVE"
-	}) {
+	if !observedForwardPolicySettled(policy) {
 		return false
 	}
 	return slices.ContainsFunc(route.policies, func(wanted desiredPolicy) bool {
@@ -368,10 +382,11 @@ func observedGroupedPrefixMatches(observed observedRoutePolicy, legacy desiredRo
 // is observed ACTIVE and enabled.
 func planHTTPPolicyHandovers(original, desired desiredGatewayGraph, actual observedGatewayGraph, owners []int) *httpPolicyHandovers {
 	handover := &httpPolicyHandovers{
-		protected: make(map[string]bool),
-		ports:     make(map[int]bool),
-		drain:     make(map[int]bool),
-		stages:    make(map[int]httpPolicyStage),
+		protected:                make(map[string]bool),
+		ports:                    make(map[int]bool),
+		drain:                    make(map[int]bool),
+		stages:                   make(map[int]httpPolicyStage),
+		headerHandoverPredicates: make(map[string]bool),
 	}
 	listenerPorts := make(map[string]int, len(actual.scopedListeners))
 	configured := scopedHTTPListeners(desired)
@@ -380,7 +395,26 @@ func planHTTPPolicyHandovers(original, desired desiredGatewayGraph, actual obser
 			listenerPorts[listener.ID] = listener.ProtocolPort
 		}
 	}
-	stageReplacement := func(target, port int, old []observedRoutePolicy, wantedPolicies []desiredPolicy) bool {
+	stageReplacement := func(source, target, port int, old []observedRoutePolicy, wantedPolicies []desiredPolicy) bool {
+		prior, next := desired.routes[source], desired.routes[target]
+		oldPool := actual.routes[source].pool
+		// A scalar/grouped transition for a modifier keeps the same match.
+		// During staging, its proved old predicate still protects redirects.
+		provedHeaderHandover := (prior.backendKey == "") != (next.backendKey == "") &&
+			!next.fixedResponse && next.weightedTargets == nil && oldPool != nil &&
+			(slices.ContainsFunc(old, func(policy observedRoutePolicy) bool {
+				return len(policy.requestHeaderOperations) != 0
+			}) || hasRequestHeaderPolicies(wantedPolicies)) &&
+			!slices.ContainsFunc(old, func(policy observedRoutePolicy) bool {
+				return !observedForwardPolicySettled(policy) ||
+					policy.policy.Action != string(l7policies.ActionRedirectToPool) ||
+					policy.policy.RedirectPoolID != oldPool.ID
+			})
+		if provedHeaderHandover {
+			for _, policy := range old {
+				handover.headerHandoverPredicates[policy.policy.ID] = true
+			}
+		}
 		// A scalar prefix uses two consecutive positions for one logical
 		// match. Start before the first and preserve earlier policy order.
 		position := old[0].policy.Position
@@ -395,6 +429,9 @@ func planHTTPPolicyHandovers(original, desired desiredGatewayGraph, actual obser
 			for _, current := range replacement.policies {
 				if current.role == wanted.role && current.policy.ListenerID == old[0].policy.ListenerID {
 					stage.current = []observedRoutePolicy{current}
+					if provedHeaderHandover && observedPolicyDisabled(current) {
+						handover.headerHandoverPredicates[current.policy.ID] = true
+					}
 					stage.wanted.position = min(position, current.policy.Position)
 					break
 				}
@@ -430,10 +467,24 @@ func planHTTPPolicyHandovers(original, desired desiredGatewayGraph, actual obser
 			if !actual.scoped || port != 0 {
 				target, wanted := findHTTPPolicyReplacement(desired, owners, owner, port, observed.policies)
 				if target >= 0 {
-					staging := stageReplacement(target, port, observed.policies, wanted)
+					staging := stageReplacement(index, target, port, observed.policies, wanted)
 					replacement := desired.routes[target]
 					handover.drain[index] = staging && (replacement.httpFixedPolicy() || replacement.weightedTargets != nil)
 					continue
+				}
+			}
+		}
+		if node.Disposition == cloud.GraphDelete {
+			route := original.routes[owner]
+			headerPredecessor := backend == "" && slices.ContainsFunc(route.httpParts, func(part desiredRoute) bool {
+				return hasRequestHeaderPolicies(part.policies)
+			})
+			for _, policy := range observed.policies {
+				// Rule cleanup keeps an explicitly disabled predecessor out
+				// of forwarding throughout the header handover.
+				if observedPolicyDisabled(policy) && (headerPredecessor ||
+					backend != "" && len(route.httpParts) == 0 && len(policy.requestHeaderOperations) != 0) {
+					handover.headerHandoverPredicates[policy.policy.ID] = true
 				}
 			}
 		}
@@ -454,7 +505,7 @@ func planHTTPPolicyHandovers(original, desired desiredGatewayGraph, actual obser
 			if target < 0 {
 				continue
 			}
-			staging := stageReplacement(target, port, old, wanted)
+			staging := stageReplacement(index, target, port, old, wanted)
 			if desired.routes[target].httpFixedPolicy() {
 				fixedReplacements++
 				fixedStaging = fixedStaging || staging
@@ -470,6 +521,10 @@ func planHTTPPolicyHandovers(original, desired desiredGatewayGraph, actual obser
 		}
 	}
 	return handover
+}
+
+func hasRequestHeaderPolicies(policies []desiredPolicy) bool {
+	return slices.ContainsFunc(policies, func(policy desiredPolicy) bool { return len(policy.requestHeaderOperations) != 0 })
 }
 
 func findHTTPPolicyReplacement(desired desiredGatewayGraph, owners []int, owner, port int, observed []observedRoutePolicy) (int, []desiredPolicy) {

@@ -66,23 +66,25 @@ func NewIdentity(value cloud.Identity) (Identity, error) {
 // ProviderConfig bounds one provider call and controls how soon the controller
 // observes an asynchronous Octavia operation again.
 type ProviderConfig struct {
-	FixedHTTPResponses  bool
-	WeightedHTTPTargets bool
-	OperationTimeout    time.Duration
-	PollInterval        time.Duration
+	FixedHTTPResponses    bool
+	WeightedHTTPTargets   bool
+	RequestHeaderModifier bool
+	OperationTimeout      time.Duration
+	PollInterval          time.Duration
 }
 
 // Provider owns the OpenStack resource graph for managed Gateway API objects.
 type Provider struct {
-	fixedHTTPResponses  bool
-	weightedHTTPTargets bool
-	projectID           string
-	region              string
-	neutron             *neutron.Service
-	octavia             *octavia.Service
-	topology            *topology.Resolver
-	operationTimeout    time.Duration
-	pollInterval        time.Duration
+	fixedHTTPResponses    bool
+	weightedHTTPTargets   bool
+	requestHeaderModifier bool
+	projectID             string
+	region                string
+	neutron               *neutron.Service
+	octavia               *octavia.Service
+	topology              *topology.Resolver
+	operationTimeout      time.Duration
+	pollInterval          time.Duration
 }
 
 // NewProvider creates an OpenStack provider. The clients are expected to have
@@ -95,28 +97,25 @@ func NewProvider(clients ServiceClients, cfg ProviderConfig) *Provider {
 		cfg.PollInterval = 2 * time.Second
 	}
 	return &Provider{
-		fixedHTTPResponses:  cfg.FixedHTTPResponses || cfg.WeightedHTTPTargets,
-		weightedHTTPTargets: cfg.WeightedHTTPTargets,
-		projectID:           clients.ProjectID,
-		region:              clients.Region,
-		neutron:             neutron.NewService(clients.Network),
-		octavia:             octavia.NewService(clients.LoadBalancer),
-		topology:            topology.NewResolver(clients, cfg.OperationTimeout),
-		operationTimeout:    cfg.OperationTimeout,
-		pollInterval:        cfg.PollInterval,
+		fixedHTTPResponses:    cfg.FixedHTTPResponses || cfg.WeightedHTTPTargets,
+		weightedHTTPTargets:   cfg.WeightedHTTPTargets,
+		requestHeaderModifier: cfg.RequestHeaderModifier,
+		projectID:             clients.ProjectID,
+		region:                clients.Region,
+		neutron:               neutron.NewService(clients.Network),
+		octavia:               octavia.NewService(clients.LoadBalancer),
+		topology:              topology.NewResolver(clients, cfg.OperationTimeout),
+		operationTimeout:      cfg.OperationTimeout,
+		pollInterval:          cfg.PollInterval,
 	}
 }
 
 var _ cloud.GraphProvider = (*Provider)(nil)
 
-func (p *Provider) verifyGatewayHTTPCapabilities(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph) error {
+func (p *Provider) verifyGatewayHTTPCapabilities(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, required []string) error {
 	provider := desired.spec.Gateway.Spec.Provider
 	if actual.loadBalancer != nil {
 		provider = actual.loadBalancer.Provider
-	}
-	required := []string{octavia.GatewayCapabilityFixedHTTPResponses}
-	if p.weightedHTTPTargets {
-		required = append(required, octavia.GatewayCapabilityWeightedHTTPTargets)
 	}
 	if err := p.octavia.VerifyGatewayCapabilities(ctx, provider, required...); err != nil {
 		return cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady, fmt.Errorf("verify Octavia Gateway HTTP actions in region %q: %w", p.region, err))

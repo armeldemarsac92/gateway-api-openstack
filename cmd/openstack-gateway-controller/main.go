@@ -99,12 +99,14 @@ func run(ctx context.Context) error {
 		apiQPS             float64
 		apiBurst           int
 	)
+	var requestHeaderModifier bool
 	zapOptions := zap.Options{Development: false}
 	zapOptions.BindFlags(flag.CommandLine)
 	flag.StringVar(&controllerName, "controller-name", envOr("GATEWAY_OPENSTACK_CONTROLLER_NAME", configv1alpha1.GroupName+"/gateway-api-openstack"), "Gateway API controllerName for this installation")
 	flag.StringVar(&gatewayAPIChannel, "gateway-api-channel", envOr("GATEWAY_OPENSTACK_GATEWAY_API_CHANNEL", "standard"), "Gateway API release channel: standard or experimental")
 	flag.BoolVar(&fixedHTTPResponses, "octavia-fixed-http-responses", false, "use the advertised Octavia fixed HTTP response capability")
 	flag.BoolVar(&weightedTargets, "octavia-weighted-http-targets", false, "use the advertised Octavia weighted HTTP target capability (requires --octavia-fixed-http-responses)")
+	flag.BoolVar(&requestHeaderModifier, "octavia-request-header-modifier", false, "use the advertised Octavia L7 request header operations capability")
 	flag.StringVar(&certificateMap, "tls-certificate-map", envOr("GATEWAY_OPENSTACK_TLS_CERTIFICATE_MAP", ""), "operator-managed TLS revision map for HTTPS listeners")
 	flag.StringVar(&clusterID, "cluster-id", envOr("GATEWAY_OPENSTACK_CLUSTER_ID", ""), "stable unique identifier for this Kubernetes cluster (required)")
 	flag.StringVar(&region, "openstack-region", envOr("OS_REGION_NAME", ""), "OpenStack region; defaults to clouds.yaml or OS_REGION_NAME")
@@ -144,6 +146,7 @@ func run(ctx context.Context) error {
 		GatewayAPIChannel:       gatewayAPIChannel,
 		FixedHTTPResponses:      fixedHTTPResponses,
 		WeightedHTTPTargets:     weightedTargets,
+		RequestHeaderModifier:   requestHeaderModifier,
 		OperatorHTTPS:           certificateMap != "",
 		ClusterID:               clusterID,
 		OpenStackResyncInterval: resyncInterval,
@@ -183,10 +186,11 @@ func run(ctx context.Context) error {
 	}
 	controllerConfig.OpenStackProjectID = serviceClients.ProjectID
 	openStackProvider := openstack.NewProvider(serviceClients, openstack.ProviderConfig{
-		FixedHTTPResponses:  fixedHTTPResponses,
-		WeightedHTTPTargets: weightedTargets,
-		OperationTimeout:    operationTimeout,
-		PollInterval:        pollInterval,
+		FixedHTTPResponses:    fixedHTTPResponses,
+		WeightedHTTPTargets:   weightedTargets,
+		RequestHeaderModifier: requestHeaderModifier,
+		OperationTimeout:      operationTimeout,
+		PollInterval:          pollInterval,
 	})
 	if err := controller.SetupIndexes(ctx, manager.GetFieldIndexer(), controllerConfig); err != nil {
 		return fmt.Errorf("set up controller field indexes: %w", err)

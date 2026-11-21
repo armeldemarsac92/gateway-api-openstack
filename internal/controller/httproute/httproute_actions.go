@@ -26,7 +26,7 @@ import (
 )
 
 // compileRouteAction rejects actions that the current Amphora model cannot emit.
-func compileRouteAction(rule gatewayv1.HTTPRouteRule) error {
+func compileRouteAction(rule gatewayv1.HTTPRouteRule, requestHeaderModifier bool) error {
 	if len(rule.Filters) == 0 {
 		if len(rule.BackendRefs) == 0 {
 			return compileHTTPResponse(http.StatusInternalServerError)
@@ -36,7 +36,13 @@ func compileRouteAction(rule gatewayv1.HTTPRouteRule) error {
 	filter := rule.Filters[0]
 	switch filter.Type {
 	case gatewayv1.HTTPRouteFilterRequestHeaderModifier:
-		return compileRequestHeaderModifier(filter.RequestHeaderModifier)
+		if !requestHeaderModifier {
+			return newRouteBuildError(routeErrorUnsupported, "RequestHeaderModifier requires route-scoped header operations in Octavia")
+		}
+		if _, err := model.NormalizeRequestHeaderModifier(rule.Filters); err != nil {
+			return newRouteBuildError(routeErrorUnsupported, "%s", err)
+		}
+		return nil
 	case gatewayv1.HTTPRouteFilterRequestRedirect:
 		if _, err := model.NormalizeRequestRedirect(rule); err != nil {
 			return newRouteBuildError(routeErrorUnsupported, "%s", err)
@@ -45,13 +51,6 @@ func compileRouteAction(rule gatewayv1.HTTPRouteRule) error {
 	default:
 		return newRouteBuildError(routeErrorUnsupported, "HTTPRoute filter %s is not supported", filter.Type)
 	}
-}
-
-func compileRequestHeaderModifier(_ *gatewayv1.HTTPHeaderFilter) error {
-	// TODO(octavia): Lower route-scoped header add, set, and remove operations
-	// when a released Octavia API and Amphora implementation expose them.
-	// Listener insert_headers cannot represent these operations.
-	return newRouteBuildError(routeErrorUnsupported, "RequestHeaderModifier requires route-scoped header operations in Octavia")
 }
 
 // routeRedirectPrefix resolves the scheme and port before passing the fixed

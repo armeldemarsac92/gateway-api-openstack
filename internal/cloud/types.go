@@ -161,10 +161,11 @@ type Member struct {
 
 // HTTPPathMatch describes an alternative at its rank on the physical listener.
 type HTTPPathMatch struct {
-	Hostname   string
-	PathType   PathMatchType
-	PathValue  string
-	Precedence int
+	Hostname                string
+	PathType                PathMatchType
+	PathValue               string
+	Precedence              int
+	RequestHeaderOperations []HTTPHeaderOperation `json:",omitempty"`
 }
 
 // HTTPBackend groups the paths served by one Service port within one HTTPRoute.
