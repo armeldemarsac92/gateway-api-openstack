@@ -554,6 +554,12 @@ func TestGatewayUDPListenerCountsOnlyAcceptedUDPRoutes(t *testing.T) {
 		controllerutil.ContainsFinalizer(udp, oldCheckpoint) || controller.UDPRouteAnchor(cfg, udp) != 53 {
 		t.Fatalf("enrollment failed to block the previous controller's route cleanup: finalizers %v, id %v, bound %v, error %v", udp.Finalizers, gotID, bound, err)
 	}
+	if result, err := reconciler.Reconcile(t.Context(), request); err != nil || !result.Requeue {
+		t.Fatalf("Gateway enrollment marker checkpoint = %v, %v", result, err)
+	}
+	if len(provider.gatewaySpecs) != 1 {
+		t.Fatalf("provider received a write during enrollment: %+v", provider.gatewaySpecs)
+	}
 	pending := cloud.GatewayProgressingResult("waiting for the second listener", time.Second)
 	pending.UDPReadyPorts = []int{53}
 	provider.gatewayResult = &pending

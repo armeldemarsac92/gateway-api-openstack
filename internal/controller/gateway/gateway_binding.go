@@ -69,10 +69,8 @@ func (r *Reconciler) bindGateway(
 		if err != nil || anchor < 1 || anchor > 65535 {
 			return fmt.Errorf("invalid frozen UDP Gateway port")
 		}
-		if err := r.sealGatewayMutationSnapshot(ctx, snapshot); err != nil {
-			return err
-		}
-		if err := r.sealUDPRoutes(ctx, gateway, anchor); err != nil {
+		sealed, err := r.sealUDPRoutes(ctx, snapshot, anchor)
+		if err != nil || !sealed {
 			return err
 		}
 		controller.SetGatewayUDPListenerMode(r.Config, gateway, true)
@@ -92,50 +90,55 @@ func (r *Reconciler) bindGateway(
 	return nil
 }
 
-// sealUDPRoutes migrates the existing route checkpoints before the Gateway
-// marker can authorize a scoped cloud write. Each migration is independently
-// durable, so a conflict or restart can safely repeat the enrollment.
-func (r *Reconciler) sealUDPRoutes(ctx context.Context, gateway *gatewayv1.Gateway, anchor int) error {
-	gatewayID := controller.GatewayIdentity(r.Config, gateway)
-	for _, verify := range []bool{false, true} {
-		var list gatewayv1.UDPRouteList
-		if err := r.APIReader.List(ctx, &list); err != nil {
-			return err
+// sealUDPRoutes returns true when every claiming route already carries the
+// frozen anchor. Otherwise it checkpoints one route and the binding phase
+// requeues so the next migration starts from fresh Gateway and route reads.
+func (r *Reconciler) sealUDPRoutes(ctx context.Context, snapshot *gatewayMutationSnapshot, anchor int) (bool, error) {
+	gatewayID := controller.GatewayIdentity(r.Config, snapshot.gateway)
+	var list gatewayv1.UDPRouteList
+	if err := r.APIReader.List(ctx, &list); err != nil {
+		return false, err
+	}
+	if list.Continue != "" {
+		return false, fmt.Errorf("incomplete UDPRoute enrollment list")
+	}
+	var candidate *gatewayv1.UDPRoute
+	for i := range list.Items {
+		route := &list.Items[i]
+		if !controller.RouteClaimsGateway(r.Config, route, gatewayID) {
+			continue
 		}
-		if list.Continue != "" {
-			return fmt.Errorf("incomplete UDPRoute enrollment list")
+		id, present, err := controller.StoredRouteIdentity(r.Config, route)
+		if err != nil {
+			return false, err
 		}
-		for i := range list.Items {
-			route := &list.Items[i]
-			if !controller.RouteClaimsGateway(r.Config, route, gatewayID) {
-				continue
-			}
-			id, present, err := controller.StoredRouteIdentity(r.Config, route)
-			if err != nil {
-				return err
-			}
-			lifecycle := route.Annotations[r.Config.RouteLifecycleAnnotation()]
-			if !present || !controller.SameGatewayIdentity(id, gatewayID) ||
-				!controllerutil.ContainsFinalizer(route, r.Config.RouteFinalizer()) ||
-				route.Annotations[r.Config.RouteClusterIDAnnotation()] != id.ClusterID || route.Annotations[r.Config.RouteProjectIDAnnotation()] != id.OpenStackProjectID ||
-				(lifecycle != controller.RouteAttached && lifecycle != controller.RouteDetaching) {
-				return fmt.Errorf("incomplete UDPRoute enrollment binding for %s/%s", route.Namespace, route.Name)
-			}
-			port := controller.UDPRouteAnchor(r.Config, route)
-			if port == anchor {
-				continue
-			}
-			// Kubernetes forbids adding a finalizer once deletion begins. Keep
-			// the legacy cleanup path available until the route is gone.
-			if verify || port != 0 || !route.DeletionTimestamp.IsZero() {
-				return errGatewayChanged
-			}
-			base := route.DeepCopy()
-			controller.SealUDPRouteAnchor(r.Config, route, id, anchor)
-			if err := r.Patch(ctx, route, controller.OptimisticMergeFrom(base)); err != nil {
-				return err
-			}
+		lifecycle := route.Annotations[r.Config.RouteLifecycleAnnotation()]
+		if !present || !controller.SameGatewayIdentity(id, gatewayID) ||
+			!controllerutil.ContainsFinalizer(route, r.Config.RouteFinalizer()) ||
+			route.Annotations[r.Config.RouteClusterIDAnnotation()] != id.ClusterID || route.Annotations[r.Config.RouteProjectIDAnnotation()] != id.OpenStackProjectID ||
+			(lifecycle != controller.RouteAttached && lifecycle != controller.RouteDetaching) {
+			return false, fmt.Errorf("incomplete UDPRoute enrollment binding for %s/%s", route.Namespace, route.Name)
+		}
+		port := controller.UDPRouteAnchor(r.Config, route)
+		if port == anchor {
+			continue
+		}
+		// Kubernetes forbids adding a finalizer once deletion begins. Keep
+		// the legacy cleanup path available until the route is gone.
+		if port != 0 || !route.DeletionTimestamp.IsZero() {
+			return false, errGatewayChanged
+		}
+		if candidate == nil {
+			candidate = route
 		}
 	}
-	return nil
+	if candidate == nil {
+		return true, nil
+	}
+	base := candidate.DeepCopy()
+	controller.SealUDPRouteAnchor(r.Config, candidate, gatewayID, anchor)
+	if err := r.sealGatewayMutationSnapshot(ctx, snapshot); err != nil {
+		return false, err
+	}
+	return false, r.Patch(ctx, candidate, controller.OptimisticMergeFrom(base))
 }

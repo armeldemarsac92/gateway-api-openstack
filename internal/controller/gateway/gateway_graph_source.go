@@ -95,11 +95,15 @@ func (r *Reconciler) observeGatewayForRouteDeletion(ctx context.Context, request
 		if err != nil {
 			return graph.GatewayInput{}, err
 		}
+		if !present || identity != request.Identity ||
+			!controllerutil.ContainsFinalizer(route, r.Config.RouteFinalizer()) ||
+			route.Annotations[r.Config.RouteClusterIDAnnotation()] != identity.ClusterID ||
+			route.Annotations[r.Config.RouteProjectIDAnnotation()] != identity.OpenStackProjectID ||
+			route.Annotations[r.Config.RouteLifecycleAnnotation()] != controller.RouteDetaching {
+			return graph.GatewayInput{}, errGatewayChanged
+		}
 		routeAnchor = controller.UDPRouteAnchor(r.Config, route)
 		if routeAnchor != 0 {
-			if !present || identity != request.Identity || route.Annotations[r.Config.RouteLifecycleAnnotation()] != controller.RouteDetaching {
-				return graph.GatewayInput{}, errGatewayChanged
-			}
 			input.Node.Spec = cloud.GatewaySpec{ListenerProtocol: cloud.ListenerProtocolUDP, ListenerPort: routeAnchor, UDPListeners: []cloud.UDPListener{}}
 		}
 	}
@@ -118,6 +122,26 @@ func (r *Reconciler) observeGatewayForRouteDeletion(ctx context.Context, request
 	if !scopedBinding && boundProtocol != gatewayv1.UDPProtocolType && routeAnchor == 0 {
 		return input, nil
 	}
+	input.Validate = func(ctx context.Context) error {
+		var latest gatewayv1.Gateway
+		if err := r.APIReader.Get(ctx, key, &latest); err != nil {
+			return errors.Join(errGatewayChanged, client.IgnoreNotFound(err))
+		}
+		if latest.UID != current.UID || !controller.GatewayBindingMetadataEqual(r.Config, &current, &latest) {
+			return errGatewayChanged
+		}
+		return nil
+	}
+	if !controller.GatewayHasControllerBinding(r.Config, &current) {
+		// A fully cleared Gateway binding can outlive its old routes after
+		// teardown. Their sealed anchors still authorize route-owned cleanup.
+		return input, nil
+	}
+	if !scopedBinding && routeAnchor == 0 && request.UDPRoute != nil && !hasMultipleUDPListeners(&current) {
+		// The legacy singleton cleanup is authorized by the route's durable
+		// ownership alone. It does not provision from the Gateway topology.
+		return input, nil
+	}
 	if err := controller.ValidateGatewayBinding(r.Config, &current); err != nil {
 		// Scoped ownership comes only from a verified Gateway or route
 		// checkpoint. Never reinterpret a damaged current binding as legacy.
@@ -128,6 +152,9 @@ func (r *Reconciler) observeGatewayForRouteDeletion(ctx context.Context, request
 	port, err := strconv.Atoi(current.Annotations[r.Config.GatewayListenerPortAnnotation()])
 	if err != nil || port < 1 || port > 65535 || !controllerutil.ContainsFinalizer(&current, r.Config.GatewayFinalizer()) ||
 		controller.StoredGatewayIdentity(r.Config, &current) != owner {
+		if scopedBinding || routeAnchor != 0 {
+			return graph.GatewayInput{}, fmt.Errorf("%w: Gateway cleanup binding is incomplete or belongs to a different owner", cloud.ErrOwnershipConflict)
+		}
 		return input, nil
 	}
 	switch {
@@ -140,18 +167,10 @@ func (r *Reconciler) observeGatewayForRouteDeletion(ctx context.Context, request
 		// Changing a bound protocol requires verified teardown of the old
 		// graph. Use the current legacy preservation path for its replacement.
 		input.Node.Spec = cloud.GatewaySpec{}
+	case routeAnchor != 0 && routeAnchor != port:
+		return graph.GatewayInput{}, fmt.Errorf("%w: UDPRoute cleanup disagrees with the Gateway's frozen anchor", cloud.ErrOwnershipConflict)
 	case routeAnchor != port:
 		input.Node.Spec = cloud.GatewaySpec{ListenerProtocol: cloud.ListenerProtocolUDP, ListenerPort: port}
-	}
-	input.Validate = func(ctx context.Context) error {
-		var latest gatewayv1.Gateway
-		if err := r.APIReader.Get(ctx, key, &latest); err != nil {
-			return errors.Join(errGatewayChanged, client.IgnoreNotFound(err))
-		}
-		if latest.UID != current.UID || !controller.GatewayBindingMetadataEqual(r.Config, &current, &latest) {
-			return errGatewayChanged
-		}
-		return nil
 	}
 	return input, nil
 }
