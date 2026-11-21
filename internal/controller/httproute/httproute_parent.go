@@ -90,19 +90,19 @@ func validateRouteParentListener(route *gatewayv1.HTTPRoute, parent managedRoute
 	if !routeTargetsGateway(route, parent.ref, parent.gateway.Namespace, parent.gateway.Name) {
 		return newRouteBuildError(routeErrorNoMatchingParent, "parentRef does not target this Gateway")
 	}
-	if parent.listener == nil {
-		return newRouteBuildError(routeErrorUnsupported, "parent Gateway must have one HTTP listener on its own port")
-	}
 	listener := parent.listener
 	selectsListener := func(candidate gatewayv1.Listener) bool {
 		return (parent.ref.SectionName == nil || *parent.ref.SectionName == candidate.Name) &&
 			(parent.ref.Port == nil || *parent.ref.Port == candidate.Port)
 	}
-	if !selectsListener(*listener) {
-		if slices.ContainsFunc(parent.gateway.Spec.Listeners, selectsListener) {
-			return newRouteBuildError(routeErrorNotAllowed, "selected listener does not support HTTPRoute")
+	if listener == nil || !selectsListener(*listener) {
+		if !slices.ContainsFunc(parent.gateway.Spec.Listeners, selectsListener) {
+			return newRouteBuildError(routeErrorNoMatchingParent, "parentRef does not select a Gateway listener")
 		}
-		return newRouteBuildError(routeErrorNoMatchingParent, "parentRef does not select a Gateway listener")
+		if listener == nil {
+			return newRouteBuildError(routeErrorUnsupported, "parent Gateway must have one HTTP listener on its own port")
+		}
+		return newRouteBuildError(routeErrorNotAllowed, "selected listener does not support HTTPRoute")
 	}
 	if listener.Protocol != gatewayv1.HTTPProtocolType || listener.TLS != nil {
 		return newRouteBuildError(routeErrorUnsupported, "parent listener is not a supported plain HTTP listener")

@@ -338,6 +338,47 @@ func TestHTTPRouteProgramsOnlyHTTPListenerOnMixedGateway(t *testing.T) {
 	}
 }
 
+func TestHTTPRouteParentRefSelectorsMustMatchTheSameListener(t *testing.T) {
+	cfg := testConfig()
+	class, gateway := providerRouteParentObjects(cfg)
+	first := gateway.Spec.Listeners[0]
+	second := gatewayv1.Listener{Name: "second", Port: 8081, Protocol: gatewayv1.HTTPProtocolType}
+	gateway.Spec.Listeners = []gatewayv1.Listener{first, second}
+	parent := gatewayv1.ParentReference{
+		Name: gatewayv1.ObjectName(gateway.Name), SectionName: &first.Name, Port: &second.Port,
+	}
+	route := mapperTestHTTPRoute(gateway.Namespace, "api", parent, "missing-service")
+	route.UID, route.Generation = "route-uid", 2
+	kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(route).
+		WithObjects(class, gateway, route).Build()
+	provider := &recordingProvider{}
+	r := newTestReconciler(Reconciler{Client: kubeClient, APIReader: kubeClient, Coordinator: &graph.Coordinator{}, Config: cfg}, provider)
+	key := client.ObjectKeyFromObject(route)
+	if _, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: key}); err != nil {
+		t.Fatal(err)
+	}
+	if err := kubeClient.Get(t.Context(), key, route); err != nil {
+		t.Fatal(err)
+	}
+	parents := route.Status.Parents
+	if len(parents) != 1 || parents[0].ControllerName != cfg.ControllerName ||
+		!controller.ParentRefsEqual(parents[0].ParentRef, route.Namespace, parent, route.Namespace) {
+		t.Fatalf("parent statuses = %#v, want the controller's status for %#v", parents, parent)
+	}
+	conditions := parents[0].Conditions
+	accepted := meta.FindStatusCondition(conditions, string(gatewayv1.RouteConditionAccepted))
+	if accepted == nil || accepted.Status != metav1.ConditionFalse || accepted.Reason != string(gatewayv1.RouteReasonNoMatchingParent) || accepted.ObservedGeneration != route.Generation {
+		t.Fatalf("Accepted = %#v, want False/NoMatchingParent at generation %d", accepted, route.Generation)
+	}
+	resolved := meta.FindStatusCondition(conditions, string(gatewayv1.RouteConditionResolvedRefs))
+	if resolved == nil || resolved.Status != metav1.ConditionFalse || resolved.Reason != string(gatewayv1.RouteReasonBackendNotFound) || resolved.ObservedGeneration != route.Generation {
+		t.Fatalf("ResolvedRefs = %#v, want False/BackendNotFound at generation %d", resolved, route.Generation)
+	}
+	if len(provider.routeSpecs) != 0 || len(route.Finalizers) != 0 {
+		t.Fatalf("rejected route got forwarding state: routes=%#v, finalizers=%v", provider.routeSpecs, route.Finalizers)
+	}
+}
+
 func TestHTTPRouteResolvesBackendReferencesWhenNamespaceAttachmentIsDenied(t *testing.T) {
 	for _, test := range []struct {
 		name     string

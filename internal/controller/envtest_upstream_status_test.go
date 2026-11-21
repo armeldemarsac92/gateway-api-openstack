@@ -145,7 +145,16 @@ func testUpstreamGatewayStatus(t *testing.T, c client.Client, cfg controller.Con
 		}
 	})
 
-	for _, tc := range []suite.ConformanceTest{tests.GatewayClassObservedGenerationBump, tests.GatewayInvalidRouteKind, tests.GatewayInvalidParametersRef, tests.GatewayListenerUnsupportedProtocol, tests.HTTPRouteInvalidCrossNamespaceParentRef} {
+	for _, tc := range []suite.ConformanceTest{
+		tests.GatewayClassObservedGenerationBump,
+		tests.GatewayInvalidRouteKind,
+		tests.GatewayInvalidParametersRef,
+		tests.GatewayListenerUnsupportedProtocol,
+		tests.HTTPRouteInvalidCrossNamespaceParentRef,
+		tests.HTTPRouteInvalidParentRefNotMatchingListenerPort,
+		tests.HTTPRouteInvalidParentRefNotMatchingSectionName,
+		tests.HTTPRouteInvalidParentRefSectionNameNotMatchingPort,
+	} {
 		t.Run(tc.ShortName, func(t *testing.T) {
 			s.RunTest = tc.ShortName
 			tc.Run(t, s)
@@ -153,8 +162,8 @@ func testUpstreamGatewayStatus(t *testing.T, c client.Client, cfg controller.Con
 	}
 }
 
-// These status-only cases need the upstream namespaces, Same Gateway and
-// backend Service. Use their published definitions directly from the module.
+// Use the upstream namespaces, same-namespace Gateway and referenced backend
+// Services directly from the published module.
 func createUpstreamStatusBase(t *testing.T, c client.Client, className string) {
 	t.Helper()
 	file, err := conformance.Manifests.Open("base/manifests.yaml")
@@ -173,6 +182,7 @@ func createUpstreamStatusBase(t *testing.T, c client.Client, className string) {
 		}
 		switch {
 		case obj.GetKind() == "Namespace" && (obj.GetName() == suite.InfrastructureNamespace || obj.GetName() == suite.WebBackendNamespace):
+		case obj.GetKind() == "Service" && obj.GetNamespace() == suite.InfrastructureNamespace && obj.GetName() == "infra-backend-v1":
 		case obj.GetKind() == "Service" && obj.GetNamespace() == suite.WebBackendNamespace && obj.GetName() == "web-backend":
 		case obj.GetKind() == "Gateway" && obj.GetNamespace() == suite.InfrastructureNamespace && obj.GetName() == "same-namespace":
 			if err := unstructured.SetNestedField(obj.Object, className, "spec", "gatewayClassName"); err != nil {

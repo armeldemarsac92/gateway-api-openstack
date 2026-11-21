@@ -347,9 +347,9 @@ func rejectedRouteStatus(reason, message string) routeReconcileStatus {
 	}
 }
 
-// resolveDeniedRouteBackend evaluates object references without applying the
+// resolveRejectedRouteBackend evaluates object references without applying the
 // Gateway's member mode or requiring ready endpoints.
-func (r *Reconciler) resolveDeniedRouteBackend(ctx context.Context, route *gatewayv1.HTTPRoute, status *routeReconcileStatus) error {
+func (r *Reconciler) resolveRejectedRouteBackend(ctx context.Context, route *gatewayv1.HTTPRoute, status *routeReconcileStatus) error {
 	backend, err := validateRouteStructure(route)
 	if err != nil {
 		var rejection *routeBuildError

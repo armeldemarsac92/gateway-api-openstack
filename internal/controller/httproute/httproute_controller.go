@@ -193,10 +193,12 @@ func (r *Reconciler) validateCachedRouteDecision(
 	}
 	if validationErr != nil {
 		status := statusForRouteBuildError(validationErr)
+		resolveBackend := status.acceptedReason == string(gatewayv1.RouteReasonNoMatchingParent) ||
+			(parentErr == nil && status.acceptedReason == string(gatewayv1.RouteReasonNotAllowedByListeners))
 		// An established route must detach even if a backend read fails.
 		// Clearing its binding enqueues it again for reference evaluation.
-		if !decision.bindingPresent && parentErr == nil && status.acceptedReason == string(gatewayv1.RouteReasonNotAllowedByListeners) {
-			if err := r.resolveDeniedRouteBackend(ctx, route, &status); err != nil {
+		if !decision.bindingPresent && resolveBackend {
+			if err := r.resolveRejectedRouteBackend(ctx, route, &status); err != nil {
 				return cachedRouteDecision{}, err
 			}
 		}
