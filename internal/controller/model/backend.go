@@ -138,7 +138,7 @@ func findBackendService(key types.NamespacedName, services []corev1.Service) *co
 // ResolveServicePort resolves the referenced TCP port and HTTP appProtocol.
 func ResolveServicePort(service *corev1.Service, selected *gatewayv1.PortNumber) (*corev1.ServicePort, *Diagnostic) {
 	port, diagnostic := ResolveTCPServicePort(service, selected)
-	if diagnostic == nil && port.AppProtocol != nil && *port.AppProtocol != "http" && *port.AppProtocol != "kubernetes.io/http" {
+	if diagnostic == nil && port.AppProtocol != nil && !slices.Contains([]string{"http", "kubernetes.io/http", "kubernetes.io/ws"}, *port.AppProtocol) {
 		return nil, backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "backend Service appProtocol is not supported for HTTP forwarding")
 	}
 	return port, diagnostic

@@ -101,14 +101,45 @@ func TestKindUpstreamUDPTraffic(t *testing.T) {
 	}
 	baseManifests, manifestFS := kindConformanceManifests(t)
 
-	const className = "kind-upstream-udp-traffic"
+	options := suite.ConfigurableOptions{
+		GatewayClassName:     "kind-upstream-udp-traffic",
+		CleanupBaseResources: true,
+		CleanupTestResources: true,
+		DisableParallelTests: true,
+		SupportedFeatures:    []features.FeatureName{features.SupportGateway, features.SupportUDPRoute, features.SupportReferenceGrant},
+		TimeoutConfig:        config.TimeoutConfig{NamespacesMustBeReady: 90 * time.Second},
+		// The upstream case returns without assertions unless TLSRoute is supported.
+		SkipTests: []string{tests.UDPRouteNotAllowedByListeners.ShortName},
+	}
+	if literalProfile {
+		options.ConformanceProfiles = []suite.ConformanceProfileName{suite.GatewayUDPConformanceProfileName}
+		t.Logf("Upstream GATEWAY-UDP profile attempt on %s with the original upstream base", channel)
+	} else if selection == "grant-traffic" {
+		t.Logf("Local packet check of weighted UDP grant revocation on %s (base %s)", channel, baseManifests)
+	} else if baseManifests == "base/manifests.yaml" {
+		t.Logf("Selected upstream UDP cases on %s with the original upstream base", channel)
+	} else {
+		t.Logf("Focused upstream UDP cases on %s with the HTTPS Gateway omitted from the shared base", channel)
+	}
+	if selection != "grant-traffic" {
+		t.Log("UDPRouteNotAllowedByListeners requires TLSRoute and is excluded when selected")
+	}
+	runKindTrafficConformance(t, channel, "HIBISCUS_UDP", suite.ConformanceOptions{
+		ConfigurableOptions: options,
+		BaseManifests:       baseManifests,
+		ManifestFS:          manifestFS,
+	}, cases)
+}
+
+func runKindTrafficConformance(t *testing.T, channel, envPrefix string, options suite.ConformanceOptions, cases []suite.ConformanceTest) {
+	t.Helper()
 	cfg := testConfig()
 	cfg.GatewayAPIChannel = channel
-	cfg.OpenStackProjectID = requireKindUDPEnv(t, "HIBISCUS_UDP_PROJECT")
-	cfg.ClusterID = "kind-" + requireKindUDPEnv(t, "KIND_CLUSTER_NAME")
-	parameters := envtestClassParameters(className)
-	parameters.Spec.VIPSubnet.ID = requireKindUDPEnv(t, "HIBISCUS_UDP_VIP_SUBNET")
-	parameters.Spec.MemberSubnet.ID = requireKindUDPEnv(t, "HIBISCUS_UDP_MEMBER_SUBNET")
+	cfg.OpenStackProjectID = requireKindTrafficEnv(t, envPrefix+"_PROJECT")
+	cfg.ClusterID = "kind-" + requireKindTrafficEnv(t, "KIND_CLUSTER_NAME")
+	parameters := envtestClassParameters(options.GatewayClassName)
+	parameters.Spec.VIPSubnet.ID = requireKindTrafficEnv(t, envPrefix+"_VIP_SUBNET")
+	parameters.Spec.MemberSubnet.ID = requireKindTrafficEnv(t, envPrefix+"_MEMBER_SUBNET")
 	// The upstream Services are ClusterIP. Reconcile their actual Pod endpoints.
 	parameters.Spec.MemberMode = configv1alpha1.MemberModeEndpoint
 
@@ -131,7 +162,7 @@ func TestKindUpstreamUDPTraffic(t *testing.T) {
 	if err := controller.SetupIndexes(t.Context(), manager.GetFieldIndexer(), cfg); err != nil {
 		t.Fatal(err)
 	}
-	startKindUDPReconcilers(t, manager, cfg)
+	startKindTrafficReconcilers(t, manager, cfg, envPrefix+"_FIXTURE")
 	startKindManager(t, manager)
 
 	for _, object := range []client.Object{parameters, kindGatewayClass(cfg, parameters)} {
@@ -147,37 +178,10 @@ func TestKindUpstreamUDPTraffic(t *testing.T) {
 		})
 	}
 
-	options := suite.ConfigurableOptions{
-		GatewayClassName:     className,
-		CleanupBaseResources: true,
-		CleanupTestResources: true,
-		DisableParallelTests: true,
-		SupportedFeatures:    []features.FeatureName{features.SupportGateway, features.SupportUDPRoute, features.SupportReferenceGrant},
-		TimeoutConfig:        config.TimeoutConfig{NamespacesMustBeReady: 90 * time.Second},
-		// The upstream case returns without assertions unless TLSRoute is supported.
-		SkipTests: []string{tests.UDPRouteNotAllowedByListeners.ShortName},
-	}
-	if literalProfile {
-		options.ConformanceProfiles = []suite.ConformanceProfileName{suite.GatewayUDPConformanceProfileName}
-		t.Logf("Upstream GATEWAY-UDP profile attempt on %s with the original upstream base", channel)
-	} else if selection == "grant-traffic" {
-		t.Logf("Local packet check of weighted UDP grant revocation on %s (base %s)", channel, baseManifests)
-	} else if baseManifests == "base/manifests.yaml" {
-		t.Logf("Selected upstream UDP cases on %s with the original upstream base", channel)
-	} else {
-		t.Logf("Focused upstream UDP cases on %s with the HTTPS Gateway omitted from the shared base", channel)
-	}
-	if selection != "grant-traffic" {
-		t.Log("UDPRouteNotAllowedByListeners requires TLSRoute and is excluded when selected")
-	}
-	s, err := suite.NewConformanceTestSuite(suite.ConformanceOptions{
-		ConfigurableOptions: options,
-		Client:              apiClient,
-		ClientOptions:       clientOptions,
-		RestConfig:          restConfig,
-		BaseManifests:       baseManifests,
-		ManifestFS:          manifestFS,
-	})
+	options.Client = apiClient
+	options.ClientOptions = clientOptions
+	options.RestConfig = restConfig
+	s, err := suite.NewConformanceTestSuite(options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +191,7 @@ func TestKindUpstreamUDPTraffic(t *testing.T) {
 	}
 }
 
-func requireKindUDPEnv(t *testing.T, name string) string {
+func requireKindTrafficEnv(t *testing.T, name string) string {
 	t.Helper()
 	value := os.Getenv(name)
 	if value == "" {
@@ -196,11 +200,11 @@ func requireKindUDPEnv(t *testing.T, name string) string {
 	return value
 }
 
-func startKindUDPReconcilers(t *testing.T, manager ctrl.Manager, cfg controller.Config) {
+func startKindTrafficReconcilers(t *testing.T, manager ctrl.Manager, cfg controller.Config, fixtureEnv string) {
 	t.Helper()
-	endpoint, err := netip.ParseAddrPort(os.Getenv("HIBISCUS_UDP_FIXTURE"))
+	endpoint, err := netip.ParseAddrPort(os.Getenv(fixtureEnv))
 	if err != nil || !endpoint.Addr().IsLoopback() || endpoint.Port() == 0 {
-		t.Fatal("HIBISCUS_UDP_FIXTURE must identify the stock Octavia fixture on loopback")
+		t.Fatalf("%s must identify the stock Octavia fixture on loopback", fixtureEnv)
 	}
 	network := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/floatingips" {

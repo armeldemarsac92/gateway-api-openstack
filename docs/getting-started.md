@@ -237,6 +237,8 @@ A VIP without a Floating IP may not be reachable from the public Internet.
 
 See the [supported routing scope](../README.md#current-implementation) and [class configuration lifecycle](reference/class-configuration.md#configuration-after-gateway-creation) before extending this example.
 
+For a WebSocket backend, set `appProtocol: kubernetes.io/ws` on the TCP Service port selected by the HTTPRoute backend reference. Point your WebSocket client at `ws://<gateway-address>/<route-path>`. The HTTP listener forwards the upgrade to the application, which must accept the handshake and handle the subsequent frames. [WebSocket qualification](qualification/v1.7.0/provider/http-websocket.md)
+
 ## Forward TCP to a Service
 
 For a TCP application, create a dedicated Gateway with one TCP listener. This example uses the existing `openstack` class, the `gateway-api-openstack-demo` namespace and a Service called `database` exposing port 5432. With the default class member mode, the Service must have an allocated NodePort and ready endpoints on reachable workers. In Endpoint mode the Amphora must be able to reach the pod addresses and ports.

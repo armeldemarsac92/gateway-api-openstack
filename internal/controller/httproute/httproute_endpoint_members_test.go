@@ -118,6 +118,9 @@ func TestEndpointRouteResolvesServiceInputsWithoutNodes(t *testing.T) {
 		want   []cloud.Member
 	}{
 		{name: "ClusterIP named target port", want: []cloud.Member{{Address: "192.0.2.20", Port: 8080}}},
+		{name: "WebSocket Service", change: func(s *corev1.Service, _ *discoveryv1.EndpointSlice) {
+			s.Spec.Ports[0].AppProtocol = ptr.To("kubernetes.io/ws")
+		}, want: []cloud.Member{{Address: "192.0.2.20", Port: 8080}}},
 		{name: "headless manual slice", change: func(s *corev1.Service, _ *discoveryv1.EndpointSlice) {
 			s.Spec.ClusterIP = corev1.ClusterIPNone
 			s.Spec.Selector = nil
