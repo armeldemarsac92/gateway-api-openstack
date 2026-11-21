@@ -211,8 +211,6 @@ kubectl -n gateway-api-openstack-demo get httproute basic -o yaml
 
 An HTTPRoute can list the managed Gateway alongside a missing Gateway or a Gateway owned by another controller. The managed entry may appear anywhere in `spec.parentRefs`. Look for its exact reference and this controller's name in `status.parents`. Two references handled by this controller, including two sections of the same Gateway, currently give `Accepted=False/UnsupportedValue`. [Attachment and status behavior](qualification/v1.7.0/provider/http-one-managed-parent.md)
 
-To share a port between `bar.com` and `foo.com`, declare two plain HTTP listeners on that port with distinct names and those exact hostnames. Point each route's `sectionName` at the intended listener. When a route omits `sectionName`, its hostname and the listener's namespace policy must identify exactly one eligible section. The two hosts can select different Services behind the same Gateway address. Check each named listener's conditions and `attachedRoutes`. [Section configuration and qualification](qualification/v1.7.0/provider/http-disjoint-sections.md)
-
 The example intentionally uses one Gateway, one HTTP listener, one HTTPRoute, one rule, one PathPrefix match, and one NodePort Service backend.
 
 For a shared Gateway, the platform operator can give its HTTP listener a Namespace selector.
@@ -242,6 +240,46 @@ Send an HTTP request to that address from a network that can reach it.
 A VIP without a Floating IP may not be reachable from the public Internet.
 
 See the [supported routing scope](../README.md#current-implementation) and [class configuration lifecycle](reference/class-configuration.md#configuration-after-gateway-creation) before extending this example.
+
+### Serve HTTP on two ports of one Gateway
+
+Use only plain HTTP listeners on a Gateway with several HTTP sections. Give each listener a distinct name. Ensure the frontend network and any referenced security groups admit both ports. The controller manages no rules in referenced groups.
+
+Add these listeners under `Gateway.spec`. The same host can use both ports on the same Gateway address.
+
+```yaml
+listeners:
+  - name: http
+    protocol: HTTP
+    port: 80
+    hostname: api.example.com
+  - name: http-alt
+    protocol: HTTP
+    port: 8080
+    hostname: api.example.com
+```
+
+Set one managed parent reference on each HTTPRoute. This reference selects the second port. Create a separate route for the first port with `sectionName: http` and `port: 80`. Give each route one backend Service reference. The backends can differ while the hostname and path stay the same.
+
+```yaml
+parentRefs:
+  - name: edge
+    sectionName: http-alt
+    port: 8080
+```
+
+Either selector can be used alone. When both are present, they must match the same listener. The selectors, hostname intersection and namespace authorization must leave exactly one eligible section. A listener defaults to routes in the Gateway's namespace. For cross-namespace routes, set the parent reference's `namespace` and authorize the route namespace on that listener.
+
+Check the conditions and `attachedRoutes` for both named listeners at the current generation. Confirm each route's managed parent reports `Accepted`, `ResolvedRefs` and `<controller-domain>/Programmed` as true. Set `VIP` to the observed Gateway address. From a client with access to it, send the same host and path to both ports and verify each backend's response.
+
+```sh
+curl -fsS --resolve "api.example.com:80:$VIP" "http://api.example.com:80/"
+curl -fsS --resolve "api.example.com:8080:$VIP" "http://api.example.com:8080/"
+```
+
+To share a port between `bar.com` and `foo.com`, declare two sections on that port with those distinct exact hostnames. A port with just one section can use a wildcard or omit its hostname. [Same-port sections](qualification/v1.7.0/provider/http-disjoint-sections.md)
+
+Complete the controller rollout before adding the second port. If you need to revert to a version from before distinct HTTP ports, clean up enrolled Gateways with the current controller first. [Local traffic and status results](qualification/v1.7.0/provider/http-distinct-ports.md) · [Rollback procedure](operator-recovery.md#roll-back-a-gateway-with-distinct-http-ports)
 
 For a WebSocket backend, set `appProtocol: kubernetes.io/ws` on the TCP Service port selected by the HTTPRoute backend reference. Point your WebSocket client at `ws://<gateway-address>/<route-path>`. The HTTP listener forwards the upgrade to the application, which must accept the handshake and handle the subsequent frames. [WebSocket qualification](qualification/v1.7.0/provider/http-websocket.md)
 

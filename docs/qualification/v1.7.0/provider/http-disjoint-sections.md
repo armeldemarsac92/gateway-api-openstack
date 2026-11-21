@@ -6,7 +6,7 @@ An HTTPRoute still needs exactly one managed Gateway parentRef. Its section name
 
 Adding or removing an exact-host section on the bound port retains the Gateway and route ownership bindings. Hostname edits use the existing disable, update, and enable order for Octavia policy changes. A stale attached fragment retains its cleanup authority until the Route reconciler stores its detach checkpoint. The Gateway waits for provider confirmation before marking the new generation programmed. During Gateway API version skew, an unsectioned route whose hostname might have been derived from another section is withdrawn unless its declared hostname proves the old policy still fits.
 
-The shared-port profile requires exact listener hostnames. It rejects wildcard and hostname-free sections, duplicate hostnames, mixed protocols, and multiple HTTP ports. The single-listener HTTP profile continues to support its existing hostname matching shapes.
+Any port with several sections requires distinct exact listener hostnames. For a port with one section, a wildcard or an omitted hostname is also allowed. A Gateway with several HTTP sections requires plain HTTP on every listener. [Adding distinct ports](http-distinct-ports.md)
 
 Local controller tests exercise the one-to-two-to-one transition, hostname edits, host-specific backend selection, rejected attachments, and bundle skew. Local provider tests check the exact hostname predicates and the readiness hold for a stale policy. These tests use simulated provider responses. The following records cover the stock API, wire behavior and the upstream cases.
 
@@ -22,6 +22,8 @@ The standalone public-API exercise created one HTTP listener, two pools, two pol
 
 ## Original Gateway API cases
 
+The table records revision `d6278819244862c6dca7654ccc779f60622e62c9`. The later distinct-port revision passes the port-8080 case on both channels. [Current port-8080 result](http-distinct-ports.md#original-gateway-api-case)
+
 | Case | Standard | Experimental | Fixture |
 |---|---|---|---|
 | GatewayObservedGenerationBump | PASS, 1.46 s | PASS, 1.44 s | Original case on separate kind clusters with 16 and 16 Ready infrastructure Pods |
@@ -32,8 +34,8 @@ The original generation case added `foo.com` alongside `bar.com`. Generation 2 r
 
 ## Upgrade and rollback
 
-The earlier controller source rejects the shared-port spec. A downgrade requires migration or retirement of the extra hostnames and a verified single section on the original Gateway. [Operator procedure](../../../operator-recovery.md#roll-back-a-gateway-with-several-http-sections)
+The earlier controller source rejects the shared-port spec. For a Gateway that has only used one HTTP port, move or retire the extra hostnames and verify the single surviving section before downgrading. A Gateway enrolled for distinct ports requires cleanup and recreation. [Distinct-port rollback](../../../operator-recovery.md#roll-back-a-gateway-with-distinct-http-ports) [Operator procedure](../../../operator-recovery.md#roll-back-a-gateway-with-several-http-sections)
 
 ### Verified singleton downgrade
 
-The earlier controller at `f85a33968895` rejected the two-section spec. After the current controller reduced it to the surviving `bar.com` section, the earlier controller reread those stored Kubernetes objects, kept the VIP, Gateway and route UIDs, ownership bindings and NodePort 30080, and requested zero Gateway or route deletions. This two-version check used the Kubernetes fake client and a recording provider. Operators must verify any migrated hostname through its actual new destination before reverting. [Readback and checksums](http-disjoint-sections-results.json) · [Reproduction files](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-d6278819244862c6dca7654ccc779f60622e62c9/hibiscus-http-sections-d62788192448.tar.gz)
+The earlier controller at `f85a33968895` rejected the two-section spec. After the shared-port controller reduced it to the surviving `bar.com` section, the earlier controller reread those stored Kubernetes objects, kept the VIP, Gateway and route UIDs, ownership bindings and NodePort 30080, and requested zero Gateway or route deletions. This two-version check used the Kubernetes fake client and a recording provider. Operators must verify any migrated hostname through its actual new destination before reverting. [Readback and checksums](http-disjoint-sections-results.json) · [Reproduction files](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-d6278819244862c6dca7654ccc779f60622e62c9/hibiscus-http-sections-d62788192448.tar.gz)

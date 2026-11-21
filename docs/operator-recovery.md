@@ -49,11 +49,20 @@ A local two-version reader test stored the newer controller’s bound Gateway, c
 
 ## Roll back a Gateway with several HTTP sections
 
-The earlier controller rejects a Gateway with two HTTP sections on the same port and can start deleting its owned Octavia graph. Keep the newer controller running while migrating. Record the VIP, all hostnames, their accepted routes, their allowed namespaces and an identifiable backend response for each active host. Choose which single section and port will stay on the original Gateway.
+Use this procedure for Gateways that have only used one HTTP port. The earlier controller rejects a Gateway with two HTTP sections on that port and can start deleting its owned Octavia graph. Keep the newer controller running while migrating. Record the VIP, all hostnames, their accepted routes, their allowed namespaces and an identifiable backend response for each active host. Choose which single section and port will stay on the original Gateway.
 
 Move traffic for each additional hostname to a separately supported Gateway or retire the hostname with its owner. Preserve its namespace authorization and verify its backend through the destination that clients will use. When the additional paths have been migrated or retired, reduce the original Gateway to its surviving section. Wait for Accepted and Programmed at the new generation, the expected attached route count and the original VIP. Verify the surviving and migrated hostnames before reverting the controller image. If the deployment cannot preserve the required reachability and authorization with one section per Gateway, retain the newer version.
 
 The two-version readback kept the surviving VIP, route and member port after this migration. [Tested singleton downgrade](qualification/v1.7.0/provider/http-disjoint-sections.md#verified-singleton-downgrade)
+
+## Roll back a Gateway with distinct HTTP ports
+
+Complete the controller rollout before adding a second HTTP port. Once an HTTP Gateway enrolls in per-port bindings, those bindings persist even after its spec returns to a single port. The previous controller rejects the enrolled Gateway and route bindings. Its Gateway status can lose the reported address while the old provider graph still exists. [Two-version readback](qualification/v1.7.0/provider/http-distinct-ports.md#rollback)
+
+1. Keep the current controller and its original cloud access available. Record the affected Gateway and route UIDs, VIP, ports, authorization, expected backend responses and the owned cloud resource IDs. Record the identities of your unrelated control resources for comparison.
+2. Move traffic to a supported destination or drain it. Verify the migrated host and path through the destination clients use. Delete or detach the scoped routes and wait for the current controller to clean up their forwarding and owned resources.
+3. Delete the enrolled Gateway and wait for Kubernetes finalization. Use the [ownership audit](#run-the-ownership-audit) and cloud readback to verify that the recorded Octavia and Neutron resources owned by the old graph are gone and that unrelated control resources are still present. Keep controller-managed annotations and finalizers intact.
+4. Revert the controller and recreate the Gateway with one supported HTTP port and its corresponding routes. Check the new address, current-generation status and application responses. Plan for a possible endpoint or VIP change. Reuse of the old VIP remains unverified.
 
 ## Roll back HTTPRoutes with additional parents
 

@@ -33,7 +33,7 @@ The [architecture](docs/design/architecture.md) defines ownership, resource mapp
 The controller uses Gateway API v1.7.0 and defaults to the Standard Channel. Its implemented routing scope includes:
 
 - A Gateway can request one private IPv4 VIP at creation on a class with Floating IP mode `None`. [Configuration and allocation results](docs/qualification/v1.7.0/provider/private-gateway-address.md)
-- A Gateway can share one physical HTTP listener among sections on the same port when each section has a different exact hostname. Each section enforces its route namespace policy and reports its attachments. The single-section form also supports a wildcard or an omitted hostname. [HTTP listener sections and limits](docs/qualification/v1.7.0/provider/http-disjoint-sections.md)
+- A plain HTTP Gateway can serve separate backends on several ports of one VIP, including when the requests use the same host and path. Several sections can share one port when each section has a different exact hostname. A port with one section also supports a wildcard or an omitted hostname. Each section enforces its route namespace policy and reports its attachments. [Distinct HTTP ports](docs/qualification/v1.7.0/provider/http-distinct-ports.md) · [Same-port sections](docs/qualification/v1.7.0/provider/http-disjoint-sections.md)
 - An HTTPRoute with one managed Gateway reference can serve traffic even when the route also refers to a missing or foreign Gateway. Other controllers keep their own entries in route status. [Parent attachment and evidence](docs/qualification/v1.7.0/provider/http-one-managed-parent.md)
 - One rule, one match and one backend Service per HTTPRoute. Across routes the listener orders matching hostnames, Exact and PathPrefix paths, route age and names.
 - HTTP/1.1 WebSocket Upgrade to a TCP Service port declaring `appProtocol: kubernetes.io/ws`. [Operator instructions](docs/getting-started.md) · [Qualification](docs/qualification/v1.7.0/provider/http-websocket.md)
@@ -49,7 +49,7 @@ The controller uses Gateway API v1.7.0 and defaults to the Standard Channel. Its
 - Ownership validation, restart recovery, and ordered cleanup
 
 The [class configuration reference](docs/reference/class-configuration.md) describes member modes and their network prerequisites.
-An HTTPRoute, TCPRoute or UDPRoute may select a Service in another namespace when a ReferenceGrant there authorizes that route kind and source namespace. HTTP sections on different ports, overlapping wildcard or catch-all sections on one port, and HTTPS remain open. [Grant and revocation evidence](docs/qualification/v1.7.0/service-grants.md)
+An HTTPRoute, TCPRoute or UDPRoute may select a Service in another namespace when a ReferenceGrant there authorizes that route kind and source namespace. Overlapping sections on one port and HTTPS remain open. [Grant and revocation evidence](docs/qualification/v1.7.0/service-grants.md)
 The stock pilot targets Amphora. Other Gateway profiles, the two mesh profiles and the Experimental resources are tracked in the [v1.7.0 feature matrix](docs/qualification/v1.7.0/matrix/README.md).
 
 ## Development status

@@ -50,3 +50,7 @@ The stock management operator later completed all three Helm revisions against a
 | Disable/uninstall and delete | Unrun | Stop creation, finalize routes/Gateways while controller/credential alive, audit zero identity-owned cloud resources, retain other LBs and shared CRDs; retry and operator orphan recovery when API is unavailable. |
 
 The fork’s [operator guide](magnum-operator.md) covers the opt-in patch, the driver render check and the deployment steps. The published chart URL and archive checksum above identify the package used in the local rehearsal.
+
+## Local conductor deletion
+
+The stock conductor and periodic job completed an enrolled cluster deletion on a disposable management API after a synthetic drain acknowledgement and CAPI finalization. The control release and nine shared CRD UIDs survived. [Deletion ordering and limits](lifecycle/cluster-delete.md)
