@@ -1,0 +1,471 @@
+{
+  "mode": "weighted",
+  "channel": "experimental",
+  "gatewayAPI": "v1.7.0",
+  "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+  "kubernetes": "v1.36.2",
+  "baseController": "e6fbd1a853aceaed3a141b406d5860f5242b9ecb",
+  "controllerSHA256": "81417c8c739b3f496f139c6847c413ef005179c1ab475b30b43743535addd0ec",
+  "octaviaBase": "bdcd6e3de9283595e20b2e11b1e3ad440208dfd6",
+  "octaviaLibBase": "bb1a993ac95477b0bdc429f8aaf6d1620f8e7669",
+  "octavia": "19.0.0",
+  "octaviaLib": "3.12.0",
+  "haproxy": "3.0.19",
+  "sampling": {
+    "requestsPerPhaseAndTransport": 1024,
+    "expectedMinorityShare": 0.25,
+    "acceptableMinorityShareInclusive": [
+      0.18,
+      0.32
+    ]
+  },
+  "phases": [
+    {
+      "phase": "grant-present",
+      "routeGeneration": 1,
+      "routeSpecSHA256": "356594bca366b1933eae75dbc6684ecc81ebac8250c2b627a237bd0874ca53d2",
+      "routeConditions": {
+        "Accepted": "True/Accepted",
+        "ResolvedRefs": "True/ResolvedRefs",
+        "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+      },
+      "gatewayConditions": {
+        "Accepted": "True/Accepted",
+        "Programmed": "True/Programmed"
+      },
+      "attachedRoutes": 1,
+      "octavia": {
+        "policyID": "6f6df045-2c27-484d-a86b-e3701731607b",
+        "position": 1,
+        "listenerID": "6b0ecbfe-f498-46a5-8e06-45253f9520de",
+        "action": "WEIGHTED_TARGETS",
+        "targets": [
+          {
+            "weight": 3,
+            "pool_id": "cb079f0d-b017-4a36-9bc6-6228a2286f33"
+          },
+          {
+            "weight": 1,
+            "pool_id": "28cd74f7-cf79-4551-ba00-9471b378b0c2"
+          }
+        ],
+        "pools": {
+          "protected": {
+            "id": "28cd74f7-cf79-4551-ba00-9471b378b0c2",
+            "memberCount": 1,
+            "memberEndpoints": [
+              "protected-1"
+            ],
+            "ownershipVerified": true
+          },
+          "public": {
+            "id": "cb079f0d-b017-4a36-9bc6-6228a2286f33",
+            "memberCount": 2,
+            "memberEndpoints": [
+              "public-1",
+              "public-2"
+            ],
+            "ownershipVerified": true
+          }
+        },
+        "rules": [
+          [
+            "HOST_NAME",
+            "REGEX",
+            "^gateway\\.example\\.test(:[0-9]+)?$"
+          ],
+          [
+            "PATH",
+            "EQUAL_TO",
+            "/weighted"
+          ]
+        ],
+        "listenerDefault": {
+          "status_code": 404
+        }
+      },
+      "wire": {
+        "fresh": {
+          "requests": 1024,
+          "clientTCPConnections": 1024,
+          "httpStatus": {
+            "200": 1024
+          },
+          "endpointCalls": {
+            "protected-1": 256,
+            "public-1": 384,
+            "public-2": 384
+          },
+          "empty500WithoutApplicationCall": 0,
+          "responsesWithLocation": 0,
+          "minorityShare": 0.25
+        },
+        "keepalive": {
+          "requests": 1024,
+          "clientTCPConnections": 1,
+          "httpStatus": {
+            "200": 1024
+          },
+          "endpointCalls": {
+            "public-1": 383,
+            "protected-1": 259,
+            "public-2": 382
+          },
+          "empty500WithoutApplicationCall": 0,
+          "responsesWithLocation": 0,
+          "minorityShare": 0.2529296875
+        }
+      }
+    },
+    {
+      "phase": "grant-removed",
+      "routeGeneration": 1,
+      "routeSpecSHA256": "356594bca366b1933eae75dbc6684ecc81ebac8250c2b627a237bd0874ca53d2",
+      "routeConditions": {
+        "Accepted": "True/Accepted",
+        "ResolvedRefs": "False/RefNotPermitted",
+        "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+      },
+      "gatewayConditions": {
+        "Accepted": "True/Accepted",
+        "Programmed": "True/Programmed"
+      },
+      "attachedRoutes": 1,
+      "octavia": {
+        "policyID": "6f6df045-2c27-484d-a86b-e3701731607b",
+        "position": 1,
+        "listenerID": "6b0ecbfe-f498-46a5-8e06-45253f9520de",
+        "action": "WEIGHTED_TARGETS",
+        "targets": [
+          {
+            "weight": 3,
+            "pool_id": "cb079f0d-b017-4a36-9bc6-6228a2286f33"
+          },
+          {
+            "weight": 1,
+            "fixed_response": {
+              "status_code": 500
+            }
+          }
+        ],
+        "pools": {
+          "public": {
+            "id": "cb079f0d-b017-4a36-9bc6-6228a2286f33",
+            "memberCount": 2,
+            "memberEndpoints": [
+              "public-1",
+              "public-2"
+            ],
+            "ownershipVerified": true
+          }
+        },
+        "rules": [
+          [
+            "HOST_NAME",
+            "REGEX",
+            "^gateway\\.example\\.test(:[0-9]+)?$"
+          ],
+          [
+            "PATH",
+            "EQUAL_TO",
+            "/weighted"
+          ]
+        ],
+        "listenerDefault": {
+          "status_code": 404
+        }
+      },
+      "wire": {
+        "fresh": {
+          "requests": 1024,
+          "clientTCPConnections": 1024,
+          "httpStatus": {
+            "200": 778,
+            "500": 246
+          },
+          "endpointCalls": {
+            "public-2": 389,
+            "public-1": 389
+          },
+          "empty500WithoutApplicationCall": 246,
+          "responsesWithLocation": 0,
+          "minorityShare": 0.240234375
+        },
+        "keepalive": {
+          "requests": 1024,
+          "clientTCPConnections": 1,
+          "httpStatus": {
+            "200": 770,
+            "500": 254
+          },
+          "endpointCalls": {
+            "public-2": 385,
+            "public-1": 385
+          },
+          "empty500WithoutApplicationCall": 254,
+          "responsesWithLocation": 0,
+          "minorityShare": 0.248046875
+        }
+      }
+    },
+    {
+      "phase": "manager-restarted-grant-absent",
+      "routeGeneration": 1,
+      "routeSpecSHA256": "356594bca366b1933eae75dbc6684ecc81ebac8250c2b627a237bd0874ca53d2",
+      "routeConditions": {
+        "Accepted": "True/Accepted",
+        "ResolvedRefs": "False/RefNotPermitted",
+        "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+      },
+      "gatewayConditions": {
+        "Accepted": "True/Accepted",
+        "Programmed": "True/Programmed"
+      },
+      "attachedRoutes": 1,
+      "octavia": {
+        "policyID": "6f6df045-2c27-484d-a86b-e3701731607b",
+        "position": 1,
+        "listenerID": "6b0ecbfe-f498-46a5-8e06-45253f9520de",
+        "action": "WEIGHTED_TARGETS",
+        "targets": [
+          {
+            "weight": 3,
+            "pool_id": "cb079f0d-b017-4a36-9bc6-6228a2286f33"
+          },
+          {
+            "weight": 1,
+            "fixed_response": {
+              "status_code": 500
+            }
+          }
+        ],
+        "pools": {
+          "public": {
+            "id": "cb079f0d-b017-4a36-9bc6-6228a2286f33",
+            "memberCount": 2,
+            "memberEndpoints": [
+              "public-1",
+              "public-2"
+            ],
+            "ownershipVerified": true
+          }
+        },
+        "rules": [
+          [
+            "HOST_NAME",
+            "REGEX",
+            "^gateway\\.example\\.test(:[0-9]+)?$"
+          ],
+          [
+            "PATH",
+            "EQUAL_TO",
+            "/weighted"
+          ]
+        ],
+        "listenerDefault": {
+          "status_code": 404
+        }
+      },
+      "wire": {
+        "fresh": {
+          "requests": 1024,
+          "clientTCPConnections": 1024,
+          "httpStatus": {
+            "500": 279,
+            "200": 745
+          },
+          "endpointCalls": {
+            "public-2": 373,
+            "public-1": 372
+          },
+          "empty500WithoutApplicationCall": 279,
+          "responsesWithLocation": 0,
+          "minorityShare": 0.2724609375
+        },
+        "keepalive": {
+          "requests": 1024,
+          "clientTCPConnections": 1,
+          "httpStatus": {
+            "200": 771,
+            "500": 253
+          },
+          "endpointCalls": {
+            "public-1": 386,
+            "public-2": 385
+          },
+          "empty500WithoutApplicationCall": 253,
+          "responsesWithLocation": 0,
+          "minorityShare": 0.2470703125
+        }
+      }
+    },
+    {
+      "phase": "grant-restored",
+      "routeGeneration": 1,
+      "routeSpecSHA256": "356594bca366b1933eae75dbc6684ecc81ebac8250c2b627a237bd0874ca53d2",
+      "routeConditions": {
+        "Accepted": "True/Accepted",
+        "ResolvedRefs": "True/ResolvedRefs",
+        "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+      },
+      "gatewayConditions": {
+        "Accepted": "True/Accepted",
+        "Programmed": "True/Programmed"
+      },
+      "attachedRoutes": 1,
+      "octavia": {
+        "policyID": "6f6df045-2c27-484d-a86b-e3701731607b",
+        "position": 1,
+        "listenerID": "6b0ecbfe-f498-46a5-8e06-45253f9520de",
+        "action": "WEIGHTED_TARGETS",
+        "targets": [
+          {
+            "weight": 3,
+            "pool_id": "cb079f0d-b017-4a36-9bc6-6228a2286f33"
+          },
+          {
+            "weight": 1,
+            "pool_id": "297130f1-1d3d-4d1a-9d70-9a0f5156fad8"
+          }
+        ],
+        "pools": {
+          "public": {
+            "id": "cb079f0d-b017-4a36-9bc6-6228a2286f33",
+            "memberCount": 2,
+            "memberEndpoints": [
+              "public-1",
+              "public-2"
+            ],
+            "ownershipVerified": true
+          },
+          "protected": {
+            "id": "297130f1-1d3d-4d1a-9d70-9a0f5156fad8",
+            "memberCount": 1,
+            "memberEndpoints": [
+              "protected-1"
+            ],
+            "ownershipVerified": true
+          }
+        },
+        "rules": [
+          [
+            "HOST_NAME",
+            "REGEX",
+            "^gateway\\.example\\.test(:[0-9]+)?$"
+          ],
+          [
+            "PATH",
+            "EQUAL_TO",
+            "/weighted"
+          ]
+        ],
+        "listenerDefault": {
+          "status_code": 404
+        }
+      },
+      "wire": {
+        "fresh": {
+          "requests": 1024,
+          "clientTCPConnections": 1024,
+          "httpStatus": {
+            "200": 1024
+          },
+          "endpointCalls": {
+            "protected-1": 272,
+            "public-1": 376,
+            "public-2": 376
+          },
+          "empty500WithoutApplicationCall": 0,
+          "responsesWithLocation": 0,
+          "minorityShare": 0.265625
+        },
+        "keepalive": {
+          "requests": 1024,
+          "clientTCPConnections": 1,
+          "httpStatus": {
+            "200": 1024
+          },
+          "endpointCalls": {
+            "public-1": 388,
+            "protected-1": 249,
+            "public-2": 387
+          },
+          "empty500WithoutApplicationCall": 0,
+          "responsesWithLocation": 0,
+          "minorityShare": 0.2431640625
+        }
+      }
+    }
+  ],
+  "coldRestart": {
+    "mutations": 0,
+    "managerRuleReads": 2
+  },
+  "protectedDirectWhileRevoked": {
+    "status": 200,
+    "bodyBytes": 11,
+    "location": false,
+    "applicationCalls": 1,
+    "endpoint": "protected-1"
+  },
+  "temporaryNeutronFailure": {
+    "injectedHTTPStatus": 503,
+    "failedAddressReads": 1,
+    "policyUpdates": 1,
+    "otherOctaviaWrites": 0,
+    "supplementalGatewayResponses": {
+      "200": 53,
+      "500": 11
+    }
+  },
+  "mutationOrder": {
+    "grantRemovalFirstWrite": "PUT selected L7 policy",
+    "protectedPoolRemovedLater": true,
+    "routeDeletionRemovedPolicyBeforeBothPools": true
+  },
+  "referenceGrant": {
+    "name": "allow-app",
+    "namespace": "private-services",
+    "spec": {
+      "from": [
+        {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "namespace": "qualification"
+        }
+      ],
+      "to": [
+        {
+          "group": "",
+          "kind": "Service",
+          "name": "protected"
+        }
+      ]
+    },
+    "observedMissing": true,
+    "recreatedWithNewUID": true
+  },
+  "cleanup": {
+    "afterRouteDeletion": {
+      "status": 404,
+      "bodyBytes": 0,
+      "location": false,
+      "applicationCalls": 0
+    },
+    "afterRouteInventory": {
+      "loadbalancers": 1,
+      "listeners": 1,
+      "pools": 0,
+      "healthmonitors": 0,
+      "l7policies": 0
+    },
+    "afterGatewayInventory": {
+      "loadbalancers": 0,
+      "listeners": 0,
+      "pools": 0,
+      "healthmonitors": 0,
+      "l7policies": 0
+    },
+    "haproxyStopped": true
+  }
+}
