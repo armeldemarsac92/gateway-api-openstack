@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"reflect"
 	"slices"
 	"testing"
 
@@ -229,7 +230,7 @@ func TestHTTPRouteOneRuleWithAlternativeMatches(t *testing.T) {
 		{PathType: cloud.PathMatchExact, PathValue: "/health", Precedence: 0},
 		{PathType: cloud.PathMatchPrefix, PathValue: "/api", Precedence: 1},
 	}
-	if len(spec.HTTPBackends) != 1 || !slices.Equal(spec.HTTPBackends[0].Matches, want) {
+	if len(spec.HTTPBackends) != 1 || !reflect.DeepEqual(spec.HTTPBackends[0].Matches, want) {
 		t.Fatalf("alternative matches = %#v, want %v", spec.HTTPBackends, want)
 	}
 }

@@ -126,10 +126,10 @@ func TestWeightedPolicyWire(t *testing.T) {
 		Endpoint:       "http://octavia.test/",
 	})
 	disabled := false
-	if _, err := service.CreateWeightedPolicy(t.Context(), l7policies.CreateOpts{ListenerID: "listener", AdminStateUp: &disabled}, targets); err != nil {
+	if _, err := service.CreateWeightedPolicy(t.Context(), l7policies.CreateOpts{ListenerID: "listener", AdminStateUp: &disabled}, targets, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.SetPolicyWeightedTargets(t.Context(), "policy", targets); err != nil {
+	if _, err := service.SetPolicyWeightedTargets(t.Context(), "policy", targets, nil); err != nil {
 		t.Fatal(err)
 	}
 	observed, complete, err := service.ListPolicyObservations(t.Context(), l7policies.ListOpts{})

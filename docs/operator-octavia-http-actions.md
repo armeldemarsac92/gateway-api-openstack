@@ -2,7 +2,7 @@
 
 An HTTPRoute can keep sending traffic to each Service at its declared weight when an operator revokes or restores a cross-namespace ReferenceGrant. The Gateway controller uses two capabilities added to the Hibiscus forks of Octavia and octavia-lib. The platform operator must enable them on the cloud and on the controller.
 
-The local qualification records the original Gateway API cases and the settled 3:1 grant lifecycle on both release bundles. [Opt-in provider results](qualification/v1.7.0/provider/opt-in-http-actions.md)
+The local qualification records the original Gateway API cases and the settled 3:1 grant lifecycle on both release bundles. [Opt-in provider results](qualification/v1.7.0/provider/opt-in-http-actions.md) · [Independent request-header capability and weighted regression](qualification/v1.7.0/provider/opt-in-request-header-modifier.md)
 
 ## Enable the capabilities
 

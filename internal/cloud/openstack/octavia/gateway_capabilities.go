@@ -25,9 +25,20 @@ import (
 )
 
 const (
-	GatewayCapabilityFixedHTTPResponses  = "fixed_http_responses_v1"
-	GatewayCapabilityWeightedHTTPTargets = "weighted_http_targets_v1"
+	GatewayCapabilityFixedHTTPResponses      = "fixed_http_responses_v1"
+	GatewayCapabilityWeightedHTTPTargets     = "weighted_http_targets_v1"
+	GatewayCapabilityRequestHeaderOperations = "request_header_operations_v1"
 )
+
+// MissingGatewayCapability reports an explicit negative capability discovery.
+type MissingGatewayCapability struct {
+	Provider   string
+	Capability string
+}
+
+func (e *MissingGatewayCapability) Error() string {
+	return fmt.Sprintf("provider %q did not advertise Octavia Gateway capability %q", e.Provider, e.Capability)
+}
 
 // VerifyGatewayCapabilities checks the selected provider on the authenticated,
 // region-specific load-balancer endpoint. Only an explicit capability list
@@ -45,7 +56,7 @@ func (s *Service) VerifyGatewayCapabilities(ctx context.Context, provider string
 	}
 	for _, capability := range required {
 		if !slices.Contains(response.Capabilities, capability) {
-			return fmt.Errorf("provider %q did not advertise Octavia Gateway capability %q", provider, capability)
+			return &MissingGatewayCapability{Provider: provider, Capability: capability}
 		}
 	}
 	return nil

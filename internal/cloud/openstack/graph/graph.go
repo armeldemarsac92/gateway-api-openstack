@@ -194,8 +194,8 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	if len(plan) == 0 {
 		return result, nil
 	}
-	step, err := p.prepareGraphMutation(ctx, desired, actual, plan[0])
-	if err != nil {
+	step, prepared, err := p.prepareNextGraphMutation(ctx, desired, actual, plan, &result)
+	if !prepared {
 		return result, err
 	}
 	if spec.ValidateMutation != nil {
