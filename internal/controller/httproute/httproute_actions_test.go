@@ -201,10 +201,14 @@ func TestUnsupportedAmphoraActionsDoNotBindOrProvision(t *testing.T) {
 	for _, test := range []struct {
 		name           string
 		filters        []gatewayv1.HTTPRouteFilter
+		matches        []gatewayv1.HTTPRouteMatch
 		includeBackend bool
 		deniedBackend  bool
 		message        string
 	}{
+		{name: "exact header matching without opt-in", includeBackend: true, matches: []gatewayv1.HTTPRouteMatch{{
+			Headers: []gatewayv1.HTTPHeaderMatch{{Name: "X-Version", Value: "one"}},
+		}}, message: "--octavia-http-header-exact"},
 		{name: "request headers", filters: []gatewayv1.HTTPRouteFilter{{
 			Type: gatewayv1.HTTPRouteFilterRequestHeaderModifier,
 			RequestHeaderModifier: &gatewayv1.HTTPHeaderFilter{
@@ -251,6 +255,7 @@ func TestUnsupportedAmphoraActionsDoNotBindOrProvision(t *testing.T) {
 			route := mapperTestHTTPRoute(gateway.Namespace, "route", gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name)}, "backend")
 			route.UID, route.Generation = "route-uid", 1
 			route.Spec.Rules[0].Filters = test.filters
+			route.Spec.Rules[0].Matches = test.matches
 			if !test.includeBackend {
 				route.Spec.Rules[0].BackendRefs = nil
 			}

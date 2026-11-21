@@ -19,8 +19,10 @@ limitations under the License.
 package cloud
 
 import (
+	"cmp"
 	"errors"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode/utf8"
 )
@@ -42,6 +44,43 @@ type HTTPHeaderOperation struct {
 }
 
 var httpHeaderName = regexp.MustCompile(`^[!#$%&'*+\-.^_\x60|~0-9A-Za-z]{1,256}$`)
+
+// HTTPHeaderMatch compares a case-insensitive field name and a literal value.
+type HTTPHeaderMatch struct {
+	Name  string
+	Value string
+}
+
+// NormalizeHTTPHeaderMatches validates the Amphora HTTP field limits and
+// canonicalizes the conjunction independently of declaration order.
+func NormalizeHTTPHeaderMatches(headers []HTTPHeaderMatch) ([]HTTPHeaderMatch, error) {
+	if len(headers) == 0 {
+		return nil, nil
+	}
+	if len(headers) > 16 {
+		return nil, errors.New("HTTPRoute supports at most 16 exact header matches per alternative")
+	}
+	normalized := make([]HTTPHeaderMatch, 0, len(headers))
+	seen := make(map[string]bool, len(headers))
+	for _, header := range headers {
+		if !httpHeaderName.MatchString(header.Name) || len(header.Name) > 255 {
+			return nil, errors.New("an exact HTTP header match requires a valid field name of at most 255 bytes on Amphora")
+		}
+		header.Name = strings.ToLower(header.Name)
+		if seen[header.Name] {
+			continue
+		}
+		seen[header.Name] = true
+		if header.Value == "" || !utf8.ValidString(header.Value) || utf8.RuneCountInString(header.Value) > 4096 ||
+			strings.Trim(header.Value, " \t") != header.Value ||
+			strings.ContainsFunc(header.Value, func(c rune) bool { return c < ' ' && c != '\t' || c == 127 }) {
+			return nil, errors.New("an exact HTTP header match requires a valid field value of 1–4096 characters without surrounding whitespace")
+		}
+		normalized = append(normalized, header)
+	}
+	slices.SortFunc(normalized, func(a, b HTTPHeaderMatch) int { return cmp.Compare(a.Name, b.Name) })
+	return normalized, nil
+}
 
 // NormalizeHTTPHeaderOperations validates literal operations and canonicalizes names.
 func NormalizeHTTPHeaderOperations(operations []HTTPHeaderOperation) ([]HTTPHeaderOperation, error) {

@@ -116,6 +116,9 @@ func (p *Provider) buildHTTPRoutePartsGraphPlan(desired desiredGatewayGraph, act
 		if fragment.Result.Outcome.State != cloud.OutcomeReady {
 			combined.Outcome = fragment.Result.Outcome
 		}
+		if combined.UnsupportedMatch == "" {
+			combined.UnsupportedMatch = fragment.Result.UnsupportedMatch
+		}
 		if combined.UnsupportedBackendProtocol == "" {
 			combined.UnsupportedBackendProtocol = fragment.Result.UnsupportedBackendProtocol
 		}
@@ -301,7 +304,7 @@ func observedHTTPPredicateMatches(policy observedRoutePolicy, rules []desiredRul
 		if !slices.ContainsFunc(policy.rules, func(observed observedRouteRule) bool {
 			rule := observed.rule
 			return rule.RuleType == string(wanted.ruleType) && rule.CompareType == string(wanted.compareType) &&
-				rule.Value == wanted.value && rule.AdminStateUp && rule.Invert == wanted.invert
+				(wanted.key == "" || rule.Key == wanted.key) && rule.Value == wanted.value && rule.AdminStateUp && rule.Invert == wanted.invert
 		}) {
 			return false
 		}

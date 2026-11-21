@@ -1,8 +1,8 @@
 {
   "repository": "ghcr.io/armeldemarsac92/gateway-api-openstack",
-  "sourceRevision": "633e0efb0ca141adfd693f5474ed08a8b0777f3c",
-  "manifestDigest": "sha256:523db1c10771c4c520c2d1b8cd9e2c616b2987bf9d3cc470a7e6108c3901e0a4",
+  "sourceRevision": "db720031f03f5c344be3decad81a1563dc734dde",
+  "manifestDigest": "sha256:358069a4210a218196078fab457a717ea92eedff4d5428db3d9b3fedd5fad5af",
   "platform": "linux/amd64",
-  "ociArchiveSHA256": "aa37e433d7c9963a6c95cba6d6db461628e6ee2f16eaf06667173aa92f727249",
-  "managerSHA256": "0fc497eaa5680f672ecdb58b095a0c2c6ef724c5c338bfb851c8213319bb3bc3"
+  "ociArchiveSHA256": "92780ab5e54da4c018fb7b5f3f4b353df5afd785e7fa010f65557de1fa297c2f",
+  "managerSHA256": "3ac54546696c07c0461e5b5b3edd94d5f1ac404490e3f67536503dad289f9d7d"
 }

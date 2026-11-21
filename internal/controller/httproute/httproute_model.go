@@ -82,7 +82,7 @@ func (r *Reconciler) validateRouteStructure(route *gatewayv1.HTTPRoute) ([]gatew
 	}
 	references := make([]gatewayv1.BackendObjectReference, 0, len(route.Spec.Rules))
 	for _, rule := range route.Spec.Rules {
-		if err := validateRouteRule(rule, r.Config.FixedHTTPResponses || grpc, r.Config.WeightedHTTPTargets && !grpc, r.Config.RequestHeaderModifier, r.Config.XBackendEnabled() && !grpc); err != nil {
+		if err := r.validateRouteRule(rule, grpc); err != nil {
 			return nil, err
 		}
 		for _, backend := range rule.BackendRefs {
@@ -107,7 +107,7 @@ func (r *Reconciler) usesHTTPBackendGroups(route *gatewayv1.HTTPRoute) bool {
 			}
 		}
 	}
-	if len(rule.Matches) > 1 {
+	if len(rule.Matches) > 1 || len(rule.Matches) == 1 && len(rule.Matches[0].Headers) != 0 {
 		return true
 	}
 	if !r.Config.RequestHeaderModifier || len(rule.Filters) != 1 || rule.Filters[0].Type != gatewayv1.HTTPRouteFilterRequestHeaderModifier {
@@ -117,17 +117,20 @@ func (r *Reconciler) usesHTTPBackendGroups(route *gatewayv1.HTTPRoute) bool {
 	return filter != nil && (len(filter.Set) != 0 || len(filter.Add) != 0 || len(filter.Remove) != 0)
 }
 
-func validateRouteRule(rule gatewayv1.HTTPRouteRule, fixedResponses, weightedTargets, requestHeaderModifier, xbackend bool) error {
+func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, grpc bool) error {
+	fixedResponses := r.Config.FixedHTTPResponses || grpc
+	weightedTargets := r.Config.WeightedHTTPTargets && !grpc
+	exactHeaders := r.Config.HTTPHeaderExact && !grpc
 	if rule.Timeouts != nil || rule.Retry != nil || rule.SessionPersistence != nil { //nolint:staticcheck // The release still serves this deprecated Experimental field.
 		return newRouteBuildError(routeErrorUnsupported, "timeouts, retries, and session persistence are not supported")
 	}
 	if len(rule.Filters) != 0 || !fixedResponses && !weightedTargets {
-		if err := compileRouteAction(rule, requestHeaderModifier); err != nil {
+		if err := compileRouteAction(rule, r.Config.RequestHeaderModifier); err != nil {
 			return err
 		}
 	}
 	for _, match := range rule.Matches {
-		if _, _, err := supportedMatch(match); err != nil {
+		if _, _, err := supportedMatch(match, exactHeaders); err != nil {
 			return err
 		}
 	}
@@ -150,7 +153,7 @@ func validateRouteRule(rule gatewayv1.HTTPRouteRule, fixedResponses, weightedTar
 	if backend.Weight != nil && *backend.Weight <= 0 {
 		return newRouteBuildError(routeErrorUnsupported, "a single backendRef must have positive weight")
 	}
-	if _, supported := model.XBackendReference("", backend.BackendObjectReference); supported && xbackend {
+	if _, supported := model.XBackendReference("", backend.BackendObjectReference); supported && r.Config.XBackendEnabled() && !grpc {
 		if backend.Port != nil {
 			return newRouteBuildError(routeErrorUnsupported, "backendRef.port must be omitted for XBackend")
 		}
@@ -237,7 +240,9 @@ func (r *Reconciler) buildRouteModelFromInputs(
 	listener gatewayv1.Listener,
 	inputs *routeModelInputs,
 ) (cloud.RouteSpec, model.Diagnostic, error) {
-	matches, rules, err := supportedRouteModel(inputs.routeFragment(route), listener, r.Config.FixedHTTPResponses || r.Config.WeightedHTTPTargets, r.Config.WeightedHTTPTargets)
+	exactHeaders := r.Config.HTTPHeaderExact && model.HTTPProfileRouteKind(route) == model.HTTPRouteKind
+	matches, rules, err := supportedRouteModel(inputs.routeFragment(route), listener,
+		r.Config.FixedHTTPResponses || r.Config.WeightedHTTPTargets, r.Config.WeightedHTTPTargets, exactHeaders)
 	if err != nil {
 		return cloud.RouteSpec{}, model.Diagnostic{}, err
 	}
@@ -383,7 +388,7 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 		}
 		*paths = appendHTTPPathMatch(*paths, cloud.HTTPPathMatch{
 			Hostname: match.Hostname, PathType: cloud.PathMatchType(match.Match.PathType), PathValue: match.Match.PathValue, Precedence: match.Precedence,
-			RequestHeaderOperations: operations,
+			Headers: match.Match.Headers, RequestHeaderOperations: operations,
 		})
 	}
 	return firstDiagnostic, nil
@@ -443,7 +448,8 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 func appendHTTPPathMatch(matches []cloud.HTTPPathMatch, match cloud.HTTPPathMatch) []cloud.HTTPPathMatch {
 	// Equivalent alternatives targeting the same action share one policy identity.
 	if slices.ContainsFunc(matches, func(previous cloud.HTTPPathMatch) bool {
-		return previous.Hostname == match.Hostname && previous.PathType == match.PathType && previous.PathValue == match.PathValue
+		return previous.Hostname == match.Hostname && previous.PathType == match.PathType && previous.PathValue == match.PathValue &&
+			slices.Equal(previous.Headers, match.Headers)
 	}) {
 		return matches
 	}
@@ -478,7 +484,7 @@ func groupedBackendMembers(ctx context.Context, reader client.Reader, backend mo
 
 // supportedRouteModel only admits fragments on one section. Logical rule
 // diagnostics must be checked before creating any backend group.
-func supportedRouteModel(logical model.Gateway, selected gatewayv1.Listener, fixedResponses, weightedTargets bool) ([]model.RouteMatch, []model.Rule, error) {
+func supportedRouteModel(logical model.Gateway, selected gatewayv1.Listener, fixedResponses, weightedTargets, exactHeaders bool) ([]model.RouteMatch, []model.Rule, error) {
 	unsupported := func() ([]model.RouteMatch, []model.Rule, error) {
 		return nil, nil, newRouteBuildError(routeErrorUnsupported, "logical Gateway configuration is outside the supported HTTP profile")
 	}
@@ -530,19 +536,22 @@ func supportedRouteModel(logical model.Gateway, selected gatewayv1.Listener, fix
 		}
 	}
 	for _, match := range listener.Rules {
-		if len(match.Match.Headers) != 0 {
+		if !exactHeaders && len(match.Match.Headers) != 0 {
 			return unsupported()
 		}
 	}
 	return listener.Rules, route.Rules, nil
 }
 
-func supportedMatch(match gatewayv1.HTTPRouteMatch) (cloud.PathMatchType, string, error) {
-	if len(match.Headers) != 0 || len(match.QueryParams) != 0 || match.Method != nil {
-		return "", "", newRouteBuildError(routeErrorUnsupported, "header, query parameter, and method matches are not supported")
+func supportedMatch(match gatewayv1.HTTPRouteMatch, exactHeaders bool) (cloud.PathMatchType, string, error) {
+	if len(match.Headers) != 0 && !exactHeaders {
+		return "", "", newRouteBuildError(routeErrorUnsupported, "exact HTTP header matching requires --octavia-http-header-exact")
 	}
 	normalized, err := model.NormalizeMatch(match)
 	if err != nil {
+		return "", "", newRouteBuildError(routeErrorUnsupported, "%s", err)
+	}
+	if _, err := cloud.NormalizeHTTPHeaderMatches(normalized.Headers); err != nil {
 		return "", "", newRouteBuildError(routeErrorUnsupported, "%s", err)
 	}
 	pathType := cloud.PathMatchType(normalized.PathType)

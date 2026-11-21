@@ -52,8 +52,25 @@ func HTTPWeightedRuleKey(index int) string {
 }
 
 // HTTPMatchKey identifies a logical predicate across list edits and rank changes.
-func HTTPMatchKey(hostname string, pathType cloud.PathMatchType, path string) string {
-	return httpTupleKey(hostname, string(pathType), path)
+func HTTPMatchKey(hostname string, pathType cloud.PathMatchType, path string, headers ...cloud.HTTPHeaderMatch) string {
+	var predicate strings.Builder
+	predicate.WriteString(path)
+	for _, header := range headers {
+		// Canonical HTTP header names and values cannot contain NUL.
+		predicate.WriteByte(0)
+		predicate.WriteString(header.Name)
+		predicate.WriteByte(0)
+		predicate.WriteString(header.Value)
+	}
+	return httpTupleKey(hostname, string(pathType), predicate.String())
+}
+
+// RoleRuleHTTPHeaderExact identifies a predicate on a normalized header name.
+const RoleRuleHTTPHeaderExact = "l7-header-exact"
+
+// HTTPHeaderRuleKey identifies one field within an exact-header conjunction.
+func HTTPHeaderRuleKey(name string) string {
+	return httpTupleKey("exact-header", name, "")
 }
 
 func httpTupleKey(first, second, third string) string {
@@ -72,20 +89,18 @@ func validHTTPKey(key string) bool {
 
 // HTTPFragmentRole preserves the route ownership tuple and distinguishes its
 // backend and path resources. Invalid combinations have no resource role.
-func HTTPFragmentRole(base, backendKey, matchKey string) string {
+func HTTPFragmentRole(base, backendKey, matchKey string, predicateKeys ...string) string {
 	if !validHTTPKey(backendKey) {
 		return ""
 	}
 	role := "http-v2/" + base + "/" + backendKey
 	switch base {
 	case RolePool, RoleMember, RoleMonitor:
-		if matchKey == "" {
+		if matchKey == "" && len(predicateKeys) == 0 {
 			return role
 		}
-	case RolePolicyExact, RolePolicyPrefix, RoleRulePath, RoleRuleHost:
-		if validHTTPKey(matchKey) {
-			return role + "/" + matchKey
-		}
+	default:
+		return httpMatchRole(role, base, matchKey, predicateKeys)
 	}
 	return ""
 }
@@ -93,11 +108,25 @@ func HTTPFragmentRole(base, backendKey, matchKey string) string {
 const weightedHTTPRolePrefix = "http-weighted-v1/"
 
 // HTTPWeightedPolicyRole identifies a policy or predicate owned by a rule.
-func HTTPWeightedPolicyRole(base, ruleKey, matchKey string) string {
+func HTTPWeightedPolicyRole(base, ruleKey, matchKey string, predicateKeys ...string) string {
+	if !validHTTPKey(ruleKey) {
+		return ""
+	}
+	return httpMatchRole(weightedHTTPRolePrefix+base+"/"+ruleKey, base, matchKey, predicateKeys)
+}
+
+func httpMatchRole(role, base, match string, predicateKeys []string) string {
+	if !validHTTPKey(match) {
+		return ""
+	}
 	switch base {
 	case RolePolicyExact, RolePolicyPrefix, RoleRulePath, RoleRuleHost:
-		if validHTTPKey(ruleKey) && validHTTPKey(matchKey) {
-			return weightedHTTPRolePrefix + base + "/" + ruleKey + "/" + matchKey
+		if len(predicateKeys) == 0 {
+			return role + "/" + match
+		}
+	case RoleRuleHTTPHeaderExact:
+		if len(predicateKeys) == 1 && validHTTPKey(predicateKeys[0]) {
+			return role + "/" + match + "/" + predicateKeys[0]
 		}
 	}
 	return ""
@@ -121,8 +150,13 @@ func ParseHTTPFragmentRole(raw string) (base, backendKey, matchKey string, ok bo
 	if !ok {
 		return "", "", "", false
 	}
-	backendKey, matchKey, _ = strings.Cut(rest, "/")
-	if formatRole(base, backendKey, matchKey) != raw {
+	backendKey, rest, _ = strings.Cut(rest, "/")
+	matchKey, predicate, hasPredicate := strings.Cut(rest, "/")
+	var predicateKeys []string
+	if hasPredicate {
+		predicateKeys = []string{predicate}
+	}
+	if formatRole(base, backendKey, matchKey, predicateKeys...) != raw {
 		return "", "", "", false
 	}
 	return base, backendKey, matchKey, true
@@ -147,7 +181,7 @@ func HTTPRedirectRole(base, match, cell, guard string) string {
 		if guard == "" {
 			return role
 		}
-	case RoleRuleRedirectGuard:
+	case RoleRuleRedirectGuard, RoleRuleHTTPHeaderExact:
 		if validHTTPKey(guard) {
 			return role + "/" + guard
 		}

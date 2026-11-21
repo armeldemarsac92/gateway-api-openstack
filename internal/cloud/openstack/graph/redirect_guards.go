@@ -17,6 +17,7 @@ limitations under the License.
 package graph
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
@@ -38,6 +39,8 @@ type redirectGuard struct {
 	compareType l7policies.CompareType
 	value       string
 }
+
+var errExactHeaderRedirectPrecedence = errors.New("cannot preserve Octavia redirect precedence with an overlapping higher-priority forwarding rule that adds an exact HTTP header condition")
 
 type redirectCell struct {
 	hostname string
@@ -167,6 +170,7 @@ func redirectCells(match cloud.HTTPPathMatch, forwards []cloud.HTTPPathMatch) ([
 	root := &redirectDomain{host: match.Hostname}
 	domains := map[string]*redirectDomain{root.host: root}
 	ordered := []*redirectDomain{root}
+	var unsupportedHeaders bool
 	for _, f := range forwards {
 		if f.Precedence >= match.Precedence {
 			continue
@@ -182,6 +186,12 @@ func redirectCells(match cloud.HTTPPathMatch, forwards []cloud.HTTPPathMatch) ([
 		} else if !hostContains(root.host, host) {
 			continue
 		}
+		if slices.ContainsFunc(f.Headers, func(header cloud.HTTPHeaderMatch) bool {
+			return !slices.Contains(match.Headers, header)
+		}) {
+			unsupportedHeaders = true
+			continue
+		}
 		d := domains[host]
 		if d == nil {
 			d = &redirectDomain{host: host}
@@ -193,6 +203,9 @@ func redirectCells(match cloud.HTTPPathMatch, forwards []cloud.HTTPPathMatch) ([
 	}
 	if root.shadowed {
 		return nil, nil
+	}
+	if unsupportedHeaders {
+		return nil, errExactHeaderRedirectPrecedence
 	}
 	// A wildcard ancestor has fewer literal DNS labels than its descendants.
 	sort.Slice(ordered[1:], func(i, j int) bool {
@@ -241,7 +254,7 @@ func redirectCells(match cloud.HTTPPathMatch, forwards []cloud.HTTPPathMatch) ([
 				cell.guards = append(cell.guards, redirectGuard{l7policies.TypePath, policy.compareType, policy.path})
 			}
 		}
-		positives := 1 // one PATH predicate per physical policy
+		positives := 1 + len(match.Headers) // one PATH predicate plus the positive header predicates
 		if d.host != "" {
 			positives++
 		}

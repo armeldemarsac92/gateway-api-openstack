@@ -373,8 +373,8 @@ func auditCandidateRole(resourceType string, tags []string) (string, bool, error
 		return role, true, nil
 	}
 	baseRole := role
-	if role == openstackidentity.RoleRuleRedirectGuard {
-		return "", false, fmt.Errorf("redirect guard role requires a policy cell")
+	if role == openstackidentity.RoleRuleRedirectGuard || role == openstackidentity.RoleRuleHTTPHeaderExact {
+		return "", false, fmt.Errorf("HTTP predicate role requires a policy identity")
 	}
 	if base, _, _, fragmented := openstackidentity.ParseHTTPFragmentRole(role); fragmented {
 		baseRole = base
@@ -398,7 +398,7 @@ func auditCandidateRole(resourceType string, tags []string) (string, bool, error
 	case auditTypeL7Policy:
 		valid, routeScoped = baseRole == rolePolicyExact || baseRole == rolePolicyPrefix, true
 	case auditTypeL7Rule:
-		valid, routeScoped = baseRole == roleRulePath || baseRole == roleRuleHost || baseRole == openstackidentity.RoleRuleRedirectGuard, true
+		valid, routeScoped = baseRole == roleRulePath || baseRole == roleRuleHost || baseRole == openstackidentity.RoleRuleRedirectGuard || baseRole == openstackidentity.RoleRuleHTTPHeaderExact, true
 	}
 	if !valid {
 		return "", false, fmt.Errorf("resource role does not match its OpenStack type")

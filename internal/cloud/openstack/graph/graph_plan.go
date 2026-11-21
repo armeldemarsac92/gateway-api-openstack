@@ -295,8 +295,10 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 		if len(routePlan) != 0 {
 			routeResult.Outcome = p.progressingOutcome(routePlan[0].message())
 		}
-		if route.redirectIssue != "" {
-			routeResult.Outcome = p.progressingOutcome(route.redirectIssue)
+		if errors.Is(route.redirectIssue, errExactHeaderRedirectPrecedence) {
+			routeResult.UnsupportedMatch = route.redirectIssue.Error()
+		} else if route.redirectIssue != nil {
+			routeResult.Outcome = p.progressingOutcome(route.redirectIssue.Error())
 		}
 		if route.targetsPending {
 			canRestoreTraffic = false
@@ -629,8 +631,8 @@ type unavailableRouteCapability struct {
 func (e *unavailableRouteCapability) Unwrap() error { return e.error }
 
 // prepareNextGraphMutation can stage a sibling's owned backend during a
-// route capability outage. Preserve the planned policy order and leave
-// policy programming and frontend restoration to a fresh observation.
+// route capability outage. A policy on another physical listener has an
+// independent order and can also proceed when exact headers are unavailable.
 func (p *Provider) prepareNextGraphMutation(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, plan []graphMutation, result *cloud.GatewayGraphResult) (graphMutation, bool, error) {
 	first := plan[0]
 	step, err := p.prepareGraphMutation(ctx, desired, actual, first)
@@ -648,6 +650,7 @@ func (p *Provider) prepareNextGraphMutation(ctx context.Context, desired desired
 		}
 	}
 	recordBlocked(first, blocked)
+	blockedExactHeaders := blocked.capability == octavia.GatewayCapabilityHTTPHeaderExact
 	result.Outcome = result.Routes[first.routeIndex].Result.Outcome
 	seen := map[poolRouteOwner]bool{{route: first.routeIndex, backend: first.backendKey}: true}
 	for _, sibling := range plan[1:] {
@@ -661,17 +664,20 @@ func (p *Provider) prepareNextGraphMutation(ctx context.Context, desired desired
 		// Each pool can contribute only its first planned action. Subsequent
 		// actions may rely on a write whose result has yet to be observed.
 		seen[owner] = true
+		independentListener := blockedExactHeaders && first.listenerID != "" && sibling.listenerID != "" && first.listenerID != sibling.listenerID
 		switch sibling.route.kind {
 		case routeMutationCreatePool, routeMutationUpdatePool, routeMutationCreateMember, routeMutationUpdateMember:
-			// The complete graph ties each of these pools to its own route.
-			// A sibling backend mutation cannot publish or reorder a policy.
-			prepared, err := p.prepareGraphMutation(ctx, desired, actual, sibling)
-			if err == nil {
-				return prepared, true, nil
+		default:
+			if !independentListener || !isHTTPPolicyMutation(sibling.route.kind) {
+				continue
 			}
-			if errors.As(err, &blocked) {
-				recordBlocked(sibling, blocked)
-			}
+		}
+		prepared, err := p.prepareGraphMutation(ctx, desired, actual, sibling)
+		if err == nil {
+			return prepared, true, nil
+		}
+		if errors.As(err, &blocked) {
+			recordBlocked(sibling, blocked)
 		}
 	}
 	return graphMutation{}, false, nil
@@ -702,6 +708,10 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 		}
 		if len(step.route.requestHeaderOperations) != 0 {
 			required = append(required, octavia.GatewayCapabilityRequestHeaderOperations)
+		}
+		if step.route.requiresExactHeaders || len(step.route.policy.headers) != 0 && step.route.kind == routeMutationCreatePolicy ||
+			step.route.rule.ruleType == httpHeaderExactRuleType {
+			required = append(required, octavia.GatewayCapabilityHTTPHeaderExact)
 		}
 	default:
 		return step, nil
@@ -739,6 +749,9 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 			} else if len(step.route.requestHeaderOperations) != 0 && !step.withdrawHTTPPolicy &&
 				(!explicitlyMissing || missing.Capability == octavia.GatewayCapabilityRequestHeaderOperations) {
 				err = &unavailableRouteCapability{error: err, capability: octavia.GatewayCapabilityRequestHeaderOperations}
+			} else if slices.Contains(required, octavia.GatewayCapabilityHTTPHeaderExact) &&
+				(!explicitlyMissing || missing.Capability == octavia.GatewayCapabilityHTTPHeaderExact) {
+				err = &unavailableRouteCapability{error: err, capability: octavia.GatewayCapabilityHTTPHeaderExact}
 			}
 			return step, err
 		}

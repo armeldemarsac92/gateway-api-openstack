@@ -4,6 +4,8 @@ This integration targets Magnum 23.0.0 and the magnum-capi-helm 1.4.0 source at 
 
 Clusters using the Octavia fork can render the five workload objects with fixed HTTP responses and weighted backend actions. [Provider enrollment and Magnum manifest](../../operator-octavia-http-actions.md)
 
+Clusters can select exact HTTPRoute header matching with HTTP 404 for unmatched requests when Amphora advertises both capabilities. [Exact-header setup and Magnum manifest](../../operator-octavia-http-header-exact.md)
+
 Operators can select a workload artifact for TLSRoute SNI passthrough on a dedicated Endpoint GatewayClass when the region advertises the Amphora capability. [Regional enrollment and Magnum artifact](../../operator-octavia-tls-sni-passthrough.md)
 
 For an Experimental workload cluster, install the Experimental v1.7.0 bundle and render the controller artifact with `kubectl kustomize integrations/magnum-capi-helm/workload-experimental`. This selects the Experimental channel and adds the permissions for XBackend selection and status to the workload service account. Pin the resulting manifest SHA-256 in the conductor configuration. The local magnum-capi-helm 1.4.0 test rendered the five workload objects inside the registered addon's manifest. [Render and permissions](provider/xbackend-endpoint-selector-evidence/operator-render.json)

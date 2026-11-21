@@ -65,11 +65,14 @@ func (p *Provider) buildDesiredGatewayRoute(spec cloud.RouteSpec, forwards []clo
 		}
 		indexes[redirect.RuleIndex] = true
 		for _, match := range redirect.Matches {
-			match = normalizeGroupedHTTPMatch(match)
+			match, err := p.normalizeHTTPMatch(match)
+			if err != nil {
+				return invalid(err)
+			}
 			if _, _, err := httpPathPolicies(match, true); err != nil {
 				return invalid(err)
 			}
-			key := openstackidentity.HTTPMatchKey(match.Hostname, match.PathType, match.PathValue)
+			key := openstackidentity.HTTPMatchKey(match.Hostname, match.PathType, match.PathValue, match.Headers...)
 			route.redirectRanks = append(route.redirectRanks, match.Precedence)
 			selected, found := matches[key]
 			if found && selected.precedence <= match.Precedence {
@@ -84,7 +87,7 @@ func (p *Provider) buildDesiredGatewayRoute(spec cloud.RouteSpec, forwards []clo
 			part := desiredRoute{identity: route.identity, spec: route.spec, backendKey: redirectPartKey(key), redirect: true}
 			cells, err := redirectCells(match, forwards)
 			if err != nil {
-				part.redirectIssue = err.Error()
+				part.redirectIssue = err
 				route.httpParts[selected.index] = part
 				continue
 			}
@@ -163,8 +166,15 @@ func policyRuleRole(policy desiredPolicy, base, guard string) string {
 	if policy.redirect != nil {
 		return openstackidentity.HTTPRedirectRole(base, policy.redirect.matchKey, policy.matchKey, guard)
 	}
+	var predicateKeys []string
+	if guard != "" {
+		predicateKeys = []string{guard}
+	}
 	if policy.weighted {
-		return openstackidentity.HTTPWeightedPolicyRole(base, policy.backendKey, policy.matchKey)
+		return openstackidentity.HTTPWeightedPolicyRole(base, policy.backendKey, policy.matchKey, predicateKeys...)
+	}
+	if len(predicateKeys) != 0 {
+		return openstackidentity.HTTPFragmentRole(base, policy.backendKey, policy.matchKey, predicateKeys...)
 	}
 	return httpResourceRole(base, policy.backendKey, policy.matchKey)
 }

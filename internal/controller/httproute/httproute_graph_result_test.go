@@ -22,7 +22,10 @@ import (
 	"testing"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
@@ -117,4 +120,33 @@ type fixedRouteGraph struct {
 
 func (w fixedRouteGraph) ReconcileGraph(context.Context, graph.Request) (cloud.GatewayGraphResult, error) {
 	return w.result, w.err
+}
+
+func TestHTTPRouteReportedMatchIncompatibilityKeepsForwardBinding(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	component := cloud.RouteReadyResult(cloud.RouteState{PoolID: "forward"})
+	component.UnsupportedMatch = "Octavia cannot preserve this redirect's match precedence"
+	id := controller.RouteIdentity(f.reconciler.Config, f.gateway, f.route)
+	f.reconciler.Writer = fixedRouteGraph{result: cloud.GatewayGraphResult{Outcome: cloud.ReadyOutcome(),
+		Routes: []cloud.RouteGraphResult{{Identity: id, Result: component}}}}
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(f.route)}
+	result, err := f.reconciler.Reconcile(t.Context(), request)
+	if err != nil || result.RequeueAfter != controller.OpenStackResyncAfter(f.reconciler.Config.OpenStackResyncInterval, f.route.UID) {
+		t.Fatalf("want settled incompatibility and periodic resync: %+v %v", result, err)
+	}
+	var current gatewayv1.HTTPRoute
+	if err := f.client.Get(t.Context(), request.NamespacedName, &current); err != nil {
+		t.Fatal(err)
+	}
+	if current.Annotations[f.reconciler.Config.RouteLifecycleAnnotation()] != controller.RouteAttached || len(current.Status.Parents) != 1 {
+		t.Fatalf("route lost its forwarding binding or parent: %#v", current)
+	}
+	conditions := current.Status.Parents[0].Conditions
+	accepted := meta.FindStatusCondition(conditions, string(gatewayv1.RouteConditionAccepted))
+	programmed := meta.FindStatusCondition(conditions, f.reconciler.Config.Domain()+"/Programmed")
+	if accepted == nil || accepted.Status != metav1.ConditionFalse ||
+		accepted.Reason != string(gatewayv1.RouteReasonUnsupportedValue) || accepted.Message != component.UnsupportedMatch ||
+		programmed == nil || programmed.Status != metav1.ConditionFalse || programmed.Reason != "Invalid" {
+		t.Fatalf("want permanent match incompatibility, conditions: %#v", conditions)
+	}
 }

@@ -1,0 +1,698 @@
+{
+  "channel": "standard",
+  "case": "HTTPRouteHeaderMatching",
+  "passed": true,
+  "identities": {
+    "gatewayAPISourceRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+    "releaseBundleSha256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+    "originalCaseGoSha256": "c294e8c61106e7f684ca0602708e44f118890e364e96e75860763838c3d829f4",
+    "originalCaseYAMLSha256": "266c01fe2f4fae7cd44e859db668cb48f8765b365bcd8dd03e560b91a3f7ed94",
+    "baseManifestSha256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+    "controllerSourceRevision": "db720031f03f5c344be3decad81a1563dc734dde",
+    "controllerArtifact": "sha256:358069a4210a218196078fab457a717ea92eedff4d5428db3d9b3fedd5fad5af",
+    "controllerBinarySha256": "3ac54546696c07c0461e5b5b3edd94d5f1ac404490e3f67536503dad289f9d7d",
+    "controllerFlags": [
+      "--octavia-http-header-exact",
+      "--octavia-fixed-http-responses"
+    ],
+    "conformanceBinarySha256": "6abedc0a0cdde2266d21faac6a8f9b72e61f1ee7a67fba61af569236c0cc8488",
+    "echoBinarySha256": "d4e04b904229880dc2e32dbe58244b3bf46408c2e1e8325ebb83a69fab3d57a9",
+    "kubernetes": "v1.36.2",
+    "provider": {
+      "octavia": {
+        "version": "19.0.1.dev6",
+        "wheelSha256": "00ce0a3cb11f39779e5d7b8e6fe79618ac9058943ae22e9c2330b54fde73272c",
+        "filesVerified": 632
+      },
+      "octaviaLib": {
+        "version": "3.12.1.dev3",
+        "wheelSha256": "5513991a6e004490221065b64be53f3dbdf3de1bab6e768ff2bc98f797c5cfc5",
+        "filesVerified": 24
+      },
+      "octaviaSourceRevision": "5896c054cf709b8b082c332157409e3c7e27cafc"
+    },
+    "haproxy": "3.0.19",
+    "haproxyRunning": true,
+    "haproxyBinarySha256": "847fad8188f01f5693cfba85731f37d554758526f39dc6f67162ec2c6a150885"
+  },
+  "prerequisites": {
+    "infra-backend-v1": {
+      "servicePorts": [
+        8080,
+        8081,
+        8082
+      ],
+      "readyEndpoints": 2,
+      "directProbes": [
+        {
+          "status": 200,
+          "backend": "infra-backend-v1",
+          "echoRequestMatched": true
+        },
+        {
+          "status": 200,
+          "backend": "infra-backend-v1",
+          "echoRequestMatched": true
+        }
+      ]
+    },
+    "infra-backend-v2": {
+      "servicePorts": [
+        8080
+      ],
+      "readyEndpoints": 2,
+      "directProbes": [
+        {
+          "status": 200,
+          "backend": "infra-backend-v2",
+          "echoRequestMatched": true
+        },
+        {
+          "status": 200,
+          "backend": "infra-backend-v2",
+          "echoRequestMatched": true
+        }
+      ]
+    },
+    "infra-backend-v3": {
+      "servicePorts": [
+        8080
+      ],
+      "readyEndpoints": 1,
+      "directProbes": [
+        {
+          "status": 200,
+          "backend": "infra-backend-v3",
+          "echoRequestMatched": true
+        }
+      ]
+    }
+  },
+  "upstream": {
+    "exit": 0,
+    "passed": true,
+    "trafficSubtestsPassed": 11,
+    "events": [
+      "--- PASS: TestLocalHeaderCase/HTTPRouteHeaderMatching (1.02s)",
+      "--- PASS: TestLocalHeaderCase/HTTPRouteHeaderMatching/0_request_to_'/'_with_headers_should_go_to_infra-backend-v1 (14.71s)",
+      "--- PASS: TestLocalHeaderCase/HTTPRouteHeaderMatching/5_request_to_'/'_with_headers_should_receive_one_of_[] (0.01s)",
+      "--- PASS: TestLocalHeaderCase/HTTPRouteHeaderMatching/10_request_to_'/'_with_headers_should_receive_one_of_[] (0.00s)",
+      "--- PASS: TestLocalHeaderCase/HTTPRouteHeaderMatching/4_request_to_'/'_with_headers_should_receive_one_of_[] (0.00s)",
+      "--- PASS: TestLocalHeaderCase/HTTPRouteHeaderMatching/6_request_to_'/'_with_headers_should_go_to_infra-backend-v1 (15.83s)",
+      "--- PASS: TestLocalHeaderCase/HTTPRouteHeaderMatching/3_request_to_'/'_with_headers_should_go_to_infra-backend-v2 (0.00s)",
+      "--- PASS: TestLocalHeaderCase/HTTPRouteHeaderMatching/8_request_to_'/'_with_headers_should_go_to_infra-backend-v2 (1.13s)",
+      "--- PASS: TestLocalHeaderCase/HTTPRouteHeaderMatching/2_request_to_'/'_with_headers_should_go_to_infra-backend-v1 (0.00s)",
+      "--- PASS: TestLocalHeaderCase/HTTPRouteHeaderMatching/7_request_to_'/'_with_headers_should_go_to_infra-backend-v1 (0.01s)",
+      "--- PASS: TestLocalHeaderCase/HTTPRouteHeaderMatching/1_request_to_'/'_with_headers_should_go_to_infra-backend-v2 (0.00s)",
+      "--- PASS: TestLocalHeaderCase/HTTPRouteHeaderMatching/9_request_to_'/'_with_headers_should_go_to_infra-backend-v2 (2.84s)"
+    ],
+    "requestLogCount": 371,
+    "responseStatusesBySubtest": {
+      "6": {
+        "404": 155,
+        "200": 3
+      },
+      "0": {
+        "404": 144,
+        "200": 3
+      },
+      "5": {
+        "404": 3
+      },
+      "10": {
+        "404": 3
+      },
+      "4": {
+        "404": 3
+      },
+      "9": {
+        "404": 28,
+        "200": 3
+      },
+      "3": {
+        "200": 3
+      },
+      "8": {
+        "404": 11,
+        "200": 3
+      },
+      "2": {
+        "200": 3
+      },
+      "7": {
+        "200": 3
+      },
+      "1": {
+        "200": 3
+      }
+    }
+  },
+  "readback": {
+    "providerCapabilitiesBeforeOptIn": [
+      "fixed_http_responses_v1",
+      "weighted_http_targets_v1"
+    ],
+    "providerCapabilitiesWithOptIn": [
+      "fixed_http_responses_v1",
+      "weighted_http_targets_v1",
+      "http_header_exact_v1"
+    ],
+    "gatewayConditions": {
+      "Accepted": "True/Accepted",
+      "Programmed": "True/Programmed"
+    },
+    "listenerAttachedRoutes": [
+      1
+    ],
+    "routeParents": [
+      {
+        "parent": "same-namespace",
+        "controllerMatches": true,
+        "currentConditions": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "gateway-api-openstack.github.io/Programmed": "False/Pending"
+        }
+      }
+    ],
+    "octaviaPolicies": [
+      {
+        "position": 1,
+        "action": "REDIRECT_TO_POOL",
+        "rules": [
+          {
+            "type": "PATH",
+            "compare_type": "STARTS_WITH",
+            "key": null,
+            "value": "/",
+            "provisioning_status": "ACTIVE"
+          },
+          {
+            "type": "HTTP_HEADER_EXACT",
+            "compare_type": "EQUAL_TO",
+            "key": "color",
+            "value": "orange",
+            "provisioning_status": "ACTIVE"
+          },
+          {
+            "type": "HTTP_HEADER_EXACT",
+            "compare_type": "EQUAL_TO",
+            "key": "version",
+            "value": "two",
+            "provisioning_status": "ACTIVE"
+          }
+        ]
+      },
+      {
+        "position": 2,
+        "action": "REDIRECT_TO_POOL",
+        "rules": [
+          {
+            "type": "PATH",
+            "compare_type": "STARTS_WITH",
+            "key": null,
+            "value": "/",
+            "provisioning_status": "ACTIVE"
+          },
+          {
+            "type": "HTTP_HEADER_EXACT",
+            "compare_type": "EQUAL_TO",
+            "key": "version",
+            "value": "one",
+            "provisioning_status": "ACTIVE"
+          }
+        ]
+      },
+      {
+        "position": 3,
+        "action": "REDIRECT_TO_POOL",
+        "rules": [
+          {
+            "type": "PATH",
+            "compare_type": "STARTS_WITH",
+            "key": null,
+            "value": "/",
+            "provisioning_status": "ACTIVE"
+          },
+          {
+            "type": "HTTP_HEADER_EXACT",
+            "compare_type": "EQUAL_TO",
+            "key": "version",
+            "value": "two",
+            "provisioning_status": "ACTIVE"
+          }
+        ]
+      },
+      {
+        "position": 4,
+        "action": "REDIRECT_TO_POOL",
+        "rules": [
+          {
+            "type": "PATH",
+            "compare_type": "STARTS_WITH",
+            "key": null,
+            "value": "/",
+            "provisioning_status": "ACTIVE"
+          },
+          {
+            "type": "HTTP_HEADER_EXACT",
+            "compare_type": "EQUAL_TO",
+            "key": "color",
+            "value": "blue",
+            "provisioning_status": "ACTIVE"
+          }
+        ]
+      },
+      {
+        "position": 5,
+        "action": "REDIRECT_TO_POOL",
+        "rules": [
+          {
+            "type": "PATH",
+            "compare_type": "STARTS_WITH",
+            "key": null,
+            "value": "/",
+            "provisioning_status": "ACTIVE"
+          },
+          {
+            "type": "HTTP_HEADER_EXACT",
+            "compare_type": "EQUAL_TO",
+            "key": "color",
+            "value": "green",
+            "provisioning_status": "ACTIVE"
+          }
+        ]
+      },
+      {
+        "position": 6,
+        "action": "REDIRECT_TO_POOL",
+        "rules": [
+          {
+            "type": "PATH",
+            "compare_type": "STARTS_WITH",
+            "key": null,
+            "value": "/",
+            "provisioning_status": "ACTIVE"
+          },
+          {
+            "type": "HTTP_HEADER_EXACT",
+            "compare_type": "EQUAL_TO",
+            "key": "color",
+            "value": "red",
+            "provisioning_status": "ACTIVE"
+          }
+        ]
+      },
+      {
+        "position": 7,
+        "action": "REDIRECT_TO_POOL",
+        "rules": [
+          {
+            "type": "PATH",
+            "compare_type": "STARTS_WITH",
+            "key": null,
+            "value": "/",
+            "provisioning_status": "ACTIVE"
+          },
+          {
+            "type": "HTTP_HEADER_EXACT",
+            "compare_type": "EQUAL_TO",
+            "key": "color",
+            "value": "yellow",
+            "provisioning_status": "ACTIVE"
+          }
+        ]
+      }
+    ],
+    "octaviaWriteCounts": {
+      "loadbalancers": 1,
+      "listeners": 1,
+      "pools": 6,
+      "healthmonitors": 2,
+      "l7policies": 29
+    },
+    "haproxyConfigSha256": "5f399c877bc497b87ac7efbcb9ba7c8be8bf7488ff861fe86f5bc9cb7bf5e2cb",
+    "httpRequests": [
+      {
+        "headers": {
+          "Version": "one"
+        },
+        "status": 200,
+        "backend": "infra-backend-v1",
+        "echoRequestMatched": true
+      },
+      {
+        "headers": {
+          "Version": "one, other"
+        },
+        "status": 404
+      },
+      {
+        "headers": {},
+        "status": 404
+      },
+      {
+        "headers": {
+          "Color": "blue"
+        },
+        "status": 200,
+        "backend": "infra-backend-v1",
+        "echoRequestMatched": true
+      },
+      {
+        "headers": {
+          "Color": "red"
+        },
+        "status": 200,
+        "backend": "infra-backend-v2",
+        "echoRequestMatched": true
+      },
+      {
+        "headers": {
+          "Color": "yellow"
+        },
+        "status": 200,
+        "backend": "infra-backend-v2",
+        "echoRequestMatched": true
+      }
+    ],
+    "timing": {
+      "upstreamStartedSeconds": 8.569,
+      "upstreamCompletedSeconds": 28.899,
+      "octaviaWriteCompletions": [
+        {
+          "method": "POST",
+          "collection": "loadbalancers",
+          "sinceStartSeconds": 5.702,
+          "fixtureCompletionSeconds": 0.032,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": false
+        },
+        {
+          "method": "POST",
+          "collection": "listeners",
+          "sinceStartSeconds": 6.916,
+          "fixtureCompletionSeconds": 0.233,
+          "activatedHAProxyConfig": true,
+          "completedWithWorkerTasks": false
+        },
+        {
+          "method": "POST",
+          "collection": "pools",
+          "sinceStartSeconds": 10.737,
+          "fixtureCompletionSeconds": 0.089,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": false
+        },
+        {
+          "method": "POST",
+          "collection": "pools",
+          "sinceStartSeconds": 11.097,
+          "fixtureCompletionSeconds": 0.084,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": false
+        },
+        {
+          "method": "POST",
+          "collection": "pools",
+          "sinceStartSeconds": 11.446,
+          "fixtureCompletionSeconds": 0.117,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": false
+        },
+        {
+          "method": "POST",
+          "collection": "healthmonitors",
+          "sinceStartSeconds": 11.813,
+          "fixtureCompletionSeconds": 0.103,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": false
+        },
+        {
+          "method": "POST",
+          "collection": "pools",
+          "sinceStartSeconds": 12.34,
+          "fixtureCompletionSeconds": 0.13,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": false
+        },
+        {
+          "method": "POST",
+          "collection": "pools",
+          "sinceStartSeconds": 12.746,
+          "fixtureCompletionSeconds": 0.117,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": false
+        },
+        {
+          "method": "POST",
+          "collection": "pools",
+          "sinceStartSeconds": 13.126,
+          "fixtureCompletionSeconds": 0.122,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": false
+        },
+        {
+          "method": "POST",
+          "collection": "healthmonitors",
+          "sinceStartSeconds": 13.49,
+          "fixtureCompletionSeconds": 0.137,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": false
+        },
+        {
+          "method": "POST",
+          "collection": "l7policies",
+          "sinceStartSeconds": 13.962,
+          "fixtureCompletionSeconds": 0.095,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true
+        },
+        {
+          "method": "POST",
+          "collection": "l7rules",
+          "sinceStartSeconds": 14.379,
+          "fixtureCompletionSeconds": 0.12,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true
+        },
+        {
+          "method": "POST",
+          "collection": "l7rules",
+          "sinceStartSeconds": 14.812,
+          "fixtureCompletionSeconds": 0.116,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true
+        },
+        {
+          "method": "POST",
+          "collection": "l7rules",
+          "sinceStartSeconds": 15.225,
+          "fixtureCompletionSeconds": 0.122,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true
+        },
+        {
+          "method": "POST",
+          "collection": "l7policies",
+          "sinceStartSeconds": 15.76,
+          "fixtureCompletionSeconds": 0.112,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true
+        },
+        {
+          "method": "POST",
+          "collection": "l7rules",
+          "sinceStartSeconds": 16.151,
+          "fixtureCompletionSeconds": 0.132,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true
+        },
+        {
+          "method": "POST",
+          "collection": "l7rules",
+          "sinceStartSeconds": 16.623,
+          "fixtureCompletionSeconds": 0.131,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true
+        },
+        {
+          "method": "POST",
+          "collection": "l7policies",
+          "sinceStartSeconds": 17.235,
+          "fixtureCompletionSeconds": 0.104,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true
+        },
+        {
+          "method": "POST",
+          "collection": "l7rules",
+          "sinceStartSeconds": 17.676,
+          "fixtureCompletionSeconds": 0.136,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true
+        },
+        {
+          "method": "POST",
+          "collection": "l7rules",
+          "sinceStartSeconds": 18.137,
+          "fixtureCompletionSeconds": 0.146,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true
+        },
+        {
+          "method": "POST",
+          "collection": "l7policies",
+          "sinceStartSeconds": 18.669,
+          "fixtureCompletionSeconds": 0.098,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true
+        },
+        {
+          "method": "POST",
+          "collection": "l7rules",
+          "sinceStartSeconds": 19.109,
+          "fixtureCompletionSeconds": 0.167,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true
+        },
+        {
+          "method": "POST",
+          "collection": "l7rules",
+          "sinceStartSeconds": 19.659,
+          "fixtureCompletionSeconds": 0.192,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true
+        },
+        {
+          "method": "POST",
+          "collection": "l7policies",
+          "sinceStartSeconds": 20.245,
+          "fixtureCompletionSeconds": 0.102,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true
+        },
+        {
+          "method": "POST",
+          "collection": "l7rules",
+          "sinceStartSeconds": 20.692,
+          "fixtureCompletionSeconds": 0.159,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true
+        },
+        {
+          "method": "POST",
+          "collection": "l7rules",
+          "sinceStartSeconds": 21.202,
+          "fixtureCompletionSeconds": 0.149,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true
+        },
+        {
+          "method": "POST",
+          "collection": "l7policies",
+          "sinceStartSeconds": 21.779,
+          "fixtureCompletionSeconds": 0.313,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true
+        },
+        {
+          "method": "POST",
+          "collection": "l7rules",
+          "sinceStartSeconds": 22.451,
+          "fixtureCompletionSeconds": 0.172,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true
+        },
+        {
+          "method": "POST",
+          "collection": "l7rules",
+          "sinceStartSeconds": 22.974,
+          "fixtureCompletionSeconds": 0.161,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true
+        },
+        {
+          "method": "POST",
+          "collection": "l7policies",
+          "sinceStartSeconds": 23.533,
+          "fixtureCompletionSeconds": 0.123,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true
+        },
+        {
+          "method": "POST",
+          "collection": "l7rules",
+          "sinceStartSeconds": 24.109,
+          "fixtureCompletionSeconds": 0.182,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true
+        },
+        {
+          "method": "POST",
+          "collection": "l7rules",
+          "sinceStartSeconds": 24.685,
+          "fixtureCompletionSeconds": 0.21,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true
+        },
+        {
+          "method": "PUT",
+          "collection": "l7policies",
+          "sinceStartSeconds": 25.273,
+          "fixtureCompletionSeconds": 0.185,
+          "activatedHAProxyConfig": true,
+          "completedWithWorkerTasks": true
+        },
+        {
+          "method": "PUT",
+          "collection": "l7policies",
+          "sinceStartSeconds": 25.858,
+          "fixtureCompletionSeconds": 0.172,
+          "activatedHAProxyConfig": true,
+          "completedWithWorkerTasks": true
+        },
+        {
+          "method": "PUT",
+          "collection": "l7policies",
+          "sinceStartSeconds": 26.419,
+          "fixtureCompletionSeconds": 0.172,
+          "activatedHAProxyConfig": true,
+          "completedWithWorkerTasks": true
+        },
+        {
+          "method": "PUT",
+          "collection": "l7policies",
+          "sinceStartSeconds": 26.988,
+          "fixtureCompletionSeconds": 0.161,
+          "activatedHAProxyConfig": true,
+          "completedWithWorkerTasks": true
+        },
+        {
+          "method": "PUT",
+          "collection": "l7policies",
+          "sinceStartSeconds": 27.539,
+          "fixtureCompletionSeconds": 0.172,
+          "activatedHAProxyConfig": true,
+          "completedWithWorkerTasks": true
+        },
+        {
+          "method": "PUT",
+          "collection": "l7policies",
+          "sinceStartSeconds": 28.09,
+          "fixtureCompletionSeconds": 0.171,
+          "activatedHAProxyConfig": true,
+          "completedWithWorkerTasks": true
+        },
+        {
+          "method": "PUT",
+          "collection": "l7policies",
+          "sinceStartSeconds": 28.68,
+          "fixtureCompletionSeconds": 0.229,
+          "activatedHAProxyConfig": true,
+          "completedWithWorkerTasks": true
+        }
+      ]
+    }
+  }
+}

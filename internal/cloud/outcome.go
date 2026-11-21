@@ -122,6 +122,8 @@ type RouteResult struct {
 	ObservationDeferred bool
 	// UnsupportedBackendProtocol is populated when the provider explicitly lacks a requested transport.
 	UnsupportedBackendProtocol string
+	// UnsupportedMatch reports an incompatible match without discarding other programmed rules.
+	UnsupportedMatch string
 }
 
 // RouteReadyResult returns a converged HTTPRoute result.
