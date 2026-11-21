@@ -62,7 +62,7 @@ func TestInvalidHTTPBackendChangesOnlyItsPolicyTarget(t *testing.T) {
 	desired.members = []cloud.Member{{Address: "10.0.0.10", Port: 30080}}
 	plan, _, err = buildRouteEnsurePlan(desired, actual)
 	want[0].parentID = "pool-1"
-	if err != nil || len(plan) != 2 || plan[0].kind != routeMutationUpdateMember || plan[1] != want[0] {
+	if err != nil || len(plan) != 2 || plan[0].kind != routeMutationUpdateMember || !reflect.DeepEqual(plan[1], want[0]) {
 		t.Fatalf("prepare the original pool and restore it in place: plan = %#v, error = %v", plan, err)
 	}
 
@@ -297,7 +297,7 @@ func TestBuildRouteEnsurePlanDisablesPolicyBeforeChangingRules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildRouteEnsurePlan() error = %v", err)
 	}
-	if len(plan) == 0 || plan[0] != (routeMutation{kind: routeMutationDisablePolicy, id: "policy-1"}) {
+	if len(plan) == 0 || !reflect.DeepEqual(plan[0], routeMutation{kind: routeMutationDisablePolicy, id: "policy-1"}) {
 		t.Fatalf("first route mutation = %#v, want policy disable", firstRouteMutation(plan))
 	}
 }
@@ -458,10 +458,10 @@ func TestBuildRouteDeletionPlanDisablesPolicyBeforeDeletingRules(t *testing.T) {
 	if len(plan) < 2 {
 		t.Fatalf("route deletion plan = %#v, want policy disable and rule deletion", plan)
 	}
-	if plan[0] != (routeMutation{kind: routeMutationDisablePolicy, id: "policy-1"}) {
+	if !reflect.DeepEqual(plan[0], routeMutation{kind: routeMutationDisablePolicy, id: "policy-1"}) {
 		t.Fatalf("first route deletion = %#v, want policy disable", plan[0])
 	}
-	if plan[1] != (routeMutation{kind: routeMutationDeleteRule, id: "rule-path", parentID: "policy-1"}) {
+	if !reflect.DeepEqual(plan[1], routeMutation{kind: routeMutationDeleteRule, id: "rule-path", parentID: "policy-1"}) {
 		t.Fatalf("second route deletion = %#v, want path rule deletion", plan[1])
 	}
 }
@@ -540,4 +540,97 @@ func TestMemberProviderIdentityDoesNotChangeOctaviaMembership(t *testing.T) {
 	if len(plan) != 0 {
 		t.Fatalf("provider identity changed a converged member: %#v", plan)
 	}
+}
+
+func TestHeaderDriftKeepsTheForwardingPredicateProved(t *testing.T) {
+	route, actual := convergedRoutePlanFixture()
+	route.policies[0].requestHeaderOperations = []cloud.HTTPHeaderOperation{{Operation: cloud.HTTPHeaderSet, Name: "x-color", Value: "blue"}}
+	policy := &actual.policies[0]
+	policy.adminObserved, policy.policy.ProvisioningStatus = true, "ACTIVE"
+	for i := range policy.rules {
+		policy.rules[i].flagsObserved, policy.rules[i].rule.ProvisioningStatus = true, "ACTIVE"
+	}
+	if !observedForwardPolicyMatches(route, actual, *policy) {
+		t.Fatal("header-only drift must not make a neighboring redirect withdraw a proved forwarding predicate")
+	}
+	plan, disables, _ := buildRoutePolicyPlan(route, actual.policies, actual.pool.ID)
+	if len(disables) != 0 || len(plan) != 1 || plan[0].kind != routeMutationSetPolicyHeaders {
+		t.Fatalf("expected an independent header repair: plan=%#v disables=%#v", plan, disables)
+	}
+}
+
+func TestFirstHeaderModifierStagesOnlyItsOwnRoute(t *testing.T) {
+	ordinary, old := convergedRoutePlanFixture()
+	replacement, prepared := convergedRoutePlanFixture()
+	old.policies[0].policy.ListenerID = "listener-1"
+	old.policies[0].policy.ProvisioningStatus, old.policies[0].adminObserved = "ACTIVE", true
+	old.policies[0].rules[0].rule.ProvisioningStatus, old.policies[0].rules[0].flagsObserved = "ACTIVE", true
+	replacement.backendKey = "preview"
+	replacement.policies[0].role = "preview-path"
+	replacement.policies[0].requestHeaderOperations = []cloud.HTTPHeaderOperation{{Operation: cloud.HTTPHeaderSet, Name: "x-color", Value: "blue"}}
+	prepared.pool.ID, prepared.pool.ProvisioningStatus = "preview-pool", "ACTIVE"
+	prepared.members[0].ProvisioningStatus, prepared.monitor.ProvisioningStatus = "ACTIVE", "ACTIVE"
+	prepared.policies = nil
+	old.httpParts = map[string]*observedRouteGraph{replacement.backendKey: &prepared}
+	desired, actual := fixedHTTPPlanFixture(desiredRoute{spec: ordinary.spec, httpParts: []desiredRoute{replacement}}, old)
+	desired.fixedHTTPResponses = false
+	actual.protocol = cloud.ListenerProtocolHTTP
+
+	redirect, err := (&Provider{projectID: "project-a"}).buildDesiredGatewayGraph(redirectGraphSpec(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	redirectPart := redirect.routes[0].httpParts[0]
+	wanted := redirectPart.policies[0]
+	redirectPolicy := observedRoutePolicy{
+		role: wanted.role, versioned: true, redirect: true, adminObserved: true,
+		policy: l7policies.L7Policy{ID: "redirect", ListenerID: "listener-1", Position: 2, AdminStateUp: true,
+			ProvisioningStatus: "ACTIVE", Action: "REDIRECT_PREFIX", RedirectPrefix: wanted.redirect.prefix, RedirectHttpCode: wanted.redirect.statusCode},
+	}
+	for _, rule := range rulesFor(wanted, "") {
+		redirectPolicy.rules = append(redirectPolicy.rules, observedRouteRule{role: rule.role, flagsObserved: true,
+			rule: l7policies.Rule{RuleType: string(rule.ruleType), CompareType: string(rule.compareType), Value: rule.value,
+				AdminStateUp: true, Invert: rule.invert, ProvisioningStatus: "ACTIVE"}})
+	}
+	desired.routes = append(desired.routes, redirect.routes[0])
+	desired.spec.Routes = append(desired.spec.Routes, redirect.spec.Routes[0])
+	actual.routes = append(actual.routes, observedRouteGraph{httpParts: map[string]*observedRouteGraph{
+		redirectPart.backendKey: {policies: []observedRoutePolicy{redirectPolicy}},
+	}})
+
+	planned := func(kind routeMutationKind, id string) graphMutation {
+		t.Helper()
+		plan, _, err := (&Provider{}).buildGatewayGraphPlan(desired, actual)
+		if err != nil || len(plan) == 0 || plan[0].route.kind != kind || plan[0].route.id != id {
+			t.Fatalf("wrong handover mutation after readback: %+v, %v", plan, err)
+		}
+		for _, step := range plan {
+			if step.kind == graphRouteMutation && (step.route.id == "redirect" ||
+				step.route.id == "policy-1" && kind != routeMutationDisablePolicy) {
+				t.Fatalf("the old forward or unrelated redirect would stop before the replacement is ready: %+v", step)
+			}
+		}
+		return plan[0]
+	}
+	stage := planned(routeMutationCreatePolicy, "")
+	if stage.backendKey != "preview" || stage.route.policy.position != 1 || len(stage.route.requestHeaderOperations) != 1 {
+		t.Fatalf("stage the filtered policy ahead of the existing predicate: %+v", stage)
+	}
+	old.policies[0].policy.Position++
+	actual.routes[1].httpParts[redirectPart.backendKey].policies[0].policy.Position++
+	prepared.policies = []observedRoutePolicy{{
+		role: replacement.policies[0].role, adminObserved: true,
+		requestHeaderOperations: replacement.policies[0].requestHeaderOperations,
+		policy: l7policies.L7Policy{ID: "preview-policy", ListenerID: "listener-1", Position: 1,
+			Action: string(l7policies.ActionRedirectToPool), RedirectPoolID: prepared.pool.ID, ProvisioningStatus: "ACTIVE"},
+	}}
+	planned(routeMutationCreateRule, "")
+	for _, rule := range rulesFor(replacement.policies[0], "") {
+		prepared.policies[0].rules = append(prepared.policies[0].rules, observedRouteRule{role: rule.role, flagsObserved: true,
+			rule: l7policies.Rule{RuleType: string(rule.ruleType), CompareType: string(rule.compareType), Value: rule.value,
+				AdminStateUp: true, ProvisioningStatus: "ACTIVE"}})
+	}
+	planned(routeMutationEnablePolicy, "preview-policy")
+	prepared.policies[0].policy.AdminStateUp = true
+	planned(routeMutationDisablePolicy, "policy-1")
 }

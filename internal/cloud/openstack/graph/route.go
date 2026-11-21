@@ -34,17 +34,18 @@ import (
 const maxOctaviaMemberWeight = 256
 
 type desiredPolicy struct {
-	role              string
-	position          int32
-	compareType       l7policies.CompareType
-	path              string
-	precedence        int
-	backendKey        string
-	matchKey          string
-	hostnameRuleValue string
-	redirect          *desiredRedirectPolicy
-	weighted          bool
-	weightedPlan      *weightedHTTPPolicyPlan
+	role                    string
+	position                int32
+	compareType             l7policies.CompareType
+	path                    string
+	precedence              int
+	backendKey              string
+	matchKey                string
+	hostnameRuleValue       string
+	redirect                *desiredRedirectPolicy
+	weighted                bool
+	weightedPlan            *weightedHTTPPolicyPlan
+	requestHeaderOperations []cloud.HTTPHeaderOperation
 }
 
 type desiredRule struct {
@@ -273,7 +274,7 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 				return invalid(err)
 			}
 		}
-		if err := part.buildHTTPMatchPolicies(backend.Matches); err != nil {
+		if err := p.buildHTTPMatchPolicies(&part, backend.Matches); err != nil {
 			return invalid(err)
 		}
 		route.httpParts = append(route.httpParts, part)
@@ -312,7 +313,7 @@ func (p *Provider) buildDesiredFixedHTTPParts(spec cloud.RouteSpec) ([]desiredRo
 			return nil, err
 		}
 		part.fixedResponse = true
-		if err := part.buildHTTPMatchPolicies(rule.Matches); err != nil {
+		if err := p.buildHTTPMatchPolicies(&part, rule.Matches); err != nil {
 			return invalid(err)
 		}
 		parts = append(parts, part)
@@ -320,7 +321,7 @@ func (p *Provider) buildDesiredFixedHTTPParts(spec cloud.RouteSpec) ([]desiredRo
 	return parts, nil
 }
 
-func (r *desiredRoute) buildHTTPMatchPolicies(matches []cloud.HTTPPathMatch) error {
+func (p *Provider) buildHTTPMatchPolicies(r *desiredRoute, matches []cloud.HTTPPathMatch) error {
 	matchKeys := make(map[string]bool, len(matches))
 	for _, match := range matches {
 		match = normalizeGroupedHTTPMatch(match)
@@ -333,10 +334,21 @@ func (r *desiredRoute) buildHTTPMatchPolicies(matches []cloud.HTTPPathMatch) err
 			return errors.New("duplicate HTTP match within one backend or weighted rule")
 		}
 		matchKeys[matchKey] = true
+		operations, err := cloud.NormalizeHTTPHeaderOperations(match.RequestHeaderOperations)
+		if err != nil {
+			return err
+		}
+		if len(operations) != 0 && !p.requestHeaderModifier {
+			return errors.New("Octavia request header operations require controller opt-in")
+		}
+		if r.fixedResponse {
+			operations = nil
+		}
 		for _, policy := range policies {
 			policy.backendKey, policy.matchKey = r.backendKey, matchKey
 			policy.hostnameRuleValue, policy.precedence = hostnameRuleValue, match.Precedence
 			policy.weighted = r.weightedTargets != nil
+			policy.requestHeaderOperations = operations
 			policy.role = policyRuleRole(policy, policy.role, "")
 			if _, err := r.identity.RouteTags(policy.role); err != nil {
 				return err
