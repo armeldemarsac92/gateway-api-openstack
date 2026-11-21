@@ -207,3 +207,52 @@ func TestHTTPPolicyDescriptionFitsOctaviaAndPreservesMatchIdentity(t *testing.T)
 		t.Fatal("policy description must identify its original owner and match")
 	}
 }
+
+func TestHTTPRedirectDescriptionsFitOctaviaAndPreserveMatchIdentity(t *testing.T) {
+	id, err := NewIdentity(cloud.Identity{
+		OpenStackProjectID: "project", ClusterID: "cluster", Controller: "gateway.example.test",
+		GatewayNamespace: "infra", GatewayName: "edge", GatewayUID: "gateway-uid",
+		RouteNamespace: "apps", RouteName: "redirects", RouteUID: "route-uid",
+		ControllerVersion: "0665660e81b64da8a5d456d573e1932d23a8dffc",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		base  string
+		guard string
+	}{
+		{base: RolePolicyExact},
+		{base: RolePolicyPrefix},
+		{base: RoleRuleRedirectGuard, guard: HTTPRedirectKey("PATH", "EQUAL_TO", "/forward")},
+	} {
+		t.Run(test.base, func(t *testing.T) {
+			roleFor := func(path string) string {
+				match := HTTPMatchKey("", cloud.PathMatchPrefix, path)
+				cell := HTTPRedirectKey(match, "", test.base)
+				return HTTPRedirectRole(test.base, match, cell, test.guard)
+			}
+			role := roleFor("/hostname-redirect")
+			other := roleFor("/host-and-status")
+			description := id.Description(role)
+			if len(description) > 255 {
+				t.Errorf("Octavia description is %d bytes, limit 255", len(description))
+			}
+			_, displayRole, _ := strings.Cut(description, "; role=")
+			wantDisplay := encode(test.base) + "; controller-version=" + encode(id.Value().ControllerVersion)
+			if displayRole != wantDisplay {
+				t.Errorf("description display role and version = %q, want %q", displayRole, wantDisplay)
+			}
+			if !id.MatchesDescription(description, role) || id.MatchesDescription(description, other) {
+				t.Error("description must distinguish redirects with the same display role")
+			}
+			tags, err := id.RouteTags(role)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, ok := ResourceRole(tags); !ok || got != role {
+				t.Errorf("role tag = %q, want full redirect role %q", got, role)
+			}
+		})
+	}
+}
