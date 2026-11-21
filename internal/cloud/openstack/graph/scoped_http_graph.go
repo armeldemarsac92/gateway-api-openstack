@@ -310,6 +310,7 @@ func deferredScopedHTTPRoutes(desired desiredGatewayGraph, actual observedGatewa
 		route := desired.routes[i]
 		port := scopedHTTPRoutePort(route)
 		if desired.spec.Routes[i].Disposition != cloud.GraphEnsure || !slices.Contains(readyPorts, port) || route.targetsPending ||
+			route.backendTransportNeedsWithdrawal(observed) ||
 			!route.fixedResponse && observed.backendProvisioningIssue(false, true) != "" {
 			continue
 		}

@@ -702,6 +702,7 @@ type routeMutation struct {
 	retry                   bool
 	clearPoolPersistence    bool
 	backendH2C              *bool
+	reenableH2CPool         bool
 	clearMemberBackup       bool
 	withdrawHTTPPolicy      bool
 	weightedTargets         *[]octavia.WeightedHTTPTarget
@@ -757,6 +758,15 @@ func (s routeMutation) message() string {
 	}
 }
 
+func (r desiredRoute) h2cTLSConflict(observed observedRouteGraph) bool {
+	return !r.fixedResponse && r.spec.BackendH2C && observed.pool != nil && observed.pool.TLSEnabled
+}
+
+func (r desiredRoute) backendTransportNeedsWithdrawal(observed observedRouteGraph) bool {
+	return !r.fixedResponse && observed.pool != nil &&
+		(r.spec.BackendH2C != observed.backendH2C || r.h2cTLSConflict(observed))
+}
+
 func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]routeMutation, cloud.RouteState, error) {
 	nonPolicyPlan := make([]routeMutation, 0)
 	state := cloud.RouteState{}
@@ -786,6 +796,19 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 		if pool.Protocol != desired.protocol() {
 			return nil, cloud.RouteState{}, fmt.Errorf("%w: pool %s has protocol %s", cloud.ErrOwnershipConflict, pool.ID, pool.Protocol)
 		}
+		if desired.backendTransportNeedsWithdrawal(actual) {
+			if desired.protocol() != cloud.ListenerProtocolHTTP {
+				return nil, state, fmt.Errorf("%w: non-HTTP pool %s reports h2c", cloud.ErrOwnershipConflict, pool.ID)
+			}
+			// Keep the predicate in place and wait for an independent read of
+			// the new transport before planning any traffic restoration.
+			state = routeStateFromObservation(actual)
+			steps, hold := httpMemberWithdrawal(actual)
+			if len(steps) != 0 || hold != "" || desired.h2cTLSConflict(actual) {
+				return steps, state, nil
+			}
+			return []routeMutation{{kind: routeMutationUpdatePool, id: pool.ID, backendH2C: boolPointer(desired.spec.BackendH2C)}}, state, nil
+		}
 		if desired.unavailable {
 			state = routeStateFromObservation(actual)
 			if steps, hold := httpMemberWithdrawal(actual); len(steps) != 0 || hold != "" {
@@ -794,23 +817,11 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 		}
 		clearPersistence := pool.Persistence != (pools.SessionPersistence{}) &&
 			slices.ContainsFunc(desired.members, func(member cloud.Member) bool { return !member.Draining && member.Weight > 0 })
-		if desired.spec.BackendH2C && pool.TLSEnabled {
-			return nil, state, fmt.Errorf("%w: pool %s uses TLS and cannot forward cleartext HTTP/2", cloud.ErrOwnershipConflict, pool.ID)
-		}
-		var backendH2C *bool
-		if desired.spec.BackendH2C != actual.backendH2C {
-			if desired.protocol() != cloud.ListenerProtocolHTTP {
-				return nil, state, fmt.Errorf("%w: non-HTTP pool %s reports h2c", cloud.ErrOwnershipConflict, pool.ID)
-			}
-			// Keep the policy in place while withdrawing traffic from members
-			// that still speak the previously configured protocol.
-			if steps, hold := httpMemberWithdrawal(actual); len(steps) != 0 || hold != "" {
-				return steps, routeStateFromObservation(actual), nil
-			}
-			backendH2C = boolPointer(desired.spec.BackendH2C)
-		}
-		if pool.LBMethod != string(pools.LBMethodRoundRobin) || !pool.AdminStateUp || clearPersistence || backendH2C != nil {
-			nonPolicyPlan = append(nonPolicyPlan, routeMutation{kind: routeMutationUpdatePool, id: pool.ID, clearPoolPersistence: clearPersistence, backendH2C: backendH2C})
+		if pool.LBMethod != string(pools.LBMethodRoundRobin) || !pool.AdminStateUp || clearPersistence {
+			nonPolicyPlan = append(nonPolicyPlan, routeMutation{
+				kind: routeMutationUpdatePool, id: pool.ID, clearPoolPersistence: clearPersistence,
+				reenableH2CPool: actual.backendH2C && !pool.AdminStateUp,
+			})
 		}
 
 		desiredMembers := make(map[string]cloud.Member, len(desired.members))
@@ -1099,9 +1110,9 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 		}
 		_, err = p.octavia.CreatePool(ctx, octavia.CreatePoolOpts{CreateOpts: opts, BackendH2C: desired.spec.BackendH2C})
 	case routeMutationUpdatePool:
-		opts := pools.UpdateOpts{
-			LBMethod:     pools.LBMethodRoundRobin,
-			AdminStateUp: boolPointer(true),
+		opts := pools.UpdateOpts{LBMethod: pools.LBMethodRoundRobin}
+		if step.backendH2C == nil {
+			opts.AdminStateUp = boolPointer(true)
 		}
 		if step.clearPoolPersistence {
 			// Gophercloud encodes a non-nil empty persistence as a JSON null.

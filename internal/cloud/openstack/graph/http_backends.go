@@ -116,6 +116,9 @@ func (p *Provider) buildHTTPRoutePartsGraphPlan(desired desiredGatewayGraph, act
 		if fragment.Result.Outcome.State != cloud.OutcomeReady {
 			combined.Outcome = fragment.Result.Outcome
 		}
+		if combined.UnsupportedBackendProtocol == "" {
+			combined.UnsupportedBackendProtocol = fragment.Result.UnsupportedBackendProtocol
+		}
 		old, state := &combined.State, fragment.Result.State
 		if part.backendKey == "" {
 			old.PoolID, old.MonitorID = state.PoolID, state.MonitorID
@@ -272,7 +275,8 @@ func (stage httpPolicyStage) plan(route desiredRoute, observed observedRouteGrap
 }
 
 func (stage httpPolicyStage) ready(route desiredRoute, observed observedRouteGraph) bool {
-	if stage.wanted.targetsPending() || len(stage.current) == 0 || !route.fixedResponse && observed.backendProvisioningIssue(false, true) != "" {
+	if stage.wanted.targetsPending() || len(stage.current) == 0 || route.backendTransportNeedsWithdrawal(observed) ||
+		!route.fixedResponse && observed.backendProvisioningIssue(false, true) != "" {
 		return false
 	}
 	current := stage.current[0]

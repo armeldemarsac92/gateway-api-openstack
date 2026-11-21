@@ -152,7 +152,7 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 		routeResult := cloud.RouteReadyResult(routeStateFromObservation(observed))
 		var routePlan []routeMutation
 		var backendIssue, ensureHold string
-		withdrawBackendTransport := observed.pool != nil && !route.fixedResponse && route.spec.BackendH2C != observed.backendH2C
+		withdrawBackendTransport := route.backendTransportNeedsWithdrawal(observed)
 		node := desired.spec.Routes[index]
 		port := scopedHTTPRoutePort(route)
 		var observedPort int
@@ -198,6 +198,13 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 			}
 			if withdrawBackendTransport && len(routePlan) == 0 {
 				_, ensureHold = httpMemberWithdrawal(observed)
+				canRestoreTraffic = canRestoreTraffic && ensureHold == ""
+			}
+			if route.h2cTLSConflict(observed) {
+				routeResult.UnsupportedBackendProtocol = "Octavia pool uses TLS, which prevents cleartext HTTP/2"
+				if ensureHold == "" {
+					ensureHold = routeResult.UnsupportedBackendProtocol
+				}
 			}
 			if actual.loadBalancer == nil || !scopedHTTP && actual.listener == nil || scopedHTTP && listenerID == "" {
 				// The desired route has been validated, but its resources cannot
@@ -633,16 +640,24 @@ func (p *Provider) prepareNextGraphMutation(ctx context.Context, desired desired
 		message := "Waiting for Octavia to advertise " + blocked.capability
 		route := &result.Routes[step.routeIndex].Result
 		route.Outcome = p.progressingOutcome(message)
-		if blocked.unsupportedBackendProtocol {
+		if blocked.unsupportedBackendProtocol && route.UnsupportedBackendProtocol == "" {
 			route.UnsupportedBackendProtocol = message
 		}
 	}
 	recordBlocked(first, blocked)
 	result.Outcome = result.Routes[first.routeIndex].Result.Outcome
+	seen := map[poolRouteOwner]bool{{route: first.routeIndex, backend: first.backendKey}: true}
 	for _, sibling := range plan[1:] {
-		if sibling.kind != graphRouteMutation || sibling.routeIndex == first.routeIndex {
+		if sibling.kind != graphRouteMutation {
 			continue
 		}
+		owner := poolRouteOwner{route: sibling.routeIndex, backend: sibling.backendKey}
+		if seen[owner] {
+			continue
+		}
+		// Each pool can contribute only its first planned action. Subsequent
+		// actions may rely on a write whose result has yet to be observed.
+		seen[owner] = true
 		switch sibling.route.kind {
 		case routeMutationCreatePool, routeMutationUpdatePool, routeMutationCreateMember, routeMutationUpdateMember:
 			// The complete graph ties each of these pools to its own route.
@@ -672,7 +687,8 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 	case graphRouteMutation:
 		part := graphRoutePart(desired, step)
 		fixed = fixed && routeNeedsHTTPCapability(part, step.route)
-		if step.route.backendH2C != nil || step.route.kind == routeMutationCreatePool && part.spec.BackendH2C {
+		if step.route.reenableH2CPool || step.route.backendH2C != nil && *step.route.backendH2C ||
+			step.route.kind == routeMutationCreatePool && part.spec.BackendH2C {
 			required = append(required, octavia.GatewayCapabilityBackendH2C)
 		}
 		if len(step.route.requestHeaderOperations) != 0 {

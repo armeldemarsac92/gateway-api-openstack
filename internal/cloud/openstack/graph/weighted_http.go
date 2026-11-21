@@ -217,6 +217,9 @@ func weightedBackendReady(route desiredRoute, key string, observed observedRoute
 		return false
 	}
 	backend := route.httpParts[index]
+	if backend.backendTransportNeedsWithdrawal(observed) {
+		return false
+	}
 	backend.policies, observed.policies = nil, nil
 	steps, _, err := buildRouteEnsurePlan(backend, observed)
 	if _, hold := httpMemberWithdrawal(observed); backend.unavailable && hold != "" {
