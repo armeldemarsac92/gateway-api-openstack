@@ -36,6 +36,9 @@ type GatewayGraphSpec struct {
 	Identity Identity
 	Gateway  GatewayGraphNode
 	Routes   []RouteGraphNode
+	// ValidateMutation rechecks the request-local authority after cloud reads
+	// and planning, immediately before the provider sends a mutation.
+	ValidateMutation func(context.Context) error `json:"-"`
 }
 
 // GatewayGraphNode describes the Gateway component. Spec is required for Ensure.

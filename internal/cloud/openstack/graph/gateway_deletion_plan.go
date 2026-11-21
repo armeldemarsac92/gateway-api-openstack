@@ -309,7 +309,7 @@ func (p *Provider) buildGatewayMonitorDeletionPlan(ctx context.Context, identity
 }
 
 func (p *Provider) buildGatewayMemberDeletionPlan(ctx context.Context, identity Identity, poolID string) (gatewayPoolDeletionPlan, error) {
-	memberList, err := p.octavia.ListMembers(ctx, poolID, pools.ListMembersOpts{ProjectID: p.projectID})
+	memberList, err := p.octavia.ListCompleteMembers(ctx, poolID, pools.ListMembersOpts{ProjectID: p.projectID})
 	if err != nil {
 		return nil, fmt.Errorf("list members beneath pool %s before Gateway deletion: %w", poolID, err)
 	}

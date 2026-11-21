@@ -153,7 +153,11 @@ func (w *Writer) ReconcileGraph(ctx context.Context, request Request) (cloud.Gat
 	identity := request.Identity
 	identity.RouteNamespace, identity.RouteName, identity.RouteUID = "", "", ""
 	started = time.Now()
-	result, err := w.Provider.ReconcileGatewayGraph(ctx, cloud.GatewayGraphSpec{Identity: identity, Gateway: gateway.Node, Routes: routes.Nodes})
+	spec := cloud.GatewayGraphSpec{Identity: identity, Gateway: gateway.Node, Routes: routes.Nodes}
+	if gateway.Validate != nil || routes.Validate != nil {
+		spec.ValidateMutation = func(ctx context.Context) error { return validateInputs(ctx, gateway, routes) }
+	}
+	result, err := w.Provider.ReconcileGatewayGraph(ctx, spec)
 	if err == nil {
 		if outcomeErr := result.Outcome.Validate(); outcomeErr != nil {
 			err = fmt.Errorf("validate Gateway graph outcome: %w", outcomeErr)

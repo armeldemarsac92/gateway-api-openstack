@@ -149,6 +149,11 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		return result, nil
 	}
 	step := plan[0]
+	if spec.ValidateMutation != nil {
+		if err := spec.ValidateMutation(ctx); err != nil {
+			return cloud.GatewayGraphResult{}, err
+		}
+	}
 	if err := p.executeGraphMutation(ctx, desired, actual, step); err != nil {
 		if step.kind == graphRouteMutation {
 			return result, &cloud.GraphError{Identity: desired.routes[step.routeIndex].spec.Identity, Err: err}

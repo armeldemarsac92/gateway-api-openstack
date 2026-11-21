@@ -43,7 +43,7 @@ func (p *Provider) listGatewayListeners(ctx context.Context, lb *octavia.LoadBal
 }
 
 func (p *Provider) listGatewayPools(ctx context.Context, lb *octavia.LoadBalancer) ([]pools.Pool, error) {
-	items, err := p.octavia.ListPools(ctx, pools.ListOpts{LoadbalancerID: lb.ID, ProjectID: p.projectID})
+	items, err := p.octavia.ListCompletePools(ctx, pools.ListOpts{LoadbalancerID: lb.ID, ProjectID: p.projectID})
 	if err != nil {
 		return nil, fmt.Errorf("list pools beneath Gateway: %w", err)
 	}

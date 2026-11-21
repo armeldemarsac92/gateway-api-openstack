@@ -267,7 +267,7 @@ func (p *Provider) observeRoutePoolChildren(ctx context.Context, identity Identi
 	if graph.pool.Protocol == cloud.ListenerProtocolTCP {
 		graph.members, graph.memberBackupUnreported, err = p.octavia.ListMembersWithBackup(ctx, graph.pool.ID, opts)
 	} else {
-		graph.members, err = p.octavia.ListMembers(ctx, graph.pool.ID, opts)
+		graph.members, err = p.octavia.ListCompleteMembers(ctx, graph.pool.ID, opts)
 	}
 	if err != nil {
 		return fmt.Errorf("list route pool members: %w", err)
