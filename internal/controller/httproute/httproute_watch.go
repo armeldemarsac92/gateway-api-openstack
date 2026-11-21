@@ -34,6 +34,8 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/routebackend"
 )
 
 func (r *Reconciler) enqueueHTTPRoutePeers(ctx context.Context, object client.Object) []reconcile.Request {
@@ -60,8 +62,26 @@ func (r *Reconciler) enqueueHTTPRoutesForGateway(ctx context.Context, object cli
 	if !ok {
 		return nil
 	}
-	gatewayKey := controller.ObjectKeyString(client.ObjectKeyFromObject(gateway))
 	keys := map[types.NamespacedName]struct{}{}
+	r.addHTTPRoutesForGateway(ctx, gateway, keys)
+	return controller.SortedRequests(keys)
+}
+
+func (r *Reconciler) enqueueHTTPRoutesForGatewayClass(ctx context.Context, object client.Object) []reconcile.Request {
+	var gateways gatewayv1.GatewayList
+	if err := r.List(ctx, &gateways, client.MatchingFields{controller.IndexGatewayByClass: object.GetName()}); err != nil {
+		log.FromContext(ctx).Error(err, "Could not list Gateways for GatewayClass", "gatewayClass", object.GetName())
+		return nil
+	}
+	keys := map[types.NamespacedName]struct{}{}
+	for i := range gateways.Items {
+		r.addHTTPRoutesForGateway(ctx, &gateways.Items[i], keys)
+	}
+	return controller.SortedRequests(keys)
+}
+
+func (r *Reconciler) addHTTPRoutesForGateway(ctx context.Context, gateway *gatewayv1.Gateway, keys map[types.NamespacedName]struct{}) {
+	gatewayKey := controller.ObjectKeyString(client.ObjectKeyFromObject(gateway))
 	for _, indexName := range []string{controller.IndexHTTPRouteByParentGateway, controller.IndexHTTPRouteByStatusGateway, controller.IndexHTTPRouteByBoundGateway} {
 		var routes gatewayv1.HTTPRouteList
 		if err := r.List(ctx, &routes, client.MatchingFields{indexName: gatewayKey}); err != nil {
@@ -72,7 +92,6 @@ func (r *Reconciler) enqueueHTTPRoutesForGateway(ctx context.Context, object cli
 			keys[client.ObjectKeyFromObject(&routes.Items[index])] = struct{}{}
 		}
 	}
-	return controller.SortedRequests(keys)
 }
 
 func (r *Reconciler) enqueueHTTPRoutesForServiceKey(ctx context.Context, serviceKey types.NamespacedName) []reconcile.Request {
@@ -86,8 +105,7 @@ func (r *Reconciler) enqueueHTTPRoutesForServiceKey(ctx context.Context, service
 	return r.enqueueHTTPRouteConsumers(ctx, direct.Items)
 }
 
-// enqueueHTTPRouteConsumers includes contenders because a dependency change can
-// change the selected route for every parent shared by a direct consumer.
+// A backend change can alter which bound fragments the shared listener can program.
 func (r *Reconciler) enqueueHTTPRouteConsumers(ctx context.Context, routes []gatewayv1.HTTPRoute) []reconcile.Request {
 	keys := map[types.NamespacedName]struct{}{}
 	observedParents := map[string]struct{}{}
@@ -98,12 +116,12 @@ func (r *Reconciler) enqueueHTTPRouteConsumers(ctx context.Context, routes []gat
 			if _, observed := observedParents[gatewayKey]; observed {
 				continue
 			}
-			// Contenders sharing a parent need one indexed read per event,
+			// Routes sharing a parent need one indexed read per event,
 			// including when that read fails. Later events observe it again.
 			observedParents[gatewayKey] = struct{}{}
 			var peers gatewayv1.HTTPRouteList
 			if err := r.List(ctx, &peers, client.MatchingFields{controller.IndexHTTPRouteByParentGateway: gatewayKey}); err != nil {
-				log.FromContext(ctx).Error(err, "Could not list HTTPRoute contenders", "gateway", gatewayKey)
+				log.FromContext(ctx).Error(err, "Could not list HTTPRoutes sharing a Gateway", "gateway", gatewayKey)
 				continue
 			}
 			for peerIndex := range peers.Items {
@@ -144,7 +162,8 @@ func (r *Reconciler) enqueueHTTPRoutesForNode(ctx context.Context, object client
 	}
 	for index := range routes.Items {
 		route := &routes.Items[index]
-		if !structurallySupportedRoute(route) {
+		backends, err := validateRouteStructure(route)
+		if err != nil {
 			continue
 		}
 		managed, err := inputs.hasNodePortParent(ctx, r, route)
@@ -155,29 +174,36 @@ func (r *Reconciler) enqueueHTTPRoutesForNode(ctx context.Context, object client
 		if !managed {
 			continue
 		}
-		backend := route.Spec.Rules[0].BackendRefs[0]
-		serviceKey := types.NamespacedName{Namespace: route.Namespace, Name: string(backend.Name)}
-		service, err := inputs.service(ctx, r.Client, serviceKey)
-		if err != nil {
-			if !apierrors.IsNotFound(err) {
-				log.FromContext(ctx).Error(err, "Could not get backend Service for Node", "service", serviceKey, "node", node.Name)
+		for _, backend := range backends {
+			serviceKey, _ := model.BackendServiceReference(route.Namespace, backend)
+			if serviceKey.Namespace != route.Namespace {
+				// Let reconciliation check the live grant before reading this Service.
+				keys[client.ObjectKeyFromObject(route)] = struct{}{}
+				break
 			}
-			continue
-		}
-		if service.Spec.Type != corev1.ServiceTypeNodePort {
-			continue
-		}
-		if service.Spec.ExternalTrafficPolicy == corev1.ServiceExternalTrafficPolicyLocal {
-			local, err := inputs.hasReadyEndpoint(ctx, r, serviceKey, node.Name)
+			service, err := inputs.service(ctx, r.Client, serviceKey)
 			if err != nil {
-				log.FromContext(ctx).Error(err, "Could not list local endpoints for Node", "service", serviceKey, "node", node.Name)
+				if !apierrors.IsNotFound(err) {
+					log.FromContext(ctx).Error(err, "Could not get backend Service for Node", "service", serviceKey, "node", node.Name)
+				}
 				continue
 			}
-			if !local {
+			if service.Spec.Type != corev1.ServiceTypeNodePort {
 				continue
 			}
+			if service.Spec.ExternalTrafficPolicy == corev1.ServiceExternalTrafficPolicyLocal {
+				local, err := inputs.hasReadyEndpoint(ctx, r, serviceKey, node.Name)
+				if err != nil {
+					log.FromContext(ctx).Error(err, "Could not list local endpoints for Node", "service", serviceKey, "node", node.Name)
+					continue
+				}
+				if !local {
+					continue
+				}
+			}
+			keys[client.ObjectKeyFromObject(route)] = struct{}{}
+			break
 		}
-		keys[client.ObjectKeyFromObject(route)] = struct{}{}
 	}
 	return controller.SortedRequests(keys)
 }
@@ -191,7 +217,7 @@ func (r *Reconciler) nodeHasReadyEndpoint(ctx context.Context, serviceKey types.
 	}
 	for _, slice := range slices.Items {
 		for _, endpoint := range slice.Endpoints {
-			if endpoint.NodeName != nil && *endpoint.NodeName == nodeName && endpointReady(endpoint.Conditions) {
+			if endpoint.NodeName != nil && *endpoint.NodeName == nodeName && routebackend.EndpointReady(endpoint.Conditions) {
 				return true, nil
 			}
 		}
@@ -212,11 +238,10 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 	}
 	return ctrl.NewControllerManagedBy(manager).
 		For(&gatewayv1.HTTPRoute{}, builder.WithPredicates(controller.HTTPRouteReconcilePredicate(r.Config))).
-		// A create, spec change, or completed deletion can change the sole
-		// selected route for a Gateway. Requeue routes for the same
-		// parent Gateway and ignore status updates made by this controller.
+		// A changed route can alter the precedence of its peers on the same listener.
 		Watches(&gatewayv1.HTTPRoute{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutePeers), builder.WithPredicates(controller.HTTPRoutePeerPredicate())).
 		Watches(&gatewayv1.Gateway{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForGateway), builder.WithPredicates(controller.GatewayForHTTPRoutePredicate(r.Config))).
+		Watches(&gatewayv1.GatewayClass{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForGatewayClass), builder.WithPredicates(controller.GatewayClassForGatewayPredicate())).
 		Watches(&corev1.Service{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForService), builder.WithPredicates(controller.ServicePredicate())).
 		Watches(&discoveryv1.EndpointSlice{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForEndpointSlice), builder.WithPredicates(controller.EndpointSlicePredicate())).
 		Watches(&gatewayv1.ReferenceGrant{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForReferenceGrant), builder.WithPredicates(controller.GenerationOrDeletionChangedPredicate())).

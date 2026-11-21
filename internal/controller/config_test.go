@@ -59,6 +59,7 @@ func TestConfigValidateRejectsUnsupportedOrAmbiguousValues(t *testing.T) {
 		mutate func(*Config)
 	}{
 		{name: "invalid controller name", mutate: func(cfg *Config) { cfg.ControllerName = "NOT_A_DOMAIN/controller" }},
+		{name: "unknown Gateway API channel", mutate: func(cfg *Config) { cfg.GatewayAPIChannel = "nightly" }},
 		{name: "missing cluster identity", mutate: func(cfg *Config) { cfg.ClusterID = "" }},
 		{name: "disabled OpenStack resync", mutate: func(cfg *Config) { cfg.OpenStackResyncInterval = 0 }},
 		{name: "negative OpenStack resync", mutate: func(cfg *Config) { cfg.OpenStackResyncInterval = -time.Minute }},

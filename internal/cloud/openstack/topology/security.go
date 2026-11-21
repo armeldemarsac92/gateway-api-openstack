@@ -143,8 +143,13 @@ func (r *Resolver) ValidateGatewaySecurity(ctx context.Context, gateway cloud.Ga
 		if err != nil {
 			return err
 		}
-		if !allowsTCPIngress(frontend, subnet.IPVersion, gateway.ListenerPort) {
+		if len(gateway.ScopedListeners) == 0 && !allowsIngress(frontend, gateway.ListenerProtocol, subnet.IPVersion, gateway.ListenerPort) {
 			return invalid("referenced frontend groups do not allow the listener protocol and port for the VIP IP family")
+		}
+		for _, listener := range gateway.ScopedListeners {
+			if !allowsIngress(frontend, gateway.ListenerProtocol, subnet.IPVersion, listener.Port) {
+				return invalid(fmt.Sprintf("referenced frontend groups do not allow %s port %d for the VIP IP family", gateway.ListenerProtocol, listener.Port))
+			}
 		}
 	}
 	for _, route := range routes {
@@ -164,7 +169,7 @@ func (r *Resolver) ValidateGatewaySecurity(ctx context.Context, gateway cloud.Ga
 			if address.Is4() {
 				family = 4
 			}
-			if !allowsTCPIngress(backend, family, member.Port) {
+			if !allowsIngress(backend, route.GatewayRequirements.ListenerProtocol, family, member.Port) {
 				return &cloud.GraphError{Identity: route.Identity, Err: invalid("referenced backend groups do not allow the member protocol and port for its IP family")}
 			}
 			if err := r.ValidateMemberPort(ctx, member.ProviderID, member.Address, route.MemberSubnetID, route.BackendSecurityGroupIDs); err != nil {
@@ -175,7 +180,16 @@ func (r *Resolver) ValidateGatewaySecurity(ctx context.Context, gateway cloud.Ga
 	return nil
 }
 
-func allowsTCPIngress(securityGroups []groups.SecGroup, family, port int) bool {
+func allowsIngress(securityGroups []groups.SecGroup, listenerProtocol string, family, port int) bool {
+	var protocol, protocolNumber string
+	switch cloud.NormalizeListenerProtocol(listenerProtocol) {
+	case cloud.ListenerProtocolHTTP, cloud.ListenerProtocolTCP:
+		protocol, protocolNumber = "tcp", "6"
+	case cloud.ListenerProtocolUDP:
+		protocol, protocolNumber = "udp", "17"
+	default:
+		return false
+	}
 	etherType := "IPv6"
 	if family == 4 {
 		etherType = "IPv4"
@@ -185,7 +199,7 @@ func allowsTCPIngress(securityGroups []groups.SecGroup, family, port int) bool {
 			if rule.Direction != "ingress" || rule.EtherType != etherType {
 				continue
 			}
-			if rule.Protocol != "" && rule.Protocol != "tcp" && rule.Protocol != "6" {
+			if rule.Protocol != "" && rule.Protocol != protocol && rule.Protocol != protocolNumber {
 				continue
 			}
 			if rule.RemoteIPPrefix != "" {

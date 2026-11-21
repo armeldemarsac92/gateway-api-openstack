@@ -95,6 +95,11 @@ func (e *providerReconcileError) Unwrap() error {
 // ProviderProgressRequeueAfter returns a bounded, stable retry interval for an
 // asynchronous provider operation.
 func ProviderProgressRequeueAfter(outcome cloud.Outcome, uid types.UID) time.Duration {
+	if outcome.MutationSubmitted && outcome.State == cloud.OutcomeProgressing {
+		// A slow async operation falls back to the normal interval on the next
+		// read. Immediately applied operations can advance the remaining graph.
+		return min(250*time.Millisecond, max(100*time.Millisecond, outcome.RequeueAfter))
+	}
 	var interval time.Duration
 	switch {
 	case outcome.RequeueAfter <= 0:

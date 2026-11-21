@@ -23,6 +23,8 @@ import (
 	"testing"
 
 	ctrl "sigs.k8s.io/controller-runtime"
+
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 )
 
 func TestUnknownProviderFailuresAreRedacted(t *testing.T) {
@@ -30,7 +32,7 @@ func TestUnknownProviderFailuresAreRedacted(t *testing.T) {
 	cause := errors.New("response=private-body token=secret-token")
 	for name, handle := range map[string]func() (ctrl.Result, error){
 		"ensure": func() (ctrl.Result, error) {
-			return reconciler.handleGatewayProviderFailure(context.Background(), nil, nil, cause)
+			return reconciler.handleGatewayProviderFailure(context.Background(), nil, nil, cause, cloud.GatewayResult{})
 		},
 		"delete": func() (ctrl.Result, error) { return reconciler.handleGatewayDeleteFailure(nil, cause) },
 	} {

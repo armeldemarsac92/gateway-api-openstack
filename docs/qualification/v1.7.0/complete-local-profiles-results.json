@@ -1,0 +1,2144 @@
+{
+  "channels": {
+    "experimental": {
+      "gateway": {
+        "caseBodiesEntered": 0,
+        "cleanup": {
+          "gatewayGroupObjects": 0,
+          "oneKindCluster": true,
+          "openStackClassConfigs": 0,
+          "readyNodes": 2,
+          "testIPVSRules": 0,
+          "testVIPs": 0,
+          "upstreamFixtureNamespaces": 0
+        },
+        "code": 1,
+        "elapsedSeconds": 324.205,
+        "fixturesReadyCheckSeconds": 300,
+        "selection": {
+          "eligibleByProfile": {
+            "GATEWAY-GRPC": 30,
+            "GATEWAY-HTTP": 104,
+            "GATEWAY-TCP": 31,
+            "GATEWAY-TLS": 39,
+            "GATEWAY-UDP": 32
+          },
+          "eligibleCases": 145,
+          "eligibleOnlyThroughCombinedSelection": [
+            "HTTPRouteDisallowedKind"
+          ],
+          "excludedExtendedFeatures": [],
+          "profileNames": [
+            "GATEWAY-GRPC",
+            "GATEWAY-HTTP",
+            "GATEWAY-TCP",
+            "GATEWAY-TLS",
+            "GATEWAY-UDP"
+          ],
+          "selectedFeatureCount": 52
+        },
+        "sharedSetupCompleted": false,
+        "snapshot": {
+          "gateway_class": [
+            {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True",
+              "type": "Accepted"
+            },
+            {
+              "observedGeneration": 1,
+              "reason": "SupportedVersion",
+              "status": "True",
+              "type": "SupportedVersion"
+            }
+          ],
+          "gateway_class_supported_features": [],
+          "gateways": [
+            {
+              "conditions": [
+                {
+                  "observedGeneration": 1,
+                  "reason": "Accepted",
+                  "status": "True",
+                  "type": "Accepted"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "Programmed",
+                  "status": "True",
+                  "type": "Programmed"
+                }
+              ],
+              "declared_listeners": [
+                {
+                  "allowedRoutes": {
+                    "namespaces": {
+                      "from": "All"
+                    }
+                  },
+                  "name": "http",
+                  "port": 80,
+                  "protocol": "HTTP"
+                }
+              ],
+              "excluded_from_readiness": false,
+              "generation": 1,
+              "listener_status": {
+                "http": [
+                  {
+                    "observedGeneration": 1,
+                    "reason": "Accepted",
+                    "status": "True",
+                    "type": "Accepted"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "ResolvedRefs",
+                    "status": "True",
+                    "type": "ResolvedRefs"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "NoConflicts",
+                    "status": "False",
+                    "type": "Conflicted"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "Programmed",
+                    "status": "True",
+                    "type": "Programmed"
+                  }
+                ]
+              },
+              "name": "all-namespaces",
+              "namespace": "gateway-conformance-infra"
+            },
+            {
+              "conditions": [
+                {
+                  "observedGeneration": 1,
+                  "reason": "Accepted",
+                  "status": "True",
+                  "type": "Accepted"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "Programmed",
+                  "status": "True",
+                  "type": "Programmed"
+                }
+              ],
+              "declared_listeners": [
+                {
+                  "allowedRoutes": {
+                    "namespaces": {
+                      "from": "Selector",
+                      "selector": {
+                        "matchLabels": {
+                          "gateway-conformance": "backend"
+                        }
+                      }
+                    }
+                  },
+                  "name": "http",
+                  "port": 80,
+                  "protocol": "HTTP"
+                }
+              ],
+              "excluded_from_readiness": false,
+              "generation": 1,
+              "listener_status": {
+                "http": [
+                  {
+                    "observedGeneration": 1,
+                    "reason": "Accepted",
+                    "status": "True",
+                    "type": "Accepted"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "ResolvedRefs",
+                    "status": "True",
+                    "type": "ResolvedRefs"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "NoConflicts",
+                    "status": "False",
+                    "type": "Conflicted"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "Programmed",
+                    "status": "True",
+                    "type": "Programmed"
+                  }
+                ]
+              },
+              "name": "backend-namespaces",
+              "namespace": "gateway-conformance-infra"
+            },
+            {
+              "conditions": [
+                {
+                  "observedGeneration": 1,
+                  "reason": "Accepted",
+                  "status": "True",
+                  "type": "Accepted"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "Programmed",
+                  "status": "True",
+                  "type": "Programmed"
+                }
+              ],
+              "declared_listeners": [
+                {
+                  "allowedRoutes": {
+                    "namespaces": {
+                      "from": "Same"
+                    }
+                  },
+                  "name": "http",
+                  "port": 80,
+                  "protocol": "HTTP"
+                }
+              ],
+              "excluded_from_readiness": false,
+              "generation": 1,
+              "listener_status": {
+                "http": [
+                  {
+                    "observedGeneration": 1,
+                    "reason": "Accepted",
+                    "status": "True",
+                    "type": "Accepted"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "ResolvedRefs",
+                    "status": "True",
+                    "type": "ResolvedRefs"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "NoConflicts",
+                    "status": "False",
+                    "type": "Conflicted"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "Programmed",
+                    "status": "True",
+                    "type": "Programmed"
+                  }
+                ]
+              },
+              "name": "same-namespace",
+              "namespace": "gateway-conformance-infra"
+            },
+            {
+              "conditions": [
+                {
+                  "observedGeneration": 1,
+                  "reason": "ListenersNotValid",
+                  "status": "False",
+                  "type": "Accepted"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "Invalid",
+                  "status": "False",
+                  "type": "Programmed"
+                }
+              ],
+              "declared_listeners": [
+                {
+                  "allowedRoutes": {
+                    "namespaces": {
+                      "from": "Same"
+                    }
+                  },
+                  "name": "https",
+                  "port": 443,
+                  "protocol": "HTTPS",
+                  "tls": {
+                    "certificateRefs": [
+                      {
+                        "group": "",
+                        "kind": "Secret",
+                        "name": "tls-validity-checks-certificate",
+                        "namespace": "gateway-conformance-infra"
+                      }
+                    ],
+                    "mode": "Terminate"
+                  }
+                },
+                {
+                  "allowedRoutes": {
+                    "namespaces": {
+                      "from": "Same"
+                    }
+                  },
+                  "hostname": "second-example.org",
+                  "name": "https-with-hostname",
+                  "port": 443,
+                  "protocol": "HTTPS",
+                  "tls": {
+                    "certificateRefs": [
+                      {
+                        "group": "",
+                        "kind": "Secret",
+                        "name": "tls-validity-checks-certificate",
+                        "namespace": "gateway-conformance-infra"
+                      }
+                    ],
+                    "mode": "Terminate"
+                  }
+                },
+                {
+                  "allowedRoutes": {
+                    "namespaces": {
+                      "from": "Same"
+                    }
+                  },
+                  "hostname": "*.wildcard.org",
+                  "name": "https-with-wildcard-hostname",
+                  "port": 443,
+                  "protocol": "HTTPS",
+                  "tls": {
+                    "certificateRefs": [
+                      {
+                        "group": "",
+                        "kind": "Secret",
+                        "name": "tls-validity-checks-certificate",
+                        "namespace": "gateway-conformance-infra"
+                      }
+                    ],
+                    "mode": "Terminate"
+                  }
+                },
+                {
+                  "allowedRoutes": {
+                    "namespaces": {
+                      "from": "Same"
+                    }
+                  },
+                  "hostname": "fourth-example.wildcard.org",
+                  "name": "https-with-hostname-matching-wildcard",
+                  "port": 443,
+                  "protocol": "HTTPS",
+                  "tls": {
+                    "certificateRefs": [
+                      {
+                        "group": "",
+                        "kind": "Secret",
+                        "name": "tls-validity-checks-certificate",
+                        "namespace": "gateway-conformance-infra"
+                      }
+                    ],
+                    "mode": "Terminate"
+                  }
+                }
+              ],
+              "excluded_from_readiness": false,
+              "generation": 1,
+              "listener_status": {
+                "https": [
+                  {
+                    "observedGeneration": 1,
+                    "reason": "UnsupportedProtocol",
+                    "status": "False",
+                    "type": "Accepted"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "ResolvedRefs",
+                    "status": "True",
+                    "type": "ResolvedRefs"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "NoConflicts",
+                    "status": "False",
+                    "type": "Conflicted"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "Invalid",
+                    "status": "False",
+                    "type": "Programmed"
+                  }
+                ],
+                "https-with-hostname": [
+                  {
+                    "observedGeneration": 1,
+                    "reason": "UnsupportedProtocol",
+                    "status": "False",
+                    "type": "Accepted"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "ResolvedRefs",
+                    "status": "True",
+                    "type": "ResolvedRefs"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "NoConflicts",
+                    "status": "False",
+                    "type": "Conflicted"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "Invalid",
+                    "status": "False",
+                    "type": "Programmed"
+                  }
+                ],
+                "https-with-hostname-matching-wildcard": [
+                  {
+                    "observedGeneration": 1,
+                    "reason": "UnsupportedProtocol",
+                    "status": "False",
+                    "type": "Accepted"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "ResolvedRefs",
+                    "status": "True",
+                    "type": "ResolvedRefs"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "NoConflicts",
+                    "status": "False",
+                    "type": "Conflicted"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "Invalid",
+                    "status": "False",
+                    "type": "Programmed"
+                  }
+                ],
+                "https-with-wildcard-hostname": [
+                  {
+                    "observedGeneration": 1,
+                    "reason": "UnsupportedProtocol",
+                    "status": "False",
+                    "type": "Accepted"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "ResolvedRefs",
+                    "status": "True",
+                    "type": "ResolvedRefs"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "NoConflicts",
+                    "status": "False",
+                    "type": "Conflicted"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "Invalid",
+                    "status": "False",
+                    "type": "Programmed"
+                  }
+                ]
+              },
+              "name": "same-namespace-with-https-listener",
+              "namespace": "gateway-conformance-infra"
+            }
+          ],
+          "pods": {
+            "gateway-conformance-app-backend": {
+              "image_ids": [
+                "registry.k8s.io/gateway-api/conformance/echo-basic@sha256:640d843263062f4391ecd74effd68673a69800852eb4ff31b8452a3301eae83b"
+              ],
+              "ready": 5,
+              "total": 5
+            },
+            "gateway-conformance-infra": {
+              "image_ids": [
+                "registry.k8s.io/gateway-api/conformance/echo-basic@sha256:640d843263062f4391ecd74effd68673a69800852eb4ff31b8452a3301eae83b",
+                "registry.k8s.io/gateway-api/conformance/echo-basic@sha256:2e9146b0550f20c9082b1f8490729104ea0120bb0a41763bd02307db93028f20"
+              ],
+              "ready": 16,
+              "total": 16
+            },
+            "gateway-conformance-web-backend": {
+              "image_ids": [
+                "registry.k8s.io/gateway-api/conformance/echo-basic@sha256:640d843263062f4391ecd74effd68673a69800852eb4ff31b8452a3301eae83b"
+              ],
+              "ready": 2,
+              "total": 2
+            }
+          },
+          "time_utc": "2026-11-21T07:36:16.300042+00:00"
+        },
+        "snapshotLogSHA256": "5f423c5f90717bf63d5dc048d3cf88ba2583e83b77936f5fb5ec3d13703e0e94",
+        "startUTC": "2026-11-21T07:31:22.839753+00:00",
+        "suiteLogSHA256": "d2a894a847009a633f09d9a841d4202e6688a1c80706c8e9b2ab09f6877e7b7b",
+        "unrunEligibleCases": 145,
+        "upstreamReport": false
+      },
+      "mesh": {
+        "caseDiagnostics": {
+          "redirectExpectedObservedStatus": [
+            [
+              301,
+              200
+            ],
+            [
+              302,
+              200
+            ]
+          ],
+          "weightExpectedEchoV1Share": 0.7,
+          "weightLastObservedEchoV1Share": {
+            "GRPC": 1.0,
+            "HTTP": 0.482
+          },
+          "wrongBackendResponsesInPassingCases": {
+            "MeshHTTPRouteMatching": 17,
+            "MeshHTTPRouteNamedRule": 13,
+            "MeshHTTPRouteSimpleSameNamespace": 9,
+            "MeshTrafficSplit": 19
+          }
+        },
+        "cleanup": {
+          "gatewayGroupObjects": 0,
+          "oneKindCluster": true,
+          "openStackClassConfigs": 0,
+          "readyNodes": 2,
+          "testIPVSRules": 0,
+          "testVIPs": 0,
+          "upstreamFixtureNamespaces": 0
+        },
+        "code": 1,
+        "elapsedSeconds": 785.311,
+        "eligibleMeshCaseBodiesUnrun": 0,
+        "graphOperations": 0,
+        "meshCaseBodiesUnrun": 7,
+        "meshCaseCounts": {
+          "fail": 11,
+          "pass": 5,
+          "skip": 7
+        },
+        "meshCaseResults": {
+          "MeshBasic": {
+            "bodyEntered": true,
+            "result": "pass"
+          },
+          "MeshConsumerRoute": {
+            "bodyEntered": false,
+            "firstMissingFeature": "HTTPRouteResponseHeaderModification",
+            "result": "skip"
+          },
+          "MeshFrontend": {
+            "bodyEntered": false,
+            "firstMissingFeature": "HTTPRouteResponseHeaderModification",
+            "result": "skip"
+          },
+          "MeshFrontendHostname": {
+            "bodyEntered": false,
+            "firstMissingFeature": "HTTPRouteResponseHeaderModification",
+            "result": "skip"
+          },
+          "MeshGRPCRouteRequestHeaderModifier": {
+            "bodyEntered": true,
+            "result": "fail"
+          },
+          "MeshGRPCRouteWeight": {
+            "bodyEntered": true,
+            "result": "fail"
+          },
+          "MeshHTTPRoute303Redirect": {
+            "bodyEntered": false,
+            "firstMissingFeature": "HTTPRoute303RedirectStatusCode",
+            "result": "skip"
+          },
+          "MeshHTTPRoute307Redirect": {
+            "bodyEntered": false,
+            "firstMissingFeature": "HTTPRoute307RedirectStatusCode",
+            "result": "skip"
+          },
+          "MeshHTTPRoute308Redirect": {
+            "bodyEntered": false,
+            "firstMissingFeature": "HTTPRoute308RedirectStatusCode",
+            "result": "skip"
+          },
+          "MeshHTTPRouteBackendRequestHeaderModifier": {
+            "bodyEntered": true,
+            "result": "fail"
+          },
+          "MeshHTTPRouteMatching": {
+            "bodyEntered": true,
+            "result": "pass"
+          },
+          "MeshHTTPRouteNamedRule": {
+            "bodyEntered": true,
+            "result": "pass"
+          },
+          "MeshHTTPRouteQueryParamMatching": {
+            "bodyEntered": true,
+            "result": "fail"
+          },
+          "MeshHTTPRouteRedirectHostAndStatus": {
+            "bodyEntered": true,
+            "result": "fail"
+          },
+          "MeshHTTPRouteRedirectPath": {
+            "bodyEntered": true,
+            "result": "fail"
+          },
+          "MeshHTTPRouteRedirectPort": {
+            "bodyEntered": true,
+            "result": "fail"
+          },
+          "MeshHTTPRouteRequestHeaderModifier": {
+            "bodyEntered": true,
+            "result": "fail"
+          },
+          "MeshHTTPRouteRewritePath": {
+            "bodyEntered": true,
+            "result": "fail"
+          },
+          "MeshHTTPRouteSchemeRedirect": {
+            "bodyEntered": true,
+            "result": "fail"
+          },
+          "MeshHTTPRouteSimpleSameNamespace": {
+            "bodyEntered": true,
+            "result": "pass"
+          },
+          "MeshHTTPRouteWeight": {
+            "bodyEntered": true,
+            "result": "fail"
+          },
+          "MeshPorts": {
+            "bodyEntered": false,
+            "firstMissingFeature": "HTTPRouteParentRefPort",
+            "result": "skip"
+          },
+          "MeshTrafficSplit": {
+            "bodyEntered": true,
+            "result": "pass"
+          }
+        },
+        "observation": {
+          "expectedXHeaderSet": "set-overwrites-values",
+          "grpcRouteStatusEmpty": true,
+          "httpRouteParentStatuses": 0,
+          "imagePreparationLogSHA256": "ee7bca4a72b0bf505f97683a2bca2a0398f1c4e4d297f42a6fb23597f23806f0",
+          "observerLogSHA256": "32370ba6eb0cb40cac11da7c594a12218a2113d27fd0eabcfcf3854da574cc5f",
+          "probes": {
+            "grpcServiceHeader": {
+              "echoV1": 12,
+              "echoV2": 0,
+              "observedXHeaderSet": "this-value-should-be-overwritten",
+              "successfulReplies": 12
+            },
+            "httpDirectEchoV2Pod": {
+              "echoV1": 0,
+              "echoV2": 1,
+              "observedXHeaderSet": "some-other-value",
+              "successfulReplies": 1
+            },
+            "httpServiceBaseline": {
+              "echoV1": 8,
+              "echoV2": 8,
+              "successfulReplies": 16
+            },
+            "httpServiceHeader": {
+              "echoV1": 4,
+              "echoV2": 8,
+              "observedXHeaderSet": "some-other-value",
+              "successfulReplies": 12
+            }
+          },
+          "readyEndpointsBeforeAndDuring": [
+            2,
+            2
+          ],
+          "serviceAndEndpointSlicesByteIdentical": true
+        },
+        "registeredTestLoop": {
+          "fail": 11,
+          "pass": 5,
+          "skip": 154
+        },
+        "sampledPods": {
+          "consumer": [
+            {
+              "containers": [
+                "echo"
+              ],
+              "imageIDDigest": "sha256:b7a3ec9339cefd7b0c729073bb95da23c2967fed9c79eb5d5b28dbf3cd2dff42",
+              "initContainers": [],
+              "ownerKind": "ReplicaSet",
+              "ready": true
+            }
+          ],
+          "producer": [
+            {
+              "containers": [
+                "echo"
+              ],
+              "imageIDDigest": "sha256:b7a3ec9339cefd7b0c729073bb95da23c2967fed9c79eb5d5b28dbf3cd2dff42",
+              "initContainers": [],
+              "ownerKind": "ReplicaSet",
+              "ready": true
+            },
+            {
+              "containers": [
+                "echo"
+              ],
+              "imageIDDigest": "sha256:b7a3ec9339cefd7b0c729073bb95da23c2967fed9c79eb5d5b28dbf3cd2dff42",
+              "initContainers": [],
+              "ownerKind": "ReplicaSet",
+              "ready": true
+            }
+          ]
+        },
+        "selection": {
+          "eligibleByProfile": {
+            "MESH-GRPC": 3,
+            "MESH-HTTP": 14
+          },
+          "eligibleCases": 16,
+          "eligibleOnlyThroughCombinedSelection": [],
+          "excludedExtendedFeatures": [],
+          "profileNames": [
+            "MESH-GRPC",
+            "MESH-HTTP"
+          ],
+          "selectedFeatureCount": 12
+        },
+        "sharedSetupCompleted": true,
+        "snapshotLogSHA256": "997f5bfbe4ec475fcf19bf6e60fae0ff94bd24ca84a6c391300b53843c2ad12a",
+        "startUTC": "2026-11-21T07:37:00.358761+00:00",
+        "suiteLogSHA256": "a9fd6553cc24a853528bc972055fc0971d0f8e9d59b53b7380ba495d14f14e26",
+        "upstreamReport": {
+          "apiVersion": "gateway.networking.k8s.io/v1",
+          "date": "2026-11-21T07:49:54Z",
+          "gatewayAPIChannel": "experimental",
+          "gatewayAPIVersion": "v1.7.0",
+          "implementation": {
+            "contact": null,
+            "organization": "",
+            "project": "",
+            "url": "",
+            "version": ""
+          },
+          "kind": "ConformanceReport",
+          "mode": "default",
+          "profiles": [
+            {
+              "core": {
+                "failedTests": [
+                  "MeshGRPCRouteRequestHeaderModifier",
+                  "MeshGRPCRouteWeight"
+                ],
+                "result": "failure",
+                "statistics": {
+                  "Failed": 2,
+                  "Passed": 1,
+                  "Skipped": 0
+                }
+              },
+              "name": "MESH-GRPC",
+              "summary": "Core tests failed with 2 test failures."
+            },
+            {
+              "core": {
+                "failedTests": [
+                  "MeshHTTPRouteRedirectHostAndStatus",
+                  "MeshHTTPRouteRequestHeaderModifier",
+                  "MeshHTTPRouteWeight"
+                ],
+                "result": "failure",
+                "statistics": {
+                  "Failed": 3,
+                  "Passed": 4,
+                  "Skipped": 0
+                }
+              },
+              "extended": {
+                "failedTests": [
+                  "MeshHTTPRouteBackendRequestHeaderModifier",
+                  "MeshHTTPRouteQueryParamMatching",
+                  "MeshHTTPRouteRedirectPath",
+                  "MeshHTTPRouteRedirectPort",
+                  "MeshHTTPRouteRewritePath",
+                  "MeshHTTPRouteSchemeRedirect"
+                ],
+                "result": "failure",
+                "statistics": {
+                  "Failed": 6,
+                  "Passed": 1,
+                  "Skipped": 0
+                },
+                "supportedFeatures": [
+                  "MeshClusterIPMatching",
+                  "MeshConsumerRoute",
+                  "MeshHTTPRouteBackendRequestHeaderModification",
+                  "MeshHTTPRouteNamedRouteRule",
+                  "MeshHTTPRouteQueryParamMatching",
+                  "MeshHTTPRouteRedirectPath",
+                  "MeshHTTPRouteRedirectPort",
+                  "MeshHTTPRouteRewritePath",
+                  "MeshHTTPRouteSchemeRedirect"
+                ]
+              },
+              "name": "MESH-HTTP",
+              "summary": "Core tests failed with 3 test failures. Extended tests failed with 6 test failures."
+            }
+          ]
+        }
+      },
+      "runtime": {
+        "bundle_sha256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+        "class_config_crd_sha256": "39aa7fa4a30f187d5eed492fe3af821dc23498ab49ec4a37a6d4152cf70b8f16",
+        "container_runtime": [
+          "containerd://2.3.4"
+        ],
+        "crds": [
+          "backendtlspolicies.gateway.networking.k8s.io",
+          "gatewayclasses.gateway.networking.k8s.io",
+          "gateways.gateway.networking.k8s.io",
+          "grpcroutes.gateway.networking.k8s.io",
+          "httproutes.gateway.networking.k8s.io",
+          "listenersets.gateway.networking.k8s.io",
+          "openstackgatewayclassconfigs.gateway-api-openstack.github.io",
+          "referencegrants.gateway.networking.k8s.io",
+          "tcproutes.gateway.networking.k8s.io",
+          "tlsroutes.gateway.networking.k8s.io",
+          "udproutes.gateway.networking.k8s.io",
+          "xbackends.gateway.networking.x-k8s.io",
+          "xbackendtrafficpolicies.gateway.networking.x-k8s.io",
+          "xmeshes.gateway.networking.x-k8s.io",
+          "xtelemetrypolicies.gateway.networking.x-k8s.io"
+        ],
+        "echo_images": {
+          "registry.k8s.io/gateway-api/conformance/echo-basic:v0.1.0": "sha256:640d843263062f4391ecd74effd68673a69800852eb4ff31b8452a3301eae83b",
+          "registry.k8s.io/gateway-api/conformance/echo-basic:v0.2.0": "sha256:2e9146b0550f20c9082b1f8490729104ea0120bb0a41763bd02307db93028f20"
+        },
+        "etcdFilesystem": "tmpfs",
+        "gatewayGroupObjects": 0,
+        "goBinarySHA256": "e0d745139a0800df827a327fbdacdf6076a79bb98e623c7772720da88ab81931",
+        "node_count": 2,
+        "node_image": "sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed",
+        "oneKindCluster": true,
+        "openStackClassConfigs": 0,
+        "readyNodes": 2,
+        "server_version": "v1.36.4",
+        "sourceCommit": "e36efaa7605842f885c7463f8d09569ec077a218",
+        "suppliedStaticAddressFixturePools": true,
+        "testIPVSRules": 0,
+        "testVIPs": 0,
+        "upstreamFixtureNamespaces": 0
+      }
+    },
+    "standard": {
+      "gateway": {
+        "caseBodiesEntered": 0,
+        "cleanup": {
+          "gatewayGroupObjects": 0,
+          "oneKindCluster": true,
+          "openStackClassConfigs": 0,
+          "testIPVSRules": 0,
+          "testVIPs": 0,
+          "upstreamFixtureNamespaces": 0
+        },
+        "code": 1,
+        "elapsedSeconds": 323.913,
+        "fixturesReadyCheckSeconds": 300,
+        "selection": {
+          "eligibleByProfile": {
+            "GATEWAY-GRPC": 30,
+            "GATEWAY-HTTP": 103,
+            "GATEWAY-TCP": 31,
+            "GATEWAY-TLS": 39,
+            "GATEWAY-UDP": 32
+          },
+          "eligibleCases": 144,
+          "eligibleOnlyThroughCombinedSelection": [
+            "HTTPRouteDisallowedKind"
+          ],
+          "excludedExtendedFeatures": [
+            "ClusterTrustBundle",
+            "GatewayAddressRoutability",
+            "GatewayAddressRoutabilityCluster",
+            "GatewayListenerFilters",
+            "HTTPRouteDestinationPortMatching"
+          ],
+          "profileNames": [
+            "GATEWAY-GRPC",
+            "GATEWAY-HTTP",
+            "GATEWAY-TCP",
+            "GATEWAY-TLS",
+            "GATEWAY-UDP"
+          ],
+          "selectedFeatureCount": 47
+        },
+        "sharedSetupCompleted": false,
+        "snapshot": {
+          "gateway_class": [
+            {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True",
+              "type": "Accepted"
+            },
+            {
+              "observedGeneration": 1,
+              "reason": "SupportedVersion",
+              "status": "True",
+              "type": "SupportedVersion"
+            }
+          ],
+          "gateway_class_supported_features": [],
+          "gateways": [
+            {
+              "conditions": [
+                {
+                  "observedGeneration": 1,
+                  "reason": "Accepted",
+                  "status": "True",
+                  "type": "Accepted"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "Programmed",
+                  "status": "True",
+                  "type": "Programmed"
+                }
+              ],
+              "declared_listeners": [
+                {
+                  "allowedRoutes": {
+                    "namespaces": {
+                      "from": "All"
+                    }
+                  },
+                  "name": "http",
+                  "port": 80,
+                  "protocol": "HTTP"
+                }
+              ],
+              "excluded_from_readiness": false,
+              "generation": 1,
+              "listener_status": {
+                "http": [
+                  {
+                    "observedGeneration": 1,
+                    "reason": "Accepted",
+                    "status": "True",
+                    "type": "Accepted"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "ResolvedRefs",
+                    "status": "True",
+                    "type": "ResolvedRefs"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "NoConflicts",
+                    "status": "False",
+                    "type": "Conflicted"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "Programmed",
+                    "status": "True",
+                    "type": "Programmed"
+                  }
+                ]
+              },
+              "name": "all-namespaces",
+              "namespace": "gateway-conformance-infra"
+            },
+            {
+              "conditions": [
+                {
+                  "observedGeneration": 1,
+                  "reason": "Accepted",
+                  "status": "True",
+                  "type": "Accepted"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "Programmed",
+                  "status": "True",
+                  "type": "Programmed"
+                }
+              ],
+              "declared_listeners": [
+                {
+                  "allowedRoutes": {
+                    "namespaces": {
+                      "from": "Selector",
+                      "selector": {
+                        "matchLabels": {
+                          "gateway-conformance": "backend"
+                        }
+                      }
+                    }
+                  },
+                  "name": "http",
+                  "port": 80,
+                  "protocol": "HTTP"
+                }
+              ],
+              "excluded_from_readiness": false,
+              "generation": 1,
+              "listener_status": {
+                "http": [
+                  {
+                    "observedGeneration": 1,
+                    "reason": "Accepted",
+                    "status": "True",
+                    "type": "Accepted"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "ResolvedRefs",
+                    "status": "True",
+                    "type": "ResolvedRefs"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "NoConflicts",
+                    "status": "False",
+                    "type": "Conflicted"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "Programmed",
+                    "status": "True",
+                    "type": "Programmed"
+                  }
+                ]
+              },
+              "name": "backend-namespaces",
+              "namespace": "gateway-conformance-infra"
+            },
+            {
+              "conditions": [
+                {
+                  "observedGeneration": 1,
+                  "reason": "Accepted",
+                  "status": "True",
+                  "type": "Accepted"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "Programmed",
+                  "status": "True",
+                  "type": "Programmed"
+                }
+              ],
+              "declared_listeners": [
+                {
+                  "allowedRoutes": {
+                    "namespaces": {
+                      "from": "Same"
+                    }
+                  },
+                  "name": "http",
+                  "port": 80,
+                  "protocol": "HTTP"
+                }
+              ],
+              "excluded_from_readiness": false,
+              "generation": 1,
+              "listener_status": {
+                "http": [
+                  {
+                    "observedGeneration": 1,
+                    "reason": "Accepted",
+                    "status": "True",
+                    "type": "Accepted"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "ResolvedRefs",
+                    "status": "True",
+                    "type": "ResolvedRefs"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "NoConflicts",
+                    "status": "False",
+                    "type": "Conflicted"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "Programmed",
+                    "status": "True",
+                    "type": "Programmed"
+                  }
+                ]
+              },
+              "name": "same-namespace",
+              "namespace": "gateway-conformance-infra"
+            },
+            {
+              "conditions": [
+                {
+                  "observedGeneration": 1,
+                  "reason": "ListenersNotValid",
+                  "status": "False",
+                  "type": "Accepted"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "Invalid",
+                  "status": "False",
+                  "type": "Programmed"
+                }
+              ],
+              "declared_listeners": [
+                {
+                  "allowedRoutes": {
+                    "namespaces": {
+                      "from": "Same"
+                    }
+                  },
+                  "name": "https",
+                  "port": 443,
+                  "protocol": "HTTPS",
+                  "tls": {
+                    "certificateRefs": [
+                      {
+                        "group": "",
+                        "kind": "Secret",
+                        "name": "tls-validity-checks-certificate",
+                        "namespace": "gateway-conformance-infra"
+                      }
+                    ],
+                    "mode": "Terminate"
+                  }
+                },
+                {
+                  "allowedRoutes": {
+                    "namespaces": {
+                      "from": "Same"
+                    }
+                  },
+                  "hostname": "second-example.org",
+                  "name": "https-with-hostname",
+                  "port": 443,
+                  "protocol": "HTTPS",
+                  "tls": {
+                    "certificateRefs": [
+                      {
+                        "group": "",
+                        "kind": "Secret",
+                        "name": "tls-validity-checks-certificate",
+                        "namespace": "gateway-conformance-infra"
+                      }
+                    ],
+                    "mode": "Terminate"
+                  }
+                },
+                {
+                  "allowedRoutes": {
+                    "namespaces": {
+                      "from": "Same"
+                    }
+                  },
+                  "hostname": "*.wildcard.org",
+                  "name": "https-with-wildcard-hostname",
+                  "port": 443,
+                  "protocol": "HTTPS",
+                  "tls": {
+                    "certificateRefs": [
+                      {
+                        "group": "",
+                        "kind": "Secret",
+                        "name": "tls-validity-checks-certificate",
+                        "namespace": "gateway-conformance-infra"
+                      }
+                    ],
+                    "mode": "Terminate"
+                  }
+                },
+                {
+                  "allowedRoutes": {
+                    "namespaces": {
+                      "from": "Same"
+                    }
+                  },
+                  "hostname": "fourth-example.wildcard.org",
+                  "name": "https-with-hostname-matching-wildcard",
+                  "port": 443,
+                  "protocol": "HTTPS",
+                  "tls": {
+                    "certificateRefs": [
+                      {
+                        "group": "",
+                        "kind": "Secret",
+                        "name": "tls-validity-checks-certificate",
+                        "namespace": "gateway-conformance-infra"
+                      }
+                    ],
+                    "mode": "Terminate"
+                  }
+                }
+              ],
+              "excluded_from_readiness": false,
+              "generation": 1,
+              "listener_status": {
+                "https": [
+                  {
+                    "observedGeneration": 1,
+                    "reason": "UnsupportedProtocol",
+                    "status": "False",
+                    "type": "Accepted"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "ResolvedRefs",
+                    "status": "True",
+                    "type": "ResolvedRefs"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "NoConflicts",
+                    "status": "False",
+                    "type": "Conflicted"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "Invalid",
+                    "status": "False",
+                    "type": "Programmed"
+                  }
+                ],
+                "https-with-hostname": [
+                  {
+                    "observedGeneration": 1,
+                    "reason": "UnsupportedProtocol",
+                    "status": "False",
+                    "type": "Accepted"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "ResolvedRefs",
+                    "status": "True",
+                    "type": "ResolvedRefs"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "NoConflicts",
+                    "status": "False",
+                    "type": "Conflicted"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "Invalid",
+                    "status": "False",
+                    "type": "Programmed"
+                  }
+                ],
+                "https-with-hostname-matching-wildcard": [
+                  {
+                    "observedGeneration": 1,
+                    "reason": "UnsupportedProtocol",
+                    "status": "False",
+                    "type": "Accepted"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "ResolvedRefs",
+                    "status": "True",
+                    "type": "ResolvedRefs"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "NoConflicts",
+                    "status": "False",
+                    "type": "Conflicted"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "Invalid",
+                    "status": "False",
+                    "type": "Programmed"
+                  }
+                ],
+                "https-with-wildcard-hostname": [
+                  {
+                    "observedGeneration": 1,
+                    "reason": "UnsupportedProtocol",
+                    "status": "False",
+                    "type": "Accepted"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "ResolvedRefs",
+                    "status": "True",
+                    "type": "ResolvedRefs"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "NoConflicts",
+                    "status": "False",
+                    "type": "Conflicted"
+                  },
+                  {
+                    "observedGeneration": 1,
+                    "reason": "Invalid",
+                    "status": "False",
+                    "type": "Programmed"
+                  }
+                ]
+              },
+              "name": "same-namespace-with-https-listener",
+              "namespace": "gateway-conformance-infra"
+            }
+          ],
+          "pods": {
+            "gateway-conformance-app-backend": {
+              "image_ids": [
+                "registry.k8s.io/gateway-api/conformance/echo-basic@sha256:640d843263062f4391ecd74effd68673a69800852eb4ff31b8452a3301eae83b"
+              ],
+              "ready": 5,
+              "total": 5
+            },
+            "gateway-conformance-infra": {
+              "image_ids": [
+                "registry.k8s.io/gateway-api/conformance/echo-basic@sha256:640d843263062f4391ecd74effd68673a69800852eb4ff31b8452a3301eae83b",
+                "registry.k8s.io/gateway-api/conformance/echo-basic@sha256:2e9146b0550f20c9082b1f8490729104ea0120bb0a41763bd02307db93028f20"
+              ],
+              "ready": 16,
+              "total": 16
+            },
+            "gateway-conformance-web-backend": {
+              "image_ids": [
+                "registry.k8s.io/gateway-api/conformance/echo-basic@sha256:640d843263062f4391ecd74effd68673a69800852eb4ff31b8452a3301eae83b"
+              ],
+              "ready": 2,
+              "total": 2
+            }
+          },
+          "time_utc": "2026-11-21T07:10:31.642572+00:00"
+        },
+        "snapshotLogSHA256": "a88ab47a4cf450f9d658ba110fb064ab508078fbc3322a5a5514dc5dfd4b4c46",
+        "startUTC": "2026-11-21T07:05:36.415816+00:00",
+        "suiteLogSHA256": "a1acb4e8c9424274bcdcbdb09291374d8bf0809aa43783630b136674927107d1",
+        "unrunEligibleCases": 144,
+        "upstreamReport": false
+      },
+      "mesh": {
+        "caseDiagnostics": {
+          "redirectExpectedObservedStatus": [
+            [
+              301,
+              200
+            ],
+            [
+              302,
+              200
+            ]
+          ],
+          "weightExpectedEchoV1Share": 0.7,
+          "weightLastObservedEchoV1Share": {
+            "GRPC": 1.0,
+            "HTTP": 0.498
+          },
+          "wrongBackendResponsesInPassingCases": {
+            "MeshHTTPRouteMatching": 75,
+            "MeshHTTPRouteNamedRule": 16,
+            "MeshHTTPRouteSimpleSameNamespace": 8,
+            "MeshTrafficSplit": 21
+          }
+        },
+        "cleanup": {
+          "gatewayGroupObjects": 0,
+          "oneKindCluster": true,
+          "openStackClassConfigs": 0,
+          "testIPVSRules": 0,
+          "testVIPs": 0,
+          "upstreamFixtureNamespaces": 0
+        },
+        "code": 1,
+        "elapsedSeconds": 798.141,
+        "eligibleMeshCaseBodiesUnrun": 0,
+        "graphOperations": 0,
+        "meshCaseBodiesUnrun": 7,
+        "meshCaseCounts": {
+          "fail": 11,
+          "pass": 5,
+          "skip": 7
+        },
+        "meshCaseResults": {
+          "MeshBasic": {
+            "bodyEntered": true,
+            "result": "pass"
+          },
+          "MeshConsumerRoute": {
+            "bodyEntered": false,
+            "firstMissingFeature": "HTTPRouteResponseHeaderModification",
+            "result": "skip"
+          },
+          "MeshFrontend": {
+            "bodyEntered": false,
+            "firstMissingFeature": "HTTPRouteResponseHeaderModification",
+            "result": "skip"
+          },
+          "MeshFrontendHostname": {
+            "bodyEntered": false,
+            "firstMissingFeature": "HTTPRouteResponseHeaderModification",
+            "result": "skip"
+          },
+          "MeshGRPCRouteRequestHeaderModifier": {
+            "bodyEntered": true,
+            "result": "fail"
+          },
+          "MeshGRPCRouteWeight": {
+            "bodyEntered": true,
+            "result": "fail"
+          },
+          "MeshHTTPRoute303Redirect": {
+            "bodyEntered": false,
+            "firstMissingFeature": "HTTPRoute303RedirectStatusCode",
+            "result": "skip"
+          },
+          "MeshHTTPRoute307Redirect": {
+            "bodyEntered": false,
+            "firstMissingFeature": "HTTPRoute307RedirectStatusCode",
+            "result": "skip"
+          },
+          "MeshHTTPRoute308Redirect": {
+            "bodyEntered": false,
+            "firstMissingFeature": "HTTPRoute308RedirectStatusCode",
+            "result": "skip"
+          },
+          "MeshHTTPRouteBackendRequestHeaderModifier": {
+            "bodyEntered": true,
+            "result": "fail"
+          },
+          "MeshHTTPRouteMatching": {
+            "bodyEntered": true,
+            "result": "pass"
+          },
+          "MeshHTTPRouteNamedRule": {
+            "bodyEntered": true,
+            "result": "pass"
+          },
+          "MeshHTTPRouteQueryParamMatching": {
+            "bodyEntered": true,
+            "result": "fail"
+          },
+          "MeshHTTPRouteRedirectHostAndStatus": {
+            "bodyEntered": true,
+            "result": "fail"
+          },
+          "MeshHTTPRouteRedirectPath": {
+            "bodyEntered": true,
+            "result": "fail"
+          },
+          "MeshHTTPRouteRedirectPort": {
+            "bodyEntered": true,
+            "result": "fail"
+          },
+          "MeshHTTPRouteRequestHeaderModifier": {
+            "bodyEntered": true,
+            "result": "fail"
+          },
+          "MeshHTTPRouteRewritePath": {
+            "bodyEntered": true,
+            "result": "fail"
+          },
+          "MeshHTTPRouteSchemeRedirect": {
+            "bodyEntered": true,
+            "result": "fail"
+          },
+          "MeshHTTPRouteSimpleSameNamespace": {
+            "bodyEntered": true,
+            "result": "pass"
+          },
+          "MeshHTTPRouteWeight": {
+            "bodyEntered": true,
+            "result": "fail"
+          },
+          "MeshPorts": {
+            "bodyEntered": false,
+            "firstMissingFeature": "HTTPRouteParentRefPort",
+            "result": "skip"
+          },
+          "MeshTrafficSplit": {
+            "bodyEntered": true,
+            "result": "pass"
+          }
+        },
+        "observation": {
+          "expectedXHeaderSet": "set-overwrites-values",
+          "grpcRouteStatusEmpty": true,
+          "httpRouteParentStatuses": 0,
+          "imagePreparationLogSHA256": "c639ed961b1738442bcadf8399d77cc1b78e1b59330d4fb284efda832a37204a",
+          "observerLogSHA256": "76277faaed3a58dfa494a455060986e22e3bb5a298bd5d7b5e7c36f6f8322a98",
+          "probes": {
+            "grpcServiceHeader": {
+              "echoV1": 0,
+              "echoV2": 12,
+              "observedXHeaderSet": "this-value-should-be-overwritten",
+              "successfulReplies": 12
+            },
+            "httpDirectEchoV2Pod": {
+              "echoV1": 0,
+              "echoV2": 1,
+              "observedXHeaderSet": "some-other-value",
+              "successfulReplies": 1
+            },
+            "httpServiceBaseline": {
+              "echoV1": 7,
+              "echoV2": 9,
+              "successfulReplies": 16
+            },
+            "httpServiceHeader": {
+              "echoV1": 9,
+              "echoV2": 3,
+              "observedXHeaderSet": "some-other-value",
+              "successfulReplies": 12
+            }
+          },
+          "readyEndpointsBeforeAndDuring": [
+            2,
+            2
+          ],
+          "serviceAndEndpointSlicesByteIdentical": true
+        },
+        "registeredTestLoop": {
+          "fail": 11,
+          "pass": 5,
+          "skip": 154
+        },
+        "sampledPods": {
+          "consumer": [
+            {
+              "containers": [
+                "echo"
+              ],
+              "imageIDDigest": "sha256:b7a3ec9339cefd7b0c729073bb95da23c2967fed9c79eb5d5b28dbf3cd2dff42",
+              "initContainers": [],
+              "ownerKind": "ReplicaSet",
+              "ready": true
+            }
+          ],
+          "producer": [
+            {
+              "containers": [
+                "echo"
+              ],
+              "imageIDDigest": "sha256:b7a3ec9339cefd7b0c729073bb95da23c2967fed9c79eb5d5b28dbf3cd2dff42",
+              "initContainers": [],
+              "ownerKind": "ReplicaSet",
+              "ready": true
+            },
+            {
+              "containers": [
+                "echo"
+              ],
+              "imageIDDigest": "sha256:b7a3ec9339cefd7b0c729073bb95da23c2967fed9c79eb5d5b28dbf3cd2dff42",
+              "initContainers": [],
+              "ownerKind": "ReplicaSet",
+              "ready": true
+            }
+          ]
+        },
+        "selection": {
+          "eligibleByProfile": {
+            "MESH-GRPC": 3,
+            "MESH-HTTP": 14
+          },
+          "eligibleCases": 16,
+          "eligibleOnlyThroughCombinedSelection": [],
+          "excludedExtendedFeatures": [],
+          "profileNames": [
+            "MESH-GRPC",
+            "MESH-HTTP"
+          ],
+          "selectedFeatureCount": 12
+        },
+        "sharedSetupCompleted": true,
+        "snapshotLogSHA256": "997f5bfbe4ec475fcf19bf6e60fae0ff94bd24ca84a6c391300b53843c2ad12a",
+        "startUTC": "2026-11-21T07:11:13.687996+00:00",
+        "suiteLogSHA256": "529d249004080cf561fced3e385f672191d8a93655910e9dbb5dd48d80ec8247",
+        "upstreamReport": {
+          "apiVersion": "gateway.networking.k8s.io/v1",
+          "date": "2026-11-21T07:24:21Z",
+          "gatewayAPIChannel": "standard",
+          "gatewayAPIVersion": "v1.7.0",
+          "implementation": {
+            "contact": null,
+            "organization": "",
+            "project": "",
+            "url": "",
+            "version": ""
+          },
+          "kind": "ConformanceReport",
+          "mode": "default",
+          "profiles": [
+            {
+              "core": {
+                "failedTests": [
+                  "MeshGRPCRouteRequestHeaderModifier",
+                  "MeshGRPCRouteWeight"
+                ],
+                "result": "failure",
+                "statistics": {
+                  "Failed": 2,
+                  "Passed": 1,
+                  "Skipped": 0
+                }
+              },
+              "name": "MESH-GRPC",
+              "summary": "Core tests failed with 2 test failures."
+            },
+            {
+              "core": {
+                "failedTests": [
+                  "MeshHTTPRouteRedirectHostAndStatus",
+                  "MeshHTTPRouteRequestHeaderModifier",
+                  "MeshHTTPRouteWeight"
+                ],
+                "result": "failure",
+                "statistics": {
+                  "Failed": 3,
+                  "Passed": 4,
+                  "Skipped": 0
+                }
+              },
+              "extended": {
+                "failedTests": [
+                  "MeshHTTPRouteBackendRequestHeaderModifier",
+                  "MeshHTTPRouteQueryParamMatching",
+                  "MeshHTTPRouteRedirectPath",
+                  "MeshHTTPRouteRedirectPort",
+                  "MeshHTTPRouteRewritePath",
+                  "MeshHTTPRouteSchemeRedirect"
+                ],
+                "result": "failure",
+                "statistics": {
+                  "Failed": 6,
+                  "Passed": 1,
+                  "Skipped": 0
+                },
+                "supportedFeatures": [
+                  "MeshClusterIPMatching",
+                  "MeshConsumerRoute",
+                  "MeshHTTPRouteBackendRequestHeaderModification",
+                  "MeshHTTPRouteNamedRouteRule",
+                  "MeshHTTPRouteQueryParamMatching",
+                  "MeshHTTPRouteRedirectPath",
+                  "MeshHTTPRouteRedirectPort",
+                  "MeshHTTPRouteRewritePath",
+                  "MeshHTTPRouteSchemeRedirect"
+                ]
+              },
+              "name": "MESH-HTTP",
+              "summary": "Core tests failed with 3 test failures. Extended tests failed with 6 test failures."
+            }
+          ]
+        }
+      },
+      "runtime": {
+        "bundle_sha256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+        "class_config_crd_sha256": "39aa7fa4a30f187d5eed492fe3af821dc23498ab49ec4a37a6d4152cf70b8f16",
+        "container_runtime": [
+          "containerd://2.3.4"
+        ],
+        "crds": [
+          "backendtlspolicies.gateway.networking.k8s.io",
+          "gatewayclasses.gateway.networking.k8s.io",
+          "gateways.gateway.networking.k8s.io",
+          "grpcroutes.gateway.networking.k8s.io",
+          "httproutes.gateway.networking.k8s.io",
+          "listenersets.gateway.networking.k8s.io",
+          "openstackgatewayclassconfigs.gateway-api-openstack.github.io",
+          "referencegrants.gateway.networking.k8s.io",
+          "tcproutes.gateway.networking.k8s.io",
+          "tlsroutes.gateway.networking.k8s.io",
+          "udproutes.gateway.networking.k8s.io"
+        ],
+        "echo_images": {
+          "registry.k8s.io/gateway-api/conformance/echo-basic:v0.1.0": "sha256:640d843263062f4391ecd74effd68673a69800852eb4ff31b8452a3301eae83b",
+          "registry.k8s.io/gateway-api/conformance/echo-basic:v0.2.0": "sha256:2e9146b0550f20c9082b1f8490729104ea0120bb0a41763bd02307db93028f20"
+        },
+        "etcdFilesystem": "tmpfs",
+        "gatewayGroupObjects": 0,
+        "goBinarySHA256": "cc452839a36af2c1c7070ce82d10a362319cbff723906c64cf92621b831f3527",
+        "node_count": 2,
+        "node_image": "sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed",
+        "oneKindCluster": true,
+        "openStackClassConfigs": 0,
+        "server_version": "v1.36.4",
+        "sourceCommit": "83644649b204d082bb6ea0bf15c5909dcd39e6d8",
+        "suppliedStaticAddressFixturePools": false,
+        "testIPVSRules": 0,
+        "testVIPs": 0,
+        "upstreamFixtureNamespaces": 0
+      }
+    }
+  },
+  "environment": {
+    "architecture": "linux/amd64",
+    "go": "1.27.4",
+    "goTestProcessGOMAXPROCS": 2,
+    "goTestProcessTimeoutMinutes": 120,
+    "guest": "Fedora Cloud 45-1.4 on KVM",
+    "guestKernel": "7.2.11-300.fc45.x86_64",
+    "kind": "v0.33.0",
+    "meshImage": "registry.k8s.io/gateway-api/conformance/echo-advanced:v0.1.0",
+    "meshImageArchiveIndexDigest": "sha256:b7a3ec9339cefd7b0c729073bb95da23c2967fed9c79eb5d5b28dbf3cd2dff42",
+    "meshImageLinuxAMD64Manifest": "sha256:7b928723a4f261dcc94ef2cc036041d393c2ff4fe02623cc79d2f8691db995af",
+    "meshImageLocalArchiveSHA256": "bfc1cfc52c226464a5e41355d312fa6894696567157fd1a4cc837df7dfdab534",
+    "podman": "6.1.3 rootful",
+    "ramMiB": 4992,
+    "vCPUs": 4
+  },
+  "experimentalFormalSuitesFixtureDrain": {
+    "gatewayGroupObjects": 0,
+    "oneKindCluster": true,
+    "openStackClassConfigs": 0,
+    "readyNodes": 2,
+    "testIPVSRules": 0,
+    "testVIPs": 0,
+    "upstreamFixtureNamespaces": 0
+  },
+  "meshCaseRegistry": {
+    "MeshBasic": {
+      "profiles": [
+        "MESH-HTTP",
+        "MESH-GRPC"
+      ],
+      "requires": [
+        "Mesh"
+      ]
+    },
+    "MeshConsumerRoute": {
+      "profiles": [],
+      "requires": [
+        "Mesh",
+        "MeshConsumerRoute",
+        "HTTPRoute",
+        "HTTPRouteResponseHeaderModification"
+      ]
+    },
+    "MeshFrontend": {
+      "profiles": [],
+      "requires": [
+        "Mesh",
+        "HTTPRoute",
+        "HTTPRouteResponseHeaderModification"
+      ]
+    },
+    "MeshFrontendHostname": {
+      "profiles": [],
+      "requires": [
+        "Mesh",
+        "MeshClusterIPMatching",
+        "HTTPRoute",
+        "HTTPRouteResponseHeaderModification"
+      ]
+    },
+    "MeshGRPCRouteRequestHeaderModifier": {
+      "profiles": [
+        "MESH-GRPC"
+      ],
+      "requires": [
+        "Mesh",
+        "GRPCRoute"
+      ]
+    },
+    "MeshGRPCRouteWeight": {
+      "profiles": [
+        "MESH-GRPC"
+      ],
+      "requires": [
+        "Mesh",
+        "GRPCRoute"
+      ]
+    },
+    "MeshHTTPRoute303Redirect": {
+      "profiles": [],
+      "requires": [
+        "Mesh",
+        "HTTPRoute",
+        "HTTPRoute303RedirectStatusCode"
+      ]
+    },
+    "MeshHTTPRoute307Redirect": {
+      "profiles": [],
+      "requires": [
+        "Mesh",
+        "HTTPRoute",
+        "HTTPRoute307RedirectStatusCode"
+      ]
+    },
+    "MeshHTTPRoute308Redirect": {
+      "profiles": [],
+      "requires": [
+        "Mesh",
+        "HTTPRoute",
+        "HTTPRoute308RedirectStatusCode"
+      ]
+    },
+    "MeshHTTPRouteBackendRequestHeaderModifier": {
+      "profiles": [
+        "MESH-HTTP"
+      ],
+      "requires": [
+        "Mesh",
+        "HTTPRoute",
+        "MeshHTTPRouteBackendRequestHeaderModification"
+      ]
+    },
+    "MeshHTTPRouteMatching": {
+      "profiles": [
+        "MESH-HTTP"
+      ],
+      "requires": [
+        "Mesh",
+        "HTTPRoute"
+      ]
+    },
+    "MeshHTTPRouteNamedRule": {
+      "profiles": [
+        "MESH-HTTP"
+      ],
+      "requires": [
+        "Mesh",
+        "HTTPRoute",
+        "MeshHTTPRouteNamedRouteRule"
+      ]
+    },
+    "MeshHTTPRouteQueryParamMatching": {
+      "profiles": [
+        "MESH-HTTP"
+      ],
+      "requires": [
+        "Mesh",
+        "HTTPRoute",
+        "MeshHTTPRouteQueryParamMatching"
+      ]
+    },
+    "MeshHTTPRouteRedirectHostAndStatus": {
+      "profiles": [
+        "MESH-HTTP"
+      ],
+      "requires": [
+        "Mesh",
+        "HTTPRoute"
+      ]
+    },
+    "MeshHTTPRouteRedirectPath": {
+      "profiles": [
+        "MESH-HTTP"
+      ],
+      "requires": [
+        "Mesh",
+        "HTTPRoute",
+        "MeshHTTPRouteRedirectPath"
+      ]
+    },
+    "MeshHTTPRouteRedirectPort": {
+      "profiles": [
+        "MESH-HTTP"
+      ],
+      "requires": [
+        "Mesh",
+        "HTTPRoute",
+        "MeshHTTPRouteRedirectPort"
+      ]
+    },
+    "MeshHTTPRouteRequestHeaderModifier": {
+      "profiles": [
+        "MESH-HTTP"
+      ],
+      "requires": [
+        "Mesh",
+        "HTTPRoute"
+      ]
+    },
+    "MeshHTTPRouteRewritePath": {
+      "profiles": [
+        "MESH-HTTP"
+      ],
+      "requires": [
+        "Mesh",
+        "HTTPRoute",
+        "MeshHTTPRouteRewritePath"
+      ]
+    },
+    "MeshHTTPRouteSchemeRedirect": {
+      "profiles": [
+        "MESH-HTTP"
+      ],
+      "requires": [
+        "Mesh",
+        "HTTPRoute",
+        "MeshHTTPRouteSchemeRedirect"
+      ]
+    },
+    "MeshHTTPRouteSimpleSameNamespace": {
+      "profiles": [
+        "MESH-HTTP"
+      ],
+      "requires": [
+        "Mesh",
+        "HTTPRoute"
+      ]
+    },
+    "MeshHTTPRouteWeight": {
+      "profiles": [
+        "MESH-HTTP"
+      ],
+      "requires": [
+        "Mesh",
+        "HTTPRoute"
+      ]
+    },
+    "MeshPorts": {
+      "profiles": [],
+      "requires": [
+        "Mesh",
+        "HTTPRoute",
+        "HTTPRouteParentRefPort",
+        "HTTPRouteResponseHeaderModification"
+      ]
+    },
+    "MeshTrafficSplit": {
+      "profiles": [
+        "MESH-HTTP"
+      ],
+      "requires": [
+        "Mesh",
+        "HTTPRoute"
+      ]
+    }
+  },
+  "profiles": {
+    "GATEWAY-GRPC": {
+      "CoreFeatures": [
+        "GRPCRoute",
+        "Gateway",
+        "ReferenceGrant"
+      ],
+      "ExtendedFeatures": {
+        "BackendTLSPolicy": "standard",
+        "BackendTLSPolicySANValidation": "standard",
+        "ClusterTrustBundle": "experimental",
+        "GatewayAddressEmpty": "standard",
+        "GatewayAddressRoutability": "experimental",
+        "GatewayAddressRoutabilityCluster": "experimental",
+        "GatewayBackendClientCertificate": "standard",
+        "GatewayFrontendClientCertificateValidation": "standard",
+        "GatewayFrontendClientCertificateValidationInsecureFallback": "standard",
+        "GatewayHTTPListenerIsolation": "standard",
+        "GatewayHTTPSListenerDetectMisdirectedRequests": "standard",
+        "GatewayInfrastructure": "standard",
+        "GatewayListenerFilters": "experimental",
+        "GatewayPort8080": "standard",
+        "GatewayRouteHostnameIntersectionPrecedence": "standard",
+        "GatewayStaticAddresses": "standard",
+        "ListenerSet": "standard"
+      }
+    },
+    "GATEWAY-HTTP": {
+      "CoreFeatures": [
+        "Gateway",
+        "HTTPRoute",
+        "ReferenceGrant"
+      ],
+      "ExtendedFeatures": {
+        "BackendTLSPolicy": "standard",
+        "BackendTLSPolicySANValidation": "standard",
+        "ClusterTrustBundle": "experimental",
+        "GatewayAddressEmpty": "standard",
+        "GatewayAddressRoutability": "experimental",
+        "GatewayAddressRoutabilityCluster": "experimental",
+        "GatewayBackendClientCertificate": "standard",
+        "GatewayFrontendClientCertificateValidation": "standard",
+        "GatewayFrontendClientCertificateValidationInsecureFallback": "standard",
+        "GatewayHTTPListenerIsolation": "standard",
+        "GatewayHTTPSListenerDetectMisdirectedRequests": "standard",
+        "GatewayInfrastructure": "standard",
+        "GatewayListenerFilters": "experimental",
+        "GatewayPort8080": "standard",
+        "GatewayRouteHostnameIntersectionPrecedence": "standard",
+        "GatewayStaticAddresses": "standard",
+        "HTTPRoute303RedirectStatusCode": "standard",
+        "HTTPRoute307RedirectStatusCode": "standard",
+        "HTTPRoute308RedirectStatusCode": "standard",
+        "HTTPRouteBackendProtocolH2C": "standard",
+        "HTTPRouteBackendProtocolWebSocket": "standard",
+        "HTTPRouteBackendRequestHeaderModification": "standard",
+        "HTTPRouteBackendTimeout": "standard",
+        "HTTPRouteBackendURLRewrite": "standard",
+        "HTTPRouteCORS": "standard",
+        "HTTPRouteDestinationPortMatching": "experimental",
+        "HTTPRouteHostRewrite": "standard",
+        "HTTPRouteMethodMatching": "standard",
+        "HTTPRouteNamedRouteRule": "standard",
+        "HTTPRouteParentRefPort": "standard",
+        "HTTPRoutePathRedirect": "standard",
+        "HTTPRoutePathRewrite": "standard",
+        "HTTPRoutePortRedirect": "standard",
+        "HTTPRouteQueryParamMatching": "standard",
+        "HTTPRouteRequestMirror": "standard",
+        "HTTPRouteRequestMultipleMirrors": "standard",
+        "HTTPRouteRequestPercentageMirror": "standard",
+        "HTTPRouteRequestTimeout": "standard",
+        "HTTPRouteResponseHeaderModification": "standard",
+        "HTTPRouteRetryCodes": "standard",
+        "HTTPRouteRetryConnectionError": "standard",
+        "HTTPRouteSchemeRedirect": "standard",
+        "ListenerSet": "standard"
+      }
+    },
+    "GATEWAY-TCP": {
+      "CoreFeatures": [
+        "Gateway",
+        "ReferenceGrant",
+        "TCPRoute"
+      ],
+      "ExtendedFeatures": {
+        "ClusterTrustBundle": "experimental",
+        "GatewayAddressEmpty": "standard",
+        "GatewayAddressRoutability": "experimental",
+        "GatewayAddressRoutabilityCluster": "experimental",
+        "GatewayBackendClientCertificate": "standard",
+        "GatewayFrontendClientCertificateValidation": "standard",
+        "GatewayFrontendClientCertificateValidationInsecureFallback": "standard",
+        "GatewayHTTPListenerIsolation": "standard",
+        "GatewayHTTPSListenerDetectMisdirectedRequests": "standard",
+        "GatewayInfrastructure": "standard",
+        "GatewayListenerFilters": "experimental",
+        "GatewayPort8080": "standard",
+        "GatewayRouteHostnameIntersectionPrecedence": "standard",
+        "GatewayStaticAddresses": "standard",
+        "ListenerSet": "standard",
+        "TCPRoute": "standard"
+      }
+    },
+    "GATEWAY-TLS": {
+      "CoreFeatures": [
+        "Gateway",
+        "ReferenceGrant",
+        "TLSRoute"
+      ],
+      "ExtendedFeatures": {
+        "BackendTLSPolicy": "standard",
+        "BackendTLSPolicySANValidation": "standard",
+        "ClusterTrustBundle": "experimental",
+        "GatewayAddressEmpty": "standard",
+        "GatewayAddressRoutability": "experimental",
+        "GatewayAddressRoutabilityCluster": "experimental",
+        "GatewayBackendClientCertificate": "standard",
+        "GatewayFrontendClientCertificateValidation": "standard",
+        "GatewayFrontendClientCertificateValidationInsecureFallback": "standard",
+        "GatewayHTTPListenerIsolation": "standard",
+        "GatewayHTTPSListenerDetectMisdirectedRequests": "standard",
+        "GatewayInfrastructure": "standard",
+        "GatewayListenerFilters": "experimental",
+        "GatewayPort8080": "standard",
+        "GatewayRouteHostnameIntersectionPrecedence": "standard",
+        "GatewayStaticAddresses": "standard",
+        "ListenerSet": "standard",
+        "TLSRouteModeMixed": "standard",
+        "TLSRouteModeTerminate": "standard"
+      }
+    },
+    "GATEWAY-UDP": {
+      "CoreFeatures": [
+        "Gateway",
+        "ReferenceGrant",
+        "UDPRoute"
+      ],
+      "ExtendedFeatures": {
+        "ClusterTrustBundle": "experimental",
+        "GatewayAddressEmpty": "standard",
+        "GatewayAddressRoutability": "experimental",
+        "GatewayAddressRoutabilityCluster": "experimental",
+        "GatewayBackendClientCertificate": "standard",
+        "GatewayFrontendClientCertificateValidation": "standard",
+        "GatewayFrontendClientCertificateValidationInsecureFallback": "standard",
+        "GatewayHTTPListenerIsolation": "standard",
+        "GatewayHTTPSListenerDetectMisdirectedRequests": "standard",
+        "GatewayInfrastructure": "standard",
+        "GatewayListenerFilters": "experimental",
+        "GatewayPort8080": "standard",
+        "GatewayRouteHostnameIntersectionPrecedence": "standard",
+        "GatewayStaticAddresses": "standard",
+        "ListenerSet": "standard",
+        "UDPRoute": "standard"
+      }
+    },
+    "MESH-GRPC": {
+      "CoreFeatures": [
+        "GRPCRoute",
+        "Mesh"
+      ],
+      "ExtendedFeatures": {
+        "MeshClusterIPMatching": "standard",
+        "MeshConsumerRoute": "standard",
+        "MeshHTTPRouteBackendRequestHeaderModification": "standard",
+        "MeshHTTPRouteNamedRouteRule": "standard",
+        "MeshHTTPRouteQueryParamMatching": "standard",
+        "MeshHTTPRouteRedirectPath": "standard",
+        "MeshHTTPRouteRedirectPort": "standard",
+        "MeshHTTPRouteRewritePath": "standard",
+        "MeshHTTPRouteSchemeRedirect": "standard"
+      }
+    },
+    "MESH-HTTP": {
+      "CoreFeatures": [
+        "HTTPRoute",
+        "Mesh"
+      ],
+      "ExtendedFeatures": {
+        "MeshClusterIPMatching": "standard",
+        "MeshConsumerRoute": "standard",
+        "MeshHTTPRouteBackendRequestHeaderModification": "standard",
+        "MeshHTTPRouteNamedRouteRule": "standard",
+        "MeshHTTPRouteQueryParamMatching": "standard",
+        "MeshHTTPRouteRedirectPath": "standard",
+        "MeshHTTPRouteRedirectPort": "standard",
+        "MeshHTTPRouteRewritePath": "standard",
+        "MeshHTTPRouteSchemeRedirect": "standard"
+      }
+    }
+  },
+  "realProviderProfileChannelPairs": 14,
+  "realProviderProfilesQualified": 0,
+  "scope": "Disposable kind with a recording cloud adapter and stock Kubernetes Services",
+  "staticAddressApplierCheck": {
+    "addressRolesInAssertionOrder": [
+      "unsupported address type",
+      "unavailable test-network IPv4",
+      "recording adapter synthetic IPv4"
+    ],
+    "fixture": "tests/gateway-static-addresses.yaml",
+    "result": "pass",
+    "runnerConfigurationSource": "e36efaa7605842f885c7463f8d09569ec077a218"
+  },
+  "upstream": {
+    "baseManifestSHA256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+    "meshManifestSHA256": "4ade870abee6cc31d35d7b5dbc6544c2fdc6851141d353ab9c23eb0352a5f301",
+    "registeredCases": 170,
+    "sourceCommit": "e26d183dbbc1bb782b78addbd26faba03955c152",
+    "version": "v1.7.0"
+  }
+}

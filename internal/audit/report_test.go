@@ -116,6 +116,20 @@ func TestBuildReport(t *testing.T) {
 	}
 }
 
+func TestBuildReportAcceptsUDPRouteOwnership(t *testing.T) {
+	scope := reportTestScope()
+	gateway, route := reportTestRecords(scope)
+	route.Objects[0].Kind = "UDPRoute"
+	snapshot := KubernetesSnapshot{Records: []OwnershipRecord{gateway, route}}
+	report, err := BuildReport(time.Unix(1, 0), "v0.2.0-test", scope, snapshot, Inventory{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Summary.KubernetesBindings != 2 {
+		t.Fatalf("Kubernetes bindings = %d, want 2", report.Summary.KubernetesBindings)
+	}
+}
+
 func TestBuildReportIsDeterministic(t *testing.T) {
 	scope := reportTestScope()
 	gatewayRecord, routeRecord := reportTestRecords(scope)
@@ -273,13 +287,15 @@ func reportTestRecords(scope Scope) (OwnershipRecord, OwnershipRecord) {
 	routeIdentity.RouteNamespace = "default"
 	routeIdentity.RouteName = "app"
 	routeIdentity.RouteUID = "route-uid"
-	return OwnershipRecord{
-			Identity: gatewayIdentity,
-			Objects:  []ObjectReference{reportTestObject("Gateway", "default", "edge", "gateway-uid")},
-		}, OwnershipRecord{
-			Identity: routeIdentity,
-			Objects:  []ObjectReference{reportTestObject("HTTPRoute", "default", "app", "route-uid")},
-		}
+	gateway := OwnershipRecord{
+		Identity: gatewayIdentity,
+		Objects:  []ObjectReference{reportTestObject("Gateway", "default", "edge", "gateway-uid")},
+	}
+	route := OwnershipRecord{
+		Identity: routeIdentity,
+		Objects:  []ObjectReference{reportTestObject("HTTPRoute", "default", "app", "route-uid")},
+	}
+	return gateway, route
 }
 
 func reportTestObject(kind, namespace, name, uid string) ObjectReference {

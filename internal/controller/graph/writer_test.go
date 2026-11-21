@@ -165,7 +165,7 @@ func TestWriterCanceledWaitDoesNotObserveOrCallProvider(t *testing.T) {
 }
 
 func TestWriterFailedSourceOrFencePreventsProviderCall(t *testing.T) {
-	for _, stage := range []string{"gateway source", "route source", "route fence", "gateway fence"} {
+	for _, stage := range []string{"gateway source", "HTTP source", "TCP source", "HTTP fence", "TCP fence", "gateway fence"} {
 		t.Run(stage, func(t *testing.T) {
 			w := writerFixture()
 			failure := errors.New("input changed")
@@ -180,9 +180,12 @@ func TestWriterFailedSourceOrFencePreventsProviderCall(t *testing.T) {
 			w.Gateway = gatewaySourceFunc(func(context.Context, Request) (GatewayInput, error) {
 				return GatewayInput{Validate: func(context.Context) error { return failAt("gateway fence") }}, failAt("gateway source")
 			})
-			w.Routes = routeSourceFunc(func(context.Context, Request, *gatewayv1.Gateway) (RouteInputs, error) {
-				return RouteInputs{Validate: func(context.Context) error { return failAt("route fence") }}, failAt("route source")
-			})
+			source := func(kind string) RouteSource {
+				return routeSourceFunc(func(context.Context, Request, *gatewayv1.Gateway) (RouteInputs, error) {
+					return RouteInputs{Validate: func(context.Context) error { return failAt(kind + " fence") }}, failAt(kind + " source")
+				})
+			}
+			w.Routes = RouteSources{source("HTTP"), source("TCP")}
 			w.Provider = graphProviderFunc(func(context.Context, cloud.GatewayGraphSpec) (cloud.GatewayGraphResult, error) {
 				t.Error("failed input allowed provider call")
 				return cloud.GatewayGraphResult{}, nil
@@ -190,7 +193,7 @@ func TestWriterFailedSourceOrFencePreventsProviderCall(t *testing.T) {
 			if _, err := w.ReconcileGraph(context.Background(), writerRequest()); !errors.Is(err, failure) {
 				t.Fatalf("error = %v, want source failure", err)
 			}
-			order := []string{"gateway source", "route source", "route fence", "gateway fence"}
+			order := []string{"gateway source", "HTTP source", "TCP source", "HTTP fence", "TCP fence", "gateway fence"}
 			want := order[:slices.Index(order, stage)+1]
 			if !slices.Equal(calls, want) {
 				t.Fatalf("calls = %v, want prerequisite order %v", calls, want)

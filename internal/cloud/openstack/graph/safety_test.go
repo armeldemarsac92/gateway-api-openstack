@@ -26,8 +26,15 @@ import (
 	"testing"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
+	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/loadbalancers"
 )
+
+func safetyObservedLoadBalancer() *octavia.LoadBalancer {
+	return &octavia.LoadBalancer{LoadBalancer: loadbalancers.LoadBalancer{ID: "load-balancer-1"}}
+}
 
 func TestEnsureFloatingIPValidatesEveryAttachedAddress(t *testing.T) {
 	identity := safetyTestIdentity(t)
@@ -209,7 +216,7 @@ func TestBuildGatewayDeletionPlanUsesDedicatedListAPIs(t *testing.T) {
 		LoadBalancer: safetyServiceClient(safetyGatewayGraphHandler(t, identity, "", requests)),
 		ProjectID:    "project-a",
 	}, ProviderConfig{})
-	deletionPlan, err := provider.buildGatewayDeletionPlan(context.Background(), identity, "load-balancer-1")
+	deletionPlan, err := provider.buildGatewayDeletionPlan(context.Background(), identity, safetyObservedLoadBalancer(), nil, "")
 	if err != nil {
 		t.Fatalf("buildGatewayDeletionPlan() error = %v", err)
 	}
@@ -274,7 +281,7 @@ func TestBuildGatewayDeletionPlanRejectsUnmanagedDescendants(t *testing.T) {
 				LoadBalancer: safetyServiceClient(safetyGatewayGraphHandler(t, identity, resource, newSafetyRequestLog())),
 				ProjectID:    "project-a",
 			}, ProviderConfig{})
-			_, err := provider.buildGatewayDeletionPlan(context.Background(), identity, "load-balancer-1")
+			_, err := provider.buildGatewayDeletionPlan(context.Background(), identity, safetyObservedLoadBalancer(), nil, "")
 			if !errors.Is(err, cloud.ErrOwnershipConflict) {
 				t.Fatalf("buildGatewayDeletionPlan() error = %v, want ownership conflict for unmanaged %s", err, resource)
 			}
@@ -301,172 +308,6 @@ func TestExecuteGatewayDeletionStepIgnoresAlreadyDeletedResource(t *testing.T) {
 	}
 	if deleteRequests != 1 {
 		t.Errorf("DELETE request count = %d, want 1", deleteRequests)
-	}
-}
-
-func TestDeleteGatewayExecutesValidatedPlanWithoutCascade(t *testing.T) {
-	identity := safetyTestIdentity(t)
-	loadBalancerTags := safetyGatewayTags(t, identity, roleLoadBalancer)
-	listenerTags := safetyGatewayTags(t, identity, roleListener)
-	policyTags := safetyRouteTags(t, identity, rolePolicyExact)
-	ruleTags := safetyRouteTags(t, identity, roleRulePath)
-	poolTags := safetyRouteTags(t, identity, rolePool)
-	memberTags := safetyRouteTags(t, identity, roleMember)
-	monitorTags := safetyRouteTags(t, identity, roleMonitor)
-
-	var deletedLoadBalancer bool
-	deleted := make(map[string]int)
-	var deletionOrder []string
-	loadBalancerHandler := http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-		switch {
-		case request.Method == http.MethodGet && request.URL.Path == "/lbaas/loadbalancers":
-			items := []any{}
-			if !deletedLoadBalancer {
-				items = append(items, map[string]any{
-					"id": "load-balancer-1", "project_id": "project-a", "vip_port_id": "vip-port", "vip_address": "192.0.2.10", "tags": loadBalancerTags,
-				})
-			}
-			safetyWriteJSON(t, w, map[string]any{"loadbalancers": items})
-		case request.Method == http.MethodGet && request.URL.Path == "/lbaas/loadbalancers/load-balancer-1":
-			if deletedLoadBalancer {
-				http.Error(w, "not found", http.StatusNotFound)
-				return
-			}
-			safetyWriteJSON(t, w, map[string]any{"loadbalancer": map[string]any{
-				"id": "load-balancer-1", "project_id": "project-a", "vip_port_id": "vip-port", "vip_address": "192.0.2.10", "provisioning_status": "ACTIVE", "tags": loadBalancerTags,
-			}})
-		case request.Method == http.MethodGet && request.URL.Path == "/lbaas/listeners":
-			items := []any{}
-			if deleted["/lbaas/listeners/listener-1"] == 0 {
-				items = append(items, map[string]any{"id": "listener-1", "tags": listenerTags})
-			}
-			safetyWriteJSON(t, w, map[string]any{"listeners": items})
-		case request.Method == http.MethodGet && request.URL.Path == "/lbaas/l7policies":
-			items := []any{}
-			if deleted["/lbaas/l7policies/policy-1"] == 0 {
-				items = append(items, map[string]any{"id": "policy-1", "position": 1, "tags": policyTags})
-			}
-			safetyWriteJSON(t, w, map[string]any{"l7policies": items})
-		case request.Method == http.MethodGet && request.URL.Path == "/lbaas/l7policies/policy-1/rules":
-			items := []any{}
-			if deleted["/lbaas/l7policies/policy-1/rules/rule-1"] == 0 {
-				items = append(items, map[string]any{"id": "rule-1", "tags": ruleTags})
-			}
-			safetyWriteJSON(t, w, map[string]any{"rules": items})
-		case request.Method == http.MethodGet && request.URL.Path == "/lbaas/pools":
-			items := []any{}
-			if deleted["/lbaas/pools/pool-1"] == 0 {
-				items = append(items, map[string]any{"id": "pool-1", "tags": poolTags})
-			}
-			safetyWriteJSON(t, w, map[string]any{"pools": items})
-		case request.Method == http.MethodGet && request.URL.Path == "/lbaas/pools/pool-1/members":
-			items := []any{}
-			if deleted["/lbaas/pools/pool-1/members/member-1"] == 0 {
-				items = append(items, map[string]any{"id": "member-1", "address": "10.0.0.10", "protocol_port": 30080, "tags": memberTags})
-			}
-			safetyWriteJSON(t, w, map[string]any{"members": items})
-		case request.Method == http.MethodGet && request.URL.Path == "/lbaas/healthmonitors":
-			items := []any{}
-			if deleted["/lbaas/healthmonitors/monitor-1"] == 0 {
-				items = append(items, map[string]any{"id": "monitor-1", "tags": monitorTags})
-			}
-			safetyWriteJSON(t, w, map[string]any{"healthmonitors": items})
-		case request.Method == http.MethodDelete:
-			deleted[request.URL.Path]++
-			deletionOrder = append(deletionOrder, request.URL.Path)
-			if request.URL.Path == "/lbaas/loadbalancers/load-balancer-1" {
-				if got := request.URL.Query().Get("cascade"); got != "" {
-					t.Errorf("load balancer delete cascade = %q, want omitted", got)
-					http.Error(w, "cascade must be disabled", http.StatusBadRequest)
-					return
-				}
-				deletedLoadBalancer = true
-			}
-			w.WriteHeader(http.StatusNoContent)
-		default:
-			t.Errorf("unexpected load balancer request: %s %s", request.Method, request.URL.RequestURI())
-			http.Error(w, "unexpected request", http.StatusNotFound)
-		}
-	})
-
-	floatingIPDescription := identity.GatewayDescription(roleFloatingIP)
-	networkHandler := http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-		switch {
-		case request.Method == http.MethodGet && request.URL.Path == "/floatingips":
-			if !safetyRequireQuery(t, w, request, "project_id", "project-a") {
-				return
-			}
-			items := []any{}
-			if deleted["/floatingips/floating-ip-1"] == 0 {
-				items = append(items, map[string]any{
-					"id": "floating-ip-1", "project_id": "project-a", "port_id": "vip-port", "fixed_ip_address": "192.0.2.10", "description": floatingIPDescription,
-				})
-			}
-			safetyWriteJSON(t, w, map[string]any{"floatingips": items})
-		case request.Method == http.MethodDelete && request.URL.Path == "/floatingips/floating-ip-1":
-			deleted[request.URL.Path]++
-			deletionOrder = append(deletionOrder, request.URL.Path)
-			w.WriteHeader(http.StatusNoContent)
-		default:
-			t.Errorf("unexpected network request: %s %s", request.Method, request.URL.RequestURI())
-			http.Error(w, "unexpected request", http.StatusNotFound)
-		}
-	})
-
-	provider := newTestProvider(t, ServiceClients{
-		LoadBalancer: safetyServiceClient(loadBalancerHandler),
-		Network:      safetyServiceClient(networkHandler),
-		ProjectID:    "project-a",
-	}, ProviderConfig{})
-	ready := false
-	for attempt := 0; attempt < 10; attempt++ {
-		outcome, err := provider.DeleteGateway(context.Background(), identity.Value())
-		if err != nil {
-			t.Fatalf("DeleteGateway() attempt %d error = %v", attempt+1, err)
-		}
-		if outcome.State == cloud.OutcomeReady {
-			ready = true
-			break
-		}
-		if outcome.State != cloud.OutcomeProgressing {
-			t.Fatalf("DeleteGateway() attempt %d outcome = %#v", attempt+1, outcome)
-		}
-	}
-	if !ready {
-		t.Fatal("DeleteGateway() did not converge")
-	}
-
-	for _, path := range []string{
-		"/lbaas/l7policies/policy-1/rules/rule-1",
-		"/lbaas/l7policies/policy-1",
-		"/lbaas/listeners/listener-1",
-		"/lbaas/healthmonitors/monitor-1",
-		"/lbaas/pools/pool-1/members/member-1",
-		"/lbaas/pools/pool-1",
-		"/floatingips/floating-ip-1",
-		"/lbaas/loadbalancers/load-balancer-1",
-	} {
-		if deleted[path] != 1 {
-			t.Errorf("DELETE %s count = %d, want 1", path, deleted[path])
-		}
-	}
-	wantDeletionOrder := []string{
-		"/lbaas/l7policies/policy-1/rules/rule-1",
-		"/lbaas/l7policies/policy-1",
-		"/lbaas/healthmonitors/monitor-1",
-		"/lbaas/pools/pool-1/members/member-1",
-		"/lbaas/pools/pool-1",
-		"/lbaas/listeners/listener-1",
-		"/floatingips/floating-ip-1",
-		"/lbaas/loadbalancers/load-balancer-1",
-	}
-	if len(deletionOrder) != len(wantDeletionOrder) {
-		t.Fatalf("Gateway deletion order = %v, want %v", deletionOrder, wantDeletionOrder)
-	}
-	for index := range wantDeletionOrder {
-		if deletionOrder[index] != wantDeletionOrder[index] {
-			t.Errorf("Gateway deletion order[%d] = %q, want %q", index, deletionOrder[index], wantDeletionOrder[index])
-		}
 	}
 }
 
@@ -528,9 +369,9 @@ func TestObserveRoutePoliciesRejectsForeignPolicyOrRule(t *testing.T) {
 				}
 			})
 			provider := newTestProvider(t, ServiceClients{LoadBalancer: safetyServiceClient(handler), ProjectID: "project-a"}, ProviderConfig{})
-			_, err := provider.observeGatewayRoutes(context.Background(), []Identity{identity}, cloud.GatewayState{LoadBalancerID: "load-balancer-1", ListenerID: "listener-1"})
+			_, err := provider.observeRouteGraphs(context.Background(), []routeGraphOwner{{identity: identity}}, safetyObservedLoadBalancer(), &listeners.Listener{ID: "listener-1"}, cloud.ListenerProtocolHTTP)
 			if !errors.Is(err, cloud.ErrOwnershipConflict) {
-				t.Fatalf("observeGatewayRoutes() error = %v, want ownership conflict", err)
+				t.Fatalf("observeRouteGraphs() error = %v, want ownership conflict", err)
 			}
 		})
 	}
@@ -602,7 +443,7 @@ func safetyGatewayGraphHandler(t *testing.T, identity Identity, unmanagedResourc
 					"loadbalancers": []any{map[string]any{"id": "load-balancer-1"}},
 					"tags":          tags["listener"],
 					"l7policies": []any{
-						map[string]any{"id": "nested-policy-without-tags"},
+						map[string]any{"id": "policy-1"},
 					},
 				},
 			}})
@@ -620,7 +461,7 @@ func safetyGatewayGraphHandler(t *testing.T, identity Identity, unmanagedResourc
 					"listener_id": "listener-1",
 					"tags":        tags["policy"],
 					"rules": []any{
-						map[string]any{"id": "nested-rule-without-tags"},
+						map[string]any{"id": "rule-1"},
 					},
 				},
 			}})

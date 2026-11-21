@@ -1,0 +1,35 @@
+# Gateway API v1.7.0 on Magnum Hibiscus
+
+## Scope and design decision
+
+A workload-cluster tenant attaches Gateway routes to infrastructure assigned by an operator. A mesh tenant attaches routes to a Kubernetes Service and observes the result from another workload using the normal Service address. The target includes both release channels, five Gateway profiles, two mesh profiles, and the contracts in the tagged API that the conformance suite leaves untested.
+
+Start with the existing OpenStack controller, one private IPv4 Amphora VIP, an HTTP listener, a same-namespace HTTPRoute and a known NodePort backend. Keep the controller independent of Magnum. Pin the controller base to `0d41b7ce39125c012af8bd1bfba3a9c90f0d1252`, Gateway API v1.7.0 to `e26d183dbbc1bb782b78addbd26faba03955c152` and Go to 1.27.4. The management-plane integration targets Magnum 23.0.0 and magnum-capi-helm 1.4.0. The cloud source baseline is Octavia 19.0.0 on Hibiscus. Installed versions and traffic results require a designated environment.
+
+## Approaches
+
+The selected direction keeps stock OpenStack as the first target and studies a public Octavia API/provider extension for operations Amphora cannot express through the existing API. It studies an explicitly enabled mesh for Service-parent traffic. The operator selected this direction on November 20. Delivery of either new dataplane contract requires a separate decision after the minimal feasibility cases and costs are available.
+
+An explicitly managed proxy for inbound Gateway traffic would give the operator another dataplane to run and changes where TLS and routing policy are enforced. A stock-only implementation covers a useful pilot and leaves release requirements open, starting with per-route arbitrary header mutation. The selected direction retains those requirements in the matrix. All programming of the load balancer goes through public authenticated APIs.
+
+## Controller, release bundles and evidence
+
+- Reuse the Gateway UID-keyed writer. Validate fresh Kubernetes inputs, project and cluster identity, immutable tags, parentage and provider before each mutation. Finish at most one dependency-safe cloud transition per pass. Rediscover by identity after a restart. A foreign descendant blocks deletion. Explicitly remove verified children before the parent. Use the existing bounded requeue and finalization paths.
+- Install the genuine Standard bundle by default. Qualify the genuine Experimental bundle independently, with a separate cluster or control plane. At the mutation boundary validate the release version and a consistent selected channel across Gateway API CRDs. Verify the inventory, group and admission objects against the selected manifest during installation. The admission policy and its binding carry `channel: standard` in both tagged manifests. Keep cleanup of previously bound resources available during CRD skew where the Kubernetes objects are still served. Store feature evidence per class, channel and dataplane.
+- The feature matrix tracks the tagged schema, profile membership, named features, unflagged normative rules, implementation-specific decisions, case names and evidence. Unsupported inputs receive the conditions specified for their object and controller. Preserve foreign conditions and parent entries. Remove any capability claim that lacks the required behavior.
+- Port the module, container builder, linter, tests, fixtures, operator instructions and evidence labels together. Use the same pinned build, lint, unit and envtest commands locally and in PR CI. Use real CRDs with a local Kubernetes API server. Extend the existing Go HTTP test transport with the few Octavia/Neutron responses needed for a real adapter scenario. Assert requests, durable ownership and recovery using API shapes verified against Hibiscus. Record simulated results under their own test names.
+- The first live sample requires a client on the private VIP network, a distinctive backend response before and after restarting the controller, and before/after identification of the API-server and OCCM Service load balancers. Finalization must remove all resources owned by the test Gateway and preserve both controls, including their traffic when available. Credentialed E2E and conformance run only on a designated disposable target.
+
+## Missing primitives and extensions under study
+
+The first provider case adds an arbitrary header for a single path and observes it at an echo backend. Other cases request a default 404, a proportional 500 for an invalid weighted backend, HTTP/2 gRPC matching and distinct backends for two TLS SNI names on the same port. For each, record the requested wire result, the smallest public API operation or missing field, and the provider capability required. A candidate extension includes typed ordered header operations and terminal or weighted forwarding actions; negotiation, tenant authorization, immutable ownership, provider limits and backward compatibility belong in the provider decision. Stock classes continue to report their observed capabilities. No provider-specific internal configuration is an installation prerequisite.
+
+For mesh, use a Service DNS name and make requests from enrolled client Pods in producer and consumer namespaces. Check Service-parent selection, revocation, protocol behavior and controller-owned status. Study an operator-provisioned dataplane that receives these requests, including selectors/enrollment, ownership of Route parent status, interception scope, uninstall and coexistence. Require a concrete dataplane/version and separate approval before exposing or installing the mode.
+
+## Magnum lifecycle and qualification
+
+Integrate through the 1.4 driver's resolved `openstack-cluster` chart and management-cluster addon resources. Add one operator-controlled opt-in and pinned workload package. The driver chooses the chart and restricts the values tenants can supply. Use a stable cluster identity and dedicated project-scoped application credential. Keep shared Gateway CRDs and admission objects under their platform owner. Give the controller its own RBAC and only remove resources with matching ownership.
+
+On credential or TLS certificate rotation, apply the replacement, verify consumption and successful use, then retire the old one. During uninstall or cluster deletion, stop new allocations and keep the workload API and credential alive until the owned cloud inventory is empty. An explicit failure preserves retry state and the credential. A lost workload API requires identity-scoped recovery from the management side. Validate install, upgrade, rollback, both rotations, uninstall and cluster teardown separately.
+
+Publish the fork revision and reproducible image digest with the operator runbook, exact version inventory and per-channel/profile results. Each result records upstream suite revision, requested features, failures, skips and unrun cases. Mocked cloud calls, local API admission, real private VIP traffic, real Service-to-Service traffic and provider lifecycle each have their own evidence. The operator has no disposable Hibiscus environment at design time.

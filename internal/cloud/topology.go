@@ -69,7 +69,7 @@ type TopologyResolver interface {
 	ResolveTopology(context.Context, TopologyRequest) (Topology, error)
 }
 
-// HealthMonitorConfig describes the HTTP health checks for a route pool.
+// HealthMonitorConfig describes route pool health checks. Only HTTP checks use Path.
 type HealthMonitorConfig struct {
 	Path           string `json:"path"`
 	Delay          int    `json:"delay"`

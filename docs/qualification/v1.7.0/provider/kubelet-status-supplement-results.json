@@ -1,0 +1,1664 @@
+{
+  "channelSwitch": {
+    "beforeNodesReady": 2,
+    "etcdFilesystem": "tmpfs",
+    "newNodesReady": 2,
+    "nextChannel": "experimental",
+    "nodeImage": "kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed",
+    "previousFixtureResources": 0,
+    "retired": "standard"
+  },
+  "formalProfileRun": false,
+  "gatewayAPI": "v1.7.0",
+  "previousDirectAddressEnvtest": {
+    "kubernetes": "1.36.2",
+    "runs": {
+      "experimental": {
+        "outcome": "PASS",
+        "suiteLogSHA256": "8a559d021dbfccf93851c0005b2d6cbf172b148796f7c5908eae6ae4f3beaf10"
+      },
+      "standard": {
+        "outcome": "PASS",
+        "suiteLogSHA256": "8bcec08dac132882754d7a2c717cdd573520813b46b232b23da85c16d9f1e259"
+      }
+    },
+    "scope": "The explicit empty-value IPAddress entry, checked without a kubelet workload",
+    "sourceRevision": "455798411c13fd42f5c1568357f2c35cec2b2169"
+  },
+  "realHibiscus": false,
+  "runner": {
+    "baseSHA256": "eec15359b2f8ce095f3da26dfbc9485725c06a985a15796f1bde2ac79158f6ed",
+    "originalCases": [
+      "GatewayOptionalAddressValue",
+      "GatewayPreserveForeignConditions",
+      "GatewayObservedGenerationBump",
+      "HTTPRouteObservedGenerationBump"
+    ],
+    "patchSHA256": "3bce72fde7a7d65cbc111891e0ea6b66da57e94f361896cf03179af17d3e03a4",
+    "runnerSHA256": "0752123687b51630cf58e6dc6e236bd583215a9a82eafbcadddfae9ce59abfb4",
+    "sourceRevision": "455798411c13fd42f5c1568357f2c35cec2b2169"
+  },
+  "runs": {
+    "experimental": {
+      "baseSHA256": "eec15359b2f8ce095f3da26dfbc9485725c06a985a15796f1bde2ac79158f6ed",
+      "cases": {
+        "GatewayObservedGenerationBump": {
+          "deadlineExceeded": true,
+          "elapsedSeconds": 301.73,
+          "entered": true,
+          "outcome": "FAIL",
+          "sourceFailureLines": [
+            "gateway-observed-generation-bump.go:80"
+          ]
+        },
+        "GatewayOptionalAddressValue": {
+          "deadlineExceeded": false,
+          "elapsedSeconds": 0.33,
+          "entered": true,
+          "outcome": "PASS",
+          "sourceFailureLines": []
+        },
+        "GatewayPreserveForeignConditions": {
+          "deadlineExceeded": false,
+          "elapsedSeconds": 3.32,
+          "entered": true,
+          "outcome": "PASS",
+          "sourceFailureLines": []
+        },
+        "HTTPRouteObservedGenerationBump": {
+          "backendType": "ClusterIP",
+          "blockingCondition": {
+            "observedGeneration": 2,
+            "reason": "UnsupportedValue",
+            "state": "False",
+            "type": "Accepted"
+          },
+          "conditionDeadlineSeconds": 60,
+          "deadlineExceeded": true,
+          "elapsedSeconds": 60.06,
+          "entered": true,
+          "outcome": "FAIL",
+          "requiredBackendType": "NodePort",
+          "sourceFailureLines": [
+            "httproute-observed-generation-bump.go:69"
+          ]
+        }
+      },
+      "channel": "experimental",
+      "cloud": "mocked recording provider",
+      "elapsedSeconds": 394.252,
+      "exitCode": 1,
+      "fixtureCleanup": {
+        "gatewayGroupObjects": 0,
+        "oneKindCluster": true,
+        "openStackClassConfigs": 0,
+        "readyNodes": 2,
+        "testIPVSRules": 0,
+        "testVIPs": 0,
+        "upstreamFixtureNamespaces": 0
+      },
+      "gatewayAPI": "v1.7.0",
+      "gatewayWatch": {
+        "gateway-observed-generation-bump": [
+          {
+            "assignedAddresses": 0,
+            "conditions": [
+              {
+                "reason": "Pending",
+                "status": "Unknown",
+                "type": "Accepted"
+              },
+              {
+                "reason": "Pending",
+                "status": "Unknown",
+                "type": "Programmed"
+              }
+            ],
+            "listeners": {},
+            "specAddresses": "omitted",
+            "specGeneration": 1
+          },
+          {
+            "assignedAddresses": 1,
+            "conditions": [
+              {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True",
+                "type": "Programmed"
+              }
+            ],
+            "listeners": {
+              "http": [
+                {
+                  "observedGeneration": 1,
+                  "reason": "Accepted",
+                  "status": "True",
+                  "type": "Accepted"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "ResolvedRefs",
+                  "status": "True",
+                  "type": "ResolvedRefs"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "NoConflicts",
+                  "status": "False",
+                  "type": "Conflicted"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "Programmed",
+                  "status": "True",
+                  "type": "Programmed"
+                }
+              ]
+            },
+            "specAddresses": "omitted",
+            "specGeneration": 1
+          },
+          {
+            "assignedAddresses": 1,
+            "conditions": [
+              {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True",
+                "type": "Programmed"
+              }
+            ],
+            "listeners": {
+              "http": [
+                {
+                  "observedGeneration": 1,
+                  "reason": "Accepted",
+                  "status": "True",
+                  "type": "Accepted"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "ResolvedRefs",
+                  "status": "True",
+                  "type": "ResolvedRefs"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "NoConflicts",
+                  "status": "False",
+                  "type": "Conflicted"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "Programmed",
+                  "status": "True",
+                  "type": "Programmed"
+                }
+              ]
+            },
+            "specAddresses": "omitted",
+            "specGeneration": 2
+          },
+          {
+            "assignedAddresses": 0,
+            "conditions": [
+              {
+                "observedGeneration": 2,
+                "reason": "ListenersNotValid",
+                "status": "False",
+                "type": "Accepted"
+              },
+              {
+                "observedGeneration": 2,
+                "reason": "Invalid",
+                "status": "False",
+                "type": "Programmed"
+              }
+            ],
+            "listeners": {
+              "alternate": [
+                {
+                  "observedGeneration": 2,
+                  "reason": "UnsupportedValue",
+                  "status": "False",
+                  "type": "Accepted"
+                },
+                {
+                  "observedGeneration": 2,
+                  "reason": "ResolvedRefs",
+                  "status": "True",
+                  "type": "ResolvedRefs"
+                },
+                {
+                  "observedGeneration": 2,
+                  "reason": "NoConflicts",
+                  "status": "False",
+                  "type": "Conflicted"
+                },
+                {
+                  "observedGeneration": 2,
+                  "reason": "Invalid",
+                  "status": "False",
+                  "type": "Programmed"
+                }
+              ],
+              "http": [
+                {
+                  "observedGeneration": 2,
+                  "reason": "UnsupportedValue",
+                  "status": "False",
+                  "type": "Accepted"
+                },
+                {
+                  "observedGeneration": 2,
+                  "reason": "ResolvedRefs",
+                  "status": "True",
+                  "type": "ResolvedRefs"
+                },
+                {
+                  "observedGeneration": 2,
+                  "reason": "NoConflicts",
+                  "status": "False",
+                  "type": "Conflicted"
+                },
+                {
+                  "observedGeneration": 2,
+                  "reason": "Invalid",
+                  "status": "False",
+                  "type": "Programmed"
+                }
+              ]
+            },
+            "specAddresses": "omitted",
+            "specGeneration": 2
+          },
+          {
+            "assignedAddresses": 0,
+            "conditions": [
+              {
+                "observedGeneration": 2,
+                "reason": "ListenersNotValid",
+                "status": "False",
+                "type": "Accepted"
+              },
+              {
+                "observedGeneration": 2,
+                "reason": "Invalid",
+                "status": "False",
+                "type": "Programmed"
+              }
+            ],
+            "listeners": {
+              "alternate": [
+                {
+                  "observedGeneration": 2,
+                  "reason": "UnsupportedValue",
+                  "status": "False",
+                  "type": "Accepted"
+                },
+                {
+                  "observedGeneration": 2,
+                  "reason": "ResolvedRefs",
+                  "status": "True",
+                  "type": "ResolvedRefs"
+                },
+                {
+                  "observedGeneration": 2,
+                  "reason": "NoConflicts",
+                  "status": "False",
+                  "type": "Conflicted"
+                },
+                {
+                  "observedGeneration": 2,
+                  "reason": "Invalid",
+                  "status": "False",
+                  "type": "Programmed"
+                }
+              ],
+              "http": [
+                {
+                  "observedGeneration": 2,
+                  "reason": "UnsupportedValue",
+                  "status": "False",
+                  "type": "Accepted"
+                },
+                {
+                  "observedGeneration": 2,
+                  "reason": "ResolvedRefs",
+                  "status": "True",
+                  "type": "ResolvedRefs"
+                },
+                {
+                  "observedGeneration": 2,
+                  "reason": "NoConflicts",
+                  "status": "False",
+                  "type": "Conflicted"
+                },
+                {
+                  "observedGeneration": 2,
+                  "reason": "Invalid",
+                  "status": "False",
+                  "type": "Programmed"
+                }
+              ]
+            },
+            "specAddresses": "omitted",
+            "specGeneration": 3
+          }
+        ],
+        "gateway-preserve-foreign-conditions": [
+          {
+            "assignedAddresses": 0,
+            "conditions": [
+              {
+                "reason": "Pending",
+                "status": "Unknown",
+                "type": "Accepted"
+              },
+              {
+                "reason": "Pending",
+                "status": "Unknown",
+                "type": "Programmed"
+              }
+            ],
+            "listeners": {},
+            "specAddresses": "omitted",
+            "specGeneration": 1
+          },
+          {
+            "assignedAddresses": 1,
+            "conditions": [
+              {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True",
+                "type": "Programmed"
+              }
+            ],
+            "listeners": {
+              "http": [
+                {
+                  "observedGeneration": 1,
+                  "reason": "Accepted",
+                  "status": "True",
+                  "type": "Accepted"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "ResolvedRefs",
+                  "status": "True",
+                  "type": "ResolvedRefs"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "NoConflicts",
+                  "status": "False",
+                  "type": "Conflicted"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "Programmed",
+                  "status": "True",
+                  "type": "Programmed"
+                }
+              ]
+            },
+            "specAddresses": "omitted",
+            "specGeneration": 1
+          },
+          {
+            "assignedAddresses": 1,
+            "conditions": [
+              {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True",
+                "type": "Programmed"
+              },
+              {
+                "observedGeneration": 1,
+                "reason": "Seeded",
+                "status": "True",
+                "type": "conformance.gateway.networking.k8s.io/StaleCondition"
+              }
+            ],
+            "listeners": {
+              "http": [
+                {
+                  "observedGeneration": 1,
+                  "reason": "Accepted",
+                  "status": "True",
+                  "type": "Accepted"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "ResolvedRefs",
+                  "status": "True",
+                  "type": "ResolvedRefs"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "NoConflicts",
+                  "status": "False",
+                  "type": "Conflicted"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "Programmed",
+                  "status": "True",
+                  "type": "Programmed"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "Seeded",
+                  "status": "True",
+                  "type": "conformance.gateway.networking.k8s.io/StaleCondition"
+                }
+              ]
+            },
+            "specAddresses": "omitted",
+            "specGeneration": 1
+          },
+          {
+            "assignedAddresses": 1,
+            "conditions": [
+              {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True",
+                "type": "Programmed"
+              },
+              {
+                "observedGeneration": 1,
+                "reason": "Seeded",
+                "status": "True",
+                "type": "conformance.gateway.networking.k8s.io/StaleCondition"
+              }
+            ],
+            "listeners": {
+              "http": [
+                {
+                  "observedGeneration": 1,
+                  "reason": "Accepted",
+                  "status": "True",
+                  "type": "Accepted"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "ResolvedRefs",
+                  "status": "True",
+                  "type": "ResolvedRefs"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "NoConflicts",
+                  "status": "False",
+                  "type": "Conflicted"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "Programmed",
+                  "status": "True",
+                  "type": "Programmed"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "Seeded",
+                  "status": "True",
+                  "type": "conformance.gateway.networking.k8s.io/StaleCondition"
+                }
+              ]
+            },
+            "specAddresses": "omitted",
+            "specGeneration": 2
+          },
+          {
+            "assignedAddresses": 1,
+            "conditions": [
+              {
+                "observedGeneration": 2,
+                "reason": "Accepted",
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "observedGeneration": 2,
+                "reason": "Programmed",
+                "status": "True",
+                "type": "Programmed"
+              },
+              {
+                "observedGeneration": 1,
+                "reason": "Seeded",
+                "status": "True",
+                "type": "conformance.gateway.networking.k8s.io/StaleCondition"
+              }
+            ],
+            "listeners": {
+              "http": [
+                {
+                  "observedGeneration": 2,
+                  "reason": "Accepted",
+                  "status": "True",
+                  "type": "Accepted"
+                },
+                {
+                  "observedGeneration": 2,
+                  "reason": "ResolvedRefs",
+                  "status": "True",
+                  "type": "ResolvedRefs"
+                },
+                {
+                  "observedGeneration": 2,
+                  "reason": "NoConflicts",
+                  "status": "False",
+                  "type": "Conflicted"
+                },
+                {
+                  "observedGeneration": 2,
+                  "reason": "Programmed",
+                  "status": "True",
+                  "type": "Programmed"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "Seeded",
+                  "status": "True",
+                  "type": "conformance.gateway.networking.k8s.io/StaleCondition"
+                }
+              ]
+            },
+            "specAddresses": "omitted",
+            "specGeneration": 2
+          },
+          {
+            "assignedAddresses": 1,
+            "conditions": [
+              {
+                "observedGeneration": 2,
+                "reason": "Accepted",
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "observedGeneration": 2,
+                "reason": "Programmed",
+                "status": "True",
+                "type": "Programmed"
+              },
+              {
+                "observedGeneration": 1,
+                "reason": "Seeded",
+                "status": "True",
+                "type": "conformance.gateway.networking.k8s.io/StaleCondition"
+              }
+            ],
+            "listeners": {
+              "http": [
+                {
+                  "observedGeneration": 2,
+                  "reason": "Accepted",
+                  "status": "True",
+                  "type": "Accepted"
+                },
+                {
+                  "observedGeneration": 2,
+                  "reason": "ResolvedRefs",
+                  "status": "True",
+                  "type": "ResolvedRefs"
+                },
+                {
+                  "observedGeneration": 2,
+                  "reason": "NoConflicts",
+                  "status": "False",
+                  "type": "Conflicted"
+                },
+                {
+                  "observedGeneration": 2,
+                  "reason": "Programmed",
+                  "status": "True",
+                  "type": "Programmed"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "Seeded",
+                  "status": "True",
+                  "type": "conformance.gateway.networking.k8s.io/StaleCondition"
+                }
+              ]
+            },
+            "specAddresses": "omitted",
+            "specGeneration": 3
+          }
+        ],
+        "gateway-without-address-value": [
+          {
+            "assignedAddresses": 0,
+            "conditions": [
+              {
+                "reason": "Pending",
+                "status": "Unknown",
+                "type": "Accepted"
+              },
+              {
+                "reason": "Pending",
+                "status": "Unknown",
+                "type": "Programmed"
+              }
+            ],
+            "listeners": {},
+            "specAddresses": "omitted",
+            "specGeneration": 1
+          },
+          {
+            "assignedAddresses": 1,
+            "conditions": [
+              {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True",
+                "type": "Programmed"
+              }
+            ],
+            "listeners": {
+              "http": [
+                {
+                  "observedGeneration": 1,
+                  "reason": "Accepted",
+                  "status": "True",
+                  "type": "Accepted"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "ResolvedRefs",
+                  "status": "True",
+                  "type": "ResolvedRefs"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "NoConflicts",
+                  "status": "False",
+                  "type": "Conflicted"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "Programmed",
+                  "status": "True",
+                  "type": "Programmed"
+                }
+              ]
+            },
+            "specAddresses": "omitted",
+            "specGeneration": 1
+          },
+          {
+            "assignedAddresses": 1,
+            "conditions": [
+              {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True",
+                "type": "Programmed"
+              }
+            ],
+            "listeners": {
+              "http": [
+                {
+                  "observedGeneration": 1,
+                  "reason": "Accepted",
+                  "status": "True",
+                  "type": "Accepted"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "ResolvedRefs",
+                  "status": "True",
+                  "type": "ResolvedRefs"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "NoConflicts",
+                  "status": "False",
+                  "type": "Conflicted"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "Programmed",
+                  "status": "True",
+                  "type": "Programmed"
+                }
+              ]
+            },
+            "specAddresses": "omitted",
+            "specGeneration": 2
+          }
+        ]
+      },
+      "gatewayWatchErrorFree": true,
+      "gatewayWatchSHA256": "c30570dee789f140baf0aee9bff09a96169ba83b8e4930294730a3e1fcbc21ed",
+      "kubernetes": {
+        "bundle_sha256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+        "class_config_crd_sha256": "39aa7fa4a30f187d5eed492fe3af821dc23498ab49ec4a37a6d4152cf70b8f16",
+        "container_runtime": [
+          "containerd://2.3.4"
+        ],
+        "crds": [
+          "backendtlspolicies.gateway.networking.k8s.io",
+          "gatewayclasses.gateway.networking.k8s.io",
+          "gateways.gateway.networking.k8s.io",
+          "grpcroutes.gateway.networking.k8s.io",
+          "httproutes.gateway.networking.k8s.io",
+          "listenersets.gateway.networking.k8s.io",
+          "openstackgatewayclassconfigs.gateway-api-openstack.github.io",
+          "referencegrants.gateway.networking.k8s.io",
+          "tcproutes.gateway.networking.k8s.io",
+          "tlsroutes.gateway.networking.k8s.io",
+          "udproutes.gateway.networking.k8s.io",
+          "xbackends.gateway.networking.x-k8s.io",
+          "xbackendtrafficpolicies.gateway.networking.x-k8s.io",
+          "xmeshes.gateway.networking.x-k8s.io",
+          "xtelemetrypolicies.gateway.networking.x-k8s.io"
+        ],
+        "echo_images": {
+          "registry.k8s.io/gateway-api/conformance/echo-basic:v0.1.0": "sha256:640d843263062f4391ecd74effd68673a69800852eb4ff31b8452a3301eae83b",
+          "registry.k8s.io/gateway-api/conformance/echo-basic:v0.2.0": "sha256:2e9146b0550f20c9082b1f8490729104ea0120bb0a41763bd02307db93028f20"
+        },
+        "etcdFilesystem": "tmpfs",
+        "gatewayGroupObjects": 0,
+        "node_count": 2,
+        "node_image": "sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed",
+        "oneKindCluster": true,
+        "openStackClassConfigs": 0,
+        "readyNodes": 2,
+        "server_version": "v1.36.4",
+        "testIPVSRules": 0,
+        "testVIPs": 0,
+        "upstreamFixtureNamespaces": 0
+      },
+      "originalCases": [
+        "GatewayOptionalAddressValue",
+        "GatewayPreserveForeignConditions",
+        "GatewayObservedGenerationBump",
+        "HTTPRouteObservedGenerationBump"
+      ],
+      "patchSHA256": "3bce72fde7a7d65cbc111891e0ea6b66da57e94f361896cf03179af17d3e03a4",
+      "readyWorkloads": {
+        "imageTags": [
+          "registry.k8s.io/gateway-api/conformance/echo-basic:v0.1.0",
+          "registry.k8s.io/gateway-api/conformance/echo-basic:v0.2.0"
+        ],
+        "pods": 16,
+        "replicaSetOwned": 16,
+        "runningAndReady": 16
+      },
+      "runnerSHA256": "0752123687b51630cf58e6dc6e236bd583215a9a82eafbcadddfae9ce59abfb4",
+      "scope": "Four original Gateway and HTTPRoute status cases in a scoped local kind supplement",
+      "scopedSetupCompleted": true,
+      "sourceRevision": "455798411c13fd42f5c1568357f2c35cec2b2169",
+      "stagedFilesRemoved": true,
+      "startUTC": "2026-11-21T08:29:43.678689+00:00",
+      "suiteLogSHA256": "503f9b87f46603060aebb9bb4dfe1432b54e882274e33f5262af7426731bbaaf",
+      "watchCleanup": {
+        "kubectlWatchProcessesRemaining": 0,
+        "terminatedAfterSSHExit": true
+      }
+    },
+    "standard": {
+      "baseSHA256": "eec15359b2f8ce095f3da26dfbc9485725c06a985a15796f1bde2ac79158f6ed",
+      "cases": {
+        "GatewayObservedGenerationBump": {
+          "deadlineExceeded": true,
+          "elapsedSeconds": 301.73,
+          "entered": true,
+          "outcome": "FAIL",
+          "sourceFailureLines": [
+            "gateway-observed-generation-bump.go:80"
+          ]
+        },
+        "GatewayOptionalAddressValue": {
+          "deadlineExceeded": false,
+          "elapsedSeconds": 0.34,
+          "entered": true,
+          "outcome": "PASS",
+          "sourceFailureLines": []
+        },
+        "GatewayPreserveForeignConditions": {
+          "deadlineExceeded": false,
+          "elapsedSeconds": 3.33,
+          "entered": true,
+          "outcome": "PASS",
+          "sourceFailureLines": []
+        },
+        "HTTPRouteObservedGenerationBump": {
+          "backendType": "ClusterIP",
+          "blockingCondition": {
+            "observedGeneration": 2,
+            "reason": "UnsupportedValue",
+            "state": "False",
+            "type": "Accepted"
+          },
+          "conditionDeadlineSeconds": 60,
+          "deadlineExceeded": true,
+          "elapsedSeconds": 60.03,
+          "entered": true,
+          "outcome": "FAIL",
+          "requiredBackendType": "NodePort",
+          "sourceFailureLines": [
+            "httproute-observed-generation-bump.go:69"
+          ]
+        }
+      },
+      "channel": "standard",
+      "cloud": "mocked recording provider",
+      "elapsedSeconds": 394.224,
+      "exitCode": 1,
+      "fixtureCleanup": {
+        "gatewayGroupObjects": 0,
+        "oneKindCluster": true,
+        "openStackClassConfigs": 0,
+        "readyNodes": 2,
+        "testIPVSRules": 0,
+        "testVIPs": 0,
+        "upstreamFixtureNamespaces": 0
+      },
+      "gatewayAPI": "v1.7.0",
+      "gatewayWatch": {
+        "gateway-observed-generation-bump": [
+          {
+            "assignedAddresses": 0,
+            "conditions": [
+              {
+                "reason": "Pending",
+                "status": "Unknown",
+                "type": "Accepted"
+              },
+              {
+                "reason": "Pending",
+                "status": "Unknown",
+                "type": "Programmed"
+              }
+            ],
+            "listeners": {},
+            "specAddresses": "omitted",
+            "specGeneration": 1
+          },
+          {
+            "assignedAddresses": 1,
+            "conditions": [
+              {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True",
+                "type": "Programmed"
+              }
+            ],
+            "listeners": {
+              "http": [
+                {
+                  "observedGeneration": 1,
+                  "reason": "Accepted",
+                  "status": "True",
+                  "type": "Accepted"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "ResolvedRefs",
+                  "status": "True",
+                  "type": "ResolvedRefs"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "NoConflicts",
+                  "status": "False",
+                  "type": "Conflicted"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "Programmed",
+                  "status": "True",
+                  "type": "Programmed"
+                }
+              ]
+            },
+            "specAddresses": "omitted",
+            "specGeneration": 1
+          },
+          {
+            "assignedAddresses": 1,
+            "conditions": [
+              {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True",
+                "type": "Programmed"
+              }
+            ],
+            "listeners": {
+              "http": [
+                {
+                  "observedGeneration": 1,
+                  "reason": "Accepted",
+                  "status": "True",
+                  "type": "Accepted"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "ResolvedRefs",
+                  "status": "True",
+                  "type": "ResolvedRefs"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "NoConflicts",
+                  "status": "False",
+                  "type": "Conflicted"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "Programmed",
+                  "status": "True",
+                  "type": "Programmed"
+                }
+              ]
+            },
+            "specAddresses": "omitted",
+            "specGeneration": 2
+          },
+          {
+            "assignedAddresses": 0,
+            "conditions": [
+              {
+                "observedGeneration": 2,
+                "reason": "ListenersNotValid",
+                "status": "False",
+                "type": "Accepted"
+              },
+              {
+                "observedGeneration": 2,
+                "reason": "Invalid",
+                "status": "False",
+                "type": "Programmed"
+              }
+            ],
+            "listeners": {
+              "alternate": [
+                {
+                  "observedGeneration": 2,
+                  "reason": "UnsupportedValue",
+                  "status": "False",
+                  "type": "Accepted"
+                },
+                {
+                  "observedGeneration": 2,
+                  "reason": "ResolvedRefs",
+                  "status": "True",
+                  "type": "ResolvedRefs"
+                },
+                {
+                  "observedGeneration": 2,
+                  "reason": "NoConflicts",
+                  "status": "False",
+                  "type": "Conflicted"
+                },
+                {
+                  "observedGeneration": 2,
+                  "reason": "Invalid",
+                  "status": "False",
+                  "type": "Programmed"
+                }
+              ],
+              "http": [
+                {
+                  "observedGeneration": 2,
+                  "reason": "UnsupportedValue",
+                  "status": "False",
+                  "type": "Accepted"
+                },
+                {
+                  "observedGeneration": 2,
+                  "reason": "ResolvedRefs",
+                  "status": "True",
+                  "type": "ResolvedRefs"
+                },
+                {
+                  "observedGeneration": 2,
+                  "reason": "NoConflicts",
+                  "status": "False",
+                  "type": "Conflicted"
+                },
+                {
+                  "observedGeneration": 2,
+                  "reason": "Invalid",
+                  "status": "False",
+                  "type": "Programmed"
+                }
+              ]
+            },
+            "specAddresses": "omitted",
+            "specGeneration": 2
+          },
+          {
+            "assignedAddresses": 0,
+            "conditions": [
+              {
+                "observedGeneration": 2,
+                "reason": "ListenersNotValid",
+                "status": "False",
+                "type": "Accepted"
+              },
+              {
+                "observedGeneration": 2,
+                "reason": "Invalid",
+                "status": "False",
+                "type": "Programmed"
+              }
+            ],
+            "listeners": {
+              "alternate": [
+                {
+                  "observedGeneration": 2,
+                  "reason": "UnsupportedValue",
+                  "status": "False",
+                  "type": "Accepted"
+                },
+                {
+                  "observedGeneration": 2,
+                  "reason": "ResolvedRefs",
+                  "status": "True",
+                  "type": "ResolvedRefs"
+                },
+                {
+                  "observedGeneration": 2,
+                  "reason": "NoConflicts",
+                  "status": "False",
+                  "type": "Conflicted"
+                },
+                {
+                  "observedGeneration": 2,
+                  "reason": "Invalid",
+                  "status": "False",
+                  "type": "Programmed"
+                }
+              ],
+              "http": [
+                {
+                  "observedGeneration": 2,
+                  "reason": "UnsupportedValue",
+                  "status": "False",
+                  "type": "Accepted"
+                },
+                {
+                  "observedGeneration": 2,
+                  "reason": "ResolvedRefs",
+                  "status": "True",
+                  "type": "ResolvedRefs"
+                },
+                {
+                  "observedGeneration": 2,
+                  "reason": "NoConflicts",
+                  "status": "False",
+                  "type": "Conflicted"
+                },
+                {
+                  "observedGeneration": 2,
+                  "reason": "Invalid",
+                  "status": "False",
+                  "type": "Programmed"
+                }
+              ]
+            },
+            "specAddresses": "omitted",
+            "specGeneration": 3
+          }
+        ],
+        "gateway-preserve-foreign-conditions": [
+          {
+            "assignedAddresses": 0,
+            "conditions": [
+              {
+                "reason": "Pending",
+                "status": "Unknown",
+                "type": "Accepted"
+              },
+              {
+                "reason": "Pending",
+                "status": "Unknown",
+                "type": "Programmed"
+              }
+            ],
+            "listeners": {},
+            "specAddresses": "omitted",
+            "specGeneration": 1
+          },
+          {
+            "assignedAddresses": 1,
+            "conditions": [
+              {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True",
+                "type": "Programmed"
+              }
+            ],
+            "listeners": {
+              "http": [
+                {
+                  "observedGeneration": 1,
+                  "reason": "Accepted",
+                  "status": "True",
+                  "type": "Accepted"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "ResolvedRefs",
+                  "status": "True",
+                  "type": "ResolvedRefs"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "NoConflicts",
+                  "status": "False",
+                  "type": "Conflicted"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "Programmed",
+                  "status": "True",
+                  "type": "Programmed"
+                }
+              ]
+            },
+            "specAddresses": "omitted",
+            "specGeneration": 1
+          },
+          {
+            "assignedAddresses": 1,
+            "conditions": [
+              {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True",
+                "type": "Programmed"
+              },
+              {
+                "observedGeneration": 1,
+                "reason": "Seeded",
+                "status": "True",
+                "type": "conformance.gateway.networking.k8s.io/StaleCondition"
+              }
+            ],
+            "listeners": {
+              "http": [
+                {
+                  "observedGeneration": 1,
+                  "reason": "Accepted",
+                  "status": "True",
+                  "type": "Accepted"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "ResolvedRefs",
+                  "status": "True",
+                  "type": "ResolvedRefs"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "NoConflicts",
+                  "status": "False",
+                  "type": "Conflicted"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "Programmed",
+                  "status": "True",
+                  "type": "Programmed"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "Seeded",
+                  "status": "True",
+                  "type": "conformance.gateway.networking.k8s.io/StaleCondition"
+                }
+              ]
+            },
+            "specAddresses": "omitted",
+            "specGeneration": 1
+          },
+          {
+            "assignedAddresses": 1,
+            "conditions": [
+              {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True",
+                "type": "Programmed"
+              },
+              {
+                "observedGeneration": 1,
+                "reason": "Seeded",
+                "status": "True",
+                "type": "conformance.gateway.networking.k8s.io/StaleCondition"
+              }
+            ],
+            "listeners": {
+              "http": [
+                {
+                  "observedGeneration": 1,
+                  "reason": "Accepted",
+                  "status": "True",
+                  "type": "Accepted"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "ResolvedRefs",
+                  "status": "True",
+                  "type": "ResolvedRefs"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "NoConflicts",
+                  "status": "False",
+                  "type": "Conflicted"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "Programmed",
+                  "status": "True",
+                  "type": "Programmed"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "Seeded",
+                  "status": "True",
+                  "type": "conformance.gateway.networking.k8s.io/StaleCondition"
+                }
+              ]
+            },
+            "specAddresses": "omitted",
+            "specGeneration": 2
+          },
+          {
+            "assignedAddresses": 1,
+            "conditions": [
+              {
+                "observedGeneration": 2,
+                "reason": "Accepted",
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "observedGeneration": 2,
+                "reason": "Programmed",
+                "status": "True",
+                "type": "Programmed"
+              },
+              {
+                "observedGeneration": 1,
+                "reason": "Seeded",
+                "status": "True",
+                "type": "conformance.gateway.networking.k8s.io/StaleCondition"
+              }
+            ],
+            "listeners": {
+              "http": [
+                {
+                  "observedGeneration": 2,
+                  "reason": "Accepted",
+                  "status": "True",
+                  "type": "Accepted"
+                },
+                {
+                  "observedGeneration": 2,
+                  "reason": "ResolvedRefs",
+                  "status": "True",
+                  "type": "ResolvedRefs"
+                },
+                {
+                  "observedGeneration": 2,
+                  "reason": "NoConflicts",
+                  "status": "False",
+                  "type": "Conflicted"
+                },
+                {
+                  "observedGeneration": 2,
+                  "reason": "Programmed",
+                  "status": "True",
+                  "type": "Programmed"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "Seeded",
+                  "status": "True",
+                  "type": "conformance.gateway.networking.k8s.io/StaleCondition"
+                }
+              ]
+            },
+            "specAddresses": "omitted",
+            "specGeneration": 2
+          },
+          {
+            "assignedAddresses": 1,
+            "conditions": [
+              {
+                "observedGeneration": 2,
+                "reason": "Accepted",
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "observedGeneration": 2,
+                "reason": "Programmed",
+                "status": "True",
+                "type": "Programmed"
+              },
+              {
+                "observedGeneration": 1,
+                "reason": "Seeded",
+                "status": "True",
+                "type": "conformance.gateway.networking.k8s.io/StaleCondition"
+              }
+            ],
+            "listeners": {
+              "http": [
+                {
+                  "observedGeneration": 2,
+                  "reason": "Accepted",
+                  "status": "True",
+                  "type": "Accepted"
+                },
+                {
+                  "observedGeneration": 2,
+                  "reason": "ResolvedRefs",
+                  "status": "True",
+                  "type": "ResolvedRefs"
+                },
+                {
+                  "observedGeneration": 2,
+                  "reason": "NoConflicts",
+                  "status": "False",
+                  "type": "Conflicted"
+                },
+                {
+                  "observedGeneration": 2,
+                  "reason": "Programmed",
+                  "status": "True",
+                  "type": "Programmed"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "Seeded",
+                  "status": "True",
+                  "type": "conformance.gateway.networking.k8s.io/StaleCondition"
+                }
+              ]
+            },
+            "specAddresses": "omitted",
+            "specGeneration": 3
+          }
+        ],
+        "gateway-without-address-value": [
+          {
+            "assignedAddresses": 0,
+            "conditions": [
+              {
+                "reason": "Pending",
+                "status": "Unknown",
+                "type": "Accepted"
+              },
+              {
+                "reason": "Pending",
+                "status": "Unknown",
+                "type": "Programmed"
+              }
+            ],
+            "listeners": {},
+            "specAddresses": "omitted",
+            "specGeneration": 1
+          },
+          {
+            "assignedAddresses": 1,
+            "conditions": [
+              {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True",
+                "type": "Programmed"
+              }
+            ],
+            "listeners": {
+              "http": [
+                {
+                  "observedGeneration": 1,
+                  "reason": "Accepted",
+                  "status": "True",
+                  "type": "Accepted"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "ResolvedRefs",
+                  "status": "True",
+                  "type": "ResolvedRefs"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "NoConflicts",
+                  "status": "False",
+                  "type": "Conflicted"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "Programmed",
+                  "status": "True",
+                  "type": "Programmed"
+                }
+              ]
+            },
+            "specAddresses": "omitted",
+            "specGeneration": 1
+          },
+          {
+            "assignedAddresses": 1,
+            "conditions": [
+              {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True",
+                "type": "Programmed"
+              }
+            ],
+            "listeners": {
+              "http": [
+                {
+                  "observedGeneration": 1,
+                  "reason": "Accepted",
+                  "status": "True",
+                  "type": "Accepted"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "ResolvedRefs",
+                  "status": "True",
+                  "type": "ResolvedRefs"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "NoConflicts",
+                  "status": "False",
+                  "type": "Conflicted"
+                },
+                {
+                  "observedGeneration": 1,
+                  "reason": "Programmed",
+                  "status": "True",
+                  "type": "Programmed"
+                }
+              ]
+            },
+            "specAddresses": "omitted",
+            "specGeneration": 2
+          }
+        ]
+      },
+      "gatewayWatchErrorFree": true,
+      "gatewayWatchSHA256": "7ae083eed22a3cf02579f3752329ce0f03fb382594008bcdaade40c0b0aa1717",
+      "kubernetes": {
+        "bundle_sha256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+        "class_config_crd_sha256": "39aa7fa4a30f187d5eed492fe3af821dc23498ab49ec4a37a6d4152cf70b8f16",
+        "container_runtime": [
+          "containerd://2.3.4"
+        ],
+        "crds": [
+          "backendtlspolicies.gateway.networking.k8s.io",
+          "gatewayclasses.gateway.networking.k8s.io",
+          "gateways.gateway.networking.k8s.io",
+          "grpcroutes.gateway.networking.k8s.io",
+          "httproutes.gateway.networking.k8s.io",
+          "listenersets.gateway.networking.k8s.io",
+          "openstackgatewayclassconfigs.gateway-api-openstack.github.io",
+          "referencegrants.gateway.networking.k8s.io",
+          "tcproutes.gateway.networking.k8s.io",
+          "tlsroutes.gateway.networking.k8s.io",
+          "udproutes.gateway.networking.k8s.io"
+        ],
+        "echo_images": {
+          "registry.k8s.io/gateway-api/conformance/echo-basic:v0.1.0": "sha256:640d843263062f4391ecd74effd68673a69800852eb4ff31b8452a3301eae83b",
+          "registry.k8s.io/gateway-api/conformance/echo-basic:v0.2.0": "sha256:2e9146b0550f20c9082b1f8490729104ea0120bb0a41763bd02307db93028f20"
+        },
+        "etcdFilesystem": "tmpfs",
+        "gatewayGroupObjects": 0,
+        "node_count": 2,
+        "node_image": "sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed",
+        "oneKindCluster": true,
+        "openStackClassConfigs": 0,
+        "readyNodes": 2,
+        "server_version": "v1.36.4",
+        "testIPVSRules": 0,
+        "testVIPs": 0,
+        "upstreamFixtureNamespaces": 0
+      },
+      "originalCases": [
+        "GatewayOptionalAddressValue",
+        "GatewayPreserveForeignConditions",
+        "GatewayObservedGenerationBump",
+        "HTTPRouteObservedGenerationBump"
+      ],
+      "patchSHA256": "3bce72fde7a7d65cbc111891e0ea6b66da57e94f361896cf03179af17d3e03a4",
+      "readyWorkloads": {
+        "imageTags": [
+          "registry.k8s.io/gateway-api/conformance/echo-basic:v0.1.0",
+          "registry.k8s.io/gateway-api/conformance/echo-basic:v0.2.0"
+        ],
+        "pods": 16,
+        "replicaSetOwned": 16,
+        "runningAndReady": 16
+      },
+      "runnerSHA256": "0752123687b51630cf58e6dc6e236bd583215a9a82eafbcadddfae9ce59abfb4",
+      "scope": "Four original Gateway and HTTPRoute status cases in a scoped local kind supplement",
+      "scopedSetupCompleted": true,
+      "sourceRevision": "455798411c13fd42f5c1568357f2c35cec2b2169",
+      "stagedFilesRemoved": true,
+      "startUTC": "2026-11-21T08:21:22.428079+00:00",
+      "suiteLogSHA256": "9a103f4c79290b1b9988b66a65ef4be4a28c57c834ed1130eff4446a49b53823",
+      "watchCleanup": {
+        "kubectlWatchProcessesRemaining": 0,
+        "terminatedAfterSSHExit": true
+      }
+    }
+  },
+  "totals": {
+    "experimental": {
+      "FAIL": 2,
+      "PASS": 2
+    },
+    "standard": {
+      "FAIL": 2,
+      "PASS": 2
+    }
+  },
+  "upstreamRevision": "e26d183dbbc1bb782b78addbd26faba03955c152"
+}

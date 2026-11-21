@@ -19,6 +19,7 @@ package httproute
 import (
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -31,31 +32,50 @@ import (
 )
 
 func TestNodePortRouteUsesLogicalMatchAndSharedEndpointObservation(t *testing.T) {
-	cfg := testConfig()
-	_, gateway := providerRouteParentObjects(cfg)
-	route := mapperTestHTTPRoute(gateway.Namespace, "api", gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name)}, "backend")
-	route.UID = "route-uid"
-	route.Spec.Hostnames = []gatewayv1.Hostname{"api.example.test"}
-	route.Spec.Rules[0].Matches = []gatewayv1.HTTPRouteMatch{{Path: &gatewayv1.HTTPPathMatch{
-		Type: ptr.To(gatewayv1.PathMatchPathPrefix), Value: ptr.To("/api/"),
-	}}}
-	service, endpoints, node := validNodePortBackend(gateway.Namespace, "backend")
-	endpoints.Endpoints[0].Addresses = []string{"198.51.100.20"}
-	reader := &fanoutCountingClient{Client: indexedFakeClientBuilder(testScheme(t), cfg).WithObjects(service, endpoints, node).Build()}
-	r := &Reconciler{Config: cfg}
-	desired, err := r.buildRouteModelWithReader(t.Context(), reader, route, gateway)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if desired.Hostname != "api.example.test" || desired.PathType != cloud.PathMatchPrefix || desired.PathValue != "/api" {
-		t.Fatalf("cloud match did not use normalized logical model: %#v", desired)
-	}
-	want := []cloud.Member{{Address: "192.0.2.10", Port: 30080}}
-	if !slices.Equal(desired.Members, want) {
-		t.Fatalf("members = %v, want existing NodePort transport %v", desired.Members, want)
-	}
-	if reader.gets != 1 || reader.lists != 2 {
-		t.Fatalf("reads = %d gets, %d lists, want one Service, EndpointSlice list, and Node list", reader.gets, reader.lists)
+	label := strings.Repeat("a", 60)
+	longSuffix := strings.Join([]string{label, label, label, strings.Repeat("b", 39)}, ".")
+	for _, test := range []struct {
+		name     string
+		listener gatewayv1.Hostname
+		routes   []gatewayv1.Hostname
+		want     string
+	}{
+		{"nested wildcards", "*.svc.example.test", []gatewayv1.Hostname{"*.example.test"}, "*.svc.example.test"},
+		{"listener-only hostname", "api.example.test", nil, "api.example.test"},
+		{"long wildcard narrowed to an exact hostname", gatewayv1.Hostname("*." + longSuffix), []gatewayv1.Hostname{gatewayv1.Hostname("x." + longSuffix)}, "x." + longSuffix},
+		{"exclude disjoint declaration", "*.example.test", []gatewayv1.Hostname{"api.example.test", "other.test"}, "api.example.test"},
+		{"deduplicate collapsed intersections", "api.example.test", []gatewayv1.Hostname{"*.example.test", "api.example.test", "api.example.test"}, "api.example.test"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := testConfig()
+			_, gateway := providerRouteParentObjects(cfg)
+			route := mapperTestHTTPRoute(gateway.Namespace, "api", gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name)}, "backend")
+			route.UID = "route-uid"
+			gateway.Spec.Listeners[0].Hostname = ptr.To(test.listener)
+			gateway.Spec.Addresses = []gatewayv1.GatewaySpecAddress{{Type: ptr.To(gatewayv1.IPAddressType)}}
+			route.Spec.Hostnames = test.routes
+			route.Spec.Rules[0].Matches = []gatewayv1.HTTPRouteMatch{{Path: &gatewayv1.HTTPPathMatch{
+				Type: ptr.To(gatewayv1.PathMatchPathPrefix), Value: ptr.To("/api/"),
+			}}}
+			service, endpoints, node := validNodePortBackend(gateway.Namespace, "backend")
+			endpoints.Endpoints[0].Addresses = []string{"198.51.100.20"}
+			reader := &fanoutCountingClient{Client: indexedFakeClientBuilder(testScheme(t), cfg).WithObjects(service, endpoints, node).Build()}
+			r := &Reconciler{Config: cfg}
+			desired, err := r.buildRouteModelWithReader(t.Context(), reader, route, gateway)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if desired.Hostname != test.want || desired.PathType != cloud.PathMatchPrefix || desired.PathValue != "/api" {
+				t.Fatalf("cloud match did not use normalized logical model: %#v", desired)
+			}
+			want := []cloud.Member{{Address: "192.0.2.10", Port: 30080}}
+			if !slices.Equal(desired.Members, want) {
+				t.Fatalf("members = %v, want existing NodePort transport %v", desired.Members, want)
+			}
+			if reader.gets != 1 || reader.lists != 2 {
+				t.Fatalf("reads = %d gets, %d lists, want one Service, EndpointSlice list, and Node list", reader.gets, reader.lists)
+			}
+		})
 	}
 }
 
@@ -67,20 +87,14 @@ func TestLogicalModelCannotEnableUnmappedNodePortBehavior(t *testing.T) {
 		{name: "multiple backends", change: func(route *gatewayv1.HTTPRoute) {
 			route.Spec.Rules[0].BackendRefs = append(route.Spec.Rules[0].BackendRefs, route.Spec.Rules[0].BackendRefs[0])
 		}},
-		{name: "multiple rules", change: func(route *gatewayv1.HTTPRoute) {
-			route.Spec.Rules = append(route.Spec.Rules, *route.Spec.Rules[0].DeepCopy())
-		}},
 		{name: "unresolved filter", change: func(route *gatewayv1.HTTPRoute) {
 			route.Spec.Rules[0].Filters = []gatewayv1.HTTPRouteFilter{{Type: gatewayv1.HTTPRouteFilterExtensionRef}}
 		}},
-		{name: "unresolved backend", change: func(route *gatewayv1.HTTPRoute) {
-			route.Spec.Rules[0].BackendRefs[0].Name = "missing"
+		{name: "missing backend port", change: func(route *gatewayv1.HTTPRoute) {
+			route.Spec.Rules[0].BackendRefs[0].Port = nil
 		}},
 		{name: "header predicate", change: func(route *gatewayv1.HTTPRoute) {
 			route.Spec.Rules[0].Matches = []gatewayv1.HTTPRouteMatch{{Headers: []gatewayv1.HTTPHeaderMatch{{Name: "x-version", Value: "v2"}}}}
-		}},
-		{name: "wildcard hostname", change: func(route *gatewayv1.HTTPRoute) {
-			route.Spec.Hostnames = []gatewayv1.Hostname{"*.example.test"}
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -96,7 +110,7 @@ func TestLogicalModelCannotEnableUnmappedNodePortBehavior(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, _, err = supportedRouteModel(logical, cloud.MemberModeNodePort)
+			_, _, err = supportedRouteModel(logical, gateway.Spec.Listeners[0])
 			var rejected *routeBuildError
 			if !errors.As(err, &rejected) || rejected.kind != routeErrorUnsupported {
 				t.Fatalf("unmapped logical model escaped NodePort lowering: %v", err)

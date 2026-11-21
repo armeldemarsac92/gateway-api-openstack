@@ -18,6 +18,7 @@ package topology
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"net/http"
 	"net/netip"
@@ -67,6 +68,27 @@ func (r *Resolver) resolveSubnet(ctx context.Context, reference cloud.ResourceRe
 		return nil, invalid("subnet CIDR does not match its IP version")
 	}
 	return subnet, nil
+}
+
+// VIPSubnetSupports applies stock Neutron's IPv4 fixed-address subnet rules.
+func (r *Resolver) VIPSubnetSupports(ctx context.Context, subnetID string, address netip.Addr) (bool, error) {
+	subnet, err := r.resolveSubnet(ctx, cloud.ResourceReference{ID: subnetID})
+	if err != nil {
+		return false, err
+	}
+	prefix := netip.MustParsePrefix(subnet.CIDR).Masked() // resolveSubnet validated the CIDR.
+	if !address.Is4() || !prefix.Contains(address) || address == prefix.Addr() {
+		return false, nil
+	}
+	// Neutron permits the second address of a /31. Its first-address check
+	// also rejects the sole address of a /32.
+	if prefix.Bits() == 31 {
+		return true, nil
+	}
+	first, requested := prefix.Addr().As4(), address.As4()
+	hostMask := ^uint32(0) >> prefix.Bits()
+	broadcast := binary.BigEndian.Uint32(first[:]) | hostMask
+	return binary.BigEndian.Uint32(requested[:]) != broadcast, nil
 }
 
 type externalNetwork struct {

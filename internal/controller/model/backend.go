@@ -24,6 +24,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -78,7 +79,7 @@ func resolveBackend(route *gatewayv1.HTTPRoute, reference gatewayv1.HTTPBackendR
 	group.Port = port.DeepCopy()
 	group.Port.Protocol = corev1.ProtocolTCP
 	group.State = BackendResolved
-	group.Endpoints = resolveServiceEndpoints(service, port, input.EndpointSlices)
+	group.Endpoints = ResolveServiceEndpoints(service, port, input.EndpointSlices)
 	return group
 }
 
@@ -97,6 +98,11 @@ func BackendServiceReference(namespace string, reference gatewayv1.BackendObject
 // BackendReferenceAllowed checks Service reference authorization against observed grants.
 // It performs no reads and does not confer ownership of the referenced Service.
 func BackendReferenceAllowed(namespace string, target types.NamespacedName, grants []gatewayv1.ReferenceGrant) bool {
+	return BackendReferenceAllowedFor("HTTPRoute", namespace, target, grants)
+}
+
+// BackendReferenceAllowedFor checks the exact source kind, namespace and Service target.
+func BackendReferenceAllowedFor(kind gatewayv1.Kind, namespace string, target types.NamespacedName, grants []gatewayv1.ReferenceGrant) bool {
 	if namespace == target.Namespace {
 		return true
 	}
@@ -105,7 +111,7 @@ func BackendReferenceAllowed(namespace string, target types.NamespacedName, gran
 			continue
 		}
 		fromAllowed := slices.ContainsFunc(grant.Spec.From, func(from gatewayv1.ReferenceGrantFrom) bool {
-			return from.Group == gatewayv1.GroupName && from.Kind == "HTTPRoute" && string(from.Namespace) == namespace
+			return from.Group == gatewayv1.GroupName && from.Kind == kind && string(from.Namespace) == namespace
 		})
 		if !fromAllowed {
 			continue
@@ -131,32 +137,46 @@ func findBackendService(key types.NamespacedName, services []corev1.Service) *co
 
 // ResolveServicePort resolves the referenced TCP port and HTTP appProtocol.
 func ResolveServicePort(service *corev1.Service, selected *gatewayv1.PortNumber) (*corev1.ServicePort, *Diagnostic) {
+	port, diagnostic := ResolveTCPServicePort(service, selected)
+	if diagnostic == nil && port.AppProtocol != nil && !slices.Contains([]string{"http", "kubernetes.io/http", "kubernetes.io/ws"}, *port.AppProtocol) {
+		return nil, backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "backend Service appProtocol is not supported for HTTP forwarding")
+	}
+	return port, diagnostic
+}
+
+// ResolveTCPServicePort selects a TCP port regardless of the application protocol it transports.
+func ResolveTCPServicePort(service *corev1.Service, selected *gatewayv1.PortNumber) (*corev1.ServicePort, *Diagnostic) {
+	return ResolveTransportServicePort(service, selected, corev1.ProtocolTCP)
+}
+
+// ResolveTransportServicePort selects the requested Service port and IP protocol.
+// Kubernetes defaults a missing Service port protocol to TCP.
+func ResolveTransportServicePort(service *corev1.Service, selected *gatewayv1.PortNumber, protocol corev1.Protocol) (*corev1.ServicePort, *Diagnostic) {
 	var unsupportedProtocol bool
 	for index := range service.Spec.Ports {
 		port := &service.Spec.Ports[index]
 		if selected == nil || port.Port != int32(*selected) {
 			continue
 		}
-		if port.Protocol != "" && port.Protocol != corev1.ProtocolTCP {
+		if servicePortProtocol(port) != protocol {
 			unsupportedProtocol = true
 			continue
-		}
-		if port.AppProtocol != nil && *port.AppProtocol != "http" && *port.AppProtocol != "kubernetes.io/http" {
-			return nil, backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "backend Service appProtocol is not supported for HTTP forwarding")
 		}
 		return port, nil
 	}
 	if unsupportedProtocol {
-		return nil, backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "backend Service port must use TCP")
+		return nil, backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, fmt.Sprintf("backend Service port must use %s", protocol))
 	}
 	return nil, backendDiagnostic(gatewayv1.RouteReasonBackendNotFound,
 		fmt.Sprintf("backend Service %s/%s does not expose the referenced port", service.Namespace, service.Name))
 }
 
-func resolveServiceEndpoints(service *corev1.Service, servicePort *corev1.ServicePort, endpointSlices []discoveryv1.EndpointSlice) []Endpoint {
+// ResolveServiceEndpoints identifies distinct endpoint observations for the selected Service port.
+func ResolveServiceEndpoints(service *corev1.Service, servicePort *corev1.ServicePort, endpointSlices []discoveryv1.EndpointSlice) []Endpoint {
 	observations := map[Endpoint]struct{}{}
 	for _, endpointSlice := range endpointSlices {
-		if !endpointSlice.DeletionTimestamp.IsZero() || endpointSlice.Namespace != service.Namespace || endpointSlice.Labels[discoveryv1.LabelServiceName] != service.Name {
+		if !endpointSlice.DeletionTimestamp.IsZero() || endpointSlice.Namespace != service.Namespace || endpointSlice.Labels[discoveryv1.LabelServiceName] != service.Name ||
+			!EndpointSliceOwnerMatchesService(&endpointSlice, service) {
 			continue
 		}
 		if endpointSlice.AddressType != discoveryv1.AddressTypeIPv4 && endpointSlice.AddressType != discoveryv1.AddressTypeIPv6 {
@@ -165,7 +185,7 @@ func resolveServiceEndpoints(service *corev1.Service, servicePort *corev1.Servic
 		if len(service.Spec.IPFamilies) != 0 && !slices.Contains(service.Spec.IPFamilies, corev1.IPFamily(endpointSlice.AddressType)) {
 			continue
 		}
-		port := endpointPort(endpointSlice.Ports, servicePort.Name)
+		port := EndpointSlicePort(servicePort, endpointSlice.Ports)
 		if port != 0 {
 			collectEndpointObservations(endpointSlice, port, observations)
 		}
@@ -178,9 +198,43 @@ func resolveServiceEndpoints(service *corev1.Service, servicePort *corev1.Servic
 	return endpoints
 }
 
-func endpointPort(ports []discoveryv1.EndpointPort, name string) int32 {
+// EndpointSliceOwnerMatchesService checks the identity of a controlling core
+// Service when the backend Service has a UID. Other slices rely on the Service label.
+func EndpointSliceOwnerMatchesService(slice *discoveryv1.EndpointSlice, service *corev1.Service) bool {
+	owner := endpointSliceServiceOwner(slice)
+	return service.UID == "" || owner == nil || (owner.UID == service.UID && owner.Name == service.Name)
+}
+
+// EndpointSliceServiceOwnerChanged compares the controller identity used to select members.
+func EndpointSliceServiceOwnerChanged(oldSlice, newSlice *discoveryv1.EndpointSlice) bool {
+	oldOwner, newOwner := endpointSliceServiceOwner(oldSlice), endpointSliceServiceOwner(newSlice)
+	if oldOwner == nil || newOwner == nil {
+		return oldOwner != newOwner
+	}
+	return oldOwner.UID != newOwner.UID || oldOwner.Name != newOwner.Name
+}
+
+func endpointSliceServiceOwner(slice *discoveryv1.EndpointSlice) *metav1.OwnerReference {
+	owner := metav1.GetControllerOfNoCopy(slice)
+	if owner == nil || owner.APIVersion != corev1.SchemeGroupVersion.String() || owner.Kind != "Service" {
+		return nil
+	}
+	return owner
+}
+
+func servicePortProtocol(port *corev1.ServicePort) corev1.Protocol {
+	if port.Protocol == "" {
+		return corev1.ProtocolTCP
+	}
+	return port.Protocol
+}
+
+// EndpointSlicePort matches a ServicePort's name and transport protocol.
+// A named targetPort may resolve to a different number in each EndpointSlice.
+func EndpointSlicePort(servicePort *corev1.ServicePort, ports []discoveryv1.EndpointPort) int32 {
+	protocol := servicePortProtocol(servicePort)
 	for _, port := range ports {
-		if ptr.Deref(port.Name, "") == name && ptr.Deref(port.Protocol, corev1.ProtocolTCP) == corev1.ProtocolTCP && ptr.Deref(port.Port, 0) > 0 {
+		if ptr.Deref(port.Name, "") == servicePort.Name && ptr.Deref(port.Protocol, corev1.ProtocolTCP) == protocol && ptr.Deref(port.Port, 0) > 0 {
 			return *port.Port
 		}
 	}

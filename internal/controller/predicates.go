@@ -34,6 +34,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	gatewayconsts "sigs.k8s.io/gateway-api/pkg/consts"
+
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
 func updatePredicate(changed func(client.Object, client.Object) bool) predicate.Predicate {
@@ -99,7 +101,8 @@ func GatewayClassForGatewayPredicate() predicate.Predicate {
 		if !oldOK || !newOK {
 			return true
 		}
-		return generationOrDeletionChanged(oldClass, newClass) ||
+		return oldClass.UID != newClass.UID ||
+			generationOrDeletionChanged(oldClass, newClass) ||
 			gatewayClassConditionStateFor(oldClass, gatewayv1.GatewayClassConditionStatusAccepted) !=
 				gatewayClassConditionStateFor(newClass, gatewayv1.GatewayClassConditionStatusAccepted) ||
 			gatewayClassConditionStateFor(oldClass, gatewayv1.GatewayClassConditionStatusSupportedVersion) !=
@@ -127,7 +130,8 @@ func GatewayAPICRDReconcilePredicate() predicate.Predicate {
 			return generationOrDeletionChanged(event.ObjectOld, event.ObjectNew) ||
 				event.ObjectOld.GetName() != event.ObjectNew.GetName() ||
 				event.ObjectOld.GetAnnotations()[gatewayconsts.BundleVersionAnnotation] !=
-					event.ObjectNew.GetAnnotations()[gatewayconsts.BundleVersionAnnotation]
+					event.ObjectNew.GetAnnotations()[gatewayconsts.BundleVersionAnnotation] ||
+				event.ObjectOld.GetAnnotations()[gatewayconsts.ChannelAnnotation] != event.ObjectNew.GetAnnotations()[gatewayconsts.ChannelAnnotation]
 		},
 		GenericFunc: func(event event.GenericEvent) bool {
 			return isGatewayAPICRD(event.Object)
@@ -159,20 +163,20 @@ func HTTPRoutePeerPredicate() predicate.Predicate {
 	return updatePredicate(generationOrDeletionChanged)
 }
 
-// HTTPRouteForGatewayPredicate selects HTTPRoute changes that may affect a
-// Gateway's attached route state.
-func HTTPRouteForGatewayPredicate(config Config) predicate.Predicate {
+// RouteForGatewayPredicate selects Route changes that may affect a Gateway's
+// attached route state.
+func RouteForGatewayPredicate(config Config) predicate.Predicate {
 	return updatePredicate(func(oldObject, newObject client.Object) bool {
-		oldRoute, oldOK := oldObject.(*gatewayv1.HTTPRoute)
-		newRoute, newOK := newObject.(*gatewayv1.HTTPRoute)
+		_, oldStatuses, oldOK := RouteParents(oldObject)
+		_, newStatuses, newOK := RouteParents(newObject)
 		if !oldOK || !newOK {
 			return true
 		}
-		return generationOrDeletionChanged(oldRoute, newRoute) ||
-			routeBindingChanged(config, oldRoute, newRoute) ||
+		return generationOrDeletionChanged(oldObject, newObject) ||
+			routeBindingChanged(config, oldObject, newObject) ||
 			!equality.Semantic.DeepEqual(
-				controllerRouteParentStatuses(oldRoute, config.ControllerName),
-				controllerRouteParentStatuses(newRoute, config.ControllerName),
+				controllerRouteParentStatuses(oldStatuses, config.ControllerName),
+				controllerRouteParentStatuses(newStatuses, config.ControllerName),
 			)
 	})
 }
@@ -186,14 +190,16 @@ func GatewayForHTTPRoutePredicate(config Config) predicate.Predicate {
 		if !oldOK || !newOK {
 			return true
 		}
-		return generationOrDeletionChanged(oldGateway, newGateway) ||
+		return oldGateway.UID != newGateway.UID ||
+			generationOrDeletionChanged(oldGateway, newGateway) ||
 			gatewayBindingChanged(config, oldGateway, newGateway) ||
 			gatewayAcceptedState(oldGateway) != gatewayAcceptedState(newGateway) ||
-			gatewayProgrammedState(oldGateway) != gatewayProgrammedState(newGateway)
+			gatewayProgrammedState(oldGateway) != gatewayProgrammedState(newGateway) ||
+			!maps.Equal(programmedListenerSections(oldGateway), programmedListenerSections(newGateway))
 	})
 }
 
-// EndpointSlicePredicate selects changes to backend addresses or readiness.
+// EndpointSlicePredicate selects changes to backend membership and readiness.
 func EndpointSlicePredicate() predicate.Predicate {
 	return updatePredicate(func(oldObject, newObject client.Object) bool {
 		oldSlice, oldOK := oldObject.(*discoveryv1.EndpointSlice)
@@ -205,6 +211,7 @@ func EndpointSlicePredicate() predicate.Predicate {
 			!equality.Semantic.DeepEqual(oldSlice.Ports, newSlice.Ports) ||
 			oldSlice.Labels[discoveryv1.LabelServiceName] != newSlice.Labels[discoveryv1.LabelServiceName] ||
 			oldSlice.DeletionTimestamp.IsZero() != newSlice.DeletionTimestamp.IsZero() ||
+			model.EndpointSliceServiceOwnerChanged(oldSlice, newSlice) ||
 			!maps.Equal(endpointSliceBackendState(oldSlice), endpointSliceBackendState(newSlice))
 	})
 }
@@ -225,8 +232,8 @@ func NodePredicate(addressType corev1.NodeAddressType) predicate.Predicate {
 	})
 }
 
-// ServicePredicate selects Service spec and deletion changes. The core Service
-// API does not increment generation when its spec changes.
+// ServicePredicate selects Service identity, spec and deletion changes. The
+// core Service API does not increment generation when its spec changes.
 func ServicePredicate() predicate.Predicate {
 	return updatePredicate(func(oldObject, newObject client.Object) bool {
 		oldService, oldOK := oldObject.(*corev1.Service)
@@ -234,16 +241,20 @@ func ServicePredicate() predicate.Predicate {
 		if !oldOK || !newOK {
 			return true
 		}
-		return !equality.Semantic.DeepEqual(oldService.Spec, newService.Spec) ||
+		return oldService.UID != newService.UID ||
+			!equality.Semantic.DeepEqual(oldService.Spec, newService.Spec) ||
 			!equality.Semantic.DeepEqual(oldService.DeletionTimestamp, newService.DeletionTimestamp)
 	})
 }
 
-// NamespacePredicate selects namespace labels used by allowedRoutes selectors.
+// NamespacePredicate selects labels and termination used by allowedRoutes.
 func NamespacePredicate() predicate.Predicate {
 	return updatePredicate(func(oldObject, newObject client.Object) bool {
-		return !maps.Equal(oldObject.GetLabels(), newObject.GetLabels()) ||
-			!equality.Semantic.DeepEqual(oldObject.GetDeletionTimestamp(), newObject.GetDeletionTimestamp())
+		oldNamespace, oldOK := oldObject.(*corev1.Namespace)
+		newNamespace, newOK := newObject.(*corev1.Namespace)
+		return oldOK && newOK && ((oldNamespace.Status.Phase == corev1.NamespaceTerminating) != (newNamespace.Status.Phase == corev1.NamespaceTerminating) ||
+			!maps.Equal(oldObject.GetLabels(), newObject.GetLabels()) ||
+			!equality.Semantic.DeepEqual(oldObject.GetDeletionTimestamp(), newObject.GetDeletionTimestamp()))
 	})
 }
 
@@ -261,25 +272,10 @@ func containsString(values []string, expected string) bool {
 }
 
 func gatewayBindingChanged(config Config, oldGateway, newGateway *gatewayv1.Gateway) bool {
-	if !GatewayTopologyMetadataEqual(config, oldGateway, newGateway) {
-		return true
-	}
-	if finalizerPresenceChanged(oldGateway, newGateway, config.GatewayFinalizer()) {
-		return true
-	}
-	for _, key := range []string{
-		config.GatewayListenerPortAnnotation(),
-		config.GatewayClusterIDAnnotation(),
-		config.GatewayProjectIDAnnotation(),
-	} {
-		if oldGateway.Annotations[key] != newGateway.Annotations[key] {
-			return true
-		}
-	}
-	return false
+	return !GatewayBindingMetadataEqual(config, oldGateway, newGateway)
 }
 
-func routeBindingChanged(config Config, oldRoute, newRoute *gatewayv1.HTTPRoute) bool {
+func routeBindingChanged(config Config, oldRoute, newRoute client.Object) bool {
 	for _, key := range []string{
 		config.RouteLifecycleAnnotation(),
 		config.RouteGatewayNamespaceAnnotation(),
@@ -287,8 +283,10 @@ func routeBindingChanged(config Config, oldRoute, newRoute *gatewayv1.HTTPRoute)
 		config.RouteGatewayUIDAnnotation(),
 		config.RouteClusterIDAnnotation(),
 		config.RouteProjectIDAnnotation(),
+		config.RouteListenerPortAnnotation(gatewayv1.UDPProtocolType),
+		config.RouteListenerPortAnnotation(gatewayv1.TCPProtocolType),
 	} {
-		if oldRoute.Annotations[key] != newRoute.Annotations[key] {
+		if oldRoute.GetAnnotations()[key] != newRoute.GetAnnotations()[key] {
 			return true
 		}
 	}
@@ -298,9 +296,9 @@ func routeBindingChanged(config Config, oldRoute, newRoute *gatewayv1.HTTPRoute)
 	)
 }
 
-func controllerRouteFinalizers(config Config, route *gatewayv1.HTTPRoute) []string {
+func controllerRouteFinalizers(config Config, route client.Object) []string {
 	finalizers := make([]string, 0, 2)
-	for _, finalizer := range route.Finalizers {
+	for _, finalizer := range route.GetFinalizers() {
 		if finalizer == config.RouteFinalizer() || strings.HasPrefix(finalizer, config.RouteBindingFinalizerPrefix()) {
 			finalizers = append(finalizers, finalizer)
 		}
@@ -309,9 +307,9 @@ func controllerRouteFinalizers(config Config, route *gatewayv1.HTTPRoute) []stri
 	return finalizers
 }
 
-func controllerRouteParentStatuses(route *gatewayv1.HTTPRoute, controllerName gatewayv1.GatewayController) []gatewayv1.RouteParentStatus {
-	statuses := make([]gatewayv1.RouteParentStatus, 0, len(route.Status.Parents))
-	for _, status := range route.Status.Parents {
+func controllerRouteParentStatuses(parents []gatewayv1.RouteParentStatus, controllerName gatewayv1.GatewayController) []gatewayv1.RouteParentStatus {
+	statuses := make([]gatewayv1.RouteParentStatus, 0, len(parents))
+	for _, status := range parents {
 		if status.ControllerName == controllerName {
 			statuses = append(statuses, status)
 		}
@@ -373,6 +371,18 @@ func gatewayProgrammedState(gateway *gatewayv1.Gateway) programmedState {
 		reason:             condition.Reason,
 		observedGeneration: condition.ObservedGeneration,
 	}
+}
+
+// A route bound to a section consumes that section's current Programmed state.
+func programmedListenerSections(gateway *gatewayv1.Gateway) map[gatewayv1.SectionName]bool {
+	ready := make(map[gatewayv1.SectionName]bool)
+	for _, listener := range gateway.Status.Listeners {
+		condition := meta.FindStatusCondition(listener.Conditions, string(gatewayv1.ListenerConditionProgrammed))
+		if condition != nil && condition.Status == metav1.ConditionTrue && condition.ObservedGeneration == gateway.Generation {
+			ready[listener.Name] = true
+		}
+	}
+	return ready
 }
 
 type endpointState struct {

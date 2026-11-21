@@ -47,12 +47,17 @@ type nodeServiceObservation struct {
 }
 
 func (inputs *nodeEventInputs) hasNodePortParent(ctx context.Context, r *Reconciler, route *gatewayv1.HTTPRoute) (bool, error) {
-	keys := controller.ParentGatewayKeys(route)
-	if len(keys) != 1 {
-		return false, nil
-	}
-	if observation, ok := inputs.parents[keys[0]]; ok {
-		return observation.eligible, observation.err
+	// Routes with different reference sets cannot share an eligibility result.
+	var key string
+	if len(route.Spec.ParentRefs) == 1 {
+		keys := controller.ParentGatewayKeys(route)
+		if len(keys) == 0 {
+			return false, nil
+		}
+		key = keys[0]
+		if observation, ok := inputs.parents[key]; ok {
+			return observation.eligible, observation.err
+		}
 	}
 	parents, err := r.managedParents(ctx, route)
 	observation := nodeEligibilityObservation{err: err}
@@ -61,7 +66,9 @@ func (inputs *nodeEventInputs) hasNodePortParent(ctx context.Context, r *Reconci
 		observation.err = err
 		observation.eligible = err == nil && topology.Topology.MemberMode == cloud.MemberModeNodePort
 	}
-	inputs.parents[keys[0]] = observation
+	if key != "" {
+		inputs.parents[key] = observation
+	}
 	return observation.eligible, observation.err
 }
 

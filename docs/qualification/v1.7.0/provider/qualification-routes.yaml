@@ -1,0 +1,147 @@
+# Route and Gateway specimens. Supply the class, Services, and test certificate
+# described in provider-feasibility.md in the isolated qualification namespace.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: stock-feasibility
+  namespace: feasibility
+spec:
+  gatewayClassName: qualification
+  listeners:
+  - name: http
+    protocol: HTTP
+    port: 80
+  - name: grpc
+    protocol: HTTPS
+    port: 8443
+    hostname: grpc.example.test
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - name: grpc-test-tls
+  - name: passthrough
+    protocol: TLS
+    port: 9443
+    tls:
+      mode: Passthrough
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: http-valid-and-empty
+  namespace: feasibility
+spec:
+  parentRefs:
+  - name: stock-feasibility
+    sectionName: http
+  rules:
+  - matches:
+    - path: {type: Exact, value: /plain}
+    backendRefs:
+    - name: echo-a
+      port: 80
+  - matches:
+    - path: {type: Exact, value: /mutate}
+    filters:
+    - type: RequestHeaderModifier
+      requestHeaderModifier:
+        add:
+        - {name: X-Test-Add, value: gateway-added}
+        set:
+        - {name: X-Test-Set, value: gateway-set}
+        remove: [X-Test-Remove]
+    backendRefs:
+    - name: echo-a
+      port: 80
+  - matches:
+    - path: {type: Exact, value: /omitted}
+  - matches:
+    - path: {type: Exact, value: /empty}
+    backendRefs: []
+  - matches:
+    - path: {type: Exact, value: /weighted-valid}
+    backendRefs:
+    - {name: echo-a, port: 80, weight: 3}
+    - {name: echo-b, port: 80, weight: 1}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: http-invalid
+  namespace: feasibility
+spec:
+  parentRefs:
+  - name: stock-feasibility
+    sectionName: http
+  rules:
+  - matches:
+    - path: {type: Exact, value: /weighted-invalid}
+    backendRefs:
+    - {name: echo-a, port: 80, weight: 3}
+    - {name: deliberately-absent, port: 80, weight: 1}
+  - matches:
+    - path: {type: Exact, value: /only-invalid}
+    backendRefs:
+    - {name: deliberately-absent, port: 80}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: GRPCRoute
+metadata:
+  name: exact-grpc
+  namespace: feasibility
+spec:
+  parentRefs:
+  - name: stock-feasibility
+    sectionName: grpc
+  hostnames: [grpc.example.test]
+  rules:
+  - matches:
+    - method: {type: Exact, service: feasibility.v1.Echo, method: First}
+    backendRefs:
+    - {name: grpc-a, port: 443}
+  - matches:
+    - method: {type: Exact, service: feasibility.v1.Echo, method: Second}
+    backendRefs:
+    - {name: grpc-b, port: 443}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: TLSRoute
+metadata:
+  name: tls-a
+  namespace: feasibility
+spec:
+  parentRefs:
+  - name: stock-feasibility
+    sectionName: passthrough
+  hostnames: [a.example.test]
+  rules:
+  - backendRefs:
+    - {name: tls-a, port: 443}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: TLSRoute
+metadata:
+  name: tls-b
+  namespace: feasibility
+spec:
+  parentRefs:
+  - name: stock-feasibility
+    sectionName: passthrough
+  hostnames: [b.example.test]
+  rules:
+  - backendRefs:
+    - {name: tls-b, port: 443}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: mesh-service-parent
+  namespace: feasibility
+spec:
+  parentRefs:
+  - {group: "", kind: Service, name: frontend}
+  rules:
+  - matches:
+    - path: {type: Exact, value: /split}
+    backendRefs:
+    - {name: echo-b, port: 80}

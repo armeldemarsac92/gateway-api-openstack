@@ -18,74 +18,417 @@ package graph
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/netip"
+	"slices"
 	"sort"
+	"strings"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	openstackidentity "github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/identity"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
+	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/monitors"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/pools"
 )
 
 const routeMonitorExpectedCodes = "200-399"
 
+var errWeightedTCPBackupUnknown = errors.New("waiting for Octavia to report the backup flag for every weighted TCP member")
+
 type observedRoutePolicy struct {
-	policy l7policies.L7Policy
-	role   string
-	rules  []observedRouteRule
+	policy        l7policies.L7Policy
+	role          string
+	rules         []observedRouteRule
+	versioned     bool
+	redirect      bool
+	adminObserved bool
 }
 
 type observedRouteRule struct {
-	rule l7policies.Rule
-	role string
+	rule          l7policies.Rule
+	role          string
+	base          string
+	flagsObserved bool
 }
 
 type observedRouteGraph struct {
-	pool     *pools.Pool
-	members  []pools.Member
-	monitor  *monitors.Monitor
-	policies []observedRoutePolicy
+	pool                   *pools.Pool
+	members                []pools.Member
+	memberBackupUnreported map[string]struct{}
+	memberAdminUnreported  map[string]struct{}
+	monitor                *monitors.Monitor
+	policies               []observedRoutePolicy
+	httpParts              map[string]*observedRouteGraph
 }
 
-// observeGatewayRoutes reads every child once and assigns it to an exact route
-// identity. An unaccounted child blocks the entire graph before any mutation.
-func (p *Provider) observeGatewayRoutes(ctx context.Context, identities []Identity, gateway cloud.GatewayState) ([]observedRouteGraph, error) {
-	graphs := make([]observedRouteGraph, len(identities))
-	poolItems, err := p.octavia.ListPools(ctx, pools.ListOpts{
-		LoadbalancerID: gateway.LoadBalancerID,
-		ProjectID:      p.projectID,
+type routeGraphOwner struct {
+	identity                   Identity
+	cleanupProtocol            string
+	recovery                   *openstackidentity.RouteOwnerProof
+	expectsHTTPParts           bool
+	requiresPolicyAbsenceProof bool
+}
+
+func (owner routeGraphOwner) matchesRoute(tags []string, role string) bool {
+	if owner.recovery == nil {
+		return owner.identity.MatchesRoute(tags, role)
+	}
+	proof, ok := owner.identity.RouteOwner(tags, role)
+	return ok && proof == *owner.recovery
+}
+
+type routeResourceRole struct {
+	raw, base, backend, match string
+	redirect                  bool
+}
+
+func readRouteResourceRole(tags []string, bases ...string) (routeResourceRole, bool) {
+	raw, ok := openstackidentity.ResourceRole(tags)
+	if !ok {
+		return routeResourceRole{}, false
+	}
+	if slices.Contains(bases, raw) && raw != roleRuleRedirectGuard {
+		return routeResourceRole{raw: raw, base: raw}, true
+	}
+	if base, match, cell, _, ok := openstackidentity.ParseHTTPRedirectRole(raw); ok {
+		return routeResourceRole{raw: raw, base: base, backend: redirectPartKey(match), match: cell, redirect: true}, slices.Contains(bases, base)
+	}
+	base, backend, match, ok := openstackidentity.ParseHTTPFragmentRole(raw)
+	return routeResourceRole{raw: raw, base: base, backend: backend, match: match}, ok && slices.Contains(bases, base)
+}
+
+type routeGraphInventory struct {
+	owners           []routeGraphOwner
+	graphs           []observedRouteGraph
+	recoverGateway   *Identity
+	recoverAllRoutes bool
+	recovered        map[openstackidentity.RouteOwnerProof]int
+}
+
+func (inventory *routeGraphInventory) resolve(tags []string, bases ...string) (int, routeResourceRole, error) {
+	role, ok := readRouteResourceRole(tags, bases...)
+	if !ok {
+		return -1, role, fmt.Errorf("%w: Gateway route resource has an invalid or ambiguous role", cloud.ErrOwnershipConflict)
+	}
+	for index, owner := range inventory.owners {
+		if owner.matchesRoute(tags, role.raw) {
+			return index, role, nil
+		}
+	}
+	if inventory.recoverGateway != nil && (inventory.recoverAllRoutes || role.redirect) {
+		if proof, ok := inventory.recoverGateway.RouteOwner(tags, role.raw); ok {
+			if index, ok := inventory.recovered[proof]; ok {
+				return index, role, nil
+			}
+			index := len(inventory.owners)
+			inventory.owners = append(inventory.owners, routeGraphOwner{identity: *inventory.recoverGateway, recovery: &proof})
+			inventory.graphs = append(inventory.graphs, observedRouteGraph{})
+			inventory.recovered[proof] = index
+			return index, role, nil
+		}
+	}
+	return -1, role, fmt.Errorf("%w: Gateway contains an unaccounted or foreign route resource", cloud.ErrOwnershipConflict)
+}
+
+func (route *observedRouteGraph) part(backend string) *observedRouteGraph {
+	if backend == "" {
+		return route
+	}
+	if route.httpParts == nil {
+		route.httpParts = make(map[string]*observedRouteGraph)
+	}
+	if route.httpParts[backend] == nil {
+		route.httpParts[backend] = &observedRouteGraph{}
+	}
+	return route.httpParts[backend]
+}
+
+func (route observedRouteGraph) parts() []observedRouteGraph {
+	parts := []observedRouteGraph{route}
+	keys := make([]string, 0, len(route.httpParts))
+	for key := range route.httpParts {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		parts = append(parts, *route.httpParts[key])
+	}
+	return parts
+}
+
+type poolRouteOwner struct {
+	route   int
+	backend string
+}
+
+// A route retains its bound protocol after the listener is removed. With no
+// listener or Gateway binding, competing transport claims cannot identify it.
+func detachingProtocolWithoutListener(owners []routeGraphOwner) (string, error) {
+	var protocol string
+	for _, owner := range owners {
+		if owner.cleanupProtocol == "" {
+			continue
+		}
+		if protocol != "" && owner.cleanupProtocol != protocol {
+			return "", &cloud.GraphError{Identity: owner.identity.Value(), Err: fmt.Errorf("%w: detaching routes claim different protocols without a Gateway listener", cloud.ErrOwnershipConflict)}
+		}
+		protocol = owner.cleanupProtocol
+	}
+	return protocol, nil
+}
+
+func hasOtherCleanupProtocol(owners []routeGraphOwner, protocol string) bool {
+	return slices.ContainsFunc(owners, func(owner routeGraphOwner) bool {
+		return owner.cleanupProtocol != "" && owner.cleanupProtocol != protocol
 	})
+}
+
+func (policy observedRoutePolicy) pending() bool {
+	unsettled := func(status string) bool {
+		if policy.versioned {
+			return status != "ACTIVE" && status != "ERROR"
+		}
+		return strings.HasPrefix(status, "PENDING_")
+	}
+	return unsettled(policy.policy.ProvisioningStatus) ||
+		slices.ContainsFunc(policy.rules, func(rule observedRouteRule) bool { return unsettled(rule.rule.ProvisioningStatus) })
+}
+
+func (policy observedRoutePolicy) hasOutdatedHostname(value string) bool {
+	for _, observed := range policy.rules {
+		rule := observed.rule
+		if observed.role == roleRuleHost || observed.base == roleRuleHost {
+			return value == "" || rule.Value != value || rule.RuleType != string(l7policies.TypeHostName) ||
+				rule.CompareType != string(l7policies.CompareTypeRegex) || rule.Invert || !rule.AdminStateUp ||
+				rule.ProvisioningStatus == "ERROR" || rule.ProvisioningStatus == "PENDING_UPDATE" || rule.ProvisioningStatus == "PENDING_DELETE"
+		}
+	}
+	// Policies are created disabled, before their path and hostname rules.
+	return value != "" && policy.policy.AdminStateUp
+}
+
+func (route observedRouteGraph) backendProvisioningIssue(pendingOnly, requireActive bool) string {
+	issue := func(resource, id, status string) string {
+		// Older observations may omit the status. Current Octavia supplies it
+		// for all three backend resource types.
+		if status == "" && !requireActive || status == "ACTIVE" || pendingOnly && !strings.HasPrefix(status, "PENDING_") {
+			return ""
+		}
+		return fmt.Sprintf("Octavia %s %s provisioning status is %s", resource, id, status)
+	}
+	if route.pool != nil {
+		if message := issue("pool", route.pool.ID, route.pool.ProvisioningStatus); message != "" {
+			return message
+		}
+	}
+	for _, member := range route.members {
+		if message := issue("member", member.ID, member.ProvisioningStatus); message != "" {
+			return message
+		}
+	}
+	if route.monitor != nil {
+		return issue("health monitor", route.monitor.ID, route.monitor.ProvisioningStatus)
+	}
+	return ""
+}
+
+func policyPositionsMatch(wanted []desiredPolicy, actual []observedRoutePolicy) bool {
+	if len(wanted) != len(actual) {
+		return false
+	}
+	for _, desired := range wanted {
+		if !slices.ContainsFunc(actual, func(policy observedRoutePolicy) bool {
+			return policy.role == desired.role && policy.policy.Position == desired.position
+		}) {
+			return false
+		}
+	}
+	return true
+}
+
+// observeRouteGraphs reads every child once and assigns it to an exact route
+// identity. An unaccounted child blocks the entire graph before any mutation.
+func (p *Provider) observeRouteGraphs(ctx context.Context, owners []routeGraphOwner, lb *octavia.LoadBalancer, listener *listeners.Listener, protocol string) ([]observedRouteGraph, error) {
+	return p.observeRouteGraphsWithListeners(ctx, owners, lb, listener, protocol, nil)
+}
+
+func (p *Provider) observeRouteGraphsWithListeners(ctx context.Context, owners []routeGraphOwner, lb *octavia.LoadBalancer, listener *listeners.Listener, protocol string, scopedListeners []listeners.Listener) ([]observedRouteGraph, error) {
+	poolItems, err := p.listGatewayPools(ctx, lb)
 	if err != nil {
-		return nil, fmt.Errorf("list pools beneath Gateway: %w", err)
+		return nil, err
+	}
+	return p.observeRouteGraphsFromPools(ctx, owners, lb, listener, protocol, scopedListeners, poolItems, nil)
+}
+
+func (p *Provider) observeRouteGraphsFromPools(ctx context.Context, owners []routeGraphOwner, lb *octavia.LoadBalancer, listener *listeners.Listener, protocol string, scopedListeners []listeners.Listener, poolItems []pools.Pool, recoverGateway *Identity) ([]observedRouteGraph, error) {
+	inventory := routeGraphInventory{
+		owners: slices.Clone(owners), graphs: make([]observedRouteGraph, len(owners)),
+		recoverGateway: recoverGateway, recoverAllRoutes: len(owners) == 0,
+	}
+	if recoverGateway != nil {
+		inventory.recovered = make(map[openstackidentity.RouteOwnerProof]int)
+	}
+	defaultPool := usesDefaultPool(protocol)
+	scopedHTTP := protocol == cloud.ListenerProtocolHTTP && scopedListeners != nil
+	strictHTTP := scopedHTTP || containsHTTPFragmentPool(poolItems) ||
+		slices.ContainsFunc(owners, func(owner routeGraphOwner) bool { return owner.expectsHTTPParts }) || recoverGateway != nil
+	if strictHTTP {
+		frontends := scopedListeners
+		if listener != nil {
+			frontends = []listeners.Listener{*listener}
+		}
+		if err := crossCheckCompleteChildInventory("load balancer", lb.ID, "listener", lb.Listeners, frontends, func(listener listeners.Listener) string { return listener.ID }); err != nil {
+			return nil, err
+		}
+		if err := crossCheckCompleteChildInventory("load balancer", lb.ID, "pool", lb.Pools, poolItems, func(pool pools.Pool) string { return pool.ID }); err != nil {
+			return nil, err
+		}
 	}
 	sort.Slice(poolItems, func(i, j int) bool { return poolItems[i].ID < poolItems[j].ID })
+	poolOwners := make(map[string]poolRouteOwner, len(poolItems))
 	for index := range poolItems {
 		pool := &poolItems[index]
-		routeIndex, err := routeOwnerIndex(identities, pool.Tags, rolePool)
+		routeIndex, role, err := inventory.resolve(pool.Tags, rolePool)
 		if err != nil {
 			return nil, fmt.Errorf("validate pool %s: %w", pool.ID, err)
 		}
-		identity := identities[routeIndex]
-		if err := p.validateGatewayDeletionPool(identity, *pool, gateway.LoadBalancerID); err != nil {
+		owner := inventory.owners[routeIndex]
+		identity := owner.identity
+		if err := p.validatePoolParent(*pool, lb.ID, role.raw, identity); err != nil {
 			return nil, &cloud.GraphError{Identity: identity.Value(), Err: err}
 		}
-		graph := &graphs[routeIndex]
+		poolProtocol := protocol
+		if owner.cleanupProtocol != "" && owner.cleanupProtocol != protocol {
+			// A replacement listener does not authorize modifying its graph
+			// through an old route. Require the old pool's exact transport
+			// and prove it is independent of the replacement listener.
+			poolProtocol = owner.cleanupProtocol
+			if !usesDefaultPool(poolProtocol) {
+				return nil, &cloud.GraphError{Identity: identity.Value(), Err: fmt.Errorf("%w: pool %s belongs to a different listener protocol", cloud.ErrOwnershipConflict, pool.ID)}
+			}
+		}
+		if _, duplicate := poolOwners[pool.ID]; duplicate {
+			return nil, fmt.Errorf("%w: %s pool %s appears more than once in the Gateway inventory", cloud.ErrOwnershipConflict, pool.Protocol, pool.ID)
+		}
+		if usesDefaultPool(poolProtocol) {
+			if role.backend != "" {
+				return nil, &cloud.GraphError{Identity: identity.Value(), Err: fmt.Errorf("%w: HTTP backend roles cannot identify a transport pool", cloud.ErrOwnershipConflict)}
+			}
+			var err error
+			if scopedListeners != nil {
+				err = p.validateScopedDefaultPool(*pool, lb.ID, scopedListeners, poolProtocol)
+			} else {
+				err = validateDefaultPool(*pool, lb.ID, listener, poolProtocol)
+			}
+			if err != nil {
+				return nil, &cloud.GraphError{Identity: identity.Value(), Err: err}
+			}
+		} else if strictHTTP {
+			if err := validateDefaultPoolParent(*pool, lb.ID, cloud.ListenerProtocolHTTP); err != nil {
+				return nil, &cloud.GraphError{Identity: identity.Value(), Err: err}
+			}
+			if pool.ProjectID != p.projectID {
+				return nil, &cloud.GraphError{Identity: identity.Value(), Err: fmt.Errorf("%w: HTTP pool %s has an unproven project", cloud.ErrOwnershipConflict, pool.ID)}
+			}
+		} else if usesDefaultPool(pool.Protocol) {
+			return nil, &cloud.GraphError{Identity: identity.Value(), Err: fmt.Errorf("%w: %s pool %s observed without a matching Gateway", cloud.ErrOwnershipConflict, pool.Protocol, pool.ID)}
+		}
+		graph := inventory.graphs[routeIndex].part(role.backend)
 		if graph.pool != nil {
-			return nil, &cloud.GraphError{Identity: identity.Value(), Err: fmt.Errorf("%w: found multiple pools for one HTTPRoute", cloud.ErrOwnershipConflict)}
+			return nil, &cloud.GraphError{Identity: identity.Value(), Err: fmt.Errorf("%w: found multiple pools for one route", cloud.ErrOwnershipConflict)}
 		}
 		graph.pool = pool
-		if err := p.observeRoutePoolChildren(ctx, identity, graph); err != nil {
+		poolOwners[pool.ID] = poolRouteOwner{route: routeIndex, backend: role.backend}
+		if err := p.observeRoutePoolChildrenWithRole(ctx, owner, graph, role.backend); err != nil {
 			return nil, &cloud.GraphError{Identity: identity.Value(), Err: err}
 		}
+		if strictHTTP && !usesDefaultPool(poolProtocol) {
+			if err := graph.validateScopedHTTPPoolChildren(); err != nil {
+				return nil, &cloud.GraphError{Identity: identity.Value(), Err: err}
+			}
+		} else if usesDefaultPool(poolProtocol) {
+			if err := graph.validateDefaultPoolChildren(); err != nil {
+				return nil, &cloud.GraphError{Identity: identity.Value(), Err: err}
+			}
+		}
 	}
-	if gateway.ListenerID == "" {
-		return graphs, nil
+	if defaultPool {
+		return inventory.graphs, nil
 	}
-	items, err := p.octavia.ListPolicies(ctx, l7policies.ListOpts{ListenerID: gateway.ListenerID, ProjectID: p.projectID})
+	listenerByRoute := make(map[int]string)
+	if scopedHTTP {
+		for i := range scopedListeners {
+			if err := p.observeListenerPolicies(ctx, &inventory, &scopedListeners[i], protocol, poolOwners, listenerByRoute, true); err != nil {
+				return nil, err
+			}
+		}
+	} else if listener != nil {
+		if strictHTTP && (listener.ProjectID != p.projectID || len(listener.Loadbalancers) != 1 || listener.Loadbalancers[0].ID != lb.ID) {
+			return nil, fmt.Errorf("%w: HTTP listener %s has an unproven parent or project", cloud.ErrOwnershipConflict, listener.ID)
+		}
+		if err := p.observeListenerPolicies(ctx, &inventory, listener, protocol, poolOwners, listenerByRoute, strictHTTP); err != nil {
+			return nil, err
+		}
+	}
+	if !strictHTTP && containsObservedRedirect(inventory.graphs) {
+		if listener == nil || listener.ProjectID != p.projectID || len(listener.Loadbalancers) != 1 || listener.Loadbalancers[0].ID != lb.ID {
+			return nil, fmt.Errorf("%w: HTTP redirect has an unproven listener parent or project", cloud.ErrOwnershipConflict)
+		}
+		if err := crossCheckCompleteChildInventory("load balancer", lb.ID, "listener", lb.Listeners, []listeners.Listener{*listener}, func(listener listeners.Listener) string { return listener.ID }); err != nil {
+			return nil, err
+		}
+		if err := crossCheckCompleteChildInventory("load balancer", lb.ID, "pool", lb.Pools, poolItems, func(pool pools.Pool) string { return pool.ID }); err != nil {
+			return nil, err
+		}
+		strictHTTP = true
+	}
+	if strictHTTP {
+		if err := validateScopedHTTPRouteRelationships(inventory.graphs); err != nil {
+			return nil, err
+		}
+	}
+	return inventory.graphs, nil
+}
+
+func containsHTTPFragmentPool(items []pools.Pool) bool {
+	return slices.ContainsFunc(items, func(pool pools.Pool) bool {
+		role, ok := readRouteResourceRole(pool.Tags, rolePool)
+		return ok && role.backend != ""
+	})
+}
+
+func (p *Provider) observeListenerPolicies(ctx context.Context, inventory *routeGraphInventory, listener *listeners.Listener, protocol string, poolOwners map[string]poolRouteOwner, listenerByRoute map[int]string, strict bool) error {
+	items, err := p.octavia.ObservePolicies(ctx, l7policies.ListOpts{ListenerID: listener.ID, ProjectID: p.projectID})
 	if err != nil {
-		return nil, fmt.Errorf("list Gateway L7 policies: %w", err)
+		return fmt.Errorf("list Gateway L7 policies: %w", err)
+	}
+	otherCleanup := hasOtherCleanupProtocol(inventory.owners, protocol)
+	policyID := func(item octavia.PolicyObservation) string { return item.ID }
+	if !strict && slices.ContainsFunc(items, func(item octavia.PolicyObservation) bool {
+		role, ok := readRouteResourceRole(item.Tags, rolePolicyExact, rolePolicyPrefix)
+		return ok && role.redirect
+	}) {
+		strict = true
+	}
+	refs := make([]octavia.PolicyObservation, 0, len(listener.L7Policies))
+	if listener.L7Policies == nil {
+		refs = nil
+	}
+	for _, ref := range listener.L7Policies {
+		refs = append(refs, octavia.PolicyObservation{L7Policy: l7policies.L7Policy{ID: ref.ID}})
+	}
+	if strict {
+		if err := crossCheckCompleteChildInventory("listener", listener.ID, "L7 policy", refs, items, policyID); err != nil {
+			return err
+		}
+	} else if otherCleanup || slices.ContainsFunc(inventory.owners, func(owner routeGraphOwner) bool { return owner.requiresPolicyAbsenceProof }) {
+		if err := crossCheckChildInventory("listener", listener.ID, "L7 policy", refs, items, policyID); err != nil {
+			return err
+		}
 	}
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].Position == items[j].Position {
@@ -94,41 +437,81 @@ func (p *Provider) observeGatewayRoutes(ctx context.Context, identities []Identi
 		return items[i].Position < items[j].Position
 	})
 	for _, item := range items {
-		routeIndex, err := routeOwnerIndex(identities, item.Tags, rolePolicyExact, rolePolicyPrefix)
+		routeIndex, role, err := inventory.resolve(item.Tags, rolePolicyExact, rolePolicyPrefix)
 		if err != nil {
-			return nil, fmt.Errorf("validate L7 policy %s: %w", item.ID, err)
+			return fmt.Errorf("validate L7 policy %s: %w", item.ID, err)
 		}
-		observed, err := p.observeRoutePolicy(ctx, identities[routeIndex], item, gateway.ListenerID)
+		owner := inventory.owners[routeIndex]
+		if owner.cleanupProtocol != "" && owner.cleanupProtocol != protocol {
+			return &cloud.GraphError{Identity: owner.identity.Value(), Err: fmt.Errorf("%w: L7 policy %s belongs to a different listener protocol", cloud.ErrOwnershipConflict, item.ID)}
+		}
+		strictPolicy := strict || role.backend != ""
+		if strictPolicy && (item.ProjectID != p.projectID || item.ListenerID != listener.ID || (!role.redirect && item.RedirectPoolID == "")) {
+			return &cloud.GraphError{Identity: owner.identity.Value(), Err: fmt.Errorf("%w: L7 policy %s has an unproven project, listener or pool", cloud.ErrOwnershipConflict, item.ID)}
+		}
+		if role.redirect {
+			if protocol != cloud.ListenerProtocolHTTP || listener.ProjectID != p.projectID ||
+				(listener.Protocol != cloud.ListenerProtocolHTTP && listener.Protocol != terminatedHTTPS) || item.RedirectPoolID != "" {
+				return &cloud.GraphError{Identity: owner.identity.Value(), Err: fmt.Errorf("%w: HTTP redirect policy %s has an incompatible listener or pool", cloud.ErrOwnershipConflict, item.ID)}
+			}
+			if item.AdminState == nil || len(item.PoolReference) == 0 || item.Action == "" ||
+				(item.Action == string(l7policies.ActionRedirectPrefix) && (item.RedirectPrefix == "" || item.RedirectHttpCode == 0)) {
+				return &cloud.GraphError{Identity: owner.identity.Value(), Err: cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady,
+					fmt.Errorf("HTTP redirect policy %s has incomplete action or administrative state", item.ID))}
+			}
+		}
+		observed, err := p.observeRoutePolicy(ctx, owner, item.L7Policy, listener.ID, role)
 		if err != nil {
-			return nil, &cloud.GraphError{Identity: identities[routeIndex].Value(), Err: err}
+			return &cloud.GraphError{Identity: owner.identity.Value(), Err: err}
 		}
-		graph := &graphs[routeIndex]
+		observed.adminObserved = item.AdminState != nil
+		if strictPolicy || owner.requiresPolicyAbsenceProof {
+			rules := make([]l7policies.Rule, 0, len(observed.rules))
+			for _, rule := range observed.rules {
+				rules = append(rules, rule.rule)
+			}
+			check := crossCheckChildInventory[l7policies.Rule]
+			if strictPolicy {
+				check = crossCheckCompleteChildInventory[l7policies.Rule]
+			}
+			if err := check("L7 policy", item.ID, "rule", item.Rules, rules, func(rule l7policies.Rule) string { return rule.ID }); err != nil {
+				return err
+			}
+		}
+		if poolOwner, found := poolOwners[item.RedirectPoolID]; found && poolOwner != (poolRouteOwner{route: routeIndex, backend: role.backend}) ||
+			(otherCleanup || strictPolicy) && !found && item.RedirectPoolID != "" {
+			return &cloud.GraphError{Identity: owner.identity.Value(), Err: fmt.Errorf("%w: L7 policy %s redirects to an unproven pool %s", cloud.ErrOwnershipConflict, item.ID, item.RedirectPoolID)}
+		}
+		if previous := listenerByRoute[routeIndex]; strictPolicy && previous != "" && previous != listener.ID {
+			return &cloud.GraphError{Identity: owner.identity.Value(), Err: fmt.Errorf("%w: HTTPRoute policies appear on multiple listeners", cloud.ErrOwnershipConflict)}
+		}
+		listenerByRoute[routeIndex] = listener.ID
+		graph := inventory.graphs[routeIndex].part(role.backend)
 		for _, policy := range graph.policies {
 			if policy.role == observed.role {
-				return nil, &cloud.GraphError{Identity: identities[routeIndex].Value(), Err: fmt.Errorf("%w: duplicate %s policies %s and %s", cloud.ErrOwnershipConflict, observed.role, policy.policy.ID, item.ID)}
+				return &cloud.GraphError{Identity: owner.identity.Value(), Err: fmt.Errorf("%w: duplicate %s policies %s and %s", cloud.ErrOwnershipConflict, observed.role, policy.policy.ID, item.ID)}
 			}
 		}
 		graph.policies = append(graph.policies, observed)
 	}
-	return graphs, nil
-}
-
-func routeOwnerIndex(identities []Identity, tags []string, roles ...string) (int, error) {
-	for index, identity := range identities {
-		for _, role := range roles {
-			if identity.MatchesRoute(tags, role) {
-				return index, nil
-			}
-		}
-	}
-	return -1, fmt.Errorf("%w: Gateway contains an unaccounted or foreign route resource", cloud.ErrOwnershipConflict)
+	return nil
 }
 
 func (p *Provider) observeRoutePoolChildren(ctx context.Context, identity Identity, graph *observedRouteGraph) error {
+	return p.observeRoutePoolChildrenWithRole(ctx, routeGraphOwner{identity: identity}, graph, "")
+}
+
+func (p *Provider) observeRoutePoolChildrenWithRole(ctx context.Context, owner routeGraphOwner, graph *observedRouteGraph, backend string) error {
 	var err error
-	graph.members, err = p.octavia.ListMembers(ctx, graph.pool.ID, pools.ListMembersOpts{
-		ProjectID: p.projectID,
-	})
+	opts := pools.ListMembersOpts{ProjectID: p.projectID}
+	switch {
+	case graph.pool.Protocol == cloud.ListenerProtocolTCP:
+		graph.members, graph.memberBackupUnreported, err = p.octavia.ListMembersWithBackup(ctx, graph.pool.ID, opts)
+	case backend != "":
+		graph.members, graph.memberAdminUnreported, err = p.octavia.ListMembersWithAdminState(ctx, graph.pool.ID, opts)
+	default:
+		graph.members, err = p.octavia.ListCompleteMembers(ctx, graph.pool.ID, opts)
+	}
 	if err != nil {
 		return fmt.Errorf("list route pool members: %w", err)
 	}
@@ -147,8 +530,8 @@ func (p *Provider) observeRoutePoolChildren(ctx context.Context, identity Identi
 		if err := p.validateOptionalProject("member", member.ID, member.ProjectID); err != nil {
 			return err
 		}
-		if !identity.MatchesRoute(member.Tags, roleMember) {
-			return fmt.Errorf("%w: pool %s contains member %s not owned by the selected HTTPRoute", cloud.ErrOwnershipConflict, graph.pool.ID, member.ID)
+		if backend != "" && member.ProjectID != p.projectID || !owner.matchesRoute(member.Tags, httpResourceRole(roleMember, backend, "")) {
+			return fmt.Errorf("%w: pool %s contains member %s not owned by the selected route", cloud.ErrOwnershipConflict, graph.pool.ID, member.ID)
 		}
 		if member.PoolID != "" && member.PoolID != graph.pool.ID {
 			return fmt.Errorf("%w: member %s reports pool %s instead of %s", cloud.ErrOwnershipConflict, member.ID, member.PoolID, graph.pool.ID)
@@ -165,7 +548,7 @@ func (p *Provider) observeRoutePoolChildren(ctx context.Context, identity Identi
 		memberKeys[key] = member.ID
 	}
 
-	monitorItems, err := p.octavia.ListMonitors(ctx, monitors.ListOpts{
+	monitorItems, err := p.octavia.ListCompleteMonitors(ctx, monitors.ListOpts{
 		PoolID:    graph.pool.ID,
 		ProjectID: p.projectID,
 	})
@@ -178,8 +561,9 @@ func (p *Provider) observeRoutePoolChildren(ctx context.Context, identity Identi
 		if err := p.validateOptionalProject("health monitor", monitor.ID, monitor.ProjectID); err != nil {
 			return err
 		}
-		if !identity.MatchesRoute(monitor.Tags, roleMonitor) {
-			return fmt.Errorf("%w: pool %s contains health monitor %s not owned by the selected HTTPRoute", cloud.ErrOwnershipConflict, graph.pool.ID, monitor.ID)
+		if backend != "" && (monitor.ProjectID != p.projectID || len(monitor.Pools) != 1) ||
+			!owner.matchesRoute(monitor.Tags, httpResourceRole(roleMonitor, backend, "")) {
+			return fmt.Errorf("%w: pool %s contains health monitor %s not owned by the selected route", cloud.ErrOwnershipConflict, graph.pool.ID, monitor.ID)
 		}
 		for _, parent := range monitor.Pools {
 			if parent.ID != graph.pool.ID {
@@ -194,63 +578,42 @@ func (p *Provider) observeRoutePoolChildren(ctx context.Context, identity Identi
 	return nil
 }
 
-func (p *Provider) observeRoutePolicy(ctx context.Context, identity Identity, item l7policies.L7Policy, listenerID string) (observedRoutePolicy, error) {
+func (p *Provider) observeRoutePolicy(ctx context.Context, owner routeGraphOwner, item l7policies.L7Policy, listenerID string, role routeResourceRole) (observedRoutePolicy, error) {
 	if err := p.validateOptionalProject("L7 policy", item.ID, item.ProjectID); err != nil {
 		return observedRoutePolicy{}, err
-	}
-	role, err := routePolicyRole(identity, item.Tags)
-	if err != nil {
-		return observedRoutePolicy{}, fmt.Errorf("validate L7 policy %s: %w", item.ID, err)
 	}
 	if item.ListenerID != "" && item.ListenerID != listenerID {
 		return observedRoutePolicy{}, fmt.Errorf("%w: L7 policy %s reports listener %s instead of %s", cloud.ErrOwnershipConflict, item.ID, item.ListenerID, listenerID)
 	}
-	ruleItems, err := p.octavia.ListRules(ctx, item.ID, l7policies.ListRulesOpts{ProjectID: p.projectID})
+	ruleItems, err := p.octavia.ObserveRules(ctx, item.ID, l7policies.ListRulesOpts{ProjectID: p.projectID})
 	if err != nil {
 		return observedRoutePolicy{}, fmt.Errorf("list rules beneath L7 policy %s: %w", item.ID, err)
 	}
 	sort.Slice(ruleItems, func(i, j int) bool { return ruleItems[i].ID < ruleItems[j].ID })
 	observedRules := make([]observedRouteRule, 0, len(ruleItems))
 	ruleRoles := make(map[string]string, len(ruleItems))
-	for _, rule := range ruleItems {
+	for _, observation := range ruleItems {
+		rule := observation.Rule
 		if err := p.validateOptionalProject("L7 rule", rule.ID, rule.ProjectID); err != nil {
 			return observedRoutePolicy{}, err
 		}
-		ruleRole, err := routeRuleRole(identity, rule.Tags)
-		if err != nil {
-			return observedRoutePolicy{}, fmt.Errorf("validate L7 rule %s beneath policy %s: %w", rule.ID, item.ID, err)
+		ruleRole, ok := readRouteResourceRole(rule.Tags, roleRulePath, roleRuleHost, roleRuleRedirectGuard)
+		if !ok || !owner.matchesRoute(rule.Tags, ruleRole.raw) || ruleRole.backend != role.backend ||
+			ruleRole.match != role.match || ruleRole.redirect != role.redirect || role.backend != "" && rule.ProjectID != p.projectID {
+			return observedRoutePolicy{}, fmt.Errorf("%w: L7 rule %s beneath policy %s has an unproven project or route, backend or match identity", cloud.ErrOwnershipConflict, rule.ID, item.ID)
 		}
-		if existingID := ruleRoles[ruleRole]; existingID != "" {
-			return observedRoutePolicy{}, fmt.Errorf("%w: policy %s has duplicate %s rules %s and %s", cloud.ErrOwnershipConflict, item.ID, ruleRole, existingID, rule.ID)
+		flagsObserved := observation.AdminState != nil && observation.Inverted != nil
+		if role.redirect && (!flagsObserved || rule.RuleType == "" || rule.CompareType == "" || rule.Value == "") {
+			return observedRoutePolicy{}, cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady,
+				fmt.Errorf("HTTP redirect rule %s has incomplete predicate or administrative state", rule.ID))
 		}
-		ruleRoles[ruleRole] = rule.ID
-		observedRules = append(observedRules, observedRouteRule{rule: rule, role: ruleRole})
+		if existingID := ruleRoles[ruleRole.raw]; existingID != "" {
+			return observedRoutePolicy{}, fmt.Errorf("%w: policy %s has duplicate %s rules %s and %s", cloud.ErrOwnershipConflict, item.ID, ruleRole.raw, existingID, rule.ID)
+		}
+		ruleRoles[ruleRole.raw] = rule.ID
+		observedRules = append(observedRules, observedRouteRule{rule: rule, role: ruleRole.raw, base: ruleRole.base, flagsObserved: flagsObserved})
 	}
-	return observedRoutePolicy{policy: item, role: role, rules: observedRules}, nil
-}
-
-func routePolicyRole(identity Identity, tags []string) (string, error) {
-	for _, role := range []string{rolePolicyExact, rolePolicyPrefix} {
-		if identity.MatchesRoute(tags, role) {
-			return role, nil
-		}
-		if identity.MatchesRouteDiscovery(tags, role) {
-			return "", fmt.Errorf("%w: policy has an incomplete or stale identity", cloud.ErrOwnershipConflict)
-		}
-	}
-	return "", fmt.Errorf("%w: policy is not owned by the selected HTTPRoute", cloud.ErrOwnershipConflict)
-}
-
-func routeRuleRole(identity Identity, tags []string) (string, error) {
-	for _, role := range []string{roleRulePath, roleRuleHost} {
-		if identity.MatchesRoute(tags, role) {
-			return role, nil
-		}
-		if identity.MatchesRouteDiscovery(tags, role) {
-			return "", fmt.Errorf("%w: rule has an incomplete or stale identity", cloud.ErrOwnershipConflict)
-		}
-	}
-	return "", fmt.Errorf("%w: rule is not owned by the selected HTTPRoute", cloud.ErrOwnershipConflict)
+	return observedRoutePolicy{policy: item, role: role.raw, rules: observedRules, versioned: role.backend != "", redirect: role.redirect}, nil
 }
 
 type routeMutationKind uint8
@@ -259,6 +622,7 @@ const (
 	routeMutationCreatePool routeMutationKind = iota
 	routeMutationUpdatePool
 	routeMutationDeleteMember
+	routeMutationDisableMember
 	routeMutationCreateMember
 	routeMutationUpdateMember
 	routeMutationCreateMonitor
@@ -268,6 +632,7 @@ const (
 	routeMutationDeletePolicy
 	routeMutationCreatePolicy
 	routeMutationUpdatePolicy
+	routeMutationMovePolicy
 	routeMutationCreateRule
 	routeMutationUpdateRule
 	routeMutationEnablePolicy
@@ -276,12 +641,16 @@ const (
 )
 
 type routeMutation struct {
-	kind     routeMutationKind
-	id       string
-	parentID string
-	member   cloud.Member
-	policy   desiredPolicy
-	rule     desiredRule
+	kind                 routeMutationKind
+	id                   string
+	parentID             string
+	member               cloud.Member
+	policy               desiredPolicy
+	rule                 desiredRule
+	retry                bool
+	clearPoolPersistence bool
+	clearMemberBackup    bool
+	withdrawHTTPPolicy   bool
 }
 
 func (s routeMutation) message() string {
@@ -290,6 +659,8 @@ func (s routeMutation) message() string {
 		return "Created Octavia pool"
 	case routeMutationUpdatePool:
 		return "Updated Octavia pool"
+	case routeMutationDisableMember:
+		return "Disabling an Octavia HTTP backend member"
 	case routeMutationDeleteMember:
 		return "Deleted stale Octavia member"
 	case routeMutationCreateMember:
@@ -310,6 +681,8 @@ func (s routeMutation) message() string {
 		return "Created Octavia L7 policy"
 	case routeMutationUpdatePolicy:
 		return "Updated Octavia L7 policy"
+	case routeMutationMovePolicy:
+		return "Updated Octavia L7 policy position"
 	case routeMutationCreateRule:
 		return "Created Octavia L7 rule"
 	case routeMutationUpdateRule:
@@ -329,17 +702,29 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 	nonPolicyPlan := make([]routeMutation, 0)
 	state := cloud.RouteState{}
 	poolID := ""
-	if actual.pool == nil {
+	if desired.redirect {
+		if actual.pool != nil {
+			return nil, state, fmt.Errorf("%w: HTTP redirect has a pool", cloud.ErrOwnershipConflict)
+		}
+	} else if actual.pool == nil {
 		nonPolicyPlan = append(nonPolicyPlan, routeMutation{kind: routeMutationCreatePool})
 	} else {
 		pool := actual.pool
 		poolID = pool.ID
 		state.PoolID = pool.ID
-		if pool.Protocol != string(pools.ProtocolHTTP) {
+		if pool.Protocol != desired.protocol() {
 			return nil, cloud.RouteState{}, fmt.Errorf("%w: pool %s has protocol %s", cloud.ErrOwnershipConflict, pool.ID, pool.Protocol)
 		}
-		if pool.LBMethod != string(pools.LBMethodRoundRobin) || !pool.AdminStateUp {
-			nonPolicyPlan = append(nonPolicyPlan, routeMutation{kind: routeMutationUpdatePool, id: pool.ID})
+		if desired.unavailable {
+			state = routeStateFromObservation(actual)
+			if steps, hold := httpMemberWithdrawal(actual); len(steps) != 0 || hold != "" {
+				return steps, state, nil
+			}
+		}
+		clearPersistence := pool.Persistence != (pools.SessionPersistence{}) && desired.spec.MemberMode == cloud.MemberModeEndpoint &&
+			slices.ContainsFunc(desired.members, func(member cloud.Member) bool { return !member.Draining && member.Weight > 0 })
+		if pool.LBMethod != string(pools.LBMethodRoundRobin) || !pool.AdminStateUp || clearPersistence {
+			nonPolicyPlan = append(nonPolicyPlan, routeMutation{kind: routeMutationUpdatePool, id: pool.ID, clearPoolPersistence: clearPersistence})
 		}
 
 		desiredMembers := make(map[string]cloud.Member, len(desired.members))
@@ -347,21 +732,37 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 			desiredMembers[memberKey(member.Address, member.Port)] = member
 		}
 		for _, member := range actual.members {
+			if desired.unavailable {
+				continue
+			}
 			key := memberKey(member.Address, member.ProtocolPort)
 			wanted, exists := desiredMembers[key]
+			retry := desired.backendKey != "" && member.ProvisioningStatus == "ERROR"
 			if !exists || member.SubnetID != desired.spec.MemberSubnetID {
-				nonPolicyPlan = append(nonPolicyPlan, routeMutation{kind: routeMutationDeleteMember, id: member.ID, parentID: pool.ID})
+				kind := routeMutationDeleteMember
+				if retry {
+					kind = routeMutationDisableMember
+				}
+				nonPolicyPlan = append(nonPolicyPlan, routeMutation{kind: kind, id: member.ID, parentID: pool.ID, retry: retry})
 				continue
 			}
 			state.MemberIDs = append(state.MemberIDs, member.ID)
 			delete(desiredMembers, key)
 			weight := desiredMemberWeight(desired.spec.MemberMode, wanted)
-			if !member.AdminStateUp || weight != nil && member.Weight != *weight {
+			// HAProxy excludes backup members while any regular member is up.
+			weightedTCP := desired.protocol() == cloud.ListenerProtocolTCP && wanted.Weight > 0 && !wanted.Draining
+			if _, unreported := actual.memberBackupUnreported[member.ID]; weightedTCP && unreported {
+				return nil, cloud.RouteState{}, errWeightedTCPBackupUnknown
+			}
+			clearBackup := weightedTCP && member.Backup
+			if _, unreported := actual.memberAdminUnreported[member.ID]; unreported || !member.AdminStateUp || retry || weight != nil && member.Weight != *weight || clearBackup {
 				nonPolicyPlan = append(nonPolicyPlan, routeMutation{
-					kind:     routeMutationUpdateMember,
-					id:       member.ID,
-					parentID: pool.ID,
-					member:   wanted,
+					kind:              routeMutationUpdateMember,
+					id:                member.ID,
+					parentID:          pool.ID,
+					member:            wanted,
+					retry:             retry,
+					clearMemberBackup: clearBackup,
 				})
 			}
 		}
@@ -374,38 +775,36 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 			nonPolicyPlan = append(nonPolicyPlan, routeMutation{kind: routeMutationCreateMember, parentID: pool.ID, member: desiredMembers[key]})
 		}
 
-		if actual.monitor == nil {
+		switch {
+		case desired.healthMonitor == (cloud.HealthMonitorConfig{}):
+			if actual.monitor != nil {
+				nonPolicyPlan = append(nonPolicyPlan, routeMutation{kind: routeMutationDeleteMonitor, id: actual.monitor.ID, parentID: pool.ID})
+			}
+		case actual.monitor == nil:
 			nonPolicyPlan = append(nonPolicyPlan, routeMutation{kind: routeMutationCreateMonitor, parentID: pool.ID})
-		} else {
+		default:
 			monitor := actual.monitor
 			state.MonitorID = monitor.ID
-			if monitor.Type != monitors.TypeHTTP {
+			if monitor.Type != desired.monitorType() {
 				return nil, cloud.RouteState{}, fmt.Errorf("%w: health monitor %s has type %s", cloud.ErrOwnershipConflict, monitor.ID, monitor.Type)
 			}
+			httpDrift := monitor.Type == monitors.TypeHTTP && (monitor.URLPath != desired.healthMonitor.Path ||
+				monitor.HTTPMethod != http.MethodGet || monitor.ExpectedCodes != routeMonitorExpectedCodes)
 			if monitor.Delay != desired.healthMonitor.Delay || monitor.Timeout != desired.healthMonitor.Timeout ||
 				monitor.MaxRetries != desired.healthMonitor.MaxRetries || monitor.MaxRetriesDown != desired.healthMonitor.MaxRetriesDown ||
-				monitor.URLPath != desired.healthMonitor.Path || monitor.HTTPMethod != http.MethodGet ||
-				monitor.ExpectedCodes != routeMonitorExpectedCodes || !monitor.AdminStateUp {
+				httpDrift || !monitor.AdminStateUp {
 				nonPolicyPlan = append(nonPolicyPlan, routeMutation{kind: routeMutationUpdateMonitor, id: monitor.ID, parentID: pool.ID})
 			}
 		}
 	}
 
-	policyPlan, policyState, semanticDiff := buildRoutePolicyPlan(desired, actual.policies, poolID)
+	policyPlan, disablePlan, policyState := buildRoutePolicyPlan(desired, actual.policies, poolID)
 	state.L7PolicyIDs = policyState.L7PolicyIDs
 	state.L7RuleIDs = policyState.L7RuleIDs
-	if semanticDiff {
-		disablePlan := make([]routeMutation, 0, len(actual.policies))
-		for _, policy := range actual.policies {
-			if policy.policy.AdminStateUp {
-				disablePlan = append(disablePlan, routeMutation{kind: routeMutationDisablePolicy, id: policy.policy.ID})
-			}
-		}
-		plan := append(disablePlan, nonPolicyPlan...)
-		return append(plan, policyPlan...), state, nil
-	}
-	if len(nonPolicyPlan) != 0 {
-		return nonPolicyPlan, state, nil
+	plan := append(disablePlan, nonPolicyPlan...)
+	plan = append(plan, policyPlan...)
+	if len(plan) != 0 {
+		return plan, state, nil
 	}
 	for _, wantedPolicy := range desired.policies {
 		for _, policy := range actual.policies {
@@ -421,10 +820,10 @@ func buildRoutePolicyPlan(
 	desired desiredRoute,
 	actual []observedRoutePolicy,
 	poolID string,
-) ([]routeMutation, cloud.RouteState, bool) {
+) ([]routeMutation, []routeMutation, cloud.RouteState) {
 	plan := make([]routeMutation, 0)
+	disablePlan := make([]routeMutation, 0)
 	state := cloud.RouteState{}
-	semanticDiff := false
 	desiredPolicies := make(map[string]desiredPolicy, len(desired.policies))
 	for _, policy := range desired.policies {
 		desiredPolicies[policy.role] = policy
@@ -433,11 +832,14 @@ func buildRoutePolicyPlan(
 		if _, wanted := desiredPolicies[policy.role]; wanted {
 			continue
 		}
-		semanticDiff = true
-		for _, rule := range policy.rules {
-			plan = append(plan, routeMutation{kind: routeMutationDeleteRule, id: rule.rule.ID, parentID: policy.policy.ID})
+		if policy.policy.AdminStateUp || policy.policy.ProvisioningStatus == "ERROR" {
+			disablePlan = append(disablePlan, routeMutation{kind: routeMutationDisablePolicy, id: policy.policy.ID,
+				retry: policy.policy.ProvisioningStatus == "ERROR", withdrawHTTPPolicy: desired.backendKey != ""})
 		}
-		plan = append(plan, routeMutation{kind: routeMutationDeletePolicy, id: policy.policy.ID})
+		for _, rule := range policy.rules {
+			plan = append(plan, routeMutation{kind: routeMutationDeleteRule, id: rule.rule.ID, parentID: policy.policy.ID, withdrawHTTPPolicy: desired.backendKey != ""})
+		}
+		plan = append(plan, routeMutation{kind: routeMutationDeletePolicy, id: policy.policy.ID, withdrawHTTPPolicy: desired.backendKey != ""})
 	}
 
 	actualPolicies := make(map[string]observedRoutePolicy, len(actual))
@@ -447,19 +849,21 @@ func buildRoutePolicyPlan(
 	for _, wantedPolicy := range desired.policies {
 		observedPolicy, exists := actualPolicies[wantedPolicy.role]
 		if !exists {
-			semanticDiff = true
 			plan = append(plan, routeMutation{kind: routeMutationCreatePolicy, parentID: poolID, policy: wantedPolicy})
 			continue
 		}
 		policy := observedPolicy.policy
 		state.L7PolicyIDs = append(state.L7PolicyIDs, policy.ID)
-		if policy.Action != string(l7policies.ActionRedirectToPool) || policy.RedirectPoolID != poolID ||
-			policy.Position != wantedPolicy.position {
-			semanticDiff = true
-			plan = append(plan, routeMutation{kind: routeMutationUpdatePolicy, id: policy.ID, parentID: poolID, policy: wantedPolicy})
+		start := len(plan)
+		if !desiredPolicyActionMatches(wantedPolicy, policy, poolID) {
+			step := routeMutation{kind: routeMutationUpdatePolicy, id: policy.ID, parentID: poolID}
+			if wantedPolicy.redirect != nil {
+				step.policy = wantedPolicy
+			}
+			plan = append(plan, step)
 		}
 
-		wantedRules := rulesFor(wantedPolicy, desired.spec.Hostname)
+		wantedRules := rulesFor(wantedPolicy, desired.hostnameRuleValue)
 		actualRules := make(map[string]observedRouteRule, len(observedPolicy.rules))
 		for _, rule := range observedPolicy.rules {
 			actualRules[rule.role] = rule
@@ -467,15 +871,13 @@ func buildRoutePolicyPlan(
 		for _, wantedRule := range wantedRules {
 			observedRule, exists := actualRules[wantedRule.role]
 			if !exists {
-				semanticDiff = true
 				plan = append(plan, routeMutation{kind: routeMutationCreateRule, parentID: policy.ID, rule: wantedRule})
 				continue
 			}
 			rule := observedRule.rule
 			state.L7RuleIDs = append(state.L7RuleIDs, rule.ID)
 			if rule.RuleType != string(wantedRule.ruleType) || rule.CompareType != string(wantedRule.compareType) ||
-				rule.Value != wantedRule.value || rule.Invert || !rule.AdminStateUp {
-				semanticDiff = true
+				rule.Value != wantedRule.value || rule.Invert != wantedRule.invert || !rule.AdminStateUp || rule.ProvisioningStatus == "ERROR" {
 				plan = append(plan, routeMutation{kind: routeMutationUpdateRule, id: rule.ID, parentID: policy.ID, rule: wantedRule})
 			}
 			delete(actualRules, wantedRule.role)
@@ -486,18 +888,28 @@ func buildRoutePolicyPlan(
 		}
 		sort.Slice(staleRules, func(i, j int) bool { return staleRules[i].rule.ID < staleRules[j].rule.ID })
 		for _, rule := range staleRules {
-			semanticDiff = true
 			plan = append(plan, routeMutation{kind: routeMutationDeleteRule, id: rule.rule.ID, parentID: policy.ID})
 		}
+		// A failed policy update can leave Octavia's desired admin state in
+		// the database even while Amphora still uses an earlier configuration.
+		if policy.ProvisioningStatus == "ERROR" || len(plan) > start && policy.AdminStateUp {
+			disablePlan = append(disablePlan, routeMutation{kind: routeMutationDisablePolicy, id: policy.ID,
+				retry: desired.redirect && policy.ProvisioningStatus == "ERROR", withdrawHTTPPolicy: desired.redirect})
+		}
+		// Moving a policy changes precedence only. Keep its current admin state
+		// and predicates and let Octavia shift the other positions atomically.
+		if policy.Position != wantedPolicy.position {
+			plan = append(plan, routeMutation{kind: routeMutationMovePolicy, id: policy.ID, policy: wantedPolicy})
+		}
 	}
-	return plan, state, semanticDiff
+	return plan, disablePlan, state
 }
 
 func buildRouteDeletionPlan(actual observedRouteGraph) []routeMutation {
 	plan := make([]routeMutation, 0)
 	for _, policy := range actual.policies {
-		if policy.policy.AdminStateUp {
-			plan = append(plan, routeMutation{kind: routeMutationDisablePolicy, id: policy.policy.ID})
+		if !policy.pending() && (policy.policy.AdminStateUp || policy.policy.ProvisioningStatus == "ERROR") {
+			plan = append(plan, routeMutation{kind: routeMutationDisablePolicy, id: policy.policy.ID, retry: policy.policy.ProvisioningStatus == "ERROR"})
 		}
 	}
 	for _, policy := range actual.policies {
@@ -524,75 +936,88 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 	var err error
 	switch step.kind {
 	case routeMutationCreatePool:
-		tags, tagErr := desired.identity.RouteTags(rolePool)
+		tags, tagErr := desired.identity.RouteTags(desired.httpRole(rolePool, ""))
 		if tagErr != nil {
 			return tagErr
 		}
 		_, err = p.octavia.CreatePool(ctx, pools.CreateOpts{
 			LBMethod:       pools.LBMethodRoundRobin,
-			Protocol:       pools.ProtocolHTTP,
+			Protocol:       pools.Protocol(desired.protocol()),
 			LoadbalancerID: desired.spec.Gateway.LoadBalancerID,
-			Name:           resourceName(desired.spec.Identity, rolePool),
-			Description:    desired.identity.Description(rolePool),
+			Name:           resourceName(desired.spec.Identity, desired.httpRole(rolePool, "")),
+			Description:    desired.identity.Description(desired.httpRole(rolePool, "")),
 			AdminStateUp:   boolPointer(true),
 			Tags:           tags,
 		})
 	case routeMutationUpdatePool:
-		_, err = p.octavia.UpdatePool(ctx, step.id, pools.UpdateOpts{
+		opts := pools.UpdateOpts{
 			LBMethod:     pools.LBMethodRoundRobin,
 			AdminStateUp: boolPointer(true),
-		})
+		}
+		if step.clearPoolPersistence {
+			// Gophercloud encodes a non-nil empty persistence as a JSON null.
+			opts.Persistence = &pools.SessionPersistence{}
+		}
+		_, err = p.octavia.UpdatePool(ctx, step.id, opts)
+	case routeMutationDisableMember:
+		_, err = p.octavia.UpdateMember(ctx, step.parentID, step.id, pools.UpdateMemberOpts{AdminStateUp: boolPointer(false)})
 	case routeMutationDeleteMember:
 		err = p.octavia.DeleteMember(ctx, step.parentID, step.id)
 	case routeMutationCreateMember:
-		tags, tagErr := desired.identity.RouteTags(roleMember)
+		tags, tagErr := desired.identity.RouteTags(desired.httpRole(roleMember, ""))
 		if tagErr != nil {
 			return tagErr
 		}
 		_, err = p.octavia.CreateMember(ctx, step.parentID, pools.CreateMemberOpts{
 			Address:      step.member.Address,
 			ProtocolPort: step.member.Port,
-			Name:         resourceName(desired.spec.Identity, roleMember),
+			Name:         resourceName(desired.spec.Identity, desired.httpRole(roleMember, "")),
 			SubnetID:     desired.spec.MemberSubnetID,
 			AdminStateUp: boolPointer(true),
 			Tags:         tags,
 			Weight:       desiredMemberWeight(desired.spec.MemberMode, step.member),
 		})
 	case routeMutationUpdateMember:
-		_, err = p.octavia.UpdateMember(ctx, step.parentID, step.id, pools.UpdateMemberOpts{
+		opts := pools.UpdateMemberOpts{
 			AdminStateUp: boolPointer(true),
 			Weight:       desiredMemberWeight(desired.spec.MemberMode, step.member),
-		})
+		}
+		if step.clearMemberBackup {
+			opts.Backup = boolPointer(false)
+		}
+		_, err = p.octavia.UpdateMember(ctx, step.parentID, step.id, opts)
 	case routeMutationCreateMonitor:
-		tags, tagErr := desired.identity.RouteTags(roleMonitor)
+		tags, tagErr := desired.identity.RouteTags(desired.httpRole(roleMonitor, ""))
 		if tagErr != nil {
 			return tagErr
 		}
-		_, err = p.octavia.CreateMonitor(ctx, monitors.CreateOpts{
+		opts := monitors.CreateOpts{
 			PoolID:         step.parentID,
-			Type:           monitors.TypeHTTP,
+			Type:           desired.monitorType(),
 			Delay:          desired.healthMonitor.Delay,
 			Timeout:        desired.healthMonitor.Timeout,
 			MaxRetries:     desired.healthMonitor.MaxRetries,
 			MaxRetriesDown: desired.healthMonitor.MaxRetriesDown,
-			URLPath:        desired.healthMonitor.Path,
-			HTTPMethod:     http.MethodGet,
-			ExpectedCodes:  routeMonitorExpectedCodes,
-			Name:           resourceName(desired.spec.Identity, roleMonitor),
+			Name:           resourceName(desired.spec.Identity, desired.httpRole(roleMonitor, "")),
 			AdminStateUp:   boolPointer(true),
 			Tags:           tags,
-		})
+		}
+		if opts.Type == monitors.TypeHTTP {
+			opts.URLPath, opts.HTTPMethod, opts.ExpectedCodes = desired.healthMonitor.Path, http.MethodGet, routeMonitorExpectedCodes
+		}
+		_, err = p.octavia.CreateMonitor(ctx, opts)
 	case routeMutationUpdateMonitor:
-		_, err = p.octavia.UpdateMonitor(ctx, step.id, monitors.UpdateOpts{
+		opts := monitors.UpdateOpts{
 			Delay:          desired.healthMonitor.Delay,
 			Timeout:        desired.healthMonitor.Timeout,
 			MaxRetries:     desired.healthMonitor.MaxRetries,
 			MaxRetriesDown: desired.healthMonitor.MaxRetriesDown,
-			URLPath:        desired.healthMonitor.Path,
-			HTTPMethod:     http.MethodGet,
-			ExpectedCodes:  routeMonitorExpectedCodes,
 			AdminStateUp:   boolPointer(true),
-		})
+		}
+		if desired.monitorType() == monitors.TypeHTTP {
+			opts.URLPath, opts.HTTPMethod, opts.ExpectedCodes = desired.healthMonitor.Path, http.MethodGet, routeMonitorExpectedCodes
+		}
+		_, err = p.octavia.UpdateMonitor(ctx, step.id, opts)
 	case routeMutationDisablePolicy:
 		_, err = p.octavia.UpdatePolicy(ctx, step.id, l7policies.UpdateOpts{
 			AdminStateUp: boolPointer(false),
@@ -606,7 +1031,7 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 		if tagErr != nil {
 			return tagErr
 		}
-		_, err = p.octavia.CreatePolicy(ctx, l7policies.CreateOpts{
+		opts := l7policies.CreateOpts{
 			Name:           resourceName(desired.spec.Identity, step.policy.role),
 			ListenerID:     desired.spec.Gateway.ListenerID,
 			Action:         l7policies.ActionRedirectToPool,
@@ -615,14 +1040,21 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 			RedirectPoolID: step.parentID,
 			AdminStateUp:   boolPointer(false),
 			Tags:           tags,
-		})
+		}
+		if redirect := step.policy.redirect; redirect != nil {
+			opts.Action, opts.RedirectPrefix, opts.RedirectHttpCode = l7policies.ActionRedirectPrefix, redirect.prefix, redirect.statusCode
+		}
+		_, err = p.octavia.CreatePolicy(ctx, opts)
 	case routeMutationUpdatePolicy:
-		_, err = p.octavia.UpdatePolicy(ctx, step.id, l7policies.UpdateOpts{
-			Action:         l7policies.ActionRedirectToPool,
-			Position:       step.policy.position,
-			RedirectPoolID: &step.parentID,
-			AdminStateUp:   boolPointer(false),
-		})
+		opts := l7policies.UpdateOpts{AdminStateUp: boolPointer(false)}
+		if redirect := step.policy.redirect; redirect != nil {
+			opts.Action, opts.RedirectPrefix, opts.RedirectHttpCode = l7policies.ActionRedirectPrefix, &redirect.prefix, redirect.statusCode
+		} else {
+			opts.Action, opts.RedirectPoolID = l7policies.ActionRedirectToPool, &step.parentID
+		}
+		_, err = p.octavia.UpdatePolicy(ctx, step.id, opts)
+	case routeMutationMovePolicy:
+		_, err = p.octavia.UpdatePolicy(ctx, step.id, l7policies.UpdateOpts{Position: step.policy.position})
 	case routeMutationCreateRule:
 		tags, tagErr := desired.identity.RouteTags(step.rule.role)
 		if tagErr != nil {
@@ -632,6 +1064,7 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 			RuleType:     step.rule.ruleType,
 			CompareType:  step.rule.compareType,
 			Value:        step.rule.value,
+			Invert:       step.rule.invert,
 			AdminStateUp: boolPointer(true),
 			Tags:         tags,
 		})
@@ -640,7 +1073,7 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 			RuleType:     step.rule.ruleType,
 			CompareType:  step.rule.compareType,
 			Value:        step.rule.value,
-			Invert:       boolPointer(false),
+			Invert:       boolPointer(step.rule.invert),
 			AdminStateUp: boolPointer(true),
 		})
 	case routeMutationEnablePolicy:
@@ -663,15 +1096,17 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 	return nil
 }
 
-// Endpoint weight represents readiness, not the Service backend's traffic share.
-// NodePort mode retains Octavia's default and does not own member weights.
+// Endpoint mode owns weight for readiness and explicit TCP and UDP traffic shares.
 func desiredMemberWeight(mode cloud.MemberMode, member cloud.Member) *int {
 	if mode != cloud.MemberModeEndpoint {
 		return nil
 	}
-	weight := 1
-	if member.Draining {
+	weight := member.Weight
+	switch {
+	case member.Draining:
 		weight = 0
+	case weight == 0:
+		weight = 1
 	}
 	return &weight
 }

@@ -90,6 +90,30 @@ func TestCompileOrdersWholeGateway(t *testing.T) {
 	}
 }
 
+func TestCompileOrdersOriginalRouteHostnamesOnExactListener(t *testing.T) {
+	gateway := logicalGateway()
+	gateway.Spec.Listeners[0].Hostname = ptr.To(gatewayv1.Hostname("shop.eu.example.com"))
+	anyHost := logicalRoute("a-any", "/account")
+	wildcard := logicalRoute("b-wildcard", "/account")
+	wildcard.Spec.Hostnames = []gatewayv1.Hostname{"*.example.com", "other.eu.example.com"}
+	nested := logicalRoute("c-nested", "/account")
+	nested.Spec.Hostnames = []gatewayv1.Hostname{"*.eu.example.com"}
+	exact := logicalRoute("z-exact", "/")
+	exact.Spec.Hostnames = []gatewayv1.Hostname{"shop.eu.example.com"}
+	anyHost.Spec.Rules[0].Matches[0].Path.Type = ptr.To(gatewayv1.PathMatchExact)
+	result := compileLogical(t, Input{Gateway: gateway, Routes: []gatewayv1.HTTPRoute{anyHost, wildcard, nested, exact}})
+	var names []string
+	for _, match := range result.Listeners[0].Rules {
+		if match.Hostname != string(*gateway.Spec.Listeners[0].Hostname) {
+			t.Fatalf("effective hostname = %q", match.Hostname)
+		}
+		names = append(names, match.Route.Name)
+	}
+	if want := []string{exact.Name, nested.Name, wildcard.Name, anyHost.Name}; !slices.Equal(names, want) {
+		t.Fatalf("route hostname precedence = %v, want %v", names, want)
+	}
+}
+
 func TestCompileHostnamePrecedesPathAndRouteAge(t *testing.T) {
 	wildcard := logicalRoute("wildcard", "/longer")
 	wildcard.Spec.Hostnames = []gatewayv1.Hostname{"*.example.com"}

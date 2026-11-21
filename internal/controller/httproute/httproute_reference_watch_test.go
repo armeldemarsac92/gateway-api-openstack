@@ -111,7 +111,7 @@ func TestReferenceGrantUpdateAndDeletionReachOldConsumers(t *testing.T) {
 	assertRouteRequests(t, drainReferenceWatchQueue(queue), oldRoute)
 }
 
-func TestNamespaceEventsFollowOnlySelectorParents(t *testing.T) {
+func TestNamespaceEventsFollowParentsWithNamespaceDependencies(t *testing.T) {
 	gateway := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "gateways", Name: "edge"}, Spec: gatewayv1.GatewaySpec{Listeners: []gatewayv1.Listener{
 		{Name: "selected", Port: 80, Protocol: gatewayv1.HTTPProtocolType, AllowedRoutes: &gatewayv1.AllowedRoutes{Namespaces: &gatewayv1.RouteNamespaces{
 			From: ptr.To(gatewayv1.NamespacesFromSelector), Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "blue"}},
@@ -138,12 +138,12 @@ func TestNamespaceEventsFollowOnlySelectorParents(t *testing.T) {
 	}
 	queue := newReferenceWatchQueue(t)
 	handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForNamespace).Update(t.Context(), update, queue)
-	assertRouteRequests(t, drainReferenceWatchQueue(queue), direct, peer)
-	if parentUsesNamespaceSelector(gateway, gatewayv1.ParentReference{SectionName: ptr.To(gatewayv1.SectionName("all"))}) {
-		t.Fatal("unrelated listener was treated as a selector dependency")
+	assertRouteRequests(t, drainReferenceWatchQueue(queue), direct, peer, unrelated)
+	if parentObservesRouteNamespace(gateway, gatewayv1.ParentReference{SectionName: ptr.To(gatewayv1.SectionName("missing"))}) {
+		t.Fatal("unmatched listener was treated as a namespace dependency")
 	}
-	if parentUsesNamespaceSelector(gateway, gatewayv1.ParentReference{Port: ptr.To(gatewayv1.PortNumber(8080))}) {
-		t.Fatal("unrelated listener port was treated as a selector dependency")
+	if parentObservesRouteNamespace(gateway, gatewayv1.ParentReference{Port: ptr.To(gatewayv1.PortNumber(8081))}) {
+		t.Fatal("unmatched listener port was treated as a namespace dependency")
 	}
 }
 

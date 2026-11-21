@@ -143,7 +143,7 @@ func (r *Reconciler) reconcileGatewayClassStatus(
 	scope *gatewayClassScope,
 ) (ctrl.Result, error) {
 	gatewayClass := scope.gatewayClass
-	versionObservation, err := controller.ObserveGatewayAPIVersion(ctx, r.APIReader)
+	versionObservation, err := r.Config.ObserveGatewayAPIVersion(ctx, r.APIReader)
 	if err != nil {
 		return ctrl.Result{}, err
 	}

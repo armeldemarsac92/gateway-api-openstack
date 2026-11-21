@@ -1,16 +1,18 @@
 {
-  "gatewayAPIVersion": "v1.6.1",
+  "gatewayAPIVersion": "v1.7.0",
   "profile": "GATEWAY-HTTP",
   "requirements": [
     {
       "name": "gateway-status",
       "tests": [
         "GatewayClassObservedGenerationBump",
-        "GatewayInvalidParametersRef",
         "GatewayInvalidRouteKind",
         "GatewayListenerUnsupportedProtocol",
+        "GatewayNameMaximumLength",
         "GatewayObservedGenerationBump",
-        "HTTPRouteObservedGenerationBump"
+        "GatewayPreserveForeignConditions",
+        "HTTPRouteObservedGenerationBump",
+        "HTTPRoutePreserveForeignStatus"
       ]
     },
     {
@@ -29,6 +31,7 @@
         "HTTPRouteMatchingAcrossRoutes",
         "HTTPRouteMultipleGateways",
         "HTTPRoutePathMatchOrder",
+        "HTTPRouteRuleOrder",
         "HTTPRouteSimpleSameNamespace"
       ]
     },

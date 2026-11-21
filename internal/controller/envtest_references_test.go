@@ -23,13 +23,210 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
+	configv1alpha1 "github.com/gateway-api-openstack/gateway-api-openstack/api/v1alpha1"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
+	httproutecontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/httproute"
 )
+
+func testHTTPRouteServiceReferenceGrant(t *testing.T, apiClient, cacheClient client.Client, config controller.Config, gateway *gatewayv1.Gateway) {
+	t.Helper()
+	target := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "grant-backends-envtest"}}
+	port := corev1.ServicePort{Name: "http", Protocol: corev1.ProtocolTCP, Port: 80}
+	decoy := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: gateway.Namespace, Name: "shared"}, Spec: corev1.ServiceSpec{Ports: []corev1.ServicePort{port}}}
+	port.NodePort = 31081
+	service := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: target.Name, Name: decoy.Name}, Spec: corev1.ServiceSpec{Type: corev1.ServiceTypeNodePort, Ports: []corev1.ServicePort{port}}}
+	endpoints := &discoveryv1.EndpointSlice{
+		ObjectMeta:  metav1.ObjectMeta{Namespace: target.Name, Name: "shared-endpoints", Labels: map[string]string{discoveryv1.LabelServiceName: service.Name}},
+		AddressType: discoveryv1.AddressTypeIPv4,
+		Ports:       []discoveryv1.EndpointPort{{Name: ptr.To("http"), Port: ptr.To(int32(8080))}},
+		Endpoints:   []discoveryv1.Endpoint{{Addresses: []string{"10.1.1.11"}}},
+	}
+	route := envtestHTTPRoute(gateway.Namespace, "granted", gateway.Name, service.Name)
+	route.Spec.Rules[0].BackendRefs[0].Namespace = ptr.To(gatewayv1.Namespace(target.Name))
+	grant := &gatewayv1.ReferenceGrant{
+		ObjectMeta: metav1.ObjectMeta{Namespace: target.Name, Name: "allow-granted-service", Finalizers: []string{"envtest.example/retain"}},
+		Spec: gatewayv1.ReferenceGrantSpec{
+			From: []gatewayv1.ReferenceGrantFrom{{Group: gatewayv1.GroupName, Kind: "HTTPRoute", Namespace: gatewayv1.Namespace(route.Namespace)}},
+			To:   []gatewayv1.ReferenceGrantTo{{Group: "", Kind: "Service", Name: ptr.To(gatewayv1.ObjectName(service.Name))}},
+		},
+	}
+	for _, object := range []client.Object{target, decoy, service, endpoints, route} {
+		if err := apiClient.Create(t.Context(), object); err != nil {
+			t.Fatalf("create %T: %v", object, err)
+		}
+	}
+	provider := &recordingProvider{}
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("last route status: %#v, graph writes: %d", route.Status.Parents, len(provider.graphSpecs))
+		}
+	})
+	gatewayReconciler := newEnvtestGatewayReconciler(cacheClient, apiClient, provider, config)
+	routeReconciler := gatewayReconciler.Writer.(*graph.Writer).Routes.(*httproutecontroller.Reconciler)
+	routeKey := client.ObjectKeyFromObject(route)
+	reconcileUntil := func(conditionType string, status metav1.ConditionStatus, reason string, bound bool, graphCount int) {
+		t.Helper()
+		waitForEnvtest(t, func(ctx context.Context) (bool, error) {
+			current, cached := &gatewayv1.HTTPRoute{}, &gatewayv1.HTTPRoute{}
+			if err := apiClient.Get(ctx, routeKey, current); err != nil {
+				return false, err
+			}
+			if err := cacheClient.Get(ctx, routeKey, cached); err != nil || cached.ResourceVersion != current.ResourceVersion {
+				return false, client.IgnoreNotFound(err)
+			}
+			_, err := routeReconciler.Reconcile(ctx, ctrl.Request{NamespacedName: routeKey})
+			if err != nil {
+				return false, err
+			}
+			if err := apiClient.Get(ctx, routeKey, route); err != nil {
+				return false, err
+			}
+			if len(route.Status.Parents) != 1 {
+				return false, nil
+			}
+			condition := meta.FindStatusCondition(route.Status.Parents[0].Conditions, conditionType)
+			hasBinding := route.Annotations[config.RouteGatewayUIDAnnotation()] == string(gateway.UID)
+			return condition != nil && condition.Status == status && condition.Reason == reason &&
+				condition.ObservedGeneration == route.Generation && hasBinding == bound && len(provider.graphSpecs) >= graphCount, nil
+		})
+	}
+	reconcileUntil("ResolvedRefs", metav1.ConditionFalse, "RefNotPermitted", false, 0)
+	if len(provider.graphSpecs) != 0 {
+		t.Fatalf("ungranted route changed the cloud graph: %#v", provider.graphSpecs)
+	}
+	if err := apiClient.Create(t.Context(), grant); err != nil {
+		t.Fatal(err)
+	}
+	reconcileUntil(config.Domain()+"/Programmed", metav1.ConditionTrue, "Programmed", true, 1)
+	identity := controller.RouteIdentity(config, gateway, route)
+	programmed := provider.graphSpecs[0]
+	if len(programmed.Routes) != 1 || programmed.Routes[0].Disposition != cloud.GraphEnsure || programmed.Routes[0].Spec.Identity != identity ||
+		len(programmed.Routes[0].Spec.Members) != 1 || programmed.Routes[0].Spec.Members[0].Port != 31081 {
+		t.Fatalf("expected only the authorized Service's NodePort on the bound Gateway: %#v", programmed)
+	}
+
+	if err := apiClient.Delete(t.Context(), grant); err != nil {
+		t.Fatal(err)
+	}
+	if err := apiClient.Get(t.Context(), client.ObjectKeyFromObject(grant), grant); err != nil || grant.DeletionTimestamp.IsZero() {
+		t.Fatalf("expected the terminating grant to remain visible: %v", err)
+	}
+	beforeRevoke := len(provider.graphSpecs)
+	reconcileUntil("ResolvedRefs", metav1.ConditionFalse, "RefNotPermitted", false, beforeRevoke+1)
+	for _, spec := range provider.graphSpecs[beforeRevoke:] {
+		if !controller.SameGatewayIdentity(spec.Identity, identity) || spec.Gateway.Disposition != cloud.GraphPreserve ||
+			len(spec.Routes) != 1 || spec.Routes[0].Disposition != cloud.GraphDelete || spec.Routes[0].Spec.Identity != identity {
+			t.Fatalf("revocation must only remove the affected route from its Gateway: %#v", spec)
+		}
+	}
+}
+
+// Exercise the normal controller watches, including a label-only revocation.
+func testSharedHTTPGateway(t *testing.T, c client.Client, cfg controller.Config) {
+	t.Helper()
+	const name = "shared-tenants"
+	params := envtestClassParameters(name)
+	class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: gatewayv1.GatewayClassSpec{
+		ControllerName: cfg.ControllerName, ParametersRef: &gatewayv1.ParametersReference{
+			Group: configv1alpha1.GroupName, Kind: configv1alpha1.GatewayClassConfigKind, Name: params.Name,
+		},
+	}}
+	gw := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "controller-envtest"}, Spec: gatewayv1.GatewaySpec{
+		GatewayClassName: name, Listeners: []gatewayv1.Listener{{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80,
+			AllowedRoutes: &gatewayv1.AllowedRoutes{Namespaces: &gatewayv1.RouteNamespaces{
+				From: ptr.To(gatewayv1.NamespacesFromSelector), Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"edge": name}},
+			}},
+		}},
+	}}
+	for _, obj := range []client.Object{params, class, gw} {
+		if err := c.Create(t.Context(), obj); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var tenants []*corev1.Namespace
+	for i, ns := range []string{"shared-accounts", "shared-catalog"} {
+		tenant := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, Labels: map[string]string{"edge": name}}}
+		service := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: ns}, Spec: corev1.ServiceSpec{
+			Type: corev1.ServiceTypeNodePort, Ports: []corev1.ServicePort{{Name: "http", Port: 80, NodePort: int32(31120 + i)}},
+		}}
+		endpoints := &discoveryv1.EndpointSlice{
+			ObjectMeta:  metav1.ObjectMeta{Name: "web", Namespace: ns, Labels: map[string]string{discoveryv1.LabelServiceName: service.Name}},
+			AddressType: discoveryv1.AddressTypeIPv4, Ports: []discoveryv1.EndpointPort{{Name: ptr.To("http"), Port: ptr.To(int32(8080))}},
+			Endpoints: []discoveryv1.Endpoint{{Addresses: []string{"10.1.1.12"}}},
+		}
+		route := envtestHTTPRoute(ns, "web", gw.Name, service.Name)
+		route.Spec.ParentRefs[0].Namespace = ptr.To(gatewayv1.Namespace(gw.Namespace))
+		route.Spec.Rules[0].Matches = []gatewayv1.HTTPRouteMatch{{Path: &gatewayv1.HTTPPathMatch{Value: ptr.To("/" + ns)}}}
+		for _, obj := range []client.Object{tenant, service, endpoints, route} {
+			if err := c.Create(t.Context(), obj); err != nil {
+				t.Fatal(err)
+			}
+		}
+		tenants = append(tenants, tenant)
+	}
+	waitForAttachment := func(revoked bool, count int32) {
+		t.Helper()
+		defer func() {
+			if !t.Failed() {
+				return
+			}
+			var current gatewayv1.Gateway
+			if err := c.Get(t.Context(), client.ObjectKeyFromObject(gw), &current); err == nil {
+				t.Logf("expected %d routes, listener status: %+v", count, current.Status.Listeners)
+			}
+			for _, tenant := range tenants {
+				var route gatewayv1.HTTPRoute
+				if err := c.Get(t.Context(), client.ObjectKey{Namespace: tenant.Name, Name: "web"}, &route); err == nil {
+					t.Logf("%s/web binding=%q parents=%+v", tenant.Name, route.Annotations[cfg.RouteGatewayUIDAnnotation()], route.Status.Parents)
+				}
+			}
+		}()
+		waitForEnvtest(t, func(ctx context.Context) (bool, error) {
+			for i, tenant := range tenants {
+				var route gatewayv1.HTTPRoute
+				if err := c.Get(ctx, client.ObjectKey{Namespace: tenant.Name, Name: "web"}, &route); err != nil {
+					return false, err
+				}
+				if len(route.Status.Parents) != 1 || route.Status.Parents[0].ControllerName != cfg.ControllerName {
+					return false, nil
+				}
+				conditions := route.Status.Parents[0].Conditions
+				accepted := meta.FindStatusCondition(conditions, "Accepted")
+				bound := route.Annotations[cfg.RouteGatewayUIDAnnotation()] == string(gw.UID)
+				if accepted == nil || accepted.ObservedGeneration != route.Generation {
+					return false, nil
+				}
+				if revoked && i == 0 {
+					if bound || accepted.Status != metav1.ConditionFalse || accepted.Reason != string(gatewayv1.RouteReasonNotAllowedByListeners) {
+						return false, nil
+					}
+				} else if !bound || accepted.Status != metav1.ConditionTrue || !meta.IsStatusConditionTrue(conditions, cfg.Domain()+"/Programmed") || len(route.OwnerReferences) != 0 {
+					return false, nil
+				}
+			}
+			var current gatewayv1.Gateway
+			err := c.Get(ctx, client.ObjectKeyFromObject(gw), &current)
+			return err == nil && len(current.Status.Listeners) == 1 && current.Status.Listeners[0].AttachedRoutes == count, err
+		})
+	}
+	waitForAttachment(false, 2)
+	before := tenants[0].DeepCopy()
+	delete(tenants[0].Labels, "edge")
+	if err := c.Patch(t.Context(), tenants[0], client.MergeFrom(before)); err != nil {
+		t.Fatal(err)
+	}
+	waitForAttachment(true, 1)
+}
 
 func testHTTPRouteReferenceIndexUpdates(t *testing.T, apiClient, cacheClient client.Client) {
 	t.Helper()

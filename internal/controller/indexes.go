@@ -50,6 +50,16 @@ const (
 	indexHTTPRouteByBoundGatewayUID = "metadata.boundGatewayUID"
 	// IndexHTTPRouteByNodeBackend indexes routes that use Node backends.
 	IndexHTTPRouteByNodeBackend = "spec.nodeBackend"
+	// IndexL4RouteByParentGateway indexes TCPRoutes and UDPRoutes by parent Gateway key.
+	IndexL4RouteByParentGateway = "spec.l4RouteParentGateway"
+	// IndexL4RouteByStatusGateway indexes TCPRoutes and UDPRoutes by status parent Gateway key.
+	IndexL4RouteByStatusGateway = "status.l4RouteParentGateway"
+	// IndexL4RouteByBackendService indexes TCPRoutes and UDPRoutes by backend Service key.
+	IndexL4RouteByBackendService = "spec.l4RouteBackendService"
+	// IndexL4RouteByBackendNamespace indexes cross-namespace TCPRoute and UDPRoute Service references.
+	IndexL4RouteByBackendNamespace = "spec.l4RouteBackendNamespace"
+	// IndexL4RouteByBoundGateway indexes TCPRoutes and UDPRoutes by bound Gateway key.
+	IndexL4RouteByBoundGateway = "metadata.l4RouteBoundGateway"
 	// IndexEndpointSliceByService indexes EndpointSlices by Service key.
 	IndexEndpointSliceByService = "metadata.service"
 	// NodeBackendIndexValue is the field value for routes that use Node backends.
@@ -67,14 +77,14 @@ type controllerFieldIndex struct {
 func SetupIndexes(ctx context.Context, indexer client.FieldIndexer, config Config) error {
 	for _, index := range controllerFieldIndexes(config) {
 		if err := indexer.IndexField(ctx, index.object, index.field, index.extract); err != nil {
-			return fmt.Errorf("register %q field index: %w", index.field, err)
+			return fmt.Errorf("register %q field index for %T: %w", index.field, index.object, err)
 		}
 	}
 	return nil
 }
 
 func controllerFieldIndexes(config Config) []controllerFieldIndex {
-	return []controllerFieldIndex{
+	indexes := []controllerFieldIndex{
 		{object: &gatewayv1.GatewayClass{}, field: IndexGatewayClassByParameters, extract: gatewayClassParametersKeys},
 		{
 			object: &gatewayv1.GatewayClass{},
@@ -192,6 +202,45 @@ func controllerFieldIndexes(config Config) []controllerFieldIndex {
 			},
 		},
 	}
+	for _, route := range []client.Object{&gatewayv1.TCPRoute{}, &gatewayv1.UDPRoute{}} {
+		indexes = append(indexes,
+			controllerFieldIndex{object: route, field: IndexL4RouteByParentGateway, extract: func(object client.Object) []string {
+				parents, _, _ := RouteParents(object)
+				return parentGatewayKeys(object.GetNamespace(), parents)
+			}},
+			controllerFieldIndex{object: route, field: IndexL4RouteByStatusGateway, extract: func(object client.Object) []string {
+				_, statuses, _ := RouteParents(object)
+				return statusGatewayKeys(config, object.GetNamespace(), statuses)
+			}},
+			controllerFieldIndex{object: route, field: IndexL4RouteByBackendService, extract: func(object client.Object) []string {
+				return l4BackendKeys(object, false)
+			}},
+			controllerFieldIndex{object: route, field: IndexL4RouteByBackendNamespace, extract: func(object client.Object) []string {
+				return l4BackendKeys(object, true)
+			}},
+			controllerFieldIndex{object: route, field: IndexL4RouteByBoundGateway, extract: func(object client.Object) []string {
+				if key := boundGatewayKey(config, object); key != "" {
+					return []string{key}
+				}
+				return nil
+			}},
+		)
+	}
+	return indexes
+}
+
+// RouteParents returns the declared and reported parents of a supported Route.
+func RouteParents(object client.Object) ([]gatewayv1.ParentReference, []gatewayv1.RouteParentStatus, bool) {
+	switch route := object.(type) {
+	case *gatewayv1.HTTPRoute:
+		return route.Spec.ParentRefs, route.Status.Parents, true
+	case *gatewayv1.TCPRoute:
+		return route.Spec.ParentRefs, route.Status.Parents, true
+	case *gatewayv1.UDPRoute:
+		return route.Spec.ParentRefs, route.Status.Parents, true
+	default:
+		return nil, nil, false
+	}
 }
 
 // ObjectKeyString returns the stable namespace and name representation used by
@@ -203,12 +252,16 @@ func ObjectKeyString(key types.NamespacedName) string {
 // ParentGatewayKeys returns the distinct Gateway keys referenced by an
 // HTTPRoute, in deterministic order.
 func ParentGatewayKeys(route *gatewayv1.HTTPRoute) []string {
-	keys := make(map[string]struct{}, len(route.Spec.ParentRefs))
-	for _, parent := range route.Spec.ParentRefs {
+	return parentGatewayKeys(route.Namespace, route.Spec.ParentRefs)
+}
+
+func parentGatewayKeys(routeNamespace string, parents []gatewayv1.ParentReference) []string {
+	keys := make(map[string]struct{}, len(parents))
+	for _, parent := range parents {
 		if !IsGatewayParentRef(parent) || parent.Name == "" {
 			continue
 		}
-		namespace := route.Namespace
+		namespace := routeNamespace
 		if parent.Namespace != nil {
 			namespace = string(*parent.Namespace)
 		}
@@ -224,12 +277,16 @@ func ParentGatewayKeys(route *gatewayv1.HTTPRoute) []string {
 }
 
 func statusParentGatewayKeys(config Config, route *gatewayv1.HTTPRoute) []string {
-	keys := make(map[string]struct{}, len(route.Status.Parents))
-	for _, parent := range route.Status.Parents {
+	return statusGatewayKeys(config, route.Namespace, route.Status.Parents)
+}
+
+func statusGatewayKeys(config Config, routeNamespace string, parents []gatewayv1.RouteParentStatus) []string {
+	keys := make(map[string]struct{}, len(parents))
+	for _, parent := range parents {
 		if parent.ControllerName != config.ControllerName || !IsGatewayParentRef(parent.ParentRef) || parent.ParentRef.Name == "" {
 			continue
 		}
-		namespace := route.Namespace
+		namespace := routeNamespace
 		if parent.ParentRef.Namespace != nil {
 			namespace = string(*parent.ParentRef.Namespace)
 		}
@@ -290,7 +347,36 @@ func hasCoreServiceBackend(route *gatewayv1.HTTPRoute) bool {
 	return false
 }
 
-func boundGatewayKey(config Config, route *gatewayv1.HTTPRoute) string {
+func l4BackendKeys(object client.Object, namespacesOnly bool) []string {
+	namespace := object.GetNamespace()
+	keys := make(map[string]struct{})
+	addBackends := func(backends []gatewayv1.BackendRef) {
+		for _, backend := range backends {
+			key, supported := model.BackendServiceReference(namespace, backend.BackendObjectReference)
+			if !supported || key.Namespace == "" || key.Name == "" {
+				continue
+			}
+			if !namespacesOnly {
+				keys[ObjectKeyString(key)] = struct{}{}
+			} else if key.Namespace != namespace {
+				keys[key.Namespace] = struct{}{}
+			}
+		}
+	}
+	switch route := object.(type) {
+	case *gatewayv1.TCPRoute:
+		for _, rule := range route.Spec.Rules {
+			addBackends(rule.BackendRefs)
+		}
+	case *gatewayv1.UDPRoute:
+		for _, rule := range route.Spec.Rules {
+			addBackends(rule.BackendRefs)
+		}
+	}
+	return sortedIndexKeys(keys)
+}
+
+func boundGatewayKey(config Config, route client.Object) string {
 	annotations := route.GetAnnotations()
 	namespace := annotations[config.RouteGatewayNamespaceAnnotation()]
 	name := annotations[config.RouteGatewayNameAnnotation()]

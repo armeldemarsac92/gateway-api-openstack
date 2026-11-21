@@ -28,13 +28,13 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
-type recordedFieldIndex struct {
-	object  client.Object
-	extract client.IndexerFunc
+type fieldIndexKey struct {
+	objectType reflect.Type
+	field      string
 }
 
 type recordingFieldIndexer struct {
-	indexes   map[string]recordedFieldIndex
+	indexes   map[fieldIndexKey]client.IndexerFunc
 	failField string
 	failErr   error
 }
@@ -49,9 +49,9 @@ func (r *recordingFieldIndexer) IndexField(
 		return r.failErr
 	}
 	if r.indexes == nil {
-		r.indexes = make(map[string]recordedFieldIndex)
+		r.indexes = make(map[fieldIndexKey]client.IndexerFunc)
 	}
-	r.indexes[field] = recordedFieldIndex{object: object, extract: extract}
+	r.indexes[fieldIndexKey{objectType: reflect.TypeOf(object), field: field}] = extract
 	return nil
 }
 
@@ -77,17 +77,22 @@ func TestSetupIndexes(t *testing.T) {
 		IndexHTTPRouteByNodeBackend:      &gatewayv1.HTTPRoute{},
 		IndexEndpointSliceByService:      &discoveryv1.EndpointSlice{},
 	}
-	if len(indexer.indexes) != len(wantTypes) {
-		t.Fatalf("registered indexes = %d, want %d", len(indexer.indexes), len(wantTypes))
+	l4Fields := []struct {
+		field string
+		want  []string
+	}{
+		{IndexL4RouteByParentGateway, []string{"gateways/edge", "routes/z-gateway"}},
+		{IndexL4RouteByStatusGateway, []string{"gateways/edge", "routes/status-gateway"}},
+		{IndexL4RouteByBackendService, []string{"apps/a-service", "routes/z-service"}},
+		{IndexL4RouteByBackendNamespace, []string{"apps"}},
+		{IndexL4RouteByBoundGateway, []string{"gateways/edge"}},
 	}
-	for field, wantObject := range wantTypes {
-		index, found := indexer.indexes[field]
-		if !found {
-			t.Errorf("field index %q was not registered", field)
-			continue
-		}
-		if reflect.TypeOf(index.object) != reflect.TypeOf(wantObject) {
-			t.Errorf("field index %q object type = %T, want %T", field, index.object, wantObject)
+	if want := len(wantTypes) + 2*len(l4Fields); len(indexer.indexes) != want {
+		t.Fatalf("registered indexes = %d, want %d", len(indexer.indexes), want)
+	}
+	for field, object := range wantTypes {
+		if _, found := indexer.indexes[fieldIndexKey{objectType: reflect.TypeOf(object), field: field}]; !found {
+			t.Errorf("field index %q was not registered for %T", field, object)
 		}
 	}
 
@@ -105,6 +110,32 @@ func TestSetupIndexes(t *testing.T) {
 	assertIndexValues(t, indexer, IndexHTTPRouteByBoundGateway, route, []string{"gateways/edge"})
 	assertIndexValues(t, indexer, indexHTTPRouteByBoundGatewayUID, route, []string{"gateway-uid"})
 	assertIndexValues(t, indexer, IndexHTTPRouteByNodeBackend, route, []string{NodeBackendIndexValue})
+
+	tcpRoute := &gatewayv1.TCPRoute{
+		ObjectMeta: route.ObjectMeta,
+		Spec: gatewayv1.TCPRouteSpec{
+			CommonRouteSpec: route.Spec.CommonRouteSpec,
+			Rules: []gatewayv1.TCPRouteRule{{BackendRefs: []gatewayv1.BackendRef{
+				route.Spec.Rules[0].BackendRefs[0].BackendRef,
+				route.Spec.Rules[0].BackendRefs[1].BackendRef,
+				route.Spec.Rules[0].BackendRefs[1].BackendRef,
+			}}},
+		},
+		Status: gatewayv1.TCPRouteStatus{RouteStatus: route.Status.RouteStatus},
+	}
+	udpRoute := &gatewayv1.UDPRoute{
+		ObjectMeta: tcpRoute.ObjectMeta,
+		Spec: gatewayv1.UDPRouteSpec{
+			CommonRouteSpec: tcpRoute.Spec.CommonRouteSpec,
+			Rules:           []gatewayv1.UDPRouteRule{{BackendRefs: tcpRoute.Spec.Rules[0].BackendRefs}},
+		},
+		Status: gatewayv1.UDPRouteStatus{RouteStatus: tcpRoute.Status.RouteStatus},
+	}
+	for _, object := range []client.Object{tcpRoute, udpRoute} {
+		for _, index := range l4Fields {
+			assertIndexValues(t, indexer, index.field, object, index.want)
+		}
+	}
 
 	endpointSlice := &discoveryv1.EndpointSlice{ObjectMeta: metav1.ObjectMeta{
 		Namespace: "apps",
@@ -304,12 +335,12 @@ func assertIndexValues(
 	want []string,
 ) {
 	t.Helper()
-	index, found := indexer.indexes[field]
+	extract, found := indexer.indexes[fieldIndexKey{objectType: reflect.TypeOf(object), field: field}]
 	if !found {
-		t.Fatalf("field index %q was not registered", field)
+		t.Fatalf("field index %q was not registered for %T", field, object)
 	}
-	if got := index.extract(object); !reflect.DeepEqual(got, want) {
-		t.Errorf("field index %q values = %#v, want %#v", field, got, want)
+	if got := extract(object); !reflect.DeepEqual(got, want) {
+		t.Errorf("field index %q for %T values = %#v, want %#v", field, object, got, want)
 	}
 }
 

@@ -17,6 +17,7 @@ limitations under the License.
 package gateway
 
 import (
+	"cmp"
 	"context"
 	"strings"
 	"testing"
@@ -55,13 +56,6 @@ var (
 	Condition    = controller.Condition
 	SetCondition = controller.SetCondition
 )
-
-var requiredGatewayAPICRDs = []string{
-	"gatewayclasses.gateway.networking.k8s.io",
-	"gateways.gateway.networking.k8s.io",
-	"httproutes.gateway.networking.k8s.io",
-	"referencegrants.gateway.networking.k8s.io",
-}
 
 type recordingProvider struct {
 	gatewaySpecs     []cloud.GatewaySpec
@@ -220,19 +214,7 @@ func (b *controllerTestClientBuilder) Build() client.WithWatch {
 		b.builder = b.builder.WithObjects(testClassParameters())
 	}
 	if !b.hasGatewayAPICRDs {
-		definitions := make([]client.Object, 0, len(requiredGatewayAPICRDs))
-		for _, name := range requiredGatewayAPICRDs {
-			definitions = append(definitions, &apiextensionsv1.CustomResourceDefinition{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: name,
-					Annotations: map[string]string{
-						gatewayconsts.BundleVersionAnnotation: gatewayconsts.BundleVersion,
-					},
-				},
-				Spec: apiextensionsv1.CustomResourceDefinitionSpec{Group: gatewayv1.GroupName},
-			})
-		}
-		b.builder = b.builder.WithObjects(definitions...)
+		b.builder = b.builder.WithObjects(supportedGatewayAPICRDs(b.config)...)
 	}
 	return b.builder.Build()
 }
@@ -250,23 +232,20 @@ func rawIndexedFakeClientBuilder(scheme *runtime.Scheme, config Config) *fake.Cl
 	return builder
 }
 
-func supportedGatewayAPICRDs() []client.Object {
-	definitions := make([]client.Object, 0, len(requiredGatewayAPICRDs))
-	for _, name := range requiredGatewayAPICRDs {
-		definitions = append(definitions, gatewayAPICRD(name, gatewayconsts.BundleVersion))
+func supportedGatewayAPICRDs(config Config) []client.Object {
+	names := config.GatewayAPICRDNames()
+	definitions := make([]client.Object, 0, len(names))
+	for _, name := range names {
+		_, group, _ := strings.Cut(name, ".")
+		definitions = append(definitions, &apiextensionsv1.CustomResourceDefinition{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Annotations: map[string]string{
+				gatewayconsts.ChannelAnnotation:       cmp.Or(config.GatewayAPIChannel, "standard"),
+				gatewayconsts.BundleVersionAnnotation: gatewayconsts.BundleVersion,
+			}},
+			Spec: apiextensionsv1.CustomResourceDefinitionSpec{Group: group},
+		})
 	}
 	return definitions
-}
-
-func gatewayAPICRD(name, bundleVersion string) *apiextensionsv1.CustomResourceDefinition {
-	annotations := map[string]string{}
-	if bundleVersion != "" {
-		annotations[gatewayconsts.BundleVersionAnnotation] = bundleVersion
-	}
-	return &apiextensionsv1.CustomResourceDefinition{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Annotations: annotations},
-		Spec:       apiextensionsv1.CustomResourceDefinitionSpec{Group: gatewayv1.GroupName},
-	}
 }
 
 type fakeFieldIndexer struct {

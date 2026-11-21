@@ -20,6 +20,8 @@ package controller_test
 
 import (
 	"context"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -32,8 +34,10 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -65,6 +69,7 @@ func TestControllerEnvtest(t *testing.T) {
 
 	testEnvironment := &envtest.Environment{
 		Scheme:                   scheme,
+		UseExistingCluster:       ptr.To(false),
 		CRDDirectoryPaths:        []string{crdDirectory, "../../config/crd"},
 		ErrorIfCRDPathMissing:    true,
 		DownloadBinaryAssets:     false,
@@ -83,49 +88,102 @@ func TestControllerEnvtest(t *testing.T) {
 		}
 	})
 
-	manager, err := ctrl.NewManager(restConfig, ctrl.Options{
-		Scheme:                 scheme,
-		Metrics:                metricsserver.Options{BindAddress: "0"},
-		HealthProbeBindAddress: "0",
-	})
-	if err != nil {
-		t.Fatalf("create envtest manager: %v", err)
-	}
 	config := testConfig()
-	if err := controller.SetupIndexes(t.Context(), manager.GetFieldIndexer(), config); err != nil {
-		t.Fatalf("set up controller indexes: %v", err)
-	}
-
-	managerContext, stopManager := context.WithCancel(context.Background())
-	managerResult := make(chan error, 1)
-	go func() {
-		managerResult <- manager.Start(managerContext)
-	}()
-	t.Cleanup(func() {
-		stopManager()
-		select {
-		case err := <-managerResult:
-			if err != nil {
-				t.Errorf("stop envtest manager: %v", err)
+	config.GatewayAPIChannel = os.Getenv("GATEWAY_API_CHANNEL")
+	// Status and binding indexes belong to one controller name. Keep the
+	// manager-driven watches separate from the manually stepped reconcilers.
+	startManager := func(cfg controller.Config, provider *recordingProvider) ctrl.Manager {
+		manager, err := ctrl.NewManager(restConfig, ctrl.Options{
+			Scheme:                 scheme,
+			Metrics:                metricsserver.Options{BindAddress: "0"},
+			HealthProbeBindAddress: "0",
+		})
+		if err != nil {
+			t.Fatalf("create envtest manager: %v", err)
+		}
+		if err := controller.SetupIndexes(t.Context(), manager.GetFieldIndexer(), cfg); err != nil {
+			t.Fatalf("set up controller indexes: %v", err)
+		}
+		if provider != nil {
+			startGatewayStatusReconcilers(t, manager, cfg, provider)
+		}
+		managerContext, stopManager := context.WithCancel(context.Background())
+		managerResult := make(chan error, 1)
+		go func() {
+			managerResult <- manager.Start(managerContext)
+		}()
+		t.Cleanup(func() {
+			stopManager()
+			select {
+			case err := <-managerResult:
+				if err != nil {
+					t.Errorf("stop envtest manager: %v", err)
+				}
+			case <-time.After(time.Minute):
+				t.Error("envtest manager did not stop")
 			}
-		case <-time.After(time.Minute):
-			t.Error("envtest manager did not stop")
+		})
+		if synced := manager.GetCache().WaitForCacheSync(t.Context()); !synced {
+			select {
+			case err := <-managerResult:
+				t.Fatalf("start envtest manager: %v", err)
+			default:
+				t.Fatal("envtest manager cache did not sync")
+			}
 		}
-	})
-	if synced := manager.GetCache().WaitForCacheSync(t.Context()); !synced {
-		select {
-		case err := <-managerResult:
-			t.Fatalf("start envtest manager: %v", err)
-		default:
-			t.Fatal("envtest manager cache did not sync")
-		}
+
+		return manager
 	}
+	manager := startManager(config, nil)
+	statusConfig := config
+	statusConfig.ControllerName = "status.example.com/gateway-api-openstack"
+	statusProvider := &recordingProvider{}
+	startManager(statusConfig, statusProvider)
 
 	apiClient, err := client.New(restConfig, client.Options{Scheme: scheme})
 	if err != nil {
 		t.Fatalf("create envtest API client: %v", err)
 	}
+	t.Run("genuine Gateway API release bundle", func(t *testing.T) {
+		// envtest installs CRDs from a directory. The release also ships two
+		// admission resources in this multi-document manifest.
+		file, err := os.Open(filepath.Join(crdDirectory, "gateway.networking.k8s.io_vap_safeupgrades.yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = file.Close() }()
+		decoder := yaml.NewYAMLOrJSONDecoder(file, 4096)
+		for _, kind := range []string{"ValidatingAdmissionPolicy", "ValidatingAdmissionPolicyBinding"} {
+			var obj unstructured.Unstructured
+			if err := decoder.Decode(&obj); err != nil {
+				t.Fatal(err)
+			}
+			if obj.GetKind() != kind || obj.GetName() != "safe-upgrades.gateway.networking.k8s.io" {
+				t.Fatalf("unexpected release admission resource %s/%s", obj.GetKind(), obj.GetName())
+			}
+			if err := apiClient.Create(t.Context(), &obj); err != nil {
+				t.Fatalf("install release %s: %v", kind, err)
+			}
+		}
+		if err := decoder.Decode(&unstructured.Unstructured{}); !errors.Is(err, io.EOF) {
+			t.Fatalf("unexpected document after the release admission binding, error: %v", err)
+		}
+		if err := config.ValidateInstalledGatewayAPIVersion(t.Context(), apiClient); err != nil {
+			t.Fatalf("configured channel rejected its genuine release CRDs: %v", err)
+		}
+		other := config
+		other.GatewayAPIChannel = "experimental"
+		if config.GatewayAPIChannel == "experimental" {
+			other.GatewayAPIChannel = "standard"
+		}
+		if err := other.ValidateInstalledGatewayAPIVersion(t.Context(), apiClient); !errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) {
+			t.Fatalf("a controller configured for the other channel accepted this installation: %v", err)
+		}
+	})
 	cacheClient := manager.GetClient()
+	t.Run("upstream Gateway status cases", func(t *testing.T) {
+		testUpstreamGatewayStatus(t, apiClient, statusConfig)
+	})
 	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "controller-envtest"}}
 	if err := apiClient.Create(t.Context(), namespace); err != nil {
 		t.Fatalf("create test Namespace: %v", err)
@@ -137,6 +195,41 @@ func TestControllerEnvtest(t *testing.T) {
 	testServicePortUpdatePredicate(t, apiClient, namespace.Name)
 	gatewayClass := createEnvtestGatewayClass(t, apiClient, cacheClient, config)
 	testGatewayClassStatusSubresource(t, apiClient, cacheClient, config, gatewayClass)
+	if config.GatewayAPIChannel == "experimental" {
+		t.Run("unsupported listener filter stops provisioning", func(t *testing.T) {
+			gw := &gatewayv1.Gateway{
+				ObjectMeta: metav1.ObjectMeta{Namespace: namespace.Name, Name: "filtered"},
+				Spec: gatewayv1.GatewaySpec{GatewayClassName: gatewayv1.ObjectName(gatewayClass.Name), Listeners: []gatewayv1.Listener{{
+					Name: "http", Port: 80, Protocol: gatewayv1.HTTPProtocolType,
+					Filters: &gatewayv1.ListenerFilters{Requests: []gatewayv1.ListenerFilter{{
+						Type:         gatewayv1.ListenerFilterExtensionRef,
+						ExtensionRef: &gatewayv1.LocalObjectReference{Group: "example.net", Kind: "Policy", Name: "authorization"},
+					}}},
+				}}},
+			}
+			if err := apiClient.Create(t.Context(), gw); err != nil {
+				t.Fatal(err)
+			}
+			key := client.ObjectKeyFromObject(gw)
+			waitForGatewayResourceVersion(t, cacheClient, key, gw.ResourceVersion, false)
+			provider := &recordingProvider{}
+			r := newEnvtestGatewayReconciler(cacheClient, apiClient, provider, config)
+			if _, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: key}); err != nil {
+				t.Fatal(err)
+			}
+			if err := apiClient.Get(t.Context(), key, gw); err != nil {
+				t.Fatal(err)
+			}
+			if len(gw.Status.Listeners) != 1 || !meta.IsStatusConditionFalse(gw.Status.Listeners[0].Conditions, "Accepted") ||
+				len(gw.Finalizers) != 0 || len(provider.gatewaySpecs) != 0 || len(provider.deletedGateways) != 0 {
+				t.Fatal("the filtered listener must be rejected before any binding or cloud mutation")
+			}
+			if err := apiClient.Delete(t.Context(), gw); err != nil {
+				t.Fatal(err)
+			}
+			waitForGatewayDeletion(t, cacheClient, key)
+		})
+	}
 	testGatewayBindingConflict(t, apiClient, cacheClient, config, namespace.Name, gatewayClass.Name)
 
 	gateway := createEnvtestGateway(t, apiClient, cacheClient, namespace.Name, "edge", gatewayClass.Name)
@@ -147,6 +240,18 @@ func TestControllerEnvtest(t *testing.T) {
 		testHTTPRouteReferenceIndexUpdates(t, apiClient, cacheClient)
 	})
 	testGraphWriterTriggerEquivalence(t, apiClient, cacheClient, config, gateway)
+	t.Run("shared Gateway follows tenant namespace labels", func(t *testing.T) {
+		testSharedHTTPGateway(t, apiClient, statusConfig)
+	})
+	t.Run("TCP listener selects one authorized backend", func(t *testing.T) {
+		testTCPGatewaySelection(t, apiClient, statusConfig, statusProvider)
+	})
+	t.Run("UDP worker NodePort follows endpoint protocol and grant", func(t *testing.T) {
+		testUDPNodePort(t, apiClient, statusConfig, statusProvider)
+	})
+	t.Run("HTTPRoute Service ReferenceGrant lifecycle", func(t *testing.T) {
+		testHTTPRouteServiceReferenceGrant(t, apiClient, cacheClient, config, gateway)
+	})
 	testFinalizersWithNewReconciler(t, apiClient, cacheClient, config, gatewayClass, gateway)
 	t.Run("GatewayClass topology isolation", func(t *testing.T) {
 		testGatewayClassTopologyIsolation(t, apiClient, cacheClient, config)
@@ -863,8 +968,17 @@ func testGraphWriterTriggerEquivalence(t *testing.T, apiClient, cacheClient clie
 	if _, err := routeReconciler.Reconcile(t.Context(), routeRequest); err != nil {
 		t.Fatalf("HTTPRoute-triggered complete graph: %v", err)
 	}
-	if len(provider.graphSpecs) != 2 || !reflect.DeepEqual(provider.graphSpecs[0], provider.graphSpecs[1]) {
-		t.Fatalf("writer triggers produced different graphs: %#v", provider.graphSpecs)
+	if len(provider.graphSpecs) != 2 {
+		t.Fatalf("got %d graphs, want one per trigger", len(provider.graphSpecs))
+	}
+	fromGateway, fromRoute := provider.graphSpecs[0], provider.graphSpecs[1]
+	if fromGateway.ValidateMutation == nil || fromRoute.ValidateMutation == nil {
+		t.Fatal("both writer triggers must validate fresh inputs before a cloud mutation")
+	}
+	// Each request has its own callback. Compare the desired resources it guards.
+	fromGateway.ValidateMutation, fromRoute.ValidateMutation = nil, nil
+	if !reflect.DeepEqual(fromGateway, fromRoute) {
+		t.Fatalf("writer triggers produced different graphs: %#v and %#v", fromGateway, fromRoute)
 	}
 	if len(provider.graphSpecs[0].Routes) != 1 || provider.graphSpecs[0].Gateway.Disposition != cloud.GraphEnsure || provider.graphSpecs[0].Routes[0].Disposition != cloud.GraphEnsure {
 		t.Fatalf("writer did not build complete graph: %#v", provider.graphSpecs[0])

@@ -1,0 +1,56 @@
+name: Hibiscus development image
+
+on:
+  push:
+    branches: [hibiscus/v1.7.0]
+    paths: [docs/qualification/v1.7.0/image.json]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: github.repository == 'armeldemarsac92/gateway-api-openstack'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Verify the reviewed development archive
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          record=docs/qualification/v1.7.0/image.json
+          revision="$(jq -er '.sourceRevision | select(test("^[a-f0-9]{40}$"))' "$record")"
+          digest="$(jq -er '.manifestDigest | select(test("^sha256:[a-f0-9]{64}$"))' "$record")"
+          git merge-base --is-ancestor "$revision" HEAD
+          tag="hibiscus-dev-$revision"
+          test "$(git rev-list -n 1 "$tag")" = "$revision"
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern controller-linux-amd64.oci.tar --dir "$RUNNER_TEMP"
+          source="oci-archive:$RUNNER_TEMP/controller-linux-amd64.oci.tar:hibiscus"
+          actual="$(skopeo inspect --raw "$source" | sha256sum | cut -d' ' -f1)"
+          test "sha256:$actual" = "$digest"
+          skopeo inspect --config "$source" | jq -e --arg rev "$revision" '.os == "linux" and .architecture == "amd64" and .config.Labels["org.opencontainers.image.revision"] == $rev' >/dev/null
+          echo "IMAGE_TAG=$tag" >> "$GITHUB_ENV"
+          echo "IMAGE_DIGEST=$digest" >> "$GITHUB_ENV"
+      - name: Copy the verified manifest to the personal registry
+        shell: bash
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          authfile="$RUNNER_TEMP/hibiscus-registry.json"
+          trap 'rm -f "$authfile"' EXIT
+          printf '%s' "$REGISTRY_TOKEN" | skopeo login --authfile "$authfile" --username "$GITHUB_ACTOR" --password-stdin ghcr.io
+          repository="ghcr.io/$GITHUB_REPOSITORY"
+          skopeo copy --preserve-digests --dest-authfile "$authfile" "oci-archive:$RUNNER_TEMP/controller-linux-amd64.oci.tar:hibiscus" "docker://$repository:$IMAGE_TAG"
+          actual="$(skopeo inspect --authfile "$authfile" --raw "docker://$repository@$IMAGE_DIGEST" | sha256sum | cut -d' ' -f1)"
+          test "sha256:$actual" = "$IMAGE_DIGEST"
+          printf 'Registry image %s@%s (linux/amd64)\n' "$repository" "$IMAGE_DIGEST" | tee -a "$GITHUB_STEP_SUMMARY"

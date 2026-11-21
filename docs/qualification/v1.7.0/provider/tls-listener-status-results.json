@@ -1,0 +1,331 @@
+{
+  "controller_revision": "d6278819244862c6dca7654ccc779f60622e62c9",
+  "gateway_api_version": "v1.7.0",
+  "gateway_api_revision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "kubernetes_version": "v1.36.2",
+  "go_version": "1.27.4",
+  "listener_timeout_seconds": 60,
+  "qualification_patch_sha256": "3cebccd62f435f5b1b7c9449e3ee9f2be7efc789ea1ac48bf8253e6a757c2d04",
+  "runs": [
+    {
+      "channel": "standard",
+      "selection": "advertised",
+      "targeted_probe": false,
+      "runner_features": [],
+      "go_test_status": "PASS",
+      "go_test_exit_code": 0,
+      "package_elapsed_seconds": 6.431,
+      "private_event_stream_sha256": "8a29bc9a0601bd06c1c5883263cd4d439f9310ce2bc99a77eb53fc509abf4f74",
+      "cases": [
+        {
+          "name": "TLSRouteListenerPassthroughSupportedKinds",
+          "status": "SKIP",
+          "elapsed_seconds": 0,
+          "case_manifest_applied": false,
+          "reason": "Upstream feature gate: suite does not support Gateway.",
+          "unreached_checks": [
+            "tls-passthrough SupportedKinds includes gateway.networking.k8s.io/TLSRoute",
+            "tls-passthrough AttachedRoutes=0",
+            "tls-passthrough ResolvedRefs=False/InvalidRouteKinds"
+          ]
+        },
+        {
+          "name": "TLSRouteListenerTerminateNotSupported",
+          "status": "SKIP",
+          "elapsed_seconds": 0,
+          "case_manifest_applied": false,
+          "reason": "Upstream feature gate: suite does not support Gateway.",
+          "unreached_checks": [
+            "tls-terminate SupportedKinds is empty",
+            "tls-terminate AttachedRoutes=0",
+            "tls-terminate Accepted=False/UnsupportedValue"
+          ]
+        },
+        {
+          "name": "TLSRouteListenerTerminateSupportedKinds",
+          "status": "SKIP",
+          "elapsed_seconds": 0,
+          "case_manifest_applied": false,
+          "reason": "Upstream feature gate: suite does not support Gateway.",
+          "unreached_checks": [
+            "tls-terminate SupportedKinds includes gateway.networking.k8s.io/TLSRoute",
+            "tls-terminate AttachedRoutes=0",
+            "tls-terminate Accepted=True/Accepted"
+          ]
+        },
+        {
+          "name": "TLSRouteListenerMixedTerminationNotSupported",
+          "status": "SKIP",
+          "elapsed_seconds": 0,
+          "case_manifest_applied": false,
+          "reason": "Upstream feature gate: suite does not support Gateway.",
+          "unreached_checks": [
+            "tls-terminate SupportedKinds is empty",
+            "tls-terminate AttachedRoutes=0",
+            "tls-terminate Accepted=False/ProtocolConflict",
+            "tls-passthrough SupportedKinds is empty",
+            "tls-passthrough AttachedRoutes=0",
+            "tls-passthrough Accepted=False/ProtocolConflict"
+          ]
+        }
+      ]
+    },
+    {
+      "channel": "standard",
+      "selection": "passthrough",
+      "targeted_probe": true,
+      "runner_features": [
+        "Gateway",
+        "TLSRoute"
+      ],
+      "go_test_status": "FAIL",
+      "go_test_exit_code": 1,
+      "package_elapsed_seconds": 126.934,
+      "private_event_stream_sha256": "07181ee115e249d6d28ece887ebe32bdad7d5510f51a9f122f51d90cc22729e8",
+      "cases": [
+        {
+          "name": "TLSRouteListenerPassthroughSupportedKinds",
+          "status": "FAIL",
+          "elapsed_seconds": 60.01,
+          "case_manifest_applied": true,
+          "reason": "Listener status omitted gateway.networking.k8s.io/TLSRoute from SupportedKinds.",
+          "unreached_checks": [
+            "tls-passthrough AttachedRoutes=0",
+            "tls-passthrough ResolvedRefs=False/InvalidRouteKinds"
+          ],
+          "assertion": {
+            "name": "TLS_listener_should_have_a_false_ResolvedRefs_condition_with_reason_InvalidRouteKinds_for_TCPRoute,_and_TLSRoute_must_be_put_in_the_supportedKinds",
+            "status": "FAIL",
+            "elapsed_seconds": 60,
+            "terminal_error": "context deadline exceeded"
+          }
+        },
+        {
+          "name": "TLSRouteListenerTerminateNotSupported",
+          "status": "FAIL",
+          "elapsed_seconds": 60.01,
+          "case_manifest_applied": true,
+          "reason": "The tls-terminate listener reported Accepted=False/UnsupportedProtocol. Upstream expected Accepted=False/UnsupportedValue.",
+          "unreached_checks": [],
+          "assertion": {
+            "name": "Listener_with_unsupported_mode_Terminate_must_have_Accepted=False_with_Reason=UnsupportedValue",
+            "status": "FAIL",
+            "elapsed_seconds": 60,
+            "terminal_error": "context deadline exceeded"
+          }
+        }
+      ]
+    },
+    {
+      "channel": "standard",
+      "selection": "terminate",
+      "targeted_probe": true,
+      "runner_features": [
+        "Gateway",
+        "TLSRoute",
+        "TLSRouteModeTerminate"
+      ],
+      "go_test_status": "FAIL",
+      "go_test_exit_code": 1,
+      "package_elapsed_seconds": 127.425,
+      "private_event_stream_sha256": "c9632f4b1bd468670948ffea3066095f83495f97887225d18bc0312edd49cbdf",
+      "cases": [
+        {
+          "name": "TLSRouteListenerTerminateSupportedKinds",
+          "status": "FAIL",
+          "elapsed_seconds": 60.02,
+          "case_manifest_applied": true,
+          "reason": "Listener status omitted gateway.networking.k8s.io/TLSRoute from SupportedKinds.",
+          "unreached_checks": [
+            "tls-terminate AttachedRoutes=0",
+            "tls-terminate Accepted=True/Accepted"
+          ],
+          "assertion": {
+            "name": "Listener_with_mode_Terminate_must_have_TLSRoute_in_SupportedKinds",
+            "status": "FAIL",
+            "elapsed_seconds": 60,
+            "terminal_error": "context deadline exceeded"
+          }
+        },
+        {
+          "name": "TLSRouteListenerMixedTerminationNotSupported",
+          "status": "FAIL",
+          "elapsed_seconds": 60.01,
+          "case_manifest_applied": true,
+          "reason": "The tls-terminate listener reported Accepted=False/UnsupportedProtocol. Upstream expected Accepted=False/ProtocolConflict.",
+          "unreached_checks": [
+            "tls-passthrough SupportedKinds is empty",
+            "tls-passthrough AttachedRoutes=0",
+            "tls-passthrough Accepted=False/ProtocolConflict"
+          ],
+          "assertion": {
+            "name": "Listener_with_unsupported_mixed_Terminate/Passthrough_must_have_Accepted=False_with_Reason=ProtocolConflict",
+            "status": "FAIL",
+            "elapsed_seconds": 60,
+            "terminal_error": "context deadline exceeded"
+          }
+        }
+      ]
+    },
+    {
+      "channel": "experimental",
+      "selection": "advertised",
+      "targeted_probe": false,
+      "runner_features": [],
+      "go_test_status": "PASS",
+      "go_test_exit_code": 0,
+      "package_elapsed_seconds": 6.684,
+      "private_event_stream_sha256": "752311ab4611ff1d143a9a915f0e2efa2164754db212e80d28d77c0794e76097",
+      "cases": [
+        {
+          "name": "TLSRouteListenerPassthroughSupportedKinds",
+          "status": "SKIP",
+          "elapsed_seconds": 0,
+          "case_manifest_applied": false,
+          "reason": "Upstream feature gate: suite does not support Gateway.",
+          "unreached_checks": [
+            "tls-passthrough SupportedKinds includes gateway.networking.k8s.io/TLSRoute",
+            "tls-passthrough AttachedRoutes=0",
+            "tls-passthrough ResolvedRefs=False/InvalidRouteKinds"
+          ]
+        },
+        {
+          "name": "TLSRouteListenerTerminateNotSupported",
+          "status": "SKIP",
+          "elapsed_seconds": 0,
+          "case_manifest_applied": false,
+          "reason": "Upstream feature gate: suite does not support Gateway.",
+          "unreached_checks": [
+            "tls-terminate SupportedKinds is empty",
+            "tls-terminate AttachedRoutes=0",
+            "tls-terminate Accepted=False/UnsupportedValue"
+          ]
+        },
+        {
+          "name": "TLSRouteListenerTerminateSupportedKinds",
+          "status": "SKIP",
+          "elapsed_seconds": 0,
+          "case_manifest_applied": false,
+          "reason": "Upstream feature gate: suite does not support Gateway.",
+          "unreached_checks": [
+            "tls-terminate SupportedKinds includes gateway.networking.k8s.io/TLSRoute",
+            "tls-terminate AttachedRoutes=0",
+            "tls-terminate Accepted=True/Accepted"
+          ]
+        },
+        {
+          "name": "TLSRouteListenerMixedTerminationNotSupported",
+          "status": "SKIP",
+          "elapsed_seconds": 0,
+          "case_manifest_applied": false,
+          "reason": "Upstream feature gate: suite does not support Gateway.",
+          "unreached_checks": [
+            "tls-terminate SupportedKinds is empty",
+            "tls-terminate AttachedRoutes=0",
+            "tls-terminate Accepted=False/ProtocolConflict",
+            "tls-passthrough SupportedKinds is empty",
+            "tls-passthrough AttachedRoutes=0",
+            "tls-passthrough Accepted=False/ProtocolConflict"
+          ]
+        }
+      ]
+    },
+    {
+      "channel": "experimental",
+      "selection": "passthrough",
+      "targeted_probe": true,
+      "runner_features": [
+        "Gateway",
+        "TLSRoute"
+      ],
+      "go_test_status": "FAIL",
+      "go_test_exit_code": 1,
+      "package_elapsed_seconds": 127.375,
+      "private_event_stream_sha256": "74b3e5d3d04293eaf1a1f4d42d85a545142a06bbbf9c3c7fd86a8b557c27f6bd",
+      "cases": [
+        {
+          "name": "TLSRouteListenerPassthroughSupportedKinds",
+          "status": "FAIL",
+          "elapsed_seconds": 60.01,
+          "case_manifest_applied": true,
+          "reason": "Listener status omitted gateway.networking.k8s.io/TLSRoute from SupportedKinds.",
+          "unreached_checks": [
+            "tls-passthrough AttachedRoutes=0",
+            "tls-passthrough ResolvedRefs=False/InvalidRouteKinds"
+          ],
+          "assertion": {
+            "name": "TLS_listener_should_have_a_false_ResolvedRefs_condition_with_reason_InvalidRouteKinds_for_TCPRoute,_and_TLSRoute_must_be_put_in_the_supportedKinds",
+            "status": "FAIL",
+            "elapsed_seconds": 60,
+            "terminal_error": "context deadline exceeded"
+          }
+        },
+        {
+          "name": "TLSRouteListenerTerminateNotSupported",
+          "status": "FAIL",
+          "elapsed_seconds": 60.01,
+          "case_manifest_applied": true,
+          "reason": "The tls-terminate listener reported Accepted=False/UnsupportedProtocol. Upstream expected Accepted=False/UnsupportedValue.",
+          "unreached_checks": [],
+          "assertion": {
+            "name": "Listener_with_unsupported_mode_Terminate_must_have_Accepted=False_with_Reason=UnsupportedValue",
+            "status": "FAIL",
+            "elapsed_seconds": 60,
+            "terminal_error": "context deadline exceeded"
+          }
+        }
+      ]
+    },
+    {
+      "channel": "experimental",
+      "selection": "terminate",
+      "targeted_probe": true,
+      "runner_features": [
+        "Gateway",
+        "TLSRoute",
+        "TLSRouteModeTerminate"
+      ],
+      "go_test_status": "FAIL",
+      "go_test_exit_code": 1,
+      "package_elapsed_seconds": 127.99,
+      "private_event_stream_sha256": "18012d39baf96c4e633fdde4d9ad8dd2012546eed12a472bafa9b4a25f799b3c",
+      "cases": [
+        {
+          "name": "TLSRouteListenerTerminateSupportedKinds",
+          "status": "FAIL",
+          "elapsed_seconds": 60.01,
+          "case_manifest_applied": true,
+          "reason": "Listener status omitted gateway.networking.k8s.io/TLSRoute from SupportedKinds.",
+          "unreached_checks": [
+            "tls-terminate AttachedRoutes=0",
+            "tls-terminate Accepted=True/Accepted"
+          ],
+          "assertion": {
+            "name": "Listener_with_mode_Terminate_must_have_TLSRoute_in_SupportedKinds",
+            "status": "FAIL",
+            "elapsed_seconds": 60,
+            "terminal_error": "context deadline exceeded"
+          }
+        },
+        {
+          "name": "TLSRouteListenerMixedTerminationNotSupported",
+          "status": "FAIL",
+          "elapsed_seconds": 60.02,
+          "case_manifest_applied": true,
+          "reason": "The tls-terminate listener reported Accepted=False/UnsupportedProtocol. Upstream expected Accepted=False/ProtocolConflict.",
+          "unreached_checks": [
+            "tls-passthrough SupportedKinds is empty",
+            "tls-passthrough AttachedRoutes=0",
+            "tls-passthrough Accepted=False/ProtocolConflict"
+          ],
+          "assertion": {
+            "name": "Listener_with_unsupported_mixed_Terminate/Passthrough_must_have_Accepted=False_with_Reason=ProtocolConflict",
+            "status": "FAIL",
+            "elapsed_seconds": 60,
+            "terminal_error": "context deadline exceeded"
+          }
+        }
+      ]
+    }
+  ]
+}

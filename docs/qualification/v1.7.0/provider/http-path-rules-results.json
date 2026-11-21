@@ -1,0 +1,216 @@
+{
+  "controllerSourceRevision": "e17cf858d11d04cf35d298ad19d9498ccde6b491",
+  "image": {
+    "manifestDigest": "sha256:0664d6d075651b9c52d673b4d29ddcc6e71082b79ea67e4627a589af2f490bff",
+    "platform": "linux/amd64",
+    "sourceRevision": "e17cf858d11d04cf35d298ad19d9498ccde6b491"
+  },
+  "results": {
+    "experimental": {
+      "HTTPRouteExactPathMatching": {
+        "freshWire": {
+          "/": {
+            "status": 503
+          },
+          "/Two": {
+            "status": 503
+          },
+          "/one": {
+            "backend": "infra-backend-v1",
+            "echoMatched": true,
+            "status": 200
+          },
+          "/one/example": {
+            "status": 503
+          },
+          "/two": {
+            "backend": "infra-backend-v2",
+            "echoMatched": true,
+            "status": 200
+          },
+          "/two/": {
+            "status": 503
+          }
+        },
+        "result": "FAIL",
+        "wireSubtests": {
+          "FAIL": [
+            "/",
+            "/one/example",
+            "/Two",
+            "/two/"
+          ],
+          "PASS": [
+            "/one",
+            "/two"
+          ],
+          "SKIP": []
+        }
+      },
+      "HTTPRouteInvalidCrossNamespaceBackendRef": {
+        "result": "FAIL",
+        "supplementalWire": {
+          "/": {
+            "expectedStatus": 500,
+            "status": 503
+          }
+        },
+        "upstreamTrafficChecksStarted": true
+      },
+      "HTTPRouteNoBackendRefs": {
+        "result": "FAIL",
+        "supplementalWire": {
+          "/empty-no-forward": {
+            "expectedStatus": 500,
+            "status": 503
+          },
+          "/forward": {
+            "expectedStatus": 200,
+            "status": 503
+          },
+          "/omitted-no-forward": {
+            "expectedStatus": 500,
+            "status": 503
+          }
+        },
+        "upstreamTrafficChecksStarted": false
+      },
+      "HTTPRoutePathMatchOrder": {
+        "individualRun": {
+          "result": "FAIL",
+          "wireSubtests": {
+            "FAIL": [
+              "/match/exact/one",
+              "/match/prefix/one/any",
+              "/match/exact",
+              "/match/any",
+              "/match",
+              "/match/prefix/any"
+            ],
+            "PASS": [],
+            "SKIP": []
+          }
+        },
+        "parallelRun": {
+          "result": "FAIL",
+          "wireSubtests": {
+            "FAIL": [
+              "/match/exact/one",
+              "/match/prefix/one/any",
+              "/match/exact",
+              "/match/prefix/any",
+              "/match/any",
+              "/match"
+            ],
+            "PASS": [],
+            "SKIP": []
+          }
+        },
+        "result": "FAIL"
+      }
+    },
+    "standard": {
+      "HTTPRouteExactPathMatching": {
+        "freshWire": {
+          "/": {
+            "status": 503
+          },
+          "/Two": {
+            "status": 503
+          },
+          "/one": {
+            "backend": "infra-backend-v1",
+            "echoMatched": true,
+            "status": 200
+          },
+          "/one/example": {
+            "status": 503
+          },
+          "/two": {
+            "backend": "infra-backend-v2",
+            "echoMatched": true,
+            "status": 200
+          },
+          "/two/": {
+            "status": 503
+          }
+        },
+        "result": "FAIL",
+        "wireSubtests": {
+          "FAIL": [
+            "/two/",
+            "/one/example",
+            "/",
+            "/Two"
+          ],
+          "PASS": [
+            "/one",
+            "/two"
+          ],
+          "SKIP": []
+        }
+      },
+      "HTTPRouteInvalidCrossNamespaceBackendRef": {
+        "result": "FAIL",
+        "supplementalWire": {
+          "/": {
+            "expectedStatus": 500,
+            "status": 503
+          }
+        },
+        "upstreamTrafficChecksStarted": true
+      },
+      "HTTPRouteNoBackendRefs": {
+        "result": "FAIL",
+        "supplementalWire": {
+          "/empty-no-forward": {
+            "expectedStatus": 500,
+            "status": 503
+          },
+          "/forward": {
+            "expectedStatus": 200,
+            "status": 503
+          },
+          "/omitted-no-forward": {
+            "expectedStatus": 500,
+            "status": 503
+          }
+        },
+        "upstreamTrafficChecksStarted": false
+      },
+      "HTTPRoutePathMatchOrder": {
+        "individualRun": {
+          "result": "PASS",
+          "wireSubtests": {
+            "FAIL": [],
+            "PASS": [
+              "/match",
+              "/match/exact",
+              "/match/exact/one",
+              "/match/prefix/one/any",
+              "/match/prefix/any",
+              "/match/any"
+            ],
+            "SKIP": []
+          }
+        },
+        "parallelRun": {
+          "result": "FAIL",
+          "wireSubtests": {
+            "FAIL": [
+              "/match/exact/one",
+              "/match",
+              "/match/any",
+              "/match/prefix/one/any",
+              "/match/prefix/any",
+              "/match/exact"
+            ],
+            "PASS": [],
+            "SKIP": []
+          }
+        },
+        "result": "FAIL"
+      }
+    }
+  }
+}

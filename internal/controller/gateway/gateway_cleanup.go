@@ -61,7 +61,7 @@ func (r *Reconciler) cleanupGateway(ctx context.Context, scope *gatewayScope) (c
 	if err := controller.ValidateGatewayBinding(r.Config, scope.gateway); err != nil {
 		return ctrl.Result{}, err
 	}
-	outcome, err := r.deleteGateway(ctx, scope.gateway)
+	result, err := r.deleteGateway(ctx, scope.gateway)
 	if err != nil {
 		if errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) {
 			return r.setGatewayUnsupportedVersion(ctx, scope)
@@ -72,6 +72,17 @@ func (r *Reconciler) cleanupGateway(ctx context.Context, scope *gatewayScope) (c
 		providerErr := fmt.Errorf("delete OpenStack resources for Gateway: %w", err)
 		return r.handleGatewayDeleteFailure(scope, providerErr)
 	}
+	if result.Gateway.AddressIssue != "" {
+		listeners, err := SupportedListenersForConfig(r.Config, scope.gateway)
+		if err != nil {
+			return ctrl.Result{}, errors.Join(errGatewayChanged, err)
+		}
+		if err := r.setGatewayAddressUnusable(ctx, scope.gateway, listeners[0], result.Gateway, result.Gateway.Outcome); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: controller.OpenStackResyncAfter(r.Config.OpenStackResyncInterval, scope.gateway.UID)}, nil
+	}
+	outcome := result.Outcome
 	if err := outcome.Validate(); err != nil {
 		return ctrl.Result{}, fmt.Errorf("validate Gateway deletion outcome: %w", err)
 	}
@@ -89,9 +100,15 @@ func (r *Reconciler) cleanupGateway(ctx context.Context, scope *gatewayScope) (c
 	}
 	if snapshot.disposition == gatewayCleanupRebuild {
 		if snapshot.listenerPort == "" {
-			return ctrl.Result{}, nil
+			if controller.GatewayListenerScope(r.Config, scope.gateway) == "" {
+				return ctrl.Result{}, nil
+			}
+			controller.SetGatewayListenerScope(r.Config, scope.gateway, "")
+			return ctrl.Result{}, r.patchGatewayMetadata(ctx, scope)
 		}
 		scope.gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] = snapshot.listenerPort
+		scope.gateway.Annotations[r.Config.GatewayListenerProtocolAnnotation()] = string(snapshot.listenerProtocol)
+		controller.SetGatewayListenerScope(r.Config, scope.gateway, "")
 		if err := r.patchGatewayMetadata(ctx, scope); err != nil {
 			return ctrl.Result{}, fmt.Errorf("checkpoint Gateway graph replacement: %w", err)
 		}
@@ -100,6 +117,10 @@ func (r *Reconciler) cleanupGateway(ctx context.Context, scope *gatewayScope) (c
 	controller.ClearGatewayTopology(r.Config, scope.gateway)
 	controllerutil.RemoveFinalizer(scope.gateway, r.Config.GatewayFinalizer())
 	delete(scope.gateway.Annotations, r.Config.GatewayListenerPortAnnotation())
+	delete(scope.gateway.Annotations, r.Config.GatewayListenerProtocolAnnotation())
+	delete(scope.gateway.Annotations, r.Config.GatewayListenerModeAnnotation(gatewayv1.UDPProtocolType))
+	delete(scope.gateway.Annotations, r.Config.GatewayListenerModeAnnotation(gatewayv1.TCPProtocolType))
+	delete(scope.gateway.Annotations, r.Config.GatewayListenerModeAnnotation(gatewayv1.HTTPProtocolType))
 	delete(scope.gateway.Annotations, r.Config.GatewayClusterIDAnnotation())
 	delete(scope.gateway.Annotations, r.Config.GatewayProjectIDAnnotation())
 	if err := r.patchGatewayMetadata(ctx, scope); err != nil {
@@ -115,10 +136,9 @@ func (r *Reconciler) cleanupGateway(ctx context.Context, scope *gatewayScope) (c
 	return ctrl.Result{}, nil
 }
 
-func (r *Reconciler) deleteGateway(ctx context.Context, expected *gatewayv1.Gateway) (cloud.Outcome, error) {
+func (r *Reconciler) deleteGateway(ctx context.Context, expected *gatewayv1.Gateway) (cloud.GatewayGraphResult, error) {
 	if r.Writer == nil {
-		return cloud.Outcome{}, fmt.Errorf("gateway graph writer is required")
+		return cloud.GatewayGraphResult{}, fmt.Errorf("gateway graph writer is required")
 	}
-	result, err := r.Writer.ReconcileGraph(ctx, graph.Request{Identity: controller.StoredGatewayIdentity(r.Config, expected), Action: graph.DeleteGateway, Gateway: expected})
-	return result.Outcome, err
+	return r.Writer.ReconcileGraph(ctx, graph.Request{Identity: controller.StoredGatewayIdentity(r.Config, expected), Action: graph.DeleteGateway, Gateway: expected})
 }

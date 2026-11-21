@@ -28,6 +28,7 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
 func (r *Reconciler) enqueueHTTPRoutesForReferenceGrant(ctx context.Context, object client.Object) []reconcile.Request {
@@ -76,7 +77,7 @@ func (r *Reconciler) enqueueHTTPRoutesForNamespace(ctx context.Context, object c
 	}
 	var routes gatewayv1.HTTPRouteList
 	// The cache's namespace index bounds this read to possible consumers of the
-	// changed labels. Parent lookups then avoid scanning all Gateways.
+	// changed namespace. Parent lookups then avoid scanning all Gateways.
 	if err := r.List(ctx, &routes, client.InNamespace(namespace.Name)); err != nil {
 		log.FromContext(ctx).Error(err, "Could not list HTTPRoutes for Namespace", "namespace", namespace.Name)
 		return nil
@@ -103,7 +104,7 @@ func (r *Reconciler) enqueueHTTPRoutesForNamespace(ctx context.Context, object c
 				}
 				gateways[key] = gateway
 			}
-			if gateway != nil && parentUsesNamespaceSelector(gateway, parent) {
+			if gateway != nil && parentObservesRouteNamespace(gateway, parent) {
 				consumers = append(consumers, route)
 				break
 			}
@@ -112,13 +113,13 @@ func (r *Reconciler) enqueueHTTPRoutesForNamespace(ctx context.Context, object c
 	return r.enqueueHTTPRouteConsumers(ctx, consumers)
 }
 
-func parentUsesNamespaceSelector(gateway *gatewayv1.Gateway, parent gatewayv1.ParentReference) bool {
-	for _, listener := range gateway.Spec.Listeners {
+func parentObservesRouteNamespace(gateway *gatewayv1.Gateway, parent gatewayv1.ParentReference) bool {
+	for i := range gateway.Spec.Listeners {
+		listener := &gateway.Spec.Listeners[i]
 		if parent.SectionName != nil && *parent.SectionName != listener.Name || parent.Port != nil && *parent.Port != listener.Port {
 			continue
 		}
-		allowed := listener.AllowedRoutes
-		if allowed != nil && allowed.Namespaces != nil && allowed.Namespaces.From != nil && *allowed.Namespaces.From == gatewayv1.NamespacesFromSelector {
+		if model.ObservesRouteNamespace(listener) {
 			return true
 		}
 	}

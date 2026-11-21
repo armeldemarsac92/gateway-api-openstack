@@ -25,13 +25,91 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 )
+
+func TestValidateDistinctUDPListeners(t *testing.T) {
+	gateway := &gatewayv1.Gateway{Spec: gatewayv1.GatewaySpec{Listeners: []gatewayv1.Listener{
+		{Name: "private", Port: 5353, Protocol: gatewayv1.UDPProtocolType},
+		{Name: "public", Port: 53, Protocol: gatewayv1.UDPProtocolType},
+	}}}
+	if _, err := Validate(gateway); err != nil {
+		t.Fatalf("distinct UDP listeners must be supported: %v", err)
+	}
+	gateway.Spec.Listeners[1].Port = 5353
+	if _, err := Validate(gateway); err == nil {
+		t.Fatal("UDP listeners sharing a port must be rejected")
+	}
+}
+
+func TestSharedHTTPPortRejectsUnsupportedListenerShapes(t *testing.T) {
+	first := gatewayv1.Listener{Name: "first", Port: 80, Protocol: gatewayv1.HTTPProtocolType, Hostname: ptr.To(gatewayv1.Hostname("a.example.com"))}
+	for _, second := range []gatewayv1.Listener{
+		{Name: "same-host", Port: 80, Protocol: gatewayv1.HTTPProtocolType, Hostname: first.Hostname},
+		{Name: "wildcard", Port: 80, Protocol: gatewayv1.HTTPProtocolType, Hostname: ptr.To(gatewayv1.Hostname("*.example.com"))},
+		{Name: "catch-all", Port: 80, Protocol: gatewayv1.HTTPProtocolType},
+		{Name: "https", Port: 80, Protocol: gatewayv1.HTTPSProtocolType, Hostname: ptr.To(gatewayv1.Hostname("b.example.com"))},
+	} {
+		t.Run(string(second.Name), func(t *testing.T) {
+			gw := &gatewayv1.Gateway{Spec: gatewayv1.GatewaySpec{Listeners: []gatewayv1.Listener{first, second}}}
+			if _, err := SupportedListeners(gw); err == nil {
+				t.Fatal("unsupported HTTP listener set was admitted")
+			}
+		})
+	}
+}
+
+func TestScopedUDPRouteCleanupUsesItsSealedAnchorWithoutGateway(t *testing.T) {
+	config := testConfig()
+	gateway := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "edge", UID: "old-gateway"}}
+	route := &gatewayv1.UDPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "dns", UID: "udp-route"}}
+	identity := controller.RouteIdentity(config, gateway, route)
+	controller.ApplyRouteBinding(config, route, identity)
+	controller.SealRouteAnchor(config, route, identity, 5353)
+	route.Annotations[config.RouteLifecycleAnnotation()] = controller.RouteDetaching
+	kube := indexedFakeClientBuilder(testScheme(t), config).Build()
+	r := &Reconciler{APIReader: kube, Config: config}
+	request := graph.Request{Identity: identity, Action: graph.DeleteRoute, UDPRoute: route}
+
+	input, err := r.ObserveGatewayGraph(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := input.Node.Spec
+	if input.Node.Disposition != cloud.GraphPreserve || spec.ScopedListeners == nil || len(spec.ScopedListeners) != 0 ||
+		spec.ListenerPort != 5353 || spec.ListenerProtocol != cloud.ListenerProtocolUDP {
+		t.Fatalf("cleanup lost its exact scoped anchor: %+v", input.Node)
+	}
+	gateway.Annotations = gatewayBindingAnnotations(config, "443")
+	gateway.Annotations[config.GatewayListenerProtocolAnnotation()] = cloud.ListenerProtocolTCP
+	gateway.Finalizers = []string{config.GatewayFinalizer()}
+	if err := controller.BindGatewayTopology(config, gateway, testBoundTopology()); err != nil {
+		t.Fatal(err)
+	}
+	if err := kube.Create(t.Context(), gateway); err != nil {
+		t.Fatal(err)
+	}
+	input, err = r.ObserveGatewayGraph(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if input.Node.Disposition != cloud.GraphPreserve || input.Node.Spec.ScopedListeners != nil || input.Node.Spec.ListenerPort != 0 {
+		t.Fatalf("a verified protocol replacement should preserve its current graph: %+v", input.Node)
+	}
+
+	delete(route.Annotations, config.RouteListenerPortAnnotation(gatewayv1.UDPProtocolType))
+	if _, err := r.ObserveGatewayGraph(t.Context(), request); err == nil {
+		t.Fatal("a damaged route checkpoint fell back to legacy cleanup")
+	}
+}
 
 func TestGatewayRequestsForHTTPRoute(t *testing.T) {
 	config := testConfig()
@@ -62,7 +140,7 @@ func TestGatewayRequestsForHTTPRoute(t *testing.T) {
 	}
 
 	reconciler := newTestReconciler(Reconciler{Config: config}, nil)
-	requests := reconciler.gatewayRequestsForHTTPRoute(context.Background(), route)
+	requests := reconciler.gatewayRequestsForRoute(context.Background(), route)
 	want := []reconcile.Request{
 		{NamespacedName: types.NamespacedName{Namespace: "default", Name: "edge"}},
 		{NamespacedName: types.NamespacedName{Namespace: "default", Name: "status-parent"}},
@@ -70,9 +148,9 @@ func TestGatewayRequestsForHTTPRoute(t *testing.T) {
 		{NamespacedName: types.NamespacedName{Namespace: "previous", Name: "bound"}},
 	}
 	if !reflect.DeepEqual(requests, want) {
-		t.Fatalf("gatewayRequestsForHTTPRoute() = %#v, want %#v", requests, want)
+		t.Fatalf("gatewayRequestsForRoute() = %#v, want %#v", requests, want)
 	}
-	if requests := reconciler.gatewayRequestsForHTTPRoute(context.Background(), &gatewayv1.Gateway{}); requests != nil {
+	if requests := reconciler.gatewayRequestsForRoute(context.Background(), &gatewayv1.Gateway{}); requests != nil {
 		t.Fatalf("requests for non-HTTPRoute object = %#v, want nil", requests)
 	}
 }
@@ -100,6 +178,38 @@ func TestGatewayRequestsForGatewayClass(t *testing.T) {
 	}
 	if requests := reconciler.gatewayRequestsForGatewayClass(context.Background(), matchingGateway); requests != nil {
 		t.Fatalf("requests for non-GatewayClass object = %#v, want nil", requests)
+	}
+}
+
+func TestGatewayWatchesUDPRouteStatusAndPreviousBinding(t *testing.T) {
+	config := testConfig()
+	reconciler := newTestReconciler(Reconciler{Config: config}, nil)
+	old := &gatewayv1.UDPRoute{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "apps", Name: "backend", Annotations: map[string]string{
+			config.RouteGatewayNamespaceAnnotation(): "old-gateways",
+			config.RouteGatewayNameAnnotation():      "old-edge",
+			config.RouteGatewayUIDAnnotation():       "old-uid",
+		}},
+	}
+	status := old.DeepCopy()
+	status.Status.Parents = []gatewayv1.RouteParentStatus{
+		{ParentRef: gatewayv1.ParentReference{Name: "edge"}, ControllerName: config.ControllerName},
+		{ParentRef: gatewayv1.ParentReference{Name: "foreign"}, ControllerName: "example.com/foreign"},
+	}
+	unbound := old.DeepCopy()
+	unbound.Annotations = nil
+	predicate := controller.RouteForGatewayPredicate(config)
+	if !predicate.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: status}) ||
+		!predicate.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: unbound}) {
+		t.Fatal("status or binding update was filtered out")
+	}
+	requests := reconciler.gatewayRequestsForRoute(t.Context(), status)
+	want := []reconcile.Request{
+		{NamespacedName: types.NamespacedName{Namespace: "apps", Name: "edge"}},
+		{NamespacedName: types.NamespacedName{Namespace: "old-gateways", Name: "old-edge"}},
+	}
+	if !reflect.DeepEqual(requests, want) {
+		t.Fatalf("Gateway requests = %v, want %v", requests, want)
 	}
 }
 

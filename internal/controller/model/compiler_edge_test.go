@@ -21,6 +21,7 @@ import (
 	"slices"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -41,7 +42,7 @@ func TestCompileParentRejectionDoesNotDependOnListenerOrder(t *testing.T) {
 	route := edgeRoute(gateway)
 	route.Namespace = "application"
 	route.Spec.Hostnames = []gatewayv1.Hostname{"app.example.com"}
-	input := Input{Gateway: gateway, Routes: []gatewayv1.HTTPRoute{route}}
+	input := Input{Gateway: gateway, Routes: []gatewayv1.HTTPRoute{route}, Namespaces: []corev1.Namespace{{ObjectMeta: metav1.ObjectMeta{Name: route.Namespace}}}}
 	for iteration := 0; iteration < 2; iteration++ {
 		compiled, err := Compile(input)
 		if err != nil {
@@ -55,6 +56,46 @@ func TestCompileParentRejectionDoesNotDependOnListenerOrder(t *testing.T) {
 			t.Fatalf("parent diagnostics = %#v, want NoMatchingListenerHostname", parent.Diagnostics)
 		}
 		slices.Reverse(gateway.Spec.Listeners)
+	}
+}
+
+func TestCompileAllowedRouteNamespaces(t *testing.T) {
+	namespace := corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "tenant", Labels: map[string]string{"team": "web"}}}
+	terminating := *namespace.DeepCopy()
+	terminating.Status.Phase = corev1.NamespaceTerminating
+	selector := &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{
+		{Key: "team", Operator: metav1.LabelSelectorOpIn, Values: []string{"web"}},
+	}}
+	for _, test := range []struct {
+		name       string
+		from       *gatewayv1.FromNamespaces
+		selector   *metav1.LabelSelector
+		namespaces []corev1.Namespace
+		want       AttachmentState
+	}{
+		{"default Same", nil, nil, nil, AttachmentRejected},
+		{"All", ptr.To(gatewayv1.NamespacesFromAll), nil, []corev1.Namespace{namespace}, AttachmentAccepted},
+		{"All with terminating namespace", ptr.To(gatewayv1.NamespacesFromAll), nil, []corev1.Namespace{terminating}, AttachmentRejected},
+		{"matching expression", ptr.To(gatewayv1.NamespacesFromSelector), selector, []corev1.Namespace{namespace}, AttachmentAccepted},
+		{"empty selector", ptr.To(gatewayv1.NamespacesFromSelector), &metav1.LabelSelector{}, []corev1.Namespace{namespace}, AttachmentAccepted},
+		{"missing selector", ptr.To(gatewayv1.NamespacesFromSelector), nil, []corev1.Namespace{namespace}, AttachmentRejected},
+		{"invalid selector", ptr.To(gatewayv1.NamespacesFromSelector), &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "team", Operator: "Invalid"}}}, []corev1.Namespace{namespace}, AttachmentRejected},
+		{"missing namespace", ptr.To(gatewayv1.NamespacesFromSelector), selector, nil, AttachmentRejected},
+		{"terminating namespace", ptr.To(gatewayv1.NamespacesFromSelector), selector, []corev1.Namespace{terminating}, AttachmentRejected},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			gateway := edgeGateway()
+			gateway.Spec.Listeners[0].AllowedRoutes = &gatewayv1.AllowedRoutes{Namespaces: &gatewayv1.RouteNamespaces{From: test.from, Selector: test.selector}}
+			route := edgeRoute(gateway)
+			route.Namespace = namespace.Name
+			compiled, err := Compile(Input{Gateway: gateway, Routes: []gatewayv1.HTTPRoute{route}, Namespaces: test.namespaces})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := compiled.Routes[0].Parents[0].State; got != test.want {
+				t.Fatalf("attachment = %s, want %s", got, test.want)
+			}
+		})
 	}
 }
 
@@ -154,6 +195,21 @@ func TestCompileUnsupportedTCPDoesNotConflictWithHTTP(t *testing.T) {
 				t.Fatal("TCP listener lost its unsupported protocol diagnostic")
 			}
 		}
+	}
+}
+
+func TestCompileRejectsUnsupportedListenerFilters(t *testing.T) {
+	gateway := edgeGateway()
+	gateway.Spec.Listeners[0].Filters = &gatewayv1.ListenerFilters{Requests: []gatewayv1.ListenerFilter{{Type: gatewayv1.ListenerFilterExtensionRef, ExtensionRef: &gatewayv1.LocalObjectReference{Group: "example.net", Kind: "Policy", Name: "authorization"}}}}
+	compiled, err := Compile(Input{Gateway: gateway, Routes: []gatewayv1.HTTPRoute{edgeRoute(gateway)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener := compiled.Listeners[0]
+	if listener.AttachedRoutes != 0 || !slices.ContainsFunc(listener.Diagnostics, func(d Diagnostic) bool {
+		return d.Condition == string(gatewayv1.ListenerConditionAccepted) && d.Reason == string(gatewayv1.ListenerReasonUnsupportedValue)
+	}) {
+		t.Fatalf("listener with an unsupported request filter = %#v", listener)
 	}
 }
 

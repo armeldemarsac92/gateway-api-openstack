@@ -19,9 +19,11 @@ package gateway
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strconv"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
@@ -35,19 +37,13 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 		return graph.GatewayInput{}, controller.ErrAPIReaderRequired
 	}
 	if request.Action == graph.DeleteRoute {
-		var current gatewayv1.Gateway
-		err := r.APIReader.Get(ctx, client.ObjectKey{Namespace: request.Identity.GatewayNamespace, Name: request.Identity.GatewayName}, &current)
-		if err != nil && !apierrors.IsNotFound(err) {
-			return graph.GatewayInput{}, err
-		}
-		input := graph.GatewayInput{Node: cloud.GatewayGraphNode{Disposition: cloud.GraphPreserve}}
-		if err == nil && string(current.UID) == request.Identity.GatewayUID {
-			input.Object = &current
-		}
-		return input, nil
+		return r.observeGatewayForRouteDeletion(ctx, request)
 	}
 	if request.Gateway == nil {
 		return graph.GatewayInput{}, errors.New("expected Gateway revision is required")
+	}
+	if request.Action == graph.WithdrawTLS {
+		return r.observeGatewayTLSWithdrawal(ctx, request)
 	}
 	if request.Action == graph.DeleteGateway {
 		snapshot, err := r.observeGatewayCleanupSnapshot(ctx, request.Gateway)
@@ -57,8 +53,29 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 		if snapshot.disposition == gatewayCleanupHold || snapshot.identity != request.Identity {
 			return graph.GatewayInput{}, errGatewayChanged
 		}
+		port, _ := strconv.Atoi(snapshot.boundListenerPort)
+		spec := cloud.GatewaySpec{ListenerProtocol: string(snapshot.boundListenerProtocol), ListenerPort: port}
+		// A listener replacement must not release an existing VIP when the
+		// same request changes the fixed address. Deletion has no such guard.
+		if snapshot.listenerPort != "" {
+			setGatewayAddressRequest(&spec, request.Gateway)
+			if spec.RequestedVIPAddress != "" || spec.AddressRejection != "" {
+				topology, err := controller.StoredGatewayTopology(r.Config, request.Gateway)
+				if err != nil {
+					return graph.GatewayInput{}, err
+				}
+				spec.ExternalNetworkID = topology.Topology.ExternalNetworkID
+			}
+		}
+		if snapshot.scopedListeners {
+			spec.ScopedListeners = []cloud.ScopedListener{}
+		}
 		return graph.GatewayInput{
-			Object: request.Gateway.DeepCopy(), Node: cloud.GatewayGraphNode{Disposition: cloud.GraphDelete},
+			Object: request.Gateway.DeepCopy(),
+			Node: cloud.GatewayGraphNode{
+				Disposition: cloud.GraphDelete,
+				Spec:        spec,
+			},
 			Validate: func(ctx context.Context) error {
 				latest, err := r.observeGatewayCleanupSnapshot(ctx, request.Gateway)
 				if err != nil {
@@ -75,12 +92,127 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 		return graph.GatewayInput{}, errors.New("invalid Gateway graph action")
 	}
 	snapshot, err := r.observeGatewayMutationSnapshot(ctx, request.Gateway, gatewayBindingRequired, "")
+	binding := request.Gateway
+	if snapshot != nil {
+		binding = snapshot.gateway
+	}
+	var input graph.GatewayInput
+	if controller.GatewayListenerScope(r.Config, binding) == gatewayv1.HTTPProtocolType {
+		input.ObserveTLS = func(ctx context.Context) (graph.GatewayInput, error) {
+			return r.tlsWithdrawalInput(ctx, binding, request.Identity)
+		}
+	}
 	if err != nil {
+		return input, err
+	}
+	input.Object = snapshot.gateway
+	input.Node = cloud.GatewayGraphNode{Disposition: cloud.GraphEnsure, Spec: r.gatewaySpec(snapshot.gateway, snapshot.listeners, snapshot.topology)}
+	input.Validate = func(ctx context.Context) error { return r.sealGatewayMutationSnapshot(ctx, snapshot) }
+	if usesHTTPSProfile(r.Config, snapshot.gateway) {
+		if err := r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
+			return input, err
+		}
+		r.addTLSGraphInput(ctx, snapshot, &input)
+	}
+	return input, nil
+}
+
+func (r *Reconciler) observeGatewayForRouteDeletion(ctx context.Context, request graph.Request) (graph.GatewayInput, error) {
+	input := graph.GatewayInput{Node: cloud.GatewayGraphNode{Disposition: cloud.GraphPreserve}}
+	var route client.Object
+	var routeProtocol gatewayv1.ProtocolType
+	switch {
+	case request.Route != nil:
+		route, routeProtocol = request.Route, gatewayv1.HTTPProtocolType
+	case request.TCPRoute != nil:
+		route, routeProtocol = request.TCPRoute, gatewayv1.TCPProtocolType
+	case request.UDPRoute != nil:
+		route, routeProtocol = request.UDPRoute, gatewayv1.UDPProtocolType
+	}
+	var routeAnchor int
+	if route != nil {
+		routeAnchor = controller.ScopedRouteAnchor(r.Config, route, routeProtocol)
+	}
+	if route != nil && (routeProtocol != gatewayv1.HTTPProtocolType || routeAnchor != 0) {
+		identity, present, err := controller.StoredRouteIdentity(r.Config, route)
+		if err != nil {
+			return graph.GatewayInput{}, err
+		}
+		if !present || identity != request.Identity ||
+			!controllerutil.ContainsFinalizer(route, r.Config.RouteFinalizer()) ||
+			route.GetAnnotations()[r.Config.RouteClusterIDAnnotation()] != identity.ClusterID ||
+			route.GetAnnotations()[r.Config.RouteProjectIDAnnotation()] != identity.OpenStackProjectID ||
+			route.GetAnnotations()[r.Config.RouteLifecycleAnnotation()] != controller.RouteDetaching {
+			return graph.GatewayInput{}, errGatewayChanged
+		}
+		if routeAnchor != 0 {
+			input.Node.Spec = cloud.GatewaySpec{ListenerProtocol: string(routeProtocol), ListenerPort: routeAnchor, ScopedListeners: []cloud.ScopedListener{}}
+		}
+	}
+
+	var current gatewayv1.Gateway
+	key := client.ObjectKey{Namespace: request.Identity.GatewayNamespace, Name: request.Identity.GatewayName}
+	if err := r.APIReader.Get(ctx, key, &current); err != nil {
+		return input, client.IgnoreNotFound(err)
+	}
+	if string(current.UID) != request.Identity.GatewayUID {
+		return input, nil
+	}
+	input.Object = &current
+	boundProtocol := r.boundListenerProtocol(&current)
+	scopedBinding := controller.HasGatewayListenerScopeBinding(r.Config, &current)
+	if !scopedBinding && boundProtocol != gatewayv1.UDPProtocolType && routeAnchor == 0 && !r.requestsListenerScope(&current) {
+		return input, nil
+	}
+	input.Validate = func(ctx context.Context) error {
+		var latest gatewayv1.Gateway
+		if err := r.APIReader.Get(ctx, key, &latest); err != nil {
+			return errors.Join(errGatewayChanged, client.IgnoreNotFound(err))
+		}
+		if latest.UID != current.UID || !controller.GatewayBindingMetadataEqual(r.Config, &current, &latest) {
+			return errGatewayChanged
+		}
+		return nil
+	}
+	if !controller.GatewayHasControllerBinding(r.Config, &current) {
+		// A fully cleared Gateway binding can outlive its old routes after
+		// teardown. Their sealed anchors still authorize route-owned cleanup.
+		return input, nil
+	}
+	if !scopedBinding && routeAnchor == 0 && route != nil && !r.requestsListenerScope(&current) {
+		// The legacy singleton cleanup is authorized by the route's durable
+		// ownership alone. It does not provision from the Gateway topology.
+		return input, nil
+	}
+	if err := controller.ValidateGatewayBinding(r.Config, &current); err != nil {
+		// Scoped ownership comes only from a verified Gateway or route
+		// checkpoint. Never reinterpret a damaged current binding as legacy.
 		return graph.GatewayInput{}, err
 	}
-	desired := r.gatewaySpec(snapshot.gateway, snapshot.listener, snapshot.topology)
-	return graph.GatewayInput{
-		Object: snapshot.gateway, Node: cloud.GatewayGraphNode{Disposition: cloud.GraphEnsure, Spec: desired},
-		Validate: func(ctx context.Context) error { return r.sealGatewayMutationSnapshot(ctx, snapshot) },
-	}, nil
+	owner := request.Identity
+	owner.RouteNamespace, owner.RouteName, owner.RouteUID = "", "", ""
+	port, err := strconv.Atoi(current.Annotations[r.Config.GatewayListenerPortAnnotation()])
+	if err != nil || port < 1 || port > 65535 || !controllerutil.ContainsFinalizer(&current, r.Config.GatewayFinalizer()) ||
+		controller.StoredGatewayIdentity(r.Config, &current) != owner {
+		if scopedBinding || routeAnchor != 0 {
+			return graph.GatewayInput{}, fmt.Errorf("%w: Gateway cleanup binding is incomplete or belongs to a different owner", cloud.ErrOwnershipConflict)
+		}
+		return input, nil
+	}
+	scope := controller.GatewayListenerScope(r.Config, &current)
+	switch {
+	case scope != "":
+		if routeProtocol == scope && routeAnchor != port {
+			return graph.GatewayInput{}, fmt.Errorf("%w: %s route cleanup lacks the enrolled Gateway's frozen anchor", cloud.ErrOwnershipConflict, scope)
+		}
+		input.Node.Spec = cloud.GatewaySpec{ListenerProtocol: string(scope), ListenerPort: port, ScopedListeners: []cloud.ScopedListener{}}
+	case routeAnchor != 0 && boundProtocol != routeProtocol:
+		// Changing a bound protocol required verified teardown of the old graph.
+		input.Node.Spec = cloud.GatewaySpec{}
+	case routeAnchor != 0 && routeAnchor != port:
+		return graph.GatewayInput{}, fmt.Errorf("%w: %s route cleanup disagrees with the Gateway's frozen anchor", cloud.ErrOwnershipConflict, routeProtocol)
+	case routeAnchor != port:
+		input.Node.Spec = cloud.GatewaySpec{ListenerProtocol: string(boundProtocol), ListenerPort: port}
+	}
+	return input, nil
 }

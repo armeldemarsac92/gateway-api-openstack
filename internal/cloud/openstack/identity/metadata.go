@@ -245,6 +245,13 @@ func (id Identity) description(scope, role string, includeRoute, includeProject 
 	if scope != "" {
 		prefix += " " + scope
 	}
+	// The digest and the role tag include the full HTTP role. Only the
+	// display role needs shortening to fit Octavia's 255-byte description.
+	if base, _, _, ok := ParseHTTPFragmentRole(role); ok {
+		role = base
+	} else if base, _, _, _, ok := ParseHTTPRedirectRole(role); ok {
+		role = base
+	}
 	return fmt.Sprintf("%s; identity-sha256=%x; role=%s", prefix, digest, encode(role))
 }
 

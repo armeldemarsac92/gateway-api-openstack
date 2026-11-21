@@ -1,0 +1,48 @@
+{
+  "scope": "disposable local management plane; synthetic acknowledgement and credentials",
+  "versions": {
+    "kubernetes": "v1.36.2",
+    "etcd": "etcd Version: 3.6.8",
+    "helm": "v3.15.4+gfa9efb0",
+    "python": "3.12.13",
+    "magnum": "23.0.0",
+    "magnum_capi_helm": "1.4.0",
+    "driver_commit": "a8b82c2480a286a10b60ecc1d94c6cd9f1d01823",
+    "controller_commit": "d6278819244862c6dca7654ccc779f60622e62c9",
+    "parent_chart": "0.10.1",
+    "parent_chart_source": "856f8fb7372615ac0d3173d9b5d91fe605c9aeac",
+    "capi_crds": "v1.8.1",
+    "capo_crds": "v0.10.4",
+    "addon_crds_source": "771b28756e78c5271e40bd8f3b163e1d31f649f7"
+  },
+  "sha256": {
+    "helm_binary": "f07f23e8048f704294a670378d5bd36e9f84c1552eb844af82dcd82a17883647",
+    "kube_apiserver_binary": "6770be17296ef36b656ad84e52b043007fb9a47ba0445c224097323291b1b33b",
+    "etcd_binary": "b8956dc9f7479b1f15c46d03edae5dd9db508932840f91a9818e67717fcb1850",
+    "kubectl_binary": "1e9045ec32bea85da43de85f0065358529ea7c7a152eca78154fba5b58c27d82",
+    "parent_chart_archive": "fa3c30070e6f9f6684bfb10641917089b5d8453d91bc566230544029a0380d9d",
+    "gateway_controller_manifest": "b8523298642fe46b1b4d3fbadef88c23f2d1b2af7a493900b3b4d7b1793cd1cb",
+    "installed_crds": "5f2e6782ee080bd7e2c87eef006aa46757e5ed2b11197136cc214d00c2b0dfd5",
+    "patched_driver_py": "e9d36fe475699ad78f44d62aceb664ac610f4ac9d02d8cdb96fee56cd1571891",
+    "patched_gateway_api_py": "a23ccbb82e1cc5f50510d5503ffad10c1b4974de882dc2badf58d3686dbc676e"
+  },
+  "observed": {
+    "before_ack_conductor_status": "DELETE_FAILED",
+    "before_ack_enrolled_resources_untouched": true,
+    "accepted_after_formatted_synthetic_ack": true,
+    "parent_helm_release_and_gateway_manifests_source_removed": true,
+    "poll_while_capi_finalizing": "DELETE_IN_PROGRESS",
+    "capi_absent_before_scoped_secret_deletion_and_credential_request": true,
+    "final_magnum_status": "DELETE_COMPLETE",
+    "magnum_cluster_and_nodegroup_rows_removed": true,
+    "dedicated_gateway_records_retained_then_removed_separately": true,
+    "stock_control_objects_and_helm_release_retained": true,
+    "shared_crds_retained_by_uid": 9
+  },
+  "simulated": {
+    "capi_finalization": "fixture adds and clears one finalizer on the real Cluster",
+    "keystone": "production credential helper GETs and DELETEs the enrolled app credential in an in-memory adapter; stock and dedicated Gateway credentials stay present",
+    "cloud_discovery": "fixture Glance image, Neutron network and Cinder storage values",
+    "notifications": "captured at the in-process CADF helper boundary"
+  }
+}

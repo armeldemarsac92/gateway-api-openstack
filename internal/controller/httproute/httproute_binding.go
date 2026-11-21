@@ -19,13 +19,12 @@ package httproute
 import (
 	"context"
 	"reflect"
-	"strings"
+	"strconv"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
@@ -167,49 +166,20 @@ func (r *Reconciler) clearStoredRouteBinding(
 }
 
 func (r *Reconciler) applyRouteBinding(route *gatewayv1.HTTPRoute, gateway *gatewayv1.Gateway) {
-	if route.Annotations == nil {
-		route.Annotations = map[string]string{}
+	identity := controller.RouteIdentity(r.Config, gateway, route)
+	controller.ApplyRouteBinding(r.Config, route, identity)
+	port, _ := strconv.Atoi(gateway.Annotations[r.Config.GatewayListenerPortAnnotation()])
+	storedAnchor := controller.ScopedRouteAnchor(r.Config, route, gatewayv1.HTTPProtocolType)
+	if controller.GatewayListenerScope(r.Config, gateway) == gatewayv1.HTTPProtocolType || storedAnchor != 0 && storedAnchor == port {
+		// A Gateway edit can interrupt enrollment after this route was sealed.
+		controller.SealRouteAnchor(r.Config, route, identity, port)
+	} else if storedAnchor != 0 {
+		delete(route.Annotations, r.Config.RouteListenerPortAnnotation(gatewayv1.HTTPProtocolType))
 	}
-	route.Annotations[r.Config.RouteLifecycleAnnotation()] = controller.RouteAttached
-	route.Annotations[r.Config.RouteGatewayNamespaceAnnotation()] = gateway.Namespace
-	route.Annotations[r.Config.RouteGatewayNameAnnotation()] = gateway.Name
-	route.Annotations[r.Config.RouteGatewayUIDAnnotation()] = string(gateway.UID)
-	route.Annotations[r.Config.RouteClusterIDAnnotation()] = r.Config.ClusterID
-	route.Annotations[r.Config.RouteProjectIDAnnotation()] = r.Config.OpenStackProjectID
-	delete(route.Annotations, r.Config.RouteCleanupFailureAnnotation())
-	bindingFinalizer := r.Config.RouteBindingFinalizer(
-		r.Config.ClusterID,
-		r.Config.OpenStackProjectID,
-		gateway.Namespace,
-		gateway.Name,
-		string(gateway.UID),
-	)
-	r.removeStaleRouteBindingFinalizers(route, bindingFinalizer)
-	controllerutil.AddFinalizer(route, bindingFinalizer)
-	controllerutil.AddFinalizer(route, r.Config.RouteFinalizer())
 }
 
 func (r *Reconciler) clearRouteBinding(route *gatewayv1.HTTPRoute) {
-	controllerutil.RemoveFinalizer(route, r.Config.RouteFinalizer())
-	r.removeRouteBindingFinalizers(route)
-	delete(route.Annotations, r.Config.RouteLifecycleAnnotation())
-	delete(route.Annotations, r.Config.RouteGatewayNamespaceAnnotation())
-	delete(route.Annotations, r.Config.RouteGatewayNameAnnotation())
-	delete(route.Annotations, r.Config.RouteGatewayUIDAnnotation())
-	delete(route.Annotations, r.Config.RouteClusterIDAnnotation())
-	delete(route.Annotations, r.Config.RouteProjectIDAnnotation())
-	delete(route.Annotations, r.Config.RouteCleanupFailureAnnotation())
-}
-
-func (r *Reconciler) removeStaleRouteBindingFinalizers(route *gatewayv1.HTTPRoute, expected string) {
-	finalizers := make([]string, 0, len(route.Finalizers))
-	for _, finalizer := range route.Finalizers {
-		if strings.HasPrefix(finalizer, r.Config.RouteBindingFinalizerPrefix()) && finalizer != expected {
-			continue
-		}
-		finalizers = append(finalizers, finalizer)
-	}
-	route.Finalizers = finalizers
+	controller.ClearRouteBinding(r.Config, route)
 }
 
 func routeBindingMetadataEqual(left, right *gatewayv1.HTTPRoute) bool {
@@ -223,12 +193,4 @@ func sameHTTPRouteRevision(route *gatewayv1.HTTPRoute, uid types.UID, generation
 
 func (r *Reconciler) storedRouteIdentity(route *gatewayv1.HTTPRoute) (cloud.Identity, bool, error) {
 	return controller.StoredRouteIdentity(r.Config, route)
-}
-
-func (r *Reconciler) removeRouteBindingFinalizers(route *gatewayv1.HTTPRoute) {
-	for _, finalizer := range append([]string(nil), route.Finalizers...) {
-		if strings.HasPrefix(finalizer, r.Config.RouteBindingFinalizerPrefix()) {
-			controllerutil.RemoveFinalizer(route, finalizer)
-		}
-	}
 }

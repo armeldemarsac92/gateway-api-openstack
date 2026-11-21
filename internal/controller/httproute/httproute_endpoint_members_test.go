@@ -118,6 +118,9 @@ func TestEndpointRouteResolvesServiceInputsWithoutNodes(t *testing.T) {
 		want   []cloud.Member
 	}{
 		{name: "ClusterIP named target port", want: []cloud.Member{{Address: "192.0.2.20", Port: 8080}}},
+		{name: "WebSocket Service", change: func(s *corev1.Service, _ *discoveryv1.EndpointSlice) {
+			s.Spec.Ports[0].AppProtocol = ptr.To("kubernetes.io/ws")
+		}, want: []cloud.Member{{Address: "192.0.2.20", Port: 8080}}},
 		{name: "headless manual slice", change: func(s *corev1.Service, _ *discoveryv1.EndpointSlice) {
 			s.Spec.ClusterIP = corev1.ClusterIPNone
 			s.Spec.Selector = nil
@@ -196,9 +199,9 @@ func TestEndpointRouteRejectsUnsupportedServiceInputs(t *testing.T) {
 			test.change(service)
 			reader := indexedFakeClientBuilder(testScheme(t), testConfig()).WithObjects(service, endpointSlice).Build()
 			r := &Reconciler{Config: testConfig()}
-			decision, err := r.evaluateRouteSlotWithReader(t.Context(), reader, route, gateway)
-			if err != nil || decision.canReserve || decision.rejection == nil {
-				t.Fatalf("slot = %#v, error = %v", decision, err)
+			var rejection *routeBuildError
+			if err := r.checkRouteBackendProfile(t.Context(), reader, route.Namespace, route.Spec.Rules[0].BackendRefs[0].BackendObjectReference, gateway); !errors.As(err, &rejection) {
+				t.Fatalf("unsupported backend profile error = %v", err)
 			}
 			if _, err := r.buildRouteModelWithReader(t.Context(), reader, route, gateway); err == nil {
 				t.Fatal("unsupported Service reached the cloud model")

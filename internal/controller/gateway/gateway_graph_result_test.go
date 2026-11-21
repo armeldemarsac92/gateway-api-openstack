@@ -22,8 +22,11 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -48,6 +51,167 @@ func TestGatewayRejectsMissingComponentOutcome(t *testing.T) {
 	}
 	if !reflect.DeepEqual(current.Status, gateway.Status) {
 		t.Fatalf("invalid component result changed status: %#v", current.Status)
+	}
+}
+
+func TestGatewayDoesNotReportNewHostnameProgrammedWhileRoutesProgress(t *testing.T) {
+	cfg := testConfig()
+	gateway := programmedTestGateway(cfg)
+	gateway.Generation++
+	gateway.Spec.Listeners[0].Hostname = ptr.To(gatewayv1.Hostname("*.example.test"))
+	class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "openstack"}, Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName}}
+	kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gateway).WithObjects(class, gateway).Build()
+	result := cloud.GatewayGraphResult{
+		Outcome: cloud.ProgressingOutcome("Disabling Octavia routing policy", time.Second),
+		Gateway: cloud.GatewayResult{
+			Outcome: cloud.ReadyOutcome(),
+			State:   cloud.GatewayState{LoadBalancerID: "load-balancer", ListenerID: "listener", VIPAddress: "192.0.2.10"},
+		},
+	}
+	reconciler := newTestReconciler(Reconciler{Client: kubeClient, APIReader: kubeClient, Config: cfg, Writer: fixedGatewayGraph{result: result}}, nil)
+	if _, err := reconciler.Reconcile(t.Context(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(gateway)}); err != nil {
+		t.Fatal(err)
+	}
+	current := &gatewayv1.Gateway{}
+	if err := kubeClient.Get(t.Context(), client.ObjectKeyFromObject(gateway), current); err != nil {
+		t.Fatal(err)
+	}
+	accepted := meta.FindStatusCondition(current.Status.Conditions, string(gatewayv1.GatewayConditionAccepted))
+	programmed := meta.FindStatusCondition(current.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed))
+	if accepted == nil || accepted.Status != metav1.ConditionTrue || accepted.ObservedGeneration != gateway.Generation ||
+		programmed == nil || (programmed.Status == metav1.ConditionTrue && programmed.ObservedGeneration == gateway.Generation) {
+		t.Fatalf("new hostname should be accepted while its policy update is pending: %v", current.Status.Conditions)
+	}
+}
+
+func TestGatewayWithdrawsCurrentHTTPReadinessOnPolicyFailure(t *testing.T) {
+	cfg := testConfig()
+	gateway := programmedTestGateway(cfg)
+	gateway.Spec.Listeners[0].Hostname = ptr.To(gatewayv1.Hostname("first.example.test"))
+	gateway.Spec.Listeners = append(gateway.Spec.Listeners, gatewayv1.Listener{
+		Name: "second", Protocol: gatewayv1.HTTPProtocolType, Port: gateway.Spec.Listeners[0].Port,
+		Hostname: ptr.To(gatewayv1.Hostname("second.example.test")),
+	})
+	class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "openstack"}, Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName}}
+	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gateway).WithObjects(class, gateway).Build()
+	gatewayState := cloud.GatewayState{LoadBalancerID: "load-balancer", ListenerID: "listener", VIPAddress: "192.0.2.10"}
+	pending := cloud.ProgressingOutcome("Waiting for updated HTTP hostname rules", time.Second)
+	graphFailure := &cloud.GraphError{Identity: cloud.Identity{RouteUID: "route-uid"}, Err: errors.New("failed to disable policy")}
+	r := newTestReconciler(Reconciler{Client: kube, APIReader: kube, Config: cfg, Writer: fixedGatewayGraph{
+		result: cloud.GatewayGraphResult{Outcome: pending, Gateway: cloud.GatewayResult{
+			State: gatewayState, Outcome: pending, HTTPPolicyTransition: true,
+		}}, err: graphFailure,
+	}}, nil)
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(gateway)}
+	if _, err := r.Reconcile(t.Context(), request); !errors.Is(err, graphFailure) {
+		t.Fatalf("reconcile on failed HTTP policy change = %v, want the provider error", err)
+	}
+	current := &gatewayv1.Gateway{}
+	if err := kube.Get(t.Context(), request.NamespacedName, current); err != nil {
+		t.Fatal(err)
+	}
+	if current.Generation != gateway.Generation ||
+		!meta.IsStatusConditionFalse(current.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed)) ||
+		len(current.Status.Listeners) != 2 ||
+		!meta.IsStatusConditionFalse(current.Status.Listeners[0].Conditions, string(gatewayv1.ListenerConditionProgrammed)) {
+		t.Fatalf("failed HTTP policy change left current readiness published: %#v", current.Status)
+	}
+
+	r.Writer = fixedGatewayGraph{result: cloud.GatewayGraphResult{Outcome: cloud.ReadyOutcome(), Gateway: cloud.GatewayReadyResult(gatewayState)}}
+	if _, err := r.Reconcile(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	if err := kube.Get(t.Context(), request.NamespacedName, current); err != nil {
+		t.Fatal(err)
+	}
+	if current.Generation != gateway.Generation ||
+		!meta.IsStatusConditionTrue(current.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed)) ||
+		!meta.IsStatusConditionTrue(current.Status.Listeners[0].Conditions, string(gatewayv1.ListenerConditionProgrammed)) {
+		t.Fatalf("observed HTTP policy readiness was not recovered: %#v", current.Status)
+	}
+}
+
+func TestGatewayExcludesRemovedHostnameFromSingletonAttachedRoutes(t *testing.T) {
+	cfg := testConfig()
+	gateway := programmedTestGateway(cfg)
+	survivor := &gateway.Spec.Listeners[0]
+	survivor.Hostname = ptr.To(gatewayv1.Hostname("survivor.example.test"))
+	removed := survivor.DeepCopy()
+	removed.Name, removed.Hostname = "old", ptr.To(gatewayv1.Hostname("old.example.test"))
+	parent := gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name)}
+	route := &gatewayv1.HTTPRoute{
+		ObjectMeta: metav1.ObjectMeta{Namespace: gateway.Namespace, Name: "old", Generation: 1},
+		Spec: gatewayv1.HTTPRouteSpec{
+			CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{parent}},
+			Hostnames:       []gatewayv1.Hostname{*removed.Hostname},
+		},
+	}
+	route.Status.Parents = []gatewayv1.RouteParentStatus{{
+		ParentRef: parent, ControllerName: cfg.ControllerName,
+		Conditions: []metav1.Condition{{Type: string(gatewayv1.RouteConditionAccepted), Status: metav1.ConditionTrue, ObservedGeneration: route.Generation}},
+	}}
+	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithObjects(route).Build()
+	r := &Reconciler{Client: kube, Config: cfg}
+	counts, err := r.attachedRouteCounts(t.Context(), gateway, []*gatewayv1.Listener{survivor, removed})
+	if err != nil || counts[removed.Name] != 1 || counts[survivor.Name] != 0 {
+		t.Fatalf("shared counts = %v, %v", counts, err)
+	}
+	counts, err = r.attachedRouteCounts(t.Context(), gateway, []*gatewayv1.Listener{survivor})
+	if err != nil || counts[survivor.Name] != 0 {
+		t.Fatalf("singleton counts before the old route status is refreshed = %v, %v", counts, err)
+	}
+}
+
+func TestGatewayReportsProvenUDPListenerWhenSiblingFails(t *testing.T) {
+	cfg := testConfig()
+	gateway := &gatewayv1.Gateway{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "edge", UID: "gateway-uid", Generation: 1},
+		Spec: gatewayv1.GatewaySpec{GatewayClassName: "openstack", Listeners: []gatewayv1.Listener{
+			{Name: "dns", Protocol: gatewayv1.UDPProtocolType, Port: 53},
+			{Name: "radius", Protocol: gatewayv1.UDPProtocolType, Port: 1812},
+		}},
+	}
+	class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "openstack"}, Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName}}
+	kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gateway).WithObjects(class, gateway).Build()
+	reconciler := newTestReconciler(Reconciler{Client: kubeClient, APIReader: kubeClient, Config: cfg, Coordinator: &graph.Coordinator{}}, &recordingProvider{})
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(gateway)}
+	if result, err := reconciler.Reconcile(t.Context(), request); err != nil || !result.Requeue {
+		t.Fatalf("binding checkpoint = %v, %v", result, err)
+	}
+	component := cloud.GatewayProgressingResult("Waiting for the Gateway UDP listeners", time.Second)
+	component.State = cloud.GatewayState{LoadBalancerID: "lb-1", VIPAddress: "192.0.2.10"}
+	component.ScopedListenerReadyPorts = []int{53}
+	providerErr := cloud.NewProviderError(cloud.ErrorCategoryResourceFailure, errors.New("Octavia UDP listener provisioning status is ERROR"))
+	reconciler.Writer = fixedGatewayGraph{result: cloud.GatewayGraphResult{Gateway: component}, err: providerErr}
+	if result, err := reconciler.Reconcile(t.Context(), request); err != nil || result.RequeueAfter <= 0 {
+		t.Fatalf("provider failure = %v, %v", result, err)
+	}
+	var current gatewayv1.Gateway
+	if err := kubeClient.Get(t.Context(), request.NamespacedName, &current); err != nil {
+		t.Fatal(err)
+	}
+	programmed := meta.FindStatusCondition(current.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed))
+	if programmed == nil || programmed.Status != metav1.ConditionFalse || programmed.Reason != "ResourceFailed" {
+		t.Fatalf("aggregate failure condition = %#v", programmed)
+	}
+	if len(current.Status.Listeners) != 2 ||
+		!meta.IsStatusConditionTrue(current.Status.Listeners[0].Conditions, string(gatewayv1.ListenerConditionProgrammed)) ||
+		!meta.IsStatusConditionFalse(current.Status.Listeners[1].Conditions, string(gatewayv1.ListenerConditionProgrammed)) {
+		t.Fatalf("listener conditions = %+v", current.Status.Listeners)
+	}
+	if len(current.Status.Addresses) != 1 || current.Status.Addresses[0].Value != "192.0.2.10" {
+		t.Fatalf("proven address = %+v", current.Status.Addresses)
+	}
+
+	reconciler.Writer = fixedGatewayGraph{err: providerErr}
+	if _, err := reconciler.Reconcile(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	if err := kubeClient.Get(t.Context(), request.NamespacedName, &current); err != nil {
+		t.Fatal(err)
+	}
+	if !meta.IsStatusConditionFalse(current.Status.Listeners[0].Conditions, string(gatewayv1.ListenerConditionProgrammed)) {
+		t.Fatalf("listener inherited historical proof after an unproven failure: %+v", current.Status.Listeners[0])
 	}
 }
 
@@ -88,6 +252,36 @@ func TestGatewayRouteFailurePreservesStatusAndRedactsDetails(t *testing.T) {
 	}
 }
 
+func TestGatewayReplacementReportsImmutableAddress(t *testing.T) {
+	cfg := testConfig()
+	gateway := programmedTestGateway(cfg)
+	gateway.Spec.Listeners[0].Port++
+	gateway.Spec.Addresses = []gatewayv1.GatewaySpecAddress{{Value: "192.0.2.11"}}
+	gateway.Generation++
+	class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "openstack"}, Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName}}
+	kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gateway).WithObjects(class, gateway).Build()
+	component := cloud.GatewayProgressingResult("Blocked replacement", time.Second)
+	component.State = cloud.GatewayState{LoadBalancerID: "lb-1", VIPAddress: "192.0.2.10"}
+	component.AddressIssue = "Restore the currently bound VIP 192.0.2.10"
+	r := newTestReconciler(Reconciler{Client: kubeClient, APIReader: kubeClient, Config: cfg,
+		Writer: fixedGatewayGraph{result: cloud.GatewayGraphResult{Outcome: component.Outcome, Gateway: component}}}, nil)
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(gateway)}
+	for range 2 {
+		if _, err := r.Reconcile(t.Context(), request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	current := &gatewayv1.Gateway{}
+	if err := kubeClient.Get(t.Context(), request.NamespacedName, current); err != nil {
+		t.Fatal(err)
+	}
+	programmed := meta.FindStatusCondition(current.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed))
+	if programmed == nil || programmed.ObservedGeneration != gateway.Generation || programmed.Status != metav1.ConditionFalse ||
+		programmed.Reason != string(gatewayv1.GatewayReasonAddressNotUsable) || len(current.Status.Addresses) != 1 || current.Status.Addresses[0].Value != "192.0.2.10" {
+		t.Fatalf("status = %#v, want actual address and current-generation address rejection", current.Status)
+	}
+}
+
 type fixedGatewayGraph struct {
 	result cloud.GatewayGraphResult
 	err    error
@@ -95,4 +289,55 @@ type fixedGatewayGraph struct {
 
 func (w fixedGatewayGraph) ReconcileGraph(context.Context, graph.Request) (cloud.GatewayGraphResult, error) {
 	return w.result, w.err
+}
+
+func TestWithdrawalPreservesOnlyCurrentProgrammedSiblings(t *testing.T) {
+	g := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Generation: 3}}
+	for i, name := range []gatewayv1.SectionName{"withdrawing", "serving", "older", "new"} {
+		port := gatewayv1.PortNumber(443)
+		if i > 0 {
+			port = 8443
+		}
+		g.Spec.Listeners = append(g.Spec.Listeners, gatewayv1.Listener{Name: name, Port: port})
+		g.Status.Listeners = append(g.Status.Listeners, gatewayv1.ListenerStatus{Name: name, Conditions: []metav1.Condition{{
+			Type: string(gatewayv1.ListenerConditionProgrammed), Status: metav1.ConditionFalse,
+			ObservedGeneration: 3, Reason: "Pending", LastTransitionTime: metav1.Unix(100, 0),
+		}}})
+	}
+	previous := g.Status.DeepCopy()
+	for i := range previous.Listeners[:3] {
+		c := &previous.Listeners[i].Conditions[0]
+		c.Status, c.Reason, c.LastTransitionTime = metav1.ConditionTrue, "Programmed", metav1.Unix(50, 0)
+	}
+	previous.Listeners[2].Conditions[0].ObservedGeneration = 2
+	preserveProgrammedListeners(g, *previous, []int{8443})
+	for i, section := range g.Status.Listeners {
+		condition := section.Conditions[0]
+		if (condition.Status == metav1.ConditionTrue) != (i == 1) {
+			t.Fatalf("unexpected Programmed condition for %s: %v", section.Name, condition)
+		}
+		if i == 1 && !condition.LastTransitionTime.Equal(&previous.Listeners[i].Conditions[0].LastTransitionTime) {
+			t.Fatal("the retained sibling acquired a new transition timestamp")
+		}
+	}
+}
+
+func TestDeniedCertificatePreservesGatewayProviderFailure(t *testing.T) {
+	g := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Generation: 1}}
+	g.Spec.Listeners = []gatewayv1.Listener{{Name: "web", Port: 443, Protocol: gatewayv1.HTTPSProtocolType}}
+	g.Status.Conditions = []metav1.Condition{{Type: "Programmed", Status: metav1.ConditionFalse,
+		ObservedGeneration: 1, Reason: "NoResources", Message: "The provider quota is exhausted"}}
+	previous := g.Status.DeepCopy()
+	issues := map[gatewayv1.SectionName]httpsListenerStatusIssue{"web": {
+		primary: httpsListenerIssue{
+			condition: gatewayv1.ListenerConditionResolvedRefs, reason: gatewayv1.ListenerReasonInvalidCertificateRef,
+			message: "No approved certificate is available for this listener",
+		},
+	}}
+	(&Reconciler{}).applyHTTPSListenerStatus(g, *previous, issues, nil, true)
+	aggregate := meta.FindStatusCondition(g.Status.Conditions, "Programmed")
+	if aggregate.Reason != "NoResources" || aggregate.Message != previous.Conditions[0].Message ||
+		!meta.IsStatusConditionFalse(g.Status.Listeners[0].Conditions, "ResolvedRefs") {
+		t.Fatalf("expected both provider failure and listener certificate status, got %v", g.Status)
+	}
 }

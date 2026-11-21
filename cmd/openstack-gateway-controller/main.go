@@ -45,10 +45,12 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack"
 	openstackobservability "github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/observability"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/certificates"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gatewayclass"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/httproute"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/l4route"
 )
 
 // version is overridden at build time with -X main.version=<release>.
@@ -77,25 +79,29 @@ func run(ctx context.Context) error {
 		return err
 	}
 	var (
-		controllerName   string
-		clusterID        string
-		region           string
-		microversion     string
-		cloudsYAML       string
-		cloudName        string
-		metricsAddress   string
-		healthAddress    string
-		leaderElection   bool
-		allowInsecure    bool
-		operationTimeout time.Duration
-		pollInterval     time.Duration
-		resyncInterval   time.Duration
-		apiQPS           float64
-		apiBurst         int
+		controllerName    string
+		gatewayAPIChannel string
+		certificateMap    string
+		clusterID         string
+		region            string
+		microversion      string
+		cloudsYAML        string
+		cloudName         string
+		metricsAddress    string
+		healthAddress     string
+		leaderElection    bool
+		allowInsecure     bool
+		operationTimeout  time.Duration
+		pollInterval      time.Duration
+		resyncInterval    time.Duration
+		apiQPS            float64
+		apiBurst          int
 	)
 	zapOptions := zap.Options{Development: false}
 	zapOptions.BindFlags(flag.CommandLine)
 	flag.StringVar(&controllerName, "controller-name", envOr("GATEWAY_OPENSTACK_CONTROLLER_NAME", configv1alpha1.GroupName+"/gateway-api-openstack"), "Gateway API controllerName for this installation")
+	flag.StringVar(&gatewayAPIChannel, "gateway-api-channel", envOr("GATEWAY_OPENSTACK_GATEWAY_API_CHANNEL", "standard"), "Gateway API release channel: standard or experimental")
+	flag.StringVar(&certificateMap, "tls-certificate-map", envOr("GATEWAY_OPENSTACK_TLS_CERTIFICATE_MAP", ""), "operator-managed TLS revision map for HTTPS listeners")
 	flag.StringVar(&clusterID, "cluster-id", envOr("GATEWAY_OPENSTACK_CLUSTER_ID", ""), "stable unique identifier for this Kubernetes cluster (required)")
 	flag.StringVar(&region, "openstack-region", envOr("OS_REGION_NAME", ""), "OpenStack region; defaults to clouds.yaml or OS_REGION_NAME")
 	flag.StringVar(&microversion, "octavia-microversion", "2.5", "Octavia API microversion (2.5 or later is required for resource tags)")
@@ -128,6 +134,8 @@ func run(ctx context.Context) error {
 	controllerConfig := controller.Config{
 		ControllerName:          gatewayv1.GatewayController(controllerName),
 		ControllerVersion:       version,
+		GatewayAPIChannel:       gatewayAPIChannel,
+		OperatorHTTPS:           certificateMap != "",
 		ClusterID:               clusterID,
 		OpenStackResyncInterval: resyncInterval,
 	}
@@ -186,6 +194,20 @@ func run(ctx context.Context) error {
 		Recorder:         eventRecorder,
 		Config:           controllerConfig,
 	}
+	if controllerConfig.OperatorHTTPS {
+		gatewayReconciler.Certificates = &certificates.Resolver{
+			Path: certificateMap, Reader: manager.GetAPIReader(),
+			ClusterID: controllerConfig.ClusterID, ProjectID: serviceClients.ProjectID, Region: serviceClients.Region,
+			DiscoverEndpoint: func() (string, error) {
+				// Catalog availability can change while other Gateway listeners continue serving.
+				keyManager, err := serviceClients.NewKeyManagerClient()
+				if err != nil {
+					return "", err
+				}
+				return keyManager.Endpoint, nil
+			},
+		}
+	}
 	routeReconciler := &httproute.Reconciler{
 		Client:      manager.GetClient(),
 		Coordinator: graphCoordinator,
@@ -193,17 +215,34 @@ func run(ctx context.Context) error {
 		Recorder:    eventRecorder,
 		Config:      controllerConfig,
 	}
+	tcpReconciler := &l4route.Reconciler{
+		Protocol: gatewayv1.TCPProtocolType,
+		Client:   manager.GetClient(), APIReader: manager.GetAPIReader(), Config: controllerConfig, Coordinator: graphCoordinator,
+	}
+	udpReconciler := &l4route.Reconciler{
+		Protocol: gatewayv1.UDPProtocolType,
+		Client:   manager.GetClient(), APIReader: manager.GetAPIReader(), Config: controllerConfig, Coordinator: graphCoordinator,
+	}
 	writerMetrics, err := graph.RegisterWriterMetrics(controllermetrics.Registry)
 	if err != nil {
 		return fmt.Errorf("register Gateway graph metrics: %w", err)
 	}
-	writer := &graph.Writer{Observer: writerMetrics, Coordinator: graphCoordinator, Gateway: gatewayReconciler, Routes: routeReconciler, Provider: openStackProvider}
-	gatewayReconciler.Writer, routeReconciler.Writer = writer, writer
+	writer := &graph.Writer{
+		Observer: writerMetrics, Coordinator: graphCoordinator, Gateway: gatewayReconciler,
+		Routes: graph.RouteSources{routeReconciler, tcpReconciler, udpReconciler}, Provider: openStackProvider,
+	}
+	gatewayReconciler.Writer, routeReconciler.Writer, tcpReconciler.Writer, udpReconciler.Writer = writer, writer, writer, writer
 	if err := gatewayReconciler.SetupWithManager(manager); err != nil {
 		return fmt.Errorf("set up Gateway controller: %w", err)
 	}
 	if err := routeReconciler.SetupWithManager(manager); err != nil {
 		return fmt.Errorf("set up HTTPRoute controller: %w", err)
+	}
+	if err := tcpReconciler.SetupWithManager(manager); err != nil {
+		return fmt.Errorf("set up TCPRoute controller: %w", err)
+	}
+	if err := udpReconciler.SetupWithManager(manager); err != nil {
+		return fmt.Errorf("set up UDPRoute controller: %w", err)
 	}
 	if err := manager.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		return fmt.Errorf("add health check: %w", err)
@@ -215,6 +254,7 @@ func run(ctx context.Context) error {
 		"Starting controller manager",
 		"version", version,
 		"controllerName", controllerConfig.ControllerName,
+		"gatewayAPIChannel", controllerConfig.GatewayAPIChannel,
 		"clusterID", controllerConfig.ClusterID,
 		"octaviaProvider", "amphora",
 		"memberMode", "NodePort",
@@ -241,15 +281,15 @@ func requireGatewayAPIs(restConfig *rest.Config) error {
 	}
 	resourceList, err := discoveryClient.ServerResourcesForGroupVersion(gatewayv1.GroupVersion.String())
 	if err != nil {
-		return fmt.Errorf("required Gateway API v1 CRDs are unavailable; install Gateway API Standard %s before starting the controller: %w", gatewayconsts.BundleVersion, err)
+		return fmt.Errorf("required Gateway API v1 CRDs are unavailable; install the selected Gateway API %s bundle before starting the controller: %w", gatewayconsts.BundleVersion, err)
 	}
 	availableResources := make([]string, 0, len(resourceList.APIResources))
 	for _, resource := range resourceList.APIResources {
 		availableResources = append(availableResources, resource.Name)
 	}
-	for _, required := range []string{"gatewayclasses", "gateways", "httproutes", "referencegrants"} {
+	for _, required := range []string{"gatewayclasses", "gateways", "httproutes", "tcproutes", "udproutes", "referencegrants"} {
 		if !slices.Contains(availableResources, required) {
-			return fmt.Errorf("required Gateway API resource %s is missing from %s; install Gateway API Standard %s", required, gatewayv1.GroupVersion, gatewayconsts.BundleVersion)
+			return fmt.Errorf("required Gateway API resource %s is missing from %s; install the selected Gateway API %s bundle", required, gatewayv1.GroupVersion, gatewayconsts.BundleVersion)
 		}
 	}
 	return nil

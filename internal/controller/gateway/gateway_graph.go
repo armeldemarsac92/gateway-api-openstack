@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -39,17 +40,50 @@ func (r *Reconciler) ensureGateway(ctx context.Context, expected *gatewayv1.Gate
 	return r.Writer.ReconcileGraph(ctx, graph.Request{Identity: controller.GatewayIdentity(r.Config, expected), Action: graph.Ensure, Gateway: expected})
 }
 
-func (r *Reconciler) gatewaySpec(gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, topology classconfig.Resolved) cloud.GatewaySpec {
-	return cloud.GatewaySpec{
+func (r *Reconciler) gatewaySpec(gateway *gatewayv1.Gateway, listeners []*gatewayv1.Listener, topology classconfig.Resolved) cloud.GatewaySpec {
+	listener := listeners[0]
+	var protocol string
+	if isL4Listener(listener.Protocol) {
+		protocol = string(listener.Protocol)
+	}
+	spec := cloud.GatewaySpec{
 		Identity:            controller.GatewayIdentity(r.Config, gateway),
 		Provider:            "amphora",
 		VIPSubnetID:         topology.Topology.VIPSubnetID,
 		ExternalNetworkID:   topology.Topology.ExternalNetworkID,
 		ListenerName:        resourceDisplayName(gateway.Namespace, gateway.Name, string(listener.Name)),
 		ListenerPort:        int(listener.Port),
+		ListenerProtocol:    protocol,
 		FlavorID:            topology.Topology.FlavorID,
 		AvailabilityZone:    topology.Topology.AvailabilityZone,
 		VIPSecurityGroupIDs: slices.Clone(topology.Topology.VIPSecurityGroupIDs),
+	}
+	setGatewayAddressRequest(&spec, gateway)
+	if controller.GatewayListenerScope(r.Config, gateway) != "" {
+		// Snapshot validation already verified the frozen listener port and topology.
+		spec.ListenerProtocol = string(listenerFamily(listener))
+		spec.ListenerPort, _ = strconv.Atoi(gateway.Annotations[r.Config.GatewayListenerPortAnnotation()])
+		spec.ScopedListeners = []cloud.ScopedListener{}
+		seenPorts := make(map[gatewayv1.PortNumber]bool, len(listeners))
+		for _, listener := range listeners {
+			if seenPorts[listener.Port] {
+				continue
+			}
+			seenPorts[listener.Port] = true
+			spec.ScopedListeners = append(spec.ScopedListeners, cloud.ScopedListener{
+				Name: resourceDisplayName(strconv.Itoa(int(listener.Port)), gateway.Namespace, gateway.Name, string(listener.Name)),
+				Port: int(listener.Port),
+			})
+		}
+	}
+	return spec
+}
+
+func setGatewayAddressRequest(spec *cloud.GatewaySpec, gateway *gatewayv1.Gateway) {
+	if rejection := validateAddresses(gateway.Spec.Addresses); rejection != nil {
+		spec.AddressRejection = rejection.message
+	} else if len(gateway.Spec.Addresses) == 1 {
+		spec.RequestedVIPAddress = gateway.Spec.Addresses[0].Value
 	}
 }
 

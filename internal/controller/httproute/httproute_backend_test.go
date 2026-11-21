@@ -28,6 +28,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/routebackend"
 )
 
 func TestNodePortMembersWorkerEligibility(t *testing.T) {
@@ -133,14 +134,13 @@ func TestNodePortMembersRejectConflictingProviderIDs(t *testing.T) {
 			second.Spec.ProviderID = test.providerID
 			nodes := []corev1.Node{*first, *second}
 			for range 2 {
-				members, err := nodePortMembersForNodes(service, 30080, corev1.NodeInternalIP, backendNodes{discoveryv1.AddressTypeIPv4: {"": {}}}, nodes)
+				members, diagnostic := routebackend.NodePortMembersForNodes(service, 30080, corev1.NodeInternalIP, routebackend.BackendNodes{discoveryv1.AddressTypeIPv4: {"": {}}}, nodes)
 				if test.conflict {
-					var buildError *routeBuildError
-					if !errors.As(err, &buildError) || buildError.kind != routeErrorPending || len(members) != 0 {
-						t.Fatalf("ambiguous provider identity produced members: %v, %v", members, err)
+					if diagnostic == nil || diagnostic.Reason != "Pending" || len(members) != 0 {
+						t.Fatalf("ambiguous provider identity produced members: %v, %v", members, diagnostic)
 					}
-				} else if err != nil || len(members) != 1 || members[0].ProviderID != first.Spec.ProviderID {
-					t.Fatalf("identical member tuples did not deduplicate: %v, %v", members, err)
+				} else if diagnostic != nil || len(members) != 1 || members[0].ProviderID != first.Spec.ProviderID {
+					t.Fatalf("identical member tuples did not deduplicate: %v, %v", members, diagnostic)
 				}
 				slices.Reverse(nodes)
 			}

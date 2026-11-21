@@ -1,0 +1,110 @@
+# Gateway API v1.7.0 qualification on Hibiscus
+
+The fork provides a development controller and an opt-in Magnum driver patch. The first qualification target is an HTTP request sent through a private Amphora VIP to a known response on a worker NodePort. A disposable Hibiscus deployment has yet to be designated. The live ledger records zero completed runs across the fourteen profile and channel combinations. The local results span multiple controller revisions. [Live profile ledger](live-runs.md) · [Case inventory](matrix/features-and-cases.md#complete-registered-test-inventory)
+
+The private HTTP pilot now has three local traffic samples with two independent checks per sample. The VIP and worker NodePort answered before the controller stopped, at zero controller Pods and after both replacements became Ready. In a separate management exercise the stock addon operator deployed, upgraded and restored the workload image with two Ready Pods per revision. Both runs used local OpenStack fixtures. [Cold restart and HTTP traffic](provider/controller-cold-http.md) · [Management addon lifecycle](magnum-management-addon.md)
+
+One Gateway can serve independent HTTP backends on distinct ports of one VIP. The original `GatewayWithAttachedRoutesWithPort8080` case passed on Standard and Experimental. Loopback HAProxy and a separate stock Octavia API fixture served the same host and path through different ports. The earlier same-port run checked two disjoint HTTP hostnames and withdrawal of one section. The default controller has a recorded failure at the HTTPS assertion in `GatewayWithAttachedRoutes`. The opt-in HTTPS controller passed all three assertions on both channels. [Distinct-port receipts](provider/http-distinct-ports.md) · [Same-port traffic and status](provider/http-disjoint-sections.md)
+
+With operator HTTPS enabled, two terminating HTTPS ports and a plaintext sibling served three distinct backends through the native Octavia and Barbican APIs. The edge port rotated to the approved certificate, closed after grant removal and served the approved revision again when the grant returned. [Traffic and conditions on both channels](provider/https-operator-ports.md)
+
+The four upstream HTTPS certificate grant cases passed on both channels in operator mode. A listener on a conflicting port reports its own certificate authorization. [Status and traffic evidence](provider/https-secret-grants.md)
+
+Four original TLS listener-status cases failed their targeted assertions on the preceding revision on both channels. With the GatewayClass's advertised features, the runner skipped the same four cases. [TLS listener-status receipt](provider/tls-listener-status-results.json) · [Per-case matrix](matrix/features-and-cases.md#complete-registered-test-inventory)
+
+The original path-order and exact-path cases exercised six requests each against stock Octavia. The exact-path case recorded four unmatched responses of 503 where Gateway API requires 404. [Requests, backends and qualification on both channels](provider/http-path-rules.md)
+
+## Revisions and installation
+
+| Component | Development input | Deployed version |
+|---|---|---|
+| Controller base | Upstream `main` matched the audited base on November 21, 2026. [Commit 0d41b7c](https://github.com/gateway-api-openstack/gateway-api-openstack/tree/0d41b7ce39125c012af8bd1bfba3a9c90f0d1252) | Unobserved |
+| Fork controller image | [Source revision, image and reproduction procedure](image-build.md) | Unobserved |
+| Gateway API and conformance suite | [v1.7.0, e26d183](https://github.com/kubernetes-sigs/gateway-api/tree/e26d183dbbc1bb782b78addbd26faba03955c152) | Unobserved |
+| Go | [1.27.4](https://go.dev/dl/#go1.27.4) | Build input |
+| Magnum and driver | [Magnum 23.0.0, magnum-capi-helm 1.4.0, chart 0.10.1 and exact revisions](magnum-driver.md) | Unobserved |
+| Cloud and provider | [Octavia 19.0.0, Amphora, Neutron, Keystone and Barbican source revisions](provider/provider-feasibility.md) | Unobserved |
+| Kubernetes and Amphora image | Kubernetes 1.36.2 for local envtest. Record the real management/workload versions, provider and Amphora image before a live run. | Unobserved |
+
+The [Magnum operator guide](magnum-operator.md) covers how to build the patch, select an operator-owned template, supply the credential, rotate inputs, verify a drain and remove the addon. The [portable installation](../../../README.md#getting-started) uses the same controller. Install the official Standard bundle by default. Experimental requires the complete official Experimental bundle on a separate cluster and a controller configured for that channel. In both bundles the safe-upgrades policy and binding use the Standard annotation. [Release assets](https://github.com/kubernetes-sigs/gateway-api/releases/tag/v1.7.0)
+
+## Profile records
+
+An **Unrun** entry means the profile has not run on a deployed Hibiscus cluster. The local qualification records below give case counts and setup failures for the disposable fixtures. The Experimental suite may exercise additional fields on the shared Gateway API kinds. Each applicable Core and Extended case still needs its own result. The [matrix](matrix/README.md) relates features, cases, both schemas and unflagged API requirements.
+
+| Upstream profile | Standard | Experimental | Required traffic observation |
+|---|---|---|---|
+| GATEWAY-HTTP | Unrun | Unrun | HTTP and terminated HTTPS, route matching, mutation, weighted and invalid backend responses |
+| GATEWAY-GRPC | Unrun | Unrun | HTTP/2 method and metadata routing, backend protocol and gRPC status/trailers |
+| GATEWAY-TLS | Unrun | Unrun | ClientHello SNI selects the backend while the client negotiates TLS with that backend |
+| GATEWAY-TCP | Unrun | Unrun | An external client exchanges stream bytes with the chosen Service |
+| GATEWAY-UDP | Unrun | Unrun | UDP requests and replies reach the chosen Service |
+| MESH-HTTP | Unrun | Unrun | An enrolled workload uses the ordinary Service address and observes a Service-parent HTTPRoute |
+| MESH-GRPC | Unrun | Unrun | An enrolled client calls the ordinary Service and observes a Service-parent GRPCRoute |
+
+The Experimental qualification also requires behavioral checks for XBackend, XBackendTrafficPolicy, XMesh and XTelemetryPolicy. The registry inventory identifies named features without upstream cases. [Additional contracts](matrix/unflagged-contracts.md) · [Source study of AWS, Envoy Gateway and Istio](reference-implementations.md)
+
+The API server admitted all four release-defined Experimental kinds in focused local probes. The controller rejected an HTTPRoute backend referring to XBackend. The backend and telemetry policies had no status, and XMesh retained the default pending condition. Their data-plane behavior remains unqualified. [XBackend](provider/xbackend-endpoint-selector.md) · [Policies and XMesh](provider/experimental-policies.md)
+
+## Reproduce the local checks
+
+Use Go 1.27.4 and the linter version reported by `make lint-version`. The following commands use a fresh local API server and etcd for each envtest run.
+
+```sh
+make envtest-assets
+make ci
+make test-envtest GATEWAY_API_CHANNEL=experimental
+```
+
+Local verification passed the pinned linter, Go race tests, tagged E2E helper tests, HTTP Core inventory, Standard envtest, binary and image builds. A separate Experimental envtest also passed. The qualification preflight accepted the two published release assets after server-side installation on separate Kubernetes 1.36.2 API servers. Its raw reads returned 10 and 14 established CRDs respectively, with one safe-upgrades policy and binding per channel.
+
+| Local evidence | Observation |
+|---|---|
+| [All five Gateway and both mesh profile selections](complete-local-profiles.md) | The original shared Gateway setup stopped at the four HTTPS listeners on each channel. The two mesh profiles ran 16 eligible cases. Seven further registered mesh bodies ran in an isolated supplement on ordinary Services. [Supplement and original cases](provider/mesh-registered-supplement.md) |
+| [Upstream status cases](../../../internal/controller/envtest_upstream_status_test.go) | Eight original v1.7.0 cases exercise GatewayClass, Gateway and HTTPRoute status through controller watches. The three listener selector cases cover an unmatched port, an unmatched section and a section/port mismatch. On each release channel the unmatched port reports `Accepted=False/NoMatchingParent` while its valid backend reports `ResolvedRefs=True`. [ParentRef results](provider/http-parentref-status.md) |
+| [Automatic IP address request](matrix/features-and-cases.md#complete-registered-test-inventory) | A separate test applies the tagged address manifest directly, reads back the empty IP request and checks the address reported by the controller. The cloud provider is simulated. |
+| [Private Gateway addresses](provider/private-gateway-address.md) | Tenants can request one private IPv4 address at creation. The original v1.7.0 status case passed against both API-server bundles. The provider study covers the public Octavia API, the Neutron database allocator and error translation. [Provider results](provider/stock-private-vip.md) |
+| [Stock Amphora rendering and HTTP traffic](cloud-contract.md#http-traffic-from-the-adapters-own-writes) | A real HAProxy sent a matching request to the echo backend before and after recreation of the Octavia adapter. Both responses were HTTP 200 with the original Host. A route miss returned HTTP 503 where v1.7.0 requires 404. |
+| [HTTP through a dedicated kind worker NodePort](kind-http.md) | The same upstream pod answered through HAProxy before and after the Go adapter was recreated. The adapter made zero new writes. The loopback VIP refused traffic after cleanup and the two control LB fixtures survived. The test constructed the provider graph and used a real Standard-bundle cluster for the worker, Service and pod. |
+| [Gateway and route hostname intersection](../../providers/hibiscus-exact-hostname.md) | An exact name and a wildcard can narrow one another. Nested matching subdomains reach the backend. The wildcard excludes its apex. |
+| [Provider cleanup](cloud-contract.md) | After the adapter loses the response to a disable request, a fresh instance waits for the owned load balancer to be disabled and ACTIVE. It then removes the graph and leaves the two fixture control load balancers intact. |
+| [Upstream HTTP attachment and grant deletion](provider/http-attachments.md#results-on-both-channels) | Same-namespace and cross-namespace attachment passed on both channels. The grant case failed after the VIP returned 503 where 500 was required. Both full HTTP Core attempts stopped at the four HTTPS listeners on port 443. |
+| [HTTPRoute WebSocket upgrade](provider/http-websocket.md#results-on-both-channels) | The original v1.7.0 case passed on Standard and Experimental with real Kubernetes Services and stock HAProxy. Each channel produced three HTTP 101 exchanges with matching request and reply bytes on both sides of the proxy. |
+| [Stock fixed-destination HTTP redirect](provider/stock-http-redirect.md) | The original fixed-host redirect case passed on Standard and Experimental. On a shared listener, a higher-priority path reached its Service while a sibling host received its redirect. [Controller qualification](provider/stock-http-redirect-controller.md) |
+| [Several declared HTTPRoute hostnames](provider/http-host-intersection.md) | When an exact listener admits one effective name, the graph keeps the original route hostname precedence. Loopback HAProxy routed the matching Host and port to the expected backend and returned the fixture’s 503 on two excluded names. |
+| [Shared HTTP Gateway](cloud-contract.md#two-routes-on-a-shared-listener) | Two tenant namespaces attach same-named routes to the shared listener. Removing one namespace label drops its binding and changes the listener count from two to one. The independent Octavia loopback test checks policy order, selective deletion and continued sibling traffic. [Kubernetes watch test](../../../internal/controller/envtest_references_test.go) |
+| [Stock Amphora UDP forwarding](provider/stock-udp.md) | The Go adapter rediscovered its serving graph without writes, replaced A with B, enabled `UDP-CONNECT` and cleaned up. The kernel guest delivered the expected datagrams through the VIP and observed the stock health probe. The Octavia project inventory returned to its two control load balancers and six children. |
+| [UDPRoute on Kubernetes](provider/udp-kind.md) | Two upstream status cases and a local listener rejection passed on each of two kind clusters, one per channel. A direct NodePort request also reached the upstream UDP echo pod in each cluster. |
+| [Private UDP VIP to a worker NodePort](provider/udp-worker.md) | On Standard, the live UDPRoute selected a dedicated kind worker. Kernel IPVS ran the exact configuration emitted by the Octavia worker. The client received the echo pod’s identity through the VIP, then saw withdrawal while the worker remained reachable directly. |
+| [GATEWAY-GRPC and GATEWAY-TLS](kind-grpc-tls.md) | Both profile attempts on each channel stopped during the original common setup. At a recorded snapshot, 23 pods were Ready and all four terminating HTTPS listeners on port 443 reported `UnsupportedProtocol`. Zero case bodies ran. |
+| [TCP listener selection on kind](provider/tcp-upstream.md#multiple-tcp-listeners-on-one-gateway) | Both original TCPRoute parent reference cases passed on both channels at the reviewed multiport revision. They exercise one Service across four ports and distinct Services selected by port, section and both selectors. |
+| [TCP traffic on kind](provider/tcp-upstream.md) | Both channels routed the older TCPRoute and stopped forwarding after ReferenceGrant deletion. In the weighted case the three Services received 350, 150 and 0 of 500 new connections per channel. Three additional status cases passed on Experimental. Full GATEWAY-TCP Core setup stopped at the common HTTPS Gateway on both channels. |
+| [Upstream UDP traffic on kind](provider/udp-upstream.md) | Across the linked revisions, eight of nine focused UDP cases passed on Standard and seven passed on Experimental. On Experimental the Gateway-wide attachment case missed its first port in the disk-backed run and passed on a single cluster with etcd on tmpfs. One case required TLSRoute on both channels. Each channel returned 500 weighted replies through IPVS. A separate grant test confirmed withdrawal and 20 permitted replies after setting the denied share to zero. |
+| [Ordinary Service traffic with mesh Routes](provider/stock-mesh.md) | With the ingress controller running on plain kind, each channel recorded four HTTP Core passes and three failures, and one gRPC Core pass and two failures. Pod clients reached the Service on both protocols. Header changes, redirects and the requested 70% share failed. |
+| [Shared terminating HTTPS listener](provider/stock-https-rotation.md) | A public Octavia listener update switched between two operator-provisioned Barbican certificates. Fresh TLS connections saw four verified leaves and HTTP 200 responses per revision. |
+| [Stock Amphora gRPC routing](provider/stock-grpc.md) | On a single HTTP/2 client connection over TLS, two exact methods selected different backends and returned their gRPC trailers. The stock worker renderer produced the HAProxy configuration. Cleartext gRPC clients reached the HTTP listener, which sent HTTP/1.1 to the selected members and returned HTTP/2 status 502. Direct h2c calls to those servers succeeded. Kubernetes GRPCRoute reconciliation remains open. |
+| [Three upstream TCPRoute status cases on kind](kind-tcp.md) | Standard v1.7.0 with 23 Ready workload pods. The scoped base omitted one unsupported HTTPS Gateway. A direct NodePort handshake on the kind control-plane node identified a Ready upstream backend pod. The checked-in test repeated all three passes on a fresh cluster. |
+| [TCPRoute attachment and revocation](provider/stock-tcp.md#controller-and-provider-checks) | Two Kubernetes TCPRoutes attach and the oldest supplies the only endpoint. Grant removal withdraws traffic intent. Namespace label removal promotes the remaining route. The provider adapter also exercises restart, binary forwarding and detachment on loopback. |
+| [SNI on one stock TCP listener](provider/stock-tls-sni.md) | Two different ClientHello names reached pool A, then both reached pool B after a public reattachment. Leaf fingerprints, application IDs and the packet capture identify the selected backend. Both handshakes stopped when the listener had no pool. |
+| [Stock Amphora TCP forwarding](provider/stock-tcp.md) | Attaching a TCP pool through the public Octavia API let a loopback client exchange all 256 byte values with the member through HAProxy. Clearing the attachment stopped the traffic while the member still existed. The test uses the upstream API fixture and simulates worker completion. |
+| [ReferenceGrant](service-grants.md) | The controller observes authorization and revocation for a cross-namespace Service on a local Kubernetes API server. |
+| [Magnum lifecycle](magnum-driver.md#local-lifecycle-rehearsal) | Helm installed, upgraded, rolled back and removed the workload addon. Uninstall removed all five chart objects and preserved the sampled external resources and updated Cloud Secret. A separate TLS check exercised client startup with the replacement credential and CA. |
+| [Magnum cluster deletion rehearsal](lifecycle/cluster-delete-results.json) | The pinned conductor held an enrolled cluster without a drain acknowledgement. With a synthetic acknowledgement, Helm removed the parent release and addon source. A fixture CAPI finalizer held the Cluster and delayed credential cleanup. Once the finalizer cleared, the periodic job completed deletion. Stock cluster resources and sampled controls survived. Live CAPI, provider cleanup, credential revocation and in-service traffic remain unverified. |
+
+On a dedicated TCP or UDP Gateway, each distinct listener port selects its oldest eligible route of the corresponding kind. A route can serve several ports through the same pool. Endpoint mode supports weighted Services and NodePort mode selects one Service. [TCP operator example](../../getting-started.md#forward-tcp-to-a-service) · [UDP operator example](../../getting-started.md#forward-udp-to-a-service) · [Remaining L4 contracts](matrix/named-contracts.md)
+
+The provider studies cover proposed public Octavia capabilities for request headers, unmatched and invalid-backend responses, and an opt-in waypoint for Service traffic. Each requires implementation and cloud qualification. [Provider feasibility](provider/provider-feasibility.md) · [HTTP responses and weighted invalid backends](provider/octavia-http-local-responses.md)
+
+The workload rotation rehearsal used two real controller Pods and a synthetic TLS service catalog. Replacing the projected Secret and restarting the Deployment gave both new Pods working credentials and a new CA. A separate check received HTTP 401 with the retired credential. [Runtime and cleanup](magnum-projected-rotation.md)
+
+## First live run
+
+1. Record management and workload Kubernetes versions, actual Magnum and driver builds, parent chart digest, Gateway bundle, controller image digest, cloud services, negotiated microversion and Amphora image. Confirm a private VIP and reachable worker NodePorts. Keep credentials and environment identifiers in private run artifacts.
+2. Record both control load balancer identities and ownership before creation. Use the existing [foundation scenarios](../../testing-openstack-e2e.md#foundation-checks) in a designated project. Check the backend response through the private VIP, cold-restart the controller, send the same request again, and compare the IDs and owned graph.
+3. Remove the test graph, wait for finalizers and audit Octavia and Neutron. Verify both original control load balancers and the absence of all objects tagged for this run. Exercise provider failures, permission revocation and credential and certificate rotation while the workload remains reachable.
+4. Qualify Magnum install, upgrade, rollback, disable, removal and cluster teardown. Follow the management and workload steps in the operator guide. Record the result of each lifecycle transition independently of the traffic suite.
+5. Follow the [manual qualification runbook](live-runs.md) to run the unmodified profile suite against each channel’s own disposable cluster. Retain the original report, logs and environment metadata. Record setup failures and unrun cases explicitly. A trace of the live wire behavior is also needed for requirements without an upstream test.
+
+## Additional HTTPRoute ownership and kubelet results
+
+The controller preserves a foreign status entry at its original generation and transition time while serving through its own reference. A separate four-case run on kind observed dynamic Gateway address allocation and retention of foreign Gateway conditions. The earlier controller rejected an added HTTP section on the same port and the default NodePort configuration rejected the upstream ClusterIP backend in the route-generation case. The newer shared-port controller passes the Gateway generation case. The inventory retains the default NodePort failure and records the Endpoint-mode pass for HTTPRoute generation. [HTTPRoute ownership and traffic](provider/http-one-managed-parent.md) · [Scoped kubelet results](provider/kubelet-status-supplement.md)

@@ -29,7 +29,7 @@ import (
 
 func TestBuildRouteEnsurePlanDisablesPolicyBeforeChangingRules(t *testing.T) {
 	desired, actual := convergedRoutePlanFixture()
-	desired.spec.Hostname = "api.example.test"
+	desired.hostnameRuleValue = `^api\.example\.test(:[0-9]+)?$`
 
 	plan, _, err := buildRouteEnsurePlan(desired, actual)
 	if err != nil {

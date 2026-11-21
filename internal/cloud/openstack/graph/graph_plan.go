@@ -17,8 +17,11 @@ limitations under the License.
 package graph
 
 import (
+	"cmp"
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
@@ -30,6 +33,13 @@ import (
 // buildGatewayGraphPlan is free of I/O. No plan is executable unless every
 // component passed validation, even when an earlier prerequisite needs repair.
 func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual observedGatewayGraph) ([]graphMutation, cloud.GatewayGraphResult, error) {
+	if desired.spec.Gateway.Disposition != cloud.GraphDelete && hasHTTPRouteParts(desired, actual) {
+		return p.buildHTTPRoutePartsGraphPlan(desired, actual)
+	}
+	return p.buildGatewayGraphPartPlan(desired, actual, nil)
+}
+
+func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual observedGatewayGraph, handovers *httpPolicyHandovers) ([]graphMutation, cloud.GatewayGraphResult, error) {
 	result := cloud.GatewayGraphResult{Outcome: cloud.ReadyOutcome(), Gateway: cloud.GatewayReadyResult(actual.state)}
 	if desired.spec.Gateway.Disposition == cloud.GraphDelete {
 		plan := gatewayGraphDeletionPlan(actual)
@@ -42,19 +52,84 @@ func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual obs
 		}
 		return plan, result, nil
 	}
+	if actual.scoped && usesDefaultPool(actual.protocol) {
+		return p.buildScopedListenerGraphPlan(desired, actual)
+	}
+	if usesDefaultPool(actual.protocol) {
+		return p.buildDefaultPoolGraphPlan(desired, actual)
+	}
+	result.Routes = observedRouteDeleteCompletions(desired, actual)
 	plan, err := buildGatewayPrerequisitePlan(desired, actual)
 	if err != nil {
 		return nil, result, err
 	}
 	externalAddressReady := actual.floatingIP == nil && desired.spec.Gateway.Spec.ExternalNetworkID == "" ||
 		actual.floatingIP != nil && actual.floatingIP.PortID != ""
-	gatewayReady := actual.loadBalancer != nil && actual.listener != nil && actual.loadBalancer.AdminStateUp && actual.listener.AdminStateUp && externalAddressReady && len(plan) == 0
+	gatewayReady := actual.loadBalancer != nil && actual.listener != nil && actual.loadBalancer.AdminStateUp &&
+		actual.listener.AdminStateUp && actual.listener.DefaultPoolID == "" && externalAddressReady && len(plan) == 0
 	if !gatewayReady {
 		result.Gateway.Outcome = p.progressingOutcome("Waiting for the Gateway infrastructure")
 	}
-	deletions := make([]graphMutation, 0)
+	scopedHTTP := actual.scoped && actual.protocol == cloud.ListenerProtocolHTTP
+	var listenerChanges []graphMutation
+	var listenersByPort map[int]listeners.Listener
+	var portByListenerID map[string]int
+	var retiringListeners map[string]bool
+	if scopedHTTP {
+		listenersByPort, portByListenerID, retiringListeners, listenerChanges = scopedHTTPListenerPlan(desired, actual)
+		if desired.spec.Gateway.Disposition == cloud.GraphEnsure {
+			result.Gateway = scopedHTTPGatewayResult(desired, actual, p.progressingOutcome("Waiting for the Gateway listeners"))
+		}
+	} else if message := httpPolicyTransition(desired, actual); message != "" {
+		result.Gateway.Outcome = p.progressingOutcome(message)
+		result.Gateway.HTTPPolicyTransition = true
+	}
+	groupedHTTP := handovers != nil
+	var deleteDisables, deleteDisableRetries, deletions, memberDisables, memberDisableRetries []graphMutation
+	var staging []graphMutation
+	disables := make([]graphMutation, 0)
 	ensures := make([]graphMutation, 0)
-	canRestoreTraffic := true
+	routeResults := make([]cloud.RouteGraphResult, 0, len(desired.routes))
+	canRestoreTraffic := !groupedHTTP || len(handovers.protected) == 0
+	holdPolicyOrder := make(map[int]bool)
+	policyPending := make(map[int]bool)
+	policyCount := make(map[int]int32)
+	holdPolicyEnable := make(map[int]bool)
+	holdRedirectEnable := make(map[int]bool)
+	redirectPorts := make(map[int]bool)
+	for index, route := range desired.routes {
+		if route.redirect && desired.spec.Routes[index].Disposition == cloud.GraphEnsure {
+			redirectPorts[scopedHTTPRoutePort(route)] = true
+		}
+	}
+	for index, observed := range actual.routes {
+		node := desired.spec.Routes[index]
+		if groupedHTTP && node.Disposition == cloud.GraphEnsure && !policyPositionsMatch(desired.routes[index].policies, observed.policies) {
+			holdPolicyEnable[scopedHTTPRoutePort(desired.routes[index])] = true
+		}
+		for _, policy := range observed.policies {
+			port := portByListenerID[policy.policy.ListenerID]
+			policyCount[port]++
+			if redirectPorts[port] && !policy.redirect && (node.Disposition != cloud.GraphEnsure ||
+				!observedForwardPolicyMatches(desired.routes[index], observed, policy)) {
+				holdRedirectEnable[port] = true
+			}
+			if policy.pending() {
+				policyPending[port] = true
+				holdPolicyOrder[port] = true
+				canRestoreTraffic = false
+			}
+			if node.Disposition == cloud.GraphPreserve {
+				holdPolicyOrder[port] = true
+			} else if target := scopedHTTPRoutePort(desired.routes[index]); target != 0 && target != port {
+				holdPolicyOrder[port], holdPolicyOrder[target] = true, true
+			}
+		}
+		// A preserved fragment cannot authorize reopening its parent.
+		if node.Disposition == cloud.GraphPreserve && (observed.pool != nil || len(observed.policies) != 0) {
+			canRestoreTraffic = false
+		}
+	}
 	for index, route := range desired.routes {
 		observed := observedRouteGraph{}
 		if index < len(actual.routes) {
@@ -62,57 +137,246 @@ func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual obs
 		}
 		routeResult := cloud.RouteReadyResult(routeStateFromObservation(observed))
 		var routePlan []routeMutation
+		var backendIssue, ensureHold string
 		node := desired.spec.Routes[index]
-		switch node.Disposition {
-		case cloud.GraphDelete:
-			routePlan = buildRouteDeletionPlan(observed)
-		case cloud.GraphPreserve:
-			// An unresolved attached fragment may be observed, but it cannot
-			// authorize reopening traffic through a disabled parent.
-			if observed.pool != nil || len(observed.policies) != 0 {
-				canRestoreTraffic = false
+		port := scopedHTTPRoutePort(route)
+		var observedPort int
+		if len(observed.policies) != 0 {
+			observedPort = portByListenerID[observed.policies[0].policy.ListenerID]
+		}
+		var listenerID string
+		frontendReady := gatewayReady
+		if scopedHTTP {
+			listenerID = listenersByPort[port].ID
+			frontendReady = slices.Contains(result.Gateway.ScopedListenerReadyPorts, port)
+		}
+		if node.Disposition == cloud.GraphEnsure {
+			state := actual.state
+			if scopedHTTP {
+				state.ListenerID = listenerID
 			}
-		case cloud.GraphEnsure:
-			// Desired routes share the validated Gateway requirements. Their
-			// recorded IDs must still match this observation before planning.
-			if route.spec.Gateway.LoadBalancerID != "" && actual.state.LoadBalancerID != "" && route.spec.Gateway.LoadBalancerID != actual.state.LoadBalancerID ||
-				route.spec.Gateway.ListenerID != "" && actual.state.ListenerID != "" && route.spec.Gateway.ListenerID != actual.state.ListenerID {
-				return nil, result, &cloud.GraphError{Identity: route.spec.Identity, Err: fmt.Errorf("%w: route Gateway IDs differ from the observed graph", cloud.ErrOwnershipConflict)}
+			if err := validateRouteGatewayIDs(route.spec.Gateway, state); err != nil {
+				return nil, result, &cloud.GraphError{Identity: route.spec.Identity, Err: err}
 			}
-			route.spec.Gateway = actual.state
+			route.spec.Gateway = state
+		}
+		relocating := node.Disposition == cloud.GraphEnsure && observedPort != 0 &&
+			(port != observedPort || retiringListeners[observed.policies[0].policy.ListenerID])
+		withdrawing := node.Disposition == cloud.GraphDelete || relocating
+		switch {
+		case withdrawing:
+			if relocating {
+				// Octavia cannot move a policy to another listener. Remove its
+				// original policies before creating any on the new port.
+				routePlan = buildRouteDeletionPlan(observedRouteGraph{policies: observed.policies})
+			} else {
+				routePlan = buildRouteDeletionPlan(observed)
+				backendIssue = observed.backendProvisioningIssue(true, scopedHTTP)
+			}
+		case node.Disposition == cloud.GraphEnsure:
 			routePlan, routeResult.State, err = buildRouteEnsurePlan(route, observed)
 			if err != nil {
 				return nil, result, &cloud.GraphError{Identity: route.spec.Identity, Err: err}
 			}
-			if actual.listener == nil || actual.loadBalancer == nil {
+			if actual.loadBalancer == nil || !scopedHTTP && actual.listener == nil || scopedHTTP && listenerID == "" {
 				// The desired route has been validated, but its resources cannot
 				// be created until both prerequisites have been observed.
 				routePlan = nil
 			}
-			if !gatewayReady {
+			if !frontendReady {
 				routeResult.Outcome = p.progressingOutcome("Waiting for the Gateway infrastructure")
+			}
+			if slices.ContainsFunc(observed.policies, observedRoutePolicy.pending) {
+				ensureHold = "Waiting for Octavia L7 policy or rule provisioning"
+				routePlan = nil
+			} else if backendIssue := observed.backendProvisioningIssue(route.unavailable && len(observed.members) != 0, scopedHTTP || route.backendKey != ""); backendIssue != "" {
+				ensureHold = backendIssue
+				canRestoreTraffic = false
+				// A blocked earlier route can leave an empty slot in the policy
+				// order. Octavia would clamp a subsequent insert to the end.
+				holdPolicyOrder[port] = holdPolicyOrder[port] || !policyPositionsMatch(route.policies, observed.policies)
+				if groupedHTTP && slices.ContainsFunc(observed.policies, func(policy observedRoutePolicy) bool { return !policy.policy.AdminStateUp }) {
+					holdPolicyEnable[port] = true
+				}
+			}
+		}
+		if groupedHTTP {
+			if handovers.drain[index] {
+				if steps, hold := httpMemberWithdrawal(observed); len(steps) != 0 || hold != "" {
+					routePlan, ensureHold = steps, hold
+				}
+			}
+			routePlan = slices.DeleteFunc(routePlan, func(step routeMutation) bool {
+				if handovers.protected[step.id] || handovers.protected[step.parentID] {
+					routeResult.Outcome = p.progressingOutcome("Waiting for the replacement HTTP policy before withdrawing the old match")
+					return true
+				}
+				return withdrawing && len(observed.policies) != 0 &&
+					(step.kind == routeMutationDeleteMember || step.kind == routeMutationDeleteMonitor || step.kind == routeMutationDeletePool)
+			})
+			if route.unavailable && ensureHold == "" {
+				_, ensureHold = httpMemberWithdrawal(observed)
+			}
+			if stage, ok := handovers.stages[index]; ok && !withdrawing && ensureHold == "" &&
+				actual.loadBalancer != nil && (!scopedHTTP && actual.listener != nil || listenerID != "") && !policyPending[port] {
+				steps, err := stage.plan(route, observed)
+				if err != nil {
+					return nil, result, &cloud.GraphError{Identity: route.spec.Identity, Err: err}
+				}
+				if len(steps) != 0 && steps[0].kind != routeMutationDisableMember {
+					step := steps[0]
+					step.policy.position = stage.wanted.position
+					staging = append(staging, graphMutation{kind: graphRouteMutation, routeIndex: index, route: step, listenerID: listenerID, message: step.message()})
+					routeResult.Outcome = p.progressingOutcome(step.message())
+				}
+			}
+		}
+		if node.Disposition == cloud.GraphEnsure && route.redirect && !withdrawing && holdRedirectEnable[port] {
+			routeResult.Outcome = p.progressingOutcome("Waiting for verified forwarding predicates on the redirect listener")
+			var withdrawal []routeMutation
+			for _, policy := range observed.policies {
+				if !policy.pending() && (policy.policy.AdminStateUp || policy.policy.ProvisioningStatus == "ERROR") {
+					withdrawal = append(withdrawal, routeMutation{kind: routeMutationDisablePolicy, id: policy.policy.ID,
+						retry: policy.policy.ProvisioningStatus == "ERROR", withdrawHTTPPolicy: true})
+				}
+			}
+			if len(withdrawal) > 0 {
+				routePlan = withdrawal
 			}
 		}
 		if len(routePlan) != 0 {
 			routeResult.Outcome = p.progressingOutcome(routePlan[0].message())
 		}
-		for _, step := range routePlan {
-			mutation := graphMutation{kind: graphRouteMutation, routeIndex: index, route: step, message: step.message()}
-			if node.Disposition == cloud.GraphDelete {
-				deletions = append(deletions, mutation)
-			} else {
+		if route.redirectIssue != "" {
+			routeResult.Outcome = p.progressingOutcome(route.redirectIssue)
+		}
+		if ensureHold != "" {
+			routeResult.Outcome = p.progressingOutcome(ensureHold)
+			if groupedHTTP && (route.unavailable || handovers.drain[index]) {
+				canRestoreTraffic = false
+			}
+		}
+		for stepIndex, step := range routePlan {
+			if groupedHTTP && step.kind == routeMutationEnablePolicy {
+				for _, policy := range observed.policies {
+					if policy.policy.ID == step.id {
+						step.policy.position = policy.policy.Position
+						break
+					}
+				}
+			}
+			mutation := graphMutation{kind: graphRouteMutation, routeIndex: index, route: step, listenerID: listenerID, message: step.message()}
+			withdrawPolicy := step.withdrawHTTPPolicy || withdrawing &&
+				(step.kind == routeMutationDisablePolicy || step.kind == routeMutationDeleteRule || step.kind == routeMutationDeletePolicy)
+			mutation.withdrawHTTPPolicy = (scopedHTTP || groupedHTTP) && (withdrawPolicy || step.kind == routeMutationDisableMember)
+			switch {
+			case step.kind == routeMutationDisableMember:
+				if observed.backendProvisioningIssue(true, true) != "" {
+					continue
+				}
+				if step.retry {
+					memberDisableRetries = append(memberDisableRetries, mutation)
+				} else {
+					memberDisables = append(memberDisables, mutation)
+				}
+			case withdrawPolicy && step.kind == routeMutationDisablePolicy:
+				if step.retry {
+					deleteDisableRetries = append(deleteDisableRetries, mutation)
+				} else {
+					deleteDisables = append(deleteDisables, mutation)
+				}
+			case withdrawing || step.withdrawHTTPPolicy:
+				if policyPending[observedPort] {
+					routeResult.Outcome = p.progressingOutcome("Waiting for Octavia L7 policy or rule provisioning before cleanup")
+				} else if backendIssue != "" && (step.kind == routeMutationDeleteMember || step.kind == routeMutationDeleteMonitor || step.kind == routeMutationDeletePool) {
+					routeResult.Outcome = p.progressingOutcome(backendIssue)
+				} else {
+					deletions = append(deletions, mutation)
+				}
+			case step.kind == routeMutationDisablePolicy:
+				disables = append(disables, mutation)
+			case groupedHTTP && step.kind == routeMutationUpdateMember && step.retry:
+				// A granted backend can repair an owned member left ERROR
+				// by an earlier disable or a failed re-enable. Other backend
+				// changes still wait for the pending mutation to settle.
+				if observed.backendProvisioningIssue(true, true) == "" {
+					ensures = append(ensures, mutation)
+				}
+			case ensureHold != "":
+				continue
+			case route.redirect && step.kind == routeMutationEnablePolicy && (holdRedirectEnable[port] || holdPolicyOrder[port]):
+				routeResult.Outcome = p.progressingOutcome("Waiting for verified HTTP forwarding policies before enabling the redirect")
+			case groupedHTTP && stepIndex != 0:
+				// Only the first actionable change in this backend is eligible
+				// for global ordering. Later changes may depend on it.
+				continue
+			case !groupedHTTP && holdPolicyOrder[port] && (isHTTPPolicyPositionChange(step.kind) || step.kind == routeMutationEnablePolicy):
+				routeResult.Outcome = p.progressingOutcome("Waiting for the HTTPRoute policy order")
+			case groupedHTTP && (step.kind == routeMutationCreatePolicy && step.policy.position > policyCount[port]+1 ||
+				step.kind == routeMutationMovePolicy && step.policy.position > policyCount[port]):
+				routeResult.Outcome = p.progressingOutcome("Waiting for the HTTPRoute policy order")
+			default:
 				ensures = append(ensures, mutation)
 			}
 		}
-		result.Routes = append(result.Routes, cloud.RouteGraphResult{Identity: route.spec.Identity, Result: routeResult})
+		routeResults = append(routeResults, cloud.RouteGraphResult{Identity: route.spec.Identity, Result: routeResult})
 		if routeResult.Outcome.State == cloud.OutcomeProgressing {
 			result.Outcome = routeResult.Outcome
 		}
 	}
+	result.Routes = routeResults
+	// A failed teardown for one route must never leave another revoked route
+	// forwarding. Close all actionable policies, including fresh disables ahead
+	// of retries for previously failed disables, before touching descendants.
+	if scopedHTTP || groupedHTTP {
+		// Prioritize verified withdrawals even when earlier prerequisites need
+		// repair. A same-predicate handover keeps its old policy eligible only
+		// after the new enabled policy and its backend have been read back.
+		for _, steps := range [][]graphMutation{memberDisables, deleteDisables, memberDisableRetries, deleteDisableRetries, deletions} {
+			for _, step := range steps {
+				if step.withdrawHTTPPolicy {
+					result.Outcome = p.progressingOutcome(step.message)
+					return []graphMutation{step}, result, nil
+				}
+			}
+		}
+	}
+	plan = append(plan, deleteDisables...)
+	plan = append(plan, deleteDisableRetries...)
 	plan = append(plan, deletions...)
+	slices.SortStableFunc(staging, func(a, b graphMutation) int { return cmp.Compare(a.route.policy.position, b.route.policy.position) })
+	plan = append(plan, staging...)
+	plan = append(plan, disables...)
+	plan = append(plan, listenerChanges...)
+	// Ensured routes are ranked, and each route's policies are ordered within
+	// its rank. Each new call refreshes the list after Octavia shifts positions.
+	// Filling this prefix first keeps inserts and moves within the current list.
+	if groupedHTTP {
+		ensures = slices.DeleteFunc(ensures, func(step graphMutation) bool {
+			port := scopedHTTPRoutePort(desired.routes[step.routeIndex])
+			if handovers.ports[port] && isHTTPPolicyMutation(step.route.kind) {
+				return true
+			}
+			switch step.route.kind {
+			case routeMutationEnablePolicy:
+				return holdPolicyEnable[port] || holdPolicyOrder[port]
+			case routeMutationMovePolicy, routeMutationCreatePolicy:
+				return holdPolicyOrder[port]
+			default:
+				return false
+			}
+		})
+		orderHTTPBackendMutations(ensures)
+	}
 	plan = append(plan, ensures...)
 	if canRestoreTraffic {
-		restore, err := buildGatewayTrafficRestorationPlan(desired, actual)
+		var restore []graphMutation
+		var err error
+		if scopedHTTP {
+			restore, err = buildScopedHTTPTrafficRestorationPlan(desired, actual)
+		} else {
+			restore, err = buildGatewayTrafficRestorationPlan(desired, actual)
+		}
 		if err != nil {
 			return nil, result, err
 		}
@@ -126,11 +390,57 @@ func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual obs
 	return plan, result, nil
 }
 
+func httpPolicyTransition(desired desiredGatewayGraph, actual observedGatewayGraph) string {
+	if desired.spec.Gateway.Disposition != cloud.GraphEnsure || actual.protocol != cloud.ListenerProtocolHTTP || actual.listener == nil {
+		return ""
+	}
+	if hasHTTPRouteParts(desired, actual) {
+		desired, actual, _ = httpPlanningParts(desired, actual)
+	}
+	for index, node := range desired.spec.Routes {
+		if node.WaitForHTTPPolicyRemoval || node.Disposition == cloud.GraphDelete {
+			if index >= len(actual.routes) || len(actual.routes[index].policies) != 0 {
+				return "Waiting for outdated HTTP policy removal"
+			}
+		}
+		if node.Disposition == cloud.GraphEnsure && index < len(actual.routes) {
+			for _, policy := range actual.routes[index].policies {
+				if policyNeedsHostnameUpdate(desired.routes[index], policy) {
+					return "Waiting for updated HTTP hostname rules"
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func observedRouteDeleteCompletions(desired desiredGatewayGraph, actual observedGatewayGraph) []cloud.RouteGraphResult {
+	if desired.spec.Gateway.Disposition == cloud.GraphDelete || actual.loadBalancer != nil && len(actual.routes) != len(desired.routes) {
+		return nil
+	}
+	var completed []cloud.RouteGraphResult
+	for index, node := range desired.spec.Routes {
+		if node.Disposition != cloud.GraphDelete {
+			continue
+		}
+		if index < len(actual.routes) && (actual.routes[index].pool != nil || len(actual.routes[index].policies) != 0 || len(actual.routes[index].httpParts) != 0) {
+			continue
+		}
+		// Inventory was either completely observed or the parent was absent.
+		completed = append(completed, cloud.RouteGraphResult{Identity: node.Spec.Identity, Result: cloud.RouteReadyResult(cloud.RouteState{})})
+	}
+	return completed
+}
+
 func buildGatewayPrerequisitePlan(desired desiredGatewayGraph, actual observedGatewayGraph) ([]graphMutation, error) {
 	if desired.spec.Gateway.Disposition != cloud.GraphEnsure {
 		return nil, nil
 	}
 	if actual.loadBalancer == nil {
+		if actual.scoped && actual.protocol == cloud.ListenerProtocolHTTP &&
+			!slices.ContainsFunc(desired.spec.Gateway.Spec.ScopedListeners, hasAuthorizedListener) {
+			return nil, nil
+		}
 		return []graphMutation{{kind: graphCreateLoadBalancer, message: "Created Octavia load balancer"}}, nil
 	}
 	plan := make([]graphMutation, 0)
@@ -138,31 +448,32 @@ func buildGatewayPrerequisitePlan(desired desiredGatewayGraph, actual observedGa
 	if actual.floatingIP != nil && networkID != "" && actual.floatingIP.FloatingNetworkID != networkID {
 		return nil, fmt.Errorf("%w: Gateway Floating IP network differs from its binding", cloud.ErrOwnershipConflict)
 	}
+	if actual.listener != nil && actual.listener.DefaultPoolID != "" && !usesDefaultPool(actual.protocol) {
+		// Octavia may return a cleared field before Amphora applies it. Keep the
+		// frontend closed across that pending update so readback alone cannot
+		// mark the Gateway programmed before the data plane has changed.
+		if actual.loadBalancer.AdminStateUp && actual.listener.AdminStateUp {
+			return []graphMutation{{kind: graphDisableListener, message: "Disabling Octavia listener before clearing its default pool"}}, nil
+		}
+		return []graphMutation{{kind: graphClearListenerDefaultPool, message: "Clearing unexpected Octavia listener default pool"}}, nil
+	}
 	if networkID == "" && actual.floatingIP != nil {
 		plan = append(plan, graphMutation{kind: graphDeleteFloatingIP, message: "Removed a no-longer-configured Floating IP"})
 	}
-	if actual.listener == nil {
+	if actual.listener == nil && !actual.scoped {
 		plan = append(plan, graphMutation{kind: graphCreateListener, message: "Created Octavia listener"})
 	}
 	return plan, nil
 }
 
 func buildGatewayTrafficRestorationPlan(desired desiredGatewayGraph, actual observedGatewayGraph) ([]graphMutation, error) {
-	if desired.spec.Gateway.Disposition != cloud.GraphEnsure || actual.loadBalancer == nil || actual.listener == nil {
+	if desired.spec.Gateway.Disposition != cloud.GraphEnsure || actual.loadBalancer == nil || actual.listener == nil ||
+		actual.listener.DefaultPoolID != "" && !usesDefaultPool(actual.protocol) {
 		return nil, nil
 	}
-	var plan []graphMutation
-	// Restoring an external address also restores traffic. Keep the same
-	// complete-fragment validation boundary as administrative repair.
-	if desired.spec.Gateway.Spec.ExternalNetworkID != "" && (actual.floatingIP == nil || actual.floatingIP.PortID == "") {
-		if actual.state.VIPPortID == "" || actual.state.VIPAddress == "" {
-			return nil, fmt.Errorf("%w: Gateway load balancer has no complete VIP association", cloud.ErrOwnershipConflict)
-		}
-		mutation := graphMutation{kind: graphCreateFloatingIP, message: "Allocated Floating IP"}
-		if actual.floatingIP != nil {
-			mutation = graphMutation{kind: graphAssociateFloatingIP, message: "Restored Floating IP association"}
-		}
-		plan = append(plan, mutation)
+	plan, err := buildGatewayAddressRestorationPlan(desired.spec.Gateway.Spec.ExternalNetworkID, actual)
+	if err != nil {
+		return nil, err
 	}
 	if !actual.listener.AdminStateUp {
 		plan = append(plan, graphMutation{kind: graphEnableListener, message: "Enabled Octavia listener after validating the Gateway graph"})
@@ -173,7 +484,40 @@ func buildGatewayTrafficRestorationPlan(desired desiredGatewayGraph, actual obse
 	return plan, nil
 }
 
+// Restoring an external address restores traffic and requires a complete VIP association.
+func buildGatewayAddressRestorationPlan(networkID string, actual observedGatewayGraph) ([]graphMutation, error) {
+	if networkID == "" || actual.floatingIP != nil && actual.floatingIP.PortID != "" {
+		return nil, nil
+	}
+	if actual.state.VIPPortID == "" || actual.state.VIPAddress == "" {
+		return nil, fmt.Errorf("%w: Gateway load balancer has no complete VIP association", cloud.ErrOwnershipConflict)
+	}
+	mutation := graphMutation{kind: graphCreateFloatingIP, message: "Allocated Floating IP"}
+	if actual.floatingIP != nil {
+		mutation = graphMutation{kind: graphAssociateFloatingIP, message: "Restored Floating IP association"}
+	}
+	return []graphMutation{mutation}, nil
+}
+
 func gatewayGraphDeletionPlan(actual observedGatewayGraph) []graphMutation {
+	if actual.scoped {
+		for _, listener := range actual.scopedListeners {
+			if listener.DefaultPoolID != "" {
+				mutation := clearListenerDefaultPool(actual.protocol)
+				mutation.listenerID = listener.ID
+				return []graphMutation{mutation}
+			}
+		}
+	}
+	if listener := actual.deletion.defaultPoolListener; listener != nil && listener.DefaultPoolID != "" {
+		return []graphMutation{clearListenerDefaultPool(listener.Protocol)}
+	}
+	// Removing a predicate from a serving L7 policy can widen its match.
+	// Close all frontends first. The next pass waits for ACTIVE and revalidates
+	// the graph before changing any of its L7 resources.
+	if actual.loadBalancer != nil && actual.loadBalancer.AdminStateUp && len(actual.deletion.routes) > 0 {
+		return []graphMutation{{kind: graphDisableLoadBalancer, message: "Disabling Octavia load balancer before removing routes"}}
+	}
 	plan := make([]graphMutation, 0)
 	for _, step := range actual.deletion.orderedSteps() {
 		plan = append(plan, graphMutation{kind: graphDeleteChild, deletion: step, message: fmt.Sprintf("Deleting controller-owned %s", step.resource)})
@@ -210,6 +554,10 @@ func routeStateFromObservation(actual observedRouteGraph) cloud.RouteState {
 func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, step graphMutation) error {
 	var err error
 	spec := desired.spec.Gateway.Spec
+	listenerID := step.listenerID
+	if listenerID == "" {
+		listenerID = actual.state.ListenerID
+	}
 	switch step.kind {
 	case graphCreateLoadBalancer:
 		tags, tagErr := desired.identity.GatewayTags(roleLoadBalancer)
@@ -218,7 +566,7 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 		}
 		created, createErr := p.octavia.CreateLoadBalancer(ctx, octavia.CreateLoadBalancerOpts{CreateOpts: loadbalancers.CreateOpts{
 			Name: resourceName(desired.spec.Identity, roleLoadBalancer), Description: desired.identity.Description(roleLoadBalancer),
-			VipSubnetID: spec.VIPSubnetID, Provider: spec.Provider, FlavorID: spec.FlavorID, AvailabilityZone: spec.AvailabilityZone,
+			VipSubnetID: spec.VIPSubnetID, VipAddress: spec.RequestedVIPAddress, Provider: spec.Provider, FlavorID: spec.FlavorID, AvailabilityZone: spec.AvailabilityZone,
 			AdminStateUp: boolPointer(true), Tags: tags,
 		}, VIPSecurityGroupIDs: spec.VIPSecurityGroupIDs})
 		err = createErr
@@ -247,18 +595,43 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 		if tagErr != nil {
 			return tagErr
 		}
+		port, name := spec.ListenerPort, spec.ListenerName
+		protocol := cloud.NormalizeListenerProtocol(spec.ListenerProtocol)
+		enabled := true
+		certificateRef := ""
+		if step.scopedListener.Port != 0 {
+			port, name = step.scopedListener.Port, step.scopedListener.Name
+			if tls := step.scopedListener.TLS; tls != nil {
+				protocol, enabled, certificateRef = terminatedHTTPS, false, tls.CertificateRef
+			}
+			tags = append(tags, scopedPortTag(protocol, port))
+		}
 		_, err = p.octavia.CreateListener(ctx, listeners.CreateOpts{
-			LoadbalancerID: actual.state.LoadBalancerID, Protocol: listeners.ProtocolHTTP, ProtocolPort: spec.ListenerPort,
-			Name: spec.ListenerName, Description: desired.identity.Description(roleListener), AdminStateUp: boolPointer(true), Tags: tags,
+			LoadbalancerID: actual.state.LoadBalancerID, Protocol: listeners.Protocol(protocol), ProtocolPort: port,
+			Name: name, Description: desired.identity.Description(roleListener), AdminStateUp: boolPointer(enabled),
+			DefaultTlsContainerRef: certificateRef, Tags: tags,
 		})
+	case graphUpdateListenerCertificate:
+		ref := step.scopedListener.TLS.CertificateRef
+		_, err = p.octavia.UpdateListener(ctx, listenerID, listeners.UpdateOpts{DefaultTlsContainerRef: &ref})
+	case graphClearListenerDefaultPool, graphSetListenerDefaultPool:
+		// Gophercloud encodes an explicit empty DefaultPoolID as JSON null.
+		_, err = p.octavia.UpdateListener(ctx, listenerID, listeners.UpdateOpts{DefaultPoolID: &step.poolID})
 	case graphRouteMutation:
 		route := desired.routes[step.routeIndex]
+		if step.backendKey != "" {
+			if index := slices.IndexFunc(route.httpParts, func(backend desiredRoute) bool { return backend.backendKey == step.backendKey }); index != -1 {
+				route = route.httpParts[index]
+			}
+		}
 		route.spec.Gateway = actual.state
+		route.spec.Gateway.ListenerID = listenerID
 		return p.executeRouteMutation(ctx, route, step.route)
-	case graphEnableListener:
-		return p.enableListener(ctx, actual.state.ListenerID)
-	case graphEnableLoadBalancer:
-		return p.enableLoadBalancer(ctx, actual.state.LoadBalancerID)
+	case graphEnableListener, graphDisableListener:
+		enabled := step.kind == graphEnableListener
+		_, err = p.octavia.UpdateListener(ctx, listenerID, listeners.UpdateOpts{AdminStateUp: boolPointer(enabled)})
+	case graphEnableLoadBalancer, graphDisableLoadBalancer:
+		return p.setLoadBalancerAdminState(ctx, actual.state.LoadBalancerID, step.kind == graphEnableLoadBalancer)
 	case graphDeleteChild:
 		return p.executeGatewayDeletionStep(ctx, step.deletion)
 	case graphDeleteLoadBalancer:
@@ -270,7 +643,20 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 		return fmt.Errorf("unsupported graph mutation %d", step.kind)
 	}
 	if err != nil {
-		return fmt.Errorf("reconcile Gateway graph: %w", classifyOctaviaMutationError(err))
+		err = classifyOctaviaMutationError(err)
+		if step.redactTLSError {
+			// Octavia faults may echo Barbican references. Surface the
+			// classification without publishing the provider's raw body.
+			if errors.Is(err, context.Canceled) {
+				return context.Canceled
+			}
+			category, ok := cloud.ErrorCategoryOf(classifyOpenStackError(err))
+			if !ok {
+				category = cloud.ErrorCategoryResourceFailure
+			}
+			return cloud.NewProviderError(category, errors.New(step.message))
+		}
+		return fmt.Errorf("reconcile Gateway graph: %w", err)
 	}
 	return nil
 }

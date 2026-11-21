@@ -1,0 +1,84 @@
+{
+  "controllerSource": "ce6f51797fb7c31a63c1f63577cb6938ecaff618",
+  "gatewayAPI": "v1.7.0",
+  "gatewayAPISource": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "kubernetes": "1.36.2",
+  "go": "go1.27.4",
+  "channel": "experimental",
+  "originalLogSHA256": "7285a9be2dcbd31425c231b9f0f576d8689592913326a54ff5c1d70755134654",
+  "watchGateway": {
+    "controllerName": "status.example.com/gateway-api-openstack",
+    "generation": 2,
+    "listenerPort": 81,
+    "programmed": "True"
+  },
+  "forcedGraph": {
+    "equalBeforeAfter": true,
+    "beforePort": 81,
+    "afterPort": 81,
+    "beforeRoutes": 0,
+    "afterRoutes": 0
+  },
+  "objects": [
+    {
+      "generation": 1,
+      "kind": "XBackendTrafficPolicy",
+      "spec": {
+        "retryConstraint": {
+          "budget": {
+            "interval": "10s",
+            "percent": 20
+          },
+          "minRetryRate": {
+            "count": 10,
+            "interval": "1s"
+          }
+        },
+        "targetRefs": [
+          {
+            "group": "",
+            "kind": "Service",
+            "name": "backend"
+          }
+        ]
+      },
+      "status": null
+    },
+    {
+      "generation": 1,
+      "kind": "XMesh",
+      "spec": {
+        "controllerName": "status.example.com/gateway-api-openstack"
+      },
+      "status": {
+        "conditions": [
+          {
+            "lastTransitionTime": "1970-01-01T00:00:00Z",
+            "message": "Waiting for controller",
+            "reason": "Pending",
+            "status": "Unknown",
+            "type": "Accepted"
+          }
+        ]
+      }
+    },
+    {
+      "generation": 1,
+      "kind": "XTelemetryPolicy",
+      "spec": {
+        "targetRefs": [
+          {
+            "group": "gateway.networking.k8s.io",
+            "kind": "Gateway",
+            "name": "edge"
+          }
+        ],
+        "tracing": {
+          "mode": "Disabled"
+        }
+      },
+      "status": null
+    }
+  ],
+  "traffic": "none: no data-plane, provider, mesh or collector traffic"
+}

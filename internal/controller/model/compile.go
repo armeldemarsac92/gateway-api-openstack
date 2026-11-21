@@ -32,7 +32,7 @@ func Compile(input Input) (Gateway, error) {
 	if input.Gateway == nil {
 		return Gateway{}, errors.New("gateway input is required")
 	}
-	result := Gateway{Source: source(input.Gateway), Listeners: compileListeners(input.Gateway)}
+	result := Gateway{Source: source(input.Gateway), Listeners: compileListeners(input.Gateway, input.OperatorHTTPS)}
 	if input.Gateway.Spec.AllowedListeners != nil || input.Gateway.Spec.TLS != nil {
 		result.Diagnostics = append(result.Diagnostics, Diagnostic{
 			Condition: string(gatewayv1.GatewayConditionAccepted), Reason: string(gatewayv1.GatewayReasonInvalidParameters),
@@ -77,7 +77,7 @@ func Compile(input Input) (Gateway, error) {
 	return result, nil
 }
 
-func compileListeners(gateway *gatewayv1.Gateway) []Listener {
+func compileListeners(gateway *gatewayv1.Gateway, operatorHTTPS bool) []Listener {
 	result := make([]Listener, 0, len(gateway.Spec.Listeners))
 	for _, listener := range gateway.Spec.Listeners {
 		compiled := Listener{Name: listener.Name, Port: listener.Port, Protocol: listener.Protocol}
@@ -85,12 +85,17 @@ func compileListeners(gateway *gatewayv1.Gateway) []Listener {
 			compiled.Hostname = string(*listener.Hostname)
 		}
 		switch {
-		case listener.Protocol != gatewayv1.HTTPProtocolType:
+		case listener.Filters != nil && len(listener.Filters.Requests) > 0:
+			compiled.Diagnostics = append(compiled.Diagnostics, Diagnostic{
+				Condition: string(gatewayv1.ListenerConditionAccepted), Reason: string(gatewayv1.ListenerReasonUnsupportedValue),
+				Message: "pre-routing request filters are not implemented by the HTTP compiler",
+			})
+		case listener.Protocol != gatewayv1.HTTPProtocolType && (listener.Protocol != gatewayv1.HTTPSProtocolType || !operatorHTTPS):
 			compiled.Diagnostics = append(compiled.Diagnostics, Diagnostic{
 				Condition: string(gatewayv1.ListenerConditionAccepted), Reason: string(gatewayv1.ListenerReasonUnsupportedProtocol),
 				Message: "only HTTP listeners can be resolved without certificate inputs",
 			})
-		case listener.TLS != nil:
+		case listener.Protocol == gatewayv1.HTTPProtocolType && listener.TLS != nil:
 			compiled.Diagnostics = append(compiled.Diagnostics, Diagnostic{
 				Condition: string(gatewayv1.ListenerConditionAccepted), Reason: string(gatewayv1.ListenerReasonUnsupportedValue),
 				Message: "TLS configuration is unsupported on an HTTP listener",
@@ -155,15 +160,24 @@ func compileRoute(route *gatewayv1.HTTPRoute, input Input) Route {
 	supportedRules := 0
 	for i, rule := range route.Spec.Rules {
 		compiled := Rule{Index: i, Backends: ResolveBackends(route, rule, input)}
-		if rule.Name != nil || rule.Timeouts != nil || rule.Retry != nil || rule.SessionPersistence != nil {
+		if rule.Name != nil || rule.Timeouts != nil || rule.Retry != nil || rule.SessionPersistence != nil { //nolint:staticcheck // The release still serves this deprecated Experimental field.
 			compiled.Diagnostics = append(compiled.Diagnostics, *unsupported("named rules, timeouts, retries, and session persistence are not implemented", ScopeRule))
 		}
-		for _, filter := range rule.Filters {
-			scope := ScopeRule
-			if !knownFilter(filter.Type) {
-				scope = ScopeRoute
+		if len(rule.Filters) == 1 && rule.Filters[0].Type == gatewayv1.HTTPRouteFilterRequestRedirect {
+			redirect, err := NormalizeRequestRedirect(rule)
+			if err != nil {
+				compiled.Diagnostics = append(compiled.Diagnostics, *unsupported(err.Error(), ScopeRule))
+			} else {
+				compiled.Redirect = &redirect
 			}
-			compiled.Diagnostics = append(compiled.Diagnostics, *unsupported(fmt.Sprintf("HTTPRoute filter %s requires an explicit action model before lowering", filter.Type), scope))
+		} else {
+			for _, filter := range rule.Filters {
+				scope := ScopeRule
+				if !knownFilter(filter.Type) {
+					scope = ScopeRoute
+				}
+				compiled.Diagnostics = append(compiled.Diagnostics, *unsupported(fmt.Sprintf("HTTPRoute filter %s requires an explicit action model before lowering", filter.Type), scope))
+			}
 		}
 		for _, backend := range rule.BackendRefs {
 			if len(backend.Filters) != 0 {
@@ -231,19 +245,21 @@ func populateListener(listener *Listener, routes []Route) {
 		listener.AttachedRoutes++
 		slices.Sort(hostnames)
 		hostnames = slices.Compact(hostnames)
-		for _, rule := range route.Rules {
-			// Keep matches from unsupported action rules in the logical order.
-			// Their diagnostics must block lowering rather than creating a hole
-			// that could fall through to a broader route.
-			for _, match := range rule.Matches {
-				for _, hostname := range hostnames {
+		for _, hostname := range hostnames {
+			original := matchingRouteHostname(hostname, route.Hostnames)
+			for _, rule := range route.Rules {
+				// Keep unsupported actions in the order so lowering can see their diagnostics.
+				for _, match := range rule.Matches {
 					listener.Rules = append(listener.Rules, RouteMatch{
 						Route: route.Source, RuleIndex: rule.Index, MatchIndex: match.Index,
-						Hostname: hostname, Match: match,
+						Hostname: hostname, routeHostname: original, Match: match,
 					})
 				}
 			}
 		}
 	}
 	slices.SortStableFunc(listener.Rules, compareMatches)
+	for i := range listener.Rules {
+		listener.Rules[i].Precedence = i
+	}
 }

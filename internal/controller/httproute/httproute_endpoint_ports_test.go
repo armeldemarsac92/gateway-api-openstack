@@ -28,6 +28,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/routebackend"
 )
 
 func TestNodePortEndpointSlicePortSelection(t *testing.T) {
@@ -73,20 +74,19 @@ func TestNodePortEndpointSlicePortSelection(t *testing.T) {
 					test.mutate(&service.Spec.Ports[0], slice)
 				}
 				beforeService, beforeSlice, beforeNode := service.DeepCopy(), slice.DeepCopy(), node.DeepCopy()
-				ready, err := readyBackendNodes(service, &service.Spec.Ports[0], []discoveryv1.EndpointSlice{*slice})
+				ready, diagnostic := routebackend.ReadyBackendNodes(service, &service.Spec.Ports[0], []discoveryv1.EndpointSlice{*slice})
 				if !test.ready {
-					var pending *routeBuildError
-					if !errors.As(err, &pending) || pending.kind != routeErrorPending {
-						t.Fatalf("unusable Service port produced readiness: nodes=%v error=%v", ready, err)
+					if diagnostic == nil || diagnostic.Reason != "Pending" {
+						t.Fatalf("unusable Service port produced readiness: nodes=%v error=%v", ready, diagnostic)
 					}
 				} else {
-					if err != nil {
-						t.Fatal(err)
+					if diagnostic != nil {
+						t.Fatal(diagnostic)
 					}
-					members, err := nodePortMembersForNodes(service, service.Spec.Ports[0].NodePort, corev1.NodeInternalIP, ready, []corev1.Node{*node})
+					members, diagnostic := routebackend.NodePortMembersForNodes(service, service.Spec.Ports[0].NodePort, corev1.NodeInternalIP, ready, []corev1.Node{*node})
 					want := []cloud.Member{{Address: "192.0.2.10", Port: 30080}}
-					if err != nil || !slices.Equal(members, want) {
-						t.Fatalf("members=%v error=%v, want NodePort members %v", members, err, want)
+					if diagnostic != nil || !slices.Equal(members, want) {
+						t.Fatalf("members=%v error=%v, want NodePort members %v", members, diagnostic, want)
 					}
 				}
 				if !apiequality.Semantic.DeepEqual(service, beforeService) || !apiequality.Semantic.DeepEqual(slice, beforeSlice) || !apiequality.Semantic.DeepEqual(node, beforeNode) {
@@ -116,20 +116,19 @@ func TestNodePortMembersKeepEndpointFamiliesSeparate(t *testing.T) {
 			ipv6.Name, ipv6.AddressType = "backend-ipv6", discoveryv1.AddressTypeIPv6
 			ipv4.Endpoints[0].NodeName = ptr.To("another-worker")
 			node.Status.Addresses = append(node.Status.Addresses, corev1.NodeAddress{Type: corev1.NodeInternalIP, Address: "2001:db8::10"})
-			ready, err := readyBackendNodes(service, &service.Spec.Ports[0], []discoveryv1.EndpointSlice{*ipv4, *ipv6})
-			if err != nil {
-				t.Fatal(err)
+			ready, diagnostic := routebackend.ReadyBackendNodes(service, &service.Spec.Ports[0], []discoveryv1.EndpointSlice{*ipv4, *ipv6})
+			if diagnostic != nil {
+				t.Fatal(diagnostic)
 			}
-			members, err := nodePortMembersForNodes(service, 30080, corev1.NodeInternalIP, ready, []corev1.Node{*node})
+			members, diagnostic := routebackend.NodePortMembersForNodes(service, 30080, corev1.NodeInternalIP, ready, []corev1.Node{*node})
 			if test.address == "" {
-				var pending *routeBuildError
-				if !errors.As(err, &pending) || pending.kind != routeErrorPending || len(members) != 0 {
-					t.Fatalf("mismatched address family produced members=%v error=%v", members, err)
+				if diagnostic == nil || diagnostic.Reason != "Pending" || len(members) != 0 {
+					t.Fatalf("mismatched address family produced members=%v error=%v", members, diagnostic)
 				}
 				return
 			}
-			if err != nil || len(members) != 1 || members[0].Address != test.address {
-				t.Fatalf("members=%v error=%v, want member at %s", members, err, test.address)
+			if diagnostic != nil || len(members) != 1 || members[0].Address != test.address {
+				t.Fatalf("members=%v error=%v, want member at %s", members, diagnostic, test.address)
 			}
 		})
 	}

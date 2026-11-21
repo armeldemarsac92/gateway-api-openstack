@@ -28,6 +28,7 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
+	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
 )
 
@@ -113,6 +114,43 @@ func TestReconcileGatewayGraphConvergedPassesMakeNoMutation(t *testing.T) {
 	}
 }
 
+func TestReconcileGatewayGraphRejectsUnprovenDefaultPoolBeforeReopening(t *testing.T) {
+	for _, foreignPoolVisible := range []bool{false, true} {
+		name := "unknown pool"
+		if foreignPoolVisible {
+			name = "foreign pool"
+		}
+		t.Run(name, func(t *testing.T) {
+			identity := safetyTestIdentity(t)
+			requests := &gatewayTransitionRequests{}
+			base := gatewayDriftHandler(t, requests, safetyGatewayTags(t, identity, roleLoadBalancer), nil, false, []any{map[string]any{
+				"id": "listener-1", "protocol": "HTTP", "protocol_port": 80, "admin_state_up": true,
+				"tags": safetyGatewayTags(t, identity, roleListener), "default_pool_id": "unowned-pool",
+			}})
+			handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if foreignPoolVisible && req.Method == http.MethodGet && req.URL.Path == "/lbaas/pools" {
+					requests.record(req)
+					safetyWriteJSON(t, w, map[string]any{"pools": []any{map[string]any{
+						"id": "unowned-pool", "project_id": "project-a", "tags": []string{"kube_service"},
+					}}})
+					return
+				}
+				base.ServeHTTP(w, req)
+			})
+			provider := completeGraphProvider(t, handler, requests)
+			spec := completeGraphSpec(identity)
+			spec.Routes = nil
+			result, err := provider.ReconcileGatewayGraph(t.Context(), spec)
+			if !errors.Is(err, cloud.ErrOwnershipConflict) || result.Gateway.Outcome.State == cloud.OutcomeReady {
+				t.Fatalf("reconcile = %#v, %v, want ownership conflict and Gateway unready", result, err)
+			}
+			if writes := requests.mutationPaths(); len(writes) != 0 {
+				t.Fatalf("mutation with an unproven default pool = %v, want none", writes)
+			}
+		})
+	}
+}
+
 func TestReconcileGatewayGraphRejectsUnaccountedChildrenBeforeGatewayRepair(t *testing.T) {
 	identity := safetyTestIdentity(t)
 	requests := &gatewayTransitionRequests{}
@@ -167,6 +205,53 @@ func TestReconcileGatewayGraphPreserveCannotRestoreTraffic(t *testing.T) {
 	}
 	if got := requests.mutationPaths(); len(got) != 0 {
 		t.Fatalf("preserved fragment authorized parent repair: %v", got)
+	}
+}
+
+func TestReconcileGatewayGraphDefersReadinessUntilOutdatedHTTPPolicyIsRemoved(t *testing.T) {
+	identity := safetyTestIdentity(t)
+	requests := &gatewayTransitionRequests{}
+	spec := completeGraphSpec(identity)
+	spec.Routes[0].Disposition = cloud.GraphPreserve
+	spec.Routes[0].WaitForHTTPPolicyRemoval = true
+	policyRemoved := false
+	base := convergedRouteGraphHandler(t, requests, identity, true, true)
+	handler := http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if policyRemoved && request.Method == http.MethodGet && request.URL.Path == "/lbaas/l7policies" {
+			requests.record(request)
+			safetyWriteJSON(t, w, map[string]any{"l7policies": []any{}})
+			return
+		}
+		if request.Method == http.MethodPut && request.URL.Path == "/lbaas/l7policies/policy-1" {
+			requests.record(request)
+			safetyWriteJSON(t, w, map[string]any{"l7policy": map[string]any{"id": "policy-1"}})
+			return
+		}
+		base.ServeHTTP(w, request)
+	})
+	provider := completeGraphProvider(t, handler, requests)
+	result, err := provider.ReconcileGatewayGraph(t.Context(), spec)
+	if err != nil || result.Outcome.State != cloud.OutcomeProgressing || result.Gateway.Outcome.State != cloud.OutcomeProgressing {
+		t.Fatalf("active outdated policy certified Gateway readiness: %#v, %v", result, err)
+	}
+	policyRemoved = true
+	result, err = provider.ReconcileGatewayGraph(t.Context(), spec)
+	if err != nil || result.Gateway.Outcome.State != cloud.OutcomeReady {
+		t.Fatalf("Gateway retained a hold after policy removal: %#v, %v", result, err)
+	}
+	if got := requests.mutationPaths(); len(got) != 0 {
+		t.Fatalf("preservation authorized mutations: %v", got)
+	}
+
+	spec.Routes[0].Disposition = cloud.GraphDelete
+	spec.Routes[0].WaitForHTTPPolicyRemoval = false
+	policyRemoved = false
+	result, err = provider.ReconcileGatewayGraph(t.Context(), spec)
+	if err != nil || result.Gateway.Outcome.State != cloud.OutcomeProgressing {
+		t.Fatalf("detach checkpoint prematurely certified Gateway readiness: %#v, %v", result, err)
+	}
+	if got, want := requests.mutationPaths(), []string{"/lbaas/l7policies/policy-1"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("first mutation after detach checkpoint = %v, want %v", got, want)
 	}
 }
 
@@ -331,6 +416,279 @@ func TestGatewayGraphPlanDetachesBeforeEnsuringAndRestoresParentsLast(t *testing
 	}
 }
 
+func TestGatewayGraphPlanDisablesEveryRevokedRouteBeforeTeardown(t *testing.T) {
+	first, firstObserved := convergedRoutePlanFixture()
+	second, secondObserved := convergedRoutePlanFixture()
+	secondObserved.policies[0].policy.ID = "policy-2"
+	secondObserved.policies[0].policy.Position = 2
+	desired := desiredGatewayGraph{spec: cloud.GatewayGraphSpec{
+		Gateway: cloud.GatewayGraphNode{Disposition: cloud.GraphPreserve},
+		Routes:  []cloud.RouteGraphNode{{Disposition: cloud.GraphDelete}, {Disposition: cloud.GraphDelete}},
+	}, routes: []desiredRoute{first, second}}
+	actual := observedGatewayGraph{
+		loadBalancer: &octavia.LoadBalancer{}, listener: &listeners.Listener{AdminStateUp: true},
+		routes: []observedRouteGraph{firstObserved, secondObserved},
+	}
+	actual.loadBalancer.AdminStateUp = true
+	for _, status := range []string{"ACTIVE", "PENDING_UPDATE", "ERROR"} {
+		t.Run(status, func(t *testing.T) {
+			policy := &firstObserved.policies[0].policy
+			policy.AdminStateUp, policy.ProvisioningStatus = false, status
+			plan, _, err := (&Provider{}).buildGatewayGraphPlan(desired, actual)
+			if err != nil || len(plan) == 0 || plan[0].route.kind != routeMutationDisablePolicy || plan[0].route.id != "policy-2" {
+				t.Fatalf("plan = %#v, %v, want fresh disable for policy-2 first", plan, err)
+			}
+		})
+	}
+}
+
+func TestGatewayGraphPlanReportsBackendsPerRouteBeforeEnabling(t *testing.T) {
+	first, firstObserved := convergedRoutePlanFixture()
+	second, secondObserved := convergedRoutePlanFixture()
+	firstObserved.policies[0].policy.AdminStateUp = false
+	second.policies[0].position = 2
+	secondObserved.policies[0].policy.Position = 2
+	desired := desiredGatewayGraph{spec: cloud.GatewayGraphSpec{
+		Gateway: cloud.GatewayGraphNode{Disposition: cloud.GraphEnsure},
+		Routes:  []cloud.RouteGraphNode{{Disposition: cloud.GraphEnsure}, {Disposition: cloud.GraphEnsure}},
+	}, routes: []desiredRoute{first, second}}
+	actual := observedGatewayGraph{
+		loadBalancer: &octavia.LoadBalancer{}, listener: &listeners.Listener{AdminStateUp: true},
+		routes: []observedRouteGraph{firstObserved, secondObserved},
+	}
+	actual.loadBalancer.AdminStateUp = true
+	for _, childStatus := range []*string{&firstObserved.pool.ProvisioningStatus, &firstObserved.members[0].ProvisioningStatus, &firstObserved.monitor.ProvisioningStatus} {
+		for _, status := range []string{"PENDING_UPDATE", "ERROR"} {
+			*childStatus = status
+			plan, result, err := (&Provider{}).buildGatewayGraphPlan(desired, actual)
+			if err != nil || len(plan) != 0 || result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing || result.Routes[1].Result.Outcome.State != cloud.OutcomeReady {
+				t.Fatalf("backend status %s produced %#v, %#v, %v", status, plan, result, err)
+			}
+		}
+		*childStatus = "ACTIVE"
+	}
+	plan, _, err := (&Provider{}).buildGatewayGraphPlan(desired, actual)
+	if err != nil || len(plan) == 0 || plan[0].route.kind != routeMutationEnablePolicy {
+		t.Fatalf("active backend produced %#v, %v, want enable", plan, err)
+	}
+}
+
+func TestReconcileGatewayGraphReturnsAbsentRouteDuringSiblingTeardownFailure(t *testing.T) {
+	identity := safetyTestIdentity(t)
+	requests := &gatewayTransitionRequests{}
+	base := convergedRouteGraphHandler(t, requests, identity, true, true)
+	spec := completeGraphSpec(identity)
+	spec.Gateway.Disposition = cloud.GraphPreserve
+	spec.Routes[0].Disposition = cloud.GraphDelete
+	absent := identity.Value()
+	absent.RouteName, absent.RouteUID = "already-absent", "already-absent-uid"
+	spec.Routes = append(spec.Routes, cloud.RouteGraphNode{Disposition: cloud.GraphDelete, Spec: cloud.RouteSpec{Identity: absent}})
+	handler := http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		switch {
+		case request.Method == http.MethodGet && request.URL.Path == "/lbaas/l7policies":
+			requests.record(request)
+			safetyWriteJSON(t, w, map[string]any{"l7policies": []any{map[string]any{
+				"id": "policy-1", "listener_id": "listener-1", "action": "REDIRECT_TO_POOL",
+				"redirect_pool_id": "pool-1", "position": 1, "admin_state_up": false,
+				"provisioning_status": "ACTIVE", "tags": safetyRouteTags(t, identity, rolePolicyExact),
+			}}})
+		case request.Method == http.MethodDelete && request.URL.Path == "/lbaas/l7policies/policy-1/rules/rule-host":
+			requests.record(request)
+			http.Error(w, "Octavia could not delete the rule", http.StatusServiceUnavailable)
+		default:
+			base.ServeHTTP(w, request)
+		}
+	})
+	result, err := completeGraphProvider(t, handler, requests).ReconcileGatewayGraph(t.Context(), spec)
+	var graphErr *cloud.GraphError
+	if !errors.As(err, &graphErr) || graphErr.Identity != identity.Value() {
+		t.Fatalf("error = %v, want the failing route identity", err)
+	}
+	for _, outcome := range result.Routes {
+		if outcome.Identity == absent && reflect.DeepEqual(outcome.Result, cloud.RouteReadyResult(cloud.RouteState{})) {
+			return
+		}
+	}
+	t.Fatalf("route results = %#v, missing confirmed absence for %s", result.Routes, absent.RouteUID)
+}
+
+func TestBuildDesiredGatewayGraphAllocatesSharedListenerPolicyPositions(t *testing.T) {
+	identity := safetyTestIdentity(t)
+	spec := completeGraphSpec(identity)
+	spec.Routes[0].Spec.Identity.RouteName = "alphabetically-first"
+	spec.Routes[0].Spec.Precedence = 4
+	spec.Routes[0].Spec.Hostname = "bar.com"
+	first := spec.Routes[0]
+	first.Spec.Identity.RouteName, first.Spec.Identity.RouteUID = "higher-priority", "higher-priority-uid"
+	first.Spec.Precedence, first.Spec.Hostname = 1, "foo.com"
+	first.Spec.PathType, first.Spec.PathValue = cloud.PathMatchPrefix, "/first"
+	spec.Routes = append(spec.Routes, first)
+	provider := &Provider{projectID: "project-a"}
+	desired, err := provider.buildDesiredGatewayGraph(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := desired.routes[0].spec.Identity.RouteUID; got != first.Spec.Identity.RouteUID {
+		t.Fatalf("first route = %s, want %s", got, first.Spec.Identity.RouteUID)
+	}
+	var positions []int32
+	wantHosts := []string{`^foo\.com(:[0-9]+)?$`, `^bar\.com(:[0-9]+)?$`}
+	for i, route := range desired.routes {
+		for _, policy := range route.policies {
+			positions = append(positions, policy.position)
+			rules := rulesFor(policy, route.hostnameRuleValue)
+			if len(rules) != 2 || rules[1].ruleType != l7policies.TypeHostName ||
+				rules[1].compareType != l7policies.CompareTypeRegex || rules[1].value != wantHosts[i] {
+				t.Fatalf("route %s policy %d lacks its exact host predicate: %#v", route.spec.Identity.RouteUID, policy.position, rules)
+			}
+		}
+	}
+	if want := []int32{1, 2, 3}; !reflect.DeepEqual(positions, want) {
+		t.Fatalf("policy positions = %v, want %v", positions, want)
+	}
+	spec.Routes[0].Spec.Precedence = first.Spec.Precedence
+	if _, err := provider.buildDesiredGatewayGraph(spec); err == nil {
+		t.Fatal("accepted two ensured routes with equal precedence")
+	}
+}
+
+func TestGatewayGraphPlanWaitsForChangedHTTPHostname(t *testing.T) {
+	route, observed := convergedRoutePlanFixture()
+	route.hostnameRuleValue = "^new[.]example[.]test$"
+	policy := &observed.policies[0]
+	policy.rules = append(policy.rules, observedRouteRule{
+		role: roleRuleHost,
+		rule: l7policies.Rule{
+			ID: "rule-host", RuleType: string(l7policies.TypeHostName), CompareType: string(l7policies.CompareTypeRegex),
+			Value: "^old[.]example[.]test$", AdminStateUp: true,
+		},
+	})
+	peer, observedPeer := convergedRoutePlanFixture()
+	peer.policies[0].position = 2
+	observedPeer.policies[0].policy.Position = 2
+	desired := desiredGatewayGraph{spec: cloud.GatewayGraphSpec{
+		Gateway: cloud.GatewayGraphNode{Disposition: cloud.GraphEnsure},
+		Routes:  []cloud.RouteGraphNode{{Disposition: cloud.GraphEnsure}, {Disposition: cloud.GraphEnsure}},
+	}, routes: []desiredRoute{route, peer}}
+	actual := observedGatewayGraph{
+		protocol:     cloud.ListenerProtocolHTTP,
+		loadBalancer: &octavia.LoadBalancer{}, listener: &listeners.Listener{AdminStateUp: true},
+		routes: []observedRouteGraph{observed, observedPeer},
+	}
+	actual.loadBalancer.AdminStateUp = true
+	provider := &Provider{}
+	plan, result, err := provider.buildGatewayGraphPlan(desired, actual)
+	if err != nil || len(plan) == 0 || plan[0].route.kind != routeMutationDisablePolicy ||
+		result.Gateway.Outcome.State != cloud.OutcomeProgressing || result.Routes[1].Result.Outcome.State != cloud.OutcomeReady {
+		t.Fatalf("hostname change = plan %v, result %#v, error %v", plan, result, err)
+	}
+	policy.rules[1].rule.Value = route.hostnameRuleValue
+	policy.rules[1].rule.ProvisioningStatus = "PENDING_UPDATE"
+	plan, result, err = provider.buildGatewayGraphPlan(desired, actual)
+	if err != nil || len(plan) != 0 || result.Gateway.Outcome.State != cloud.OutcomeProgressing {
+		t.Fatalf("unapplied hostname = plan %v, result %#v, error %v", plan, result, err)
+	}
+	policy.rules[1].rule.ProvisioningStatus = "ACTIVE"
+	plan, result, err = provider.buildGatewayGraphPlan(desired, actual)
+	if err != nil || len(plan) != 0 || result.Gateway.Outcome.State != cloud.OutcomeReady {
+		t.Fatalf("converged hostname = plan %v, result %#v, error %v", plan, result, err)
+	}
+}
+
+func TestGatewayGraphPlanReordersEnabledPoliciesWithoutDisablingThem(t *testing.T) {
+	first, firstObserved := convergedRoutePlanFixture()
+	second, secondObserved := convergedRoutePlanFixture()
+	firstObserved.policies[0].policy.Position = 2
+	second.policies[0].position = 2
+	secondObserved.pool.ID = "pool-2"
+	secondObserved.policies[0].policy.ID = "policy-2"
+	secondObserved.policies[0].policy.RedirectPoolID = "pool-2"
+	desired := desiredGatewayGraph{spec: cloud.GatewayGraphSpec{
+		Gateway: cloud.GatewayGraphNode{Disposition: cloud.GraphEnsure},
+		Routes:  []cloud.RouteGraphNode{{Disposition: cloud.GraphEnsure}, {Disposition: cloud.GraphEnsure}},
+	}, routes: []desiredRoute{first, second}}
+	actual := observedGatewayGraph{
+		loadBalancer: &octavia.LoadBalancer{}, listener: &listeners.Listener{AdminStateUp: true},
+		routes: []observedRouteGraph{firstObserved, secondObserved},
+	}
+	actual.loadBalancer.AdminStateUp = true
+	provider := &Provider{}
+	plan, _, err := provider.buildGatewayGraphPlan(desired, actual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan) == 0 || plan[0].kind != graphRouteMutation || plan[0].routeIndex != 0 ||
+		plan[0].route.kind != routeMutationMovePolicy || plan[0].route.id != "policy-1" || plan[0].route.policy.position != 1 {
+		t.Fatalf("reorder plan = %#v, want position-only move of first policy", plan)
+	}
+
+	// Moving policy-1 to the front also moves policy-2 back one position.
+	firstObserved.policies[0].policy.Position = 1
+	secondObserved.policies[0].policy.Position = 2
+	plan, result, err := provider.buildGatewayGraphPlan(desired, actual)
+	if err != nil || len(plan) != 0 || result.Outcome.State != cloud.OutcomeReady {
+		t.Fatalf("after Octavia renumbering = %#v, %#v, %v", plan, result, err)
+	}
+
+	desired.spec.Routes[0].Disposition = cloud.GraphPreserve
+	desired.routes[1].policies[0].position = 1
+	plan, result, err = provider.buildGatewayGraphPlan(desired, actual)
+	if err != nil || len(plan) != 0 || result.Outcome.State != cloud.OutcomeProgressing {
+		t.Fatalf("with an observed preserved route = %#v, %#v, %v", plan, result, err)
+	}
+}
+
+func TestReconcileGatewayGraphWaitsForPolicyDisableReadback(t *testing.T) {
+	identity := safetyTestIdentity(t)
+	requests := &gatewayTransitionRequests{}
+	base := convergedRouteGraphHandler(t, requests, identity, true, true)
+	status := "PENDING_UPDATE"
+	handler := http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		switch {
+		case request.Method == http.MethodGet && request.URL.Path == "/lbaas/l7policies":
+			requests.record(request)
+			safetyWriteJSON(t, w, map[string]any{"l7policies": []any{map[string]any{
+				"id": "policy-1", "listener_id": "listener-1", "action": "REDIRECT_TO_POOL",
+				"redirect_pool_id": "pool-1", "position": 1, "admin_state_up": false,
+				"provisioning_status": status, "tags": safetyRouteTags(t, identity, rolePolicyExact),
+			}}})
+		case request.Method == http.MethodPut && request.URL.Path == "/lbaas/l7policies/policy-1":
+			requests.record(request)
+			var body map[string]map[string]any
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil || !reflect.DeepEqual(body["l7policy"], map[string]any{"admin_state_up": false}) {
+				t.Errorf("retry of failed policy disable = %#v, %v", body, err)
+			}
+			safetyWriteJSON(t, w, map[string]any{"l7policy": map[string]any{"id": "policy-1"}})
+		case request.Method == http.MethodPut && request.URL.Path == "/lbaas/l7policies/policy-1/rules/rule-path":
+			requests.record(request)
+			safetyWriteJSON(t, w, map[string]any{"rule": map[string]any{"id": "rule-path"}})
+		default:
+			base.ServeHTTP(w, request)
+		}
+	})
+	provider := completeGraphProvider(t, handler, requests)
+	spec := completeGraphSpec(identity)
+	spec.Routes[0].Spec.PathValue = "/changed"
+	result, err := provider.ReconcileGatewayGraph(t.Context(), spec)
+	if err != nil || result.Outcome.State != cloud.OutcomeProgressing || len(requests.mutationPaths()) != 0 {
+		t.Fatalf("pending policy disable = %#v, %v, writes %v", result, err, requests.mutationPaths())
+	}
+	status = "ERROR"
+	if _, err := provider.ReconcileGatewayGraph(t.Context(), spec); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := requests.mutationPaths(), []string{"/lbaas/l7policies/policy-1"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("mutations after disable fails = %v, want %v", got, want)
+	}
+	status = "ACTIVE"
+	if _, err := provider.ReconcileGatewayGraph(t.Context(), spec); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := requests.mutationPaths(), []string{"/lbaas/l7policies/policy-1", "/lbaas/l7policies/policy-1/rules/rule-path"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("mutations after disable completes = %v, want %v", got, want)
+	}
+}
+
 func TestReconcileGatewayGraphPendingRouteKeepsGatewayProgrammed(t *testing.T) {
 	identity := safetyTestIdentity(t)
 	requests := &gatewayTransitionRequests{}
@@ -355,6 +713,9 @@ func TestReconcileGatewayGraphPendingRouteKeepsGatewayProgrammed(t *testing.T) {
 	}
 	if got := requests.count(http.MethodGet, "/lbaas/pools"); got != 0 {
 		t.Fatalf("pending graph unnecessarily read route descendants: %d", got)
+	}
+	if len(result.Routes) != 1 || !result.Routes[0].Result.ObservationDeferred {
+		t.Fatalf("parent progress supplied a new observation for the route: %#v", result.Routes)
 	}
 }
 
@@ -411,15 +772,12 @@ func TestReconcileGatewayGraphDeletionValidatesEveryChildBeforeOneMutation(t *te
 	requests := &gatewayTransitionRequests{}
 	base := convergedRouteGraphHandler(t, requests, identity, true, true)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-		if request.Method == http.MethodDelete {
+		if request.Method == http.MethodPut && request.URL.Path == "/lbaas/loadbalancers/load-balancer-1" {
 			requests.record(request)
-			if request.URL.Path != "/lbaas/l7policies/policy-1/rules/rule-host" {
-				t.Errorf("first deletion = %s", request.URL.Path)
-			}
 			if requests.count(http.MethodGet, "/lbaas/pools/pool-1/members") != 1 {
-				t.Error("deleted rule before validating pool descendants")
+				t.Error("closed frontends before validating pool descendants")
 			}
-			w.WriteHeader(http.StatusNotFound)
+			safetyWriteJSON(t, w, map[string]any{"loadbalancer": map[string]string{"id": "load-balancer-1", "provisioning_status": "PENDING_UPDATE"}})
 			return
 		}
 		base.ServeHTTP(w, request)

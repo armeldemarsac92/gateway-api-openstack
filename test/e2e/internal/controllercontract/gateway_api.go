@@ -18,44 +18,21 @@ package controllercontract
 
 import (
 	"context"
-	"fmt"
 
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	gatewayconsts "sigs.k8s.io/gateway-api/pkg/consts"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 )
 
-// RequireGatewayAPICRDs verifies the pinned Standard bundle without changing it.
-func RequireGatewayAPICRDs(ctx context.Context, reader client.Reader) error {
-	var definitions metav1.PartialObjectMetadataList
-	definitions.SetGroupVersionKind(apiextensionsv1.SchemeGroupVersion.WithKind("CustomResourceDefinitionList"))
-	if err := reader.List(ctx, &definitions); err != nil {
-		return fmt.Errorf("list installed Gateway API CRDs: %w", err)
+// RequireGatewayAPICRDs returns the release label after verifying the installed
+// Standard CRD inventory, version and channel against the pinned release.
+func RequireGatewayAPICRDs(ctx context.Context, reader client.Reader) (string, error) {
+	observed, err := (controller.Config{}).ObserveGatewayAPIVersion(ctx, reader)
+	if err != nil {
+		return "", err
 	}
-	present := make(map[string]struct{})
-	for _, definition := range definitions.Items {
-		if !controller.IsGatewayAPICRDName(definition.Name) {
-			continue
-		}
-		present[definition.Name] = struct{}{}
-		if !definition.DeletionTimestamp.IsZero() ||
-			definition.Annotations[gatewayconsts.BundleVersionAnnotation] != gatewayconsts.BundleVersion ||
-			definition.Annotations[gatewayconsts.ChannelAnnotation] != "standard" {
-			return fmt.Errorf("an installed Gateway API CRD is not from the pinned Standard bundle or is being deleted")
-		}
+	if !observed.Supported {
+		return "", controller.ErrUnsupportedGatewayAPIVersion
 	}
-	for _, name := range []string{
-		"gatewayclasses.gateway.networking.k8s.io",
-		"gateways.gateway.networking.k8s.io",
-		"httproutes.gateway.networking.k8s.io",
-		"referencegrants.gateway.networking.k8s.io",
-	} {
-		if _, found := present[name]; !found {
-			return fmt.Errorf("a required Gateway API CRD is absent")
-		}
-	}
-	return nil
+	return observed.Version + " Standard Channel", nil
 }

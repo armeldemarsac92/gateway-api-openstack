@@ -1,8 +1,7 @@
 # Gateway API conformance
 
-The target is Gateway API v1.6.1 Standard Channel and the `GATEWAY-HTTP` profile.
-Its [Core feature set](https://github.com/kubernetes-sigs/gateway-api/blob/v1.6.1/conformance/utils/suite/profiles.go) contains Gateway, HTTPRoute, and ReferenceGrant, including HTTPS termination for HTTPRoute.
-The repository does not yet provide a full-profile runner.
+The first Amphora traffic target is a Standard-channel HTTPRoute. The complete Gateway API v1.7.0 qualification covers five Gateway profiles and two mesh profiles. The HTTP Core profile includes Gateway, HTTPRoute, ReferenceGrant and HTTPS termination. [v1.7.0 profile definitions](https://github.com/kubernetes-sigs/gateway-api/blob/v1.7.0/conformance/utils/suite/profiles.go)
+The [Hibiscus qualification runner](qualification/v1.7.0/live-runs.md) can exercise all seven profiles on the two channels. The [qualification record](qualification/v1.7.0/README.md) tracks those runs.
 
 ## Implementation gaps
 
@@ -11,13 +10,13 @@ The [compatibility record](providers/compatibility.md) summarizes the available 
 
 | Area | Current implementation | Remaining Core work |
 | --- | --- | --- |
-| Listeners | One HTTP listener without a listener hostname | Multiple listeners and their lifecycle, hostname matching, HTTPS, and certificate validation |
+| Listeners | One active HTTP listener with an optional exact or wildcard hostname. Unsupported protocols on separate ports receive their own listener status. | Multiple active listeners, HTTPS and certificate validation |
 | Route attachment | One selected HTTPRoute with one parent in the Gateway namespace | Multiple routes and parents, namespace selection, and precedence |
-| Matching | One rule and match, Exact or PathPrefix, and at most one exact hostname | Multiple rules and matches, wildcard and multiple hostnames, and exact header matching |
-| Service inputs | One Service in the route namespace, with NodePort forwarding or opt-in IPv4 Endpoint forwarding | Live proof for ClusterIP, headless, and manually managed EndpointSlice inputs in a verified network environment |
+| Matching | One rule and match, Exact or PathPrefix, and one effective hostname after listener and route intersection | Multiple rules, matches and route hostnames, values beyond the provider limit, and exact header matching |
+| Service inputs | One authorized Service, with NodePort forwarding or opt-in IPv4 Endpoint forwarding | Live proof for ClusterIP, headless, and manually managed EndpointSlice inputs in a verified network environment |
 | Backend selection and errors | One backend | Weighted backends, weight zero, unmatched-request HTTP 404, and required responses for omitted or invalid backends |
 | Filters | No filters | RequestHeaderModifier and Core RequestRedirect behavior |
-| References | References within the route namespace | ReferenceGrant for Service and certificate references |
+| References | Same-namespace Services and cross-namespace Services authorized by a live ReferenceGrant | Certificate references, full invalid-backend wire behavior and live revocation |
 | Partial validity and status | Conditions and listener status for the supported subset | Required behavior for invalid siblings, reference errors, listener changes, and generation updates |
 
 The Endpoint mode implementation removes the NodePort requirement from Service input handling, but local tests do not close the Core traffic gap.
@@ -26,7 +25,7 @@ The [feasibility assessment](design/conformance-feasibility.md) identifies Octav
 The [roadmap](../ROADMAP.md) assigns that work and defines the completion gates.
 
 Method and query matching, URLRewrite, response header modification, mirroring, retries, timeouts, and `GatewayHTTPListenerIsolation` are outside the initial Extended claim.
-Other Route profiles and mesh conformance are also outside the target.
+Other Route profiles and mesh are part of the separate Hibiscus qualification plan. [Hibiscus plan](superpowers/plans/2026-11-20-hibiscus.md)
 
 ## Prepare the suite
 
@@ -41,7 +40,7 @@ Select applicable upstream tests once their setup dependencies are met, then tes
 These checks can run before every Phase 4 task is complete.
 Extend the test harness as behavior becomes available rather than assuming the current runner implements these scenarios.
 
-Use the conformance module and Standard CRDs for the same pinned Gateway API release.
+Use the v1.7.0 conformance module with the complete v1.7.0 bundle for the selected channel. Use separate control planes for Standard and Experimental.
 Before a full run:
 
 1. Provide a controller configuration that accepts the upstream Service inputs, listeners, and namespace relationships.
@@ -60,7 +59,7 @@ Record the gaps below to distinguish setup blockers, failures, and tests that ha
 ## Record conformance gaps
 
 Keep exploratory records local under the [publication policy](../CONTRIBUTING.md#test-evidence-and-publication).
-Identify whether the run used an upstream profile or an adapted diagnostic, then record the controller revision, Gateway API version, environment, command, selected profile or tests, feature flags, and original result artifact.
+Identify whether the run used an upstream profile or an adapted diagnostic, then record the controller revision, Gateway API version and channel, environment, command, selected profile or tests, feature flags, and original result artifact.
 List fixture changes and setup blockers.
 For tests against unreleased Octavia extensions, retain the exact controller, Octavia, octavia-lib, and Amphora build inputs privately with the run.
 Identify the upstream changes and the dependency on unreleased code in any public summary.
@@ -91,7 +90,7 @@ This record does not replace the suite-generated conformance report.
 Upstream lists [Conformant and Partially Conformant implementations](https://gateway-api.sigs.k8s.io/docs/implementations/list/).
 This project's target requires the complete Core profile and all declared Extended features to pass.
 An eligible partial report can support an earlier listing during Phase 5 development, but does not satisfy that target or close Phase 4.
-The current adapted single-test diagnostic is not an eligible profile report, and this repository still needs a reusable report-producing runner.
+The historical single-test diagnostic cannot be submitted as a profile report. Use the [manual full-profile runner](qualification/v1.7.0/live-runs.md) to produce original upstream reports.
 The current empty `supportedFeatures` list also blocks the suite's default inferred-feature setup.
 Resolve submission eligibility without declaring unverified features or overriding feature selection merely to qualify.
 
@@ -105,7 +104,6 @@ Recheck these windows and the actual list generator when submitting, rather than
 At the reviewed [upstream revision](https://github.com/kubernetes-sigs/gateway-api/tree/a52aff438a5c133b10376fbe45c4096a2b0ce8ff), profile validation adds a limit of five skipped tests to each partial Core or Extended status when evaluated as v1.7, while the list generator still evaluates against v1.6.
 This transition is not a permanent allowance for broad skips.
 Reassess version eligibility, skip limits, and feature declaration rules before scheduling the submission run.
-The repository remains pinned to v1.6.1 until a separate dependency update is reviewed.
 
 Submit the report and [ImplementationListDetails](https://github.com/kubernetes-sigs/gateway-api/blob/a52aff438a5c133b10376fbe45c4096a2b0ce8ff/conformance/list/implementations/README.md) upstream, and generate the list with `make update-implist` in the upstream repository.
 Follow the [entry procedure](https://gateway-api.sigs.k8s.io/docs/implementations/list/#adding-new-entries) instead of editing the generated implementation page directly.

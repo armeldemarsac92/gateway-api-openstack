@@ -29,6 +29,13 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/test/e2e/internal/runconfig"
 )
 
+func TestReportStartsWithUnverifiedGatewayAPIBundle(t *testing.T) {
+	report := newE2EReport(time.Unix(1, 0), reportTestConfig(projectModeDedicated))
+	if got := report.GatewayAPIBundle; got != "Unverified" {
+		t.Fatalf("Gateway API bundle = %q before preflight, want Unverified", got)
+	}
+}
+
 func TestOverallStatusRequiresBaseline(t *testing.T) {
 	report := newE2EReport(time.Unix(1, 0), reportTestConfig(projectModeDedicated))
 	if got := overallStatus(report.Checks, report.requiredChecks...); got != statusNotRun {

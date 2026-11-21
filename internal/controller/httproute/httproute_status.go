@@ -20,7 +20,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -29,6 +31,7 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
 type routeReconcileStatus struct {
@@ -54,6 +57,9 @@ func (r *Reconciler) setRouteStatusesAndDetach(
 	updates []parentStatusUpdate,
 ) (ctrl.Result, error) {
 	route := scope.route
+	if err := r.applyUnsupportedRouteReferenceStatus(ctx, route, updates); err != nil {
+		return ctrl.Result{}, err
+	}
 	providerStatusPublished := routeHasProviderFailureStatus(route, updates, r.Config.ControllerName, r.Config.Domain()+"/Programmed")
 	checkpointNeeded, err := r.routeCleanupStatusCheckpointNeeded(ctx, scope, updates)
 	if err != nil {
@@ -70,6 +76,14 @@ func (r *Reconciler) setRouteStatusesAndDetach(
 		return result, nil
 	}
 	if errors.Is(cleanupErr, controller.ErrUnsupportedGatewayAPIVersion) {
+		// Retry if the live cleanup check no longer confirms the reason for
+		// taking forwarding down during the freeze.
+		if scope.versionSkew || slices.ContainsFunc(updates, func(update parentStatusUpdate) bool {
+			return update.status.resolvedReason == string(gatewayv1.RouteReasonRefNotPermitted)
+		}) {
+			scope.statusPlan = nil
+			return ctrl.Result{}, errHTTPRouteChanged
+		}
 		_, present, bindingErr := r.storedRouteIdentity(route)
 		if bindingErr != nil {
 			return ctrl.Result{}, bindingErr
@@ -104,6 +118,33 @@ func (r *Reconciler) setRouteStatusesAndDetach(
 		scope.patchCause = controller.SafeProviderReconcileError(policy, cleanupErr)
 	}
 	return controller.ProviderFinalizationFailureResult(policy, cleanupErr, string(route.UID))
+}
+
+func (r *Reconciler) applyUnsupportedRouteReferenceStatus(ctx context.Context, route *gatewayv1.HTTPRoute, updates []parentStatusUpdate) error {
+	needsAuthorization := func(update parentStatusUpdate) bool {
+		return update.status.acceptedReason == string(gatewayv1.RouteReasonUnsupportedValue) &&
+			update.status.resolved == metav1.ConditionUnknown
+	}
+	if !slices.ContainsFunc(updates, needsAuthorization) {
+		return nil
+	}
+	// A bound route must detach even if a reference check fails. Its binding
+	// change enqueues the unbound route for independent status evaluation.
+	_, bound, err := r.storedRouteIdentity(route)
+	if err != nil || bound {
+		return err
+	}
+	rejection, err := r.liveRouteBackendReferenceRejection(ctx, route)
+	if err != nil || rejection == nil {
+		return err
+	}
+	diagnostic := model.Diagnostic{Reason: string(gatewayv1.RouteReasonRefNotPermitted), Message: rejection.message}
+	for i := range updates {
+		if needsAuthorization(updates[i]) {
+			updates[i].status = updates[i].status.withBackendDiagnostic(diagnostic)
+		}
+	}
+	return nil
 }
 
 func routeHasProviderFailureStatus(
@@ -176,6 +217,7 @@ func (r *Reconciler) handleRouteProviderFailure(
 	scope *httpRouteScope,
 	parent gatewayv1.ParentReference,
 	referencesEvaluated bool,
+	diagnostic model.Diagnostic,
 	providerErr error,
 	action string,
 ) (ctrl.Result, error) {
@@ -184,7 +226,7 @@ func (r *Reconciler) handleRouteProviderFailure(
 		return ctrl.Result{}, controller.SafeProviderReconcileError(controller.ProviderFailurePolicy{Message: "The HTTPRoute graph could not be reconciled"}, providerErr)
 	}
 	route := scope.route
-	status := providerFailureRouteStatus(policy, referencesEvaluated)
+	status := providerFailureRouteStatus(policy, referencesEvaluated).withBackendDiagnostic(diagnostic)
 	scope.setProviderFailureStatuses(
 		[]parentStatusUpdate{{parent: parent, status: status}},
 		policy,
@@ -267,12 +309,16 @@ func statusForRouteBuildError(err error) routeReconcileStatus {
 		switch buildError.kind {
 		case routeErrorInvalidKind:
 			return unresolvedRouteStatus(string(gatewayv1.RouteReasonInvalidKind), buildError.message)
+		case routeErrorBackendNotFound:
+			return unresolvedRouteStatus(string(gatewayv1.RouteReasonBackendNotFound), buildError.message)
 		case routeErrorRefNotPermitted:
 			return unresolvedRouteStatus(string(gatewayv1.RouteReasonRefNotPermitted), buildError.message)
 		case routeErrorUnsupportedProtocol:
 			return unresolvedRouteStatus(string(gatewayv1.RouteReasonUnsupportedProtocol), buildError.message)
 		case routeErrorNoMatchingParent:
 			return rejectedRouteStatus(string(gatewayv1.RouteReasonNoMatchingParent), buildError.message)
+		case routeErrorNoMatchingHostname:
+			return rejectedRouteStatus(string(gatewayv1.RouteReasonNoMatchingListenerHostname), buildError.message)
 		case routeErrorNotAllowed:
 			return rejectedRouteStatus(string(gatewayv1.RouteReasonNotAllowedByListeners), buildError.message)
 		case routeErrorPending:
@@ -294,7 +340,7 @@ func programmedRouteStatus() routeReconcileStatus {
 		resolvedMessage:   "All backend references are resolved",
 		programmed:        metav1.ConditionTrue,
 		programmedReason:  "Programmed",
-		programmedMessage: "Octavia pool, members, health monitor, and L7 policies are active",
+		programmedMessage: "Octavia configuration for the HTTPRoute is active",
 	}
 }
 
@@ -304,6 +350,15 @@ func pendingRouteStatus(message string) routeReconcileStatus {
 	status.programmedReason = "Pending"
 	status.programmedMessage = message
 	return status
+}
+
+func (s routeReconcileStatus) withBackendDiagnostic(diagnostic model.Diagnostic) routeReconcileStatus {
+	if diagnostic.Reason != "" {
+		s.resolved = metav1.ConditionFalse
+		s.resolvedReason = diagnostic.Reason
+		s.resolvedMessage = diagnostic.Message
+	}
+	return s
 }
 
 func unsupportedGatewayAPIVersionRouteStatus() routeReconcileStatus {
@@ -334,8 +389,57 @@ func rejectedRouteStatus(reason, message string) routeReconcileStatus {
 	}
 }
 
-func rejectedServiceProfileStatus(err error) routeReconcileStatus {
+// resolveRouteReferences evaluates object references without applying the
+// Gateway's member mode or requiring ready endpoints.
+func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv1.HTTPRoute, status *routeReconcileStatus) error {
+	backends, err := validateRouteStructure(route)
+	if err != nil {
+		var rejection *routeBuildError
+		if errors.As(err, &rejection) && rejection.kind == routeErrorInvalidKind {
+			status.resolved = metav1.ConditionFalse
+			status.resolvedReason = string(gatewayv1.RouteReasonInvalidKind)
+			status.resolvedMessage = rejection.message
+		}
+		return nil
+	}
+	rejection, err := r.liveRouteBackendReferenceRejection(ctx, route)
+	if err != nil {
+		return err
+	}
+	status.resolved = metav1.ConditionFalse
+	if rejection != nil {
+		status.resolvedReason = string(gatewayv1.RouteReasonRefNotPermitted)
+		status.resolvedMessage = rejection.message
+		return nil
+	}
+	status.resolved = metav1.ConditionTrue
+	status.resolvedReason = string(gatewayv1.RouteReasonResolvedRefs)
+	status.resolvedMessage = "All backend references are resolved"
+	for _, backend := range backends {
+		key, _ := model.BackendServiceReference(route.Namespace, backend)
+		var service corev1.Service
+		err := r.routePatchReader().Get(ctx, key, &service)
+		if apierrors.IsNotFound(err) || !service.DeletionTimestamp.IsZero() {
+			*status = status.withBackendDiagnostic(model.Diagnostic{
+				Reason: string(gatewayv1.RouteReasonBackendNotFound), Message: fmt.Sprintf("backend Service %s was not found", key),
+			})
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("get backend Service: %w", err)
+		}
+		if _, diagnostic := model.ResolveServicePort(&service, backend.Port); diagnostic != nil {
+			*status = status.withBackendDiagnostic(*diagnostic)
+		}
+	}
+	return nil
+}
+
+func backendProfileRejectionStatus(err error) routeReconcileStatus {
 	status := statusForRouteBuildError(err)
+	if status.resolvedReason == string(gatewayv1.RouteReasonRefNotPermitted) {
+		return status
+	}
 	status.accepted = metav1.ConditionFalse
 	status.acceptedReason = string(gatewayv1.RouteReasonUnsupportedValue)
 	status.acceptedMessage = err.Error()

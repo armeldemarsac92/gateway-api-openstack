@@ -19,6 +19,7 @@ package gateway
 import (
 	"context"
 	"errors"
+	"slices"
 
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -34,35 +35,35 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 )
 
-func (r *Reconciler) gatewayRequestsForHTTPRoute(_ context.Context, object client.Object) []reconcile.Request {
-	route, ok := object.(*gatewayv1.HTTPRoute)
+func (r *Reconciler) gatewayRequestsForRoute(_ context.Context, route client.Object) []reconcile.Request {
+	parents, statuses, ok := controller.RouteParents(route)
 	if !ok {
 		return nil
 	}
-
-	keys := make(map[types.NamespacedName]struct{}, len(route.Spec.ParentRefs)+len(route.Status.Parents)+1)
+	keys := make(map[types.NamespacedName]struct{}, len(parents)+len(statuses)+1)
 	addParent := func(parentRef gatewayv1.ParentReference) {
 		if !controller.IsGatewayParentRef(parentRef) || parentRef.Name == "" {
 			return
 		}
-		gatewayNamespace := route.Namespace
+		gatewayNamespace := route.GetNamespace()
 		if parentRef.Namespace != nil {
 			gatewayNamespace = string(*parentRef.Namespace)
 		}
 		keys[types.NamespacedName{Namespace: gatewayNamespace, Name: string(parentRef.Name)}] = struct{}{}
 	}
-	for _, parentRef := range route.Spec.ParentRefs {
+	for _, parentRef := range parents {
 		addParent(parentRef)
 	}
-	for _, parentStatus := range route.Status.Parents {
+	for _, parentStatus := range statuses {
 		if parentStatus.ControllerName != r.Config.ControllerName {
 			continue
 		}
 		addParent(parentStatus.ParentRef)
 	}
-	boundNamespace := route.Annotations[r.Config.RouteGatewayNamespaceAnnotation()]
-	boundName := route.Annotations[r.Config.RouteGatewayNameAnnotation()]
-	boundUID := route.Annotations[r.Config.RouteGatewayUIDAnnotation()]
+	annotations := route.GetAnnotations()
+	boundNamespace := annotations[r.Config.RouteGatewayNamespaceAnnotation()]
+	boundName := annotations[r.Config.RouteGatewayNameAnnotation()]
+	boundUID := annotations[r.Config.RouteGatewayUIDAnnotation()]
 	if boundNamespace != "" && boundName != "" && boundUID != "" {
 		keys[types.NamespacedName{Namespace: boundNamespace, Name: boundName}] = struct{}{}
 	}
@@ -100,13 +101,16 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 	if r.Writer == nil {
 		return errors.New("gateway graph writer is required")
 	}
-	return ctrl.NewControllerManagedBy(manager).
-		For(&gatewayv1.Gateway{}, builder.WithPredicates(controller.GatewayReconcilePredicate(r.Config))).
-		Watches(
-			&gatewayv1.HTTPRoute{},
-			handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForHTTPRoute),
-			builder.WithPredicates(controller.HTTPRouteForGatewayPredicate(r.Config)),
-		).
+	gatewayController := ctrl.NewControllerManagedBy(manager).
+		For(&gatewayv1.Gateway{}, builder.WithPredicates(controller.GatewayReconcilePredicate(r.Config)))
+	for _, route := range []client.Object{&gatewayv1.HTTPRoute{}, &gatewayv1.TCPRoute{}, &gatewayv1.UDPRoute{}} {
+		gatewayController.Watches(route, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForRoute),
+			builder.WithPredicates(controller.RouteForGatewayPredicate(r.Config)))
+	}
+	if r.Config.OperatorHTTPS {
+		gatewayController.Watches(&gatewayv1.ReferenceGrant{}, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForCertificateGrant))
+	}
+	return gatewayController.
 		Watches(
 			&gatewayv1.GatewayClass{},
 			handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForGatewayClass),
@@ -141,6 +145,40 @@ func (r *Reconciler) gatewayRequestsForParameters(ctx context.Context, object cl
 		for _, gateway := range gateways.Items {
 			if !controller.HasGatewayTopologyBinding(r.Config, &gateway) && gateway.DeletionTimestamp.IsZero() {
 				keys[client.ObjectKeyFromObject(&gateway)] = struct{}{}
+			}
+		}
+	}
+	return controller.SortedRequests(keys)
+}
+
+func (r *Reconciler) gatewayRequestsForCertificateGrant(ctx context.Context, object client.Object) []reconcile.Request {
+	grant, ok := object.(*gatewayv1.ReferenceGrant)
+	if !ok || !slices.ContainsFunc(grant.Spec.To, func(target gatewayv1.ReferenceGrantTo) bool {
+		return target.Group == "" && target.Kind == "Secret"
+	}) {
+		return nil
+	}
+	keys := make(map[types.NamespacedName]struct{})
+	namespaces := make(map[gatewayv1.Namespace]bool)
+	for _, source := range grant.Spec.From {
+		if source.Group != gatewayv1.GroupName || source.Kind != "Gateway" || namespaces[source.Namespace] {
+			continue
+		}
+		namespaces[source.Namespace] = true
+		var gateways gatewayv1.GatewayList
+		if err := r.List(ctx, &gateways, client.InNamespace(string(source.Namespace))); err != nil {
+			log.FromContext(ctx).Error(err, "Could not list Gateways for certificate ReferenceGrant")
+			continue
+		}
+		for i := range gateways.Items {
+			gateway := &gateways.Items[i]
+			if slices.ContainsFunc(gateway.Spec.Listeners, func(listener gatewayv1.Listener) bool {
+				return listener.Protocol == gatewayv1.HTTPSProtocolType && listener.TLS != nil &&
+					slices.ContainsFunc(listener.TLS.CertificateRefs, func(ref gatewayv1.SecretObjectReference) bool {
+						return ref.Namespace != nil && string(*ref.Namespace) == grant.Namespace
+					})
+			}) {
+				keys[client.ObjectKeyFromObject(gateway)] = struct{}{}
 			}
 		}
 	}

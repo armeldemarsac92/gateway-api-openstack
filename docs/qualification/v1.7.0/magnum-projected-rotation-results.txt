@@ -1,0 +1,14 @@
+kind v0.33.0 go1.26.7 linux/amd64
+Client Version: v1.36.4
+Kustomize Version: v5.8.1
+Server Version: v1.36.4
+VERSION   RUNTIME
+v1.36.4   containerd://2.3.4
+v1.36.4   containerd://2.3.4
+initial controller phase: {"initial_keystone_201":2,"initial_neutron_network_200":2,"initial_neutron_subnet_200":2,"initial_neutron_versions_200":2,"initial_octavia_providers_200":2,"initial_octavia_versions_200":4}
+controller Pods Ready with expected imageID: 2 initial, 2 replacement, zero shared UIDs
+replacement controller phase: {"initial_keystone_201":2,"initial_neutron_network_200":2,"initial_neutron_subnet_200":2,"initial_neutron_versions_200":2,"initial_octavia_providers_200":2,"initial_octavia_versions_200":4,"replacement_keystone_201":2,"replacement_neutron_network_200":1,"replacement_neutron_subnet_200":1,"replacement_neutron_versions_200":2,"replacement_octavia_providers_200":1,"replacement_octavia_versions_200":3}
+negative controls: retired CA x509 unknown authority, zero Keystone requests; retired credential HTTP 401 once
+Helm uninstall removed five owned objects and retained 5 independent controls and 15 shared CRD UIDs
+named qualification namespace and controls deleted; 15 shared CRD UIDs retained
+fixture final counters: {"initial_keystone_201":2,"initial_neutron_network_200":2,"initial_neutron_subnet_200":2,"initial_neutron_versions_200":2,"initial_octavia_providers_200":2,"initial_octavia_versions_200":4,"keystone_401":1,"replacement_keystone_201":2,"replacement_neutron_network_200":1,"replacement_neutron_subnet_200":1,"replacement_neutron_versions_200":2,"replacement_octavia_providers_200":1,"replacement_octavia_versions_200":3}

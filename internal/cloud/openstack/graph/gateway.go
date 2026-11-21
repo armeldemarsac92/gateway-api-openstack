@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
@@ -75,25 +76,93 @@ func (p *Provider) GetGateway(
 		return cloud.GatewayProgressingResult("Octavia load balancer is administratively disabled", p.pollInterval), true, nil
 	}
 
-	listener, err := p.findManagedGatewayListener(ctx, identity, loadBalancer.ID)
+	inventory, markedProtocol, err := p.listGatewayListeners(ctx, loadBalancer)
 	if err != nil {
 		return cloud.GatewayResult{}, false, err
 	}
-	if listener == nil {
+	listenerList := inventory.Items
+	var observed []listeners.Listener
+	var unverifiedAnchor int
+	https := slices.ContainsFunc(listenerList, func(listener listeners.Listener) bool { return listener.Protocol == terminatedHTTPS })
+	if https && markedProtocol != cloud.ListenerProtocolHTTP {
+		return cloud.GatewayResult{}, false, fmt.Errorf("%w: HTTPS listener lacks its scoped HTTP binding", cloud.ErrOwnershipConflict)
+	}
+	if markedProtocol == cloud.ListenerProtocolTCP || https {
+		// Identity-only reads do not have the Gateway's frozen port. Check
+		// the inventory's shape and withhold readiness for a legacy anchor.
+		for _, listener := range listenerList {
+			if !slices.ContainsFunc(listener.Tags, func(tag string) bool { return scopedPortTagProtocol(tag) != "" }) {
+				unverifiedAnchor = listener.ProtocolPort
+				break
+			}
+		}
+	}
+	if markedProtocol != "" {
+		if err := requireListenerDefaultPoolInventory(loadBalancer.ID, inventory); err != nil {
+			return cloud.GatewayResult{}, false, err
+		}
+		observed, err = p.managedScopedListeners(identity, loadBalancer, listenerList, markedProtocol, unverifiedAnchor)
+	} else {
+		listener, singleErr := p.managedGatewayListener(identity, loadBalancer.ID, listenerList)
+		err = singleErr
+		if listener != nil {
+			observed = []listeners.Listener{*listener}
+		}
+	}
+	if err != nil {
+		return cloud.GatewayResult{}, false, err
+	}
+	if https {
+		return cloud.GatewayResult{
+			State:   cloud.GatewayState{LoadBalancerID: loadBalancer.ID, VIPPortID: loadBalancer.VipPortID, VIPAddress: loadBalancer.VipAddress},
+			Outcome: p.progressingOutcome("HTTPS readiness requires current certificate authorization"),
+		}, true, nil
+	}
+	if unverifiedAnchor != 0 {
+		return cloud.GatewayResult{
+			State:   cloud.GatewayState{LoadBalancerID: loadBalancer.ID, VIPPortID: loadBalancer.VipPortID, VIPAddress: loadBalancer.VipAddress},
+			Outcome: p.progressingOutcome("Waiting for the frozen TCP listener port to verify the Gateway"),
+		}, true, nil
+	}
+	if len(observed) == 0 {
 		return cloud.GatewayProgressingResult("Octavia listener has not been created", p.pollInterval), true, nil
 	}
-	if listener.Protocol != string(listeners.ProtocolHTTP) {
-		return cloud.GatewayResult{}, false, fmt.Errorf("%w: listener %s has protocol %s", cloud.ErrOwnershipConflict, listener.ID, listener.Protocol)
-	}
-	if !listener.AdminStateUp {
-		return cloud.GatewayProgressingResult("Octavia listener is administratively disabled", p.pollInterval), true, nil
+	for index := range observed {
+		listener := &observed[index]
+		if !supportedListenerProtocol(listener.Protocol) {
+			return cloud.GatewayResult{}, false, fmt.Errorf("%w: listener %s has protocol %s", cloud.ErrOwnershipConflict, listener.ID, listener.Protocol)
+		}
+		if usesDefaultPool(listener.Protocol) {
+			if err := validateDefaultPoolListener(listener, loadBalancer.ID); err != nil {
+				return cloud.GatewayResult{}, false, err
+			}
+			outcome, err := p.defaultPoolListenerOutcome(listener, false)
+			if err != nil {
+				return cloud.GatewayResult{}, false, err
+			}
+			if outcome.State == cloud.OutcomeProgressing {
+				return cloud.GatewayResult{Outcome: outcome}, true, nil
+			}
+		}
+		if !listener.AdminStateUp {
+			return cloud.GatewayProgressingResult("Octavia listener is administratively disabled", p.pollInterval), true, nil
+		}
+		if listener.Protocol == cloud.ListenerProtocolHTTP && listener.DefaultPoolID != "" {
+			return cloud.GatewayProgressingResult("Octavia listener has an unexpected default pool", p.pollInterval), true, nil
+		}
+		if listener.ProvisioningStatus == "ERROR" {
+			return cloud.GatewayResult{}, false, cloud.NewProviderError(cloud.ErrorCategoryResourceFailure, fmt.Errorf("octavia listener %s provisioning status is ERROR", listener.ID))
+		}
 	}
 
 	state := cloud.GatewayState{
 		LoadBalancerID: loadBalancer.ID,
 		VIPPortID:      loadBalancer.VipPortID,
 		VIPAddress:     loadBalancer.VipAddress,
-		ListenerID:     listener.ID,
+		ListenerID:     observed[0].ID,
+	}
+	if markedProtocol != "" {
+		state.ListenerID = scopedRepresentativeListenerID(observed, 0)
 	}
 	floatingIP, err := p.findGatewayFloatingIP(ctx, identity, loadBalancer.VipPortID, loadBalancer.VipAddress)
 	if err != nil {
@@ -109,18 +178,7 @@ func (p *Provider) GetGateway(
 	return cloud.GatewayReadyResult(state), true, nil
 }
 
-func (p *Provider) findManagedGatewayListener(
-	ctx context.Context,
-	identity Identity,
-	loadBalancerID string,
-) (*listeners.Listener, error) {
-	listenerList, err := p.octavia.ListListeners(ctx, listeners.ListOpts{
-		LoadbalancerID: loadBalancerID,
-		ProjectID:      p.projectID,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("list Gateway listeners: %w", err)
-	}
+func (p *Provider) managedGatewayListener(identity Identity, loadBalancerID string, listenerList []listeners.Listener) (*listeners.Listener, error) {
 	var owned *listeners.Listener
 	for index := range listenerList {
 		listener := &listenerList[index]
@@ -180,20 +238,11 @@ func (p *Provider) findGatewayFloatingIP(ctx context.Context, identity Identity,
 	return owned, nil
 }
 
-func (p *Provider) enableLoadBalancer(ctx context.Context, loadBalancerID string) error {
+func (p *Provider) setLoadBalancerAdminState(ctx context.Context, loadBalancerID string, enabled bool) error {
 	if _, err := p.octavia.UpdateLoadBalancer(ctx, loadBalancerID, loadbalancers.UpdateOpts{
-		AdminStateUp: boolPointer(true),
+		AdminStateUp: boolPointer(enabled),
 	}); err != nil {
-		return fmt.Errorf("enable load balancer: %w", classifyOctaviaMutationError(err))
-	}
-	return nil
-}
-
-func (p *Provider) enableListener(ctx context.Context, listenerID string) error {
-	if _, err := p.octavia.UpdateListener(ctx, listenerID, listeners.UpdateOpts{
-		AdminStateUp: boolPointer(true),
-	}); err != nil {
-		return fmt.Errorf("enable listener: %w", classifyOctaviaMutationError(err))
+		return fmt.Errorf("set load balancer %s admin_state_up=%t: %w", loadBalancerID, enabled, classifyOctaviaMutationError(err))
 	}
 	return nil
 }

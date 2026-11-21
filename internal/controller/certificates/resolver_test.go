@@ -1,0 +1,292 @@
+package certificates
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/rest"
+	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+)
+
+const (
+	firstID   = "11111111-1111-4111-8111-111111111111"
+	secondID  = "22222222-2222-4222-8222-222222222222"
+	scopeJSON = `"scope":{"cluster":"cluster","gatewayClass":"octavia","project":"project","region":"RegionOne"}`
+)
+
+func TestResolveFollowsOnlyTheEnrolledSecretRevision(t *testing.T) {
+	resolver, gateway, listener, reader := resolverFixture(t)
+	writeMap(t, resolver.Path, rowJSON("uid-a", "rv/alpha", firstID))
+	expectResolution(t, resolver, gateway, listener, firstID, "")
+
+	reader.metadata.ResourceVersion = "rv/beta"
+	expectResolution(t, resolver, gateway, listener, "", gatewayv1.ListenerReasonInvalidCertificateRef)
+	writeMap(t, resolver.Path, rowJSON("uid-a", "rv/beta", secondID))
+	expectResolution(t, resolver, gateway, listener, secondID, "")
+
+	reader.metadata.UID = "uid-b"
+	expectResolution(t, resolver, gateway, listener, "", gatewayv1.ListenerReasonInvalidCertificateRef)
+	reader.metadata.UID = "uid-a"
+	reader.metadata.DeletionTimestamp = ptr.To(metav1.Now())
+	expectResolution(t, resolver, gateway, listener, "", gatewayv1.ListenerReasonInvalidCertificateRef)
+	reader.metadata.DeletionTimestamp = nil
+	writeMap(t, resolver.Path, "")
+	reader.reads = nil
+	expectResolution(t, resolver, gateway, listener, "", gatewayv1.ListenerReasonInvalidCertificateRef)
+	if len(reader.reads) != 0 {
+		t.Fatalf("looked up an unmapped Secret: %v", reader.reads)
+	}
+}
+
+func TestCrossNamespaceGrantRevocationPrecedesMetadataRead(t *testing.T) {
+	resolver, gateway, listener, reader := resolverFixture(t)
+	gateway.Namespace = "application"
+	listener.TLS.CertificateRefs[0].Namespace = ptr.To(gatewayv1.Namespace("certs"))
+	writeMap(t, resolver.Path, rowJSON("uid-a", "rv/alpha", firstID))
+	reader.grants = []gatewayv1.ReferenceGrant{{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "certs"},
+		Spec: gatewayv1.ReferenceGrantSpec{
+			From: []gatewayv1.ReferenceGrantFrom{{Group: gatewayv1.GroupName, Kind: "Gateway", Namespace: "application"}},
+			To:   []gatewayv1.ReferenceGrantTo{{Kind: "Secret", Name: ptr.To(gatewayv1.ObjectName("web"))}},
+		},
+	}}
+	expectResolution(t, resolver, gateway, listener, firstID, "")
+	if !reflect.DeepEqual(reader.reads, []string{"grants certs", "metadata certs/web"}) {
+		t.Fatalf("unexpected read sequence: %v", reader.reads)
+	}
+	resolver.DiscoverEndpoint = func() (string, error) {
+		t.Fatal("reference status reached Barbican endpoint discovery")
+		return "", nil
+	}
+	reader.reads = nil
+	if reason := resolver.ReferenceStatus(t.Context(), gateway, listener); reason != "" {
+		t.Fatalf("granted certificate reference status = %q", reason)
+	}
+	if !reflect.DeepEqual(reader.reads, []string{"grants certs", "metadata certs/web"}) {
+		t.Fatalf("unexpected status read sequence: %v", reader.reads)
+	}
+	reader.grants[0].DeletionTimestamp = ptr.To(metav1.Now())
+	reader.reads = nil
+	expectResolution(t, resolver, gateway, listener, "", gatewayv1.ListenerReasonRefNotPermitted)
+	if !reflect.DeepEqual(reader.reads, []string{"grants certs"}) {
+		t.Fatalf("read certificate metadata after grant revocation: %v", reader.reads)
+	}
+	reader.reads = nil
+	if reason := resolver.ReferenceStatus(t.Context(), gateway, listener); reason != gatewayv1.ListenerReasonRefNotPermitted {
+		t.Fatalf("revoked certificate reference status = %q", reason)
+	}
+	if !reflect.DeepEqual(reader.reads, []string{"grants certs"}) {
+		t.Fatalf("status read certificate metadata after grant revocation: %v", reader.reads)
+	}
+	reader.grantError = errors.New("forbidden")
+	expectResolution(t, resolver, gateway, listener, "", gatewayv1.ListenerReasonInvalidCertificateRef)
+}
+
+func TestBadMapAndUnsupportedTLSFailClosedBeforeMetadataRead(t *testing.T) {
+	resolver, gateway, listener, reader := resolverFixture(t)
+	valid := mapJSON(rowJSON("uid-a", "rv/alpha", firstID))
+	for _, candidate := range []struct{ name, document string }{
+		{"missing file", ""},
+		{"wrong scope", strings.Replace(valid, `"project":"project"`, `"project":"other"`, 1)},
+		{"duplicate keys", strings.Replace(valid, `"version":1`, `"version":1,"version":1`, 1)},
+		{"unknown fields", strings.Replace(valid, `"version":1`, `"version":1,"unexpected":true`, 1)},
+		{"ambiguous rows", mapJSON(rowJSON("uid-a", "rv/alpha", firstID) + "," + rowJSON("uid-a", "rv/beta", secondID))},
+		{"expired", strings.Replace(valid, "2050-01-01", "2021-01-01", 1)},
+		{"future", strings.Replace(valid, "2020-01-01", "2049-01-01", 1)},
+		{"oversized", valid + strings.Repeat(" ", 1<<20)},
+	} {
+		t.Run(candidate.name, func(t *testing.T) {
+			if candidate.document != "" {
+				if err := os.WriteFile(resolver.Path, []byte(candidate.document), 0o444); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					if err := os.Remove(resolver.Path); err != nil {
+						t.Error(err)
+					}
+				})
+			}
+			expectResolution(t, resolver, gateway, listener, "", gatewayv1.ListenerReasonInvalidCertificateRef)
+			if len(reader.reads) != 0 {
+				t.Fatalf("unexpected reads: %v", reader.reads)
+			}
+		})
+	}
+
+	writeMap(t, resolver.Path, rowJSON("uid-a", "rv/alpha", firstID))
+	listener.TLS.Options = map[gatewayv1.AnnotationKey]gatewayv1.AnnotationValue{"example.org/min-version": "1.3"}
+	expectResolution(t, resolver, gateway, listener, "", gatewayv1.ListenerReasonInvalidCertificateRef)
+	listener.TLS.Options = nil
+	gateway.Spec.TLS = &gatewayv1.GatewayTLSConfig{Frontend: &gatewayv1.FrontendTLSConfig{}}
+	expectResolution(t, resolver, gateway, listener, "", gatewayv1.ListenerReasonInvalidCertificateRef)
+	if len(reader.reads) != 0 {
+		t.Fatalf("unexpected reads: %v", reader.reads)
+	}
+}
+
+func TestCatalogEndpointForms(t *testing.T) {
+	resolver, gateway, listener, _ := resolverFixture(t)
+	writeMap(t, resolver.Path, rowJSON("uid-a", "rv/alpha", firstID))
+	for _, path := range []string{"", "/", "/v1", "/v1/"} {
+		resolver.Endpoint = "https://barbican.example:443" + path
+		expectResolution(t, resolver, gateway, listener, firstID, "")
+	}
+	for _, endpoint := range []string{
+		"http://barbican.example", "//barbican.example", "https://barbican.example/v1/v1",
+		"https://user@barbican.example", "https://barbican.example?", "https://barbican.example#",
+		"https://barbican.example/%76%31", "https://barbican.example:99999",
+	} {
+		resolver.Endpoint = endpoint
+		expectResolution(t, resolver, gateway, listener, "", gatewayv1.ListenerReasonInvalidCertificateRef)
+	}
+}
+
+func TestBarbicanEndpointBehindServicePath(t *testing.T) {
+	for _, endpoint := range []string{
+		"https://cloud.example/key-manager",
+		"https://cloud.example/key-manager/v1/",
+	} {
+		base, ok := barbicanBase(endpoint)
+		if !ok || base != "https://cloud.example/key-manager/v1/secrets/" {
+			t.Fatalf("unexpected key-manager collection %q for %q", base, endpoint)
+		}
+	}
+}
+
+func TestCatalogDiscoveryWaitsForCurrentAuthorizedMetadata(t *testing.T) {
+	resolver, gateway, listener, reader := resolverFixture(t)
+	writeMap(t, resolver.Path, rowJSON("uid-a", "rv/alpha", firstID))
+	discoveries := 0
+	resolver.DiscoverEndpoint = func() (string, error) {
+		discoveries++
+		if discoveries == 1 {
+			return "", errors.New("catalog unavailable")
+		}
+		return "https://barbican.example:443", nil
+	}
+	reader.metadata.ResourceVersion = "too-new"
+	expectResolution(t, resolver, gateway, listener, "", gatewayv1.ListenerReasonInvalidCertificateRef)
+	if discoveries != 0 {
+		t.Fatalf("looked up the Barbican catalog for an unenrolled Secret revision")
+	}
+	reader.metadata.ResourceVersion = "rv/alpha"
+	expectResolution(t, resolver, gateway, listener, "", gatewayv1.ListenerReasonInvalidCertificateRef)
+	expectResolution(t, resolver, gateway, listener, firstID, "")
+}
+
+func TestResolverGetsNativeKubernetesSecretMetadata(t *testing.T) {
+	resolver, gateway, listener, _ := resolverFixture(t)
+	writeMap(t, resolver.Path, rowJSON("uid-a", "rv/alpha", firstID))
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Method != "GET" || request.URL.Path != "/api/v1/namespaces/certs/secrets/web" {
+			t.Errorf("unexpected API request %s %s", request.Method, request.URL.Path)
+		}
+		if !strings.Contains(request.Header.Get("Accept"), "as=PartialObjectMetadata;g=meta.k8s.io;v=v1") {
+			t.Errorf("missing metadata content negotiation: %q", request.Header.Get("Accept"))
+		}
+		response.Header().Set("Content-Type", "application/json")
+		if _, err := fmt.Fprint(response, `{"apiVersion":"meta.k8s.io/v1","kind":"PartialObjectMetadata","metadata":{"namespace":"certs","name":"web","uid":"uid-a","resourceVersion":"rv/alpha"}}`); err != nil {
+			t.Error(err)
+		}
+	}))
+	t.Cleanup(server.Close)
+	mapper := meta.NewDefaultRESTMapper([]schema.GroupVersion{corev1.SchemeGroupVersion})
+	mapper.AddSpecific(corev1.SchemeGroupVersion.WithKind("Secret"), corev1.SchemeGroupVersion.WithResource("secrets"), corev1.SchemeGroupVersion.WithResource("secret"), meta.RESTScopeNamespace)
+	direct, err := client.New(&rest.Config{Host: server.URL}, client.Options{Mapper: mapper})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver.Reader = direct
+	expectResolution(t, resolver, gateway, listener, firstID, "")
+}
+
+func resolverFixture(t *testing.T) (*Resolver, *gatewayv1.Gateway, *gatewayv1.Listener, *certificateReader) {
+	t.Helper()
+	reader := &certificateReader{metadata: metav1.ObjectMeta{Namespace: "certs", Name: "web", UID: "uid-a", ResourceVersion: "rv/alpha"}}
+	resolver := &Resolver{
+		Path: filepath.Join(t.TempDir(), "certificates.json"), ClusterID: "cluster", ProjectID: "project",
+		Region: "RegionOne", Endpoint: "https://barbican.example:443/v1/", Reader: reader,
+	}
+	gateway := &gatewayv1.Gateway{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "certs"},
+		Spec:       gatewayv1.GatewaySpec{GatewayClassName: "octavia"},
+	}
+	listener := &gatewayv1.Listener{
+		Protocol: gatewayv1.HTTPSProtocolType, Port: 443,
+		TLS: &gatewayv1.ListenerTLSConfig{CertificateRefs: []gatewayv1.SecretObjectReference{{Name: "web"}}},
+	}
+	return resolver, gateway, listener, reader
+}
+
+func mapJSON(rows string) string { return `{"version":1,` + scopeJSON + `,"revisions":[` + rows + `]}` }
+
+func rowJSON(uid, version, id string) string {
+	return fmt.Sprintf(`{"namespace":"certs","name":"web","uid":%q,"resourceVersion":%q,"barbicanSecretID":%q,"chainSHA256":[%q],"notBefore":"2020-01-01T00:00:00Z","notAfter":"2050-01-01T00:00:00Z"}`,
+		uid, version, id, strings.Repeat("a", 64))
+}
+
+func writeMap(t *testing.T, path, rows string) {
+	t.Helper()
+	// Replace the read-only file the same way a new mounted snapshot becomes visible.
+	if err := os.WriteFile(path+".new", []byte(mapJSON(rows)), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(path+".new", path); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func expectResolution(t *testing.T, resolver *Resolver, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, id string, reason gatewayv1.ListenerConditionReason) {
+	t.Helper()
+	wantRef := ""
+	if id != "" {
+		wantRef = "https://barbican.example:443/v1/secrets/" + id
+	}
+	gotRef, gotReason := resolver.Resolve(context.Background(), gateway, listener)
+	if gotRef != wantRef || gotReason != reason {
+		t.Fatalf("Resolve = (%q, %q), want (%q, %q)", gotRef, gotReason, wantRef, reason)
+	}
+}
+
+type certificateReader struct {
+	client.Reader
+	metadata   metav1.ObjectMeta
+	grants     []gatewayv1.ReferenceGrant
+	grantError error
+	reads      []string
+}
+
+func (r *certificateReader) Get(_ context.Context, key client.ObjectKey, object client.Object, _ ...client.GetOption) error {
+	r.reads = append(r.reads, "metadata "+key.String())
+	metadata, ok := object.(*metav1.PartialObjectMetadata)
+	if !ok || metadata.GroupVersionKind() != corev1.SchemeGroupVersion.WithKind("Secret") {
+		return fmt.Errorf("expected core Secret metadata, got %T", object)
+	}
+	metadata.ObjectMeta = *r.metadata.DeepCopy()
+	return nil
+}
+
+func (r *certificateReader) List(_ context.Context, object client.ObjectList, options ...client.ListOption) error {
+	opts := (&client.ListOptions{}).ApplyOptions(options)
+	r.reads = append(r.reads, "grants "+opts.Namespace)
+	grants, ok := object.(*gatewayv1.ReferenceGrantList)
+	if !ok || opts.Namespace != "certs" {
+		return fmt.Errorf("expected ReferenceGrants in certs, got %T in %q", object, opts.Namespace)
+	}
+	grants.Items = r.grants
+	return r.grantError
+}

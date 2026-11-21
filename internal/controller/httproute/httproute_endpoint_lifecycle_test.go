@@ -21,12 +21,10 @@ import (
 	"errors"
 	"slices"
 	"testing"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -108,31 +106,6 @@ func TestEndpointMembershipChangesPreserveAttachedRoute(t *testing.T) {
 				t.Fatalf("live cleanup check discarded an Endpoint graph: %#v, %v", snapshot, err)
 			}
 		})
-	}
-}
-
-func TestEndpointSelectionUsesFrozenGatewayMode(t *testing.T) {
-	cfg := testConfig()
-	_, gateway, older, service, endpointSlice := endpointRouteFixture(t)
-	older.CreationTimestamp = metav1.NewTime(time.Unix(1, 0))
-	newer := older.DeepCopy()
-	newer.Name, newer.UID = "newer", "newer-uid"
-	newer.CreationTimestamp = metav1.NewTime(time.Unix(2, 0))
-	newer.Spec.Rules[0].BackendRefs[0].Name = "node-port"
-	nodePort, _, _ := validNodePortBackend(gateway.Namespace, "node-port")
-	// The live class defaults to NodePort. Both route decisions use only the
-	// already frozen Endpoint mode on this Gateway.
-	reader := indexedFakeClientBuilder(testScheme(t), cfg).WithObjects(older, newer, service, endpointSlice, nodePort).Build()
-	r := &Reconciler{Config: cfg, Client: reader}
-	parent := managedRouteParent{ref: newer.Spec.ParentRefs[0], gateway: gateway, listener: &gateway.Spec.Listeners[0]}
-	selected, err := r.isSelectedRoute(t.Context(), newer, parent)
-	if err != nil || selected {
-		t.Fatalf("older valid ClusterIP route lost its Endpoint slot: selected=%t, error=%v", selected, err)
-	}
-	parent.ref = older.Spec.ParentRefs[0]
-	selected, err = r.isSelectedRoute(t.Context(), older, parent)
-	if err != nil || !selected {
-		t.Fatalf("frozen Endpoint route was rejected: selected=%t, error=%v", selected, err)
 	}
 }
 

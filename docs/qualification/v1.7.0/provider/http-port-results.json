@@ -1,0 +1,212 @@
+{
+  "sourceRevision": "2b084bc00110b84155c2f8b6df03966186d8a771",
+  "gatewayAPI": "v1.7.0",
+  "channels": {
+    "standard": {
+      "sourceRevision": "2b084bc00110b84155c2f8b6df03966186d8a771",
+      "upstreamRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "channel": "standard",
+      "gatewayAPI": "v1.7.0",
+      "kubernetes": "1.36.2 envtest",
+      "startedUTC": "2026-11-21T09:42:12.892644+00:00",
+      "case": "GatewayWithAttachedRoutesWithPort8080",
+      "status": "PASS",
+      "elapsedSeconds": 0.52,
+      "subcase": "Gateway_listener_should_have_attached_route_by_specifying_the_sectionName",
+      "subcaseStatus": "PASS",
+      "patchSHA256": "bb8cb68f34ff18dd8cce84e8afe476dc9215b770984d66267b2004acc3d04b51",
+      "releaseManifestSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "suiteLogSHA256": "45db0499a199cadd9a7a677ef2b92d1e48d1c4ba9fb5801468cb3bdca664128e",
+      "defaultDeadlines": true,
+      "scope": "Original Gateway API case and manifest with a recording OpenStack provider, genuine CRDs, release admission objects and scoped Namespace/Service prerequisites. Status only. No grouped profile or live OpenStack."
+    },
+    "experimental": {
+      "sourceRevision": "2b084bc00110b84155c2f8b6df03966186d8a771",
+      "upstreamRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "channel": "experimental",
+      "gatewayAPI": "v1.7.0",
+      "kubernetes": "1.36.2 envtest",
+      "startedUTC": "2026-11-21T09:42:12.892605+00:00",
+      "case": "GatewayWithAttachedRoutesWithPort8080",
+      "status": "PASS",
+      "elapsedSeconds": 0.42,
+      "subcase": "Gateway_listener_should_have_attached_route_by_specifying_the_sectionName",
+      "subcaseStatus": "PASS",
+      "patchSHA256": "bb8cb68f34ff18dd8cce84e8afe476dc9215b770984d66267b2004acc3d04b51",
+      "releaseManifestSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "suiteLogSHA256": "31bf49265bc3e526713e66cea4b9e18009489ee18320be5259b80f4fe919d374",
+      "defaultDeadlines": true,
+      "scope": "Original Gateway API case and manifest with a recording OpenStack provider, genuine CRDs, release admission objects and scoped Namespace/Service prerequisites. Status only. No grouped profile or live OpenStack."
+    }
+  },
+  "controllerTraffic": {
+    "test": "TestHibiscusDistinctHTTPListenerPorts",
+    "provider": "recording OpenStack HTTP API with the stock Amphora template and HAProxy 3.0.19 on loopback",
+    "sameHost": "api.example.com",
+    "samePath": "/api",
+    "before": [
+      "hibiscus-node-backend",
+      "hibiscus-other-port-backend"
+    ],
+    "afterRetiringFirstPort": [
+      "connection refused",
+      "hibiscus-other-port-backend"
+    ],
+    "kubelets": false
+  },
+  "nativePublicAPI": {
+    "delete": {
+      "after": {
+        "listenerA": 404,
+        "listenerB": "ACTIVE",
+        "loadBalancer": "ACTIVE",
+        "policyA": 404,
+        "poolA": "retained with original member and no listeners",
+        "rulesA": [
+          404,
+          404
+        ]
+      },
+      "amphoraCalls": [
+        "upload_config",
+        "reload_listener"
+      ],
+      "apiStatus": 204,
+      "dispatched": "delete_listener",
+      "pending": {
+        "listenerA": "PENDING_DELETE",
+        "listenerB": "ACTIVE",
+        "loadBalancer": "PENDING_UPDATE"
+      }
+    },
+    "ports": {
+      "A": 50699,
+      "B": 57199
+    },
+    "readback": {
+      "before": {
+        "listeners": 2,
+        "loadBalancers": 1,
+        "members": 2,
+        "policies": 2,
+        "pools": 2,
+        "rules": 4
+      },
+      "listenersPointToCommonLoadBalancer": true,
+      "policiesPointToTheirListenerAndPool": true,
+      "policyFilterReturnsOnlyItsListener": true,
+      "poolsPointToCommonLoadBalancerAndTheirListener": true
+    },
+    "requests": [
+      {
+        "backend": "A",
+        "host": "same.example.test",
+        "path": "/app",
+        "phase": "both-listeners",
+        "port": 50699,
+        "status": 200
+      },
+      {
+        "backend": "B",
+        "host": "same.example.test",
+        "path": "/app",
+        "phase": "both-listeners",
+        "port": 57199,
+        "status": 200
+      },
+      {
+        "backend": null,
+        "host": "same.example.test",
+        "path": "/other",
+        "phase": "both-listeners",
+        "port": 57199,
+        "status": 503
+      },
+      {
+        "connection": "refused",
+        "host": "same.example.test",
+        "path": "/app",
+        "phase": "after-worker-delete",
+        "port": 50699
+      },
+      {
+        "backend": "B",
+        "host": "same.example.test",
+        "path": "/app",
+        "phase": "after-worker-delete",
+        "port": 57199,
+        "status": 200
+      }
+    ],
+    "versions": {
+      "haproxy": "3.0.19",
+      "octavia": "19.0.0",
+      "octavia-lib": "3.12.0"
+    }
+  },
+  "rollback": {
+    "writerRevision": "2b084bc00110b84155c2f8b6df03966186d8a771",
+    "readerRevision": "d6278819244862c6dca7654ccc779f60622e62c9",
+    "method": "The current Gateway and HTTPRoute reconcilers persisted synthetic Kubernetes objects to a fake client. The previous version reloaded those serialized objects and ran its normal Gateway and HTTPRoute reconcilers against a recording provider.",
+    "cases": [
+      {
+        "stage": "unenrolled-singleton",
+        "httpPorts": [
+          80
+        ],
+        "previousSpecAccepted": true,
+        "previousGatewayBindingAccepted": true,
+        "previousRouteBindingAccepted": true,
+        "previousGraphOutcome": "Reconciled the serving route through member port 30080. Same synthetic VIP, UIDs and binding metadata. Current programmed status; no delete requests."
+      },
+      {
+        "stage": "two-ports",
+        "httpPorts": [
+          80,
+          8080
+        ],
+        "previousSpecAccepted": false,
+        "previousGatewayBindingAccepted": false,
+        "previousRouteBindingAccepted": false,
+        "previousGraphOutcome": "Provider calls zero. Gateway and surviving route binding metadata preserved. Gateway Accepted=False/InvalidParameters, Programmed=False/Invalid, observed address cleared from Kubernetes status. HTTPRoute reconcile returned a binding finalizer mismatch."
+      },
+      {
+        "stage": "enrolled-singleton",
+        "httpPorts": [
+          80
+        ],
+        "previousSpecAccepted": true,
+        "previousGatewayBindingAccepted": false,
+        "previousRouteBindingAccepted": false,
+        "previousGraphOutcome": "Provider calls zero. Gateway and surviving route binding metadata preserved. Gateway Accepted=False/InvalidParameters, Programmed=False/Invalid, observed address cleared from Kubernetes status. HTTPRoute reconcile returned a binding finalizer mismatch."
+      }
+    ],
+    "writerShrink": {
+      "retainedRoutePort": 80,
+      "retainedMemberPort": 30080,
+      "sameSyntheticVIP": true,
+      "sameGatewayAndServingRouteUIDs": true,
+      "retiringRouteDeleteRequested": true,
+      "retainedScopedGatewayTopologyAndHttpRouteFinalizers": true
+    },
+    "writerCleanup": "The current reconciler processed deletion of the remaining route first, then the enrolled Gateway. It requested both graph deletions and finalized both synthetic Kubernetes objects after Ready responses from the recording provider.",
+    "rollback": "Keep the current controller running while migrating or draining client traffic. Delete or detach the scoped routes and confirm their cleanup. Delete the enrolled Gateway and wait for Kubernetes finalization. Verify removal of the old owned Octavia resources before reverting. Recreate a supported single-port Gateway and routes through the previous controller and verify client traffic. Leave binding annotations and finalizers under controller ownership. Plan for an endpoint or VIP change.",
+    "operationalBoundary": "Physical Octavia cleanup, an actual cluster rollback, destination reachability, traffic migration and VIP reuse were outside this test. Readback changes to status.addresses describe Kubernetes status only.",
+    "testsPassed": [
+      "TestCaptureHTTPDistinctPortDowngrade",
+      "TestGatewayWithAttachedRoutesWithPort8080",
+      "TestReadHTTPDistinctPortDowngrade/unenrolled-singleton",
+      "TestReadHTTPDistinctPortDowngrade/two-ports",
+      "TestReadHTTPDistinctPortDowngrade/enrolled-singleton"
+    ],
+    "checksums": {
+      "http_downgrade_test.go": "cd81650bf25777b286bfcbe7b1e4e295cad44f8847ddaea57de399f326a90e79",
+      "evidence/current.log": "dda16d405868a63510dfd56eaa418e8e4b1b1ab23f63305fd690c563f7093706",
+      "evidence/previous.log": "75a5195b6ee254efa0f5ec2e449e07e1086274ba823510803fd661a9cdeb4d4b",
+      "evidence/unenrolled-singleton.json": "2ea3e87e426e03fbceb0d8ddfb9a52c40cb7bbe9639ea75fce0b9012e37c15f8",
+      "evidence/two-ports.json": "317f00e1f702e406ae3f46d197159c45adb0166475d914b8cb8171f1daf26370",
+      "evidence/enrolled-singleton.json": "ba76c66949a3bad4780c2b314f0f1ae8d78b35f507778d9d405ffe894545beff"
+    }
+  },
+  "liveHibiscus": false
+}

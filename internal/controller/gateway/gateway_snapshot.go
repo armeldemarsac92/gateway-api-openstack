@@ -49,6 +49,7 @@ type gatewayMutationSnapshot struct {
 	gateway      *gatewayv1.Gateway
 	gatewayClass *gatewayv1.GatewayClass
 	listener     *gatewayv1.Listener
+	listeners    []*gatewayv1.Listener
 	binding      gatewayBindingRequirement
 	topology     classconfig.Resolved
 }
@@ -70,7 +71,7 @@ func (r *Reconciler) observeGatewayMutationSnapshot(
 	if err := r.APIReader.Get(ctx, client.ObjectKeyFromObject(expected), &gateway); err != nil {
 		return nil, errors.Join(errGatewayChanged, client.IgnoreNotFound(err))
 	}
-	if gateway.UID != expected.UID || gateway.Generation != expected.Generation ||
+	if gateway.UID != expected.UID || gateway.Generation != expected.Generation || !reflect.DeepEqual(gateway.Spec, expected.Spec) ||
 		!gateway.DeletionTimestamp.IsZero() {
 		return nil, errGatewayChanged
 	}
@@ -83,7 +84,7 @@ func (r *Reconciler) observeGatewayMutationSnapshot(
 	); err != nil {
 		return nil, errors.Join(errGatewayChanged, client.IgnoreNotFound(err))
 	}
-	if gatewayClass.Spec.ControllerName != r.Config.ControllerName {
+	if gatewayClass.Spec.ControllerName != r.Config.ControllerName || (r.gatewayUsesListenerScope(&gateway) && !gatewayClass.DeletionTimestamp.IsZero()) {
 		return nil, errGatewayChanged
 	}
 	if !controller.GatewayClassSupportsInstalledVersion(&gatewayClass) {
@@ -96,16 +97,20 @@ func (r *Reconciler) observeGatewayMutationSnapshot(
 		return nil, errors.Join(errGatewayChanged, err)
 	}
 
-	listener, validationErr := Validate(&gateway)
+	listeners, validationErr := SupportedListenersForConfig(r.Config, &gateway)
 	if validationErr != nil {
 		return nil, errGatewayChanged
 	}
-	listenerPort := strconv.Itoa(int(listener.Port))
+	if !r.gatewayBindingComplete(&gateway) && validateAddresses(gateway.Spec.Addresses) != nil {
+		return nil, errGatewayChanged
+	}
+	listener := listeners[0]
+	listenerPort := r.desiredListenerPort(&gateway, listener)
 	if expectedListenerPort != "" && listenerPort != expectedListenerPort {
 		return nil, errGatewayChanged
 	}
-	if binding == gatewayBindingRequired &&
-		gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] != listenerPort {
+	if r.gatewayListenerNeedsReplacement(&gateway, listener) ||
+		(binding == gatewayBindingRequired && (!r.gatewayBindingComplete(&gateway) || r.gatewayNeedsListenerScope(&gateway))) {
 		return nil, errGatewayChanged
 	}
 
@@ -126,6 +131,7 @@ func (r *Reconciler) observeGatewayMutationSnapshot(
 		topology:     topology,
 		gatewayClass: &gatewayClass,
 		listener:     listener,
+		listeners:    listeners,
 		binding:      binding,
 	}, nil
 }
@@ -137,7 +143,7 @@ func (r *Reconciler) sealGatewayMutationSnapshot(
 	ctx context.Context,
 	snapshot *gatewayMutationSnapshot,
 ) error {
-	if err := controller.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
+	if err := r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
 		return err
 	}
 
@@ -145,7 +151,7 @@ func (r *Reconciler) sealGatewayMutationSnapshot(
 	if err := r.APIReader.Get(ctx, client.ObjectKeyFromObject(snapshot.gateway), &gateway); err != nil {
 		return errors.Join(errGatewayChanged, client.IgnoreNotFound(err))
 	}
-	if gateway.UID != snapshot.gateway.UID || gateway.Generation != snapshot.gateway.Generation ||
+	if gateway.UID != snapshot.gateway.UID || gateway.Generation != snapshot.gateway.Generation || !reflect.DeepEqual(gateway.Spec, snapshot.gateway.Spec) ||
 		!gateway.DeletionTimestamp.IsZero() ||
 		!controller.GatewayBindingMetadataEqual(r.Config, &gateway, snapshot.gateway) {
 		return errGatewayChanged
@@ -171,7 +177,8 @@ func (r *Reconciler) sealGatewayMutationSnapshot(
 	); err != nil {
 		return errors.Join(errGatewayChanged, client.IgnoreNotFound(err))
 	}
-	if gatewayClass.Spec.ControllerName != r.Config.ControllerName {
+	if gatewayClass.Spec.ControllerName != r.Config.ControllerName || (r.gatewayUsesListenerScope(&gateway) &&
+		(gatewayClass.UID != snapshot.gatewayClass.UID || gatewayClass.Generation != snapshot.gatewayClass.Generation || !gatewayClass.DeletionTimestamp.IsZero())) {
 		return errGatewayChanged
 	}
 	if !controller.GatewayClassSupportsInstalledVersion(&gatewayClass) {
@@ -223,25 +230,30 @@ func (r *Reconciler) decideGatewayPhase(scope *gatewayScope) gatewayPhaseDecisio
 		}
 		return gatewayPhaseDecision{phase: gatewayPhaseIgnore}
 	}
-	if scope.gatewayClass != nil && !controller.GatewayClassSupportsInstalledVersion(scope.gatewayClass) {
+	if scope.gatewayClass != nil && !controller.GatewayClassSupportsInstalledVersion(scope.gatewayClass) && !hasListenerRequestFilters(gateway) {
 		return gatewayPhaseDecision{phase: gatewayPhaseUnsupportedVersion}
 	}
 	if err := controller.ValidateGatewayBinding(r.Config, gateway); err != nil {
 		return gatewayPhaseDecision{phase: gatewayPhaseInvalidBinding, validation: err}
 	}
 
-	listener, err := Validate(gateway)
+	listeners, err := SupportedListenersForConfig(r.Config, gateway)
 	if err != nil {
 		return gatewayPhaseDecision{phase: gatewayPhaseInvalidSpec, validation: err}
 	}
-	listenerPort := strconv.Itoa(int(listener.Port))
-	storedListenerPort := gateway.Annotations[r.Config.GatewayListenerPortAnnotation()]
-	if storedListenerPort != "" && storedListenerPort != listenerPort {
+	listener := listeners[0]
+	if !r.gatewayBindingComplete(gateway) {
+		if err := validateAddresses(gateway.Spec.Addresses); err != nil {
+			return gatewayPhaseDecision{phase: gatewayPhaseInvalidSpec, validation: err}
+		}
+	}
+	listenerPort := r.desiredListenerPort(gateway, listener)
+	if r.gatewayListenerNeedsReplacement(gateway, listener) {
 		return gatewayPhaseDecision{
 			phase: gatewayPhaseReplaceGraph, listener: listener, listenerPort: listenerPort,
 		}
 	}
-	if !r.gatewayBindingComplete(gateway) {
+	if !r.gatewayBindingComplete(gateway) || r.gatewayNeedsListenerScope(gateway) {
 		return gatewayPhaseDecision{phase: gatewayPhaseBind, listener: listener, listenerPort: listenerPort}
 	}
 	return gatewayPhaseDecision{phase: gatewayPhaseEnsure, listener: listener, listenerPort: listenerPort}
@@ -252,6 +264,39 @@ func (r *Reconciler) gatewayBindingComplete(gateway *gatewayv1.Gateway) bool {
 		gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] != "" &&
 		gateway.Annotations[r.Config.GatewayClusterIDAnnotation()] != "" &&
 		gateway.Annotations[r.Config.GatewayProjectIDAnnotation()] != ""
+}
+
+func (r *Reconciler) gatewayListenerNeedsReplacement(gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) bool {
+	storedPort := gateway.Annotations[r.Config.GatewayListenerPortAnnotation()]
+	return storedPort != "" && (storedPort != r.desiredListenerPort(gateway, listener) || r.boundListenerProtocol(gateway) != listenerFamily(listener))
+}
+
+func (r *Reconciler) desiredListenerPort(gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) string {
+	stored := gateway.Annotations[r.Config.GatewayListenerPortAnnotation()]
+	if stored != "" && r.boundListenerProtocol(gateway) == listenerFamily(listener) && r.gatewayUsesListenerScope(gateway) {
+		return stored
+	}
+	return strconv.Itoa(int(listener.Port))
+}
+
+func (r *Reconciler) gatewayUsesListenerScope(gateway *gatewayv1.Gateway) bool {
+	return r.requestsListenerScope(gateway) || controller.GatewayListenerScope(r.Config, gateway) != ""
+}
+
+func (r *Reconciler) gatewayNeedsListenerScope(gateway *gatewayv1.Gateway) bool {
+	return r.requestsListenerScope(gateway) && controller.GatewayListenerScope(r.Config, gateway) == ""
+}
+
+func (r *Reconciler) requestsListenerScope(gateway *gatewayv1.Gateway) bool {
+	return usesHTTPSProfile(r.Config, gateway) || hasMultipleTransportListeners(gateway) || HasMultipleHTTPListenerPorts(gateway)
+}
+
+func (r *Reconciler) boundListenerProtocol(gateway *gatewayv1.Gateway) gatewayv1.ProtocolType {
+	storedProtocol := gatewayv1.ProtocolType(gateway.Annotations[r.Config.GatewayListenerProtocolAnnotation()])
+	if storedProtocol == "" {
+		return gatewayv1.HTTPProtocolType
+	}
+	return storedProtocol
 }
 
 type gatewayCleanupDisposition string
@@ -265,9 +310,13 @@ const (
 // gatewayCleanupSnapshot records the live binding and the cleanup authority
 // derived from the current Gateway and GatewayClass lifecycle.
 type gatewayCleanupSnapshot struct {
-	identity     cloud.Identity
-	disposition  gatewayCleanupDisposition
-	listenerPort string
+	identity              cloud.Identity
+	disposition           gatewayCleanupDisposition
+	boundListenerProtocol gatewayv1.ProtocolType
+	boundListenerPort     string
+	scopedListeners       bool
+	listenerPort          string
+	listenerProtocol      gatewayv1.ProtocolType
 }
 
 func (r *Reconciler) observeGatewayCleanupSnapshot(
@@ -292,8 +341,11 @@ func (r *Reconciler) observeGatewayCleanupSnapshot(
 	}
 
 	snapshot := &gatewayCleanupSnapshot{
-		identity:    controller.StoredGatewayIdentity(r.Config, &gateway),
-		disposition: gatewayCleanupDelete,
+		identity:              controller.StoredGatewayIdentity(r.Config, &gateway),
+		disposition:           gatewayCleanupDelete,
+		boundListenerProtocol: r.boundListenerProtocol(&gateway),
+		boundListenerPort:     gateway.Annotations[r.Config.GatewayListenerPortAnnotation()],
+		scopedListeners:       controller.GatewayListenerScope(r.Config, &gateway) != "",
 	}
 	if !gateway.DeletionTimestamp.IsZero() {
 		return snapshot, nil
@@ -306,7 +358,7 @@ func (r *Reconciler) observeGatewayCleanupSnapshot(
 		&gatewayClass,
 	); err != nil {
 		if apierrors.IsNotFound(err) {
-			if versionErr := controller.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); versionErr != nil {
+			if versionErr := r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); versionErr != nil {
 				return nil, versionErr
 			}
 			return snapshot, nil
@@ -316,21 +368,28 @@ func (r *Reconciler) observeGatewayCleanupSnapshot(
 	if gatewayClass.Spec.ControllerName != r.Config.ControllerName {
 		return snapshot, nil
 	}
+	// A bound listener cannot continue serving without its requested filters. The
+	// live identity and resource-version checks above still apply during bundle skew.
+	if hasListenerRequestFilters(&gateway) {
+		snapshot.disposition = gatewayCleanupRebuild
+		return snapshot, nil
+	}
 	if !controller.GatewayClassSupportsInstalledVersion(&gatewayClass) {
 		return nil, controller.ErrUnsupportedGatewayAPIVersion
 	}
-	if err := controller.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
+	if err := r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
 		return nil, err
 	}
-	listener, validationErr := Validate(&gateway)
+	listeners, validationErr := SupportedListenersForConfig(r.Config, &gateway)
 	if validationErr != nil {
 		snapshot.disposition = gatewayCleanupRebuild
 		return snapshot, nil
 	}
-	storedListenerPort := gateway.Annotations[r.Config.GatewayListenerPortAnnotation()]
-	if storedListenerPort != "" && storedListenerPort != strconv.Itoa(int(listener.Port)) {
+	listener := listeners[0]
+	if r.gatewayListenerNeedsReplacement(&gateway, listener) {
 		snapshot.disposition = gatewayCleanupRebuild
 		snapshot.listenerPort = strconv.Itoa(int(listener.Port))
+		snapshot.listenerProtocol = listenerFamily(listener)
 		return snapshot, nil
 	}
 

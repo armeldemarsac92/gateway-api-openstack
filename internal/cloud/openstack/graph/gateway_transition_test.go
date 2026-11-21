@@ -462,8 +462,8 @@ func TestDeleteGatewayExecutesOnlyFirstValidatedStep(t *testing.T) {
 			safetyWriteJSON(t, w, map[string]any{"loadbalancers": []any{gatewayTransitionLoadBalancer(loadBalancerTags, "ACTIVE")}})
 		case request.Method == http.MethodGet && request.URL.Path == "/lbaas/loadbalancers/load-balancer-1":
 			safetyWriteJSON(t, w, map[string]any{"loadbalancer": gatewayTransitionLoadBalancer(loadBalancerTags, "ACTIVE")})
-		case request.Method == http.MethodDelete:
-			w.WriteHeader(http.StatusNoContent)
+		case request.Method == http.MethodPut && request.URL.Path == "/lbaas/loadbalancers/load-balancer-1":
+			safetyWriteJSON(t, w, map[string]any{"loadbalancer": gatewayTransitionLoadBalancer(loadBalancerTags, "PENDING_UPDATE")})
 		default:
 			graphHandler.ServeHTTP(w, request)
 		}
@@ -490,7 +490,7 @@ func TestDeleteGatewayExecutesOnlyFirstValidatedStep(t *testing.T) {
 	if outcome.State != cloud.OutcomeProgressing {
 		t.Fatalf("DeleteGateway() outcome = %#v, want Progressing", outcome)
 	}
-	want := []string{"/lbaas/l7policies/policy-1/rules/rule-1"}
+	want := []string{"/lbaas/loadbalancers/load-balancer-1"}
 	if got := requests.mutationPaths(); !equalGatewayTransitionPaths(got, want) {
 		t.Fatalf("mutating requests = %v, want %v", got, want)
 	}

@@ -31,6 +31,8 @@ import (
 // The compiler does not establish its completeness or authorize references by
 // virtue of their presence in these collections.
 type Input struct {
+	// OperatorHTTPS allows HTTPS sections admitted by the stock frontend profile.
+	OperatorHTTPS   bool
 	Gateway         *gatewayv1.Gateway
 	Routes          []gatewayv1.HTTPRoute
 	Namespaces      []corev1.Namespace
@@ -104,7 +106,17 @@ type Rule struct {
 	Index       int
 	Matches     []Match
 	Backends    []BackendGroup
+	Redirect    *RequestRedirect
 	Diagnostics []Diagnostic
+}
+
+// RequestRedirect is a fixed-host action with no path modifier or backend.
+// An empty scheme or a zero port is resolved for the selected listener.
+type RequestRedirect struct {
+	Hostname   string
+	Scheme     string
+	Port       int
+	StatusCode int
 }
 
 // Match is one alternative within a rule. Its header predicates are conjunctive.
@@ -157,6 +169,9 @@ type RouteMatch struct {
 	MatchIndex int
 	Hostname   string
 	Match      Match
+	// Precedence is the zero-based position in the complete listener model.
+	Precedence    int
+	routeHostname string
 }
 
 func source(object metav1.Object) Source {

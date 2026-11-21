@@ -22,7 +22,7 @@ Ask on the issue if that is not true.
 Clone the canonical project repository:
 
 ```sh
-git clone https://github.com/gateway-api-openstack/gateway-api-openstack.git
+git clone https://github.com/armeldemarsac92/gateway-api-openstack.git
 cd gateway-api-openstack
 ```
 
@@ -31,25 +31,15 @@ Use `github.com/gateway-api-openstack/gateway-api-openstack` for imports within 
 Use the Go version in `go.mod`.
 Unit tests use fake Kubernetes clients or fake OpenStack HTTP servers and do not need cloud credentials.
 
-Run the normal checks with:
-
-```sh
-make verify
-make test-race
-```
-
-Controller tests that need API server behavior use envtest:
+Pull requests use Go 1.27.4 and the linter printed by `make lint-version`. With the pinned linter and a container builder installed, run the same checks locally.
 
 ```sh
 make envtest-assets
-make test-envtest
+make ci
 ```
 
-The first command downloads the pinned Kubernetes control plane binaries.
-The envtest suite installs the Gateway API Standard Channel CRDs pinned by this repository.
-It does not run Octavia, send traffic, or provide Gateway API conformance evidence.
+The unit suite runs once under the race detector. The default envtest starts a local Kubernetes API server and installs the genuine v1.7.0 Standard CRDs and admission objects. Run `make test-envtest GATEWAY_API_CHANNEL=experimental` for an independent Experimental control plane. Use `make verify` for quick local checks and `make container-build CONTAINER_TOOL=podman` with a rootless Podman builder. Credentialed E2E and conformance run on a designated disposable environment.
 
-Run `make lint` when `golangci-lint` is installed.
 Use `make fmt` for Go source formatting.
 Do not run `make manifests`, `make generate`, or Kubebuilder scaffolding commands.
 This repository consumes upstream Gateway API types and maintains its class configuration API, CRD, Kustomize, and RBAC files by hand.

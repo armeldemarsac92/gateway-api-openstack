@@ -35,9 +35,9 @@ const (
 	invalidBindingMessage = "Controller binding is incomplete or does not match the configured cluster and OpenStack project"
 )
 
-// CollectOwnershipSnapshot reads the complete set of Gateway and HTTPRoute
+// CollectOwnershipSnapshot reads the complete set of Gateway and Route
 // bindings for one controller installation. It does not mutate Kubernetes
-// objects and returns no partial snapshot when either list operation fails.
+// objects and returns no partial snapshot when a list operation fails.
 func CollectOwnershipSnapshot(ctx context.Context, reader client.Reader, config controller.Config) (audit.KubernetesSnapshot, error) {
 	snapshot := audit.KubernetesSnapshot{
 		Records: []audit.OwnershipRecord{},
@@ -57,6 +57,18 @@ func CollectOwnershipSnapshot(ctx context.Context, reader client.Reader, config 
 	var routes gatewayv1.HTTPRouteList
 	if err := reader.List(ctx, &routes); err != nil {
 		return audit.KubernetesSnapshot{}, fmt.Errorf("list HTTPRoutes for ownership audit: %w", err)
+	}
+
+	var streams gatewayv1.TCPRouteList
+	if err := reader.List(ctx, &streams); err != nil {
+		return audit.KubernetesSnapshot{}, fmt.Errorf("list TCPRoutes for ownership audit: %w", err)
+	}
+	var datagrams gatewayv1.UDPRouteList
+	if err := reader.List(ctx, &datagrams); err != nil {
+		return audit.KubernetesSnapshot{}, fmt.Errorf("list UDPRoutes for ownership audit: %w", err)
+	}
+	if gateways.Continue != "" || routes.Continue != "" || streams.Continue != "" || datagrams.Continue != "" {
+		return audit.KubernetesSnapshot{}, fmt.Errorf("incomplete Kubernetes ownership inventory")
 	}
 
 	for index := range gateways.Items {
@@ -80,21 +92,14 @@ func CollectOwnershipSnapshot(ctx context.Context, reader client.Reader, config 
 		})
 	}
 
-	for index := range routes.Items {
-		route := &routes.Items[index]
-		if !controller.RouteHasControllerBinding(config, route) {
-			continue
-		}
-		object := routeAuditReference(route)
-		identity, present, err := controller.StoredRouteIdentity(config, route)
-		if err != nil || !present {
-			snapshot.Issues = append(snapshot.Issues, invalidBindingIssue(object))
-			continue
-		}
-		snapshot.Records = append(snapshot.Records, audit.OwnershipRecord{
-			Identity: identity,
-			Objects:  []audit.ObjectReference{object},
-		})
+	for i := range routes.Items {
+		recordRoute(&snapshot, config, &routes.Items[i], "HTTPRoute")
+	}
+	for i := range streams.Items {
+		recordRoute(&snapshot, config, &streams.Items[i], "TCPRoute")
+	}
+	for i := range datagrams.Items {
+		recordRoute(&snapshot, config, &datagrams.Items[i], "UDPRoute")
 	}
 
 	sortOwnershipSnapshot(&snapshot)
@@ -126,14 +131,23 @@ func gatewayAuditReference(gateway *gatewayv1.Gateway) audit.ObjectReference {
 	}
 }
 
-func routeAuditReference(route *gatewayv1.HTTPRoute) audit.ObjectReference {
-	return audit.ObjectReference{
-		APIVersion: gatewayv1.GroupVersion.String(),
-		Kind:       "HTTPRoute",
-		Namespace:  route.Namespace,
-		Name:       route.Name,
-		UID:        string(route.UID),
+func recordRoute(snapshot *audit.KubernetesSnapshot, config controller.Config, route client.Object, kind string) {
+	if !controller.RouteHasControllerBinding(config, route) {
+		return
 	}
+	object := audit.ObjectReference{APIVersion: gatewayv1.GroupVersion.String(), Kind: kind, Namespace: route.GetNamespace(), Name: route.GetName(), UID: string(route.GetUID())}
+	identity, present, err := controller.StoredRouteIdentity(config, route)
+	annotations := route.GetAnnotations()
+	scoped := annotations[config.RouteClusterIDAnnotation()] != "" && annotations[config.RouteProjectIDAnnotation()] != ""
+	checkpoint := config.RouteBindingFinalizer(config.ClusterID, config.OpenStackProjectID, identity.GatewayNamespace, identity.GatewayName, identity.GatewayUID)
+	if err != nil || !present || !scoped && !slices.Contains(route.GetFinalizers(), checkpoint) {
+		snapshot.Issues = append(snapshot.Issues, invalidBindingIssue(object))
+		return
+	}
+	snapshot.Records = append(snapshot.Records, audit.OwnershipRecord{
+		Identity: identity,
+		Objects:  []audit.ObjectReference{object},
+	})
 }
 
 func invalidBindingIssue(object audit.ObjectReference) audit.KubernetesIssue {

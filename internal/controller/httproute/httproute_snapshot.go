@@ -23,7 +23,6 @@ import (
 	"slices"
 	"strconv"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -34,6 +33,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	gatewaycontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
 type routeSnapshotPurpose int
@@ -66,23 +66,17 @@ type routeBindingSnapshot struct {
 	matchesDesired bool
 }
 
-type routeSelectionSnapshot struct {
-	slot     routeSlotDecision
-	selected bool
-}
-
 // routeValidationSnapshot contains one live view of every Kubernetes input
 // that authorizes a route graph mutation. It is local to one mutation attempt
 // and must not be retained after releasing the Gateway graph lock.
 type routeValidationSnapshot struct {
 	route             *gatewayv1.HTTPRoute
 	gateway           *gatewayv1.Gateway
-	gatewayClass      *gatewayv1.GatewayClass
-	listener          gatewayv1.Listener
+	parentRef         gatewayv1.ParentReference
 	binding           routeBindingSnapshot
-	selection         routeSelectionSnapshot
 	desired           cloud.RouteSpec
 	backends          *routeModelInputs
+	backendDiagnostic model.Diagnostic
 	gatewayProgrammed bool
 	disposition       routeValidationDisposition
 }
@@ -96,17 +90,13 @@ const (
 )
 
 type routeCleanupSnapshot struct {
-	route       *gatewayv1.HTTPRoute
-	identity    cloud.Identity
-	disposition routeCleanupDisposition
-}
-
-type routeParentObservation struct {
-	ref          gatewayv1.ParentReference
-	gateway      *gatewayv1.Gateway
-	gatewayClass *gatewayv1.GatewayClass
-	listener     *gatewayv1.Listener
-	managed      bool
+	route             *gatewayv1.HTTPRoute
+	identity          cloud.Identity
+	disposition       routeCleanupDisposition
+	referenceRevoked  bool
+	attachmentRevoked bool
+	bundleUnsupported bool
+	parents           []routeParentObservation
 }
 
 func (r *Reconciler) buildRouteValidationSnapshot(
@@ -130,34 +120,48 @@ func (r *Reconciler) buildRouteValidationSnapshotFromInputs(
 		return routeValidationSnapshot{}, err
 	}
 
-	parent, err := r.validateRouteSnapshotParent(&snapshot, purpose)
+	if err := r.observeRouteBinding(&snapshot); err != nil {
+		return routeValidationSnapshot{}, err
+	}
+	candidates, err := r.validateRouteSnapshotParent(&snapshot, purpose)
 	if err != nil || snapshot.disposition == routeValidationGatewayPending {
 		return snapshot, err
 	}
-	if purpose == routeSnapshotForBinding && !snapshot.gatewayProgrammed {
-		return routeValidationSnapshot{}, errHTTPRouteChanged
+	if _, err := validateRouteStructure(snapshot.route); err != nil {
+		return routeValidationSnapshot{}, routeSnapshotRejection(purpose, err)
 	}
-
 	if inputs == nil {
 		routes, err := r.liveGraphRoutes(ctx, controller.GatewayIdentity(r.Config, snapshot.gateway))
 		if err != nil {
 			return routeValidationSnapshot{}, err
 		}
-		inputs, err = collectRouteModelInputs(ctx, r.APIReader, snapshot.gateway, routes)
+		inputs, err = r.collectGraphRouteModelInputs(ctx, snapshot.gateway, routes, snapshot.route)
 		if err != nil {
 			return routeValidationSnapshot{}, err
 		}
 	}
-	selection, desired, err := r.selectAndBuildRouteModel(ctx, snapshot, parent, purpose, inputs)
+	listener, err := selectRouteAttachment(snapshot.route, snapshot.gateway, candidates, inputs.input.Namespaces)
 	if err != nil {
-		return routeValidationSnapshot{}, err
+		return routeValidationSnapshot{}, routeSnapshotRejection(purpose, err)
 	}
-	snapshot.selection = selection
+	if controller.GatewayListenerScope(r.Config, snapshot.gateway) == gatewayv1.HTTPProtocolType {
+		snapshot.gatewayProgrammed = listenerProgrammedForGeneration(snapshot.gateway, listener.Name)
+	}
+	if purpose == routeSnapshotForBinding {
+		if err := r.validateRouteBindingTransition(snapshot); err != nil {
+			return routeValidationSnapshot{}, err
+		}
+	}
+	desired, diagnostic, err := r.buildRouteModelFromInputs(ctx, r.APIReader, snapshot.route, snapshot.gateway, *listener, inputs)
+	if err != nil {
+		return routeValidationSnapshot{}, routeSnapshotReadError(purpose, err)
+	}
 	snapshot.desired = desired
 	snapshot.backends = inputs
+	snapshot.backendDiagnostic = diagnostic
 
-	if err := r.finishRouteBindingSnapshot(&snapshot, purpose); err != nil {
-		return routeValidationSnapshot{}, err
+	if purpose == routeSnapshotForEnsure {
+		r.setRouteBindingDisposition(&snapshot)
 	}
 	return snapshot, nil
 }
@@ -201,7 +205,14 @@ func (r *Reconciler) observeRouteValidationInputs(
 	); err != nil {
 		return routeValidationSnapshot{}, errors.Join(errHTTPRouteChanged, client.IgnoreNotFound(err))
 	}
-	if gatewayClass.Spec.ControllerName != r.Config.ControllerName || len(route.Spec.ParentRefs) != 1 {
+	if gatewayClass.Spec.ControllerName != r.Config.ControllerName {
+		return routeValidationSnapshot{}, errHTTPRouteChanged
+	}
+	parentRef, err := r.soleParentForManagedGateway(ctx, &route, &gateway)
+	if err != nil {
+		return routeValidationSnapshot{}, err
+	}
+	if parentRef == nil {
 		return routeValidationSnapshot{}, errHTTPRouteChanged
 	}
 	if !controller.GatewayClassSupportsInstalledVersion(&gatewayClass) {
@@ -212,96 +223,52 @@ func (r *Reconciler) observeRouteValidationInputs(
 		return routeValidationSnapshot{}, errHTTPRouteChanged
 	}
 	return routeValidationSnapshot{
-		route:        &route,
-		gateway:      &gateway,
-		gatewayClass: &gatewayClass,
-		disposition:  routeValidationReady,
+		route:       &route,
+		gateway:     &gateway,
+		parentRef:   *parentRef,
+		disposition: routeValidationReady,
 	}, nil
 }
 
 func (r *Reconciler) validateRouteSnapshotParent(
 	snapshot *routeValidationSnapshot,
 	purpose routeSnapshotPurpose,
-) (managedRouteParent, error) {
-	listener, validationErr := gatewaycontroller.Validate(snapshot.gateway)
+) ([]*gatewayv1.Listener, error) {
+	listeners, validationErr := gatewaycontroller.ValidatedHTTPRouteListeners(r.Config, snapshot.gateway)
 	if validationErr != nil {
 		if purpose == routeSnapshotForBinding {
-			return managedRouteParent{}, errHTTPRouteChanged
+			return nil, errHTTPRouteChanged
 		}
 		snapshot.disposition = routeValidationGatewayPending
-		return managedRouteParent{}, nil
+		return nil, nil
 	}
-	snapshot.listener = *listener
 	parent := managedRouteParent{
-		ref:          snapshot.route.Spec.ParentRefs[0],
-		gateway:      snapshot.gateway,
-		gatewayClass: snapshot.gatewayClass,
-		listener:     &snapshot.listener,
+		ref:     snapshot.parentRef,
+		gateway: snapshot.gateway,
 	}
-	if err := validateRouteParent(snapshot.route, parent); err != nil {
-		if purpose == routeSnapshotForBinding {
-			return managedRouteParent{}, errHTTPRouteChanged
+	candidates, err := routeParentCandidates(snapshot.route, parent, listeners)
+	if err != nil {
+		return nil, routeSnapshotRejection(purpose, err)
+	}
+	if controller.GatewayListenerScope(r.Config, snapshot.gateway) != gatewayv1.HTTPProtocolType {
+		if gatewaycontroller.RequiresHTTPListenerScope(r.Config, snapshot.gateway) {
+			// Enrollment requires complete route checkpoints, so an established
+			// route must be able to repair its binding before enrollment finishes.
+			annotations := snapshot.route.Annotations
+			if !r.establishedRouteBinding(*snapshot) ||
+				(annotations[r.Config.RouteClusterIDAnnotation()] != "" && annotations[r.Config.RouteProjectIDAnnotation()] != "") {
+				snapshot.disposition = routeValidationGatewayPending
+				return nil, nil
+			}
+		} else if snapshot.gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] != strconv.Itoa(int(candidates[0].Port)) {
+			return nil, errHTTPRouteChanged
 		}
-		return managedRouteParent{}, err
-	}
-	if snapshot.gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] != strconv.Itoa(int(snapshot.listener.Port)) {
-		return managedRouteParent{}, errHTTPRouteChanged
 	}
 	snapshot.gatewayProgrammed = gatewayProgrammedForGeneration(snapshot.gateway)
-	return parent, nil
+	return candidates, nil
 }
 
-func (r *Reconciler) selectAndBuildRouteModel(
-	ctx context.Context,
-	snapshot routeValidationSnapshot,
-	parent managedRouteParent,
-	purpose routeSnapshotPurpose,
-	inputs *routeModelInputs,
-) (routeSelectionSnapshot, cloud.RouteSpec, error) {
-	structurallySupported := structurallySupportedRoute(snapshot.route)
-	if !structurallySupported && purpose == routeSnapshotForBinding {
-		return routeSelectionSnapshot{}, cloud.RouteSpec{}, errHTTPRouteChanged
-	}
-	topology, err := controller.StoredGatewayTopology(r.Config, snapshot.gateway)
-	if err != nil {
-		return routeSelectionSnapshot{}, cloud.RouteSpec{}, err
-	}
-	evaluate := func(route *gatewayv1.HTTPRoute) (routeSlotDecision, error) {
-		reference := route.Spec.Rules[0].BackendRefs[0]
-		service := inputs.service(types.NamespacedName{Namespace: route.Namespace, Name: string(reference.Name)})
-		return routeSlotForService(service, *reference.Port, topology.Topology.MemberMode), nil
-	}
-	selection := routeSelectionSnapshot{}
-	if structurallySupported {
-		decision, _ := evaluate(snapshot.route)
-		selection.slot = decision
-		if !decision.canReserve {
-			return routeSelectionSnapshot{}, cloud.RouteSpec{}, routeSnapshotRejection(purpose, decision.rejection)
-		}
-	}
-	selected, err := selectRouteCandidate(snapshot.route, parent, inputs.input.Routes, evaluate)
-	if err != nil {
-		return routeSelectionSnapshot{}, cloud.RouteSpec{}, routeSnapshotReadError(purpose, err)
-	}
-	selection.selected = selected
-	if !selected {
-		return routeSelectionSnapshot{}, cloud.RouteSpec{}, routeSnapshotRejection(purpose, newRouteBuildError(
-			routeErrorUnsupported,
-			"only one HTTPRoute per Gateway is supported. An older route is already selected",
-		))
-	}
-
-	desired, err := r.buildRouteModelFromInputs(ctx, r.APIReader, snapshot.route, snapshot.gateway, inputs)
-	if err != nil {
-		return routeSelectionSnapshot{}, cloud.RouteSpec{}, routeSnapshotReadError(purpose, err)
-	}
-	return selection, desired, nil
-}
-
-func (r *Reconciler) finishRouteBindingSnapshot(
-	snapshot *routeValidationSnapshot,
-	purpose routeSnapshotPurpose,
-) error {
+func (r *Reconciler) observeRouteBinding(snapshot *routeValidationSnapshot) error {
 	if snapshot.route.Annotations[r.Config.RouteLifecycleAnnotation()] == controller.RouteDetaching {
 		return errHTTPRouteChanged
 	}
@@ -310,29 +277,26 @@ func (r *Reconciler) finishRouteBindingSnapshot(
 		return err
 	}
 	desiredIdentity := controller.RouteIdentity(r.Config, snapshot.gateway, snapshot.route)
-	binding := routeBindingSnapshot{
+	snapshot.binding = routeBindingSnapshot{
 		identity:       storedIdentity,
 		present:        bindingPresent,
 		hasFinalizer:   controllerutil.ContainsFinalizer(snapshot.route, r.Config.RouteFinalizer()),
 		matchesDesired: bindingPresent && storedIdentity == desiredIdentity,
 	}
-	snapshot.binding = binding
+	return nil
+}
 
-	if purpose == routeSnapshotForBinding {
-		return r.validateRouteBindingTransition(*snapshot)
-	}
-
-	boundToCurrentGateway := binding.matchesDesired && binding.hasFinalizer
+func (r *Reconciler) setRouteBindingDisposition(snapshot *routeValidationSnapshot) {
+	boundToCurrentGateway := snapshot.binding.matchesDesired && snapshot.binding.hasFinalizer
 	if !snapshot.gatewayProgrammed && !boundToCurrentGateway {
 		snapshot.disposition = routeValidationGatewayPending
-		return nil
+		return
 	}
 	desiredBinding := snapshot.route.DeepCopy()
 	r.applyRouteBinding(desiredBinding, snapshot.gateway)
 	if !routeBindingMetadataEqual(snapshot.route, desiredBinding) {
 		snapshot.disposition = routeValidationBindingRequired
 	}
-	return nil
 }
 
 // validateRouteBindingTransition prevents a binding checkpoint from adopting
@@ -340,7 +304,10 @@ func (r *Reconciler) finishRouteBindingSnapshot(
 // It is pure so an ensure snapshot can be reused without rebuilding the
 // backend model.
 func (r *Reconciler) validateRouteBindingTransition(snapshot routeValidationSnapshot) error {
-	if !snapshot.gatewayProgrammed {
+	// Both finalizers and the stored identity prove this attached route already
+	// belongs to the Gateway. Its metadata must be complete before the graph
+	// writer can program a newer Gateway generation.
+	if !snapshot.gatewayProgrammed && !r.establishedRouteBinding(snapshot) {
 		return errHTTPRouteChanged
 	}
 	if !snapshot.binding.present && snapshot.binding.hasFinalizer {
@@ -356,6 +323,11 @@ func (r *Reconciler) validateRouteBindingTransition(snapshot routeValidationSnap
 	return nil
 }
 
+func (r *Reconciler) establishedRouteBinding(snapshot routeValidationSnapshot) bool {
+	return snapshot.binding.matchesDesired && snapshot.binding.hasFinalizer &&
+		snapshot.route.Annotations[r.Config.RouteLifecycleAnnotation()] == controller.RouteAttached
+}
+
 func gatewayProgrammedForGeneration(gateway *gatewayv1.Gateway) bool {
 	programmed := meta.FindStatusCondition(
 		gateway.Status.Conditions,
@@ -363,6 +335,16 @@ func gatewayProgrammedForGeneration(gateway *gatewayv1.Gateway) bool {
 	)
 	return programmed != nil && programmed.Status == metav1.ConditionTrue &&
 		programmed.ObservedGeneration == gateway.Generation
+}
+
+func listenerProgrammedForGeneration(gateway *gatewayv1.Gateway, section gatewayv1.SectionName) bool {
+	for _, listener := range gateway.Status.Listeners {
+		if listener.Name == section {
+			programmed := meta.FindStatusCondition(listener.Conditions, string(gatewayv1.ListenerConditionProgrammed))
+			return programmed != nil && programmed.Status == metav1.ConditionTrue && programmed.ObservedGeneration == gateway.Generation
+		}
+	}
+	return false
 }
 
 func routeSnapshotReadError(purpose routeSnapshotPurpose, err error) error {
@@ -395,16 +377,13 @@ func (r *Reconciler) sealRouteMutationSnapshot(
 	if err != nil {
 		return err
 	}
-	if !slices.Equal(routeGraphRevisions(snapshot.backends.input.Routes), routeGraphRevisions(routes)) {
-		return errHTTPRouteChanged
-	}
-	return snapshot.backends.validate(ctx, r.APIReader)
+	return r.validateGraphRouteModel(ctx, snapshot.backends, routes, snapshot.route)
 }
 
 // sealRouteOwnershipSnapshot checks durable route and Gateway authority. The
 // graph writer validates shared backend inputs once after all route fences.
 func (r *Reconciler) sealRouteOwnershipSnapshot(ctx context.Context, snapshot routeValidationSnapshot, bindingRequirement routeBindingRequirement) error {
-	if err := controller.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
+	if err := r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
 		return err
 	}
 	var route gatewayv1.HTTPRoute
@@ -459,6 +438,13 @@ func (r *Reconciler) sealRouteOwnershipSnapshot(ctx context.Context, snapshot ro
 	if !controller.GatewayClassSupportsInstalledVersion(&gatewayClass) {
 		return controller.ErrUnsupportedGatewayAPIVersion
 	}
+	parentRef, err := r.soleParentForManagedGateway(ctx, &route, &gateway)
+	if err != nil {
+		return err
+	}
+	if parentRef == nil || !controller.ParentRefsEqual(*parentRef, route.Namespace, snapshot.parentRef, snapshot.route.Namespace) {
+		return errHTTPRouteChanged
+	}
 
 	return nil
 }
@@ -498,50 +484,72 @@ func (r *Reconciler) buildRouteCleanupSnapshot(
 	if !route.DeletionTimestamp.IsZero() || route.Annotations[r.Config.RouteLifecycleAnnotation()] == controller.RouteDetaching {
 		return snapshot, nil
 	}
+	attachment, attachmentRejection, err := r.liveBoundRouteAttachment(ctx, &route, stored)
+	if err != nil {
+		return routeCleanupSnapshot{}, err
+	}
+	if attachmentRejection != nil {
+		snapshot.attachmentRevoked = true
+		return snapshot, nil
+	}
 
-	parentObservations, err := r.observeRouteParentsForCleanup(ctx, &route)
+	parentObservations, err := r.observeRouteParents(ctx, r.APIReader, &route)
 	if err != nil {
 		return routeCleanupSnapshot{}, err
 	}
 	if routeCleanupAllowedDuringVersionMismatch(parentObservations, stored) {
+		snapshot.parents = parentObservations
 		return snapshot, nil
 	}
-	if err := controller.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
-		return routeCleanupSnapshot{}, err
-	}
-	parentObservations, err = r.observeRouteParentsForCleanup(ctx, &route)
+	rejection, err := r.liveRouteBackendReferenceRejection(ctx, &route)
 	if err != nil {
 		return routeCleanupSnapshot{}, err
 	}
+	if rejection != nil && !hasMultipleRoutePaths(&route) {
+		snapshot.referenceRevoked = true
+		return snapshot, nil
+	}
+	if err := r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
+		if errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) && rejection != nil {
+			snapshot.referenceRevoked = true
+			snapshot.bundleUnsupported = true
+			return snapshot, nil
+		}
+		if errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) &&
+			!r.routeForwardingEstablished(&route, managedParentsFromObservations(parentObservations), stored, attachment) {
+			snapshot.bundleUnsupported = true
+			snapshot.parents = parentObservations
+			return snapshot, nil
+		}
+		return routeCleanupSnapshot{}, err
+	}
+	parentObservations, err = r.observeRouteParents(ctx, r.APIReader, &route)
+	if err != nil {
+		return routeCleanupSnapshot{}, err
+	}
+	snapshot.parents = parentObservations
 	managedParents := managedParentsFromObservations(parentObservations)
-	if len(route.Spec.ParentRefs) != 1 || len(managedParents) != 1 {
+	if len(managedParents) != 1 {
 		return snapshot, nil
 	}
 	parent := managedParents[0]
 	if !controller.GatewayClassSupportsInstalledVersion(parent.gatewayClass) {
+		if rejection != nil {
+			snapshot.referenceRevoked = true
+			return snapshot, nil
+		}
+		if !r.routeForwardingEstablished(&route, managedParents, stored, attachment) {
+			return snapshot, nil
+		}
 		return routeCleanupSnapshot{}, controller.ErrUnsupportedGatewayAPIVersion
 	}
-	if validateRouteParent(&route, parent) != nil || !structurallySupportedRoute(&route) {
-		return snapshot, nil
-	}
-	decision, err := r.evaluateRouteSlotWithReader(ctx, r.APIReader, &route, parent.gateway)
-	if err != nil {
-		return routeCleanupSnapshot{}, err
-	}
-	if !decision.canReserve {
-		return snapshot, nil
-	}
-	selected, err := r.isSelectedRouteWithReader(ctx, r.APIReader, &route, parent, false)
-	if err != nil {
-		return routeCleanupSnapshot{}, err
-	}
-	if !selected {
+	if !structurallySupportedRoute(&route) {
 		return snapshot, nil
 	}
 	desired, err := r.buildRouteModelWithReader(ctx, r.APIReader, &route, parent.gateway)
 	if err != nil {
 		var buildError *routeBuildError
-		if errors.As(err, &buildError) || apierrors.IsNotFound(err) {
+		if errors.As(err, &buildError) {
 			return snapshot, nil
 		}
 		return routeCleanupSnapshot{}, err
@@ -550,57 +558,6 @@ func (r *Reconciler) buildRouteCleanupSnapshot(
 		snapshot.disposition = routeCleanupStillDesired
 	}
 	return snapshot, nil
-}
-
-func (r *Reconciler) observeRouteParentsForCleanup(
-	ctx context.Context,
-	route *gatewayv1.HTTPRoute,
-) ([]routeParentObservation, error) {
-	parents := make([]routeParentObservation, 0, len(route.Spec.ParentRefs))
-	for _, parentRef := range route.Spec.ParentRefs {
-		if !controller.IsGatewayParentRef(parentRef) {
-			continue
-		}
-		observation := routeParentObservation{ref: parentRef}
-		namespace := route.Namespace
-		if parentRef.Namespace != nil {
-			namespace = string(*parentRef.Namespace)
-		}
-		var gateway gatewayv1.Gateway
-		if err := r.APIReader.Get(
-			ctx,
-			types.NamespacedName{Namespace: namespace, Name: string(parentRef.Name)},
-			&gateway,
-		); err != nil {
-			if apierrors.IsNotFound(err) {
-				parents = append(parents, observation)
-				continue
-			}
-			return nil, fmt.Errorf("get parent Gateway during Gateway API version check: %w", err)
-		}
-		observation.gateway = &gateway
-		var gatewayClass gatewayv1.GatewayClass
-		if err := r.APIReader.Get(
-			ctx,
-			types.NamespacedName{Name: string(gateway.Spec.GatewayClassName)},
-			&gatewayClass,
-		); err != nil {
-			if apierrors.IsNotFound(err) {
-				parents = append(parents, observation)
-				continue
-			}
-			return nil, fmt.Errorf("get parent GatewayClass during Gateway API version check: %w", err)
-		}
-		observation.gatewayClass = &gatewayClass
-		if gatewayClass.Spec.ControllerName == r.Config.ControllerName {
-			observation.managed = true
-			if len(gateway.Spec.Listeners) == 1 {
-				observation.listener = &gateway.Spec.Listeners[0]
-			}
-		}
-		parents = append(parents, observation)
-	}
-	return parents, nil
 }
 
 func routeCleanupAllowedDuringVersionMismatch(
@@ -627,22 +584,6 @@ func routeCleanupAllowedDuringVersionMismatch(
 	return true
 }
 
-func managedParentsFromObservations(observations []routeParentObservation) []managedRouteParent {
-	parents := make([]managedRouteParent, 0, len(observations))
-	for _, observation := range observations {
-		if !observation.managed {
-			continue
-		}
-		parents = append(parents, managedRouteParent{
-			ref:          observation.ref,
-			gateway:      observation.gateway,
-			gatewayClass: observation.gatewayClass,
-			listener:     observation.listener,
-		})
-	}
-	return parents
-}
-
 func (r *Reconciler) sealRouteCleanupSnapshot(
 	ctx context.Context,
 	snapshot routeCleanupSnapshot,
@@ -666,5 +607,52 @@ func (r *Reconciler) sealRouteCleanupSnapshot(
 	if !present || stored != snapshot.identity {
 		return errHTTPRouteChanged
 	}
+	if snapshot.referenceRevoked {
+		rejection, err := r.liveRouteBackendReferenceRejection(ctx, &route)
+		if err != nil {
+			return err
+		}
+		if rejection == nil {
+			return errHTTPRouteChanged
+		}
+	}
+	if snapshot.attachmentRevoked {
+		_, rejection, err := r.liveBoundRouteAttachment(ctx, &route, stored)
+		if err != nil {
+			return err
+		}
+		if rejection == nil {
+			return errHTTPRouteChanged
+		}
+	}
+	if snapshot.parents != nil {
+		parents, err := r.observeRouteParents(ctx, r.APIReader, &route)
+		if err != nil {
+			return err
+		}
+		if !slices.EqualFunc(snapshot.parents, parents, sameCleanupParentObservation) {
+			return errHTTPRouteChanged
+		}
+	}
+	if snapshot.bundleUnsupported {
+		err := r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader)
+		if err == nil {
+			return errHTTPRouteChanged
+		}
+		if !errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) {
+			return err
+		}
+	}
 	return nil
+}
+
+func sameCleanupParentObservation(a, b routeParentObservation) bool {
+	if a.managed != b.managed || (a.gateway == nil) != (b.gateway == nil) || (a.gatewayClass == nil) != (b.gatewayClass == nil) {
+		return false
+	}
+	if a.gateway != nil && (a.gateway.UID != b.gateway.UID || a.gateway.Generation != b.gateway.Generation) {
+		return false
+	}
+	return a.gatewayClass == nil || (a.gatewayClass.UID == b.gatewayClass.UID &&
+		controller.GatewayClassSupportsInstalledVersion(a.gatewayClass) == controller.GatewayClassSupportsInstalledVersion(b.gatewayClass))
 }

@@ -24,6 +24,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -37,14 +38,14 @@ func TestRouteGraphInventoryRetainsBoundFragmentsWithoutParentRefs(t *testing.T)
 	cfg := testConfig()
 	boundGateway := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "edge", UID: "gateway-1"}}
 	binder := &Reconciler{Config: cfg}
-	boundRoute := func(name, lifecycle string) *gatewayv1.HTTPRoute {
-		route := &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: boundGateway.Namespace, Name: name, UID: types.UID(name + "-uid"), Generation: 1}}
+	boundRoute := func(namespace, lifecycle string) *gatewayv1.HTTPRoute {
+		route := &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "route", UID: types.UID(namespace + "-uid"), Generation: 1}}
 		binder.applyRouteBinding(route, boundGateway)
 		route.Annotations[cfg.RouteLifecycleAnnotation()] = lifecycle
 		return route
 	}
-	detaching := boundRoute("a-detaching", controller.RouteDetaching)
-	attached := boundRoute("b-attached", controller.RouteAttached)
+	detaching := boundRoute("tenant-a", controller.RouteDetaching)
+	attached := boundRoute("tenant-b", controller.RouteAttached)
 	candidate := mapperTestHTTPRoute("default", "candidate", gatewayv1.ParentReference{Name: "edge"}, "backend")
 	candidate.UID = "candidate-uid"
 	unrelated := mapperTestHTTPRoute("default", "unrelated", gatewayv1.ParentReference{Name: "other"}, "backend")
@@ -94,7 +95,7 @@ func TestRouteGraphInventoryFenceDetectsNewCandidatesAndLifecycleChanges(t *test
 					t.Fatal(err)
 				}
 			default:
-				created := mapperTestHTTPRoute("default", "new-route", gatewayv1.ParentReference{Name: "edge"}, "backend")
+				created := mapperTestHTTPRoute("tenant", "new-route", gatewayv1.ParentReference{Name: "edge", Namespace: ptr.To(gatewayv1.Namespace(gateway.Namespace))}, "backend")
 				created.UID = "new-route-uid"
 				switch change {
 				case "bound fragment":
@@ -108,7 +109,7 @@ func TestRouteGraphInventoryFenceDetectsNewCandidatesAndLifecycleChanges(t *test
 				}
 			}
 			err = input.Validate(ctx)
-			if change == "unrelated route" {
+			if change == "unrelated route" || change == "candidate" {
 				if err != nil {
 					t.Fatalf("unrelated route invalidated graph: %v", err)
 				}
@@ -116,6 +117,37 @@ func TestRouteGraphInventoryFenceDetectsNewCandidatesAndLifecycleChanges(t *test
 				t.Fatalf("fence error = %v, want changed graph input", err)
 			}
 		})
+	}
+}
+
+func TestRouteInventoryRequiresDurableBindingEvidence(t *testing.T) {
+	cfg := testConfig()
+	gateway := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "infra", Name: "edge", UID: "gateway-1"}}
+	claim := &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: "tenant", Name: "unrelated", UID: "route-1", Annotations: map[string]string{
+		cfg.RouteGatewayNamespaceAnnotation(): gateway.Namespace,
+		cfg.RouteGatewayNameAnnotation():      gateway.Name,
+	}}}
+	r := &Reconciler{Config: cfg}
+	kubeClient := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(claim).Build()
+	r.APIReader = kubeClient
+	identity := controller.GatewayIdentity(cfg, gateway)
+	request := graph.Request{Identity: identity, Action: graph.DeleteGateway}
+	input, err := r.ObserveRouteGraph(t.Context(), request, gateway)
+	if err != nil || len(input.Nodes) != 0 {
+		t.Fatalf("unsubstantiated annotation affected the Gateway graph: nodes %v, error %v", input.Nodes, err)
+	}
+	if err := kubeClient.Get(t.Context(), client.ObjectKeyFromObject(claim), claim); err != nil {
+		t.Fatal(err)
+	}
+	claim.Finalizers = []string{cfg.RouteBindingFinalizer(identity.ClusterID, identity.OpenStackProjectID, gateway.Namespace, gateway.Name, string(gateway.UID))}
+	if err := kubeClient.Update(t.Context(), claim); err != nil {
+		t.Fatal(err)
+	}
+	if err := input.Validate(t.Context()); !errors.Is(err, errHTTPRouteChanged) {
+		t.Fatalf("new binding evidence passed the fence: %v", err)
+	}
+	if _, err := r.ObserveRouteGraph(t.Context(), request, gateway); err == nil {
+		t.Fatal("incomplete durable binding did not stop graph mutation")
 	}
 }
 

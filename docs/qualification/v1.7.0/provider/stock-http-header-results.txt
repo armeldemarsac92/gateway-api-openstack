@@ -1,0 +1,21 @@
+Octavia 19.0.0, octavia-lib 3.12.0, HAProxy version 3.0.19-ade9c1262 2026/03/19 - https://haproxy.org/
+Public Octavia v2 WSGI, persisted Amphora worker configuration, local HAProxy and three HTTP echo backends.
+SHA-256 of the probe: b25d56b76f84e01fcdce458a24b3280600ddc0a7d2d76cbf2641304781150ace
+SHA-256 of the original local run log: ce2fa70f1af02192400fc4f00acb696ee4360c04471cc722da869b8c63b3020e
+
+256-character name: API HTTP 400
+256-character value: API HTTP 400
+unquoted interior space: API HTTP 400
+exact value: HTTP 200 from backend A
+no header: HTTP 200 from backend C
+mixed-case name: HTTP 200 from backend A
+mixed-case value: HTTP 200 from backend C
+version two alone: HTTP 200 from backend B
+two matching predicates: HTTP 200 from backend A
+second predicate differs: HTTP 200 from backend B
+first predicate absent: HTTP 200 from backend C
+repeated request field: HTTP 200 from backend A
+comma-separated field value: HTTP 200 from backend A
+255-character name and value: HTTP 200 from backend A
+Ran 1 test
+OK

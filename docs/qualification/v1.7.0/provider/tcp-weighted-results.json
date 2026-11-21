@@ -1,0 +1,94 @@
+{
+  "controllerSource": "75101c26553d89b81ab2281297be6ce7daac4f2a",
+  "upstreamCase": "TCPRouteWeightedRouting",
+  "upstreamVersion": "v1.7.0",
+  "kubernetes": "1.36.4",
+  "octavia": "19.0.0",
+  "HAProxy": "3.0.19",
+  "mode": "Endpoint",
+  "commonBaseSHA256": "eec15359b2f8ce095f3da26dfbc9485725c06a985a15796f1bde2ac79158f6ed",
+  "channels": {
+    "standard": {
+      "case": "TCPRouteWeightedRouting",
+      "channel": "standard",
+      "goTestBinarySHA256": "9913d5be3da8001b03d792b35bddac7c68c54d14ef5a833e5b90b4a060429ae3",
+      "result": "PASS",
+      "probePort": 9300,
+      "requestedShares": {
+        "tcp-backend-v1": 70,
+        "tcp-backend-v2": 30,
+        "tcp-backend-v3": 0
+      },
+      "receivedEchoesAtVIPAndMembersIncludingAvailabilityChecks": {
+        "tcp-backend-v1": 351,
+        "tcp-backend-v2": 150,
+        "tcp-backend-v3": 0
+      },
+      "upstreamDistributionAttemptsReportingFailure": 0,
+      "pcapKernelDrops": {
+        "vip": 0,
+        "member": 0
+      },
+      "pcapSHA256": {
+        "vip": "fae2f2cfa2a1f5c7580483326eaaa4854b2762245ee1ef389de015733e66fe6c",
+        "member": "020770faff22b12f52e9bf67e9886ffca6852e1953c1d56d9f0e3b1c9988dc34"
+      },
+      "caseLogSHA256": "59eb6e4a140ec72241fdafe8734ae2900ff396d0a4d127c944654f398ff8f90d",
+      "matchingCloudCreateDeleteIDsByKind": {
+        "Load Balancer": 4,
+        "Listener": 4,
+        "Pool": 1,
+        "Member": 2,
+        "Health Monitor": 1
+      },
+      "cleanupVerified": true,
+      "upstreamSampleReplies": {
+        "tcp-backend-v1": 350,
+        "tcp-backend-v2": 150,
+        "tcp-backend-v3": 0
+      },
+      "initialAvailabilityEcho": "tcp-backend-v1"
+    },
+    "experimental": {
+      "case": "TCPRouteWeightedRouting",
+      "channel": "experimental",
+      "goTestBinarySHA256": "9913d5be3da8001b03d792b35bddac7c68c54d14ef5a833e5b90b4a060429ae3",
+      "result": "PASS",
+      "probePort": 9300,
+      "requestedShares": {
+        "tcp-backend-v1": 70,
+        "tcp-backend-v2": 30,
+        "tcp-backend-v3": 0
+      },
+      "receivedEchoesAtVIPAndMembersIncludingAvailabilityChecks": {
+        "tcp-backend-v1": 351,
+        "tcp-backend-v2": 150,
+        "tcp-backend-v3": 0
+      },
+      "upstreamDistributionAttemptsReportingFailure": 0,
+      "pcapKernelDrops": {
+        "vip": 0,
+        "member": 0
+      },
+      "pcapSHA256": {
+        "vip": "b6b8b53c834099ee2bfdcdc2db76f11b75bade2f80f996fa16f2411b226f2823",
+        "member": "5a6a9173f9868fe69ef49de3667428868a6aff2af65c324b1efb40e7ae0cf4c3"
+      },
+      "caseLogSHA256": "7844c122e2dc20125d83214111a878d746cd5c3a115ebe2e452ccad702f351e7",
+      "matchingCloudCreateDeleteIDsByKind": {
+        "Load Balancer": 4,
+        "Listener": 4,
+        "Pool": 1,
+        "Member": 2,
+        "Health Monitor": 1
+      },
+      "cleanupVerified": true,
+      "upstreamSampleReplies": {
+        "tcp-backend-v1": 350,
+        "tcp-backend-v2": 150,
+        "tcp-backend-v3": 0
+      },
+      "initialAvailabilityEcho": "tcp-backend-v1"
+    }
+  }
+}

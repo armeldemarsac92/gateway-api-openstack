@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
@@ -36,11 +37,11 @@ func GatewayIdentity(cfg Config, gateway *gatewayv1.Gateway) cloud.Identity {
 }
 
 // RouteIdentity builds the immutable cloud identity for resources owned by an
-// HTTPRoute in a Gateway graph.
-func RouteIdentity(cfg Config, gateway *gatewayv1.Gateway, route *gatewayv1.HTTPRoute) cloud.Identity {
+// Route in a Gateway graph.
+func RouteIdentity(cfg Config, gateway *gatewayv1.Gateway, route client.Object) cloud.Identity {
 	value := GatewayIdentity(cfg, gateway)
-	value.RouteNamespace = route.Namespace
-	value.RouteName = route.Name
-	value.RouteUID = string(route.UID)
+	value.RouteNamespace = route.GetNamespace()
+	value.RouteName = route.GetName()
+	value.RouteUID = string(route.GetUID())
 	return value
 }

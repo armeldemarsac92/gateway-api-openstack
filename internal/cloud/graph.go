@@ -28,6 +28,10 @@ const (
 	GraphPreserve GraphDisposition = "Preserve"
 	// GraphDelete removes a component after a durable Kubernetes checkpoint.
 	GraphDelete GraphDisposition = "Delete"
+	// GraphWithdrawTLS closes owned frontends inconsistent with the current
+	// HTTPS port and certificate list. An empty list withdraws all owned TLS.
+	// This operation cannot create, enable or reconfigure listeners.
+	GraphWithdrawTLS GraphDisposition = "WithdrawTLS"
 )
 
 // GatewayGraphSpec contains the complete authority and desired graph for one
@@ -36,6 +40,9 @@ type GatewayGraphSpec struct {
 	Identity Identity
 	Gateway  GatewayGraphNode
 	Routes   []RouteGraphNode
+	// ValidateMutation rechecks the request-local authority after cloud reads
+	// and planning, immediately before the provider sends a mutation.
+	ValidateMutation func(context.Context) error `json:"-"`
 }
 
 // GatewayGraphNode describes the Gateway component. Spec is required for Ensure.
@@ -49,6 +56,14 @@ type GatewayGraphNode struct {
 type RouteGraphNode struct {
 	Disposition GraphDisposition
 	Spec        RouteSpec
+	// RetainScopedListenerPorts limits which existing defaults may remain on a
+	// preserved pool in a full TCP or UDP Gateway election. A nil set grants no
+	// authority to change those associations.
+	RetainScopedListenerPorts []int
+	// WaitForHTTPPolicyRemoval guards Gateway readiness while an attached peer
+	// with no current desired model still owns a policy on the HTTP frontend.
+	// Only the route's durable detach checkpoint authorizes its deletion.
+	WaitForHTTPPolicyRemoval bool
 }
 
 // GatewayGraphResult separates whole-graph scheduling from component status.

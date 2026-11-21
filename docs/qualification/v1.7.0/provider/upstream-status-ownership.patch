@@ -1,0 +1,10 @@
+diff --git a/internal/controller/envtest_upstream_status_test.go b/internal/controller/envtest_upstream_status_test.go
+index 3ae6421..0f8b247 100644
+--- a/internal/controller/envtest_upstream_status_test.go
++++ b/internal/controller/envtest_upstream_status_test.go
+@@ -97,0 +98 @@ func testUpstreamGatewayStatus(t *testing.T, c client.Client, cfg controller.Con
++		ControllerName: string(cfg.ControllerName),
+@@ -163,0 +165 @@ func testUpstreamGatewayStatus(t *testing.T, c client.Client, cfg controller.Con
++		tests.GatewayNameMaximumLength,
+@@ -167,0 +170 @@ func testUpstreamGatewayStatus(t *testing.T, c client.Client, cfg controller.Con
++		tests.HTTPRoutePreserveForeignStatus,

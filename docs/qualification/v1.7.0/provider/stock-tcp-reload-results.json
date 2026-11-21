@@ -1,0 +1,213 @@
+{
+  "versions": {
+    "octavia": "19.0.0",
+    "octavia-lib": "3.12.0",
+    "haproxy": "3.0.19-ade9c1262",
+    "pyroute2": "0.8.1"
+  },
+  "modes": {
+    "stock_signal": {
+      "A_initial_fresh": {
+        "echo": 5
+      },
+      "detach_A": {
+        "pre_signal_prefix": "echo",
+        "post_signal_suffix": "echo",
+        "worker_replaced": true,
+        "master_pid_stable": true,
+        "old_worker_present_at_new_readiness": true,
+        "observed_handoff_ms": 48.36,
+        "fresh_B": {
+          "before_signal": {
+            "echo": 34
+          },
+          "handoff_window": {
+            "echo": 11
+          },
+          "after_ready": {
+            "echo": 26
+          }
+        },
+        "public_status": 200,
+        "held_before": "echo",
+        "held_after": "echo",
+        "A_fresh_after": {
+          "eof": 5
+        },
+        "A_fresh_payloads_seen_by_member": 0,
+        "held_stream_worker_still_alive_after_reload": true,
+        "agent_save_state_wrote_file": true
+      },
+      "delete_A": {
+        "pre_signal_prefix": "echo",
+        "post_signal_suffix": "echo",
+        "worker_replaced": true,
+        "master_pid_stable": true,
+        "old_worker_present_at_new_readiness": true,
+        "observed_handoff_ms": 37.57,
+        "fresh_B": {
+          "before_signal": {
+            "echo": 37
+          },
+          "handoff_window": {
+            "echo": 8
+          },
+          "after_ready": {
+            "echo": 25
+          }
+        },
+        "public_status": 204,
+        "held_before": "echo",
+        "held_after": "echo",
+        "A_fresh_after": {
+          "refused": 5
+        },
+        "A_fresh_payloads_seen_by_member": 0,
+        "held_stream_worker_still_alive_after_reload": true,
+        "agent_save_state_wrote_file": true
+      },
+      "only_new_worker_after_held_socket_closed": true,
+      "one_unchanged_client_and_member_stream": true,
+      "held_echoed_bytes": 168,
+      "agent_service_actions": [
+        "start",
+        "reload",
+        "reload"
+      ],
+      "agent_http_responses": [
+        [
+          "upload",
+          202
+        ],
+        [
+          "reload_request",
+          202
+        ],
+        [
+          "upload",
+          202
+        ],
+        [
+          "reload_request",
+          202
+        ],
+        [
+          "upload",
+          202
+        ],
+        [
+          "reload_request",
+          202
+        ]
+      ],
+      "passed": true
+    },
+    "cold_restart": {
+      "A_initial_fresh": {
+        "echo": 5
+      },
+      "detach_A": {
+        "pre_signal_prefix": "echo",
+        "post_signal_suffix": "eof",
+        "worker_replaced": true,
+        "master_pid_stable": null,
+        "old_worker_present_at_new_readiness": false,
+        "observed_handoff_ms": 26.56,
+        "fresh_B": {
+          "before_signal": {
+            "echo": 25
+          },
+          "handoff_window": {
+            "refused": 7,
+            "echo": 1
+          },
+          "after_ready": {
+            "echo": 21
+          }
+        },
+        "public_status": 200,
+        "held_before": "echo",
+        "held_after": "reset",
+        "A_fresh_after": {
+          "eof": 5
+        },
+        "A_fresh_payloads_seen_by_member": 0,
+        "held_stream_worker_still_alive_after_reload": false,
+        "agent_save_state_wrote_file": true
+      },
+      "delete_A": {
+        "pre_signal_prefix": "echo",
+        "post_signal_suffix": "eof",
+        "worker_replaced": true,
+        "master_pid_stable": null,
+        "old_worker_present_at_new_readiness": false,
+        "observed_handoff_ms": 19.14,
+        "fresh_B": {
+          "before_signal": {
+            "echo": 25
+          },
+          "handoff_window": {
+            "refused": 5,
+            "echo": 1
+          },
+          "after_ready": {
+            "echo": 16
+          }
+        },
+        "public_status": 204,
+        "held_before": "echo",
+        "held_after": "reset",
+        "A_fresh_after": {
+          "refused": 5
+        },
+        "A_fresh_payloads_seen_by_member": 0,
+        "held_stream_worker_still_alive_after_reload": false,
+        "agent_save_state_wrote_file": true
+      },
+      "agent_service_actions": [
+        "start",
+        "reload",
+        "reload"
+      ],
+      "agent_http_responses": [
+        [
+          "upload",
+          202
+        ],
+        [
+          "reload_request",
+          202
+        ],
+        [
+          "upload",
+          202
+        ],
+        [
+          "reload_request",
+          202
+        ],
+        [
+          "upload",
+          202
+        ],
+        [
+          "reload_request",
+          202
+        ]
+      ],
+      "passed": true
+    }
+  },
+  "sources": {
+    "combined_driver_update": "https://github.com/openstack/octavia/blob/93689cb7701da65b5aad387bb824c477c64b0f2b/octavia/amphorae/drivers/haproxy/rest_api_driver.py#L193-L208",
+    "sibling_driver_delete": "https://github.com/openstack/octavia/blob/93689cb7701da65b5aad387bb824c477c64b0f2b/octavia/amphorae/drivers/haproxy/rest_api_driver.py#L288-L325",
+    "agent_route": "https://github.com/openstack/octavia/blob/93689cb7701da65b5aad387bb824c477c64b0f2b/octavia/amphorae/backends/agent/api_server/server.py#L148-L165",
+    "agent_upload": "https://github.com/openstack/octavia/blob/93689cb7701da65b5aad387bb824c477c64b0f2b/octavia/amphorae/backends/agent/api_server/loadbalancer.py#L89-L187",
+    "agent_reload": "https://github.com/openstack/octavia/blob/93689cb7701da65b5aad387bb824c477c64b0f2b/octavia/amphorae/backends/agent/api_server/loadbalancer.py#L206-L246",
+    "systemd_unit": "https://github.com/openstack/octavia/blob/93689cb7701da65b5aad387bb824c477c64b0f2b/octavia/amphorae/backends/agent/api_server/templates/systemd.conf.j2#L12-L31",
+    "haproxy_management": "https://www.haproxy.org/download/3.0/doc/management.txt",
+    "haproxy_3_0_19_source": "https://www.haproxy.org/download/3.0/src/haproxy-3.0.19.tar.gz"
+  },
+  "boundary": "Stock public WSGI API, SQLite, worker task entry points, actual Amphora agent Flask routes and upload/reload logic, and real Linux HAProxy. In-process transport and loopback model mTLS, Amphora network namespace and VIP advertisement. Local service code runs the generated HAProxy commands and checks readiness instead of invoking the systemd manager. The cold mode models the repository callback's SIGTERM then -D transition. A Linux user namespace maps the scratch runner to nobody so the stock provider render can run unchanged.",
+  "passed": true
+}

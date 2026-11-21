@@ -1,0 +1,430 @@
+/*
+Copyright 2026 The gateway-api-openstack Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package graph
+
+import (
+	"slices"
+	"sort"
+	"strings"
+
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia/amphora"
+	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
+)
+
+func hasHTTPRouteParts(desired desiredGatewayGraph, actual observedGatewayGraph) bool {
+	return slices.ContainsFunc(desired.routes, func(route desiredRoute) bool { return len(route.httpParts) != 0 }) ||
+		slices.ContainsFunc(actual.routes, func(route observedRouteGraph) bool { return len(route.httpParts) != 0 })
+}
+
+// Route parts reuse the route planner and retain one binding and result per
+// HTTPRoute. Inventory keeps each proved forwarding or redirect part across
+// replacements and deletions.
+func httpPlanningParts(desired desiredGatewayGraph, actual observedGatewayGraph) (desiredGatewayGraph, observedGatewayGraph, []int) {
+	partDesired, partActual := desired, actual
+	partDesired.spec.Routes, partDesired.routes, partActual.routes = nil, nil, nil
+	var owners []int
+	for index, route := range desired.routes {
+		node := desired.spec.Routes[index]
+		var observed observedRouteGraph
+		if index < len(actual.routes) {
+			observed = actual.routes[index]
+		}
+		appendPart := func(part desiredRoute, fragment observedRouteGraph, obsolete bool) {
+			partNode := node
+			if obsolete && partNode.Disposition == cloud.GraphEnsure {
+				partNode.Disposition = cloud.GraphDelete
+			}
+			part.httpParts, fragment.httpParts = nil, nil
+			partDesired.spec.Routes = append(partDesired.spec.Routes, partNode)
+			partDesired.routes = append(partDesired.routes, part)
+			if actual.routes != nil {
+				partActual.routes = append(partActual.routes, fragment)
+			}
+			owners = append(owners, index)
+		}
+		if len(route.httpParts) == 0 || observed.pool != nil || len(observed.policies) != 0 {
+			appendPart(route, observed, len(route.httpParts) != 0)
+		}
+		for _, backend := range route.httpParts {
+			var fragment observedRouteGraph
+			if part := observed.httpParts[backend.backendKey]; part != nil {
+				fragment = *part
+			}
+			appendPart(backend, fragment, false)
+		}
+		keys := make([]string, 0, len(observed.httpParts))
+		for key := range observed.httpParts {
+			if !slices.ContainsFunc(route.httpParts, func(backend desiredRoute) bool { return backend.backendKey == key }) {
+				keys = append(keys, key)
+			}
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			part := route
+			part.backendKey = key
+			part.redirect = strings.HasPrefix(key, "redirect/")
+			appendPart(part, *observed.httpParts[key], true)
+		}
+	}
+	return partDesired, partActual, owners
+}
+
+func (p *Provider) buildHTTPRoutePartsGraphPlan(desired desiredGatewayGraph, actual observedGatewayGraph) ([]graphMutation, cloud.GatewayGraphResult, error) {
+	partDesired, partActual, owners := httpPlanningParts(desired, actual)
+	plan, result, err := p.buildGatewayGraphPartPlan(partDesired, partActual, planHTTPPolicyHandovers(desired, partDesired, partActual, owners))
+	if err != nil {
+		result.Routes = observedRouteDeleteCompletions(desired, actual)
+		return nil, result, err
+	}
+	byOwner := make([]cloud.RouteGraphResult, len(desired.routes))
+	for index, route := range desired.routes {
+		byOwner[index] = cloud.RouteGraphResult{Identity: route.spec.Identity, Result: cloud.RouteReadyResult(cloud.RouteState{})}
+	}
+	for index, fragment := range result.Routes {
+		part := partDesired.routes[index]
+		combined := &byOwner[owners[index]].Result
+		if fragment.Result.Outcome.State != cloud.OutcomeReady {
+			combined.Outcome = fragment.Result.Outcome
+		}
+		old, state := &combined.State, fragment.Result.State
+		if part.backendKey == "" {
+			old.PoolID, old.MonitorID = state.PoolID, state.MonitorID
+		} else {
+			if state.PoolID != "" {
+				old.PoolIDs = append(old.PoolIDs, state.PoolID)
+			}
+			if state.MonitorID != "" {
+				old.MonitorIDs = append(old.MonitorIDs, state.MonitorID)
+			}
+		}
+		old.MemberIDs = append(old.MemberIDs, state.MemberIDs...)
+		old.L7PolicyIDs = append(old.L7PolicyIDs, state.L7PolicyIDs...)
+		old.L7RuleIDs = append(old.L7RuleIDs, state.L7RuleIDs...)
+	}
+	result.Routes = byOwner
+	for i := range plan {
+		step := &plan[i]
+		if step.kind == graphRouteMutation {
+			step.backendKey = partDesired.routes[step.routeIndex].backendKey
+			step.routeIndex = owners[step.routeIndex]
+		}
+	}
+	return plan, result, nil
+}
+
+func policyNeedsHostnameUpdate(route desiredRoute, policy observedRoutePolicy) bool {
+	if route.redirect {
+		for _, wanted := range route.policies {
+			if wanted.role == policy.role {
+				return !desiredPolicyActionMatches(wanted, policy.policy, "") ||
+					!observedHTTPPredicateMatches(policy, rulesFor(wanted, ""))
+			}
+		}
+		return true
+	}
+	if route.backendKey == "" {
+		return policy.hasOutdatedHostname(route.hostnameRuleValue)
+	}
+	for _, wanted := range route.policies {
+		if wanted.role == policy.role {
+			return policy.hasOutdatedHostname(wanted.hostnameRuleValue)
+		}
+	}
+	return true
+}
+
+func isHTTPPolicyMutation(kind routeMutationKind) bool {
+	return kind >= routeMutationDisablePolicy && kind <= routeMutationEnablePolicy
+}
+
+func isHTTPPolicyPositionChange(kind routeMutationKind) bool {
+	return kind == routeMutationMovePolicy || kind == routeMutationCreatePolicy
+}
+
+// Fill lower positions first and finish preparing disabled policies before
+// enabling them. Each Octavia insert or move shifts the other positions.
+func orderHTTPBackendMutations(steps []graphMutation) {
+	sort.SliceStable(steps, func(i, j int) bool {
+		a, b := steps[i].route, steps[j].route
+		if a.kind == routeMutationEnablePolicy || b.kind == routeMutationEnablePolicy {
+			if a.kind != b.kind {
+				return b.kind == routeMutationEnablePolicy
+			}
+			return a.policy.position < b.policy.position
+		}
+		aOrders, bOrders := isHTTPPolicyPositionChange(a.kind), isHTTPPolicyPositionChange(b.kind)
+		if aOrders != bOrders {
+			return bOrders
+		}
+		return aOrders && a.policy.position < b.policy.position
+	})
+}
+
+// httpMemberWithdrawal keeps members addressable while Octavia applies the
+// disable in Amphora. A failed reload can restore ACTIVE on the pool and load
+// balancer, while the single-member worker leaves the affected member ERROR.
+// Retain confirmed disabled members on unavailable targets so a restored
+// grant can re-enable the same owned member if its address and subnet match.
+func httpMemberWithdrawal(observed observedRouteGraph) ([]routeMutation, string) {
+	if observed.pool == nil {
+		return nil, ""
+	}
+	var steps []routeMutation
+	var hold string
+	for _, member := range observed.members {
+		switch member.ProvisioningStatus {
+		case "ACTIVE", "ERROR":
+			_, unreported := observed.memberAdminUnreported[member.ID]
+			if unreported {
+				hold = "Waiting for explicit Octavia member administrative state before HTTP withdrawal"
+			}
+			if member.AdminStateUp || unreported || member.ProvisioningStatus == "ERROR" {
+				steps = append(steps, routeMutation{kind: routeMutationDisableMember, id: member.ID,
+					parentID: observed.pool.ID, retry: unreported || member.ProvisioningStatus == "ERROR"})
+			}
+		default:
+			hold = "Waiting for Octavia member provisioning before HTTP withdrawal"
+		}
+	}
+	return steps, hold
+}
+
+type httpPolicyHandovers struct {
+	protected map[string]bool
+	ports     map[int]bool
+	drain     map[int]bool
+	stages    map[int]httpPolicyStage
+}
+
+type httpPolicyStage struct {
+	wanted   desiredPolicy
+	current  []observedRoutePolicy
+	position int32
+}
+
+func (stage httpPolicyStage) plan(route desiredRoute, observed observedRouteGraph) ([]routeMutation, error) {
+	route.policies = []desiredPolicy{stage.wanted}
+	observed.policies = stage.current
+	steps, _, err := buildRouteEnsurePlan(route, observed)
+	return steps, err
+}
+
+func (stage httpPolicyStage) ready(route desiredRoute, observed observedRouteGraph) bool {
+	if len(stage.current) == 0 || observed.backendProvisioningIssue(false, true) != "" {
+		return false
+	}
+	current := stage.current[0]
+	if current.policy.Position >= stage.position || !current.policy.AdminStateUp || current.policy.ProvisioningStatus != "ACTIVE" ||
+		slices.ContainsFunc(current.rules, func(rule observedRouteRule) bool { return rule.rule.ProvisioningStatus != "ACTIVE" }) {
+		return false
+	}
+	if route.unavailable {
+		if steps, hold := httpMemberWithdrawal(observed); len(steps) != 0 || hold != "" {
+			return false
+		}
+	}
+	steps, err := stage.plan(route, observed)
+	return err == nil && len(steps) == 0
+}
+
+func observedHTTPPredicateMatches(policy observedRoutePolicy, rules []desiredRule) bool {
+	if len(policy.rules) != len(rules) {
+		return false
+	}
+	for _, wanted := range rules {
+		if !slices.ContainsFunc(policy.rules, func(observed observedRouteRule) bool {
+			rule := observed.rule
+			return rule.RuleType == string(wanted.ruleType) && rule.CompareType == string(wanted.compareType) &&
+				rule.Value == wanted.value && rule.AdminStateUp && rule.Invert == wanted.invert
+		}) {
+			return false
+		}
+	}
+	return true
+}
+
+func observedForwardPolicyMatches(route desiredRoute, observed observedRouteGraph, policy observedRoutePolicy) bool {
+	if observed.pool == nil || !policy.adminObserved || policy.policy.ProvisioningStatus != "ACTIVE" || slices.ContainsFunc(policy.rules, func(rule observedRouteRule) bool {
+		return !rule.flagsObserved || rule.rule.ProvisioningStatus != "ACTIVE"
+	}) {
+		return false
+	}
+	return slices.ContainsFunc(route.policies, func(wanted desiredPolicy) bool {
+		return wanted.role == policy.role && desiredPolicyActionMatches(wanted, policy.policy, observed.pool.ID) &&
+			observedHTTPPredicateMatches(policy, rulesFor(wanted, route.hostnameRuleValue))
+	})
+}
+
+func observedLegacyPrefixMatches(observed []observedRoutePolicy, regex desiredPolicy, hostname string) bool {
+	if len(observed) != 2 || regex.compareType != l7policies.CompareTypeRegex ||
+		observed[0].policy.ListenerID != observed[1].policy.ListenerID {
+		return false
+	}
+	path := strings.TrimSuffix(strings.TrimPrefix(regex.path, "^"), "($|/)")
+	pattern, valid := amphora.LiteralPathPrefixPattern(path)
+	if !valid || pattern != regex.path || strings.HasSuffix(path, "/") {
+		return false
+	}
+	for _, piece := range policiesFor(path, path+"/") {
+		wanted := regex
+		wanted.compareType, wanted.path = piece.compareType, piece.path
+		if !slices.ContainsFunc(observed, func(policy observedRoutePolicy) bool {
+			return policy.role == piece.role && observedHTTPPredicateMatches(policy, rulesFor(wanted, hostname))
+		}) {
+			return false
+		}
+	}
+	return true
+}
+
+func observedGroupedPrefixMatches(observed observedRoutePolicy, legacy desiredRoute) bool {
+	if len(legacy.policies) != 2 {
+		return false
+	}
+	exact, prefix := legacy.policies[0], legacy.policies[1]
+	if exact.role != rolePolicyExact || exact.compareType != l7policies.CompareTypeEqual ||
+		prefix.role != rolePolicyPrefix || prefix.compareType != l7policies.CompareTypeStartWith ||
+		prefix.path != exact.path+"/" || strings.HasSuffix(exact.path, "/") {
+		return false
+	}
+	pattern, valid := amphora.LiteralPathPrefixPattern(exact.path)
+	if !valid {
+		return false
+	}
+	exact.compareType, exact.path = l7policies.CompareTypeRegex, pattern
+	return observedHTTPPredicateMatches(observed, rulesFor(exact, legacy.hostnameRuleValue))
+}
+
+// Stage an equivalent policy immediately before the old one. Inserting the
+// disabled policy leaves the old predicate effective while the new backend
+// and rules converge. Leave unrelated positions alone until the new policy
+// is observed ACTIVE and enabled. Removing the old rule first could expose a
+// broader healthy match while the replacement is being provisioned.
+func planHTTPPolicyHandovers(original, desired desiredGatewayGraph, actual observedGatewayGraph, owners []int) *httpPolicyHandovers {
+	handover := &httpPolicyHandovers{
+		protected: make(map[string]bool),
+		ports:     make(map[int]bool),
+		drain:     make(map[int]bool),
+		stages:    make(map[int]httpPolicyStage),
+	}
+	listenerPorts := make(map[string]int, len(actual.scopedListeners))
+	configured := scopedHTTPListeners(desired)
+	for _, listener := range actual.scopedListeners {
+		if spec, exists := configured[listener.ProtocolPort]; exists && scopedHTTPProtocol(spec) == listener.Protocol {
+			listenerPorts[listener.ID] = listener.ProtocolPort
+		}
+	}
+	stageReplacement := func(target, port int, old []observedRoutePolicy, wantedPolicies []desiredPolicy) {
+		// A scalar prefix uses two consecutive positions for one logical
+		// match. Start before the first and preserve earlier policy order.
+		position := old[0].policy.Position
+		for _, policy := range old[1:] {
+			position = min(position, policy.policy.Position)
+		}
+		replacement := actual.routes[target]
+		for _, wanted := range wantedPolicies {
+			stage := httpPolicyStage{wanted: wanted, position: position}
+			stage.wanted.position = position
+			for _, current := range replacement.policies {
+				if current.role == wanted.role && current.policy.ListenerID == old[0].policy.ListenerID {
+					stage.current = []observedRoutePolicy{current}
+					stage.wanted.position = min(position, current.policy.Position)
+					break
+				}
+			}
+			if stage.ready(desired.routes[target], replacement) {
+				continue
+			}
+			handover.ports[port] = true
+			for _, policy := range old {
+				handover.protected[policy.policy.ID] = true
+			}
+			if current, found := handover.stages[target]; !found || stage.position < current.position {
+				handover.stages[target] = stage
+			}
+		}
+	}
+	for index, observed := range actual.routes {
+		owner := owners[index]
+		if original.spec.Routes[owner].Disposition != cloud.GraphEnsure {
+			continue
+		}
+		node := desired.spec.Routes[index]
+		backend := desired.routes[index].backendKey
+		if desired.routes[index].redirect {
+			// Stock Amphora evaluates redirects ahead of forwarding regardless
+			// of policy position. Action changes must retire the old policy.
+			continue
+		}
+		if node.Disposition == cloud.GraphDelete && backend == "" && len(observed.policies) == 2 {
+			port := listenerPorts[observed.policies[0].policy.ListenerID]
+			if !actual.scoped || port != 0 {
+				target, wanted := findHTTPPolicyReplacement(desired, owners, owner, port, observed.policies)
+				if target >= 0 {
+					stageReplacement(target, port, observed.policies, wanted)
+					continue
+				}
+			}
+		}
+		for _, policy := range observed.policies {
+			if node.Disposition == cloud.GraphEnsure && slices.ContainsFunc(desired.routes[index].policies, func(wanted desiredPolicy) bool {
+				return wanted.role == policy.role
+			}) {
+				continue
+			}
+			port := listenerPorts[policy.policy.ListenerID]
+			if actual.scoped && port == 0 {
+				continue
+			}
+			old := []observedRoutePolicy{policy}
+			target, wanted := findHTTPPolicyReplacement(desired, owners, owner, port, old)
+			if target < 0 {
+				continue
+			}
+			if node.Disposition == cloud.GraphDelete && backend != "" {
+				handover.drain[index] = true
+			}
+			stageReplacement(target, port, old, wanted)
+		}
+	}
+	return handover
+}
+
+func findHTTPPolicyReplacement(desired desiredGatewayGraph, owners []int, owner, port int, observed []observedRoutePolicy) (int, []desiredPolicy) {
+	target := -1
+	var best desiredPolicy
+	for index, route := range desired.routes {
+		if route.redirect || owners[index] != owner || desired.spec.Routes[index].Disposition != cloud.GraphEnsure || scopedHTTPRoutePort(route) != port {
+			continue
+		}
+		if len(observed) == 1 && observed[0].versioned && route.backendKey == "" && observedGroupedPrefixMatches(observed[0], route) {
+			return index, route.policies
+		}
+		for _, wanted := range route.policies {
+			matches := len(observed) == 1 && observedHTTPPredicateMatches(observed[0], rulesFor(wanted, route.hostnameRuleValue)) ||
+				len(observed) == 2 && route.backendKey != "" && observedLegacyPrefixMatches(observed, wanted, route.hostnameRuleValue)
+			if matches && (target < 0 || wanted.position < best.position) {
+				target, best = index, wanted
+			}
+		}
+	}
+	if target < 0 {
+		return target, nil
+	}
+	return target, []desiredPolicy{best}
+}

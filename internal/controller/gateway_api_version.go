@@ -17,9 +17,11 @@ limitations under the License.
 package controller
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -31,13 +33,32 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	gatewayconsts "sigs.k8s.io/gateway-api/pkg/consts"
+	"sigs.k8s.io/gateway-api/pkg/features"
 )
 
-var requiredGatewayAPICRDs = []string{
-	"gatewayclasses.gateway.networking.k8s.io",
-	"gateways.gateway.networking.k8s.io",
-	"httproutes.gateway.networking.k8s.io",
-	"referencegrants.gateway.networking.k8s.io",
+// GatewayAPICRDNames returns the CRDs shipped in the configured release channel.
+func (c Config) GatewayAPICRDNames() []string {
+	names := []string{
+		"backendtlspolicies.gateway.networking.k8s.io",
+		"gatewayclasses.gateway.networking.k8s.io",
+		"gateways.gateway.networking.k8s.io",
+		"grpcroutes.gateway.networking.k8s.io",
+		"httproutes.gateway.networking.k8s.io",
+		"listenersets.gateway.networking.k8s.io",
+		"referencegrants.gateway.networking.k8s.io",
+		"tcproutes.gateway.networking.k8s.io",
+		"tlsroutes.gateway.networking.k8s.io",
+		"udproutes.gateway.networking.k8s.io",
+	}
+	if c.GatewayAPIChannel == features.FeatureChannelExperimental {
+		names = append(names,
+			"xbackends.gateway.networking.x-k8s.io",
+			"xbackendtrafficpolicies.gateway.networking.x-k8s.io",
+			"xmeshes.gateway.networking.x-k8s.io",
+			"xtelemetrypolicies.gateway.networking.x-k8s.io",
+		)
+	}
+	return names
 }
 
 const (
@@ -63,13 +84,15 @@ var ErrUnsupportedGatewayAPIVersion = errors.New("installed Gateway API CRD vers
 type GatewayAPIVersionObservation struct {
 	// Supported reports whether every required CRD uses the supported bundle.
 	Supported bool
+	// Version is the observed bundle annotation, populated only for a supported installation.
+	Version string
 	// Message summarizes the observed bundle state for status reporting.
 	Message string
 }
 
 // ObserveGatewayAPIVersion reads Gateway API CRD metadata and evaluates the
 // installed bundle version.
-func ObserveGatewayAPIVersion(ctx context.Context, reader client.Reader) (GatewayAPIVersionObservation, error) {
+func (c Config) ObserveGatewayAPIVersion(ctx context.Context, reader client.Reader) (GatewayAPIVersionObservation, error) {
 	var definitions metav1.PartialObjectMetadataList
 	definitions.SetGroupVersionKind(
 		apiextensionsv1.SchemeGroupVersion.WithKind("CustomResourceDefinitionList"),
@@ -78,7 +101,10 @@ func ObserveGatewayAPIVersion(ctx context.Context, reader client.Reader) (Gatewa
 		return GatewayAPIVersionObservation{}, fmt.Errorf("list Gateway API custom resource definitions: %w", err)
 	}
 
-	present := make(map[string]struct{})
+	expected := c.GatewayAPICRDNames()
+	channel := cmp.Or(c.GatewayAPIChannel, features.FeatureChannelStandard)
+	var observedVersion string
+	present := make(map[string]struct{}, len(expected))
 	issues := make([]string, 0)
 	for _, definition := range definitions.Items {
 		if !IsGatewayAPICRDName(definition.Name) {
@@ -90,14 +116,23 @@ func ObserveGatewayAPIVersion(ctx context.Context, reader client.Reader) (Gatewa
 			continue
 		}
 		installedVersion := definition.Annotations[gatewayconsts.BundleVersionAnnotation]
+		installedChannel := definition.Annotations[gatewayconsts.ChannelAnnotation]
 		switch {
 		case installedVersion == "":
 			issues = append(issues, fmt.Sprintf("%s has no bundle version annotation", definition.Name))
 		case installedVersion != gatewayconsts.BundleVersion:
 			issues = append(issues, fmt.Sprintf("%s uses bundle version %s", definition.Name, installedVersion))
+		case installedChannel == "":
+			issues = append(issues, fmt.Sprintf("%s has no channel annotation", definition.Name))
+		case installedChannel != channel:
+			issues = append(issues, fmt.Sprintf("%s uses channel %s (expected %s)", definition.Name, installedChannel, channel))
+		case !slices.Contains(expected, definition.Name):
+			issues = append(issues, fmt.Sprintf("%s is outside the %s bundle", definition.Name, channel))
+		default:
+			observedVersion = installedVersion
 		}
 	}
-	for _, name := range requiredGatewayAPICRDs {
+	for _, name := range expected {
 		if _, found := present[name]; !found {
 			issues = append(issues, fmt.Sprintf("%s is not installed", name))
 		}
@@ -106,7 +141,8 @@ func ObserveGatewayAPIVersion(ctx context.Context, reader client.Reader) (Gatewa
 	if len(issues) == 0 {
 		return GatewayAPIVersionObservation{
 			Supported: true,
-			Message:   fmt.Sprintf("Installed Gateway API CRDs use supported bundle version %s", gatewayconsts.BundleVersion),
+			Version:   observedVersion,
+			Message:   fmt.Sprintf("Installed Gateway API CRDs use supported bundle version %s (%s)", gatewayconsts.BundleVersion, channel),
 		}, nil
 	}
 	sort.Strings(issues)
@@ -143,11 +179,11 @@ func GatewayClassSupportsInstalledVersion(gatewayClass *gatewayv1.GatewayClass) 
 
 // ValidateInstalledGatewayAPIVersion returns an error unless a live read shows
 // a supported Gateway API CRD bundle.
-func ValidateInstalledGatewayAPIVersion(ctx context.Context, reader client.Reader) error {
+func (c Config) ValidateInstalledGatewayAPIVersion(ctx context.Context, reader client.Reader) error {
 	if reader == nil {
 		return ErrAPIReaderRequired
 	}
-	observation, err := ObserveGatewayAPIVersion(ctx, reader)
+	observation, err := c.ObserveGatewayAPIVersion(ctx, reader)
 	if err != nil {
 		return err
 	}

@@ -12,7 +12,7 @@ The project remains pre-alpha.
 The [compatibility record](docs/providers/compatibility.md) describes the evidence available for the current implementation.
 
 Each controller release pins its Gateway API version.
-The current baseline is Gateway API v1.6.1 Standard Channel.
+The current baseline is Gateway API v1.7.0, with Standard as the default channel.
 
 ## Product contract
 
@@ -153,8 +153,7 @@ Unaccepted Core mappings, upstream API blockers, and live evidence prevent phase
 
 Phase 4 validates the designs needed for full GATEWAY-HTTP Core support and reduces manual network configuration without taking ownership of the cluster's network topology.
 [ADR 0004](docs/design/adr/0004-network-access-and-recovery.md) defines the implemented security modes, address recovery, and read-only diagnostics.
-The initial target is Gateway API v1.6.1 Standard Channel.
-Reassess the requirements when changing the pinned Gateway API version.
+The Core inventory follows the pinned Gateway API v1.7.0 GATEWAY-HTTP profile.
 
 ### Core feasibility before implementation
 

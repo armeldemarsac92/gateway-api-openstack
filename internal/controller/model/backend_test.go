@@ -210,6 +210,36 @@ func TestBackendPortAndReferenceFailures(t *testing.T) {
 	})
 }
 
+func TestUDPBackendRequiresExplicitUDPServiceAndEndpointSlicePorts(t *testing.T) {
+	service := backendService("dns")
+	number := ptr.To(gatewayv1.PortNumber(80))
+	if _, diagnostic := ResolveTransportServicePort(&service, number, corev1.ProtocolUDP); diagnostic == nil || diagnostic.Reason != string(gatewayv1.RouteReasonUnsupportedProtocol) {
+		t.Fatalf("an omitted Service protocol admitted UDP: %v", diagnostic)
+	}
+	service.Spec.Ports = append(service.Spec.Ports, corev1.ServicePort{Name: "dns-udp", Port: 80, Protocol: corev1.ProtocolUDP})
+	port, diagnostic := ResolveTransportServicePort(&service, number, corev1.ProtocolUDP)
+	if diagnostic != nil || port.Name != "dns-udp" {
+		t.Fatalf("UDP port = %v, diagnostic = %v", port, diagnostic)
+	}
+	tcpPort, diagnostic := ResolveTCPServicePort(&service, number)
+	if diagnostic != nil || tcpPort.Name != "http" {
+		t.Fatalf("TCP port = %v, diagnostic = %v", tcpPort, diagnostic)
+	}
+
+	udp := backendSlice("dns", "192.0.2.10")
+	udp.Ports[0].Name, udp.Ports[0].Protocol = ptr.To(port.Name), ptr.To(corev1.ProtocolUDP)
+	defaultTCP := *udp.DeepCopy()
+	defaultTCP.Ports[0].Protocol = nil
+	defaultTCP.Endpoints[0].Addresses = []string{"192.0.2.11"}
+	wrongName := *udp.DeepCopy()
+	wrongName.Ports[0].Name = ptr.To("dns-tcp")
+	wrongName.Endpoints[0].Addresses = []string{"192.0.2.12"}
+	endpoints := ResolveServiceEndpoints(&service, port, []discoveryv1.EndpointSlice{udp, defaultTCP, wrongName})
+	if len(endpoints) != 1 || endpoints[0].Address != "192.0.2.10" || endpoints[0].Port != 8080 {
+		t.Fatalf("UDP endpoints = %v", endpoints)
+	}
+}
+
 func TestBackendEndpointPortAndFamilyResolution(t *testing.T) {
 	route := &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: "app"}}
 	rule := gatewayv1.HTTPRouteRule{BackendRefs: []gatewayv1.HTTPBackendRef{backendReference("echo", nil)}}
@@ -277,6 +307,39 @@ func TestBackendEndpointObservationsRetainConditions(t *testing.T) {
 	}
 }
 
+func TestRecreatedServiceIgnoresEndpointSlicesOwnedByPreviousService(t *testing.T) {
+	service := backendService("echo")
+	service.UID = "current"
+	currentOwner := metav1.NewControllerRef(&service, corev1.SchemeGroupVersion.WithKind("Service"))
+	staleOwner, foreignOwner, nonServiceOwner, nonController := *currentOwner, *currentOwner, *currentOwner, *currentOwner
+	staleOwner.UID = "previous"
+	foreignOwner.Name = "other"
+	nonServiceOwner.APIVersion = "example.com/v1"
+	nonController.UID, nonController.Controller = "unrelated", ptr.To(false)
+
+	current := backendSlice("echo", "192.0.2.10")
+	current.OwnerReferences = []metav1.OwnerReference{nonController, *currentOwner}
+	manual := backendSlice("echo", "192.0.2.11")
+	managed := backendSlice("echo", "192.0.2.12")
+	managed.OwnerReferences = []metav1.OwnerReference{nonServiceOwner}
+	stale := backendSlice("echo", "192.0.2.13")
+	stale.OwnerReferences = []metav1.OwnerReference{staleOwner}
+	foreign := backendSlice("echo", "192.0.2.14")
+	foreign.OwnerReferences = []metav1.OwnerReference{foreignOwner}
+
+	endpointSlices := []discoveryv1.EndpointSlice{current, manual, managed, stale, foreign}
+	endpoints := ResolveServiceEndpoints(&service, &service.Spec.Ports[0], endpointSlices)
+	if want := []string{"192.0.2.10", "192.0.2.11", "192.0.2.12"}; !slices.EqualFunc(endpoints, want, func(endpoint Endpoint, address string) bool {
+		return endpoint.Address == address
+	}) {
+		t.Fatalf("endpoints from recreated Service = %v, want addresses %v", endpoints, want)
+	}
+	service.UID = ""
+	if endpoints = ResolveServiceEndpoints(&service, &service.Spec.Ports[0], endpointSlices); len(endpoints) != len(endpointSlices) {
+		t.Fatalf("endpoints without a Service UID = %v, want all %d slices", endpoints, len(endpointSlices))
+	}
+}
+
 func TestBackendModelDoesNotAliasInputs(t *testing.T) {
 	reference := backendReference("echo", ptr.To(int32(5)))
 	reference.Group = ptr.To(gatewayv1.Group(""))
@@ -340,4 +403,22 @@ func backendSlice(name string, addresses ...string) discoveryv1.EndpointSlice {
 		endpointSlice.Endpoints = append(endpointSlice.Endpoints, discoveryv1.Endpoint{Addresses: []string{address}})
 	}
 	return endpointSlice
+}
+
+func TestTCPBackendReferenceRequiresTCPRouteGrant(t *testing.T) {
+	target := types.NamespacedName{Namespace: "data", Name: "db"}
+	grant := gatewayv1.ReferenceGrant{
+		ObjectMeta: metav1.ObjectMeta{Namespace: target.Namespace},
+		Spec: gatewayv1.ReferenceGrantSpec{
+			From: []gatewayv1.ReferenceGrantFrom{{Group: gatewayv1.GroupName, Kind: "HTTPRoute", Namespace: "tenant"}},
+			To:   []gatewayv1.ReferenceGrantTo{{Group: "", Kind: "Service", Name: ptr.To(gatewayv1.ObjectName(target.Name))}},
+		},
+	}
+	if BackendReferenceAllowedFor("TCPRoute", "tenant", target, []gatewayv1.ReferenceGrant{grant}) {
+		t.Fatal("HTTPRoute grant authorized a TCPRoute")
+	}
+	grant.Spec.From[0].Kind = "TCPRoute"
+	if !BackendReferenceAllowedFor("TCPRoute", "tenant", target, []gatewayv1.ReferenceGrant{grant}) || BackendReferenceAllowed("tenant", target, []gatewayv1.ReferenceGrant{grant}) {
+		t.Fatal("grant did not apply exclusively to its source kind")
+	}
 }

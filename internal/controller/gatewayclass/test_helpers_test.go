@@ -34,14 +34,7 @@ type Config = controller.Config
 
 const gatewayAPIExperimentalGroup = "gateway.networking.x-k8s.io"
 
-var ObserveGatewayAPIVersion = controller.ObserveGatewayAPIVersion
-
-var requiredGatewayAPICRDs = []string{
-	"gatewayclasses.gateway.networking.k8s.io",
-	"gateways.gateway.networking.k8s.io",
-	"httproutes.gateway.networking.k8s.io",
-	"referencegrants.gateway.networking.k8s.io",
-}
+var requiredGatewayAPICRDs = (controller.Config{}).GatewayAPICRDNames()
 
 func testConfig() Config {
 	return Config{ControllerName: "example.com/gateway-api-openstack"}
@@ -76,7 +69,7 @@ func unsupportedGatewayAPICRDs() []client.Object {
 	definitions := supportedGatewayAPICRDs()
 	for _, definition := range definitions {
 		if definition.GetName() == "httproutes.gateway.networking.k8s.io" {
-			definition.SetAnnotations(map[string]string{gatewayconsts.BundleVersionAnnotation: "v1.5.0"})
+			definition.SetAnnotations(map[string]string{gatewayconsts.BundleVersionAnnotation: "v1.5.0", gatewayconsts.ChannelAnnotation: "standard"})
 		}
 	}
 	return definitions

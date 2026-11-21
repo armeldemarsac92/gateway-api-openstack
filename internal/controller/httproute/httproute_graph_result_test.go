@@ -18,6 +18,7 @@ package httproute
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -75,15 +76,45 @@ func TestHTTPRouteRequiresItsComponentOutcome(t *testing.T) {
 			if (err != nil) != test.wantError {
 				t.Fatalf("error=%v", err)
 			}
-			if err == nil && result.outcome.State != test.wantState {
-				t.Fatalf("outcome=%#v", result.outcome)
+			if err == nil && result.Outcome.State != test.wantState {
+				t.Fatalf("outcome=%#v", result.Outcome)
 			}
 		})
 	}
 }
 
-type fixedRouteGraph struct{ result cloud.GatewayGraphResult }
+func TestHTTPRouteCleanupFinishesFromItsOwnResult(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	identity := controller.RouteIdentity(testConfig(), f.gateway, f.route)
+	peer := identity
+	peer.RouteUID, peer.RouteName = "sibling-uid", "sibling"
+	f.route.Annotations[testConfig().RouteLifecycleAnnotation()] = controller.RouteDetaching
+	failure := errors.New("member cleanup failed")
+	result := cloud.GatewayGraphResult{
+		Outcome: cloud.ProgressingOutcome("Removing sibling", time.Second),
+		Routes: []cloud.RouteGraphResult{
+			{Identity: peer, Result: cloud.RouteProgressingResult("Removing sibling", time.Second)},
+			{Identity: identity, Result: cloud.RouteReadyResult(cloud.RouteState{})},
+		},
+	}
+	for _, err := range []error{nil, &cloud.GraphError{Identity: peer, Err: failure}} {
+		f.reconciler.Writer = fixedRouteGraph{result: result, err: err}
+		outcome, gotErr := f.reconciler.deleteRoute(t.Context(), f.route, identity)
+		if gotErr != nil || outcome.State != cloud.OutcomeReady {
+			t.Fatalf("own cleanup outcome=%v, err=%v (peer error=%v)", outcome, gotErr, err)
+		}
+	}
+	f.reconciler.Writer = fixedRouteGraph{result: result, err: &cloud.GraphError{Identity: identity, Err: failure}}
+	if _, err := f.reconciler.deleteRoute(t.Context(), f.route, identity); !errors.Is(err, failure) {
+		t.Fatalf("own cleanup failure = %v", err)
+	}
+}
+
+type fixedRouteGraph struct {
+	result cloud.GatewayGraphResult
+	err    error
+}
 
 func (w fixedRouteGraph) ReconcileGraph(context.Context, graph.Request) (cloud.GatewayGraphResult, error) {
-	return w.result, nil
+	return w.result, w.err
 }

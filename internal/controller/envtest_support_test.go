@@ -20,6 +20,7 @@ package controller_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -38,7 +39,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+const (
+	recordingProviderVIP       = "192.0.2.10"
+	recordingProviderStaticVIP = "192.0.2.30"
+)
+
 type recordingProvider struct {
+	mu               sync.Mutex
 	gatewaySpecs     []cloud.GatewaySpec
 	graphSpecs       []cloud.GatewayGraphSpec
 	gatewayDeleteOut *cloud.Outcome
@@ -47,9 +54,18 @@ type recordingProvider struct {
 
 func (p *recordingProvider) EnsureGateway(_ context.Context, spec cloud.GatewaySpec) (cloud.GatewayResult, error) {
 	p.gatewaySpecs = append(p.gatewaySpecs, spec)
+	vip := recordingProviderVIP
+	if spec.RequestedVIPAddress != "" {
+		if spec.RequestedVIPAddress != recordingProviderStaticVIP {
+			result := cloud.GatewayProgressingResult("Fixture cannot allocate the requested VIP", time.Second)
+			result.AddressIssue = result.Outcome.Message
+			return result, nil
+		}
+		vip = recordingProviderStaticVIP
+	}
 	return cloud.GatewayReadyResult(cloud.GatewayState{
 		LoadBalancerID: "lb-1",
-		VIPAddress:     "192.0.2.10",
+		VIPAddress:     vip,
 		ListenerID:     "listener-1",
 	}), nil
 }
@@ -62,8 +78,8 @@ func (p *recordingProvider) DeleteGateway(_ context.Context, identity cloud.Iden
 	return cloud.ReadyOutcome(), nil
 }
 
-func (*recordingProvider) EnsureRoute(context.Context, cloud.RouteSpec) (cloud.RouteResult, error) {
-	return cloud.RouteReadyResult(cloud.RouteState{PoolID: "pool-1"}), nil
+func (*recordingProvider) EnsureRoute(_ context.Context, spec cloud.RouteSpec) (cloud.RouteResult, error) {
+	return cloud.RouteReadyResult(cloud.RouteState{PoolID: "pool-" + spec.Identity.RouteUID}), nil
 }
 
 func (*recordingProvider) DeleteRoute(context.Context, cloud.Identity) (cloud.Outcome, error) {
@@ -126,8 +142,10 @@ func newEnvtestGatewayReconciler(kubeClient client.Client, reader client.Reader,
 }
 
 func (p *recordingProvider) ReconcileGatewayGraph(ctx context.Context, spec cloud.GatewayGraphSpec) (cloud.GatewayGraphResult, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.graphSpecs = append(p.graphSpecs, spec)
-	result := cloud.GatewayGraphResult{Outcome: cloud.ReadyOutcome(), Gateway: cloud.GatewayReadyResult(cloud.GatewayState{LoadBalancerID: "lb-1", VIPAddress: "192.0.2.10", ListenerID: "listener-1"})}
+	result := cloud.GatewayGraphResult{Outcome: cloud.ReadyOutcome(), Gateway: cloud.GatewayReadyResult(cloud.GatewayState{LoadBalancerID: "lb-1", VIPAddress: recordingProviderVIP, ListenerID: "listener-1"})}
 	if spec.Gateway.Disposition == cloud.GraphDelete {
 		outcome, err := p.DeleteGateway(ctx, spec.Identity)
 		result.Outcome = outcome
@@ -140,15 +158,19 @@ func (p *recordingProvider) ReconcileGatewayGraph(ctx context.Context, spec clou
 			outcome, err := p.DeleteRoute(ctx, route.Spec.Identity)
 			result.Outcome = outcome
 			result.Routes = append(result.Routes, cloud.RouteGraphResult{Identity: route.Spec.Identity, Result: cloud.RouteResult{Outcome: outcome}})
-			return result, err
+			if err != nil {
+				return result, err
+			}
 		case cloud.GraphEnsure:
 			routeResult, err := p.EnsureRoute(ctx, route.Spec)
 			result.Outcome = routeResult.Outcome
 			result.Routes = append(result.Routes, cloud.RouteGraphResult{Identity: route.Spec.Identity, Result: routeResult})
-			return result, err
+			if err != nil {
+				return result, err
+			}
 		}
 	}
-	if spec.Gateway.Disposition == cloud.GraphEnsure {
+	if len(result.Routes) == 0 && spec.Gateway.Disposition == cloud.GraphEnsure {
 		gatewayResult, err := p.EnsureGateway(ctx, spec.Gateway.Spec)
 		result.Gateway = gatewayResult
 		result.Outcome = gatewayResult.Outcome

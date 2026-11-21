@@ -4,12 +4,9 @@
 > This project is pre-alpha and is not ready for production.
 > No supported controller environment profile has been published.
 
-gateway-api-openstack implements Kubernetes [Gateway API](https://gateway-api.sigs.k8s.io/) using OpenStack Octavia Amphora load balancers.
-It currently supports a limited HTTP profile and aims to become a Conformant implementation for HTTP and terminated HTTPS.
-It uses Octavia directly without an in-cluster proxy data plane.
+This fork ports Gateway API for OpenStack to Kubernetes Gateway API v1.7.0 and adds an opt-in workload addon for clusters created by Magnum and magnum-capi-helm. The first traffic target is a private Amphora VIP forwarding HTTP to a worker NodePort. The [Hibiscus qualification record](docs/qualification/v1.7.0/README.md) covers all seven release profiles, the available evidence and the operator procedure.
 
-The project lives at [gateway-api-openstack/gateway-api-openstack](https://github.com/gateway-api-openstack/gateway-api-openstack).
-Its API group is `gateway-api-openstack.github.io`, and its Go module is `github.com/gateway-api-openstack/gateway-api-openstack`.
+The controller uses public OpenStack APIs. It keeps the upstream API group `gateway-api-openstack.github.io` and Go module path. [Personal Hibiscus fork](https://github.com/armeldemarsac92/gateway-api-openstack/tree/hibiscus/v1.7.0) · [Upstream project](https://github.com/gateway-api-openstack/gateway-api-openstack)
 
 ## How it works
 
@@ -33,22 +30,28 @@ The [architecture](docs/design/architecture.md) defines ownership, resource mapp
 
 ## Current implementation
 
-The controller uses Gateway API v1.6.1 Standard Channel and supports:
+The controller uses Gateway API v1.7.0 and defaults to the Standard Channel. Its implemented routing scope includes:
 
-- One HTTP listener and one selected HTTPRoute in the Gateway namespace
-- One rule, one backend Service, and Exact or PathPrefix matching
-- At most one exact route hostname
+- A Gateway can request one private IPv4 VIP at creation on a class with Floating IP mode `None`. [Configuration and allocation results](docs/qualification/v1.7.0/provider/private-gateway-address.md)
+- A plain HTTP Gateway can serve separate backends on several ports of one VIP, including when the requests use the same host and path. Several sections can share one port when each section has a different exact hostname. A port with one section also supports a wildcard or an omitted hostname. Each section enforces its route namespace policy and reports its attachments. [Distinct HTTP ports](docs/qualification/v1.7.0/provider/http-distinct-ports.md) · [Same-port sections](docs/qualification/v1.7.0/provider/http-disjoint-sections.md)
+- A platform operator can enable HTTPS using one terminating listener per port and a verified Secret revision in Barbican. HTTPRoutes use their ordinary attachment and backend rules. [Set up HTTPS, rotate and revoke](docs/operator-https.md)
+- An HTTPRoute with one managed Gateway reference can serve traffic even when the route also refers to a missing or foreign Gateway. Other controllers keep their own entries in route status. [Parent attachment and evidence](docs/qualification/v1.7.0/provider/http-one-managed-parent.md)
+- An HTTPRoute can send different paths to different Service ports. Each rule selects one Service port and can list alternative Exact or PathPrefix matches. The listener ranks the matches across its attached routes. [Configure path routing](docs/getting-started.md#route-several-paths-to-services)
+- HTTP/1.1 WebSocket Upgrade to a TCP Service port declaring `appProtocol: kubernetes.io/ws`. [Operator instructions](docs/getting-started.md) · [Qualification](docs/qualification/v1.7.0/provider/http-websocket.md)
+- An HTTPRoute can declare several hostnames on one listener when their intersection produces one effective exact name or wildcard. An excluded hostname cannot reach that route’s backend. [Host matching and limits](docs/qualification/v1.7.0/provider/http-host-intersection.md)
+- Distinct TCP ports on one dedicated Gateway share its VIP. Each listener selects its oldest eligible TCPRoute. A route that wins on several ports can share one pool. NodePort mode selects one Service and Endpoint mode can weight Services with routable pod IPs. [TCP example](docs/getting-started.md#forward-tcp-to-a-service) · [Local qualification](docs/qualification/v1.7.0/provider/tcp-upstream.md#multiple-tcp-listeners-on-one-gateway)
+- Distinct UDP ports on one dedicated Gateway share its VIP. Each listener selects its oldest eligible UDPRoute. A route that wins on several ports uses one shared pool. Endpoint mode supports weighted UDP Services with routable pod IPs. NodePort mode accepts a single Service. [UDP example](docs/getting-started.md#forward-udp-to-a-service)
 - Eligible worker NodePort members with Local or Cluster traffic policy
 - An opt-in IPv4 Endpoint mode for ClusterIP, headless, and NodePort Services, pending live network validation
 - Typed GatewayClass configuration with topology settings fixed for each Gateway
-- Optional Floating IP allocation and recovery after detachment
+- Automatic allocation for a single `IPAddress` request with no value. Gateway status reports the private VIP or, when the class enables one, the allocated Floating IP. Floating IP recovery also handles detachment.
 - Referenced frontend and backend security groups without changing their rules
 - Read-only environment diagnostics
 - Ownership validation, restart recovery, and ordered cleanup
 
 The [class configuration reference](docs/reference/class-configuration.md) describes member modes and their network prerequisites.
-Multiple listeners and routes, HTTPS, and cross-namespace forwarding remain unimplemented.
-OVN, non-HTTP Route kinds, existing resource adoption, and proxy data planes are outside the current product scope.
+An HTTPRoute, TCPRoute or UDPRoute may select a Service in another namespace when a ReferenceGrant there authorizes that route kind and source namespace. Shared-port HTTPS and overlapping plain HTTP sections on one port remain open. [Grant and revocation evidence](docs/qualification/v1.7.0/service-grants.md)
+The stock pilot targets Amphora. Other Gateway profiles, the two mesh profiles and the Experimental resources are tracked in the [v1.7.0 feature matrix](docs/qualification/v1.7.0/matrix/README.md).
 
 ## Development status
 
@@ -57,7 +60,7 @@ Phase 5 includes the logical HTTP model, shared backend input collection, refere
 See the [compatibility record](docs/providers/compatibility.md) for completed checks and outstanding evidence.
 Development results do not establish general OpenStack support or Gateway API conformance.
 
-The [roadmap](ROADMAP.md) targets complete GATEWAY-HTTP Core support and all declared Extended features.
+The [upstream roadmap](ROADMAP.md) targets complete GATEWAY-HTTP Core support and all declared Extended features. The [Hibiscus plan](docs/superpowers/plans/2026-11-20-hibiscus.md) extends the target to the full v1.7.0 release.
 It allows feature implementation and traffic validation to proceed alongside Octavia development after the corresponding design is accepted.
 The [feasibility assessment](docs/design/conformance-feasibility.md) records the API blockers for individual features.
 The [conformance guide](docs/testing-conformance.md) describes the required suite and reporting workflow.
@@ -65,7 +68,7 @@ The [conformance guide](docs/testing-conformance.md) describes the required suit
 ## Getting started
 
 The repository includes Kustomize manifests and a NodePort example for development.
-Installation requires an operator-built controller image and a Secret containing OpenStack credentials.
+Install the fork’s linux/amd64 development image by digest or build the recorded revision for your registry. The controller reads its OpenStack credentials from a dedicated Secret. [Image record and reproduction](docs/qualification/v1.7.0/image-build.md)
 Follow [Getting started](docs/getting-started.md) to install, verify, and remove the controller.
 Use the [OpenStack E2E guide](docs/testing-openstack-e2e.md) for reusable traffic, recovery, and cleanup tests.
 

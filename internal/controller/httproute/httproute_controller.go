@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"time"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -32,7 +31,9 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	gatewaycontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
 var errHTTPRouteChanged = controller.ErrGraphInputChanged
@@ -167,7 +168,7 @@ func (r *Reconciler) buildCachedRouteDecision(
 		base.disposition = cachedRouteDetach
 		return base, nil
 	}
-	if len(route.Spec.ParentRefs) != 1 || len(parents) != 1 {
+	if len(parents) != 1 {
 		base.disposition = cachedRouteDetach
 		base.statusUpdates = unsupportedParentCountUpdates(parents)
 		return base, nil
@@ -182,42 +183,48 @@ func (r *Reconciler) validateCachedRouteDecision(
 	decision cachedRouteDecision,
 ) (cachedRouteDecision, error) {
 	decision.parent = parent
-	if validationErr := validateRouteParent(route, parent); validationErr != nil {
-		decision.disposition = cachedRouteDetach
-		decision.statusUpdates = []parentStatusUpdate{{
-			parent: parent.ref,
-			status: statusForRouteBuildError(validationErr),
-		}}
-		return decision, nil
-	}
-	if structurallySupportedRoute(route) {
-		slot, err := r.evaluateRouteSlotWithReader(ctx, r.Client, route, parent.gateway)
+	http, _ := gatewaycontroller.HTTPRouteListeners(r.Config, parent.gateway)
+	candidates, parentErr := routeParentCandidates(route, parent, http)
+	validationErr := parentErr
+	if parentErr == nil {
+		namespaces, err := readRouteNamespaces(ctx, r.APIReader, candidates, route.Namespace)
 		if err != nil {
 			return cachedRouteDecision{}, err
 		}
-		if !slot.canReserve {
-			decision.disposition = cachedRouteDetach
-			decision.statusUpdates = []parentStatusUpdate{{
-				parent: parent.ref,
-				status: rejectedServiceProfileStatus(slot.rejection),
-			}}
-			return decision, nil
+		_, validationErr = selectRouteAttachment(route, parent.gateway, candidates, namespaces)
+	}
+	if validationErr != nil {
+		status := statusForRouteBuildError(validationErr)
+		resolveBackend := status.acceptedReason == string(gatewayv1.RouteReasonNoMatchingParent) ||
+			(parentErr == nil && status.acceptedReason == string(gatewayv1.RouteReasonNotAllowedByListeners))
+		// An established route must detach even if a backend read fails.
+		// Clearing its binding enqueues it again for reference evaluation.
+		if !decision.bindingPresent && resolveBackend {
+			if err := r.resolveRouteReferences(ctx, route, &status); err != nil {
+				return cachedRouteDecision{}, err
+			}
 		}
-	}
-	selected, err := r.isSelectedRoute(ctx, route, parent)
-	if err != nil {
-		return cachedRouteDecision{}, err
-	}
-	if !selected {
 		decision.disposition = cachedRouteDetach
 		decision.statusUpdates = []parentStatusUpdate{{
 			parent: parent.ref,
-			status: rejectedRouteStatus(
-				string(gatewayv1.RouteReasonUnsupportedValue),
-				"only one HTTPRoute per Gateway is supported. An older route is already selected",
-			),
+			status: status,
 		}}
 		return decision, nil
+	}
+	// Grouped routes resolve each backend profile independently from the live inputs.
+	if backends, err := validateRouteStructure(route); err == nil && len(backends) == 1 && !hasMultipleRoutePaths(route) {
+		if err := r.checkRouteBackendProfile(ctx, r.Client, route.Namespace, backends[0], parent.gateway); err != nil {
+			var rejection *routeBuildError
+			if !errors.As(err, &rejection) {
+				return cachedRouteDecision{}, err
+			}
+			decision.disposition = cachedRouteDetach
+			decision.statusUpdates = []parentStatusUpdate{{
+				parent: parent.ref,
+				status: backendProfileRejectionStatus(rejection),
+			}}
+			return decision, nil
+		}
 	}
 	decision.disposition = cachedRouteReady
 	return decision, nil
@@ -235,7 +242,7 @@ func managedParentsSupportInstalledVersion(parents []managedRouteParent) bool {
 func unsupportedParentCountUpdates(parents []managedRouteParent) []parentStatusUpdate {
 	status := rejectedRouteStatus(
 		string(gatewayv1.RouteReasonUnsupportedValue),
-		"exactly one Gateway parentRef is supported",
+		"exactly one managed Gateway parentRef is supported",
 	)
 	updates := make([]parentStatusUpdate, 0, len(parents))
 	for _, parent := range parents {
@@ -272,7 +279,7 @@ func (r *Reconciler) reconcileSelectedRoute(
 		if errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) {
 			return r.setRouteUnsupportedVersion(ctx, scope)
 		}
-		return r.handleRouteProviderFailure(scope, parent.ref, false, err, "DeleteHTTPRoute")
+		return r.handleRouteProviderFailure(scope, parent.ref, false, model.Diagnostic{}, err, "DeleteHTTPRoute")
 	}
 	if detachResult.RequeueAfter > 0 {
 		status := pendingRouteStatus("OpenStack resources for the previous Gateway are being removed")
@@ -297,21 +304,30 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 		if errors.As(err, &bindingError) {
 			return ctrl.Result{}, fmt.Errorf("bind HTTPRoute to Gateway: %w", bindingError)
 		}
+		var fragmentError *cloud.GraphError
+		if errors.As(err, &fragmentError) && fragmentError.Identity.RouteUID != "" && fragmentError.Identity.RouteUID != string(httpRoute.UID) {
+			return ctrl.Result{}, controller.SafeProviderReconcileError(controller.ProviderFailurePolicy{Message: "Another HTTPRoute in the Gateway graph could not be reconciled"}, err)
+		}
 		var semanticError *routeBuildError
-		if errors.As(err, &semanticError) || apierrors.IsNotFound(err) {
+		if errors.As(err, &semanticError) {
 			status := statusForRouteBuildError(err)
 			return r.setRouteStatusesAndDetach(ctx, scope, []parentStatusUpdate{{parent: parent.ref, status: status}})
 		}
 		if errors.Is(err, errHTTPRouteChanged) {
 			return ctrl.Result{}, err
 		}
-		return r.handleRouteProviderFailure(scope, parent.ref, true, err, "EnsureHTTPRoute")
+		return r.handleRouteProviderFailure(scope, parent.ref, true, graphResult.backendDiagnostic, err, "EnsureHTTPRoute")
 	}
 	switch graphResult.bindingState {
 	case routeBindingPersisted:
 		return ctrl.Result{Requeue: true}, nil
 	case routeBindingGatewayPending:
-		status := pendingRouteStatus("Controller-owned Octavia load balancer or listener is not ready")
+		status := pendingRouteStatus("Controller-owned Octavia load balancer or listener is not ready").withBackendDiagnostic(graphResult.backendDiagnostic)
+		if hasMultipleRoutePaths(httpRoute) && !graphResult.backendObserved {
+			if err := r.resolveRouteReferences(ctx, httpRoute, &status); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
 		scope.setStatuses([]parentStatusUpdate{{parent: parent.ref, status: status}})
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	case routeBindingReady:
@@ -319,13 +335,15 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 	default:
 		return ctrl.Result{}, fmt.Errorf("invalid HTTPRoute binding state %d", graphResult.bindingState)
 	}
-	if graphResult.outcome.State == cloud.OutcomeProgressing {
-		message := controller.ProviderProgressMessage(graphResult.outcome, "Octavia resources for the HTTPRoute are still progressing")
-		status := pendingRouteStatus(message)
-		scope.setStatuses([]parentStatusUpdate{{parent: parent.ref, status: status}})
-		return ctrl.Result{RequeueAfter: controller.ProviderProgressRequeueAfter(graphResult.outcome, httpRoute.UID)}, nil
+	if graphResult.Outcome.State == cloud.OutcomeProgressing {
+		if !graphResult.ObservationDeferred || r.currentRouteProgrammedCondition(httpRoute, parent.ref) == nil ||
+			!r.currentBackendResolution(httpRoute, parent.ref, graphResult.backendDiagnostic) {
+			message := controller.ProviderProgressMessage(graphResult.Outcome, "Octavia resources for the HTTPRoute are still progressing")
+			scope.setStatuses([]parentStatusUpdate{{parent: parent.ref, status: pendingRouteStatus(message).withBackendDiagnostic(graphResult.backendDiagnostic)}})
+		}
+		return ctrl.Result{RequeueAfter: controller.ProviderProgressRequeueAfter(graphResult.Outcome, httpRoute.UID)}, nil
 	}
-	scope.setStatuses([]parentStatusUpdate{{parent: parent.ref, status: programmedRouteStatus()}})
+	scope.setStatuses([]parentStatusUpdate{{parent: parent.ref, status: programmedRouteStatus().withBackendDiagnostic(graphResult.backendDiagnostic)}})
 	log.FromContext(ctx).V(1).Info("Programmed HTTPRoute", "gateway", client.ObjectKeyFromObject(parent.gateway))
 	return ctrl.Result{RequeueAfter: controller.OpenStackResyncAfter(r.Config.OpenStackResyncInterval, httpRoute.UID)}, nil
 }

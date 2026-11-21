@@ -98,7 +98,7 @@ func TestHTTPRouteForGatewayPredicate(t *testing.T) {
 	cfg := testConfig()
 	otherController := gatewayv1.GatewayController("example.com/other")
 	base := &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "api", Generation: 1}}
-	pred := HTTPRouteForGatewayPredicate(cfg)
+	pred := RouteForGatewayPredicate(cfg)
 
 	testPredicateUpdate(t, pred, base, mutateRoute(base, func(route *gatewayv1.HTTPRoute) {
 		route.Status.Parents = []gatewayv1.RouteParentStatus{{ControllerName: otherController}}
@@ -113,7 +113,7 @@ func TestHTTPRouteForGatewayPredicate(t *testing.T) {
 
 func TestGatewayForHTTPRoutePredicate(t *testing.T) {
 	cfg := testConfig()
-	base := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "edge", Generation: 1}}
+	base := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "edge", UID: "original", Generation: 1}}
 	base.Status.Conditions = []metav1.Condition{{
 		Type:               string(gatewayv1.GatewayConditionProgrammed),
 		Status:             metav1.ConditionTrue,
@@ -128,7 +128,18 @@ func TestGatewayForHTTPRoutePredicate(t *testing.T) {
 		Message:            "accepted",
 	}}
 	pred := GatewayForHTTPRoutePredicate(cfg)
+	readySection := mutateGateway(base, func(gateway *gatewayv1.Gateway) {
+		gateway.Status.Listeners = []gatewayv1.ListenerStatus{{Name: "https", Conditions: []metav1.Condition{{
+			Type: string(gatewayv1.ListenerConditionProgrammed), Status: metav1.ConditionTrue, ObservedGeneration: gateway.Generation,
+		}}}}
+	})
+	testPredicateUpdate(t, pred, readySection, mutateGateway(readySection, func(gateway *gatewayv1.Gateway) {
+		gateway.Status.Listeners[0].Conditions[0].Status = metav1.ConditionFalse
+	}), true, "section withdrawal while aggregate conditions are unchanged")
 
+	testPredicateUpdate(t, pred, base, mutateGateway(base, func(gateway *gatewayv1.Gateway) {
+		gateway.UID = "replacement"
+	}), true, "Gateway replacement at the same name")
 	testPredicateUpdate(t, pred, base, mutateGateway(base, func(gateway *gatewayv1.Gateway) {
 		gateway.Status.Addresses = []gatewayv1.GatewayStatusAddress{{Value: "192.0.2.10"}}
 		gateway.Status.Listeners = []gatewayv1.ListenerStatus{{Name: "http", AttachedRoutes: 1}}
@@ -196,7 +207,7 @@ func TestGatewayClassAndPeerPredicates(t *testing.T) {
 }
 
 func TestGatewayClassForGatewayPredicate(t *testing.T) {
-	class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "openstack", Generation: 1}}
+	class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "openstack", UID: "original", Generation: 1}}
 	SetCondition(&class.Status.Conditions, Condition(
 		string(gatewayv1.GatewayClassConditionStatusAccepted),
 		metav1.ConditionTrue,
@@ -213,6 +224,9 @@ func TestGatewayClassForGatewayPredicate(t *testing.T) {
 	))
 	pred := GatewayClassForGatewayPredicate()
 	testPredicateUpdate(t, pred, class, class.DeepCopy(), false, "unchanged GatewayClass")
+	replacement := class.DeepCopy()
+	replacement.UID = "replacement"
+	testPredicateUpdate(t, pred, class, replacement, true, "GatewayClass replacement at the same name")
 	messageChanged := class.DeepCopy()
 	meta.FindStatusCondition(messageChanged.Status.Conditions, string(gatewayv1.GatewayClassConditionStatusSupportedVersion)).Message = "still supported"
 	testPredicateUpdate(t, pred, class, messageChanged, false, "SupportedVersion message")
@@ -240,6 +254,11 @@ func TestGatewayAPICRDReconcilePredicate(t *testing.T) {
 		Type: apiextensionsv1.Established,
 	})
 	testPredicateUpdate(t, pred, definition, statusChanged, false, "CRD status")
+	channelChanged := definition.DeepCopy()
+	channelChanged.Annotations[gatewayconsts.ChannelAnnotation] = "experimental"
+	if !pred.Update(event.UpdateEvent{ObjectOld: definition, ObjectNew: channelChanged}) {
+		t.Fatal("Gateway API CRD channel change was ignored")
+	}
 	annotationChanged := definition.DeepCopy()
 	annotationChanged.Annotations[gatewayconsts.BundleVersionAnnotation] = "v1.5.0"
 	testPredicateUpdate(t, pred, definition, annotationChanged, true, "bundle version annotation")
@@ -273,7 +292,7 @@ func TestGatewayAPICRDReconcilePredicate(t *testing.T) {
 }
 
 func TestServicePredicate(t *testing.T) {
-	service := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "backend", Generation: 1}}
+	service := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "backend", UID: "previous", Generation: 1}}
 	pred := ServicePredicate()
 	statusChanged := service.DeepCopy()
 	statusChanged.Status.LoadBalancer.Ingress = []corev1.LoadBalancerIngress{{IP: "192.0.2.10"}}
@@ -287,6 +306,9 @@ func TestServicePredicate(t *testing.T) {
 	metadataChanged := service.DeepCopy()
 	metadataChanged.Labels = map[string]string{"example.com/label": "value"}
 	testPredicateUpdate(t, pred, service, metadataChanged, false, "unrelated Service metadata")
+	recreated := service.DeepCopy()
+	recreated.UID = "current"
+	testPredicateUpdate(t, pred, service, recreated, true, "recreated Service UID")
 }
 
 func TestEndpointSlicePredicate(t *testing.T) {
@@ -340,6 +362,19 @@ func TestEndpointSlicePredicate(t *testing.T) {
 	serviceChanged := base.DeepCopy()
 	serviceChanged.Labels[discoveryv1.LabelServiceName] = "other-backend"
 	testPredicateUpdate(t, pred, base, serviceChanged, true, "Service label")
+
+	controlled := base.DeepCopy()
+	controlled.OwnerReferences = []metav1.OwnerReference{{APIVersion: "v1", Kind: "Service", Name: "backend", UID: "previous", Controller: ptr.To(true)}}
+	testPredicateUpdate(t, pred, base, controlled, true, "controlling Service added")
+	ownerChanged := controlled.DeepCopy()
+	ownerChanged.OwnerReferences[0].UID = "current"
+	testPredicateUpdate(t, pred, controlled, ownerChanged, true, "controlling Service UID changed")
+	ownerChanged.OwnerReferences[0].Name = "other-backend"
+	ownerChanged.OwnerReferences[0].UID = "previous"
+	testPredicateUpdate(t, pred, controlled, ownerChanged, true, "controlling Service name changed")
+	ownerChanged.OwnerReferences[0].Controller = ptr.To(false)
+	testPredicateUpdate(t, pred, controlled, ownerChanged, true, "controlling Service removed")
+	testPredicateUpdate(t, pred, base, ownerChanged, false, "non-controlling Service owner")
 
 	portsChanged := base.DeepCopy()
 	portsChanged.Ports = []discoveryv1.EndpointPort{{Port: ptr.To(int32(8080))}}
@@ -508,8 +543,11 @@ func TestNamespacePredicate(t *testing.T) {
 	changed.Annotations = map[string]string{"example.com/note": "changed"}
 	testPredicateUpdate(t, pred, base, changed, false, "annotation only")
 	changed = base.DeepCopy()
+	changed.Status.Phase = corev1.NamespaceActive
+	testPredicateUpdate(t, pred, base, changed, false, "active status only")
+	changed = base.DeepCopy()
 	changed.Status.Phase = corev1.NamespaceTerminating
-	testPredicateUpdate(t, pred, base, changed, false, "status only")
+	testPredicateUpdate(t, pred, base, changed, true, "terminating status")
 	changed = base.DeepCopy()
 	changed.DeletionTimestamp = ptr.To(metav1.Now())
 	testPredicateUpdate(t, pred, base, changed, true, "deletion")

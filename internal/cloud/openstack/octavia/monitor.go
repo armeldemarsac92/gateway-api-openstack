@@ -21,6 +21,7 @@ import (
 	"fmt"
 
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/monitors"
+	"github.com/gophercloud/gophercloud/v2/pagination"
 )
 
 // ListMonitors lists and extracts health monitors matching opts.
@@ -34,6 +35,13 @@ func (s *Service) ListMonitors(ctx context.Context, opts monitors.ListOpts) ([]m
 		return nil, fmt.Errorf("extract health monitors: %w", err)
 	}
 	return items, nil
+}
+
+// ListCompleteMonitors requires an explicit collection on every page.
+func (s *Service) ListCompleteMonitors(ctx context.Context, opts monitors.ListOpts) ([]monitors.Monitor, error) {
+	return listCompleteCollection(ctx, monitors.List(s.client, opts), func(result pagination.PageResult) pagination.Page {
+		return monitors.MonitorPage{LinkedPageBase: pagination.LinkedPageBase{PageResult: result}}
+	}, "healthmonitors", monitors.ExtractMonitors)
 }
 
 // CreateMonitor creates one health monitor.

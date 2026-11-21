@@ -16,7 +16,7 @@ The runner cannot prove that no one else uses the cluster.
 
 Prepare all of the following:
 
-- Gateway API v1.6.1 Standard Channel CRDs on the cluster.
+- The complete Gateway API v1.7.0 Standard bundle on the cluster. This pilot runner checks the Standard CRD inventory, version, and channel before installing its controller.
 - The OpenStackGatewayClassConfig CRD from the revision under test, installed by the operator before starting the runner.
 - A kubeconfig and explicit context that can create, inspect, update, and delete the run-scoped workloads, controller objects, and cluster-scoped RBAC.
   The test gets Namespaces, including `kube-system` when the cluster identity is pinned, and its ConfigMaps and Secrets.
@@ -374,11 +374,11 @@ Set `artifacts.root` to an existing absolute directory outside the checkout, inc
 The second profile starts only after the first passes its audit and removes its controller installation.
 Any failure or cancellation stops the sequence.
 
-The workflow in `.github/workflows/openstack-e2e.yml` can run weekly or through manual dispatch.
-It accepts only `main` in the project repository and remains disabled unless the repository variable `OPENSTACK_E2E_ENABLED` is `true`.
+The workflow in `.github/workflows/openstack-e2e.yml` runs through manual dispatch.
+It accepts the default branch of the personal fork and remains disabled unless the repository variable `OPENSTACK_E2E_ENABLED` is `true`.
 Configure the protected `openstack-e2e` environment and one dedicated Linux runner carrying the `openstack-e2e` label.
 That runner must have the approved API and VIP connectivity, tools, credentials, and immutable images described above.
-Set `OPENSTACK_E2E_CONFIG` to a private configuration file outside the checkout on persistent storage.
+Set the protected environment secret `OPENSTACK_E2E_CONFIG` to the absolute path of a private configuration file outside the checkout on persistent storage.
 Keep the configuration path stable so successive jobs use the same pending marker.
 
 Before checkout, the workflow creates an exclusive `<config-path>.pending` directory.
@@ -431,6 +431,7 @@ See the [ownership audit contract](design/architecture.md#ownership-audit) for i
 
 The runner writes `report.json` and `report.md` in a new artifact directory.
 They record the tested artifact, configuration summary, check results, and aggregate audit and metrics evidence without cloud resource IDs or backend selector values.
+They report the Gateway API version and channel once the suite verifies the CRDs. Reports written before that check succeeds label the bundle `Unverified`.
 Failures retain a fixed classification and the failed check, while raw API and audit errors remain excluded from the report.
 Review them under the [publication policy](../CONTRIBUTING.md#test-evidence-and-publication) before sharing.
 

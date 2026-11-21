@@ -38,6 +38,9 @@ type Outcome struct {
 	State        OutcomeState
 	Message      string
 	RequeueAfter time.Duration
+	// MutationSubmitted requests one prompt observation after a successful
+	// write. A subsequent read that finds a busy provider uses normal polling.
+	MutationSubmitted bool
 }
 
 // Validate rejects an outcome that does not describe a supported provider
@@ -45,6 +48,9 @@ type Outcome struct {
 func (o Outcome) Validate() error {
 	switch o.State {
 	case OutcomeReady:
+		if o.MutationSubmitted {
+			return fmt.Errorf("ready provider outcome cannot request post-mutation observation")
+		}
 		if o.RequeueAfter != 0 {
 			return fmt.Errorf("ready provider outcome has a requeue interval")
 		}
@@ -75,6 +81,23 @@ func ProgressingOutcome(message string, requeueAfter time.Duration) Outcome {
 type GatewayResult struct {
 	State   GatewayState
 	Outcome Outcome
+	// AddressIssue explains why the requested fixed address cannot be assigned.
+	// The observed Gateway and route outcomes still describe the existing infrastructure.
+	AddressIssue string
+	// AddressBlocked indicates that the rejected address leaves no provider work
+	// to retry at the provisioning cadence.
+	AddressBlocked bool
+	// AddressAbsent is a complete observation that the client-facing address
+	// is unassigned. An incomplete observation leaves this false.
+	AddressAbsent bool
+	// HTTPPolicyTransition indicates an outdated rule or a policy awaiting withdrawal.
+	HTTPPolicyTransition bool
+	// ScopedListenerReadyPorts contains the individually programmed listener ports.
+	ScopedListenerReadyPorts []int
+	// ScopedListenerDeferredPorts still match their active frontends during a TLS
+	// withdrawal. The route inventory was deferred. Only a previously programmed
+	// section at the same generation can retain its status for this observation.
+	ScopedListenerDeferredPorts []int
 }
 
 // GatewayReadyResult returns a converged Gateway result.
@@ -92,6 +115,11 @@ func GatewayProgressingResult(message string, requeueAfter time.Duration) Gatewa
 type RouteResult struct {
 	State   RouteState
 	Outcome Outcome
+	// ObservationDeferred means the parent is busy and the provider could not
+	// establish a new outcome for this route on this pass. For scoped UDP, it
+	// also confirms the winning listeners still reach the route's active pool
+	// while a sibling listener is pending.
+	ObservationDeferred bool
 }
 
 // RouteReadyResult returns a converged HTTPRoute result.

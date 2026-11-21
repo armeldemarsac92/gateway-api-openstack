@@ -363,7 +363,7 @@ func TestGatewayProviderFailureObservedGeneration(t *testing.T) {
 			providerErr := cloud.NewProviderError(test.category, errors.New("provider failure"))
 
 			scope := &gatewayScope{gateway: gateway, original: gateway.DeepCopy()}
-			_, _ = reconciler.handleGatewayProviderFailure(context.Background(), scope, &gateway.Spec.Listeners[0], providerErr)
+			_, _ = reconciler.handleGatewayProviderFailure(context.Background(), scope, &gateway.Spec.Listeners[0], providerErr, cloud.GatewayResult{})
 			if err := reconciler.patchGateway(context.Background(), scope); err != nil {
 				t.Fatalf("patchGateway() error = %v", err)
 			}
