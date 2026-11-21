@@ -454,7 +454,7 @@ With a compatible provider advertising `request_header_operations_v1`, add
 the matching forwarding rule. The controller checks this capability
 independently of the fixed-response and weighted-target flags.
 Kustomize deployments can add the standalone `config/components/octavia-request-header-modifier` component.
-[Provider setup and API contract](qualification/v1.7.0/provider/octavia-policy-header-proposal.md)
+[Provider setup and API contract](qualification/v1.7.0/provider/octavia-policy-header-proposal.md) · [Local qualification](qualification/v1.7.0/provider/opt-in-request-header-modifier.md)
 
 ## Safe removal
 

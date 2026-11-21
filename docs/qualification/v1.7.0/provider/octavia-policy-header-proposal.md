@@ -69,6 +69,7 @@ operations until the policy is cleared or removed.
 The controller lowers one RequestHeaderModifier filter per HTTPRoute rule on
 the supported forwarding matches. Response headers, backendRef filters and
 header-based matching have separate support requirements. The local WSGI and
-HAProxy checks exercise persisted operations and shared-pool traffic.
-Upstream conformance, a rolling production fleet and Amphora failover require
-separate evidence.
+HAProxy checks exercise persisted operations and shared-pool traffic. The
+original rule-level case has been exercised locally on both CRD channels. A
+rolling production fleet and Amphora failover require separate evidence.
+[Case and provider results](opt-in-request-header-modifier.md)

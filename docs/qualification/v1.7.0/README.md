@@ -95,7 +95,7 @@ Local verification passed the pinned linter, Go race tests, tagged E2E helper te
 
 On a dedicated TCP or UDP Gateway, each distinct listener port selects its oldest eligible route of the corresponding kind. A route can serve several ports through the same pool. Endpoint mode supports weighted Services and NodePort mode selects one Service. [TCP operator example](../../getting-started.md#forward-tcp-to-a-service) · [UDP operator example](../../getting-started.md#forward-udp-to-a-service) · [Remaining L4 contracts](matrix/named-contracts.md)
 
-The provider studies cover proposed public Octavia capabilities for request headers and an opt-in waypoint for Service traffic. The HTTP response study records the original mapping for unmatched routes and invalid backends. [Provider feasibility](provider/provider-feasibility.md) · [HTTP responses and weighted invalid backends](provider/octavia-http-local-responses.md)
+The local Amphora qualification covers the original rule-level request-header case on Standard and Experimental. The provider study for Service traffic covers an opt-in waypoint. [Request-header qualification](provider/opt-in-request-header-modifier.md) The HTTP response study records the original mapping for unmatched routes and invalid backends. [Provider feasibility](provider/provider-feasibility.md) · [HTTP responses and weighted invalid backends](provider/octavia-http-local-responses.md)
 
 The opt-in Amphora extension has local evidence for HTTP 404, HTTP 500, weighted backends and a full ReferenceGrant change. [Opt-in HTTP actions](provider/opt-in-http-actions.md) · [Operator setup](../../operator-octavia-http-actions.md)
 
