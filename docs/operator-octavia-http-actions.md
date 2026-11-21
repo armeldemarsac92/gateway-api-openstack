@@ -2,6 +2,8 @@
 
 An HTTPRoute can keep sending traffic to each Service at its declared weight when an operator revokes or restores a cross-namespace ReferenceGrant. The Gateway controller uses two capabilities added to the Hibiscus forks of Octavia and octavia-lib. The platform operator must enable them on the cloud and on the controller.
 
+The local qualification records the original Gateway API cases and the settled 3:1 grant lifecycle on both release bundles. [Opt-in provider results](qualification/v1.7.0/provider/opt-in-http-actions.md)
+
 ## Enable the capabilities
 
 1. Install matching builds of octavia-lib and Octavia and apply the Octavia database migrations. Upgrade the API processes and the workers that render Amphora configuration across the fleet before enabling admission. Keep the previous workloads serving while completing the rollout. [Octavia fork](https://github.com/armeldemarsac92/octavia) · [octavia-lib fork](https://github.com/armeldemarsac92/octavia-lib)
