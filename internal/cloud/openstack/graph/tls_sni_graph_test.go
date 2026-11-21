@@ -313,6 +313,120 @@ func TestSNISuffixStagesReplacementBeforeRetiringProtectedSelector(t *testing.T)
 	assertDisable("broad")
 }
 
+func TestSNISuffixWithdrawsFormerOwnerBeforeStagingSuccessor(t *testing.T) {
+	identity := safetyTestIdentity(t)
+	previous := cloud.TLSSNIRoute{Identity: identity.Value(), Hostname: "*.shop.example.test",
+		ServiceUID: "former-service", Members: []cloud.Member{{Address: "192.0.2.10", Port: 443}}}
+	successor := previous
+	successor.Identity.RouteUID = "successor-uid"
+	successor.ServiceUID = "successor-service"
+	successor.Members = []cloud.Member{{Address: "192.0.2.11", Port: 443}}
+	broad := previous
+	broad.Identity.RouteName, broad.Identity.RouteUID = "broad", "broad-uid"
+	broad.Hostname = "*.example.test"
+	broad.ServiceUID = "broad-service"
+	broad.Members = []cloud.Member{{Address: "192.0.2.12", Port: 443}}
+	compile := func(narrow cloud.TLSSNIRoute) []desiredSNIFragment {
+		t.Helper()
+		targets, err := buildSNITargets(identity.Value(), []cloud.TLSSNIRoute{narrow, broad})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return targets
+	}
+	before, after := compile(previous), compile(successor)
+	formerTarget, successorTarget := before[0], after[0]
+	former := activeSNIFragment(formerTarget, "former")
+	formerMembers := former.members
+	desired := desiredGatewayGraph{spec: completeGraphSpec(identity), sni: after}
+	desired.spec.Gateway.Spec.ExternalNetworkID = ""
+	actual := observedGatewayGraph{loadBalancer: safetyObservedLoadBalancer(),
+		listener: &listeners.Listener{ID: "listener", ProvisioningStatus: "ACTIVE", AdminStateUp: true},
+		sni: map[sniFragmentKey]*observedSNIFragment{
+			formerTarget.key: former,
+			after[1].key:     activeSNIFragment(after[1], "broad"),
+		},
+	}
+	actual.loadBalancer.ProvisioningStatus, actual.loadBalancer.AdminStateUp = "ACTIVE", true
+	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/lbaas/pools" {
+			t.Errorf("unexpected Octavia write %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		http.Error(w, "Quota exceeded for pool.", http.StatusForbidden)
+	}))
+	provider := newTestProvider(t, ServiceClients{LoadBalancer: client, ProjectID: "project-a"}, ProviderConfig{})
+	next := func(wantNarrow cloud.OutcomeState) graphMutation {
+		t.Helper()
+		steps, result, err := provider.buildSNIGraphPlan(desired, actual)
+		if err != nil || len(steps) != 1 || len(result.Routes) != 2 ||
+			result.Routes[0].Identity != desired.sni[0].route.Identity || result.Routes[0].Result.Outcome.State != wantNarrow ||
+			result.Routes[1].Identity != broad.Identity || result.Routes[1].Result.Outcome.State != cloud.OutcomeReady {
+			t.Fatalf("expected one mutation and an unaffected covering route: plan=%v routes=%v err=%v", steps, result.Routes, err)
+		}
+		return steps[0]
+	}
+	if clear := next(cloud.OutcomeProgressing); clear.kind != graphSNIMutation || clear.sni.kind != sniClearMembers ||
+		clear.sni.parentID != former.pool.ID || !clear.isRestrictiveSNI() {
+		t.Fatalf("withdraw the former destinations before allocating the successor: %#v", clear)
+	}
+	former.members = nil
+	quota := next(cloud.OutcomeProgressing)
+	if quota.kind != graphSNIMutation || quota.sni.kind != sniCreatePool || quota.sni.target.key != successorTarget.key {
+		t.Fatalf("allocate the successor after observing the withdrawal: %#v", quota)
+	}
+	if err := provider.executeSNIMutation(t.Context(), actual, quota.sni); err == nil {
+		t.Fatal("expected Octavia to reject the pool allocation")
+	}
+	if retry := next(cloud.OutcomeProgressing); retry.sni.kind != sniCreatePool || retry.sni.target.key != successorTarget.key ||
+		former.forwardingHostname() != previous.Hostname || len(former.members) != 0 {
+		t.Fatalf("the former selector must stay active and empty across an allocation failure: %#v", retry)
+	}
+
+	// When the previous owner regains the claim, reuse the empty pool.
+	desired.sni = before
+	if restore := next(cloud.OutcomeProgressing); restore.kind != graphSNIMutation || restore.sni.kind != sniCreateMember ||
+		restore.sni.target.key != formerTarget.key || restore.sni.parentID != former.pool.ID {
+		t.Fatalf("restore the authorized destination in the original pool: %#v", restore)
+	}
+	former.members = formerMembers
+	if steps, result, err := provider.buildSNIGraphPlan(desired, actual); err != nil || len(steps) != 0 || len(result.Routes) != 2 ||
+		result.Routes[0].Result.Outcome.State != cloud.OutcomeReady {
+		t.Fatalf("the restored owner must become ready: plan=%v routes=%v err=%v", steps, result.Routes, err)
+	}
+
+	// Once the successor is staged, observe its activation before cleanup.
+	desired.sni = after
+	former.members = nil
+	replacement := activeSNIFragment(successorTarget, "successor")
+	replacement.policy.AdminStateUp = false
+	actual.sni[successorTarget.key] = replacement
+	if enable := next(cloud.OutcomeProgressing); enable.kind != graphSNIMutation || enable.sni.kind != sniEnablePolicy || enable.sni.target.key != successorTarget.key {
+		t.Fatalf("enable the successor while retaining the former selector: %#v", enable)
+	}
+	replacement.policy.AdminStateUp = true
+	if disable := next(cloud.OutcomeProgressing); disable.kind != graphDeleteChild || disable.deletion.resource != gatewayDisableL7Policy || disable.deletion.resourceID != former.policy.ID {
+		t.Fatalf("retire the former selector after the successor is active: %#v", disable)
+	}
+	former.policy.AdminStateUp = false
+	if cleanup := next(cloud.OutcomeReady); cleanup.deletion.resource != gatewayDeletionL7Rule || cleanup.deletion.resourceID != former.rule.ID {
+		t.Fatalf("clean up the former fragment while the successor is ready: %#v", cleanup)
+	}
+	former.rule = nil
+	if cleanup := next(cloud.OutcomeReady); cleanup.deletion.resource != gatewayDeletionL7Policy || cleanup.deletion.resourceID != former.policy.ID {
+		t.Fatalf("delete the former policy after removing its rule: %#v", cleanup)
+	}
+	former.policy = nil
+	if cleanup := next(cloud.OutcomeReady); cleanup.deletion.resource != gatewayDeletionPool || cleanup.deletion.resourceID != former.pool.ID {
+		t.Fatalf("delete the former pool after removing its policy: %#v", cleanup)
+	}
+	delete(actual.sni, formerTarget.key)
+	if steps, result, err := provider.buildSNIGraphPlan(desired, actual); err != nil || len(steps) != 0 || result.Outcome.State != cloud.OutcomeReady {
+		t.Fatalf("the handoff must settle after cleanup: plan=%v outcome=%v err=%v", steps, result.Outcome, err)
+	}
+}
+
 func TestSNISuffixSuspendsFallbacksBeforeAllocatingMissingDenial(t *testing.T) {
 	identity := safetyTestIdentity(t)
 	makeTarget := func(name, hostname string, deny bool) cloud.TLSSNIRoute {

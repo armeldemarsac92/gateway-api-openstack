@@ -583,6 +583,18 @@ func (p *Provider) buildSNIGraphPlan(desired desiredGatewayGraph, actual observe
 			}
 			return plan(step)
 		}
+		for _, key := range retire {
+			fragment := actual.sni[key]
+			hostname := fragment.forwardingHostname()
+			target, claimed := byHostname[hostname]
+			if claimed && !target.route.Deny && key.sniRouteKey != target.key.sniRouteKey && len(fragment.members) != 0 &&
+				hasSNIFallback(hostname, desired.sni, actual.sni) {
+				// Keep the selector ahead of the fallback while the successor
+				// is staged. Its former owner's destinations can be withdrawn
+				// even if Octavia cannot allocate a replacement pool.
+				return plan(sniClearMembersStep(fragment))
+			}
+		}
 		// Stage new negative claims first. Enabling their empty target can
 		// only restrict the existing frontend.
 		for _, target := range desired.sni {
@@ -685,9 +697,7 @@ func protectSNIDenials(desired []desiredSNIFragment, actual map[sniFragmentKey]*
 			}
 			// Preserve the rule and the pool, removing all destinations in
 			// one write. Its name cannot fall through while we stage a guard.
-			return graphMutation{kind: graphSNIMutation, sniWithdrawal: true,
-				sni:     sniMutation{kind: sniClearMembers, parentID: fragment.pool.ID},
-				message: "Removing unauthorized TLS SNI pool members"}, "", true
+			return sniClearMembersStep(fragment), "", true
 		}
 		if guard == nil {
 			// The keys are ordered broadest first, so disabling one covering
@@ -703,6 +713,12 @@ func protectSNIDenials(desired []desiredSNIFragment, actual map[sniFragmentKey]*
 		}
 	}
 	return graphMutation{}, "", false
+}
+
+func sniClearMembersStep(fragment *observedSNIFragment) graphMutation {
+	return graphMutation{kind: graphSNIMutation, sniWithdrawal: true,
+		sni:     sniMutation{kind: sniClearMembers, parentID: fragment.pool.ID},
+		message: "Removing unauthorized TLS SNI pool members"}
 }
 
 func hasSNIFallback(hostname string, desired []desiredSNIFragment, actual map[sniFragmentKey]*observedSNIFragment) bool {
