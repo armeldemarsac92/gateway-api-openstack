@@ -25,10 +25,12 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	"sigs.k8s.io/gateway-api/conformance"
 	"sigs.k8s.io/gateway-api/conformance/tests"
 	"sigs.k8s.io/gateway-api/conformance/utils/suite"
@@ -41,35 +43,12 @@ import (
 // TestKindUpstreamGatewayProfile attempts upstream profiles with the full shared
 // setup and a recording cloud adapter.
 func TestKindUpstreamGatewayProfile(t *testing.T) {
-	var profiles []suite.ConformanceProfile
-	switch suite.ConformanceProfileName(os.Getenv("HIBISCUS_GATEWAY_PROFILE")) {
-	case "":
-		t.Skip("set HIBISCUS_GATEWAY_PROFILE to GATEWAY-GRPC, GATEWAY-TLS or all on a disposable kind cluster")
-	case suite.GatewayGRPCConformanceProfileName:
-		profiles = []suite.ConformanceProfile{suite.GatewayGRPCConformanceProfile}
-	case suite.GatewayTLSConformanceProfileName:
-		profiles = []suite.ConformanceProfile{suite.GatewayTLSConformanceProfile}
-	case "all":
-		profiles = []suite.ConformanceProfile{
-			suite.GatewayHTTPConformanceProfile,
-			suite.GatewayGRPCConformanceProfile,
-			suite.GatewayTLSConformanceProfile,
-			suite.GatewayTCPConformanceProfile,
-			suite.GatewayUDPConformanceProfile,
-		}
-	default:
-		t.Fatal("HIBISCUS_GATEWAY_PROFILE must be GATEWAY-GRPC, GATEWAY-TLS or all")
-	}
-
 	cfg := testConfig()
 	cfg.GatewayAPIChannel = os.Getenv("GATEWAY_API_CHANNEL")
-	if cfg.GatewayAPIChannel != features.FeatureChannelStandard && cfg.GatewayAPIChannel != features.FeatureChannelExperimental {
-		t.Fatal("GATEWAY_API_CHANNEL must be standard or experimental")
-	}
 	cfg.ClusterID = "kind-" + os.Getenv("KIND_CLUSTER_NAME")
-	profileNames, selectedFeatures := selectKindProfileFeatures(t, profiles, cfg.GatewayAPIChannel)
-	t.Logf("Attempting %v on %s with the original upstream base and recording cloud adapter", profileNames, cfg.GatewayAPIChannel)
-	t.Logf("Selected upstream feature union: %v", selectedFeatures)
+	const className = "kind-upstream-gateway-profile"
+	options := kindGatewayProfileOptions(t, suite.ConformanceProfileName(os.Getenv("HIBISCUS_GATEWAY_PROFILE")), cfg.GatewayAPIChannel)
+	options.GatewayClassName = className
 
 	ctrl.SetLogger(zap.New())
 	restConfig := kindUpstreamRESTConfig(t)
@@ -85,7 +64,6 @@ func TestKindUpstreamGatewayProfile(t *testing.T) {
 	if err := checkGatewaySuiteNamespaces(t.Context(), apiClient); err != nil {
 		t.Fatal(err)
 	}
-	const className = "kind-upstream-gateway-profile"
 	parameters := envtestClassParameters(className)
 	resources := []client.Object{parameters, kindGatewayClass(cfg, parameters)}
 	for _, resource := range resources {
@@ -108,19 +86,11 @@ func TestKindUpstreamGatewayProfile(t *testing.T) {
 	startKindManager(t, manager)
 
 	s, err := suite.NewConformanceTestSuite(suite.ConformanceOptions{
-		ConfigurableOptions: suite.ConfigurableOptions{
-			GatewayClassName:     className,
-			ConformanceProfiles:  profileNames,
-			SupportedFeatures:    selectedFeatures,
-			Mode:                 "kind-with-recording-cloud",
-			CleanupBaseResources: true,
-			CleanupTestResources: true,
-			DisableParallelTests: true,
-		},
-		Client:        apiClient,
-		ClientOptions: clientOptions,
-		RestConfig:    restConfig,
-		ManifestFS:    []fs.FS{&conformance.Manifests},
+		ConfigurableOptions: options,
+		Client:              apiClient,
+		ClientOptions:       clientOptions,
+		RestConfig:          restConfig,
+		ManifestFS:          []fs.FS{&conformance.Manifests},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -144,6 +114,50 @@ func TestKindUpstreamGatewayProfile(t *testing.T) {
 	if err := s.Run(t, tests.ConformanceTests); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func kindGatewayProfileOptions(t *testing.T, mode suite.ConformanceProfileName, channel string) suite.ConfigurableOptions {
+	t.Helper()
+	options := suite.ConfigurableOptions{
+		Mode:                 "kind-with-recording-cloud",
+		CleanupBaseResources: true,
+		CleanupTestResources: true,
+		DisableParallelTests: true,
+	}
+	var profiles []suite.ConformanceProfile
+	switch mode {
+	case "":
+		t.Skip("set HIBISCUS_GATEWAY_PROFILE to GATEWAY-GRPC, GATEWAY-TLS or all on a disposable kind cluster")
+	case suite.GatewayGRPCConformanceProfileName:
+		profiles = []suite.ConformanceProfile{suite.GatewayGRPCConformanceProfile}
+	case suite.GatewayTLSConformanceProfileName:
+		profiles = []suite.ConformanceProfile{suite.GatewayTLSConformanceProfile}
+	case "all":
+		profiles = []suite.ConformanceProfile{
+			suite.GatewayHTTPConformanceProfile,
+			suite.GatewayGRPCConformanceProfile,
+			suite.GatewayTLSConformanceProfile,
+			suite.GatewayTCPConformanceProfile,
+			suite.GatewayUDPConformanceProfile,
+		}
+		// Fill the upstream GatewayStaticAddresses fixture's placeholders.
+		// The adapter only records graphs and returns a synthetic VIP.
+		options.UsableNetworkAddresses = []gatewayv1.GatewaySpecAddress{
+			{Type: ptr.To(gatewayv1.IPAddressType), Value: recordingProviderVIP},
+		}
+		options.UnusableNetworkAddresses = []gatewayv1.GatewaySpecAddress{
+			{Type: ptr.To(gatewayv1.IPAddressType), Value: "198.51.100.10"},
+		}
+	default:
+		t.Fatal("HIBISCUS_GATEWAY_PROFILE must be GATEWAY-GRPC, GATEWAY-TLS or all")
+	}
+	if channel != features.FeatureChannelStandard && channel != features.FeatureChannelExperimental {
+		t.Fatal("GATEWAY_API_CHANNEL must be standard or experimental")
+	}
+	options.ConformanceProfiles, options.SupportedFeatures = selectKindProfileFeatures(t, profiles, channel)
+	t.Logf("Attempting %v on %s with the original upstream base and recording cloud adapter", options.ConformanceProfiles, channel)
+	t.Logf("Selected upstream feature union: %v", options.SupportedFeatures)
+	return options
 }
 
 func selectKindProfileFeatures(t *testing.T, profiles []suite.ConformanceProfile, channel string) ([]suite.ConformanceProfileName, []features.FeatureName) {
