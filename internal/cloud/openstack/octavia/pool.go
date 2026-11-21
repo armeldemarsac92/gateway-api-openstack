@@ -84,7 +84,7 @@ func eachCollectionPage(ctx context.Context, pager pagination.Pager, create func
 }
 
 func missingCollection(field string) error {
-	return cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady, fmt.Errorf("Octavia omitted the %s collection", field))
+	return cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady, fmt.Errorf("missing %s collection in Octavia response", field))
 }
 
 // CreatePool creates one pool.

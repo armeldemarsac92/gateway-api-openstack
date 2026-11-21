@@ -19,6 +19,10 @@ package l4route
 import (
 	"context"
 	"errors"
+	"slices"
+	"testing"
+	"time"
+
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
@@ -28,9 +32,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
-	"slices"
-	"testing"
-	"time"
 )
 
 func TestScopedTCPForwardingTargetFences(t *testing.T) {
