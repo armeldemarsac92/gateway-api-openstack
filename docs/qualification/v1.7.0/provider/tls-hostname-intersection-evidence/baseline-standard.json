@@ -1,0 +1,120 @@
+{
+  "channel": "standard",
+  "baseline": true,
+  "controller": {
+    "repository": "ghcr.io/armeldemarsac92/gateway-api-openstack",
+    "sourceRevision": "6c74e8eaa94054527823c5c7576da96e84d5f6f1",
+    "manifestDigest": "sha256:c7bbf6bde39c2ed6fa757f909e81f160f2be1ba54430403f9f2d05e31167016e",
+    "platform": "linux/amd64",
+    "ociArchiveSHA256": "42562cb339e629cd53a1f3bec32165784ee97cb5bcb805d69396636006a6a7b7",
+    "managerSHA256": "2d204d3582a78837b6b05270f82eba16f822ff80db5404897da60ddb0b98c6d6",
+    "normalAndNoCacheBuildsMatch": true
+  },
+  "gatewayAPI": {
+    "revision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+    "release": "v1.7.0",
+    "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+    "baseManifestSHA256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+    "caseFilesSHA256": {
+      "tlsroute-simple-same-namespace.go": "1eed4db6b5444c4a6973d19fc63bbc17303b757bbccf94790af62b457cc8f843",
+      "tlsroute-simple-same-namespace.yaml": "7b31fd8db8d7f904d34c0ad2ced960d504c19d20a908abdfe85a7b4048caee74",
+      "tlsroute-invalid-no-matching-listener-hostname.go": "d60eddc812ae0f7abe9845463c4c47671ad0fa8670dee5f1a0d01d0bde2f964f",
+      "tlsroute-invalid-no-matching-listener-hostname.yaml": "3030fd8fbf3e77a623281d43124193fb275124ab02f322dbfcd66467294bc231"
+    }
+  },
+  "kubernetes": "v1.36.2",
+  "etcd": "3.6.8",
+  "haproxy": "3.0.19",
+  "echoBasicGoModule": "sigs.k8s.io/gateway-api-conformance-images@v0.2.0",
+  "backendCertificateCAConfigMap": "tls-checks-ca-certificate",
+  "endpoints": [
+    {
+      "pod": "tcp-backend-local",
+      "service": "tcp-backend",
+      "ready": true,
+      "handshakeVerified": true
+    },
+    {
+      "pod": "tls-backend-local",
+      "service": "tls-backend",
+      "ready": true,
+      "handshakeVerified": true
+    }
+  ],
+  "tests": {
+    "TLSRouteSimpleSameNamespace": "FAIL"
+  },
+  "gateways": {
+    "gateway-tlsroute": {
+      "conditions": {
+        "Accepted": "False/ListenersNotValid",
+        "Programmed": "False/Invalid"
+      },
+      "listenerStatus": [
+        {
+          "name": "https",
+          "attachedRoutes": 0,
+          "conditions": {
+            "Accepted": "False/UnsupportedValue",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "Conflicted": "False/NoConflicts",
+            "Programmed": "False/Invalid"
+          }
+        }
+      ],
+      "addresses": []
+    }
+  },
+  "routes": {
+    "gateway-conformance-infra-test": []
+  },
+  "octaviaAPI": {
+    "getRequests": 3,
+    "writeRequests": 0,
+    "activeHAProxies": 0
+  },
+  "providerPackages": {
+    "octavia": {
+      "revision": "0e37f9873147c3c0468edd4e3da11531d8614e6c",
+      "sourceTree": "61e7c97f0427b9b17356b0c8c556e1bcdad06741",
+      "packageSourceArchiveSHA256": "c7e7d64ca6d851daaae8e5c67a3adbf94b2d957a63534d969cf9a1aa7417627a",
+      "version": "19.0.1.dev4",
+      "wheel": "octavia-19.0.1.dev4-py3-none-any.whl",
+      "wheelSHA256": "8c0e50358ba98d44d5afa88a0c013ab22cc95d463b380b97eaa0f5d246ee324a",
+      "packageFilesMatchedToSource": 631,
+      "pythonFilesMatchedToSource": 609,
+      "templatesMatchedToSource": 11,
+      "importedModulesVerified": 151,
+      "moduleFiles": {
+        "octavia.api.drivers.amphora_driver.v2.driver": "octavia/api/drivers/amphora_driver/v2/driver.py",
+        "octavia.api.drivers.utils": "octavia/api/drivers/utils.py",
+        "octavia.api.v2.controllers.l7policy": "octavia/api/v2/controllers/l7policy.py",
+        "octavia.api.v2.controllers.l7rule": "octavia/api/v2/controllers/l7rule.py",
+        "octavia.api.app": "octavia/api/app.py",
+        "octavia.common.jinja.haproxy.combined_listeners.jinja_cfg": "octavia/common/jinja/haproxy/combined_listeners/jinja_cfg.py",
+        "octavia.db.models": "octavia/db/models.py",
+        "octavia.tests.functional.api.v2.base": "octavia/tests/functional/api/v2/base.py"
+      },
+      "rendererTemplates": [
+        "octavia/common/jinja/haproxy/combined_listeners/templates/haproxy.cfg.j2",
+        "octavia/common/jinja/haproxy/combined_listeners/templates/macros.j2"
+      ]
+    },
+    "octavia-lib": {
+      "revision": "bb1a993ac95477b0bdc429f8aaf6d1620f8e7669",
+      "sourceTree": "8b18768d9c12dafe916b582ba6dc3f0f9c91d9f7",
+      "packageSourceArchiveSHA256": "5fef097a538f18a53360fb79046f77043c853876d81130c2cb141c5a6427fd83",
+      "version": "3.12.1.dev3",
+      "wheel": "octavia_lib-3.12.1.dev3-py3-none-any.whl",
+      "wheelSHA256": "5513991a6e004490221065b64be53f3dbdf3de1bab6e768ff2bc98f797c5cfc5",
+      "packageFilesMatchedToSource": 24,
+      "pythonFilesMatchedToSource": 24,
+      "templatesMatchedToSource": 0,
+      "importedModulesVerified": 9,
+      "moduleFiles": {
+        "octavia_lib.api.drivers.data_models": "octavia_lib/api/drivers/data_models.py",
+        "octavia_lib.api.drivers.provider_base": "octavia_lib/api/drivers/provider_base.py"
+      }
+    }
+  }
+}

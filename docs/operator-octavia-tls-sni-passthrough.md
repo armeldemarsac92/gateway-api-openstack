@@ -9,7 +9,7 @@ A dedicated Gateway can serve two TLS applications on the same port. Amphora rea
 3. Set `enabled_tls_sni_providers = amphora` in the `[api_settings]` section of the region's Octavia API configuration. With the controller's project credentials and regional load-balancer endpoint, check that `GET /v2/lbaas/providers/amphora/gateway_capabilities` returns `tls_sni_passthrough_v1` in `gateway_capabilities`.
 4. For standalone, pin the matching controller image by digest in an operator kustomization based on `config/octavia-tls-sni-passthrough`. For Magnum, render and inspect the artifact below and pin its SHA-256 and the matching controller image in the conductor configuration. Select the Endpoint class for the workload. [Magnum operator setup](qualification/v1.7.0/magnum-operator.md#build-and-configure)
 
-   Pin `ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:c7bbf6bde39c2ed6fa757f909e81f160f2be1ba54430403f9f2d05e31167016e`. [Controller release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-6c74e8eaa94054527823c5c7576da96e84d5f6f1) · [TLSRoute qualification](qualification/v1.7.0/provider/tlsroute-sni.md)
+   Pin `ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:7023a4e25ea1f89fada19bacdcb0c803f45fc334b5ea9e2aaa2918dddcc2149f`. [Controller release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-a82cf5d7670e66d38fa4f8f9d8b054507faa083e) · [TLSRoute hostname qualification](qualification/v1.7.0/provider/tls-hostname-intersection.md)
 
 ```sh
 kubectl kustomize config/octavia-tls-sni-passthrough

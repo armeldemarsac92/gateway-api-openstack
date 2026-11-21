@@ -1,0 +1,19 @@
+# TLSRoute hostname intersection on Amphora
+
+The opt-in controller forwards each exact DNS name shared by a TLSRoute and its listener. The upstream cases `TLSRouteSimpleSameNamespace` and `TLSRouteInvalidNoMatchingListenerHostname` passed on both Gateway API v1.7.0 bundles. The positive case connected over TLS to the upstream echo Service through the Gateway VIP. In the negative case, both Gateway parents reported `Accepted=False/NoMatchingListenerHostname` and their listeners reported zero attached routes. The preceding SNI release rejected the wildcard listener in the positive case on Standard. [Standard](tls-hostname-intersection-evidence/upstream-standard.json) · [Experimental](tls-hostname-intersection-evidence/upstream-experimental.json) · [Earlier controller](tls-hostname-intersection-evidence/baseline-standard.json)
+
+A second run on each bundle created two TLSRoutes, A and B. A declared `a.example.test`, `alias.example.test` and `outside.other.test` and used a Service in a namespace that granted access. B declared `b.example.test` and the same alias. A won the equal-specificity alias. The receipts record both creation timestamps and names used to break ties. The TLS application at each Service presented its own certificate.
+
+| Change | Attached routes | Current parent status for A | New connections that reached an application |
+| --- | ---: | --- | --- |
+| Install the wildcard listener | 2 | Accepted, references resolved, programmed | A served `a` and `alias`. B served `b`. |
+| Narrow the listener to `b.example.test` | 1 | `Accepted=False/NoMatchingListenerHostname` | B served `b`. |
+| Restore the wildcard listener | 2 | Accepted, references resolved, programmed | A served `a` and `alias`. B served `b`. |
+| Remove A's ReferenceGrant | 2 | `Accepted=True`, `ResolvedRefs=False/RefNotPermitted`, `Programmed=False` | B served `b`. Both names won by A closed. |
+| Restore the ReferenceGrant | 2 | Accepted, references resolved, programmed | A served `a` and `alias`. B served `b`. |
+
+On each channel, 11 connections authenticated the backend certificate and returned the expected 256-byte payload. Nineteen connections failed during TLS with zero new backend sessions. The checks included the out-of-scope name, the listener's bare suffix and a client without SNI at each step. B kept its pool ID throughout. Gateway deletion cleared both managed parent entries, closed the VIP and removed the owned load balancer, listener, pools and policies. [Standard lifecycle](tls-hostname-intersection-evidence/lifecycle-standard.json) · [Experimental lifecycle](tls-hostname-intersection-evidence/lifecycle-experimental.json)
+
+The extracted linux/amd64 manager came from source `a82cf5d7670e66d38fa4f8f9d8b054507faa083e` at manifest `sha256:7023a4e25ea1f89fada19bacdcb0c803f45fc334b5ea9e2aaa2918dddcc2149f`. The normal and no-cache builds produced the same raw OCI manifest. Both runners used Kubernetes v1.36.2, wheel-installed Octavia 19.0.1.dev4 and octavia-lib 3.12.1.dev3, and HAProxy 3.0.19. The cloud fixture supplied Keystone, Neutron, provisioning completion and the transport to the Amphora agent. Qualification on a deployed Hibiscus cloud and the full GATEWAY-TLS profile remain open. [Image record](../image.json) · [Reproduce the image](../image-build.md) · [Live profile ledger](../live-runs.md)
+
+Both runners use public exact `TLS_SNI/EQUAL_TO` rules. A listener and route whose intersection still requires a wildcard forwarding rule need additional provider support. The replay archive `hibiscus-tls-hostname-intersection-a82cf5d7670e.tar.gz` has SHA-256 `2c231b4bc6688a1ea13160fb11a00006643f87c088f97e783456cfa50df40f07`. [Release and replay](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-a82cf5d7670e66d38fa4f8f9d8b054507faa083e)

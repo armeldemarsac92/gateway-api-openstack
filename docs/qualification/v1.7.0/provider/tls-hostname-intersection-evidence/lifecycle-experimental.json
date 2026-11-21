@@ -1,0 +1,643 @@
+{
+  "channel": "experimental",
+  "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+  "controller": {
+    "repository": "ghcr.io/armeldemarsac92/gateway-api-openstack",
+    "sourceRevision": "a82cf5d7670e66d38fa4f8f9d8b054507faa083e",
+    "manifestDigest": "sha256:7023a4e25ea1f89fada19bacdcb0c803f45fc334b5ea9e2aaa2918dddcc2149f",
+    "platform": "linux/amd64",
+    "ociArchiveSHA256": "042aed270ef44bf750b4b7964e17c4da434241a9e3a5339da8bae740638c0b24",
+    "managerSHA256": "01a0587f14750e262260603c70abdc226bf2c5ce03e36c4c7ac68c60c9011af2"
+  },
+  "controllerTree": "8754c59e0ff3ec6b2359eaa81171014c82a86472",
+  "kubernetes": "v1.36.2",
+  "gatewayAPI": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "haproxy": "3.0.19",
+  "providerPackages": {
+    "octavia": {
+      "revision": "0e37f9873147c3c0468edd4e3da11531d8614e6c",
+      "sourceTree": "61e7c97f0427b9b17356b0c8c556e1bcdad06741",
+      "packageSourceArchiveSHA256": "c7e7d64ca6d851daaae8e5c67a3adbf94b2d957a63534d969cf9a1aa7417627a",
+      "version": "19.0.1.dev4",
+      "wheel": "octavia-19.0.1.dev4-py3-none-any.whl",
+      "wheelSHA256": "8c0e50358ba98d44d5afa88a0c013ab22cc95d463b380b97eaa0f5d246ee324a",
+      "packageFilesMatchedToSource": 631,
+      "pythonFilesMatchedToSource": 609,
+      "templatesMatchedToSource": 11,
+      "importedModulesVerified": 151,
+      "moduleFiles": {
+        "octavia.api.drivers.amphora_driver.v2.driver": "octavia/api/drivers/amphora_driver/v2/driver.py",
+        "octavia.api.drivers.utils": "octavia/api/drivers/utils.py",
+        "octavia.api.v2.controllers.l7policy": "octavia/api/v2/controllers/l7policy.py",
+        "octavia.api.v2.controllers.l7rule": "octavia/api/v2/controllers/l7rule.py",
+        "octavia.api.app": "octavia/api/app.py",
+        "octavia.common.jinja.haproxy.combined_listeners.jinja_cfg": "octavia/common/jinja/haproxy/combined_listeners/jinja_cfg.py",
+        "octavia.db.models": "octavia/db/models.py",
+        "octavia.tests.functional.api.v2.base": "octavia/tests/functional/api/v2/base.py"
+      },
+      "rendererTemplates": [
+        "octavia/common/jinja/haproxy/combined_listeners/templates/haproxy.cfg.j2",
+        "octavia/common/jinja/haproxy/combined_listeners/templates/macros.j2"
+      ]
+    },
+    "octavia-lib": {
+      "revision": "bb1a993ac95477b0bdc429f8aaf6d1620f8e7669",
+      "sourceTree": "8b18768d9c12dafe916b582ba6dc3f0f9c91d9f7",
+      "packageSourceArchiveSHA256": "5fef097a538f18a53360fb79046f77043c853876d81130c2cb141c5a6427fd83",
+      "version": "3.12.1.dev3",
+      "wheel": "octavia_lib-3.12.1.dev3-py3-none-any.whl",
+      "wheelSHA256": "5513991a6e004490221065b64be53f3dbdf3de1bab6e768ff2bc98f797c5cfc5",
+      "packageFilesMatchedToSource": 24,
+      "pythonFilesMatchedToSource": 24,
+      "templatesMatchedToSource": 0,
+      "importedModulesVerified": 9,
+      "moduleFiles": {
+        "octavia_lib.api.drivers.data_models": "octavia_lib/api/drivers/data_models.py",
+        "octavia_lib.api.drivers.provider_base": "octavia_lib/api/drivers/provider_base.py"
+      }
+    }
+  },
+  "routesCreated": {
+    "A": {
+      "namespace": "feasibility",
+      "name": "tls-a",
+      "creationTimestamp": "2026-11-21T20:23:12Z",
+      "uid": "43a39a7e-0115-45b1-a531-a764b8b55c51"
+    },
+    "B": {
+      "namespace": "feasibility",
+      "name": "tls-b",
+      "creationTimestamp": "2026-11-21T20:23:12Z",
+      "uid": "ddb8c1cb-e95b-45aa-9cf7-79ac07e7f45e"
+    }
+  },
+  "phases": {
+    "wildcard-listener": {
+      "gateway": {
+        "conditions": {
+          "Accepted": "True/Accepted",
+          "Programmed": "True/Programmed"
+        },
+        "listeners": [
+          {
+            "attachedRoutes": 2,
+            "supportedKinds": [
+              "TLSRoute"
+            ],
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            }
+          }
+        ]
+      },
+      "routes": {
+        "A": {
+          "uid": "43a39a7e-0115-45b1-a531-a764b8b55c51",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+          }
+        },
+        "B": {
+          "uid": "ddb8c1cb-e95b-45aa-9cf7-79ac07e7f45e",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+          }
+        }
+      },
+      "names": {
+        "a.example.test": {
+          "listener": "7dcee7a1-8fb6-4263-80ed-89741e994f53",
+          "pool": "0120e464-fb3e-4b58-bee5-088ab7656fcb",
+          "policy": "86538a39-a239-4486-89a7-a3efd370bce8",
+          "rule": "07180744-fe1f-4a56-9b1b-057e8b5aed09",
+          "backend": "A"
+        },
+        "alias.example.test": {
+          "listener": "7dcee7a1-8fb6-4263-80ed-89741e994f53",
+          "pool": "eec9ae5e-f528-4d37-82e1-4659818a9bfe",
+          "policy": "1981cc62-e828-4d65-bdb2-9125ca8ba3b5",
+          "rule": "4c35fa85-4b0d-40a6-abc1-001e3eb25f42",
+          "backend": "A"
+        },
+        "b.example.test": {
+          "listener": "7dcee7a1-8fb6-4263-80ed-89741e994f53",
+          "pool": "b802e001-9207-4147-87d2-3ad17dae4823",
+          "policy": "68271b6b-4d97-4b97-ba19-2965255e2a51",
+          "rule": "110a7a18-c755-49f4-8485-20958b417c4c",
+          "backend": "B"
+        }
+      },
+      "connections": [
+        {
+          "sni": "a.example.test",
+          "outcome": "connected",
+          "backend": "A",
+          "backendSNI": "a.example.test",
+          "leafSHA256": "251f403a5e72920cb2b1493a2ec9af26b9041d2bd3cbe59a7467b9c230560de2",
+          "echoBytes": 256
+        },
+        {
+          "sni": "alias.example.test",
+          "outcome": "connected",
+          "backend": "A",
+          "backendSNI": "alias.example.test",
+          "leafSHA256": "251f403a5e72920cb2b1493a2ec9af26b9041d2bd3cbe59a7467b9c230560de2",
+          "echoBytes": 256
+        },
+        {
+          "sni": "b.example.test",
+          "outcome": "connected",
+          "backend": "B",
+          "backendSNI": "b.example.test",
+          "leafSHA256": "0697d77e5778135da88b85b02c011858ec46db0fd67efd0e6bc12e317a1ffb8a",
+          "echoBytes": 256
+        },
+        {
+          "sni": "outside.other.test",
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "additionalBackendSessions": 0,
+          "backendCountersChecked": 3
+        },
+        {
+          "sni": "example.test",
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "additionalBackendSessions": 0,
+          "backendCountersChecked": 3
+        },
+        {
+          "sni": null,
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "additionalBackendSessions": 0,
+          "backendCountersChecked": 3
+        }
+      ]
+    },
+    "narrowed-to-b": {
+      "gateway": {
+        "conditions": {
+          "Accepted": "True/Accepted",
+          "Programmed": "True/Programmed"
+        },
+        "listeners": [
+          {
+            "attachedRoutes": 1,
+            "supportedKinds": [
+              "TLSRoute"
+            ],
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            }
+          }
+        ]
+      },
+      "routes": {
+        "A": {
+          "uid": "43a39a7e-0115-45b1-a531-a764b8b55c51",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "False/NoMatchingListenerHostname",
+            "ResolvedRefs": "Unknown/Pending",
+            "gateway-api-openstack.github.io/Programmed": "False/NoMatchingListenerHostname"
+          }
+        },
+        "B": {
+          "uid": "ddb8c1cb-e95b-45aa-9cf7-79ac07e7f45e",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+          }
+        }
+      },
+      "names": {
+        "b.example.test": {
+          "listener": "7dcee7a1-8fb6-4263-80ed-89741e994f53",
+          "pool": "b802e001-9207-4147-87d2-3ad17dae4823",
+          "policy": "68271b6b-4d97-4b97-ba19-2965255e2a51",
+          "rule": "110a7a18-c755-49f4-8485-20958b417c4c",
+          "backend": "B"
+        }
+      },
+      "connections": [
+        {
+          "sni": "a.example.test",
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "additionalBackendSessions": 0,
+          "backendCountersChecked": 1
+        },
+        {
+          "sni": "alias.example.test",
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "additionalBackendSessions": 0,
+          "backendCountersChecked": 1
+        },
+        {
+          "sni": "b.example.test",
+          "outcome": "connected",
+          "backend": "B",
+          "backendSNI": "b.example.test",
+          "leafSHA256": "0697d77e5778135da88b85b02c011858ec46db0fd67efd0e6bc12e317a1ffb8a",
+          "echoBytes": 256
+        },
+        {
+          "sni": "outside.other.test",
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "additionalBackendSessions": 0,
+          "backendCountersChecked": 1
+        },
+        {
+          "sni": "example.test",
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "additionalBackendSessions": 0,
+          "backendCountersChecked": 1
+        },
+        {
+          "sni": null,
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "additionalBackendSessions": 0,
+          "backendCountersChecked": 1
+        }
+      ]
+    },
+    "wildcard-restored": {
+      "gateway": {
+        "conditions": {
+          "Accepted": "True/Accepted",
+          "Programmed": "True/Programmed"
+        },
+        "listeners": [
+          {
+            "attachedRoutes": 2,
+            "supportedKinds": [
+              "TLSRoute"
+            ],
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            }
+          }
+        ]
+      },
+      "routes": {
+        "A": {
+          "uid": "43a39a7e-0115-45b1-a531-a764b8b55c51",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+          }
+        },
+        "B": {
+          "uid": "ddb8c1cb-e95b-45aa-9cf7-79ac07e7f45e",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+          }
+        }
+      },
+      "names": {
+        "b.example.test": {
+          "listener": "7dcee7a1-8fb6-4263-80ed-89741e994f53",
+          "pool": "b802e001-9207-4147-87d2-3ad17dae4823",
+          "policy": "68271b6b-4d97-4b97-ba19-2965255e2a51",
+          "rule": "110a7a18-c755-49f4-8485-20958b417c4c",
+          "backend": "B"
+        },
+        "a.example.test": {
+          "listener": "7dcee7a1-8fb6-4263-80ed-89741e994f53",
+          "pool": "637e0375-ca8b-40e3-8514-3325edeb1d1e",
+          "policy": "1a2926bc-a308-45cb-bec9-760dd919fa0a",
+          "rule": "d5ed8f64-8228-4c34-910f-9ce02734db16",
+          "backend": "A"
+        },
+        "alias.example.test": {
+          "listener": "7dcee7a1-8fb6-4263-80ed-89741e994f53",
+          "pool": "848dbdde-3152-49f1-960e-470e6b83feec",
+          "policy": "710d5ad0-7c6b-4d73-91f8-f1df967b31c2",
+          "rule": "24bf3b06-fd1d-4561-9ee8-b948dc1a03c5",
+          "backend": "A"
+        }
+      },
+      "connections": [
+        {
+          "sni": "a.example.test",
+          "outcome": "connected",
+          "backend": "A",
+          "backendSNI": "a.example.test",
+          "leafSHA256": "251f403a5e72920cb2b1493a2ec9af26b9041d2bd3cbe59a7467b9c230560de2",
+          "echoBytes": 256
+        },
+        {
+          "sni": "alias.example.test",
+          "outcome": "connected",
+          "backend": "A",
+          "backendSNI": "alias.example.test",
+          "leafSHA256": "251f403a5e72920cb2b1493a2ec9af26b9041d2bd3cbe59a7467b9c230560de2",
+          "echoBytes": 256
+        },
+        {
+          "sni": "b.example.test",
+          "outcome": "connected",
+          "backend": "B",
+          "backendSNI": "b.example.test",
+          "leafSHA256": "0697d77e5778135da88b85b02c011858ec46db0fd67efd0e6bc12e317a1ffb8a",
+          "echoBytes": 256
+        },
+        {
+          "sni": "outside.other.test",
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "additionalBackendSessions": 0,
+          "backendCountersChecked": 3
+        },
+        {
+          "sni": "example.test",
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "additionalBackendSessions": 0,
+          "backendCountersChecked": 3
+        },
+        {
+          "sni": null,
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "additionalBackendSessions": 0,
+          "backendCountersChecked": 3
+        }
+      ]
+    },
+    "grant-removed": {
+      "gateway": {
+        "conditions": {
+          "Accepted": "True/Accepted",
+          "Programmed": "True/Programmed"
+        },
+        "listeners": [
+          {
+            "attachedRoutes": 2,
+            "supportedKinds": [
+              "TLSRoute"
+            ],
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            }
+          }
+        ]
+      },
+      "routes": {
+        "A": {
+          "uid": "43a39a7e-0115-45b1-a531-a764b8b55c51",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "False/RefNotPermitted",
+            "gateway-api-openstack.github.io/Programmed": "False/RefNotPermitted"
+          }
+        },
+        "B": {
+          "uid": "ddb8c1cb-e95b-45aa-9cf7-79ac07e7f45e",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+          }
+        }
+      },
+      "names": {
+        "b.example.test": {
+          "listener": "7dcee7a1-8fb6-4263-80ed-89741e994f53",
+          "pool": "b802e001-9207-4147-87d2-3ad17dae4823",
+          "policy": "68271b6b-4d97-4b97-ba19-2965255e2a51",
+          "rule": "110a7a18-c755-49f4-8485-20958b417c4c",
+          "backend": "B"
+        }
+      },
+      "connections": [
+        {
+          "sni": "a.example.test",
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "additionalBackendSessions": 0,
+          "backendCountersChecked": 1
+        },
+        {
+          "sni": "alias.example.test",
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "additionalBackendSessions": 0,
+          "backendCountersChecked": 1
+        },
+        {
+          "sni": "b.example.test",
+          "outcome": "connected",
+          "backend": "B",
+          "backendSNI": "b.example.test",
+          "leafSHA256": "0697d77e5778135da88b85b02c011858ec46db0fd67efd0e6bc12e317a1ffb8a",
+          "echoBytes": 256
+        },
+        {
+          "sni": "outside.other.test",
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "additionalBackendSessions": 0,
+          "backendCountersChecked": 1
+        },
+        {
+          "sni": "example.test",
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "additionalBackendSessions": 0,
+          "backendCountersChecked": 1
+        },
+        {
+          "sni": null,
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "additionalBackendSessions": 0,
+          "backendCountersChecked": 1
+        }
+      ]
+    },
+    "grant-restored": {
+      "gateway": {
+        "conditions": {
+          "Accepted": "True/Accepted",
+          "Programmed": "True/Programmed"
+        },
+        "listeners": [
+          {
+            "attachedRoutes": 2,
+            "supportedKinds": [
+              "TLSRoute"
+            ],
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            }
+          }
+        ]
+      },
+      "routes": {
+        "A": {
+          "uid": "43a39a7e-0115-45b1-a531-a764b8b55c51",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+          }
+        },
+        "B": {
+          "uid": "ddb8c1cb-e95b-45aa-9cf7-79ac07e7f45e",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+          }
+        }
+      },
+      "names": {
+        "b.example.test": {
+          "listener": "7dcee7a1-8fb6-4263-80ed-89741e994f53",
+          "pool": "b802e001-9207-4147-87d2-3ad17dae4823",
+          "policy": "68271b6b-4d97-4b97-ba19-2965255e2a51",
+          "rule": "110a7a18-c755-49f4-8485-20958b417c4c",
+          "backend": "B"
+        },
+        "a.example.test": {
+          "listener": "7dcee7a1-8fb6-4263-80ed-89741e994f53",
+          "pool": "2c3d9a26-c262-4043-a3c4-8a10884d1707",
+          "policy": "ab71bb97-320e-406b-82b5-d00c9e9d0be4",
+          "rule": "6789fa5f-72e8-4b3b-aa5b-467f08f612fe",
+          "backend": "A"
+        },
+        "alias.example.test": {
+          "listener": "7dcee7a1-8fb6-4263-80ed-89741e994f53",
+          "pool": "1b93d6e5-41a1-42ac-980e-878e56dc4e72",
+          "policy": "b16cf52e-e4f6-467e-bee6-9af21ca2e6be",
+          "rule": "66c80355-068d-4278-ad2e-fea692d3ed53",
+          "backend": "A"
+        }
+      },
+      "connections": [
+        {
+          "sni": "a.example.test",
+          "outcome": "connected",
+          "backend": "A",
+          "backendSNI": "a.example.test",
+          "leafSHA256": "251f403a5e72920cb2b1493a2ec9af26b9041d2bd3cbe59a7467b9c230560de2",
+          "echoBytes": 256
+        },
+        {
+          "sni": "alias.example.test",
+          "outcome": "connected",
+          "backend": "A",
+          "backendSNI": "alias.example.test",
+          "leafSHA256": "251f403a5e72920cb2b1493a2ec9af26b9041d2bd3cbe59a7467b9c230560de2",
+          "echoBytes": 256
+        },
+        {
+          "sni": "b.example.test",
+          "outcome": "connected",
+          "backend": "B",
+          "backendSNI": "b.example.test",
+          "leafSHA256": "0697d77e5778135da88b85b02c011858ec46db0fd67efd0e6bc12e317a1ffb8a",
+          "echoBytes": 256
+        },
+        {
+          "sni": "outside.other.test",
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "additionalBackendSessions": 0,
+          "backendCountersChecked": 3
+        },
+        {
+          "sni": "example.test",
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "additionalBackendSessions": 0,
+          "backendCountersChecked": 3
+        },
+        {
+          "sni": null,
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "additionalBackendSessions": 0,
+          "backendCountersChecked": 3
+        }
+      ]
+    }
+  },
+  "siblingPoolStable": true,
+  "cleanup": {
+    "remaining": {
+      "loadbalancers": 0,
+      "listeners": 0,
+      "pools": 0,
+      "l7policies": 0,
+      "healthmonitors": 0
+    },
+    "routeParentConditionsCleared": true,
+    "vipClosed": true
+  }
+}
