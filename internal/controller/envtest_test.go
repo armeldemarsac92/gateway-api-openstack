@@ -258,7 +258,7 @@ func TestControllerEnvtest(t *testing.T) {
 		grpcConfig.BackendH2C, grpcConfig.FixedHTTPResponses = true, true
 		provider := &recordingProvider{}
 		startManager(t, grpcConfig, provider)
-		testGRPCExactMethodRoute(t, apiClient, grpcConfig, provider, crdDirectory)
+		testGRPCExactMethodRoute(t, apiClient, grpcConfig, provider)
 	})
 	t.Run("HTTPRoute Service ReferenceGrant lifecycle", func(t *testing.T) {
 		testHTTPRouteServiceReferenceGrant(t, apiClient, cacheClient, config, gateway)

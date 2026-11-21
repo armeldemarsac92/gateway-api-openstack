@@ -20,8 +20,6 @@ package controller_test
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -32,6 +30,8 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	"sigs.k8s.io/gateway-api/conformance"
+	"sigs.k8s.io/gateway-api/conformance/tests"
 	"sigs.k8s.io/yaml"
 
 	configv1alpha1 "github.com/gateway-api-openstack/gateway-api-openstack/api/v1alpha1"
@@ -39,7 +39,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 )
 
-func testGRPCExactMethodRoute(t *testing.T, c client.Client, cfg controller.Config, provider *recordingProvider, crdDirectory string) {
+func testGRPCExactMethodRoute(t *testing.T, c client.Client, cfg controller.Config, provider *recordingProvider) {
 	t.Helper()
 	ctx := t.Context()
 	const namespace = "grpc-exact-method"
@@ -85,8 +85,7 @@ func testGRPCExactMethodRoute(t *testing.T, c client.Client, cfg controller.Conf
 		}
 	}
 
-	manifest := filepath.Join(crdDirectory, "../../../conformance/tests/grpcroute-exact-method-matching.yaml")
-	data, err := os.ReadFile(manifest)
+	data, err := conformance.Manifests.ReadFile(tests.GRPCExactMethodMatching.Manifests[0])
 	if err != nil {
 		t.Fatal(err)
 	}
