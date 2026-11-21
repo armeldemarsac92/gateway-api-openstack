@@ -17,15 +17,277 @@ limitations under the License.
 package graph
 
 import (
+	"errors"
 	"net/http"
 	"reflect"
 	"testing"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	openstackidentity "github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/identity"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
+	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
+	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/loadbalancers"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/monitors"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/pools"
 )
+
+func TestInvalidHTTPBackendChangesOnlyItsPolicyTarget(t *testing.T) {
+	desired, actual := convergedRoutePlanFixture()
+	desired.fixedResponse, desired.unavailable = true, true
+	desired.members = nil
+	actual.members[0].ProvisioningStatus = "ACTIVE"
+
+	plan, _, err := buildRouteEnsurePlan(desired, actual)
+	if err != nil || len(plan) != 1 || plan[0].kind != routeMutationDisableMember {
+		t.Fatalf("withdraw enabled member first: plan = %#v, error = %v", plan, err)
+	}
+
+	actual.members[0].AdminStateUp = false
+	plan, _, err = buildRouteEnsurePlan(desired, actual)
+	want := []routeMutation{{kind: routeMutationSetPolicyTarget, id: "policy-1"}}
+	if err != nil || !reflect.DeepEqual(plan, want) {
+		t.Fatalf("change the enabled policy in place: plan = %#v, error = %v", plan, err)
+	}
+
+	policy := &actual.policies[0]
+	policy.policy.Action, policy.policy.RedirectPoolID = "FIXED_RESPONSE", ""
+	policy.fixedResponse = true
+	plan, _, err = buildRouteEnsurePlan(desired, actual)
+	if err != nil || len(plan) != 0 {
+		t.Fatalf("verified 500 policy should be stable: plan = %#v, error = %v", plan, err)
+	}
+
+	desired.fixedResponse, desired.unavailable = false, false
+	desired.members = []cloud.Member{{Address: "10.0.0.10", Port: 30080}}
+	plan, _, err = buildRouteEnsurePlan(desired, actual)
+	want[0].parentID = "pool-1"
+	if err != nil || len(plan) != 2 || plan[0].kind != routeMutationUpdateMember || plan[1] != want[0] {
+		t.Fatalf("prepare the original pool and restore it in place: plan = %#v, error = %v", plan, err)
+	}
+
+	actual.members[0].AdminStateUp = true
+	policy.fixedResponse, policy.targetObserved = false, true
+	policy.policy.Action, policy.policy.RedirectPoolID = string(l7policies.ActionRedirectToPool), "pool-1"
+	policy.policy.ProvisioningStatus = "ERROR"
+	plan, _, err = buildRouteEnsurePlan(desired, actual)
+	if err != nil || !reflect.DeepEqual(plan, want) {
+		t.Fatalf("retry the forwarding target in place after a failed reload: plan = %#v, error = %v", plan, err)
+	}
+}
+
+func TestInvalidHTTPBackendSwitchesPolicyWhenMemberDisableFails(t *testing.T) {
+	route, actual := convergedRoutePlanFixture()
+	route.fixedResponse, route.unavailable, route.backendKey = true, true, "backend"
+	route.members = nil
+	actual.members[0].ProvisioningStatus, actual.members[0].AdminStateUp = "ERROR", false
+	policy := &actual.policies[0]
+	policy.targetObserved = true
+	policy.policy.ProvisioningStatus, policy.rules[0].rule.ProvisioningStatus = "ACTIVE", "ACTIVE"
+	desired, observed := fixedHTTPPlanFixture(desiredRoute{httpParts: []desiredRoute{route}},
+		observedRouteGraph{httpParts: map[string]*observedRouteGraph{route.backendKey: &actual}})
+
+	check := func(want routeMutationKind, id string) {
+		t.Helper()
+		plan, _, err := (&Provider{}).buildGatewayGraphPlan(desired, observed)
+		if err != nil || len(plan) != 1 || plan[0].route.kind != want || plan[0].route.id != id || !plan[0].withdrawHTTPPolicy {
+			t.Fatalf("want priority for %v on %s, plan = %#v, error = %v", want, id, plan, err)
+		}
+	}
+	policy.rules[0].rule.Value = "/unexpected"
+	check(routeMutationDisableMember, actual.members[0].ID)
+	policy.rules[0].rule.Value = route.policies[0].path
+	check(routeMutationSetPolicyTarget, policy.policy.ID)
+	policy.fixedResponse, policy.policy.ProvisioningStatus = true, "ERROR"
+	policy.policy.Action, policy.policy.RedirectPoolID = "FIXED_RESPONSE", ""
+	check(routeMutationSetPolicyTarget, policy.policy.ID)
+	policy.policy.ProvisioningStatus = "ACTIVE"
+	check(routeMutationDisableMember, actual.members[0].ID)
+}
+
+func TestInvalidHTTPBackendWithdrawsLegacyPoolBeforeStaging(t *testing.T) {
+	for _, test := range []struct {
+		name             string
+		old, replacement []desiredPolicy
+	}{
+		{name: "exact", old: policiesFor("/api", ""), replacement: policiesFor("/api", "")},
+		{name: "prefix pair", old: policiesFor("/api", "/api/"), replacement: []desiredPolicy{{
+			role: rolePolicyPrefix, path: "^/api($|/)", compareType: l7policies.CompareTypeRegex,
+		}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, actual := convergedRoutePlanFixture()
+			actual.members[0].ProvisioningStatus = "ACTIVE"
+			actual.policies = nil
+			for i, wanted := range test.old {
+				policy := observedRoutePolicy{role: wanted.role, policy: l7policies.L7Policy{
+					ID: wanted.role, ListenerID: "listener-1", Position: int32(i + 1), AdminStateUp: true,
+					Action: string(l7policies.ActionRedirectToPool), RedirectPoolID: actual.pool.ID, ProvisioningStatus: "ACTIVE",
+				}}
+				for _, rule := range rulesFor(wanted, "") {
+					policy.rules = append(policy.rules, observedRouteRule{role: rule.role, rule: l7policies.Rule{
+						RuleType: string(rule.ruleType), CompareType: string(rule.compareType), Value: rule.value,
+						AdminStateUp: true, ProvisioningStatus: "ACTIVE",
+					}})
+				}
+				actual.policies = append(actual.policies, policy)
+			}
+			replacement := desiredRoute{fixedResponse: true, unavailable: true, backendKey: "replacement", policies: test.replacement}
+			desired, observed := fixedHTTPPlanFixture(desiredRoute{httpParts: []desiredRoute{replacement}}, actual)
+			check := func(want routeMutationKind, backend string) graphMutation {
+				t.Helper()
+				plan, _, err := (&Provider{}).buildGatewayGraphPlan(desired, observed)
+				if err != nil || len(plan) != 1 || plan[0].route.kind != want || plan[0].backendKey != backend || !plan[0].withdrawHTTPPolicy {
+					t.Fatalf("want priority for %v on backend %q, plan = %#v, error = %v", want, backend, plan, err)
+				}
+				return plan[0]
+			}
+			if step := check(routeMutationDisableMember, ""); step.route.id != actual.members[0].ID || step.route.parentID != actual.pool.ID {
+				t.Fatalf("legacy withdrawal selected a different member: %#v", step)
+			}
+			actual.members[0].AdminStateUp = false
+			actual.members[0].ProvisioningStatus = "ERROR"
+			check(routeMutationCreatePolicy, replacement.backendKey)
+			actual.members[0].ProvisioningStatus = "ACTIVE"
+			observed.routes[0].memberAdminUnreported = map[string]struct{}{actual.members[0].ID: {}}
+			check(routeMutationCreatePolicy, replacement.backendKey)
+			observed.routes[0].memberAdminUnreported = nil
+			check(routeMutationCreatePolicy, replacement.backendKey)
+
+			// On a failed member withdrawal, the staged policy must remain
+			// disabled until its identical predicate has been read back.
+			actual.members[0].ProvisioningStatus = "ERROR"
+			for i := range observed.routes[0].policies {
+				observed.routes[0].policies[i].policy.Position++
+			}
+			wanted := replacement.policies[0]
+			staged := observedRoutePolicy{role: wanted.role, fixedResponse: true, targetObserved: true, policy: l7policies.L7Policy{
+				ID: "fixed-policy", ListenerID: "listener-1", Position: 1, Action: "FIXED_RESPONSE", ProvisioningStatus: "ACTIVE",
+			}}
+			newBackend := &observedRouteGraph{policies: []observedRoutePolicy{staged}}
+			observed.routes[0].httpParts = map[string]*observedRouteGraph{replacement.backendKey: newBackend}
+			check(routeMutationCreateRule, replacement.backendKey)
+			for _, rule := range rulesFor(wanted, "") {
+				newBackend.policies[0].rules = append(newBackend.policies[0].rules, observedRouteRule{role: rule.role, rule: l7policies.Rule{
+					RuleType: string(rule.ruleType), CompareType: string(rule.compareType), Value: rule.value,
+					AdminStateUp: true, ProvisioningStatus: "ACTIVE",
+				}})
+			}
+			check(routeMutationEnablePolicy, replacement.backendKey)
+			newBackend.policies[0].policy.AdminStateUp = true
+			check(routeMutationDisablePolicy, "")
+		})
+	}
+}
+
+func TestFixedHTTPBackendHandoverKeepsSharedPoolServing(t *testing.T) {
+	kept, shared := convergedRoutePlanFixture()
+	kept.backendKey = "shared"
+	replaced := shared.policies[0]
+	replaced.role, replaced.policy.ID = "replaced-role", "replaced-policy"
+	replaced.rules = []observedRouteRule{{role: roleRulePath, rule: l7policies.Rule{
+		RuleType: string(l7policies.TypePath), CompareType: string(l7policies.CompareTypeEqual),
+		Value: "/revoked", AdminStateUp: true, ProvisioningStatus: "ACTIVE",
+	}}}
+	replaced.policy.Position, replaced.policy.ProvisioningStatus = 2, "ACTIVE"
+	shared.policies = append(shared.policies, replaced)
+	shared.members[0].ProvisioningStatus = "ACTIVE"
+	fixed := desiredRoute{fixedResponse: true, unavailable: true, backendKey: "replacement", policies: []desiredPolicy{{
+		role: "replacement-role", path: "/revoked", compareType: l7policies.CompareTypeEqual, position: 2,
+	}}}
+	desired, observed := fixedHTTPPlanFixture(desiredRoute{httpParts: []desiredRoute{kept, fixed}},
+		observedRouteGraph{httpParts: map[string]*observedRouteGraph{kept.backendKey: &shared}})
+
+	plan, _, err := (&Provider{}).buildGatewayGraphPlan(desired, observed)
+	if err != nil || len(plan) != 1 || plan[0].backendKey != fixed.backendKey ||
+		plan[0].route.kind != routeMutationCreatePolicy || plan[0].route.policy.position != 2 || !plan[0].withdrawHTTPPolicy {
+		t.Fatalf("want fixed policy before the revoked match on an otherwise healthy pool, plan = %#v, error = %v", plan, err)
+	}
+}
+
+func fixedHTTPPlanFixture(route desiredRoute, observed observedRouteGraph) (desiredGatewayGraph, observedGatewayGraph) {
+	desired := desiredGatewayGraph{
+		spec: cloud.GatewayGraphSpec{Gateway: cloud.GatewayGraphNode{Disposition: cloud.GraphEnsure},
+			Routes: []cloud.RouteGraphNode{{Disposition: cloud.GraphEnsure}}},
+		routes: []desiredRoute{route}, fixedHTTPResponses: true,
+	}
+	actual := observedGatewayGraph{
+		loadBalancer: &octavia.LoadBalancer{LoadBalancer: loadbalancers.LoadBalancer{AdminStateUp: true}},
+		listener:     &listeners.Listener{ID: "listener-1", AdminStateUp: true, Protocol: cloud.ListenerProtocolHTTP},
+		protocol:     cloud.ListenerProtocolHTTP, defaultHTTPResponseCodes: map[string]int{"listener-1": http.StatusNotFound},
+		routes: []observedRouteGraph{observed},
+	}
+	return desired, actual
+}
+
+func TestInvalidHTTPBackendWithoutPoolCreatesOnlyItsPolicy(t *testing.T) {
+	desired, _ := convergedRoutePlanFixture()
+	desired.fixedResponse, desired.unavailable = true, true
+	desired.members = nil
+
+	plan, _, err := buildRouteEnsurePlan(desired, observedRouteGraph{})
+	if err != nil || len(plan) != 1 || plan[0].kind != routeMutationCreatePolicy || plan[0].parentID != "" {
+		t.Fatalf("create a disabled fixed policy without a pool: plan = %#v, error = %v", plan, err)
+	}
+}
+
+func TestObserveFixedPolicyRequiresVerifiedTargetAndOwner(t *testing.T) {
+	identity := safetyTestIdentity(t)
+	backend := openstackidentity.HTTPBackendKey("default", "web", 80)
+	match := openstackidentity.HTTPMatchKey("", cloud.PathMatchExact, "/api")
+	role := openstackidentity.HTTPFragmentRole(rolePolicyExact, backend, match)
+	for _, test := range []struct {
+		name, field    string
+		value          any
+		change, remove bool
+	}{
+		{name: "verified"},
+		{name: "status omitted", field: "fixed_response", remove: true},
+		{name: "wrong status", field: "fixed_response", value: map[string]int{"status_code": 404}, change: true},
+		{name: "pool omitted", field: "redirect_pool_id", remove: true},
+		{name: "pool present", field: "redirect_pool_id", value: "foreign-pool", change: true},
+		{name: "unknown action", field: "action", value: "UNKNOWN", change: true},
+		{name: "foreign project", field: "project_id", value: "foreign-project", change: true},
+		{name: "unknown administrative state", field: "admin_state_up", remove: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			policy := map[string]any{
+				"id": "policy-1", "project_id": "project-a", "listener_id": "listener-1", "action": "FIXED_RESPONSE",
+				"redirect_pool_id": nil, "fixed_response": map[string]int{"status_code": 500},
+				"admin_state_up": false, "position": 1, "provisioning_status": "ACTIVE", "rules": []any{},
+				"tags": safetyRouteTags(t, identity, role),
+			}
+			if test.remove {
+				delete(policy, test.field)
+			} else if test.change {
+				policy[test.field] = test.value
+			}
+			provider := &Provider{projectID: "project-a", fixedHTTPResponses: true, octavia: octavia.NewService(safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				switch req.URL.Path {
+				case "/lbaas/l7policies":
+					safetyWriteJSON(t, w, map[string]any{"l7policies": []any{policy}})
+				case "/lbaas/l7policies/policy-1/rules":
+					safetyWriteJSON(t, w, map[string]any{"rules": []any{}})
+				default:
+					t.Errorf("unexpected request to %s", req.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			})))}
+			inventory := routeGraphInventory{owners: []routeGraphOwner{{identity: identity}}, graphs: make([]observedRouteGraph, 1)}
+			listener := &listeners.Listener{ID: "listener-1", L7Policies: []l7policies.L7Policy{{ID: "policy-1"}}}
+			err := provider.observeListenerPolicies(t.Context(), &inventory, listener, cloud.ListenerProtocolHTTP, nil, map[int]string{}, true)
+			if test.change || test.remove {
+				if !errors.Is(err, cloud.ErrOwnershipConflict) {
+					t.Fatalf("expected ambiguous or conflicting target to block the graph, got %v", err)
+				}
+				return
+			}
+			if err != nil || !inventory.graphs[0].part(backend).policies[0].fixedResponse {
+				t.Fatalf("expected verified no-pool fixed policy, got %v", err)
+			}
+		})
+	}
+}
 
 func TestBuildRouteEnsurePlanDisablesPolicyBeforeChangingRules(t *testing.T) {
 	desired, actual := convergedRoutePlanFixture()

@@ -162,7 +162,7 @@ func (r *Reconciler) enqueueHTTPRoutesForNode(ctx context.Context, object client
 	}
 	for index := range routes.Items {
 		route := &routes.Items[index]
-		backends, err := validateRouteStructure(route)
+		backends, err := r.validateRouteStructure(route)
 		if err != nil {
 			continue
 		}
@@ -175,7 +175,10 @@ func (r *Reconciler) enqueueHTTPRoutesForNode(ctx context.Context, object client
 			continue
 		}
 		for _, backend := range backends {
-			serviceKey, _ := model.BackendServiceReference(route.Namespace, backend)
+			serviceKey, supported := model.BackendServiceReference(route.Namespace, backend)
+			if !supported {
+				continue
+			}
 			if serviceKey.Namespace != route.Namespace {
 				// Let reconciliation check the live grant before reading this Service.
 				keys[client.ObjectKeyFromObject(route)] = struct{}{}

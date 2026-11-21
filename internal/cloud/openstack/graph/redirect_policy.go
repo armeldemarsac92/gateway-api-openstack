@@ -163,6 +163,9 @@ func policyRuleRole(policy desiredPolicy, base, guard string) string {
 	if policy.redirect != nil {
 		return openstackidentity.HTTPRedirectRole(base, policy.redirect.matchKey, policy.matchKey, guard)
 	}
+	if policy.weighted {
+		return openstackidentity.HTTPWeightedPolicyRole(base, policy.backendKey, policy.matchKey)
+	}
 	return httpResourceRole(base, policy.backendKey, policy.matchKey)
 }
 

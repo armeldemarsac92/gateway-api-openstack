@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -154,6 +155,228 @@ func TestScanReturnsMatchedGraphUsingReadOnlyPaginatedQueries(t *testing.T) {
 		if strings.Contains(string(encoded), sensitive) {
 			t.Errorf("serialized inventory contains sensitive provider data %q: %s", sensitive, encoded)
 		}
+	}
+}
+
+func TestScanWeightedPolicyRequiresEveryPoolToBelongToItsRouteAndListener(t *testing.T) {
+	for _, test := range []struct {
+		name, poolCase string
+		policy, rule   audit.Disposition
+	}{
+		{"owned pools including zero", "", audit.DispositionMatched, audit.DispositionMatched},
+		{"pool replaced by fixed 500", "fixed", audit.DispositionMatched, audit.DispositionMatched},
+		{"zero weight pool missing", "missing", audit.DispositionUnresolved, audit.DispositionUnresolved},
+		{"zero weight pool from sibling route", "sibling", audit.DispositionOwnershipConflict, audit.DispositionOwnershipConflict},
+		{"sibling pool alongside fixed 404", "sibling-fixed-404", audit.DispositionOwnershipConflict, audit.DispositionOwnershipConflict},
+		{"sibling pool after malformed slot", "sibling-malformed", audit.DispositionOwnershipConflict, audit.DispositionOwnershipConflict},
+		{"a rule without a project inherits the policy conflict", "sibling-rule-no-project", audit.DispositionOwnershipConflict, audit.DispositionOwnershipConflict},
+		{"a stock action with a sibling target still conflicts", "sibling-stock-action", audit.DispositionOwnershipConflict, audit.DispositionOwnershipConflict},
+		{"pool from other load balancer", "other-lb", audit.DispositionOwnershipConflict, audit.DispositionOwnershipConflict},
+		{"pool without backend fragment", "legacy", audit.DispositionOwnershipConflict, audit.DispositionOwnershipConflict},
+		{"pool has conflicting duplicate identity", "duplicate-pool", audit.DispositionOwnershipConflict, audit.DispositionOwnershipConflict},
+		{"pool from wrong project with another target missing", "wrong-project", audit.DispositionOwnershipConflict, audit.DispositionOwnershipConflict},
+		{"unsupported fixed 404 target", "fixed-404", audit.DispositionUnresolved, audit.DispositionUnresolved},
+		{"malformed target", "malformed", audit.DispositionUnresolved, audit.DispositionUnresolved},
+		{"204 after weighted page leaves inventory incomplete", "incomplete", audit.DispositionUnresolved, audit.DispositionUnresolved},
+		{"unknown action", "unknown", audit.DispositionUnresolved, audit.DispositionUnresolved},
+		{"target changed on another page", "changed", audit.DispositionUnresolved, audit.DispositionUnresolved},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			route := safetyTestIdentity(t)
+			fixture := newAuditScanFixture(t, route)
+			fixture.paginate = true
+			fixture.members, fixture.monitors = nil, nil
+			records := auditTestRecords(route.Value())
+			policy := fixture.policies[0]
+			ruleKey := openstackidentity.HTTPWeightedRuleKey(0)
+			matchKey := openstackidentity.HTTPMatchKey("", cloud.PathMatchExact, "/weighted")
+			policy["tags"] = safetyRouteTags(t, route, openstackidentity.HTTPWeightedPolicyRole(rolePolicyExact, ruleKey, matchKey))
+			policy["action"] = "WEIGHTED_TARGETS"
+			policy["redirect_pool_id"] = nil
+			policy["admin_state_up"] = true
+			fixture.rules[0]["tags"] = safetyRouteTags(t, route, openstackidentity.HTTPWeightedPolicyRole(roleRulePath, ruleKey, matchKey))
+			a := openstackidentity.HTTPBackendKey("default", "first", 80)
+			b := openstackidentity.HTTPBackendKey("default", "second", 80)
+			fixture.pools[0]["tags"] = safetyRouteTags(t, route, openstackidentity.HTTPFragmentRole(rolePool, a, ""))
+			second := maps.Clone(fixture.pools[0])
+			second["id"] = "pool-2"
+			second["tags"] = safetyRouteTags(t, route, openstackidentity.HTTPFragmentRole(rolePool, b, ""))
+			fixture.pools = append(fixture.pools, second)
+			targets := []map[string]any{{"weight": 3, "pool_id": "pool-1"}, {"weight": 0, "pool_id": "pool-2"}}
+			switch test.poolCase {
+			case "fixed", "fixed-404":
+				code := http.StatusInternalServerError
+				if test.poolCase == "fixed-404" {
+					code = http.StatusNotFound
+				}
+				targets[1] = map[string]any{"weight": 1, "fixed_response": map[string]any{"status_code": code}}
+				fixture.pools = fixture.pools[:1]
+			case "missing":
+				fixture.pools = fixture.pools[:1]
+			case "sibling", "sibling-fixed-404", "sibling-malformed", "sibling-rule-no-project", "sibling-stock-action", "other-lb":
+				siblingID := route.Value()
+				siblingID.RouteName, siblingID.RouteUID = "sibling", "sibling-uid"
+				if test.poolCase == "other-lb" {
+					lb := maps.Clone(fixture.loadBalancers[0])
+					lb["id"], lb["vip_port_id"] = "load-balancer-2", "vip-port-2"
+					// Keep the pool's ownership tags the same so this case exercises the actual LB edge.
+					fixture.loadBalancers = append(fixture.loadBalancers, lb)
+					second["loadbalancers"] = []any{map[string]any{"id": "load-balancer-2"}}
+				} else {
+					sibling, err := openstackidentity.NewIdentity(siblingID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					records = append(records, auditTestRecords(siblingID)[1])
+					second["tags"] = safetyRouteTags(t, sibling, openstackidentity.HTTPFragmentRole(rolePool, b, ""))
+				}
+				switch test.poolCase {
+				case "sibling-fixed-404":
+					targets = append(targets, map[string]any{"weight": 1, "fixed_response": map[string]any{"status_code": 404}})
+				case "sibling-malformed":
+					delete(targets[0], "weight")
+				case "sibling-rule-no-project":
+					delete(fixture.rules[0], "project_id")
+				case "sibling-stock-action":
+					policy["action"], policy["redirect_pool_id"] = "REDIRECT_TO_POOL", "pool-1"
+					policy["tags"] = safetyRouteTags(t, route, openstackidentity.HTTPFragmentRole(rolePolicyExact, a, matchKey))
+					fixture.rules[0]["tags"] = safetyRouteTags(t, route, openstackidentity.HTTPFragmentRole(roleRulePath, a, matchKey))
+				}
+			case "legacy":
+				second["tags"] = safetyRouteTags(t, route, rolePool)
+			case "duplicate-pool":
+				duplicate := maps.Clone(second)
+				duplicate["id"] = "duplicate"
+				fixture.pools = append(fixture.pools, duplicate)
+			case "wrong-project":
+				targets[0]["pool_id"] = "missing"
+				second["project_id"] = "other-project"
+			case "malformed":
+				delete(targets[1], "weight")
+			case "incomplete":
+				fixture.overridePolicyPage = func(w http.ResponseWriter, req *http.Request) bool {
+					if req.URL.Query().Get("page") != "2" {
+						return false
+					}
+					w.WriteHeader(http.StatusNoContent)
+					return true
+				}
+			case "unknown":
+				policy["action"] = "PRIVATE_UNKNOWN"
+			case "changed":
+				changed := maps.Clone(policy)
+				changed["targets"] = []map[string]any{targets[0], {"weight": 1, "fixed_response": map[string]any{"status_code": 500}}}
+				fixture.policies = append(fixture.policies, changed)
+			}
+			policy["targets"] = targets
+			if test.poolCase != "changed" && test.poolCase != "incomplete" {
+				// The managed weighted policy is on the second page.
+				fixture.policies = append([]map[string]any{{"id": "unmanaged-policy"}}, fixture.policies...)
+			}
+			result, err := fixture.provider().Scan(t.Context(), auditTestScope(route.Value()), records)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for id, want := range map[string]audit.Disposition{"policy-1": test.policy, "rule-1": test.rule} {
+				got := auditFindingByID(t, result.Resources, id)
+				if got.Disposition != want {
+					t.Errorf("%s = %s/%s, want %s", id, got.Disposition, got.Reason, want)
+				}
+			}
+			if test.poolCase == "other-lb" {
+				got := auditFindingByID(t, result.Resources, "policy-1")
+				if got.Reason != auditReasonParentMismatch {
+					t.Errorf("policy reason = %s, want %s", got.Reason, auditReasonParentMismatch)
+				}
+			}
+			if test.poolCase == "changed" {
+				got := auditFindingByID(t, result.Resources, "policy-1")
+				if got.Reason != auditReasonObservationChanged {
+					t.Errorf("policy reason = %s, want %s", got.Reason, auditReasonObservationChanged)
+				}
+			}
+			if fixture.mutatingRequests != 0 {
+				t.Errorf("weighted audit sent %d mutating requests", fixture.mutatingRequests)
+			}
+			if _, ok := fixture.findRequest("/lbaas/l7policies", func(query url.Values) bool { return query.Get("page") == "2" }); !ok {
+				t.Error("weighted audit did not follow the L7 policy page link")
+			}
+			policyRequests := 0
+			for _, request := range fixture.recordedRequests() {
+				if request.path == "/lbaas/l7policies" {
+					policyRequests++
+				}
+			}
+			if policyRequests != 2 {
+				t.Errorf("L7 policy requests = %d, want one read per page", policyRequests)
+			}
+		})
+	}
+}
+
+func TestScanDoesNotMatchRedirectPolicyWithPrivateTargets(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		fields map[string]any
+		want   audit.Disposition
+	}{
+		{"stock empty targets", map[string]any{"targets": []any{}, "fixed_response": nil}, audit.DispositionMatched},
+		{"private fixed slot", map[string]any{"targets": []any{map[string]any{"weight": 1, "fixed_response": map[string]any{"status_code": 500}}}}, audit.DispositionUnresolved},
+		{"malformed targets", map[string]any{"targets": "invalid"}, audit.DispositionUnresolved},
+		{"malformed fixed response", map[string]any{"fixed_response": "invalid"}, audit.DispositionUnresolved},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			identity := safetyTestIdentity(t)
+			fixture := newAuditScanFixture(t, identity)
+			maps.Copy(fixture.policies[0], test.fields)
+			inventory, err := fixture.provider().Scan(t.Context(), auditTestScope(identity.Value()), auditTestRecords(identity.Value()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, id := range []string{"policy-1", "rule-1"} {
+				finding := auditFindingByID(t, inventory.Resources, id)
+				if finding.Disposition != test.want {
+					t.Errorf("%s = %s/%s, want %s", id, finding.Disposition, finding.Reason, test.want)
+				}
+			}
+		})
+	}
+}
+
+func TestScanRequiresExplicitPolicyCollection(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		body    map[string]any
+		wantErr bool
+	}{
+		{"empty array", map[string]any{"l7policies": []any{}}, false},
+		{"no content", nil, false},
+		{"missing collection", map[string]any{}, true},
+		{"null collection", map[string]any{"l7policies": nil}, true},
+		{"null row", map[string]any{"l7policies": []any{nil}}, true},
+		{"row without ID", map[string]any{"l7policies": []any{map[string]any{"action": "WEIGHTED_TARGETS"}}}, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			identity := safetyTestIdentity(t)
+			fixture := newAuditScanFixture(t, identity)
+			fixture.overridePolicyPage = func(w http.ResponseWriter, _ *http.Request) bool {
+				if test.body == nil {
+					w.WriteHeader(http.StatusNoContent)
+				} else {
+					safetyWriteJSON(t, w, test.body)
+				}
+				return true
+			}
+			inventory, err := fixture.provider().Scan(t.Context(), auditTestScope(identity.Value()), auditTestRecords(identity.Value()))
+			if (err != nil) != test.wantErr {
+				t.Fatalf("Scan() returned %d resources and error %v, want error = %t", len(inventory.Resources), err, test.wantErr)
+			}
+			for _, finding := range inventory.Resources {
+				if finding.Type == auditTypeL7Policy || finding.Type == auditTypeL7Rule {
+					t.Errorf("Scan() reported unexpected resource %s", finding.ID)
+				}
+			}
+		})
 	}
 }
 
@@ -455,21 +678,51 @@ func TestScanDistinguishesMissingRedirectPoolRelationship(t *testing.T) {
 	}
 }
 
+func TestScanMatchesPoolFreeFixedPolicyWithExplicitTarget(t *testing.T) {
+	identity := safetyTestIdentity(t)
+	match := openstackidentity.HTTPMatchKey("", cloud.PathMatchExact, "/omitted")
+	fixed := openstackidentity.HTTPFixedRuleKey(0)
+	for _, statusCode := range []int{500, 302} {
+		fixture := newAuditScanFixture(t, identity)
+		fixture.policies[0]["action"] = "FIXED_RESPONSE"
+		fixture.policies[0]["admin_state_up"] = true
+		fixture.policies[0]["redirect_pool_id"] = nil
+		fixture.policies[0]["fixed_response"] = map[string]any{"status_code": statusCode}
+		fixture.policies[0]["tags"] = safetyRouteTags(t, identity, openstackidentity.HTTPFragmentRole(rolePolicyExact, fixed, match))
+		fixture.rules[0]["tags"] = safetyRouteTags(t, identity, openstackidentity.HTTPFragmentRole(roleRulePath, fixed, match))
+		inventory, err := fixture.provider().Scan(t.Context(), auditTestScope(identity.Value()), auditTestRecords(identity.Value()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := audit.DispositionMatched
+		if statusCode == 302 {
+			want = audit.DispositionUnresolved
+		}
+		for _, id := range []string{"policy-1", "rule-1"} {
+			got := auditFindingByID(t, inventory.Resources, id)
+			if got.Disposition != want {
+				t.Fatalf("%s with fixed code %d: got %s (%s), want %s", id, statusCode, got.Disposition, got.Reason, want)
+			}
+		}
+	}
+}
+
 type auditScanFixture struct {
-	t                *testing.T
-	loadBalancers    []map[string]any
-	listeners        []map[string]any
-	pools            []map[string]any
-	members          []map[string]any
-	monitors         []map[string]any
-	policies         []map[string]any
-	rules            []map[string]any
-	floatingIPs      []map[string]any
-	paginate         bool
-	noPolicyContent  bool
-	mutex            sync.Mutex
-	requests         []auditRecordedRequest
-	mutatingRequests int
+	t                  *testing.T
+	loadBalancers      []map[string]any
+	listeners          []map[string]any
+	pools              []map[string]any
+	members            []map[string]any
+	monitors           []map[string]any
+	policies           []map[string]any
+	rules              []map[string]any
+	floatingIPs        []map[string]any
+	paginate           bool
+	noPolicyContent    bool
+	overridePolicyPage func(http.ResponseWriter, *http.Request) bool
+	mutex              sync.Mutex
+	requests           []auditRecordedRequest
+	mutatingRequests   int
 }
 
 func newAuditScanFixture(t *testing.T, identity openstackidentity.Identity) *auditScanFixture {
@@ -512,7 +765,7 @@ func newAuditScanFixture(t *testing.T, identity openstackidentity.Identity) *aud
 		policies: []map[string]any{{
 			"id": "policy-1", "project_id": identity.Value().OpenStackProjectID,
 			"provisioning_status": "ACTIVE", "listener_id": "listener-1",
-			"redirect_pool_id": "pool-1", "tags": policyTags,
+			"action": "REDIRECT_TO_POOL", "redirect_pool_id": "pool-1", "tags": policyTags,
 		}},
 		rules: []map[string]any{{
 			"id": "rule-1", "project_id": identity.Value().OpenStackProjectID,
@@ -563,6 +816,9 @@ func (f *auditScanFixture) serveHTTP(w http.ResponseWriter, request *http.Reques
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
+		if f.overridePolicyPage != nil && f.overridePolicyPage(w, request) {
+			return
+		}
 		key, items = "l7policies", f.policies
 	case strings.HasPrefix(request.URL.Path, "/lbaas/pools/") && strings.HasSuffix(request.URL.Path, "/members"):
 		key = "members"
@@ -587,8 +843,12 @@ func (f *auditScanFixture) serveHTTP(w http.ResponseWriter, request *http.Reques
 }
 
 func (f *auditScanFixture) writeCollection(w http.ResponseWriter, request *http.Request, key string, items []map[string]any) {
+	nextItems := []map[string]any{}
 	if items == nil {
 		items = []map[string]any{}
+	}
+	if f.paginate && key == "l7policies" && len(items) > 1 {
+		items, nextItems = items[:1], items[1:]
 	}
 	if f.paginate && request.URL.Query().Get("page") == "" {
 		query := request.URL.Query()
@@ -601,7 +861,7 @@ func (f *auditScanFixture) writeCollection(w http.ResponseWriter, request *http.
 		return
 	}
 	if f.paginate {
-		items = []map[string]any{}
+		items = nextItems
 	}
 	safetyWriteJSON(f.t, w, map[string]any{key: items})
 }

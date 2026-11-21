@@ -215,7 +215,7 @@ Deleting slices are ignored, and conflicting duplicate observations use the less
 The controller rejects loopback, link-local, multicast, and the referenced Service's virtual addresses.
 
 Endpoint updates preserve unchanged member IDs.
-For an HTTPRoute, a valid Service with no eligible endpoints keeps its pool, monitor, and route policies with an empty member list. The required HTTP error response for an invalid backend remains open.
+For an HTTPRoute, a valid Service with no eligible endpoints keeps its pool, monitor, and route policies with an empty member list. The optional Octavia HTTP actions serve HTTP 500 for an invalid backend. [Controller flags](../getting-started.md#optional-octavia-http-actions)
 For a weighted TCPRoute or UDPRoute, losing the last eligible endpoint of a positive-weight Service withdraws forwarding and deletes the route's pool. Reconciliation recreates the pool when the endpoints return. [Weighted TCP Services](../getting-started.md#forward-tcp-to-a-service) · [Weighted UDP Services](../getting-started.md#forward-udp-to-a-service)
 IPv6 endpoint forwarding, broader route mappings, and conformance remain separate work.
 

@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"reflect"
 	"testing"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
@@ -85,5 +86,82 @@ func TestOctaviaRequiresCompleteChildCollections(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestWeightedPolicyWire(t *testing.T) {
+	const pool = "b9b600af-3eb4-455c-aab5-d87c28c9c301"
+	targets := []WeightedHTTPTarget{{Weight: 3, PoolID: pool}, {Weight: 1, FixedResponse: &FixedHTTPResponse{StatusCode: 500}}, {Weight: 0, PoolID: pool}}
+	raw := `[{"pool_id":"` + pool + `","weight":3},{"weight":1,"fixed_response":{"status_code":500}},{"weight":0,"pool_id":"` + pool + `"}]`
+	var wantTargets any
+	if err := json.Unmarshal([]byte(raw), &wantTargets); err != nil {
+		t.Fatal(err)
+	}
+	var methods []string
+	handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		methods = append(methods, req.Method)
+		w.Header().Set("Content-Type", "application/json")
+		if req.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`{"l7policies":[{"id":"policy","action":"WEIGHTED_TARGETS","redirect_pool_id":null,"admin_state_up":true,"targets":` + raw + `}]}`))
+			return
+		}
+		var body struct {
+			Policy map[string]any `json:"l7policy"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		want := map[string]any{"action": "WEIGHTED_TARGETS", "targets": wantTargets}
+		if req.Method == http.MethodPost {
+			want["listener_id"], want["admin_state_up"] = "listener", false
+			w.WriteHeader(http.StatusCreated)
+		}
+		if !reflect.DeepEqual(body.Policy, want) {
+			t.Fatalf("policy = %#v, want %#v", body.Policy, want)
+		}
+		_, _ = w.Write([]byte(`{"l7policy":{"id":"policy"}}`))
+	})
+	service := NewService(&gophercloud.ServiceClient{
+		ProviderClient: &gophercloud.ProviderClient{HTTPClient: http.Client{Transport: loadBalancerTestTransport{handler}}},
+		Endpoint:       "http://octavia.test/",
+	})
+	disabled := false
+	if _, err := service.CreateWeightedPolicy(t.Context(), l7policies.CreateOpts{ListenerID: "listener", AdminStateUp: &disabled}, targets); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.SetPolicyWeightedTargets(t.Context(), "policy", targets); err != nil {
+		t.Fatal(err)
+	}
+	observed, complete, err := service.ListPolicyObservations(t.Context(), l7policies.ListOpts{})
+	if err != nil || !complete || len(observed) != 1 || observed[0].Target == nil || !reflect.DeepEqual(observed[0].Target.WeightedTargets, targets) {
+		t.Fatalf("observed targets = %#v, error = %v", observed, err)
+	}
+	if !reflect.DeepEqual(methods, []string{"POST", "PUT", "GET"}) {
+		t.Fatal(methods)
+	}
+}
+
+func TestWeightedPolicyReadsOnlyExplicitTargetFields(t *testing.T) {
+	const pool = "b9b600af-3eb4-455c-aab5-d87c28c9c301"
+	for _, body := range []string{
+		`{"pool_id":"` + pool + `"}`,
+		`{"weight":0,"pool_id":"` + pool + `","fixed_response":null}`,
+		`{"weight":1,"pool_id":"` + pool + `","unexpected":true}`,
+		`{"weight":1,"fixed_response":{"status_code":500,"location":"/"}}`,
+		`{"weight":1,"fixed_response":{"status_code":200}}`,
+	} {
+		var target WeightedHTTPTarget
+		if err := json.Unmarshal([]byte(body), &target); err == nil {
+			t.Errorf("accepted invalid weighted target %s", body)
+		}
+	}
+}
+
+func TestAuditReadbackTreatsFormattedEmptyTargetsAsInactive(t *testing.T) {
+	row := json.RawMessage(`{"id":"policy","action":"REDIRECT_TO_POOL","targets":[
+	]}`)
+	observation, err := readPolicyObservation(row)
+	if err != nil || observation.ExtendedTargetFields {
+		t.Fatalf("empty JSON array activated private target handling: %v, %v", observation.ExtendedTargetFields, err)
 	}
 }

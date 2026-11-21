@@ -66,7 +66,7 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 	externalAddressReady := actual.floatingIP == nil && desired.spec.Gateway.Spec.ExternalNetworkID == "" ||
 		actual.floatingIP != nil && actual.floatingIP.PortID != ""
 	gatewayReady := actual.loadBalancer != nil && actual.listener != nil && actual.loadBalancer.AdminStateUp &&
-		actual.listener.AdminStateUp && actual.listener.DefaultPoolID == "" && externalAddressReady && len(plan) == 0
+		actual.listener.AdminStateUp && actual.listener.DefaultPoolID == "" && actual.httpFallbackReady(*actual.listener, desired.fixedHTTPResponses) && externalAddressReady && len(plan) == 0
 	if !gatewayReady {
 		result.Gateway.Outcome = p.progressingOutcome("Waiting for the Gateway infrastructure")
 	}
@@ -86,9 +86,11 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 	}
 	groupedHTTP := handovers != nil
 	var deleteDisables, deleteDisableRetries, deletions, memberDisables, memberDisableRetries []graphMutation
-	var staging []graphMutation
+	var staging, fixedStaging, fixedTargetWithdrawals []graphMutation
+	var weightedWithdrawals []graphMutation
 	disables := make([]graphMutation, 0)
 	ensures := make([]graphMutation, 0)
+	var zeroWeightPoolEnsures []graphMutation
 	routeResults := make([]cloud.RouteGraphResult, 0, len(desired.routes))
 	canRestoreTraffic := !groupedHTTP || len(handovers.protected) == 0
 	holdPolicyOrder := make(map[int]bool)
@@ -172,6 +174,9 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 			} else {
 				routePlan = buildRouteDeletionPlan(observed)
 				backendIssue = observed.backendProvisioningIssue(true, scopedHTTP)
+				if observed.weightedPoolHeld {
+					backendIssue = "Waiting for weighted HTTP policies to release the pool"
+				}
 			}
 		case node.Disposition == cloud.GraphEnsure:
 			routePlan, routeResult.State, err = buildRouteEnsurePlan(route, observed)
@@ -189,9 +194,9 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 			if slices.ContainsFunc(observed.policies, observedRoutePolicy.pending) {
 				ensureHold = "Waiting for Octavia L7 policy or rule provisioning"
 				routePlan = nil
-			} else if backendIssue := observed.backendProvisioningIssue(route.unavailable && len(observed.members) != 0, scopedHTTP || route.backendKey != ""); backendIssue != "" {
+			} else if backendIssue := observed.backendProvisioningIssue(route.unavailable && len(observed.members) != 0, scopedHTTP || route.backendKey != ""); !route.fixedResponse && backendIssue != "" {
 				ensureHold = backendIssue
-				canRestoreTraffic = false
+				canRestoreTraffic = canRestoreTraffic && route.zeroWeightOnly
 				// A blocked earlier route can leave an empty slot in the policy
 				// order. Octavia would clamp a subsequent insert to the end.
 				holdPolicyOrder[port] = holdPolicyOrder[port] || !policyPositionsMatch(route.policies, observed.policies)
@@ -211,13 +216,19 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 					routeResult.Outcome = p.progressingOutcome("Waiting for the replacement HTTP policy before withdrawing the old match")
 					return true
 				}
+				if withdrawing && observed.weightedPoolHeld &&
+					(step.kind == routeMutationDeleteMember || step.kind == routeMutationDeleteMonitor || step.kind == routeMutationDeletePool) {
+					routeResult.Outcome = p.progressingOutcome(backendIssue)
+					return true
+				}
 				return withdrawing && len(observed.policies) != 0 &&
 					(step.kind == routeMutationDeleteMember || step.kind == routeMutationDeleteMonitor || step.kind == routeMutationDeletePool)
 			})
-			if route.unavailable && ensureHold == "" {
+			if route.unavailable && ensureHold == "" &&
+				(len(routePlan) == 0 || routePlan[0].kind != routeMutationSetPolicyTarget) {
 				_, ensureHold = httpMemberWithdrawal(observed)
 			}
-			if stage, ok := handovers.stages[index]; ok && !withdrawing && ensureHold == "" &&
+			if stage, ok := handovers.stages[index]; ok && !withdrawing && (ensureHold == "" || route.fixedResponse) &&
 				actual.loadBalancer != nil && (!scopedHTTP && actual.listener != nil || listenerID != "") && !policyPending[port] {
 				steps, err := stage.plan(route, observed)
 				if err != nil {
@@ -226,9 +237,20 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 				if len(steps) != 0 && steps[0].kind != routeMutationDisableMember {
 					step := steps[0]
 					step.policy.position = stage.wanted.position
-					staging = append(staging, graphMutation{kind: graphRouteMutation, routeIndex: index, route: step, listenerID: listenerID, message: step.message()})
+					mutation := graphMutation{kind: graphRouteMutation, routeIndex: index, route: step, listenerID: listenerID, message: step.message()}
+					if route.httpFixedPolicy() {
+						mutation.withdrawHTTPPolicy = true
+						fixedStaging = append(fixedStaging, mutation)
+					} else {
+						staging = append(staging, mutation)
+					}
 					routeResult.Outcome = p.progressingOutcome(step.message())
 				}
+			}
+			for _, step := range weightedTargetWithdrawals(route, observed) {
+				weightedWithdrawals = append(weightedWithdrawals, graphMutation{kind: graphRouteMutation, routeIndex: index,
+					route: step, listenerID: listenerID, message: step.message(), withdrawHTTPPolicy: true})
+				routeResult.Outcome = p.progressingOutcome(step.message())
 			}
 		}
 		if node.Disposition == cloud.GraphEnsure && route.redirect && !withdrawing && holdRedirectEnable[port] {
@@ -250,9 +272,15 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 		if route.redirectIssue != "" {
 			routeResult.Outcome = p.progressingOutcome(route.redirectIssue)
 		}
+		if route.targetsPending {
+			canRestoreTraffic = false
+			if routeResult.Outcome.State == cloud.OutcomeReady {
+				routeResult.Outcome = p.progressingOutcome("Waiting for owned Octavia weighted HTTP target pools")
+			}
+		}
 		if ensureHold != "" {
 			routeResult.Outcome = p.progressingOutcome(ensureHold)
-			if groupedHTTP && (route.unavailable || handovers.drain[index]) {
+			if groupedHTTP && (route.unavailable && !route.zeroWeightOnly || handovers.drain[index]) {
 				canRestoreTraffic = false
 			}
 		}
@@ -268,8 +296,13 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 			mutation := graphMutation{kind: graphRouteMutation, routeIndex: index, route: step, listenerID: listenerID, message: step.message()}
 			withdrawPolicy := step.withdrawHTTPPolicy || withdrawing &&
 				(step.kind == routeMutationDisablePolicy || step.kind == routeMutationDeleteRule || step.kind == routeMutationDeletePolicy)
-			mutation.withdrawHTTPPolicy = (scopedHTTP || groupedHTTP) && (withdrawPolicy || step.kind == routeMutationDisableMember)
+			fixTarget := route.fixedResponse && step.kind == routeMutationSetPolicyTarget
+			mutation.withdrawHTTPPolicy = (scopedHTTP || groupedHTTP) && (withdrawPolicy || step.kind == routeMutationDisableMember || fixTarget)
 			switch {
+			case fixTarget:
+				if stepIndex == 0 && ensureHold == "" {
+					fixedTargetWithdrawals = append(fixedTargetWithdrawals, mutation)
+				}
 			case step.kind == routeMutationDisableMember:
 				if observed.backendProvisioningIssue(true, true) != "" {
 					continue
@@ -315,6 +348,8 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 			case groupedHTTP && (step.kind == routeMutationCreatePolicy && step.policy.position > policyCount[port]+1 ||
 				step.kind == routeMutationMovePolicy && step.policy.position > policyCount[port]):
 				routeResult.Outcome = p.progressingOutcome("Waiting for the HTTPRoute policy order")
+			case route.zeroWeightOnly:
+				zeroWeightPoolEnsures = append(zeroWeightPoolEnsures, mutation)
 			default:
 				ensures = append(ensures, mutation)
 			}
@@ -330,9 +365,10 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 	// of retries for previously failed disables, before touching descendants.
 	if scopedHTTP || groupedHTTP {
 		// Prioritize verified withdrawals even when earlier prerequisites need
-		// repair. A same-predicate handover keeps its old policy eligible only
-		// after the new enabled policy and its backend have been read back.
-		for _, steps := range [][]graphMutation{memberDisables, deleteDisables, memberDisableRetries, deleteDisableRetries, deletions} {
+		// repair. Withdraw fresh members first, then let an equivalent fixed
+		// response take over if member withdrawal requires a retry.
+		slices.SortStableFunc(fixedStaging, func(a, b graphMutation) int { return cmp.Compare(a.route.policy.position, b.route.policy.position) })
+		for _, steps := range [][]graphMutation{weightedWithdrawals, memberDisables, fixedTargetWithdrawals, deleteDisables, fixedStaging, memberDisableRetries, deleteDisableRetries, deletions} {
 			for _, step := range steps {
 				if step.withdrawHTTPPolicy {
 					result.Outcome = p.progressingOutcome(step.message)
@@ -382,6 +418,7 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 		}
 		plan = append(plan, restore...)
 	}
+	plan = append(plan, zeroWeightPoolEnsures...)
 	if len(plan) != 0 {
 		result.Outcome = p.progressingOutcome(plan[0].message)
 	} else if result.Gateway.Outcome.State == cloud.OutcomeProgressing && desired.spec.Gateway.Disposition == cloud.GraphEnsure {
@@ -460,6 +497,10 @@ func buildGatewayPrerequisitePlan(desired desiredGatewayGraph, actual observedGa
 	if networkID == "" && actual.floatingIP != nil {
 		plan = append(plan, graphMutation{kind: graphDeleteFloatingIP, message: "Removed a no-longer-configured Floating IP"})
 	}
+	if !actual.scoped && actual.listener != nil && actual.listener.DefaultPoolID == "" &&
+		desired.fixedHTTPResponses && actual.listener.ProvisioningStatus == "ACTIVE" && actual.listener.Protocol == cloud.ListenerProtocolHTTP && actual.defaultHTTPResponseCodes[actual.listener.ID] != 404 {
+		plan = append(plan, graphMutation{kind: graphSetListenerNotFound, listenerID: actual.listener.ID, message: "Setting the default HTTP response on the Gateway listener"})
+	}
 	if actual.listener == nil && !actual.scoped {
 		plan = append(plan, graphMutation{kind: graphCreateListener, message: "Created Octavia listener"})
 	}
@@ -468,7 +509,7 @@ func buildGatewayPrerequisitePlan(desired desiredGatewayGraph, actual observedGa
 
 func buildGatewayTrafficRestorationPlan(desired desiredGatewayGraph, actual observedGatewayGraph) ([]graphMutation, error) {
 	if desired.spec.Gateway.Disposition != cloud.GraphEnsure || actual.loadBalancer == nil || actual.listener == nil ||
-		actual.listener.DefaultPoolID != "" && !usesDefaultPool(actual.protocol) {
+		actual.listener.DefaultPoolID != "" && !usesDefaultPool(actual.protocol) || !actual.httpFallbackReady(*actual.listener, desired.fixedHTTPResponses) {
 		return nil, nil
 	}
 	plan, err := buildGatewayAddressRestorationPlan(desired.spec.Gateway.Spec.ExternalNetworkID, actual)
@@ -551,6 +592,60 @@ func routeStateFromObservation(actual observedRouteGraph) cloud.RouteState {
 	return state
 }
 
+// prepareGraphMutation resolves provider prerequisites before the caller's
+// live Kubernetes authorization check, which stays adjacent to the write.
+func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, step graphMutation) (graphMutation, error) {
+	if !desired.fixedHTTPResponses || desired.protocol != cloud.ListenerProtocolHTTP {
+		return step, nil
+	}
+	switch step.kind {
+	case graphCreateLoadBalancer, graphCreateListener, graphSetListenerNotFound, graphEnableListener, graphEnableLoadBalancer:
+	case graphRouteMutation:
+		if !routeNeedsHTTPCapability(graphRoutePart(desired, step), step.route) {
+			return step, nil
+		}
+	default:
+		return step, nil
+	}
+	if err := p.verifyGatewayHTTPCapabilities(ctx, desired, actual); err != nil {
+		// A removed capability cannot authorize a target update. Still
+		// withdraw an affected serving policy using the stock API.
+		if step.kind == graphRouteMutation && step.withdrawHTTPPolicy && step.route.kind == routeMutationSetPolicyTarget &&
+			step.routeIndex < len(actual.routes) && servingPolicyNeedsDisable(actual.routes[step.routeIndex], step.route.id) {
+			step.route = routeMutation{kind: routeMutationDisablePolicy, id: step.route.id}
+			step.message = "Disabling an HTTP policy while its Octavia capability is unavailable"
+			return step, nil
+		}
+		if step.kind == graphRouteMutation {
+			return step, &cloud.GraphError{Identity: desired.routes[step.routeIndex].spec.Identity, Err: err}
+		}
+		return step, err
+	}
+	return step, nil
+}
+
+func servingPolicyNeedsDisable(route observedRouteGraph, id string) bool {
+	for _, part := range route.parts() {
+		for _, policy := range part.policies {
+			if policy.policy.ID == id && policy.adminObserved && !policy.pending() &&
+				(policy.policy.AdminStateUp || policy.policy.ProvisioningStatus == "ERROR") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func graphRoutePart(desired desiredGatewayGraph, step graphMutation) desiredRoute {
+	route := desired.routes[step.routeIndex]
+	for _, part := range route.httpParts {
+		if part.backendKey == step.backendKey {
+			return part
+		}
+	}
+	return route
+}
+
 func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, step graphMutation) error {
 	var err error
 	spec := desired.spec.Gateway.Spec
@@ -606,11 +701,18 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 			}
 			tags = append(tags, scopedPortTag(protocol, port))
 		}
-		_, err = p.octavia.CreateListener(ctx, listeners.CreateOpts{
+		opts := listeners.CreateOpts{
 			LoadbalancerID: actual.state.LoadBalancerID, Protocol: listeners.Protocol(protocol), ProtocolPort: port,
 			Name: name, Description: desired.identity.Description(roleListener), AdminStateUp: boolPointer(enabled),
 			DefaultTlsContainerRef: certificateRef, Tags: tags,
-		})
+		}
+		if desired.fixedHTTPResponses && (protocol == cloud.ListenerProtocolHTTP || protocol == terminatedHTTPS) {
+			_, err = p.octavia.CreateListenerWithNotFound(ctx, opts)
+		} else {
+			_, err = p.octavia.CreateListener(ctx, opts)
+		}
+	case graphSetListenerNotFound:
+		err = p.octavia.SetListenerNotFound(ctx, listenerID)
 	case graphUpdateListenerCertificate:
 		ref := step.scopedListener.TLS.CertificateRef
 		_, err = p.octavia.UpdateListener(ctx, listenerID, listeners.UpdateOpts{DefaultTlsContainerRef: &ref})
@@ -618,12 +720,7 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 		// Gophercloud encodes an explicit empty DefaultPoolID as JSON null.
 		_, err = p.octavia.UpdateListener(ctx, listenerID, listeners.UpdateOpts{DefaultPoolID: &step.poolID})
 	case graphRouteMutation:
-		route := desired.routes[step.routeIndex]
-		if step.backendKey != "" {
-			if index := slices.IndexFunc(route.httpParts, func(backend desiredRoute) bool { return backend.backendKey == step.backendKey }); index != -1 {
-				route = route.httpParts[index]
-			}
-		}
+		route := graphRoutePart(desired, step)
 		route.spec.Gateway = actual.state
 		route.spec.Gateway.ListenerID = listenerID
 		return p.executeRouteMutation(ctx, route, step.route)

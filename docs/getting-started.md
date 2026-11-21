@@ -429,6 +429,25 @@ rules:
 
 The default status is 302. With only `hostname`, the redirect uses the listener’s scheme and port. An explicit scheme selects its standard port unless the rule specifies another one. The fixed destination supports 301, 302, 303, 307 and 308. Dynamic request hosts and path replacement are outside this stock mapping. The parent’s `Accepted`, `ResolvedRefs` and controller-domain `Programmed` conditions describe the current generation. [Stock Octavia behavior](qualification/v1.7.0/provider/stock-http-redirect.md)
 
+## Optional Octavia HTTP actions
+
+The stock controller profile is the default. With a compatible Octavia API and
+Amphora worker fleet, add `--octavia-fixed-http-responses` to the controller
+arguments to serve unmatched requests as HTTP 404 and matching rules with omitted
+or unresolved Service backends as HTTP 500. Add
+`--octavia-weighted-http-targets` alongside it to split traffic across multiple
+backend references. A disallowed or missing reference keeps its weight as a local
+HTTP 500 response. A weighted rule supports up to 16 references and requires at
+least one positive weight.
+
+Before writing the extension fields, the controller verifies the selected
+capabilities on the effective load balancer provider in the configured Octavia
+region. With both flags enabled, the provider must advertise both
+`fixed_http_responses_v1` and `weighted_http_targets_v1`. Keep the flags on during
+controller restarts and while removing managed extension routes or Gateways.
+The operator must keep the API and workers compatible with the actions they
+advertise.
+
 ## Safe removal
 
 Keep the controller, its application credential, and OpenStack access running until every managed HTTPRoute, TCPRoute, UDPRoute and Gateway has finished finalization.

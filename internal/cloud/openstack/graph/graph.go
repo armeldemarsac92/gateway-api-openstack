@@ -33,26 +33,29 @@ import (
 )
 
 type desiredGatewayGraph struct {
-	spec     cloud.GatewayGraphSpec
-	identity Identity
-	routes   []desiredRoute
-	protocol string
+	fixedHTTPResponses bool
+	spec               cloud.GatewayGraphSpec
+	identity           Identity
+	routes             []desiredRoute
+	protocol           string
 }
 
 type observedGatewayGraph struct {
-	loadBalancer    *octavia.LoadBalancer
-	listener        *listeners.Listener
-	scopedListeners []listeners.Listener
-	scoped          bool
-	floatingIP      *floatingips.FloatingIP
-	routes          []observedRouteGraph
-	deletion        gatewayDeletionPlan
-	withdrawTLS     *graphMutation
-	adminObserved   map[string]bool
-	state           cloud.GatewayState
-	addressAbsent   bool
-	outcome         cloud.Outcome
-	protocol        string
+	defaultHTTPResponseCodes map[string]int
+	loadBalancer             *octavia.LoadBalancer
+	listener                 *listeners.Listener
+	scopedListeners          []listeners.Listener
+	scoped                   bool
+	floatingIP               *floatingips.FloatingIP
+	routes                   []observedRouteGraph
+	deletion                 gatewayDeletionPlan
+	withdrawTLS              *graphMutation
+	adminObserved            map[string]bool
+	state                    cloud.GatewayState
+	addressAbsent            bool
+	addressReadError         error
+	outcome                  cloud.Outcome
+	protocol                 string
 }
 
 type graphMutationKind uint8
@@ -65,6 +68,7 @@ const (
 	graphCreateListener
 	graphDisableListener
 	graphUpdateListenerCertificate
+	graphSetListenerNotFound
 	graphClearListenerDefaultPool
 	graphSetListenerDefaultPool
 	graphRouteMutation
@@ -135,6 +139,9 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		result.Gateway = observedGatewayResult(desired, actual, p.progressingOutcome("Waiting for the Gateway infrastructure"))
 		return result, err
 	}
+	if actual.addressReadError != nil {
+		return p.reconcileWeightedWithdrawalWithoutAddress(ctx, desired, actual)
+	}
 	if spec.Gateway.Disposition == cloud.GraphWithdrawTLS {
 		return cloud.GatewayGraphResult{Gateway: cloud.GatewayResult{State: actual.state, Outcome: actual.outcome}, Outcome: actual.outcome}, nil
 	}
@@ -187,7 +194,10 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	if len(plan) == 0 {
 		return result, nil
 	}
-	step := plan[0]
+	step, err := p.prepareGraphMutation(ctx, desired, actual, plan[0])
+	if err != nil {
+		return result, err
+	}
 	if spec.ValidateMutation != nil {
 		if err := spec.ValidateMutation(ctx); err != nil {
 			return cloud.GatewayGraphResult{}, err
@@ -205,12 +215,46 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		}
 		return result, err
 	}
+	p.recordGraphMutationOutcome(&result, step)
+	return result, nil
+}
+
+func (p *Provider) recordGraphMutationOutcome(result *cloud.GatewayGraphResult, step graphMutation) {
 	result.Outcome = p.progressingOutcome(step.message)
 	if step.kind == graphRouteMutation && step.backendKey != "" {
 		result.Outcome.MutationSubmitted = true
 		outcome := &result.Routes[step.routeIndex].Result.Outcome
 		outcome.MutationSubmitted = outcome.State == cloud.OutcomeProgressing
 	}
+}
+
+func (p *Provider) reconcileWeightedWithdrawalWithoutAddress(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph) (cloud.GatewayGraphResult, error) {
+	if actual.loadBalancer == nil || actual.loadBalancer.ProvisioningStatus != "ACTIVE" || actual.outcome.State != cloud.OutcomeReady ||
+		len(actual.routes) != len(desired.routes) {
+		return cloud.GatewayGraphResult{}, actual.addressReadError
+	}
+	plan, result, err := p.buildGatewayGraphPlan(desired, actual)
+	if err != nil {
+		return result, err
+	}
+	result.Gateway.Outcome = p.progressingOutcome("Waiting to observe the Gateway Floating IP inventory")
+	if len(plan) != 1 || !plan[0].withdrawHTTPPolicy || plan[0].kind != graphRouteMutation ||
+		plan[0].route.kind != routeMutationSetPolicyTarget || plan[0].route.weightedTargets == nil {
+		return result, actual.addressReadError
+	}
+	step, err := p.prepareGraphMutation(ctx, desired, actual, plan[0])
+	if err != nil {
+		return result, err
+	}
+	if validate := desired.spec.ValidateMutation; validate != nil {
+		if err := validate(ctx); err != nil {
+			return cloud.GatewayGraphResult{}, err
+		}
+	}
+	if err := p.executeGraphMutation(ctx, desired, actual, step); err != nil {
+		return result, &cloud.GraphError{Identity: desired.routes[step.routeIndex].spec.Identity, Err: err}
+	}
+	p.recordGraphMutationOutcome(&result, step)
 	return result, nil
 }
 
@@ -239,7 +283,7 @@ func (p *Provider) validateGraphTrafficSecurity(ctx context.Context, desired des
 				routes = append(routes, route.spec)
 			}
 			for _, backend := range route.httpParts {
-				if !backend.unavailable && !backend.redirect {
+				if !backend.unavailable && !backend.redirect && !backend.fixedResponse && backend.weightedTargets == nil {
 					routes = append(routes, backend.spec)
 				}
 			}
@@ -377,7 +421,7 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 		}
 		return a.RouteUID < b.RouteUID
 	})
-	desired := desiredGatewayGraph{spec: spec, identity: identity, protocol: protocol}
+	desired := desiredGatewayGraph{spec: spec, identity: identity, protocol: protocol, fixedHTTPResponses: p.fixedHTTPResponses}
 	identities := make(map[string]struct{}, len(spec.Routes))
 	lastRank := -1
 	portWinners := make(map[int]bool, len(ports))
@@ -525,6 +569,11 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 	return desired, nil
 }
 
+func (actual observedGatewayGraph) httpFallbackReady(listener listeners.Listener, required bool) bool {
+	return !required || listener.Protocol != cloud.ListenerProtocolHTTP && listener.Protocol != terminatedHTTPS ||
+		listener.ProvisioningStatus == "ACTIVE" && actual.defaultHTTPResponseCodes[listener.ID] == 404
+}
+
 func observedGatewayResult(desired desiredGatewayGraph, actual observedGatewayGraph, pending cloud.Outcome) cloud.GatewayResult {
 	result := cloud.GatewayResult{State: actual.state, Outcome: pending}
 	if actual.scoped {
@@ -550,7 +599,7 @@ func observedGatewayResult(desired desiredGatewayGraph, actual observedGatewayGr
 		}
 		protocol := cloud.NormalizeListenerProtocol(desired.spec.Gateway.Spec.ListenerProtocol)
 		if actual.listener.DefaultPoolID != "" || actual.listener.ProvisioningStatus == "ERROR" ||
-			usesDefaultPool(protocol) && actual.listener.ProvisioningStatus != "ACTIVE" ||
+			usesDefaultPool(protocol) && actual.listener.ProvisioningStatus != "ACTIVE" || !actual.httpFallbackReady(*actual.listener, desired.fixedHTTPResponses) ||
 			actual.listener.Protocol != protocol || actual.listener.ProtocolPort != desired.spec.Gateway.Spec.ListenerPort {
 			return result
 		}
@@ -669,7 +718,13 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 	}
 	actual.floatingIP, err = p.findGatewayFloatingIP(ctx, desired.identity, lb.VipPortID, lb.VipAddress)
 	if err != nil {
-		return actual, err
+		if !p.weightedHTTPTargets || desired.protocol != cloud.ListenerProtocolHTTP || desired.spec.Gateway.Disposition != cloud.GraphEnsure ||
+			observation.phase != loadBalancerPhaseActive || ctx.Err() != nil || errors.Is(err, cloud.ErrOwnershipConflict) {
+			return actual, err
+		}
+		// Still prove the Octavia graph so a restrictive in-place target
+		// withdrawal can run. Every other mutation needs address inventory.
+		actual.addressReadError = err
 	}
 	if actual.floatingIP != nil {
 		actual.state.FloatingIPID = actual.floatingIP.ID
@@ -677,7 +732,7 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 			actual.state.FloatingIPAddress = actual.floatingIP.FloatingIP
 		}
 	}
-	if observeAddress && addressSpec.ExternalNetworkID != "" {
+	if observeAddress && addressSpec.ExternalNetworkID != "" && actual.addressReadError == nil {
 		actual.addressAbsent = lb.VipPortID != "" && (actual.floatingIP == nil || actual.floatingIP.PortID == "")
 		if actual.floatingIP != nil && actual.floatingIP.FloatingNetworkID == addressSpec.ExternalNetworkID &&
 			actual.floatingIP.PortID != "" && actual.floatingIP.FloatingIP == "" {
@@ -791,6 +846,7 @@ func (p *Provider) observeGatewayListenerInventory(ctx context.Context, desired 
 	if err != nil {
 		return inventory, err
 	}
+	actual.defaultHTTPResponseCodes = inventory.DefaultHTTPResponseCodes
 	if markedProtocol != "" {
 		if actual.protocol != "" && actual.protocol != markedProtocol {
 			return inventory, fmt.Errorf("%w: scoped listeners differ from the Gateway protocol binding", cloud.ErrOwnershipConflict)

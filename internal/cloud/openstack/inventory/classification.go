@@ -19,12 +19,14 @@ package inventory
 import (
 	"encoding/base64"
 	"fmt"
+	"net/http"
 	"slices"
 	"strings"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/audit"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	openstackidentity "github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/identity"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
 )
 
@@ -45,6 +47,7 @@ const (
 	auditReasonUnattributed          = "UnattributedDescription"
 	auditReasonProviderNotReported   = "ProviderNotReported"
 	auditReasonMissingBackendPool    = "MissingBackendPool"
+	auditReasonUnprovenPolicyTarget  = "UnprovenPolicyTarget"
 	auditReasonParentConflict        = "ParentConflict"
 	auditReasonParentUnresolved      = "ParentUnresolved"
 )
@@ -169,24 +172,40 @@ func classifyAuditCandidate(
 		}
 	}
 	if candidate.resourceType == auditTypeL7Policy {
-		if _, _, _, _, redirect := openstackidentity.ParseHTTPRedirectRole(role); redirect {
+		_, _, _, _, redirect := openstackidentity.ParseHTTPRedirectRole(role)
+		switch {
+		case redirect:
 			if !candidate.redirectPoolReported {
 				return auditFinding(finding, audit.DispositionUnresolved, auditReasonMissingBackendPool,
 					"HTTP redirect policy does not report its pool relationship")
 			}
-			if candidate.policyAction != string(l7policies.ActionRedirectPrefix) || !candidate.redirectPoolNull {
+			if candidate.policyAction != string(l7policies.ActionRedirectPrefix) || !candidate.redirectPoolNull || candidate.extendedPolicy() {
 				return auditFinding(finding, audit.DispositionOwnershipConflict, auditReasonParentMismatch,
 					"HTTP redirect policy does not report the owned prefix action and pool-free relationship")
 			}
-		} else {
-			if candidate.redirectPoolID == "" {
-				return auditFinding(finding, audit.DispositionUnresolved, auditReasonMissingBackendPool,
-					"L7 policy does not report its redirect pool")
+		case candidate.policyAction == string(octavia.ActionFixedResponse):
+			target := candidate.policyTarget
+			if _, _, _, grouped := openstackidentity.ParseHTTPFragmentRole(role); !grouped ||
+				openstackidentity.IsHTTPWeightedPolicyRole(role) || !candidate.policyInventoryOK || target == nil ||
+				!target.IsFixedServerError() || len(target.WeightedTargets) != 0 || candidate.redirectPoolID != "" || candidate.policyRedirects {
+				return auditFinding(finding, audit.DispositionUnresolved, auditReasonUnprovenPolicyTarget,
+					"L7 policy does not report the owned fixed HTTP response and pool-free relationship")
 			}
-			if !auditCandidateExists(candidates, auditTypePool, candidate.redirectPoolID) {
-				return auditFinding(finding, audit.DispositionUnresolved, auditReasonMissingBackendPool,
-					"L7 policy redirect pool is not present in the scoped inventory")
+		case candidate.extendedPolicy():
+			finding = classifyAuditExtendedPolicy(candidates, candidate, finding)
+			if finding.Disposition != "" {
+				return finding
 			}
+		case candidate.policyAction != "" && candidate.policyAction != string(l7policies.ActionRedirectToPool):
+			return auditFinding(finding, audit.DispositionUnresolved, auditReasonUnprovenPolicyTarget,
+				"L7 policy uses an unsupported forwarding action")
+		case candidate.redirectPoolID == "":
+			return auditFinding(finding, audit.DispositionUnresolved, auditReasonMissingBackendPool,
+				"L7 policy does not report its redirect pool")
+		case !auditCandidateExists(candidates, auditTypePool, candidate.redirectPoolID):
+			return auditFinding(finding, audit.DispositionUnresolved, auditReasonMissingBackendPool,
+				"L7 policy redirect pool is not present in the scoped inventory")
+		default:
 			if err := validateAuditPolicyPool(candidates, candidate, candidate.redirectPoolID); err != nil {
 				return auditFinding(finding, audit.DispositionOwnershipConflict, auditReasonParentMismatch, err.Error())
 			}
@@ -573,6 +592,76 @@ func validateAuditPolicyPool(candidates auditCandidateSet, policy *auditCandidat
 	return nil
 }
 
+func classifyAuditExtendedPolicy(candidates auditCandidateSet, policy *auditCandidate, finding audit.ResourceFinding) audit.ResourceFinding {
+	if !openstackidentity.IsHTTPWeightedPolicyRole(finding.Role) || policy.policyAction != string(octavia.ActionWeightedTargets) ||
+		!validAuditWeightedTarget(policy) {
+		finding = auditFinding(finding, audit.DispositionUnresolved, auditReasonUnprovenPolicyTarget,
+			"L7 policy does not report the supported weighted HTTP target shape")
+	}
+	listener := auditParentCandidate(candidates, auditTypeL7Policy, finding.ParentID)
+	listenerLB := ""
+	if listener == nil {
+		finding = auditFinding(finding, audit.DispositionUnresolved, auditReasonMissingParent,
+			"Weighted L7 policy listener is not present in the scoped inventory")
+	} else {
+		listenerLB, _ = auditCandidateParent(listener)
+		if listenerLB == "" || len(listener.reportedParents) == 0 {
+			finding = auditFinding(finding, audit.DispositionUnresolved, auditReasonParentNotObserved,
+				"Weighted L7 policy listener did not report its load balancer")
+		}
+	}
+	keys := []string{"managed", "cluster", "controller", "project", "namespace", "name", "uid", "route-namespace", "route-name", "route-uid"}
+	poolIDs := policy.weightedPoolIDs
+	if policy.redirectPoolID != "" {
+		poolIDs = slices.Concat(poolIDs, []string{policy.redirectPoolID})
+	}
+	for index, poolID := range poolIDs {
+		pool := candidates[auditServiceOctavia+"\x00"+auditTypePool+"\x00"+poolID]
+		if pool == nil {
+			if finding.Disposition == "" {
+				finding = auditFinding(finding, audit.DispositionUnresolved, auditReasonMissingBackendPool,
+					"L7 policy target pool is not present in the scoped inventory")
+			}
+			continue
+		}
+		poolRole, _ := openstackidentity.ResourceRole(pool.tags)
+		base, _, _, fragment := openstackidentity.ParseHTTPFragmentRole(poolRole)
+		if !auditTagValuesEqual(policy.tags, pool.tags, keys) || index < len(policy.weightedPoolIDs) && (base != rolePool || !fragment) {
+			return auditFinding(finding, audit.DispositionOwnershipConflict, auditReasonParentMismatch,
+				"L7 policy target is not a backend pool for the same Route and Gateway")
+		}
+		poolLB, _ := auditCandidateParent(pool)
+		if listenerLB != "" && poolLB != "" && poolLB != listenerLB {
+			return auditFinding(finding, audit.DispositionOwnershipConflict, auditReasonParentMismatch,
+				"Weighted L7 policy target pool belongs to a different load balancer than the listener")
+		}
+		if len(pool.reportedParents) == 0 && finding.Disposition == "" {
+			finding = auditFinding(finding, audit.DispositionUnresolved, auditReasonParentNotObserved,
+				"Weighted L7 policy target pool did not report its load balancer")
+		}
+	}
+	return finding
+}
+
+func validAuditWeightedTarget(policy *auditCandidate) bool {
+	target := policy.policyTarget
+	if !policy.policyInventoryOK || target == nil || target.FixedResponse != nil || target.AdminStateUp == nil || *target.AdminStateUp != policy.policyAdminStateUp ||
+		string(target.RedirectPool) != "null" || policy.redirectPoolID != "" || policy.policyRedirects ||
+		len(target.WeightedTargets) == 0 || len(target.WeightedTargets) > 16 {
+		return false
+	}
+	total := 0
+	for _, slot := range target.WeightedTargets {
+		if slot.Weight < 0 || slot.Weight > 1_000_000 ||
+			slot.PoolID == "" && (slot.FixedResponse == nil || slot.FixedResponse.StatusCode != http.StatusInternalServerError) ||
+			slot.PoolID != "" && slot.FixedResponse != nil {
+			return false
+		}
+		total += slot.Weight
+	}
+	return total > 0
+}
+
 // Legacy resources share their route owner. A grouped route also requires the
 // child to belong to its parent's backend and, for L7 rules, its exact match.
 func auditHTTPFragmentParentMatches(child, parent *auditCandidate, matchPath bool) bool {
@@ -588,7 +677,8 @@ func auditHTTPFragmentParentMatches(child, parent *auditCandidate, matchPath boo
 	}
 	_, childBackend, childMatch, childFragment := openstackidentity.ParseHTTPFragmentRole(childRole)
 	_, parentBackend, parentMatch, parentFragment := openstackidentity.ParseHTTPFragmentRole(parentRole)
-	return childFragment == parentFragment && childBackend == parentBackend && (!matchPath || childMatch == parentMatch)
+	return childFragment == parentFragment && childBackend == parentBackend &&
+		(!matchPath || childMatch == parentMatch && openstackidentity.IsHTTPWeightedPolicyRole(childRole) == openstackidentity.IsHTTPWeightedPolicyRole(parentRole))
 }
 
 func auditCandidateExists(candidates auditCandidateSet, resourceType, id string) bool {
@@ -664,45 +754,47 @@ func markDuplicateAuditIdentities(classified []classifiedAuditCandidate) {
 }
 
 func propagateAuditParentFindings(classified []classifiedAuditCandidate) {
-	byResource := make(map[string]*audit.ResourceFinding, len(classified))
+	byResource := make(map[string]*classifiedAuditCandidate, len(classified))
 	for index := range classified {
 		key := classified[index].finding.Type + "\x00" + classified[index].finding.ID
-		byResource[key] = &classified[index].finding
+		byResource[key] = &classified[index]
 	}
 	for order := 1; order <= auditResourceOrder(auditTypeFloatingIP); order++ {
 		for index := range classified {
 			item := &classified[index]
-			if auditResourceOrder(item.finding.Type) != order || item.finding.Disposition != audit.DispositionMatched {
+			if auditResourceOrder(item.finding.Type) != order {
 				continue
 			}
-			parents := []struct {
-				resourceType string
-				id           string
-			}{
-				{resourceType: auditParentType(item.finding.Type), id: item.finding.ParentID},
+			parent := byResource[auditParentType(item.finding.Type)+"\x00"+item.finding.ParentID]
+			extendedPolicy := item.candidate.extendedPolicy()
+			extended := extendedPolicy || item.finding.Type == auditTypeL7Rule && parent != nil && parent.candidate.extendedPolicy()
+			if item.finding.Disposition != audit.DispositionMatched &&
+				(!extended || item.finding.Disposition == audit.DispositionOwnershipConflict) {
+				continue
 			}
+			parents := []*classifiedAuditCandidate{parent}
 			if item.finding.Type == auditTypeL7Policy {
-				parents = append(parents, struct {
-					resourceType string
-					id           string
-				}{resourceType: auditTypePool, id: item.candidate.redirectPoolID})
+				for _, poolID := range item.candidate.weightedPoolIDs {
+					parents = append(parents, byResource[auditTypePool+"\x00"+poolID])
+				}
+				parents = append(parents, byResource[auditTypePool+"\x00"+item.candidate.redirectPoolID])
 			}
-			for _, parentReference := range parents {
-				if parentReference.resourceType == "" || parentReference.id == "" {
+			for _, parent := range parents {
+				if parent == nil || parent.finding.Disposition == audit.DispositionMatched {
 					continue
 				}
-				parent := byResource[parentReference.resourceType+"\x00"+parentReference.id]
-				if parent == nil || parent.Disposition == audit.DispositionMatched {
-					continue
-				}
-				if parent.Disposition == audit.DispositionOwnershipConflict {
+				if parent.finding.Disposition == audit.DispositionOwnershipConflict {
 					item.finding = auditFinding(item.finding, audit.DispositionOwnershipConflict, auditReasonParentConflict,
 						"Resource parent has an ownership conflict")
-				} else {
+					break
+				}
+				if item.finding.Disposition == audit.DispositionMatched {
 					item.finding = auditFinding(item.finding, audit.DispositionUnresolved, auditReasonParentUnresolved,
 						"Resource parent is not fully matched to a current binding")
 				}
-				break
+				if !extended {
+					break
+				}
 			}
 		}
 	}

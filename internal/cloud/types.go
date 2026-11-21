@@ -171,12 +171,14 @@ type HTTPPathMatch struct {
 // Unavailable marks an unusable target. Its matches retain their position and
 // its pool must contain no members.
 type HTTPBackend struct {
-	Namespace   string
-	Name        string
-	Port        int
-	Members     []Member
-	Unavailable bool
-	Matches     []HTTPPathMatch
+	// InvalidReference distinguishes an unresolved reference from a valid Service without endpoints.
+	InvalidReference bool `json:",omitempty"`
+	Namespace        string
+	Name             string
+	Port             int
+	Members          []Member
+	Unavailable      bool
+	Matches          []HTTPPathMatch
 }
 
 // HTTPRedirect groups the alternatives of one fixed-destination redirect rule.
@@ -185,6 +187,26 @@ type HTTPRedirect struct {
 	Prefix     string
 	StatusCode int
 	Matches    []HTTPPathMatch
+}
+
+// HTTPFixedRule groups the matches that require a local HTTP 500 response.
+type HTTPFixedRule struct {
+	RuleIndex int
+	Matches   []HTTPPathMatch
+}
+
+// HTTPWeightedTarget selects a Service pool by its index in RouteSpec.HTTPBackends.
+// A nil index reserves this share for HTTP 500 when the reference is unresolved.
+type HTTPWeightedTarget struct {
+	BackendIndex *int
+	Weight       int
+}
+
+// HTTPWeightedRule preserves backendRef order and owns the policies for its matches.
+type HTTPWeightedRule struct {
+	RuleIndex int
+	Matches   []HTTPPathMatch
+	Targets   []HTTPWeightedTarget
 }
 
 // RouteSpec describes the traffic configuration owned by one route.
@@ -209,8 +231,10 @@ type RouteSpec struct {
 	Members    []Member
 	// HTTPBackends carries the complete set of paths and backend groups when
 	// the HTTPRoute has several rules or alternative matches.
-	HTTPBackends  []HTTPBackend  `json:",omitempty"`
-	HTTPRedirects []HTTPRedirect `json:",omitempty"`
+	HTTPBackends      []HTTPBackend      `json:",omitempty"`
+	FixedHTTPRules    []HTTPFixedRule    `json:",omitempty"`
+	HTTPRedirects     []HTTPRedirect     `json:",omitempty"`
+	WeightedHTTPRules []HTTPWeightedRule `json:",omitempty"`
 }
 
 // RouteState records the OpenStack objects produced for one route.

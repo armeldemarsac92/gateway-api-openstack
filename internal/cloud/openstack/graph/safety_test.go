@@ -593,3 +593,71 @@ func safetyWriteJSON(t *testing.T, w http.ResponseWriter, value any) {
 		t.Errorf("encode test response: %v", err)
 	}
 }
+
+func TestFixedResponsesDeleteValidatesScalarPolicyTarget(t *testing.T) {
+	id := safetyTestIdentity(t)
+	policyTags, err := id.RouteTags(rolePolicyExact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listenerTags, err := id.GatewayTags(roleListener)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lb := safetyObservedLoadBalancer()
+	if err := json.Unmarshal([]byte(`{"id":"load-balancer-1","pools":[]}`), lb); err != nil {
+		t.Fatal(err)
+	}
+	var listener listeners.Listener
+	if err := json.Unmarshal([]byte(`{"id":"listener-1","project_id":"project-a","protocol":"HTTP","loadbalancers":[{"id":"load-balancer-1"}],"l7policies":[{"id":"legacy"}],"provisioning_status":"ACTIVE"}`), &listener); err != nil {
+		t.Fatal(err)
+	}
+	listener.Tags = listenerTags
+	lb.Listeners = []listeners.Listener{listener}
+	policy := map[string]any{"id": "legacy", "listener_id": "listener-1", "project_id": "project-a", "position": 1,
+		"action": "REDIRECT_TO_URL", "redirect_url": "https://example.invalid", "redirect_pool_id": nil, "admin_state_up": true,
+		"tags": policyTags, "rules": []any{}}
+	policyRead := false
+	p := newTestProvider(t, ServiceClients{ProjectID: "project-a", LoadBalancer: safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/lbaas/pools":
+			safetyWriteJSON(t, w, map[string]any{"pools": []any{}})
+		case "/lbaas/l7policies":
+			policyRead = true
+			safetyWriteJSON(t, w, map[string]any{"l7policies": []any{policy}})
+		case "/lbaas/l7policies/legacy/rules":
+			safetyWriteJSON(t, w, map[string]any{"rules": []any{}})
+		default:
+			t.Errorf("unexpected request %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))}, ProviderConfig{FixedHTTPResponses: true})
+	inv := octavia.ListenerInventory{Items: []listeners.Listener{listener}, DefaultPoolsObserved: true}
+	plan, err := p.buildGatewayDeletionPlanFromListeners(t.Context(), id, lb, []routeGraphOwner{{identity: id}}, cloud.ListenerProtocolHTTP, inv)
+	if !policyRead || !errors.Is(err, cloud.ErrOwnershipConflict) || len(plan.orderedSteps()) != 0 {
+		t.Fatalf("read policy = %v, steps = %v, error = %v", policyRead, plan.orderedSteps(), err)
+	}
+}
+
+func TestFixedResponsesObservesActiveListenerDefaultBeforeReady(t *testing.T) {
+	desired := desiredGatewayGraph{fixedHTTPResponses: true}
+	desired.spec.Gateway.Disposition = cloud.GraphEnsure
+	desired.spec.Gateway.Spec.ListenerPort = 80
+	desired.spec.Gateway.Spec.ListenerProtocol = cloud.ListenerProtocolHTTP
+	actual := observedGatewayGraph{loadBalancer: safetyObservedLoadBalancer(), listener: &listeners.Listener{ID: "owned",
+		Protocol: "HTTP", ProtocolPort: 80, AdminStateUp: true, ProvisioningStatus: "ACTIVE"}, state: cloud.GatewayState{VIPAddress: "192.0.2.8"}}
+	actual.loadBalancer.AdminStateUp = true
+	pending := cloud.Outcome{State: cloud.OutcomeProgressing}
+	for _, sample := range []struct {
+		code         int
+		provisioning string
+		ready        bool
+	}{{0, "ACTIVE", false}, {404, "PENDING_UPDATE", false}, {404, "ACTIVE", true}} {
+		actual.defaultHTTPResponseCodes = map[string]int{"owned": sample.code}
+		actual.listener.ProvisioningStatus = sample.provisioning
+		got := observedGatewayResult(desired, actual, pending)
+		if (got.Outcome.State == cloud.OutcomeReady) != sample.ready {
+			t.Fatalf("default %d, status %s, outcome %#v", sample.code, sample.provisioning, got.Outcome)
+		}
+	}
+}

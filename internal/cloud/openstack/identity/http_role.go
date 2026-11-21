@@ -32,6 +32,16 @@ func HTTPBackendKey(namespace, name string, port int) string {
 	return httpTupleKey(namespace, name, strconv.Itoa(port))
 }
 
+// HTTPFixedRuleKey identifies a rule that serves a local fixed response.
+func HTTPFixedRuleKey(index int) string {
+	return httpTupleKey("", "fixed-rule", strconv.Itoa(index))
+}
+
+// HTTPWeightedRuleKey identifies a rule independently of its targets.
+func HTTPWeightedRuleKey(index int) string {
+	return httpTupleKey("", "weighted-rule", strconv.Itoa(index))
+}
+
 // HTTPMatchKey identifies a logical predicate across list edits and rank changes.
 func HTTPMatchKey(hostname string, pathType cloud.PathMatchType, path string) string {
 	return httpTupleKey(hostname, string(pathType), path)
@@ -71,9 +81,30 @@ func HTTPFragmentRole(base, backendKey, matchKey string) string {
 	return ""
 }
 
+const weightedHTTPRolePrefix = "http-weighted-v1/"
+
+// HTTPWeightedPolicyRole identifies a policy or predicate owned by a rule.
+func HTTPWeightedPolicyRole(base, ruleKey, matchKey string) string {
+	switch base {
+	case RolePolicyExact, RolePolicyPrefix, RoleRulePath, RoleRuleHost:
+		if validHTTPKey(ruleKey) && validHTTPKey(matchKey) {
+			return weightedHTTPRolePrefix + base + "/" + ruleKey + "/" + matchKey
+		}
+	}
+	return ""
+}
+
+func IsHTTPWeightedPolicyRole(role string) bool {
+	return strings.HasPrefix(role, weightedHTTPRolePrefix)
+}
+
 // ParseHTTPFragmentRole recognizes only roles the HTTP path writer can create.
 func ParseHTTPFragmentRole(raw string) (base, backendKey, matchKey string, ok bool) {
-	rest, ok := strings.CutPrefix(raw, "http-v2/")
+	prefix, formatRole := "http-v2/", HTTPFragmentRole
+	if IsHTTPWeightedPolicyRole(raw) {
+		prefix, formatRole = weightedHTTPRolePrefix, HTTPWeightedPolicyRole
+	}
+	rest, ok := strings.CutPrefix(raw, prefix)
 	if !ok {
 		return "", "", "", false
 	}
@@ -82,7 +113,7 @@ func ParseHTTPFragmentRole(raw string) (base, backendKey, matchKey string, ok bo
 		return "", "", "", false
 	}
 	backendKey, matchKey, _ = strings.Cut(rest, "/")
-	if HTTPFragmentRole(base, backendKey, matchKey) != raw {
+	if formatRole(base, backendKey, matchKey) != raw {
 		return "", "", "", false
 	}
 	return base, backendKey, matchKey, true
