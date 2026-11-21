@@ -34,7 +34,7 @@ const (
 // authorizes use of the requested extensions.
 func (s *Service) VerifyGatewayCapabilities(ctx context.Context, provider string, required ...string) error {
 	if strings.TrimSpace(provider) == "" {
-		return fmt.Errorf("Octavia did not report the effective load balancer provider")
+		return fmt.Errorf("missing effective load balancer provider in Octavia response")
 	}
 	var response struct {
 		Capabilities []string `json:"gateway_capabilities"`
@@ -45,7 +45,7 @@ func (s *Service) VerifyGatewayCapabilities(ctx context.Context, provider string
 	}
 	for _, capability := range required {
 		if !slices.Contains(response.Capabilities, capability) {
-			return fmt.Errorf("Octavia provider %q did not advertise Gateway capability %q", provider, capability)
+			return fmt.Errorf("provider %q did not advertise Octavia Gateway capability %q", provider, capability)
 		}
 	}
 	return nil
