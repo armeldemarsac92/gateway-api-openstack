@@ -551,7 +551,7 @@ func TestGatewayUDPListenerCountsOnlyAcceptedUDPRoutes(t *testing.T) {
 	}
 	oldCheckpoint := cfg.RouteBindingFinalizer(routeID.ClusterID, routeID.OpenStackProjectID, routeID.GatewayNamespace, routeID.GatewayName, routeID.GatewayUID)
 	if gotID, bound, err := controller.StoredRouteIdentity(cfg, udp); err != nil || !bound || gotID != routeID ||
-		controllerutil.ContainsFinalizer(udp, oldCheckpoint) || controller.UDPRouteAnchor(cfg, udp) != 53 {
+		controllerutil.ContainsFinalizer(udp, oldCheckpoint) || controller.ScopedRouteAnchor(cfg, udp, gatewayv1.UDPProtocolType) != 53 {
 		t.Fatalf("enrollment failed to block the previous controller's route cleanup: finalizers %v, id %v, bound %v, error %v", udp.Finalizers, gotID, bound, err)
 	}
 	if result, err := reconciler.Reconcile(t.Context(), request); err != nil || !result.Requeue {
@@ -561,7 +561,7 @@ func TestGatewayUDPListenerCountsOnlyAcceptedUDPRoutes(t *testing.T) {
 		t.Fatalf("provider received a write during enrollment: %+v", provider.gatewaySpecs)
 	}
 	pending := cloud.GatewayProgressingResult("waiting for the second listener", time.Second)
-	pending.UDPReadyPorts = []int{53}
+	pending.ScopedListenerReadyPorts = []int{53}
 	provider.gatewayResult = &pending
 	if _, err := reconciler.Reconcile(t.Context(), request); err != nil {
 		t.Fatal(err)
@@ -570,7 +570,7 @@ func TestGatewayUDPListenerCountsOnlyAcceptedUDPRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	spec := provider.gatewaySpecs[len(provider.gatewaySpecs)-1]
-	if spec.ListenerPort != 53 || len(spec.UDPListeners) != 2 || spec.UDPListeners[0].Port != 52 || spec.UDPListeners[1].Port != 53 {
+	if spec.ListenerPort != 53 || len(spec.ScopedListeners) != 2 || spec.ScopedListeners[0].Port != 52 || spec.ScopedListeners[1].Port != 53 {
 		t.Fatalf("UDP graph lost its original anchor or listener ordering: %+v", spec)
 	}
 	if len(got.Status.Listeners) != 2 || got.Status.Listeners[0].AttachedRoutes != 1 || got.Status.Listeners[1].AttachedRoutes != 0 {
@@ -582,7 +582,7 @@ func TestGatewayUDPListenerCountsOnlyAcceptedUDPRoutes(t *testing.T) {
 		t.Fatalf("UDP readiness was not limited to the observed port: %+v", got.Status)
 	}
 	ready := cloud.GatewayReadyResult(cloud.GatewayState{LoadBalancerID: "lb-1", VIPAddress: "192.0.2.10"})
-	ready.UDPReadyPorts = []int{52}
+	ready.ScopedListenerReadyPorts = []int{52}
 	provider.gatewayResult = &ready
 	got.Spec.Listeners = got.Spec.Listeners[1:]
 	got.Generation++
@@ -593,7 +593,7 @@ func TestGatewayUDPListenerCountsOnlyAcceptedUDPRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	spec = provider.gatewaySpecs[len(provider.gatewaySpecs)-1]
-	if spec.ListenerPort != 53 || len(spec.UDPListeners) != 1 || spec.UDPListeners[0].Port != 52 || len(provider.deletedGateways) != 0 {
+	if spec.ListenerPort != 53 || len(spec.ScopedListeners) != 1 || spec.ScopedListeners[0].Port != 52 || len(provider.deletedGateways) != 0 {
 		t.Fatalf("removing the original port changed the binding or replaced the graph: %+v, deletes %v", spec, provider.deletedGateways)
 	}
 }

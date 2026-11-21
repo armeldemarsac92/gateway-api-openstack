@@ -141,10 +141,10 @@ func (r *Reconciler) planRoute(ctx context.Context, route *transportRoute, bindi
 		plan.detach = true
 		return plan, nil
 	}
-	if bound && r.protocol() == gatewayv1.UDPProtocolType {
-		routePort := controller.UDPRouteAnchor(r.Config, route)
+	if bound {
+		routePort := controller.ScopedRouteAnchor(r.Config, route, r.protocol())
 		if routePort != 0 && (parent.gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] != strconv.Itoa(routePort) ||
-			parent.gateway.Annotations[r.Config.GatewayListenerProtocolAnnotation()] != cloud.ListenerProtocolUDP) {
+			parent.gateway.Annotations[r.Config.GatewayListenerProtocolAnnotation()] != string(r.protocol())) {
 			if err := controller.ValidateGatewayBinding(r.Config, parent.gateway); err != nil {
 				return routePlan{}, err
 			}
@@ -277,9 +277,8 @@ func (r *Reconciler) gatewayTopology(gateway *gatewayv1.Gateway, listener *gatew
 	if err := controller.ValidateGatewayBinding(r.Config, gateway); err != nil {
 		return classconfig.Resolved{}, false, err
 	}
-	if !controller.GatewayUsesMultipleUDPListeners(r.Config, gateway) &&
-		(gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] != strconv.Itoa(int(listener.Port)) ||
-			(r.protocol() == gatewayv1.UDPProtocolType && len(gateway.Spec.Listeners) > 1)) {
+	if controller.GatewayListenerScope(r.Config, gateway) != r.protocol() &&
+		(gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] != strconv.Itoa(int(listener.Port)) || len(gateway.Spec.Listeners) > 1) {
 		return classconfig.Resolved{}, false, nil
 	}
 	topology, err := controller.StoredGatewayTopology(r.Config, gateway)
@@ -327,11 +326,11 @@ func (r *Reconciler) routeSpec(ctx context.Context, route *transportRoute, gatew
 		BackendSecurityGroupIDs: topology.Topology.BackendSecurityGroupIDs,
 		HealthMonitor:           topology.HealthMonitor, Members: members,
 	}
-	if controller.GatewayUsesMultipleUDPListeners(r.Config, gateway) {
+	if controller.GatewayListenerScope(r.Config, gateway) == r.protocol() {
 		// The frozen port identifies the former unscoped listener. The route's
 		// current listener edges are the election result, independent of it.
 		spec.GatewayRequirements.ListenerPort, _ = strconv.Atoi(gateway.Annotations[r.Config.GatewayListenerPortAnnotation()])
-		spec.UDPListenerPorts = slices.Clone(listenerPorts)
+		spec.ScopedListenerPorts = slices.Clone(listenerPorts)
 	}
 	target, err := forwardingTarget(backends, groups, weighted, spec)
 	return spec, target, nil, err
@@ -360,9 +359,9 @@ func (r *Reconciler) ensure(ctx context.Context, route *transportRoute, plan *ro
 		plan.programmed = routeCondition(route, "Programmed", policy.ConditionStatus, policy.Reason, policy.Message)
 		return controller.ProviderFailureResult(policy, err, string(route.GetUID()))
 	}
-	// Scoped UDP needs a route-specific deferred observation. Whole-graph
+	// Scoped listeners need a route-specific deferred observation. Whole-graph
 	// progress alone does not show which listener is pending.
-	component, err := r.routeResult(result, identity, len(plan.desired.UDPListenerPorts) == 0)
+	component, err := r.routeResult(result, identity, len(plan.desired.ScopedListenerPorts) == 0)
 	if err != nil {
 		return ctrl.Result{}, err
 	}

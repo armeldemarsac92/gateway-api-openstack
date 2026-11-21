@@ -39,13 +39,13 @@ func (r *Reconciler) forwardingTargetType() string { return r.Config.Domain() + 
 // forwardingTarget hashes the desired destinations with the identities and
 // routing semantics of the Services that contribute to the pool.
 func forwardingTarget(backends []serviceBackend, groups []weightedServiceMembers, weighted bool, spec cloud.RouteSpec) (string, error) {
-	ports := spec.UDPListenerPorts
-	spec.UDPListenerPorts = nil
+	ports := spec.ScopedListenerPorts
+	spec.ScopedListenerPorts = nil
 	target, err := forwardingBackendTarget(backends, groups, weighted, spec)
 	if err != nil || len(ports) == 0 {
 		return target, err
 	}
-	scope, err := hashForwardingTarget("udp", ports)
+	scope, err := hashForwardingTarget(strings.ToLower(spec.GatewayRequirements.ListenerProtocol), ports)
 	if err != nil {
 		return "", err
 	}

@@ -87,7 +87,7 @@ func TestGatewayUDPEnrollmentCheckpointsOneRoutePerReconcile(t *testing.T) {
 			}
 
 			err := r.bindGateway(ctx, gateway, "53")
-			if patches != 1 || err != nil || controller.GatewayUsesMultipleUDPListeners(config, readGateway()) {
+			if patches != 1 || err != nil || controller.GatewayListenerScope(config, readGateway()) == gatewayv1.UDPProtocolType {
 				t.Fatalf("first checkpoint patched %d UDPRoutes, returned %v, or prematurely marked the Gateway", patches, err)
 			}
 			if change == "delete Gateway" {
@@ -98,18 +98,18 @@ func TestGatewayUDPEnrollmentCheckpointsOneRoutePerReconcile(t *testing.T) {
 				t.Fatal(err)
 			}
 			if change != "keep both ports" {
-				if patches != 1 || controller.GatewayUsesMultipleUDPListeners(config, readGateway()) {
+				if patches != 1 || controller.GatewayListenerScope(config, readGateway()) == gatewayv1.UDPProtocolType {
 					t.Fatalf("changed Gateway continued enrollment after %d route checkpoints", patches)
 				}
 				return
 			}
-			if patches != 2 || controller.GatewayUsesMultipleUDPListeners(config, readGateway()) {
+			if patches != 2 || controller.GatewayListenerScope(config, readGateway()) == gatewayv1.UDPProtocolType {
 				t.Fatalf("the second checkpoint must seal only the remaining route, got %d route patches", patches)
 			}
 			if err := r.bindGateway(ctx, readGateway(), "53"); err != nil {
 				t.Fatal(err)
 			}
-			if !controller.GatewayUsesMultipleUDPListeners(config, readGateway()) {
+			if controller.GatewayListenerScope(config, readGateway()) != gatewayv1.UDPProtocolType {
 				t.Fatal("Gateway remained unmarked after both route checkpoints were durable")
 			}
 		})
@@ -133,8 +133,8 @@ func TestUDPRouteDeletionUsesOnlyVerifiedScopedAuthority(t *testing.T) {
 		{
 			name: "missing Gateway mode with surviving scoped finalizer",
 			edit: func(config Config, gateway *gatewayv1.Gateway) {
-				controller.SetGatewayUDPListenerMode(config, gateway, true)
-				delete(gateway.Annotations, config.GatewayUDPListenerModeAnnotation())
+				controller.SetGatewayListenerScope(config, gateway, gatewayv1.UDPProtocolType)
+				delete(gateway.Annotations, config.GatewayListenerModeAnnotation(gatewayv1.UDPProtocolType))
 			},
 			wantError: true,
 		},
@@ -142,7 +142,7 @@ func TestUDPRouteDeletionUsesOnlyVerifiedScopedAuthority(t *testing.T) {
 			name:      "scoped Gateway topology damage",
 			routePort: 53,
 			edit: func(config Config, gateway *gatewayv1.Gateway) {
-				controller.SetGatewayUDPListenerMode(config, gateway, true)
+				controller.SetGatewayListenerScope(config, gateway, gatewayv1.UDPProtocolType)
 				gateway.Annotations[config.GatewayTopologyAnnotation()] = "damaged"
 			},
 			wantError: true,
@@ -177,7 +177,7 @@ func TestUDPRouteDeletionUsesOnlyVerifiedScopedAuthority(t *testing.T) {
 			controller.ApplyRouteBinding(config, route, identity)
 			route.Annotations[config.RouteLifecycleAnnotation()] = controller.RouteDetaching
 			if test.routePort != 0 {
-				controller.SealUDPRouteAnchor(config, route, identity, test.routePort)
+				controller.SealRouteAnchor(config, route, identity, test.routePort)
 			}
 			kube := indexedFakeClientBuilder(testScheme(t), config).WithObjects(gateway).Build()
 			r := &Reconciler{APIReader: kube, Config: config}
@@ -192,7 +192,7 @@ func TestUDPRouteDeletionUsesOnlyVerifiedScopedAuthority(t *testing.T) {
 				t.Fatal(err)
 			}
 			if input.Object == nil || input.Object.UID != gateway.UID || input.Node.Disposition != cloud.GraphPreserve ||
-				(input.Node.Spec.UDPListeners != nil) != test.wantScoped || test.wantScoped && input.Node.Spec.ListenerPort != test.routePort {
+				(input.Node.Spec.ScopedListeners != nil) != test.wantScoped || test.wantScoped && input.Node.Spec.ListenerPort != test.routePort {
 				t.Fatalf("unexpected preservation graph: %+v", input)
 			}
 		})
@@ -211,5 +211,59 @@ func boundSingletonUDPTestGateway(config Config) *gatewayv1.Gateway {
 			GatewayClassName: "openstack",
 			Listeners:        []gatewayv1.Listener{{Name: "public", Port: 53, Protocol: gatewayv1.UDPProtocolType}},
 		},
+	}
+}
+
+func TestGatewayEnrollsDistinctTCPListenersWithoutChangingAnchor(t *testing.T) {
+	config := testConfig()
+	gateway := boundSingletonUDPTestGateway(config)
+	gateway.Annotations[config.GatewayListenerProtocolAnnotation()] = cloud.ListenerProtocolTCP
+	gateway.Spec.Listeners = []gatewayv1.Listener{
+		{Name: "one", Port: 53, Protocol: gatewayv1.TCPProtocolType},
+		{Name: "two", Port: 9301, Protocol: gatewayv1.TCPProtocolType},
+		{Name: "three", Port: 9302, Protocol: gatewayv1.TCPProtocolType},
+	}
+	if err := controller.BindGatewayTopology(config, gateway, testBoundTopology()); err != nil {
+		t.Fatal(err)
+	}
+	class := &gatewayv1.GatewayClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "openstack"},
+		Spec:       gatewayv1.GatewayClassSpec{ControllerName: config.ControllerName},
+	}
+	route := &gatewayv1.TCPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "echo", UID: "route"}}
+	identity := controller.RouteIdentity(config, gateway, route)
+	controller.ApplyRouteBinding(config, route, identity)
+	legacyRouteFinalizer := config.RouteBindingFinalizer(identity.ClusterID, identity.OpenStackProjectID, identity.GatewayNamespace, identity.GatewayName, identity.GatewayUID)
+	kube := indexedFakeClientBuilder(testScheme(t), config).WithObjects(gateway, class, route).Build()
+	r := &Reconciler{Client: kube, APIReader: kube, Coordinator: &graph.Coordinator{}, Config: config}
+
+	if err := r.bindGateway(t.Context(), gateway, "53"); err != nil {
+		t.Fatal(err)
+	}
+	if err := kube.Get(t.Context(), client.ObjectKeyFromObject(route), route); err != nil {
+		t.Fatal(err)
+	}
+	for _, finalizer := range route.Finalizers {
+		if finalizer == legacyRouteFinalizer {
+			t.Fatal("scoped TCP route retained the legacy cleanup checkpoint")
+		}
+	}
+	if err := kube.Get(t.Context(), client.ObjectKeyFromObject(gateway), gateway); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.bindGateway(t.Context(), gateway, "53"); err != nil {
+		t.Fatal(err)
+	}
+	if err := kube.Get(t.Context(), client.ObjectKeyFromObject(gateway), gateway); err != nil {
+		t.Fatal(err)
+	}
+	input, err := r.ObserveGatewayGraph(t.Context(), graph.Request{Identity: controller.GatewayIdentity(config, gateway), Action: graph.Ensure, Gateway: gateway})
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := input.Node.Spec
+	if spec.ListenerProtocol != cloud.ListenerProtocolTCP || spec.ListenerPort != 53 ||
+		len(spec.ScopedListeners) != 3 || spec.ScopedListeners[0].Port != 53 || spec.ScopedListeners[1].Port != 9301 || spec.ScopedListeners[2].Port != 9302 {
+		t.Fatalf("TCP enrollment produced %+v", spec)
 	}
 }

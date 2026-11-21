@@ -38,9 +38,9 @@ type gatewayValidationError struct {
 }
 
 func hasListenerRequestFilters(gateway *gatewayv1.Gateway) bool {
-	multiUDP := hasMultipleUDPListeners(gateway)
+	multipleTransport := hasMultipleTransportListeners(gateway)
 	return slices.ContainsFunc(gateway.Spec.Listeners, func(l gatewayv1.Listener) bool {
-		supportedProtocol := l.Protocol == gatewayv1.HTTPProtocolType || (isL4Listener(l.Protocol) && len(gateway.Spec.Listeners) == 1) || multiUDP
+		supportedProtocol := l.Protocol == gatewayv1.HTTPProtocolType || (isL4Listener(l.Protocol) && len(gateway.Spec.Listeners) == 1) || multipleTransport
 		return supportedProtocol && l.Filters != nil && len(l.Filters.Requests) != 0
 	})
 }
@@ -91,7 +91,7 @@ func SupportedListeners(gateway *gatewayv1.Gateway) ([]*gatewayv1.Listener, erro
 	}
 	var listeners []*gatewayv1.Listener
 	switch {
-	case hasMultipleUDPListeners(gateway):
+	case hasMultipleTransportListeners(gateway):
 		for i := range gateway.Spec.Listeners {
 			listeners = append(listeners, &gateway.Spec.Listeners[i])
 		}
@@ -137,14 +137,18 @@ func SupportedListeners(gateway *gatewayv1.Gateway) ([]*gatewayv1.Listener, erro
 	return listeners, nil
 }
 
-// hasMultipleUDPListeners describes the Gateway shape eligible for enrollment.
-func hasMultipleUDPListeners(gateway *gatewayv1.Gateway) bool {
+// hasMultipleTransportListeners describes the Gateway shape eligible for enrollment.
+func hasMultipleTransportListeners(gateway *gatewayv1.Gateway) bool {
 	if len(gateway.Spec.Listeners) < 2 {
+		return false
+	}
+	protocol := gateway.Spec.Listeners[0].Protocol
+	if !isL4Listener(protocol) {
 		return false
 	}
 	ports := make(map[gatewayv1.PortNumber]struct{}, len(gateway.Spec.Listeners))
 	for _, listener := range gateway.Spec.Listeners {
-		if listener.Protocol != gatewayv1.UDPProtocolType || listener.Port < 1 || listener.Port > 65535 {
+		if listener.Protocol != protocol || listener.Port < 1 || listener.Port > 65535 {
 			return false
 		}
 		if _, exists := ports[listener.Port]; exists {
@@ -268,7 +272,7 @@ func HTTPListener(gateway *gatewayv1.Gateway) (*gatewayv1.Listener, error) {
 		}
 	}
 	if http == nil {
-		return nil, fmt.Errorf("a plain HTTP listener, a single TCP listener, or UDP listeners on distinct ports are required")
+		return nil, fmt.Errorf("a plain HTTP listener or same-protocol TCP or UDP listeners on distinct ports are required")
 	}
 	return http, nil
 }

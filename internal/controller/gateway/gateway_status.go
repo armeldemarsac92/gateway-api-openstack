@@ -59,7 +59,7 @@ func (r *Reconciler) setGatewayFailure(gateway *gatewayv1.Gateway, validationErr
 		}
 	}
 	existingListeners := append([]gatewayv1.ListenerStatus(nil), gateway.Status.Listeners...)
-	unsupportedMultipleL4 := len(gateway.Spec.Listeners) > 1 && !hasMultipleUDPListeners(gateway)
+	unsupportedMultipleL4 := len(gateway.Spec.Listeners) > 1 && !hasMultipleTransportListeners(gateway)
 	gateway.Status.Addresses = nil
 	controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionAccepted), accepted, string(gatewayReason), message, gateway.Generation))
 	controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionProgrammed), metav1.ConditionFalse, string(programmedReason), message, gateway.Generation))
@@ -97,10 +97,7 @@ func unprogrammedListenerStatus(
 		acceptedReason = gatewayv1.ListenerReasonUnsupportedProtocol
 		acceptedMessage = "Listener protocol is unsupported"
 		if l4InMultipleListeners {
-			acceptedMessage = fmt.Sprintf("%s requires a Gateway with a single listener", listener.Protocol)
-			if listener.Protocol == gatewayv1.UDPProtocolType {
-				acceptedMessage = "UDP requires a Gateway with only UDP listeners on distinct ports"
-			}
+			acceptedMessage = fmt.Sprintf("%s requires a Gateway with only %s listeners on distinct ports", listener.Protocol, listener.Protocol)
 		}
 	} else if !listenerSpecific {
 		acceptedStatus = metav1.ConditionTrue
@@ -233,10 +230,10 @@ func (r *Reconciler) handleGatewayProviderFailure(
 		policy.Message,
 		programmedGeneration,
 	)
-	var udpReadyPorts []int
+	var scopedReadyPorts []int
 	if policy.Category == cloud.ErrorCategoryResourceFailure && observation.Outcome.State == cloud.OutcomeProgressing &&
-		controller.GatewayUsesMultipleUDPListeners(r.Config, gateway) {
-		udpReadyPorts = observation.UDPReadyPorts
+		controller.GatewayListenerScope(r.Config, gateway) != "" {
+		scopedReadyPorts = observation.ScopedListenerReadyPorts
 	}
 	if err := r.setGatewayListenerStatuses(
 		ctx,
@@ -248,11 +245,11 @@ func (r *Reconciler) handleGatewayProviderFailure(
 		policy.Message,
 		policy.Message,
 		policy.AdvancesObservedGeneration,
-		udpReadyPorts,
+		scopedReadyPorts,
 	); err != nil {
 		return ctrl.Result{}, errors.Join(controller.SafeProviderReconcileError(policy, providerErr), err)
 	}
-	if address := observation.State.Address(); address != "" && len(udpReadyPorts) != 0 {
+	if address := observation.State.Address(); address != "" && len(scopedReadyPorts) != 0 {
 		setGatewayAddress(gateway, address)
 	}
 	if transitioned {
@@ -369,8 +366,8 @@ func (r *Reconciler) setGatewayProvisioningStatus(
 
 func (r *Reconciler) setGatewayProgrammed(ctx context.Context, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, gatewayState cloud.GatewayState) error {
 	message := "Octavia load balancer and listener are active"
-	if hasMultipleUDPListeners(gateway) {
-		message = "Octavia load balancer and UDP listeners are active"
+	if hasMultipleTransportListeners(gateway) {
+		message = "Octavia load balancer and listeners are active"
 	}
 	if err := r.setGatewayListenerStatuses(ctx, gateway, listener, metav1.ConditionTrue, gatewayv1.GatewayReasonProgrammed,
 		gatewayv1.ListenerReasonProgrammed, message, "Octavia listener is active", true, nil); err != nil {
@@ -394,10 +391,10 @@ func (r *Reconciler) setGatewayListenerStatuses(
 	listenerReason gatewayv1.ListenerConditionReason,
 	gatewayMessage, listenerMessage string,
 	advanceProgrammedGeneration bool,
-	udpReadyPorts []int,
+	scopedReadyPorts []int,
 ) error {
 	listeners := []*gatewayv1.Listener{primary}
-	if hasMultipleUDPListeners(gateway) {
+	if hasMultipleTransportListeners(gateway) {
 		listeners = make([]*gatewayv1.Listener, 0, len(gateway.Spec.Listeners))
 		for index := range gateway.Spec.Listeners {
 			listeners = append(listeners, &gateway.Spec.Listeners[index])
@@ -418,7 +415,7 @@ func (r *Reconciler) setGatewayListenerStatuses(
 		setAcceptedListenerConditions(&status.Conditions, gateway.Generation)
 		generation := controller.ConditionObservedGeneration(status.Conditions, string(gatewayv1.ListenerConditionProgrammed), gateway.Generation, advanceProgrammedGeneration)
 		portProgrammed, portReason, portMessage := programmed, listenerReason, listenerMessage
-		if listener.Protocol == gatewayv1.UDPProtocolType && slices.Contains(udpReadyPorts, int(listener.Port)) {
+		if isL4Listener(listener.Protocol) && slices.Contains(scopedReadyPorts, int(listener.Port)) {
 			portProgrammed, portReason, portMessage = metav1.ConditionTrue, gatewayv1.ListenerReasonProgrammed, "Octavia listener is active"
 		}
 		controller.SetCondition(&status.Conditions, controller.Condition(string(gatewayv1.ListenerConditionProgrammed), portProgrammed, string(portReason), portMessage, generation))

@@ -50,16 +50,16 @@ type GatewaySpec struct {
 	ListenerName      string
 	ListenerPort      int
 	ListenerProtocol  string
-	// UDPListeners lists every desired UDP port after the Gateway has entered
+	// ScopedListeners lists every desired TCP or UDP port after the Gateway has entered
 	// multi-listener mode. ListenerPort retains its original binding port so
 	// an existing unscoped listener can be recognized after a restart.
 	// Cleanup carries an empty, non-nil set and the same frozen port.
-	UDPListeners        []UDPListener
+	ScopedListeners     []ScopedListener
 	VIPSecurityGroupIDs []string
 }
 
-// UDPListener is one named Octavia listener on a shared Gateway load balancer.
-type UDPListener struct {
+// ScopedListener is one named Octavia listener on a shared Gateway load balancer.
+type ScopedListener struct {
 	Name string
 	Port int
 }
@@ -151,9 +151,9 @@ type RouteSpec struct {
 	Identity            Identity
 	Gateway             GatewayState
 	GatewayRequirements GatewayRequirements
-	// UDPListenerPorts identifies the UDP listeners on which this route wins.
+	// ScopedListenerPorts identifies the TCP or UDP listeners on which this route wins.
 	// Single-listener bindings use GatewayRequirements.ListenerPort.
-	UDPListenerPorts        []int `json:",omitempty"`
+	ScopedListenerPorts     []int `json:",omitempty"`
 	MemberMode              MemberMode
 	MemberSubnetID          string
 	BackendSecurityGroupIDs []string

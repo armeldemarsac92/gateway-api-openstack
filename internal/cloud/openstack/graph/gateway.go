@@ -75,14 +75,13 @@ func (p *Provider) GetGateway(
 		return cloud.GatewayProgressingResult("Octavia load balancer is administratively disabled", p.pollInterval), true, nil
 	}
 
-	listenerList, err := p.listGatewayListeners(ctx, loadBalancer, false)
+	listenerList, markedProtocol, err := p.listGatewayListeners(ctx, loadBalancer, false)
 	if err != nil {
 		return cloud.GatewayResult{}, false, err
 	}
 	var observed []listeners.Listener
-	scopedUDP := hasScopedUDPListeners(listenerList)
-	if scopedUDP {
-		observed, err = p.managedUDPListeners(identity, loadBalancer, listenerList, 0)
+	if markedProtocol != "" {
+		observed, err = p.managedScopedListeners(identity, loadBalancer, listenerList, markedProtocol, 0)
 	} else {
 		listener, singleErr := p.managedGatewayListener(identity, loadBalancer.ID, listenerList)
 		err = singleErr
@@ -130,8 +129,8 @@ func (p *Provider) GetGateway(
 		VIPAddress:     loadBalancer.VipAddress,
 		ListenerID:     observed[0].ID,
 	}
-	if scopedUDP {
-		state.ListenerID = udpRepresentativeListenerID(observed, 0)
+	if markedProtocol != "" {
+		state.ListenerID = scopedRepresentativeListenerID(observed, 0)
 	}
 	floatingIP, err := p.findGatewayFloatingIP(ctx, identity, loadBalancer.VipPortID, loadBalancer.VipAddress)
 	if err != nil {

@@ -350,21 +350,21 @@ func TestMultiUDPGraphUpgradesAndRemovesOneSharedListener(t *testing.T) {
 		t.Fatalf("expected the Octavia listener to exist after losing its create response, got %v", err)
 	}
 	provider = f.provider()
-	settled := f.settleUDP(provider)
+	settled := f.settleTransportGraph(provider)
 	if settled.Routes[0].Result.State.PoolID != "pool" || len(f.children(tcpListeners)) != 3 {
 		t.Fatalf("expected three listeners with the original pool, got %#v, %v", settled, f.inventory)
 	}
 	for _, listener := range f.children(tcpListeners) {
 		port := int(listener["protocol_port"].(float64))
-		marked := slices.Contains(pilotTags(listener["tags"]), udpPortTag(port))
+		marked := slices.Contains(pilotTags(listener["tags"]), scopedPortTag(cloud.ListenerProtocolUDP, port))
 		if listener["default_pool_id"] != "pool" || marked == (listener["id"] == "listener") {
 			t.Fatalf("incorrect pool or port marker for listener %v", listener)
 		}
 	}
 	before := len(f.writes)
-	f.spec.Gateway.Spec.UDPListeners = f.spec.Gateway.Spec.UDPListeners[1:2]
-	f.spec.Routes[0].Spec.UDPListenerPorts = []int{5353}
-	f.settleUDP(provider)
+	f.spec.Gateway.Spec.ScopedListeners = f.spec.Gateway.Spec.ScopedListeners[1:2]
+	f.spec.Routes[0].Spec.ScopedListenerPorts = []int{5353}
+	f.settleTransportGraph(provider)
 	sibling := f.inventory[tcpListener+"-5353"]
 	if sibling == nil || sibling["default_pool_id"] != "pool" || len(f.children(tcpListeners)) != 1 {
 		t.Fatalf("retained listener stopped serving, inventory %v", f.inventory)
@@ -376,14 +376,14 @@ func TestMultiUDPGraphUpgradesAndRemovesOneSharedListener(t *testing.T) {
 
 func (f *tcpGraphFixture) enableMultiUDP() {
 	anchor := f.spec.Gateway.Spec.ListenerPort
-	f.spec.Gateway.Spec.UDPListeners = []cloud.UDPListener{
+	f.spec.Gateway.Spec.ScopedListeners = []cloud.ScopedListener{
 		{Name: "anchor", Port: anchor}, {Name: "dns", Port: 5353}, {Name: "radius", Port: 1812},
 	}
-	f.spec.Routes[0].Spec.UDPListenerPorts = []int{anchor, 1812, 5353}
-	slices.Sort(f.spec.Routes[0].Spec.UDPListenerPorts)
+	f.spec.Routes[0].Spec.ScopedListenerPorts = []int{anchor, 1812, 5353}
+	slices.Sort(f.spec.Routes[0].Spec.ScopedListenerPorts)
 }
 
-func (f *tcpGraphFixture) settleUDP(provider *Provider) cloud.GatewayGraphResult {
+func (f *tcpGraphFixture) settleTransportGraph(provider *Provider) cloud.GatewayGraphResult {
 	f.t.Helper()
 	for range 20 {
 		for _, listener := range f.children(tcpListeners) {
@@ -396,7 +396,7 @@ func (f *tcpGraphFixture) settleUDP(provider *Provider) cloud.GatewayGraphResult
 			return result
 		}
 	}
-	f.t.Fatalf("UDP graph did not converge, writes %v", f.writes)
+	f.t.Fatalf("%s graph did not converge, writes %v", f.spec.Gateway.Spec.ListenerProtocol, f.writes)
 	return cloud.GatewayGraphResult{}
 }
 
@@ -404,17 +404,17 @@ func TestMultiUDPGraphChangesOneWinnerAndPreservesOtherRouteDuringCleanup(t *tes
 	f := newTransportGraphFixture(t, "UDP")
 	f.enableMultiUDP()
 	provider := f.provider()
-	f.settleUDP(provider)
+	f.settleTransportGraph(provider)
 	first := &f.spec.Routes[0]
-	first.Spec.UDPListenerPorts = []int{f.spec.Gateway.Spec.ListenerPort, 5353}
+	first.Spec.ScopedListenerPorts = []int{f.spec.Gateway.Spec.ListenerPort, 5353}
 	second := *first
 	second.Spec.Identity.RouteName, second.Spec.Identity.RouteUID = "other", "other-uid"
 	second.Spec.Precedence++
-	second.Spec.UDPListenerPorts = []int{1812}
+	second.Spec.ScopedListenerPorts = []int{1812}
 	f.spec.Routes = append(f.spec.Routes, second)
 	middle := tcpListener + "-1812"
 	before := len(f.writes)
-	result := f.settleUDP(provider)
+	result := f.settleTransportGraph(provider)
 	want := []string{"PUT " + middle, "POST " + tcpPools, "POST " + tcpPool + "-secondary/members",
 		"POST " + tcpMonitors, "PUT " + middle}
 	if got := f.writes[before:]; !slices.Equal(got, want) || result.Routes[1].Result.State.PoolID != "pool-secondary" {
@@ -437,13 +437,13 @@ func TestMultiUDPGraphChangesOneWinnerAndPreservesOtherRouteDuringCleanup(t *tes
 	if len(f.writes) != before+1 || pending.Outcome.State != cloud.OutcomeProgressing {
 		t.Fatalf("cleanup did not wait for settlement: writes %v, result %#v", f.writes[before:], pending)
 	}
-	f.settleUDP(provider)
+	f.settleTransportGraph(provider)
 	want = []string{"PUT " + tcpListener, "PUT " + tcpListener + "-5353", "DELETE " + tcpMonitor, "DELETE " + tcpMember, "DELETE " + tcpPool}
 	if got := f.writes[before:]; !slices.Equal(got, want) || f.inventory[middle]["default_pool_id"] != "pool-secondary" {
 		t.Fatalf("route-only deletion disturbed the other route: writes %v, listeners %v", got, f.children(tcpListeners))
 	}
 	f.udpCleanupGateway(cloud.GraphDelete)
-	f.settleUDP(f.provider())
+	f.settleTransportGraph(f.provider())
 	if len(f.inventory) != 0 {
 		t.Fatalf("whole Gateway deletion leaked resources: %v", f.inventory)
 	}
@@ -453,7 +453,7 @@ func TestMultiUDPGraphBlocksCleanupAcrossInconsistentAssociations(t *testing.T) 
 	f := newTransportGraphFixture(t, "UDP")
 	f.enableMultiUDP()
 	provider := f.provider()
-	f.settleUDP(provider)
+	f.settleTransportGraph(provider)
 	f.udpCleanupGateway(cloud.GraphPreserve)
 	f.spec.Routes[0].Disposition = cloud.GraphDelete
 	listener := f.inventory[tcpListener+"-1812"]
@@ -478,7 +478,7 @@ func TestMultiUDPGraphBlocksCleanupAcrossInconsistentAssociations(t *testing.T) 
 	pool["listeners"] = reverse
 
 	tags := listener["tags"]
-	listener["tags"] = append(pilotTags(tags), udpPortTag(1812))
+	listener["tags"] = append(pilotTags(tags), scopedPortTag(cloud.ListenerProtocolUDP, 1812))
 	assertBlocked(cloud.ErrorCategoryOwnershipConflict)
 	listener["tags"] = tags
 
@@ -493,7 +493,7 @@ func TestMultiUDPGraphKeepsPoolWhenDetachReportsError(t *testing.T) {
 	f := newTransportGraphFixture(t, "UDP")
 	f.enableMultiUDP()
 	provider := f.provider()
-	f.settleUDP(provider)
+	f.settleTransportGraph(provider)
 	f.udpCleanupGateway(cloud.GraphPreserve)
 	f.spec.Routes[0].Disposition = cloud.GraphDelete
 	before := len(f.writes)
@@ -516,7 +516,7 @@ func TestMultiUDPGraphKeepsPoolWhenDetachReportsError(t *testing.T) {
 
 func (f *tcpGraphFixture) udpCleanupGateway(disposition cloud.GraphDisposition) {
 	f.spec.Gateway = cloud.GatewayGraphNode{Disposition: disposition, Spec: cloud.GatewaySpec{
-		ListenerProtocol: "UDP", ListenerPort: f.spec.Gateway.Spec.ListenerPort, UDPListeners: []cloud.UDPListener{},
+		ListenerProtocol: "UDP", ListenerPort: f.spec.Gateway.Spec.ListenerPort, ScopedListeners: []cloud.ScopedListener{},
 	}}
 }
 
@@ -524,7 +524,7 @@ func TestMultiUDPDetachedPoolNeedsExplicitEmptyReverseList(t *testing.T) {
 	f := newTransportGraphFixture(t, "UDP")
 	f.enableMultiUDP()
 	provider := f.provider()
-	f.settleUDP(provider)
+	f.settleTransportGraph(provider)
 	f.udpCleanupGateway(cloud.GraphPreserve)
 	f.spec.Routes[0].Disposition = cloud.GraphDelete
 	for _, listener := range f.children(tcpListeners) {
@@ -548,7 +548,7 @@ func TestMultiUDPDetachedPoolNeedsExplicitEmptyReverseList(t *testing.T) {
 		t.Fatalf("missing forward association permitted pool cleanup: %v, writes %v", err, f.writes[before:])
 	}
 	listener["default_pool_id"] = nil
-	f.settleUDP(provider)
+	f.settleTransportGraph(provider)
 	if f.inventory[tcpPool] != nil {
 		t.Fatal("route-owned pool survived authorized cleanup after explicit detach")
 	}
@@ -557,10 +557,10 @@ func TestMultiUDPDetachedPoolNeedsExplicitEmptyReverseList(t *testing.T) {
 func TestMultiUDPCleanupRequiresFrozenPortForUnmarkedListener(t *testing.T) {
 	f := newTransportGraphFixture(t, "UDP")
 	provider := f.provider()
-	f.settleUDP(provider)
+	f.settleTransportGraph(provider)
 	f.enableMultiUDP()
-	f.settleUDP(provider)
-	if slices.ContainsFunc(pilotTags(f.inventory[tcpListener]["tags"]), isUDPPortTag) {
+	f.settleTransportGraph(provider)
+	if slices.ContainsFunc(pilotTags(f.inventory[tcpListener]["tags"]), func(tag string) bool { return scopedPortTagProtocol(tag) == cloud.ListenerProtocolUDP }) {
 		t.Fatal("expected the original single-port listener to retain its legacy tags")
 	}
 	f.udpCleanupGateway(cloud.GraphPreserve)
@@ -581,7 +581,7 @@ func TestMultiUDPCleanupRequiresFrozenPortForUnmarkedListener(t *testing.T) {
 		t.Fatalf("last unmarked listener on the wrong port was adopted: %v, writes %v", err, f.writes[before:])
 	}
 	f.spec.Gateway.Spec.ListenerPort = original
-	f.settleUDP(provider)
+	f.settleTransportGraph(provider)
 	if f.inventory[tcpPool] != nil {
 		t.Fatal("fully owned orphaned route pool survived cleanup")
 	}
@@ -591,18 +591,18 @@ func TestMultiUDPWithdrawsUnelectedDefaultsBeforeReportingObserved(t *testing.T)
 	f := newTransportGraphFixture(t, "UDP")
 	f.enableMultiUDP()
 	provider := f.provider()
-	f.settleUDP(provider)
+	f.settleTransportGraph(provider)
 	route := &f.spec.Routes[0]
-	route.Spec.UDPListenerPorts = []int{f.spec.Gateway.Spec.ListenerPort}
+	route.Spec.ScopedListenerPorts = []int{f.spec.Gateway.Spec.ListenerPort}
 	changing := f.reconcile(provider)
 	if changing.Routes[0].Result.Outcome.State == cloud.OutcomeReady {
 		t.Fatal("route marked observed while the reverse list still contains superseded ports")
 	}
-	f.settleUDP(provider)
+	f.settleTransportGraph(provider)
 	route.Disposition = cloud.GraphPreserve
-	route.RetainUDPListenerPorts = []int{}
+	route.RetainScopedListenerPorts = []int{}
 	before := len(f.writes)
-	f.settleUDP(provider)
+	f.settleTransportGraph(provider)
 	if !slices.Equal(f.writes[before:], []string{"PUT " + tcpListener}) || f.inventory[tcpPool] == nil {
 		t.Fatalf("revoked route must detach only its remaining default, preserving the pool: %v", f.writes[before:])
 	}
@@ -612,11 +612,11 @@ func TestMultiUDPReportsServingPortWhenSiblingIsPending(t *testing.T) {
 	f := newTransportGraphFixture(t, "UDP")
 	f.enableMultiUDP()
 	provider := f.provider()
-	f.settleUDP(provider)
+	f.settleTransportGraph(provider)
 	f.inventory[tcpListener+"-1812"]["provisioning_status"] = "PENDING_UPDATE"
 	result := f.reconcile(provider)
 	if result.Gateway.Outcome.State == cloud.OutcomeReady ||
-		!slices.Equal(result.Gateway.UDPReadyPorts, []int{f.spec.Gateway.Spec.ListenerPort, 5353}) {
+		!slices.Equal(result.Gateway.ScopedListenerReadyPorts, []int{f.spec.Gateway.Spec.ListenerPort, 5353}) {
 		t.Fatalf("partial UDP listener readiness = %#v", result.Gateway)
 	}
 }
@@ -1276,6 +1276,53 @@ func TestTCPGraphBlocksCleanupWhileParentStillReferencesUnlistedChildren(t *test
 		if result, err := provider.ReconcileGatewayGraph(t.Context(), f.spec); !errors.Is(err, cloud.ErrDependencyNotReady) ||
 			result.Outcome.State == cloud.OutcomeReady || len(f.writes) != 5 {
 			t.Fatalf("Gateway cleanup with unlisted %s = %#v, %v, writes %v", child, result, err, f.writes[5:])
+		}
+	}
+}
+
+func TestMultiTCPGraphKeepsSharedPoolOnListenerRemoval(t *testing.T) {
+	f := newTCPGraphFixture(t)
+	provider := f.provider()
+	f.settleTransportGraph(provider)
+
+	anchor := f.spec.Gateway.Spec.ListenerPort
+	f.spec.Gateway.Spec.ScopedListeners = []cloud.ScopedListener{
+		{Name: "one", Port: anchor}, {Name: "two", Port: 9311}, {Name: "three", Port: 9312}, {Name: "four", Port: 9313},
+	}
+	f.spec.Routes[0].Spec.ScopedListenerPorts = []int{anchor, 9311, 9312, 9313}
+	before := len(f.writes)
+	f.settleTransportGraph(provider)
+	if slices.Contains(f.writes[before:], "PUT "+tcpListener) || slices.Contains(f.writes[before:], "DELETE "+tcpListener) {
+		t.Fatalf("enrolling TCP siblings changed the original listener: %v", f.writes[before:])
+	}
+	if len(f.children(tcpListeners)) != 4 {
+		t.Fatalf("expected four TCP listeners, got %d", len(f.children(tcpListeners)))
+	}
+	for _, listener := range f.children(tcpListeners) {
+		if listener["default_pool_id"] != "pool" {
+			t.Fatalf("listener %s does not reach the shared TCP pool", listener["id"])
+		}
+	}
+
+	// A stale reverse association must stop frontend deletion, even after
+	// the listener no longer reports a default pool.
+	f.spec.Gateway.Spec.ScopedListeners = f.spec.Gateway.Spec.ScopedListeners[:3]
+	f.spec.Routes[0].Spec.ScopedListenerPorts = f.spec.Routes[0].Spec.ScopedListenerPorts[:3]
+	removed := tcpListener + "-9313"
+	f.inventory[removed]["default_pool_id"] = nil
+	before = len(f.writes)
+	if _, err := provider.ReconcileGatewayGraph(t.Context(), f.spec); !errors.Is(err, cloud.ErrDependencyNotReady) || len(f.writes) != before {
+		t.Fatalf("mismatched readback authorized a write: %v, writes %v", err, f.writes[before:])
+	}
+
+	f.inventory[removed]["default_pool_id"] = "pool"
+	f.settleTransportGraph(provider)
+	if want := []string{"PUT " + removed, "DELETE " + removed}; !slices.Equal(f.writes[before:], want) {
+		t.Fatalf("removing one TCP listener changed sibling traffic: writes %v, want %v", f.writes[before:], want)
+	}
+	for _, listener := range f.children(tcpListeners) {
+		if listener["default_pool_id"] != "pool" {
+			t.Fatalf("sibling listener %s lost the shared pool", listener["id"])
 		}
 	}
 }

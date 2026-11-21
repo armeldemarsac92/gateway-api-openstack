@@ -106,66 +106,79 @@ func StoredGatewayTopology(config Config, gateway *gatewayv1.Gateway) (classconf
 	return resolved, nil
 }
 
-const gatewayUDPListenerModeV1 = "v1"
+const gatewayListenerModeV1 = "v1"
 
-// GatewayUsesMultipleUDPListeners reports whether the Gateway is enrolled.
-// Callers must validate its complete binding before a graph mutation.
-func GatewayUsesMultipleUDPListeners(config Config, gateway *gatewayv1.Gateway) bool {
-	return gateway.Annotations[config.GatewayUDPListenerModeAnnotation()] == gatewayUDPListenerModeV1
+// GatewayListenerScope returns the enrolled protocol after binding validation.
+func GatewayListenerScope(config Config, gateway *gatewayv1.Gateway) gatewayv1.ProtocolType {
+	for _, protocol := range []gatewayv1.ProtocolType{gatewayv1.TCPProtocolType, gatewayv1.UDPProtocolType} {
+		if gateway.Annotations[config.GatewayListenerModeAnnotation(protocol)] == gatewayListenerModeV1 {
+			return protocol
+		}
+	}
+	return ""
 }
 
-// HasGatewayUDPListenerModeBinding detects even a partial scoped checkpoint.
-func HasGatewayUDPListenerModeBinding(config Config, gateway *gatewayv1.Gateway) bool {
-	_, marked := gateway.Annotations[config.GatewayUDPListenerModeAnnotation()]
-	return marked || slices.ContainsFunc(gateway.Finalizers, func(finalizer string) bool {
+// HasGatewayListenerScopeBinding detects even a partial scoped checkpoint.
+func HasGatewayListenerScopeBinding(config Config, gateway *gatewayv1.Gateway) bool {
+	_, tcp := gateway.Annotations[config.GatewayListenerModeAnnotation(gatewayv1.TCPProtocolType)]
+	_, udp := gateway.Annotations[config.GatewayListenerModeAnnotation(gatewayv1.UDPProtocolType)]
+	return tcp || udp || slices.ContainsFunc(gateway.Finalizers, func(finalizer string) bool {
 		return strings.HasPrefix(finalizer, config.GatewayTopologyFinalizerPrefix()+"u")
 	})
 }
 
-// SetGatewayUDPListenerMode changes the mode and its integrity checkpoint
+// SetGatewayListenerScope changes the mode and its integrity checkpoint
 // together. Callers validate the original binding before changing its metadata.
-func SetGatewayUDPListenerMode(config Config, gateway *gatewayv1.Gateway, enabled bool) {
-	key := config.GatewayUDPListenerModeAnnotation()
-	if enabled == GatewayUsesMultipleUDPListeners(config, gateway) {
+func SetGatewayListenerScope(config Config, gateway *gatewayv1.Gateway, protocol gatewayv1.ProtocolType) {
+	if protocol == GatewayListenerScope(config, gateway) {
 		return
 	}
 	for _, finalizer := range topologyFinalizers(config, gateway) {
 		controllerutil.RemoveFinalizer(gateway, finalizer)
 	}
-	if enabled {
-		gateway.Annotations[key] = gatewayUDPListenerModeV1
-	} else {
-		delete(gateway.Annotations, key)
+	for _, transport := range []gatewayv1.ProtocolType{gatewayv1.TCPProtocolType, gatewayv1.UDPProtocolType} {
+		delete(gateway.Annotations, config.GatewayListenerModeAnnotation(transport))
+	}
+	if protocol != "" {
+		gateway.Annotations[config.GatewayListenerModeAnnotation(protocol)] = gatewayListenerModeV1
 	}
 	raw := gateway.Annotations[config.GatewayTopologyAnnotation()]
 	controllerutil.AddFinalizer(gateway, gatewayTopologyCheckpoint(config, gateway, raw))
 }
 
 func gatewayTopologyCheckpoint(config Config, gateway *gatewayv1.Gateway, raw string) string {
-	if _, exists := gateway.Annotations[config.GatewayUDPListenerModeAnnotation()]; !exists {
+	mode, udp := gateway.Annotations[config.GatewayListenerModeAnnotation(gatewayv1.UDPProtocolType)]
+	tcpMode, tcp := gateway.Annotations[config.GatewayListenerModeAnnotation(gatewayv1.TCPProtocolType)]
+	if !udp && !tcp {
 		return config.GatewayTopologyFinalizer(raw)
 	}
-	// The original port and owner are frozen for as long as this topology
-	// carries scoped UDP listeners. Older controllers fail closed on this digest.
+	// Retain the existing UDP digest. The distinct TCP format uses the same
+	// leading u that S7 checks to require topology validation before route cleanup.
+	prefix := "u"
+	if tcp {
+		mode, prefix = tcpMode, "ut"
+	}
 	input := strings.Join([]string{
-		raw, gateway.Annotations[config.GatewayUDPListenerModeAnnotation()],
+		raw, mode,
 		gateway.Namespace, gateway.Name, string(gateway.UID),
 		gateway.Annotations[config.GatewayClusterIDAnnotation()], gateway.Annotations[config.GatewayProjectIDAnnotation()],
 		gateway.Annotations[config.GatewayListenerProtocolAnnotation()], gateway.Annotations[config.GatewayListenerPortAnnotation()],
 	}, "\x00")
 	digest := sha256.Sum256([]byte(input))
-	return config.GatewayTopologyFinalizerPrefix() + "u" + fmt.Sprintf("%x", digest[:15])
+	return config.GatewayTopologyFinalizerPrefix() + prefix + fmt.Sprintf("%x", digest[:15])
 }
 
-func validateGatewayUDPListenerMode(config Config, gateway *gatewayv1.Gateway) error {
-	mode, exists := gateway.Annotations[config.GatewayUDPListenerModeAnnotation()]
-	if !exists {
+func validateGatewayListenerScope(config Config, gateway *gatewayv1.Gateway) error {
+	_, tcp := gateway.Annotations[config.GatewayListenerModeAnnotation(gatewayv1.TCPProtocolType)]
+	_, udp := gateway.Annotations[config.GatewayListenerModeAnnotation(gatewayv1.UDPProtocolType)]
+	if !tcp && !udp {
 		return nil
 	}
+	protocol := GatewayListenerScope(config, gateway)
 	port, err := strconv.Atoi(gateway.Annotations[config.GatewayListenerPortAnnotation()])
-	if mode != gatewayUDPListenerModeV1 || gateway.Annotations[config.GatewayListenerProtocolAnnotation()] != string(gatewayv1.UDPProtocolType) ||
+	if tcp && udp || protocol == "" || gateway.Annotations[config.GatewayListenerProtocolAnnotation()] != string(protocol) ||
 		err != nil || port < 1 || port > 65535 || !controllerutil.ContainsFinalizer(gateway, config.GatewayFinalizer()) {
-		return fmt.Errorf("%w: Gateway UDP listener mode binding is invalid", cloud.ErrOwnershipConflict)
+		return fmt.Errorf("%w: Gateway listener mode binding is invalid", cloud.ErrOwnershipConflict)
 	}
 	return nil
 }

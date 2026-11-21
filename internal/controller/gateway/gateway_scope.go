@@ -160,7 +160,8 @@ func gatewayBindingAnnotationKeys(config controller.Config) []string {
 		config.GatewayTopologyAnnotation(),
 		config.GatewayListenerPortAnnotation(),
 		config.GatewayListenerProtocolAnnotation(),
-		config.GatewayUDPListenerModeAnnotation(),
+		config.GatewayListenerModeAnnotation(gatewayv1.UDPProtocolType),
+		config.GatewayListenerModeAnnotation(gatewayv1.TCPProtocolType),
 		config.GatewayClusterIDAnnotation(),
 		config.GatewayProjectIDAnnotation(),
 	}

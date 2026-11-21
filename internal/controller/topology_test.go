@@ -116,7 +116,7 @@ func TestGatewayUDPModeSealsOriginalListenerPort(t *testing.T) {
 	if err := BindGatewayTopology(config, gateway, testResolvedTopology()); err != nil {
 		t.Fatal(err)
 	}
-	SetGatewayUDPListenerMode(config, gateway, true)
+	SetGatewayListenerScope(config, gateway, gatewayv1.UDPProtocolType)
 	if err := ValidateGatewayBinding(config, gateway); err != nil {
 		t.Fatal(err)
 	}
@@ -125,8 +125,8 @@ func TestGatewayUDPModeSealsOriginalListenerPort(t *testing.T) {
 		key  string
 		new  string
 	}{
-		{name: "marker removed", key: config.GatewayUDPListenerModeAnnotation()},
-		{name: "unrecognized marker", key: config.GatewayUDPListenerModeAnnotation(), new: "v2"},
+		{name: "marker removed", key: config.GatewayListenerModeAnnotation(gatewayv1.UDPProtocolType)},
+		{name: "unrecognized marker", key: config.GatewayListenerModeAnnotation(gatewayv1.UDPProtocolType), new: "v2"},
 		{name: "port changed", key: config.GatewayListenerPortAnnotation(), new: "53"},
 		{name: "protocol changed", key: config.GatewayListenerProtocolAnnotation(), new: "TCP"},
 	} {
@@ -142,8 +142,8 @@ func TestGatewayUDPModeSealsOriginalListenerPort(t *testing.T) {
 			}
 		})
 	}
-	SetGatewayUDPListenerMode(config, gateway, false)
-	if GatewayUsesMultipleUDPListeners(config, gateway) {
+	SetGatewayListenerScope(config, gateway, "")
+	if GatewayListenerScope(config, gateway) == gatewayv1.UDPProtocolType {
 		t.Fatal("UDP mode was not cleared")
 	}
 	if err := ValidateGatewayBinding(config, gateway); err != nil {

@@ -38,16 +38,16 @@ type desiredGatewayGraph struct {
 }
 
 type observedGatewayGraph struct {
-	loadBalancer *octavia.LoadBalancer
-	listener     *listeners.Listener
-	udpListeners []listeners.Listener
-	multiUDP     bool
-	floatingIP   *floatingips.FloatingIP
-	routes       []observedRouteGraph
-	deletion     gatewayDeletionPlan
-	state        cloud.GatewayState
-	outcome      cloud.Outcome
-	protocol     string
+	loadBalancer    *octavia.LoadBalancer
+	listener        *listeners.Listener
+	scopedListeners []listeners.Listener
+	scoped          bool
+	floatingIP      *floatingips.FloatingIP
+	routes          []observedRouteGraph
+	deletion        gatewayDeletionPlan
+	state           cloud.GatewayState
+	outcome         cloud.Outcome
+	protocol        string
 }
 
 type graphMutationKind uint8
@@ -70,14 +70,14 @@ const (
 )
 
 type graphMutation struct {
-	kind        graphMutationKind
-	routeIndex  int
-	route       routeMutation
-	deletion    gatewayDeletionStep
-	poolID      string
-	listenerID  string
-	udpListener cloud.UDPListener
-	message     string
+	kind           graphMutationKind
+	routeIndex     int
+	route          routeMutation
+	deletion       gatewayDeletionStep
+	poolID         string
+	listenerID     string
+	scopedListener cloud.ScopedListener
+	message        string
 }
 
 // ReconcileGatewayGraph validates and observes every component before building
@@ -174,7 +174,7 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 		return invalid("Gateway graph disposition is invalid")
 	}
 	var protocol string
-	if spec.Gateway.Disposition != cloud.GraphPreserve || spec.Gateway.Spec.UDPListeners != nil {
+	if spec.Gateway.Disposition != cloud.GraphPreserve || spec.Gateway.Spec.ScopedListeners != nil {
 		protocol = spec.Gateway.Spec.ListenerProtocol
 	}
 	if spec.Gateway.Disposition == cloud.GraphEnsure {
@@ -195,30 +195,30 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 	if protocol != "" && !supportedListenerProtocol(protocol) {
 		return invalid("Gateway listener protocol must be HTTP, TCP or UDP")
 	}
-	if spec.Gateway.Spec.UDPListeners != nil {
-		if protocol != cloud.ListenerProtocolUDP || spec.Gateway.Spec.ListenerPort < 1 || spec.Gateway.Spec.ListenerPort > 65535 {
-			return invalid("scoped UDP listeners require a frozen UDP port within 1-65535")
+	if spec.Gateway.Spec.ScopedListeners != nil {
+		if !usesDefaultPool(protocol) || spec.Gateway.Spec.ListenerPort < 1 || spec.Gateway.Spec.ListenerPort > 65535 {
+			return invalid("scoped TCP or UDP listeners require a frozen port within 1-65535")
 		}
-		if spec.Gateway.Disposition == cloud.GraphEnsure && len(spec.Gateway.Spec.UDPListeners) == 0 {
-			return invalid("an ensured multi-listener UDP Gateway requires its desired ports")
+		if spec.Gateway.Disposition == cloud.GraphEnsure && len(spec.Gateway.Spec.ScopedListeners) == 0 {
+			return invalid("an ensured multi-listener Gateway requires its desired ports")
 		}
 	}
-	udpPorts := make(map[int]bool, len(spec.Gateway.Spec.UDPListeners))
-	if len(spec.Gateway.Spec.UDPListeners) != 0 {
-		if spec.Gateway.Disposition != cloud.GraphEnsure || protocol != cloud.ListenerProtocolUDP {
-			return invalid("a UDP listener set requires an ensured UDP Gateway")
+	ports := make(map[int]bool, len(spec.Gateway.Spec.ScopedListeners))
+	if len(spec.Gateway.Spec.ScopedListeners) != 0 {
+		if spec.Gateway.Disposition != cloud.GraphEnsure {
+			return invalid("a listener set requires an ensured Gateway")
 		}
-		names := make(map[string]bool, len(spec.Gateway.Spec.UDPListeners))
-		for _, listener := range spec.Gateway.Spec.UDPListeners {
-			if listener.Port < 1 || listener.Port > 65535 || strings.TrimSpace(listener.Name) == "" || udpPorts[listener.Port] || names[listener.Name] {
-				return invalid("UDP listeners require unique names and distinct ports within 1-65535")
+		names := make(map[string]bool, len(spec.Gateway.Spec.ScopedListeners))
+		for _, listener := range spec.Gateway.Spec.ScopedListeners {
+			if listener.Port < 1 || listener.Port > 65535 || strings.TrimSpace(listener.Name) == "" || ports[listener.Port] || names[listener.Name] {
+				return invalid("scoped listeners require unique names and distinct ports within 1-65535")
 			}
-			udpPorts[listener.Port] = true
+			ports[listener.Port] = true
 			names[listener.Name] = true
 		}
-		spec.Gateway.Spec.UDPListeners = slices.Clone(spec.Gateway.Spec.UDPListeners)
-		sort.Slice(spec.Gateway.Spec.UDPListeners, func(i, j int) bool {
-			return spec.Gateway.Spec.UDPListeners[i].Port < spec.Gateway.Spec.UDPListeners[j].Port
+		spec.Gateway.Spec.ScopedListeners = slices.Clone(spec.Gateway.Spec.ScopedListeners)
+		sort.Slice(spec.Gateway.Spec.ScopedListeners, func(i, j int) bool {
+			return spec.Gateway.Spec.ScopedListeners[i].Port < spec.Gateway.Spec.ScopedListeners[j].Port
 		})
 	}
 	// Copy before sorting: callers can reuse their immutable reconciliation input.
@@ -244,7 +244,7 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 	desired := desiredGatewayGraph{spec: spec, identity: identity, protocol: protocol}
 	identities := make(map[string]struct{}, len(spec.Routes))
 	lastRank := -1
-	udpPortWinners := make(map[int]bool, len(udpPorts))
+	portWinners := make(map[int]bool, len(ports))
 	position := int32(1)
 	for _, node := range spec.Routes {
 		id := node.Spec.Identity
@@ -261,18 +261,18 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 			return desiredGatewayGraph{}, &cloud.GraphError{Identity: id, Err: fmt.Errorf("%w: duplicate route fragment", cloud.ErrOwnershipConflict)}
 		}
 		identities[id.RouteUID] = struct{}{}
-		assigned := node.RetainUDPListenerPorts
-		if assigned != nil && (node.Disposition != cloud.GraphPreserve || spec.Gateway.Disposition != cloud.GraphEnsure || len(udpPorts) == 0) {
-			return invalid("limiting a preserved pool's UDP defaults requires a complete Gateway listener set")
+		assigned := node.RetainScopedListenerPorts
+		if assigned != nil && (node.Disposition != cloud.GraphPreserve || spec.Gateway.Disposition != cloud.GraphEnsure || len(ports) == 0) {
+			return invalid("limiting a preserved pool's defaults requires a complete Gateway listener set")
 		}
 		if node.Disposition == cloud.GraphEnsure {
-			assigned = node.Spec.UDPListenerPorts
+			assigned = node.Spec.ScopedListenerPorts
 		}
 		for index, port := range assigned {
-			if !udpPorts[port] || udpPortWinners[port] || index > 0 && assigned[index-1] >= port {
-				return invalid("UDP route elections require sorted, distinct ports from the Gateway listener set")
+			if !ports[port] || portWinners[port] || index > 0 && assigned[index-1] >= port {
+				return invalid("scoped route elections require sorted, distinct ports from the Gateway listener set")
 			}
-			udpPortWinners[port] = true
+			portWinners[port] = true
 		}
 		routeIdentity, err := p.identity(id)
 		if err != nil {
@@ -286,16 +286,16 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 			if spec.Gateway.Disposition != cloud.GraphEnsure {
 				return invalid("an ensured route requires an ensured Gateway")
 			}
-			if usesDefaultPool(protocol) && len(udpPorts) == 0 && lastRank != -1 {
+			if usesDefaultPool(protocol) && len(ports) == 0 && lastRank != -1 {
 				return invalid(fmt.Sprintf("a %s listener allows at most one ensured route", protocol))
 			}
-			if node.Spec.Precedence < 0 || len(udpPorts) == 0 && node.Spec.Precedence == lastRank {
+			if node.Spec.Precedence < 0 || len(ports) == 0 && node.Spec.Precedence == lastRank {
 				return desiredGatewayGraph{}, &cloud.GraphError{Identity: id, Err: cloud.NewProviderError(cloud.ErrorCategoryTerminalValidation,
 					fmt.Errorf("route precedence %d must be nonnegative and distinct among ensured routes", node.Spec.Precedence))}
 			}
 			lastRank = node.Spec.Precedence
-			if len(udpPorts) == 0 && len(node.Spec.UDPListenerPorts) != 0 || len(udpPorts) != 0 && len(node.Spec.UDPListenerPorts) == 0 {
-				return invalid("an ensured route of a multi-listener UDP Gateway requires its selected UDP ports")
+			if len(ports) == 0 && len(node.Spec.ScopedListenerPorts) != 0 || len(ports) != 0 && len(node.Spec.ScopedListenerPorts) == 0 {
+				return invalid("an ensured route of a multi-listener Gateway requires its selected ports")
 			}
 			if !node.Spec.GatewayRequirements.Equal(gatewayRequirements(spec.Gateway.Spec)) {
 				return desiredGatewayGraph{}, &cloud.GraphError{Identity: id, Err: fmt.Errorf("%w: route and Gateway infrastructure requirements differ", cloud.ErrOwnershipConflict)}
@@ -316,9 +316,9 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 
 func observedGatewayResult(desired desiredGatewayGraph, actual observedGatewayGraph, pending cloud.Outcome) cloud.GatewayResult {
 	result := cloud.GatewayResult{State: actual.state, Outcome: pending}
-	if actual.multiUDP {
+	if actual.scoped {
 		if desired.spec.Gateway.Disposition == cloud.GraphEnsure {
-			return udpGatewayResult(desired.spec.Gateway.Spec, actual, pending)
+			return scopedGatewayResult(desired.spec.Gateway.Spec, actual, pending)
 		}
 		return result
 	}
@@ -372,7 +372,7 @@ func (d desiredGatewayGraph) routeOwners() []routeGraphOwner {
 }
 
 func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatewayGraph) (observedGatewayGraph, error) {
-	actual := observedGatewayGraph{outcome: cloud.ReadyOutcome(), protocol: desired.protocol, multiUDP: desired.spec.Gateway.Spec.UDPListeners != nil}
+	actual := observedGatewayGraph{outcome: cloud.ReadyOutcome(), protocol: desired.protocol, scoped: desired.spec.Gateway.Spec.ScopedListeners != nil}
 	lb, err := p.findGatewayLoadBalancer(ctx, desired.identity)
 	if err != nil {
 		return actual, err
@@ -422,17 +422,21 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 		}
 	}
 	owners := desired.routeOwners()
-	listenerList, err := p.listGatewayListeners(ctx, lb, actual.multiUDP)
+	listenerList, markedProtocol, err := p.listGatewayListeners(ctx, lb, actual.scoped)
 	if err != nil {
 		return actual, err
 	}
-	scopedUDP := hasScopedUDPListeners(listenerList)
-	if scopedUDP && desired.spec.Gateway.Disposition == cloud.GraphEnsure && !actual.multiUDP {
-		return actual, fmt.Errorf("%w: scoped UDP listeners require the Gateway listener set", cloud.ErrOwnershipConflict)
+	if markedProtocol != "" {
+		if actual.protocol != "" && actual.protocol != markedProtocol {
+			return actual, fmt.Errorf("%w: scoped listeners differ from the Gateway protocol binding", cloud.ErrOwnershipConflict)
+		}
+		if desired.spec.Gateway.Disposition == cloud.GraphEnsure && !actual.scoped {
+			return actual, fmt.Errorf("%w: scoped listeners require the Gateway listener set", cloud.ErrOwnershipConflict)
+		}
+		actual.protocol, actual.scoped = markedProtocol, true
 	}
-	if actual.multiUDP || scopedUDP {
-		actual.multiUDP = true
-		return p.observeMultiUDPGraph(ctx, desired, actual, owners, listenerList, observation.phase == loadBalancerPhasePending)
+	if actual.scoped {
+		return p.observeScopedListenerGraph(ctx, desired, actual, owners, listenerList, observation.phase == loadBalancerPhasePending)
 	}
 	if desired.spec.Gateway.Disposition == cloud.GraphDelete {
 		if observation.phase == loadBalancerPhasePending {
@@ -535,7 +539,7 @@ func validateObservedPolicyLayout(routes []observedRouteGraph) error {
 // observeAbsentGateway checks independently allocated Neutron resources before
 // declaring a deleted graph absent or creating a replacement load balancer.
 func (p *Provider) observeAbsentGateway(ctx context.Context, desired desiredGatewayGraph) (observedGatewayGraph, error) {
-	actual := observedGatewayGraph{outcome: cloud.ReadyOutcome(), protocol: desired.protocol, multiUDP: desired.spec.Gateway.Spec.UDPListeners != nil}
+	actual := observedGatewayGraph{outcome: cloud.ReadyOutcome(), protocol: desired.protocol, scoped: desired.spec.Gateway.Spec.ScopedListeners != nil}
 	floatingIP, err := p.findGatewayFloatingIP(ctx, desired.identity, "", "")
 	if err != nil {
 		return actual, err
@@ -568,12 +572,12 @@ func validateGraphLoadBalancer(lb *octavia.LoadBalancer, requirements cloud.Gate
 func (p *Provider) pendingGraphResult(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph) cloud.GatewayGraphResult {
 	result := cloud.GatewayGraphResult{Outcome: actual.outcome, Gateway: observedGatewayResult(desired, actual, actual.outcome)}
 	var deferred map[int]bool
-	if actual.multiUDP {
-		deferred = p.deferredUDPRouteObservations(ctx, desired, actual, result.Gateway.UDPReadyPorts)
+	if actual.scoped {
+		deferred = p.deferredScopedRouteObservations(ctx, desired, actual, result.Gateway.ScopedListenerReadyPorts)
 	}
 	for index, route := range desired.routes {
 		result.Routes = append(result.Routes, cloud.RouteGraphResult{Identity: route.spec.Identity, Result: cloud.RouteResult{
-			Outcome: actual.outcome, ObservationDeferred: !actual.multiUDP || deferred[index],
+			Outcome: actual.outcome, ObservationDeferred: !actual.scoped || deferred[index],
 		}})
 	}
 	return result

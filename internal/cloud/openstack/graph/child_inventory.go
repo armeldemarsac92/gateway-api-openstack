@@ -26,16 +26,20 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/pools"
 )
 
-func (p *Provider) listGatewayListeners(ctx context.Context, lb *octavia.LoadBalancer, multiUDP bool) ([]listeners.Listener, error) {
+func (p *Provider) listGatewayListeners(ctx context.Context, lb *octavia.LoadBalancer, scoped bool) ([]listeners.Listener, string, error) {
 	items, defaultPoolsObserved, err := p.octavia.ListListenersWithDefaultPools(ctx, listeners.ListOpts{LoadbalancerID: lb.ID, ProjectID: p.projectID})
 	if err != nil {
-		return nil, fmt.Errorf("list Gateway listeners: %w", err)
+		return nil, "", fmt.Errorf("list Gateway listeners: %w", err)
 	}
-	if !defaultPoolsObserved && (multiUDP || hasScopedUDPListeners(items)) {
-		return nil, cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady,
-			fmt.Errorf("load balancer %s has an incomplete UDP listener default pool inventory", lb.ID))
+	markedProtocol, err := scopedListenerProtocol(items)
+	if err != nil {
+		return nil, "", err
 	}
-	return items, crossCheckChildInventory("load balancer", lb.ID, "listener", lb.Listeners, items, func(item listeners.Listener) string { return item.ID })
+	if !defaultPoolsObserved && (scoped || markedProtocol != "") {
+		return nil, "", cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady,
+			fmt.Errorf("load balancer %s has an incomplete scoped listener default pool inventory", lb.ID))
+	}
+	return items, markedProtocol, crossCheckChildInventory("load balancer", lb.ID, "listener", lb.Listeners, items, func(item listeners.Listener) string { return item.ID })
 }
 
 func (p *Provider) listGatewayPools(ctx context.Context, lb *octavia.LoadBalancer) ([]pools.Pool, error) {

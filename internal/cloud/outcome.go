@@ -75,9 +75,9 @@ func ProgressingOutcome(message string, requeueAfter time.Duration) Outcome {
 type GatewayResult struct {
 	State   GatewayState
 	Outcome Outcome
-	// UDPReadyPorts contains the individually programmed listener ports when
-	// the provider has observed a multi-listener UDP Gateway.
-	UDPReadyPorts []int
+	// ScopedListenerReadyPorts contains the individually programmed listener ports when
+	// the provider has observed a multi-listener TCP or UDP Gateway.
+	ScopedListenerReadyPorts []int
 }
 
 // GatewayReadyResult returns a converged Gateway result.

@@ -102,7 +102,7 @@ func TestGatewayReportsProvenUDPListenerWhenSiblingFails(t *testing.T) {
 	}
 	component := cloud.GatewayProgressingResult("Waiting for the Gateway UDP listeners", time.Second)
 	component.State = cloud.GatewayState{LoadBalancerID: "lb-1", VIPAddress: "192.0.2.10"}
-	component.UDPReadyPorts = []int{53}
+	component.ScopedListenerReadyPorts = []int{53}
 	providerErr := cloud.NewProviderError(cloud.ErrorCategoryResourceFailure, errors.New("Octavia UDP listener provisioning status is ERROR"))
 	reconciler.Writer = fixedGatewayGraph{result: cloud.GatewayGraphResult{Gateway: component}, err: providerErr}
 	if result, err := reconciler.Reconcile(t.Context(), request); err != nil || result.RequeueAfter <= 0 {

@@ -58,11 +58,11 @@ func (r *Reconciler) gatewaySpec(gateway *gatewayv1.Gateway, listeners []*gatewa
 		AvailabilityZone:    topology.Topology.AvailabilityZone,
 		VIPSecurityGroupIDs: slices.Clone(topology.Topology.VIPSecurityGroupIDs),
 	}
-	if controller.GatewayUsesMultipleUDPListeners(r.Config, gateway) {
-		// Snapshot validation already verified the frozen UDP port and topology.
+	if controller.GatewayListenerScope(r.Config, gateway) != "" {
+		// Snapshot validation already verified the frozen listener port and topology.
 		spec.ListenerPort, _ = strconv.Atoi(gateway.Annotations[r.Config.GatewayListenerPortAnnotation()])
 		for _, listener := range listeners {
-			spec.UDPListeners = append(spec.UDPListeners, cloud.UDPListener{
+			spec.ScopedListeners = append(spec.ScopedListeners, cloud.ScopedListener{
 				Name: resourceDisplayName(strconv.Itoa(int(listener.Port)), gateway.Namespace, gateway.Name, string(listener.Name)),
 				Port: int(listener.Port),
 			})

@@ -43,8 +43,8 @@ func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual obs
 		}
 		return plan, result, nil
 	}
-	if actual.multiUDP {
-		return p.buildMultiUDPGraphPlan(desired, actual)
+	if actual.scoped {
+		return p.buildScopedListenerGraphPlan(desired, actual)
 	}
 	if usesDefaultPool(actual.protocol) {
 		return p.buildDefaultPoolGraphPlan(desired, actual)
@@ -230,7 +230,7 @@ func buildGatewayPrerequisitePlan(desired desiredGatewayGraph, actual observedGa
 	if networkID == "" && actual.floatingIP != nil {
 		plan = append(plan, graphMutation{kind: graphDeleteFloatingIP, message: "Removed a no-longer-configured Floating IP"})
 	}
-	if actual.listener == nil && !actual.multiUDP {
+	if actual.listener == nil && !actual.scoped {
 		plan = append(plan, graphMutation{kind: graphCreateListener, message: "Created Octavia listener"})
 	}
 	return plan, nil
@@ -270,10 +270,10 @@ func buildGatewayAddressRestorationPlan(networkID string, actual observedGateway
 }
 
 func gatewayGraphDeletionPlan(actual observedGatewayGraph) []graphMutation {
-	if actual.multiUDP {
-		for _, listener := range actual.udpListeners {
+	if actual.scoped {
+		for _, listener := range actual.scopedListeners {
 			if listener.DefaultPoolID != "" {
-				mutation := clearListenerDefaultPool(cloud.ListenerProtocolUDP)
+				mutation := clearListenerDefaultPool(actual.protocol)
 				mutation.listenerID = listener.ID
 				return []graphMutation{mutation}
 			}
@@ -366,9 +366,9 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 			return tagErr
 		}
 		port, name := spec.ListenerPort, spec.ListenerName
-		if step.udpListener.Port != 0 {
-			port, name = step.udpListener.Port, step.udpListener.Name
-			tags = append(tags, udpPortTag(port))
+		if step.scopedListener.Port != 0 {
+			port, name = step.scopedListener.Port, step.scopedListener.Name
+			tags = append(tags, scopedPortTag(spec.ListenerProtocol, port))
 		}
 		_, err = p.octavia.CreateListener(ctx, listeners.CreateOpts{
 			LoadbalancerID: actual.state.LoadBalancerID, Protocol: listeners.Protocol(cloud.NormalizeListenerProtocol(spec.ListenerProtocol)), ProtocolPort: port,

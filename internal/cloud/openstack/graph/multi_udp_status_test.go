@@ -27,9 +27,9 @@ func TestMultiUDPDeferredObservationRequiresServingRouteEdges(t *testing.T) {
 	f := newTransportGraphFixture(t, "UDP")
 	f.enableMultiUDP()
 	ports := []int{f.spec.Gateway.Spec.ListenerPort, 5353}
-	f.spec.Routes[0].Spec.UDPListenerPorts = ports
+	f.spec.Routes[0].Spec.ScopedListenerPorts = ports
 	provider := f.provider()
-	f.settleUDP(provider)
+	f.settleTransportGraph(provider)
 	writes := len(f.writes)
 
 	sibling := f.inventory[tcpListener+"-1812"]
@@ -65,12 +65,12 @@ func TestMultiUDPDeferredObservationRequiresServingRouteEdges(t *testing.T) {
 
 	// A formerly winning port remains attached to the pool until the graph
 	// can perform the withdrawal. That stale edge cannot support deferral.
-	f.spec.Routes[0].Spec.UDPListenerPorts = ports[:1]
+	f.spec.Routes[0].Spec.ScopedListenerPorts = ports[:1]
 	result = f.reconcile(provider)
 	if result.Routes[0].Result.ObservationDeferred {
 		t.Fatalf("superseded default deferred a UDP route: %+v", result.Routes)
 	}
-	f.spec.Routes[0].Spec.UDPListenerPorts = ports
+	f.spec.Routes[0].Spec.ScopedListenerPorts = ports
 
 	winning := f.inventory[tcpListener+"-5353"]
 	winning["provisioning_status"] = "PENDING_UPDATE"
@@ -82,7 +82,7 @@ func TestMultiUDPDeferredObservationRequiresServingRouteEdges(t *testing.T) {
 
 	sibling["provisioning_status"] = "ERROR"
 	result, err := provider.ReconcileGatewayGraph(t.Context(), f.spec)
-	if err == nil || result.Gateway.Outcome.State != cloud.OutcomeProgressing || !slices.Equal(result.Gateway.UDPReadyPorts, ports) ||
+	if err == nil || result.Gateway.Outcome.State != cloud.OutcomeProgressing || !slices.Equal(result.Gateway.ScopedListenerReadyPorts, ports) ||
 		result.Gateway.State.Address() == "" || len(result.Routes) != 0 || len(f.writes) != writes {
 		t.Fatalf("UDP sibling ERROR returned result %+v, error %v, writes %v", result, err, f.writes[writes:])
 	}

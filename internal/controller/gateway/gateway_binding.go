@@ -22,6 +22,8 @@ import (
 	"strconv"
 
 	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/meta"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
@@ -34,7 +36,7 @@ func (r *Reconciler) bindGateway(
 	expected *gatewayv1.Gateway,
 	desiredListenerPort string,
 ) error {
-	if r.gatewayNeedsUDPListenerMode(expected) {
+	if r.gatewayNeedsListenerScope(expected) {
 		release, err := graph.Acquire(ctx, r.Coordinator, string(expected.UID))
 		if err != nil {
 			return err
@@ -64,16 +66,16 @@ func (r *Reconciler) bindGateway(
 	gateway.Annotations[r.Config.GatewayClusterIDAnnotation()] = r.Config.ClusterID
 	gateway.Annotations[r.Config.GatewayProjectIDAnnotation()] = r.Config.OpenStackProjectID
 	controllerutil.AddFinalizer(gateway, r.Config.GatewayFinalizer())
-	if r.gatewayNeedsUDPListenerMode(gateway) {
+	if r.gatewayNeedsListenerScope(gateway) {
 		anchor, err := strconv.Atoi(desiredListenerPort)
 		if err != nil || anchor < 1 || anchor > 65535 {
-			return fmt.Errorf("invalid frozen UDP Gateway port")
+			return fmt.Errorf("invalid frozen Gateway listener port")
 		}
-		sealed, err := r.sealUDPRoutes(ctx, snapshot, anchor)
+		sealed, err := r.sealTransportRoutes(ctx, snapshot, snapshot.listener.Protocol, anchor)
 		if err != nil || !sealed {
 			return err
 		}
-		controller.SetGatewayUDPListenerMode(r.Config, gateway, true)
+		controller.SetGatewayListenerScope(r.Config, gateway, snapshot.listener.Protocol)
 	}
 	if err := controller.ValidateGatewayBinding(r.Config, gateway); err != nil {
 		return err
@@ -90,21 +92,31 @@ func (r *Reconciler) bindGateway(
 	return nil
 }
 
-// sealUDPRoutes returns true when every claiming route already carries the
+// sealTransportRoutes returns true when every claiming route already carries the
 // frozen anchor. Otherwise it checkpoints one route and the binding phase
 // requeues so the next migration starts from fresh Gateway and route reads.
-func (r *Reconciler) sealUDPRoutes(ctx context.Context, snapshot *gatewayMutationSnapshot, anchor int) (bool, error) {
+func (r *Reconciler) sealTransportRoutes(ctx context.Context, snapshot *gatewayMutationSnapshot, protocol gatewayv1.ProtocolType, anchor int) (bool, error) {
 	gatewayID := controller.GatewayIdentity(r.Config, snapshot.gateway)
-	var list gatewayv1.UDPRouteList
-	if err := r.APIReader.List(ctx, &list); err != nil {
+	var list client.ObjectList = &gatewayv1.UDPRouteList{}
+	if protocol == gatewayv1.TCPProtocolType {
+		list = &gatewayv1.TCPRouteList{}
+	}
+	if err := r.APIReader.List(ctx, list); err != nil {
 		return false, err
 	}
-	if list.Continue != "" {
-		return false, fmt.Errorf("incomplete UDPRoute enrollment list")
+	if list.GetContinue() != "" {
+		return false, fmt.Errorf("incomplete %s route enrollment list", protocol)
 	}
-	var candidate *gatewayv1.UDPRoute
-	for i := range list.Items {
-		route := &list.Items[i]
+	items, err := meta.ExtractList(list)
+	if err != nil {
+		return false, err
+	}
+	var candidate client.Object
+	for _, item := range items {
+		route, ok := item.(client.Object)
+		if !ok {
+			return false, fmt.Errorf("invalid %s route enrollment object", protocol)
+		}
 		if !controller.RouteClaimsGateway(r.Config, route, gatewayID) {
 			continue
 		}
@@ -112,20 +124,20 @@ func (r *Reconciler) sealUDPRoutes(ctx context.Context, snapshot *gatewayMutatio
 		if err != nil {
 			return false, err
 		}
-		lifecycle := route.Annotations[r.Config.RouteLifecycleAnnotation()]
+		lifecycle := route.GetAnnotations()[r.Config.RouteLifecycleAnnotation()]
 		if !present || !controller.SameGatewayIdentity(id, gatewayID) ||
 			!controllerutil.ContainsFinalizer(route, r.Config.RouteFinalizer()) ||
-			route.Annotations[r.Config.RouteClusterIDAnnotation()] != id.ClusterID || route.Annotations[r.Config.RouteProjectIDAnnotation()] != id.OpenStackProjectID ||
+			route.GetAnnotations()[r.Config.RouteClusterIDAnnotation()] != id.ClusterID || route.GetAnnotations()[r.Config.RouteProjectIDAnnotation()] != id.OpenStackProjectID ||
 			(lifecycle != controller.RouteAttached && lifecycle != controller.RouteDetaching) {
-			return false, fmt.Errorf("incomplete UDPRoute enrollment binding for %s/%s", route.Namespace, route.Name)
+			return false, fmt.Errorf("incomplete %s route enrollment binding for %s/%s", protocol, route.GetNamespace(), route.GetName())
 		}
-		port := controller.UDPRouteAnchor(r.Config, route)
+		port := controller.ScopedRouteAnchor(r.Config, route, protocol)
 		if port == anchor {
 			continue
 		}
 		// Kubernetes forbids adding a finalizer once deletion begins. Keep
 		// the legacy cleanup path available until the route is gone.
-		if port != 0 || !route.DeletionTimestamp.IsZero() {
+		if port != 0 || !route.GetDeletionTimestamp().IsZero() {
 			return false, errGatewayChanged
 		}
 		if candidate == nil {
@@ -135,8 +147,8 @@ func (r *Reconciler) sealUDPRoutes(ctx context.Context, snapshot *gatewayMutatio
 	if candidate == nil {
 		return true, nil
 	}
-	base := candidate.DeepCopy()
-	controller.SealUDPRouteAnchor(r.Config, candidate, gatewayID, anchor)
+	base := candidate.DeepCopyObject().(client.Object)
+	controller.SealRouteAnchor(r.Config, candidate, gatewayID, anchor)
 	if err := r.sealGatewayMutationSnapshot(ctx, snapshot); err != nil {
 		return false, err
 	}

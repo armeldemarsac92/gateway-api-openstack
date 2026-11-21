@@ -422,11 +422,11 @@ func TestUDPRouteElectionKeepsOtherListenerWhenOlderTargetIsInvalid(t *testing.T
 	identity := bindFixture(t, r, gateway, broad, cloud.MemberModeEndpoint)
 
 	base := broad.DeepCopy()
-	controller.SealUDPRouteAnchor(r.Config, broad, identity, 8080)
+	controller.SealRouteAnchor(r.Config, broad, identity, 8080)
 	if err := r.Patch(t.Context(), broad, controller.OptimisticMergeFrom(base)); err != nil {
 		t.Fatal(err)
 	}
-	controller.SetGatewayUDPListenerMode(r.Config, gateway, true)
+	controller.SetGatewayListenerScope(r.Config, gateway, gatewayv1.UDPProtocolType)
 	gateway.Spec.Listeners = append(gateway.Spec.Listeners, gatewayv1.Listener{
 		Name: "other-udp", Protocol: gatewayv1.UDPProtocolType, Port: 8053,
 	})
@@ -449,7 +449,7 @@ func TestUDPRouteElectionKeepsOtherListenerWhenOlderTargetIsInvalid(t *testing.T
 		t.Fatal(err)
 	}
 	if len(input.Nodes) != 1 || input.Nodes[0].Disposition != cloud.GraphEnsure ||
-		!slices.Equal(input.Nodes[0].Spec.UDPListenerPorts, []int{8053}) ||
+		!slices.Equal(input.Nodes[0].Spec.ScopedListenerPorts, []int{8053}) ||
 		input.Nodes[0].Spec.GatewayRequirements.ListenerPort != 8080 {
 		t.Fatalf("UDP graph with invalid winner on the anchor: %+v", input.Nodes)
 	}
@@ -465,7 +465,7 @@ func TestUDPRouteElectionKeepsOtherListenerWhenOlderTargetIsInvalid(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(input.Nodes) != 1 || !slices.Equal(input.Nodes[0].Spec.UDPListenerPorts, []int{8053, 8080}) {
+	if len(input.Nodes) != 1 || !slices.Equal(input.Nodes[0].Spec.ScopedListenerPorts, []int{8053, 8080}) {
 		t.Fatalf("UDP graph for the broad route after a mismatched section and port: %+v", input.Nodes)
 	}
 
@@ -481,7 +481,7 @@ func TestUDPRouteElectionKeepsOtherListenerWhenOlderTargetIsInvalid(t *testing.T
 		t.Fatal(err)
 	}
 	if len(input.Nodes) != 1 || input.Nodes[0].Disposition != cloud.GraphPreserve ||
-		input.Nodes[0].RetainUDPListenerPorts == nil || len(input.Nodes[0].RetainUDPListenerPorts) != 0 {
+		input.Nodes[0].RetainScopedListenerPorts == nil || len(input.Nodes[0].RetainScopedListenerPorts) != 0 {
 		t.Fatalf("losing UDP pool should withdraw every default before cleanup: %+v", input.Nodes)
 	}
 }
@@ -507,12 +507,12 @@ func TestUDPRouteRetainsOnlyCommittedTargetDuringSiblingProgress(t *testing.T) {
 				}
 			}
 			identity := bindFixture(t, r, gateway, route, cloud.MemberModeEndpoint)
-			controller.SetGatewayUDPListenerMode(r.Config, gateway, true)
+			controller.SetGatewayListenerScope(r.Config, gateway, gatewayv1.UDPProtocolType)
 			if err := r.Update(t.Context(), gateway); err != nil {
 				t.Fatal(err)
 			}
 			base := route.DeepCopy()
-			controller.SealUDPRouteAnchor(r.Config, route, identity, 8080)
+			controller.SealRouteAnchor(r.Config, route, identity, 8080)
 			if err := r.Patch(t.Context(), route, controller.OptimisticMergeFrom(base)); err != nil {
 				t.Fatal(err)
 			}
@@ -542,7 +542,7 @@ func TestUDPRouteRetainsOnlyCommittedTargetDuringSiblingProgress(t *testing.T) {
 				if err != nil {
 					return cloud.GatewayGraphResult{}, err
 				}
-				if len(input.Nodes) != 1 || !slices.Equal(input.Nodes[0].Spec.UDPListenerPorts, []int{8080}) {
+				if len(input.Nodes) != 1 || !slices.Equal(input.Nodes[0].Spec.ScopedListenerPorts, []int{8080}) {
 					t.Fatalf("selected UDP ports = %+v", input.Nodes)
 				}
 				observed = true

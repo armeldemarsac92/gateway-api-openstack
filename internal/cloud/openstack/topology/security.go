@@ -143,12 +143,12 @@ func (r *Resolver) ValidateGatewaySecurity(ctx context.Context, gateway cloud.Ga
 		if err != nil {
 			return err
 		}
-		if len(gateway.UDPListeners) == 0 && !allowsIngress(frontend, gateway.ListenerProtocol, subnet.IPVersion, gateway.ListenerPort) {
+		if len(gateway.ScopedListeners) == 0 && !allowsIngress(frontend, gateway.ListenerProtocol, subnet.IPVersion, gateway.ListenerPort) {
 			return invalid("referenced frontend groups do not allow the listener protocol and port for the VIP IP family")
 		}
-		for _, listener := range gateway.UDPListeners {
-			if !allowsIngress(frontend, cloud.ListenerProtocolUDP, subnet.IPVersion, listener.Port) {
-				return invalid(fmt.Sprintf("referenced frontend groups do not allow UDP port %d for the VIP IP family", listener.Port))
+		for _, listener := range gateway.ScopedListeners {
+			if !allowsIngress(frontend, gateway.ListenerProtocol, subnet.IPVersion, listener.Port) {
+				return invalid(fmt.Sprintf("referenced frontend groups do not allow %s port %d for the VIP IP family", gateway.ListenerProtocol, listener.Port))
 			}
 		}
 	}

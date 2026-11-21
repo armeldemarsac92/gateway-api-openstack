@@ -18,6 +18,7 @@ package graph
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -30,29 +31,46 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/pools"
 )
 
-const udpPortTagKey = "udp-port"
-
-var udpPortTagPrefix = openstackidentity.Tag(udpPortTagKey, "")
-
-func udpPortTag(port int) string {
-	return openstackidentity.Tag(udpPortTagKey, strconv.Itoa(port))
+var scopedPortTagPrefixes = map[string]string{
+	cloud.ListenerProtocolUDP: openstackidentity.Tag("udp-port", ""),
+	cloud.ListenerProtocolTCP: openstackidentity.Tag("tcp-port", ""),
 }
 
-func isUDPPortTag(tag string) bool {
-	return strings.HasPrefix(tag, udpPortTagPrefix) || tag == strings.TrimSuffix(udpPortTagPrefix, "=")
+func scopedPortTag(protocol string, port int) string {
+	return scopedPortTagPrefixes[protocol] + openstackidentity.EncodeValue(strconv.Itoa(port))
 }
 
-func hasScopedUDPListeners(items []listeners.Listener) bool {
-	return slices.ContainsFunc(items, func(listener listeners.Listener) bool {
-		return slices.ContainsFunc(listener.Tags, isUDPPortTag)
-	})
+func scopedPortTagProtocol(tag string) string {
+	for protocol, prefix := range scopedPortTagPrefixes {
+		if strings.HasPrefix(tag, prefix) || tag == strings.TrimSuffix(prefix, "=") {
+			return protocol
+		}
+	}
+	return ""
 }
 
-func (p *Provider) managedUDPListeners(identity Identity, lb *octavia.LoadBalancer, items []listeners.Listener, anchor int) ([]listeners.Listener, error) {
+func scopedListenerProtocol(items []listeners.Listener) (string, error) {
+	var protocol string
+	for _, listener := range items {
+		for _, tag := range listener.Tags {
+			markedProtocol := scopedPortTagProtocol(tag)
+			if markedProtocol == "" {
+				continue
+			}
+			if protocol != "" && protocol != markedProtocol {
+				return "", fmt.Errorf("%w: mixed scoped listener protocols", cloud.ErrOwnershipConflict)
+			}
+			protocol = markedProtocol
+		}
+	}
+	return protocol, nil
+}
+
+func (p *Provider) managedScopedListeners(identity Identity, lb *octavia.LoadBalancer, items []listeners.Listener, protocol string, anchor int) ([]listeners.Listener, error) {
 	// Octavia exposes both views. A list entry alone cannot establish that a
 	// listener belongs to this graph, including after an uncertain create.
 	if lb.Listeners == nil {
-		return nil, cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady, fmt.Errorf("load balancer %s omitted its UDP listener inventory", lb.ID))
+		return nil, cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady, fmt.Errorf("load balancer %s omitted its scoped listener inventory", lb.ID))
 	}
 	ports := make(map[int]bool, len(items))
 	ids := make(map[string]bool, len(items))
@@ -61,8 +79,8 @@ func (p *Provider) managedUDPListeners(identity Identity, lb *octavia.LoadBalanc
 		listener := &items[index]
 		port := listener.ProtocolPort
 		if listener.ProjectID != p.projectID || !identity.MatchesGateway(listener.Tags, roleListener) ||
-			listener.Protocol != cloud.ListenerProtocolUDP || port < 1 || port > 65535 || ports[port] || ids[listener.ID] {
-			return nil, fmt.Errorf("%w: invalid or duplicate UDP listener %s on load balancer %s", cloud.ErrOwnershipConflict, listener.ID, lb.ID)
+			listener.Protocol != protocol || port < 1 || port > 65535 || ports[port] || ids[listener.ID] {
+			return nil, fmt.Errorf("%w: invalid or duplicate scoped listener %s on load balancer %s", cloud.ErrOwnershipConflict, listener.ID, lb.ID)
 		}
 		if err := validateDefaultPoolListener(listener, lb.ID); err != nil {
 			return nil, err
@@ -74,22 +92,22 @@ func (p *Provider) managedUDPListeners(identity Identity, lb *octavia.LoadBalanc
 
 		marked := false
 		for _, tag := range listener.Tags {
-			if isUDPPortTag(tag) {
-				if tag != udpPortTag(port) || marked {
-					return nil, fmt.Errorf("%w: UDP listener %s has inconsistent port tags", cloud.ErrOwnershipConflict, listener.ID)
+			if markedProtocol := scopedPortTagProtocol(tag); markedProtocol != "" {
+				if markedProtocol != protocol || tag != scopedPortTag(protocol, port) || marked {
+					return nil, fmt.Errorf("%w: scoped listener %s has inconsistent port tags", cloud.ErrOwnershipConflict, listener.ID)
 				}
 				marked = true
 			}
 		}
 		if !marked {
 			if legacy || port != anchor {
-				return nil, fmt.Errorf("%w: UDP listener %s does not match the legacy binding", cloud.ErrOwnershipConflict, listener.ID)
+				return nil, fmt.Errorf("%w: scoped listener %s does not match the legacy binding", cloud.ErrOwnershipConflict, listener.ID)
 			}
 			legacy = true
 		}
 	}
 	if len(lb.Listeners) != len(ids) {
-		return nil, fmt.Errorf("%w: load balancer %s has duplicate UDP listener references", cloud.ErrOwnershipConflict, lb.ID)
+		return nil, fmt.Errorf("%w: load balancer %s has duplicate scoped listener references", cloud.ErrOwnershipConflict, lb.ID)
 	}
 	slices.SortFunc(items, func(a, b listeners.Listener) int { return a.ProtocolPort - b.ProtocolPort })
 	// Use a non-nil empty list to select multi-listener pool validation before
@@ -102,9 +120,9 @@ func (p *Provider) managedUDPListeners(identity Identity, lb *octavia.LoadBalanc
 
 // GatewayState retains its single ID for legacy callers, while the graph
 // authorizes every frontend from the independently observed listener set.
-func udpRepresentativeListenerID(managed []listeners.Listener, anchor int) string {
+func scopedRepresentativeListenerID(managed []listeners.Listener, anchor int) string {
 	for _, listener := range managed {
-		if listener.ProtocolPort == anchor || !slices.ContainsFunc(listener.Tags, isUDPPortTag) {
+		if listener.ProtocolPort == anchor || !slices.ContainsFunc(listener.Tags, func(tag string) bool { return scopedPortTagProtocol(tag) != "" }) {
 			return listener.ID
 		}
 	}
@@ -114,7 +132,7 @@ func udpRepresentativeListenerID(managed []listeners.Listener, anchor int) strin
 	return managed[0].ID
 }
 
-func (p *Provider) observeMultiUDPGraph(
+func (p *Provider) observeScopedListenerGraph(
 	ctx context.Context,
 	desired desiredGatewayGraph,
 	actual observedGatewayGraph,
@@ -122,17 +140,13 @@ func (p *Provider) observeMultiUDPGraph(
 	items []listeners.Listener,
 	parentPending bool,
 ) (observedGatewayGraph, error) {
-	if actual.protocol != "" && actual.protocol != cloud.ListenerProtocolUDP {
-		return actual, fmt.Errorf("%w: scoped UDP listeners differ from the Gateway protocol binding", cloud.ErrOwnershipConflict)
-	}
-	actual.protocol = cloud.ListenerProtocolUDP
 	anchor := desired.spec.Gateway.Spec.ListenerPort
-	managed, err := p.managedUDPListeners(desired.identity, actual.loadBalancer, items, anchor)
+	managed, err := p.managedScopedListeners(desired.identity, actual.loadBalancer, items, actual.protocol, anchor)
 	if err != nil {
 		return actual, err
 	}
-	actual.udpListeners = managed
-	actual.state.ListenerID = udpRepresentativeListenerID(managed, anchor)
+	actual.scopedListeners = managed
+	actual.state.ListenerID = scopedRepresentativeListenerID(managed, anchor)
 	for _, listener := range managed {
 		if parentPending {
 			continue
@@ -150,7 +164,7 @@ func (p *Provider) observeMultiUDPGraph(
 	}
 	if actual.loadBalancer.Pools == nil {
 		return actual, cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady,
-			fmt.Errorf("load balancer %s omitted its UDP pool inventory", actual.loadBalancer.ID))
+			fmt.Errorf("load balancer %s omitted its scoped pool inventory", actual.loadBalancer.ID))
 	}
 	actual.routes, err = p.observeRouteGraphsWithListeners(ctx, owners, actual.loadBalancer, nil, actual.protocol, managed)
 	if err != nil {
@@ -163,7 +177,7 @@ func (p *Provider) observeMultiUDPGraph(
 		}
 	}
 	if desired.spec.Gateway.Disposition == cloud.GraphDelete {
-		actual.deletion = multiUDPDeletionPlan(actual)
+		actual.deletion = scopedListenerDeletionPlan(actual)
 		if actual.deletion.defaultPoolPending != "" {
 			actual.outcome = p.progressingOutcome(actual.deletion.defaultPoolPending)
 		}
@@ -171,7 +185,7 @@ func (p *Provider) observeMultiUDPGraph(
 	return actual, nil
 }
 
-func (p *Provider) validateMultiUDPDefaultPool(pool pools.Pool, lbID string, managed []listeners.Listener, protocol string) error {
+func (p *Provider) validateScopedDefaultPool(pool pools.Pool, lbID string, managed []listeners.Listener, protocol string) error {
 	if err := validateDefaultPoolParent(pool, lbID, protocol); err != nil {
 		return err
 	}
@@ -179,7 +193,7 @@ func (p *Provider) validateMultiUDPDefaultPool(pool pools.Pool, lbID string, man
 		return fmt.Errorf("%w: default pool %s has an unproven project", cloud.ErrOwnershipConflict, pool.ID)
 	}
 	if pool.Listeners == nil {
-		return cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady, fmt.Errorf("pool %s omitted its UDP listener inventory", pool.ID))
+		return cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady, fmt.Errorf("pool %s omitted its scoped listener inventory", pool.ID))
 	}
 	byID := make(map[string]listeners.Listener, len(managed))
 	for _, listener := range managed {
@@ -188,7 +202,7 @@ func (p *Provider) validateMultiUDPDefaultPool(pool pools.Pool, lbID string, man
 	reverse := make(map[string]bool, len(pool.Listeners))
 	disagree := func(listenerID string) error {
 		return cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady,
-			fmt.Errorf("listener %s and pool %s disagree about their UDP default association", listenerID, pool.ID))
+			fmt.Errorf("listener %s and pool %s disagree about their default association", listenerID, pool.ID))
 	}
 	for _, ref := range pool.Listeners {
 		listener, found := byID[ref.ID]
@@ -213,20 +227,20 @@ func (p *Provider) validateMultiUDPDefaultPool(pool pools.Pool, lbID string, man
 	return nil
 }
 
-func multiUDPDeletionPlan(actual observedGatewayGraph) gatewayDeletionPlan {
+func scopedListenerDeletionPlan(actual observedGatewayGraph) gatewayDeletionPlan {
 	var plan gatewayDeletionPlan
-	for _, listener := range actual.udpListeners {
+	for _, listener := range actual.scopedListeners {
 		if listener.DefaultPoolID != "" {
 			// The graph planner detaches known edges before processing this
 			// subtree. One fresh, settled observation follows each detach.
 			return plan
 		}
 	}
-	for _, listener := range actual.udpListeners {
+	for _, listener := range actual.scopedListeners {
 		if listener.ProvisioningStatus == "ERROR" {
 			// An empty default readback under ERROR does not prove that the
 			// dataplane detached. Remove the failed frontend before its backend.
-			plan.listeners = append(plan.listeners, udpListenerDeletionStep(listener.ID))
+			plan.listeners = append(plan.listeners, listenerDeletionStep(listener.ID))
 		}
 	}
 	if len(plan.listeners) != 0 {
@@ -241,35 +255,35 @@ func multiUDPDeletionPlan(actual observedGatewayGraph) gatewayDeletionPlan {
 		}
 		plan.pools = appendDefaultPoolDeletionSteps(plan.pools, route)
 	}
-	for _, listener := range actual.udpListeners {
-		plan.listeners = append(plan.listeners, udpListenerDeletionStep(listener.ID))
+	for _, listener := range actual.scopedListeners {
+		plan.listeners = append(plan.listeners, listenerDeletionStep(listener.ID))
 	}
 	return plan
 }
 
-func udpListenerDeletionStep(id string) gatewayDeletionStep {
+func listenerDeletionStep(id string) gatewayDeletionStep {
 	return gatewayDeletionStep{resource: gatewayDeletionListener, resourceID: id}
 }
 
-func udpGatewayResult(spec cloud.GatewaySpec, actual observedGatewayGraph, pending cloud.Outcome) cloud.GatewayResult {
-	result := cloud.GatewayResult{State: actual.state, Outcome: pending, UDPReadyPorts: []int{}}
-	if actual.loadBalancer == nil || !actual.loadBalancer.AdminStateUp || actual.udpListeners == nil {
+func scopedGatewayResult(spec cloud.GatewaySpec, actual observedGatewayGraph, pending cloud.Outcome) cloud.GatewayResult {
+	result := cloud.GatewayResult{State: actual.state, Outcome: pending, ScopedListenerReadyPorts: []int{}}
+	if actual.loadBalancer == nil || !actual.loadBalancer.AdminStateUp || actual.scopedListeners == nil {
 		return result
 	}
 	if spec.ExternalNetworkID == "" && actual.floatingIP != nil ||
 		spec.ExternalNetworkID != "" && (actual.floatingIP == nil || actual.floatingIP.FloatingNetworkID != spec.ExternalNetworkID || actual.floatingIP.PortID == "") {
 		return result
 	}
-	ready := make(map[int]bool, len(actual.udpListeners))
-	for _, listener := range actual.udpListeners {
+	ready := make(map[int]bool, len(actual.scopedListeners))
+	for _, listener := range actual.scopedListeners {
 		ready[listener.ProtocolPort] = listener.AdminStateUp && listener.ProvisioningStatus == "ACTIVE"
 	}
-	for _, listener := range spec.UDPListeners {
+	for _, listener := range spec.ScopedListeners {
 		if ready[listener.Port] {
-			result.UDPReadyPorts = append(result.UDPReadyPorts, listener.Port)
+			result.ScopedListenerReadyPorts = append(result.ScopedListenerReadyPorts, listener.Port)
 		}
 	}
-	if len(result.UDPReadyPorts) == len(spec.UDPListeners) && len(actual.udpListeners) == len(spec.UDPListeners) {
+	if len(result.ScopedListenerReadyPorts) == len(spec.ScopedListeners) && len(actual.scopedListeners) == len(spec.ScopedListeners) {
 		result.Outcome = cloud.ReadyOutcome()
 	}
 	return result
@@ -278,13 +292,13 @@ func udpGatewayResult(spec cloud.GatewaySpec, actual observedGatewayGraph, pendi
 // The shared parent can defer full route observation while a sibling listener
 // is pending. Keep existing proof only for routes whose exact edges still
 // reach an active, owned pool.
-func (p *Provider) deferredUDPRouteObservations(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, readyPorts []int) map[int]bool {
+func (p *Provider) deferredScopedRouteObservations(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, readyPorts []int) map[int]bool {
 	if len(readyPorts) == 0 || actual.loadBalancer.Pools == nil || len(desired.routes) == 0 {
 		return nil
 	}
 	readyPools := make(map[int]string, len(readyPorts))
 	pending := false
-	for _, listener := range actual.udpListeners {
+	for _, listener := range actual.scopedListeners {
 		switch {
 		case strings.HasPrefix(listener.ProvisioningStatus, "PENDING_"):
 			pending = true
@@ -303,7 +317,7 @@ func (p *Provider) deferredUDPRouteObservations(ctx context.Context, desired des
 	}
 	deferred := make(map[int]bool)
 	for index, route := range desired.routes {
-		ports := route.spec.UDPListenerPorts
+		ports := route.spec.ScopedListenerPorts
 		if desired.spec.Routes[index].Disposition != cloud.GraphEnsure || len(ports) == 0 {
 			continue
 		}
@@ -318,7 +332,7 @@ func (p *Provider) deferredUDPRouteObservations(ctx context.Context, desired des
 		pool := poolItems[poolIndex]
 		if !pool.AdminStateUp || pool.ProvisioningStatus != "ACTIVE" || len(pool.Listeners) != len(ports) ||
 			!route.identity.MatchesRoute(pool.Tags, rolePool) ||
-			p.validateMultiUDPDefaultPool(pool, actual.loadBalancer.ID, actual.udpListeners, cloud.ListenerProtocolUDP) != nil {
+			p.validateScopedDefaultPool(pool, actual.loadBalancer.ID, actual.scopedListeners, actual.protocol) != nil {
 			continue
 		}
 		observed := observedRouteGraph{pool: &pool}
@@ -326,25 +340,25 @@ func (p *Provider) deferredUDPRouteObservations(ctx context.Context, desired des
 			continue
 		}
 		changes, _, err := buildRouteEnsurePlan(route, observed)
-		deferred[index] = err == nil && udpRouteBackendReady(route, observed, actual.state.VIPAddress, changes, observed.backendProvisioningIssue(false, true))
+		deferred[index] = err == nil && scopedRouteBackendReady(route, observed, actual.state.VIPAddress, changes, observed.backendProvisioningIssue(false, true))
 	}
 	return deferred
 }
 
 // Use the same convergence test when the whole graph is active and when a
 // pending sibling permits a read-only observation of this route's backend.
-func udpRouteBackendReady(route desiredRoute, observed observedRouteGraph, vip string, changes []routeMutation, provisioningIssue string) bool {
+func scopedRouteBackendReady(route desiredRoute, observed observedRouteGraph, vip string, changes []routeMutation, provisioningIssue string) bool {
 	return observed.pool != nil && provisioningIssue == "" && len(changes) == 0 &&
 		slices.ContainsFunc(route.members, func(member cloud.Member) bool { return !member.Draining }) &&
-		hasActiveUDPBackend(route, observed, vip)
+		(route.spec.GatewayRequirements.ListenerProtocol == cloud.ListenerProtocolTCP || hasActiveUDPBackend(route, observed, vip))
 }
 
-func (p *Provider) buildMultiUDPGraphPlan(desired desiredGatewayGraph, actual observedGatewayGraph) ([]graphMutation, cloud.GatewayGraphResult, error) {
+func (p *Provider) buildScopedListenerGraphPlan(desired desiredGatewayGraph, actual observedGatewayGraph) ([]graphMutation, cloud.GatewayGraphResult, error) {
 	result := cloud.GatewayGraphResult{Outcome: cloud.ReadyOutcome(), Gateway: cloud.GatewayReadyResult(actual.state)}
 	ensureGateway := desired.spec.Gateway.Disposition == cloud.GraphEnsure
 	spec := desired.spec.Gateway.Spec
 	if ensureGateway {
-		result.Gateway = udpGatewayResult(spec, actual, p.progressingOutcome("Waiting for the Gateway UDP listeners"))
+		result.Gateway = scopedGatewayResult(spec, actual, p.progressingOutcome("Waiting for the Gateway listeners"))
 		result.Outcome = result.Gateway.Outcome
 	}
 	gatewayReady := result.Gateway.Outcome.State == cloud.OutcomeReady
@@ -352,20 +366,20 @@ func (p *Provider) buildMultiUDPGraphPlan(desired desiredGatewayGraph, actual ob
 	if err != nil {
 		return nil, result, err
 	}
-	found := make(map[int]listeners.Listener, len(actual.udpListeners))
-	configured := make(map[int]bool, len(spec.UDPListeners))
-	for _, listener := range actual.udpListeners {
+	found := make(map[int]listeners.Listener, len(actual.scopedListeners))
+	configured := make(map[int]bool, len(spec.ScopedListeners))
+	for _, listener := range actual.scopedListeners {
 		found[listener.ProtocolPort] = listener
 	}
-	for _, listener := range spec.UDPListeners {
+	for _, listener := range spec.ScopedListeners {
 		configured[listener.Port] = true
 		if _, exists := found[listener.Port]; !exists && actual.loadBalancer != nil {
-			prerequisites = append(prerequisites, graphMutation{kind: graphCreateListener, udpListener: listener, message: "Creating Octavia UDP listener"})
+			prerequisites = append(prerequisites, graphMutation{kind: graphCreateListener, scopedListener: listener, message: "Creating Octavia listener"})
 		}
 	}
 
 	var detach, remove, cleanup, backend, attach, restore []graphMutation
-	keepEdge := make(map[int]bool, len(actual.udpListeners))
+	keepEdge := make(map[int]bool, len(actual.scopedListeners))
 	readyByPool := make(map[string]bool, len(actual.routes))
 	for index, route := range desired.routes {
 		observed := observedRouteGraph{}
@@ -377,7 +391,7 @@ func (p *Provider) buildMultiUDPGraphPlan(desired desiredGatewayGraph, actual ob
 		switch node.Disposition {
 		case cloud.GraphDelete:
 			if observed.pool != nil && len(observed.pool.Listeners) != 0 {
-				routeResult.Outcome = p.progressingOutcome("Waiting for UDP listeners to detach before cleanup")
+				routeResult.Outcome = p.progressingOutcome("Waiting for listeners to detach before cleanup")
 			} else if issue := observed.backendProvisioningIssue(true, true); issue != "" {
 				routeResult.Outcome = p.progressingOutcome(issue)
 			} else if steps := buildRouteDeletionPlan(observed); len(steps) != 0 {
@@ -386,16 +400,20 @@ func (p *Provider) buildMultiUDPGraphPlan(desired desiredGatewayGraph, actual ob
 				cleanup = append(cleanup, graphMutation{kind: graphRouteMutation, routeIndex: index, route: step, message: step.message()})
 			}
 		case cloud.GraphEnsure:
-			if err := validateMultiUDPRouteGatewayIDs(route.spec.Gateway, actual.state, actual.udpListeners); err != nil {
+			if err := validateScopedRouteGatewayIDs(route.spec.Gateway, actual.state, actual.scopedListeners); err != nil {
 				return nil, result, &cloud.GraphError{Identity: route.spec.Identity, Err: err}
 			}
 			steps, state, err := buildRouteEnsurePlan(route, observed)
+			if errors.Is(err, errWeightedTCPBackupUnknown) {
+				routeResult.Outcome = p.progressingOutcome(err.Error())
+				break
+			}
 			if err != nil {
 				return nil, result, &cloud.GraphError{Identity: route.spec.Identity, Err: err}
 			}
 			routeResult.State = state
 			issue := observed.backendProvisioningIssue(false, true)
-			ready := udpRouteBackendReady(route, observed, actual.state.VIPAddress, steps, issue)
+			ready := scopedRouteBackendReady(route, observed, actual.state.VIPAddress, steps, issue)
 			if ready {
 				readyByPool[observed.pool.ID] = true
 			}
@@ -409,26 +427,33 @@ func (p *Provider) buildMultiUDPGraphPlan(desired desiredGatewayGraph, actual ob
 				routeResult.Outcome = p.progressingOutcome(step.message())
 				backend = append(backend, graphMutation{kind: graphRouteMutation, routeIndex: index, route: step, message: step.message()})
 			case !ready:
-				routeResult.Outcome = p.progressingOutcome("Waiting for a ready UDP backend member in the VIP IP family")
+				message := fmt.Sprintf("Waiting for a ready %s backend member", actual.protocol)
+				if actual.protocol == cloud.ListenerProtocolUDP {
+					message += " in the VIP IP family"
+				}
+				routeResult.Outcome = p.progressingOutcome(message)
 			}
 			if ready {
-				for _, port := range route.spec.UDPListenerPorts {
+				for _, port := range route.spec.ScopedListenerPorts {
 					listener, exists := found[port]
 					switch {
 					case !exists:
-						routeResult.Outcome = p.progressingOutcome("Waiting for the selected UDP listener")
+						routeResult.Outcome = p.progressingOutcome("Waiting for the selected listener")
 					case listener.DefaultPoolID == observed.pool.ID:
 						keepEdge[port] = true
 					case listener.DefaultPoolID == "":
-						message := "Attaching the selected Octavia UDP pool"
+						message := "Attaching the selected Octavia pool"
 						routeResult.Outcome = p.progressingOutcome(message)
 						attach = append(attach, graphMutation{kind: graphSetListenerDefaultPool, listenerID: listener.ID, poolID: observed.pool.ID, message: message})
 					default:
-						routeResult.Outcome = p.progressingOutcome("Waiting for the previous UDP route to detach")
+						routeResult.Outcome = p.progressingOutcome("Waiting for the previous route to detach")
 					}
 				}
 			}
-			if routeResult.Outcome.State == cloud.OutcomeReady && !gatewayReady {
+			if routeResult.Outcome.State == cloud.OutcomeReady && !gatewayReady &&
+				(actual.protocol == cloud.ListenerProtocolUDP || slices.ContainsFunc(route.spec.ScopedListenerPorts, func(port int) bool {
+					return !slices.Contains(result.Gateway.ScopedListenerReadyPorts, port)
+				})) {
 				routeResult.Outcome = result.Gateway.Outcome
 			}
 		}
@@ -438,30 +463,30 @@ func (p *Provider) buildMultiUDPGraphPlan(desired desiredGatewayGraph, actual ob
 		}
 	}
 	var failed *listeners.Listener
-	for index := range actual.udpListeners {
-		listener := &actual.udpListeners[index]
+	for index := range actual.scopedListeners {
+		listener := &actual.scopedListeners[index]
 		obsolete := ensureGateway && !configured[listener.ProtocolPort]
 		owner := defaultPoolOwner(listener, actual.routes)
 		if owner != -1 {
 			node := desired.spec.Routes[owner]
 			withdraw := node.Disposition == cloud.GraphDelete ||
 				node.Disposition == cloud.GraphEnsure && !keepEdge[listener.ProtocolPort] ||
-				node.RetainUDPListenerPorts != nil && !slices.Contains(node.RetainUDPListenerPorts, listener.ProtocolPort)
+				node.RetainScopedListenerPorts != nil && !slices.Contains(node.RetainScopedListenerPorts, listener.ProtocolPort)
 			if obsolete || withdraw {
-				step := clearListenerDefaultPool(cloud.ListenerProtocolUDP)
+				step := clearListenerDefaultPool(actual.protocol)
 				step.listenerID = listener.ID
 				detach = append(detach, step)
-				result.Routes[owner].Result.Outcome = p.progressingOutcome("Waiting for the superseded UDP default to detach")
+				result.Routes[owner].Result.Outcome = p.progressingOutcome("Waiting for the superseded default to detach")
 				continue
 			}
 		}
 		switch {
 		case obsolete:
-			remove = append(remove, graphMutation{kind: graphDeleteChild, deletion: udpListenerDeletionStep(listener.ID), message: "Removing an obsolete Octavia UDP listener"})
+			remove = append(remove, graphMutation{kind: graphDeleteChild, deletion: listenerDeletionStep(listener.ID), message: "Removing an obsolete Octavia listener"})
 		case listener.ProvisioningStatus == "ERROR":
 			failed = listener
 		case ensureGateway && !listener.AdminStateUp && (listener.DefaultPoolID == "" || readyByPool[listener.DefaultPoolID]):
-			restore = append(restore, graphMutation{kind: graphEnableListener, listenerID: listener.ID, message: "Enabled Octavia UDP listener"})
+			restore = append(restore, graphMutation{kind: graphEnableListener, listenerID: listener.ID, message: "Enabled Octavia listener"})
 		}
 	}
 	var plan []graphMutation
@@ -476,8 +501,8 @@ func (p *Provider) buildMultiUDPGraphPlan(desired desiredGatewayGraph, actual ob
 		result.Routes = nil
 		return nil, result, defaultPoolListenerProvisioningFailure(failed)
 	default:
-		if ensureGateway && actual.loadBalancer != nil && len(actual.udpListeners) != 0 &&
-			!slices.ContainsFunc(actual.udpListeners, func(listener listeners.Listener) bool {
+		if ensureGateway && actual.loadBalancer != nil && len(actual.scopedListeners) != 0 &&
+			!slices.ContainsFunc(actual.scopedListeners, func(listener listeners.Listener) bool {
 				return listener.DefaultPoolID != "" && !readyByPool[listener.DefaultPoolID]
 			}) {
 			address, err := buildGatewayAddressRestorationPlan(spec.ExternalNetworkID, actual)
@@ -500,7 +525,7 @@ func (p *Provider) buildMultiUDPGraphPlan(desired desiredGatewayGraph, actual ob
 	return plan, result, nil
 }
 
-func validateMultiUDPRouteGatewayIDs(recorded, observed cloud.GatewayState, managed []listeners.Listener) error {
+func validateScopedRouteGatewayIDs(recorded, observed cloud.GatewayState, managed []listeners.Listener) error {
 	if recorded.ListenerID != "" && len(managed) != 0 && !slices.ContainsFunc(managed, func(listener listeners.Listener) bool {
 		return listener.ID == recorded.ListenerID
 	}) {

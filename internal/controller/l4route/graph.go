@@ -115,8 +115,8 @@ func (r *Reconciler) observeRoutes(ctx context.Context, request graph.Request, e
 	var listeners []*gatewayv1.Listener
 	var observedGateway *gatewayv1.Gateway
 	winners := make(map[types.UID][]int)
-	multiUDP := false
-	var udpAnchor int
+	scoped := false
+	var anchor int
 	if request.Action == graph.Ensure {
 		gateway, err := r.liveGateway(ctx, request.Identity, expectedGateway)
 		if err != nil {
@@ -128,12 +128,12 @@ func (r *Reconciler) observeRoutes(ctx context.Context, request graph.Request, e
 		snapshot.gateway = gateway.DeepCopy()
 		snapshot.gateway.ResourceVersion = ""
 		snapshot.gateway.Status = gatewayv1.GatewayStatus{}
-		multiUDP = r.protocol() == gatewayv1.UDPProtocolType && controller.GatewayUsesMultipleUDPListeners(r.Config, gateway)
-		if multiUDP {
+		scoped = controller.GatewayListenerScope(r.Config, gateway) == r.protocol()
+		if scoped {
 			if err := controller.ValidateGatewayBinding(r.Config, gateway); err != nil {
 				return snapshot, err
 			}
-			udpAnchor, _ = strconv.Atoi(gateway.Annotations[r.Config.GatewayListenerPortAnnotation()])
+			anchor, _ = strconv.Atoi(gateway.Annotations[r.Config.GatewayListenerPortAnnotation()])
 		}
 		supported, err := gatewaycontroller.SupportedListeners(gateway)
 		if err == nil && supported[0].Protocol == r.protocol() && gateway.DeletionTimestamp.IsZero() {
@@ -180,13 +180,13 @@ func (r *Reconciler) observeRoutes(ctx context.Context, request graph.Request, e
 		if !present || !controller.SameGatewayIdentity(identity, request.Identity) {
 			return snapshot, fmt.Errorf("%w: %s binding does not match the Gateway graph", cloud.ErrOwnershipConflict, r.kind())
 		}
-		if multiUDP && controller.UDPRouteAnchor(r.Config, route) != udpAnchor {
-			return snapshot, fmt.Errorf("%w: UDPRoute does not carry the enrolled Gateway's frozen anchor", cloud.ErrOwnershipConflict)
+		if scoped && controller.ScopedRouteAnchor(r.Config, route, r.protocol()) != anchor {
+			return snapshot, fmt.Errorf("%w: %s does not carry the enrolled Gateway's frozen anchor", cloud.ErrOwnershipConflict, r.kind())
 		}
 		requested := trigger != nil && route.GetUID() == trigger.GetUID()
 		if requested {
 			if request.Identity != identity || !sameRouteRevision(route, trigger) || route.GetResourceVersion() != trigger.GetResourceVersion() ||
-				controller.UDPRouteAnchor(r.Config, route) != controller.UDPRouteAnchor(r.Config, trigger) {
+				controller.ScopedRouteAnchor(r.Config, route, r.protocol()) != controller.ScopedRouteAnchor(r.Config, trigger, r.protocol()) {
 				return snapshot, controller.ErrGraphInputChanged
 			}
 			requestedIndex = len(snapshot.nodes)
@@ -205,17 +205,17 @@ func (r *Reconciler) observeRoutes(ctx context.Context, request graph.Request, e
 		default:
 			peerAttached = true
 		}
-		if multiUDP && node.Disposition == cloud.GraphPreserve {
+		if scoped && node.Disposition == cloud.GraphPreserve {
 			// A bound route with no fresh authorized target cannot keep a
 			// default on any port. Scope withdrawal to its proven edges.
-			node.RetainUDPListenerPorts = []int{}
+			node.RetainScopedListenerPorts = []int{}
 		}
 		snapshot.nodes = append(snapshot.nodes, node)
 		snapshot.revisions = append(snapshot.revisions, route.GetResourceVersion())
 	}
-	// The singleton path keeps its conservative handoff. Scoped UDP lets a
+	// The singleton path keeps its conservative handoff. Listener scope lets a
 	// provider preserve a peer's occupied edges while converging other ports.
-	if peerAttached && !multiUDP {
+	if peerAttached && !scoped {
 		winningNodes = nil
 	}
 	for _, winner := range winningNodes {
@@ -227,7 +227,7 @@ func (r *Reconciler) observeRoutes(ctx context.Context, request graph.Request, e
 		if spec != nil {
 			snapshot.nodes[winner.index].Disposition = cloud.GraphEnsure
 			snapshot.nodes[winner.index].Spec = *spec
-			snapshot.nodes[winner.index].RetainUDPListenerPorts = nil
+			snapshot.nodes[winner.index].RetainScopedListenerPorts = nil
 		}
 	}
 	if trigger != nil {

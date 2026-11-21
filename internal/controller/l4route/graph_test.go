@@ -360,3 +360,67 @@ func bindFixture(t *testing.T, r *Reconciler, gateway *gatewayv1.Gateway, route 
 	}
 	return identity
 }
+
+func TestTCPRouteScopedParentSelectors(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		section *gatewayv1.SectionName
+		port    *gatewayv1.PortNumber
+		want    []int
+	}{
+		{name: "all", want: []int{8080, 9311, 9312, 9313}},
+		{name: "port", port: ptr.To(gatewayv1.PortNumber(8080)), want: []int{8080}},
+		{name: "section", section: ptr.To(gatewayv1.SectionName("two")), want: []int{9311}},
+		{name: "port and section", section: ptr.To(gatewayv1.SectionName("three")), port: ptr.To(gatewayv1.PortNumber(9312)), want: []int{9312}},
+		{name: "mismatched port and section", section: ptr.To(gatewayv1.SectionName("four")), port: ptr.To(gatewayv1.PortNumber(9312))},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			gateway, class, route := routeFixture()
+			route.Spec.ParentRefs[0].SectionName, route.Spec.ParentRefs[0].Port = test.section, test.port
+			gateway.Spec.Listeners[0].Name = "one"
+			gateway.Spec.Listeners = append(gateway.Spec.Listeners,
+				gatewayv1.Listener{Name: "two", Protocol: gatewayv1.TCPProtocolType, Port: 9311},
+				gatewayv1.Listener{Name: "three", Protocol: gatewayv1.TCPProtocolType, Port: 9312},
+				gatewayv1.Listener{Name: "four", Protocol: gatewayv1.TCPProtocolType, Port: 9313},
+			)
+			service := &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{Namespace: route.Namespace, Name: "backend", UID: "service-uid"},
+				Spec:       corev1.ServiceSpec{Ports: []corev1.ServicePort{{Port: 8080, Protocol: corev1.ProtocolTCP}}},
+			}
+			r := testReconciler(t, gateway, class, route, service)
+			r.Coordinator = &graph.Coordinator{}
+			if len(test.want) == 0 {
+				current := reconcileTCPRoute(t, r, route)
+				checkRouteCondition(t, current, r.Config.ControllerName, "Accepted", metav1.ConditionFalse, "NoMatchingParent")
+				return
+			}
+			identity := bindFixture(t, r, gateway, route, cloud.MemberModeEndpoint)
+			controller.SetGatewayListenerScope(r.Config, gateway, gatewayv1.TCPProtocolType)
+			if err := r.Update(t.Context(), gateway); err != nil {
+				t.Fatal(err)
+			}
+			base := route.DeepCopy()
+			controller.SealRouteAnchor(r.Config, route, identity, 8080)
+			if err := r.Patch(t.Context(), route, controller.OptimisticMergeFrom(base)); err != nil {
+				t.Fatal(err)
+			}
+			route = reconcileTCPRoute(t, r, route)
+			r.Writer = applyRouteGraphFunc(func(ctx context.Context, request graph.Request) (cloud.GatewayGraphResult, error) {
+				input, err := r.ObserveRouteGraph(ctx, request, request.Gateway)
+				if err != nil {
+					return cloud.GatewayGraphResult{}, err
+				}
+				if len(input.Nodes) != 1 || input.Nodes[0].Disposition != cloud.GraphEnsure ||
+					!slices.Equal(input.Nodes[0].Spec.ScopedListenerPorts, test.want) {
+					t.Fatalf("TCP parent selected %+v, want ports %v", input.Nodes, test.want)
+				}
+				return cloud.GatewayGraphResult{Outcome: cloud.ReadyOutcome(), Routes: []cloud.RouteGraphResult{
+					{Identity: request.Identity, Result: cloud.RouteReadyResult(cloud.RouteState{})},
+				}}, input.Validate(ctx)
+			})
+			route = reconcileTCPRoute(t, r, route)
+			checkRouteCondition(t, route, r.Config.ControllerName, "Accepted", metav1.ConditionTrue, "Accepted")
+			checkRouteCondition(t, route, r.Config.ControllerName, r.Config.Domain()+"/Programmed", metav1.ConditionTrue, "Programmed")
+		})
+	}
+}

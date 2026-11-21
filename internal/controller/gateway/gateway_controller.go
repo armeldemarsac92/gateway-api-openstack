@@ -223,12 +223,12 @@ func (r *Reconciler) reconcileGatewayGraph(
 			progress = graphResult.Outcome
 		}
 	}
-	if controller.GatewayUsesMultipleUDPListeners(r.Config, scope.gateway) {
+	if controller.GatewayListenerScope(r.Config, scope.gateway) != "" {
 		// A provider result must carry current proof for every desired port
 		// before the aggregate Gateway can be reported as programmed.
 		for _, listener := range scope.gateway.Spec.Listeners {
-			if progress.State == cloud.OutcomeReady && !slices.Contains(gatewayResult.UDPReadyPorts, int(listener.Port)) {
-				progress = cloud.ProgressingOutcome("Waiting for UDP listener readiness", time.Second)
+			if progress.State == cloud.OutcomeReady && !slices.Contains(gatewayResult.ScopedListenerReadyPorts, int(listener.Port)) {
+				progress = cloud.ProgressingOutcome("Waiting for listener readiness", time.Second)
 				break
 			}
 		}
@@ -236,10 +236,10 @@ func (r *Reconciler) reconcileGatewayGraph(
 	if progress.State == cloud.OutcomeProgressing {
 		message := controller.ProviderProgressMessage(progress, "Octavia resources for the Gateway are still progressing")
 		if err := r.setGatewayListenerStatuses(ctx, scope.gateway, decision.listener,
-			metav1.ConditionFalse, gatewayv1.GatewayReasonNoResources, gatewayv1.ListenerReasonPending, message, message, true, gatewayResult.UDPReadyPorts); err != nil {
+			metav1.ConditionFalse, gatewayv1.GatewayReasonNoResources, gatewayv1.ListenerReasonPending, message, message, true, gatewayResult.ScopedListenerReadyPorts); err != nil {
 			return ctrl.Result{}, err
 		}
-		if address := gatewayResult.State.Address(); address != "" && len(gatewayResult.UDPReadyPorts) != 0 {
+		if address := gatewayResult.State.Address(); address != "" && len(gatewayResult.ScopedListenerReadyPorts) != 0 {
 			setGatewayAddress(scope.gateway, address)
 		}
 		return ctrl.Result{RequeueAfter: controller.ProviderProgressRequeueAfter(progress, scope.gateway.UID)}, nil

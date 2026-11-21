@@ -55,7 +55,7 @@ func TestScopedUDPRouteCleanupUsesItsSealedAnchorWithoutGateway(t *testing.T) {
 	route := &gatewayv1.UDPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "dns", UID: "udp-route"}}
 	identity := controller.RouteIdentity(config, gateway, route)
 	controller.ApplyRouteBinding(config, route, identity)
-	controller.SealUDPRouteAnchor(config, route, identity, 5353)
+	controller.SealRouteAnchor(config, route, identity, 5353)
 	route.Annotations[config.RouteLifecycleAnnotation()] = controller.RouteDetaching
 	kube := indexedFakeClientBuilder(testScheme(t), config).Build()
 	r := &Reconciler{APIReader: kube, Config: config}
@@ -66,7 +66,7 @@ func TestScopedUDPRouteCleanupUsesItsSealedAnchorWithoutGateway(t *testing.T) {
 		t.Fatal(err)
 	}
 	spec := input.Node.Spec
-	if input.Node.Disposition != cloud.GraphPreserve || spec.UDPListeners == nil || len(spec.UDPListeners) != 0 ||
+	if input.Node.Disposition != cloud.GraphPreserve || spec.ScopedListeners == nil || len(spec.ScopedListeners) != 0 ||
 		spec.ListenerPort != 5353 || spec.ListenerProtocol != cloud.ListenerProtocolUDP {
 		t.Fatalf("cleanup lost its exact scoped anchor: %+v", input.Node)
 	}
@@ -83,11 +83,11 @@ func TestScopedUDPRouteCleanupUsesItsSealedAnchorWithoutGateway(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if input.Node.Disposition != cloud.GraphPreserve || input.Node.Spec.UDPListeners != nil || input.Node.Spec.ListenerPort != 0 {
+	if input.Node.Disposition != cloud.GraphPreserve || input.Node.Spec.ScopedListeners != nil || input.Node.Spec.ListenerPort != 0 {
 		t.Fatalf("a verified protocol replacement should preserve its current graph: %+v", input.Node)
 	}
 
-	delete(route.Annotations, config.RouteUDPListenerPortAnnotation())
+	delete(route.Annotations, config.RouteListenerPortAnnotation(gatewayv1.UDPProtocolType))
 	if _, err := r.ObserveGatewayGraph(t.Context(), request); err == nil {
 		t.Fatal("a damaged route checkpoint fell back to legacy cleanup")
 	}

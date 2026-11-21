@@ -136,7 +136,7 @@ func (p *Provider) observeRouteGraphs(ctx context.Context, owners []routeGraphOw
 	return p.observeRouteGraphsWithListeners(ctx, owners, lb, listener, protocol, nil)
 }
 
-func (p *Provider) observeRouteGraphsWithListeners(ctx context.Context, owners []routeGraphOwner, lb *octavia.LoadBalancer, listener *listeners.Listener, protocol string, udpListeners []listeners.Listener) ([]observedRouteGraph, error) {
+func (p *Provider) observeRouteGraphsWithListeners(ctx context.Context, owners []routeGraphOwner, lb *octavia.LoadBalancer, listener *listeners.Listener, protocol string, scopedListeners []listeners.Listener) ([]observedRouteGraph, error) {
 	graphs := make([]observedRouteGraph, len(owners))
 	defaultPool := usesDefaultPool(protocol)
 	poolItems, err := p.listGatewayPools(ctx, lb)
@@ -171,8 +171,8 @@ func (p *Provider) observeRouteGraphsWithListeners(ctx context.Context, owners [
 				return nil, fmt.Errorf("%w: %s pool %s appears more than once in the Gateway inventory", cloud.ErrOwnershipConflict, pool.Protocol, pool.ID)
 			}
 			var err error
-			if udpListeners != nil {
-				err = p.validateMultiUDPDefaultPool(*pool, lb.ID, udpListeners, poolProtocol)
+			if scopedListeners != nil {
+				err = p.validateScopedDefaultPool(*pool, lb.ID, scopedListeners, poolProtocol)
 			} else {
 				err = validateDefaultPool(*pool, lb.ID, listener, poolProtocol)
 			}

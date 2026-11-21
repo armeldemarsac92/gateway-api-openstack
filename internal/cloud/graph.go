@@ -49,10 +49,10 @@ type GatewayGraphNode struct {
 type RouteGraphNode struct {
 	Disposition GraphDisposition
 	Spec        RouteSpec
-	// RetainUDPListenerPorts limits which existing defaults may remain on a
-	// preserved pool in a full UDP Gateway election. A nil set grants no
+	// RetainScopedListenerPorts limits which existing defaults may remain on a
+	// preserved pool in a full TCP or UDP Gateway election. A nil set grants no
 	// authority to change those associations.
-	RetainUDPListenerPorts []int
+	RetainScopedListenerPorts []int
 }
 
 // GatewayGraphResult separates whole-graph scheduling from component status.

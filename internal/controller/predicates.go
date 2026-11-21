@@ -280,7 +280,8 @@ func routeBindingChanged(config Config, oldRoute, newRoute client.Object) bool {
 		config.RouteGatewayUIDAnnotation(),
 		config.RouteClusterIDAnnotation(),
 		config.RouteProjectIDAnnotation(),
-		config.RouteUDPListenerPortAnnotation(),
+		config.RouteListenerPortAnnotation(gatewayv1.UDPProtocolType),
+		config.RouteListenerPortAnnotation(gatewayv1.TCPProtocolType),
 	} {
 		if oldRoute.GetAnnotations()[key] != newRoute.GetAnnotations()[key] {
 			return true

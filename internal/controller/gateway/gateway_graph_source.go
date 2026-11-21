@@ -52,8 +52,8 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 		}
 		port, _ := strconv.Atoi(snapshot.boundListenerPort)
 		spec := cloud.GatewaySpec{ListenerProtocol: string(snapshot.boundListenerProtocol), ListenerPort: port}
-		if snapshot.udpListenerMode {
-			spec.UDPListeners = []cloud.UDPListener{}
+		if snapshot.scopedListeners {
+			spec.ScopedListeners = []cloud.ScopedListener{}
 		}
 		return graph.GatewayInput{
 			Object: request.Gateway.DeepCopy(),
@@ -89,22 +89,30 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 
 func (r *Reconciler) observeGatewayForRouteDeletion(ctx context.Context, request graph.Request) (graph.GatewayInput, error) {
 	input := graph.GatewayInput{Node: cloud.GatewayGraphNode{Disposition: cloud.GraphPreserve}}
+	var route client.Object
+	var routeProtocol gatewayv1.ProtocolType
+	switch {
+	case request.TCPRoute != nil:
+		route, routeProtocol = request.TCPRoute, gatewayv1.TCPProtocolType
+	case request.UDPRoute != nil:
+		route, routeProtocol = request.UDPRoute, gatewayv1.UDPProtocolType
+	}
 	var routeAnchor int
-	if route := request.UDPRoute; route != nil {
+	if route != nil {
 		identity, present, err := controller.StoredRouteIdentity(r.Config, route)
 		if err != nil {
 			return graph.GatewayInput{}, err
 		}
 		if !present || identity != request.Identity ||
 			!controllerutil.ContainsFinalizer(route, r.Config.RouteFinalizer()) ||
-			route.Annotations[r.Config.RouteClusterIDAnnotation()] != identity.ClusterID ||
-			route.Annotations[r.Config.RouteProjectIDAnnotation()] != identity.OpenStackProjectID ||
-			route.Annotations[r.Config.RouteLifecycleAnnotation()] != controller.RouteDetaching {
+			route.GetAnnotations()[r.Config.RouteClusterIDAnnotation()] != identity.ClusterID ||
+			route.GetAnnotations()[r.Config.RouteProjectIDAnnotation()] != identity.OpenStackProjectID ||
+			route.GetAnnotations()[r.Config.RouteLifecycleAnnotation()] != controller.RouteDetaching {
 			return graph.GatewayInput{}, errGatewayChanged
 		}
-		routeAnchor = controller.UDPRouteAnchor(r.Config, route)
+		routeAnchor = controller.ScopedRouteAnchor(r.Config, route, routeProtocol)
 		if routeAnchor != 0 {
-			input.Node.Spec = cloud.GatewaySpec{ListenerProtocol: cloud.ListenerProtocolUDP, ListenerPort: routeAnchor, UDPListeners: []cloud.UDPListener{}}
+			input.Node.Spec = cloud.GatewaySpec{ListenerProtocol: string(routeProtocol), ListenerPort: routeAnchor, ScopedListeners: []cloud.ScopedListener{}}
 		}
 	}
 
@@ -118,8 +126,8 @@ func (r *Reconciler) observeGatewayForRouteDeletion(ctx context.Context, request
 	}
 	input.Object = &current
 	boundProtocol := r.boundListenerProtocol(&current)
-	scopedBinding := controller.HasGatewayUDPListenerModeBinding(r.Config, &current)
-	if !scopedBinding && boundProtocol != gatewayv1.UDPProtocolType && routeAnchor == 0 {
+	scopedBinding := controller.HasGatewayListenerScopeBinding(r.Config, &current)
+	if !scopedBinding && boundProtocol != gatewayv1.UDPProtocolType && routeAnchor == 0 && !hasMultipleTransportListeners(&current) {
 		return input, nil
 	}
 	input.Validate = func(ctx context.Context) error {
@@ -137,7 +145,7 @@ func (r *Reconciler) observeGatewayForRouteDeletion(ctx context.Context, request
 		// teardown. Their sealed anchors still authorize route-owned cleanup.
 		return input, nil
 	}
-	if !scopedBinding && routeAnchor == 0 && request.UDPRoute != nil && !hasMultipleUDPListeners(&current) {
+	if !scopedBinding && routeAnchor == 0 && route != nil && !hasMultipleTransportListeners(&current) {
 		// The legacy singleton cleanup is authorized by the route's durable
 		// ownership alone. It does not provision from the Gateway topology.
 		return input, nil
@@ -157,20 +165,20 @@ func (r *Reconciler) observeGatewayForRouteDeletion(ctx context.Context, request
 		}
 		return input, nil
 	}
+	scope := controller.GatewayListenerScope(r.Config, &current)
 	switch {
-	case controller.GatewayUsesMultipleUDPListeners(r.Config, &current):
-		if request.UDPRoute != nil && routeAnchor != port {
-			return graph.GatewayInput{}, fmt.Errorf("%w: UDPRoute cleanup lacks the enrolled Gateway's frozen anchor", cloud.ErrOwnershipConflict)
+	case scope != "":
+		if routeProtocol == scope && routeAnchor != port {
+			return graph.GatewayInput{}, fmt.Errorf("%w: %s route cleanup lacks the enrolled Gateway's frozen anchor", cloud.ErrOwnershipConflict, scope)
 		}
-		input.Node.Spec = cloud.GatewaySpec{ListenerProtocol: cloud.ListenerProtocolUDP, ListenerPort: port, UDPListeners: []cloud.UDPListener{}}
-	case boundProtocol != gatewayv1.UDPProtocolType:
-		// Changing a bound protocol requires verified teardown of the old
-		// graph. Use the current legacy preservation path for its replacement.
+		input.Node.Spec = cloud.GatewaySpec{ListenerProtocol: string(scope), ListenerPort: port, ScopedListeners: []cloud.ScopedListener{}}
+	case routeAnchor != 0 && boundProtocol != routeProtocol:
+		// Changing a bound protocol required verified teardown of the old graph.
 		input.Node.Spec = cloud.GatewaySpec{}
 	case routeAnchor != 0 && routeAnchor != port:
-		return graph.GatewayInput{}, fmt.Errorf("%w: UDPRoute cleanup disagrees with the Gateway's frozen anchor", cloud.ErrOwnershipConflict)
+		return graph.GatewayInput{}, fmt.Errorf("%w: %s route cleanup disagrees with the Gateway's frozen anchor", cloud.ErrOwnershipConflict, routeProtocol)
 	case routeAnchor != port:
-		input.Node.Spec = cloud.GatewaySpec{ListenerProtocol: cloud.ListenerProtocolUDP, ListenerPort: port}
+		input.Node.Spec = cloud.GatewaySpec{ListenerProtocol: string(boundProtocol), ListenerPort: port}
 	}
 	return input, nil
 }

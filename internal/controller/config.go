@@ -135,9 +135,9 @@ func (c Config) GatewayListenerPortAnnotation() string {
 	return c.Domain() + "/gateway-listener-port-" + c.controllerKey()
 }
 
-// GatewayUDPListenerModeAnnotation records enrollment in per-port UDP listener ownership.
-func (c Config) GatewayUDPListenerModeAnnotation() string {
-	return c.Domain() + "/gateway-udp-listener-mode-" + c.controllerKey()
+// GatewayListenerModeAnnotation records enrollment in per-port listener ownership.
+func (c Config) GatewayListenerModeAnnotation(protocol gatewayv1.ProtocolType) string {
+	return c.Domain() + "/gateway-" + strings.ToLower(string(protocol)) + "-listener-mode-" + c.controllerKey()
 }
 
 // GatewayListenerProtocolAnnotation returns the key that records the listener

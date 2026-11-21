@@ -37,7 +37,7 @@ func ValidateGatewayBinding(config Config, gateway *gatewayv1.Gateway) error {
 		return err
 	}
 	if GatewayHasControllerBinding(config, gateway) {
-		if err := validateGatewayUDPListenerMode(config, gateway); err != nil {
+		if err := validateGatewayListenerScope(config, gateway); err != nil {
 			return err
 		}
 		switch gateway.Annotations[config.GatewayListenerProtocolAnnotation()] {
@@ -82,7 +82,7 @@ func ValidateGatewayIdentityBinding(config Config, gateway *gatewayv1.Gateway) e
 // GatewayHasControllerBinding reports whether the Gateway contains any part
 // of this controller's durable binding.
 func GatewayHasControllerBinding(config Config, gateway *gatewayv1.Gateway) bool {
-	if _, exists := gateway.Annotations[config.GatewayUDPListenerModeAnnotation()]; exists {
+	if HasGatewayListenerScopeBinding(config, gateway) {
 		return true
 	}
 	if controllerutil.ContainsFinalizer(gateway, config.GatewayFinalizer()) || HasGatewayTopologyBinding(config, gateway) {
@@ -104,10 +104,15 @@ func GatewayHasControllerBinding(config Config, gateway *gatewayv1.Gateway) bool
 // GatewayBindingMetadataEqual compares only Gateway metadata owned by this
 // controller.
 func GatewayBindingMetadataEqual(config Config, left, right *gatewayv1.Gateway) bool {
-	key := config.GatewayUDPListenerModeAnnotation()
-	leftMode, leftHasMode := left.Annotations[key]
-	rightMode, rightHasMode := right.Annotations[key]
-	if leftMode != rightMode || leftHasMode != rightHasMode || !GatewayTopologyMetadataEqual(config, left, right) {
+	for _, protocol := range []gatewayv1.ProtocolType{gatewayv1.TCPProtocolType, gatewayv1.UDPProtocolType} {
+		key := config.GatewayListenerModeAnnotation(protocol)
+		leftMode, leftHasMode := left.Annotations[key]
+		rightMode, rightHasMode := right.Annotations[key]
+		if leftMode != rightMode || leftHasMode != rightHasMode {
+			return false
+		}
+	}
+	if !GatewayTopologyMetadataEqual(config, left, right) {
 		return false
 	}
 	if controllerutil.ContainsFinalizer(left, config.GatewayFinalizer()) !=
@@ -153,7 +158,7 @@ func RouteClaimsGateway(config Config, route client.Object, identity cloud.Ident
 	boundUID := route.GetAnnotations()[config.RouteGatewayUIDAnnotation()]
 	checkpoint := config.RouteBindingFinalizer(identity.ClusterID, identity.OpenStackProjectID, identity.GatewayNamespace, identity.GatewayName, identity.GatewayUID)
 	return boundUID != "" && boundUID == identity.GatewayUID || slices.ContainsFunc(route.GetFinalizers(), func(finalizer string) bool {
-		return finalizer == checkpoint || strings.HasPrefix(finalizer, checkpoint+"-u-")
+		return finalizer == checkpoint || strings.HasPrefix(finalizer, checkpoint+"-u-") || strings.HasPrefix(finalizer, checkpoint+"-t-")
 	}) ||
 		boundUID == "" && slices.Contains(route.GetFinalizers(), config.RouteFinalizer()) &&
 			route.GetAnnotations()[config.RouteGatewayNamespaceAnnotation()] == identity.GatewayNamespace &&
@@ -176,7 +181,7 @@ func StoredRouteIdentity(config Config, route client.Object) (cloud.Identity, bo
 		}
 	}
 	if empty == len(values) {
-		if annotations[config.RouteClusterIDAnnotation()] != "" || annotations[config.RouteProjectIDAnnotation()] != "" || hasRouteBindingFinalizer(config, route) || hasRouteUDPAnchor(config, route) {
+		if annotations[config.RouteClusterIDAnnotation()] != "" || annotations[config.RouteProjectIDAnnotation()] != "" || hasRouteBindingFinalizer(config, route) || hasScopedRouteAnchor(config, route) {
 			return cloud.Identity{}, false, fmt.Errorf("route %s/%s has an incomplete stored Gateway identity", route.GetNamespace(), route.GetName())
 		}
 		return cloud.Identity{}, false, nil
@@ -220,16 +225,19 @@ func StoredRouteIdentity(config Config, route client.Object) (cloud.Identity, bo
 		identity.GatewayName,
 		identity.GatewayUID,
 	)
-	if hasRouteUDPAnchor(config, route) {
-		port, err := strconv.Atoi(annotations[config.RouteUDPListenerPortAnnotation()])
-		_, udp := route.(*gatewayv1.UDPRoute)
+	if hasScopedRouteAnchor(config, route) {
+		_, tcp := annotations[config.RouteListenerPortAnnotation(gatewayv1.TCPProtocolType)]
+		_, udp := annotations[config.RouteListenerPortAnnotation(gatewayv1.UDPProtocolType)]
+		protocol := scopedRouteProtocol(route)
 		lifecycle := annotations[config.RouteLifecycleAnnotation()]
-		if !udp || err != nil || port < 1 || port > 65535 ||
+		port := ScopedRouteAnchor(config, route, protocol)
+		if tcp == udp || tcp && protocol != gatewayv1.TCPProtocolType || udp && protocol != gatewayv1.UDPProtocolType ||
+			port < 1 || port > 65535 ||
 			annotations[config.RouteClusterIDAnnotation()] != identity.ClusterID || annotations[config.RouteProjectIDAnnotation()] != identity.OpenStackProjectID ||
 			!controllerutil.ContainsFinalizer(route, config.RouteFinalizer()) || (lifecycle != RouteAttached && lifecycle != RouteDetaching) {
-			return cloud.Identity{}, false, fmt.Errorf("%w: invalid UDPRoute anchor checkpoint", cloud.ErrOwnershipConflict)
+			return cloud.Identity{}, false, fmt.Errorf("%w: invalid route listener anchor checkpoint", cloud.ErrOwnershipConflict)
 		}
-		expectedBindingFinalizer = udpRouteBindingFinalizer(config, route, expectedBindingFinalizer)
+		expectedBindingFinalizer = scopedRouteBindingFinalizer(config, route, protocol, expectedBindingFinalizer)
 	}
 	if controllerutil.ContainsFinalizer(route, config.RouteFinalizer()) && !controllerutil.ContainsFinalizer(route, expectedBindingFinalizer) {
 		return cloud.Identity{}, false, fmt.Errorf("route %s/%s stored Gateway identity does not match its binding finalizer; restore the original binding before reconciling", route.GetNamespace(), route.GetName())
@@ -275,7 +283,7 @@ func routeHasBindingAnnotations(config Config, route client.Object) bool {
 func RouteHasControllerBinding(config Config, route client.Object) bool {
 	return controllerutil.ContainsFinalizer(route, config.RouteFinalizer()) ||
 		hasRouteBindingFinalizer(config, route) ||
-		routeHasBindingAnnotations(config, route) || hasRouteUDPAnchor(config, route)
+		routeHasBindingAnnotations(config, route) || hasScopedRouteAnchor(config, route)
 }
 
 // ApplyRouteBinding persists the supplied identity in the object's metadata. The caller
@@ -309,39 +317,57 @@ func ClearRouteBinding(config Config, route client.Object) {
 	annotations := route.GetAnnotations()
 	for _, key := range []string{config.RouteLifecycleAnnotation(), config.RouteGatewayNamespaceAnnotation(),
 		config.RouteGatewayNameAnnotation(), config.RouteGatewayUIDAnnotation(), config.RouteClusterIDAnnotation(),
-		config.RouteProjectIDAnnotation(), config.RouteCleanupFailureAnnotation(), config.RouteUDPListenerPortAnnotation()} {
+		config.RouteProjectIDAnnotation(), config.RouteCleanupFailureAnnotation(), config.RouteListenerPortAnnotation(gatewayv1.TCPProtocolType),
+		config.RouteListenerPortAnnotation(gatewayv1.UDPProtocolType)} {
 		delete(annotations, key)
 	}
 	route.SetAnnotations(annotations)
 }
 
-// RouteUDPListenerPortAnnotation records the frozen Gateway port in a scoped UDP binding.
-func (c Config) RouteUDPListenerPortAnnotation() string {
-	return c.Domain() + "/route-udp-listener-port-" + c.controllerKey()
+// RouteListenerPortAnnotation records the frozen Gateway port in a scoped route binding.
+func (c Config) RouteListenerPortAnnotation(protocol gatewayv1.ProtocolType) string {
+	return c.Domain() + "/route-" + strings.ToLower(string(protocol)) + "-listener-port-" + c.controllerKey()
 }
 
-func hasRouteUDPAnchor(config Config, route client.Object) bool {
-	_, exists := route.GetAnnotations()[config.RouteUDPListenerPortAnnotation()]
-	return exists
+func scopedRouteProtocol(route client.Object) gatewayv1.ProtocolType {
+	switch route.(type) {
+	case *gatewayv1.TCPRoute:
+		return gatewayv1.TCPProtocolType
+	case *gatewayv1.UDPRoute:
+		return gatewayv1.UDPProtocolType
+	default:
+		return ""
+	}
 }
 
-func udpRouteBindingFinalizer(config Config, route client.Object, legacy string) string {
-	input := strings.Join([]string{route.GetNamespace(), route.GetName(), string(route.GetUID()), route.GetAnnotations()[config.RouteUDPListenerPortAnnotation()]}, "\x00")
+func hasScopedRouteAnchor(config Config, route client.Object) bool {
+	_, tcp := route.GetAnnotations()[config.RouteListenerPortAnnotation(gatewayv1.TCPProtocolType)]
+	_, udp := route.GetAnnotations()[config.RouteListenerPortAnnotation(gatewayv1.UDPProtocolType)]
+	return tcp || udp
+}
+
+func scopedRouteBindingFinalizer(config Config, route client.Object, protocol gatewayv1.ProtocolType, legacy string) string {
+	input := strings.Join([]string{route.GetNamespace(), route.GetName(), string(route.GetUID()), route.GetAnnotations()[config.RouteListenerPortAnnotation(protocol)]}, "\x00")
 	digest := sha256.Sum256([]byte(input))
-	return legacy + "-u-" + fmt.Sprintf("%x", digest[:6])
+	prefix := "-u-"
+	if protocol == gatewayv1.TCPProtocolType {
+		prefix = "-t-"
+	}
+	return legacy + prefix + fmt.Sprintf("%x", digest[:6])
 }
 
-// UDPRouteAnchor returns the port recorded by a validated UDPRoute binding.
-func UDPRouteAnchor(config Config, route client.Object) int {
-	port, _ := strconv.Atoi(route.GetAnnotations()[config.RouteUDPListenerPortAnnotation()])
+// ScopedRouteAnchor returns the port recorded by a validated route binding.
+func ScopedRouteAnchor(config Config, route client.Object, protocol gatewayv1.ProtocolType) int {
+	port, _ := strconv.Atoi(route.GetAnnotations()[config.RouteListenerPortAnnotation(protocol)])
 	return port
 }
 
-// SealUDPRouteAnchor adds the port to the route's existing owner checkpoint.
-// The absence of the old finalizer makes earlier controllers hold the binding.
-func SealUDPRouteAnchor(config Config, route *gatewayv1.UDPRoute, identity cloud.Identity, port int) {
-	route.Annotations[config.RouteUDPListenerPortAnnotation()] = strconv.Itoa(port)
+// SealRouteAnchor adds the port to the route's existing owner checkpoint.
+// The absence of the legacy finalizer makes older controllers hold the binding.
+func SealRouteAnchor(config Config, route client.Object, identity cloud.Identity, port int) {
+	protocol := scopedRouteProtocol(route)
+	route.GetAnnotations()[config.RouteListenerPortAnnotation(protocol)] = strconv.Itoa(port)
 	legacy := config.RouteBindingFinalizer(identity.ClusterID, identity.OpenStackProjectID, identity.GatewayNamespace, identity.GatewayName, identity.GatewayUID)
 	controllerutil.RemoveFinalizer(route, legacy)
-	controllerutil.AddFinalizer(route, udpRouteBindingFinalizer(config, route, legacy))
+	controllerutil.AddFinalizer(route, scopedRouteBindingFinalizer(config, route, protocol, legacy))
 }

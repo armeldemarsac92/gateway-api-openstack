@@ -90,8 +90,8 @@ func (r *Reconciler) bind(ctx context.Context, expected *transportRoute, identit
 	}
 	base := current.copyObject()
 	controller.ApplyRouteBinding(r.Config, current, identity)
-	if len(first.desired.UDPListenerPorts) != 0 {
-		controller.SealUDPRouteAnchor(r.Config, current.Object.(*gatewayv1.UDPRoute), identity, first.desired.GatewayRequirements.ListenerPort)
+	if len(first.desired.ScopedListenerPorts) != 0 {
+		controller.SealRouteAnchor(r.Config, current.Object, identity, first.desired.GatewayRequirements.ListenerPort)
 	}
 	if err := r.Patch(ctx, current.Object, controller.OptimisticMergeFrom(base)); err != nil {
 		return ctrl.Result{}, err
