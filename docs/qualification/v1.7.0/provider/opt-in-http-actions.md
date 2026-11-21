@@ -15,6 +15,18 @@ The controller bytes were extracted from the linux/amd64 OCI image at source `39
 
 The native receipt captures conditions when the case returns. The controller-specific route `Programmed` condition can still be `False/Pending` at that point. The weight run also polls it to `True/Programmed`. The lifecycle below waits for settled Kubernetes and Octavia status before sampling. [Gateway API case inventory](../matrix/features-and-cases.md#complete-registered-test-inventory)
 
+## Three additional HTTPRoute Core cases
+
+Three selected original v1.7.0 cases each passed on Standard and Experimental with the same released manager and both opt-in flags enabled. The class used IPv4 Endpoint mode so the upstream ClusterIP Services kept their original type. [Per-case receipts and input digests](opt-in-http-core-results.json)
+
+| Registered case | Standard | Experimental | What the original case checked |
+| --- | --- | --- | --- |
+| `HTTPRouteObservedGenerationBump` | PASS | PASS | Changing the backend from `infra-backend-v1` to `infra-backend-v2` updated all parent conditions to generation 2. `Accepted` and `ResolvedRefs` were both true. |
+| `HTTPRouteReferenceGrant` | PASS (2/2) | PASS (2/2) | The Gateway returned HTTP 200 from `gateway-conformance-web-backend/web-backend` with the grant present, then converged to HTTP 500 after the test deleted that grant through the API. `ResolvedRefs` was `False/RefNotPermitted` at readback and the Route kept generation 1. |
+| `HTTPRoutePathMatchOrder` | PASS (6/6) | PASS (6/6) | Exact matches and longer path prefixes reached the expected one of three upstream Services. |
+
+Each channel had its own Kubernetes API server and published release bundle. The upstream case code, manifest application and HTTP assertions were unchanged. A scoped base supplied the original HTTP Gateway and four Services. Seven independent echo-basic processes ran in separate network namespaces, including two replicas with the original `web-backend` identity. The envtest API held Pod readiness records based on successful direct probes and EndpointSlices pointing to those peers. These results cover the selected cases with the opt-in provider. The [earlier stock observations](http-attachments.md), [full local profile attempts](../complete-local-profiles.md) and [deployed Hibiscus profile ledger](../live-runs.md) retain their own results.
+
 ## Settled ReferenceGrant lifecycle
 
 The same HTTPRoute keeps its UID, generation, parent and 3:1 weights across grant removal and restoration. The HAProxy samples contain 1,024 requests from fresh connections and 1,024 requests over one keep-alive connection in each phase and channel. Each value below is the count for the one-quarter target, shown as fresh / keep-alive.
