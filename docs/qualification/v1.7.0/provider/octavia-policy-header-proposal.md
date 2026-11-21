@@ -58,6 +58,8 @@ response shares unchanged. [Gateway API header filter](https://github.com/kubern
    the first operation or removing the last stages a replacement for that
    route. Edits on an already grouped match update its existing policy.
 
+For standalone installations, use `config/octavia-request-header-modifier` as the operator kustomization base and pin the controller image. For Magnum, render `kubectl kustomize integrations/magnum-capi-helm/workload-request-header-modifier` as `gateway-controller.yaml`. Pin the manifest checksum and matching image in the conductor configuration. Both overlays select only the request-header capability. To select fixed responses and weighted targets as well, add `config/components/octavia-http-actions` in the operator kustomization and enroll the regional provider for those actions. [Magnum operator procedure](../magnum-operator.md) · [Fixed responses and weighted targets](../../../operator-octavia-http-actions.md)
+
 To withdraw, remove the affected modifiers or delete the routes while their
 controller is running. Verify readback, provisioning status and traffic before
 disabling the controller flag or downgrading Octavia. Removing the provider
