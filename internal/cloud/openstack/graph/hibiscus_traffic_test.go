@@ -27,6 +27,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"os/exec"
 	"os/user"
@@ -50,11 +51,42 @@ import (
 // The Octavia API fixture stores the real Gophercloud writes. The stock render
 // and HAProxy operate on that inventory, including the administrative close.
 func TestHibiscusPrivateHTTPTraffic(t *testing.T) {
-	testHibiscusPrivateHTTPTraffic(t, false)
+	testHibiscusHTTPTraffic(t, false, nil)
 }
 
 func TestHibiscusSharedHTTPTraffic(t *testing.T) {
-	testHibiscusPrivateHTTPTraffic(t, true)
+	testHibiscusHTTPTraffic(t, true, nil)
+}
+
+// Point the pilot at a private kind worker NodePort with one Ready Gateway API
+// echo-basic pod. The operator supplies the pod and namespace independently.
+func TestHibiscusKindWorkerHTTP(t *testing.T) {
+	address := os.Getenv("HIBISCUS_KIND_NODEPORT")
+	pod, namespace := os.Getenv("HIBISCUS_KIND_POD"), os.Getenv("HIBISCUS_KIND_NAMESPACE")
+	if address == "" && pod == "" && namespace == "" {
+		t.Skip("set HIBISCUS_KIND_NODEPORT, HIBISCUS_KIND_POD and HIBISCUS_KIND_NAMESPACE to run the worker pilot")
+	}
+	endpoint, err := netip.ParseAddrPort(address)
+	if err != nil || !endpoint.Addr().Is4() || !endpoint.Addr().IsPrivate() || endpoint.Port() == 0 {
+		t.Fatal("HIBISCUS_KIND_NODEPORT must be a private IPv4 address with an explicit nonzero port")
+	}
+	if pod == "" || namespace == "" {
+		t.Fatal("HIBISCUS_KIND_POD and HIBISCUS_KIND_NAMESPACE must identify the Ready echo-basic pod")
+	}
+	testHibiscusHTTPTraffic(t, false, &kindHTTPBackend{endpoint: endpoint, pod: pod, namespace: namespace})
+}
+
+type kindHTTPBackend struct {
+	endpoint       netip.AddrPort
+	pod, namespace string
+}
+
+type kindHTTPEcho struct {
+	Pod       string `json:"pod"`
+	Namespace string `json:"namespace"`
+	Method    string `json:"method"`
+	Path      string `json:"path"`
+	Host      string `json:"host"`
 }
 
 func TestHibiscusTCPTraffic(t *testing.T) {
@@ -171,9 +203,9 @@ func TestHibiscusTCPTraffic(t *testing.T) {
 	t.Logf("Stock HAProxy echoed all %d bytes after attach and forwarded no bytes after detach", len(payload))
 }
 
-func testHibiscusPrivateHTTPTraffic(t *testing.T, shared bool) {
+func testHibiscusHTTPTraffic(t *testing.T, shared bool, worker *kindHTTPBackend) {
 	python, haproxy := os.Getenv("HIBISCUS_OCTAVIA_PYTHON"), os.Getenv("HIBISCUS_HAPROXY")
-	if python == "" && haproxy == "" {
+	if worker == nil && python == "" && haproxy == "" {
 		t.Skip("set HIBISCUS_OCTAVIA_PYTHON and HIBISCUS_HAPROXY to run the loopback pilot")
 	}
 	if !filepath.IsAbs(python) || !filepath.IsAbs(haproxy) {
@@ -188,7 +220,17 @@ func testHibiscusPrivateHTTPTraffic(t *testing.T, shared bool) {
 	t.Log(strings.SplitN(string(version), "\n", 2)[0])
 
 	const response = "hibiscus-node-backend"
-	backendAddress, healthChecks := startPilotBackend(t, response)
+	var backendAddress netip.AddrPort
+	var healthChecks *atomic.Int32
+	var renderArgs []string
+	if worker == nil {
+		address, checks := startPilotBackend(t, response)
+		backendAddress, healthChecks = address.AddrPort(), checks
+	} else {
+		backendAddress = worker.endpoint
+		renderArgs = []string{backendAddress.String()}
+		t.Logf("Worker NodePort %s, expected pod %s/%s", backendAddress, worker.namespace, worker.pod)
+	}
 	reservation, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -402,7 +444,7 @@ func testHibiscusPrivateHTTPTraffic(t *testing.T, shared bool) {
 	route := &spec.Routes[0].Spec
 	route.Gateway = cloud.GatewayState{}
 	route.GatewayRequirements.ListenerPort = frontendAddress.Port
-	route.Members = []cloud.Member{{Address: backendAddress.IP.String(), Port: backendAddress.Port}}
+	route.Members = []cloud.Member{{Address: backendAddress.Addr().String(), Port: int(backendAddress.Port())}}
 	route.HealthMonitor.Delay, route.HealthMonitor.Timeout = 2, 1
 
 	reconcile := func(p *Provider, spec cloud.GatewayGraphSpec) cloud.GatewayGraphResult {
@@ -451,7 +493,7 @@ func testHibiscusPrivateHTTPTraffic(t *testing.T, shared bool) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return startPilotHAProxy(t, ctx, python, haproxy, data)
+		return startPilotHAProxy(t, ctx, python, haproxy, data, renderArgs...)
 	}
 	stopOpenProxy := startProxy()
 	address := frontendAddress.String()
@@ -485,9 +527,35 @@ func testHibiscusPrivateHTTPTraffic(t *testing.T, shared bool) {
 			time.Sleep(50 * time.Millisecond)
 		}
 	}
-	expectBackend("/api", response, healthChecks)
-	if status, body, err := send(route.Hostname, "/api"); status != http.StatusOK || body != response+" "+route.Hostname || err != nil {
-		t.Fatalf("bare Host %s /api = %d %q, err = %v", route.Hostname, status, body, err)
+	expectWorkerBackend := func(stage string) {
+		t.Helper()
+		for _, requestHost := range []string{host, route.Hostname} {
+			want := kindHTTPEcho{Pod: worker.pod, Namespace: worker.namespace, Method: http.MethodGet, Path: "/api", Host: requestHost}
+			for deadline := time.Now().Add(6 * time.Second); ; {
+				status, body, err := send(requestHost, "/api")
+				if status == http.StatusOK && err == nil {
+					var got kindHTTPEcho
+					if err := json.Unmarshal([]byte(body), &got); err != nil || got != want {
+						t.Fatalf("%s: worker echo = %+v, want %+v, decode error = %v", stage, got, want, err)
+					}
+					t.Logf("%s: HAProxy VIP %s, Host %s -> 200 from kind pod %s/%s, %s %s",
+						stage, address, got.Host, got.Namespace, got.Pod, got.Method, got.Path)
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("%s: HTTP %s %s = %d %q, err = %v", stage, requestHost, want.Path, status, body, err)
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
+		}
+	}
+	if worker != nil {
+		expectWorkerBackend("before adapter recreation")
+	} else {
+		expectBackend("/api", response, healthChecks)
+		if status, body, err := send(route.Hostname, "/api"); status != http.StatusOK || body != response+" "+route.Hostname || err != nil {
+			t.Fatalf("bare Host %s /api = %d %q, err = %v", route.Hostname, status, body, err)
+		}
 	}
 	expectMiss := func(host, requestPath string) {
 		t.Helper()
@@ -504,7 +572,9 @@ func testHibiscusPrivateHTTPTraffic(t *testing.T, shared bool) {
 	if result := reconcile(provider, spec); result.Outcome.State != cloud.OutcomeReady || len(writes) != initialWrites {
 		t.Fatalf("fresh provider did not rediscover the serving graph: %v, writes %v", result.Outcome, writes)
 	}
-	if status, body, err := send(host, "/api"); status != http.StatusOK || body != response+" "+host || err != nil {
+	if worker != nil {
+		expectWorkerBackend("after adapter recreation")
+	} else if status, body, err := send(host, "/api"); status != http.StatusOK || body != response+" "+host || err != nil {
 		t.Fatalf("after recreating provider instance: HTTP %d %q, err = %v", status, body, err)
 	}
 	t.Log("fresh provider instance rediscovered the serving graph without writes")
@@ -625,7 +695,7 @@ func pilotTags(value any) []string {
 	return tags
 }
 
-func startPilotHAProxy(t *testing.T, ctx context.Context, python, haproxy string, inventory []byte) func() {
+func startPilotHAProxy(t *testing.T, ctx context.Context, python, haproxy string, inventory []byte, renderArgs ...string) func() {
 	t.Helper()
 	// Keep the stats socket under the platform's Unix socket path limit.
 	dir, err := os.MkdirTemp("", "hibiscus-haproxy-")
@@ -633,7 +703,8 @@ func startPilotHAProxy(t *testing.T, ctx context.Context, python, haproxy string
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	render := exec.CommandContext(ctx, python, "-I", "testdata/render_hibiscus_amphora.py", dir)
+	args := append([]string{"-I", "testdata/render_hibiscus_amphora.py", dir}, renderArgs...)
+	render := exec.CommandContext(ctx, python, args...)
 	render.Stdin = bytes.NewReader(inventory)
 	if output, err := render.CombinedOutput(); err != nil {
 		t.Fatalf("render pinned Octavia templates: %v\n%s", err, output)

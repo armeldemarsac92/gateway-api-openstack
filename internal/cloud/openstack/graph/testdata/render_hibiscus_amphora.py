@@ -23,12 +23,15 @@ def children(inventory, collection):
     return (data for path, data in inventory.items() if path.rpartition("/")[0] == collection)
 
 
-def pool_from_inventory(inventory, gateway, pool):
+def pool_from_inventory(inventory, gateway, pool, expected_member):
     if pool["loadbalancers"] != [{"id": gateway["id"]}]:
         raise ValueError("pool is not attached to the observed Gateway")
     members = list(children(inventory, f"/v2/lbaas/pools/{pool['id']}/members"))
-    if any(member["address"] != "127.0.0.1" for member in members):
-        raise ValueError("the pilot expects loopback members")
+    if expected_member is None:
+        if any(member["address"] != "127.0.0.1" for member in members):
+            raise ValueError("the pilot expects loopback members")
+    elif [(member["address"], member["protocol_port"]) for member in members] != [expected_member]:
+        raise ValueError(f"the pilot expects member endpoint {expected_member}")
     backends = [
         model(data_models.Member, member, "protocol_port subnet_id",
               ip_address=member["address"], weight=member.get("weight", 1))
@@ -63,7 +66,7 @@ def policy_from_inventory(inventory, listener, pools, policy):
                  redirect_url=policy.get("redirect_url"), redirect_prefix=policy.get("redirect_prefix"))
 
 
-def listener_from_inventory(inventory):
+def listener_from_inventory(inventory, expected_member=None):
     gateway = inventory["/v2/lbaas/loadbalancers/gateway"]
     listener = inventory["/v2/lbaas/listeners/listener"]
     default_pool_id = listener["default_pool_id"]
@@ -75,7 +78,7 @@ def listener_from_inventory(inventory):
     if listener["loadbalancers"] != [{"id": gateway["id"]}]:
         raise ValueError("listener is not attached to the observed Gateway")
 
-    pools = {pool["id"]: pool_from_inventory(inventory, gateway, pool)
+    pools = {pool["id"]: pool_from_inventory(inventory, gateway, pool, expected_member)
              for pool in children(inventory, "/v2/lbaas/pools")
              if not tcp or pool["id"] == default_pool_id}
     # The Octavia database exposes the listener's policies in position order.
@@ -97,7 +100,11 @@ def main():
         if version(package) != want:
             raise ValueError(f"{package} {want} is required, found {version(package)}")
     output = Path(sys.argv[1])
-    listener = listener_from_inventory(json.load(sys.stdin))
+    expected_member = None
+    if len(sys.argv) == 3:
+        address, port = sys.argv[2].split(":")
+        expected_member = address, int(port)
+    listener = listener_from_inventory(json.load(sys.stdin), expected_member)
     amphora = data_models.Amphora(id="local-amphora", lb_network_ip="127.0.0.1")
     jinja_cfg.CONF.set_override("default_connection_limit", 64, group="haproxy_amphora")
     templater = jinja_cfg.JinjaTemplater(
