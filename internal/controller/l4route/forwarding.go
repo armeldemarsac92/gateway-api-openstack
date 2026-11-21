@@ -21,6 +21,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -38,6 +39,20 @@ func (r *Reconciler) forwardingTargetType() string { return r.Config.Domain() + 
 // forwardingTarget hashes the desired destinations with the identities and
 // routing semantics of the Services that contribute to the pool.
 func forwardingTarget(backends []serviceBackend, groups []weightedServiceMembers, weighted bool, spec cloud.RouteSpec) (string, error) {
+	ports := spec.UDPListenerPorts
+	spec.UDPListenerPorts = nil
+	target, err := forwardingBackendTarget(backends, groups, weighted, spec)
+	if err != nil || len(ports) == 0 {
+		return target, err
+	}
+	scope, err := hashForwardingTarget("udp", ports)
+	if err != nil {
+		return "", err
+	}
+	return target + "/" + scope, nil
+}
+
+func forwardingBackendTarget(backends []serviceBackend, groups []weightedServiceMembers, weighted bool, spec cloud.RouteSpec) (string, error) {
 	for _, backend := range backends {
 		if backend.service.UID == "" {
 			return "", fmt.Errorf("cannot identify the forwarding target for Service %s", backend.ref.key)
@@ -118,6 +133,21 @@ func (r *Reconciler) currentTarget(route *transportRoute, parent gatewayv1.Paren
 	return condition
 }
 
+// hasCurrentBackendTarget allows a sealed graph to update a route's listener
+// edges while retaining its existing checkpoint for the backend pool.
+func (r *Reconciler) hasCurrentBackendTarget(route *transportRoute, parent gatewayv1.ParentReference, target string) bool {
+	condition := r.currentParentCondition(route, parent, r.forwardingTargetType())
+	if condition == nil {
+		return false
+	}
+	desired, _, scoped := strings.Cut(target, "/")
+	if !scoped {
+		return condition.Message == target
+	}
+	current, _, _ := strings.Cut(condition.Message, "/")
+	return current == desired
+}
+
 func (r *Reconciler) planVersionSkew(ctx context.Context, route *transportRoute, plan *routePlan, backends []serviceBackend, bound bool) error {
 	if bound {
 		confirmed, err := r.hasConfirmedForwarding(ctx, route, plan, backends)
@@ -140,11 +170,11 @@ func (r *Reconciler) hasConfirmedForwarding(ctx context.Context, route *transpor
 		plan.programmed.Status != metav1.ConditionTrue {
 		return false, nil
 	}
-	topology, ready, err := r.gatewayTopology(parent.gateway, parent.listener)
+	topology, ready, err := r.gatewayTopology(parent.gateway, parent.listeners[0])
 	if err != nil || !ready {
 		return false, err
 	}
-	_, target, diagnostic, err := r.routeSpec(ctx, route, parent.gateway, parent.listener, backends, topology)
+	_, target, diagnostic, err := r.routeSpec(ctx, route, parent.gateway, parent.listeners[0], backends, topology, plan.listenerPorts...)
 	if err != nil || diagnostic != nil {
 		return false, err
 	}

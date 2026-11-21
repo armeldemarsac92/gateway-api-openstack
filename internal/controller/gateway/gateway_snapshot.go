@@ -49,6 +49,7 @@ type gatewayMutationSnapshot struct {
 	gateway      *gatewayv1.Gateway
 	gatewayClass *gatewayv1.GatewayClass
 	listener     *gatewayv1.Listener
+	listeners    []*gatewayv1.Listener
 	binding      gatewayBindingRequirement
 	topology     classconfig.Resolved
 }
@@ -70,7 +71,7 @@ func (r *Reconciler) observeGatewayMutationSnapshot(
 	if err := r.APIReader.Get(ctx, client.ObjectKeyFromObject(expected), &gateway); err != nil {
 		return nil, errors.Join(errGatewayChanged, client.IgnoreNotFound(err))
 	}
-	if gateway.UID != expected.UID || gateway.Generation != expected.Generation ||
+	if gateway.UID != expected.UID || gateway.Generation != expected.Generation || !reflect.DeepEqual(gateway.Spec, expected.Spec) ||
 		!gateway.DeletionTimestamp.IsZero() {
 		return nil, errGatewayChanged
 	}
@@ -83,7 +84,7 @@ func (r *Reconciler) observeGatewayMutationSnapshot(
 	); err != nil {
 		return nil, errors.Join(errGatewayChanged, client.IgnoreNotFound(err))
 	}
-	if gatewayClass.Spec.ControllerName != r.Config.ControllerName {
+	if gatewayClass.Spec.ControllerName != r.Config.ControllerName || (r.gatewayUsesUDPListenerScope(&gateway) && !gatewayClass.DeletionTimestamp.IsZero()) {
 		return nil, errGatewayChanged
 	}
 	if !controller.GatewayClassSupportsInstalledVersion(&gatewayClass) {
@@ -96,16 +97,17 @@ func (r *Reconciler) observeGatewayMutationSnapshot(
 		return nil, errors.Join(errGatewayChanged, err)
 	}
 
-	listener, validationErr := Validate(&gateway)
+	listeners, validationErr := SupportedListeners(&gateway)
 	if validationErr != nil {
 		return nil, errGatewayChanged
 	}
-	listenerPort := strconv.Itoa(int(listener.Port))
+	listener := listeners[0]
+	listenerPort := r.desiredListenerPort(&gateway, listener)
 	if expectedListenerPort != "" && listenerPort != expectedListenerPort {
 		return nil, errGatewayChanged
 	}
 	if r.gatewayListenerNeedsReplacement(&gateway, listener) ||
-		(binding == gatewayBindingRequired && gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] == "") {
+		(binding == gatewayBindingRequired && (!r.gatewayBindingComplete(&gateway) || r.gatewayNeedsUDPListenerMode(&gateway))) {
 		return nil, errGatewayChanged
 	}
 
@@ -126,6 +128,7 @@ func (r *Reconciler) observeGatewayMutationSnapshot(
 		topology:     topology,
 		gatewayClass: &gatewayClass,
 		listener:     listener,
+		listeners:    listeners,
 		binding:      binding,
 	}, nil
 }
@@ -145,7 +148,7 @@ func (r *Reconciler) sealGatewayMutationSnapshot(
 	if err := r.APIReader.Get(ctx, client.ObjectKeyFromObject(snapshot.gateway), &gateway); err != nil {
 		return errors.Join(errGatewayChanged, client.IgnoreNotFound(err))
 	}
-	if gateway.UID != snapshot.gateway.UID || gateway.Generation != snapshot.gateway.Generation ||
+	if gateway.UID != snapshot.gateway.UID || gateway.Generation != snapshot.gateway.Generation || !reflect.DeepEqual(gateway.Spec, snapshot.gateway.Spec) ||
 		!gateway.DeletionTimestamp.IsZero() ||
 		!controller.GatewayBindingMetadataEqual(r.Config, &gateway, snapshot.gateway) {
 		return errGatewayChanged
@@ -171,7 +174,8 @@ func (r *Reconciler) sealGatewayMutationSnapshot(
 	); err != nil {
 		return errors.Join(errGatewayChanged, client.IgnoreNotFound(err))
 	}
-	if gatewayClass.Spec.ControllerName != r.Config.ControllerName {
+	if gatewayClass.Spec.ControllerName != r.Config.ControllerName || (r.gatewayUsesUDPListenerScope(&gateway) &&
+		(gatewayClass.UID != snapshot.gatewayClass.UID || gatewayClass.Generation != snapshot.gatewayClass.Generation || !gatewayClass.DeletionTimestamp.IsZero())) {
 		return errGatewayChanged
 	}
 	if !controller.GatewayClassSupportsInstalledVersion(&gatewayClass) {
@@ -234,13 +238,13 @@ func (r *Reconciler) decideGatewayPhase(scope *gatewayScope) gatewayPhaseDecisio
 	if err != nil {
 		return gatewayPhaseDecision{phase: gatewayPhaseInvalidSpec, validation: err}
 	}
-	listenerPort := strconv.Itoa(int(listener.Port))
+	listenerPort := r.desiredListenerPort(gateway, listener)
 	if r.gatewayListenerNeedsReplacement(gateway, listener) {
 		return gatewayPhaseDecision{
 			phase: gatewayPhaseReplaceGraph, listener: listener, listenerPort: listenerPort,
 		}
 	}
-	if !r.gatewayBindingComplete(gateway) {
+	if !r.gatewayBindingComplete(gateway) || r.gatewayNeedsUDPListenerMode(gateway) {
 		return gatewayPhaseDecision{phase: gatewayPhaseBind, listener: listener, listenerPort: listenerPort}
 	}
 	return gatewayPhaseDecision{phase: gatewayPhaseEnsure, listener: listener, listenerPort: listenerPort}
@@ -255,7 +259,24 @@ func (r *Reconciler) gatewayBindingComplete(gateway *gatewayv1.Gateway) bool {
 
 func (r *Reconciler) gatewayListenerNeedsReplacement(gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) bool {
 	storedPort := gateway.Annotations[r.Config.GatewayListenerPortAnnotation()]
-	return storedPort != "" && (storedPort != strconv.Itoa(int(listener.Port)) || r.boundListenerProtocol(gateway) != listener.Protocol)
+	return storedPort != "" && (storedPort != r.desiredListenerPort(gateway, listener) || r.boundListenerProtocol(gateway) != listener.Protocol)
+}
+
+func (r *Reconciler) desiredListenerPort(gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) string {
+	stored := gateway.Annotations[r.Config.GatewayListenerPortAnnotation()]
+	if stored != "" && listener.Protocol == gatewayv1.UDPProtocolType && r.boundListenerProtocol(gateway) == listener.Protocol &&
+		(controller.GatewayUsesMultipleUDPListeners(r.Config, gateway) || hasMultipleUDPListeners(gateway)) {
+		return stored
+	}
+	return strconv.Itoa(int(listener.Port))
+}
+
+func (r *Reconciler) gatewayUsesUDPListenerScope(gateway *gatewayv1.Gateway) bool {
+	return hasMultipleUDPListeners(gateway) || controller.GatewayUsesMultipleUDPListeners(r.Config, gateway)
+}
+
+func (r *Reconciler) gatewayNeedsUDPListenerMode(gateway *gatewayv1.Gateway) bool {
+	return hasMultipleUDPListeners(gateway) && !controller.GatewayUsesMultipleUDPListeners(r.Config, gateway)
 }
 
 func (r *Reconciler) boundListenerProtocol(gateway *gatewayv1.Gateway) gatewayv1.ProtocolType {
@@ -280,6 +301,8 @@ type gatewayCleanupSnapshot struct {
 	identity              cloud.Identity
 	disposition           gatewayCleanupDisposition
 	boundListenerProtocol gatewayv1.ProtocolType
+	boundListenerPort     string
+	udpListenerMode       bool
 	listenerPort          string
 	listenerProtocol      gatewayv1.ProtocolType
 }
@@ -309,6 +332,8 @@ func (r *Reconciler) observeGatewayCleanupSnapshot(
 		identity:              controller.StoredGatewayIdentity(r.Config, &gateway),
 		disposition:           gatewayCleanupDelete,
 		boundListenerProtocol: r.boundListenerProtocol(&gateway),
+		boundListenerPort:     gateway.Annotations[r.Config.GatewayListenerPortAnnotation()],
+		udpListenerMode:       controller.GatewayUsesMultipleUDPListeners(r.Config, &gateway),
 	}
 	if !gateway.DeletionTimestamp.IsZero() {
 		return snapshot, nil

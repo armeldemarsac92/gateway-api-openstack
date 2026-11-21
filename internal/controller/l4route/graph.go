@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"strconv"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -38,13 +39,23 @@ import (
 var _ graph.RouteSource = (*Reconciler)(nil)
 
 type routeGraphSnapshot struct {
-	nodes      []cloud.RouteGraphNode
-	revisions  []string
+	nodes     []cloud.RouteGraphNode
+	revisions []string
+	elections []listenerElection
+	backends  []routeBackendRevisions
+	gateway   *gatewayv1.Gateway
+}
+
+type listenerElection struct {
+	port       int
 	candidates []routeCandidateRevision
 	winner     types.UID
-	backends   []objectRevision
-	gateway    *gatewayv1.Gateway
-	class      objectRevision
+}
+
+type routeBackendRevisions struct {
+	class    objectRevision
+	grants   []objectRevision
+	services []objectRevision
 }
 
 // routeCandidateRevision excludes status so observing an unbound route's
@@ -101,8 +112,11 @@ func (r *Reconciler) observeRoutes(ctx context.Context, request graph.Request, e
 		return cmp.Or(cmp.Compare(left.GetNamespace(), right.GetNamespace()), cmp.Compare(left.GetName(), right.GetName()))
 	})
 
-	var listener *gatewayv1.Listener
+	var listeners []*gatewayv1.Listener
 	var observedGateway *gatewayv1.Gateway
+	winners := make(map[types.UID][]int)
+	multiUDP := false
+	var udpAnchor int
 	if request.Action == graph.Ensure {
 		gateway, err := r.liveGateway(ctx, request.Identity, expectedGateway)
 		if err != nil {
@@ -114,28 +128,46 @@ func (r *Reconciler) observeRoutes(ctx context.Context, request graph.Request, e
 		snapshot.gateway = gateway.DeepCopy()
 		snapshot.gateway.ResourceVersion = ""
 		snapshot.gateway.Status = gatewayv1.GatewayStatus{}
-		listener, err = gatewaycontroller.Validate(gateway)
-		if err == nil && listener.Protocol == r.protocol() && gateway.DeletionTimestamp.IsZero() {
-			candidates := listenerCandidates(gateway, listener, routes)
-			for _, candidate := range candidates {
-				snapshot.candidates = append(snapshot.candidates, routeCandidateRevision{
-					key: client.ObjectKeyFromObject(candidate), uid: candidate.GetUID(), generation: candidate.GetGeneration(),
-					created: candidate.GetCreationTimestamp(), spec: candidate.spec,
-				})
-			}
-			winner, err := r.selectedRoute(ctx, gateway, listener, candidates)
-			if err != nil {
+		multiUDP = r.protocol() == gatewayv1.UDPProtocolType && controller.GatewayUsesMultipleUDPListeners(r.Config, gateway)
+		if multiUDP {
+			if err := controller.ValidateGatewayBinding(r.Config, gateway); err != nil {
 				return snapshot, err
 			}
-			if winner != nil {
-				snapshot.winner = winner.GetUID()
+			udpAnchor, _ = strconv.Atoi(gateway.Annotations[r.Config.GatewayListenerPortAnnotation()])
+		}
+		supported, err := gatewaycontroller.SupportedListeners(gateway)
+		if err == nil && supported[0].Protocol == r.protocol() && gateway.DeletionTimestamp.IsZero() {
+			listeners = supported
+			namespaces := make(routeNamespaceCache)
+			for _, listener := range listeners {
+				candidates := listenerCandidates(gateway, listener, routes)
+				election := listenerElection{port: int(listener.Port)}
+				for _, candidate := range candidates {
+					election.candidates = append(election.candidates, routeCandidateRevision{
+						key: client.ObjectKeyFromObject(candidate), uid: candidate.GetUID(), generation: candidate.GetGeneration(),
+						created: candidate.GetCreationTimestamp(), spec: candidate.spec,
+					})
+				}
+				winner, err := r.selectedRoute(ctx, gateway, listener, candidates, namespaces)
+				if err != nil {
+					return snapshot, err
+				}
+				if winner != nil {
+					election.winner = winner.GetUID()
+					winners[election.winner] = append(winners[election.winner], election.port)
+				}
+				snapshot.elections = append(snapshot.elections, election)
 			}
 		}
 	}
 
 	trigger := r.requestRoute(request)
-	requestedIndex, winnerIndex := -1, -1
-	var winner *transportRoute
+	requestedIndex := -1
+	type winningNode struct {
+		index int
+		route *transportRoute
+	}
+	var winningNodes []winningNode
 	peerAttached := false
 	for _, route := range routes {
 		if !controller.RouteClaimsGateway(r.Config, route, request.Identity) {
@@ -148,9 +180,13 @@ func (r *Reconciler) observeRoutes(ctx context.Context, request graph.Request, e
 		if !present || !controller.SameGatewayIdentity(identity, request.Identity) {
 			return snapshot, fmt.Errorf("%w: %s binding does not match the Gateway graph", cloud.ErrOwnershipConflict, r.kind())
 		}
+		if multiUDP && controller.UDPRouteAnchor(r.Config, route) != udpAnchor {
+			return snapshot, fmt.Errorf("%w: UDPRoute does not carry the enrolled Gateway's frozen anchor", cloud.ErrOwnershipConflict)
+		}
 		requested := trigger != nil && route.GetUID() == trigger.GetUID()
 		if requested {
-			if request.Identity != identity || !sameRouteRevision(route, trigger) || route.GetResourceVersion() != trigger.GetResourceVersion() {
+			if request.Identity != identity || !sameRouteRevision(route, trigger) || route.GetResourceVersion() != trigger.GetResourceVersion() ||
+				controller.UDPRouteAnchor(r.Config, route) != controller.UDPRouteAnchor(r.Config, trigger) {
 				return snapshot, controller.ErrGraphInputChanged
 			}
 			requestedIndex = len(snapshot.nodes)
@@ -164,23 +200,34 @@ func (r *Reconciler) observeRoutes(ctx context.Context, request graph.Request, e
 			if request.Action == graph.Ensure || request.Action == graph.DeleteRoute && requested {
 				node.Disposition = cloud.GraphDelete
 			}
-		case route.GetUID() == snapshot.winner && route.GetDeletionTimestamp().IsZero():
-			winnerIndex, winner = len(snapshot.nodes), route
+		case len(winners[route.GetUID()]) != 0 && route.GetDeletionTimestamp().IsZero():
+			winningNodes = append(winningNodes, winningNode{index: len(snapshot.nodes), route: route})
 		default:
 			peerAttached = true
+		}
+		if multiUDP && node.Disposition == cloud.GraphPreserve {
+			// A bound route with no fresh authorized target cannot keep a
+			// default on any port. Scope withdrawal to its proven edges.
+			node.RetainUDPListenerPorts = []int{}
 		}
 		snapshot.nodes = append(snapshot.nodes, node)
 		snapshot.revisions = append(snapshot.revisions, route.GetResourceVersion())
 	}
-	if winner != nil && !peerAttached {
-		spec, backends, class, err := r.ensureRouteNode(ctx, winner, observedGateway, listener)
+	// The singleton path keeps its conservative handoff. Scoped UDP lets a
+	// provider preserve a peer's occupied edges while converging other ports.
+	if peerAttached && !multiUDP {
+		winningNodes = nil
+	}
+	for _, winner := range winningNodes {
+		spec, backends, err := r.ensureRouteNode(ctx, winner.route, observedGateway, listeners[0], winners[winner.route.GetUID()])
 		if err != nil {
 			return snapshot, err
 		}
+		snapshot.backends = append(snapshot.backends, backends)
 		if spec != nil {
-			snapshot.nodes[winnerIndex].Disposition = cloud.GraphEnsure
-			snapshot.nodes[winnerIndex].Spec = *spec
-			snapshot.backends, snapshot.class = backends, class
+			snapshot.nodes[winner.index].Disposition = cloud.GraphEnsure
+			snapshot.nodes[winner.index].Spec = *spec
+			snapshot.nodes[winner.index].RetainUDPListenerPorts = nil
 		}
 	}
 	if trigger != nil {
@@ -208,38 +255,43 @@ func (r *Reconciler) liveGateway(ctx context.Context, identity cloud.Identity, e
 	return gateway, nil
 }
 
-func (r *Reconciler) ensureRouteNode(ctx context.Context, route *transportRoute, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) (*cloud.RouteSpec, []objectRevision, objectRevision, error) {
+func (r *Reconciler) ensureRouteNode(ctx context.Context, route *transportRoute, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, ports []int) (*cloud.RouteSpec, routeBackendRevisions, error) {
+	var revisions routeBackendRevisions
 	class, err := r.gatewayClass(ctx, gateway)
-	if err != nil || class == nil || !controller.GatewayClassSupportsInstalledVersion(class) {
-		return nil, nil, objectRevision{}, err
+	if err != nil || class == nil {
+		return nil, revisions, err
+	}
+	revisions.class = revisionOf(class)
+	if !controller.GatewayClassSupportsInstalledVersion(class) {
+		return nil, revisions, nil
 	}
 	if err := r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
 		if errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) {
 			err = nil
 		}
-		return nil, nil, objectRevision{}, err
+		return nil, revisions, err
 	}
 	topology, valid, err := r.gatewayTopology(gateway, listener)
 	if err != nil || !valid {
-		return nil, nil, objectRevision{}, err
+		return nil, revisions, err
 	}
 	// Zero-weight references affect status only. Their authorization and
 	// revisions cannot change the serving destinations of the sealed graph.
 	refs, rejections, err := r.authorizedBackends(ctx, route, false)
+	revisions.grants = rejections.grants
 	if err != nil || rejections.active != nil || len(refs) == 0 {
-		return nil, nil, objectRevision{}, err
+		return nil, revisions, err
 	}
 	services, rejections, err := r.backendServices(ctx, refs, false)
 	if err != nil || rejections.active != nil || len(services) == 0 {
-		return nil, nil, objectRevision{}, err
+		return nil, revisions, err
 	}
-	spec, target, diagnostic, err := r.routeSpec(ctx, route, gateway, listener, services, topology)
-	if err != nil || diagnostic != nil || r.currentTarget(route, route.parentRefs[0], target) == nil {
-		return nil, nil, objectRevision{}, err
-	}
-	backends := make([]objectRevision, 0, len(services))
 	for _, service := range services {
-		backends = append(backends, revisionOf(service.service))
+		revisions.services = append(revisions.services, revisionOf(service.service))
 	}
-	return &spec, backends, revisionOf(class), nil
+	spec, target, diagnostic, err := r.routeSpec(ctx, route, gateway, listener, services, topology, ports...)
+	if err != nil || diagnostic != nil || !r.hasCurrentBackendTarget(route, route.parentRefs[0], target) {
+		return nil, revisions, err
+	}
+	return &spec, revisions, nil
 }

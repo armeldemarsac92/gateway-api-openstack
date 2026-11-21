@@ -30,9 +30,68 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 )
+
+func TestValidateDistinctUDPListeners(t *testing.T) {
+	gateway := &gatewayv1.Gateway{Spec: gatewayv1.GatewaySpec{Listeners: []gatewayv1.Listener{
+		{Name: "private", Port: 5353, Protocol: gatewayv1.UDPProtocolType},
+		{Name: "public", Port: 53, Protocol: gatewayv1.UDPProtocolType},
+	}}}
+	if _, err := Validate(gateway); err != nil {
+		t.Fatalf("distinct UDP listeners must be supported: %v", err)
+	}
+	gateway.Spec.Listeners[1].Port = 5353
+	if _, err := Validate(gateway); err == nil {
+		t.Fatal("UDP listeners sharing a port must be rejected")
+	}
+}
+
+func TestScopedUDPRouteCleanupUsesItsSealedAnchorWithoutGateway(t *testing.T) {
+	config := testConfig()
+	gateway := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "edge", UID: "old-gateway"}}
+	route := &gatewayv1.UDPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "dns", UID: "udp-route"}}
+	identity := controller.RouteIdentity(config, gateway, route)
+	controller.ApplyRouteBinding(config, route, identity)
+	controller.SealUDPRouteAnchor(config, route, identity, 5353)
+	route.Annotations[config.RouteLifecycleAnnotation()] = controller.RouteDetaching
+	kube := indexedFakeClientBuilder(testScheme(t), config).Build()
+	r := &Reconciler{APIReader: kube, Config: config}
+	request := graph.Request{Identity: identity, Action: graph.DeleteRoute, UDPRoute: route}
+
+	input, err := r.ObserveGatewayGraph(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := input.Node.Spec
+	if input.Node.Disposition != cloud.GraphPreserve || spec.UDPListeners == nil || len(spec.UDPListeners) != 0 ||
+		spec.ListenerPort != 5353 || spec.ListenerProtocol != cloud.ListenerProtocolUDP {
+		t.Fatalf("cleanup lost its exact scoped anchor: %+v", input.Node)
+	}
+	gateway.Annotations = gatewayBindingAnnotations(config, "443")
+	gateway.Annotations[config.GatewayListenerProtocolAnnotation()] = cloud.ListenerProtocolTCP
+	gateway.Finalizers = []string{config.GatewayFinalizer()}
+	if err := controller.BindGatewayTopology(config, gateway, testBoundTopology()); err != nil {
+		t.Fatal(err)
+	}
+	if err := kube.Create(t.Context(), gateway); err != nil {
+		t.Fatal(err)
+	}
+	input, err = r.ObserveGatewayGraph(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if input.Node.Disposition != cloud.GraphPreserve || input.Node.Spec.UDPListeners != nil || input.Node.Spec.ListenerPort != 0 {
+		t.Fatalf("a verified protocol replacement should preserve its current graph: %+v", input.Node)
+	}
+
+	delete(route.Annotations, config.RouteUDPListenerPortAnnotation())
+	if _, err := r.ObserveGatewayGraph(t.Context(), request); err == nil {
+		t.Fatal("a damaged route checkpoint fell back to legacy cleanup")
+	}
+}
 
 func TestGatewayRequestsForHTTPRoute(t *testing.T) {
 	config := testConfig()

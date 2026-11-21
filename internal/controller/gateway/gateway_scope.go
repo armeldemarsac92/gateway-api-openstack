@@ -114,7 +114,7 @@ func (r *Reconciler) patchGateway(ctx context.Context, scope *gatewayScope) erro
 }
 
 func (r *Reconciler) patchGatewayMetadata(ctx context.Context, scope *gatewayScope) error {
-	if !gatewayOwnedMetadataChanged(r.Config, scope.original, scope.gateway) {
+	if controller.GatewayBindingMetadataEqual(r.Config, scope.original, scope.gateway) {
 		return nil
 	}
 	desiredStatus := scope.gateway.DeepCopy().Status
@@ -128,22 +128,6 @@ func (r *Reconciler) patchGatewayMetadata(ctx context.Context, scope *gatewaySco
 	scope.original = metadataTarget.DeepCopy()
 	scope.gateway.Status = desiredStatus
 	return nil
-}
-
-func gatewayOwnedMetadataChanged(config controller.Config, left, right *gatewayv1.Gateway) bool {
-	if !controller.GatewayTopologyMetadataEqual(config, left, right) {
-		return true
-	}
-	if controllerutil.ContainsFinalizer(left, config.GatewayFinalizer()) !=
-		controllerutil.ContainsFinalizer(right, config.GatewayFinalizer()) {
-		return true
-	}
-	for _, key := range gatewayBindingAnnotationKeys(config) {
-		if left.Annotations[key] != right.Annotations[key] {
-			return true
-		}
-	}
-	return false
 }
 
 func copyGatewayOwnedMetadata(config controller.Config, target, desired *gatewayv1.Gateway) {
@@ -176,6 +160,7 @@ func gatewayBindingAnnotationKeys(config controller.Config) []string {
 		config.GatewayTopologyAnnotation(),
 		config.GatewayListenerPortAnnotation(),
 		config.GatewayListenerProtocolAnnotation(),
+		config.GatewayUDPListenerModeAnnotation(),
 		config.GatewayClusterIDAnnotation(),
 		config.GatewayProjectIDAnnotation(),
 	}

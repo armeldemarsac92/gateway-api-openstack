@@ -59,13 +59,14 @@ func (r *Reconciler) setGatewayFailure(gateway *gatewayv1.Gateway, validationErr
 		}
 	}
 	existingListeners := append([]gatewayv1.ListenerStatus(nil), gateway.Status.Listeners...)
+	unsupportedMultipleL4 := len(gateway.Spec.Listeners) > 1 && !hasMultipleUDPListeners(gateway)
 	gateway.Status.Addresses = nil
 	controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionAccepted), accepted, string(gatewayReason), message, gateway.Generation))
 	controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionProgrammed), metav1.ConditionFalse, string(programmedReason), message, gateway.Generation))
 	gateway.Status.Listeners = make([]gatewayv1.ListenerStatus, 0, len(gateway.Spec.Listeners))
 	for _, listener := range gateway.Spec.Listeners {
 		gateway.Status.Listeners = append(gateway.Status.Listeners, unprogrammedListenerStatus(
-			listener, existingListeners, gateway.Generation, len(gateway.Spec.Listeners) > 1, listenerSpecific, message,
+			listener, existingListeners, gateway.Generation, unsupportedMultipleL4, listenerSpecific, message,
 		))
 	}
 }
@@ -97,6 +98,9 @@ func unprogrammedListenerStatus(
 		acceptedMessage = "Listener protocol is unsupported"
 		if l4InMultipleListeners {
 			acceptedMessage = fmt.Sprintf("%s requires a Gateway with a single listener", listener.Protocol)
+			if listener.Protocol == gatewayv1.UDPProtocolType {
+				acceptedMessage = "UDP requires a Gateway with only UDP listeners on distinct ports"
+			}
 		}
 	} else if !listenerSpecific {
 		acceptedStatus = metav1.ConditionTrue
@@ -121,10 +125,10 @@ func unprogrammedListenerStatus(
 	return status
 }
 
-func setGatewayAcceptedListeners(gateway *gatewayv1.Gateway, accepted gatewayv1.ListenerStatus) {
+func setGatewayAcceptedListeners(gateway *gatewayv1.Gateway, accepted ...gatewayv1.ListenerStatus) {
 	reason := gatewayv1.GatewayReasonAccepted
 	message := "Gateway configuration is accepted"
-	if len(gateway.Spec.Listeners) > 1 {
+	if len(gateway.Spec.Listeners) != len(accepted) {
 		reason = gatewayv1.GatewayReasonListenersNotValid
 		message = "The HTTP listener is accepted. Other listeners cannot be programmed on this Gateway"
 	}
@@ -133,8 +137,9 @@ func setGatewayAcceptedListeners(gateway *gatewayv1.Gateway, accepted gatewayv1.
 	))
 	listeners := make([]gatewayv1.ListenerStatus, 0, len(gateway.Spec.Listeners))
 	for _, listener := range gateway.Spec.Listeners {
-		if listener.Name == accepted.Name {
-			listeners = append(listeners, accepted)
+		index := slices.IndexFunc(accepted, func(status gatewayv1.ListenerStatus) bool { return status.Name == listener.Name })
+		if index >= 0 {
+			listeners = append(listeners, accepted[index])
 		} else {
 			listeners = append(listeners, unprogrammedListenerStatus(
 				listener, gateway.Status.Listeners, gateway.Generation, true, true, "Listener cannot be programmed on this Gateway",
@@ -348,52 +353,69 @@ func (r *Reconciler) setGatewayProvisioningStatus(
 	message string,
 	advanceProgrammedGeneration bool,
 ) error {
-	attachedRoutes, err := r.attachedRouteCount(ctx, gateway, listener)
-	if err != nil {
-		return err
-	}
-	programmedGeneration := controller.ConditionObservedGeneration(
-		gateway.Status.Conditions,
-		string(gatewayv1.GatewayConditionProgrammed),
-		gateway.Generation,
-		advanceProgrammedGeneration,
-	)
-	controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionProgrammed), programmed, string(gatewayReason), message, programmedGeneration))
-	listenerStatus := gatewayv1.ListenerStatus{
-		Name:           listener.Name,
-		SupportedKinds: supportedRouteKinds(listenerRouteKind(listener.Protocol)),
-		AttachedRoutes: attachedRoutes,
-		Conditions:     existingListenerConditions(gateway, listener.Name),
-	}
-	setAcceptedListenerConditions(&listenerStatus.Conditions, gateway.Generation)
-	listenerProgrammedGeneration := controller.ConditionObservedGeneration(
-		listenerStatus.Conditions,
-		string(gatewayv1.ListenerConditionProgrammed),
-		gateway.Generation,
-		advanceProgrammedGeneration,
-	)
-	controller.SetCondition(&listenerStatus.Conditions, controller.Condition(string(gatewayv1.ListenerConditionProgrammed), programmed, string(listenerReason), message, listenerProgrammedGeneration))
-	setGatewayAcceptedListeners(gateway, listenerStatus)
-	return nil
+	return r.setGatewayListenerStatuses(ctx, gateway, listener, programmed, gatewayReason, listenerReason, message, message, advanceProgrammedGeneration, nil)
 }
 
 func (r *Reconciler) setGatewayProgrammed(ctx context.Context, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, gatewayState cloud.GatewayState) error {
-	attachedRoutes, err := r.attachedRouteCount(ctx, gateway, listener)
+	message := "Octavia load balancer and listener are active"
+	if hasMultipleUDPListeners(gateway) {
+		message = "Octavia load balancer and UDP listeners are active"
+	}
+	if err := r.setGatewayListenerStatuses(ctx, gateway, listener, metav1.ConditionTrue, gatewayv1.GatewayReasonProgrammed,
+		gatewayv1.ListenerReasonProgrammed, message, "Octavia listener is active", true, nil); err != nil {
+		return err
+	}
+	setGatewayAddress(gateway, gatewayState.Address())
+	return nil
+}
+
+func setGatewayAddress(gateway *gatewayv1.Gateway, address string) {
+	addressType := gatewayv1.IPAddressType
+	gateway.Status.Addresses = []gatewayv1.GatewayStatusAddress{{Type: &addressType, Value: address}}
+}
+
+func (r *Reconciler) setGatewayListenerStatuses(
+	ctx context.Context,
+	gateway *gatewayv1.Gateway,
+	primary *gatewayv1.Listener,
+	programmed metav1.ConditionStatus,
+	gatewayReason gatewayv1.GatewayConditionReason,
+	listenerReason gatewayv1.ListenerConditionReason,
+	gatewayMessage, listenerMessage string,
+	advanceProgrammedGeneration bool,
+	udpReadyPorts []int,
+) error {
+	listeners := []*gatewayv1.Listener{primary}
+	if hasMultipleUDPListeners(gateway) {
+		listeners = make([]*gatewayv1.Listener, 0, len(gateway.Spec.Listeners))
+		for index := range gateway.Spec.Listeners {
+			listeners = append(listeners, &gateway.Spec.Listeners[index])
+		}
+	}
+	counts, err := r.attachedRouteCounts(ctx, gateway, listeners)
 	if err != nil {
 		return err
 	}
-	addressType := gatewayv1.IPAddressType
-	gateway.Status.Addresses = []gatewayv1.GatewayStatusAddress{{Type: &addressType, Value: gatewayState.Address()}}
-	controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionProgrammed), metav1.ConditionTrue, string(gatewayv1.GatewayReasonProgrammed), "Octavia load balancer and listener are active", gateway.Generation))
-	listenerStatus := gatewayv1.ListenerStatus{
-		Name:           listener.Name,
-		SupportedKinds: supportedRouteKinds(listenerRouteKind(listener.Protocol)),
-		AttachedRoutes: attachedRoutes,
-		Conditions:     existingListenerConditions(gateway, listener.Name),
+	statuses := make([]gatewayv1.ListenerStatus, 0, len(listeners))
+	for _, listener := range listeners {
+		status := gatewayv1.ListenerStatus{
+			Name:           listener.Name,
+			SupportedKinds: supportedRouteKinds(listenerRouteKind(listener.Protocol)),
+			AttachedRoutes: counts[listener.Name],
+			Conditions:     existingListenerConditions(gateway, listener.Name),
+		}
+		setAcceptedListenerConditions(&status.Conditions, gateway.Generation)
+		generation := controller.ConditionObservedGeneration(status.Conditions, string(gatewayv1.ListenerConditionProgrammed), gateway.Generation, advanceProgrammedGeneration)
+		portProgrammed, portReason, portMessage := programmed, listenerReason, listenerMessage
+		if listener.Protocol == gatewayv1.UDPProtocolType && slices.Contains(udpReadyPorts, int(listener.Port)) {
+			portProgrammed, portReason, portMessage = metav1.ConditionTrue, gatewayv1.ListenerReasonProgrammed, "Octavia listener is active"
+		}
+		controller.SetCondition(&status.Conditions, controller.Condition(string(gatewayv1.ListenerConditionProgrammed), portProgrammed, string(portReason), portMessage, generation))
+		statuses = append(statuses, status)
 	}
-	setAcceptedListenerConditions(&listenerStatus.Conditions, gateway.Generation)
-	controller.SetCondition(&listenerStatus.Conditions, controller.Condition(string(gatewayv1.ListenerConditionProgrammed), metav1.ConditionTrue, string(gatewayv1.ListenerReasonProgrammed), "Octavia listener is active", gateway.Generation))
-	setGatewayAcceptedListeners(gateway, listenerStatus)
+	generation := controller.ConditionObservedGeneration(gateway.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed), gateway.Generation, advanceProgrammedGeneration)
+	controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionProgrammed), programmed, string(gatewayReason), gatewayMessage, generation))
+	setGatewayAcceptedListeners(gateway, statuses...)
 	return nil
 }
 
@@ -403,9 +425,9 @@ func setAcceptedListenerConditions(conditions *[]metav1.Condition, generation in
 	controller.SetCondition(conditions, controller.Condition(string(gatewayv1.ListenerConditionConflicted), metav1.ConditionFalse, string(gatewayv1.ListenerReasonNoConflicts), "Listener has no conflicts", generation))
 }
 
-func (r *Reconciler) attachedRouteCount(ctx context.Context, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) (int32, error) {
+func (r *Reconciler) attachedRouteCounts(ctx context.Context, gateway *gatewayv1.Gateway, listeners []*gatewayv1.Listener) (map[gatewayv1.SectionName]int32, error) {
 	gatewayKey := controller.ObjectKeyString(client.ObjectKeyFromObject(gateway))
-	var count int32
+	counts := make(map[gatewayv1.SectionName]int32, len(listeners))
 	namespaces := make(map[string][]corev1.Namespace)
 	countRoute := func(object runtime.Object) error {
 		route := object.(client.Object)
@@ -414,40 +436,42 @@ func (r *Reconciler) attachedRouteCount(ctx context.Context, gateway *gatewayv1.
 		}
 		refs, parents, _ := controller.RouteParents(route)
 		routeNamespace := route.GetNamespace()
-		for _, parentStatus := range parents {
-			if !routeParentStatusTargetsListener(parentStatus, routeNamespace, gateway, listener, r.Config.ControllerName) {
-				continue
-			}
-			accepted := meta.FindStatusCondition(parentStatus.Conditions, string(gatewayv1.RouteConditionAccepted))
-			if accepted == nil || accepted.Status != metav1.ConditionTrue || accepted.ObservedGeneration != route.GetGeneration() ||
-				!slices.ContainsFunc(refs, func(ref gatewayv1.ParentReference) bool {
-					return controller.ParentRefsEqual(ref, routeNamespace, parentStatus.ParentRef, routeNamespace)
-				}) {
-				continue
-			}
-			if _, observed := namespaces[routeNamespace]; !observed && model.ObservesRouteNamespace(listener) {
-				if r.APIReader == nil {
-					return controller.ErrAPIReaderRequired
+		for _, listener := range listeners {
+			for _, parentStatus := range parents {
+				if !routeParentStatusTargetsListener(parentStatus, routeNamespace, gateway, listener, r.Config.ControllerName) {
+					continue
 				}
-				namespace, err := graph.ReadRouteNamespace(ctx, r.APIReader, routeNamespace)
-				if err != nil {
-					return err
+				accepted := meta.FindStatusCondition(parentStatus.Conditions, string(gatewayv1.RouteConditionAccepted))
+				if accepted == nil || accepted.Status != metav1.ConditionTrue || accepted.ObservedGeneration != route.GetGeneration() ||
+					!slices.ContainsFunc(refs, func(ref gatewayv1.ParentReference) bool {
+						return controller.ParentRefsEqual(ref, routeNamespace, parentStatus.ParentRef, routeNamespace)
+					}) {
+					continue
 				}
-				namespaces[routeNamespace] = nil
-				if namespace != nil {
-					namespaces[routeNamespace] = []corev1.Namespace{*namespace}
+				if _, observed := namespaces[routeNamespace]; !observed && model.ObservesRouteNamespace(listener) {
+					if r.APIReader == nil {
+						return controller.ErrAPIReaderRequired
+					}
+					namespace, err := graph.ReadRouteNamespace(ctx, r.APIReader, routeNamespace)
+					if err != nil {
+						return err
+					}
+					namespaces[routeNamespace] = nil
+					if namespace != nil {
+						namespaces[routeNamespace] = []corev1.Namespace{*namespace}
+					}
 				}
+				if model.AllowsRouteNamespace(listener, gateway.Namespace, routeNamespace, namespaces[routeNamespace]) {
+					counts[listener.Name]++
+				}
+				break
 			}
-			if model.AllowsRouteNamespace(listener, gateway.Namespace, routeNamespace, namespaces[routeNamespace]) {
-				count++
-			}
-			break
 		}
 		return nil
 	}
 	var routes client.ObjectList
 	index := controller.IndexL4RouteByStatusGateway
-	switch listener.Protocol {
+	switch listeners[0].Protocol {
 	case gatewayv1.TCPProtocolType:
 		routes = &gatewayv1.TCPRouteList{}
 	case gatewayv1.UDPProtocolType:
@@ -457,12 +481,12 @@ func (r *Reconciler) attachedRouteCount(ctx context.Context, gateway *gatewayv1.
 		index = controller.IndexHTTPRouteByStatusGateway
 	}
 	if err := r.List(ctx, routes, client.MatchingFields{index: gatewayKey}); err != nil {
-		return 0, err
+		return nil, err
 	}
 	if err := meta.EachListItem(routes, countRoute); err != nil {
-		return 0, err
+		return nil, err
 	}
-	return count, nil
+	return counts, nil
 }
 
 func routeParentStatusTargetsListener(

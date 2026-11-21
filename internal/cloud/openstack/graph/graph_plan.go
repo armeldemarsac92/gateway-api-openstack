@@ -43,6 +43,9 @@ func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual obs
 		}
 		return plan, result, nil
 	}
+	if actual.multiUDP {
+		return p.buildMultiUDPGraphPlan(desired, actual)
+	}
 	if usesDefaultPool(actual.protocol) {
 		return p.buildDefaultPoolGraphPlan(desired, actual)
 	}
@@ -227,7 +230,7 @@ func buildGatewayPrerequisitePlan(desired desiredGatewayGraph, actual observedGa
 	if networkID == "" && actual.floatingIP != nil {
 		plan = append(plan, graphMutation{kind: graphDeleteFloatingIP, message: "Removed a no-longer-configured Floating IP"})
 	}
-	if actual.listener == nil {
+	if actual.listener == nil && !actual.multiUDP {
 		plan = append(plan, graphMutation{kind: graphCreateListener, message: "Created Octavia listener"})
 	}
 	return plan, nil
@@ -238,18 +241,9 @@ func buildGatewayTrafficRestorationPlan(desired desiredGatewayGraph, actual obse
 		actual.listener.DefaultPoolID != "" && !usesDefaultPool(actual.protocol) {
 		return nil, nil
 	}
-	var plan []graphMutation
-	// Restoring an external address also restores traffic. Keep the same
-	// complete-fragment validation boundary as administrative repair.
-	if desired.spec.Gateway.Spec.ExternalNetworkID != "" && (actual.floatingIP == nil || actual.floatingIP.PortID == "") {
-		if actual.state.VIPPortID == "" || actual.state.VIPAddress == "" {
-			return nil, fmt.Errorf("%w: Gateway load balancer has no complete VIP association", cloud.ErrOwnershipConflict)
-		}
-		mutation := graphMutation{kind: graphCreateFloatingIP, message: "Allocated Floating IP"}
-		if actual.floatingIP != nil {
-			mutation = graphMutation{kind: graphAssociateFloatingIP, message: "Restored Floating IP association"}
-		}
-		plan = append(plan, mutation)
+	plan, err := buildGatewayAddressRestorationPlan(desired.spec.Gateway.Spec.ExternalNetworkID, actual)
+	if err != nil {
+		return nil, err
 	}
 	if !actual.listener.AdminStateUp {
 		plan = append(plan, graphMutation{kind: graphEnableListener, message: "Enabled Octavia listener after validating the Gateway graph"})
@@ -260,7 +254,31 @@ func buildGatewayTrafficRestorationPlan(desired desiredGatewayGraph, actual obse
 	return plan, nil
 }
 
+// Restoring an external address restores traffic and requires a complete VIP association.
+func buildGatewayAddressRestorationPlan(networkID string, actual observedGatewayGraph) ([]graphMutation, error) {
+	if networkID == "" || actual.floatingIP != nil && actual.floatingIP.PortID != "" {
+		return nil, nil
+	}
+	if actual.state.VIPPortID == "" || actual.state.VIPAddress == "" {
+		return nil, fmt.Errorf("%w: Gateway load balancer has no complete VIP association", cloud.ErrOwnershipConflict)
+	}
+	mutation := graphMutation{kind: graphCreateFloatingIP, message: "Allocated Floating IP"}
+	if actual.floatingIP != nil {
+		mutation = graphMutation{kind: graphAssociateFloatingIP, message: "Restored Floating IP association"}
+	}
+	return []graphMutation{mutation}, nil
+}
+
 func gatewayGraphDeletionPlan(actual observedGatewayGraph) []graphMutation {
+	if actual.multiUDP {
+		for _, listener := range actual.udpListeners {
+			if listener.DefaultPoolID != "" {
+				mutation := clearListenerDefaultPool(cloud.ListenerProtocolUDP)
+				mutation.listenerID = listener.ID
+				return []graphMutation{mutation}
+			}
+		}
+	}
 	if listener := actual.deletion.defaultPoolListener; listener != nil && listener.DefaultPoolID != "" {
 		return []graphMutation{clearListenerDefaultPool(listener.Protocol)}
 	}
@@ -306,6 +324,10 @@ func routeStateFromObservation(actual observedRouteGraph) cloud.RouteState {
 func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, step graphMutation) error {
 	var err error
 	spec := desired.spec.Gateway.Spec
+	listenerID := step.listenerID
+	if listenerID == "" {
+		listenerID = actual.state.ListenerID
+	}
 	switch step.kind {
 	case graphCreateLoadBalancer:
 		tags, tagErr := desired.identity.GatewayTags(roleLoadBalancer)
@@ -343,20 +365,25 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 		if tagErr != nil {
 			return tagErr
 		}
+		port, name := spec.ListenerPort, spec.ListenerName
+		if step.udpListener.Port != 0 {
+			port, name = step.udpListener.Port, step.udpListener.Name
+			tags = append(tags, udpPortTag(port))
+		}
 		_, err = p.octavia.CreateListener(ctx, listeners.CreateOpts{
-			LoadbalancerID: actual.state.LoadBalancerID, Protocol: listeners.Protocol(cloud.NormalizeListenerProtocol(spec.ListenerProtocol)), ProtocolPort: spec.ListenerPort,
-			Name: spec.ListenerName, Description: desired.identity.Description(roleListener), AdminStateUp: boolPointer(true), Tags: tags,
+			LoadbalancerID: actual.state.LoadBalancerID, Protocol: listeners.Protocol(cloud.NormalizeListenerProtocol(spec.ListenerProtocol)), ProtocolPort: port,
+			Name: name, Description: desired.identity.Description(roleListener), AdminStateUp: boolPointer(true), Tags: tags,
 		})
 	case graphClearListenerDefaultPool, graphSetListenerDefaultPool:
 		// Gophercloud encodes an explicit empty DefaultPoolID as JSON null.
-		_, err = p.octavia.UpdateListener(ctx, actual.state.ListenerID, listeners.UpdateOpts{DefaultPoolID: &step.poolID})
+		_, err = p.octavia.UpdateListener(ctx, listenerID, listeners.UpdateOpts{DefaultPoolID: &step.poolID})
 	case graphRouteMutation:
 		route := desired.routes[step.routeIndex]
 		route.spec.Gateway = actual.state
 		return p.executeRouteMutation(ctx, route, step.route)
 	case graphEnableListener, graphDisableListener:
 		enabled := step.kind == graphEnableListener
-		_, err = p.octavia.UpdateListener(ctx, actual.state.ListenerID, listeners.UpdateOpts{AdminStateUp: boolPointer(enabled)})
+		_, err = p.octavia.UpdateListener(ctx, listenerID, listeners.UpdateOpts{AdminStateUp: boolPointer(enabled)})
 	case graphEnableLoadBalancer, graphDisableLoadBalancer:
 		return p.setLoadBalancerAdminState(ctx, actual.state.LoadBalancerID, step.kind == graphEnableLoadBalancer)
 	case graphDeleteChild:

@@ -17,6 +17,7 @@ limitations under the License.
 package gateway
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"net/netip"
@@ -37,8 +38,9 @@ type gatewayValidationError struct {
 }
 
 func hasListenerRequestFilters(gateway *gatewayv1.Gateway) bool {
+	multiUDP := hasMultipleUDPListeners(gateway)
 	return slices.ContainsFunc(gateway.Spec.Listeners, func(l gatewayv1.Listener) bool {
-		supportedProtocol := l.Protocol == gatewayv1.HTTPProtocolType || (isL4Listener(l.Protocol) && len(gateway.Spec.Listeners) == 1)
+		supportedProtocol := l.Protocol == gatewayv1.HTTPProtocolType || (isL4Listener(l.Protocol) && len(gateway.Spec.Listeners) == 1) || multiUDP
 		return supportedProtocol && l.Filters != nil && len(l.Filters.Requests) != 0
 	})
 }
@@ -57,8 +59,18 @@ func (r *Reconciler) getGatewayClass(ctx context.Context, gateway *gatewayv1.Gat
 	return &gatewayClass, gatewayClass.Spec.ControllerName == r.Config.ControllerName, nil
 }
 
-// Validate returns the listener that the stock Amphora profile can program.
+// Validate returns the primary listener supported by the stock Amphora profile.
+// Use SupportedListeners to obtain all admitted listeners.
 func Validate(gateway *gatewayv1.Gateway) (*gatewayv1.Listener, error) {
+	listeners, err := SupportedListeners(gateway)
+	if err != nil {
+		return nil, err
+	}
+	return listeners[0], nil
+}
+
+// SupportedListeners returns the admitted listeners in ascending port order.
+func SupportedListeners(gateway *gatewayv1.Gateway) ([]*gatewayv1.Listener, error) {
 	if gateway.Spec.Infrastructure != nil {
 		return nil, &gatewayValidationError{
 			message:       "spec.infrastructure is not supported",
@@ -77,15 +89,19 @@ func Validate(gateway *gatewayv1.Gateway) (*gatewayv1.Listener, error) {
 			gatewayReason: gatewayv1.GatewayReasonInvalidParameters,
 		}
 	}
-	var listener *gatewayv1.Listener
-	if len(gateway.Spec.Listeners) == 1 && isL4Listener(gateway.Spec.Listeners[0].Protocol) {
-		listener = &gateway.Spec.Listeners[0]
-		if err := validateL4Listener(listener); err != nil {
-			return nil, err
+	var listeners []*gatewayv1.Listener
+	switch {
+	case hasMultipleUDPListeners(gateway):
+		for i := range gateway.Spec.Listeners {
+			listeners = append(listeners, &gateway.Spec.Listeners[i])
 		}
-	} else {
-		var err error
-		listener, err = HTTPListener(gateway)
+		slices.SortFunc(listeners, func(left, right *gatewayv1.Listener) int {
+			return cmp.Compare(left.Port, right.Port)
+		})
+	case len(gateway.Spec.Listeners) == 1 && isL4Listener(gateway.Spec.Listeners[0].Protocol):
+		listeners = append(listeners, &gateway.Spec.Listeners[0])
+	default:
+		listener, err := HTTPListener(gateway)
 		if err != nil {
 			return nil, err
 		}
@@ -97,13 +113,19 @@ func Validate(gateway *gatewayv1.Gateway) (*gatewayv1.Listener, error) {
 				return nil, fmt.Errorf("invalid listener hostname: %w", err)
 			}
 		}
+		listeners = append(listeners, listener)
 	}
-	if hasListenerRequestFilters(gateway) {
-		return nil, fmt.Errorf("listener request filters cannot be enforced by the stock Amphora %s profile", listener.Protocol)
-	}
-	kind := listenerRouteKind(listener.Protocol)
-	if listener.AllowedRoutes != nil {
-		if slices.ContainsFunc(listener.AllowedRoutes.Kinds, func(ref gatewayv1.RouteGroupKind) bool {
+	for _, listener := range listeners {
+		if isL4Listener(listener.Protocol) {
+			if err := validateL4Listener(listener); err != nil {
+				return nil, err
+			}
+		}
+		if listener.Filters != nil && len(listener.Filters.Requests) != 0 {
+			return nil, fmt.Errorf("listener request filters cannot be enforced by the stock Amphora %s profile", listener.Protocol)
+		}
+		kind := listenerRouteKind(listener.Protocol)
+		if listener.AllowedRoutes != nil && slices.ContainsFunc(listener.AllowedRoutes.Kinds, func(ref gatewayv1.RouteGroupKind) bool {
 			return !isRouteGroupKind(ref, kind)
 		}) {
 			return nil, fmt.Errorf("only %s is supported in listener allowedRoutes.kinds", kind)
@@ -112,7 +134,25 @@ func Validate(gateway *gatewayv1.Gateway) (*gatewayv1.Listener, error) {
 	if err := validateAddresses(gateway.Spec.Addresses); err != nil {
 		return nil, err
 	}
-	return listener, nil
+	return listeners, nil
+}
+
+// hasMultipleUDPListeners describes the Gateway shape eligible for enrollment.
+func hasMultipleUDPListeners(gateway *gatewayv1.Gateway) bool {
+	if len(gateway.Spec.Listeners) < 2 {
+		return false
+	}
+	ports := make(map[gatewayv1.PortNumber]struct{}, len(gateway.Spec.Listeners))
+	for _, listener := range gateway.Spec.Listeners {
+		if listener.Protocol != gatewayv1.UDPProtocolType || listener.Port < 1 || listener.Port > 65535 {
+			return false
+		}
+		if _, exists := ports[listener.Port]; exists {
+			return false
+		}
+		ports[listener.Port] = struct{}{}
+	}
+	return true
 }
 
 func isL4Listener(protocol gatewayv1.ProtocolType) bool {
@@ -228,7 +268,7 @@ func HTTPListener(gateway *gatewayv1.Gateway) (*gatewayv1.Listener, error) {
 		}
 	}
 	if http == nil {
-		return nil, fmt.Errorf("a plain HTTP listener, a single TCP listener, or a single UDP listener is required")
+		return nil, fmt.Errorf("a plain HTTP listener, a single TCP listener, or UDP listeners on distinct ports are required")
 	}
 	return http, nil
 }

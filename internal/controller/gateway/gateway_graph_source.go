@@ -19,9 +19,11 @@ package gateway
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strconv"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
@@ -35,16 +37,7 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 		return graph.GatewayInput{}, controller.ErrAPIReaderRequired
 	}
 	if request.Action == graph.DeleteRoute {
-		var current gatewayv1.Gateway
-		err := r.APIReader.Get(ctx, client.ObjectKey{Namespace: request.Identity.GatewayNamespace, Name: request.Identity.GatewayName}, &current)
-		if err != nil && !apierrors.IsNotFound(err) {
-			return graph.GatewayInput{}, err
-		}
-		input := graph.GatewayInput{Node: cloud.GatewayGraphNode{Disposition: cloud.GraphPreserve}}
-		if err == nil && string(current.UID) == request.Identity.GatewayUID {
-			input.Object = &current
-		}
-		return input, nil
+		return r.observeGatewayForRouteDeletion(ctx, request)
 	}
 	if request.Gateway == nil {
 		return graph.GatewayInput{}, errors.New("expected Gateway revision is required")
@@ -57,11 +50,16 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 		if snapshot.disposition == gatewayCleanupHold || snapshot.identity != request.Identity {
 			return graph.GatewayInput{}, errGatewayChanged
 		}
+		port, _ := strconv.Atoi(snapshot.boundListenerPort)
+		spec := cloud.GatewaySpec{ListenerProtocol: string(snapshot.boundListenerProtocol), ListenerPort: port}
+		if snapshot.udpListenerMode {
+			spec.UDPListeners = []cloud.UDPListener{}
+		}
 		return graph.GatewayInput{
 			Object: request.Gateway.DeepCopy(),
 			Node: cloud.GatewayGraphNode{
 				Disposition: cloud.GraphDelete,
-				Spec:        cloud.GatewaySpec{ListenerProtocol: string(snapshot.boundListenerProtocol)},
+				Spec:        spec,
 			},
 			Validate: func(ctx context.Context) error {
 				latest, err := r.observeGatewayCleanupSnapshot(ctx, request.Gateway)
@@ -82,9 +80,78 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 	if err != nil {
 		return graph.GatewayInput{}, err
 	}
-	desired := r.gatewaySpec(snapshot.gateway, snapshot.listener, snapshot.topology)
+	desired := r.gatewaySpec(snapshot.gateway, snapshot.listeners, snapshot.topology)
 	return graph.GatewayInput{
 		Object: snapshot.gateway, Node: cloud.GatewayGraphNode{Disposition: cloud.GraphEnsure, Spec: desired},
 		Validate: func(ctx context.Context) error { return r.sealGatewayMutationSnapshot(ctx, snapshot) },
 	}, nil
+}
+
+func (r *Reconciler) observeGatewayForRouteDeletion(ctx context.Context, request graph.Request) (graph.GatewayInput, error) {
+	input := graph.GatewayInput{Node: cloud.GatewayGraphNode{Disposition: cloud.GraphPreserve}}
+	var routeAnchor int
+	if route := request.UDPRoute; route != nil {
+		identity, present, err := controller.StoredRouteIdentity(r.Config, route)
+		if err != nil {
+			return graph.GatewayInput{}, err
+		}
+		routeAnchor = controller.UDPRouteAnchor(r.Config, route)
+		if routeAnchor != 0 {
+			if !present || identity != request.Identity || route.Annotations[r.Config.RouteLifecycleAnnotation()] != controller.RouteDetaching {
+				return graph.GatewayInput{}, errGatewayChanged
+			}
+			input.Node.Spec = cloud.GatewaySpec{ListenerProtocol: cloud.ListenerProtocolUDP, ListenerPort: routeAnchor, UDPListeners: []cloud.UDPListener{}}
+		}
+	}
+
+	var current gatewayv1.Gateway
+	key := client.ObjectKey{Namespace: request.Identity.GatewayNamespace, Name: request.Identity.GatewayName}
+	if err := r.APIReader.Get(ctx, key, &current); err != nil {
+		return input, client.IgnoreNotFound(err)
+	}
+	if string(current.UID) != request.Identity.GatewayUID {
+		return input, nil
+	}
+	input.Object = &current
+	boundProtocol := r.boundListenerProtocol(&current)
+	scopedBinding := controller.HasGatewayUDPListenerModeBinding(r.Config, &current)
+	if !scopedBinding && boundProtocol != gatewayv1.UDPProtocolType && routeAnchor == 0 {
+		return input, nil
+	}
+	if err := controller.ValidateGatewayBinding(r.Config, &current); err != nil {
+		// Scoped ownership comes only from a verified Gateway or route
+		// checkpoint. Never reinterpret a damaged current binding as legacy.
+		return graph.GatewayInput{}, err
+	}
+	owner := request.Identity
+	owner.RouteNamespace, owner.RouteName, owner.RouteUID = "", "", ""
+	port, err := strconv.Atoi(current.Annotations[r.Config.GatewayListenerPortAnnotation()])
+	if err != nil || port < 1 || port > 65535 || !controllerutil.ContainsFinalizer(&current, r.Config.GatewayFinalizer()) ||
+		controller.StoredGatewayIdentity(r.Config, &current) != owner {
+		return input, nil
+	}
+	switch {
+	case controller.GatewayUsesMultipleUDPListeners(r.Config, &current):
+		if request.UDPRoute != nil && routeAnchor != port {
+			return graph.GatewayInput{}, fmt.Errorf("%w: UDPRoute cleanup lacks the enrolled Gateway's frozen anchor", cloud.ErrOwnershipConflict)
+		}
+		input.Node.Spec = cloud.GatewaySpec{ListenerProtocol: cloud.ListenerProtocolUDP, ListenerPort: port, UDPListeners: []cloud.UDPListener{}}
+	case boundProtocol != gatewayv1.UDPProtocolType:
+		// Changing a bound protocol requires verified teardown of the old
+		// graph. Use the current legacy preservation path for its replacement.
+		input.Node.Spec = cloud.GatewaySpec{}
+	case routeAnchor != port:
+		input.Node.Spec = cloud.GatewaySpec{ListenerProtocol: cloud.ListenerProtocolUDP, ListenerPort: port}
+	}
+	input.Validate = func(ctx context.Context) error {
+		var latest gatewayv1.Gateway
+		if err := r.APIReader.Get(ctx, key, &latest); err != nil {
+			return errors.Join(errGatewayChanged, client.IgnoreNotFound(err))
+		}
+		if latest.UID != current.UID || !controller.GatewayBindingMetadataEqual(r.Config, &current, &latest) {
+			return errGatewayChanged
+		}
+		return nil
+	}
+	return input, nil
 }

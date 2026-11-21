@@ -19,6 +19,7 @@ package l4route
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -404,6 +405,80 @@ func TestUDPRouteAcceptsBothCandidatesAndDoesNotSkipInvalidWinner(t *testing.T) 
 	checkRouteCondition(t, current, r.Config.ControllerName, "Accepted", metav1.ConditionTrue, "Accepted")
 	checkRouteCondition(t, current, r.Config.ControllerName, "ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")
 	checkRouteCondition(t, current, r.Config.ControllerName, r.Config.Domain()+"/Programmed", metav1.ConditionFalse, "NotSelected")
+}
+
+func TestUDPRouteElectionKeepsOtherListenerWhenOlderTargetIsInvalid(t *testing.T) {
+	gateway, class, broad := udpRouteFixture()
+	service := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: broad.Namespace, Name: "backend", UID: "udp-service"},
+		Spec: corev1.ServiceSpec{Ports: []corev1.ServicePort{{Port: 8080, Protocol: corev1.ProtocolUDP}}},
+	}
+	r := testReconciler(t, gateway, class, broad, service)
+	r.Protocol = gatewayv1.UDPProtocolType
+	identity := bindFixture(t, r, gateway, broad, cloud.MemberModeEndpoint)
+
+	base := broad.DeepCopy()
+	controller.SealUDPRouteAnchor(r.Config, broad, identity, 8080)
+	if err := r.Patch(t.Context(), broad, controller.OptimisticMergeFrom(base)); err != nil {
+		t.Fatal(err)
+	}
+	controller.SetGatewayUDPListenerMode(r.Config, gateway, true)
+	gateway.Spec.Listeners = append(gateway.Spec.Listeners, gatewayv1.Listener{
+		Name: "other-udp", Protocol: gatewayv1.UDPProtocolType, Port: 8053,
+	})
+	if err := r.Update(t.Context(), gateway); err != nil {
+		t.Fatal(err)
+	}
+	older := broad.DeepCopy()
+	older.Name, older.UID, older.ResourceVersion = "older-specific", "route-specific", ""
+	older.Finalizers, older.Annotations, older.Status.Parents = nil, nil, nil
+	older.CreationTimestamp = metav1.NewTime(broad.CreationTimestamp.Add(-time.Minute))
+	older.Spec.ParentRefs[0].SectionName = ptr.To(gatewayv1.SectionName("udp"))
+	older.Spec.ParentRefs[0].Port = ptr.To(gatewayv1.PortNumber(8080))
+	older.Spec.Rules[0].BackendRefs[0].Name = "missing"
+	if err := r.Create(t.Context(), older); err != nil {
+		t.Fatal(err)
+	}
+	request := graph.Request{Identity: identity, Action: graph.Ensure, Gateway: gateway, UDPRoute: broad}
+	input, err := r.ObserveRouteGraph(t.Context(), request, gateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(input.Nodes) != 1 || input.Nodes[0].Disposition != cloud.GraphEnsure ||
+		!slices.Equal(input.Nodes[0].Spec.UDPListenerPorts, []int{8053}) ||
+		input.Nodes[0].Spec.GatewayRequirements.ListenerPort != 8080 {
+		t.Fatalf("UDP graph with invalid winner on the anchor: %+v", input.Nodes)
+	}
+
+	older.Spec.ParentRefs[0].SectionName = ptr.To(gatewayv1.SectionName("other-udp"))
+	if err := r.Update(t.Context(), older); err != nil {
+		t.Fatal(err)
+	}
+	if err := input.Validate(t.Context()); !errors.Is(err, controller.ErrGraphInputChanged) {
+		t.Fatalf("changed conjunction did not fence the graph: %v", err)
+	}
+	input, err = r.ObserveRouteGraph(t.Context(), request, gateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(input.Nodes) != 1 || !slices.Equal(input.Nodes[0].Spec.UDPListenerPorts, []int{8053, 8080}) {
+		t.Fatalf("UDP graph for the broad route after a mismatched section and port: %+v", input.Nodes)
+	}
+
+	// An invalid older route winning both listeners withdraws the younger
+	// pool's defaults, even before its separate detach reconcile runs.
+	older.Spec.ParentRefs[0] = gatewayv1.ParentReference{Name: "edge"}
+	if err := r.Update(t.Context(), older); err != nil {
+		t.Fatal(err)
+	}
+	gatewayRequest := graph.Request{Identity: controller.GatewayIdentity(r.Config, gateway), Action: graph.Ensure, Gateway: gateway}
+	input, err = r.ObserveRouteGraph(t.Context(), gatewayRequest, gateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(input.Nodes) != 1 || input.Nodes[0].Disposition != cloud.GraphPreserve ||
+		input.Nodes[0].RetainUDPListenerPorts == nil || len(input.Nodes[0].RetainUDPListenerPorts) != 0 {
+		t.Fatalf("losing UDP pool should withdraw every default before cleanup: %+v", input.Nodes)
+	}
 }
 
 func TestUDPRouteDetachesAfterRestartWithoutUDPListener(t *testing.T) {

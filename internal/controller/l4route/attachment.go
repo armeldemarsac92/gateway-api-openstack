@@ -33,11 +33,11 @@ import (
 )
 
 type routeParent struct {
-	ref      gatewayv1.ParentReference
-	gateway  *gatewayv1.Gateway
-	class    *gatewayv1.GatewayClass
-	listener *gatewayv1.Listener
-	rejected model.Diagnostic
+	ref       gatewayv1.ParentReference
+	gateway   *gatewayv1.Gateway
+	class     *gatewayv1.GatewayClass
+	listeners []*gatewayv1.Listener
+	rejected  model.Diagnostic
 }
 
 func gatewayKey(route *transportRoute, parent gatewayv1.ParentReference) client.ObjectKey {
@@ -50,6 +50,7 @@ func gatewayKey(route *transportRoute, parent gatewayv1.ParentReference) client.
 
 func (r *Reconciler) managedParents(ctx context.Context, route *transportRoute) ([]routeParent, error) {
 	var parents []routeParent
+	namespaces := make(routeNamespaceCache)
 	for _, ref := range route.parentRefs {
 		if !controller.IsGatewayParentRef(ref) {
 			continue
@@ -69,7 +70,7 @@ func (r *Reconciler) managedParents(ctx context.Context, route *transportRoute) 
 			continue
 		}
 		parent := routeParent{ref: ref, gateway: gateway, class: class}
-		parent.listener, parent.rejected, err = r.attachment(ctx, route, gateway, ref)
+		parent.listeners, parent.rejected, err = r.attachment(ctx, route, gateway, ref, namespaces)
 		if err != nil {
 			return nil, err
 		}
@@ -89,30 +90,39 @@ func (r *Reconciler) gatewayClass(ctx context.Context, gateway *gatewayv1.Gatewa
 	return class, nil
 }
 
-func (r *Reconciler) attachment(ctx context.Context, route *transportRoute, gateway *gatewayv1.Gateway, ref gatewayv1.ParentReference) (*gatewayv1.Listener, model.Diagnostic, error) {
+func (r *Reconciler) attachment(ctx context.Context, route *transportRoute, gateway *gatewayv1.Gateway, ref gatewayv1.ParentReference, namespaces routeNamespaceCache) ([]*gatewayv1.Listener, model.Diagnostic, error) {
 	noMatch := model.Diagnostic{Reason: string(gatewayv1.RouteReasonNoMatchingParent), Message: "parent reference does not select a live Gateway listener"}
 	if !gateway.DeletionTimestamp.IsZero() {
 		return nil, noMatch, nil
 	}
 	selected := false
+	var admitted, supported []*gatewayv1.Listener
 	for i := range gateway.Spec.Listeners {
 		candidate := &gateway.Spec.Listeners[i]
 		if !parentSelects(ref, candidate) {
 			continue
 		}
 		selected = true
-		allowed, err := r.listenerAllows(ctx, candidate, gateway.Namespace, route.GetNamespace())
+		allowed, err := r.listenerAllows(ctx, candidate, gateway.Namespace, route.GetNamespace(), namespaces)
 		if err != nil {
 			return nil, model.Diagnostic{}, err
 		}
 		if !allowed {
 			continue
 		}
-		listener, err := gatewaycontroller.Validate(gateway)
-		if err != nil || listener.Protocol != r.protocol() || listener.Name != candidate.Name {
+		if supported == nil {
+			supported, err = gatewaycontroller.SupportedListeners(gateway)
+			if err != nil {
+				return nil, model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: fmt.Sprintf("the Gateway must support the selected %s listener", r.protocol())}, nil
+			}
+		}
+		if !slices.Contains(supported, candidate) {
 			return nil, model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: fmt.Sprintf("the Gateway must support the selected %s listener", r.protocol())}, nil
 		}
-		return listener, model.Diagnostic{}, nil
+		admitted = append(admitted, candidate)
+	}
+	if len(admitted) != 0 {
+		return admitted, model.Diagnostic{}, nil
 	}
 	if !selected {
 		return nil, noMatch, nil
@@ -124,7 +134,9 @@ func parentSelects(ref gatewayv1.ParentReference, listener *gatewayv1.Listener) 
 	return (ref.SectionName == nil || *ref.SectionName == listener.Name) && (ref.Port == nil || *ref.Port == listener.Port)
 }
 
-func (r *Reconciler) listenerAllows(ctx context.Context, listener *gatewayv1.Listener, gatewayNamespace, routeNamespace string) (bool, error) {
+type routeNamespaceCache map[string][]corev1.Namespace
+
+func (r *Reconciler) listenerAllows(ctx context.Context, listener *gatewayv1.Listener, gatewayNamespace, routeNamespace string, namespaces routeNamespaceCache) (bool, error) {
 	if listener.Protocol != r.protocol() {
 		return false, nil
 	}
@@ -134,15 +146,20 @@ func (r *Reconciler) listenerAllows(ctx context.Context, listener *gatewayv1.Lis
 	}) {
 		return false, nil
 	}
-	var namespaces []corev1.Namespace
 	if model.ObservesRouteNamespace(listener) {
-		var namespace corev1.Namespace
-		if err := r.APIReader.Get(ctx, client.ObjectKey{Name: routeNamespace}, &namespace); err != nil {
-			return false, client.IgnoreNotFound(err)
+		if _, checked := namespaces[routeNamespace]; !checked {
+			var namespace corev1.Namespace
+			err := r.APIReader.Get(ctx, client.ObjectKey{Name: routeNamespace}, &namespace)
+			if err == nil {
+				namespaces[routeNamespace] = []corev1.Namespace{namespace}
+			} else if apierrors.IsNotFound(err) {
+				namespaces[routeNamespace] = nil
+			} else {
+				return false, err
+			}
 		}
-		namespaces = []corev1.Namespace{namespace}
 	}
-	return model.AllowsRouteNamespace(listener, gatewayNamespace, routeNamespace, namespaces), nil
+	return model.AllowsRouteNamespace(listener, gatewayNamespace, routeNamespace, namespaces[routeNamespace]), nil
 }
 
 func listenerCandidates(gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, routes []*transportRoute) []*transportRoute {
@@ -166,9 +183,9 @@ func listenerCandidates(gateway *gatewayv1.Gateway, listener *gatewayv1.Listener
 
 // selectedRoute uses only attachment inputs. An unusable oldest route still
 // wins the listener and prevents traffic from leaking to a younger route.
-func (r *Reconciler) selectedRoute(ctx context.Context, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, candidates []*transportRoute) (*transportRoute, error) {
+func (r *Reconciler) selectedRoute(ctx context.Context, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, candidates []*transportRoute, namespaces routeNamespaceCache) (*transportRoute, error) {
 	for _, route := range candidates {
-		allowed, err := r.listenerAllows(ctx, listener, gateway.Namespace, route.GetNamespace())
+		allowed, err := r.listenerAllows(ctx, listener, gateway.Namespace, route.GetNamespace(), namespaces)
 		if allowed || err != nil {
 			return route, err
 		}

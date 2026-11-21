@@ -89,10 +89,15 @@ func (r *Reconciler) cleanupGateway(ctx context.Context, scope *gatewayScope) (c
 	}
 	if snapshot.disposition == gatewayCleanupRebuild {
 		if snapshot.listenerPort == "" {
-			return ctrl.Result{}, nil
+			if !controller.GatewayUsesMultipleUDPListeners(r.Config, scope.gateway) {
+				return ctrl.Result{}, nil
+			}
+			controller.SetGatewayUDPListenerMode(r.Config, scope.gateway, false)
+			return ctrl.Result{}, r.patchGatewayMetadata(ctx, scope)
 		}
 		scope.gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] = snapshot.listenerPort
 		scope.gateway.Annotations[r.Config.GatewayListenerProtocolAnnotation()] = string(snapshot.listenerProtocol)
+		controller.SetGatewayUDPListenerMode(r.Config, scope.gateway, false)
 		if err := r.patchGatewayMetadata(ctx, scope); err != nil {
 			return ctrl.Result{}, fmt.Errorf("checkpoint Gateway graph replacement: %w", err)
 		}
@@ -102,6 +107,7 @@ func (r *Reconciler) cleanupGateway(ctx context.Context, scope *gatewayScope) (c
 	controllerutil.RemoveFinalizer(scope.gateway, r.Config.GatewayFinalizer())
 	delete(scope.gateway.Annotations, r.Config.GatewayListenerPortAnnotation())
 	delete(scope.gateway.Annotations, r.Config.GatewayListenerProtocolAnnotation())
+	delete(scope.gateway.Annotations, r.Config.GatewayUDPListenerModeAnnotation())
 	delete(scope.gateway.Annotations, r.Config.GatewayClusterIDAnnotation())
 	delete(scope.gateway.Annotations, r.Config.GatewayProjectIDAnnotation())
 	if err := r.patchGatewayMetadata(ctx, scope); err != nil {

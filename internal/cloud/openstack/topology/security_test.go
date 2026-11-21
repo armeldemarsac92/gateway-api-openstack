@@ -171,6 +171,26 @@ func TestGatewaySecurityObservesExternalRepairs(t *testing.T) {
 	}
 }
 
+func TestUDPFrontendSecurityFollowsCurrentListenerPorts(t *testing.T) {
+	f := newTopologyFixture(t)
+	f.resolver.clients.LoadBalancer.Microversion = "2.29"
+	f.responses["/"] = fixtureResponse{body: `{"versions":[{"id":"v2.29","status":"CURRENT"}]}`}
+	spec := cloud.GatewaySpec{
+		VIPSubnetID: "vip-subnet", ListenerProtocol: "UDP", ListenerPort: 5353,
+		VIPSecurityGroupIDs: []string{"sg-a"},
+		UDPListeners:        []cloud.UDPListener{{Name: "first", Port: 5353}, {Name: "second", Port: 5354}},
+	}
+	f.responses["/v2.0/security-groups/sg-a"] = fixtureResponse{body: `{"security_group":{"id":"sg-a","project_id":"project-a","security_group_rules":[{"direction":"ingress","ethertype":"IPv4","protocol":"udp","port_range_min":5353,"port_range_max":5353}]}}`}
+	if err := f.resolver.ValidateGatewaySecurity(t.Context(), spec, nil); !errors.Is(err, cloud.ErrDependencyNotReady) {
+		t.Fatalf("second port lacks an ingress rule: %v", err)
+	}
+	spec.UDPListeners = spec.UDPListeners[1:]
+	f.responses["/v2.0/security-groups/sg-a"] = fixtureResponse{body: `{"security_group":{"id":"sg-a","project_id":"project-a","security_group_rules":[{"direction":"ingress","ethertype":"IPv4","protocol":"udp","port_range_min":5354,"port_range_max":5354}]}}`}
+	if err := f.resolver.ValidateGatewaySecurity(t.Context(), spec, nil); err != nil {
+		t.Fatalf("remaining port is allowed after removing the original port: %v", err)
+	}
+}
+
 func TestBackendSecurityChecksPortAndScopesFailure(t *testing.T) {
 	f := newTopologyFixture(t)
 	f.responses["/v2.0/security-groups/sg-a"] = fixtureResponse{body: `{"security_group":{"id":"sg-a","project_id":"project-a","security_group_rules":[{"direction":"ingress","ethertype":"IPv4","protocol":"tcp"}]}}`}

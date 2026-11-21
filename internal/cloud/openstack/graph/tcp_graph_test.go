@@ -22,9 +22,12 @@ import (
 	"maps"
 	"net/http"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	openstackidentity "github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/identity"
 )
 
 const (
@@ -46,7 +49,9 @@ type tcpGraphFixture struct {
 	inventory              map[string]map[string]any
 	writes                 []string
 	loseNextListenerUpdate bool
+	loseNextListenerCreate bool
 	hiddenChild            string
+	unreferencedChild      string
 	extraListedMembers     []map[string]any
 	rejectMonitorDelay     float64
 }
@@ -83,19 +88,26 @@ func (f *tcpGraphFixture) reconcile(provider *Provider) cloud.GatewayGraphResult
 
 func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 	type collection struct{ name, parentKey, parentID, responseParent string }
-	collections := map[string]collection{
-		tcpLBs:       {"loadbalancer", "", "", ""},
-		tcpListeners: {"listener", "loadbalancer_id", "gateway", "loadbalancers"},
-		tcpPools:     {"pool", "loadbalancer_id", "gateway", "loadbalancers"},
-		tcpMembers:   {"member", "", "", ""},
-		tcpMonitors:  {"healthmonitor", "pool_id", "pool", "pools"},
+	resource := req.URL.Path
+	memberCollection := tcpMembers
+	if subpath, found := strings.CutPrefix(resource, tcpPools+"/"); found {
+		poolID, child, _ := strings.Cut(subpath, "/")
+		if child == "members" || strings.HasPrefix(child, "members/") {
+			memberCollection = tcpPools + "/" + poolID + "/members"
+		}
 	}
-	resources := map[string]string{tcpLBs: tcpLB, tcpListeners: tcpListener, tcpPools: tcpPool, tcpMembers: tcpMember, tcpMonitors: tcpMonitor}
+	collections := map[string]collection{
+		tcpLBs:           {"loadbalancer", "", "", ""},
+		tcpListeners:     {"listener", "loadbalancer_id", "gateway", "loadbalancers"},
+		tcpPools:         {"pool", "loadbalancer_id", "gateway", "loadbalancers"},
+		memberCollection: {"member", "", "", ""},
+		tcpMonitors:      {"healthmonitor", "pool_id", req.URL.Query().Get("pool_id"), "pools"},
+	}
+	resources := map[string]string{tcpLBs: tcpLB, tcpListeners: tcpListener, tcpPools: tcpPool, memberCollection: memberCollection + "/member", tcpMonitors: tcpMonitor}
 	reject := func() {
 		f.t.Errorf("unexpected Octavia request %s %s", req.Method, req.URL.RequestURI())
 		http.Error(w, "unexpected request", http.StatusBadRequest)
 	}
-	resource := req.URL.Path
 	if resource == "/v2.0/floatingips" && req.Method == http.MethodGet {
 		safetyWriteJSON(f.t, w, map[string]any{"floatingips": []any{}})
 		return
@@ -107,6 +119,9 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	for listPath, entryPath := range resources {
+		if id, found := strings.CutPrefix(resource, listPath+"/"); found && !strings.Contains(id, "/") {
+			entryPath = resource
+		}
 		if resource != listPath && resource != entryPath {
 			continue
 		}
@@ -120,10 +135,13 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 					return
 				}
 				items := []map[string]any{}
-				if entry != nil && entryPath != f.hiddenChild {
-					items = append(items, entry)
+				for _, child := range f.children(listPath) {
+					if listPath+"/"+child["id"].(string) != f.hiddenChild &&
+						(listPath != tcpMonitors || child["pool_id"] == kind.parentID) {
+						items = append(items, child)
+					}
 				}
-				if listPath == tcpMembers {
+				if listPath == memberCollection {
 					items = append(items, f.extraListedMembers...)
 				}
 				safetyWriteJSON(f.t, w, map[string]any{kind.name + "s": items})
@@ -131,10 +149,12 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 				w.WriteHeader(http.StatusNotFound)
 			} else {
 				if resource == tcpLB {
-					for key, child := range map[string]string{"listeners": tcpListener, "pools": tcpPool} {
+					for key, collection := range map[string]string{"listeners": tcpListeners, "pools": tcpPools} {
 						references := []map[string]any{}
-						if item := f.inventory[child]; item != nil {
-							references = append(references, map[string]any{"id": item["id"]})
+						for _, item := range f.children(collection) {
+							if collection+"/"+item["id"].(string) != f.unreferencedChild {
+								references = append(references, map[string]any{"id": item["id"]})
+							}
 						}
 						entry[key] = references
 					}
@@ -144,11 +164,25 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 		case http.MethodPost:
 			f.writes = append(f.writes, req.Method+" "+resource)
 			var body map[string]map[string]any
-			if resource != listPath || entry != nil || json.NewDecoder(req.Body).Decode(&body) != nil || body[kind.name] == nil {
+			if resource != listPath || json.NewDecoder(req.Body).Decode(&body) != nil || body[kind.name] == nil {
 				reject()
 				return
 			}
 			data := body[kind.name]
+			if listPath == tcpListeners && data["protocol_port"] != float64(f.spec.Gateway.Spec.ListenerPort) {
+				entryPath = tcpListener + "-" + strconv.Itoa(int(data["protocol_port"].(float64)))
+			}
+			if listPath == tcpPools && len(f.spec.Routes) > 1 &&
+				slices.Contains(pilotTags(data["tags"]), openstackidentity.Tag("route-uid", f.spec.Routes[1].Spec.Identity.RouteUID)) {
+				entryPath = tcpPool + "-secondary"
+			}
+			if listPath == tcpMonitors && data["pool_id"] == "pool-secondary" {
+				entryPath = tcpMonitor + "-secondary"
+			}
+			if f.inventory[entryPath] != nil {
+				reject()
+				return
+			}
 			_, linked := data["listener_id"]
 			_, defaulted := data["default_pool_id"]
 			protocol := f.spec.Gateway.Spec.ListenerProtocol
@@ -183,8 +217,15 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 				data["vip_address"], data["vip_port_id"] = "127.0.0.1", "vip-port"
 			case tcpListeners:
 				data["default_pool_id"] = nil
+			case tcpPools:
+				data["listeners"] = []map[string]any{}
 			}
 			f.inventory[entryPath] = data
+			if listPath == tcpListeners && f.loseNextListenerCreate {
+				f.loseNextListenerCreate = false
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
 			safetyWriteJSON(f.t, w, map[string]any{kind.name: data})
@@ -218,17 +259,19 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 				return
 			}
 			target, ok := payload["default_pool_id"]
-			monitorRequired := f.spec.Routes[0].Spec.HealthMonitor != (cloud.HealthMonitorConfig{})
-			if resource != tcpListener || !ok || len(payload) != 1 || target != nil && (target != "pool" || f.inventory[tcpMember]["provisioning_status"] != "ACTIVE" ||
-				f.inventory[tcpPool]["provisioning_status"] != "ACTIVE" || monitorRequired && f.inventory[tcpMonitor]["provisioning_status"] != "ACTIVE") {
+			if listPath != tcpListeners || !ok || len(payload) != 1 || target != nil && !f.poolReady(target.(string)) {
 				reject()
 				return
 			}
 			entry["default_pool_id"], entry["provisioning_status"] = target, "PENDING_UPDATE"
-			if target == nil {
-				f.inventory[tcpPool]["listeners"] = nil
-			} else {
-				f.inventory[tcpPool]["listeners"] = []map[string]any{{"id": "listener"}}
+			for _, pool := range f.children(tcpPools) {
+				references := []map[string]any{}
+				for _, listener := range f.children(tcpListeners) {
+					if listener["default_pool_id"] == pool["id"] {
+						references = append(references, map[string]any{"id": listener["id"]})
+					}
+				}
+				pool["listeners"] = references
 			}
 			if f.loseNextListenerUpdate {
 				f.loseNextListenerUpdate = false
@@ -238,7 +281,15 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 			safetyWriteJSON(f.t, w, map[string]any{kind.name: entry})
 		case http.MethodDelete:
 			f.writes = append(f.writes, req.Method+" "+resource)
-			if resource != entryPath || entry == nil || f.inventory[tcpListener]["default_pool_id"] != nil {
+			poolID := entry["pool_id"]
+			switch listPath {
+			case tcpPools:
+				poolID = entry["id"]
+			case memberCollection:
+				poolID = strings.TrimSuffix(strings.TrimPrefix(memberCollection, tcpPools+"/"), "/members")
+			}
+			if resource != entryPath || entry == nil || entry["default_pool_id"] != nil ||
+				poolID != nil && slices.ContainsFunc(f.children(tcpListeners), func(listener map[string]any) bool { return listener["default_pool_id"] == poolID }) {
 				reject()
 				return
 			}
@@ -250,6 +301,308 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	reject()
+}
+
+func (f *tcpGraphFixture) poolReady(id string) bool {
+	routeIndex, monitorPath := 0, tcpMonitor
+	if id == "pool-secondary" {
+		routeIndex, monitorPath = 1, tcpMonitor+"-secondary"
+	}
+	poolPath := tcpPools + "/" + id
+	monitorRequired := f.spec.Routes[routeIndex].Spec.HealthMonitor != (cloud.HealthMonitorConfig{})
+	return f.inventory[poolPath]["provisioning_status"] == "ACTIVE" &&
+		f.inventory[poolPath+"/members/member"]["provisioning_status"] == "ACTIVE" &&
+		(!monitorRequired || f.inventory[monitorPath]["provisioning_status"] == "ACTIVE")
+}
+
+func (f *tcpGraphFixture) children(collection string) []map[string]any {
+	var children []map[string]any
+	for path, item := range f.inventory {
+		if id, found := strings.CutPrefix(path, collection+"/"); found && !strings.Contains(id, "/") {
+			children = append(children, item)
+		}
+	}
+	slices.SortFunc(children, func(a, b map[string]any) int {
+		return strings.Compare(a["id"].(string), b["id"].(string))
+	})
+	return children
+}
+
+func TestMultiUDPGraphUpgradesAndRemovesOneSharedListener(t *testing.T) {
+	f := newTransportGraphFixture(t, "UDP")
+	provider := f.provider()
+	for range 6 {
+		f.reconcile(provider)
+	}
+	f.inventory[tcpListener]["provisioning_status"] = "ACTIVE"
+	f.enableMultiUDP()
+	f.loseNextListenerCreate = true
+	if _, err := provider.ReconcileGatewayGraph(t.Context(), f.spec); err == nil || f.inventory[tcpListener+"-1812"] == nil {
+		t.Fatalf("expected the Octavia listener to exist after losing its create response, got %v", err)
+	}
+	provider = f.provider()
+	settled := f.settleUDP(provider)
+	if settled.Routes[0].Result.State.PoolID != "pool" || len(f.children(tcpListeners)) != 3 {
+		t.Fatalf("expected three listeners with the original pool, got %#v, %v", settled, f.inventory)
+	}
+	for _, listener := range f.children(tcpListeners) {
+		port := int(listener["protocol_port"].(float64))
+		marked := slices.Contains(pilotTags(listener["tags"]), udpPortTag(port))
+		if listener["default_pool_id"] != "pool" || marked == (listener["id"] == "listener") {
+			t.Fatalf("incorrect pool or port marker for listener %v", listener)
+		}
+	}
+	before := len(f.writes)
+	f.spec.Gateway.Spec.UDPListeners = f.spec.Gateway.Spec.UDPListeners[1:2]
+	f.spec.Routes[0].Spec.UDPListenerPorts = []int{5353}
+	f.settleUDP(provider)
+	sibling := f.inventory[tcpListener+"-5353"]
+	if sibling == nil || sibling["default_pool_id"] != "pool" || len(f.children(tcpListeners)) != 1 {
+		t.Fatalf("retained listener stopped serving, inventory %v", f.inventory)
+	}
+	if got := f.writes[before:]; !slices.Equal(got, []string{"PUT " + tcpListener, "PUT " + tcpListener + "-1812", "DELETE " + tcpListener, "DELETE " + tcpListener + "-1812"}) {
+		t.Fatalf("unexpected writes while removing listeners: %v", got)
+	}
+}
+
+func (f *tcpGraphFixture) enableMultiUDP() {
+	anchor := f.spec.Gateway.Spec.ListenerPort
+	f.spec.Gateway.Spec.UDPListeners = []cloud.UDPListener{
+		{Name: "anchor", Port: anchor}, {Name: "dns", Port: 5353}, {Name: "radius", Port: 1812},
+	}
+	f.spec.Routes[0].Spec.UDPListenerPorts = []int{anchor, 1812, 5353}
+	slices.Sort(f.spec.Routes[0].Spec.UDPListenerPorts)
+}
+
+func (f *tcpGraphFixture) settleUDP(provider *Provider) cloud.GatewayGraphResult {
+	f.t.Helper()
+	for range 20 {
+		for _, listener := range f.children(tcpListeners) {
+			if status, _ := listener["provisioning_status"].(string); strings.HasPrefix(status, "PENDING_") {
+				listener["provisioning_status"] = "ACTIVE"
+			}
+		}
+		result := f.reconcile(provider)
+		if result.Outcome.State == cloud.OutcomeReady {
+			return result
+		}
+	}
+	f.t.Fatalf("UDP graph did not converge, writes %v", f.writes)
+	return cloud.GatewayGraphResult{}
+}
+
+func TestMultiUDPGraphChangesOneWinnerAndPreservesOtherRouteDuringCleanup(t *testing.T) {
+	f := newTransportGraphFixture(t, "UDP")
+	f.enableMultiUDP()
+	provider := f.provider()
+	f.settleUDP(provider)
+	first := &f.spec.Routes[0]
+	first.Spec.UDPListenerPorts = []int{f.spec.Gateway.Spec.ListenerPort, 5353}
+	second := *first
+	second.Spec.Identity.RouteName, second.Spec.Identity.RouteUID = "other", "other-uid"
+	second.Spec.Precedence++
+	second.Spec.UDPListenerPorts = []int{1812}
+	f.spec.Routes = append(f.spec.Routes, second)
+	middle := tcpListener + "-1812"
+	before := len(f.writes)
+	result := f.settleUDP(provider)
+	want := []string{"PUT " + middle, "POST " + tcpPools, "POST " + tcpPool + "-secondary/members",
+		"POST " + tcpMonitors, "PUT " + middle}
+	if got := f.writes[before:]; !slices.Equal(got, want) || result.Routes[1].Result.State.PoolID != "pool-secondary" {
+		t.Fatalf("wrong handoff: writes %v, result %#v", got, result)
+	}
+	if f.inventory[middle]["default_pool_id"] != "pool-secondary" ||
+		f.inventory[tcpListener]["default_pool_id"] != "pool" ||
+		f.inventory[tcpListener+"-5353"]["default_pool_id"] != "pool" {
+		t.Fatalf("incorrect forwarding graph: %v", f.children(tcpListeners))
+	}
+
+	// A restarted route-only deletion has no desired listener inventory.
+	f.udpCleanupGateway(cloud.GraphPreserve)
+	f.spec.Routes[0].Disposition = cloud.GraphDelete
+	f.spec.Routes[1].Disposition = cloud.GraphPreserve
+	before = len(f.writes)
+	provider = f.provider()
+	f.reconcile(provider)
+	pending := f.reconcile(provider)
+	if len(f.writes) != before+1 || pending.Outcome.State != cloud.OutcomeProgressing {
+		t.Fatalf("cleanup did not wait for settlement: writes %v, result %#v", f.writes[before:], pending)
+	}
+	f.settleUDP(provider)
+	want = []string{"PUT " + tcpListener, "PUT " + tcpListener + "-5353", "DELETE " + tcpMonitor, "DELETE " + tcpMember, "DELETE " + tcpPool}
+	if got := f.writes[before:]; !slices.Equal(got, want) || f.inventory[middle]["default_pool_id"] != "pool-secondary" {
+		t.Fatalf("route-only deletion disturbed the other route: writes %v, listeners %v", got, f.children(tcpListeners))
+	}
+	f.udpCleanupGateway(cloud.GraphDelete)
+	f.settleUDP(f.provider())
+	if len(f.inventory) != 0 {
+		t.Fatalf("whole Gateway deletion leaked resources: %v", f.inventory)
+	}
+}
+
+func TestMultiUDPGraphBlocksCleanupAcrossInconsistentAssociations(t *testing.T) {
+	f := newTransportGraphFixture(t, "UDP")
+	f.enableMultiUDP()
+	provider := f.provider()
+	f.settleUDP(provider)
+	f.udpCleanupGateway(cloud.GraphPreserve)
+	f.spec.Routes[0].Disposition = cloud.GraphDelete
+	listener := f.inventory[tcpListener+"-1812"]
+	pool := f.inventory[tcpPool]
+	before := len(f.writes)
+	assertBlocked := func(want cloud.ErrorCategory) {
+		t.Helper()
+		_, err := provider.ReconcileGatewayGraph(t.Context(), f.spec)
+		if category, _ := cloud.ErrorCategoryOf(err); category != want || len(f.writes) != before {
+			t.Fatalf("unsafe readback = %v, new writes %v, want %s", err, f.writes[before:], want)
+		}
+	}
+
+	listener["default_pool_id"] = nil
+	assertBlocked(cloud.ErrorCategoryDependencyNotReady)
+	listener["default_pool_id"] = "pool"
+	reverse := pool["listeners"]
+	pool["listeners"] = nil
+	assertBlocked(cloud.ErrorCategoryDependencyNotReady)
+	pool["listeners"] = []map[string]any{{"id": "foreign-listener"}}
+	assertBlocked(cloud.ErrorCategoryOwnershipConflict)
+	pool["listeners"] = reverse
+
+	tags := listener["tags"]
+	listener["tags"] = append(pilotTags(tags), udpPortTag(1812))
+	assertBlocked(cloud.ErrorCategoryOwnershipConflict)
+	listener["tags"] = tags
+
+	f.unreferencedChild = tcpListener + "-1812"
+	assertBlocked(cloud.ErrorCategoryDependencyNotReady)
+	f.unreferencedChild = ""
+	listener["project_id"] = "foreign-project"
+	assertBlocked(cloud.ErrorCategoryOwnershipConflict)
+}
+
+func TestMultiUDPGraphKeepsPoolWhenDetachReportsError(t *testing.T) {
+	f := newTransportGraphFixture(t, "UDP")
+	f.enableMultiUDP()
+	provider := f.provider()
+	f.settleUDP(provider)
+	f.udpCleanupGateway(cloud.GraphPreserve)
+	f.spec.Routes[0].Disposition = cloud.GraphDelete
+	before := len(f.writes)
+	for _, listener := range f.children(tcpListeners) {
+		f.reconcile(provider)
+		for _, observed := range f.children(tcpListeners) {
+			observed["provisioning_status"] = "ACTIVE"
+		}
+		if listener["default_pool_id"] != nil && listener["id"] == "listener" {
+			t.Fatal("expected the original listener to detach first")
+		}
+	}
+	f.inventory[tcpListener]["provisioning_status"] = "ERROR"
+	_, err := f.provider().ReconcileGatewayGraph(t.Context(), f.spec)
+	want := []string{"PUT " + tcpListener, "PUT " + tcpListener + "-1812", "PUT " + tcpListener + "-5353"}
+	if category, _ := cloud.ErrorCategoryOf(err); category != cloud.ErrorCategoryResourceFailure || !slices.Equal(f.writes[before:], want) {
+		t.Fatalf("cleanup after failed detach = %v, writes %v, want %v", err, f.writes[before:], want)
+	}
+}
+
+func (f *tcpGraphFixture) udpCleanupGateway(disposition cloud.GraphDisposition) {
+	f.spec.Gateway = cloud.GatewayGraphNode{Disposition: disposition, Spec: cloud.GatewaySpec{
+		ListenerProtocol: "UDP", ListenerPort: f.spec.Gateway.Spec.ListenerPort, UDPListeners: []cloud.UDPListener{},
+	}}
+}
+
+func TestMultiUDPDetachedPoolNeedsExplicitEmptyReverseList(t *testing.T) {
+	f := newTransportGraphFixture(t, "UDP")
+	f.enableMultiUDP()
+	provider := f.provider()
+	f.settleUDP(provider)
+	f.udpCleanupGateway(cloud.GraphPreserve)
+	f.spec.Routes[0].Disposition = cloud.GraphDelete
+	for _, listener := range f.children(tcpListeners) {
+		listener["default_pool_id"] = nil
+	}
+	pool := f.inventory[tcpPool]
+	before := len(f.writes)
+	delete(pool, "listeners")
+	if _, err := provider.ReconcileGatewayGraph(t.Context(), f.spec); err == nil || len(f.writes) != before {
+		t.Fatalf("missing reverse inventory permitted pool cleanup: %v, writes %v", err, f.writes[before:])
+	}
+	pool["listeners"] = nil
+	if _, err := provider.ReconcileGatewayGraph(t.Context(), f.spec); err == nil || len(f.writes) != before {
+		t.Fatalf("null reverse inventory permitted pool cleanup: %v, writes %v", err, f.writes[before:])
+	}
+	pool["listeners"] = []map[string]any{}
+	f.settleUDP(provider)
+	if f.inventory[tcpPool] != nil {
+		t.Fatal("route-owned pool survived authorized cleanup after explicit detach")
+	}
+}
+
+func TestMultiUDPCleanupRequiresFrozenPortForUnmarkedListener(t *testing.T) {
+	f := newTransportGraphFixture(t, "UDP")
+	provider := f.provider()
+	f.settleUDP(provider)
+	f.enableMultiUDP()
+	f.settleUDP(provider)
+	if slices.ContainsFunc(pilotTags(f.inventory[tcpListener]["tags"]), isUDPPortTag) {
+		t.Fatal("expected the original single-port listener to retain its legacy tags")
+	}
+	f.udpCleanupGateway(cloud.GraphPreserve)
+	f.spec.Routes[0].Disposition = cloud.GraphDelete
+	original := f.spec.Gateway.Spec.ListenerPort
+	before := len(f.writes)
+	f.spec.Gateway.Spec.ListenerPort = 0
+	if _, err := provider.ReconcileGatewayGraph(t.Context(), f.spec); err == nil || len(f.writes) != before {
+		t.Fatalf("missing frozen port allowed adoption: %v, writes %v", err, f.writes[before:])
+	}
+	// After both marked listeners disappear, the sole unmarked listener still
+	// needs the enrolled Gateway's port and the pool's complete reverse list.
+	delete(f.inventory, tcpListener+"-1812")
+	delete(f.inventory, tcpListener+"-5353")
+	f.inventory[tcpPool]["listeners"] = []map[string]any{{"id": "listener"}}
+	f.spec.Gateway.Spec.ListenerPort = original + 1
+	if _, err := provider.ReconcileGatewayGraph(t.Context(), f.spec); err == nil || len(f.writes) != before {
+		t.Fatalf("last unmarked listener on the wrong port was adopted: %v, writes %v", err, f.writes[before:])
+	}
+	f.spec.Gateway.Spec.ListenerPort = original
+	f.settleUDP(provider)
+	if f.inventory[tcpPool] != nil {
+		t.Fatal("fully owned orphaned route pool survived cleanup")
+	}
+}
+
+func TestMultiUDPWithdrawsUnelectedDefaultsBeforeReportingObserved(t *testing.T) {
+	f := newTransportGraphFixture(t, "UDP")
+	f.enableMultiUDP()
+	provider := f.provider()
+	f.settleUDP(provider)
+	route := &f.spec.Routes[0]
+	route.Spec.UDPListenerPorts = []int{f.spec.Gateway.Spec.ListenerPort}
+	changing := f.reconcile(provider)
+	if changing.Routes[0].Result.Outcome.State == cloud.OutcomeReady {
+		t.Fatal("route marked observed while the reverse list still contains superseded ports")
+	}
+	f.settleUDP(provider)
+	route.Disposition = cloud.GraphPreserve
+	route.RetainUDPListenerPorts = []int{}
+	before := len(f.writes)
+	f.settleUDP(provider)
+	if !slices.Equal(f.writes[before:], []string{"PUT " + tcpListener}) || f.inventory[tcpPool] == nil {
+		t.Fatalf("revoked route must detach only its remaining default, preserving the pool: %v", f.writes[before:])
+	}
+}
+
+func TestMultiUDPReportsServingPortWhenSiblingIsPending(t *testing.T) {
+	f := newTransportGraphFixture(t, "UDP")
+	f.enableMultiUDP()
+	provider := f.provider()
+	f.settleUDP(provider)
+	f.inventory[tcpListener+"-1812"]["provisioning_status"] = "PENDING_UPDATE"
+	result := f.reconcile(provider)
+	if result.Gateway.Outcome.State == cloud.OutcomeReady ||
+		!slices.Equal(result.Gateway.UDPReadyPorts, []int{f.spec.Gateway.Spec.ListenerPort, 5353}) {
+		t.Fatalf("partial UDP listener readiness = %#v", result.Gateway)
+	}
 }
 
 func TestDefaultPoolLifecycle(t *testing.T) {

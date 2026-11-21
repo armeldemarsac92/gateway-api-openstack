@@ -37,7 +37,7 @@ The controller uses Gateway API v1.7.0 and defaults to the Standard Channel. Its
 - HTTP/1.1 WebSocket Upgrade to a TCP Service port declaring `appProtocol: kubernetes.io/ws`. [Operator instructions](docs/getting-started.md) · [Qualification](docs/qualification/v1.7.0/provider/http-websocket.md)
 - An optional exact or wildcard hostname on the listener and at most one on the HTTPRoute. Only the names shared by both reach the backend.
 - One TCP listener on a dedicated Gateway. It forwards opaque streams to one Service port from the oldest attached TCPRoute. A newer attached route takes over when the older route detaches. [TCP example](docs/getting-started.md#forward-tcp-to-a-service)
-- One UDP listener on a dedicated Gateway. The oldest attached UDPRoute selects the Amphora listener's default pool. Endpoint mode supports weighted UDP Services with routable pod IPs. NodePort mode accepts a single Service. [UDP example](docs/getting-started.md#forward-udp-to-a-service)
+- Distinct UDP ports on one dedicated Gateway share its VIP. Each listener selects its oldest eligible UDPRoute. A route that wins on several ports uses one shared pool. Endpoint mode supports weighted UDP Services with routable pod IPs. NodePort mode accepts a single Service. [UDP example](docs/getting-started.md#forward-udp-to-a-service)
 - Eligible worker NodePort members with Local or Cluster traffic policy
 - An opt-in IPv4 Endpoint mode for ClusterIP, headless, and NodePort Services, pending live network validation
 - Typed GatewayClass configuration with topology settings fixed for each Gateway
@@ -47,7 +47,7 @@ The controller uses Gateway API v1.7.0 and defaults to the Standard Channel. Its
 - Ownership validation, restart recovery, and ordered cleanup
 
 The [class configuration reference](docs/reference/class-configuration.md) describes member modes and their network prerequisites.
-An HTTPRoute, TCPRoute or UDPRoute may select a Service in another namespace when a ReferenceGrant there authorizes that route kind and source namespace. Multiple active listeners and HTTPS are still open. [Grant and revocation evidence](docs/qualification/v1.7.0/service-grants.md)
+An HTTPRoute, TCPRoute or UDPRoute may select a Service in another namespace when a ReferenceGrant there authorizes that route kind and source namespace. Multiple active HTTP or TCP listeners, mixed protocols and HTTPS remain open. [Grant and revocation evidence](docs/qualification/v1.7.0/service-grants.md)
 The stock pilot targets Amphora. Other Gateway profiles, the two mesh profiles and the Experimental resources are tracked in the [v1.7.0 feature matrix](docs/qualification/v1.7.0/matrix/README.md).
 
 ## Development status

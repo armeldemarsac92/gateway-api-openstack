@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"time"
 
@@ -51,14 +52,15 @@ type Reconciler struct {
 }
 
 type routePlan struct {
-	parents      []routeParent
-	resolved     metav1.Condition
-	programmed   metav1.Condition
-	desired      *cloud.RouteSpec
-	target       string
-	targetStatus metav1.Condition
-	detach       bool
-	requeue      time.Duration
+	parents       []routeParent
+	resolved      metav1.Condition
+	programmed    metav1.Condition
+	desired       *cloud.RouteSpec
+	target        string
+	targetStatus  metav1.Condition
+	listenerPorts []int
+	detach        bool
+	requeue       time.Duration
 }
 
 // Reconcile evaluates listener attachment and backend references independently.
@@ -129,15 +131,26 @@ func (r *Reconciler) planRoute(ctx context.Context, route *transportRoute, bindi
 	}
 	if len(route.parentRefs) != 1 {
 		for i := range plan.parents {
-			plan.parents[i].listener = nil
+			plan.parents[i].listeners = nil
 			plan.parents[i].rejected = model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: fmt.Sprintf("%s forwarding supports exactly one Gateway parentRef", r.protocol())}
 		}
 		return plan, nil
 	}
 	parent := plan.parents[0]
-	if bound && (parent.listener == nil || !controller.SameGatewayIdentity(binding, controller.RouteIdentity(r.Config, parent.gateway, route))) {
+	if bound && (len(parent.listeners) == 0 || !controller.SameGatewayIdentity(binding, controller.RouteIdentity(r.Config, parent.gateway, route))) {
 		plan.detach = true
 		return plan, nil
+	}
+	if bound && r.protocol() == gatewayv1.UDPProtocolType {
+		routePort := controller.UDPRouteAnchor(r.Config, route)
+		if routePort != 0 && (parent.gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] != strconv.Itoa(routePort) ||
+			parent.gateway.Annotations[r.Config.GatewayListenerProtocolAnnotation()] != cloud.ListenerProtocolUDP) {
+			if err := controller.ValidateGatewayBinding(r.Config, parent.gateway); err != nil {
+				return routePlan{}, err
+			}
+			plan.detach = true
+			return plan, nil
+		}
 	}
 	refs, authRejections, err := r.authorizedBackends(ctx, route, true)
 	if err != nil {
@@ -148,17 +161,17 @@ func (r *Reconciler) planRoute(ctx context.Context, route *transportRoute, bindi
 		plan.detach = bound
 		return plan, nil
 	}
-	if parent.listener != nil {
-		routes, err := r.readRoutes(ctx)
+	if len(parent.listeners) != 0 {
+		plan.listenerPorts, err = r.wonListenerPorts(ctx, parent.gateway, parent.listeners, route)
 		if err != nil {
 			return routePlan{}, err
 		}
-		selected, err := r.selectedRoute(ctx, parent.gateway, parent.listener, listenerCandidates(parent.gateway, parent.listener, routes))
-		if err != nil {
-			return routePlan{}, err
-		}
-		if selected == nil || selected.GetUID() != route.GetUID() {
-			plan.programmed = routeCondition(route, "Programmed", metav1.ConditionFalse, "NotSelected", fmt.Sprintf("An older %s takes precedence on this listener", r.kind()))
+		if len(plan.listenerPorts) == 0 {
+			message := fmt.Sprintf("An older %s takes precedence on this listener", r.kind())
+			if len(parent.listeners) > 1 {
+				message = fmt.Sprintf("An older %s takes precedence on each selected listener", r.kind())
+			}
+			plan.programmed = routeCondition(route, "Programmed", metav1.ConditionFalse, "NotSelected", message)
 			plan.detach = bound
 		}
 	}
@@ -195,10 +208,10 @@ func (r *Reconciler) planRoute(ctx context.Context, route *transportRoute, bindi
 		err := r.planVersionSkew(ctx, route, &plan, backends, bound)
 		return plan, err
 	}
-	if parent.listener == nil || plan.programmed.Reason == "NotSelected" {
+	if len(parent.listeners) == 0 || plan.programmed.Reason == "NotSelected" {
 		return plan, nil
 	}
-	topology, ready, err := r.gatewayTopology(parent.gateway, parent.listener)
+	topology, ready, err := r.gatewayTopology(parent.gateway, parent.listeners[0])
 	if err != nil {
 		return routePlan{}, err
 	}
@@ -206,7 +219,7 @@ func (r *Reconciler) planRoute(ctx context.Context, route *transportRoute, bindi
 		plan.requeue = 5 * time.Second
 		return plan, nil
 	}
-	desired, target, diagnostic, err := r.routeSpec(ctx, route, parent.gateway, parent.listener, backends, topology)
+	desired, target, diagnostic, err := r.routeSpec(ctx, route, parent.gateway, parent.listeners[0], backends, topology, plan.listenerPorts...)
 	if err != nil {
 		return routePlan{}, err
 	}
@@ -225,6 +238,26 @@ func (r *Reconciler) planRoute(ctx context.Context, route *transportRoute, bindi
 	return plan, nil
 }
 
+func (r *Reconciler) wonListenerPorts(ctx context.Context, gateway *gatewayv1.Gateway, listeners []*gatewayv1.Listener, route *transportRoute) ([]int, error) {
+	routes, err := r.readRoutes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var ports []int
+	namespaces := make(routeNamespaceCache)
+	for _, listener := range listeners {
+		selected, err := r.selectedRoute(ctx, gateway, listener, listenerCandidates(gateway, listener, routes), namespaces)
+		if err != nil {
+			return nil, err
+		}
+		if selected != nil && selected.GetUID() == route.GetUID() {
+			ports = append(ports, int(listener.Port))
+		}
+	}
+	slices.Sort(ports)
+	return ports, nil
+}
+
 func routeStillReferences(route *transportRoute, identity cloud.Identity) bool {
 	if len(route.parentRefs) != 1 {
 		return false
@@ -238,12 +271,16 @@ func routeStillReferences(route *transportRoute, identity cloud.Identity) bool {
 func (r *Reconciler) gatewayTopology(gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) (classconfig.Resolved, bool, error) {
 	if listener.Protocol != r.protocol() || !controllerutil.ContainsFinalizer(gateway, r.Config.GatewayFinalizer()) ||
 		gateway.Annotations[r.Config.GatewayListenerProtocolAnnotation()] != string(r.protocol()) ||
-		gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] != strconv.Itoa(int(listener.Port)) ||
 		!gateway.DeletionTimestamp.IsZero() {
 		return classconfig.Resolved{}, false, nil
 	}
 	if err := controller.ValidateGatewayBinding(r.Config, gateway); err != nil {
 		return classconfig.Resolved{}, false, err
+	}
+	if !controller.GatewayUsesMultipleUDPListeners(r.Config, gateway) &&
+		(gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] != strconv.Itoa(int(listener.Port)) ||
+			(r.protocol() == gatewayv1.UDPProtocolType && len(gateway.Spec.Listeners) > 1)) {
+		return classconfig.Resolved{}, false, nil
 	}
 	topology, err := controller.StoredGatewayTopology(r.Config, gateway)
 	return topology, err == nil, err
@@ -254,7 +291,7 @@ func gatewayProgrammed(gateway *gatewayv1.Gateway) bool {
 	return condition != nil && condition.Status == metav1.ConditionTrue && condition.ObservedGeneration == gateway.Generation
 }
 
-func (r *Reconciler) routeSpec(ctx context.Context, route *transportRoute, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, backends []serviceBackend, topology classconfig.Resolved) (cloud.RouteSpec, string, *model.Diagnostic, error) {
+func (r *Reconciler) routeSpec(ctx context.Context, route *transportRoute, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, backends []serviceBackend, topology classconfig.Resolved, listenerPorts ...int) (cloud.RouteSpec, string, *model.Diagnostic, error) {
 	weighted := len(route.backendRefs) > 1
 	if weighted && topology.Topology.MemberMode != cloud.MemberModeEndpoint {
 		return cloud.RouteSpec{}, "", backendRejection(gatewayv1.RouteReasonUnsupportedValue, "UDP forwarding with multiple backend references requires Endpoint member mode"), nil
@@ -290,6 +327,12 @@ func (r *Reconciler) routeSpec(ctx context.Context, route *transportRoute, gatew
 		BackendSecurityGroupIDs: topology.Topology.BackendSecurityGroupIDs,
 		HealthMonitor:           topology.HealthMonitor, Members: members,
 	}
+	if controller.GatewayUsesMultipleUDPListeners(r.Config, gateway) {
+		// The frozen port identifies the former unscoped listener. The route's
+		// current listener edges are the election result, independent of it.
+		spec.GatewayRequirements.ListenerPort, _ = strconv.Atoi(gateway.Annotations[r.Config.GatewayListenerPortAnnotation()])
+		spec.UDPListenerPorts = slices.Clone(listenerPorts)
+	}
 	target, err := forwardingTarget(backends, groups, weighted, spec)
 	return spec, target, nil, err
 }
@@ -323,7 +366,7 @@ func (r *Reconciler) ensure(ctx context.Context, route *transportRoute, plan *ro
 	}
 	if component.Outcome.State == cloud.OutcomeProgressing {
 		target := r.currentTarget(route, plan.parents[0].ref, plan.target)
-		if !component.ObservationDeferred || target == nil || target.Status != metav1.ConditionTrue || !r.retainProgrammedCondition(route, plan) {
+		if len(plan.desired.UDPListenerPorts) != 0 || !component.ObservationDeferred || target == nil || target.Status != metav1.ConditionTrue || !r.retainProgrammedCondition(route, plan) {
 			message := controller.ProviderProgressMessage(component.Outcome, fmt.Sprintf("Octavia is programming the %s forwarding configuration", r.protocol()))
 			plan.programmed = routeCondition(route, "Programmed", metav1.ConditionFalse, "Pending", message)
 		}

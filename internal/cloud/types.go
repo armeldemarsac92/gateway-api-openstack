@@ -41,16 +41,27 @@ type Identity struct {
 
 // GatewaySpec describes the OpenStack resources owned by a Gateway.
 type GatewaySpec struct {
-	Identity            Identity
-	Provider            string
-	VIPSubnetID         string
-	ExternalNetworkID   string
-	FlavorID            string
-	AvailabilityZone    string
-	ListenerName        string
-	ListenerPort        int
-	ListenerProtocol    string
+	Identity          Identity
+	Provider          string
+	VIPSubnetID       string
+	ExternalNetworkID string
+	FlavorID          string
+	AvailabilityZone  string
+	ListenerName      string
+	ListenerPort      int
+	ListenerProtocol  string
+	// UDPListeners lists every desired UDP port after the Gateway has entered
+	// multi-listener mode. ListenerPort retains its original binding port so
+	// an existing unscoped listener can be recognized after a restart.
+	// Cleanup carries an empty, non-nil set and the same frozen port.
+	UDPListeners        []UDPListener
 	VIPSecurityGroupIDs []string
+}
+
+// UDPListener is one named Octavia listener on a shared Gateway load balancer.
+type UDPListener struct {
+	Name string
+	Port int
 }
 
 // GatewayState is the provider-neutral result published to Gateway status and
@@ -137,9 +148,12 @@ type Member struct {
 
 // RouteSpec describes the pool and forwarding configuration owned by one route.
 type RouteSpec struct {
-	Identity                Identity
-	Gateway                 GatewayState
-	GatewayRequirements     GatewayRequirements
+	Identity            Identity
+	Gateway             GatewayState
+	GatewayRequirements GatewayRequirements
+	// UDPListenerPorts identifies the UDP listeners on which this route wins.
+	// Single-listener bindings use GatewayRequirements.ListenerPort.
+	UDPListenerPorts        []int `json:",omitempty"`
 	MemberMode              MemberMode
 	MemberSubnetID          string
 	BackendSecurityGroupIDs []string

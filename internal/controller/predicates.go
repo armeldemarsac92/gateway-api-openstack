@@ -269,23 +269,7 @@ func containsString(values []string, expected string) bool {
 }
 
 func gatewayBindingChanged(config Config, oldGateway, newGateway *gatewayv1.Gateway) bool {
-	if !GatewayTopologyMetadataEqual(config, oldGateway, newGateway) {
-		return true
-	}
-	if finalizerPresenceChanged(oldGateway, newGateway, config.GatewayFinalizer()) {
-		return true
-	}
-	for _, key := range []string{
-		config.GatewayListenerPortAnnotation(),
-		config.GatewayListenerProtocolAnnotation(),
-		config.GatewayClusterIDAnnotation(),
-		config.GatewayProjectIDAnnotation(),
-	} {
-		if oldGateway.Annotations[key] != newGateway.Annotations[key] {
-			return true
-		}
-	}
-	return false
+	return !GatewayBindingMetadataEqual(config, oldGateway, newGateway)
 }
 
 func routeBindingChanged(config Config, oldRoute, newRoute client.Object) bool {
@@ -296,6 +280,7 @@ func routeBindingChanged(config Config, oldRoute, newRoute client.Object) bool {
 		config.RouteGatewayUIDAnnotation(),
 		config.RouteClusterIDAnnotation(),
 		config.RouteProjectIDAnnotation(),
+		config.RouteUDPListenerPortAnnotation(),
 	} {
 		if oldRoute.GetAnnotations()[key] != newRoute.GetAnnotations()[key] {
 			return true

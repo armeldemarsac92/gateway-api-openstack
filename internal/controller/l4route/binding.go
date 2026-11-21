@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -35,7 +36,7 @@ import (
 )
 
 func (r *Reconciler) routeBinding(route *transportRoute) (cloud.Identity, bool, error) {
-	identity, present, err := controller.StoredRouteIdentity(r.Config, route)
+	identity, present, err := controller.StoredRouteIdentity(r.Config, route.Object)
 	if err != nil {
 		return cloud.Identity{}, false, errors.Join(cloud.ErrOwnershipConflict, err)
 	}
@@ -47,17 +48,12 @@ func (r *Reconciler) routeBinding(route *transportRoute) (cloud.Identity, bool, 
 	}
 	lifecycle := route.GetAnnotations()[r.Config.RouteLifecycleAnnotation()]
 	if !controllerutil.ContainsFinalizer(route, r.Config.RouteFinalizer()) ||
-		!controllerutil.ContainsFinalizer(route, r.bindingFinalizer(identity)) ||
 		route.GetAnnotations()[r.Config.RouteClusterIDAnnotation()] != identity.ClusterID ||
 		route.GetAnnotations()[r.Config.RouteProjectIDAnnotation()] != identity.OpenStackProjectID ||
 		(lifecycle != controller.RouteAttached && lifecycle != controller.RouteDetaching) {
 		return cloud.Identity{}, false, fmt.Errorf("%w: %s %s lacks a complete lifecycle checkpoint", cloud.ErrOwnershipConflict, r.kind(), client.ObjectKeyFromObject(route))
 	}
 	return identity, true, nil
-}
-
-func (r *Reconciler) bindingFinalizer(identity cloud.Identity) string {
-	return r.Config.RouteBindingFinalizer(identity.ClusterID, identity.OpenStackProjectID, identity.GatewayNamespace, identity.GatewayName, identity.GatewayUID)
 }
 
 func (r *Reconciler) bind(ctx context.Context, expected *transportRoute, identity cloud.Identity) (ctrl.Result, error) {
@@ -81,7 +77,8 @@ func (r *Reconciler) bind(ctx context.Context, expected *transportRoute, identit
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	if first.desired == nil || first.desired.Identity != identity || first.target != second.target ||
+	if first.desired == nil || first.desired.Identity != identity || first.target != second.target || !slices.Equal(first.listenerPorts, second.listenerPorts) ||
+		revisionOf(first.parents[0].class) != revisionOf(second.parents[0].class) ||
 		!sameGatewayRevision(r.Config, first.parents[0].gateway, second.parents[0].gateway) {
 		return ctrl.Result{}, controller.ErrGraphInputChanged
 	}
@@ -93,6 +90,9 @@ func (r *Reconciler) bind(ctx context.Context, expected *transportRoute, identit
 	}
 	base := current.copyObject()
 	controller.ApplyRouteBinding(r.Config, current, identity)
+	if len(first.desired.UDPListenerPorts) != 0 {
+		controller.SealUDPRouteAnchor(r.Config, current.Object.(*gatewayv1.UDPRoute), identity, first.desired.GatewayRequirements.ListenerPort)
+	}
 	if err := r.Patch(ctx, current.Object, controller.OptimisticMergeFrom(base)); err != nil {
 		return ctrl.Result{}, err
 	}

@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -39,12 +40,13 @@ func (r *Reconciler) ensureGateway(ctx context.Context, expected *gatewayv1.Gate
 	return r.Writer.ReconcileGraph(ctx, graph.Request{Identity: controller.GatewayIdentity(r.Config, expected), Action: graph.Ensure, Gateway: expected})
 }
 
-func (r *Reconciler) gatewaySpec(gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, topology classconfig.Resolved) cloud.GatewaySpec {
+func (r *Reconciler) gatewaySpec(gateway *gatewayv1.Gateway, listeners []*gatewayv1.Listener, topology classconfig.Resolved) cloud.GatewaySpec {
+	listener := listeners[0]
 	var protocol string
 	if isL4Listener(listener.Protocol) {
 		protocol = string(listener.Protocol)
 	}
-	return cloud.GatewaySpec{
+	spec := cloud.GatewaySpec{
 		Identity:            controller.GatewayIdentity(r.Config, gateway),
 		Provider:            "amphora",
 		VIPSubnetID:         topology.Topology.VIPSubnetID,
@@ -56,6 +58,17 @@ func (r *Reconciler) gatewaySpec(gateway *gatewayv1.Gateway, listener *gatewayv1
 		AvailabilityZone:    topology.Topology.AvailabilityZone,
 		VIPSecurityGroupIDs: slices.Clone(topology.Topology.VIPSecurityGroupIDs),
 	}
+	if controller.GatewayUsesMultipleUDPListeners(r.Config, gateway) {
+		// Snapshot validation already verified the frozen UDP port and topology.
+		spec.ListenerPort, _ = strconv.Atoi(gateway.Annotations[r.Config.GatewayListenerPortAnnotation()])
+		for _, listener := range listeners {
+			spec.UDPListeners = append(spec.UDPListeners, cloud.UDPListener{
+				Name: resourceDisplayName(strconv.Itoa(int(listener.Port)), gateway.Namespace, gateway.Name, string(listener.Name)),
+				Port: int(listener.Port),
+			})
+		}
+	}
+	return spec
 }
 
 func resourceDisplayName(parts ...string) string {

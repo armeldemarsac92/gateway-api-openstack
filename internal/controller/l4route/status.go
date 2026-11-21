@@ -85,9 +85,13 @@ func (r *Reconciler) patchStatuses(ctx context.Context, route *transportRoute, p
 				break
 			}
 		}
-		accepted := routeCondition(route, "Accepted", metav1.ConditionTrue, "Accepted", fmt.Sprintf("The %s listener accepts this route", r.protocol()))
+		message := fmt.Sprintf("The %s listener accepts this route", r.protocol())
+		if len(parent.listeners) > 1 {
+			message = fmt.Sprintf("The selected %s listeners accept this route", r.protocol())
+		}
+		accepted := routeCondition(route, "Accepted", metav1.ConditionTrue, "Accepted", message)
 		programmed := plan.programmed
-		if parent.listener == nil {
+		if len(parent.listeners) == 0 {
 			accepted = routeCondition(route, "Accepted", metav1.ConditionFalse, parent.rejected.Reason, parent.rejected.Message)
 			programmed = routeCondition(route, "Programmed", metav1.ConditionFalse, parent.rejected.Reason, parent.rejected.Message)
 		}

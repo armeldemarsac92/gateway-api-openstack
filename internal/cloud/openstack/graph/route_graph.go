@@ -129,6 +129,10 @@ func policyPositionsMatch(wanted []desiredPolicy, actual []observedRoutePolicy) 
 // observeRouteGraphs reads every child once and assigns it to an exact route
 // identity. An unaccounted child blocks the entire graph before any mutation.
 func (p *Provider) observeRouteGraphs(ctx context.Context, owners []routeGraphOwner, lb *octavia.LoadBalancer, listener *listeners.Listener, protocol string) ([]observedRouteGraph, error) {
+	return p.observeRouteGraphsWithListeners(ctx, owners, lb, listener, protocol, nil)
+}
+
+func (p *Provider) observeRouteGraphsWithListeners(ctx context.Context, owners []routeGraphOwner, lb *octavia.LoadBalancer, listener *listeners.Listener, protocol string, udpListeners []listeners.Listener) ([]observedRouteGraph, error) {
 	graphs := make([]observedRouteGraph, len(owners))
 	defaultPool := usesDefaultPool(protocol)
 	poolItems, err := p.listGatewayPools(ctx, lb)
@@ -162,7 +166,13 @@ func (p *Provider) observeRouteGraphs(ctx context.Context, owners []routeGraphOw
 			if _, duplicate := poolOwners[pool.ID]; duplicate {
 				return nil, fmt.Errorf("%w: %s pool %s appears more than once in the Gateway inventory", cloud.ErrOwnershipConflict, pool.Protocol, pool.ID)
 			}
-			if err := validateDefaultPool(*pool, lb.ID, listener, poolProtocol); err != nil {
+			var err error
+			if udpListeners != nil {
+				err = p.validateMultiUDPDefaultPool(*pool, lb.ID, udpListeners, poolProtocol)
+			} else {
+				err = validateDefaultPool(*pool, lb.ID, listener, poolProtocol)
+			}
+			if err != nil {
 				return nil, &cloud.GraphError{Identity: identity.Value(), Err: err}
 			}
 		} else if usesDefaultPool(pool.Protocol) {

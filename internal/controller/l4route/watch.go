@@ -83,7 +83,7 @@ func (r *Reconciler) routeChanges() predicate.Predicate {
 			for _, key := range []string{
 				r.Config.RouteLifecycleAnnotation(), r.Config.RouteGatewayUIDAnnotation(),
 				r.Config.RouteGatewayNameAnnotation(), r.Config.RouteGatewayNamespaceAnnotation(),
-				r.Config.RouteClusterIDAnnotation(), r.Config.RouteProjectIDAnnotation(),
+				r.Config.RouteClusterIDAnnotation(), r.Config.RouteProjectIDAnnotation(), r.Config.RouteUDPListenerPortAnnotation(),
 			} {
 				if old[key] != current[key] {
 					return true

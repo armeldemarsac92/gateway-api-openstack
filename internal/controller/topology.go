@@ -23,6 +23,7 @@ import (
 	"io"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -86,7 +87,7 @@ func BindGatewayTopology(config Config, gateway *gatewayv1.Gateway, resolved cla
 func StoredGatewayTopology(config Config, gateway *gatewayv1.Gateway) (classconfig.Resolved, error) {
 	raw := gateway.Annotations[config.GatewayTopologyAnnotation()]
 	finalizers := topologyFinalizers(config, gateway)
-	if raw == "" || len(finalizers) != 1 || finalizers[0] != config.GatewayTopologyFinalizer(raw) {
+	if raw == "" || len(finalizers) != 1 || finalizers[0] != gatewayTopologyCheckpoint(config, gateway, raw) {
 		return classconfig.Resolved{}, fmt.Errorf("%w: Gateway topology binding is missing, incomplete, or changed", cloud.ErrOwnershipConflict)
 	}
 	var resolved classconfig.Resolved
@@ -103,6 +104,70 @@ func StoredGatewayTopology(config Config, gateway *gatewayv1.Gateway) (classconf
 		return classconfig.Resolved{}, err
 	}
 	return resolved, nil
+}
+
+const gatewayUDPListenerModeV1 = "v1"
+
+// GatewayUsesMultipleUDPListeners reports whether the Gateway is enrolled.
+// Callers must validate its complete binding before a graph mutation.
+func GatewayUsesMultipleUDPListeners(config Config, gateway *gatewayv1.Gateway) bool {
+	return gateway.Annotations[config.GatewayUDPListenerModeAnnotation()] == gatewayUDPListenerModeV1
+}
+
+// HasGatewayUDPListenerModeBinding detects even a partial scoped checkpoint.
+func HasGatewayUDPListenerModeBinding(config Config, gateway *gatewayv1.Gateway) bool {
+	_, marked := gateway.Annotations[config.GatewayUDPListenerModeAnnotation()]
+	return marked || slices.ContainsFunc(gateway.Finalizers, func(finalizer string) bool {
+		return strings.HasPrefix(finalizer, config.GatewayTopologyFinalizerPrefix()+"u")
+	})
+}
+
+// SetGatewayUDPListenerMode changes the mode and its integrity checkpoint
+// together. Callers validate the original binding before changing its metadata.
+func SetGatewayUDPListenerMode(config Config, gateway *gatewayv1.Gateway, enabled bool) {
+	key := config.GatewayUDPListenerModeAnnotation()
+	if enabled == GatewayUsesMultipleUDPListeners(config, gateway) {
+		return
+	}
+	for _, finalizer := range topologyFinalizers(config, gateway) {
+		controllerutil.RemoveFinalizer(gateway, finalizer)
+	}
+	if enabled {
+		gateway.Annotations[key] = gatewayUDPListenerModeV1
+	} else {
+		delete(gateway.Annotations, key)
+	}
+	raw := gateway.Annotations[config.GatewayTopologyAnnotation()]
+	controllerutil.AddFinalizer(gateway, gatewayTopologyCheckpoint(config, gateway, raw))
+}
+
+func gatewayTopologyCheckpoint(config Config, gateway *gatewayv1.Gateway, raw string) string {
+	if _, exists := gateway.Annotations[config.GatewayUDPListenerModeAnnotation()]; !exists {
+		return config.GatewayTopologyFinalizer(raw)
+	}
+	// The original port and owner are frozen for as long as this topology
+	// carries scoped UDP listeners. Older controllers fail closed on this digest.
+	input := strings.Join([]string{
+		raw, gateway.Annotations[config.GatewayUDPListenerModeAnnotation()],
+		gateway.Namespace, gateway.Name, string(gateway.UID),
+		gateway.Annotations[config.GatewayClusterIDAnnotation()], gateway.Annotations[config.GatewayProjectIDAnnotation()],
+		gateway.Annotations[config.GatewayListenerProtocolAnnotation()], gateway.Annotations[config.GatewayListenerPortAnnotation()],
+	}, "\x00")
+	digest := sha256.Sum256([]byte(input))
+	return config.GatewayTopologyFinalizerPrefix() + "u" + fmt.Sprintf("%x", digest[:15])
+}
+
+func validateGatewayUDPListenerMode(config Config, gateway *gatewayv1.Gateway) error {
+	mode, exists := gateway.Annotations[config.GatewayUDPListenerModeAnnotation()]
+	if !exists {
+		return nil
+	}
+	port, err := strconv.Atoi(gateway.Annotations[config.GatewayListenerPortAnnotation()])
+	if mode != gatewayUDPListenerModeV1 || gateway.Annotations[config.GatewayListenerProtocolAnnotation()] != string(gatewayv1.UDPProtocolType) ||
+		err != nil || port < 1 || port > 65535 || !controllerutil.ContainsFinalizer(gateway, config.GatewayFinalizer()) {
+		return fmt.Errorf("%w: Gateway UDP listener mode binding is invalid", cloud.ErrOwnershipConflict)
+	}
+	return nil
 }
 
 // HasGatewayTopologyBinding detects any component of the persisted topology.

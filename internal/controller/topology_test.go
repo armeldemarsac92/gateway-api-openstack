@@ -103,6 +103,54 @@ func TestGatewayTopologyBindingRejectsIncompleteOrChangedMetadata(t *testing.T) 
 	}
 }
 
+func TestGatewayUDPModeSealsOriginalListenerPort(t *testing.T) {
+	config := Config{ControllerName: "gateway.example/controller", ClusterID: "cluster", OpenStackProjectID: "project"}
+	gateway := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{
+		Namespace: "default", Name: "dns", UID: "gateway-uid",
+		Annotations: map[string]string{
+			config.GatewayListenerPortAnnotation(): "5353", config.GatewayListenerProtocolAnnotation(): "UDP",
+			config.GatewayClusterIDAnnotation(): config.ClusterID, config.GatewayProjectIDAnnotation(): config.OpenStackProjectID,
+		},
+		Finalizers: []string{config.GatewayFinalizer()},
+	}}
+	if err := BindGatewayTopology(config, gateway, testResolvedTopology()); err != nil {
+		t.Fatal(err)
+	}
+	SetGatewayUDPListenerMode(config, gateway, true)
+	if err := ValidateGatewayBinding(config, gateway); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name string
+		key  string
+		new  string
+	}{
+		{name: "marker removed", key: config.GatewayUDPListenerModeAnnotation()},
+		{name: "unrecognized marker", key: config.GatewayUDPListenerModeAnnotation(), new: "v2"},
+		{name: "port changed", key: config.GatewayListenerPortAnnotation(), new: "53"},
+		{name: "protocol changed", key: config.GatewayListenerProtocolAnnotation(), new: "TCP"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			changed := gateway.DeepCopy()
+			if test.new == "" {
+				delete(changed.Annotations, test.key)
+			} else {
+				changed.Annotations[test.key] = test.new
+			}
+			if err := ValidateGatewayBinding(config, changed); !errors.Is(err, cloud.ErrOwnershipConflict) {
+				t.Fatalf("edited binding returned %v", err)
+			}
+		})
+	}
+	SetGatewayUDPListenerMode(config, gateway, false)
+	if GatewayUsesMultipleUDPListeners(config, gateway) {
+		t.Fatal("UDP mode was not cleared")
+	}
+	if err := ValidateGatewayBinding(config, gateway); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestGatewaySecurityBinding(t *testing.T) {
 	config := Config{ControllerName: "gateway.example/controller"}
 	resolved := testResolvedTopology()

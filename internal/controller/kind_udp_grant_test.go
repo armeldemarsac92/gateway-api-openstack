@@ -80,33 +80,8 @@ func testWeightedUDPGrantTraffic(t *testing.T, s *suite.ConformanceTestSuite) {
 	require.NoError(t, s.Client.Delete(t.Context(), grant))
 	denied := metav1.Condition{Type: "ResolvedRefs", Status: metav1.ConditionFalse, Reason: string(gatewayv1.RouteReasonRefNotPermitted)}
 	kubernetes.UDPRouteMustHaveCondition(t, s.Client, s.TimeoutConfig, routeKey, gatewayKey, denied)
-	type echo struct{ Namespace, Service, Request string }
-	probe := func(phase string) (echo, error) {
-		var got echo
-		conn, err := net.DialTimeout("udp", addr, time.Second)
-		if err != nil {
-			return got, err
-		}
-		defer func() { _ = conn.Close() }()
-		if err = conn.SetDeadline(time.Now().Add(time.Second)); err != nil {
-			return got, err
-		}
-		payload := fmt.Sprintf("hibiscus-grant-%s-%d", phase, time.Now().UnixNano())
-		if _, err = conn.Write([]byte(payload)); err != nil {
-			return got, err
-		}
-		var response [2048]byte
-		n, err := conn.Read(response[:])
-		if err != nil {
-			return got, err
-		}
-		if err := json.Unmarshal(response[:n], &got); err != nil {
-			return got, err
-		}
-		if got.Request != payload {
-			return got, fmt.Errorf("backend echoed %q, want %q", got.Request, payload)
-		}
-		return got, nil
+	probe := func(phase string) (kindUDPEcho, error) {
+		return probeKindUDPEcho(addr, fmt.Sprintf("hibiscus-grant-%s-%d", phase, time.Now().UnixNano()))
 	}
 	rejected := func(phase string) (bool, error) {
 		_, err := probe(phase)
@@ -135,4 +110,34 @@ func testWeightedUDPGrantTraffic(t *testing.T, s *suite.ConformanceTestSuite) {
 		require.Equal(t, string(local.Name), got.Service)
 	}
 	t.Log("The permitted Service answered 20 fresh requests on the same VIP with the revoked reference at zero weight")
+}
+
+type kindUDPEcho struct{ Namespace, Service, Request string }
+
+// probeKindUDPEcho sends one datagram from a fresh socket and verifies its payload.
+func probeKindUDPEcho(address, payload string) (kindUDPEcho, error) {
+	var got kindUDPEcho
+	conn, err := net.DialTimeout("udp", address, time.Second)
+	if err != nil {
+		return got, err
+	}
+	defer func() { _ = conn.Close() }()
+	if err = conn.SetDeadline(time.Now().Add(time.Second)); err != nil {
+		return got, err
+	}
+	if _, err = conn.Write([]byte(payload)); err != nil {
+		return got, err
+	}
+	var response [2048]byte
+	n, err := conn.Read(response[:])
+	if err != nil {
+		return got, err
+	}
+	if err := json.Unmarshal(response[:n], &got); err != nil {
+		return got, err
+	}
+	if got.Request != payload {
+		return got, fmt.Errorf("backend echoed %q, want %q", got.Request, payload)
+	}
+	return got, nil
 }

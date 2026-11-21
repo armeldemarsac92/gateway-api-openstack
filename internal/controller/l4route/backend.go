@@ -47,6 +47,7 @@ type serviceBackend struct {
 type backendRejections struct {
 	active   *model.Diagnostic
 	inactive *model.Diagnostic
+	grants   []objectRevision
 }
 
 func (r *backendRejections) reject(weight int32, diagnostic *model.Diagnostic) (blocksForwarding bool) {
@@ -100,6 +101,14 @@ func (r *Reconciler) authorizedBackends(ctx context.Context, route *transportRou
 					return nil, rejections, fmt.Errorf("incomplete %s ReferenceGrant list", r.kind())
 				}
 				grants[key.Namespace] = list.Items
+				// The writer compares the fresh authorization snapshot before
+				// applying any graph mutation, even if replacement grants agree.
+				if !includeZeroWeight {
+					slices.SortFunc(list.Items, func(left, right gatewayv1.ReferenceGrant) int { return cmp.Compare(left.Name, right.Name) })
+					for i := range list.Items {
+						rejections.grants = append(rejections.grants, revisionOf(&list.Items[i]))
+					}
+				}
 			}
 			if !model.BackendReferenceAllowedFor(r.kind(), route.GetNamespace(), key, grants[key.Namespace]) {
 				if rejections.reject(weight, backendRejection(gatewayv1.RouteReasonRefNotPermitted, fmt.Sprintf("no ReferenceGrant permits this %s to use its backend Service", r.kind()))) {

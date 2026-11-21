@@ -69,9 +69,8 @@ func validateDefaultPoolListener(listener *listeners.Listener, loadBalancerID st
 }
 
 func validateDefaultPool(pool pools.Pool, loadBalancerID string, listener *listeners.Listener, protocol string) error {
-	if pool.ID == "" || pool.Protocol != protocol || pool.TLSEnabled ||
-		len(pool.Loadbalancers) != 1 || pool.Loadbalancers[0].ID != loadBalancerID {
-		return fmt.Errorf("%w: %s pool %s has an unexpected protocol, identity or load balancer", cloud.ErrOwnershipConflict, protocol, pool.ID)
+	if err := validateDefaultPoolParent(pool, loadBalancerID, protocol); err != nil {
+		return err
 	}
 	for _, parent := range pool.Listeners {
 		if listener == nil || listener.Protocol != protocol || len(pool.Listeners) != 1 || parent.ID != listener.ID || listener.DefaultPoolID != pool.ID {
@@ -84,6 +83,14 @@ func validateDefaultPool(pool pools.Pool, loadBalancerID string, listener *liste
 		}
 		return cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady,
 			fmt.Errorf("waiting for %s pool %s to report its listener %s", protocol, pool.ID, listener.ID))
+	}
+	return nil
+}
+
+func validateDefaultPoolParent(pool pools.Pool, loadBalancerID, protocol string) error {
+	if pool.ID == "" || pool.Protocol != protocol || pool.TLSEnabled ||
+		len(pool.Loadbalancers) != 1 || pool.Loadbalancers[0].ID != loadBalancerID {
+		return fmt.Errorf("%w: %s pool %s has an unexpected protocol, identity or load balancer", cloud.ErrOwnershipConflict, protocol, pool.ID)
 	}
 	return nil
 }
@@ -167,16 +174,20 @@ func (p *Provider) buildDefaultPoolGatewayDeletionPlan(ctx context.Context, owne
 		if issue := route.backendProvisioningIssue(true, true); issue != "" && (listener == nil || listener.DefaultPoolID == "") {
 			plan.defaultPoolPending = issue
 		}
-		poolID := route.pool.ID
-		if route.monitor != nil {
-			plan.pools = append(plan.pools, gatewayDeletionStep{resource: gatewayDeletionMonitor, resourceID: route.monitor.ID, parentID: poolID})
-		}
-		for _, member := range route.members {
-			plan.pools = append(plan.pools, gatewayDeletionStep{resource: gatewayDeletionMember, resourceID: member.ID, parentID: poolID})
-		}
-		plan.pools = append(plan.pools, gatewayDeletionStep{resource: gatewayDeletionPool, resourceID: poolID})
+		plan.pools = appendDefaultPoolDeletionSteps(plan.pools, route)
 	}
 	return plan, nil
+}
+
+func appendDefaultPoolDeletionSteps(steps gatewayPoolDeletionPlan, route observedRouteGraph) gatewayPoolDeletionPlan {
+	poolID := route.pool.ID
+	if route.monitor != nil {
+		steps = append(steps, gatewayDeletionStep{resource: gatewayDeletionMonitor, resourceID: route.monitor.ID, parentID: poolID})
+	}
+	for _, member := range route.members {
+		steps = append(steps, gatewayDeletionStep{resource: gatewayDeletionMember, resourceID: member.ID, parentID: poolID})
+	}
+	return append(steps, gatewayDeletionStep{resource: gatewayDeletionPool, resourceID: poolID})
 }
 
 // A TCP or UDP listener forwards through one pointer. Detach before changing its
@@ -238,13 +249,7 @@ func (p *Provider) buildDefaultPoolGraphPlan(desired desiredGatewayGraph, actual
 			}
 			canServe := slices.ContainsFunc(route.members, func(member cloud.Member) bool { return !member.Draining })
 			if actual.protocol == cloud.ListenerProtocolUDP && index == defaultOwner {
-				family := udpIPFamily(actual.state.VIPAddress)
-				hasEligibleMember := slices.ContainsFunc(observed.members, func(member pools.Member) bool {
-					return family != 0 && udpIPFamily(member.Address) == family &&
-						member.AdminStateUp && member.ProvisioningStatus == "ACTIVE" &&
-						(route.spec.MemberMode != cloud.MemberModeEndpoint || member.Weight > 0)
-				})
-				if !canServe || !hasEligibleMember {
+				if !canServe || !hasActiveUDPBackend(route, observed, actual.state.VIPAddress) {
 					// Revoke the proven forwarding pointer even if another
 					// backend difference prevents planning further changes.
 					detach = true
@@ -316,4 +321,13 @@ func validateRouteGatewayIDs(recorded, observed cloud.GatewayState) error {
 		return fmt.Errorf("%w: route Gateway IDs differ from the observed graph", cloud.ErrOwnershipConflict)
 	}
 	return nil
+}
+
+func hasActiveUDPBackend(route desiredRoute, observed observedRouteGraph, vipAddress string) bool {
+	family := udpIPFamily(vipAddress)
+	return slices.ContainsFunc(observed.members, func(member pools.Member) bool {
+		return family != 0 && udpIPFamily(member.Address) == family &&
+			member.AdminStateUp && member.ProvisioningStatus == "ACTIVE" &&
+			(route.spec.MemberMode != cloud.MemberModeEndpoint || member.Weight > 0)
+	})
 }
