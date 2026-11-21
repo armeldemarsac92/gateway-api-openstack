@@ -17,6 +17,8 @@ After the stock WSGI application completed `PUT /v2/lbaas/listeners/{id}` with H
 
 Public Barbican reads returned both original bundles byte for byte after the switch. The probe sent a public Octavia cascade delete request and simulated worker completion by setting `DELETED` directly in the fixture. Public GETs then returned HTTP 404 for the load balancer and listener. The operator deleted both Barbican secrets through the real public API and verified HTTP 404 for each one.
 
+An operator-assisted mapping for Kubernetes Secret revisions is under study. It covers certificate identity, key ownership, grant withdrawal and the four same-port listener sections. [Proposed mapping and acceptance criteria](https-certificate-mapping.md)
+
 ## What the probe exercised
 
 Barbican ran as a separate loopback WSGI process with SQLite and its `store_crypto` adapter and `simple_crypto` plugin. The real discovery, secret and ACL APIs ran with their stock policy. The fixture omitted Keystone's token-validation filter and supplied synthetic confirmed project identities. The operator had the `member` role and the Octavia certificate reader had the `reader` role. Octavia's Barbican ACL handler used the real ACL and secret APIs through python-barbicanclient. The test substituted the Keystone service session, service user ID and delegated user client. Both services used fixture configuration with host configuration discovery disabled. Generated private keys and secret references stayed in the private fixture.
