@@ -142,6 +142,21 @@ func TestSNISuffixRequiresBothCapabilitiesAndWritesWildcardValue(t *testing.T) {
 		if !discovered || wrote != wantWrite || (err == nil) != wantWrite {
 			t.Fatalf("caps=%v discovered=%t wrote=%t err=%v", capabilities, discovered, wrote, err)
 		}
+		if len(capabilities) == 1 && capabilities[0] == "tls_sni_passthrough_v1" {
+			actual.sni = map[sniFragmentKey]*observedSNIFragment{desired.sni[0].key: activeSNIFragment(desired.sni[0], "observed")}
+			spec.Gateway.TLSSNIRoutes[0].Hostname = "exact.example.test"
+			exact, err := provider.buildDesiredGatewayGraph(spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := provider.verifySNICapability(t.Context(), exact, actual); err == nil {
+				t.Fatal("an observed serving suffix still needs the suffix capability")
+			}
+			actual.sni[desired.sni[0].key].policy.AdminStateUp = false
+			if err := provider.verifySNICapability(t.Context(), exact, actual); err != nil {
+				t.Fatalf("the suffix flag must not block an exact-only graph: %v", err)
+			}
+		}
 	}
 }
 
@@ -193,7 +208,24 @@ func TestSNISuffixStagesReplacementBeforeRetiringProtectedSelector(t *testing.T)
 		},
 	}
 	actual.loadBalancer.ProvisioningStatus, actual.loadBalancer.AdminStateUp = "ACTIVE", true
-	provider := &Provider{}
+	loadBalancerClient := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPut && r.URL.Path == "/lbaas/pools/pool-narrow/members":
+			var body struct {
+				Members []json.RawMessage
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Members == nil || len(body.Members) != 0 {
+				t.Errorf("revocation must atomically remove all members: %#v, %v", body, err)
+			}
+			w.WriteHeader(http.StatusAccepted)
+		case r.Method == http.MethodPost && r.URL.Path == "/lbaas/pools":
+			http.Error(w, "Quota exceeded for pool.", http.StatusForbidden)
+		default:
+			t.Errorf("unexpected Octavia write %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	provider := newTestProvider(t, ServiceClients{LoadBalancer: loadBalancerClient, ProjectID: "project-a"}, ProviderConfig{})
 	next := func() graphMutation {
 		t.Helper()
 		steps, result, err := provider.buildSNIGraphPlan(desired, actual)
@@ -225,8 +257,33 @@ func TestSNISuffixStagesReplacementBeforeRetiringProtectedSelector(t *testing.T)
 			t.Fatalf("expected only policy %s to close, got %#v", id, got)
 		}
 	}
-	newDeny := activeSNIFragment(restricted[1], "deny")
+	oldNarrow := actual.sni[serving[1].key]
+	oldNarrow.policy.Position = 2
+	if got := next(); got.kind != graphSNIMutation || got.sni.kind != sniClearMembers || !got.sniWithdrawal {
+		t.Fatalf("must withdraw the revoked members before allocation: %#v", got)
+	} else if err := provider.executeSNIMutation(t.Context(), actual, got.sni); err != nil {
+		t.Fatal(err)
+	}
+	oldNarrow.members = nil
+	quota := next()
+	if quota.sni.kind != sniCreatePool {
+		t.Fatalf("expected to stage a replacement for the now-empty selector: %#v", quota)
+	}
+	if err := provider.executeSNIMutation(t.Context(), actual, quota.sni); err == nil {
+		t.Fatal("the fake Octavia project must reject the new pool")
+	}
+	if oldNarrow.forwardingHostname() != narrow.Hostname || len(oldNarrow.members) != 0 {
+		t.Fatal("quota rejection must leave a matching empty pool in front of the broad route")
+	}
+	// If the grant returns before the new denial is provisioned, the original
+	// selector can regain its authorized members without exposing a fallback.
+	desired.sni = serving
+	assertMutation(sniCreateMember, serving[1])
+	desired.sni = restricted
+
 	assertMutation(sniCreatePool, restricted[1])
+	newDeny := activeSNIFragment(restricted[1], "deny")
+	newDeny.policy.Position = 1
 	actual.sni[restricted[1].key] = &observedSNIFragment{pool: newDeny.pool}
 	assertMutation(sniCreatePolicy, restricted[1])
 	newDeny.policy.AdminStateUp = false
@@ -235,6 +292,9 @@ func TestSNISuffixStagesReplacementBeforeRetiringProtectedSelector(t *testing.T)
 	actual.sni[restricted[1].key].rule = newDeny.rule
 	assertMutation(sniEnablePolicy, restricted[1])
 	newDeny.policy.AdminStateUp = true
+	// The confirmed position-1 guard also protects the name when a stale
+	// lower-priority member is still present. The obsolete policy can close.
+	oldNarrow.members = activeSNIFragment(serving[1], "narrow").members
 	assertDisable("narrow")
 
 	delete(actual.sni, serving[1].key)
@@ -251,6 +311,102 @@ func TestSNISuffixStagesReplacementBeforeRetiringProtectedSelector(t *testing.T)
 	// while the observed narrow selector still covers its names.
 	desired.sni = serving[:1]
 	assertDisable("broad")
+}
+
+func TestSNISuffixSuspendsFallbacksBeforeAllocatingMissingDenial(t *testing.T) {
+	identity := safetyTestIdentity(t)
+	makeTarget := func(name, hostname string, deny bool) cloud.TLSSNIRoute {
+		route := cloud.TLSSNIRoute{Identity: identity.Value(), Hostname: hostname, Deny: deny}
+		route.Identity.RouteName, route.Identity.RouteUID = name, name+"-uid"
+		if !deny {
+			route.ServiceUID, route.Members = name+"-svc", []cloud.Member{{Address: "192.0.2.12", Port: 443}}
+		}
+		return route
+	}
+	targets, err := buildSNITargets(identity.Value(), []cloud.TLSSNIRoute{
+		makeTarget("exact", "vip.shop.example.test", false),
+		makeTarget("denial", "*.shop.example.test", true),
+		makeTarget("regional", "*.example.test", false),
+		makeTarget("wide", "*.test", false),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	desired := desiredGatewayGraph{spec: completeGraphSpec(identity), sni: targets}
+	desired.spec.Gateway.Spec.ExternalNetworkID = ""
+	actual := observedGatewayGraph{loadBalancer: safetyObservedLoadBalancer(),
+		listener: &listeners.Listener{ID: "listener", ProvisioningStatus: "ACTIVE", AdminStateUp: true},
+		sni: map[sniFragmentKey]*observedSNIFragment{
+			targets[0].key: activeSNIFragment(targets[0], "exact"),
+			targets[2].key: activeSNIFragment(targets[2], "regional"),
+			targets[3].key: activeSNIFragment(targets[3], "wide"),
+		},
+	}
+	actual.loadBalancer.ProvisioningStatus, actual.loadBalancer.AdminStateUp = "ACTIVE", true
+	for _, index := range []int{3, 2} {
+		steps, result, err := (&Provider{}).buildSNIGraphPlan(desired, actual)
+		fragment := actual.sni[targets[index].key]
+		if err != nil || len(steps) != 1 || steps[0].deletion.resource != gatewayDisableL7Policy ||
+			steps[0].deletion.resourceID != fragment.policy.ID || !steps[0].sniWithdrawal {
+			t.Fatalf("expected to suspend %s before any allocation, got %#v, %v", fragment.policy.ID, steps, err)
+		}
+		if result.Routes[0].Result.Outcome.State != cloud.OutcomeReady {
+			t.Fatalf("the exact sibling must retain forwarding evidence: %#v", result.Routes)
+		}
+		fragment.policy.AdminStateUp = false
+	}
+	steps, _, err := (&Provider{}).buildSNIGraphPlan(desired, actual)
+	if err != nil || len(steps) != 1 || steps[0].kind != graphSNIMutation ||
+		steps[0].sni.kind != sniCreatePool || !steps[0].sni.target.route.Deny {
+		t.Fatalf("only stage the denial once all of its fallbacks are suspended, got %#v, %v", steps, err)
+	}
+	actual.sni[targets[1].key] = activeSNIFragment(targets[1], "denial")
+	steps, _, err = (&Provider{}).buildSNIGraphPlan(desired, actual)
+	if err != nil || len(steps) != 1 || steps[0].sni.kind != sniEnablePolicy || steps[0].sni.parentID != "policy-regional" {
+		t.Fatalf("restore the covering policies after observing the denial, got %#v, %v", steps, err)
+	}
+}
+
+func TestSNISuffixReadinessWaitsForObsoleteNarrowerMatch(t *testing.T) {
+	identity := safetyTestIdentity(t)
+	makeTarget := func(name, hostname string) cloud.TLSSNIRoute {
+		route := cloud.TLSSNIRoute{Identity: identity.Value(), Hostname: hostname, ServiceUID: name + "-svc",
+			Members: []cloud.Member{{Address: "192.0.2.12", Port: 443}}}
+		route.Identity.RouteName, route.Identity.RouteUID = name, name+"-uid"
+		return route
+	}
+	targets, err := buildSNITargets(identity.Value(), []cloud.TLSSNIRoute{
+		makeTarget("obsolete", "old.shop.example.test"),
+		makeTarget("disjoint", "vip.example.test"),
+		makeTarget("regional", "*.shop.example.test"),
+		makeTarget("wide", "*.example.test"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	desired := desiredGatewayGraph{spec: completeGraphSpec(identity), sni: targets[1:]}
+	desired.spec.Gateway.Spec.ExternalNetworkID = ""
+	actual := observedGatewayGraph{loadBalancer: safetyObservedLoadBalancer(),
+		listener: &listeners.Listener{ID: "listener", ProvisioningStatus: "ACTIVE", AdminStateUp: true},
+		sni:      make(map[sniFragmentKey]*observedSNIFragment),
+	}
+	actual.loadBalancer.ProvisioningStatus, actual.loadBalancer.AdminStateUp = "ACTIVE", true
+	for _, target := range targets {
+		actual.sni[target.key] = activeSNIFragment(target, target.route.Identity.RouteName)
+	}
+	check := func(wantRegional bool) {
+		t.Helper()
+		ready := readySNIRoutes(desired, actual)
+		if ready[targets[2].key.uid] != wantRegional || !ready[targets[1].key.uid] || !ready[targets[3].key.uid] {
+			t.Fatalf("only the suffix inheriting the obsolete hostname must wait: %v", ready)
+		}
+	}
+	check(false)
+	obsolete := actual.sni[targets[0].key]
+	obsolete.policy.AdminStateUp, obsolete.policy.ProvisioningStatus = false, "PENDING_UPDATE"
+	check(false)
+	obsolete.policy.ProvisioningStatus = "ACTIVE"
+	check(true)
 }
 
 func TestSNIGraphWithdrawsObsoletePolicyWithoutUnprogrammingSibling(t *testing.T) {

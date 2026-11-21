@@ -232,6 +232,11 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		if step.kind == graphRouteMutation {
 			return result, &cloud.GraphError{Identity: desired.routes[step.routeIndex].spec.Identity, Err: err}
 		}
+		if step.kind == graphSNIMutation && step.isRestrictiveSNI() {
+			// An unsuccessful denial write cannot establish forwarding.
+			// Unaffected siblings can retain an existing checkpoint.
+			deferReadySNIReadback(&result, result.Outcome)
+		}
 		return result, err
 	}
 	p.recordGraphMutationOutcome(&result, step)

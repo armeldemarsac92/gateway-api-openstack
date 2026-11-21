@@ -419,8 +419,7 @@ func (fragment *observedSNIFragment) matches(wanted desiredSNIFragment) bool {
 		seen[key] = true
 	}
 	if fragment.policy != nil {
-		if fragment.policy.ProvisioningStatus != "ACTIVE" || len(fragment.members) != len(wanted.route.Members) ||
-			fragment.policy.AdminStateUp && fragment.rule == nil {
+		if fragment.policy.ProvisioningStatus != "ACTIVE" || fragment.policy.AdminStateUp && fragment.rule == nil {
 			return false
 		}
 	}
@@ -457,9 +456,11 @@ func readySNIRoutes(desired desiredGatewayGraph, actual observedGatewayGraph) ma
 		return nil
 	}
 	wanted := make(map[sniFragmentKey]bool, len(desired.sni))
+	wantedHostnames := make(map[string]bool, len(desired.sni))
 	ready := make(map[string]bool)
 	for _, target := range desired.sni {
 		wanted[target.key] = true
+		wantedHostnames[target.route.Hostname] = true
 		if !target.route.Deny {
 			ready[target.key.uid] = true
 		}
@@ -472,12 +473,23 @@ func readySNIRoutes(desired desiredGatewayGraph, actual observedGatewayGraph) ma
 		}
 		if hostname := fragment.forwardingHostname(); hostname != "" {
 			selectors[hostname]++
+			if !wantedHostnames[hostname] {
+				// The first covering desired suffix inherits these names once
+				// Octavia confirms that the old selector is no longer active.
+				for _, target := range desired.sni {
+					if amphora.SNISuffixCovers(target.route.Hostname, hostname) {
+						delete(ready, target.key.uid)
+						break
+					}
+				}
+			}
 		}
 	}
 	for _, target := range desired.sni {
 		fragment := actual.sni[target.key]
 		if ready[target.key.uid] && (selectors[target.route.Hostname] != 1 || fragment == nil ||
-			fragment.policy == nil || !fragment.policy.AdminStateUp || fragment.rule == nil || !fragment.matches(target)) {
+			fragment.policy == nil || !fragment.policy.AdminStateUp || fragment.rule == nil ||
+			len(fragment.members) != len(target.route.Members) || !fragment.matches(target)) {
 			delete(ready, target.key.uid)
 		}
 	}
@@ -562,6 +574,15 @@ func (p *Provider) buildSNIGraphPlan(desired desiredGatewayGraph, actual observe
 		return nil, result, nil
 	}
 	if actual.listener != nil && actual.listener.AdminStateUp {
+		step, coveredUID, needed := protectSNIDenials(desired.sni, actual.sni, keys)
+		if needed {
+			for i, route := range result.Routes {
+				if encodedSNITag("route-uid", route.Identity.RouteUID) == coveredUID {
+					result.Routes[i].Result.Outcome = pending
+				}
+			}
+			return plan(step)
+		}
 		// Stage new negative claims first. Enabling their empty target can
 		// only restrict the existing frontend.
 		for _, target := range desired.sni {
@@ -638,6 +659,52 @@ func (p *Provider) buildSNIGraphPlan(desired desiredGatewayGraph, actual observe
 	return nil, result, nil
 }
 
+// protectSNIDenials only changes existing resources. A full pool, policy or
+// rule quota must not keep an unauthorized match forwarding.
+func protectSNIDenials(desired []desiredSNIFragment, actual map[sniFragmentKey]*observedSNIFragment, keys []sniFragmentKey) (graphMutation, string, bool) {
+	for _, target := range desired {
+		if !target.route.Deny {
+			continue
+		}
+		hostname := target.route.Hostname
+		var guard *observedSNIFragment
+		for _, key := range keys {
+			fragment := actual[key]
+			if fragment.forwardingHostname() == hostname && fragment.matches(target) &&
+				(guard == nil || fragment.policy.Position < guard.policy.Position) {
+				guard = fragment
+			}
+		}
+		for _, key := range keys {
+			fragment := actual[key]
+			if fragment.forwardingHostname() != hostname || len(fragment.members) == 0 {
+				continue
+			}
+			if guard != nil && guard.policy.Position > 0 && guard.policy.Position < fragment.policy.Position {
+				continue
+			}
+			// Preserve the rule and the pool, removing all destinations in
+			// one write. Its name cannot fall through while we stage a guard.
+			return graphMutation{kind: graphSNIMutation, sniWithdrawal: true,
+				sni:     sniMutation{kind: sniClearMembers, parentID: fragment.pool.ID},
+				message: "Removing unauthorized TLS SNI pool members"}, "", true
+		}
+		if guard == nil {
+			// The keys are ordered broadest first, so disabling one covering
+			// suffix cannot expose a wider candidate for the denied names.
+			for _, key := range keys {
+				fragment := actual[key]
+				if len(fragment.members) != 0 && amphora.SNISuffixCovers(fragment.forwardingHostname(), hostname) {
+					return graphMutation{kind: graphDeleteChild, sniWithdrawal: true,
+						deletion: gatewayDeletionStep{resource: gatewayDisableL7Policy, resourceID: fragment.policy.ID},
+						message:  "Suspending a broader TLS SNI policy until the denial is installed"}, key.uid, true
+				}
+			}
+		}
+	}
+	return graphMutation{}, "", false
+}
+
 func hasSNIFallback(hostname string, desired []desiredSNIFragment, actual map[sniFragmentKey]*observedSNIFragment) bool {
 	for _, target := range desired {
 		if !target.route.Deny && amphora.SNISuffixCovers(target.route.Hostname, hostname) {
@@ -685,6 +752,7 @@ const (
 	sniCreatePolicy
 	sniCreateRule
 	sniEnablePolicy
+	sniClearMembers
 )
 
 type sniMutation struct {
@@ -730,6 +798,8 @@ func (p *Provider) executeSNIMutation(ctx context.Context, actual observedGatewa
 			AdminStateUp: boolPointer(true), Tags: tagsFor(roleSNIRule),
 		})
 		return err
+	case sniClearMembers:
+		return p.octavia.ClearMembers(ctx, step.parentID)
 	case sniEnablePolicy:
 		_, err := p.octavia.UpdatePolicy(ctx, step.parentID, l7policies.UpdateOpts{AdminStateUp: boolPointer(true)})
 		return err
@@ -744,13 +814,27 @@ func (p *Provider) verifySNICapability(ctx context.Context, desired desiredGatew
 		provider = actual.loadBalancer.Provider
 	}
 	required := []string{octavia.GatewayCapabilityTLSSNIPassthrough}
-	if p.tlsSNISuffix {
+	if graphUsesSNISuffix(desired, actual) {
 		required = append(required, octavia.GatewayCapabilityTLSSNISuffix)
 	}
 	if err := p.octavia.VerifyGatewayCapabilities(ctx, provider, required...); err != nil {
 		return cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady, fmt.Errorf("verify Octavia TLS SNI capabilities in region %q: %w", p.region, err))
 	}
 	return nil
+}
+
+func graphUsesSNISuffix(desired desiredGatewayGraph, actual observedGatewayGraph) bool {
+	if slices.ContainsFunc(desired.sni, func(target desiredSNIFragment) bool {
+		return sniCompareType(target.route.Hostname) == sniEndsWith
+	}) {
+		return true
+	}
+	for _, fragment := range actual.sni {
+		if sniCompareType(fragment.forwardingHostname()) == sniEndsWith {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *Provider) withdrawUndiscoverableSNI(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, cause error) (cloud.GatewayGraphResult, error) {
@@ -779,13 +863,9 @@ func (p *Provider) reconcileSNIWithdrawalWithoutAddress(ctx context.Context, des
 		return result, err
 	}
 	result.Gateway.Outcome = p.progressingOutcome("Waiting to observe the Gateway Floating IP inventory")
-	for i := range result.Routes {
-		// A previously proven sibling can stay Programmed during this read
-		// failure. Do not create a new serving proof without address inventory.
-		if result.Routes[i].Result.Outcome.State == cloud.OutcomeReady {
-			result.Routes[i].Result = cloud.RouteResult{Outcome: result.Gateway.Outcome, ObservationDeferred: true}
-		}
-	}
+	// A previously proven sibling can stay Programmed during this read
+	// failure. Do not create a new serving proof without address inventory.
+	deferReadySNIReadback(&result, result.Gateway.Outcome)
 	if len(plan) != 1 || !plan[0].isRestrictiveSNI() ||
 		plan[0].kind == graphDeleteChild && plan[0].deletion.resource != gatewayDisableL7Policy {
 		return result, actual.addressReadError
@@ -804,4 +884,12 @@ func (p *Provider) reconcileSNIWithdrawalWithoutAddress(ctx context.Context, des
 	}
 	p.recordGraphMutationOutcome(&result, step)
 	return result, nil
+}
+
+func deferReadySNIReadback(result *cloud.GatewayGraphResult, outcome cloud.Outcome) {
+	for i := range result.Routes {
+		if result.Routes[i].Result.Outcome.State == cloud.OutcomeReady {
+			result.Routes[i].Result = cloud.RouteResult{Outcome: outcome, ObservationDeferred: true}
+		}
+	}
 }
