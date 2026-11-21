@@ -1,0 +1,83 @@
+{
+  "controllerSource": "00eabae770f40014af8cb6cb53a225f1450ac52a",
+  "goTestBinarySHA256": "1fbcf196eea704f0d248ec76581349e8f8077e4f4c6c0d0e2148b8040aa899fc",
+  "selection": "UDPRouteParentRefAttachAllListeners",
+  "channel": "experimental",
+  "priorDiskBackedRun": "FAIL",
+  "previousDiskBackedVIPRequests5310": 21,
+  "previousDiskBackedMemberRequests5310": 0,
+  "storageExperiment": {
+    "previousReadyNodes": 4,
+    "previousClusters": 2,
+    "previousDrainVerified": true,
+    "nodeImage": "kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed",
+    "scratchFdatasync": {
+      "samples": 64,
+      "p95ms": 0.01,
+      "maxMS": 0.092
+    },
+    "activeClusters": 1,
+    "activeKindNodes": 2,
+    "etcdFilesystem": "tmpfs",
+    "gatewayAPIBundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+    "echoImageDigests": {
+      "v0.1.0": "sha256:640d843263062f4391ecd74effd68673a69800852eb4ff31b8452a3301eae83b",
+      "v0.2.0": "sha256:2e9146b0550f20c9082b1f8490729104ea0120bb0a41763bd02307db93028f20"
+    }
+  },
+  "scopedCommonBaseSHA256": "eec15359b2f8ce095f3da26dfbc9485725c06a985a15796f1bde2ac79158f6ed",
+  "result": "PASS",
+  "ports": {
+    "5310": {
+      "toVIP": 8,
+      "toMember": 1,
+      "echoes": 1
+    },
+    "5311": {
+      "toVIP": 1,
+      "toMember": 1,
+      "echoes": 1
+    },
+    "5312": {
+      "toVIP": 1,
+      "toMember": 1,
+      "echoes": 1
+    }
+  },
+  "walSyncSamples": 1186,
+  "walSync99thPercentileUpperBoundSeconds": "0.001",
+  "walSyncCumulativeBuckets": {
+    "0.001": 1186,
+    "0.002": 1186,
+    "0.004": 1186,
+    "0.008": 1186,
+    "0.016": 1186,
+    "0.032": 1186,
+    "0.064": 1186,
+    "0.128": 1186,
+    "0.256": 1186,
+    "0.512": 1186,
+    "1.024": 1186,
+    "2.048": 1186,
+    "4.096": 1186,
+    "8.192": 1186,
+    "+Inf": 1186
+  },
+  "matchedCreatesAndDeletes": {
+    "Health Monitor": 1,
+    "Listener": 6,
+    "Load Balancer": 4,
+    "Member": 1,
+    "Pool": 1
+  },
+  "kernelDrops": 0,
+  "pcapSHA256": "b455663d2a2df65b03f9be0f34a5375025958ff79bcc4e83518425f4479173e2",
+  "caseLogSHA256": "55cc1e01b629e7aa67461c57ed55e86260ef979a95d331e179b68545234a73c6",
+  "remainingTestResources": {
+    "namespaces": 0,
+    "gatewayClasses": 0,
+    "fixtureVIPs": 0,
+    "ipvsServices": 0,
+    "listenerStateDirectories": 0
+  }
+}

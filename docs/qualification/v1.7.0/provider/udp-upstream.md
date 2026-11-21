@@ -27,6 +27,20 @@ On the final Experimental run, public Octavia traces show a 24.875-second interv
 
 The public archive contains per-channel results, an ordered excerpt of each trace with anonymous endpoint labels, hashes of the full local captures, fixture versions, per-port request counts, bounded control-plane log counts and file checksums. Its SHA-256 is `7ccf394d77a22fb61b94cf1f59bf94e6753b7c500bef9ee9b23f3942479afe10`. [Download the UDP results](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-00eabae770f40014af8cb6cb53a225f1450ac52a/hibiscus-udp-multiport-00eabae770f4.tar.gz)
 
+## Experimental run with isolated etcd storage
+
+The original `UDPRouteParentRefAttachAllListeners` case passed once on a new two-node Experimental cluster. It used the same controller test binary from `00eabae770f4`, pinned workload images, scoped common manifest and upstream traffic deadline as the preceding disk-backed run. The earlier two clusters were removed after checking that all test resources had drained. The replacement ran alone in the guest with its control-plane `/var/lib/etcd` on tmpfs. The case selected only the Gateway-wide attachment. [Machine-readable observation](udp-attach-all-experimental.json)
+
+| UDP port | Requests at VIP | Requests at pod | Replies from the expected pod |
+|---|---:|---:|---:|
+| 5310 | 8 | 1 | 1 |
+| 5311 | 1 | 1 | 1 |
+| 5312 | 1 | 1 | 1 |
+
+All 1,186 etcd WAL synchronizations during the test fell in the histogram bucket at or below 1 ms. Both the forward and return packets for all three echoes identified the same pod. The capture recorded zero kernel drops. The WSGI fixture recorded matching create/delete IDs for four load balancers, six listeners, one pool, one member and one monitor. The case left zero conformance namespaces, GatewayClasses, fixture VIPs, IPVS services and listener state directories. On the earlier disk-backed trial port 5310 got zero backend requests from 21 attempts. The cluster count, storage and case selection all changed, so this observation does not isolate the cause of the deadline miss. The matrix counts that mixed result as a failure. [Trace counts and checksums](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-ce6f51797fb7c31a63c1f63577cb6938ecaff618/hibiscus-transport-qualification-75101c26553d.tar.gz)
+
+To reproduce the storage experiment, create one disposable Experimental kind cluster using the versions and commands below. On the control-plane node, bind an empty directory backed by tmpfs to `/var/lib/etcd` with a kind `extraMounts` entry. Verify the mount from inside the node using `stat -f -c %T /var/lib/etcd`. Select `HIBISCUS_UDP_CASES=UDPRouteParentRefAttachAllListeners` and use the original scoped manifest. Record `etcd_disk_wal_fsync_duration_seconds_bucket` immediately before and after the case and inspect traffic on the VIP and member interfaces.
+
 ## Weighted Endpoint results
 
 Controller [`c49134b1183b`](https://github.com/armeldemarsac92/gateway-api-openstack/commit/c49134b1183bbc6b3e4cf01c720bef2ae154d70e) ran the nine UDP cases on two independent, two-node kind clusters with Kubernetes v1.36.4. Each cluster installed its own published v1.7.0 CRD bundle. Each focused run passed six cases, failed two and skipped one. Both failing cases requested three UDP listeners on distinct ports of a single Gateway. The skipped case requires a TLSRoute-capable Gateway. With the exact same binary, the literal GATEWAY-UDP Core setup stopped on both channels before any case body ran. All 23 upstream pods were Ready. The base Gateway with four HTTPS listeners on port 443 reported `Accepted=False/ListenersNotValid` and `Programmed=False/Invalid`.

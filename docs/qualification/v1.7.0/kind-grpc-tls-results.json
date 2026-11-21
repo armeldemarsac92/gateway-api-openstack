@@ -1,0 +1,223 @@
+{
+  "controllerSource": "00eabae770f40014af8cb6cb53a225f1450ac52a",
+  "runnerSource": "0b04173620e55c632742318cfde7f5ba4ca08a86",
+  "testBinarySHA256": "cf9566a8ffcf6128743d55d614a12d593c1d46147f4ad84bbe4cb5fc77c701e1",
+  "cloudAdapter": "in-memory recording adapter",
+  "upstreamRegistry": "v1.7.0",
+  "commonBaseSHA256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+  "timeoutSeconds": 300,
+  "runs": [
+    {
+      "channel": "standard",
+      "profile": "GATEWAY-GRPC",
+      "selectedFeatures": {
+        "core": [
+          "GRPCRoute",
+          "Gateway",
+          "ReferenceGrant"
+        ],
+        "extended": [
+          "BackendTLSPolicy",
+          "BackendTLSPolicySANValidation",
+          "GatewayAddressEmpty",
+          "GatewayBackendClientCertificate",
+          "GatewayFrontendClientCertificateValidation",
+          "GatewayFrontendClientCertificateValidationInsecureFallback",
+          "GatewayHTTPListenerIsolation",
+          "GatewayHTTPSListenerDetectMisdirectedRequests",
+          "GatewayInfrastructure",
+          "GatewayPort8080",
+          "GatewayRouteHostnameIntersectionPrecedence",
+          "GatewayStaticAddresses",
+          "ListenerSet"
+        ]
+      },
+      "outcome": "SETUP_FAILED",
+      "commonBasePodsReady": 23,
+      "gatewayConditions": {
+        "Accepted": [
+          "False",
+          "ListenersNotValid"
+        ],
+        "Programmed": [
+          "False",
+          "Invalid"
+        ]
+      },
+      "rejectedListenerSections": [
+        "https",
+        "https-with-hostname",
+        "https-with-hostname-matching-wildcard",
+        "https-with-wildcard-hostname"
+      ],
+      "listenerReason": "UnsupportedProtocol",
+      "caseBodiesRun": 0,
+      "officialReportEmitted": false,
+      "cleanupVerified": true,
+      "rawSuiteLogSHA256": "a2c95cc36cc755383d18b2dfce470bf87e1ad47503db27393ab9a94aaab5082b",
+      "rawStatusSnapshotsSHA256": "9f30d93a75b84b566ac13768e8218ac7bafd7009a7db45a1f9ef07e0604016cd"
+    },
+    {
+      "channel": "standard",
+      "profile": "GATEWAY-TLS",
+      "selectedFeatures": {
+        "core": [
+          "Gateway",
+          "ReferenceGrant",
+          "TLSRoute"
+        ],
+        "extended": [
+          "BackendTLSPolicy",
+          "BackendTLSPolicySANValidation",
+          "GatewayAddressEmpty",
+          "GatewayBackendClientCertificate",
+          "GatewayFrontendClientCertificateValidation",
+          "GatewayFrontendClientCertificateValidationInsecureFallback",
+          "GatewayHTTPListenerIsolation",
+          "GatewayHTTPSListenerDetectMisdirectedRequests",
+          "GatewayInfrastructure",
+          "GatewayPort8080",
+          "GatewayRouteHostnameIntersectionPrecedence",
+          "GatewayStaticAddresses",
+          "ListenerSet",
+          "TLSRouteModeMixed",
+          "TLSRouteModeTerminate"
+        ]
+      },
+      "outcome": "SETUP_FAILED",
+      "commonBasePodsReady": 23,
+      "gatewayConditions": {
+        "Accepted": [
+          "False",
+          "ListenersNotValid"
+        ],
+        "Programmed": [
+          "False",
+          "Invalid"
+        ]
+      },
+      "rejectedListenerSections": [
+        "https",
+        "https-with-hostname",
+        "https-with-hostname-matching-wildcard",
+        "https-with-wildcard-hostname"
+      ],
+      "listenerReason": "UnsupportedProtocol",
+      "caseBodiesRun": 0,
+      "officialReportEmitted": false,
+      "cleanupVerified": true,
+      "rawSuiteLogSHA256": "68449fda4b70647ef562d7ff043458ca3dd8965957ebfb282a1f90932d96d27a",
+      "rawStatusSnapshotsSHA256": "ad9fd3d7f72d62793decc467c4c8e325d8c1b6694717a72335c7190a30627edd"
+    },
+    {
+      "channel": "experimental",
+      "profile": "GATEWAY-GRPC",
+      "selectedFeatures": {
+        "core": [
+          "GRPCRoute",
+          "Gateway",
+          "ReferenceGrant"
+        ],
+        "extended": [
+          "BackendTLSPolicy",
+          "BackendTLSPolicySANValidation",
+          "ClusterTrustBundle",
+          "GatewayAddressEmpty",
+          "GatewayAddressRoutability",
+          "GatewayAddressRoutabilityCluster",
+          "GatewayBackendClientCertificate",
+          "GatewayFrontendClientCertificateValidation",
+          "GatewayFrontendClientCertificateValidationInsecureFallback",
+          "GatewayHTTPListenerIsolation",
+          "GatewayHTTPSListenerDetectMisdirectedRequests",
+          "GatewayInfrastructure",
+          "GatewayListenerFilters",
+          "GatewayPort8080",
+          "GatewayRouteHostnameIntersectionPrecedence",
+          "GatewayStaticAddresses",
+          "ListenerSet"
+        ]
+      },
+      "outcome": "SETUP_FAILED",
+      "commonBasePodsReady": 23,
+      "gatewayConditions": {
+        "Accepted": [
+          "False",
+          "ListenersNotValid"
+        ],
+        "Programmed": [
+          "False",
+          "Invalid"
+        ]
+      },
+      "rejectedListenerSections": [
+        "https",
+        "https-with-hostname",
+        "https-with-hostname-matching-wildcard",
+        "https-with-wildcard-hostname"
+      ],
+      "listenerReason": "UnsupportedProtocol",
+      "caseBodiesRun": 0,
+      "officialReportEmitted": false,
+      "cleanupVerified": true,
+      "rawSuiteLogSHA256": "8e589e04f5f1bda81bea0a0ec81fd0d3587044d12b92a434abadc9093e204b33",
+      "rawStatusSnapshotsSHA256": "caafc27d41df36836e2f31ad7ce6e350569cfa5d74b39fe89356e8bc8915c4fb"
+    },
+    {
+      "channel": "experimental",
+      "profile": "GATEWAY-TLS",
+      "selectedFeatures": {
+        "core": [
+          "Gateway",
+          "ReferenceGrant",
+          "TLSRoute"
+        ],
+        "extended": [
+          "BackendTLSPolicy",
+          "BackendTLSPolicySANValidation",
+          "ClusterTrustBundle",
+          "GatewayAddressEmpty",
+          "GatewayAddressRoutability",
+          "GatewayAddressRoutabilityCluster",
+          "GatewayBackendClientCertificate",
+          "GatewayFrontendClientCertificateValidation",
+          "GatewayFrontendClientCertificateValidationInsecureFallback",
+          "GatewayHTTPListenerIsolation",
+          "GatewayHTTPSListenerDetectMisdirectedRequests",
+          "GatewayInfrastructure",
+          "GatewayListenerFilters",
+          "GatewayPort8080",
+          "GatewayRouteHostnameIntersectionPrecedence",
+          "GatewayStaticAddresses",
+          "ListenerSet",
+          "TLSRouteModeMixed",
+          "TLSRouteModeTerminate"
+        ]
+      },
+      "outcome": "SETUP_FAILED",
+      "commonBasePodsReady": 23,
+      "gatewayConditions": {
+        "Accepted": [
+          "False",
+          "ListenersNotValid"
+        ],
+        "Programmed": [
+          "False",
+          "Invalid"
+        ]
+      },
+      "rejectedListenerSections": [
+        "https",
+        "https-with-hostname",
+        "https-with-hostname-matching-wildcard",
+        "https-with-wildcard-hostname"
+      ],
+      "listenerReason": "UnsupportedProtocol",
+      "caseBodiesRun": 0,
+      "officialReportEmitted": false,
+      "cleanupVerified": true,
+      "rawSuiteLogSHA256": "3f6208fbd9939166738e14582ee3199aa3f52dacb06ca2c79b666b52d5933e21",
+      "rawStatusSnapshotsSHA256": "b30121511dee45214e12c66dc35b16185a51a823c0883f32d87a82c06f62346a"
+    }
+  ]
+}

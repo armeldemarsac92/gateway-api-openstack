@@ -20,7 +20,11 @@ If the release CRDs change while a route is bound, the controller checks the exi
 
 In a separate local weighted probe, Gophercloud created and updated TCP `ROUND_ROBIN` members through the pinned Octavia public API and read each weight back by member ID. Octavia accepted 0 and 256 and returned HTTP 400 for 257. It accepted clearing `SOURCE_IP` persistence on the pool. HAProxy 3.0.19 ran the stock configuration rendered from those API writes. With weights 7, 7 and 6, three echo backends received 703, 702 and 595 of 2,000 new connections. After changing the same members to equal weights, each received 500 of 1,500 new connections. [Member API types](https://github.com/openstack/octavia/blob/93689cb7701da65b5aad387bb824c477c64b0f2b/octavia/api/v2/types/member.py) · [HAProxy pool template](https://github.com/openstack/octavia/blob/93689cb7701da65b5aad387bb824c477c64b0f2b/octavia/common/jinja/haproxy/combined_listeners/templates/macros.j2)
 
-These local checks use a loopback listener. Weighted TCPRoute traffic through Kubernetes pods, a real private Amphora VIP, on-cloud restart and cleanup, and the upstream GATEWAY-TCP report remain open.
+The loopback observations isolate the stock API and template. The upstream weighted TCPRoute case also reached real worker pods on both kind channels. The private VIP, failover and cleanup on a deployed Amphora and the full GATEWAY-TCP report remain open. [Kubernetes connection counts](tcp-upstream.md#weighted-tcp-connections)
+
+## Reproduce the weighted member probe
+
+The source archive includes the Gophercloud helper and the Python probe used for the TCP 7:7:6 and 1:1:1 runs. Its README gives the build and invocation from the pinned Go module. The test uses three fresh loopback echo servers and the stock Amphora template rendered from the fixture’s persisted public-API writes. Archive SHA-256 is `9395b52e4a3033b3e7b7bfa5b2a58fdb3f47f397e3606767b3fa7bc64e217a15`. [Source and checksums](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-ce6f51797fb7c31a63c1f63577cb6938ecaff618/hibiscus-provider-probes-75101c26553d.tar.gz)
 
 ## Reproduce
 

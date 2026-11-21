@@ -1,0 +1,131 @@
+{
+  "testRunnerRevision": "17c2ca64210ca8fb065e5bf23b27d7b147221d8f",
+  "controllerRevision": "a02e83e4ab974fd64042648ee1cbd6c71389a280",
+  "testBinarySHA256": "95f0f07908f305622a6ff62b77eb97390987185d9e6371139243db9b2f6f8aa9",
+  "gatewayAPI": "v1.7.0",
+  "kubernetes": "1.36.4",
+  "octavia": "19.0.0",
+  "HAProxy": "3.0.19",
+  "scopedBaseSHA256": "eec15359b2f8ce095f3da26dfbc9485725c06a985a15796f1bde2ac79158f6ed",
+  "upstreamBaseSHA256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+  "channels": {
+    "standard": {
+      "traffic": {
+        "caseBodies": {
+          "TCPRouteMultipleRoutesAttachment": "PASS",
+          "TCPRouteReferenceGrant": "PASS"
+        },
+        "caseLogSHA256": "6f7489266321ae8c5d868fc0a0f20ebddcd33fecee277a780571f4819e832cba",
+        "verifiedFixtureCleanup": true,
+        "matchedOctaviaCreatesAndDeletes": {
+          "Load Balancer": 5,
+          "Listener": 5,
+          "Pool": 2,
+          "Member": 2,
+          "Health Monitor": 2
+        },
+        "vipPcapSHA256": "e2a8c6a825a3ad05dbeb1066258a5c8e148a7bdb7d88edf6a740bd91ab79ef30",
+        "memberPcapSHA256": "e241f42d97549a6bb645ce441424d2d222ecf0ff1315e2a8dc86abf71722c793",
+        "vipEchoesByBackend": {
+          "tcp-attach-backend-1": 101,
+          "tcp-reference-grant-backend": 4
+        },
+        "memberEchoesIncludingDirectProbes": {
+          "tcp-attach-backend-1": 101,
+          "tcp-reference-grant-backend": 10
+        },
+        "kernelCaptureDrops": 0,
+        "postGrantDeletion": {
+          "freshVIPEOFBeforeGreeting": 3,
+          "sameDirectPodEchoes": 3
+        }
+      },
+      "unmodifiedCoreProfile": {
+        "caseBodies": {},
+        "caseLogSHA256": "265a64fefde5f585ef3bf18c7da9fb26464401147888ffa230026c83ab5bf6f2",
+        "verifiedFixtureCleanup": true,
+        "matchedOctaviaCreatesAndDeletes": {
+          "Load Balancer": 3,
+          "Listener": 3
+        },
+        "result": "SETUP_FAILED",
+        "readyPodsInCommonBase": 23,
+        "timeoutSeconds": 300,
+        "gateway": "same-namespace-with-https-listener",
+        "rejectedSections": [
+          "https",
+          "https-with-hostname",
+          "https-with-hostname-matching-wildcard",
+          "https-with-wildcard-hostname"
+        ],
+        "reason": "UnsupportedProtocol"
+      }
+    },
+    "experimental": {
+      "traffic": {
+        "caseBodies": {
+          "TCPRouteMultipleRoutesAttachment": "PASS",
+          "TCPRouteReferenceGrant": "PASS"
+        },
+        "caseLogSHA256": "514a67da56adfea57a95afb96963feff4fb18301212e41cf23a1ca3eb0079f34",
+        "verifiedFixtureCleanup": true,
+        "matchedOctaviaCreatesAndDeletes": {
+          "Load Balancer": 5,
+          "Listener": 5,
+          "Pool": 2,
+          "Member": 2,
+          "Health Monitor": 2
+        },
+        "vipPcapSHA256": "3e19edc2eacaab9b23cf22f57e03ec024d44f938adb44c0fbadc57aaa70718b4",
+        "memberPcapSHA256": "e7efc5a0cefc2270c4e34ec2ee038db3e5ec7d50c58cef36ae334041e4adc6dc",
+        "vipEchoesByBackend": {
+          "tcp-attach-backend-1": 101,
+          "tcp-reference-grant-backend": 4
+        },
+        "memberEchoesIncludingDirectProbes": {
+          "tcp-attach-backend-1": 101,
+          "tcp-reference-grant-backend": 10
+        },
+        "kernelCaptureDrops": 0,
+        "postGrantDeletion": {
+          "freshVIPEOFBeforeGreeting": 3,
+          "sameDirectPodEchoes": 3
+        }
+      },
+      "unmodifiedCoreProfile": {
+        "caseBodies": {},
+        "caseLogSHA256": "79a7f577303bd8874e2f7e0f07d87ab31bffba2c3ae47c6558eee1ddde33e002",
+        "verifiedFixtureCleanup": true,
+        "matchedOctaviaCreatesAndDeletes": {
+          "Load Balancer": 3,
+          "Listener": 3
+        },
+        "result": "SETUP_FAILED",
+        "readyPodsInCommonBase": 23,
+        "timeoutSeconds": 300,
+        "gateway": "same-namespace-with-https-listener",
+        "rejectedSections": [
+          "https",
+          "https-with-hostname",
+          "https-with-hostname-matching-wildcard",
+          "https-with-wildcard-hostname"
+        ],
+        "reason": "UnsupportedProtocol"
+      },
+      "focusedInvalidRouteStatus": {
+        "caseBodies": {
+          "TCPRouteInvalidNonTCPListener": "PASS",
+          "TCPRouteInvalidCrossNamespaceBackendRef": "PASS",
+          "TCPRouteInvalidBackendRefNonexistent": "PASS"
+        },
+        "caseLogSHA256": "ef727d2e174468958991a3f93c45bdb70150ad5c156f319d1888ab04c39ea3c8",
+        "verifiedFixtureCleanup": true,
+        "matchedOctaviaCreatesAndDeletes": {
+          "Load Balancer": 6,
+          "Listener": 6
+        }
+      }
+    }
+  },
+  "standardFirstFixtureAttempt": "Tracing/capture wrapper stopped before case execution. Captures and temporary pod routes were removed before the corrected wrapper ran."
+}
