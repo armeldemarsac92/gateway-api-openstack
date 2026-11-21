@@ -221,6 +221,9 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 				data["listeners"] = []map[string]any{}
 			case memberCollection:
 				data["backup"] = false
+				if _, explicit := data["weight"]; !explicit {
+					data["weight"] = float64(1)
+				}
 			}
 			f.inventory[entryPath] = data
 			if listPath == tcpListeners && f.loseNextListenerCreate {
@@ -261,6 +264,9 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 				}
 				if backup, found := payload["backup"]; found {
 					entry["backup"] = backup
+				}
+				if tags, found := payload["tags"]; found {
+					entry["tags"] = tags
 				}
 				entry["weight"], entry["admin_state_up"], entry["provisioning_status"] = weight, true, "PENDING_UPDATE"
 				pool["provisioning_status"] = "PENDING_UPDATE"
@@ -937,15 +943,35 @@ func TestUDPGraphDetachesWithoutMembersInTheVIPFamily(t *testing.T) {
 func TestTransportGraphReconcilesEndpointWeightThroughThePublicAPI(t *testing.T) {
 	for _, protocol := range []string{cloud.ListenerProtocolTCP, cloud.ListenerProtocolUDP} {
 		t.Run(protocol, func(t *testing.T) {
-			testTransportGraphReconcilesEndpointWeight(t, protocol)
+			testTransportGraphReconcilesWeight(t, protocol, cloud.MemberModeEndpoint)
 		})
 	}
 }
 
-func testTransportGraphReconcilesEndpointWeight(t *testing.T, protocol string) {
+func TestUDPGraphReconcilesNodePortWeightThroughThePublicAPI(t *testing.T) {
+	testTransportGraphReconcilesWeight(t, cloud.ListenerProtocolUDP, cloud.MemberModeNodePort)
+}
+
+func TestUDPGraphKeepsLegacyNodePortMemberDrainedAcrossRestart(t *testing.T) {
+	f := newTransportGraphFixture(t, cloud.ListenerProtocolUDP)
+	for range 6 {
+		f.reconcile(f.provider())
+	}
+	listener, member := f.inventory[tcpListener], f.inventory[tcpMember]
+	listener["provisioning_status"], member["weight"] = "ACTIVE", float64(0)
+	before := len(f.writes)
+	result := f.reconcile(f.provider())
+	if result.Outcome.State != cloud.OutcomeReady || len(f.writes) != before ||
+		listener["default_pool_id"] != "pool" || member["weight"] != float64(0) {
+		t.Fatalf("cold reconcile changed an operator-drained legacy NodePort: outcome %v, default pool %v, weight %v, writes %v",
+			result.Outcome.State, listener["default_pool_id"], member["weight"], f.writes[before:])
+	}
+}
+
+func testTransportGraphReconcilesWeight(t *testing.T, protocol string, mode cloud.MemberMode) {
 	f := newTransportGraphFixture(t, protocol)
 	route := &f.spec.Routes[0].Spec
-	route.MemberMode = cloud.MemberModeEndpoint
+	route.MemberMode = mode
 	member := &route.Members[0]
 	member.Weight = 256
 	for range 6 {
@@ -954,6 +980,10 @@ func testTransportGraphReconcilesEndpointWeight(t *testing.T, protocol string) {
 	observed := f.inventory[tcpMember]
 	if observed["weight"] != float64(256) {
 		t.Fatalf("created member weight = %v, want 256", observed["weight"])
+	}
+	const weightTag = "gateway-api-openstack.udp-nodeport-weight=v1"
+	if mode == cloud.MemberModeNodePort && !slices.Contains(pilotTags(observed["tags"]), weightTag) {
+		t.Fatal("weighted UDP NodePort create did not persist weight ownership")
 	}
 	f.inventory[tcpListener]["provisioning_status"] = "ACTIVE"
 	assertWriteFree := func(want cloud.OutcomeState) {
@@ -999,6 +1029,14 @@ func testTransportGraphReconcilesEndpointWeight(t *testing.T, protocol string) {
 		if !slices.Equal(f.writes[before:], want) || f.inventory[tcpListener]["default_pool_id"] != "pool" {
 			t.Fatalf("%s: weight transition writes = %v, want %v and an attached pool", change.name, f.writes[before:], want)
 		}
+	}
+	if mode == cloud.MemberModeNodePort {
+		if slices.Contains(pilotTags(observed["tags"]), weightTag) {
+			t.Fatal("returning to a single UDP backend retained explicit weight ownership")
+		}
+		observed["weight"] = float64(0)
+		assertWriteFree(cloud.OutcomeReady)
+		return
 	}
 	member.Weight, member.Draining = 7, true
 	before := len(f.writes)
@@ -1105,15 +1143,19 @@ func TestTransportGraphRepairsBackupOnlyForWeightedTCPEndpoints(t *testing.T) {
 func TestWeightedTransportGraphClearsSourceIPPersistenceBeforeAttaching(t *testing.T) {
 	for _, protocol := range []string{cloud.ListenerProtocolTCP, cloud.ListenerProtocolUDP} {
 		t.Run(protocol, func(t *testing.T) {
-			testWeightedTransportGraphClearsSourceIPPersistence(t, protocol)
+			testWeightedTransportGraphClearsSourceIPPersistence(t, protocol, cloud.MemberModeEndpoint)
 		})
 	}
 }
 
-func testWeightedTransportGraphClearsSourceIPPersistence(t *testing.T, protocol string) {
+func TestWeightedUDPNodePortGraphClearsSourceIPPersistenceBeforeAttaching(t *testing.T) {
+	testWeightedTransportGraphClearsSourceIPPersistence(t, cloud.ListenerProtocolUDP, cloud.MemberModeNodePort)
+}
+
+func testWeightedTransportGraphClearsSourceIPPersistence(t *testing.T, protocol string, mode cloud.MemberMode) {
 	f := newTransportGraphFixture(t, protocol)
 	route := &f.spec.Routes[0].Spec
-	route.MemberMode = cloud.MemberModeEndpoint
+	route.MemberMode = mode
 	for range 6 {
 		f.reconcile(f.provider())
 	}
@@ -1122,7 +1164,7 @@ func testWeightedTransportGraphClearsSourceIPPersistence(t *testing.T, protocol 
 	sticky := map[string]any{"type": "SOURCE_IP"}
 	pool["session_persistence"] = sticky
 	if result := f.reconcile(f.provider()); result.Outcome.State != cloud.OutcomeReady || len(f.writes) != 6 {
-		t.Fatalf("legacy endpoint pool changed: %v, writes %v", result.Outcome.State, f.writes)
+		t.Fatalf("unweighted pool changed: %v, writes %v", result.Outcome.State, f.writes)
 	}
 
 	// An explicit weight of 1 is also used when weighted backend shares are equal.
@@ -1145,10 +1187,20 @@ func testWeightedTransportGraphClearsSourceIPPersistence(t *testing.T, protocol 
 		t.Fatalf("sticky pool was reattached without clear readback, writes %v", f.writes[8:])
 	}
 	pool["provisioning_status"] = "ACTIVE"
+	if mode == cloud.MemberModeNodePort {
+		f.reconcile(f.provider())
+		member := f.inventory[tcpMember]
+		if listener["default_pool_id"] != nil ||
+			!slices.Contains(pilotTags(member["tags"]), "gateway-api-openstack.udp-nodeport-weight=v1") {
+			t.Fatalf("existing member weight was claimed without a detached pool or marker: %v", f.writes[9:])
+		}
+		member["provisioning_status"], pool["provisioning_status"] = "ACTIVE", "ACTIVE"
+	}
+	before := len(f.writes)
 	f.reconcile(f.provider())
 	listener["provisioning_status"] = "ACTIVE"
 	if result := f.reconcile(f.provider()); result.Outcome.State != cloud.OutcomeReady || listener["default_pool_id"] != "pool" ||
-		!slices.Equal(f.writes[9:], []string{"PUT " + tcpListener}) {
+		!slices.Equal(f.writes[before:], []string{"PUT " + tcpListener}) {
 		t.Fatalf("cleared pool did not converge: %v, writes %v", result.Outcome.State, f.writes[9:])
 	}
 }

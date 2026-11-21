@@ -178,9 +178,21 @@ func (r *Reconciler) planRoute(ctx context.Context, route *transportRoute, bindi
 	if plan.detach {
 		return plan, nil
 	}
-	// Multiple backend references require Endpoint mode. Validate disabled Services
-	// against its constraints without resolving any endpoints for them.
-	backends, serviceRejections, err := r.backendServices(ctx, refs, len(route.backendRefs) > 1)
+	// Validate disabled Services in the Gateway's member mode without reading
+	// their destinations. Before a topology is bound, keep the Endpoint checks
+	// used for multiple references.
+	var inactiveMode cloud.MemberMode
+	if len(route.backendRefs) > 1 {
+		inactiveMode = cloud.MemberModeEndpoint
+		if r.protocol() == gatewayv1.UDPProtocolType && controller.HasGatewayTopologyBinding(r.Config, parent.gateway) {
+			topology, err := controller.StoredGatewayTopology(r.Config, parent.gateway)
+			if err != nil {
+				return routePlan{}, err
+			}
+			inactiveMode = topology.Topology.MemberMode
+		}
+	}
+	backends, serviceRejections, err := r.backendServices(ctx, refs, inactiveMode)
 	if err != nil {
 		return routePlan{}, err
 	}
@@ -292,7 +304,9 @@ func gatewayProgrammed(gateway *gatewayv1.Gateway) bool {
 
 func (r *Reconciler) routeSpec(ctx context.Context, route *transportRoute, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, backends []serviceBackend, topology classconfig.Resolved, listenerPorts ...int) (cloud.RouteSpec, string, *model.Diagnostic, error) {
 	weighted := len(route.backendRefs) > 1
-	if weighted && topology.Topology.MemberMode != cloud.MemberModeEndpoint {
+	mode := topology.Topology.MemberMode
+	supportsWeights := mode == cloud.MemberModeEndpoint || r.protocol() == gatewayv1.UDPProtocolType && mode == cloud.MemberModeNodePort
+	if weighted && !supportsWeights {
 		return cloud.RouteSpec{}, "", backendRejection(gatewayv1.RouteReasonUnsupportedValue, fmt.Sprintf("%s forwarding with multiple backend references requires Endpoint member mode", r.protocol())), nil
 	}
 	groups := make([]weightedServiceMembers, len(backends))

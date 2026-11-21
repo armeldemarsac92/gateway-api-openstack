@@ -90,6 +90,71 @@ func udpRouteFixture() (*gatewayv1.Gateway, *gatewayv1.GatewayClass, *gatewayv1.
 	return gateway, class, route
 }
 
+func TestUDPRouteProgramsWeightedLocalNodePortPool(t *testing.T) {
+	gateway, class, route := udpRouteFixture()
+	workerA := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "worker-a"}, Spec: corev1.NodeSpec{ProviderID: "openstack:///worker-a"},
+		Status: corev1.NodeStatus{
+			Addresses:  []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "192.0.2.44"}},
+			Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}},
+		},
+	}
+	workerB := workerA.DeepCopy()
+	workerB.Name, workerB.Spec.ProviderID, workerB.Status.Addresses[0].Address = "worker-b", "openstack:///worker-b", "192.0.2.45"
+	primaryRef, primary, primaryEndpoints := udpBackendFixture(route.Namespace, "primary", 3, "10.1.2.1", "10.1.2.2")
+	secondaryRef, secondary, secondaryEndpoints := udpBackendFixture(route.Namespace, "secondary", 1, "10.1.2.3")
+	disabledRef, disabled, disabledEndpoints := udpBackendFixture(route.Namespace, "disabled", 0, "10.1.2.4")
+	for i, service := range []*corev1.Service{primary, secondary, disabled} {
+		service.Spec.Type = corev1.ServiceTypeNodePort
+		service.Spec.ExternalTrafficPolicy = corev1.ServiceExternalTrafficPolicyLocal
+		service.Spec.Ports[0].NodePort = 32000 + int32(i)
+	}
+	primaryEndpoints.Endpoints[0].NodeName = &workerA.Name
+	primaryEndpoints.Endpoints[1].NodeName = &workerB.Name
+	secondaryEndpoints.Endpoints[0].NodeName = &workerA.Name
+	disabledEndpoints.Endpoints[0].NodeName = &workerB.Name
+	route.Spec.Rules[0].BackendRefs = []gatewayv1.BackendRef{primaryRef, secondaryRef, disabledRef}
+	r := testReconciler(t, gateway, class, route, workerA, workerB, primary, primaryEndpoints, secondary, secondaryEndpoints, disabled, disabledEndpoints)
+	r.Protocol = gatewayv1.UDPProtocolType
+	identity := bindFixture(t, r, gateway, route, cloud.MemberModeNodePort)
+	want := []cloud.Member{
+		{Address: "192.0.2.44", Port: 32000, ProviderID: "openstack:///worker-a", Weight: 3},
+		{Address: "192.0.2.44", Port: 32001, ProviderID: "openstack:///worker-a", Weight: 2},
+		{Address: "192.0.2.45", Port: 32000, ProviderID: "openstack:///worker-b", Weight: 3},
+	}
+	route = reconcileUDPRouteWithGraph(t, r, route, identity, func(nodes []cloud.RouteGraphNode) {
+		spec := nodes[0].Spec
+		if spec.MemberMode != cloud.MemberModeNodePort || !slices.Equal(spec.Members, want) {
+			t.Fatalf("expected 3:1 total NodePort shares across eligible workers, got %+v", spec.Members)
+		}
+	})
+	checkRouteCondition(t, route, r.Config.ControllerName, r.Config.Domain()+"/Programmed", metav1.ConditionTrue, "Programmed")
+
+	disabled.Spec.Type, disabled.Spec.Ports[0].NodePort = corev1.ServiceTypeClusterIP, 0
+	if err := r.Update(t.Context(), disabled); err != nil {
+		t.Fatal(err)
+	}
+	route = reconcileUDPRoute(t, r, route)
+	checkRouteCondition(t, route, r.Config.ControllerName, "ResolvedRefs", metav1.ConditionFalse, "UnsupportedValue")
+	checkRouteCondition(t, route, r.Config.ControllerName, r.Config.Domain()+"/Programmed", metav1.ConditionTrue, "Programmed")
+
+	request := graph.Request{Identity: identity, Action: graph.Ensure, Gateway: gateway, UDPRoute: route}
+	input, err := r.ObserveRouteGraph(t.Context(), request, gateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Delete(t.Context(), secondaryEndpoints); err != nil {
+		t.Fatal(err)
+	}
+	if err := input.Validate(t.Context()); !errors.Is(err, controller.ErrGraphInputChanged) {
+		t.Fatalf("losing the last eligible worker must invalidate the sealed graph, got %v", err)
+	}
+	route = reconcileUDPRoute(t, r, route)
+	checkRouteCondition(t, route, r.Config.ControllerName, r.Config.Domain()+"/Programmed", metav1.ConditionFalse, "Pending")
+	if route.Annotations[r.Config.RouteLifecycleAnnotation()] != controller.RouteDetaching {
+		t.Fatal("losing a positive share did not checkpoint withdrawal")
+	}
+}
+
 func TestUDPRouteProgramsWeightedEndpointPool(t *testing.T) {
 	gateway, class, route := udpRouteFixture()
 	grant := &gatewayv1.ReferenceGrant{ObjectMeta: metav1.ObjectMeta{Namespace: "other", Name: "allow-disabled"},

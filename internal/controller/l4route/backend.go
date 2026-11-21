@@ -28,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/routebackend"
 )
@@ -129,7 +130,7 @@ func (r *Reconciler) authorizedBackends(ctx context.Context, route *transportRou
 }
 
 // backendServices validates authorized references and returns the Services that carry traffic.
-func (r *Reconciler) backendServices(ctx context.Context, refs []serviceReference, validateInactiveEndpoints bool) ([]serviceBackend, backendRejections, error) {
+func (r *Reconciler) backendServices(ctx context.Context, refs []serviceReference, inactiveMode cloud.MemberMode) ([]serviceBackend, backendRejections, error) {
 	services := make(map[client.ObjectKey]*corev1.Service, len(refs))
 	backends := make([]serviceBackend, 0, len(refs))
 	var rejections backendRejections
@@ -150,8 +151,13 @@ func (r *Reconciler) backendServices(ctx context.Context, refs []serviceReferenc
 			services[ref.key] = service
 		}
 		port, diagnostic := model.ResolveTransportServicePort(service, ref.port, corev1.Protocol(r.protocol()))
-		if diagnostic == nil && ref.weight == 0 && validateInactiveEndpoints {
-			diagnostic = routebackend.ValidateEndpointService(service)
+		if diagnostic == nil && ref.weight == 0 {
+			switch inactiveMode {
+			case cloud.MemberModeEndpoint:
+				diagnostic = routebackend.ValidateEndpointService(service)
+			case cloud.MemberModeNodePort:
+				diagnostic = routebackend.ValidateNodePortService(service, port)
+			}
 		}
 		if diagnostic != nil {
 			if rejections.reject(ref.weight, diagnostic) {
