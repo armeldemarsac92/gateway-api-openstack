@@ -36,7 +36,7 @@ import (
 
 const routeMonitorExpectedCodes = "200-399"
 
-var errWeightedTCPBackupUnknown = errors.New("Waiting for Octavia to report the backup flag for every weighted TCP member")
+var errWeightedTCPBackupUnknown = errors.New("waiting for Octavia to report the backup flag for every weighted TCP member")
 
 type observedRoutePolicy struct {
 	policy l7policies.L7Policy
