@@ -1,0 +1,16 @@
+# Multiple declared HTTPRoute hostnames on one listener
+
+The Amphora HTTP controller intersects each valid declared hostname with the selected listener and ignores declarations outside that intersection. If all matching declarations yield a single distinct constraint, each of the route's existing Octavia policies uses one `HOST_NAME` rule alongside its path rule. The strongest original matching hostname still determines precedence when routes share the same effective hostname. [Gateway API v1.7.0 hostname rules](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/apis/v1/httproute_types.go#L61-L108)
+
+An empty intersection gives `Accepted=False/NoMatchingListenerHostname`. Two or more distinct effective constraints give `Accepted=False/UnsupportedValue` because the graph supports one hostname per route. Either rejection withdraws the affected route's existing policies. During Gateway API version skew, a changed listener whose current generation has yet to be programmed can retain forwarding only if every declared hostname already fits its restriction.
+
+## Qualification
+
+- At `2e4a1611cec6`, the two new lowering cases failed with `at most one hostname is supported`. The candidate passed those cases and the controller tests for original hostname precedence, disjoint and unsupported intersections, route and listener edits, and sibling preservation. [Lowering cases](../../../../internal/controller/httproute/httproute_logical_model_test.go) · [Reconcile case](../../../../internal/controller/httproute/reconciler_test.go) · [Listener edit cases](../../../../internal/controller/httproute/gateway_api_version_test.go)
+- A local pilot fed the captured two-route controller graph to the Gophercloud REST fixture and the stock Octavia 19.0.0 renderer. The pilot supplied loopback endpoints and health checks. HAProxy 3.0.19 sent `API.Example.COM:1234 /api` to the exact-hostname route's backend, ahead of the wildcard sibling with an exact path, and preserved the original Host. The excluded declaration `ignored.example.net` and wildcard-only `other.example.com` both hit the fixture's 503 fallback. [Loopback fixture](../../../../internal/cloud/openstack/graph/hibiscus_traffic_test.go)
+
+The full upstream `HTTPRouteHostnameIntersection` case remains open because its Gateway uses multiple HTTP listeners. The local pilot covers the stock loopback fallback only. An Amphora deployment and the upstream case's 404 responses remain unverified. [Upstream case and manifests](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/httproute-hostname-intersection.yaml)
+
+## Rollout and rollback
+
+The change uses the existing Octavia API and ownership model. A rollout can reconcile previously rejected routes whose intersection has become supported. Before reverting, reduce any newly accepted route to a single declared hostname that preserves the effective match and original precedence with its listener. The previous controller rejects remaining multi-hostname routes and withdraws their forwarding when they reconcile.

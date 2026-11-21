@@ -19,6 +19,7 @@ package httproute
 import (
 	"context"
 	"errors"
+	"slices"
 	"strconv"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -158,10 +159,10 @@ func (r *Reconciler) routeForwardingEstablished(route *gatewayv1.HTTPRoute, pare
 	if listener.Hostname == nil || gatewayProgrammedForGeneration(parent.gateway) {
 		return true
 	}
-	// A declared hostname bounds forwarding for this route revision even if
-	// the Gateway has not yet programmed its current hostname restriction.
+	// The previous listener could select any declared hostname. Keep
+	// forwarding only if all declarations already fit the current restriction.
 	effective := model.IntersectHostnames(listener.Hostname, route.Spec.Hostnames)
-	return len(route.Spec.Hostnames) == 1 && len(effective) == 1 && effective[0] == string(route.Spec.Hostnames[0])
+	return slices.Equal(effective, model.IntersectHostnames(nil, route.Spec.Hostnames))
 }
 
 func (r *Reconciler) currentRouteProgrammedCondition(

@@ -37,12 +37,14 @@ func TestNodePortRouteUsesLogicalMatchAndSharedEndpointObservation(t *testing.T)
 	for _, test := range []struct {
 		name     string
 		listener gatewayv1.Hostname
-		route    gatewayv1.Hostname
+		routes   []gatewayv1.Hostname
 		want     string
 	}{
-		{"nested wildcards", "*.svc.example.test", "*.example.test", "*.svc.example.test"},
-		{"listener-only hostname", "api.example.test", "", "api.example.test"},
-		{"long wildcard narrowed to an exact hostname", gatewayv1.Hostname("*." + longSuffix), gatewayv1.Hostname("x." + longSuffix), "x." + longSuffix},
+		{"nested wildcards", "*.svc.example.test", []gatewayv1.Hostname{"*.example.test"}, "*.svc.example.test"},
+		{"listener-only hostname", "api.example.test", nil, "api.example.test"},
+		{"long wildcard narrowed to an exact hostname", gatewayv1.Hostname("*." + longSuffix), []gatewayv1.Hostname{gatewayv1.Hostname("x." + longSuffix)}, "x." + longSuffix},
+		{"exclude disjoint declaration", "*.example.test", []gatewayv1.Hostname{"api.example.test", "other.test"}, "api.example.test"},
+		{"deduplicate collapsed intersections", "api.example.test", []gatewayv1.Hostname{"*.example.test", "api.example.test", "api.example.test"}, "api.example.test"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			cfg := testConfig()
@@ -51,9 +53,7 @@ func TestNodePortRouteUsesLogicalMatchAndSharedEndpointObservation(t *testing.T)
 			route.UID = "route-uid"
 			gateway.Spec.Listeners[0].Hostname = ptr.To(test.listener)
 			gateway.Spec.Addresses = []gatewayv1.GatewaySpecAddress{{Type: ptr.To(gatewayv1.IPAddressType)}}
-			if test.route != "" {
-				route.Spec.Hostnames = []gatewayv1.Hostname{test.route}
-			}
+			route.Spec.Hostnames = test.routes
 			route.Spec.Rules[0].Matches = []gatewayv1.HTTPRouteMatch{{Path: &gatewayv1.HTTPPathMatch{
 				Type: ptr.To(gatewayv1.PathMatchPathPrefix), Value: ptr.To("/api/"),
 			}}}

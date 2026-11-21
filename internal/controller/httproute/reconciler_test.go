@@ -705,15 +705,106 @@ func TestHTTPRouteMissingBackendSetsResolvedRefsWhileGatewayPending(t *testing.T
 	}
 }
 
+func TestHTTPRouteMultipleDeclaredHostnamesPreservePrecedenceAndDetach(t *testing.T) {
+	ctx := t.Context()
+	cfg := testConfig()
+	class, gateway := providerRouteParentObjects(cfg)
+	gateway.Spec.Listeners[0].Hostname = ptr.To(gatewayv1.Hostname("api.example.com"))
+	parent := gatewayv1.ParentReference{Name: "edge"}
+	route := mapperTestHTTPRoute(gateway.Namespace, "api", parent, "backend")
+	route.UID, route.Generation = "api-route", 1
+	route.Spec.Hostnames = []gatewayv1.Hostname{"*.example.com", "api.example.com", "ignored.example.net"}
+	route.Spec.Rules[0].Matches = []gatewayv1.HTTPRouteMatch{{Path: &gatewayv1.HTTPPathMatch{
+		Type: ptr.To(gatewayv1.PathMatchPathPrefix), Value: ptr.To("/api"),
+	}}}
+	sibling := mapperTestHTTPRoute(gateway.Namespace, "sibling", parent, "backend")
+	sibling.UID, sibling.Generation = "sibling-route", 1
+	sibling.Spec.Hostnames = []gatewayv1.Hostname{"*.example.com"}
+	sibling.Spec.Rules[0].Matches = []gatewayv1.HTTPRouteMatch{{Path: &gatewayv1.HTTPPathMatch{
+		Type: ptr.To(gatewayv1.PathMatchExact), Value: ptr.To("/api"),
+	}}}
+	service, endpoints, node := validNodePortBackend(gateway.Namespace, "backend")
+	kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).
+		WithStatusSubresource(class, gateway, route, sibling).
+		WithObjects(class, gateway, route, sibling, service, endpoints, node).Build()
+	provider := &recordingProvider{}
+	reconciler := newTestReconciler(Reconciler{
+		Client: kubeClient, APIReader: kubeClient, Coordinator: &graph.Coordinator{}, Config: cfg,
+	}, provider)
+	reconcile := func(route *gatewayv1.HTTPRoute) {
+		t.Helper()
+		if _, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(route)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reconcile(sibling)
+	reconcile(sibling)
+	reconcile(route)
+	reconcile(route)
+	for _, candidate := range []*gatewayv1.HTTPRoute{route, sibling} {
+		if err := kubeClient.Get(ctx, client.ObjectKeyFromObject(candidate), candidate); err != nil {
+			t.Fatal(err)
+		}
+		if reconciler.currentRouteProgrammedCondition(candidate, parent) == nil {
+			t.Fatalf("route %s was never programmed: %#v", candidate.Name, candidate.Status)
+		}
+	}
+	if len(provider.routeSpecs) < 2 {
+		t.Fatalf("expected the two route components, got %#v", provider.routeSpecs)
+	}
+	programmed := provider.routeSpecs[len(provider.routeSpecs)-2:]
+	if programmed[0].Identity.RouteName != route.Name || programmed[1].Identity.RouteName != sibling.Name ||
+		programmed[0].Hostname != "api.example.com" || programmed[1].Hostname != programmed[0].Hostname ||
+		programmed[0].Precedence != 0 || programmed[1].Precedence != 1 {
+		t.Fatalf("exact declaration must outrank a wildcard even against a more specific path: %#v", programmed)
+	}
+
+	route.Spec.Hostnames = []gatewayv1.Hostname{"example.com", "ignored.example.net"}
+	route.Generation++
+	if err := kubeClient.Update(ctx, route); err != nil {
+		t.Fatal(err)
+	}
+	before := len(provider.routeSpecs)
+	for range 4 {
+		reconcile(route)
+	}
+	if len(provider.deletedRoutes) != 1 || provider.deletedRoutes[0] != programmed[0].Identity ||
+		len(provider.deletedGateways) != 0 || len(provider.routeSpecs) != before {
+		t.Fatalf("revocation should delete only the edited route: deletes %#v, Gateway deletes %#v, ensures %#v",
+			provider.deletedRoutes, provider.deletedGateways, provider.routeSpecs[before:])
+	}
+	if err := kubeClient.Get(ctx, client.ObjectKeyFromObject(route), route); err != nil {
+		t.Fatal(err)
+	}
+	if len(route.Status.Parents) != 1 {
+		t.Fatalf("expected one route parent after revocation, got %#v", route.Status.Parents)
+	}
+	accepted := meta.FindStatusCondition(route.Status.Parents[0].Conditions, string(gatewayv1.RouteConditionAccepted))
+	if accepted == nil || accepted.Status != metav1.ConditionFalse ||
+		accepted.Reason != string(gatewayv1.RouteReasonNoMatchingListenerHostname) || accepted.ObservedGeneration != route.Generation {
+		t.Fatalf("edited route Accepted = %#v, want current NoMatchingListenerHostname", accepted)
+	}
+	reconcile(sibling)
+	last := provider.routeSpecs[len(provider.routeSpecs)-1]
+	if len(provider.routeSpecs) != before+1 || last.Identity != programmed[1].Identity ||
+		last.Hostname != "api.example.com" || last.Precedence != 0 {
+		t.Fatalf("sibling did not retain its forwarding after the edited route detached: %#v", last)
+	}
+}
+
 func TestUnsupportedRouteIsRejectedBeforeBackendLookup(t *testing.T) {
 	for _, test := range []struct {
 		name   string
+		host   *gatewayv1.Hostname
 		change func(*gatewayv1.HTTPRoute)
 		kind   routeErrorKind
 	}{
-		{name: "multiple hostnames", change: func(route *gatewayv1.HTTPRoute) {
+		{name: "multiple effective hostnames", change: func(route *gatewayv1.HTTPRoute) {
 			route.Spec.Hostnames = []gatewayv1.Hostname{"a.example.test", "b.example.test"}
 		}, kind: routeErrorUnsupported},
+		{name: "no matching declared hostname", host: ptr.To(gatewayv1.Hostname("*.example.test")), change: func(route *gatewayv1.HTTPRoute) {
+			route.Spec.Hostnames = []gatewayv1.Hostname{"example.test", "other.test"}
+		}, kind: routeErrorNoMatchingHostname},
 		{name: "hostname exceeds Octavia L7 rule value limit after encoding", change: func(route *gatewayv1.HTTPRoute) {
 			label := strings.Repeat("a", 60)
 			route.Spec.Hostnames = []gatewayv1.Hostname{gatewayv1.Hostname(strings.Join([]string{label, label, label, label}, "."))}
@@ -738,6 +829,7 @@ func TestUnsupportedRouteIsRejectedBeforeBackendLookup(t *testing.T) {
 			test.change(route)
 			kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).WithObjects(route).Build()
 			gateway := programmedTestGateway(cfg)
+			gateway.Spec.Listeners[0].Hostname = test.host
 			reconciler := newTestReconciler(Reconciler{Client: kubeClient, APIReader: kubeClient, Config: cfg}, nil)
 			_, err := reconciler.buildRouteModelWithReader(t.Context(), kubeClient, route, gateway)
 			var buildError *routeBuildError

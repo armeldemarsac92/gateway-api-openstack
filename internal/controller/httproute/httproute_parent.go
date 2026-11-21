@@ -199,16 +199,13 @@ func (r *Reconciler) liveBoundRouteAttachmentRejection(ctx context.Context, rout
 }
 
 func validateRouteHostnames(listener *gatewayv1.Hostname, hostnames []gatewayv1.Hostname) error {
-	if len(hostnames) > 1 {
-		return newRouteBuildError(routeErrorUnsupported, "at most one hostname is supported")
-	}
 	if listener != nil {
 		if err := amphora.ValidateHostname(string(*listener)); err != nil {
 			return newRouteBuildError(routeErrorUnsupported, "invalid listener hostname: %s", err)
 		}
 	}
-	if len(hostnames) == 1 {
-		if err := amphora.ValidateHostname(string(hostnames[0])); err != nil {
+	for _, hostname := range hostnames {
+		if err := amphora.ValidateHostname(string(hostname)); err != nil {
 			return newRouteBuildError(routeErrorUnsupported, "invalid HTTPRoute hostname: %s", err)
 		}
 	}
@@ -216,6 +213,9 @@ func validateRouteHostnames(listener *gatewayv1.Hostname, hostnames []gatewayv1.
 	effective := model.IntersectHostnames(listener, hostnames)
 	if len(effective) == 0 {
 		return newRouteBuildError(routeErrorNoMatchingHostname, "HTTPRoute and listener hostnames do not intersect")
+	}
+	if len(effective) > 1 {
+		return newRouteBuildError(routeErrorUnsupported, "at most one effective hostname is supported per HTTPRoute")
 	}
 	if effective[0] != "" {
 		if _, err := amphora.HostnameRuleValue(effective[0]); err != nil {

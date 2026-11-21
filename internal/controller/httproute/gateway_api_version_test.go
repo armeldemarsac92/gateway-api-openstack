@@ -226,14 +226,14 @@ func TestListenerHostnameChangesRemoveStaleRouteForwarding(t *testing.T) {
 	for _, test := range []struct {
 		name                string
 		versionSkew         bool
-		routeHost           gatewayv1.Hostname
+		routeHosts          []gatewayv1.Hostname
 		initialListenerHost gatewayv1.Hostname
 		updatedListenerHost gatewayv1.Hostname
 		wantAccepted        metav1.ConditionStatus
 		wantReason          string
 	}{
 		{
-			name: "apex outside wildcard", routeHost: "example.test", updatedListenerHost: "*.example.test",
+			name: "apex outside wildcard", routeHosts: []gatewayv1.Hostname{"example.test"}, updatedListenerHost: "*.example.test",
 			wantAccepted: metav1.ConditionFalse, wantReason: "NoMatchingListenerHostname",
 		},
 		{
@@ -241,7 +241,18 @@ func TestListenerHostnameChangesRemoveStaleRouteForwarding(t *testing.T) {
 			wantAccepted: metav1.ConditionUnknown, wantReason: "Pending",
 		},
 		{
-			name: "different exact hostname during skew", versionSkew: true, routeHost: "*.example.test",
+			name: "different exact hostname during skew", versionSkew: true, routeHosts: []gatewayv1.Hostname{"*.example.test"},
+			initialListenerHost: "api.example.test", updatedListenerHost: "other.example.test",
+			wantAccepted: metav1.ConditionUnknown, wantReason: "Pending",
+		},
+		{
+			name: "listener edit admits two distinct constraints", routeHosts: []gatewayv1.Hostname{"api.example.test", "other.example.test"},
+			initialListenerHost: "api.example.test", updatedListenerHost: "*.example.test",
+			wantAccepted: metav1.ConditionFalse, wantReason: "UnsupportedValue",
+		},
+		{
+			name: "listener edit selects a formerly excluded declaration during skew", versionSkew: true,
+			routeHosts:          []gatewayv1.Hostname{"api.example.test", "other.example.test"},
 			initialListenerHost: "api.example.test", updatedListenerHost: "other.example.test",
 			wantAccepted: metav1.ConditionUnknown, wantReason: "Pending",
 		},
@@ -257,9 +268,7 @@ func TestListenerHostnameChangesRemoveStaleRouteForwarding(t *testing.T) {
 			}
 			route := mapperTestHTTPRoute(gateway.Namespace, "api", gatewayv1.ParentReference{Name: "edge"}, "backend")
 			route.UID, route.Generation = "route-uid", 1
-			if test.routeHost != "" {
-				route.Spec.Hostnames = []gatewayv1.Hostname{test.routeHost}
-			}
+			route.Spec.Hostnames = test.routeHosts
 			service, endpoints, node := validNodePortBackend(gateway.Namespace, "backend")
 			kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).
 				WithStatusSubresource(class, gateway, route).

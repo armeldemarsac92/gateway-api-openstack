@@ -69,9 +69,6 @@ func structurallySupportedRoute(route *gatewayv1.HTTPRoute) bool {
 // validateRouteStructure limits programming to the existing Octavia mapping.
 // The logical compiler can represent a wider configuration without enabling it.
 func validateRouteStructure(route *gatewayv1.HTTPRoute) (gatewayv1.BackendObjectReference, error) {
-	if len(route.Spec.Hostnames) > 1 {
-		return gatewayv1.BackendObjectReference{}, newRouteBuildError(routeErrorUnsupported, "at most one hostname is supported")
-	}
 	if len(route.Spec.Rules) != 1 {
 		return gatewayv1.BackendObjectReference{}, newRouteBuildError(routeErrorUnsupported, "exactly one HTTPRoute rule is supported")
 	}
