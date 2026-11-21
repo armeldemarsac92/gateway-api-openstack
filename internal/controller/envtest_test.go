@@ -968,8 +968,17 @@ func testGraphWriterTriggerEquivalence(t *testing.T, apiClient, cacheClient clie
 	if _, err := routeReconciler.Reconcile(t.Context(), routeRequest); err != nil {
 		t.Fatalf("HTTPRoute-triggered complete graph: %v", err)
 	}
-	if len(provider.graphSpecs) != 2 || !reflect.DeepEqual(provider.graphSpecs[0], provider.graphSpecs[1]) {
-		t.Fatalf("writer triggers produced different graphs: %#v", provider.graphSpecs)
+	if len(provider.graphSpecs) != 2 {
+		t.Fatalf("got %d graphs, want one per trigger", len(provider.graphSpecs))
+	}
+	fromGateway, fromRoute := provider.graphSpecs[0], provider.graphSpecs[1]
+	if fromGateway.ValidateMutation == nil || fromRoute.ValidateMutation == nil {
+		t.Fatal("both writer triggers must validate fresh inputs before a cloud mutation")
+	}
+	// Each request has its own callback. Compare the desired resources it guards.
+	fromGateway.ValidateMutation, fromRoute.ValidateMutation = nil, nil
+	if !reflect.DeepEqual(fromGateway, fromRoute) {
+		t.Fatalf("writer triggers produced different graphs: %#v and %#v", fromGateway, fromRoute)
 	}
 	if len(provider.graphSpecs[0].Routes) != 1 || provider.graphSpecs[0].Gateway.Disposition != cloud.GraphEnsure || provider.graphSpecs[0].Routes[0].Disposition != cloud.GraphEnsure {
 		t.Fatalf("writer did not build complete graph: %#v", provider.graphSpecs[0])
