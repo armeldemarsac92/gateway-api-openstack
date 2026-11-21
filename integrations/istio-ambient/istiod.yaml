@@ -1,0 +1,8 @@
+profile: ambient
+image: docker.io/istio/pilot@sha256:17b581d9d75a1ab319d2816230626f06d65b48e3e798f98e3092a031843b3fe0
+global:
+  proxy:
+    image: docker.io/istio/proxyv2@sha256:b153f8891c4eab1ef2a58d291e1e9ca00794561833bda82e3e26e26bf59ddebb
+pilot:
+  env:
+    PILOT_ENABLE_GATEWAY_API_GATEWAYCLASS_CONTROLLER: "false"
