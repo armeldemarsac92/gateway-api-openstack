@@ -1,0 +1,639 @@
+{
+  "channel": "experimental",
+  "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+  "kubernetes": "v1.36.2",
+  "controllerRevision": "6c74e8eaa94054527823c5c7576da96e84d5f6f1",
+  "controllerBinarySHA256": "2d204d3582a78837b6b05270f82eba16f822ff80db5404897da60ddb0b98c6d6",
+  "octaviaRevision": "0e37f9873147c3c0468edd4e3da11531d8614e6c",
+  "octaviaLibRevision": "bb1a993ac95477b0bdc429f8aaf6d1620f8e7669",
+  "haproxy": "3.0.19",
+  "phases": {
+    "both-routes": {
+      "gateway": {
+        "conditions": {
+          "Accepted": "True/Accepted",
+          "Programmed": "True/Programmed"
+        },
+        "listeners": [
+          {
+            "attachedRoutes": 2,
+            "supportedKinds": [
+              "TLSRoute"
+            ],
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            }
+          }
+        ]
+      },
+      "routes": {
+        "A": {
+          "uid": "0b430027-0d66-4fc7-89a4-f817daaee9db",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+          }
+        },
+        "B": {
+          "uid": "1959d20d-9ef6-460f-bb72-829c155ca525",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+          }
+        }
+      },
+      "provider": {
+        "listener": "fbdbc157-2e07-486a-bc46-e337d106d51e",
+        "protocol": "TCP",
+        "port": 9443,
+        "defaultPool": null,
+        "defaultTLSContainer": null,
+        "names": {
+          "a.example.test": {
+            "policy": "1b3fe8c2-dd2d-4092-8e18-8fa12a0c3a97",
+            "pool": "26fb842d-380b-4f98-80ea-2f848b4ceef2",
+            "rule": "2198791b-7216-420c-b41f-2f021bfe5f72",
+            "action": "REDIRECT_TO_POOL",
+            "type": "TLS_SNI",
+            "compareType": "EQUAL_TO",
+            "memberAddress": "198.51.100.5",
+            "memberPort": 10443
+          },
+          "b.example.test": {
+            "policy": "f8014f74-9ea8-4579-ad21-189e073b667d",
+            "pool": "b2bac526-890c-42e7-84d0-f1451840a813",
+            "rule": "3acb02dd-e784-43b3-a87c-b9c5ca89f8cb",
+            "action": "REDIRECT_TO_POOL",
+            "type": "TLS_SNI",
+            "compareType": "EQUAL_TO",
+            "memberAddress": "198.51.100.6",
+            "memberPort": 10443
+          }
+        }
+      },
+      "wire": [
+        {
+          "sni": "a.example.test",
+          "outcome": "connected",
+          "backend": "A",
+          "backendSNI": "a.example.test",
+          "leafSHA256": "1fd6b0c43a2d5da0bc3795b68d58cf718ff9138ad7bdcde2cf042b70a43d7e94",
+          "echoBytes": 256
+        },
+        {
+          "sni": "b.example.test",
+          "outcome": "connected",
+          "backend": "B",
+          "backendSNI": "b.example.test",
+          "leafSHA256": "2d4d713307c998367c1080c396a0731e54992e0d62ffeabdf614fe16badfeb31",
+          "echoBytes": 256
+        },
+        {
+          "sni": "unknown.example.test",
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "additionalBackendSessions": 0
+        },
+        {
+          "sni": null,
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "additionalBackendSessions": 0
+        }
+      ],
+      "convergenceSeconds": 21.499
+    },
+    "grant-removed": {
+      "gateway": {
+        "conditions": {
+          "Accepted": "True/Accepted",
+          "Programmed": "True/Programmed"
+        },
+        "listeners": [
+          {
+            "attachedRoutes": 2,
+            "supportedKinds": [
+              "TLSRoute"
+            ],
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            }
+          }
+        ]
+      },
+      "routes": {
+        "B": {
+          "uid": "1959d20d-9ef6-460f-bb72-829c155ca525",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+          }
+        },
+        "A": {
+          "uid": "0b430027-0d66-4fc7-89a4-f817daaee9db",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "False/RefNotPermitted",
+            "gateway-api-openstack.github.io/Programmed": "False/RefNotPermitted"
+          }
+        }
+      },
+      "provider": {
+        "listener": "fbdbc157-2e07-486a-bc46-e337d106d51e",
+        "protocol": "TCP",
+        "port": 9443,
+        "defaultPool": null,
+        "defaultTLSContainer": null,
+        "names": {
+          "b.example.test": {
+            "policy": "f8014f74-9ea8-4579-ad21-189e073b667d",
+            "pool": "b2bac526-890c-42e7-84d0-f1451840a813",
+            "rule": "3acb02dd-e784-43b3-a87c-b9c5ca89f8cb",
+            "action": "REDIRECT_TO_POOL",
+            "type": "TLS_SNI",
+            "compareType": "EQUAL_TO",
+            "memberAddress": "198.51.100.6",
+            "memberPort": 10443
+          }
+        }
+      },
+      "wire": [
+        {
+          "sni": "b.example.test",
+          "outcome": "connected",
+          "backend": "B",
+          "backendSNI": "b.example.test",
+          "leafSHA256": "2d4d713307c998367c1080c396a0731e54992e0d62ffeabdf614fe16badfeb31",
+          "echoBytes": 256
+        },
+        {
+          "sni": "a.example.test",
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "additionalBackendSessions": 0
+        },
+        {
+          "sni": "unknown.example.test",
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "additionalBackendSessions": 0
+        },
+        {
+          "sni": null,
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "additionalBackendSessions": 0
+        }
+      ],
+      "convergenceSeconds": 0.72
+    },
+    "grant-restored": {
+      "gateway": {
+        "conditions": {
+          "Accepted": "True/Accepted",
+          "Programmed": "True/Programmed"
+        },
+        "listeners": [
+          {
+            "attachedRoutes": 2,
+            "supportedKinds": [
+              "TLSRoute"
+            ],
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            }
+          }
+        ]
+      },
+      "routes": {
+        "A": {
+          "uid": "0b430027-0d66-4fc7-89a4-f817daaee9db",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+          }
+        },
+        "B": {
+          "uid": "1959d20d-9ef6-460f-bb72-829c155ca525",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+          }
+        }
+      },
+      "provider": {
+        "listener": "fbdbc157-2e07-486a-bc46-e337d106d51e",
+        "protocol": "TCP",
+        "port": 9443,
+        "defaultPool": null,
+        "defaultTLSContainer": null,
+        "names": {
+          "a.example.test": {
+            "policy": "1b3fe8c2-dd2d-4092-8e18-8fa12a0c3a97",
+            "pool": "26fb842d-380b-4f98-80ea-2f848b4ceef2",
+            "rule": "2198791b-7216-420c-b41f-2f021bfe5f72",
+            "action": "REDIRECT_TO_POOL",
+            "type": "TLS_SNI",
+            "compareType": "EQUAL_TO",
+            "memberAddress": "198.51.100.5",
+            "memberPort": 10443
+          },
+          "b.example.test": {
+            "policy": "f8014f74-9ea8-4579-ad21-189e073b667d",
+            "pool": "b2bac526-890c-42e7-84d0-f1451840a813",
+            "rule": "3acb02dd-e784-43b3-a87c-b9c5ca89f8cb",
+            "action": "REDIRECT_TO_POOL",
+            "type": "TLS_SNI",
+            "compareType": "EQUAL_TO",
+            "memberAddress": "198.51.100.6",
+            "memberPort": 10443
+          }
+        }
+      },
+      "wire": [
+        {
+          "sni": "a.example.test",
+          "outcome": "connected",
+          "backend": "A",
+          "backendSNI": "a.example.test",
+          "leafSHA256": "1fd6b0c43a2d5da0bc3795b68d58cf718ff9138ad7bdcde2cf042b70a43d7e94",
+          "echoBytes": 256
+        },
+        {
+          "sni": "b.example.test",
+          "outcome": "connected",
+          "backend": "B",
+          "backendSNI": "b.example.test",
+          "leafSHA256": "2d4d713307c998367c1080c396a0731e54992e0d62ffeabdf614fe16badfeb31",
+          "echoBytes": 256
+        },
+        {
+          "sni": "unknown.example.test",
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "additionalBackendSessions": 0
+        },
+        {
+          "sni": null,
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "additionalBackendSessions": 0
+        }
+      ],
+      "convergenceSeconds": 1.656
+    },
+    "route-a-deleted": {
+      "gateway": {
+        "conditions": {
+          "Accepted": "True/Accepted",
+          "Programmed": "True/Programmed"
+        },
+        "listeners": [
+          {
+            "attachedRoutes": 1,
+            "supportedKinds": [
+              "TLSRoute"
+            ],
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            }
+          }
+        ]
+      },
+      "routes": {
+        "B": {
+          "uid": "1959d20d-9ef6-460f-bb72-829c155ca525",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+          }
+        }
+      },
+      "provider": {
+        "listener": "fbdbc157-2e07-486a-bc46-e337d106d51e",
+        "protocol": "TCP",
+        "port": 9443,
+        "defaultPool": null,
+        "defaultTLSContainer": null,
+        "names": {
+          "b.example.test": {
+            "policy": "f8014f74-9ea8-4579-ad21-189e073b667d",
+            "pool": "b2bac526-890c-42e7-84d0-f1451840a813",
+            "rule": "3acb02dd-e784-43b3-a87c-b9c5ca89f8cb",
+            "action": "REDIRECT_TO_POOL",
+            "type": "TLS_SNI",
+            "compareType": "EQUAL_TO",
+            "memberAddress": "198.51.100.6",
+            "memberPort": 10443
+          }
+        }
+      },
+      "wire": [
+        {
+          "sni": "b.example.test",
+          "outcome": "connected",
+          "backend": "B",
+          "backendSNI": "b.example.test",
+          "leafSHA256": "2d4d713307c998367c1080c396a0731e54992e0d62ffeabdf614fe16badfeb31",
+          "echoBytes": 256
+        },
+        {
+          "sni": "a.example.test",
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "additionalBackendSessions": 0
+        },
+        {
+          "sni": "unknown.example.test",
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "additionalBackendSessions": 0
+        },
+        {
+          "sni": null,
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "additionalBackendSessions": 0
+        }
+      ],
+      "convergenceSeconds": 8.858
+    },
+    "route-a-recreated": {
+      "gateway": {
+        "conditions": {
+          "Accepted": "True/Accepted",
+          "Programmed": "True/Programmed"
+        },
+        "listeners": [
+          {
+            "attachedRoutes": 2,
+            "supportedKinds": [
+              "TLSRoute"
+            ],
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            }
+          }
+        ]
+      },
+      "routes": {
+        "A": {
+          "uid": "1ce10474-5b6e-4bcd-b071-f3655d3ad6e7",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+          }
+        },
+        "B": {
+          "uid": "1959d20d-9ef6-460f-bb72-829c155ca525",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+          }
+        }
+      },
+      "provider": {
+        "listener": "fbdbc157-2e07-486a-bc46-e337d106d51e",
+        "protocol": "TCP",
+        "port": 9443,
+        "defaultPool": null,
+        "defaultTLSContainer": null,
+        "names": {
+          "b.example.test": {
+            "policy": "f8014f74-9ea8-4579-ad21-189e073b667d",
+            "pool": "b2bac526-890c-42e7-84d0-f1451840a813",
+            "rule": "3acb02dd-e784-43b3-a87c-b9c5ca89f8cb",
+            "action": "REDIRECT_TO_POOL",
+            "type": "TLS_SNI",
+            "compareType": "EQUAL_TO",
+            "memberAddress": "198.51.100.6",
+            "memberPort": 10443
+          },
+          "a.example.test": {
+            "policy": "7c720c51-f2e5-49ab-95b4-b60c3bc918f7",
+            "pool": "064dc3a0-2c5d-4692-ba26-336184e90bbf",
+            "rule": "da1611fe-13ac-45b0-95a2-93e24be7211b",
+            "action": "REDIRECT_TO_POOL",
+            "type": "TLS_SNI",
+            "compareType": "EQUAL_TO",
+            "memberAddress": "198.51.100.5",
+            "memberPort": 10443
+          }
+        }
+      },
+      "wire": [
+        {
+          "sni": "a.example.test",
+          "outcome": "connected",
+          "backend": "A",
+          "backendSNI": "a.example.test",
+          "leafSHA256": "1fd6b0c43a2d5da0bc3795b68d58cf718ff9138ad7bdcde2cf042b70a43d7e94",
+          "echoBytes": 256
+        },
+        {
+          "sni": "b.example.test",
+          "outcome": "connected",
+          "backend": "B",
+          "backendSNI": "b.example.test",
+          "leafSHA256": "2d4d713307c998367c1080c396a0731e54992e0d62ffeabdf614fe16badfeb31",
+          "echoBytes": 256
+        },
+        {
+          "sni": "unknown.example.test",
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "additionalBackendSessions": 0
+        },
+        {
+          "sni": null,
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "additionalBackendSessions": 0
+        }
+      ],
+      "convergenceSeconds": 8.479
+    }
+  },
+  "controllerImageManifestDigest": "sha256:c7bbf6bde39c2ed6fa757f909e81f160f2be1ba54430403f9f2d05e31167016e",
+  "controllerOCIArchiveSHA256": "42562cb339e629cd53a1f3bec32165784ee97cb5bcb805d69396636006a6a7b7",
+  "controllerSourceTree": "0f7fddb90e9a865606b6f67e6937659006576deb",
+  "controllerInputFilesSHA256": {
+    "Dockerfile": "70a9f44822e6d882d0701b2b8695bcaadf5a551c54a7dfef9a15cabd33d29d4c",
+    "go.mod": "4e9b1a229e476aaf4dd80b562a51dd9220e5e7c3a71183daa58583dfcffd5511",
+    "go.sum": "e8e91a0a1ac317b9e8c5aced5c262bdc99a20a1f9bc262fe95fe2e05834d2ebb",
+    "config/crd/gateway-api-openstack.github.io_openstackgatewayclassconfigs.yaml": "39aa7fa4a30f187d5eed492fe3af821dc23498ab49ec4a37a6d4152cf70b8f16",
+    "config/rbac/cluster_role.yaml": "291fc203b7d0f5016e62112583ca4d704f01b6307dd2398a9a75d3c9a32997cf",
+    "config/rbac/cluster_role_binding.yaml": "2a3795fe376324e4cc16d9d2bee1446ee6236db7a895ea675e18fba542a2d80c",
+    "docs/qualification/v1.7.0/provider/qualification-routes.yaml": "f489a7327214ae972d1f7c1b93ea6ba0e9df5d4f1995bf5c13c1a16e8574f86b",
+    "docs/qualification/v1.7.0/provider/stock-grpc.py": "b1ad414ec2c368ae0fea11f2bba81286d64d6e32dbce9d3b3cfdfb612130b229",
+    "docs/qualification/v1.7.0/provider/stock-https-rotation.py": "9aa97169e40fc622e4692cc61ee6f773f79669802919c9669c5cd37c40dc8931",
+    "docs/qualification/v1.7.0/provider/stock-tcp.py": "98939b848b635664aeefb3d7140ba0dc02ac26090738c90299886ea74ef60d49",
+    "docs/qualification/v1.7.0/provider/stock-udp.py": "26349ea9aeb44dfa980f59301dcd3e1bb82e6c655816b032a135b54784dbcf86",
+    "docs/qualification/v1.7.0/provider/udp-upstream-api.py": "82093a3f3bb8159e284bad1ddcbdfeb8cc44e3d3ae7b5dd4471c286977cccfb4"
+  },
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "barbicanFixtureStartup": {
+    "deadlineSeconds": 60,
+    "readySeconds": 1.163
+  },
+  "runtime": {
+    "python": "3.14.7",
+    "sqlite": "3.51.2",
+    "barbican": "23.0.0",
+    "pythonBarbicanClient": "7.6.0"
+  },
+  "apiInstances": {
+    "kubernetes": {
+      "defaultNamespaceUID": "f9f3329d-983b-4edd-91a3-3b64e64f0b25",
+      "apiVersion": "gateway.networking.k8s.io/v1",
+      "channel": "experimental",
+      "servingMode": "envtest, local etcd"
+    },
+    "octavia": {
+      "projectID": "49a11ae7-0409-42b8-bf14-6ada118ffc21",
+      "apiVersion": "load-balancer 2.5",
+      "provider": "amphora",
+      "servingMode": "loopback WSGI, SQLite",
+      "getRequests": 414,
+      "writeRequests": 37
+    }
+  },
+  "sniCapability": true,
+  "direct": [
+    {
+      "sni": "a.example.test",
+      "outcome": "connected",
+      "backend": "A",
+      "backendSNI": "a.example.test",
+      "leafSHA256": "1fd6b0c43a2d5da0bc3795b68d58cf718ff9138ad7bdcde2cf042b70a43d7e94",
+      "echoBytes": 256
+    },
+    {
+      "sni": "b.example.test",
+      "outcome": "connected",
+      "backend": "B",
+      "backendSNI": "b.example.test",
+      "leafSHA256": "2d4d713307c998367c1080c396a0731e54992e0d62ffeabdf614fe16badfeb31",
+      "echoBytes": 256
+    }
+  ],
+  "controllerStartupRevision": "6c74e8eaa94054527823c5c7576da96e84d5f6f1",
+  "siblingPoolStable": true,
+  "cleanup": {
+    "gatewayRemoved": true,
+    "haProxyStopped": true,
+    "vipClosed": true,
+    "restartedWithoutSNIFlag": true,
+    "controllerStartupRevision": "6c74e8eaa94054527823c5c7576da96e84d5f6f1",
+    "sniGatewayInitiallyHeldByFinalizer": true,
+    "survivingRouteStatusesBeforeDeletion": {
+      "A": {
+        "uid": "1ce10474-5b6e-4bcd-b071-f3655d3ad6e7",
+        "generation": 1,
+        "conditions": {}
+      },
+      "B": {
+        "uid": "1959d20d-9ef6-460f-bb72-829c155ca525",
+        "generation": 1,
+        "conditions": {}
+      }
+    },
+    "remainingLoadBalancersListenersPoolsPoliciesMonitors": 0
+  },
+  "providerPackages": {
+    "octavia": {
+      "revision": "0e37f9873147c3c0468edd4e3da11531d8614e6c",
+      "sourceTree": "61e7c97f0427b9b17356b0c8c556e1bcdad06741",
+      "packageSourceArchiveSHA256": "c7e7d64ca6d851daaae8e5c67a3adbf94b2d957a63534d969cf9a1aa7417627a",
+      "version": "19.0.1.dev4",
+      "wheel": "octavia-19.0.1.dev4-py3-none-any.whl",
+      "wheelSHA256": "8c0e50358ba98d44d5afa88a0c013ab22cc95d463b380b97eaa0f5d246ee324a",
+      "packageFilesMatchedToSource": 631,
+      "pythonFilesMatchedToSource": 609,
+      "templatesMatchedToSource": 11,
+      "importedModulesVerified": 151,
+      "moduleFiles": {
+        "octavia.api.drivers.amphora_driver.v2.driver": "octavia/api/drivers/amphora_driver/v2/driver.py",
+        "octavia.api.drivers.utils": "octavia/api/drivers/utils.py",
+        "octavia.api.v2.controllers.l7policy": "octavia/api/v2/controllers/l7policy.py",
+        "octavia.api.v2.controllers.l7rule": "octavia/api/v2/controllers/l7rule.py",
+        "octavia.api.app": "octavia/api/app.py",
+        "octavia.common.jinja.haproxy.combined_listeners.jinja_cfg": "octavia/common/jinja/haproxy/combined_listeners/jinja_cfg.py",
+        "octavia.db.models": "octavia/db/models.py",
+        "octavia.tests.functional.api.v2.base": "octavia/tests/functional/api/v2/base.py"
+      },
+      "rendererTemplates": [
+        "octavia/common/jinja/haproxy/combined_listeners/templates/haproxy.cfg.j2",
+        "octavia/common/jinja/haproxy/combined_listeners/templates/macros.j2"
+      ]
+    },
+    "octavia-lib": {
+      "revision": "bb1a993ac95477b0bdc429f8aaf6d1620f8e7669",
+      "sourceTree": "8b18768d9c12dafe916b582ba6dc3f0f9c91d9f7",
+      "packageSourceArchiveSHA256": "5fef097a538f18a53360fb79046f77043c853876d81130c2cb141c5a6427fd83",
+      "version": "3.12.1.dev3",
+      "wheel": "octavia_lib-3.12.1.dev3-py3-none-any.whl",
+      "wheelSHA256": "5513991a6e004490221065b64be53f3dbdf3de1bab6e768ff2bc98f797c5cfc5",
+      "packageFilesMatchedToSource": 24,
+      "pythonFilesMatchedToSource": 24,
+      "templatesMatchedToSource": 0,
+      "importedModulesVerified": 9,
+      "moduleFiles": {
+        "octavia_lib.api.drivers.data_models": "octavia_lib/api/drivers/data_models.py",
+        "octavia_lib.api.drivers.provider_base": "octavia_lib/api/drivers/provider_base.py"
+      }
+    }
+  }
+}

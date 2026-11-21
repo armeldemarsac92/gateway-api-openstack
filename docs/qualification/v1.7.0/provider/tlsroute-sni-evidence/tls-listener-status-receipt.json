@@ -1,0 +1,85 @@
+{
+  "gatewayApiVersion": "v1.7.0",
+  "gatewayApiRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "controllerRevision": "6c74e8eaa94054527823c5c7576da96e84d5f6f1",
+  "kubernetesVersion": "v1.36.2",
+  "scope": {
+    "runner": "Focused upstream listener status tests on a Kubernetes envtest control plane",
+    "provider": "Controller's in-process recording provider fixture",
+    "tlsSniPassthroughEnabled": true,
+    "selectedFeatures": [
+      "Gateway",
+      "TLSRoute"
+    ],
+    "dataPlaneTrafficVerified": false,
+    "openStackRegionVerified": false
+  },
+  "channels": {
+    "standard": {
+      "result": "PASS",
+      "installBundleSha256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "cases": {
+        "TLSRouteListenerPassthroughSupportedKinds": {
+          "result": "PASS",
+          "listener": "tls-passthrough",
+          "supportedKinds": [
+            {
+              "group": "gateway.networking.k8s.io",
+              "kind": "TLSRoute"
+            }
+          ],
+          "condition": {
+            "type": "ResolvedRefs",
+            "status": "False",
+            "reason": "InvalidRouteKinds"
+          },
+          "attachedRoutes": 0
+        },
+        "TLSRouteListenerTerminateNotSupported": {
+          "result": "PASS",
+          "listener": "tls-terminate",
+          "supportedKinds": [],
+          "condition": {
+            "type": "Accepted",
+            "status": "False",
+            "reason": "UnsupportedValue"
+          },
+          "attachedRoutes": 0
+        }
+      }
+    },
+    "experimental": {
+      "result": "PASS",
+      "installBundleSha256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "cases": {
+        "TLSRouteListenerPassthroughSupportedKinds": {
+          "result": "PASS",
+          "listener": "tls-passthrough",
+          "supportedKinds": [
+            {
+              "group": "gateway.networking.k8s.io",
+              "kind": "TLSRoute"
+            }
+          ],
+          "condition": {
+            "type": "ResolvedRefs",
+            "status": "False",
+            "reason": "InvalidRouteKinds"
+          },
+          "attachedRoutes": 0
+        },
+        "TLSRouteListenerTerminateNotSupported": {
+          "result": "PASS",
+          "listener": "tls-terminate",
+          "supportedKinds": [],
+          "condition": {
+            "type": "Accepted",
+            "status": "False",
+            "reason": "UnsupportedValue"
+          },
+          "attachedRoutes": 0
+        }
+      }
+    }
+  }
+}
