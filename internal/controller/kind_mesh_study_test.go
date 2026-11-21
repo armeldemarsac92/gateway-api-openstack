@@ -21,6 +21,7 @@ package controller_test
 import (
 	"io/fs"
 	"os"
+	"slices"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -50,9 +51,10 @@ func TestKindStockMeshStudy(t *testing.T) {
 		CleanupTestResources: true,
 		DisableParallelTests: true,
 	}
-	switch os.Getenv("HIBISCUS_MESH_STUDY") {
+	selection := os.Getenv("HIBISCUS_MESH_STUDY")
+	switch selection {
 	case "":
-		t.Skip("set HIBISCUS_MESH_STUDY to core, all or MeshFrontend on a disposable kind cluster")
+		t.Skip("set HIBISCUS_MESH_STUDY to core, all, registered or MeshFrontend on a disposable kind cluster")
 	case "core":
 		options.ConformanceProfiles = []suite.ConformanceProfileName{
 			suite.MeshHTTPConformanceProfileName,
@@ -61,17 +63,40 @@ func TestKindStockMeshStudy(t *testing.T) {
 		// v1.7.0 otherwise attempts feature inference before adding profile defaults.
 		options.SupportedFeatures = sets.List(suite.MeshHTTPConformanceProfile.CoreFeatures.
 			Union(suite.MeshGRPCConformanceProfile.CoreFeatures))
-	case "all":
+	case "all", "registered":
 		options.ConformanceProfiles, options.SupportedFeatures = selectKindProfileFeatures(t, []suite.ConformanceProfile{
 			suite.MeshHTTPConformanceProfile,
 			suite.MeshGRPCConformanceProfile,
 		}, cfg.GatewayAPIChannel)
+		if selection == "registered" {
+			// Some registered mesh cases require generic HTTPRoute features
+			// outside the mesh profile tables in v1.7.0.
+			selected := sets.New(options.SupportedFeatures...)
+			for _, tc := range tests.ConformanceTests {
+				if !slices.Contains(tc.Features, features.SupportMesh) {
+					continue
+				}
+				for _, feature := range tc.Features {
+					switch features.GetFeature(feature).Channel {
+					case features.FeatureChannelStandard:
+						selected.Insert(feature)
+					case features.FeatureChannelExperimental:
+						if cfg.GatewayAPIChannel == features.FeatureChannelExperimental {
+							selected.Insert(feature)
+						}
+					default:
+						t.Fatalf("unknown release channel for mesh feature %s", feature)
+					}
+				}
+			}
+			options.SupportedFeatures = sets.List(selected)
+		}
 		t.Logf("Selected upstream feature union: %v", options.SupportedFeatures)
 	case meshtests.MeshFrontend.ShortName:
 		options.RunTest = meshtests.MeshFrontend.ShortName
 		options.SupportedFeatures = meshtests.MeshFrontend.Features
 	default:
-		t.Fatal("HIBISCUS_MESH_STUDY must be core, all or MeshFrontend")
+		t.Fatal("HIBISCUS_MESH_STUDY must be core, all, registered or MeshFrontend")
 	}
 
 	if cfg.GatewayAPIChannel != features.FeatureChannelStandard && cfg.GatewayAPIChannel != features.FeatureChannelExperimental {
