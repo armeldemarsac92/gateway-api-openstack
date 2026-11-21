@@ -1,0 +1,194 @@
+{
+  "gatewayApiVersion": "v1.7.0",
+  "kubernetesVersion": "v1.36.2",
+  "haproxyVersion": "3.0.19",
+  "capabilitiesEnabled": [
+    "octavia-fixed-http-responses",
+    "octavia-weighted-http-targets"
+  ],
+  "backendMode": "Endpoint",
+  "imageManifestDigest": "sha256:476ac892753e25a4462c45b33d6cfe4711b187fd411ecc138a99140186e62630",
+  "gatewayApiSourceRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "controllerSourceRevision": "394afddf983752c0683c30c170de363d9ff129dc",
+  "octaviaSourceRevision": "032e44b82cb58361aec149f874c8eacbe89c275f",
+  "octaviaLibSourceRevision": "3c960017bc9c47783607f0efe7a24512cc9c1d2f",
+  "controllerBinarySha256": "ba3f946f81b7d86c6d21af9f1124fa157c18846f33f8b99f303347baedbc37ef",
+  "echoBinarySha256": "d4e04b904229880dc2e32dbe58244b3bf46408c2e1e8325ebb83a69fab3d57a9",
+  "baseManifestSha256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+  "upstreamRunnerSHA256": "ba3bd02630689a8267a9f2f44f69af88d678e555e218a417763df8037dc004fd",
+  "echoPeersWithDirectHTTP200OnBothChannels": {
+    "gateway-conformance-infra": [
+      "infra-backend-v1-local-0",
+      "infra-backend-v1-local-1",
+      "infra-backend-v2-local-0",
+      "infra-backend-v2-local-1",
+      "infra-backend-v3-local-0"
+    ],
+    "gateway-conformance-web-backend": [
+      "web-backend-local-0",
+      "web-backend-local-1"
+    ]
+  },
+  "upstreamCaseInputs": {
+    "HTTPRouteObservedGenerationBump": {
+      "caseGoSHA256": "b0b7b676b1c0acadef81d4769f777a4364ef8349c8eaa98444f17ff7e4bbe316",
+      "caseYAMLSHA256": "8e92d1ab80b27c58e55ef5374011fce41666a6abb5443e5dd5a17329ed6c2db8"
+    },
+    "HTTPRouteReferenceGrant": {
+      "caseGoSHA256": "c6769c5fbbe3a1bb522d72bd269159a0109f94cd9c32961f262a1f9e430a9e80",
+      "caseYAMLSHA256": "d013ce5e8929d833ac3a423ffad1387c88d99cb82b358dcede6f63ec52b6293e"
+    },
+    "HTTPRoutePathMatchOrder": {
+      "caseGoSHA256": "e8c682fe179096de15c92c12cb1ffda8d12dcc950760f823be03ae4e829d5fa1",
+      "caseYAMLSHA256": "543410619d385a8fd717b5432b34dbd9b38541fb349928bb9af690dce8d1438a"
+    }
+  },
+  "channels": [
+    {
+      "channel": "standard",
+      "bundleSha256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "cases": {
+        "HTTPRouteObservedGenerationBump": {
+          "passed": true,
+          "exit": 0,
+          "caseEvents": [
+            "--- PASS: TestLocalHTTPCore/HTTPRouteObservedGenerationBump (1.34s)",
+            "--- PASS: TestLocalHTTPCore/HTTPRouteObservedGenerationBump/observedGeneration_should_increment (1.34s)"
+          ],
+          "routeGeneration": 2,
+          "parentConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "False/Pending"
+          },
+          "observedGenerations": {
+            "Accepted": 2,
+            "ResolvedRefs": 2,
+            "gateway-api-openstack.github.io/Programmed": 2
+          },
+          "backendAfterCase": "infra-backend-v2"
+        },
+        "HTTPRouteReferenceGrant": {
+          "passed": true,
+          "exit": 0,
+          "caseEvents": [
+            "--- PASS: TestLocalHTTPCore/HTTPRouteReferenceGrant (3.56s)",
+            "--- PASS: TestLocalHTTPCore/HTTPRouteReferenceGrant/Simple_HTTP_request_should_reach_web-backend (1.32s)",
+            "--- PASS: TestLocalHTTPCore/HTTPRouteReferenceGrant/Simple_HTTP_request_should_return_500_after_deleting_the_relevant_reference_grant (1.32s)"
+          ],
+          "referenceGrantAbsentAfterCase": true,
+          "vipHTTPStatusAfterCase": 500,
+          "routeGeneration": 1,
+          "parentConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "False/RefNotPermitted",
+            "gateway-api-openstack.github.io/Programmed": "False/Pending"
+          },
+          "observedGenerations": {
+            "Accepted": 1,
+            "ResolvedRefs": 1,
+            "gateway-api-openstack.github.io/Programmed": 1
+          }
+        },
+        "HTTPRoutePathMatchOrder": {
+          "passed": true,
+          "exit": 0,
+          "caseEvents": [
+            "--- PASS: TestLocalHTTPCore/HTTPRoutePathMatchOrder (1.02s)",
+            "--- PASS: TestLocalHTTPCore/HTTPRoutePathMatchOrder/0_request_to_'/match/exact/one'_should_go_to_infra-backend-v3 (15.45s)",
+            "--- PASS: TestLocalHTTPCore/HTTPRoutePathMatchOrder/2_request_to_'/match'_should_go_to_infra-backend-v1 (0.01s)",
+            "--- PASS: TestLocalHTTPCore/HTTPRoutePathMatchOrder/1_request_to_'/match/exact'_should_go_to_infra-backend-v2 (0.00s)",
+            "--- PASS: TestLocalHTTPCore/HTTPRoutePathMatchOrder/3_request_to_'/match/prefix/one/any'_should_go_to_infra-backend-v2 (16.77s)",
+            "--- PASS: TestLocalHTTPCore/HTTPRoutePathMatchOrder/4_request_to_'/match/prefix/any'_should_go_to_infra-backend-v1 (1.02s)",
+            "--- PASS: TestLocalHTTPCore/HTTPRoutePathMatchOrder/5_request_to_'/match/any'_should_go_to_infra-backend-v3 (3.45s)"
+          ],
+          "routeGeneration": 1,
+          "parentConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "False/Pending"
+          },
+          "observedGenerations": {
+            "Accepted": 1,
+            "ResolvedRefs": 1,
+            "gateway-api-openstack.github.io/Programmed": 1
+          }
+        }
+      },
+      "upstreamExit": 0
+    },
+    {
+      "channel": "experimental",
+      "bundleSha256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "cases": {
+        "HTTPRouteObservedGenerationBump": {
+          "passed": true,
+          "exit": 0,
+          "caseEvents": [
+            "--- PASS: TestLocalHTTPCore/HTTPRouteObservedGenerationBump (0.92s)",
+            "--- PASS: TestLocalHTTPCore/HTTPRouteObservedGenerationBump/observedGeneration_should_increment (0.92s)"
+          ],
+          "routeGeneration": 2,
+          "parentConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "False/Pending"
+          },
+          "observedGenerations": {
+            "Accepted": 2,
+            "ResolvedRefs": 2,
+            "gateway-api-openstack.github.io/Programmed": 2
+          },
+          "backendAfterCase": "infra-backend-v2"
+        },
+        "HTTPRouteReferenceGrant": {
+          "passed": true,
+          "exit": 0,
+          "caseEvents": [
+            "--- PASS: TestLocalHTTPCore/HTTPRouteReferenceGrant (2.95s)",
+            "--- PASS: TestLocalHTTPCore/HTTPRouteReferenceGrant/Simple_HTTP_request_should_reach_web-backend (1.11s)",
+            "--- PASS: TestLocalHTTPCore/HTTPRouteReferenceGrant/Simple_HTTP_request_should_return_500_after_deleting_the_relevant_reference_grant (1.12s)"
+          ],
+          "referenceGrantAbsentAfterCase": true,
+          "vipHTTPStatusAfterCase": 500,
+          "routeGeneration": 1,
+          "parentConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "False/RefNotPermitted",
+            "gateway-api-openstack.github.io/Programmed": "False/Pending"
+          },
+          "observedGenerations": {
+            "Accepted": 1,
+            "ResolvedRefs": 1,
+            "gateway-api-openstack.github.io/Programmed": 1
+          }
+        },
+        "HTTPRoutePathMatchOrder": {
+          "passed": true,
+          "exit": 0,
+          "caseEvents": [
+            "--- PASS: TestLocalHTTPCore/HTTPRoutePathMatchOrder (0.83s)",
+            "--- PASS: TestLocalHTTPCore/HTTPRoutePathMatchOrder/0_request_to_'/match/exact/one'_should_go_to_infra-backend-v3 (17.83s)",
+            "--- PASS: TestLocalHTTPCore/HTTPRoutePathMatchOrder/2_request_to_'/match'_should_go_to_infra-backend-v1 (0.01s)",
+            "--- PASS: TestLocalHTTPCore/HTTPRoutePathMatchOrder/1_request_to_'/match/exact'_should_go_to_infra-backend-v2 (0.01s)",
+            "--- PASS: TestLocalHTTPCore/HTTPRoutePathMatchOrder/3_request_to_'/match/prefix/one/any'_should_go_to_infra-backend-v2 (19.69s)",
+            "--- PASS: TestLocalHTTPCore/HTTPRoutePathMatchOrder/4_request_to_'/match/prefix/any'_should_go_to_infra-backend-v1 (1.39s)",
+            "--- PASS: TestLocalHTTPCore/HTTPRoutePathMatchOrder/5_request_to_'/match/any'_should_go_to_infra-backend-v3 (5.23s)"
+          ],
+          "routeGeneration": 1,
+          "parentConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          },
+          "observedGenerations": {
+            "Accepted": 1,
+            "ResolvedRefs": 1,
+            "gateway-api-openstack.github.io/Programmed": 1
+          }
+        }
+      },
+      "upstreamExit": 0
+    }
+  ]
+}
