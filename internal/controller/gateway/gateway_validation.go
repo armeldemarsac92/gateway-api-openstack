@@ -100,10 +100,7 @@ func SupportedListenersForConfig(config controller.Config, gateway *gatewayv1.Ga
 	}
 	var listeners []*gatewayv1.Listener
 	switch {
-	case slices.ContainsFunc(gateway.Spec.Listeners, func(l gatewayv1.Listener) bool { return l.Protocol == gatewayv1.TLSProtocolType }):
-		if !config.TLSSNIPassthrough {
-			return nil, fmt.Errorf("TLS SNI passthrough requires explicit controller opt-in")
-		}
+	case config.TLSSNIPassthrough && hasSNIPassthroughListener(gateway):
 		if len(gateway.Spec.Listeners) != 1 {
 			return nil, fmt.Errorf("TLS SNI passthrough requires a dedicated Gateway with one listener")
 		}
@@ -117,6 +114,8 @@ func SupportedListenersForConfig(config controller.Config, gateway *gatewayv1.Ga
 			return nil, err
 		}
 		listeners = append(listeners, listener)
+	case len(gateway.Spec.Listeners) == 1 && gateway.Spec.Listeners[0].Protocol == gatewayv1.TLSProtocolType:
+		return nil, fmt.Errorf("TLS SNI passthrough requires explicit controller opt-in")
 	case usesHTTPSProfile(config, gateway):
 		listeners := httpsProfileListeners(config, gateway)
 		if len(listeners) == 0 {

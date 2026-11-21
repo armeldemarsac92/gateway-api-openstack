@@ -70,7 +70,7 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 		if snapshot.scopedListeners {
 			spec.ScopedListeners = []cloud.ScopedListener{}
 		}
-		return graph.GatewayInput{
+		input := graph.GatewayInput{
 			Object: request.Gateway.DeepCopy(),
 			Node: cloud.GatewayGraphNode{
 				Disposition: cloud.GraphDelete,
@@ -86,7 +86,19 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 				}
 				return nil
 			},
-		}, nil
+		}
+		if snapshot.boundListenerProtocol == gatewayv1.TLSProtocolType {
+			input.ReportRoutes = func(ctx context.Context, result cloud.GatewayGraphResult, providerErr error) error {
+				if providerErr != nil || result.Outcome.State != cloud.OutcomeReady || result.Gateway.AddressIssue != "" {
+					return nil
+				}
+				if err := input.Validate(ctx); err != nil {
+					return err
+				}
+				return r.clearSNIRouteParentStatuses(ctx, request.Gateway)
+			}
+		}
+		return input, nil
 	}
 	if request.Action != graph.Ensure {
 		return graph.GatewayInput{}, errors.New("invalid Gateway graph action")

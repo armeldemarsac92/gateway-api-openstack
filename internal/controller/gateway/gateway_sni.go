@@ -19,6 +19,8 @@ package gateway
 import (
 	"cmp"
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"slices"
@@ -27,6 +29,7 @@ import (
 	discoveryv1 "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -36,6 +39,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia/amphora"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/classconfig"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/routebackend"
@@ -47,6 +51,24 @@ func hasSNIPassthroughListener(gateway *gatewayv1.Gateway) bool {
 	return slices.ContainsFunc(gateway.Spec.Listeners, func(l gatewayv1.Listener) bool {
 		return l.Protocol == gatewayv1.TLSProtocolType
 	})
+}
+
+func validateSNITopology(listener *gatewayv1.Listener, topology classconfig.Resolved) error {
+	if listener.Protocol == gatewayv1.TLSProtocolType && topology.Topology.MemberMode != cloud.MemberModeEndpoint {
+		return &classconfig.InvalidParametersError{Message: "TLS SNI passthrough requires Endpoint member mode"}
+	}
+	return nil
+}
+
+func (r *Reconciler) validateBoundSNITopology(gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) error {
+	if listener.Protocol != gatewayv1.TLSProtocolType || !controller.HasGatewayTopologyBinding(r.Config, gateway) {
+		return nil
+	}
+	topology, err := controller.StoredGatewayTopology(r.Config, gateway)
+	if err != nil {
+		return err
+	}
+	return validateSNITopology(listener, topology)
 }
 
 type sniRouteStatus struct {
@@ -261,12 +283,14 @@ func (r *Reconciler) resolveSNIBackend(ctx context.Context, snapshot *gatewayMut
 }
 
 func (r *Reconciler) reportSNIRoutes(ctx context.Context, gateway *gatewayv1.Gateway, observation sniRouteObservation, result cloud.GatewayGraphResult, providerErr error) error {
-	ready := make(map[string]bool)
-	if providerErr == nil {
-		for _, route := range result.Routes {
-			ready[route.Identity.RouteUID] = route.Result.Outcome.State == cloud.OutcomeReady
+	outcomes := make(map[string]cloud.RouteResult)
+	for _, route := range result.Routes {
+		if providerErr == nil || route.Result.ObservationDeferred {
+			outcomes[route.Identity.RouteUID] = route.Result
 		}
 	}
+	programmedType := r.Config.Domain() + "/Programmed"
+	targetType := r.Config.Domain() + "/ForwardingTarget"
 	for _, entry := range observation {
 		base := entry.route
 		target := base.DeepCopy()
@@ -276,6 +300,11 @@ func (r *Reconciler) reportSNIRoutes(ctx context.Context, gateway *gatewayv1.Gat
 		target.Status.Parents = slices.DeleteFunc(target.Status.Parents, func(parent gatewayv1.RouteParentStatus) bool {
 			return parent.ControllerName == r.Config.ControllerName && sniParentTargetsGateway(base.Namespace, parent.ParentRef, gateway)
 		})
+		fingerprint, err := sniForwardingFingerprint(gateway, entry.target)
+		if err != nil {
+			return err
+		}
+		outcome := outcomes[string(base.UID)]
 		for _, ref := range entry.parents {
 			status := gatewayv1.RouteParentStatus{ParentRef: ref, ControllerName: r.Config.ControllerName}
 			for _, old := range previous {
@@ -297,6 +326,12 @@ func (r *Reconciler) reportSNIRoutes(ctx context.Context, gateway *gatewayv1.Gat
 			default:
 				resolved = metav1.ConditionFalse
 			}
+			checkpoint := meta.FindStatusCondition(status.Conditions, targetType)
+			previouslyProgrammed := meta.FindStatusCondition(status.Conditions, programmedType)
+			retain := outcome.ObservationDeferred && checkpoint != nil && checkpoint.Status == metav1.ConditionTrue &&
+				checkpoint.ObservedGeneration == base.Generation && checkpoint.Message == fingerprint &&
+				previouslyProgrammed != nil && previouslyProgrammed.Status == metav1.ConditionTrue &&
+				previouslyProgrammed.ObservedGeneration == base.Generation
 			programmedReason, programmedMessage := "Pending", "Waiting for a coherent Octavia listener, policy, rule and backend readback"
 			switch {
 			case accepted == metav1.ConditionFalse:
@@ -305,21 +340,72 @@ func (r *Reconciler) reportSNIRoutes(ctx context.Context, gateway *gatewayv1.Gat
 				programmedReason, programmedMessage = string(resolvedReason), resolvedMessage
 			case entry.target == nil:
 				programmedMessage = "The backend Service has no ready IPv4 endpoints"
-			case ready[string(base.UID)]:
+			case outcome.Outcome.State == cloud.OutcomeReady || retain:
 				programmed, programmedReason, programmedMessage = metav1.ConditionTrue, "Programmed", "Octavia readback confirms the exact SNI route and its backend"
 			}
 			controller.SetCondition(&status.Conditions, controller.Condition("Accepted", accepted, string(entry.acceptedReason), entry.acceptedMessage, base.Generation))
 			controller.SetCondition(&status.Conditions, controller.Condition("ResolvedRefs", resolved, string(resolvedReason), resolvedMessage, base.Generation))
-			controller.SetCondition(&status.Conditions, controller.Condition(r.Config.Domain()+"/Programmed", programmed, programmedReason, programmedMessage, base.Generation))
+			controller.SetCondition(&status.Conditions, controller.Condition(programmedType, programmed, programmedReason, programmedMessage, base.Generation))
+			if programmed == metav1.ConditionTrue {
+				controller.SetCondition(&status.Conditions, controller.Condition(targetType, metav1.ConditionTrue, "Observed", fingerprint, base.Generation))
+			} else {
+				meta.RemoveStatusCondition(&status.Conditions, targetType)
+			}
 			target.Status.Parents = append(target.Status.Parents, status)
 		}
-		if !equality.Semantic.DeepEqual(base.Status, target.Status) {
-			if err := r.Status().Patch(ctx, target, controller.OptimisticMergeFrom(base)); err != nil {
-				return client.IgnoreNotFound(err)
-			}
+		if err := r.patchSNIRouteStatus(ctx, base, target); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+func sniForwardingFingerprint(gateway *gatewayv1.Gateway, target *cloud.TLSSNIRoute) (string, error) {
+	if target == nil {
+		return "", nil
+	}
+	route := *target
+	route.Identity.ControllerVersion = ""
+	content, err := json.Marshal(struct {
+		GatewayGeneration int64
+		Route             cloud.TLSSNIRoute
+	}{gateway.Generation, route})
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("v1:%x", sha256.Sum256(content)), nil
+}
+
+func (r *Reconciler) clearSNIRouteParentStatuses(ctx context.Context, gateway *gatewayv1.Gateway) error {
+	var routes gatewayv1.TLSRouteList
+	if err := r.APIReader.List(ctx, &routes); err != nil {
+		// With the CRD gone, no status remains to clean up.
+		if meta.IsNoMatchError(err) || apierrors.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+	if routes.Continue != "" {
+		return fmt.Errorf("incomplete TLSRoute inventory before Gateway cleanup")
+	}
+	for i := range routes.Items {
+		base := &routes.Items[i]
+		target := base.DeepCopy()
+		target.Status.Parents = slices.DeleteFunc(target.Status.Parents, func(parent gatewayv1.RouteParentStatus) bool {
+			return parent.ControllerName == r.Config.ControllerName && sniParentTargetsGateway(base.Namespace, parent.ParentRef, gateway)
+		})
+		if err := r.patchSNIRouteStatus(ctx, base, target); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *Reconciler) patchSNIRouteStatus(ctx context.Context, base, target *gatewayv1.TLSRoute) error {
+	if equality.Semantic.DeepEqual(base.Status, target.Status) {
+		return nil
+	}
+	return client.IgnoreNotFound(r.Status().Patch(ctx, target, controller.OptimisticMergeFrom(base)))
 }
 
 func (r *Reconciler) gatewayRequestsForSNIDependency(ctx context.Context, dependency client.Object) []reconcile.Request {

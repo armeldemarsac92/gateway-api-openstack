@@ -21,13 +21,17 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/classconfig"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 
 	"k8s.io/utils/ptr"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -124,4 +128,145 @@ func TestSNIRouteGrantWithdrawalLeavesOtherHostname(t *testing.T) {
 	if observed[0].resolvedReason != gatewayv1.RouteReasonRefNotPermitted {
 		t.Fatalf("expected RefNotPermitted, got %#v", observed[0])
 	}
+}
+
+func TestSNIFlagOffPreservesMixedGatewayHTTP(t *testing.T) {
+	cfg := testConfig()
+	gateway := programmedTestGateway(cfg)
+	gateway.Generation++
+	gateway.Spec.Listeners = append(gateway.Spec.Listeners, testSNIListener())
+	class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "openstack"}, Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName}}
+	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gateway).WithObjects(class, gateway).Build()
+	provider := &recordingProvider{}
+	r := newTestReconciler(Reconciler{Client: kube, APIReader: kube, Config: cfg, Coordinator: &graph.Coordinator{}}, provider)
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(gateway)}
+	for range 2 {
+		if _, err := r.Reconcile(t.Context(), request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(provider.deletedGateways) != 0 || len(provider.gatewaySpecs) == 0 || provider.gatewaySpecs[0].ListenerPort != 80 {
+		t.Fatalf("HTTP graph did not stay in service with SNI off: ensures=%v, deletes=%v", provider.gatewaySpecs, provider.deletedGateways)
+	}
+}
+
+func TestTLSGatewayCleanupClearsOnlyItsOwnRouteParentStatus(t *testing.T) {
+	for _, deleting := range []bool{true, false} {
+		cfg := testConfig()
+		cfg.TLSSNIPassthrough = true
+		gateway := programmedTestGateway(cfg)
+		gateway.Annotations[cfg.GatewayListenerProtocolAnnotation()] = string(gatewayv1.TLSProtocolType)
+		gateway.Spec.Listeners[0].Protocol = gatewayv1.TCPProtocolType
+		if deleting {
+			gateway.DeletionTimestamp = ptr.To(metav1.Now())
+		}
+		route := &gatewayv1.TLSRoute{ObjectMeta: metav1.ObjectMeta{Name: "sni", Namespace: gateway.Namespace, UID: "route", Generation: 1}}
+		parent := gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name)}
+		other := gatewayv1.ParentReference{Name: "other-gateway"}
+		programmed := []metav1.Condition{
+			controller.Condition("Accepted", metav1.ConditionTrue, "Accepted", "Attached", 1),
+			controller.Condition(cfg.Domain()+"/Programmed", metav1.ConditionTrue, "Programmed", "Read back", 1),
+		}
+		route.Spec.ParentRefs = []gatewayv1.ParentReference{parent}
+		route.Status.Parents = []gatewayv1.RouteParentStatus{
+			{ParentRef: parent, ControllerName: cfg.ControllerName, Conditions: programmed},
+			{ParentRef: parent, ControllerName: "other.example/controller", Conditions: programmed},
+			{ParentRef: other, ControllerName: cfg.ControllerName, Conditions: programmed},
+		}
+		class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "openstack"}, Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName}}
+		kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gateway, route).WithObjects(class, gateway, route).Build()
+		provider := &recordingProvider{}
+		r := newTestReconciler(Reconciler{Client: kube, APIReader: kube, Config: cfg, Coordinator: &graph.Coordinator{}}, provider)
+		request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(gateway)}
+		for range 2 {
+			if _, err := r.Reconcile(t.Context(), request); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var got gatewayv1.TLSRoute
+		if err := kube.Get(t.Context(), client.ObjectKeyFromObject(route), &got); err != nil {
+			t.Fatal(err)
+		}
+		if len(got.Status.Parents) != 2 || got.Status.Parents[0].ControllerName != "other.example/controller" || got.Status.Parents[1].ParentRef.Name != other.Name {
+			t.Fatalf("deleting=%t: should preserve other parents and controllers only, got %#v", deleting, got.Status.Parents)
+		}
+	}
+}
+
+func TestSNIGatewayCannotReplaceStoredNodePortTopology(t *testing.T) {
+	cfg := testConfig()
+	cfg.TLSSNIPassthrough = true
+	gateway := programmedTestGateway(cfg)
+	gateway.Generation++
+	gateway.Spec.Listeners[0] = testSNIListener()
+	gateway.Annotations[cfg.GatewayListenerProtocolAnnotation()] = string(gatewayv1.TCPProtocolType)
+	completeGatewayTopologyFixture(cfg, gateway)
+	topology, err := controller.StoredGatewayTopology(cfg, gateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	topology.Topology.MemberMode = cloud.MemberModeNodePort
+	controller.ClearGatewayTopology(cfg, gateway)
+	if err := controller.BindGatewayTopology(cfg, gateway, topology); err != nil {
+		t.Fatal(err)
+	}
+	class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "openstack"}, Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName}}
+	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gateway).WithObjects(class, gateway).Build()
+	provider := &recordingProvider{}
+	r := newTestReconciler(Reconciler{Client: kube, APIReader: kube, Config: cfg, Coordinator: &graph.Coordinator{}}, provider)
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(gateway)}
+	for range 3 {
+		if _, err := r.Reconcile(t.Context(), request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var got gatewayv1.Gateway
+	if err := kube.Get(t.Context(), request.NamespacedName, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Annotations[cfg.GatewayListenerProtocolAnnotation()] != string(gatewayv1.TCPProtocolType) || len(provider.gatewaySpecs) != 0 {
+		t.Fatalf("NodePort topology must prevent the replacement TLS binding: spec=%#v annotation=%q", provider.gatewaySpecs, got.Annotations[cfg.GatewayListenerProtocolAnnotation()])
+	}
+}
+
+func TestSNIRoutePendingSiblingUsesOnlySameAuthorizedTarget(t *testing.T) {
+	cfg := testConfig()
+	gateway := programmedTestGateway(cfg)
+	gateway.Spec.Listeners[0] = testSNIListener()
+	parent := gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name)}
+	route := &gatewayv1.TLSRoute{ObjectMeta: metav1.ObjectMeta{Name: "b", Namespace: gateway.Namespace, UID: "route-b", Generation: 1}}
+	target := cloud.TLSSNIRoute{Identity: controller.RouteIdentity(cfg, gateway, route), Hostname: "b.example.test", ServiceUID: "service-b",
+		Members: []cloud.Member{{Address: "192.0.2.21", Port: 443}}}
+	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(route).WithObjects(route).Build()
+	r := &Reconciler{Client: kube, APIReader: kube, Config: cfg}
+	result := cloud.GatewayGraphResult{Routes: []cloud.RouteGraphResult{{Identity: target.Identity}}}
+	report := func(want bool) {
+		t.Helper()
+		if err := kube.Get(t.Context(), client.ObjectKeyFromObject(route), route); err != nil {
+			t.Fatal(err)
+		}
+		obs := sniRouteObservation{{route: route, parents: []gatewayv1.ParentReference{parent}, target: &target,
+			acceptedReason: gatewayv1.RouteReasonAccepted, acceptedMessage: "Attached",
+			resolvedReason: gatewayv1.RouteReasonResolvedRefs, resolvedMessage: "Resolved"}}
+		if err := r.reportSNIRoutes(t.Context(), gateway, obs, result, nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := kube.Get(t.Context(), client.ObjectKeyFromObject(route), route); err != nil {
+			t.Fatal(err)
+		}
+		if got := meta.IsStatusConditionTrue(route.Status.Parents[0].Conditions, cfg.Domain()+"/Programmed"); got != want {
+			t.Fatalf("Programmed=%t, want %t: %#v", got, want, route.Status.Parents[0].Conditions)
+		}
+	}
+	result.Routes[0].Result = cloud.RouteReadyResult(cloud.RouteState{})
+	report(true)
+	result.Routes[0].Result = cloud.RouteResult{ObservationDeferred: true}
+	report(true)
+	target.ServiceUID = "service-b-recreated"
+	report(false)
+}
+
+func testSNIListener() gatewayv1.Listener {
+	return gatewayv1.Listener{Name: "sni", Port: 443, Protocol: gatewayv1.TLSProtocolType,
+		TLS: &gatewayv1.ListenerTLSConfig{Mode: ptr.To(gatewayv1.TLSModePassthrough)}}
 }

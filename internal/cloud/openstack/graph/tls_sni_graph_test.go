@@ -17,7 +17,9 @@ limitations under the License.
 package graph
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -127,5 +129,136 @@ func TestSNIPassthroughRejectsOverlongDNSLabel(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("accepted a DNS label that the Octavia SNI extension refuses")
+	}
+}
+
+func TestSNIPolicyWithdrawalDuringNeutronFailureAndDisabledCleanup(t *testing.T) {
+	routeID := safetyTestIdentity(t)
+	spec := completeGraphSpec(routeID)
+	spec.Routes = nil
+	spec.Gateway.Spec.ListenerProtocol = cloud.ListenerProtocolTLSSNI
+	spec.Gateway.Spec.ExternalNetworkID = ""
+	targets, err := buildSNITargets(spec.Identity, []cloud.TLSSNIRoute{{
+		Identity: routeID.Value(), Hostname: "a.example.test", ServiceUID: "service-a", Members: []cloud.Member{{Address: "192.0.2.30", Port: 443}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tags := func(role string) []string {
+		t.Helper()
+		tags, err := targets[0].tags(role)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tags
+	}
+	ids := func(id string) []map[string]string { return []map[string]string{{"id": id}} }
+	lb := map[string]any{"id": "lb", "project_id": "project-a", "provisioning_status": "ACTIVE", "admin_state_up": true,
+		"provider": "amphora", "vip_subnet_id": spec.Gateway.Spec.VIPSubnetID, "vip_port_id": "vip-port", "vip_address": "192.0.2.10",
+		"listeners": ids("listener"), "pools": ids("pool"), "tags": append(safetyGatewayTags(t, routeID, roleLoadBalancer), sniProfileTag)}
+	listener := map[string]any{"id": "listener", "project_id": "project-a", "provisioning_status": "ACTIVE", "admin_state_up": true,
+		"protocol": "TCP", "protocol_port": spec.Gateway.Spec.ListenerPort, "default_pool_id": nil, "loadbalancers": ids("lb"),
+		"l7policies": ids("policy-a"), "tags": append(safetyGatewayTags(t, routeID, roleListener), sniProfileTag)}
+	pool := map[string]any{"id": "pool", "project_id": "project-a", "provisioning_status": "ACTIVE", "admin_state_up": true,
+		"protocol": "TCP", "lb_algorithm": "ROUND_ROBIN", "loadbalancers": ids("lb"), "listeners": ids("listener"),
+		"members": ids("member"), "tags": tags(roleSNIPool)}
+	member := map[string]any{"id": "member", "project_id": "project-a", "provisioning_status": "ACTIVE", "admin_state_up": true,
+		"address": "192.0.2.30", "protocol_port": 443, "weight": 1, "tags": tags(roleSNIMember)}
+	policy := map[string]any{"id": "policy-a", "project_id": "project-a", "provisioning_status": "ACTIVE", "admin_state_up": true,
+		"position": 1, "action": "REDIRECT_TO_POOL", "listener_id": "listener", "redirect_pool_id": "pool", "rules": ids("rule"), "tags": tags(roleSNIPolicy)}
+	rule := map[string]any{"id": "rule", "project_id": "project-a", "provisioning_status": "ACTIVE", "admin_state_up": true,
+		"type": "TLS_SNI", "value": "a.example.test", "compare_type": "EQUAL_TO", "invert": false, "tags": tags(roleSNIRule)}
+	reads := map[string]map[string]any{
+		"/lbaas/loadbalancers": {"loadbalancers": []any{lb}}, "/lbaas/loadbalancers/lb": {"loadbalancer": lb},
+		"/lbaas/listeners": {"listeners": []any{listener}}, "/lbaas/pools": {"pools": []any{pool}},
+		"/lbaas/pools/pool/members": {"members": []any{member}}, "/lbaas/l7policies": {"l7policies": []any{policy}},
+		"/lbaas/l7policies/policy-a/rules": {"rules": []any{rule}},
+	}
+	var writes []string
+	neutronFailed := true
+	clients := ServiceClients{
+		ProjectID: "project-a",
+		Network: safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodGet || r.URL.Path != "/floatingips" {
+				t.Errorf("unexpected Neutron request: %s %s", r.Method, r.URL.Path)
+			}
+			if neutronFailed {
+				http.Error(w, "unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			safetyWriteJSON(t, w, map[string]any{"floatingips": []any{}})
+		})),
+		LoadBalancer: safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if body, found := reads[r.URL.Path]; r.Method == http.MethodGet && found {
+				safetyWriteJSON(t, w, body)
+				return
+			}
+			writes = append(writes, r.Method+" "+r.URL.Path)
+			if r.Method != http.MethodPut || r.URL.Path != "/lbaas/l7policies/policy-a" {
+				t.Errorf("unexpected Octavia request: %s", writes[len(writes)-1])
+				http.Error(w, "unexpected", http.StatusBadRequest)
+				return
+			}
+			var body struct {
+				Policy map[string]any `json:"l7policy"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.Policy) != 1 || body.Policy["admin_state_up"] != false {
+				t.Errorf("withdrawal must only close the owned SNI policy: %#v, %v", body.Policy, err)
+			}
+			safetyWriteJSON(t, w, map[string]any{"l7policy": policy})
+		})),
+	}
+	t.Run("withdrawal remains writable with Neutron down", func(t *testing.T) {
+		provider := newTestProvider(t, clients, ProviderConfig{TLSSNIPassthrough: true})
+		stale := errors.New("authorization changed")
+		spec.ValidateMutation = func(context.Context) error { return stale }
+		if _, err := provider.ReconcileGatewayGraph(t.Context(), spec); !errors.Is(err, stale) || len(writes) != 0 {
+			t.Fatalf("the withdrawal must still pass the mutation fence: err=%v writes=%v", err, writes)
+		}
+		spec.ValidateMutation = nil
+		if result, err := provider.ReconcileGatewayGraph(t.Context(), spec); err != nil || result.Outcome.State != cloud.OutcomeProgressing || len(writes) != 1 {
+			t.Fatalf("the verified withdrawal should run without the optional address inventory: err=%v result=%v writes=%v", err, result, writes)
+		}
+		spec.Gateway.TLSSNIRoutes = []cloud.TLSSNIRoute{targets[0].route}
+		if _, err := provider.ReconcileGatewayGraph(t.Context(), spec); err == nil || !strings.Contains(err.Error(), "discover Gateway Floating IPs") || len(writes) != 1 {
+			t.Fatalf("serving state still needs address inventory: err=%v writes=%v", err, writes)
+		}
+		spec.Gateway.TLSSNIRoutes = nil
+	})
+	t.Run("disabled controller still cleans verified TLS graph", func(t *testing.T) {
+		writes, neutronFailed = nil, false
+		provider := newTestProvider(t, clients, ProviderConfig{})
+		if _, err := provider.ReconcileGatewayGraph(t.Context(), spec); err == nil || len(writes) != 0 {
+			t.Fatalf("feature off must reject Ensure: err=%v writes=%v", err, writes)
+		}
+		cleanup := spec
+		cleanup.Gateway.Disposition = cloud.GraphDelete
+		if result, err := provider.ReconcileGatewayGraph(t.Context(), cleanup); err != nil || result.Outcome.State != cloud.OutcomeProgressing || len(writes) != 1 {
+			t.Fatalf("feature off must allow verified GraphDelete: err=%v result=%v writes=%v", err, result, writes)
+		}
+		policy["project_id"] = "foreign-project"
+		if _, err := provider.ReconcileGatewayGraph(t.Context(), cleanup); !errors.Is(err, cloud.ErrOwnershipConflict) || len(writes) != 1 {
+			t.Fatalf("feature off must never delete a foreign fragment: err=%v writes=%v", err, writes)
+		}
+	})
+}
+
+func TestSNIPendingLoadBalancerDefersOnlyDesiredRouteObservations(t *testing.T) {
+	identity := safetyTestIdentity(t)
+	spec := completeGraphSpec(identity)
+	spec.Gateway.Spec.ExternalNetworkID = ""
+	desired := desiredGatewayGraph{spec: spec, protocol: cloud.ListenerProtocolTLSSNI,
+		sni: []desiredSNIFragment{{route: cloud.TLSSNIRoute{Identity: identity.Value()}}}}
+	lb := safetyObservedLoadBalancer()
+	lb.ProvisioningStatus, lb.AdminStateUp = "PENDING_UPDATE", true
+	actual := observedGatewayGraph{loadBalancer: lb, outcome: cloud.ProgressingOutcome("Updating", 1),
+		listener: &listeners.Listener{ID: "listener", AdminStateUp: true, ProvisioningStatus: "PENDING_UPDATE"}}
+	p := &Provider{}
+	if got := p.pendingGraphResult(t.Context(), desired, actual).Routes; len(got) != 1 || !got[0].Result.ObservationDeferred {
+		t.Fatalf("expected one desired route eligible to retain an existing proof while a policy update is pending, got %#v", got)
+	}
+	lb.ProvisioningStatus = "PENDING_CREATE"
+	if got := p.pendingGraphResult(t.Context(), desired, actual).Routes; len(got) != 0 && got[0].Result.ObservationDeferred {
+		t.Fatalf("a pending new loadbalancer is not an eligible serving sibling, got %#v", got)
 	}
 }

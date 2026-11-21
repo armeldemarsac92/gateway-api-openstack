@@ -543,3 +543,31 @@ func (p *Provider) withdrawUndiscoverableSNI(ctx context.Context, desired desire
 	step := graphMutation{kind: graphDisableListener, sniWithdrawal: true, message: "Closing TLS SNI listener until Octavia advertises its capability"}
 	return result, errors.Join(cause, p.executeGraphMutation(ctx, desired, actual, step))
 }
+
+// Neutron failures must not hold up restrictive updates on a proven Octavia
+// graph. Keep all address handling and traffic expansion behind full inventory.
+func (p *Provider) reconcileSNIWithdrawalWithoutAddress(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph) (cloud.GatewayGraphResult, error) {
+	plan, result, err := p.buildSNIGraphPlan(desired, actual)
+	if err != nil {
+		return result, err
+	}
+	result.Gateway.Outcome = p.progressingOutcome("Waiting to observe the Gateway Floating IP inventory")
+	for i := range result.Routes {
+		// A previously proven sibling can stay Programmed during this read
+		// failure. Do not create a new serving proof without address inventory.
+		result.Routes[i].Result = cloud.RouteResult{Outcome: result.Gateway.Outcome, ObservationDeferred: true}
+	}
+	if len(plan) != 1 || plan[0].kind != graphDeleteChild || plan[0].deletion.resource != gatewayDisableL7Policy || !plan[0].sniWithdrawal {
+		return result, actual.addressReadError
+	}
+	if validate := desired.spec.ValidateMutation; validate != nil {
+		if err := validate(ctx); err != nil {
+			return cloud.GatewayGraphResult{}, err
+		}
+	}
+	if err := p.executeGraphMutation(ctx, desired, actual, plan[0]); err != nil {
+		return result, err
+	}
+	p.recordGraphMutationOutcome(&result, plan[0])
+	return result, nil
+}

@@ -84,7 +84,7 @@ func (r *Reconciler) observeGatewayMutationSnapshot(
 	); err != nil {
 		return nil, errors.Join(errGatewayChanged, client.IgnoreNotFound(err))
 	}
-	if gatewayClass.Spec.ControllerName != r.Config.ControllerName || ((r.gatewayUsesListenerScope(&gateway) || hasSNIPassthroughListener(&gateway)) && !gatewayClass.DeletionTimestamp.IsZero()) {
+	if gatewayClass.Spec.ControllerName != r.Config.ControllerName || ((r.gatewayUsesListenerScope(&gateway) || r.Config.TLSSNIPassthrough && hasSNIPassthroughListener(&gateway)) && !gatewayClass.DeletionTimestamp.IsZero()) {
 		return nil, errGatewayChanged
 	}
 	if !controller.GatewayClassSupportsInstalledVersion(&gatewayClass) {
@@ -124,6 +124,9 @@ func (r *Reconciler) observeGatewayMutationSnapshot(
 		topology, err = classconfig.Resolve(ctx, r.APIReader, r.TopologyResolver, &gatewayClass)
 	}
 	if err != nil {
+		return nil, err
+	}
+	if err := validateSNITopology(listener, topology); err != nil {
 		return nil, err
 	}
 	return &gatewayMutationSnapshot{
@@ -177,7 +180,7 @@ func (r *Reconciler) sealGatewayMutationSnapshot(
 	); err != nil {
 		return errors.Join(errGatewayChanged, client.IgnoreNotFound(err))
 	}
-	if gatewayClass.Spec.ControllerName != r.Config.ControllerName || ((r.gatewayUsesListenerScope(&gateway) || hasSNIPassthroughListener(&gateway)) &&
+	if gatewayClass.Spec.ControllerName != r.Config.ControllerName || ((r.gatewayUsesListenerScope(&gateway) || snapshot.listener.Protocol == gatewayv1.TLSProtocolType) &&
 		(gatewayClass.UID != snapshot.gatewayClass.UID || gatewayClass.Generation != snapshot.gatewayClass.Generation || !gatewayClass.DeletionTimestamp.IsZero())) {
 		return errGatewayChanged
 	}
@@ -242,6 +245,11 @@ func (r *Reconciler) decideGatewayPhase(scope *gatewayScope) gatewayPhaseDecisio
 		return gatewayPhaseDecision{phase: gatewayPhaseInvalidSpec, validation: err}
 	}
 	listener := listeners[0]
+	if err := r.validateBoundSNITopology(gateway, listener); err != nil {
+		return gatewayPhaseDecision{phase: gatewayPhaseInvalidSpec, validation: &gatewayValidationError{
+			gatewayReason: gatewayv1.GatewayReasonInvalidParameters, message: err.Error(),
+		}}
+	}
 	if !r.gatewayBindingComplete(gateway) {
 		if err := validateAddresses(gateway.Spec.Addresses); err != nil {
 			return gatewayPhaseDecision{phase: gatewayPhaseInvalidSpec, validation: err}
@@ -386,6 +394,10 @@ func (r *Reconciler) observeGatewayCleanupSnapshot(
 		return snapshot, nil
 	}
 	listener := listeners[0]
+	if err := r.validateBoundSNITopology(&gateway, listener); err != nil {
+		snapshot.disposition = gatewayCleanupRebuild
+		return snapshot, nil
+	}
 	if r.gatewayListenerNeedsReplacement(&gateway, listener) {
 		snapshot.disposition = gatewayCleanupRebuild
 		snapshot.listenerPort = strconv.Itoa(int(listener.Port))

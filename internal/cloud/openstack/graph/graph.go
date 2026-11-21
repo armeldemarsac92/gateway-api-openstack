@@ -145,6 +145,12 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		return result, err
 	}
 	if actual.addressReadError != nil {
+		if desired.protocol == cloud.ListenerProtocolTLSSNI {
+			if actual.outcome.State == cloud.OutcomeProgressing {
+				return p.pendingGraphResult(ctx, desired, actual), nil
+			}
+			return p.reconcileSNIWithdrawalWithoutAddress(ctx, desired, actual)
+		}
 		return p.reconcileWeightedWithdrawalWithoutAddress(ctx, desired, actual)
 	}
 	if spec.Gateway.Disposition == cloud.GraphWithdrawTLS {
@@ -397,8 +403,10 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 		}
 	}
 	if protocol == cloud.ListenerProtocolTLSSNI {
-		if !p.tlsSNIPassthrough || spec.Gateway.Disposition != cloud.GraphEnsure && spec.Gateway.Disposition != cloud.GraphDelete ||
-			spec.Gateway.Spec.ScopedListeners != nil || len(spec.Routes) != 0 || spec.Gateway.Spec.ListenerPort < 1 || spec.Gateway.Spec.ListenerPort > 65535 {
+		ensure := spec.Gateway.Disposition == cloud.GraphEnsure && p.tlsSNIPassthrough
+		cleanup := spec.Gateway.Disposition == cloud.GraphDelete && len(spec.Gateway.TLSSNIRoutes) == 0
+		if !ensure && !cleanup || spec.Gateway.Spec.ScopedListeners != nil || len(spec.Routes) != 0 ||
+			spec.Gateway.Spec.ListenerPort < 1 || spec.Gateway.Spec.ListenerPort > 65535 {
 			return invalid("invalid TLS SNI profile or TLS SNI passthrough is disabled")
 		}
 		targets, err := buildSNITargets(spec.Identity, spec.Gateway.TLSSNIRoutes)
@@ -762,12 +770,15 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 	}
 	actual.floatingIP, err = p.findGatewayFloatingIP(ctx, desired.identity, lb.VipPortID, lb.VipAddress)
 	if err != nil {
-		if !p.weightedHTTPTargets || desired.protocol != cloud.ListenerProtocolHTTP || desired.spec.Gateway.Disposition != cloud.GraphEnsure ||
-			observation.phase != loadBalancerPhaseActive || ctx.Err() != nil || errors.Is(err, cloud.ErrOwnershipConflict) {
+		canWithdraw := desired.protocol == cloud.ListenerProtocolTLSSNI ||
+			desired.protocol == cloud.ListenerProtocolHTTP && p.weightedHTTPTargets
+		observeSNIPending := desired.protocol == cloud.ListenerProtocolTLSSNI && lb.ProvisioningStatus == "PENDING_UPDATE"
+		if !canWithdraw || desired.spec.Gateway.Disposition != cloud.GraphEnsure ||
+			observation.phase != loadBalancerPhaseActive && !observeSNIPending || ctx.Err() != nil || errors.Is(err, cloud.ErrOwnershipConflict) {
 			return actual, err
 		}
-		// Still prove the Octavia graph so a restrictive in-place target
-		// withdrawal can run. Every other mutation needs address inventory.
+		// Still prove the Octavia graph so an in-place withdrawal can close
+		// unauthorized targets. Other mutations require the address inventory.
 		actual.addressReadError = err
 	}
 	if actual.floatingIP != nil {
@@ -988,6 +999,18 @@ func validateGraphLoadBalancer(lb *octavia.LoadBalancer, requirements cloud.Gate
 
 func (p *Provider) pendingGraphResult(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph) cloud.GatewayGraphResult {
 	result := cloud.GatewayGraphResult{Outcome: actual.outcome, Gateway: observedGatewayResult(desired, actual, actual.outcome)}
+	if desired.protocol == cloud.ListenerProtocolTLSSNI {
+		if desired.spec.Gateway.Disposition == cloud.GraphEnsure && actual.loadBalancer != nil && actual.loadBalancer.AdminStateUp &&
+			actual.loadBalancer.ProvisioningStatus == "PENDING_UPDATE" && actual.listener != nil && actual.listener.AdminStateUp &&
+			actual.listener.DefaultPoolID == "" && actual.listener.ProvisioningStatus != "ERROR" &&
+			(desired.spec.Gateway.Spec.ExternalNetworkID == "" || actual.state.FloatingIPAddress != "") {
+			for _, fragment := range desired.sni {
+				result.Routes = append(result.Routes, cloud.RouteGraphResult{Identity: fragment.route.Identity,
+					Result: cloud.RouteResult{Outcome: actual.outcome, ObservationDeferred: true}})
+			}
+		}
+		return result
+	}
 	if actual.withdrawTLS != nil {
 		result.Gateway.ScopedListenerDeferredPorts = unchangedHTTPSWithdrawalSiblings(desired, actual)
 	}
