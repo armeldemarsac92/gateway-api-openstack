@@ -74,7 +74,7 @@ func (r *Reconciler) validateRouteStructure(route *gatewayv1.HTTPRoute) ([]gatew
 			return nil, grpcProfileDisabled()
 		}
 		if len(route.Spec.Rules) == 0 {
-			return nil, newRouteBuildError(routeErrorUnsupported, "GRPCRoute requires exact service and method matches and one backendRef per rule, without headers, filters, named rules or session persistence")
+			return nil, newRouteBuildError(routeErrorUnsupported, "GRPCRoute requires exact service and method matches and one backendRef per rule, without headers, filters or session persistence")
 		}
 	}
 	if len(route.Spec.Rules) == 0 {
@@ -111,8 +111,8 @@ func (r *Reconciler) usesHTTPBackendGroups(route *gatewayv1.HTTPRoute) bool {
 }
 
 func validateRouteRule(rule gatewayv1.HTTPRouteRule, fixedResponses, weightedTargets, requestHeaderModifier bool) error {
-	if rule.Name != nil || rule.Timeouts != nil || rule.Retry != nil || rule.SessionPersistence != nil { //nolint:staticcheck // The release still serves this deprecated Experimental field.
-		return newRouteBuildError(routeErrorUnsupported, "named rules, timeouts, retries, and session persistence are not supported")
+	if rule.Timeouts != nil || rule.Retry != nil || rule.SessionPersistence != nil { //nolint:staticcheck // The release still serves this deprecated Experimental field.
+		return newRouteBuildError(routeErrorUnsupported, "timeouts, retries, and session persistence are not supported")
 	}
 	if len(rule.Filters) != 0 || !fixedResponses && !weightedTargets {
 		if err := compileRouteAction(rule, requestHeaderModifier); err != nil {

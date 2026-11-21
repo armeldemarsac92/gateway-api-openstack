@@ -56,7 +56,7 @@ func ProjectGRPCRoute(route *gatewayv1.GRPCRoute) *gatewayv1.HTTPRoute {
 	rules := make([]gatewayv1.HTTPRouteRule, 0, len(route.Spec.Rules))
 	for _, rule := range route.Spec.Rules {
 		if len(rule.Matches) == 0 || len(rule.Filters) != 0 || len(rule.BackendRefs) != 1 ||
-			rule.Name != nil || rule.SessionPersistence != nil { //nolint:staticcheck // Still served in the experimental bundle.
+			rule.SessionPersistence != nil { //nolint:staticcheck // Still served in the experimental bundle.
 			return projected
 		}
 		backend := rule.BackendRefs[0]
