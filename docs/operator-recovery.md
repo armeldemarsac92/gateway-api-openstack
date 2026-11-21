@@ -118,7 +118,9 @@ Keep the original binding and investigate with the ownership audit.
 
 ## Run the ownership audit
 
-`openstack-gateway-audit` compares durable Gateway, HTTPRoute, TCPRoute and UDPRoute bindings with resources found in the authenticated OpenStack project.
+`openstack-gateway-audit` compares durable Gateway, HTTPRoute, GRPCRoute, TCPRoute and UDPRoute bindings with resources found in the authenticated OpenStack project.
+For exact-name TLS passthrough, the Gateway reconciles pools, members, policies and rules together. These resources have TLSRoute UID and target tags. The audit reports them as `unresolved` with reason `GatewayManagedTLSRoute` when their identities and observed relationships pass its checks. Verify the Gateway UID, the current TLSRoute parent conditions and the Octavia forwarding graph before acting. [TLS passthrough recovery](operator-octavia-tls-sni-passthrough.md)
+
 It only lists and gets resources.
 It does not patch Kubernetes, adopt OpenStack resources, delete anything, or remove a finalizer.
 
@@ -150,7 +152,7 @@ When `--clouds-yaml` is omitted, the command uses `OS_CLIENT_CONFIG_FILE` when i
 Otherwise it reads the standard OpenStack authentication environment variables.
 `--openstack-cloud` defaults to `OS_CLOUD` and is required whenever a clouds.yaml path is selected.
 `--openstack-region` defaults to `OS_REGION_NAME`.
-The Kubernetes identity needs list access to Gateways, HTTPRoutes, TCPRoutes and UDPRoutes.
+The Kubernetes identity needs list access to Gateways, HTTPRoutes, GRPCRoutes, TCPRoutes and UDPRoutes.
 The OpenStack credential needs read access to the relevant Octavia and Neutron APIs.
 
 The command writes only one JSON document to standard output.

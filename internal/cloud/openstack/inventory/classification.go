@@ -212,6 +212,12 @@ func classifyAuditCandidate(
 		}
 	}
 
+	if role == sniRoleByType[candidate.resourceType] {
+		finding.Objects = nil
+		return auditFinding(finding, audit.DispositionUnresolved, "GatewayManagedTLSRoute",
+			"The Gateway reconciles this TLSRoute target without a separate durable Route binding")
+	}
+
 	switch {
 	case len(exact) > 1:
 		finding.Objects = auditObjects(exact)
@@ -347,10 +353,23 @@ func auditCandidateParent(candidate *auditCandidate) (string, string) {
 	return "", ""
 }
 
+// SNI fragments have route UID tags but no independent, durable Route binding.
+var sniRoleByType = map[string]string{
+	auditTypePool: openstackidentity.RoleSNIPool, auditTypeMember: openstackidentity.RoleSNIMember,
+	auditTypeL7Policy: openstackidentity.RoleSNIPolicy, auditTypeL7Rule: openstackidentity.RoleSNIRule,
+}
+
 func auditCandidateRole(resourceType string, tags []string) (string, bool, error) {
 	role, ok := openstackidentity.ResourceRole(tags)
 	if !ok {
 		return "", false, fmt.Errorf("resource has a missing, invalid or duplicate role identity tag")
+	}
+	if role == sniRoleByType[resourceType] {
+		target, unique := singleAuditTagValue(tags, "sni-target")
+		if !unique || !openstackidentity.ValidSNITarget(target) {
+			return "", false, fmt.Errorf("TLSRoute resource has a missing or invalid target identity")
+		}
+		return role, true, nil
 	}
 	baseRole := role
 	if role == openstackidentity.RoleRuleRedirectGuard {
@@ -561,8 +580,8 @@ func validateAuditParentIdentity(candidates auditCandidateSet, child *auditCandi
 	switch child.resourceType {
 	case auditTypeMember, auditTypeMonitor, auditTypeL7Rule:
 		keys = append(keys, "route-namespace", "route-name", "route-uid")
-		if !auditHTTPFragmentParentMatches(child, parent, child.resourceType == auditTypeL7Rule) {
-			return fmt.Errorf("HTTP resource belongs to another backend or path on its parent route")
+		if !auditRouteFragmentParentMatches(child, parent, child.resourceType == auditTypeL7Rule) {
+			return fmt.Errorf("resource target does not match its parent route fragment")
 		}
 	}
 	if !auditTagValuesEqual(child.tags, parent.tags, keys) {
@@ -586,7 +605,7 @@ func validateAuditPolicyPool(candidates auditCandidateSet, policy *auditCandidat
 		"managed", "cluster", "controller", "project", "namespace", "name", "uid",
 		"route-namespace", "route-name", "route-uid",
 	}
-	if !auditTagValuesEqual(policy.tags, pool.tags, keys) || !auditHTTPFragmentParentMatches(policy, pool, false) {
+	if !auditTagValuesEqual(policy.tags, pool.tags, keys) || !auditRouteFragmentParentMatches(policy, pool, false) {
 		return fmt.Errorf("policy identity does not match its redirect pool")
 	}
 	return nil
@@ -664,11 +683,16 @@ func validAuditWeightedTarget(policy *auditCandidate) bool {
 
 // Legacy resources share their route owner. A grouped route also requires the
 // child to belong to its parent's backend and, for L7 rules, its exact match.
-func auditHTTPFragmentParentMatches(child, parent *auditCandidate, matchPath bool) bool {
+func auditRouteFragmentParentMatches(child, parent *auditCandidate, matchPath bool) bool {
 	childRole, childOK := openstackidentity.ResourceRole(child.tags)
 	parentRole, parentOK := openstackidentity.ResourceRole(parent.tags)
 	if !childOK || !parentOK {
 		return false
+	}
+	childSNI := childRole == sniRoleByType[child.resourceType]
+	parentSNI := parentRole == sniRoleByType[parent.resourceType]
+	if childSNI || parentSNI {
+		return childSNI && parentSNI && auditTagValuesEqual(child.tags, parent.tags, []string{"sni-target"})
 	}
 	_, childRedirectMatch, childCell, _, childRedirect := openstackidentity.ParseHTTPRedirectRole(childRole)
 	_, parentRedirectMatch, parentCell, _, parentRedirect := openstackidentity.ParseHTTPRedirectRole(parentRole)

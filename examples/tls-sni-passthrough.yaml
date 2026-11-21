@@ -1,0 +1,106 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tls-demo
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tls-backends
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alpha
+  namespace: tls-demo
+spec:
+  ipFamilyPolicy: SingleStack
+  ipFamilies: [IPv4]
+  selector:
+    app: tls-alpha
+  ports:
+    - name: tls
+      protocol: TCP
+      port: 443
+      targetPort: 8443
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: beta
+  namespace: tls-backends
+spec:
+  ipFamilyPolicy: SingleStack
+  ipFamilies: [IPv4]
+  selector:
+    app: tls-beta
+  ports:
+    - name: tls
+      protocol: TCP
+      port: 443
+      targetPort: 8443
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: edge
+  namespace: tls-demo
+spec:
+  gatewayClassName: openstack-tls
+  listeners:
+    - name: tls
+      protocol: TLS
+      port: 443
+      tls:
+        mode: Passthrough
+      allowedRoutes:
+        kinds:
+          - kind: TLSRoute
+        namespaces:
+          from: Same
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: TLSRoute
+metadata:
+  name: alpha
+  namespace: tls-demo
+spec:
+  parentRefs:
+    - name: edge
+      sectionName: tls
+  hostnames: [alpha.example.test]
+  rules:
+    - backendRefs:
+        - name: alpha
+          port: 443
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: TLSRoute
+metadata:
+  name: beta
+  namespace: tls-demo
+spec:
+  parentRefs:
+    - name: edge
+      sectionName: tls
+  hostnames: [beta.example.test]
+  rules:
+    - backendRefs:
+        - name: beta
+          namespace: tls-backends
+          port: 443
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: ReferenceGrant
+metadata:
+  name: allow-tls-demo-beta
+  namespace: tls-backends
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: TLSRoute
+      namespace: tls-demo
+  to:
+    - group: ""
+      kind: Service
+      name: beta

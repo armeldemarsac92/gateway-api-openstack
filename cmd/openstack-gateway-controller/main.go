@@ -99,13 +99,14 @@ func run(ctx context.Context) error {
 		apiQPS             float64
 		apiBurst           int
 	)
-	var requestHeaderModifier, backendH2C bool
+	var requestHeaderModifier, backendH2C, tlsSNIPassthrough bool
 	zapOptions := zap.Options{Development: false}
 	zapOptions.BindFlags(flag.CommandLine)
 	flag.StringVar(&controllerName, "controller-name", envOr("GATEWAY_OPENSTACK_CONTROLLER_NAME", configv1alpha1.GroupName+"/gateway-api-openstack"), "Gateway API controllerName for this installation")
 	flag.StringVar(&gatewayAPIChannel, "gateway-api-channel", envOr("GATEWAY_OPENSTACK_GATEWAY_API_CHANNEL", "standard"), "Gateway API release channel: standard or experimental")
 	flag.BoolVar(&fixedHTTPResponses, "octavia-fixed-http-responses", false, "use the advertised Octavia fixed HTTP response capability")
 	flag.BoolVar(&weightedTargets, "octavia-weighted-http-targets", false, "use the advertised Octavia weighted HTTP target capability (requires --octavia-fixed-http-responses)")
+	flag.BoolVar(&tlsSNIPassthrough, "octavia-tls-sni-passthrough", false, "use the advertised Octavia TCP SNI passthrough capability for TLSRoutes")
 	flag.BoolVar(&backendH2C, "octavia-backend-h2c", false, "use the advertised Octavia h2c backend transport capability")
 	flag.BoolVar(&requestHeaderModifier, "octavia-request-header-modifier", false, "use the advertised Octavia L7 request header operations capability")
 	flag.StringVar(&certificateMap, "tls-certificate-map", envOr("GATEWAY_OPENSTACK_TLS_CERTIFICATE_MAP", ""), "operator-managed TLS revision map for HTTPS listeners")
@@ -150,6 +151,7 @@ func run(ctx context.Context) error {
 		RequestHeaderModifier:   requestHeaderModifier,
 		BackendH2C:              backendH2C,
 		OperatorHTTPS:           certificateMap != "",
+		TLSSNIPassthrough:       tlsSNIPassthrough,
 		ClusterID:               clusterID,
 		OpenStackResyncInterval: resyncInterval,
 	}
@@ -165,7 +167,7 @@ func run(ctx context.Context) error {
 	utilruntime.Must(configv1alpha1.AddToScheme(scheme))
 
 	restConfig := ctrl.GetConfigOrDie()
-	if err := requireGatewayAPIs(restConfig); err != nil {
+	if err := requireGatewayAPIs(restConfig, tlsSNIPassthrough); err != nil {
 		return err
 	}
 	manager, err := ctrl.NewManager(restConfig, ctrl.Options{
@@ -192,6 +194,7 @@ func run(ctx context.Context) error {
 		WeightedHTTPTargets:   weightedTargets,
 		RequestHeaderModifier: requestHeaderModifier,
 		BackendH2C:            backendH2C,
+		TLSSNIPassthrough:     tlsSNIPassthrough,
 		OperationTimeout:      operationTimeout,
 		PollInterval:          pollInterval,
 	})
@@ -292,7 +295,7 @@ func configureOpenStackRequestMetrics(config *openstack.ClientConfig, registerer
 	return nil
 }
 
-func requireGatewayAPIs(restConfig *rest.Config) error {
+func requireGatewayAPIs(restConfig *rest.Config, tlsSNIPassthrough bool) error {
 	discoveryClient, err := discovery.NewDiscoveryClientForConfig(restConfig)
 	if err != nil {
 		return fmt.Errorf("create Kubernetes discovery client: %w", err)
@@ -305,7 +308,11 @@ func requireGatewayAPIs(restConfig *rest.Config) error {
 	for _, resource := range resourceList.APIResources {
 		availableResources = append(availableResources, resource.Name)
 	}
-	for _, required := range []string{"gatewayclasses", "gateways", "httproutes", "tcproutes", "udproutes", "referencegrants"} {
+	requiredResources := []string{"gatewayclasses", "gateways", "httproutes", "tcproutes", "udproutes", "referencegrants"}
+	if tlsSNIPassthrough {
+		requiredResources = append(requiredResources, "tlsroutes")
+	}
+	for _, required := range requiredResources {
 		if !slices.Contains(availableResources, required) {
 			return fmt.Errorf("required Gateway API resource %s is missing from %s; install the selected Gateway API %s bundle", required, gatewayv1.GroupVersion, gatewayconsts.BundleVersion)
 		}

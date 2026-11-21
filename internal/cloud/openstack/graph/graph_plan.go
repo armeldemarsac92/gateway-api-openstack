@@ -33,6 +33,9 @@ import (
 // buildGatewayGraphPlan is free of I/O. No plan is executable unless every
 // component passed validation, even when an earlier prerequisite needs repair.
 func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual observedGatewayGraph) ([]graphMutation, cloud.GatewayGraphResult, error) {
+	if desired.protocol == cloud.ListenerProtocolTLSSNI {
+		return p.buildSNIGraphPlan(desired, actual)
+	}
 	if desired.spec.Gateway.Disposition != cloud.GraphDelete && hasHTTPRouteParts(desired, actual) {
 		return p.buildHTTPRoutePartsGraphPlan(desired, actual)
 	}
@@ -677,6 +680,12 @@ func (p *Provider) prepareNextGraphMutation(ctx context.Context, desired desired
 // prepareGraphMutation resolves provider prerequisites before the caller's
 // live Kubernetes authorization check, which stays adjacent to the write.
 func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, step graphMutation) (graphMutation, error) {
+	if desired.protocol == cloud.ListenerProtocolTLSSNI {
+		if desired.spec.Gateway.Disposition == cloud.GraphEnsure && !step.sniWithdrawal {
+			return step, p.verifySNICapability(ctx, desired, actual)
+		}
+		return step, nil
+	}
 	if desired.protocol != cloud.ListenerProtocolHTTP {
 		return step, nil
 	}
@@ -782,6 +791,9 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 		if tagErr != nil {
 			return tagErr
 		}
+		if desired.protocol == cloud.ListenerProtocolTLSSNI {
+			tags = append(tags, sniProfileTag)
+		}
 		created, createErr := p.octavia.CreateLoadBalancer(ctx, octavia.CreateLoadBalancerOpts{CreateOpts: loadbalancers.CreateOpts{
 			Name: resourceName(desired.spec.Identity, roleLoadBalancer), Description: desired.identity.Description(roleLoadBalancer),
 			VipSubnetID: spec.VIPSubnetID, VipAddress: spec.RequestedVIPAddress, Provider: spec.Provider, FlavorID: spec.FlavorID, AvailabilityZone: spec.AvailabilityZone,
@@ -816,6 +828,10 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 		port, name := spec.ListenerPort, spec.ListenerName
 		protocol := cloud.NormalizeListenerProtocol(spec.ListenerProtocol)
 		enabled := true
+		if desired.protocol == cloud.ListenerProtocolTLSSNI {
+			protocol, enabled = cloud.ListenerProtocolTCP, false
+			tags = append(tags, sniProfileTag)
+		}
 		certificateRef := ""
 		if step.scopedListener.Port != 0 {
 			port, name = step.scopedListener.Port, step.scopedListener.Name
@@ -847,6 +863,8 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 		route.spec.Gateway = actual.state
 		route.spec.Gateway.ListenerID = listenerID
 		return p.executeRouteMutation(ctx, route, step.route)
+	case graphSNIMutation:
+		err = p.executeSNIMutation(ctx, actual, step.sni)
 	case graphEnableListener, graphDisableListener:
 		enabled := step.kind == graphEnableListener
 		_, err = p.octavia.UpdateListener(ctx, listenerID, listeners.UpdateOpts{AdminStateUp: boolPointer(enabled)})

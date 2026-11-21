@@ -85,7 +85,7 @@ func (r *Reconciler) unprogrammedListenerStatus(
 	}
 	kind := listenerRouteKind(listener.Protocol)
 	l4InMultipleListeners := isL4Listener(listener.Protocol) && multipleListeners
-	protocolSupported := kind != "" && listener.Protocol != gatewayv1.HTTPSProtocolType && !l4InMultipleListeners
+	protocolSupported := kind != "" && listener.Protocol != gatewayv1.HTTPSProtocolType && (listener.Protocol != gatewayv1.TLSProtocolType || r.Config.TLSSNIPassthrough) && !l4InMultipleListeners
 	if protocolSupported {
 		status.SupportedKinds = listenerSupportedRouteKinds(r.Config, listener)
 	}
@@ -152,6 +152,10 @@ func supportedRouteKinds(kind gatewayv1.Kind) []gatewayv1.RouteGroupKind {
 }
 
 func listenerSupportedRouteKinds(config controller.Config, listener gatewayv1.Listener) []gatewayv1.RouteGroupKind {
+	if listener.Protocol == gatewayv1.TLSProtocolType && (!config.TLSSNIPassthrough || listener.TLS == nil ||
+		listener.TLS.Mode == nil || *listener.TLS.Mode != gatewayv1.TLSModePassthrough) {
+		return nil
+	}
 	var result []gatewayv1.RouteGroupKind
 	kind := listenerRouteKind(listener.Protocol)
 	if kind != "" && listenerAllowsRouteKind(listener, kind) {
@@ -569,6 +573,15 @@ func (r *Reconciler) attachedRouteCounts(ctx context.Context, gateway *gatewayv1
 	var routes client.ObjectList
 	index := controller.IndexL4RouteByStatusGateway
 	switch listeners[0].Protocol {
+	case gatewayv1.TLSProtocolType:
+		var routes gatewayv1.TLSRouteList
+		if err := r.APIReader.List(ctx, &routes); err != nil {
+			return nil, err
+		}
+		if routes.Continue != "" {
+			return nil, fmt.Errorf("incomplete TLSRoute inventory")
+		}
+		return counts, meta.EachListItem(&routes, countRoute)
 	case gatewayv1.TCPProtocolType:
 		routes = &gatewayv1.TCPRouteList{}
 	case gatewayv1.UDPProtocolType:

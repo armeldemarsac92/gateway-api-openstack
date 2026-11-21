@@ -55,7 +55,19 @@ const (
 	RoleRulePath = "l7-rule-path"
 	// RoleRuleHost identifies a hostname L7 rule.
 	RoleRuleHost = "l7-rule-host"
+
+	// The TLS passthrough graph is reconciled from the Gateway and its TLSRoutes.
+	RoleSNIPool   = "tls-sni-pool"
+	RoleSNIMember = "tls-sni-member"
+	RoleSNIPolicy = "tls-sni-policy"
+	RoleSNIRule   = "tls-sni-rule"
 )
+
+// ValidSNITarget reports whether the encoded tag contains a full lowercase SHA-256 digest.
+func ValidSNITarget(encoded string) bool {
+	digest, err := base64.RawURLEncoding.DecodeString(encoded)
+	return err == nil && len(digest) == sha256.Size*2 && strings.Trim(string(digest), "0123456789abcdef") == ""
+}
 
 // Identity encodes the shared immutable ownership tuple into Octavia tags and
 // Neutron descriptions.

@@ -1,0 +1,448 @@
+/*
+Copyright 2026 The gateway-api-openstack Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package gateway
+
+import (
+	"cmp"
+	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	"reflect"
+	"slices"
+
+	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia/amphora"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/classconfig"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/routebackend"
+)
+
+const tlsRouteKind gatewayv1.Kind = "TLSRoute"
+
+func hasSNIPassthroughListener(gateway *gatewayv1.Gateway) bool {
+	return slices.ContainsFunc(gateway.Spec.Listeners, func(l gatewayv1.Listener) bool {
+		return l.Protocol == gatewayv1.TLSProtocolType
+	})
+}
+
+func validateSNITopology(listener *gatewayv1.Listener, topology classconfig.Resolved) error {
+	if listener.Protocol == gatewayv1.TLSProtocolType && topology.Topology.MemberMode != cloud.MemberModeEndpoint {
+		return &classconfig.InvalidParametersError{Message: "TLS SNI passthrough requires Endpoint member mode"}
+	}
+	return nil
+}
+
+func (r *Reconciler) validateBoundSNITopology(gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) error {
+	if listener.Protocol != gatewayv1.TLSProtocolType || !controller.HasGatewayTopologyBinding(r.Config, gateway) {
+		return nil
+	}
+	topology, err := controller.StoredGatewayTopology(r.Config, gateway)
+	if err != nil {
+		return err
+	}
+	return validateSNITopology(listener, topology)
+}
+
+type sniRouteStatus struct {
+	route           *gatewayv1.TLSRoute
+	parents         []gatewayv1.ParentReference
+	hostname        string
+	acceptedReason  gatewayv1.RouteConditionReason
+	acceptedMessage string
+	resolvedReason  gatewayv1.RouteConditionReason
+	resolvedMessage string
+	target          *cloud.TLSSNIRoute
+}
+
+type sniRouteObservation []sniRouteStatus
+
+func (observation sniRouteObservation) targets() []cloud.TLSSNIRoute {
+	var targets []cloud.TLSSNIRoute
+	for _, entry := range observation {
+		if entry.target != nil {
+			targets = append(targets, *entry.target)
+		}
+	}
+	return targets
+}
+
+// sameInputs ignores status-only writes. The target includes the authorized
+// Service UID and the exact ready member list used for the provider mutation.
+func (observation sniRouteObservation) sameInputs(other sniRouteObservation) bool {
+	return slices.EqualFunc(observation, other, func(a, b sniRouteStatus) bool {
+		if a.route.UID != b.route.UID || a.route.Generation != b.route.Generation ||
+			!equality.Semantic.DeepEqual(a.route.Spec, b.route.Spec) {
+			return false
+		}
+		a.route, b.route = nil, nil
+		return reflect.DeepEqual(a, b)
+	})
+}
+
+func (r *Reconciler) observeSNIRoutes(ctx context.Context, snapshot *gatewayMutationSnapshot) (sniRouteObservation, error) {
+	var routes gatewayv1.TLSRouteList
+	if err := r.APIReader.List(ctx, &routes); err != nil {
+		return nil, err
+	}
+	if routes.Continue != "" {
+		return nil, fmt.Errorf("incomplete TLSRoute inventory")
+	}
+	slices.SortFunc(routes.Items, func(a, b gatewayv1.TLSRoute) int {
+		return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
+	})
+	var observation sniRouteObservation
+	names := make(map[string]int)
+	for i := range routes.Items {
+		route := &routes.Items[i]
+		if !route.DeletionTimestamp.IsZero() {
+			continue
+		}
+		parents := slices.DeleteFunc(slices.Clone(route.Spec.ParentRefs), func(ref gatewayv1.ParentReference) bool {
+			return !sniParentTargetsGateway(route.Namespace, ref, snapshot.gateway)
+		})
+		ownsStatus := slices.ContainsFunc(route.Status.Parents, func(status gatewayv1.RouteParentStatus) bool {
+			return status.ControllerName == r.Config.ControllerName && sniParentTargetsGateway(route.Namespace, status.ParentRef, snapshot.gateway)
+		})
+		if len(parents) == 0 && !ownsStatus {
+			continue
+		}
+		entry := sniRouteStatus{route: route, parents: parents}
+		if len(parents) > 0 {
+			if err := r.admitSNIRoute(ctx, snapshot, &entry); err != nil {
+				return nil, err
+			}
+			if entry.hostname != "" {
+				names[entry.hostname]++
+			}
+		}
+		observation = append(observation, entry)
+	}
+	for i := range observation {
+		entry := &observation[i]
+		if entry.hostname != "" && names[entry.hostname] > 1 {
+			entry.reject(gatewayv1.RouteReasonUnsupportedValue, "The same exact SNI name is claimed by multiple TLSRoutes")
+			continue
+		}
+		if entry.acceptedReason == gatewayv1.RouteReasonAccepted {
+			if err := r.resolveSNIBackend(ctx, snapshot, entry); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return observation, nil
+}
+
+func sniParentTargetsGateway(namespace string, ref gatewayv1.ParentReference, gateway *gatewayv1.Gateway) bool {
+	return controller.IsGatewayParentRef(ref) && string(ref.Name) == gateway.Name &&
+		string(ptr.Deref(ref.Namespace, gatewayv1.Namespace(namespace))) == gateway.Namespace
+}
+
+func (entry *sniRouteStatus) reject(reason gatewayv1.RouteConditionReason, message string) {
+	entry.acceptedReason, entry.acceptedMessage = reason, message
+}
+
+func (r *Reconciler) admitSNIRoute(ctx context.Context, snapshot *gatewayMutationSnapshot, entry *sniRouteStatus) error {
+	listener, route := snapshot.listener, entry.route
+	if listener == nil {
+		entry.reject(gatewayv1.RouteReasonUnsupportedValue, "The Gateway has no supported TLS SNI listener")
+		return nil
+	}
+	if len(route.Spec.ParentRefs) != 1 {
+		entry.reject(gatewayv1.RouteReasonUnsupportedValue, "TLS SNI passthrough requires one Gateway parentRef")
+		return nil
+	}
+	ref := entry.parents[0]
+	if ref.SectionName != nil && *ref.SectionName != listener.Name || ref.Port != nil && *ref.Port != listener.Port {
+		entry.reject(gatewayv1.RouteReasonNoMatchingParent, "The parentRef does not select the TLS SNI listener")
+		return nil
+	}
+	var namespaces []corev1.Namespace
+	if model.ObservesRouteNamespace(listener) {
+		namespace, err := graph.ReadRouteNamespace(ctx, r.APIReader, route.Namespace)
+		if err != nil {
+			return err
+		}
+		if namespace != nil && namespace.DeletionTimestamp.IsZero() {
+			namespaces = append(namespaces, *namespace)
+		}
+	}
+	if !listenerAllowsRouteKind(*listener, tlsRouteKind) || !model.AllowsRouteNamespace(listener, snapshot.gateway.Namespace, route.Namespace, namespaces) {
+		entry.reject(gatewayv1.RouteReasonNotAllowedByListeners, "The listener does not allow this TLSRoute kind or namespace")
+		return nil
+	}
+	if len(route.Spec.Hostnames) != 1 {
+		entry.reject(gatewayv1.RouteReasonUnsupportedValue, "TLS SNI passthrough requires one exact DNS hostname")
+		return nil
+	}
+	hostname := string(route.Spec.Hostnames[0])
+	if err := amphora.ValidateExactHostname(hostname); err != nil {
+		entry.reject(gatewayv1.RouteReasonUnsupportedValue, "TLS SNI passthrough requires one exact DNS hostname")
+		return nil
+	}
+	entry.hostname = hostname
+	if len(route.Spec.Rules) != 1 || len(route.Spec.Rules[0].BackendRefs) != 1 ||
+		ptr.Deref(route.Spec.Rules[0].BackendRefs[0].Weight, 1) != 1 {
+		entry.reject(gatewayv1.RouteReasonUnsupportedValue, "TLS SNI passthrough requires one rule and one backendRef of weight 1")
+		return nil
+	}
+	entry.reject(gatewayv1.RouteReasonAccepted, "The TLSRoute is attached to the TLS SNI listener")
+	return nil
+}
+
+func (r *Reconciler) resolveSNIBackend(ctx context.Context, snapshot *gatewayMutationSnapshot, entry *sniRouteStatus) error {
+	route := entry.route
+	ref := route.Spec.Rules[0].BackendRefs[0]
+	key, supported := model.BackendServiceReference(route.Namespace, ref.BackendObjectReference)
+	if !supported {
+		entry.resolvedReason, entry.resolvedMessage = gatewayv1.RouteReasonInvalidKind, "The backendRef must refer to a core Service"
+		return nil
+	}
+	if key.Namespace != route.Namespace {
+		grants, err := graph.ListBackendReferenceGrants(ctx, r.APIReader, key.Namespace)
+		if err != nil {
+			return err
+		}
+		grants = slices.DeleteFunc(grants, func(grant gatewayv1.ReferenceGrant) bool { return !grant.DeletionTimestamp.IsZero() })
+		if !model.BackendReferenceAllowedFor(tlsRouteKind, route.Namespace, key, grants) {
+			entry.resolvedReason, entry.resolvedMessage = gatewayv1.RouteReasonRefNotPermitted, "No ReferenceGrant authorizes this TLSRoute to use the Service"
+			return nil
+		}
+	}
+	var service corev1.Service
+	if err := r.APIReader.Get(ctx, key, &service); err != nil {
+		if apierrors.IsNotFound(err) {
+			entry.resolvedReason, entry.resolvedMessage = gatewayv1.RouteReasonBackendNotFound, "The backend Service was not found"
+			return nil
+		}
+		return err
+	}
+	if !service.DeletionTimestamp.IsZero() || service.UID == "" {
+		entry.resolvedReason, entry.resolvedMessage = gatewayv1.RouteReasonBackendNotFound, "The backend Service has no live identity"
+		return nil
+	}
+	port, diagnostic := model.ResolveTransportServicePort(&service, ref.Port, corev1.ProtocolTCP)
+	if diagnostic == nil {
+		diagnostic = routebackend.ValidateEndpointService(&service)
+	}
+	if diagnostic != nil {
+		entry.resolvedReason, entry.resolvedMessage = gatewayv1.RouteConditionReason(diagnostic.Reason), diagnostic.Message
+		return nil
+	}
+	var endpoints discoveryv1.EndpointSliceList
+	if err := r.APIReader.List(ctx, &endpoints, client.InNamespace(service.Namespace), client.MatchingLabels{discoveryv1.LabelServiceName: service.Name}); err != nil {
+		return err
+	}
+	if endpoints.Continue != "" {
+		return fmt.Errorf("incomplete TLSRoute EndpointSlice inventory")
+	}
+	members, diagnostic := routebackend.EndpointMembers(&service, model.ResolveServiceEndpoints(&service, port, endpoints.Items))
+	if diagnostic != nil {
+		entry.resolvedReason, entry.resolvedMessage = gatewayv1.RouteConditionReason(diagnostic.Reason), diagnostic.Message
+		return nil
+	}
+	entry.resolvedReason, entry.resolvedMessage = gatewayv1.RouteReasonResolvedRefs, "The backend Service reference is resolved"
+	members = slices.DeleteFunc(members, func(member cloud.Member) bool { return member.Draining })
+	if len(members) == 0 {
+		return nil
+	}
+	topology := snapshot.topology.Topology
+	entry.target = &cloud.TLSSNIRoute{
+		Identity: controller.RouteIdentity(r.Config, snapshot.gateway, route), Hostname: entry.hostname,
+		ServiceUID: string(service.UID), BackendSubnetID: topology.MemberSubnetID,
+		BackendSecurityGroupIDs: topology.BackendSecurityGroupIDs, Members: members,
+	}
+	return nil
+}
+
+func (r *Reconciler) reportSNIRoutes(ctx context.Context, gateway *gatewayv1.Gateway, observation sniRouteObservation, result cloud.GatewayGraphResult, providerErr error) error {
+	outcomes := make(map[string]cloud.RouteResult)
+	for _, route := range result.Routes {
+		if providerErr == nil || route.Result.ObservationDeferred {
+			outcomes[route.Identity.RouteUID] = route.Result
+		}
+	}
+	programmedType := r.Config.Domain() + "/Programmed"
+	targetType := r.Config.Domain() + "/ForwardingTarget"
+	for _, entry := range observation {
+		base := entry.route
+		target := base.DeepCopy()
+		previous := slices.DeleteFunc(slices.Clone(base.Status.Parents), func(parent gatewayv1.RouteParentStatus) bool {
+			return parent.ControllerName != r.Config.ControllerName || !sniParentTargetsGateway(base.Namespace, parent.ParentRef, gateway)
+		})
+		target.Status.Parents = slices.DeleteFunc(target.Status.Parents, func(parent gatewayv1.RouteParentStatus) bool {
+			return parent.ControllerName == r.Config.ControllerName && sniParentTargetsGateway(base.Namespace, parent.ParentRef, gateway)
+		})
+		fingerprint, err := sniForwardingFingerprint(gateway, entry.target)
+		if err != nil {
+			return err
+		}
+		outcome := outcomes[string(base.UID)]
+		for _, ref := range entry.parents {
+			status := gatewayv1.RouteParentStatus{ParentRef: ref, ControllerName: r.Config.ControllerName}
+			for _, old := range previous {
+				if controller.ParentRefsEqual(ref, base.Namespace, old.ParentRef, base.Namespace) {
+					status.Conditions = slices.Clone(old.Conditions)
+					break
+				}
+			}
+			accepted, resolved, programmed := metav1.ConditionFalse, metav1.ConditionUnknown, metav1.ConditionFalse
+			if entry.acceptedReason == gatewayv1.RouteReasonAccepted {
+				accepted = metav1.ConditionTrue
+			}
+			resolvedReason, resolvedMessage := entry.resolvedReason, entry.resolvedMessage
+			switch resolvedReason {
+			case "":
+				resolvedReason, resolvedMessage = gatewayv1.RouteReasonPending, "The TLSRoute is not attached"
+			case gatewayv1.RouteReasonResolvedRefs:
+				resolved = metav1.ConditionTrue
+			default:
+				resolved = metav1.ConditionFalse
+			}
+			checkpoint := meta.FindStatusCondition(status.Conditions, targetType)
+			previouslyProgrammed := meta.FindStatusCondition(status.Conditions, programmedType)
+			retain := outcome.ObservationDeferred && checkpoint != nil && checkpoint.Status == metav1.ConditionTrue &&
+				checkpoint.ObservedGeneration == base.Generation && checkpoint.Message == fingerprint &&
+				previouslyProgrammed != nil && previouslyProgrammed.Status == metav1.ConditionTrue &&
+				previouslyProgrammed.ObservedGeneration == base.Generation
+			programmedReason, programmedMessage := "Pending", "Waiting for a coherent Octavia listener, policy, rule and backend readback"
+			switch {
+			case accepted == metav1.ConditionFalse:
+				programmedReason, programmedMessage = string(entry.acceptedReason), entry.acceptedMessage
+			case resolved == metav1.ConditionFalse:
+				programmedReason, programmedMessage = string(resolvedReason), resolvedMessage
+			case entry.target == nil:
+				programmedMessage = "The backend Service has no ready IPv4 endpoints"
+			case outcome.Outcome.State == cloud.OutcomeReady || retain:
+				programmed, programmedReason, programmedMessage = metav1.ConditionTrue, "Programmed", "Octavia readback confirms the exact SNI route and its backend"
+			}
+			controller.SetCondition(&status.Conditions, controller.Condition("Accepted", accepted, string(entry.acceptedReason), entry.acceptedMessage, base.Generation))
+			controller.SetCondition(&status.Conditions, controller.Condition("ResolvedRefs", resolved, string(resolvedReason), resolvedMessage, base.Generation))
+			controller.SetCondition(&status.Conditions, controller.Condition(programmedType, programmed, programmedReason, programmedMessage, base.Generation))
+			if programmed == metav1.ConditionTrue {
+				controller.SetCondition(&status.Conditions, controller.Condition(targetType, metav1.ConditionTrue, "Observed", fingerprint, base.Generation))
+			} else {
+				meta.RemoveStatusCondition(&status.Conditions, targetType)
+			}
+			target.Status.Parents = append(target.Status.Parents, status)
+		}
+		if err := r.patchSNIRouteStatus(ctx, base, target); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func sniForwardingFingerprint(gateway *gatewayv1.Gateway, target *cloud.TLSSNIRoute) (string, error) {
+	if target == nil {
+		return "", nil
+	}
+	route := *target
+	route.Identity.ControllerVersion = ""
+	content, err := json.Marshal(struct {
+		GatewayGeneration int64
+		Route             cloud.TLSSNIRoute
+	}{gateway.Generation, route})
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("v1:%x", sha256.Sum256(content)), nil
+}
+
+func (r *Reconciler) clearSNIRouteParentStatuses(ctx context.Context, gateway *gatewayv1.Gateway) error {
+	var routes gatewayv1.TLSRouteList
+	if err := r.APIReader.List(ctx, &routes); err != nil {
+		// With the CRD gone, no status remains to clean up.
+		if meta.IsNoMatchError(err) || apierrors.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+	if routes.Continue != "" {
+		return fmt.Errorf("incomplete TLSRoute inventory before Gateway cleanup")
+	}
+	for i := range routes.Items {
+		base := &routes.Items[i]
+		target := base.DeepCopy()
+		target.Status.Parents = slices.DeleteFunc(target.Status.Parents, func(parent gatewayv1.RouteParentStatus) bool {
+			return parent.ControllerName == r.Config.ControllerName && sniParentTargetsGateway(base.Namespace, parent.ParentRef, gateway)
+		})
+		if err := r.patchSNIRouteStatus(ctx, base, target); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *Reconciler) patchSNIRouteStatus(ctx context.Context, base, target *gatewayv1.TLSRoute) error {
+	if equality.Semantic.DeepEqual(base.Status, target.Status) {
+		return nil
+	}
+	return client.IgnoreNotFound(r.Status().Patch(ctx, target, controller.OptimisticMergeFrom(base)))
+}
+
+func (r *Reconciler) gatewayRequestsForSNIDependency(ctx context.Context, dependency client.Object) []reconcile.Request {
+	var routes gatewayv1.TLSRouteList
+	if err := r.List(ctx, &routes); err != nil {
+		return nil // The periodic live observation also checks these inputs.
+	}
+	keys := make(map[client.ObjectKey]struct{})
+	for i := range routes.Items {
+		route := &routes.Items[i]
+		affected := false
+		switch object := dependency.(type) {
+		case *corev1.Namespace:
+			affected = route.Namespace == object.Name
+		default:
+			for _, rule := range route.Spec.Rules {
+				for _, ref := range rule.BackendRefs {
+					key, ok := model.BackendServiceReference(route.Namespace, ref.BackendObjectReference)
+					if !ok || key.Namespace != dependency.GetNamespace() {
+						continue
+					}
+					switch object := dependency.(type) {
+					case *corev1.Service:
+						affected = affected || key.Name == object.Name
+					case *discoveryv1.EndpointSlice:
+						affected = affected || key.Name == object.Labels[discoveryv1.LabelServiceName]
+					case *gatewayv1.ReferenceGrant:
+						affected = affected || key.Namespace != route.Namespace
+					}
+				}
+			}
+		}
+		if affected {
+			for _, request := range r.gatewayRequestsForRoute(ctx, route) {
+				keys[request.NamespacedName] = struct{}{}
+			}
+		}
+	}
+	return controller.SortedRequests(keys)
+}
