@@ -33,38 +33,12 @@ type Resolver struct {
 // Resolve returns a Barbican reference only for the live revision of an enrolled
 // Secret. The endpoint comes from the authenticated key-manager catalog.
 func (r *Resolver) Resolve(ctx context.Context, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) (string, gatewayv1.ListenerConditionReason) {
+	row, reason := r.authorizedBinding(ctx, gateway, listener)
+	if reason != "" {
+		return "", reason
+	}
+
 	const invalid = gatewayv1.ListenerReasonInvalidCertificateRef
-	if r == nil || r.Path == "" || r.Reader == nil || gateway == nil || listener == nil {
-		return "", invalid
-	}
-	scope := bindingScope{Cluster: r.ClusterID, GatewayClass: string(gateway.Spec.GatewayClassName), Project: r.ProjectID, Region: r.Region}
-	target, valid := certificateTarget(gateway, listener)
-	if !valid || !scope.valid() {
-		return "", invalid
-	}
-	if target.Namespace != gateway.Namespace {
-		var grants gatewayv1.ReferenceGrantList
-		if err := r.Reader.List(ctx, &grants, client.InNamespace(target.Namespace)); err != nil || grants.Continue != "" {
-			return "", invalid
-		}
-		if !permitsCertificate(grants.Items, gateway.Namespace, target) {
-			return "", gatewayv1.ListenerReasonRefNotPermitted
-		}
-	}
-
-	row, found := findBinding(r.Path, scope, target)
-	if !found || !row.validAt(time.Now()) {
-		return "", invalid
-	}
-	metadata := &metav1.PartialObjectMetadata{}
-	metadata.SetGroupVersionKind(corev1.SchemeGroupVersion.WithKind("Secret"))
-	if err := r.Reader.Get(ctx, target, metadata); err != nil ||
-		metadata.Namespace != target.Namespace || metadata.Name != target.Name ||
-		string(metadata.UID) != row.UID || metadata.ResourceVersion != row.ResourceVersion ||
-		!metadata.DeletionTimestamp.IsZero() {
-		return "", invalid
-	}
-
 	endpoint := r.Endpoint
 	if r.DiscoverEndpoint != nil {
 		var err error
@@ -78,6 +52,51 @@ func (r *Resolver) Resolve(ctx context.Context, gateway *gatewayv1.Gateway, list
 		return "", invalid
 	}
 	return base + row.BarbicanSecretID, ""
+}
+
+// ReferenceStatus checks a live, enrolled Secret reference without discovering
+// the key manager endpoint. An empty reason means the reference is valid.
+func (r *Resolver) ReferenceStatus(ctx context.Context, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) gatewayv1.ListenerConditionReason {
+	row, reason := r.authorizedBinding(ctx, gateway, listener)
+	if reason == "" && !row.validAt(time.Now()) {
+		return gatewayv1.ListenerReasonInvalidCertificateRef
+	}
+	return reason
+}
+
+func (r *Resolver) authorizedBinding(ctx context.Context, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) (binding, gatewayv1.ListenerConditionReason) {
+	const invalid = gatewayv1.ListenerReasonInvalidCertificateRef
+	if r == nil || r.Path == "" || r.Reader == nil || gateway == nil || listener == nil {
+		return binding{}, invalid
+	}
+	scope := bindingScope{Cluster: r.ClusterID, GatewayClass: string(gateway.Spec.GatewayClassName), Project: r.ProjectID, Region: r.Region}
+	target, valid := certificateTarget(gateway, listener)
+	if !valid || !scope.valid() {
+		return binding{}, invalid
+	}
+	if target.Namespace != gateway.Namespace {
+		var grants gatewayv1.ReferenceGrantList
+		if err := r.Reader.List(ctx, &grants, client.InNamespace(target.Namespace)); err != nil || grants.Continue != "" {
+			return binding{}, invalid
+		}
+		if !permitsCertificate(grants.Items, gateway.Namespace, target) {
+			return binding{}, gatewayv1.ListenerReasonRefNotPermitted
+		}
+	}
+
+	row, found := findBinding(r.Path, scope, target)
+	if !found || !row.validAt(time.Now()) {
+		return binding{}, invalid
+	}
+	metadata := &metav1.PartialObjectMetadata{}
+	metadata.SetGroupVersionKind(corev1.SchemeGroupVersion.WithKind("Secret"))
+	if err := r.Reader.Get(ctx, target, metadata); err != nil ||
+		metadata.Namespace != target.Namespace || metadata.Name != target.Name ||
+		string(metadata.UID) != row.UID || metadata.ResourceVersion != row.ResourceVersion ||
+		!metadata.DeletionTimestamp.IsZero() {
+		return binding{}, invalid
+	}
+	return row, ""
 }
 
 func certificateTarget(gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) (client.ObjectKey, bool) {

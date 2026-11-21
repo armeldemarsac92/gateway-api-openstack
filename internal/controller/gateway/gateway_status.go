@@ -590,7 +590,7 @@ func routeParentStatusTargetsListener(
 func (r *Reconciler) applyHTTPSListenerStatus(
 	gateway *gatewayv1.Gateway,
 	previous gatewayv1.GatewayStatus,
-	issues map[gatewayv1.SectionName]httpsListenerIssue,
+	issues map[gatewayv1.SectionName]httpsListenerStatusIssue,
 	changed *graph.TLSAuthorizationChanged,
 	keepGatewayProgrammed bool,
 ) {
@@ -598,7 +598,7 @@ func (r *Reconciler) applyHTTPSListenerStatus(
 		return
 	}
 	for _, listener := range gateway.Spec.Listeners {
-		issue, invalid := issues[listener.Name]
+		statusIssue, invalid := issues[listener.Name]
 		stale := changed != nil && slices.Contains(changed.Ports, int(listener.Port))
 		if !invalid && !stale {
 			continue
@@ -612,6 +612,7 @@ func (r *Reconciler) applyHTTPSListenerStatus(
 		programmedReason := gatewayv1.ListenerReasonPending
 		message := "Waiting to verify the HTTPS frontend after its authorization changed"
 		if invalid {
+			issue := statusIssue.primary
 			conditionStatus := metav1.ConditionFalse
 			if issue.condition == gatewayv1.ListenerConditionConflicted {
 				conditionStatus = metav1.ConditionTrue
@@ -623,6 +624,9 @@ func (r *Reconciler) applyHTTPSListenerStatus(
 				status.AttachedRoutes = 0
 			}
 			controller.SetCondition(&status.Conditions, controller.Condition(string(issue.condition), conditionStatus, string(issue.reason), issue.message, gateway.Generation))
+			if statusIssue.resolvedRefs != nil {
+				controller.SetCondition(&status.Conditions, *statusIssue.resolvedRefs)
+			}
 			programmedReason, message = gatewayv1.ListenerReasonInvalid, issue.message
 		}
 		controller.SetCondition(&status.Conditions, controller.Condition(string(gatewayv1.ListenerConditionProgrammed),

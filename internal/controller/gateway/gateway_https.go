@@ -26,6 +26,7 @@ import (
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -40,10 +41,11 @@ import (
 
 const httpsPollInterval = 5 * time.Second
 
-// CertificateResolver resolves a listener's exact live authorization and returns
-// a provider reference or a listener condition reason without certificate material.
+// CertificateResolver checks a listener's exact live authorization without
+// reading certificate material. ReferenceStatus also skips provider discovery.
 type CertificateResolver interface {
 	Resolve(context.Context, *gatewayv1.Gateway, *gatewayv1.Listener) (string, gatewayv1.ListenerConditionReason)
+	ReferenceStatus(context.Context, *gatewayv1.Gateway, *gatewayv1.Listener) gatewayv1.ListenerConditionReason
 }
 
 func hasHTTPS(gateway *gatewayv1.Gateway) bool {
@@ -113,8 +115,8 @@ func httpsProfileIssue(config controller.Config, gateway *gatewayv1.Gateway, lis
 	if listener.Filters != nil && len(listener.Filters.Requests) != 0 {
 		return invalid(gatewayv1.ListenerReasonUnsupportedValue, "Listener request filters are unsupported")
 	}
-	if listener.AllowedRoutes != nil && slices.ContainsFunc(listener.AllowedRoutes.Kinds, func(ref gatewayv1.RouteGroupKind) bool { return !isRouteGroupKind(ref, "HTTPRoute") }) {
-		return &httpsListenerIssue{gatewayv1.ListenerConditionResolvedRefs, gatewayv1.ListenerReasonInvalidRouteKinds, "Only HTTPRoute is supported by this listener"}
+	if issue := httpRouteKindsIssue(listener); issue != nil {
+		return issue
 	}
 	tls := listener.TLS
 	if listener.Protocol == gatewayv1.HTTPProtocolType {
@@ -135,6 +137,13 @@ func httpsProfileIssue(config controller.Config, gateway *gatewayv1.Gateway, lis
 	ref := tls.CertificateRefs[0]
 	if ref.Name == "" || ref.Group != nil && *ref.Group != "" || ref.Kind != nil && *ref.Kind != "Secret" {
 		return refError("HTTPS requires one core Secret certificate reference")
+	}
+	return nil
+}
+
+func httpRouteKindsIssue(listener *gatewayv1.Listener) *httpsListenerIssue {
+	if listener.AllowedRoutes != nil && slices.ContainsFunc(listener.AllowedRoutes.Kinds, func(ref gatewayv1.RouteGroupKind) bool { return !isRouteGroupKind(ref, "HTTPRoute") }) {
+		return &httpsListenerIssue{gatewayv1.ListenerConditionResolvedRefs, gatewayv1.ListenerReasonInvalidRouteKinds, "Only HTTPRoute is supported by this listener"}
 	}
 	return nil
 }
@@ -185,6 +194,10 @@ func (r *Reconciler) resolveTLS(ctx context.Context, gateway *gatewayv1.Gateway,
 	if issue := httpsProfileIssue(r.Config, gateway, listener); issue != nil {
 		return tlsResolution{issue: issue}
 	}
+	return r.resolveCertificate(ctx, gateway, listener)
+}
+
+func (r *Reconciler) resolveCertificate(ctx context.Context, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) tlsResolution {
 	var ref string
 	var reason gatewayv1.ListenerConditionReason
 	if r.Certificates != nil {
@@ -193,13 +206,17 @@ func (r *Reconciler) resolveTLS(ctx context.Context, gateway *gatewayv1.Gateway,
 	if ref != "" && reason == "" {
 		return tlsResolution{ref: ref}
 	}
+	return tlsResolution{issue: certificateReferenceIssue(reason)}
+}
+
+func certificateReferenceIssue(reason gatewayv1.ListenerConditionReason) *httpsListenerIssue {
 	message := "No approved certificate is available for this listener"
 	if reason == gatewayv1.ListenerReasonRefNotPermitted {
 		message = "Certificate reference is not permitted by a ReferenceGrant"
 	} else {
 		reason = gatewayv1.ListenerReasonInvalidCertificateRef
 	}
-	return tlsResolution{issue: &httpsListenerIssue{gatewayv1.ListenerConditionResolvedRefs, reason, message}}
+	return &httpsListenerIssue{gatewayv1.ListenerConditionResolvedRefs, reason, message}
 }
 
 func (r *Reconciler) addTLSGraphInput(ctx context.Context, snapshot *gatewayMutationSnapshot, input *graph.GatewayInput) {
@@ -348,20 +365,52 @@ func (r *Reconciler) withdrawBoundTLS(ctx context.Context, gateway *gatewayv1.Ga
 	return ctrl.Result{}, true, nil
 }
 
-func (r *Reconciler) listenerTLSIssues(ctx context.Context, gateway *gatewayv1.Gateway) map[gatewayv1.SectionName]httpsListenerIssue {
-	issues := make(map[gatewayv1.SectionName]httpsListenerIssue)
+type httpsListenerStatusIssue struct {
+	primary      httpsListenerIssue
+	resolvedRefs *metav1.Condition
+}
+
+func (r *Reconciler) listenerTLSIssues(ctx context.Context, gateway *gatewayv1.Gateway) map[gatewayv1.SectionName]httpsListenerStatusIssue {
+	issues := make(map[gatewayv1.SectionName]httpsListenerStatusIssue)
 	for i := range gateway.Spec.Listeners {
 		listener := &gateway.Spec.Listeners[i]
-		switch listener.Protocol {
-		case gatewayv1.HTTPSProtocolType:
-			if resolution := r.resolveTLS(ctx, gateway, listener); resolution.issue != nil {
-				issues[listener.Name] = *resolution.issue
+		if listener.Protocol != gatewayv1.HTTPProtocolType && listener.Protocol != gatewayv1.HTTPSProtocolType {
+			continue
+		}
+		issue := httpsProfileIssue(r.Config, gateway, listener)
+		var resolvedRefs *metav1.Condition
+		if listener.Protocol == gatewayv1.HTTPSProtocolType {
+			switch {
+			case issue == nil:
+				issue = r.resolveCertificate(ctx, gateway, listener).issue
+			case issue.condition == gatewayv1.ListenerConditionConflicted:
+				resolvedRefs = r.conflictedHTTPSReferenceCondition(ctx, gateway, listener)
 			}
-		case gatewayv1.HTTPProtocolType:
-			if issue := httpsProfileIssue(r.Config, gateway, listener); issue != nil {
-				issues[listener.Name] = *issue
-			}
+		}
+		if issue != nil {
+			issues[listener.Name] = httpsListenerStatusIssue{primary: *issue, resolvedRefs: resolvedRefs}
 		}
 	}
 	return issues
+}
+
+func (r *Reconciler) conflictedHTTPSReferenceCondition(ctx context.Context, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) *metav1.Condition {
+	// Keep the conflict as the reason this listener cannot program. Resolve
+	// its references independently for status, without using the provider ref.
+	issue := httpRouteKindsIssue(listener)
+	if issue == nil {
+		reason := gatewayv1.ListenerReasonInvalidCertificateRef
+		if r.Certificates != nil {
+			reason = r.Certificates.ReferenceStatus(ctx, gateway, listener)
+		}
+		if reason != "" {
+			issue = certificateReferenceIssue(reason)
+		}
+	}
+	status, reason, message := metav1.ConditionTrue, gatewayv1.ListenerReasonResolvedRefs, "Listener references are resolved"
+	if issue != nil {
+		status, reason, message = metav1.ConditionFalse, issue.reason, issue.message
+	}
+	condition := controller.Condition(string(gatewayv1.ListenerConditionResolvedRefs), status, string(reason), message, gateway.Generation)
+	return &condition
 }

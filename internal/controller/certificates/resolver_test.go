@@ -68,11 +68,29 @@ func TestCrossNamespaceGrantRevocationPrecedesMetadataRead(t *testing.T) {
 	if !reflect.DeepEqual(reader.reads, []string{"grants certs", "metadata certs/web"}) {
 		t.Fatalf("unexpected read sequence: %v", reader.reads)
 	}
+	resolver.DiscoverEndpoint = func() (string, error) {
+		t.Fatal("reference status reached Barbican endpoint discovery")
+		return "", nil
+	}
+	reader.reads = nil
+	if reason := resolver.ReferenceStatus(t.Context(), gateway, listener); reason != "" {
+		t.Fatalf("granted certificate reference status = %q", reason)
+	}
+	if !reflect.DeepEqual(reader.reads, []string{"grants certs", "metadata certs/web"}) {
+		t.Fatalf("unexpected status read sequence: %v", reader.reads)
+	}
 	reader.grants[0].DeletionTimestamp = ptr.To(metav1.Now())
 	reader.reads = nil
 	expectResolution(t, resolver, gateway, listener, "", gatewayv1.ListenerReasonRefNotPermitted)
 	if !reflect.DeepEqual(reader.reads, []string{"grants certs"}) {
 		t.Fatalf("read certificate metadata after grant revocation: %v", reader.reads)
+	}
+	reader.reads = nil
+	if reason := resolver.ReferenceStatus(t.Context(), gateway, listener); reason != gatewayv1.ListenerReasonRefNotPermitted {
+		t.Fatalf("revoked certificate reference status = %q", reason)
+	}
+	if !reflect.DeepEqual(reader.reads, []string{"grants certs"}) {
+		t.Fatalf("status read certificate metadata after grant revocation: %v", reader.reads)
 	}
 	reader.grantError = errors.New("forbidden")
 	expectResolution(t, resolver, gateway, listener, "", gatewayv1.ListenerReasonInvalidCertificateRef)

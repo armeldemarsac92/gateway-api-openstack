@@ -228,7 +228,7 @@ func (r *Reconciler) reconcileGatewayGraph(
 		return r.setGatewayUnsupportedVersion(ctx, scope)
 	}
 	var changedTLS *graph.TLSAuthorizationChanged
-	var tlsIssues map[gatewayv1.SectionName]httpsListenerIssue
+	var tlsIssues map[gatewayv1.SectionName]httpsListenerStatusIssue
 	var keepGatewayProgrammed bool
 	if usesHTTPSProfile(r.Config, scope.gateway) {
 		tlsIssues = r.listenerTLSIssues(ctx, scope.gateway)

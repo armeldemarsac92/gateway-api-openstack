@@ -40,6 +40,20 @@ func (f resolveHTTPSFunc) Resolve(ctx context.Context, gateway *gatewayv1.Gatewa
 	return f(ctx, gateway, listener)
 }
 
+func (f resolveHTTPSFunc) ReferenceStatus(ctx context.Context, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) gatewayv1.ListenerConditionReason {
+	_, reason := f(ctx, gateway, listener)
+	return reason
+}
+
+type testHTTPSReferenceResolver struct {
+	resolveHTTPSFunc
+	referenceStatus func(*gatewayv1.Listener) gatewayv1.ListenerConditionReason
+}
+
+func (r testHTTPSReferenceResolver) ReferenceStatus(_ context.Context, _ *gatewayv1.Gateway, listener *gatewayv1.Listener) gatewayv1.ListenerConditionReason {
+	return r.referenceStatus(listener)
+}
+
 func testHTTPSListener(name gatewayv1.SectionName, port gatewayv1.PortNumber) gatewayv1.Listener {
 	return gatewayv1.Listener{Name: name, Port: port, Protocol: gatewayv1.HTTPSProtocolType,
 		TLS: &gatewayv1.ListenerTLSConfig{CertificateRefs: []gatewayv1.SecretObjectReference{{Name: "certificate"}}}}
@@ -183,19 +197,38 @@ func TestHTTPSGatewaySharedPortCannotProgramPlainOrTLS(t *testing.T) {
 	cfg := testConfig()
 	cfg.OperatorHTTPS = true
 	gw := programmedTestGateway(cfg)
-	gw.Spec.Listeners = append(gw.Spec.Listeners, testHTTPSListener("https", 80), testHTTPSListener("one", 443), testHTTPSListener("two", 443), testHTTPSListener("dedicated", 8443))
+	certificateNamespace := gatewayv1.Namespace("certificates")
+	granted := testHTTPSListener("granted", 443)
+	granted.TLS.CertificateRefs[0].Namespace = &certificateNamespace
+	ungranted := testHTTPSListener("ungranted", 443)
+	ungranted.TLS.CertificateRefs[0].Namespace = &certificateNamespace
+	ungranted.TLS.CertificateRefs[0].Name = "ungranted"
+	// A separate unsupported listener request filter must not hide certificate authorization.
+	ungranted.Filters = &gatewayv1.ListenerFilters{Requests: []gatewayv1.ListenerFilter{{
+		Type:         gatewayv1.ListenerFilterExtensionRef,
+		ExtensionRef: &gatewayv1.LocalObjectReference{Group: "example.net", Kind: "Policy", Name: "authorization"},
+	}}}
+	gw.Spec.Listeners = append(gw.Spec.Listeners, testHTTPSListener("https", 80), granted, ungranted, testHTTPSListener("dedicated", 8443))
 	class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "openstack"}, Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName}}
 	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gw, class).WithObjects(gw, class).Build()
 	ready := cloud.GatewayReadyResult(cloud.GatewayState{LoadBalancerID: "lb-1", VIPAddress: "192.0.2.10"})
 	ready.ScopedListenerReadyPorts = []int{8443}
 	provider := &recordingProvider{gatewayResult: &ready}
 	r := newTestReconciler(Reconciler{Client: kube, APIReader: kube, Config: cfg, Coordinator: &graph.Coordinator{},
-		Certificates: resolveHTTPSFunc(func(_ context.Context, _ *gatewayv1.Gateway, listener *gatewayv1.Listener) (string, gatewayv1.ListenerConditionReason) {
-			if listener.Port != 8443 {
-				t.Fatalf("conflicted listener reached certificate resolution: %s", listener.Name)
-			}
-			return "approved", ""
-		})}, provider)
+		Certificates: testHTTPSReferenceResolver{
+			resolveHTTPSFunc: func(_ context.Context, _ *gatewayv1.Gateway, listener *gatewayv1.Listener) (string, gatewayv1.ListenerConditionReason) {
+				if listener.Port != 8443 {
+					t.Fatalf("conflicted listener reached provider reference resolution: %s", listener.Name)
+				}
+				return "approved", ""
+			},
+			referenceStatus: func(listener *gatewayv1.Listener) gatewayv1.ListenerConditionReason {
+				if listener.TLS.CertificateRefs[0].Name == "ungranted" {
+					return gatewayv1.ListenerReasonRefNotPermitted
+				}
+				return ""
+			},
+		}}, provider)
 	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(gw)}
 	for range 2 {
 		if _, err := r.Reconcile(t.Context(), request); err != nil {
@@ -211,10 +244,31 @@ func TestHTTPSGatewaySharedPortCannotProgramPlainOrTLS(t *testing.T) {
 	if err := kube.Get(t.Context(), request.NamespacedName, gw); err != nil {
 		t.Fatal(err)
 	}
-	for _, listener := range gw.Status.Listeners {
-		if listener.Name != "dedicated" && (!meta.IsStatusConditionTrue(listener.Conditions, string(gatewayv1.ListenerConditionConflicted)) ||
-			!meta.IsStatusConditionFalse(listener.Conditions, string(gatewayv1.ListenerConditionProgrammed))) {
-			t.Fatalf("shared section %s must be conflicted and unprogrammed: %#v", listener.Name, listener.Conditions)
+	for _, spec := range gw.Spec.Listeners {
+		index := slices.IndexFunc(gw.Status.Listeners, func(s gatewayv1.ListenerStatus) bool { return s.Name == spec.Name })
+		if index < 0 {
+			t.Fatalf("missing status for listener %s", spec.Name)
+		}
+		listener := gw.Status.Listeners[index]
+		if listener.Name == "dedicated" {
+			continue
+		}
+		conditions := listener.Conditions
+		if !meta.IsStatusConditionTrue(conditions, string(gatewayv1.ListenerConditionConflicted)) ||
+			!meta.IsStatusConditionFalse(conditions, string(gatewayv1.ListenerConditionAccepted)) ||
+			!meta.IsStatusConditionFalse(conditions, string(gatewayv1.ListenerConditionProgrammed)) {
+			t.Fatalf("shared section %s must be conflicted, unaccepted and unprogrammed: %v", listener.Name, conditions)
+		}
+		refs := meta.FindStatusCondition(conditions, string(gatewayv1.ListenerConditionResolvedRefs))
+		switch listener.Name {
+		case granted.Name:
+			if refs == nil || refs.Status != metav1.ConditionTrue || refs.Reason != string(gatewayv1.ListenerReasonResolvedRefs) {
+				t.Fatalf("granted section references = %v", refs)
+			}
+		case ungranted.Name:
+			if refs == nil || refs.Status != metav1.ConditionFalse || refs.Reason != string(gatewayv1.ListenerReasonRefNotPermitted) {
+				t.Fatalf("ungranted section references = %v", refs)
+			}
 		}
 	}
 }

@@ -2,6 +2,8 @@
 
 A tenant can use an HTTPS listener and an HTTPRoute on a private Amphora Gateway. The operator provisions a certificate in Barbican and approves the exact revision of a Kubernetes TLS Secret. The controller creates a stock Octavia `TERMINATED_HTTPS` listener with that certificate. Use one HTTPS listener per port and one certificate reference per listener. The Gateway can also serve plain HTTP on a different port.
 
+When two HTTPS listeners claim the same port, both report `Conflicted=True`, `Accepted=False` and `Programmed=False`. Check `ResolvedRefs` on each listener for its certificate authorization. A missing cross-namespace grant reports `RefNotPermitted` even during the conflict. Move one listener to a free port and verify each backend with a new TLS connection.
+
 ## Enable the mode
 
 The default controller has no Secret permissions. The optional component sets `GATEWAY_OPENSTACK_TLS_CERTIFICATE_MAP` and mounts a protected directory at `/etc/gateway-operator/certificates`. For a standalone installation, start your pinned-image overlay from [the HTTPS installation](../config/operator-https/kustomization.yaml). For Magnum, render [the five-object workload overlay](../integrations/magnum-capi-helm/workload-operator-https/kustomization.yaml) into the operator artifact and record its SHA-256 in the conductor configuration. The mapping ConfigMap and the per-Secret Role and RoleBinding belong to the workload operator. [Magnum installation](qualification/v1.7.0/magnum-operator.md)

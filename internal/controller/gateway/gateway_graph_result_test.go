@@ -328,9 +328,11 @@ func TestDeniedCertificatePreservesGatewayProviderFailure(t *testing.T) {
 	g.Status.Conditions = []metav1.Condition{{Type: "Programmed", Status: metav1.ConditionFalse,
 		ObservedGeneration: 1, Reason: "NoResources", Message: "The provider quota is exhausted"}}
 	previous := g.Status.DeepCopy()
-	issues := map[gatewayv1.SectionName]httpsListenerIssue{"web": {
-		condition: gatewayv1.ListenerConditionResolvedRefs, reason: gatewayv1.ListenerReasonInvalidCertificateRef,
-		message: "No approved certificate is available for this listener",
+	issues := map[gatewayv1.SectionName]httpsListenerStatusIssue{"web": {
+		primary: httpsListenerIssue{
+			condition: gatewayv1.ListenerConditionResolvedRefs, reason: gatewayv1.ListenerReasonInvalidCertificateRef,
+			message: "No approved certificate is available for this listener",
+		},
 	}}
 	(&Reconciler{}).applyHTTPSListenerStatus(g, *previous, issues, nil, true)
 	aggregate := meta.FindStatusCondition(g.Status.Conditions, "Programmed")
