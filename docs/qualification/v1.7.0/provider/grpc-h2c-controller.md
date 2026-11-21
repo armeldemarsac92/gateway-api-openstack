@@ -41,3 +41,5 @@ loads the original v1.7.0 `GRPCExactMethodMatching` manifest into a local
 Kubernetes API server and observes two exact paths and h2c backends at the
 Gateway writer. It also verifies Route status, overlapping HTTPRoute rejection,
 and finalization. Its recording provider does not serve traffic.
+
+See the [two-channel image qualification](opt-in-grpc-h2c.md) for native case transcripts, post-monitor-window RPC traffic and provider readbacks.

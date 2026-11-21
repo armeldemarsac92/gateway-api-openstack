@@ -1,6 +1,6 @@
 # Reproduce the Hibiscus development image
 
-Use the [build record](image.json) for the source revision, platform and OCI manifest digest. The [development prerelease](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-ba6c47689d58a640523fd39e18c3a4bb3a9e0b31) contains the same linux/amd64 manifest in an OCI archive. The registry reference uses `ghcr.io/armeldemarsac92/gateway-api-openstack@` followed by the manifest digest.
+Use the [local build record](image.json) for the exact source revision, linux/amd64 OCI manifest, archive digest and embedded manager digest. The normal and no-cache builds produced the same registry manifest. The OCI archive was built and checked locally.
 
 On a linux/amd64 host, use a separate checkout of the recorded revision. The Dockerfile pins the Go 1.27.4 builder and distroless base by digest. Podman uses a fixed timestamp, and the build writes the full commit into the binary and the OCI revision label. The verification command exports gzip-compressed layers.
 
