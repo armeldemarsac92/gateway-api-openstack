@@ -250,7 +250,7 @@ func (p *Provider) buildDefaultPoolGraphPlan(desired desiredGatewayGraph, actual
 			}
 			canServe := slices.ContainsFunc(route.members, func(member cloud.Member) bool { return !member.Draining })
 			if actual.protocol == cloud.ListenerProtocolUDP && index == defaultOwner {
-				if !canServe || !hasActiveUDPBackend(observed, actual.state.VIPAddress) {
+				if !canServe || !hasActiveUDPBackend(route, observed, actual.state.VIPAddress) {
 					// Revoke the proven forwarding pointer even if another
 					// backend difference prevents planning further changes.
 					detach = true
@@ -329,10 +329,11 @@ func validateRouteGatewayIDs(recorded, observed cloud.GatewayState) error {
 	return nil
 }
 
-func hasActiveUDPBackend(observed observedRouteGraph, vipAddress string) bool {
+func hasActiveUDPBackend(route desiredRoute, observed observedRouteGraph, vipAddress string) bool {
 	family := udpIPFamily(vipAddress)
 	return slices.ContainsFunc(observed.members, func(member pools.Member) bool {
 		return family != 0 && udpIPFamily(member.Address) == family &&
-			member.AdminStateUp && member.ProvisioningStatus == "ACTIVE" && member.Weight > 0
+			member.AdminStateUp && member.ProvisioningStatus == "ACTIVE" &&
+			(route.spec.MemberMode != cloud.MemberModeEndpoint || member.Weight > 0)
 	})
 }
