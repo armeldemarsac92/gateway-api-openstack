@@ -105,10 +105,15 @@ func SupportedListenersForConfig(config controller.Config, gateway *gatewayv1.Ga
 			return nil, fmt.Errorf("TLS SNI passthrough requires a dedicated Gateway with one listener")
 		}
 		listener := &gateway.Spec.Listeners[0]
-		if listener.Hostname != nil || listener.Port < 1 || listener.Port > 65535 || listener.TLS == nil ||
+		if listener.Port < 1 || listener.Port > 65535 || listener.TLS == nil ||
 			listener.TLS.Mode == nil || *listener.TLS.Mode != gatewayv1.TLSModePassthrough ||
 			len(listener.TLS.CertificateRefs) != 0 || len(listener.TLS.Options) != 0 {
-			return nil, fmt.Errorf("TLS SNI passthrough requires a valid port and Passthrough mode without listener hostname, certificates or TLS options")
+			return nil, fmt.Errorf("TLS SNI passthrough requires a valid port and Passthrough mode without certificates or TLS options")
+		}
+		if listener.Hostname != nil {
+			if err := amphora.ValidateHostname(string(*listener.Hostname)); err != nil {
+				return nil, fmt.Errorf("invalid listener hostname: %w", err)
+			}
 		}
 		if err := validateRouteNamespacePolicy(listener); err != nil {
 			return nil, err

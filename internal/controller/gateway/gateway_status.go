@@ -539,6 +539,12 @@ func (r *Reconciler) attachedRouteCounts(ctx context.Context, gateway *gatewayv1
 				if httpKind != "" && (!listenerAllowsRouteKind(*listener, httpKind) || len(model.IntersectHostnames(listener.Hostname, hostnames)) == 0) {
 					continue
 				}
+				if tlsRoute, ok := route.(*gatewayv1.TLSRoute); ok {
+					hostnames, err := intersectSNIHostnames(listener, tlsRoute)
+					if err != nil || len(hostnames) == 0 || !listenerAllowsRouteKind(*listener, tlsRouteKind) {
+						continue
+					}
+				}
 				if _, observed := namespaces[routeNamespace]; !observed && model.ObservesRouteNamespace(listener) {
 					if r.APIReader == nil {
 						return controller.ErrAPIReaderRequired
