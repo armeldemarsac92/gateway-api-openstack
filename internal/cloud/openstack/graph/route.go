@@ -43,6 +43,7 @@ type desiredPolicy struct {
 	position                int32
 	compareType             l7policies.CompareType
 	path                    string
+	pathInvert              bool
 	precedence              int
 	backendKey              string
 	matchKey                string
@@ -167,7 +168,7 @@ func (p *Provider) buildDesiredRoutePart(spec cloud.RouteSpec, backendKey string
 	switch protocol {
 	case cloud.ListenerProtocolHTTP:
 		if backendKey == "" {
-			policies, hostnameRuleValue, err = httpPathPolicies(cloud.HTTPPathMatch{
+			policies, hostnameRuleValue, err = p.httpPathPolicies(cloud.HTTPPathMatch{
 				Hostname: spec.Hostname, PathType: spec.PathType, PathValue: spec.PathValue,
 			}, false)
 			if err != nil {
@@ -345,7 +346,7 @@ func (p *Provider) buildHTTPMatchPolicies(r *desiredRoute, matches []cloud.HTTPP
 		if err != nil {
 			return err
 		}
-		policies, hostnameRuleValue, err := httpPathPolicies(match, true)
+		policies, hostnameRuleValue, err := p.httpPathPolicies(match, true)
 		if err != nil {
 			return err
 		}
@@ -438,6 +439,20 @@ func usesHTTPPathPredicate(match cloud.HTTPPathMatch) bool {
 	return match.Method == "" || match.PathType != cloud.PathMatchPrefix || match.PathValue != "/"
 }
 
+// Inverting this impossible PATH regex also matches request targets for which
+// HAProxy has no path sample.
+const impossibleHTTPPathPattern = "(^$)."
+
+func (p *Provider) httpPathPolicies(match cloud.HTTPPathMatch, grouped bool) ([]desiredPolicy, string, error) {
+	policies, hostname, err := httpPathPolicies(match, grouped)
+	if err == nil && p.httpMethodMatch && match.Method == "" && match.PathType == cloud.PathMatchPrefix && strings.TrimRight(match.PathValue, "/") == "" {
+		policies[0].path = impossibleHTTPPathPattern
+		policies[0].compareType = l7policies.CompareTypeRegex
+		policies[0].pathInvert = true
+	}
+	return policies, hostname, err
+}
+
 func httpPathPolicies(match cloud.HTTPPathMatch, grouped bool) ([]desiredPolicy, string, error) {
 	if match.PathType != cloud.PathMatchExact && match.PathType != cloud.PathMatchPrefix {
 		return nil, "", fmt.Errorf("unsupported path match type %q", match.PathType)
@@ -499,6 +514,7 @@ func rulesFor(policy desiredPolicy, hostnameRuleValue string) []desiredRule {
 			ruleType:    l7policies.TypePath,
 			compareType: policy.compareType,
 			value:       policy.path,
+			invert:      policy.pathInvert,
 		})
 	}
 	if hostnameRuleValue != "" {

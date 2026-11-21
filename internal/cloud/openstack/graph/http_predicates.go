@@ -128,13 +128,13 @@ func (p *Provider) protectHTTPPredicateTraffic(ctx context.Context, desired desi
 			continue
 		}
 		closedByID[listener.ID] = closed(listener)
-		frontendBlocked[listener.ID] = discoveryErr != nil || state.unsettled
-		reason := unavailable
-		// Reserve method-triggered closures for listeners with an installed
-		// method policy. New policies are gated before creation and use.
-		if confirmedMissing && predicate.capability == octavia.GatewayCapabilityHTTPMethodMatch && !state.installed {
+		// New policies are gated separately. Close a listener only when
+		// ownership inventory proves an installed dependency was withdrawn.
+		if confirmedMissing && !state.installed {
 			continue
 		}
+		frontendBlocked[listener.ID] = discoveryErr != nil || state.unsettled
+		reason := unavailable
 		if !confirmedMissing {
 			if listener.ID != withdrawalListener || closed(listener) {
 				continue

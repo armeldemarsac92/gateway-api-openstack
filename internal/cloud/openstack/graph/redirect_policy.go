@@ -94,7 +94,7 @@ func (p *Provider) buildDesiredGatewayRoute(spec cloud.RouteSpec, forwards []clo
 			for _, cell := range cells {
 				positive := match
 				positive.Hostname = cell.hostname
-				if err := appendRedirectPolicies(&part, redirect, positive, key, cell.guards); err != nil {
+				if err := p.appendRedirectPolicies(&part, redirect, positive, key, cell.guards); err != nil {
 					return invalid(err)
 				}
 			}
@@ -128,8 +128,8 @@ func validateRedirectDestination(redirect cloud.HTTPRedirect) error {
 	}
 }
 
-func appendRedirectPolicies(part *desiredRoute, redirect cloud.HTTPRedirect, positive cloud.HTTPPathMatch, matchKey string, guards []redirectGuard) error {
-	policies, hostname, err := httpPathPolicies(positive, true)
+func (p *Provider) appendRedirectPolicies(part *desiredRoute, redirect cloud.HTTPRedirect, positive cloud.HTTPPathMatch, matchKey string, guards []redirectGuard) error {
+	policies, hostname, err := p.httpPathPolicies(positive, true)
 	if err != nil {
 		return err
 	}
