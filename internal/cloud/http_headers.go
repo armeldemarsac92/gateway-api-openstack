@@ -41,7 +41,7 @@ type HTTPHeaderOperation struct {
 	Value     string
 }
 
-var httpHeaderName = regexp.MustCompile("^[!#$%&'*+\\-.^_\\x60|~0-9A-Za-z]{1,256}$")
+var httpHeaderName = regexp.MustCompile(`^[!#$%&'*+\-.^_\x60|~0-9A-Za-z]{1,256}$`)
 
 // NormalizeHTTPHeaderOperations validates literal operations and canonicalizes names.
 func NormalizeHTTPHeaderOperations(operations []HTTPHeaderOperation) ([]HTTPHeaderOperation, error) {

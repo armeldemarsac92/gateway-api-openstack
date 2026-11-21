@@ -339,7 +339,7 @@ func (p *Provider) buildHTTPMatchPolicies(r *desiredRoute, matches []cloud.HTTPP
 			return err
 		}
 		if len(operations) != 0 && !p.requestHeaderModifier {
-			return errors.New("Octavia request header operations require controller opt-in")
+			return errors.New("request header operations require controller opt-in for Octavia")
 		}
 		if r.fixedResponse {
 			operations = nil
