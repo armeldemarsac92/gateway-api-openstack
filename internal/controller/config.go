@@ -40,6 +40,8 @@ var gatewayControllerNamePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0
 type Config struct {
 	// HTTPHeaderExact enables exact HTTPRoute header matching on capable Amphora providers.
 	HTTPHeaderExact bool
+	// HTTPMethodMatch enables exact HTTPRoute method matching on capable Amphora providers.
+	HTTPMethodMatch bool
 	// FixedHTTPResponses enables the local Amphora fixed-response extension.
 	FixedHTTPResponses bool
 	// WeightedHTTPTargets enables per-backend weighted policies in the local Amphora extension.
@@ -75,6 +77,9 @@ func (c Config) XBackendEnabled() bool {
 
 // Validate rejects configuration that could make ownership ambiguous.
 func (c Config) Validate() error {
+	if c.HTTPMethodMatch && !c.FixedHTTPResponses {
+		return fmt.Errorf("--octavia-http-method-match requires --octavia-fixed-http-responses")
+	}
 	if c.TLSSNISuffix && !c.TLSSNIPassthrough {
 		return fmt.Errorf("--octavia-tls-sni-suffix requires --octavia-tls-sni-passthrough")
 	}

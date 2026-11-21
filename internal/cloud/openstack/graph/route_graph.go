@@ -98,7 +98,7 @@ func readRouteResourceRole(tags []string, bases ...string) (routeResourceRole, b
 	if !ok {
 		return routeResourceRole{}, false
 	}
-	if slices.Contains(bases, raw) && raw != roleRuleRedirectGuard && raw != openstackidentity.RoleRuleHTTPHeaderExact {
+	if slices.Contains(bases, raw) && raw != roleRuleRedirectGuard && raw != openstackidentity.RoleRuleHTTPHeaderExact && raw != openstackidentity.RoleRuleHTTPMethod {
 		return routeResourceRole{raw: raw, base: raw}, true
 	}
 	if base, match, cell, _, ok := openstackidentity.ParseHTTPRedirectRole(raw); ok {
@@ -643,14 +643,14 @@ func (p *Provider) observeRoutePolicy(ctx context.Context, owner routeGraphOwner
 		if err := p.validateOptionalProject("L7 rule", rule.ID, rule.ProjectID); err != nil {
 			return observedRoutePolicy{}, err
 		}
-		ruleRole, ok := readRouteResourceRole(rule.Tags, roleRulePath, roleRuleHost, roleRuleRedirectGuard, openstackidentity.RoleRuleHTTPHeaderExact)
+		ruleRole, ok := readRouteResourceRole(rule.Tags, roleRulePath, roleRuleHost, roleRuleRedirectGuard, openstackidentity.RoleRuleHTTPHeaderExact, openstackidentity.RoleRuleHTTPMethod)
 		if !ok || !owner.matchesRoute(rule.Tags, ruleRole.raw) || ruleRole.backend != role.backend ||
 			ruleRole.match != role.match || ruleRole.redirect != role.redirect || ruleRole.weighted != role.weighted ||
 			role.backend != "" && rule.ProjectID != p.projectID {
 			return observedRoutePolicy{}, fmt.Errorf("%w: L7 rule %s beneath policy %s has an unproven project or route, backend or match identity", cloud.ErrOwnershipConflict, rule.ID, item.ID)
 		}
 		flagsObserved := observation.AdminState != nil && observation.Inverted != nil
-		if (role.redirect || ruleRole.base == openstackidentity.RoleRuleHTTPHeaderExact) && (!flagsObserved || rule.RuleType == "" || rule.CompareType == "" || rule.Value == "") {
+		if (role.redirect || ruleRole.base == openstackidentity.RoleRuleHTTPHeaderExact || ruleRole.base == openstackidentity.RoleRuleHTTPMethod) && (!flagsObserved || rule.RuleType == "" || rule.CompareType == "" || rule.Value == "") {
 			return observedRoutePolicy{}, cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady,
 				fmt.Errorf("HTTP rule %s has incomplete predicate or administrative state", rule.ID))
 		}
@@ -706,6 +706,7 @@ type routeMutation struct {
 	weightedTargets         *[]octavia.WeightedHTTPTarget
 	requestHeaderOperations []cloud.HTTPHeaderOperation
 	requiresExactHeaders    bool
+	requiresHTTPMethod      bool
 }
 
 func (s routeMutation) message() string {
@@ -927,7 +928,8 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 		for _, policy := range actual.policies {
 			if policy.role == wantedPolicy.role && !policy.policy.AdminStateUp {
 				return []routeMutation{{kind: routeMutationEnablePolicy, id: policy.policy.ID,
-					requestHeaderOperations: wantedPolicy.requestHeaderOperations, requiresExactHeaders: len(wantedPolicy.headers) != 0}}, state, nil
+					requestHeaderOperations: wantedPolicy.requestHeaderOperations,
+					requiresExactHeaders: len(wantedPolicy.headers) != 0, requiresHTTPMethod: wantedPolicy.method != ""}}, state, nil
 			}
 		}
 	}
@@ -1027,6 +1029,12 @@ func buildRoutePolicyPlan(
 			}
 			rule := observedRule.rule
 			state.L7RuleIDs = append(state.L7RuleIDs, rule.ID)
+			if wantedRule.ruleType == httpMethodRuleType && rule.Key != "" {
+				// Recreate the disabled rule to remove a key from a keyless predicate.
+				plan = append(plan, routeMutation{kind: routeMutationDeleteRule, id: rule.ID, parentID: policy.ID})
+				delete(actualRules, wantedRule.role)
+				continue
+			}
 			if rule.RuleType != string(wantedRule.ruleType) || rule.CompareType != string(wantedRule.compareType) ||
 				wantedRule.key != "" && rule.Key != wantedRule.key || rule.Value != wantedRule.value || rule.Invert != wantedRule.invert || !rule.AdminStateUp || rule.ProvisioningStatus == "ERROR" {
 				plan = append(plan, routeMutation{kind: routeMutationUpdateRule, id: rule.ID, parentID: policy.ID, rule: wantedRule})

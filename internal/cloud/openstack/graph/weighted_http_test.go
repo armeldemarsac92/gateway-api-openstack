@@ -79,7 +79,7 @@ func TestWeightedHTTPFailedWithdrawalCanRetryWithoutFloatingIPInventory(t *testi
 	gateway := cloud.GatewaySpec{Identity: gatewayID, Provider: "amphora", VIPSubnetID: "vip-subnet", ExternalNetworkID: "external",
 		ListenerPort: 80, ListenerProtocol: cloud.ListenerProtocolHTTP}
 	match := cloud.HTTPPathMatch{PathType: cloud.PathMatchExact, PathValue: "/api"}
-	key, predicate := openstackidentity.HTTPWeightedRuleKey(0), openstackidentity.HTTPMatchKey("", match.PathType, match.PathValue)
+	key, predicate := openstackidentity.HTTPWeightedRuleKey(0), openstackidentity.HTTPMatchKey("", match.PathType, match.PathValue, "")
 	route := cloud.RouteSpec{Identity: identity.Value(), GatewayRequirements: gatewayRequirements(gateway), MemberSubnetID: "member-subnet",
 		HealthMonitor:     cloud.HealthMonitorConfig{Path: "/ready", Delay: 10, Timeout: 5, MaxRetries: 3, MaxRetriesDown: 3},
 		WeightedHTTPRules: []cloud.HTTPWeightedRule{{Matches: []cloud.HTTPPathMatch{match}, Targets: []cloud.HTTPWeightedTarget{{Weight: 1}}}},
@@ -419,7 +419,7 @@ func TestObserveWeightedHTTPPolicyRequiresOwnedPoolEdges(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			identity := safetyTestIdentity(t)
 			key := openstackidentity.HTTPWeightedRuleKey(2)
-			match := openstackidentity.HTTPMatchKey("", cloud.PathMatchExact, "/api")
+			match := openstackidentity.HTTPMatchKey("", cloud.PathMatchExact, "/api", "")
 			policy := map[string]any{
 				"id": "policy-1", "project_id": "project-a", "listener_id": "listener-1", "action": "WEIGHTED_TARGETS",
 				"redirect_pool_id": nil, "targets": []octavia.WeightedHTTPTarget{{Weight: 3, PoolID: "pool-1"}, fixedWeightedHTTPTarget(1)},

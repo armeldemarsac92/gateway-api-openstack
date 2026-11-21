@@ -161,12 +161,13 @@ type Member struct {
 	Weight int `json:",omitempty"`
 }
 
-// HTTPPathMatch describes one path and its optional conjunctive header predicates at its listener rank.
+// HTTPPathMatch describes one path and its optional conjunctive predicates at its listener rank.
 type HTTPPathMatch struct {
 	Hostname                string
 	PathType                PathMatchType
 	PathValue               string
 	Precedence              int
+	Method                  string                `json:",omitempty"`
 	Headers                 []HTTPHeaderMatch     `json:",omitempty"`
 	RequestHeaderOperations []HTTPHeaderOperation `json:",omitempty"`
 }

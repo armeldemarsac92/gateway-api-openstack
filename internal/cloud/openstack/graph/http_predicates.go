@@ -27,16 +27,34 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
 )
 
-type exactHeaderListener struct {
+type protectedHTTPPredicate struct {
+	capability string
+	role       string
+	label      string
+	required   func(desiredPolicy) bool
+}
+
+var (
+	exactHTTPHeaderPredicate = protectedHTTPPredicate{
+		capability: octavia.GatewayCapabilityHTTPHeaderExact, role: openstackidentity.RoleRuleHTTPHeaderExact,
+		label: "exact HTTP header", required: func(policy desiredPolicy) bool { return len(policy.headers) != 0 },
+	}
+	httpMethodPredicate = protectedHTTPPredicate{
+		capability: octavia.GatewayCapabilityHTTPMethodMatch, role: openstackidentity.RoleRuleHTTPMethod,
+		label: "HTTP method", required: func(policy desiredPolicy) bool { return policy.method != "" },
+	}
+)
+
+type guardedHTTPListener struct {
 	desired, unsettled, installed bool
 	routes                        map[int]bool
 	policyIDs                     map[string]bool
 }
 
-// protectExactHeaderTraffic uses the same verified listener and policy inventory
+// protectHTTPPredicateTraffic uses the same verified listener and policy inventory
 // as the graph writer. A confirmed revocation closes the port before changing
 // its predicates. A discovery error alone leaves an existing port serving.
-func (p *Provider) protectExactHeaderTraffic(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, plan []graphMutation, result *cloud.GatewayGraphResult) []graphMutation {
+func (p *Provider) protectHTTPPredicateTraffic(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, plan []graphMutation, result *cloud.GatewayGraphResult, predicate protectedHTTPPredicate) []graphMutation {
 	if desired.protocol != cloud.ListenerProtocolHTTP || desired.spec.Gateway.Disposition != cloud.GraphEnsure {
 		return plan
 	}
@@ -54,7 +72,7 @@ func (p *Provider) protectExactHeaderTraffic(ctx context.Context, desired desire
 		portByID[actual.listener.ID] = desired.spec.Gateway.Spec.ListenerPort
 		observedListeners[0].ProtocolPort = desired.spec.Gateway.Spec.ListenerPort
 	}
-	states := exactHeaderListeners(desired, actual, portByID)
+	states := guardedHTTPListeners(desired, actual, portByID, predicate)
 	if len(states) == 0 {
 		return plan
 	}
@@ -78,7 +96,7 @@ func (p *Provider) protectExactHeaderTraffic(ctx context.Context, desired desire
 	}
 	var discoveryErr error
 	if actual.loadBalancer != nil {
-		discoveryErr = p.verifyGatewayHTTPCapabilities(ctx, desired, actual, []string{octavia.GatewayCapabilityHTTPHeaderExact})
+		discoveryErr = p.verifyGatewayHTTPCapabilities(ctx, desired, actual, []string{predicate.capability})
 	}
 	var missing *octavia.MissingGatewayCapability
 	confirmedMissing := errors.As(discoveryErr, &missing)
@@ -87,8 +105,8 @@ func (p *Provider) protectExactHeaderTraffic(ctx context.Context, desired desire
 	}
 	frontendBlocked := make(map[string]bool)
 	closedByID := make(map[string]bool, len(observedListeners))
-	const waiting = "Waiting for Octavia exact HTTP header policies to be verified"
-	const unavailable = "Octavia withdrew the exact HTTP header capability on this listener"
+	waiting := "Waiting for Octavia " + predicate.label + " policies to be verified"
+	unavailable := "Octavia withdrew the " + predicate.label + " capability on this listener"
 	// An explicit route withdrawal must remain possible during a discovery
 	// outage. Close before tearing down its last known guarded policy.
 	var withdrawalListener string
@@ -112,15 +130,20 @@ func (p *Provider) protectExactHeaderTraffic(ctx context.Context, desired desire
 		closedByID[listener.ID] = closed(listener)
 		frontendBlocked[listener.ID] = discoveryErr != nil || state.unsettled
 		reason := unavailable
+		// Reserve method-triggered closures for listeners with an installed
+		// method policy. New policies are gated before creation and use.
+		if confirmedMissing && predicate.capability == octavia.GatewayCapabilityHTTPMethodMatch && !state.installed {
+			continue
+		}
 		if !confirmedMissing {
 			if listener.ID != withdrawalListener || closed(listener) {
 				continue
 			}
-			reason = "Closing the affected listener before withdrawing an exact HTTP header policy"
+			reason = "Closing the affected listener before withdrawing an Octavia " + predicate.label + " policy"
 		}
-		p.markExactHeaderListener(result, listener.ProtocolPort, state, reason)
+		p.markGuardedHTTPListener(result, listener.ProtocolPort, state, reason)
 		if !closed(listener) && (listener.ProvisioningStatus == "ACTIVE" || listener.ProvisioningStatus == "ERROR") {
-			return []graphMutation{closeExactHeaderListener(listener, reason)}
+			return []graphMutation{closeGuardedHTTPListener(listener, reason)}
 		}
 	}
 	return slices.DeleteFunc(plan, func(step graphMutation) bool {
@@ -129,13 +152,13 @@ func (p *Provider) protectExactHeaderTraffic(ctx context.Context, desired desire
 		switch step.kind {
 		case graphEnableListener:
 			if frontendBlocked[listenerID] {
-				p.markExactHeaderListener(result, portByID[listenerID], state, waiting)
+				p.markGuardedHTTPListener(result, portByID[listenerID], state, waiting)
 				return true
 			}
 		case graphEnableLoadBalancer:
 			for _, listener := range observedListeners {
 				if frontendBlocked[listener.ID] && !closedByID[listener.ID] {
-					p.markExactHeaderListener(result, listener.ProtocolPort, states[listener.ProtocolPort], waiting)
+					p.markGuardedHTTPListener(result, listener.ProtocolPort, states[listener.ProtocolPort], waiting)
 					return true
 				}
 			}
@@ -147,20 +170,20 @@ func (p *Provider) protectExactHeaderTraffic(ctx context.Context, desired desire
 			if discoveryErr == nil || closedByID[listenerID] || !state.installed || !isHTTPPolicyMutation(step.route.kind) {
 				return false
 			}
-			p.markExactHeaderListener(result, portByID[listenerID], state, waiting)
+			p.markGuardedHTTPListener(result, portByID[listenerID], state, waiting)
 			return true
 		}
 		return false
 	})
 }
 
-func closeExactHeaderListener(listener listeners.Listener, reason string) graphMutation {
+func closeGuardedHTTPListener(listener listeners.Listener, reason string) graphMutation {
 	return graphMutation{kind: graphDisableListener, listenerID: listener.ID,
 		scopedListener: cloud.ScopedListener{Port: listener.ProtocolPort}, redactTLSError: listener.Protocol == terminatedHTTPS,
 		withdrawHTTPPolicy: true, message: reason}
 }
 
-func (p *Provider) markExactHeaderListener(result *cloud.GatewayGraphResult, port int, state exactHeaderListener, reason string) {
+func (p *Provider) markGuardedHTTPListener(result *cloud.GatewayGraphResult, port int, state guardedHTTPListener, reason string) {
 	result.Outcome = p.progressingOutcome(reason)
 	for index := range state.routes {
 		if index < len(result.Routes) {
@@ -172,8 +195,8 @@ func (p *Provider) markExactHeaderListener(result *cloud.GatewayGraphResult, por
 	result.Gateway.ScopedListenerReadyPorts = slices.DeleteFunc(result.Gateway.ScopedListenerReadyPorts, func(ready int) bool { return ready == port })
 }
 
-func exactHeaderListeners(desired desiredGatewayGraph, actual observedGatewayGraph, portByID map[string]int) map[int]exactHeaderListener {
-	states := make(map[int]exactHeaderListener)
+func guardedHTTPListeners(desired desiredGatewayGraph, actual observedGatewayGraph, portByID map[string]int, predicate protectedHTTPPredicate) map[int]guardedHTTPListener {
+	states := make(map[int]guardedHTTPListener)
 	if hasHTTPRouteParts(desired, actual) {
 		parts, observedParts, owners := httpPlanningParts(desired, actual)
 		for index, part := range parts.routes {
@@ -181,15 +204,15 @@ func exactHeaderListeners(desired desiredGatewayGraph, actual observedGatewayGra
 			if index < len(observedParts.routes) {
 				observed = observedParts.routes[index]
 			}
-			collectExactHeaderListener(states, desired, portByID, part, observed, parts.spec.Routes[index].Disposition, owners[index])
+			collectGuardedHTTPListener(states, desired, portByID, part, observed, parts.spec.Routes[index].Disposition, owners[index], predicate)
 		}
 	}
 	return states
 }
 
-func collectExactHeaderListener(states map[int]exactHeaderListener, gateway desiredGatewayGraph, portByID map[string]int,
-	route desiredRoute, observed observedRouteGraph, disposition cloud.GraphDisposition, owner int) {
-	mark := func(port int, change func(*exactHeaderListener)) {
+func collectGuardedHTTPListener(states map[int]guardedHTTPListener, gateway desiredGatewayGraph, portByID map[string]int,
+	route desiredRoute, observed observedRouteGraph, disposition cloud.GraphDisposition, owner int, predicate protectedHTTPPredicate) {
+	mark := func(port int, change func(*guardedHTTPListener)) {
 		state := states[port]
 		if state.routes == nil {
 			state.routes = make(map[int]bool)
@@ -205,7 +228,7 @@ func collectExactHeaderListener(states map[int]exactHeaderListener, gateway desi
 	wantedAtPort := make(map[string]bool)
 	if disposition == cloud.GraphEnsure {
 		for _, wanted := range route.policies {
-			if len(wanted.headers) == 0 {
+			if !predicate.required(wanted) {
 				continue
 			}
 			wantedAtPort[wanted.role] = true
@@ -216,7 +239,7 @@ func collectExactHeaderListener(states map[int]exactHeaderListener, gateway desi
 					(route.redirect && desiredPolicyActionMatches(wanted, policy.policy, "") ||
 						!route.redirect && observedForwardPolicyMatches(route, observed, policy))
 			})
-			mark(port, func(state *exactHeaderListener) {
+			mark(port, func(state *guardedHTTPListener) {
 				state.desired, state.unsettled = true, state.unsettled || !settled
 			})
 		}
@@ -224,11 +247,11 @@ func collectExactHeaderListener(states map[int]exactHeaderListener, gateway desi
 	for _, policy := range observed.policies {
 		observedPort, present := portByID[policy.policy.ListenerID]
 		if !present || !slices.ContainsFunc(policy.rules, func(rule observedRouteRule) bool {
-			return rule.base == openstackidentity.RoleRuleHTTPHeaderExact
+			return rule.base == predicate.role
 		}) {
 			continue
 		}
-		mark(observedPort, func(state *exactHeaderListener) {
+		mark(observedPort, func(state *guardedHTTPListener) {
 			state.installed = true
 			if state.policyIDs == nil {
 				state.policyIDs = make(map[string]bool)

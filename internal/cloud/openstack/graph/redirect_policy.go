@@ -72,7 +72,7 @@ func (p *Provider) buildDesiredGatewayRoute(spec cloud.RouteSpec, forwards []clo
 			if _, _, err := httpPathPolicies(match, true); err != nil {
 				return invalid(err)
 			}
-			key := openstackidentity.HTTPMatchKey(match.Hostname, match.PathType, match.PathValue, match.Headers...)
+			key := openstackidentity.HTTPMatchKey(match.Hostname, match.PathType, match.PathValue, match.Method, match.Headers...)
 			route.redirectRanks = append(route.redirectRanks, match.Precedence)
 			selected, found := matches[key]
 			if found && selected.precedence <= match.Precedence {

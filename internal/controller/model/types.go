@@ -127,11 +127,12 @@ type RequestRedirect struct {
 	StatusCode int
 }
 
-// Match is one alternative within a rule. Its header predicates are conjunctive.
+// Match is one conjunction of predicates within a rule.
 type Match struct {
 	Index     int
 	PathType  gatewayv1.PathMatchType
 	PathValue string
+	Method    string
 	Headers   []HeaderMatch
 }
 

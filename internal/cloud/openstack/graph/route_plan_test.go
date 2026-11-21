@@ -234,7 +234,7 @@ func TestInvalidHTTPBackendWithoutPoolCreatesOnlyItsPolicy(t *testing.T) {
 func TestObserveFixedPolicyRequiresVerifiedTargetAndOwner(t *testing.T) {
 	identity := safetyTestIdentity(t)
 	backend := openstackidentity.HTTPBackendKey("default", "web", 80)
-	match := openstackidentity.HTTPMatchKey("", cloud.PathMatchExact, "/api")
+	match := openstackidentity.HTTPMatchKey("", cloud.PathMatchExact, "/api", "")
 	role := openstackidentity.HTTPFragmentRole(rolePolicyExact, backend, match)
 	for _, test := range []struct {
 		name, field    string

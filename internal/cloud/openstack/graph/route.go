@@ -33,7 +33,10 @@ import (
 // Octavia's public member create and update APIs accept weights from 0 to 256.
 const maxOctaviaMemberWeight = 256
 
-const httpHeaderExactRuleType l7policies.RuleType = "HTTP_HEADER_EXACT"
+const (
+	httpHeaderExactRuleType l7policies.RuleType = "HTTP_HEADER_EXACT"
+	httpMethodRuleType      l7policies.RuleType = "HTTP_METHOD"
+)
 
 type desiredPolicy struct {
 	role                    string
@@ -48,6 +51,7 @@ type desiredPolicy struct {
 	weighted                bool
 	weightedPlan            *weightedHTTPPolicyPlan
 	requestHeaderOperations []cloud.HTTPHeaderOperation
+	method                  string
 	headers                 []cloud.HTTPHeaderMatch
 }
 
@@ -345,7 +349,7 @@ func (p *Provider) buildHTTPMatchPolicies(r *desiredRoute, matches []cloud.HTTPP
 		if err != nil {
 			return err
 		}
-		matchKey := openstackidentity.HTTPMatchKey(match.Hostname, match.PathType, match.PathValue, match.Headers...)
+		matchKey := openstackidentity.HTTPMatchKey(match.Hostname, match.PathType, match.PathValue, match.Method, match.Headers...)
 		if matchKeys[matchKey] {
 			return errors.New("duplicate HTTP match within one backend or weighted rule")
 		}
@@ -406,6 +410,14 @@ func (p *Provider) normalizeHTTPMatch(match cloud.HTTPPathMatch) (cloud.HTTPPath
 	if len(match.Headers) != 0 && !p.httpHeaderExact {
 		return cloud.HTTPPathMatch{}, errors.New("exact HTTP header matching requires --octavia-http-header-exact")
 	}
+	if match.Method != "" {
+		if !p.httpMethodMatch || !p.fixedHTTPResponses {
+			return cloud.HTTPPathMatch{}, errors.New("HTTP method matching requires --octavia-http-method-match and --octavia-fixed-http-responses")
+		}
+		if !cloud.ValidHTTPMethod(match.Method) {
+			return cloud.HTTPPathMatch{}, fmt.Errorf("unknown HTTP method %q", match.Method)
+		}
+	}
 	headers, err := cloud.NormalizeHTTPHeaderMatches(match.Headers)
 	if err != nil {
 		return cloud.HTTPPathMatch{}, err
@@ -418,6 +430,12 @@ func (p *Provider) normalizeHTTPMatch(match cloud.HTTPPathMatch) (cloud.HTTPPath
 		match.PathValue = "/"
 	}
 	return match, nil
+}
+
+// A method-only root prefix has no path constraint. In particular, CONNECT
+// authority targets and OPTIONS * do not begin with a slash.
+func usesHTTPPathPredicate(match cloud.HTTPPathMatch) bool {
+	return match.Method == "" || match.PathType != cloud.PathMatchPrefix || match.PathValue != "/"
 }
 
 func httpPathPolicies(match cloud.HTTPPathMatch, grouped bool) ([]desiredPolicy, string, error) {
@@ -435,6 +453,9 @@ func httpPathPolicies(match cloud.HTTPPathMatch, grouped bool) ([]desiredPolicy,
 			return nil, "", err
 		}
 	}
+	if !usesHTTPPathPredicate(match) {
+		return []desiredPolicy{{role: rolePolicyPrefix, position: 1, method: match.Method, headers: match.Headers}}, hostnameRuleValue, nil
+	}
 	role := rolePolicyExact
 	pattern := pathRules.Regex
 	if match.PathType == cloud.PathMatchPrefix {
@@ -450,6 +471,7 @@ func httpPathPolicies(match cloud.HTTPPathMatch, grouped bool) ([]desiredPolicy,
 		policies = policiesFor(pathRules.Exact, pathRules.Prefix)
 	}
 	for i := range policies {
+		policies[i].method = match.Method
 		policies[i].headers = match.Headers
 	}
 	return policies, hostnameRuleValue, nil
@@ -470,18 +492,29 @@ func rulesFor(policy desiredPolicy, hostnameRuleValue string) []desiredRule {
 	if policy.matchKey != "" {
 		hostnameRuleValue = policy.hostnameRuleValue
 	}
-	rules := []desiredRule{{
-		role:        policyRuleRole(policy, roleRulePath, ""),
-		ruleType:    l7policies.TypePath,
-		compareType: policy.compareType,
-		value:       policy.path,
-	}}
+	var rules []desiredRule
+	if policy.path != "" {
+		rules = append(rules, desiredRule{
+			role:        policyRuleRole(policy, roleRulePath, ""),
+			ruleType:    l7policies.TypePath,
+			compareType: policy.compareType,
+			value:       policy.path,
+		})
+	}
 	if hostnameRuleValue != "" {
 		rules = append(rules, desiredRule{
 			role:        policyRuleRole(policy, roleRuleHost, ""),
 			ruleType:    l7policies.TypeHostName,
 			compareType: l7policies.CompareTypeRegex,
 			value:       hostnameRuleValue,
+		})
+	}
+	if policy.method != "" {
+		rules = append(rules, desiredRule{
+			role:        policyRuleRole(policy, openstackidentity.RoleRuleHTTPMethod, ""),
+			ruleType:    httpMethodRuleType,
+			compareType: l7policies.CompareTypeEqual,
+			value:       policy.method,
 		})
 	}
 	for _, header := range policy.headers {
