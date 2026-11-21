@@ -39,6 +39,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+const recordingProviderVIP = "192.0.2.10"
+
 type recordingProvider struct {
 	mu               sync.Mutex
 	gatewaySpecs     []cloud.GatewaySpec
@@ -51,7 +53,7 @@ func (p *recordingProvider) EnsureGateway(_ context.Context, spec cloud.GatewayS
 	p.gatewaySpecs = append(p.gatewaySpecs, spec)
 	return cloud.GatewayReadyResult(cloud.GatewayState{
 		LoadBalancerID: "lb-1",
-		VIPAddress:     "192.0.2.10",
+		VIPAddress:     recordingProviderVIP,
 		ListenerID:     "listener-1",
 	}), nil
 }
@@ -131,7 +133,7 @@ func (p *recordingProvider) ReconcileGatewayGraph(ctx context.Context, spec clou
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.graphSpecs = append(p.graphSpecs, spec)
-	result := cloud.GatewayGraphResult{Outcome: cloud.ReadyOutcome(), Gateway: cloud.GatewayReadyResult(cloud.GatewayState{LoadBalancerID: "lb-1", VIPAddress: "192.0.2.10", ListenerID: "listener-1"})}
+	result := cloud.GatewayGraphResult{Outcome: cloud.ReadyOutcome(), Gateway: cloud.GatewayReadyResult(cloud.GatewayState{LoadBalancerID: "lb-1", VIPAddress: recordingProviderVIP, ListenerID: "listener-1"})}
 	if spec.Gateway.Disposition == cloud.GraphDelete {
 		outcome, err := p.DeleteGateway(ctx, spec.Identity)
 		result.Outcome = outcome
