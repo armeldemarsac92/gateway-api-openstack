@@ -43,7 +43,7 @@ func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual obs
 		}
 		return plan, result, nil
 	}
-	if actual.scoped {
+	if actual.scoped && usesDefaultPool(actual.protocol) {
 		return p.buildScopedListenerGraphPlan(desired, actual)
 	}
 	if usesDefaultPool(actual.protocol) {
@@ -61,7 +61,16 @@ func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual obs
 	if !gatewayReady {
 		result.Gateway.Outcome = p.progressingOutcome("Waiting for the Gateway infrastructure")
 	}
-	if message := httpPolicyTransition(desired, actual); message != "" {
+	scopedHTTP := actual.scoped && actual.protocol == cloud.ListenerProtocolHTTP
+	var listenerChanges []graphMutation
+	var listenersByPort map[int]listeners.Listener
+	var portByListenerID map[string]int
+	if scopedHTTP {
+		listenersByPort, portByListenerID, listenerChanges = scopedHTTPListenerPlan(desired, actual)
+		if desired.spec.Gateway.Disposition == cloud.GraphEnsure {
+			result.Gateway = scopedHTTPGatewayResult(desired, actual, p.progressingOutcome("Waiting for the Gateway listeners"))
+		}
+	} else if message := httpPolicyTransition(desired, actual); message != "" {
 		result.Gateway.Outcome = p.progressingOutcome(message)
 		result.Gateway.HTTPPolicyTransition = true
 	}
@@ -70,21 +79,28 @@ func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual obs
 	ensures := make([]graphMutation, 0)
 	routeResults := make([]cloud.RouteGraphResult, 0, len(desired.routes))
 	canRestoreTraffic := true
-	holdPolicyOrder := false
-	policyPending := false
+	holdPolicyOrder := make(map[int]bool)
+	policyPending := make(map[int]bool)
 	for index, observed := range actual.routes {
-		policyPending = policyPending || slices.ContainsFunc(observed.policies, observedRoutePolicy.pending)
 		node := desired.spec.Routes[index]
-		if node.Disposition != cloud.GraphPreserve {
-			continue
+		for _, policy := range observed.policies {
+			port := portByListenerID[policy.policy.ListenerID]
+			if policy.pending() {
+				policyPending[port] = true
+				holdPolicyOrder[port] = true
+				canRestoreTraffic = false
+			}
+			if node.Disposition == cloud.GraphPreserve {
+				holdPolicyOrder[port] = true
+			} else if target := scopedHTTPRoutePort(desired.routes[index]); target != 0 && target != port {
+				holdPolicyOrder[port], holdPolicyOrder[target] = true, true
+			}
 		}
-		// A preserved fragment cannot authorize reopening its parent. If it
-		// has policies, their precedence is unknown until the next full ensure.
-		canRestoreTraffic = canRestoreTraffic && observed.pool == nil && len(observed.policies) == 0
-		holdPolicyOrder = holdPolicyOrder || len(observed.policies) != 0
+		// A preserved fragment cannot authorize reopening its parent.
+		if node.Disposition == cloud.GraphPreserve && (observed.pool != nil || len(observed.policies) != 0) {
+			canRestoreTraffic = false
+		}
 	}
-	holdPolicyOrder = holdPolicyOrder || policyPending
-	canRestoreTraffic = canRestoreTraffic && !policyPending
 	for index, route := range desired.routes {
 		observed := observedRouteGraph{}
 		if index < len(actual.routes) {
@@ -94,38 +110,61 @@ func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual obs
 		var routePlan []routeMutation
 		var backendIssue, ensureHold string
 		node := desired.spec.Routes[index]
-		switch node.Disposition {
-		case cloud.GraphDelete:
-			routePlan = buildRouteDeletionPlan(observed)
-			backendIssue = observed.backendProvisioningIssue(true, false)
-		case cloud.GraphEnsure:
-			// Desired routes share the validated Gateway requirements. Their
-			// recorded IDs must still match this observation before planning.
-			if err := validateRouteGatewayIDs(route.spec.Gateway, actual.state); err != nil {
+		port := scopedHTTPRoutePort(route)
+		var observedPort int
+		if len(observed.policies) != 0 {
+			observedPort = portByListenerID[observed.policies[0].policy.ListenerID]
+		}
+		var listenerID string
+		frontendReady := gatewayReady
+		if scopedHTTP {
+			listenerID = listenersByPort[port].ID
+			frontendReady = slices.Contains(result.Gateway.ScopedListenerReadyPorts, port)
+		}
+		if node.Disposition == cloud.GraphEnsure {
+			state := actual.state
+			if scopedHTTP {
+				state.ListenerID = listenerID
+			}
+			if err := validateRouteGatewayIDs(route.spec.Gateway, state); err != nil {
 				return nil, result, &cloud.GraphError{Identity: route.spec.Identity, Err: err}
 			}
-			route.spec.Gateway = actual.state
+			route.spec.Gateway = state
+		}
+		relocating := node.Disposition == cloud.GraphEnsure && observedPort != 0 && port != observedPort
+		withdrawing := node.Disposition == cloud.GraphDelete || relocating
+		switch {
+		case withdrawing:
+			if relocating {
+				// Octavia cannot move a policy to another listener. Remove its
+				// original policies before creating any on the new port.
+				routePlan = buildRouteDeletionPlan(observedRouteGraph{policies: observed.policies})
+			} else {
+				routePlan = buildRouteDeletionPlan(observed)
+				backendIssue = observed.backendProvisioningIssue(true, scopedHTTP)
+			}
+		case node.Disposition == cloud.GraphEnsure:
 			routePlan, routeResult.State, err = buildRouteEnsurePlan(route, observed)
 			if err != nil {
 				return nil, result, &cloud.GraphError{Identity: route.spec.Identity, Err: err}
 			}
-			if actual.listener == nil || actual.loadBalancer == nil {
+			if actual.loadBalancer == nil || !scopedHTTP && actual.listener == nil || scopedHTTP && listenerID == "" {
 				// The desired route has been validated, but its resources cannot
 				// be created until both prerequisites have been observed.
 				routePlan = nil
 			}
-			if !gatewayReady {
+			if !frontendReady {
 				routeResult.Outcome = p.progressingOutcome("Waiting for the Gateway infrastructure")
 			}
 			if slices.ContainsFunc(observed.policies, observedRoutePolicy.pending) {
 				ensureHold = "Waiting for Octavia L7 policy or rule provisioning"
 				routePlan = nil
-			} else if backendIssue := observed.backendProvisioningIssue(false, false); backendIssue != "" {
+			} else if backendIssue := observed.backendProvisioningIssue(false, scopedHTTP); backendIssue != "" {
 				ensureHold = backendIssue
 				canRestoreTraffic = false
 				// A blocked earlier route can leave an empty slot in the policy
 				// order. Octavia would clamp a subsequent insert to the end.
-				holdPolicyOrder = holdPolicyOrder || !policyPositionsMatch(route.policies, observed.policies)
+				holdPolicyOrder[port] = holdPolicyOrder[port] || !policyPositionsMatch(route.policies, observed.policies)
 			}
 		}
 		if len(routePlan) != 0 {
@@ -135,16 +174,16 @@ func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual obs
 			routeResult.Outcome = p.progressingOutcome(ensureHold)
 		}
 		for _, step := range routePlan {
-			mutation := graphMutation{kind: graphRouteMutation, routeIndex: index, route: step, message: step.message()}
+			mutation := graphMutation{kind: graphRouteMutation, routeIndex: index, route: step, listenerID: listenerID, message: step.message()}
 			switch {
-			case node.Disposition == cloud.GraphDelete && step.kind == routeMutationDisablePolicy:
+			case withdrawing && step.kind == routeMutationDisablePolicy:
 				if step.retry {
 					deleteDisableRetries = append(deleteDisableRetries, mutation)
 				} else {
 					deleteDisables = append(deleteDisables, mutation)
 				}
-			case node.Disposition == cloud.GraphDelete:
-				if policyPending {
+			case withdrawing:
+				if policyPending[observedPort] {
 					routeResult.Outcome = p.progressingOutcome("Waiting for Octavia L7 policy or rule provisioning before cleanup")
 				} else if backendIssue != "" && (step.kind == routeMutationDeleteMember || step.kind == routeMutationDeleteMonitor || step.kind == routeMutationDeletePool) {
 					routeResult.Outcome = p.progressingOutcome(backendIssue)
@@ -155,7 +194,7 @@ func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual obs
 				disables = append(disables, mutation)
 			case ensureHold != "":
 				continue
-			case holdPolicyOrder && (step.kind == routeMutationMovePolicy || step.kind == routeMutationCreatePolicy || step.kind == routeMutationEnablePolicy):
+			case holdPolicyOrder[port] && (step.kind == routeMutationMovePolicy || step.kind == routeMutationCreatePolicy || step.kind == routeMutationEnablePolicy):
 				routeResult.Outcome = p.progressingOutcome("Waiting for the HTTPRoute policy order")
 			default:
 				ensures = append(ensures, mutation)
@@ -174,12 +213,19 @@ func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual obs
 	plan = append(plan, deleteDisableRetries...)
 	plan = append(plan, deletions...)
 	plan = append(plan, disables...)
+	plan = append(plan, listenerChanges...)
 	// Ensured routes are ranked, and each route's policies are ordered within
 	// its rank. Each new call refreshes the list after Octavia shifts positions.
 	// Filling this prefix first keeps inserts and moves within the current list.
 	plan = append(plan, ensures...)
 	if canRestoreTraffic {
-		restore, err := buildGatewayTrafficRestorationPlan(desired, actual)
+		var restore []graphMutation
+		var err error
+		if scopedHTTP {
+			restore, err = buildScopedHTTPTrafficRestorationPlan(desired, actual)
+		} else {
+			restore, err = buildGatewayTrafficRestorationPlan(desired, actual)
+		}
 		if err != nil {
 			return nil, result, err
 		}
@@ -406,6 +452,7 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 	case graphRouteMutation:
 		route := desired.routes[step.routeIndex]
 		route.spec.Gateway = actual.state
+		route.spec.Gateway.ListenerID = listenerID
 		return p.executeRouteMutation(ctx, route, step.route)
 	case graphEnableListener, graphDisableListener:
 		enabled := step.kind == graphEnableListener

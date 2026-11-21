@@ -104,7 +104,7 @@ func GatewayHasControllerBinding(config Config, gateway *gatewayv1.Gateway) bool
 // GatewayBindingMetadataEqual compares only Gateway metadata owned by this
 // controller.
 func GatewayBindingMetadataEqual(config Config, left, right *gatewayv1.Gateway) bool {
-	for _, protocol := range []gatewayv1.ProtocolType{gatewayv1.TCPProtocolType, gatewayv1.UDPProtocolType} {
+	for _, protocol := range scopedListenerProtocols {
 		key := config.GatewayListenerModeAnnotation(protocol)
 		leftMode, leftHasMode := left.Annotations[key]
 		rightMode, rightHasMode := right.Annotations[key]
@@ -158,7 +158,7 @@ func RouteClaimsGateway(config Config, route client.Object, identity cloud.Ident
 	boundUID := route.GetAnnotations()[config.RouteGatewayUIDAnnotation()]
 	checkpoint := config.RouteBindingFinalizer(identity.ClusterID, identity.OpenStackProjectID, identity.GatewayNamespace, identity.GatewayName, identity.GatewayUID)
 	return boundUID != "" && boundUID == identity.GatewayUID || slices.ContainsFunc(route.GetFinalizers(), func(finalizer string) bool {
-		return finalizer == checkpoint || strings.HasPrefix(finalizer, checkpoint+"-u-") || strings.HasPrefix(finalizer, checkpoint+"-t-")
+		return finalizer == checkpoint || strings.HasPrefix(finalizer, checkpoint+"-u-") || strings.HasPrefix(finalizer, checkpoint+"-t-") || strings.HasPrefix(finalizer, checkpoint+"-h-")
 	}) ||
 		boundUID == "" && slices.Contains(route.GetFinalizers(), config.RouteFinalizer()) &&
 			route.GetAnnotations()[config.RouteGatewayNamespaceAnnotation()] == identity.GatewayNamespace &&
@@ -226,12 +226,16 @@ func StoredRouteIdentity(config Config, route client.Object) (cloud.Identity, bo
 		identity.GatewayUID,
 	)
 	if hasScopedRouteAnchor(config, route) {
-		_, tcp := annotations[config.RouteListenerPortAnnotation(gatewayv1.TCPProtocolType)]
-		_, udp := annotations[config.RouteListenerPortAnnotation(gatewayv1.UDPProtocolType)]
+		anchors := 0
+		for _, protocol := range scopedListenerProtocols {
+			if _, exists := annotations[config.RouteListenerPortAnnotation(protocol)]; exists {
+				anchors++
+			}
+		}
 		protocol := scopedRouteProtocol(route)
 		lifecycle := annotations[config.RouteLifecycleAnnotation()]
 		port := ScopedRouteAnchor(config, route, protocol)
-		if tcp == udp || tcp && protocol != gatewayv1.TCPProtocolType || udp && protocol != gatewayv1.UDPProtocolType ||
+		if anchors != 1 || protocol == "" ||
 			port < 1 || port > 65535 ||
 			annotations[config.RouteClusterIDAnnotation()] != identity.ClusterID || annotations[config.RouteProjectIDAnnotation()] != identity.OpenStackProjectID ||
 			!controllerutil.ContainsFinalizer(route, config.RouteFinalizer()) || (lifecycle != RouteAttached && lifecycle != RouteDetaching) {
@@ -318,7 +322,7 @@ func ClearRouteBinding(config Config, route client.Object) {
 	for _, key := range []string{config.RouteLifecycleAnnotation(), config.RouteGatewayNamespaceAnnotation(),
 		config.RouteGatewayNameAnnotation(), config.RouteGatewayUIDAnnotation(), config.RouteClusterIDAnnotation(),
 		config.RouteProjectIDAnnotation(), config.RouteCleanupFailureAnnotation(), config.RouteListenerPortAnnotation(gatewayv1.TCPProtocolType),
-		config.RouteListenerPortAnnotation(gatewayv1.UDPProtocolType)} {
+		config.RouteListenerPortAnnotation(gatewayv1.UDPProtocolType), config.RouteListenerPortAnnotation(gatewayv1.HTTPProtocolType)} {
 		delete(annotations, key)
 	}
 	route.SetAnnotations(annotations)
@@ -335,23 +339,29 @@ func scopedRouteProtocol(route client.Object) gatewayv1.ProtocolType {
 		return gatewayv1.TCPProtocolType
 	case *gatewayv1.UDPRoute:
 		return gatewayv1.UDPProtocolType
+	case *gatewayv1.HTTPRoute:
+		return gatewayv1.HTTPProtocolType
 	default:
 		return ""
 	}
 }
 
 func hasScopedRouteAnchor(config Config, route client.Object) bool {
-	_, tcp := route.GetAnnotations()[config.RouteListenerPortAnnotation(gatewayv1.TCPProtocolType)]
-	_, udp := route.GetAnnotations()[config.RouteListenerPortAnnotation(gatewayv1.UDPProtocolType)]
-	return tcp || udp
+	return slices.ContainsFunc(scopedListenerProtocols, func(protocol gatewayv1.ProtocolType) bool {
+		_, exists := route.GetAnnotations()[config.RouteListenerPortAnnotation(protocol)]
+		return exists
+	})
 }
 
 func scopedRouteBindingFinalizer(config Config, route client.Object, protocol gatewayv1.ProtocolType, legacy string) string {
 	input := strings.Join([]string{route.GetNamespace(), route.GetName(), string(route.GetUID()), route.GetAnnotations()[config.RouteListenerPortAnnotation(protocol)]}, "\x00")
 	digest := sha256.Sum256([]byte(input))
 	prefix := "-u-"
-	if protocol == gatewayv1.TCPProtocolType {
+	switch protocol {
+	case gatewayv1.TCPProtocolType:
 		prefix = "-t-"
+	case gatewayv1.HTTPProtocolType:
+		prefix = "-h-"
 	}
 	return legacy + prefix + fmt.Sprintf("%x", digest[:6])
 }

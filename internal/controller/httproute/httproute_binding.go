@@ -19,6 +19,7 @@ package httproute
 import (
 	"context"
 	"reflect"
+	"strconv"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
@@ -165,7 +166,16 @@ func (r *Reconciler) clearStoredRouteBinding(
 }
 
 func (r *Reconciler) applyRouteBinding(route *gatewayv1.HTTPRoute, gateway *gatewayv1.Gateway) {
-	controller.ApplyRouteBinding(r.Config, route, controller.RouteIdentity(r.Config, gateway, route))
+	identity := controller.RouteIdentity(r.Config, gateway, route)
+	controller.ApplyRouteBinding(r.Config, route, identity)
+	port, _ := strconv.Atoi(gateway.Annotations[r.Config.GatewayListenerPortAnnotation()])
+	storedAnchor := controller.ScopedRouteAnchor(r.Config, route, gatewayv1.HTTPProtocolType)
+	if controller.GatewayListenerScope(r.Config, gateway) == gatewayv1.HTTPProtocolType || storedAnchor != 0 && storedAnchor == port {
+		// A Gateway edit can interrupt enrollment after this route was sealed.
+		controller.SealRouteAnchor(r.Config, route, identity, port)
+	} else if storedAnchor != 0 {
+		delete(route.Annotations, r.Config.RouteListenerPortAnnotation(gatewayv1.HTTPProtocolType))
+	}
 }
 
 func (r *Reconciler) clearRouteBinding(route *gatewayv1.HTTPRoute) {

@@ -51,11 +51,15 @@ import (
 // The Octavia API fixture stores the real Gophercloud writes. The stock render
 // and HAProxy operate on that inventory, including the administrative close.
 func TestHibiscusPrivateHTTPTraffic(t *testing.T) {
-	testHibiscusHTTPTraffic(t, false, nil)
+	testHibiscusHTTPTraffic(t, false, false, nil)
 }
 
 func TestHibiscusSharedHTTPTraffic(t *testing.T) {
-	testHibiscusHTTPTraffic(t, true, nil)
+	testHibiscusHTTPTraffic(t, true, false, nil)
+}
+
+func TestHibiscusDistinctHTTPListenerPorts(t *testing.T) {
+	testHibiscusHTTPTraffic(t, false, true, nil)
 }
 
 // Point the pilot at a private kind worker NodePort with one Ready Gateway API
@@ -73,7 +77,7 @@ func TestHibiscusKindWorkerHTTP(t *testing.T) {
 	if pod == "" || namespace == "" {
 		t.Fatal("HIBISCUS_KIND_POD and HIBISCUS_KIND_NAMESPACE must identify the Ready echo-basic pod")
 	}
-	testHibiscusHTTPTraffic(t, false, &kindHTTPBackend{endpoint: endpoint, pod: pod, namespace: namespace})
+	testHibiscusHTTPTraffic(t, false, false, &kindHTTPBackend{endpoint: endpoint, pod: pod, namespace: namespace})
 }
 
 type kindHTTPBackend struct {
@@ -203,21 +207,24 @@ func TestHibiscusTCPTraffic(t *testing.T) {
 	t.Logf("Stock HAProxy echoed all %d bytes after attach and forwarded no bytes after detach", len(payload))
 }
 
-func testHibiscusHTTPTraffic(t *testing.T, shared bool, worker *kindHTTPBackend) {
+func testHibiscusHTTPTraffic(t *testing.T, shared, distinct bool, worker *kindHTTPBackend) {
 	python, haproxy := os.Getenv("HIBISCUS_OCTAVIA_PYTHON"), os.Getenv("HIBISCUS_HAPROXY")
-	if worker == nil && python == "" && haproxy == "" {
+	renderAvailable := python != "" || haproxy != ""
+	if worker == nil && !distinct && !renderAvailable {
 		t.Skip("set HIBISCUS_OCTAVIA_PYTHON and HIBISCUS_HAPROXY to run the loopback pilot")
 	}
-	if !filepath.IsAbs(python) || !filepath.IsAbs(haproxy) {
+	if (renderAvailable || worker != nil) && (!filepath.IsAbs(python) || !filepath.IsAbs(haproxy)) {
 		t.Fatal("HIBISCUS_OCTAVIA_PYTHON and HIBISCUS_HAPROXY must be absolute paths")
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	version, err := exec.CommandContext(ctx, haproxy, "-v").CombinedOutput()
-	if err != nil {
-		t.Fatalf("read HAProxy version: %v\n%s", err, version)
+	if renderAvailable {
+		version, err := exec.CommandContext(ctx, haproxy, "-v").CombinedOutput()
+		if err != nil {
+			t.Fatalf("read HAProxy version: %v\n%s", err, version)
+		}
+		t.Log(strings.SplitN(string(version), "\n", 2)[0])
 	}
-	t.Log(strings.SplitN(string(version), "\n", 2)[0])
 
 	const response = "hibiscus-node-backend"
 	var backendAddress netip.AddrPort
@@ -289,6 +296,43 @@ func testHibiscusHTTPTraffic(t *testing.T, shared bool, worker *kindHTTPBackend)
 	}
 	nextID := map[string]int{}
 	var writes []string
+	ids := func(items []record, match func(record) bool) []record {
+		refs := []record{}
+		for _, item := range items {
+			if match(item) {
+				refs = append(refs, record{"id": item["id"]})
+			}
+		}
+		return refs
+	}
+	var disagreePoolListeners string
+	readback := func(collection string, item record) record {
+		if !distinct {
+			return item
+		}
+		data := maps.Clone(item)
+		id := item["id"]
+		switch collection {
+		case lb:
+			data["listeners"] = ids(list(listener), func(child record) bool { return child["loadbalancer_id"] == id })
+			data["pools"] = ids(list(pool), func(child record) bool { return child["loadbalancer_id"] == id })
+		case listener:
+			data["l7policies"] = ids(orderedPolicies(id), func(record) bool { return true })
+		case policy:
+			data["rules"] = ids(list(policy+"/"+id.(string)+"/rules"), func(record) bool { return true })
+		case pool:
+			data["listeners"] = ids(list(listener), func(entry record) bool {
+				return entry["default_pool_id"] == id || slices.ContainsFunc(orderedPolicies(entry["id"]), func(policy record) bool {
+					return policy["redirect_pool_id"] == id && policy["admin_state_up"] == true && len(list("/v2/lbaas/l7policies/"+policy["id"].(string)+"/rules")) != 0
+				})
+			})
+			if id == disagreePoolListeners {
+				data["listeners"] = []record{}
+			}
+			data["members"] = ids(list(pool+"/"+id.(string)+"/members"), func(record) bool { return true })
+		}
+		return data
+	}
 	cloudAPI := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		resource := req.URL.Path
 		if resource == "/v2.0/floatingips" && req.Method == http.MethodGet {
@@ -315,7 +359,7 @@ func testHibiscusHTTPTraffic(t *testing.T, shared bool, worker *kindHTTPBackend)
 		}
 		if req.Method == http.MethodGet {
 			if id != "" && entry != nil {
-				safetyWriteJSON(t, w, record{kind.key: entry})
+				safetyWriteJSON(t, w, record{kind.key: readback(collection, entry)})
 				return
 			}
 			parentID := req.URL.Query().Get(kind.parentKey)
@@ -335,6 +379,9 @@ func testHibiscusHTTPTraffic(t *testing.T, shared bool, worker *kindHTTPBackend)
 				tags := req.URL.Query().Get("tags")
 				return tags != "" && !openstackidentity.HasAllTags(pilotTags(data["tags"]), strings.Split(tags, ","))
 			})
+			for i, item := range items {
+				items[i] = readback(collection, item)
+			}
 			safetyWriteJSON(t, w, record{name: items})
 			return
 		}
@@ -390,7 +437,7 @@ func testHibiscusHTTPTraffic(t *testing.T, shared bool, worker *kindHTTPBackend)
 				inventory[resource] = data
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusCreated)
-			} else if req.Method == http.MethodPut && entry != nil && (resource == gateway || collection == policy) {
+			} else if req.Method == http.MethodPut && entry != nil && (resource == gateway || collection == policy || distinct && collection == listener) {
 				if position, exists := data["position"]; collection == policy && exists {
 					placePolicy(entry, position)
 					delete(data, "position")
@@ -407,7 +454,8 @@ func testHibiscusHTTPTraffic(t *testing.T, shared bool, worker *kindHTTPBackend)
 			safetyWriteJSON(t, w, record{kind.key: data})
 		case http.MethodDelete:
 			if entry == nil || inventory[gateway]["provisioning_status"] != "ACTIVE" ||
-				((collection == lb || collection == listener) && inventory[gateway]["admin_state_up"] != false) {
+				((collection == lb || collection == listener && !distinct) && inventory[gateway]["admin_state_up"] != false) ||
+				collection == listener && len(orderedPolicies(entry["id"])) != 0 {
 				reject()
 				return
 			}
@@ -469,6 +517,136 @@ func testHibiscusHTTPTraffic(t *testing.T, shared bool, worker *kindHTTPBackend)
 	}
 	if result := converge(provider, spec); len(result.Routes) != 1 || result.Routes[0].Result.Outcome.State != cloud.OutcomeReady {
 		t.Fatalf("route did not converge: %#v, writes %v", result, writes)
+	}
+	if distinct {
+		secondReservation, err := net.Listen("tcp4", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = secondReservation.Close() }()
+		secondAddress := secondReservation.Addr().(*net.TCPAddr)
+		const otherResponse = "hibiscus-other-port-backend"
+		secondBackend, _ := startPilotBackend(t, otherResponse)
+		second := spec.Routes[0]
+		second.Spec.Identity.RouteName, second.Spec.Identity.RouteUID = "other-port", "other-port-uid"
+		second.Spec.Members = []cloud.Member{{Address: secondBackend.IP.String(), Port: secondBackend.Port}}
+		second.Spec.ScopedListenerPorts = []int{secondAddress.Port}
+		spec.Gateway.Spec.ListenerProtocol = cloud.ListenerProtocolHTTP
+		spec.Gateway.Spec.ScopedListeners = []cloud.ScopedListener{
+			{Name: "first", Port: frontendAddress.Port}, {Name: "second", Port: secondAddress.Port},
+		}
+		firstState := routeStateFromInventoryForTest(t, orderedPolicies("listener"), inventory, pool, int(backendAddress.Port()))
+		spec.Routes[0].Spec.ScopedListenerPorts = []int{frontendAddress.Port}
+		spec.Routes = append(spec.Routes, second)
+		converge(newProvider(), spec)
+		if len(list(listener)) != 2 || inventory[listener+"/listener"]["protocol_port"] != float64(frontendAddress.Port) ||
+			inventory[listener+"/listener-2"]["protocol_port"] != float64(secondAddress.Port) ||
+			inventory[listener+"/listener"]["default_pool_id"] != nil || inventory[listener+"/listener-2"]["default_pool_id"] != nil {
+			t.Fatalf("unexpected physical listeners: %v", list(listener))
+		}
+		if state := routeStateFromInventoryForTest(t, orderedPolicies("listener"), inventory, pool, int(backendAddress.Port())); state != firstState {
+			t.Fatalf("adding the port changed the first route: %v -> %v", firstState, state)
+		}
+		secondState := routeStateFromInventoryForTest(t, orderedPolicies("listener-2"), inventory, pool, secondBackend.Port)
+		stableWrites := len(writes)
+		if outcome := reconcile(newProvider(), spec).Outcome; outcome.State != cloud.OutcomeReady || len(writes) != stableWrites {
+			t.Fatalf("restart changed converged graph: %v, %v", outcome, writes[stableWrites:])
+		}
+		// While an established route still has policies on its old port,
+		// neither port can certify the move, even if both listeners are active.
+		move := spec
+		move.Routes = slices.Clone(spec.Routes)
+		move.Routes[0].Spec.ScopedListenerPorts = []int{secondAddress.Port}
+		move.Routes[0].Spec.Precedence = 1
+		inventory[gateway]["provisioning_status"] = "PENDING_UPDATE"
+		if result := reconcile(newProvider(), move); !result.Gateway.HTTPPolicyTransition ||
+			len(result.Gateway.ScopedListenerReadyPorts) != 0 || len(writes) != stableWrites {
+			t.Fatalf("moving route exposed premature listener readiness: %#v", result)
+		}
+		inventory[gateway]["provisioning_status"] = "ACTIVE"
+		probe := func(expectFirst bool) {
+			t.Helper()
+			if !renderAvailable {
+				return
+			}
+			data, err := json.Marshal(inventory)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stop := startPilotHAProxy(t, ctx, python, haproxy, data)
+			defer stop()
+			client := &http.Client{Timeout: time.Second}
+			for _, test := range []struct{ address, response string }{
+				{frontendAddress.String(), response}, {secondAddress.String(), otherResponse},
+			} {
+				req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+test.address+"/api", nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				req.Host = "api.example.com"
+				got, err := client.Do(req)
+				if !expectFirst && test.address == frontendAddress.String() {
+					if !errors.Is(err, syscall.ECONNREFUSED) {
+						t.Fatalf("removed physical port still accepts requests: %v, %v", got, err)
+					}
+					continue
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				body, err := io.ReadAll(got.Body)
+				err = errors.Join(err, got.Body.Close())
+				if err != nil || got.StatusCode != http.StatusOK || string(body) != test.response+" "+req.Host {
+					t.Fatalf("port %s forwarded to %d %q, want %q; %v", test.address, got.StatusCode, body, test.response, err)
+				}
+				t.Logf("HTTP %s /api -> %q", test.address, body)
+			}
+		}
+		if err := errors.Join(reservation.Close(), secondReservation.Close()); err != nil {
+			t.Fatal(err)
+		}
+		probe(true)
+		spec.Gateway.Spec.ScopedListeners = spec.Gateway.Spec.ScopedListeners[1:]
+		spec.Routes[0].Disposition = cloud.GraphDelete
+		spec.Routes[0].Spec = cloud.RouteSpec{Identity: route.Identity}
+		disagreePoolListeners = firstState[1]
+		if _, err := provider.ReconcileGatewayGraph(ctx, spec); err == nil || len(writes) != stableWrites {
+			t.Fatalf("cleanup began before verifying the first port's pool association: %v, writes %v", err, writes[stableWrites:])
+		}
+		disagreePoolListeners = ""
+		inventory[gateway]["provisioning_status"] = "PENDING_UPDATE"
+		inventory[listener+"/listener"]["provisioning_status"] = "PENDING_DELETE"
+		if result := reconcile(newProvider(), spec); result.Outcome.State != cloud.OutcomeProgressing || len(writes) != stableWrites ||
+			!slices.Equal(result.Gateway.ScopedListenerReadyPorts, []int{secondAddress.Port}) ||
+			result.Routes[0].Identity != second.Spec.Identity || !result.Routes[0].Result.ObservationDeferred {
+			t.Fatalf("pending first port lost proof for the serving sibling: %#v, writes %v", result, writes[stableWrites:])
+		}
+		inventory[gateway]["provisioning_status"] = "ACTIVE"
+		inventory[listener+"/listener"]["provisioning_status"] = "ACTIVE"
+		converge(newProvider(), spec)
+		if len(list(listener)) != 1 || len(list(pool)) != 1 ||
+			routeStateFromInventoryForTest(t, orderedPolicies("listener-2"), inventory, pool, secondBackend.Port) != secondState ||
+			inventory[gateway]["admin_state_up"] != true {
+			t.Fatalf("removing the legacy port disrupted the remaining route: writes %v", writes[stableWrites:])
+		}
+		probe(false)
+		// Whole-Gateway deletion still closes forwarding before changing L7
+		// predicates and observes the sibling exclusively through its port tag.
+		spec.Gateway = cloud.GatewayGraphNode{Disposition: cloud.GraphDelete, Spec: cloud.GatewaySpec{
+			ListenerProtocol: cloud.ListenerProtocolHTTP, ListenerPort: frontendAddress.Port, ScopedListeners: []cloud.ScopedListener{},
+		}}
+		spec.Routes[1].Disposition = cloud.GraphPreserve
+		beforeDelete := len(writes)
+		if result := reconcile(newProvider(), spec); result.Outcome.State != cloud.OutcomeProgressing ||
+			!slices.Equal(writes[beforeDelete:], []string{"PUT " + gateway}) || inventory[gateway]["admin_state_up"] != false {
+			t.Fatalf("scoped Gateway teardown did not close forwarding first: %#v, writes %v", result, writes[beforeDelete:])
+		}
+		inventory[gateway]["provisioning_status"] = "ACTIVE"
+		converge(newProvider(), spec)
+		if len(inventory) != len(protected) {
+			t.Fatalf("scoped Gateway teardown left resources: %v", inventory)
+		}
+		return
 	}
 	driftedInventory := maps.Clone(inventory)
 	driftedListener := maps.Clone(inventory[listener+"/listener"])
@@ -665,6 +843,22 @@ func testHibiscusHTTPTraffic(t *testing.T, shared bool, worker *kindHTTPBackend)
 		t.Fatalf("final inventory = %v, want unchanged protected controls %v", after, controls)
 	}
 	t.Logf("Gateway traffic refused before and after owned cleanup %v; Magnum API server and OCCM load balancers unchanged", writes[initialWrites:])
+}
+
+func routeStateFromInventoryForTest(t *testing.T, policies []map[string]any, inventory map[string]map[string]any, pool string, memberPort int) [2]string {
+	t.Helper()
+	if len(policies) != 1 || policies[0]["position"] != 1 || policies[0]["admin_state_up"] != true {
+		t.Fatalf("expected exactly one enabled policy in position one, got %v", policies)
+	}
+	policy := policies[0]
+	poolID := policy["redirect_pool_id"].(string)
+	for resource, record := range inventory {
+		if path.Dir(resource) == pool+"/"+poolID+"/members" && record["protocol_port"] == float64(memberPort) {
+			return [2]string{policy["id"].(string), poolID}
+		}
+	}
+	t.Fatalf("policy %v does not reach backend port %d", policy["id"], memberPort)
+	return [2]string{}
 }
 
 func startPilotBackend(t *testing.T, response string) (*net.TCPAddr, *atomic.Int32) {

@@ -61,8 +61,14 @@ func (r *Reconciler) gatewaySpec(gateway *gatewayv1.Gateway, listeners []*gatewa
 	setGatewayAddressRequest(&spec, gateway)
 	if controller.GatewayListenerScope(r.Config, gateway) != "" {
 		// Snapshot validation already verified the frozen listener port and topology.
+		spec.ListenerProtocol = string(listener.Protocol)
 		spec.ListenerPort, _ = strconv.Atoi(gateway.Annotations[r.Config.GatewayListenerPortAnnotation()])
+		seenPorts := make(map[gatewayv1.PortNumber]bool, len(listeners))
 		for _, listener := range listeners {
+			if seenPorts[listener.Port] {
+				continue
+			}
+			seenPorts[listener.Port] = true
 			spec.ScopedListeners = append(spec.ScopedListeners, cloud.ScopedListener{
 				Name: resourceDisplayName(strconv.Itoa(int(listener.Port)), gateway.Namespace, gateway.Name, string(listener.Name)),
 				Port: int(listener.Port),

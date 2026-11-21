@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strconv"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -181,7 +182,7 @@ func (r *Reconciler) buildRouteModelFromInputs(
 	if err != nil {
 		return cloud.RouteSpec{}, err
 	}
-	return cloud.RouteSpec{
+	spec := cloud.RouteSpec{
 		Identity: controller.RouteIdentity(r.Config, gateway, route),
 		GatewayRequirements: cloud.GatewayRequirements{
 			Provider:          "amphora",
@@ -200,7 +201,13 @@ func (r *Reconciler) buildRouteModelFromInputs(
 		PathType:                cloud.PathMatchType(match.Match.PathType),
 		PathValue:               match.Match.PathValue,
 		Members:                 members,
-	}, nil
+	}
+	if controller.GatewayListenerScope(r.Config, gateway) == gatewayv1.HTTPProtocolType {
+		spec.GatewayRequirements.ListenerPort, _ = strconv.Atoi(gateway.Annotations[r.Config.GatewayListenerPortAnnotation()])
+		spec.GatewayRequirements.ListenerProtocol = cloud.ListenerProtocolHTTP
+		spec.ScopedListenerPorts = []int{int(listener.Port)}
+	}
+	return spec, nil
 }
 
 // supportedRouteModel lowers only the currently implemented graph shape. Model

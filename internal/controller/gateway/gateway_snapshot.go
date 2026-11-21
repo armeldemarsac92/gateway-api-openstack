@@ -272,19 +272,22 @@ func (r *Reconciler) gatewayListenerNeedsReplacement(gateway *gatewayv1.Gateway,
 
 func (r *Reconciler) desiredListenerPort(gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) string {
 	stored := gateway.Annotations[r.Config.GatewayListenerPortAnnotation()]
-	if stored != "" && isL4Listener(listener.Protocol) && r.boundListenerProtocol(gateway) == listener.Protocol &&
-		(controller.GatewayListenerScope(r.Config, gateway) == listener.Protocol || hasMultipleTransportListeners(gateway)) {
+	if stored != "" && r.boundListenerProtocol(gateway) == listener.Protocol && r.gatewayUsesListenerScope(gateway) {
 		return stored
 	}
 	return strconv.Itoa(int(listener.Port))
 }
 
 func (r *Reconciler) gatewayUsesListenerScope(gateway *gatewayv1.Gateway) bool {
-	return hasMultipleTransportListeners(gateway) || controller.GatewayListenerScope(r.Config, gateway) != ""
+	return requestsListenerScope(gateway) || controller.GatewayListenerScope(r.Config, gateway) != ""
 }
 
 func (r *Reconciler) gatewayNeedsListenerScope(gateway *gatewayv1.Gateway) bool {
-	return hasMultipleTransportListeners(gateway) && controller.GatewayListenerScope(r.Config, gateway) == ""
+	return requestsListenerScope(gateway) && controller.GatewayListenerScope(r.Config, gateway) == ""
+}
+
+func requestsListenerScope(gateway *gatewayv1.Gateway) bool {
+	return hasMultipleTransportListeners(gateway) || HasMultipleHTTPListenerPorts(gateway)
 }
 
 func (r *Reconciler) boundListenerProtocol(gateway *gatewayv1.Gateway) gatewayv1.ProtocolType {

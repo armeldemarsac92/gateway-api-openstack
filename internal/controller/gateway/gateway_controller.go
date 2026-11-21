@@ -217,7 +217,9 @@ func (r *Reconciler) reconcileGatewayGraph(
 		if errors.As(err, &componentError) && componentError.Identity.RouteUID != "" {
 			if graphResult.Gateway.HTTPPolicyTransition {
 				message := controller.ProviderProgressMessage(graphResult.Gateway.Outcome, "Waiting for HTTP policy changes")
-				if statusErr := r.setGatewayProgressing(ctx, scope.gateway, decision.listener, message); statusErr != nil {
+				if statusErr := r.setGatewayListenerStatuses(ctx, scope.gateway, decision.listener,
+					metav1.ConditionFalse, gatewayv1.GatewayReasonNoResources, gatewayv1.ListenerReasonPending,
+					message, message, true, graphResult.Gateway.ScopedListenerReadyPorts); statusErr != nil {
 					return ctrl.Result{}, statusErr
 				}
 			}
@@ -246,7 +248,7 @@ func (r *Reconciler) reconcileGatewayGraph(
 		// A provider result must carry current proof for every desired port
 		// before the aggregate Gateway can be reported as programmed.
 		for _, listener := range scope.gateway.Spec.Listeners {
-			if progress.State == cloud.OutcomeReady && !slices.Contains(gatewayResult.ScopedListenerReadyPorts, int(listener.Port)) {
+			if listener.Protocol == decision.listener.Protocol && progress.State == cloud.OutcomeReady && !slices.Contains(gatewayResult.ScopedListenerReadyPorts, int(listener.Port)) {
 				progress = cloud.ProgressingOutcome("Waiting for listener readiness", time.Second)
 				break
 			}

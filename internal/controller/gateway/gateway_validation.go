@@ -250,17 +250,16 @@ func validateAddresses(addresses []gatewayv1.GatewaySpecAddress) *gatewayValidat
 	return nil
 }
 
-// HTTPListeners selects the HTTP sections of the stock profile. A single
-// section can coexist with rejected protocols on other ports. Multiple HTTP
-// sections require one port and pairwise distinct, encodable exact hostnames.
+// HTTPListeners selects the HTTP sections of the stock profile. Multiple
+// sections on each port must have pairwise distinct, encodable exact hostnames.
 func HTTPListeners(gateway *gatewayv1.Gateway) ([]*gatewayv1.Listener, error) {
 	var http []*gatewayv1.Listener
-	ports := make(map[gatewayv1.PortNumber]bool, len(gateway.Spec.Listeners))
+	ports := make(map[gatewayv1.PortNumber]int, len(gateway.Spec.Listeners))
 	duplicatePort := false
 	for i := range gateway.Spec.Listeners {
 		listener := &gateway.Spec.Listeners[i]
-		duplicatePort = duplicatePort || ports[listener.Port]
-		ports[listener.Port] = true
+		duplicatePort = duplicatePort || ports[listener.Port] != 0
+		ports[listener.Port]++
 		if listener.Protocol == gatewayv1.HTTPProtocolType {
 			http = append(http, listener)
 		}
@@ -274,26 +273,40 @@ func HTTPListeners(gateway *gatewayv1.Gateway) ([]*gatewayv1.Listener, error) {
 		}
 		return http, nil
 	}
-	if len(http) != len(gateway.Spec.Listeners) || len(ports) != 1 {
-		return nil, fmt.Errorf("multiple HTTP sections require a Gateway with only plain HTTP listeners sharing one port")
+	if len(http) != len(gateway.Spec.Listeners) {
+		return nil, fmt.Errorf("multiple HTTP sections require a Gateway with only plain HTTP listeners")
 	}
-	hostnames := make(map[gatewayv1.Hostname]bool, len(http))
+	hostnames := make(map[gatewayv1.PortNumber]map[gatewayv1.Hostname]bool)
 	names := make(map[gatewayv1.SectionName]bool, len(http))
 	for _, listener := range http {
-		if listener.TLS != nil || listener.Hostname == nil || strings.HasPrefix(string(*listener.Hostname), "*.") ||
-			hostnames[*listener.Hostname] || names[listener.Name] {
-			return nil, fmt.Errorf("same-port HTTP sections require plain HTTP with distinct names and exact hostnames")
-		}
 		if listener.Port < 1 || listener.Port > 65535 {
 			return nil, fmt.Errorf("listener port must be between 1 and 65535")
+		}
+		if listener.TLS != nil || names[listener.Name] {
+			return nil, fmt.Errorf("HTTP sections require plain HTTP with distinct names")
+		}
+		names[listener.Name] = true
+		if ports[listener.Port] == 1 {
+			continue
+		}
+		if hostnames[listener.Port] == nil {
+			hostnames[listener.Port] = make(map[gatewayv1.Hostname]bool)
+		}
+		if listener.Hostname == nil || strings.HasPrefix(string(*listener.Hostname), "*.") || hostnames[listener.Port][*listener.Hostname] {
+			return nil, fmt.Errorf("same-port HTTP sections require distinct exact hostnames")
 		}
 		if _, err := amphora.HostnameRuleValue(string(*listener.Hostname)); err != nil {
 			return nil, fmt.Errorf("unsupported shared HTTP listener hostname: %w", err)
 		}
-		hostnames[*listener.Hostname] = true
-		names[listener.Name] = true
+		hostnames[listener.Port][*listener.Hostname] = true
 	}
 	return http, nil
+}
+
+// HasMultipleHTTPListenerPorts identifies Gateways that need per-port bindings.
+func HasMultipleHTTPListenerPorts(gateway *gatewayv1.Gateway) bool {
+	http, err := HTTPListeners(gateway)
+	return err == nil && slices.ContainsFunc(http, func(listener *gatewayv1.Listener) bool { return listener.Port != http[0].Port })
 }
 
 func listenerRouteKind(protocol gatewayv1.ProtocolType) gatewayv1.Kind {

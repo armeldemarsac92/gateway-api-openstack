@@ -129,12 +129,6 @@ func (r *Reconciler) buildRouteValidationSnapshotFromInputs(
 	if _, err := validateRouteStructure(snapshot.route); err != nil {
 		return routeValidationSnapshot{}, routeSnapshotRejection(purpose, err)
 	}
-	if purpose == routeSnapshotForBinding {
-		if err := r.validateRouteBindingTransition(snapshot); err != nil {
-			return routeValidationSnapshot{}, err
-		}
-	}
-
 	if inputs == nil {
 		routes, err := r.liveGraphRoutes(ctx, controller.GatewayIdentity(r.Config, snapshot.gateway))
 		if err != nil {
@@ -148,6 +142,14 @@ func (r *Reconciler) buildRouteValidationSnapshotFromInputs(
 	listener, err := selectRouteAttachment(snapshot.route, snapshot.gateway, candidates, inputs.input.Namespaces)
 	if err != nil {
 		return routeValidationSnapshot{}, routeSnapshotRejection(purpose, err)
+	}
+	if controller.GatewayListenerScope(r.Config, snapshot.gateway) == gatewayv1.HTTPProtocolType {
+		snapshot.gatewayProgrammed = listenerProgrammedForGeneration(snapshot.gateway, listener.Name)
+	}
+	if purpose == routeSnapshotForBinding {
+		if err := r.validateRouteBindingTransition(snapshot); err != nil {
+			return routeValidationSnapshot{}, err
+		}
 	}
 	desired, err := r.buildRouteModelFromInputs(ctx, r.APIReader, snapshot.route, snapshot.gateway, *listener, inputs)
 	if err != nil {
@@ -246,8 +248,14 @@ func (r *Reconciler) validateRouteSnapshotParent(
 	if err != nil {
 		return nil, routeSnapshotRejection(purpose, err)
 	}
-	if snapshot.gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] != strconv.Itoa(int(candidates[0].Port)) {
-		return nil, errHTTPRouteChanged
+	if controller.GatewayListenerScope(r.Config, snapshot.gateway) != gatewayv1.HTTPProtocolType {
+		if gatewaycontroller.HasMultipleHTTPListenerPorts(snapshot.gateway) {
+			snapshot.disposition = routeValidationGatewayPending
+			return nil, nil
+		}
+		if snapshot.gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] != strconv.Itoa(int(candidates[0].Port)) {
+			return nil, errHTTPRouteChanged
+		}
 	}
 	snapshot.gatewayProgrammed = gatewayProgrammedForGeneration(snapshot.gateway)
 	return candidates, nil
@@ -317,6 +325,16 @@ func gatewayProgrammedForGeneration(gateway *gatewayv1.Gateway) bool {
 	)
 	return programmed != nil && programmed.Status == metav1.ConditionTrue &&
 		programmed.ObservedGeneration == gateway.Generation
+}
+
+func listenerProgrammedForGeneration(gateway *gatewayv1.Gateway, section gatewayv1.SectionName) bool {
+	for _, listener := range gateway.Status.Listeners {
+		if listener.Name == section {
+			programmed := meta.FindStatusCondition(listener.Conditions, string(gatewayv1.ListenerConditionProgrammed))
+			return programmed != nil && programmed.Status == metav1.ConditionTrue && programmed.ObservedGeneration == gateway.Generation
+		}
+	}
+	return false
 }
 
 func routeSnapshotReadError(purpose routeSnapshotPurpose, err error) error {

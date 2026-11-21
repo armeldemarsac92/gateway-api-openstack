@@ -120,6 +120,7 @@ func (r *Reconciler) cleanupGateway(ctx context.Context, scope *gatewayScope) (c
 	delete(scope.gateway.Annotations, r.Config.GatewayListenerProtocolAnnotation())
 	delete(scope.gateway.Annotations, r.Config.GatewayListenerModeAnnotation(gatewayv1.UDPProtocolType))
 	delete(scope.gateway.Annotations, r.Config.GatewayListenerModeAnnotation(gatewayv1.TCPProtocolType))
+	delete(scope.gateway.Annotations, r.Config.GatewayListenerModeAnnotation(gatewayv1.HTTPProtocolType))
 	delete(scope.gateway.Annotations, r.Config.GatewayClusterIDAnnotation())
 	delete(scope.gateway.Annotations, r.Config.GatewayProjectIDAnnotation())
 	if err := r.patchGatewayMetadata(ctx, scope); err != nil {

@@ -151,7 +151,25 @@ func (r *Reconciler) routeForwardingEstablished(route *gatewayv1.HTTPRoute, pare
 	}
 	parent := parents[0]
 	listeners, err := gatewaycontroller.SupportedListeners(parent.gateway)
-	if err != nil || parent.gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] != strconv.Itoa(int(listener.Port)) {
+	if err != nil {
+		return false
+	}
+	gatewayProgrammed := gatewayProgrammedForGeneration(parent.gateway)
+	if controller.GatewayListenerScope(r.Config, parent.gateway) == gatewayv1.HTTPProtocolType {
+		if controller.ValidateGatewayBinding(r.Config, parent.gateway) != nil {
+			return false
+		}
+		// An explicit port stays fixed for this Route revision. A section name
+		// needs current provider proof because the section may change ports.
+		if parent.ref.SectionName != nil {
+			gatewayProgrammed = listenerProgrammedForGeneration(parent.gateway, listener.Name)
+			if parent.ref.Port == nil && !gatewayProgrammed {
+				return false
+			}
+		} else if parent.ref.Port == nil && (!gatewayProgrammed || gatewaycontroller.HasMultipleHTTPListenerPorts(parent.gateway)) {
+			return false
+		}
+	} else if parent.gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] != strconv.Itoa(int(listener.Port)) {
 		return false
 	}
 	if r.currentRouteProgrammedCondition(route, parent.ref) == nil {
@@ -163,7 +181,7 @@ func (r *Reconciler) routeForwardingEstablished(route *gatewayv1.HTTPRoute, pare
 	// Namespace labels can move an unsectioned route between shared sections
 	// without a new Gateway or Route generation. In that case a current status
 	// alone cannot prove which exact Host predicate was installed.
-	if (len(listeners) == 1 || parent.ref.SectionName != nil) && gatewayProgrammedForGeneration(parent.gateway) {
+	if (len(listeners) == 1 || parent.ref.SectionName != nil) && gatewayProgrammed {
 		return true
 	}
 	// The previous listener could select any declared hostname. Keep

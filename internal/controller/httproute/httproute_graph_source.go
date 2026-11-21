@@ -191,6 +191,7 @@ func (r *Reconciler) liveGraphRoutes(ctx context.Context, identity cloud.Identit
 
 type routeGraphBinding struct {
 	route, boundNamespace, boundName, boundUID, lifecycle, project, cluster, finalizers string
+	anchor                                                                              int
 }
 
 func (r *Reconciler) routeGraphBindings(routes []gatewayv1.HTTPRoute, identity cloud.Identity) []routeGraphBinding {
@@ -207,6 +208,7 @@ func (r *Reconciler) routeGraphBindings(routes []gatewayv1.HTTPRoute, identity c
 			lifecycle:      route.Annotations[r.Config.RouteLifecycleAnnotation()],
 			project:        route.Annotations[r.Config.RouteProjectIDAnnotation()],
 			cluster:        route.Annotations[r.Config.RouteClusterIDAnnotation()],
+			anchor:         controller.ScopedRouteAnchor(r.Config, &route, gatewayv1.HTTPProtocolType),
 		}
 		var finalizers []string
 		for _, finalizer := range route.Finalizers {

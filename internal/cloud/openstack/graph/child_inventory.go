@@ -75,3 +75,19 @@ func crossCheckChildInventory[T any](parentKind, parentID, kind string, referenc
 	}
 	return nil
 }
+
+// Scoped HTTP cleanup requires both sides of each relationship to be
+// present, including an explicit empty inventory after an edge is removed.
+func crossCheckCompleteChildInventory[T any](parentKind, parentID, kind string, referenced, listed []T, idOf func(T) string) error {
+	if referenced == nil {
+		return cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady,
+			fmt.Errorf("%s %s omitted its %s inventory", parentKind, parentID, kind))
+	}
+	if err := crossCheckChildInventory(parentKind, parentID, kind, referenced, listed, idOf); err != nil {
+		return err
+	}
+	if len(referenced) != len(listed) {
+		return fmt.Errorf("%w: %s %s has duplicate %s references", cloud.ErrOwnershipConflict, parentKind, parentID, kind)
+	}
+	return nil
+}

@@ -261,8 +261,8 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 		return invalid("Gateway listener protocol must be HTTP, TCP or UDP")
 	}
 	if spec.Gateway.Spec.ScopedListeners != nil {
-		if !usesDefaultPool(protocol) || spec.Gateway.Spec.ListenerPort < 1 || spec.Gateway.Spec.ListenerPort > 65535 {
-			return invalid("scoped TCP or UDP listeners require a frozen port within 1-65535")
+		if !supportedListenerProtocol(protocol) || spec.Gateway.Spec.ListenerPort < 1 || spec.Gateway.Spec.ListenerPort > 65535 {
+			return invalid("scoped listeners require a frozen port within 1-65535")
 		}
 		if spec.Gateway.Disposition == cloud.GraphEnsure && len(spec.Gateway.Spec.ScopedListeners) == 0 {
 			return invalid("an ensured multi-listener Gateway requires its desired ports")
@@ -310,7 +310,8 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 	identities := make(map[string]struct{}, len(spec.Routes))
 	lastRank := -1
 	portWinners := make(map[int]bool, len(ports))
-	position := int32(1)
+	rankByPort := make(map[int]int)
+	positionByPort := make(map[int]int32)
 	for _, node := range spec.Routes {
 		id := node.Spec.Identity
 		if !validGraphDisposition(node.Disposition) {
@@ -337,11 +338,19 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 		if node.Disposition == cloud.GraphEnsure {
 			assigned = node.Spec.ScopedListenerPorts
 		}
-		for index, port := range assigned {
-			if !ports[port] || portWinners[port] || index > 0 && assigned[index-1] >= port {
-				return invalid("scoped route elections require sorted, distinct ports from the Gateway listener set")
+		var httpPort int
+		if protocol == cloud.ListenerProtocolHTTP && len(ports) != 0 && node.Disposition == cloud.GraphEnsure {
+			if len(assigned) != 1 || !ports[assigned[0]] {
+				return invalid("a scoped HTTPRoute requires exactly one port from the Gateway listener set")
 			}
-			portWinners[port] = true
+			httpPort = assigned[0]
+		} else {
+			for index, port := range assigned {
+				if !ports[port] || portWinners[port] || index > 0 && assigned[index-1] >= port {
+					return invalid("scoped route elections require sorted, distinct ports from the Gateway listener set")
+				}
+				portWinners[port] = true
+			}
 		}
 		routeIdentity, err := p.identity(id)
 		if err != nil {
@@ -368,11 +377,13 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 			if usesDefaultPool(protocol) && len(ports) == 0 && lastRank != -1 {
 				return invalid(fmt.Sprintf("a %s listener allows at most one ensured route", protocol))
 			}
-			if node.Spec.Precedence < 0 || len(ports) == 0 && node.Spec.Precedence == lastRank {
+			previousRank, hasRank := rankByPort[httpPort]
+			if node.Spec.Precedence < 0 || (len(ports) == 0 || httpPort != 0) && hasRank && node.Spec.Precedence == previousRank {
 				return desiredGatewayGraph{}, &cloud.GraphError{Identity: id, Err: cloud.NewProviderError(cloud.ErrorCategoryTerminalValidation,
 					fmt.Errorf("route precedence %d must be nonnegative and distinct among ensured routes", node.Spec.Precedence))}
 			}
 			lastRank = node.Spec.Precedence
+			rankByPort[httpPort] = node.Spec.Precedence
 			if len(ports) == 0 && len(node.Spec.ScopedListenerPorts) != 0 || len(ports) != 0 && len(node.Spec.ScopedListenerPorts) == 0 {
 				return invalid("an ensured route of a multi-listener Gateway requires its selected ports")
 			}
@@ -384,8 +395,8 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 				return desiredGatewayGraph{}, &cloud.GraphError{Identity: id, Err: err}
 			}
 			for i := range route.policies {
-				route.policies[i].position = position
-				position++
+				positionByPort[httpPort]++
+				route.policies[i].position = positionByPort[httpPort]
 			}
 		}
 		desired.routes = append(desired.routes, route)
@@ -397,6 +408,9 @@ func observedGatewayResult(desired desiredGatewayGraph, actual observedGatewayGr
 	result := cloud.GatewayResult{State: actual.state, Outcome: pending}
 	if actual.scoped {
 		if desired.spec.Gateway.Disposition == cloud.GraphEnsure {
+			if actual.protocol == cloud.ListenerProtocolHTTP {
+				return scopedHTTPGatewayResult(desired, actual, pending)
+			}
 			return scopedGatewayResult(desired.spec.Gateway.Spec, actual, pending)
 		}
 		return result
@@ -676,7 +690,11 @@ func (p *Provider) pendingGraphResult(ctx context.Context, desired desiredGatewa
 	result := cloud.GatewayGraphResult{Outcome: actual.outcome, Gateway: observedGatewayResult(desired, actual, actual.outcome)}
 	var deferred map[int]bool
 	if actual.scoped {
-		deferred = p.deferredScopedRouteObservations(ctx, desired, actual, result.Gateway.ScopedListenerReadyPorts)
+		if actual.protocol == cloud.ListenerProtocolHTTP {
+			deferred = deferredScopedHTTPRoutes(desired, actual, result.Gateway.ScopedListenerReadyPorts)
+		} else {
+			deferred = p.deferredScopedRouteObservations(ctx, desired, actual, result.Gateway.ScopedListenerReadyPorts)
+		}
 	}
 	for index, route := range desired.routes {
 		result.Routes = append(result.Routes, cloud.RouteGraphResult{Identity: route.spec.Identity, Result: cloud.RouteResult{

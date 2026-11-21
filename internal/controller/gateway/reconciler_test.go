@@ -974,7 +974,7 @@ func TestValidateGatewayRejectsUnsupportedAllowedRouteKinds(t *testing.T) {
 
 func TestValidateGatewayRejectsNonIsolatedHTTP(t *testing.T) {
 	for _, peer := range []gatewayv1.Listener{
-		{Name: "other-http", Port: 81, Protocol: gatewayv1.HTTPProtocolType},
+		{Name: "other-http", Port: 80, Protocol: gatewayv1.HTTPProtocolType},
 		{Name: "same-port", Port: 80, Protocol: "custom.example/test"},
 	} {
 		t.Run(string(peer.Name), func(t *testing.T) {

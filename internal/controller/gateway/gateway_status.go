@@ -368,7 +368,7 @@ func (r *Reconciler) setGatewayProvisioningStatus(
 
 func (r *Reconciler) setGatewayProgrammed(ctx context.Context, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, address string) error {
 	message := "Octavia load balancer and listener are active"
-	if hasMultipleTransportListeners(gateway) {
+	if requestsListenerScope(gateway) {
 		message = "Octavia load balancer and listeners are active"
 	}
 	if err := r.setGatewayListenerStatuses(ctx, gateway, listener, metav1.ConditionTrue, gatewayv1.GatewayReasonProgrammed,

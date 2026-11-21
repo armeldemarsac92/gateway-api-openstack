@@ -71,7 +71,7 @@ func (r *Reconciler) bindGateway(
 		if err != nil || anchor < 1 || anchor > 65535 {
 			return fmt.Errorf("invalid frozen Gateway listener port")
 		}
-		sealed, err := r.sealTransportRoutes(ctx, snapshot, snapshot.listener.Protocol, anchor)
+		sealed, err := r.sealScopedRoutes(ctx, snapshot, snapshot.listener.Protocol, anchor)
 		if err != nil || !sealed {
 			return err
 		}
@@ -92,14 +92,17 @@ func (r *Reconciler) bindGateway(
 	return nil
 }
 
-// sealTransportRoutes returns true when every claiming route already carries the
+// sealScopedRoutes returns true when every claiming route already carries the
 // frozen anchor. Otherwise it checkpoints one route and the binding phase
 // requeues so the next migration starts from fresh Gateway and route reads.
-func (r *Reconciler) sealTransportRoutes(ctx context.Context, snapshot *gatewayMutationSnapshot, protocol gatewayv1.ProtocolType, anchor int) (bool, error) {
+func (r *Reconciler) sealScopedRoutes(ctx context.Context, snapshot *gatewayMutationSnapshot, protocol gatewayv1.ProtocolType, anchor int) (bool, error) {
 	gatewayID := controller.GatewayIdentity(r.Config, snapshot.gateway)
 	var list client.ObjectList = &gatewayv1.UDPRouteList{}
-	if protocol == gatewayv1.TCPProtocolType {
+	switch protocol {
+	case gatewayv1.TCPProtocolType:
 		list = &gatewayv1.TCPRouteList{}
+	case gatewayv1.HTTPProtocolType:
+		list = &gatewayv1.HTTPRouteList{}
 	}
 	if err := r.APIReader.List(ctx, list); err != nil {
 		return false, err

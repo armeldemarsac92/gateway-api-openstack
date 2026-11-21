@@ -50,7 +50,7 @@ type GatewaySpec struct {
 	ListenerName      string
 	ListenerPort      int
 	ListenerProtocol  string
-	// ScopedListeners lists every desired TCP or UDP port after the Gateway has entered
+	// ScopedListeners lists every desired physical port after the Gateway has entered
 	// multi-listener mode. ListenerPort retains its original binding port so
 	// an existing unscoped listener can be recognized after a restart.
 	// Cleanup carries an empty, non-nil set and the same frozen port.
@@ -157,7 +157,8 @@ type RouteSpec struct {
 	Identity            Identity
 	Gateway             GatewayState
 	GatewayRequirements GatewayRequirements
-	// ScopedListenerPorts identifies the TCP or UDP listeners on which this route wins.
+	// ScopedListenerPorts identifies the authorized listener ports. An HTTPRoute
+	// selects exactly one scoped port, while transport routes may win several.
 	// Single-listener bindings use GatewayRequirements.ListenerPort.
 	ScopedListenerPorts     []int `json:",omitempty"`
 	MemberMode              MemberMode

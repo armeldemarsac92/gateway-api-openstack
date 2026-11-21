@@ -56,7 +56,6 @@ func TestSharedHTTPPortRejectsUnsupportedListenerShapes(t *testing.T) {
 		{Name: "same-host", Port: 80, Protocol: gatewayv1.HTTPProtocolType, Hostname: first.Hostname},
 		{Name: "wildcard", Port: 80, Protocol: gatewayv1.HTTPProtocolType, Hostname: ptr.To(gatewayv1.Hostname("*.example.com"))},
 		{Name: "catch-all", Port: 80, Protocol: gatewayv1.HTTPProtocolType},
-		{Name: "other-port", Port: 8080, Protocol: gatewayv1.HTTPProtocolType, Hostname: ptr.To(gatewayv1.Hostname("b.example.com"))},
 		{Name: "https", Port: 80, Protocol: gatewayv1.HTTPSProtocolType, Hostname: ptr.To(gatewayv1.Hostname("b.example.com"))},
 	} {
 		t.Run(string(second.Name), func(t *testing.T) {

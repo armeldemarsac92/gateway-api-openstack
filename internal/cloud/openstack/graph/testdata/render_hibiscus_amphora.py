@@ -66,9 +66,8 @@ def policy_from_inventory(inventory, listener, pools, policy):
                  redirect_url=policy.get("redirect_url"), redirect_prefix=policy.get("redirect_prefix"))
 
 
-def listener_from_inventory(inventory, expected_member=None):
+def listener_from_inventory(inventory, listener, expected_member=None):
     gateway = inventory["/v2/lbaas/loadbalancers/gateway"]
-    listener = inventory["/v2/lbaas/listeners/listener"]
     default_pool_id = listener["default_pool_id"]
     tcp = listener["protocol"] == "TCP"
     if not tcp and default_pool_id is not None:
@@ -78,11 +77,13 @@ def listener_from_inventory(inventory, expected_member=None):
     if listener["loadbalancers"] != [{"id": gateway["id"]}]:
         raise ValueError("listener is not attached to the observed Gateway")
 
-    pools = {pool["id"]: pool_from_inventory(inventory, gateway, pool, expected_member)
-             for pool in children(inventory, "/v2/lbaas/pools")
-             if not tcp or pool["id"] == default_pool_id}
     # The Octavia database exposes the listener's policies in position order.
-    ordered = sorted(children(inventory, "/v2/lbaas/l7policies"), key=lambda policy: policy["position"])
+    ordered = sorted((policy for policy in children(inventory, "/v2/lbaas/l7policies")
+                      if policy["listener_id"] == listener["id"]), key=lambda policy: policy["position"])
+    attached_pools = {policy["redirect_pool_id"] for policy in ordered}
+    attached_pools.add(default_pool_id)
+    pools = {pool["id"]: pool_from_inventory(inventory, gateway, pool, expected_member)
+             for pool in children(inventory, "/v2/lbaas/pools") if pool["id"] in attached_pools}
     if tcp and ordered:
         raise ValueError("TCP cannot have L7 policies")
     policies = [policy_from_inventory(inventory, listener, pools, policy) for policy in ordered]
@@ -104,7 +105,9 @@ def main():
     if len(sys.argv) == 3:
         address, port = sys.argv[2].split(":")
         expected_member = address, int(port)
-    listener = listener_from_inventory(json.load(sys.stdin), expected_member)
+    inventory = json.load(sys.stdin)
+    listeners = [listener_from_inventory(inventory, listener, expected_member)
+                 for listener in children(inventory, "/v2/lbaas/listeners")]
     amphora = data_models.Amphora(id="local-amphora", lb_network_ip="127.0.0.1")
     jinja_cfg.CONF.set_override("default_connection_limit", 64, group="haproxy_amphora")
     templater = jinja_cfg.JinjaTemplater(
@@ -112,7 +115,7 @@ def main():
         log_http=str(output / "syslog.sock"), log_server=str(output / "syslog.sock"),
     )
     config = templater.render_loadbalancer_obj(
-        amphora, [listener], socket_path=str(output / "stats.sock"),
+        amphora, listeners, socket_path=str(output / "stats.sock"),
         feature_compatibility={constants.HTTP_REUSE: True},
     )
     (output / "haproxy.cfg").write_text(config, encoding="utf-8")

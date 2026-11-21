@@ -152,9 +152,15 @@ func (p *Provider) observeRouteGraphs(ctx context.Context, owners []routeGraphOw
 func (p *Provider) observeRouteGraphsWithListeners(ctx context.Context, owners []routeGraphOwner, lb *octavia.LoadBalancer, listener *listeners.Listener, protocol string, scopedListeners []listeners.Listener) ([]observedRouteGraph, error) {
 	graphs := make([]observedRouteGraph, len(owners))
 	defaultPool := usesDefaultPool(protocol)
+	scopedHTTP := protocol == cloud.ListenerProtocolHTTP && scopedListeners != nil
 	poolItems, err := p.listGatewayPools(ctx, lb)
 	if err != nil {
 		return nil, err
+	}
+	if scopedHTTP {
+		if err := crossCheckCompleteChildInventory("load balancer", lb.ID, "pool", lb.Pools, poolItems, func(pool pools.Pool) string { return pool.ID }); err != nil {
+			return nil, err
+		}
 	}
 	sort.Slice(poolItems, func(i, j int) bool { return poolItems[i].ID < poolItems[j].ID })
 	poolOwners := make(map[string]int, len(poolItems))
@@ -192,6 +198,14 @@ func (p *Provider) observeRouteGraphsWithListeners(ctx context.Context, owners [
 			if err != nil {
 				return nil, &cloud.GraphError{Identity: identity.Value(), Err: err}
 			}
+		} else if scopedHTTP {
+			if err := validateDefaultPoolParent(*pool, lb.ID, cloud.ListenerProtocolHTTP); err != nil {
+				return nil, &cloud.GraphError{Identity: identity.Value(), Err: err}
+			}
+			if pool.ProjectID != p.projectID {
+				return nil, &cloud.GraphError{Identity: identity.Value(), Err: fmt.Errorf("%w: HTTP pool %s has an unproven project", cloud.ErrOwnershipConflict, pool.ID)}
+			}
+
 		} else if usesDefaultPool(pool.Protocol) {
 			return nil, &cloud.GraphError{Identity: identity.Value(), Err: fmt.Errorf("%w: %s pool %s observed without a matching Gateway", cloud.ErrOwnershipConflict, pool.Protocol, pool.ID)}
 		}
@@ -204,23 +218,51 @@ func (p *Provider) observeRouteGraphsWithListeners(ctx context.Context, owners [
 		if err := p.observeRoutePoolChildren(ctx, identity, graph); err != nil {
 			return nil, &cloud.GraphError{Identity: identity.Value(), Err: err}
 		}
-		if usesDefaultPool(poolProtocol) {
+		if scopedHTTP {
+			if err := crossCheckCompleteChildInventory("pool", pool.ID, "member", pool.Members, graph.members, func(member pools.Member) string { return member.ID }); err != nil {
+				return nil, &cloud.GraphError{Identity: identity.Value(), Err: err}
+			}
+		}
+		if usesDefaultPool(poolProtocol) || scopedHTTP {
 			if err := graph.validateDefaultPoolChildren(); err != nil {
 				return nil, &cloud.GraphError{Identity: identity.Value(), Err: err}
 			}
 		}
 	}
-	if defaultPool || listener == nil {
+	if defaultPool {
 		return graphs, nil
 	}
+	if scopedHTTP {
+		for i := range scopedListeners {
+			if err := p.observeListenerPolicies(ctx, owners, &scopedListeners[i], protocol, poolOwners, graphs, true); err != nil {
+				return nil, err
+			}
+		}
+		if err := validateScopedHTTPRouteRelationships(graphs); err != nil {
+			return nil, err
+		}
+	} else if listener != nil {
+		if err := p.observeListenerPolicies(ctx, owners, listener, protocol, poolOwners, graphs, false); err != nil {
+			return nil, err
+		}
+	}
+	return graphs, nil
+}
+
+func (p *Provider) observeListenerPolicies(ctx context.Context, owners []routeGraphOwner, listener *listeners.Listener, protocol string, poolOwners map[string]int, graphs []observedRouteGraph, strict bool) error {
 	items, err := p.octavia.ListPolicies(ctx, l7policies.ListOpts{ListenerID: listener.ID, ProjectID: p.projectID})
 	if err != nil {
-		return nil, fmt.Errorf("list Gateway L7 policies: %w", err)
+		return fmt.Errorf("list Gateway L7 policies: %w", err)
 	}
 	otherCleanup := hasOtherCleanupProtocol(owners, protocol)
-	if otherCleanup {
-		if err := crossCheckChildInventory("listener", listener.ID, "L7 policy", listener.L7Policies, items, func(item l7policies.L7Policy) string { return item.ID }); err != nil {
-			return nil, err
+	policyID := func(item l7policies.L7Policy) string { return item.ID }
+	if strict {
+		if err := crossCheckCompleteChildInventory("listener", listener.ID, "L7 policy", listener.L7Policies, items, policyID); err != nil {
+			return err
+		}
+	} else if otherCleanup {
+		if err := crossCheckChildInventory("listener", listener.ID, "L7 policy", listener.L7Policies, items, policyID); err != nil {
+			return err
 		}
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -232,28 +274,40 @@ func (p *Provider) observeRouteGraphsWithListeners(ctx context.Context, owners [
 	for _, item := range items {
 		routeIndex, err := routeOwnerIndex(owners, item.Tags, rolePolicyExact, rolePolicyPrefix)
 		if err != nil {
-			return nil, fmt.Errorf("validate L7 policy %s: %w", item.ID, err)
+			return fmt.Errorf("validate L7 policy %s: %w", item.ID, err)
 		}
 		owner := owners[routeIndex]
 		if owner.cleanupProtocol != "" && owner.cleanupProtocol != protocol {
-			return nil, &cloud.GraphError{Identity: owner.identity.Value(), Err: fmt.Errorf("%w: L7 policy %s belongs to a different listener protocol", cloud.ErrOwnershipConflict, item.ID)}
+			return &cloud.GraphError{Identity: owner.identity.Value(), Err: fmt.Errorf("%w: L7 policy %s belongs to a different listener protocol", cloud.ErrOwnershipConflict, item.ID)}
+		}
+		if strict && (item.ProjectID != p.projectID || item.ListenerID != listener.ID || item.RedirectPoolID == "") {
+			return &cloud.GraphError{Identity: owner.identity.Value(), Err: fmt.Errorf("%w: L7 policy %s has an unproven project, listener or pool", cloud.ErrOwnershipConflict, item.ID)}
 		}
 		observed, err := p.observeRoutePolicy(ctx, owner.identity, item, listener.ID)
 		if err != nil {
-			return nil, &cloud.GraphError{Identity: owner.identity.Value(), Err: err}
+			return &cloud.GraphError{Identity: owner.identity.Value(), Err: err}
 		}
-		if poolOwner, found := poolOwners[item.RedirectPoolID]; found && poolOwner != routeIndex || otherCleanup && !found && item.RedirectPoolID != "" {
-			return nil, &cloud.GraphError{Identity: owner.identity.Value(), Err: fmt.Errorf("%w: L7 policy %s redirects to an unproven pool %s", cloud.ErrOwnershipConflict, item.ID, item.RedirectPoolID)}
+		if strict {
+			rules := make([]l7policies.Rule, 0, len(observed.rules))
+			for _, rule := range observed.rules {
+				rules = append(rules, rule.rule)
+			}
+			if err := crossCheckCompleteChildInventory("L7 policy", item.ID, "rule", item.Rules, rules, func(rule l7policies.Rule) string { return rule.ID }); err != nil {
+				return err
+			}
+		}
+		if poolOwner, found := poolOwners[item.RedirectPoolID]; found && poolOwner != routeIndex || (otherCleanup || strict) && !found && item.RedirectPoolID != "" {
+			return &cloud.GraphError{Identity: owner.identity.Value(), Err: fmt.Errorf("%w: L7 policy %s redirects to an unproven pool %s", cloud.ErrOwnershipConflict, item.ID, item.RedirectPoolID)}
 		}
 		graph := &graphs[routeIndex]
 		for _, policy := range graph.policies {
-			if policy.role == observed.role {
-				return nil, &cloud.GraphError{Identity: owner.identity.Value(), Err: fmt.Errorf("%w: duplicate %s policies %s and %s", cloud.ErrOwnershipConflict, observed.role, policy.policy.ID, item.ID)}
+			if policy.role == observed.role || strict && policy.policy.ListenerID != listener.ID {
+				return &cloud.GraphError{Identity: owner.identity.Value(), Err: fmt.Errorf("%w: duplicate %s policies %s and %s", cloud.ErrOwnershipConflict, observed.role, policy.policy.ID, item.ID)}
 			}
 		}
 		graph.policies = append(graph.policies, observed)
 	}
-	return graphs, nil
+	return nil
 }
 
 func routeOwnerIndex(owners []routeGraphOwner, tags []string, roles ...string) (int, error) {

@@ -338,6 +338,65 @@ func TestHTTPRouteProgramsOnlyHTTPListenerOnMixedGateway(t *testing.T) {
 	}
 }
 
+// Matches the two HTTP sections and explicit parent selector in the upstream
+// GatewayWithAttachedRoutesWithPort8080 case.
+func TestGatewayWithAttachedRoutesWithPort8080(t *testing.T) {
+	cfg := testConfig()
+	class, gateway := providerRouteParentObjects(cfg)
+	selected := gatewayv1.Listener{Name: "http", Port: 80, Protocol: gatewayv1.HTTPProtocolType}
+	other := gatewayv1.Listener{Name: "http-unattached", Port: 8080, Protocol: gatewayv1.HTTPProtocolType}
+	gateway.Spec.Listeners = []gatewayv1.Listener{other, selected}
+	route := mapperTestHTTPRoute(gateway.Namespace, "attached", gatewayv1.ParentReference{
+		Name: gatewayv1.ObjectName(gateway.Name), SectionName: &selected.Name,
+	}, "backend")
+	route.UID, route.Generation = "attached-uid", 1
+	service, endpoints, node := validNodePortBackend(gateway.Namespace, "backend")
+	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gateway, route).
+		WithObjects(class, gateway, route, service, endpoints, node).Build()
+	ready := cloud.GatewayReadyResult(cloud.GatewayState{LoadBalancerID: "lb-1", ListenerID: "listener-1", VIPAddress: "192.0.2.10"})
+	ready.ScopedListenerReadyPorts = []int{80, 8080}
+	provider := &recordingProvider{gatewayResult: &ready}
+	coordinator := &graph.Coordinator{}
+	gr := newTestGatewayReconciler(gatewaycontroller.Reconciler{Client: kube, APIReader: kube, Coordinator: coordinator, Config: cfg}, provider)
+	r := &Reconciler{Client: kube, APIReader: kube, Writer: gr.Writer, Coordinator: coordinator, Config: cfg}
+	gatewayReq := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(gateway)}
+	routeReq := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(route)}
+	for range 2 {
+		if _, err := gr.Reconcile(t.Context(), gatewayReq); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(provider.gatewaySpecs) != 1 || len(provider.gatewaySpecs[0].ScopedListeners) != 2 {
+		t.Fatalf("expected two physical listener ports: %#v", provider.gatewaySpecs)
+	}
+	for range 2 {
+		if _, err := r.Reconcile(t.Context(), routeReq); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := gr.Reconcile(t.Context(), gatewayReq); err != nil {
+		t.Fatal(err)
+	}
+	if err := kube.Get(t.Context(), gatewayReq.NamespacedName, gateway); err != nil {
+		t.Fatal(err)
+	}
+	for name, count := range map[gatewayv1.SectionName]int32{"http": 1, "http-unattached": 0} {
+		i := slices.IndexFunc(gateway.Status.Listeners, func(status gatewayv1.ListenerStatus) bool { return status.Name == name })
+		if i < 0 {
+			t.Fatalf("missing section %s: %#v", name, gateway.Status.Listeners)
+		}
+		status := gateway.Status.Listeners[i]
+		if status.AttachedRoutes != count || len(status.SupportedKinds) != 1 || status.SupportedKinds[0].Kind != "HTTPRoute" ||
+			!meta.IsStatusConditionTrue(status.Conditions, string(gatewayv1.ListenerConditionAccepted)) ||
+			!meta.IsStatusConditionTrue(status.Conditions, string(gatewayv1.ListenerConditionResolvedRefs)) {
+			t.Fatalf("section %s should accept HTTPRoute and report %d attachment(s): %#v", name, count, status)
+		}
+	}
+	if len(provider.routeSpecs) == 0 || !slices.Equal(provider.routeSpecs[len(provider.routeSpecs)-1].ScopedListenerPorts, []int{80}) {
+		t.Fatalf("HTTPRoute must be assigned only to port 80: %#v", provider.routeSpecs)
+	}
+}
+
 func TestExactHTTPSectionsShareOneGatewayListener(t *testing.T) {
 	cfg := testConfig()
 	class, gateway := providerRouteParentObjects(cfg)

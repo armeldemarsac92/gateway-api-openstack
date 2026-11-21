@@ -32,8 +32,9 @@ import (
 )
 
 var scopedPortTagPrefixes = map[string]string{
-	cloud.ListenerProtocolUDP: openstackidentity.Tag("udp-port", ""),
-	cloud.ListenerProtocolTCP: openstackidentity.Tag("tcp-port", ""),
+	cloud.ListenerProtocolUDP:  openstackidentity.Tag("udp-port", ""),
+	cloud.ListenerProtocolTCP:  openstackidentity.Tag("tcp-port", ""),
+	cloud.ListenerProtocolHTTP: openstackidentity.Tag("http-port", ""),
 }
 
 func scopedPortTag(protocol string, port int) string {
@@ -82,7 +83,14 @@ func (p *Provider) managedScopedListeners(identity Identity, lb *octavia.LoadBal
 			listener.Protocol != protocol || port < 1 || port > 65535 || ports[port] || ids[listener.ID] {
 			return nil, fmt.Errorf("%w: invalid or duplicate scoped listener %s on load balancer %s", cloud.ErrOwnershipConflict, listener.ID, lb.ID)
 		}
-		if err := validateDefaultPoolListener(listener, lb.ID); err != nil {
+		if protocol == cloud.ListenerProtocolHTTP {
+			if listener.ID == "" || len(listener.Loadbalancers) != 1 || listener.Loadbalancers[0].ID != lb.ID {
+				return nil, fmt.Errorf("%w: HTTP listener %s has an unexpected load balancer", cloud.ErrOwnershipConflict, listener.ID)
+			}
+			if listener.DefaultPoolID != "" {
+				return nil, unprovenDefaultPool(listener)
+			}
+		} else if err := validateDefaultPoolListener(listener, lb.ID); err != nil {
 			return nil, err
 		}
 		if len(lb.VIPSecurityGroupIDs) > 0 && len(listener.AllowedCIDRs) > 0 {
@@ -147,6 +155,9 @@ func (p *Provider) observeScopedListenerGraph(
 	}
 	actual.scopedListeners = managed
 	actual.state.ListenerID = scopedRepresentativeListenerID(managed, anchor)
+	if actual.protocol == cloud.ListenerProtocolHTTP {
+		return p.observeScopedHTTPGraph(ctx, desired, actual, owners)
+	}
 	for _, listener := range managed {
 		if parentPending {
 			continue
