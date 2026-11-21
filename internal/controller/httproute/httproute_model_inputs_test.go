@@ -36,6 +36,29 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 )
 
+func TestRouteGraphOrdersTwoBoundRoutes(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	exact := f.candidate("z-accounts")
+	exact.Spec.Rules[0].Matches = []gatewayv1.HTTPRouteMatch{{Path: &gatewayv1.HTTPPathMatch{
+		Type: ptr.To(gatewayv1.PathMatchExact), Value: ptr.To("/accounts"),
+	}}}
+	f.reconciler.applyRouteBinding(exact, f.gateway)
+	f.create(t, exact)
+	input := f.observe(t)
+	if len(input.Nodes) != 2 {
+		t.Fatalf("got %d route fragments, want both bound routes", len(input.Nodes))
+	}
+	for _, node := range input.Nodes {
+		want := 1
+		if node.Spec.Identity.RouteUID == string(exact.UID) {
+			want = 0
+		}
+		if node.Disposition != cloud.GraphEnsure || node.Spec.Precedence != want {
+			t.Fatalf("route %s = %s rank %d, want Ensure rank %d", node.Spec.Identity.RouteUID, node.Disposition, node.Spec.Precedence, want)
+		}
+	}
+}
+
 func TestRouteGraphSharesBackendObservationAcrossCandidates(t *testing.T) {
 	f := newRouteModelInputFixture(t)
 	unsupported := f.candidate("a-unsupported")
@@ -43,7 +66,9 @@ func TestRouteGraphSharesBackendObservationAcrossCandidates(t *testing.T) {
 	other := *unsupported.Spec.Rules[0].BackendRefs[0].DeepCopy()
 	other.Weight = ptr.To(int32(20))
 	unsupported.Spec.Rules[0].BackendRefs = append(unsupported.Spec.Rules[0].BackendRefs, other)
-	f.create(t, unsupported, f.candidate("z-candidate"))
+	candidate := f.candidate("z-candidate")
+	candidate.Spec.Rules[0].BackendRefs[0].Namespace = ptr.To(gatewayv1.Namespace("unbound-backend"))
+	f.create(t, unsupported, candidate)
 
 	routes, err := f.reconciler.liveGraphRoutes(t.Context(), controller.GatewayIdentity(testConfig(), f.gateway))
 	if err != nil {
@@ -88,10 +113,12 @@ func TestRouteGraphFenceDetectsBackendDependencyChanges(t *testing.T) {
 			case "missing Service creation":
 				candidate := f.candidate("z-missing")
 				candidate.Spec.Rules[0].BackendRefs[0].Name = "missing"
+				f.reconciler.applyRouteBinding(candidate, f.gateway)
 				f.create(t, candidate)
 			case "ReferenceGrant revocation":
 				candidate := f.candidate("z-cross-namespace")
 				candidate.Spec.Rules[0].BackendRefs[0].Namespace = ptr.To(gatewayv1.Namespace("shared"))
+				f.reconciler.applyRouteBinding(candidate, f.gateway)
 				service := f.service.DeepCopy()
 				service.Namespace, service.ResourceVersion, service.UID = "shared", "", "shared-service"
 				grant = &gatewayv1.ReferenceGrant{
@@ -104,7 +131,7 @@ func TestRouteGraphFenceDetectsBackendDependencyChanges(t *testing.T) {
 				f.create(t, candidate, service, grant)
 			}
 			input := f.observe(t)
-			if len(input.Nodes) != 1 || input.Nodes[0].Disposition != cloud.GraphEnsure {
+			if len(input.Nodes) == 0 || input.Nodes[0].Disposition != cloud.GraphEnsure || input.Nodes[0].Spec.Identity.RouteUID != string(f.route.UID) {
 				t.Fatalf("selected route was not ensured: %#v", input.Nodes)
 			}
 			switch change {
@@ -145,23 +172,66 @@ func TestRouteModelFenceDetectsNamespaceLabelChanges(t *testing.T) {
 	f := newRouteModelInputFixture(t)
 	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: f.route.Namespace, Labels: map[string]string{"team": "application"}}}
 	f.create(t, namespace)
-	gateway := f.gateway.DeepCopy()
-	gateway.Spec.Listeners[0].AllowedRoutes = &gatewayv1.AllowedRoutes{Namespaces: &gatewayv1.RouteNamespaces{
+	f.gateway.Spec.Listeners[0].AllowedRoutes = &gatewayv1.AllowedRoutes{Namespaces: &gatewayv1.RouteNamespaces{
 		From: ptr.To(gatewayv1.NamespacesFromSelector), Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "application"}},
 	}}
-	inputs, err := collectRouteModelInputs(t.Context(), f.reader, gateway, []gatewayv1.HTTPRoute{*f.route})
-	if err != nil {
+	if err := f.client.Update(t.Context(), f.gateway); err != nil {
 		t.Fatal(err)
 	}
-	if err := inputs.validate(t.Context(), f.reader); err != nil {
+	input := f.observe(t)
+	if err := input.Validate(t.Context()); err != nil {
 		t.Fatalf("unchanged Namespace failed validation: %v", err)
 	}
 	namespace.Labels["team"] = "another"
 	if err := f.client.Update(t.Context(), namespace); err != nil {
 		t.Fatal(err)
 	}
-	if err := inputs.validate(t.Context(), f.reader); !errors.Is(err, errHTTPRouteChanged) {
+	if err := input.Validate(t.Context()); !errors.Is(err, errHTTPRouteChanged) {
 		t.Fatalf("changed Namespace labels passed the mutation fence: %v", err)
+	}
+}
+
+func TestRouteGraphPreservesRevokedTenantUntilDetachCheckpoint(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	if err := f.client.Get(t.Context(), client.ObjectKeyFromObject(f.gateway), f.gateway); err != nil {
+		t.Fatal(err)
+	}
+	f.gateway.Spec.Listeners[0].AllowedRoutes = &gatewayv1.AllowedRoutes{Namespaces: &gatewayv1.RouteNamespaces{
+		From: ptr.To(gatewayv1.NamespacesFromSelector), Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"edge": "shared"}},
+	}}
+	if err := f.client.Update(t.Context(), f.gateway); err != nil {
+		t.Fatal(err)
+	}
+	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "tenant"}}
+	sibling := f.candidate(f.route.Name)
+	sibling.Namespace, sibling.UID = namespace.Name, "tenant-sibling"
+	sibling.Spec.ParentRefs[0].Namespace = ptr.To(gatewayv1.Namespace(f.gateway.Namespace))
+	sibling.Spec.Rules[0].BackendRefs[0].Namespace = ptr.To(gatewayv1.Namespace("foreign"))
+	f.reconciler.applyRouteBinding(sibling, f.gateway)
+	f.create(t, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: f.route.Namespace, Labels: map[string]string{"edge": "shared"}}}, namespace, sibling)
+	input := f.observe(t)
+	if len(input.Nodes) != 2 || input.Nodes[0].Disposition != cloud.GraphEnsure || input.Nodes[1].Disposition != cloud.GraphPreserve || input.Nodes[1].Spec.Identity.RouteUID != string(sibling.UID) {
+		t.Fatalf("expected to ensure the permitted route and hold the revoked tenant fragment for its cleanup: %#v", input.Nodes)
+	}
+	if f.reader.counts["ReferenceGrant"] != 0 || f.reader.counts["Service"] != 1 || f.reader.counts["EndpointSlice"] != 1 {
+		t.Fatalf("revoked tenant caused backend reads: %v", f.reader.counts)
+	}
+	if err := f.client.Get(t.Context(), client.ObjectKeyFromObject(sibling), sibling); err != nil {
+		t.Fatal(err)
+	}
+	sibling.Status.Parents = []gatewayv1.RouteParentStatus{{ControllerName: "other.example/controller", ParentRef: sibling.Spec.ParentRefs[0]}}
+	if err := f.client.Status().Update(t.Context(), sibling); err != nil {
+		t.Fatal(err)
+	}
+	if err := input.Validate(t.Context()); err != nil {
+		t.Fatalf("denied tenant status churn invalidated the healthy route: %v", err)
+	}
+	namespace.Labels = map[string]string{"edge": "shared"}
+	if err := f.client.Update(t.Context(), namespace); err != nil {
+		t.Fatal(err)
+	}
+	if err := input.Validate(t.Context()); !errors.Is(err, errHTTPRouteChanged) {
+		t.Fatalf("restored scope did not cancel provider plan: %v", err)
 	}
 }
 
@@ -248,7 +318,7 @@ func newRouteModelInputFixture(t *testing.T) *routeModelInputFixture {
 	endpoints.UID = "slice-uid"
 	r := &Reconciler{Config: testConfig()}
 	r.applyRouteBinding(route, gateway)
-	kubeClient := indexedFakeClientBuilder(testScheme(t), r.Config).WithObjects(class, gateway, route, service, endpoints).Build()
+	kubeClient := indexedFakeClientBuilder(testScheme(t), r.Config).WithStatusSubresource(route).WithObjects(class, gateway, route, service, endpoints).Build()
 	for _, object := range []client.Object{gateway, route, service, endpoints} {
 		if err := kubeClient.Get(t.Context(), client.ObjectKeyFromObject(object), object); err != nil {
 			t.Fatal(err)

@@ -58,7 +58,23 @@ func (r *Reconciler) setRouteUnsupportedVersion(
 	if err != nil {
 		return ctrl.Result{}, err
 	}
+	identity, bound, err := r.storedRouteIdentity(&current)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	var attachmentRejection error
+	if bound {
+		attachmentRejection, err = r.liveBoundRouteAttachmentRejection(ctx, &current, identity)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+	}
 	if len(parents) == 0 {
+		if attachmentRejection != nil {
+			*route = current
+			scope.versionSkew = true
+			return r.setRouteStatusesAndDetach(ctx, scope, nil)
+		}
 		scope.skipPatch = true
 		return ctrl.Result{}, nil
 	}
@@ -80,19 +96,20 @@ func (r *Reconciler) setRouteUnsupportedVersion(
 		}
 		recheckVersion = true
 	}
-	rejection, err := r.liveRouteBackendReferenceRejection(ctx, &current)
-	if err != nil {
-		return ctrl.Result{}, err
+	var rejection *routeBuildError
+	if attachmentRejection == nil {
+		rejection, err = r.liveRouteBackendReferenceRejection(ctx, &current)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
 	}
-	identity, bound, err := r.storedRouteIdentity(&current)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-	detach := bound && (rejection != nil || !r.routeForwardingEstablished(&current, parents, identity))
+	detach := bound && (attachmentRejection != nil || rejection != nil || !r.routeForwardingEstablished(&current, parents, identity))
 	updates := make([]parentStatusUpdate, 0, len(parents)+1)
 	for _, parent := range parents {
 		status := unsupportedGatewayAPIVersionRouteStatus()
-		if rejection != nil {
+		if attachmentRejection != nil && controller.SameGatewayIdentity(identity, controller.RouteIdentity(r.Config, parent.gateway, &current)) {
+			status = statusForRouteBuildError(attachmentRejection)
+		} else if rejection != nil {
 			unresolved := statusForRouteBuildError(rejection)
 			unresolved.accepted, unresolved.acceptedReason, unresolved.acceptedMessage =
 				status.accepted, status.acceptedReason, status.acceptedMessage
@@ -134,7 +151,8 @@ func (r *Reconciler) routeForwardingEstablished(route *gatewayv1.HTTPRoute, pare
 	if err != nil || parent.gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] != strconv.Itoa(int(listener.Port)) {
 		return false
 	}
-	if validateRouteParent(route, parent) != nil || r.currentRouteProgrammedCondition(route, parent.ref) == nil {
+	if validateRouteParentListener(route, parent) != nil || validateRouteHostnames(listener.Hostname, route.Spec.Hostnames) != nil ||
+		r.currentRouteProgrammedCondition(route, parent.ref) == nil {
 		return false
 	}
 	if listener.Hostname == nil || gatewayProgrammedForGeneration(parent.gateway) {

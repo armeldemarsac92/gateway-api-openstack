@@ -513,8 +513,11 @@ func TestNamespacePredicate(t *testing.T) {
 	changed.Annotations = map[string]string{"example.com/note": "changed"}
 	testPredicateUpdate(t, pred, base, changed, false, "annotation only")
 	changed = base.DeepCopy()
+	changed.Status.Phase = corev1.NamespaceActive
+	testPredicateUpdate(t, pred, base, changed, false, "active status only")
+	changed = base.DeepCopy()
 	changed.Status.Phase = corev1.NamespaceTerminating
-	testPredicateUpdate(t, pred, base, changed, false, "status only")
+	testPredicateUpdate(t, pred, base, changed, true, "terminating status")
 	changed = base.DeepCopy()
 	changed.DeletionTimestamp = ptr.To(metav1.Now())
 	testPredicateUpdate(t, pred, base, changed, true, "deletion")

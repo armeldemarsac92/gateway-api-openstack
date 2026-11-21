@@ -240,11 +240,14 @@ func ServicePredicate() predicate.Predicate {
 	})
 }
 
-// NamespacePredicate selects namespace labels used by allowedRoutes selectors.
+// NamespacePredicate selects labels and termination used by allowedRoutes.
 func NamespacePredicate() predicate.Predicate {
 	return updatePredicate(func(oldObject, newObject client.Object) bool {
-		return !maps.Equal(oldObject.GetLabels(), newObject.GetLabels()) ||
-			!equality.Semantic.DeepEqual(oldObject.GetDeletionTimestamp(), newObject.GetDeletionTimestamp())
+		oldNamespace, oldOK := oldObject.(*corev1.Namespace)
+		newNamespace, newOK := newObject.(*corev1.Namespace)
+		return oldOK && newOK && ((oldNamespace.Status.Phase == corev1.NamespaceTerminating) != (newNamespace.Status.Phase == corev1.NamespaceTerminating) ||
+			!maps.Equal(oldObject.GetLabels(), newObject.GetLabels()) ||
+			!equality.Semantic.DeepEqual(oldObject.GetDeletionTimestamp(), newObject.GetDeletionTimestamp()))
 	})
 }
 

@@ -92,6 +92,9 @@ func GatewayProgressingResult(message string, requeueAfter time.Duration) Gatewa
 type RouteResult struct {
 	State   RouteState
 	Outcome Outcome
+	// ObservationDeferred means the parent is busy and the provider could not
+	// establish a new outcome for this route on this pass.
+	ObservationDeferred bool
 }
 
 // RouteReadyResult returns a converged HTTPRoute result.

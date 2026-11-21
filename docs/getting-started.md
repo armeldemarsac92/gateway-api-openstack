@@ -208,6 +208,19 @@ kubectl -n gateway-api-openstack-demo get httproute basic -o yaml
 ```
 
 The example intentionally uses one Gateway, one HTTP listener, one HTTPRoute, one rule, one PathPrefix match, and one NodePort Service backend.
+
+For a shared Gateway, the platform operator can give its HTTP listener a Namespace selector.
+
+```yaml
+allowedRoutes:
+  namespaces:
+    from: Selector
+    selector:
+      matchLabels:
+        shared-edge: "enabled"
+```
+
+Give each participating Namespace the label `shared-edge: "enabled"`. In a tenant HTTPRoute, set the parent reference's `name` and `namespace` to the shared Gateway. An omitted backend namespace selects the Service in the route's own namespace. Removing the Namespace label withdraws that tenant's routes. Check the route's `Accepted` reason and the Gateway listener's `attachedRoutes` count. [Shared listener evidence](qualification/v1.7.0/README.md)
 First check that GatewayClass reports `Accepted=True`.
 This verifies the class inputs and read-only cloud checks, not network connectivity or provisioning permissions.
 Then wait until the Gateway's `Accepted` and `Programmed` conditions are `True`.

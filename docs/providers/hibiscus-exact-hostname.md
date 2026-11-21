@@ -1,6 +1,6 @@
 # HTTP listener and route hostnames on Hibiscus
 
-This is a stock routing increment of the [Hibiscus design](../superpowers/specs/2026-11-20-hibiscus-design.md) and [implementation plan](../superpowers/plans/2026-11-20-hibiscus.md). It applies to the existing single HTTPRoute and HTTP listener on Amphora.
+This is a stock routing increment of the [Hibiscus design](../superpowers/specs/2026-11-20-hibiscus-design.md) and [implementation plan](../superpowers/plans/2026-11-20-hibiscus.md). It describes how each HTTPRoute constrains its host on the shared Amphora listener. When routes have identical listener intersections, their original matching hostnames determine precedence before the paths are compared.
 
 Gateway API v1.7.0 requires the implementation to ignore the port in the HTTP Host header for matching and to forward the original header. Its hostname intersection test sends both a bare hostname and one with an explicit port. [HTTPRoute API](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/apis/v1/httproute_types.go#L59-L68) · [Hostname intersection test](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/httproute-hostname-intersection.go#L67-L98)
 

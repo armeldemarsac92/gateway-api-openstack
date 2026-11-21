@@ -25,10 +25,14 @@ python3 -m venv /tmp/hibiscus-octavia
 /tmp/hibiscus-octavia/bin/python -m pip install 'octavia==19.0.0' 'octavia-lib==3.12.0'
 HIBISCUS_OCTAVIA_PYTHON=/tmp/hibiscus-octavia/bin/python \
 HIBISCUS_HAPROXY=/absolute/path/to/haproxy \
-  go test -count=1 -v -run '^TestHibiscusPrivateHTTPTraffic$' ./internal/cloud/openstack/graph
+  go test -count=1 -v -run '^TestHibiscus(Private|Shared)HTTPTraffic$' ./internal/cloud/openstack/graph
 ```
 
 Before and after creating a fresh provider instance, `GET /api` with `Host: API.Example.COM:1234` returned `200` and `hibiscus-node-backend API.Example.COM:1234`. HAProxy also reached the backend health endpoint. Reconciliation after restart rediscovered the settled graph without a new cloud write. A different valid hostname or path returned `503`, documenting the stock gap against the required route-miss `404`. The disabled configuration refused a new connection before the owned graph was removed. The final inventory contained the two original controls.
+
+### Two routes on a shared listener
+
+The shared case sends real requests to two distinct echo backends through the same HAProxy frontend. It initially gives the prefix route the higher rank and then swaps the ranks through the graph API. A single public policy position update sends `/api` to the exact backend while `/api/extra` continues to reach the prefix backend. Recreating the adapter preserves the result without another write. Removing the exact route leaves the prefix route serving both matching paths with its original resource IDs. A different host or unrelated path returns the stock 503. Final cleanup preserves both control load balancers. [Loopback test](../../../internal/cloud/openstack/graph/hibiscus_traffic_test.go) · [Octavia L7 policy API](https://docs.openstack.org/api-ref/load-balancer/v2/#update-an-l7-policy)
 
 This exercises a real TCP connection, HTTP client, HAProxy process, stock renderer and echo backend. Keystone, Amphora orchestration, the worker NodePort, controller Pod restart and traffic through both control load balancers remain live qualification steps.
 

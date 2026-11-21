@@ -19,11 +19,14 @@ limitations under the License.
 package controller_test
 
 import (
+	"errors"
+	"io"
 	"io/fs"
 	"testing"
 
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	kubeyaml "k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -38,6 +41,8 @@ import (
 	configv1alpha1 "github.com/gateway-api-openstack/gateway-api-openstack/api/v1alpha1"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gatewayclass"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/httproute"
 )
 
 func startGatewayStatusReconcilers(t *testing.T, manager ctrl.Manager, cfg controller.Config) {
@@ -49,6 +54,10 @@ func startGatewayStatusReconcilers(t *testing.T, manager ctrl.Manager, cfg contr
 	}
 	gateway := newEnvtestGatewayReconciler(manager.GetClient(), manager.GetAPIReader(), provider, cfg)
 	if err := gateway.SetupWithManager(manager); err != nil {
+		t.Fatal(err)
+	}
+	route := gateway.Writer.(*graph.Writer).Routes.(*httproute.Reconciler)
+	if err := route.SetupWithManager(manager); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -67,17 +76,18 @@ func testUpstreamGatewayStatus(t *testing.T, c client.Client, cfg controller.Con
 				Kind: configv1alpha1.GatewayClassConfigKind, Name: parameters.Name},
 		},
 	}
-	for _, obj := range []client.Object{&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: suite.InfrastructureNamespace}}, parameters, class} {
+	for _, obj := range []client.Object{parameters, class} {
 		if err := c.Create(t.Context(), obj); err != nil {
 			t.Fatal(err)
 		}
 	}
+	createUpstreamStatusBase(t, c, className)
 	s := &suite.ConformanceTestSuite{
 		Client: c, DisableParallelTests: true, CleanupTestResources: true,
 		Applier: kubernetes.Applier{GatewayClass: className, ControllerName: string(cfg.ControllerName), ManifestFS: []fs.FS{&conformance.Manifests}},
 		TimeoutConfig: config.TimeoutConfig{GWCMustBeAccepted: envtestWaitTimeout, LatestObservedGenerationSet: envtestWaitTimeout,
 			GatewayMustHaveCondition: envtestWaitTimeout, GatewayStatusMustHaveListeners: envtestWaitTimeout,
-			GatewayMustHaveAddress: envtestWaitTimeout},
+			GatewayMustHaveAddress: envtestWaitTimeout, HTTPRouteMustHaveCondition: envtestWaitTimeout},
 	}
 	config.SetupTimeoutConfig(&s.TimeoutConfig)
 	kubernetes.GWCMustHaveAcceptedConditionTrue(t, c, s.TimeoutConfig, className)
@@ -124,10 +134,44 @@ func testUpstreamGatewayStatus(t *testing.T, c client.Client, cfg controller.Con
 		}
 	})
 
-	for _, tc := range []suite.ConformanceTest{tests.GatewayClassObservedGenerationBump, tests.GatewayInvalidRouteKind, tests.GatewayInvalidParametersRef, tests.GatewayListenerUnsupportedProtocol} {
+	for _, tc := range []suite.ConformanceTest{tests.GatewayClassObservedGenerationBump, tests.GatewayInvalidRouteKind, tests.GatewayInvalidParametersRef, tests.GatewayListenerUnsupportedProtocol, tests.HTTPRouteInvalidCrossNamespaceParentRef} {
 		t.Run(tc.ShortName, func(t *testing.T) {
 			s.RunTest = tc.ShortName
 			tc.Run(t, s)
 		})
+	}
+}
+
+// These status-only cases need the upstream namespaces, Same Gateway and
+// backend Service. Use their published definitions directly from the module.
+func createUpstreamStatusBase(t *testing.T, c client.Client, className string) {
+	t.Helper()
+	file, err := conformance.Manifests.Open("base/manifests.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = file.Close() }()
+	decoder := kubeyaml.NewYAMLOrJSONDecoder(file, 4096)
+	for {
+		var obj unstructured.Unstructured
+		if err := decoder.Decode(&obj); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			t.Fatal(err)
+		}
+		switch {
+		case obj.GetKind() == "Namespace" && (obj.GetName() == suite.InfrastructureNamespace || obj.GetName() == suite.WebBackendNamespace):
+		case obj.GetKind() == "Service" && obj.GetNamespace() == suite.WebBackendNamespace && obj.GetName() == "web-backend":
+		case obj.GetKind() == "Gateway" && obj.GetNamespace() == suite.InfrastructureNamespace && obj.GetName() == "same-namespace":
+			if err := unstructured.SetNestedField(obj.Object, className, "spec", "gatewayClassName"); err != nil {
+				t.Fatal(err)
+			}
+		default:
+			continue
+		}
+		if err := c.Create(t.Context(), &obj); err != nil {
+			t.Fatalf("create upstream %s %s: %v", obj.GetKind(), obj.GetName(), err)
+		}
 	}
 }

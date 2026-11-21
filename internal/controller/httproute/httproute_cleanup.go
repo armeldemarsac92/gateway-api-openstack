@@ -18,6 +18,7 @@ package httproute
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -221,7 +222,21 @@ func (r *Reconciler) deleteRoute(
 		return cloud.ProgressingOutcome("HTTPRoute cleanup checkpoint was stored", time.Second), nil
 	}
 	result, err := r.Writer.ReconcileGraph(ctx, graph.Request{Identity: identity, Action: graph.DeleteRoute, Route: expected})
-	return result.Outcome, err
+	if err != nil {
+		var fragment *cloud.GraphError
+		if !errors.As(err, &fragment) || fragment.Identity.RouteUID == "" || fragment.Identity.RouteUID == identity.RouteUID {
+			return cloud.Outcome{}, err
+		}
+		// A failure acting on a sibling does not invalidate our own completed
+		// observation. Keep the finalizer on failures outside this Gateway.
+		parent := fragment.Identity
+		parent.RouteNamespace, parent.RouteName, parent.RouteUID = identity.RouteNamespace, identity.RouteName, identity.RouteUID
+		if parent != identity {
+			return cloud.Outcome{}, err
+		}
+	}
+	component, err := routeComponentResult(result, identity)
+	return component.Outcome, err
 }
 
 func (r *Reconciler) checkpointRouteDetaching(ctx context.Context, expected *gatewayv1.HTTPRoute, identity cloud.Identity) error {

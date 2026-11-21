@@ -19,6 +19,7 @@ package graph
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
@@ -42,6 +43,7 @@ func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual obs
 		}
 		return plan, result, nil
 	}
+	result.Routes = observedRouteDeleteCompletions(desired, actual)
 	plan, err := buildGatewayPrerequisitePlan(desired, actual)
 	if err != nil {
 		return nil, result, err
@@ -53,9 +55,25 @@ func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual obs
 	if !gatewayReady {
 		result.Gateway.Outcome = p.progressingOutcome("Waiting for the Gateway infrastructure")
 	}
-	deletions := make([]graphMutation, 0)
+	var deleteDisables, deleteDisableRetries, deletions []graphMutation
+	disables := make([]graphMutation, 0)
 	ensures := make([]graphMutation, 0)
+	routeResults := make([]cloud.RouteGraphResult, 0, len(desired.routes))
 	canRestoreTraffic := true
+	holdPolicyOrder := false
+	policyPending := false
+	for index, observed := range actual.routes {
+		policyPending = policyPending || slices.ContainsFunc(observed.policies, observedRoutePolicy.pending)
+		if desired.spec.Routes[index].Disposition != cloud.GraphPreserve {
+			continue
+		}
+		// A preserved fragment cannot authorize reopening its parent. If it
+		// has policies, their precedence is unknown until the next full ensure.
+		canRestoreTraffic = canRestoreTraffic && observed.pool == nil && len(observed.policies) == 0
+		holdPolicyOrder = holdPolicyOrder || len(observed.policies) != 0
+	}
+	holdPolicyOrder = holdPolicyOrder || policyPending
+	canRestoreTraffic = canRestoreTraffic && !policyPending
 	for index, route := range desired.routes {
 		observed := observedRouteGraph{}
 		if index < len(actual.routes) {
@@ -63,16 +81,12 @@ func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual obs
 		}
 		routeResult := cloud.RouteReadyResult(routeStateFromObservation(observed))
 		var routePlan []routeMutation
+		var backendIssue, ensureHold string
 		node := desired.spec.Routes[index]
 		switch node.Disposition {
 		case cloud.GraphDelete:
 			routePlan = buildRouteDeletionPlan(observed)
-		case cloud.GraphPreserve:
-			// An unresolved attached fragment may be observed, but it cannot
-			// authorize reopening traffic through a disabled parent.
-			if observed.pool != nil || len(observed.policies) != 0 {
-				canRestoreTraffic = false
-			}
+			backendIssue = observed.backendProvisioningIssue(true)
 		case cloud.GraphEnsure:
 			// Desired routes share the validated Gateway requirements. Their
 			// recorded IDs must still match this observation before planning.
@@ -93,24 +107,66 @@ func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual obs
 			if !gatewayReady {
 				routeResult.Outcome = p.progressingOutcome("Waiting for the Gateway infrastructure")
 			}
+			if slices.ContainsFunc(observed.policies, observedRoutePolicy.pending) {
+				ensureHold = "Waiting for Octavia L7 policy or rule provisioning"
+				routePlan = nil
+			} else if backendIssue := observed.backendProvisioningIssue(false); backendIssue != "" {
+				ensureHold = backendIssue
+				canRestoreTraffic = false
+				// A blocked earlier route can leave an empty slot in the policy
+				// order. Octavia would clamp a subsequent insert to the end.
+				holdPolicyOrder = holdPolicyOrder || !policyPositionsMatch(route.policies, observed.policies)
+			}
 		}
 		if len(routePlan) != 0 {
 			routeResult.Outcome = p.progressingOutcome(routePlan[0].message())
 		}
+		if ensureHold != "" {
+			routeResult.Outcome = p.progressingOutcome(ensureHold)
+		}
 		for _, step := range routePlan {
 			mutation := graphMutation{kind: graphRouteMutation, routeIndex: index, route: step, message: step.message()}
-			if node.Disposition == cloud.GraphDelete {
-				deletions = append(deletions, mutation)
-			} else {
+			switch {
+			case node.Disposition == cloud.GraphDelete && step.kind == routeMutationDisablePolicy:
+				if step.retry {
+					deleteDisableRetries = append(deleteDisableRetries, mutation)
+				} else {
+					deleteDisables = append(deleteDisables, mutation)
+				}
+			case node.Disposition == cloud.GraphDelete:
+				if policyPending {
+					routeResult.Outcome = p.progressingOutcome("Waiting for Octavia L7 policy or rule provisioning before cleanup")
+				} else if backendIssue != "" && (step.kind == routeMutationDeleteMember || step.kind == routeMutationDeleteMonitor || step.kind == routeMutationDeletePool) {
+					routeResult.Outcome = p.progressingOutcome(backendIssue)
+				} else {
+					deletions = append(deletions, mutation)
+				}
+			case step.kind == routeMutationDisablePolicy:
+				disables = append(disables, mutation)
+			case ensureHold != "":
+				continue
+			case holdPolicyOrder && (step.kind == routeMutationMovePolicy || step.kind == routeMutationCreatePolicy || step.kind == routeMutationEnablePolicy):
+				routeResult.Outcome = p.progressingOutcome("Waiting for the HTTPRoute policy order")
+			default:
 				ensures = append(ensures, mutation)
 			}
 		}
-		result.Routes = append(result.Routes, cloud.RouteGraphResult{Identity: route.spec.Identity, Result: routeResult})
+		routeResults = append(routeResults, cloud.RouteGraphResult{Identity: route.spec.Identity, Result: routeResult})
 		if routeResult.Outcome.State == cloud.OutcomeProgressing {
 			result.Outcome = routeResult.Outcome
 		}
 	}
+	result.Routes = routeResults
+	// A failed teardown for one route must never leave another revoked route
+	// forwarding. Close all actionable policies, including fresh disables ahead
+	// of retries for previously failed disables, before touching descendants.
+	plan = append(plan, deleteDisables...)
+	plan = append(plan, deleteDisableRetries...)
 	plan = append(plan, deletions...)
+	plan = append(plan, disables...)
+	// Ensured routes are ranked, and each route's policies are ordered within
+	// its rank. Each new call refreshes the list after Octavia shifts positions.
+	// Filling this prefix first keeps inserts and moves within the current list.
 	plan = append(plan, ensures...)
 	if canRestoreTraffic {
 		restore, err := buildGatewayTrafficRestorationPlan(desired, actual)
@@ -125,6 +181,24 @@ func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual obs
 		result.Outcome = result.Gateway.Outcome
 	}
 	return plan, result, nil
+}
+
+func observedRouteDeleteCompletions(desired desiredGatewayGraph, actual observedGatewayGraph) []cloud.RouteGraphResult {
+	if desired.spec.Gateway.Disposition == cloud.GraphDelete || actual.loadBalancer != nil && len(actual.routes) != len(desired.routes) {
+		return nil
+	}
+	var completed []cloud.RouteGraphResult
+	for index, node := range desired.spec.Routes {
+		if node.Disposition != cloud.GraphDelete {
+			continue
+		}
+		if index < len(actual.routes) && (actual.routes[index].pool != nil || len(actual.routes[index].policies) != 0) {
+			continue
+		}
+		// Inventory was either completely observed or the parent was absent.
+		completed = append(completed, cloud.RouteGraphResult{Identity: node.Spec.Identity, Result: cloud.RouteReadyResult(cloud.RouteState{})})
+	}
+	return completed
 }
 
 func buildGatewayPrerequisitePlan(desired desiredGatewayGraph, actual observedGatewayGraph) ([]graphMutation, error) {

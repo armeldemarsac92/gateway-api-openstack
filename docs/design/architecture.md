@@ -23,11 +23,11 @@ This project does not adopt or migrate its resources.
 - Existing OpenStack resources are not adopted.
 - Unsupported or unrepresentable behavior is rejected through status.
 
-The current profile supports one HTTP listener, one selected HTTPRoute in the Gateway namespace, one rule, and one Service backend. A Service in another namespace requires a live ReferenceGrant in that namespace.
-It supports an exact hostname with Exact or PathPrefix matching. On the Experimental channel, a nonempty pre-routing filter list rejects the listener. For an existing binding, the controller closes its owned traffic path, including during unrelated bundle skew.
+The current profile supports one active HTTP listener shared by HTTPRoutes that each have one rule, one match and one Service backend. A Service in another namespace requires a live ReferenceGrant in that namespace.
+The listener and route may use an exact hostname or a leading wildcard with Exact or PathPrefix path matching. On the Experimental channel, a nonempty pre-routing filter list rejects the listener. For an existing binding, the controller closes its owned traffic path, including during unrelated bundle skew.
 NodePort is the default member mode.
 The opt-in IPv4 Endpoint implementation awaits live network validation under [ADR 0007](adr/0007-direct-endpoint-members.md).
-Multiple listeners, multiple desired routes, TLS, cross-namespace ParentRefs, requested addresses, and backend policies remain unsupported.
+The listener accepts a route according to its Same, All or Selector namespace policy. Multiple active listeners, TLS, static address allocation and backend policies remain open.
 
 ## Design principles
 
@@ -94,7 +94,7 @@ Ownership of a security group alone is insufficient authority to change a port.
 | Gateway | Amphora load balancer | One per Gateway. |
 | Gateway address | Allocated Floating IP or load balancer VIP | Existing addresses are not adopted, and requested Gateway addresses are unsupported. |
 | Listener | HTTP listener | One listener. Terminated HTTPS remains planned. |
-| HTTPRoute rule and match | Pool, ordered L7 policies, and conjunctive rules | One selected route, rule, and backend with exact hostname and path matching. |
+| HTTPRoute rule and match | Pool, ordered L7 policies, and conjunctive rules | One pool per bound route. L7 policy positions implement hostname and path precedence across routes. |
 | NodePort mode | Members on eligible worker Node addresses and NodePorts | Requires a NodePort Service. |
 | Endpoint mode | Members on resolved EndpointSlice addresses and ports | Opt-in IPv4 development mode with no verified cloud environment. |
 | Class health settings | HTTP health monitor for the route pool | Backend-specific policy is deferred. |
@@ -147,11 +147,11 @@ Invalid references and unsupported rules remain explicit diagnostics, so a consu
 Endpoint conditions describe Kubernetes observations, not Amphora health or network reachability.
 
 Both member modes use the model's normalized match and selected Service port, reusing the same EndpointSlice observation for member selection.
-The graph source collects backend inputs for its complete current route inventory and compiles them once per observation.
+The graph source observes every bound fragment and candidate for the Gateway. It collects backend inputs for the admitted bound routes and the route being bound, then compiles them once per observation.
 Service and EndpointSlice reads are shared across rules and routes, while backend weights, authorization results, and diagnostics remain separate.
 Cross-namespace targets are read only when an observed ReferenceGrant permits at least one referring route.
-Namespace labels are collected when listener attachment uses a namespace selector.
-The current single-route selection then chooses the portion eligible for cloud programming without dropping any of that route's rules or backend groups.
+The graph records the tenant Namespace when the listener permits All or uses a selector.
+Each eligible route takes its match position from this shared listener model. The provider expands the positions into consecutive Octavia L7 policies, including both element-wise comparisons for a non-root PathPrefix.
 The compiler can evaluate multiple HTTP listeners, routes, parents, and backend groups in local tests, while the deployed path retains the current profile's restrictions.
 Enabling those configurations still requires the physical mappings, complete live inventory, and durable parent bindings described in [ADR 0005](adr/0005-core-resource-mapping.md).
 The compiler does not assign cloud resource identities, choose a pool layout, or authorize cleanup.
@@ -169,14 +169,14 @@ Route cleanup preserves the Gateway component and deletes only exact detaching f
 Whole-Gateway cleanup may remove the entire graph after validation.
 A preserved fragment cannot authorize restoring disabled parent traffic.
 
-The route source lists the Gateway namespace through the uncached reader, including bound routes whose ParentRef has disappeared and candidates that can affect selection.
-It repeats that inventory before mutation and checks route UIDs and resource versions, then validates the required object revisions, bindings, finalizers, lifecycle, ownership, and API version.
+The route source lists HTTPRoutes across namespaces through the uncached reader. A stored Gateway UID or a matching durable cleanup checkpoint can identify a bound route after its ParentRef disappears.
+Before mutation the writer compares binding identities and lifecycle, the eligible route and Namespace UIDs, and the specs and generations of active routes. Each active fragment also has an ownership and version check.
 It also reobserves backend dependencies once per graph to detect replacement objects, changed EndpointSlice membership, and revised reference permissions.
 Binding creation performs the same inventory and dependency checks before persisting ownership.
 Cleanup requests rely on durable bindings and do not require Service, EndpointSlice, or ReferenceGrant reads.
 These checks detect observed changes without claiming an atomic Kubernetes snapshot.
 Cached indexes drive event mapping, not proof of inventory completeness.
-For a Service in another namespace, the writer rechecks the ReferenceGrant before programming and detaches the route fragment when permission is revoked. The route and parent Gateway must share a namespace. [Service grant behavior](../qualification/v1.7.0/service-grants.md)
+For a Service in another namespace, the writer rechecks the ReferenceGrant before programming and detaches the route fragment when permission is revoked. The Gateway listener independently authorizes the tenant's namespace through allowedRoutes. [Service grant behavior](../qualification/v1.7.0/service-grants.md)
 
 Bound routes require an explicit `Attached` or `Detaching` marker.
 The route reconciler makes the applicable status and cleanup checkpoint durable before changing the marker to `Detaching`.
@@ -197,10 +197,10 @@ A restart reconstructs state from Kubernetes bindings and OpenStack identity.
 
 A graph call returns a scheduling outcome and separate Gateway and route results.
 Errors identify the affected component when known.
-A route failure discovered during Gateway reconciliation does not become a Gateway provisioning failure, and a route transition does not clear a still-valid Gateway `Programmed` condition.
+A route failure is attributed to its owner. While Octavia is busy with a sibling, an already programmed route retains its last confirmed status for its current generation. The controller retries for a fresh observation. A route finalizer can clear when its own resources are confirmed absent, even if another route still needs cleanup.
 
 The desired load balancer and listener administrative state is enabled.
-After validating all relevant fragments, the plan reconciles Gateway prerequisites, deletes detaching fragments, reconciles the attached fragment, enables the listener, and finally enables the load balancer.
+After validating the graph, the provider prepares the Gateway, prioritizes disabling policies for every detaching route, removes their resources, and reconciles the admitted routes in listener order. It then enables the listener and load balancer as needed.
 It performs only one of these mutations per call.
 Immutable topology and identity differences are conflicts, not fields to overwrite.
 
@@ -274,6 +274,7 @@ Per-Gateway infrastructure settings, managed backend security, and per-backend p
 Gateway API matches are alternatives, with conjunctive conditions within each match.
 The current path mapping uses ordered Octavia policies and rules.
 PathPrefix `/foo` needs an exact `/foo` policy and a `/foo/` prefix policy so that `/foobar` does not match.
+Octavia limits each rule value to 255 characters. Exact paths can use all 255 characters, while a normalized non-root PathPrefix can use 254 because its second rule adds `/`. The controller reports `Accepted=False` with reason `UnsupportedValue` before binding a route that exceeds these limits.
 
 The [conformance guide](../testing-conformance.md) records current Core gaps.
 The [feasibility assessment](conformance-feasibility.md) identifies Octavia API blockers and designs needed for the broader compiler.
@@ -373,7 +374,7 @@ The following boundaries remain open:
 - per-Gateway infrastructure parameters and merge semantics
 - managed changes to worker security groups
 - shared resource identity, reference counting, and uninstall behavior
-- listener grouping, multiple routes, and global precedence
+- listener grouping across multiple active ports and precedence for additional match types
 - weighted and invalid backend behavior
 - Barbican identity, certificate rotation, and rollback
 - the backend policy API, whole-Service and port overlap, and conflict status

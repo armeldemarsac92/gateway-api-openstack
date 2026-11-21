@@ -113,15 +113,26 @@ func unsupported(message string, scope DiagnosticScope) *Diagnostic {
 	return &Diagnostic{Condition: string(gatewayv1.RouteConditionAccepted), Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: message, Scope: scope}
 }
 
-// compareMatches follows the pinned Core hostname, path, header, and route
-// precedence. Unsupported method and query predicates never enter this order.
+func matchingRouteHostname(effective string, hostnames []string) string {
+	best := ""
+	for _, host := range hostnames {
+		if host == effective {
+			return host
+		}
+		if wildcardMatches(host, effective) && len(host) > len(best) {
+			best = host
+		}
+	}
+	return best
+}
+
+// compareMatches uses original route hostnames to break ties introduced by
+// listener intersection before applying path, header and route precedence.
 func compareMatches(a, b RouteMatch) int {
-	aExact, aLength := hostnameSpecificity(a.Hostname)
-	bExact, bLength := hostnameSpecificity(b.Hostname)
-	if order := cmp.Compare(bExact, aExact); order != 0 {
+	if order := compareHostnames(a.Hostname, b.Hostname); order != 0 {
 		return order
 	}
-	if order := cmp.Compare(bLength, aLength); order != 0 {
+	if order := compareHostnames(a.routeHostname, b.routeHostname); order != 0 {
 		return order
 	}
 	if a.Match.PathType != b.Match.PathType {
@@ -151,6 +162,15 @@ func compareMatches(a, b RouteMatch) int {
 		return order
 	}
 	return cmp.Compare(a.Hostname, b.Hostname)
+}
+
+func compareHostnames(a, b string) int {
+	aExact, aLength := hostnameSpecificity(a)
+	bExact, bLength := hostnameSpecificity(b)
+	if order := cmp.Compare(bExact, aExact); order != 0 {
+		return order
+	}
+	return cmp.Compare(bLength, aLength)
 }
 
 func hostnameSpecificity(hostname string) (int, int) {

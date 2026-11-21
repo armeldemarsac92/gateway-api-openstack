@@ -21,14 +21,17 @@ import (
 	"fmt"
 	"slices"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia/amphora"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	gatewaycontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
@@ -80,12 +83,12 @@ func (r *Reconciler) managedParentsWithReader(
 	return parents, nil
 }
 
-func validateRouteParent(route *gatewayv1.HTTPRoute, parent managedRouteParent) error {
+func validateRouteParentListener(route *gatewayv1.HTTPRoute, parent managedRouteParent) error {
 	if parent.gateway.DeletionTimestamp != nil {
 		return newRouteBuildError(routeErrorPending, "parent Gateway is being deleted")
 	}
-	if parent.gateway.Namespace != route.Namespace {
-		return newRouteBuildError(routeErrorNotAllowed, "cross-namespace parentRefs are not supported")
+	if !routeTargetsGateway(route, parent.ref, parent.gateway.Namespace, parent.gateway.Name) {
+		return newRouteBuildError(routeErrorNoMatchingParent, "parentRef does not target this Gateway")
 	}
 	if parent.listener == nil {
 		return newRouteBuildError(routeErrorUnsupported, "parent Gateway must have one HTTP listener on its own port")
@@ -118,12 +121,81 @@ func validateRouteParent(route *gatewayv1.HTTPRoute, parent managedRouteParent) 
 		if !allowsHTTPRoute {
 			return newRouteBuildError(routeErrorNotAllowed, "listener allowedRoutes does not include HTTPRoute")
 		}
-		if listener.AllowedRoutes.Namespaces != nil && listener.AllowedRoutes.Namespaces.From != nil &&
-			*listener.AllowedRoutes.Namespaces.From != gatewayv1.NamespacesFromSame {
-			return newRouteBuildError(routeErrorNotAllowed, "listeners only allow same-namespace HTTPRoutes")
+	}
+	return nil
+}
+
+func routeTargetsGateway(route *gatewayv1.HTTPRoute, parent gatewayv1.ParentReference, namespace, name string) bool {
+	parentNamespace := route.Namespace
+	if parent.Namespace != nil {
+		parentNamespace = string(*parent.Namespace)
+	}
+	return controller.IsGatewayParentRef(parent) && parentNamespace == namespace && string(parent.Name) == name
+}
+
+func validateRouteAttachment(route *gatewayv1.HTTPRoute, parent managedRouteParent, namespaces []corev1.Namespace) error {
+	if !model.AllowsRouteNamespace(parent.listener, parent.gateway.Namespace, route.Namespace, namespaces) {
+		return newRouteBuildError(routeErrorNotAllowed, "listener allowedRoutes does not allow this HTTPRoute namespace")
+	}
+	return validateRouteHostnames(parent.listener.Hostname, route.Spec.Hostnames)
+}
+
+func readRouteNamespaces(ctx context.Context, reader client.Reader, listener *gatewayv1.Listener, routeNamespace string) ([]corev1.Namespace, error) {
+	if !model.ObservesRouteNamespace(listener) {
+		return nil, nil
+	}
+	if reader == nil {
+		return nil, controller.ErrAPIReaderRequired
+	}
+	namespace, err := graph.ReadRouteNamespace(ctx, reader, routeNamespace)
+	if err != nil || namespace == nil {
+		return nil, err
+	}
+	return []corev1.Namespace{*namespace}, nil
+}
+
+func boundRouteAttachmentRejection(route *gatewayv1.HTTPRoute, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, namespaces []corev1.Namespace) error {
+	rejection := newRouteBuildError(routeErrorNoMatchingParent, "HTTPRoute no longer targets the bound Gateway")
+	for _, ref := range route.Spec.ParentRefs {
+		if !routeTargetsGateway(route, ref, gateway.Namespace, gateway.Name) {
+			continue
+		}
+		parent := managedRouteParent{ref: ref, gateway: gateway, listener: listener}
+		rejection = validateRouteParentListener(route, parent)
+		if rejection == nil {
+			rejection = validateRouteAttachment(route, parent, namespaces)
+		}
+		if rejection == nil {
+			return nil
 		}
 	}
-	return validateRouteHostnames(listener.Hostname, route.Spec.Hostnames)
+	return rejection
+}
+
+// liveBoundRouteAttachmentRejection observes the authorization for established
+// forwarding independently of GatewayClass and bundle readiness.
+func (r *Reconciler) liveBoundRouteAttachmentRejection(ctx context.Context, route *gatewayv1.HTTPRoute, identity cloud.Identity) (rejection, readErr error) {
+	if !slices.ContainsFunc(route.Spec.ParentRefs, func(ref gatewayv1.ParentReference) bool {
+		return routeTargetsGateway(route, ref, identity.GatewayNamespace, identity.GatewayName)
+	}) {
+		return newRouteBuildError(routeErrorNoMatchingParent, "HTTPRoute no longer targets the bound Gateway"), nil
+	}
+	var gateway gatewayv1.Gateway
+	if err := r.APIReader.Get(ctx, client.ObjectKey{Namespace: identity.GatewayNamespace, Name: identity.GatewayName}, &gateway); err != nil {
+		if apierrors.IsNotFound(err) {
+			return newRouteBuildError(routeErrorNoMatchingParent, "the bound Gateway no longer exists"), nil
+		}
+		return nil, fmt.Errorf("get bound Gateway attachment policy: %w", err)
+	}
+	if string(gateway.UID) != identity.GatewayUID {
+		return newRouteBuildError(routeErrorNoMatchingParent, "the bound Gateway was replaced"), nil
+	}
+	listener, _ := gatewaycontroller.HTTPListener(&gateway)
+	namespaces, err := readRouteNamespaces(ctx, r.APIReader, listener, route.Namespace)
+	if err != nil {
+		return nil, err
+	}
+	return boundRouteAttachmentRejection(route, &gateway, listener, namespaces), nil
 }
 
 func validateRouteHostnames(listener *gatewayv1.Hostname, hostnames []gatewayv1.Hostname) error {

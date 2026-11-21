@@ -21,6 +21,7 @@ import (
 	"errors"
 	"slices"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -29,6 +30,8 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
 func (r *Reconciler) setGatewayFailure(gateway *gatewayv1.Gateway, validationErr error) {
@@ -400,13 +403,36 @@ func (r *Reconciler) attachedRouteCount(ctx context.Context, gateway *gatewayv1.
 		return 0, err
 	}
 	var count int32
+	namespaces := make(map[string][]corev1.Namespace)
 	for _, route := range routes.Items {
+		if !route.DeletionTimestamp.IsZero() {
+			continue
+		}
 		for _, parentStatus := range route.Status.Parents {
-			if !routeParentStatusTargetsListener(parentStatus, gateway, listener, r.Config.ControllerName) {
+			if !routeParentStatusTargetsListener(parentStatus, route.Namespace, gateway, listener, r.Config.ControllerName) {
 				continue
 			}
 			accepted := meta.FindStatusCondition(parentStatus.Conditions, string(gatewayv1.RouteConditionAccepted))
-			if accepted != nil && accepted.Status == metav1.ConditionTrue && accepted.ObservedGeneration == route.Generation {
+			if accepted == nil || accepted.Status != metav1.ConditionTrue || accepted.ObservedGeneration != route.Generation ||
+				!slices.ContainsFunc(route.Spec.ParentRefs, func(ref gatewayv1.ParentReference) bool {
+					return controller.ParentRefsEqual(ref, route.Namespace, parentStatus.ParentRef, route.Namespace)
+				}) {
+				continue
+			}
+			if _, observed := namespaces[route.Namespace]; !observed && model.ObservesRouteNamespace(listener) {
+				if r.APIReader == nil {
+					return 0, controller.ErrAPIReaderRequired
+				}
+				namespace, err := graph.ReadRouteNamespace(ctx, r.APIReader, route.Namespace)
+				if err != nil {
+					return 0, err
+				}
+				namespaces[route.Namespace] = nil
+				if namespace != nil {
+					namespaces[route.Namespace] = []corev1.Namespace{*namespace}
+				}
+			}
+			if model.AllowsRouteNamespace(listener, gateway.Namespace, route.Namespace, namespaces[route.Namespace]) {
 				count++
 			}
 			break
@@ -417,6 +443,7 @@ func (r *Reconciler) attachedRouteCount(ctx context.Context, gateway *gatewayv1.
 
 func routeParentStatusTargetsListener(
 	parentStatus gatewayv1.RouteParentStatus,
+	routeNamespace string,
 	gateway *gatewayv1.Gateway,
 	listener *gatewayv1.Listener,
 	controllerName gatewayv1.GatewayController,
@@ -425,7 +452,10 @@ func routeParentStatusTargetsListener(
 	if parentStatus.ControllerName != controllerName || !controller.IsGatewayParentRef(parentRef) || string(parentRef.Name) != gateway.Name {
 		return false
 	}
-	if parentRef.Namespace != nil && string(*parentRef.Namespace) != gateway.Namespace {
+	if parentRef.Namespace != nil {
+		routeNamespace = string(*parentRef.Namespace)
+	}
+	if routeNamespace != gateway.Namespace {
 		return false
 	}
 	if parentRef.SectionName != nil && *parentRef.SectionName != listener.Name {

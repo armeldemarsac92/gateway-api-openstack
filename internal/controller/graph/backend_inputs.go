@@ -26,7 +26,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -38,20 +37,25 @@ import (
 // The caller establishes inventory completeness and mutation authority separately.
 // Reads are shared only within this observation, and a failed read returns no partial input.
 func CollectBackendInputs(ctx context.Context, reader client.Reader, gateway *gatewayv1.Gateway, routes []gatewayv1.HTTPRoute) (model.Input, error) {
+	input := model.Input{Gateway: gateway, Routes: routes}
 	if gateway == nil {
 		return model.Input{}, fmt.Errorf("gateway is required to collect backend inputs")
 	}
-	input := model.Input{Gateway: gateway.DeepCopy(), Routes: make([]gatewayv1.HTTPRoute, 0, len(routes))}
+	if err := collectRouteNamespaces(ctx, reader, &input); err != nil {
+		return model.Input{}, err
+	}
+	return CollectBackendInputsWithNamespaces(ctx, reader, gateway, routes, input.Namespaces)
+}
+
+// CollectBackendInputsWithNamespaces reads the already-admitted route dependencies.
+func CollectBackendInputsWithNamespaces(ctx context.Context, reader client.Reader, gateway *gatewayv1.Gateway, routes []gatewayv1.HTTPRoute, namespaces []corev1.Namespace) (model.Input, error) {
+	input := model.Input{Gateway: gateway.DeepCopy(), Routes: make([]gatewayv1.HTTPRoute, 0, len(routes)), Namespaces: namespaces}
 	for i := range routes {
 		input.Routes = append(input.Routes, *routes[i].DeepCopy())
 	}
 	slices.SortFunc(input.Routes, func(a, b gatewayv1.HTTPRoute) int {
 		return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name), cmp.Compare(a.UID, b.UID))
 	})
-	if err := collectRouteNamespaces(ctx, reader, &input); err != nil {
-		return model.Input{}, err
-	}
-
 	references := backendServiceReferences(input.Routes)
 	grantNamespaces := map[string]struct{}{}
 	for target, sources := range references {
@@ -139,18 +143,10 @@ func backendServiceReferences(routes []gatewayv1.HTTPRoute) map[types.Namespaced
 }
 
 func collectRouteNamespaces(ctx context.Context, reader client.Reader, input *model.Input) error {
-	needsLabels := slices.ContainsFunc(input.Gateway.Spec.Listeners, func(listener gatewayv1.Listener) bool {
-		if listener.AllowedRoutes == nil || listener.AllowedRoutes.Namespaces == nil {
-			return false
-		}
-		namespaces := listener.AllowedRoutes.Namespaces
-		if namespaces.From == nil || *namespaces.From != gatewayv1.NamespacesFromSelector || namespaces.Selector == nil {
-			return false
-		}
-		_, err := metav1.LabelSelectorAsSelector(namespaces.Selector)
-		return err == nil
+	needsNamespaces := slices.ContainsFunc(input.Gateway.Spec.Listeners, func(listener gatewayv1.Listener) bool {
+		return model.ObservesRouteNamespace(&listener)
 	})
-	if !needsLabels {
+	if !needsNamespaces {
 		return nil
 	}
 	namespaces := map[string]struct{}{}
@@ -158,14 +154,25 @@ func collectRouteNamespaces(ctx context.Context, reader client.Reader, input *mo
 		namespaces[route.Namespace] = struct{}{}
 	}
 	for _, name := range slices.Sorted(maps.Keys(namespaces)) {
-		var namespace corev1.Namespace
-		if err := reader.Get(ctx, client.ObjectKey{Name: name}, &namespace); err != nil {
-			if apierrors.IsNotFound(err) {
-				continue
-			}
-			return fmt.Errorf("get HTTPRoute Namespace %s: %w", name, err)
+		namespace, err := ReadRouteNamespace(ctx, reader, name)
+		if err != nil {
+			return err
 		}
-		input.Namespaces = append(input.Namespaces, *namespace.DeepCopy())
+		if namespace != nil {
+			input.Namespaces = append(input.Namespaces, *namespace)
+		}
 	}
 	return nil
+}
+
+// ReadRouteNamespace distinguishes a missing Namespace from a failed read.
+func ReadRouteNamespace(ctx context.Context, reader client.Reader, name string) (*corev1.Namespace, error) {
+	var namespace corev1.Namespace
+	if err := reader.Get(ctx, client.ObjectKey{Name: name}, &namespace); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get HTTPRoute Namespace %s: %w", name, err)
+	}
+	return namespace.DeepCopy(), nil
 }

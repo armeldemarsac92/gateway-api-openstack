@@ -126,7 +126,10 @@ type RouteSpec struct {
 	Hostname                string
 	PathType                PathMatchType
 	PathValue               string
-	Members                 []Member
+	// Precedence is the zero-based rank of this route on the Gateway listener.
+	// Smaller ranks are evaluated first. Ranks must be distinct among ensured routes.
+	Precedence int
+	Members    []Member
 }
 
 // RouteState records the OpenStack objects produced for one HTTPRoute.

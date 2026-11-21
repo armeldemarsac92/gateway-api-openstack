@@ -182,42 +182,44 @@ func (r *Reconciler) validateCachedRouteDecision(
 	decision cachedRouteDecision,
 ) (cachedRouteDecision, error) {
 	decision.parent = parent
-	if validationErr := validateRouteParent(route, parent); validationErr != nil {
+	parentErr := validateRouteParentListener(route, parent)
+	validationErr := parentErr
+	if parentErr == nil {
+		namespaces, err := readRouteNamespaces(ctx, r.APIReader, parent.listener, route.Namespace)
+		if err != nil {
+			return cachedRouteDecision{}, err
+		}
+		validationErr = validateRouteAttachment(route, parent, namespaces)
+	}
+	if validationErr != nil {
+		status := statusForRouteBuildError(validationErr)
+		// An established route must detach even if a backend read fails.
+		// Clearing its binding enqueues it again for reference evaluation.
+		if !decision.bindingPresent && parentErr == nil && status.acceptedReason == string(gatewayv1.RouteReasonNotAllowedByListeners) {
+			if err := r.resolveDeniedRouteBackend(ctx, route, &status); err != nil {
+				return cachedRouteDecision{}, err
+			}
+		}
 		decision.disposition = cachedRouteDetach
 		decision.statusUpdates = []parentStatusUpdate{{
 			parent: parent.ref,
-			status: statusForRouteBuildError(validationErr),
+			status: status,
 		}}
 		return decision, nil
 	}
 	if structurallySupportedRoute(route) {
-		slot, err := r.evaluateRouteSlotWithReader(ctx, r.Client, route, parent.gateway)
-		if err != nil {
-			return cachedRouteDecision{}, err
-		}
-		if !slot.canReserve {
+		if err := r.checkRouteBackendProfile(ctx, r.Client, route, parent.gateway); err != nil {
+			var rejection *routeBuildError
+			if !errors.As(err, &rejection) {
+				return cachedRouteDecision{}, err
+			}
 			decision.disposition = cachedRouteDetach
 			decision.statusUpdates = []parentStatusUpdate{{
 				parent: parent.ref,
-				status: routeSlotRejectionStatus(slot.rejection),
+				status: backendProfileRejectionStatus(rejection),
 			}}
 			return decision, nil
 		}
-	}
-	selected, err := r.isSelectedRoute(ctx, route, parent)
-	if err != nil {
-		return cachedRouteDecision{}, err
-	}
-	if !selected {
-		decision.disposition = cachedRouteDetach
-		decision.statusUpdates = []parentStatusUpdate{{
-			parent: parent.ref,
-			status: rejectedRouteStatus(
-				string(gatewayv1.RouteReasonUnsupportedValue),
-				"only one HTTPRoute per Gateway is supported. An older route is already selected",
-			),
-		}}
-		return decision, nil
 	}
 	decision.disposition = cachedRouteReady
 	return decision, nil
@@ -297,6 +299,10 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 		if errors.As(err, &bindingError) {
 			return ctrl.Result{}, fmt.Errorf("bind HTTPRoute to Gateway: %w", bindingError)
 		}
+		var fragmentError *cloud.GraphError
+		if errors.As(err, &fragmentError) && fragmentError.Identity.RouteUID != "" && fragmentError.Identity.RouteUID != string(httpRoute.UID) {
+			return ctrl.Result{}, controller.SafeProviderReconcileError(controller.ProviderFailurePolicy{Message: "Another HTTPRoute in the Gateway graph could not be reconciled"}, err)
+		}
 		var semanticError *routeBuildError
 		if errors.As(err, &semanticError) || apierrors.IsNotFound(err) {
 			status := statusForRouteBuildError(err)
@@ -319,11 +325,12 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 	default:
 		return ctrl.Result{}, fmt.Errorf("invalid HTTPRoute binding state %d", graphResult.bindingState)
 	}
-	if graphResult.outcome.State == cloud.OutcomeProgressing {
-		message := controller.ProviderProgressMessage(graphResult.outcome, "Octavia resources for the HTTPRoute are still progressing")
-		status := pendingRouteStatus(message)
-		scope.setStatuses([]parentStatusUpdate{{parent: parent.ref, status: status}})
-		return ctrl.Result{RequeueAfter: controller.ProviderProgressRequeueAfter(graphResult.outcome, httpRoute.UID)}, nil
+	if graphResult.Outcome.State == cloud.OutcomeProgressing {
+		if !graphResult.ObservationDeferred || r.currentRouteProgrammedCondition(httpRoute, parent.ref) == nil {
+			message := controller.ProviderProgressMessage(graphResult.Outcome, "Octavia resources for the HTTPRoute are still progressing")
+			scope.setStatuses([]parentStatusUpdate{{parent: parent.ref, status: pendingRouteStatus(message)}})
+		}
+		return ctrl.Result{RequeueAfter: controller.ProviderProgressRequeueAfter(graphResult.Outcome, httpRoute.UID)}, nil
 	}
 	scope.setStatuses([]parentStatusUpdate{{parent: parent.ref, status: programmedRouteStatus()}})
 	log.FromContext(ctx).V(1).Info("Programmed HTTPRoute", "gateway", client.ObjectKeyFromObject(parent.gateway))

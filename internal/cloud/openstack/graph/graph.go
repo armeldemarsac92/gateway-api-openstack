@@ -112,6 +112,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 			}
 		}
 		if err := p.topology.ValidateGatewaySecurity(ctx, desired.spec.Gateway.Spec, routes); err != nil {
+			result.Routes = observedRouteDeleteCompletions(desired, actual)
 			return result, err
 		}
 	}
@@ -164,7 +165,15 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 	// Copy before sorting: callers can reuse their immutable reconciliation input.
 	spec.Routes = append([]cloud.RouteGraphNode(nil), spec.Routes...)
 	sort.Slice(spec.Routes, func(i, j int) bool {
-		a, b := spec.Routes[i].Spec.Identity, spec.Routes[j].Spec.Identity
+		first, second := spec.Routes[i], spec.Routes[j]
+		firstEnsure, secondEnsure := first.Disposition == cloud.GraphEnsure, second.Disposition == cloud.GraphEnsure
+		if firstEnsure != secondEnsure {
+			return firstEnsure
+		}
+		if firstEnsure && first.Spec.Precedence != second.Spec.Precedence {
+			return first.Spec.Precedence < second.Spec.Precedence
+		}
+		a, b := first.Spec.Identity, second.Spec.Identity
 		if a.RouteNamespace != b.RouteNamespace {
 			return a.RouteNamespace < b.RouteNamespace
 		}
@@ -175,7 +184,8 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 	})
 	desired := desiredGatewayGraph{spec: spec, identity: identity}
 	identities := make(map[string]struct{}, len(spec.Routes))
-	ensured := 0
+	lastRank := -1
+	position := int32(1)
 	for _, node := range spec.Routes {
 		id := node.Spec.Identity
 		if !validGraphDisposition(node.Disposition) {
@@ -197,10 +207,14 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 		}
 		route := desiredRoute{identity: routeIdentity, spec: node.Spec}
 		if node.Disposition == cloud.GraphEnsure {
-			ensured++
 			if spec.Gateway.Disposition != cloud.GraphEnsure {
 				return invalid("an ensured HTTPRoute requires an ensured Gateway")
 			}
+			if node.Spec.Precedence < 0 || node.Spec.Precedence == lastRank {
+				return desiredGatewayGraph{}, &cloud.GraphError{Identity: id, Err: cloud.NewProviderError(cloud.ErrorCategoryTerminalValidation,
+					fmt.Errorf("HTTPRoute precedence %d must be nonnegative and distinct among ensured HTTPRoutes", node.Spec.Precedence))}
+			}
+			lastRank = node.Spec.Precedence
 			if !node.Spec.GatewayRequirements.Equal(gatewayRequirements(spec.Gateway.Spec)) {
 				return desiredGatewayGraph{}, &cloud.GraphError{Identity: id, Err: fmt.Errorf("%w: HTTPRoute and Gateway infrastructure requirements differ", cloud.ErrOwnershipConflict)}
 			}
@@ -208,11 +222,12 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 			if err != nil {
 				return desiredGatewayGraph{}, &cloud.GraphError{Identity: id, Err: err}
 			}
+			for i := range route.policies {
+				route.policies[i].position = position
+				position++
+			}
 		}
 		desired.routes = append(desired.routes, route)
-	}
-	if ensured > 1 {
-		return invalid("the current HTTP profile supports one ensured HTTPRoute")
 	}
 	return desired, nil
 }
@@ -340,6 +355,13 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 	if err != nil {
 		return actual, err
 	}
+	if actual.listener != nil && strings.HasPrefix(actual.listener.ProvisioningStatus, "PENDING_") {
+		actual.outcome = p.progressingOutcome("Waiting for Octavia listener provisioning")
+		return actual, nil
+	}
+	if err := validateObservedPolicyLayout(actual.routes); err != nil {
+		return actual, err
+	}
 	if desired.spec.Gateway.Disposition == cloud.GraphEnsure && actual.listener != nil && actual.listener.DefaultPoolID != "" {
 		defaultPoolID := actual.listener.DefaultPoolID
 		if !slices.ContainsFunc(actual.routes, func(route observedRouteGraph) bool {
@@ -349,6 +371,25 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 		}
 	}
 	return actual, nil
+}
+
+func validateObservedPolicyLayout(routes []observedRouteGraph) error {
+	positions := make(map[int32]bool)
+	policyCount := 0
+	for _, route := range routes {
+		for _, policy := range route.policies {
+			positions[policy.policy.Position] = true
+			policyCount++
+		}
+	}
+	// Octavia moves policies by popping their current one-based position from
+	// the listener's policy list. Wait for a complete, consistent readback.
+	for position := int32(1); position <= int32(policyCount); position++ {
+		if !positions[position] {
+			return cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady, fmt.Errorf("missing Octavia L7 policy at position %d", position))
+		}
+	}
+	return nil
 }
 
 // observeAbsentGateway checks independently allocated Neutron resources before
@@ -387,7 +428,7 @@ func validateGraphLoadBalancer(lb *octavia.LoadBalancer, requirements cloud.Gate
 func pendingGraphResult(desired desiredGatewayGraph, outcome cloud.Outcome) cloud.GatewayGraphResult {
 	result := cloud.GatewayGraphResult{Outcome: outcome, Gateway: cloud.GatewayResult{Outcome: outcome}}
 	for _, route := range desired.routes {
-		result.Routes = append(result.Routes, cloud.RouteGraphResult{Identity: route.spec.Identity, Result: cloud.RouteResult{Outcome: outcome}})
+		result.Routes = append(result.Routes, cloud.RouteGraphResult{Identity: route.spec.Identity, Result: cloud.RouteResult{Outcome: outcome, ObservationDeferred: true}})
 	}
 	return result
 }

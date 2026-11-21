@@ -17,21 +17,23 @@ limitations under the License.
 package httproute
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
-	"sort"
+	"slices"
+	"strings"
 
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	gatewaycontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 )
 
-// ObserveRouteGraph rebuilds every bound fragment from a complete namespace read.
+// ObserveRouteGraph rebuilds every bound fragment from a complete cluster read.
 // Cached indexes cannot establish completeness for a destructive cloud plan.
 func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Request, gateway *gatewayv1.Gateway) (graph.RouteInputs, error) {
 	if r.APIReader == nil {
@@ -42,26 +44,42 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 		return graph.RouteInputs{}, err
 	}
 	var backends *routeModelInputs
+	var listener *gatewayv1.Listener
 	if request.Action == graph.Ensure {
+		if gateway == nil {
+			return graph.RouteInputs{}, errors.New("gateway is required to ensure routes")
+		}
+		listener, err = gatewaycontroller.Validate(gateway)
+		if err != nil {
+			return graph.RouteInputs{}, err
+		}
 		// Cleanup requests use durable ownership without requiring backend reads.
-		backends, err = collectRouteModelInputs(ctx, r.APIReader, gateway, routes)
+		backends, err = r.collectGraphRouteModelInputs(ctx, gateway, listener, routes, request.Route)
 		if err != nil {
 			return graph.RouteInputs{}, err
 		}
 	}
 	input := graph.RouteInputs{Nodes: make([]cloud.RouteGraphNode, 0, len(routes))}
+	var bindings []routeGraphBinding
+	if backends == nil {
+		bindings = r.routeGraphBindings(routes, request.Identity)
+	}
 	fences := make([]func(context.Context) error, 0, len(routes))
 	foundRequested := request.Route == nil
 	for i := range routes {
 		route := &routes[i]
+		if !r.hasGraphBindingClaim(route, request.Identity) {
+			continue
+		}
 		identity, present, err := r.storedRouteIdentity(route)
 		if err != nil {
 			return graph.RouteInputs{}, err
 		}
 		if !present || !controller.SameGatewayIdentity(identity, request.Identity) {
-			continue
+			return graph.RouteInputs{}, fmt.Errorf("%w: HTTPRoute binding does not match the Gateway graph", cloud.ErrOwnershipConflict)
 		}
-		if request.Route != nil && route.UID == request.Route.UID {
+		requested := request.Route != nil && route.UID == request.Route.UID
+		if requested {
 			foundRequested = true
 			if !sameHTTPRouteRevision(route, request.Route.UID, request.Route.Generation, !request.Route.DeletionTimestamp.IsZero()) {
 				return graph.RouteInputs{}, errHTTPRouteChanged
@@ -83,11 +101,28 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 			snapshot := routeCleanupSnapshot{route: route, identity: identity, disposition: routeCleanupRequired}
 			fences = append(fences, func(ctx context.Context) error { return r.sealRouteCleanupSnapshot(ctx, snapshot) })
 		} else if request.Action == graph.Ensure {
-			if gateway == nil {
-				return graph.RouteInputs{}, errors.New("gateway is required for an attached route")
+			if !requested && !structurallySupportedRoute(route) {
+				input.Nodes = append(input.Nodes, node)
+				continue
+			}
+			if rejection := boundRouteAttachmentRejection(route, gateway, listener, backends.input.Namespaces); rejection != nil || !route.DeletionTimestamp.IsZero() {
+				if requested {
+					if rejection != nil {
+						return graph.RouteInputs{}, &cloud.GraphError{Identity: identity, Err: rejection}
+					}
+					return graph.RouteInputs{}, errHTTPRouteChanged
+				}
+				// The peer reconciles revocation through its durable detach checkpoint.
+				input.Nodes = append(input.Nodes, node)
+				continue
 			}
 			snapshot, err := r.buildRouteValidationSnapshotFromInputs(ctx, route, gateway, routeSnapshotForEnsure, backends)
 			if err != nil {
+				var rejection *routeBuildError
+				if !requested && (errors.As(err, &rejection) || apierrors.IsNotFound(err)) {
+					input.Nodes = append(input.Nodes, node)
+					continue
+				}
 				return graph.RouteInputs{}, &cloud.GraphError{Identity: identity, Err: err}
 			}
 			if snapshot.disposition != routeValidationReady {
@@ -98,7 +133,7 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 				return r.sealRouteOwnershipSnapshot(ctx, snapshot, routeBindingRequired)
 			})
 		}
-		if request.Action == graph.DeleteRoute && request.Route != nil && route.UID == request.Route.UID && node.Disposition != cloud.GraphDelete {
+		if request.Action == graph.DeleteRoute && requested && node.Disposition != cloud.GraphDelete {
 			return graph.RouteInputs{}, errHTTPRouteChanged
 		}
 		input.Nodes = append(input.Nodes, node)
@@ -111,7 +146,7 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 		if err != nil {
 			return err
 		}
-		if !reflect.DeepEqual(routeGraphRevisions(routes), routeGraphRevisions(current)) {
+		if backends == nil && !slices.Equal(bindings, r.routeGraphBindings(current, request.Identity)) {
 			return errHTTPRouteChanged
 		}
 		for _, fence := range fences {
@@ -120,7 +155,7 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 			}
 		}
 		if backends != nil {
-			return backends.validate(ctx, r.APIReader)
+			return r.validateGraphRouteModel(ctx, backends, listener, current, request.Route)
 		}
 		return nil
 	}
@@ -129,36 +164,69 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 
 func (r *Reconciler) liveGraphRoutes(ctx context.Context, identity cloud.Identity) ([]gatewayv1.HTTPRoute, error) {
 	var list gatewayv1.HTTPRouteList
-	if err := r.APIReader.List(ctx, &list, client.InNamespace(identity.GatewayNamespace)); err != nil {
+	if err := r.APIReader.List(ctx, &list); err != nil {
 		return nil, fmt.Errorf("list Gateway route fragments: %w", err)
+	}
+	if list.Continue != "" {
+		return nil, errors.New("incomplete Gateway route fragment list")
 	}
 	result := make([]gatewayv1.HTTPRoute, 0)
 	for _, route := range list.Items {
-		boundUID := route.Annotations[r.Config.RouteGatewayUIDAnnotation()]
-		if boundUID == identity.GatewayUID {
+		if r.hasGraphBindingClaim(&route, identity) {
 			result = append(result, route)
 			continue
 		}
 		// An unbound candidate can change route selection while a graph is built.
 		for _, parent := range route.Spec.ParentRefs {
-			namespace := route.Namespace
-			if parent.Namespace != nil {
-				namespace = string(*parent.Namespace)
-			}
-			if controller.IsGatewayParentRef(parent) && namespace == identity.GatewayNamespace && string(parent.Name) == identity.GatewayName {
+			if routeTargetsGateway(&route, parent, identity.GatewayNamespace, identity.GatewayName) {
 				result = append(result, route)
 				break
 			}
 		}
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
+	slices.SortFunc(result, func(a, b gatewayv1.HTTPRoute) int {
+		return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name), cmp.Compare(a.UID, b.UID))
+	})
 	return result, nil
 }
 
-func routeGraphRevisions(routes []gatewayv1.HTTPRoute) []string {
-	revisions := make([]string, 0, len(routes))
+func (r *Reconciler) hasGraphBindingClaim(route *gatewayv1.HTTPRoute, identity cloud.Identity) bool {
+	boundUID := route.Annotations[r.Config.RouteGatewayUIDAnnotation()]
+	checkpoint := r.Config.RouteBindingFinalizer(identity.ClusterID, identity.OpenStackProjectID, identity.GatewayNamespace, identity.GatewayName, identity.GatewayUID)
+	return boundUID != "" && boundUID == identity.GatewayUID || slices.Contains(route.Finalizers, checkpoint) ||
+		boundUID == "" && slices.Contains(route.Finalizers, r.Config.RouteFinalizer()) &&
+			route.Annotations[r.Config.RouteGatewayNamespaceAnnotation()] == identity.GatewayNamespace &&
+			route.Annotations[r.Config.RouteGatewayNameAnnotation()] == identity.GatewayName
+}
+
+type routeGraphBinding struct {
+	route, boundNamespace, boundName, boundUID, lifecycle, project, cluster, finalizers string
+}
+
+func (r *Reconciler) routeGraphBindings(routes []gatewayv1.HTTPRoute, identity cloud.Identity) []routeGraphBinding {
+	bindings := make([]routeGraphBinding, 0)
 	for _, route := range routes {
-		revisions = append(revisions, string(route.UID)+"/"+route.ResourceVersion)
+		if !r.hasGraphBindingClaim(&route, identity) {
+			continue
+		}
+		binding := routeGraphBinding{
+			route:          route.Namespace + "/" + route.Name + "/" + string(route.UID),
+			boundNamespace: route.Annotations[r.Config.RouteGatewayNamespaceAnnotation()],
+			boundName:      route.Annotations[r.Config.RouteGatewayNameAnnotation()],
+			boundUID:       route.Annotations[r.Config.RouteGatewayUIDAnnotation()],
+			lifecycle:      route.Annotations[r.Config.RouteLifecycleAnnotation()],
+			project:        route.Annotations[r.Config.RouteProjectIDAnnotation()],
+			cluster:        route.Annotations[r.Config.RouteClusterIDAnnotation()],
+		}
+		var finalizers []string
+		for _, finalizer := range route.Finalizers {
+			if finalizer == r.Config.RouteFinalizer() || strings.HasPrefix(finalizer, r.Config.RouteBindingFinalizerPrefix()) {
+				finalizers = append(finalizers, finalizer)
+			}
+		}
+		slices.Sort(finalizers)
+		binding.finalizers = strings.Join(finalizers, "\x00")
+		bindings = append(bindings, binding)
 	}
-	return revisions
+	return bindings
 }

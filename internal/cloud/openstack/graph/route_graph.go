@@ -21,7 +21,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/netip"
+	"slices"
 	"sort"
+	"strings"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
@@ -49,6 +51,52 @@ type observedRouteGraph struct {
 	policies []observedRoutePolicy
 }
 
+func (policy observedRoutePolicy) pending() bool {
+	return strings.HasPrefix(policy.policy.ProvisioningStatus, "PENDING_") ||
+		slices.ContainsFunc(policy.rules, func(rule observedRouteRule) bool {
+			return strings.HasPrefix(rule.rule.ProvisioningStatus, "PENDING_")
+		})
+}
+
+func (route observedRouteGraph) backendProvisioningIssue(pendingOnly bool) string {
+	issue := func(resource, id, status string) string {
+		// Older observations may omit the status. Current Octavia supplies it
+		// for all three backend resource types.
+		if status == "" || status == "ACTIVE" || pendingOnly && !strings.HasPrefix(status, "PENDING_") {
+			return ""
+		}
+		return fmt.Sprintf("Octavia %s %s provisioning status is %s", resource, id, status)
+	}
+	if route.pool != nil {
+		if message := issue("pool", route.pool.ID, route.pool.ProvisioningStatus); message != "" {
+			return message
+		}
+	}
+	for _, member := range route.members {
+		if message := issue("member", member.ID, member.ProvisioningStatus); message != "" {
+			return message
+		}
+	}
+	if route.monitor != nil {
+		return issue("health monitor", route.monitor.ID, route.monitor.ProvisioningStatus)
+	}
+	return ""
+}
+
+func policyPositionsMatch(wanted []desiredPolicy, actual []observedRoutePolicy) bool {
+	if len(wanted) != len(actual) {
+		return false
+	}
+	for _, desired := range wanted {
+		if !slices.ContainsFunc(actual, func(policy observedRoutePolicy) bool {
+			return policy.role == desired.role && policy.policy.Position == desired.position
+		}) {
+			return false
+		}
+	}
+	return true
+}
+
 // observeGatewayRoutes reads every child once and assigns it to an exact route
 // identity. An unaccounted child blocks the entire graph before any mutation.
 func (p *Provider) observeGatewayRoutes(ctx context.Context, identities []Identity, gateway cloud.GatewayState) ([]observedRouteGraph, error) {
@@ -61,6 +109,7 @@ func (p *Provider) observeGatewayRoutes(ctx context.Context, identities []Identi
 		return nil, fmt.Errorf("list pools beneath Gateway: %w", err)
 	}
 	sort.Slice(poolItems, func(i, j int) bool { return poolItems[i].ID < poolItems[j].ID })
+	poolOwners := make(map[string]int, len(poolItems))
 	for index := range poolItems {
 		pool := &poolItems[index]
 		routeIndex, err := routeOwnerIndex(identities, pool.Tags, rolePool)
@@ -76,6 +125,7 @@ func (p *Provider) observeGatewayRoutes(ctx context.Context, identities []Identi
 			return nil, &cloud.GraphError{Identity: identity.Value(), Err: fmt.Errorf("%w: found multiple pools for one HTTPRoute", cloud.ErrOwnershipConflict)}
 		}
 		graph.pool = pool
+		poolOwners[pool.ID] = routeIndex
 		if err := p.observeRoutePoolChildren(ctx, identity, graph); err != nil {
 			return nil, &cloud.GraphError{Identity: identity.Value(), Err: err}
 		}
@@ -102,6 +152,9 @@ func (p *Provider) observeGatewayRoutes(ctx context.Context, identities []Identi
 		if err != nil {
 			return nil, &cloud.GraphError{Identity: identities[routeIndex].Value(), Err: err}
 		}
+		if poolOwner, found := poolOwners[item.RedirectPoolID]; found && poolOwner != routeIndex {
+			return nil, &cloud.GraphError{Identity: identities[routeIndex].Value(), Err: fmt.Errorf("%w: L7 policy %s redirects to another HTTPRoute's pool %s", cloud.ErrOwnershipConflict, item.ID, item.RedirectPoolID)}
+		}
 		graph := &graphs[routeIndex]
 		for _, policy := range graph.policies {
 			if policy.role == observed.role {
@@ -114,14 +167,21 @@ func (p *Provider) observeGatewayRoutes(ctx context.Context, identities []Identi
 }
 
 func routeOwnerIndex(identities []Identity, tags []string, roles ...string) (int, error) {
+	owner := -1
 	for index, identity := range identities {
 		for _, role := range roles {
 			if identity.MatchesRoute(tags, role) {
-				return index, nil
+				if owner != -1 {
+					return -1, fmt.Errorf("%w: Gateway route resource has multiple matching identities or roles", cloud.ErrOwnershipConflict)
+				}
+				owner = index
 			}
 		}
 	}
-	return -1, fmt.Errorf("%w: Gateway contains an unaccounted or foreign route resource", cloud.ErrOwnershipConflict)
+	if owner == -1 {
+		return -1, fmt.Errorf("%w: Gateway contains an unaccounted or foreign route resource", cloud.ErrOwnershipConflict)
+	}
+	return owner, nil
 }
 
 func (p *Provider) observeRoutePoolChildren(ctx context.Context, identity Identity, graph *observedRouteGraph) error {
@@ -268,6 +328,7 @@ const (
 	routeMutationDeletePolicy
 	routeMutationCreatePolicy
 	routeMutationUpdatePolicy
+	routeMutationMovePolicy
 	routeMutationCreateRule
 	routeMutationUpdateRule
 	routeMutationEnablePolicy
@@ -282,6 +343,7 @@ type routeMutation struct {
 	member   cloud.Member
 	policy   desiredPolicy
 	rule     desiredRule
+	retry    bool
 }
 
 func (s routeMutation) message() string {
@@ -310,6 +372,8 @@ func (s routeMutation) message() string {
 		return "Created Octavia L7 policy"
 	case routeMutationUpdatePolicy:
 		return "Updated Octavia L7 policy"
+	case routeMutationMovePolicy:
+		return "Updated Octavia L7 policy position"
 	case routeMutationCreateRule:
 		return "Created Octavia L7 rule"
 	case routeMutationUpdateRule:
@@ -391,21 +455,13 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 		}
 	}
 
-	policyPlan, policyState, semanticDiff := buildRoutePolicyPlan(desired, actual.policies, poolID)
+	policyPlan, disablePlan, policyState := buildRoutePolicyPlan(desired, actual.policies, poolID)
 	state.L7PolicyIDs = policyState.L7PolicyIDs
 	state.L7RuleIDs = policyState.L7RuleIDs
-	if semanticDiff {
-		disablePlan := make([]routeMutation, 0, len(actual.policies))
-		for _, policy := range actual.policies {
-			if policy.policy.AdminStateUp {
-				disablePlan = append(disablePlan, routeMutation{kind: routeMutationDisablePolicy, id: policy.policy.ID})
-			}
-		}
-		plan := append(disablePlan, nonPolicyPlan...)
-		return append(plan, policyPlan...), state, nil
-	}
-	if len(nonPolicyPlan) != 0 {
-		return nonPolicyPlan, state, nil
+	plan := append(disablePlan, nonPolicyPlan...)
+	plan = append(plan, policyPlan...)
+	if len(plan) != 0 {
+		return plan, state, nil
 	}
 	for _, wantedPolicy := range desired.policies {
 		for _, policy := range actual.policies {
@@ -421,10 +477,10 @@ func buildRoutePolicyPlan(
 	desired desiredRoute,
 	actual []observedRoutePolicy,
 	poolID string,
-) ([]routeMutation, cloud.RouteState, bool) {
+) ([]routeMutation, []routeMutation, cloud.RouteState) {
 	plan := make([]routeMutation, 0)
+	disablePlan := make([]routeMutation, 0)
 	state := cloud.RouteState{}
-	semanticDiff := false
 	desiredPolicies := make(map[string]desiredPolicy, len(desired.policies))
 	for _, policy := range desired.policies {
 		desiredPolicies[policy.role] = policy
@@ -433,7 +489,9 @@ func buildRoutePolicyPlan(
 		if _, wanted := desiredPolicies[policy.role]; wanted {
 			continue
 		}
-		semanticDiff = true
+		if policy.policy.AdminStateUp || policy.policy.ProvisioningStatus == "ERROR" {
+			disablePlan = append(disablePlan, routeMutation{kind: routeMutationDisablePolicy, id: policy.policy.ID})
+		}
 		for _, rule := range policy.rules {
 			plan = append(plan, routeMutation{kind: routeMutationDeleteRule, id: rule.rule.ID, parentID: policy.policy.ID})
 		}
@@ -447,16 +505,14 @@ func buildRoutePolicyPlan(
 	for _, wantedPolicy := range desired.policies {
 		observedPolicy, exists := actualPolicies[wantedPolicy.role]
 		if !exists {
-			semanticDiff = true
 			plan = append(plan, routeMutation{kind: routeMutationCreatePolicy, parentID: poolID, policy: wantedPolicy})
 			continue
 		}
 		policy := observedPolicy.policy
 		state.L7PolicyIDs = append(state.L7PolicyIDs, policy.ID)
-		if policy.Action != string(l7policies.ActionRedirectToPool) || policy.RedirectPoolID != poolID ||
-			policy.Position != wantedPolicy.position {
-			semanticDiff = true
-			plan = append(plan, routeMutation{kind: routeMutationUpdatePolicy, id: policy.ID, parentID: poolID, policy: wantedPolicy})
+		start := len(plan)
+		if poolID == "" || policy.Action != string(l7policies.ActionRedirectToPool) || policy.RedirectPoolID != poolID {
+			plan = append(plan, routeMutation{kind: routeMutationUpdatePolicy, id: policy.ID, parentID: poolID})
 		}
 
 		wantedRules := rulesFor(wantedPolicy, desired.hostnameRuleValue)
@@ -467,15 +523,13 @@ func buildRoutePolicyPlan(
 		for _, wantedRule := range wantedRules {
 			observedRule, exists := actualRules[wantedRule.role]
 			if !exists {
-				semanticDiff = true
 				plan = append(plan, routeMutation{kind: routeMutationCreateRule, parentID: policy.ID, rule: wantedRule})
 				continue
 			}
 			rule := observedRule.rule
 			state.L7RuleIDs = append(state.L7RuleIDs, rule.ID)
 			if rule.RuleType != string(wantedRule.ruleType) || rule.CompareType != string(wantedRule.compareType) ||
-				rule.Value != wantedRule.value || rule.Invert || !rule.AdminStateUp {
-				semanticDiff = true
+				rule.Value != wantedRule.value || rule.Invert || !rule.AdminStateUp || rule.ProvisioningStatus == "ERROR" {
 				plan = append(plan, routeMutation{kind: routeMutationUpdateRule, id: rule.ID, parentID: policy.ID, rule: wantedRule})
 			}
 			delete(actualRules, wantedRule.role)
@@ -486,18 +540,27 @@ func buildRoutePolicyPlan(
 		}
 		sort.Slice(staleRules, func(i, j int) bool { return staleRules[i].rule.ID < staleRules[j].rule.ID })
 		for _, rule := range staleRules {
-			semanticDiff = true
 			plan = append(plan, routeMutation{kind: routeMutationDeleteRule, id: rule.rule.ID, parentID: policy.ID})
 		}
+		// A failed policy update can leave Octavia's desired admin state in
+		// the database even while Amphora still uses an earlier configuration.
+		if policy.ProvisioningStatus == "ERROR" || len(plan) > start && policy.AdminStateUp {
+			disablePlan = append(disablePlan, routeMutation{kind: routeMutationDisablePolicy, id: policy.ID})
+		}
+		// Moving a policy changes precedence only. Keep its current admin state
+		// and predicates and let Octavia shift the other positions atomically.
+		if policy.Position != wantedPolicy.position {
+			plan = append(plan, routeMutation{kind: routeMutationMovePolicy, id: policy.ID, policy: wantedPolicy})
+		}
 	}
-	return plan, state, semanticDiff
+	return plan, disablePlan, state
 }
 
 func buildRouteDeletionPlan(actual observedRouteGraph) []routeMutation {
 	plan := make([]routeMutation, 0)
 	for _, policy := range actual.policies {
-		if policy.policy.AdminStateUp {
-			plan = append(plan, routeMutation{kind: routeMutationDisablePolicy, id: policy.policy.ID})
+		if !policy.pending() && (policy.policy.AdminStateUp || policy.policy.ProvisioningStatus == "ERROR") {
+			plan = append(plan, routeMutation{kind: routeMutationDisablePolicy, id: policy.policy.ID, retry: policy.policy.ProvisioningStatus == "ERROR"})
 		}
 	}
 	for _, policy := range actual.policies {
@@ -619,10 +682,11 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 	case routeMutationUpdatePolicy:
 		_, err = p.octavia.UpdatePolicy(ctx, step.id, l7policies.UpdateOpts{
 			Action:         l7policies.ActionRedirectToPool,
-			Position:       step.policy.position,
 			RedirectPoolID: &step.parentID,
 			AdminStateUp:   boolPointer(false),
 		})
+	case routeMutationMovePolicy:
+		_, err = p.octavia.UpdatePolicy(ctx, step.id, l7policies.UpdateOpts{Position: step.policy.position})
 	case routeMutationCreateRule:
 		tags, tagErr := desired.identity.RouteTags(step.rule.role)
 		if tagErr != nil {

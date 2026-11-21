@@ -100,6 +100,10 @@ func (p *Provider) buildDesiredRoute(spec cloud.RouteSpec) (desiredRoute, error)
 	if spec.PathType != cloud.PathMatchExact && spec.PathType != cloud.PathMatchPrefix {
 		return invalid(fmt.Errorf("unsupported path match type %q", spec.PathType))
 	}
+	exactPath, prefixPath, err := amphora.PathRuleValues(spec.PathValue, spec.PathType == cloud.PathMatchPrefix)
+	if err != nil {
+		return invalid(err)
+	}
 
 	var hostnameRuleValue string
 	if spec.Hostname != "" {
@@ -158,30 +162,20 @@ func (p *Provider) buildDesiredRoute(spec cloud.RouteSpec) (desiredRoute, error)
 		spec:              spec,
 		members:           members,
 		healthMonitor:     monitor,
-		policies:          policiesFor(spec),
+		policies:          policiesFor(exactPath, prefixPath),
 		hostnameRuleValue: hostnameRuleValue,
 	}, nil
 }
 
-func policiesFor(spec cloud.RouteSpec) []desiredPolicy {
-	path := spec.PathValue
-	if path == "" {
-		path = "/"
+func policiesFor(exactPath, prefixPath string) []desiredPolicy {
+	var policies []desiredPolicy
+	if exactPath != "" {
+		policies = append(policies, desiredPolicy{role: rolePolicyExact, position: 1, compareType: l7policies.CompareTypeEqual, path: exactPath})
 	}
-	if spec.PathType == cloud.PathMatchExact {
-		return []desiredPolicy{{role: rolePolicyExact, position: 1, compareType: l7policies.CompareTypeEqual, path: path}}
+	if prefixPath != "" {
+		policies = append(policies, desiredPolicy{role: rolePolicyPrefix, position: int32(len(policies) + 1), compareType: l7policies.CompareTypeStartWith, path: prefixPath})
 	}
-	path = strings.TrimRight(path, "/")
-	if path == "" {
-		path = "/"
-	}
-	if path == "/" {
-		return []desiredPolicy{{role: rolePolicyPrefix, position: 1, compareType: l7policies.CompareTypeStartWith, path: "/"}}
-	}
-	return []desiredPolicy{
-		{role: rolePolicyExact, position: 1, compareType: l7policies.CompareTypeEqual, path: path},
-		{role: rolePolicyPrefix, position: 2, compareType: l7policies.CompareTypeStartWith, path: path + "/"},
-	}
+	return policies
 }
 
 func rulesFor(policy desiredPolicy, hostnameRuleValue string) []desiredRule {

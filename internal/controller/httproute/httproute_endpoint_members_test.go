@@ -196,9 +196,9 @@ func TestEndpointRouteRejectsUnsupportedServiceInputs(t *testing.T) {
 			test.change(service)
 			reader := indexedFakeClientBuilder(testScheme(t), testConfig()).WithObjects(service, endpointSlice).Build()
 			r := &Reconciler{Config: testConfig()}
-			decision, err := r.evaluateRouteSlotWithReader(t.Context(), reader, route, gateway)
-			if err != nil || decision.canReserve || decision.rejection == nil {
-				t.Fatalf("slot = %#v, error = %v", decision, err)
+			var rejection *routeBuildError
+			if err := r.checkRouteBackendProfile(t.Context(), reader, route, gateway); !errors.As(err, &rejection) {
+				t.Fatalf("unsupported backend profile error = %v", err)
 			}
 			if _, err := r.buildRouteModelWithReader(t.Context(), reader, route, gateway); err == nil {
 				t.Fatal("unsupported Service reached the cloud model")

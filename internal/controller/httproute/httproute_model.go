@@ -28,6 +28,7 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia/amphora"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	gatewaycontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
@@ -166,9 +167,8 @@ func (r *Reconciler) buildRouteModelFromInputs(
 	if _, err := servicePortForBackend(service, *reference.Port, mode); err != nil {
 		return cloud.RouteSpec{}, err
 	}
-	// Route selection is still the current single-route contract. Preserve every
-	// rule and backend of that route so unsupported groups cannot disappear here.
-	logical := inputs.selectedRoute(route)
+	// Lower this route with its position from the complete listener model.
+	logical := inputs.routeFragment(route)
 	match, backend, err := supportedRouteModel(logical, listener, mode)
 	if err != nil {
 		return cloud.RouteSpec{}, err
@@ -197,6 +197,7 @@ func (r *Reconciler) buildRouteModelFromInputs(
 		BackendSecurityGroupIDs: slices.Clone(topology.Topology.BackendSecurityGroupIDs),
 		HealthMonitor:           topology.HealthMonitor,
 		Hostname:                match.Hostname,
+		Precedence:              match.Precedence,
 		PathType:                cloud.PathMatchType(match.Match.PathType),
 		PathValue:               match.Match.PathValue,
 		Members:                 members,
@@ -230,7 +231,7 @@ func supportedRouteModel(logical model.Gateway, selected gatewayv1.Listener, mod
 		return unsupported()
 	}
 	match := listener.Rules[0]
-	if route.Source.Namespace != logical.Source.Namespace || len(match.Match.Headers) != 0 {
+	if len(match.Match.Headers) != 0 {
 		return unsupported()
 	}
 	rule, parent := route.Rules[0], route.Parents[0]
@@ -262,5 +263,9 @@ func supportedMatch(matches []gatewayv1.HTTPRouteMatch) (cloud.PathMatchType, st
 	if err != nil {
 		return "", "", newRouteBuildError(routeErrorUnsupported, "%s", err)
 	}
-	return cloud.PathMatchType(normalized.PathType), normalized.PathValue, nil
+	pathType := cloud.PathMatchType(normalized.PathType)
+	if _, _, err := amphora.PathRuleValues(normalized.PathValue, pathType == cloud.PathMatchPrefix); err != nil {
+		return "", "", newRouteBuildError(routeErrorUnsupported, "%s", err)
+	}
+	return pathType, normalized.PathValue, nil
 }

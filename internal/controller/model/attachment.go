@@ -93,10 +93,7 @@ func acceptsHTTP(listener Listener) bool {
 
 func allowsRoute(listener *gatewayv1.Listener, gatewayNamespace, routeNamespace string, namespaces []corev1.Namespace) bool {
 	allowed := listener.AllowedRoutes
-	if allowed == nil {
-		return gatewayNamespace == routeNamespace
-	}
-	if len(allowed.Kinds) != 0 {
+	if allowed != nil && len(allowed.Kinds) != 0 {
 		found := false
 		for _, kind := range allowed.Kinds {
 			if kind.Kind == "HTTPRoute" && (kind.Group == nil || *kind.Group == gatewayv1.GroupName) {
@@ -108,29 +105,58 @@ func allowsRoute(listener *gatewayv1.Listener, gatewayNamespace, routeNamespace 
 			return false
 		}
 	}
-	if allowed.Namespaces == nil || allowed.Namespaces.From == nil {
-		return gatewayNamespace == routeNamespace
-	}
-	switch *allowed.Namespaces.From {
-	case gatewayv1.NamespacesFromSame:
-		return gatewayNamespace == routeNamespace
+	return AllowsRouteNamespace(listener, gatewayNamespace, routeNamespace, namespaces)
+}
+
+// ObservesRouteNamespace reports whether the policy needs a Namespace read.
+func ObservesRouteNamespace(listener *gatewayv1.Listener) bool {
+	policy := routeNamespacePolicy(listener)
+	switch *policy.From {
 	case gatewayv1.NamespacesFromAll:
 		return true
 	case gatewayv1.NamespacesFromSelector:
-		if allowed.Namespaces.Selector == nil {
-			return false
-		}
-		selector, err := metav1.LabelSelectorAsSelector(allowed.Namespaces.Selector)
-		if err != nil {
-			return false
-		}
-		for i := range namespaces {
-			if namespaces[i].Name == routeNamespace {
-				return selector.Matches(labels.Set(namespaces[i].Labels))
-			}
-		}
+		_, err := metav1.LabelSelectorAsSelector(policy.Selector)
+		return policy.Selector != nil && err == nil
 	}
 	return false
+}
+
+// AllowsRouteNamespace applies the listener's namespace policy to the route namespace.
+func AllowsRouteNamespace(listener *gatewayv1.Listener, gatewayNamespace, routeNamespace string, namespaces []corev1.Namespace) bool {
+	policy := routeNamespacePolicy(listener)
+	switch *policy.From {
+	case gatewayv1.NamespacesFromSame:
+		return gatewayNamespace == routeNamespace
+	case gatewayv1.NamespacesFromAll:
+		return activeRouteNamespace(routeNamespace, namespaces) != nil
+	case gatewayv1.NamespacesFromSelector:
+		namespace := activeRouteNamespace(routeNamespace, namespaces)
+		if namespace == nil || policy.Selector == nil {
+			return false
+		}
+		selector, err := metav1.LabelSelectorAsSelector(policy.Selector)
+		return err == nil && selector.Matches(labels.Set(namespace.Labels))
+	}
+	return false
+}
+
+func routeNamespacePolicy(listener *gatewayv1.Listener) gatewayv1.RouteNamespaces {
+	if listener != nil && listener.AllowedRoutes != nil && listener.AllowedRoutes.Namespaces != nil &&
+		listener.AllowedRoutes.Namespaces.From != nil {
+		return *listener.AllowedRoutes.Namespaces
+	}
+	from := gatewayv1.NamespacesFromSame
+	return gatewayv1.RouteNamespaces{From: &from}
+}
+
+func activeRouteNamespace(name string, namespaces []corev1.Namespace) *corev1.Namespace {
+	for i := range namespaces {
+		namespace := &namespaces[i]
+		if namespace.Name == name && namespace.DeletionTimestamp.IsZero() && namespace.Status.Phase != corev1.NamespaceTerminating {
+			return namespace
+		}
+	}
+	return nil
 }
 
 // IntersectHostnames returns the effective hostname constraints, including

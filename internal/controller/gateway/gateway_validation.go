@@ -91,11 +91,6 @@ func Validate(gateway *gatewayv1.Gateway) (*gatewayv1.Listener, error) {
 			return nil, fmt.Errorf("invalid listener hostname: %w", err)
 		}
 	}
-	if listener.AllowedRoutes != nil && listener.AllowedRoutes.Namespaces != nil &&
-		listener.AllowedRoutes.Namespaces.From != nil &&
-		*listener.AllowedRoutes.Namespaces.From != gatewayv1.NamespacesFromSame {
-		return nil, fmt.Errorf("only same-namespace HTTPRoutes are supported")
-	}
 	if listener.AllowedRoutes != nil && len(listener.AllowedRoutes.Kinds) != 0 {
 		for _, kind := range listener.AllowedRoutes.Kinds {
 			if !isHTTPRouteGroupKind(kind) {

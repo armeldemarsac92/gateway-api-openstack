@@ -21,6 +21,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
@@ -35,6 +36,7 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	gatewayconsts "sigs.k8s.io/gateway-api/pkg/consts"
 
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	gatewaycontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
@@ -346,6 +348,12 @@ func TestUnsupportedGatewayAPIVersionKeepsExactForwardingUnderWildcard(t *testin
 	if len(provider.routeSpecs) != 1 || provider.routeSpecs[0].Hostname != "api.example.test" {
 		t.Fatalf("initial forwarding = %#v, want one exact hostname", provider.routeSpecs)
 	}
+	// Octavia locks the load balancer while applying a sibling's change.
+	// This observation carries no update about our previously programmed route.
+	writer := reconciler.Writer
+	reconciler.Writer = fixedRouteGraph{result: cloud.GatewayGraphResult{Outcome: cloud.ProgressingOutcome("Waiting for load balancer", time.Second)}}
+	reconcile()
+	reconciler.Writer = writer
 	if err := kubeClient.Get(ctx, client.ObjectKeyFromObject(gateway), gateway); err != nil {
 		t.Fatal(err)
 	}
@@ -380,6 +388,95 @@ func TestUnsupportedGatewayAPIVersionKeepsExactForwardingUnderWildcard(t *testin
 func TestUnsupportedGatewayAPIVersionRevokesBoundServiceReference(t *testing.T) {
 	t.Run("unchanged backend", func(t *testing.T) { testServiceReferenceRevocationDuringVersionSkew(t, false) })
 	t.Run("edited backend", func(t *testing.T) { testServiceReferenceRevocationDuringVersionSkew(t, true) })
+}
+
+func TestUnsupportedGatewayAPIVersionRemovesOldTenantForwarding(t *testing.T) {
+	for _, action := range []string{"selector revoked", "parent retargeted"} {
+		t.Run(action, func(t *testing.T) {
+			cfg := testConfig()
+			gatewayClass := unsupportedVersionGatewayClass(cfg)
+			unsupported := gatewayClass.Status.DeepCopy()
+			gatewayClass.Status.Conditions = nil
+			gateway := programmedTestGateway(cfg)
+			gateway.Spec.Listeners[0].AllowedRoutes = &gatewayv1.AllowedRoutes{Namespaces: &gatewayv1.RouteNamespaces{
+				From: ptr.To(gatewayv1.NamespacesFromSelector), Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "blue"}},
+			}}
+			namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "tenant", Labels: map[string]string{"team": "blue"}}}
+			parent := gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name), Namespace: ptr.To(gatewayv1.Namespace(gateway.Namespace))}
+			route := mapperTestHTTPRoute(namespace.Name, "api", parent, "backend")
+			route.UID, route.Generation = "tenant-route", 1
+			foreign := gatewayv1.RouteParentStatus{ControllerName: "other.example/controller", ParentRef: parent}
+			route.Status.Parents = []gatewayv1.RouteParentStatus{foreign}
+			service, endpoints, node := validNodePortBackend(route.Namespace, "backend")
+			kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).
+				WithStatusSubresource(gatewayClass, route).
+				WithObjects(gatewayClass, gateway, route, namespace, service, endpoints, node).
+				Build()
+			provider := &recordingProvider{}
+			newReconciler := func(reader client.Reader) *Reconciler {
+				return newTestReconciler(Reconciler{Client: kubeClient, APIReader: reader, Coordinator: &graph.Coordinator{}, Config: cfg}, provider)
+			}
+			reconciler := newReconciler(kubeClient)
+			key := client.ObjectKeyFromObject(route)
+			reconcile := func() {
+				t.Helper()
+				if _, err := reconciler.Reconcile(t.Context(), ctrl.Request{NamespacedName: key}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			reconcile()
+			reconcile()
+			identity := controller.RouteIdentity(cfg, gateway, route)
+			if len(provider.routeSpecs) != 1 || provider.routeSpecs[0].Identity != identity {
+				t.Fatalf("tenant route was not ensured with its own identity: %#v", provider.routeSpecs)
+			}
+			if err := kubeClient.Get(t.Context(), client.ObjectKeyFromObject(gatewayClass), gatewayClass); err != nil {
+				t.Fatal(err)
+			}
+			gatewayClass.Status = *unsupported
+			if err := kubeClient.Status().Update(t.Context(), gatewayClass); err != nil {
+				t.Fatal(err)
+			}
+			reconciler = newReconciler(liveReaderWithUnsupportedVersion(kubeClient))
+			reconcile()
+			if len(provider.deletedRoutes) != 0 {
+				t.Fatal("bundle skew removed an authorized tenant route")
+			}
+			if err := kubeClient.Get(t.Context(), key, route); err != nil {
+				t.Fatal(err)
+			}
+			if action == "selector revoked" {
+				namespace.Labels["team"] = "red"
+				if err := kubeClient.Update(t.Context(), namespace); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				route.Spec.ParentRefs[0].Name = "other"
+				route.Generation++
+				if err := kubeClient.Update(t.Context(), route); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for range 3 {
+				reconcile()
+			}
+			if len(provider.routeSpecs) != 1 || len(provider.deletedGateways) != 0 || len(provider.deletedRoutes) != 1 || provider.deletedRoutes[0] != identity {
+				t.Fatalf("old tenant fragment was not selectively removed: ensures %d, route deletes %v, Gateway deletes %v", len(provider.routeSpecs), provider.deletedRoutes, provider.deletedGateways)
+			}
+			if err := kubeClient.Get(t.Context(), key, route); err != nil {
+				t.Fatal(err)
+			}
+			if len(route.OwnerReferences) != 0 || controllerutil.ContainsFinalizer(route, cfg.RouteFinalizer()) || route.Status.Parents[0].ControllerName != foreign.ControllerName {
+				t.Fatalf("tenant detach changed unrelated ownership or status: %#v", route)
+			}
+			if action == "selector revoked" {
+				accepted := meta.FindStatusCondition(route.Status.Parents[1].Conditions, string(gatewayv1.RouteConditionAccepted))
+				if accepted == nil || accepted.Status != metav1.ConditionFalse || accepted.Reason != string(gatewayv1.RouteReasonNotAllowedByListeners) {
+					t.Fatalf("selector revocation status = %#v", accepted)
+				}
+			}
+		})
+	}
 }
 
 func testServiceReferenceRevocationDuringVersionSkew(t *testing.T, editBackend bool) {

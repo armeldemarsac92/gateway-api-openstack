@@ -88,47 +88,56 @@ func TestControllerEnvtest(t *testing.T) {
 		}
 	})
 
-	manager, err := ctrl.NewManager(restConfig, ctrl.Options{
-		Scheme:                 scheme,
-		Metrics:                metricsserver.Options{BindAddress: "0"},
-		HealthProbeBindAddress: "0",
-	})
-	if err != nil {
-		t.Fatalf("create envtest manager: %v", err)
-	}
 	config := testConfig()
 	config.GatewayAPIChannel = os.Getenv("GATEWAY_API_CHANNEL")
-	if err := controller.SetupIndexes(t.Context(), manager.GetFieldIndexer(), config); err != nil {
-		t.Fatalf("set up controller indexes: %v", err)
+	// Status and binding indexes belong to one controller name. Keep the
+	// manager-driven watches separate from the manually stepped reconcilers.
+	startManager := func(cfg controller.Config, watches bool) ctrl.Manager {
+		manager, err := ctrl.NewManager(restConfig, ctrl.Options{
+			Scheme:                 scheme,
+			Metrics:                metricsserver.Options{BindAddress: "0"},
+			HealthProbeBindAddress: "0",
+		})
+		if err != nil {
+			t.Fatalf("create envtest manager: %v", err)
+		}
+		if err := controller.SetupIndexes(t.Context(), manager.GetFieldIndexer(), cfg); err != nil {
+			t.Fatalf("set up controller indexes: %v", err)
+		}
+		if watches {
+			startGatewayStatusReconcilers(t, manager, cfg)
+		}
+		managerContext, stopManager := context.WithCancel(context.Background())
+		managerResult := make(chan error, 1)
+		go func() {
+			managerResult <- manager.Start(managerContext)
+		}()
+		t.Cleanup(func() {
+			stopManager()
+			select {
+			case err := <-managerResult:
+				if err != nil {
+					t.Errorf("stop envtest manager: %v", err)
+				}
+			case <-time.After(time.Minute):
+				t.Error("envtest manager did not stop")
+			}
+		})
+		if synced := manager.GetCache().WaitForCacheSync(t.Context()); !synced {
+			select {
+			case err := <-managerResult:
+				t.Fatalf("start envtest manager: %v", err)
+			default:
+				t.Fatal("envtest manager cache did not sync")
+			}
+		}
+
+		return manager
 	}
+	manager := startManager(config, false)
 	statusConfig := config
 	statusConfig.ControllerName = "status.example.com/gateway-api-openstack"
-	startGatewayStatusReconcilers(t, manager, statusConfig)
-
-	managerContext, stopManager := context.WithCancel(context.Background())
-	managerResult := make(chan error, 1)
-	go func() {
-		managerResult <- manager.Start(managerContext)
-	}()
-	t.Cleanup(func() {
-		stopManager()
-		select {
-		case err := <-managerResult:
-			if err != nil {
-				t.Errorf("stop envtest manager: %v", err)
-			}
-		case <-time.After(time.Minute):
-			t.Error("envtest manager did not stop")
-		}
-	})
-	if synced := manager.GetCache().WaitForCacheSync(t.Context()); !synced {
-		select {
-		case err := <-managerResult:
-			t.Fatalf("start envtest manager: %v", err)
-		default:
-			t.Fatal("envtest manager cache did not sync")
-		}
-	}
+	startManager(statusConfig, true)
 
 	apiClient, err := client.New(restConfig, client.Options{Scheme: scheme})
 	if err != nil {
@@ -230,6 +239,9 @@ func TestControllerEnvtest(t *testing.T) {
 		testHTTPRouteReferenceIndexUpdates(t, apiClient, cacheClient)
 	})
 	testGraphWriterTriggerEquivalence(t, apiClient, cacheClient, config, gateway)
+	t.Run("shared Gateway follows tenant namespace labels", func(t *testing.T) {
+		testSharedHTTPGateway(t, apiClient, statusConfig)
+	})
 	t.Run("HTTPRoute Service ReferenceGrant lifecycle", func(t *testing.T) {
 		testHTTPRouteServiceReferenceGrant(t, apiClient, cacheClient, config, gateway)
 	})

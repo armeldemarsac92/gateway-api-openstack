@@ -38,7 +38,7 @@ const (
 
 type routeGraphResult struct {
 	bindingState routeBindingState
-	outcome      cloud.Outcome
+	cloud.RouteResult
 }
 
 type routeBindingCheckpointError struct {
@@ -79,6 +79,11 @@ func (r *Reconciler) ensureRouteGraph(
 	if err != nil {
 		return routeGraphResult{}, err
 	}
+	component, err := routeComponentResult(result, expectedIdentity)
+	return routeGraphResult{bindingState: bindingState, RouteResult: component}, err
+}
+
+func routeComponentResult(result cloud.GatewayGraphResult, expectedIdentity cloud.Identity) (cloud.RouteResult, error) {
 	var component *cloud.RouteGraphResult
 	for i := range result.Routes {
 		route := &result.Routes[i]
@@ -86,20 +91,23 @@ func (r *Reconciler) ensureRouteGraph(
 			continue
 		}
 		if route.Identity != expectedIdentity || component != nil {
-			return routeGraphResult{}, fmt.Errorf("provider returned an inconsistent HTTPRoute component identity")
+			return cloud.RouteResult{}, fmt.Errorf("provider returned an inconsistent HTTPRoute component identity")
 		}
 		component = route
 	}
 	if component != nil {
 		if err := component.Result.Outcome.Validate(); err != nil {
-			return routeGraphResult{}, fmt.Errorf("validate HTTPRoute component outcome: %w", err)
+			return cloud.RouteResult{}, fmt.Errorf("validate HTTPRoute component outcome: %w", err)
 		}
-		return routeGraphResult{bindingState: bindingState, outcome: component.Result.Outcome}, nil
+		if component.Result.ObservationDeferred && component.Result.Outcome.State != cloud.OutcomeProgressing {
+			return cloud.RouteResult{}, fmt.Errorf("deferred HTTPRoute observation cannot certify completion")
+		}
+		return component.Result, nil
 	}
 	if result.Outcome.State == cloud.OutcomeProgressing {
-		return routeGraphResult{bindingState: bindingState, outcome: result.Outcome}, nil
+		return cloud.RouteResult{Outcome: result.Outcome, ObservationDeferred: true}, nil
 	}
-	return routeGraphResult{}, fmt.Errorf("provider omitted the ensured HTTPRoute component result")
+	return cloud.RouteResult{}, fmt.Errorf("provider omitted the HTTPRoute component result")
 }
 
 // prepareRouteGraphBinding persists the binding before the writer can create resources.

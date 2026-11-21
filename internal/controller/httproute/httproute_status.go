@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"slices"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -30,6 +31,7 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
 type routeReconcileStatus struct {
@@ -345,7 +347,52 @@ func rejectedRouteStatus(reason, message string) routeReconcileStatus {
 	}
 }
 
-func routeSlotRejectionStatus(err error) routeReconcileStatus {
+// resolveDeniedRouteBackend evaluates object references without applying the
+// Gateway's member mode or requiring ready endpoints.
+func (r *Reconciler) resolveDeniedRouteBackend(ctx context.Context, route *gatewayv1.HTTPRoute, status *routeReconcileStatus) error {
+	backend, err := validateRouteStructure(route)
+	if err != nil {
+		var rejection *routeBuildError
+		if errors.As(err, &rejection) && rejection.kind == routeErrorInvalidKind {
+			status.resolved = metav1.ConditionFalse
+			status.resolvedReason = string(gatewayv1.RouteReasonInvalidKind)
+			status.resolvedMessage = rejection.message
+		}
+		return nil
+	}
+	key, _ := model.BackendServiceReference(route.Namespace, backend)
+	rejection, err := r.liveBackendReferenceRejection(ctx, route.Namespace, key)
+	if err != nil {
+		return err
+	}
+	status.resolved = metav1.ConditionFalse
+	if rejection != nil {
+		status.resolvedReason = string(gatewayv1.RouteReasonRefNotPermitted)
+		status.resolvedMessage = rejection.message
+		return nil
+	}
+	var service corev1.Service
+	err = r.routePatchReader().Get(ctx, key, &service)
+	if apierrors.IsNotFound(err) || !service.DeletionTimestamp.IsZero() {
+		status.resolvedReason = string(gatewayv1.RouteReasonBackendNotFound)
+		status.resolvedMessage = fmt.Sprintf("backend Service %s was not found", key)
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("get backend Service: %w", err)
+	}
+	if _, diagnostic := model.ResolveServicePort(&service, backend.Port); diagnostic != nil {
+		status.resolvedReason = diagnostic.Reason
+		status.resolvedMessage = diagnostic.Message
+		return nil
+	}
+	status.resolved = metav1.ConditionTrue
+	status.resolvedReason = string(gatewayv1.RouteReasonResolvedRefs)
+	status.resolvedMessage = "All backend references are resolved"
+	return nil
+}
+
+func backendProfileRejectionStatus(err error) routeReconcileStatus {
 	status := statusForRouteBuildError(err)
 	if status.resolvedReason == string(gatewayv1.RouteReasonRefNotPermitted) {
 		return status

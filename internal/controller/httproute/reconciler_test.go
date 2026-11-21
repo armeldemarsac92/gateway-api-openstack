@@ -34,6 +34,7 @@ import (
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
@@ -337,6 +338,155 @@ func TestHTTPRouteProgramsOnlyHTTPListenerOnMixedGateway(t *testing.T) {
 	}
 }
 
+func TestHTTPRouteResolvesBackendReferencesWhenNamespaceAttachmentIsDenied(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		port     int32
+		remote   bool
+		grant    bool
+		disjoint bool
+		group    gatewayv1.Group
+		kind     gatewayv1.Kind
+		resolved metav1.ConditionStatus
+		reason   gatewayv1.RouteConditionReason
+	}{
+		{name: "ClusterIP Service", port: 8080, resolved: metav1.ConditionTrue, reason: gatewayv1.RouteReasonResolvedRefs},
+		{name: "disjoint hostname", port: 8080, disjoint: true, resolved: metav1.ConditionTrue, reason: gatewayv1.RouteReasonResolvedRefs},
+		{name: "missing Service", resolved: metav1.ConditionFalse, reason: gatewayv1.RouteReasonBackendNotFound},
+		{name: "missing port", port: 80, resolved: metav1.ConditionFalse, reason: gatewayv1.RouteReasonBackendNotFound},
+		{name: "ungranted remote Service", port: 8080, remote: true, resolved: metav1.ConditionFalse, reason: gatewayv1.RouteReasonRefNotPermitted},
+		{name: "granted remote Service", port: 8080, remote: true, grant: true, resolved: metav1.ConditionTrue, reason: gatewayv1.RouteReasonResolvedRefs},
+		{name: "unsupported backend kind", port: 8080, remote: true, kind: "Pod", resolved: metav1.ConditionFalse, reason: gatewayv1.RouteReasonInvalidKind},
+		{name: "unsupported backend group", port: 8080, remote: true, group: "example.test", resolved: metav1.ConditionFalse, reason: gatewayv1.RouteReasonInvalidKind},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := t.Context()
+			cfg := testConfig()
+			class, gateway := providerRouteParentObjects(cfg)
+			parent := gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name), Namespace: ptr.To(gatewayv1.Namespace(gateway.Namespace))}
+			route := mapperTestHTTPRoute("tenant", "api", parent, "backend")
+			route.UID, route.Generation = "route-uid", 1
+			if test.disjoint {
+				listener := &gateway.Spec.Listeners[0]
+				listener.Hostname = ptr.To(gatewayv1.Hostname("gateway.example.test"))
+				route.Spec.Hostnames = []gatewayv1.Hostname{"route.example.test"}
+				status := statusForRouteBuildError(boundRouteAttachmentRejection(route, gateway, listener, nil))
+				if status.acceptedReason != string(gatewayv1.RouteReasonNotAllowedByListeners) {
+					t.Fatalf("bound route attachment reason = %s, want NotAllowedByListeners", status.acceptedReason)
+				}
+			}
+			backend := &route.Spec.Rules[0].BackendRefs[0]
+			backend.Port = ptr.To(gatewayv1.PortNumber(8080))
+			if test.group != "" {
+				backend.Group = &test.group
+			}
+			if test.kind != "" {
+				backend.Kind = &test.kind
+			}
+			foreign := gatewayv1.RouteParentStatus{ParentRef: parent, ControllerName: "example.test/other"}
+			route.Status.Parents = []gatewayv1.RouteParentStatus{foreign}
+			serviceNamespace := route.Namespace
+			if test.remote {
+				serviceNamespace = "shared"
+				backend.Namespace = ptr.To(gatewayv1.Namespace(serviceNamespace))
+			}
+			objects := []client.Object{class, gateway, route}
+			if test.port != 0 {
+				objects = append(objects, &corev1.Service{
+					ObjectMeta: metav1.ObjectMeta{Namespace: serviceNamespace, Name: "backend"},
+					Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP, Ports: []corev1.ServicePort{{Port: test.port}}},
+				})
+			}
+			if test.grant {
+				objects = append(objects, serviceReferenceGrant(serviceNamespace, route.Namespace, "backend"))
+			}
+			baseClient := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(route).WithObjects(objects...).Build()
+			kubeClient := interceptor.NewClient(baseClient, interceptor.Funcs{Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				if _, service := obj.(*corev1.Service); service && test.remote && !test.grant {
+					t.Fatal("read a remote Service without a ReferenceGrant")
+				}
+				return c.Get(ctx, key, obj, opts...)
+			}})
+			provider := &recordingProvider{}
+			reconciler := newTestReconciler(Reconciler{Client: kubeClient, APIReader: kubeClient, Coordinator: &graph.Coordinator{}, Config: cfg}, provider)
+			key := client.ObjectKeyFromObject(route)
+			if _, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key}); err != nil {
+				t.Fatal(err)
+			}
+			if err := kubeClient.Get(ctx, key, route); err != nil {
+				t.Fatal(err)
+			}
+			parents := route.Status.Parents
+			if len(parents) != 2 || parents[0].ControllerName != foreign.ControllerName || parents[1].ControllerName != cfg.ControllerName {
+				t.Fatalf("expected foreign and managed parents, got %#v", parents)
+			}
+			conditions := parents[1].Conditions
+			accepted := meta.FindStatusCondition(conditions, string(gatewayv1.RouteConditionAccepted))
+			if accepted == nil || accepted.Status != metav1.ConditionFalse || accepted.Reason != string(gatewayv1.RouteReasonNotAllowedByListeners) {
+				t.Fatalf("Accepted = %#v, want False/NotAllowedByListeners", accepted)
+			}
+			resolved := meta.FindStatusCondition(conditions, string(gatewayv1.RouteConditionResolvedRefs))
+			if resolved == nil || resolved.Status != test.resolved || resolved.Reason != string(test.reason) || resolved.ObservedGeneration != route.Generation {
+				t.Fatalf("ResolvedRefs = %#v, want %s/%s at generation %d", resolved, test.resolved, test.reason, route.Generation)
+			}
+			if len(provider.routeSpecs) != 0 || len(route.Finalizers) != 0 || !meta.IsStatusConditionFalse(conditions, cfg.Domain()+"/Programmed") {
+				t.Fatalf("denied route got forwarding state: routes=%#v, finalizers=%v, conditions=%v", provider.routeSpecs, route.Finalizers, conditions)
+			}
+		})
+	}
+}
+
+func TestHTTPRoutePathLimitsPreserveHealthyPeer(t *testing.T) {
+	for _, test := range []struct {
+		pathType gatewayv1.PathMatchType
+		maxLen   int
+	}{
+		{gatewayv1.PathMatchExact, 255},
+		{gatewayv1.PathMatchPathPrefix, 254},
+	} {
+		t.Run(string(test.pathType), func(t *testing.T) {
+			ctx := t.Context()
+			cfg := testConfig()
+			class, gateway := providerRouteParentObjects(cfg)
+			parent := gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name)}
+			makeRoute := func(name, path string) *gatewayv1.HTTPRoute {
+				route := mapperTestHTTPRoute(gateway.Namespace, name, parent, "backend")
+				route.UID, route.Generation = types.UID(name), 1
+				route.Spec.Rules[0].Matches = []gatewayv1.HTTPRouteMatch{{
+					Path: &gatewayv1.HTTPPathMatch{Type: &test.pathType, Value: &path},
+				}}
+				return route
+			}
+			validPath := "/" + strings.Repeat("a", test.maxLen-1)
+			longRoute, validRoute := makeRoute("too-long", validPath+"a"), makeRoute("at-limit", validPath)
+			service, endpoints, node := validNodePortBackend(gateway.Namespace, "backend")
+			kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).
+				WithStatusSubresource(longRoute, validRoute).
+				WithObjects(class, gateway, longRoute, validRoute, service, endpoints, node).Build()
+			provider := &recordingProvider{}
+			reconciler := newTestReconciler(Reconciler{Client: kubeClient, APIReader: kubeClient, Coordinator: &graph.Coordinator{}, Config: cfg}, provider)
+			for _, candidate := range []*gatewayv1.HTTPRoute{longRoute, validRoute, validRoute} {
+				if _, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(candidate)}); err != nil {
+					t.Fatalf("Reconcile(%s): %v", candidate.Name, err)
+				}
+			}
+			if err := kubeClient.Get(ctx, client.ObjectKeyFromObject(longRoute), longRoute); err != nil {
+				t.Fatal(err)
+			}
+			if len(longRoute.Finalizers) != 0 || routeHasBindingAnnotations(cfg, longRoute) || len(longRoute.Status.Parents) != 1 {
+				t.Fatalf("expected the overlong route to be rejected before binding, got finalizers=%v annotations=%v parents=%v", longRoute.Finalizers, longRoute.Annotations, longRoute.Status.Parents)
+			}
+			accepted := meta.FindStatusCondition(longRoute.Status.Parents[0].Conditions, string(gatewayv1.RouteConditionAccepted))
+			if accepted == nil || accepted.Status != metav1.ConditionFalse || accepted.Reason != string(gatewayv1.RouteReasonUnsupportedValue) {
+				t.Fatalf("overlong route Accepted = %#v, want False/UnsupportedValue", accepted)
+			}
+			if len(provider.routeSpecs) != 1 || provider.routeSpecs[0].Identity.RouteName != validRoute.Name || provider.routeSpecs[0].PathValue != validPath {
+				t.Fatalf("expected only the route at the supported limit to reach the provider, got %#v", provider.routeSpecs)
+			}
+		})
+	}
+}
+
 func TestHTTPRouteDetachDeletesStoredResourcesAndMetadata(t *testing.T) {
 	scheme := testScheme(t)
 	cfg := testConfig()
@@ -514,64 +664,7 @@ func TestHTTPRouteMissingBackendSetsResolvedRefsWhileGatewayPending(t *testing.T
 	}
 }
 
-func TestRouteSelectionIgnoresOlderRouteForWrongListenerSection(t *testing.T) {
-	scheme := testScheme(t)
-	older := metav1.NewTime(time.Unix(1, 0))
-	newer := metav1.NewTime(time.Unix(2, 0))
-	wrongSection := gatewayv1.SectionName("wrong")
-	oldRoute := &gatewayv1.HTTPRoute{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "old", CreationTimestamp: older},
-		Spec: gatewayv1.HTTPRouteSpec{CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{{
-			Name: "edge", SectionName: &wrongSection,
-		}}}, Rules: []gatewayv1.HTTPRouteRule{{BackendRefs: []gatewayv1.HTTPBackendRef{{BackendRef: gatewayv1.BackendRef{BackendObjectReference: gatewayv1.BackendObjectReference{Name: "backend", Port: portNumberPointer(80)}}}}}}},
-	}
-	current := &gatewayv1.HTTPRoute{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "current", CreationTimestamp: newer},
-		Spec:       gatewayv1.HTTPRouteSpec{CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{{Name: "edge"}}}, Rules: []gatewayv1.HTTPRouteRule{{BackendRefs: []gatewayv1.HTTPBackendRef{{BackendRef: gatewayv1.BackendRef{BackendObjectReference: gatewayv1.BackendObjectReference{Name: "backend", Port: portNumberPointer(80)}}}}}}},
-	}
-	kubeClient := indexedFakeClientBuilder(scheme, testConfig()).WithObjects(oldRoute, current).Build()
-	gateway := programmedTestGateway(testConfig())
-	reconciler := *newTestReconciler(Reconciler{Client: kubeClient, Config: testConfig()}, nil)
-	selected, err := reconciler.isSelectedRoute(context.Background(), current, managedRouteParent{
-		ref: current.Spec.ParentRefs[0], gateway: gateway, listener: &gateway.Spec.Listeners[0],
-	})
-	if err != nil {
-		t.Fatalf("isSelectedRoute() error = %v", err)
-	}
-	if !selected {
-		t.Fatal("valid route lost selection to an older route targeting a nonexistent listener section")
-	}
-}
-
-func TestRouteSelectionIgnoresOlderRejectedClusterIPProfile(t *testing.T) {
-	scheme := testScheme(t)
-	older := metav1.NewTime(time.Unix(1, 0))
-	newer := metav1.NewTime(time.Unix(2, 0))
-	oldRoute := &gatewayv1.HTTPRoute{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "old", CreationTimestamp: older},
-		Spec:       gatewayv1.HTTPRouteSpec{CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{{Name: "edge"}}}, Rules: []gatewayv1.HTTPRouteRule{{BackendRefs: []gatewayv1.HTTPBackendRef{{BackendRef: gatewayv1.BackendRef{BackendObjectReference: gatewayv1.BackendObjectReference{Name: "cluster-ip", Port: portNumberPointer(80)}}}}}}},
-	}
-	current := &gatewayv1.HTTPRoute{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "current", CreationTimestamp: newer},
-		Spec:       gatewayv1.HTTPRouteSpec{CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{{Name: "edge"}}}, Rules: []gatewayv1.HTTPRouteRule{{BackendRefs: []gatewayv1.HTTPBackendRef{{BackendRef: gatewayv1.BackendRef{BackendObjectReference: gatewayv1.BackendObjectReference{Name: "node-port", Port: portNumberPointer(80)}}}}}}},
-	}
-	clusterIP := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "cluster-ip"}, Spec: corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP}}
-	nodePort := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "node-port"}, Spec: corev1.ServiceSpec{Type: corev1.ServiceTypeNodePort}}
-	kubeClient := indexedFakeClientBuilder(scheme, testConfig()).WithObjects(oldRoute, current, clusterIP, nodePort).Build()
-	gateway := programmedTestGateway(testConfig())
-	reconciler := *newTestReconciler(Reconciler{Client: kubeClient, Config: testConfig()}, nil)
-	selected, err := reconciler.isSelectedRoute(context.Background(), current, managedRouteParent{
-		ref: current.Spec.ParentRefs[0], gateway: gateway, listener: &gateway.Spec.Listeners[0],
-	})
-	if err != nil {
-		t.Fatalf("isSelectedRoute() error = %v", err)
-	}
-	if !selected {
-		t.Fatal("valid NodePort route lost selection to an older rejected ClusterIP profile")
-	}
-}
-
-func TestUnsupportedRouteCannotReserveGatewaySlot(t *testing.T) {
+func TestUnsupportedRouteIsRejectedBeforeBackendLookup(t *testing.T) {
 	for _, test := range []struct {
 		name   string
 		change func(*gatewayv1.HTTPRoute)
@@ -600,21 +693,12 @@ func TestUnsupportedRouteCannotReserveGatewaySlot(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			cfg := testConfig()
 			parent := gatewayv1.ParentReference{Name: "edge"}
-			older := mapperTestHTTPRoute("default", "old", parent, "backend")
-			older.CreationTimestamp = metav1.NewTime(time.Unix(1, 0))
-			test.change(older)
-			current := mapperTestHTTPRoute("default", "current", parent, "backend")
-			current.CreationTimestamp = metav1.NewTime(time.Unix(2, 0))
-			kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).WithObjects(older, current).Build()
+			route := mapperTestHTTPRoute("default", "route", parent, "backend")
+			test.change(route)
+			kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).WithObjects(route).Build()
 			gateway := programmedTestGateway(cfg)
 			reconciler := newTestReconciler(Reconciler{Client: kubeClient, APIReader: kubeClient, Config: cfg}, nil)
-			selected, err := reconciler.isSelectedRoute(t.Context(), current, managedRouteParent{
-				ref: parent, gateway: gateway, listener: &gateway.Spec.Listeners[0],
-			})
-			if err != nil || !selected {
-				t.Fatalf("valid route lost selection to an unsupported route: selected=%t, error=%v", selected, err)
-			}
-			_, err = reconciler.buildRouteModelWithReader(t.Context(), kubeClient, older, gateway)
+			_, err := reconciler.buildRouteModelWithReader(t.Context(), kubeClient, route, gateway)
 			var buildError *routeBuildError
 			if !errors.As(err, &buildError) || buildError.kind != test.kind {
 				t.Fatalf("unsupported route error = %v, want %s before backend lookup", err, test.kind)
@@ -629,7 +713,7 @@ func TestUnsupportedRouteCannotReserveGatewaySlot(t *testing.T) {
 	}
 }
 
-func TestRouteCanReserveSlotRejectsTerminalServiceProfiles(t *testing.T) {
+func TestNodePortRouteRejectsTerminalServiceProfiles(t *testing.T) {
 	port := gatewayv1.PortNumber(80)
 	route := &gatewayv1.HTTPRoute{
 		ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "candidate"},
@@ -651,12 +735,10 @@ func TestRouteCanReserveSlotRejectsTerminalServiceProfiles(t *testing.T) {
 			kubeClient := indexedFakeClientBuilder(testScheme(t), testConfig()).WithObjects(service).Build()
 			reconciler := *newTestReconciler(Reconciler{Client: kubeClient, Config: testConfig()}, nil)
 			_, gateway := providerRouteParentObjects(testConfig())
-			decision, err := reconciler.evaluateRouteSlotWithReader(context.Background(), kubeClient, route, gateway)
-			if err != nil {
-				t.Fatalf("routeCanReserveSlot() error = %v", err)
-			}
-			if decision.canReserve {
-				t.Fatal("terminally unsupported Service profile reserved the sole Gateway route slot")
+			err := reconciler.checkRouteBackendProfile(t.Context(), kubeClient, route, gateway)
+			var rejection *routeBuildError
+			if !errors.As(err, &rejection) {
+				t.Fatalf("unsupported backend profile error = %v", err)
 			}
 		})
 	}

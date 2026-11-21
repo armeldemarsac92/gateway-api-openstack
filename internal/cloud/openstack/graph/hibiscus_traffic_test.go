@@ -18,6 +18,7 @@ package graph
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -29,9 +30,11 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"path"
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -47,6 +50,14 @@ import (
 // The Octavia API fixture stores the real Gophercloud writes. The stock render
 // and HAProxy operate on that inventory, including the administrative close.
 func TestHibiscusPrivateHTTPTraffic(t *testing.T) {
+	testHibiscusPrivateHTTPTraffic(t, false)
+}
+
+func TestHibiscusSharedHTTPTraffic(t *testing.T) {
+	testHibiscusPrivateHTTPTraffic(t, true)
+}
+
+func testHibiscusPrivateHTTPTraffic(t *testing.T, shared bool) {
 	python, haproxy := os.Getenv("HIBISCUS_OCTAVIA_PYTHON"), os.Getenv("HIBISCUS_HAPROXY")
 	if python == "" && haproxy == "" {
 		t.Skip("set HIBISCUS_OCTAVIA_PYTHON and HIBISCUS_HAPROXY to run the loopback pilot")
@@ -62,21 +73,8 @@ func TestHibiscusPrivateHTTPTraffic(t *testing.T) {
 	}
 	t.Log(strings.SplitN(string(version), "\n", 2)[0])
 
-	var healthChecks atomic.Int32
 	const response = "hibiscus-node-backend"
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		switch req.URL.Path {
-		case "/healthz":
-			healthChecks.Add(1)
-			w.WriteHeader(http.StatusOK)
-		case "/api":
-			_, _ = io.WriteString(w, response+" "+req.Host)
-		default:
-			http.NotFound(w, req)
-		}
-	}))
-	defer backend.Close()
-	backendAddress := backend.Listener.Addr().(*net.TCPAddr)
+	backendAddress, healthChecks := startPilotBackend(t, response)
 	reservation, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -89,10 +87,7 @@ func TestHibiscusPrivateHTTPTraffic(t *testing.T) {
 		gateway  = lb + "/gateway"
 		listener = "/v2/lbaas/listeners"
 		pool     = "/v2/lbaas/pools"
-		member   = pool + "/pool/members"
-		monitor  = "/v2/lbaas/healthmonitors"
 		policy   = "/v2/lbaas/l7policies"
-		rule     = policy + "/policy/rules"
 	)
 	type record = map[string]any
 	protected := hibiscusControlLoadBalancers(lb)
@@ -100,16 +95,43 @@ func TestHibiscusPrivateHTTPTraffic(t *testing.T) {
 	// Public response relationships differ from the corresponding POST
 	// fields. Keep that translation in the fixture alongside allocated IDs.
 	collections := map[string]struct {
-		key, id, parentKey, parentID, parentList string
+		key, id, parentKey, parentCollection, parentList string
 	}{
-		lb:       {key: "loadbalancer", id: "gateway"},
-		listener: {key: "listener", id: "listener", parentKey: "loadbalancer_id", parentID: "gateway", parentList: "loadbalancers"},
-		pool:     {key: "pool", id: "pool", parentKey: "loadbalancer_id", parentID: "gateway", parentList: "loadbalancers"},
-		monitor:  {key: "healthmonitor", id: "healthmonitor", parentKey: "pool_id", parentID: "pool", parentList: "pools"},
-		member:   {key: "member", id: "member"},
-		policy:   {key: "l7policy", id: "policy", parentKey: "listener_id", parentID: "listener"},
-		rule:     {key: "rule"},
+		"loadbalancers":  {key: "loadbalancer", id: "gateway"},
+		"listeners":      {key: "listener", id: "listener", parentKey: "loadbalancer_id", parentCollection: lb, parentList: "loadbalancers"},
+		"pools":          {key: "pool", id: "pool", parentKey: "loadbalancer_id", parentCollection: lb, parentList: "loadbalancers"},
+		"healthmonitors": {key: "healthmonitor", id: "healthmonitor", parentKey: "pool_id", parentCollection: pool, parentList: "pools"},
+		"members":        {key: "member", id: "member", parentCollection: pool},
+		"l7policies":     {key: "l7policy", id: "policy", parentKey: "listener_id", parentCollection: listener},
+		"rules":          {key: "rule", id: "rule", parentCollection: policy},
 	}
+	list := func(collection string) []record {
+		items := []record{}
+		for _, resource := range slices.Sorted(maps.Keys(inventory)) {
+			if path.Dir(resource) == collection {
+				items = append(items, inventory[resource])
+			}
+		}
+		return items
+	}
+	orderedPolicies := func(listenerID any) []record {
+		items := slices.DeleteFunc(list(policy), func(item record) bool { return item["listener_id"] != listenerID })
+		slices.SortFunc(items, func(a, b record) int { return cmp.Compare(a["position"].(int), b["position"].(int)) })
+		return items
+	}
+	// Octavia's per-listener ordering list uses one-based positions. Inserting or
+	// moving a policy shifts its siblings, and deletion closes the gap.
+	placePolicy := func(data record, requested any) {
+		items := slices.DeleteFunc(orderedPolicies(data["listener_id"]), func(item record) bool { return item["id"] == data["id"] })
+		index := len(items)
+		if position, ok := requested.(float64); ok {
+			index = min(int(position)-1, index)
+		}
+		for i, item := range slices.Insert(items, index, data) {
+			item["position"] = i + 1
+		}
+	}
+	nextID := map[string]int{}
 	var writes []string
 	cloudAPI := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		resource := req.URL.Path
@@ -118,17 +140,20 @@ func TestHibiscusPrivateHTTPTraffic(t *testing.T) {
 			return
 		}
 		collection, id := resource, ""
-		if _, exists := collections[resource]; !exists {
-			split := strings.LastIndex(resource, "/")
-			collection, id = resource[:split], resource[split+1:]
+		if _, exists := collections[path.Base(resource)]; !exists {
+			collection, id = path.Dir(resource), path.Base(resource)
 		}
-		kind, known := collections[collection]
+		name := path.Base(collection)
+		kind, known := collections[name]
 		entry := inventory[resource]
 		reject := func() {
 			t.Errorf("unexpected Octavia request %s %s", req.Method, req.URL.RequestURI())
 			http.Error(w, "unexpected request", http.StatusBadRequest)
 		}
-		if !known {
+		outer := path.Dir(collection)
+		if !known || (kind.parentCollection != "" && kind.parentKey == "" &&
+			(path.Dir(outer) != kind.parentCollection || inventory[outer] == nil)) ||
+			((kind.parentCollection == "" || kind.parentKey != "") && outer != "/v2/lbaas") {
 			reject()
 			return
 		}
@@ -137,23 +162,24 @@ func TestHibiscusPrivateHTTPTraffic(t *testing.T) {
 				safetyWriteJSON(t, w, record{kind.key: entry})
 				return
 			}
+			parentID := req.URL.Query().Get(kind.parentKey)
 			if id != "" || !safetyRequireQuery(t, w, req, "project_id", hibiscusProject) ||
-				(kind.parentKey != "" && !safetyRequireQuery(t, w, req, kind.parentKey, kind.parentID)) {
+				(kind.parentKey != "" && inventory[kind.parentCollection+"/"+parentID] == nil) {
 				reject()
 				return
 			}
-			items := []record{}
-			for _, item := range slices.Sorted(maps.Keys(inventory)) {
-				if strings.HasPrefix(item, collection+"/") && !strings.Contains(strings.TrimPrefix(item, collection+"/"), "/") {
-					data := inventory[item]
-					if tags := req.URL.Query().Get("tags"); tags != "" &&
-						!openstackidentity.HasAllTags(pilotTags(data["tags"]), strings.Split(tags, ",")) {
-						continue
-					}
-					items = append(items, data)
-				}
+			items := list(collection)
+			if collection == policy {
+				items = orderedPolicies(parentID)
 			}
-			safetyWriteJSON(t, w, record{collection[strings.LastIndex(collection, "/")+1:]: items})
+			items = slices.DeleteFunc(items, func(data record) bool {
+				if kind.parentKey != "" && data[kind.parentKey] != parentID {
+					return true
+				}
+				tags := req.URL.Query().Get("tags")
+				return tags != "" && !openstackidentity.HasAllTags(pilotTags(data["tags"]), strings.Split(tags, ","))
+			})
+			safetyWriteJSON(t, w, record{name: items})
 			return
 		}
 		if protected[resource] != nil {
@@ -169,17 +195,27 @@ func TestHibiscusPrivateHTTPTraffic(t *testing.T) {
 				return
 			}
 			data := payload[kind.key]
+			if position, exists := data["position"]; collection == policy && exists {
+				if value, ok := position.(float64); !ok || value < 1 || value != float64(int(value)) {
+					reject()
+					return
+				}
+			}
 			if req.Method == http.MethodPost && id == "" {
 				id = kind.id
+				// Octavia allocates these IDs globally. Its HAProxy template uses
+				// rule IDs as ACL names on the shared frontend.
+				nextID[name]++
+				if nextID[name] > 1 {
+					id += "-" + strconv.Itoa(nextID[name])
+				}
+				parentID, _ := data[kind.parentKey].(string)
+				if kind.parentKey != "" && inventory[kind.parentCollection+"/"+parentID] == nil {
+					reject()
+					return
+				}
 				if collection == lb {
 					data["vip_address"], data["vip_port_id"] = frontendAddress.IP.String(), "vip-port"
-				} else if collection == rule {
-					ruleType, ok := data["type"].(string)
-					if !ok {
-						reject()
-						return
-					}
-					id = strings.ToLower(ruleType)
 				} else if kind.parentList != "" {
 					data[kind.parentList] = []record{{"id": data[kind.parentKey]}}
 				}
@@ -192,10 +228,17 @@ func TestHibiscusPrivateHTTPTraffic(t *testing.T) {
 					return
 				}
 				data["id"], data["project_id"], data["provisioning_status"] = id, hibiscusProject, "ACTIVE"
+				if collection == policy {
+					placePolicy(data, data["position"])
+				}
 				inventory[resource] = data
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusCreated)
 			} else if req.Method == http.MethodPut && entry != nil && (resource == gateway || collection == policy) {
+				if position, exists := data["position"]; collection == policy && exists {
+					placePolicy(entry, position)
+					delete(data, "position")
+				}
 				maps.Copy(entry, data)
 				if resource == gateway {
 					entry["provisioning_status"] = "PENDING_UPDATE"
@@ -207,11 +250,17 @@ func TestHibiscusPrivateHTTPTraffic(t *testing.T) {
 			}
 			safetyWriteJSON(t, w, record{kind.key: data})
 		case http.MethodDelete:
-			if entry == nil || inventory[gateway]["admin_state_up"] != false || inventory[gateway]["provisioning_status"] != "ACTIVE" {
+			if entry == nil || inventory[gateway]["provisioning_status"] != "ACTIVE" ||
+				((collection == lb || collection == listener) && inventory[gateway]["admin_state_up"] != false) {
 				reject()
 				return
 			}
 			delete(inventory, resource)
+			if collection == policy {
+				for i, item := range orderedPolicies(entry["listener_id"]) {
+					item["position"] = i + 1
+				}
+			}
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			reject()
@@ -253,7 +302,7 @@ func TestHibiscusPrivateHTTPTraffic(t *testing.T) {
 	converge := func(p *Provider, desired cloud.GatewayGraphSpec) cloud.GatewayGraphResult {
 		t.Helper()
 		var result cloud.GatewayGraphResult
-		for range 12 {
+		for range 24 {
 			result = reconcile(p, desired)
 			if result.Outcome.State == cloud.OutcomeReady {
 				return result
@@ -307,27 +356,34 @@ func TestHibiscusPrivateHTTPTraffic(t *testing.T) {
 		return res.StatusCode, string(body), errors.Join(err, res.Body.Close())
 	}
 	const host = "API.Example.COM:1234"
-	deadline := time.Now().Add(8 * time.Second)
-	for {
-		status, body, err := send(host, "/api")
-		if status == http.StatusOK && body == response+" "+host && healthChecks.Load() > 0 && err == nil {
-			break
+	expectBackend := func(requestPath, backend string, checks *atomic.Int32) {
+		t.Helper()
+		deadline := time.Now().Add(6 * time.Second)
+		for {
+			status, body, err := send(host, requestPath)
+			if status == http.StatusOK && body == backend+" "+host && checks.Load() > 0 && err == nil {
+				t.Logf("HTTP %s %s -> 200 %q, active health check observed", host, requestPath, body)
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("loopback %s %s = %d %q, want %q, health checks = %d, err = %v", host, requestPath, status, body, backend, checks.Load(), err)
+			}
+			time.Sleep(50 * time.Millisecond)
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("loopback %s /api = %d %q, health checks = %d, err = %v", host, status, body, healthChecks.Load(), err)
-		}
-		time.Sleep(50 * time.Millisecond)
 	}
-	t.Logf("HTTP %s /api -> 200 %q from loopback backend %s, active health check observed", host, response+" "+host, backendAddress)
+	expectBackend("/api", response, healthChecks)
 	if status, body, err := send(route.Hostname, "/api"); status != http.StatusOK || body != response+" "+route.Hostname || err != nil {
 		t.Fatalf("bare Host %s /api = %d %q, err = %v", route.Hostname, status, body, err)
 	}
-	for _, miss := range [][2]string{{"apiXexample.com", "/api"}, {host, "/api/extra"}} {
-		if status, body, err := send(miss[0], miss[1]); status != http.StatusServiceUnavailable || strings.Contains(body, response) || err != nil {
-			t.Fatalf("unmatched %q = %d %q, err = %v", miss, status, body, err)
+	expectMiss := func(host, requestPath string) {
+		t.Helper()
+		if status, body, err := send(host, requestPath); status != http.StatusServiceUnavailable || strings.Contains(body, "hibiscus-") || err != nil {
+			t.Fatalf("unmatched %s %s = %d %q, err = %v", host, requestPath, status, body, err)
 		}
-		t.Logf("HTTP %s %s -> 503", miss[0], miss[1])
+		t.Logf("HTTP %s %s -> 503", host, requestPath)
 	}
+	expectMiss("apiXexample.com", "/api")
+	expectMiss(host, "/api/extra")
 
 	initialWrites := len(writes)
 	provider = newProvider()
@@ -338,6 +394,67 @@ func TestHibiscusPrivateHTTPTraffic(t *testing.T) {
 		t.Fatalf("after recreating provider instance: HTTP %d %q, err = %v", status, body, err)
 	}
 	t.Log("fresh provider instance rediscovered the serving graph without writes")
+	if shared {
+		const broadResponse = "hibiscus-broad-backend"
+		broadAddress, broadHealthChecks := startPilotBackend(t, broadResponse)
+		broad := spec.Routes[0]
+		broad.Spec.Identity.RouteNamespace = "broad-site"
+		broad.Spec.Identity.RouteName = "broad"
+		broad.Spec.Identity.RouteUID = "broad-route-uid"
+		broad.Spec.PathType = cloud.PathMatchPrefix
+		broad.Spec.Members = []cloud.Member{{Address: broadAddress.IP.String(), Port: broadAddress.Port}}
+		spec.Routes[0].Spec.Precedence = 1
+		spec.Routes = append(spec.Routes, broad)
+		converge(provider, spec)
+		stopOpenProxy()
+		stopOpenProxy = startProxy()
+		expectBackend("/api", broadResponse, broadHealthChecks)
+		expectBackend("/api/extra", broadResponse, broadHealthChecks)
+
+		// Switch only precedence so the same overlap reaches the other pool.
+		spec.Routes[0].Spec.Precedence, spec.Routes[1].Spec.Precedence = 0, 1
+		beforeReordering := len(writes)
+		settled := converge(provider, spec)
+		t.Logf("shared route precedence change applied %v", writes[beforeReordering:])
+		initialWrites = len(writes)
+		provider = newProvider()
+		rediscovered := reconcile(provider, spec)
+		if len(rediscovered.Routes) != 2 || !reflect.DeepEqual(rediscovered, settled) || len(writes) != initialWrites {
+			t.Fatalf("shared graph rediscovery = %#v, writes %v", rediscovered, writes[initialWrites:])
+		}
+		t.Log("fresh provider rediscovered both shared routes without writes")
+		stopOpenProxy()
+		stopOpenProxy = startProxy()
+		expectBackend("/api", response, healthChecks)
+		expectBackend("/api/extra", broadResponse, broadHealthChecks)
+		expectMiss(host, "/apiculture")
+		expectMiss("apiXexample.com", "/api")
+
+		spec.Routes[0].Disposition = cloud.GraphDelete
+		spec.Routes[1].Spec.Precedence = 0
+		converge(provider, spec)
+		if slices.Contains(writes[initialWrites:], "PUT "+gateway) || inventory[gateway]["admin_state_up"] != true ||
+			inventory[listener+"/listener"]["admin_state_up"] != true {
+			t.Fatalf("removing a route changed Gateway traffic state: %v", writes[initialWrites:])
+		}
+		spec.Routes = spec.Routes[1:]
+		initialWrites = len(writes)
+		provider = newProvider()
+		remaining := reconcile(provider, spec)
+		if remaining.Outcome.State != cloud.OutcomeReady || len(remaining.Routes) != 1 || len(writes) != initialWrites {
+			t.Fatalf("remaining route did not rediscover without writes: %#v, writes %v", remaining, writes[initialWrites:])
+		}
+		index := slices.IndexFunc(settled.Routes, func(result cloud.RouteGraphResult) bool { return result.Identity == broad.Spec.Identity })
+		if index < 0 || !reflect.DeepEqual(settled.Routes[index], remaining.Routes[0]) {
+			t.Fatalf("remaining route resources changed: before %#v, after %#v", settled.Routes, remaining.Routes[0])
+		}
+		stopOpenProxy()
+		stopOpenProxy = startProxy()
+		expectBackend("/api", broadResponse, broadHealthChecks)
+		expectBackend("/api/extra", broadResponse, broadHealthChecks)
+		expectMiss(host, "/apiculture")
+		t.Log("removing the exact route preserved the prefix route's resources and traffic")
+	}
 	remove := cloud.GatewayGraphSpec{Identity: spec.Identity, Gateway: cloud.GatewayGraphNode{Disposition: cloud.GraphDelete}}
 	if result := reconcile(provider, remove); result.Outcome.State != cloud.OutcomeProgressing ||
 		!slices.Equal(writes[initialWrites:], []string{"PUT " + gateway}) || inventory[gateway]["admin_state_up"] != false {
@@ -364,6 +481,21 @@ func TestHibiscusPrivateHTTPTraffic(t *testing.T) {
 		t.Fatalf("final inventory = %v, want unchanged protected controls %v", after, controls)
 	}
 	t.Logf("Gateway traffic refused before and after owned cleanup %v; Magnum API server and OCCM load balancers unchanged", writes[initialWrites:])
+}
+
+func startPilotBackend(t *testing.T, response string) (*net.TCPAddr, *atomic.Int32) {
+	t.Helper()
+	var healthChecks atomic.Int32
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path == "/healthz" {
+			healthChecks.Add(1)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		_, _ = io.WriteString(w, response+" "+req.Host)
+	}))
+	t.Cleanup(backend.Close)
+	return backend.Listener.Addr().(*net.TCPAddr), &healthChecks
 }
 
 func pilotTags(value any) []string {

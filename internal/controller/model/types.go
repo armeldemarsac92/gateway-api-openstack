@@ -157,6 +157,9 @@ type RouteMatch struct {
 	MatchIndex int
 	Hostname   string
 	Match      Match
+	// Precedence is the zero-based position in the complete listener model.
+	Precedence    int
+	routeHostname string
 }
 
 func source(object metav1.Object) Source {

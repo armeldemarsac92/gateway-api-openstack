@@ -236,19 +236,21 @@ func populateListener(listener *Listener, routes []Route) {
 		listener.AttachedRoutes++
 		slices.Sort(hostnames)
 		hostnames = slices.Compact(hostnames)
-		for _, rule := range route.Rules {
-			// Keep matches from unsupported action rules in the logical order.
-			// Their diagnostics must block lowering rather than creating a hole
-			// that could fall through to a broader route.
-			for _, match := range rule.Matches {
-				for _, hostname := range hostnames {
+		for _, hostname := range hostnames {
+			original := matchingRouteHostname(hostname, route.Hostnames)
+			for _, rule := range route.Rules {
+				// Keep unsupported actions in the order so lowering can see their diagnostics.
+				for _, match := range rule.Matches {
 					listener.Rules = append(listener.Rules, RouteMatch{
 						Route: route.Source, RuleIndex: rule.Index, MatchIndex: match.Index,
-						Hostname: hostname, Match: match,
+						Hostname: hostname, routeHostname: original, Match: match,
 					})
 				}
 			}
 		}
 	}
 	slices.SortStableFunc(listener.Rules, compareMatches)
+	for i := range listener.Rules {
+		listener.Rules[i].Precedence = i
+	}
 }

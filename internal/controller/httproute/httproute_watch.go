@@ -87,8 +87,7 @@ func (r *Reconciler) enqueueHTTPRoutesForServiceKey(ctx context.Context, service
 	return r.enqueueHTTPRouteConsumers(ctx, direct.Items)
 }
 
-// enqueueHTTPRouteConsumers includes contenders because a dependency change can
-// change the selected route for every parent shared by a direct consumer.
+// A backend change can alter which bound fragments the shared listener can program.
 func (r *Reconciler) enqueueHTTPRouteConsumers(ctx context.Context, routes []gatewayv1.HTTPRoute) []reconcile.Request {
 	keys := map[types.NamespacedName]struct{}{}
 	observedParents := map[string]struct{}{}
@@ -99,12 +98,12 @@ func (r *Reconciler) enqueueHTTPRouteConsumers(ctx context.Context, routes []gat
 			if _, observed := observedParents[gatewayKey]; observed {
 				continue
 			}
-			// Contenders sharing a parent need one indexed read per event,
+			// Routes sharing a parent need one indexed read per event,
 			// including when that read fails. Later events observe it again.
 			observedParents[gatewayKey] = struct{}{}
 			var peers gatewayv1.HTTPRouteList
 			if err := r.List(ctx, &peers, client.MatchingFields{controller.IndexHTTPRouteByParentGateway: gatewayKey}); err != nil {
-				log.FromContext(ctx).Error(err, "Could not list HTTPRoute contenders", "gateway", gatewayKey)
+				log.FromContext(ctx).Error(err, "Could not list HTTPRoutes sharing a Gateway", "gateway", gatewayKey)
 				continue
 			}
 			for peerIndex := range peers.Items {
@@ -218,9 +217,7 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 	}
 	return ctrl.NewControllerManagedBy(manager).
 		For(&gatewayv1.HTTPRoute{}, builder.WithPredicates(controller.HTTPRouteReconcilePredicate(r.Config))).
-		// A create, spec change, or completed deletion can change the sole
-		// selected route for a Gateway. Requeue routes for the same
-		// parent Gateway and ignore status updates made by this controller.
+		// A changed route can alter the precedence of its peers on the same listener.
 		Watches(&gatewayv1.HTTPRoute{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutePeers), builder.WithPredicates(controller.HTTPRoutePeerPredicate())).
 		Watches(&gatewayv1.Gateway{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForGateway), builder.WithPredicates(controller.GatewayForHTTPRoutePredicate(r.Config))).
 		Watches(&corev1.Service{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForService), builder.WithPredicates(controller.ServicePredicate())).
