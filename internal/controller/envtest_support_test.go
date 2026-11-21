@@ -20,6 +20,7 @@ package controller_test
 
 import (
 	"context"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -29,6 +30,7 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 
 	configv1alpha1 "github.com/gateway-api-openstack/gateway-api-openstack/api/v1alpha1"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
@@ -113,6 +115,11 @@ func testScheme(t *testing.T) *runtime.Scheme {
 	}
 	if err := gatewayv1.Install(scheme); err != nil {
 		t.Fatal(err)
+	}
+	if os.Getenv("GATEWAY_API_CHANNEL") == "experimental" {
+		if err := gatewayx.Install(scheme); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return scheme
 }

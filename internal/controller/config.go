@@ -44,7 +44,7 @@ type Config struct {
 	WeightedHTTPTargets bool
 	// RequestHeaderModifier enables route-scoped L7 request header operations.
 	RequestHeaderModifier bool
-	// BackendH2C enables h2c for explicitly annotated HTTP backend Service ports.
+	// BackendH2C enables h2c for HTTP backends that explicitly request it.
 	BackendH2C bool
 	// OperatorHTTPS enables termination using operator-provisioned certificates.
 	OperatorHTTPS bool
@@ -62,6 +62,11 @@ type Config struct {
 	ClusterID string
 	// OpenStackResyncInterval controls periodic observation after convergence.
 	OpenStackResyncInterval time.Duration
+}
+
+// XBackendEnabled reports whether this installation uses the Experimental bundle.
+func (c Config) XBackendEnabled() bool {
+	return c.GatewayAPIChannel == features.FeatureChannelExperimental
 }
 
 // Validate rejects configuration that could make ownership ambiguous.

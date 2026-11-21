@@ -8,7 +8,7 @@ Start with the existing OpenStack controller, one private IPv4 Amphora VIP, an H
 
 ## Approaches
 
-The selected direction keeps stock OpenStack as the first target and studies a public Octavia API/provider extension for operations Amphora cannot express through the existing API. It studies an explicitly enabled mesh for Service-parent traffic. The operator selected this direction on November 20. Delivery of either new dataplane contract requires a separate decision after the minimal feasibility cases and costs are available.
+Start with the stock OpenStack APIs. For missing operations, implement a typed public Octavia capability, keep activation under regional operator control and verify its behavior locally before delivery on the personal forks. The selected mesh integration uses an explicitly enrolled Istio ambient waypoint. The acceptance target is the full v1.7.0 feature matrix. Record the source revision, tests, traffic and outstanding contracts as each group of changes lands.
 
 An explicitly managed proxy for inbound Gateway traffic would give the operator another dataplane to run and changes where TLS and routing policy are enforced. A stock-only implementation covers a useful pilot and leaves release requirements open, starting with per-route arbitrary header mutation. The selected direction retains those requirements in the matrix. All programming of the load balancer goes through public authenticated APIs.
 
@@ -24,7 +24,7 @@ An explicitly managed proxy for inbound Gateway traffic would give the operator 
 
 The first provider case adds an arbitrary header for a single path and observes it at an echo backend. Other cases request a default 404, a proportional 500 for an invalid weighted backend, HTTP/2 gRPC matching and distinct backends for two TLS SNI names on the same port. For each, record the requested wire result, the smallest public API operation or missing field, and the provider capability required. A candidate extension includes typed ordered header operations and terminal or weighted forwarding actions; negotiation, tenant authorization, immutable ownership, provider limits and backward compatibility belong in the provider decision. Stock classes continue to report their observed capabilities. No provider-specific internal configuration is an installation prerequisite.
 
-For mesh, use a Service DNS name and make requests from enrolled client Pods in producer and consumer namespaces. Check Service-parent selection, revocation, protocol behavior and controller-owned status. Study an operator-provisioned dataplane that receives these requests, including selectors/enrollment, ownership of Route parent status, interception scope, uninstall and coexistence. Require a concrete dataplane/version and separate approval before exposing or installing the mode.
+For mesh, use a Service DNS name and make requests from enrolled client Pods in producer and consumer namespaces. Check Service-parent selection, revocation, protocol behavior and controller-owned status. Pin the Istio dataplane version and use the operator-provisioned waypoint to exercise enrollment, ownership of Route parent status, interception scope, uninstall and coexistence.
 
 ## Magnum lifecycle and qualification
 

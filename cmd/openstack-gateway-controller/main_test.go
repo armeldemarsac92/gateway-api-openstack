@@ -28,43 +28,57 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack"
 )
 
 func TestRequireGatewayAPIs(t *testing.T) {
-	for _, missing := range []string{"referencegrants", "udproutes", ""} {
-		name := "all resources installed"
-		if missing != "" {
-			name = missing + " missing"
-		}
-		t.Run(name, func(t *testing.T) {
-			resources := metav1.APIResourceList{
-				GroupVersion: gatewayv1.GroupVersion.String(),
-			}
+	for _, tc := range []struct {
+		name, missing string
+		experimental  bool
+	}{
+		{name: "standard"},
+		{name: "missing referencegrants", missing: "referencegrants"},
+		{name: "missing udproutes", missing: "udproutes"},
+		{name: "experimental", experimental: true},
+		{name: "missing xbackends", missing: "xbackends", experimental: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resources := metav1.APIResourceList{GroupVersion: gatewayv1.GroupVersion.String()}
 			for _, resource := range []string{"gatewayclasses", "gateways", "httproutes", "tcproutes", "udproutes", "referencegrants"} {
-				if resource != missing {
+				if resource != tc.missing {
 					resources.APIResources = append(resources.APIResources, metav1.APIResource{Name: resource})
 				}
 			}
+			experimental := metav1.APIResourceList{GroupVersion: gatewayx.GroupVersion.String()}
+			if tc.missing != "xbackends" {
+				experimental.APIResources = []metav1.APIResource{{Name: "xbackends"}}
+			}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-				if request.Method != http.MethodGet || request.URL.Path != "/apis/"+gatewayv1.GroupVersion.String() {
+				var response metav1.APIResourceList
+				switch {
+				case request.Method == http.MethodGet && request.URL.Path == "/apis/"+resources.GroupVersion:
+					response = resources
+				case tc.experimental && request.Method == http.MethodGet && request.URL.Path == "/apis/"+experimental.GroupVersion:
+					response = experimental
+				default:
 					t.Errorf("unexpected discovery request: %s %s", request.Method, request.URL.Path)
 					http.NotFound(w, request)
 					return
 				}
 				w.Header().Set("Content-Type", "application/json")
-				if err := json.NewEncoder(w).Encode(resources); err != nil {
+				if err := json.NewEncoder(w).Encode(response); err != nil {
 					t.Errorf("encode discovery response: %v", err)
 				}
 			}))
 			t.Cleanup(server.Close)
-			err := requireGatewayAPIs(&rest.Config{Host: server.URL}, false)
-			if missing == "" && err != nil {
+			err := requireGatewayAPIs(&rest.Config{Host: server.URL}, false, tc.experimental)
+			if tc.missing == "" && err != nil {
 				t.Fatalf("requireGatewayAPIs() rejected available resources: %v", err)
 			}
-			if missing != "" && (err == nil || !strings.Contains(err.Error(), missing)) {
-				t.Fatalf("requireGatewayAPIs() = %v, want missing %s resource", err, missing)
+			if tc.missing != "" && (err == nil || !strings.Contains(err.Error(), tc.missing)) {
+				t.Fatalf("requireGatewayAPIs() = %v, want missing %s resource", err, tc.missing)
 			}
 		})
 	}

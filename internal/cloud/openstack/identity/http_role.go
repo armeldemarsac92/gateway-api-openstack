@@ -32,6 +32,15 @@ func HTTPBackendKey(namespace, name string, port int) string {
 	return httpTupleKey(namespace, name, strconv.Itoa(port))
 }
 
+// HTTPBackendPoolKey keeps Service identities stable and gives an XBackend
+// its own identity across edits to its port.
+func HTTPBackendPoolKey(backend cloud.HTTPBackend) string {
+	if backend.Kind == cloud.HTTPBackendKindXBackend {
+		return httpTupleKey(string(backend.Kind), backend.Namespace, backend.Name)
+	}
+	return HTTPBackendKey(backend.Namespace, backend.Name, backend.Port)
+}
+
 // HTTPFixedRuleKey identifies a rule that serves a local fixed response.
 func HTTPFixedRuleKey(index int) string {
 	return httpTupleKey("", "fixed-rule", strconv.Itoa(index))

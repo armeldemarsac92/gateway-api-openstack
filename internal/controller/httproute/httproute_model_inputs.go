@@ -30,6 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	gatewaycontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
@@ -211,6 +212,17 @@ func (r *Reconciler) collectRouteModelInputs(ctx context.Context, reader client.
 	}
 	input.RequestHeaderModifier = r.Config.RequestHeaderModifier
 	input.BackendH2C = r.Config.BackendH2C
+	input.EnableXBackend = r.Config.XBackendEnabled()
+	if input.EnableXBackend {
+		mode, err := r.xBackendMemberMode(gateway)
+		if err != nil {
+			return nil, err
+		}
+		input.MemberMode = mode
+		if err := graph.CollectXBackendInputs(ctx, reader, &input); err != nil {
+			return nil, err
+		}
+	}
 	if r.Config.OperatorHTTPS && slices.ContainsFunc(gateway.Spec.Listeners, func(l gatewayv1.Listener) bool { return l.Protocol == gatewayv1.HTTPSProtocolType }) {
 		listeners, err := gatewaycontroller.HTTPRouteListeners(r.Config, gateway)
 		if err != nil {
@@ -230,9 +242,23 @@ func (r *Reconciler) collectRouteModelInputs(ctx context.Context, reader client.
 	return &routeModelInputs{input: input, logical: logical}, nil
 }
 
+func (r *Reconciler) xBackendMemberMode(gateway *gatewayv1.Gateway) (cloud.MemberMode, error) {
+	if !controller.HasGatewayTopologyBinding(r.Config, gateway) {
+		return "", nil
+	}
+	topology, err := controller.StoredGatewayTopology(r.Config, gateway)
+	return topology.Topology.MemberMode, err
+}
+
 func (inputs *routeModelInputs) validateBackends(ctx context.Context, reader client.Reader) error {
 	current, err := graph.CollectBackendInputsWithNamespaces(ctx, reader, inputs.input.Gateway, inputs.input.Routes, inputs.input.Namespaces)
 	if err != nil {
+		return err
+	}
+	current.EnableXBackend = inputs.input.EnableXBackend
+	current.MemberMode = inputs.input.MemberMode
+	current.BackendH2C = inputs.input.BackendH2C
+	if err := graph.CollectXBackendInputs(ctx, reader, &current); err != nil {
 		return err
 	}
 	for _, route := range inputs.input.Routes {
@@ -247,7 +273,8 @@ func (inputs *routeModelInputs) validateBackends(ctx context.Context, reader cli
 		}
 	}
 	if !equality.Semantic.DeepEqual(inputs.input.Services, current.Services) ||
-		!equality.Semantic.DeepEqual(inputs.input.EndpointSlices, current.EndpointSlices) {
+		!equality.Semantic.DeepEqual(inputs.input.EndpointSlices, current.EndpointSlices) ||
+		!equality.Semantic.DeepEqual(inputs.input.XBackends, current.XBackends) {
 		return errHTTPRouteChanged
 	}
 	return nil

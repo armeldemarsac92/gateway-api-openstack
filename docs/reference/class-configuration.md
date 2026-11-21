@@ -194,7 +194,7 @@ This mode has local tests but no verified OpenStack environment yet.
 Keep `backendSecurity.mode: Unmanaged` and select IPv4 VIP and member subnets.
 The current OpenStack E2E runner exercises NodePort modes and does not validate this path.
 
-HTTPRoute continues to reference a Service port.
+For a Service backend, the HTTPRoute specifies a Service port.
 The controller resolves that port through EndpointSlices and registers their IPv4 addresses and resolved ports as Octavia members. HTTPRoute and TCPRoute use TCP Service and EndpointSlice ports. UDPRoute requires UDP on both.
 It accepts ClusterIP, headless, and NodePort Services, including manually managed EndpointSlices selected by namespace and the `kubernetes.io/service-name` label.
 It matches the Service port name rather than the `targetPort` string, allowing different resolved ports in different slices.
@@ -218,6 +218,42 @@ Endpoint updates preserve unchanged member IDs.
 For an HTTPRoute, a valid Service with no eligible endpoints keeps its pool, monitor, and route policies with an empty member list. The optional Octavia HTTP actions serve HTTP 500 for an invalid backend. [Controller flags](../getting-started.md#optional-octavia-http-actions)
 For a weighted TCPRoute or UDPRoute, losing the last eligible endpoint of a positive-weight Service withdraws forwarding and deletes the route's pool. Reconciliation recreates the pool when the endpoints return. [Weighted TCP Services](../getting-started.md#forward-tcp-to-a-service) · [Weighted UDP Services](../getting-started.md#forward-udp-to-a-service)
 IPv6 endpoint forwarding, broader route mappings, and conformance remain separate work.
+
+### Select Pods with an Experimental XBackend
+
+An HTTPRoute on an Endpoint-mode Gateway can select Pods in its namespace through an `XBackend`. Install the v1.7.0 Experimental bundle and the `config/experimental` controller overlay. The following objects use an existing HTTP Gateway named `edge` in `apps`. The application must listen on port 8080 and its Pods must carry both labels. [Experimental installation](../getting-started.md#prerequisites)
+
+```yaml
+apiVersion: gateway.networking.x-k8s.io/v1alpha1
+kind: XBackend
+metadata:
+  name: reports
+  namespace: apps
+spec:
+  type: EndpointSelector
+  endpointSelector:
+    matchLabels:
+      app: reports
+      track: green
+  port:
+    number: 8080
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: reports
+  namespace: apps
+spec:
+  parentRefs:
+    - name: edge
+  rules:
+    - backendRefs:
+        - group: gateway.networking.x-k8s.io
+          kind: XBackend
+          name: reports
+```
+
+The backend supplies the port, so omit `backendRefs[].port`. The controller selects ready, nonterminating Pods with routable IPv4 addresses. Pods using the host network are ineligible for this endpoint profile. Changes to the selector, Pod labels, readiness and Pod addresses update pool membership. The Route and XBackend must share a namespace. Use the HTTPRoute parent conditions and the XBackend's `status.ancestors` to check the current generation for your Gateway. [XBackend specification](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/apisx/v1alpha1/xbackend_types.go) · [Namespace contract](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/geps/gep-4894/index.md#route-attachment-and-consumer-overrides)
 
 ## Worker NodePort members
 

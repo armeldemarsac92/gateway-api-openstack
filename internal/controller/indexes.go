@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 
 	configv1alpha1 "github.com/gateway-api-openstack/gateway-api-openstack/api/v1alpha1"
@@ -27,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 )
 
 const (
@@ -42,6 +44,10 @@ const (
 	IndexHTTPRouteByStatusGateway = "status.parentGateway"
 	// IndexHTTPRouteByBackendService indexes HTTPRoutes by backend Service key.
 	IndexHTTPRouteByBackendService = "spec.backendService"
+	// IndexHTTPRouteByXBackend indexes same-namespace XBackend reference targets.
+	IndexHTTPRouteByXBackend = "spec.xBackend"
+	// IndexXBackendByPodLabel indexes each matchLabels pair in an EndpointSelector.
+	IndexXBackendByPodLabel = "spec.podLabel"
 	// IndexHTTPRouteByBackendNamespace indexes cross-namespace Service references.
 	IndexHTTPRouteByBackendNamespace = "spec.backendNamespace"
 	// IndexHTTPRouteByBoundGateway indexes HTTPRoutes by bound Gateway key.
@@ -60,6 +66,8 @@ const (
 	IndexL4RouteByBackendNamespace = "spec.l4RouteBackendNamespace"
 	// IndexL4RouteByBoundGateway indexes TCPRoutes and UDPRoutes by bound Gateway key.
 	IndexL4RouteByBoundGateway = "metadata.l4RouteBoundGateway"
+	// IndexTLSRouteByGateway indexes declared and controller-owned status parents.
+	IndexTLSRouteByGateway = "tlsRouteGateway"
 	// IndexEndpointSliceByService indexes EndpointSlices by Service key.
 	IndexEndpointSliceByService = "metadata.service"
 	// NodeBackendIndexValue is the field value for routes that use Node backends.
@@ -239,7 +247,46 @@ func controllerFieldIndexes(config Config) []controllerFieldIndex {
 			}},
 		)
 	}
+	if config.XBackendEnabled() {
+		indexes = append(indexes,
+			controllerFieldIndex{object: &gatewayv1.HTTPRoute{}, field: IndexHTTPRouteByXBackend, extract: func(object client.Object) []string {
+				route, ok := object.(*gatewayv1.HTTPRoute)
+				if !ok {
+					return nil
+				}
+				keys := make(map[string]struct{})
+				for _, key := range model.LocalXBackendReferences(route) {
+					keys[ObjectKeyString(key)] = struct{}{}
+				}
+				return sortedIndexKeys(keys)
+			}},
+			controllerFieldIndex{object: &gatewayx.XBackend{}, field: IndexXBackendByPodLabel, extract: func(object client.Object) []string {
+				backend, ok := object.(*gatewayx.XBackend)
+				if !ok || backend.Spec.Type != gatewayx.BackendTypeEndpointSelector || backend.Spec.EndpointSelector == nil {
+					return nil
+				}
+				keys := make(map[string]struct{})
+				for key, value := range backend.Spec.EndpointSelector.MatchLabels {
+					keys[PodLabelIndexKey(string(key), string(value))] = struct{}{}
+				}
+				return sortedIndexKeys(keys)
+			}},
+		)
+	}
+	if config.TLSSNIPassthrough {
+		indexes = append(indexes, controllerFieldIndex{object: &gatewayv1.TLSRoute{}, field: IndexTLSRouteByGateway, extract: func(object client.Object) []string {
+			parents, statuses, _ := RouteParents(object)
+			keys := append(parentGatewayKeys(object.GetNamespace(), parents), statusGatewayKeys(config, object.GetNamespace(), statuses)...)
+			slices.Sort(keys)
+			return slices.Compact(keys)
+		}})
+	}
 	return indexes
+}
+
+// PodLabelIndexKey encodes one Kubernetes label selector equality.
+func PodLabelIndexKey(key, value string) string {
+	return key + "=" + value
 }
 
 // RouteParents returns the declared and reported parents of a supported Route.

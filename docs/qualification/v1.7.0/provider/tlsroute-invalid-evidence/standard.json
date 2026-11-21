@@ -1,0 +1,615 @@
+{
+  "channel": "standard",
+  "profile": "sni-and-operator-https",
+  "controller": {
+    "repository": "ghcr.io/armeldemarsac92/gateway-api-openstack",
+    "sourceRevision": "f150a6e006d027106da2aaed6b82cb262bcf1b1a",
+    "manifestDigest": "sha256:4328c81191c1c9daba6ec011d39f1f3a049bd477a90e15fe8c8673f5b23002b7",
+    "platform": "linux/amd64",
+    "ociArchiveSHA256": "10673ab98dd63eda95e1a9a15190cd6bda29d5faed0289a5de526c2f92e9ebdf",
+    "managerSHA256": "3d5ea8fe3b7c3bf46f8fa0133264f5bee811fab5456c92b1e1bee3beb88a6104"
+  },
+  "gatewayAPI": {
+    "revision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+    "release": "v1.7.0",
+    "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+    "baseManifestSHA256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+    "caseFilesSHA256": {
+      "tlsroute-invalid-reference-grant.go": "6d3e966960747728450e177e5a1e297ea1e571ed429778a6ce079cb6b275e564",
+      "tlsroute-invalid-reference-grant.yaml": "37005f33424c063176d78b29e23591cedf0d3415c38f76713b40a8b67ef757ca",
+      "tlsroute-invalid-backendref-nonexistent.go": "a5ec36145162bd14d76f879b6d6c150ffddf091fa41d4401b30143a67c548bfc",
+      "tlsroute-invalid-backendref-nonexistent.yaml": "48d574e1ae2946e456f671cffd6a922bc6e3d1201ec2a1a9ee0f63a47f7dc0e1",
+      "tlsroute-invalid-backendref-unknown-kind.go": "420c263ef40d8bc5135e790eed00cc5ada05d5ef2fafe6cfcacf1ed907a71fbb",
+      "tlsroute-invalid-backendref-unknown-kind.yaml": "6528bc58f661d0e70b3ed584276ac51e17c2219834143fd55a84c9b695390d7e",
+      "tlsroute-invalid-no-matching-listener.go": "276298bb60503fd4b56b1887a6d7daf21d6d7f70ecf49bc7834c412055bf8a39",
+      "tlsroute-invalid-no-matching-listener.yaml": "f98145a5e41bd6b9ce729625b1724add25ae386e84f16a14690372d933936f93"
+    }
+  },
+  "kubernetes": "v1.36.2",
+  "etcd": "3.6.8",
+  "haproxy": "3.0.19",
+  "providerPackages": {
+    "octavia": {
+      "revision": "0e37f9873147c3c0468edd4e3da11531d8614e6c",
+      "sourceTree": "61e7c97f0427b9b17356b0c8c556e1bcdad06741",
+      "packageSourceArchiveSHA256": "c7e7d64ca6d851daaae8e5c67a3adbf94b2d957a63534d969cf9a1aa7417627a",
+      "version": "19.0.1.dev4",
+      "wheel": "octavia-19.0.1.dev4-py3-none-any.whl",
+      "wheelSHA256": "8c0e50358ba98d44d5afa88a0c013ab22cc95d463b380b97eaa0f5d246ee324a",
+      "packageFilesMatchedToSource": 631,
+      "pythonFilesMatchedToSource": 609,
+      "templatesMatchedToSource": 11,
+      "importedModulesVerified": 151,
+      "moduleFiles": {
+        "octavia.api.drivers.amphora_driver.v2.driver": "octavia/api/drivers/amphora_driver/v2/driver.py",
+        "octavia.api.drivers.utils": "octavia/api/drivers/utils.py",
+        "octavia.api.v2.controllers.l7policy": "octavia/api/v2/controllers/l7policy.py",
+        "octavia.api.v2.controllers.l7rule": "octavia/api/v2/controllers/l7rule.py",
+        "octavia.api.app": "octavia/api/app.py",
+        "octavia.common.jinja.haproxy.combined_listeners.jinja_cfg": "octavia/common/jinja/haproxy/combined_listeners/jinja_cfg.py",
+        "octavia.db.models": "octavia/db/models.py",
+        "octavia.tests.functional.api.v2.base": "octavia/tests/functional/api/v2/base.py"
+      },
+      "rendererTemplates": [
+        "octavia/common/jinja/haproxy/combined_listeners/templates/haproxy.cfg.j2",
+        "octavia/common/jinja/haproxy/combined_listeners/templates/macros.j2"
+      ]
+    },
+    "octavia-lib": {
+      "revision": "bb1a993ac95477b0bdc429f8aaf6d1620f8e7669",
+      "sourceTree": "8b18768d9c12dafe916b582ba6dc3f0f9c91d9f7",
+      "packageSourceArchiveSHA256": "5fef097a538f18a53360fb79046f77043c853876d81130c2cb141c5a6427fd83",
+      "version": "3.12.1.dev3",
+      "wheel": "octavia_lib-3.12.1.dev3-py3-none-any.whl",
+      "wheelSHA256": "5513991a6e004490221065b64be53f3dbdf3de1bab6e768ff2bc98f797c5cfc5",
+      "packageFilesMatchedToSource": 24,
+      "pythonFilesMatchedToSource": 24,
+      "templatesMatchedToSource": 0,
+      "importedModulesVerified": 9,
+      "moduleFiles": {
+        "octavia_lib.api.drivers.data_models": "octavia_lib/api/drivers/data_models.py",
+        "octavia_lib.api.drivers.provider_base": "octavia_lib/api/drivers/provider_base.py"
+      }
+    }
+  },
+  "octaviaAPI": {
+    "getRequests": 197,
+    "writeRequests": 17,
+    "activeHAProxies": 6
+  },
+  "echoReadiness": {
+    "pod": "tcp-backend-local",
+    "service": "tcp-backend",
+    "ready": true,
+    "handshakeVerified": true
+  },
+  "upstreamExitCode": 0,
+  "tests": {
+    "TLSRouteInvalidReferenceGrant": "PASS",
+    "TLSRouteInvalidReferenceGrant/TLSRoute_with_BackendRef_in_another_namespace_and_no_ReferenceGrant_covering_the_Service_has_a_ResolvedRefs_Condition_with_status_False_and_Reason_RefNotPermitted": "PASS",
+    "TLSRouteInvalidBackendRefNonexistent": "PASS",
+    "TLSRouteInvalidBackendRefNonexistent/TLSRoute_with_only_a_nonexistent_BackendRef_has_a_ResolvedRefs_Condition_with_status_False_and_Reason_BackendNotFound": "PASS",
+    "TLSRouteInvalidBackendRefNonexistent/TLS_connection_to_nonexistent_backend_should_be_rejected": "PASS",
+    "TLSRouteInvalidBackendRefUnknownKind": "PASS",
+    "TLSRouteInvalidBackendRefUnknownKind/TLSRoute_with_Invalid_Kind_has_a_ResolvedRefs_Condition_with_status_False_and_Reason_InvalidKind": "PASS",
+    "TLSRouteInvalidBackendRefUnknownKind/TLS_connection_to_invalid_backend_with_invalid_Kind_should_be_rejected": "PASS",
+    "TLSRouteInvalidNoMatchingListener": "PASS",
+    "TLSRouteInvalidNoMatchingListener/TLSRoute_rejected_when_listener_protocol_is_HTTP": "PASS",
+    "TLSRouteInvalidNoMatchingListener/TLSRoute_rejected_when_listener_protocol_is_HTTPS": "PASS",
+    "TLSRouteInvalidNoMatchingListener/TLSRoute_rejected_when_sectionName_not_found": "PASS",
+    "TLSRouteInvalidNoMatchingListener/TLSRoute_(HTTP_listener)_should_not_have_Parents_accepted": "PASS",
+    "TLSRouteInvalidNoMatchingListener/TLSRoute_(HTTPS_listener)_should_not_have_Parents_accepted": "PASS",
+    "TLSRouteInvalidNoMatchingListener/TLSRoute_(wrong_sectionName)_should_not_have_Parents_accepted": "PASS",
+    "TLSRouteInvalidNoMatchingListener/Gateway_HTTP-only_should_have_0_Routes_attached": "PASS",
+    "TLSRouteInvalidNoMatchingListener/Gateway_HTTPS-only_should_have_0_Routes_attached": "PASS"
+  },
+  "trafficRejectionErrors": {
+    "TLSRouteInvalidBackendRefNonexistent": "EOF",
+    "TLSRouteInvalidBackendRefUnknownKind": "EOF"
+  },
+  "diagnostics": [
+    "helpers.go:302: gateway-conformance-infra/gateway-tlsroute-invalid-backend-ref-nonexistent Gateway not Programmed yet",
+    "helpers.go:302: gateway-conformance-infra/gateway-tlsroute-invalid-backend-ref-unknown-kind Gateway not Programmed yet",
+    "helpers.go:302: gateway-conformance-infra/gateway-tlsroute-http-only Gateway not Programmed yet",
+    "helpers.go:302: gateway-conformance-infra/gateway-tlsroute-https-only Gateway not Programmed yet"
+  ],
+  "gateways": {
+    "gateway-tlsroute-http-only": {
+      "generation": 1,
+      "addresses": [
+        "192.0.2.34"
+      ],
+      "conditions": {
+        "Accepted": {
+          "status": "True",
+          "reason": "Accepted",
+          "observedGeneration": 1
+        },
+        "Programmed": {
+          "status": "True",
+          "reason": "Programmed",
+          "observedGeneration": 1
+        }
+      },
+      "listeners": [
+        {
+          "name": "http",
+          "attachedRoutes": 0,
+          "supportedKinds": [
+            {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute"
+            }
+          ],
+          "conditions": {
+            "Accepted": {
+              "status": "True",
+              "reason": "Accepted",
+              "observedGeneration": 1
+            },
+            "ResolvedRefs": {
+              "status": "True",
+              "reason": "ResolvedRefs",
+              "observedGeneration": 1
+            },
+            "Conflicted": {
+              "status": "False",
+              "reason": "NoConflicts",
+              "observedGeneration": 1
+            },
+            "Programmed": {
+              "status": "True",
+              "reason": "Programmed",
+              "observedGeneration": 1
+            }
+          }
+        }
+      ]
+    },
+    "gateway-tlsroute-https-only": {
+      "generation": 1,
+      "addresses": [
+        "192.0.2.35"
+      ],
+      "conditions": {
+        "Accepted": {
+          "status": "True",
+          "reason": "Accepted",
+          "observedGeneration": 1
+        },
+        "Programmed": {
+          "status": "True",
+          "reason": "Programmed",
+          "observedGeneration": 1
+        }
+      },
+      "listeners": [
+        {
+          "name": "https",
+          "attachedRoutes": 0,
+          "supportedKinds": [
+            {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute"
+            }
+          ],
+          "conditions": {
+            "Accepted": {
+              "status": "True",
+              "reason": "Accepted",
+              "observedGeneration": 1
+            },
+            "ResolvedRefs": {
+              "status": "True",
+              "reason": "ResolvedRefs",
+              "observedGeneration": 1
+            },
+            "Conflicted": {
+              "status": "False",
+              "reason": "NoConflicts",
+              "observedGeneration": 1
+            },
+            "Programmed": {
+              "status": "True",
+              "reason": "Programmed",
+              "observedGeneration": 1
+            }
+          }
+        }
+      ]
+    },
+    "gateway-tlsroute-invalid-backend-ref-nonexistent": {
+      "generation": 1,
+      "addresses": [
+        "192.0.2.31"
+      ],
+      "conditions": {
+        "Accepted": {
+          "status": "True",
+          "reason": "Accepted",
+          "observedGeneration": 1
+        },
+        "Programmed": {
+          "status": "True",
+          "reason": "Programmed",
+          "observedGeneration": 1
+        }
+      },
+      "listeners": [
+        {
+          "name": "tls",
+          "attachedRoutes": 1,
+          "supportedKinds": [
+            {
+              "group": "gateway.networking.k8s.io",
+              "kind": "TLSRoute"
+            }
+          ],
+          "conditions": {
+            "Accepted": {
+              "status": "True",
+              "reason": "Accepted",
+              "observedGeneration": 1
+            },
+            "ResolvedRefs": {
+              "status": "True",
+              "reason": "ResolvedRefs",
+              "observedGeneration": 1
+            },
+            "Conflicted": {
+              "status": "False",
+              "reason": "NoConflicts",
+              "observedGeneration": 1
+            },
+            "Programmed": {
+              "status": "True",
+              "reason": "Programmed",
+              "observedGeneration": 1
+            }
+          }
+        }
+      ]
+    },
+    "gateway-tlsroute-invalid-backend-ref-unknown-kind": {
+      "generation": 1,
+      "addresses": [
+        "192.0.2.32"
+      ],
+      "conditions": {
+        "Accepted": {
+          "status": "True",
+          "reason": "Accepted",
+          "observedGeneration": 1
+        },
+        "Programmed": {
+          "status": "True",
+          "reason": "Programmed",
+          "observedGeneration": 1
+        }
+      },
+      "listeners": [
+        {
+          "name": "tls",
+          "attachedRoutes": 1,
+          "supportedKinds": [
+            {
+              "group": "gateway.networking.k8s.io",
+              "kind": "TLSRoute"
+            }
+          ],
+          "conditions": {
+            "Accepted": {
+              "status": "True",
+              "reason": "Accepted",
+              "observedGeneration": 1
+            },
+            "ResolvedRefs": {
+              "status": "True",
+              "reason": "ResolvedRefs",
+              "observedGeneration": 1
+            },
+            "Conflicted": {
+              "status": "False",
+              "reason": "NoConflicts",
+              "observedGeneration": 1
+            },
+            "Programmed": {
+              "status": "True",
+              "reason": "Programmed",
+              "observedGeneration": 1
+            }
+          }
+        }
+      ]
+    },
+    "gateway-tlsroute-referencegrant": {
+      "generation": 1,
+      "addresses": [
+        "192.0.2.30"
+      ],
+      "conditions": {
+        "Accepted": {
+          "status": "True",
+          "reason": "Accepted",
+          "observedGeneration": 1
+        },
+        "Programmed": {
+          "status": "True",
+          "reason": "Programmed",
+          "observedGeneration": 1
+        }
+      },
+      "listeners": [
+        {
+          "name": "https",
+          "attachedRoutes": 1,
+          "supportedKinds": [
+            {
+              "group": "gateway.networking.k8s.io",
+              "kind": "TLSRoute"
+            }
+          ],
+          "conditions": {
+            "Accepted": {
+              "status": "True",
+              "reason": "Accepted",
+              "observedGeneration": 1
+            },
+            "ResolvedRefs": {
+              "status": "True",
+              "reason": "ResolvedRefs",
+              "observedGeneration": 1
+            },
+            "Conflicted": {
+              "status": "False",
+              "reason": "NoConflicts",
+              "observedGeneration": 1
+            },
+            "Programmed": {
+              "status": "True",
+              "reason": "Programmed",
+              "observedGeneration": 1
+            }
+          }
+        }
+      ]
+    },
+    "gateway-tlsroute-tls-passthrough-only": {
+      "generation": 1,
+      "addresses": [
+        "192.0.2.33"
+      ],
+      "conditions": {
+        "Accepted": {
+          "status": "True",
+          "reason": "Accepted",
+          "observedGeneration": 1
+        },
+        "Programmed": {
+          "status": "True",
+          "reason": "Programmed",
+          "observedGeneration": 1
+        }
+      },
+      "listeners": [
+        {
+          "name": "tls-passthrough",
+          "attachedRoutes": 0,
+          "supportedKinds": [
+            {
+              "group": "gateway.networking.k8s.io",
+              "kind": "TLSRoute"
+            }
+          ],
+          "conditions": {
+            "Accepted": {
+              "status": "True",
+              "reason": "Accepted",
+              "observedGeneration": 1
+            },
+            "ResolvedRefs": {
+              "status": "True",
+              "reason": "ResolvedRefs",
+              "observedGeneration": 1
+            },
+            "Conflicted": {
+              "status": "False",
+              "reason": "NoConflicts",
+              "observedGeneration": 1
+            },
+            "Programmed": {
+              "status": "True",
+              "reason": "Programmed",
+              "observedGeneration": 1
+            }
+          }
+        }
+      ]
+    }
+  },
+  "routes": {
+    "gateway-conformance-infra-test": {
+      "generation": 1,
+      "parents": [
+        {
+          "parentRef": {
+            "group": "gateway.networking.k8s.io",
+            "kind": "Gateway",
+            "name": "gateway-tlsroute-referencegrant"
+          },
+          "controllerName": "gateway-api-openstack.github.io/gateway-api-openstack",
+          "conditions": {
+            "Accepted": {
+              "status": "True",
+              "reason": "Accepted",
+              "observedGeneration": 1
+            },
+            "ResolvedRefs": {
+              "status": "False",
+              "reason": "RefNotPermitted",
+              "observedGeneration": 1
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "status": "False",
+              "reason": "RefNotPermitted",
+              "observedGeneration": 1
+            }
+          }
+        }
+      ]
+    },
+    "invalid-backend-ref-nonexistent": {
+      "generation": 1,
+      "parents": [
+        {
+          "parentRef": {
+            "group": "gateway.networking.k8s.io",
+            "kind": "Gateway",
+            "name": "gateway-tlsroute-invalid-backend-ref-nonexistent",
+            "namespace": "gateway-conformance-infra"
+          },
+          "controllerName": "gateway-api-openstack.github.io/gateway-api-openstack",
+          "conditions": {
+            "Accepted": {
+              "status": "True",
+              "reason": "Accepted",
+              "observedGeneration": 1
+            },
+            "ResolvedRefs": {
+              "status": "False",
+              "reason": "BackendNotFound",
+              "observedGeneration": 1
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "status": "False",
+              "reason": "BackendNotFound",
+              "observedGeneration": 1
+            }
+          }
+        }
+      ]
+    },
+    "invalid-backend-ref-unknown-kind": {
+      "generation": 1,
+      "parents": [
+        {
+          "parentRef": {
+            "group": "gateway.networking.k8s.io",
+            "kind": "Gateway",
+            "name": "gateway-tlsroute-invalid-backend-ref-unknown-kind",
+            "namespace": "gateway-conformance-infra"
+          },
+          "controllerName": "gateway-api-openstack.github.io/gateway-api-openstack",
+          "conditions": {
+            "Accepted": {
+              "status": "True",
+              "reason": "Accepted",
+              "observedGeneration": 1
+            },
+            "ResolvedRefs": {
+              "status": "False",
+              "reason": "InvalidKind",
+              "observedGeneration": 1
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "status": "False",
+              "reason": "InvalidKind",
+              "observedGeneration": 1
+            }
+          }
+        }
+      ]
+    },
+    "tlsroute-no-matching-section-name": {
+      "generation": 1,
+      "parents": [
+        {
+          "parentRef": {
+            "group": "gateway.networking.k8s.io",
+            "kind": "Gateway",
+            "name": "gateway-tlsroute-tls-passthrough-only",
+            "sectionName": "nonexistent-listener"
+          },
+          "controllerName": "gateway-api-openstack.github.io/gateway-api-openstack",
+          "conditions": {
+            "Accepted": {
+              "status": "False",
+              "reason": "NoMatchingParent",
+              "observedGeneration": 1
+            },
+            "ResolvedRefs": {
+              "status": "Unknown",
+              "reason": "Pending",
+              "observedGeneration": 1
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "status": "False",
+              "reason": "NoMatchingParent",
+              "observedGeneration": 1
+            }
+          }
+        }
+      ]
+    },
+    "tlsroute-not-allowed-protocol-http": {
+      "generation": 1,
+      "parents": [
+        {
+          "parentRef": {
+            "group": "gateway.networking.k8s.io",
+            "kind": "Gateway",
+            "name": "gateway-tlsroute-http-only"
+          },
+          "controllerName": "gateway-api-openstack.github.io/gateway-api-openstack",
+          "conditions": {
+            "Accepted": {
+              "status": "False",
+              "reason": "NotAllowedByListeners",
+              "observedGeneration": 1
+            },
+            "ResolvedRefs": {
+              "status": "Unknown",
+              "reason": "Pending",
+              "observedGeneration": 1
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "status": "False",
+              "reason": "NotAllowedByListeners",
+              "observedGeneration": 1
+            }
+          }
+        }
+      ]
+    },
+    "tlsroute-not-allowed-protocol-https": {
+      "generation": 1,
+      "parents": [
+        {
+          "parentRef": {
+            "group": "gateway.networking.k8s.io",
+            "kind": "Gateway",
+            "name": "gateway-tlsroute-https-only"
+          },
+          "controllerName": "gateway-api-openstack.github.io/gateway-api-openstack",
+          "conditions": {
+            "Accepted": {
+              "status": "False",
+              "reason": "NotAllowedByListeners",
+              "observedGeneration": 1
+            },
+            "ResolvedRefs": {
+              "status": "Unknown",
+              "reason": "Pending",
+              "observedGeneration": 1
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "status": "False",
+              "reason": "NotAllowedByListeners",
+              "observedGeneration": 1
+            }
+          }
+        }
+      ]
+    }
+  }
+}

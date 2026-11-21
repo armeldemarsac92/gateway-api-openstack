@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
@@ -115,6 +116,70 @@ func CollectBackendInputsWithNamespaces(ctx context.Context, reader client.Reade
 		return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
 	})
 	return input, nil
+}
+
+// CollectXBackendInputs reads local XBackend references and the matching Pods
+// needed to lower them. A foreign reference never reaches the API reader.
+func CollectXBackendInputs(ctx context.Context, reader client.Reader, input *model.Input) error {
+	if !input.EnableXBackend {
+		return nil
+	}
+	keys := map[types.NamespacedName]struct{}{}
+	for _, route := range input.Routes {
+		if model.HTTPProfileRouteKind(&route) != model.HTTPRouteKind {
+			continue
+		}
+		for _, key := range model.LocalXBackendReferences(&route) {
+			keys[key] = struct{}{}
+		}
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	input.XBackends = make([]model.XBackendObservation, 0, len(keys))
+	for _, key := range slices.SortedFunc(maps.Keys(keys), func(a, b types.NamespacedName) int {
+		return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
+	}) {
+		backend, err := ReadXBackend(ctx, reader, key)
+		if err != nil {
+			return err
+		}
+		if backend == nil {
+			continue
+		}
+		observation := model.XBackendObservation{Key: key, UID: backend.UID, Generation: backend.Generation, Spec: backend.Spec}
+		if model.ValidateXBackend(backend.Spec, input.MemberMode, input.BackendH2C) == nil {
+			selector := make(client.MatchingLabels, len(backend.Spec.EndpointSelector.MatchLabels))
+			for label, value := range backend.Spec.EndpointSelector.MatchLabels {
+				selector[string(label)] = string(value)
+			}
+			var pods corev1.PodList
+			if err := reader.List(ctx, &pods, client.InNamespace(key.Namespace), selector); err != nil {
+				return fmt.Errorf("list Pods for XBackend %s: %w", key, err)
+			}
+			if pods.Continue != "" {
+				return fmt.Errorf("incomplete Pod list for XBackend %s", key)
+			}
+			observation.Endpoints = model.ResolveXBackendEndpoints(backend, pods.Items)
+		}
+		input.XBackends = append(input.XBackends, observation)
+	}
+	return nil
+}
+
+// ReadXBackend distinguishes a missing or terminating backend from a failed read.
+func ReadXBackend(ctx context.Context, reader client.Reader, key types.NamespacedName) (*gatewayx.XBackend, error) {
+	var backend gatewayx.XBackend
+	if err := reader.Get(ctx, key, &backend); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get XBackend %s: %w", key, err)
+	}
+	if !backend.DeletionTimestamp.IsZero() {
+		return nil, nil
+	}
+	return &backend, nil
 }
 
 // ListBackendReferenceGrants reads a Service target namespace before backend access.

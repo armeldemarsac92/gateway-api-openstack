@@ -89,6 +89,9 @@ func (r *Reconciler) liveRouteBackendReferenceRejection(ctx context.Context, rou
 	var rejection *routeBuildError
 	for _, rule := range route.Spec.Rules {
 		for _, ref := range rule.BackendRefs {
+			if target, xbackend := model.XBackendReference(route.Namespace, ref.BackendObjectReference); xbackend && r.Config.XBackendEnabled() && model.HTTPProfileRouteKind(route) == model.HTTPRouteKind && target.Namespace != route.Namespace {
+				return &routeBuildError{kind: routeErrorRefNotPermitted, message: "XBackend must be in the same namespace as its HTTPRoute"}, nil
+			}
 			key, supported := model.BackendServiceReference(route.Namespace, ref.BackendObjectReference)
 			if !supported || key.Namespace == route.Namespace {
 				continue

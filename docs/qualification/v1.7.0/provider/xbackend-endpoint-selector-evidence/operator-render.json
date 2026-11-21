@@ -1,0 +1,139 @@
+{
+  "driver": "a8b82c2480a286a10b60ecc1d94c6cd9f1d01823",
+  "driverPatchSHA256": "ecb4ed47d22af8782eab7292032cb1613f7df2ff7d55f14b8c939433ad0bada2",
+  "magnum": {
+    "standard": {
+      "channel": "standard",
+      "role": "magnum-openstack-gateway-controller",
+      "serviceAccount": "magnum-openstack-gateway-controller",
+      "resources": [
+        "ClusterRole",
+        "ClusterRoleBinding",
+        "ConfigMap",
+        "Deployment",
+        "ServiceAccount"
+      ],
+      "permissions": {
+        "pods": [],
+        "xbackends": [],
+        "xbackends/status": []
+      }
+    },
+    "experimental": {
+      "channel": "experimental",
+      "role": "magnum-openstack-gateway-controller",
+      "serviceAccount": "magnum-openstack-gateway-controller",
+      "resources": [
+        "ClusterRole",
+        "ClusterRoleBinding",
+        "ConfigMap",
+        "Deployment",
+        "ServiceAccount"
+      ],
+      "permissions": {
+        "pods": [
+          "list",
+          "watch"
+        ],
+        "xbackends": [
+          "get",
+          "list",
+          "watch"
+        ],
+        "xbackends/status": [
+          "patch"
+        ]
+      }
+    },
+    "experimentalManifestSHA256": "049f015b138a925b06dcb13880a7e4f68f2220daccc9f86a5810547481909e43",
+    "packagedWorkload": {
+      "channel": "experimental",
+      "role": "magnum-openstack-gateway-controller",
+      "serviceAccount": "magnum-openstack-gateway-controller",
+      "resources": [
+        "ClusterRole",
+        "ClusterRoleBinding",
+        "ConfigMap",
+        "Deployment",
+        "ServiceAccount"
+      ],
+      "permissions": {
+        "pods": [
+          "list",
+          "watch"
+        ],
+        "xbackends": [
+          "get",
+          "list",
+          "watch"
+        ],
+        "xbackends/status": [
+          "patch"
+        ]
+      }
+    },
+    "addonWhenEnrolled": "openstack-gw",
+    "addonWhenNotEnrolled": false,
+    "driverTest": "test_offline_render_uses_pinned_parent_and_workload_objects"
+  },
+  "chartSHA256": "fa3c30070e6f9f6684bfb10641917089b5d8453d91bc566230544029a0380d9d",
+  "helm": "v3.15.4+gfa9efb0",
+  "kubectl": "v1.33.13",
+  "standalone": {
+    "standard": {
+      "channel": "standard",
+      "role": "openstack-gateway-controller",
+      "serviceAccount": "openstack-gateway-controller",
+      "resources": [
+        "ClusterRole",
+        "ClusterRoleBinding",
+        "ConfigMap",
+        "CustomResourceDefinition",
+        "Deployment",
+        "Namespace",
+        "ServiceAccount"
+      ],
+      "permissions": {
+        "pods": [],
+        "xbackends": [],
+        "xbackends/status": []
+      }
+    },
+    "experimental": {
+      "channel": "experimental",
+      "role": "openstack-gateway-controller",
+      "serviceAccount": "openstack-gateway-controller",
+      "resources": [
+        "ClusterRole",
+        "ClusterRoleBinding",
+        "ConfigMap",
+        "CustomResourceDefinition",
+        "Deployment",
+        "Namespace",
+        "ServiceAccount"
+      ],
+      "permissions": {
+        "pods": [
+          "list",
+          "watch"
+        ],
+        "xbackends": [
+          "get",
+          "list",
+          "watch"
+        ],
+        "xbackends/status": [
+          "patch"
+        ]
+      }
+    },
+    "experimentalManifestSHA256": "f882bf615e5a98731479e7b4accba7bd22005dbff2b670de41cf5f454e00bba9"
+  },
+  "magnumVersion": "23.0.0",
+  "overlaysSHA256": {
+    "config/components/experimental/kustomization.yaml": "ef6714adda30df828ee8abae7226da7d8281da4ec5a767e9c45b06755d514f3b",
+    "config/experimental/kustomization.yaml": "1de06ba22fe67789a212b6a90ca46b9cb2966a0d370f6aebaeefaa939e1ed868",
+    "integrations/magnum-capi-helm/workload-experimental/kustomization.yaml": "9230c301f13ce5c160d2467863abf0d2b2934625d33b598a90ca9e8a238ce4da"
+  },
+  "scope": "Local kubectl kustomize render and magnum-capi-helm driver fixture with Helm. The fixture substitutes enrollment state and workload image and does not contact a cluster or cloud."
+}

@@ -77,6 +77,14 @@ func (r *Reconciler) Reconcile(
 	ctx = log.IntoContext(ctx, logger)
 	logger.V(4).Info("Reconciling Gateway")
 
+	if r.Config.TLSSNIPassthrough {
+		// Route rejection and status cleanup do not gate Gateway graph mutations.
+		defer func() {
+			if err := r.reconcileSNIParentStatuses(ctx, req.NamespacedName); err != nil {
+				retErr = errors.Join(retErr, err)
+			}
+		}()
+	}
 	scope, responsible, err := r.newGatewayScope(ctx, req)
 	if err != nil || !responsible {
 		return ctrl.Result{}, err

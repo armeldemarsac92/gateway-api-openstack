@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
@@ -244,7 +245,13 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 	if err := r.setupRouteController(manager, &gatewayv1.HTTPRoute{}, "httproute"); err != nil {
 		return err
 	}
-	return r.forRouteKind(model.GRPCRouteKind).setupRouteController(manager, &gatewayv1.GRPCRoute{}, "grpcroute")
+	if err := r.forRouteKind(model.GRPCRouteKind).setupRouteController(manager, &gatewayv1.GRPCRoute{}, "grpcroute"); err != nil {
+		return err
+	}
+	if r.Config.XBackendEnabled() {
+		return r.setupXBackendStatusController(manager)
+	}
+	return nil
 }
 
 func (r *Reconciler) setupRouteController(manager ctrl.Manager, object client.Object, name string) error {
@@ -254,6 +261,10 @@ func (r *Reconciler) setupRouteController(manager ctrl.Manager, object client.Ob
 	// whose earlier policy might have blocked this route from attaching.
 	for _, peer := range []client.Object{&gatewayv1.HTTPRoute{}, &gatewayv1.GRPCRoute{}} {
 		setup.Watches(peer, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutePeers), builder.WithPredicates(controller.HTTPRoutePeerPredicate()))
+	}
+	if r.Config.XBackendEnabled() && r.kind() == model.HTTPRouteKind {
+		setup.Watches(&gatewayx.XBackend{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForXBackend), builder.WithPredicates(controller.GenerationOrDeletionChangedPredicate())).
+			Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForXBackendPod), builder.WithPredicates(xBackendPodPredicate()))
 	}
 	return setup.
 		Watches(&gatewayv1.Gateway{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForGateway), builder.WithPredicates(controller.GatewayForHTTPRoutePredicate(r.Config))).

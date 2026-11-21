@@ -37,6 +37,9 @@ type Input struct {
 	OperatorHTTPS         bool
 	RequestHeaderModifier bool
 	BackendH2C            bool
+	EnableXBackend        bool
+	MemberMode            cloud.MemberMode
+	XBackends             []XBackendObservation
 	Gateway               *gatewayv1.Gateway
 	Routes                []gatewayv1.HTTPRoute
 	Namespaces            []corev1.Namespace

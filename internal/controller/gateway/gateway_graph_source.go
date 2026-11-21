@@ -141,7 +141,7 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 			if err := validate(ctx); err != nil {
 				return err
 			}
-			return r.reportSNIRoutes(ctx, snapshot.gateway, observed, result, providerErr)
+			return r.reportSNIRoutes(ctx, snapshot, observed, result, providerErr)
 		}
 	}
 	if usesHTTPSProfile(r.Config, snapshot.gateway) {
