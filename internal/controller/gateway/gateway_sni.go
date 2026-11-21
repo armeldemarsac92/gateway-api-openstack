@@ -127,7 +127,7 @@ func (r *Reconciler) observeSNIRoutes(ctx context.Context, snapshot *gatewayMuta
 			return !sniParentTargetsGateway(route.Namespace, ref, snapshot.gateway)
 		})
 		ownsStatus := slices.ContainsFunc(route.Status.Parents, func(status gatewayv1.RouteParentStatus) bool {
-			return status.ControllerName == r.Config.ControllerName && sniParentTargetsGateway(route.Namespace, status.ParentRef, snapshot.gateway)
+			return r.ownsSNIParent(route, snapshot.gateway, status)
 		})
 		if len(parents) == 0 && !ownsStatus {
 			continue
@@ -199,13 +199,12 @@ func (r *Reconciler) admitSNIRoute(ctx context.Context, snapshot *gatewayMutatio
 		entry.reject(gatewayv1.RouteReasonUnsupportedValue, "The Gateway has no supported TLS SNI listener")
 		return nil
 	}
-	if len(route.Spec.ParentRefs) != 1 {
-		entry.reject(gatewayv1.RouteReasonUnsupportedValue, "TLS SNI passthrough requires one Gateway parentRef")
+	if !slices.ContainsFunc(entry.parents, func(ref gatewayv1.ParentReference) bool { return sniParentSelectsListener(ref, *listener) }) {
+		entry.reject(gatewayv1.RouteReasonNoMatchingParent, sniParentNoMatchingListenerMessage)
 		return nil
 	}
-	ref := entry.parents[0]
-	if ref.SectionName != nil && *ref.SectionName != listener.Name || ref.Port != nil && *ref.Port != listener.Port {
-		entry.reject(gatewayv1.RouteReasonNoMatchingParent, "The parentRef does not select the TLS SNI listener")
+	if len(route.Spec.ParentRefs) != 1 {
+		entry.reject(gatewayv1.RouteReasonUnsupportedValue, "TLS SNI passthrough requires one Gateway parentRef")
 		return nil
 	}
 	var namespaces []corev1.Namespace
@@ -320,7 +319,7 @@ func (r *Reconciler) resolveSNIBackend(ctx context.Context, snapshot *gatewayMut
 	return nil
 }
 
-func (r *Reconciler) reportSNIRoutes(ctx context.Context, gateway *gatewayv1.Gateway, observation sniRouteObservation, result cloud.GatewayGraphResult, providerErr error) error {
+func (r *Reconciler) reportSNIRoutes(ctx context.Context, snapshot *gatewayMutationSnapshot, observation sniRouteObservation, result cloud.GatewayGraphResult, providerErr error) error {
 	outcomes := make(map[string]cloud.RouteResult)
 	for _, route := range result.Routes {
 		if providerErr == nil || route.Result.ObservationDeferred {
@@ -332,24 +331,15 @@ func (r *Reconciler) reportSNIRoutes(ctx context.Context, gateway *gatewayv1.Gat
 	for _, entry := range observation {
 		base := entry.route
 		target := base.DeepCopy()
-		previous := slices.DeleteFunc(slices.Clone(base.Status.Parents), func(parent gatewayv1.RouteParentStatus) bool {
-			return parent.ControllerName != r.Config.ControllerName || !sniParentTargetsGateway(base.Namespace, parent.ParentRef, gateway)
-		})
-		target.Status.Parents = slices.DeleteFunc(target.Status.Parents, func(parent gatewayv1.RouteParentStatus) bool {
-			return parent.ControllerName == r.Config.ControllerName && sniParentTargetsGateway(base.Namespace, parent.ParentRef, gateway)
-		})
-		fingerprint, err := sniForwardingFingerprint(gateway, entry.targets)
+		fingerprint, err := sniForwardingFingerprint(snapshot.gateway, entry.targets)
 		if err != nil {
 			return err
 		}
 		outcome := outcomes[string(base.UID)]
-		for _, ref := range entry.parents {
-			status := gatewayv1.RouteParentStatus{ParentRef: ref, ControllerName: r.Config.ControllerName}
-			for _, old := range previous {
-				if controller.ParentRefsEqual(ref, base.Namespace, old.ParentRef, base.Namespace) {
-					status.Conditions = slices.Clone(old.Conditions)
-					break
-				}
+		r.updateSNIRouteParents(target, snapshot.gateway, func(status *gatewayv1.RouteParentStatus) bool {
+			if snapshot.listener != nil && !sniParentSelectsListener(status.ParentRef, *snapshot.listener) {
+				r.setRejectedSNIParent(status, gatewayv1.RouteReasonNoMatchingParent, sniParentNoMatchingListenerMessage, base.Generation)
+				return true
 			}
 			accepted, resolved, programmed := metav1.ConditionFalse, metav1.ConditionUnknown, metav1.ConditionFalse
 			if entry.acceptedReason == gatewayv1.RouteReasonAccepted {
@@ -391,8 +381,8 @@ func (r *Reconciler) reportSNIRoutes(ctx context.Context, gateway *gatewayv1.Gat
 			} else {
 				meta.RemoveStatusCondition(&status.Conditions, targetType)
 			}
-			target.Status.Parents = append(target.Status.Parents, status)
-		}
+			return true
+		})
 		if err := r.patchSNIRouteStatus(ctx, base, target); err != nil {
 			return err
 		}
@@ -443,9 +433,7 @@ func (r *Reconciler) clearSNIRouteParentStatuses(ctx context.Context, gateway *g
 	for i := range routes.Items {
 		base := &routes.Items[i]
 		target := base.DeepCopy()
-		target.Status.Parents = slices.DeleteFunc(target.Status.Parents, func(parent gatewayv1.RouteParentStatus) bool {
-			return parent.ControllerName == r.Config.ControllerName && sniParentTargetsGateway(base.Namespace, parent.ParentRef, gateway)
-		})
+		r.removeOwnedSNIParents(target, gateway)
 		if err := r.patchSNIRouteStatus(ctx, base, target); err != nil {
 			return err
 		}

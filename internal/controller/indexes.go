@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 
 	configv1alpha1 "github.com/gateway-api-openstack/gateway-api-openstack/api/v1alpha1"
@@ -65,6 +66,8 @@ const (
 	IndexL4RouteByBackendNamespace = "spec.l4RouteBackendNamespace"
 	// IndexL4RouteByBoundGateway indexes TCPRoutes and UDPRoutes by bound Gateway key.
 	IndexL4RouteByBoundGateway = "metadata.l4RouteBoundGateway"
+	// IndexTLSRouteByGateway indexes declared and controller-owned status parents.
+	IndexTLSRouteByGateway = "tlsRouteGateway"
 	// IndexEndpointSliceByService indexes EndpointSlices by Service key.
 	IndexEndpointSliceByService = "metadata.service"
 	// NodeBackendIndexValue is the field value for routes that use Node backends.
@@ -269,6 +272,14 @@ func controllerFieldIndexes(config Config) []controllerFieldIndex {
 				return sortedIndexKeys(keys)
 			}},
 		)
+	}
+	if config.TLSSNIPassthrough {
+		indexes = append(indexes, controllerFieldIndex{object: &gatewayv1.TLSRoute{}, field: IndexTLSRouteByGateway, extract: func(object client.Object) []string {
+			parents, statuses, _ := RouteParents(object)
+			keys := append(parentGatewayKeys(object.GetNamespace(), parents), statusGatewayKeys(config, object.GetNamespace(), statuses)...)
+			slices.Sort(keys)
+			return slices.Compact(keys)
+		}})
 	}
 	return indexes
 }
