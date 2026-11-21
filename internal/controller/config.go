@@ -38,6 +38,10 @@ var gatewayControllerNamePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0
 
 // Config is the cluster-wide controller configuration.
 type Config struct {
+	// FixedHTTPResponses enables the local Amphora fixed-response extension.
+	FixedHTTPResponses bool
+	// WeightedHTTPTargets enables per-backend weighted policies in the local Amphora extension.
+	WeightedHTTPTargets bool
 	// OperatorHTTPS enables termination using operator-provisioned certificates.
 	OperatorHTTPS bool
 	// ControllerName is the exact Gateway API ownership identifier.

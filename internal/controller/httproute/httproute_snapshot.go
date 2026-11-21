@@ -127,7 +127,7 @@ func (r *Reconciler) buildRouteValidationSnapshotFromInputs(
 	if err != nil || snapshot.disposition == routeValidationGatewayPending {
 		return snapshot, err
 	}
-	if _, err := validateRouteStructure(snapshot.route); err != nil {
+	if _, err := r.validateRouteStructure(snapshot.route); err != nil {
 		return routeValidationSnapshot{}, routeSnapshotRejection(purpose, err)
 	}
 	if inputs == nil {
@@ -505,7 +505,7 @@ func (r *Reconciler) buildRouteCleanupSnapshot(
 	if err != nil {
 		return routeCleanupSnapshot{}, err
 	}
-	if rejection != nil && !hasMultipleRoutePaths(&route) {
+	if rejection != nil && !r.usesHTTPBackendGroups(&route) {
 		snapshot.referenceRevoked = true
 		return snapshot, nil
 	}
@@ -543,7 +543,7 @@ func (r *Reconciler) buildRouteCleanupSnapshot(
 		}
 		return routeCleanupSnapshot{}, controller.ErrUnsupportedGatewayAPIVersion
 	}
-	if !structurallySupportedRoute(&route) {
+	if !r.structurallySupportedRoute(&route) {
 		return snapshot, nil
 	}
 	desired, err := r.buildRouteModelWithReader(ctx, r.APIReader, &route, parent.gateway)

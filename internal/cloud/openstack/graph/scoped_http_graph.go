@@ -82,12 +82,12 @@ func (route observedRouteGraph) validateScopedHTTPPoolChildren() error {
 func validateScopedHTTPRouteRelationships(routes []observedRouteGraph) error {
 	layout := make(map[string][]observedRoutePolicy)
 	memberPools, rulePolicies, policyListeners := make(map[string]string), make(map[string]string), make(map[string]string)
+	poolListeners := make(map[string][]pools.ListenerID)
 	for _, route := range routes {
 		for _, part := range route.parts() {
 			if part.pool != nil && part.pool.Protocol != cloud.ListenerProtocolHTTP {
 				continue
 			}
-			var referenced []pools.ListenerID
 			for _, policy := range part.policies {
 				id := policy.policy.ListenerID
 				if previous := policyListeners[policy.policy.ID]; previous != "" {
@@ -101,18 +101,27 @@ func validateScopedHTTPRouteRelationships(routes []observedRouteGraph) error {
 					rulePolicies[rule.rule.ID] = policy.policy.ID
 				}
 				layout[id] = append(layout[id], policy)
-				if part.pool == nil {
-					continue
-				}
-				edge := pools.ListenerID{ID: id}
-				if policy.policy.AdminStateUp && len(policy.rules) != 0 && !slices.Contains(referenced, edge) {
-					referenced = append(referenced, edge)
+				if policy.policy.AdminStateUp && len(policy.rules) != 0 {
+					edge := pools.ListenerID{ID: id}
+					add := func(poolID string) {
+						if poolID != "" && !slices.Contains(poolListeners[poolID], edge) {
+							poolListeners[poolID] = append(poolListeners[poolID], edge)
+						}
+					}
+					add(policy.policy.RedirectPoolID)
+					for _, target := range policy.weightedTargets {
+						add(target.PoolID)
+					}
 				}
 			}
-			if part.pool == nil {
+		}
+	}
+	for _, route := range routes {
+		for _, part := range route.parts() {
+			if part.pool == nil || part.pool.Protocol != cloud.ListenerProtocolHTTP {
 				continue
 			}
-			if err := crossCheckCompleteChildInventory("HTTP pool", part.pool.ID, "listener", part.pool.Listeners, referenced, func(ref pools.ListenerID) string { return ref.ID }); err != nil {
+			if err := crossCheckCompleteChildInventory("HTTP pool", part.pool.ID, "listener", part.pool.Listeners, poolListeners[part.pool.ID], func(ref pools.ListenerID) string { return ref.ID }); err != nil {
 				return err
 			}
 			for _, member := range part.members {
@@ -252,7 +261,7 @@ func scopedHTTPGatewayResult(desired desiredGatewayGraph, actual observedGateway
 	unverified := make(map[int]bool)
 	for _, listener := range actual.scopedListeners {
 		portsByID[listener.ID] = listener.ProtocolPort
-		if spec, found := configured[listener.ProtocolPort]; !found || !scopedHTTPListenerMatches(listener, spec, actual.adminObserved[listener.ID]) {
+		if spec, found := configured[listener.ProtocolPort]; !found || !scopedHTTPListenerMatches(listener, spec, actual.adminObserved[listener.ID]) || !actual.httpFallbackReady(listener, desired.fixedHTTPResponses) {
 			unverified[listener.ProtocolPort] = true
 		}
 	}
@@ -300,7 +309,8 @@ func deferredScopedHTTPRoutes(desired desiredGatewayGraph, actual observedGatewa
 	for i, observed := range actual.routes {
 		route := desired.routes[i]
 		port := scopedHTTPRoutePort(route)
-		if desired.spec.Routes[i].Disposition != cloud.GraphEnsure || !slices.Contains(readyPorts, port) || observed.backendProvisioningIssue(false, true) != "" {
+		if desired.spec.Routes[i].Disposition != cloud.GraphEnsure || !slices.Contains(readyPorts, port) || route.targetsPending ||
+			!route.fixedResponse && observed.backendProvisioningIssue(false, true) != "" {
 			continue
 		}
 		listener := actual.scopedListeners[slices.IndexFunc(actual.scopedListeners, func(listener listeners.Listener) bool { return listener.ProtocolPort == port })]
@@ -340,6 +350,9 @@ func scopedHTTPListenerPlan(desired desiredGatewayGraph, actual observedGatewayG
 		adminObserved := actual.adminObserved[listener.ID]
 		if scopedHTTPListenerMatches(listener, spec, adminObserved) {
 			byPort[port] = listener
+			if desired.fixedHTTPResponses && listener.ProvisioningStatus == "ACTIVE" && actual.defaultHTTPResponseCodes[listener.ID] != 404 {
+				changes = append(changes, graphMutation{kind: graphSetListenerNotFound, listenerID: listener.ID, message: "Setting the default HTTP response on the scoped listener"})
+			}
 		} else if spec.TLS != nil && hasAuthorizedListener(spec) && adminObserved && !listener.AdminStateUp &&
 			listener.ProvisioningStatus == "ACTIVE" && supportsSingleCertificate(listener) {
 			changes = append(changes, graphMutation{kind: graphUpdateListenerCertificate, listenerID: listener.ID, scopedListener: spec,
@@ -372,7 +385,7 @@ func buildScopedHTTPTrafficRestorationPlan(desired desiredGatewayGraph, actual o
 			// An independently denied port does not hold authorized siblings.
 			continue
 		}
-		if !scopedHTTPListenerMatches(listener, spec, actual.adminObserved[listener.ID]) ||
+		if !scopedHTTPListenerMatches(listener, spec, actual.adminObserved[listener.ID]) || !actual.httpFallbackReady(listener, desired.fixedHTTPResponses) ||
 			listener.Protocol == terminatedHTTPS && listener.ProvisioningStatus != "ACTIVE" {
 			continue
 		}

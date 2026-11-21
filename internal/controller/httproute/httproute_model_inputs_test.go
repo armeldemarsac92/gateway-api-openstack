@@ -695,3 +695,31 @@ func TestHTTPSRouteSelectsDedicatedSectionAndInheritsHostname(t *testing.T) {
 		t.Fatalf("route with a mismatched hostname was admitted: %v", err)
 	}
 }
+
+func TestFixedHTTPResponseRequiresInvalidBackendReference(t *testing.T) {
+	for _, target := range []string{"ready", "empty", "prohibited"} {
+		t.Run(target, func(t *testing.T) {
+			f := newRouteModelInputFixture(t)
+			f.reconciler.Config.FixedHTTPResponses = true
+			switch target {
+			case "empty":
+				if err := f.client.Delete(t.Context(), f.endpoints); err != nil {
+					t.Fatal(err)
+				}
+			case "prohibited":
+				f.route.Spec.Rules[0].BackendRefs[0].Namespace = ptr.To(gatewayv1.Namespace("private"))
+				if err := f.client.Update(t.Context(), f.route); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got := f.observe(t)
+			if len(got.Nodes) != 1 || len(got.Nodes[0].Spec.HTTPBackends) != 1 {
+				t.Fatalf("expected one observed backend group")
+			}
+			b := got.Nodes[0].Spec.HTTPBackends[0]
+			if b.InvalidReference != (target == "prohibited") || b.Unavailable != (target != "ready") {
+				t.Fatalf("invalid reference = %v, unavailable = %v, target = %s", b.InvalidReference, b.Unavailable, target)
+			}
+		})
+	}
+}

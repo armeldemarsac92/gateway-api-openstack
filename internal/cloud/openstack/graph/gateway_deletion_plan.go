@@ -120,6 +120,11 @@ func (p *Provider) buildGatewayDeletionPlanFromListeners(ctx context.Context, id
 		}
 		return p.buildDefaultPoolGatewayDeletionPlan(ctx, owners, lb, listener, protocol)
 	}
+	if p.fixedHTTPResponses {
+		// The previous controller can leave scalar policy roles on this HTTP Gateway.
+		// Prove their targets and relationships before the first deletion as well.
+		return p.recoverHTTPBackendGatewayDeletion(ctx, identity, lb, owners, inventory)
+	}
 	listenerPlan, routePlan, err := p.buildGatewayListenerDeletionPlans(ctx, identity, listenerList)
 	if errors.Is(err, errHTTPFragmentCleanup) {
 		return p.recoverHTTPBackendGatewayDeletion(ctx, identity, lb, owners, inventory)

@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
 )
@@ -33,9 +34,10 @@ func (s *Service) ListListeners(ctx context.Context, opts listeners.ListOpts) ([
 // ListenerInventory retains field presence needed to prove a listener has
 // been disabled and detached. Both zero values otherwise accept missing JSON.
 type ListenerInventory struct {
-	Items                []listeners.Listener
-	DefaultPoolsObserved bool
-	AdminStatesObserved  map[string]bool
+	DefaultHTTPResponseCodes map[string]int
+	Items                    []listeners.Listener
+	DefaultPoolsObserved     bool
+	AdminStatesObserved      map[string]bool
 }
 
 func (s *Service) ListListenerInventory(ctx context.Context, opts listeners.ListOpts) (ListenerInventory, error) {
@@ -46,6 +48,9 @@ func (s *Service) ListListenerInventory(ctx context.Context, opts listeners.List
 	var response struct {
 		Listeners []struct {
 			listeners.Listener
+			DefaultHTTPResponse *struct {
+				StatusCode int `json:"status_code"`
+			} `json:"default_http_response"`
 			DefaultPool  json.RawMessage `json:"default_pool_id"`
 			AdminStateUp *bool           `json:"admin_state_up"`
 		} `json:"listeners"`
@@ -61,6 +66,12 @@ func (s *Service) ListListenerInventory(ctx context.Context, opts listeners.List
 	for i, observed := range response.Listeners {
 		item := &inventory.Items[i]
 		*item = observed.Listener
+		if observed.DefaultHTTPResponse != nil {
+			if inventory.DefaultHTTPResponseCodes == nil {
+				inventory.DefaultHTTPResponseCodes = make(map[string]int)
+			}
+			inventory.DefaultHTTPResponseCodes[item.ID] = observed.DefaultHTTPResponse.StatusCode
+		}
 		if observed.AdminStateUp != nil {
 			item.AdminStateUp = *observed.AdminStateUp
 			inventory.AdminStatesObserved[item.ID] = true
@@ -92,4 +103,30 @@ func (s *Service) UpdateListener(ctx context.Context, id string, opts listeners.
 // DeleteListener deletes one listener.
 func (s *Service) DeleteListener(ctx context.Context, id string) error {
 	return listeners.Delete(ctx, s.client, id).ExtractErr()
+}
+
+type notFoundListenerOptions struct{ listeners.CreateOpts }
+
+func (opts notFoundListenerOptions) ToListenerCreateMap() (map[string]any, error) {
+	body, err := opts.CreateOpts.ToListenerCreateMap()
+	if err != nil {
+		return nil, err
+	}
+	body["listener"].(map[string]any)["default_http_response"] = map[string]int{"status_code": http.StatusNotFound}
+	return body, nil
+}
+
+func (notFoundListenerOptions) ToListenerUpdateMap() (map[string]any, error) {
+	return map[string]any{"listener": map[string]any{"default_http_response": map[string]int{"status_code": http.StatusNotFound}}}, nil
+}
+
+// CreateListenerWithNotFound creates an HTTP-family listener on the opt-in provider.
+func (s *Service) CreateListenerWithNotFound(ctx context.Context, opts listeners.CreateOpts) (*listeners.Listener, error) {
+	return listeners.Create(ctx, s.client, notFoundListenerOptions{opts}).Extract()
+}
+
+// SetListenerNotFound restores the unmatched response on an existing owned listener.
+func (s *Service) SetListenerNotFound(ctx context.Context, id string) error {
+	_, err := listeners.Update(ctx, s.client, id, notFoundListenerOptions{}).Extract()
+	return err
 }

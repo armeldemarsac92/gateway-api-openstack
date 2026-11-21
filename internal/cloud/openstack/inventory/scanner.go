@@ -86,7 +86,7 @@ type octaviaReader interface {
 	ListPools(context.Context, pools.ListOpts) ([]pools.Pool, error)
 	ListMembers(context.Context, string, pools.ListMembersOpts) ([]pools.Member, error)
 	ListMonitors(context.Context, monitors.ListOpts) ([]monitors.Monitor, error)
-	ObservePolicies(context.Context, l7policies.ListOpts) ([]octavia.PolicyObservation, error)
+	ListPolicyObservations(context.Context, l7policies.ListOpts) ([]octavia.L7PolicyObservation, bool, error)
 	ListRules(context.Context, string, l7policies.ListRulesOpts) ([]l7policies.Rule, error)
 }
 
@@ -260,6 +260,12 @@ type auditCandidate struct {
 	policyAction         string
 	redirectPoolReported bool
 	redirectPoolNull     bool
+	policyAdminStateUp   bool
+	policyRedirects      bool
+	policyUsesExtension  bool
+	policyTarget         *octavia.L7PolicyTarget
+	policyInventoryOK    bool
+	weightedPoolIDs      []string
 	reportedParents      map[string]struct{}
 	observedParents      map[string]struct{}
 	observationChanged   bool
@@ -281,12 +287,16 @@ func (s auditCandidateSet) add(candidate auditCandidate) {
 		existing.provider != candidate.provider || !slices.Equal(existing.tags, candidate.tags) ||
 		existing.description != candidate.description || existing.portID != candidate.portID ||
 		existing.redirectPoolID != candidate.redirectPoolID || existing.policyAction != candidate.policyAction ||
-		existing.redirectPoolReported != candidate.redirectPoolReported || existing.redirectPoolNull != candidate.redirectPoolNull {
+		existing.redirectPoolReported != candidate.redirectPoolReported || existing.redirectPoolNull != candidate.redirectPoolNull ||
+		existing.policyAdminStateUp != candidate.policyAdminStateUp || existing.policyRedirects != candidate.policyRedirects ||
+		existing.extendedPolicy() || candidate.extendedPolicy() {
 		existing.observationChanged = true
 	}
 	if existing.provisioningStatus != candidate.provisioningStatus {
 		existing.observationChanged = true
 	}
+	existing.weightedPoolIDs = append(existing.weightedPoolIDs, candidate.weightedPoolIDs...)
+	existing.policyUsesExtension = existing.policyUsesExtension || candidate.extendedPolicy()
 	mergeStringSets(existing.reportedParents, candidate.reportedParents)
 	mergeStringSets(existing.observedParents, candidate.observedParents)
 }
@@ -426,28 +436,54 @@ func (p *Scanner) collectAuditPolicies(
 	scopeTags []string,
 	listenerIDs map[string]struct{},
 ) error {
-	items, err := p.octavia.ObservePolicies(ctx, l7policies.ListOpts{
-		ProjectID: p.projectID,
-	})
+	observations, complete, err := p.octavia.ListPolicyObservations(ctx, l7policies.ListOpts{ProjectID: p.projectID})
 	if err != nil {
 		return fmt.Errorf("list L7 policies for ownership inventory: %w", err)
 	}
-	for _, item := range items {
+	scopedIDs := make(map[string]bool)
+	for _, observation := range observations {
+		item := observation.Policy
 		_, descendant := listenerIDs[item.ListenerID]
-		if !containsAll(item.Tags, scopeTags) && !descendant {
+		if containsAll(item.Tags, scopeTags) || descendant {
+			scopedIDs[item.ID] = true
+		}
+	}
+	for _, observation := range observations {
+		if !scopedIDs[observation.Policy.ID] {
 			continue
 		}
-		candidates.add(auditCandidate{
-			service: auditServiceOctavia, resourceType: auditTypeL7Policy,
-			id: item.ID, projectID: item.ProjectID,
-			provisioningStatus: item.ProvisioningStatus, tags: item.Tags,
-			redirectPoolID: item.RedirectPoolID, policyAction: item.Action,
-			redirectPoolReported: len(item.PoolReference) != 0, redirectPoolNull: string(item.PoolReference) == "null",
-			reportedParents: singletonStringSet(item.ListenerID),
-			observedParents: singletonStringSetIf(descendant, item.ListenerID),
-		})
+		candidate := auditPolicyCandidate(observation.Policy, listenerIDs)
+		candidate.policyUsesExtension = observation.ExtendedTargetFields
+		candidate.policyTarget, candidate.policyInventoryOK = observation.Target, complete
+		candidate.weightedPoolIDs = observation.PoolIDs
+		candidate.redirectPoolReported = len(observation.PoolReference) != 0
+		candidate.redirectPoolNull = string(observation.PoolReference) == "null"
+		candidates.add(candidate)
 	}
 	return nil
+}
+
+func auditPolicyCandidate(item l7policies.L7Policy, listenerIDs map[string]struct{}) auditCandidate {
+	_, descendant := listenerIDs[item.ListenerID]
+	return auditCandidate{
+		service: auditServiceOctavia, resourceType: auditTypeL7Policy,
+		id: item.ID, projectID: item.ProjectID, provisioningStatus: item.ProvisioningStatus,
+		tags: item.Tags, redirectPoolID: item.RedirectPoolID, policyAction: item.Action, policyAdminStateUp: item.AdminStateUp,
+		policyRedirects: item.RedirectURL != "" || item.RedirectPrefix != "" || item.RedirectHttpCode != 0,
+		reportedParents: singletonStringSet(item.ListenerID), observedParents: singletonStringSetIf(descendant, item.ListenerID),
+	}
+}
+
+func (candidate auditCandidate) extendedPolicy() bool {
+	if candidate.resourceType != auditTypeL7Policy {
+		return false
+	}
+	if candidate.policyUsesExtension || candidate.policyAction == string(octavia.ActionWeightedTargets) ||
+		candidate.policyAction == string(octavia.ActionFixedResponse) {
+		return true
+	}
+	role, _ := openstackidentity.ResourceRole(candidate.tags)
+	return openstackidentity.IsHTTPWeightedPolicyRole(role)
 }
 
 func (p *Scanner) collectAuditMembers(ctx context.Context, candidates auditCandidateSet, poolIDs map[string]struct{}) error {

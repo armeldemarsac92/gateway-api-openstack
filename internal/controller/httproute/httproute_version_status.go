@@ -235,7 +235,7 @@ func (r *Reconciler) currentRouteProgrammedCondition(
 }
 
 func (r *Reconciler) currentBackendResolution(route *gatewayv1.HTTPRoute, parentRef gatewayv1.ParentReference, diagnostic model.Diagnostic) bool {
-	if !hasMultipleRoutePaths(route) {
+	if !r.usesHTTPBackendGroups(route) {
 		return true
 	}
 	expected := programmedRouteStatus().withBackendDiagnostic(diagnostic)

@@ -26,6 +26,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
@@ -392,7 +393,7 @@ func rejectedRouteStatus(reason, message string) routeReconcileStatus {
 // resolveRouteReferences evaluates object references without applying the
 // Gateway's member mode or requiring ready endpoints.
 func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv1.HTTPRoute, status *routeReconcileStatus) error {
-	backends, err := validateRouteStructure(route)
+	backends, err := r.validateRouteStructure(route)
 	if err != nil {
 		var rejection *routeBuildError
 		if errors.As(err, &rejection) && rejection.kind == routeErrorInvalidKind {
@@ -416,7 +417,15 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 	status.resolvedReason = string(gatewayv1.RouteReasonResolvedRefs)
 	status.resolvedMessage = "All backend references are resolved"
 	for _, backend := range backends {
-		key, _ := model.BackendServiceReference(route.Namespace, backend)
+		key, supported := model.BackendServiceReference(route.Namespace, backend)
+		if !supported {
+			*status = status.withBackendDiagnostic(model.Diagnostic{
+				Reason: string(gatewayv1.RouteReasonInvalidKind),
+				Message: fmt.Sprintf("backendRef group %q and kind %q are unsupported",
+					ptr.Deref(backend.Group, ""), ptr.Deref(backend.Kind, "Service")),
+			})
+			continue
+		}
 		var service corev1.Service
 		err := r.routePatchReader().Get(ctx, key, &service)
 		if apierrors.IsNotFound(err) || !service.DeletionTimestamp.IsZero() {
