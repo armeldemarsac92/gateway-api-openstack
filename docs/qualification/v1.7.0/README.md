@@ -18,7 +18,7 @@ The [Magnum operator guide](magnum-operator.md) covers how to build the patch, s
 
 ## Profile records
 
-An **Unrun** entry means no upstream suite execution, no pass/fail/skip counts, and no suite-generated report for this fork and channel. The Experimental suite may exercise additional fields on the shared Gateway API kinds. Each applicable Core and Extended case still needs its own result. The [matrix](matrix/README.md) relates features, cases, both schemas and unflagged API requirements.
+An **Unrun** entry means no complete upstream profile execution, no pass/fail/skip counts, and no suite-generated report for this fork and channel. The Experimental suite may exercise additional fields on the shared Gateway API kinds. Each applicable Core and Extended case still needs its own result. The [matrix](matrix/README.md) relates features, cases, both schemas and unflagged API requirements.
 
 | Upstream profile | Standard | Experimental | Required traffic observation |
 |---|---|---|---|
@@ -54,6 +54,7 @@ Local verification passed the pinned linter, Go race tests, tagged E2E helper te
 | [Shared HTTP Gateway](cloud-contract.md#two-routes-on-a-shared-listener) | Two tenant namespaces attach same-named routes to the shared listener. Removing one namespace label drops its binding and changes the listener count from two to one. The independent Octavia loopback test checks policy order, selective deletion and continued sibling traffic. [Kubernetes watch test](../../../internal/controller/envtest_references_test.go) |
 | [Stock Amphora UDP forwarding](provider/stock-udp.md) | The same VIP selected backend A, then B after a default-pool update. A detached listener left an empty IPVS table and returned `ECONNREFUSED` while both backends still served direct packets. The API and a disposable Linux guest supplied this evidence. Kubernetes UDPRoute reconciliation remains open. |
 | [Stock Amphora gRPC routing](provider/stock-grpc.md) | On a single HTTP/2 client connection over TLS, two exact methods selected different backends and returned their gRPC trailers. The stock worker renderer produced the HAProxy configuration. The upstream HTTP/h2c case and Kubernetes GRPCRoute reconciliation remain open. |
+| [Three upstream TCPRoute status cases on kind](kind-tcp.md) | Standard v1.7.0 with 23 Ready workload pods. The scoped base omitted one unsupported HTTPS Gateway. A direct worker NodePort handshake identified a Ready upstream backend pod. |
 | [TCPRoute attachment and revocation](provider/stock-tcp.md#controller-and-provider-checks) | Two Kubernetes TCPRoutes attach and the oldest supplies the only endpoint. Grant removal withdraws traffic intent. Namespace label removal promotes the remaining route. The provider adapter also exercises restart, binary forwarding and detachment on loopback. |
 | [Stock Amphora TCP forwarding](provider/stock-tcp.md) | Attaching a TCP pool through the public Octavia API let a loopback client exchange all 256 byte values with the member through HAProxy. Clearing the attachment stopped the traffic while the member still existed. The test uses the upstream API fixture and simulates worker completion. |
 | [ReferenceGrant](service-grants.md) | The controller observes authorization and revocation for a cross-namespace Service on a local Kubernetes API server. |
