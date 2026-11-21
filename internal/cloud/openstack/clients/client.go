@@ -51,8 +51,10 @@ const (
 // ClientConfig selects authentication and service endpoints. Credentials are
 // read at startup and are never copied into Kubernetes status or logs.
 type ClientConfig struct {
-	Region         string
-	Microversion   string
+	Region       string
+	Microversion string
+	// RequirePoolTLS selects the minimum Octavia API version for CA-backed pool TLS.
+	RequirePoolTLS bool
 	CloudsYAMLPath string
 	CloudName      string
 	AllowInsecure  bool
@@ -66,7 +68,11 @@ type ClientConfig struct {
 
 // Validate checks settings that must be safe before authentication starts.
 func (cfg ClientConfig) Validate() error {
-	if err := ValidateMicroversion(cfg.Microversion); err != nil {
+	minimumMinor := 5
+	if cfg.RequirePoolTLS {
+		minimumMinor = 8
+	}
+	if err := validateMicroversion(cfg.Microversion, minimumMinor); err != nil {
 		return err
 	}
 	if cfg.APIQPS <= 0 || math.IsNaN(cfg.APIQPS) || math.IsInf(cfg.APIQPS, 0) {
@@ -307,6 +313,10 @@ func allowReauthentication(authOptions gophercloud.AuthOptions) bool {
 // contract. It parses major and minor components as integers, so 2.10 is not
 // mistaken for a floating-point value smaller than 2.5.
 func ValidateMicroversion(value string) error {
+	return validateMicroversion(value, 5)
+}
+
+func validateMicroversion(value string, minimumMinor int) error {
 	parts := strings.Split(value, ".")
 	if len(parts) != 2 {
 		return fmt.Errorf("octavia microversion %q must have major.minor form", value)
@@ -316,8 +326,8 @@ func ValidateMicroversion(value string) error {
 	if majorErr != nil || minorErr != nil || major < 0 || minor < 0 {
 		return fmt.Errorf("octavia microversion %q must contain non-negative integers", value)
 	}
-	if major < 2 || major == 2 && minor < 5 {
-		return fmt.Errorf("octavia microversion %q is unsupported; 2.5 or newer is required for identity tags", value)
+	if major < 2 || major == 2 && minor < minimumMinor {
+		return fmt.Errorf("octavia microversion %q is unsupported, the selected features require 2.%d or newer", value, minimumMinor)
 	}
 	return nil
 }

@@ -31,22 +31,26 @@ import (
 	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 )
 
 func TestRequireGatewayAPIs(t *testing.T) {
 	for _, tc := range []struct {
 		name, missing string
 		experimental  bool
+		backendTLS    bool
 	}{
 		{name: "standard"},
 		{name: "missing referencegrants", missing: "referencegrants"},
 		{name: "missing udproutes", missing: "udproutes"},
+		{name: "backend TLS policy enabled", backendTLS: true},
+		{name: "backend TLS policy CRD missing", backendTLS: true, missing: "backendtlspolicies"},
 		{name: "experimental", experimental: true},
 		{name: "missing xbackends", missing: "xbackends", experimental: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			resources := metav1.APIResourceList{GroupVersion: gatewayv1.GroupVersion.String()}
-			for _, resource := range []string{"gatewayclasses", "gateways", "httproutes", "tcproutes", "udproutes", "referencegrants"} {
+			for _, resource := range []string{"gatewayclasses", "gateways", "httproutes", "tcproutes", "udproutes", "referencegrants", "backendtlspolicies"} {
 				if resource != tc.missing {
 					resources.APIResources = append(resources.APIResources, metav1.APIResource{Name: resource})
 				}
@@ -73,7 +77,11 @@ func TestRequireGatewayAPIs(t *testing.T) {
 				}
 			}))
 			t.Cleanup(server.Close)
-			err := requireGatewayAPIs(&rest.Config{Host: server.URL}, false, tc.experimental)
+			configuration := controller.Config{BackendTLSPolicy: tc.backendTLS}
+			if tc.experimental {
+				configuration.GatewayAPIChannel = "experimental"
+			}
+			err := requireGatewayAPIs(&rest.Config{Host: server.URL}, configuration)
 			if tc.missing == "" && err != nil {
 				t.Fatalf("requireGatewayAPIs() rejected available resources: %v", err)
 			}
