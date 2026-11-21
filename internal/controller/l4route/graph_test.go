@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package tcproute
+package l4route
 
 import (
 	"context"
@@ -158,21 +158,36 @@ func TestTCPRouteChangingToTwoParentsCheckpointsDetach(t *testing.T) {
 }
 
 func TestBundleSkewKeepsOnlyConfirmedTCPForwarding(t *testing.T) {
-	for _, change := range []string{"current", "edited backend", "deleted Service"} {
+	for _, change := range []string{"current", "legacy status", "edited backend", "deleted Service"} {
 		t.Run(change, func(t *testing.T) {
 			gateway, class, route := routeFixture()
 			ref := &route.Spec.Rules[0].BackendRefs[0]
-			service := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: route.Namespace, Name: string(ref.Name)}, Spec: corev1.ServiceSpec{Ports: []corev1.ServicePort{{Port: int32(*ref.Port), Protocol: corev1.ProtocolTCP}}}}
+			service := &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{Namespace: route.Namespace, Name: string(ref.Name), UID: "backend-uid"},
+				Spec:       corev1.ServiceSpec{Ports: []corev1.ServicePort{{Port: int32(*ref.Port), Protocol: corev1.ProtocolTCP}}},
+			}
 			r := testReconciler(t, gateway, class, route, service)
 			bindFixture(t, r, gateway, route, cloud.MemberModeEndpoint)
-			route.Status.Parents = []gatewayv1.RouteParentStatus{{ControllerName: r.Config.ControllerName, ParentRef: route.Spec.ParentRefs[0],
-				Conditions: []metav1.Condition{{Type: r.Config.Domain() + "/Programmed", Status: metav1.ConditionTrue, Reason: "Programmed", ObservedGeneration: route.Generation}},
-			}}
-			if err := r.Status().Update(t.Context(), route); err != nil {
-				t.Fatal(err)
+			if change == "legacy status" {
+				route.Status.Parents = []gatewayv1.RouteParentStatus{{ControllerName: r.Config.ControllerName, ParentRef: route.Spec.ParentRefs[0],
+					Conditions: []metav1.Condition{{Type: r.Config.Domain() + "/Programmed", Status: metav1.ConditionTrue, Reason: "Programmed", ObservedGeneration: route.Generation}},
+				}}
+				if err := r.Status().Update(t.Context(), route); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				r.Writer = readyRouteWriter(t, r)
+				route = reconcileTCPRoute(t, r, route)
+				checkRouteCondition(t, route, r.Config.ControllerName, r.Config.Domain()+"/Programmed", metav1.ConditionTrue, "Programmed")
 			}
+			r.Writer = applyRouteGraphFunc(func(context.Context, graph.Request) (cloud.GatewayGraphResult, error) {
+				t.Fatal("version skew authorized a provider operation without a durable detach")
+				return cloud.GatewayGraphResult{}, nil
+			})
 			setBundleSkew(t, r)
 			switch change {
+			case "current":
+				r.Config.ControllerVersion = "next-build"
 			case "edited backend":
 				// The new local Service is independently authorized. It cannot
 				// authorize continued forwarding to the old Service.
@@ -209,7 +224,7 @@ func TestBundleSkewKeepsOnlyConfirmedTCPForwarding(t *testing.T) {
 func TestTCPRouteNodePortWithdrawsWhenLastEndpointDisappears(t *testing.T) {
 	gateway, class, route := routeFixture()
 	ref := route.Spec.Rules[0].BackendRefs[0]
-	service := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: route.Namespace, Name: string(ref.Name)}, Spec: corev1.ServiceSpec{
+	service := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: route.Namespace, Name: string(ref.Name), UID: "backend-uid"}, Spec: corev1.ServiceSpec{
 		Type: corev1.ServiceTypeNodePort, Ports: []corev1.ServicePort{{Port: int32(*ref.Port), Protocol: corev1.ProtocolTCP, NodePort: 31001}},
 	}}
 	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "worker"}, Status: corev1.NodeStatus{
@@ -223,7 +238,7 @@ func TestTCPRouteNodePortWithdrawsWhenLastEndpointDisappears(t *testing.T) {
 	r := testReconciler(t, gateway, class, route, service, node, endpoints)
 	r.Coordinator = &graph.Coordinator{}
 	identity := bindFixture(t, r, gateway, route, cloud.MemberModeNodePort)
-	plan, err := r.planRoute(t.Context(), route, identity, true)
+	plan, err := r.planRoute(t.Context(), viewRoute(route), identity, true)
 	if err != nil || plan.desired == nil || !slices.Equal(plan.desired.Members, []cloud.Member{{Address: "10.0.0.43", Port: 31001}}) {
 		t.Fatalf("TCP Service did not resolve to the worker NodePort: plan=%+v error=%v", plan, err)
 	}
@@ -252,7 +267,7 @@ func TestMissingTCPBindingCheckpointBlocksMutation(t *testing.T) {
 		t.Fatalf("lost checkpoint accepted by writer: %v", err)
 	}
 	route.SetAnnotations(nil)
-	if _, _, err := r.routeBinding(route); !errors.Is(err, cloud.ErrOwnershipConflict) {
+	if _, _, err := r.routeBinding(viewRoute(route)); !errors.Is(err, cloud.ErrOwnershipConflict) {
 		t.Fatalf("orphan finalizer treated as unbound: %v", err)
 	}
 }
@@ -275,7 +290,26 @@ func (f applyRouteGraphFunc) ReconcileGraph(ctx context.Context, request graph.R
 	return f(ctx, request)
 }
 
-func bindFixture(t *testing.T, r *Reconciler, gateway *gatewayv1.Gateway, route *gatewayv1.TCPRoute, mode cloud.MemberMode) cloud.Identity {
+func readyRouteWriter(t *testing.T, r *Reconciler) applyRouteGraphFunc {
+	t.Helper()
+	return func(ctx context.Context, request graph.Request) (cloud.GatewayGraphResult, error) {
+		if request.Action != graph.Ensure {
+			t.Fatalf("unexpected graph action %s", request.Action)
+		}
+		input, err := r.ObserveRouteGraph(ctx, request, request.Gateway)
+		if err != nil {
+			return cloud.GatewayGraphResult{}, err
+		}
+		if err := input.Validate(ctx); err != nil {
+			return cloud.GatewayGraphResult{}, err
+		}
+		return cloud.GatewayGraphResult{Outcome: cloud.ReadyOutcome(), Routes: []cloud.RouteGraphResult{
+			{Identity: request.Identity, Result: cloud.RouteResult{Outcome: cloud.ReadyOutcome()}},
+		}}, nil
+	}
+}
+
+func bindFixture(t *testing.T, r *Reconciler, gateway *gatewayv1.Gateway, route client.Object, mode cloud.MemberMode) cloud.Identity {
 	t.Helper()
 	ctx := t.Context()
 	for _, object := range []client.Object{gateway, route} {
@@ -285,7 +319,7 @@ func bindFixture(t *testing.T, r *Reconciler, gateway *gatewayv1.Gateway, route 
 	}
 	baseGateway := gateway.DeepCopy()
 	gateway.Annotations = map[string]string{
-		r.Config.GatewayListenerPortAnnotation(): "8080", r.Config.GatewayListenerProtocolAnnotation(): "TCP",
+		r.Config.GatewayListenerPortAnnotation(): "8080", r.Config.GatewayListenerProtocolAnnotation(): string(gateway.Spec.Listeners[0].Protocol),
 		r.Config.GatewayClusterIDAnnotation(): r.Config.ClusterID, r.Config.GatewayProjectIDAnnotation(): r.Config.OpenStackProjectID,
 	}
 	gateway.Finalizers = []string{r.Config.GatewayFinalizer()}
@@ -303,11 +337,21 @@ func bindFixture(t *testing.T, r *Reconciler, gateway *gatewayv1.Gateway, route 
 	if err := r.Patch(ctx, gateway, controller.OptimisticMergeFrom(baseGateway)); err != nil {
 		t.Fatal(err)
 	}
-	base := route.DeepCopy()
+	base := viewRoute(route).copyObject()
 	identity := controller.RouteIdentity(r.Config, gateway, route)
 	controller.ApplyRouteBinding(r.Config, route, identity)
 	if err := r.Patch(ctx, route, controller.OptimisticMergeFrom(base)); err != nil {
 		t.Fatal(err)
+	}
+	plan, err := r.planRoute(ctx, viewRoute(route), identity, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.desired != nil {
+		plan.targetStatus = routeCondition(viewRoute(route), r.forwardingTargetType(), metav1.ConditionFalse, "Pending", plan.target)
+		if err := r.patchStatuses(ctx, viewRoute(route), plan); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return identity
 }

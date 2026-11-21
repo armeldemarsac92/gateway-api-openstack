@@ -38,7 +38,7 @@ type gatewayValidationError struct {
 
 func hasListenerRequestFilters(gateway *gatewayv1.Gateway) bool {
 	return slices.ContainsFunc(gateway.Spec.Listeners, func(l gatewayv1.Listener) bool {
-		supportedProtocol := l.Protocol == gatewayv1.HTTPProtocolType || (l.Protocol == gatewayv1.TCPProtocolType && len(gateway.Spec.Listeners) == 1)
+		supportedProtocol := l.Protocol == gatewayv1.HTTPProtocolType || (isL4Listener(l.Protocol) && len(gateway.Spec.Listeners) == 1)
 		return supportedProtocol && l.Filters != nil && len(l.Filters.Requests) != 0
 	})
 }
@@ -78,9 +78,9 @@ func Validate(gateway *gatewayv1.Gateway) (*gatewayv1.Listener, error) {
 		}
 	}
 	var listener *gatewayv1.Listener
-	if len(gateway.Spec.Listeners) == 1 && gateway.Spec.Listeners[0].Protocol == gatewayv1.TCPProtocolType {
+	if len(gateway.Spec.Listeners) == 1 && isL4Listener(gateway.Spec.Listeners[0].Protocol) {
 		listener = &gateway.Spec.Listeners[0]
-		if err := validateTCPListener(listener); err != nil {
+		if err := validateL4Listener(listener); err != nil {
 			return nil, err
 		}
 	} else {
@@ -115,9 +115,13 @@ func Validate(gateway *gatewayv1.Gateway) (*gatewayv1.Listener, error) {
 	return listener, nil
 }
 
-func validateTCPListener(listener *gatewayv1.Listener) error {
+func isL4Listener(protocol gatewayv1.ProtocolType) bool {
+	return protocol == gatewayv1.TCPProtocolType || protocol == gatewayv1.UDPProtocolType
+}
+
+func validateL4Listener(listener *gatewayv1.Listener) error {
 	if listener.Hostname != nil || listener.TLS != nil {
-		return fmt.Errorf("TCP listeners do not support hostname or TLS")
+		return fmt.Errorf("%s listeners do not support hostname or TLS", listener.Protocol)
 	}
 	if listener.AllowedRoutes == nil || listener.AllowedRoutes.Namespaces == nil {
 		return nil
@@ -224,7 +228,7 @@ func HTTPListener(gateway *gatewayv1.Gateway) (*gatewayv1.Listener, error) {
 		}
 	}
 	if http == nil {
-		return nil, fmt.Errorf("a plain HTTP listener or a single TCP listener is required")
+		return nil, fmt.Errorf("a plain HTTP listener, a single TCP listener, or a single UDP listener is required")
 	}
 	return http, nil
 }
@@ -235,6 +239,8 @@ func listenerRouteKind(protocol gatewayv1.ProtocolType) gatewayv1.Kind {
 		return "HTTPRoute"
 	case gatewayv1.TCPProtocolType:
 		return "TCPRoute"
+	case gatewayv1.UDPProtocolType:
+		return "UDPRoute"
 	default:
 		return ""
 	}

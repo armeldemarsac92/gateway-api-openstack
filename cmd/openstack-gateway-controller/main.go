@@ -49,7 +49,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gatewayclass"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/httproute"
-	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/tcproute"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/l4route"
 )
 
 // version is overridden at build time with -X main.version=<release>.
@@ -197,15 +197,23 @@ func run(ctx context.Context) error {
 		Recorder:    eventRecorder,
 		Config:      controllerConfig,
 	}
-	tcpReconciler := &tcproute.Reconciler{
-		Client: manager.GetClient(), APIReader: manager.GetAPIReader(), Config: controllerConfig, Coordinator: graphCoordinator,
+	tcpReconciler := &l4route.Reconciler{
+		Protocol: gatewayv1.TCPProtocolType,
+		Client:   manager.GetClient(), APIReader: manager.GetAPIReader(), Config: controllerConfig, Coordinator: graphCoordinator,
+	}
+	udpReconciler := &l4route.Reconciler{
+		Protocol: gatewayv1.UDPProtocolType,
+		Client:   manager.GetClient(), APIReader: manager.GetAPIReader(), Config: controllerConfig, Coordinator: graphCoordinator,
 	}
 	writerMetrics, err := graph.RegisterWriterMetrics(controllermetrics.Registry)
 	if err != nil {
 		return fmt.Errorf("register Gateway graph metrics: %w", err)
 	}
-	writer := &graph.Writer{Observer: writerMetrics, Coordinator: graphCoordinator, Gateway: gatewayReconciler, Routes: graph.RouteSources{routeReconciler, tcpReconciler}, Provider: openStackProvider}
-	gatewayReconciler.Writer, routeReconciler.Writer, tcpReconciler.Writer = writer, writer, writer
+	writer := &graph.Writer{
+		Observer: writerMetrics, Coordinator: graphCoordinator, Gateway: gatewayReconciler,
+		Routes: graph.RouteSources{routeReconciler, tcpReconciler, udpReconciler}, Provider: openStackProvider,
+	}
+	gatewayReconciler.Writer, routeReconciler.Writer, tcpReconciler.Writer, udpReconciler.Writer = writer, writer, writer, writer
 	if err := gatewayReconciler.SetupWithManager(manager); err != nil {
 		return fmt.Errorf("set up Gateway controller: %w", err)
 	}
@@ -214,6 +222,9 @@ func run(ctx context.Context) error {
 	}
 	if err := tcpReconciler.SetupWithManager(manager); err != nil {
 		return fmt.Errorf("set up TCPRoute controller: %w", err)
+	}
+	if err := udpReconciler.SetupWithManager(manager); err != nil {
+		return fmt.Errorf("set up UDPRoute controller: %w", err)
 	}
 	if err := manager.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		return fmt.Errorf("add health check: %w", err)
@@ -258,7 +269,7 @@ func requireGatewayAPIs(restConfig *rest.Config) error {
 	for _, resource := range resourceList.APIResources {
 		availableResources = append(availableResources, resource.Name)
 	}
-	for _, required := range []string{"gatewayclasses", "gateways", "httproutes", "tcproutes", "referencegrants"} {
+	for _, required := range []string{"gatewayclasses", "gateways", "httproutes", "tcproutes", "udproutes", "referencegrants"} {
 		if !slices.Contains(availableResources, required) {
 			return fmt.Errorf("required Gateway API resource %s is missing from %s; install the selected Gateway API %s bundle", required, gatewayv1.GroupVersion, gatewayconsts.BundleVersion)
 		}

@@ -14,12 +14,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package tcproute
+package l4route
 
 import (
 	"cmp"
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 
@@ -41,17 +40,17 @@ type routeParent struct {
 	rejected model.Diagnostic
 }
 
-func gatewayKey(route *gatewayv1.TCPRoute, parent gatewayv1.ParentReference) client.ObjectKey {
-	namespace := route.Namespace
+func gatewayKey(route *transportRoute, parent gatewayv1.ParentReference) client.ObjectKey {
+	namespace := route.GetNamespace()
 	if parent.Namespace != nil {
 		namespace = string(*parent.Namespace)
 	}
 	return client.ObjectKey{Namespace: namespace, Name: string(parent.Name)}
 }
 
-func (r *Reconciler) managedParents(ctx context.Context, route *gatewayv1.TCPRoute) ([]routeParent, error) {
+func (r *Reconciler) managedParents(ctx context.Context, route *transportRoute) ([]routeParent, error) {
 	var parents []routeParent
-	for _, ref := range route.Spec.ParentRefs {
+	for _, ref := range route.parentRefs {
 		if !controller.IsGatewayParentRef(ref) {
 			continue
 		}
@@ -90,7 +89,7 @@ func (r *Reconciler) gatewayClass(ctx context.Context, gateway *gatewayv1.Gatewa
 	return class, nil
 }
 
-func (r *Reconciler) attachment(ctx context.Context, route *gatewayv1.TCPRoute, gateway *gatewayv1.Gateway, ref gatewayv1.ParentReference) (*gatewayv1.Listener, model.Diagnostic, error) {
+func (r *Reconciler) attachment(ctx context.Context, route *transportRoute, gateway *gatewayv1.Gateway, ref gatewayv1.ParentReference) (*gatewayv1.Listener, model.Diagnostic, error) {
 	noMatch := model.Diagnostic{Reason: string(gatewayv1.RouteReasonNoMatchingParent), Message: "parent reference does not select a live Gateway listener"}
 	if !gateway.DeletionTimestamp.IsZero() {
 		return nil, noMatch, nil
@@ -102,7 +101,7 @@ func (r *Reconciler) attachment(ctx context.Context, route *gatewayv1.TCPRoute, 
 			continue
 		}
 		selected = true
-		allowed, err := r.listenerAllows(ctx, candidate, gateway.Namespace, route.Namespace)
+		allowed, err := r.listenerAllows(ctx, candidate, gateway.Namespace, route.GetNamespace())
 		if err != nil {
 			return nil, model.Diagnostic{}, err
 		}
@@ -110,15 +109,15 @@ func (r *Reconciler) attachment(ctx context.Context, route *gatewayv1.TCPRoute, 
 			continue
 		}
 		listener, err := gatewaycontroller.Validate(gateway)
-		if err != nil || listener.Protocol != gatewayv1.TCPProtocolType || listener.Name != candidate.Name {
-			return nil, model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: "the Gateway must support the selected TCP listener"}, nil
+		if err != nil || listener.Protocol != r.protocol() || listener.Name != candidate.Name {
+			return nil, model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: fmt.Sprintf("the Gateway must support the selected %s listener", r.protocol())}, nil
 		}
 		return listener, model.Diagnostic{}, nil
 	}
 	if !selected {
 		return nil, noMatch, nil
 	}
-	return nil, model.Diagnostic{Reason: string(gatewayv1.RouteReasonNotAllowedByListeners), Message: "no selected listener allows this TCPRoute kind and namespace"}, nil
+	return nil, model.Diagnostic{Reason: string(gatewayv1.RouteReasonNotAllowedByListeners), Message: fmt.Sprintf("no selected listener allows this %s kind and namespace", r.kind())}, nil
 }
 
 func parentSelects(ref gatewayv1.ParentReference, listener *gatewayv1.Listener) bool {
@@ -126,12 +125,12 @@ func parentSelects(ref gatewayv1.ParentReference, listener *gatewayv1.Listener) 
 }
 
 func (r *Reconciler) listenerAllows(ctx context.Context, listener *gatewayv1.Listener, gatewayNamespace, routeNamespace string) (bool, error) {
-	if listener.Protocol != gatewayv1.TCPProtocolType {
+	if listener.Protocol != r.protocol() {
 		return false, nil
 	}
 	allowed := listener.AllowedRoutes
 	if allowed != nil && len(allowed.Kinds) != 0 && !slices.ContainsFunc(allowed.Kinds, func(kind gatewayv1.RouteGroupKind) bool {
-		return kind.Kind == "TCPRoute" && (kind.Group == nil || *kind.Group == gatewayv1.GroupName)
+		return kind.Kind == r.kind() && (kind.Group == nil || *kind.Group == gatewayv1.GroupName)
 	}) {
 		return false, nil
 	}
@@ -146,37 +145,30 @@ func (r *Reconciler) listenerAllows(ctx context.Context, listener *gatewayv1.Lis
 	return model.AllowsRouteNamespace(listener, gatewayNamespace, routeNamespace, namespaces), nil
 }
 
-func (r *Reconciler) listRoutes(ctx context.Context) ([]gatewayv1.TCPRoute, error) {
-	var list gatewayv1.TCPRouteList
-	if err := r.APIReader.List(ctx, &list); err != nil {
-		return nil, fmt.Errorf("list TCPRoute attachments: %w", err)
-	}
-	if list.Continue != "" {
-		return nil, errors.New("incomplete TCPRoute attachment list")
-	}
-	return list.Items, nil
-}
-
-// selectedRoute uses only attachment inputs. An unusable oldest route still
-// wins the listener and prevents traffic from leaking to a younger route.
-func (r *Reconciler) selectedRoute(ctx context.Context, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, routes []gatewayv1.TCPRoute) (*gatewayv1.TCPRoute, error) {
-	var candidates []*gatewayv1.TCPRoute
+func listenerCandidates(gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, routes []*transportRoute) []*transportRoute {
+	var candidates []*transportRoute
 	key := client.ObjectKeyFromObject(gateway)
-	for i := range routes {
-		route := &routes[i]
-		if !route.DeletionTimestamp.IsZero() || len(route.Spec.ParentRefs) != 1 {
+	for _, route := range routes {
+		if !route.GetDeletionTimestamp().IsZero() || len(route.parentRefs) != 1 {
 			continue
 		}
-		ref := route.Spec.ParentRefs[0]
+		ref := route.parentRefs[0]
 		if controller.IsGatewayParentRef(ref) && gatewayKey(route, ref) == key && parentSelects(ref, listener) {
 			candidates = append(candidates, route)
 		}
 	}
-	slices.SortFunc(candidates, func(left, right *gatewayv1.TCPRoute) int {
-		return cmp.Or(left.CreationTimestamp.Compare(right.CreationTimestamp.Time), cmp.Compare(left.Namespace, right.Namespace), cmp.Compare(left.Name, right.Name))
+	slices.SortFunc(candidates, func(left, right *transportRoute) int {
+		created := left.GetCreationTimestamp()
+		return cmp.Or(created.Compare(right.GetCreationTimestamp().Time), cmp.Compare(left.GetNamespace(), right.GetNamespace()), cmp.Compare(left.GetName(), right.GetName()))
 	})
+	return candidates
+}
+
+// selectedRoute uses only attachment inputs. An unusable oldest route still
+// wins the listener and prevents traffic from leaking to a younger route.
+func (r *Reconciler) selectedRoute(ctx context.Context, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, candidates []*transportRoute) (*transportRoute, error) {
 	for _, route := range candidates {
-		allowed, err := r.listenerAllows(ctx, listener, gateway.Namespace, route.Namespace)
+		allowed, err := r.listenerAllows(ctx, listener, gateway.Namespace, route.GetNamespace())
 		if allowed || err != nil {
 			return route, err
 		}

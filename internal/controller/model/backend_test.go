@@ -210,6 +210,36 @@ func TestBackendPortAndReferenceFailures(t *testing.T) {
 	})
 }
 
+func TestUDPBackendRequiresExplicitUDPServiceAndEndpointSlicePorts(t *testing.T) {
+	service := backendService("dns")
+	number := ptr.To(gatewayv1.PortNumber(80))
+	if _, diagnostic := ResolveTransportServicePort(&service, number, corev1.ProtocolUDP); diagnostic == nil || diagnostic.Reason != string(gatewayv1.RouteReasonUnsupportedProtocol) {
+		t.Fatalf("an omitted Service protocol admitted UDP: %v", diagnostic)
+	}
+	service.Spec.Ports = append(service.Spec.Ports, corev1.ServicePort{Name: "dns-udp", Port: 80, Protocol: corev1.ProtocolUDP})
+	port, diagnostic := ResolveTransportServicePort(&service, number, corev1.ProtocolUDP)
+	if diagnostic != nil || port.Name != "dns-udp" {
+		t.Fatalf("UDP port = %v, diagnostic = %v", port, diagnostic)
+	}
+	tcpPort, diagnostic := ResolveTCPServicePort(&service, number)
+	if diagnostic != nil || tcpPort.Name != "http" {
+		t.Fatalf("TCP port = %v, diagnostic = %v", tcpPort, diagnostic)
+	}
+
+	udp := backendSlice("dns", "192.0.2.10")
+	udp.Ports[0].Name, udp.Ports[0].Protocol = ptr.To(port.Name), ptr.To(corev1.ProtocolUDP)
+	defaultTCP := *udp.DeepCopy()
+	defaultTCP.Ports[0].Protocol = nil
+	defaultTCP.Endpoints[0].Addresses = []string{"192.0.2.11"}
+	wrongName := *udp.DeepCopy()
+	wrongName.Ports[0].Name = ptr.To("dns-tcp")
+	wrongName.Endpoints[0].Addresses = []string{"192.0.2.12"}
+	endpoints := ResolveServiceEndpoints(&service, port, []discoveryv1.EndpointSlice{udp, defaultTCP, wrongName})
+	if len(endpoints) != 1 || endpoints[0].Address != "192.0.2.10" || endpoints[0].Port != 8080 {
+		t.Fatalf("UDP endpoints = %v", endpoints)
+	}
+}
+
 func TestBackendEndpointPortAndFamilyResolution(t *testing.T) {
 	route := &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: "app"}}
 	rule := gatewayv1.HTTPRouteRule{BackendRefs: []gatewayv1.HTTPBackendRef{backendReference("echo", nil)}}

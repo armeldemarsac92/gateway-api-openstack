@@ -69,7 +69,7 @@ Gateway `spec.infrastructure.parametersRef` is not supported.
 | `healthMonitor.maxRetries` | `3` | Successful checks required for recovery, from 1 through 10. |
 | `healthMonitor.maxRetriesDown` | `3` | Failed checks required to mark a member down, from 1 through 10. |
 
-On HTTP listeners, health monitors send `GET` to `healthMonitor.path` and accept status codes `200-399`. On TCP listeners, Octavia performs a TCP connect check. The delay, timeout and retry settings apply to both protocols. The HTTP path applies only to HTTP monitors.
+HTTP listeners use an HTTP monitor that sends `GET` to `healthMonitor.path` and accepts status codes `200-399`. TCP and UDP listeners use Octavia's `TCP` and `UDP-CONNECT` monitors respectively. Octavia records the configured delay, timeout and both retry counts. For UDP, Hibiscus enforces an operator-configurable minimum delay that defaults to 3 seconds. The stock Amphora LVS template renders the failure threshold as `retry` and omits the separate recovery threshold. The HTTP path applies only to HTTP monitors. [Stock configuration and packet check](../qualification/v1.7.0/provider/stock-udp.md)
 There is no option to disable the health monitor or supply an existing Floating IP.
 
 Each subnet, external network, or security group reference must contain exactly one selector:
@@ -125,7 +125,7 @@ The controller maps the Node's OpenStack provider ID and configured region to a 
 Conflicting Node identities for the same address are rejected.
 In `Unmanaged` mode, the controller does not impose these port security checks.
 
-Ingress validation checks the IP family, TCP protocol, and listener or NodePort range.
+Ingress validation checks the IP family, the listener or NodePort range, and the transport protocol. HTTP and TCP listeners require TCP ingress. UDP listeners require UDP ingress on the VIP and UDP NodePort.
 It does not prove that a remote group or source CIDR includes Amphora or the client.
 The controller never derives backend source CIDRs from the VIP subnet.
 Health checks and actual traffic must establish reachability.
@@ -195,7 +195,7 @@ Keep `backendSecurity.mode: Unmanaged` and select IPv4 VIP and member subnets.
 The current OpenStack E2E runner exercises NodePort modes and does not validate this path.
 
 HTTPRoute continues to reference a Service port.
-The controller resolves that port through EndpointSlices and registers their IPv4 addresses and resolved TCP ports as Octavia members.
+The controller resolves that port through EndpointSlices and registers their IPv4 addresses and resolved ports as Octavia members. HTTPRoute and TCPRoute use TCP Service and EndpointSlice ports. UDPRoute requires UDP on both.
 It accepts ClusterIP, headless, and NodePort Services, including manually managed EndpointSlices selected by namespace and the `kubernetes.io/service-name` label.
 It matches the Service port name rather than the `targetPort` string, allowing different resolved ports in different slices.
 LoadBalancer and ExternalName Services remain unsupported.
@@ -239,6 +239,7 @@ Use `"false"` when an explicit value is needed.
 
 Both supported traffic policies require a ready, nonterminating backend endpoint for the selected Service port.
 The EndpointSlice port must match the Service port name and protocol and provide a resolved port number.
+For a UDP NodePort, the chosen worker address and ready EndpointSlice must use the VIP’s IP family. Amphora’s IPVS virtual server can only forward to members in that family.
 Its address family must be one of the Service's configured families and match the selected Node address.
 With `externalTrafficPolicy: Cluster`, eligible workers can use a ready endpoint in that family anywhere in the cluster.
 With `externalTrafficPolicy: Local`, that endpoint must also identify the worker through `endpoints[].nodeName`.

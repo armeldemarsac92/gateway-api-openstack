@@ -19,11 +19,13 @@ package gateway
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -81,8 +83,8 @@ func unprogrammedListenerStatus(
 		Conditions: existingListenerConditionsFrom(existing, listener.Name),
 	}
 	kind := listenerRouteKind(listener.Protocol)
-	tcpInMultipleListeners := listener.Protocol == gatewayv1.TCPProtocolType && multipleListeners
-	protocolSupported := kind != "" && !tcpInMultipleListeners
+	l4InMultipleListeners := isL4Listener(listener.Protocol) && multipleListeners
+	protocolSupported := kind != "" && !l4InMultipleListeners
 	if protocolSupported && listenerAllowsRouteKind(listener, kind) {
 		status.SupportedKinds = supportedRouteKinds(kind)
 	}
@@ -93,8 +95,8 @@ func unprogrammedListenerStatus(
 	if !protocolSupported {
 		acceptedReason = gatewayv1.ListenerReasonUnsupportedProtocol
 		acceptedMessage = "Listener protocol is unsupported"
-		if tcpInMultipleListeners {
-			acceptedMessage = "TCP requires a Gateway with a single listener"
+		if l4InMultipleListeners {
+			acceptedMessage = fmt.Sprintf("%s requires a Gateway with a single listener", listener.Protocol)
 		}
 	} else if !listenerSpecific {
 		acceptedStatus = metav1.ConditionTrue
@@ -405,10 +407,12 @@ func (r *Reconciler) attachedRouteCount(ctx context.Context, gateway *gatewayv1.
 	gatewayKey := controller.ObjectKeyString(client.ObjectKeyFromObject(gateway))
 	var count int32
 	namespaces := make(map[string][]corev1.Namespace)
-	countRoute := func(route client.Object, refs []gatewayv1.ParentReference, parents []gatewayv1.RouteParentStatus) error {
+	countRoute := func(object runtime.Object) error {
+		route := object.(client.Object)
 		if !route.GetDeletionTimestamp().IsZero() {
 			return nil
 		}
+		refs, parents, _ := controller.RouteParents(route)
 		routeNamespace := route.GetNamespace()
 		for _, parentStatus := range parents {
 			if !routeParentStatusTargetsListener(parentStatus, routeNamespace, gateway, listener, r.Config.ControllerName) {
@@ -441,26 +445,22 @@ func (r *Reconciler) attachedRouteCount(ctx context.Context, gateway *gatewayv1.
 		}
 		return nil
 	}
-	if listener.Protocol == gatewayv1.TCPProtocolType {
-		var routes gatewayv1.TCPRouteList
-		if err := r.List(ctx, &routes, client.MatchingFields{controller.IndexTCPRouteByStatusGateway: gatewayKey}); err != nil {
-			return 0, err
-		}
-		for _, route := range routes.Items {
-			if err := countRoute(&route, route.Spec.ParentRefs, route.Status.Parents); err != nil {
-				return 0, err
-			}
-		}
-	} else {
-		var routes gatewayv1.HTTPRouteList
-		if err := r.List(ctx, &routes, client.MatchingFields{controller.IndexHTTPRouteByStatusGateway: gatewayKey}); err != nil {
-			return 0, err
-		}
-		for _, route := range routes.Items {
-			if err := countRoute(&route, route.Spec.ParentRefs, route.Status.Parents); err != nil {
-				return 0, err
-			}
-		}
+	var routes client.ObjectList
+	index := controller.IndexL4RouteByStatusGateway
+	switch listener.Protocol {
+	case gatewayv1.TCPProtocolType:
+		routes = &gatewayv1.TCPRouteList{}
+	case gatewayv1.UDPProtocolType:
+		routes = &gatewayv1.UDPRouteList{}
+	default:
+		routes = &gatewayv1.HTTPRouteList{}
+		index = controller.IndexHTTPRouteByStatusGateway
+	}
+	if err := r.List(ctx, routes, client.MatchingFields{index: gatewayKey}); err != nil {
+		return 0, err
+	}
+	if err := meta.EachListItem(routes, countRoute); err != nil {
+		return 0, err
 	}
 	return count, nil
 }

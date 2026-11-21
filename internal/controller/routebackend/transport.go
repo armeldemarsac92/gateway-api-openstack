@@ -20,6 +20,7 @@ package routebackend
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"slices"
 
 	corev1 "k8s.io/api/core/v1"
@@ -40,13 +41,13 @@ func unsupported(format string, args ...any) *model.Diagnostic {
 	return &model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: fmt.Sprintf(format, args...)}
 }
 
-// TCPMembers resolves a TCP Service through the Gateway's frozen member mode.
+// TransportMembers resolves a TCP or UDP Service through the Gateway's frozen member mode.
 // The caller authorizes the Service reference before reading it.
-func TCPMembers(ctx context.Context, reader client.Reader, service *corev1.Service, port *gatewayv1.PortNumber, topology classconfig.Resolved) ([]cloud.Member, *model.Diagnostic, error) {
+func TransportMembers(ctx context.Context, reader client.Reader, service *corev1.Service, port *gatewayv1.PortNumber, protocol corev1.Protocol, topology classconfig.Resolved, gatewayAddresses []gatewayv1.GatewayStatusAddress) ([]cloud.Member, *model.Diagnostic, error) {
 	if !service.DeletionTimestamp.IsZero() {
 		return nil, &model.Diagnostic{Reason: string(gatewayv1.RouteReasonBackendNotFound), Message: "The backend Service is being deleted"}, nil
 	}
-	selected, diagnostic := model.ResolveTCPServicePort(service, port)
+	selected, diagnostic := model.ResolveTransportServicePort(service, port, protocol)
 	if diagnostic != nil {
 		return nil, diagnostic, nil
 	}
@@ -74,6 +75,23 @@ func TCPMembers(ctx context.Context, reader client.Reader, service *corev1.Servi
 		return nil, nil, fmt.Errorf("incomplete backend EndpointSlice list")
 	}
 	if mode == cloud.MemberModeNodePort {
+		if protocol == corev1.ProtocolUDP {
+			// Amphora IPVS only renders real servers of the VIP's address family.
+			// The controller publishes one address. Floating-IP mode requires
+			// IPv4 for both the public address and the private VIP.
+			if len(gatewayAddresses) != 1 || gatewayAddresses[0].Type != nil && *gatewayAddresses[0].Type != gatewayv1.IPAddressType {
+				return nil, pending("waiting for the UDP Gateway IP address"), nil
+			}
+			vip, err := netip.ParseAddr(gatewayAddresses[0].Value)
+			if err != nil || vip.Is4In6() || vip.Zone() != "" {
+				return nil, pending("waiting for a valid UDP Gateway IP address"), nil
+			}
+			family := discoveryv1.AddressTypeIPv6
+			if vip.Is4() {
+				family = discoveryv1.AddressTypeIPv4
+			}
+			endpoints.Items = slices.DeleteFunc(endpoints.Items, func(endpoint discoveryv1.EndpointSlice) bool { return endpoint.AddressType != family })
+		}
 		return NodePortMembers(ctx, reader, service, selected, topology.NodeAddressType, endpoints.Items)
 	}
 	members, diagnostic := EndpointMembers(service, model.ResolveServiceEndpoints(service, selected, endpoints.Items))

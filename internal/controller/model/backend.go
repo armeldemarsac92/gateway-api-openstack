@@ -145,20 +145,26 @@ func ResolveServicePort(service *corev1.Service, selected *gatewayv1.PortNumber)
 
 // ResolveTCPServicePort selects a TCP port regardless of the application protocol it transports.
 func ResolveTCPServicePort(service *corev1.Service, selected *gatewayv1.PortNumber) (*corev1.ServicePort, *Diagnostic) {
+	return ResolveTransportServicePort(service, selected, corev1.ProtocolTCP)
+}
+
+// ResolveTransportServicePort selects the requested Service port and IP protocol.
+// Kubernetes defaults a missing Service port protocol to TCP.
+func ResolveTransportServicePort(service *corev1.Service, selected *gatewayv1.PortNumber, protocol corev1.Protocol) (*corev1.ServicePort, *Diagnostic) {
 	var unsupportedProtocol bool
 	for index := range service.Spec.Ports {
 		port := &service.Spec.Ports[index]
 		if selected == nil || port.Port != int32(*selected) {
 			continue
 		}
-		if port.Protocol != "" && port.Protocol != corev1.ProtocolTCP {
+		if servicePortProtocol(port) != protocol {
 			unsupportedProtocol = true
 			continue
 		}
 		return port, nil
 	}
 	if unsupportedProtocol {
-		return nil, backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "backend Service port must use TCP")
+		return nil, backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, fmt.Sprintf("backend Service port must use %s", protocol))
 	}
 	return nil, backendDiagnostic(gatewayv1.RouteReasonBackendNotFound,
 		fmt.Sprintf("backend Service %s/%s does not expose the referenced port", service.Namespace, service.Name))
@@ -177,7 +183,7 @@ func ResolveServiceEndpoints(service *corev1.Service, servicePort *corev1.Servic
 		if len(service.Spec.IPFamilies) != 0 && !slices.Contains(service.Spec.IPFamilies, corev1.IPFamily(endpointSlice.AddressType)) {
 			continue
 		}
-		port := endpointPort(endpointSlice.Ports, servicePort.Name)
+		port := EndpointSlicePort(servicePort, endpointSlice.Ports)
 		if port != 0 {
 			collectEndpointObservations(endpointSlice, port, observations)
 		}
@@ -190,9 +196,19 @@ func ResolveServiceEndpoints(service *corev1.Service, servicePort *corev1.Servic
 	return endpoints
 }
 
-func endpointPort(ports []discoveryv1.EndpointPort, name string) int32 {
+func servicePortProtocol(port *corev1.ServicePort) corev1.Protocol {
+	if port.Protocol == "" {
+		return corev1.ProtocolTCP
+	}
+	return port.Protocol
+}
+
+// EndpointSlicePort matches a ServicePort's name and transport protocol.
+// A named targetPort may resolve to a different number in each EndpointSlice.
+func EndpointSlicePort(servicePort *corev1.ServicePort, ports []discoveryv1.EndpointPort) int32 {
+	protocol := servicePortProtocol(servicePort)
 	for _, port := range ports {
-		if ptr.Deref(port.Name, "") == name && ptr.Deref(port.Protocol, corev1.ProtocolTCP) == corev1.ProtocolTCP && ptr.Deref(port.Port, 0) > 0 {
+		if ptr.Deref(port.Name, "") == servicePort.Name && ptr.Deref(port.Protocol, corev1.ProtocolTCP) == protocol && ptr.Deref(port.Port, 0) > 0 {
 			return *port.Port
 		}
 	}

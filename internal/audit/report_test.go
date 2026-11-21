@@ -116,6 +116,20 @@ func TestBuildReport(t *testing.T) {
 	}
 }
 
+func TestBuildReportAcceptsUDPRouteOwnership(t *testing.T) {
+	scope := reportTestScope()
+	gateway, route := reportTestRecords(scope)
+	route.Objects[0].Kind = "UDPRoute"
+	snapshot := KubernetesSnapshot{Records: []OwnershipRecord{gateway, route}}
+	report, err := BuildReport(time.Unix(1, 0), "v0.2.0-test", scope, snapshot, Inventory{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Summary.KubernetesBindings != 2 {
+		t.Fatalf("Kubernetes bindings = %d, want 2", report.Summary.KubernetesBindings)
+	}
+}
+
 func TestBuildReportIsDeterministic(t *testing.T) {
 	scope := reportTestScope()
 	gatewayRecord, routeRecord := reportTestRecords(scope)

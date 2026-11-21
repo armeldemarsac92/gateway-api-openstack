@@ -78,18 +78,7 @@ func sliceSupportsServicePort(service *corev1.Service, servicePort *corev1.Servi
 	if len(service.Spec.IPFamilies) != 0 && !slices.Contains(service.Spec.IPFamilies, corev1.IPFamily(slice.AddressType)) {
 		return false
 	}
-	protocol := servicePort.Protocol
-	if protocol == "" {
-		protocol = corev1.ProtocolTCP
-	}
-	for _, port := range slice.Ports {
-		// EndpointSlice port names identify ServicePort names, not targetPort
-		// names. A named targetPort may resolve to a different number per slice.
-		if ptr.Deref(port.Name, "") == servicePort.Name && ptr.Deref(port.Protocol, corev1.ProtocolTCP) == protocol && ptr.Deref(port.Port, 0) > 0 {
-			return true
-		}
-	}
-	return false
+	return model.EndpointSlicePort(servicePort, slice.Ports) > 0
 }
 
 // NodePortMembersForNodes selects eligible workers according to Service traffic policy.

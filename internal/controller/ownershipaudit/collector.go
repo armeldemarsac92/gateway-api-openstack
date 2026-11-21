@@ -63,7 +63,11 @@ func CollectOwnershipSnapshot(ctx context.Context, reader client.Reader, config 
 	if err := reader.List(ctx, &streams); err != nil {
 		return audit.KubernetesSnapshot{}, fmt.Errorf("list TCPRoutes for ownership audit: %w", err)
 	}
-	if gateways.Continue != "" || routes.Continue != "" || streams.Continue != "" {
+	var datagrams gatewayv1.UDPRouteList
+	if err := reader.List(ctx, &datagrams); err != nil {
+		return audit.KubernetesSnapshot{}, fmt.Errorf("list UDPRoutes for ownership audit: %w", err)
+	}
+	if gateways.Continue != "" || routes.Continue != "" || streams.Continue != "" || datagrams.Continue != "" {
 		return audit.KubernetesSnapshot{}, fmt.Errorf("incomplete Kubernetes ownership inventory")
 	}
 
@@ -93,6 +97,9 @@ func CollectOwnershipSnapshot(ctx context.Context, reader client.Reader, config 
 	}
 	for i := range streams.Items {
 		recordRoute(&snapshot, config, &streams.Items[i], "TCPRoute")
+	}
+	for i := range datagrams.Items {
+		recordRoute(&snapshot, config, &datagrams.Items[i], "UDPRoute")
 	}
 
 	sortOwnershipSnapshot(&snapshot)
@@ -130,7 +137,10 @@ func recordRoute(snapshot *audit.KubernetesSnapshot, config controller.Config, r
 	}
 	object := audit.ObjectReference{APIVersion: gatewayv1.GroupVersion.String(), Kind: kind, Namespace: route.GetNamespace(), Name: route.GetName(), UID: string(route.GetUID())}
 	identity, present, err := controller.StoredRouteIdentity(config, route)
-	if err != nil || !present {
+	annotations := route.GetAnnotations()
+	scoped := annotations[config.RouteClusterIDAnnotation()] != "" && annotations[config.RouteProjectIDAnnotation()] != ""
+	checkpoint := config.RouteBindingFinalizer(config.ClusterID, config.OpenStackProjectID, identity.GatewayNamespace, identity.GatewayName, identity.GatewayUID)
+	if err != nil || !present || !scoped && !slices.Contains(route.GetFinalizers(), checkpoint) {
 		snapshot.Issues = append(snapshot.Issues, invalidBindingIssue(object))
 		return
 	}

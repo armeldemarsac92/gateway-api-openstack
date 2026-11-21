@@ -98,7 +98,7 @@ func TestHTTPRouteForGatewayPredicate(t *testing.T) {
 	cfg := testConfig()
 	otherController := gatewayv1.GatewayController("example.com/other")
 	base := &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "api", Generation: 1}}
-	pred := HTTPRouteForGatewayPredicate(cfg)
+	pred := RouteForGatewayPredicate(cfg)
 
 	testPredicateUpdate(t, pred, base, mutateRoute(base, func(route *gatewayv1.HTTPRoute) {
 		route.Status.Parents = []gatewayv1.RouteParentStatus{{ControllerName: otherController}}

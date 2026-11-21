@@ -43,7 +43,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gatewayclass"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/httproute"
-	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/tcproute"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/l4route"
 )
 
 func startGatewayStatusReconcilers(t *testing.T, manager ctrl.Manager, cfg controller.Config, provider *recordingProvider) {
@@ -58,9 +58,13 @@ func startGatewayStatusReconcilers(t *testing.T, manager ctrl.Manager, cfg contr
 	}
 	writer := gateway.Writer.(*graph.Writer)
 	route := writer.Routes.(*httproute.Reconciler)
-	tcp := &tcproute.Reconciler{Client: manager.GetClient(), APIReader: manager.GetAPIReader(), Config: cfg, Writer: writer, Coordinator: writer.Coordinator}
-	writer.Routes = graph.RouteSources{route, tcp}
+	tcp := &l4route.Reconciler{Protocol: gatewayv1.TCPProtocolType, Client: manager.GetClient(), APIReader: manager.GetAPIReader(), Config: cfg, Writer: writer, Coordinator: writer.Coordinator}
+	udp := &l4route.Reconciler{Protocol: gatewayv1.UDPProtocolType, Client: manager.GetClient(), APIReader: manager.GetAPIReader(), Config: cfg, Writer: writer, Coordinator: writer.Coordinator}
+	writer.Routes = graph.RouteSources{route, tcp, udp}
 	if err := tcp.SetupWithManager(manager); err != nil {
+		t.Fatal(err)
+	}
+	if err := udp.SetupWithManager(manager); err != nil {
 		t.Fatal(err)
 	}
 	if err := route.SetupWithManager(manager); err != nil {

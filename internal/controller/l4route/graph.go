@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package tcproute
+package l4route
 
 import (
 	"cmp"
@@ -24,6 +24,7 @@ import (
 	"reflect"
 	"slices"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -37,16 +38,36 @@ import (
 var _ graph.RouteSource = (*Reconciler)(nil)
 
 type routeGraphSnapshot struct {
-	nodes     []cloud.RouteGraphNode
-	revisions []string
-	winner    types.UID
-	backend   types.UID
-	gateway   *gatewayv1.Gateway
-	class     types.UID
+	nodes      []cloud.RouteGraphNode
+	revisions  []string
+	candidates []routeCandidateRevision
+	winner     types.UID
+	backend    objectRevision
+	gateway    *gatewayv1.Gateway
+	class      objectRevision
 }
 
-// ObserveRouteGraph constructs and fences the TCPRoute fragment of the graph
-// while the shared writer holds the Gateway UID lock.
+// routeCandidateRevision excludes status so observing an unbound route's
+// conditions does not change the inputs to listener precedence.
+type routeCandidateRevision struct {
+	key        client.ObjectKey
+	uid        types.UID
+	generation int64
+	created    metav1.Time
+	spec       any
+}
+
+type objectRevision struct {
+	uid             types.UID
+	resourceVersion string
+}
+
+func revisionOf(object client.Object) objectRevision {
+	return objectRevision{uid: object.GetUID(), resourceVersion: object.GetResourceVersion()}
+}
+
+// ObserveRouteGraph constructs and fences this transport route kind's
+// fragment of the graph while the writer holds the Gateway UID lock.
 func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Request, gateway *gatewayv1.Gateway) (graph.RouteInputs, error) {
 	if r.APIReader == nil {
 		return graph.RouteInputs{}, controller.ErrAPIReaderRequired
@@ -72,15 +93,16 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 
 func (r *Reconciler) observeRoutes(ctx context.Context, request graph.Request, expectedGateway *gatewayv1.Gateway) (routeGraphSnapshot, error) {
 	var snapshot routeGraphSnapshot
-	routes, err := r.listRoutes(ctx)
+	routes, err := r.readRoutes(ctx)
 	if err != nil {
 		return snapshot, err
 	}
-	slices.SortFunc(routes, func(left, right gatewayv1.TCPRoute) int {
-		return cmp.Or(cmp.Compare(left.Namespace, right.Namespace), cmp.Compare(left.Name, right.Name))
+	slices.SortFunc(routes, func(left, right *transportRoute) int {
+		return cmp.Or(cmp.Compare(left.GetNamespace(), right.GetNamespace()), cmp.Compare(left.GetName(), right.GetName()))
 	})
 
 	var listener *gatewayv1.Listener
+	var observedGateway *gatewayv1.Gateway
 	if request.Action == graph.Ensure {
 		gateway, err := r.liveGateway(ctx, request.Identity, expectedGateway)
 		if err != nil {
@@ -88,26 +110,34 @@ func (r *Reconciler) observeRoutes(ctx context.Context, request graph.Request, e
 		}
 		// Store only safety-sensitive inputs. A status update from an unrelated
 		// controller must not invalidate this route observation.
+		observedGateway = gateway
 		snapshot.gateway = gateway.DeepCopy()
 		snapshot.gateway.ResourceVersion = ""
 		snapshot.gateway.Status = gatewayv1.GatewayStatus{}
 		listener, err = gatewaycontroller.Validate(gateway)
-		if err == nil && listener.Protocol == gatewayv1.TCPProtocolType && gateway.DeletionTimestamp.IsZero() {
-			winner, err := r.selectedRoute(ctx, gateway, listener, routes)
+		if err == nil && listener.Protocol == r.protocol() && gateway.DeletionTimestamp.IsZero() {
+			candidates := listenerCandidates(gateway, listener, routes)
+			for _, candidate := range candidates {
+				snapshot.candidates = append(snapshot.candidates, routeCandidateRevision{
+					key: client.ObjectKeyFromObject(candidate), uid: candidate.GetUID(), generation: candidate.GetGeneration(),
+					created: candidate.GetCreationTimestamp(), spec: candidate.spec,
+				})
+			}
+			winner, err := r.selectedRoute(ctx, gateway, listener, candidates)
 			if err != nil {
 				return snapshot, err
 			}
 			if winner != nil {
-				snapshot.winner = winner.UID
+				snapshot.winner = winner.GetUID()
 			}
 		}
 	}
 
+	trigger := r.requestRoute(request)
 	requestedIndex, winnerIndex := -1, -1
-	var winner *gatewayv1.TCPRoute
+	var winner *transportRoute
 	peerAttached := false
-	for i := range routes {
-		route := &routes[i]
+	for _, route := range routes {
 		if !controller.RouteClaimsGateway(r.Config, route, request.Identity) {
 			continue
 		}
@@ -116,34 +146,34 @@ func (r *Reconciler) observeRoutes(ctx context.Context, request graph.Request, e
 			return snapshot, err
 		}
 		if !present || !controller.SameGatewayIdentity(identity, request.Identity) {
-			return snapshot, fmt.Errorf("%w: TCPRoute binding does not match the Gateway graph", cloud.ErrOwnershipConflict)
+			return snapshot, fmt.Errorf("%w: %s binding does not match the Gateway graph", cloud.ErrOwnershipConflict, r.kind())
 		}
-		requested := request.TCPRoute != nil && route.UID == request.TCPRoute.UID
+		requested := trigger != nil && route.GetUID() == trigger.GetUID()
 		if requested {
-			if request.Identity != identity || !sameRouteRevision(route, request.TCPRoute) {
+			if request.Identity != identity || !sameRouteRevision(route, trigger) || route.GetResourceVersion() != trigger.GetResourceVersion() {
 				return snapshot, controller.ErrGraphInputChanged
 			}
 			requestedIndex = len(snapshot.nodes)
 		}
 		node := cloud.RouteGraphNode{Disposition: cloud.GraphPreserve, Spec: cloud.RouteSpec{
-			Identity: identity, GatewayRequirements: cloud.GatewayRequirements{ListenerProtocol: cloud.ListenerProtocolTCP},
+			Identity: identity, GatewayRequirements: cloud.GatewayRequirements{ListenerProtocol: string(r.protocol())},
 		}}
-		lifecycle := route.Annotations[r.Config.RouteLifecycleAnnotation()]
+		lifecycle := route.GetAnnotations()[r.Config.RouteLifecycleAnnotation()]
 		switch {
 		case lifecycle == controller.RouteDetaching:
 			if request.Action == graph.Ensure || request.Action == graph.DeleteRoute && requested {
 				node.Disposition = cloud.GraphDelete
 			}
-		case route.UID == snapshot.winner && route.DeletionTimestamp.IsZero():
+		case route.GetUID() == snapshot.winner && route.GetDeletionTimestamp().IsZero():
 			winnerIndex, winner = len(snapshot.nodes), route
 		default:
 			peerAttached = true
 		}
 		snapshot.nodes = append(snapshot.nodes, node)
-		snapshot.revisions = append(snapshot.revisions, route.ResourceVersion)
+		snapshot.revisions = append(snapshot.revisions, route.GetResourceVersion())
 	}
 	if winner != nil && !peerAttached {
-		spec, backend, class, err := r.ensureRouteNode(ctx, winner, snapshot.gateway, listener)
+		spec, backend, class, err := r.ensureRouteNode(ctx, winner, observedGateway, listener)
 		if err != nil {
 			return snapshot, err
 		}
@@ -153,7 +183,7 @@ func (r *Reconciler) observeRoutes(ctx context.Context, request graph.Request, e
 			snapshot.backend, snapshot.class = backend, class
 		}
 	}
-	if request.TCPRoute != nil {
+	if trigger != nil {
 		if requestedIndex < 0 ||
 			request.Action == graph.Ensure && snapshot.nodes[requestedIndex].Disposition != cloud.GraphEnsure ||
 			request.Action == graph.DeleteRoute && snapshot.nodes[requestedIndex].Disposition != cloud.GraphDelete {
@@ -178,32 +208,36 @@ func (r *Reconciler) liveGateway(ctx context.Context, identity cloud.Identity, e
 	return gateway, nil
 }
 
-func (r *Reconciler) ensureRouteNode(ctx context.Context, route *gatewayv1.TCPRoute, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) (*cloud.RouteSpec, types.UID, types.UID, error) {
+func (r *Reconciler) ensureRouteNode(ctx context.Context, route *transportRoute, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) (*cloud.RouteSpec, objectRevision, objectRevision, error) {
 	class, err := r.gatewayClass(ctx, gateway)
 	if err != nil || class == nil || !controller.GatewayClassSupportsInstalledVersion(class) {
-		return nil, "", "", err
+		return nil, objectRevision{}, objectRevision{}, err
 	}
 	if err := r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
 		if errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) {
 			err = nil
 		}
-		return nil, "", "", err
+		return nil, objectRevision{}, objectRevision{}, err
 	}
 	topology, valid, err := r.gatewayTopology(gateway, listener)
 	if err != nil || !valid {
-		return nil, "", "", err
+		return nil, objectRevision{}, objectRevision{}, err
 	}
 	ref, diagnostic, err := r.authorizedBackend(ctx, route)
 	if err != nil || diagnostic != nil || ref.disabled {
-		return nil, "", "", err
+		return nil, objectRevision{}, objectRevision{}, err
 	}
 	service, diagnostic, err := r.backendService(ctx, ref)
 	if err != nil || diagnostic != nil {
-		return nil, "", "", err
+		return nil, objectRevision{}, objectRevision{}, err
 	}
 	spec, diagnostic, err := r.routeSpec(ctx, route, gateway, listener, ref, service, topology)
 	if err != nil || diagnostic != nil {
-		return nil, "", "", err
+		return nil, objectRevision{}, objectRevision{}, err
 	}
-	return &spec, service.UID, class.UID, nil
+	target, err := r.forwardingTarget(service, ref, spec)
+	if err != nil || r.currentTarget(route, route.parentRefs[0], target) == nil {
+		return nil, objectRevision{}, objectRevision{}, err
+	}
+	return &spec, revisionOf(service), revisionOf(class), nil
 }

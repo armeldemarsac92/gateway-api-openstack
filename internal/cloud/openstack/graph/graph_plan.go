@@ -43,8 +43,8 @@ func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual obs
 		}
 		return plan, result, nil
 	}
-	if isTCPGraph(desired, actual) {
-		return p.buildTCPGraphPlan(desired, actual)
+	if usesDefaultPool(actual.protocol) {
+		return p.buildDefaultPoolGraphPlan(desired, actual)
 	}
 	result.Routes = observedRouteDeleteCompletions(desired, actual)
 	plan, err := buildGatewayPrerequisitePlan(desired, actual)
@@ -215,7 +215,7 @@ func buildGatewayPrerequisitePlan(desired desiredGatewayGraph, actual observedGa
 	if actual.floatingIP != nil && networkID != "" && actual.floatingIP.FloatingNetworkID != networkID {
 		return nil, fmt.Errorf("%w: Gateway Floating IP network differs from its binding", cloud.ErrOwnershipConflict)
 	}
-	if actual.listener != nil && actual.listener.DefaultPoolID != "" && !isTCPGraph(desired, actual) {
+	if actual.listener != nil && actual.listener.DefaultPoolID != "" && !usesDefaultPool(actual.protocol) {
 		// Octavia may return a cleared field before Amphora applies it. Keep the
 		// frontend closed across that pending update so readback alone cannot
 		// mark the Gateway programmed before the data plane has changed.
@@ -235,7 +235,7 @@ func buildGatewayPrerequisitePlan(desired desiredGatewayGraph, actual observedGa
 
 func buildGatewayTrafficRestorationPlan(desired desiredGatewayGraph, actual observedGatewayGraph) ([]graphMutation, error) {
 	if desired.spec.Gateway.Disposition != cloud.GraphEnsure || actual.loadBalancer == nil || actual.listener == nil ||
-		actual.listener.DefaultPoolID != "" && !isTCPGraph(desired, actual) {
+		actual.listener.DefaultPoolID != "" && !usesDefaultPool(actual.protocol) {
 		return nil, nil
 	}
 	var plan []graphMutation
@@ -261,8 +261,8 @@ func buildGatewayTrafficRestorationPlan(desired desiredGatewayGraph, actual obse
 }
 
 func gatewayGraphDeletionPlan(actual observedGatewayGraph) []graphMutation {
-	if actual.deletion.tcpListener != nil && actual.deletion.tcpListener.DefaultPoolID != "" {
-		return []graphMutation{clearTCPListenerDefault()}
+	if listener := actual.deletion.defaultPoolListener; listener != nil && listener.DefaultPoolID != "" {
+		return []graphMutation{clearListenerDefaultPool(listener.Protocol)}
 	}
 	// Removing a predicate from a serving L7 policy can widen its match.
 	// Close all frontends first. The next pass waits for ACTIVE and revalidates

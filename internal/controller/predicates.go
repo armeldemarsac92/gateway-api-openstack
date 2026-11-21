@@ -160,38 +160,20 @@ func HTTPRoutePeerPredicate() predicate.Predicate {
 	return updatePredicate(generationOrDeletionChanged)
 }
 
-// HTTPRouteForGatewayPredicate selects HTTPRoute changes that may affect a
-// Gateway's attached route state.
-func HTTPRouteForGatewayPredicate(config Config) predicate.Predicate {
+// RouteForGatewayPredicate selects Route changes that may affect a Gateway's
+// attached route state.
+func RouteForGatewayPredicate(config Config) predicate.Predicate {
 	return updatePredicate(func(oldObject, newObject client.Object) bool {
-		oldRoute, oldOK := oldObject.(*gatewayv1.HTTPRoute)
-		newRoute, newOK := newObject.(*gatewayv1.HTTPRoute)
+		_, oldStatuses, oldOK := RouteParents(oldObject)
+		_, newStatuses, newOK := RouteParents(newObject)
 		if !oldOK || !newOK {
 			return true
 		}
-		return generationOrDeletionChanged(oldRoute, newRoute) ||
-			routeBindingChanged(config, oldRoute, newRoute) ||
+		return generationOrDeletionChanged(oldObject, newObject) ||
+			routeBindingChanged(config, oldObject, newObject) ||
 			!equality.Semantic.DeepEqual(
-				controllerRouteParentStatuses(oldRoute.Status.Parents, config.ControllerName),
-				controllerRouteParentStatuses(newRoute.Status.Parents, config.ControllerName),
-			)
-	})
-}
-
-// TCPRouteForGatewayPredicate selects TCPRoute changes that may affect a
-// Gateway's attached route state.
-func TCPRouteForGatewayPredicate(config Config) predicate.Predicate {
-	return updatePredicate(func(oldObject, newObject client.Object) bool {
-		oldRoute, oldOK := oldObject.(*gatewayv1.TCPRoute)
-		newRoute, newOK := newObject.(*gatewayv1.TCPRoute)
-		if !oldOK || !newOK {
-			return true
-		}
-		return generationOrDeletionChanged(oldRoute, newRoute) ||
-			routeBindingChanged(config, oldRoute, newRoute) ||
-			!equality.Semantic.DeepEqual(
-				controllerRouteParentStatuses(oldRoute.Status.Parents, config.ControllerName),
-				controllerRouteParentStatuses(newRoute.Status.Parents, config.ControllerName),
+				controllerRouteParentStatuses(oldStatuses, config.ControllerName),
+				controllerRouteParentStatuses(newStatuses, config.ControllerName),
 			)
 	})
 }

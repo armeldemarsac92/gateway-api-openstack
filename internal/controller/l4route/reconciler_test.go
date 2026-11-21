@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package tcproute
+package l4route
 
 import (
 	"context"
@@ -133,7 +133,7 @@ func testReconciler(t *testing.T, objects ...client.Object) *Reconciler {
 			Name: name, Annotations: map[string]string{gatewayconsts.ChannelAnnotation: "standard", gatewayconsts.BundleVersionAnnotation: gatewayconsts.BundleVersion},
 		}})
 	}
-	builder := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&gatewayv1.TCPRoute{}).WithObjects(objects...)
+	builder := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&gatewayv1.TCPRoute{}, &gatewayv1.UDPRoute{}).WithObjects(objects...)
 	if err := controller.SetupIndexes(t.Context(), fakeRouteIndexes{builder}, config); err != nil {
 		t.Fatal(err)
 	}
@@ -154,20 +154,21 @@ func reconcileTCPRoute(t *testing.T, r *Reconciler, route *gatewayv1.TCPRoute) *
 	return current
 }
 
-func checkRouteCondition(t *testing.T, route *gatewayv1.TCPRoute, name gatewayv1.GatewayController, conditionType string, status metav1.ConditionStatus, reason string) {
+func checkRouteCondition(t *testing.T, object client.Object, name gatewayv1.GatewayController, conditionType string, status metav1.ConditionStatus, reason string) {
 	t.Helper()
-	for _, parent := range route.Status.Parents {
+	route := viewRoute(object)
+	for _, parent := range route.status.Parents {
 		if parent.ControllerName != name {
 			continue
 		}
 		condition := meta.FindStatusCondition(parent.Conditions, conditionType)
 		if condition != nil && condition.Status == status && condition.Reason == reason &&
-			(name == "foreign.example/controller" || condition.ObservedGeneration == route.Generation) {
+			(name == "foreign.example/controller" || condition.ObservedGeneration == route.GetGeneration()) {
 			return
 		}
-		t.Fatalf("%s %s condition = %+v, want %s %s (generation %d)", route.Name, conditionType, condition, status, reason, route.Generation)
+		t.Fatalf("%s %s condition = %+v, want %s %s (generation %d)", route.GetName(), conditionType, condition, status, reason, route.GetGeneration())
 	}
-	t.Fatalf("%s has no parent status from %s", route.Name, name)
+	t.Fatalf("%s has no parent status from %s", route.GetName(), name)
 }
 
 type denyServiceRead struct{ client.Reader }

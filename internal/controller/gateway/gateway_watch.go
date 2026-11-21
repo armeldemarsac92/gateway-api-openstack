@@ -34,23 +34,11 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 )
 
-func (r *Reconciler) gatewayRequestsForHTTPRoute(_ context.Context, object client.Object) []reconcile.Request {
-	route, ok := object.(*gatewayv1.HTTPRoute)
+func (r *Reconciler) gatewayRequestsForRoute(_ context.Context, route client.Object) []reconcile.Request {
+	parents, statuses, ok := controller.RouteParents(route)
 	if !ok {
 		return nil
 	}
-	return r.gatewayRequestsForRoute(route, route.Spec.ParentRefs, route.Status.Parents)
-}
-
-func (r *Reconciler) gatewayRequestsForTCPRoute(_ context.Context, object client.Object) []reconcile.Request {
-	route, ok := object.(*gatewayv1.TCPRoute)
-	if !ok {
-		return nil
-	}
-	return r.gatewayRequestsForRoute(route, route.Spec.ParentRefs, route.Status.Parents)
-}
-
-func (r *Reconciler) gatewayRequestsForRoute(route client.Object, parents []gatewayv1.ParentReference, statuses []gatewayv1.RouteParentStatus) []reconcile.Request {
 	keys := make(map[types.NamespacedName]struct{}, len(parents)+len(statuses)+1)
 	addParent := func(parentRef gatewayv1.ParentReference) {
 		if !controller.IsGatewayParentRef(parentRef) || parentRef.Name == "" {
@@ -112,18 +100,13 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 	if r.Writer == nil {
 		return errors.New("gateway graph writer is required")
 	}
-	return ctrl.NewControllerManagedBy(manager).
-		For(&gatewayv1.Gateway{}, builder.WithPredicates(controller.GatewayReconcilePredicate(r.Config))).
-		Watches(
-			&gatewayv1.HTTPRoute{},
-			handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForHTTPRoute),
-			builder.WithPredicates(controller.HTTPRouteForGatewayPredicate(r.Config)),
-		).
-		Watches(
-			&gatewayv1.TCPRoute{},
-			handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForTCPRoute),
-			builder.WithPredicates(controller.TCPRouteForGatewayPredicate(r.Config)),
-		).
+	gatewayController := ctrl.NewControllerManagedBy(manager).
+		For(&gatewayv1.Gateway{}, builder.WithPredicates(controller.GatewayReconcilePredicate(r.Config)))
+	for _, route := range []client.Object{&gatewayv1.HTTPRoute{}, &gatewayv1.TCPRoute{}, &gatewayv1.UDPRoute{}} {
+		gatewayController.Watches(route, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForRoute),
+			builder.WithPredicates(controller.RouteForGatewayPredicate(r.Config)))
+	}
+	return gatewayController.
 		Watches(
 			&gatewayv1.GatewayClass{},
 			handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForGatewayClass),

@@ -27,6 +27,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -34,6 +35,7 @@ import (
 	"sigs.k8s.io/gateway-api/conformance"
 	"sigs.k8s.io/gateway-api/conformance/tests"
 	"sigs.k8s.io/gateway-api/conformance/utils/config"
+	"sigs.k8s.io/gateway-api/conformance/utils/kubernetes"
 	"sigs.k8s.io/gateway-api/conformance/utils/suite"
 	"sigs.k8s.io/gateway-api/pkg/features"
 
@@ -42,6 +44,47 @@ import (
 )
 
 func TestKindUpstreamTCPStatus(t *testing.T) {
+	runKindUpstreamStatus(t, "kind-upstream-status", "standard", features.SupportTCPRoute, []suite.ConformanceTest{
+		tests.TCPRouteInvalidNonTCPListener,
+		tests.TCPRouteInvalidCrossNamespaceBackendRef,
+		tests.TCPRouteInvalidBackendRefNonexistent,
+	})
+}
+
+func TestKindUpstreamUDPStatus(t *testing.T) {
+	s := runKindUpstreamStatus(t, "kind-upstream-udp-status", os.Getenv("GATEWAY_API_CHANNEL"), features.SupportUDPRoute, []suite.ConformanceTest{
+		tests.UDPRouteInvalidCrossNamespaceBackendRef,
+		tests.UDPRouteInvalidBackendRefNonexistent,
+	})
+
+	// The upstream listener-rejection case requires a programmed TLS Gateway.
+	// Check rejection on the existing HTTP Gateway with the same status helpers.
+	t.Run("UDPRouteRejectedByHTTPListener", func(t *testing.T) {
+		gateway := client.ObjectKey{Namespace: suite.InfrastructureNamespace, Name: "same-namespace"}
+		route := &gatewayv1.UDPRoute{
+			ObjectMeta: metav1.ObjectMeta{Namespace: gateway.Namespace, Name: "udp-route-http-listener"},
+			Spec: gatewayv1.UDPRouteSpec{
+				CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{{
+					Name: gatewayv1.ObjectName(gateway.Name), SectionName: ptr.To(gatewayv1.SectionName("http")),
+				}}},
+				Rules: []gatewayv1.UDPRouteRule{{BackendRefs: []gatewayv1.BackendRef{{
+					BackendObjectReference: gatewayv1.BackendObjectReference{
+						Name: "udp-echo", Port: ptr.To(gatewayv1.PortNumber(8080)),
+					},
+				}}}},
+			},
+		}
+		s.Applier.MustApplyObjectsWithCleanup(t, s.Client, s.TimeoutConfig, []client.Object{route}, true)
+		kubernetes.UDPRouteMustHaveCondition(t, s.Client, s.TimeoutConfig, client.ObjectKeyFromObject(route), gateway, metav1.Condition{
+			Type: string(gatewayv1.RouteConditionAccepted), Status: metav1.ConditionFalse,
+			Reason: string(gatewayv1.RouteReasonNotAllowedByListeners),
+		})
+		kubernetes.GatewayMustHaveZeroRoutes(t, s.Client, s.TimeoutConfig, gateway)
+	})
+}
+
+func runKindUpstreamStatus(t *testing.T, className, channel string, routeFeature features.FeatureName, cases []suite.ConformanceTest) *suite.ConformanceTestSuite {
+	t.Helper()
 	kubeconfig := os.Getenv("HIBISCUS_TEST_KUBECONFIG")
 	if kubeconfig == "" {
 		t.Fatal("HIBISCUS_TEST_KUBECONFIG must point to the disposable cluster kubeconfig")
@@ -66,7 +109,7 @@ func TestKindUpstreamTCPStatus(t *testing.T) {
 	}
 
 	cfg := testConfig()
-	cfg.GatewayAPIChannel = "standard"
+	cfg.GatewayAPIChannel = channel
 	if err := cfg.ValidateInstalledGatewayAPIVersion(t.Context(), apiClient); err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +144,6 @@ func TestKindUpstreamTCPStatus(t *testing.T) {
 		t.Fatal("manager cache did not sync")
 	}
 
-	const className = "kind-upstream-status"
 	parameters := envtestClassParameters(className)
 	class := &gatewayv1.GatewayClass{
 		ObjectMeta: metav1.ObjectMeta{Name: className},
@@ -118,11 +160,6 @@ func TestKindUpstreamTCPStatus(t *testing.T) {
 		}
 	}
 
-	cases := []suite.ConformanceTest{
-		tests.TCPRouteInvalidNonTCPListener,
-		tests.TCPRouteInvalidCrossNamespaceBackendRef,
-		tests.TCPRouteInvalidBackendRefNonexistent,
-	}
 	manifestFS := []fs.FS{&conformance.Manifests}
 	baseManifests := "base/manifests.yaml"
 	if statusBase := os.Getenv("HIBISCUS_STATUS_BASE_DIR"); statusBase != "" {
@@ -136,7 +173,7 @@ func TestKindUpstreamTCPStatus(t *testing.T) {
 			CleanupTestResources: true,
 			DisableParallelTests: true,
 			SupportedFeatures: []features.FeatureName{
-				features.SupportGateway, features.SupportTCPRoute, features.SupportReferenceGrant,
+				features.SupportGateway, routeFeature, features.SupportReferenceGrant,
 			},
 			TimeoutConfig: config.TimeoutConfig{NamespacesMustBeReady: 90 * time.Second},
 		},
@@ -153,4 +190,5 @@ func TestKindUpstreamTCPStatus(t *testing.T) {
 	if err := s.Run(t, cases); err != nil {
 		t.Fatal(err)
 	}
+	return s
 }

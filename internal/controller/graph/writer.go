@@ -47,6 +47,7 @@ type Request struct {
 	Gateway  *gatewayv1.Gateway
 	Route    *gatewayv1.HTTPRoute
 	TCPRoute *gatewayv1.TCPRoute
+	UDPRoute *gatewayv1.UDPRoute
 }
 
 // Reconciler is the sole Kubernetes-facing graph mutation boundary.

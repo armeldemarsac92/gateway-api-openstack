@@ -63,7 +63,7 @@ func TestGatewayRequestsForHTTPRoute(t *testing.T) {
 	}
 
 	reconciler := newTestReconciler(Reconciler{Config: config}, nil)
-	requests := reconciler.gatewayRequestsForHTTPRoute(context.Background(), route)
+	requests := reconciler.gatewayRequestsForRoute(context.Background(), route)
 	want := []reconcile.Request{
 		{NamespacedName: types.NamespacedName{Namespace: "default", Name: "edge"}},
 		{NamespacedName: types.NamespacedName{Namespace: "default", Name: "status-parent"}},
@@ -71,9 +71,9 @@ func TestGatewayRequestsForHTTPRoute(t *testing.T) {
 		{NamespacedName: types.NamespacedName{Namespace: "previous", Name: "bound"}},
 	}
 	if !reflect.DeepEqual(requests, want) {
-		t.Fatalf("gatewayRequestsForHTTPRoute() = %#v, want %#v", requests, want)
+		t.Fatalf("gatewayRequestsForRoute() = %#v, want %#v", requests, want)
 	}
-	if requests := reconciler.gatewayRequestsForHTTPRoute(context.Background(), &gatewayv1.Gateway{}); requests != nil {
+	if requests := reconciler.gatewayRequestsForRoute(context.Background(), &gatewayv1.Gateway{}); requests != nil {
 		t.Fatalf("requests for non-HTTPRoute object = %#v, want nil", requests)
 	}
 }
@@ -104,10 +104,10 @@ func TestGatewayRequestsForGatewayClass(t *testing.T) {
 	}
 }
 
-func TestGatewayWatchesTCPRouteStatusAndPreviousBinding(t *testing.T) {
+func TestGatewayWatchesUDPRouteStatusAndPreviousBinding(t *testing.T) {
 	config := testConfig()
 	reconciler := newTestReconciler(Reconciler{Config: config}, nil)
-	old := &gatewayv1.TCPRoute{
+	old := &gatewayv1.UDPRoute{
 		ObjectMeta: metav1.ObjectMeta{Namespace: "apps", Name: "backend", Annotations: map[string]string{
 			config.RouteGatewayNamespaceAnnotation(): "old-gateways",
 			config.RouteGatewayNameAnnotation():      "old-edge",
@@ -121,12 +121,12 @@ func TestGatewayWatchesTCPRouteStatusAndPreviousBinding(t *testing.T) {
 	}
 	unbound := old.DeepCopy()
 	unbound.Annotations = nil
-	predicate := controller.TCPRouteForGatewayPredicate(config)
+	predicate := controller.RouteForGatewayPredicate(config)
 	if !predicate.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: status}) ||
 		!predicate.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: unbound}) {
 		t.Fatal("status or binding update was filtered out")
 	}
-	requests := reconciler.gatewayRequestsForTCPRoute(t.Context(), status)
+	requests := reconciler.gatewayRequestsForRoute(t.Context(), status)
 	want := []reconcile.Request{
 		{NamespacedName: types.NamespacedName{Namespace: "apps", Name: "edge"}},
 		{NamespacedName: types.NamespacedName{Namespace: "old-gateways", Name: "old-edge"}},

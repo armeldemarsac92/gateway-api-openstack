@@ -53,11 +53,11 @@ type gatewayPoolDeletionPlan []gatewayDeletionStep
 // gatewayDeletionPlan separates the load balancer graph into dependency
 // subplans. No step may run until all three subplans have been validated.
 type gatewayDeletionPlan struct {
-	listeners   gatewayListenerDeletionPlan
-	routes      gatewayRouteDeletionPlan
-	pools       gatewayPoolDeletionPlan
-	tcpListener *listeners.Listener
-	tcpPending  string
+	listeners           gatewayListenerDeletionPlan
+	routes              gatewayRouteDeletionPlan
+	pools               gatewayPoolDeletionPlan
+	defaultPoolListener *listeners.Listener
+	defaultPoolPending  string
 }
 
 // orderedSteps flattens the validated subplans in reverse dependency order.
@@ -72,28 +72,37 @@ func (p gatewayDeletionPlan) orderedSteps() []gatewayDeletionStep {
 // buildGatewayDeletionPlan validates the complete load balancer graph before
 // returning any work. Callers must not execute a deletion step when this
 // method returns an error.
-func (p *Provider) buildGatewayDeletionPlan(ctx context.Context, identity Identity, lb *octavia.LoadBalancer, routeIdentities []Identity, protocol string) (gatewayDeletionPlan, error) {
+func (p *Provider) buildGatewayDeletionPlan(ctx context.Context, identity Identity, lb *octavia.LoadBalancer, owners []routeGraphOwner, protocol string) (gatewayDeletionPlan, error) {
 	listenerList, err := p.listGatewayListeners(ctx, lb)
 	if err != nil {
 		return gatewayDeletionPlan{}, err
 	}
-	tcp := protocol == cloud.ListenerProtocolTCP
+	if protocol == "" && len(listenerList) == 0 {
+		protocol, err = detachingProtocolWithoutListener(owners)
+		if err != nil {
+			return gatewayDeletionPlan{}, err
+		}
+	}
+	defaultPool := usesDefaultPool(protocol)
 	for _, listener := range listenerList {
-		tcp = tcp || listener.Protocol == cloud.ListenerProtocolTCP
+		defaultPool = defaultPool || usesDefaultPool(listener.Protocol)
 		if err := p.validateGatewayDeletionListener(identity, listener, lb.ID); err != nil {
 			return gatewayDeletionPlan{}, err
 		}
 	}
-	if tcp {
-		if len(listenerList) > 1 || len(listenerList) == 1 && (listenerList[0].Protocol != cloud.ListenerProtocolTCP ||
-			protocol != "" && protocol != cloud.ListenerProtocolTCP) {
-			return gatewayDeletionPlan{}, fmt.Errorf("%w: unexpected listener protocol or count before TCP Gateway deletion", cloud.ErrOwnershipConflict)
+	if defaultPool {
+		if len(listenerList) > 1 {
+			return gatewayDeletionPlan{}, fmt.Errorf("%w: multiple listeners before Gateway deletion", cloud.ErrOwnershipConflict)
 		}
 		var listener *listeners.Listener
 		if len(listenerList) == 1 {
 			listener = &listenerList[0]
+			if !usesDefaultPool(listener.Protocol) || protocol != "" && protocol != listener.Protocol {
+				return gatewayDeletionPlan{}, fmt.Errorf("%w: listener protocol %q differs from its binding before Gateway deletion", cloud.ErrOwnershipConflict, listener.Protocol)
+			}
+			protocol = listener.Protocol
 		}
-		return p.buildTCPGatewayDeletionPlan(ctx, routeIdentities, lb, listener)
+		return p.buildDefaultPoolGatewayDeletionPlan(ctx, owners, lb, listener, protocol)
 	}
 	listenerPlan, routePlan, err := p.buildGatewayListenerDeletionPlans(ctx, identity, listenerList)
 	if err != nil {
@@ -143,7 +152,7 @@ func (p *Provider) validateGatewayDeletionListener(identity Identity, listener l
 	if !identity.MatchesGateway(listener.Tags, roleListener) {
 		return fmt.Errorf("%w: listener %s", cloud.ErrOwnershipConflict, listener.ID)
 	}
-	if listener.Protocol != "" && listener.Protocol != cloud.ListenerProtocolHTTP && listener.Protocol != cloud.ListenerProtocolTCP {
+	if listener.Protocol != "" && !supportedListenerProtocol(listener.Protocol) {
 		return fmt.Errorf("%w: unexpected listener protocol %q", cloud.ErrOwnershipConflict, listener.Protocol)
 	}
 	for _, parent := range listener.Loadbalancers {
@@ -216,8 +225,8 @@ func (p *Provider) buildGatewayPoolDeletionPlan(ctx context.Context, identity Id
 
 	var plan gatewayPoolDeletionPlan
 	for _, pool := range poolList {
-		if pool.Protocol == cloud.ListenerProtocolTCP {
-			return nil, fmt.Errorf("%w: TCP pool %s needs an explicit TCP Gateway or its owned listener for cleanup", cloud.ErrOwnershipConflict, pool.ID)
+		if usesDefaultPool(pool.Protocol) {
+			return nil, fmt.Errorf("%w: %s pool %s needs its bound protocol or owned listener for cleanup", cloud.ErrOwnershipConflict, pool.Protocol, pool.ID)
 		}
 		if err := p.validateGatewayDeletionPool(identity, pool, lb.ID); err != nil {
 			return nil, err

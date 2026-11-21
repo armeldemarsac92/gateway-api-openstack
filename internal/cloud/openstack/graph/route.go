@@ -26,6 +26,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia/amphora"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
+	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/monitors"
 )
 
 type desiredPolicy struct {
@@ -53,6 +54,13 @@ type desiredRoute struct {
 
 func (r desiredRoute) protocol() string {
 	return cloud.NormalizeListenerProtocol(r.spec.GatewayRequirements.ListenerProtocol)
+}
+
+func (r desiredRoute) monitorType() string {
+	if r.protocol() == cloud.ListenerProtocolUDP {
+		return monitors.TypeUDPConnect
+	}
+	return r.protocol()
 }
 
 func (p *Provider) buildDesiredRoute(spec cloud.RouteSpec) (desiredRoute, error) {
@@ -120,9 +128,9 @@ func (p *Provider) buildDesiredRoute(spec cloud.RouteSpec) (desiredRoute, error)
 				return invalid(err)
 			}
 		}
-	case cloud.ListenerProtocolTCP:
+	case cloud.ListenerProtocolTCP, cloud.ListenerProtocolUDP:
 		if spec.Hostname != "" || spec.PathType != "" || spec.PathValue != "" {
-			return invalid(errors.New("a TCP route cannot contain HTTP matches"))
+			return invalid(fmt.Errorf("a %s route cannot contain HTTP matches", protocol))
 		}
 	default:
 		return invalid(fmt.Errorf("unsupported listener protocol %q", protocol))

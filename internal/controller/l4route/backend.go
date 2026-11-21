@@ -14,11 +14,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package tcproute
+package l4route
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
@@ -39,25 +38,25 @@ func backendRejection(reason gatewayv1.RouteConditionReason, message string) *mo
 	return &model.Diagnostic{Condition: string(gatewayv1.RouteConditionResolvedRefs), Reason: string(reason), Message: message}
 }
 
-func (r *Reconciler) authorizedBackend(ctx context.Context, route *gatewayv1.TCPRoute) (serviceReference, *model.Diagnostic, error) {
-	if len(route.Spec.Rules) != 1 || len(route.Spec.Rules[0].BackendRefs) != 1 {
-		return serviceReference{}, backendRejection(gatewayv1.RouteReasonUnsupportedValue, "TCP forwarding requires one rule with exactly one Service backendRef"), nil
+func (r *Reconciler) authorizedBackend(ctx context.Context, route *transportRoute) (serviceReference, *model.Diagnostic, error) {
+	if len(route.backendRefs) != 1 {
+		return serviceReference{}, backendRejection(gatewayv1.RouteReasonUnsupportedValue, fmt.Sprintf("%s forwarding requires one rule with exactly one Service backendRef", r.protocol())), nil
 	}
-	backend := route.Spec.Rules[0].BackendRefs[0]
-	key, supported := model.BackendServiceReference(route.Namespace, backend.BackendObjectReference)
+	backend := route.backendRefs[0]
+	key, supported := model.BackendServiceReference(route.GetNamespace(), backend.BackendObjectReference)
 	if !supported {
-		return serviceReference{}, backendRejection(gatewayv1.RouteReasonInvalidKind, "the TCPRoute backendRef must refer to a core Service"), nil
+		return serviceReference{}, backendRejection(gatewayv1.RouteReasonInvalidKind, fmt.Sprintf("the %s backendRef must refer to a core Service", r.kind())), nil
 	}
-	if key.Namespace != route.Namespace {
+	if key.Namespace != route.GetNamespace() {
 		var grants gatewayv1.ReferenceGrantList
 		if err := r.APIReader.List(ctx, &grants, client.InNamespace(key.Namespace)); err != nil {
 			return serviceReference{}, nil, err
 		}
 		if grants.Continue != "" {
-			return serviceReference{}, nil, errors.New("incomplete TCPRoute ReferenceGrant list")
+			return serviceReference{}, nil, fmt.Errorf("incomplete %s ReferenceGrant list", r.kind())
 		}
-		if !model.BackendReferenceAllowedFor("TCPRoute", route.Namespace, key, grants.Items) {
-			return serviceReference{}, backendRejection(gatewayv1.RouteReasonRefNotPermitted, "no ReferenceGrant permits this TCPRoute to use its backend Service"), nil
+		if !model.BackendReferenceAllowedFor(r.kind(), route.GetNamespace(), key, grants.Items) {
+			return serviceReference{}, backendRejection(gatewayv1.RouteReasonRefNotPermitted, fmt.Sprintf("no ReferenceGrant permits this %s to use its backend Service", r.kind())), nil
 		}
 	}
 	return serviceReference{key: key, port: backend.Port, disabled: backend.Weight != nil && *backend.Weight == 0}, nil, nil
@@ -72,7 +71,7 @@ func (r *Reconciler) backendService(ctx context.Context, ref serviceReference) (
 	if err != nil {
 		return nil, nil, err
 	}
-	if _, diagnostic := model.ResolveTCPServicePort(&service, ref.port); diagnostic != nil {
+	if _, diagnostic := model.ResolveTransportServicePort(&service, ref.port, corev1.Protocol(r.protocol())); diagnostic != nil {
 		return nil, diagnostic, nil
 	}
 	return &service, nil, nil

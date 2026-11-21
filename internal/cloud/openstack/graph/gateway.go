@@ -83,14 +83,14 @@ func (p *Provider) GetGateway(
 	if listener == nil {
 		return cloud.GatewayProgressingResult("Octavia listener has not been created", p.pollInterval), true, nil
 	}
-	if listener.Protocol != string(listeners.ProtocolHTTP) && listener.Protocol != string(listeners.ProtocolTCP) {
+	if !supportedListenerProtocol(listener.Protocol) {
 		return cloud.GatewayResult{}, false, fmt.Errorf("%w: listener %s has protocol %s", cloud.ErrOwnershipConflict, listener.ID, listener.Protocol)
 	}
-	if listener.Protocol == cloud.ListenerProtocolTCP {
-		if err := validateTCPListener(listener, loadBalancer.ID); err != nil {
+	if usesDefaultPool(listener.Protocol) {
+		if err := validateDefaultPoolListener(listener, loadBalancer.ID); err != nil {
 			return cloud.GatewayResult{}, false, err
 		}
-		outcome, err := p.tcpListenerOutcome(listener, false)
+		outcome, err := p.defaultPoolListenerOutcome(listener, false)
 		if err != nil {
 			return cloud.GatewayResult{}, false, err
 		}

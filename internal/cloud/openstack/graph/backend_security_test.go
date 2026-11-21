@@ -30,9 +30,23 @@ import (
 )
 
 func TestBackendSecurityFailureRetainsRouteRetryAndRecovers(t *testing.T) {
+	for _, protocol := range []string{"", "UDP"} {
+		t.Run(cloud.NormalizeListenerProtocol(protocol), func(t *testing.T) {
+			testBackendSecurityFailureRetainsRouteRetryAndRecovers(t, protocol)
+		})
+	}
+}
+
+func testBackendSecurityFailureRetainsRouteRetryAndRecovers(t *testing.T, protocol string) {
 	const serverID = "12345678-1234-1234-1234-123456789abc"
 	identity := safetyTestIdentity(t)
 	spec := completeGraphSpec(identity)
+	if protocol == "UDP" {
+		spec.Gateway.Spec.ListenerProtocol = protocol
+		route := &spec.Routes[0].Spec
+		route.GatewayRequirements.ListenerProtocol = protocol
+		route.Hostname, route.PathType, route.PathValue = "", "", ""
+	}
 	spec.Routes[0].Spec.BackendSecurityGroupIDs = []string{"sg-a"}
 	spec.Routes[0].Spec.Members[0].ProviderID = "openstack:///" + serverID
 	requests := &gatewayTransitionRequests{}
@@ -57,8 +71,12 @@ func TestBackendSecurityFailureRetainsRouteRetryAndRecovers(t *testing.T) {
 			safetyWriteJSON(t, writer, map[string]any{"floatingips": []any{}})
 		case "/security-groups/sg-a":
 			rules := []any{}
-			if allowed {
-				rules = append(rules, map[string]any{"direction": "ingress", "ethertype": "IPv4", "protocol": "tcp", "port_range_min": 30080, "port_range_max": 30080})
+			if allowed || protocol == "UDP" {
+				ruleProtocol := "tcp"
+				if allowed && protocol == "UDP" {
+					ruleProtocol = "17"
+				}
+				rules = append(rules, map[string]any{"direction": "ingress", "ethertype": "IPv4", "protocol": ruleProtocol, "port_range_min": 30080, "port_range_max": 30080})
 			}
 			safetyWriteJSON(t, writer, map[string]any{"security_group": map[string]any{"id": "sg-a", "project_id": "project-a", "security_group_rules": rules}})
 		case "/ports":

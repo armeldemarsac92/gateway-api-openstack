@@ -182,10 +182,16 @@ func TestRunCommandStopsAtFirstFailureWithoutWritingStdout(t *testing.T) {
 			wantMessage: "could not read Kubernetes ownership bindings",
 		},
 		{
+			name:        "UDPRoute list",
+			failure:     "list-udp-routes",
+			wantTrace:   []string{"load-kubeconfig", "new-kube-reader", "new-service-clients", "list-gateways", "list-routes", "list-tcp-routes", "list-udp-routes"},
+			wantMessage: "could not read Kubernetes ownership bindings",
+		},
+		{
 			name:    "OpenStack scan",
 			failure: "scan",
 			wantTrace: []string{
-				"load-kubeconfig", "new-kube-reader", "new-service-clients", "list-gateways", "list-routes", "list-tcp-routes", "new-scanner", "scan",
+				"load-kubeconfig", "new-kube-reader", "new-service-clients", "list-gateways", "list-routes", "list-tcp-routes", "list-udp-routes", "new-scanner", "scan",
 			},
 			wantMessage: "could not scan OpenStack ownership (RetryableService)",
 		},
@@ -193,7 +199,7 @@ func TestRunCommandStopsAtFirstFailureWithoutWritingStdout(t *testing.T) {
 			name:    "report construction",
 			failure: "build-report",
 			wantTrace: []string{
-				"load-kubeconfig", "new-kube-reader", "new-service-clients", "list-gateways", "list-routes", "list-tcp-routes", "new-scanner", "scan", "now",
+				"load-kubeconfig", "new-kube-reader", "new-service-clients", "list-gateways", "list-routes", "list-tcp-routes", "list-udp-routes", "new-scanner", "scan", "now",
 			},
 			wantMessage: "could not build audit report",
 		},
@@ -557,6 +563,11 @@ func (r *staticAuditReader) List(ctx context.Context, list client.ObjectList, _ 
 	case *gatewayv1.TCPRouteList:
 		if r.onList != nil {
 			return r.onList("list-tcp-routes")
+		}
+		return nil
+	case *gatewayv1.UDPRouteList:
+		if r.onList != nil {
+			return r.onList("list-udp-routes")
 		}
 		return nil
 	default:

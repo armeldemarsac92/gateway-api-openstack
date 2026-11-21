@@ -14,13 +14,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package tcproute
+package l4route
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
 	"strconv"
 	"time"
 
@@ -40,41 +39,48 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/routebackend"
 )
 
-// Reconciler converges the TCPRoute component of an Octavia Gateway graph.
+// Reconciler converges one transport route kind in an Octavia Gateway graph.
 type Reconciler struct {
 	client.Client
 	APIReader   client.Reader
 	Config      controller.Config
 	Writer      graph.Reconciler
 	Coordinator *graph.Coordinator
+	Protocol    gatewayv1.ProtocolType // TCP (including the zero value) or UDP.
 }
 
 type routePlan struct {
-	parents    []routeParent
-	resolved   metav1.Condition
-	programmed metav1.Condition
-	desired    *cloud.RouteSpec
-	detach     bool
-	requeue    time.Duration
+	parents      []routeParent
+	resolved     metav1.Condition
+	programmed   metav1.Condition
+	desired      *cloud.RouteSpec
+	target       string
+	targetStatus metav1.Condition
+	detach       bool
+	requeue      time.Duration
 }
 
 // Reconcile evaluates listener attachment and backend references independently.
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=tcproutes,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=tcproutes/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=tcproutes/finalizers,verbs=update
+// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=udproutes,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=udproutes/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=udproutes/finalizers,verbs=update
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	if r.APIReader == nil {
 		return ctrl.Result{}, controller.ErrAPIReaderRequired
 	}
-	route := &gatewayv1.TCPRoute{}
-	if err := r.APIReader.Get(ctx, req.NamespacedName, route); err != nil {
+	object := r.newRouteObject()
+	if err := r.APIReader.Get(ctx, req.NamespacedName, object); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+	route := viewRoute(object)
 	binding, bound, err := r.routeBinding(route)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	if !route.DeletionTimestamp.IsZero() || route.Annotations[r.Config.RouteLifecycleAnnotation()] == controller.RouteDetaching {
+	if !route.GetDeletionTimestamp().IsZero() || route.GetAnnotations()[r.Config.RouteLifecycleAnnotation()] == controller.RouteDetaching {
 		if !bound {
 			return ctrl.Result{}, nil
 		}
@@ -92,6 +98,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		if !bound {
 			return r.bind(ctx, route, plan.desired.Identity)
 		}
+		if r.currentTarget(route, plan.parents[0].ref, plan.target) == nil {
+			return ctrl.Result{Requeue: true}, r.checkpointTarget(ctx, route, binding, plan.target)
+		}
 		result, err = r.ensure(ctx, route, &plan)
 		if errors.Is(err, controller.ErrGraphInputChanged) || errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) {
 			return result, err
@@ -100,9 +109,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	return result, errors.Join(err, r.patchStatuses(ctx, route, plan))
 }
 
-func (r *Reconciler) planRoute(ctx context.Context, route *gatewayv1.TCPRoute, binding cloud.Identity, bound bool) (routePlan, error) {
+func (r *Reconciler) planRoute(ctx context.Context, route *transportRoute, binding cloud.Identity, bound bool) (routePlan, error) {
 	plan := routePlan{}
-	plan.programmed = routeCondition(route, "Programmed", metav1.ConditionFalse, "Pending", "TCP forwarding has not been programmed")
+	plan.programmed = routeCondition(route, "Programmed", metav1.ConditionFalse, "Pending", fmt.Sprintf("%s forwarding has not been programmed", r.protocol()))
 	plan.resolved = routeCondition(route, "ResolvedRefs", metav1.ConditionUnknown, "Pending", "Backend references have not been resolved")
 	if bound && !routeStillReferences(route, binding) {
 		plan.detach = true
@@ -117,10 +126,10 @@ func (r *Reconciler) planRoute(ctx context.Context, route *gatewayv1.TCPRoute, b
 		plan.detach = bound
 		return plan, nil
 	}
-	if len(route.Spec.ParentRefs) != 1 {
+	if len(route.parentRefs) != 1 {
 		for i := range plan.parents {
 			plan.parents[i].listener = nil
-			plan.parents[i].rejected = model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: "TCP forwarding supports exactly one Gateway parentRef"}
+			plan.parents[i].rejected = model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: fmt.Sprintf("%s forwarding supports exactly one Gateway parentRef", r.protocol())}
 		}
 		return plan, nil
 	}
@@ -139,16 +148,16 @@ func (r *Reconciler) planRoute(ctx context.Context, route *gatewayv1.TCPRoute, b
 		return plan, nil
 	}
 	if parent.listener != nil {
-		routes, err := r.listRoutes(ctx)
+		routes, err := r.readRoutes(ctx)
 		if err != nil {
 			return routePlan{}, err
 		}
-		selected, err := r.selectedRoute(ctx, parent.gateway, parent.listener, routes)
+		selected, err := r.selectedRoute(ctx, parent.gateway, parent.listener, listenerCandidates(parent.gateway, parent.listener, routes))
 		if err != nil {
 			return routePlan{}, err
 		}
-		if selected == nil || selected.UID != route.UID {
-			plan.programmed = routeCondition(route, "Programmed", metav1.ConditionFalse, "NotSelected", "An older TCPRoute takes precedence on this listener")
+		if selected == nil || selected.GetUID() != route.GetUID() {
+			plan.programmed = routeCondition(route, "Programmed", metav1.ConditionFalse, "NotSelected", fmt.Sprintf("An older %s takes precedence on this listener", r.kind()))
 			plan.detach = bound
 		}
 	}
@@ -169,18 +178,8 @@ func (r *Reconciler) planRoute(ctx context.Context, route *gatewayv1.TCPRoute, b
 		return routePlan{}, err
 	}
 	if err != nil || !controller.GatewayClassSupportsInstalledVersion(parent.class) {
-		if bound {
-			_, current, err := r.gatewayTopology(parent.gateway, parent.listener)
-			if err != nil {
-				return routePlan{}, err
-			}
-			plan.detach = !current || !r.retainProgrammedCondition(route, &plan) || plan.programmed.Status != metav1.ConditionTrue
-		}
-		if !bound || plan.detach {
-			plan.programmed = routeCondition(route, "Programmed", metav1.ConditionUnknown, "UnsupportedVersion", controller.UnsupportedGatewayAPIVersionMessage)
-		}
-		plan.requeue = controller.GatewayAPIVersionRequeueAfter(route.UID)
-		return plan, nil
+		err := r.planVersionSkew(ctx, route, &plan, ref, service, bound)
+		return plan, err
 	}
 	if ref.disabled {
 		plan.programmed = routeCondition(route, "Programmed", metav1.ConditionFalse, "ZeroWeight", "The only backend has weight zero")
@@ -211,23 +210,27 @@ func (r *Reconciler) planRoute(ctx context.Context, route *gatewayv1.TCPRoute, b
 		plan.detach = bound
 		return plan, nil
 	}
+	plan.target, err = r.forwardingTarget(service, ref, desired)
+	if err != nil {
+		return routePlan{}, err
+	}
 	plan.desired = &desired
 	return plan, nil
 }
 
-func routeStillReferences(route *gatewayv1.TCPRoute, identity cloud.Identity) bool {
-	if len(route.Spec.ParentRefs) != 1 {
+func routeStillReferences(route *transportRoute, identity cloud.Identity) bool {
+	if len(route.parentRefs) != 1 {
 		return false
 	}
-	ref := route.Spec.ParentRefs[0]
+	ref := route.parentRefs[0]
 	key := gatewayKey(route, ref)
 	return controller.IsGatewayParentRef(ref) && key.Namespace == identity.GatewayNamespace && key.Name == identity.GatewayName
 }
 
-// gatewayTopology admits only the current TCP listener and checkpointed topology.
+// gatewayTopology requires the current transport listener and checkpointed topology.
 func (r *Reconciler) gatewayTopology(gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) (classconfig.Resolved, bool, error) {
-	if !controllerutil.ContainsFinalizer(gateway, r.Config.GatewayFinalizer()) ||
-		gateway.Annotations[r.Config.GatewayListenerProtocolAnnotation()] != string(gatewayv1.TCPProtocolType) ||
+	if listener.Protocol != r.protocol() || !controllerutil.ContainsFinalizer(gateway, r.Config.GatewayFinalizer()) ||
+		gateway.Annotations[r.Config.GatewayListenerProtocolAnnotation()] != string(r.protocol()) ||
 		gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] != strconv.Itoa(int(listener.Port)) ||
 		!gateway.DeletionTimestamp.IsZero() {
 		return classconfig.Resolved{}, false, nil
@@ -244,15 +247,15 @@ func gatewayProgrammed(gateway *gatewayv1.Gateway) bool {
 	return condition != nil && condition.Status == metav1.ConditionTrue && condition.ObservedGeneration == gateway.Generation
 }
 
-func (r *Reconciler) routeSpec(ctx context.Context, route *gatewayv1.TCPRoute, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, ref serviceReference, service *corev1.Service, topology classconfig.Resolved) (cloud.RouteSpec, *model.Diagnostic, error) {
-	members, diagnostic, err := routebackend.TCPMembers(ctx, r.APIReader, service, ref.port, topology)
+func (r *Reconciler) routeSpec(ctx context.Context, route *transportRoute, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, ref serviceReference, service *corev1.Service, topology classconfig.Resolved) (cloud.RouteSpec, *model.Diagnostic, error) {
+	members, diagnostic, err := routebackend.TransportMembers(ctx, r.APIReader, service, ref.port, corev1.Protocol(r.protocol()), topology, gateway.Status.Addresses)
 	if err != nil || diagnostic != nil {
 		return cloud.RouteSpec{}, diagnostic, err
 	}
 	return cloud.RouteSpec{
 		Identity: controller.RouteIdentity(r.Config, gateway, route),
 		GatewayRequirements: cloud.GatewayRequirements{
-			Provider: "amphora", ListenerProtocol: cloud.ListenerProtocolTCP, ListenerPort: int(listener.Port),
+			Provider: "amphora", ListenerProtocol: string(r.protocol()), ListenerPort: int(listener.Port),
 			VIPSubnetID: topology.Topology.VIPSubnetID, ExternalNetworkID: topology.Topology.ExternalNetworkID,
 			FlavorID: topology.Topology.FlavorID, AvailabilityZone: topology.Topology.AvailabilityZone,
 			VIPSecurityGroupIDs: topology.Topology.VIPSecurityGroupIDs,
@@ -263,12 +266,12 @@ func (r *Reconciler) routeSpec(ctx context.Context, route *gatewayv1.TCPRoute, g
 	}, nil, nil
 }
 
-func (r *Reconciler) ensure(ctx context.Context, route *gatewayv1.TCPRoute, plan *routePlan) (ctrl.Result, error) {
+func (r *Reconciler) ensure(ctx context.Context, route *transportRoute, plan *routePlan) (ctrl.Result, error) {
 	if r.Writer == nil {
 		return ctrl.Result{}, errors.New("gateway graph writer is required")
 	}
 	identity := plan.desired.Identity
-	result, err := r.Writer.ReconcileGraph(ctx, graph.Request{Identity: identity, Action: graph.Ensure, Gateway: plan.parents[0].gateway, TCPRoute: route})
+	result, err := r.Writer.ReconcileGraph(ctx, route.graphRequest(identity, graph.Ensure, plan.parents[0].gateway))
 	if err != nil {
 		if errors.Is(err, controller.ErrGraphInputChanged) || errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) {
 			return ctrl.Result{}, err
@@ -280,25 +283,27 @@ func (r *Reconciler) ensure(ctx context.Context, route *gatewayv1.TCPRoute, plan
 		if !classified {
 			policy = controller.ProviderFailurePolicy{
 				ConditionStatus: metav1.ConditionUnknown, Reason: controller.ProviderReasonUnavailable,
-				Message: "OpenStack could not program the TCPRoute", ReturnError: true,
+				Message: fmt.Sprintf("OpenStack could not program the %s", r.kind()), ReturnError: true,
 			}
 		}
 		plan.programmed = routeCondition(route, "Programmed", policy.ConditionStatus, policy.Reason, policy.Message)
-		return controller.ProviderFailureResult(policy, err, string(route.UID))
+		return controller.ProviderFailureResult(policy, err, string(route.GetUID()))
 	}
-	component, err := routeResult(result, identity)
+	component, err := r.routeResult(result, identity)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 	if component.Outcome.State == cloud.OutcomeProgressing {
-		if !component.ObservationDeferred || !r.retainProgrammedCondition(route, plan) {
-			message := controller.ProviderProgressMessage(component.Outcome, "Octavia is programming the TCP forwarding configuration")
+		target := r.currentTarget(route, plan.parents[0].ref, plan.target)
+		if !component.ObservationDeferred || target == nil || target.Status != metav1.ConditionTrue || !r.retainProgrammedCondition(route, plan) {
+			message := controller.ProviderProgressMessage(component.Outcome, fmt.Sprintf("Octavia is programming the %s forwarding configuration", r.protocol()))
 			plan.programmed = routeCondition(route, "Programmed", metav1.ConditionFalse, "Pending", message)
 		}
-		return ctrl.Result{RequeueAfter: controller.ProviderProgressRequeueAfter(component.Outcome, route.UID)}, nil
+		return ctrl.Result{RequeueAfter: controller.ProviderProgressRequeueAfter(component.Outcome, route.GetUID())}, nil
 	}
-	plan.programmed = routeCondition(route, "Programmed", metav1.ConditionTrue, "Programmed", "Octavia programmed the TCP forwarding configuration")
-	return ctrl.Result{RequeueAfter: controller.OpenStackResyncAfter(r.Config.OpenStackResyncInterval, route.UID)}, nil
+	plan.targetStatus = routeCondition(route, r.forwardingTargetType(), metav1.ConditionTrue, "Observed", plan.target)
+	plan.programmed = routeCondition(route, "Programmed", metav1.ConditionTrue, "Programmed", fmt.Sprintf("Octavia programmed the %s forwarding configuration", r.protocol()))
+	return ctrl.Result{RequeueAfter: controller.OpenStackResyncAfter(r.Config.OpenStackResyncInterval, route.GetUID())}, nil
 }
 
 func siblingFailure(err error, expected cloud.Identity) bool {
@@ -311,14 +316,14 @@ func siblingFailure(err error, expected cloud.Identity) bool {
 	return parent == expected
 }
 
-func routeResult(result cloud.GatewayGraphResult, expected cloud.Identity) (cloud.RouteResult, error) {
+func (r *Reconciler) routeResult(result cloud.GatewayGraphResult, expected cloud.Identity) (cloud.RouteResult, error) {
 	var found *cloud.RouteResult
 	for _, component := range result.Routes {
 		if component.Identity.RouteUID != expected.RouteUID {
 			continue
 		}
 		if component.Identity != expected || found != nil {
-			return cloud.RouteResult{}, errors.New("provider returned an inconsistent TCPRoute component identity")
+			return cloud.RouteResult{}, fmt.Errorf("provider returned an inconsistent %s component identity", r.kind())
 		}
 		found = &component.Result
 	}
@@ -326,18 +331,13 @@ func routeResult(result cloud.GatewayGraphResult, expected cloud.Identity) (clou
 		if result.Outcome.State == cloud.OutcomeProgressing {
 			return cloud.RouteResult{Outcome: result.Outcome, ObservationDeferred: true}, nil
 		}
-		return cloud.RouteResult{}, errors.New("provider omitted the TCPRoute component result")
+		return cloud.RouteResult{}, fmt.Errorf("provider omitted the %s component result", r.kind())
 	}
 	if err := found.Outcome.Validate(); err != nil {
-		return cloud.RouteResult{}, fmt.Errorf("validate TCPRoute component outcome: %w", err)
+		return cloud.RouteResult{}, fmt.Errorf("validate %s component outcome: %w", r.kind(), err)
 	}
 	if found.ObservationDeferred && found.Outcome.State != cloud.OutcomeProgressing {
-		return cloud.RouteResult{}, errors.New("deferred TCPRoute observation cannot certify completion")
+		return cloud.RouteResult{}, fmt.Errorf("deferred %s observation cannot certify completion", r.kind())
 	}
 	return *found, nil
-}
-
-func sameRouteRevision(current, expected *gatewayv1.TCPRoute) bool {
-	return current.UID == expected.UID && current.Generation == expected.Generation &&
-		current.DeletionTimestamp.Equal(expected.DeletionTimestamp) && reflect.DeepEqual(current.Spec, expected.Spec)
 }

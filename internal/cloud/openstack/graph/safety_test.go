@@ -369,7 +369,7 @@ func TestObserveRoutePoliciesRejectsForeignPolicyOrRule(t *testing.T) {
 				}
 			})
 			provider := newTestProvider(t, ServiceClients{LoadBalancer: safetyServiceClient(handler), ProjectID: "project-a"}, ProviderConfig{})
-			_, err := provider.observeRouteGraphs(context.Background(), []Identity{identity}, safetyObservedLoadBalancer(), &listeners.Listener{ID: "listener-1"}, false)
+			_, err := provider.observeRouteGraphs(context.Background(), []routeGraphOwner{{identity: identity}}, safetyObservedLoadBalancer(), &listeners.Listener{ID: "listener-1"}, cloud.ListenerProtocolHTTP)
 			if !errors.Is(err, cloud.ErrOwnershipConflict) {
 				t.Fatalf("observeRouteGraphs() error = %v, want ownership conflict", err)
 			}

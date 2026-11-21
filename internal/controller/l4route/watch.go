@@ -14,12 +14,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package tcproute
+package l4route
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
@@ -39,7 +41,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 )
 
-// SetupWithManager registers the TCPRoute and its attachment and backend dependencies.
+// SetupWithManager registers the configured route kind and its attachment and backend dependencies.
 func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 	if r.Coordinator == nil {
 		return graph.ErrCoordinatorRequired
@@ -50,10 +52,14 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 	if r.Writer == nil {
 		return errors.New("gateway graph writer is required")
 	}
+	if r.protocol() != gatewayv1.TCPProtocolType && r.protocol() != gatewayv1.UDPProtocolType {
+		return fmt.Errorf("unsupported transport route protocol %q", r.Protocol)
+	}
 	routeChanges := builder.WithPredicates(r.routeChanges())
+	route := r.newRouteObject()
 	return ctrl.NewControllerManagedBy(manager).
-		For(&gatewayv1.TCPRoute{}, routeChanges).
-		Watches(&gatewayv1.TCPRoute{}, handler.EnqueueRequestsFromMapFunc(r.enqueuePeers), routeChanges).
+		For(route, routeChanges).
+		Watches(route, handler.EnqueueRequestsFromMapFunc(r.enqueuePeers), routeChanges).
 		Watches(&gatewayv1.Gateway{}, handler.EnqueueRequestsFromMapFunc(r.enqueueGateway), builder.WithPredicates(controller.GatewayForHTTPRoutePredicate(r.Config))).
 		Watches(&gatewayv1.GatewayClass{}, handler.EnqueueRequestsFromMapFunc(r.enqueueClass), builder.WithPredicates(controller.GatewayClassForGatewayPredicate())).
 		WatchesMetadata(&apiextensionsv1.CustomResourceDefinition{}, handler.EnqueueRequestsFromMapFunc(r.enqueueAll), builder.WithPredicates(controller.GatewayAPICRDReconcilePredicate())).
@@ -62,7 +68,7 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 		Watches(&discoveryv1.EndpointSlice{}, handler.EnqueueRequestsFromMapFunc(r.enqueueEndpointSlice), builder.WithPredicates(controller.EndpointSlicePredicate())).
 		Watches(&corev1.Node{}, handler.EnqueueRequestsFromMapFunc(r.enqueueNode), builder.WithPredicates(controller.NodePredicate(""))).
 		Watches(&gatewayv1.ReferenceGrant{}, handler.EnqueueRequestsFromMapFunc(r.enqueueGrant), builder.WithPredicates(controller.GenerationOrDeletionChangedPredicate())).
-		Named("tcproute").
+		Named(strings.ToLower(string(r.kind()))).
 		Complete(r)
 }
 
@@ -90,18 +96,20 @@ func (r *Reconciler) routeChanges() predicate.Predicate {
 
 type routeRequests map[client.ObjectKey]struct{}
 
-func (r *Reconciler) cachedRoutes(ctx context.Context, opts ...client.ListOption) []gatewayv1.TCPRoute {
-	var routes gatewayv1.TCPRouteList
-	if err := r.List(ctx, &routes, opts...); err != nil {
-		log.FromContext(ctx).Error(err, "Could not list TCPRoutes for dependency change")
+func (r *Reconciler) cachedRoutes(ctx context.Context, opts ...client.ListOption) []*transportRoute {
+	// Informers return a synthetic continuation even for a complete local
+	// listing. These results only enqueue keys; reconciliation rereads the API.
+	routes, _, err := r.listRoutes(ctx, r.Client, opts...)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "Could not list routes for dependency change", "kind", r.kind())
 		return nil
 	}
-	return routes.Items
+	return routes
 }
 
-func (keys routeRequests) add(routes []gatewayv1.TCPRoute) {
-	for i := range routes {
-		keys[client.ObjectKeyFromObject(&routes[i])] = struct{}{}
+func (keys routeRequests) add(routes []*transportRoute) {
+	for _, route := range routes {
+		keys[client.ObjectKeyFromObject(route)] = struct{}{}
 	}
 }
 
@@ -113,14 +121,14 @@ func (r *Reconciler) addGatewayRoutes(ctx context.Context, keys routeRequests, g
 
 func (r *Reconciler) enqueueGateway(ctx context.Context, object client.Object) []reconcile.Request {
 	keys := routeRequests{}
-	r.addGatewayRoutes(ctx, keys, client.ObjectKeyFromObject(object), controller.IndexTCPRouteByParentGateway, controller.IndexTCPRouteByStatusGateway, controller.IndexTCPRouteByBoundGateway)
+	r.addGatewayRoutes(ctx, keys, client.ObjectKeyFromObject(object), controller.IndexL4RouteByParentGateway, controller.IndexL4RouteByStatusGateway, controller.IndexL4RouteByBoundGateway)
 	return controller.SortedRequests(keys)
 }
 
 func (r *Reconciler) enqueueClass(ctx context.Context, object client.Object) []reconcile.Request {
 	keys := routeRequests{}
 	for _, gateway := range r.gatewaysForClass(ctx, object.GetName()) {
-		r.addGatewayRoutes(ctx, keys, client.ObjectKeyFromObject(&gateway), controller.IndexTCPRouteByParentGateway, controller.IndexTCPRouteByStatusGateway, controller.IndexTCPRouteByBoundGateway)
+		r.addGatewayRoutes(ctx, keys, client.ObjectKeyFromObject(&gateway), controller.IndexL4RouteByParentGateway, controller.IndexL4RouteByStatusGateway, controller.IndexL4RouteByBoundGateway)
 	}
 	return controller.SortedRequests(keys)
 }
@@ -135,26 +143,25 @@ func (r *Reconciler) gatewaysForClass(ctx context.Context, name string) []gatewa
 }
 
 func (r *Reconciler) enqueuePeers(ctx context.Context, object client.Object) []reconcile.Request {
-	route, ok := object.(*gatewayv1.TCPRoute)
-	if !ok {
+	route := viewRoute(object)
+	if route == nil || route.protocol != r.protocol() {
 		return nil
 	}
 	keys := routeRequests{}
-	r.addPeers(ctx, keys, []gatewayv1.TCPRoute{*route})
+	r.addPeers(ctx, keys, []*transportRoute{route})
 	return controller.SortedRequests(keys)
 }
 
-func (r *Reconciler) addPeers(ctx context.Context, keys routeRequests, routes []gatewayv1.TCPRoute) {
+func (r *Reconciler) addPeers(ctx context.Context, keys routeRequests, routes []*transportRoute) {
 	checked := make(map[client.ObjectKey]bool)
 	add := func(key client.ObjectKey) {
 		if !checked[key] {
-			r.addGatewayRoutes(ctx, keys, key, controller.IndexTCPRouteByParentGateway)
+			r.addGatewayRoutes(ctx, keys, key, controller.IndexL4RouteByParentGateway)
 			checked[key] = true
 		}
 	}
-	for i := range routes {
-		route := &routes[i]
-		for _, ref := range route.Spec.ParentRefs {
+	for _, route := range routes {
+		for _, ref := range route.parentRefs {
 			if controller.IsGatewayParentRef(ref) {
 				add(gatewayKey(route, ref))
 			}
@@ -188,12 +195,12 @@ func (r *Reconciler) enqueueNode(ctx context.Context, _ client.Object) []reconci
 	keys := routeRequests{}
 	for _, class := range classes.Items {
 		for _, gateway := range r.gatewaysForClass(ctx, class.Name) {
-			if !gateway.DeletionTimestamp.IsZero() || gateway.Annotations[r.Config.GatewayListenerProtocolAnnotation()] != cloud.ListenerProtocolTCP {
+			if !gateway.DeletionTimestamp.IsZero() || gateway.Annotations[r.Config.GatewayListenerProtocolAnnotation()] != string(r.protocol()) {
 				continue
 			}
 			topology, err := controller.StoredGatewayTopology(r.Config, &gateway)
 			if err == nil && topology.Topology.MemberMode == cloud.MemberModeNodePort {
-				r.addGatewayRoutes(ctx, keys, client.ObjectKeyFromObject(&gateway), controller.IndexTCPRouteByParentGateway)
+				r.addGatewayRoutes(ctx, keys, client.ObjectKeyFromObject(&gateway), controller.IndexL4RouteByParentGateway)
 			}
 		}
 	}
@@ -214,7 +221,7 @@ func (r *Reconciler) enqueueEndpointSlice(ctx context.Context, object client.Obj
 
 func (r *Reconciler) enqueueServiceKey(ctx context.Context, key client.ObjectKey) []reconcile.Request {
 	keys := routeRequests{}
-	keys.add(r.cachedRoutes(ctx, client.MatchingFields{controller.IndexTCPRouteByBackendService: controller.ObjectKeyString(key)}))
+	keys.add(r.cachedRoutes(ctx, client.MatchingFields{controller.IndexL4RouteByBackendService: controller.ObjectKeyString(key)}))
 	return controller.SortedRequests(keys)
 }
 
@@ -225,16 +232,16 @@ func (r *Reconciler) enqueueGrant(ctx context.Context, object client.Object) []r
 	}
 	keys := routeRequests{}
 	for _, from := range grant.Spec.From {
-		if from.Group != gatewayv1.GroupName || from.Kind != "TCPRoute" || string(from.Namespace) == grant.Namespace {
+		if from.Group != gatewayv1.GroupName || from.Kind != r.kind() || string(from.Namespace) == grant.Namespace {
 			continue
 		}
 		for _, to := range grant.Spec.To {
 			if to.Group != "" || to.Kind != "Service" {
 				continue
 			}
-			field, value := controller.IndexTCPRouteByBackendNamespace, grant.Namespace
+			field, value := controller.IndexL4RouteByBackendNamespace, grant.Namespace
 			if to.Name != nil {
-				field = controller.IndexTCPRouteByBackendService
+				field = controller.IndexL4RouteByBackendService
 				value = controller.ObjectKeyString(client.ObjectKey{Namespace: grant.Namespace, Name: string(*to.Name)})
 			}
 			keys.add(r.cachedRoutes(ctx, client.InNamespace(string(from.Namespace)), client.MatchingFields{field: value}))

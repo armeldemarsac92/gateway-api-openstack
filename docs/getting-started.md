@@ -19,7 +19,7 @@ The [conformance plan](testing-conformance.md) describes the separate Gateway AP
   Support claims are limited to environment profiles with published compatibility evidence.
 - A Keystone application credential with only the permissions that the controller needs, stored in a named `clouds.yaml` entry.
 - A VIP subnet and a member subnet from which Amphora can reach the selected Kubernetes Node addresses and allocated NodePorts.
-- Security groups and routing that allow Amphora health checks and HTTP traffic to those Node addresses and NodePorts.
+- Security groups and routing that allow Amphora health checks and the listener's traffic protocol to those Node addresses and NodePorts.
 - Optionally, an external network for allocating a Floating IP.
   Without one, Gateway status reports the Octavia VIP, which may be reachable only from private networks.
 - A controller container image built from the source revision being deployed.
@@ -44,7 +44,7 @@ kubectl get -f "$gateway_api_manifest" -o 'custom-columns=KIND:.kind,NAME:.metad
 The Standard manifest contains ten CRDs in `gateway.networking.k8s.io` and the `safe-upgrades.gateway.networking.k8s.io` admission policy and binding. Each has the v1.7.0 and `standard` annotations. Check the manifest inventory and any other installed Gateway API CRDs before proceeding.
 For Experimental qualification on a separate cluster, use `experimental-install.yaml` from the same release and set `GATEWAY_OPENSTACK_GATEWAY_API_CHANNEL` to `experimental` in the controller ConfigMap. That manifest has the same ten CRDs plus four in `gateway.networking.x-k8s.io`, all annotated `experimental`. The policy and binding carry `standard` in both manifests.
 
-Startup requires GatewayClass, Gateway, HTTPRoute, TCPRoute, and ReferenceGrant to be available.
+Startup requires GatewayClass, Gateway, HTTPRoute, TCPRoute, UDPRoute, and ReferenceGrant to be available. `UDPRoute` uses `gateway.networking.k8s.io/v1` in both bundles.
 The controller reports bundle version and channel validation through the GatewayClass `SupportedVersion` condition.
 A mismatch blocks provisioning and repair. Finalization can continue while the required Kubernetes APIs are served. [Installed Gateway API version](design/architecture.md#installed-gateway-api-version)
 
@@ -273,9 +273,60 @@ Use the Gateway address and listener port with the application's own TCP client.
 
 When several routes attach to this listener, `attachedRoutes` counts them all. The oldest route wins. For equal creation timestamps the controller orders routes by namespace and then name. Check each parent's `Accepted`, `ResolvedRefs` and `<controller-domain>/Programmed` conditions. A younger route reports `NotSelected`. A missing or unauthorized backend on the oldest route leaves forwarding withdrawn. To allow a Service in a different namespace, create a ReferenceGrant in that namespace with `from.kind: TCPRoute`. The listener's `allowedRoutes` separately controls which route namespaces may attach. Weighted traffic across several backends and multiple active listeners remain open. [Controller and provider checks](qualification/v1.7.0/provider/stock-tcp.md)
 
+## Forward UDP to a Service
+
+Create a dedicated Gateway with one UDP listener. This example assumes DNS pods labeled `app: example-dns` in `gateway-api-openstack-demo` that serve UDP on port 53. It uses the existing `openstack` GatewayClass in its default NodePort mode. Amphora needs to reach the allocated UDP NodePort on eligible workers, and the Service needs ready endpoints.
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: example-dns
+  namespace: gateway-api-openstack-demo
+spec:
+  type: NodePort
+  selector:
+    app: example-dns
+  ports:
+    - name: dns
+      protocol: UDP
+      port: 53
+      targetPort: 53
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: dns-edge
+  namespace: gateway-api-openstack-demo
+spec:
+  gatewayClassName: openstack
+  listeners:
+    - name: dns
+      protocol: UDP
+      port: 53
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: UDPRoute
+metadata:
+  name: example-dns
+  namespace: gateway-api-openstack-demo
+spec:
+  parentRefs:
+    - name: dns-edge
+      sectionName: dns
+  rules:
+    - backendRefs:
+        - name: example-dns
+          port: 53
+```
+
+The backend reference uses the Service's UDP port. The controller uses the allocated UDP NodePort for the Octavia members. Check the Gateway address and the route's `Accepted`, `ResolvedRefs` and `<controller-domain>/Programmed` conditions for its parent. Then query a record served by the backend with `dig @<gateway-address> -p 53 <record-name> +notcp +ignore +tries=1 +time=2` and confirm the expected reply.
+
+The supported route shape is one Gateway parent reference, one rule and one core Service backend reference. The listener counts all attached UDPRoutes in `attachedRoutes`. The oldest route selects the pool, with ties broken by namespace and name. A younger route takes over when the older route detaches. If the selected backend is missing, unauthorized or exposes only TCP on the requested port, the listener's forwarding is withdrawn and the older route keeps precedence. Cross-namespace Service references require a grant in the Service namespace with `from.kind: UDPRoute`. The listener's `allowedRoutes` separately governs route attachment. Multiple active listeners, routing across multiple Service backends and preserving the configured packet-loss share of an invalid weighted backend remain open. [Qualification record](qualification/v1.7.0/README.md)
+
 ## Safe removal
 
-Keep the controller, its application credential, and OpenStack access running until every managed HTTPRoute, TCPRoute and Gateway has finished finalization.
+Keep the controller, its application credential, and OpenStack access running until every managed HTTPRoute, TCPRoute, UDPRoute and Gateway has finished finalization.
 Removing the Deployment or Secret first can leave OpenStack resources behind and leave Kubernetes objects stuck in deletion.
 
 For the basic example, delete in this order:
@@ -292,7 +343,7 @@ Each of the first three commands waits for deletion by default.
 If one remains blocked, keep the installation available and follow the [operator recovery guide](operator-recovery.md).
 Do not remove controller finalizers manually because doing so bypasses ownership checks and cleanup.
 
-Before uninstalling a shared controller, delete managed HTTPRoutes and TCPRoutes before their Gateways, then repeat the GatewayClass deletion for every class using its exact controller name.
+Before uninstalling a shared controller, delete managed HTTPRoutes, TCPRoutes and UDPRoutes before their Gateways, then repeat the GatewayClass deletion for every class using its exact controller name.
 Remove a parameter object only after no class needs it.
 
 The base uninstall also deletes the OpenStackGatewayClassConfig CRD, which removes every instance of that API throughout the cluster.

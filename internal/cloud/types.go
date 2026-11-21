@@ -89,6 +89,7 @@ func (r GatewayRequirements) Equal(other GatewayRequirements) bool {
 const (
 	ListenerProtocolHTTP = "HTTP"
 	ListenerProtocolTCP  = "TCP"
+	ListenerProtocolUDP  = "UDP"
 )
 
 // NormalizeListenerProtocol interprets bindings written before listener

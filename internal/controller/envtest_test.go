@@ -246,6 +246,9 @@ func TestControllerEnvtest(t *testing.T) {
 	t.Run("TCP listener selects one authorized backend", func(t *testing.T) {
 		testTCPGatewaySelection(t, apiClient, statusConfig, statusProvider)
 	})
+	t.Run("UDP worker NodePort follows endpoint protocol and grant", func(t *testing.T) {
+		testUDPNodePort(t, apiClient, statusConfig, statusProvider)
+	})
 	t.Run("HTTPRoute Service ReferenceGrant lifecycle", func(t *testing.T) {
 		testHTTPRouteServiceReferenceGrant(t, apiClient, cacheClient, config, gateway)
 	})

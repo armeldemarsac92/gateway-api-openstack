@@ -32,19 +32,20 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack"
 )
 
-func TestRequireGatewayAPIsIncludesReferenceGrant(t *testing.T) {
-	for _, installed := range []bool{false, true} {
-		name := "ReferenceGrant missing"
-		if installed {
-			name = "ReferenceGrant installed"
+func TestRequireGatewayAPIs(t *testing.T) {
+	for _, missing := range []string{"referencegrants", "udproutes", ""} {
+		name := "all resources installed"
+		if missing != "" {
+			name = missing + " missing"
 		}
 		t.Run(name, func(t *testing.T) {
 			resources := metav1.APIResourceList{
 				GroupVersion: gatewayv1.GroupVersion.String(),
-				APIResources: []metav1.APIResource{{Name: "gatewayclasses"}, {Name: "gateways"}, {Name: "httproutes"}, {Name: "tcproutes"}},
 			}
-			if installed {
-				resources.APIResources = append(resources.APIResources, metav1.APIResource{Name: "referencegrants"})
+			for _, resource := range []string{"gatewayclasses", "gateways", "httproutes", "tcproutes", "udproutes", "referencegrants"} {
+				if resource != missing {
+					resources.APIResources = append(resources.APIResources, metav1.APIResource{Name: resource})
+				}
 			}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 				if request.Method != http.MethodGet || request.URL.Path != "/apis/"+gatewayv1.GroupVersion.String() {
@@ -59,11 +60,11 @@ func TestRequireGatewayAPIsIncludesReferenceGrant(t *testing.T) {
 			}))
 			t.Cleanup(server.Close)
 			err := requireGatewayAPIs(&rest.Config{Host: server.URL})
-			if installed && err != nil {
+			if missing == "" && err != nil {
 				t.Fatalf("requireGatewayAPIs() rejected available resources: %v", err)
 			}
-			if !installed && (err == nil || !strings.Contains(err.Error(), "referencegrants")) {
-				t.Fatalf("requireGatewayAPIs() = %v, want missing ReferenceGrant resource", err)
+			if missing != "" && (err == nil || !strings.Contains(err.Error(), missing)) {
+				t.Fatalf("requireGatewayAPIs() = %v, want missing %s resource", err, missing)
 			}
 		})
 	}

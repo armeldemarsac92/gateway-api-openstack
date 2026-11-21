@@ -143,7 +143,7 @@ func TestSecurityRulePrerequisites(t *testing.T) {
 		{"restricted source", rules.SecGroupRule{Direction: "ingress", EtherType: "IPv4", RemoteIPPrefix: "192.0.2.0/24"}, true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if got := allowsTCPIngress([]groups.SecGroup{{Rules: []rules.SecGroupRule{test.rule}}}, 4, 30080); got != test.allowed {
+			if got := allowsIngress([]groups.SecGroup{{Rules: []rules.SecGroupRule{test.rule}}}, "TCP", 4, 30080); got != test.allowed {
 				t.Fatalf("allowed = %t, want %t", got, test.allowed)
 			}
 		})
@@ -189,5 +189,34 @@ func TestBackendSecurityChecksPortAndScopesFailure(t *testing.T) {
 	var graphError *cloud.GraphError
 	if !errors.Is(err, cloud.ErrDependencyNotReady) || !errors.As(err, &graphError) || graphError.Identity != route.Identity {
 		t.Fatalf("missing backend port error = %v", err)
+	}
+}
+
+func TestFrontendUDPSecurityChecksTransportPortFamilyAndOwnership(t *testing.T) {
+	f := newTopologyFixture(t)
+	f.resolver.clients.LoadBalancer.Microversion = "2.29"
+	f.responses["/"] = fixtureResponse{body: `{"versions":[{"id":"v2.29","status":"CURRENT"}]}`}
+	spec := cloud.GatewaySpec{VIPSubnetID: "vip-subnet", ListenerPort: 5353, ListenerProtocol: "UDP", VIPSecurityGroupIDs: []string{"sg-a"}}
+	for _, test := range []struct {
+		name, project, rule string
+		allowed             bool
+	}{
+		{"TCP only", "project-a", `{"direction":"ingress","ethertype":"IPv4","protocol":"tcp","port_range_min":5353,"port_range_max":5353}`, false},
+		{"wrong port", "project-a", `{"direction":"ingress","ethertype":"IPv4","protocol":"udp","port_range_min":53,"port_range_max":53}`, false},
+		{"wrong family", "project-a", `{"direction":"ingress","ethertype":"IPv6","protocol":"udp"}`, false},
+		{"foreign group", "other-project", `{"direction":"ingress","ethertype":"IPv4","protocol":"udp"}`, false},
+		{"UDP", "project-a", `{"direction":"ingress","ethertype":"IPv4","protocol":"udp","port_range_min":5353,"port_range_max":5353}`, true},
+		{"numeric UDP", "project-a", `{"direction":"ingress","ethertype":"IPv4","protocol":"17","port_range_min":5300,"port_range_max":5400}`, true},
+		{"wildcard", "project-a", `{"direction":"ingress","ethertype":"IPv4","protocol":null}`, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f.responses["/v2.0/security-groups/sg-a"] = fixtureResponse{
+				body: `{"security_group":{"id":"sg-a","project_id":"` + test.project + `","security_group_rules":[` + test.rule + `]}}`,
+			}
+			err := f.resolver.ValidateGatewaySecurity(t.Context(), spec, nil)
+			if test.allowed && err != nil || !test.allowed && !errors.Is(err, cloud.ErrDependencyNotReady) {
+				t.Fatalf("frontend prerequisite allowed=%t, error %v", test.allowed, err)
+			}
+		})
 	}
 }

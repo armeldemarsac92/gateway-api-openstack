@@ -34,6 +34,7 @@ type desiredGatewayGraph struct {
 	spec     cloud.GatewayGraphSpec
 	identity Identity
 	routes   []desiredRoute
+	protocol string
 }
 
 type observedGatewayGraph struct {
@@ -44,6 +45,7 @@ type observedGatewayGraph struct {
 	deletion     gatewayDeletionPlan
 	state        cloud.GatewayState
 	outcome      cloud.Outcome
+	protocol     string
 }
 
 type graphMutationKind uint8
@@ -106,9 +108,18 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		result.Gateway = observedGatewayResult(desired, actual, actual.outcome)
 		return result, nil
 	}
+	if actual.protocol == cloud.ListenerProtocolUDP && actual.loadBalancer != nil {
+		for index, route := range desired.routes {
+			if desired.spec.Routes[index].Disposition == cloud.GraphEnsure {
+				route.members = udpMembersInVIPFamily(route.members, actual.state.VIPAddress)
+				route.spec.Members = route.members
+				desired.routes[index] = route
+			}
+		}
+	}
 	var plan []graphMutation
-	tcp := isTCPGraph(desired, actual)
-	if tcp {
+	defaultPool := usesDefaultPool(actual.protocol)
+	if defaultPool {
 		plan, result, err = p.buildGatewayGraphPlan(desired, actual)
 		if err != nil {
 			return result, err
@@ -126,7 +137,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 			return result, err
 		}
 	}
-	if !tcp {
+	if !defaultPool {
 		plan, result, err = p.buildGatewayGraphPlan(desired, actual)
 		if err != nil {
 			return result, err
@@ -160,6 +171,10 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 	if !validGraphDisposition(spec.Gateway.Disposition) {
 		return invalid("Gateway graph disposition is invalid")
 	}
+	var protocol string
+	if spec.Gateway.Disposition != cloud.GraphPreserve {
+		protocol = spec.Gateway.Spec.ListenerProtocol
+	}
 	if spec.Gateway.Disposition == cloud.GraphEnsure {
 		if !sameGatewayIdentity(spec.Identity, spec.Gateway.Spec.Identity) {
 			return desiredGatewayGraph{}, fmt.Errorf("%w: Gateway model and graph identities differ", cloud.ErrOwnershipConflict)
@@ -168,16 +183,15 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 			spec.Gateway.Spec.ListenerPort < 1 || spec.Gateway.Spec.ListenerPort > 65535 {
 			return invalid("Gateway requires Amphora, a VIP subnet, and a listener port within 1-65535")
 		}
-		switch cloud.NormalizeListenerProtocol(spec.Gateway.Spec.ListenerProtocol) {
-		case cloud.ListenerProtocolHTTP, cloud.ListenerProtocolTCP:
-		default:
-			return invalid("Gateway listener protocol must be HTTP or TCP")
-		}
+		protocol = cloud.NormalizeListenerProtocol(protocol)
 		for _, role := range []string{roleLoadBalancer, roleListener} {
 			if _, err := identity.GatewayTags(role); err != nil {
 				return desiredGatewayGraph{}, err
 			}
 		}
+	}
+	if protocol != "" && !supportedListenerProtocol(protocol) {
+		return invalid("Gateway listener protocol must be HTTP, TCP or UDP")
 	}
 	// Copy before sorting: callers can reuse their immutable reconciliation input.
 	spec.Routes = append([]cloud.RouteGraphNode(nil), spec.Routes...)
@@ -199,7 +213,7 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 		}
 		return a.RouteUID < b.RouteUID
 	})
-	desired := desiredGatewayGraph{spec: spec, identity: identity}
+	desired := desiredGatewayGraph{spec: spec, identity: identity, protocol: protocol}
 	identities := make(map[string]struct{}, len(spec.Routes))
 	lastRank := -1
 	position := int32(1)
@@ -223,16 +237,19 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 			return desiredGatewayGraph{}, err
 		}
 		route := desiredRoute{identity: routeIdentity, spec: node.Spec}
+		if transport := node.Spec.GatewayRequirements.ListenerProtocol; node.Disposition == cloud.GraphDelete && transport != "" && !supportedListenerProtocol(transport) {
+			return desiredGatewayGraph{}, &cloud.GraphError{Identity: id, Err: fmt.Errorf("%w: unsupported detaching route protocol %q", cloud.ErrOwnershipConflict, transport)}
+		}
 		if node.Disposition == cloud.GraphEnsure {
 			if spec.Gateway.Disposition != cloud.GraphEnsure {
 				return invalid("an ensured route requires an ensured Gateway")
 			}
-			if spec.Gateway.Spec.ListenerProtocol == cloud.ListenerProtocolTCP && lastRank != -1 {
-				return invalid("a TCP listener allows at most one ensured route")
+			if usesDefaultPool(protocol) && lastRank != -1 {
+				return invalid(fmt.Sprintf("a %s listener allows at most one ensured route", protocol))
 			}
 			if node.Spec.Precedence < 0 || node.Spec.Precedence == lastRank {
 				return desiredGatewayGraph{}, &cloud.GraphError{Identity: id, Err: cloud.NewProviderError(cloud.ErrorCategoryTerminalValidation,
-					fmt.Errorf("HTTPRoute precedence %d must be nonnegative and distinct among ensured HTTPRoutes", node.Spec.Precedence))}
+					fmt.Errorf("route precedence %d must be nonnegative and distinct among ensured routes", node.Spec.Precedence))}
 			}
 			lastRank = node.Spec.Precedence
 			if !node.Spec.GatewayRequirements.Equal(gatewayRequirements(spec.Gateway.Spec)) {
@@ -260,7 +277,7 @@ func observedGatewayResult(desired desiredGatewayGraph, actual observedGatewayGr
 	if desired.spec.Gateway.Disposition == cloud.GraphEnsure {
 		protocol := cloud.NormalizeListenerProtocol(desired.spec.Gateway.Spec.ListenerProtocol)
 		if actual.listener.DefaultPoolID != "" || actual.listener.ProvisioningStatus == "ERROR" ||
-			protocol == cloud.ListenerProtocolTCP && actual.listener.ProvisioningStatus != "ACTIVE" ||
+			usesDefaultPool(protocol) && actual.listener.ProvisioningStatus != "ACTIVE" ||
 			actual.listener.Protocol != protocol || actual.listener.ProtocolPort != desired.spec.Gateway.Spec.ListenerPort {
 			return result
 		}
@@ -277,6 +294,10 @@ func validGraphDisposition(disposition cloud.GraphDisposition) bool {
 	return disposition == cloud.GraphEnsure || disposition == cloud.GraphPreserve || disposition == cloud.GraphDelete
 }
 
+func supportedListenerProtocol(protocol string) bool {
+	return protocol == cloud.ListenerProtocolHTTP || usesDefaultPool(protocol)
+}
+
 func sameGatewayIdentity(a, b cloud.Identity) bool {
 	return a.OpenStackProjectID == b.OpenStackProjectID && a.ClusterID == b.ClusterID && a.Controller == b.Controller &&
 		a.GatewayNamespace == b.GatewayNamespace && a.GatewayName == b.GatewayName && a.GatewayUID == b.GatewayUID
@@ -288,16 +309,19 @@ func gatewayRequirements(spec cloud.GatewaySpec) cloud.GatewayRequirements {
 		ListenerProtocol: spec.ListenerProtocol, VIPSecurityGroupIDs: spec.VIPSecurityGroupIDs}
 }
 
-func (d desiredGatewayGraph) routeIdentities() []Identity {
-	identities := make([]Identity, len(d.routes))
+func (d desiredGatewayGraph) routeOwners() []routeGraphOwner {
+	owners := make([]routeGraphOwner, len(d.routes))
 	for index, route := range d.routes {
-		identities[index] = route.identity
+		owners[index].identity = route.identity
+		if d.spec.Routes[index].Disposition == cloud.GraphDelete {
+			owners[index].cleanupProtocol = route.spec.GatewayRequirements.ListenerProtocol
+		}
 	}
-	return identities
+	return owners
 }
 
 func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatewayGraph) (observedGatewayGraph, error) {
-	actual := observedGatewayGraph{outcome: cloud.ReadyOutcome()}
+	actual := observedGatewayGraph{outcome: cloud.ReadyOutcome(), protocol: desired.protocol}
 	lb, err := p.findGatewayLoadBalancer(ctx, desired.identity)
 	if err != nil {
 		return actual, err
@@ -346,17 +370,18 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 			actual.state.FloatingIPAddress = actual.floatingIP.FloatingIP
 		}
 	}
+	owners := desired.routeOwners()
 	if desired.spec.Gateway.Disposition == cloud.GraphDelete {
 		if observation.phase == loadBalancerPhasePending {
 			return actual, nil
 		}
-		actual.deletion, err = p.buildGatewayDeletionPlan(ctx, desired.identity, lb, desired.routeIdentities(), desired.spec.Gateway.Spec.ListenerProtocol)
-		if actual.deletion.tcpListener != nil {
-			actual.listener = actual.deletion.tcpListener
+		actual.deletion, err = p.buildGatewayDeletionPlan(ctx, desired.identity, lb, owners, desired.protocol)
+		if actual.deletion.defaultPoolListener != nil {
+			actual.listener = actual.deletion.defaultPoolListener
 			actual.state.ListenerID = actual.listener.ID
 		}
-		if actual.deletion.tcpPending != "" {
-			actual.outcome = p.progressingOutcome(actual.deletion.tcpPending)
+		if actual.deletion.defaultPoolPending != "" {
+			actual.outcome = p.progressingOutcome(actual.deletion.defaultPoolPending)
 		}
 		return actual, err
 	}
@@ -366,16 +391,16 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 	}
 	if actual.listener != nil {
 		protocol := actual.listener.Protocol
-		if protocol != cloud.ListenerProtocolHTTP && protocol != cloud.ListenerProtocolTCP ||
-			desired.spec.Gateway.Disposition == cloud.GraphEnsure && protocol != cloud.NormalizeListenerProtocol(desired.spec.Gateway.Spec.ListenerProtocol) {
+		if !supportedListenerProtocol(protocol) || desired.protocol != "" && protocol != desired.protocol {
 			return actual, fmt.Errorf("%w: Gateway listener protocol %q differs from its binding", cloud.ErrOwnershipConflict, protocol)
 		}
+		actual.protocol = protocol
 		actual.state.ListenerID = actual.listener.ID
 		if desired.spec.Gateway.Disposition == cloud.GraphEnsure && actual.listener.ProtocolPort != desired.spec.Gateway.Spec.ListenerPort {
 			return actual, fmt.Errorf("%w: Gateway listener port differs from its binding", cloud.ErrOwnershipConflict)
 		}
-		if protocol == cloud.ListenerProtocolTCP {
-			if err := validateTCPListener(actual.listener, lb.ID); err != nil {
+		if usesDefaultPool(protocol) {
+			if err := validateDefaultPoolListener(actual.listener, lb.ID); err != nil {
 				return actual, err
 			}
 		} else if desired.spec.Gateway.Disposition == cloud.GraphEnsure && actual.listener.ProvisioningStatus == "ERROR" {
@@ -391,9 +416,15 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 	if observation.phase == loadBalancerPhasePending {
 		return actual, nil
 	}
-	tcp := isTCPGraph(desired, actual)
-	if tcp && actual.listener != nil {
-		actual.outcome, err = p.tcpListenerOutcome(actual.listener, true)
+	if actual.listener == nil && actual.protocol == "" {
+		actual.protocol, err = detachingProtocolWithoutListener(owners)
+		if err != nil {
+			return actual, err
+		}
+	}
+	defaultPool := usesDefaultPool(actual.protocol)
+	if defaultPool && actual.listener != nil {
+		actual.outcome, err = p.defaultPoolListenerOutcome(actual.listener, true)
 		if err != nil {
 			return actual, err
 		}
@@ -401,18 +432,19 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 			return actual, nil
 		}
 	}
-	actual.routes, err = p.observeRouteGraphs(ctx, desired.routeIdentities(), lb, actual.listener, tcp)
+	actual.routes, err = p.observeRouteGraphs(ctx, owners, lb, actual.listener, actual.protocol)
 	if err != nil {
 		return actual, err
 	}
-	if !tcp && actual.listener != nil && strings.HasPrefix(actual.listener.ProvisioningStatus, "PENDING_") {
+	if !defaultPool && actual.listener != nil && strings.HasPrefix(actual.listener.ProvisioningStatus, "PENDING_") {
 		actual.outcome = p.progressingOutcome("Waiting for Octavia listener provisioning")
 		return actual, nil
 	}
 	if err := validateObservedPolicyLayout(actual.routes); err != nil {
 		return actual, err
 	}
-	if (tcp || desired.spec.Gateway.Disposition == cloud.GraphEnsure) && actual.listener != nil && actual.listener.DefaultPoolID != "" && defaultPoolOwner(actual.listener, actual.routes) == -1 {
+	if (defaultPool || desired.spec.Gateway.Disposition == cloud.GraphEnsure || hasOtherCleanupProtocol(owners, actual.protocol)) &&
+		actual.listener != nil && actual.listener.DefaultPoolID != "" && defaultPoolOwner(actual.listener, actual.routes) == -1 {
 		return actual, unprovenDefaultPool(actual.listener)
 	}
 	return actual, nil
@@ -440,7 +472,7 @@ func validateObservedPolicyLayout(routes []observedRouteGraph) error {
 // observeAbsentGateway checks independently allocated Neutron resources before
 // declaring a deleted graph absent or creating a replacement load balancer.
 func (p *Provider) observeAbsentGateway(ctx context.Context, desired desiredGatewayGraph) (observedGatewayGraph, error) {
-	actual := observedGatewayGraph{outcome: cloud.ReadyOutcome()}
+	actual := observedGatewayGraph{outcome: cloud.ReadyOutcome(), protocol: desired.protocol}
 	floatingIP, err := p.findGatewayFloatingIP(ctx, desired.identity, "", "")
 	if err != nil {
 		return actual, err

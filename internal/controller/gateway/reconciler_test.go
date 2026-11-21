@@ -478,6 +478,90 @@ func TestGatewaySamePortProtocolChangeReplacesOwnedGraph(t *testing.T) {
 	}
 }
 
+func TestGatewayUDPListenerCountsOnlyAcceptedUDPRoutes(t *testing.T) {
+	cfg := testConfig()
+	class := &gatewayv1.GatewayClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "openstack"},
+		Spec:       gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName},
+	}
+	gateway := &gatewayv1.Gateway{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "edge", UID: "gateway-uid", Generation: 1},
+		Spec: gatewayv1.GatewaySpec{GatewayClassName: "openstack", Listeners: []gatewayv1.Listener{
+			{Name: "dns", Protocol: gatewayv1.UDPProtocolType, Port: 53},
+		}},
+	}
+	commonSpec := gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{{Name: "edge", SectionName: ptr.To(gatewayv1.SectionName("dns"))}}}
+	status := gatewayv1.RouteStatus{Parents: []gatewayv1.RouteParentStatus{{
+		ParentRef: commonSpec.ParentRefs[0], ControllerName: cfg.ControllerName,
+		Conditions: []metav1.Condition{Condition(string(gatewayv1.RouteConditionAccepted), metav1.ConditionTrue,
+			string(gatewayv1.RouteReasonAccepted), "Accepted", 1)},
+	}}}
+	udp := &gatewayv1.UDPRoute{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "app", UID: "udp", Generation: 1},
+		Spec:       gatewayv1.UDPRouteSpec{CommonRouteSpec: commonSpec},
+		Status:     gatewayv1.UDPRouteStatus{RouteStatus: status},
+	}
+	tcp := &gatewayv1.TCPRoute{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "app", UID: "tcp", Generation: 1},
+		Spec:       gatewayv1.TCPRouteSpec{CommonRouteSpec: commonSpec},
+		Status:     gatewayv1.TCPRouteStatus{RouteStatus: status},
+	}
+	kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gateway).WithObjects(class, gateway, udp, tcp).Build()
+	provider := &recordingProvider{}
+	reconciler := newTestReconciler(Reconciler{Client: kubeClient, APIReader: kubeClient, Config: cfg, Coordinator: &graph.Coordinator{}}, provider)
+	request := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: gateway.Namespace, Name: gateway.Name}}
+	if result, err := reconciler.Reconcile(t.Context(), request); err != nil || !result.Requeue {
+		t.Fatalf("binding checkpoint = %v, %v", result, err)
+	}
+	if _, err := reconciler.Reconcile(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.gatewaySpecs) != 1 || provider.gatewaySpecs[0].ListenerProtocol != "UDP" || provider.gatewaySpecs[0].ListenerPort != 53 {
+		t.Fatalf("UDP Gateway specs = %#v", provider.gatewaySpecs)
+	}
+	var got gatewayv1.Gateway
+	if err := kubeClient.Get(t.Context(), request.NamespacedName, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Annotations[cfg.GatewayListenerProtocolAnnotation()] != "UDP" || len(got.Status.Listeners) != 1 {
+		t.Fatalf("UDP Gateway binding or listeners missing: %#v", got)
+	}
+	listener := got.Status.Listeners[0]
+	if listener.AttachedRoutes != 1 || len(listener.SupportedKinds) != 1 || listener.SupportedKinds[0].Kind != "UDPRoute" ||
+		!meta.IsStatusConditionTrue(listener.Conditions, string(gatewayv1.ListenerConditionProgrammed)) {
+		t.Fatalf("UDP listener status = %#v", listener)
+	}
+}
+
+func TestGatewayMixedListenersDoNotAuthorizeUDP(t *testing.T) {
+	for _, peer := range []gatewayv1.ProtocolType{gatewayv1.HTTPProtocolType, gatewayv1.TCPProtocolType, gatewayv1.UDPProtocolType} {
+		t.Run(string(peer), func(t *testing.T) {
+			gateway := &gatewayv1.Gateway{Spec: gatewayv1.GatewaySpec{Listeners: []gatewayv1.Listener{
+				{Name: "dns", Protocol: gatewayv1.UDPProtocolType, Port: 53},
+				{Name: "other", Protocol: peer, Port: 80},
+			}}}
+			listener, err := Validate(gateway)
+			if peer == gatewayv1.HTTPProtocolType {
+				if err != nil || listener.Protocol != gatewayv1.HTTPProtocolType {
+					t.Fatalf("existing HTTP listener = %#v, error = %v", listener, err)
+				}
+				setGatewayAcceptedListeners(gateway, gatewayv1.ListenerStatus{Name: listener.Name})
+			} else {
+				if err == nil {
+					t.Fatal("Gateway accepted a listener from the unsupported mix")
+				}
+				(&Reconciler{}).setGatewayFailure(gateway, err)
+			}
+			udp := gateway.Status.Listeners[0]
+			accepted := meta.FindStatusCondition(udp.Conditions, string(gatewayv1.ListenerConditionAccepted))
+			if accepted == nil || accepted.Status != metav1.ConditionFalse || accepted.Reason != string(gatewayv1.ListenerReasonUnsupportedProtocol) ||
+				accepted.Message != "UDP requires a Gateway with a single listener" || len(udp.SupportedKinds) != 0 || udp.AttachedRoutes != 0 {
+				t.Fatalf("mixed UDP listener status = %#v", udp)
+			}
+		})
+	}
+}
+
 func TestGatewayTCPListenerRejectsUnsupportedOptions(t *testing.T) {
 	for _, test := range []struct {
 		name string

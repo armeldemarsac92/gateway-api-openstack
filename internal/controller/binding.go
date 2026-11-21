@@ -36,7 +36,7 @@ func ValidateGatewayBinding(config Config, gateway *gatewayv1.Gateway) error {
 	}
 	if GatewayHasControllerBinding(config, gateway) {
 		switch gateway.Annotations[config.GatewayListenerProtocolAnnotation()] {
-		case "", string(gatewayv1.HTTPProtocolType), string(gatewayv1.TCPProtocolType):
+		case "", string(gatewayv1.HTTPProtocolType), string(gatewayv1.TCPProtocolType), string(gatewayv1.UDPProtocolType):
 		default:
 			return fmt.Errorf("%w: invalid bound Gateway listener protocol", cloud.ErrOwnershipConflict)
 		}

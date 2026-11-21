@@ -46,16 +46,21 @@ type tcpGraphFixture struct {
 	writes                 []string
 	loseNextListenerUpdate bool
 	hiddenChild            string
+	rejectMonitorDelay     float64
 }
 
 func newTCPGraphFixture(t *testing.T) *tcpGraphFixture {
+	return newTransportGraphFixture(t, "TCP")
+}
+
+func newTransportGraphFixture(t *testing.T, protocol string) *tcpGraphFixture {
 	t.Helper()
 	identity := safetyTestIdentity(t)
 	spec := completeGraphSpec(identity)
-	spec.Gateway.Spec.ListenerProtocol = cloud.ListenerProtocolTCP
+	spec.Gateway.Spec.ListenerProtocol = protocol
 	route := &spec.Routes[0].Spec
 	route.Gateway = cloud.GatewayState{}
-	route.GatewayRequirements.ListenerProtocol = cloud.ListenerProtocolTCP
+	route.GatewayRequirements.ListenerProtocol = protocol
 	route.Hostname, route.PathType, route.PathValue = "", "", ""
 	return &tcpGraphFixture{t: t, spec: spec, inventory: map[string]map[string]any{}}
 }
@@ -91,6 +96,12 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 	resource := req.URL.Path
 	if resource == "/v2.0/floatingips" && req.Method == http.MethodGet {
 		safetyWriteJSON(f.t, w, map[string]any{"floatingips": []any{}})
+		return
+	}
+	if resource == "/v2/lbaas/l7policies" && req.Method == http.MethodGet && f.inventory[tcpListener]["protocol"] == "HTTP" {
+		if safetyRequireQuery(f.t, w, req, "project_id", hibiscusProject) && safetyRequireQuery(f.t, w, req, "listener_id", "listener") {
+			safetyWriteJSON(f.t, w, map[string]any{"l7policies": []any{}})
+		}
 		return
 	}
 	for listPath, entryPath := range resources {
@@ -135,14 +146,28 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 			data := body[kind.name]
 			_, linked := data["listener_id"]
 			_, defaulted := data["default_pool_id"]
-			if (listPath == tcpListeners || listPath == tcpPools) && (data["protocol"] != "TCP" || linked || defaulted) {
-				f.t.Errorf("expected an unattached TCP resource, got %v", data)
+			protocol := f.spec.Gateway.Spec.ListenerProtocol
+			if (listPath == tcpListeners || listPath == tcpPools) && (data["protocol"] != protocol || linked || defaulted) {
+				f.t.Errorf("expected an unattached %s resource, got %v", protocol, data)
+			}
+			if listPath == tcpPools && data["lb_algorithm"] != "ROUND_ROBIN" {
+				f.t.Errorf("expected a ROUND_ROBIN pool, got %v", data)
 			}
 			_, hasURL := data["url_path"]
 			_, hasMethod := data["http_method"]
 			_, hasCodes := data["expected_codes"]
-			if listPath == tcpMonitors && (data["type"] != "TCP" || hasURL || hasMethod || hasCodes) {
-				f.t.Errorf("expected a native TCP monitor, got %v", data)
+			if listPath == tcpMonitors {
+				monitorType := "TCP"
+				if protocol == "UDP" {
+					monitorType = "UDP-CONNECT"
+				}
+				if data["type"] != monitorType || hasURL || hasMethod || hasCodes {
+					f.t.Errorf("expected a native %s monitor, got %v", monitorType, data)
+				}
+				if data["delay"] == f.rejectMonitorDelay {
+					http.Error(w, `{"faultstring":"The request delay value is below the configured UDP-CONNECT interval"}`, http.StatusBadRequest)
+					return
+				}
 			}
 			if kind.responseParent != "" {
 				data[kind.responseParent] = []map[string]any{{"id": data[kind.parentKey]}}
@@ -201,8 +226,14 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 	reject()
 }
 
-func TestTCPGraphDefaultPoolLifecycle(t *testing.T) {
-	f := newTCPGraphFixture(t)
+func TestDefaultPoolLifecycle(t *testing.T) {
+	for _, protocol := range []string{"TCP", "UDP"} {
+		t.Run(protocol, func(t *testing.T) { testDefaultPoolLifecycle(t, protocol) })
+	}
+}
+
+func testDefaultPoolLifecycle(t *testing.T, protocol string) {
+	f := newTransportGraphFixture(t, protocol)
 	provider := f.provider()
 	for _, path := range []string{tcpLBs, tcpListeners, tcpPools, tcpMembers, tcpMonitors} {
 		before := len(f.writes)
@@ -253,8 +284,14 @@ func TestTCPGraphDefaultPoolLifecycle(t *testing.T) {
 	}
 }
 
-func TestTCPGraphCanAttachWithoutMonitor(t *testing.T) {
-	f := newTCPGraphFixture(t)
+func TestDefaultPoolCanAttachWithoutMonitor(t *testing.T) {
+	for _, protocol := range []string{"TCP", "UDP"} {
+		t.Run(protocol, func(t *testing.T) { testDefaultPoolCanAttachWithoutMonitor(t, protocol) })
+	}
+}
+
+func testDefaultPoolCanAttachWithoutMonitor(t *testing.T, protocol string) {
+	f := newTransportGraphFixture(t, protocol)
 	f.spec.Routes[0].Spec.HealthMonitor = cloud.HealthMonitorConfig{}
 	provider := f.provider()
 	for range 5 {
@@ -262,12 +299,18 @@ func TestTCPGraphCanAttachWithoutMonitor(t *testing.T) {
 	}
 	f.inventory[tcpListener]["provisioning_status"] = "ACTIVE"
 	if result := f.reconcile(provider); result.Outcome.State != cloud.OutcomeReady || f.inventory[tcpMonitor] != nil || f.inventory[tcpListener]["default_pool_id"] != "pool" {
-		t.Fatalf("TCP listener without a configured monitor = %#v, writes %v", result, f.writes)
+		t.Fatalf("%s listener without a configured monitor = %#v, writes %v", protocol, result, f.writes)
 	}
 }
 
-func TestTCPGraphDetachesServingPoolBeforeChangingMembers(t *testing.T) {
-	f := newTCPGraphFixture(t)
+func TestDefaultPoolDetachesServingPoolBeforeChangingMembers(t *testing.T) {
+	for _, protocol := range []string{"TCP", "UDP"} {
+		t.Run(protocol, func(t *testing.T) { testDefaultPoolDetachesServingPoolBeforeChangingMembers(t, protocol) })
+	}
+}
+
+func testDefaultPoolDetachesServingPoolBeforeChangingMembers(t *testing.T, protocol string) {
+	f := newTransportGraphFixture(t, protocol)
 	provider := f.provider()
 	for range 6 {
 		f.reconcile(provider)
@@ -336,19 +379,25 @@ func TestTCPGraphGatewayCleanupProvesOwnershipBeforeDetaching(t *testing.T) {
 	}
 }
 
-func TestTCPRouteCleanupAfterListenerDisappears(t *testing.T) {
-	f := newTCPGraphFixture(t)
+func TestDefaultPoolRouteCleanupAfterListenerDisappears(t *testing.T) {
+	for _, protocol := range []string{"TCP", "UDP"} {
+		t.Run(protocol, func(t *testing.T) { testDefaultPoolRouteCleanupAfterListenerDisappears(t, protocol) })
+	}
+}
+
+func testDefaultPoolRouteCleanupAfterListenerDisappears(t *testing.T, protocol string) {
+	f := newTransportGraphFixture(t, protocol)
 	provider := f.provider()
 	for range 5 {
 		f.reconcile(provider)
 	}
 	// The listener disappeared after the backend objects were created. On
-	// restart only the durably detaching TCPRoute can identify its transport.
+	// restart only the durably detaching route can identify its transport.
 	delete(f.inventory, tcpListener)
 	f.spec.Gateway = cloud.GatewayGraphNode{Disposition: cloud.GraphPreserve}
 	node := &f.spec.Routes[0]
 	node.Disposition = cloud.GraphDelete
-	node.Spec = cloud.RouteSpec{Identity: node.Spec.Identity, GatewayRequirements: cloud.GatewayRequirements{ListenerProtocol: cloud.ListenerProtocolTCP}}
+	node.Spec = cloud.RouteSpec{Identity: node.Spec.Identity, GatewayRequirements: cloud.GatewayRequirements{ListenerProtocol: protocol}}
 	provider = f.provider()
 	for range 3 {
 		f.reconcile(provider)
@@ -359,8 +408,162 @@ func TestTCPRouteCleanupAfterListenerDisappears(t *testing.T) {
 	}
 }
 
-func TestTCPGraphListenerErrorFailsEnsureAndAllowsOwnedRevocation(t *testing.T) {
-	f := newTCPGraphFixture(t)
+func TestUDPGraphRejectsUnprovenPoolAndConflictingTransports(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		corrupt func(*tcpGraphFixture)
+	}{
+		{"TCP pool", func(f *tcpGraphFixture) { f.inventory[tcpPool]["protocol"] = "TCP" }},
+		{"foreign listener", func(f *tcpGraphFixture) { f.inventory[tcpPool]["listeners"] = []map[string]any{{"id": "foreign"}} }},
+		{"TCP listener", func(f *tcpGraphFixture) { f.inventory[tcpListener]["protocol"] = "TCP" }},
+		{"conflicting detachment", func(f *tcpGraphFixture) {
+			delete(f.inventory, tcpListener)
+			f.inventory[tcpPool]["listeners"] = nil
+			f.spec.Routes[0].Disposition = cloud.GraphDelete
+			identity := f.spec.Routes[0].Spec.Identity
+			identity.RouteName, identity.RouteUID = "other-route", "other-route-uid"
+			f.spec.Routes = append(f.spec.Routes, cloud.RouteGraphNode{Disposition: cloud.GraphDelete, Spec: cloud.RouteSpec{
+				Identity: identity, GatewayRequirements: cloud.GatewayRequirements{ListenerProtocol: "TCP"},
+			}})
+			f.spec.Gateway = cloud.GatewayGraphNode{Disposition: cloud.GraphPreserve}
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := newTransportGraphFixture(t, "UDP")
+			provider := f.provider()
+			for range 6 {
+				f.reconcile(provider)
+			}
+			f.inventory[tcpListener]["provisioning_status"] = "ACTIVE"
+			test.corrupt(f)
+			if _, err := f.provider().ReconcileGatewayGraph(t.Context(), f.spec); !errors.Is(err, cloud.ErrOwnershipConflict) || len(f.writes) != 6 {
+				t.Fatalf("unproven UDP graph = %v, writes %v", err, f.writes)
+			}
+		})
+	}
+}
+
+func TestUDPRouteCleanupAfterListenerReplacement(t *testing.T) {
+	for _, protocol := range []string{"TCP", "HTTP"} {
+		t.Run(protocol, func(t *testing.T) {
+			f := newTransportGraphFixture(t, "UDP")
+			for range 5 {
+				f.reconcile(f.provider())
+			}
+			f.inventory[tcpListener]["protocol"] = protocol
+			f.spec.Gateway.Spec.ListenerProtocol = protocol
+			f.spec.Routes[0].Disposition = cloud.GraphDelete
+			replacement := f.inventory[tcpListener]
+			f.inventory[tcpPool]["listeners"] = []map[string]any{{"id": "listener"}}
+			replacement["default_pool_id"] = "pool"
+			if _, err := f.provider().ReconcileGatewayGraph(t.Context(), f.spec); !errors.Is(err, cloud.ErrOwnershipConflict) || len(f.writes) != 5 {
+				t.Fatalf("replacement listener has a cross-protocol relationship: %v, writes %v", err, f.writes[5:])
+			}
+			replacement["default_pool_id"] = nil
+			f.inventory[tcpPool]["listeners"] = nil
+			if protocol == "HTTP" {
+				replacement["l7policies"] = []map[string]any{{"id": "unlisted"}}
+				if _, err := f.provider().ReconcileGatewayGraph(t.Context(), f.spec); !errors.Is(err, cloud.ErrDependencyNotReady) || len(f.writes) != 5 {
+					t.Fatalf("replacement listener still references an unlisted L7 policy: %v, writes %v", err, f.writes[5:])
+				}
+				delete(replacement, "l7policies")
+			}
+			if result := f.reconcile(f.provider()); result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing {
+				t.Fatalf("cleanup under ensured replacement gateway = %#v", result)
+			}
+			f.spec.Gateway = cloud.GatewayGraphNode{Disposition: cloud.GraphPreserve}
+			for range 2 {
+				f.reconcile(f.provider())
+			}
+			want := []string{"DELETE " + tcpMonitor, "DELETE " + tcpMember, "DELETE " + tcpPool}
+			if result := f.reconcile(f.provider()); result.Routes[0].Result.Outcome.State != cloud.OutcomeReady ||
+				!slices.Equal(f.writes[5:], want) || f.inventory[tcpListener]["protocol"] != protocol {
+				t.Fatalf("cleanup leaves replacement listener in place: %#v, writes %v", result, f.writes[5:])
+			}
+		})
+	}
+}
+
+func TestUDPRouteCleanupPreservesReplacementBackend(t *testing.T) {
+	f := newTransportGraphFixture(t, "TCP")
+	for range 6 {
+		f.reconcile(f.provider())
+	}
+	f.inventory[tcpListener]["provisioning_status"] = "ACTIVE"
+	oldRoute := f.spec.Routes[0].Spec.Identity
+	oldRoute.RouteName, oldRoute.RouteUID = "old-route", "old-route-uid"
+	f.spec.Routes = append(f.spec.Routes, cloud.RouteGraphNode{Disposition: cloud.GraphDelete, Spec: cloud.RouteSpec{
+		Identity: oldRoute, GatewayRequirements: cloud.GatewayRequirements{ListenerProtocol: "UDP"},
+	}})
+	for _, disposition := range []cloud.GraphDisposition{cloud.GraphEnsure, cloud.GraphPreserve} {
+		f.spec.Gateway.Disposition = disposition
+		if disposition == cloud.GraphPreserve {
+			f.spec.Routes[0].Disposition = cloud.GraphPreserve
+		}
+		result := f.reconcile(f.provider())
+		if result.Outcome.State != cloud.OutcomeReady || len(f.writes) != 6 || f.inventory[tcpListener]["default_pool_id"] != "pool" {
+			t.Fatalf("cleanup changed the serving replacement: %#v, writes %v", result, f.writes[6:])
+		}
+		var complete bool
+		for _, route := range result.Routes {
+			if route.Identity == oldRoute {
+				complete = route.Result.Outcome.State == cloud.OutcomeReady
+			}
+		}
+		if !complete {
+			t.Fatalf("old route did not complete: %#v", result.Routes)
+		}
+	}
+}
+
+func TestUDPGraphDetachesWithoutMembersInTheVIPFamily(t *testing.T) {
+	f := newTransportGraphFixture(t, "UDP")
+	provider := f.provider()
+	for range 6 {
+		f.reconcile(provider)
+	}
+	f.inventory[tcpListener]["provisioning_status"] = "ACTIVE"
+	f.spec.Routes[0].Spec.Members[0].Address = "2001:db8::44"
+	f.inventory[tcpMonitor]["type"] = "TCP"
+	if result := f.reconcile(f.provider()); result.Routes[0].Result.Outcome.State == cloud.OutcomeReady ||
+		!slices.Equal(f.writes[6:], []string{"PUT " + tcpListener}) || f.inventory[tcpListener]["default_pool_id"] != nil {
+		t.Fatalf("no same-family backend, result %#v, writes %v", result, f.writes[6:])
+	}
+	f.inventory[tcpListener]["provisioning_status"] = "ACTIVE"
+	f.inventory[tcpMonitor]["type"] = "UDP-CONNECT"
+	f.reconcile(f.provider())
+	if result := f.reconcile(f.provider()); result.Routes[0].Result.Outcome.State == cloud.OutcomeReady ||
+		!slices.Equal(f.writes[7:], []string{"DELETE " + tcpMember}) || f.inventory[tcpListener]["default_pool_id"] != nil {
+		t.Fatalf("an IPv6 member behind an IPv4 VIP was accepted: %#v, writes %v", result, f.writes[7:])
+	}
+}
+
+func TestUDPGraphReportsProviderMonitorDelayRejection(t *testing.T) {
+	f := newTransportGraphFixture(t, "UDP")
+	route := &f.spec.Routes[0].Spec
+	route.HealthMonitor.Delay, route.HealthMonitor.Timeout = 7, 2
+	f.rejectMonitorDelay = 7
+	provider := f.provider()
+	for range 4 {
+		f.reconcile(provider)
+	}
+	result, err := provider.ReconcileGatewayGraph(t.Context(), f.spec)
+	var component *cloud.GraphError
+	if !errors.Is(err, cloud.ErrTerminalValidation) || !errors.As(err, &component) || component.Identity != route.Identity ||
+		result.Routes[0].Result.Outcome.State == cloud.OutcomeReady || f.inventory[tcpListener]["default_pool_id"] != nil ||
+		!slices.Equal(f.writes[4:], []string{"POST " + tcpMonitors}) {
+		t.Fatalf("rejected UDP monitor = %v, result %#v, writes %v", err, result, f.writes)
+	}
+}
+
+func TestDefaultPoolListenerErrorFailsEnsureAndAllowsOwnedRevocation(t *testing.T) {
+	for _, protocol := range []string{"TCP", "UDP"} {
+		t.Run(protocol, func(t *testing.T) { testDefaultPoolListenerErrorFailsEnsureAndAllowsOwnedRevocation(t, protocol) })
+	}
+}
+
+func testDefaultPoolListenerErrorFailsEnsureAndAllowsOwnedRevocation(t *testing.T, protocol string) {
+	f := newTransportGraphFixture(t, protocol)
 	provider := f.provider()
 	for range 6 {
 		f.reconcile(provider)
@@ -383,7 +586,7 @@ func TestTCPGraphListenerErrorFailsEnsureAndAllowsOwnedRevocation(t *testing.T) 
 	if _, err := f.provider().ReconcileGatewayGraph(t.Context(), f.spec); !errors.Is(err, cloud.ErrResourceFailure) || len(f.writes) != 7 {
 		t.Fatalf("failed detach should hold descendants = %v, writes %v", err, f.writes[6:])
 	}
-	f.spec.Gateway = cloud.GatewayGraphNode{Disposition: cloud.GraphDelete, Spec: cloud.GatewaySpec{ListenerProtocol: cloud.ListenerProtocolTCP}}
+	f.spec.Gateway = cloud.GatewayGraphNode{Disposition: cloud.GraphDelete, Spec: cloud.GatewaySpec{ListenerProtocol: protocol}}
 	if result := f.reconcile(f.provider()); result.Outcome.State != cloud.OutcomeProgressing ||
 		!slices.Equal(f.writes[7:], []string{"DELETE " + tcpListener}) {
 		t.Fatalf("Gateway cleanup should remove the failed listener first = %#v, writes %v", result, f.writes[7:])

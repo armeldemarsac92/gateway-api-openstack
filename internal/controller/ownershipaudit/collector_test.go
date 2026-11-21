@@ -57,12 +57,14 @@ func TestCollectOwnershipSnapshot(t *testing.T) {
 	applyRouteBinding(cfg, route, gateway)
 	stream := &gatewayv1.TCPRoute{ObjectMeta: *route.ObjectMeta.DeepCopy()}
 	stream.UID = "tcp-uid"
+	datagram := &gatewayv1.UDPRoute{ObjectMeta: *route.ObjectMeta.DeepCopy()}
+	datagram.UID = "udp-uid"
 	unboundGateway := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "unbound", UID: "unbound-gateway"}}
 	unboundRoute := &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "unbound", UID: "unbound-route"}}
 
 	reader := fake.NewClientBuilder().
 		WithScheme(testScheme(t)).
-		WithObjects(route, stream, unboundRoute, gateway, unboundGateway).
+		WithObjects(route, stream, datagram, unboundRoute, gateway, unboundGateway).
 		Build()
 	snapshot, err := CollectOwnershipSnapshot(context.Background(), reader, cfg)
 	if err != nil {
@@ -71,8 +73,8 @@ func TestCollectOwnershipSnapshot(t *testing.T) {
 	if len(snapshot.Issues) != 0 {
 		t.Fatalf("CollectOwnershipSnapshot() issues = %#v, want none", snapshot.Issues)
 	}
-	if len(snapshot.Records) != 3 {
-		t.Fatalf("CollectOwnershipSnapshot() records = %#v, want a Gateway, an HTTPRoute and a TCPRoute", snapshot.Records)
+	if len(snapshot.Records) != 4 {
+		t.Fatalf("CollectOwnershipSnapshot() records = %#v, want a Gateway, an HTTPRoute, a TCPRoute and a UDPRoute", snapshot.Records)
 	}
 
 	wantGatewayIdentity := cloud.Identity{
@@ -103,6 +105,10 @@ func TestCollectOwnershipSnapshot(t *testing.T) {
 	wantRouteIdentity.RouteUID = string(stream.UID)
 	if record := snapshot.Records[2]; record.Identity != wantRouteIdentity || len(record.Objects) != 1 || record.Objects[0].Kind != "TCPRoute" {
 		t.Fatalf("TCPRoute binding was not identified independently of the same-named HTTPRoute: %#v", record)
+	}
+	wantRouteIdentity.RouteUID = string(datagram.UID)
+	if record := snapshot.Records[3]; record.Identity != wantRouteIdentity || len(record.Objects) != 1 || record.Objects[0].Kind != "UDPRoute" {
+		t.Fatalf("UDPRoute binding was not identified independently of the same-named routes: %#v", record)
 	}
 	encoded, err := json.Marshal(snapshot)
 	if err != nil {
@@ -206,6 +212,18 @@ func TestCollectOwnershipSnapshotAcceptsCompleteAnnotationsWithoutFinalizers(t *
 	}
 	if len(snapshot.Records) != 2 || len(snapshot.Issues) != 0 {
 		t.Fatalf("CollectOwnershipSnapshot() = %#v, want two records and no issues", snapshot)
+	}
+}
+
+func TestAuditRejectsRouteWithoutClusterOrProjectEvidence(t *testing.T) {
+	cfg := testConfig()
+	route := &gatewayv1.UDPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: "edge", Name: "dns", UID: "route-uid", Annotations: map[string]string{
+		cfg.RouteGatewayNamespaceAnnotation(): "edge", cfg.RouteGatewayNameAnnotation(): "udp", cfg.RouteGatewayUIDAnnotation(): "gateway-uid",
+	}}}
+	reader := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(route).Build()
+	snapshot, err := CollectOwnershipSnapshot(t.Context(), reader, cfg)
+	if err != nil || len(snapshot.Records) != 0 || len(snapshot.Issues) != 1 || snapshot.Issues[0].Reason != invalidBindingReason {
+		t.Fatalf("unproven route scope: snapshot %+v, error %v", snapshot, err)
 	}
 }
 

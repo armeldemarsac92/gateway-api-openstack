@@ -31,7 +31,7 @@ func (p *Provider) listGatewayListeners(ctx context.Context, lb *octavia.LoadBal
 	if err != nil {
 		return nil, fmt.Errorf("list Gateway listeners: %w", err)
 	}
-	return items, crossCheckChildInventory(lb.ID, "listener", lb.Listeners, items, func(item listeners.Listener) string { return item.ID })
+	return items, crossCheckChildInventory("load balancer", lb.ID, "listener", lb.Listeners, items, func(item listeners.Listener) string { return item.ID })
 }
 
 func (p *Provider) listGatewayPools(ctx context.Context, lb *octavia.LoadBalancer) ([]pools.Pool, error) {
@@ -39,13 +39,13 @@ func (p *Provider) listGatewayPools(ctx context.Context, lb *octavia.LoadBalance
 	if err != nil {
 		return nil, fmt.Errorf("list pools beneath Gateway: %w", err)
 	}
-	return items, crossCheckChildInventory(lb.ID, "pool", lb.Pools, items, func(item pools.Pool) string { return item.ID })
+	return items, crossCheckChildInventory("load balancer", lb.ID, "pool", lb.Pools, items, func(item pools.Pool) string { return item.ID })
 }
 
 // Octavia's parent response supplies arrays of ID references. A missing or
 // null field supplies no additional observation. When the field is present,
 // refuse to plan from two snapshots that disagree about their child IDs.
-func crossCheckChildInventory[T any](loadBalancerID, kind string, referenced, listed []T, idOf func(T) string) error {
+func crossCheckChildInventory[T any](parentKind, parentID, kind string, referenced, listed []T, idOf func(T) string) error {
 	if referenced == nil {
 		return nil
 	}
@@ -57,13 +57,13 @@ func crossCheckChildInventory[T any](loadBalancerID, kind string, referenced, li
 		id := idOf(child)
 		if id == "" || !remaining[id] {
 			return cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady,
-				fmt.Errorf("load balancer %s and its %s list disagree about ID %q", loadBalancerID, kind, id))
+				fmt.Errorf("%s %s and its %s list disagree about ID %q", parentKind, parentID, kind, id))
 		}
 		delete(remaining, id)
 	}
 	if len(remaining) != 0 {
 		return cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady,
-			fmt.Errorf("load balancer %s references %d unlisted %s resources", loadBalancerID, len(remaining), kind))
+			fmt.Errorf("%s %s references %d unlisted %s resources", parentKind, parentID, len(remaining), kind))
 	}
 	return nil
 }
