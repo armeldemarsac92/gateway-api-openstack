@@ -57,4 +57,4 @@ rtk helm uninstall hibiscus-ambient-ztunnel hibiscus-ambient-cni hibiscus-ambien
   --kubeconfig "$kubeconfig" --kube-context "$context" --namespace istio-system --wait --timeout 5m
 ```
 
-The operator must qualify the site's CNI, workload policies and provider topology before using this module on deployed clusters. Istio 1.31.0's published mesh report uses Gateway API v1.6.0. Follow the v1.7.0 qualification record for the behavior verified with this module. [Reference implementations](../../docs/qualification/v1.7.0/reference-implementations.md)
+The operator must qualify the site's CNI, workload policies and provider topology before using this module on deployed clusters. Istio 1.31.0's published mesh report uses Gateway API v1.6.0. [Local v1.7.0 qualification](../../docs/qualification/v1.7.0/provider/ambient-waypoint.md) · [Reference implementations](../../docs/qualification/v1.7.0/reference-implementations.md)
