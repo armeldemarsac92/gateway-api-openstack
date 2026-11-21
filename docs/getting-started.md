@@ -43,7 +43,7 @@ kubectl get -f "$gateway_api_manifest" -o 'custom-columns=KIND:.kind,NAME:.metad
 The Standard manifest contains ten CRDs in `gateway.networking.k8s.io` and the `safe-upgrades.gateway.networking.k8s.io` admission policy and binding. Each has the v1.7.0 and `standard` annotations. Check the manifest inventory and any other installed Gateway API CRDs before proceeding.
 For Experimental qualification on a separate cluster, use `experimental-install.yaml` from the same release and set `GATEWAY_OPENSTACK_GATEWAY_API_CHANNEL` to `experimental` in the controller ConfigMap. That manifest has the same ten CRDs plus four in `gateway.networking.x-k8s.io`, all annotated `experimental`. The policy and binding carry `standard` in both manifests.
 
-Startup requires GatewayClass, Gateway, HTTPRoute, TCPRoute, UDPRoute, and ReferenceGrant to be available. `UDPRoute` uses `gateway.networking.k8s.io/v1` in both bundles.
+Startup requires GatewayClass, Gateway, HTTPRoute, TCPRoute, UDPRoute, and ReferenceGrant to be available. `UDPRoute` uses `gateway.networking.k8s.io/v1` in both bundles. The TLS SNI opt-in also requires the `TLSRoute` v1 API.
 The controller reports bundle version and channel validation through the GatewayClass `SupportedVersion` condition.
 A mismatch blocks provisioning and repair. Finalization can continue while the required Kubernetes APIs are served. [Installed Gateway API version](design/architecture.md#installed-gateway-api-version)
 
@@ -286,6 +286,10 @@ For a WebSocket backend, set `appProtocol: kubernetes.io/ws` on the TCP Service 
 ## Serve HTTPS with an operator-provisioned certificate
 
 A tenant can attach an HTTPRoute to a named HTTPS listener when the operator enables the certificate map for that class and approves the exact TLS Secret revision. Use a separate port for each HTTPS listener. A cross-namespace Secret also needs a ReferenceGrant from the certificate owner. [Workload overlay, example Gateway and certificate lifecycle](operator-https.md)
+
+## Route TLS connections by name
+
+With the regional Amphora capability and controller opt-in, two TLSRoutes can share one dedicated listener on the same port. Each route selects one Service by an exact ClientHello SNI name. [TLS passthrough example and grant lifecycle](operator-octavia-tls-sni-passthrough.md#route-two-names-on-one-port)
 
 ## Forward TCP to a Service
 
