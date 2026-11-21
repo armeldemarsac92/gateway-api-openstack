@@ -44,6 +44,14 @@ func ValidateHostname(hostname string) error {
 	return nil
 }
 
+// ValidateExactHostname rejects wildcards and accepts an exact DNS name.
+func ValidateExactHostname(hostname string) error {
+	if strings.HasPrefix(hostname, "*.") {
+		return errors.New("hostname must be an exact DNS name")
+	}
+	return ValidateHostname(hostname)
+}
+
 // HostnameRuleValue encodes one effective hostname for an Amphora HOST_NAME
 // REGEX rule. The stock renderer applies case-insensitive matching to the
 // Host value. Match an optional numeric port without changing the header.

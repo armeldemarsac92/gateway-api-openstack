@@ -47,8 +47,19 @@ type GatewayGraphSpec struct {
 
 // GatewayGraphNode describes the Gateway component. Spec is required for Ensure.
 type GatewayGraphNode struct {
-	Disposition GraphDisposition
-	Spec        GatewaySpec
+	Disposition  GraphDisposition
+	Spec         GatewaySpec
+	TLSSNIRoutes []TLSSNIRoute
+}
+
+// TLSSNIRoute is a single exact hostname and its authorized TCP destinations.
+type TLSSNIRoute struct {
+	Identity                Identity
+	Hostname                string
+	ServiceUID              string
+	BackendSubnetID         string
+	BackendSecurityGroupIDs []string
+	Members                 []Member
 }
 
 // RouteGraphNode describes one exact route component. Spec.Identity is always

@@ -19,6 +19,8 @@ package gateway
 import (
 	"context"
 	"errors"
+	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	"slices"
 
 	"k8s.io/apimachinery/pkg/types"
@@ -106,6 +108,13 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 	for _, route := range []client.Object{&gatewayv1.HTTPRoute{}, &gatewayv1.GRPCRoute{}, &gatewayv1.TCPRoute{}, &gatewayv1.UDPRoute{}} {
 		gatewayController.Watches(route, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForRoute),
 			builder.WithPredicates(controller.RouteForGatewayPredicate(r.Config)))
+	}
+	if r.Config.TLSSNIPassthrough {
+		gatewayController.Watches(&gatewayv1.TLSRoute{}, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForRoute),
+			builder.WithPredicates(controller.RouteForGatewayPredicate(r.Config)))
+		for _, dependency := range []client.Object{&corev1.Service{}, &discoveryv1.EndpointSlice{}, &corev1.Namespace{}, &gatewayv1.ReferenceGrant{}} {
+			gatewayController.Watches(dependency, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForSNIDependency))
+		}
 	}
 	if r.Config.OperatorHTTPS {
 		gatewayController.Watches(&gatewayv1.ReferenceGrant{}, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForCertificateGrant))

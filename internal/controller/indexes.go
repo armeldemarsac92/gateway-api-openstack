@@ -253,6 +253,8 @@ func RouteParents(object client.Object) ([]gatewayv1.ParentReference, []gatewayv
 		return route.Spec.ParentRefs, route.Status.Parents, true
 	case *gatewayv1.UDPRoute:
 		return route.Spec.ParentRefs, route.Status.Parents, true
+	case *gatewayv1.TLSRoute:
+		return route.Spec.ParentRefs, route.Status.Parents, true
 	default:
 		return nil, nil, false
 	}

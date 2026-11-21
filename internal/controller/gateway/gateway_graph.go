@@ -43,7 +43,7 @@ func (r *Reconciler) ensureGateway(ctx context.Context, expected *gatewayv1.Gate
 func (r *Reconciler) gatewaySpec(gateway *gatewayv1.Gateway, listeners []*gatewayv1.Listener, topology classconfig.Resolved) cloud.GatewaySpec {
 	listener := listeners[0]
 	var protocol string
-	if isL4Listener(listener.Protocol) {
+	if isL4Listener(listener.Protocol) || listener.Protocol == gatewayv1.TLSProtocolType {
 		protocol = string(listener.Protocol)
 	}
 	spec := cloud.GatewaySpec{

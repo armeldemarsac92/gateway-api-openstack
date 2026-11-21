@@ -114,6 +114,8 @@ const (
 	ListenerProtocolHTTP = "HTTP"
 	ListenerProtocolTCP  = "TCP"
 	ListenerProtocolUDP  = "UDP"
+	// ListenerProtocolTLSSNI describes a native TCP listener with no default.
+	ListenerProtocolTLSSNI = "TLS"
 )
 
 // NormalizeListenerProtocol interprets bindings written before listener

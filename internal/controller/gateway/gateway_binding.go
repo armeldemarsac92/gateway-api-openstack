@@ -28,7 +28,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/classconfig"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 )
 
@@ -52,6 +54,9 @@ func (r *Reconciler) bindGateway(
 	)
 	if err != nil {
 		return err
+	}
+	if snapshot.listener.Protocol == gatewayv1.TLSProtocolType && snapshot.topology.Topology.MemberMode != cloud.MemberModeEndpoint {
+		return &classconfig.InvalidParametersError{Message: "TLS SNI passthrough requires Endpoint member mode"}
 	}
 	gateway := snapshot.gateway.DeepCopy()
 

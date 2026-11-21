@@ -40,6 +40,14 @@ rules:
   - apiGroups:
       - gateway.networking.k8s.io
     resources:
+      - tlsroutes
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - gateway.networking.k8s.io
+    resources:
       - referencegrants
     verbs:
       - list
@@ -53,6 +61,7 @@ rules:
       - grpcroutes/status
       - tcproutes/status
       - udproutes/status
+      - tlsroutes/status
     verbs:
       - get
       - update

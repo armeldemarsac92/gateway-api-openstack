@@ -1,0 +1,127 @@
+/*
+Copyright 2026 The gateway-api-openstack Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package gateway
+
+import (
+	"testing"
+
+	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/classconfig"
+
+	"k8s.io/utils/ptr"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+)
+
+func TestSNIPassthroughRequiresOptInAndDedicatedListener(t *testing.T) {
+	gateway := &gatewayv1.Gateway{Spec: gatewayv1.GatewaySpec{Listeners: []gatewayv1.Listener{{
+		Name: "sni", Port: 443, Protocol: gatewayv1.TLSProtocolType,
+		TLS: &gatewayv1.ListenerTLSConfig{Mode: ptr.To(gatewayv1.TLSModePassthrough)},
+	}}}}
+	config := controller.Config{}
+	if _, err := SupportedListenersForConfig(config, gateway); err == nil {
+		t.Fatal("accepted TLS passthrough with the flag disabled")
+	}
+	config.TLSSNIPassthrough = true
+	if got, err := SupportedListenersForConfig(config, gateway); err != nil || len(got) != 1 || got[0].Protocol != gatewayv1.TLSProtocolType {
+		t.Fatalf("wanted one TLS listener, got %v, %v", got, err)
+	}
+	gateway.Spec.Listeners = append(gateway.Spec.Listeners, gatewayv1.Listener{Name: "http", Port: 80, Protocol: gatewayv1.HTTPProtocolType})
+	if _, err := SupportedListenersForConfig(config, gateway); err == nil {
+		t.Fatal("accepted a mixed Gateway")
+	}
+}
+
+func TestSNIRouteGrantWithdrawalLeavesOtherHostname(t *testing.T) {
+	scheme := runtime.NewScheme()
+	for _, add := range []func(*runtime.Scheme) error{corev1.AddToScheme, discoveryv1.AddToScheme, gatewayv1.Install} {
+		if err := add(scheme); err != nil {
+			t.Fatal(err)
+		}
+	}
+	config := controller.Config{ControllerName: "example.net/gateway", ClusterID: "cluster", OpenStackProjectID: "project", TLSSNIPassthrough: true}
+	listener := gatewayv1.Listener{Name: "sni", Port: 443, Protocol: gatewayv1.TLSProtocolType}
+	gateway := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "edge", Name: "gateway", UID: "gateway-uid"}}
+	snapshot := &gatewayMutationSnapshot{gateway: gateway, listener: &listener, topology: classconfig.Resolved{Topology: cloud.Topology{MemberMode: cloud.MemberModeEndpoint}}}
+	route := func(name, hostname, target string) *gatewayv1.TLSRoute {
+		return &gatewayv1.TLSRoute{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "edge", UID: types.UID(name + "-uid")},
+			Spec: gatewayv1.TLSRouteSpec{
+				CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{{Name: "gateway", SectionName: ptr.To(gatewayv1.SectionName("sni"))}}},
+				Hostnames:       []gatewayv1.Hostname{gatewayv1.Hostname(hostname)},
+				Rules: []gatewayv1.TLSRouteRule{{BackendRefs: []gatewayv1.BackendRef{{BackendObjectReference: gatewayv1.BackendObjectReference{
+					Name: "backend", Namespace: ptr.To(gatewayv1.Namespace(target)), Port: ptr.To(gatewayv1.PortNumber(8443)),
+				}}}}},
+			},
+		}
+	}
+	a, b := route("a", "a.example.test", "backend-a"), route("b", "b.example.test", "edge")
+	service := func(namespace, uid, address string) (*corev1.Service, *discoveryv1.EndpointSlice) {
+		svc := &corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{Name: "backend", Namespace: namespace, UID: types.UID(uid)},
+			Spec:       corev1.ServiceSpec{Ports: []corev1.ServicePort{{Name: "tls", Port: 8443, Protocol: corev1.ProtocolTCP}}},
+		}
+		endpoints := &discoveryv1.EndpointSlice{
+			ObjectMeta: metav1.ObjectMeta{Name: "backend-1", Namespace: namespace, Labels: map[string]string{discoveryv1.LabelServiceName: svc.Name},
+				OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(svc, corev1.SchemeGroupVersion.WithKind("Service"))}},
+			AddressType: discoveryv1.AddressTypeIPv4,
+			Ports:       []discoveryv1.EndpointPort{{Name: ptr.To("tls"), Protocol: ptr.To(corev1.ProtocolTCP), Port: ptr.To(int32(9443))}},
+			Endpoints:   []discoveryv1.Endpoint{{Addresses: []string{address}, Conditions: discoveryv1.EndpointConditions{Ready: ptr.To(true)}}},
+		}
+		return svc, endpoints
+	}
+	svcA, endpointsA := service("backend-a", "service-a", "192.0.2.101")
+	svcB, endpointsB := service("edge", "service-b", "192.0.2.102")
+	grant := &gatewayv1.ReferenceGrant{
+		ObjectMeta: metav1.ObjectMeta{Name: "grant-a", Namespace: "backend-a"},
+		Spec: gatewayv1.ReferenceGrantSpec{
+			From: []gatewayv1.ReferenceGrantFrom{{Group: gatewayv1.GroupName, Kind: "TLSRoute", Namespace: "edge"}},
+			To:   []gatewayv1.ReferenceGrantTo{{Group: "", Kind: "Service", Name: ptr.To(gatewayv1.ObjectName(svcA.Name))}},
+		},
+	}
+	client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(a, b, svcA, svcB, endpointsA, endpointsB, grant).Build()
+	r := &Reconciler{APIReader: client, Config: config}
+	observed, err := r.observeSNIRoutes(t.Context(), snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := observed.targets(); len(got) != 2 || got[0].Hostname != "a.example.test" || got[1].Hostname != "b.example.test" ||
+		len(got[0].Members) != 1 || got[0].Members[0].Address != "192.0.2.101" || got[0].Members[0].Port != 9443 {
+		t.Fatalf("expected two disjoint endpoint targets, got %#v", got)
+	}
+	if err := client.Delete(t.Context(), grant); err != nil {
+		t.Fatal(err)
+	}
+	observed, err = r.observeSNIRoutes(t.Context(), snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := observed.targets(); len(got) != 1 || got[0].Hostname != "b.example.test" {
+		t.Fatalf("grant withdrawal must withdraw A only, got %#v", got)
+	}
+	if observed[0].resolvedReason != gatewayv1.RouteReasonRefNotPermitted {
+		t.Fatalf("expected RefNotPermitted, got %#v", observed[0])
+	}
+}

@@ -84,7 +84,7 @@ func (r *Reconciler) observeGatewayMutationSnapshot(
 	); err != nil {
 		return nil, errors.Join(errGatewayChanged, client.IgnoreNotFound(err))
 	}
-	if gatewayClass.Spec.ControllerName != r.Config.ControllerName || (r.gatewayUsesListenerScope(&gateway) && !gatewayClass.DeletionTimestamp.IsZero()) {
+	if gatewayClass.Spec.ControllerName != r.Config.ControllerName || ((r.gatewayUsesListenerScope(&gateway) || hasSNIPassthroughListener(&gateway)) && !gatewayClass.DeletionTimestamp.IsZero()) {
 		return nil, errGatewayChanged
 	}
 	if !controller.GatewayClassSupportsInstalledVersion(&gatewayClass) {
@@ -177,7 +177,7 @@ func (r *Reconciler) sealGatewayMutationSnapshot(
 	); err != nil {
 		return errors.Join(errGatewayChanged, client.IgnoreNotFound(err))
 	}
-	if gatewayClass.Spec.ControllerName != r.Config.ControllerName || (r.gatewayUsesListenerScope(&gateway) &&
+	if gatewayClass.Spec.ControllerName != r.Config.ControllerName || ((r.gatewayUsesListenerScope(&gateway) || hasSNIPassthroughListener(&gateway)) &&
 		(gatewayClass.UID != snapshot.gatewayClass.UID || gatewayClass.Generation != snapshot.gatewayClass.Generation || !gatewayClass.DeletionTimestamp.IsZero())) {
 		return errGatewayChanged
 	}

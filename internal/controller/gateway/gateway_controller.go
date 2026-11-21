@@ -66,7 +66,8 @@ var (
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gateways,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gateways/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gateways/finalizers,verbs=update
-// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gatewayclasses;httproutes,verbs=get;list;watch
+// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gatewayclasses;httproutes;tlsroutes,verbs=get;list;watch
+// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=tlsroutes/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch;update
 func (r *Reconciler) Reconcile(
 	ctx context.Context,
@@ -86,7 +87,7 @@ func (r *Reconciler) Reconcile(
 			retErr = errors.Join(retErr, scope.patchCause, err)
 		}
 		if retErr == nil && scope.patchCause == nil && !result.Requeue && scope.gateway.DeletionTimestamp.IsZero() &&
-			usesHTTPSProfile(r.Config, scope.gateway) && (result.RequeueAfter == 0 || result.RequeueAfter > httpsPollInterval) {
+			(usesHTTPSProfile(r.Config, scope.gateway) || r.Config.TLSSNIPassthrough && hasSNIPassthroughListener(scope.gateway)) && (result.RequeueAfter == 0 || result.RequeueAfter > httpsPollInterval) {
 			result.RequeueAfter = httpsPollInterval
 		}
 	}()
@@ -305,6 +306,9 @@ func (r *Reconciler) reconcileGatewayGraph(
 	address := r.observedGatewayAddress(scope.gateway, gatewayResult.State)
 	if progress.State == cloud.OutcomeReady && address == "" {
 		progress = cloud.ProgressingOutcome("Waiting to observe the Gateway address", time.Second)
+	}
+	if listenerFamily(decision.listener) == gatewayv1.TLSProtocolType && graphResult.Outcome.State == cloud.OutcomeProgressing && progress.State == cloud.OutcomeReady {
+		progress = graphResult.Outcome
 	}
 	if progress.State == cloud.OutcomeProgressing {
 		message := controller.ProviderProgressMessage(progress, "Octavia resources for the Gateway are still progressing")
