@@ -205,7 +205,7 @@ func TestNodePortMemberWeightIsNotReconciled(t *testing.T) {
 	}
 }
 
-func TestInvalidEndpointWeightsFailBeforeCloudAccess(t *testing.T) {
+func TestInvalidMemberWeightsFailBeforeCloudAccess(t *testing.T) {
 	for _, test := range []struct {
 		name      string
 		protocol  string
@@ -216,7 +216,7 @@ func TestInvalidEndpointWeightsFailBeforeCloudAccess(t *testing.T) {
 		{name: "negative", protocol: cloud.ListenerProtocolUDP, mode: cloud.MemberModeEndpoint, weight: -1},
 		{name: "above Octavia maximum", protocol: cloud.ListenerProtocolUDP, mode: cloud.MemberModeEndpoint, weight: 257},
 		{name: "conflicting duplicate", protocol: cloud.ListenerProtocolUDP, mode: cloud.MemberModeEndpoint, weight: 3, duplicate: true},
-		{name: "UDP NodePort", protocol: cloud.ListenerProtocolUDP, mode: cloud.MemberModeNodePort, weight: 1},
+		{name: "UDP NodePort above Octavia maximum", protocol: cloud.ListenerProtocolUDP, mode: cloud.MemberModeNodePort, weight: 257},
 		{name: "TCP NodePort", protocol: cloud.ListenerProtocolTCP, mode: cloud.MemberModeNodePort, weight: 1},
 		{name: "HTTP Endpoint", protocol: cloud.ListenerProtocolHTTP, mode: cloud.MemberModeEndpoint, weight: 1},
 	} {

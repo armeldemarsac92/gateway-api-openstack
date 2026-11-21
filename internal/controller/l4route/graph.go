@@ -294,7 +294,7 @@ func (r *Reconciler) observeRouteBackend(ctx context.Context, route *transportRo
 	if err != nil || rejections.active != nil || len(refs) == 0 {
 		return nil, "", revisions, err
 	}
-	services, rejections, err := r.backendServices(ctx, refs, false)
+	services, rejections, err := r.backendServices(ctx, refs, "")
 	if err != nil || rejections.active != nil || len(services) == 0 {
 		return nil, "", revisions, err
 	}

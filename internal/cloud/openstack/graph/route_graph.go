@@ -775,7 +775,7 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 				return steps, state, nil
 			}
 		}
-		clearPersistence := pool.Persistence != (pools.SessionPersistence{}) && desired.spec.MemberMode == cloud.MemberModeEndpoint &&
+		clearPersistence := pool.Persistence != (pools.SessionPersistence{}) &&
 			slices.ContainsFunc(desired.members, func(member cloud.Member) bool { return !member.Draining && member.Weight > 0 })
 		if pool.LBMethod != string(pools.LBMethodRoundRobin) || !pool.AdminStateUp || clearPersistence {
 			nonPolicyPlan = append(nonPolicyPlan, routeMutation{kind: routeMutationUpdatePool, id: pool.ID, clearPoolPersistence: clearPersistence})
@@ -802,7 +802,7 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 			}
 			state.MemberIDs = append(state.MemberIDs, member.ID)
 			delete(desiredMembers, key)
-			weight := desiredMemberWeight(desired.spec.MemberMode, wanted)
+			weight := desired.memberWeight(wanted)
 			// HAProxy excludes backup members while any regular member is up.
 			weightedTCP := desired.protocol() == cloud.ListenerProtocolTCP && wanted.Weight > 0 && !wanted.Draining
 			if _, unreported := actual.memberBackupUnreported[member.ID]; weightedTCP && unreported {
@@ -1062,12 +1062,12 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 			SubnetID:     desired.spec.MemberSubnetID,
 			AdminStateUp: boolPointer(true),
 			Tags:         tags,
-			Weight:       desiredMemberWeight(desired.spec.MemberMode, step.member),
+			Weight:       desired.memberWeight(step.member),
 		})
 	case routeMutationUpdateMember:
 		opts := pools.UpdateMemberOpts{
 			AdminStateUp: boolPointer(true),
-			Weight:       desiredMemberWeight(desired.spec.MemberMode, step.member),
+			Weight:       desired.memberWeight(step.member),
 		}
 		if step.clearMemberBackup {
 			opts.Backup = boolPointer(false)
@@ -1197,9 +1197,10 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 	return nil
 }
 
-// Endpoint mode owns weight for readiness and explicit TCP and UDP traffic shares.
-func desiredMemberWeight(mode cloud.MemberMode, member cloud.Member) *int {
-	if mode != cloud.MemberModeEndpoint {
+// Endpoint mode uses weight for readiness. UDP NodePort mode also owns weight
+// so the adapter can restore weight 1 after removing an explicit share.
+func (r desiredRoute) memberWeight(member cloud.Member) *int {
+	if r.spec.MemberMode != cloud.MemberModeEndpoint && r.protocol() != cloud.ListenerProtocolUDP {
 		return nil
 	}
 	weight := member.Weight

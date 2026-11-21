@@ -172,9 +172,9 @@ func (p *Provider) buildDesiredRoutePart(spec cloud.RouteSpec, backendKey string
 		if member.Port < 1 || member.Port > 65535 {
 			return invalid(fmt.Errorf("member %s has invalid port %d", member.Address, member.Port))
 		}
-		if member.Weight != 0 && (spec.MemberMode != cloud.MemberModeEndpoint ||
-			(protocol != cloud.ListenerProtocolTCP && protocol != cloud.ListenerProtocolUDP)) {
-			return invalid(errors.New("explicit member weights require TCP or UDP endpoint mode"))
+		if member.Weight != 0 && !(protocol == cloud.ListenerProtocolUDP ||
+			protocol == cloud.ListenerProtocolTCP && spec.MemberMode == cloud.MemberModeEndpoint) {
+			return invalid(errors.New("explicit member weights require UDP or TCP endpoint mode"))
 		}
 		if member.Weight < 0 || member.Weight > maxOctaviaMemberWeight {
 			return invalid(fmt.Errorf("explicit member weight %d is outside 1-%d", member.Weight, maxOctaviaMemberWeight))

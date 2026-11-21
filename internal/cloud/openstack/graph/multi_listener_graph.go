@@ -366,7 +366,7 @@ func (p *Provider) deferredScopedRouteObservations(ctx context.Context, desired 
 func scopedRouteBackendReady(route desiredRoute, observed observedRouteGraph, vip string, changes []routeMutation, provisioningIssue string) bool {
 	return observed.pool != nil && provisioningIssue == "" && len(changes) == 0 &&
 		slices.ContainsFunc(route.members, func(member cloud.Member) bool { return !member.Draining }) &&
-		(route.spec.GatewayRequirements.ListenerProtocol == cloud.ListenerProtocolTCP || hasActiveUDPBackend(route, observed, vip))
+		(route.spec.GatewayRequirements.ListenerProtocol == cloud.ListenerProtocolTCP || hasActiveUDPBackend(observed, vip))
 }
 
 func (p *Provider) buildScopedListenerGraphPlan(desired desiredGatewayGraph, actual observedGatewayGraph) ([]graphMutation, cloud.GatewayGraphResult, error) {

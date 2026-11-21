@@ -52,6 +52,14 @@ func ValidateEndpointService(service *corev1.Service) *model.Diagnostic {
 	return nil
 }
 
+// ValidateNodePortService checks that Kubernetes allocated the selected NodePort.
+func ValidateNodePortService(service *corev1.Service, port *corev1.ServicePort) *model.Diagnostic {
+	if service.Spec.Type != corev1.ServiceTypeNodePort || port.NodePort == 0 {
+		return unsupported("backend Service %s requires an allocated NodePort", service.Name)
+	}
+	return nil
+}
+
 // TransportMembers resolves a TCP or UDP Service through the Gateway's frozen member mode.
 // The caller authorizes the Service reference before reading it.
 func TransportMembers(ctx context.Context, reader client.Reader, service *corev1.Service, port *gatewayv1.PortNumber, protocol corev1.Protocol, topology classconfig.Resolved, gatewayAddresses []gatewayv1.GatewayStatusAddress) ([]cloud.Member, *model.Diagnostic, error) {
@@ -65,8 +73,8 @@ func TransportMembers(ctx context.Context, reader client.Reader, service *corev1
 	mode := topology.Topology.MemberMode
 	switch mode {
 	case cloud.MemberModeNodePort:
-		if service.Spec.Type != corev1.ServiceTypeNodePort || selected.NodePort == 0 {
-			return nil, unsupported("backend Service %s requires an allocated NodePort", service.Name), nil
+		if diagnostic := ValidateNodePortService(service, selected); diagnostic != nil {
+			return nil, diagnostic, nil
 		}
 	case cloud.MemberModeEndpoint:
 		if diagnostic := ValidateEndpointService(service); diagnostic != nil {

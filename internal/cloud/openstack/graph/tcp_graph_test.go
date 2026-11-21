@@ -937,15 +937,19 @@ func TestUDPGraphDetachesWithoutMembersInTheVIPFamily(t *testing.T) {
 func TestTransportGraphReconcilesEndpointWeightThroughThePublicAPI(t *testing.T) {
 	for _, protocol := range []string{cloud.ListenerProtocolTCP, cloud.ListenerProtocolUDP} {
 		t.Run(protocol, func(t *testing.T) {
-			testTransportGraphReconcilesEndpointWeight(t, protocol)
+			testTransportGraphReconcilesWeight(t, protocol, cloud.MemberModeEndpoint)
 		})
 	}
 }
 
-func testTransportGraphReconcilesEndpointWeight(t *testing.T, protocol string) {
+func TestUDPGraphReconcilesNodePortWeightThroughThePublicAPI(t *testing.T) {
+	testTransportGraphReconcilesWeight(t, cloud.ListenerProtocolUDP, cloud.MemberModeNodePort)
+}
+
+func testTransportGraphReconcilesWeight(t *testing.T, protocol string, mode cloud.MemberMode) {
 	f := newTransportGraphFixture(t, protocol)
 	route := &f.spec.Routes[0].Spec
-	route.MemberMode = cloud.MemberModeEndpoint
+	route.MemberMode = mode
 	member := &route.Members[0]
 	member.Weight = 256
 	for range 6 {
@@ -999,6 +1003,9 @@ func testTransportGraphReconcilesEndpointWeight(t *testing.T, protocol string) {
 		if !slices.Equal(f.writes[before:], want) || f.inventory[tcpListener]["default_pool_id"] != "pool" {
 			t.Fatalf("%s: weight transition writes = %v, want %v and an attached pool", change.name, f.writes[before:], want)
 		}
+	}
+	if mode == cloud.MemberModeNodePort {
+		return
 	}
 	member.Weight, member.Draining = 7, true
 	before := len(f.writes)
@@ -1105,15 +1112,19 @@ func TestTransportGraphRepairsBackupOnlyForWeightedTCPEndpoints(t *testing.T) {
 func TestWeightedTransportGraphClearsSourceIPPersistenceBeforeAttaching(t *testing.T) {
 	for _, protocol := range []string{cloud.ListenerProtocolTCP, cloud.ListenerProtocolUDP} {
 		t.Run(protocol, func(t *testing.T) {
-			testWeightedTransportGraphClearsSourceIPPersistence(t, protocol)
+			testWeightedTransportGraphClearsSourceIPPersistence(t, protocol, cloud.MemberModeEndpoint)
 		})
 	}
 }
 
-func testWeightedTransportGraphClearsSourceIPPersistence(t *testing.T, protocol string) {
+func TestWeightedUDPNodePortGraphClearsSourceIPPersistenceBeforeAttaching(t *testing.T) {
+	testWeightedTransportGraphClearsSourceIPPersistence(t, cloud.ListenerProtocolUDP, cloud.MemberModeNodePort)
+}
+
+func testWeightedTransportGraphClearsSourceIPPersistence(t *testing.T, protocol string, mode cloud.MemberMode) {
 	f := newTransportGraphFixture(t, protocol)
 	route := &f.spec.Routes[0].Spec
-	route.MemberMode = cloud.MemberModeEndpoint
+	route.MemberMode = mode
 	for range 6 {
 		f.reconcile(f.provider())
 	}
@@ -1122,7 +1133,7 @@ func testWeightedTransportGraphClearsSourceIPPersistence(t *testing.T, protocol 
 	sticky := map[string]any{"type": "SOURCE_IP"}
 	pool["session_persistence"] = sticky
 	if result := f.reconcile(f.provider()); result.Outcome.State != cloud.OutcomeReady || len(f.writes) != 6 {
-		t.Fatalf("legacy endpoint pool changed: %v, writes %v", result.Outcome.State, f.writes)
+		t.Fatalf("unweighted pool changed: %v, writes %v", result.Outcome.State, f.writes)
 	}
 
 	// An explicit weight of 1 is also used when weighted backend shares are equal.
