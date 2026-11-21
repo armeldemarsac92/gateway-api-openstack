@@ -158,7 +158,7 @@ func (s *Store) List(ctx context.Context, gatewayUID string) ([]Revision, error)
 // result preserves a live revision, and a missing or failed check fails closed.
 func (s *Store) Retire(ctx context.Context, gatewayUID string, revision Revision, isUnused func(context.Context, string) (bool, error)) error {
 	if isUnused == nil {
-		return errors.New("Octavia backend CA usage check is required")
+		return errors.New("backend CA retirement requires an Octavia usage check")
 	}
 	client, prefix, err := s.open(gatewayUID)
 	if err != nil {

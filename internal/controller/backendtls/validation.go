@@ -44,7 +44,7 @@ type CA struct {
 	Key    types.NamespacedName
 	UID    types.UID
 	Digest string
-	PEM    []byte
+	PEM    []byte `json:"-"`
 }
 
 const caKey = "ca.crt"

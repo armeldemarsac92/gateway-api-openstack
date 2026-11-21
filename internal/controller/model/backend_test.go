@@ -29,6 +29,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 )
 
 func TestBackendGroupsPreserveWeightsAndOverlappingEndpoints(t *testing.T) {
@@ -354,12 +356,22 @@ func TestBackendModelDoesNotAliasInputs(t *testing.T) {
 	service := backendService("echo")
 	service.Spec.Ports[0].AppProtocol = ptr.To("http")
 	input := Input{Services: []corev1.Service{service}, EndpointSlices: []discoveryv1.EndpointSlice{backendSlice("echo", "192.0.2.10")}}
+	policies := []backendtls.PolicyResult{{Validation: &backendtls.Validation{
+		Hostname: "echo.example", CA: backendtls.CA{PEM: []byte("public test CA")},
+	}}}
+	key := ServicePortKey{Service: types.NamespacedName{Namespace: service.Namespace, Name: service.Name}, Port: 80}
+	input.BackendTLSPolicies = map[ServicePortKey]backendtls.Selection{key: {Policies: policies, Winner: &policies[0]}}
 	routeBefore := route.DeepCopy()
 	inputBefore, err := json.Marshal(input)
 	if err != nil {
 		t.Fatal(err)
 	}
 	group := ResolveBackends(route, route.Spec.Rules[0], input)[0]
+	group.BackendTLS.Winner.Validation.CA.PEM[0] = 'x'
+	group.BackendTLS.Policies[0].Validation.Hostname = "changed.example"
+	if string(policies[0].Validation.CA.PEM) != "public test CA" || policies[0].Validation.Hostname != "echo.example" {
+		t.Fatal("compiled backend aliases the input policy or CA")
+	}
 	*group.Reference.Weight = 90
 	*group.Reference.Port = 90
 	*group.Reference.Group = "other.test"

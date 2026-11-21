@@ -82,7 +82,7 @@ func resolveBackend(route *gatewayv1.HTTPRoute, reference gatewayv1.HTTPBackendR
 		group.Diagnostic = diagnostic
 		return group
 	}
-	group.BackendTLS = selection
+	group.BackendTLS = selection.Clone()
 	if HTTPProfileRouteKind(route) == GRPCRouteKind && !ServicePortUsesH2C(port) {
 		group.Diagnostic = backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "GRPCRoute requires kubernetes.io/h2c on the backend Service port")
 		return group

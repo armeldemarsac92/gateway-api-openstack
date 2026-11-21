@@ -39,7 +39,7 @@ type Input struct {
 	RequestHeaderModifier bool
 	BackendH2C            bool
 	EnableXBackend        bool
-	BackendTLSPolicies    map[ServicePortKey]backendtls.Selection
+	BackendTLSPolicies    map[ServicePortKey]backendtls.Selection `json:"-"`
 	MemberMode            cloud.MemberMode
 	XBackends             []XBackendObservation
 	Gateway               *gatewayv1.Gateway

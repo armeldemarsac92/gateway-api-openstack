@@ -36,6 +36,31 @@ type Selection struct {
 	Policies []PolicyResult
 }
 
+// Clone detaches the policy conditions and CA bytes used in a compiled backend.
+func (s Selection) Clone() Selection {
+	copy := Selection{Policies: slices.Clone(s.Policies)}
+	for i := range copy.Policies {
+		copy.Policies[i] = s.Policies[i].clone()
+		if s.Winner == &s.Policies[i] {
+			copy.Winner = &copy.Policies[i]
+		}
+	}
+	if s.Winner != nil && copy.Winner == nil {
+		winner := s.Winner.clone()
+		copy.Winner = &winner
+	}
+	return copy
+}
+
+func (r PolicyResult) clone() PolicyResult {
+	if r.Validation != nil {
+		validation := *r.Validation
+		validation.CA.PEM = slices.Clone(validation.CA.PEM)
+		r.Validation = &validation
+	}
+	return r
+}
+
 // PolicyResult provides the inputs for an ancestor status. The caller establishes
 // Gateway ancestry and verifies that the data path can enforce the policy before
 // publishing an Accepted condition.
@@ -86,7 +111,7 @@ func Evaluate(service *corev1.Service, port *corev1.ServicePort, policies []gate
 	}
 	slices.SortFunc(candidates, func(a, b candidate) int {
 		return cmp.Or(
-			a.policy.CreationTimestamp.Time.Compare(b.policy.CreationTimestamp.Time),
+			a.policy.CreationTimestamp.Compare(b.policy.CreationTimestamp.Time),
 			cmp.Compare(a.policy.Namespace, b.policy.Namespace),
 			cmp.Compare(a.policy.Name, b.policy.Name),
 		)

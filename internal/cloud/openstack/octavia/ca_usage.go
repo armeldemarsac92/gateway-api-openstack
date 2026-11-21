@@ -102,7 +102,7 @@ func (row caAttachment) excludes(projectID string, wanted uuid.UUID, field json.
 		}
 	}
 	if row.ProvisioningStatus != "ACTIVE" {
-		return false, errors.New("Octavia CA reference inventory has pending or failed changes")
+		return false, errors.New("cannot confirm CA detachment while Octavia changes are pending or failed")
 	}
 	return true, nil
 }

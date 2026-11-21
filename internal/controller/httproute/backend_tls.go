@@ -18,6 +18,7 @@ package httproute
 
 import (
 	"context"
+	"slices"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -62,7 +63,7 @@ func (a backendTLSAvailability) validation(backend model.BackendGroup, ordinaryH
 	}
 	return &cloud.BackendTLSValidation{
 		Hostname: winner.Validation.Hostname, CAConfigMapUID: string(winner.Validation.CA.UID),
-		CADigest: winner.Validation.CA.Digest, CAPEM: winner.Validation.CA.PEM,
+		CADigest: winner.Validation.CA.Digest, CAPEM: slices.Clone(winner.Validation.CA.PEM),
 	}
 }
 
