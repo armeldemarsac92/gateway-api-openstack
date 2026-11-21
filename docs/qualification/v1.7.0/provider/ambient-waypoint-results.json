@@ -1,0 +1,160 @@
+{
+  "channels": {
+    "experimental": {
+      "acceptedRouteConditions": [
+        "Accepted",
+        "ResolvedRefs",
+        "ResolvedWaypoints"
+      ],
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "directPodIPSamples": 6,
+      "drainedFixtureNamespaces": 6,
+      "gatewayClassController": "istio.io/mesh-controller",
+      "neighborServiceSamples": 12,
+      "observedComponentImages": [
+        "docker.io/istio/install-cni@sha256:fe7081ed2605166fef573a7987f183e91fd45c2a302f90998c879ca20112426e",
+        "docker.io/istio/pilot@sha256:17b581d9d75a1ab319d2816230626f06d65b48e3e798f98e3092a031843b3fe0",
+        "docker.io/istio/proxyv2@sha256:b153f8891c4eab1ef2a58d291e1e9ca00794561833bda82e3e26e26bf59ddebb",
+        "docker.io/istio/ztunnel@sha256:efa1115b58acd969bf876dfcee27751714e3ae317b2518e1a1d61f3ef037587e"
+      ],
+      "originalResponseAfterRouteWithdrawalSamples": 18,
+      "originalResponseAfterUnenrollmentSamples": 18,
+      "recordedCloudGraphs": 0,
+      "retainedBaseRelease": true,
+      "routeParentControllers": [
+        "istio.io/gateway-controller"
+      ],
+      "routedClientSamples": 12,
+      "unenrolledControlSamples": 6,
+      "uninstalledRuntimeReleases": [
+        "hibiscus-ambient-ztunnel",
+        "hibiscus-ambient-cni",
+        "hibiscus-ambient-istiod"
+      ],
+      "upstreamCases": {
+        "MeshBasic": "PASS",
+        "MeshGRPCRouteRequestHeaderModifier": "PASS",
+        "MeshGRPCRouteWeight": "PASS",
+        "MeshHTTPRouteMatching": "PASS",
+        "MeshHTTPRouteRedirectHostAndStatus": "PASS",
+        "MeshHTTPRouteRequestHeaderModifier": "PASS",
+        "MeshHTTPRouteSimpleSameNamespace": "PASS",
+        "MeshHTTPRouteWeight": "PASS",
+        "MeshTrafficSplit": "PASS"
+      },
+      "upstreamExit": 0,
+      "upstreamProfiles": {
+        "MESH-GRPC": {
+          "result": "success",
+          "statistics": {
+            "Failed": 0,
+            "Passed": 3,
+            "Skipped": 0
+          }
+        },
+        "MESH-HTTP": {
+          "result": "success",
+          "statistics": {
+            "Failed": 0,
+            "Passed": 7,
+            "Skipped": 0
+          }
+        }
+      },
+      "wireExit": 0,
+      "wireWeights": {
+        "grpc": {
+          "echo-v1": 139,
+          "echo-v2": 61
+        },
+        "http": {
+          "echo-v1": 146,
+          "echo-v2": 54
+        }
+      }
+    },
+    "standard": {
+      "acceptedRouteConditions": [
+        "Accepted",
+        "ResolvedRefs",
+        "ResolvedWaypoints"
+      ],
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "directPodIPSamples": 6,
+      "drainedFixtureNamespaces": 6,
+      "gatewayClassController": "istio.io/mesh-controller",
+      "neighborServiceSamples": 12,
+      "observedComponentImages": [
+        "docker.io/istio/install-cni@sha256:fe7081ed2605166fef573a7987f183e91fd45c2a302f90998c879ca20112426e",
+        "docker.io/istio/pilot@sha256:17b581d9d75a1ab319d2816230626f06d65b48e3e798f98e3092a031843b3fe0",
+        "docker.io/istio/proxyv2@sha256:b153f8891c4eab1ef2a58d291e1e9ca00794561833bda82e3e26e26bf59ddebb",
+        "docker.io/istio/ztunnel@sha256:efa1115b58acd969bf876dfcee27751714e3ae317b2518e1a1d61f3ef037587e"
+      ],
+      "originalResponseAfterRouteWithdrawalSamples": 18,
+      "originalResponseAfterUnenrollmentSamples": 18,
+      "recordedCloudGraphs": 0,
+      "retainedBaseRelease": true,
+      "routeParentControllers": [
+        "istio.io/gateway-controller"
+      ],
+      "routedClientSamples": 12,
+      "unenrolledControlSamples": 6,
+      "uninstalledRuntimeReleases": [
+        "hibiscus-ambient-ztunnel",
+        "hibiscus-ambient-cni",
+        "hibiscus-ambient-istiod"
+      ],
+      "upstreamCases": {
+        "MeshBasic": "PASS",
+        "MeshGRPCRouteRequestHeaderModifier": "PASS",
+        "MeshGRPCRouteWeight": "PASS",
+        "MeshHTTPRouteMatching": "PASS",
+        "MeshHTTPRouteRedirectHostAndStatus": "PASS",
+        "MeshHTTPRouteRequestHeaderModifier": "PASS",
+        "MeshHTTPRouteSimpleSameNamespace": "PASS",
+        "MeshHTTPRouteWeight": "PASS",
+        "MeshTrafficSplit": "PASS"
+      },
+      "upstreamExit": 0,
+      "upstreamProfiles": {
+        "MESH-GRPC": {
+          "result": "success",
+          "statistics": {
+            "Failed": 0,
+            "Passed": 3,
+            "Skipped": 0
+          }
+        },
+        "MESH-HTTP": {
+          "result": "success",
+          "statistics": {
+            "Failed": 0,
+            "Passed": 7,
+            "Skipped": 0
+          }
+        }
+      },
+      "wireExit": 0,
+      "wireWeights": {
+        "grpc": {
+          "echo-v1": 141,
+          "echo-v2": 59
+        },
+        "http": {
+          "echo-v1": 134,
+          "echo-v2": 66
+        }
+      }
+    }
+  },
+  "gatewayAPIRelease": "v1.7.0",
+  "gatewayAPISource": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "istioRelease": "1.31.0",
+  "istioSource": "eed52ebb66ade45214088877b0f82855d954060d",
+  "kind": "v0.33.0",
+  "kubernetes": "v1.36.4",
+  "nodeImage": "docker.io/kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed",
+  "platform": "Linux amd64 IPv4 kind, one active two-node cluster at a time in a local KVM guest",
+  "runnerSHA256": "64af6ef1c6114ec1e4532b5bf27f7b143e2a44aa8d5ab3316c369247aef1ce0b",
+  "source": "ab748e2dddec6b96447e2b9d3afd6d5feb1e4b11"
+}

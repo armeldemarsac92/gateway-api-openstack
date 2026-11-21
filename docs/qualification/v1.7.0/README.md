@@ -30,6 +30,8 @@ The [Magnum operator guide](magnum-operator.md) covers how to build the patch, s
 
 ## Profile records
 
+For east-west traffic, the operator can enroll selected namespaces and Services in Istio ambient on a single-stack IPv4 workload cluster. Both mesh Core profiles passed on separate local Standard and Experimental clusters. The table below tracks deployed Hibiscus runs. [Local waypoint results](provider/ambient-waypoint.md)
+
 An **Unrun** entry means the profile has not run on a deployed Hibiscus cluster. The local qualification records below give case counts and setup failures for the disposable fixtures. The Experimental suite may exercise additional fields on the shared Gateway API kinds. Each applicable Core and Extended case still needs its own result. The [matrix](matrix/README.md) relates features, cases, both schemas and unflagged API requirements.
 
 | Upstream profile | Standard | Experimental | Required traffic observation |

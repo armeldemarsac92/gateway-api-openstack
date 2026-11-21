@@ -1,0 +1,4 @@
+profile: ambient
+image: docker.io/istio/install-cni@sha256:fe7081ed2605166fef573a7987f183e91fd45c2a302f90998c879ca20112426e
+ambient:
+  ipv6: false

@@ -1,0 +1,4 @@
+profile: ambient
+image: docker.io/istio/ztunnel@sha256:efa1115b58acd969bf876dfcee27751714e3ae317b2518e1a1d61f3ef037587e
+env:
+  IPV6_ENABLED: "false"
