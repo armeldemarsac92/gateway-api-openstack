@@ -35,7 +35,7 @@ The controller uses Gateway API v1.7.0 and defaults to the Standard Channel. Its
 - One active HTTP listener shared by multiple HTTPRoutes. The listener accepts its own namespace by default and can opt into all namespaces or a namespace label selector. An unsupported protocol on a separate port gets its own listener status.
 - One rule, one match and one backend Service per HTTPRoute. Across routes the listener orders matching hostnames, Exact and PathPrefix paths, route age and names.
 - HTTP/1.1 WebSocket Upgrade to a TCP Service port declaring `appProtocol: kubernetes.io/ws`. [Operator instructions](docs/getting-started.md) · [Qualification](docs/qualification/v1.7.0/provider/http-websocket.md)
-- An optional exact or wildcard hostname on the listener and at most one on the HTTPRoute. Only the names shared by both reach the backend.
+- An HTTPRoute can declare several hostnames on one listener when their intersection produces one effective exact name or wildcard. An excluded hostname cannot reach that route’s backend. [Host matching and limits](docs/qualification/v1.7.0/provider/http-host-intersection.md)
 - Distinct TCP ports on one dedicated Gateway share its VIP. Each listener selects its oldest eligible TCPRoute. A route that wins on several ports can share one pool. NodePort mode selects one Service and Endpoint mode can weight Services with routable pod IPs. [TCP example](docs/getting-started.md#forward-tcp-to-a-service) · [Local qualification](docs/qualification/v1.7.0/provider/tcp-upstream.md#multiple-tcp-listeners-on-one-gateway)
 - Distinct UDP ports on one dedicated Gateway share its VIP. Each listener selects its oldest eligible UDPRoute. A route that wins on several ports uses one shared pool. Endpoint mode supports weighted UDP Services with routable pod IPs. NodePort mode accepts a single Service. [UDP example](docs/getting-started.md#forward-udp-to-a-service)
 - Eligible worker NodePort members with Local or Cluster traffic policy
@@ -65,7 +65,7 @@ The [conformance guide](docs/testing-conformance.md) describes the required suit
 ## Getting started
 
 The repository includes Kustomize manifests and a NodePort example for development.
-Installation requires an operator-built controller image and a Secret containing OpenStack credentials.
+Install the fork’s linux/amd64 development image by digest or build the recorded revision for your registry. The controller reads its OpenStack credentials from a dedicated Secret. [Image record and reproduction](docs/qualification/v1.7.0/image-build.md)
 Follow [Getting started](docs/getting-started.md) to install, verify, and remove the controller.
 Use the [OpenStack E2E guide](docs/testing-openstack-e2e.md) for reusable traffic, recovery, and cleanup tests.
 

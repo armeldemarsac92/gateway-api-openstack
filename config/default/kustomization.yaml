@@ -9,8 +9,8 @@ resources:
   - ../rbac
   - ../manager
 
-# No controller image is published yet. Replace this image with an image built
-# from the source revision being deployed before applying this kustomization.
+# Select the recorded development image digest or your operator build
+# before applying this kustomization.
 images:
   - name: controller
     newName: example.invalid/openstack-gateway-controller

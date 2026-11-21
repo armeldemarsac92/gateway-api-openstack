@@ -1,0 +1,35 @@
+{
+  "gatewayAPI": "v1.7.0",
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "kubernetes": "1.36.2",
+  "cloud": "recording adapter",
+  "trafficExercised": false,
+  "beforeControllerSource": "63ec0796cb57cd7ac0f698879e6b635d6069019b",
+  "integratedFix": "15e0acb507055699cbe2f2c43d812f4cc7f696ce",
+  "runs": {
+    "standardBefore": {
+      "caseBodies": {
+        "HTTPRouteInvalidParentRefNotMatchingListenerPort": "FAIL",
+        "HTTPRouteInvalidParentRefNotMatchingSectionName": "PASS",
+        "HTTPRouteInvalidParentRefSectionNameNotMatchingPort": "PASS"
+      },
+      "rawLogSHA256": "6fcee0144c88615f50486e38e88bdf18a5e8c79bd0624330a4ea490e9cc06549"
+    },
+    "standard": {
+      "caseBodies": {
+        "HTTPRouteInvalidParentRefNotMatchingListenerPort": "PASS",
+        "HTTPRouteInvalidParentRefNotMatchingSectionName": "PASS",
+        "HTTPRouteInvalidParentRefSectionNameNotMatchingPort": "PASS"
+      },
+      "rawLogSHA256": "30b39408f695b527cbb25dece8883daa0116355ded476441b4d57bc1d2e007ec"
+    },
+    "experimental": {
+      "caseBodies": {
+        "HTTPRouteInvalidParentRefNotMatchingListenerPort": "PASS",
+        "HTTPRouteInvalidParentRefNotMatchingSectionName": "PASS",
+        "HTTPRouteInvalidParentRefSectionNameNotMatchingPort": "PASS"
+      },
+      "rawLogSHA256": "ac1ae84a579aafa77f1fadda021ddb235df3e13f4280838655e26707708c0cb8"
+    }
+  }
+}

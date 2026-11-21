@@ -100,7 +100,7 @@ Acceptance for a prototype would require a real Octavia API request and readback
 
 ### First opt-in mesh experiment
 
-In the plain kind control, calls to the original Service DNS continued to reach healthy backends. The Service-parent routes left the request header untouched. Redirect and 70% weighting assertions failed on each channel, and neither run recorded a Gateway graph write. [Upstream mesh Core results on both channels](stock-mesh.md)
+In the plain kind control, calls to the original Service DNS continued to reach healthy backends. The Service-parent routes left the request header untouched. Redirect and 70% weighting assertions failed on each channel, and neither run recorded a Gateway graph write. [Upstream mesh Core results on both channels](stock-mesh.md) · [Full Core and Extended selections](../complete-local-profiles.md) · [Seven additional registered mesh cases](mesh-registered-supplement.md)
 
 The candidate for a separate experiment is Istio 1.31.0 ambient with a Service waypoint in the workload cluster. Pin the existing [studied revision](../reference-implementations.md) and the component image digests before any deployment. The operator would install istiod, the Istio CNI node agent, ztunnel and the waypoint. They would enroll two disposable client namespaces in ambient mode and assign only the test destination Service to the waypoint. That changes the path of traffic to the normal Service address. The external Amphora GatewayClass would retain its own controller name. [Istio waypoint configuration](https://istio.io/latest/docs/ambient/usage/waypoint/) · [Pinned waypoint tests](https://github.com/istio/istio/blob/eed52ebb66ade45214088877b0f82855d954060d/tests/integration/ambient/waypoint_test.go)
 

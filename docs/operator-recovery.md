@@ -41,6 +41,10 @@ For TCP or UDP, compare the listener's `default_pool_id`, the load balancer's li
 
 A Gateway enrolled in multi-listener UDP retains its original listener port in the frozen binding, including after it shrinks to one listener. A controller from before this feature rejects the new binding and leaves the resources in place. To roll back to that controller, clean up the enrolled Gateway with a version that understands the binding, wait for deletion to finish, then recreate the Gateway with a single UDP listener. Before enrollment the controller seals the frozen port on each bound UDPRoute. Older controllers also hold those route bindings, including if enrollment is interrupted. Keep the newer controller running until cleanup finishes. Editing the binding annotations by hand leaves the checkpoints invalid.
 
+## HTTPRoute hostname rollback
+
+Before restoring a controller that accepts at most one declared hostname, inspect HTTPRoutes with multiple declarations. Reduce each affected route to the single hostname that preserves its effective match and its precedence on this listener. Verify the intended backend after the change. Rolling back with several declarations still present causes the older reconciler to withdraw that route. [Hostname selection and local traffic](qualification/v1.7.0/provider/http-host-intersection.md)
+
 ## Multiport TCP upgrades
 
 Complete the controller rollout before adding a second TCP listener. Verify that the old controller pods have terminated and all cloud operations from that rollout have settled. The new controller saves the original listener port in the Gateway and in bound TCPRoutes before it starts managing individual ports. A Gateway keeps that record when it returns to one TCP listener. An identity-only Octavia read can discover the untagged original listener but cannot verify its port without that record. It reports `Progressing` and leaves the graph untouched.

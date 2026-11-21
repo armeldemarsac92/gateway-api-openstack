@@ -1,7 +1,7 @@
 # Getting started with the current controller
 
 The controller is pre-alpha.
-No supported environment profile or release image is available.
+The personal fork publishes a linux/amd64 development image. Qualification on a deployed Hibiscus environment remains open. [Image and build record](qualification/v1.7.0/image-build.md)
 See the [compatibility record](providers/compatibility.md) for development evidence and the [roadmap](../ROADMAP.md) for remaining work.
 
 Use these base manifests only in a disposable test project.
@@ -22,8 +22,7 @@ The [conformance plan](testing-conformance.md) describes the separate Gateway AP
 - Security groups and routing that allow Amphora health checks and the listener's traffic protocol to those Node addresses and NodePorts.
 - Optionally, an external network for allocating a Floating IP.
   Without one, Gateway status reports the Octavia VIP, which may be reachable only from private networks.
-- A controller container image built from the source revision being deployed.
-  The repository does not currently publish a supported image.
+- The pinned linux/amd64 development image or an operator build of the selected source revision. [Build record](qualification/v1.7.0/image.json)
 
 Each class selects network placement and Node addresses through an OpenStackGatewayClassConfig.
 See the [configuration reference](reference/class-configuration.md) for the fields and [worker eligibility rules](reference/class-configuration.md#worker-nodeport-members).
@@ -94,8 +93,9 @@ Configure VIP and member placement in the OpenStackGatewayClassConfig in `exampl
 Replace its synthetic subnet IDs with existing resources in the controller project.
 The [class configuration reference](reference/class-configuration.md#fields-and-defaults) covers Floating IP selection, health settings, and optional placement.
 
-Build and push an image from the exact source revision you are deploying, then edit the image override in `config/default/kustomization.yaml`.
-The image reference in the repository uses `example.invalid` and is intentionally unusable, so it cannot be mistaken for a published release.
+Set the image override in your deployment overlay. The checked-in `config/default/kustomization.yaml` starts with an `example.invalid` placeholder. For the published linux/amd64 image, use the `repository` from the build record as `newName` and the `manifestDigest` as `digest`, and remove the placeholder `newTag`. [Current digest](qualification/v1.7.0/image.json)
+
+For an operator build, build the selected revision and push the resulting image to your registry.
 
 ```sh
 make container-build \
