@@ -17,13 +17,14 @@ limitations under the License.
 package gateway
 
 import (
+	"slices"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -49,8 +50,11 @@ func TestSNIPassthroughRequiresOptInAndDedicatedListener(t *testing.T) {
 		t.Fatal("accepted TLS passthrough with the flag disabled")
 	}
 	config.TLSSNIPassthrough = true
-	if got, err := SupportedListenersForConfig(config, gateway); err != nil || len(got) != 1 || got[0].Protocol != gatewayv1.TLSProtocolType {
-		t.Fatalf("wanted one TLS listener, got %v, %v", got, err)
+	for _, hostname := range []*gatewayv1.Hostname{nil, ptr.To(gatewayv1.Hostname("a.example.test")), ptr.To(gatewayv1.Hostname("*.example.test"))} {
+		gateway.Spec.Listeners[0].Hostname = hostname
+		if got, err := SupportedListenersForConfig(config, gateway); err != nil || len(got) != 1 || got[0].Protocol != gatewayv1.TLSProtocolType {
+			t.Fatalf("wanted one TLS listener with hostname %v, got %v, %v", ptr.Deref(hostname, ""), got, err)
+		}
 	}
 	terminating := gateway.Spec.Listeners[0].DeepCopy()
 	terminating.TLS.Mode = ptr.To(gatewayv1.TLSModeTerminate)
@@ -63,46 +67,142 @@ func TestSNIPassthroughRequiresOptInAndDedicatedListener(t *testing.T) {
 	}
 }
 
-func TestSNIRouteGrantWithdrawalLeavesOtherHostname(t *testing.T) {
-	scheme := runtime.NewScheme()
-	for _, add := range []func(*runtime.Scheme) error{corev1.AddToScheme, discoveryv1.AddToScheme, gatewayv1.Install} {
-		if err := add(scheme); err != nil {
-			t.Fatal(err)
-		}
+func testSNIRoute(gateway *gatewayv1.Gateway, name, target string, hostnames ...gatewayv1.Hostname) *gatewayv1.TLSRoute {
+	return &gatewayv1.TLSRoute{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: gateway.Namespace, UID: types.UID(name + "-uid"), Generation: 1},
+		Spec: gatewayv1.TLSRouteSpec{
+			CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{{Name: gatewayv1.ObjectName(gateway.Name), SectionName: ptr.To(gatewayv1.SectionName("sni"))}}},
+			Hostnames:       hostnames,
+			Rules: []gatewayv1.TLSRouteRule{{BackendRefs: []gatewayv1.BackendRef{{BackendObjectReference: gatewayv1.BackendObjectReference{
+				Name: "backend", Namespace: ptr.To(gatewayv1.Namespace(target)), Port: ptr.To(gatewayv1.PortNumber(8443)),
+			}}}}},
+		},
 	}
-	config := controller.Config{ControllerName: "example.net/gateway", ClusterID: "cluster", OpenStackProjectID: "project", TLSSNIPassthrough: true}
-	listener := gatewayv1.Listener{Name: "sni", Port: 443, Protocol: gatewayv1.TLSProtocolType}
+}
+
+func testSNIBackend(namespace, uid, address string) (*corev1.Service, *discoveryv1.EndpointSlice) {
+	svc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "backend", Namespace: namespace, UID: types.UID(uid)},
+		Spec:       corev1.ServiceSpec{Ports: []corev1.ServicePort{{Name: "tls", Port: 8443, Protocol: corev1.ProtocolTCP}}},
+	}
+	endpoints := &discoveryv1.EndpointSlice{
+		ObjectMeta: metav1.ObjectMeta{Name: "backend-1", Namespace: namespace, Labels: map[string]string{discoveryv1.LabelServiceName: svc.Name},
+			OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(svc, corev1.SchemeGroupVersion.WithKind("Service"))}},
+		AddressType: discoveryv1.AddressTypeIPv4,
+		Ports:       []discoveryv1.EndpointPort{{Name: ptr.To("tls"), Protocol: ptr.To(corev1.ProtocolTCP), Port: ptr.To(int32(9443))}},
+		Endpoints:   []discoveryv1.Endpoint{{Addresses: []string{address}, Conditions: discoveryv1.EndpointConditions{Ready: ptr.To(true)}}},
+	}
+	return svc, endpoints
+}
+
+func TestSNIRouteHostnameIntersection(t *testing.T) {
+	cfg := testConfig()
+	cfg.TLSSNIPassthrough = true
+	for _, tc := range []struct {
+		name     string
+		listener *gatewayv1.Hostname
+		route    []gatewayv1.Hostname
+		want     []string
+		reason   gatewayv1.RouteConditionReason
+	}{
+		{"unconstrained listener", nil, []gatewayv1.Hostname{"z.test", "a.test", "a.test"}, []string{"a.test", "z.test"}, gatewayv1.RouteReasonAccepted},
+		{"exact listener", ptr.To(gatewayv1.Hostname("a.deep.example.test")), []gatewayv1.Hostname{"outside.test", "*.example.test"}, []string{"a.deep.example.test"}, gatewayv1.RouteReasonAccepted},
+		{"wildcard listener", ptr.To(gatewayv1.Hostname("*.example.test")), []gatewayv1.Hostname{"a.deep.example.test", "example.test", "b.example.test", "outside.test"}, []string{"a.deep.example.test", "b.example.test"}, gatewayv1.RouteReasonAccepted},
+		{"disjoint", ptr.To(gatewayv1.Hostname("*.example.test")), []gatewayv1.Hostname{"example.test", "*.outside.test"}, nil, gatewayv1.RouteReasonNoMatchingListenerHostname},
+		{"unrepresentable", ptr.To(gatewayv1.Hostname("*.example.test")), []gatewayv1.Hostname{"a.example.test", "*.deep.example.test"}, nil, gatewayv1.RouteReasonUnsupportedValue},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			listener := testSNIListener()
+			listener.Hostname = tc.listener
+			gateway := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "edge", Name: "gateway", UID: "gateway-uid"}}
+			route := testSNIRoute(gateway, "route", gateway.Namespace, tc.route...)
+			service, endpoints := testSNIBackend(gateway.Namespace, "service", "192.0.2.101")
+			kube := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(route, service, endpoints).Build()
+			r := &Reconciler{APIReader: kube, Config: cfg}
+			observed, err := r.observeSNIRoutes(t.Context(), &gatewayMutationSnapshot{gateway: gateway, listener: &listener})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(observed) != 1 || observed[0].acceptedReason != tc.reason {
+				t.Fatalf("expected Accepted reason %q, got %#v", tc.reason, observed)
+			}
+			var got []string
+			for _, target := range observed.targets() {
+				got = append(got, target.Hostname)
+				if target.Identity.RouteUID != string(route.UID) || target.ServiceUID != string(service.UID) {
+					t.Fatalf("target lost route or backend identity: %#v", target)
+				}
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("target hostnames = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSNIRouteHostnamePrecedence(t *testing.T) {
+	cfg := testConfig()
+	cfg.TLSSNIPassthrough = true
+	const hostname = "a.deep.example.test"
+	for _, tc := range []struct {
+		name         string
+		firstHost    gatewayv1.Hostname
+		secondHost   gatewayv1.Hostname
+		firstCreated int64
+		wantWinner   string
+	}{
+		{"exact beats older wildcard", "*.deep.example.test", hostname, 1, "z"},
+		{"longer wildcard beats older wildcard", "*.example.test", "*.deep.example.test", 1, "z"},
+		{"older route beats alphabetical order", hostname, hostname, 3, "z"},
+		{"alphabetical tie", hostname, hostname, 2, "a"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			listener := testSNIListener()
+			listener.Hostname = ptr.To(gatewayv1.Hostname(hostname))
+			gateway := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "edge", Name: "gateway", UID: "gateway-uid"}}
+			first := testSNIRoute(gateway, "a", gateway.Namespace, tc.firstHost)
+			second := testSNIRoute(gateway, "z", gateway.Namespace, tc.secondHost)
+			first.CreationTimestamp = metav1.NewTime(time.Unix(tc.firstCreated, 0))
+			second.CreationTimestamp = metav1.NewTime(time.Unix(2, 0))
+			service, endpoints := testSNIBackend(gateway.Namespace, "service", "192.0.2.101")
+			kube := fake.NewClientBuilder().WithScheme(testScheme(t)).WithStatusSubresource(first, second).WithObjects(first, second, service, endpoints).Build()
+			r := &Reconciler{Client: kube, APIReader: kube, Config: cfg}
+			observed, err := r.observeSNIRoutes(t.Context(), &gatewayMutationSnapshot{gateway: gateway, listener: &listener})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := observed.targets(); len(got) != 1 || got[0].Hostname != hostname || got[0].Identity.RouteName != tc.wantWinner {
+				t.Fatalf("target = %#v, want %s to serve %s", got, tc.wantWinner, hostname)
+			}
+			for _, entry := range observed {
+				if entry.acceptedReason != gatewayv1.RouteReasonAccepted || entry.resolvedReason != gatewayv1.RouteReasonResolvedRefs {
+					t.Fatalf("%s must be attached with resolved references: %#v", entry.route.Name, entry)
+				}
+			}
+			if err := r.reportSNIRoutes(t.Context(), gateway, observed, cloud.GatewayGraphResult{}, nil); err != nil {
+				t.Fatal(err)
+			}
+			if counts, err := r.attachedRouteCounts(t.Context(), gateway, []*gatewayv1.Listener{&listener}); err != nil || counts[listener.Name] != 2 {
+				t.Fatalf("attached routes = %v, want 2: %v", counts, err)
+			}
+			listener.Hostname = ptr.To(gatewayv1.Hostname("changed.other.test"))
+			if counts, err := r.attachedRouteCounts(t.Context(), gateway, []*gatewayv1.Listener{&listener}); err != nil || counts[listener.Name] != 0 {
+				t.Fatalf("attached routes after listener edit = %v, want 0: %v", counts, err)
+			}
+		})
+	}
+}
+
+func TestSNIRouteGrantWithdrawalLeavesOtherHostname(t *testing.T) {
+	config := testConfig()
+	config.TLSSNIPassthrough = true
+	listener := testSNIListener()
 	gateway := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "edge", Name: "gateway", UID: "gateway-uid"}}
 	snapshot := &gatewayMutationSnapshot{gateway: gateway, listener: &listener, topology: classconfig.Resolved{Topology: cloud.Topology{MemberMode: cloud.MemberModeEndpoint}}}
-	route := func(name, hostname, target string) *gatewayv1.TLSRoute {
-		return &gatewayv1.TLSRoute{
-			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "edge", UID: types.UID(name + "-uid")},
-			Spec: gatewayv1.TLSRouteSpec{
-				CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{{Name: "gateway", SectionName: ptr.To(gatewayv1.SectionName("sni"))}}},
-				Hostnames:       []gatewayv1.Hostname{gatewayv1.Hostname(hostname)},
-				Rules: []gatewayv1.TLSRouteRule{{BackendRefs: []gatewayv1.BackendRef{{BackendObjectReference: gatewayv1.BackendObjectReference{
-					Name: "backend", Namespace: ptr.To(gatewayv1.Namespace(target)), Port: ptr.To(gatewayv1.PortNumber(8443)),
-				}}}}},
-			},
-		}
-	}
-	a, b := route("a", "a.example.test", "backend-a"), route("b", "b.example.test", "edge")
-	service := func(namespace, uid, address string) (*corev1.Service, *discoveryv1.EndpointSlice) {
-		svc := &corev1.Service{
-			ObjectMeta: metav1.ObjectMeta{Name: "backend", Namespace: namespace, UID: types.UID(uid)},
-			Spec:       corev1.ServiceSpec{Ports: []corev1.ServicePort{{Name: "tls", Port: 8443, Protocol: corev1.ProtocolTCP}}},
-		}
-		endpoints := &discoveryv1.EndpointSlice{
-			ObjectMeta: metav1.ObjectMeta{Name: "backend-1", Namespace: namespace, Labels: map[string]string{discoveryv1.LabelServiceName: svc.Name},
-				OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(svc, corev1.SchemeGroupVersion.WithKind("Service"))}},
-			AddressType: discoveryv1.AddressTypeIPv4,
-			Ports:       []discoveryv1.EndpointPort{{Name: ptr.To("tls"), Protocol: ptr.To(corev1.ProtocolTCP), Port: ptr.To(int32(9443))}},
-			Endpoints:   []discoveryv1.Endpoint{{Addresses: []string{address}, Conditions: discoveryv1.EndpointConditions{Ready: ptr.To(true)}}},
-		}
-		return svc, endpoints
-	}
-	svcA, endpointsA := service("backend-a", "service-a", "192.0.2.101")
-	svcB, endpointsB := service("edge", "service-b", "192.0.2.102")
+	a := testSNIRoute(gateway, "a", "backend-a", "a.example.test")
+	b := testSNIRoute(gateway, "b", "edge", "a.example.test", "b.example.test")
+	svcA, endpointsA := testSNIBackend("backend-a", "service-a", "192.0.2.101")
+	svcB, endpointsB := testSNIBackend("edge", "service-b", "192.0.2.102")
 	grant := &gatewayv1.ReferenceGrant{
 		ObjectMeta: metav1.ObjectMeta{Name: "grant-a", Namespace: "backend-a"},
 		Spec: gatewayv1.ReferenceGrantSpec{
@@ -110,7 +210,7 @@ func TestSNIRouteGrantWithdrawalLeavesOtherHostname(t *testing.T) {
 			To:   []gatewayv1.ReferenceGrantTo{{Group: "", Kind: "Service", Name: ptr.To(gatewayv1.ObjectName(svcA.Name))}},
 		},
 	}
-	client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(a, b, svcA, svcB, endpointsA, endpointsB, grant).Build()
+	client := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(a, b, svcA, svcB, endpointsA, endpointsB, grant).Build()
 	r := &Reconciler{APIReader: client, Config: config}
 	observed, err := r.observeSNIRoutes(t.Context(), snapshot)
 	if err != nil {
@@ -234,26 +334,25 @@ func TestSNIGatewayCannotReplaceStoredNodePortTopology(t *testing.T) {
 	}
 }
 
-func TestSNIRoutePendingSiblingUsesOnlySameAuthorizedTarget(t *testing.T) {
+func TestSNIRouteDeferredReadbackRequiresSameAuthorizedTargets(t *testing.T) {
 	cfg := testConfig()
 	gateway := programmedTestGateway(cfg)
-	gateway.Spec.Listeners[0] = testSNIListener()
-	parent := gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name)}
-	route := &gatewayv1.TLSRoute{ObjectMeta: metav1.ObjectMeta{Name: "b", Namespace: gateway.Namespace, UID: "route-b", Generation: 1}}
-	target := cloud.TLSSNIRoute{Identity: controller.RouteIdentity(cfg, gateway, route), Hostname: "b.example.test", ServiceUID: "service-b",
-		Members: []cloud.Member{{Address: "192.0.2.21", Port: 443}}}
-	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(route).WithObjects(route).Build()
+	listener := testSNIListener()
+	gateway.Spec.Listeners[0] = listener
+	route := testSNIRoute(gateway, "b", gateway.Namespace, "b.example.test", "a.example.test")
+	winner := testSNIRoute(gateway, "a", gateway.Namespace, "a.example.test")
+	service, endpoints := testSNIBackend(gateway.Namespace, "service", "192.0.2.101")
+	kube := fake.NewClientBuilder().WithScheme(testScheme(t)).WithStatusSubresource(route, winner).WithObjects(route, service, endpoints).Build()
 	r := &Reconciler{Client: kube, APIReader: kube, Config: cfg}
-	result := cloud.GatewayGraphResult{Routes: []cloud.RouteGraphResult{{Identity: target.Identity}}}
+	snapshot := &gatewayMutationSnapshot{gateway: gateway, listener: &listener}
+	result := cloud.GatewayGraphResult{Routes: []cloud.RouteGraphResult{{Identity: controller.RouteIdentity(cfg, gateway, route)}}}
 	report := func(want bool) {
 		t.Helper()
-		if err := kube.Get(t.Context(), client.ObjectKeyFromObject(route), route); err != nil {
+		observed, err := r.observeSNIRoutes(t.Context(), snapshot)
+		if err != nil {
 			t.Fatal(err)
 		}
-		obs := sniRouteObservation{{route: route, parents: []gatewayv1.ParentReference{parent}, target: &target,
-			acceptedReason: gatewayv1.RouteReasonAccepted, acceptedMessage: "Attached",
-			resolvedReason: gatewayv1.RouteReasonResolvedRefs, resolvedMessage: "Resolved"}}
-		if err := r.reportSNIRoutes(t.Context(), gateway, obs, result, nil); err != nil {
+		if err := r.reportSNIRoutes(t.Context(), gateway, observed, result, nil); err != nil {
 			t.Fatal(err)
 		}
 		if err := kube.Get(t.Context(), client.ObjectKeyFromObject(route), route); err != nil {
@@ -267,8 +366,37 @@ func TestSNIRoutePendingSiblingUsesOnlySameAuthorizedTarget(t *testing.T) {
 	report(true)
 	result.Routes[0].Result = cloud.RouteResult{ObservationDeferred: true}
 	report(true)
-	target.ServiceUID = "service-b-recreated"
+	if counts, err := r.attachedRouteCounts(t.Context(), gateway, []*gatewayv1.Listener{&listener}); err != nil || counts[listener.Name] != 1 {
+		t.Fatalf("attached routes = %v, want one route for both hostnames: %v", counts, err)
+	}
+
+	if err := kube.Create(t.Context(), winner); err != nil {
+		t.Fatal(err)
+	}
 	report(false)
+	result.Routes[0].Result = cloud.RouteReadyResult(cloud.RouteState{})
+	report(true)
+	if err := kube.Delete(t.Context(), winner); err != nil {
+		t.Fatal(err)
+	}
+	result.Routes[0].Result = cloud.RouteResult{ObservationDeferred: true}
+	report(false)
+	result.Routes[0].Result = cloud.RouteReadyResult(cloud.RouteState{})
+	report(true)
+	for _, object := range []client.Object{endpoints, service} {
+		if err := kube.Delete(t.Context(), object); err != nil {
+			t.Fatal(err)
+		}
+	}
+	newService, newEndpoints := testSNIBackend(gateway.Namespace, "service-recreated", "192.0.2.101")
+	for _, object := range []client.Object{newService, newEndpoints} {
+		if err := kube.Create(t.Context(), object); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result.Routes[0].Result = cloud.RouteResult{ObservationDeferred: true}
+	report(false)
+
 }
 
 func testSNIListener() gatewayv1.Listener {

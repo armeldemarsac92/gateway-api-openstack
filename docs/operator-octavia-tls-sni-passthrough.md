@@ -9,7 +9,7 @@ A dedicated Gateway can serve two TLS applications on the same port. Amphora rea
 3. Set `enabled_tls_sni_providers = amphora` in the `[api_settings]` section of the region's Octavia API configuration. With the controller's project credentials and regional load-balancer endpoint, check that `GET /v2/lbaas/providers/amphora/gateway_capabilities` returns `tls_sni_passthrough_v1` in `gateway_capabilities`.
 4. For standalone, pin the matching controller image by digest in an operator kustomization based on `config/octavia-tls-sni-passthrough`. For Magnum, render and inspect the artifact below and pin its SHA-256 and the matching controller image in the conductor configuration. Select the Endpoint class for the workload. [Magnum operator setup](qualification/v1.7.0/magnum-operator.md#build-and-configure)
 
-   Pin `ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:c7bbf6bde39c2ed6fa757f909e81f160f2be1ba54430403f9f2d05e31167016e`. [Controller release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-6c74e8eaa94054527823c5c7576da96e84d5f6f1) · [TLSRoute qualification](qualification/v1.7.0/provider/tlsroute-sni.md)
+   Pin `ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:7023a4e25ea1f89fada19bacdcb0c803f45fc334b5ea9e2aaa2918dddcc2149f`. [Controller release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-a82cf5d7670e66d38fa4f8f9d8b054507faa083e) · [TLSRoute hostname qualification](qualification/v1.7.0/provider/tls-hostname-intersection.md)
 
 ```sh
 kubectl kustomize config/octavia-tls-sni-passthrough
@@ -30,7 +30,19 @@ kubectl -n tls-demo get gateway edge -o yaml
 kubectl -n tls-demo get tlsroute alpha beta -o yaml
 ```
 
-A Gateway in this mode has one `TLS` listener in `Passthrough` mode. Leave its hostname, certificates and TLS options unset. Each route has one Gateway parent, one exact DNS name and one rule with one Service backend at weight 1. The names must be distinct. Wildcards, multiple backends, TLSRoute termination and mixed-profile Gateways are outside this mode.
+A Gateway in this mode has one `TLS` listener in `Passthrough` mode, without certificate references or TLS options. Its hostname may be omitted, an exact DNS name, or a leading wildcard such as `*.example.test`. Each TLSRoute has one Gateway parent and one rule selecting one IPv4 Endpoint Service at weight 1.
+
+The controller forwards the exact names shared by the listener and the route. For example, a listener with `*.example.test` and a route with `alpha.example.test`, `alias.example.test` and `elsewhere.example.org` sends the first two names to that Service. Its backend certificate must cover both. An exact listener can also narrow a wildcard route to that listener's name. When the names are disjoint, the route reports `Accepted=False/NoMatchingListenerHostname`. A remaining wildcard forwarding target requires a provider capability beyond this Octavia release.
+
+When two routes claim an effective name, the more specific original route hostname takes precedence. Equally specific claims use creation time, then namespace and name. The chosen route must have an authorized backend before that name can serve traffic. A revoked grant closes its names even when a lower-priority route also claims them. Each accepted route counts once in `attachedRoutes`.
+
+## Upgrade an existing exact-name Gateway
+
+The first SNI release (`6c74e8eaa940`) closed an exact name claimed by two routes. This release can start serving that name on upgrade. Check overlapping route declarations and confirm the winning route and Service before rolling out the new controller. Each effective name uses one Octavia pool, one policy, one rule and one member per resolved endpoint. Allow for those resources when adding aliases.
+
+Before rolling back to `6c74e8eaa940`, drain Gateways that use the new hostname shapes, or restore one exact name per route and remove the listener hostname and duplicate claims. With the newer controller still running, verify the resulting parent status, pools, policies and fresh TLS connections. Then roll out the earlier image.
+
+## Check the routes
 
 Check the current-generation Gateway `Programmed=True` and both routes' managed parent conditions `Accepted=True`, `ResolvedRefs=True` and `gateway-api-openstack.github.io/Programmed=True` (using the configured controller's domain). The listener should report `supportedKinds` including TLSRoute and `attachedRoutes: 2`. Use a CA file that trusts both backend certificates.
 

@@ -74,12 +74,12 @@ func (r *Reconciler) validateBoundSNITopology(gateway *gatewayv1.Gateway, listen
 type sniRouteStatus struct {
 	route           *gatewayv1.TLSRoute
 	parents         []gatewayv1.ParentReference
-	hostname        string
+	hostnames       []string
 	acceptedReason  gatewayv1.RouteConditionReason
 	acceptedMessage string
 	resolvedReason  gatewayv1.RouteConditionReason
 	resolvedMessage string
-	target          *cloud.TLSSNIRoute
+	targets         []cloud.TLSSNIRoute
 }
 
 type sniRouteObservation []sniRouteStatus
@@ -87,18 +87,17 @@ type sniRouteObservation []sniRouteStatus
 func (observation sniRouteObservation) targets() []cloud.TLSSNIRoute {
 	var targets []cloud.TLSSNIRoute
 	for _, entry := range observation {
-		if entry.target != nil {
-			targets = append(targets, *entry.target)
-		}
+		targets = append(targets, entry.targets...)
 	}
 	return targets
 }
 
-// sameInputs ignores status-only writes. The target includes the authorized
-// Service UID and the exact ready member list used for the provider mutation.
+// sameInputs ignores status-only writes. Targets include the exact hostnames,
+// authorized Service UID and ready members used for the provider mutation.
 func (observation sniRouteObservation) sameInputs(other sniRouteObservation) bool {
 	return slices.EqualFunc(observation, other, func(a, b sniRouteStatus) bool {
 		if a.route.UID != b.route.UID || a.route.Generation != b.route.Generation ||
+			!a.route.CreationTimestamp.Equal(&b.route.CreationTimestamp) ||
 			!equality.Semantic.DeepEqual(a.route.Spec, b.route.Spec) {
 			return false
 		}
@@ -119,7 +118,6 @@ func (r *Reconciler) observeSNIRoutes(ctx context.Context, snapshot *gatewayMuta
 		return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
 	})
 	var observation sniRouteObservation
-	names := make(map[string]int)
 	for i := range routes.Items {
 		route := &routes.Items[i]
 		if !route.DeletionTimestamp.IsZero() {
@@ -139,25 +137,51 @@ func (r *Reconciler) observeSNIRoutes(ctx context.Context, snapshot *gatewayMuta
 			if err := r.admitSNIRoute(ctx, snapshot, &entry); err != nil {
 				return nil, err
 			}
-			if entry.hostname != "" {
-				names[entry.hostname]++
-			}
 		}
 		observation = append(observation, entry)
 	}
+	owners := observation.hostnameOwners(snapshot.listener)
 	for i := range observation {
 		entry := &observation[i]
-		if entry.hostname != "" && names[entry.hostname] > 1 {
-			entry.reject(gatewayv1.RouteReasonUnsupportedValue, "The same exact SNI name is claimed by multiple TLSRoutes")
-			continue
-		}
 		if entry.acceptedReason == gatewayv1.RouteReasonAccepted {
+			entry.hostnames = slices.DeleteFunc(entry.hostnames, func(hostname string) bool { return owners[hostname].index != i })
 			if err := r.resolveSNIBackend(ctx, snapshot, entry); err != nil {
 				return nil, err
 			}
 		}
 	}
 	return observation, nil
+}
+
+type sniHostnameOwner struct {
+	index    int
+	original string
+}
+
+// hostnameOwners selects the winner for each SNI name before resolving any
+// backend. Losing authorization must withdraw the winner's forwarding target.
+func (observation sniRouteObservation) hostnameOwners(listener *gatewayv1.Listener) map[string]sniHostnameOwner {
+	owners := make(map[string]sniHostnameOwner)
+	for i, entry := range observation {
+		for _, hostname := range entry.hostnames {
+			original := hostname
+			// Only an exact listener can make a wildcard route hostname exact.
+			if listener.Hostname != nil && string(*listener.Hostname) == hostname {
+				original = model.MatchingRouteHostname(hostname, entry.route.Spec.Hostnames)
+			}
+			if owner, ok := owners[hostname]; ok {
+				old := observation[owner.index].route
+				route := entry.route
+				if cmp.Or(model.CompareHostnameSpecificity(original, owner.original),
+					route.CreationTimestamp.Compare(old.CreationTimestamp.Time),
+					cmp.Compare(route.Namespace+"/"+route.Name, old.Namespace+"/"+old.Name)) >= 0 {
+					continue
+				}
+			}
+			owners[hostname] = sniHostnameOwner{index: i, original: original}
+		}
+	}
+	return owners
 }
 
 func sniParentTargetsGateway(namespace string, ref gatewayv1.ParentReference, gateway *gatewayv1.Gateway) bool {
@@ -198,23 +222,33 @@ func (r *Reconciler) admitSNIRoute(ctx context.Context, snapshot *gatewayMutatio
 		entry.reject(gatewayv1.RouteReasonNotAllowedByListeners, "The listener does not allow this TLSRoute kind or namespace")
 		return nil
 	}
-	if len(route.Spec.Hostnames) != 1 {
-		entry.reject(gatewayv1.RouteReasonUnsupportedValue, "TLS SNI passthrough requires one exact DNS hostname")
+	hostnames, err := intersectSNIHostnames(listener, route)
+	if err != nil {
+		entry.reject(gatewayv1.RouteReasonUnsupportedValue, err.Error())
 		return nil
 	}
-	hostname := string(route.Spec.Hostnames[0])
-	if err := amphora.ValidateExactHostname(hostname); err != nil {
-		entry.reject(gatewayv1.RouteReasonUnsupportedValue, "TLS SNI passthrough requires one exact DNS hostname")
+	if len(hostnames) == 0 {
+		entry.reject(gatewayv1.RouteReasonNoMatchingListenerHostname, "No TLSRoute hostname intersects the listener hostname")
 		return nil
 	}
-	entry.hostname = hostname
 	if len(route.Spec.Rules) != 1 || len(route.Spec.Rules[0].BackendRefs) != 1 ||
 		ptr.Deref(route.Spec.Rules[0].BackendRefs[0].Weight, 1) != 1 {
 		entry.reject(gatewayv1.RouteReasonUnsupportedValue, "TLS SNI passthrough requires one rule and one backendRef of weight 1")
 		return nil
 	}
+	entry.hostnames = hostnames
 	entry.reject(gatewayv1.RouteReasonAccepted, "The TLSRoute is attached to the TLS SNI listener")
 	return nil
+}
+
+func intersectSNIHostnames(listener *gatewayv1.Listener, route *gatewayv1.TLSRoute) ([]string, error) {
+	hostnames := model.IntersectHostnames(listener.Hostname, route.Spec.Hostnames)
+	for _, hostname := range hostnames {
+		if err := amphora.ValidateExactHostname(hostname); err != nil {
+			return nil, fmt.Errorf("cannot forward the intersecting hostname %q through an exact SNI rule", hostname)
+		}
+	}
+	return hostnames, nil
 }
 
 func (r *Reconciler) resolveSNIBackend(ctx context.Context, snapshot *gatewayMutationSnapshot, entry *sniRouteStatus) error {
@@ -274,10 +308,14 @@ func (r *Reconciler) resolveSNIBackend(ctx context.Context, snapshot *gatewayMut
 		return nil
 	}
 	topology := snapshot.topology.Topology
-	entry.target = &cloud.TLSSNIRoute{
-		Identity: controller.RouteIdentity(r.Config, snapshot.gateway, route), Hostname: entry.hostname,
+	target := cloud.TLSSNIRoute{
+		Identity:   controller.RouteIdentity(r.Config, snapshot.gateway, route),
 		ServiceUID: string(service.UID), BackendSubnetID: topology.MemberSubnetID,
 		BackendSecurityGroupIDs: topology.BackendSecurityGroupIDs, Members: members,
+	}
+	for _, hostname := range entry.hostnames {
+		target.Hostname = hostname
+		entry.targets = append(entry.targets, target)
 	}
 	return nil
 }
@@ -300,7 +338,7 @@ func (r *Reconciler) reportSNIRoutes(ctx context.Context, gateway *gatewayv1.Gat
 		target.Status.Parents = slices.DeleteFunc(target.Status.Parents, func(parent gatewayv1.RouteParentStatus) bool {
 			return parent.ControllerName == r.Config.ControllerName && sniParentTargetsGateway(base.Namespace, parent.ParentRef, gateway)
 		})
-		fingerprint, err := sniForwardingFingerprint(gateway, entry.target)
+		fingerprint, err := sniForwardingFingerprint(gateway, entry.targets)
 		if err != nil {
 			return err
 		}
@@ -338,10 +376,12 @@ func (r *Reconciler) reportSNIRoutes(ctx context.Context, gateway *gatewayv1.Gat
 				programmedReason, programmedMessage = string(entry.acceptedReason), entry.acceptedMessage
 			case resolved == metav1.ConditionFalse:
 				programmedReason, programmedMessage = string(resolvedReason), resolvedMessage
-			case entry.target == nil:
+			case len(entry.hostnames) == 0:
+				programmedReason, programmedMessage = "Conflicted", "Higher-priority TLSRoutes match every SNI hostname of this route"
+			case len(entry.targets) == 0:
 				programmedMessage = "The backend Service has no ready IPv4 endpoints"
 			case outcome.Outcome.State == cloud.OutcomeReady || retain:
-				programmed, programmedReason, programmedMessage = metav1.ConditionTrue, "Programmed", "Octavia readback confirms the exact SNI route and its backend"
+				programmed, programmedReason, programmedMessage = metav1.ConditionTrue, "Programmed", "Octavia readback confirms forwarding for the selected SNI hostnames and their backend"
 			}
 			controller.SetCondition(&status.Conditions, controller.Condition("Accepted", accepted, string(entry.acceptedReason), entry.acceptedMessage, base.Generation))
 			controller.SetCondition(&status.Conditions, controller.Condition("ResolvedRefs", resolved, string(resolvedReason), resolvedMessage, base.Generation))
@@ -360,20 +400,32 @@ func (r *Reconciler) reportSNIRoutes(ctx context.Context, gateway *gatewayv1.Gat
 	return nil
 }
 
-func sniForwardingFingerprint(gateway *gatewayv1.Gateway, target *cloud.TLSSNIRoute) (string, error) {
-	if target == nil {
+func sniForwardingFingerprint(gateway *gatewayv1.Gateway, targets []cloud.TLSSNIRoute) (string, error) {
+	if len(targets) == 0 {
 		return "", nil
 	}
-	route := *target
-	route.Identity.ControllerVersion = ""
-	content, err := json.Marshal(struct {
+	routes := slices.Clone(targets)
+	for i := range routes {
+		routes[i].Identity.ControllerVersion = ""
+	}
+	slices.SortFunc(routes, func(a, b cloud.TLSSNIRoute) int { return cmp.Compare(a.Hostname, b.Hostname) })
+	content := struct {
 		GatewayGeneration int64
-		Route             cloud.TLSSNIRoute
-	}{gateway.Generation, route})
+		Route             *cloud.TLSSNIRoute  `json:",omitempty"`
+		Routes            []cloud.TLSSNIRoute `json:",omitempty"`
+	}{GatewayGeneration: gateway.Generation}
+	version := "v2"
+	if len(routes) == 1 {
+		// Keep the persisted fingerprint for existing single-hostname routes.
+		content.Route, version = &routes[0], "v1"
+	} else {
+		content.Routes = routes
+	}
+	data, err := json.Marshal(content)
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("v1:%x", sha256.Sum256(content)), nil
+	return fmt.Sprintf("%s:%x", version, sha256.Sum256(data)), nil
 }
 
 func (r *Reconciler) clearSNIRouteParentStatuses(ctx context.Context, gateway *gatewayv1.Gateway) error {

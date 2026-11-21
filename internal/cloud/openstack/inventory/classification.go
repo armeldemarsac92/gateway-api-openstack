@@ -70,6 +70,7 @@ func classifyAuditCandidates(
 			finding:   classifyAuditCandidate(candidates, candidate, records, scopeTags, scopeProjectID),
 		})
 	}
+	markInconsistentSNIRouteIdentities(classified)
 	markDuplicateAuditIdentities(classified)
 	propagateAuditParentFindings(classified)
 	slices.SortFunc(classified, compareClassifiedAuditCandidates)
@@ -754,6 +755,35 @@ func auditParentExists(candidates auditCandidateSet, childType, parentID string)
 	return auditParentCandidate(candidates, childType, parentID) != nil
 }
 
+func markInconsistentSNIRouteIdentities(classified []classifiedAuditCandidate) {
+	groups := make(map[string][]int)
+	for index, item := range classified {
+		if item.finding.Disposition == audit.DispositionOwnershipConflict || item.finding.Role == "" ||
+			item.finding.Role != sniRoleByType[item.candidate.resourceType] {
+			continue
+		}
+		var parts []string
+		for _, key := range []string{"cluster", "controller", "project", "namespace", "name", "uid", "route-uid"} {
+			value, _ := singleAuditTagValue(item.candidate.tags, key) // Validated during classification.
+			parts = append(parts, value)
+		}
+		key := strings.Join(parts, "\x00")
+		groups[key] = append(groups[key], index)
+	}
+	for _, indexes := range groups {
+		owner := classified[indexes[0]].candidate.tags
+		if !slices.ContainsFunc(indexes[1:], func(index int) bool {
+			return !auditTagValuesEqual(owner, classified[index].candidate.tags, []string{"route-namespace", "route-name"})
+		}) {
+			continue
+		}
+		for _, index := range indexes {
+			classified[index].finding = auditFinding(classified[index].finding, audit.DispositionOwnershipConflict, auditReasonInvalidIdentity,
+				"TLSRoute fragments for the same Gateway and Route UID disagree on the Route namespace or name")
+		}
+	}
+}
+
 func markDuplicateAuditIdentities(classified []classifiedAuditCandidate) {
 	groups := make(map[string][]int)
 	for index, item := range classified {
@@ -839,6 +869,9 @@ func auditCardinalityKey(candidate *auditCandidate, finding audit.ResourceFindin
 	switch candidate.resourceType {
 	case auditTypePool, auditTypeMonitor, auditTypeL7Policy, auditTypeL7Rule:
 		stableKeys = append(stableKeys, "route-namespace", "route-name")
+	}
+	if finding.Role != "" && finding.Role == sniRoleByType[candidate.resourceType] {
+		stableKeys = append(stableKeys, "uid", "route-uid", "sni-target")
 	}
 	parts := []string{candidate.resourceType}
 	for _, key := range stableKeys {

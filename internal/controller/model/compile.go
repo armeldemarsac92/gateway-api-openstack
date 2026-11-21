@@ -256,7 +256,7 @@ func populateListener(listener *Listener, routes []Route) {
 		slices.Sort(hostnames)
 		hostnames = slices.Compact(hostnames)
 		for _, hostname := range hostnames {
-			original := matchingRouteHostname(hostname, route.Hostnames)
+			original := MatchingRouteHostname(hostname, route.Hostnames)
 			for _, rule := range route.Rules {
 				// Keep unsupported actions in the order so lowering can see their diagnostics.
 				for _, match := range rule.Matches {

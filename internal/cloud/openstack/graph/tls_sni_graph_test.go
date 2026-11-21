@@ -95,21 +95,13 @@ func TestSNIGraphWithdrawsObsoletePolicyWithoutUnprogrammingSibling(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	observed := func(route desiredSNIFragment, id string) *observedSNIFragment {
-		return &observedSNIFragment{
-			pool:    &pools.Pool{ID: "pool-" + id, ProvisioningStatus: "ACTIVE", AdminStateUp: true, LBMethod: "ROUND_ROBIN"},
-			members: []pools.Member{{ID: "member-" + id, Address: route.route.Members[0].Address, ProtocolPort: 443, Weight: 1, AdminStateUp: true, ProvisioningStatus: "ACTIVE"}},
-			policy:  &l7policies.L7Policy{ID: "policy-" + id, ProvisioningStatus: "ACTIVE", AdminStateUp: true},
-			rule:    &l7policies.Rule{ID: "rule-" + id, Value: route.route.Hostname, RuleType: "TLS_SNI", CompareType: "EQUAL_TO", ProvisioningStatus: "ACTIVE", AdminStateUp: true},
-		}
-	}
 	desired := desiredGatewayGraph{spec: completeGraphSpec(gateway), sni: targets[1:]}
 	desired.spec.Gateway.Spec.ExternalNetworkID = ""
 	actual := observedGatewayGraph{loadBalancer: safetyObservedLoadBalancer(),
 		listener: &listeners.Listener{ID: "listener", ProvisioningStatus: "ACTIVE", AdminStateUp: true},
-		sni:      map[sniFragmentKey]*observedSNIFragment{targets[0].key: observed(targets[0], "a"), targets[1].key: observed(targets[1], "b")},
+		sni:      map[sniFragmentKey]*observedSNIFragment{targets[0].key: activeSNIFragment(targets[0], "a"), targets[1].key: activeSNIFragment(targets[1], "b")},
 	}
-	actual.loadBalancer.AdminStateUp = true
+	actual.loadBalancer.ProvisioningStatus, actual.loadBalancer.AdminStateUp = "ACTIVE", true
 	provider := &Provider{}
 	steps, result, err := provider.buildSNIGraphPlan(desired, actual)
 	if err != nil || len(steps) != 1 || steps[0].deletion.resource != gatewayDisableL7Policy || steps[0].deletion.resourceID != "policy-a" {
@@ -117,6 +109,123 @@ func TestSNIGraphWithdrawsObsoletePolicyWithoutUnprogrammingSibling(t *testing.T
 	}
 	if len(result.Routes) != 1 || result.Routes[0].Identity.RouteUID != "route-b" || result.Routes[0].Result.Outcome.State != cloud.OutcomeReady {
 		t.Fatalf("B remains proven during withdrawal of A, got %#v", result.Routes)
+	}
+
+	retired := actual.sni[targets[0].key]
+	retired.rule.Value = strings.ToUpper(targets[1].route.Hostname)
+	steps, result, err = provider.buildSNIGraphPlan(desired, actual)
+	if err != nil || len(steps) != 1 || steps[0].deletion.resource != gatewayDisableL7Policy ||
+		result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing {
+		t.Fatalf("B is pending while A also selects B's name, plan=%v routes=%v err=%v", steps, result.Routes, err)
+	}
+	retired.policy.AdminStateUp = false
+	retired.policy.ProvisioningStatus = "PENDING_UPDATE"
+	steps, result, err = provider.buildSNIGraphPlan(desired, actual)
+	if err != nil || len(steps) != 0 || result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing {
+		t.Fatalf("B waits for A's closure to settle, plan=%v routes=%v err=%v", steps, result.Routes, err)
+	}
+	retired.policy.ProvisioningStatus = "ACTIVE"
+	steps, result, err = provider.buildSNIGraphPlan(desired, actual)
+	if err != nil || len(steps) != 1 || steps[0].deletion.resource != gatewayDeletionL7Rule ||
+		result.Routes[0].Result.Outcome.State != cloud.OutcomeReady {
+		t.Fatalf("B is ready once A's policy closure is observed, plan=%v routes=%v err=%v", steps, result.Routes, err)
+	}
+}
+
+func activeSNIFragment(route desiredSNIFragment, id string) *observedSNIFragment {
+	return &observedSNIFragment{
+		pool:    &pools.Pool{ID: "pool-" + id, ProvisioningStatus: "ACTIVE", AdminStateUp: true, LBMethod: "ROUND_ROBIN"},
+		members: []pools.Member{{ID: "member-" + id, Address: route.route.Members[0].Address, ProtocolPort: 443, Weight: 1, AdminStateUp: true, ProvisioningStatus: "ACTIVE"}},
+		policy:  &l7policies.L7Policy{ID: "policy-" + id, ProvisioningStatus: "ACTIVE", AdminStateUp: true},
+		rule:    &l7policies.Rule{ID: "rule-" + id, Value: route.route.Hostname, RuleType: "TLS_SNI", CompareType: "EQUAL_TO", ProvisioningStatus: "ACTIVE", AdminStateUp: true},
+	}
+}
+
+func TestSNIGraphProgramsAllHostnamesBeforeReportingRouteReady(t *testing.T) {
+	identity := safetyTestIdentity(t)
+	first := cloud.TLSSNIRoute{Identity: identity.Value(), Hostname: "a.example.test", ServiceUID: "service-a", Members: []cloud.Member{{Address: "192.0.2.10", Port: 443}}}
+	second := first
+	second.Hostname = "b.example.test"
+	targets, err := buildSNITargets(identity.Value(), []cloud.TLSSNIRoute{first, second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if targets[0].targetTag == targets[1].targetTag {
+		t.Fatal("each hostname needs its own Octavia target")
+	}
+	desired := desiredGatewayGraph{spec: completeGraphSpec(identity), sni: targets}
+	desired.spec.Gateway.Spec.ExternalNetworkID = ""
+	actual := observedGatewayGraph{loadBalancer: safetyObservedLoadBalancer(),
+		listener: &listeners.Listener{ID: "listener", ProvisioningStatus: "ACTIVE", AdminStateUp: true},
+		sni:      map[sniFragmentKey]*observedSNIFragment{targets[0].key: activeSNIFragment(targets[0], "a")},
+	}
+	actual.loadBalancer.ProvisioningStatus, actual.loadBalancer.AdminStateUp = "ACTIVE", true
+	check := func(state cloud.OutcomeState) []graphMutation {
+		t.Helper()
+		steps, result, err := (&Provider{}).buildSNIGraphPlan(desired, actual)
+		if err != nil || len(result.Routes) != 1 || result.Routes[0].Identity != first.Identity ||
+			result.Routes[0].Result.Outcome.State != state || result.Routes[0].Result.ObservationDeferred {
+			t.Fatalf("expected one %s result for both hostnames, got %#v, %v", state, result.Routes, err)
+		}
+		return steps
+	}
+	if steps := check(cloud.OutcomeProgressing); len(steps) != 1 || steps[0].sni.kind != sniCreatePool || steps[0].sni.target.route.Hostname != second.Hostname {
+		t.Fatalf("the existing target must stay active while creating the second pool: %#v", steps)
+	}
+	b := activeSNIFragment(targets[1], "b")
+	actual.sni[targets[1].key] = &observedSNIFragment{pool: b.pool}
+	if steps := check(cloud.OutcomeProgressing); len(steps) != 1 || steps[0].sni.kind != sniCreateMember || steps[0].sni.parentID != "pool-b" {
+		t.Fatalf("readback must resume from the existing second pool: %#v", steps)
+	}
+	b.rule.ProvisioningStatus = "PENDING_UPDATE"
+	actual.sni[targets[1].key] = b
+	if steps := check(cloud.OutcomeProgressing); len(steps) != 0 {
+		t.Fatalf("pending rule must finish before further writes: %#v", steps)
+	}
+	b.rule.ProvisioningStatus = "ACTIVE"
+	if steps := check(cloud.OutcomeReady); len(steps) != 0 {
+		t.Fatalf("settled route should be a no-op: %#v", steps)
+	}
+	desired.sni = targets[:1]
+	if steps := check(cloud.OutcomeProgressing); len(steps) != 1 || steps[0].deletion.resource != gatewayDisableL7Policy ||
+		steps[0].deletion.resourceID != "policy-b" {
+		t.Fatalf("the route should withdraw only the retired hostname before it is ready: %#v", steps)
+	}
+	replacement := second
+	replacement.Hostname = "c.example.test"
+	desired.sni, err = buildSNITargets(identity.Value(), []cloud.TLSSNIRoute{first, replacement})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if steps := check(cloud.OutcomeProgressing); len(steps) != 1 || steps[0].deletion.resource != gatewayDisableL7Policy {
+		t.Fatalf("the old target must be closed before creating its replacement: %#v", steps)
+	}
+}
+
+func TestSNIPassthroughRejectsConflictingHostnamesAndFragments(t *testing.T) {
+	identity := safetyTestIdentity(t).Value()
+	first := cloud.TLSSNIRoute{Identity: identity, Hostname: "a.example.test", ServiceUID: "service-a", Members: []cloud.Member{{Address: "192.0.2.10", Port: 443}}}
+	for _, test := range []struct {
+		name   string
+		change func(*cloud.TLSSNIRoute)
+		want   error
+	}{
+		{"duplicate hostname", func(route *cloud.TLSSNIRoute) {
+			route.Hostname = first.Hostname
+			route.Identity.RouteUID = "another-route"
+		}, cloud.ErrTerminalValidation},
+		{"same UID with another name", func(route *cloud.TLSSNIRoute) { route.Identity.RouteName = "another-name" }, cloud.ErrOwnershipConflict},
+		{"different Service", func(route *cloud.TLSSNIRoute) { route.ServiceUID = "another-service" }, cloud.ErrTerminalValidation},
+		{"different member", func(route *cloud.TLSSNIRoute) { route.Members = []cloud.Member{{Address: "192.0.2.11", Port: 443}} }, cloud.ErrTerminalValidation},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			second := first
+			second.Hostname = "b.example.test"
+			test.change(&second)
+			if _, err := buildSNITargets(identity, []cloud.TLSSNIRoute{first, second}); !errors.Is(err, test.want) {
+				t.Fatalf("expected %v, got %v", test.want, err)
+			}
+		})
 	}
 }
 
@@ -208,6 +317,31 @@ func TestSNIPolicyWithdrawalDuringNeutronFailureAndDisabledCleanup(t *testing.T)
 			safetyWriteJSON(t, w, map[string]any{"l7policy": policy})
 		})),
 	}
+	t.Run("pending LB and listener require complete active route readback", func(t *testing.T) {
+		lb["provisioning_status"], listener["provisioning_status"] = "PENDING_UPDATE", "PENDING_UPDATE"
+		t.Cleanup(func() {
+			lb["provisioning_status"], listener["provisioning_status"], policy["provisioning_status"] = "ACTIVE", "ACTIVE", "ACTIVE"
+		})
+		pending := spec
+		pending.Gateway.TLSSNIRoutes = []cloud.TLSSNIRoute{targets[0].route}
+		provider := newTestProvider(t, clients, ProviderConfig{TLSSNIPassthrough: true})
+		check := func(wantDeferred bool) {
+			t.Helper()
+			got, err := provider.ReconcileGatewayGraph(t.Context(), pending)
+			if err != nil || len(writes) != 0 || len(got.Routes) != 1 || got.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing ||
+				got.Routes[0].Result.ObservationDeferred != wantDeferred {
+				t.Fatalf("pending route result=%#v writes=%v err=%v, want deferred=%t", got.Routes, writes, err, wantDeferred)
+			}
+		}
+		check(true)
+		second := targets[0].route
+		second.Hostname = "b.example.test"
+		pending.Gateway.TLSSNIRoutes = append(pending.Gateway.TLSSNIRoutes, second)
+		check(false)
+		pending.Gateway.TLSSNIRoutes = pending.Gateway.TLSSNIRoutes[:1]
+		policy["provisioning_status"] = "PENDING_UPDATE"
+		check(false)
+	})
 	t.Run("withdrawal remains writable with Neutron down", func(t *testing.T) {
 		provider := newTestProvider(t, clients, ProviderConfig{TLSSNIPassthrough: true})
 		stale := errors.New("authorization changed")
@@ -241,24 +375,52 @@ func TestSNIPolicyWithdrawalDuringNeutronFailureAndDisabledCleanup(t *testing.T)
 			t.Fatalf("feature off must never delete a foreign fragment: err=%v writes=%v", err, writes)
 		}
 	})
+	t.Run("same UID with different ownership tags is a conflict", func(t *testing.T) {
+		writes, neutronFailed = nil, false
+		policy["project_id"] = "project-a"
+		conflicting := targets[0].route
+		conflicting.Identity.RouteName = "conflicting-name"
+		conflicts, err := buildSNITargets(spec.Identity, []cloud.TLSSNIRoute{conflicting})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for role, resource := range map[string]map[string]any{roleSNIPool: pool, roleSNIMember: member, roleSNIPolicy: policy, roleSNIRule: rule} {
+			resource["tags"], err = conflicts[0].tags(role)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		spec.Gateway.TLSSNIRoutes = []cloud.TLSSNIRoute{targets[0].route}
+		provider := newTestProvider(t, clients, ProviderConfig{TLSSNIPassthrough: true})
+		if _, err := provider.ReconcileGatewayGraph(t.Context(), spec); !errors.Is(err, cloud.ErrOwnershipConflict) || len(writes) != 0 {
+			t.Fatalf("a conflicting route UID cannot authorize a mutation: err=%v writes=%v", err, writes)
+		}
+	})
 }
 
-func TestSNIPendingLoadBalancerDefersOnlyDesiredRouteObservations(t *testing.T) {
+func TestSNIPendingLoadBalancerWithoutFragmentReadbackCannotDefer(t *testing.T) {
 	identity := safetyTestIdentity(t)
 	spec := completeGraphSpec(identity)
 	spec.Gateway.Spec.ExternalNetworkID = ""
-	desired := desiredGatewayGraph{spec: spec, protocol: cloud.ListenerProtocolTLSSNI,
-		sni: []desiredSNIFragment{{route: cloud.TLSSNIRoute{Identity: identity.Value()}}}}
+	first := cloud.TLSSNIRoute{Identity: identity.Value(), Hostname: "a.example.test", ServiceUID: "service-a", Members: []cloud.Member{{Address: "192.0.2.10", Port: 443}}}
+	second := first
+	second.Hostname = "b.example.test"
+	targets, err := buildSNITargets(spec.Identity, []cloud.TLSSNIRoute{first, second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	desired := desiredGatewayGraph{spec: spec, protocol: cloud.ListenerProtocolTLSSNI, sni: targets}
 	lb := safetyObservedLoadBalancer()
 	lb.ProvisioningStatus, lb.AdminStateUp = "PENDING_UPDATE", true
 	actual := observedGatewayGraph{loadBalancer: lb, outcome: cloud.ProgressingOutcome("Updating", 1),
 		listener: &listeners.Listener{ID: "listener", AdminStateUp: true, ProvisioningStatus: "PENDING_UPDATE"}}
 	p := &Provider{}
-	if got := p.pendingGraphResult(t.Context(), desired, actual).Routes; len(got) != 1 || !got[0].Result.ObservationDeferred {
-		t.Fatalf("expected one desired route eligible to retain an existing proof while a policy update is pending, got %#v", got)
+	if got := p.pendingGraphResult(t.Context(), desired, actual).Routes; len(got) != 1 || got[0].Result.ObservationDeferred {
+		t.Fatalf("pending frontend without a route inventory cannot retain an existing proof, got %#v", got)
 	}
+	actual.sni = map[sniFragmentKey]*observedSNIFragment{targets[0].key: activeSNIFragment(targets[0], "a"), targets[1].key: activeSNIFragment(targets[1], "b")}
 	lb.ProvisioningStatus = "PENDING_CREATE"
-	if got := p.pendingGraphResult(t.Context(), desired, actual).Routes; len(got) != 0 && got[0].Result.ObservationDeferred {
+	if got := p.pendingGraphResult(t.Context(), desired, actual).Routes; len(got) != 1 || got[0].Result.ObservationDeferred {
 		t.Fatalf("a pending new loadbalancer is not an eligible serving sibling, got %#v", got)
 	}
 }
