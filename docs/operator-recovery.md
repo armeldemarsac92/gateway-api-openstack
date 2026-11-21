@@ -47,6 +47,14 @@ Keep the newer controller running while preparing each Gateway. Record its obser
 
 A local two-version reader test stored the newer controller’s bound Gateway, cleared the address, and reconciled that exact serialized object with the previous controller. Its binding and observed VIP survived. A deployed rollback and live traffic remain outstanding. [Reader test and results](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-455798411c13fd42f5c1568357f2c35cec2b2169/hibiscus-private-ipv4-455798411c13.tar.gz)
 
+## Roll back a Gateway with several HTTP sections
+
+The earlier controller rejects a Gateway with two HTTP sections on the same port and can start deleting its owned Octavia graph. Keep the newer controller running while migrating. Record the VIP, all hostnames, their accepted routes, their allowed namespaces and an identifiable backend response for each active host. Choose which single section and port will stay on the original Gateway.
+
+Move traffic for each additional hostname to a separately supported Gateway or retire the hostname with its owner. Preserve its namespace authorization and verify its backend through the destination that clients will use. When the additional paths have been migrated or retired, reduce the original Gateway to its surviving section. Wait for Accepted and Programmed at the new generation, the expected attached route count and the original VIP. Verify the surviving and migrated hostnames before reverting the controller image. If the deployment cannot preserve the required reachability and authorization with one section per Gateway, retain the newer version.
+
+The two-version readback kept the surviving VIP, route and member port after this migration. [Tested singleton downgrade](qualification/v1.7.0/provider/http-disjoint-sections.md#verified-singleton-downgrade)
+
 ## Roll back HTTPRoutes with additional parents
 
 The controller at `455798411c13fd42f5c1568357f2c35cec2b2169` requires one item in `spec.parentRefs`. Before rolling back, list routes that use this controller alongside other parents. Record which parents actually serve traffic and check the hostname, path and backend through each active entry point. If an extra reference is unused, remove it while the newer controller is running and verify the managed path. If another controller serves through an extra reference, migrate that attachment to a separately named HTTPRoute using its supported configuration and verify both paths before removing it from the original. Account for age-based selection where routes overlap. Keep the current image if the attachments cannot be migrated while preserving traffic. The previous image can withdraw this controller's Octavia fragment as soon as it encounters multiple references. [Controller and qualification](qualification/v1.7.0/provider/http-one-managed-parent.md)

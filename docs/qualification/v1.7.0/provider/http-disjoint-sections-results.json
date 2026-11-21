@@ -1,0 +1,548 @@
+{
+  "sourceRevision": "d6278819244862c6dca7654ccc779f60622e62c9",
+  "upstreamRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "formalProfile": false,
+  "realHibiscus": false,
+  "channels": {
+    "standard": {
+      "GatewayObservedGenerationBump": "PASS",
+      "GatewayWithAttachedRoutes": "FAIL",
+      "GatewayWithAttachedRoutesWithPort8080": "FAIL"
+    },
+    "experimental": {
+      "GatewayObservedGenerationBump": "PASS",
+      "GatewayWithAttachedRoutes": "FAIL",
+      "GatewayWithAttachedRoutesWithPort8080": "FAIL"
+    }
+  },
+  "kubeletGeneration": {
+    "standard": {
+      "cases": {
+        "GatewayObservedGenerationBump": {
+          "deadlineExceeded": false,
+          "elapsedSeconds": 1.46,
+          "entered": true,
+          "outcome": "PASS",
+          "sourceFailureLines": []
+        }
+      },
+      "sourceRevision": "d6278819244862c6dca7654ccc779f60622e62c9",
+      "scope": "One original Gateway API v1.7.0 status case using the pinned scoped base and default upstream deadlines",
+      "baseSHA256": "eec15359b2f8ce095f3da26dfbc9485725c06a985a15796f1bde2ac79158f6ed",
+      "gatewayAPI": "v1.7.0",
+      "channel": "standard",
+      "cloud": "mocked recording provider",
+      "elapsedSeconds": 31.248,
+      "gatewayWatchSHA256": "63d23f346f5751c3aa1650f518bf9ef267945849972dfcdea6fba90fe0dad676",
+      "gatewayWatchErrorFree": true,
+      "generation2Programmed": {
+        "assignedAddresses": 1,
+        "conditions": [
+          {
+            "observedGeneration": 2,
+            "reason": "Accepted",
+            "status": "True",
+            "type": "Accepted"
+          },
+          {
+            "observedGeneration": 2,
+            "reason": "Programmed",
+            "status": "True",
+            "type": "Programmed"
+          }
+        ],
+        "listenerSpecs": [
+          {
+            "hostname": "bar.com",
+            "name": "http",
+            "port": 80,
+            "protocol": "HTTP"
+          },
+          {
+            "hostname": "foo.com",
+            "name": "alternate",
+            "port": 80,
+            "protocol": "HTTP"
+          }
+        ],
+        "listeners": {
+          "alternate": [
+            {
+              "observedGeneration": 2,
+              "reason": "Accepted",
+              "status": "True",
+              "type": "Accepted"
+            },
+            {
+              "observedGeneration": 2,
+              "reason": "ResolvedRefs",
+              "status": "True",
+              "type": "ResolvedRefs"
+            },
+            {
+              "observedGeneration": 2,
+              "reason": "NoConflicts",
+              "status": "False",
+              "type": "Conflicted"
+            },
+            {
+              "observedGeneration": 2,
+              "reason": "Programmed",
+              "status": "True",
+              "type": "Programmed"
+            }
+          ],
+          "http": [
+            {
+              "observedGeneration": 2,
+              "reason": "Accepted",
+              "status": "True",
+              "type": "Accepted"
+            },
+            {
+              "observedGeneration": 2,
+              "reason": "ResolvedRefs",
+              "status": "True",
+              "type": "ResolvedRefs"
+            },
+            {
+              "observedGeneration": 2,
+              "reason": "NoConflicts",
+              "status": "False",
+              "type": "Conflicted"
+            },
+            {
+              "observedGeneration": 2,
+              "reason": "Programmed",
+              "status": "True",
+              "type": "Programmed"
+            }
+          ]
+        },
+        "specAddresses": "omitted",
+        "specGeneration": 2
+      },
+      "originalCaseSourceSHA256": "3bee7ded65ebdef9ae843f02fd33e448c3e5bfd112d616dddb67db4895b879cd",
+      "originalCaseManifestSHA256": "65f527503444751e59003c0b2bdd7f9fed29fb09069881e16b23d79ff0f3af52",
+      "originalCases": [
+        "GatewayObservedGenerationBump"
+      ],
+      "patchSHA256": "54e0d306f228781ecfcb3952ed1a2696689d1d22e8f007ba333e23a19cc6829a",
+      "runnerSHA256": "266c07db284cc8c75ab0c8e4ee547aa729b513ab23039739c2e581b1a7b688c4",
+      "readyWorkloads": {
+        "imageTags": [
+          "registry.k8s.io/gateway-api/conformance/echo-basic:v0.1.0",
+          "registry.k8s.io/gateway-api/conformance/echo-basic:v0.2.0"
+        ],
+        "pods": 16,
+        "replicaSetOwned": 16,
+        "runningAndReady": 16
+      },
+      "scopedSetupCompleted": true,
+      "fixtureCleanup": {
+        "gatewayGroupObjects": 0,
+        "oneKindCluster": true,
+        "openStackClassConfigs": 0,
+        "readyNodes": 2,
+        "testIPVSRules": 0,
+        "testVIPs": 0,
+        "upstreamFixtureNamespaces": 0
+      },
+      "stagedFilesRemoved": true,
+      "startUTC": "2026-11-21T09:00:25.204967+00:00",
+      "suiteLogSHA256": "c6bae88495e5052f625f90ce9dfc98e75bc04cddf42dc352612a7054789fa9a3",
+      "kubernetes": {
+        "bundle_sha256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+        "class_config_crd_sha256": "39aa7fa4a30f187d5eed492fe3af821dc23498ab49ec4a37a6d4152cf70b8f16",
+        "container_runtime": [
+          "containerd://2.3.4"
+        ],
+        "server_version": "v1.36.4",
+        "readyNodes": 2
+      }
+    },
+    "experimental": {
+      "cases": {
+        "GatewayObservedGenerationBump": {
+          "deadlineExceeded": false,
+          "elapsedSeconds": 1.44,
+          "entered": true,
+          "outcome": "PASS",
+          "sourceFailureLines": []
+        }
+      },
+      "sourceRevision": "d6278819244862c6dca7654ccc779f60622e62c9",
+      "scope": "One original Gateway API v1.7.0 status case using the pinned scoped base and default upstream deadlines",
+      "baseSHA256": "eec15359b2f8ce095f3da26dfbc9485725c06a985a15796f1bde2ac79158f6ed",
+      "gatewayAPI": "v1.7.0",
+      "channel": "experimental",
+      "cloud": "mocked recording provider",
+      "elapsedSeconds": 30.342,
+      "gatewayWatchSHA256": "da17ab8527be7c976fc6aa24521d9e12b1b9db0245abd94a6aa341b1cb447219",
+      "gatewayWatchErrorFree": true,
+      "generation2Programmed": {
+        "assignedAddresses": 1,
+        "conditions": [
+          {
+            "observedGeneration": 2,
+            "reason": "Accepted",
+            "status": "True",
+            "type": "Accepted"
+          },
+          {
+            "observedGeneration": 2,
+            "reason": "Programmed",
+            "status": "True",
+            "type": "Programmed"
+          }
+        ],
+        "listenerSpecs": [
+          {
+            "hostname": "bar.com",
+            "name": "http",
+            "port": 80,
+            "protocol": "HTTP"
+          },
+          {
+            "hostname": "foo.com",
+            "name": "alternate",
+            "port": 80,
+            "protocol": "HTTP"
+          }
+        ],
+        "listeners": {
+          "alternate": [
+            {
+              "observedGeneration": 2,
+              "reason": "Accepted",
+              "status": "True",
+              "type": "Accepted"
+            },
+            {
+              "observedGeneration": 2,
+              "reason": "ResolvedRefs",
+              "status": "True",
+              "type": "ResolvedRefs"
+            },
+            {
+              "observedGeneration": 2,
+              "reason": "NoConflicts",
+              "status": "False",
+              "type": "Conflicted"
+            },
+            {
+              "observedGeneration": 2,
+              "reason": "Programmed",
+              "status": "True",
+              "type": "Programmed"
+            }
+          ],
+          "http": [
+            {
+              "observedGeneration": 2,
+              "reason": "Accepted",
+              "status": "True",
+              "type": "Accepted"
+            },
+            {
+              "observedGeneration": 2,
+              "reason": "ResolvedRefs",
+              "status": "True",
+              "type": "ResolvedRefs"
+            },
+            {
+              "observedGeneration": 2,
+              "reason": "NoConflicts",
+              "status": "False",
+              "type": "Conflicted"
+            },
+            {
+              "observedGeneration": 2,
+              "reason": "Programmed",
+              "status": "True",
+              "type": "Programmed"
+            }
+          ]
+        },
+        "specAddresses": "omitted",
+        "specGeneration": 2
+      },
+      "originalCaseSourceSHA256": "3bee7ded65ebdef9ae843f02fd33e448c3e5bfd112d616dddb67db4895b879cd",
+      "originalCaseManifestSHA256": "65f527503444751e59003c0b2bdd7f9fed29fb09069881e16b23d79ff0f3af52",
+      "originalCases": [
+        "GatewayObservedGenerationBump"
+      ],
+      "patchSHA256": "54e0d306f228781ecfcb3952ed1a2696689d1d22e8f007ba333e23a19cc6829a",
+      "runnerSHA256": "266c07db284cc8c75ab0c8e4ee547aa729b513ab23039739c2e581b1a7b688c4",
+      "readyWorkloads": {
+        "imageTags": [
+          "registry.k8s.io/gateway-api/conformance/echo-basic:v0.1.0",
+          "registry.k8s.io/gateway-api/conformance/echo-basic:v0.2.0"
+        ],
+        "pods": 16,
+        "replicaSetOwned": 16,
+        "runningAndReady": 16
+      },
+      "scopedSetupCompleted": true,
+      "fixtureCleanup": {
+        "gatewayGroupObjects": 0,
+        "oneKindCluster": true,
+        "openStackClassConfigs": 0,
+        "readyNodes": 2,
+        "testIPVSRules": 0,
+        "testVIPs": 0,
+        "upstreamFixtureNamespaces": 0
+      },
+      "stagedFilesRemoved": true,
+      "startUTC": "2026-11-21T09:07:31.054092+00:00",
+      "suiteLogSHA256": "db4955c5d18a41a73a1a4c6f38e38012beb33cb37b84b81739d92fd36855aec2",
+      "kubernetes": {
+        "bundle_sha256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+        "class_config_crd_sha256": "39aa7fa4a30f187d5eed492fe3af821dc23498ab49ec4a37a6d4152cf70b8f16",
+        "container_runtime": [
+          "containerd://2.3.4"
+        ],
+        "server_version": "v1.36.4",
+        "readyNodes": 2
+      }
+    }
+  },
+  "attachedStatus": {
+    "standard": {
+      "cases": {
+        "GatewayWithAttachedRoutes": "FAIL",
+        "GatewayWithAttachedRoutesWithPort8080": "FAIL"
+      },
+      "subcasesPassed": 2,
+      "subcasesEntered": 4,
+      "skipped": 0,
+      "receiptSHA256": "9201ee49cbd8d6ced14cf4e8e1849432ddc34fefc41e013f334733cf9adab0f7",
+      "goTestJSONLSHA256": "c95d0c3172e170dd93a44fe210339f868890aad536a850dabde342cd0c5dc13a"
+    },
+    "experimental": {
+      "cases": {
+        "GatewayWithAttachedRoutes": "FAIL",
+        "GatewayWithAttachedRoutesWithPort8080": "FAIL"
+      },
+      "subcasesPassed": 2,
+      "subcasesEntered": 4,
+      "skipped": 0,
+      "receiptSHA256": "b4abade49f2938f3df5ea39833c744e95970bb3820d5840487aaa2489335d2e0",
+      "goTestJSONLSHA256": "f6bfd9481f721273bf9e83fd98a43319dc37f8e455de99d4927095bedcdcc54a"
+    }
+  },
+  "attachedStatusPatchSHA256": "bb8cb68f34ff18dd8cce84e8afe476dc9215b770984d66267b2004acc3d04b51",
+  "stockNodePortTraffic": {
+    "sourceRevision": "d6278819244862c6dca7654ccc779f60622e62c9",
+    "channel": "standard",
+    "scope": "production reconcilers with NodePort, stock Octavia v2 public API and Amphora-rendered local HAProxy",
+    "startedUTC": "2026-11-21T09:01:09.243717+00:00",
+    "elapsedSeconds": 149.629,
+    "suiteLogSHA256": "3aa412c0811ccf5d3f9ca0417ed8e7caf27cde207a6494863d6a5882cd837f4c",
+    "runnerSHA256": "36af4a5b5bf87e319db8f38497e3edd00c47f2c4c5dcb5c376b2cf7fe537d293",
+    "patchSHA256": "9f347da9471d6d894c57d3d71c206724c8578ac60a341e28c1f8d3147cb30912",
+    "fixtureSHA256": "7b10b10c0d0880c7a4f501cc82a70df3cf2fad9431568eb087480f20671ac9e3",
+    "baseSHA256": "eec15359b2f8ce095f3da26dfbc9485725c06a985a15796f1bde2ac79158f6ed",
+    "originalUpstreamCase": false,
+    "fixtureCleanup": {
+      "gatewayGroupObjects": 0,
+      "oneKindCluster": true,
+      "openStackClassConfigs": 0,
+      "readyNodes": 2,
+      "stagedFilesRemoved": true,
+      "stockCallbackResources": 0,
+      "testIPVSRules": 0,
+      "testVIPs": 0,
+      "upstreamFixtureNamespaces": 0
+    },
+    "componentInputs": {
+      "callbackSHA256": "8962c294fed1a2f28f68d80ef3921d5f6b6e4b5790aa0b36459c6f564a844c94",
+      "stockAPIHarnessSHA256": "82093a3f3bb8159e284bad1ddcbdfeb8cc44e3d3ae7b5dd4471c286977cccfb4",
+      "haproxyVersion": "HAProxy version 3.0.19-ade9c1262 2026/03/19 - https://haproxy.org/",
+      "readyNodes": 2
+    },
+    "requests": [
+      {
+        "target": "worker NodePort",
+        "host": "bar.com",
+        "path": "/before",
+        "status": 200,
+        "backendDeployment": "infra-backend-v1"
+      },
+      {
+        "target": "Gateway VIP",
+        "host": "bar.com",
+        "path": "/before",
+        "status": 200,
+        "backendDeployment": "infra-backend-v1"
+      },
+      {
+        "target": "worker NodePort",
+        "host": "foo.com",
+        "path": "/before",
+        "status": 200,
+        "backendDeployment": "infra-backend-v2"
+      },
+      {
+        "target": "Gateway VIP",
+        "host": "foo.com",
+        "path": "/before",
+        "status": 200,
+        "backendDeployment": "infra-backend-v2"
+      },
+      {
+        "target": "Gateway VIP",
+        "host": "unknown.example",
+        "path": "/before",
+        "status": 503,
+        "backendDeployment": null
+      },
+      {
+        "target": "Gateway VIP",
+        "host": "bar.com",
+        "path": "/after",
+        "status": 200,
+        "backendDeployment": "infra-backend-v1"
+      },
+      {
+        "target": "Gateway VIP",
+        "host": "foo.com",
+        "path": "/after",
+        "status": 503,
+        "backendDeployment": null
+      }
+    ],
+    "boundary": "Real two-node Standard kind cluster and identified echo workloads, two NodePort Services, production reconcilers in the Go qualification binary, Octavia 19 WSGI/SQLite and stock Amphora rendering to HAProxy 3.0.19. The local harness supplies authentication, networking, callback and Amphora placement.",
+    "change": "Removed the foo.com listener section from the Gateway; the HTTPRoute object stayed and detached. The remaining bar.com section stayed on the same address.",
+    "networkBoundary": "The stock functional network fixture returned a synthetic member subnet configured with the Pod CIDR. The launcher exported the worker subnet but this WSGI entry point uses its fixed CIDR. Packet delivery through the worker NodePorts was observed directly. Neutron membership validation and routing require a cloud test.",
+    "importPreflight": "Before the only traffic run, a Python import check stopped before case execution in an environment lacking pyroute2. The full Octavia functional-test environment loaded it."
+  },
+  "nativePublicAPI": {
+    "haproxy": "3.0.19",
+    "hostRuleValues": {
+      "bar.com": "^bar\\.com(:[0-9]+)?$",
+      "foo.com": "^foo\\.com(:[0-9]+)?$"
+    },
+    "initialGraph": {
+      "backendPools": 2,
+      "hostAndPathRules": 4,
+      "listeners": 1,
+      "policies": 2
+    },
+    "liveHibiscus": false,
+    "octavia": "19.0.0",
+    "octaviaLib": "3.12.0",
+    "removedPolicyReadback": 404,
+    "requests": [
+      {
+        "backend": "bar.com",
+        "host": "bar.com",
+        "path": "/app",
+        "phase": "two-routes",
+        "status": 200
+      },
+      {
+        "backend": "foo.com",
+        "host": "FOO.COM:8080",
+        "path": "/app",
+        "phase": "two-routes",
+        "status": 200
+      },
+      {
+        "backend": null,
+        "host": "absent.example.test",
+        "path": "/app",
+        "phase": "two-routes",
+        "status": 503
+      },
+      {
+        "backend": null,
+        "host": "bar.com",
+        "path": "/other",
+        "phase": "two-routes",
+        "status": 503
+      },
+      {
+        "backend": "bar.com",
+        "host": "bar.com",
+        "path": "/app",
+        "phase": "remove-foo",
+        "status": 200
+      },
+      {
+        "backend": null,
+        "host": "FOO.COM:8080",
+        "path": "/app",
+        "phase": "remove-foo",
+        "status": 503
+      }
+    ],
+    "controllerHostnameEncoderSource": "f85a33968895b1c14a6eb5b5d911435c34b0f79e",
+    "octaviaSource": "93689cb7701da65b5aad387bb824c477c64b0f2b",
+    "octaviaServer": "stock public WSGI with SQLite and the Amphora provider",
+    "worker": "stock renderer and stock DeleteL7PolicyInDB task; no whole Taskflow execution",
+    "simulated": "Neutron VIP allocation, transport, authorization context and Amphora agent; loopback frontend and backends",
+    "kubernetes": "none in this provider probe",
+    "logSHA256": "ef2539acfc43aafdcb883294f77581b6c932db2d5fc0ffba8b2fd15cf4e1af63",
+    "priorFixtureAttempt": "The first traffic run passed the initial host requests. It reset every resource to ACTIVE immediately after the public delete. The foo rule still served. The measured run preserves PENDING_DELETE through rendering, executes the stock database task and checks the public 404 readback."
+  },
+  "controllerGraphTraffic": {
+    "sourceRevision": "d6278819244862c6dca7654ccc779f60622e62c9",
+    "graphSHA256": "a281374ae2d486aae2acfd7a75f639a689cdb7281cd2c3a0501f595e83987979",
+    "sampleLogSHA256": "55aa88e3757a7a19760576a661cb0412bf5dc17d4aa3e26b1d8cc9036bb9997c",
+    "fixturePatchSHA256": "d6bbe20d45f796d60d53b6239df771f881fa8425056f28128e53f08c63fdf830",
+    "requests": [
+      "bar.com /app -> 200 hibiscus-node-backend",
+      "FOO.COM:8080 /app -> 200 hibiscus-foo-backend",
+      "bar.com:444 /sub/path -> 200 hibiscus-node-backend",
+      "absent.example.test /app -> 503"
+    ],
+    "providerBoundary": "Controller-produced graph (in-memory Kubernetes client), Gophercloud REST recorder, stock Octavia 19 renderer, HAProxy 3.0.19 and two independent loopback backends. Fixture supplied backend addresses, test ports and short health checks.",
+    "liveHibiscus": false
+  },
+  "rollback": {
+    "sourceRevision": "d6278819244862c6dca7654ccc779f60622e62c9",
+    "olderReader": "f85a33968895b1c14a6eb5b5d911435c34b0f79e",
+    "earlierTwoSectionSpec": "rejected by previous validator",
+    "prepared": {
+      "remainingHost": "bar.com",
+      "workerNodePort": 30080,
+      "sameGatewayUID": true,
+      "sameRouteUID": true,
+      "sameRecordedVIP": true,
+      "sameBindings": true,
+      "currentGatewayAndRouteConditions": true,
+      "gatewayOrRouteDeletesRequested": 0
+    },
+    "scope": "Serialized fake-client Kubernetes objects read by both controller versions through the normal singleton reconcile path. The two-section counterexample exercised the earlier Gateway validator. Migration of traffic for a removed section and live provider operations were outside this check.",
+    "checksums": {
+      "capture.patch": "78ed2d17c7f5c6d6402d50a00e9ca226e91a8c3e761b05d7ab56b918e9b0720e",
+      "reader_test.go": "7b91f2dfbc8e11b9d289eabe97992cc67b9a98b66fd93fa0c8f968e2f999ae34",
+      "sections.log": "7555dca40e16254bf91ba99a862596410ec010396b09f36369a013827deca4e6",
+      "prior.log": "f2873a1456d1ae4b5fa147cf1d572e7c7840b94ff1b27423be1c83dea18ef46a",
+      "two-section-graph.json": "a281374ae2d486aae2acfd7a75f639a689cdb7281cd2c3a0501f595e83987979"
+    }
+  },
+  "guestTeardown": {
+    "beforeTeardown": {
+      "gatewayGroupObjects": 0,
+      "oneKindCluster": true,
+      "openStackClassConfigs": 0,
+      "readyNodes": 2,
+      "testIPVSRules": 0,
+      "testVIPs": 0,
+      "upstreamFixtureNamespaces": 0,
+      "captureProcesses": 0,
+      "stockCallbackResources": 0,
+      "preservedPriorReceipts": 14
+    },
+    "afterTeardown": {
+      "ownedKindNodes": 0,
+      "ownedKindNetworkPresent": false,
+      "ownedAmphoraNetworkNamespacePresent": false,
+      "qemuStopped": true,
+      "guestOverlayRemoved": true,
+      "ephemeralAccessMaterialRemoved": true
+    }
+  }
+}

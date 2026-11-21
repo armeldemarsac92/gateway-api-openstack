@@ -211,6 +211,8 @@ kubectl -n gateway-api-openstack-demo get httproute basic -o yaml
 
 An HTTPRoute can list the managed Gateway alongside a missing Gateway or a Gateway owned by another controller. The managed entry may appear anywhere in `spec.parentRefs`. Look for its exact reference and this controller's name in `status.parents`. Two references handled by this controller, including two sections of the same Gateway, currently give `Accepted=False/UnsupportedValue`. [Attachment and status behavior](qualification/v1.7.0/provider/http-one-managed-parent.md)
 
+To share a port between `bar.com` and `foo.com`, declare two plain HTTP listeners on that port with distinct names and those exact hostnames. Point each route's `sectionName` at the intended listener. When a route omits `sectionName`, its hostname and the listener's namespace policy must identify exactly one eligible section. The two hosts can select different Services behind the same Gateway address. Check each named listener's conditions and `attachedRoutes`. [Section configuration and qualification](qualification/v1.7.0/provider/http-disjoint-sections.md)
+
 The example intentionally uses one Gateway, one HTTP listener, one HTTPRoute, one rule, one PathPrefix match, and one NodePort Service backend.
 
 For a shared Gateway, the platform operator can give its HTTP listener a Namespace selector.

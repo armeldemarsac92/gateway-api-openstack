@@ -4,6 +4,8 @@ The fork provides a development controller and an opt-in Magnum driver patch. Th
 
 The private HTTP pilot now has three local traffic samples with two independent checks per sample. The VIP and worker NodePort answered before the controller stopped, at zero controller Pods and after both replacements became Ready. In a separate management exercise the stock addon operator deployed, upgraded and restored the workload image with two Ready Pods per revision. Both runs used local OpenStack fixtures. [Cold restart and HTTP traffic](provider/controller-cold-http.md) · [Management addon lifecycle](magnum-management-addon.md)
 
+One Gateway can also serve two disjoint HTTP hostnames with independent Services over one VIP and port. A two-node Standard run checked both backends and the withdrawal of one section. The original Gateway generation case passed on the new source on separate Standard and Experimental clusters. Both current attached-route cases expose open HTTPS or physical-port requirements. [Traffic, status and per-channel receipts](provider/http-disjoint-sections.md)
+
 ## Revisions and installation
 
 | Component | Development input | Deployed version |
@@ -96,4 +98,4 @@ The workload rotation rehearsal used two real controller Pods and a synthetic TL
 
 ## Additional HTTPRoute ownership and kubelet results
 
-The controller preserves a foreign status entry at its original generation and transition time while serving through its own reference. A separate four-case run on kind observed dynamic Gateway address allocation and retention of foreign Gateway conditions. The earlier controller rejected an added HTTP section on the same port and the default NodePort configuration rejected the upstream ClusterIP backend in the route-generation case. The case inventory retains those failures. [HTTPRoute ownership and traffic](provider/http-one-managed-parent.md) · [Scoped kubelet results](provider/kubelet-status-supplement.md)
+The controller preserves a foreign status entry at its original generation and transition time while serving through its own reference. A separate four-case run on kind observed dynamic Gateway address allocation and retention of foreign Gateway conditions. The earlier controller rejected an added HTTP section on the same port and the default NodePort configuration rejected the upstream ClusterIP backend in the route-generation case. The newer shared-port controller passes the Gateway generation case. The inventory retains the default NodePort failure and records the Endpoint-mode pass for HTTPRoute generation. [HTTPRoute ownership and traffic](provider/http-one-managed-parent.md) · [Scoped kubelet results](provider/kubelet-status-supplement.md)

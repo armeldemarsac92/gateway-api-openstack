@@ -2,6 +2,8 @@
 
 Four original Gateway API v1.7.0 status cases ran once on Standard and once on Experimental in disposable two-node kind clusters. The runner used the official release bundles, Kubernetes v1.36.4, the upstream embedded case manifests and default case deadlines. The upstream setup reached readiness in the three workload namespaces on each channel. A read-only sample in the infrastructure namespace found 16 running, Ready echo Pods owned by ReplicaSets on Standard and 16 on Experimental. The fixture ran on a kubelet with ordinary Deployments and used a recording OpenStack provider. [Sanitized receipts](kubelet-status-supplement-results.json)
 
+The table records the earlier private-address controller. The newer shared-port implementation passed the original Gateway generation case on both channels. The HTTPRoute case also passed in opt-in Endpoint mode. [Shared-port results](http-disjoint-sections.md#original-gateway-api-cases)
+
 | Upstream case | Standard | Experimental |
 |---|---|---|
 | [`GatewayOptionalAddressValue`](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/gateway-optional-address-value.go) | PASS | PASS |
@@ -20,6 +22,8 @@ For the optional-address case, the embedded YAML declares an `IPAddress` entry w
 The local test runner derives from source revision `455798411c13fd42f5c1568357f2c35cec2b2169`. It selected the four cases above and used the upstream shared Gateway base with the unrelated HTTPS Gateway document omitted. The runner and base SHA-256 values matched on the host and in the guest. Each cluster had two Ready nodes, tmpfs-backed etcd and the pinned upstream echo images on both nodes. Standard used 10 official Gateway API CRDs and Experimental used 14, alongside the fork class-config CRD. The Standard fixture drained before the fresh Experimental cluster was created. After each run, the test namespaces, class and config, Gateway API objects, staged files, test VIPs and IPVS rules were absent. [Fixture and hashes](kubelet-status-supplement-results.json)
 
 This scoped supplement contributes local case evidence. The original shared profile runs and their results are documented separately. The evidence covers Kubernetes status and recorded provider calls in the local fixture. [Formal profile runs](../complete-local-profiles.md)
+
+On the later published controller source `f85a33968895b1c14a6eb5b5d911435c34b0f79e`, the same HTTPRoute case passed on both channels with the class explicitly set to IPv4 Endpoint mode. Both upstream Services stayed ClusterIP and Accepted, ResolvedRefs and the route's Programmed condition reached generation 2. The default NodePort failures above retain their original result. [Endpoint receipts and portable reproduction](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-f85a33968895b1c14a6eb5b5d911435c34b0f79e/hibiscus-clusterip-generation-f85a33968895.tar.gz)
 
 ## Reproduction inputs
 

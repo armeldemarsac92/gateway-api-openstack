@@ -8,4 +8,32 @@ Adding or removing an exact-host section on the bound port retains the Gateway a
 
 The shared-port profile requires exact listener hostnames. It rejects wildcard and hostname-free sections, duplicate hostnames, mixed protocols, and multiple HTTP ports. The single-listener HTTP profile continues to support its existing hostname matching shapes.
 
-Local controller tests exercise the one-to-two-to-one transition, hostname edits, host-specific backend selection, rejected attachments, and bundle skew. Local provider tests check the exact hostname predicates and the readiness hold for a stale policy. These tests use simulated provider responses. Record stock Octavia requests, data-plane probes, and unmodified upstream case outcomes separately.
+Local controller tests exercise the one-to-two-to-one transition, hostname edits, host-specific backend selection, rejected attachments, and bundle skew. Local provider tests check the exact hostname predicates and the readiness hold for a stale policy. These tests use simulated provider responses. The following records cover the stock API, wire behavior and the upstream cases.
+
+## Traffic on a two-node Standard cluster
+
+The controller programmed two exact hostnames on one VIP and port 80. Both backing Services used worker NodePorts. Requests to the VIP and the direct NodePort with `Host: bar.com` reached the `infra-backend-v1` workload. With `Host: foo.com` both paths reached `infra-backend-v2`. An unconfigured host received the stock 503. After the operator removed only the `foo.com` listener section, the original VIP continued serving v1 for `bar.com` and returned 503 for `foo.com`. This stock miss response remains a gap for the Gateway API 404 contract. [Seven HTTP observations](http-disjoint-sections-results.json) · [Fixture and reproduction](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-d6278819244862c6dca7654ccc779f60622e62c9/hibiscus-http-sections-d62788192448.tar.gz)
+
+The production reconcilers ran inside the qualification process against Kubernetes v1.36.4 with real kubelets and echo Pods. Gophercloud called the stock Octavia 19 public WSGI application. The Amphora worker rendered the configuration for HAProxy 3.0.19. The fixture supplied OpenStack identity, network allocation, callback and Amphora placement. The WSGI fixture used its fixed synthetic member subnet. The worker NodePort packets were observed directly. Neutron subnet membership and routing require cloud qualification. The run drained its Gateway objects, class configuration, VIPs and callback state. Final teardown removed the kind nodes, isolated network, VM overlay and temporary access files. [Cloud fixture](udp-upstream-api.py) · [Amphora callback](http-upstream-guest.sh)
+
+## Provider and controller checks
+
+The standalone public-API exercise created one HTTP listener, two pools, two policies and four host/path predicates. A mixed-case host with a port selected the correct backend. After the public DELETE set one policy to `PENDING_DELETE`, the stock renderer withdrew it and kept the sibling active. The stock database task removed the row and the subsequent GET returned 404. An earlier fixture reset the deleting policy to active before rendering. The archived procedure follows the stock deletion sequence. A separate exercise captured the final controller’s two-route graph, replayed it through the Go provider and stock renderer, and checked four wire responses against two loopback backends. [Requests and provider boundaries](http-disjoint-sections-results.json) · [Reproducible probe inputs](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-d6278819244862c6dca7654ccc779f60622e62c9/hibiscus-http-sections-d62788192448.tar.gz)
+
+## Original Gateway API cases
+
+| Case | Standard | Experimental | Fixture |
+|---|---|---|---|
+| GatewayObservedGenerationBump | PASS, 1.46 s | PASS, 1.44 s | Original case on separate kind clusters with 16 and 16 Ready infrastructure Pods |
+| GatewayWithAttachedRoutes | FAIL | FAIL | Single and double HTTP counts passed. The HTTPS listener omitted HTTPRoute in supportedKinds |
+| GatewayWithAttachedRoutesWithPort8080 | FAIL | FAIL | The additional HTTP listener on port 8080 reported Accepted=False/UnsupportedValue |
+
+The original generation case added `foo.com` alongside `bar.com`. Generation 2 reached Accepted and Programmed and both listener statuses reflected the same generation. The earlier controller rejected this change on both channels. Each run used the scoped release base, which omits the unrelated four-listener HTTPS Gateway. The case body, case manifest and upstream deadlines were unchanged. The two attachment cases ran against Kubernetes 1.36.2 envtest and the recording cloud provider. Both reported the expected two HTTP attachments and the rejection for the mismatched hostname. The HTTPS failure occurred before its attachment and unresolved-reference assertions. The port-8080 failure occurred before the port-80 attachment assertion. [Original generation case](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/gateway-observed-generation-bump.go) · [Original attachment cases](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/gateway-with-attached-routes.go) · [Per-channel receipts](http-disjoint-sections-results.json) · [Earlier failures](kubelet-status-supplement.md)
+
+## Upgrade and rollback
+
+The earlier controller source rejects the shared-port spec. A downgrade requires migration or retirement of the extra hostnames and a verified single section on the original Gateway. [Operator procedure](../../../operator-recovery.md#roll-back-a-gateway-with-several-http-sections)
+
+### Verified singleton downgrade
+
+The earlier controller at `f85a33968895` rejected the two-section spec. After the current controller reduced it to the surviving `bar.com` section, the earlier controller reread those stored Kubernetes objects, kept the VIP, Gateway and route UIDs, ownership bindings and NodePort 30080, and requested zero Gateway or route deletions. This two-version check used the Kubernetes fake client and a recording provider. Operators must verify any migrated hostname through its actual new destination before reverting. [Readback and checksums](http-disjoint-sections-results.json) · [Reproduction files](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-d6278819244862c6dca7654ccc779f60622e62c9/hibiscus-http-sections-d62788192448.tar.gz)
