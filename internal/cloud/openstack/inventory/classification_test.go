@@ -520,3 +520,38 @@ func TestAuditIdentifiesGatewayManagedTLSRouteResources(t *testing.T) {
 		t.Fatalf("SNI pool without a target digest was classified as %s", got.Disposition)
 	}
 }
+
+func TestAuditDistinguishesTLSRouteTargetsOfSameUID(t *testing.T) {
+	route := safetyTestIdentity(t)
+	id := route.Value()
+	candidates := auditCandidateSet{}
+	addTarget := func(suffix string, digest string) {
+		poolID := "pool-" + suffix
+		target := openstackidentity.Tag("sni-target", digest)
+		candidates.add(auditCandidate{
+			service: auditServiceOctavia, resourceType: auditTypePool, id: poolID, projectID: id.OpenStackProjectID,
+			tags: append(safetyRouteTags(t, route, openstackidentity.RoleSNIPool), target),
+		})
+		candidates.add(auditCandidate{
+			service: auditServiceOctavia, resourceType: auditTypeL7Policy, id: "policy-" + suffix, projectID: id.OpenStackProjectID,
+			tags:         append(safetyRouteTags(t, route, openstackidentity.RoleSNIPolicy), target),
+			policyAction: "REDIRECT_TO_POOL", redirectPoolID: poolID,
+		})
+	}
+	addTarget("a", strings.Repeat("a", 64))
+	addTarget("b", strings.Repeat("b", 64))
+	findings := classifyAuditCandidates(candidates, nil, auditTestScopeTags(id), id.OpenStackProjectID)
+	for _, finding := range findings {
+		if finding.Disposition != audit.DispositionUnresolved || finding.Reason != "GatewayManagedTLSRoute" {
+			t.Errorf("%s = %s/%s, want distinct TLSRoute target", finding.ID, finding.Disposition, finding.Reason)
+		}
+	}
+	addTarget("duplicate-a", strings.Repeat("a", 64))
+	findings = classifyAuditCandidates(candidates, nil, auditTestScopeTags(id), id.OpenStackProjectID)
+	for _, duplicate := range []string{"pool-a", "policy-a", "pool-duplicate-a", "policy-duplicate-a"} {
+		got := auditFindingByID(t, findings, duplicate)
+		if got.Disposition != audit.DispositionOwnershipConflict || got.Reason != auditReasonDuplicateIdentity {
+			t.Errorf("%s = %s/%s, want same-target duplicate conflict", got.ID, got.Disposition, got.Reason)
+		}
+	}
+}

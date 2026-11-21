@@ -47,11 +47,15 @@ const (
 
 var sniProfileTag = openstackidentity.Tag("profile", "tls-sni-v1")
 
-type sniFragmentKey struct {
+type sniRouteKey struct {
 	namespace string
 	name      string
 	uid       string
-	target    string
+}
+
+type sniFragmentKey struct {
+	sniRouteKey
+	target string
 }
 
 type desiredSNIFragment struct {
@@ -71,7 +75,7 @@ type observedSNIFragment struct {
 func buildSNITargets(gateway cloud.Identity, routes []cloud.TLSSNIRoute) ([]desiredSNIFragment, error) {
 	result := make([]desiredSNIFragment, 0, len(routes))
 	names := make(map[string]bool)
-	uids := make(map[string]bool)
+	owners := make(map[string]cloud.TLSSNIRoute)
 	for _, route := range routes {
 		id, err := NewIdentity(route.Identity)
 		if err != nil {
@@ -81,10 +85,10 @@ func buildSNITargets(gateway cloud.Identity, routes []cloud.TLSSNIRoute) ([]desi
 			return nil, fmt.Errorf("%w: TLSRoute belongs to a different Gateway or has incomplete identity", cloud.ErrOwnershipConflict)
 		}
 		if amphora.ValidateExactHostname(route.Hostname) != nil ||
-			names[route.Hostname] || uids[route.Identity.RouteUID] || route.ServiceUID == "" || len(route.Members) == 0 {
+			names[route.Hostname] || route.ServiceUID == "" || len(route.Members) == 0 {
 			return nil, invalidSNI("TLSRoutes require distinct exact DNS names and one identified Service with ready members")
 		}
-		names[route.Hostname], uids[route.Identity.RouteUID] = true, true
+		names[route.Hostname] = true
 		route.Members = slices.Clone(route.Members)
 		slices.SortFunc(route.Members, func(a, b cloud.Member) int {
 			return cmp.Or(cmp.Compare(a.Address, b.Address), cmp.Compare(a.Port, b.Port))
@@ -96,6 +100,19 @@ func buildSNITargets(gateway cloud.Identity, routes []cloud.TLSSNIRoute) ([]desi
 				i > 0 && route.Members[i-1].Address == member.Address && route.Members[i-1].Port == member.Port {
 				return nil, invalidSNI("invalid or duplicate IPv4 TLSRoute member")
 			}
+		}
+		route.BackendSecurityGroupIDs = slices.Clone(route.BackendSecurityGroupIDs)
+		slices.Sort(route.BackendSecurityGroupIDs)
+		if owner, exists := owners[route.Identity.RouteUID]; exists {
+			if owner.Identity != route.Identity {
+				return nil, fmt.Errorf("%w: inconsistent identity for the same TLSRoute UID", cloud.ErrOwnershipConflict)
+			}
+			if owner.ServiceUID != route.ServiceUID || owner.BackendSubnetID != route.BackendSubnetID ||
+				!slices.Equal(owner.BackendSecurityGroupIDs, route.BackendSecurityGroupIDs) || !slices.Equal(owner.Members, route.Members) {
+				return nil, invalidSNI("hostnames on one TLSRoute require the same backend Service, topology and members")
+			}
+		} else {
+			owners[route.Identity.RouteUID] = route
 		}
 		target, err := json.Marshal(struct {
 			Hostname   string
@@ -109,10 +126,12 @@ func buildSNITargets(gateway cloud.Identity, routes []cloud.TLSSNIRoute) ([]desi
 		targetTag := openstackidentity.Tag("sni-target", fmt.Sprintf("%x", sha256.Sum256(target)))
 		_, encodedTarget, _ := openstackidentity.ParseTag(targetTag)
 		key := sniFragmentKey{
-			namespace: encodedSNITag("route-namespace", route.Identity.RouteNamespace),
-			name:      encodedSNITag("route-name", route.Identity.RouteName),
-			uid:       encodedSNITag("route-uid", route.Identity.RouteUID),
-			target:    encodedTarget,
+			sniRouteKey: sniRouteKey{
+				namespace: encodedSNITag("route-namespace", route.Identity.RouteNamespace),
+				name:      encodedSNITag("route-name", route.Identity.RouteName),
+				uid:       encodedSNITag("route-uid", route.Identity.RouteUID),
+			},
+			target: encodedTarget,
 		}
 		fragment := desiredSNIFragment{route: route, identity: id, key: key, targetTag: targetTag}
 		for _, role := range []string{roleSNIPool, roleSNIMember, roleSNIPolicy, roleSNIRule} {
@@ -124,6 +143,27 @@ func buildSNITargets(gateway cloud.Identity, routes []cloud.TLSSNIRoute) ([]desi
 	}
 	slices.SortFunc(result, func(a, b desiredSNIFragment) int { return cmp.Compare(a.route.Hostname, b.route.Hostname) })
 	return result, nil
+}
+
+func sniRouteOwners(fragments []desiredSNIFragment) []desiredSNIFragment {
+	var owners []desiredSNIFragment
+	seen := make(map[string]bool)
+	for _, fragment := range fragments {
+		uid := fragment.route.Identity.RouteUID
+		if !seen[uid] {
+			owners = append(owners, fragment)
+			seen[uid] = true
+		}
+	}
+	return owners
+}
+
+func sniRouteResults(fragments []desiredSNIFragment, observation cloud.RouteResult) []cloud.RouteGraphResult {
+	var results []cloud.RouteGraphResult
+	for _, owner := range sniRouteOwners(fragments) {
+		results = append(results, cloud.RouteGraphResult{Identity: owner.route.Identity, Result: observation})
+	}
+	return results
 }
 
 func invalidSNI(message string) error {
@@ -205,6 +245,10 @@ func (p *Provider) observeSNIGraph(ctx context.Context, desired desiredGatewayGr
 	if actual.outcome.State != cloud.OutcomeReady {
 		return actual, nil
 	}
+	owners := make(map[string]sniRouteKey)
+	for _, target := range desired.sni {
+		owners[target.key.uid] = target.key.sniRouteKey
+	}
 	byKey := make(map[sniFragmentKey]*observedSNIFragment)
 	fragmentFor := func(key sniFragmentKey) *observedSNIFragment {
 		if byKey[key] == nil {
@@ -225,6 +269,10 @@ func (p *Provider) observeSNIGraph(ctx context.Context, desired desiredGatewayGr
 		if err != nil {
 			return actual, err
 		}
+		if owner, exists := owners[key.uid]; exists && owner != key.sniRouteKey {
+			return actual, fmt.Errorf("%w: inconsistent TLSRoute owner for pool %s", cloud.ErrOwnershipConflict, pool.ID)
+		}
+		owners[key.uid] = key.sniRouteKey
 		if fragmentFor(key).pool != nil || pool.Protocol != cloud.ListenerProtocolTCP || len(pool.Loadbalancers) != 1 ||
 			pool.Loadbalancers[0].ID != lb.ID || pool.MonitorID != "" || poolInventory.BackendH2C[pool.ID] ||
 			len(pool.Listeners) > 1 || (len(pool.Listeners) == 1 && (listener == nil || pool.Listeners[0].ID != listener.ID)) {
@@ -361,7 +409,10 @@ func sniDeletionStep(fragment *observedSNIFragment) graphMutation {
 
 func (p *Provider) buildSNIGraphPlan(desired desiredGatewayGraph, actual observedGatewayGraph) ([]graphMutation, cloud.GatewayGraphResult, error) {
 	pending := p.progressingOutcome("Waiting for the TLS SNI graph")
-	result := cloud.GatewayGraphResult{Outcome: cloud.ReadyOutcome(), Gateway: cloud.GatewayReadyResult(actual.state)}
+	result := cloud.GatewayGraphResult{
+		Outcome: cloud.ReadyOutcome(), Gateway: cloud.GatewayReadyResult(actual.state),
+		Routes: sniRouteResults(desired.sni, cloud.RouteResult{Outcome: pending}),
+	}
 	plan := func(step graphMutation) ([]graphMutation, cloud.GatewayGraphResult, error) {
 		result.Outcome = p.progressingOutcome(step.message)
 		result.Gateway.Outcome = result.Outcome
@@ -375,30 +426,48 @@ func (p *Provider) buildSNIGraphPlan(desired desiredGatewayGraph, actual observe
 		return nil, result, fmt.Errorf("%w: TLS SNI listener has an unexpected default pool", cloud.ErrOwnershipConflict)
 	}
 	wanted := make(map[sniFragmentKey]desiredSNIFragment)
+	remaining := make(map[string]int)
 	for _, frag := range desired.sni {
 		wanted[frag.key] = frag
+		remaining[frag.key.uid]++
 	}
 	keys := slices.SortedFunc(maps.Keys(actual.sni), func(a, b sniFragmentKey) int {
 		return cmp.Or(cmp.Compare(a.namespace, b.namespace), cmp.Compare(a.name, b.name), cmp.Compare(a.uid, b.uid), cmp.Compare(a.target, b.target))
 	})
 	var retire []graphMutation
+	waitForOctavia := false
+	frontendReady := actual.loadBalancer != nil && actual.loadBalancer.AdminStateUp &&
+		actual.listener != nil && actual.listener.AdminStateUp && actual.listener.ProvisioningStatus == "ACTIVE" &&
+		desired.spec.Gateway.Disposition == cloud.GraphEnsure &&
+		(desired.spec.Gateway.Spec.ExternalNetworkID == "" || actual.state.FloatingIPAddress != "")
 	for _, key := range keys {
 		fragment := actual.sni[key]
+		target, keep := wanted[key]
+		if !keep {
+			// A retired target still belongs to the route until verified removal.
+			remaining[key.uid]++
+		}
 		if slices.ContainsFunc(fragment.members, func(m pools.Member) bool { return strings.HasPrefix(m.ProvisioningStatus, "PENDING_") }) ||
 			strings.HasPrefix(fragment.pool.ProvisioningStatus, "PENDING_") ||
 			fragment.policy != nil && strings.HasPrefix(fragment.policy.ProvisioningStatus, "PENDING_") ||
 			fragment.rule != nil && strings.HasPrefix(fragment.rule.ProvisioningStatus, "PENDING_") {
-			result.Outcome, result.Gateway.Outcome = pending, pending
-			return nil, result, nil
+			waitForOctavia = true
+			continue
 		}
-		if target, keep := wanted[key]; !keep || !fragment.matches(target) {
+		if !keep || !fragment.matches(target) {
 			retire = append(retire, sniDeletionStep(fragment))
-		} else if fragment.policy != nil && fragment.policy.AdminStateUp && fragment.rule != nil &&
-			actual.loadBalancer.AdminStateUp && actual.listener != nil && actual.listener.AdminStateUp &&
-			actual.listener.ProvisioningStatus == "ACTIVE" && desired.spec.Gateway.Disposition == cloud.GraphEnsure &&
-			(desired.spec.Gateway.Spec.ExternalNetworkID == "" || actual.state.FloatingIPAddress != "") {
-			result.Routes = append(result.Routes, cloud.RouteGraphResult{Identity: target.route.Identity, Result: cloud.RouteResult{Outcome: cloud.ReadyOutcome()}})
+		} else if frontendReady && fragment.policy != nil && fragment.policy.AdminStateUp && fragment.rule != nil {
+			remaining[key.uid]--
 		}
+	}
+	for i, route := range result.Routes {
+		if remaining[encodedSNITag("route-uid", route.Identity.RouteUID)] == 0 {
+			result.Routes[i].Result.Outcome = cloud.ReadyOutcome()
+		}
+	}
+	if waitForOctavia {
+		result.Outcome, result.Gateway.Outcome = pending, pending
+		return nil, result, nil
 	}
 	// Close every stale policy before staging a new route, including when a
 	// hostname moves to a different Service UID or is claimed by two routes.
@@ -529,7 +598,10 @@ func (p *Provider) verifySNICapability(ctx context.Context, desired desiredGatew
 
 func (p *Provider) withdrawUndiscoverableSNI(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, cause error) (cloud.GatewayGraphResult, error) {
 	outcome := p.progressingOutcome("Octavia TLS SNI passthrough capability is unavailable")
-	result := cloud.GatewayGraphResult{Outcome: outcome, Gateway: cloud.GatewayResult{State: actual.state, Outcome: outcome}}
+	result := cloud.GatewayGraphResult{
+		Outcome: outcome, Gateway: cloud.GatewayResult{State: actual.state, Outcome: outcome},
+		Routes: sniRouteResults(desired.sni, cloud.RouteResult{Outcome: outcome}),
+	}
 	if actual.listener == nil || !actual.listener.AdminStateUp {
 		return result, cause
 	}
@@ -553,7 +625,9 @@ func (p *Provider) reconcileSNIWithdrawalWithoutAddress(ctx context.Context, des
 	for i := range result.Routes {
 		// A previously proven sibling can stay Programmed during this read
 		// failure. Do not create a new serving proof without address inventory.
-		result.Routes[i].Result = cloud.RouteResult{Outcome: result.Gateway.Outcome, ObservationDeferred: true}
+		if result.Routes[i].Result.Outcome.State == cloud.OutcomeReady {
+			result.Routes[i].Result = cloud.RouteResult{Outcome: result.Gateway.Outcome, ObservationDeferred: true}
+		}
 	}
 	if len(plan) != 1 || plan[0].kind != graphDeleteChild || plan[0].deletion.resource != gatewayDisableL7Policy || !plan[0].sniWithdrawal {
 		return result, actual.addressReadError

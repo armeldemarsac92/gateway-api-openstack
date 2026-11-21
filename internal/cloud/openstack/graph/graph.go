@@ -290,9 +290,10 @@ func (p *Provider) validateGraphTrafficSecurity(ctx context.Context, desired des
 	spec := desired.spec.Gateway.Spec
 	if desired.protocol == cloud.ListenerProtocolTLSSNI {
 		spec.ListenerProtocol = cloud.ListenerProtocolTCP
-		routes := make([]cloud.RouteSpec, 0, len(desired.sni))
-		for _, fragment := range desired.sni {
-			target := fragment.route
+		owners := sniRouteOwners(desired.sni)
+		routes := make([]cloud.RouteSpec, 0, len(owners))
+		for _, owner := range owners {
+			target := owner.route
 			routes = append(routes, cloud.RouteSpec{Identity: target.Identity, Members: target.Members,
 				MemberSubnetID: target.BackendSubnetID, BackendSecurityGroupIDs: target.BackendSecurityGroupIDs,
 				GatewayRequirements: cloud.GatewayRequirements{ListenerProtocol: cloud.ListenerProtocolTCP}})
@@ -1000,15 +1001,11 @@ func validateGraphLoadBalancer(lb *octavia.LoadBalancer, requirements cloud.Gate
 func (p *Provider) pendingGraphResult(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph) cloud.GatewayGraphResult {
 	result := cloud.GatewayGraphResult{Outcome: actual.outcome, Gateway: observedGatewayResult(desired, actual, actual.outcome)}
 	if desired.protocol == cloud.ListenerProtocolTLSSNI {
-		if desired.spec.Gateway.Disposition == cloud.GraphEnsure && actual.loadBalancer != nil && actual.loadBalancer.AdminStateUp &&
+		deferred := desired.spec.Gateway.Disposition == cloud.GraphEnsure && actual.loadBalancer != nil && actual.loadBalancer.AdminStateUp &&
 			actual.loadBalancer.ProvisioningStatus == "PENDING_UPDATE" && actual.listener != nil && actual.listener.AdminStateUp &&
 			actual.listener.DefaultPoolID == "" && actual.listener.ProvisioningStatus != "ERROR" &&
-			(desired.spec.Gateway.Spec.ExternalNetworkID == "" || actual.state.FloatingIPAddress != "") {
-			for _, fragment := range desired.sni {
-				result.Routes = append(result.Routes, cloud.RouteGraphResult{Identity: fragment.route.Identity,
-					Result: cloud.RouteResult{Outcome: actual.outcome, ObservationDeferred: true}})
-			}
-		}
+			(desired.spec.Gateway.Spec.ExternalNetworkID == "" || actual.state.FloatingIPAddress != "")
+		result.Routes = sniRouteResults(desired.sni, cloud.RouteResult{Outcome: actual.outcome, ObservationDeferred: deferred})
 		return result
 	}
 	if actual.withdrawTLS != nil {

@@ -840,6 +840,9 @@ func auditCardinalityKey(candidate *auditCandidate, finding audit.ResourceFindin
 	case auditTypePool, auditTypeMonitor, auditTypeL7Policy, auditTypeL7Rule:
 		stableKeys = append(stableKeys, "route-namespace", "route-name")
 	}
+	if finding.Role != "" && finding.Role == sniRoleByType[candidate.resourceType] {
+		stableKeys = append(stableKeys, "uid", "route-uid", "sni-target")
+	}
 	parts := []string{candidate.resourceType}
 	for _, key := range stableKeys {
 		value, ok := singleAuditTagValue(candidate.tags, key)
