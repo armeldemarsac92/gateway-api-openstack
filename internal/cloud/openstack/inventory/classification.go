@@ -212,6 +212,12 @@ func classifyAuditCandidate(
 		}
 	}
 
+	if role == sniRoleByType[candidate.resourceType] {
+		finding.Objects = nil
+		return auditFinding(finding, audit.DispositionUnresolved, "GatewayManagedTLSRoute",
+			"The Gateway reconciles this TLSRoute target without a separate durable Route binding")
+	}
+
 	switch {
 	case len(exact) > 1:
 		finding.Objects = auditObjects(exact)
@@ -347,10 +353,23 @@ func auditCandidateParent(candidate *auditCandidate) (string, string) {
 	return "", ""
 }
 
+// SNI fragments have route UID tags but no independent, durable Route binding.
+var sniRoleByType = map[string]string{
+	auditTypePool: openstackidentity.RoleSNIPool, auditTypeMember: openstackidentity.RoleSNIMember,
+	auditTypeL7Policy: openstackidentity.RoleSNIPolicy, auditTypeL7Rule: openstackidentity.RoleSNIRule,
+}
+
 func auditCandidateRole(resourceType string, tags []string) (string, bool, error) {
 	role, ok := openstackidentity.ResourceRole(tags)
 	if !ok {
 		return "", false, fmt.Errorf("resource has a missing, invalid or duplicate role identity tag")
+	}
+	if role == sniRoleByType[resourceType] {
+		target, unique := singleAuditTagValue(tags, "sni-target")
+		if !unique || !openstackidentity.ValidSNITarget(target) {
+			return "", false, fmt.Errorf("TLSRoute resource has a missing or invalid target identity")
+		}
+		return role, true, nil
 	}
 	baseRole := role
 	if role == openstackidentity.RoleRuleRedirectGuard {

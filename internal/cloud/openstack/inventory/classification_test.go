@@ -480,3 +480,33 @@ func stringsContainAny(value string, candidates ...string) bool {
 	}
 	return false
 }
+
+func TestAuditIdentifiesGatewayManagedTLSRouteResources(t *testing.T) {
+	route := safetyTestIdentity(t)
+	id := route.Value()
+	target := openstackidentity.Tag("sni-target", strings.Repeat("a", 64))
+	tags := func(role string) []string {
+		return append(safetyRouteTags(t, route, role), target)
+	}
+	candidates := auditCandidateSet{}
+	for kind, role := range map[string]string{
+		auditTypePool: "tls-sni-pool", auditTypeMember: "tls-sni-member",
+		auditTypeL7Policy: "tls-sni-policy", auditTypeL7Rule: "tls-sni-rule",
+	} {
+		candidate := auditCandidate{service: auditServiceOctavia, resourceType: kind, id: role, projectID: id.OpenStackProjectID, tags: tags(role)}
+		if kind == auditTypeL7Policy {
+			candidate.policyAction, candidate.redirectPoolID = "REDIRECT_TO_POOL", "tls-sni-pool"
+		}
+		candidates.add(candidate)
+	}
+	findings := classifyAuditCandidates(candidates, nil, auditTestScopeTags(id), id.OpenStackProjectID)
+	for _, finding := range findings {
+		if finding.Disposition != audit.DispositionUnresolved || finding.Reason != "GatewayManagedTLSRoute" {
+			t.Errorf("%s = %s/%s, want unresolved Gateway-managed TLSRoute", finding.ID, finding.Disposition, finding.Reason)
+		}
+	}
+	pool := auditCandidate{service: auditServiceOctavia, resourceType: auditTypePool, id: "incomplete", projectID: id.OpenStackProjectID, tags: safetyRouteTags(t, route, "tls-sni-pool")}
+	if got := singleClassifiedAuditFinding(t, pool, nil, auditTestScopeTags(id), id.OpenStackProjectID); got.Disposition != audit.DispositionOwnershipConflict {
+		t.Fatalf("SNI pool without a target digest was classified as %s", got.Disposition)
+	}
+}

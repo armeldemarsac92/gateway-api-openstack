@@ -20,7 +20,6 @@ import (
 	"cmp"
 	"context"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -39,10 +38,10 @@ import (
 )
 
 const (
-	roleSNIPool   = "tls-sni-pool"
-	roleSNIMember = "tls-sni-member"
-	roleSNIPolicy = "tls-sni-policy"
-	roleSNIRule   = "tls-sni-rule"
+	roleSNIPool   = openstackidentity.RoleSNIPool
+	roleSNIMember = openstackidentity.RoleSNIMember
+	roleSNIPolicy = openstackidentity.RoleSNIPolicy
+	roleSNIRule   = openstackidentity.RoleSNIRule
 	ruleTLSSNI    = "TLS_SNI"
 )
 
@@ -164,8 +163,7 @@ func (p *Provider) sniOwnership(identity Identity, tags []string, project, id, r
 	if id == "" || !identity.MatchesGateway(tags, role) || key.namespace == "" || key.name == "" || key.uid == "" || key.target == "" {
 		return key, fmt.Errorf("%w: incomplete TLSRoute identity for %s %s", cloud.ErrOwnershipConflict, role, id)
 	}
-	digest, err := base64.RawURLEncoding.DecodeString(key.target)
-	if err != nil || len(digest) != sha256.Size*2 || strings.Trim(string(digest), "0123456789abcdef") != "" {
+	if !openstackidentity.ValidSNITarget(key.target) {
 		return key, fmt.Errorf("%w: invalid TLSRoute target identity for %s %s", cloud.ErrOwnershipConflict, role, id)
 	}
 	return key, nil
