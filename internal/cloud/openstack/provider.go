@@ -57,6 +57,11 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	return p.graph.ReconcileGatewayGraph(ctx, spec)
 }
 
+// BackendTLSAvailable discovers the fixed backend hostname capability in the configured region.
+func (p *Provider) BackendTLSAvailable(ctx context.Context) (bool, error) {
+	return p.graph.BackendTLSAvailable(ctx)
+}
+
 // GetGateway delegates read-only Gateway discovery to the graph package.
 func (p *Provider) GetGateway(ctx context.Context, identity cloud.Identity) (cloud.GatewayResult, bool, error) {
 	return p.graph.GetGateway(ctx, identity)

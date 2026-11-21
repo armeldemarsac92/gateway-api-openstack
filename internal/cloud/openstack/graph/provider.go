@@ -20,6 +20,7 @@ package graph
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -27,6 +28,7 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/apierrors"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/backendca"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/clients"
 	openstackidentity "github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/identity"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/neutron"
@@ -66,6 +68,8 @@ func NewIdentity(value cloud.Identity) (Identity, error) {
 // ProviderConfig bounds one provider call and controls how soon the controller
 // observes an asynchronous Octavia operation again.
 type ProviderConfig struct {
+	// BackendCA publishes trust for the opt-in BackendTLSPolicy integration.
+	BackendCA             *backendca.Store
 	FixedHTTPResponses    bool
 	HTTPHeaderExact       bool
 	HTTPMethodMatch       bool
@@ -80,6 +84,7 @@ type ProviderConfig struct {
 
 // Provider owns the OpenStack resource graph for managed Gateway API objects.
 type Provider struct {
+	backendCA             *backendca.Store
 	fixedHTTPResponses    bool
 	httpHeaderExact       bool
 	httpMethodMatch       bool
@@ -107,6 +112,7 @@ func NewProvider(clients ServiceClients, cfg ProviderConfig) *Provider {
 		cfg.PollInterval = 2 * time.Second
 	}
 	return &Provider{
+		backendCA:             cfg.BackendCA,
 		fixedHTTPResponses:    cfg.FixedHTTPResponses || cfg.WeightedHTTPTargets,
 		httpHeaderExact:       cfg.HTTPHeaderExact,
 		httpMethodMatch:       cfg.HTTPMethodMatch,
@@ -126,6 +132,19 @@ func NewProvider(clients ServiceClients, cfg ProviderConfig) *Provider {
 }
 
 var _ cloud.GraphProvider = (*Provider)(nil)
+
+// BackendTLSAvailable discovers support on the authenticated regional Amphora endpoint.
+func (p *Provider) BackendTLSAvailable(ctx context.Context) (bool, error) {
+	if p.backendCA == nil {
+		return false, nil
+	}
+	err := p.octavia.VerifyGatewayCapabilities(ctx, "amphora", octavia.GatewayCapabilityBackendTLSHostname)
+	var missing *octavia.MissingGatewayCapability
+	if errors.As(err, &missing) {
+		return false, nil
+	}
+	return err == nil, err
+}
 
 func (p *Provider) verifyGatewayHTTPCapabilities(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, required []string) error {
 	provider := desired.spec.Gateway.Spec.Provider
