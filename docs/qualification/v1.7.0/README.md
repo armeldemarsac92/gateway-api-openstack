@@ -8,6 +8,8 @@ One Gateway can serve independent HTTP backends on distinct ports of one VIP. Th
 
 With operator HTTPS enabled, two terminating HTTPS ports and a plaintext sibling served three distinct backends through the native Octavia and Barbican APIs. The edge port rotated to the approved certificate, closed after grant removal and served the approved revision again when the grant returned. [Traffic and conditions on both channels](provider/https-operator-ports.md)
 
+The four upstream HTTPS certificate grant cases passed on both channels in operator mode. A listener on a conflicting port reports its own certificate authorization. [Status and traffic evidence](provider/https-secret-grants.md)
+
 Four original TLS listener-status cases failed their targeted assertions on the preceding revision on both channels. With the GatewayClass's advertised features, the runner skipped the same four cases. [TLS listener-status receipt](provider/tls-listener-status-results.json) · [Per-case matrix](matrix/features-and-cases.md#complete-registered-test-inventory)
 
 ## Revisions and installation
