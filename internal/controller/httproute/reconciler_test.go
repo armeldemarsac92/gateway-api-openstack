@@ -1069,7 +1069,7 @@ func TestNodePortRouteRejectsTerminalServiceProfiles(t *testing.T) {
 			kubeClient := indexedFakeClientBuilder(testScheme(t), testConfig()).WithObjects(service).Build()
 			reconciler := *newTestReconciler(Reconciler{Client: kubeClient, Config: testConfig()}, nil)
 			_, gateway := providerRouteParentObjects(testConfig())
-			err := reconciler.checkRouteBackendProfile(t.Context(), kubeClient, route, gateway)
+			err := reconciler.checkRouteBackendProfile(t.Context(), kubeClient, route.Namespace, route.Spec.Rules[0].BackendRefs[0].BackendObjectReference, gateway)
 			var rejection *routeBuildError
 			if !errors.As(err, &rejection) {
 				t.Fatalf("unsupported backend profile error = %v", err)

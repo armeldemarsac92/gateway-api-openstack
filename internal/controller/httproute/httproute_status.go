@@ -187,6 +187,7 @@ func (r *Reconciler) handleRouteProviderFailure(
 	scope *httpRouteScope,
 	parent gatewayv1.ParentReference,
 	referencesEvaluated bool,
+	diagnostic model.Diagnostic,
 	providerErr error,
 	action string,
 ) (ctrl.Result, error) {
@@ -195,7 +196,7 @@ func (r *Reconciler) handleRouteProviderFailure(
 		return ctrl.Result{}, controller.SafeProviderReconcileError(controller.ProviderFailurePolicy{Message: "The HTTPRoute graph could not be reconciled"}, providerErr)
 	}
 	route := scope.route
-	status := providerFailureRouteStatus(policy, referencesEvaluated)
+	status := providerFailureRouteStatus(policy, referencesEvaluated).withBackendDiagnostic(diagnostic)
 	scope.setProviderFailureStatuses(
 		[]parentStatusUpdate{{parent: parent, status: status}},
 		policy,
@@ -278,6 +279,8 @@ func statusForRouteBuildError(err error) routeReconcileStatus {
 		switch buildError.kind {
 		case routeErrorInvalidKind:
 			return unresolvedRouteStatus(string(gatewayv1.RouteReasonInvalidKind), buildError.message)
+		case routeErrorBackendNotFound:
+			return unresolvedRouteStatus(string(gatewayv1.RouteReasonBackendNotFound), buildError.message)
 		case routeErrorRefNotPermitted:
 			return unresolvedRouteStatus(string(gatewayv1.RouteReasonRefNotPermitted), buildError.message)
 		case routeErrorUnsupportedProtocol:
@@ -319,6 +322,15 @@ func pendingRouteStatus(message string) routeReconcileStatus {
 	return status
 }
 
+func (s routeReconcileStatus) withBackendDiagnostic(diagnostic model.Diagnostic) routeReconcileStatus {
+	if diagnostic.Reason != "" {
+		s.resolved = metav1.ConditionFalse
+		s.resolvedReason = diagnostic.Reason
+		s.resolvedMessage = diagnostic.Message
+	}
+	return s
+}
+
 func unsupportedGatewayAPIVersionRouteStatus() routeReconcileStatus {
 	return routeReconcileStatus{
 		accepted:          metav1.ConditionUnknown,
@@ -347,10 +359,10 @@ func rejectedRouteStatus(reason, message string) routeReconcileStatus {
 	}
 }
 
-// resolveRejectedRouteBackend evaluates object references without applying the
+// resolveRouteReferences evaluates object references without applying the
 // Gateway's member mode or requiring ready endpoints.
-func (r *Reconciler) resolveRejectedRouteBackend(ctx context.Context, route *gatewayv1.HTTPRoute, status *routeReconcileStatus) error {
-	backend, err := validateRouteStructure(route)
+func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv1.HTTPRoute, status *routeReconcileStatus) error {
+	backends, err := validateRouteStructure(route)
 	if err != nil {
 		var rejection *routeBuildError
 		if errors.As(err, &rejection) && rejection.kind == routeErrorInvalidKind {
@@ -360,8 +372,7 @@ func (r *Reconciler) resolveRejectedRouteBackend(ctx context.Context, route *gat
 		}
 		return nil
 	}
-	key, _ := model.BackendServiceReference(route.Namespace, backend)
-	rejection, err := r.liveBackendReferenceRejection(ctx, route.Namespace, key)
+	rejection, err := r.liveRouteBackendReferenceRejection(ctx, route)
 	if err != nil {
 		return err
 	}
@@ -371,24 +382,26 @@ func (r *Reconciler) resolveRejectedRouteBackend(ctx context.Context, route *gat
 		status.resolvedMessage = rejection.message
 		return nil
 	}
-	var service corev1.Service
-	err = r.routePatchReader().Get(ctx, key, &service)
-	if apierrors.IsNotFound(err) || !service.DeletionTimestamp.IsZero() {
-		status.resolvedReason = string(gatewayv1.RouteReasonBackendNotFound)
-		status.resolvedMessage = fmt.Sprintf("backend Service %s was not found", key)
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("get backend Service: %w", err)
-	}
-	if _, diagnostic := model.ResolveServicePort(&service, backend.Port); diagnostic != nil {
-		status.resolvedReason = diagnostic.Reason
-		status.resolvedMessage = diagnostic.Message
-		return nil
-	}
 	status.resolved = metav1.ConditionTrue
 	status.resolvedReason = string(gatewayv1.RouteReasonResolvedRefs)
 	status.resolvedMessage = "All backend references are resolved"
+	for _, backend := range backends {
+		key, _ := model.BackendServiceReference(route.Namespace, backend)
+		var service corev1.Service
+		err := r.routePatchReader().Get(ctx, key, &service)
+		if apierrors.IsNotFound(err) || !service.DeletionTimestamp.IsZero() {
+			*status = status.withBackendDiagnostic(model.Diagnostic{
+				Reason: string(gatewayv1.RouteReasonBackendNotFound), Message: fmt.Sprintf("backend Service %s was not found", key),
+			})
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("get backend Service: %w", err)
+		}
+		if _, diagnostic := model.ResolveServicePort(&service, backend.Port); diagnostic != nil {
+			*status = status.withBackendDiagnostic(*diagnostic)
+		}
+	}
 	return nil
 }
 

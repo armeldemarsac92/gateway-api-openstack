@@ -159,6 +159,26 @@ type Member struct {
 	Weight int `json:",omitempty"`
 }
 
+// HTTPPathMatch describes an alternative at its rank on the physical listener.
+type HTTPPathMatch struct {
+	Hostname   string
+	PathType   PathMatchType
+	PathValue  string
+	Precedence int
+}
+
+// HTTPBackend groups the paths served by one Service port within one HTTPRoute.
+// Unavailable marks an unusable target. Its matches retain their position and
+// its pool must contain no members.
+type HTTPBackend struct {
+	Namespace   string
+	Name        string
+	Port        int
+	Members     []Member
+	Unavailable bool
+	Matches     []HTTPPathMatch
+}
+
 // RouteSpec describes the pool and forwarding configuration owned by one route.
 type RouteSpec struct {
 	Identity            Identity
@@ -179,6 +199,9 @@ type RouteSpec struct {
 	// Smaller ranks are evaluated first. Ranks must be distinct among ensured routes.
 	Precedence int
 	Members    []Member
+	// HTTPBackends carries the complete set of paths and backend groups when
+	// the HTTPRoute has several rules or alternative matches.
+	HTTPBackends []HTTPBackend `json:",omitempty"`
 }
 
 // RouteState records the OpenStack objects produced for one route.
@@ -188,6 +211,9 @@ type RouteState struct {
 	MonitorID   string
 	L7PolicyIDs []string
 	L7RuleIDs   []string
+	// Routes with several backend groups have one pool and optional monitor per group.
+	PoolIDs    []string `json:",omitempty"`
+	MonitorIDs []string `json:",omitempty"`
 }
 
 // ValidateGatewayIdentity verifies the common Gateway ownership tuple.

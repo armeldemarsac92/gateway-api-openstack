@@ -38,6 +38,9 @@ type Outcome struct {
 	State        OutcomeState
 	Message      string
 	RequeueAfter time.Duration
+	// MutationSubmitted requests one prompt observation after a successful
+	// write. A subsequent read that finds a busy provider uses normal polling.
+	MutationSubmitted bool
 }
 
 // Validate rejects an outcome that does not describe a supported provider
@@ -45,6 +48,9 @@ type Outcome struct {
 func (o Outcome) Validate() error {
 	switch o.State {
 	case OutcomeReady:
+		if o.MutationSubmitted {
+			return fmt.Errorf("ready provider outcome cannot request post-mutation observation")
+		}
 		if o.RequeueAfter != 0 {
 			return fmt.Errorf("ready provider outcome has a requeue interval")
 		}

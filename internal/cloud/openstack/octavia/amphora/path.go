@@ -18,6 +18,7 @@ package amphora
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 )
@@ -38,4 +39,16 @@ func PathRuleValues(path string, isPrefix bool) (exact, prefix string, err error
 		return "", "", fmt.Errorf("path requires an Octavia L7 rule value of %d characters, exceeding the %d character limit", length, maxL7RuleValueLength)
 	}
 	return exact, prefix, nil
+}
+
+var literalPathSegments = regexp.MustCompile(`^/[a-zA-Z0-9_/-]+$`)
+
+// LiteralPathPrefixPattern maps a normalized, ordinary path prefix to one
+// Octavia PATH rule. Other paths retain their literal equality/prefix pair.
+func LiteralPathPrefixPattern(path string) (string, bool) {
+	const boundary = "($|/)"
+	if len(path)+1+len(boundary) > maxL7RuleValueLength || !literalPathSegments.MatchString(path) {
+		return "", false
+	}
+	return "^" + path + boundary, true
 }

@@ -32,8 +32,15 @@ func (p *Provider) observeScopedHTTPGraph(ctx context.Context, desired desiredGa
 			return actual, unprovenDefaultPool(&listener)
 		}
 	}
-	var err error
-	actual.routes, err = p.observeRouteGraphsWithListeners(ctx, owners, actual.loadBalancer, nil, actual.protocol, actual.scopedListeners)
+	var routeRecovery *Identity
+	if desired.spec.Gateway.Disposition == cloud.GraphDelete && len(owners) == 0 {
+		routeRecovery = &desired.identity
+	}
+	poolItems, err := p.listGatewayPools(ctx, actual.loadBalancer)
+	if err != nil {
+		return actual, err
+	}
+	actual.routes, err = p.observeRouteGraphsFromPools(ctx, owners, actual.loadBalancer, nil, actual.protocol, actual.scopedListeners, poolItems, routeRecovery)
 	if err != nil {
 		return actual, err
 	}
@@ -50,30 +57,7 @@ func (p *Provider) observeScopedHTTPGraph(ctx context.Context, desired desiredGa
 		}
 	}
 	if desired.spec.Gateway.Disposition == cloud.GraphDelete && actual.outcome.State == cloud.OutcomeReady {
-		for _, route := range actual.routes {
-			if slices.ContainsFunc(route.policies, observedRoutePolicy.pending) {
-				actual.outcome = p.progressingOutcome("Waiting for HTTP policy provisioning before Gateway cleanup")
-				return actual, nil
-			}
-			if issue := route.backendProvisioningIssue(true, true); issue != "" {
-				actual.outcome = p.progressingOutcome(issue)
-				return actual, nil
-			}
-			for _, policy := range route.policies {
-				for _, rule := range policy.rules {
-					actual.deletion.routes = append(actual.deletion.routes, gatewayDeletionStep{
-						resource: gatewayDeletionL7Rule, resourceID: rule.rule.ID, parentID: policy.policy.ID,
-					})
-				}
-				actual.deletion.routes = append(actual.deletion.routes, gatewayDeletionStep{resource: gatewayDeletionL7Policy, resourceID: policy.policy.ID})
-			}
-			if route.pool != nil {
-				actual.deletion.pools = appendDefaultPoolDeletionSteps(actual.deletion.pools, route)
-			}
-		}
-		for _, listener := range actual.scopedListeners {
-			actual.deletion.listeners = append(actual.deletion.listeners, listenerDeletionStep(listener.ID))
-		}
+		actual.deletion, actual.outcome = p.httpGatewayDeletionPlan(actual.routes, actual.scopedListeners)
 	}
 	return actual, nil
 }
@@ -97,21 +81,40 @@ func (route observedRouteGraph) validateScopedHTTPPoolChildren() error {
 // include disabled policies and prove their ownership before any deletion.
 func validateScopedHTTPRouteRelationships(routes []observedRouteGraph) error {
 	layout := make(map[string][]observedRoutePolicy)
+	memberPools, rulePolicies, policyListeners := make(map[string]string), make(map[string]string), make(map[string]string)
 	for _, route := range routes {
-		if route.pool == nil {
-			continue
-		}
-		var referenced []pools.ListenerID
-		for _, policy := range route.policies {
-			id := policy.policy.ListenerID
-			layout[id] = append(layout[id], policy)
-			edge := pools.ListenerID{ID: id}
-			if policy.policy.AdminStateUp && len(policy.rules) != 0 && !slices.Contains(referenced, edge) {
-				referenced = append(referenced, edge)
+		for _, part := range route.parts() {
+			if part.pool == nil || part.pool.Protocol != cloud.ListenerProtocolHTTP {
+				continue
 			}
-		}
-		if err := crossCheckCompleteChildInventory("HTTP pool", route.pool.ID, "listener", route.pool.Listeners, referenced, func(ref pools.ListenerID) string { return ref.ID }); err != nil {
-			return err
+			var referenced []pools.ListenerID
+			for _, policy := range part.policies {
+				id := policy.policy.ListenerID
+				if previous := policyListeners[policy.policy.ID]; previous != "" {
+					return fmt.Errorf("%w: policy %s appears in listeners %s and %s", cloud.ErrOwnershipConflict, policy.policy.ID, previous, id)
+				}
+				policyListeners[policy.policy.ID] = id
+				for _, rule := range policy.rules {
+					if previous := rulePolicies[rule.rule.ID]; previous != "" {
+						return fmt.Errorf("%w: rule %s appears in policies %s and %s", cloud.ErrOwnershipConflict, rule.rule.ID, previous, policy.policy.ID)
+					}
+					rulePolicies[rule.rule.ID] = policy.policy.ID
+				}
+				layout[id] = append(layout[id], policy)
+				edge := pools.ListenerID{ID: id}
+				if policy.policy.AdminStateUp && len(policy.rules) != 0 && !slices.Contains(referenced, edge) {
+					referenced = append(referenced, edge)
+				}
+			}
+			if err := crossCheckCompleteChildInventory("HTTP pool", part.pool.ID, "listener", part.pool.Listeners, referenced, func(ref pools.ListenerID) string { return ref.ID }); err != nil {
+				return err
+			}
+			for _, member := range part.members {
+				if previous := memberPools[member.ID]; previous != "" {
+					return fmt.Errorf("%w: member %s appears in pools %s and %s", cloud.ErrOwnershipConflict, member.ID, previous, part.pool.ID)
+				}
+				memberPools[member.ID] = part.pool.ID
+			}
 		}
 	}
 	for _, policies := range layout {
@@ -230,6 +233,9 @@ func scopedHTTPRoutePort(route desiredRoute) int {
 }
 
 func scopedHTTPGatewayResult(desired desiredGatewayGraph, actual observedGatewayGraph, pending cloud.Outcome) cloud.GatewayResult {
+	if hasHTTPBackends(desired, actual) {
+		desired, actual, _ = httpPlanningParts(desired, actual)
+	}
 	result := scopedGatewayResult(desired.spec.Gateway.Spec, actual, pending)
 	if actual.routes == nil && actual.loadBalancer != nil {
 		result.Outcome, result.ScopedListenerReadyPorts = pending, []int{}
@@ -259,7 +265,7 @@ func scopedHTTPGatewayResult(desired desiredGatewayGraph, actual observedGateway
 				held[port] = true
 				result.Outcome = pending
 				result.Outcome.Message = "Waiting for outdated HTTP policy removal"
-			case node.Disposition == cloud.GraphEnsure && (target != port || policy.hasOutdatedHostname(route.hostnameRuleValue)):
+			case node.Disposition == cloud.GraphEnsure && (target != port || policyNeedsHostnameUpdate(route, policy)):
 				held[port], held[target] = true, true
 				result.Outcome = pending
 				result.Outcome.Message = "Waiting for updated HTTP policies"
@@ -274,6 +280,16 @@ func scopedHTTPGatewayResult(desired desiredGatewayGraph, actual observedGateway
 }
 
 func deferredScopedHTTPRoutes(desired desiredGatewayGraph, actual observedGatewayGraph, readyPorts []int) map[int]bool {
+	if hasHTTPBackends(desired, actual) {
+		partDesired, partActual, owners := httpPlanningParts(desired, actual)
+		parts := deferredScopedHTTPRoutes(partDesired, partActual, readyPorts)
+		deferred, held := make(map[int]bool), make(map[int]bool)
+		for part, owner := range owners {
+			held[owner] = held[owner] || !parts[part]
+			deferred[owner] = !held[owner]
+		}
+		return deferred
+	}
 	deferred := make(map[int]bool)
 	for i, observed := range actual.routes {
 		route := desired.routes[i]
@@ -288,7 +304,8 @@ func deferredScopedHTTPRoutes(desired desiredGatewayGraph, actual observedGatewa
 			continue
 		}
 		steps, _, err := buildRouteEnsurePlan(route, observed)
-		deferred[i] = err == nil && len(steps) == 0
+		_, withdrawalHold := httpMemberWithdrawal(observed)
+		deferred[i] = err == nil && len(steps) == 0 && (!route.unavailable || withdrawalHold == "")
 	}
 	return deferred
 }

@@ -250,6 +250,54 @@ func TestClassifyAuditCandidatesValidatesGraphAndCardinality(t *testing.T) {
 	})
 }
 
+func TestAuditHTTPPathResourcesShareRouteButRequireTheirOwnBackend(t *testing.T) {
+	route := safetyTestIdentity(t)
+	id := route.Value()
+	gatewayID := id
+	gatewayID.RouteNamespace, gatewayID.RouteName, gatewayID.RouteUID = "", "", ""
+	gateway, err := openstackidentity.NewIdentity(gatewayID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records := []preparedAuditRecord{
+		{identity: gateway, record: audit.OwnershipRecord{Identity: gatewayID}},
+		{identity: route, record: audit.OwnershipRecord{Identity: id}, isRoute: true},
+	}
+	first, second := strings.Repeat("A", 43), strings.Repeat("B", 42)+"A"
+	match := strings.Repeat("C", 42) + "A"
+	candidates := auditCandidateSet{}
+	candidates.add(auditTestLoadBalancerCandidate(t, gatewayID, "lb"))
+	add := func(kind, name, parent string, tags []string, redirect string) {
+		candidates.add(auditCandidate{service: auditServiceOctavia, resourceType: kind,
+			id: name, projectID: id.OpenStackProjectID, tags: tags, redirectPoolID: redirect,
+			observedParents: singletonStringSet(parent), reportedParents: singletonStringSet(parent)})
+	}
+	add(auditTypeListener, "listener", "lb", safetyGatewayTags(t, gateway, roleListener), "")
+	add(auditTypePool, "first", "lb", safetyRouteTags(t, route, "http-v2/pool/"+first), "")
+	add(auditTypePool, "second", "lb", safetyRouteTags(t, route, "http-v2/pool/"+second), "")
+	policyTags := safetyRouteTags(t, route, "http-v2/l7-policy-exact/"+first+"/"+match)
+	add(auditTypeL7Policy, "exact", "listener", policyTags, "first")
+	add(auditTypeL7Rule, "path", "exact", safetyRouteTags(t, route, "http-v2/l7-rule-path/"+first+"/"+match), "")
+
+	classify := func() []audit.ResourceFinding {
+		return classifyAuditCandidates(candidates, records, auditTestScopeTags(id), id.OpenStackProjectID)
+	}
+	for _, finding := range classify() {
+		if finding.Disposition != audit.DispositionMatched {
+			t.Fatalf("expected a matched HTTP graph, got %s: %s", finding.ID, finding.Reason)
+		}
+	}
+	// Both pools belong to the same Route UID. Only the first pool belongs to this policy.
+	for _, candidate := range candidates {
+		if candidate.id == "exact" {
+			candidate.redirectPoolID = "second"
+		}
+	}
+	if finding := auditFindingByID(t, classify(), "exact"); finding.Reason != auditReasonParentMismatch {
+		t.Fatalf("policy pointed to the other Service's pool: %s", finding.Reason)
+	}
+}
+
 func TestClassifyAuditFloatingIPDoesNotExposeDescription(t *testing.T) {
 	identity := auditTestCloudIdentity()
 	wrapped, err := openstackidentity.NewIdentity(identity)

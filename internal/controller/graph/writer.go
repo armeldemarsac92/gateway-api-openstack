@@ -26,6 +26,7 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
 // Action identifies the durable lifecycle intent that the sources must verify.
@@ -54,6 +55,9 @@ type Request struct {
 	// ForwardingTarget ties a TCPRoute-triggered status update to the exact
 	// backend and listener election rebuilt by the writer.
 	ForwardingTarget string
+	// HTTPRouteBackendDiagnostic ties ResolvedRefs to the backend observation
+	// that the graph writer uses for the requesting HTTPRoute.
+	HTTPRouteBackendDiagnostic *model.Diagnostic
 }
 
 // Reconciler is the sole Kubernetes-facing graph mutation boundary.

@@ -78,6 +78,7 @@ const (
 type graphMutation struct {
 	kind               graphMutationKind
 	routeIndex         int
+	backendKey         string
 	route              routeMutation
 	deletion           gatewayDeletionStep
 	poolID             string
@@ -164,7 +165,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	}
 	var plan []graphMutation
 	defaultPool := usesDefaultPool(actual.protocol)
-	planBeforeSecurity := defaultPool || actual.scoped && actual.protocol == cloud.ListenerProtocolHTTP
+	planBeforeSecurity := defaultPool || actual.scoped && actual.protocol == cloud.ListenerProtocolHTTP || hasHTTPBackends(desired, actual)
 	if planBeforeSecurity {
 		plan, result, err = p.buildGatewayGraphPlan(desired, actual)
 		if err != nil {
@@ -205,6 +206,11 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		return result, err
 	}
 	result.Outcome = p.progressingOutcome(step.message)
+	if step.kind == graphRouteMutation && step.backendKey != "" {
+		result.Outcome.MutationSubmitted = true
+		outcome := &result.Routes[step.routeIndex].Result.Outcome
+		outcome.MutationSubmitted = outcome.State == cloud.OutcomeProgressing
+	}
 	return result, nil
 }
 
@@ -229,7 +235,14 @@ func (p *Provider) validateGraphTrafficSecurity(ctx context.Context, desired des
 	routes := make([]cloud.RouteSpec, 0, len(desired.routes))
 	for index, route := range desired.routes {
 		if desired.spec.Routes[index].Disposition == cloud.GraphEnsure && !deniedPorts[scopedHTTPRoutePort(route)] {
-			routes = append(routes, route.spec)
+			if len(route.httpBackends) == 0 {
+				routes = append(routes, route.spec)
+			}
+			for _, backend := range route.httpBackends {
+				if !backend.unavailable {
+					routes = append(routes, backend.spec)
+				}
+			}
 		}
 	}
 	return p.topology.ValidateGatewaySecurity(ctx, spec, routes)
@@ -369,7 +382,8 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 	lastRank := -1
 	portWinners := make(map[int]bool, len(ports))
 	rankByPort := make(map[int]int)
-	positionByPort := make(map[int]int32)
+	policiesByPort := make(map[int][]*desiredPolicy)
+	policyRanksByPort := make(map[int]map[int]bool)
 	for _, node := range spec.Routes {
 		id := node.Spec.Identity
 		if !validGraphDisposition(node.Disposition) {
@@ -436,7 +450,8 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 				return invalid(fmt.Sprintf("a %s listener allows at most one ensured route", protocol))
 			}
 			previousRank, hasRank := rankByPort[httpPort]
-			if node.Spec.Precedence < 0 || (len(ports) == 0 || httpPort != 0) && hasRank && node.Spec.Precedence == previousRank {
+			if protocol != cloud.ListenerProtocolHTTP && (node.Spec.Precedence < 0 ||
+				len(ports) == 0 && hasRank && node.Spec.Precedence == previousRank) {
 				return desiredGatewayGraph{}, &cloud.GraphError{Identity: id, Err: cloud.NewProviderError(cloud.ErrorCategoryTerminalValidation,
 					fmt.Errorf("route precedence %d must be nonnegative and distinct among ensured routes", node.Spec.Precedence))}
 			}
@@ -452,12 +467,39 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 			if err != nil {
 				return desiredGatewayGraph{}, &cloud.GraphError{Identity: id, Err: err}
 			}
-			for i := range route.policies {
-				positionByPort[httpPort]++
-				route.policies[i].position = positionByPort[httpPort]
+			if protocol == cloud.ListenerProtocolHTTP {
+				ranks := policyRanksByPort[httpPort]
+				if ranks == nil {
+					ranks = make(map[int]bool)
+					policyRanksByPort[httpPort] = ranks
+				}
+				for _, policies := range route.policySets() {
+					for i := range policies {
+						policy := &policies[i]
+						if policy.position == 1 {
+							if policy.precedence < 0 || ranks[policy.precedence] {
+								return desiredGatewayGraph{}, &cloud.GraphError{Identity: id, Err: cloud.NewProviderError(cloud.ErrorCategoryTerminalValidation,
+									fmt.Errorf("HTTP match precedence %d must be nonnegative and distinct on its listener", policy.precedence))}
+							}
+							ranks[policy.precedence] = true
+						}
+						policiesByPort[httpPort] = append(policiesByPort[httpPort], policy)
+					}
+				}
 			}
 		}
 		desired.routes = append(desired.routes, route)
+	}
+	for _, policies := range policiesByPort {
+		sort.SliceStable(policies, func(i, j int) bool { return policies[i].precedence < policies[j].precedence })
+		for i, policy := range policies {
+			policy.position = int32(i + 1)
+		}
+	}
+	for _, route := range desired.routes {
+		for _, policies := range route.policySets() {
+			sort.Slice(policies, func(i, j int) bool { return policies[i].position < policies[j].position })
+		}
 	}
 	return desired, nil
 }
@@ -523,6 +565,7 @@ func (d desiredGatewayGraph) routeOwners() []routeGraphOwner {
 	owners := make([]routeGraphOwner, len(d.routes))
 	for index, route := range d.routes {
 		owners[index].identity = route.identity
+		owners[index].expectsHTTPBackends = len(route.httpBackends) != 0
 		if d.spec.Routes[index].Disposition == cloud.GraphDelete {
 			owners[index].cleanupProtocol = route.spec.GatewayRequirements.ListenerProtocol
 		}
@@ -639,7 +682,7 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 		if observation.phase == loadBalancerPhasePending {
 			return actual, nil
 		}
-		actual.deletion, err = p.buildGatewayDeletionPlanFromListeners(ctx, desired.identity, lb, owners, desired.protocol, inventory.Items)
+		actual.deletion, err = p.buildGatewayDeletionPlanFromListeners(ctx, desired.identity, lb, owners, desired.protocol, inventory)
 		if actual.deletion.defaultPoolListener != nil {
 			actual.listener = actual.deletion.defaultPoolListener
 			actual.state.ListenerID = actual.listener.ID
@@ -700,6 +743,11 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 	if err != nil {
 		return actual, err
 	}
+	if hasHTTPBackends(desired, actual) {
+		if err := requireListenerDefaultPoolInventory(lb.ID, inventory); err != nil {
+			return actual, err
+		}
+	}
 	if !defaultPool && actual.listener != nil && strings.HasPrefix(actual.listener.ProvisioningStatus, "PENDING_") {
 		actual.outcome = p.progressingOutcome("Waiting for Octavia listener provisioning")
 		return actual, nil
@@ -731,6 +779,19 @@ func (p *Provider) observeGatewayListenerInventory(ctx context.Context, desired 
 	}
 	if actual.scoped && actual.protocol == cloud.ListenerProtocolHTTP {
 		anchor := desired.spec.Gateway.Spec.ListenerPort
+		if anchor == 0 && desired.spec.Gateway.Disposition == cloud.GraphDelete {
+			// A scoped upgrade can retain one legacy HTTP anchor without
+			// a port tag. Recovery still proves the exact Gateway and parent
+			// of that listener and refuses an ambiguous second anchor.
+			for _, listener := range inventory.Items {
+				if listener.Protocol == cloud.ListenerProtocolHTTP && !slices.ContainsFunc(listener.Tags, func(tag string) bool {
+					return scopedPortTagProtocol(tag) != ""
+				}) {
+					anchor = listener.ProtocolPort
+					break
+				}
+			}
+		}
 		actual.scopedListeners, err = p.managedScopedListeners(desired.identity, lb, inventory.Items, actual.protocol, anchor)
 		if err != nil {
 			return inventory, err
@@ -745,9 +806,11 @@ func validateObservedPolicyLayout(routes []observedRouteGraph) error {
 	positions := make(map[int32]bool)
 	policyCount := 0
 	for _, route := range routes {
-		for _, policy := range route.policies {
-			positions[policy.policy.Position] = true
-			policyCount++
+		for _, part := range route.parts() {
+			for _, policy := range part.policies {
+				positions[policy.policy.Position] = true
+				policyCount++
+			}
 		}
 	}
 	// Octavia moves policies by popping their current one-based position from
@@ -800,7 +863,7 @@ func (p *Provider) pendingGraphResult(ctx context.Context, desired desiredGatewa
 		result.Gateway.ScopedListenerDeferredPorts = unchangedHTTPSWithdrawalSiblings(desired, actual)
 	}
 	var deferred map[int]bool
-	if actual.scoped {
+	if actual.scoped && desired.spec.Gateway.Disposition == cloud.GraphEnsure {
 		if actual.protocol == cloud.ListenerProtocolHTTP {
 			deferred = deferredScopedHTTPRoutes(desired, actual, result.Gateway.ScopedListenerReadyPorts)
 		} else {

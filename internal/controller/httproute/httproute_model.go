@@ -18,12 +18,12 @@ package httproute
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
 
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -40,6 +40,7 @@ type routeErrorKind string
 const (
 	routeErrorUnsupported         routeErrorKind = "Unsupported"
 	routeErrorInvalidKind         routeErrorKind = "InvalidKind"
+	routeErrorBackendNotFound     routeErrorKind = "BackendNotFound"
 	routeErrorRefNotPermitted     routeErrorKind = "RefNotPermitted"
 	routeErrorUnsupportedProtocol routeErrorKind = "UnsupportedProtocol"
 	routeErrorNoMatchingParent    routeErrorKind = "NoMatchingParent"
@@ -64,22 +65,38 @@ func structurallySupportedRoute(route *gatewayv1.HTTPRoute) bool {
 	return err == nil
 }
 
-// validateRouteStructure limits programming to the existing Octavia mapping.
+// validateRouteStructure limits programming to the stock HTTP path profile.
 // The logical compiler can represent a wider configuration without enabling it.
-func validateRouteStructure(route *gatewayv1.HTTPRoute) (gatewayv1.BackendObjectReference, error) {
-	if len(route.Spec.Rules) != 1 {
-		return gatewayv1.BackendObjectReference{}, newRouteBuildError(routeErrorUnsupported, "exactly one HTTPRoute rule is supported")
+func validateRouteStructure(route *gatewayv1.HTTPRoute) ([]gatewayv1.BackendObjectReference, error) {
+	if len(route.Spec.Rules) == 0 {
+		return nil, newRouteBuildError(routeErrorUnsupported, "at least one HTTPRoute rule is required")
 	}
-	rule := route.Spec.Rules[0]
+	references := make([]gatewayv1.BackendObjectReference, 0, len(route.Spec.Rules))
+	for _, rule := range route.Spec.Rules {
+		reference, err := validateRouteRule(rule)
+		if err != nil {
+			return nil, err
+		}
+		references = append(references, reference)
+	}
+	return references, nil
+}
+
+func hasMultipleRoutePaths(route *gatewayv1.HTTPRoute) bool {
+	return len(route.Spec.Rules) > 1 || len(route.Spec.Rules) == 1 && len(route.Spec.Rules[0].Matches) > 1
+}
+
+func validateRouteRule(rule gatewayv1.HTTPRouteRule) (gatewayv1.BackendObjectReference, error) {
 	if rule.Name != nil || rule.Timeouts != nil || rule.Retry != nil || rule.SessionPersistence != nil { //nolint:staticcheck // The release still serves this deprecated Experimental field.
 		return gatewayv1.BackendObjectReference{}, newRouteBuildError(routeErrorUnsupported, "named rules, timeouts, retries, and session persistence are not supported")
 	}
 	if err := compileRouteAction(rule); err != nil {
 		return gatewayv1.BackendObjectReference{}, err
 	}
-	_, _, err := supportedMatch(rule.Matches)
-	if err != nil {
-		return gatewayv1.BackendObjectReference{}, err
+	for _, match := range rule.Matches {
+		if _, _, err := supportedMatch(match); err != nil {
+			return gatewayv1.BackendObjectReference{}, err
+		}
 	}
 	if len(rule.BackendRefs) != 1 {
 		return gatewayv1.BackendObjectReference{}, newRouteBuildError(routeErrorUnsupported, "exactly one backendRef is supported")
@@ -88,8 +105,8 @@ func validateRouteStructure(route *gatewayv1.HTTPRoute) (gatewayv1.BackendObject
 	if len(backend.Filters) != 0 {
 		return gatewayv1.BackendObjectReference{}, newRouteBuildError(routeErrorUnsupported, "backendRef filters are not supported")
 	}
-	if backend.Weight != nil && *backend.Weight == 0 {
-		return gatewayv1.BackendObjectReference{}, newRouteBuildError(routeErrorUnsupported, "a single backendRef must have non-zero weight")
+	if backend.Weight != nil && *backend.Weight <= 0 {
+		return gatewayv1.BackendObjectReference{}, newRouteBuildError(routeErrorUnsupported, "a single backendRef must have positive weight")
 	}
 	if backend.Group != nil && *backend.Group != gatewayv1.Group("") {
 		return gatewayv1.BackendObjectReference{}, newRouteBuildError(routeErrorInvalidKind, "backendRef group %q is unsupported; use a core Service", *backend.Group)
@@ -97,8 +114,8 @@ func validateRouteStructure(route *gatewayv1.HTTPRoute) (gatewayv1.BackendObject
 	if backend.Kind != nil && *backend.Kind != gatewayv1.Kind("Service") {
 		return gatewayv1.BackendObjectReference{}, newRouteBuildError(routeErrorInvalidKind, "backendRef kind %q is unsupported; use Service", *backend.Kind)
 	}
-	if backend.Port == nil {
-		return gatewayv1.BackendObjectReference{}, newRouteBuildError(routeErrorUnsupported, "backendRef port is required")
+	if backend.Port == nil || *backend.Port < 1 || *backend.Port > 65535 {
+		return gatewayv1.BackendObjectReference{}, newRouteBuildError(routeErrorUnsupported, "backendRef must specify a port between 1 and 65535")
 	}
 
 	return backend.BackendObjectReference, nil
@@ -136,7 +153,8 @@ func (r *Reconciler) buildRouteModelWithReader(
 	if err != nil {
 		return cloud.RouteSpec{}, err
 	}
-	return r.buildRouteModelFromInputs(ctx, reader, route, gateway, *listener, inputs)
+	spec, _, err := r.buildRouteModelFromInputs(ctx, reader, route, gateway, *listener, inputs)
+	return spec, err
 }
 
 func (r *Reconciler) buildRouteModelFromInputs(
@@ -146,42 +164,16 @@ func (r *Reconciler) buildRouteModelFromInputs(
 	gateway *gatewayv1.Gateway,
 	listener gatewayv1.Listener,
 	inputs *routeModelInputs,
-) (cloud.RouteSpec, error) {
-	reference, err := validateRouteStructure(route)
+) (cloud.RouteSpec, model.Diagnostic, error) {
+	matches, rules, err := supportedRouteModel(inputs.routeFragment(route), listener)
 	if err != nil {
-		return cloud.RouteSpec{}, err
-	}
-	key, _ := model.BackendServiceReference(route.Namespace, reference)
-	if err := backendReferenceRejection(route.Namespace, key, inputs.input.ReferenceGrants); err != nil {
-		return cloud.RouteSpec{}, err
-	}
-	service := inputs.service(key)
-	if service == nil {
-		return cloud.RouteSpec{}, fmt.Errorf("get backend Service: %w", apierrors.NewNotFound(corev1.Resource("services"), key.Name))
+		return cloud.RouteSpec{}, model.Diagnostic{}, err
 	}
 	topology, err := controller.StoredGatewayTopology(r.Config, gateway)
 	if err != nil {
-		return cloud.RouteSpec{}, err
+		return cloud.RouteSpec{}, model.Diagnostic{}, err
 	}
 	mode := topology.Topology.MemberMode
-	if _, err := servicePortForBackend(service, *reference.Port, mode); err != nil {
-		return cloud.RouteSpec{}, err
-	}
-	// Lower this route with its position from the complete listener model.
-	logical := inputs.routeFragment(route)
-	match, backend, err := supportedRouteModel(logical, listener, mode)
-	if err != nil {
-		return cloud.RouteSpec{}, err
-	}
-	var members []cloud.Member
-	if mode == cloud.MemberModeEndpoint {
-		members, err = endpointMembers(service, backend.Endpoints)
-	} else {
-		members, err = nodePortMembersFromSlices(ctx, reader, service, backend.Port, topology.NodeAddressType, inputs.endpointSlices(key))
-	}
-	if err != nil {
-		return cloud.RouteSpec{}, err
-	}
 	spec := cloud.RouteSpec{
 		Identity: controller.RouteIdentity(r.Config, gateway, route),
 		GatewayRequirements: cloud.GatewayRequirements{
@@ -196,25 +188,118 @@ func (r *Reconciler) buildRouteModelFromInputs(
 		MemberSubnetID:          topology.Topology.MemberSubnetID,
 		BackendSecurityGroupIDs: slices.Clone(topology.Topology.BackendSecurityGroupIDs),
 		HealthMonitor:           topology.HealthMonitor,
-		Hostname:                match.Hostname,
-		Precedence:              match.Precedence,
-		PathType:                cloud.PathMatchType(match.Match.PathType),
-		PathValue:               match.Match.PathValue,
-		Members:                 members,
 	}
 	if controller.GatewayListenerScope(r.Config, gateway) == gatewayv1.HTTPProtocolType {
 		spec.GatewayRequirements.ListenerPort, _ = strconv.Atoi(gateway.Annotations[r.Config.GatewayListenerPortAnnotation()])
 		spec.GatewayRequirements.ListenerProtocol = cloud.ListenerProtocolHTTP
 		spec.ScopedListenerPorts = []int{int(listener.Port)}
 	}
-	return spec, nil
+	if !hasMultipleRoutePaths(route) {
+		match := matches[0]
+		members, err := routeBackendMembers(ctx, reader, route.Namespace, rules[0].Backends[0], inputs, mode, topology.NodeAddressType)
+		if err != nil {
+			return cloud.RouteSpec{}, model.Diagnostic{}, err
+		}
+		spec.Hostname, spec.PathType, spec.PathValue, spec.Precedence = match.Hostname, cloud.PathMatchType(match.Match.PathType), match.Match.PathValue, match.Precedence
+		spec.Members = members
+		return spec, model.Diagnostic{}, nil
+	}
+	diagnostic, err := lowerHTTPBackends(ctx, reader, route, &spec, inputs, matches, rules, topology.NodeAddressType)
+	if err != nil {
+		return cloud.RouteSpec{}, model.Diagnostic{}, err
+	}
+	return spec, diagnostic, nil
 }
 
-// supportedRouteModel lowers only the currently implemented graph shape. Model
-// diagnostics never grant authority to drop a fragment or choose a fallback.
-func supportedRouteModel(logical model.Gateway, selected gatewayv1.Listener, mode cloud.MemberMode) (model.RouteMatch, model.BackendGroup, error) {
-	unsupported := func() (model.RouteMatch, model.BackendGroup, error) {
-		return model.RouteMatch{}, model.BackendGroup{}, newRouteBuildError(routeErrorUnsupported, "logical Gateway configuration is outside the supported HTTP profile")
+func routeBackendMembers(ctx context.Context, reader client.Reader, sourceNamespace string, backend model.BackendGroup, inputs *routeModelInputs, mode cloud.MemberMode, nodeAddressType corev1.NodeAddressType) ([]cloud.Member, error) {
+	key := backend.Service
+	if rejection := backendReferenceRejection(sourceNamespace, key, inputs.input.ReferenceGrants); rejection != nil {
+		return nil, rejection
+	}
+	service := inputs.service(key)
+	if service == nil {
+		return nil, newRouteBuildError(routeErrorBackendNotFound, "backend Service %s was not found", key)
+	}
+	port, err := servicePortForBackend(service, *backend.Reference.Port, mode)
+	if err != nil {
+		return nil, err
+	}
+	if mode == cloud.MemberModeEndpoint {
+		return endpointMembers(service, backend.Endpoints)
+	}
+	return nodePortMembersFromSlices(ctx, reader, service, port, nodeAddressType, inputs.endpointSlices(key))
+}
+
+type backendKey struct {
+	service types.NamespacedName
+	port    int
+}
+
+func lowerHTTPBackends(ctx context.Context, reader client.Reader, route *gatewayv1.HTTPRoute, spec *cloud.RouteSpec, inputs *routeModelInputs, matches []model.RouteMatch, rules []model.Rule, nodeAddressType corev1.NodeAddressType) (model.Diagnostic, error) {
+	groups := make(map[backendKey]int, len(rules))
+	ruleGroups := make([]int, len(rules))
+	var firstDiagnostic model.Diagnostic
+	for i, rule := range rules {
+		backend := rule.Backends[0]
+		key := backendKey{service: backend.Service, port: int(*backend.Reference.Port)}
+		index, found := groups[key]
+		if !found {
+			members, diagnostic, err := groupedBackendMembers(ctx, reader, route.Namespace, backend, inputs, spec.MemberMode, nodeAddressType)
+			if err != nil {
+				return model.Diagnostic{}, err
+			}
+			// Prefer an authorization failure when several references cannot resolve.
+			if firstDiagnostic.Reason == "" || firstDiagnostic.Reason != string(gatewayv1.RouteReasonRefNotPermitted) &&
+				diagnostic.Reason == string(gatewayv1.RouteReasonRefNotPermitted) {
+				firstDiagnostic = diagnostic
+			}
+			index = len(spec.HTTPBackends)
+			groups[key] = index
+			spec.HTTPBackends = append(spec.HTTPBackends, cloud.HTTPBackend{
+				Namespace: key.service.Namespace, Name: key.service.Name, Port: key.port,
+				Members: members, Unavailable: len(members) == 0,
+			})
+		}
+		ruleGroups[i] = index
+	}
+	for _, match := range matches {
+		backend := &spec.HTTPBackends[ruleGroups[match.RuleIndex]]
+		// Equivalent alternatives targeting this pool share one policy identity.
+		if slices.ContainsFunc(backend.Matches, func(previous cloud.HTTPPathMatch) bool {
+			return previous.Hostname == match.Hostname && previous.PathType == cloud.PathMatchType(match.Match.PathType) && previous.PathValue == match.Match.PathValue
+		}) {
+			continue
+		}
+		backend.Matches = append(backend.Matches, cloud.HTTPPathMatch{
+			Hostname: match.Hostname, PathType: cloud.PathMatchType(match.Match.PathType), PathValue: match.Match.PathValue, Precedence: match.Precedence,
+		})
+	}
+	return firstDiagnostic, nil
+}
+
+func groupedBackendMembers(ctx context.Context, reader client.Reader, sourceNamespace string, backend model.BackendGroup, inputs *routeModelInputs, mode cloud.MemberMode, nodeAddressType corev1.NodeAddressType) ([]cloud.Member, model.Diagnostic, error) {
+	if backend.Diagnostic != nil {
+		return nil, *backend.Diagnostic, nil
+	}
+	members, err := routeBackendMembers(ctx, reader, sourceNamespace, backend, inputs, mode, nodeAddressType)
+	if err == nil {
+		return members, model.Diagnostic{}, nil
+	}
+	var buildError *routeBuildError
+	if !errors.As(err, &buildError) {
+		return nil, model.Diagnostic{}, err
+	}
+	if buildError.kind == routeErrorPending {
+		return nil, model.Diagnostic{}, nil
+	}
+	return nil, model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: buildError.message}, nil
+}
+
+// supportedRouteModel only admits fragments on one section. Logical rule
+// diagnostics must be checked before creating any backend group.
+func supportedRouteModel(logical model.Gateway, selected gatewayv1.Listener) ([]model.RouteMatch, []model.Rule, error) {
+	unsupported := func() ([]model.RouteMatch, []model.Rule, error) {
+		return nil, nil, newRouteBuildError(routeErrorUnsupported, "logical Gateway configuration is outside the supported HTTP profile")
 	}
 	if len(logical.Diagnostics) != 0 || len(logical.Routes) != 1 {
 		return unsupported()
@@ -232,15 +317,11 @@ func supportedRouteModel(logical model.Gateway, selected gatewayv1.Listener, mod
 		}
 	}
 	route := logical.Routes[0]
-	if listener == nil || len(listener.Diagnostics) != 0 || len(route.Diagnostics) != 0 || len(listener.Rules) != 1 || len(route.Rules) != 1 || len(route.Parents) != 1 {
+	if listener == nil || len(listener.Diagnostics) != 0 || len(route.Diagnostics) != 0 || len(listener.Rules) == 0 || len(route.Parents) != 1 {
 		return unsupported()
 	}
-	match := listener.Rules[0]
-	if len(match.Match.Headers) != 0 {
-		return unsupported()
-	}
-	rule, parent := route.Rules[0], route.Parents[0]
-	if len(rule.Diagnostics) != 0 || len(rule.Backends) != 1 || len(rule.Matches) != 1 || parent.State != model.AttachmentAccepted {
+	parent := route.Parents[0]
+	if parent.State != model.AttachmentAccepted {
 		return unsupported()
 	}
 	attached := false
@@ -256,24 +337,20 @@ func supportedRouteModel(logical model.Gateway, selected gatewayv1.Listener, mod
 	if !attached {
 		return unsupported()
 	}
-	backend := rule.Backends[0]
-	if backend.Diagnostic != nil || backend.Port == nil || backend.Weight == 0 || backend.Authorization != model.BackendAuthorizationAllowed {
-		return unsupported()
+	for _, rule := range route.Rules {
+		if len(rule.Diagnostics) != 0 || len(rule.Backends) != 1 || rule.Backends[0].Reference.Port == nil || rule.Backends[0].Weight <= 0 {
+			return unsupported()
+		}
 	}
-	if mode == cloud.MemberModeNodePort && backend.Port.NodePort == 0 {
-		return unsupported()
+	for _, match := range listener.Rules {
+		if len(match.Match.Headers) != 0 {
+			return unsupported()
+		}
 	}
-	return match, backend, nil
+	return listener.Rules, route.Rules, nil
 }
 
-func supportedMatch(matches []gatewayv1.HTTPRouteMatch) (cloud.PathMatchType, string, error) {
-	if len(matches) > 1 {
-		return "", "", newRouteBuildError(routeErrorUnsupported, "at most one HTTPRoute match is supported")
-	}
-	var match gatewayv1.HTTPRouteMatch
-	if len(matches) == 1 {
-		match = matches[0]
-	}
+func supportedMatch(match gatewayv1.HTTPRouteMatch) (cloud.PathMatchType, string, error) {
 	if len(match.Headers) != 0 || len(match.QueryParams) != 0 || match.Method != nil {
 		return "", "", newRouteBuildError(routeErrorUnsupported, "header, query parameter, and method matches are not supported")
 	}

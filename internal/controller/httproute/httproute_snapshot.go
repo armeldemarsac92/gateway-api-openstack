@@ -23,7 +23,6 @@ import (
 	"slices"
 	"strconv"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -34,6 +33,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	gatewaycontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
 type routeSnapshotPurpose int
@@ -76,6 +76,7 @@ type routeValidationSnapshot struct {
 	binding           routeBindingSnapshot
 	desired           cloud.RouteSpec
 	backends          *routeModelInputs
+	backendDiagnostic model.Diagnostic
 	gatewayProgrammed bool
 	disposition       routeValidationDisposition
 }
@@ -151,12 +152,13 @@ func (r *Reconciler) buildRouteValidationSnapshotFromInputs(
 			return routeValidationSnapshot{}, err
 		}
 	}
-	desired, err := r.buildRouteModelFromInputs(ctx, r.APIReader, snapshot.route, snapshot.gateway, *listener, inputs)
+	desired, diagnostic, err := r.buildRouteModelFromInputs(ctx, r.APIReader, snapshot.route, snapshot.gateway, *listener, inputs)
 	if err != nil {
 		return routeValidationSnapshot{}, routeSnapshotReadError(purpose, err)
 	}
 	snapshot.desired = desired
 	snapshot.backends = inputs
+	snapshot.backendDiagnostic = diagnostic
 
 	if purpose == routeSnapshotForEnsure {
 		r.setRouteBindingDisposition(&snapshot)
@@ -503,11 +505,16 @@ func (r *Reconciler) buildRouteCleanupSnapshot(
 	if err != nil {
 		return routeCleanupSnapshot{}, err
 	}
-	if rejection != nil {
+	if rejection != nil && !hasMultipleRoutePaths(&route) {
 		snapshot.referenceRevoked = true
 		return snapshot, nil
 	}
 	if err := r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
+		if errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) && rejection != nil {
+			snapshot.referenceRevoked = true
+			snapshot.bundleUnsupported = true
+			return snapshot, nil
+		}
 		if errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) &&
 			!r.routeForwardingEstablished(&route, managedParentsFromObservations(parentObservations), stored, attachment) {
 			snapshot.bundleUnsupported = true
@@ -527,6 +534,10 @@ func (r *Reconciler) buildRouteCleanupSnapshot(
 	}
 	parent := managedParents[0]
 	if !controller.GatewayClassSupportsInstalledVersion(parent.gatewayClass) {
+		if rejection != nil {
+			snapshot.referenceRevoked = true
+			return snapshot, nil
+		}
 		if !r.routeForwardingEstablished(&route, managedParents, stored, attachment) {
 			return snapshot, nil
 		}
@@ -538,7 +549,7 @@ func (r *Reconciler) buildRouteCleanupSnapshot(
 	desired, err := r.buildRouteModelWithReader(ctx, r.APIReader, &route, parent.gateway)
 	if err != nil {
 		var buildError *routeBuildError
-		if errors.As(err, &buildError) || apierrors.IsNotFound(err) {
+		if errors.As(err, &buildError) {
 			return snapshot, nil
 		}
 		return routeCleanupSnapshot{}, err

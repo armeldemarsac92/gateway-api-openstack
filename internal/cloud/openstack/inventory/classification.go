@@ -24,6 +24,7 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/audit"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	openstackidentity "github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/identity"
 )
 
 const (
@@ -316,32 +317,31 @@ func auditCandidateParent(candidate *auditCandidate) (string, string) {
 }
 
 func auditCandidateRole(resourceType string, tags []string) (string, bool, error) {
-	encodedRole, ok := singleAuditTagValue(tags, "role")
+	role, ok := openstackidentity.ResourceRole(tags)
 	if !ok {
-		return "", false, fmt.Errorf("resource has a missing or duplicate role identity tag")
+		return "", false, fmt.Errorf("resource has a missing, invalid or duplicate role identity tag")
 	}
-	decodedRole, err := base64.RawURLEncoding.DecodeString(encodedRole)
-	if err != nil {
-		return "", false, fmt.Errorf("resource has an invalid role identity tag")
+	baseRole := role
+	if base, _, _, fragmented := openstackidentity.ParseHTTPFragmentRole(role); fragmented {
+		baseRole = base
 	}
-	role := string(decodedRole)
 	routeScoped := false
 	valid := false
 	switch resourceType {
 	case auditTypeLoadBalancer:
-		valid = role == roleLoadBalancer
+		valid = baseRole == roleLoadBalancer
 	case auditTypeListener:
-		valid = role == roleListener
+		valid = baseRole == roleListener
 	case auditTypePool:
-		valid, routeScoped = role == rolePool, true
+		valid, routeScoped = baseRole == rolePool, true
 	case auditTypeMember:
-		valid, routeScoped = role == roleMember, true
+		valid, routeScoped = baseRole == roleMember, true
 	case auditTypeMonitor:
-		valid, routeScoped = role == roleMonitor, true
+		valid, routeScoped = baseRole == roleMonitor, true
 	case auditTypeL7Policy:
-		valid, routeScoped = role == rolePolicyExact || role == rolePolicyPrefix, true
+		valid, routeScoped = baseRole == rolePolicyExact || baseRole == rolePolicyPrefix, true
 	case auditTypeL7Rule:
-		valid, routeScoped = role == roleRulePath || role == roleRuleHost, true
+		valid, routeScoped = baseRole == roleRulePath || baseRole == roleRuleHost, true
 	}
 	if !valid {
 		return "", false, fmt.Errorf("resource role does not match its OpenStack type")
@@ -524,6 +524,9 @@ func validateAuditParentIdentity(candidates auditCandidateSet, child *auditCandi
 	switch child.resourceType {
 	case auditTypeMember, auditTypeMonitor, auditTypeL7Rule:
 		keys = append(keys, "route-namespace", "route-name", "route-uid")
+		if !auditHTTPFragmentParentMatches(child, parent, child.resourceType == auditTypeL7Rule) {
+			return fmt.Errorf("HTTP resource belongs to another backend or path on its parent route")
+		}
 	}
 	if !auditTagValuesEqual(child.tags, parent.tags, keys) {
 		return fmt.Errorf("resource identity does not match its scoped parent")
@@ -546,10 +549,23 @@ func validateAuditPolicyPool(candidates auditCandidateSet, policy *auditCandidat
 		"managed", "cluster", "controller", "project", "namespace", "name", "uid",
 		"route-namespace", "route-name", "route-uid",
 	}
-	if !auditTagValuesEqual(policy.tags, pool.tags, keys) {
+	if !auditTagValuesEqual(policy.tags, pool.tags, keys) || !auditHTTPFragmentParentMatches(policy, pool, false) {
 		return fmt.Errorf("policy identity does not match its redirect pool")
 	}
 	return nil
+}
+
+// Legacy resources share their route owner. A grouped route also requires the
+// child to belong to its parent's backend and, for L7 rules, its exact match.
+func auditHTTPFragmentParentMatches(child, parent *auditCandidate, matchPath bool) bool {
+	childRole, childOK := openstackidentity.ResourceRole(child.tags)
+	parentRole, parentOK := openstackidentity.ResourceRole(parent.tags)
+	if !childOK || !parentOK {
+		return false
+	}
+	_, childBackend, childMatch, childFragment := openstackidentity.ParseHTTPFragmentRole(childRole)
+	_, parentBackend, parentMatch, parentFragment := openstackidentity.ParseHTTPFragmentRole(parentRole)
+	return childFragment == parentFragment && childBackend == parentBackend && (!matchPath || childMatch == parentMatch)
 }
 
 func auditCandidateExists(candidates auditCandidateSet, resourceType, id string) bool {

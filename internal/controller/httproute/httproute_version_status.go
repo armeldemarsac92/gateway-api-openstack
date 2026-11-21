@@ -233,3 +233,20 @@ func (r *Reconciler) currentRouteProgrammedCondition(
 	}
 	return nil
 }
+
+func (r *Reconciler) currentBackendResolution(route *gatewayv1.HTTPRoute, parentRef gatewayv1.ParentReference, diagnostic model.Diagnostic) bool {
+	if !hasMultipleRoutePaths(route) {
+		return true
+	}
+	expected := programmedRouteStatus().withBackendDiagnostic(diagnostic)
+	for _, parent := range route.Status.Parents {
+		if parent.ControllerName != r.Config.ControllerName ||
+			!controller.ParentRefsEqual(parent.ParentRef, route.Namespace, parentRef, route.Namespace) {
+			continue
+		}
+		resolved := meta.FindStatusCondition(parent.Conditions, string(gatewayv1.RouteConditionResolvedRefs))
+		return resolved != nil && resolved.ObservedGeneration == route.Generation &&
+			resolved.Status == expected.resolved && resolved.Reason == expected.resolvedReason && resolved.Message == expected.resolvedMessage
+	}
+	return false
+}

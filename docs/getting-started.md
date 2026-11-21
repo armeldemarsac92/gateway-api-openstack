@@ -259,7 +259,7 @@ listeners:
     hostname: api.example.com
 ```
 
-Set one managed parent reference on each HTTPRoute. This reference selects the second port. Create a separate route for the first port with `sectionName: http` and `port: 80`. Give each route one backend Service reference. The backends can differ while the hostname and path stay the same.
+Set one managed parent reference on each HTTPRoute. This reference selects the second port. Create a separate route for the first port with `sectionName: http` and `port: 80`. Give each rule one backend Service reference. The backends can differ while the hostname and path stay the same.
 
 ```yaml
 parentRefs:
@@ -385,6 +385,31 @@ To serve this Service on a second UDP port at the same Gateway address, add a li
 For multiple UDP Services, choose a GatewayClass with `memberMode: Endpoint` and operator-managed routing from Amphora to the pod IPs. In the rule, give each Service its own `backendRef` with its Service port and relative weight. For example, weights of 70, 30 and 0 send seven parts to the first Service, three to the second and none to the third. The controller divides each Service's share across its ready endpoints, including when the Services have different replica counts. [GatewayClass configuration](reference/class-configuration.md)
 
 The controller requires an exact ratio within Octavia's integer member-weight range of 1–256. When a positive share has no usable destination, the controller withdraws forwarding for the whole route. A denied zero-weight reference still reports `ResolvedRefs=False`. The permitted positive destinations can continue serving. Selective packet loss for an invalid share and weighted NodePort backends remain open. [Qualification record](qualification/v1.7.0/README.md)
+
+## Route several paths to Services
+
+One HTTPRoute can serve several applications on the same HTTP or operator-managed HTTPS listener. The following rules send `/account` and `/me` to the account Service. Other requests below `/catalog` reach the catalog Service. Use the Service port in each backend reference.
+
+```yaml
+rules:
+  - matches:
+      - path: {type: Exact, value: /account}
+      - path: {type: Exact, value: /me}
+    backendRefs:
+      - name: account
+        port: 8080
+  - matches:
+      - path: {type: PathPrefix, value: /catalog}
+    backendRefs:
+      - name: catalog
+        port: 8080
+```
+
+For the same hostname, Exact has priority over PathPrefix. Among prefixes, the longest matching path wins. A prefix matches whole path segments. The relative order of rules in the route breaks a tie after the listener has compared paths and route ownership. The controller uses one pool for each distinct Service port in this route. A prefix made of ordinary ASCII path segments can use one native Octavia policy. Other element-wise prefixes can use two policies.
+
+If a rule references a Service in another namespace, create a ReferenceGrant in the Service namespace. Check the route parent's `ResolvedRefs` condition after changing a grant. On stock Amphora, the controller keeps the affected path attached to its pool and disables previously serving members. Once Octavia applies the change, requests to that path return HTTP 503. Other authorized paths keep serving. Gateway API requires HTTP 500 for an invalid backend. [Provider response contract](qualification/v1.7.0/provider/octavia-http-local-responses.md)
+
+Keep the current image running when migrating a multi-rule route back to the single-rule controller. [Rollback procedure](operator-recovery.md#roll-back-httproutes-with-several-paths)
 
 ## Safe removal
 

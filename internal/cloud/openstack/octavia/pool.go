@@ -121,17 +121,22 @@ func (s *Service) ListMembers(ctx context.Context, poolID string, opts pools.Lis
 
 // ListCompleteMembers requires an explicit member collection on every page.
 func (s *Service) ListCompleteMembers(ctx context.Context, poolID string, opts pools.ListMembersOpts) ([]pools.Member, error) {
-	items, _, err := s.listCompleteMembers(ctx, poolID, opts, false)
+	items, _, err := s.listCompleteMembers(ctx, poolID, opts, "")
 	return items, err
 }
 
 // ListMembersWithBackup reports the IDs whose backup flag is omitted or null.
 // The SDK's boolean alone cannot distinguish either case from explicit false.
 func (s *Service) ListMembersWithBackup(ctx context.Context, poolID string, opts pools.ListMembersOpts) ([]pools.Member, map[string]struct{}, error) {
-	return s.listCompleteMembers(ctx, poolID, opts, true)
+	return s.listCompleteMembers(ctx, poolID, opts, "backup")
 }
 
-func (s *Service) listCompleteMembers(ctx context.Context, poolID string, opts pools.ListMembersOpts, inspectBackup bool) ([]pools.Member, map[string]struct{}, error) {
+// ListMembersWithAdminState reports the IDs without an explicit administrative state.
+func (s *Service) ListMembersWithAdminState(ctx context.Context, poolID string, opts pools.ListMembersOpts) ([]pools.Member, map[string]struct{}, error) {
+	return s.listCompleteMembers(ctx, poolID, opts, "admin_state_up")
+}
+
+func (s *Service) listCompleteMembers(ctx context.Context, poolID string, opts pools.ListMembersOpts, inspectFlag string) ([]pools.Member, map[string]struct{}, error) {
 	var items []pools.Member
 	var unreported map[string]struct{}
 	err := eachCollectionPage(ctx, pools.ListMembers(s.client, poolID, opts), func(result pagination.PageResult) pagination.Page {
@@ -145,20 +150,25 @@ func (s *Service) listCompleteMembers(ctx context.Context, poolID string, opts p
 			return missingCollection("members")
 		}
 		items = append(items, batch...)
-		if !inspectBackup {
+		if inspectFlag == "" {
 			return nil
 		}
 		var response struct {
 			Members []struct {
-				ID     string `json:"id"`
-				Backup *bool  `json:"backup"`
+				ID           string `json:"id"`
+				Backup       *bool  `json:"backup"`
+				AdminStateUp *bool  `json:"admin_state_up"`
 			} `json:"members"`
 		}
 		if err := page.(pools.MemberPage).ExtractInto(&response); err != nil {
-			return fmt.Errorf("extract member backup flags: %w", err)
+			return fmt.Errorf("extract member %s flags: %w", inspectFlag, err)
 		}
 		for _, member := range response.Members {
-			if member.Backup == nil {
+			reported := member.Backup != nil
+			if inspectFlag == "admin_state_up" {
+				reported = member.AdminStateUp != nil
+			}
+			if !reported {
 				if unreported == nil {
 					unreported = make(map[string]struct{})
 				}

@@ -24,7 +24,6 @@ import (
 	"slices"
 	"strings"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
@@ -117,7 +116,7 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 			snapshot, err := r.buildRouteValidationSnapshotFromInputs(ctx, route, gateway, routeSnapshotForEnsure, backends)
 			if err != nil {
 				var rejection *routeBuildError
-				if !requested && (errors.As(err, &rejection) || apierrors.IsNotFound(err)) {
+				if !requested && errors.As(err, &rejection) {
 					node.WaitForHTTPPolicyRemoval = true
 					input.Nodes = append(input.Nodes, node)
 					continue
@@ -126,6 +125,9 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 			}
 			if snapshot.disposition != routeValidationReady {
 				return graph.RouteInputs{}, &cloud.GraphError{Identity: identity, Err: errHTTPRouteChanged}
+			}
+			if requested && request.HTTPRouteBackendDiagnostic != nil && *request.HTTPRouteBackendDiagnostic != snapshot.backendDiagnostic {
+				return graph.RouteInputs{}, errHTTPRouteChanged
 			}
 			node.Disposition, node.Spec = cloud.GraphEnsure, snapshot.desired
 			fences = append(fences, func(ctx context.Context) error {

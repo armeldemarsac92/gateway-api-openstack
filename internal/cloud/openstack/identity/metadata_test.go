@@ -139,3 +139,71 @@ func TestGatewayDescriptionIgnoresRouteFields(t *testing.T) {
 		t.Fatal("route-scoped identity did not recognize its Gateway-scoped Floating IP description")
 	}
 }
+
+func TestHTTPRouteOwnershipProofAcrossPoolsAndRules(t *testing.T) {
+	gatewayID := cloud.Identity{OpenStackProjectID: "project", ClusterID: "cluster", Controller: "gateway.example.test",
+		GatewayNamespace: "infra", GatewayName: "private", GatewayUID: "gateway-uid"}
+	gateway, err := NewIdentity(gatewayID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value := gatewayID
+	value.RouteNamespace, value.RouteName, value.RouteUID = "apps", strings.Repeat("long-name.", 24)+"app", "route-uid"
+	route, err := NewIdentity(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend := HTTPBackendKey("apps", "users", 8080)
+	match := HTTPMatchKey("service.test", cloud.PathMatchExact, "/users")
+	poolRole, pathRole := HTTPFragmentRole(RolePool, backend, ""), HTTPFragmentRole(RoleRulePath, backend, match)
+	proof := func(role string) RouteOwnerProof {
+		t.Helper()
+		tags, tagErr := route.RouteTags(role)
+		if tagErr != nil {
+			t.Fatal(tagErr)
+		}
+		owner, ok := gateway.RouteOwner(tags, role)
+		if !ok {
+			t.Fatalf("missing proof for %q", role)
+		}
+		if _, ok := gateway.RouteOwner(append(tags, tag("route-uid", "other")), role); ok {
+			t.Fatal("duplicate owner tag produced a route proof")
+		}
+		return owner
+	}
+	if proof(poolRole) != proof(pathRole) {
+		t.Fatal("pool and path identify different owners")
+	}
+	if base, b, m, ok := ParseHTTPFragmentRole(pathRole); !ok || base != RoleRulePath || b != backend || m != match {
+		t.Fatalf("cannot recover the original path role: %q", pathRole)
+	}
+	rootWithRouteTags, err := route.RouteTags(RoleLoadBalancer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := gateway.RouteOwner(rootWithRouteTags, RoleLoadBalancer); ok {
+		t.Fatal("Gateway resource role produced a route proof")
+	}
+}
+
+func TestHTTPPolicyDescriptionFitsOctaviaAndPreservesMatchIdentity(t *testing.T) {
+	value := cloud.Identity{OpenStackProjectID: "project", ClusterID: "cluster", Controller: "gateway.example.test",
+		GatewayNamespace: "infra", GatewayName: "edge", GatewayUID: "gateway-uid",
+		RouteNamespace: "apps", RouteName: "catalog", RouteUID: "route-uid", ControllerVersion: strings.Repeat("release", 40)}
+	id, err := NewIdentity(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend := HTTPBackendKey("apps", "catalog", 80)
+	roleFor := func(path string) string {
+		return HTTPFragmentRole(RolePolicyExact, backend, HTTPMatchKey("", cloud.PathMatchExact, path))
+	}
+	role := roleFor("/one")
+	description := id.Description(role)
+	if len(description) > 255 {
+		t.Fatalf("Octavia L7Policy description is %d bytes, limit 255", len(description))
+	}
+	if !id.MatchesDescription(description, role) || id.MatchesDescription(description, roleFor("/two")) {
+		t.Fatal("policy description must identify its original owner and match")
+	}
+}

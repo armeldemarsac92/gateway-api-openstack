@@ -23,11 +23,11 @@ This project does not adopt or migrate its resources.
 - Existing OpenStack resources are not adopted.
 - Unsupported or unrepresentable behavior is rejected through status.
 
-The current profile supports one active HTTP listener shared by HTTPRoutes that each have one rule, one match and one Service backend. A Service in another namespace requires a live ReferenceGrant in that namespace.
+An HTTPRoute attaches to one eligible HTTP-family section. Each rule selects one Service port and has one or more alternative path matches. Several rules can target the same Service port. A Service in another namespace requires a live ReferenceGrant there.
 The listener and route may use an exact hostname or a leading wildcard with Exact or PathPrefix path matching. On the Experimental channel, a nonempty pre-routing filter list rejects the listener. For an existing binding, the controller closes its owned traffic path, including during unrelated bundle skew.
 NodePort is the default member mode.
 The opt-in IPv4 Endpoint implementation awaits live network validation under [ADR 0007](adr/0007-direct-endpoint-members.md).
-The listener accepts a route according to its Same, All or Selector namespace policy. A dedicated TCP or UDP Gateway can use distinct ports on the same VIP. The Gateway-UID writer elects a route per listener and tracks every listener that shares a route-owned pool. A private class can allocate one requested IPv4 address when it creates the load balancer. Multiple active HTTP listeners, TLS and backend policies remain open. [Private address contract](../qualification/v1.7.0/provider/private-gateway-address.md)
+The listener accepts a route according to its Same, All or Selector namespace policy. A dedicated TCP or UDP Gateway can use distinct ports on the same VIP. The Gateway-UID writer elects a route per listener and tracks every listener that shares a route-owned pool. A private class can allocate one requested IPv4 address when it creates the load balancer. Plain HTTP supports distinct ports and disjoint exact hostnames on one port. A dedicated HTTPS port can use an operator-enrolled certificate. Shared HTTPS and backend TLS policies remain open. [Private address contract](../qualification/v1.7.0/provider/private-gateway-address.md)
 
 ## Design principles
 
@@ -93,16 +93,16 @@ Ownership of a security group alone is insufficient authority to change a port.
 | OpenStackGatewayClassConfig | Resolved topology and class health defaults | Cluster-scoped `gateway-api-openstack.github.io/v1alpha1`. |
 | Gateway | Amphora load balancer | One per Gateway. |
 | Gateway address | Allocated Floating IP or load balancer VIP | A private class can request one IPv4 address at creation. The controller retains ownership checks on every allocated address. |
-| Listener | HTTP listener | One listener. Terminated HTTPS remains planned. |
-| HTTPRoute rule and match | Pool, ordered L7 policies, and conjunctive rules | One pool per bound route. L7 policy positions implement hostname and path precedence across routes. |
+| Listener | HTTP or operator-managed TERMINATED_HTTPS listener | Each HTTPS section requires a dedicated port. [Certificate enrollment](../operator-https.md) |
+| HTTPRoute rule and match | Pool per distinct Service port within a route, ordered L7 policies and their rules | The provider orders exact and prefix matches across all routes on a physical listener. |
 | NodePort mode | Members on eligible worker Node addresses and NodePorts | Requires a NodePort Service. |
 | Endpoint mode | Members on resolved EndpointSlice addresses and ports | Opt-in IPv4 development mode with no verified cloud environment. |
 | Class health settings | HTTP health monitor for the route pool | Backend-specific policy is deferred. |
-| TLS Secret | Planned PKCS12 certificate through the cloud key manager | Default certificate source for future HTTPS. Publication ownership and recovery remain unresolved. |
+| TLS Secret | Operator-enrolled PKCS#12 in Barbican | The operator maps the exact Secret UID and revision. The controller checks the live grant and enrollment before termination. |
 | Frontend security | Octavia-managed or referenced VIP security groups | Referenced groups require API 2.29 and validated ingress prerequisites. Their rules remain operator-owned. |
 | Backend security | Unmanaged or referenced existing groups | Referenced mode validates worker ports and rule prerequisites without modifying them. |
 
-A pool and its children include the exact HTTPRoute identity.
+A pool and its children include the exact HTTPRoute identity. In a route with several paths, the resource role identifies the backend Service namespace, name and port by a stable digest. Policy and rule roles additionally identify their hostname and path predicate. Their positions can change independently of their identities.
 Reusing a Service read within one reconciliation does not share its pool across routes.
 Pool sharing would require an ADR covering ownership, protocol and policy compatibility, reconstruction, and deletion after the last reference disappears.
 Pools are not shared across Gateways.

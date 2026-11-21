@@ -200,7 +200,7 @@ func TestEndpointRouteRejectsUnsupportedServiceInputs(t *testing.T) {
 			reader := indexedFakeClientBuilder(testScheme(t), testConfig()).WithObjects(service, endpointSlice).Build()
 			r := &Reconciler{Config: testConfig()}
 			var rejection *routeBuildError
-			if err := r.checkRouteBackendProfile(t.Context(), reader, route, gateway); !errors.As(err, &rejection) {
+			if err := r.checkRouteBackendProfile(t.Context(), reader, route.Namespace, route.Spec.Rules[0].BackendRefs[0].BackendObjectReference, gateway); !errors.As(err, &rejection) {
 				t.Fatalf("unsupported backend profile error = %v", err)
 			}
 			if _, err := r.buildRouteModelWithReader(t.Context(), reader, route, gateway); err == nil {

@@ -167,11 +167,14 @@ func (inputs *routeModelInputs) validateBackends(ctx context.Context, reader cli
 		return err
 	}
 	for _, route := range inputs.input.Routes {
-		ref := route.Spec.Rules[0].BackendRefs[0].BackendObjectReference
-		key, _ := model.BackendServiceReference(route.Namespace, ref)
-		if model.BackendReferenceAllowed(route.Namespace, key, inputs.input.ReferenceGrants) !=
-			model.BackendReferenceAllowed(route.Namespace, key, current.ReferenceGrants) {
-			return errHTTPRouteChanged
+		for _, rule := range route.Spec.Rules {
+			for _, ref := range rule.BackendRefs {
+				key, supported := model.BackendServiceReference(route.Namespace, ref.BackendObjectReference)
+				if supported && model.BackendReferenceAllowed(route.Namespace, key, inputs.input.ReferenceGrants) !=
+					model.BackendReferenceAllowed(route.Namespace, key, current.ReferenceGrants) {
+					return errHTTPRouteChanged
+				}
+			}
 		}
 	}
 	if !equality.Semantic.DeepEqual(inputs.input.Services, current.Services) ||

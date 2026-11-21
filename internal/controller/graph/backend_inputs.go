@@ -106,6 +106,9 @@ func CollectBackendInputsWithNamespaces(ctx context.Context, reader client.Reade
 		if err := reader.List(ctx, &endpointSlices, client.InNamespace(key.Namespace), client.MatchingLabels{discoveryv1.LabelServiceName: key.Name}); err != nil {
 			return model.Input{}, fmt.Errorf("list EndpointSlices for Service %s: %w", key, err)
 		}
+		if endpointSlices.Continue != "" {
+			return model.Input{}, fmt.Errorf("incomplete EndpointSlice list for Service %s", key)
+		}
 		input.EndpointSlices = append(input.EndpointSlices, endpointSlices.DeepCopy().Items...)
 	}
 	slices.SortFunc(input.EndpointSlices, func(a, b discoveryv1.EndpointSlice) int {
@@ -119,6 +122,9 @@ func ListBackendReferenceGrants(ctx context.Context, reader client.Reader, names
 	var grants gatewayv1.ReferenceGrantList
 	if err := reader.List(ctx, &grants, client.InNamespace(namespace)); err != nil {
 		return nil, fmt.Errorf("list backend ReferenceGrants in namespace %s: %w", namespace, err)
+	}
+	if grants.Continue != "" {
+		return nil, fmt.Errorf("incomplete backend ReferenceGrant list in namespace %s", namespace)
 	}
 	return grants.DeepCopy().Items, nil
 }

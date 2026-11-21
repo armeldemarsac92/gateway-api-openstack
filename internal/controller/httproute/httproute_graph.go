@@ -25,6 +25,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
 type routeBindingState uint8
@@ -37,7 +38,9 @@ const (
 )
 
 type routeGraphResult struct {
-	bindingState routeBindingState
+	bindingState      routeBindingState
+	backendObserved   bool
+	backendDiagnostic model.Diagnostic
 	cloud.RouteResult
 }
 
@@ -64,23 +67,25 @@ func (r *Reconciler) ensureRouteGraph(
 	if r.Writer == nil {
 		return routeGraphResult{}, fmt.Errorf("gateway graph writer is required")
 	}
-	bindingState, err := r.prepareRouteGraphBinding(ctx, expectedRoute, expectedGateway)
+	prepared, err := r.prepareRouteGraphBinding(ctx, expectedRoute, expectedGateway)
 	if err != nil {
 		return routeGraphResult{}, err
 	}
-	if bindingState != routeBindingReady {
-		return routeGraphResult{bindingState: bindingState}, nil
+	if prepared.bindingState != routeBindingReady {
+		return prepared, nil
 	}
 	expectedIdentity := controller.RouteIdentity(r.Config, expectedGateway, expectedRoute)
 	result, err := r.Writer.ReconcileGraph(ctx, graph.Request{
 		Identity: expectedIdentity,
 		Action:   graph.Ensure, Gateway: expectedGateway, Route: expectedRoute,
+		HTTPRouteBackendDiagnostic: &prepared.backendDiagnostic,
 	})
 	if err != nil {
-		return routeGraphResult{}, err
+		return prepared, err
 	}
 	component, err := routeComponentResult(result, expectedIdentity)
-	return routeGraphResult{bindingState: bindingState, RouteResult: component}, err
+	prepared.RouteResult = component
+	return prepared, err
 }
 
 func routeComponentResult(result cloud.GatewayGraphResult, expectedIdentity cloud.Identity) (cloud.RouteResult, error) {
@@ -111,27 +116,29 @@ func routeComponentResult(result cloud.GatewayGraphResult, expectedIdentity clou
 }
 
 // prepareRouteGraphBinding persists the binding before the writer can create resources.
-func (r *Reconciler) prepareRouteGraphBinding(ctx context.Context, route *gatewayv1.HTTPRoute, gateway *gatewayv1.Gateway) (routeBindingState, error) {
+func (r *Reconciler) prepareRouteGraphBinding(ctx context.Context, route *gatewayv1.HTTPRoute, gateway *gatewayv1.Gateway) (routeGraphResult, error) {
 	release, err := graph.Acquire(ctx, r.Coordinator, string(gateway.UID))
 	if err != nil {
-		return routeBindingUnknown, fmt.Errorf("acquire Gateway graph: %w", err)
+		return routeGraphResult{}, fmt.Errorf("acquire Gateway graph: %w", err)
 	}
 	defer release()
 	snapshot, err := r.buildRouteValidationSnapshot(ctx, route, gateway, routeSnapshotForEnsure)
 	if err != nil {
-		return routeBindingUnknown, err
+		return routeGraphResult{}, err
 	}
+	prepared := routeGraphResult{backendObserved: snapshot.backends != nil, backendDiagnostic: snapshot.backendDiagnostic}
 	switch snapshot.disposition {
 	case routeValidationGatewayPending:
-		return routeBindingGatewayPending, nil
+		prepared.bindingState = routeBindingGatewayPending
 	case routeValidationBindingRequired:
 		if _, err := r.bindRouteFromSnapshot(ctx, route, gateway, snapshot); err != nil {
-			return routeBindingUnknown, &routeBindingCheckpointError{err: err}
+			return routeGraphResult{}, &routeBindingCheckpointError{err: err}
 		}
-		return routeBindingPersisted, nil
+		prepared.bindingState = routeBindingPersisted
 	case routeValidationReady:
-		return routeBindingReady, nil
+		prepared.bindingState = routeBindingReady
 	default:
-		return routeBindingUnknown, fmt.Errorf("invalid HTTPRoute validation disposition %d", snapshot.disposition)
+		return routeGraphResult{}, fmt.Errorf("invalid HTTPRoute validation disposition %d", snapshot.disposition)
 	}
+	return prepared, nil
 }

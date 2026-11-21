@@ -26,9 +26,11 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
@@ -36,6 +38,210 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 )
+
+func TestHTTPRoutePathMatchOrderGroupsThreeBackends(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	exact, prefix := gatewayv1.PathMatchExact, gatewayv1.PathMatchPathPrefix
+	f.route.Spec.Rules = nil
+	for _, entry := range []struct {
+		path    string
+		kind    gatewayv1.PathMatchType
+		service gatewayv1.ObjectName
+	}{
+		{"/match", exact, "infra-backend-v1"},
+		{"/match/exact", exact, "infra-backend-v2"},
+		{"/match/exact/one", exact, "infra-backend-v3"},
+		{"/match/", prefix, "infra-backend-v3"},
+		{"/match/prefix/", prefix, "infra-backend-v1"},
+		{"/match/prefix/one", prefix, "infra-backend-v2"},
+	} {
+		rule := pathBackendRule(entry.path, entry.kind, entry.service)
+		f.route.Spec.Rules = append(f.route.Spec.Rules, rule)
+	}
+	hosts := []gatewayv1.Hostname{"app.example.test"}
+	f.route.Spec.Hostnames = hosts
+	peer := f.candidate("other")
+	peer.Spec.Rules = []gatewayv1.HTTPRouteRule{pathBackendRule("/another-exact", exact, gatewayv1.ObjectName(f.service.Name))}
+	peer.Spec.Rules[0].BackendRefs[0].Port = ptr.To(gatewayv1.PortNumber(f.service.Spec.Ports[0].Port))
+	f.reconciler.applyRouteBinding(peer, f.gateway)
+	f.create(t, peer)
+	for i, name := range []string{"infra-backend-v1", "infra-backend-v2", "infra-backend-v3"} {
+		service, endpoints := f.service.DeepCopy(), f.endpoints.DeepCopy()
+		service.Name, service.UID, service.ResourceVersion = name, types.UID(name), ""
+		service.Spec.Ports[0].Port = 8080
+		endpoints.Name, endpoints.UID, endpoints.ResourceVersion = name, types.UID(name+"-slice"), ""
+		endpoints.Labels[discoveryv1.LabelServiceName] = name
+		endpoints.Endpoints[0].Addresses = []string{fmt.Sprintf("192.0.2.%d", 30+i)}
+		f.create(t, service, endpoints)
+	}
+	if err := f.client.Update(t.Context(), f.route); err != nil {
+		t.Fatal(err)
+	}
+	provider := &recordingProvider{}
+	r := newTestReconciler(*f.reconciler, provider)
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(f.route)}
+	if _, err := r.Reconcile(t.Context(), request); err != nil {
+		t.Fatalf("reconcile: %v (cause: %v)", err, errors.Unwrap(err))
+	}
+	if len(provider.routeSpecs) != 2 {
+		t.Fatalf("provider route specs = %#v, want one node per bound route", provider.routeSpecs)
+	}
+	grouped := provider.routeSpecs[0]
+	if grouped.Identity.RouteUID != string(f.route.UID) || grouped.PathType != "" || len(grouped.Members) != 0 || len(grouped.HTTPBackends) != 3 {
+		t.Fatalf("grouped provider spec = %#v", grouped)
+	}
+	want := map[string]int{
+		"/match": 0, "/match/exact": 1, "/match/exact/one": 2, "/match/prefix/one": 4, "/match/prefix": 5,
+	}
+	for i, backend := range grouped.HTTPBackends {
+		if backend.Namespace != f.route.Namespace || backend.Name != fmt.Sprintf("infra-backend-v%d", i+1) ||
+			backend.Port != 8080 || backend.Unavailable || len(backend.Members) != 1 || len(backend.Matches) != 2 ||
+			backend.Members[0].Address != fmt.Sprintf("192.0.2.%d", 30+i) {
+			t.Fatalf("group %d = %#v", i, backend)
+		}
+		for _, match := range backend.Matches {
+			rank, ok := want[match.PathValue]
+			if match.PathType == cloud.PathMatchPrefix && match.PathValue == "/match" {
+				rank, ok = 6, true
+			}
+			if !ok || match.Precedence != rank || match.Hostname != string(hosts[0]) {
+				t.Fatalf("ranked match = %#v, want precedence %d", match, rank)
+			}
+		}
+	}
+	if peerSpec := provider.routeSpecs[1]; peerSpec.Precedence != 3 || len(peerSpec.HTTPBackends) != 0 {
+		t.Fatalf("legacy peer spec = %#v", peerSpec)
+	}
+}
+
+func TestRecoveredBundleRetainsHealthyPathsAfterSecondaryGrantLoss(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	secondary := pathBackendRule("/private", gatewayv1.PathMatchExact, "secondary")
+	secondary.BackendRefs[0].Namespace = ptr.To(gatewayv1.Namespace("shared"))
+	f.route.Spec.Rules = append(f.route.Spec.Rules, secondary)
+	if err := f.client.Update(t.Context(), f.route); err != nil {
+		t.Fatal(err)
+	}
+	reader := liveReaderWithUnsupportedVersion(f.client)
+	f.reconciler.APIReader = reader
+	owner := controller.RouteIdentity(f.reconciler.Config, f.gateway, f.route)
+	cleanup, err := f.reconciler.buildRouteCleanupSnapshot(t.Context(), f.route, owner)
+	if err != nil || cleanup.disposition != routeCleanupRequired {
+		t.Fatalf("cleanup under version skew = %#v, %v", cleanup, err)
+	}
+	reader.useClientCRDs = true
+	if err := f.reconciler.sealRouteCleanupSnapshot(t.Context(), cleanup); !errors.Is(err, errHTTPRouteChanged) {
+		t.Fatalf("obsolete full-route cleanup after recovery = %v", err)
+	}
+	current, err := f.reconciler.buildRouteCleanupSnapshot(t.Context(), f.route, owner)
+	if err != nil || current.disposition != routeCleanupStillDesired {
+		t.Fatalf("healthy paths after recovery = %#v, %v", current, err)
+	}
+}
+
+func TestHTTPRouteRevokesGrantForSecondaryBackend(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	remote, endpoints := f.service.DeepCopy(), f.endpoints.DeepCopy()
+	remote.Namespace, remote.Name, remote.ResourceVersion = "shared", "secondary", ""
+	remote.Spec.Ports[0].Port = 8080
+	endpoints.Namespace, endpoints.ResourceVersion = remote.Namespace, ""
+	endpoints.Labels[discoveryv1.LabelServiceName] = remote.Name
+	grant := &gatewayv1.ReferenceGrant{
+		ObjectMeta: metav1.ObjectMeta{Namespace: remote.Namespace, Name: "secondary"},
+		Spec: gatewayv1.ReferenceGrantSpec{
+			From: []gatewayv1.ReferenceGrantFrom{{Group: gatewayv1.GroupName, Kind: "HTTPRoute", Namespace: gatewayv1.Namespace(f.route.Namespace)}},
+			To:   []gatewayv1.ReferenceGrantTo{{Kind: "Service", Name: ptr.To(gatewayv1.ObjectName(remote.Name))}},
+		},
+	}
+	f.create(t, remote, endpoints, grant)
+	secondary := pathBackendRule("/private", gatewayv1.PathMatchExact, gatewayv1.ObjectName(remote.Name))
+	secondary.BackendRefs[0].Namespace = ptr.To(gatewayv1.Namespace(remote.Namespace))
+	f.route.Spec.Rules = append(f.route.Spec.Rules, secondary)
+	if err := f.client.Update(t.Context(), f.route); err != nil {
+		t.Fatal(err)
+	}
+	before := f.observe(t)
+	if len(before.Nodes) != 1 || len(before.Nodes[0].Spec.HTTPBackends) != 2 || before.Nodes[0].Spec.HTTPBackends[1].Unavailable {
+		t.Fatalf("authorized fragment = %#v", before.Nodes)
+	}
+	provider := &recordingProvider{}
+	r := newTestReconciler(*f.reconciler, provider)
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(f.route)}
+	if _, err := r.Reconcile(t.Context(), request); err != nil {
+		t.Fatalf("reconcile before revocation: %v (cause: %v)", err, errors.Unwrap(err))
+	}
+	if err := f.client.Get(t.Context(), request.NamespacedName, f.route); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.route.Status.Parents) != 1 || r.currentRouteProgrammedCondition(f.route, f.route.Spec.ParentRefs[0]) == nil {
+		t.Fatalf("authorized route status = %#v", f.route.Status.Parents)
+	}
+	if err := f.client.Delete(t.Context(), grant); err != nil {
+		t.Fatal(err)
+	}
+	clear(f.reader.counts)
+	if err := before.Validate(t.Context()); !errors.Is(err, errHTTPRouteChanged) {
+		t.Fatalf("secondary grant revocation passed the mutation fence: %v", err)
+	}
+	if f.reader.counts["Service"] != 1 || f.reader.counts["EndpointSlice"] != 1 {
+		t.Fatalf("revocation allowed reads of the secondary Service or EndpointSlice: %v", f.reader.counts)
+	}
+	provider.routeSpecs = nil
+	if _, err := r.Reconcile(t.Context(), request); err != nil {
+		t.Fatalf("reconcile: %v (cause: %v)", err, errors.Unwrap(err))
+	}
+	if len(provider.routeSpecs) != 1 || len(provider.deletedRoutes) != 0 || len(provider.routeSpecs[0].HTTPBackends) != 2 {
+		t.Fatalf("revocation lost healthy rules: ensure %#v, delete %#v", provider.routeSpecs, provider.deletedRoutes)
+	}
+	local, denied := provider.routeSpecs[0].HTTPBackends[0], provider.routeSpecs[0].HTTPBackends[1]
+	if local.Unavailable || len(local.Members) != 1 || !denied.Unavailable || len(denied.Members) != 0 ||
+		len(denied.Matches) != 1 || denied.Matches[0].PathValue != "/private" || denied.Matches[0].Precedence >= local.Matches[0].Precedence {
+		t.Fatalf("revoked route groups = %#v", provider.routeSpecs[0].HTTPBackends)
+	}
+	if err := f.client.Get(t.Context(), request.NamespacedName, f.route); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.route.Status.Parents) != 1 {
+		t.Fatalf("parent statuses = %#v", f.route.Status.Parents)
+	}
+	conditions := f.route.Status.Parents[0].Conditions
+	resolved := meta.FindStatusCondition(conditions, string(gatewayv1.RouteConditionResolvedRefs))
+	if !meta.IsStatusConditionTrue(conditions, string(gatewayv1.RouteConditionAccepted)) ||
+		resolved == nil || resolved.Status != metav1.ConditionFalse || resolved.Reason != string(gatewayv1.RouteReasonRefNotPermitted) ||
+		resolved.ObservedGeneration != f.route.Generation {
+		t.Fatalf("conditions after secondary grant revocation = %#v", conditions)
+	}
+}
+
+func TestHTTPRouteOneRuleWithAlternativeMatches(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	rule := &f.route.Spec.Rules[0]
+	rule.Matches = []gatewayv1.HTTPRouteMatch{
+		{Path: &gatewayv1.HTTPPathMatch{Type: ptr.To(gatewayv1.PathMatchPathPrefix), Value: ptr.To("/api/")}},
+		{Path: &gatewayv1.HTTPPathMatch{Type: ptr.To(gatewayv1.PathMatchExact), Value: ptr.To("/health")}},
+	}
+	if err := f.client.Update(t.Context(), f.route); err != nil {
+		t.Fatal(err)
+	}
+	input := f.observe(t)
+	spec := input.Nodes[0].Spec
+	want := []cloud.HTTPPathMatch{
+		{PathType: cloud.PathMatchExact, PathValue: "/health", Precedence: 0},
+		{PathType: cloud.PathMatchPrefix, PathValue: "/api", Precedence: 1},
+	}
+	if len(spec.HTTPBackends) != 1 || !slices.Equal(spec.HTTPBackends[0].Matches, want) {
+		t.Fatalf("alternative matches = %#v, want %v", spec.HTTPBackends, want)
+	}
+}
+
+func pathBackendRule(path string, kind gatewayv1.PathMatchType, service gatewayv1.ObjectName) gatewayv1.HTTPRouteRule {
+	return gatewayv1.HTTPRouteRule{
+		Matches: []gatewayv1.HTTPRouteMatch{{Path: &gatewayv1.HTTPPathMatch{Type: ptr.To(kind), Value: ptr.To(path)}}},
+		BackendRefs: []gatewayv1.HTTPBackendRef{{BackendRef: gatewayv1.BackendRef{BackendObjectReference: gatewayv1.BackendObjectReference{
+			Name: service, Port: ptr.To(gatewayv1.PortNumber(8080)),
+		}}}},
+	}
+}
 
 func TestRouteGraphOrdersTwoBoundRoutes(t *testing.T) {
 	f := newRouteModelInputFixture(t)
@@ -364,7 +570,7 @@ func newRouteModelInputFixture(t *testing.T) *routeModelInputFixture {
 	t.Helper()
 	class, gateway, route, service, endpoints := endpointRouteFixture(t)
 	endpoints.UID = "slice-uid"
-	r := &Reconciler{Config: testConfig()}
+	r := &Reconciler{Config: testConfig(), Coordinator: &graph.Coordinator{}}
 	r.applyRouteBinding(route, gateway)
 	kubeClient := indexedFakeClientBuilder(testScheme(t), r.Config).WithStatusSubresource(route).WithObjects(class, gateway, route, service, endpoints).Build()
 	for _, object := range []client.Object{gateway, route, service, endpoints} {

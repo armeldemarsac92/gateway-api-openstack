@@ -87,14 +87,11 @@ func TestLogicalModelCannotEnableUnmappedNodePortBehavior(t *testing.T) {
 		{name: "multiple backends", change: func(route *gatewayv1.HTTPRoute) {
 			route.Spec.Rules[0].BackendRefs = append(route.Spec.Rules[0].BackendRefs, route.Spec.Rules[0].BackendRefs[0])
 		}},
-		{name: "multiple rules", change: func(route *gatewayv1.HTTPRoute) {
-			route.Spec.Rules = append(route.Spec.Rules, *route.Spec.Rules[0].DeepCopy())
-		}},
 		{name: "unresolved filter", change: func(route *gatewayv1.HTTPRoute) {
 			route.Spec.Rules[0].Filters = []gatewayv1.HTTPRouteFilter{{Type: gatewayv1.HTTPRouteFilterExtensionRef}}
 		}},
-		{name: "unresolved backend", change: func(route *gatewayv1.HTTPRoute) {
-			route.Spec.Rules[0].BackendRefs[0].Name = "missing"
+		{name: "missing backend port", change: func(route *gatewayv1.HTTPRoute) {
+			route.Spec.Rules[0].BackendRefs[0].Port = nil
 		}},
 		{name: "header predicate", change: func(route *gatewayv1.HTTPRoute) {
 			route.Spec.Rules[0].Matches = []gatewayv1.HTTPRouteMatch{{Headers: []gatewayv1.HTTPHeaderMatch{{Name: "x-version", Value: "v2"}}}}
@@ -113,7 +110,7 @@ func TestLogicalModelCannotEnableUnmappedNodePortBehavior(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, _, err = supportedRouteModel(logical, gateway.Spec.Listeners[0], cloud.MemberModeNodePort)
+			_, _, err = supportedRouteModel(logical, gateway.Spec.Listeners[0])
 			var rejected *routeBuildError
 			if !errors.As(err, &rejected) || rejected.kind != routeErrorUnsupported {
 				t.Fatalf("unmapped logical model escaped NodePort lowering: %v", err)

@@ -34,6 +34,7 @@ import (
 	"path"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -51,19 +52,27 @@ import (
 // The Octavia API fixture stores the real Gophercloud writes. The stock render
 // and HAProxy operate on that inventory, including the administrative close.
 func TestHibiscusPrivateHTTPTraffic(t *testing.T) {
-	testHibiscusHTTPTraffic(t, false, false, false, nil)
+	testHibiscusHTTPTraffic(t, false, false, false, false, nil)
 }
 
 func TestHibiscusSharedHTTPTraffic(t *testing.T) {
-	testHibiscusHTTPTraffic(t, true, false, false, nil)
+	testHibiscusHTTPTraffic(t, true, false, false, false, nil)
 }
 
 func TestHibiscusDistinctHTTPListenerPorts(t *testing.T) {
-	testHibiscusHTTPTraffic(t, false, true, false, nil)
+	testHibiscusHTTPTraffic(t, false, true, false, false, nil)
+}
+
+func TestScopedHTTPBackendPathGroups(t *testing.T) {
+	testHibiscusHTTPTraffic(t, false, true, false, true, nil)
+}
+
+func TestUnscopedHTTPBackendRecovery(t *testing.T) {
+	testHibiscusHTTPTraffic(t, false, false, false, true, nil)
 }
 
 func TestScopedHTTPSListenerLifecycle(t *testing.T) {
-	testHibiscusHTTPTraffic(t, false, true, true, nil)
+	testHibiscusHTTPTraffic(t, false, true, true, false, nil)
 }
 
 // Point the pilot at a private kind worker NodePort with one Ready Gateway API
@@ -81,7 +90,7 @@ func TestHibiscusKindWorkerHTTP(t *testing.T) {
 	if pod == "" || namespace == "" {
 		t.Fatal("HIBISCUS_KIND_POD and HIBISCUS_KIND_NAMESPACE must identify the Ready echo-basic pod")
 	}
-	testHibiscusHTTPTraffic(t, false, false, false, &kindHTTPBackend{endpoint: endpoint, pod: pod, namespace: namespace})
+	testHibiscusHTTPTraffic(t, false, false, false, false, &kindHTTPBackend{endpoint: endpoint, pod: pod, namespace: namespace})
 }
 
 type kindHTTPBackend struct {
@@ -211,10 +220,10 @@ func TestHibiscusTCPTraffic(t *testing.T) {
 	t.Logf("Stock HAProxy echoed all %d bytes after attach and forwarded no bytes after detach", len(payload))
 }
 
-func testHibiscusHTTPTraffic(t *testing.T, shared, distinct, https bool, worker *kindHTTPBackend) {
+func testHibiscusHTTPTraffic(t *testing.T, shared, distinct, https, grouped bool, worker *kindHTTPBackend) {
 	python, haproxy := os.Getenv("HIBISCUS_OCTAVIA_PYTHON"), os.Getenv("HIBISCUS_HAPROXY")
 	renderAvailable := python != "" || haproxy != ""
-	if worker == nil && !distinct && !renderAvailable {
+	if worker == nil && !distinct && !grouped && !renderAvailable {
 		t.Skip("set HIBISCUS_OCTAVIA_PYTHON and HIBISCUS_HAPROXY to run the loopback pilot")
 	}
 	if (renderAvailable || worker != nil) && (!filepath.IsAbs(python) || !filepath.IsAbs(haproxy)) {
@@ -286,6 +295,47 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct, https bool, worker 
 		slices.SortFunc(items, func(a, b record) int { return cmp.Compare(a["position"].(int), b["position"].(int)) })
 		return items
 	}
+	selectedPool := func(listenerID, hostname, requestPath string) string {
+		if inventory[gateway]["admin_state_up"] != true || inventory[listener+"/"+listenerID]["admin_state_up"] != true {
+			return ""
+		}
+		for _, entry := range orderedPolicies(listenerID) {
+			if entry["admin_state_up"] != true || entry["provisioning_status"] != "ACTIVE" {
+				continue
+			}
+			rules := list(policy + "/" + entry["id"].(string) + "/rules")
+			if len(rules) == 0 {
+				continue
+			}
+			if !slices.ContainsFunc(rules, func(rule record) bool {
+				if rule["admin_state_up"] != true || rule["provisioning_status"] != "ACTIVE" {
+					return true
+				}
+				value, input := rule["value"].(string), requestPath
+				if rule["type"] == "HOST_NAME" {
+					input = hostname
+				}
+				switch rule["compare_type"] {
+				case "EQUAL_TO":
+					return input != value
+				case "STARTS_WITH":
+					return !strings.HasPrefix(input, value)
+				case "REGEX":
+					matched, err := regexp.MatchString(value, input)
+					if err != nil {
+						t.Fatal(err)
+					}
+					return !matched
+				default:
+					t.Fatalf("unexpected rule: %v", rule)
+					return true
+				}
+			}) {
+				return entry["redirect_pool_id"].(string)
+			}
+		}
+		return ""
+	}
 	// Octavia's per-listener ordering list uses one-based positions. Inserting or
 	// moving a policy shifts its siblings, and deletion closes the gap.
 	placePolicy := func(data record, requested any) {
@@ -310,11 +360,11 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct, https bool, worker 
 		return refs
 	}
 	var disagreePoolListeners, disagreePoolMonitor string
-	var loseCertificateUpdateReply bool
+	var loseCertificateUpdateReply, holdMemberDisable bool
 	var poolListReads int
 	allowedHTTPPorts := []int{frontendAddress.Port}
 	readback := func(collection string, item record) record {
-		if !distinct {
+		if !distinct && !grouped {
 			return item
 		}
 		data := maps.Clone(item)
@@ -476,10 +526,14 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct, https bool, worker 
 				inventory[resource] = data
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusCreated)
-			} else if req.Method == http.MethodPut && entry != nil && (resource == gateway || collection == policy || distinct && collection == listener) {
+			} else if req.Method == http.MethodPut && entry != nil &&
+				(resource == gateway || collection == policy || distinct && collection == listener || grouped && (name == "members" || name == "rules")) {
 				if position, exists := data["position"]; collection == policy && exists {
 					placePolicy(entry, position)
 					delete(data, "position")
+				}
+				if holdMemberDisable && name == "members" && len(data) == 1 && data["admin_state_up"] == false {
+					entry["provisioning_status"] = "PENDING_UPDATE"
 				}
 				maps.Copy(entry, data)
 				if collection == listener && data["default_tls_container_ref"] != nil && loseCertificateUpdateReply {
@@ -566,6 +620,432 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct, https bool, worker 
 		}
 		t.Fatalf("graph did not converge: %v, writes %v", result.Outcome, writes)
 		return result
+	}
+	if grouped {
+		const secondResponse = "second-path-backend"
+		secondBackend, _ := startPilotBackend(t, secondResponse)
+		secondMember := cloud.Member{Address: secondBackend.IP.String(), Port: secondBackend.Port}
+		var siblingReservation net.Listener
+		legacy := spec.Routes[0]
+		peer := legacy
+		peer.Spec.Identity.RouteName, peer.Spec.Identity.RouteUID = "same-port-peer", "same-port-peer-uid"
+		peer.Spec.Hostname, peer.Spec.PathType, peer.Spec.PathValue = "", cloud.PathMatchExact, "/peer"
+		peer.Spec.Precedence = 2
+		peer.Spec.Members = []cloud.Member{secondMember}
+		spec.Routes = append(spec.Routes, peer)
+		converge(newProvider(), spec)
+		if distinct {
+			siblingReservation, err = net.Listen("tcp4", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = siblingReservation.Close() }()
+			siblingPort := siblingReservation.Addr().(*net.TCPAddr).Port
+			allowedHTTPPorts = append(allowedHTTPPorts, siblingPort)
+			spec.Gateway.Spec.ScopedListeners = []cloud.ScopedListener{
+				{Name: "first", Port: frontendAddress.Port}, {Name: "sibling", Port: siblingPort},
+			}
+			for i := range spec.Routes {
+				spec.Routes[i].Spec.ScopedListenerPorts = []int{frontendAddress.Port}
+			}
+			legacy = spec.Routes[0]
+			sibling := peer
+			sibling.Spec.Identity.RouteName, sibling.Spec.Identity.RouteUID = "sibling", "sibling-uid"
+			sibling.Spec.ScopedListenerPorts = []int{siblingPort}
+			spec.Routes = append(spec.Routes, sibling)
+			converge(newProvider(), spec)
+		}
+		// A path prefix stays ahead of an independent healthy catch-all while
+		// changing between the scalar pair and the grouped regular expression.
+		prefix, catchAll := legacy, spec.Routes[1]
+		prefix.Spec.PathType, prefix.Spec.PathValue = cloud.PathMatchPrefix, "/migration/"
+		catchAll.Spec.PathType, catchAll.Spec.PathValue = cloud.PathMatchPrefix, "/"
+		spec.Routes[0], spec.Routes[1] = prefix, catchAll
+		prefixResult := converge(newProvider(), spec)
+		var migrationListener, oldPool, catchAllPool string
+		for _, item := range list(listener) {
+			if item["protocol_port"] == float64(frontendAddress.Port) {
+				migrationListener = item["id"].(string)
+			}
+		}
+		for _, route := range prefixResult.Routes {
+			switch route.Identity {
+			case prefix.Spec.Identity:
+				oldPool = route.Result.State.PoolID
+			case catchAll.Spec.Identity:
+				catchAllPool = route.Result.State.PoolID
+			}
+		}
+		servesMember := func(poolID string) bool {
+			members := list(pool + "/" + poolID + "/members")
+			return len(members) == 1 && members[0]["admin_state_up"] == true
+		}
+		migrate := func(next cloud.RouteGraphNode, oldPool string) string {
+			t.Helper()
+			spec.Routes[0] = next
+			lostMatch := false
+			for range 50 {
+				before, fences := len(writes), 0
+				spec.ValidateMutation = func(context.Context) error { fences++; return nil }
+				result := reconcile(newProvider(), spec)
+				spec.ValidateMutation = nil
+				if len(writes) > before+1 || len(writes)-before != fences {
+					t.Fatalf("migration did not fence each single write: %v, %d fences", writes[before:], fences)
+				}
+				host := prefix.Spec.Hostname
+				base := selectedPool(migrationListener, host, "/migration")
+				child := selectedPool(migrationListener, host, "/migration/child")
+				if !lostMatch && (base == "" || child == "" || base == catchAllPool || child == catchAllPool) {
+					t.Errorf("migration after %v lost the prefix: bare path selected %q, child selected %q, catch-all %q", writes[before:], base, child, catchAllPool)
+					lostMatch = true
+				}
+				if selectedPool(migrationListener, host, "/migration-other") != catchAllPool ||
+					selectedPool(migrationListener, "other.example", "/migration") != catchAllPool {
+					t.Fatalf("migration widened a path or hostname predicate: %v", writes[before:])
+				}
+				if len(next.Spec.HTTPBackends) != 0 && (base == oldPool || child == oldPool) && !servesMember(oldPool) {
+					t.Fatalf("migration disabled a legacy member while its policy was still selected: %v", writes[before:])
+				}
+				if result.Outcome.State == cloud.OutcomeReady {
+					if base != child || base == oldPool || inventory[pool+"/"+oldPool] != nil || !servesMember(base) {
+						t.Fatalf("migration did not converge to the replacement pool: bare %q, child %q, old %q", base, child, oldPool)
+					}
+					return base
+				}
+			}
+			t.Fatal("prefix migration did not converge")
+			return ""
+		}
+		groupedPrefix := prefix
+		groupedPrefix.Spec.Hostname, groupedPrefix.Spec.PathType, groupedPrefix.Spec.PathValue, groupedPrefix.Spec.Members = "", "", "", nil
+		groupedPrefix.Spec.HTTPBackends = []cloud.HTTPBackend{{
+			Namespace: "default", Name: "first", Port: 80, Members: prefix.Spec.Members,
+			Matches: []cloud.HTTPPathMatch{{Hostname: prefix.Spec.Hostname, PathType: prefix.Spec.PathType, PathValue: prefix.Spec.PathValue}},
+		}}
+		groupedPool := migrate(groupedPrefix, oldPool)
+		migrate(prefix, groupedPool)
+		spec.Routes[0], spec.Routes[1] = legacy, peer
+		if distinct {
+			spec.Routes[1].Spec.ScopedListenerPorts = []int{frontendAddress.Port}
+		}
+		legacyResult := converge(newProvider(), spec)
+
+		// Appending routes can move their backing array.
+		route = &spec.Routes[0].Spec
+		firstMember := route.Members[0]
+		route.Hostname, route.PathType, route.PathValue, route.Members = "", "", "", nil
+		route.HTTPBackends = []cloud.HTTPBackend{
+			{Namespace: "default", Name: "first", Port: 80, Members: []cloud.Member{firstMember}, Matches: []cloud.HTTPPathMatch{
+				{PathType: cloud.PathMatchExact, PathValue: "/shop/item", Precedence: 0},
+				{PathType: cloud.PathMatchPrefix, PathValue: "/shop", Precedence: 3},
+			}},
+			{Namespace: "default", Name: "second", Port: 80, Members: []cloud.Member{secondMember}, Matches: []cloud.HTTPPathMatch{
+				{PathType: cloud.PathMatchPrefix, PathValue: "/shop/sale", Precedence: 1},
+			}},
+		}
+		// Treat each call as a fresh controller process and permit one write.
+		settle := func() cloud.GatewayGraphResult {
+			t.Helper()
+			for range 50 {
+				before := len(writes)
+				result := reconcile(newProvider(), spec)
+				if len(writes) > before+1 {
+					t.Fatalf("one graph pass made several writes: %v", writes[before:])
+				}
+				if result.Outcome.State == cloud.OutcomeReady {
+					return result
+				}
+			}
+			t.Fatalf("grouped routes failed to converge: %v", writes)
+			return cloud.GatewayGraphResult{}
+		}
+		result := settle()
+		if len(result.Routes) != len(spec.Routes) || len(result.Gateway.ScopedListenerReadyPorts) != len(spec.Gateway.Spec.ScopedListeners) {
+			t.Fatalf("grouping changed logical route or listener results: %#v", result)
+		}
+		states := make(map[string]cloud.RouteState)
+		for _, observed := range result.Routes {
+			if observed.Result.Outcome.State != cloud.OutcomeReady {
+				t.Fatalf("logical route was not ready: %#v", observed)
+			}
+			states[observed.Identity.RouteUID] = observed.Result.State
+		}
+		first := states[route.Identity.RouteUID]
+		if len(first.PoolIDs) != 2 || len(first.MonitorIDs) != 2 || len(first.L7PolicyIDs) != 3 ||
+			inventory[pool+"/"+legacyResult.Routes[0].Result.State.PoolID] != nil {
+			t.Fatalf("expected three policies over two pools and removal of the legacy pool: %#v", first)
+		}
+		var listenerID string
+		for _, item := range list(listener) {
+			if item["protocol_port"] == float64(frontendAddress.Port) {
+				listenerID = item["id"].(string)
+			}
+		}
+		pathOrder, poolOrder := []string{}, []string{}
+		for _, entry := range orderedPolicies(listenerID) {
+			for _, rule := range list(policy + "/" + entry["id"].(string) + "/rules") {
+				if rule["type"] == "PATH" {
+					pathOrder = append(pathOrder, rule["value"].(string))
+					poolOrder = append(poolOrder, entry["redirect_pool_id"].(string))
+				}
+			}
+		}
+		if !slices.Equal(pathOrder, []string{"/shop/item", "^/shop/sale($|/)", "/peer", "^/shop($|/)"}) ||
+			poolOrder[0] != poolOrder[3] || poolOrder[0] == poolOrder[1] || len(list(pool)) != len(spec.Routes)+1 {
+			t.Fatalf("listener paths and redirect pools = %v, %v", pathOrder, poolOrder)
+		}
+		before := len(writes)
+		if again := settle(); len(writes) != before || !reflect.DeepEqual(again.Routes, result.Routes) {
+			t.Fatalf("restarting a converged group changed resources: %v", writes[before:])
+		}
+		// A policy may only reference the exact backend encoded by its
+		// own role, even if the other pool has the same route UID.
+		policies := orderedPolicies(listenerID)
+		policies[1]["redirect_pool_id"] = poolOrder[0]
+		if _, err := newProvider().ReconcileGatewayGraph(ctx, spec); !errors.Is(err, cloud.ErrOwnershipConflict) || len(writes) != before {
+			t.Fatalf("cross-backend policy was treated as owned: %v, writes %v", err, writes[before:])
+		}
+		policies[1]["redirect_pool_id"] = poolOrder[1]
+		probe := func(unavailable bool) {
+			t.Helper()
+			if !renderAvailable || !distinct {
+				return
+			}
+			data, err := json.Marshal(inventory)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stop := startPilotHAProxy(t, ctx, python, haproxy, data)
+			defer stop()
+			cases := []struct {
+				address, path, body string
+				status              int
+			}{
+				{frontendAddress.String(), "/shop/item", response, http.StatusOK},
+				{frontendAddress.String(), "/shop/sale", secondResponse, http.StatusOK},
+				{frontendAddress.String(), "/shop/sale/deep", secondResponse, http.StatusOK},
+				{frontendAddress.String(), "/shop/sales", response, http.StatusOK},
+				{siblingReservation.Addr().String(), "/peer", secondResponse, http.StatusOK},
+			}
+			if unavailable {
+				cases[1].status, cases[2].status = http.StatusServiceUnavailable, http.StatusServiceUnavailable
+			}
+			client := &http.Client{Timeout: time.Second}
+			for _, test := range cases {
+				request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+test.address+test.path, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				request.Host = "path.example"
+				got, err := client.Do(request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				body, readErr := io.ReadAll(got.Body)
+				if closeErr := got.Body.Close(); readErr != nil || closeErr != nil ||
+					got.StatusCode != test.status || test.status == http.StatusOK && string(body) != test.body+" "+request.Host {
+					t.Fatalf("stock HAProxy GET %s%s = %d %q, want %d %q", test.address, test.path, got.StatusCode, body, test.status, test.body)
+				}
+			}
+		}
+		if renderAvailable && distinct {
+			if err := errors.Join(reservation.Close(), siblingReservation.Close()); err != nil {
+				t.Fatal(err)
+			}
+		}
+		probe(false)
+
+		// The specific path keeps its enabled policy while Octavia disables
+		// its member, so HAProxy does not fall through to the healthy prefix.
+		backend := &route.HTTPBackends[1]
+		backend.Unavailable, backend.Members = true, nil
+		memberCollection := pool + "/" + poolOrder[1] + "/members"
+		member := list(memberCollection)[0]
+		memberPath := memberCollection + "/" + member["id"].(string)
+		fenceErr := errors.New("backend authorization changed during observation")
+		spec.ValidateMutation = func(context.Context) error { return fenceErr }
+		if _, err := newProvider().ReconcileGatewayGraph(ctx, spec); !errors.Is(err, fenceErr) || len(writes) != before {
+			t.Fatalf("member withdrawal bypassed the mutation fence: %v, writes %v", err, writes[before:])
+		}
+		spec.ValidateMutation = nil
+		holdMemberDisable = true
+		withdrawal, err := newProvider().ReconcileGatewayGraph(ctx, spec)
+		if err != nil || !withdrawal.Outcome.MutationSubmitted || !withdrawal.Routes[0].Result.Outcome.MutationSubmitted {
+			t.Fatalf("member withdrawal did not request a fresh observation: %v, %#v", err, withdrawal)
+		}
+		if pending := reconcile(newProvider(), spec); pending.Outcome.State != cloud.OutcomeProgressing || len(writes) != before+1 ||
+			member["admin_state_up"] != false {
+			t.Fatalf("pending member disable was accepted as convergence: %#v, writes %v", pending, writes[before:])
+		}
+		// Octavia records the intended admin state before reloading HAProxy.
+		// Its single-member worker leaves the member ERROR after a failed reload.
+		member["provisioning_status"] = "ERROR"
+		retry := reconcile(newProvider(), spec)
+		if !retry.Outcome.MutationSubmitted || !slices.Equal(writes[before:], []string{"PUT " + memberPath, "PUT " + memberPath}) {
+			t.Fatalf("failed disable was not retried on the same member: %#v, writes %v", retry, writes[before:])
+		}
+		holdMemberDisable = false
+		member["provisioning_status"] = "ACTIVE"
+		disabled := settle()
+		if len(writes) != before+2 || inventory[memberPath] == nil || member["admin_state_up"] != false ||
+			policies[1]["admin_state_up"] != true || !slices.ContainsFunc(disabled.Routes, func(route cloud.RouteGraphResult) bool {
+			return route.Result.Outcome.State == cloud.OutcomeReady && slices.Equal(route.Result.State.PoolIDs, first.PoolIDs) &&
+				slices.Equal(route.Result.State.MemberIDs, first.MemberIDs)
+		}) {
+			t.Fatalf("unavailable backend did not retain its match and disabled member: %v, %#v", writes[before:], disabled)
+		}
+		probe(true)
+		backend.Unavailable, backend.Members = false, []cloud.Member{secondMember}
+		member["provisioning_status"] = "ERROR"
+		before = len(writes)
+		reconcile(newProvider(), spec)
+		if !slices.Equal(writes[before:], []string{"PUT " + memberPath}) || member["admin_state_up"] != true {
+			t.Fatalf("restoring authorization did not re-enable the same member: %v", writes[before:])
+		}
+		member["provisioning_status"] = "ACTIVE"
+		settle()
+
+		before = len(writes)
+		exact := &route.HTTPBackends[0].Matches[0]
+		broad := &route.HTTPBackends[0].Matches[1]
+		exact.Precedence = 2 // Conflicts with the scalar peer on this listener.
+		if _, err := newProvider().ReconcileGatewayGraph(ctx, spec); !errors.Is(err, cloud.ErrTerminalValidation) || len(writes) != before {
+			t.Fatalf("accepted an ambiguous policy rank: %v, writes %v", err, writes[before:])
+		}
+		exact.Precedence, broad.Precedence = 3, 0
+		settle()
+		newOrder := orderedPolicies(listenerID)
+		want := []string{policies[3]["id"].(string), policies[1]["id"].(string),
+			policies[2]["id"].(string), policies[0]["id"].(string)}
+		for i, item := range newOrder {
+			if item["id"] != want[i] || item["admin_state_up"] != true {
+				t.Fatalf("rank update recreated or disabled an existing policy: %v", writes[before:])
+			}
+		}
+		for _, write := range writes[before:] {
+			if !strings.HasPrefix(write, "PUT "+policy+"/") {
+				t.Fatalf("rank update mutated something besides policy positions: %v", writes[before:])
+			}
+		}
+
+		// Stage an identical match before retiring it from the original
+		// backend. Observe every API transition with the broader pool serving.
+		exact.Precedence, broad.Precedence = 0, 3
+		backend.Matches = append(backend.Matches, cloud.HTTPPathMatch{PathType: cloud.PathMatchExact, PathValue: "/kept", Precedence: 4})
+		settle()
+		poolForPath := func(requestPath string) string {
+			return selectedPool(listenerID, "path.example", requestPath)
+		}
+		replaceBackend := func(oldPool string) string {
+			t.Helper()
+			for range 50 {
+				before := len(writes)
+				result := reconcile(newProvider(), spec)
+				base, deep := poolForPath("/shop/sale"), poolForPath("/shop/sale/deep")
+				if len(writes) > before+1 || base == "" || deep == "" || base == poolOrder[0] || deep == poolOrder[0] || poolForPath("/kept") != poolOrder[1] {
+					t.Fatalf("a transition lost the specific predicate or the retained match: base %q deep %q, writes %v", base, deep, writes[before:])
+				}
+				if result.Outcome.State == cloud.OutcomeReady {
+					if base != deep || base == oldPool || len(list(pool+"/"+base+"/members")) != 0 {
+						t.Fatalf("the normalized prefix and its exact path must select the new unavailable target, got %q and %q", base, deep)
+					}
+					return base
+				}
+			}
+			t.Fatal("replacement did not converge")
+			return ""
+		}
+		sale := backend.Matches[0]
+		backend.Matches = backend.Matches[1:]
+		route.HTTPBackends = append(route.HTTPBackends, cloud.HTTPBackend{
+			Namespace: "remote", Name: "denied", Port: 80, Unavailable: true, Matches: []cloud.HTTPPathMatch{sale},
+		})
+		newPool := replaceBackend(poolOrder[1])
+		if member["admin_state_up"] != true {
+			t.Fatal("moving one match disabled the backend that still serves /kept")
+		}
+		current := &route.HTTPBackends[2]
+		current.Unavailable, current.Members = false, []cloud.Member{secondMember}
+		settle()
+		newMember := list(pool + "/" + newPool + "/members")[0]
+		newMemberPath := pool + "/" + newPool + "/members/" + newMember["id"].(string)
+		route.HTTPBackends[2] = cloud.HTTPBackend{
+			Namespace: "remote", Name: "replacement-denied", Port: 80, Unavailable: true, Matches: []cloud.HTTPPathMatch{sale},
+		}
+		before = len(writes)
+		replaceBackend(newPool)
+		if writes[before] != "PUT "+newMemberPath || inventory[pool+"/"+newPool] != nil {
+			t.Fatalf("obsolete backend did not disable its member before handing off the predicate and cleaning up: %v", writes[before:])
+		}
+		probe(true)
+
+		// Identical paths in distinct backends are two rule candidates.
+		// The first rank wins even when the other Service name sorts earlier.
+		route.HTTPBackends[1].Matches = append(route.HTTPBackends[1].Matches, cloud.HTTPPathMatch{
+			PathType: cloud.PathMatchExact, PathValue: "/shop/item", Precedence: 5,
+		})
+		settle()
+		if poolForPath("/shop/item") != poolOrder[0] {
+			t.Fatal("an identical later match overrode the first rule")
+		}
+		route.HTTPBackends[0].Matches[0].Precedence, route.HTTPBackends[1].Matches[1].Precedence = 5, 0
+		final := settle()
+		if poolForPath("/shop/item") != poolOrder[1] {
+			t.Fatal("reordering identical matches did not update the winning backend")
+		}
+		duplicate := sale
+		duplicate.PathValue, duplicate.Precedence = "/shop/sale/", 6
+		route.HTTPBackends[2].Matches = append(route.HTTPBackends[2].Matches, duplicate)
+		before = len(writes)
+		if _, err := newProvider().ReconcileGatewayGraph(ctx, spec); !errors.Is(err, cloud.ErrTerminalValidation) || len(writes) != before {
+			t.Fatalf("duplicate normalized prefixes within one backend were accepted: %v, writes %v", err, writes[before:])
+		}
+		route.HTTPBackends[2].Matches = route.HTTPBackends[2].Matches[:1]
+
+		if distinct {
+			// Returning to scalar ownership withdraws all versioned policies
+			// and pools while keeping the unrelated routes and listeners.
+			spec.Routes[0] = legacy
+			restored := settle()
+			for _, id := range final.Routes[0].Result.State.PoolIDs {
+				if inventory[pool+"/"+id] != nil {
+					t.Fatalf("scalar migration retained versioned pool %s", id)
+				}
+			}
+			if len(restored.Routes) != 3 || !slices.ContainsFunc(restored.Routes, func(route cloud.RouteGraphResult) bool {
+				return route.Identity == spec.Routes[2].Spec.Identity && route.Result.State.PoolID == legacyResult.Routes[2].Result.State.PoolID
+			}) {
+				t.Fatalf("scalar migration changed the sibling route: %#v", restored)
+			}
+		}
+
+		// A Gateway can be recovered from provider state after its route
+		// models were lost. Keep the unscoped variant versioned here.
+		spec.Gateway = cloud.GatewayGraphNode{Disposition: cloud.GraphDelete}
+		spec.Routes = nil
+		before = len(writes)
+		inventory[listener+"/"+listenerID]["provisioning_status"] = "PENDING_UPDATE"
+		if result := reconcile(newProvider(), spec); result.Outcome.State != cloud.OutcomeProgressing || len(writes) != before {
+			t.Fatalf("Gateway recovered before its frontend settled: %v, writes %v", result.Outcome, writes[before:])
+		}
+		inventory[listener+"/"+listenerID]["provisioning_status"] = "ACTIVE"
+		for range 48 {
+			if len(inventory) == len(protected) {
+				break
+			}
+			before := len(writes)
+			reconcile(newProvider(), spec)
+			if len(writes) > before+1 {
+				t.Fatalf("recovery made several writes in one pass: %v", writes[before:])
+			}
+			if inventory[gateway] != nil {
+				inventory[gateway]["provisioning_status"] = "ACTIVE"
+			}
+		}
+		if len(inventory) != len(protected) {
+			t.Fatalf("model-less Gateway recovery left descendants: %v", writes)
+		}
+		return
 	}
 	if https {
 		const refA = "https://barbican.example/v1/secrets/revision-a"

@@ -29,6 +29,18 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 )
 
+func TestSubmittedRouteMutationGetsOnePromptObservation(t *testing.T) {
+	outcome := cloud.ProgressingOutcome("Octavia accepted the write", 2*time.Second)
+	outcome.MutationSubmitted = true
+	if got := ProviderProgressRequeueAfter(outcome, "route"); got <= 0 || got > 300*time.Millisecond {
+		t.Fatalf("next observation after an accepted mutation = %s", got)
+	}
+	outcome.MutationSubmitted = false
+	if got := ProviderProgressRequeueAfter(outcome, "route"); got < time.Second {
+		t.Fatalf("provider still provisioning, next poll = %s", got)
+	}
+}
+
 func TestProviderProgressRequeueAfter(t *testing.T) {
 	tests := []struct {
 		name     string
