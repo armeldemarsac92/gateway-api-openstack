@@ -62,7 +62,7 @@ func ValidateNodePortService(service *corev1.Service, port *corev1.ServicePort) 
 
 // TransportMembers resolves a TCP or UDP Service through the Gateway's frozen member mode.
 // The caller authorizes the Service reference before reading it.
-func TransportMembers(ctx context.Context, reader client.Reader, service *corev1.Service, port *gatewayv1.PortNumber, protocol corev1.Protocol, topology classconfig.Resolved, gatewayAddresses []gatewayv1.GatewayStatusAddress) ([]cloud.Member, *model.Diagnostic, error) {
+func TransportMembers(ctx context.Context, reader client.Reader, service *corev1.Service, port *gatewayv1.PortNumber, protocol corev1.Protocol, topology classconfig.Resolved, gatewayAddresses []gatewayv1.GatewayStatusAddress, matchVIPFamily bool) ([]cloud.Member, *model.Diagnostic, error) {
 	if !service.DeletionTimestamp.IsZero() {
 		return nil, &model.Diagnostic{Reason: string(gatewayv1.RouteReasonBackendNotFound), Message: "The backend Service is being deleted"}, nil
 	}
@@ -91,16 +91,16 @@ func TransportMembers(ctx context.Context, reader client.Reader, service *corev1
 		return nil, nil, fmt.Errorf("incomplete backend EndpointSlice list")
 	}
 	if mode == cloud.MemberModeNodePort {
-		if protocol == corev1.ProtocolUDP {
-			// Amphora IPVS only renders real servers of the VIP's address family.
-			// The controller publishes one address. Floating-IP mode requires
-			// IPv4 for both the public address and the private VIP.
+		if matchVIPFamily {
+			// Count only workers of the VIP's address family before assigning
+			// weighted shares. IPVS also omits real servers of other families.
+			// A published floating IP and its private VIP are both IPv4.
 			if len(gatewayAddresses) != 1 || gatewayAddresses[0].Type != nil && *gatewayAddresses[0].Type != gatewayv1.IPAddressType {
-				return nil, pending("waiting for the UDP Gateway IP address"), nil
+				return nil, pending("waiting for the %s Gateway IP address", protocol), nil
 			}
 			vip, err := netip.ParseAddr(gatewayAddresses[0].Value)
 			if err != nil || vip.Is4In6() || vip.Zone() != "" {
-				return nil, pending("waiting for a valid UDP Gateway IP address"), nil
+				return nil, pending("waiting for a valid %s Gateway IP address", protocol), nil
 			}
 			family := discoveryv1.AddressTypeIPv6
 			if vip.Is4() {

@@ -150,6 +150,62 @@ func TestTCPRouteProgramsWeightedEndpointPool(t *testing.T) {
 	}
 }
 
+func TestTCPRouteProgramsWeightedLocalNodePortsInVIPFamily(t *testing.T) {
+	gateway, class, route := routeFixture()
+	gateway.Status.Addresses = []gatewayv1.GatewayStatusAddress{{Value: "192.0.2.30"}}
+	primaryRef, primary, primaryEndpoints := transportBackendFixture(corev1.ProtocolTCP, route.Namespace, "primary", 3, "10.1.2.1", "10.1.2.2")
+	secondaryRef, secondary, secondaryEndpoints := transportBackendFixture(corev1.ProtocolTCP, route.Namespace, "secondary", 1, "10.1.2.3")
+	for i, service := range []*corev1.Service{primary, secondary} {
+		service.Spec.Type = corev1.ServiceTypeNodePort
+		service.Spec.ExternalTrafficPolicy = corev1.ServiceExternalTrafficPolicyLocal
+		service.Spec.Ports[0].NodePort = 32000 + int32(i)
+	}
+	workerA := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "worker-a"}, Status: corev1.NodeStatus{
+		Addresses: []corev1.NodeAddress{
+			{Type: corev1.NodeInternalIP, Address: "2001:db8::44"},
+			{Type: corev1.NodeInternalIP, Address: "192.0.2.44"},
+		},
+		Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}},
+	}}
+	workerB := workerA.DeepCopy()
+	workerB.Name = "worker-b"
+	workerB.Status.Addresses = []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "192.0.2.45"}}
+	primaryEndpoints.Endpoints[0].NodeName = &workerA.Name
+	primaryEndpoints.Endpoints[1].NodeName = &workerB.Name
+	secondaryEndpoints.Endpoints[0].NodeName = &workerA.Name
+	secondaryIPv6 := secondaryEndpoints.DeepCopy()
+	secondaryIPv6.Name, secondaryIPv6.AddressType = "secondary-ipv6", discoveryv1.AddressTypeIPv6
+	secondaryIPv6.Endpoints[0].Addresses = []string{"2001:db8:1::3"}
+	route.Spec.Rules[0].BackendRefs = []gatewayv1.BackendRef{primaryRef, secondaryRef}
+	r := testReconciler(t, gateway, class, route, workerA, workerB, primary, primaryEndpoints, secondary, secondaryEndpoints, secondaryIPv6)
+	r.Coordinator, r.Writer = &graph.Coordinator{}, readyRouteWriter(t, r)
+	identity := bindFixture(t, r, gateway, route, cloud.MemberModeNodePort)
+	current := reconcileTCPRoute(t, r, route)
+	checkRouteCondition(t, current, r.Config.ControllerName, r.Config.Domain()+"/Programmed", metav1.ConditionTrue, "Programmed")
+	request := graph.Request{Identity: identity, Action: graph.Ensure, Gateway: gateway, TCPRoute: current}
+	input, err := r.ObserveRouteGraph(t.Context(), request, gateway)
+	want := []cloud.Member{
+		{Address: "192.0.2.44", Port: 32000, Weight: 3},
+		{Address: "192.0.2.44", Port: 32001, Weight: 2},
+		{Address: "192.0.2.45", Port: 32000, Weight: 3},
+	}
+	if err != nil || len(input.Nodes) != 1 || input.Nodes[0].Disposition != cloud.GraphEnsure ||
+		!slices.Equal(input.Nodes[0].Spec.Members, want) {
+		t.Fatalf("TCP NodePort graph must represent exact 3:1 shares in the IPv4 VIP family, got %+v, error %v", input.Nodes, err)
+	}
+	if err := r.Delete(t.Context(), secondaryEndpoints); err != nil {
+		t.Fatal(err)
+	}
+	if err := input.Validate(t.Context()); !errors.Is(err, controller.ErrGraphInputChanged) {
+		t.Fatalf("losing all secondary endpoints in the VIP family did not invalidate the graph: %v", err)
+	}
+	current = reconcileTCPRoute(t, r, current)
+	checkRouteCondition(t, current, r.Config.ControllerName, r.Config.Domain()+"/Programmed", metav1.ConditionFalse, "Pending")
+	if current.Annotations[r.Config.RouteLifecycleAnnotation()] != controller.RouteDetaching {
+		t.Fatal("losing a positive TCP share did not checkpoint withdrawal")
+	}
+}
+
 func TestTCPRouteRejectsUnusableWeightedDestinations(t *testing.T) {
 	for _, test := range []struct {
 		name       string
@@ -162,7 +218,7 @@ func TestTCPRouteRejectsUnusableWeightedDestinations(t *testing.T) {
 	}{
 		{"missing endpoint group", cloud.MemberModeEndpoint, 1, nil, metav1.ConditionTrue, "ResolvedRefs", "Pending"},
 		{"unrepresentable ratio", cloud.MemberModeEndpoint, 257, []string{"10.1.2.2"}, metav1.ConditionTrue, "ResolvedRefs", "UnsupportedValue"},
-		{"weighted NodePort", cloud.MemberModeNodePort, 1, []string{"10.1.2.2"}, metav1.ConditionFalse, "UnsupportedValue", "UnsupportedValue"},
+		{"missing NodePort allocation", cloud.MemberModeNodePort, 1, []string{"10.1.2.2"}, metav1.ConditionFalse, "UnsupportedValue", "UnsupportedValue"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			gateway, class, route := routeFixture()
@@ -170,7 +226,7 @@ func TestTCPRouteRejectsUnusableWeightedDestinations(t *testing.T) {
 			firstRef, first, firstEndpoints := transportBackendFixture(corev1.ProtocolTCP, route.Namespace, "first", 1, "10.1.2.1")
 			secondRef, second, secondEndpoints := transportBackendFixture(corev1.ProtocolTCP, route.Namespace, "second", test.weight, test.endpoints...)
 			if test.mode == cloud.MemberModeNodePort {
-				first.Spec.Type, first.Spec.Ports[0].NodePort = corev1.ServiceTypeNodePort, 32001
+				first.Spec.Type = corev1.ServiceTypeNodePort
 				second.Spec.Type, second.Spec.Ports[0].NodePort = corev1.ServiceTypeNodePort, 32002
 			}
 			route.Spec.Rules[0].BackendRefs = []gatewayv1.BackendRef{firstRef, secondRef}
