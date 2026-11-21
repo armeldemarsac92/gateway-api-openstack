@@ -168,6 +168,7 @@ class UpstreamUDP(stock.StockUDP):
 
 class UpstreamHTTP(UpstreamUDP):
     protocol = "HTTP"
+    listener_protocols = (constants.PROTOCOL_HTTP,)
 
     def configure_renderer(self):
         base_path = "/run/hibiscus-http-upstream"
@@ -177,7 +178,7 @@ class UpstreamHTTP(UpstreamUDP):
     def render_configs(self, loadbalancer):
         if not loadbalancer.listeners:
             return {}
-        self.assertTrue(all(listener.protocol == constants.PROTOCOL_HTTP
+        self.assertTrue(all(listener.protocol in self.listener_protocols
                             for listener in loadbalancer.listeners))
         agent = mock.Mock()
         agent.get_api_version.return_value = {"api_version": "1.0"}
@@ -196,9 +197,16 @@ class UpstreamHTTP(UpstreamUDP):
         return {(loadbalancer.vip.ip_address,): config.encode("utf-8")}
 
 
+class UpstreamTCP(UpstreamHTTP):
+    protocol = "TCP"
+    # The shared Gateway API base also creates HTTP-only Gateways.
+    listener_protocols = (constants.PROTOCOL_HTTP, constants.PROTOCOL_TCP)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--protocol", choices=("udp", "http"), default="udp")
+    fixtures = {"udp": UpstreamUDP, "http": UpstreamHTTP, "tcp": UpstreamTCP}
+    parser.add_argument("--protocol", choices=fixtures, default="udp")
     parser.add_argument("--run", type=Path, required=True, help="Local suite executable")
     parser.add_argument("--apply", type=Path, required=True, help="Configuration callback executable")
     parser.add_argument("--timeout", type=int, default=300, help="Suite deadline in seconds")
@@ -208,7 +216,7 @@ def main():
     stock.require_stock_versions(parser)
     options.run = options.run.resolve(strict=True)
     options.apply = options.apply.resolve(strict=True)
-    fixture = UpstreamHTTP if options.protocol == "http" else UpstreamUDP
+    fixture = fixtures[options.protocol]
     fixture.options = options
     unittest.main(argv=[__file__, f"{fixture.__name__}.run_upstream"], verbosity=2)
 
