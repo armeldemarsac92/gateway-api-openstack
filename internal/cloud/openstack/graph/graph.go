@@ -226,7 +226,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 				return p.withdrawUndiscoverableSNI(ctx, desired, actual, err)
 			}
 		}
-		return p.retireUnusedBackendCA(ctx, spec, result)
+		return p.retireUnusedBackendCA(ctx, desired.spec, actual, result)
 	}
 	step, prepared, err := p.prepareNextGraphMutation(ctx, desired, actual, plan, &result)
 	if !prepared {
@@ -269,7 +269,7 @@ func (p *Provider) recordGraphMutationOutcome(result *cloud.GatewayGraphResult, 
 			return port == step.scopedListener.Port
 		})
 	}
-	if step.kind == graphRouteMutation && (step.backendKey != "" || step.route.kind == routeMutationPublishBackendCA ||
+	if step.kind == graphRouteMutation && (step.backendKey != "" || step.route.kind == routeMutationClaimBackendCA || step.route.kind == routeMutationPublishBackendCA ||
 		step.route.kind == routeMutationSetBackendTLS || step.route.backendTLS != nil) {
 		result.Outcome.MutationSubmitted = true
 		outcome := &result.Routes[step.routeIndex].Result.Outcome
@@ -503,6 +503,9 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 		}
 		return a.RouteUID < b.RouteUID
 	})
+	// Transport reconciliation can hold a route whose old pools must stay
+	// protected. Keep the request's authority snapshot immutable.
+	spec.Routes = slices.Clone(spec.Routes)
 	desired := desiredGatewayGraph{spec: spec, identity: identity, protocol: protocol, fixedHTTPResponses: p.fixedHTTPResponses}
 	identities := make(map[string]struct{}, len(spec.Routes))
 	lastRank := -1

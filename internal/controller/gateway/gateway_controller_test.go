@@ -67,6 +67,47 @@ func TestSharedHTTPPortRejectsUnsupportedListenerShapes(t *testing.T) {
 	}
 }
 
+func TestBackendTLSOwnershipSurvivesOptOutAndIsUsedAtDeletion(t *testing.T) {
+	cfg := testConfig()
+	cfg.BackendTLSPolicy = true
+	gw := programmedTestGateway(cfg)
+	completeGatewayTopologyFixture(cfg, gw)
+	class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "openstack"}, Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName}}
+	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithObjects(class, gw).Build()
+	r := &Reconciler{Client: kube, APIReader: kube, Config: cfg}
+	observe := func(action graph.Action) graph.GatewayInput {
+		t.Helper()
+		if err := kube.Get(t.Context(), client.ObjectKeyFromObject(gw), gw); err != nil {
+			t.Fatal(err)
+		}
+		input, err := r.ObserveGatewayGraph(t.Context(), graph.Request{Identity: controller.GatewayIdentity(cfg, gw), Action: action, Gateway: gw})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return input
+	}
+	before := observe(graph.Ensure)
+	if before.Node.BackendCAOwned || before.Node.ClaimBackendCA == nil {
+		t.Fatal("new Gateway must checkpoint before publishing its first CA")
+	}
+	if err := before.Node.ClaimBackendCA(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := before.Validate(t.Context()); err == nil {
+		t.Fatal("old snapshot was allowed to publish after the checkpoint")
+	}
+	r.Config.BackendTLSPolicy = false
+	if after := observe(graph.Ensure); !after.Node.BackendCAOwned || after.Node.ClaimBackendCA != nil {
+		t.Fatal("opt-out lost ownership of previously published CAs")
+	}
+	if err := kube.Delete(t.Context(), gw); err != nil {
+		t.Fatal(err)
+	}
+	if removal := observe(graph.DeleteGateway); !removal.Node.BackendCAOwned || removal.Node.ClaimBackendCA != nil {
+		t.Fatal("Gateway finalization lost its CA cleanup obligation")
+	}
+}
+
 func TestScopedUDPRouteCleanupUsesItsSealedAnchorWithoutGateway(t *testing.T) {
 	config := testConfig()
 	gateway := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "edge", UID: "old-gateway"}}

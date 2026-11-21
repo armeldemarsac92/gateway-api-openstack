@@ -68,8 +68,9 @@ func NewIdentity(value cloud.Identity) (Identity, error) {
 // ProviderConfig bounds one provider call and controls how soon the controller
 // observes an asynchronous Octavia operation again.
 type ProviderConfig struct {
-	// BackendCA publishes trust for the opt-in BackendTLSPolicy integration.
+	// BackendCA can retire previously published revisions after opt-out.
 	BackendCA             *backendca.Store
+	BackendTLSPolicy      bool
 	FixedHTTPResponses    bool
 	HTTPHeaderExact       bool
 	HTTPMethodMatch       bool
@@ -85,6 +86,7 @@ type ProviderConfig struct {
 // Provider owns the OpenStack resource graph for managed Gateway API objects.
 type Provider struct {
 	backendCA             *backendca.Store
+	backendTLSPolicy      bool
 	fixedHTTPResponses    bool
 	httpHeaderExact       bool
 	httpMethodMatch       bool
@@ -113,6 +115,7 @@ func NewProvider(clients ServiceClients, cfg ProviderConfig) *Provider {
 	}
 	return &Provider{
 		backendCA:             cfg.BackendCA,
+		backendTLSPolicy:      cfg.BackendTLSPolicy,
 		fixedHTTPResponses:    cfg.FixedHTTPResponses || cfg.WeightedHTTPTargets,
 		httpHeaderExact:       cfg.HTTPHeaderExact,
 		httpMethodMatch:       cfg.HTTPMethodMatch,
@@ -135,7 +138,7 @@ var _ cloud.GraphProvider = (*Provider)(nil)
 
 // BackendTLSAvailable discovers support on the authenticated regional Amphora endpoint.
 func (p *Provider) BackendTLSAvailable(ctx context.Context) (bool, error) {
-	if p.backendCA == nil {
+	if !p.backendTLSPolicy || p.backendCA == nil {
 		return false, nil
 	}
 	err := p.octavia.VerifyGatewayCapabilities(ctx, "amphora", octavia.GatewayCapabilityBackendTLSHostname)

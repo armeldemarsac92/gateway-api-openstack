@@ -206,6 +206,8 @@ func run(ctx context.Context) error {
 	}
 	controllerConfig.OpenStackProjectID = serviceClients.ProjectID
 	providerConfig := openstack.ProviderConfig{
+		BackendCA:             backendca.New(clusterID, serviceClients),
+		BackendTLSPolicy:      backendTLSPolicy,
 		HTTPHeaderExact:       exactHTTPHeaders,
 		HTTPMethodMatch:       httpMethodMatch,
 		FixedHTTPResponses:    fixedHTTPResponses,
@@ -216,9 +218,6 @@ func run(ctx context.Context) error {
 		TLSSNISuffix:          tlsSNISuffix,
 		OperationTimeout:      operationTimeout,
 		PollInterval:          pollInterval,
-	}
-	if backendTLSPolicy {
-		providerConfig.BackendCA = backendca.New(clusterID, serviceClients)
 	}
 	openStackProvider := openstack.NewProvider(serviceClients, providerConfig)
 	if err := controller.SetupIndexes(ctx, manager.GetFieldIndexer(), controllerConfig); err != nil {

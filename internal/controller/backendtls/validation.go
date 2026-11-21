@@ -119,7 +119,7 @@ func isPreciseHostname(hostname string) bool {
 func loadCA(key types.NamespacedName, configMap *corev1.ConfigMap) (CA, error) {
 	if configMap == nil || configMap.Namespace != key.Namespace || configMap.Name != key.Name ||
 		!configMap.DeletionTimestamp.IsZero() {
-		return CA{}, errors.New("does not exist")
+		return CA{}, errors.New("is absent or unreadable")
 	}
 	text, hasText := configMap.Data[caKey]
 	binary, hasBinary := configMap.BinaryData[caKey]

@@ -138,10 +138,12 @@ func copyGatewayOwnedMetadata(config controller.Config, target, desired *gateway
 		}
 	}
 
-	if controllerutil.ContainsFinalizer(desired, config.GatewayFinalizer()) {
-		controllerutil.AddFinalizer(target, config.GatewayFinalizer())
-	} else {
-		controllerutil.RemoveFinalizer(target, config.GatewayFinalizer())
+	for _, finalizer := range []string{config.GatewayFinalizer(), config.BackendCAFinalizer()} {
+		if controllerutil.ContainsFinalizer(desired, finalizer) {
+			controllerutil.AddFinalizer(target, finalizer)
+		} else {
+			controllerutil.RemoveFinalizer(target, finalizer)
+		}
 	}
 	if target.Annotations == nil {
 		target.Annotations = map[string]string{}

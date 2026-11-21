@@ -115,6 +115,11 @@ func (c Config) GatewayFinalizer() string {
 	return c.Domain() + "/gateway-finalizer-" + c.controllerKey()
 }
 
+// BackendCAFinalizer records a Gateway's responsibility for its Barbican CAs.
+func (c Config) BackendCAFinalizer() string {
+	return c.Domain() + "/backend-ca-" + c.controllerKey()
+}
+
 // RouteFinalizer returns the controller-scoped HTTPRoute finalizer.
 func (c Config) RouteFinalizer() string {
 	return c.Domain() + "/httproute-finalizer-" + c.controllerKey()

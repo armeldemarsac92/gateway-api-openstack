@@ -679,6 +679,7 @@ type routeMutationKind uint8
 const (
 	routeMutationCreatePool routeMutationKind = iota
 	routeMutationUpdatePool
+	routeMutationClaimBackendCA
 	routeMutationPublishBackendCA
 	routeMutationClearPoolMembers
 	routeMutationSetBackendTLS
@@ -732,6 +733,8 @@ func (s routeMutation) message() string {
 		return "Created Octavia pool"
 	case routeMutationUpdatePool:
 		return "Updated Octavia pool"
+	case routeMutationClaimBackendCA:
+		return "Checkpointed Gateway ownership of backend CAs"
 	case routeMutationPublishBackendCA:
 		return "Publishing the backend CA in Barbican"
 	case routeMutationClearPoolMembers:

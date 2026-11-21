@@ -254,7 +254,8 @@ func (r *Reconciler) buildRouteModelFromInputs(
 	}
 	mode := topology.Topology.MemberMode
 	spec := cloud.RouteSpec{
-		Identity: controller.RouteIdentity(r.Config, gateway, route),
+		Identity:           controller.RouteIdentity(r.Config, gateway, route),
+		BackendTLSObserved: inputs.input.BackendTLSPolicies != nil,
 		GatewayRequirements: cloud.GatewayRequirements{
 			Provider:          "amphora",
 			VIPSubnetID:       topology.Topology.VIPSubnetID,

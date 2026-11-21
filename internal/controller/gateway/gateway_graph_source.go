@@ -73,8 +73,9 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 		input := graph.GatewayInput{
 			Object: request.Gateway.DeepCopy(),
 			Node: cloud.GatewayGraphNode{
-				Disposition: cloud.GraphDelete,
-				Spec:        spec,
+				Disposition:    cloud.GraphDelete,
+				Spec:           spec,
+				BackendCAOwned: controllerutil.ContainsFinalizer(request.Gateway, r.Config.BackendCAFinalizer()),
 			},
 			Validate: func(ctx context.Context) error {
 				latest, err := r.observeGatewayCleanupSnapshot(ctx, request.Gateway)
@@ -119,6 +120,14 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 	}
 	input.Object = snapshot.gateway
 	input.Node = cloud.GatewayGraphNode{Disposition: cloud.GraphEnsure, Spec: r.gatewaySpec(snapshot.gateway, snapshot.listeners, snapshot.topology)}
+	input.Node.BackendCAOwned = controllerutil.ContainsFinalizer(snapshot.gateway, r.Config.BackendCAFinalizer())
+	if r.Config.BackendTLSPolicy && !input.Node.BackendCAOwned {
+		input.Node.ClaimBackendCA = func(ctx context.Context) error {
+			desired := snapshot.gateway.DeepCopy()
+			controllerutil.AddFinalizer(desired, r.Config.BackendCAFinalizer())
+			return r.Patch(ctx, desired, controller.OptimisticMergeFrom(snapshot.gateway))
+		}
+	}
 	input.Validate = func(ctx context.Context) error { return r.sealGatewayMutationSnapshot(ctx, snapshot) }
 	if snapshot.listener.Protocol == gatewayv1.TLSProtocolType {
 		observed, err := r.observeSNIRoutes(ctx, snapshot)

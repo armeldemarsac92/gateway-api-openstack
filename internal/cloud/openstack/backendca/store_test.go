@@ -117,6 +117,13 @@ func TestRotateAndRetireOnlyUnusedOwnedRevision(t *testing.T) {
 	if err != nil || len(inventory) != 4 {
 		t.Fatalf("expected all owned revisions, got %d: %v", len(inventory), err)
 	}
+	attached := func(ref string) bool { return ref == duplicate }
+	if selected := SelectConfigMapRevision(inventory, source, old.Digest(), attached); selected.Reference() != duplicate {
+		t.Fatal("the older unattached duplicate would survive every retirement sweep")
+	}
+	if selected := SelectConfigMapRevision(inventory, source, old.Digest(), func(string) bool { return false }); selected != old {
+		t.Fatal("lost the oldest revision while waiting for the first pool attachment")
+	}
 
 	live := map[string]bool{old.Reference(): true, next.Reference(): true}
 	check := func(_ context.Context, ref string) (bool, error) { return !live[ref], nil }

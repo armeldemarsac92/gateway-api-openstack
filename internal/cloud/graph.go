@@ -50,6 +50,10 @@ type GatewayGraphNode struct {
 	Disposition  GraphDisposition
 	Spec         GatewaySpec
 	TLSSNIRoutes []TLSSNIRoute
+	// BackendCAOwned persists across controller restarts and operator opt-out.
+	BackendCAOwned bool `json:",omitempty"`
+	// ClaimBackendCA checkpoints ownership before creating a Barbican revision.
+	ClaimBackendCA func(context.Context) error `json:"-"`
 }
 
 // TLSSNIRoute is one effective hostname and its authorized TCP destinations.

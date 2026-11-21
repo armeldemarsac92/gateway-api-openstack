@@ -881,6 +881,12 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 		// Gophercloud encodes an explicit empty DefaultPoolID as JSON null.
 		_, err = p.octavia.UpdateListener(ctx, listenerID, listeners.UpdateOpts{DefaultPoolID: &step.poolID})
 	case graphRouteMutation:
+		if step.route.kind == routeMutationClaimBackendCA {
+			if desired.spec.Gateway.ClaimBackendCA == nil {
+				return errors.New("backend CA ownership checkpoint is unavailable")
+			}
+			return desired.spec.Gateway.ClaimBackendCA(ctx)
+		}
 		route := graphRoutePart(desired, step)
 		route.spec.Gateway = actual.state
 		route.spec.Gateway.ListenerID = listenerID

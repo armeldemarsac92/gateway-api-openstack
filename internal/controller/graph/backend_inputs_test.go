@@ -26,6 +26,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -303,6 +304,35 @@ type backendInputReader struct {
 	failures map[string]error
 }
 
+func TestBackendTLSUnreadableCAStillProtectsOnlyItsService(t *testing.T) {
+	protected, healthy := backendInputService("protected", "app"), backendInputService("healthy", "app")
+	policy := &gatewayv1.BackendTLSPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "tls", Namespace: "app", UID: "policy"},
+		Spec: gatewayv1.BackendTLSPolicySpec{
+			TargetRefs: []gatewayv1.LocalPolicyTargetReferenceWithSectionName{{
+				LocalPolicyTargetReference: gatewayv1.LocalPolicyTargetReference{Kind: "Service", Name: "protected"},
+			}},
+			Validation: gatewayv1.BackendTLSPolicyValidation{
+				Hostname: "protected.example.test", CACertificateRefs: []gatewayv1.LocalObjectReference{{Kind: "ConfigMap", Name: "root"}},
+			},
+		},
+	}
+	reader := newBackendInputReader(t, policy)
+	reader.failures = map[string]error{"ConfigMap app/root": apierrors.NewForbidden(corev1.Resource("configmaps"), "root", errors.New("read denied"))}
+	route := backendInputRoute("r", "app", backendInputReference("protected", "", 80, 3), backendInputReference("healthy", "", 80, 1))
+	input := model.Input{Gateway: backendInputGateway(), Services: []corev1.Service{*protected, *healthy}, Routes: []gatewayv1.HTTPRoute{route}}
+	if err := CollectBackendTLSInputs(t.Context(), reader, &input); err != nil {
+		t.Fatal(err)
+	}
+	denied := input.BackendTLSPolicies[model.ServicePortKey{Service: client.ObjectKeyFromObject(protected), Port: 80}].Winner
+	if denied == nil || denied.Validation != nil || denied.ResolvedRefs.Status != metav1.ConditionFalse {
+		t.Fatal("unreadable CA lost its winning policy or its unresolved reference")
+	}
+	if peer, ok := input.BackendTLSPolicies[model.ServicePortKey{Service: client.ObjectKeyFromObject(healthy), Port: 80}]; !ok || peer.Winner != nil {
+		t.Fatal("unrelated Service was omitted or inherited the CA failure")
+	}
+}
+
 func newBackendInputReader(t *testing.T, objects ...client.Object) *backendInputReader {
 	t.Helper()
 	scheme := runtime.NewScheme()
@@ -317,6 +347,8 @@ func newBackendInputReader(t *testing.T, objects ...client.Object) *backendInput
 func (r *backendInputReader) Get(ctx context.Context, key client.ObjectKey, object client.Object, options ...client.GetOption) error {
 	var operation string
 	switch object.(type) {
+	case *corev1.ConfigMap:
+		operation = "ConfigMap " + key.String()
 	case *corev1.Service:
 		operation = "Service " + key.String()
 	case *corev1.Namespace:
@@ -336,6 +368,8 @@ func (r *backendInputReader) List(ctx context.Context, list client.ObjectList, o
 	opts.ApplyOptions(options)
 	var operation string
 	switch list.(type) {
+	case *gatewayv1.BackendTLSPolicyList:
+		operation = "BackendTLSPolicies " + opts.Namespace
 	case *discoveryv1.EndpointSliceList:
 		if opts.Namespace == "" || opts.LabelSelector == nil {
 			return errors.New("EndpointSlice list must select a Service and namespace")

@@ -87,6 +87,24 @@ func (r Revision) MatchesConfigMap(configMapUID, payloadDigest string) bool {
 		strings.HasSuffix(r.name, "-"+digest([]byte(configMapUID))+"-"+payloadDigest)
 }
 
+// SelectConfigMapRevision picks a verified attached revision when Barbican
+// reports duplicate names. Until a pool is attached, keep the oldest match.
+func SelectConfigMapRevision(revisions []Revision, configMapUID, digest string, attached func(string) bool) Revision {
+	var oldest Revision
+	for _, revision := range revisions {
+		if !revision.MatchesConfigMap(configMapUID, digest) {
+			continue
+		}
+		if attached(revision.reference) {
+			return revision
+		}
+		if oldest.reference == "" {
+			oldest = revision
+		}
+	}
+	return oldest
+}
+
 // String redacts the reference in default formatting.
 func (r Revision) String() string { return "[backend CA revision]" }
 
@@ -107,12 +125,9 @@ func (s *Store) Find(ctx context.Context, gatewayUID, configMapUID, wantedDigest
 	if err != nil || len(revisions) == 0 {
 		return Revision{}, err
 	}
-	for _, revision := range revisions {
-		if revision.Reference() == preferredReference {
-			return revision, nil
-		}
-	}
-	return revisions[0], nil
+	return SelectConfigMapRevision(revisions, configMapUID, wantedDigest, func(ref string) bool {
+		return ref == preferredReference
+	}), nil
 }
 
 // Ensure publishes the normalized, validated ConfigMap CA PEM once and

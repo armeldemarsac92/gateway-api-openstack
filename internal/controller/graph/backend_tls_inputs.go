@@ -21,7 +21,6 @@ import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -108,9 +107,12 @@ func observeBackendTLS(ctx context.Context, reader client.Reader, service *corev
 		}
 		var configMap corev1.ConfigMap
 		if err := reader.Get(ctx, key, &configMap); err != nil {
-			if !apierrors.IsNotFound(err) {
-				return backendtls.Selection{}, fmt.Errorf("get BackendTLSPolicy CA ConfigMap %s: %w", key, err)
+			if ctx.Err() != nil {
+				return backendtls.Selection{}, ctx.Err()
 			}
+			// A known policy still governs this port when its CA cannot be
+			// read. The mutation fence repeats the read, and later watches
+			// and resyncs can restore this backend independently of its peers.
 			cas[key] = nil
 		} else {
 			cas[key] = &configMap

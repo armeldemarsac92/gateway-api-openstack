@@ -18,6 +18,7 @@ package graph
 
 import (
 	"context"
+	"errors"
 	"slices"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
@@ -27,9 +28,9 @@ import (
 // retireUnusedBackendCA runs with the Gateway writer lock and a converged Octavia graph.
 // The selected CA can exist before the first pool is attached. Keep that revision as
 // well as every PEM still used by a pool or client-authenticating listener.
-func (p *Provider) retireUnusedBackendCA(ctx context.Context, spec cloud.GatewayGraphSpec, result cloud.GatewayGraphResult) (cloud.GatewayGraphResult, error) {
+func (p *Provider) retireUnusedBackendCA(ctx context.Context, spec cloud.GatewayGraphSpec, actual observedGatewayGraph, result cloud.GatewayGraphResult) (cloud.GatewayGraphResult, error) {
 	deleting := spec.Gateway.Disposition == cloud.GraphDelete
-	if p.backendCA == nil || result.Outcome.State != cloud.OutcomeReady ||
+	if !spec.Gateway.BackendCAOwned || result.Outcome.State != cloud.OutcomeReady ||
 		(!deleting && spec.Gateway.Disposition != cloud.GraphEnsure) {
 		return result, nil
 	}
@@ -38,12 +39,15 @@ func (p *Provider) retireUnusedBackendCA(ctx context.Context, spec cloud.Gateway
 	}) {
 		return result, nil
 	}
+	if p.backendCA == nil {
+		return result, errors.New("backend CA retirement requires the regional Barbican client")
+	}
 
 	revisions, err := p.backendCA.List(ctx, spec.Identity.GatewayUID)
 	if err != nil {
 		return result, err
 	}
-	keep := retainedBackendCAs(spec, revisions)
+	keep := retainedBackendCAs(spec, actual, revisions)
 	pendingUse := false
 	for _, revision := range revisions {
 		if keep[revision.Reference()] {
@@ -91,21 +95,29 @@ func (p *Provider) retireUnusedBackendCA(ctx context.Context, spec cloud.Gateway
 	return result, nil
 }
 
-func retainedBackendCAs(spec cloud.GatewayGraphSpec, revisions []backendca.Revision) map[string]bool {
+func retainedBackendCAs(spec cloud.GatewayGraphSpec, actual observedGatewayGraph, revisions []backendca.Revision) map[string]bool {
 	if len(revisions) == 0 || spec.Gateway.Disposition != cloud.GraphEnsure {
 		return nil
 	}
 	keep := make(map[string]bool)
+	attached := make(map[string]bool)
+	for _, route := range actual.routes {
+		if route.pool != nil && route.pool.CATLSContainerRef != "" {
+			attached[route.pool.CATLSContainerRef] = true
+		}
+		for _, backend := range route.httpParts {
+			if backend.pool != nil && backend.pool.CATLSContainerRef != "" {
+				attached[backend.pool.CATLSContainerRef] = true
+			}
+		}
+	}
 	selectRevision := func(tls *cloud.BackendTLSValidation) {
 		if tls == nil || tls.Denied {
 			return
 		}
-		// List and Ensure use the same stable oldest-first ordering.
-		for _, revision := range revisions {
-			if revision.MatchesConfigMap(tls.CAConfigMapUID, tls.CADigest) {
-				keep[revision.Reference()] = true
-				return
-			}
+		revision := backendca.SelectConfigMapRevision(revisions, tls.CAConfigMapUID, tls.CADigest, func(ref string) bool { return attached[ref] })
+		if ref := revision.Reference(); ref != "" {
+			keep[ref] = true
 		}
 	}
 	for _, node := range spec.Routes {

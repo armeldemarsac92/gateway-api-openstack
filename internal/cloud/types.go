@@ -238,6 +238,9 @@ type RouteSpec struct {
 	Identity            Identity
 	Gateway             GatewayState
 	GatewayRequirements GatewayRequirements
+	// BackendTLSObserved records a current policy inventory for this route.
+	// Only such an observation can release a previously protected backend.
+	BackendTLSObserved bool `json:"-"`
 	// ScopedListenerPorts identifies the authorized listener ports. An HTTPRoute
 	// selects exactly one scoped port, while transport routes may win several.
 	// Single-listener bindings use GatewayRequirements.ListenerPort.

@@ -50,6 +50,7 @@ func TestBackendTLSScalarQuarantinesBeforePublishingAndReopening(t *testing.T) {
 	project := id.Value().OpenStackProjectID
 	spec := completeGraphSpec(id)
 	spec.Gateway.Spec.ListenerProtocol, spec.Routes[0].Spec.GatewayRequirements.ListenerProtocol = cloud.ListenerProtocolHTTP, cloud.ListenerProtocolHTTP
+	spec.Routes[0].Spec.BackendTLSObserved = true
 	tls := newGraphBackendTLS(t)
 	spec.Routes[0].Spec.BackendTLS = tls
 	const poolURL = "/lbaas/pools/pool-1"
@@ -64,7 +65,7 @@ func TestBackendTLSScalarQuarantinesBeforePublishingAndReopening(t *testing.T) {
 	lb["pools"], lb["listeners"] = []map[string]string{{"id": "pool-1"}}, []map[string]string{{"id": "listener-1"}}
 	listener := map[string]any{
 		"id": "listener-1", "project_id": project, "protocol": "HTTP", "protocol_port": 80, "admin_state_up": true,
-		"provisioning_status": "ACTIVE", "default_pool_id": nil, "loadbalancers": pool["loadbalancers"],
+		"provisioning_status": "ACTIVE", "default_pool_id": nil, "client_ca_tls_container_ref": nil, "loadbalancers": pool["loadbalancers"],
 		"l7policies": []map[string]string{{"id": "policy-1"}}, "tags": safetyGatewayTags(t, id, roleListener),
 	}
 	policy := map[string]any{
@@ -175,7 +176,12 @@ func TestBackendTLSScalarQuarantinesBeforePublishingAndReopening(t *testing.T) {
 	})
 	serviceClients := scalarBackendTLSClients(t, project, handle, &writes)
 	store := backendca.New(id.Value().ClusterID, serviceClients)
-	provider := newTestProvider(t, serviceClients, ProviderConfig{BackendCA: store})
+	provider := newTestProvider(t, serviceClients, ProviderConfig{BackendCA: store, BackendTLSPolicy: true})
+	spec.Gateway.ClaimBackendCA = func(context.Context) error {
+		spec.Gateway.BackendCAOwned = true
+		writes = append(writes, "claim")
+		return nil
+	}
 	reconcile := func(expectedWrites ...string) {
 		t.Helper()
 		for _, expected := range expectedWrites {
@@ -191,14 +197,25 @@ func TestBackendTLSScalarQuarantinesBeforePublishingAndReopening(t *testing.T) {
 		t.Fatalf("the stale request reached a write: %v, %v", writes, err)
 	}
 	spec.ValidateMutation = nil
-	reconcile("drain", "mark")
+	reconcile("disable")
+	if !slices.Contains(pool["tags"].([]any), any(backendTLSManagedTag)) {
+		t.Fatal("first restrictive update omitted durable TLS protection")
+	}
+	// Restart with the option off while the original members still exist.
+	provider.backendTLSPolicy, spec.Routes[0].Spec.BackendTLS, spec.Routes[0].Spec.BackendTLSObserved = false, nil, false
+	reconcile("drain")
+	writes = nil
+	if _, err := provider.ReconcileGatewayGraph(t.Context(), spec); err != nil || len(writes) != 0 {
+		t.Fatalf("restart reopened the enrolled pool: writes %v, error %v", writes, err)
+	}
+	provider.backendTLSPolicy, spec.Routes[0].Spec.BackendTLS, spec.Routes[0].Spec.BackendTLSObserved = true, tls, true
 	writes = nil
 	spec.ValidateMutation = func(context.Context) error { return fence }
 	if _, err := provider.ReconcileGatewayGraph(t.Context(), spec); !errors.Is(err, fence) || len(writes) != 0 {
 		t.Fatalf("the stale request published a CA: %v, %v", writes, err)
 	}
 	spec.ValidateMutation = nil
-	reconcile("publish", "configure", "member")
+	reconcile("claim", "publish", "configure", "enable", "member")
 	tls.Hostname = "rotated.example.test"
 	reconcile("disable", "drain", "configure", "enable", "member")
 	tls.CAConfigMapUID = "recreated-configmap"
@@ -211,21 +228,47 @@ func TestBackendTLSScalarQuarantinesBeforePublishingAndReopening(t *testing.T) {
 	}
 	pool["backend_tls_hostname"] = tls.Hostname
 	reconcile("enable", "member")
+	// Requested fields may be visible even when an Octavia worker failed
+	// to install them. Retry a restrictive update before allowing traffic.
+	pool["provisioning_status"] = "ERROR"
+	reconcile("disable")
+	reconcile("disable")
+	pool["provisioning_status"] = "ACTIVE"
+	reconcile("drain", "enable", "member")
 	capabilities = []string{}
 	reconcile("disable", "drain")
 	tls.Denied = true
 	writes = nil
-	if _, err := provider.ReconcileGatewayGraph(t.Context(), spec); err != nil || len(writes) != 0 || pool["tls_enabled"] != true {
-		t.Fatal("a denied policy changed the old trust configuration or reopened forwarding")
+	if _, err := provider.ReconcileGatewayGraph(t.Context(), spec); err != nil || !slices.Equal(writes, []string{"retire"}) ||
+		pool["tls_enabled"] != true || pool["admin_state_up"] != false || len(memberIDs) != 0 {
+		t.Fatalf("denied policy: writes %v, tls enabled %v, error %v", writes, pool["tls_enabled"], err)
 	}
-	provider.backendCA = nil
+	attached := pool["ca_tls_container_ref"].(string)
+	if revision, err := store.Find(t.Context(), spec.Identity.GatewayUID, tls.CAConfigMapUID, tls.CADigest, attached); err != nil || revision.Reference() != attached {
+		t.Fatal("denial retired the CA still referenced by the closed pool")
+	}
+	provider.backendTLSPolicy, spec.Routes[0].Spec.BackendTLSObserved = false, false
 	spec.Routes[0].Spec.BackendTLS = nil
 	writes = nil
 	if _, err := provider.ReconcileGatewayGraph(t.Context(), spec); err != nil || len(writes) != 0 || pool["tls_enabled"] != true {
 		t.Fatal("a controller with BackendTLSPolicy turned off removed existing TLS")
 	}
-	provider.backendCA, capabilities = store, []string{octavia.GatewayCapabilityBackendTLSHostname}
-	reconcile("configure", "mark", "enable", "member")
+	provider.backendTLSPolicy, capabilities, spec.Routes[0].Spec.BackendTLSObserved = true, []string{octavia.GatewayCapabilityBackendTLSHostname}, true
+	reconcile("configure", "enable", "mark", "member")
+
+	// Finalization still inventories this Gateway's CAs when enrollment
+	// has been disabled. Each unreferenced revision retires independently.
+	provider.backendTLSPolicy = false
+	cleanup := cloud.GatewayGraphSpec{Identity: spec.Identity, Gateway: cloud.GatewayGraphNode{Disposition: cloud.GraphDelete, BackendCAOwned: true}}
+	for _, want := range []string{"retire", ""} {
+		writes = nil
+		initial := cloud.GatewayGraphResult{Outcome: cloud.ReadyOutcome(), Gateway: cloud.GatewayReadyResult(cloud.GatewayState{})}
+		result, err := provider.retireUnusedBackendCA(t.Context(), cleanup, observedGatewayGraph{}, initial)
+		if err != nil || want == "" && (len(writes) != 0 || result.Outcome.State != cloud.OutcomeReady) ||
+			want != "" && (!slices.Equal(writes, []string{want}) || result.Outcome.State != cloud.OutcomeProgressing) {
+			t.Fatalf("retirement after opt-out: writes %v, state %v, error %v", writes, result.Outcome.State, err)
+		}
+	}
 }
 
 func newGraphBackendTLS(t *testing.T) *cloud.BackendTLSValidation {
@@ -305,8 +348,9 @@ func scalarBackendTLSClients(t *testing.T, project string, octaviaHandler http.H
 	})
 	mux.HandleFunc("GET /barbican/v1/secrets", func(w http.ResponseWriter, r *http.Request) {
 		items := []secrets.Secret{}
+		name := r.URL.Query().Get("name")
 		for _, row := range rows {
-			if row.Name == r.URL.Query().Get("name") {
+			if row.Name == name || strings.HasSuffix(name, "%") && strings.HasPrefix(row.Name, strings.TrimSuffix(name, "%")) {
 				items = append(items, row)
 			}
 		}
@@ -344,6 +388,13 @@ func scalarBackendTLSClients(t *testing.T, project string, octaviaHandler http.H
 		w.Header().Set("Content-Type", "application/octet-stream")
 		_, _ = w.Write(payloads[r.PathValue("id")])
 	})
+	mux.HandleFunc("DELETE /barbican/v1/secrets/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		rows = slices.DeleteFunc(rows, func(row secrets.Secret) bool { return strings.HasSuffix(row.SecretRef, "/"+id) })
+		delete(payloads, id)
+		*writes = append(*writes, "retire")
+		w.WriteHeader(http.StatusNoContent)
+	})
 	return services
 }
 
@@ -362,5 +413,58 @@ func TestBackendTLSWeightedDenialPreservesHealthyShare(t *testing.T) {
 	if len(targets) != 2 || !weightedTargetsEqual(targets[0], octavia.WeightedHTTPTarget{Weight: 3, PoolID: "pool-1"}) ||
 		!weightedTargetsEqual(targets[1], fixedWeightedHTTPTarget(1)) {
 		t.Fatalf("the denied share replaced a healthy weighted target: %#v", targets)
+	}
+}
+
+func TestBackendTLSRestartHoldsPoolRepresentationWithoutPolicyObservation(t *testing.T) {
+	for _, grouped := range []bool{false, true} {
+		t.Run(fmt.Sprintf("grouped-replacement-%t", grouped), func(t *testing.T) {
+			desired, actual := weightedPlanFixture()
+			scalar, pool := convergedRoutePlanFixture()
+			pool.members = nil
+			pool.pool.ProvisioningStatus, pool.pool.AdminStateUp = "ACTIVE", false
+			pool.pool.Tags = append(pool.pool.Tags, backendTLSManagedTag)
+			pool.backendTLS = octavia.PoolBackendTLS{AdminObserved: true, EnabledObserved: true, CAObserved: true, HostnameObserved: true}
+			if grouped {
+				actual.routes[0] = pool
+			} else {
+				desired.routes[0] = scalar
+				actual.routes[0] = observedRouteGraph{httpParts: map[string]*observedRouteGraph{"old": &pool}}
+			}
+			actual.loadBalancer.ProvisioningStatus = "ACTIVE"
+			p := &Provider{}
+			if step := p.prepareBackendTLS(t.Context(), &desired, actual); step != nil {
+				t.Fatalf("a closed pool was changed on restart: %v", step)
+			}
+			if desired.spec.Routes[0].Disposition != cloud.GraphPreserve {
+				t.Fatal("a replacement could lose its old TLS protection")
+			}
+			for _, step := range weightedPlan(t, desired, actual) {
+				if step.kind == graphRouteMutation {
+					t.Fatalf("replaced a protected pool without a live policy observation: %v", step.route.kind)
+				}
+			}
+		})
+	}
+}
+
+func TestBackendTLSFreshWithdrawalPrecedesDisabledPoolRetry(t *testing.T) {
+	desired, actual := weightedPlanFixture()
+	actual.loadBalancer.ProvisioningStatus = "ACTIVE"
+	for i := range 2 {
+		part := &desired.routes[0].httpParts[i]
+		part.spec.BackendTLS = &cloud.BackendTLSValidation{Denied: true}
+		observed := actual.routes[0].httpParts[part.backendKey]
+		observed.pool.Tags = append(observed.pool.Tags, backendTLSManagedTag)
+		observed.pool.TLSEnabled, observed.backendTLS.AdminObserved = true, true
+		observed.pool.AdminStateUp = i == 1
+		if i == 0 {
+			observed.pool.ProvisioningStatus = "ERROR"
+		}
+	}
+	step := (&Provider{}).prepareBackendTLS(t.Context(), &desired, actual)
+	if step == nil || step.backendKey != desired.routes[0].httpParts[1].backendKey || step.route.retry ||
+		step.route.poolAdmin == nil || *step.route.poolAdmin {
+		t.Fatal("an already-disabled pool prevented a new withdrawal")
 	}
 }
