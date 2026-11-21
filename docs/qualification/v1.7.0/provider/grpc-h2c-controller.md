@@ -7,7 +7,7 @@ The pool keeps protocol `HTTP` and uses cleartext HTTP/2 for traffic to its
 members. Ordinary Service ports on the same Gateway continue to use stock HTTP
 pools. The existing listener and health monitor profiles still apply.
 
-Before a pool operation sends `backend_h2c`, the controller reads
+Before enabling h2c or reactivating an h2c pool, the controller reads
 `GET /lbaas/providers/{driver}/gateway_capabilities` on the authenticated Octavia
 endpoint. The driver must advertise `backend_h2c_v1`. An explicit negative
 response for a requested h2c pool sets the affected route parent's
@@ -16,10 +16,11 @@ response for a requested h2c pool sets the affected route parent's
 observation.
 
 When an already managed Service port changes protocol, the controller disables
-the old members before updating the owned pool. Removing the annotation sends
-`backend_h2c: false` if the existing pool still has h2c enabled. The controller
-observes the pool change before restoring members. The predicate stays in place
-during the transition.
+the old members before updating the owned pool. Removing `appProtocol` from the
+Service port clears an existing `backend_h2c: true` setting, including after
+regional enrollment ends. The controller observes the new transport on the
+active pool before restoring members. A TLS mismatch drains the affected pool.
+Other pools on the Gateway can continue to reconcile.
 
 ## GRPCRoute exact method matching
 
