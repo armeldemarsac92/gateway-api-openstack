@@ -52,6 +52,8 @@ func TestKindUpstreamTCPTraffic(t *testing.T) {
 	switch selection {
 	case "traffic":
 		cases = []suite.ConformanceTest{tests.TCPRouteMultipleRoutesAttachment, tests.TCPRouteReferenceGrant}
+	case "weighted":
+		cases = []suite.ConformanceTest{tests.TCPRouteWeightedRouting}
 	case "status":
 		cases = kindTCPStatusCases
 	case "profile":
@@ -61,11 +63,11 @@ func TestKindUpstreamTCPTraffic(t *testing.T) {
 		options.ConformanceProfiles = []suite.ConformanceProfileName{suite.GatewayTCPConformanceProfileName}
 		cases = tests.ConformanceTests
 	default:
-		t.Fatal("HIBISCUS_TCP_CASES must be traffic, status or profile")
+		t.Fatal("HIBISCUS_TCP_CASES must be traffic, status, weighted or profile")
 	}
 	if selection != "profile" {
 		if baseDir == "" {
-			t.Fatal("HIBISCUS_TCP_CASES=traffic or status requires HIBISCUS_TCP_BASE_DIR with tcp-status-base.yaml")
+			t.Fatal("a focused TCP selection requires HIBISCUS_TCP_BASE_DIR with tcp-status-base.yaml")
 		}
 		options.TimeoutConfig = config.TimeoutConfig{NamespacesMustBeReady: 90 * time.Second}
 	}

@@ -141,7 +141,7 @@ type Member struct {
 	// ProviderID identifies the Node's server for read-only worker-port validation.
 	// It is not part of the Octavia member identity, which remains address and port.
 	ProviderID string
-	// Weight is an explicit UDP endpoint traffic weight. Zero uses the default
+	// Weight is an explicit TCP or UDP endpoint traffic weight. Zero uses the default
 	// weight for ready endpoints. Draining endpoints always use weight zero.
 	Weight int `json:",omitempty"`
 }
