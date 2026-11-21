@@ -260,6 +260,11 @@ func TestControllerEnvtest(t *testing.T) {
 		startManager(t, grpcConfig, provider)
 		testGRPCExactMethodRoute(t, apiClient, grpcConfig, provider)
 	})
+	if config.XBackendEnabled() {
+		t.Run("Experimental XBackend selects live Pod members", func(t *testing.T) {
+			testXBackendEndpointSelector(t, apiClient, statusConfig, statusProvider)
+		})
+	}
 	t.Run("HTTPRoute Service ReferenceGrant lifecycle", func(t *testing.T) {
 		testHTTPRouteServiceReferenceGrant(t, apiClient, cacheClient, config, gateway)
 	})

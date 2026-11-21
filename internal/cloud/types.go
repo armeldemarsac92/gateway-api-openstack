@@ -170,13 +170,19 @@ type HTTPPathMatch struct {
 	RequestHeaderOperations []HTTPHeaderOperation `json:",omitempty"`
 }
 
-// HTTPBackend groups the paths served by one Service port within one HTTPRoute.
+type HTTPBackendKind string
+
+const HTTPBackendKindXBackend HTTPBackendKind = "gateway.networking.x-k8s.io/XBackend"
+
+// HTTPBackend groups the paths served by one backend within one HTTPRoute.
+// The zero kind denotes a core Service port.
 // Unavailable marks an unusable target. Its matches retain their position and
 // its pool must contain no members.
 type HTTPBackend struct {
-	// InvalidReference distinguishes an unresolved reference from a valid Service without endpoints.
-	InvalidReference bool `json:",omitempty"`
-	BackendH2C       bool `json:",omitempty"`
+	// InvalidReference distinguishes an unresolved reference from a valid backend without endpoints.
+	InvalidReference bool            `json:",omitempty"`
+	BackendH2C       bool            `json:",omitempty"`
+	Kind             HTTPBackendKind `json:",omitempty"`
 	Namespace        string
 	Name             string
 	Port             int
@@ -199,7 +205,7 @@ type HTTPFixedRule struct {
 	Matches   []HTTPPathMatch
 }
 
-// HTTPWeightedTarget selects a Service pool by its index in RouteSpec.HTTPBackends.
+// HTTPWeightedTarget selects a backend pool by its index in RouteSpec.HTTPBackends.
 // A nil index reserves this share for HTTP 500 when the reference is unresolved.
 type HTTPWeightedTarget struct {
 	BackendIndex *int

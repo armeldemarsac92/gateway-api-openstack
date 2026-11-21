@@ -29,9 +29,11 @@ import (
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
@@ -417,6 +419,24 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 	status.resolvedReason = string(gatewayv1.RouteReasonResolvedRefs)
 	status.resolvedMessage = "All backend references are resolved"
 	for _, backend := range backends {
+		if key, xbackend := model.XBackendReference(route.Namespace, backend); xbackend && r.Config.XBackendEnabled() && model.HTTPProfileRouteKind(route) == model.HTTPRouteKind {
+			if backend.Port != nil {
+				*status = status.withBackendDiagnostic(model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: "backendRef.port must be omitted for XBackend"})
+				continue
+			}
+			object, err := graph.ReadXBackend(ctx, r.routePatchReader(), key)
+			if err != nil {
+				return err
+			}
+			var spec *gatewayx.BackendSpec
+			if object != nil {
+				spec = &object.Spec
+			}
+			if diagnostic := model.CheckXBackendTarget(key, spec, cloud.MemberModeEndpoint, r.Config.BackendH2C); diagnostic != nil {
+				*status = status.withBackendDiagnostic(*diagnostic)
+			}
+			continue
+		}
 		key, supported := model.BackendServiceReference(route.Namespace, backend)
 		if !supported {
 			*status = status.withBackendDiagnostic(model.Diagnostic{

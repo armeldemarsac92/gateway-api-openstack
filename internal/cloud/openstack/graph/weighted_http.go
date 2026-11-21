@@ -80,7 +80,7 @@ func (p *Provider) buildDesiredWeightedHTTPParts(spec cloud.RouteSpec) ([]desire
 					return invalid(errors.New("weighted HTTP targets must reference an authorized backend"))
 				}
 				backend := spec.HTTPBackends[index]
-				wanted.backendKey = openstackidentity.HTTPBackendKey(backend.Namespace, backend.Name, backend.Port)
+				wanted.backendKey = openstackidentity.HTTPBackendPoolKey(backend)
 				used[index] = true
 			}
 			part.weightedTargets = append(part.weightedTargets, wanted)

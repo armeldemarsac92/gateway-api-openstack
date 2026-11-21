@@ -259,11 +259,13 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 	for index, backend := range spec.HTTPBackends {
 		fixedResponse := p.fixedHTTPResponses && backend.InvalidReference
 		unavailable := backend.Unavailable || fixedResponse
-		if strings.TrimSpace(backend.Namespace) == "" || strings.TrimSpace(backend.Name) == "" || backend.Port < 1 || backend.Port > 65535 ||
+		validPort := backend.Port >= 1 && backend.Port <= 65535 || backend.Kind == cloud.HTTPBackendKindXBackend && backend.InvalidReference && backend.Port == 0
+		if strings.TrimSpace(backend.Namespace) == "" || strings.TrimSpace(backend.Name) == "" ||
+			(backend.Kind != "" && backend.Kind != cloud.HTTPBackendKindXBackend) || !validPort ||
 			len(backend.Matches) == 0 && !targetsUsed[index] || unavailable && len(backend.Members) != 0 {
-			return invalid(errors.New("each HTTP backend requires a Service namespace, name, valid port and a match or weighted reference, and an unavailable backend must have no members"))
+			return invalid(errors.New("each HTTP backend requires a supported reference and a match or weighted reference, and an unavailable backend must have no members"))
 		}
-		key := openstackidentity.HTTPBackendKey(backend.Namespace, backend.Name, backend.Port)
+		key := openstackidentity.HTTPBackendPoolKey(backend)
 		if backendKeys[key] {
 			return invalid(errors.New("duplicate HTTP backend within one route"))
 		}

@@ -48,15 +48,23 @@ const (
 // BackendGroup preserves one backendRef's contribution independently of endpoints.
 // Groups are not combined even when their Services or endpoints overlap.
 type BackendGroup struct {
-	Reference     gatewayv1.HTTPBackendRef
-	Weight        int32
-	Authorization BackendAuthorization
-	State         BackendState
-	Service       types.NamespacedName
-	ServiceUID    types.UID
-	Port          *corev1.ServicePort
-	Endpoints     []Endpoint
-	Diagnostic    *Diagnostic
+	Reference       gatewayv1.HTTPBackendRef
+	Weight          int32
+	Authorization   BackendAuthorization
+	State           BackendState
+	Service         types.NamespacedName
+	ServiceUID      types.UID
+	XBackend        types.NamespacedName
+	XBackendPort    int
+	XBackendUsesH2C bool
+	Port            *corev1.ServicePort
+	Endpoints       []Endpoint
+	Diagnostic      *Diagnostic
+}
+
+// UsesH2C reports the protocol selected by its backend kind.
+func (backend BackendGroup) UsesH2C() bool {
+	return backend.XBackendUsesH2C || ServicePortUsesH2C(backend.Port)
 }
 
 // Endpoint is a resolved address and port with the observed Kubernetes conditions.

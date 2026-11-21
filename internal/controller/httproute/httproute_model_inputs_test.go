@@ -34,6 +34,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
@@ -634,6 +635,8 @@ func (r *routeModelDependencyReader) Get(ctx context.Context, key client.ObjectK
 	switch object.(type) {
 	case *corev1.Service:
 		kind = "Service"
+	case *gatewayx.XBackend:
+		kind = "XBackend"
 	case *corev1.Namespace:
 		kind = "Namespace"
 	case *corev1.Node:
@@ -655,6 +658,8 @@ func (r *routeModelDependencyReader) List(ctx context.Context, list client.Objec
 		kind = "EndpointSlice"
 	case *gatewayv1.ReferenceGrantList:
 		kind = "ReferenceGrant"
+	case *corev1.PodList:
+		kind = "Pod"
 	case *corev1.NodeList:
 		return errors.New("Endpoint mode must not list Nodes")
 	}

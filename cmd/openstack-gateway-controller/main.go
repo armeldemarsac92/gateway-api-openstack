@@ -29,6 +29,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/discovery"
@@ -39,6 +40,7 @@ import (
 	controllermetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 	gatewayconsts "sigs.k8s.io/gateway-api/pkg/consts"
 
 	configv1alpha1 "github.com/gateway-api-openstack/gateway-api-openstack/api/v1alpha1"
@@ -165,9 +167,12 @@ func run(ctx context.Context) error {
 	utilruntime.Must(apiextensionsv1.AddToScheme(scheme))
 	utilruntime.Must(gatewayv1.Install(scheme))
 	utilruntime.Must(configv1alpha1.AddToScheme(scheme))
+	if controllerConfig.XBackendEnabled() {
+		utilruntime.Must(gatewayx.Install(scheme))
+	}
 
 	restConfig := ctrl.GetConfigOrDie()
-	if err := requireGatewayAPIs(restConfig, tlsSNIPassthrough); err != nil {
+	if err := requireGatewayAPIs(restConfig, tlsSNIPassthrough, controllerConfig.XBackendEnabled()); err != nil {
 		return err
 	}
 	manager, err := ctrl.NewManager(restConfig, ctrl.Options{
@@ -295,7 +300,7 @@ func configureOpenStackRequestMetrics(config *openstack.ClientConfig, registerer
 	return nil
 }
 
-func requireGatewayAPIs(restConfig *rest.Config, tlsSNIPassthrough bool) error {
+func requireGatewayAPIs(restConfig *rest.Config, tlsSNIPassthrough, xbackendEnabled bool) error {
 	discoveryClient, err := discovery.NewDiscoveryClientForConfig(restConfig)
 	if err != nil {
 		return fmt.Errorf("create Kubernetes discovery client: %w", err)
@@ -315,6 +320,15 @@ func requireGatewayAPIs(restConfig *rest.Config, tlsSNIPassthrough bool) error {
 	for _, required := range requiredResources {
 		if !slices.Contains(availableResources, required) {
 			return fmt.Errorf("required Gateway API resource %s is missing from %s; install the selected Gateway API %s bundle", required, gatewayv1.GroupVersion, gatewayconsts.BundleVersion)
+		}
+	}
+	if xbackendEnabled {
+		resources, err := discoveryClient.ServerResourcesForGroupVersion(gatewayx.GroupVersion.String())
+		if err != nil {
+			return fmt.Errorf("required Experimental XBackend API is unavailable; install the Gateway API %s Experimental bundle: %w", gatewayconsts.BundleVersion, err)
+		}
+		if !slices.ContainsFunc(resources.APIResources, func(resource metav1.APIResource) bool { return resource.Name == "xbackends" }) {
+			return fmt.Errorf("required Experimental API resource xbackends is missing from %s; install the Gateway API %s Experimental bundle", gatewayx.GroupVersion, gatewayconsts.BundleVersion)
 		}
 	}
 	return nil
