@@ -720,7 +720,7 @@ func TestGatewayMixedAndSharedPortListenersDoNotAuthorizeUDP(t *testing.T) {
 				if err != nil || listener.Protocol != gatewayv1.HTTPProtocolType {
 					t.Fatalf("existing HTTP listener = %#v, error = %v", listener, err)
 				}
-				setGatewayAcceptedListeners(gateway, gatewayv1.ListenerStatus{Name: listener.Name})
+				(&Reconciler{}).setGatewayAcceptedListeners(gateway, gatewayv1.ListenerStatus{Name: listener.Name})
 			} else {
 				if err == nil {
 					t.Fatal("Gateway accepted a listener from the unsupported mix")
@@ -774,7 +774,7 @@ func TestGatewayKeepsHTTPWhenMixedWithTCP(t *testing.T) {
 	if err != nil || listener.Protocol != gatewayv1.HTTPProtocolType {
 		t.Fatalf("listener = %#v, error = %v", listener, err)
 	}
-	setGatewayAcceptedListeners(gateway, gatewayv1.ListenerStatus{Name: listener.Name})
+	(&Reconciler{}).setGatewayAcceptedListeners(gateway, gatewayv1.ListenerStatus{Name: listener.Name})
 	accepted := meta.FindStatusCondition(gateway.Status.Conditions, string(gatewayv1.GatewayConditionAccepted))
 	if accepted == nil || accepted.Status != metav1.ConditionTrue || accepted.Reason != string(gatewayv1.GatewayReasonListenersNotValid) {
 		t.Fatalf("Gateway Accepted condition = %#v", accepted)
@@ -1060,5 +1060,30 @@ func programmedTestGateway(cfg Config) *gatewayv1.Gateway {
 			Reason:             string(gatewayv1.GatewayReasonProgrammed),
 			LastTransitionTime: metav1.Now(),
 		}}},
+	}
+}
+
+func TestGatewayWideFailurePreservesEnabledGRPCRouteKind(t *testing.T) {
+	cfg := testConfig()
+	cfg.BackendH2C, cfg.FixedHTTPResponses = true, true
+	gateway := &gatewayv1.Gateway{Spec: gatewayv1.GatewaySpec{
+		Infrastructure: &gatewayv1.GatewayInfrastructure{},
+		Listeners: []gatewayv1.Listener{{
+			Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80,
+			AllowedRoutes: &gatewayv1.AllowedRoutes{Kinds: []gatewayv1.RouteGroupKind{{Kind: "GRPCRoute"}}},
+		}},
+	}}
+	_, err := SupportedListenersForConfig(cfg, gateway)
+	if err == nil {
+		t.Fatal("spec.infrastructure should still be rejected")
+	}
+	(&Reconciler{Config: cfg}).setGatewayFailure(gateway, err)
+	status := gateway.Status.Listeners[0]
+	if len(status.SupportedKinds) != 1 || status.SupportedKinds[0].Kind != "GRPCRoute" {
+		t.Fatalf("supported kinds = %#v, want GRPCRoute", status.SupportedKinds)
+	}
+	resolved := meta.FindStatusCondition(status.Conditions, string(gatewayv1.ListenerConditionResolvedRefs))
+	if resolved == nil || resolved.Status != metav1.ConditionTrue || resolved.Reason != string(gatewayv1.ListenerReasonResolvedRefs) {
+		t.Fatalf("ResolvedRefs = %#v, want a resolved GRPCRoute kind", resolved)
 	}
 }

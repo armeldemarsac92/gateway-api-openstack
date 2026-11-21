@@ -881,12 +881,16 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 			}
 		case actual.monitor == nil:
 			nonPolicyPlan = append(nonPolicyPlan, routeMutation{kind: routeMutationCreateMonitor, parentID: pool.ID})
+		case actual.monitor.Type != desired.monitorType():
+			// The observer has already proved that this monitor belongs to
+			// the pool. Octavia requires replacement to change its type.
+			if !desired.spec.TCPHealthMonitor || actual.monitor.Type != monitors.TypeHTTP {
+				return nil, cloud.RouteState{}, fmt.Errorf("%w: health monitor %s has type %s", cloud.ErrOwnershipConflict, actual.monitor.ID, actual.monitor.Type)
+			}
+			nonPolicyPlan = append(nonPolicyPlan, routeMutation{kind: routeMutationDeleteMonitor, id: actual.monitor.ID, parentID: pool.ID})
 		default:
 			monitor := actual.monitor
 			state.MonitorID = monitor.ID
-			if monitor.Type != desired.monitorType() {
-				return nil, cloud.RouteState{}, fmt.Errorf("%w: health monitor %s has type %s", cloud.ErrOwnershipConflict, monitor.ID, monitor.Type)
-			}
 			httpDrift := monitor.Type == monitors.TypeHTTP && (monitor.URLPath != desired.healthMonitor.Path ||
 				monitor.HTTPMethod != http.MethodGet || monitor.ExpectedCodes != routeMonitorExpectedCodes)
 			if monitor.Delay != desired.healthMonitor.Delay || monitor.Timeout != desired.healthMonitor.Timeout ||

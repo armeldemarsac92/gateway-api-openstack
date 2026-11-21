@@ -84,6 +84,9 @@ func (r desiredRoute) monitorType() string {
 	if r.protocol() == cloud.ListenerProtocolUDP {
 		return monitors.TypeUDPConnect
 	}
+	if r.spec.TCPHealthMonitor {
+		return monitors.TypeTCP
+	}
 	return r.protocol()
 }
 

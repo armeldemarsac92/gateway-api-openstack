@@ -31,6 +31,7 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/audit"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 )
 
 func TestCollectOwnershipSnapshot(t *testing.T) {
@@ -118,6 +119,30 @@ func TestCollectOwnershipSnapshot(t *testing.T) {
 		if strings.Contains(string(encoded), privateValue) {
 			t.Fatalf("JSON snapshot exposes private identity value %q: %s", privateValue, encoded)
 		}
+	}
+}
+
+func TestCollectGRPCRouteOwnershipReport(t *testing.T) {
+	cfg := testConfig()
+	gateway := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "infra", Name: "edge", UID: "gateway-uid"}}
+	route := &gatewayv1.GRPCRoute{ObjectMeta: metav1.ObjectMeta{Namespace: "apps", Name: "echo", UID: "grpc-route-uid"}}
+	identity := controller.RouteIdentity(cfg, gateway, route)
+	controller.ApplyRouteBinding(cfg, route, identity)
+	reader := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(route).Build()
+	snapshot, err := CollectOwnershipSnapshot(t.Context(), reader, cfg)
+	if err != nil || len(snapshot.Records) != 1 {
+		t.Fatalf("GRPCRoute snapshot = %#v, error = %v", snapshot, err)
+	}
+	record := snapshot.Records[0]
+	if record.Identity != identity || len(record.Objects) != 1 || record.Objects[0] != (audit.ObjectReference{
+		APIVersion: gatewayv1.GroupVersion.String(), Kind: "GRPCRoute", Namespace: "apps", Name: "echo", UID: "grpc-route-uid",
+	}) {
+		t.Fatalf("incorrect GRPCRoute binding: %#v", record)
+	}
+	scope := audit.Scope{ClusterID: cfg.ClusterID, ControllerName: string(cfg.ControllerName), OpenStackProjectID: cfg.OpenStackProjectID}
+	report, err := audit.BuildReport(metav1.Now().Time, "test", scope, snapshot, audit.Inventory{})
+	if err != nil || report.Summary.KubernetesBindings != 1 {
+		t.Fatalf("BuildReport() summary = %#v, error = %v, want the GRPCRoute binding", report.Summary, err)
 	}
 }
 

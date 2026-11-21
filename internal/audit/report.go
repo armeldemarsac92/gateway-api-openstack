@@ -215,7 +215,7 @@ func objectMatchesIdentity(object ObjectReference, identity cloud.Identity, isRo
 		return false
 	}
 	if isRoute {
-		return (object.Kind == "HTTPRoute" || object.Kind == "TCPRoute" || object.Kind == "UDPRoute") &&
+		return (object.Kind == "HTTPRoute" || object.Kind == "GRPCRoute" || object.Kind == "TCPRoute" || object.Kind == "UDPRoute") &&
 			object.Namespace == identity.RouteNamespace &&
 			object.Name == identity.RouteName &&
 			object.UID == identity.RouteUID
