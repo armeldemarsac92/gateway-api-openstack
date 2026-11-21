@@ -57,11 +57,13 @@ func TestKindAmbientMesh(t *testing.T) {
 	}
 	extended := os.Getenv("HIBISCUS_AMBIENT_MESH_EXTENDED") == "1"
 	profileMode := "default"
+	reportKind := "core profile"
 	selectedServices := sets.New("echo")
 	// v1.7.0 attempts feature inference before it applies profile defaults.
 	selectedFeatures := suite.MeshHTTPConformanceProfile.CoreFeatures.Union(suite.MeshGRPCConformanceProfile.CoreFeatures)
 	if extended {
 		profileMode = "ambient-extended-study"
+		reportKind = "profile"
 		selectedServices.Insert("echo-v1", "echo-v2")
 		// Select every registered mesh case, including those requiring shared
 		// features outside the upstream mesh profile's Extended feature list.
@@ -160,7 +162,7 @@ func TestKindAmbientMesh(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Logf("Upstream profile results with Istio ambient:\n%s", data)
+		t.Logf("Upstream %s results with Istio ambient:\n%s", reportKind, data)
 	})
 	s.Setup(t, meshtests.MeshConformanceTests)
 	waypointKey := client.ObjectKey{Namespace: suite.MeshNamespace, Name: waypointName}
