@@ -12,6 +12,8 @@ The h2c-only workload overlay rendered five resources through the Magnum 23.0.0 
 
 ## Provider traffic and rollback
 
+An HTTP or HTTPS health monitor can specify HTTP/1.0 or HTTP/1.1 independently of the pool's gRPC traffic. The local probe received three HTTP/1.1 requests for `/healthz` on a dedicated port and then completed a gRPC call to the same member on its service port.
+
 Two local plaintext gRPC servers served both methods. The fixture used the public Octavia API, the stored graph, the Amphora worker renderer and HAProxy 3.0.19. With h2c enabled on pool A, the first method reached A and returned gRPC `OK` with its backend trailer. The second method returned HTTP 502 on pool B. Once B also selected h2c, the two calls reached their respective servers over one frontend connection, both with gRPC `OK` and the correct trailers. [Replay probe](probe-backend-h2c.py) · [Stock-provider control](stock-grpc.md#cleartext-backend-transport)
 
 Removing a provider from enrollment stops advertising the capability. Existing pools keep their transport. In the local trial, clearing B with `backend_h2c: false` restored its original HTTP 502 on the gRPC-only server while A continued serving gRPC. Reconcile affected workloads and drain or clear these pools before rolling a fleet back. On MariaDB 11.4.13 a pre-existing HTTP pool retained its protocol and gained the default value `false`. A locked update read saw the latest committed transport after a prior transaction snapshot. [Live Hibiscus ledger](../live-runs.md)

@@ -3,8 +3,10 @@
 
 import argparse
 from collections import Counter
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 import runpy
+import threading
 import unittest
 
 import grpc
@@ -14,6 +16,50 @@ stock = runpy.run_path(str(Path(__file__).with_name("stock-grpc.py")))
 
 
 class BackendH2C(stock["StockGRPC"]):
+    def test_dedicated_http11_monitor(self):
+        probed = threading.Event()
+        checks = []
+
+        class Health(BaseHTTPRequestHandler):
+            def do_GET(self):
+                checks.append((self.request_version, self.path, self.headers.get("Host")))
+                self.send_response(200)
+                self.end_headers()
+                if len(checks) >= 3:
+                    probed.set()
+
+            def log_message(self, *_):
+                pass
+
+        with HTTPServer((stock["LOOPBACK"], 0), Health) as server:
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                self.conf.config(group="api_settings", enabled_backend_h2c_providers=["amphora"])
+                service, method = stock["FIXTURE_SERVICE"], stock["FIXTURE_METHODS"][0]
+                calls = Counter()
+                backend_port = self._backend("A", calls, service, (method,))
+                lb, listener, port = self._listener("HTTP")
+                pool, = self._pools(lb, [backend_port], tls_enabled=False, backend_h2c=True)
+                member, = self.get(self.MEMBERS_PATH.format(pool_id=pool)).json["members"]
+                self.put(self.MEMBER_PATH.format(pool_id=pool, member_id=member["id"]),
+                         {"member": {"monitor_port": server.server_port}})
+                self.set_lb_status(lb)
+                self.create_health_monitor(pool, "HTTP", 1, 1, 2, 2, http_version=1.1,
+                                           url_path="/healthz", domain_name="health.example.test")
+                self.set_lb_status(lb)
+                self._exact_routes(lb, listener, [pool], [stock["rpc_path"](method, service)])
+                config = self.directory / "dedicated-monitor.cfg"
+                self._configure_amphora(self.directory, lb, config)
+                with self._run_proxy(config, self.directory / f"{lb}.sock"), stock["plaintext_channel"](port) as client:
+                    self.assertTrue(probed.wait(10), "three HTTP health checks did not arrive")
+                    self.assertEqual({("HTTP/1.1", "/healthz", "health.example.test")}, set(checks))
+                    self._assert_reply(client, method, "A", service)
+                    self.assertEqual({("A", method): 1}, calls)
+            finally:
+                server.shutdown()
+                thread.join()
+
     def test_pool_transport(self):
         calls = Counter()
         service = stock["FIXTURE_SERVICE"]
@@ -72,5 +118,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--haproxy", type=Path, required=True)
     BackendH2C.haproxy = parser.parse_args().haproxy.resolve(strict=True)
-    result = unittest.TextTestRunner(verbosity=2).run(BackendH2C("test_pool_transport"))
+    tests = unittest.TestSuite(BackendH2C(name) for name in
+                               ("test_pool_transport", "test_dedicated_http11_monitor"))
+    result = unittest.TextTestRunner(verbosity=2).run(tests)
     raise SystemExit(0 if result.wasSuccessful() else 1)
