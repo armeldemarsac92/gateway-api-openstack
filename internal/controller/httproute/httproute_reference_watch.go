@@ -59,7 +59,7 @@ func (r *Reconciler) enqueueHTTPRoutesForReferenceGrant(ctx context.Context, obj
 				continue
 			}
 			observed[query] = struct{}{}
-			routes, err := r.listRoutes(ctx, r.Client, client.InNamespace(query.Namespace), client.MatchingFields{field: value})
+			routes, err := r.listRoutes(ctx, client.InNamespace(query.Namespace), client.MatchingFields{field: value})
 			if err != nil {
 				log.FromContext(ctx).Error(err, "Could not list HTTPRoutes for ReferenceGrant", "referenceGrant", client.ObjectKeyFromObject(grant))
 				continue
@@ -77,7 +77,7 @@ func (r *Reconciler) enqueueHTTPRoutesForNamespace(ctx context.Context, object c
 	}
 	// The cache's namespace index bounds this read to possible consumers of the
 	// changed namespace. Parent lookups then avoid scanning all Gateways.
-	routes, err := r.listRoutes(ctx, r.Client, client.InNamespace(namespace.Name))
+	routes, err := r.listRoutes(ctx, client.InNamespace(namespace.Name))
 	if err != nil {
 		log.FromContext(ctx).Error(err, "Could not list HTTPRoutes for Namespace", "namespace", namespace.Name)
 		return nil

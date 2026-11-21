@@ -99,6 +99,11 @@ func testGRPCExactMethodRoute(t *testing.T, c client.Client, cfg controller.Conf
 		t.Fatal(err)
 	}
 	key := client.ObjectKeyFromObject(route)
+	defer func() {
+		if t.Failed() {
+			t.Logf("last observed GRPCRoute status: %+v", route.Status)
+		}
+	}()
 	waitForEnvtest(t, func(ctx context.Context) (bool, error) {
 		if err := c.Get(ctx, key, route); err != nil {
 			return false, err
@@ -149,6 +154,23 @@ func testGRPCExactMethodRoute(t *testing.T, c client.Client, cfg controller.Conf
 		}
 	}
 
+	// This younger catch-all must wait for the GRPCRoute to detach. Otherwise
+	// it could consume the unknown RPC that should reach the default 404.
+	fallback := envtestHTTPRoute(namespace, "z-http-fallback", gateway.Name, "grpc-infra-backend-v1")
+	fallback.Spec.Rules[0].BackendRefs[0].Port = ptr.To(gatewayv1.PortNumber(8080))
+	if err := c.Create(ctx, fallback); err != nil {
+		t.Fatal(err)
+	}
+	waitForEnvtest(t, func(ctx context.Context) (bool, error) {
+		if err := c.Get(ctx, client.ObjectKeyFromObject(fallback), fallback); err != nil {
+			return false, err
+		}
+		if len(fallback.Status.Parents) != 1 {
+			return false, nil
+		}
+		accepted := meta.FindStatusCondition(fallback.Status.Parents[0].Conditions, string(gatewayv1.RouteConditionAccepted))
+		return accepted != nil && accepted.Status == metav1.ConditionFalse && accepted.Reason == string(gatewayv1.RouteReasonNotAllowedByListeners), nil
+	})
 	if err := c.Delete(ctx, route); err != nil {
 		t.Fatal(err)
 	}

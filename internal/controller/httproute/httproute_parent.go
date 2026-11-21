@@ -174,7 +174,7 @@ func routeParentCandidates(route *gatewayv1.HTTPRoute, parent managedRouteParent
 			!slices.ContainsFunc(listener.AllowedRoutes.Kinds, func(ref gatewayv1.RouteGroupKind) bool {
 				return ref.Kind == kind && (ref.Group == nil || *ref.Group == gatewayv1.GroupName)
 			}) {
-			return nil, newRouteBuildError(routeErrorNotAllowed, "listener allowedRoutes does not include %s", kind)
+			continue
 		}
 		candidates = append(candidates, listener)
 	}

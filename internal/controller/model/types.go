@@ -36,6 +36,7 @@ type Input struct {
 	// OperatorHTTPS allows HTTPS sections admitted by the stock frontend profile.
 	OperatorHTTPS         bool
 	RequestHeaderModifier bool
+	BackendH2C            bool
 	Gateway               *gatewayv1.Gateway
 	Routes                []gatewayv1.HTTPRoute
 	Namespaces            []corev1.Namespace

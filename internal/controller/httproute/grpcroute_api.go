@@ -55,13 +55,22 @@ func (r *Reconciler) readRoute(ctx context.Context, reader client.Reader, key cl
 	return nil
 }
 
-func (r *Reconciler) listRoutes(ctx context.Context, reader client.Reader, opts ...client.ListOption) ([]gatewayv1.HTTPRoute, error) {
+func (r *Reconciler) listRoutes(ctx context.Context, opts ...client.ListOption) ([]gatewayv1.HTTPRoute, error) {
+	// The indexed cache returns a sentinel Continue value even for the entire result.
+	return r.readRoutes(ctx, r.Client, false, opts...)
+}
+
+func (r *Reconciler) listLiveRoutes(ctx context.Context) ([]gatewayv1.HTTPRoute, error) {
+	return r.readRoutes(ctx, r.APIReader, true)
+}
+
+func (r *Reconciler) readRoutes(ctx context.Context, reader client.Reader, requireComplete bool, opts ...client.ListOption) ([]gatewayv1.HTTPRoute, error) {
 	if r.kind() != model.GRPCRouteKind {
 		var list gatewayv1.HTTPRouteList
 		if err := reader.List(ctx, &list, opts...); err != nil {
 			return nil, err
 		}
-		if list.Continue != "" {
+		if requireComplete && list.Continue != "" {
 			return nil, fmt.Errorf("incomplete HTTPRoute list")
 		}
 		return list.Items, nil
@@ -70,7 +79,7 @@ func (r *Reconciler) listRoutes(ctx context.Context, reader client.Reader, opts 
 	if err := reader.List(ctx, &list, opts...); err != nil {
 		return nil, err
 	}
-	if list.Continue != "" {
+	if requireComplete && list.Continue != "" {
 		return nil, fmt.Errorf("incomplete GRPCRoute list")
 	}
 	routes := make([]gatewayv1.HTTPRoute, 0, len(list.Items))

@@ -210,6 +210,7 @@ func (r *Reconciler) collectRouteModelInputs(ctx context.Context, reader client.
 		return nil, err
 	}
 	input.RequestHeaderModifier = r.Config.RequestHeaderModifier
+	input.BackendH2C = r.Config.BackendH2C
 	if r.Config.OperatorHTTPS && slices.ContainsFunc(gateway.Spec.Listeners, func(l gatewayv1.Listener) bool { return l.Protocol == gatewayv1.HTTPSProtocolType }) {
 		listeners, err := gatewaycontroller.HTTPRouteListeners(r.Config, gateway)
 		if err != nil {

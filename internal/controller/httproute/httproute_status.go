@@ -335,13 +335,13 @@ func programmedRouteStatus() routeReconcileStatus {
 	return routeReconcileStatus{
 		accepted:          metav1.ConditionTrue,
 		acceptedReason:    string(gatewayv1.RouteReasonAccepted),
-		acceptedMessage:   "HTTPRoute is accepted by the Gateway",
+		acceptedMessage:   "Route is accepted by the Gateway",
 		resolved:          metav1.ConditionTrue,
 		resolvedReason:    string(gatewayv1.RouteReasonResolvedRefs),
 		resolvedMessage:   "All backend references are resolved",
 		programmed:        metav1.ConditionTrue,
 		programmedReason:  "Programmed",
-		programmedMessage: "Octavia configuration for the HTTPRoute is active",
+		programmedMessage: "Octavia configuration for the route is active",
 	}
 }
 
@@ -437,8 +437,13 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 		if err != nil {
 			return fmt.Errorf("get backend Service: %w", err)
 		}
-		if _, diagnostic := model.ResolveServicePort(&service, backend.Port); diagnostic != nil {
+		port, diagnostic := model.ResolveServicePort(&service, backend.Port, r.Config.BackendH2C)
+		if diagnostic != nil {
 			*status = status.withBackendDiagnostic(*diagnostic)
+		} else if model.HTTPProfileRouteKind(route) == model.GRPCRouteKind && !model.ServicePortUsesH2C(port) {
+			*status = status.withBackendDiagnostic(model.Diagnostic{
+				Reason: string(gatewayv1.RouteReasonUnsupportedProtocol), Message: "GRPCRoute requires kubernetes.io/h2c on the backend Service port",
+			})
 		}
 	}
 	return nil

@@ -24,13 +24,13 @@ import (
 	"slices"
 	"strings"
 
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	gatewaycontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
 // ObserveRouteGraph rebuilds every bound fragment from a complete cluster read.
@@ -166,11 +166,11 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 }
 
 func (r *Reconciler) liveGraphRoutes(ctx context.Context, identity cloud.Identity) ([]gatewayv1.HTTPRoute, error) {
-	http, err := r.forRouteKind(model.HTTPRouteKind).listRoutes(ctx, r.APIReader)
+	http, err := r.forRouteKind(model.HTTPRouteKind).listLiveRoutes(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list HTTPRoute graph fragments: %w", err)
 	}
-	grpc, err := r.forRouteKind(model.GRPCRouteKind).listRoutes(ctx, r.APIReader)
+	grpc, err := r.forRouteKind(model.GRPCRouteKind).listLiveRoutes(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list GRPCRoute graph fragments: %w", err)
 	}

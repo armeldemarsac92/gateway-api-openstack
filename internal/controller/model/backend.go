@@ -71,7 +71,7 @@ func resolveBackend(route *gatewayv1.HTTPRoute, reference gatewayv1.HTTPBackendR
 		group.Diagnostic = backendDiagnostic(gatewayv1.RouteReasonUnsupportedValue, "backend Service must use ClusterIP or NodePort type")
 		return group
 	}
-	port, diagnostic := ResolveServicePort(service, reference.Port)
+	port, diagnostic := ResolveServicePort(service, reference.Port, input.BackendH2C)
 	if diagnostic != nil {
 		group.Diagnostic = diagnostic
 		return group
@@ -140,12 +140,19 @@ func findBackendService(key types.NamespacedName, services []corev1.Service) *co
 }
 
 // ResolveServicePort resolves the referenced TCP port and HTTP appProtocol.
-func ResolveServicePort(service *corev1.Service, selected *gatewayv1.PortNumber) (*corev1.ServicePort, *Diagnostic) {
+func ResolveServicePort(service *corev1.Service, selected *gatewayv1.PortNumber, backendH2C bool) (*corev1.ServicePort, *Diagnostic) {
 	port, diagnostic := ResolveTCPServicePort(service, selected)
-	if diagnostic == nil && port.AppProtocol != nil && !slices.Contains([]string{"http", "kubernetes.io/http", "kubernetes.io/ws"}, *port.AppProtocol) {
+	if diagnostic == nil && port.AppProtocol != nil &&
+		!(backendH2C && ServicePortUsesH2C(port)) &&
+		!slices.Contains([]string{"http", "kubernetes.io/http", "kubernetes.io/ws"}, *port.AppProtocol) {
 		return nil, backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "backend Service appProtocol is not supported for HTTP forwarding")
 	}
 	return port, diagnostic
+}
+
+// ServicePortUsesH2C reports whether the Service port explicitly selects cleartext HTTP/2.
+func ServicePortUsesH2C(port *corev1.ServicePort) bool {
+	return port != nil && ptr.Deref(port.AppProtocol, "") == "kubernetes.io/h2c"
 }
 
 // ResolveTCPServicePort selects a TCP port regardless of the application protocol it transports.

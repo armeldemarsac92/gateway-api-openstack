@@ -47,7 +47,7 @@ func (r *Reconciler) enqueueHTTPRoutePeers(ctx context.Context, object client.Ob
 	route := &gatewayv1.HTTPRoute{Spec: gatewayv1.HTTPRouteSpec{CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: parents}}}
 	route.Namespace = object.GetNamespace()
 	for _, gatewayKey := range controller.ParentGatewayKeys(route) {
-		routes, err := r.listRoutes(ctx, r.Client, client.MatchingFields{controller.IndexHTTPRouteByParentGateway: gatewayKey})
+		routes, err := r.listRoutes(ctx, client.MatchingFields{controller.IndexHTTPRouteByParentGateway: gatewayKey})
 		if err != nil {
 			log.FromContext(ctx).Error(err, "Could not list HTTPRoutes for parent Gateway", "gateway", gatewayKey)
 			continue
@@ -85,7 +85,7 @@ func (r *Reconciler) enqueueHTTPRoutesForGatewayClass(ctx context.Context, objec
 func (r *Reconciler) addHTTPRoutesForGateway(ctx context.Context, gateway *gatewayv1.Gateway, keys map[types.NamespacedName]struct{}) {
 	gatewayKey := controller.ObjectKeyString(client.ObjectKeyFromObject(gateway))
 	for _, indexName := range []string{controller.IndexHTTPRouteByParentGateway, controller.IndexHTTPRouteByStatusGateway, controller.IndexHTTPRouteByBoundGateway} {
-		routes, err := r.listRoutes(ctx, r.Client, client.MatchingFields{indexName: gatewayKey})
+		routes, err := r.listRoutes(ctx, client.MatchingFields{indexName: gatewayKey})
 		if err != nil {
 			log.FromContext(ctx).Error(err, "Could not list HTTPRoutes for Gateway", "gateway", client.ObjectKeyFromObject(gateway))
 			continue
@@ -97,7 +97,7 @@ func (r *Reconciler) addHTTPRoutesForGateway(ctx context.Context, gateway *gatew
 }
 
 func (r *Reconciler) enqueueHTTPRoutesForServiceKey(ctx context.Context, serviceKey types.NamespacedName) []reconcile.Request {
-	direct, err := r.listRoutes(ctx, r.Client, client.MatchingFields{
+	direct, err := r.listRoutes(ctx, client.MatchingFields{
 		controller.IndexHTTPRouteByBackendService: controller.ObjectKeyString(serviceKey),
 	})
 	if err != nil {
@@ -121,7 +121,7 @@ func (r *Reconciler) enqueueHTTPRouteConsumers(ctx context.Context, routes []gat
 			// Routes sharing a parent need one indexed read per event,
 			// including when that read fails. Later events observe it again.
 			observedParents[gatewayKey] = struct{}{}
-			peers, err := r.listRoutes(ctx, r.Client, client.MatchingFields{controller.IndexHTTPRouteByParentGateway: gatewayKey})
+			peers, err := r.listRoutes(ctx, client.MatchingFields{controller.IndexHTTPRouteByParentGateway: gatewayKey})
 			if err != nil {
 				log.FromContext(ctx).Error(err, "Could not list HTTPRoutes sharing a Gateway", "gateway", gatewayKey)
 				continue
@@ -151,7 +151,7 @@ func (r *Reconciler) enqueueHTTPRoutesForNode(ctx context.Context, object client
 	if !ok {
 		return nil
 	}
-	routes, err := r.listRoutes(ctx, r.Client, client.MatchingFields{controller.IndexHTTPRouteByNodeBackend: controller.NodeBackendIndexValue})
+	routes, err := r.listRoutes(ctx, client.MatchingFields{controller.IndexHTTPRouteByNodeBackend: controller.NodeBackendIndexValue})
 	if err != nil {
 		log.FromContext(ctx).Error(err, "Could not list HTTPRoutes for Node", "node", node.Name)
 		return nil

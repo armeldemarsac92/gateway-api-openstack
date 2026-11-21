@@ -174,6 +174,7 @@ type HTTPPathMatch struct {
 type HTTPBackend struct {
 	// InvalidReference distinguishes an unresolved reference from a valid Service without endpoints.
 	InvalidReference bool `json:",omitempty"`
+	BackendH2C       bool `json:",omitempty"`
 	Namespace        string
 	Name             string
 	Port             int
@@ -230,6 +231,9 @@ type RouteSpec struct {
 	// Smaller ranks are evaluated first. Ranks must be distinct among ensured routes.
 	Precedence int
 	Members    []Member
+	// BackendH2C selects h2c for a scalar HTTP backend pool. Grouped routes
+	// carry transport on each HTTPBackend.
+	BackendH2C bool `json:",omitempty"`
 	// HTTPBackends carries the complete set of paths and backend groups when
 	// the HTTPRoute has several rules or alternative matches.
 	HTTPBackends      []HTTPBackend      `json:",omitempty"`
