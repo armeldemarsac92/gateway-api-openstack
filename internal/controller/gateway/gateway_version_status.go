@@ -30,6 +30,7 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 )
 
 func (r *Reconciler) setGatewayUnsupportedVersion(
@@ -66,6 +67,13 @@ func (r *Reconciler) setGatewayUnsupportedVersion(
 		controller.UnsupportedGatewayAPIVersionMessage,
 		gateway.Generation,
 	))
+	result, withdrawn, err := r.withdrawBoundTLS(ctx, gateway)
+	if usesHTTPSProfile(r.Config, gateway) {
+		r.applyHTTPSListenerStatus(gateway, scope.original.Status, nil, &graph.TLSAuthorizationChanged{Ports: httpsPorts(gateway)})
+	}
+	if err != nil || !withdrawn {
+		return result, err
+	}
 	programmed := meta.FindStatusCondition(gateway.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed))
 	if programmed == nil || programmed.ObservedGeneration != gateway.Generation {
 		controller.SetCondition(&gateway.Status.Conditions, controller.Condition(
@@ -76,7 +84,7 @@ func (r *Reconciler) setGatewayUnsupportedVersion(
 			gateway.Generation,
 		))
 	}
-	result := ctrl.Result{}
+	result = ctrl.Result{}
 	if recheckVersion {
 		result.RequeueAfter = controller.GatewayAPIVersionRequeueAfter(gateway.UID)
 	}

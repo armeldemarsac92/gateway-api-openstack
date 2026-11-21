@@ -73,11 +73,11 @@ func (r *Reconciler) cleanupGateway(ctx context.Context, scope *gatewayScope) (c
 		return r.handleGatewayDeleteFailure(scope, providerErr)
 	}
 	if result.Gateway.AddressIssue != "" {
-		listener, err := Validate(scope.gateway)
+		listeners, err := SupportedListenersForConfig(r.Config, scope.gateway)
 		if err != nil {
 			return ctrl.Result{}, errors.Join(errGatewayChanged, err)
 		}
-		if err := r.setGatewayAddressUnusable(ctx, scope.gateway, listener, result.Gateway, result.Gateway.Outcome); err != nil {
+		if err := r.setGatewayAddressUnusable(ctx, scope.gateway, listeners[0], result.Gateway, result.Gateway.Outcome); err != nil {
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{RequeueAfter: controller.OpenStackResyncAfter(r.Config.OpenStackResyncInterval, scope.gateway.UID)}, nil

@@ -19,6 +19,7 @@ package gateway
 import (
 	"context"
 	"errors"
+	"slices"
 
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -106,6 +107,9 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 		gatewayController.Watches(route, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForRoute),
 			builder.WithPredicates(controller.RouteForGatewayPredicate(r.Config)))
 	}
+	if r.Config.OperatorHTTPS {
+		gatewayController.Watches(&gatewayv1.ReferenceGrant{}, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForCertificateGrant))
+	}
 	return gatewayController.
 		Watches(
 			&gatewayv1.GatewayClass{},
@@ -141,6 +145,40 @@ func (r *Reconciler) gatewayRequestsForParameters(ctx context.Context, object cl
 		for _, gateway := range gateways.Items {
 			if !controller.HasGatewayTopologyBinding(r.Config, &gateway) && gateway.DeletionTimestamp.IsZero() {
 				keys[client.ObjectKeyFromObject(&gateway)] = struct{}{}
+			}
+		}
+	}
+	return controller.SortedRequests(keys)
+}
+
+func (r *Reconciler) gatewayRequestsForCertificateGrant(ctx context.Context, object client.Object) []reconcile.Request {
+	grant, ok := object.(*gatewayv1.ReferenceGrant)
+	if !ok || !slices.ContainsFunc(grant.Spec.To, func(target gatewayv1.ReferenceGrantTo) bool {
+		return target.Group == "" && target.Kind == "Secret"
+	}) {
+		return nil
+	}
+	keys := make(map[types.NamespacedName]struct{})
+	namespaces := make(map[gatewayv1.Namespace]bool)
+	for _, source := range grant.Spec.From {
+		if source.Group != gatewayv1.GroupName || source.Kind != "Gateway" || namespaces[source.Namespace] {
+			continue
+		}
+		namespaces[source.Namespace] = true
+		var gateways gatewayv1.GatewayList
+		if err := r.List(ctx, &gateways, client.InNamespace(string(source.Namespace))); err != nil {
+			log.FromContext(ctx).Error(err, "Could not list Gateways for certificate ReferenceGrant")
+			continue
+		}
+		for i := range gateways.Items {
+			gateway := &gateways.Items[i]
+			if slices.ContainsFunc(gateway.Spec.Listeners, func(listener gatewayv1.Listener) bool {
+				return listener.Protocol == gatewayv1.HTTPSProtocolType && listener.TLS != nil &&
+					slices.ContainsFunc(listener.TLS.CertificateRefs, func(ref gatewayv1.SecretObjectReference) bool {
+						return ref.Namespace != nil && string(*ref.Namespace) == grant.Namespace
+					})
+			}) {
+				keys[client.ObjectKeyFromObject(gateway)] = struct{}{}
 			}
 		}
 	}

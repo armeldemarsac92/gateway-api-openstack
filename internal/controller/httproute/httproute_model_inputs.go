@@ -57,7 +57,7 @@ type routeGraphCandidate struct {
 
 func (r *Reconciler) observeRouteGraphAdmission(ctx context.Context, gateway *gatewayv1.Gateway, routes []gatewayv1.HTTPRoute, requested *gatewayv1.HTTPRoute) (routeGraphAdmission, error) {
 	identity := controller.GatewayIdentity(r.Config, gateway)
-	http, _ := gatewaycontroller.HTTPListeners(gateway)
+	http, _ := gatewaycontroller.HTTPRouteListeners(r.Config, gateway)
 	admission := routeGraphAdmission{
 		bindings: r.routeGraphBindings(routes, identity),
 		eligible: make(map[types.NamespacedName]routeGraphCandidate),
@@ -111,7 +111,7 @@ func (r *Reconciler) collectGraphRouteModelInputs(ctx context.Context, gateway *
 	if err != nil {
 		return nil, err
 	}
-	inputs, err := collectRouteModelInputs(ctx, r.APIReader, gateway, admission.active, admission.namespaces)
+	inputs, err := r.collectRouteModelInputs(ctx, r.APIReader, gateway, admission.active, admission.namespaces)
 	if err != nil {
 		return nil, err
 	}
@@ -137,10 +137,22 @@ func (r *Reconciler) validateGraphRouteModel(ctx context.Context, inputs *routeM
 	return inputs.validateBackends(ctx, r.APIReader)
 }
 
-func collectRouteModelInputs(ctx context.Context, reader client.Reader, gateway *gatewayv1.Gateway, routes []gatewayv1.HTTPRoute, namespaces []corev1.Namespace) (*routeModelInputs, error) {
+func (r *Reconciler) collectRouteModelInputs(ctx context.Context, reader client.Reader, gateway *gatewayv1.Gateway, routes []gatewayv1.HTTPRoute, namespaces []corev1.Namespace) (*routeModelInputs, error) {
 	input, err := graph.CollectBackendInputsWithNamespaces(ctx, reader, gateway, routes, namespaces)
 	if err != nil {
 		return nil, err
+	}
+	if r.Config.OperatorHTTPS && slices.ContainsFunc(gateway.Spec.Listeners, func(l gatewayv1.Listener) bool { return l.Protocol == gatewayv1.HTTPSProtocolType }) {
+		listeners, err := gatewaycontroller.HTTPRouteListeners(r.Config, gateway)
+		if err != nil {
+			return nil, err
+		}
+		input.Gateway = gateway.DeepCopy()
+		input.Gateway.Spec.Listeners = make([]gatewayv1.Listener, 0, len(listeners))
+		for _, listener := range listeners {
+			input.Gateway.Spec.Listeners = append(input.Gateway.Spec.Listeners, *listener)
+		}
+		input.OperatorHTTPS = true
 	}
 	logical, err := model.Compile(input)
 	if err != nil {

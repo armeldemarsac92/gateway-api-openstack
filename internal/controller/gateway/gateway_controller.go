@@ -39,6 +39,8 @@ import (
 
 // Reconciler owns the Gateway-scoped Octavia resources.
 type Reconciler struct {
+	// Certificates resolves operator-approved certificate references from live metadata.
+	Certificates CertificateResolver
 	// Client reads and patches cached Kubernetes objects.
 	client.Client
 	// Writer rebuilds and reconciles the complete Gateway graph.
@@ -83,6 +85,10 @@ func (r *Reconciler) Reconcile(
 			result = ctrl.Result{}
 			retErr = errors.Join(retErr, scope.patchCause, err)
 		}
+		if retErr == nil && !result.Requeue && scope.gateway.DeletionTimestamp.IsZero() &&
+			usesHTTPSProfile(r.Config, scope.gateway) && (result.RequeueAfter == 0 || result.RequeueAfter > httpsPollInterval) {
+			result.RequeueAfter = httpsPollInterval
+		}
 	}()
 
 	if !scope.gateway.DeletionTimestamp.IsZero() {
@@ -92,6 +98,9 @@ func (r *Reconciler) Reconcile(
 }
 
 func (r *Reconciler) reconcileDelete(ctx context.Context, scope *gatewayScope) (ctrl.Result, error) {
+	if result, withdrawn, err := r.withdrawBoundTLS(ctx, scope.gateway); err != nil || !withdrawn {
+		return result, err
+	}
 	result, err := r.cleanupGateway(ctx, scope)
 	if err != nil || result.RequeueAfter > 0 {
 		return result, err
@@ -139,6 +148,9 @@ func (r *Reconciler) reconcileRejectedGateway(
 	decision gatewayPhaseDecision,
 ) (ctrl.Result, error) {
 	r.setGatewayFailure(scope.gateway, decision.validation)
+	if result, withdrawn, err := r.withdrawBoundTLS(ctx, scope.gateway); err != nil || !withdrawn {
+		return result, err
+	}
 	var validation *gatewayValidationError
 	if errors.As(decision.validation, &validation) && validation.programmedReason != "" {
 		// Address validation here precedes the initial binding.
@@ -206,9 +218,18 @@ func (r *Reconciler) reconcileGatewayGraph(
 	decision gatewayPhaseDecision,
 ) (ctrl.Result, error) {
 	graphResult, err := r.ensureGateway(ctx, scope.gateway)
+	if errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) {
+		return r.setGatewayUnsupportedVersion(ctx, scope)
+	}
+	var changedTLS *graph.TLSAuthorizationChanged
+	var tlsIssues map[gatewayv1.SectionName]httpsListenerIssue
+	if usesHTTPSProfile(r.Config, scope.gateway) {
+		tlsIssues = r.listenerTLSIssues(ctx, scope.gateway)
+		defer func() { r.applyHTTPSListenerStatus(scope.gateway, scope.original.Status, tlsIssues, changedTLS) }()
+	}
 	if err != nil {
-		if errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) {
-			return r.setGatewayUnsupportedVersion(ctx, scope)
+		if errors.As(err, &changedTLS) {
+			return ctrl.Result{RequeueAfter: time.Second}, nil
 		}
 		if errors.Is(err, errGatewayChanged) {
 			return ctrl.Result{}, err
@@ -238,7 +259,7 @@ func (r *Reconciler) reconcileGatewayGraph(
 	// includes removing the last hostname restriction from a previously
 	// shared listener. Wait for the graph before certifying a new generation.
 	progress := gatewayResult.Outcome
-	if decision.listener.Protocol == gatewayv1.HTTPProtocolType && graphResult.Outcome.State == cloud.OutcomeProgressing && progress.State == cloud.OutcomeReady {
+	if listenerFamily(decision.listener) == gatewayv1.HTTPProtocolType && graphResult.Outcome.State == cloud.OutcomeProgressing && progress.State == cloud.OutcomeReady {
 		programmed := meta.FindStatusCondition(scope.gateway.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed))
 		if programmed == nil || programmed.Status != metav1.ConditionTrue || programmed.ObservedGeneration != scope.gateway.Generation {
 			progress = graphResult.Outcome
@@ -248,7 +269,8 @@ func (r *Reconciler) reconcileGatewayGraph(
 		// A provider result must carry current proof for every desired port
 		// before the aggregate Gateway can be reported as programmed.
 		for _, listener := range scope.gateway.Spec.Listeners {
-			if listener.Protocol == decision.listener.Protocol && progress.State == cloud.OutcomeReady && !slices.Contains(gatewayResult.ScopedListenerReadyPorts, int(listener.Port)) {
+			_, hasIssue := tlsIssues[listener.Name]
+			if !hasIssue && listenerFamily(&listener) == listenerFamily(decision.listener) && progress.State == cloud.OutcomeReady && !slices.Contains(gatewayResult.ScopedListenerReadyPorts, int(listener.Port)) {
 				progress = cloud.ProgressingOutcome("Waiting for listener readiness", time.Second)
 				break
 			}

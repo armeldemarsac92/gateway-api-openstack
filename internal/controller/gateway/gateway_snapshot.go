@@ -97,7 +97,7 @@ func (r *Reconciler) observeGatewayMutationSnapshot(
 		return nil, errors.Join(errGatewayChanged, err)
 	}
 
-	listeners, validationErr := SupportedListeners(&gateway)
+	listeners, validationErr := SupportedListenersForConfig(r.Config, &gateway)
 	if validationErr != nil {
 		return nil, errGatewayChanged
 	}
@@ -237,10 +237,11 @@ func (r *Reconciler) decideGatewayPhase(scope *gatewayScope) gatewayPhaseDecisio
 		return gatewayPhaseDecision{phase: gatewayPhaseInvalidBinding, validation: err}
 	}
 
-	listener, err := Validate(gateway)
+	listeners, err := SupportedListenersForConfig(r.Config, gateway)
 	if err != nil {
 		return gatewayPhaseDecision{phase: gatewayPhaseInvalidSpec, validation: err}
 	}
+	listener := listeners[0]
 	if !r.gatewayBindingComplete(gateway) {
 		if err := validateAddresses(gateway.Spec.Addresses); err != nil {
 			return gatewayPhaseDecision{phase: gatewayPhaseInvalidSpec, validation: err}
@@ -267,27 +268,27 @@ func (r *Reconciler) gatewayBindingComplete(gateway *gatewayv1.Gateway) bool {
 
 func (r *Reconciler) gatewayListenerNeedsReplacement(gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) bool {
 	storedPort := gateway.Annotations[r.Config.GatewayListenerPortAnnotation()]
-	return storedPort != "" && (storedPort != r.desiredListenerPort(gateway, listener) || r.boundListenerProtocol(gateway) != listener.Protocol)
+	return storedPort != "" && (storedPort != r.desiredListenerPort(gateway, listener) || r.boundListenerProtocol(gateway) != listenerFamily(listener))
 }
 
 func (r *Reconciler) desiredListenerPort(gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) string {
 	stored := gateway.Annotations[r.Config.GatewayListenerPortAnnotation()]
-	if stored != "" && r.boundListenerProtocol(gateway) == listener.Protocol && r.gatewayUsesListenerScope(gateway) {
+	if stored != "" && r.boundListenerProtocol(gateway) == listenerFamily(listener) && r.gatewayUsesListenerScope(gateway) {
 		return stored
 	}
 	return strconv.Itoa(int(listener.Port))
 }
 
 func (r *Reconciler) gatewayUsesListenerScope(gateway *gatewayv1.Gateway) bool {
-	return requestsListenerScope(gateway) || controller.GatewayListenerScope(r.Config, gateway) != ""
+	return r.requestsListenerScope(gateway) || controller.GatewayListenerScope(r.Config, gateway) != ""
 }
 
 func (r *Reconciler) gatewayNeedsListenerScope(gateway *gatewayv1.Gateway) bool {
-	return requestsListenerScope(gateway) && controller.GatewayListenerScope(r.Config, gateway) == ""
+	return r.requestsListenerScope(gateway) && controller.GatewayListenerScope(r.Config, gateway) == ""
 }
 
-func requestsListenerScope(gateway *gatewayv1.Gateway) bool {
-	return hasMultipleTransportListeners(gateway) || HasMultipleHTTPListenerPorts(gateway)
+func (r *Reconciler) requestsListenerScope(gateway *gatewayv1.Gateway) bool {
+	return usesHTTPSProfile(r.Config, gateway) || hasMultipleTransportListeners(gateway) || HasMultipleHTTPListenerPorts(gateway)
 }
 
 func (r *Reconciler) boundListenerProtocol(gateway *gatewayv1.Gateway) gatewayv1.ProtocolType {
@@ -379,15 +380,16 @@ func (r *Reconciler) observeGatewayCleanupSnapshot(
 	if err := r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
 		return nil, err
 	}
-	listener, validationErr := Validate(&gateway)
+	listeners, validationErr := SupportedListenersForConfig(r.Config, &gateway)
 	if validationErr != nil {
 		snapshot.disposition = gatewayCleanupRebuild
 		return snapshot, nil
 	}
+	listener := listeners[0]
 	if r.gatewayListenerNeedsReplacement(&gateway, listener) {
 		snapshot.disposition = gatewayCleanupRebuild
 		snapshot.listenerPort = strconv.Itoa(int(listener.Port))
-		snapshot.listenerProtocol = listener.Protocol
+		snapshot.listenerProtocol = listenerFamily(listener)
 		return snapshot, nil
 	}
 

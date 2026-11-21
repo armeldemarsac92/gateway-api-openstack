@@ -45,6 +45,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack"
 	openstackobservability "github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/observability"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/certificates"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gatewayclass"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
@@ -80,6 +81,7 @@ func run(ctx context.Context) error {
 	var (
 		controllerName    string
 		gatewayAPIChannel string
+		certificateMap    string
 		clusterID         string
 		region            string
 		microversion      string
@@ -99,6 +101,7 @@ func run(ctx context.Context) error {
 	zapOptions.BindFlags(flag.CommandLine)
 	flag.StringVar(&controllerName, "controller-name", envOr("GATEWAY_OPENSTACK_CONTROLLER_NAME", configv1alpha1.GroupName+"/gateway-api-openstack"), "Gateway API controllerName for this installation")
 	flag.StringVar(&gatewayAPIChannel, "gateway-api-channel", envOr("GATEWAY_OPENSTACK_GATEWAY_API_CHANNEL", "standard"), "Gateway API release channel: standard or experimental")
+	flag.StringVar(&certificateMap, "tls-certificate-map", envOr("GATEWAY_OPENSTACK_TLS_CERTIFICATE_MAP", ""), "operator-managed TLS revision map for HTTPS listeners")
 	flag.StringVar(&clusterID, "cluster-id", envOr("GATEWAY_OPENSTACK_CLUSTER_ID", ""), "stable unique identifier for this Kubernetes cluster (required)")
 	flag.StringVar(&region, "openstack-region", envOr("OS_REGION_NAME", ""), "OpenStack region; defaults to clouds.yaml or OS_REGION_NAME")
 	flag.StringVar(&microversion, "octavia-microversion", "2.5", "Octavia API microversion (2.5 or later is required for resource tags)")
@@ -132,6 +135,7 @@ func run(ctx context.Context) error {
 		ControllerName:          gatewayv1.GatewayController(controllerName),
 		ControllerVersion:       version,
 		GatewayAPIChannel:       gatewayAPIChannel,
+		OperatorHTTPS:           certificateMap != "",
 		ClusterID:               clusterID,
 		OpenStackResyncInterval: resyncInterval,
 	}
@@ -189,6 +193,20 @@ func run(ctx context.Context) error {
 		APIReader:        manager.GetAPIReader(),
 		Recorder:         eventRecorder,
 		Config:           controllerConfig,
+	}
+	if controllerConfig.OperatorHTTPS {
+		gatewayReconciler.Certificates = &certificates.Resolver{
+			Path: certificateMap, Reader: manager.GetAPIReader(),
+			ClusterID: controllerConfig.ClusterID, ProjectID: serviceClients.ProjectID, Region: serviceClients.Region,
+			DiscoverEndpoint: func() (string, error) {
+				// Catalog availability can change while other Gateway listeners continue serving.
+				keyManager, err := serviceClients.NewKeyManagerClient()
+				if err != nil {
+					return "", err
+				}
+				return keyManager.Endpoint, nil
+			},
+		}
 	}
 	routeReconciler := &httproute.Reconciler{
 		Client:      manager.GetClient(),

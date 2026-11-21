@@ -55,6 +55,10 @@ Move traffic for each additional hostname to a separately supported Gateway or r
 
 The two-version readback kept the surviving VIP, route and member port after this migration. [Tested singleton downgrade](qualification/v1.7.0/provider/http-disjoint-sections.md#verified-singleton-downgrade)
 
+## Rotate or withdraw a terminating HTTPS certificate
+
+Keep the current controller running during withdrawal. Check the certificate on a fresh TLS connection, the stock listener's enabled and provisioning state, and the sibling ports. Leave old immutable Barbican objects available until every listener has released them. [Recovery, certificate rotation and downgrade](operator-https.md#rotate-revoke-and-roll-back)
+
 ## Roll back a Gateway with distinct HTTP ports
 
 Complete the controller rollout before adding a second HTTP port. Once an HTTP Gateway enrolls in per-port bindings, those bindings persist even after its spec returns to a single port. The previous controller rejects the enrolled Gateway and route bindings. Its Gateway status can lose the reported address while the old provider graph still exists. [Two-version readback](qualification/v1.7.0/provider/http-distinct-ports.md#rollback)

@@ -76,15 +76,20 @@ func (p *Provider) GetGateway(
 		return cloud.GatewayProgressingResult("Octavia load balancer is administratively disabled", p.pollInterval), true, nil
 	}
 
-	listenerList, markedProtocol, err := p.listGatewayListeners(ctx, loadBalancer, false)
+	inventory, markedProtocol, err := p.listGatewayListeners(ctx, loadBalancer)
 	if err != nil {
 		return cloud.GatewayResult{}, false, err
 	}
+	listenerList := inventory.Items
 	var observed []listeners.Listener
 	var unverifiedAnchor int
-	if markedProtocol == cloud.ListenerProtocolTCP {
+	https := slices.ContainsFunc(listenerList, func(listener listeners.Listener) bool { return listener.Protocol == terminatedHTTPS })
+	if https && markedProtocol != cloud.ListenerProtocolHTTP {
+		return cloud.GatewayResult{}, false, fmt.Errorf("%w: HTTPS listener lacks its scoped HTTP binding", cloud.ErrOwnershipConflict)
+	}
+	if markedProtocol == cloud.ListenerProtocolTCP || https {
 		// Identity-only reads do not have the Gateway's frozen port. Check
-		// the inventory's shape, but withhold readiness for a legacy anchor.
+		// the inventory's shape and withhold readiness for a legacy anchor.
 		for _, listener := range listenerList {
 			if !slices.ContainsFunc(listener.Tags, func(tag string) bool { return scopedPortTagProtocol(tag) != "" }) {
 				unverifiedAnchor = listener.ProtocolPort
@@ -93,6 +98,9 @@ func (p *Provider) GetGateway(
 		}
 	}
 	if markedProtocol != "" {
+		if err := requireListenerDefaultPoolInventory(loadBalancer.ID, inventory); err != nil {
+			return cloud.GatewayResult{}, false, err
+		}
 		observed, err = p.managedScopedListeners(identity, loadBalancer, listenerList, markedProtocol, unverifiedAnchor)
 	} else {
 		listener, singleErr := p.managedGatewayListener(identity, loadBalancer.ID, listenerList)
@@ -103,6 +111,12 @@ func (p *Provider) GetGateway(
 	}
 	if err != nil {
 		return cloud.GatewayResult{}, false, err
+	}
+	if https {
+		return cloud.GatewayResult{
+			State:   cloud.GatewayState{LoadBalancerID: loadBalancer.ID, VIPPortID: loadBalancer.VipPortID, VIPAddress: loadBalancer.VipAddress},
+			Outcome: p.progressingOutcome("HTTPS readiness requires current certificate authorization"),
+		}, true, nil
 	}
 	if unverifiedAnchor != 0 {
 		return cloud.GatewayResult{

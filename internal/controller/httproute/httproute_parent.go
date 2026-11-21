@@ -163,8 +163,8 @@ func routeParentCandidates(route *gatewayv1.HTTPRoute, parent managedRouteParent
 		if !selects(*listener) {
 			continue
 		}
-		if listener.Protocol != gatewayv1.HTTPProtocolType || listener.TLS != nil {
-			return nil, newRouteBuildError(routeErrorUnsupported, "parent listener is not a supported plain HTTP listener")
+		if (listener.Protocol != gatewayv1.HTTPProtocolType && listener.Protocol != gatewayv1.HTTPSProtocolType) || (listener.Protocol == gatewayv1.HTTPProtocolType && listener.TLS != nil) {
+			return nil, newRouteBuildError(routeErrorUnsupported, "parent listener does not support HTTPRoute")
 		}
 		if listener.AllowedRoutes != nil && len(listener.AllowedRoutes.Kinds) != 0 &&
 			!slices.ContainsFunc(listener.AllowedRoutes.Kinds, func(kind gatewayv1.RouteGroupKind) bool {
@@ -267,7 +267,7 @@ func (r *Reconciler) liveBoundRouteAttachment(ctx context.Context, route *gatewa
 	if string(gateway.UID) != identity.GatewayUID {
 		return boundHTTPAttachment{}, newRouteBuildError(routeErrorNoMatchingParent, "the bound Gateway was replaced"), nil
 	}
-	http, _ := gatewaycontroller.HTTPListeners(&gateway)
+	http, _ := gatewaycontroller.HTTPRouteListeners(r.Config, &gateway)
 	namespaces, err := readRouteNamespaces(ctx, r.APIReader, http, route.Namespace)
 	if err != nil {
 		return boundHTTPAttachment{}, nil, err

@@ -120,7 +120,7 @@ func (r *Reconciler) buildRouteModelWithReader(
 	if _, err := validateRouteStructure(route); err != nil {
 		return cloud.RouteSpec{}, err
 	}
-	http, err := gatewaycontroller.SupportedListeners(gateway)
+	http, err := gatewaycontroller.ValidatedHTTPRouteListeners(r.Config, gateway)
 	if err != nil {
 		return cloud.RouteSpec{}, newRouteBuildError(routeErrorUnsupported, "%s", err)
 	}
@@ -132,7 +132,7 @@ func (r *Reconciler) buildRouteModelWithReader(
 	if err != nil {
 		return cloud.RouteSpec{}, err
 	}
-	inputs, err := collectRouteModelInputs(ctx, reader, gateway, []gatewayv1.HTTPRoute{*route}, namespaces)
+	inputs, err := r.collectRouteModelInputs(ctx, reader, gateway, []gatewayv1.HTTPRoute{*route}, namespaces)
 	if err != nil {
 		return cloud.RouteSpec{}, err
 	}
@@ -222,7 +222,7 @@ func supportedRouteModel(logical model.Gateway, selected gatewayv1.Listener, mod
 	var listener *model.Listener
 	for i := range logical.Listeners {
 		candidate := &logical.Listeners[i]
-		if candidate.Name == selected.Name && candidate.Port == selected.Port && candidate.Protocol == gatewayv1.HTTPProtocolType && listener == nil {
+		if candidate.Name == selected.Name && candidate.Port == selected.Port && candidate.Protocol == selected.Protocol && listener == nil {
 			listener = candidate
 			continue
 		}

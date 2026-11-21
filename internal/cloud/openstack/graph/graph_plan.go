@@ -18,6 +18,7 @@ package graph
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -65,8 +66,9 @@ func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual obs
 	var listenerChanges []graphMutation
 	var listenersByPort map[int]listeners.Listener
 	var portByListenerID map[string]int
+	var retiringListeners map[string]bool
 	if scopedHTTP {
-		listenersByPort, portByListenerID, listenerChanges = scopedHTTPListenerPlan(desired, actual)
+		listenersByPort, portByListenerID, retiringListeners, listenerChanges = scopedHTTPListenerPlan(desired, actual)
 		if desired.spec.Gateway.Disposition == cloud.GraphEnsure {
 			result.Gateway = scopedHTTPGatewayResult(desired, actual, p.progressingOutcome("Waiting for the Gateway listeners"))
 		}
@@ -131,7 +133,8 @@ func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual obs
 			}
 			route.spec.Gateway = state
 		}
-		relocating := node.Disposition == cloud.GraphEnsure && observedPort != 0 && port != observedPort
+		relocating := node.Disposition == cloud.GraphEnsure && observedPort != 0 &&
+			(port != observedPort || retiringListeners[observed.policies[0].policy.ListenerID])
 		withdrawing := node.Disposition == cloud.GraphDelete || relocating
 		switch {
 		case withdrawing:
@@ -297,6 +300,10 @@ func buildGatewayPrerequisitePlan(desired desiredGatewayGraph, actual observedGa
 		return nil, nil
 	}
 	if actual.loadBalancer == nil {
+		if actual.scoped && actual.protocol == cloud.ListenerProtocolHTTP &&
+			!slices.ContainsFunc(desired.spec.Gateway.Spec.ScopedListeners, hasAuthorizedListener) {
+			return nil, nil
+		}
 		return []graphMutation{{kind: graphCreateLoadBalancer, message: "Created Octavia load balancer"}}, nil
 	}
 	plan := make([]graphMutation, 0)
@@ -452,14 +459,24 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 			return tagErr
 		}
 		port, name := spec.ListenerPort, spec.ListenerName
+		protocol := cloud.NormalizeListenerProtocol(spec.ListenerProtocol)
+		enabled := true
+		certificateRef := ""
 		if step.scopedListener.Port != 0 {
 			port, name = step.scopedListener.Port, step.scopedListener.Name
-			tags = append(tags, scopedPortTag(spec.ListenerProtocol, port))
+			if tls := step.scopedListener.TLS; tls != nil {
+				protocol, enabled, certificateRef = terminatedHTTPS, false, tls.CertificateRef
+			}
+			tags = append(tags, scopedPortTag(protocol, port))
 		}
 		_, err = p.octavia.CreateListener(ctx, listeners.CreateOpts{
-			LoadbalancerID: actual.state.LoadBalancerID, Protocol: listeners.Protocol(cloud.NormalizeListenerProtocol(spec.ListenerProtocol)), ProtocolPort: port,
-			Name: name, Description: desired.identity.Description(roleListener), AdminStateUp: boolPointer(true), Tags: tags,
+			LoadbalancerID: actual.state.LoadBalancerID, Protocol: listeners.Protocol(protocol), ProtocolPort: port,
+			Name: name, Description: desired.identity.Description(roleListener), AdminStateUp: boolPointer(enabled),
+			DefaultTlsContainerRef: certificateRef, Tags: tags,
 		})
+	case graphUpdateListenerCertificate:
+		ref := step.scopedListener.TLS.CertificateRef
+		_, err = p.octavia.UpdateListener(ctx, listenerID, listeners.UpdateOpts{DefaultTlsContainerRef: &ref})
 	case graphClearListenerDefaultPool, graphSetListenerDefaultPool:
 		// Gophercloud encodes an explicit empty DefaultPoolID as JSON null.
 		_, err = p.octavia.UpdateListener(ctx, listenerID, listeners.UpdateOpts{DefaultPoolID: &step.poolID})
@@ -484,7 +501,20 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 		return fmt.Errorf("unsupported graph mutation %d", step.kind)
 	}
 	if err != nil {
-		return fmt.Errorf("reconcile Gateway graph: %w", classifyOctaviaMutationError(err))
+		err = classifyOctaviaMutationError(err)
+		if step.redactTLSError {
+			// Octavia faults may echo Barbican references. Surface the
+			// classification without publishing the provider's raw body.
+			if errors.Is(err, context.Canceled) {
+				return context.Canceled
+			}
+			category, ok := cloud.ErrorCategoryOf(classifyOpenStackError(err))
+			if !ok {
+				category = cloud.ErrorCategoryResourceFailure
+			}
+			return cloud.NewProviderError(category, errors.New(step.message))
+		}
+		return fmt.Errorf("reconcile Gateway graph: %w", err)
 	}
 	return nil
 }

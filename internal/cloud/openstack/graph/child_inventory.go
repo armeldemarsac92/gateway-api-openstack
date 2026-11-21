@@ -26,20 +26,24 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/pools"
 )
 
-func (p *Provider) listGatewayListeners(ctx context.Context, lb *octavia.LoadBalancer, scoped bool) ([]listeners.Listener, string, error) {
-	items, defaultPoolsObserved, err := p.octavia.ListListenersWithDefaultPools(ctx, listeners.ListOpts{LoadbalancerID: lb.ID, ProjectID: p.projectID})
+func (p *Provider) listGatewayListeners(ctx context.Context, lb *octavia.LoadBalancer) (octavia.ListenerInventory, string, error) {
+	inventory, err := p.octavia.ListListenerInventory(ctx, listeners.ListOpts{LoadbalancerID: lb.ID, ProjectID: p.projectID})
 	if err != nil {
-		return nil, "", fmt.Errorf("list Gateway listeners: %w", err)
+		return inventory, "", fmt.Errorf("list Gateway listeners: %w", err)
 	}
-	markedProtocol, err := scopedListenerProtocol(items)
+	markedProtocol, err := scopedListenerProtocol(inventory.Items)
 	if err != nil {
-		return nil, "", err
+		return inventory, "", err
 	}
-	if !defaultPoolsObserved && (scoped || markedProtocol != "") {
-		return nil, "", cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady,
-			fmt.Errorf("load balancer %s has an incomplete scoped listener default pool inventory", lb.ID))
+	return inventory, markedProtocol, crossCheckChildInventory("load balancer", lb.ID, "listener", lb.Listeners, inventory.Items, func(item listeners.Listener) string { return item.ID })
+}
+
+func requireListenerDefaultPoolInventory(lbID string, inventory octavia.ListenerInventory) error {
+	if !inventory.DefaultPoolsObserved {
+		return cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady,
+			fmt.Errorf("load balancer %s has an incomplete scoped listener default pool inventory", lbID))
 	}
-	return items, markedProtocol, crossCheckChildInventory("load balancer", lb.ID, "listener", lb.Listeners, items, func(item listeners.Listener) string { return item.ID })
+	return nil
 }
 
 func (p *Provider) listGatewayPools(ctx context.Context, lb *octavia.LoadBalancer, requireMonitorID bool) ([]pools.Pool, error) {

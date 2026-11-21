@@ -232,7 +232,7 @@ func (r *Reconciler) validateRouteSnapshotParent(
 	snapshot *routeValidationSnapshot,
 	purpose routeSnapshotPurpose,
 ) ([]*gatewayv1.Listener, error) {
-	listeners, validationErr := gatewaycontroller.SupportedListeners(snapshot.gateway)
+	listeners, validationErr := gatewaycontroller.ValidatedHTTPRouteListeners(r.Config, snapshot.gateway)
 	if validationErr != nil {
 		if purpose == routeSnapshotForBinding {
 			return nil, errHTTPRouteChanged
@@ -249,7 +249,7 @@ func (r *Reconciler) validateRouteSnapshotParent(
 		return nil, routeSnapshotRejection(purpose, err)
 	}
 	if controller.GatewayListenerScope(r.Config, snapshot.gateway) != gatewayv1.HTTPProtocolType {
-		if gatewaycontroller.HasMultipleHTTPListenerPorts(snapshot.gateway) {
+		if gatewaycontroller.RequiresHTTPListenerScope(r.Config, snapshot.gateway) {
 			// Enrollment requires complete route checkpoints, so an established
 			// route must be able to repair its binding before enrollment finishes.
 			annotations := snapshot.route.Annotations

@@ -49,11 +49,11 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 		if gateway == nil {
 			return graph.RouteInputs{}, errors.New("gateway is required to ensure routes")
 		}
-		listener, err := gatewaycontroller.Validate(gateway)
+		listeners, err := gatewaycontroller.SupportedListenersForConfig(r.Config, gateway)
 		if err != nil {
 			return graph.RouteInputs{}, err
 		}
-		if listener.Protocol == gatewayv1.HTTPProtocolType {
+		if listeners[0].Protocol == gatewayv1.HTTPProtocolType || listeners[0].Protocol == gatewayv1.HTTPSProtocolType {
 			backends, err = r.collectGraphRouteModelInputs(ctx, gateway, routes, request.Route)
 			if err != nil {
 				return graph.RouteInputs{}, err

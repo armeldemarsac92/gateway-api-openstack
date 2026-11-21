@@ -42,6 +42,9 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 	if request.Gateway == nil {
 		return graph.GatewayInput{}, errors.New("expected Gateway revision is required")
 	}
+	if request.Action == graph.WithdrawTLS {
+		return r.observeGatewayTLSWithdrawal(ctx, request)
+	}
 	if request.Action == graph.DeleteGateway {
 		snapshot, err := r.observeGatewayCleanupSnapshot(ctx, request.Gateway)
 		if err != nil {
@@ -93,10 +96,17 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 		return graph.GatewayInput{}, err
 	}
 	desired := r.gatewaySpec(snapshot.gateway, snapshot.listeners, snapshot.topology)
-	return graph.GatewayInput{
+	input := graph.GatewayInput{
 		Object: snapshot.gateway, Node: cloud.GatewayGraphNode{Disposition: cloud.GraphEnsure, Spec: desired},
 		Validate: func(ctx context.Context) error { return r.sealGatewayMutationSnapshot(ctx, snapshot) },
-	}, nil
+	}
+	if usesHTTPSProfile(r.Config, snapshot.gateway) {
+		if err := r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
+			return graph.GatewayInput{}, err
+		}
+		r.addTLSGraphInput(ctx, snapshot, &input)
+	}
+	return input, nil
 }
 
 func (r *Reconciler) observeGatewayForRouteDeletion(ctx context.Context, request graph.Request) (graph.GatewayInput, error) {
@@ -143,7 +153,7 @@ func (r *Reconciler) observeGatewayForRouteDeletion(ctx context.Context, request
 	input.Object = &current
 	boundProtocol := r.boundListenerProtocol(&current)
 	scopedBinding := controller.HasGatewayListenerScopeBinding(r.Config, &current)
-	if !scopedBinding && boundProtocol != gatewayv1.UDPProtocolType && routeAnchor == 0 && !requestsListenerScope(&current) {
+	if !scopedBinding && boundProtocol != gatewayv1.UDPProtocolType && routeAnchor == 0 && !r.requestsListenerScope(&current) {
 		return input, nil
 	}
 	input.Validate = func(ctx context.Context) error {
@@ -161,7 +171,7 @@ func (r *Reconciler) observeGatewayForRouteDeletion(ctx context.Context, request
 		// teardown. Their sealed anchors still authorize route-owned cleanup.
 		return input, nil
 	}
-	if !scopedBinding && routeAnchor == 0 && route != nil && !requestsListenerScope(&current) {
+	if !scopedBinding && routeAnchor == 0 && route != nil && !r.requestsListenerScope(&current) {
 		// The legacy singleton cleanup is authorized by the route's durable
 		// ownership alone. It does not provision from the Gateway topology.
 		return input, nil

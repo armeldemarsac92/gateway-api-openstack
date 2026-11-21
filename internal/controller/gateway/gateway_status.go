@@ -54,7 +54,7 @@ func (r *Reconciler) setGatewayFailure(gateway *gatewayv1.Gateway, validationErr
 	accepted := metav1.ConditionFalse
 	if gatewayReason == gatewayv1.GatewayReasonAccepted {
 		accepted = metav1.ConditionTrue
-		if listeners, _ := SupportedListeners(gateway); len(listeners) != len(gateway.Spec.Listeners) {
+		if listeners, _ := SupportedListenersForConfig(r.Config, gateway); len(listeners) != len(gateway.Spec.Listeners) {
 			gatewayReason = gatewayv1.GatewayReasonListenersNotValid
 		}
 	}
@@ -85,7 +85,7 @@ func unprogrammedListenerStatus(
 	}
 	kind := listenerRouteKind(listener.Protocol)
 	l4InMultipleListeners := isL4Listener(listener.Protocol) && multipleListeners
-	protocolSupported := kind != "" && !l4InMultipleListeners
+	protocolSupported := kind != "" && listener.Protocol != gatewayv1.HTTPSProtocolType && !l4InMultipleListeners
 	if protocolSupported && listenerAllowsRouteKind(listener, kind) {
 		status.SupportedKinds = supportedRouteKinds(kind)
 	}
@@ -368,7 +368,7 @@ func (r *Reconciler) setGatewayProvisioningStatus(
 
 func (r *Reconciler) setGatewayProgrammed(ctx context.Context, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, address string) error {
 	message := "Octavia load balancer and listener are active"
-	if requestsListenerScope(gateway) {
+	if r.requestsListenerScope(gateway) {
 		message = "Octavia load balancer and listeners are active"
 	}
 	if err := r.setGatewayListenerStatuses(ctx, gateway, listener, metav1.ConditionTrue, gatewayv1.GatewayReasonProgrammed,
@@ -447,7 +447,7 @@ func (r *Reconciler) setGatewayListenerStatuses(
 	advanceProgrammedGeneration bool,
 	readyPorts []int,
 ) error {
-	listeners, err := SupportedListeners(gateway)
+	listeners, err := SupportedListenersForConfig(r.Config, gateway)
 	if err != nil {
 		listeners = []*gatewayv1.Listener{primary}
 	}
@@ -585,4 +585,75 @@ func routeParentStatusTargetsListener(
 		return false
 	}
 	return parentRef.Port == nil || *parentRef.Port == listener.Port
+}
+
+func (r *Reconciler) applyHTTPSListenerStatus(
+	gateway *gatewayv1.Gateway,
+	previous gatewayv1.GatewayStatus,
+	issues map[gatewayv1.SectionName]httpsListenerIssue,
+	changed *graph.TLSAuthorizationChanged,
+) {
+	if len(issues) == 0 && changed == nil {
+		return
+	}
+	for _, listener := range gateway.Spec.Listeners {
+		issue, invalid := issues[listener.Name]
+		stale := changed != nil && slices.Contains(changed.Ports, int(listener.Port))
+		if !invalid && !stale {
+			continue
+		}
+		index := slices.IndexFunc(gateway.Status.Listeners, func(status gatewayv1.ListenerStatus) bool { return status.Name == listener.Name })
+		if index < 0 {
+			index = len(gateway.Status.Listeners)
+			gateway.Status.Listeners = append(gateway.Status.Listeners, gatewayv1.ListenerStatus{Name: listener.Name})
+		}
+		status := &gateway.Status.Listeners[index]
+		programmedReason := gatewayv1.ListenerReasonPending
+		message := "Waiting to verify the HTTPS frontend after its authorization changed"
+		if invalid {
+			conditionStatus := metav1.ConditionFalse
+			if issue.condition == gatewayv1.ListenerConditionConflicted {
+				conditionStatus = metav1.ConditionTrue
+				controller.SetCondition(&status.Conditions, controller.Condition(string(gatewayv1.ListenerConditionAccepted),
+					metav1.ConditionFalse, string(gatewayv1.ListenerReasonPortUnavailable), issue.message, gateway.Generation))
+			}
+			if issue.condition == gatewayv1.ListenerConditionAccepted || issue.condition == gatewayv1.ListenerConditionConflicted ||
+				issue.reason == gatewayv1.ListenerReasonInvalidRouteKinds {
+				status.AttachedRoutes = 0
+			}
+			controller.SetCondition(&status.Conditions, controller.Condition(string(issue.condition), conditionStatus, string(issue.reason), issue.message, gateway.Generation))
+			programmedReason, message = gatewayv1.ListenerReasonInvalid, issue.message
+		}
+		controller.SetCondition(&status.Conditions, controller.Condition(string(gatewayv1.ListenerConditionProgrammed),
+			metav1.ConditionFalse, string(programmedReason), message, gateway.Generation))
+		preserveTransitionTimes(status.Conditions, existingListenerConditionsFrom(previous.Listeners, listener.Name))
+	}
+	programmedReason := gatewayv1.GatewayReasonPending
+	message := "Waiting to verify one or more HTTPS frontends"
+	if len(issues) != 0 {
+		programmedReason, message = gatewayv1.GatewayReasonListenersNotValid, "One or more HTTP or HTTPS listeners cannot be programmed"
+		accepted := metav1.ConditionFalse
+		for _, listener := range gateway.Status.Listeners {
+			if meta.IsStatusConditionTrue(listener.Conditions, string(gatewayv1.ListenerConditionAccepted)) {
+				accepted = metav1.ConditionTrue
+				break
+			}
+		}
+		controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionAccepted),
+			accepted, string(gatewayv1.GatewayReasonListenersNotValid), message, gateway.Generation))
+	}
+	controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionProgrammed),
+		metav1.ConditionFalse, string(programmedReason), message, gateway.Generation))
+	preserveTransitionTimes(gateway.Status.Conditions, previous.Conditions)
+}
+
+// The HTTPS overlay refines provider status. Keep transition times from the
+// persisted state when an intermediate condition was replaced in this pass.
+func preserveTransitionTimes(current, previous []metav1.Condition) {
+	for i := range current {
+		existing := meta.FindStatusCondition(previous, current[i].Type)
+		if existing != nil && existing.Status == current[i].Status {
+			current[i].LastTransitionTime = existing.LastTransitionTime
+		}
+	}
 }

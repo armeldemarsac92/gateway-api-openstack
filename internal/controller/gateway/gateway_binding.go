@@ -62,7 +62,7 @@ func (r *Reconciler) bindGateway(
 		gateway.Annotations = map[string]string{}
 	}
 	gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] = desiredListenerPort
-	gateway.Annotations[r.Config.GatewayListenerProtocolAnnotation()] = string(snapshot.listener.Protocol)
+	gateway.Annotations[r.Config.GatewayListenerProtocolAnnotation()] = string(listenerFamily(snapshot.listener))
 	gateway.Annotations[r.Config.GatewayClusterIDAnnotation()] = r.Config.ClusterID
 	gateway.Annotations[r.Config.GatewayProjectIDAnnotation()] = r.Config.OpenStackProjectID
 	controllerutil.AddFinalizer(gateway, r.Config.GatewayFinalizer())
@@ -71,11 +71,11 @@ func (r *Reconciler) bindGateway(
 		if err != nil || anchor < 1 || anchor > 65535 {
 			return fmt.Errorf("invalid frozen Gateway listener port")
 		}
-		sealed, err := r.sealScopedRoutes(ctx, snapshot, snapshot.listener.Protocol, anchor)
+		sealed, err := r.sealScopedRoutes(ctx, snapshot, listenerFamily(snapshot.listener), anchor)
 		if err != nil || !sealed {
 			return err
 		}
-		controller.SetGatewayListenerScope(r.Config, gateway, snapshot.listener.Protocol)
+		controller.SetGatewayListenerScope(r.Config, gateway, listenerFamily(snapshot.listener))
 	}
 	if err := controller.ValidateGatewayBinding(r.Config, gateway); err != nil {
 		return err

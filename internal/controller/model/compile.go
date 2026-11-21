@@ -32,7 +32,7 @@ func Compile(input Input) (Gateway, error) {
 	if input.Gateway == nil {
 		return Gateway{}, errors.New("gateway input is required")
 	}
-	result := Gateway{Source: source(input.Gateway), Listeners: compileListeners(input.Gateway)}
+	result := Gateway{Source: source(input.Gateway), Listeners: compileListeners(input.Gateway, input.OperatorHTTPS)}
 	if input.Gateway.Spec.AllowedListeners != nil || input.Gateway.Spec.TLS != nil {
 		result.Diagnostics = append(result.Diagnostics, Diagnostic{
 			Condition: string(gatewayv1.GatewayConditionAccepted), Reason: string(gatewayv1.GatewayReasonInvalidParameters),
@@ -77,7 +77,7 @@ func Compile(input Input) (Gateway, error) {
 	return result, nil
 }
 
-func compileListeners(gateway *gatewayv1.Gateway) []Listener {
+func compileListeners(gateway *gatewayv1.Gateway, operatorHTTPS bool) []Listener {
 	result := make([]Listener, 0, len(gateway.Spec.Listeners))
 	for _, listener := range gateway.Spec.Listeners {
 		compiled := Listener{Name: listener.Name, Port: listener.Port, Protocol: listener.Protocol}
@@ -90,12 +90,12 @@ func compileListeners(gateway *gatewayv1.Gateway) []Listener {
 				Condition: string(gatewayv1.ListenerConditionAccepted), Reason: string(gatewayv1.ListenerReasonUnsupportedValue),
 				Message: "pre-routing request filters are not implemented by the HTTP compiler",
 			})
-		case listener.Protocol != gatewayv1.HTTPProtocolType:
+		case listener.Protocol != gatewayv1.HTTPProtocolType && !(operatorHTTPS && listener.Protocol == gatewayv1.HTTPSProtocolType):
 			compiled.Diagnostics = append(compiled.Diagnostics, Diagnostic{
 				Condition: string(gatewayv1.ListenerConditionAccepted), Reason: string(gatewayv1.ListenerReasonUnsupportedProtocol),
 				Message: "only HTTP listeners can be resolved without certificate inputs",
 			})
-		case listener.TLS != nil:
+		case listener.Protocol == gatewayv1.HTTPProtocolType && listener.TLS != nil:
 			compiled.Diagnostics = append(compiled.Diagnostics, Diagnostic{
 				Condition: string(gatewayv1.ListenerConditionAccepted), Reason: string(gatewayv1.ListenerReasonUnsupportedValue),
 				Message: "TLS configuration is unsupported on an HTTP listener",

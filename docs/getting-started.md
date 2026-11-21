@@ -283,6 +283,10 @@ Complete the controller rollout before adding the second port. If you need to re
 
 For a WebSocket backend, set `appProtocol: kubernetes.io/ws` on the TCP Service port selected by the HTTPRoute backend reference. Point your WebSocket client at `ws://<gateway-address>/<route-path>`. The HTTP listener forwards the upgrade to the application, which must accept the handshake and handle the subsequent frames. [WebSocket qualification](qualification/v1.7.0/provider/http-websocket.md)
 
+## Serve HTTPS with an operator-provisioned certificate
+
+A tenant can attach an HTTPRoute to a named HTTPS listener when the operator enables the certificate map for that class and approves the exact TLS Secret revision. Use a separate port for each HTTPS listener. A cross-namespace Secret also needs a ReferenceGrant from the certificate owner. [Workload overlay, example Gateway and certificate lifecycle](operator-https.md)
+
 ## Forward TCP to a Service
 
 For TCP applications, create a dedicated TCP Gateway. The example uses one listener and the existing `openstack` class, the `gateway-api-openstack-demo` namespace and a Service called `database` exposing port 5432. With the default class member mode, the Service must have an allocated NodePort and ready endpoints on reachable workers. In Endpoint mode the Amphora must be able to reach the pod addresses and ports.

@@ -37,11 +37,21 @@ var scopedPortTagPrefixes = map[string]string{
 	cloud.ListenerProtocolHTTP: openstackidentity.Tag("http-port", ""),
 }
 
+const terminatedHTTPS = string(listeners.ProtocolTerminatedHTTPS)
+
+var scopedHTTPSPortTagPrefix = openstackidentity.Tag("https-port", "")
+
 func scopedPortTag(protocol string, port int) string {
+	if protocol == terminatedHTTPS {
+		return scopedHTTPSPortTagPrefix + openstackidentity.EncodeValue(strconv.Itoa(port))
+	}
 	return scopedPortTagPrefixes[protocol] + openstackidentity.EncodeValue(strconv.Itoa(port))
 }
 
 func scopedPortTagProtocol(tag string) string {
+	if strings.HasPrefix(tag, scopedHTTPSPortTagPrefix) || tag == strings.TrimSuffix(scopedHTTPSPortTagPrefix, "=") {
+		return cloud.ListenerProtocolHTTP
+	}
 	for protocol, prefix := range scopedPortTagPrefixes {
 		if strings.HasPrefix(tag, prefix) || tag == strings.TrimSuffix(prefix, "=") {
 			return protocol
@@ -79,16 +89,14 @@ func (p *Provider) managedScopedListeners(identity Identity, lb *octavia.LoadBal
 	for index := range items {
 		listener := &items[index]
 		port := listener.ProtocolPort
+		protocolMatches := listener.Protocol == protocol || protocol == cloud.ListenerProtocolHTTP && listener.Protocol == terminatedHTTPS
 		if listener.ProjectID != p.projectID || !identity.MatchesGateway(listener.Tags, roleListener) ||
-			listener.Protocol != protocol || port < 1 || port > 65535 || ports[port] || ids[listener.ID] {
+			!protocolMatches || port < 1 || port > 65535 || ports[port] || ids[listener.ID] {
 			return nil, fmt.Errorf("%w: invalid or duplicate scoped listener %s on load balancer %s", cloud.ErrOwnershipConflict, listener.ID, lb.ID)
 		}
 		if protocol == cloud.ListenerProtocolHTTP {
 			if listener.ID == "" || len(listener.Loadbalancers) != 1 || listener.Loadbalancers[0].ID != lb.ID {
 				return nil, fmt.Errorf("%w: HTTP listener %s has an unexpected load balancer", cloud.ErrOwnershipConflict, listener.ID)
-			}
-			if listener.DefaultPoolID != "" {
-				return nil, unprovenDefaultPool(listener)
 			}
 		} else if err := validateDefaultPoolListener(listener, lb.ID); err != nil {
 			return nil, err
@@ -101,14 +109,14 @@ func (p *Provider) managedScopedListeners(identity Identity, lb *octavia.LoadBal
 		marked := false
 		for _, tag := range listener.Tags {
 			if markedProtocol := scopedPortTagProtocol(tag); markedProtocol != "" {
-				if markedProtocol != protocol || tag != scopedPortTag(protocol, port) || marked {
+				if markedProtocol != protocol || tag != scopedPortTag(listener.Protocol, port) || marked {
 					return nil, fmt.Errorf("%w: scoped listener %s has inconsistent port tags", cloud.ErrOwnershipConflict, listener.ID)
 				}
 				marked = true
 			}
 		}
 		if !marked {
-			if legacy || port != anchor {
+			if legacy || port != anchor || listener.Protocol == terminatedHTTPS {
 				return nil, fmt.Errorf("%w: scoped listener %s does not match the legacy binding", cloud.ErrOwnershipConflict, listener.ID)
 			}
 			legacy = true
@@ -155,9 +163,6 @@ func (p *Provider) observeScopedListenerGraph(
 	}
 	actual.scopedListeners = managed
 	actual.state.ListenerID = scopedRepresentativeListenerID(managed, anchor)
-	if actual.protocol == cloud.ListenerProtocolHTTP {
-		return p.observeScopedHTTPGraph(ctx, desired, actual, owners)
-	}
 	for _, listener := range managed {
 		if parentPending {
 			continue

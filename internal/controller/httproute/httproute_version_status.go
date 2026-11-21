@@ -150,7 +150,7 @@ func (r *Reconciler) routeForwardingEstablished(route *gatewayv1.HTTPRoute, pare
 		return false
 	}
 	parent := parents[0]
-	listeners, err := gatewaycontroller.SupportedListeners(parent.gateway)
+	listeners, err := gatewaycontroller.ValidatedHTTPRouteListeners(r.Config, parent.gateway)
 	if err != nil {
 		return false
 	}

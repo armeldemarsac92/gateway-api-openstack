@@ -17,6 +17,8 @@ gateway_api_manifest_sha256 = <gateway-controller-yaml-sha256>
 gateway_api_controller_image = registry.example.test/gateway/controller@sha256:<image-sha256>
 ```
 
+Use the HTTPS workload overlay when the operator owns a certificate revision map and grants access to individually named Secrets in the workload cluster. The opt-in artifact keeps the same five addon resources and uses a separately managed ConfigMap. [HTTPS artifact and operator setup](../../operator-https.md#enable-the-mode)
+
 ## Create and qualify a workload cluster
 
 1. Create a workload cluster from the selected template. Before saving the stock Helm release name or creating any provider credentials, the driver creates `gateway-enrollment-<cluster-uuid>` and `gateway-addon-<cluster-uuid>` in the Magnum management project namespace. Both immutable Secret records hold the cluster UUID and workload credential reference. The first records enrollment independently of the second, which carries the teardown acknowledgement. The pinned chart also annotates the managed CAPI Cluster with `gateway-api-openstack.github.io/enrolled-cluster` and the UUID. Restrict record writes and deletes to the conductor and authorised operators. Back up both records.

@@ -38,6 +38,8 @@ var gatewayControllerNamePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0
 
 // Config is the cluster-wide controller configuration.
 type Config struct {
+	// OperatorHTTPS enables termination using operator-provisioned certificates.
+	OperatorHTTPS bool
 	// ControllerName is the exact Gateway API ownership identifier.
 	ControllerName gatewayv1.GatewayController
 	// GatewayAPIChannel selects the release CRDs accepted by this installation. Empty selects Standard.

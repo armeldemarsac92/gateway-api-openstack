@@ -183,7 +183,7 @@ func (r *Reconciler) validateCachedRouteDecision(
 	decision cachedRouteDecision,
 ) (cachedRouteDecision, error) {
 	decision.parent = parent
-	http, _ := gatewaycontroller.HTTPListeners(parent.gateway)
+	http, _ := gatewaycontroller.HTTPRouteListeners(r.Config, parent.gateway)
 	candidates, parentErr := routeParentCandidates(route, parent, http)
 	validationErr := parentErr
 	if parentErr == nil {

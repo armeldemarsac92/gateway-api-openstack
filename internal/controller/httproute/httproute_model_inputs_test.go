@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -121,7 +122,7 @@ func TestRouteGraphSharesBackendObservationAcrossCandidates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	models, err := collectRouteModelInputs(t.Context(), f.reader, f.gateway, routes, nil)
+	models, err := f.reconciler.collectRouteModelInputs(t.Context(), f.reader, f.gateway, routes, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -457,4 +458,34 @@ func (r *routeModelDependencyReader) List(ctx context.Context, list client.Objec
 		}
 	}
 	return r.Reader.List(ctx, list, options...)
+}
+
+func TestHTTPSRouteSelectsDedicatedSectionAndInheritsHostname(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	cfg := f.reconciler.Config
+	cfg.OperatorHTTPS = true
+	f.reconciler.Config = cfg
+	section := gatewayv1.SectionName("secure")
+	port := gatewayv1.PortNumber(443)
+	f.gateway.Spec.Listeners = append(f.gateway.Spec.Listeners, gatewayv1.Listener{
+		Name: section, Port: port, Protocol: gatewayv1.HTTPSProtocolType, Hostname: ptr.To(gatewayv1.Hostname("app.example.test")),
+		TLS: &gatewayv1.ListenerTLSConfig{CertificateRefs: []gatewayv1.SecretObjectReference{{Name: "certificate"}}},
+	})
+	controller.SetGatewayListenerScope(cfg, f.gateway, gatewayv1.HTTPProtocolType)
+	f.route.Spec.ParentRefs[0].SectionName = &section
+	f.route.Spec.ParentRefs[0].Port = &port
+	spec, err := f.reconciler.buildRouteModelWithReader(t.Context(), f.reader, f.route, f.gateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(spec.ScopedListenerPorts, []int{443}) || spec.Hostname != "app.example.test" ||
+		spec.GatewayRequirements.ListenerProtocol != cloud.ListenerProtocolHTTP {
+		t.Fatalf("HTTPS route lost its port or hostname constraint: %#v", spec)
+	}
+	f.route.Spec.Hostnames = []gatewayv1.Hostname{"other.example.test"}
+	_, err = f.reconciler.buildRouteModelWithReader(t.Context(), f.reader, f.route, f.gateway)
+	var buildError *routeBuildError
+	if !errors.As(err, &buildError) || buildError.kind != routeErrorNoMatchingHostname {
+		t.Fatalf("route with a mismatched hostname was admitted: %v", err)
+	}
 }

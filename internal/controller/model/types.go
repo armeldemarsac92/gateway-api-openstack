@@ -31,6 +31,8 @@ import (
 // The compiler does not establish its completeness or authorize references by
 // virtue of their presence in these collections.
 type Input struct {
+	// OperatorHTTPS allows HTTPS sections admitted by the stock frontend profile.
+	OperatorHTTPS   bool
 	Gateway         *gatewayv1.Gateway
 	Routes          []gatewayv1.HTTPRoute
 	Namespaces      []corev1.Namespace

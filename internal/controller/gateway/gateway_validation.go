@@ -30,6 +30,7 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia/amphora"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 )
 
 type gatewayValidationError struct {
@@ -73,6 +74,11 @@ func Validate(gateway *gatewayv1.Gateway) (*gatewayv1.Listener, error) {
 // SupportedListeners returns the admitted listeners in ascending port order.
 // Address assignment is evaluated separately from listener and route admission.
 func SupportedListeners(gateway *gatewayv1.Gateway) ([]*gatewayv1.Listener, error) {
+	return SupportedListenersForConfig(controller.Config{}, gateway)
+}
+
+// SupportedListenersForConfig also returns disabled HTTPS sections for withdrawal.
+func SupportedListenersForConfig(config controller.Config, gateway *gatewayv1.Gateway) ([]*gatewayv1.Listener, error) {
 	if gateway.Spec.Infrastructure != nil {
 		return nil, &gatewayValidationError{
 			message:       "spec.infrastructure is not supported",
@@ -93,6 +99,12 @@ func SupportedListeners(gateway *gatewayv1.Gateway) ([]*gatewayv1.Listener, erro
 	}
 	var listeners []*gatewayv1.Listener
 	switch {
+	case usesHTTPSProfile(config, gateway):
+		listeners := httpsProfileListeners(config, gateway)
+		if len(listeners) == 0 {
+			return nil, fmt.Errorf("a listener with a valid HTTP or HTTPS port is required")
+		}
+		return listeners, nil
 	case hasMultipleTransportListeners(gateway):
 		for i := range gateway.Spec.Listeners {
 			listeners = append(listeners, &gateway.Spec.Listeners[i])
@@ -311,7 +323,7 @@ func HasMultipleHTTPListenerPorts(gateway *gatewayv1.Gateway) bool {
 
 func listenerRouteKind(protocol gatewayv1.ProtocolType) gatewayv1.Kind {
 	switch protocol {
-	case gatewayv1.HTTPProtocolType:
+	case gatewayv1.HTTPProtocolType, gatewayv1.HTTPSProtocolType:
 		return "HTTPRoute"
 	case gatewayv1.TCPProtocolType:
 		return "TCPRoute"

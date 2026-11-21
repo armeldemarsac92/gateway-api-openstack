@@ -27,17 +27,24 @@ import (
 )
 
 func (p *Provider) observeScopedHTTPGraph(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, owners []routeGraphOwner) (observedGatewayGraph, error) {
+	for _, listener := range actual.scopedListeners {
+		if listener.DefaultPoolID != "" {
+			return actual, unprovenDefaultPool(&listener)
+		}
+	}
 	var err error
 	actual.routes, err = p.observeRouteGraphsWithListeners(ctx, owners, actual.loadBalancer, nil, actual.protocol, actual.scopedListeners)
 	if err != nil {
 		return actual, err
 	}
-	configured := scopedHTTPPorts(desired)
+	configured := scopedHTTPListeners(desired)
 	for _, listener := range actual.scopedListeners {
 		if actual.outcome.State == cloud.OutcomeProgressing {
 			break
 		}
-		actual.outcome, err = p.defaultPoolListenerOutcome(&listener, !configured[listener.ProtocolPort])
+		spec, present := configured[listener.ProtocolPort]
+		retiring := !present || scopedHTTPProtocol(spec) != listener.Protocol
+		actual.outcome, err = p.defaultPoolListenerOutcome(&listener, retiring || listener.Protocol == terminatedHTTPS)
 		if err != nil {
 			return actual, err
 		}
@@ -113,12 +120,80 @@ func validateScopedHTTPRouteRelationships(routes []observedRouteGraph) error {
 	return nil
 }
 
-func scopedHTTPPorts(desired desiredGatewayGraph) map[int]bool {
-	ports := make(map[int]bool, len(desired.spec.Gateway.Spec.ScopedListeners))
+func scopedHTTPListeners(desired desiredGatewayGraph) map[int]cloud.ScopedListener {
+	ports := make(map[int]cloud.ScopedListener, len(desired.spec.Gateway.Spec.ScopedListeners))
 	for _, listener := range desired.spec.Gateway.Spec.ScopedListeners {
-		ports[listener.Port] = true
+		ports[listener.Port] = listener
 	}
 	return ports
+}
+
+func scopedHTTPProtocol(spec cloud.ScopedListener) string {
+	if spec.TLS != nil {
+		return terminatedHTTPS
+	}
+	return cloud.ListenerProtocolHTTP
+}
+
+func hasAuthorizedListener(spec cloud.ScopedListener) bool {
+	return spec.TLS == nil || spec.TLS.CertificateRef != ""
+}
+
+func supportsSingleCertificate(listener listeners.Listener) bool {
+	return listener.SniContainerRefs != nil && len(listener.SniContainerRefs) == 0 &&
+		(listener.ClientAuthentication == "" || listener.ClientAuthentication == string(listeners.ClientAuthenticationNone)) &&
+		listener.ClientCATLSContainerRef == "" && listener.ClientCRLContainerRef == ""
+}
+
+func scopedHTTPListenerMatches(listener listeners.Listener, spec cloud.ScopedListener, adminObserved bool) bool {
+	if listener.Protocol != scopedHTTPProtocol(spec) {
+		return false
+	}
+	return spec.TLS == nil || adminObserved && hasAuthorizedListener(spec) &&
+		listener.DefaultPoolID == "" && supportsSingleCertificate(listener) && listener.DefaultTlsContainerRef == spec.TLS.CertificateRef
+}
+
+func (p *Provider) planScopedHTTPSWithdrawal(desired desiredGatewayGraph, actual *observedGatewayGraph) {
+	disposition := desired.spec.Gateway.Disposition
+	if disposition == cloud.GraphPreserve {
+		return
+	}
+	configured := scopedHTTPListeners(desired)
+	var retry *graphMutation
+	for _, listener := range actual.scopedListeners {
+		spec, present := configured[listener.ProtocolPort]
+		https := listener.Protocol == terminatedHTTPS
+		adminObserved := actual.adminObserved[listener.ID]
+		var withdraw bool
+		switch disposition {
+		case cloud.GraphEnsure:
+			withdraw = https && (!present || !scopedHTTPListenerMatches(listener, spec, adminObserved) || listener.ProvisioningStatus == "ERROR") ||
+				!https && present && spec.TLS != nil
+		case cloud.GraphDelete:
+			withdraw = https
+		case cloud.GraphWithdrawTLS:
+			withdraw = present || len(configured) == 0 && https
+		}
+		if !withdraw {
+			continue
+		}
+		step := graphMutation{kind: graphDisableListener, listenerID: listener.ID, scopedListener: spec, redactTLSError: https,
+			message: "Disabling Octavia listener to withdraw its HTTPS port"}
+		switch listener.ProvisioningStatus {
+		case "ACTIVE":
+			if listener.AdminStateUp || !adminObserved {
+				actual.withdrawTLS = &step
+				return
+			}
+		case "ERROR":
+			// A failed close may report the intended admin state before
+			// Amphora applied it. Retry only after fresh closes on siblings.
+			retry = &step
+		default:
+			actual.outcome = p.progressingOutcome("Waiting for Octavia listener before HTTPS withdrawal")
+		}
+	}
+	actual.withdrawTLS = retry
 }
 
 func scopedHTTPRoutePort(route desiredRoute) int {
@@ -135,8 +210,17 @@ func scopedHTTPGatewayResult(desired desiredGatewayGraph, actual observedGateway
 		return result
 	}
 	portsByID := make(map[string]int, len(actual.scopedListeners))
+	configured := scopedHTTPListeners(desired)
+	unverified := make(map[int]bool)
 	for _, listener := range actual.scopedListeners {
 		portsByID[listener.ID] = listener.ProtocolPort
+		if spec, found := configured[listener.ProtocolPort]; !found || !scopedHTTPListenerMatches(listener, spec, actual.adminObserved[listener.ID]) {
+			unverified[listener.ProtocolPort] = true
+		}
+	}
+	if len(unverified) != 0 {
+		result.ScopedListenerReadyPorts = slices.DeleteFunc(result.ScopedListenerReadyPorts, func(port int) bool { return unverified[port] })
+		result.Outcome = pending
 	}
 	held := make(map[int]bool)
 	for i, observed := range actual.routes {
@@ -184,44 +268,78 @@ func deferredScopedHTTPRoutes(desired desiredGatewayGraph, actual observedGatewa
 }
 
 // Retire a port only after its authoritative policy inventory is empty.
-func scopedHTTPListenerPlan(desired desiredGatewayGraph, actual observedGatewayGraph) (map[int]listeners.Listener, map[string]int, []graphMutation) {
+func scopedHTTPListenerPlan(desired desiredGatewayGraph, actual observedGatewayGraph) (map[int]listeners.Listener, map[string]int, map[string]bool, []graphMutation) {
 	byPort, portByID := make(map[int]listeners.Listener), make(map[string]int)
+	retiring := make(map[string]bool)
+	occupied := make(map[int]bool, len(actual.scopedListeners))
 	var changes []graphMutation
-	configured := scopedHTTPPorts(desired)
+	configured := scopedHTTPListeners(desired)
 	for _, listener := range actual.scopedListeners {
-		byPort[listener.ProtocolPort], portByID[listener.ID] = listener, listener.ProtocolPort
-		if desired.spec.Gateway.Disposition == cloud.GraphEnsure && !configured[listener.ProtocolPort] && len(listener.L7Policies) == 0 {
-			changes = append(changes, graphMutation{kind: graphDeleteChild, deletion: listenerDeletionStep(listener.ID), message: "Deleting retired Octavia HTTP listener"})
+		port := listener.ProtocolPort
+		occupied[port], portByID[listener.ID] = true, port
+		spec, present := configured[port]
+		if desired.spec.Gateway.Disposition != cloud.GraphEnsure {
+			continue
+		}
+		if !present || scopedHTTPProtocol(spec) != listener.Protocol {
+			retiring[listener.ID] = true
+			if len(listener.L7Policies) == 0 {
+				changes = append(changes, graphMutation{kind: graphDeleteChild, deletion: listenerDeletionStep(listener.ID), message: "Deleting retired Octavia HTTP listener"})
+			}
+			continue
+		}
+		adminObserved := actual.adminObserved[listener.ID]
+		if scopedHTTPListenerMatches(listener, spec, adminObserved) {
+			byPort[port] = listener
+		} else if spec.TLS != nil && hasAuthorizedListener(spec) && adminObserved && !listener.AdminStateUp &&
+			listener.ProvisioningStatus == "ACTIVE" && supportsSingleCertificate(listener) {
+			changes = append(changes, graphMutation{kind: graphUpdateListenerCertificate, listenerID: listener.ID, scopedListener: spec,
+				redactTLSError: true, message: "Updating the certificate on a disabled Octavia HTTPS listener"})
 		}
 	}
 	if actual.loadBalancer != nil {
 		for _, listener := range desired.spec.Gateway.Spec.ScopedListeners {
-			if _, exists := byPort[listener.Port]; !exists {
-				changes = append(changes, graphMutation{kind: graphCreateListener, scopedListener: listener, message: "Creating Octavia HTTP listener"})
+			if !occupied[listener.Port] && hasAuthorizedListener(listener) {
+				changes = append(changes, graphMutation{kind: graphCreateListener, scopedListener: listener,
+					redactTLSError: listener.TLS != nil, message: "Creating Octavia HTTP-family listener"})
 			}
 		}
 	}
-	return byPort, portByID, changes
+	return byPort, portByID, retiring, changes
 }
 
 func buildScopedHTTPTrafficRestorationPlan(desired desiredGatewayGraph, actual observedGatewayGraph) ([]graphMutation, error) {
-	if desired.spec.Gateway.Disposition != cloud.GraphEnsure || actual.loadBalancer == nil ||
-		len(actual.scopedListeners) != len(desired.spec.Gateway.Spec.ScopedListeners) {
+	if desired.spec.Gateway.Disposition != cloud.GraphEnsure || actual.loadBalancer == nil {
 		return nil, nil
 	}
-	configured := scopedHTTPPorts(desired)
+	configured := scopedHTTPListeners(desired)
+	verified := make([]listeners.Listener, 0, len(actual.scopedListeners))
 	for _, listener := range actual.scopedListeners {
-		if !configured[listener.ProtocolPort] {
+		spec, present := configured[listener.ProtocolPort]
+		if !present || listener.Protocol != scopedHTTPProtocol(spec) {
 			return nil, nil
 		}
+		if !hasAuthorizedListener(spec) {
+			// An independently denied port does not hold authorized siblings.
+			continue
+		}
+		if !scopedHTTPListenerMatches(listener, spec, actual.adminObserved[listener.ID]) ||
+			listener.Protocol == terminatedHTTPS && listener.ProvisioningStatus != "ACTIVE" {
+			continue
+		}
+		verified = append(verified, listener)
+	}
+	if len(verified) == 0 {
+		return nil, nil
 	}
 	plan, err := buildGatewayAddressRestorationPlan(desired.spec.Gateway.Spec.ExternalNetworkID, actual)
 	if err != nil {
 		return nil, err
 	}
-	for _, listener := range actual.scopedListeners {
+	for _, listener := range verified {
 		if !listener.AdminStateUp {
-			plan = append(plan, graphMutation{kind: graphEnableListener, listenerID: listener.ID, message: "Enabled Octavia HTTP listener after validating the Gateway graph"})
+			plan = append(plan, graphMutation{kind: graphEnableListener, listenerID: listener.ID, redactTLSError: listener.Protocol == terminatedHTTPS,
+				message: "Enabling Octavia listener after validating the Gateway graph"})
 		}
 	}
 	if !actual.loadBalancer.AdminStateUp {

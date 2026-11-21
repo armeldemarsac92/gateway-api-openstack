@@ -26,47 +26,57 @@ import (
 
 // ListListeners lists and extracts listeners matching opts.
 func (s *Service) ListListeners(ctx context.Context, opts listeners.ListOpts) ([]listeners.Listener, error) {
-	items, _, err := s.ListListenersWithDefaultPools(ctx, opts)
-	return items, err
+	inventory, err := s.ListListenerInventory(ctx, opts)
+	return inventory.Items, err
 }
 
-// ListListenersWithDefaultPools reports whether every listener explicitly
-// identifies its default pool or reports null. Omission cannot prove detach.
-func (s *Service) ListListenersWithDefaultPools(ctx context.Context, opts listeners.ListOpts) ([]listeners.Listener, bool, error) {
+// ListenerInventory retains field presence needed to prove a listener has
+// been disabled and detached. Both zero values otherwise accept missing JSON.
+type ListenerInventory struct {
+	Items                []listeners.Listener
+	DefaultPoolsObserved bool
+	AdminStatesObserved  map[string]bool
+}
+
+func (s *Service) ListListenerInventory(ctx context.Context, opts listeners.ListOpts) (ListenerInventory, error) {
 	pages, err := listeners.List(s.client, opts).AllPages(ctx)
 	if err != nil {
-		return nil, false, fmt.Errorf("list listeners: %w", err)
+		return ListenerInventory{}, fmt.Errorf("list listeners: %w", err)
 	}
 	var response struct {
 		Listeners []struct {
 			listeners.Listener
-			DefaultPool json.RawMessage `json:"default_pool_id"`
+			DefaultPool  json.RawMessage `json:"default_pool_id"`
+			AdminStateUp *bool           `json:"admin_state_up"`
 		} `json:"listeners"`
 	}
 	if err := pages.(listeners.ListenerPage).ExtractInto(&response); err != nil {
-		return nil, false, fmt.Errorf("extract listeners: %w", err)
+		return ListenerInventory{}, fmt.Errorf("extract listeners: %w", err)
 	}
-	if response.Listeners == nil {
-		// AllPages coalesces an empty collection to nil. The graph checks
-		// this against the LB's explicit list of listener references.
-		return nil, true, nil
+	inventory := ListenerInventory{DefaultPoolsObserved: true}
+	if len(response.Listeners) > 0 {
+		inventory.Items = make([]listeners.Listener, len(response.Listeners))
+		inventory.AdminStatesObserved = make(map[string]bool, len(response.Listeners))
 	}
-	items := make([]listeners.Listener, len(response.Listeners))
-	complete := true
 	for i, observed := range response.Listeners {
-		items[i] = observed.Listener
+		item := &inventory.Items[i]
+		*item = observed.Listener
+		if observed.AdminStateUp != nil {
+			item.AdminStateUp = *observed.AdminStateUp
+			inventory.AdminStatesObserved[item.ID] = true
+		}
 		switch string(observed.DefaultPool) {
 		case "null":
 			// The public API explicitly reports a detached listener.
 		case "", `""`:
-			complete = false
+			inventory.DefaultPoolsObserved = false
 		default:
-			if err := json.Unmarshal(observed.DefaultPool, &items[i].DefaultPoolID); err != nil {
-				return nil, false, fmt.Errorf("extract listener default pool: %w", err)
+			if err := json.Unmarshal(observed.DefaultPool, &item.DefaultPoolID); err != nil {
+				return ListenerInventory{}, fmt.Errorf("extract listener default pool: %w", err)
 			}
 		}
 	}
-	return items, complete, nil
+	return inventory, nil
 }
 
 // CreateListener creates one listener.

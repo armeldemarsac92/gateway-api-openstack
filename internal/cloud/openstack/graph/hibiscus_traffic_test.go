@@ -51,15 +51,19 @@ import (
 // The Octavia API fixture stores the real Gophercloud writes. The stock render
 // and HAProxy operate on that inventory, including the administrative close.
 func TestHibiscusPrivateHTTPTraffic(t *testing.T) {
-	testHibiscusHTTPTraffic(t, false, false, nil)
+	testHibiscusHTTPTraffic(t, false, false, false, nil)
 }
 
 func TestHibiscusSharedHTTPTraffic(t *testing.T) {
-	testHibiscusHTTPTraffic(t, true, false, nil)
+	testHibiscusHTTPTraffic(t, true, false, false, nil)
 }
 
 func TestHibiscusDistinctHTTPListenerPorts(t *testing.T) {
-	testHibiscusHTTPTraffic(t, false, true, nil)
+	testHibiscusHTTPTraffic(t, false, true, false, nil)
+}
+
+func TestScopedHTTPSListenerLifecycle(t *testing.T) {
+	testHibiscusHTTPTraffic(t, false, true, true, nil)
 }
 
 // Point the pilot at a private kind worker NodePort with one Ready Gateway API
@@ -77,7 +81,7 @@ func TestHibiscusKindWorkerHTTP(t *testing.T) {
 	if pod == "" || namespace == "" {
 		t.Fatal("HIBISCUS_KIND_POD and HIBISCUS_KIND_NAMESPACE must identify the Ready echo-basic pod")
 	}
-	testHibiscusHTTPTraffic(t, false, false, &kindHTTPBackend{endpoint: endpoint, pod: pod, namespace: namespace})
+	testHibiscusHTTPTraffic(t, false, false, false, &kindHTTPBackend{endpoint: endpoint, pod: pod, namespace: namespace})
 }
 
 type kindHTTPBackend struct {
@@ -207,7 +211,7 @@ func TestHibiscusTCPTraffic(t *testing.T) {
 	t.Logf("Stock HAProxy echoed all %d bytes after attach and forwarded no bytes after detach", len(payload))
 }
 
-func testHibiscusHTTPTraffic(t *testing.T, shared, distinct bool, worker *kindHTTPBackend) {
+func testHibiscusHTTPTraffic(t *testing.T, shared, distinct, https bool, worker *kindHTTPBackend) {
 	python, haproxy := os.Getenv("HIBISCUS_OCTAVIA_PYTHON"), os.Getenv("HIBISCUS_HAPROXY")
 	renderAvailable := python != "" || haproxy != ""
 	if worker == nil && !distinct && !renderAvailable {
@@ -306,6 +310,8 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct bool, worker *kindHT
 		return refs
 	}
 	var disagreePoolListeners, disagreePoolMonitor string
+	var loseCertificateUpdateReply bool
+	var poolListReads int
 	allowedHTTPPorts := []int{frontendAddress.Port}
 	readback := func(collection string, item record) record {
 		if !distinct {
@@ -385,6 +391,9 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct bool, worker *kindHT
 			return
 		}
 		if req.Method == http.MethodGet {
+			if resource == pool {
+				poolListReads++
+			}
 			if id != "" && entry != nil {
 				safetyWriteJSON(t, w, record{kind.key: readback(collection, entry)})
 				return
@@ -452,6 +461,9 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct bool, worker *kindHT
 				if _, specified := data["default_pool_id"]; collection == listener && !specified {
 					data["default_pool_id"] = nil
 				}
+				if data["protocol"] == "TERMINATED_HTTPS" {
+					data["sni_container_refs"] = []string{}
+				}
 				resource = collection + "/" + id
 				if inventory[resource] != nil {
 					reject()
@@ -470,6 +482,11 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct bool, worker *kindHT
 					delete(data, "position")
 				}
 				maps.Copy(entry, data)
+				if collection == listener && data["default_tls_container_ref"] != nil && loseCertificateUpdateReply {
+					loseCertificateUpdateReply = false
+					w.WriteHeader(http.StatusGatewayTimeout)
+					return
+				}
 				if resource == gateway {
 					entry["provisioning_status"] = "PENDING_UPDATE"
 				}
@@ -549,6 +566,167 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct bool, worker *kindHT
 		}
 		t.Fatalf("graph did not converge: %v, writes %v", result.Outcome, writes)
 		return result
+	}
+	if https {
+		const refA = "https://barbican.example/v1/secrets/revision-a"
+		const refB = "https://barbican.example/v1/secrets/revision-b"
+		httpsPort := 8443
+		if httpsPort == frontendAddress.Port {
+			httpsPort++
+		}
+		allowedHTTPPorts = append(allowedHTTPPorts, httpsPort)
+		spec.Gateway.Spec.ListenerProtocol = cloud.ListenerProtocolHTTP
+		spec.Gateway.Spec.ScopedListeners = []cloud.ScopedListener{{Name: "https", Port: httpsPort, TLS: &cloud.ListenerTLS{}}}
+		desiredRoutes := spec.Routes
+		spec.Routes = nil
+		if result := reconcile(provider, spec); result.Outcome.State != cloud.OutcomeProgressing || len(writes) != 0 {
+			t.Fatalf("denied HTTPS allocated resources: %v, writes %v", result.Outcome, writes)
+		}
+
+		spec.Gateway.Spec.ScopedListeners = append(spec.Gateway.Spec.ScopedListeners, cloud.ScopedListener{Name: "http", Port: frontendAddress.Port})
+		spec.Gateway.Spec.ScopedListeners[0].TLS = &cloud.ListenerTLS{CertificateRef: refA}
+		spec.Routes = desiredRoutes
+		spec.Routes[0].Spec.ScopedListenerPorts = []int{frontendAddress.Port}
+		httpsRoute := spec.Routes[0]
+		httpsRoute.Spec.Identity.RouteName, httpsRoute.Spec.Identity.RouteUID = "tls-route", "tls-route-uid"
+		httpsRoute.Spec.ScopedListenerPorts = []int{httpsPort}
+		spec.Routes = append(spec.Routes, httpsRoute)
+		result := converge(newProvider(), spec)
+		tlsID, httpID := "listener", "listener-2"
+		if httpsPort > frontendAddress.Port {
+			tlsID, httpID = httpID, tlsID
+		}
+		tlsPath := listener + "/" + tlsID
+		server := inventory[tlsPath]
+		if len(result.Gateway.ScopedListenerReadyPorts) != 2 || server["protocol"] != "TERMINATED_HTTPS" ||
+			server["default_tls_container_ref"] != refA || server["admin_state_up"] != true || server["default_pool_id"] != nil ||
+			inventory[listener+"/"+httpID]["protocol"] != "HTTP" || len(orderedPolicies(tlsID)) == 0 ||
+			inventory[pool+"/"+orderedPolicies(tlsID)[0]["redirect_pool_id"].(string)]["protocol"] != "HTTP" {
+			t.Fatalf("HTTPS listener and HTTP routing did not converge: %v, writes %v", result.Gateway.Outcome, writes)
+		}
+
+		// A retained route's temporarily incomplete inventory must not block
+		// an independent certificate withdrawal.
+		before := len(writes)
+		beforePoolReads := poolListReads
+		spec.Gateway.Spec.ScopedListeners[0].TLS = &cloud.ListenerTLS{}
+		disagreePoolMonitor = orderedPolicies(tlsID)[0]["redirect_pool_id"].(string)
+		if result := reconcile(newProvider(), spec); result.Outcome.State != cloud.OutcomeProgressing || server["admin_state_up"] != false || poolListReads != beforePoolReads ||
+			!slices.Equal(writes[before:], []string{"PUT " + tlsPath}) {
+			t.Fatalf("HTTPS withdrawal was blocked: %v, writes %v", result.Outcome, writes[before:])
+		}
+		disagreePoolMonitor = ""
+		before = len(writes)
+		if result := reconcile(newProvider(), spec); !slices.Equal(result.Gateway.ScopedListenerReadyPorts, []int{frontendAddress.Port}) || len(writes) != before {
+			t.Fatalf("restart changed the revoked frontend or lost the HTTP sibling: %v", result.Gateway.ScopedListenerReadyPorts)
+		}
+
+		spec.Gateway.Spec.ScopedListeners[0].TLS = &cloud.ListenerTLS{CertificateRef: refB}
+		loseCertificateUpdateReply = true
+		_, err := newProvider().ReconcileGatewayGraph(ctx, spec)
+		if !errors.Is(err, cloud.ErrTimeout) || server["default_tls_container_ref"] != refB || server["admin_state_up"] != false ||
+			!slices.Equal(writes[before:], []string{"PUT " + tlsPath}) {
+			t.Fatalf("ambiguous certificate update did not leave the frontend closed: error %v, writes %v", err, writes[before:])
+		}
+		server["provisioning_status"], inventory[gateway]["provisioning_status"] = "PENDING_UPDATE", "PENDING_UPDATE"
+		if result := reconcile(newProvider(), spec); slices.Contains(result.Gateway.ScopedListenerReadyPorts, httpsPort) || len(writes) != before+1 {
+			t.Fatal("pending certificate readback authorized an enable")
+		}
+		server["provisioning_status"], inventory[gateway]["provisioning_status"] = "ACTIVE", "ACTIVE"
+		result = converge(newProvider(), spec)
+		if !slices.Equal(writes[before:], []string{"PUT " + tlsPath, "PUT " + tlsPath}) || len(result.Gateway.ScopedListenerReadyPorts) != 2 {
+			t.Fatalf("restart repeated the certificate update or omitted the enable: %v", writes[before:])
+		}
+		before = len(writes)
+		spec.Gateway.Spec.ScopedListeners[0].TLS = &cloud.ListenerTLS{CertificateRef: refA}
+		if result := reconcile(newProvider(), spec); server["default_tls_container_ref"] != refB || server["admin_state_up"] != false ||
+			slices.Contains(result.Gateway.ScopedListenerReadyPorts, httpsPort) || inventory[listener+"/"+httpID]["admin_state_up"] != true ||
+			!slices.Equal(writes[before:], []string{"PUT " + tlsPath}) {
+			t.Fatalf("rotation changed a serving certificate before withdrawal: %v, writes %v", result.Gateway.ScopedListenerReadyPorts, writes[before:])
+		}
+		converge(newProvider(), spec)
+
+		// The narrow withdrawal works without a complete HTTPRoute graph
+		// and still rechecks authorization immediately before the write.
+		withdraw := cloud.GatewayGraphSpec{Identity: spec.Identity, Gateway: cloud.GatewayGraphNode{
+			Disposition: cloud.GraphWithdrawTLS, Spec: cloud.GatewaySpec{
+				Identity: spec.Identity, ListenerProtocol: cloud.ListenerProtocolHTTP, ListenerPort: frontendAddress.Port,
+				ScopedListeners: []cloud.ScopedListener{{Name: "https", Port: httpsPort, TLS: &cloud.ListenerTLS{}}},
+			},
+		}}
+		before = len(writes)
+		mutationDenied := errors.New("authorization changed before mutation")
+		withdraw.ValidateMutation = func(context.Context) error { return mutationDenied }
+		if _, err := newProvider().ReconcileGatewayGraph(ctx, withdraw); !errors.Is(err, mutationDenied) || len(writes) != before {
+			t.Fatalf("withdrawal bypassed the mutation fence: %v, writes %v", err, writes[before:])
+		}
+		withdraw.ValidateMutation = nil
+		if result := reconcile(newProvider(), withdraw); result.Outcome.State != cloud.OutcomeProgressing || server["admin_state_up"] != false ||
+			inventory[listener+"/"+httpID]["admin_state_up"] != true || !slices.Equal(writes[before:], []string{"PUT " + tlsPath}) {
+			t.Fatalf("restricted withdrawal changed unrelated resources: %v, writes %v", result.Outcome, writes[before:])
+		}
+		if result := reconcile(newProvider(), withdraw); result.Outcome.State != cloud.OutcomeReady || len(writes) != before+1 {
+			t.Fatalf("restricted withdrawal did not settle after readback: %v, writes %v", result.Outcome, writes[before:])
+		}
+		converge(newProvider(), spec)
+		withdraw.Gateway.Spec.ScopedListeners = []cloud.ScopedListener{}
+		before = len(writes)
+		if result := reconcile(newProvider(), withdraw); result.Outcome.State != cloud.OutcomeProgressing || server["admin_state_up"] != false ||
+			inventory[listener+"/"+httpID]["admin_state_up"] != true || !slices.Equal(writes[before:], []string{"PUT " + tlsPath}) {
+			t.Fatal("withdrawing all owned certificates changed the plaintext sibling")
+		}
+		converge(newProvider(), spec)
+
+		delete(server, "sni_container_refs")
+		before = len(writes)
+		reconcile(newProvider(), spec)
+		if result := reconcile(newProvider(), spec); slices.Contains(result.Gateway.ScopedListenerReadyPorts, httpsPort) ||
+			server["admin_state_up"] != false || !slices.Equal(writes[before:], []string{"PUT " + tlsPath}) {
+			t.Fatal("missing SNI readback was treated as proof of an empty SNI list")
+		}
+		server["sni_container_refs"] = []string{}
+		converge(newProvider(), spec)
+
+		// A deliberate protocol change retires the previously owned frontend
+		// and its policies before claiming that socket for the new protocol.
+		spec.Gateway.Spec.ScopedListeners[0].TLS = nil
+		converge(newProvider(), spec)
+		current := func(port int) record {
+			for _, candidate := range list(listener) {
+				if candidate["protocol_port"] == float64(port) {
+					return candidate
+				}
+			}
+			return nil
+		}
+		plain := current(httpsPort)
+		if plain["protocol"] != "HTTP" || plain["default_tls_container_ref"] != nil || inventory[tlsPath] != nil {
+			t.Fatal("replacing HTTPS with an explicitly requested HTTP listener retained the wrong protocol")
+		}
+		spec.Gateway.Spec.ScopedListeners[0].TLS = &cloud.ListenerTLS{}
+		if result := reconcile(newProvider(), spec); slices.Contains(result.Gateway.ScopedListenerReadyPorts, httpsPort) ||
+			plain["admin_state_up"] != false || inventory[listener+"/"+httpID]["admin_state_up"] != true {
+			t.Fatal("an older plaintext listener remained open when the port required HTTPS")
+		}
+		spec.Gateway.Spec.ScopedListeners[0].TLS = &cloud.ListenerTLS{CertificateRef: refA}
+		converge(newProvider(), spec)
+
+		spec.Gateway = cloud.GatewayGraphNode{Disposition: cloud.GraphDelete, Spec: cloud.GatewaySpec{
+			ListenerProtocol: cloud.ListenerProtocolHTTP, ListenerPort: frontendAddress.Port, ScopedListeners: []cloud.ScopedListener{},
+		}}
+		for i := range spec.Routes {
+			spec.Routes[i].Disposition = cloud.GraphPreserve
+		}
+		for attempts := 0; attempts < 24 && len(inventory) != len(protected); attempts++ {
+			reconcile(newProvider(), spec)
+			if inventory[gateway] != nil {
+				inventory[gateway]["provisioning_status"] = "ACTIVE"
+			}
+		}
+		if len(inventory) != len(protected) {
+			t.Fatalf("HTTPS Gateway cleanup left provider resources: %v", writes)
+		}
+		return
 	}
 	if result := converge(provider, spec); len(result.Routes) != 1 || result.Routes[0].Result.Outcome.State != cloud.OutcomeReady {
 		t.Fatalf("route did not converge: %#v, writes %v", result, writes)

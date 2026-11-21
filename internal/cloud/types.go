@@ -68,6 +68,13 @@ type GatewaySpec struct {
 type ScopedListener struct {
 	Name string
 	Port int
+	TLS  *ListenerTLS
+}
+
+// ListenerTLS requests a terminated HTTPS frontend. An empty CertificateRef
+// withdraws the frontend until an authorized reference becomes available.
+type ListenerTLS struct {
+	CertificateRef string
 }
 
 // GatewayState is the provider-neutral result published to Gateway status and

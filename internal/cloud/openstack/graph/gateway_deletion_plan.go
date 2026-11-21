@@ -73,11 +73,16 @@ func (p gatewayDeletionPlan) orderedSteps() []gatewayDeletionStep {
 // returning any work. Callers must not execute a deletion step when this
 // method returns an error.
 func (p *Provider) buildGatewayDeletionPlan(ctx context.Context, identity Identity, lb *octavia.LoadBalancer, owners []routeGraphOwner, protocol string) (gatewayDeletionPlan, error) {
-	listeners, _, err := p.listGatewayListeners(ctx, lb, false)
+	inventory, markedProtocol, err := p.listGatewayListeners(ctx, lb)
 	if err != nil {
 		return gatewayDeletionPlan{}, err
 	}
-	return p.buildGatewayDeletionPlanFromListeners(ctx, identity, lb, owners, protocol, listeners)
+	if markedProtocol != "" {
+		if err := requireListenerDefaultPoolInventory(lb.ID, inventory); err != nil {
+			return gatewayDeletionPlan{}, err
+		}
+	}
+	return p.buildGatewayDeletionPlanFromListeners(ctx, identity, lb, owners, protocol, inventory.Items)
 }
 
 func (p *Provider) buildGatewayDeletionPlanFromListeners(ctx context.Context, identity Identity, lb *octavia.LoadBalancer, owners []routeGraphOwner, protocol string, listenerList []listeners.Listener) (gatewayDeletionPlan, error) {
