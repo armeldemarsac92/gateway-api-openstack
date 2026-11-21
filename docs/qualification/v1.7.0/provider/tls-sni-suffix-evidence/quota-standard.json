@@ -1,0 +1,1523 @@
+{
+  "channel": "standard",
+  "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+  "inputs": {
+    "controller": {
+      "repository": "ghcr.io/armeldemarsac92/gateway-api-openstack",
+      "sourceRevision": "633e0efb0ca141adfd693f5474ed08a8b0777f3c",
+      "manifestDigest": "sha256:523db1c10771c4c520c2d1b8cd9e2c616b2987bf9d3cc470a7e6108c3901e0a4",
+      "platform": "linux/amd64",
+      "ociArchiveSHA256": "aa37e433d7c9963a6c95cba6d6db461628e6ee2f16eaf06667173aa92f727249",
+      "managerSHA256": "0fc497eaa5680f672ecdb58b095a0c2c6ef724c5c338bfb851c8213319bb3bc3"
+    },
+    "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+    "environment": {
+      "planeSHA256": "71a3c743b74d453de0e347dc55ca1aa5b094ac14cdc23d52879910cd0b7883de",
+      "HAProxySHA256": "847fad8188f01f5693cfba85731f37d554758526f39dc6f67162ec2c6a150885"
+    }
+  },
+  "runtimeProviderSources": {
+    "octavia": {
+      "revision": "83653eade75abd8430fb8ac86865866cef860c34",
+      "sourceTree": "13cb0d762fcad48a383b23c247e38061c29a140e",
+      "packageSourceArchiveSHA256": "2826374ec348d07065cd9005e60d67ff7f6f2facd0c9db0418cda9ecac07a57f",
+      "version": "19.0.1.dev5",
+      "wheel": "octavia-19.0.1.dev5-py3-none-any.whl",
+      "wheelSHA256": "44e47bf3f205583c597b7605359ce5435672ea85a65dfd099361b77fd5741fc7",
+      "packageFilesMatchedToSource": 631,
+      "pythonFilesMatchedToSource": 609,
+      "templatesMatchedToSource": 11,
+      "importedModulesVerified": 151,
+      "moduleFiles": {
+        "octavia.api.drivers.amphora_driver.v2.driver": "octavia/api/drivers/amphora_driver/v2/driver.py",
+        "octavia.api.drivers.utils": "octavia/api/drivers/utils.py",
+        "octavia.api.v2.controllers.l7policy": "octavia/api/v2/controllers/l7policy.py",
+        "octavia.api.v2.controllers.l7rule": "octavia/api/v2/controllers/l7rule.py",
+        "octavia.api.app": "octavia/api/app.py",
+        "octavia.common.jinja.haproxy.combined_listeners.jinja_cfg": "octavia/common/jinja/haproxy/combined_listeners/jinja_cfg.py",
+        "octavia.db.models": "octavia/db/models.py",
+        "octavia.tests.functional.api.v2.base": "octavia/tests/functional/api/v2/base.py"
+      },
+      "rendererTemplates": [
+        "octavia/common/jinja/haproxy/combined_listeners/templates/haproxy.cfg.j2",
+        "octavia/common/jinja/haproxy/combined_listeners/templates/macros.j2"
+      ]
+    },
+    "octavia-lib": {
+      "revision": "bb1a993ac95477b0bdc429f8aaf6d1620f8e7669",
+      "sourceTree": "8b18768d9c12dafe916b582ba6dc3f0f9c91d9f7",
+      "packageSourceArchiveSHA256": "5fef097a538f18a53360fb79046f77043c853876d81130c2cb141c5a6427fd83",
+      "version": "3.12.1.dev3",
+      "wheel": "octavia_lib-3.12.1.dev3-py3-none-any.whl",
+      "wheelSHA256": "5513991a6e004490221065b64be53f3dbdf3de1bab6e768ff2bc98f797c5cfc5",
+      "packageFilesMatchedToSource": 24,
+      "pythonFilesMatchedToSource": 24,
+      "templatesMatchedToSource": 0,
+      "importedModulesVerified": 9,
+      "moduleFiles": {
+        "octavia_lib.api.drivers.data_models": "octavia_lib/api/drivers/data_models.py",
+        "octavia_lib.api.drivers.provider_base": "octavia_lib/api/drivers/provider_base.py"
+      }
+    }
+  },
+  "controllerStartupVersion": "633e0efb0ca141adfd693f5474ed08a8b0777f3c",
+  "controllerFlags": [
+    "--octavia-tls-sni-passthrough",
+    "--octavia-tls-sni-suffix"
+  ],
+  "providerEnrollment": {
+    "enabled_tls_sni_providers": [
+      "amphora"
+    ],
+    "enabled_tls_sni_suffix_providers": [
+      "amphora"
+    ],
+    "gateway_capabilities": [
+      "tls_sni_passthrough_v1",
+      "tls_sni_suffix_v1"
+    ]
+  },
+  "kubernetes": "v1.36.2",
+  "haproxy": "3.0.19",
+  "applicationSANs": {
+    "B": [
+      "catalog.example.test",
+      "deep.catalog.example.test",
+      "shop.example.test",
+      "checkout.shop.example.test",
+      "blue.eu.shop.example.test",
+      "vip.shop.example.test"
+    ],
+    "A": [
+      "checkout.shop.example.test",
+      "blue.eu.shop.example.test",
+      "vip.shop.example.test"
+    ],
+    "C": [
+      "vip.shop.example.test"
+    ]
+  },
+  "directConnections": [
+    {
+      "sni": "catalog.example.test",
+      "outcome": "connected",
+      "backend": "B",
+      "backendSNI": "catalog.example.test",
+      "leafSHA256": "a5f41c6221a1ca5b856532c3567c69a262d496caf61e50db1a683ffc11607491",
+      "echoBytes": 256
+    },
+    {
+      "sni": "deep.catalog.example.test",
+      "outcome": "connected",
+      "backend": "B",
+      "backendSNI": "deep.catalog.example.test",
+      "leafSHA256": "a5f41c6221a1ca5b856532c3567c69a262d496caf61e50db1a683ffc11607491",
+      "echoBytes": 256
+    },
+    {
+      "sni": "shop.example.test",
+      "outcome": "connected",
+      "backend": "B",
+      "backendSNI": "shop.example.test",
+      "leafSHA256": "a5f41c6221a1ca5b856532c3567c69a262d496caf61e50db1a683ffc11607491",
+      "echoBytes": 256
+    },
+    {
+      "sni": "checkout.shop.example.test",
+      "outcome": "connected",
+      "backend": "B",
+      "backendSNI": "checkout.shop.example.test",
+      "leafSHA256": "a5f41c6221a1ca5b856532c3567c69a262d496caf61e50db1a683ffc11607491",
+      "echoBytes": 256
+    },
+    {
+      "sni": "blue.eu.shop.example.test",
+      "outcome": "connected",
+      "backend": "B",
+      "backendSNI": "blue.eu.shop.example.test",
+      "leafSHA256": "a5f41c6221a1ca5b856532c3567c69a262d496caf61e50db1a683ffc11607491",
+      "echoBytes": 256
+    },
+    {
+      "sni": "vip.shop.example.test",
+      "outcome": "connected",
+      "backend": "B",
+      "backendSNI": "vip.shop.example.test",
+      "leafSHA256": "a5f41c6221a1ca5b856532c3567c69a262d496caf61e50db1a683ffc11607491",
+      "echoBytes": 256
+    },
+    {
+      "sni": "checkout.shop.example.test",
+      "outcome": "connected",
+      "backend": "A",
+      "backendSNI": "checkout.shop.example.test",
+      "leafSHA256": "1c6e6f71ef62a4800e29247ed7d712fd5abd846053fd772c46255c48cadb4db0",
+      "echoBytes": 256
+    },
+    {
+      "sni": "blue.eu.shop.example.test",
+      "outcome": "connected",
+      "backend": "A",
+      "backendSNI": "blue.eu.shop.example.test",
+      "leafSHA256": "1c6e6f71ef62a4800e29247ed7d712fd5abd846053fd772c46255c48cadb4db0",
+      "echoBytes": 256
+    },
+    {
+      "sni": "vip.shop.example.test",
+      "outcome": "connected",
+      "backend": "A",
+      "backendSNI": "vip.shop.example.test",
+      "leafSHA256": "1c6e6f71ef62a4800e29247ed7d712fd5abd846053fd772c46255c48cadb4db0",
+      "echoBytes": 256
+    },
+    {
+      "sni": "vip.shop.example.test",
+      "outcome": "connected",
+      "backend": "C",
+      "backendSNI": "vip.shop.example.test",
+      "leafSHA256": "463b2682059a4a53155381fa2fe5b1f22da6a0b643d74175b67ff13bda6a4443",
+      "echoBytes": 256
+    }
+  ],
+  "routeSpecs": {
+    "B": {
+      "parentRefs": [
+        {
+          "name": "stock-feasibility",
+          "sectionName": "passthrough"
+        }
+      ],
+      "hostnames": [
+        "*.example.test"
+      ],
+      "rules": [
+        {
+          "backendRefs": [
+            {
+              "name": "tls-b",
+              "port": 443
+            }
+          ]
+        }
+      ]
+    },
+    "A": {
+      "parentRefs": [
+        {
+          "name": "stock-feasibility",
+          "sectionName": "passthrough"
+        }
+      ],
+      "hostnames": [
+        "*.shop.example.test"
+      ],
+      "rules": [
+        {
+          "backendRefs": [
+            {
+              "name": "tls-a",
+              "port": 443,
+              "namespace": "tls-backends"
+            }
+          ]
+        }
+      ]
+    },
+    "C": {
+      "parentRefs": [
+        {
+          "name": "stock-feasibility",
+          "sectionName": "passthrough"
+        }
+      ],
+      "hostnames": [
+        "vip.shop.example.test"
+      ],
+      "rules": [
+        {
+          "backendRefs": [
+            {
+              "name": "tls-c",
+              "port": 443
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "routeIdentities": {
+    "B": {
+      "uid": "624206f1-860f-4d35-b884-2bdf5a8be6f0",
+      "generation": 1
+    },
+    "A": {
+      "uid": "8088cd42-0de2-451f-a6ca-d18dde48a246",
+      "generation": 1
+    },
+    "C": {
+      "uid": "c06635f2-a3f8-4f89-9b58-75c5c60ca1db",
+      "generation": 1
+    }
+  },
+  "phases": {
+    "grant-present": {
+      "referenceGrantUID": "5a1cb8ee-0130-4a86-a8b4-d8397dd3d86d",
+      "gateway": {
+        "conditions": {
+          "Accepted": "True/Accepted",
+          "Programmed": "True/Programmed"
+        },
+        "listeners": [
+          {
+            "attachedRoutes": 3,
+            "supportedKinds": [
+              "TLSRoute"
+            ],
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            }
+          }
+        ]
+      },
+      "routes": {
+        "B": {
+          "uid": "624206f1-860f-4d35-b884-2bdf5a8be6f0",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+          }
+        },
+        "A": {
+          "uid": "8088cd42-0de2-451f-a6ca-d18dde48a246",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+          }
+        },
+        "C": {
+          "uid": "c06635f2-a3f8-4f89-9b58-75c5c60ca1db",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+          }
+        }
+      },
+      "octavia": {
+        "loadBalancer": {
+          "id": "00d26faa-6d7c-4257-95f7-e469a7737266",
+          "vip_address": "192.0.2.30",
+          "provider": "amphora",
+          "provisioning_status": "ACTIVE"
+        },
+        "listener": {
+          "id": "60573616-26a6-45ab-892f-50c4f87d7700",
+          "protocol": "TCP",
+          "protocol_port": 9443,
+          "default_pool_id": null,
+          "default_tls_container_ref": null,
+          "admin_state_up": true
+        },
+        "bindings": {
+          "C": {
+            "policy": {
+              "id": "d777d1d4-0056-422d-b27a-9cb5b0784030",
+              "position": 1,
+              "action": "REDIRECT_TO_POOL",
+              "redirectPoolId": "9ac3c95b-69d2-4e51-8d2d-375e334b1312",
+              "listenerId": "60573616-26a6-45ab-892f-50c4f87d7700"
+            },
+            "rule": {
+              "id": "994d0af9-5973-49a2-bcbc-c5cf71423324",
+              "type": "TLS_SNI",
+              "compare_type": "EQUAL_TO",
+              "value": "vip.shop.example.test",
+              "invert": false,
+              "admin_state_up": true
+            },
+            "pool": {
+              "id": "9ac3c95b-69d2-4e51-8d2d-375e334b1312",
+              "name": "gateway-api-openstack-feasibility-stock-feasibility-tls-sni-pool",
+              "protocol": "TCP",
+              "admin_state_up": true
+            },
+            "members": [
+              {
+                "id": "8bb8bcdb-f00d-4d24-8a24-3227f57e7509",
+                "address": "198.51.100.7",
+                "protocol_port": 10443,
+                "admin_state_up": true
+              }
+            ]
+          },
+          "A": {
+            "policy": {
+              "id": "a0607af3-f3ae-484c-90a3-f0e4543ff12a",
+              "position": 2,
+              "action": "REDIRECT_TO_POOL",
+              "redirectPoolId": "ebcd14ab-0d78-4aea-a770-0ee9c18ce2ea",
+              "listenerId": "60573616-26a6-45ab-892f-50c4f87d7700"
+            },
+            "rule": {
+              "id": "8c947a12-36e4-4a8e-bc5e-0701632a2c64",
+              "type": "TLS_SNI",
+              "compare_type": "ENDS_WITH",
+              "value": "*.shop.example.test",
+              "invert": false,
+              "admin_state_up": true
+            },
+            "pool": {
+              "id": "ebcd14ab-0d78-4aea-a770-0ee9c18ce2ea",
+              "name": "gateway-api-openstack-feasibility-stock-feasibility-tls-sni-pool",
+              "protocol": "TCP",
+              "admin_state_up": true
+            },
+            "members": [
+              {
+                "id": "b143bab2-4d5d-4ec1-834d-d30402af22d9",
+                "address": "198.51.100.6",
+                "protocol_port": 10443,
+                "admin_state_up": true
+              }
+            ]
+          },
+          "B": {
+            "policy": {
+              "id": "2d42c4ff-b850-4d7e-bf2c-d52263cd3dfa",
+              "position": 3,
+              "action": "REDIRECT_TO_POOL",
+              "redirectPoolId": "e1e0849f-f706-4e13-85c6-0e5ce8da4a52",
+              "listenerId": "60573616-26a6-45ab-892f-50c4f87d7700"
+            },
+            "rule": {
+              "id": "2b18ed36-a159-42a7-9158-7ef74f9124a2",
+              "type": "TLS_SNI",
+              "compare_type": "ENDS_WITH",
+              "value": "*.example.test",
+              "invert": false,
+              "admin_state_up": true
+            },
+            "pool": {
+              "id": "e1e0849f-f706-4e13-85c6-0e5ce8da4a52",
+              "name": "gateway-api-openstack-feasibility-stock-feasibility-tls-sni-pool",
+              "protocol": "TCP",
+              "admin_state_up": true
+            },
+            "members": [
+              {
+                "id": "328e0dd2-7a3a-476a-8f44-21e53cc65008",
+                "address": "198.51.100.5",
+                "protocol_port": 10443,
+                "admin_state_up": true
+              }
+            ]
+          }
+        }
+      },
+      "haproxy": {
+        "activeConfigSHA256": "9b9cda84b4b28d1a94a9473de0a040ef1aa444e84e04d49d5db63a56bf1ec37e",
+        "mode": "tcp",
+        "defaultBackend": null,
+        "selectedBackendOrder": [
+          "C",
+          "A",
+          "B"
+        ],
+        "aclMatch": {
+          "C": [
+            "req.ssl_sni",
+            "-i",
+            "-m",
+            "str",
+            "vip.shop.example.test"
+          ],
+          "A": [
+            "req.ssl_sni",
+            "-i",
+            "-m",
+            "end",
+            ".shop.example.test"
+          ],
+          "B": [
+            "req.ssl_sni",
+            "-i",
+            "-m",
+            "end",
+            ".example.test"
+          ]
+        }
+      },
+      "connections": [
+        {
+          "sni": "catalog.example.test",
+          "outcome": "connected",
+          "backend": "B",
+          "backendSNI": "catalog.example.test",
+          "leafSHA256": "a5f41c6221a1ca5b856532c3567c69a262d496caf61e50db1a683ffc11607491",
+          "echoBytes": 256,
+          "applicationBackendSessions": {
+            "A": {
+              "before": 0,
+              "after": 0
+            },
+            "B": {
+              "before": 0,
+              "after": 1
+            },
+            "C": {
+              "before": 0,
+              "after": 0
+            }
+          }
+        },
+        {
+          "sni": "deep.catalog.example.test",
+          "outcome": "connected",
+          "backend": "B",
+          "backendSNI": "deep.catalog.example.test",
+          "leafSHA256": "a5f41c6221a1ca5b856532c3567c69a262d496caf61e50db1a683ffc11607491",
+          "echoBytes": 256,
+          "applicationBackendSessions": {
+            "A": {
+              "before": 0,
+              "after": 0
+            },
+            "B": {
+              "before": 1,
+              "after": 2
+            },
+            "C": {
+              "before": 0,
+              "after": 0
+            }
+          }
+        },
+        {
+          "sni": "shop.example.test",
+          "outcome": "connected",
+          "backend": "B",
+          "backendSNI": "shop.example.test",
+          "leafSHA256": "a5f41c6221a1ca5b856532c3567c69a262d496caf61e50db1a683ffc11607491",
+          "echoBytes": 256,
+          "applicationBackendSessions": {
+            "A": {
+              "before": 0,
+              "after": 0
+            },
+            "B": {
+              "before": 2,
+              "after": 3
+            },
+            "C": {
+              "before": 0,
+              "after": 0
+            }
+          }
+        },
+        {
+          "sni": "checkout.shop.example.test",
+          "outcome": "connected",
+          "backend": "A",
+          "backendSNI": "checkout.shop.example.test",
+          "leafSHA256": "1c6e6f71ef62a4800e29247ed7d712fd5abd846053fd772c46255c48cadb4db0",
+          "echoBytes": 256,
+          "applicationBackendSessions": {
+            "A": {
+              "before": 0,
+              "after": 1
+            },
+            "B": {
+              "before": 3,
+              "after": 3
+            },
+            "C": {
+              "before": 0,
+              "after": 0
+            }
+          }
+        },
+        {
+          "sni": "blue.eu.shop.example.test",
+          "outcome": "connected",
+          "backend": "A",
+          "backendSNI": "blue.eu.shop.example.test",
+          "leafSHA256": "1c6e6f71ef62a4800e29247ed7d712fd5abd846053fd772c46255c48cadb4db0",
+          "echoBytes": 256,
+          "applicationBackendSessions": {
+            "A": {
+              "before": 1,
+              "after": 2
+            },
+            "B": {
+              "before": 3,
+              "after": 3
+            },
+            "C": {
+              "before": 0,
+              "after": 0
+            }
+          }
+        },
+        {
+          "sni": "vip.shop.example.test",
+          "outcome": "connected",
+          "backend": "C",
+          "backendSNI": "vip.shop.example.test",
+          "leafSHA256": "463b2682059a4a53155381fa2fe5b1f22da6a0b643d74175b67ff13bda6a4443",
+          "echoBytes": 256,
+          "applicationBackendSessions": {
+            "A": {
+              "before": 2,
+              "after": 2
+            },
+            "B": {
+              "before": 3,
+              "after": 3
+            },
+            "C": {
+              "before": 0,
+              "after": 1
+            }
+          }
+        },
+        {
+          "sni": "example.test",
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "applicationBackendSessions": {
+            "A": {
+              "before": 2,
+              "after": 2
+            },
+            "B": {
+              "before": 3,
+              "after": 3
+            },
+            "C": {
+              "before": 1,
+              "after": 1
+            }
+          }
+        },
+        {
+          "sni": "catalog.notexample.test",
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "applicationBackendSessions": {
+            "A": {
+              "before": 2,
+              "after": 2
+            },
+            "B": {
+              "before": 3,
+              "after": 3
+            },
+            "C": {
+              "before": 1,
+              "after": 1
+            }
+          }
+        },
+        {
+          "sni": "unrelated.other.test",
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "applicationBackendSessions": {
+            "A": {
+              "before": 2,
+              "after": 2
+            },
+            "B": {
+              "before": 3,
+              "after": 3
+            },
+            "C": {
+              "before": 1,
+              "after": 1
+            }
+          }
+        },
+        {
+          "sni": null,
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "applicationBackendSessions": {
+            "A": {
+              "before": 2,
+              "after": 2
+            },
+            "B": {
+              "before": 3,
+              "after": 3
+            },
+            "C": {
+              "before": 1,
+              "after": 1
+            }
+          }
+        }
+      ]
+    },
+    "grant-removed-at-pool-quota": {
+      "referenceGrantUID": null,
+      "gateway": {
+        "conditions": {
+          "Accepted": "True/Accepted",
+          "Programmed": "Unknown/Pending"
+        },
+        "listeners": [
+          {
+            "attachedRoutes": 3,
+            "supportedKinds": [
+              "TLSRoute"
+            ],
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "Unknown/Pending"
+            }
+          }
+        ]
+      },
+      "routes": {
+        "B": {
+          "uid": "624206f1-860f-4d35-b884-2bdf5a8be6f0",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+          }
+        },
+        "A": {
+          "uid": "8088cd42-0de2-451f-a6ca-d18dde48a246",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "False/RefNotPermitted",
+            "gateway-api-openstack.github.io/Programmed": "False/RefNotPermitted"
+          }
+        },
+        "C": {
+          "uid": "c06635f2-a3f8-4f89-9b58-75c5c60ca1db",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+          }
+        }
+      },
+      "octavia": {
+        "loadBalancer": {
+          "id": "00d26faa-6d7c-4257-95f7-e469a7737266",
+          "vip_address": "192.0.2.30",
+          "provider": "amphora",
+          "provisioning_status": "ACTIVE"
+        },
+        "listener": {
+          "id": "60573616-26a6-45ab-892f-50c4f87d7700",
+          "protocol": "TCP",
+          "protocol_port": 9443,
+          "default_pool_id": null,
+          "default_tls_container_ref": null,
+          "admin_state_up": true
+        },
+        "bindings": {
+          "C": {
+            "policy": {
+              "id": "d777d1d4-0056-422d-b27a-9cb5b0784030",
+              "position": 1,
+              "action": "REDIRECT_TO_POOL",
+              "redirectPoolId": "9ac3c95b-69d2-4e51-8d2d-375e334b1312",
+              "listenerId": "60573616-26a6-45ab-892f-50c4f87d7700"
+            },
+            "rule": {
+              "id": "994d0af9-5973-49a2-bcbc-c5cf71423324",
+              "type": "TLS_SNI",
+              "compare_type": "EQUAL_TO",
+              "value": "vip.shop.example.test",
+              "invert": false,
+              "admin_state_up": true
+            },
+            "pool": {
+              "id": "9ac3c95b-69d2-4e51-8d2d-375e334b1312",
+              "name": "gateway-api-openstack-feasibility-stock-feasibility-tls-sni-pool",
+              "protocol": "TCP",
+              "admin_state_up": true
+            },
+            "members": [
+              {
+                "id": "8bb8bcdb-f00d-4d24-8a24-3227f57e7509",
+                "address": "198.51.100.7",
+                "protocol_port": 10443,
+                "admin_state_up": true
+              }
+            ]
+          },
+          "A": {
+            "policy": {
+              "id": "a0607af3-f3ae-484c-90a3-f0e4543ff12a",
+              "position": 2,
+              "action": "REDIRECT_TO_POOL",
+              "redirectPoolId": "ebcd14ab-0d78-4aea-a770-0ee9c18ce2ea",
+              "listenerId": "60573616-26a6-45ab-892f-50c4f87d7700"
+            },
+            "rule": {
+              "id": "8c947a12-36e4-4a8e-bc5e-0701632a2c64",
+              "type": "TLS_SNI",
+              "compare_type": "ENDS_WITH",
+              "value": "*.shop.example.test",
+              "invert": false,
+              "admin_state_up": true
+            },
+            "pool": {
+              "id": "ebcd14ab-0d78-4aea-a770-0ee9c18ce2ea",
+              "name": "gateway-api-openstack-feasibility-stock-feasibility-tls-sni-pool",
+              "protocol": "TCP",
+              "admin_state_up": true
+            },
+            "members": []
+          },
+          "B": {
+            "policy": {
+              "id": "2d42c4ff-b850-4d7e-bf2c-d52263cd3dfa",
+              "position": 3,
+              "action": "REDIRECT_TO_POOL",
+              "redirectPoolId": "e1e0849f-f706-4e13-85c6-0e5ce8da4a52",
+              "listenerId": "60573616-26a6-45ab-892f-50c4f87d7700"
+            },
+            "rule": {
+              "id": "2b18ed36-a159-42a7-9158-7ef74f9124a2",
+              "type": "TLS_SNI",
+              "compare_type": "ENDS_WITH",
+              "value": "*.example.test",
+              "invert": false,
+              "admin_state_up": true
+            },
+            "pool": {
+              "id": "e1e0849f-f706-4e13-85c6-0e5ce8da4a52",
+              "name": "gateway-api-openstack-feasibility-stock-feasibility-tls-sni-pool",
+              "protocol": "TCP",
+              "admin_state_up": true
+            },
+            "members": [
+              {
+                "id": "328e0dd2-7a3a-476a-8f44-21e53cc65008",
+                "address": "198.51.100.5",
+                "protocol_port": 10443,
+                "admin_state_up": true
+              }
+            ]
+          }
+        }
+      },
+      "haproxy": {
+        "activeConfigSHA256": "b4b3a40889746a168f6f53ab0e9fed489f558d19a7cc6f2a72233a5cfd2e4491",
+        "mode": "tcp",
+        "defaultBackend": null,
+        "selectedBackendOrder": [
+          "C",
+          "A",
+          "B"
+        ],
+        "aclMatch": {
+          "C": [
+            "req.ssl_sni",
+            "-i",
+            "-m",
+            "str",
+            "vip.shop.example.test"
+          ],
+          "A": [
+            "req.ssl_sni",
+            "-i",
+            "-m",
+            "end",
+            ".shop.example.test"
+          ],
+          "B": [
+            "req.ssl_sni",
+            "-i",
+            "-m",
+            "end",
+            ".example.test"
+          ]
+        }
+      },
+      "connections": [
+        {
+          "sni": "catalog.example.test",
+          "outcome": "connected",
+          "backend": "B",
+          "backendSNI": "catalog.example.test",
+          "leafSHA256": "a5f41c6221a1ca5b856532c3567c69a262d496caf61e50db1a683ffc11607491",
+          "echoBytes": 256,
+          "applicationBackendSessions": {
+            "B": {
+              "before": 0,
+              "after": 1
+            },
+            "C": {
+              "before": 0,
+              "after": 0
+            }
+          },
+          "emptyRejectionPoolSessions": {
+            "before": 0,
+            "after": 0
+          }
+        },
+        {
+          "sni": "deep.catalog.example.test",
+          "outcome": "connected",
+          "backend": "B",
+          "backendSNI": "deep.catalog.example.test",
+          "leafSHA256": "a5f41c6221a1ca5b856532c3567c69a262d496caf61e50db1a683ffc11607491",
+          "echoBytes": 256,
+          "applicationBackendSessions": {
+            "B": {
+              "before": 1,
+              "after": 2
+            },
+            "C": {
+              "before": 0,
+              "after": 0
+            }
+          },
+          "emptyRejectionPoolSessions": {
+            "before": 0,
+            "after": 0
+          }
+        },
+        {
+          "sni": "shop.example.test",
+          "outcome": "connected",
+          "backend": "B",
+          "backendSNI": "shop.example.test",
+          "leafSHA256": "a5f41c6221a1ca5b856532c3567c69a262d496caf61e50db1a683ffc11607491",
+          "echoBytes": 256,
+          "applicationBackendSessions": {
+            "B": {
+              "before": 2,
+              "after": 3
+            },
+            "C": {
+              "before": 0,
+              "after": 0
+            }
+          },
+          "emptyRejectionPoolSessions": {
+            "before": 0,
+            "after": 0
+          }
+        },
+        {
+          "sni": "checkout.shop.example.test",
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "applicationBackendSessions": {
+            "B": {
+              "before": 3,
+              "after": 3
+            },
+            "C": {
+              "before": 0,
+              "after": 0
+            }
+          },
+          "emptyRejectionPoolSessions": {
+            "before": 0,
+            "after": 1
+          }
+        },
+        {
+          "sni": "blue.eu.shop.example.test",
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "applicationBackendSessions": {
+            "B": {
+              "before": 3,
+              "after": 3
+            },
+            "C": {
+              "before": 0,
+              "after": 0
+            }
+          },
+          "emptyRejectionPoolSessions": {
+            "before": 1,
+            "after": 2
+          }
+        },
+        {
+          "sni": "vip.shop.example.test",
+          "outcome": "connected",
+          "backend": "C",
+          "backendSNI": "vip.shop.example.test",
+          "leafSHA256": "463b2682059a4a53155381fa2fe5b1f22da6a0b643d74175b67ff13bda6a4443",
+          "echoBytes": 256,
+          "applicationBackendSessions": {
+            "B": {
+              "before": 3,
+              "after": 3
+            },
+            "C": {
+              "before": 0,
+              "after": 1
+            }
+          },
+          "emptyRejectionPoolSessions": {
+            "before": 2,
+            "after": 2
+          }
+        },
+        {
+          "sni": "example.test",
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "applicationBackendSessions": {
+            "B": {
+              "before": 3,
+              "after": 3
+            },
+            "C": {
+              "before": 1,
+              "after": 1
+            }
+          },
+          "emptyRejectionPoolSessions": {
+            "before": 2,
+            "after": 2
+          }
+        },
+        {
+          "sni": "catalog.notexample.test",
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "applicationBackendSessions": {
+            "B": {
+              "before": 3,
+              "after": 3
+            },
+            "C": {
+              "before": 1,
+              "after": 1
+            }
+          },
+          "emptyRejectionPoolSessions": {
+            "before": 2,
+            "after": 2
+          }
+        },
+        {
+          "sni": "unrelated.other.test",
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "applicationBackendSessions": {
+            "B": {
+              "before": 3,
+              "after": 3
+            },
+            "C": {
+              "before": 1,
+              "after": 1
+            }
+          },
+          "emptyRejectionPoolSessions": {
+            "before": 2,
+            "after": 2
+          }
+        },
+        {
+          "sni": null,
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "applicationBackendSessions": {
+            "B": {
+              "before": 3,
+              "after": 3
+            },
+            "C": {
+              "before": 1,
+              "after": 1
+            }
+          },
+          "emptyRejectionPoolSessions": {
+            "before": 2,
+            "after": 2
+          }
+        }
+      ]
+    },
+    "grant-restored": {
+      "referenceGrantUID": "08fe3463-56a3-4575-be2a-d14a8e302177",
+      "gateway": {
+        "conditions": {
+          "Accepted": "True/Accepted",
+          "Programmed": "True/Programmed"
+        },
+        "listeners": [
+          {
+            "attachedRoutes": 3,
+            "supportedKinds": [
+              "TLSRoute"
+            ],
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            }
+          }
+        ]
+      },
+      "routes": {
+        "B": {
+          "uid": "624206f1-860f-4d35-b884-2bdf5a8be6f0",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+          }
+        },
+        "A": {
+          "uid": "8088cd42-0de2-451f-a6ca-d18dde48a246",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+          }
+        },
+        "C": {
+          "uid": "c06635f2-a3f8-4f89-9b58-75c5c60ca1db",
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+            "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+          }
+        }
+      },
+      "octavia": {
+        "loadBalancer": {
+          "id": "00d26faa-6d7c-4257-95f7-e469a7737266",
+          "vip_address": "192.0.2.30",
+          "provider": "amphora",
+          "provisioning_status": "ACTIVE"
+        },
+        "listener": {
+          "id": "60573616-26a6-45ab-892f-50c4f87d7700",
+          "protocol": "TCP",
+          "protocol_port": 9443,
+          "default_pool_id": null,
+          "default_tls_container_ref": null,
+          "admin_state_up": true
+        },
+        "bindings": {
+          "C": {
+            "policy": {
+              "id": "d777d1d4-0056-422d-b27a-9cb5b0784030",
+              "position": 1,
+              "action": "REDIRECT_TO_POOL",
+              "redirectPoolId": "9ac3c95b-69d2-4e51-8d2d-375e334b1312",
+              "listenerId": "60573616-26a6-45ab-892f-50c4f87d7700"
+            },
+            "rule": {
+              "id": "994d0af9-5973-49a2-bcbc-c5cf71423324",
+              "type": "TLS_SNI",
+              "compare_type": "EQUAL_TO",
+              "value": "vip.shop.example.test",
+              "invert": false,
+              "admin_state_up": true
+            },
+            "pool": {
+              "id": "9ac3c95b-69d2-4e51-8d2d-375e334b1312",
+              "name": "gateway-api-openstack-feasibility-stock-feasibility-tls-sni-pool",
+              "protocol": "TCP",
+              "admin_state_up": true
+            },
+            "members": [
+              {
+                "id": "8bb8bcdb-f00d-4d24-8a24-3227f57e7509",
+                "address": "198.51.100.7",
+                "protocol_port": 10443,
+                "admin_state_up": true
+              }
+            ]
+          },
+          "A": {
+            "policy": {
+              "id": "a0607af3-f3ae-484c-90a3-f0e4543ff12a",
+              "position": 2,
+              "action": "REDIRECT_TO_POOL",
+              "redirectPoolId": "ebcd14ab-0d78-4aea-a770-0ee9c18ce2ea",
+              "listenerId": "60573616-26a6-45ab-892f-50c4f87d7700"
+            },
+            "rule": {
+              "id": "8c947a12-36e4-4a8e-bc5e-0701632a2c64",
+              "type": "TLS_SNI",
+              "compare_type": "ENDS_WITH",
+              "value": "*.shop.example.test",
+              "invert": false,
+              "admin_state_up": true
+            },
+            "pool": {
+              "id": "ebcd14ab-0d78-4aea-a770-0ee9c18ce2ea",
+              "name": "gateway-api-openstack-feasibility-stock-feasibility-tls-sni-pool",
+              "protocol": "TCP",
+              "admin_state_up": true
+            },
+            "members": [
+              {
+                "id": "35f6f12b-8f6c-41dd-a672-4223218b5bc1",
+                "address": "198.51.100.6",
+                "protocol_port": 10443,
+                "admin_state_up": true
+              }
+            ]
+          },
+          "B": {
+            "policy": {
+              "id": "2d42c4ff-b850-4d7e-bf2c-d52263cd3dfa",
+              "position": 3,
+              "action": "REDIRECT_TO_POOL",
+              "redirectPoolId": "e1e0849f-f706-4e13-85c6-0e5ce8da4a52",
+              "listenerId": "60573616-26a6-45ab-892f-50c4f87d7700"
+            },
+            "rule": {
+              "id": "2b18ed36-a159-42a7-9158-7ef74f9124a2",
+              "type": "TLS_SNI",
+              "compare_type": "ENDS_WITH",
+              "value": "*.example.test",
+              "invert": false,
+              "admin_state_up": true
+            },
+            "pool": {
+              "id": "e1e0849f-f706-4e13-85c6-0e5ce8da4a52",
+              "name": "gateway-api-openstack-feasibility-stock-feasibility-tls-sni-pool",
+              "protocol": "TCP",
+              "admin_state_up": true
+            },
+            "members": [
+              {
+                "id": "328e0dd2-7a3a-476a-8f44-21e53cc65008",
+                "address": "198.51.100.5",
+                "protocol_port": 10443,
+                "admin_state_up": true
+              }
+            ]
+          }
+        }
+      },
+      "haproxy": {
+        "activeConfigSHA256": "78b27b3ad46837a138405fa2eea5c1977ebb293c5a2b52bf29538ae0694a4dbd",
+        "mode": "tcp",
+        "defaultBackend": null,
+        "selectedBackendOrder": [
+          "C",
+          "A",
+          "B"
+        ],
+        "aclMatch": {
+          "C": [
+            "req.ssl_sni",
+            "-i",
+            "-m",
+            "str",
+            "vip.shop.example.test"
+          ],
+          "A": [
+            "req.ssl_sni",
+            "-i",
+            "-m",
+            "end",
+            ".shop.example.test"
+          ],
+          "B": [
+            "req.ssl_sni",
+            "-i",
+            "-m",
+            "end",
+            ".example.test"
+          ]
+        }
+      },
+      "connections": [
+        {
+          "sni": "catalog.example.test",
+          "outcome": "connected",
+          "backend": "B",
+          "backendSNI": "catalog.example.test",
+          "leafSHA256": "a5f41c6221a1ca5b856532c3567c69a262d496caf61e50db1a683ffc11607491",
+          "echoBytes": 256,
+          "applicationBackendSessions": {
+            "A": {
+              "before": 0,
+              "after": 0
+            },
+            "B": {
+              "before": 0,
+              "after": 1
+            },
+            "C": {
+              "before": 0,
+              "after": 0
+            }
+          }
+        },
+        {
+          "sni": "deep.catalog.example.test",
+          "outcome": "connected",
+          "backend": "B",
+          "backendSNI": "deep.catalog.example.test",
+          "leafSHA256": "a5f41c6221a1ca5b856532c3567c69a262d496caf61e50db1a683ffc11607491",
+          "echoBytes": 256,
+          "applicationBackendSessions": {
+            "A": {
+              "before": 0,
+              "after": 0
+            },
+            "B": {
+              "before": 1,
+              "after": 2
+            },
+            "C": {
+              "before": 0,
+              "after": 0
+            }
+          }
+        },
+        {
+          "sni": "shop.example.test",
+          "outcome": "connected",
+          "backend": "B",
+          "backendSNI": "shop.example.test",
+          "leafSHA256": "a5f41c6221a1ca5b856532c3567c69a262d496caf61e50db1a683ffc11607491",
+          "echoBytes": 256,
+          "applicationBackendSessions": {
+            "A": {
+              "before": 0,
+              "after": 0
+            },
+            "B": {
+              "before": 2,
+              "after": 3
+            },
+            "C": {
+              "before": 0,
+              "after": 0
+            }
+          }
+        },
+        {
+          "sni": "checkout.shop.example.test",
+          "outcome": "connected",
+          "backend": "A",
+          "backendSNI": "checkout.shop.example.test",
+          "leafSHA256": "1c6e6f71ef62a4800e29247ed7d712fd5abd846053fd772c46255c48cadb4db0",
+          "echoBytes": 256,
+          "applicationBackendSessions": {
+            "A": {
+              "before": 0,
+              "after": 1
+            },
+            "B": {
+              "before": 3,
+              "after": 3
+            },
+            "C": {
+              "before": 0,
+              "after": 0
+            }
+          }
+        },
+        {
+          "sni": "blue.eu.shop.example.test",
+          "outcome": "connected",
+          "backend": "A",
+          "backendSNI": "blue.eu.shop.example.test",
+          "leafSHA256": "1c6e6f71ef62a4800e29247ed7d712fd5abd846053fd772c46255c48cadb4db0",
+          "echoBytes": 256,
+          "applicationBackendSessions": {
+            "A": {
+              "before": 1,
+              "after": 2
+            },
+            "B": {
+              "before": 3,
+              "after": 3
+            },
+            "C": {
+              "before": 0,
+              "after": 0
+            }
+          }
+        },
+        {
+          "sni": "vip.shop.example.test",
+          "outcome": "connected",
+          "backend": "C",
+          "backendSNI": "vip.shop.example.test",
+          "leafSHA256": "463b2682059a4a53155381fa2fe5b1f22da6a0b643d74175b67ff13bda6a4443",
+          "echoBytes": 256,
+          "applicationBackendSessions": {
+            "A": {
+              "before": 2,
+              "after": 2
+            },
+            "B": {
+              "before": 3,
+              "after": 3
+            },
+            "C": {
+              "before": 0,
+              "after": 1
+            }
+          }
+        },
+        {
+          "sni": "example.test",
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "applicationBackendSessions": {
+            "A": {
+              "before": 2,
+              "after": 2
+            },
+            "B": {
+              "before": 3,
+              "after": 3
+            },
+            "C": {
+              "before": 1,
+              "after": 1
+            }
+          }
+        },
+        {
+          "sni": "catalog.notexample.test",
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "applicationBackendSessions": {
+            "A": {
+              "before": 2,
+              "after": 2
+            },
+            "B": {
+              "before": 3,
+              "after": 3
+            },
+            "C": {
+              "before": 1,
+              "after": 1
+            }
+          }
+        },
+        {
+          "sni": "unrelated.other.test",
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "applicationBackendSessions": {
+            "A": {
+              "before": 2,
+              "after": 2
+            },
+            "B": {
+              "before": 3,
+              "after": 3
+            },
+            "C": {
+              "before": 1,
+              "after": 1
+            }
+          }
+        },
+        {
+          "sni": null,
+          "outcome": "rejected",
+          "error": "SSLEOFError",
+          "newBackendPayloads": 0,
+          "applicationBackendSessions": {
+            "A": {
+              "before": 2,
+              "after": 2
+            },
+            "B": {
+              "before": 3,
+              "after": 3
+            },
+            "C": {
+              "before": 1,
+              "after": 1
+            }
+          }
+        }
+      ]
+    }
+  },
+  "octaviaPoolQuota": {
+    "authStrategy": "testing",
+    "initialPoolLimit": -1,
+    "poolLimitWhileServing": 3,
+    "poolsWhenLimited": 3,
+    "updateHTTPStatus": 202,
+    "readbackHTTPStatus": 200,
+    "additionalPoolProbeHTTPStatus": 403,
+    "additionalPoolProbeFault": "Quota has been met for resources: Pool",
+    "revokedSelectorKeptOriginalPoolPolicyAndRule": true,
+    "poolLimitAfterWithdrawal": 3,
+    "poolsAfterWithdrawal": 3,
+    "resetHTTPStatus": 202,
+    "poolLimitBeforeRestoringGrant": -1
+  },
+  "batchMemberRemovals": [
+    {
+      "poolID": "ebcd14ab-0d78-4aea-a770-0ee9c18ce2ea",
+      "memberID": "b143bab2-4d5d-4ec1-834d-d30402af22d9"
+    }
+  ],
+  "cleanup": {
+    "remainingOctaviaObjects": {
+      "loadbalancers": 0,
+      "listeners": 0,
+      "pools": 0,
+      "l7policies": 0,
+      "healthmonitors": 0
+    },
+    "routeParentConditionsCleared": true,
+    "vipClosed": true
+  }
+}
