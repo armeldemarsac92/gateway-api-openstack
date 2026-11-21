@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Probe exact gRPC paths over TLS with stock Octavia and local HAProxy."""
+"""Probe TLS and cleartext gRPC with stock Octavia and local HAProxy."""
 
 import argparse
 from collections import Counter
@@ -30,13 +30,20 @@ LOOPBACK = "127.0.0.1"
 HOST = "grpc.example.test"
 SERVICE = "feasibility.v1.Echo"
 METHODS = ("First", "Second")
+FIXTURE_SERVICE = "gateway_api_conformance.echo_basic.grpcecho.GrpcEcho"
+FIXTURE_METHODS = ("Echo", "EchoTwo")
 PAYLOAD = b"grpc probe"
 TRAILER = "echo-backend"
 TIMEOUT = 5
+CHANNEL_OPTIONS = (("grpc.default_authority", HOST), ("grpc.enable_retries", 0))
 
 
-def rpc_path(method):
-    return f"/{SERVICE}/{method}"
+def rpc_path(method, service=SERVICE):
+    return f"/{service}/{method}"
+
+
+def plaintext_channel(port):
+    return grpc.insecure_channel(f"{LOOPBACK}:{port}", options=CHANNEL_OPTIONS)
 
 
 def make_test_ca(directory):
@@ -117,7 +124,7 @@ class StockGRPC(base.BaseAPITest):
         self.enterContext(mock.patch.object(utils, "get_network_driver", return_value=network))
         return subnet_id
 
-    def _backend(self, directory, backend_id, calls):
+    def _backend(self, backend_id, calls, service=SERVICE, methods=METHODS, *, credentials=None):
         def handler(method):
             def echo(payload, context):
                 calls[backend_id, method] += 1
@@ -128,14 +135,69 @@ class StockGRPC(base.BaseAPITest):
         executor = self.enterContext(ThreadPoolExecutor(max_workers=1))
         server = grpc.server(executor)
         server.add_generic_rpc_handlers((grpc.method_handlers_generic_handler(
-            SERVICE, {method: handler(method) for method in METHODS},
+            service, {method: handler(method) for method in methods},
         ),))
-        creds = grpc.ssl_server_credentials((tls_pair(directory, f"backend-{backend_id.lower()}"),))
-        port = server.add_secure_port(f"{LOOPBACK}:0", creds)
+        address = f"{LOOPBACK}:0"
+        if credentials is None:
+            port = server.add_insecure_port(address)
+        else:
+            port = server.add_secure_port(address, credentials)
         self.assertGreater(port, 0)
         server.start()
         self.addCleanup(lambda: server.stop(0).wait(TIMEOUT))
         return port
+
+    def _listener(self, protocol, **options):
+        with socket.socket() as reserve:
+            reserve.bind((LOOPBACK, 0))
+            port = reserve.getsockname()[1]
+        lb = self.create_load_balancer(self._vip_subnet(), provider="amphora",
+                                       vip_address=LOOPBACK)["loadbalancer"]
+        self.assertEqual(("amphora", LOOPBACK), (lb["provider"], lb["vip_address"]))
+        lb_id = lb["id"]
+        self.set_lb_status(lb_id)
+        listener = self.create_listener(protocol, port, lb_id, **options)["listener"]
+        self.set_lb_status(lb_id)
+        return lb_id, listener["id"], port
+
+    def _pools(self, lb_id, ports, *, tls_enabled, **options):
+        pool_ids = []
+        for port in ports:
+            pool = self.create_pool(
+                lb_id, "HTTP", "ROUND_ROBIN", tls_enabled=tls_enabled, **options,
+            )["pool"]
+            pool_id = pool["id"]
+            pool_ids.append(pool_id)
+            self.set_lb_status(lb_id)
+            member = self.create_member(pool_id, LOOPBACK, port)["member"]
+            self.set_lb_status(lb_id)
+            member_path = self.MEMBER_PATH.format(pool_id=pool_id, member_id=member["id"])
+            member = self.get(member_path).json["member"]
+            self.assertEqual((LOOPBACK, port), (member["address"], member["protocol_port"]))
+            pool = self.get(self.POOL_PATH.format(pool_id=pool_id)).json["pool"]
+            self.assertEqual(("HTTP", tls_enabled), (pool["protocol"], pool["tls_enabled"]))
+            for key, value in options.items():
+                self.assertEqual(value, pool[key])
+        return pool_ids
+
+    def _exact_routes(self, lb_id, listener_id, pool_ids, paths):
+        for position, (path, pool_id) in enumerate(zip(paths, pool_ids, strict=True), 1):
+            policy = self.create_l7policy(
+                listener_id, "REDIRECT_TO_POOL", redirect_pool_id=pool_id, position=position,
+            )["l7policy"]
+            policy_id = policy["id"]
+            self.set_lb_status(lb_id)
+            rule = self.create_l7rule(policy_id, "PATH", "EQUAL_TO", path)["rule"]
+            self.set_lb_status(lb_id)
+            rule_path = self.L7RULE_PATH.format(l7policy_id=policy_id, l7rule_id=rule["id"])
+            rule = self.get(rule_path).json["rule"]
+            self.assertEqual(("PATH", "EQUAL_TO", path), (
+                rule["type"], rule["compare_type"], rule["value"],
+            ))
+            policy = self.get(self.L7POLICY_PATH.format(l7policy_id=policy_id)).json["l7policy"]
+            self.assertEqual(("REDIRECT_TO_POOL", pool_id, position), (
+                policy["action"], policy["redirect_pool_id"], policy["position"],
+            ))
 
     def _configure_amphora(self, directory, lb_id, haproxy_config):
         amp_directory = directory / lb_id
@@ -183,22 +245,24 @@ class StockGRPC(base.BaseAPITest):
                     proxy.wait(timeout=TIMEOUT)
                 stats_socket.unlink(missing_ok=True)
 
-    def _exercise(self, config, stats_socket, listener_id, listener_port, credentials,
-                  expected_backends, check_near_match=False):
+    def _assert_reply(self, client, method, backend_id, service=SERVICE, payload=PAYLOAD):
+        result, call = client.unary_unary(rpc_path(method, service)).with_call(payload, timeout=TIMEOUT)
+        self.assertEqual(f"{backend_id}/{method}:".encode() + payload, result)
+        self.assertIs(grpc.StatusCode.OK, call.code())
+        self.assertIn((TRAILER, backend_id), call.trailing_metadata())
+
+    def _exercise_tls(self, config, stats_socket, listener_id, listener_port, credentials,
+                      expected_backends, check_near_match=False):
         with (
             self._run_proxy(config, stats_socket),
             grpc.secure_channel(
                 f"{LOOPBACK}:{listener_port}", credentials,
-                options=(("grpc.ssl_target_name_override", HOST),
-                         ("grpc.default_authority", HOST), ("grpc.enable_retries", 0)),
+                options=(("grpc.ssl_target_name_override", HOST), *CHANNEL_OPTIONS),
             ) as client,
         ):
             self.assertEqual((0, 0), frontend_stats(stats_socket, listener_id))
             for method, backend_id in zip(METHODS * 2, expected_backends, strict=True):
-                result, call = client.unary_unary(rpc_path(method)).with_call(PAYLOAD, timeout=TIMEOUT)
-                self.assertEqual(f"{backend_id}/{method}:".encode() + PAYLOAD, result)
-                self.assertIs(grpc.StatusCode.OK, call.code())
-                self.assertIn((TRAILER, backend_id), call.trailing_metadata())
+                self._assert_reply(client, method, backend_id)
             self.assertEqual((1, 4), frontend_stats(stats_socket, listener_id))
             print(f"{config.stem}: {' '.join(expected_backends)}, "
                   "4 OK replies with backend trailers over 1 frontend connection")
@@ -219,69 +283,31 @@ class StockGRPC(base.BaseAPITest):
         client_key, client_cert = tls_pair(directory, "client")
         credentials = grpc.ssl_channel_credentials(ca_cert, client_key, client_cert)
         calls = Counter()
-        ports = [self._backend(directory, backend_id, calls) for backend_id in ("A", "B")]
-        with socket.socket() as reserve:
-            reserve.bind((LOOPBACK, 0))
-            listener_port = reserve.getsockname()[1]
-
-        lb = self.create_load_balancer(self._vip_subnet(), provider="amphora",
-                                       vip_address=LOOPBACK)["loadbalancer"]
-        self.assertEqual(("amphora", LOOPBACK), (lb["provider"], lb["vip_address"]))
-        lb_id = lb["id"]
-        self.set_lb_status(lb_id)
-        listener = self.create_listener(
-            "TERMINATED_HTTPS", listener_port, lb_id, connection_limit=16,
+        ports = []
+        for backend_id in ("A", "B"):
+            server_credentials = grpc.ssl_server_credentials(
+                (tls_pair(directory, f"backend-{backend_id.lower()}"),),
+            )
+            ports.append(self._backend(backend_id, calls, credentials=server_credentials))
+        lb_id, listener_id, listener_port = self._listener(
+            "TERMINATED_HTTPS", connection_limit=16,
             default_tls_container_ref=frontend_ref, alpn_protocols=["h2"],
             client_ca_tls_container_ref="ca", client_authentication="MANDATORY",
-        )["listener"]
-        listener_id = listener["id"]
+        )
         listener_path = self.LISTENER_PATH.format(listener_id=listener_id)
-        self.set_lb_status(lb_id)
-        pool_ids = []
-        for port in ports:
-            pool = self.create_pool(
-                lb_id, "HTTP", "ROUND_ROBIN", tls_enabled=True,
-                ca_tls_container_ref="ca", alpn_protocols=["h2"],
-            )["pool"]
-            pool_id = pool["id"]
-            pool_ids.append(pool_id)
-            self.set_lb_status(lb_id)
-            member = self.create_member(pool_id, LOOPBACK, port)["member"]
-            self.set_lb_status(lb_id)
-            member_path = self.MEMBER_PATH.format(pool_id=pool_id, member_id=member["id"])
-            member = self.get(member_path).json["member"]
-            self.assertEqual((LOOPBACK, port), (member["address"], member["protocol_port"]))
-            pool = self.get(self.POOL_PATH.format(pool_id=pool_id)).json["pool"]
-            self.assertEqual(("HTTP", True, ["h2"], "ca"), (
-                pool["protocol"], pool["tls_enabled"], pool["alpn_protocols"],
-                pool["ca_tls_container_ref"],
-            ))
+        pool_ids = self._pools(
+            lb_id, ports, tls_enabled=True, ca_tls_container_ref="ca", alpn_protocols=["h2"],
+        )
 
         stats_socket = directory / f"{lb_id}.sock"
         self.put(listener_path, {"listener": {"default_pool_id": pool_ids[0]}})
         self.set_lb_status(lb_id)
         control = directory / "default-pool.cfg"
         self._configure_amphora(directory, lb_id, control)
-        self._exercise(control, stats_socket, listener_id, listener_port, credentials, "AAAA")
+        self._exercise_tls(control, stats_socket, listener_id, listener_port, credentials, "AAAA")
         self.assertEqual(Counter({("A", "First"): 2, ("A", "Second"): 2}), calls)
 
-        for position, (method, pool_id) in enumerate(zip(METHODS, pool_ids, strict=True), 1):
-            policy = self.create_l7policy(
-                listener_id, "REDIRECT_TO_POOL", redirect_pool_id=pool_id, position=position,
-            )["l7policy"]
-            policy_id = policy["id"]
-            self.set_lb_status(lb_id)
-            rule = self.create_l7rule(policy_id, "PATH", "EQUAL_TO", rpc_path(method))["rule"]
-            self.set_lb_status(lb_id)
-            rule_path = self.L7RULE_PATH.format(l7policy_id=policy_id, l7rule_id=rule["id"])
-            rule = self.get(rule_path).json["rule"]
-            self.assertEqual(("PATH", "EQUAL_TO", rpc_path(method)), (
-                rule["type"], rule["compare_type"], rule["value"],
-            ))
-            policy = self.get(self.L7POLICY_PATH.format(l7policy_id=policy_id)).json["l7policy"]
-            self.assertEqual(("REDIRECT_TO_POOL", pool_id, position), (
-                policy["action"], policy["redirect_pool_id"], policy["position"],
-            ))
+        self._exact_routes(lb_id, listener_id, pool_ids, [rpc_path(method) for method in METHODS])
         self.put(listener_path, {"listener": {"default_pool_id": None}})
         self.set_lb_status(lb_id)
         listener = self.get_listener(listener_id)["listener"]
@@ -293,9 +319,67 @@ class StockGRPC(base.BaseAPITest):
         routed = directory / "exact-path.cfg"
         self._configure_amphora(directory, lb_id, routed)
         calls.clear()
-        self._exercise(routed, stats_socket, listener_id, listener_port, credentials, "ABAB",
-                       check_near_match=True)
+        self._exercise_tls(routed, stats_socket, listener_id, listener_port, credentials, "ABAB",
+                           check_near_match=True)
         self.assertEqual(Counter({("A", "First"): 2, ("B", "Second"): 2}), calls)
+
+    def _assert_direct_cleartext(self, ports, calls, phase):
+        for backend_id, port, method in zip(("A", "B"), ports, FIXTURE_METHODS, strict=True):
+            with plaintext_channel(port) as client:
+                self._assert_reply(client, method, backend_id, FIXTURE_SERVICE, b"")
+        self.assertEqual(Counter({("A", "Echo"): 1, ("B", "EchoTwo"): 1}), calls)
+        print(f"Direct cleartext {phase}: A/Echo and B/EchoTwo returned OK with backend trailers")
+
+    def test_plaintext_backend(self):
+        calls = Counter()
+        ports = [
+            self._backend(backend_id, calls, FIXTURE_SERVICE, FIXTURE_METHODS)
+            for backend_id in ("A", "B")
+        ]
+        self._assert_direct_cleartext(ports, calls, "before proxy runs")
+        calls.clear()
+
+        lb_id, listener_id, listener_port = self._listener("HTTP")
+        pool_ids = self._pools(lb_id, ports, tls_enabled=False)
+        paths = [rpc_path(method, FIXTURE_SERVICE) for method in FIXTURE_METHODS]
+        self._exact_routes(lb_id, listener_id, pool_ids, paths)
+        stats_socket = self.directory / f"{lb_id}.sock"
+        listener_path = self.LISTENER_PATH.format(listener_id=listener_id)
+        resources = [("listener", listener_path)]
+        resources.extend(("pool", self.POOL_PATH.format(pool_id=pool_id)) for pool_id in pool_ids)
+
+        for name, alpn in (("plain-http", None), ("plain-http-alpn-h2", ["h2"])):
+            for resource, path in resources:
+                if alpn:
+                    self.put(path, {resource: {"alpn_protocols": alpn}})
+                    self.set_lb_status(lb_id)
+                stored = self.get(path).json[resource]
+                self.assertEqual(("HTTP", alpn), (stored["protocol"], stored["alpn_protocols"]))
+                if resource == "pool":
+                    self.assertIs(False, stored["tls_enabled"])
+
+            config = self.directory / f"{name}.cfg"
+            self._configure_amphora(self.directory, lb_id, config)
+            with self._run_proxy(config, stats_socket):
+                self.assertEqual((0, 0), frontend_stats(stats_socket, listener_id))
+                for path in paths:
+                    with plaintext_channel(listener_port) as client:
+                        with self.assertRaises(grpc.RpcError) as caught:
+                            client.unary_unary(path)(b"", timeout=TIMEOUT)
+                    self.assertIs(grpc.StatusCode.UNAVAILABLE, caught.exception.code())
+                    self.assertIn("http2 header with status: 502", caught.exception.details())
+                    self.assertFalse(caught.exception.trailing_metadata())
+                self.assertEqual((2, 2), frontend_stats(stats_socket, listener_id))
+                self.assertFalse(calls)
+            print(f"{name}: 2 connections, 2 HTTP/2 502 replies mapped to UNAVAILABLE, "
+                  "no backend calls or trailers")
+
+        self.assertEqual((self.directory / "plain-http.cfg").read_bytes(),
+                         (self.directory / "plain-http-alpn-h2.cfg").read_bytes())
+        for resource, path in resources:
+            self.put(path, {resource: {"alpn_protocols": ["h2c"]}}, status=400)
+        print("ALPN h2 rendered identical bytes. The API rejected h2c with HTTP 400.")
+        self._assert_direct_cleartext(ports, calls, "after proxy runs")
 
 
 def main():
