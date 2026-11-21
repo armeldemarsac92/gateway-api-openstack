@@ -289,7 +289,7 @@ A tenant can attach an HTTPRoute to a named HTTPS listener when the operator ena
 
 ## Route TLS connections by name
 
-With the regional Amphora capability and controller opt-in, two TLSRoutes can share one dedicated listener on the same port. Each route selects one Service by an exact ClientHello SNI name. [TLS passthrough example and grant lifecycle](operator-octavia-tls-sni-passthrough.md#route-two-names-on-one-port)
+With the regional Amphora capability and controller opt-in, two TLSRoutes can share one dedicated listener on the same port. Each route selects one Service for the exact ClientHello SNI names that also match its listener. [TLS passthrough example and grant lifecycle](operator-octavia-tls-sni-passthrough.md#route-two-names-on-one-port)
 
 ## Forward TCP to a Service
 

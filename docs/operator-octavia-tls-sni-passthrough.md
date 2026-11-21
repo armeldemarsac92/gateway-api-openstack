@@ -30,7 +30,11 @@ kubectl -n tls-demo get gateway edge -o yaml
 kubectl -n tls-demo get tlsroute alpha beta -o yaml
 ```
 
-A Gateway in this mode has one `TLS` listener in `Passthrough` mode. Leave its hostname, certificates and TLS options unset. Each route has one Gateway parent, one exact DNS name and one rule with one Service backend at weight 1. The names must be distinct. Wildcards, multiple backends, TLSRoute termination and mixed-profile Gateways are outside this mode.
+A Gateway in this mode has one `TLS` listener in `Passthrough` mode, without certificate references or TLS options. Its hostname may be omitted, an exact DNS name, or a leading wildcard such as `*.example.test`. Each TLSRoute has one Gateway parent and one rule selecting one IPv4 Endpoint Service at weight 1.
+
+The controller forwards the exact names shared by the listener and the route. For example, a listener with `*.example.test` and a route with `alpha.example.test`, `alias.example.test` and `elsewhere.example.org` sends the first two names to that Service. Its backend certificate must cover both. An exact listener can also narrow a wildcard route to that listener's name. When the names are disjoint, the route reports `Accepted=False/NoMatchingListenerHostname`. A remaining wildcard forwarding target requires a provider capability beyond this Octavia release.
+
+When two routes claim an effective name, the more specific original route hostname takes precedence. Equally specific claims use creation time, then namespace and name. The chosen route must have an authorized backend before that name can serve traffic. A revoked grant closes its names even when a lower-priority route also claims them. Each accepted route counts once in `attachedRoutes`.
 
 Check the current-generation Gateway `Programmed=True` and both routes' managed parent conditions `Accepted=True`, `ResolvedRefs=True` and `gateway-api-openstack.github.io/Programmed=True` (using the configured controller's domain). The listener should report `supportedKinds` including TLSRoute and `attachedRoutes: 2`. Use a CA file that trusts both backend certificates.
 
