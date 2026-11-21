@@ -99,7 +99,7 @@ func TestKindUpstreamUDPTraffic(t *testing.T) {
 	if literalProfile && os.Getenv("HIBISCUS_STATUS_BASE_DIR") != "" {
 		t.Fatal("HIBISCUS_UDP_CASES=profile requires the original upstream base")
 	}
-	baseManifests, manifestFS := kindConformanceManifests(t)
+	baseManifests, manifestFS := kindConformanceManifests(t, os.Getenv("HIBISCUS_STATUS_BASE_DIR"))
 
 	options := suite.ConfigurableOptions{
 		GatewayClassName:     "kind-upstream-udp-traffic",
@@ -107,7 +107,6 @@ func TestKindUpstreamUDPTraffic(t *testing.T) {
 		CleanupTestResources: true,
 		DisableParallelTests: true,
 		SupportedFeatures:    []features.FeatureName{features.SupportGateway, features.SupportUDPRoute, features.SupportReferenceGrant},
-		TimeoutConfig:        config.TimeoutConfig{NamespacesMustBeReady: 90 * time.Second},
 		// The upstream case returns without assertions unless TLSRoute is supported.
 		SkipTests: []string{tests.UDPRouteNotAllowedByListeners.ShortName},
 	}
@@ -123,6 +122,9 @@ func TestKindUpstreamUDPTraffic(t *testing.T) {
 	}
 	if selection != "grant-traffic" {
 		t.Log("UDPRouteNotAllowedByListeners requires TLSRoute and is excluded when selected")
+	}
+	if !literalProfile {
+		options.TimeoutConfig = config.TimeoutConfig{NamespacesMustBeReady: 90 * time.Second}
 	}
 	runKindTrafficConformance(t, channel, "HIBISCUS_UDP", suite.ConformanceOptions{
 		ConfigurableOptions: options,

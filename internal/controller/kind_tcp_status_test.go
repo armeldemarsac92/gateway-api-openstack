@@ -20,9 +20,13 @@ package controller_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -118,7 +122,7 @@ func runKindUpstreamStatus(t *testing.T, className, channel string, routeFeature
 		}
 	}
 
-	baseManifests, manifestFS := kindConformanceManifests(t)
+	baseManifests, manifestFS := kindConformanceManifests(t, os.Getenv("HIBISCUS_STATUS_BASE_DIR"))
 	s, err := suite.NewConformanceTestSuite(suite.ConformanceOptions{
 		ConfigurableOptions: suite.ConfigurableOptions{
 			GatewayClassName:     className,
@@ -201,14 +205,20 @@ func kindGatewayClass(cfg controller.Config, parameters *configv1alpha1.OpenStac
 	}
 }
 
-func kindConformanceManifests(t *testing.T) (string, []fs.FS) {
+func kindConformanceManifests(t *testing.T, baseDir string) (string, []fs.FS) {
 	t.Helper()
 	manifestFS := []fs.FS{&conformance.Manifests}
-	baseManifests := "base/manifests.yaml"
-	if statusBase := os.Getenv("HIBISCUS_STATUS_BASE_DIR"); statusBase != "" {
-		t.Log("Using original base documents with the unrelated HTTPS Gateway omitted")
-		manifestFS = append(manifestFS, os.DirFS(statusBase))
-		baseManifests = "tcp-status-base.yaml"
+	if baseDir == "" {
+		return "base/manifests.yaml", manifestFS
 	}
-	return baseManifests, manifestFS
+	const name = "tcp-status-base.yaml"
+	data, err := os.ReadFile(filepath.Join(baseDir, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if checksum := fmt.Sprintf("%x", sha256.Sum256(data)); checksum != "eec15359b2f8ce095f3da26dfbc9485725c06a985a15796f1bde2ac79158f6ed" {
+		t.Fatalf("%s does not match the v1.7.0 scoped base: SHA-256 %s", name, checksum)
+	}
+	t.Log("Using original base documents with the unrelated HTTPS Gateway omitted")
+	return name, append(manifestFS, fstest.MapFS{name: &fstest.MapFile{Data: data}})
 }

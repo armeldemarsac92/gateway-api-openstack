@@ -19,12 +19,10 @@ limitations under the License.
 package controller_test
 
 import (
-	"io/fs"
 	"os"
 	"testing"
 	"time"
 
-	"sigs.k8s.io/gateway-api/conformance"
 	"sigs.k8s.io/gateway-api/conformance/tests"
 	"sigs.k8s.io/gateway-api/conformance/utils/config"
 	"sigs.k8s.io/gateway-api/conformance/utils/suite"
@@ -38,13 +36,7 @@ func TestKindUpstreamHTTPWebSocket(t *testing.T) {
 	if channel != "standard" && channel != "experimental" {
 		t.Fatal("GATEWAY_API_CHANNEL must be standard or experimental")
 	}
-	baseManifests := "base/manifests.yaml"
-	manifestFS := []fs.FS{&conformance.Manifests}
-	if baseDir := os.Getenv("HIBISCUS_HTTP_BASE_DIR"); baseDir != "" {
-		baseManifests = "tcp-status-base.yaml"
-		manifestFS = append(manifestFS, os.DirFS(baseDir))
-		t.Log("Using the scoped base with the unrelated HTTPS Gateway omitted")
-	}
+	baseManifests, manifestFS := kindConformanceManifests(t, os.Getenv("HIBISCUS_HTTP_BASE_DIR"))
 
 	webSocket := tests.HTTPRouteBackendProtocolWebSocket
 	t.Logf("Selected upstream %s on %s (base %s)", webSocket.ShortName, channel, baseManifests)

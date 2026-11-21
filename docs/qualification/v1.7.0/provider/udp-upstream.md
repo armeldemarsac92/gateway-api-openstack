@@ -4,7 +4,7 @@ The upstream client sends UDP datagrams to the IP published in Gateway status an
 
 The fixture supplies subnet discovery, VIP allocation, RPC completion and delivery of each changed listener configuration. It runs HTTP base Gateways through the public API and installs the UDP listeners in the guest dataplane. Testing a deployed Amphora, Neutron access rules and Magnum lifecycle requires an OpenStack environment. [Live qualification ledger](../live-runs.md)
 
-The runner executes cases serially and sets the upstream namespace readiness timeout to 90 seconds. The case bodies, workload images and case manifests come from the tagged v1.7.0 module.
+The recorded runs used serial cases and a 90-second namespace-readiness timeout. The current focused runner keeps that timeout. The full profile runner uses the v1.7.0 default of 300 seconds. The case bodies, workload images and case manifests come from the tagged v1.7.0 module.
 
 ## Weighted Endpoint results
 
