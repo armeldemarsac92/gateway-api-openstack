@@ -32,6 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 	gatewayconsts "sigs.k8s.io/gateway-api/pkg/consts"
 
 	configv1alpha1 "github.com/gateway-api-openstack/gateway-api-openstack/api/v1alpha1"
@@ -150,6 +151,9 @@ func testScheme(t *testing.T) *runtime.Scheme {
 		t.Fatal(err)
 	}
 	if err := gatewayv1.Install(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := gatewayx.Install(scheme); err != nil {
 		t.Fatal(err)
 	}
 	return scheme
