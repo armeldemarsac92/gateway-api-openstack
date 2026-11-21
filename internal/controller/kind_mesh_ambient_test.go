@@ -41,7 +41,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	"sigs.k8s.io/gateway-api/conformance"
-	"sigs.k8s.io/gateway-api/conformance/tests"
+	meshtests "sigs.k8s.io/gateway-api/conformance/tests/mesh"
 	conformanceconfig "sigs.k8s.io/gateway-api/conformance/utils/config"
 	"sigs.k8s.io/gateway-api/conformance/utils/suite"
 	"sigs.k8s.io/gateway-api/pkg/features"
@@ -54,6 +54,20 @@ func TestKindAmbientMesh(t *testing.T) {
 	waypointPath := os.Getenv("HIBISCUS_AMBIENT_WAYPOINT_MANIFEST")
 	if waypointPath == "" {
 		t.Skip("set HIBISCUS_AMBIENT_WAYPOINT_MANIFEST to the operator's waypoint.yaml on disposable kind")
+	}
+	extended := os.Getenv("HIBISCUS_AMBIENT_MESH_EXTENDED") == "1"
+	profileMode := "default"
+	selectedServices := sets.New("echo")
+	// v1.7.0 attempts feature inference before it applies profile defaults.
+	selectedFeatures := suite.MeshHTTPConformanceProfile.CoreFeatures.Union(suite.MeshGRPCConformanceProfile.CoreFeatures)
+	if extended {
+		profileMode = "ambient-extended-study"
+		selectedServices.Insert("echo-v1", "echo-v2")
+		// Select every registered mesh case, including those requiring shared
+		// features outside the upstream mesh profile's Extended feature list.
+		for _, test := range meshtests.MeshConformanceTests {
+			selectedFeatures.Insert(test.Features...)
+		}
 	}
 
 	cfg := testConfig()
@@ -109,10 +123,11 @@ func TestKindAmbientMesh(t *testing.T) {
 	startKindManager(t, manager)
 
 	meshManifest := "ambient-mesh-fixture.yaml"
-	fixture, waypointName := ambientMeshFixture(t, waypointPath)
+	fixture, waypointName := ambientMeshFixture(t, waypointPath, selectedServices)
 	manifestFS := fstest.MapFS{meshManifest: {Data: fixture}}
 	s, err := suite.NewConformanceTestSuite(suite.ConformanceOptions{
 		ConfigurableOptions: suite.ConfigurableOptions{
+			Mode:                 profileMode,
 			CleanupBaseResources: true,
 			CleanupTestResources: true,
 			DisableParallelTests: true,
@@ -122,9 +137,7 @@ func TestKindAmbientMesh(t *testing.T) {
 			ConformanceProfiles: []suite.ConformanceProfileName{
 				suite.MeshHTTPConformanceProfileName, suite.MeshGRPCConformanceProfileName,
 			},
-			// v1.7.0 attempts feature inference before it applies profile defaults.
-			SupportedFeatures: sets.List(suite.MeshHTTPConformanceProfile.CoreFeatures.
-				Union(suite.MeshGRPCConformanceProfile.CoreFeatures)),
+			SupportedFeatures: sets.List(selectedFeatures),
 		},
 		Client:        apiClient,
 		ClientOptions: clientOptions,
@@ -147,9 +160,9 @@ func TestKindAmbientMesh(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Logf("Upstream core profile results with Istio ambient:\n%s", data)
+		t.Logf("Upstream profile results with Istio ambient:\n%s", data)
 	})
-	s.Setup(t, tests.ConformanceTests)
+	s.Setup(t, meshtests.MeshConformanceTests)
 	waypointKey := client.ObjectKey{Namespace: suite.MeshNamespace, Name: waypointName}
 	if err := wait.PollUntilContextTimeout(t.Context(), time.Second, 90*time.Second, true, func(ctx context.Context) (bool, error) {
 		var waypoint gatewayv1.Gateway
@@ -161,12 +174,12 @@ func TestKindAmbientMesh(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("fixture waypoint did not become Programmed: %v", err)
 	}
-	if err := s.Run(t, tests.ConformanceTests); err != nil {
+	if err := s.Run(t, meshtests.MeshConformanceTests); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func ambientMeshFixture(t *testing.T, waypointPath string) ([]byte, string) {
+func ambientMeshFixture(t *testing.T, waypointPath string, selectedServices sets.Set[string]) ([]byte, string) {
 	t.Helper()
 	data, err := os.ReadFile(waypointPath)
 	if err != nil {
@@ -189,7 +202,7 @@ func ambientMeshFixture(t *testing.T, waypointPath string) ([]byte, string) {
 	defer fixture.Close()
 	decoder := utilyaml.NewYAMLOrJSONDecoder(fixture, 4096)
 	var buf bytes.Buffer
-	matchedService := false
+	matchedServices := sets.New[string]()
 	for {
 		var obj unstructured.Unstructured
 		err := decoder.Decode(&obj)
@@ -202,14 +215,14 @@ func ambientMeshFixture(t *testing.T, waypointPath string) ([]byte, string) {
 		if obj.Object == nil {
 			continue
 		}
-		if obj.GetKind() == "Service" && obj.GetNamespace() == suite.MeshNamespace && obj.GetName() == "echo" {
+		if obj.GetKind() == "Service" && obj.GetNamespace() == suite.MeshNamespace && selectedServices.Has(obj.GetName()) {
 			labels := obj.GetLabels()
 			if labels == nil {
 				labels = map[string]string{}
 			}
 			labels["istio.io/use-waypoint"] = waypoint.Name
 			obj.SetLabels(labels)
-			matchedService = true
+			matchedServices.Insert(obj.GetName())
 		}
 		doc, err := yaml.Marshal(obj.Object)
 		if err != nil {
@@ -218,8 +231,8 @@ func ambientMeshFixture(t *testing.T, waypointPath string) ([]byte, string) {
 		buf.WriteString("---\n")
 		buf.Write(doc)
 	}
-	if !matchedService {
-		t.Fatal("upstream mesh fixture is missing Service echo")
+	if missing := selectedServices.Difference(matchedServices); missing.Len() != 0 {
+		t.Fatalf("upstream mesh fixture is missing Services %v", sets.List(missing))
 	}
 	buf.WriteString("---\n")
 	buf.Write(data)
