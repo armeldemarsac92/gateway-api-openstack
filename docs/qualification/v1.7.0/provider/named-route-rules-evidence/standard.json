@@ -1,0 +1,416 @@
+{
+  "channel": "standard",
+  "gatewayApiSourceRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "controllerSourceRevision": "adb6f0fc44dee7d9016bca79442e68f94eb6e15e",
+  "controllerStartupVersion": "adb6f0fc44dee7d9016bca79442e68f94eb6e15e",
+  "controllerManifestDigest": "sha256:3fd6d308de0df73ed75b1f034820e253eac502bf66ef6b8adf906c4a3ebd55de",
+  "controllerFlags": [
+    "--octavia-fixed-http-responses",
+    "--octavia-backend-h2c"
+  ],
+  "octaviaSourceRevision": "bdcd6e3de9283595e20b2e11b1e3ad440208dfd6",
+  "octaviaLibSourceRevision": "bb1a993ac95477b0bdc429f8aaf6d1620f8e7669",
+  "controllerBinarySha256": "d2faa8acbbfb46434b4186006acb0bd93a6e45a4ff0fb984f61445c7d815e9e0",
+  "echoBinarySha256": "d4e04b904229880dc2e32dbe58244b3bf46408c2e1e8325ebb83a69fab3d57a9",
+  "kubernetes": "v1.36.2",
+  "haproxy": "3.0.19",
+  "haproxyBinarySha256": "847fad8188f01f5693cfba85731f37d554758526f39dc6f67162ec2c6a150885",
+  "conformanceBinarySha256": "606c81e0e3af571c122cc7968b571b51ca8564d92aa47bc1af5512e3e3163991",
+  "pythonPackages": {
+    "octavia": "19.0.0",
+    "octavia-lib": "3.12.0",
+    "grpcio": "1.83.0",
+    "barbican": "23.0.0"
+  },
+  "bundleSha256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+  "baseManifestSha256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+  "advertisedCapabilities": [
+    "fixed_http_responses_v1",
+    "weighted_http_targets_v1",
+    "backend_h2c_v1"
+  ],
+  "observedEchoPeers": [
+    {
+      "namespace": "gateway-conformance-infra",
+      "pod": "infra-backend-v1-local-0",
+      "directHTTPStatus": 200
+    },
+    {
+      "namespace": "gateway-conformance-infra",
+      "pod": "infra-backend-v1-local-1",
+      "directHTTPStatus": 200
+    },
+    {
+      "namespace": "gateway-conformance-infra",
+      "pod": "infra-backend-v2-local-0",
+      "directHTTPStatus": 200
+    },
+    {
+      "namespace": "gateway-conformance-infra",
+      "pod": "infra-backend-v2-local-1",
+      "directHTTPStatus": 200
+    },
+    {
+      "namespace": "gateway-conformance-infra",
+      "pod": "grpc-infra-backend-v1-local-0",
+      "directGRPC": {
+        "Echo": "OK",
+        "EchoTwo": "OK",
+        "EchoThree": "UNIMPLEMENTED"
+      }
+    },
+    {
+      "namespace": "gateway-conformance-infra",
+      "pod": "grpc-infra-backend-v1-local-1",
+      "directGRPC": {
+        "Echo": "OK",
+        "EchoTwo": "OK",
+        "EchoThree": "UNIMPLEMENTED"
+      }
+    },
+    {
+      "namespace": "gateway-conformance-infra",
+      "pod": "grpc-infra-backend-v2-local-0",
+      "directGRPC": {
+        "Echo": "OK",
+        "EchoTwo": "OK",
+        "EchoThree": "UNIMPLEMENTED"
+      }
+    },
+    {
+      "namespace": "gateway-conformance-infra",
+      "pod": "grpc-infra-backend-v2-local-1",
+      "directGRPC": {
+        "Echo": "OK",
+        "EchoTwo": "OK",
+        "EchoThree": "UNIMPLEMENTED"
+      }
+    }
+  ],
+  "cases": {
+    "HTTPRouteNamedRule": {
+      "passed": true,
+      "exit": 0,
+      "caseEvents": [
+        "--- PASS: TestNamedRules/HTTPRouteNamedRule (0.21s)"
+      ],
+      "httpResponseCounts": {
+        "404": 146,
+        "200": 6
+      },
+      "caseGoSHA256": "9d9746d51c29a0caeb1bfb7445202d3d6ac3d15a08e32015b38d6cda272170cc",
+      "caseYAMLSHA256": "c272004268be401d32a89d99614481dfa77b8aae5026db78fb3ba1530fedf617",
+      "routeAfterCase": {
+        "generation": 1,
+        "ruleNames": [
+          "named-rule",
+          null
+        ],
+        "backendRefs": [
+          [
+            {
+              "group": "",
+              "kind": "Service",
+              "name": "infra-backend-v1",
+              "port": 8080,
+              "weight": 1
+            }
+          ],
+          [
+            {
+              "group": "",
+              "kind": "Service",
+              "name": "infra-backend-v2",
+              "port": 8080,
+              "weight": 1
+            }
+          ]
+        ],
+        "parents": [
+          {
+            "parentRef": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "name": "same-namespace"
+            },
+            "controllerName": "gateway-api-openstack.github.io/gateway-api-openstack",
+            "currentConditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          }
+        ]
+      },
+      "gatewayAfterCase": {
+        "conditions": {
+          "Accepted": "True/Accepted",
+          "Programmed": "True/Programmed"
+        },
+        "listeners": [
+          {
+            "name": "http",
+            "attachedRoutes": 1,
+            "supportedKinds": [
+              {
+                "group": "gateway.networking.k8s.io",
+                "kind": "HTTPRoute"
+              },
+              {
+                "group": "gateway.networking.k8s.io",
+                "kind": "GRPCRoute"
+              }
+            ],
+            "currentConditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            }
+          }
+        ]
+      },
+      "providerAfterCase": {
+        "pools": [
+          {
+            "protocol": "HTTP",
+            "backend_h2c": false,
+            "tls_enabled": false,
+            "provisioning_status": "ACTIVE"
+          },
+          {
+            "protocol": "HTTP",
+            "backend_h2c": false,
+            "tls_enabled": false,
+            "provisioning_status": "ACTIVE"
+          }
+        ],
+        "policies": [
+          {
+            "action": "REDIRECT_TO_POOL",
+            "status": "ACTIVE",
+            "rules": [
+              {
+                "type": "PATH",
+                "compareType": "REGEX",
+                "value": "^/unnamed($|/)"
+              }
+            ]
+          },
+          {
+            "action": "REDIRECT_TO_POOL",
+            "status": "ACTIVE",
+            "rules": [
+              {
+                "type": "PATH",
+                "compareType": "REGEX",
+                "value": "^/named($|/)"
+              }
+            ]
+          }
+        ],
+        "haproxy": {
+          "running": true,
+          "pathACLs": [
+            "acl bbaea172-b459-4f63-9330-b67ffe5d7c3e path -m reg ^/unnamed($|/)",
+            "acl c1b76279-b303-4275-8273-5bd518c48de8 path -m reg ^/named($|/)"
+          ],
+          "memberServerDirectives": 4,
+          "memberServerDirectivesWithProtoH2": 0
+        }
+      },
+      "httpWire": {
+        "/named": {
+          "status": 200,
+          "expectedBackend": "infra-backend-v1",
+          "backendIdentityMatched": true
+        },
+        "/unnamed": {
+          "status": 200,
+          "expectedBackend": "infra-backend-v2",
+          "backendIdentityMatched": true
+        }
+      }
+    },
+    "GRPCRouteNamedRule": {
+      "passed": true,
+      "exit": 0,
+      "caseEvents": [
+        "--- PASS: TestNamedRules/GRPCRouteNamedRule (1.02s)",
+        "--- PASS: TestNamedRules/GRPCRouteNamedRule/0_request_to_'/gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/Echo'_should_go_to_grpc-infra-backend-v1 (4.24s)",
+        "--- PASS: TestNamedRules/GRPCRouteNamedRule/1_request_to_'/gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/EchoTwo'_should_go_to_grpc-infra-backend-v2 (5.05s)"
+      ],
+      "httpResponseCounts": {},
+      "caseGoSHA256": "b34d82a8eab4e7982db0a379db851cf61ff3fd5bcfe17549400805122a674741",
+      "caseYAMLSHA256": "cb741ef1e5c6476506118a837d531ba8d833dddd2b876a46ac84c350d9be79ee",
+      "routeAfterCase": {
+        "generation": 1,
+        "ruleNames": [
+          "named-rule",
+          null
+        ],
+        "backendRefs": [
+          [
+            {
+              "group": "",
+              "kind": "Service",
+              "name": "grpc-infra-backend-v1",
+              "port": 8080,
+              "weight": 1
+            }
+          ],
+          [
+            {
+              "group": "",
+              "kind": "Service",
+              "name": "grpc-infra-backend-v2",
+              "port": 8080,
+              "weight": 1
+            }
+          ]
+        ],
+        "parents": [
+          {
+            "parentRef": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "name": "same-namespace"
+            },
+            "controllerName": "gateway-api-openstack.github.io/gateway-api-openstack",
+            "currentConditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          }
+        ]
+      },
+      "gatewayAfterCase": {
+        "conditions": {
+          "Accepted": "True/Accepted",
+          "Programmed": "True/Programmed"
+        },
+        "listeners": [
+          {
+            "name": "http",
+            "attachedRoutes": 1,
+            "supportedKinds": [
+              {
+                "group": "gateway.networking.k8s.io",
+                "kind": "HTTPRoute"
+              },
+              {
+                "group": "gateway.networking.k8s.io",
+                "kind": "GRPCRoute"
+              }
+            ],
+            "currentConditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            }
+          }
+        ]
+      },
+      "providerAfterCase": {
+        "pools": [
+          {
+            "protocol": "HTTP",
+            "backend_h2c": true,
+            "tls_enabled": false,
+            "provisioning_status": "ACTIVE"
+          },
+          {
+            "protocol": "HTTP",
+            "backend_h2c": true,
+            "tls_enabled": false,
+            "provisioning_status": "ACTIVE"
+          }
+        ],
+        "policies": [
+          {
+            "action": "REDIRECT_TO_POOL",
+            "status": "ACTIVE",
+            "rules": [
+              {
+                "type": "PATH",
+                "compareType": "EQUAL_TO",
+                "value": "/gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/Echo"
+              }
+            ]
+          },
+          {
+            "action": "REDIRECT_TO_POOL",
+            "status": "ACTIVE",
+            "rules": [
+              {
+                "type": "PATH",
+                "compareType": "EQUAL_TO",
+                "value": "/gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/EchoTwo"
+              }
+            ]
+          }
+        ],
+        "haproxy": {
+          "running": true,
+          "pathACLs": [
+            "acl 167940e1-1167-411c-9f4b-33017a48cfb8 path -m str /gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/Echo",
+            "acl 9e25aa0e-42aa-424c-beb7-b430a58767fb path -m str /gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/EchoTwo"
+          ],
+          "memberServerDirectives": 4,
+          "memberServerDirectivesWithProtoH2": 4
+        }
+      },
+      "supplementalAfterHealthWindow": {
+        "monitors": [
+          {
+            "type": "TCP",
+            "delay": 2,
+            "timeout": 1,
+            "max_retries_down": 3,
+            "provisioning_status": "ACTIVE"
+          },
+          {
+            "type": "TCP",
+            "delay": 2,
+            "timeout": 1,
+            "max_retries_down": 3,
+            "provisioning_status": "ACTIVE"
+          }
+        ],
+        "minimumWaitSeconds": 6,
+        "elapsedSeconds": 6.0,
+        "sameHAProxyThroughout": true,
+        "activeTCPMonitorsStillPresent": true,
+        "rpc": {
+          "Echo": {
+            "code": "OK",
+            "codeNumber": 0,
+            "expectedBackend": "grpc-infra-backend-v1",
+            "backendIdentityMatched": true
+          },
+          "EchoTwo": {
+            "code": "OK",
+            "codeNumber": 0,
+            "expectedBackend": "grpc-infra-backend-v2",
+            "backendIdentityMatched": true
+          },
+          "EchoThree": {
+            "code": "UNIMPLEMENTED",
+            "codeNumber": 12,
+            "viaHTTPStatus": 404
+          },
+          "echoTwo": {
+            "code": "UNIMPLEMENTED",
+            "codeNumber": 12,
+            "viaHTTPStatus": 404
+          }
+        }
+      },
+      "noHTTPRouteShadow": true
+    }
+  },
+  "upstreamExit": 0,
+  "qualificationExit": 0
+}
