@@ -65,13 +65,13 @@ func (r *Reconciler) setGatewayFailure(gateway *gatewayv1.Gateway, validationErr
 	controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionProgrammed), metav1.ConditionFalse, string(programmedReason), message, gateway.Generation))
 	gateway.Status.Listeners = make([]gatewayv1.ListenerStatus, 0, len(gateway.Spec.Listeners))
 	for _, listener := range gateway.Spec.Listeners {
-		gateway.Status.Listeners = append(gateway.Status.Listeners, unprogrammedListenerStatus(
+		gateway.Status.Listeners = append(gateway.Status.Listeners, r.unprogrammedListenerStatus(
 			listener, existingListeners, gateway.Generation, unsupportedMultipleL4, listenerSpecific, message,
 		))
 	}
 }
 
-func unprogrammedListenerStatus(
+func (r *Reconciler) unprogrammedListenerStatus(
 	listener gatewayv1.Listener,
 	existing []gatewayv1.ListenerStatus,
 	generation int64,
@@ -86,8 +86,8 @@ func unprogrammedListenerStatus(
 	kind := listenerRouteKind(listener.Protocol)
 	l4InMultipleListeners := isL4Listener(listener.Protocol) && multipleListeners
 	protocolSupported := kind != "" && listener.Protocol != gatewayv1.HTTPSProtocolType && !l4InMultipleListeners
-	if protocolSupported && listenerAllowsRouteKind(listener, kind) {
-		status.SupportedKinds = supportedRouteKinds(kind)
+	if protocolSupported {
+		status.SupportedKinds = listenerSupportedRouteKinds(r.Config, listener)
 	}
 	acceptedStatus := metav1.ConditionFalse
 	acceptedReason := gatewayv1.ListenerReasonUnsupportedValue
@@ -110,7 +110,7 @@ func unprogrammedListenerStatus(
 	resolvedReason := gatewayv1.ListenerReasonResolvedRefs
 	resolvedMessage := "Listener has no unresolved references"
 	if listener.AllowedRoutes != nil && slices.ContainsFunc(listener.AllowedRoutes.Kinds, func(ref gatewayv1.RouteGroupKind) bool {
-		return !protocolSupported || !isRouteGroupKind(ref, kind)
+		return !protocolSupported || !listenerSupportsRouteKind(r.Config, listener, ref)
 	}) {
 		resolvedStatus = metav1.ConditionFalse
 		resolvedReason = gatewayv1.ListenerReasonInvalidRouteKinds
@@ -122,7 +122,7 @@ func unprogrammedListenerStatus(
 	return status
 }
 
-func setGatewayAcceptedListeners(gateway *gatewayv1.Gateway, accepted ...gatewayv1.ListenerStatus) {
+func (r *Reconciler) setGatewayAcceptedListeners(gateway *gatewayv1.Gateway, accepted ...gatewayv1.ListenerStatus) {
 	reason := gatewayv1.GatewayReasonAccepted
 	message := "Gateway configuration is accepted"
 	if len(gateway.Spec.Listeners) != len(accepted) {
@@ -138,7 +138,7 @@ func setGatewayAcceptedListeners(gateway *gatewayv1.Gateway, accepted ...gateway
 		if index >= 0 {
 			listeners = append(listeners, accepted[index])
 		} else {
-			listeners = append(listeners, unprogrammedListenerStatus(
+			listeners = append(listeners, r.unprogrammedListenerStatus(
 				listener, gateway.Status.Listeners, gateway.Generation, true, true, "Listener cannot be programmed on this Gateway",
 			))
 		}
@@ -486,7 +486,7 @@ func (r *Reconciler) setGatewayListenerStatuses(
 	}
 	generation := controller.ConditionObservedGeneration(gateway.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed), gateway.Generation, advanceProgrammedGeneration)
 	controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionProgrammed), programmed, string(gatewayReason), gatewayMessage, generation))
-	setGatewayAcceptedListeners(gateway, statuses...)
+	r.setGatewayAcceptedListeners(gateway, statuses...)
 	return nil
 }
 

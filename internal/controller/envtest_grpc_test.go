@@ -144,8 +144,8 @@ func testGRPCExactMethodRoute(t *testing.T, c client.Client, cfg controller.Conf
 		}
 	}
 	provider.mu.Unlock()
-	if desired == nil || desired.Identity.GatewayUID != string(gateway.UID) || len(desired.HTTPBackends) != len(wantBackend) {
-		t.Fatalf("shared Gateway writer did not observe both exact method rules: %#v", desired)
+	if desired == nil || desired.Identity.GatewayUID != string(gateway.UID) || len(desired.HTTPBackends) != len(wantBackend) || !desired.TCPHealthMonitor {
+		t.Fatalf("shared Gateway writer did not observe both exact method rules with TCP health checks: %#v", desired)
 	}
 	for _, backend := range desired.HTTPBackends {
 		if len(backend.Matches) != 1 || backend.Matches[0].PathType != cloud.PathMatchExact ||

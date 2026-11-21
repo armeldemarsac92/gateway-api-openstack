@@ -433,6 +433,23 @@ func TestBuildRouteEnsurePlanDisablesPolicyBeforeRecreatingDeletedRule(t *testin
 	}
 }
 
+func TestGRPCRouteTCPMonitorReplacesOwnedHTTPMonitor(t *testing.T) {
+	desired, actual := convergedRoutePlanFixture()
+	desired.spec.TCPHealthMonitor = true
+	plan, _, err := buildRouteEnsurePlan(desired, actual)
+	want := []routeMutation{{kind: routeMutationDeleteMonitor, id: "monitor-1", parentID: "pool-1"}}
+	if err != nil || !reflect.DeepEqual(plan, want) {
+		t.Fatalf("existing gRPC monitor: plan %#v, error %v, want %#v", plan, err, want)
+	}
+
+	actual.monitor = nil
+	plan, _, err = buildRouteEnsurePlan(desired, actual)
+	want = []routeMutation{{kind: routeMutationCreateMonitor, parentID: "pool-1"}}
+	if err != nil || !reflect.DeepEqual(plan, want) || desired.monitorType() != monitors.TypeTCP {
+		t.Fatalf("replacement gRPC monitor: plan %#v, error %v, type %q, want a TCP monitor creation", plan, err, desired.monitorType())
+	}
+}
+
 func TestBuildRouteEnsurePlanDisablesPolicyBeforeRecreatingDeletedPool(t *testing.T) {
 	desired, actual := convergedRoutePlanFixture()
 	actual.pool = nil
