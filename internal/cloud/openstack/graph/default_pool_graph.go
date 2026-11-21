@@ -18,6 +18,7 @@ package graph
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/netip"
 	"slices"
@@ -258,6 +259,11 @@ func (p *Provider) buildDefaultPoolGraphPlan(desired desiredGatewayGraph, actual
 				}
 			}
 			steps, state, err := buildRouteEnsurePlan(route, observed)
+			if errors.Is(err, errWeightedTCPBackupUnknown) {
+				detach = detach || index == defaultOwner
+				routeResult.Outcome = p.progressingOutcome(err.Error())
+				break
+			}
 			if err != nil {
 				return nil, result, &cloud.GraphError{Identity: route.spec.Identity, Err: err}
 			}

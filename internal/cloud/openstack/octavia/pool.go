@@ -64,6 +64,38 @@ func (s *Service) ListMembers(ctx context.Context, poolID string, opts pools.Lis
 	return items, nil
 }
 
+// ListMembersWithBackup reports the IDs whose backup flag is omitted or null.
+// The SDK's boolean alone cannot distinguish either case from explicit false.
+func (s *Service) ListMembersWithBackup(ctx context.Context, poolID string, opts pools.ListMembersOpts) ([]pools.Member, map[string]struct{}, error) {
+	pages, err := pools.ListMembers(s.client, poolID, opts).AllPages(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list pool members: %w", err)
+	}
+	items, err := pools.ExtractMembers(pages)
+	if err != nil {
+		return nil, nil, fmt.Errorf("extract pool members: %w", err)
+	}
+	var response struct {
+		Members []struct {
+			ID     string `json:"id"`
+			Backup *bool  `json:"backup"`
+		} `json:"members"`
+	}
+	if err := pages.(pools.MemberPage).ExtractInto(&response); err != nil {
+		return nil, nil, fmt.Errorf("extract member backup flags: %w", err)
+	}
+	var unreported map[string]struct{}
+	for _, member := range response.Members {
+		if member.Backup == nil {
+			if unreported == nil {
+				unreported = make(map[string]struct{})
+			}
+			unreported[member.ID] = struct{}{}
+		}
+	}
+	return items, unreported, nil
+}
+
 // CreateMember creates one member beneath a pool.
 func (s *Service) CreateMember(ctx context.Context, poolID string, opts pools.CreateMemberOpts) (*pools.Member, error) {
 	return pools.CreateMember(ctx, s.client, poolID, opts).Extract()

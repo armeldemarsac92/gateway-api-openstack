@@ -219,6 +219,8 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 				data["default_pool_id"] = nil
 			case tcpPools:
 				data["listeners"] = []map[string]any{}
+			case memberCollection:
+				data["backup"] = false
 			}
 			f.inventory[entryPath] = data
 			if listPath == tcpListeners && f.loseNextListenerCreate {
@@ -1045,6 +1047,14 @@ func TestTransportGraphRepairsBackupOnlyForWeightedTCPEndpoints(t *testing.T) {
 				if result.Routes[0].Result.Outcome.State != cloud.OutcomeReady || len(f.writes) != before || second["backup"] != true {
 					t.Fatalf("backup flag changed the existing %s contract: outcome %v, writes %v", test.name, result.Outcome.State, f.writes[before:])
 				}
+				second["backup"] = nil
+				if result := f.reconcile(f.provider()); result.Routes[0].Result.Outcome.State != cloud.OutcomeReady || len(f.writes) != before {
+					t.Fatalf("null backup changed the existing %s contract: outcome %v, writes %v", test.name, result.Outcome.State, f.writes[before:])
+				}
+				delete(second, "backup")
+				if result := f.reconcile(f.provider()); result.Routes[0].Result.Outcome.State != cloud.OutcomeReady || len(f.writes) != before {
+					t.Fatalf("omitted backup changed the existing %s contract: outcome %v, writes %v", test.name, result.Outcome.State, f.writes[before:])
+				}
 				return
 			}
 			if result.Routes[0].Result.Outcome.State == cloud.OutcomeReady || listener["default_pool_id"] != nil ||
@@ -1069,15 +1079,24 @@ func TestTransportGraphRepairsBackupOnlyForWeightedTCPEndpoints(t *testing.T) {
 				t.Fatalf("listener reattached without confirmed backup readback: writes %v", f.writes[before+2:])
 			}
 			second["provisioning_status"], pool["provisioning_status"] = "ACTIVE", "ACTIVE"
+			for _, form := range []string{"omitted", "null"} {
+				if form == "omitted" {
+					delete(second, "backup")
+				} else {
+					second["backup"] = nil
+				}
+				if result := f.reconcile(f.provider()); listener["default_pool_id"] != nil ||
+					result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing || len(f.writes) != before+3 {
+					t.Fatalf("%s backup is not confirmed: outcome %v, pool %v, writes %v",
+						form, result.Outcome.State, listener["default_pool_id"], f.writes[before+3:])
+				}
+			}
+			second["backup"] = false
 			f.reconcile(f.provider())
 			listener["provisioning_status"] = "ACTIVE"
 			if result := f.reconcile(f.provider()); result.Routes[0].Result.Outcome.State != cloud.OutcomeReady ||
 				!slices.Equal(f.writes[before+3:], []string{"PUT " + tcpListener}) || listener["default_pool_id"] != "pool" {
 				t.Fatalf("confirmed repair did not restore the serving pool: outcome %v, writes %v", result.Outcome.State, f.writes[before+3:])
-			}
-			second["backup"] = nil
-			if result := f.reconcile(f.provider()); result.Outcome.State != cloud.OutcomeReady || len(f.writes) != before+4 {
-				t.Fatalf("null backup caused a mutation: outcome %v, writes %v", result.Outcome.State, f.writes[before+4:])
 			}
 		})
 	}

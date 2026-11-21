@@ -18,6 +18,7 @@ package graph
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/netip"
@@ -35,6 +36,8 @@ import (
 
 const routeMonitorExpectedCodes = "200-399"
 
+var errWeightedTCPBackupUnknown = errors.New("Waiting for Octavia to report the backup flag for every weighted TCP member")
+
 type observedRoutePolicy struct {
 	policy l7policies.L7Policy
 	role   string
@@ -47,10 +50,11 @@ type observedRouteRule struct {
 }
 
 type observedRouteGraph struct {
-	pool     *pools.Pool
-	members  []pools.Member
-	monitor  *monitors.Monitor
-	policies []observedRoutePolicy
+	pool                   *pools.Pool
+	members                []pools.Member
+	memberBackupUnreported map[string]struct{}
+	monitor                *monitors.Monitor
+	policies               []observedRoutePolicy
 }
 
 type routeGraphOwner struct {
@@ -259,9 +263,12 @@ func routeOwnerIndex(owners []routeGraphOwner, tags []string, roles ...string) (
 
 func (p *Provider) observeRoutePoolChildren(ctx context.Context, identity Identity, graph *observedRouteGraph) error {
 	var err error
-	graph.members, err = p.octavia.ListMembers(ctx, graph.pool.ID, pools.ListMembersOpts{
-		ProjectID: p.projectID,
-	})
+	opts := pools.ListMembersOpts{ProjectID: p.projectID}
+	if graph.pool.Protocol == cloud.ListenerProtocolTCP {
+		graph.members, graph.memberBackupUnreported, err = p.octavia.ListMembersWithBackup(ctx, graph.pool.ID, opts)
+	} else {
+		graph.members, err = p.octavia.ListMembers(ctx, graph.pool.ID, opts)
+	}
 	if err != nil {
 		return fmt.Errorf("list route pool members: %w", err)
 	}
@@ -498,7 +505,11 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 			delete(desiredMembers, key)
 			weight := desiredMemberWeight(desired.spec.MemberMode, wanted)
 			// HAProxy excludes backup members while any regular member is up.
-			clearBackup := desired.protocol() == cloud.ListenerProtocolTCP && wanted.Weight > 0 && !wanted.Draining && member.Backup
+			weightedTCP := desired.protocol() == cloud.ListenerProtocolTCP && wanted.Weight > 0 && !wanted.Draining
+			if _, unreported := actual.memberBackupUnreported[member.ID]; weightedTCP && unreported {
+				return nil, cloud.RouteState{}, errWeightedTCPBackupUnknown
+			}
+			clearBackup := weightedTCP && member.Backup
 			if !member.AdminStateUp || weight != nil && member.Weight != *weight || clearBackup {
 				nonPolicyPlan = append(nonPolicyPlan, routeMutation{
 					kind:              routeMutationUpdateMember,
