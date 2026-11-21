@@ -1,0 +1,120 @@
+/*
+Copyright 2026 The gateway-api-openstack Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package graph
+
+import (
+	"context"
+	"slices"
+
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/backendca"
+)
+
+// retireUnusedBackendCA runs with the Gateway writer lock and a converged Octavia graph.
+// The selected CA can exist before the first pool is attached. Keep that revision as
+// well as every PEM still used by a pool or client-authenticating listener.
+func (p *Provider) retireUnusedBackendCA(ctx context.Context, spec cloud.GatewayGraphSpec, result cloud.GatewayGraphResult) (cloud.GatewayGraphResult, error) {
+	deleting := spec.Gateway.Disposition == cloud.GraphDelete
+	if p.backendCA == nil || result.Outcome.State != cloud.OutcomeReady ||
+		(!deleting && spec.Gateway.Disposition != cloud.GraphEnsure) {
+		return result, nil
+	}
+	if !deleting && slices.ContainsFunc(spec.Routes, func(node cloud.RouteGraphNode) bool {
+		return node.Disposition == cloud.GraphPreserve
+	}) {
+		return result, nil
+	}
+
+	revisions, err := p.backendCA.List(ctx, spec.Identity.GatewayUID)
+	if err != nil {
+		return result, err
+	}
+	keep := retainedBackendCAs(spec, revisions)
+	pendingUse := false
+	for _, revision := range revisions {
+		if keep[revision.Reference()] {
+			continue
+		}
+		var inUse, removing bool
+		var authorityErr error
+		err := p.backendCA.Retire(ctx, spec.Identity.GatewayUID, revision, func(ctx context.Context, ref string) (bool, error) {
+			unused, err := p.octavia.CAUnused(ctx, p.projectID, ref)
+			if err != nil {
+				return false, err
+			}
+			if !unused {
+				inUse = true
+				return false, nil
+			}
+			if spec.ValidateMutation != nil {
+				authorityErr = spec.ValidateMutation(ctx)
+				if authorityErr != nil {
+					return false, authorityErr
+				}
+			}
+			removing = true
+			return true, nil
+		})
+		if authorityErr != nil {
+			return cloud.GatewayGraphResult{}, authorityErr
+		}
+		if err != nil {
+			return result, err
+		}
+		pendingUse = pendingUse || inUse
+		if removing {
+			result.Outcome = p.progressingOutcome("Waiting to observe retirement of the unused backend CA")
+			if deleting {
+				result.Gateway.Outcome = result.Outcome
+			}
+			return result, nil
+		}
+	}
+	if deleting && pendingUse {
+		result.Outcome = p.progressingOutcome("An Octavia resource still uses a CA owned by this Gateway")
+		result.Gateway.Outcome = result.Outcome
+	}
+	return result, nil
+}
+
+func retainedBackendCAs(spec cloud.GatewayGraphSpec, revisions []backendca.Revision) map[string]bool {
+	if len(revisions) == 0 || spec.Gateway.Disposition != cloud.GraphEnsure {
+		return nil
+	}
+	keep := make(map[string]bool)
+	selectRevision := func(tls *cloud.BackendTLSValidation) {
+		if tls == nil || tls.Denied {
+			return
+		}
+		// List and Ensure use the same stable oldest-first ordering.
+		for _, revision := range revisions {
+			if revision.MatchesConfigMap(tls.CAConfigMapUID, tls.CADigest) {
+				keep[revision.Reference()] = true
+				return
+			}
+		}
+	}
+	for _, node := range spec.Routes {
+		if node.Disposition == cloud.GraphEnsure {
+			selectRevision(node.Spec.BackendTLS)
+			for _, backend := range node.Spec.HTTPBackends {
+				selectRevision(backend.BackendTLS)
+			}
+		}
+	}
+	return keep
+}

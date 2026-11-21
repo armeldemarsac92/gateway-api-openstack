@@ -81,6 +81,12 @@ func (r Revision) Reference() string { return r.reference }
 // Digest returns the lowercase SHA-256 of the normalized PEM payload.
 func (r Revision) Digest() string { return r.digest }
 
+// MatchesConfigMap identifies the originating public CA revision in this Gateway scope.
+func (r Revision) MatchesConfigMap(configMapUID, payloadDigest string) bool {
+	return configMapUID != "" && payloadDigest != "" && r.digest == payloadDigest &&
+		strings.HasSuffix(r.name, "-"+digest([]byte(configMapUID))+"-"+payloadDigest)
+}
+
 // String redacts the reference in default formatting.
 func (r Revision) String() string { return "[backend CA revision]" }
 

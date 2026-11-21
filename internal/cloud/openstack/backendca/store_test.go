@@ -105,6 +105,10 @@ func TestRotateAndRetireOnlyUnusedOwnedRevision(t *testing.T) {
 	if err != nil || replacement == old || replacement.Digest() != old.Digest() {
 		t.Fatalf("recreated ConfigMap did not receive a distinct revision: %v", err)
 	}
+	if !old.MatchesConfigMap(source, old.Digest()) || old.MatchesConfigMap(source, next.Digest()) ||
+		old.MatchesConfigMap("recreated-configmap", replacement.Digest()) {
+		t.Fatal("CA retention must match both the ConfigMap UID and normalized certificate digest")
+	}
 	again, err := store.Ensure(t.Context(), gateway, source, oldCA)
 	if err != nil || again != old {
 		t.Fatalf("duplicate caused unstable CA selection: %v", err)

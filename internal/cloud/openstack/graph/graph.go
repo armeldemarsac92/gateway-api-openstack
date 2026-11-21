@@ -210,7 +210,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 				return p.withdrawUndiscoverableSNI(ctx, desired, actual, err)
 			}
 		}
-		return result, nil
+		return p.retireUnusedBackendCA(ctx, spec, result)
 	}
 	step, prepared, err := p.prepareNextGraphMutation(ctx, desired, actual, plan, &result)
 	if !prepared {
