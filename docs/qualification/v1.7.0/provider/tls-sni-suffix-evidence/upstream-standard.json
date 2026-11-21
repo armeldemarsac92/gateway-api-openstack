@@ -1,0 +1,400 @@
+{
+  "channel": "standard",
+  "runMode": "candidate",
+  "controller": {
+    "repository": "ghcr.io/armeldemarsac92/gateway-api-openstack",
+    "sourceRevision": "633e0efb0ca141adfd693f5474ed08a8b0777f3c",
+    "manifestDigest": "sha256:523db1c10771c4c520c2d1b8cd9e2c616b2987bf9d3cc470a7e6108c3901e0a4",
+    "platform": "linux/amd64",
+    "ociArchiveSHA256": "aa37e433d7c9963a6c95cba6d6db461628e6ee2f16eaf06667173aa92f727249",
+    "managerSHA256": "0fc497eaa5680f672ecdb58b095a0c2c6ef724c5c338bfb851c8213319bb3bc3"
+  },
+  "gatewayAPI": {
+    "release": "v1.7.0",
+    "revision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+    "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+    "baseManifestSHA256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+    "caseFilesSHA256": {
+      "tlsroute-hostname-intersection.go": "d32a783b6e358f89c30619de4f9e61a96dc15822e3ae6e040dd1153cf1b19c33",
+      "tlsroute-hostname-intersection.yaml": "0edc5e8d92e428a9ba140e06aa78e57a422d4cd046ba898d081c7a1d0eb1decd",
+      "tlsroute-multiple-routes-attachment-same-hostname-intersection.go": "e120b54706b3654af9c455b3eff496e68c777b339ac2bfb9336237f82b2ba82c",
+      "tlsroute-multiple-routes-attachment-same-hostname-intersection.yaml": "6038d9199ff5b43d883dcb1332ef1c2e876e71189835c826a2e0f72b9b57352a"
+    }
+  },
+  "kubernetes": "v1.36.2",
+  "etcd": "3.6.8",
+  "haproxy": "3.0.19",
+  "fixtureArchivesSHA256": {
+    "baseSNI": "eaa77d5f3a5f90a8d02d5d24a203cd339eacff54017ba251bf4f8f63492847af",
+    "multiVIP": "2c231b4bc6688a1ea13160fb11a00006643f87c088f97e783456cfa50df40f07"
+  },
+  "provider": {
+    "packages": {
+      "octavia": {
+        "revision": "83653eade75abd8430fb8ac86865866cef860c34",
+        "sourceTree": "13cb0d762fcad48a383b23c247e38061c29a140e",
+        "packageSourceArchiveSHA256": "2826374ec348d07065cd9005e60d67ff7f6f2facd0c9db0418cda9ecac07a57f",
+        "version": "19.0.1.dev5",
+        "wheel": "octavia-19.0.1.dev5-py3-none-any.whl",
+        "wheelSHA256": "44e47bf3f205583c597b7605359ce5435672ea85a65dfd099361b77fd5741fc7",
+        "packageFilesMatchedToSource": 631,
+        "pythonFilesMatchedToSource": 609,
+        "templatesMatchedToSource": 11,
+        "importedModulesVerified": 151,
+        "moduleFiles": {
+          "octavia.api.drivers.amphora_driver.v2.driver": "octavia/api/drivers/amphora_driver/v2/driver.py",
+          "octavia.api.drivers.utils": "octavia/api/drivers/utils.py",
+          "octavia.api.v2.controllers.l7policy": "octavia/api/v2/controllers/l7policy.py",
+          "octavia.api.v2.controllers.l7rule": "octavia/api/v2/controllers/l7rule.py",
+          "octavia.api.app": "octavia/api/app.py",
+          "octavia.common.jinja.haproxy.combined_listeners.jinja_cfg": "octavia/common/jinja/haproxy/combined_listeners/jinja_cfg.py",
+          "octavia.db.models": "octavia/db/models.py",
+          "octavia.tests.functional.api.v2.base": "octavia/tests/functional/api/v2/base.py"
+        },
+        "rendererTemplates": [
+          "octavia/common/jinja/haproxy/combined_listeners/templates/haproxy.cfg.j2",
+          "octavia/common/jinja/haproxy/combined_listeners/templates/macros.j2"
+        ]
+      },
+      "octavia-lib": {
+        "revision": "bb1a993ac95477b0bdc429f8aaf6d1620f8e7669",
+        "sourceTree": "8b18768d9c12dafe916b582ba6dc3f0f9c91d9f7",
+        "packageSourceArchiveSHA256": "5fef097a538f18a53360fb79046f77043c853876d81130c2cb141c5a6427fd83",
+        "version": "3.12.1.dev3",
+        "wheel": "octavia_lib-3.12.1.dev3-py3-none-any.whl",
+        "wheelSHA256": "5513991a6e004490221065b64be53f3dbdf3de1bab6e768ff2bc98f797c5cfc5",
+        "packageFilesMatchedToSource": 24,
+        "pythonFilesMatchedToSource": 24,
+        "templatesMatchedToSource": 0,
+        "importedModulesVerified": 9,
+        "moduleFiles": {
+          "octavia_lib.api.drivers.data_models": "octavia_lib/api/drivers/data_models.py",
+          "octavia_lib.api.drivers.provider_base": "octavia_lib/api/drivers/provider_base.py"
+        }
+      }
+    },
+    "amphoraPublishedCapabilities": [
+      "tls_sni_passthrough_v1",
+      "tls_sni_suffix_v1"
+    ]
+  },
+  "echo": {
+    "module": "sigs.k8s.io/gateway-api-conformance-images@v0.2.0",
+    "binarySHA256": "4e92869620dfcc5b31f8f71604030e85a1e6eee8f095982cbb6bda85669f8e4a",
+    "certificateSecret": "tls-checks-certificate",
+    "endpoints": [
+      {
+        "service": "tls-backend",
+        "pod": "tls-backend-local",
+        "address": "198.51.100.5",
+        "port": 8443,
+        "verifiedHostnames": [
+          "abc.example.com",
+          "other.example.com"
+        ],
+        "ready": true
+      },
+      {
+        "service": "tls-backend-2",
+        "pod": "tls-backend-2-local",
+        "address": "198.51.100.6",
+        "port": 9443,
+        "verifiedHostnames": [
+          "abc.example.com",
+          "other.example.com"
+        ],
+        "ready": true
+      }
+    ]
+  },
+  "upstreamExit": 0,
+  "tests": {
+    "TLSRouteHostnameIntersection": "PASS",
+    "TLSRouteHostnameIntersection/TLSRoutes_intersect_with_exact_listener_hostname": "PASS",
+    "TLSRouteHostnameIntersection/TLSRoutes_intersect_with_exact_listener_hostname/TLS_request_not_matching_hostnames_intersection_should_not_reach_backend": "PASS",
+    "TLSRouteHostnameIntersection/TLSRoutes_intersect_with_exact_listener_hostname/TLS_request_matching_exact_hostnames_intersection_should_reach_backend": "PASS",
+    "TLSRouteHostnameIntersection/TLSRoutes_intersect_with_more_specific_wildcard_listener_hostname": "PASS",
+    "TLSRouteHostnameIntersection/TLSRoutes_intersect_with_more_specific_wildcard_listener_hostname/TLS_request_not_matching_hostnames_intersection_should_not_reach_backend": "PASS",
+    "TLSRouteHostnameIntersection/TLSRoutes_intersect_with_more_specific_wildcard_listener_hostname/TLS_request_matching_wildcard_hostnames_intersection_should_reach_backend_2": "PASS",
+    "TLSRouteHostnameIntersection/TLSRoutes_intersect_with_more_specific_wildcard_listener_hostname/TLS_request_matching_exact_hostnames_intersection_should_reach_backend": "PASS",
+    "TLSRouteHostnameIntersection/TLSRoutes_intersect_with_less_specific_wildcard_listener_hostname": "PASS",
+    "TLSRouteHostnameIntersection/TLSRoutes_intersect_with_less_specific_wildcard_listener_hostname/TLS_request_not_matching_hostnames_intersection_should_not_reach_backend": "PASS",
+    "TLSRouteHostnameIntersection/TLSRoutes_intersect_with_less_specific_wildcard_listener_hostname/TLS_request_matching_exact_hostnames_intersection_should_reach_backend": "PASS",
+    "TLSRouteHostnameIntersection/TLSRoutes_intersect_with_less_specific_wildcard_listener_hostname/TLS_request_matching_wildcard_hostnames_intersection_should_reach_backend_2": "PASS",
+    "TLSRouteHostnameIntersection/TLSRoutes_intersect_with_empty_listener_hostname": "PASS",
+    "TLSRouteHostnameIntersection/TLSRoutes_intersect_with_empty_listener_hostname/TLS_request_not_matching_hostnames_intersection_should_not_reach_backend": "PASS",
+    "TLSRouteHostnameIntersection/TLSRoutes_intersect_with_empty_listener_hostname/TLS_request_matching_exact_hostnames_intersection_should_reach_backend": "PASS",
+    "TLSRouteHostnameIntersection/TLSRoutes_intersect_with_empty_listener_hostname/TLS_request_matching_wildcard_hostnames_intersection_should_reach_backend_2": "PASS",
+    "TLSRouteMultipleRoutesAttachmentSameHostnameIntersection": "PASS",
+    "TLSRouteMultipleRoutesAttachmentSameHostnameIntersection/TLSRoute_exact_hostname_match_takes_precedence_over_TLSRoute_wildcard_hostname_match_despite_having_newer_creation_timestamp": "PASS",
+    "TLSRouteMultipleRoutesAttachmentSameHostnameIntersection/TLSRoute_more_specific_wildcard_hostname_match_takes_precedence_over_less_specific_wildcard_hostname_match_despite_having_newer_creation_timestamp": "PASS"
+  },
+  "upstreamHTTPSRequestsPassed": 9,
+  "upstreamTLSConnectionsRejected": 4,
+  "failureObservations": {},
+  "gateways": {
+    "gw-tlsroute-empty-hostname-x-4": {
+      "conditions": {
+        "Accepted": "True/Accepted",
+        "Programmed": "True/Programmed"
+      },
+      "listenerStatus": [
+        {
+          "name": "listener-empty-hostname",
+          "attachedRoutes": 2,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "Conflicted": "False/NoConflicts",
+            "Programmed": "True/Programmed"
+          }
+        }
+      ],
+      "addresses": [
+        "192.0.2.33"
+      ]
+    },
+    "gw-tlsroute-exact-hostname-x": {
+      "conditions": {
+        "Accepted": "True/Accepted",
+        "Programmed": "True/Programmed"
+      },
+      "listenerStatus": [
+        {
+          "name": "listener-exact-hostname",
+          "attachedRoutes": 2,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "Conflicted": "False/NoConflicts",
+            "Programmed": "True/Programmed"
+          }
+        }
+      ],
+      "addresses": [
+        "192.0.2.34"
+      ]
+    },
+    "gw-tlsroute-exact-hostname-x-1": {
+      "conditions": {
+        "Accepted": "True/Accepted",
+        "Programmed": "True/Programmed"
+      },
+      "listenerStatus": [
+        {
+          "name": "listener-exact-hostname",
+          "attachedRoutes": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "Conflicted": "False/NoConflicts",
+            "Programmed": "True/Programmed"
+          }
+        }
+      ],
+      "addresses": [
+        "192.0.2.30"
+      ]
+    },
+    "gw-tlsroute-less-specific-wc-hostname-x-3": {
+      "conditions": {
+        "Accepted": "True/Accepted",
+        "Programmed": "True/Programmed"
+      },
+      "listenerStatus": [
+        {
+          "name": "listener-less-specific-wc-hostname",
+          "attachedRoutes": 2,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "Conflicted": "False/NoConflicts",
+            "Programmed": "True/Programmed"
+          }
+        }
+      ],
+      "addresses": [
+        "192.0.2.32"
+      ]
+    },
+    "gw-tlsroute-more-specific-wc-hostname-x-2": {
+      "conditions": {
+        "Accepted": "True/Accepted",
+        "Programmed": "True/Programmed"
+      },
+      "listenerStatus": [
+        {
+          "name": "listener-more-specific-wc-hostname",
+          "attachedRoutes": 2,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "Conflicted": "False/NoConflicts",
+            "Programmed": "True/Programmed"
+          }
+        }
+      ],
+      "addresses": [
+        "192.0.2.31"
+      ]
+    },
+    "gw-tlsroute-wc-hostname-x": {
+      "conditions": {
+        "Accepted": "True/Accepted",
+        "Programmed": "False/NoResources"
+      },
+      "listenerStatus": [
+        {
+          "name": "listener-wc-hostname",
+          "attachedRoutes": 2,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "Conflicted": "False/NoConflicts",
+            "Programmed": "False/Pending"
+          }
+        }
+      ],
+      "addresses": [
+        "192.0.2.35"
+      ]
+    }
+  },
+  "routes": {
+    "tlsroute-exact-hostname-x-2": [
+      {
+        "gateway": "gw-tlsroute-more-specific-wc-hostname-x-2",
+        "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+        "conditions": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+          "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+        }
+      }
+    ],
+    "tlsroute-exact-hostname-x-3": [
+      {
+        "gateway": "gw-tlsroute-less-specific-wc-hostname-x-3",
+        "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+        "conditions": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+          "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+        }
+      }
+    ],
+    "tlsroute-exact-hostname-x-4": [
+      {
+        "gateway": "gw-tlsroute-empty-hostname-x-4",
+        "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+        "conditions": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+          "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+        }
+      }
+    ],
+    "tlsroute-exact-hostname-x-newer": [
+      {
+        "gateway": "gw-tlsroute-exact-hostname-x",
+        "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+        "conditions": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+          "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+        }
+      }
+    ],
+    "tlsroute-less-specific-wc-hostname-x-2": [
+      {
+        "gateway": "gw-tlsroute-more-specific-wc-hostname-x-2",
+        "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+        "conditions": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+          "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+        }
+      }
+    ],
+    "tlsroute-less-specific-wc-hostname-x-4": [
+      {
+        "gateway": "gw-tlsroute-empty-hostname-x-4",
+        "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+        "conditions": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+          "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+        }
+      }
+    ],
+    "tlsroute-less-specific-wc-hostname-x-older": [
+      {
+        "gateway": "gw-tlsroute-wc-hostname-x",
+        "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+        "conditions": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "gateway-api-openstack.github.io/Programmed": "False/Conflicted"
+        }
+      }
+    ],
+    "tlsroute-more-specific-wc-hostname-x-1": [
+      {
+        "gateway": "gw-tlsroute-exact-hostname-x-1",
+        "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+        "conditions": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+          "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+        }
+      }
+    ],
+    "tlsroute-more-specific-wc-hostname-x-3": [
+      {
+        "gateway": "gw-tlsroute-less-specific-wc-hostname-x-3",
+        "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+        "conditions": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+          "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+        }
+      }
+    ],
+    "tlsroute-more-specific-wc-hostname-x-newer": [
+      {
+        "gateway": "gw-tlsroute-wc-hostname-x",
+        "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+        "conditions": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+          "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+        }
+      }
+    ],
+    "tlsroute-wc-hostname-x-older": [
+      {
+        "gateway": "gw-tlsroute-exact-hostname-x",
+        "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+        "conditions": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "gateway-api-openstack.github.io/Programmed": "False/Conflicted"
+        }
+      }
+    ]
+  },
+  "octaviaAPI": {
+    "getRequests": 1542,
+    "writeRequests": 83,
+    "activeHAProxies": 6
+  }
+}
