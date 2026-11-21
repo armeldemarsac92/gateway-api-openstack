@@ -158,24 +158,28 @@ func routeParentCandidates(route *gatewayv1.HTTPRoute, parent managedRouteParent
 	if len(http) == 0 {
 		return nil, newRouteBuildError(routeErrorUnsupported, "parent Gateway does not have a supported HTTP listener configuration")
 	}
+	kind := model.HTTPProfileRouteKind(route)
 	var candidates []*gatewayv1.Listener
 	for _, listener := range http {
 		if !selects(*listener) {
+			continue
+		}
+		if kind == model.GRPCRouteKind && listener.Protocol != gatewayv1.HTTPProtocolType {
 			continue
 		}
 		if (listener.Protocol != gatewayv1.HTTPProtocolType && listener.Protocol != gatewayv1.HTTPSProtocolType) || (listener.Protocol == gatewayv1.HTTPProtocolType && listener.TLS != nil) {
 			return nil, newRouteBuildError(routeErrorUnsupported, "parent listener does not support HTTPRoute")
 		}
 		if listener.AllowedRoutes != nil && len(listener.AllowedRoutes.Kinds) != 0 &&
-			!slices.ContainsFunc(listener.AllowedRoutes.Kinds, func(kind gatewayv1.RouteGroupKind) bool {
-				return kind.Kind == "HTTPRoute" && (kind.Group == nil || *kind.Group == gatewayv1.GroupName)
+			!slices.ContainsFunc(listener.AllowedRoutes.Kinds, func(ref gatewayv1.RouteGroupKind) bool {
+				return ref.Kind == kind && (ref.Group == nil || *ref.Group == gatewayv1.GroupName)
 			}) {
-			return nil, newRouteBuildError(routeErrorNotAllowed, "listener allowedRoutes does not include HTTPRoute")
+			return nil, newRouteBuildError(routeErrorNotAllowed, "listener allowedRoutes does not include %s", kind)
 		}
 		candidates = append(candidates, listener)
 	}
 	if len(candidates) == 0 {
-		return nil, newRouteBuildError(routeErrorNotAllowed, "selected listener does not support HTTPRoute")
+		return nil, newRouteBuildError(routeErrorNotAllowed, "selected listener does not support %s", kind)
 	}
 	return candidates, nil
 }
@@ -255,6 +259,9 @@ type boundHTTPAttachment struct {
 // liveBoundRouteAttachment observes the authorization for established
 // forwarding independently of GatewayClass and bundle readiness.
 func (r *Reconciler) liveBoundRouteAttachment(ctx context.Context, route *gatewayv1.HTTPRoute, identity cloud.Identity) (attachment boundHTTPAttachment, rejection, readErr error) {
+	if model.HTTPProfileRouteKind(route) == model.GRPCRouteKind && !r.Config.GRPCExactMethodEnabled() {
+		return boundHTTPAttachment{}, grpcProfileDisabled(), nil
+	}
 	if !slices.ContainsFunc(route.Spec.ParentRefs, func(ref gatewayv1.ParentReference) bool {
 		return routeTargetsGateway(route, ref, identity.GatewayNamespace, identity.GatewayName)
 	}) {
@@ -277,6 +284,14 @@ func (r *Reconciler) liveBoundRouteAttachment(ctx context.Context, route *gatewa
 	}
 	listener, rejection := boundRouteAttachment(route, &gateway, http, namespaces)
 	return boundHTTPAttachment{listener: listener, gatewayGeneration: gateway.Generation}, rejection, nil
+}
+
+func routeProfileConflict() error {
+	return newRouteBuildError(routeErrorNotAllowed, "an older Route of a different kind owns an overlapping hostname on this listener")
+}
+
+func grpcProfileDisabled() error {
+	return newRouteBuildError(routeErrorUnsupported, "GRPCRoute exact method matching requires Octavia backend h2c and fixed responses")
 }
 
 func validateRouteHostnames(listener *gatewayv1.Hostname, hostnames []gatewayv1.Hostname) error {

@@ -60,7 +60,7 @@ func CollectBackendInputsWithNamespaces(ctx context.Context, reader client.Reade
 	grantNamespaces := map[string]struct{}{}
 	for target, sources := range references {
 		for source := range sources {
-			if source != target.Namespace {
+			if source.namespace != target.Namespace {
 				grantNamespaces[target.Namespace] = struct{}{}
 			}
 		}
@@ -82,7 +82,7 @@ func CollectBackendInputsWithNamespaces(ctx context.Context, reader client.Reade
 	for _, key := range keys {
 		allowed := false
 		for source := range references[key] {
-			if model.BackendReferenceAllowed(source, key, input.ReferenceGrants) {
+			if model.BackendReferenceAllowedFor(source.kind, source.namespace, key, input.ReferenceGrants) {
 				allowed = true
 				break
 			}
@@ -129,8 +129,13 @@ func ListBackendReferenceGrants(ctx context.Context, reader client.Reader, names
 	return grants.DeepCopy().Items, nil
 }
 
-func backendServiceReferences(routes []gatewayv1.HTTPRoute) map[types.NamespacedName]map[string]struct{} {
-	references := map[types.NamespacedName]map[string]struct{}{}
+type backendReferenceSource struct {
+	namespace string
+	kind      gatewayv1.Kind
+}
+
+func backendServiceReferences(routes []gatewayv1.HTTPRoute) map[types.NamespacedName]map[backendReferenceSource]struct{} {
+	references := map[types.NamespacedName]map[backendReferenceSource]struct{}{}
 	for _, route := range routes {
 		for _, rule := range route.Spec.Rules {
 			for _, reference := range rule.BackendRefs {
@@ -139,9 +144,9 @@ func backendServiceReferences(routes []gatewayv1.HTTPRoute) map[types.Namespaced
 					continue
 				}
 				if references[key] == nil {
-					references[key] = map[string]struct{}{}
+					references[key] = map[backendReferenceSource]struct{}{}
 				}
-				references[key][route.Namespace] = struct{}{}
+				references[key][backendReferenceSource{namespace: route.Namespace, kind: model.HTTPProfileRouteKind(&route)}] = struct{}{}
 			}
 		}
 	}

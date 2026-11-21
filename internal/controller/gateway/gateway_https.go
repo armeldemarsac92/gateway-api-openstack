@@ -115,7 +115,7 @@ func httpsProfileIssue(config controller.Config, gateway *gatewayv1.Gateway, lis
 	if listener.Filters != nil && len(listener.Filters.Requests) != 0 {
 		return invalid(gatewayv1.ListenerReasonUnsupportedValue, "Listener request filters are unsupported")
 	}
-	if issue := httpRouteKindsIssue(listener); issue != nil {
+	if issue := httpRouteKindsIssue(config, listener); issue != nil {
 		return issue
 	}
 	tls := listener.TLS
@@ -141,8 +141,8 @@ func httpsProfileIssue(config controller.Config, gateway *gatewayv1.Gateway, lis
 	return nil
 }
 
-func httpRouteKindsIssue(listener *gatewayv1.Listener) *httpsListenerIssue {
-	if listener.AllowedRoutes != nil && slices.ContainsFunc(listener.AllowedRoutes.Kinds, func(ref gatewayv1.RouteGroupKind) bool { return !isRouteGroupKind(ref, "HTTPRoute") }) {
+func httpRouteKindsIssue(config controller.Config, listener *gatewayv1.Listener) *httpsListenerIssue {
+	if listener.AllowedRoutes != nil && slices.ContainsFunc(listener.AllowedRoutes.Kinds, func(ref gatewayv1.RouteGroupKind) bool { return !listenerSupportsRouteKind(config, *listener, ref) }) {
 		return &httpsListenerIssue{gatewayv1.ListenerConditionResolvedRefs, gatewayv1.ListenerReasonInvalidRouteKinds, "Only HTTPRoute is supported by this listener"}
 	}
 	return nil
@@ -167,7 +167,7 @@ func HTTPRouteListeners(config controller.Config, gateway *gatewayv1.Gateway) ([
 // its route-attachment sections.
 func ValidatedHTTPRouteListeners(config controller.Config, gateway *gatewayv1.Gateway) ([]*gatewayv1.Listener, error) {
 	if !usesHTTPSProfile(config, gateway) {
-		return SupportedListeners(gateway)
+		return SupportedListenersForConfig(config, gateway)
 	}
 	return HTTPRouteListeners(config, gateway)
 }
@@ -397,7 +397,7 @@ func (r *Reconciler) listenerTLSIssues(ctx context.Context, gateway *gatewayv1.G
 func (r *Reconciler) conflictedHTTPSReferenceCondition(ctx context.Context, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) *metav1.Condition {
 	// Keep the conflict as the reason this listener cannot program. Resolve
 	// its references independently for status, without using the provider ref.
-	issue := httpRouteKindsIssue(listener)
+	issue := httpRouteKindsIssue(r.Config, listener)
 	if issue == nil {
 		reason := gatewayv1.ListenerReasonInvalidCertificateRef
 		if r.Certificates != nil {

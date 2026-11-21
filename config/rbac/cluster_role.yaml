@@ -28,6 +28,7 @@ rules:
       - gatewayclasses
       - gateways
       - httproutes
+      - grpcroutes
       - tcproutes
       - udproutes
     verbs:
@@ -49,6 +50,7 @@ rules:
       - gatewayclasses/status
       - gateways/status
       - httproutes/status
+      - grpcroutes/status
       - tcproutes/status
       - udproutes/status
     verbs:
@@ -61,6 +63,7 @@ rules:
       - gatewayclasses/finalizers
       - gateways/finalizers
       - httproutes/finalizers
+      - grpcroutes/finalizers
       - tcproutes/finalizers
       - udproutes/finalizers
     verbs:

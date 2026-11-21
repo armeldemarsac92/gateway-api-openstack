@@ -87,7 +87,7 @@ func TestSetupIndexes(t *testing.T) {
 		{IndexL4RouteByBackendNamespace, []string{"apps"}},
 		{IndexL4RouteByBoundGateway, []string{"gateways/edge"}},
 	}
-	if want := len(wantTypes) + 2*len(l4Fields); len(indexer.indexes) != want {
+	if want := len(wantTypes) + 7 + 2*len(l4Fields); len(indexer.indexes) != want {
 		t.Fatalf("registered indexes = %d, want %d", len(indexer.indexes), want)
 	}
 	for field, object := range wantTypes {

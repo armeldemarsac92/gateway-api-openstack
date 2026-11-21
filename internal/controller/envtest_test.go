@@ -249,6 +249,14 @@ func TestControllerEnvtest(t *testing.T) {
 	t.Run("UDP worker NodePort follows endpoint protocol and grant", func(t *testing.T) {
 		testUDPNodePort(t, apiClient, statusConfig, statusProvider)
 	})
+	t.Run("GRPCRoute exact methods share the Gateway writer", func(t *testing.T) {
+		grpcConfig := config
+		grpcConfig.ControllerName = "grpc.example.com/gateway-api-openstack"
+		grpcConfig.BackendH2C, grpcConfig.FixedHTTPResponses = true, true
+		provider := &recordingProvider{}
+		startManager(grpcConfig, provider)
+		testGRPCExactMethodRoute(t, apiClient, grpcConfig, provider, crdDirectory)
+	})
 	t.Run("HTTPRoute Service ReferenceGrant lifecycle", func(t *testing.T) {
 		testHTTPRouteServiceReferenceGrant(t, apiClient, cacheClient, config, gateway)
 	})

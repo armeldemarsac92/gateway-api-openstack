@@ -46,9 +46,9 @@ func attachParent(input Input, route *gatewayv1.HTTPRoute, parentIndex int, list
 			continue
 		}
 		attachment := ListenerAttachment{Name: listener.Name, State: AttachmentRejected}
-		if !acceptsHTTP(listeners[i]) {
+		if !acceptsHTTP(listeners[i]) || HTTPProfileRouteKind(route) == GRPCRouteKind && listener.Protocol != gatewayv1.HTTPProtocolType {
 			attachment.Diagnostics = append(attachment.Diagnostics, routeDiagnostic(gatewayv1.RouteReasonNotAllowedByListeners, "listener does not accept HTTPRoute configuration"))
-		} else if !allowsRoute(listener, input.Gateway.Namespace, route.Namespace, input.Namespaces) {
+		} else if !allowsRoute(listener, HTTPProfileRouteKind(route), input.Gateway.Namespace, route.Namespace, input.Namespaces) {
 			attachment.Diagnostics = append(attachment.Diagnostics, routeDiagnostic(gatewayv1.RouteReasonNotAllowedByListeners, "listener does not allow this HTTPRoute kind or namespace"))
 		} else {
 			attachment.Hostnames = IntersectHostnames(listener.Hostname, route.Spec.Hostnames)
@@ -91,12 +91,12 @@ func acceptsHTTP(listener Listener) bool {
 	return true
 }
 
-func allowsRoute(listener *gatewayv1.Listener, gatewayNamespace, routeNamespace string, namespaces []corev1.Namespace) bool {
+func allowsRoute(listener *gatewayv1.Listener, routeKind gatewayv1.Kind, gatewayNamespace, routeNamespace string, namespaces []corev1.Namespace) bool {
 	allowed := listener.AllowedRoutes
 	if allowed != nil && len(allowed.Kinds) != 0 {
 		found := false
 		for _, kind := range allowed.Kinds {
-			if kind.Kind == "HTTPRoute" && (kind.Group == nil || *kind.Group == gatewayv1.GroupName) {
+			if kind.Kind == routeKind && (kind.Group == nil || *kind.Group == gatewayv1.GroupName) {
 				found = true
 				break
 			}

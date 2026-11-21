@@ -147,13 +147,8 @@ func isGatewayAPICRD(object client.Object) bool {
 // durable binding changes.
 func HTTPRouteReconcilePredicate(config Config) predicate.Predicate {
 	return updatePredicate(func(oldObject, newObject client.Object) bool {
-		oldRoute, oldOK := oldObject.(*gatewayv1.HTTPRoute)
-		newRoute, newOK := newObject.(*gatewayv1.HTTPRoute)
-		if !oldOK || !newOK {
-			return true
-		}
-		return generationOrDeletionChanged(oldRoute, newRoute) ||
-			routeBindingChanged(config, oldRoute, newRoute)
+		return generationOrDeletionChanged(oldObject, newObject) ||
+			routeBindingChanged(config, oldObject, newObject)
 	})
 }
 

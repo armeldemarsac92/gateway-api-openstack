@@ -49,6 +49,7 @@ type Request struct {
 	Identity cloud.Identity
 	Action   Action
 	Gateway  *gatewayv1.Gateway
+	// Route holds a native HTTPRoute or an in-memory GRPCRoute projection.
 	Route    *gatewayv1.HTTPRoute
 	TCPRoute *gatewayv1.TCPRoute
 	UDPRoute *gatewayv1.UDPRoute

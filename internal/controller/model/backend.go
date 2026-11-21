@@ -54,7 +54,7 @@ func resolveBackend(route *gatewayv1.HTTPRoute, reference gatewayv1.HTTPBackendR
 		return group
 	}
 	group.Service = serviceKey
-	if !BackendReferenceAllowed(route.Namespace, group.Service, input.ReferenceGrants) {
+	if !BackendReferenceAllowedFor(HTTPProfileRouteKind(route), route.Namespace, group.Service, input.ReferenceGrants) {
 		group.Authorization = BackendAuthorizationDenied
 		group.Diagnostic = backendDiagnostic(gatewayv1.RouteReasonRefNotPermitted,
 			fmt.Sprintf("backend Service %s is not permitted by a ReferenceGrant", group.Service))
@@ -74,6 +74,10 @@ func resolveBackend(route *gatewayv1.HTTPRoute, reference gatewayv1.HTTPBackendR
 	port, diagnostic := ResolveServicePort(service, reference.Port)
 	if diagnostic != nil {
 		group.Diagnostic = diagnostic
+		return group
+	}
+	if HTTPProfileRouteKind(route) == GRPCRouteKind && !ServicePortUsesH2C(port) {
+		group.Diagnostic = backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "GRPCRoute requires kubernetes.io/h2c on the backend Service port")
 		return group
 	}
 	group.Port = port.DeepCopy()
