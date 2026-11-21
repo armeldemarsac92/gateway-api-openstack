@@ -75,7 +75,7 @@ func (p *Provider) GetGateway(
 		return cloud.GatewayProgressingResult("Octavia load balancer is administratively disabled", p.pollInterval), true, nil
 	}
 
-	listenerList, err := p.listGatewayListeners(ctx, loadBalancer)
+	listenerList, err := p.listGatewayListeners(ctx, loadBalancer, false)
 	if err != nil {
 		return cloud.GatewayResult{}, false, err
 	}

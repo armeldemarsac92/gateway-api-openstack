@@ -532,6 +532,13 @@ func TestMultiUDPDetachedPoolNeedsExplicitEmptyReverseList(t *testing.T) {
 		t.Fatalf("null reverse inventory permitted pool cleanup: %v, writes %v", err, f.writes[before:])
 	}
 	pool["listeners"] = []map[string]any{}
+	// An empty reverse list alone cannot prove what a listener forwards to.
+	listener := f.inventory[tcpListener+"-5353"]
+	delete(listener, "default_pool_id")
+	if _, err := provider.ReconcileGatewayGraph(t.Context(), f.spec); err == nil || len(f.writes) != before {
+		t.Fatalf("missing forward association permitted pool cleanup: %v, writes %v", err, f.writes[before:])
+	}
+	listener["default_pool_id"] = nil
 	f.settleUDP(provider)
 	if f.inventory[tcpPool] != nil {
 		t.Fatal("route-owned pool survived authorized cleanup after explicit detach")

@@ -18,6 +18,7 @@ package octavia
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
@@ -25,15 +26,47 @@ import (
 
 // ListListeners lists and extracts listeners matching opts.
 func (s *Service) ListListeners(ctx context.Context, opts listeners.ListOpts) ([]listeners.Listener, error) {
+	items, _, err := s.ListListenersWithDefaultPools(ctx, opts)
+	return items, err
+}
+
+// ListListenersWithDefaultPools reports whether every listener explicitly
+// identifies its default pool or reports null. Omission cannot prove detach.
+func (s *Service) ListListenersWithDefaultPools(ctx context.Context, opts listeners.ListOpts) ([]listeners.Listener, bool, error) {
 	pages, err := listeners.List(s.client, opts).AllPages(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("list listeners: %w", err)
+		return nil, false, fmt.Errorf("list listeners: %w", err)
 	}
-	items, err := listeners.ExtractListeners(pages)
-	if err != nil {
-		return nil, fmt.Errorf("extract listeners: %w", err)
+	var response struct {
+		Listeners []struct {
+			listeners.Listener
+			DefaultPool json.RawMessage `json:"default_pool_id"`
+		} `json:"listeners"`
 	}
-	return items, nil
+	if err := pages.(listeners.ListenerPage).ExtractInto(&response); err != nil {
+		return nil, false, fmt.Errorf("extract listeners: %w", err)
+	}
+	if response.Listeners == nil {
+		// AllPages coalesces an empty collection to nil. The graph checks
+		// this against the LB's explicit list of listener references.
+		return nil, true, nil
+	}
+	items := make([]listeners.Listener, len(response.Listeners))
+	complete := true
+	for i, observed := range response.Listeners {
+		items[i] = observed.Listener
+		switch string(observed.DefaultPool) {
+		case "null":
+			// The public API explicitly reports a detached listener.
+		case "", `""`:
+			complete = false
+		default:
+			if err := json.Unmarshal(observed.DefaultPool, &items[i].DefaultPoolID); err != nil {
+				return nil, false, fmt.Errorf("extract listener default pool: %w", err)
+			}
+		}
+	}
+	return items, complete, nil
 }
 
 // CreateListener creates one listener.

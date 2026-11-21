@@ -424,7 +424,7 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 		}
 	}
 	owners := desired.routeOwners()
-	listenerList, err := p.listGatewayListeners(ctx, lb)
+	listenerList, err := p.listGatewayListeners(ctx, lb, actual.multiUDP)
 	if err != nil {
 		return actual, err
 	}
