@@ -36,6 +36,8 @@ A separate test starts fresh production Go service clients against a loopback Ke
 
 The initial lifecycle rehearsal ran on an API server without a scheduler or kubelet. The workload rotation rehearsal used two real controller Pods and a synthetic TLS service catalog. Replacing the projected Secret and restarting the Deployment gave both new Pods working credentials and a new CA. A separate check received HTTP 401 with the retired credential. [Runtime and cleanup](magnum-projected-rotation.md) Authentication through deployed Keystone and production Gateway traffic still require a disposable Hibiscus cluster.
 
+The stock management operator later completed all three Helm revisions against a two-node Standard workload cluster. The driver-rendered source Secret selected the first digest, the second digest and then the first again. Two Pods ran each revision. Deleting the management addon uninstalled its five workload resources and preserved all 11 shared CRD UIDs. [Management, workload and dependency evidence](magnum-management-addon.md)
+
 ## Live acceptance and missing inputs
 
 | Scenario | Status | Required proof / inputs |

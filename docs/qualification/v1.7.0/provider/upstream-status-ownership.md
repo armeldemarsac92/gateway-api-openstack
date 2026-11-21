@@ -1,4 +1,6 @@
-# Gateway name length and HTTPRoute status ownership
+# Gateway name length and HTTPRoute status ownership on the earlier controller
+
+These are the original observations on `455798411c13fd42f5c1568357f2c35cec2b2169`. The managed-parent change has since passed the same foreign-status case on both channels. [Current controller and results](http-one-managed-parent.md)
 
 The focused envtest ran the original Gateway API v1.7.0 case bodies and manifests on Kubernetes 1.36.2. Each run used its channel's release CRDs and admission policy, the upstream `same-namespace` Gateway and `infra-backend-v1` Service, and the existing recording provider. The case sources and manifests in the Go module match upstream revision `e26d183dbbc1bb782b78addbd26faba03955c152`. [Upstream conformance cases](https://github.com/kubernetes-sigs/gateway-api/tree/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests) · [Run receipt](upstream-status-ownership-results.json)
 

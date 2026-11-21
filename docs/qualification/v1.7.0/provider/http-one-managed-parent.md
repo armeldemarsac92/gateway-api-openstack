@@ -4,7 +4,7 @@ An HTTPRoute can attach to one supported Gateway managed by this controller whil
 
 The Octavia fragment keeps one binding to the managed Gateway UID. If another reference becomes managed, the live graph checks stop new programming and the route reconciler rejects the managed references with `Accepted=False/UnsupportedValue` and detaches any existing fragment through its stored UID. Two references to different sections of the same managed Gateway also receive this refusal. Other parent kinds receive no attachment from this controller. The existing listener, namespace, hostname and backend restrictions apply.
 
-A rollback to controller source `455798411c13fd42f5c1568357f2c35cec2b2169` restores the requirement for exactly one item in `spec.parentRefs`. The predecessor rejects mixed-parent routes and can remove their existing Octavia fragments. Before rollback, check any route that must continue forwarding through this controller and arrange its attachments so that its spec has a single parent reference.
+A rollback to controller source `455798411c13fd42f5c1568357f2c35cec2b2169` restores the requirement for exactly one item in `spec.parentRefs`. The predecessor rejects mixed-parent routes and can remove their existing Octavia fragments. Before rollback, identify which additional parents serve traffic. Migrate any live attachment and verify both paths before reducing the original spec to one reference. [Operator rollback procedure](../../../operator-recovery.md#roll-back-httproutes-with-additional-parents)
 
 ## Local qualification
 
@@ -31,3 +31,7 @@ for channel in standard experimental; do
     ./internal/controller > "$channel.jsonl" 2>&1
 done
 ```
+
+## Forwarding through the managed parent
+
+The two captured routes referred to a missing Gateway on opposite sides of their managed reference. The controller produced one graph for Gateway `edge`. The test sent that graph through Gophercloud's loopback REST fixture and Octavia 19's stock Amphora renderer. HAProxy 3.0.19 returned 200 for both `/api` and `/api/extra` on `API.Example.COM:1234`. The echo backend received the original Host including the port. Four unbound host or path combinations returned the fixture's 503. This exercise used Kubernetes objects in memory and a loopback backend. The two-channel status tests used real Kubernetes API servers. [Observed traffic and status](http-one-managed-parent-results.json) · [Reproduction patch and recorded graph](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-f85a33968895b1c14a6eb5b5d911435c34b0f79e/hibiscus-http-parent-qualification-f85a33968895.tar.gz)

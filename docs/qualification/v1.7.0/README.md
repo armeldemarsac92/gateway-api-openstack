@@ -2,6 +2,8 @@
 
 The fork provides a development controller and an opt-in Magnum driver patch. The first qualification target is an HTTP request sent through a private Amphora VIP to a known response on a worker NodePort. A disposable Hibiscus deployment has yet to be designated. The live ledger records zero completed runs across the fourteen profile and channel combinations. The local results span multiple controller revisions. [Live profile ledger](live-runs.md) · [Case inventory](matrix/features-and-cases.md#complete-registered-test-inventory)
 
+The private HTTP pilot now has three local traffic samples with two independent checks per sample. The VIP and worker NodePort answered before the controller stopped, at zero controller Pods and after both replacements became Ready. In a separate management exercise the stock addon operator deployed, upgraded and restored the workload image with two Ready Pods per revision. Both runs used local OpenStack fixtures. [Cold restart and HTTP traffic](provider/controller-cold-http.md) · [Management addon lifecycle](magnum-management-addon.md)
+
 ## Revisions and installation
 
 | Component | Development input | Deployed version |
@@ -91,3 +93,7 @@ The workload rotation rehearsal used two real controller Pods and a synthetic TL
 3. Remove the test graph, wait for finalizers and audit Octavia and Neutron. Verify both original control load balancers and the absence of all objects tagged for this run. Exercise provider failures, permission revocation and credential and certificate rotation while the workload remains reachable.
 4. Qualify Magnum install, upgrade, rollback, disable, removal and cluster teardown. Follow the management and workload steps in the operator guide. Record the result of each lifecycle transition independently of the traffic suite.
 5. Follow the [manual qualification runbook](live-runs.md) to run the unmodified profile suite against each channel’s own disposable cluster. Retain the original report, logs and environment metadata. Record setup failures and unrun cases explicitly. A trace of the live wire behavior is also needed for requirements without an upstream test.
+
+## Additional HTTPRoute ownership and kubelet results
+
+The controller preserves a foreign status entry at its original generation and transition time while serving through its own reference. A separate four-case run on kind observed dynamic Gateway address allocation and retention of foreign Gateway conditions. The earlier controller rejected an added HTTP section on the same port and the default NodePort configuration rejected the upstream ClusterIP backend in the route-generation case. The case inventory retains those failures. [HTTPRoute ownership and traffic](provider/http-one-managed-parent.md) · [Scoped kubelet results](provider/kubelet-status-supplement.md)

@@ -1,11 +1,11 @@
 # Reproduce the Hibiscus development image
 
-Use the [build record](image.json) for the source revision, platform and OCI manifest digest. The [development prerelease](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-455798411c13fd42f5c1568357f2c35cec2b2169) contains the same linux/amd64 manifest in an OCI archive. The registry reference uses `ghcr.io/armeldemarsac92/gateway-api-openstack@` followed by the manifest digest.
+Use the [build record](image.json) for the source revision, platform and OCI manifest digest. The [development prerelease](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-f85a33968895b1c14a6eb5b5d911435c34b0f79e) contains the same linux/amd64 manifest in an OCI archive. The registry reference uses `ghcr.io/armeldemarsac92/gateway-api-openstack@` followed by the manifest digest.
 
 On a linux/amd64 host, use a separate checkout of the recorded revision. The Dockerfile pins the Go 1.27.4 builder and distroless base by digest. Podman uses a fixed timestamp, and the build writes the full commit into the binary and the OCI revision label. The verification command exports gzip-compressed layers.
 
 ```sh
-revision=455798411c13fd42f5c1568357f2c35cec2b2169
+revision=f85a33968895b1c14a6eb5b5d911435c34b0f79e
 test "$(git rev-parse HEAD)" = "$revision"
 image="localhost/hibiscus-controller:$revision"
 make container-build CONTAINER_TOOL=podman VERSION="$revision" IMAGE="$image"

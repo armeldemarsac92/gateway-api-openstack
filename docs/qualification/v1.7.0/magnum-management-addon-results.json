@@ -1,0 +1,32 @@
+[
+  {
+    "revision": 1,
+    "phase": "Deployed",
+    "readyPods": 2,
+    "image": "sha256:0e4d2cef2350926304edb098f58c73c216f9cb8550b282e2717911d1a57a072b",
+    "history": {
+      "1": "deployed"
+    }
+  },
+  {
+    "revision": 2,
+    "phase": "Deployed",
+    "readyPods": 2,
+    "image": "sha256:0326e0e3b911b78ab0427f652f9344029ac155d42f4aca2d63c91954a555c23f",
+    "history": {
+      "1": "superseded",
+      "2": "deployed"
+    }
+  },
+  {
+    "revision": 3,
+    "phase": "Deployed",
+    "readyPods": 2,
+    "image": "sha256:0e4d2cef2350926304edb098f58c73c216f9cb8550b282e2717911d1a57a072b",
+    "history": {
+      "1": "superseded",
+      "2": "superseded",
+      "3": "deployed"
+    }
+  }
+]

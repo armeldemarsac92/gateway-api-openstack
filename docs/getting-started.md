@@ -209,6 +209,8 @@ kubectl -n gateway-api-openstack-demo get gateway edge -o yaml
 kubectl -n gateway-api-openstack-demo get httproute basic -o yaml
 ```
 
+An HTTPRoute can list the managed Gateway alongside a missing Gateway or a Gateway owned by another controller. The managed entry may appear anywhere in `spec.parentRefs`. Look for its exact reference and this controller's name in `status.parents`. Two references handled by this controller, including two sections of the same Gateway, currently give `Accepted=False/UnsupportedValue`. [Attachment and status behavior](qualification/v1.7.0/provider/http-one-managed-parent.md)
+
 The example intentionally uses one Gateway, one HTTP listener, one HTTPRoute, one rule, one PathPrefix match, and one NodePort Service backend.
 
 For a shared Gateway, the platform operator can give its HTTP listener a Namespace selector.

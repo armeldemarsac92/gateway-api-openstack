@@ -34,6 +34,7 @@ The controller uses Gateway API v1.7.0 and defaults to the Standard Channel. Its
 
 - A Gateway can request one private IPv4 VIP at creation on a class with Floating IP mode `None`. [Configuration and allocation results](docs/qualification/v1.7.0/provider/private-gateway-address.md)
 - One active HTTP listener shared by multiple HTTPRoutes. The listener accepts its own namespace by default and can opt into all namespaces or a namespace label selector. An unsupported protocol on a separate port gets its own listener status.
+- An HTTPRoute with one managed Gateway reference can serve traffic even when the route also refers to a missing or foreign Gateway. Other controllers keep their own entries in route status. [Parent attachment and evidence](docs/qualification/v1.7.0/provider/http-one-managed-parent.md)
 - One rule, one match and one backend Service per HTTPRoute. Across routes the listener orders matching hostnames, Exact and PathPrefix paths, route age and names.
 - HTTP/1.1 WebSocket Upgrade to a TCP Service port declaring `appProtocol: kubernetes.io/ws`. [Operator instructions](docs/getting-started.md) · [Qualification](docs/qualification/v1.7.0/provider/http-websocket.md)
 - An HTTPRoute can declare several hostnames on one listener when their intersection produces one effective exact name or wildcard. An excluded hostname cannot reach that route’s backend. [Host matching and limits](docs/qualification/v1.7.0/provider/http-host-intersection.md)

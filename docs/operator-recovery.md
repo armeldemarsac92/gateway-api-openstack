@@ -47,6 +47,10 @@ Keep the newer controller running while preparing each Gateway. Record its obser
 
 A local two-version reader test stored the newer controller’s bound Gateway, cleared the address, and reconciled that exact serialized object with the previous controller. Its binding and observed VIP survived. A deployed rollback and live traffic remain outstanding. [Reader test and results](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-455798411c13fd42f5c1568357f2c35cec2b2169/hibiscus-private-ipv4-455798411c13.tar.gz)
 
+## Roll back HTTPRoutes with additional parents
+
+The controller at `455798411c13fd42f5c1568357f2c35cec2b2169` requires one item in `spec.parentRefs`. Before rolling back, list routes that use this controller alongside other parents. Record which parents actually serve traffic and check the hostname, path and backend through each active entry point. If an extra reference is unused, remove it while the newer controller is running and verify the managed path. If another controller serves through an extra reference, migrate that attachment to a separately named HTTPRoute using its supported configuration and verify both paths before removing it from the original. Account for age-based selection where routes overlap. Keep the current image if the attachments cannot be migrated while preserving traffic. The previous image can withdraw this controller's Octavia fragment as soon as it encounters multiple references. [Controller and qualification](qualification/v1.7.0/provider/http-one-managed-parent.md)
+
 ## HTTPRoute hostname rollback
 
 Before restoring a controller that accepts at most one declared hostname, inspect HTTPRoutes with multiple declarations. Reduce each affected route to the single hostname that preserves its effective match and its precedence on this listener. Verify the intended backend after the change. Rolling back with several declarations still present causes the older reconciler to withdraw that route. [Hostname selection and local traffic](qualification/v1.7.0/provider/http-host-intersection.md)

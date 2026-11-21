@@ -1,0 +1,69 @@
+{
+  "sourceRevision": "f85a33968895b1c14a6eb5b5d911435c34b0f79e",
+  "predecessorSource": "455798411c13fd42f5c1568357f2c35cec2b2169",
+  "gatewayAPI": "v1.7.0",
+  "upstreamRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "envtestKubernetesVersion": "1.36.2",
+  "provider": "recording provider",
+  "serviceMemberMode": "Endpoint",
+  "channels": {
+    "standard": {
+      "prior": {
+        "GatewayNameMaximumLength": "PASS",
+        "HTTPRoutePreserveForeignStatus": "FAIL"
+      },
+      "priorLogSHA256": "d36de35bfe43bf2bdd772a6df2dc8cf6870669da0fa12eb975274f34369b4017",
+      "reviewed": {
+        "GatewayNameMaximumLength": "PASS",
+        "HTTPRoutePreserveForeignStatus": "PASS"
+      },
+      "reviewedSuiteLogSHA256": "14d70ebc73838a7f6d6d0542f4f6befe12a1fec10c35bdf14e6645f15e62e28c"
+    },
+    "experimental": {
+      "prior": {
+        "GatewayNameMaximumLength": "PASS",
+        "HTTPRoutePreserveForeignStatus": "FAIL"
+      },
+      "priorLogSHA256": "6e1bd300703e6e5d51ec42dd685e2c598c37ae9c184b4d0e01960396faecc5da",
+      "reviewed": {
+        "GatewayNameMaximumLength": "PASS",
+        "HTTPRoutePreserveForeignStatus": "PASS"
+      },
+      "reviewedSuiteLogSHA256": "d9caaca91f864b60c9fc2064798cc33cb1c9b044fd96c2e58b73ae19b7a74d83"
+    }
+  },
+  "traffic": {
+    "sourceRevision": "f85a33968895b1c14a6eb5b5d911435c34b0f79e",
+    "gatewayAPI": "v1.7.0",
+    "renderer": "stock Octavia 19.0.0",
+    "haproxy": "3.0.19",
+    "kubernetes": "controller-runtime fake client",
+    "cloud": "loopback Octavia REST fixture and short health checks",
+    "routeParentRefs": {
+      "api": [
+        "unmanaged-gateway",
+        "edge"
+      ],
+      "sibling": [
+        "edge",
+        "unmanaged-gateway"
+      ]
+    },
+    "ownedGateway": "edge",
+    "traffic": [
+      "API.Example.COM:1234 /api -> 200 \"hibiscus-node-backend API.Example.COM:1234\", active health check observed",
+      "apiXexample.com /api -> 503",
+      "API.Example.COM:1234 /api/extra -> 200 \"hibiscus-node-backend API.Example.COM:1234\", active health check observed",
+      "API.Example.COM:1234 /apiculture -> 503",
+      "ignored.example.net /api -> 503",
+      "other.example.com /api -> 503"
+    ],
+    "graphSHA256": "01c33c3cc3a79131efca0c604f7269825332ec0b4714be0e5b4936c5a42bf3ea",
+    "captureLogSHA256": "1de92c969b80f7fd245cc7f2435dd16577ff910bb1a3bb107e247c4cb3e2586e",
+    "trafficLogSHA256": "49771bd1eafe1580bdbd425ea13f0f6272d23a9a7df3cffe783e7f4d9cc646f3",
+    "qualificationPatchSHA256": "91ad82b84817ab6e47a68b52666ee3ffe21fbc0f66def99be28299f8b95d0c84",
+    "actualHibiscus": false,
+    "scope": "Normal creation and fresh requests under the one managed Gateway. The official status case runs separately against real Kubernetes API servers."
+  },
+  "deployedHibiscus": false
+}
