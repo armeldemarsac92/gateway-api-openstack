@@ -19,6 +19,7 @@ package httproute
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 
 	corev1 "k8s.io/api/core/v1"
@@ -43,19 +44,21 @@ type routeModelInputs struct {
 
 type routeGraphAdmission struct {
 	bindings   []routeGraphBinding
-	eligible   []routeGraphCandidate
+	eligible   map[types.NamespacedName]routeGraphCandidate
 	active     []gatewayv1.HTTPRoute
 	namespaces []corev1.Namespace
 }
 
 type routeGraphCandidate struct {
-	key                    types.NamespacedName
 	routeUID, namespaceUID types.UID
 }
 
 func (r *Reconciler) observeRouteGraphAdmission(ctx context.Context, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, routes []gatewayv1.HTTPRoute, requested *gatewayv1.HTTPRoute) (routeGraphAdmission, error) {
 	identity := controller.GatewayIdentity(r.Config, gateway)
-	admission := routeGraphAdmission{bindings: r.routeGraphBindings(routes, identity)}
+	admission := routeGraphAdmission{
+		bindings: r.routeGraphBindings(routes, identity),
+		eligible: make(map[types.NamespacedName]routeGraphCandidate),
+	}
 	byName := make(map[string][]corev1.Namespace)
 	for i := range routes {
 		route := &routes[i]
@@ -63,7 +66,14 @@ func (r *Reconciler) observeRouteGraphAdmission(ctx context.Context, gateway *ga
 			route.Annotations[r.Config.RouteLifecycleAnnotation()] == controller.RouteDetaching {
 			continue
 		}
-		parent := managedRouteParent{ref: route.Spec.ParentRefs[0], gateway: gateway, listener: listener}
+		ref, err := r.soleParentForManagedGateway(ctx, route, gateway)
+		if err != nil {
+			return routeGraphAdmission{}, err
+		}
+		if ref == nil {
+			continue
+		}
+		parent := managedRouteParent{ref: *ref, gateway: gateway, listener: listener}
 		if validateRouteParentListener(route, parent) != nil {
 			continue
 		}
@@ -80,11 +90,11 @@ func (r *Reconciler) observeRouteGraphAdmission(ctx context.Context, gateway *ga
 		if validateRouteAttachment(route, parent, namespaces) != nil {
 			continue
 		}
-		candidate := routeGraphCandidate{key: client.ObjectKeyFromObject(route), routeUID: route.UID}
+		candidate := routeGraphCandidate{routeUID: route.UID}
 		if len(namespaces) != 0 {
 			candidate.namespaceUID = namespaces[0].UID
 		}
-		admission.eligible = append(admission.eligible, candidate)
+		admission.eligible[client.ObjectKeyFromObject(route)] = candidate
 		if controller.RouteClaimsGateway(r.Config, route, identity) || requested != nil && route.UID == requested.UID && client.ObjectKeyFromObject(route) == client.ObjectKeyFromObject(requested) {
 			admission.active = append(admission.active, *route)
 		}
@@ -114,7 +124,7 @@ func (r *Reconciler) validateGraphRouteModel(ctx context.Context, inputs *routeM
 	if err != nil {
 		return err
 	}
-	if !slices.Equal(inputs.admission.eligible, current.eligible) ||
+	if !maps.Equal(inputs.admission.eligible, current.eligible) ||
 		!slices.Equal(inputs.admission.bindings, current.bindings) ||
 		!slices.EqualFunc(inputs.admission.active, current.active, func(a, b gatewayv1.HTTPRoute) bool {
 			return a.UID == b.UID && a.Generation == b.Generation && a.CreationTimestamp.Equal(&b.CreationTimestamp) &&

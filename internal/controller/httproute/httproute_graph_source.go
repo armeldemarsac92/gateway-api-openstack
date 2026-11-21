@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
@@ -104,17 +105,14 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 			snapshot := routeCleanupSnapshot{route: route, identity: identity, disposition: routeCleanupRequired}
 			fences = append(fences, func(ctx context.Context) error { return r.sealRouteCleanupSnapshot(ctx, snapshot) })
 		} else if backends != nil {
-			if !requested && !structurallySupportedRoute(route) {
-				input.Nodes = append(input.Nodes, node)
-				continue
-			}
-			if rejection := boundRouteAttachmentRejection(route, gateway, listener, backends.input.Namespaces); rejection != nil || !route.DeletionTimestamp.IsZero() {
-				if requested {
-					if rejection != nil {
-						return graph.RouteInputs{}, &cloud.GraphError{Identity: identity, Err: rejection}
-					}
+			if requested {
+				if rejection := boundRouteAttachmentRejection(route, gateway, listener, backends.input.Namespaces); rejection != nil {
+					return graph.RouteInputs{}, &cloud.GraphError{Identity: identity, Err: rejection}
+				}
+				if !route.DeletionTimestamp.IsZero() {
 					return graph.RouteInputs{}, errHTTPRouteChanged
 				}
+			} else if _, eligible := backends.admission.eligible[client.ObjectKeyFromObject(route)]; !eligible {
 				// The peer reconciles revocation through its durable detach checkpoint.
 				input.Nodes = append(input.Nodes, node)
 				continue

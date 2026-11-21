@@ -42,6 +42,11 @@ type managedRouteParent struct {
 	listener     *gatewayv1.Listener
 }
 
+type routeParentObservation struct {
+	managedRouteParent
+	managed bool
+}
+
 func (r *Reconciler) managedParents(ctx context.Context, route *gatewayv1.HTTPRoute) ([]managedRouteParent, error) {
 	return r.managedParentsWithReader(ctx, r.Client, route)
 }
@@ -51,36 +56,91 @@ func (r *Reconciler) managedParentsWithReader(
 	reader client.Reader,
 	route *gatewayv1.HTTPRoute,
 ) ([]managedRouteParent, error) {
-	parents := make([]managedRouteParent, 0, len(route.Spec.ParentRefs))
+	observations, err := r.observeRouteParents(ctx, reader, route)
+	if err != nil {
+		return nil, err
+	}
+	return managedParentsFromObservations(observations), nil
+}
+
+func (r *Reconciler) observeRouteParents(ctx context.Context, reader client.Reader, route *gatewayv1.HTTPRoute) ([]routeParentObservation, error) {
+	parents := make([]routeParentObservation, 0, len(route.Spec.ParentRefs))
 	for _, parentRef := range route.Spec.ParentRefs {
 		if !controller.IsGatewayParentRef(parentRef) {
 			continue
 		}
-		namespace := route.Namespace
-		if parentRef.Namespace != nil {
-			namespace = string(*parentRef.Namespace)
+		parent, err := r.observeRouteParent(ctx, reader, route.Namespace, parentRef)
+		if err != nil {
+			return nil, err
 		}
-		var gateway gatewayv1.Gateway
-		if err := reader.Get(ctx, types.NamespacedName{Namespace: namespace, Name: string(parentRef.Name)}, &gateway); err != nil {
-			if apierrors.IsNotFound(err) {
-				continue
-			}
-			return nil, fmt.Errorf("get parent Gateway: %w", err)
-		}
-		var class gatewayv1.GatewayClass
-		if err := reader.Get(ctx, types.NamespacedName{Name: string(gateway.Spec.GatewayClassName)}, &class); err != nil {
-			if apierrors.IsNotFound(err) {
-				continue
-			}
-			return nil, fmt.Errorf("get parent GatewayClass: %w", err)
-		}
-		if class.Spec.ControllerName != r.Config.ControllerName {
-			continue
-		}
-		listener, _ := gatewaycontroller.HTTPListener(&gateway)
-		parents = append(parents, managedRouteParent{ref: parentRef, gateway: &gateway, gatewayClass: &class, listener: listener})
+		parents = append(parents, parent)
 	}
 	return parents, nil
+}
+
+func (r *Reconciler) observeRouteParent(ctx context.Context, reader client.Reader, namespace string, ref gatewayv1.ParentReference) (routeParentObservation, error) {
+	parent := routeParentObservation{managedRouteParent: managedRouteParent{ref: ref}}
+	if ref.Namespace != nil {
+		namespace = string(*ref.Namespace)
+	}
+	var gateway gatewayv1.Gateway
+	if err := reader.Get(ctx, types.NamespacedName{Namespace: namespace, Name: string(ref.Name)}, &gateway); err != nil {
+		if apierrors.IsNotFound(err) {
+			return parent, nil
+		}
+		return routeParentObservation{}, fmt.Errorf("get parent Gateway: %w", err)
+	}
+	parent.gateway = &gateway
+	var class gatewayv1.GatewayClass
+	if err := reader.Get(ctx, types.NamespacedName{Name: string(gateway.Spec.GatewayClassName)}, &class); err != nil {
+		if apierrors.IsNotFound(err) {
+			return parent, nil
+		}
+		return routeParentObservation{}, fmt.Errorf("get parent GatewayClass: %w", err)
+	}
+	parent.gatewayClass = &class
+	parent.managed = class.Spec.ControllerName == r.Config.ControllerName
+	if parent.managed {
+		parent.listener, _ = gatewaycontroller.HTTPListener(&gateway)
+	}
+	return parent, nil
+}
+
+func managedParentsFromObservations(observations []routeParentObservation) []managedRouteParent {
+	parents := make([]managedRouteParent, 0, len(observations))
+	for _, observation := range observations {
+		if observation.managed {
+			parents = append(parents, observation.managedRouteParent)
+		}
+	}
+	return parents
+}
+
+// soleParentForManagedGateway checks the other references against live ownership
+// while reusing an already validated Gateway from the current graph observation.
+func (r *Reconciler) soleParentForManagedGateway(ctx context.Context, route *gatewayv1.HTTPRoute, gateway *gatewayv1.Gateway) (*gatewayv1.ParentReference, error) {
+	var selected *gatewayv1.ParentReference
+	for i := range route.Spec.ParentRefs {
+		ref := &route.Spec.ParentRefs[i]
+		if !controller.IsGatewayParentRef(*ref) {
+			continue
+		}
+		if routeTargetsGateway(route, *ref, gateway.Namespace, gateway.Name) {
+			if selected != nil {
+				return nil, nil
+			}
+			selected = ref
+			continue
+		}
+		parent, err := r.observeRouteParent(ctx, r.APIReader, route.Namespace, *ref)
+		if err != nil {
+			return nil, err
+		}
+		if parent.managed {
+			return nil, nil
+		}
+	}
+	return selected, nil
 }
 
 func validateRouteParentListener(route *gatewayv1.HTTPRoute, parent managedRouteParent) error {

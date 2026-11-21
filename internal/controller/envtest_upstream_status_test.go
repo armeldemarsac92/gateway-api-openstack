@@ -79,6 +79,8 @@ func testUpstreamGatewayStatus(t *testing.T, c client.Client, cfg controller.Con
 	t.Helper()
 	const className = "upstream-status"
 	parameters := envtestClassParameters(className)
+	// The upstream backend Services use ClusterIP.
+	parameters.Spec.MemberMode = configv1alpha1.MemberModeEndpoint
 	class := &gatewayv1.GatewayClass{
 		ObjectMeta: metav1.ObjectMeta{Name: className},
 		Spec: gatewayv1.GatewayClassSpec{
@@ -94,7 +96,8 @@ func testUpstreamGatewayStatus(t *testing.T, c client.Client, cfg controller.Con
 	}
 	createUpstreamStatusBase(t, c, className)
 	s := &suite.ConformanceTestSuite{
-		Client: c, DisableParallelTests: true, CleanupTestResources: true,
+		ControllerName: string(cfg.ControllerName),
+		Client:         c, DisableParallelTests: true, CleanupTestResources: true,
 		Applier: kubernetes.Applier{GatewayClass: className, ControllerName: string(cfg.ControllerName), ManifestFS: []fs.FS{&conformance.Manifests}},
 		TimeoutConfig: config.TimeoutConfig{GWCMustBeAccepted: envtestWaitTimeout, LatestObservedGenerationSet: envtestWaitTimeout,
 			GatewayMustHaveCondition: envtestWaitTimeout, GatewayStatusMustHaveListeners: envtestWaitTimeout,
@@ -161,10 +164,12 @@ func testUpstreamGatewayStatus(t *testing.T, c client.Client, cfg controller.Con
 		tests.GatewayInvalidRouteKind,
 		tests.GatewayInvalidParametersRef,
 		tests.GatewayListenerUnsupportedProtocol,
+		tests.GatewayNameMaximumLength,
 		tests.HTTPRouteInvalidCrossNamespaceParentRef,
 		tests.HTTPRouteInvalidParentRefNotMatchingListenerPort,
 		tests.HTTPRouteInvalidParentRefNotMatchingSectionName,
 		tests.HTTPRouteInvalidParentRefSectionNameNotMatchingPort,
+		tests.HTTPRoutePreserveForeignStatus,
 	} {
 		t.Run(tc.ShortName, func(t *testing.T) {
 			s.RunTest = tc.ShortName

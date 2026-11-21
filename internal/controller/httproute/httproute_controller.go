@@ -167,7 +167,7 @@ func (r *Reconciler) buildCachedRouteDecision(
 		base.disposition = cachedRouteDetach
 		return base, nil
 	}
-	if len(route.Spec.ParentRefs) != 1 || len(parents) != 1 {
+	if len(parents) != 1 {
 		base.disposition = cachedRouteDetach
 		base.statusUpdates = unsupportedParentCountUpdates(parents)
 		return base, nil
@@ -239,7 +239,7 @@ func managedParentsSupportInstalledVersion(parents []managedRouteParent) bool {
 func unsupportedParentCountUpdates(parents []managedRouteParent) []parentStatusUpdate {
 	status := rejectedRouteStatus(
 		string(gatewayv1.RouteReasonUnsupportedValue),
-		"exactly one Gateway parentRef is supported",
+		"exactly one managed Gateway parentRef is supported",
 	)
 	updates := make([]parentStatusUpdate, 0, len(parents))
 	for _, parent := range parents {

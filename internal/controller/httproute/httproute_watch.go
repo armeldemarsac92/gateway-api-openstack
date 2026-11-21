@@ -62,8 +62,26 @@ func (r *Reconciler) enqueueHTTPRoutesForGateway(ctx context.Context, object cli
 	if !ok {
 		return nil
 	}
-	gatewayKey := controller.ObjectKeyString(client.ObjectKeyFromObject(gateway))
 	keys := map[types.NamespacedName]struct{}{}
+	r.addHTTPRoutesForGateway(ctx, gateway, keys)
+	return controller.SortedRequests(keys)
+}
+
+func (r *Reconciler) enqueueHTTPRoutesForGatewayClass(ctx context.Context, object client.Object) []reconcile.Request {
+	var gateways gatewayv1.GatewayList
+	if err := r.List(ctx, &gateways, client.MatchingFields{controller.IndexGatewayByClass: object.GetName()}); err != nil {
+		log.FromContext(ctx).Error(err, "Could not list Gateways for GatewayClass", "gatewayClass", object.GetName())
+		return nil
+	}
+	keys := map[types.NamespacedName]struct{}{}
+	for i := range gateways.Items {
+		r.addHTTPRoutesForGateway(ctx, &gateways.Items[i], keys)
+	}
+	return controller.SortedRequests(keys)
+}
+
+func (r *Reconciler) addHTTPRoutesForGateway(ctx context.Context, gateway *gatewayv1.Gateway, keys map[types.NamespacedName]struct{}) {
+	gatewayKey := controller.ObjectKeyString(client.ObjectKeyFromObject(gateway))
 	for _, indexName := range []string{controller.IndexHTTPRouteByParentGateway, controller.IndexHTTPRouteByStatusGateway, controller.IndexHTTPRouteByBoundGateway} {
 		var routes gatewayv1.HTTPRouteList
 		if err := r.List(ctx, &routes, client.MatchingFields{indexName: gatewayKey}); err != nil {
@@ -74,7 +92,6 @@ func (r *Reconciler) enqueueHTTPRoutesForGateway(ctx context.Context, object cli
 			keys[client.ObjectKeyFromObject(&routes.Items[index])] = struct{}{}
 		}
 	}
-	return controller.SortedRequests(keys)
 }
 
 func (r *Reconciler) enqueueHTTPRoutesForServiceKey(ctx context.Context, serviceKey types.NamespacedName) []reconcile.Request {
@@ -221,6 +238,7 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 		// A changed route can alter the precedence of its peers on the same listener.
 		Watches(&gatewayv1.HTTPRoute{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutePeers), builder.WithPredicates(controller.HTTPRoutePeerPredicate())).
 		Watches(&gatewayv1.Gateway{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForGateway), builder.WithPredicates(controller.GatewayForHTTPRoutePredicate(r.Config))).
+		Watches(&gatewayv1.GatewayClass{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForGatewayClass), builder.WithPredicates(controller.GatewayClassForGatewayPredicate())).
 		Watches(&corev1.Service{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForService), builder.WithPredicates(controller.ServicePredicate())).
 		Watches(&discoveryv1.EndpointSlice{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForEndpointSlice), builder.WithPredicates(controller.EndpointSlicePredicate())).
 		Watches(&gatewayv1.ReferenceGrant{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForReferenceGrant), builder.WithPredicates(controller.GenerationOrDeletionChangedPredicate())).

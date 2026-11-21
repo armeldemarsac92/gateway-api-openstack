@@ -59,9 +59,6 @@ func newRouteBuildError(kind routeErrorKind, format string, args ...any) error {
 }
 
 func structurallySupportedRoute(route *gatewayv1.HTTPRoute) bool {
-	if len(route.Spec.ParentRefs) != 1 {
-		return false
-	}
 	_, err := validateRouteStructure(route)
 	return err == nil
 }
