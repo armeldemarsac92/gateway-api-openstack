@@ -1,0 +1,22 @@
+apiVersion: gateway.networking.k8s.io/v1
+date: "2026-11-21T23:39:48+01:00"
+gatewayAPIChannel: standard
+gatewayAPIVersion: v1.7.0
+implementation:
+  contact:
+  - https://github.com/armeldemarsac92/gateway-api-openstack/issues
+  organization: Gateway API for OpenStack
+  project: Hibiscus
+  url: https://github.com/armeldemarsac92/gateway-api-openstack
+  version: db720031f03f5c344be3decad81a1563dc734dde
+kind: ConformanceReport
+mode: local-single-case
+profiles:
+- core:
+    result: success
+    statistics:
+      Failed: 0
+      Passed: 1
+      Skipped: 0
+  name: GATEWAY-UDP
+  summary: Core tests succeeded.

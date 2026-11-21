@@ -6,6 +6,14 @@ The fixture supplies subnet discovery, VIP allocation, RPC completion and delive
 
 The recorded runs used serial cases and a 90-second namespace-readiness timeout. The current focused runner keeps that timeout. The full profile runner uses the v1.7.0 default of 300 seconds. The case bodies, workload images and case manifests come from the tagged v1.7.0 module.
 
+## TLS-only listener rejects a UDPRoute
+
+On both v1.7.0 channels the original `UDPRouteNotAllowedByListeners` case passed both assertions. A UDPRoute targeted the `tls` section of a Gateway with a single TLS passthrough listener. The Gateway reported `Accepted=True` and `Programmed=True`. Its listener advertised only TLSRoute and had zero attached routes. The UDPRoute reported `Accepted=False/NotAllowedByListeners` and `ResolvedRefs=True` at its current generation. [Standard receipt](udp-tls-listener-evidence/standard.json) · [Experimental receipt](udp-tls-listener-evidence/experimental.json)
+
+The earlier UDP-only fixture skipped this case because its declared features lacked TLSRoute. This run declared Gateway, UDPRoute and TLSRoute and used the production controller with the SNI passthrough option. The upstream readiness check ran on both channels. A local echo process answered a UDP probe before its Pod was marked Ready and answered again after the test. Experimental used the published RBAC overlay. Each upstream report covers this one status case. The nine registered UDPRoute cases have now each passed in at least one local setup per channel. Full profile runs on Magnum Hibiscus remain pending. [Standard report](udp-tls-listener-evidence/standard-report.yaml) · [Experimental report](udp-tls-listener-evidence/experimental-report.yaml) · [Live profile runs](../live-runs.md)
+
+The rerunnable archive uses the controller from revision `db720031f03f5c344be3decad81a1563dc734dde` and has SHA-256 `b847d622b38c21716cac5ba173d398c03230d1e325ea166bcb9ff1c63717c998`. [Download the replay](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-db720031f03f5c344be3decad81a1563dc734dde/udp-tls-parent-case-db720031f03f.tar.gz) · [Original upstream test](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/udproute-not-allowed-by-listeners.go)
+
 ## Multiple UDP listeners on one Gateway
 
 At the 2026-11-21 controller revision [`00eabae770f4`](https://github.com/armeldemarsac92/gateway-api-openstack/commit/00eabae770f40014af8cb6cb53a225f1450ac52a), the two scoped cases passed on the Standard Kubernetes v1.36.4 cluster. The Experimental cluster passed the port-and-section case and failed the Gateway-wide attachment case. Both clusters used the original v1.7.0 cases, workload images and case manifests. The scoped common setup omits the HTTPS Gateway described below. This run covered two cases and a separate add/remove lifecycle.
