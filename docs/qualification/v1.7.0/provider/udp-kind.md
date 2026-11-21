@@ -12,6 +12,8 @@ The upstream `UDPRouteNotAllowedByListeners` case requires `SupportTLSRoute` and
 
 On each cluster, the upstream UDP echo client received a datagram from the Ready `udp-echo` pod through a temporary NodePort on the kind control-plane node. This verified the Kubernetes backend path directly. A separate Standard rehearsal sent a VIP datagram through a dedicated worker. A complete GATEWAY-UDP profile and a deployed Amphora remain open. [Dedicated worker traffic](udp-worker.md) [Upstream UDP echo client](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/utils/udp/udp.go)
 
+The two-node qualification ran the upstream packet cases and a separate ReferenceGrant withdrawal check on both channels. Its report identifies each result and links the packet captures. [UDP traffic results](udp-upstream.md#weighted-endpoint-results)
+
 ## Rerun
 
 Use the [kind TCP setup recipe](../kind-tcp.md) to create a fresh cluster and generate `tcp-status-base.yaml` with the single HTTPS Gateway omitted. Repeat the run on a fresh cluster for each official bundle. Install the chosen bundle and the controller CRD. Wait for `udproutes.gateway.networking.k8s.io` and `openstackgatewayclassconfigs.gateway-api-openstack.github.io` to become established. The Experimental asset SHA-256 is `e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53`. The node image digest and Standard asset hash are in the TCP recipe. On a rootless Podman guest without lingering, keep the session that creates the cluster open through the test and deletion. [Official Gateway API bundles](https://github.com/kubernetes-sigs/gateway-api/releases/tag/v1.7.0)

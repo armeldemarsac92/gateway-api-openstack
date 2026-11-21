@@ -6,6 +6,35 @@ The fixture supplies subnet discovery, VIP allocation, RPC completion and delive
 
 The runner executes cases serially and sets the upstream namespace readiness timeout to 90 seconds. The case bodies, workload images and case manifests come from the tagged v1.7.0 module.
 
+## Weighted Endpoint results
+
+Controller [`c49134b1183b`](https://github.com/armeldemarsac92/gateway-api-openstack/commit/c49134b1183bbc6b3e4cf01c720bef2ae154d70e) ran the nine UDP cases on two independent, two-node kind clusters with Kubernetes v1.36.4. Each cluster installed its own published v1.7.0 CRD bundle. Each focused run passed six cases, failed two and skipped one. Both failing cases requested three UDP listeners on distinct ports of a single Gateway. The skipped case requires a TLSRoute-capable Gateway. With the exact same binary, the literal GATEWAY-UDP Core setup stopped on both channels before any case body ran. All 23 upstream pods were Ready. The base Gateway with four HTTPS listeners on port 443 reported `Accepted=False/ListenersNotValid` and `Programmed=False/Invalid`.
+
+| Upstream v1.7.0 case | Standard | Experimental |
+|---|---|---|
+| `UDPRoute` | PASS | PASS |
+| `UDPRouteReferenceGrant` | PASS | PASS |
+| `UDPRouteMultipleRoutesAttachment` | PASS | PASS |
+| `UDPRouteInvalidCrossNamespaceBackendRef` | PASS | PASS |
+| `UDPRouteInvalidBackendRefNonexistent` | PASS | PASS |
+| `UDPRouteParentRefAttachAllListeners` | FAIL | FAIL |
+| `UDPRouteParentRefPortAndSectionName` | FAIL | FAIL |
+| `UDPRouteWeightedRouting` | PASS | PASS |
+| `UDPRouteNotAllowedByListeners` | SKIP | SKIP |
+
+The upstream weighted test opens a new UDP socket per datagram. Its successful readiness response marks the start of the weighted case in each capture. Each row counts all 500 distribution replies that followed it, including replies from any Service. The 20 earlier packets from the competing-route case carry the same distribution payload and are recorded separately. The stock Amphora template configured Keepalived 2.3.4 and kernel IPVS on Fedora 45. Each backend identified its Kubernetes Service and pod in its reply.
+
+| Channel | `udp-backend-v1` (70) | `udp-backend-v2` (30) | `udp-backend-v3` (0) |
+|---|---:|---:|---:|
+| Standard | 351 | 149 | 0 |
+| Experimental | 351 | 149 | 0 |
+
+The additional grant test reached both Services before deleting their cross-namespace ReferenceGrant. On each cluster, the route reported `ResolvedRefs=False/RefNotPermitted`. All three fresh probes sent after withdrawal got no reply and none appeared on the backend-facing interface. After the denied Service's weight changed to zero, the permitted Service returned all 20 distinct payloads on the same VIP. The route kept its reference condition. The four packet captures reported zero kernel drops. After the final fixtures were removed, the guest IPVS table contained zero virtual services. Both disposable clusters, their Podman network and the VM overlay were removed. In each focused run, Octavia logged matching create and delete IDs for nine load balancers, nine listeners, four pools, five members and four health monitors. Selective packet loss for an invalid positive share remains open. [Local grant test](../../../../internal/controller/kind_udp_grant_test.go)
+
+Two separate provider checks locate the multi-listener gap. The public Octavia 19.0.0 API accepted three distinct UDP listeners on one VIP. A `PUT` also made a single pool the default for two listeners (HTTP 200). Clearing the middle listener's default after restoring its own pool left the other two rendered configurations byte-identical. The test verified all ten synthetic resources were gone after cleanup. In a separate kernel smoke test, the stock renderer consumed synthetic model objects. Two ports on one VIP reached the same real echo pod via NodePort and PodIP respectively. Withdrawing one port preserved replies on the other. The Kubernetes controller in this release still rejects both upstream three-listener Gateways.
+
+The evidence bundle includes both case lists, packet counts, four synthetic packet captures, the three-port API probe and output, the two-port kernel log, tool and echo-image versions, common-setup failures for both controller revisions and file checksums. Bundle SHA-256 is `f864a84d7a432e2479df48884033c8f9f4b8f5507e74b92b7886ce76b42bdf1c`. [Download the report and captures](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-c49134b1183bbc6b3e4cf01c720bef2ae154d70e/hibiscus-udp-weighted-qualification-c49134b1183b.tar.gz)
+
 ## Baseline on the single-Service controller
 
 At controller revision `3819e699441970e51d7e546582dd53a827e6a320`, five upstream UDP cases passed on Standard. The simple route returned its expected Service and namespace. The cross-namespace Service answered with a grant, and deleting it produced `ResolvedRefs=False/RefNotPermitted`. Both competing routes were accepted, the listener counted two attached routes, and all 20 probes identified the older route's backend. The denied and missing backend reference cases also passed. [Upstream grant case](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/udproute-reference-grant.go) · [Competing routes case](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/udproute-multiple-routes-attachment.go)
