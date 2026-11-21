@@ -35,6 +35,8 @@ The tagged schema exposes four L7 actions (`REJECT`, `REDIRECT_TO_URL`, `REDIREC
 
 ## Minimal traffic cases
 
+A public Octavia update changed the certificate on a single terminating HTTPS listener. Barbican held both operator-provisioned PKCS#12 revisions. Four fresh connections per revision verified the leaf, original Host and backend response. Kubernetes Secret ownership, shared listener reconciliation and live Amphora reload require separate qualification. [Barbican rotation and HAProxy traffic](stock-https-rotation.md)
+
 ### Stock API checks for HTTP headers and responses
 
 On the public Octavia 19.0.0 WSGI API, an HTTP listener accepted `X-Forwarded-Port` and rejected `X-Tenant` with HTTP 400. The original forwarding header was still present on readback. A forwarding L7 policy rejected the same `insert_headers` field as an unknown attribute and kept its original pool. The redirect API accepted 301, and returned 400 for both 404 and 500. Its status field only selects the HTTP code for a redirect. The separate HAProxy traffic run observed 503 on a route miss. Together these observations document the gap behind the proposed per-route header and fixed-response fields. [Local API probe](stock-http-api.py) · [HTTP traffic record](../cloud-contract.md#http-traffic-from-the-adapters-own-writes)
@@ -89,6 +91,8 @@ At request time the provider would select the first matching policy using the or
 Acceptance for a prototype would require a real Octavia API request and readback, a healthy two-path echo test, cold worker restart and Amphora failover with the same observations. A provider that lacks the operation must return an explicit unsupported result. Public API types and validation, database migration, octavia-lib provider model, Amphora rendering and Gophercloud support would all need changes. A separate new action would be needed for default or weighted fixed responses. The local pilot already measures the stock route miss as `503`.
 
 ### First opt-in mesh experiment
+
+In the plain kind control, calls to the original Service DNS continued to reach healthy backends. The Service-parent routes left the request header untouched. Redirect and 70% weighting assertions failed on each channel, and neither run recorded a Gateway graph write. [Upstream mesh Core results on both channels](stock-mesh.md)
 
 The candidate for a separate experiment is Istio 1.31.0 ambient with a Service waypoint in the workload cluster. Pin the existing [studied revision](../reference-implementations.md) and the component image digests before any deployment. The operator would install istiod, the Istio CNI node agent, ztunnel and the waypoint. They would enroll two disposable client namespaces in ambient mode and assign only the test destination Service to the waypoint. That changes the path of traffic to the normal Service address. The external Amphora GatewayClass would retain its own controller name. [Istio waypoint configuration](https://istio.io/latest/docs/ambient/usage/waypoint/) · [Pinned waypoint tests](https://github.com/istio/istio/blob/eed52ebb66ade45214088877b0f82855d954060d/tests/integration/ambient/waypoint_test.go)
 

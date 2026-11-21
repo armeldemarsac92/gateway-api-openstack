@@ -12,6 +12,8 @@ Both channel runs are **UNRUN**. A designated disposable Hibiscus environment an
 | MESH-HTTP | UNRUN | UNRUN |
 | MESH-GRPC | UNRUN | UNRUN |
 
+Both mesh Core profiles also ran on ordinary local Kubernetes Services without an enrolled dataplane. The upstream reports record the assertions that failed and the traffic that reached the echo pods. [Local mesh reports](provider/stock-mesh.md)
+
 ## Prepare the two targets
 
 Designate separate disposable control planes and cloud scopes for Standard and Experimental. Install the respective v1.7.0 release bundles before qualification. Set the controller to the same channel as the bundle. Provide the selected GatewayClass and an enrolled mesh dataplane for the Service-parent cases. The upstream Gateway fixtures use multiple listeners, HTTPS and Kubernetes Service backends. Allow the runner to reach the private VIPs, the provider to reach backend endpoints, and enrolled clients to reach the mesh Services. Check the cloud resource budget and provide real usable and unusable addresses for the static address tests. See the [release bundles](https://github.com/kubernetes-sigs/gateway-api/releases/tag/v1.7.0) and [controller installation guide](../../getting-started.md).

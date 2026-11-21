@@ -32,7 +32,7 @@ The two gRPC batches each landed on a single backend. The HTTP batches reached b
 
 The adapter recorded zero Gateway graph operations in each run. The current HTTPRoute reconciler resolves Gateway parents and skips Service parents. Mesh support would require a controller to own Service-parent status and a data plane to enforce the rules on traffic to that Service. [HTTPRoute parent selection](../../../../internal/controller/httproute/httproute_parent.go#L54)
 
-The evidence archive `hibiscus-stock-mesh-000d9dd6a3e6.tar.gz` contains both upstream ConformanceReport YAML files, per-case results, aggregate traffic observations and file checksums. Archive SHA-256 is `f14453abf5fae0ffb35cccacb5862445a40ccfef99d9afd976543ab35b18aa68`.
+The evidence archive `hibiscus-stock-mesh-000d9dd6a3e6.tar.gz` contains both upstream ConformanceReport YAML files, per-case results, aggregate traffic observations and file checksums. Archive SHA-256 is `f14453abf5fae0ffb35cccacb5862445a40ccfef99d9afd976543ab35b18aa68`. [Download both profile reports and traffic observations](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-0b512ec28ae055d6e1eb1460dc2a43e7b87c441f/hibiscus-stock-mesh-000d9dd6a3e6.tar.gz)
 
 ## Reproduce
 
