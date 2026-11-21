@@ -290,7 +290,7 @@ func TestSNISuffixGrantLifecyclePreservesNarrowerClaim(t *testing.T) {
 			{Identity: controller.RouteIdentity(cfg, gateway, a), Result: cloud.RouteReadyResult(cloud.RouteState{})},
 			{Identity: controller.RouteIdentity(cfg, gateway, b), Result: cloud.RouteReadyResult(cloud.RouteState{})},
 		}}
-		if err := r.reportSNIRoutes(t.Context(), gateway, observed, result, nil); err != nil {
+		if err := r.reportSNIRoutes(t.Context(), snapshot, observed, result, nil); err != nil {
 			t.Fatal(err)
 		}
 		var current gatewayv1.TLSRoute
