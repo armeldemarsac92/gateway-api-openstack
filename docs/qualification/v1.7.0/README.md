@@ -12,6 +12,8 @@ The four upstream HTTPS certificate grant cases passed on both channels in opera
 
 Four original TLS listener-status cases failed their targeted assertions on the preceding revision on both channels. With the GatewayClass's advertised features, the runner skipped the same four cases. [TLS listener-status receipt](provider/tls-listener-status-results.json) · [Per-case matrix](matrix/features-and-cases.md#complete-registered-test-inventory)
 
+The original path-order and exact-path cases exercised six requests each against stock Octavia. The exact-path case recorded four unmatched responses of 503 where Gateway API requires 404. [Requests, backends and qualification on both channels](provider/http-path-rules.md)
+
 ## Revisions and installation
 
 | Component | Development input | Deployed version |
