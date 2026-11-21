@@ -71,6 +71,7 @@ type ProviderConfig struct {
 	RequestHeaderModifier bool
 	BackendH2C            bool
 	TLSSNIPassthrough     bool
+	TLSSNISuffix          bool
 	OperationTimeout      time.Duration
 	PollInterval          time.Duration
 }
@@ -82,6 +83,7 @@ type Provider struct {
 	requestHeaderModifier bool
 	backendH2C            bool
 	tlsSNIPassthrough     bool
+	tlsSNISuffix          bool
 	projectID             string
 	region                string
 	neutron               *neutron.Service
@@ -106,6 +108,7 @@ func NewProvider(clients ServiceClients, cfg ProviderConfig) *Provider {
 		requestHeaderModifier: cfg.RequestHeaderModifier,
 		backendH2C:            cfg.BackendH2C,
 		tlsSNIPassthrough:     cfg.TLSSNIPassthrough,
+		tlsSNISuffix:          cfg.TLSSNISuffix,
 		projectID:             clients.ProjectID,
 		region:                clients.Region,
 		neutron:               neutron.NewService(clients.Network),

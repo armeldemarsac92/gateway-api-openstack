@@ -83,6 +83,176 @@ func TestSNIPassthroughListenerRequiresDiscoveryAndUsesNativeTCP(t *testing.T) {
 	}
 }
 
+func TestSNISuffixRequiresBothCapabilitiesAndWritesWildcardValue(t *testing.T) {
+	for _, capabilities := range [][]string{
+		{"tls_sni_passthrough_v1"}, {"tls_sni_suffix_v1"}, {"tls_sni_passthrough_v1", "tls_sni_suffix_v1"},
+	} {
+		var discovered, wrote bool
+		client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodGet && r.URL.Path == "/lbaas/providers/amphora/gateway_capabilities":
+				discovered = true
+				safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": capabilities})
+			case r.Method == http.MethodPost && r.URL.Path == "/lbaas/l7policies/policy/rules":
+				wrote = true
+				var body struct {
+					Rule struct {
+						Type, Value string
+						CompareType string `json:"compare_type"`
+					}
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Rule.Type != "TLS_SNI" ||
+					body.Rule.CompareType != "ENDS_WITH" || body.Rule.Value != "*.example.test" {
+					t.Errorf("invalid Octavia SNI suffix request: %#v, %v", body, err)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(`{"rule":{"id":"rule"}}`))
+			default:
+				t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
+		cfg := ProviderConfig{TLSSNIPassthrough: true}
+		identity := safetyTestIdentity(t)
+		spec := completeGraphSpec(identity)
+		spec.Routes = nil
+		spec.Gateway.Spec.ListenerProtocol = cloud.ListenerProtocolTLSSNI
+		spec.Gateway.TLSSNIRoutes = []cloud.TLSSNIRoute{{
+			Identity: identity.Value(), Hostname: "*.example.test", ServiceUID: "service-a",
+			Members: []cloud.Member{{Address: "192.0.2.10", Port: 443}},
+		}}
+		clients := ServiceClients{LoadBalancer: client, ProjectID: "project-a", Region: "region-a"}
+		if _, err := NewProvider(clients, cfg).buildDesiredGatewayGraph(spec); err == nil {
+			t.Fatal("accepted a wildcard with the suffix feature off")
+		}
+		cfg.TLSSNISuffix = true
+		provider := NewProvider(clients, cfg)
+		desired, err := provider.buildDesiredGatewayGraph(spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		step := graphMutation{kind: graphSNIMutation, sni: sniMutation{kind: sniCreateRule, parentID: "policy", target: desired.sni[0]}}
+		actual := observedGatewayGraph{}
+		step, err = provider.prepareGraphMutation(t.Context(), desired, actual, step)
+		if err == nil {
+			err = provider.executeGraphMutation(t.Context(), desired, actual, step)
+		}
+		wantWrite := len(capabilities) == 2
+		if !discovered || wrote != wantWrite || (err == nil) != wantWrite {
+			t.Fatalf("caps=%v discovered=%t wrote=%t err=%v", capabilities, discovered, wrote, err)
+		}
+	}
+}
+
+func TestSNIGraphOrdersExactAndNestedSuffixTargets(t *testing.T) {
+	identity := safetyTestIdentity(t).Value()
+	var routes []cloud.TLSSNIRoute
+	for _, hostname := range []string{"*.example.test", "vip.shop.example.test", "*.shop.example.test"} {
+		routes = append(routes, cloud.TLSSNIRoute{Identity: identity, Hostname: hostname, ServiceUID: "service-a", Members: []cloud.Member{{Address: "192.0.2.10", Port: 443}}})
+	}
+	targets, err := buildSNITargets(identity, routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"vip.shop.example.test", "*.shop.example.test", "*.example.test"}
+	for i, target := range targets {
+		if target.route.Hostname != want[i] {
+			t.Fatalf("target %d = %s, want %s", i, target.route.Hostname, want[i])
+		}
+	}
+}
+
+func TestSNISuffixStagesReplacementBeforeRetiringProtectedSelector(t *testing.T) {
+	identity := safetyTestIdentity(t)
+	narrow := cloud.TLSSNIRoute{Identity: identity.Value(), Hostname: "*.shop.example.test",
+		ServiceUID: "narrow-service", Members: []cloud.Member{{Address: "192.0.2.10", Port: 443}}}
+	broad := cloud.TLSSNIRoute{Identity: identity.Value(), Hostname: "*.example.test",
+		ServiceUID: "broad-service", Members: []cloud.Member{{Address: "192.0.2.11", Port: 443}}}
+	broad.Identity.RouteName, broad.Identity.RouteUID = "broad", "broad-uid"
+	exact := broad
+	exact.Hostname, exact.Identity.RouteName, exact.Identity.RouteUID = "vip.shop.example.test", "exact", "exact-uid"
+	deny := cloud.TLSSNIRoute{Identity: narrow.Identity, Hostname: narrow.Hostname, Deny: true}
+	compile := func(narrowTarget cloud.TLSSNIRoute) []desiredSNIFragment {
+		t.Helper()
+		targets, err := buildSNITargets(identity.Value(), []cloud.TLSSNIRoute{narrowTarget, broad, exact})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return targets
+	}
+	serving, restricted := compile(narrow), compile(deny)
+	desired := desiredGatewayGraph{spec: completeGraphSpec(identity), sni: restricted}
+	desired.spec.Gateway.Spec.ExternalNetworkID = ""
+	actual := observedGatewayGraph{loadBalancer: safetyObservedLoadBalancer(),
+		listener: &listeners.Listener{ID: "listener", ProvisioningStatus: "ACTIVE", AdminStateUp: true},
+		sni: map[sniFragmentKey]*observedSNIFragment{
+			serving[0].key: activeSNIFragment(serving[0], "exact"),
+			serving[1].key: activeSNIFragment(serving[1], "narrow"),
+			serving[2].key: activeSNIFragment(serving[2], "broad"),
+		},
+	}
+	actual.loadBalancer.ProvisioningStatus, actual.loadBalancer.AdminStateUp = "ACTIVE", true
+	provider := &Provider{}
+	next := func() graphMutation {
+		t.Helper()
+		steps, result, err := provider.buildSNIGraphPlan(desired, actual)
+		if err != nil || len(steps) != 1 {
+			t.Fatalf("expected a single graph mutation, got %#v, %v", steps, err)
+		}
+		for _, route := range result.Routes {
+			if route.Identity == narrow.Identity {
+				if len(desired.sni) > 1 && desired.sni[1].route.Deny {
+					t.Fatal("an empty denial pool may not produce forwarding evidence")
+				}
+				continue
+			}
+			if route.Result.Outcome.State != cloud.OutcomeReady {
+				t.Fatalf("authorized sibling must retain forwarding evidence: %#v", route)
+			}
+		}
+		return steps[0]
+	}
+	assertMutation := func(kind sniMutationKind, target desiredSNIFragment) {
+		t.Helper()
+		if got := next(); got.kind != graphSNIMutation || got.sni.kind != kind || got.sni.target.key != target.key {
+			t.Fatalf("expected SNI mutation %d for %s, got %#v", kind, target.route.Hostname, got)
+		}
+	}
+	assertDisable := func(id string) {
+		t.Helper()
+		if got := next(); got.kind != graphDeleteChild || got.deletion.resource != gatewayDisableL7Policy || got.deletion.resourceID != "policy-"+id {
+			t.Fatalf("expected only policy %s to close, got %#v", id, got)
+		}
+	}
+	newDeny := activeSNIFragment(restricted[1], "deny")
+	assertMutation(sniCreatePool, restricted[1])
+	actual.sni[restricted[1].key] = &observedSNIFragment{pool: newDeny.pool}
+	assertMutation(sniCreatePolicy, restricted[1])
+	newDeny.policy.AdminStateUp = false
+	actual.sni[restricted[1].key].policy = newDeny.policy
+	assertMutation(sniCreateRule, restricted[1])
+	actual.sni[restricted[1].key].rule = newDeny.rule
+	assertMutation(sniEnablePolicy, restricted[1])
+	newDeny.policy.AdminStateUp = true
+	assertDisable("narrow")
+
+	delete(actual.sni, serving[1].key)
+	desired.sni = serving
+	assertMutation(sniCreatePool, serving[1])
+	newServing := activeSNIFragment(serving[1], "replacement")
+	newServing.policy.AdminStateUp = false
+	actual.sni[serving[1].key] = newServing
+	assertMutation(sniEnablePolicy, serving[1])
+	newServing.policy.AdminStateUp = true
+	assertDisable("deny")
+
+	// Opting back into exact-only operation withdraws the old broader rule
+	// while the observed narrow selector still covers its names.
+	desired.sni = serving[:1]
+	assertDisable("broad")
+}
+
 func TestSNIGraphWithdrawsObsoletePolicyWithoutUnprogrammingSibling(t *testing.T) {
 	gateway := safetyTestIdentity(t)
 	routeA, routeB := gateway.Value(), gateway.Value()
@@ -133,12 +303,19 @@ func TestSNIGraphWithdrawsObsoletePolicyWithoutUnprogrammingSibling(t *testing.T
 }
 
 func activeSNIFragment(route desiredSNIFragment, id string) *observedSNIFragment {
-	return &observedSNIFragment{
-		pool:    &pools.Pool{ID: "pool-" + id, ProvisioningStatus: "ACTIVE", AdminStateUp: true, LBMethod: "ROUND_ROBIN"},
-		members: []pools.Member{{ID: "member-" + id, Address: route.route.Members[0].Address, ProtocolPort: 443, Weight: 1, AdminStateUp: true, ProvisioningStatus: "ACTIVE"}},
-		policy:  &l7policies.L7Policy{ID: "policy-" + id, ProvisioningStatus: "ACTIVE", AdminStateUp: true},
-		rule:    &l7policies.Rule{ID: "rule-" + id, Value: route.route.Hostname, RuleType: "TLS_SNI", CompareType: "EQUAL_TO", ProvisioningStatus: "ACTIVE", AdminStateUp: true},
+	fragment := &observedSNIFragment{
+		pool:   &pools.Pool{ID: "pool-" + id, ProvisioningStatus: "ACTIVE", AdminStateUp: true, LBMethod: "ROUND_ROBIN"},
+		policy: &l7policies.L7Policy{ID: "policy-" + id, ProvisioningStatus: "ACTIVE", AdminStateUp: true},
+		rule: &l7policies.Rule{ID: "rule-" + id, Value: route.route.Hostname, RuleType: "TLS_SNI",
+			CompareType: sniCompareType(route.route.Hostname), ProvisioningStatus: "ACTIVE", AdminStateUp: true},
 	}
+	for _, member := range route.route.Members {
+		fragment.members = append(fragment.members, pools.Member{
+			ID: "member-" + id, Address: member.Address, ProtocolPort: member.Port,
+			Weight: 1, AdminStateUp: true, ProvisioningStatus: "ACTIVE",
+		})
+	}
+	return fragment
 }
 
 func TestSNIGraphProgramsAllHostnamesBeforeReportingRouteReady(t *testing.T) {
@@ -359,8 +536,10 @@ func TestSNIPolicyWithdrawalDuringNeutronFailureAndDisabledCleanup(t *testing.T)
 		}
 		spec.Gateway.TLSSNIRoutes = nil
 	})
-	t.Run("disabled controller still cleans verified TLS graph", func(t *testing.T) {
+	t.Run("disabled controller still cleans verified suffix rules", func(t *testing.T) {
 		writes, neutronFailed = nil, false
+		rule["value"], rule["compare_type"] = "*.example.test", "ENDS_WITH"
+		t.Cleanup(func() { rule["value"], rule["compare_type"] = "a.example.test", "EQUAL_TO" })
 		provider := newTestProvider(t, clients, ProviderConfig{})
 		if _, err := provider.ReconcileGatewayGraph(t.Context(), spec); err == nil || len(writes) != 0 {
 			t.Fatalf("feature off must reject Ensure: err=%v writes=%v", err, writes)

@@ -17,6 +17,7 @@ limitations under the License.
 package gateway
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"testing"
@@ -31,6 +32,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/classconfig"
@@ -102,18 +104,22 @@ func TestSNIRouteHostnameIntersection(t *testing.T) {
 	cfg.TLSSNIPassthrough = true
 	for _, tc := range []struct {
 		name     string
+		suffix   bool
 		listener *gatewayv1.Hostname
 		route    []gatewayv1.Hostname
 		want     []string
 		reason   gatewayv1.RouteConditionReason
 	}{
-		{"unconstrained listener", nil, []gatewayv1.Hostname{"z.test", "a.test", "a.test"}, []string{"a.test", "z.test"}, gatewayv1.RouteReasonAccepted},
-		{"exact listener", ptr.To(gatewayv1.Hostname("a.deep.example.test")), []gatewayv1.Hostname{"outside.test", "*.example.test"}, []string{"a.deep.example.test"}, gatewayv1.RouteReasonAccepted},
-		{"wildcard listener", ptr.To(gatewayv1.Hostname("*.example.test")), []gatewayv1.Hostname{"a.deep.example.test", "example.test", "b.example.test", "outside.test"}, []string{"a.deep.example.test", "b.example.test"}, gatewayv1.RouteReasonAccepted},
-		{"disjoint", ptr.To(gatewayv1.Hostname("*.example.test")), []gatewayv1.Hostname{"example.test", "*.outside.test"}, nil, gatewayv1.RouteReasonNoMatchingListenerHostname},
-		{"unrepresentable", ptr.To(gatewayv1.Hostname("*.example.test")), []gatewayv1.Hostname{"a.example.test", "*.deep.example.test"}, nil, gatewayv1.RouteReasonUnsupportedValue},
+		{"unconstrained listener", false, nil, []gatewayv1.Hostname{"z.test", "a.test", "a.test"}, []string{"a.test", "z.test"}, gatewayv1.RouteReasonAccepted},
+		{"exact listener", false, ptr.To(gatewayv1.Hostname("a.deep.example.test")), []gatewayv1.Hostname{"outside.test", "*.example.test"}, []string{"a.deep.example.test"}, gatewayv1.RouteReasonAccepted},
+		{"wildcard listener", false, ptr.To(gatewayv1.Hostname("*.example.test")), []gatewayv1.Hostname{"a.deep.example.test", "example.test", "b.example.test", "outside.test"}, []string{"a.deep.example.test", "b.example.test"}, gatewayv1.RouteReasonAccepted},
+		{"disjoint", false, ptr.To(gatewayv1.Hostname("*.example.test")), []gatewayv1.Hostname{"example.test", "*.outside.test"}, nil, gatewayv1.RouteReasonNoMatchingListenerHostname},
+		{"unrepresentable", false, ptr.To(gatewayv1.Hostname("*.example.test")), []gatewayv1.Hostname{"a.example.test", "*.deep.example.test"}, nil, gatewayv1.RouteReasonUnsupportedValue},
+		{"nested wildcard with suffix enabled", true, ptr.To(gatewayv1.Hostname("*.example.test")), []gatewayv1.Hostname{"*.test", "*.shop.example.test", "example.test"}, []string{"*.example.test", "*.shop.example.test"}, gatewayv1.RouteReasonAccepted},
+		{"catch-all remains unsupported", true, nil, nil, nil, gatewayv1.RouteReasonUnsupportedValue},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			cfg.TLSSNISuffix = tc.suffix
 			listener := testSNIListener()
 			listener.Hostname = tc.listener
 			gateway := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "edge", Name: "gateway", UID: "gateway-uid"}}
@@ -148,19 +154,22 @@ func TestSNIRouteHostnamePrecedence(t *testing.T) {
 	const hostname = "a.deep.example.test"
 	for _, tc := range []struct {
 		name         string
+		listenerHost gatewayv1.Hostname
 		firstHost    gatewayv1.Hostname
 		secondHost   gatewayv1.Hostname
 		firstCreated int64
 		wantWinner   string
 	}{
-		{"exact beats older wildcard", "*.deep.example.test", hostname, 1, "z"},
-		{"longer wildcard beats older wildcard", "*.example.test", "*.deep.example.test", 1, "z"},
-		{"older route beats alphabetical order", hostname, hostname, 3, "z"},
-		{"alphabetical tie", hostname, hostname, 2, "a"},
+		{"exact beats older wildcard", hostname, "*.deep.example.test", hostname, 1, "z"},
+		{"longer wildcard beats older wildcard", hostname, "*.example.test", "*.deep.example.test", 1, "z"},
+		{"listener narrows both routes to the same wildcard", "*.example.test", "*.test", "*.example.test", 1, "z"},
+		{"older route beats alphabetical order", hostname, hostname, hostname, 3, "z"},
+		{"alphabetical tie", hostname, hostname, hostname, 2, "a"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			listener := testSNIListener()
-			listener.Hostname = ptr.To(gatewayv1.Hostname(hostname))
+			listener.Hostname = &tc.listenerHost
+			cfg.TLSSNISuffix = tc.listenerHost == "*.example.test"
 			gateway := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "edge", Name: "gateway", UID: "gateway-uid"}}
 			first := testSNIRoute(gateway, "a", gateway.Namespace, tc.firstHost)
 			second := testSNIRoute(gateway, "z", gateway.Namespace, tc.secondHost)
@@ -174,8 +183,8 @@ func TestSNIRouteHostnamePrecedence(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := observed.targets(); len(got) != 1 || got[0].Hostname != hostname || got[0].Identity.RouteName != tc.wantWinner {
-				t.Fatalf("target = %#v, want %s to serve %s", got, tc.wantWinner, hostname)
+			if got := observed.targets(); len(got) != 1 || got[0].Hostname != string(tc.listenerHost) || got[0].Identity.RouteName != tc.wantWinner {
+				t.Fatalf("target = %#v, want %s to serve %s", got, tc.wantWinner, tc.listenerHost)
 			}
 			for _, entry := range observed {
 				if entry.acceptedReason != gatewayv1.RouteReasonAccepted || entry.resolvedReason != gatewayv1.RouteReasonResolvedRefs {
@@ -188,7 +197,7 @@ func TestSNIRouteHostnamePrecedence(t *testing.T) {
 			if counts, err := r.attachedRouteCounts(t.Context(), gateway, []*gatewayv1.Listener{&listener}); err != nil || counts[listener.Name] != 2 {
 				t.Fatalf("attached routes = %v, want 2: %v", counts, err)
 			}
-			listener.Hostname = ptr.To(gatewayv1.Hostname("changed.other.test"))
+			listener.Hostname = ptr.To(gatewayv1.Hostname("changed.other.invalid"))
 			if counts, err := r.attachedRouteCounts(t.Context(), gateway, []*gatewayv1.Listener{&listener}); err != nil || counts[listener.Name] != 0 {
 				t.Fatalf("attached routes after listener edit = %v, want 0: %v", counts, err)
 			}
@@ -236,6 +245,83 @@ func TestSNIRouteGrantWithdrawalLeavesOtherHostname(t *testing.T) {
 	if observed[0].resolvedReason != gatewayv1.RouteReasonRefNotPermitted {
 		t.Fatalf("expected RefNotPermitted, got %#v", observed[0])
 	}
+}
+
+func TestSNISuffixGrantLifecyclePreservesNarrowerClaim(t *testing.T) {
+	cfg := testConfig()
+	cfg.TLSSNIPassthrough, cfg.TLSSNISuffix = true, true
+	listener := testSNIListener()
+	gateway := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "edge", Name: "gateway", UID: "gateway-uid"}}
+	snapshot := &gatewayMutationSnapshot{gateway: gateway, listener: &listener}
+	a := testSNIRoute(gateway, "a", "backend-a", "*.shop.example.test")
+	b := testSNIRoute(gateway, "b", "edge", "*.example.test", "vip.shop.example.test")
+	svcA, endpointsA := testSNIBackend("backend-a", "service-a", "192.0.2.101")
+	svcB, endpointsB := testSNIBackend("edge", "service-b", "192.0.2.102")
+	grant := &gatewayv1.ReferenceGrant{
+		ObjectMeta: metav1.ObjectMeta{Name: "grant-a", Namespace: "backend-a"},
+		Spec: gatewayv1.ReferenceGrantSpec{
+			From: []gatewayv1.ReferenceGrantFrom{{Group: gatewayv1.GroupName, Kind: tlsRouteKind, Namespace: "edge"}},
+			To:   []gatewayv1.ReferenceGrantTo{{Kind: "Service", Name: ptr.To(gatewayv1.ObjectName(svcA.Name))}},
+		},
+	}
+	forbiddenRead := false
+	kube := fake.NewClientBuilder().WithScheme(testScheme(t)).WithStatusSubresource(a, b).
+		WithObjects(a, b, svcA, svcB, endpointsA, endpointsB, grant).
+		WithInterceptorFuncs(interceptor.Funcs{Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if _, service := obj.(*corev1.Service); forbiddenRead && service && key == client.ObjectKeyFromObject(svcA) {
+				t.Error("read the narrow route's Service without a ReferenceGrant")
+			}
+			return c.Get(ctx, key, obj, opts...)
+		}}).Build()
+	r := &Reconciler{Client: kube, APIReader: kube, Config: cfg}
+	check := func(deny, resolved bool, reason string) {
+		t.Helper()
+		observed, err := r.observeSNIRoutes(t.Context(), snapshot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		targets := observed.targets()
+		if len(targets) != 3 || targets[0].Hostname != "*.shop.example.test" || targets[0].Deny != deny ||
+			(deny && (targets[0].ServiceUID != "" || len(targets[0].Members) != 0)) ||
+			targets[1].Hostname != "*.example.test" || targets[1].Deny || targets[2].Hostname != "vip.shop.example.test" || targets[2].Deny {
+			t.Fatalf("targets = %#v", targets)
+		}
+		result := cloud.GatewayGraphResult{Routes: []cloud.RouteGraphResult{
+			{Identity: controller.RouteIdentity(cfg, gateway, a), Result: cloud.RouteReadyResult(cloud.RouteState{})},
+			{Identity: controller.RouteIdentity(cfg, gateway, b), Result: cloud.RouteReadyResult(cloud.RouteState{})},
+		}}
+		if err := r.reportSNIRoutes(t.Context(), gateway, observed, result, nil); err != nil {
+			t.Fatal(err)
+		}
+		var current gatewayv1.TLSRoute
+		if err := kube.Get(t.Context(), client.ObjectKeyFromObject(a), &current); err != nil {
+			t.Fatal(err)
+		}
+		conditions := current.Status.Parents[0].Conditions
+		refStatus := meta.FindStatusCondition(conditions, "ResolvedRefs")
+		if !meta.IsStatusConditionTrue(conditions, "Accepted") ||
+			(refStatus.Status == metav1.ConditionTrue) != resolved || refStatus.Reason != reason ||
+			meta.IsStatusConditionTrue(conditions, cfg.Domain()+"/Programmed") == deny ||
+			(meta.FindStatusCondition(conditions, cfg.Domain()+"/ForwardingTarget") == nil) != deny {
+			t.Fatalf("narrow route conditions = %#v", conditions)
+		}
+	}
+	check(false, true, string(gatewayv1.RouteReasonResolvedRefs))
+	if err := kube.Delete(t.Context(), grant); err != nil {
+		t.Fatal(err)
+	}
+	forbiddenRead = true
+	check(true, false, string(gatewayv1.RouteReasonRefNotPermitted))
+	forbiddenRead = false
+	grant.ResourceVersion = ""
+	if err := kube.Create(t.Context(), grant); err != nil {
+		t.Fatal(err)
+	}
+	check(false, true, string(gatewayv1.RouteReasonResolvedRefs))
+	if err := kube.Delete(t.Context(), endpointsA); err != nil {
+		t.Fatal(err)
+	}
+	check(true, true, string(gatewayv1.RouteReasonResolvedRefs))
 }
 
 func TestSNIFlagOffPreservesMixedGatewayHTTP(t *testing.T) {

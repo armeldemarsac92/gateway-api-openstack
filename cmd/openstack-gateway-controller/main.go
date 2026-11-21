@@ -101,7 +101,7 @@ func run(ctx context.Context) error {
 		apiQPS             float64
 		apiBurst           int
 	)
-	var requestHeaderModifier, backendH2C, tlsSNIPassthrough bool
+	var requestHeaderModifier, backendH2C, tlsSNIPassthrough, tlsSNISuffix bool
 	zapOptions := zap.Options{Development: false}
 	zapOptions.BindFlags(flag.CommandLine)
 	flag.StringVar(&controllerName, "controller-name", envOr("GATEWAY_OPENSTACK_CONTROLLER_NAME", configv1alpha1.GroupName+"/gateway-api-openstack"), "Gateway API controllerName for this installation")
@@ -109,6 +109,7 @@ func run(ctx context.Context) error {
 	flag.BoolVar(&fixedHTTPResponses, "octavia-fixed-http-responses", false, "use the advertised Octavia fixed HTTP response capability")
 	flag.BoolVar(&weightedTargets, "octavia-weighted-http-targets", false, "use the advertised Octavia weighted HTTP target capability (requires --octavia-fixed-http-responses)")
 	flag.BoolVar(&tlsSNIPassthrough, "octavia-tls-sni-passthrough", false, "use the advertised Octavia TCP SNI passthrough capability for TLSRoutes")
+	flag.BoolVar(&tlsSNISuffix, "octavia-tls-sni-suffix", false, "use the advertised Octavia wildcard SNI capability (requires --octavia-tls-sni-passthrough)")
 	flag.BoolVar(&backendH2C, "octavia-backend-h2c", false, "use the advertised Octavia h2c backend transport capability")
 	flag.BoolVar(&requestHeaderModifier, "octavia-request-header-modifier", false, "use the advertised Octavia L7 request header operations capability")
 	flag.StringVar(&certificateMap, "tls-certificate-map", envOr("GATEWAY_OPENSTACK_TLS_CERTIFICATE_MAP", ""), "operator-managed TLS revision map for HTTPS listeners")
@@ -154,6 +155,7 @@ func run(ctx context.Context) error {
 		BackendH2C:              backendH2C,
 		OperatorHTTPS:           certificateMap != "",
 		TLSSNIPassthrough:       tlsSNIPassthrough,
+		TLSSNISuffix:            tlsSNISuffix,
 		ClusterID:               clusterID,
 		OpenStackResyncInterval: resyncInterval,
 	}
@@ -200,6 +202,7 @@ func run(ctx context.Context) error {
 		RequestHeaderModifier: requestHeaderModifier,
 		BackendH2C:            backendH2C,
 		TLSSNIPassthrough:     tlsSNIPassthrough,
+		TLSSNISuffix:          tlsSNISuffix,
 		OperationTimeout:      operationTimeout,
 		PollInterval:          pollInterval,
 	})

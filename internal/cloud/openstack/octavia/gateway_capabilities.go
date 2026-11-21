@@ -30,6 +30,7 @@ const (
 	GatewayCapabilityRequestHeaderOperations = "request_header_operations_v1"
 	GatewayCapabilityBackendH2C              = "backend_h2c_v1"
 	GatewayCapabilityTLSSNIPassthrough       = "tls_sni_passthrough_v1"
+	GatewayCapabilityTLSSNISuffix            = "tls_sni_suffix_v1"
 )
 
 // MissingGatewayCapability reports an explicit negative capability discovery.

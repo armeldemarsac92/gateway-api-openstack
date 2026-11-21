@@ -50,6 +50,8 @@ type Config struct {
 	OperatorHTTPS bool
 	// TLSSNIPassthrough enables the advertised native TCP SNI policy extension.
 	TLSSNIPassthrough bool
+	// TLSSNISuffix enables the advertised wildcard SNI extension.
+	TLSSNISuffix bool
 	// ControllerName is the exact Gateway API ownership identifier.
 	ControllerName gatewayv1.GatewayController
 	// GatewayAPIChannel selects the release CRDs accepted by this installation. Empty selects Standard.
@@ -71,6 +73,9 @@ func (c Config) XBackendEnabled() bool {
 
 // Validate rejects configuration that could make ownership ambiguous.
 func (c Config) Validate() error {
+	if c.TLSSNISuffix && !c.TLSSNIPassthrough {
+		return fmt.Errorf("--octavia-tls-sni-suffix requires --octavia-tls-sni-passthrough")
+	}
 	switch c.GatewayAPIChannel {
 	case "", features.FeatureChannelStandard, features.FeatureChannelExperimental:
 	default:
