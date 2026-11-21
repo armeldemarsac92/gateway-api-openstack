@@ -1,0 +1,11 @@
+# Same-port HTTP sections on stock Amphora
+
+A Gateway can declare multiple plain HTTP listener sections on one TCP port when every section has a distinct exact DNS hostname. The Gateway reports each section by name with its own listener conditions and attached Route count. Octavia uses one HTTP listener with no default pool. Each HTTPRoute has route-owned policies and a pool, and every policy branch includes the exact hostname selected by the section. Requests for an unconfigured hostname have no forwarding policy.
+
+An HTTPRoute still needs exactly one managed Gateway parentRef. Its section name and port, when set, must select the same section. The section's namespace policy and the Route hostname intersection must authorize the attachment. A parentRef that omits the section name can attach when these checks leave exactly one eligible section. An ambiguous attachment is rejected without creating a forwarding policy. Foreign controller parent status is preserved by the existing status writer.
+
+Adding or removing an exact-host section on the bound port retains the Gateway and route ownership bindings. Hostname edits use the existing disable, update, and enable order for Octavia policy changes. A stale attached fragment retains its cleanup authority until the Route reconciler stores its detach checkpoint. The Gateway waits for provider confirmation before marking the new generation programmed. During Gateway API version skew, an unsectioned route whose hostname might have been derived from another section is withdrawn unless its declared hostname proves the old policy still fits.
+
+The shared-port profile requires exact listener hostnames. It rejects wildcard and hostname-free sections, duplicate hostnames, mixed protocols, and multiple HTTP ports. The single-listener HTTP profile continues to support its existing hostname matching shapes.
+
+Local controller tests exercise the one-to-two-to-one transition, hostname edits, host-specific backend selection, rejected attachments, and bundle skew. Local provider tests check the exact hostname predicates and the readiness hold for a stale policy. These tests use simulated provider responses. Record stock Octavia requests, data-plane probes, and unmodified upstream case outcomes separately.

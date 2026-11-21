@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net/netip"
 	"slices"
+	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -102,19 +103,21 @@ func SupportedListeners(gateway *gatewayv1.Gateway) ([]*gatewayv1.Listener, erro
 	case len(gateway.Spec.Listeners) == 1 && isL4Listener(gateway.Spec.Listeners[0].Protocol):
 		listeners = append(listeners, &gateway.Spec.Listeners[0])
 	default:
-		listener, err := HTTPListener(gateway)
+		http, err := HTTPListeners(gateway)
 		if err != nil {
 			return nil, err
 		}
-		if listener.TLS != nil {
-			return nil, fmt.Errorf("only a plain HTTP listener is supported")
-		}
-		if listener.Hostname != nil {
-			if err := amphora.ValidateHostname(string(*listener.Hostname)); err != nil {
-				return nil, fmt.Errorf("invalid listener hostname: %w", err)
+		listeners = http
+		for _, listener := range listeners {
+			if listener.TLS != nil {
+				return nil, fmt.Errorf("only plain HTTP listeners are supported")
+			}
+			if listener.Hostname != nil {
+				if err := amphora.ValidateHostname(string(*listener.Hostname)); err != nil {
+					return nil, fmt.Errorf("invalid listener hostname: %w", err)
+				}
 			}
 		}
-		listeners = append(listeners, listener)
 	}
 	for _, listener := range listeners {
 		if isL4Listener(listener.Protocol) {
@@ -247,26 +250,48 @@ func validateAddresses(addresses []gatewayv1.GatewaySpecAddress) *gatewayValidat
 	return nil
 }
 
-// HTTPListener selects the sole HTTP listener when each listener has its own
-// port. Validate checks whether the selected listener can be programmed.
-func HTTPListener(gateway *gatewayv1.Gateway) (*gatewayv1.Listener, error) {
-	var http *gatewayv1.Listener
-	ports := make(map[gatewayv1.PortNumber]struct{}, len(gateway.Spec.Listeners))
+// HTTPListeners selects the HTTP sections of the stock profile. A single
+// section can coexist with rejected protocols on other ports. Multiple HTTP
+// sections require one port and pairwise distinct, encodable exact hostnames.
+func HTTPListeners(gateway *gatewayv1.Gateway) ([]*gatewayv1.Listener, error) {
+	var http []*gatewayv1.Listener
+	ports := make(map[gatewayv1.PortNumber]bool, len(gateway.Spec.Listeners))
+	duplicatePort := false
 	for i := range gateway.Spec.Listeners {
 		listener := &gateway.Spec.Listeners[i]
-		if _, exists := ports[listener.Port]; exists {
-			return nil, fmt.Errorf("listeners sharing a port are not supported")
-		}
-		ports[listener.Port] = struct{}{}
+		duplicatePort = duplicatePort || ports[listener.Port]
+		ports[listener.Port] = true
 		if listener.Protocol == gatewayv1.HTTPProtocolType {
-			if http != nil {
-				return nil, fmt.Errorf("only one HTTP listener is supported")
-			}
-			http = listener
+			http = append(http, listener)
 		}
 	}
-	if http == nil {
+	switch len(http) {
+	case 0:
 		return nil, fmt.Errorf("a plain HTTP listener or same-protocol TCP or UDP listeners on distinct ports are required")
+	case 1:
+		if duplicatePort {
+			return nil, fmt.Errorf("listeners sharing a port are not supported")
+		}
+		return http, nil
+	}
+	if len(http) != len(gateway.Spec.Listeners) || len(ports) != 1 {
+		return nil, fmt.Errorf("multiple HTTP sections require a Gateway with only plain HTTP listeners sharing one port")
+	}
+	hostnames := make(map[gatewayv1.Hostname]bool, len(http))
+	names := make(map[gatewayv1.SectionName]bool, len(http))
+	for _, listener := range http {
+		if listener.TLS != nil || listener.Hostname == nil || strings.HasPrefix(string(*listener.Hostname), "*.") ||
+			hostnames[*listener.Hostname] || names[listener.Name] {
+			return nil, fmt.Errorf("same-port HTTP sections require plain HTTP with distinct names and exact hostnames")
+		}
+		if listener.Port < 1 || listener.Port > 65535 {
+			return nil, fmt.Errorf("listener port must be between 1 and 65535")
+		}
+		if _, err := amphora.HostnameRuleValue(string(*listener.Hostname)); err != nil {
+			return nil, fmt.Errorf("unsupported shared HTTP listener hostname: %w", err)
+		}
+		hostnames[*listener.Hostname] = true
+		names[listener.Name] = true
 	}
 	return http, nil
 }

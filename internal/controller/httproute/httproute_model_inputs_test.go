@@ -74,7 +74,7 @@ func TestRouteGraphSharesBackendObservationAcrossCandidates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	models, err := collectRouteModelInputs(t.Context(), f.reader, f.gateway, routes)
+	models, err := collectRouteModelInputs(t.Context(), f.reader, f.gateway, routes, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

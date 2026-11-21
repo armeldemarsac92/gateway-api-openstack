@@ -70,13 +70,18 @@ func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual obs
 	policyPending := false
 	for index, observed := range actual.routes {
 		policyPending = policyPending || slices.ContainsFunc(observed.policies, observedRoutePolicy.pending)
-		if desired.spec.Routes[index].Disposition != cloud.GraphPreserve {
+		node := desired.spec.Routes[index]
+		if node.Disposition != cloud.GraphPreserve {
 			continue
 		}
 		// A preserved fragment cannot authorize reopening its parent. If it
 		// has policies, their precedence is unknown until the next full ensure.
 		canRestoreTraffic = canRestoreTraffic && observed.pool == nil && len(observed.policies) == 0
 		holdPolicyOrder = holdPolicyOrder || len(observed.policies) != 0
+		if node.WaitForHTTPPolicyRemoval && len(observed.policies) != 0 {
+			gatewayReady = false
+			result.Gateway.Outcome = p.progressingOutcome("Waiting for outdated HTTP policy removal")
+		}
 	}
 	holdPolicyOrder = holdPolicyOrder || policyPending
 	canRestoreTraffic = canRestoreTraffic && !policyPending

@@ -229,6 +229,7 @@ func TestListenerHostnameChangesRemoveStaleRouteForwarding(t *testing.T) {
 		routeHosts          []gatewayv1.Hostname
 		initialListenerHost gatewayv1.Hostname
 		updatedListenerHost gatewayv1.Hostname
+		otherListenerHost   gatewayv1.Hostname
 		wantAccepted        metav1.ConditionStatus
 		wantReason          string
 	}{
@@ -249,6 +250,11 @@ func TestListenerHostnameChangesRemoveStaleRouteForwarding(t *testing.T) {
 			name: "listener edit admits two distinct constraints", routeHosts: []gatewayv1.Hostname{"api.example.test", "other.example.test"},
 			initialListenerHost: "api.example.test", updatedListenerHost: "*.example.test",
 			wantAccepted: metav1.ConditionFalse, wantReason: "UnsupportedValue",
+		},
+		{
+			name: "added section makes established attachment ambiguous during skew", versionSkew: true,
+			initialListenerHost: "api.example.test", updatedListenerHost: "api.example.test", otherListenerHost: "other.example.test",
+			wantAccepted: metav1.ConditionUnknown, wantReason: "Pending",
 		},
 		{
 			name: "listener edit selects a formerly excluded declaration during skew", versionSkew: true,
@@ -303,11 +309,26 @@ func TestListenerHostnameChangesRemoveStaleRouteForwarding(t *testing.T) {
 				t.Fatal(err)
 			}
 			gateway.Spec.Listeners[0].Hostname = &test.updatedListenerHost
+			if test.otherListenerHost != "" {
+				second := *gateway.Spec.Listeners[0].DeepCopy()
+				second.Name, second.Hostname = "other", &test.otherListenerHost
+				gateway.Spec.Listeners = append(gateway.Spec.Listeners, second)
+			}
 			gateway.Generation++
 			if err := kubeClient.Update(ctx, gateway); err != nil {
 				t.Fatal(err)
 			}
-			for range 4 {
+			reconcile()
+			if test.otherListenerHost != "" {
+				if err := kubeClient.Get(ctx, client.ObjectKeyFromObject(route), route); err != nil {
+					t.Fatal(err)
+				}
+				accepted := meta.FindStatusCondition(route.Status.Parents[0].Conditions, string(gatewayv1.RouteConditionAccepted))
+				if accepted == nil || accepted.Status != metav1.ConditionFalse || accepted.Reason != string(gatewayv1.RouteReasonUnsupportedValue) {
+					t.Fatalf("established route did not report its ambiguous attachment before cleanup: %#v", accepted)
+				}
+			}
+			for range 3 {
 				reconcile()
 			}
 			if len(provider.deletedRoutes) != 1 || provider.deletedRoutes[0] != provider.routeSpecs[0].Identity ||
@@ -326,6 +347,59 @@ func TestListenerHostnameChangesRemoveStaleRouteForwarding(t *testing.T) {
 				t.Fatalf("route Accepted = %+v, want %s/%s", accepted, test.wantAccepted, test.wantReason)
 			}
 		})
+	}
+}
+
+func TestSharedHTTPSectionNamespaceMoveWithdrawsForwardingDuringVersionSkew(t *testing.T) {
+	cfg := testConfig()
+	class, gateway := providerRouteParentObjects(cfg)
+	first := &gateway.Spec.Listeners[0]
+	first.Hostname = ptr.To(gatewayv1.Hostname("first.example.com"))
+	first.AllowedRoutes = &gatewayv1.AllowedRoutes{Namespaces: &gatewayv1.RouteNamespaces{
+		From: ptr.To(gatewayv1.NamespacesFromSelector), Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"section": "first"}},
+	}}
+	second := *first.DeepCopy()
+	second.Name, second.Hostname = "second", ptr.To(gatewayv1.Hostname("second.example.com"))
+	second.AllowedRoutes.Namespaces.Selector.MatchLabels["section"] = "second"
+	gateway.Spec.Listeners = append(gateway.Spec.Listeners, second)
+	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: gateway.Namespace, Labels: map[string]string{"section": "first"}}}
+	route := mapperTestHTTPRoute(gateway.Namespace, "api", gatewayv1.ParentReference{Name: "edge"}, "backend")
+	route.UID, route.Generation = "route-uid", 1
+	service, endpoints, node := validNodePortBackend(gateway.Namespace, "backend")
+	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(class, gateway, route).
+		WithObjects(class, gateway, namespace, route, service, endpoints, node).Build()
+	provider := &recordingProvider{}
+	r := newTestReconciler(Reconciler{Client: kube, APIReader: kube, Coordinator: &graph.Coordinator{}, Config: cfg}, provider)
+	reconcile := func() {
+		t.Helper()
+		if _, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(route)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reconcile()
+	reconcile()
+	if len(provider.routeSpecs) != 1 || provider.routeSpecs[0].Hostname != string(*first.Hostname) {
+		t.Fatalf("initial forwarding did not select the first section: %#v", provider.routeSpecs)
+	}
+	if err := kube.Get(t.Context(), client.ObjectKeyFromObject(class), class); err != nil {
+		t.Fatal(err)
+	}
+	class.Status = unsupportedVersionGatewayClass(cfg).Status
+	if err := kube.Status().Update(t.Context(), class); err != nil {
+		t.Fatal(err)
+	}
+	if err := kube.Get(t.Context(), client.ObjectKeyFromObject(namespace), namespace); err != nil {
+		t.Fatal(err)
+	}
+	namespace.Labels["section"] = "second"
+	if err := kube.Update(t.Context(), namespace); err != nil {
+		t.Fatal(err)
+	}
+	for range 4 {
+		reconcile()
+	}
+	if len(provider.routeSpecs) != 1 || len(provider.deletedRoutes) != 1 || provider.deletedRoutes[0] != provider.routeSpecs[0].Identity {
+		t.Fatalf("namespace move left outdated host forwarding during skew: ensures %#v, deletions %#v", provider.routeSpecs, provider.deletedRoutes)
 	}
 }
 

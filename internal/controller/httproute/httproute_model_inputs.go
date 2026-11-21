@@ -30,6 +30,7 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	gatewaycontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
@@ -51,10 +52,12 @@ type routeGraphAdmission struct {
 
 type routeGraphCandidate struct {
 	routeUID, namespaceUID types.UID
+	section                gatewayv1.SectionName
 }
 
-func (r *Reconciler) observeRouteGraphAdmission(ctx context.Context, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, routes []gatewayv1.HTTPRoute, requested *gatewayv1.HTTPRoute) (routeGraphAdmission, error) {
+func (r *Reconciler) observeRouteGraphAdmission(ctx context.Context, gateway *gatewayv1.Gateway, routes []gatewayv1.HTTPRoute, requested *gatewayv1.HTTPRoute) (routeGraphAdmission, error) {
 	identity := controller.GatewayIdentity(r.Config, gateway)
+	http, _ := gatewaycontroller.HTTPListeners(gateway)
 	admission := routeGraphAdmission{
 		bindings: r.routeGraphBindings(routes, identity),
 		eligible: make(map[types.NamespacedName]routeGraphCandidate),
@@ -73,25 +76,26 @@ func (r *Reconciler) observeRouteGraphAdmission(ctx context.Context, gateway *ga
 		if ref == nil {
 			continue
 		}
-		parent := managedRouteParent{ref: *ref, gateway: gateway, listener: listener}
-		if validateRouteParentListener(route, parent) != nil {
+		parent := managedRouteParent{ref: *ref, gateway: gateway}
+		candidates, err := routeParentCandidates(route, parent, http)
+		if err != nil {
 			continue
 		}
 		namespaces, observed := byName[route.Namespace]
-		if !observed {
-			var err error
-			namespaces, err = readRouteNamespaces(ctx, r.APIReader, listener, route.Namespace)
+		if !observed && slices.ContainsFunc(candidates, model.ObservesRouteNamespace) {
+			namespaces, err = readRouteNamespaces(ctx, r.APIReader, candidates, route.Namespace)
 			if err != nil {
 				return routeGraphAdmission{}, err
 			}
 			byName[route.Namespace] = namespaces
 			admission.namespaces = append(admission.namespaces, namespaces...)
 		}
-		if validateRouteAttachment(route, parent, namespaces) != nil {
+		selected, err := selectRouteAttachment(route, gateway, candidates, namespaces)
+		if err != nil {
 			continue
 		}
-		candidate := routeGraphCandidate{routeUID: route.UID}
-		if len(namespaces) != 0 {
+		candidate := routeGraphCandidate{routeUID: route.UID, section: selected.Name}
+		if len(namespaces) != 0 && model.ObservesRouteNamespace(selected) {
 			candidate.namespaceUID = namespaces[0].UID
 		}
 		admission.eligible[client.ObjectKeyFromObject(route)] = candidate
@@ -102,16 +106,12 @@ func (r *Reconciler) observeRouteGraphAdmission(ctx context.Context, gateway *ga
 	return admission, nil
 }
 
-func (r *Reconciler) collectGraphRouteModelInputs(ctx context.Context, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, routes []gatewayv1.HTTPRoute, requested *gatewayv1.HTTPRoute) (*routeModelInputs, error) {
-	admission, err := r.observeRouteGraphAdmission(ctx, gateway, listener, routes, requested)
+func (r *Reconciler) collectGraphRouteModelInputs(ctx context.Context, gateway *gatewayv1.Gateway, routes []gatewayv1.HTTPRoute, requested *gatewayv1.HTTPRoute) (*routeModelInputs, error) {
+	admission, err := r.observeRouteGraphAdmission(ctx, gateway, routes, requested)
 	if err != nil {
 		return nil, err
 	}
-	input, err := graph.CollectBackendInputsWithNamespaces(ctx, r.APIReader, gateway, admission.active, admission.namespaces)
-	if err != nil {
-		return nil, err
-	}
-	inputs, err := compileRouteModelInputs(input)
+	inputs, err := collectRouteModelInputs(ctx, r.APIReader, gateway, admission.active, admission.namespaces)
 	if err != nil {
 		return nil, err
 	}
@@ -119,8 +119,8 @@ func (r *Reconciler) collectGraphRouteModelInputs(ctx context.Context, gateway *
 	return inputs, nil
 }
 
-func (r *Reconciler) validateGraphRouteModel(ctx context.Context, inputs *routeModelInputs, listener *gatewayv1.Listener, routes []gatewayv1.HTTPRoute, requested *gatewayv1.HTTPRoute) error {
-	current, err := r.observeRouteGraphAdmission(ctx, inputs.input.Gateway, listener, routes, requested)
+func (r *Reconciler) validateGraphRouteModel(ctx context.Context, inputs *routeModelInputs, routes []gatewayv1.HTTPRoute, requested *gatewayv1.HTTPRoute) error {
+	current, err := r.observeRouteGraphAdmission(ctx, inputs.input.Gateway, routes, requested)
 	if err != nil {
 		return err
 	}
@@ -137,15 +137,11 @@ func (r *Reconciler) validateGraphRouteModel(ctx context.Context, inputs *routeM
 	return inputs.validateBackends(ctx, r.APIReader)
 }
 
-func collectRouteModelInputs(ctx context.Context, reader client.Reader, gateway *gatewayv1.Gateway, routes []gatewayv1.HTTPRoute) (*routeModelInputs, error) {
-	input, err := graph.CollectBackendInputs(ctx, reader, gateway, routes)
+func collectRouteModelInputs(ctx context.Context, reader client.Reader, gateway *gatewayv1.Gateway, routes []gatewayv1.HTTPRoute, namespaces []corev1.Namespace) (*routeModelInputs, error) {
+	input, err := graph.CollectBackendInputsWithNamespaces(ctx, reader, gateway, routes, namespaces)
 	if err != nil {
 		return nil, err
 	}
-	return compileRouteModelInputs(input)
-}
-
-func compileRouteModelInputs(input model.Input) (*routeModelInputs, error) {
 	logical, err := model.Compile(input)
 	if err != nil {
 		return nil, fmt.Errorf("compile Gateway backend model: %w", err)
@@ -205,14 +201,19 @@ func (inputs *routeModelInputs) routeFragment(route *gatewayv1.HTTPRoute) model.
 		}
 	}
 	logical.Listeners = slices.Clone(logical.Listeners)
+	// The compiler orders each logical section independently. The physical
+	// listener needs one distinct rank while preserving each section's order.
+	sectionOffset := 0
 	for i := range logical.Listeners {
 		listener := &logical.Listeners[i]
 		listener.Rules = nil
 		for _, rule := range inputs.logical.Listeners[i].Rules {
 			if rule.Route.UID == route.UID && rule.Route.Namespace == route.Namespace && rule.Route.Name == route.Name {
+				rule.Precedence += sectionOffset
 				listener.Rules = append(listener.Rules, rule)
 			}
 		}
+		sectionOffset += len(inputs.logical.Listeners[i].Rules)
 	}
 	return logical
 }

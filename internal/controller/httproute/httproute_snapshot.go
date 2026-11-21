@@ -72,9 +72,7 @@ type routeBindingSnapshot struct {
 type routeValidationSnapshot struct {
 	route             *gatewayv1.HTTPRoute
 	gateway           *gatewayv1.Gateway
-	gatewayClass      *gatewayv1.GatewayClass
 	parentRef         gatewayv1.ParentReference
-	listener          gatewayv1.Listener
 	binding           routeBindingSnapshot
 	desired           cloud.RouteSpec
 	backends          *routeModelInputs
@@ -121,7 +119,7 @@ func (r *Reconciler) buildRouteValidationSnapshotFromInputs(
 		return routeValidationSnapshot{}, err
 	}
 
-	parent, err := r.validateRouteSnapshotParent(&snapshot, purpose)
+	candidates, err := r.validateRouteSnapshotParent(&snapshot, purpose)
 	if err != nil || snapshot.disposition == routeValidationGatewayPending {
 		return snapshot, err
 	}
@@ -142,15 +140,16 @@ func (r *Reconciler) buildRouteValidationSnapshotFromInputs(
 		if err != nil {
 			return routeValidationSnapshot{}, err
 		}
-		inputs, err = r.collectGraphRouteModelInputs(ctx, snapshot.gateway, &snapshot.listener, routes, snapshot.route)
+		inputs, err = r.collectGraphRouteModelInputs(ctx, snapshot.gateway, routes, snapshot.route)
 		if err != nil {
 			return routeValidationSnapshot{}, err
 		}
 	}
-	if err := validateRouteAttachment(snapshot.route, parent, inputs.input.Namespaces); err != nil {
+	listener, err := selectRouteAttachment(snapshot.route, snapshot.gateway, candidates, inputs.input.Namespaces)
+	if err != nil {
 		return routeValidationSnapshot{}, routeSnapshotRejection(purpose, err)
 	}
-	desired, err := r.buildRouteModelFromInputs(ctx, r.APIReader, snapshot.route, snapshot.gateway, snapshot.listener, inputs)
+	desired, err := r.buildRouteModelFromInputs(ctx, r.APIReader, snapshot.route, snapshot.gateway, *listener, inputs)
 	if err != nil {
 		return routeValidationSnapshot{}, routeSnapshotReadError(purpose, err)
 	}
@@ -220,44 +219,38 @@ func (r *Reconciler) observeRouteValidationInputs(
 		return routeValidationSnapshot{}, errHTTPRouteChanged
 	}
 	return routeValidationSnapshot{
-		route:        &route,
-		gateway:      &gateway,
-		gatewayClass: &gatewayClass,
-		parentRef:    *parentRef,
-		disposition:  routeValidationReady,
+		route:       &route,
+		gateway:     &gateway,
+		parentRef:   *parentRef,
+		disposition: routeValidationReady,
 	}, nil
 }
 
 func (r *Reconciler) validateRouteSnapshotParent(
 	snapshot *routeValidationSnapshot,
 	purpose routeSnapshotPurpose,
-) (managedRouteParent, error) {
-	listener, validationErr := gatewaycontroller.Validate(snapshot.gateway)
+) ([]*gatewayv1.Listener, error) {
+	listeners, validationErr := gatewaycontroller.SupportedListeners(snapshot.gateway)
 	if validationErr != nil {
 		if purpose == routeSnapshotForBinding {
-			return managedRouteParent{}, errHTTPRouteChanged
+			return nil, errHTTPRouteChanged
 		}
 		snapshot.disposition = routeValidationGatewayPending
-		return managedRouteParent{}, nil
+		return nil, nil
 	}
-	snapshot.listener = *listener
 	parent := managedRouteParent{
-		ref:          snapshot.parentRef,
-		gateway:      snapshot.gateway,
-		gatewayClass: snapshot.gatewayClass,
-		listener:     &snapshot.listener,
+		ref:     snapshot.parentRef,
+		gateway: snapshot.gateway,
 	}
-	if err := validateRouteParentListener(snapshot.route, parent); err != nil {
-		if purpose == routeSnapshotForBinding {
-			return managedRouteParent{}, errHTTPRouteChanged
-		}
-		return managedRouteParent{}, err
+	candidates, err := routeParentCandidates(snapshot.route, parent, listeners)
+	if err != nil {
+		return nil, routeSnapshotRejection(purpose, err)
 	}
-	if snapshot.gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] != strconv.Itoa(int(snapshot.listener.Port)) {
-		return managedRouteParent{}, errHTTPRouteChanged
+	if snapshot.gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] != strconv.Itoa(int(candidates[0].Port)) {
+		return nil, errHTTPRouteChanged
 	}
 	snapshot.gatewayProgrammed = gatewayProgrammedForGeneration(snapshot.gateway)
-	return parent, nil
+	return candidates, nil
 }
 
 func (r *Reconciler) observeRouteBinding(snapshot *routeValidationSnapshot) error {
@@ -356,7 +349,7 @@ func (r *Reconciler) sealRouteMutationSnapshot(
 	if err != nil {
 		return err
 	}
-	return r.validateGraphRouteModel(ctx, snapshot.backends, &snapshot.listener, routes, snapshot.route)
+	return r.validateGraphRouteModel(ctx, snapshot.backends, routes, snapshot.route)
 }
 
 // sealRouteOwnershipSnapshot checks durable route and Gateway authority. The
@@ -463,7 +456,7 @@ func (r *Reconciler) buildRouteCleanupSnapshot(
 	if !route.DeletionTimestamp.IsZero() || route.Annotations[r.Config.RouteLifecycleAnnotation()] == controller.RouteDetaching {
 		return snapshot, nil
 	}
-	attachmentRejection, err := r.liveBoundRouteAttachmentRejection(ctx, &route, stored)
+	attachment, attachmentRejection, err := r.liveBoundRouteAttachment(ctx, &route, stored)
 	if err != nil {
 		return routeCleanupSnapshot{}, err
 	}
@@ -490,7 +483,7 @@ func (r *Reconciler) buildRouteCleanupSnapshot(
 	}
 	if err := r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
 		if errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) &&
-			!r.routeForwardingEstablished(&route, managedParentsFromObservations(parentObservations), stored) {
+			!r.routeForwardingEstablished(&route, managedParentsFromObservations(parentObservations), stored, attachment) {
 			snapshot.bundleUnsupported = true
 			snapshot.parents = parentObservations
 			return snapshot, nil
@@ -508,12 +501,12 @@ func (r *Reconciler) buildRouteCleanupSnapshot(
 	}
 	parent := managedParents[0]
 	if !controller.GatewayClassSupportsInstalledVersion(parent.gatewayClass) {
-		if !r.routeForwardingEstablished(&route, managedParents, stored) {
+		if !r.routeForwardingEstablished(&route, managedParents, stored, attachment) {
 			return snapshot, nil
 		}
 		return routeCleanupSnapshot{}, controller.ErrUnsupportedGatewayAPIVersion
 	}
-	if validateRouteParentListener(&route, parent) != nil || !structurallySupportedRoute(&route) {
+	if !structurallySupportedRoute(&route) {
 		return snapshot, nil
 	}
 	desired, err := r.buildRouteModelWithReader(ctx, r.APIReader, &route, parent.gateway)
@@ -587,7 +580,7 @@ func (r *Reconciler) sealRouteCleanupSnapshot(
 		}
 	}
 	if snapshot.attachmentRevoked {
-		rejection, err := r.liveBoundRouteAttachmentRejection(ctx, &route, stored)
+		_, rejection, err := r.liveBoundRouteAttachment(ctx, &route, stored)
 		if err != nil {
 			return err
 		}

@@ -338,6 +338,147 @@ func TestHTTPRouteProgramsOnlyHTTPListenerOnMixedGateway(t *testing.T) {
 	}
 }
 
+func TestExactHTTPSectionsShareOneGatewayListener(t *testing.T) {
+	cfg := testConfig()
+	class, gateway := providerRouteParentObjects(cfg)
+	first := &gateway.Spec.Listeners[0]
+	first.Hostname = ptr.To(gatewayv1.Hostname("bar.com"))
+	second := *first.DeepCopy()
+	second.Name = "foo"
+	second.Hostname = ptr.To(gatewayv1.Hostname("foo.com"))
+
+	bar := mapperTestHTTPRoute(gateway.Namespace, "bar", gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name)}, "bar-service")
+	bar.UID, bar.Generation = "bar-uid", 1
+	bar.Spec.Hostnames = []gatewayv1.Hostname{"bar.com"}
+	foo := mapperTestHTTPRoute(gateway.Namespace, "foo", gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name), SectionName: &second.Name, Port: &second.Port}, "foo-service")
+	foo.UID, foo.Generation = "foo-uid", 1
+	ambiguous := mapperTestHTTPRoute(gateway.Namespace, "ambiguous", bar.Spec.ParentRefs[0], "bar-service")
+	ambiguous.UID, ambiguous.Generation = "ambiguous-uid", 1
+	wrongPort := mapperTestHTTPRoute(gateway.Namespace, "wrong-port", gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name), SectionName: &second.Name, Port: ptr.To(gatewayv1.PortNumber(8443))}, "foo-service")
+	wrongPort.UID, wrongPort.Generation = "wrong-port-uid", 1
+	wrongNamespace := mapperTestHTTPRoute("tenant", "wrong-namespace", gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name), Namespace: ptr.To(gatewayv1.Namespace(gateway.Namespace)), SectionName: &second.Name}, "foo-service")
+	wrongNamespace.UID, wrongNamespace.Generation = "wrong-namespace-uid", 1
+	barService, barEndpoints, node := validNodePortBackend(gateway.Namespace, "bar-service")
+	fooService, fooEndpoints, _ := validNodePortBackend(gateway.Namespace, "foo-service")
+	fooService.Spec.Ports[0].NodePort = 30081
+
+	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gateway, foo, bar, ambiguous, wrongPort, wrongNamespace).
+		WithObjects(class, gateway, foo, bar, ambiguous, wrongPort, wrongNamespace, barService, barEndpoints, fooService, fooEndpoints, node).Build()
+	coordinator, provider := &graph.Coordinator{}, &recordingProvider{}
+	gr := newTestGatewayReconciler(gatewaycontroller.Reconciler{Client: kube, APIReader: kube, Coordinator: coordinator, Config: cfg}, provider)
+	r := &Reconciler{Client: kube, APIReader: kube, Writer: gr.Writer, Coordinator: coordinator, Config: cfg}
+	reconcileGateway := func() {
+		t.Helper()
+		if _, err := gr.Reconcile(t.Context(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(gateway)}); err != nil {
+			t.Fatal(err)
+		}
+		if err := kube.Get(t.Context(), client.ObjectKeyFromObject(gateway), gateway); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reconcileRoute := func(route *gatewayv1.HTTPRoute) {
+		t.Helper()
+		if _, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(route)}); err != nil {
+			t.Fatal(err)
+		}
+		if err := kube.Get(t.Context(), client.ObjectKeyFromObject(route), route); err != nil {
+			t.Fatal(err)
+		}
+	}
+	editSections := func(listeners ...gatewayv1.Listener) {
+		t.Helper()
+		gateway.Spec.Listeners = listeners
+		gateway.Generation++
+		if err := kube.Update(t.Context(), gateway); err != nil {
+			t.Fatal(err)
+		}
+		reconcileGateway()
+	}
+	checkSections := func(names ...gatewayv1.SectionName) {
+		t.Helper()
+		if !gatewayProgrammedForGeneration(gateway) || len(gateway.Status.Listeners) != len(names) {
+			t.Fatalf("Gateway generation %d did not program %v: %#v", gateway.Generation, names, gateway.Status)
+		}
+		for i, listener := range gateway.Status.Listeners {
+			programmed := meta.FindStatusCondition(listener.Conditions, string(gatewayv1.ListenerConditionProgrammed))
+			if listener.Name != names[i] || listener.AttachedRoutes != 1 || programmed == nil || programmed.Status != metav1.ConditionTrue || programmed.ObservedGeneration != gateway.Generation {
+				t.Fatalf("incorrect status for section %q: %#v", names[i], listener)
+			}
+		}
+	}
+
+	reconcileGateway()
+	reconcileRoute(bar)
+	reconcileRoute(bar)
+	reconcileGateway()
+	savedBarBinding := bar.Annotations[cfg.RouteGatewayUIDAnnotation()]
+	listenerBinding := gateway.Annotations[cfg.GatewayListenerPortAnnotation()]
+	checkSections(first.Name)
+
+	editSections(second, *first)
+	reconcileRoute(foo)
+	reconcileRoute(foo)
+	if len(foo.Status.Parents) != 1 || !meta.IsStatusConditionTrue(foo.Status.Parents[0].Conditions, string(gatewayv1.RouteConditionAccepted)) {
+		t.Fatalf("foo route did not attach: %#v", foo.Status.Parents)
+	}
+	for _, test := range []struct {
+		route  *gatewayv1.HTTPRoute
+		reason gatewayv1.RouteConditionReason
+	}{
+		{ambiguous, gatewayv1.RouteReasonUnsupportedValue},
+		{wrongPort, gatewayv1.RouteReasonNoMatchingParent},
+		{wrongNamespace, gatewayv1.RouteReasonNotAllowedByListeners},
+	} {
+		reconcileRoute(test.route)
+		if len(test.route.Status.Parents) != 1 {
+			t.Fatalf("route %q did not report its parent: %#v", test.route.Name, test.route.Status.Parents)
+		}
+		accepted := meta.FindStatusCondition(test.route.Status.Parents[0].Conditions, string(gatewayv1.RouteConditionAccepted))
+		if accepted == nil || accepted.Status != metav1.ConditionFalse || accepted.Reason != string(test.reason) || len(test.route.Finalizers) != 0 {
+			t.Fatalf("route %q did not reject attachment: %#v", test.route.Name, test.route.Status)
+		}
+	}
+	reconcileGateway()
+	checkSections(second.Name, first.Name)
+	if gateway.Annotations[cfg.GatewayListenerPortAnnotation()] != listenerBinding || bar.Annotations[cfg.RouteGatewayUIDAnnotation()] != savedBarBinding {
+		t.Fatal("adding a same-port section replaced a stored binding")
+	}
+	byHost := map[string]cloud.RouteSpec{}
+	for _, spec := range provider.routeSpecs {
+		byHost[spec.Hostname] = spec
+	}
+	if len(byHost) != 2 || byHost["bar.com"].Identity.RouteUID != string(bar.UID) || byHost["foo.com"].Identity.RouteUID != string(foo.UID) ||
+		len(byHost["bar.com"].Members) != 1 || byHost["bar.com"].Members[0].Port != 30080 ||
+		len(byHost["foo.com"].Members) != 1 || byHost["foo.com"].Members[0].Port != 30081 ||
+		byHost["bar.com"].Precedence == byHost["foo.com"].Precedence {
+		t.Fatalf("incorrect forwarding or precedence across shared sections: %#v", byHost)
+	}
+
+	second.Hostname = ptr.To(gatewayv1.Hostname("new.foo.com"))
+	preEditGraph := len(provider.routeSpecs)
+	editSections(second, *first)
+	reconcileRoute(foo)
+	var fooHosts []string
+	for _, spec := range provider.routeSpecs[preEditGraph:] {
+		if spec.Identity.RouteUID == string(foo.UID) {
+			fooHosts = append(fooHosts, spec.Hostname)
+		}
+	}
+	if len(fooHosts) == 0 || slices.ContainsFunc(fooHosts, func(host string) bool { return host != "new.foo.com" }) {
+		t.Fatalf("hostname change did not rewrite the bound route: %v", fooHosts)
+	}
+
+	editSections(*first)
+	reconcileRoute(foo)
+	reconcileRoute(foo)
+	reconcileRoute(foo)
+	reconcileGateway()
+	checkSections(first.Name)
+	if len(foo.Finalizers) != 0 || len(provider.deletedGateways) != 0 || gateway.Annotations[cfg.GatewayListenerPortAnnotation()] != listenerBinding {
+		t.Fatalf("removing the section did not release its route and retain the physical binding: finalizers %v, annotations %v", foo.Finalizers, gateway.Annotations)
+	}
+}
+
 func TestHTTPRouteParentRefSelectorsMustMatchTheSameListener(t *testing.T) {
 	cfg := testConfig()
 	class, gateway := providerRouteParentObjects(cfg)
@@ -411,7 +552,8 @@ func TestHTTPRouteResolvesBackendReferencesWhenNamespaceAttachmentIsDenied(t *te
 				listener := &gateway.Spec.Listeners[0]
 				listener.Hostname = ptr.To(gatewayv1.Hostname("gateway.example.test"))
 				route.Spec.Hostnames = []gatewayv1.Hostname{"route.example.test"}
-				status := statusForRouteBuildError(boundRouteAttachmentRejection(route, gateway, listener, nil))
+				_, rejection := boundRouteAttachment(route, gateway, []*gatewayv1.Listener{listener}, nil)
+				status := statusForRouteBuildError(rejection)
 				if status.acceptedReason != string(gatewayv1.RouteReasonNotAllowedByListeners) {
 					t.Fatalf("bound route attachment reason = %s, want NotAllowedByListeners", status.acceptedReason)
 				}

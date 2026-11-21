@@ -226,10 +226,11 @@ func (r *Reconciler) reconcileGatewayGraph(
 	if err := gatewayResult.Outcome.Validate(); err != nil {
 		return ctrl.Result{}, fmt.Errorf("validate Gateway component outcome: %w", err)
 	}
-	// A new listener hostname takes effect through its route policies. Only a
-	// complete graph proves that the current Gateway generation restricts them.
+	// Listener section changes take effect through the HTTP policies. This
+	// includes removing the last hostname restriction from a previously
+	// shared listener. Wait for the graph before certifying a new generation.
 	progress := gatewayResult.Outcome
-	if decision.listener.Hostname != nil && graphResult.Outcome.State == cloud.OutcomeProgressing && progress.State == cloud.OutcomeReady {
+	if decision.listener.Protocol == gatewayv1.HTTPProtocolType && graphResult.Outcome.State == cloud.OutcomeProgressing && progress.State == cloud.OutcomeReady {
 		programmed := meta.FindStatusCondition(scope.gateway.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed))
 		if programmed == nil || programmed.Status != metav1.ConditionTrue || programmed.ObservedGeneration != scope.gateway.Generation {
 			progress = graphResult.Outcome

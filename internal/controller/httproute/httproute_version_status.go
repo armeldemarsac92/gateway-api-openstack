@@ -63,9 +63,10 @@ func (r *Reconciler) setRouteUnsupportedVersion(
 	if err != nil {
 		return ctrl.Result{}, err
 	}
+	var attachment boundHTTPAttachment
 	var attachmentRejection error
 	if bound {
-		attachmentRejection, err = r.liveBoundRouteAttachmentRejection(ctx, &current, identity)
+		attachment, attachmentRejection, err = r.liveBoundRouteAttachment(ctx, &current, identity)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -104,7 +105,7 @@ func (r *Reconciler) setRouteUnsupportedVersion(
 			return ctrl.Result{}, err
 		}
 	}
-	detach := bound && (attachmentRejection != nil || rejection != nil || !r.routeForwardingEstablished(&current, parents, identity))
+	detach := bound && (attachmentRejection != nil || rejection != nil || !r.routeForwardingEstablished(&current, parents, identity, attachment))
 	updates := make([]parentStatusUpdate, 0, len(parents)+1)
 	for _, parent := range parents {
 		status := unsupportedGatewayAPIVersionRouteStatus()
@@ -142,21 +143,27 @@ func (r *Reconciler) setRouteUnsupportedVersion(
 
 // routeForwardingEstablished requires the current route revision and proof
 // that the established forwarding fits within the current listener hostname.
-func (r *Reconciler) routeForwardingEstablished(route *gatewayv1.HTTPRoute, parents []managedRouteParent, identity cloud.Identity) bool {
-	if len(parents) != 1 ||
+func (r *Reconciler) routeForwardingEstablished(route *gatewayv1.HTTPRoute, parents []managedRouteParent, identity cloud.Identity, attachment boundHTTPAttachment) bool {
+	listener := attachment.listener
+	if listener == nil || len(parents) != 1 || parents[0].gateway.Generation != attachment.gatewayGeneration ||
 		!controller.SameGatewayIdentity(identity, controller.RouteIdentity(r.Config, parents[0].gateway, route)) {
 		return false
 	}
 	parent := parents[0]
-	listener, err := gatewaycontroller.Validate(parent.gateway)
+	listeners, err := gatewaycontroller.SupportedListeners(parent.gateway)
 	if err != nil || parent.gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] != strconv.Itoa(int(listener.Port)) {
 		return false
 	}
-	if validateRouteParentListener(route, parent) != nil || validateRouteHostnames(listener.Hostname, route.Spec.Hostnames) != nil ||
-		r.currentRouteProgrammedCondition(route, parent.ref) == nil {
+	if r.currentRouteProgrammedCondition(route, parent.ref) == nil {
 		return false
 	}
-	if listener.Hostname == nil || gatewayProgrammedForGeneration(parent.gateway) {
+	if listener.Hostname == nil {
+		return true
+	}
+	// Namespace labels can move an unsectioned route between shared sections
+	// without a new Gateway or Route generation. In that case a current status
+	// alone cannot prove which exact Host predicate was installed.
+	if (len(listeners) == 1 || parent.ref.SectionName != nil) && gatewayProgrammedForGeneration(parent.gateway) {
 		return true
 	}
 	// The previous listener could select any declared hostname. Keep

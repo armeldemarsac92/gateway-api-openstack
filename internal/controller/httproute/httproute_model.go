@@ -119,17 +119,19 @@ func (r *Reconciler) buildRouteModelWithReader(
 	if _, err := validateRouteStructure(route); err != nil {
 		return cloud.RouteSpec{}, err
 	}
-	listener, err := gatewaycontroller.Validate(gateway)
+	http, err := gatewaycontroller.SupportedListeners(gateway)
 	if err != nil {
 		return cloud.RouteSpec{}, newRouteBuildError(routeErrorUnsupported, "%s", err)
 	}
-	if listener.Protocol != gatewayv1.HTTPProtocolType {
-		return cloud.RouteSpec{}, newRouteBuildError(routeErrorNoMatchingParent, "no HTTP listener matches this route")
-	}
-	if err := validateRouteHostnames(listener.Hostname, route.Spec.Hostnames); err != nil {
+	namespaces, err := readRouteNamespaces(ctx, reader, http, route.Namespace)
+	if err != nil {
 		return cloud.RouteSpec{}, err
 	}
-	inputs, err := collectRouteModelInputs(ctx, reader, gateway, []gatewayv1.HTTPRoute{*route})
+	listener, err := boundRouteAttachment(route, gateway, http, namespaces)
+	if err != nil {
+		return cloud.RouteSpec{}, err
+	}
+	inputs, err := collectRouteModelInputs(ctx, reader, gateway, []gatewayv1.HTTPRoute{*route}, namespaces)
 	if err != nil {
 		return cloud.RouteSpec{}, err
 	}
@@ -217,9 +219,8 @@ func supportedRouteModel(logical model.Gateway, selected gatewayv1.Listener, mod
 			listener = candidate
 			continue
 		}
-		// A rejected protocol on a separate port has no HTTP forwarding.
-		if candidate.Protocol == gatewayv1.HTTPProtocolType || candidate.Port == selected.Port || candidate.Name == selected.Name ||
-			candidate.AttachedRoutes != 0 || len(candidate.Rules) != 0 {
+		// Lower one fragment only when no other section contains this route.
+		if candidate.Name == selected.Name || len(candidate.Rules) != 0 {
 			return unsupported()
 		}
 	}
@@ -233,6 +234,19 @@ func supportedRouteModel(logical model.Gateway, selected gatewayv1.Listener, mod
 	}
 	rule, parent := route.Rules[0], route.Parents[0]
 	if len(rule.Diagnostics) != 0 || len(rule.Backends) != 1 || len(rule.Matches) != 1 || parent.State != model.AttachmentAccepted {
+		return unsupported()
+	}
+	attached := false
+	for _, attachment := range parent.Listeners {
+		if attachment.State != model.AttachmentAccepted {
+			continue
+		}
+		if attached || attachment.Name != selected.Name {
+			return unsupported()
+		}
+		attached = true
+	}
+	if !attached {
 		return unsupported()
 	}
 	backend := rule.Backends[0]

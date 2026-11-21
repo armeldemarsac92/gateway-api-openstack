@@ -326,6 +326,10 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 			return desiredGatewayGraph{}, &cloud.GraphError{Identity: id, Err: fmt.Errorf("%w: duplicate route fragment", cloud.ErrOwnershipConflict)}
 		}
 		identities[id.RouteUID] = struct{}{}
+		if node.WaitForHTTPPolicyRemoval && (node.Disposition != cloud.GraphPreserve ||
+			spec.Gateway.Disposition != cloud.GraphEnsure || protocol != cloud.ListenerProtocolHTTP) {
+			return invalid("waiting for HTTP policy removal requires a preserved HTTPRoute on an ensured HTTP Gateway")
+		}
 		assigned := node.RetainScopedListenerPorts
 		if assigned != nil && (node.Disposition != cloud.GraphPreserve || spec.Gateway.Disposition != cloud.GraphEnsure || len(ports) == 0) {
 			return invalid("limiting a preserved pool's defaults requires a complete Gateway listener set")
@@ -401,6 +405,9 @@ func observedGatewayResult(desired desiredGatewayGraph, actual observedGatewayGr
 		return result
 	}
 	if desired.spec.Gateway.Disposition == cloud.GraphEnsure {
+		if slices.ContainsFunc(desired.spec.Routes, func(route cloud.RouteGraphNode) bool { return route.WaitForHTTPPolicyRemoval }) {
+			return result
+		}
 		if actual.state.VIPAddress == "" {
 			return result
 		}

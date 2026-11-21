@@ -28,6 +28,7 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
+	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
 )
 
@@ -204,6 +205,37 @@ func TestReconcileGatewayGraphPreserveCannotRestoreTraffic(t *testing.T) {
 	}
 	if got := requests.mutationPaths(); len(got) != 0 {
 		t.Fatalf("preserved fragment authorized parent repair: %v", got)
+	}
+}
+
+func TestReconcileGatewayGraphDefersReadinessUntilOutdatedHTTPPolicyIsRemoved(t *testing.T) {
+	identity := safetyTestIdentity(t)
+	requests := &gatewayTransitionRequests{}
+	spec := completeGraphSpec(identity)
+	spec.Routes[0].Disposition = cloud.GraphPreserve
+	spec.Routes[0].WaitForHTTPPolicyRemoval = true
+	policyRemoved := false
+	base := convergedRouteGraphHandler(t, requests, identity, true, true)
+	handler := http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if policyRemoved && request.Method == http.MethodGet && request.URL.Path == "/lbaas/l7policies" {
+			requests.record(request)
+			safetyWriteJSON(t, w, map[string]any{"l7policies": []any{}})
+			return
+		}
+		base.ServeHTTP(w, request)
+	})
+	provider := completeGraphProvider(t, handler, requests)
+	result, err := provider.ReconcileGatewayGraph(t.Context(), spec)
+	if err != nil || result.Outcome.State != cloud.OutcomeProgressing || result.Gateway.Outcome.State != cloud.OutcomeProgressing {
+		t.Fatalf("active outdated policy certified Gateway readiness: %#v, %v", result, err)
+	}
+	policyRemoved = true
+	result, err = provider.ReconcileGatewayGraph(t.Context(), spec)
+	if err != nil || result.Gateway.Outcome.State != cloud.OutcomeReady {
+		t.Fatalf("Gateway retained a hold after policy removal: %#v, %v", result, err)
+	}
+	if got := requests.mutationPaths(); len(got) != 0 {
+		t.Fatalf("preservation authorized mutations: %v", got)
 	}
 }
 
@@ -469,9 +501,10 @@ func TestBuildDesiredGatewayGraphAllocatesSharedListenerPolicyPositions(t *testi
 	spec := completeGraphSpec(identity)
 	spec.Routes[0].Spec.Identity.RouteName = "alphabetically-first"
 	spec.Routes[0].Spec.Precedence = 4
+	spec.Routes[0].Spec.Hostname = "bar.com"
 	first := spec.Routes[0]
 	first.Spec.Identity.RouteName, first.Spec.Identity.RouteUID = "higher-priority", "higher-priority-uid"
-	first.Spec.Precedence = 1
+	first.Spec.Precedence, first.Spec.Hostname = 1, "foo.com"
 	first.Spec.PathType, first.Spec.PathValue = cloud.PathMatchPrefix, "/first"
 	spec.Routes = append(spec.Routes, first)
 	provider := &Provider{projectID: "project-a"}
@@ -483,9 +516,15 @@ func TestBuildDesiredGatewayGraphAllocatesSharedListenerPolicyPositions(t *testi
 		t.Fatalf("first route = %s, want %s", got, first.Spec.Identity.RouteUID)
 	}
 	var positions []int32
-	for _, route := range desired.routes {
+	wantHosts := []string{`^foo\.com(:[0-9]+)?$`, `^bar\.com(:[0-9]+)?$`}
+	for i, route := range desired.routes {
 		for _, policy := range route.policies {
 			positions = append(positions, policy.position)
+			rules := rulesFor(policy, route.hostnameRuleValue)
+			if len(rules) != 2 || rules[1].ruleType != l7policies.TypeHostName ||
+				rules[1].compareType != l7policies.CompareTypeRegex || rules[1].value != wantHosts[i] {
+				t.Fatalf("route %s policy %d lacks its exact host predicate: %#v", route.spec.Identity.RouteUID, policy.position, rules)
+			}
 		}
 	}
 	if want := []int32{1, 2, 3}; !reflect.DeepEqual(positions, want) {

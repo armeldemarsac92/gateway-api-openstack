@@ -56,6 +56,10 @@ type RouteGraphNode struct {
 	// preserved pool in a full TCP or UDP Gateway election. A nil set grants no
 	// authority to change those associations.
 	RetainScopedListenerPorts []int
+	// WaitForHTTPPolicyRemoval guards Gateway readiness while an attached peer
+	// with no current desired model still owns a policy on the HTTP frontend.
+	// Only the route's durable detach checkpoint authorizes its deletion.
+	WaitForHTTPPolicyRemoval bool
 }
 
 // GatewayGraphResult separates whole-graph scheduling from component status.

@@ -32,6 +32,7 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	gatewaycontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 )
 
@@ -182,14 +183,15 @@ func (r *Reconciler) validateCachedRouteDecision(
 	decision cachedRouteDecision,
 ) (cachedRouteDecision, error) {
 	decision.parent = parent
-	parentErr := validateRouteParentListener(route, parent)
+	http, _ := gatewaycontroller.HTTPListeners(parent.gateway)
+	candidates, parentErr := routeParentCandidates(route, parent, http)
 	validationErr := parentErr
 	if parentErr == nil {
-		namespaces, err := readRouteNamespaces(ctx, r.APIReader, parent.listener, route.Namespace)
+		namespaces, err := readRouteNamespaces(ctx, r.APIReader, candidates, route.Namespace)
 		if err != nil {
 			return cachedRouteDecision{}, err
 		}
-		validationErr = validateRouteAttachment(route, parent, namespaces)
+		_, validationErr = selectRouteAttachment(route, parent.gateway, candidates, namespaces)
 	}
 	if validationErr != nil {
 		status := statusForRouteBuildError(validationErr)

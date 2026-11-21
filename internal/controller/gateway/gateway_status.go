@@ -54,7 +54,7 @@ func (r *Reconciler) setGatewayFailure(gateway *gatewayv1.Gateway, validationErr
 	accepted := metav1.ConditionFalse
 	if gatewayReason == gatewayv1.GatewayReasonAccepted {
 		accepted = metav1.ConditionTrue
-		if len(gateway.Spec.Listeners) > 1 {
+		if listeners, _ := SupportedListeners(gateway); len(listeners) != len(gateway.Spec.Listeners) {
 			gatewayReason = gatewayv1.GatewayReasonListenersNotValid
 		}
 	}
@@ -447,12 +447,9 @@ func (r *Reconciler) setGatewayListenerStatuses(
 	advanceProgrammedGeneration bool,
 	readyPorts []int,
 ) error {
-	listeners := []*gatewayv1.Listener{primary}
-	if hasMultipleTransportListeners(gateway) {
-		listeners = make([]*gatewayv1.Listener, 0, len(gateway.Spec.Listeners))
-		for index := range gateway.Spec.Listeners {
-			listeners = append(listeners, &gateway.Spec.Listeners[index])
-		}
+	listeners, err := SupportedListeners(gateway)
+	if err != nil {
+		listeners = []*gatewayv1.Listener{primary}
 	}
 	counts, err := r.attachedRouteCounts(ctx, gateway, listeners)
 	if err != nil {
@@ -498,16 +495,23 @@ func (r *Reconciler) attachedRouteCounts(ctx context.Context, gateway *gatewayv1
 		}
 		refs, parents, _ := controller.RouteParents(route)
 		routeNamespace := route.GetNamespace()
-		for _, listener := range listeners {
-			for _, parentStatus := range parents {
+		http, isHTTP := route.(*gatewayv1.HTTPRoute)
+		sharedHTTP := isHTTP && len(listeners) > 1
+		counted := make(map[gatewayv1.SectionName]bool, len(listeners))
+		for _, parentStatus := range parents {
+			accepted := meta.FindStatusCondition(parentStatus.Conditions, string(gatewayv1.RouteConditionAccepted))
+			if accepted == nil || accepted.Status != metav1.ConditionTrue || accepted.ObservedGeneration != route.GetGeneration() ||
+				!slices.ContainsFunc(refs, func(ref gatewayv1.ParentReference) bool {
+					return controller.ParentRefsEqual(ref, routeNamespace, parentStatus.ParentRef, routeNamespace)
+				}) {
+				continue
+			}
+			var matching []*gatewayv1.Listener
+			for _, listener := range listeners {
 				if !routeParentStatusTargetsListener(parentStatus, routeNamespace, gateway, listener, r.Config.ControllerName) {
 					continue
 				}
-				accepted := meta.FindStatusCondition(parentStatus.Conditions, string(gatewayv1.RouteConditionAccepted))
-				if accepted == nil || accepted.Status != metav1.ConditionTrue || accepted.ObservedGeneration != route.GetGeneration() ||
-					!slices.ContainsFunc(refs, func(ref gatewayv1.ParentReference) bool {
-						return controller.ParentRefsEqual(ref, routeNamespace, parentStatus.ParentRef, routeNamespace)
-					}) {
+				if sharedHTTP && len(model.IntersectHostnames(listener.Hostname, http.Spec.Hostnames)) == 0 {
 					continue
 				}
 				if _, observed := namespaces[routeNamespace]; !observed && model.ObservesRouteNamespace(listener) {
@@ -524,9 +528,19 @@ func (r *Reconciler) attachedRouteCounts(ctx context.Context, gateway *gatewayv1
 					}
 				}
 				if model.AllowsRouteNamespace(listener, gateway.Namespace, routeNamespace, namespaces[routeNamespace]) {
+					matching = append(matching, listener)
+				}
+			}
+			// An accepted status can predate a Gateway edit. A parent that
+			// now spans multiple HTTP sections is outside the stock profile.
+			if sharedHTTP && len(matching) != 1 {
+				continue
+			}
+			for _, listener := range matching {
+				if !counted[listener.Name] {
+					counted[listener.Name] = true
 					counts[listener.Name]++
 				}
-				break
 			}
 		}
 		return nil
