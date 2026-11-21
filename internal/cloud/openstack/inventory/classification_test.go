@@ -525,7 +525,7 @@ func TestAuditDistinguishesTLSRouteTargetsOfSameUID(t *testing.T) {
 	route := safetyTestIdentity(t)
 	id := route.Value()
 	candidates := auditCandidateSet{}
-	addTarget := func(suffix string, digest string) {
+	addTarget := func(route openstackidentity.Identity, suffix string, digest string) {
 		poolID := "pool-" + suffix
 		target := openstackidentity.Tag("sni-target", digest)
 		candidates.add(auditCandidate{
@@ -538,20 +538,33 @@ func TestAuditDistinguishesTLSRouteTargetsOfSameUID(t *testing.T) {
 			policyAction: "REDIRECT_TO_POOL", redirectPoolID: poolID,
 		})
 	}
-	addTarget("a", strings.Repeat("a", 64))
-	addTarget("b", strings.Repeat("b", 64))
+	addTarget(route, "a", strings.Repeat("a", 64))
+	addTarget(route, "b", strings.Repeat("b", 64))
 	findings := classifyAuditCandidates(candidates, nil, auditTestScopeTags(id), id.OpenStackProjectID)
 	for _, finding := range findings {
 		if finding.Disposition != audit.DispositionUnresolved || finding.Reason != "GatewayManagedTLSRoute" {
 			t.Errorf("%s = %s/%s, want distinct TLSRoute target", finding.ID, finding.Disposition, finding.Reason)
 		}
 	}
-	addTarget("duplicate-a", strings.Repeat("a", 64))
+	addTarget(route, "duplicate-a", strings.Repeat("a", 64))
 	findings = classifyAuditCandidates(candidates, nil, auditTestScopeTags(id), id.OpenStackProjectID)
 	for _, duplicate := range []string{"pool-a", "policy-a", "pool-duplicate-a", "policy-duplicate-a"} {
 		got := auditFindingByID(t, findings, duplicate)
 		if got.Disposition != audit.DispositionOwnershipConflict || got.Reason != auditReasonDuplicateIdentity {
 			t.Errorf("%s = %s/%s, want same-target duplicate conflict", got.ID, got.Disposition, got.Reason)
+		}
+	}
+	otherID := id
+	otherID.RouteNamespace, otherID.RouteName = "contradictory-namespace", "contradictory-name"
+	otherRoute, err := openstackidentity.NewIdentity(otherID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	addTarget(otherRoute, "c", strings.Repeat("c", 64))
+	findings = classifyAuditCandidates(candidates, nil, auditTestScopeTags(id), id.OpenStackProjectID)
+	for _, finding := range findings {
+		if finding.Disposition != audit.DispositionOwnershipConflict || finding.Reason != auditReasonInvalidIdentity {
+			t.Errorf("%s = %s/%s, want contradictory TLSRoute identity conflict", finding.ID, finding.Disposition, finding.Reason)
 		}
 	}
 }

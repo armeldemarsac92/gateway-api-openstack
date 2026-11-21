@@ -222,6 +222,7 @@ func (p *Provider) observeSNIGraph(ctx context.Context, desired desiredGatewayGr
 		return actual, err
 	}
 	actual.listener = listener
+	pendingUpdate := lb.ProvisioningStatus == "PENDING_UPDATE" && desired.spec.Gateway.Disposition == cloud.GraphEnsure
 	if listener != nil {
 		actual.state.ListenerID = listener.ID
 		if listener.Protocol != cloud.ListenerProtocolTCP || listener.ProtocolPort != desired.spec.Gateway.Spec.ListenerPort ||
@@ -237,12 +238,15 @@ func (p *Provider) observeSNIGraph(ctx context.Context, desired desiredGatewayGr
 			// default may belong to somebody else, so leave its edge untouched.
 			return actual, nil
 		}
-		if listener.ProvisioningStatus != "ACTIVE" && listener.ProvisioningStatus != "ERROR" {
+		if listener.ProvisioningStatus != "ACTIVE" && listener.ProvisioningStatus != "ERROR" &&
+			!(pendingUpdate && listener.ProvisioningStatus == "PENDING_UPDATE") {
 			actual.outcome = p.progressingOutcome("Waiting for TLS SNI listener provisioning")
 			return actual, nil
 		}
 	}
-	if actual.outcome.State != cloud.OutcomeReady {
+	// A policy update can mark the parent resources PENDING_UPDATE while
+	// disjoint SNI routes retain complete ACTIVE forwarding fragments.
+	if actual.outcome.State != cloud.OutcomeReady && !(pendingUpdate && sniFrontendObserved(desired, actual)) {
 		return actual, nil
 	}
 	owners := make(map[string]sniRouteKey)
@@ -390,6 +394,58 @@ func (fragment *observedSNIFragment) matches(wanted desiredSNIFragment) bool {
 		fragment.rule.Key == "" && fragment.rule.Value == wanted.route.Hostname
 }
 
+func sniFrontendObserved(desired desiredGatewayGraph, actual observedGatewayGraph) bool {
+	lb, listener := actual.loadBalancer, actual.listener
+	if desired.spec.Gateway.Disposition != cloud.GraphEnsure || lb == nil || !lb.AdminStateUp ||
+		listener == nil || !listener.AdminStateUp || listener.DefaultPoolID != "" ||
+		desired.spec.Gateway.Spec.ExternalNetworkID != "" && actual.state.FloatingIPAddress == "" {
+		return false
+	}
+	return lb.ProvisioningStatus == "ACTIVE" && listener.ProvisioningStatus == "ACTIVE" ||
+		lb.ProvisioningStatus == "PENDING_UPDATE" && (listener.ProvisioningStatus == "ACTIVE" || listener.ProvisioningStatus == "PENDING_UPDATE")
+}
+
+func (fragment *observedSNIFragment) forwardingHostname() string {
+	policy, rule := fragment.policy, fragment.rule
+	// Pending changes may have already updated admin_state_up in the API
+	// while the previous policy is still forwarding in Amphora.
+	if policy == nil || rule == nil || !policy.AdminStateUp && policy.ProvisioningStatus == "ACTIVE" ||
+		!rule.AdminStateUp && rule.ProvisioningStatus == "ACTIVE" ||
+		rule.RuleType != string(ruleTLSSNI) || rule.CompareType != "EQUAL_TO" || rule.Invert || rule.Key != "" {
+		return ""
+	}
+	return strings.ToLower(rule.Value)
+}
+
+func readySNIRoutes(desired desiredGatewayGraph, actual observedGatewayGraph) map[string]bool {
+	if !sniFrontendObserved(desired, actual) {
+		return nil
+	}
+	wanted := make(map[sniFragmentKey]bool, len(desired.sni))
+	ready := make(map[string]bool)
+	for _, target := range desired.sni {
+		wanted[target.key], ready[target.key.uid] = true, true
+	}
+	selectors := make(map[string]int)
+	for key, fragment := range actual.sni {
+		if !wanted[key] {
+			// Retired fragments still belong to their route until removed.
+			delete(ready, key.uid)
+		}
+		if hostname := fragment.forwardingHostname(); hostname != "" {
+			selectors[hostname]++
+		}
+	}
+	for _, target := range desired.sni {
+		fragment := actual.sni[target.key]
+		if ready[target.key.uid] && (selectors[target.route.Hostname] != 1 || fragment == nil ||
+			fragment.policy == nil || !fragment.policy.AdminStateUp || fragment.rule == nil || !fragment.matches(target)) {
+			delete(ready, target.key.uid)
+		}
+	}
+	return ready
+}
+
 func sniDeletionStep(fragment *observedSNIFragment) graphMutation {
 	var step gatewayDeletionStep
 	switch {
@@ -426,27 +482,17 @@ func (p *Provider) buildSNIGraphPlan(desired desiredGatewayGraph, actual observe
 		return nil, result, fmt.Errorf("%w: TLS SNI listener has an unexpected default pool", cloud.ErrOwnershipConflict)
 	}
 	wanted := make(map[sniFragmentKey]desiredSNIFragment)
-	remaining := make(map[string]int)
 	for _, frag := range desired.sni {
 		wanted[frag.key] = frag
-		remaining[frag.key.uid]++
 	}
 	keys := slices.SortedFunc(maps.Keys(actual.sni), func(a, b sniFragmentKey) int {
 		return cmp.Or(cmp.Compare(a.namespace, b.namespace), cmp.Compare(a.name, b.name), cmp.Compare(a.uid, b.uid), cmp.Compare(a.target, b.target))
 	})
 	var retire []graphMutation
 	waitForOctavia := false
-	frontendReady := actual.loadBalancer != nil && actual.loadBalancer.AdminStateUp &&
-		actual.listener != nil && actual.listener.AdminStateUp && actual.listener.ProvisioningStatus == "ACTIVE" &&
-		desired.spec.Gateway.Disposition == cloud.GraphEnsure &&
-		(desired.spec.Gateway.Spec.ExternalNetworkID == "" || actual.state.FloatingIPAddress != "")
 	for _, key := range keys {
 		fragment := actual.sni[key]
 		target, keep := wanted[key]
-		if !keep {
-			// A retired target still belongs to the route until verified removal.
-			remaining[key.uid]++
-		}
 		if slices.ContainsFunc(fragment.members, func(m pools.Member) bool { return strings.HasPrefix(m.ProvisioningStatus, "PENDING_") }) ||
 			strings.HasPrefix(fragment.pool.ProvisioningStatus, "PENDING_") ||
 			fragment.policy != nil && strings.HasPrefix(fragment.policy.ProvisioningStatus, "PENDING_") ||
@@ -456,12 +502,11 @@ func (p *Provider) buildSNIGraphPlan(desired desiredGatewayGraph, actual observe
 		}
 		if !keep || !fragment.matches(target) {
 			retire = append(retire, sniDeletionStep(fragment))
-		} else if frontendReady && fragment.policy != nil && fragment.policy.AdminStateUp && fragment.rule != nil {
-			remaining[key.uid]--
 		}
 	}
+	ready := readySNIRoutes(desired, actual)
 	for i, route := range result.Routes {
-		if remaining[encodedSNITag("route-uid", route.Identity.RouteUID)] == 0 {
+		if ready[encodedSNITag("route-uid", route.Identity.RouteUID)] {
 			result.Routes[i].Result.Outcome = cloud.ReadyOutcome()
 		}
 	}

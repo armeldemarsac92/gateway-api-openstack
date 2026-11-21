@@ -1001,11 +1001,13 @@ func validateGraphLoadBalancer(lb *octavia.LoadBalancer, requirements cloud.Gate
 func (p *Provider) pendingGraphResult(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph) cloud.GatewayGraphResult {
 	result := cloud.GatewayGraphResult{Outcome: actual.outcome, Gateway: observedGatewayResult(desired, actual, actual.outcome)}
 	if desired.protocol == cloud.ListenerProtocolTLSSNI {
-		deferred := desired.spec.Gateway.Disposition == cloud.GraphEnsure && actual.loadBalancer != nil && actual.loadBalancer.AdminStateUp &&
-			actual.loadBalancer.ProvisioningStatus == "PENDING_UPDATE" && actual.listener != nil && actual.listener.AdminStateUp &&
-			actual.listener.DefaultPoolID == "" && actual.listener.ProvisioningStatus != "ERROR" &&
-			(desired.spec.Gateway.Spec.ExternalNetworkID == "" || actual.state.FloatingIPAddress != "")
-		result.Routes = sniRouteResults(desired.sni, cloud.RouteResult{Outcome: actual.outcome, ObservationDeferred: deferred})
+		result.Routes = sniRouteResults(desired.sni, cloud.RouteResult{Outcome: actual.outcome})
+		if actual.loadBalancer != nil && actual.loadBalancer.ProvisioningStatus == "PENDING_UPDATE" {
+			ready := readySNIRoutes(desired, actual)
+			for i := range result.Routes {
+				result.Routes[i].Result.ObservationDeferred = ready[encodedSNITag("route-uid", result.Routes[i].Identity.RouteUID)]
+			}
+		}
 		return result
 	}
 	if actual.withdrawTLS != nil {

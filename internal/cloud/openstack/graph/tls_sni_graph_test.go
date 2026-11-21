@@ -101,7 +101,7 @@ func TestSNIGraphWithdrawsObsoletePolicyWithoutUnprogrammingSibling(t *testing.T
 		listener: &listeners.Listener{ID: "listener", ProvisioningStatus: "ACTIVE", AdminStateUp: true},
 		sni:      map[sniFragmentKey]*observedSNIFragment{targets[0].key: activeSNIFragment(targets[0], "a"), targets[1].key: activeSNIFragment(targets[1], "b")},
 	}
-	actual.loadBalancer.AdminStateUp = true
+	actual.loadBalancer.ProvisioningStatus, actual.loadBalancer.AdminStateUp = "ACTIVE", true
 	provider := &Provider{}
 	steps, result, err := provider.buildSNIGraphPlan(desired, actual)
 	if err != nil || len(steps) != 1 || steps[0].deletion.resource != gatewayDisableL7Policy || steps[0].deletion.resourceID != "policy-a" {
@@ -109,6 +109,26 @@ func TestSNIGraphWithdrawsObsoletePolicyWithoutUnprogrammingSibling(t *testing.T
 	}
 	if len(result.Routes) != 1 || result.Routes[0].Identity.RouteUID != "route-b" || result.Routes[0].Result.Outcome.State != cloud.OutcomeReady {
 		t.Fatalf("B remains proven during withdrawal of A, got %#v", result.Routes)
+	}
+
+	retired := actual.sni[targets[0].key]
+	retired.rule.Value = strings.ToUpper(targets[1].route.Hostname)
+	steps, result, err = provider.buildSNIGraphPlan(desired, actual)
+	if err != nil || len(steps) != 1 || steps[0].deletion.resource != gatewayDisableL7Policy ||
+		result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing {
+		t.Fatalf("B is pending while A also selects B's name, plan=%v routes=%v err=%v", steps, result.Routes, err)
+	}
+	retired.policy.AdminStateUp = false
+	retired.policy.ProvisioningStatus = "PENDING_UPDATE"
+	steps, result, err = provider.buildSNIGraphPlan(desired, actual)
+	if err != nil || len(steps) != 0 || result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing {
+		t.Fatalf("B waits for A's closure to settle, plan=%v routes=%v err=%v", steps, result.Routes, err)
+	}
+	retired.policy.ProvisioningStatus = "ACTIVE"
+	steps, result, err = provider.buildSNIGraphPlan(desired, actual)
+	if err != nil || len(steps) != 1 || steps[0].deletion.resource != gatewayDeletionL7Rule ||
+		result.Routes[0].Result.Outcome.State != cloud.OutcomeReady {
+		t.Fatalf("B is ready once A's policy closure is observed, plan=%v routes=%v err=%v", steps, result.Routes, err)
 	}
 }
 
@@ -139,7 +159,7 @@ func TestSNIGraphProgramsAllHostnamesBeforeReportingRouteReady(t *testing.T) {
 		listener: &listeners.Listener{ID: "listener", ProvisioningStatus: "ACTIVE", AdminStateUp: true},
 		sni:      map[sniFragmentKey]*observedSNIFragment{targets[0].key: activeSNIFragment(targets[0], "a")},
 	}
-	actual.loadBalancer.AdminStateUp = true
+	actual.loadBalancer.ProvisioningStatus, actual.loadBalancer.AdminStateUp = "ACTIVE", true
 	check := func(state cloud.OutcomeState) []graphMutation {
 		t.Helper()
 		steps, result, err := (&Provider{}).buildSNIGraphPlan(desired, actual)
@@ -297,6 +317,31 @@ func TestSNIPolicyWithdrawalDuringNeutronFailureAndDisabledCleanup(t *testing.T)
 			safetyWriteJSON(t, w, map[string]any{"l7policy": policy})
 		})),
 	}
+	t.Run("pending LB and listener require complete active route readback", func(t *testing.T) {
+		lb["provisioning_status"], listener["provisioning_status"] = "PENDING_UPDATE", "PENDING_UPDATE"
+		t.Cleanup(func() {
+			lb["provisioning_status"], listener["provisioning_status"], policy["provisioning_status"] = "ACTIVE", "ACTIVE", "ACTIVE"
+		})
+		pending := spec
+		pending.Gateway.TLSSNIRoutes = []cloud.TLSSNIRoute{targets[0].route}
+		provider := newTestProvider(t, clients, ProviderConfig{TLSSNIPassthrough: true})
+		check := func(wantDeferred bool) {
+			t.Helper()
+			got, err := provider.ReconcileGatewayGraph(t.Context(), pending)
+			if err != nil || len(writes) != 0 || len(got.Routes) != 1 || got.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing ||
+				got.Routes[0].Result.ObservationDeferred != wantDeferred {
+				t.Fatalf("pending route result=%#v writes=%v err=%v, want deferred=%t", got.Routes, writes, err, wantDeferred)
+			}
+		}
+		check(true)
+		second := targets[0].route
+		second.Hostname = "b.example.test"
+		pending.Gateway.TLSSNIRoutes = append(pending.Gateway.TLSSNIRoutes, second)
+		check(false)
+		pending.Gateway.TLSSNIRoutes = pending.Gateway.TLSSNIRoutes[:1]
+		policy["provisioning_status"] = "PENDING_UPDATE"
+		check(false)
+	})
 	t.Run("withdrawal remains writable with Neutron down", func(t *testing.T) {
 		provider := newTestProvider(t, clients, ProviderConfig{TLSSNIPassthrough: true})
 		stale := errors.New("authorization changed")
@@ -353,7 +398,7 @@ func TestSNIPolicyWithdrawalDuringNeutronFailureAndDisabledCleanup(t *testing.T)
 	})
 }
 
-func TestSNIPendingLoadBalancerDefersOnlyDesiredRouteObservations(t *testing.T) {
+func TestSNIPendingLoadBalancerWithoutFragmentReadbackCannotDefer(t *testing.T) {
 	identity := safetyTestIdentity(t)
 	spec := completeGraphSpec(identity)
 	spec.Gateway.Spec.ExternalNetworkID = ""
@@ -370,9 +415,10 @@ func TestSNIPendingLoadBalancerDefersOnlyDesiredRouteObservations(t *testing.T) 
 	actual := observedGatewayGraph{loadBalancer: lb, outcome: cloud.ProgressingOutcome("Updating", 1),
 		listener: &listeners.Listener{ID: "listener", AdminStateUp: true, ProvisioningStatus: "PENDING_UPDATE"}}
 	p := &Provider{}
-	if got := p.pendingGraphResult(t.Context(), desired, actual).Routes; len(got) != 1 || !got[0].Result.ObservationDeferred {
-		t.Fatalf("expected one desired route eligible to retain an existing proof while a policy update is pending, got %#v", got)
+	if got := p.pendingGraphResult(t.Context(), desired, actual).Routes; len(got) != 1 || got[0].Result.ObservationDeferred {
+		t.Fatalf("pending frontend without a route inventory cannot retain an existing proof, got %#v", got)
 	}
+	actual.sni = map[sniFragmentKey]*observedSNIFragment{targets[0].key: activeSNIFragment(targets[0], "a"), targets[1].key: activeSNIFragment(targets[1], "b")}
 	lb.ProvisioningStatus = "PENDING_CREATE"
 	if got := p.pendingGraphResult(t.Context(), desired, actual).Routes; len(got) != 1 || got[0].Result.ObservationDeferred {
 		t.Fatalf("a pending new loadbalancer is not an eligible serving sibling, got %#v", got)
