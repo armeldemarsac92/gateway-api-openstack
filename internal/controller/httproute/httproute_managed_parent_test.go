@@ -183,6 +183,31 @@ func TestHTTPRouteRechecksBundleCompatibilityAtCleanupSeal(t *testing.T) {
 	}
 }
 
+func TestHTTPRouteRechecksSingletonGatewayClassRecoveryAtCleanupSeal(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	class := unsupportedVersionGatewayClass(f.reconciler.Config)
+	if err := f.client.Get(t.Context(), client.ObjectKeyFromObject(class), class); err != nil {
+		t.Fatal(err)
+	}
+	supported := class.Status.DeepCopy()
+	class.Status = unsupportedVersionGatewayClass(f.reconciler.Config).Status
+	if err := f.client.Update(t.Context(), class); err != nil {
+		t.Fatal(err)
+	}
+	identity := controller.RouteIdentity(f.reconciler.Config, f.gateway, f.route)
+	cleanup, err := f.reconciler.buildRouteCleanupSnapshot(t.Context(), f.route, identity)
+	if err != nil || cleanup.disposition != routeCleanupRequired {
+		t.Fatalf("cleanup with an unsupported class = %v, %v, want required cleanup", cleanup.disposition, err)
+	}
+	class.Status = *supported
+	if err := f.client.Update(t.Context(), class); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.reconciler.sealRouteCleanupSnapshot(t.Context(), cleanup); !errors.Is(err, errHTTPRouteChanged) {
+		t.Fatalf("cleanup seal after class recovery = %v, want stale cleanup", err)
+	}
+}
+
 func TestHTTPRouteRefusesSeveralManagedParentRefs(t *testing.T) {
 	for _, sameGateway := range []bool{false, true} {
 		name := "distinct Gateways"

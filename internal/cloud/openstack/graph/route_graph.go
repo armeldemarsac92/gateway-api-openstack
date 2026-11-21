@@ -91,6 +91,19 @@ func (policy observedRoutePolicy) pending() bool {
 		})
 }
 
+func (policy observedRoutePolicy) hasOutdatedHostname(value string) bool {
+	for _, observed := range policy.rules {
+		rule := observed.rule
+		if observed.role == roleRuleHost {
+			return value == "" || rule.Value != value || rule.RuleType != string(l7policies.TypeHostName) ||
+				rule.CompareType != string(l7policies.CompareTypeRegex) || rule.Invert || !rule.AdminStateUp ||
+				rule.ProvisioningStatus == "ERROR" || rule.ProvisioningStatus == "PENDING_UPDATE" || rule.ProvisioningStatus == "PENDING_DELETE"
+		}
+	}
+	// Policies are created disabled, before their path and hostname rules.
+	return value != "" && policy.policy.AdminStateUp
+}
+
 func (route observedRouteGraph) backendProvisioningIssue(pendingOnly, requireActive bool) string {
 	issue := func(resource, id, status string) string {
 		// Older observations may omit the status. Current Octavia supplies it

@@ -61,6 +61,10 @@ func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual obs
 	if !gatewayReady {
 		result.Gateway.Outcome = p.progressingOutcome("Waiting for the Gateway infrastructure")
 	}
+	if message := httpPolicyTransition(desired, actual); message != "" {
+		result.Gateway.Outcome = p.progressingOutcome(message)
+		result.Gateway.HTTPPolicyTransition = true
+	}
 	var deleteDisables, deleteDisableRetries, deletions []graphMutation
 	disables := make([]graphMutation, 0)
 	ensures := make([]graphMutation, 0)
@@ -78,10 +82,6 @@ func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual obs
 		// has policies, their precedence is unknown until the next full ensure.
 		canRestoreTraffic = canRestoreTraffic && observed.pool == nil && len(observed.policies) == 0
 		holdPolicyOrder = holdPolicyOrder || len(observed.policies) != 0
-		if node.WaitForHTTPPolicyRemoval && len(observed.policies) != 0 {
-			gatewayReady = false
-			result.Gateway.Outcome = p.progressingOutcome("Waiting for outdated HTTP policy removal")
-		}
 	}
 	holdPolicyOrder = holdPolicyOrder || policyPending
 	canRestoreTraffic = canRestoreTraffic && !policyPending
@@ -191,6 +191,27 @@ func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual obs
 		result.Outcome = result.Gateway.Outcome
 	}
 	return plan, result, nil
+}
+
+func httpPolicyTransition(desired desiredGatewayGraph, actual observedGatewayGraph) string {
+	if desired.spec.Gateway.Disposition != cloud.GraphEnsure || actual.protocol != cloud.ListenerProtocolHTTP || actual.listener == nil {
+		return ""
+	}
+	for index, node := range desired.spec.Routes {
+		if node.WaitForHTTPPolicyRemoval || node.Disposition == cloud.GraphDelete {
+			if index >= len(actual.routes) || len(actual.routes[index].policies) != 0 {
+				return "Waiting for outdated HTTP policy removal"
+			}
+		}
+		if node.Disposition == cloud.GraphEnsure && index < len(actual.routes) {
+			for _, policy := range actual.routes[index].policies {
+				if policy.hasOutdatedHostname(desired.routes[index].hostnameRuleValue) {
+					return "Waiting for updated HTTP hostname rules"
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func observedRouteDeleteCompletions(desired desiredGatewayGraph, actual observedGatewayGraph) []cloud.RouteGraphResult {

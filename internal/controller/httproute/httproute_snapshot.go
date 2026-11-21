@@ -588,7 +588,7 @@ func (r *Reconciler) sealRouteCleanupSnapshot(
 			return errHTTPRouteChanged
 		}
 	}
-	if len(route.Spec.ParentRefs) > 1 && snapshot.parents != nil {
+	if snapshot.parents != nil {
 		parents, err := r.observeRouteParents(ctx, r.APIReader, &route)
 		if err != nil {
 			return err

@@ -405,7 +405,9 @@ func observedGatewayResult(desired desiredGatewayGraph, actual observedGatewayGr
 		return result
 	}
 	if desired.spec.Gateway.Disposition == cloud.GraphEnsure {
-		if slices.ContainsFunc(desired.spec.Routes, func(route cloud.RouteGraphNode) bool { return route.WaitForHTTPPolicyRemoval }) {
+		if message := httpPolicyTransition(desired, actual); message != "" {
+			result.Outcome.Message = message
+			result.HTTPPolicyTransition = true
 			return result
 		}
 		if actual.state.VIPAddress == "" {

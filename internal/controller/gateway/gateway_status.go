@@ -496,7 +496,6 @@ func (r *Reconciler) attachedRouteCounts(ctx context.Context, gateway *gatewayv1
 		refs, parents, _ := controller.RouteParents(route)
 		routeNamespace := route.GetNamespace()
 		http, isHTTP := route.(*gatewayv1.HTTPRoute)
-		sharedHTTP := isHTTP && len(listeners) > 1
 		counted := make(map[gatewayv1.SectionName]bool, len(listeners))
 		for _, parentStatus := range parents {
 			accepted := meta.FindStatusCondition(parentStatus.Conditions, string(gatewayv1.RouteConditionAccepted))
@@ -511,7 +510,7 @@ func (r *Reconciler) attachedRouteCounts(ctx context.Context, gateway *gatewayv1
 				if !routeParentStatusTargetsListener(parentStatus, routeNamespace, gateway, listener, r.Config.ControllerName) {
 					continue
 				}
-				if sharedHTTP && len(model.IntersectHostnames(listener.Hostname, http.Spec.Hostnames)) == 0 {
+				if isHTTP && len(model.IntersectHostnames(listener.Hostname, http.Spec.Hostnames)) == 0 {
 					continue
 				}
 				if _, observed := namespaces[routeNamespace]; !observed && model.ObservesRouteNamespace(listener) {
@@ -533,7 +532,7 @@ func (r *Reconciler) attachedRouteCounts(ctx context.Context, gateway *gatewayv1
 			}
 			// An accepted status can predate a Gateway edit. A parent that
 			// now spans multiple HTTP sections is outside the stock profile.
-			if sharedHTTP && len(matching) != 1 {
+			if isHTTP && len(matching) != 1 {
 				continue
 			}
 			for _, listener := range matching {

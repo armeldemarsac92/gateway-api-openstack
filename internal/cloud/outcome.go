@@ -84,6 +84,8 @@ type GatewayResult struct {
 	// AddressAbsent is a complete observation that the client-facing address
 	// is unassigned. An incomplete observation leaves this false.
 	AddressAbsent bool
+	// HTTPPolicyTransition indicates an outdated rule or a policy awaiting withdrawal.
+	HTTPPolicyTransition bool
 	// ScopedListenerReadyPorts contains the individually programmed listener ports when
 	// the provider has observed a multi-listener TCP or UDP Gateway.
 	ScopedListenerReadyPorts []int

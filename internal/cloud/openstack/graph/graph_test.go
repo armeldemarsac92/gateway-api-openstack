@@ -222,6 +222,11 @@ func TestReconcileGatewayGraphDefersReadinessUntilOutdatedHTTPPolicyIsRemoved(t 
 			safetyWriteJSON(t, w, map[string]any{"l7policies": []any{}})
 			return
 		}
+		if request.Method == http.MethodPut && request.URL.Path == "/lbaas/l7policies/policy-1" {
+			requests.record(request)
+			safetyWriteJSON(t, w, map[string]any{"l7policy": map[string]any{"id": "policy-1"}})
+			return
+		}
 		base.ServeHTTP(w, request)
 	})
 	provider := completeGraphProvider(t, handler, requests)
@@ -236,6 +241,17 @@ func TestReconcileGatewayGraphDefersReadinessUntilOutdatedHTTPPolicyIsRemoved(t 
 	}
 	if got := requests.mutationPaths(); len(got) != 0 {
 		t.Fatalf("preservation authorized mutations: %v", got)
+	}
+
+	spec.Routes[0].Disposition = cloud.GraphDelete
+	spec.Routes[0].WaitForHTTPPolicyRemoval = false
+	policyRemoved = false
+	result, err = provider.ReconcileGatewayGraph(t.Context(), spec)
+	if err != nil || result.Gateway.Outcome.State != cloud.OutcomeProgressing {
+		t.Fatalf("detach checkpoint prematurely certified Gateway readiness: %#v, %v", result, err)
+	}
+	if got, want := requests.mutationPaths(), []string{"/lbaas/l7policies/policy-1"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("first mutation after detach checkpoint = %v, want %v", got, want)
 	}
 }
 
@@ -533,6 +549,49 @@ func TestBuildDesiredGatewayGraphAllocatesSharedListenerPolicyPositions(t *testi
 	spec.Routes[0].Spec.Precedence = first.Spec.Precedence
 	if _, err := provider.buildDesiredGatewayGraph(spec); err == nil {
 		t.Fatal("accepted two ensured routes with equal precedence")
+	}
+}
+
+func TestGatewayGraphPlanWaitsForChangedHTTPHostname(t *testing.T) {
+	route, observed := convergedRoutePlanFixture()
+	route.hostnameRuleValue = "^new[.]example[.]test$"
+	policy := &observed.policies[0]
+	policy.rules = append(policy.rules, observedRouteRule{
+		role: roleRuleHost,
+		rule: l7policies.Rule{
+			ID: "rule-host", RuleType: string(l7policies.TypeHostName), CompareType: string(l7policies.CompareTypeRegex),
+			Value: "^old[.]example[.]test$", AdminStateUp: true,
+		},
+	})
+	peer, observedPeer := convergedRoutePlanFixture()
+	peer.policies[0].position = 2
+	observedPeer.policies[0].policy.Position = 2
+	desired := desiredGatewayGraph{spec: cloud.GatewayGraphSpec{
+		Gateway: cloud.GatewayGraphNode{Disposition: cloud.GraphEnsure},
+		Routes:  []cloud.RouteGraphNode{{Disposition: cloud.GraphEnsure}, {Disposition: cloud.GraphEnsure}},
+	}, routes: []desiredRoute{route, peer}}
+	actual := observedGatewayGraph{
+		protocol:     cloud.ListenerProtocolHTTP,
+		loadBalancer: &octavia.LoadBalancer{}, listener: &listeners.Listener{AdminStateUp: true},
+		routes: []observedRouteGraph{observed, observedPeer},
+	}
+	actual.loadBalancer.AdminStateUp = true
+	provider := &Provider{}
+	plan, result, err := provider.buildGatewayGraphPlan(desired, actual)
+	if err != nil || len(plan) == 0 || plan[0].route.kind != routeMutationDisablePolicy ||
+		result.Gateway.Outcome.State != cloud.OutcomeProgressing || result.Routes[1].Result.Outcome.State != cloud.OutcomeReady {
+		t.Fatalf("hostname change = plan %v, result %#v, error %v", plan, result, err)
+	}
+	policy.rules[1].rule.Value = route.hostnameRuleValue
+	policy.rules[1].rule.ProvisioningStatus = "PENDING_UPDATE"
+	plan, result, err = provider.buildGatewayGraphPlan(desired, actual)
+	if err != nil || len(plan) != 0 || result.Gateway.Outcome.State != cloud.OutcomeProgressing {
+		t.Fatalf("unapplied hostname = plan %v, result %#v, error %v", plan, result, err)
+	}
+	policy.rules[1].rule.ProvisioningStatus = "ACTIVE"
+	plan, result, err = provider.buildGatewayGraphPlan(desired, actual)
+	if err != nil || len(plan) != 0 || result.Gateway.Outcome.State != cloud.OutcomeReady {
+		t.Fatalf("converged hostname = plan %v, result %#v, error %v", plan, result, err)
 	}
 }
 

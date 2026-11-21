@@ -59,6 +59,53 @@ func TestRouteGraphOrdersTwoBoundRoutes(t *testing.T) {
 	}
 }
 
+func TestRouteGraphRevokesHTTPPolicyAfterNamespaceLabelChange(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	first := &f.gateway.Spec.Listeners[0]
+	first.Hostname = ptr.To(gatewayv1.Hostname("blue.example.test"))
+	first.AllowedRoutes = &gatewayv1.AllowedRoutes{Namespaces: &gatewayv1.RouteNamespaces{
+		From: ptr.To(gatewayv1.NamespacesFromSelector), Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "blue"}},
+	}}
+	second := first.DeepCopy()
+	second.Name, second.Hostname = "green", ptr.To(gatewayv1.Hostname("green.example.test"))
+	second.AllowedRoutes.Namespaces.Selector.MatchLabels["team"] = "green"
+	f.gateway.Spec.Listeners = append(f.gateway.Spec.Listeners, *second)
+	if err := f.client.Update(t.Context(), f.gateway); err != nil {
+		t.Fatal(err)
+	}
+	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: f.route.Namespace, Labels: map[string]string{"team": "blue"}}}
+	f.create(t, namespace)
+	if !gatewayProgrammedForGeneration(f.gateway) {
+		t.Fatal("Gateway must already be programmed for the current generation")
+	}
+	input := f.observe(t)
+	if len(input.Nodes) != 1 || input.Nodes[0].Disposition != cloud.GraphEnsure || input.Nodes[0].Spec.Hostname != "blue.example.test" {
+		t.Fatalf("initial attachment = %#v", input.Nodes)
+	}
+
+	namespace.Labels["team"] = "green"
+	if err := f.client.Update(t.Context(), namespace); err != nil {
+		t.Fatal(err)
+	}
+	input = f.observe(t)
+	if len(input.Nodes) != 1 || input.Nodes[0].Disposition != cloud.GraphEnsure || input.Nodes[0].Spec.Hostname != "green.example.test" {
+		t.Fatalf("updated attachment = %#v", input.Nodes)
+	}
+
+	namespace.Labels["team"] = "other"
+	if err := f.client.Update(t.Context(), namespace); err != nil {
+		t.Fatal(err)
+	}
+	request := graph.Request{Identity: controller.GatewayIdentity(f.reconciler.Config, f.gateway), Action: graph.Ensure}
+	input, err := f.reconciler.ObserveRouteGraph(t.Context(), request, f.gateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(input.Nodes) != 1 || input.Nodes[0].Disposition != cloud.GraphPreserve || !input.Nodes[0].WaitForHTTPPolicyRemoval {
+		t.Fatalf("revoked route has no withdrawal readiness hold before its detach checkpoint: %#v", input.Nodes)
+	}
+}
+
 func TestRouteGraphSharesBackendObservationAcrossCandidates(t *testing.T) {
 	f := newRouteModelInputFixture(t)
 	unsupported := f.candidate("a-unsupported")

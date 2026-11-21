@@ -45,7 +45,6 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 		return graph.RouteInputs{}, err
 	}
 	var backends *routeModelInputs
-	var waitForPolicyRemoval bool
 	if request.Action == graph.Ensure {
 		if gateway == nil {
 			return graph.RouteInputs{}, errors.New("gateway is required to ensure routes")
@@ -55,9 +54,6 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 			return graph.RouteInputs{}, err
 		}
 		if listener.Protocol == gatewayv1.HTTPProtocolType {
-			// An attached peer may still own a policy for an old HTTP
-			// listener hostname or namespace authorization.
-			waitForPolicyRemoval = !gatewayProgrammedForGeneration(gateway)
 			backends, err = r.collectGraphRouteModelInputs(ctx, gateway, routes, request.Route)
 			if err != nil {
 				return graph.RouteInputs{}, err
@@ -114,7 +110,7 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 				}
 			} else if _, eligible := backends.admission.eligible[client.ObjectKeyFromObject(route)]; !eligible {
 				// The peer reconciles revocation through its durable detach checkpoint.
-				node.WaitForHTTPPolicyRemoval = waitForPolicyRemoval
+				node.WaitForHTTPPolicyRemoval = true
 				input.Nodes = append(input.Nodes, node)
 				continue
 			}
@@ -122,7 +118,7 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 			if err != nil {
 				var rejection *routeBuildError
 				if !requested && (errors.As(err, &rejection) || apierrors.IsNotFound(err)) {
-					node.WaitForHTTPPolicyRemoval = waitForPolicyRemoval
+					node.WaitForHTTPPolicyRemoval = true
 					input.Nodes = append(input.Nodes, node)
 					continue
 				}

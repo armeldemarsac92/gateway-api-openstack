@@ -215,6 +215,12 @@ func (r *Reconciler) reconcileGatewayGraph(
 		}
 		var componentError *cloud.GraphError
 		if errors.As(err, &componentError) && componentError.Identity.RouteUID != "" {
+			if graphResult.Gateway.HTTPPolicyTransition {
+				message := controller.ProviderProgressMessage(graphResult.Gateway.Outcome, "Waiting for HTTP policy changes")
+				if statusErr := r.setGatewayProgressing(ctx, scope.gateway, decision.listener, message); statusErr != nil {
+					return ctrl.Result{}, statusErr
+				}
+			}
 			if policy, classified := controller.ProviderFailurePolicyFor(err); classified {
 				return controller.ProviderFailureResult(policy, err, string(scope.gateway.UID))
 			}

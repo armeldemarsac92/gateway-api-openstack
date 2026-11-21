@@ -84,6 +84,84 @@ func TestGatewayDoesNotReportNewHostnameProgrammedWhileRoutesProgress(t *testing
 	}
 }
 
+func TestGatewayWithdrawsCurrentHTTPReadinessOnPolicyFailure(t *testing.T) {
+	cfg := testConfig()
+	gateway := programmedTestGateway(cfg)
+	gateway.Spec.Listeners[0].Hostname = ptr.To(gatewayv1.Hostname("first.example.test"))
+	gateway.Spec.Listeners = append(gateway.Spec.Listeners, gatewayv1.Listener{
+		Name: "second", Protocol: gatewayv1.HTTPProtocolType, Port: gateway.Spec.Listeners[0].Port,
+		Hostname: ptr.To(gatewayv1.Hostname("second.example.test")),
+	})
+	class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "openstack"}, Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName}}
+	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gateway).WithObjects(class, gateway).Build()
+	gatewayState := cloud.GatewayState{LoadBalancerID: "load-balancer", ListenerID: "listener", VIPAddress: "192.0.2.10"}
+	pending := cloud.ProgressingOutcome("Waiting for updated HTTP hostname rules", time.Second)
+	graphFailure := &cloud.GraphError{Identity: cloud.Identity{RouteUID: "route-uid"}, Err: errors.New("failed to disable policy")}
+	r := newTestReconciler(Reconciler{Client: kube, APIReader: kube, Config: cfg, Writer: fixedGatewayGraph{
+		result: cloud.GatewayGraphResult{Outcome: pending, Gateway: cloud.GatewayResult{
+			State: gatewayState, Outcome: pending, HTTPPolicyTransition: true,
+		}}, err: graphFailure,
+	}}, nil)
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(gateway)}
+	if _, err := r.Reconcile(t.Context(), request); !errors.Is(err, graphFailure) {
+		t.Fatalf("reconcile on failed HTTP policy change = %v, want the provider error", err)
+	}
+	current := &gatewayv1.Gateway{}
+	if err := kube.Get(t.Context(), request.NamespacedName, current); err != nil {
+		t.Fatal(err)
+	}
+	if current.Generation != gateway.Generation ||
+		!meta.IsStatusConditionFalse(current.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed)) ||
+		len(current.Status.Listeners) != 2 ||
+		!meta.IsStatusConditionFalse(current.Status.Listeners[0].Conditions, string(gatewayv1.ListenerConditionProgrammed)) {
+		t.Fatalf("failed HTTP policy change left current readiness published: %#v", current.Status)
+	}
+
+	r.Writer = fixedGatewayGraph{result: cloud.GatewayGraphResult{Outcome: cloud.ReadyOutcome(), Gateway: cloud.GatewayReadyResult(gatewayState)}}
+	if _, err := r.Reconcile(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	if err := kube.Get(t.Context(), request.NamespacedName, current); err != nil {
+		t.Fatal(err)
+	}
+	if current.Generation != gateway.Generation ||
+		!meta.IsStatusConditionTrue(current.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed)) ||
+		!meta.IsStatusConditionTrue(current.Status.Listeners[0].Conditions, string(gatewayv1.ListenerConditionProgrammed)) {
+		t.Fatalf("observed HTTP policy readiness was not recovered: %#v", current.Status)
+	}
+}
+
+func TestGatewayExcludesRemovedHostnameFromSingletonAttachedRoutes(t *testing.T) {
+	cfg := testConfig()
+	gateway := programmedTestGateway(cfg)
+	survivor := &gateway.Spec.Listeners[0]
+	survivor.Hostname = ptr.To(gatewayv1.Hostname("survivor.example.test"))
+	removed := survivor.DeepCopy()
+	removed.Name, removed.Hostname = "old", ptr.To(gatewayv1.Hostname("old.example.test"))
+	parent := gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name)}
+	route := &gatewayv1.HTTPRoute{
+		ObjectMeta: metav1.ObjectMeta{Namespace: gateway.Namespace, Name: "old", Generation: 1},
+		Spec: gatewayv1.HTTPRouteSpec{
+			CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{parent}},
+			Hostnames:       []gatewayv1.Hostname{*removed.Hostname},
+		},
+	}
+	route.Status.Parents = []gatewayv1.RouteParentStatus{{
+		ParentRef: parent, ControllerName: cfg.ControllerName,
+		Conditions: []metav1.Condition{{Type: string(gatewayv1.RouteConditionAccepted), Status: metav1.ConditionTrue, ObservedGeneration: route.Generation}},
+	}}
+	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithObjects(route).Build()
+	r := &Reconciler{Client: kube, Config: cfg}
+	counts, err := r.attachedRouteCounts(t.Context(), gateway, []*gatewayv1.Listener{survivor, removed})
+	if err != nil || counts[removed.Name] != 1 || counts[survivor.Name] != 0 {
+		t.Fatalf("shared counts = %v, %v", counts, err)
+	}
+	counts, err = r.attachedRouteCounts(t.Context(), gateway, []*gatewayv1.Listener{survivor})
+	if err != nil || counts[survivor.Name] != 0 {
+		t.Fatalf("singleton counts before the old route status is refreshed = %v, %v", counts, err)
+	}
+}
+
 func TestGatewayReportsProvenUDPListenerWhenSiblingFails(t *testing.T) {
 	cfg := testConfig()
 	gateway := &gatewayv1.Gateway{
