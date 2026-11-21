@@ -1,0 +1,175 @@
+{
+  "channel": "experimental",
+  "case": "UDPRouteNotAllowedByListeners",
+  "passed": true,
+  "controller": {
+    "repository": "ghcr.io/armeldemarsac92/gateway-api-openstack",
+    "sourceRevision": "db720031f03f5c344be3decad81a1563dc734dde",
+    "manifestDigest": "sha256:358069a4210a218196078fab457a717ea92eedff4d5428db3d9b3fedd5fad5af",
+    "platform": "linux/amd64",
+    "ociArchiveSHA256": "92780ab5e54da4c018fb7b5f3f4b353df5afd785e7fa010f65557de1fa297c2f",
+    "managerSHA256": "3ac54546696c07c0461e5b5b3edd94d5f1ac404490e3f67536503dad289f9d7d"
+  },
+  "controllerFeatureFlag": "--octavia-tls-sni-passthrough",
+  "gatewayAPI": {
+    "revision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+    "release": "v1.7.0",
+    "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+    "baseManifestSHA256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+    "caseFilesSHA256": {
+      "udproute-not-allowed-by-listeners.go": "c0ca151b199a41887e2b7ced1bca4f539c7acd82cab89e35c05a35d388c7e850",
+      "udproute-not-allowed-by-listeners.yaml": "163eb987f992a7ee73f23caff54140b0ebb8cc10889959b5872400cf1bb27df6"
+    },
+    "suiteFeatures": [
+      "Gateway",
+      "UDPRoute",
+      "TLSRoute"
+    ],
+    "tlsRouteV1Served": true
+  },
+  "kubernetes": "v1.36.2",
+  "etcd": "3.6.8",
+  "haproxy": "3.0.19",
+  "providerPackages": {
+    "octavia": {
+      "version": "19.0.1.dev6",
+      "wheelSHA256": "00ce0a3cb11f39779e5d7b8e6fe79618ac9058943ae22e9c2330b54fde73272c",
+      "filesVerified": 632
+    },
+    "octaviaLib": {
+      "version": "3.12.1.dev3",
+      "wheelSHA256": "5513991a6e004490221065b64be53f3dbdf3de1bab6e768ff2bc98f797c5cfc5",
+      "filesVerified": 24
+    }
+  },
+  "amphoraCapabilities": [
+    "tls_sni_passthrough_v1"
+  ],
+  "octaviaAPI": {
+    "readRequests": 24,
+    "writeRequests": 3
+  },
+  "echoReadiness": {
+    "ready": true,
+    "phase": "Running",
+    "response": {
+      "request": "qualification-readiness",
+      "namespace": "gateway-conformance-infra",
+      "service": "udp-echo",
+      "pod": "udp-echo-local"
+    },
+    "verifiedBeforeAndAfter": true,
+    "binarySHA256": "d4e04b904229880dc2e32dbe58244b3bf46408c2e1e8325ebb83a69fab3d57a9"
+  },
+  "upstream": {
+    "exitCode": 0,
+    "namespaceReadinessCompleted": true,
+    "tests": {
+      "TestLocalUDPRouteTLSParent/UDPRouteNotAllowedByListeners": "PASS",
+      "TestLocalUDPRouteTLSParent/UDPRouteNotAllowedByListeners/UDPRoute_should_have_Accepted=False_with_reason_NotAllowedByListeners": "PASS",
+      "TestLocalUDPRouteTLSParent/UDPRouteNotAllowedByListeners/Gateway_should_have_0_Routes_attached_on_the_TLS_listener": "PASS"
+    },
+    "reportWritten": true
+  },
+  "gateway": {
+    "generation": 1,
+    "addresses": [
+      {
+        "type": "IPAddress",
+        "value": "192.0.2.30"
+      }
+    ],
+    "specListeners": [
+      {
+        "allowedRoutes": {
+          "namespaces": {
+            "from": "Same"
+          }
+        },
+        "name": "tls",
+        "port": 443,
+        "protocol": "TLS",
+        "tls": {
+          "mode": "Passthrough"
+        }
+      }
+    ],
+    "conditions": {
+      "Accepted": {
+        "status": "True",
+        "reason": "Accepted",
+        "observedGeneration": 1
+      },
+      "Programmed": {
+        "status": "True",
+        "reason": "Programmed",
+        "observedGeneration": 1
+      }
+    },
+    "listeners": [
+      {
+        "name": "tls",
+        "attachedRoutes": 0,
+        "supportedKinds": [
+          {
+            "group": "gateway.networking.k8s.io",
+            "kind": "TLSRoute"
+          }
+        ],
+        "conditions": {
+          "Accepted": {
+            "status": "True",
+            "reason": "Accepted",
+            "observedGeneration": 1
+          },
+          "ResolvedRefs": {
+            "status": "True",
+            "reason": "ResolvedRefs",
+            "observedGeneration": 1
+          },
+          "Conflicted": {
+            "status": "False",
+            "reason": "NoConflicts",
+            "observedGeneration": 1
+          },
+          "Programmed": {
+            "status": "True",
+            "reason": "Programmed",
+            "observedGeneration": 1
+          }
+        }
+      }
+    ]
+  },
+  "udpRoute": {
+    "generation": 1,
+    "parents": [
+      {
+        "parentRef": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "name": "udproute-tls-only-gateway",
+          "sectionName": "tls"
+        },
+        "controllerName": "gateway-api-openstack.github.io/gateway-api-openstack",
+        "conditions": {
+          "Accepted": {
+            "status": "False",
+            "reason": "NotAllowedByListeners",
+            "observedGeneration": 1
+          },
+          "ResolvedRefs": {
+            "status": "True",
+            "reason": "ResolvedRefs",
+            "observedGeneration": 1
+          },
+          "gateway-api-openstack.github.io/Programmed": {
+            "status": "False",
+            "reason": "NotAllowedByListeners",
+            "observedGeneration": 1
+          }
+        }
+      }
+    ]
+  }
+}
