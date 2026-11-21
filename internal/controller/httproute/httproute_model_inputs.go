@@ -65,7 +65,7 @@ func (r *Reconciler) observeRouteGraphAdmission(ctx context.Context, gateway *ga
 	byName := make(map[string][]corev1.Namespace)
 	for i := range routes {
 		route := &routes[i]
-		if !route.DeletionTimestamp.IsZero() || !structurallySupportedRoute(route) ||
+		if !route.DeletionTimestamp.IsZero() || !r.structurallySupportedRoute(route) ||
 			route.Annotations[r.Config.RouteLifecycleAnnotation()] == controller.RouteDetaching {
 			continue
 		}

@@ -465,3 +465,43 @@ func TestStockRedirectCleanupWaitsForReferencedPolicyMissingFromList(t *testing.
 		})
 	}
 }
+
+func TestStockRedirectGuardsHigherFixedAndWeightedMatches(t *testing.T) {
+	spec := redirectGraphSpec(t)
+	route := &spec.Routes[0].Spec
+	backend := completeGraphSpec(safetyTestIdentity(t)).Routes[0].Spec
+	route.MemberSubnetID, route.HealthMonitor = backend.MemberSubnetID, backend.HealthMonitor
+	route.FixedHTTPRules = []cloud.HTTPFixedRule{{
+		RuleIndex: 1,
+		Matches:   []cloud.HTTPPathMatch{{Hostname: "*.example.test", PathType: cloud.PathMatchExact, PathValue: "/app/missing", Precedence: 1}},
+	}}
+	route.WeightedHTTPRules = []cloud.HTTPWeightedRule{{
+		RuleIndex: 2,
+		Matches: []cloud.HTTPPathMatch{
+			{Hostname: "*.example.test", PathType: cloud.PathMatchExact, PathValue: "/app/split", Precedence: 2},
+			{Hostname: "*.example.test", PathType: cloud.PathMatchPrefix, PathValue: "/", Precedence: 5},
+		},
+		Targets: []cloud.HTTPWeightedTarget{{Weight: 1}},
+	}}
+	p := &Provider{projectID: "project-a", fixedHTTPResponses: true, weightedHTTPTargets: true}
+	desired, err := p.buildDesiredGatewayGraph(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var redirect desiredPolicy
+	for _, part := range desired.routes[0].httpParts {
+		if part.redirect {
+			if len(part.policies) != 1 {
+				t.Fatalf("redirect has %d policies, want one", len(part.policies))
+			}
+			redirect = part.policies[0]
+		}
+	}
+	if redirect.redirect == nil || redirect.position != 3 {
+		t.Fatalf("redirect policy belongs after the two exact matches: %#v", redirect)
+	}
+	guards := redirect.redirect.guards
+	if len(guards) != 2 || guards[0].value != "/app/missing" || guards[1].value != "/app/split" {
+		t.Fatalf("redirect must exclude both higher actions and allow the lower match: %#v", guards)
+	}
+}

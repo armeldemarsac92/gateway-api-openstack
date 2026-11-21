@@ -44,12 +44,22 @@ func httpPlanningParts(desired desiredGatewayGraph, actual observedGatewayGraph)
 		if index < len(actual.routes) {
 			observed = actual.routes[index]
 		}
+		heldPools, uncertainTargets := observedWeightedPoolHolds(observed)
+		var authorizations map[string]map[string]int
+		demand := weightedBackendDemand(route)
+		if node.Disposition == cloud.GraphEnsure {
+			authorizations = weightedPolicyAuthorizations(route, observed, demand)
+		}
 		appendPart := func(part desiredRoute, fragment observedRouteGraph, obsolete bool) {
 			partNode := node
 			if obsolete && partNode.Disposition == cloud.GraphEnsure {
 				partNode.Disposition = cloud.GraphDelete
 			}
 			part.httpParts, fragment.httpParts = nil, nil
+			part.weightedAuthorizations = authorizations
+			if fragment.pool != nil {
+				fragment.weightedPoolHeld = uncertainTargets || heldPools[fragment.pool.ID]
+			}
 			partDesired.spec.Routes = append(partDesired.spec.Routes, partNode)
 			partDesired.routes = append(partDesired.routes, part)
 			if actual.routes != nil {
@@ -64,6 +74,11 @@ func httpPlanningParts(desired desiredGatewayGraph, actual observedGatewayGraph)
 			var fragment observedRouteGraph
 			if part := observed.httpParts[backend.backendKey]; part != nil {
 				fragment = *part
+			}
+			if backend.weightedTargets != nil {
+				backend = resolveWeightedHTTPPart(backend, route, observed, servingWeightedListenerID(actual, backend))
+			} else if weight, referenced := demand[backend.backendKey]; referenced && weight == 0 && len(backend.policies) == 0 {
+				backend.zeroWeightOnly = true
 			}
 			appendPart(backend, fragment, false)
 		}
@@ -204,6 +219,28 @@ func httpMemberWithdrawal(observed observedRouteGraph) ([]routeMutation, string)
 	return steps, hold
 }
 
+// Switching a verified predicate in place closes the revoked backend even
+// when Octavia cannot confirm a member disable. A target in ERROR still
+// needs a successful reload before its readback proves traffic is closed.
+func planFixedResponseDuringMemberWithdrawal(desired desiredRoute, observed observedRouteGraph) (routeMutation, bool) {
+	for _, wanted := range desired.policies {
+		for _, policy := range observed.policies {
+			if policy.role != wanted.role || !policy.targetObserved || !policy.policy.AdminStateUp ||
+				policy.policy.ProvisioningStatus != "ACTIVE" && policy.policy.ProvisioningStatus != "ERROR" ||
+				slices.ContainsFunc(policy.rules, func(rule observedRouteRule) bool { return rule.rule.ProvisioningStatus != "ACTIVE" }) ||
+				!observedHTTPPredicateMatches(policy, rulesFor(wanted, desired.hostnameRuleValue)) {
+				continue
+			}
+			if policy.fixedResponse && policy.policy.ProvisioningStatus == "ERROR" ||
+				!policy.fixedResponse && policy.policy.Action == string(l7policies.ActionRedirectToPool) &&
+					policy.policy.RedirectPoolID == observed.pool.ID {
+				return routeMutation{kind: routeMutationSetPolicyTarget, id: policy.policy.ID}, true
+			}
+		}
+	}
+	return routeMutation{}, false
+}
+
 type httpPolicyHandovers struct {
 	protected map[string]bool
 	ports     map[int]bool
@@ -220,12 +257,17 @@ type httpPolicyStage struct {
 func (stage httpPolicyStage) plan(route desiredRoute, observed observedRouteGraph) ([]routeMutation, error) {
 	route.policies = []desiredPolicy{stage.wanted}
 	observed.policies = stage.current
+	if route.fixedResponse {
+		// A proved fixed response can take over while a separate member
+		// withdrawal is blocked. Its policy has no pool dependency.
+		observed.members = nil
+	}
 	steps, _, err := buildRouteEnsurePlan(route, observed)
 	return steps, err
 }
 
 func (stage httpPolicyStage) ready(route desiredRoute, observed observedRouteGraph) bool {
-	if len(stage.current) == 0 || observed.backendProvisioningIssue(false, true) != "" {
+	if stage.wanted.targetsPending() || len(stage.current) == 0 || !route.fixedResponse && observed.backendProvisioningIssue(false, true) != "" {
 		return false
 	}
 	current := stage.current[0]
@@ -233,7 +275,7 @@ func (stage httpPolicyStage) ready(route desiredRoute, observed observedRouteGra
 		slices.ContainsFunc(current.rules, func(rule observedRouteRule) bool { return rule.rule.ProvisioningStatus != "ACTIVE" }) {
 		return false
 	}
-	if route.unavailable {
+	if route.unavailable && !route.fixedResponse {
 		if steps, hold := httpMemberWithdrawal(observed); len(steps) != 0 || hold != "" {
 			return false
 		}
@@ -259,14 +301,23 @@ func observedHTTPPredicateMatches(policy observedRoutePolicy, rules []desiredRul
 }
 
 func observedForwardPolicyMatches(route desiredRoute, observed observedRouteGraph, policy observedRoutePolicy) bool {
-	if observed.pool == nil || !policy.adminObserved || policy.policy.ProvisioningStatus != "ACTIVE" || slices.ContainsFunc(policy.rules, func(rule observedRouteRule) bool {
+	if !policy.adminObserved || policy.policy.ProvisioningStatus != "ACTIVE" || slices.ContainsFunc(policy.rules, func(rule observedRouteRule) bool {
 		return !rule.flagsObserved || rule.rule.ProvisioningStatus != "ACTIVE"
 	}) {
 		return false
 	}
 	return slices.ContainsFunc(route.policies, func(wanted desiredPolicy) bool {
-		return wanted.role == policy.role && desiredPolicyActionMatches(wanted, policy.policy, observed.pool.ID) &&
-			observedHTTPPredicateMatches(policy, rulesFor(wanted, route.hostnameRuleValue))
+		if wanted.role != policy.role || !observedHTTPPredicateMatches(policy, rulesFor(wanted, route.hostnameRuleValue)) {
+			return false
+		}
+		switch {
+		case wanted.weightedPlan != nil:
+			return !wanted.weightedPlan.pending && slices.EqualFunc(wanted.weightedPlan.targets, policy.weightedTargets, weightedTargetsEqual)
+		case route.fixedResponse:
+			return policy.fixedResponse
+		default:
+			return observed.pool != nil && desiredPolicyActionMatches(wanted, policy.policy, observed.pool.ID)
+		}
 	})
 }
 
@@ -312,9 +363,9 @@ func observedGroupedPrefixMatches(observed observedRoutePolicy, legacy desiredRo
 
 // Stage an equivalent policy immediately before the old one. Inserting the
 // disabled policy leaves the old predicate effective while the new backend
-// and rules converge. Leave unrelated positions alone until the new policy
-// is observed ACTIVE and enabled. Removing the old rule first could expose a
-// broader healthy match while the replacement is being provisioned.
+// and rules converge. Withdraw an obsolete pool before handing its matches
+// to a fixed response. Leave unrelated positions alone until the new policy
+// is observed ACTIVE and enabled.
 func planHTTPPolicyHandovers(original, desired desiredGatewayGraph, actual observedGatewayGraph, owners []int) *httpPolicyHandovers {
 	handover := &httpPolicyHandovers{
 		protected: make(map[string]bool),
@@ -329,7 +380,7 @@ func planHTTPPolicyHandovers(original, desired desiredGatewayGraph, actual obser
 			listenerPorts[listener.ID] = listener.ProtocolPort
 		}
 	}
-	stageReplacement := func(target, port int, old []observedRoutePolicy, wantedPolicies []desiredPolicy) {
+	stageReplacement := func(target, port int, old []observedRoutePolicy, wantedPolicies []desiredPolicy) bool {
 		// A scalar prefix uses two consecutive positions for one logical
 		// match. Start before the first and preserve earlier policy order.
 		position := old[0].policy.Position
@@ -337,6 +388,7 @@ func planHTTPPolicyHandovers(original, desired desiredGatewayGraph, actual obser
 			position = min(position, policy.policy.Position)
 		}
 		replacement := actual.routes[target]
+		staging := false
 		for _, wanted := range wantedPolicies {
 			stage := httpPolicyStage{wanted: wanted, position: position}
 			stage.wanted.position = position
@@ -350,6 +402,7 @@ func planHTTPPolicyHandovers(original, desired desiredGatewayGraph, actual obser
 			if stage.ready(desired.routes[target], replacement) {
 				continue
 			}
+			staging = true
 			handover.ports[port] = true
 			for _, policy := range old {
 				handover.protected[policy.policy.ID] = true
@@ -358,6 +411,7 @@ func planHTTPPolicyHandovers(original, desired desiredGatewayGraph, actual obser
 				handover.stages[target] = stage
 			}
 		}
+		return staging
 	}
 	for index, observed := range actual.routes {
 		owner := owners[index]
@@ -376,11 +430,15 @@ func planHTTPPolicyHandovers(original, desired desiredGatewayGraph, actual obser
 			if !actual.scoped || port != 0 {
 				target, wanted := findHTTPPolicyReplacement(desired, owners, owner, port, observed.policies)
 				if target >= 0 {
-					stageReplacement(target, port, observed.policies, wanted)
+					staging := stageReplacement(target, port, observed.policies, wanted)
+					replacement := desired.routes[target]
+					handover.drain[index] = staging && (replacement.httpFixedPolicy() || replacement.weightedTargets != nil)
 					continue
 				}
 			}
 		}
+		fixedReplacements := 0
+		fixedStaging, groupedDrain := false, false
 		for _, policy := range observed.policies {
 			if node.Disposition == cloud.GraphEnsure && slices.ContainsFunc(desired.routes[index].policies, func(wanted desiredPolicy) bool {
 				return wanted.role == policy.role
@@ -396,10 +454,19 @@ func planHTTPPolicyHandovers(original, desired desiredGatewayGraph, actual obser
 			if target < 0 {
 				continue
 			}
-			if node.Disposition == cloud.GraphDelete && backend != "" {
-				handover.drain[index] = true
+			staging := stageReplacement(target, port, old, wanted)
+			if desired.routes[target].httpFixedPolicy() {
+				fixedReplacements++
+				fixedStaging = fixedStaging || staging
+			} else if backend != "" || desired.routes[target].weightedTargets != nil {
+				groupedDrain = true
 			}
-			stageReplacement(target, port, old, wanted)
+		}
+		if node.Disposition == cloud.GraphDelete {
+			// Keep an obsolete pool serving if it still covers another
+			// predicate while a fixed replacement is staged.
+			handover.drain[index] = fixedReplacements == 0 && groupedDrain ||
+				fixedStaging && fixedReplacements == len(observed.policies)
 		}
 	}
 	return handover

@@ -59,7 +59,14 @@ func redirectForwardingByPort(spec cloud.GatewayGraphSpec) map[int][]cloud.HTTPP
 			for _, backend := range route.HTTPBackends {
 				result[port] = append(result[port], backend.Matches...)
 			}
-		} else if route.PathType != "" {
+		}
+		for _, rule := range route.WeightedHTTPRules {
+			result[port] = append(result[port], rule.Matches...)
+		}
+		for _, rule := range route.FixedHTTPRules {
+			result[port] = append(result[port], rule.Matches...)
+		}
+		if route.PathType != "" {
 			result[port] = append(result[port], cloud.HTTPPathMatch{Hostname: route.Hostname, PathType: route.PathType, PathValue: route.PathValue, Precedence: route.Precedence})
 		}
 	}

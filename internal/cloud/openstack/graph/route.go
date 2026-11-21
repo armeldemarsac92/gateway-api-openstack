@@ -43,6 +43,8 @@ type desiredPolicy struct {
 	matchKey          string
 	hostnameRuleValue string
 	redirect          *desiredRedirectPolicy
+	weighted          bool
+	weightedPlan      *weightedHTTPPolicyPlan
 }
 
 type desiredRule struct {
@@ -54,18 +56,23 @@ type desiredRule struct {
 }
 
 type desiredRoute struct {
-	identity          Identity
-	spec              cloud.RouteSpec
-	members           []cloud.Member
-	healthMonitor     cloud.HealthMonitorConfig
-	policies          []desiredPolicy
-	hostnameRuleValue string
-	httpParts         []desiredRoute
-	backendKey        string
-	unavailable       bool
-	redirect          bool
-	redirectRanks     []int
-	redirectIssue     string
+	identity               Identity
+	spec                   cloud.RouteSpec
+	members                []cloud.Member
+	healthMonitor          cloud.HealthMonitorConfig
+	policies               []desiredPolicy
+	hostnameRuleValue      string
+	httpParts              []desiredRoute
+	backendKey             string
+	unavailable            bool
+	redirect               bool
+	redirectRanks          []int
+	redirectIssue          string
+	fixedResponse          bool
+	weightedTargets        []desiredHTTPWeightedTarget
+	targetsPending         bool
+	zeroWeightOnly         bool
+	weightedAuthorizations map[string]map[string]int
 }
 
 func (r desiredRoute) protocol() string {
@@ -83,7 +90,7 @@ func (p *Provider) buildDesiredRoute(spec cloud.RouteSpec) (desiredRoute, error)
 	if len(spec.HTTPRedirects) != 0 {
 		return desiredRoute{}, cloud.NewProviderError(cloud.ErrorCategoryTerminalValidation, errors.New("HTTP redirects require the complete Gateway routing snapshot"))
 	}
-	if len(spec.HTTPBackends) != 0 {
+	if len(spec.HTTPBackends) != 0 || len(spec.WeightedHTTPRules) != 0 || len(spec.FixedHTTPRules) != 0 {
 		return p.buildDesiredHTTPBackends(spec)
 	}
 	route, err := p.buildDesiredRoutePart(spec, "", false)
@@ -237,11 +244,17 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 		return desiredRoute{}, err
 	}
 	route := desiredRoute{identity: identity, spec: spec}
+	weighted, targetsUsed, err := p.buildDesiredWeightedHTTPParts(spec)
+	if err != nil {
+		return desiredRoute{}, err
+	}
 	backendKeys := make(map[string]bool, len(spec.HTTPBackends))
-	for _, backend := range spec.HTTPBackends {
+	for index, backend := range spec.HTTPBackends {
+		fixedResponse := p.fixedHTTPResponses && backend.InvalidReference
+		unavailable := backend.Unavailable || fixedResponse
 		if strings.TrimSpace(backend.Namespace) == "" || strings.TrimSpace(backend.Name) == "" || backend.Port < 1 || backend.Port > 65535 ||
-			len(backend.Matches) == 0 || backend.Unavailable && len(backend.Members) != 0 {
-			return invalid(errors.New("each HTTP backend requires a Service namespace, name, valid port and matches, and an unavailable backend must have no members"))
+			len(backend.Matches) == 0 && !targetsUsed[index] || unavailable && len(backend.Members) != 0 {
+			return invalid(errors.New("each HTTP backend requires a Service namespace, name, valid port and a match or weighted reference, and an unavailable backend must have no members"))
 		}
 		key := openstackidentity.HTTPBackendKey(backend.Namespace, backend.Name, backend.Port)
 		if backendKeys[key] {
@@ -249,47 +262,94 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 		}
 		backendKeys[key] = true
 		partSpec := spec
-		partSpec.HTTPBackends, partSpec.HTTPRedirects, partSpec.Members = nil, nil, backend.Members
-		part, err := p.buildDesiredRoutePart(partSpec, key, backend.Unavailable)
+		partSpec.HTTPBackends, partSpec.HTTPRedirects, partSpec.FixedHTTPRules, partSpec.WeightedHTTPRules, partSpec.Members = nil, nil, nil, nil, backend.Members
+		part, err := p.buildDesiredRoutePart(partSpec, key, unavailable)
 		if err != nil {
 			return desiredRoute{}, err
 		}
+		part.fixedResponse = fixedResponse
 		for _, role := range []string{rolePool, roleMember, roleMonitor} {
 			if _, err := part.identity.RouteTags(part.httpRole(role, "")); err != nil {
 				return invalid(err)
 			}
 		}
-		matchKeys := make(map[string]bool, len(backend.Matches))
-		for _, match := range backend.Matches {
-			match = normalizeGroupedHTTPMatch(match)
-			policies, hostnameRuleValue, err := httpPathPolicies(match, true)
-			if err != nil {
-				return invalid(err)
-			}
-			matchKey := openstackidentity.HTTPMatchKey(match.Hostname, match.PathType, match.PathValue)
-			if matchKeys[matchKey] {
-				return invalid(errors.New("duplicate HTTP match within one backend"))
-			}
-			matchKeys[matchKey] = true
-			for _, policy := range policies {
-				policy.backendKey, policy.matchKey = key, matchKey
-				policy.hostnameRuleValue, policy.precedence = hostnameRuleValue, match.Precedence
-				policy.role = part.httpRole(policy.role, matchKey)
-				if _, err := part.identity.RouteTags(policy.role); err != nil {
-					return invalid(err)
-				}
-				for _, rule := range rulesFor(policy, "") {
-					if _, err := part.identity.RouteTags(rule.role); err != nil {
-						return invalid(err)
-					}
-				}
-				part.policies = append(part.policies, policy)
-			}
+		if err := part.buildHTTPMatchPolicies(backend.Matches); err != nil {
+			return invalid(err)
 		}
 		route.httpParts = append(route.httpParts, part)
 	}
+	fixed, err := p.buildDesiredFixedHTTPParts(spec)
+	if err != nil {
+		return desiredRoute{}, err
+	}
+	route.httpParts = append(route.httpParts, fixed...)
+	route.httpParts = append(route.httpParts, weighted...)
 	sort.Slice(route.httpParts, func(i, j int) bool { return route.httpParts[i].backendKey < route.httpParts[j].backendKey })
 	return route, nil
+}
+
+func (p *Provider) buildDesiredFixedHTTPParts(spec cloud.RouteSpec) ([]desiredRoute, error) {
+	if len(spec.FixedHTTPRules) == 0 {
+		return nil, nil
+	}
+	invalid := func(err error) ([]desiredRoute, error) {
+		return nil, cloud.NewProviderError(cloud.ErrorCategoryTerminalValidation, err)
+	}
+	if !p.fixedHTTPResponses {
+		return invalid(errors.New("HTTP fixed responses require the Octavia fixed HTTP capability"))
+	}
+	var parts []desiredRoute
+	seen := make(map[int]bool, len(spec.FixedHTTPRules))
+	partSpec := spec
+	partSpec.HTTPBackends, partSpec.HTTPRedirects, partSpec.FixedHTTPRules, partSpec.WeightedHTTPRules = nil, nil, nil, nil
+	for _, rule := range spec.FixedHTTPRules {
+		if rule.RuleIndex < 0 || seen[rule.RuleIndex] || len(rule.Matches) == 0 {
+			return invalid(errors.New("fixed HTTP rules require a unique rule index and at least one match"))
+		}
+		seen[rule.RuleIndex] = true
+		part, err := p.buildDesiredRoutePart(partSpec, openstackidentity.HTTPFixedRuleKey(rule.RuleIndex), true)
+		if err != nil {
+			return nil, err
+		}
+		part.fixedResponse = true
+		if err := part.buildHTTPMatchPolicies(rule.Matches); err != nil {
+			return invalid(err)
+		}
+		parts = append(parts, part)
+	}
+	return parts, nil
+}
+
+func (r *desiredRoute) buildHTTPMatchPolicies(matches []cloud.HTTPPathMatch) error {
+	matchKeys := make(map[string]bool, len(matches))
+	for _, match := range matches {
+		match = normalizeGroupedHTTPMatch(match)
+		policies, hostnameRuleValue, err := httpPathPolicies(match, true)
+		if err != nil {
+			return err
+		}
+		matchKey := openstackidentity.HTTPMatchKey(match.Hostname, match.PathType, match.PathValue)
+		if matchKeys[matchKey] {
+			return errors.New("duplicate HTTP match within one backend or weighted rule")
+		}
+		matchKeys[matchKey] = true
+		for _, policy := range policies {
+			policy.backendKey, policy.matchKey = r.backendKey, matchKey
+			policy.hostnameRuleValue, policy.precedence = hostnameRuleValue, match.Precedence
+			policy.weighted = r.weightedTargets != nil
+			policy.role = policyRuleRole(policy, policy.role, "")
+			if _, err := r.identity.RouteTags(policy.role); err != nil {
+				return err
+			}
+			for _, rule := range rulesFor(policy, "") {
+				if _, err := r.identity.RouteTags(rule.role); err != nil {
+					return err
+				}
+			}
+			r.policies = append(r.policies, policy)
+		}
+	}
+	return nil
 }
 
 func (r desiredRoute) policySets() [][]desiredPolicy {

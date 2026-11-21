@@ -212,7 +212,7 @@ func (r *Reconciler) validateCachedRouteDecision(
 		return decision, nil
 	}
 	// Grouped routes resolve each backend profile independently from the live inputs.
-	if backends, err := validateRouteStructure(route); err == nil && len(backends) == 1 && !hasMultipleRoutePaths(route) {
+	if backends, err := r.validateRouteStructure(route); err == nil && len(backends) == 1 && !r.usesHTTPBackendGroups(route) {
 		if err := r.checkRouteBackendProfile(ctx, r.Client, route.Namespace, backends[0], parent.gateway); err != nil {
 			var rejection *routeBuildError
 			if !errors.As(err, &rejection) {
@@ -323,7 +323,7 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 		return ctrl.Result{Requeue: true}, nil
 	case routeBindingGatewayPending:
 		status := pendingRouteStatus("Controller-owned Octavia load balancer or listener is not ready").withBackendDiagnostic(graphResult.backendDiagnostic)
-		if hasMultipleRoutePaths(httpRoute) && !graphResult.backendObserved {
+		if r.usesHTTPBackendGroups(httpRoute) && !graphResult.backendObserved {
 			if err := r.resolveRouteReferences(ctx, httpRoute, &status); err != nil {
 				return ctrl.Result{}, err
 			}

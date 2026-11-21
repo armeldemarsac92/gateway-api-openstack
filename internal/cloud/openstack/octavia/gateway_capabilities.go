@@ -1,0 +1,52 @@
+/*
+Copyright 2026 The gateway-api-openstack Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package octavia
+
+import (
+	"context"
+	"fmt"
+	"net/url"
+	"slices"
+	"strings"
+)
+
+const (
+	GatewayCapabilityFixedHTTPResponses  = "fixed_http_responses_v1"
+	GatewayCapabilityWeightedHTTPTargets = "weighted_http_targets_v1"
+)
+
+// VerifyGatewayCapabilities checks the selected provider on the authenticated,
+// region-specific load-balancer endpoint. Only an explicit capability list
+// authorizes use of the requested extensions.
+func (s *Service) VerifyGatewayCapabilities(ctx context.Context, provider string, required ...string) error {
+	if strings.TrimSpace(provider) == "" {
+		return fmt.Errorf("Octavia did not report the effective load balancer provider")
+	}
+	var response struct {
+		Capabilities []string `json:"gateway_capabilities"`
+	}
+	endpoint := s.client.ServiceURL("lbaas", "providers", url.PathEscape(provider), "gateway_capabilities")
+	if _, err := s.client.Get(ctx, endpoint, &response, nil); err != nil {
+		return fmt.Errorf("discover Gateway capabilities for Octavia provider %q: %w", provider, err)
+	}
+	for _, capability := range required {
+		if !slices.Contains(response.Capabilities, capability) {
+			return fmt.Errorf("Octavia provider %q did not advertise Gateway capability %q", provider, capability)
+		}
+	}
+	return nil
+}
