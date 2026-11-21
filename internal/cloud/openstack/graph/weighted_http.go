@@ -377,13 +377,14 @@ func weightedTargetWithdrawals(desired desiredRoute, observed observedRouteGraph
 			// closed while its replacement has no prepared positive pool.
 			withdrawn[zeroed] = fixedWeightedHTTPTarget(policy.weightedTargets[zeroed].Weight)
 		}
+		retry := withdrawn == nil || !policy.policy.AdminStateUp || policy.policy.ProvisioningStatus == "ERROR"
 		if withdrawn == nil && retrySafeTarget && policy.policy.ProvisioningStatus == "ERROR" {
 			// The DB can already show the replacement while Amphora still
 			// serves the previous vector. Retry in place and keep the rules.
 			withdrawn = policy.weightedTargets
 		}
 		if withdrawn != nil {
-			steps = append(steps, routeMutation{kind: routeMutationSetPolicyTarget, id: policy.policy.ID, weightedTargets: &withdrawn})
+			steps = append(steps, routeMutation{kind: routeMutationSetPolicyTarget, id: policy.policy.ID, weightedTargets: &withdrawn, retry: retry})
 		}
 	}
 	return steps

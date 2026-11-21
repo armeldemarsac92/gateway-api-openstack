@@ -24,4 +24,6 @@ Check the same HTTPRoute UID, generation, declared weights and parent throughout
 
 ## Retire the mode
 
+If the region stops advertising an action during a target withdrawal, the controller closes the affected listener through the standard Octavia API. This preserves route precedence and interrupts traffic on that port. When the capability returns, the controller applies the outstanding target changes before reopening the listener. An operator can follow the listener's administrative state and the Gateway's programmed condition during recovery.
+
 Keep the patched workers, API and operator flags while withdrawing routes and Gateways that use the extension. Wait for their owned policies and listener defaults to clear and confirm cleanup against the public Octavia inventory before rolling back the workload manifest. The operator can then withdraw admission for the driver. Coordinate any database or package rollback separately under the cloud's upgrade procedure.

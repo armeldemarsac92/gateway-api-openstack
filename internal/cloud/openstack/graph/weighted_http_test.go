@@ -335,6 +335,36 @@ func TestWeightedHTTPZeroWeightDoesNotHoldPositiveTargets(t *testing.T) {
 	}
 }
 
+func TestWeightedHTTPWithdrawalPrioritizesServingPolicy(t *testing.T) {
+	desired, actual := weightedPlanFixture()
+	parts := desired.routes[0].httpParts
+	local, weighted := parts[0], parts[2]
+	second := weighted.policies[0]
+	second.role, second.path, second.position = "second", "/second", 2
+	weighted.policies = append(weighted.policies, second)
+	weighted.weightedTargets[1].backendKey = ""
+	desired.routes[0].httpParts = []desiredRoute{local, weighted}
+	graph := actual.routes[0].httpParts[weighted.backendKey]
+	other := graph.policies[0]
+	other.role, other.policy.ID, other.policy.Position = second.role, "policy-2", 2
+	other.rules = slices.Clone(other.rules)
+	other.rules[0].rule.ID, other.rules[0].rule.Value = "rule-2", second.path
+	graph.policies = append(graph.policies, other)
+	first := &graph.policies[0]
+	for _, state := range []string{"disabled", "retry with stored replacement"} {
+		if state == "disabled" {
+			first.policy.AdminStateUp = false
+		} else {
+			first.policy.AdminStateUp, first.policy.ProvisioningStatus = true, "ERROR"
+			first.weightedTargets = []octavia.WeightedHTTPTarget{first.weightedTargets[0], fixedWeightedHTTPTarget(1)}
+		}
+		steps := weightedPlan(t, desired, actual)
+		if len(steps) != 1 || steps[0].route.id != other.policy.ID || steps[0].route.weightedTargets == nil {
+			t.Fatalf("first policy %s: want second serving policy updated first, got %#v", state, steps)
+		}
+	}
+}
+
 func TestWeightedHTTPRuleReorderKeepsAuthorizedPredicateServing(t *testing.T) {
 	desired, actual := weightedPlanFixture()
 	parts := desired.routes[0].httpParts

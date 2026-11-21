@@ -24,6 +24,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
+	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
 )
 
 func TestHTTPListenerWritesRequireEffectiveProviderCapabilities(t *testing.T) {
@@ -108,18 +109,24 @@ func TestLostHTTPActionCapabilityOnlyAllowsRestrictiveWithdrawal(t *testing.T) {
 	desired := desiredGatewayGraph{fixedHTTPResponses: true, protocol: cloud.ListenerProtocolHTTP, routes: []desiredRoute{{}}}
 	lb := safetyObservedLoadBalancer()
 	lb.Provider = "amphora"
-	actual := observedGatewayGraph{loadBalancer: lb, routes: []observedRouteGraph{{policies: []observedRoutePolicy{{
-		adminObserved: true,
-		policy:        l7policies.L7Policy{ID: "weighted", AdminStateUp: true, ProvisioningStatus: "ACTIVE"},
-	}}}}}
+	actual := observedGatewayGraph{loadBalancer: lb, scoped: true,
+		adminObserved: map[string]bool{"matched": true, "unrelated": true},
+		scopedListeners: []listeners.Listener{
+			{ID: "unrelated", AdminStateUp: true, ProvisioningStatus: "ACTIVE"},
+			{ID: "matched", AdminStateUp: true, ProvisioningStatus: "ACTIVE"},
+		},
+		routes: []observedRouteGraph{{policies: []observedRoutePolicy{{
+			adminObserved: true,
+			policy:        l7policies.L7Policy{ID: "weighted", ListenerID: "matched", AdminStateUp: true, ProvisioningStatus: "ACTIVE"},
+		}}}}}
 	targets := []octavia.WeightedHTTPTarget{fixedWeightedHTTPTarget(1)}
 	step := graphMutation{kind: graphRouteMutation, withdrawHTTPPolicy: true,
 		route: routeMutation{kind: routeMutationSetPolicyTarget, id: "weighted", weightedTargets: &targets}}
 	prepared, err := p.prepareGraphMutation(t.Context(), desired, actual, step)
-	if err != nil || calls != 1 || prepared.route.kind != routeMutationDisablePolicy || prepared.route.id != "weighted" || prepared.route.weightedTargets != nil {
-		t.Fatalf("expected only a stock disable, got %#v after %d reads, error %v", prepared.route, calls, err)
+	if err != nil || calls != 1 || prepared.kind != graphDisableListener || prepared.listenerID != "matched" {
+		t.Fatalf("expected a stock close on the policy's listener, got %#v after %d reads, error %v", prepared, calls, err)
 	}
-	actual.routes[0].policies[0].policy.AdminStateUp = false
+	actual.scopedListeners[1].AdminStateUp = false
 	if _, err := p.prepareGraphMutation(t.Context(), desired, actual, step); err == nil {
 		t.Fatal("missing capability allowed an extension write after verified disable")
 	}

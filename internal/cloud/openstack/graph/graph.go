@@ -221,6 +221,12 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 
 func (p *Provider) recordGraphMutationOutcome(result *cloud.GatewayGraphResult, step graphMutation) {
 	result.Outcome = p.progressingOutcome(step.message)
+	if step.kind == graphDisableListener && step.withdrawHTTPPolicy {
+		result.Gateway.Outcome = result.Outcome
+		result.Gateway.ScopedListenerReadyPorts = slices.DeleteFunc(result.Gateway.ScopedListenerReadyPorts, func(port int) bool {
+			return port == step.scopedListener.Port
+		})
+	}
 	if step.kind == graphRouteMutation && step.backendKey != "" {
 		result.Outcome.MutationSubmitted = true
 		outcome := &result.Routes[step.routeIndex].Result.Outcome
@@ -252,7 +258,10 @@ func (p *Provider) reconcileWeightedWithdrawalWithoutAddress(ctx context.Context
 		}
 	}
 	if err := p.executeGraphMutation(ctx, desired, actual, step); err != nil {
-		return result, &cloud.GraphError{Identity: desired.routes[step.routeIndex].spec.Identity, Err: err}
+		if step.kind == graphRouteMutation {
+			return result, &cloud.GraphError{Identity: desired.routes[step.routeIndex].spec.Identity, Err: err}
+		}
+		return result, err
 	}
 	p.recordGraphMutationOutcome(&result, step)
 	return result, nil
@@ -847,6 +856,7 @@ func (p *Provider) observeGatewayListenerInventory(ctx context.Context, desired 
 		return inventory, err
 	}
 	actual.defaultHTTPResponseCodes = inventory.DefaultHTTPResponseCodes
+	actual.adminObserved = inventory.AdminStatesObserved
 	if markedProtocol != "" {
 		if actual.protocol != "" && actual.protocol != markedProtocol {
 			return inventory, fmt.Errorf("%w: scoped listeners differ from the Gateway protocol binding", cloud.ErrOwnershipConflict)
@@ -876,7 +886,6 @@ func (p *Provider) observeGatewayListenerInventory(ctx context.Context, desired 
 			return inventory, err
 		}
 		actual.state.ListenerID = scopedRepresentativeListenerID(actual.scopedListeners, anchor)
-		actual.adminObserved = inventory.AdminStatesObserved
 	}
 	return inventory, nil
 }

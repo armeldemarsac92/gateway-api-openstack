@@ -87,7 +87,18 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 	groupedHTTP := handovers != nil
 	var deleteDisables, deleteDisableRetries, deletions, memberDisables, memberDisableRetries []graphMutation
 	var staging, fixedStaging, fixedTargetWithdrawals []graphMutation
-	var weightedWithdrawals []graphMutation
+	var weightedWithdrawals, targetRetries, closedListenerTargets []graphMutation
+	queueTargetWithdrawal := func(step graphMutation, observed observedRouteGraph, fresh *[]graphMutation) {
+		listener := actual.policyListener(observed, step.route.id)
+		switch {
+		case listener != nil && actual.adminObserved[listener.ID] && !listener.AdminStateUp && listener.ProvisioningStatus == "ACTIVE":
+			closedListenerTargets = append(closedListenerTargets, step)
+		case step.route.retry || listener != nil && listener.ProvisioningStatus == "ERROR":
+			targetRetries = append(targetRetries, step)
+		default:
+			*fresh = append(*fresh, step)
+		}
+	}
 	disables := make([]graphMutation, 0)
 	ensures := make([]graphMutation, 0)
 	var zeroWeightPoolEnsures []graphMutation
@@ -248,8 +259,8 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 				}
 			}
 			for _, step := range weightedTargetWithdrawals(route, observed) {
-				weightedWithdrawals = append(weightedWithdrawals, graphMutation{kind: graphRouteMutation, routeIndex: index,
-					route: step, listenerID: listenerID, message: step.message(), withdrawHTTPPolicy: true})
+				queueTargetWithdrawal(graphMutation{kind: graphRouteMutation, routeIndex: index,
+					route: step, listenerID: listenerID, message: step.message(), withdrawHTTPPolicy: true}, observed, &weightedWithdrawals)
 				routeResult.Outcome = p.progressingOutcome(step.message())
 			}
 		}
@@ -301,7 +312,7 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 			switch {
 			case fixTarget:
 				if stepIndex == 0 && ensureHold == "" {
-					fixedTargetWithdrawals = append(fixedTargetWithdrawals, mutation)
+					queueTargetWithdrawal(mutation, observed, &fixedTargetWithdrawals)
 				}
 			case step.kind == routeMutationDisableMember:
 				if observed.backendProvisioningIssue(true, true) != "" {
@@ -368,7 +379,7 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 		// repair. Withdraw fresh members first, then let an equivalent fixed
 		// response take over if member withdrawal requires a retry.
 		slices.SortStableFunc(fixedStaging, func(a, b graphMutation) int { return cmp.Compare(a.route.policy.position, b.route.policy.position) })
-		for _, steps := range [][]graphMutation{weightedWithdrawals, memberDisables, fixedTargetWithdrawals, deleteDisables, fixedStaging, memberDisableRetries, deleteDisableRetries, deletions} {
+		for _, steps := range [][]graphMutation{weightedWithdrawals, memberDisables, fixedTargetWithdrawals, deleteDisables, fixedStaging, targetRetries, memberDisableRetries, deleteDisableRetries, deletions, closedListenerTargets} {
 			for _, step := range steps {
 				if step.withdrawHTTPPolicy {
 					result.Outcome = p.progressingOutcome(step.message)
@@ -608,13 +619,17 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 		return step, nil
 	}
 	if err := p.verifyGatewayHTTPCapabilities(ctx, desired, actual); err != nil {
-		// A removed capability cannot authorize a target update. Still
-		// withdraw an affected serving policy using the stock API.
+		// Removing the policy predicate would expose a lower-priority
+		// route. Close its verified listener until the target is updated.
 		if step.kind == graphRouteMutation && step.withdrawHTTPPolicy && step.route.kind == routeMutationSetPolicyTarget &&
-			step.routeIndex < len(actual.routes) && servingPolicyNeedsDisable(actual.routes[step.routeIndex], step.route.id) {
-			step.route = routeMutation{kind: routeMutationDisablePolicy, id: step.route.id}
-			step.message = "Disabling an HTTP policy while its Octavia capability is unavailable"
-			return step, nil
+			step.routeIndex < len(actual.routes) {
+			listener := actual.policyListener(actual.routes[step.routeIndex], step.route.id)
+			if listener != nil && (listener.ProvisioningStatus == "ERROR" || listener.ProvisioningStatus == "ACTIVE" && (listener.AdminStateUp || !actual.adminObserved[listener.ID])) {
+				return graphMutation{kind: graphDisableListener, listenerID: listener.ID,
+					scopedListener: cloud.ScopedListener{Port: listener.ProtocolPort},
+					redactTLSError: listener.Protocol == terminatedHTTPS, withdrawHTTPPolicy: true,
+					message: "Closing the affected listener until Octavia can apply the HTTP target withdrawal"}, nil
+			}
 		}
 		if step.kind == graphRouteMutation {
 			return step, &cloud.GraphError{Identity: desired.routes[step.routeIndex].spec.Identity, Err: err}
@@ -624,16 +639,25 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 	return step, nil
 }
 
-func servingPolicyNeedsDisable(route observedRouteGraph, id string) bool {
+func (actual observedGatewayGraph) policyListener(route observedRouteGraph, id string) *listeners.Listener {
 	for _, part := range route.parts() {
 		for _, policy := range part.policies {
-			if policy.policy.ID == id && policy.adminObserved && !policy.pending() &&
-				(policy.policy.AdminStateUp || policy.policy.ProvisioningStatus == "ERROR") {
-				return true
+			if policy.policy.ID != id || !policy.adminObserved || policy.pending() || policy.policy.ListenerID == "" {
+				continue
 			}
+			listenerID := policy.policy.ListenerID
+			if !actual.scoped && actual.listener != nil && actual.listener.ID == listenerID {
+				return actual.listener
+			}
+			for i := range actual.scopedListeners {
+				if actual.scopedListeners[i].ID == listenerID {
+					return &actual.scopedListeners[i]
+				}
+			}
+			return nil
 		}
 	}
-	return false
+	return nil
 }
 
 func graphRoutePart(desired desiredGatewayGraph, step graphMutation) desiredRoute {
