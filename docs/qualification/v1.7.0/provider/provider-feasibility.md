@@ -4,6 +4,8 @@ On loopback, stock Octavia and HAProxy forwarded TCP and routed two exact gRPC m
 
 Full `GATEWAY-HTTP` requires rule-level arbitrary request mutations and defined 404/500 outcomes, including the invalid backend's weighted share. Full `GATEWAY-GRPC` requires more than exact path matching. `GATEWAY-TLS` requires SNI selection before TLS termination. `MESH-HTTP` and `MESH-GRPC` require a dataplane that handles calls to Kubernetes Service frontends. The remaining mappings below identify requirements and source limits. [Profile registry][profiles] · [Public API][octavia-api]
 
+For UDP, a public listener update selected different pools on the same VIP. The stock Amphora worker generated the Keepalived configuration used by kernel IPVS in a disposable guest. Both selected backends echoed all 256 payload bytes. Clearing the pool removed the virtual service and the next client datagram received `ECONNREFUSED`. Silent packet loss at an invalid backend's configured weight and the Kubernetes UDPRoute path still need a design and evidence. [UDP API and packet study](stock-udp.md)
+
 ## Verified versions
 
 The official Hibiscus index gives the following release pins. The Gateway API Git checkout's tag and HEAD both resolved to the commit shown. Cloud package versions, enabled drivers, the Amphora image and HAProxy build, and permissions are deployment facts to verify separately. [Hibiscus index][hibiscus] · [Gateway API release][gateway-release]
