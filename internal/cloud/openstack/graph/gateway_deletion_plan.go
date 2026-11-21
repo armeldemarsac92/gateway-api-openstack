@@ -451,11 +451,11 @@ func (p *Provider) recoverHTTPBackendGatewayDeletion(ctx context.Context, identi
 			return gatewayDeletionPlan{}, fmt.Errorf("%w: HTTP backend recovery requires an owned HTTP listener without a default pool", cloud.ErrOwnershipConflict)
 		}
 	}
-	poolItems, err := p.listGatewayPools(ctx, lb)
+	poolInventory, err := p.listGatewayPoolInventory(ctx, lb)
 	if err != nil {
 		return gatewayDeletionPlan{}, err
 	}
-	routes, err := p.observeRouteGraphsFromPools(ctx, owners, lb, listener, cloud.ListenerProtocolHTTP, nil, poolItems, &identity)
+	routes, err := p.observeRouteGraphsFromPools(ctx, owners, lb, listener, cloud.ListenerProtocolHTTP, nil, poolInventory, &identity)
 	if err != nil {
 		return gatewayDeletionPlan{}, err
 	}

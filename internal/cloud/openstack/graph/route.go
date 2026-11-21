@@ -150,6 +150,9 @@ func (p *Provider) buildDesiredRoutePart(spec cloud.RouteSpec, backendKey string
 	var policies []desiredPolicy
 	var hostnameRuleValue string
 	protocol := cloud.NormalizeListenerProtocol(spec.GatewayRequirements.ListenerProtocol)
+	if spec.BackendH2C && (protocol != cloud.ListenerProtocolHTTP || !p.backendH2C) {
+		return invalid(errors.New("h2c requires an HTTP pool and --octavia-backend-h2c"))
+	}
 	switch protocol {
 	case cloud.ListenerProtocolHTTP:
 		if backendKey == "" {
@@ -237,7 +240,7 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 		return desiredRoute{}, cloud.NewProviderError(cloud.ErrorCategoryTerminalValidation, err)
 	}
 	if cloud.NormalizeListenerProtocol(spec.GatewayRequirements.ListenerProtocol) != cloud.ListenerProtocolHTTP ||
-		spec.Hostname != "" || spec.PathType != "" || spec.PathValue != "" || len(spec.Members) != 0 {
+		spec.Hostname != "" || spec.PathType != "" || spec.PathValue != "" || len(spec.Members) != 0 || spec.BackendH2C {
 		return invalid(errors.New("HTTP backend groups require HTTP routing without scalar matches or members"))
 	}
 	identity, err := p.identity(spec.Identity)
@@ -264,6 +267,7 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 		backendKeys[key] = true
 		partSpec := spec
 		partSpec.HTTPBackends, partSpec.HTTPRedirects, partSpec.FixedHTTPRules, partSpec.WeightedHTTPRules, partSpec.Members = nil, nil, nil, nil, backend.Members
+		partSpec.BackendH2C = backend.BackendH2C
 		part, err := p.buildDesiredRoutePart(partSpec, key, unavailable)
 		if err != nil {
 			return desiredRoute{}, err

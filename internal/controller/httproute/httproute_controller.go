@@ -336,6 +336,11 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 		return ctrl.Result{}, fmt.Errorf("invalid HTTPRoute binding state %d", graphResult.bindingState)
 	}
 	if graphResult.Outcome.State == cloud.OutcomeProgressing {
+		if graphResult.backendDiagnostic.Reason == "" && graphResult.UnsupportedBackendProtocol != "" {
+			graphResult.backendDiagnostic = model.Diagnostic{
+				Reason: string(gatewayv1.RouteReasonUnsupportedProtocol), Message: graphResult.UnsupportedBackendProtocol,
+			}
+		}
 		if !graphResult.ObservationDeferred || r.currentRouteProgrammedCondition(httpRoute, parent.ref) == nil ||
 			!r.currentBackendResolution(httpRoute, parent.ref, graphResult.backendDiagnostic) {
 			message := controller.ProviderProgressMessage(graphResult.Outcome, "Octavia resources for the HTTPRoute are still progressing")

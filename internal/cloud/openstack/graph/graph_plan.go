@@ -152,6 +152,7 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 		routeResult := cloud.RouteReadyResult(routeStateFromObservation(observed))
 		var routePlan []routeMutation
 		var backendIssue, ensureHold string
+		withdrawBackendTransport := observed.pool != nil && !route.fixedResponse && route.spec.BackendH2C != observed.backendH2C
 		node := desired.spec.Routes[index]
 		port := scopedHTTPRoutePort(route)
 		var observedPort int
@@ -194,6 +195,9 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 			routePlan, routeResult.State, err = buildRouteEnsurePlan(route, observed)
 			if err != nil {
 				return nil, result, &cloud.GraphError{Identity: route.spec.Identity, Err: err}
+			}
+			if withdrawBackendTransport && len(routePlan) == 0 {
+				_, ensureHold = httpMemberWithdrawal(observed)
 			}
 			if actual.loadBalancer == nil || !scopedHTTP && actual.listener == nil || scopedHTTP && listenerID == "" {
 				// The desired route has been validated, but its resources cannot
@@ -309,7 +313,9 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 			withdrawPolicy := step.withdrawHTTPPolicy || withdrawing &&
 				(step.kind == routeMutationDisablePolicy || step.kind == routeMutationDeleteRule || step.kind == routeMutationDeletePolicy)
 			fixTarget := route.fixedResponse && step.kind == routeMutationSetPolicyTarget
-			mutation.withdrawHTTPPolicy = (scopedHTTP || groupedHTTP) && (withdrawPolicy || step.kind == routeMutationDisableMember || fixTarget)
+			memberWithdrawal := step.kind == routeMutationDisableMember
+			mutation.withdrawHTTPPolicy = withdrawBackendTransport && memberWithdrawal ||
+				(scopedHTTP || groupedHTTP) && (withdrawPolicy || memberWithdrawal || fixTarget)
 			switch {
 			case fixTarget:
 				if stepIndex == 0 && ensureHold == "" {
@@ -375,7 +381,7 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 	// A failed teardown for one route must never leave another revoked route
 	// forwarding. Close all actionable policies, including fresh disables ahead
 	// of retries for previously failed disables, before touching descendants.
-	if scopedHTTP || groupedHTTP {
+	if scopedHTTP || groupedHTTP || len(memberDisables) != 0 || len(memberDisableRetries) != 0 {
 		// Prioritize verified withdrawals even when earlier prerequisites need
 		// repair. Withdraw fresh members first, then let an equivalent fixed
 		// response take over if member withdrawal requires a retry.
@@ -604,24 +610,35 @@ func routeStateFromObservation(actual observedRouteGraph) cloud.RouteState {
 	return state
 }
 
-type unavailableRequestHeaderCapability struct{ error }
+type unavailableRouteCapability struct {
+	error
+	capability                 string
+	unsupportedBackendProtocol bool
+}
 
-func (e *unavailableRequestHeaderCapability) Unwrap() error { return e.error }
+func (e *unavailableRouteCapability) Unwrap() error { return e.error }
 
 // prepareNextGraphMutation can stage a sibling's owned backend during a
-// header capability outage. Preserve the planned policy order and leave
+// route capability outage. Preserve the planned policy order and leave
 // policy programming and frontend restoration to a fresh observation.
 func (p *Provider) prepareNextGraphMutation(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, plan []graphMutation, result *cloud.GatewayGraphResult) (graphMutation, bool, error) {
 	first := plan[0]
 	step, err := p.prepareGraphMutation(ctx, desired, actual, first)
-	var blocked *unavailableRequestHeaderCapability
+	var blocked *unavailableRouteCapability
 	if !errors.As(err, &blocked) {
 		return step, err == nil, err
 	}
 
-	outcome := p.progressingOutcome("Waiting for Octavia to advertise " + octavia.GatewayCapabilityRequestHeaderOperations)
-	result.Outcome = outcome
-	result.Routes[first.routeIndex].Result.Outcome = outcome
+	recordBlocked := func(step graphMutation, blocked *unavailableRouteCapability) {
+		message := "Waiting for Octavia to advertise " + blocked.capability
+		route := &result.Routes[step.routeIndex].Result
+		route.Outcome = p.progressingOutcome(message)
+		if blocked.unsupportedBackendProtocol {
+			route.UnsupportedBackendProtocol = message
+		}
+	}
+	recordBlocked(first, blocked)
+	result.Outcome = result.Routes[first.routeIndex].Result.Outcome
 	for _, sibling := range plan[1:] {
 		if sibling.kind != graphRouteMutation || sibling.routeIndex == first.routeIndex {
 			continue
@@ -630,7 +647,13 @@ func (p *Provider) prepareNextGraphMutation(ctx context.Context, desired desired
 		case routeMutationCreatePool, routeMutationUpdatePool, routeMutationCreateMember, routeMutationUpdateMember:
 			// The complete graph ties each of these pools to its own route.
 			// A sibling backend mutation cannot publish or reorder a policy.
-			return sibling, true, nil
+			prepared, err := p.prepareGraphMutation(ctx, desired, actual, sibling)
+			if err == nil {
+				return prepared, true, nil
+			}
+			if errors.As(err, &blocked) {
+				recordBlocked(sibling, blocked)
+			}
 		}
 	}
 	return graphMutation{}, false, nil
@@ -647,7 +670,11 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 	switch step.kind {
 	case graphCreateLoadBalancer, graphCreateListener, graphSetListenerNotFound, graphEnableListener, graphEnableLoadBalancer:
 	case graphRouteMutation:
-		fixed = fixed && routeNeedsHTTPCapability(graphRoutePart(desired, step), step.route)
+		part := graphRoutePart(desired, step)
+		fixed = fixed && routeNeedsHTTPCapability(part, step.route)
+		if step.route.backendH2C != nil || step.route.kind == routeMutationCreatePool && part.spec.BackendH2C {
+			required = append(required, octavia.GatewayCapabilityBackendH2C)
+		}
 		if len(step.route.requestHeaderOperations) != 0 {
 			required = append(required, octavia.GatewayCapabilityRequestHeaderOperations)
 		}
@@ -679,9 +706,14 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 		if step.kind == graphRouteMutation {
 			err = &cloud.GraphError{Identity: desired.routes[step.routeIndex].spec.Identity, Err: err}
 			var missing *octavia.MissingGatewayCapability
-			if len(step.route.requestHeaderOperations) != 0 && !step.withdrawHTTPPolicy &&
-				(!errors.As(err, &missing) || missing.Capability == octavia.GatewayCapabilityRequestHeaderOperations) {
-				err = &unavailableRequestHeaderCapability{err}
+			explicitlyMissing := errors.As(err, &missing)
+			if slices.Contains(required, octavia.GatewayCapabilityBackendH2C) &&
+				(!explicitlyMissing || missing.Capability == octavia.GatewayCapabilityBackendH2C) {
+				err = &unavailableRouteCapability{error: err, capability: octavia.GatewayCapabilityBackendH2C,
+					unsupportedBackendProtocol: explicitlyMissing && graphRoutePart(desired, step).spec.BackendH2C}
+			} else if len(step.route.requestHeaderOperations) != 0 && !step.withdrawHTTPPolicy &&
+				(!explicitlyMissing || missing.Capability == octavia.GatewayCapabilityRequestHeaderOperations) {
+				err = &unavailableRouteCapability{error: err, capability: octavia.GatewayCapabilityRequestHeaderOperations}
 			}
 			return step, err
 		}

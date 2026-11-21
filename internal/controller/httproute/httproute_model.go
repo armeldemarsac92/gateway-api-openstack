@@ -252,6 +252,7 @@ func (r *Reconciler) buildRouteModelFromInputs(
 		}
 		spec.Hostname, spec.PathType, spec.PathValue, spec.Precedence = match.Hostname, cloud.PathMatchType(match.Match.PathType), match.Match.PathValue, match.Precedence
 		spec.Members = members
+		spec.BackendH2C = model.ServicePortUsesH2C(rules[0].Backends[0].Port)
 		return spec, model.Diagnostic{}, nil
 	}
 	diagnostic, err := r.lowerHTTPBackends(ctx, reader, route, listener, &spec, inputs, matches, rules, topology.NodeAddressType)
@@ -270,7 +271,7 @@ func routeBackendMembers(ctx context.Context, reader client.Reader, sourceNamesp
 	if service == nil {
 		return nil, newRouteBuildError(routeErrorBackendNotFound, "backend Service %s was not found", key)
 	}
-	port, err := servicePortForBackend(service, *backend.Reference.Port, mode)
+	port, err := servicePortForBackend(service, *backend.Reference.Port, mode, inputs.input.BackendH2C)
 	if err != nil {
 		return nil, err
 	}
@@ -394,6 +395,7 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 		spec.HTTPBackends = append(spec.HTTPBackends, cloud.HTTPBackend{
 			Namespace: key.service.Namespace, Name: key.service.Name, Port: key.port,
 			Members: members, Unavailable: len(members) == 0, InvalidReference: invalidReference,
+			BackendH2C: !invalid && model.ServicePortUsesH2C(backend.Port),
 		})
 	}
 	groups[key] = result

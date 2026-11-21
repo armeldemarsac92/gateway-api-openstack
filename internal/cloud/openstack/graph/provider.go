@@ -69,6 +69,7 @@ type ProviderConfig struct {
 	FixedHTTPResponses    bool
 	WeightedHTTPTargets   bool
 	RequestHeaderModifier bool
+	BackendH2C            bool
 	OperationTimeout      time.Duration
 	PollInterval          time.Duration
 }
@@ -78,6 +79,7 @@ type Provider struct {
 	fixedHTTPResponses    bool
 	weightedHTTPTargets   bool
 	requestHeaderModifier bool
+	backendH2C            bool
 	projectID             string
 	region                string
 	neutron               *neutron.Service
@@ -100,6 +102,7 @@ func NewProvider(clients ServiceClients, cfg ProviderConfig) *Provider {
 		fixedHTTPResponses:    cfg.FixedHTTPResponses || cfg.WeightedHTTPTargets,
 		weightedHTTPTargets:   cfg.WeightedHTTPTargets,
 		requestHeaderModifier: cfg.RequestHeaderModifier,
+		backendH2C:            cfg.BackendH2C,
 		projectID:             clients.ProjectID,
 		region:                clients.Region,
 		neutron:               neutron.NewService(clients.Network),
@@ -118,7 +121,7 @@ func (p *Provider) verifyGatewayHTTPCapabilities(ctx context.Context, desired de
 		provider = actual.loadBalancer.Provider
 	}
 	if err := p.octavia.VerifyGatewayCapabilities(ctx, provider, required...); err != nil {
-		return cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady, fmt.Errorf("verify Octavia Gateway HTTP actions in region %q: %w", p.region, err))
+		return cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady, fmt.Errorf("verify Octavia Gateway HTTP capabilities in region %q: %w", p.region, err))
 	}
 	return nil
 }

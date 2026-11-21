@@ -233,3 +233,40 @@ func TestNodeEventsDoNotEnqueueEndpointNodePortServices(t *testing.T) {
 		t.Fatalf("Node mapper read Endpoint backend inputs: %d gets, %d lists", reader.gets, reader.lists)
 	}
 }
+
+func TestEndpointHTTPRouteUsesH2COnlyForAnnotatedServicePort(t *testing.T) {
+	_, gateway, route, service, endpointSlice := endpointRouteFixture(t)
+	service.Spec.Ports[0].AppProtocol = ptr.To("kubernetes.io/h2c")
+	stockService := service.DeepCopy()
+	stockService.Name = "stock"
+	stockService.Spec.Ports[0].AppProtocol = nil
+	stockSlice := endpointSlice.DeepCopy()
+	stockSlice.Name = "stock"
+	stockSlice.Labels[discoveryv1.LabelServiceName] = stockService.Name
+	route.Spec.Rules[0].Matches = []gatewayv1.HTTPRouteMatch{{Path: &gatewayv1.HTTPPathMatch{Type: ptr.To(gatewayv1.PathMatchExact), Value: ptr.To("/h2c")}}}
+	secondRule := route.Spec.Rules[0].DeepCopy()
+	secondRule.Matches[0].Path.Value = ptr.To("/stock")
+	secondRule.BackendRefs[0].Name = "stock"
+	route.Spec.Rules = append(route.Spec.Rules, *secondRule)
+	cfg := testConfig()
+	cfg.BackendH2C = true
+	reader := indexedFakeClientBuilder(testScheme(t), cfg).WithObjects(service, endpointSlice, stockService, stockSlice).Build()
+	r := &Reconciler{Config: cfg}
+	if err := r.checkRouteBackendProfile(t.Context(), reader, route.Namespace, route.Spec.Rules[0].BackendRefs[0].BackendObjectReference, gateway); err != nil {
+		t.Fatal(err)
+	}
+	desired, err := r.buildRouteModelWithReader(t.Context(), reader, route, gateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(desired.HTTPBackends) != 2 || desired.HTTPBackends[0].Name != service.Name ||
+		!desired.HTTPBackends[0].BackendH2C || desired.HTTPBackends[1].Name != stockService.Name ||
+		desired.HTTPBackends[1].BackendH2C || len(desired.HTTPBackends[0].Members) != 1 || len(desired.HTTPBackends[1].Members) != 1 {
+		t.Fatalf("unexpected backend transport or endpoints: %#v", desired.HTTPBackends)
+	}
+	route.Spec.Rules = route.Spec.Rules[:1]
+	desired, err = r.buildRouteModelWithReader(t.Context(), reader, route, gateway)
+	if err != nil || !desired.BackendH2C || len(desired.Members) != 1 {
+		t.Fatalf("single h2c backend = %#v, error = %v", desired, err)
+	}
+}

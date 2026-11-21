@@ -31,7 +31,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/routebackend"
 )
 
-func servicePortForBackend(service *corev1.Service, port gatewayv1.PortNumber, mode cloud.MemberMode) (*corev1.ServicePort, error) {
+func servicePortForBackend(service *corev1.Service, port gatewayv1.PortNumber, mode cloud.MemberMode, backendH2C bool) (*corev1.ServicePort, error) {
 	if !service.DeletionTimestamp.IsZero() {
 		return nil, newRouteBuildError(routeErrorPending, "backend Service is being deleted")
 	}
@@ -50,7 +50,7 @@ func servicePortForBackend(service *corev1.Service, port gatewayv1.PortNumber, m
 	default:
 		return nil, newRouteBuildError(routeErrorUnsupported, "backend member mode is unsupported")
 	}
-	selected, diagnostic := model.ResolveServicePort(service, &port)
+	selected, diagnostic := model.ResolveServicePort(service, &port, backendH2C)
 	if diagnostic != nil {
 		kind := routeErrorPending
 		if diagnostic.Reason == string(gatewayv1.RouteReasonUnsupportedProtocol) {

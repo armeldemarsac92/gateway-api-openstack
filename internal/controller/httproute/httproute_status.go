@@ -437,7 +437,7 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 		if err != nil {
 			return fmt.Errorf("get backend Service: %w", err)
 		}
-		if _, diagnostic := model.ResolveServicePort(&service, backend.Port); diagnostic != nil {
+		if _, diagnostic := model.ResolveServicePort(&service, backend.Port, r.Config.BackendH2C); diagnostic != nil {
 			*status = status.withBackendDiagnostic(*diagnostic)
 		}
 	}

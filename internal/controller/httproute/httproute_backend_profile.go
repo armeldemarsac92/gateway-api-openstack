@@ -60,7 +60,7 @@ func (r *Reconciler) checkRouteBackendProfile(ctx context.Context, reader client
 		}
 		return fmt.Errorf("get backend Service: %w", err)
 	}
-	_, err = servicePortForBackend(&service, *backend.Port, topology.Topology.MemberMode)
+	_, err = servicePortForBackend(&service, *backend.Port, topology.Topology.MemberMode, r.Config.BackendH2C)
 	var buildError *routeBuildError
 	if errors.As(err, &buildError) && buildError.kind == routeErrorPending {
 		return nil
