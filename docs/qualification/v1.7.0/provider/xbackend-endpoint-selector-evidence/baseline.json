@@ -1,0 +1,217 @@
+{
+  "mode": "baseline",
+  "release": {
+    "standardSha256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+    "standardHasXBackend": false,
+    "experimentalSha256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+    "experimentalXBackendVersion": "v1alpha1",
+    "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152"
+  },
+  "provenance": {
+    "controllerRevision": "bebbb4304c64ec74b49cf4c4c1261e1e662a8eea",
+    "controllerTree": "e94cc4735bb6169d1f777f3973676544d2bbefe3",
+    "controllerBinarySha256": "fec9f2919957071a71609cbf1d1a3c72f33b45be957972a8190a2b1c72b6113c",
+    "controllerFlags": [
+      "--gateway-api-channel=experimental"
+    ],
+    "kubernetes": "v1.36.2",
+    "octavia": "19.0.0",
+    "octaviaLib": "3.12.0",
+    "octaviaMemberAPISha256": "f30af1365a64c10f506bf137134155703d2921f12ff13f8253bc3f10bee12bf1",
+    "octaviaRendererSha256": "9a4d887f1d0024405fdd7f2923fd55e074904d7437c14987ae4a7cd3179844f5",
+    "octaviaTemplateSha256": "02dfccd0306ab17d02daefa22890121add55a278dc85971a5bd8173b26e7990b",
+    "haproxy": "3.0.19",
+    "haproxySha256": "847fad8188f01f5693cfba85731f37d554758526f39dc6f67162ec2c6a150885",
+    "controllerStartupVersion": "bebbb4304c64ec74b49cf4c4c1261e1e662a8eea"
+  },
+  "authorization": {
+    "serviceAccount": "system:serviceaccount:openstack-gateway-system:openstack-gateway-controller",
+    "roleSourceRevision": "bebbb4304c64ec74b49cf4c4c1261e1e662a8eea",
+    "overlay": "base"
+  },
+  "storedBackendRef": {
+    "group": "gateway.networking.x-k8s.io",
+    "kind": "XBackend",
+    "name": "selector",
+    "weight": 1
+  },
+  "literalBackendPort": 18081,
+  "pods": [
+    {
+      "namespace": "qualification",
+      "name": "pod-a",
+      "labels": {
+        "app": "selection-test",
+        "lane": "a"
+      },
+      "address": "198.51.100.5",
+      "ready": true
+    },
+    {
+      "namespace": "qualification",
+      "name": "pod-b",
+      "labels": {
+        "app": "selection-test",
+        "lane": "b"
+      },
+      "address": "198.51.100.6",
+      "ready": true
+    },
+    {
+      "namespace": "selector-foreign",
+      "name": "decoy",
+      "labels": {
+        "app": "selection-test",
+        "lane": "a"
+      },
+      "address": "198.51.100.7",
+      "ready": true
+    }
+  ],
+  "directPeersBefore": {
+    "pod-a": {
+      "httpStatus": 200,
+      "peer": "pod-a"
+    },
+    "pod-b": {
+      "httpStatus": 200,
+      "peer": "pod-b"
+    },
+    "foreign-or-service": {
+      "httpStatus": 200,
+      "peer": "foreign-or-service"
+    }
+  },
+  "directPeersAfterDetach": {
+    "pod-a": {
+      "httpStatus": 200,
+      "peer": "pod-a"
+    },
+    "pod-b": {
+      "httpStatus": 200,
+      "peer": "pod-b"
+    },
+    "foreign-or-service": {
+      "httpStatus": 200,
+      "peer": "foreign-or-service"
+    }
+  },
+  "serviceAndForeignPodPresentAfterDetach": true,
+  "phases": {
+    "publishedRejection": {
+      "route": {
+        "generation": 1,
+        "ownedEntries": [
+          {
+            "controllerName": "gateway-api-openstack.github.io/gateway-api-openstack",
+            "reference": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "name": "qualification",
+              "sectionName": "http"
+            },
+            "conditions": [
+              {
+                "type": "Accepted",
+                "status": "True",
+                "reason": "Accepted",
+                "observedGeneration": 1
+              },
+              {
+                "type": "ResolvedRefs",
+                "status": "False",
+                "reason": "InvalidKind",
+                "observedGeneration": 1
+              },
+              {
+                "type": "gateway-api-openstack.github.io/Programmed",
+                "status": "False",
+                "reason": "Invalid",
+                "observedGeneration": 1
+              }
+            ]
+          }
+        ]
+      },
+      "xbackend": {
+        "generation": 1,
+        "ownedEntries": [],
+        "matchLabels": {
+          "app": "selection-test",
+          "lane": "a"
+        }
+      },
+      "octavia": {
+        "loadBalancers": 1,
+        "listeners": 1,
+        "healthMonitors": 0,
+        "policies": [],
+        "pools": []
+      },
+      "attachedRoutes": 1,
+      "traffic": [
+        {
+          "httpStatus": 503,
+          "peer": null
+        },
+        {
+          "httpStatus": 503,
+          "peer": null
+        },
+        {
+          "httpStatus": 503,
+          "peer": null
+        }
+      ],
+      "haproxyConfigSha256": "02ce969de1a32c055a12a5c2d6e901e73ee5b31520110abd0c8827df2ca5c84a",
+      "octaviaWriteDelta": 0
+    },
+    "detached": {
+      "route": {
+        "generation": 2,
+        "ownedEntries": []
+      },
+      "xbackend": {
+        "generation": 1,
+        "ownedEntries": [],
+        "matchLabels": {
+          "app": "selection-test",
+          "lane": "a"
+        }
+      },
+      "octavia": {
+        "loadBalancers": 1,
+        "listeners": 1,
+        "healthMonitors": 0,
+        "policies": [],
+        "pools": []
+      },
+      "attachedRoutes": 0,
+      "traffic": [
+        {
+          "httpStatus": 503,
+          "peer": null
+        },
+        {
+          "httpStatus": 503,
+          "peer": null
+        },
+        {
+          "httpStatus": 503,
+          "peer": null
+        }
+      ],
+      "haproxyConfigSha256": "02ce969de1a32c055a12a5c2d6e901e73ee5b31520110abd0c8827df2ca5c84a"
+    }
+  },
+  "cleanup": {
+    "octavia": {
+      "loadBalancers": 0,
+      "listeners": 0,
+      "healthMonitors": 0,
+      "policies": [],
+      "pools": []
+    },
+    "vipClosed": true
+  }
+}

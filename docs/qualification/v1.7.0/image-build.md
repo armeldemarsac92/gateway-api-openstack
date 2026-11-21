@@ -1,11 +1,11 @@
 # Reproduce the Hibiscus development image
 
-Use the [local build record](image.json) for the exact source revision, linux/amd64 OCI manifest, archive digest and embedded manager digest. The normal and no-cache builds produced identical OCI manifests. The OCI archive was built and checked locally. The extracted manager ran the TLSRoute hostname lifecycle and two upstream TLSRoute cases on both Gateway API v1.7.0 bundles. [Status and traffic receipts](provider/tls-hostname-intersection.md)
+Use the [local build record](image.json) for the exact source revision, linux/amd64 OCI manifest, archive digest and embedded manager digest. The normal and no-cache builds produced identical OCI manifests. The OCI archive was built and checked locally. The extracted manager routed HTTP to two successively selected Pods on the Experimental channel. Four upstream TLSRoute cases passed on Standard and Experimental. The Standard hostname regression also reached its TLS backend. [XBackend traffic](provider/xbackend-endpoint-selector.md) · [TLSRoute results](provider/tlsroute-invalid.md)
 
 On a linux/amd64 host, use a separate checkout of the recorded revision. The Dockerfile pins the Go 1.27.4 builder and distroless base by digest. Podman uses a fixed timestamp, and the build writes the full commit into the binary and the OCI revision label. The verification command exports gzip-compressed layers.
 
 ```sh
-revision=a82cf5d7670e66d38fa4f8f9d8b054507faa083e
+revision=f150a6e006d027106da2aaed6b82cb262bcf1b1a
 test "$(git rev-parse HEAD)" = "$revision"
 image="localhost/hibiscus-controller:$revision"
 make container-build CONTAINER_TOOL=podman VERSION="$revision" IMAGE="$image"
