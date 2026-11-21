@@ -239,14 +239,14 @@ func (p *Provider) observeSNIGraph(ctx context.Context, desired desiredGatewayGr
 			return actual, nil
 		}
 		if listener.ProvisioningStatus != "ACTIVE" && listener.ProvisioningStatus != "ERROR" &&
-			!(pendingUpdate && listener.ProvisioningStatus == "PENDING_UPDATE") {
+			(!pendingUpdate || listener.ProvisioningStatus != "PENDING_UPDATE") {
 			actual.outcome = p.progressingOutcome("Waiting for TLS SNI listener provisioning")
 			return actual, nil
 		}
 	}
 	// A policy update can mark the parent resources PENDING_UPDATE while
 	// disjoint SNI routes retain complete ACTIVE forwarding fragments.
-	if actual.outcome.State != cloud.OutcomeReady && !(pendingUpdate && sniFrontendObserved(desired, actual)) {
+	if actual.outcome.State != cloud.OutcomeReady && (!pendingUpdate || !sniFrontendObserved(desired, actual)) {
 		return actual, nil
 	}
 	owners := make(map[string]sniRouteKey)
