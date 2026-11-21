@@ -42,6 +42,7 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	"sigs.k8s.io/gateway-api/conformance"
 	"sigs.k8s.io/gateway-api/conformance/tests"
+	conformanceconfig "sigs.k8s.io/gateway-api/conformance/utils/config"
 	"sigs.k8s.io/gateway-api/conformance/utils/suite"
 	"sigs.k8s.io/gateway-api/pkg/features"
 	"sigs.k8s.io/yaml"
@@ -116,6 +117,8 @@ func TestKindAmbientMesh(t *testing.T) {
 			CleanupTestResources: true,
 			DisableParallelTests: true,
 			NamespaceLabels:      map[string]string{"istio.io/dataplane-mode": "ambient"},
+			// Namespace deletion waits for both fixture pods and the generated waypoint.
+			TimeoutConfig: conformanceconfig.TimeoutConfig{DeleteTimeout: 2 * time.Minute},
 			ConformanceProfiles: []suite.ConformanceProfileName{
 				suite.MeshHTTPConformanceProfileName, suite.MeshGRPCConformanceProfileName,
 			},
