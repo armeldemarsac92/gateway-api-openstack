@@ -505,6 +505,16 @@ func TestAuditIdentifiesGatewayManagedTLSRouteResources(t *testing.T) {
 			t.Errorf("%s = %s/%s, want unresolved Gateway-managed TLSRoute", finding.ID, finding.Disposition, finding.Reason)
 		}
 	}
+	// A pool and member can retain the same Route UID across a target change.
+	candidates.add(auditCandidate{
+		service: auditServiceOctavia, resourceType: auditTypeMember, id: "previous-member", projectID: id.OpenStackProjectID,
+		tags:            append(safetyRouteTags(t, route, "tls-sni-member"), openstackidentity.Tag("sni-target", strings.Repeat("b", 64))),
+		observedParents: singletonStringSet("tls-sni-pool"), reportedParents: singletonStringSet("tls-sni-pool"),
+	})
+	findings = classifyAuditCandidates(candidates, nil, auditTestScopeTags(id), id.OpenStackProjectID)
+	if got := auditFindingByID(t, findings, "previous-member"); got.Disposition != audit.DispositionOwnershipConflict || got.Reason != auditReasonParentMismatch {
+		t.Fatalf("member with a different target = %s/%s", got.Disposition, got.Reason)
+	}
 	pool := auditCandidate{service: auditServiceOctavia, resourceType: auditTypePool, id: "incomplete", projectID: id.OpenStackProjectID, tags: safetyRouteTags(t, route, "tls-sni-pool")}
 	if got := singleClassifiedAuditFinding(t, pool, nil, auditTestScopeTags(id), id.OpenStackProjectID); got.Disposition != audit.DispositionOwnershipConflict {
 		t.Fatalf("SNI pool without a target digest was classified as %s", got.Disposition)
