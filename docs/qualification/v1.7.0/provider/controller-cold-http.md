@@ -1,0 +1,39 @@
+# Private HTTP traffic across a cold controller restart
+
+The normal OCI controller running in kind reconciled a Standard v1.7.0 Gateway and HTTPRoute. The test sent HTTP requests to the private VIP published in Gateway status and directly to the worker NodePort. Both paths returned HTTP 200 with the same host, path and identifiable upstream echo pod before the restart, while the Deployment had zero Pods and after the replacement Pods were Ready. [Worker and NodePort fixture](kind-worker-http.yaml)
+
+| Sample | Worker NodePort | Private VIP | Unbound hostname at the VIP |
+|---|---:|---:|---:|
+| Original controller Pods Ready | 200 | 200 | 503 |
+| No controller Pods | 200 | 200 | 503 |
+| Replacement controller Pods Ready | 200 | 200 | 503 |
+
+The same Deployment ran two Ready Pods on either side of the stop. The test waited for the entire controller Pod list to become empty before scaling back to two, then verified zero shared Pod UIDs and the pinned runtime image. 2 newly minted Keystone tokens identified requests from the replacement. The controller read back the same 11 Octavia objects and made zero successful Octavia writes during recovery. The Gateway kept its address, one attached route and current-generation Accepted and Programmed conditions. The HTTPRoute kept its controller/parent binding and current-generation Accepted, ResolvedRefs and controller-specific Programmed conditions. The settled condition timestamps also matched.
+
+The Octavia graph held one Amphora load balancer, one HTTP listener, one pool, one member, one health monitor, two L7 policies and four L7 rules. The member matched the observed worker InternalIP, Service NodePort and member subnet. Deleting the HTTPRoute and Gateway returned the stock Octavia project inventory to its original two synthetic control load balancers for Magnum and OCCM. The guest had released the VIP and a new connection failed with `ENETUNREACH` and the test removed its Kubernetes objects. [Earlier adapter-only run](../kind-http.md)
+
+The test used the real Octavia 19.0.0 WSGI API and stock worker rendering with HAProxy 3.0.19. The lab provided Keystone, read-only Neutron topology, synthetic VIP allocation and immediate RPC completion. A guest callback installed the rendered configuration and assigned the isolated VIP. The three samples establish this HTTP forwarding and ownership lifecycle on local dependencies. Live Hibiscus networking, Neutron security rules, an Amphora instance, Magnum cluster lifecycle and the full GATEWAY-HTTP profile remain unverified by this pilot. [Octavia WSGI fixture](udp-upstream-api.py) · [HAProxy guest callback](http-upstream-guest.sh) · [Live qualification ledger](../live-runs.md)
+
+## Pinned inputs
+
+| Input | Version or digest |
+|---|---|
+| Controller source | `719490a9b1fa73b0d80a0c5512c2c8107b16a235` |
+| Controller OCI manifest, linux/amd64 | `sha256:d4bd805c701dbeda6a100625ca6255999742ab1d5db8469bb9fc0a1a5b9b3f2c` |
+| Controller OCI config | `sha256:6f52cddad020b7f112d526f15bda1ef9f0afba9834fd061384401e5bf4f407fe` |
+| Gateway API v1.7.0 Standard bundle | `sha256:4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1` |
+| Class configuration CRD | `sha256:39aa7fa4a30f187d5eed492fe3af821dc23498ab49ec4a37a6d4152cf70b8f16` |
+| kind v0.33.0 node image, Kubernetes v1.36.4 | `sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed` |
+| echo-basic v0.1.0 | `sha256:640d843263062f4391ecd74effd68673a69800852eb4ff31b8452a3301eae83b` |
+| Workload Helm release | Helm 3.19.4, chart `openstack-gw` |
+
+The workload chart was rendered by the Magnum integration and configured for the pinned image, a fixture-specific cluster identity and the Standard channel. The complete credential Secret was mounted read-only. The test used the stock controller entrypoint and Go client TLS verification. [Magnum operator guide](../magnum-operator.md)
+
+## Repeat the local pilot
+
+1. Create a disposable Linux guest with one Kubernetes v1.36.4 kind cluster, one control-plane node and one worker. Install the pinned Gateway API v1.7.0 Standard bundle and the checked-in class-config CRD. Use an empty tmpfs-backed directory for control-plane etcd. Label the worker for the [echo manifest](kind-worker-http.yaml) and pre-load both pinned images. Use the [kind setup](udp-upstream.md#reproduce-the-local-run) for the cluster and the [Octavia installation](stock-udp.md#reproduce-the-public-api-and-configuration-check) for the Python environment.
+2. Load the controller OCI archive into both nodes with its manifest digest. Install the [Magnum driver workload chart](../magnum-operator.md) with the digest, a dedicated cluster ID and the Standard channel. Use two replicas and the normal entrypoint. Before install, create `openstack-clouds` with generated application credentials and a CA for local Keystone and catalog endpoints. Make the endpoints reachable from the pods on the private kind bridge. Require certificate verification. Use a read-only Neutron fixture with a VIP subnet, a member subnet that contains the worker InternalIP and an empty Floating IP inventory.
+3. Start [the stock Octavia fixture](udp-upstream-api.py) with `--protocol http`. Supply the worker subnet CIDR to `install_network` in place of the default Pod CIDR. Keep the stock WSGI listener on loopback. Forward it to the guest over loopback SSH and proxy the catalog's authenticated load-balancer requests to it. Use [the guest callback](http-upstream-guest.sh) for a stock HAProxy 3.0.19 configuration on the isolated VIP. Seed two independent Amphora load balancers in the same project through the WSGI API with distinct non-controller tags. Retain their complete inventory.
+4. Apply the echo manifest. Create a class config with the fixture subnet IDs, `memberMode: NodePort`, `nodeAddressType: InternalIP` and `floatingIP.mode: None`. In the echo namespace, create a Gateway with one HTTP listener on 18080, same-namespace attachment and hostname `pilot.example.test`. Attach an HTTPRoute with this hostname, path prefix `/cold` and backend Service `echo:80`. Wait for the Gateway, listener and route parent conditions at their current generations. Read the Gateway VIP, Service NodePort, worker address and the Octavia graph. Compare three independently sampled phases using fresh paths under `/cold/` and the same Host at the worker NodePort and Gateway VIP. Compare response status, pod, namespace, host and path and test an unbound hostname at the VIP.
+5. Between the first and second samples, scale the Deployment to zero and wait until its Pod list is empty. Between the second and third samples, scale it back to two. Verify the replacement Pods are Ready, have different UIDs and run the expected image. Use newly minted Keystone tokens to attribute Octavia reads to the replacement processes. Compare the Gateway and HTTPRoute statuses and all persisted Octavia IDs and ownership records with the first sample. Count successful controller writes during recovery.
+6. Delete the HTTPRoute and Gateway while the controller is running. Wait for both finalizers and compare the full provider inventory with the two-control baseline. Check that the VIP stops answering. Uninstall the chart and delete the fixture class, config and namespaces. Dispose of the local WSGI instance after recording the control snapshots.
