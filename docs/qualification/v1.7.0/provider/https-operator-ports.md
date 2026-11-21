@@ -1,0 +1,24 @@
+# Operator-managed HTTPS on dedicated frontend ports
+
+An enrolled Gateway can serve HTTPS on ports 443 and 8443 alongside HTTP on port 18080. Each port forwards to its own HTTP backend. An operator approves an immutable Barbican PKCS#12 for an exact workload Secret revision. A cross-namespace listener also needs a ReferenceGrant in the Secret namespace. [Enable the mode, rotate and revoke](../../../operator-https.md)
+
+## Controller and traffic
+
+Two independent local runs installed the official v1.7.0 Standard and Experimental release bundles with their admission policies. The Go 1.27.4 controller used Kubernetes 1.36.2 and etcd 3.6.8 with the base service-account permissions and two named Secret GET grants. More general Secret reads were denied. The stock Octavia 19 and Barbican 23 HTTP services and databases were reachable on a private network namespace. The stock Amphora renderer configured HAProxy 3.0.19 to route to the three backend processes advertised by the Kubernetes EndpointSlices. Keystone, Neutron, Octavia RPC delivery and the remote Amphora agent were simulated. The local provider harness used Python 3.14.7, cryptography 43.0.3, WSME 0.13.0, WebOb 1.8.11 and OpenSSL 3.5.8. The backend processes ran without kubelets or cloud VMs.
+
+| Channel | Measured phases | HTTPS requests with correct backend and peer chain | New TLS connections refused or rejected | Plain HTTP requests with correct backend |
+|---|---:|---:|---:|---:|
+| Standard | 12 | 17 | 7 | 12 |
+| Experimental | 12 | 17 | 7 | 12 |
+
+Each accepted TLS connection independently verified the hostname, trust root, leaf and two ordered intermediates. An HTTP 200 counted only after the named backend echoed its identity, Host and request path. The first port refused a fresh handshake before its grant, after the Secret changed and before revision B was approved, after grant removal and after the enrollment was withdrawn. Restoring the grant served B. The plaintext backend continued responding throughout. Each run checked the three native pool memberships and monitors against the enrolled endpoints. All three ports still reached their backends with the manager stopped. After a fresh manager observed Octavia, the same resource IDs remained and the restart had caused zero provider writes. After Gateway finalization, the controller's Octavia graph was gone. The operator separately removed three Barbican payloads and verified HTTP 404.
+
+The first integration run identified an Octavia 19 response shape missing from the HTTP adapter fixture. A new pool omitted `healthmonitor_id` and its explicit monitor collection was empty. The earlier controller stopped after pool creation and the two enabled frontends returned 503. The corrected reader accepts the absent optional ID only when the independent inventory agrees. A reported monitor with a contradictory pool pointer still blocks graph changes. [Octavia pool response](https://github.com/openstack/octavia/blob/93689cb7701da65b5aad387bb824c477c64b0f2b/octavia/api/v2/types/pool.py#L122-L140)
+
+## Upstream attachment case
+
+The unmodified `GatewayWithAttachedRoutes` case passed its three subtests on both channels with the feature enabled. It counted one route on an HTTPS section with an unresolved certificate and backend. The status run used the real Kubernetes API, release admission and a recording OpenStack provider. The default-mode failure stays in the case ledger. The full Gateway profiles' common setup includes several HTTPS sections on one physical port, outside this mode. All fourteen live profile/channel combinations remain unrun. [Upstream case](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/gateway-with-attached-routes.go) · [Case matrix](../matrix/features-and-cases.md#complete-registered-test-inventory)
+
+The standalone HTTPS artifact contains seven objects. The Magnum driver checked the five-object workload artifact, replaced the operator-provided cluster and image inputs and accepted its checksum. The default Magnum workload artifact kept its previous SHA-256. The optional map and named Secret Roles are managed separately in the workload cluster. [Magnum workload setup](../magnum-operator.md)
+
+Controller source `0f0b18e3cfa17b007a14c6397b7b2942cba7a2fe`. The release contains the per-phase receipts, upstream status qualification inputs and portable traffic exercise. [Measured results](https-operator-results.json) · [Qualification archive](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-0f0b18e3cfa17b007a14c6397b7b2942cba7a2fe/hibiscus-operator-https-0f0b18e3cfa1.tar.gz) · [Development release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-0f0b18e3cfa17b007a14c6397b7b2942cba7a2fe)

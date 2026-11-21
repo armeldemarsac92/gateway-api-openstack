@@ -106,7 +106,7 @@ spec:
           port: 80
 ```
 
-Use a supported Service and member configuration for the backend. Check the listener's current `Accepted`, `ResolvedRefs` and `Programmed` conditions, the route's parent status and the expected application response through the VIP. Use a new TLS connection with the expected SNI, hostname and trust root to check the certificate. [Supported HTTP backends](getting-started.md)
+Use a supported Service and member configuration for the backend. Check the listener's current `Accepted`, `ResolvedRefs` and `Programmed` conditions, the route's parent status and the expected application response through the VIP. Use a new TLS connection with the expected SNI, hostname and trust root to check the certificate. [Supported HTTP backends](getting-started.md) · [Measured status, rotation and traffic](qualification/v1.7.0/provider/https-operator-ports.md)
 
 ## Rotate, revoke and roll back
 

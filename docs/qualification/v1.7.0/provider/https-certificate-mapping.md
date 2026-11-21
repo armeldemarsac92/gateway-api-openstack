@@ -1,6 +1,6 @@
 # Certificate mapping and shared HTTPS frontends
 
-**Operator-managed mode.** The operator enrollment helper binds a Kubernetes Secret revision to an immutable Barbican PKCS#12. The controller accepts one HTTPS listener per physical port in the opt-in installation. The default workload installation grants no Secret access. [Operator runbook](../../../operator-https.md) · [Helper and map format](../../../../hack/operator-certificates/README.md)
+**Operator-managed mode.** The operator enrollment helper binds a Kubernetes Secret revision to an immutable Barbican PKCS#12. The controller accepts one HTTPS listener per physical port in the opt-in installation. The default workload installation grants no Secret access. [Operator runbook](../../../operator-https.md) · [Helper and map format](../../../../hack/operator-certificates/README.md) · [Single-listener-per-port controller results](https-operator-ports.md)
 
 An earlier stock Octavia fixture served eight fresh HTTPS requests across two operator-provisioned PKCS#12 revisions. Its Keystone identities, provisioning transitions and Amphora agent were simulated. Multiple HTTPS sections sharing one port remain a separate design question. [Stock HTTPS provider evidence](stock-https-rotation.md)
 
