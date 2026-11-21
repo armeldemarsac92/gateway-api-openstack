@@ -32,7 +32,7 @@ Both test processes exited successfully. Each upstream report includes the share
 
 The HTTP cases cover matching, host and status redirects, request headers, the same-namespace case, weighted distribution, traffic splits and basic connectivity. The gRPC cases cover request metadata, weighted distribution and basic connectivity. The trial exercised a producer Route of each kind separately on the same Service. Consumer Routes, direct ClusterIP matching, simultaneous HTTPRoute and GRPCRoute attachments, XMesh semantics and a deployed Magnum cluster remain unqualified. [Per-case results, release checksums and image digests](ambient-waypoint-results.json)
 
-The local archive `hibiscus-istio-ambient-v1.7.0-ab748e2.tar.gz` contains the two upstream reports, wire fixtures, logs and cleanup receipts. Its SHA-256 is `1be73cf3ca8a77a670c81d8c7b1c9bc3cfce01b07c8acbea52d829982a7eed13`.
+The published archive contains the upstream reports, traffic fixtures and counts, runtime inventory, and cleanup receipts from the two clusters. It also includes the Kubernetes API check that namespace unenrollment preserves a later operator assignment. Its SHA-256 is `efef12b5ccfc3cce6c427d8f6c493cfadbc585a3e900ebcdf957d79df8b662ea`. [Download the local Core profile evidence](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-mesh-v1.7.0-4c08237/hibiscus-ambient-core-4c08237.tar.gz)
 
 ## Run the upstream Core cases
 

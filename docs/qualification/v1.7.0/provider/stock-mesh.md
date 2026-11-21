@@ -4,6 +4,8 @@ This design study runs the existing ingress reconcilers at `000d9dd6a3e64748f2b7
 
 ## Upstream Core results
 
+The optional Istio ambient module has a separate local result for each release bundle. With a Service waypoint, both mesh Core profiles passed using ordinary Service DNS. [Waypoint traffic and profile reports](ambient-waypoint.md)
+
 Both profiles failed on both channels. All Core test bodies ran. The upstream report includes the shared `MeshBasic` connectivity case in both profiles.
 
 | Profile | Standard | Experimental | Failed cases on both channels |
