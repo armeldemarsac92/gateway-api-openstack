@@ -52,6 +52,18 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 		}
 		port, _ := strconv.Atoi(snapshot.boundListenerPort)
 		spec := cloud.GatewaySpec{ListenerProtocol: string(snapshot.boundListenerProtocol), ListenerPort: port}
+		// A listener replacement must not release an existing VIP when the
+		// same request changes the fixed address. Deletion has no such guard.
+		if snapshot.listenerPort != "" && len(request.Gateway.Spec.Addresses) == 1 {
+			spec.RequestedVIPAddress = request.Gateway.Spec.Addresses[0].Value
+			if spec.RequestedVIPAddress != "" {
+				topology, err := controller.StoredGatewayTopology(r.Config, request.Gateway)
+				if err != nil {
+					return graph.GatewayInput{}, err
+				}
+				spec.ExternalNetworkID = topology.Topology.ExternalNetworkID
+			}
+		}
 		if snapshot.scopedListeners {
 			spec.ScopedListeners = []cloud.ScopedListener{}
 		}

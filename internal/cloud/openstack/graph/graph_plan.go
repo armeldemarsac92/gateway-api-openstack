@@ -336,7 +336,7 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 		}
 		created, createErr := p.octavia.CreateLoadBalancer(ctx, octavia.CreateLoadBalancerOpts{CreateOpts: loadbalancers.CreateOpts{
 			Name: resourceName(desired.spec.Identity, roleLoadBalancer), Description: desired.identity.Description(roleLoadBalancer),
-			VipSubnetID: spec.VIPSubnetID, Provider: spec.Provider, FlavorID: spec.FlavorID, AvailabilityZone: spec.AvailabilityZone,
+			VipSubnetID: spec.VIPSubnetID, VipAddress: spec.RequestedVIPAddress, Provider: spec.Provider, FlavorID: spec.FlavorID, AvailabilityZone: spec.AvailabilityZone,
 			AdminStateUp: boolPointer(true), Tags: tags,
 		}, VIPSecurityGroupIDs: spec.VIPSecurityGroupIDs})
 		err = createErr

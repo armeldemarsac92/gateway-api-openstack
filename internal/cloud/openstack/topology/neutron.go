@@ -69,6 +69,16 @@ func (r *Resolver) resolveSubnet(ctx context.Context, reference cloud.ResourceRe
 	return subnet, nil
 }
 
+// VIPSubnetContains reports whether the project-owned VIP subnet contains the requested address.
+func (r *Resolver) VIPSubnetContains(ctx context.Context, subnetID string, address netip.Addr) (bool, error) {
+	subnet, err := r.resolveSubnet(ctx, cloud.ResourceReference{ID: subnetID})
+	if err != nil {
+		return false, err
+	}
+	prefix := netip.MustParsePrefix(subnet.CIDR) // resolveSubnet validated the CIDR.
+	return prefix.Contains(address), nil
+}
+
 type externalNetwork struct {
 	networks.Network
 	external.NetworkExternalExt

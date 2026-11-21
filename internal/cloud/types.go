@@ -56,6 +56,9 @@ type GatewaySpec struct {
 	// Cleanup carries an empty, non-nil set and the same frozen port.
 	ScopedListeners     []ScopedListener
 	VIPSecurityGroupIDs []string
+
+	// RequestedVIPAddress is an optional fixed private IPv4 address on VIPSubnetID.
+	RequestedVIPAddress string
 }
 
 // ScopedListener is one named Octavia listener on a shared Gateway load balancer.

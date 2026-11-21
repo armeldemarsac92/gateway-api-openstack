@@ -19,6 +19,7 @@ package gateway
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
@@ -99,16 +101,18 @@ func TestGatewayReconcileProgramsAddressAndConditions(t *testing.T) {
 	}
 }
 
-func TestGatewayProgramsEmptyIPAddressUsingClassTopology(t *testing.T) {
+func TestGatewayProgramsIPAddressUsingClassTopology(t *testing.T) {
 	const externalNetworkID = "55555555-5555-5555-5555-555555555555"
 	for _, tc := range []struct {
 		name            string
 		addressType     *gatewayv1.AddressType
+		requested       string
 		externalNetwork string
 		floatingIP      string
 		wantAddress     string
 	}{
 		{name: "default type and private VIP", wantAddress: "192.0.2.11"},
+		{name: "static IPv4 in private subnet", addressType: ptr.To(gatewayv1.IPAddressType), requested: "192.0.2.11", wantAddress: "192.0.2.11"},
 		{name: "explicit type and floating IP", addressType: ptr.To(gatewayv1.IPAddressType),
 			externalNetwork: externalNetworkID, floatingIP: "198.51.100.42", wantAddress: "198.51.100.42"},
 	} {
@@ -125,7 +129,7 @@ func TestGatewayProgramsEmptyIPAddressUsingClassTopology(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "edge", UID: "gateway-uid"},
 				Spec: gatewayv1.GatewaySpec{
 					GatewayClassName: "openstack",
-					Addresses:        []gatewayv1.GatewaySpecAddress{{Type: tc.addressType}},
+					Addresses:        []gatewayv1.GatewaySpecAddress{{Type: tc.addressType, Value: tc.requested}},
 					Listeners:        []gatewayv1.Listener{{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80}},
 				},
 			}
@@ -146,7 +150,7 @@ func TestGatewayProgramsEmptyIPAddressUsingClassTopology(t *testing.T) {
 				t.Fatalf("EnsureGateway calls = %d, want one", len(provider.gatewaySpecs))
 			}
 			spec := provider.gatewaySpecs[0]
-			if spec.Identity.GatewayUID != string(gateway.UID) || spec.VIPSubnetID != testVIPSubnetID || spec.ExternalNetworkID != tc.externalNetwork {
+			if spec.Identity.GatewayUID != string(gateway.UID) || spec.VIPSubnetID != testVIPSubnetID || spec.ExternalNetworkID != tc.externalNetwork || spec.RequestedVIPAddress != tc.requested {
 				t.Fatalf("provider received unexpected Gateway identity or topology: %#v", spec)
 			}
 			if err := kubeClient.Get(t.Context(), request.NamespacedName, gateway); err != nil {
@@ -160,6 +164,63 @@ func TestGatewayProgramsEmptyIPAddressUsingClassTopology(t *testing.T) {
 				t.Fatalf("Gateway addresses = %#v, want IPAddress %s", got, tc.wantAddress)
 			}
 		})
+	}
+}
+
+func TestGatewayShowsActualVIPDuringRejectedAddressEdit(t *testing.T) {
+	cfg := testConfig()
+	class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "openstack"}, Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName}}
+	gw := &gatewayv1.Gateway{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "edge", UID: "gateway-uid", Generation: 1},
+		Spec: gatewayv1.GatewaySpec{
+			GatewayClassName: "openstack",
+			Listeners:        []gatewayv1.Listener{{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80}},
+		},
+	}
+	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gw).WithObjects(class, gw).Build()
+	actual := cloud.GatewayReadyResult(cloud.GatewayState{LoadBalancerID: "lb-1", ListenerID: "listener-1", VIPAddress: "192.0.2.10"})
+	provider := &recordingProvider{gatewayResult: &actual}
+	req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(gw)}
+	reconcile := func() {
+		t.Helper()
+		r := newTestReconciler(Reconciler{Client: kube, APIReader: kube, Config: cfg, Coordinator: &graph.Coordinator{}}, provider)
+		if _, err := r.Reconcile(t.Context(), req); err != nil {
+			t.Fatal(err)
+		}
+		if err := kube.Get(t.Context(), req.NamespacedName, gw); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reconcile()
+	reconcile()
+	for _, edit := range []struct {
+		requested, issue string
+		wantStatus       metav1.ConditionStatus
+		wantReason       gatewayv1.GatewayConditionReason
+	}{
+		{"192.0.2.11", "Keep the existing VIP 192.0.2.10 or use a different Gateway for 192.0.2.11", metav1.ConditionFalse, gatewayv1.GatewayReasonAddressNotUsable},
+		{"192.0.2.10", "", metav1.ConditionTrue, gatewayv1.GatewayReasonProgrammed},
+	} {
+		gw.Spec.Addresses = []gatewayv1.GatewaySpecAddress{{Value: edit.requested}}
+		gw.Generation++
+		if err := kube.Update(t.Context(), gw); err != nil {
+			t.Fatal(err)
+		}
+		actual.AddressIssue = edit.issue
+		reconcile()
+		if len(provider.deletedGateways) != 0 || len(gw.Status.Addresses) != 1 || gw.Status.Addresses[0].Value != "192.0.2.10" {
+			t.Fatalf("Gateway status = %#v, provider cleanup = %v", gw.Status, provider.deletedGateways)
+		}
+		accepted := meta.FindStatusCondition(gw.Status.Conditions, string(gatewayv1.GatewayConditionAccepted))
+		programmed := meta.FindStatusCondition(gw.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed))
+		if accepted == nil || accepted.Status != metav1.ConditionTrue || accepted.ObservedGeneration != gw.Generation ||
+			programmed == nil || programmed.Status != edit.wantStatus || programmed.Reason != string(edit.wantReason) ||
+			programmed.ObservedGeneration != gw.Generation || !strings.Contains(programmed.Message, edit.issue) {
+			t.Fatalf("conditions for %s = %#v", edit.requested, gw.Status.Conditions)
+		}
+		if len(gw.Status.Listeners) != 1 || !meta.IsStatusConditionTrue(gw.Status.Listeners[0].Conditions, string(gatewayv1.ListenerConditionProgrammed)) {
+			t.Fatalf("live listener status = %#v", gw.Status.Listeners)
+		}
 	}
 }
 
@@ -773,14 +834,14 @@ func TestGatewayRefusedAddressesPublishSpecificConditions(t *testing.T) {
 		accepted        gatewayv1.GatewayConditionReason
 		programmed      gatewayv1.GatewayConditionReason
 	}{
-		{name: "static IP", addresses: []gatewayv1.GatewaySpecAddress{staticIP},
+		{name: "static IPv6", addresses: []gatewayv1.GatewaySpecAddress{{Value: "2001:db8::20"}},
 			accepted: gatewayv1.GatewayReasonAccepted, programmed: gatewayv1.GatewayReasonAddressNotUsable},
 		{name: "multiple static IPs", addresses: []gatewayv1.GatewaySpecAddress{staticIP, {Value: "192.0.2.21"}},
 			accepted: gatewayv1.GatewayReasonAccepted, programmed: gatewayv1.GatewayReasonAddressNotUsable},
 		{name: "empty hostname", addresses: []gatewayv1.GatewaySpecAddress{emptyHostname},
 			accepted: gatewayv1.GatewayReasonUnsupportedAddress, programmed: gatewayv1.GatewayReasonAddressNotAssigned},
 		{name: "static IP with empty hostname", addresses: []gatewayv1.GatewaySpecAddress{staticIP, emptyHostname},
-			accepted: gatewayv1.GatewayReasonUnsupportedAddress, programmed: gatewayv1.GatewayReasonAddressNotAssigned},
+			accepted: gatewayv1.GatewayReasonUnsupportedAddress, programmed: gatewayv1.GatewayReasonAddressNotUsable},
 		{name: "multiple dynamic addresses", addresses: []gatewayv1.GatewaySpecAddress{{}, {}},
 			accepted: gatewayv1.GatewayReasonInvalid, programmed: gatewayv1.GatewayReasonAddressNotAssigned},
 		{name: "cluster routability", addresses: []gatewayv1.GatewaySpecAddress{{Routability: gatewayv1.GatewayAddressRoutabilityCluster}},

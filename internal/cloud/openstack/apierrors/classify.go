@@ -94,6 +94,19 @@ func ClassifyOctaviaMutation(err error) error {
 	return err
 }
 
+// IsOctaviaVIPAddressConflict identifies the VIP-specific conflict returned by
+// Octavia when allocating an Amphora VIP. Other 409s use the normal retry path.
+func IsOctaviaVIPAddressConflict(err error) bool {
+	status, body, ok := openStackResponse(err)
+	if !ok || status != http.StatusConflict {
+		return false
+	}
+	var fault struct {
+		FaultString string `json:"faultstring"`
+	}
+	return json.Unmarshal(body, &fault) == nil && strings.HasPrefix(fault.FaultString, "The VIP IP address is already in use:")
+}
+
 func categoryForResponse(status int, body []byte) (cloud.ErrorCategory, bool) {
 	if (status == http.StatusForbidden || status == http.StatusConflict) && isNeutronQuotaResponse(body) {
 		return cloud.ErrorCategoryQuota, true

@@ -288,7 +288,7 @@ func TestBoundHTTPRouteDoesNotReconcileInvalidGateway(t *testing.T) {
 	if err := kubeClient.Get(context.Background(), types.NamespacedName{Namespace: route.Namespace, Name: "edge"}, &gateway); err != nil {
 		t.Fatal(err)
 	}
-	gateway.Spec.Addresses = []gatewayv1.GatewaySpecAddress{{Value: "192.0.2.20"}}
+	gateway.Spec.Addresses = []gatewayv1.GatewaySpecAddress{{Value: "2001:db8::20"}}
 	gateway.Generation++
 	if err := kubeClient.Update(context.Background(), &gateway); err != nil {
 		t.Fatalf("make Gateway unsupported: %v", err)

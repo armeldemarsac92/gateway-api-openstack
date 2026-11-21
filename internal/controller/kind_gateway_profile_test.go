@@ -143,7 +143,7 @@ func kindGatewayProfileOptions(t *testing.T, mode suite.ConformanceProfileName, 
 		// Fill the upstream GatewayStaticAddresses fixture's placeholders.
 		// The adapter only records graphs and returns a synthetic VIP.
 		options.UsableNetworkAddresses = []gatewayv1.GatewaySpecAddress{
-			{Type: ptr.To(gatewayv1.IPAddressType), Value: recordingProviderVIP},
+			{Type: ptr.To(gatewayv1.IPAddressType), Value: recordingProviderStaticVIP},
 		}
 		options.UnusableNetworkAddresses = []gatewayv1.GatewaySpecAddress{
 			{Type: ptr.To(gatewayv1.IPAddressType), Value: "198.51.100.10"},

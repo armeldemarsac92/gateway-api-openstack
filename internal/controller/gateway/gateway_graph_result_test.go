@@ -174,6 +174,36 @@ func TestGatewayRouteFailurePreservesStatusAndRedactsDetails(t *testing.T) {
 	}
 }
 
+func TestGatewayReplacementReportsImmutableAddress(t *testing.T) {
+	cfg := testConfig()
+	gateway := programmedTestGateway(cfg)
+	gateway.Spec.Listeners[0].Port++
+	gateway.Spec.Addresses = []gatewayv1.GatewaySpecAddress{{Value: "192.0.2.11"}}
+	gateway.Generation++
+	class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "openstack"}, Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName}}
+	kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gateway).WithObjects(class, gateway).Build()
+	component := cloud.GatewayProgressingResult("Blocked replacement", time.Second)
+	component.State = cloud.GatewayState{LoadBalancerID: "lb-1", VIPAddress: "192.0.2.10"}
+	component.AddressIssue = "Restore the currently bound VIP 192.0.2.10"
+	r := newTestReconciler(Reconciler{Client: kubeClient, APIReader: kubeClient, Config: cfg,
+		Writer: fixedGatewayGraph{result: cloud.GatewayGraphResult{Outcome: component.Outcome, Gateway: component}}}, nil)
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(gateway)}
+	for range 2 {
+		if _, err := r.Reconcile(t.Context(), request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	current := &gatewayv1.Gateway{}
+	if err := kubeClient.Get(t.Context(), request.NamespacedName, current); err != nil {
+		t.Fatal(err)
+	}
+	programmed := meta.FindStatusCondition(current.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed))
+	if programmed == nil || programmed.ObservedGeneration != gateway.Generation || programmed.Status != metav1.ConditionFalse ||
+		programmed.Reason != string(gatewayv1.GatewayReasonAddressNotUsable) || len(current.Status.Addresses) != 1 || current.Status.Addresses[0].Value != "192.0.2.10" {
+		t.Fatalf("status = %#v, want actual address and current-generation address rejection", current.Status)
+	}
+}
+
 type fixedGatewayGraph struct {
 	result cloud.GatewayGraphResult
 	err    error

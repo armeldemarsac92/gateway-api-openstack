@@ -75,6 +75,9 @@ func ProgressingOutcome(message string, requeueAfter time.Duration) Outcome {
 type GatewayResult struct {
 	State   GatewayState
 	Outcome Outcome
+	// AddressIssue explains why the requested fixed address cannot be assigned.
+	// The observed Gateway and route outcomes still describe the existing infrastructure.
+	AddressIssue string
 	// ScopedListenerReadyPorts contains the individually programmed listener ports when
 	// the provider has observed a multi-listener TCP or UDP Gateway.
 	ScopedListenerReadyPorts []int

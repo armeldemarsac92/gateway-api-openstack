@@ -145,6 +145,17 @@ func testUpstreamGatewayStatus(t *testing.T, c client.Client, cfg controller.Con
 		}
 	})
 
+	t.Run(tests.GatewayStaticAddresses.ShortName, func(t *testing.T) {
+		s.RunTest = tests.GatewayStaticAddresses.ShortName
+		s.Applier.UsableNetworkAddresses = []gatewayv1.GatewaySpecAddress{
+			{Type: ptr.To(gatewayv1.IPAddressType), Value: recordingProviderStaticVIP},
+		}
+		s.Applier.UnusableNetworkAddresses = []gatewayv1.GatewaySpecAddress{
+			{Type: ptr.To(gatewayv1.IPAddressType), Value: "198.51.100.10"},
+		}
+		tests.GatewayStaticAddresses.Run(t, s)
+	})
+
 	for _, tc := range []suite.ConformanceTest{
 		tests.GatewayClassObservedGenerationBump,
 		tests.GatewayInvalidRouteKind,

@@ -39,7 +39,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-const recordingProviderVIP = "192.0.2.10"
+const (
+	recordingProviderVIP       = "192.0.2.10"
+	recordingProviderStaticVIP = "192.0.2.30"
+)
 
 type recordingProvider struct {
 	mu               sync.Mutex
@@ -51,9 +54,18 @@ type recordingProvider struct {
 
 func (p *recordingProvider) EnsureGateway(_ context.Context, spec cloud.GatewaySpec) (cloud.GatewayResult, error) {
 	p.gatewaySpecs = append(p.gatewaySpecs, spec)
+	vip := recordingProviderVIP
+	if spec.RequestedVIPAddress != "" {
+		if spec.RequestedVIPAddress != recordingProviderStaticVIP {
+			result := cloud.GatewayProgressingResult("Fixture cannot allocate the requested VIP", time.Second)
+			result.AddressIssue = result.Outcome.Message
+			return result, nil
+		}
+		vip = recordingProviderStaticVIP
+	}
 	return cloud.GatewayReadyResult(cloud.GatewayState{
 		LoadBalancerID: "lb-1",
-		VIPAddress:     recordingProviderVIP,
+		VIPAddress:     vip,
 		ListenerID:     "listener-1",
 	}), nil
 }

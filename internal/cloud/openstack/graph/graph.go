@@ -20,11 +20,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"slices"
 	"sort"
 	"strings"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/apierrors"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/extensions/layer3/floatingips"
@@ -84,8 +86,10 @@ type graphMutation struct {
 // one ordered plan. It executes at most its first mutation and never caches the
 // plan across calls, including after a timeout or a lost create response.
 func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.GatewayGraphSpec) (result cloud.GatewayGraphResult, retErr error) {
+	var addressIssue string
 	defer func() {
 		if retErr == nil {
+			result.Gateway.AddressIssue = addressIssue
 			return
 		}
 		var component *cloud.GraphError
@@ -106,6 +110,21 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	if err != nil {
 		result.Gateway = observedGatewayResult(desired, actual, p.progressingOutcome("Waiting for the Gateway infrastructure"))
 		return result, err
+	}
+	requested := spec.Gateway.Spec.RequestedVIPAddress
+	replacing := spec.Gateway.Disposition == cloud.GraphDelete && actual.loadBalancer != nil
+	if requested != "" && (spec.Gateway.Disposition == cloud.GraphEnsure || replacing) {
+		addressIssue, err = p.requestedVIPIssue(ctx, spec.Gateway.Spec, actual)
+		if err != nil {
+			return result, err
+		}
+		floatingIPUnassigned := spec.Gateway.Spec.ExternalNetworkID != "" && actual.state.FloatingIPAddress == ""
+		if addressIssue != "" && (actual.loadBalancer == nil || replacing || floatingIPUnassigned) {
+			actual.outcome = p.progressingOutcome(addressIssue)
+		}
+		if actual.loadBalancer != nil && actual.state.VIPAddress == "" {
+			actual.outcome = p.progressingOutcome("Waiting to observe the Octavia VIP address")
+		}
 	}
 	if actual.outcome.State == cloud.OutcomeProgressing {
 		return p.pendingGraphResult(ctx, desired, actual), nil
@@ -155,6 +174,11 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		}
 	}
 	if err := p.executeGraphMutation(ctx, desired, actual, step); err != nil {
+		if step.kind == graphCreateLoadBalancer && requested != "" && apierrors.IsOctaviaVIPAddressConflict(err) {
+			addressIssue = fmt.Sprintf("Octavia reports that VIP %s is already in use. Request an available IPv4 address on the GatewayClass VIP subnet", requested)
+			actual.outcome = p.progressingOutcome(addressIssue)
+			return p.pendingGraphResult(ctx, desired, actual), nil
+		}
 		if step.kind == graphRouteMutation {
 			return result, &cloud.GraphError{Identity: desired.routes[step.routeIndex].spec.Identity, Err: err}
 		}
@@ -162,6 +186,31 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	}
 	result.Outcome = p.progressingOutcome(step.message)
 	return result, nil
+}
+
+func (p *Provider) requestedVIPIssue(ctx context.Context, spec cloud.GatewaySpec, actual observedGatewayGraph) (string, error) {
+	if spec.ExternalNetworkID != "" {
+		return "A fixed Gateway address requires a GatewayClass without a Floating IP", nil
+	}
+	requested, err := netip.ParseAddr(spec.RequestedVIPAddress)
+	if err != nil || !requested.Is4() {
+		return "A fixed Gateway address must be IPv4", nil
+	}
+	if actual.loadBalancer != nil {
+		if actual.state.VIPAddress != "" && actual.state.VIPAddress != requested.String() {
+			return fmt.Sprintf("Octavia VIP %s cannot change to %s. Restore %s in spec.addresses or use a separate Gateway",
+				actual.state.VIPAddress, requested, actual.state.VIPAddress), nil
+		}
+		return "", nil
+	}
+	contains, err := p.topology.VIPSubnetContains(ctx, spec.VIPSubnetID, requested)
+	if err != nil {
+		return "", err
+	}
+	if !contains {
+		return fmt.Sprintf("Requested VIP %s is outside the GatewayClass VIP subnet. Request an IPv4 address on that subnet", requested), nil
+	}
+	return "", nil
 }
 
 func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desiredGatewayGraph, error) {

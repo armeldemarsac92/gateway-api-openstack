@@ -191,63 +191,59 @@ func validateL4Listener(listener *gatewayv1.Listener) error {
 }
 
 func validateAddresses(addresses []gatewayv1.GatewaySpecAddress) error {
-	var unsupportedType bool
+	programmedReason := gatewayv1.GatewayReasonAddressNotAssigned
 	for _, request := range addresses {
-		if request.Type == nil || *request.Type == gatewayv1.IPAddressType {
-			continue
-		}
-		unsupportedType = true
-		if request.Value == "" {
-			return &gatewayValidationError{
-				message:          "the requested Gateway address type cannot be allocated. Request an IPAddress",
-				gatewayReason:    gatewayv1.GatewayReasonUnsupportedAddress,
-				programmedReason: gatewayv1.GatewayReasonAddressNotAssigned,
-			}
+		if request.Value != "" {
+			programmedReason = gatewayv1.GatewayReasonAddressNotUsable
+			break
 		}
 	}
-	if unsupportedType {
-		return &gatewayValidationError{
-			message:       "only the IPAddress Gateway address type is supported",
-			gatewayReason: gatewayv1.GatewayReasonUnsupportedAddress,
+	for _, request := range addresses {
+		if request.Type != nil && *request.Type != gatewayv1.IPAddressType {
+			return &gatewayValidationError{
+				message:          "only the IPAddress Gateway address type is supported",
+				gatewayReason:    gatewayv1.GatewayReasonUnsupportedAddress,
+				programmedReason: programmedReason,
+			}
 		}
 	}
 
-	var staticIP string
 	for _, request := range addresses {
-		if request.Value != "" {
-			address, err := netip.ParseAddr(request.Value)
-			if err != nil || address.Zone() != "" {
-				return &gatewayValidationError{
-					message:       "the requested Gateway IP address is invalid",
-					gatewayReason: gatewayv1.GatewayReasonInvalid,
-				}
-			}
-			staticIP = request.Value
-		}
 		if request.Routability != gatewayv1.GatewayAddressRoutabilityDefault {
-			reason := gatewayv1.GatewayReasonAddressNotAssigned
-			if request.Value != "" {
-				reason = gatewayv1.GatewayReasonAddressNotUsable
-			}
 			return &gatewayValidationError{
 				message:          "only default Gateway address routability is supported",
 				gatewayReason:    gatewayv1.GatewayReasonInvalid,
-				programmedReason: reason,
+				programmedReason: programmedReason,
+			}
+		}
+		if request.Value == "" {
+			continue
+		}
+		address, err := netip.ParseAddr(request.Value)
+		if err != nil || address.Zone() != "" {
+			return &gatewayValidationError{
+				message:          "the requested Gateway IP address is invalid",
+				gatewayReason:    gatewayv1.GatewayReasonInvalid,
+				programmedReason: programmedReason,
+			}
+		}
+		if !address.Is4() {
+			return &gatewayValidationError{
+				message:          "a fixed Gateway address must be IPv4",
+				gatewayReason:    gatewayv1.GatewayReasonAccepted,
+				programmedReason: programmedReason,
 			}
 		}
 	}
-	if staticIP != "" {
-		return &gatewayValidationError{
-			message:          fmt.Sprintf("static Gateway IP address %s cannot be used. Omit the address value to request dynamic allocation", staticIP),
-			gatewayReason:    gatewayv1.GatewayReasonAccepted,
-			programmedReason: gatewayv1.GatewayReasonAddressNotUsable,
-		}
-	}
 	if len(addresses) > 1 {
+		reason := gatewayv1.GatewayReasonInvalid
+		if programmedReason == gatewayv1.GatewayReasonAddressNotUsable {
+			reason = gatewayv1.GatewayReasonAccepted
+		}
 		return &gatewayValidationError{
 			message:          "only one Gateway address may be requested",
-			gatewayReason:    gatewayv1.GatewayReasonInvalid,
-			programmedReason: gatewayv1.GatewayReasonAddressNotAssigned,
+			gatewayReason:    reason,
+			programmedReason: programmedReason,
 		}
 	}
 	return nil

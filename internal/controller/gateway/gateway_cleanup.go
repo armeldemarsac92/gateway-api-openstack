@@ -61,7 +61,7 @@ func (r *Reconciler) cleanupGateway(ctx context.Context, scope *gatewayScope) (c
 	if err := controller.ValidateGatewayBinding(r.Config, scope.gateway); err != nil {
 		return ctrl.Result{}, err
 	}
-	outcome, err := r.deleteGateway(ctx, scope.gateway)
+	result, err := r.deleteGateway(ctx, scope.gateway)
 	if err != nil {
 		if errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) {
 			return r.setGatewayUnsupportedVersion(ctx, scope)
@@ -72,6 +72,17 @@ func (r *Reconciler) cleanupGateway(ctx context.Context, scope *gatewayScope) (c
 		providerErr := fmt.Errorf("delete OpenStack resources for Gateway: %w", err)
 		return r.handleGatewayDeleteFailure(scope, providerErr)
 	}
+	if result.Gateway.AddressIssue != "" {
+		listener, err := Validate(scope.gateway)
+		if err != nil {
+			return ctrl.Result{}, errors.Join(errGatewayChanged, err)
+		}
+		if err := r.setGatewayAddressUnusable(ctx, scope.gateway, listener, result.Gateway, result.Gateway.Outcome); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: controller.OpenStackResyncAfter(r.Config.OpenStackResyncInterval, scope.gateway.UID)}, nil
+	}
+	outcome := result.Outcome
 	if err := outcome.Validate(); err != nil {
 		return ctrl.Result{}, fmt.Errorf("validate Gateway deletion outcome: %w", err)
 	}
@@ -124,10 +135,9 @@ func (r *Reconciler) cleanupGateway(ctx context.Context, scope *gatewayScope) (c
 	return ctrl.Result{}, nil
 }
 
-func (r *Reconciler) deleteGateway(ctx context.Context, expected *gatewayv1.Gateway) (cloud.Outcome, error) {
+func (r *Reconciler) deleteGateway(ctx context.Context, expected *gatewayv1.Gateway) (cloud.GatewayGraphResult, error) {
 	if r.Writer == nil {
-		return cloud.Outcome{}, fmt.Errorf("gateway graph writer is required")
+		return cloud.GatewayGraphResult{}, fmt.Errorf("gateway graph writer is required")
 	}
-	result, err := r.Writer.ReconcileGraph(ctx, graph.Request{Identity: controller.StoredGatewayIdentity(r.Config, expected), Action: graph.DeleteGateway, Gateway: expected})
-	return result.Outcome, err
+	return r.Writer.ReconcileGraph(ctx, graph.Request{Identity: controller.StoredGatewayIdentity(r.Config, expected), Action: graph.DeleteGateway, Gateway: expected})
 }

@@ -377,6 +377,29 @@ func (r *Reconciler) setGatewayProgrammed(ctx context.Context, gateway *gatewayv
 	return nil
 }
 
+func (r *Reconciler) setGatewayAddressUnusable(
+	ctx context.Context,
+	gateway *gatewayv1.Gateway,
+	listener *gatewayv1.Listener,
+	result cloud.GatewayResult,
+	progress cloud.Outcome,
+) error {
+	readyPorts := result.ScopedListenerReadyPorts
+	if controller.GatewayListenerScope(r.Config, gateway) == "" && progress.State == cloud.OutcomeReady {
+		readyPorts = []int{int(listener.Port)}
+	}
+	if err := r.setGatewayListenerStatuses(ctx, gateway, listener, metav1.ConditionFalse, gatewayv1.GatewayReasonAddressNotUsable,
+		gatewayv1.ListenerReasonPending, result.AddressIssue, "Waiting for Octavia listener readiness", true, readyPorts); err != nil {
+		return err
+	}
+	if address := result.State.Address(); address != "" {
+		setGatewayAddress(gateway, address)
+	} else {
+		gateway.Status.Addresses = nil
+	}
+	return nil
+}
+
 func setGatewayAddress(gateway *gatewayv1.Gateway, address string) {
 	addressType := gatewayv1.IPAddressType
 	gateway.Status.Addresses = []gatewayv1.GatewayStatusAddress{{Type: &addressType, Value: address}}
@@ -391,7 +414,7 @@ func (r *Reconciler) setGatewayListenerStatuses(
 	listenerReason gatewayv1.ListenerConditionReason,
 	gatewayMessage, listenerMessage string,
 	advanceProgrammedGeneration bool,
-	scopedReadyPorts []int,
+	readyPorts []int,
 ) error {
 	listeners := []*gatewayv1.Listener{primary}
 	if hasMultipleTransportListeners(gateway) {
@@ -415,7 +438,7 @@ func (r *Reconciler) setGatewayListenerStatuses(
 		setAcceptedListenerConditions(&status.Conditions, gateway.Generation)
 		generation := controller.ConditionObservedGeneration(status.Conditions, string(gatewayv1.ListenerConditionProgrammed), gateway.Generation, advanceProgrammedGeneration)
 		portProgrammed, portReason, portMessage := programmed, listenerReason, listenerMessage
-		if isL4Listener(listener.Protocol) && slices.Contains(scopedReadyPorts, int(listener.Port)) {
+		if slices.Contains(readyPorts, int(listener.Port)) {
 			portProgrammed, portReason, portMessage = metav1.ConditionTrue, gatewayv1.ListenerReasonProgrammed, "Octavia listener is active"
 		}
 		controller.SetCondition(&status.Conditions, controller.Condition(string(gatewayv1.ListenerConditionProgrammed), portProgrammed, string(portReason), portMessage, generation))

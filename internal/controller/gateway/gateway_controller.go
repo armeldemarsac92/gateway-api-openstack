@@ -138,7 +138,14 @@ func (r *Reconciler) reconcileRejectedGateway(
 	scope *gatewayScope,
 	decision gatewayPhaseDecision,
 ) (ctrl.Result, error) {
+	addresses := scope.gateway.Status.Addresses
 	r.setGatewayFailure(scope.gateway, decision.validation)
+	var validation *gatewayValidationError
+	if errors.As(decision.validation, &validation) && validation.programmedReason == gatewayv1.GatewayReasonAddressNotUsable {
+		// An unusable fixed address does not revoke an existing assignment.
+		scope.gateway.Status.Addresses = addresses
+		return ctrl.Result{}, nil
+	}
 	return r.cleanupGatewayAfterStatusCheckpoint(ctx, scope)
 }
 
@@ -147,7 +154,13 @@ func (r *Reconciler) reconcileGatewayReplacement(
 	scope *gatewayScope,
 	decision gatewayPhaseDecision,
 ) (ctrl.Result, error) {
-	message := "Listener port or protocol changed. Replacing the controller-owned OpenStack resource graph"
+	// An address conflict already checkpoints that this generation is unprogrammed.
+	programmed := meta.FindStatusCondition(scope.gateway.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed))
+	if programmed != nil && programmed.ObservedGeneration == scope.gateway.Generation &&
+		programmed.Status == metav1.ConditionFalse && programmed.Reason == string(gatewayv1.GatewayReasonAddressNotUsable) {
+		return r.cleanupGateway(ctx, scope)
+	}
+	message := "Listener port or protocol changed. Checking whether the OpenStack resource graph can be replaced"
 	if err := r.setGatewayProgressing(ctx, scope.gateway, decision.listener, message); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -232,6 +245,15 @@ func (r *Reconciler) reconcileGatewayGraph(
 				break
 			}
 		}
+	}
+	if gatewayResult.AddressIssue != "" {
+		if err := r.setGatewayAddressUnusable(ctx, scope.gateway, decision.listener, gatewayResult, progress); err != nil {
+			return ctrl.Result{}, err
+		}
+		if gatewayResult.State.LoadBalancerID != "" && graphResult.Outcome.State == cloud.OutcomeProgressing {
+			return ctrl.Result{RequeueAfter: controller.ProviderProgressRequeueAfter(graphResult.Outcome, scope.gateway.UID)}, nil
+		}
+		return ctrl.Result{RequeueAfter: controller.OpenStackResyncAfter(r.Config.OpenStackResyncInterval, scope.gateway.UID)}, nil
 	}
 	if progress.State == cloud.OutcomeProgressing {
 		message := controller.ProviderProgressMessage(progress, "Octavia resources for the Gateway are still progressing")
