@@ -184,7 +184,7 @@ func (r *Reconciler) planRoute(ctx context.Context, route *transportRoute, bindi
 	var inactiveMode cloud.MemberMode
 	if len(route.backendRefs) > 1 {
 		inactiveMode = cloud.MemberModeEndpoint
-		if r.protocol() == gatewayv1.UDPProtocolType && controller.HasGatewayTopologyBinding(r.Config, parent.gateway) {
+		if controller.HasGatewayTopologyBinding(r.Config, parent.gateway) {
 			topology, err := controller.StoredGatewayTopology(r.Config, parent.gateway)
 			if err != nil {
 				return routePlan{}, err
@@ -304,14 +304,10 @@ func gatewayProgrammed(gateway *gatewayv1.Gateway) bool {
 
 func (r *Reconciler) routeSpec(ctx context.Context, route *transportRoute, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, backends []serviceBackend, topology classconfig.Resolved, listenerPorts ...int) (cloud.RouteSpec, string, *model.Diagnostic, error) {
 	weighted := len(route.backendRefs) > 1
-	mode := topology.Topology.MemberMode
-	supportsWeights := mode == cloud.MemberModeEndpoint || r.protocol() == gatewayv1.UDPProtocolType && mode == cloud.MemberModeNodePort
-	if weighted && !supportsWeights {
-		return cloud.RouteSpec{}, "", backendRejection(gatewayv1.RouteReasonUnsupportedValue, fmt.Sprintf("%s forwarding with multiple backend references requires Endpoint member mode", r.protocol())), nil
-	}
+	matchVIPFamily := weighted || r.protocol() == gatewayv1.UDPProtocolType
 	groups := make([]weightedServiceMembers, len(backends))
 	for i, backend := range backends {
-		members, diagnostic, err := routebackend.TransportMembers(ctx, r.APIReader, backend.service, backend.ref.port, corev1.Protocol(r.protocol()), topology, gateway.Status.Addresses)
+		members, diagnostic, err := routebackend.TransportMembers(ctx, r.APIReader, backend.service, backend.ref.port, corev1.Protocol(r.protocol()), topology, gateway.Status.Addresses, matchVIPFamily)
 		if err != nil || diagnostic != nil {
 			return cloud.RouteSpec{}, "", diagnostic, err
 		}

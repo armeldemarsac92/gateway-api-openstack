@@ -174,15 +174,14 @@ func (p *Provider) buildDesiredRoutePart(spec cloud.RouteSpec, backendKey string
 		return invalid(fmt.Errorf("unsupported listener protocol %q", protocol))
 	}
 
-	supportsMemberWeights := protocol == cloud.ListenerProtocolUDP ||
-		protocol == cloud.ListenerProtocolTCP && spec.MemberMode == cloud.MemberModeEndpoint
+	supportsMemberWeights := usesDefaultPool(protocol)
 	membersByKey := make(map[string]cloud.Member, len(spec.Members))
 	for _, member := range spec.Members {
 		if member.Port < 1 || member.Port > 65535 {
 			return invalid(fmt.Errorf("member %s has invalid port %d", member.Address, member.Port))
 		}
 		if member.Weight != 0 && !supportsMemberWeights {
-			return invalid(errors.New("explicit member weights require UDP or TCP endpoint mode"))
+			return invalid(errors.New("explicit member weights require TCP or UDP"))
 		}
 		if member.Weight < 0 || member.Weight > maxOctaviaMemberWeight {
 			return invalid(fmt.Errorf("explicit member weight %d is outside 1-%d", member.Weight, maxOctaviaMemberWeight))

@@ -39,8 +39,6 @@ const routeMonitorExpectedCodes = "200-399"
 
 var errWeightedTCPBackupUnknown = errors.New("waiting for Octavia to report the backup flag for every weighted TCP member")
 
-const udpNodePortWeightTag = "gateway-api-openstack.udp-nodeport-weight=v1"
-
 type observedRoutePolicy struct {
 	policy                  l7policies.L7Policy
 	role                    string
@@ -828,6 +826,7 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 		for _, member := range desired.members {
 			desiredMembers[memberKey(member.Address, member.Port)] = member
 		}
+		weightTag := desired.nodePortWeightTag()
 		for _, member := range actual.members {
 			if desired.unavailable {
 				continue
@@ -847,15 +846,15 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 			delete(desiredMembers, key)
 			weight := desired.memberWeight(wanted)
 			var tags *[]string
-			if desired.udpNodePort() {
+			if weightTag != "" {
 				// Change the marker and the weight together so a restart or a
 				// partial activation can only normalize members we took over.
-				managed := slices.Contains(member.Tags, udpNodePortWeightTag)
+				managed := slices.Contains(member.Tags, weightTag)
 				switch {
 				case wanted.Weight > 0 && !managed:
-					tags = new(append(slices.Clone(member.Tags), udpNodePortWeightTag))
+					tags = new(append(slices.Clone(member.Tags), weightTag))
 				case wanted.Weight == 0 && managed:
-					tags = new(slices.DeleteFunc(slices.Clone(member.Tags), func(tag string) bool { return tag == udpNodePortWeightTag }))
+					tags = new(slices.DeleteFunc(slices.Clone(member.Tags), func(tag string) bool { return tag == weightTag }))
 				}
 			}
 			// HAProxy excludes backup members while any regular member is up.
@@ -1128,8 +1127,8 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 		if tagErr != nil {
 			return tagErr
 		}
-		if desired.udpNodePort() && step.member.Weight > 0 {
-			tags = append(tags, udpNodePortWeightTag)
+		if weightTag := desired.nodePortWeightTag(); weightTag != "" && step.member.Weight > 0 {
+			tags = append(tags, weightTag)
 		}
 		_, err = p.octavia.CreateMember(ctx, step.parentID, pools.CreateMemberOpts{
 			Address:      step.member.Address,
@@ -1282,14 +1281,22 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 	return nil
 }
 
-func (r desiredRoute) udpNodePort() bool {
-	return r.spec.MemberMode == cloud.MemberModeNodePort && r.protocol() == cloud.ListenerProtocolUDP
+func (r desiredRoute) nodePortWeightTag() string {
+	if r.spec.MemberMode == cloud.MemberModeNodePort {
+		switch r.protocol() {
+		case cloud.ListenerProtocolTCP:
+			return "gateway-api-openstack.tcp-nodeport-weight=v1"
+		case cloud.ListenerProtocolUDP:
+			return "gateway-api-openstack.udp-nodeport-weight=v1"
+		}
+	}
+	return ""
 }
 
-// Endpoint mode always owns weight for readiness. A singleton UDP NodePort
+// Endpoint mode always owns weight for readiness. A singleton TCP or UDP NodePort
 // leaves weights alone unless the observed member carries a managed share.
 func (r desiredRoute) memberWeight(member cloud.Member) *int {
-	managesWeight := r.spec.MemberMode == cloud.MemberModeEndpoint || r.udpNodePort() && member.Weight > 0
+	managesWeight := r.spec.MemberMode == cloud.MemberModeEndpoint || r.nodePortWeightTag() != "" && member.Weight > 0
 	if !managesWeight {
 		return nil
 	}
