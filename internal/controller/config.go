@@ -50,6 +50,8 @@ type Config struct {
 	RequestHeaderModifier bool
 	// BackendH2C enables h2c for HTTP backends that explicitly request it.
 	BackendH2C bool
+	// BackendTLSPolicy enables Service port policy selection for HTTP forwarding.
+	BackendTLSPolicy bool
 	// OperatorHTTPS enables termination using operator-provisioned certificates.
 	OperatorHTTPS bool
 	// TLSSNIPassthrough enables the advertised native TCP SNI policy extension.

@@ -40,9 +40,10 @@ import (
 // routeModelInputs keeps selection and lowering on the same request-local
 // observation. The graph source supplies the complete current route inventory.
 type routeModelInputs struct {
-	input     model.Input
-	logical   model.Gateway
-	admission routeGraphAdmission
+	input                  model.Input
+	logical                model.Gateway
+	backendTLSAvailability backendTLSAvailability
+	admission              routeGraphAdmission
 }
 
 type routeGraphAdmission struct {
@@ -235,11 +236,20 @@ func (r *Reconciler) collectRouteModelInputs(ctx context.Context, reader client.
 		}
 		input.OperatorHTTPS = true
 	}
+	var availability backendTLSAvailability
+	if r.Config.BackendTLSPolicy {
+		if err := graph.CollectBackendTLSInputs(ctx, reader, &input); err != nil {
+			return nil, err
+		}
+		if graph.HasValidBackendTLSWinner(input.BackendTLSPolicies) {
+			availability = r.backendTLSAvailability(ctx)
+		}
+	}
 	logical, err := model.Compile(input)
 	if err != nil {
 		return nil, fmt.Errorf("compile Gateway backend model: %w", err)
 	}
-	return &routeModelInputs{input: input, logical: logical}, nil
+	return &routeModelInputs{input: input, logical: logical, backendTLSAvailability: availability}, nil
 }
 
 func (r *Reconciler) xBackendMemberMode(gateway *gatewayv1.Gateway) (cloud.MemberMode, error) {
@@ -272,7 +282,13 @@ func (inputs *routeModelInputs) validateBackends(ctx context.Context, reader cli
 			}
 		}
 	}
-	if !equality.Semantic.DeepEqual(inputs.input.Services, current.Services) ||
+	if inputs.input.BackendTLSPolicies != nil {
+		if err := graph.CollectBackendTLSInputs(ctx, reader, &current); err != nil {
+			return err
+		}
+	}
+	if !equality.Semantic.DeepEqual(inputs.input.BackendTLSPolicies, current.BackendTLSPolicies) ||
+		!equality.Semantic.DeepEqual(inputs.input.Services, current.Services) ||
 		!equality.Semantic.DeepEqual(inputs.input.EndpointSlices, current.EndpointSlices) ||
 		!equality.Semantic.DeepEqual(inputs.input.XBackends, current.XBackends) {
 		return errHTTPRouteChanged
