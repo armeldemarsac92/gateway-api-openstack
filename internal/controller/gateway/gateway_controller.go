@@ -184,7 +184,7 @@ func (r *Reconciler) reconcileGatewayBinding(
 		}
 		return ctrl.Result{}, err
 	}
-	log.FromContext(ctx).V(1).Info("Added finalizer and OpenStack resource binding to Gateway")
+	log.FromContext(ctx).V(1).Info("Reconciled Gateway resource binding checkpoint")
 	return ctrl.Result{Requeue: true}, nil
 }
 

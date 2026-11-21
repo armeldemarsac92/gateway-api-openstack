@@ -34,6 +34,7 @@ import (
 	"github.com/gophercloud/gophercloud/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/gateway-api/conformance/tests"
 	"sigs.k8s.io/gateway-api/conformance/utils/config"
@@ -156,6 +157,7 @@ func runKindTrafficConformance(t *testing.T, channel, envPrefix string, options 
 		t.Fatal(err)
 	}
 	manager, err := ctrl.NewManager(restConfig, ctrl.Options{
+		Logger: zap.New(zap.UseDevMode(true)),
 		Scheme: scheme, Metrics: metricsserver.Options{BindAddress: "0"}, HealthProbeBindAddress: "0",
 	})
 	if err != nil {
