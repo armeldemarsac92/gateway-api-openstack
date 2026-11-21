@@ -6,6 +6,7 @@ All 64 named features await qualification on a deployed Hibiscus cluster. The ta
 
 | Feature | Current local observation | Still open |
 |---|---|---|
+| `GRPCRoute` | On loopback, two exact RPC paths selected different backends on a single TLS-protected HTTP/2 connection with gRPC statuses and trailers. [Stock Amphora traffic](../provider/stock-grpc.md) | Kubernetes GRPCRoute, cleartext h2c, broader matching, response semantics and both live gRPC profiles |
 | `Gateway` | Generation tracking, invalid route kinds, invalid parameters and unsupported protocol status run with the tagged upstream assertions. [Status cases](../../../../internal/controller/envtest_upstream_status_test.go) | Remaining listener, lifecycle and traffic cases |
 | `GatewayAddressEmpty` | A tenant may request one automatically assigned IP with default routability. Local tests check the stored request, the address returned by the provider and the controller's status. [Address tests](../../../../internal/controller/gateway/reconciler_test.go) | Address allocation and reachability in the tenant's real network |
 | `GatewayInfrastructure` | The negative parameters-reference case reports the required condition. [Status cases](../../../../internal/controller/envtest_upstream_status_test.go) | Positive infrastructure metadata behavior |
