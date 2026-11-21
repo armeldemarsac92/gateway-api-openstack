@@ -1,0 +1,108 @@
+{
+  "channel": "experimental",
+  "gatewayApiSourceRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "controllerSourceRevision": "e17cf858d11d04cf35d298ad19d9498ccde6b491",
+  "controllerBinarySha256": "166e2bf415025d2d3c32ac38a60d4a1ac91a05cf79412564982b9daf67bc613d",
+  "bundleSha256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+  "baseManifestSha256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+  "upstreamCaseGoSha256": "f62351b854b0ff0a04702f144fc9c8e056e9bee68ac81acf2e23e66b5fc8374d",
+  "upstreamCaseYamlSha256": "1bcec903d79d4547699c285a2e6ef6409addfc4fcf8dc94060530c6305e63012",
+  "kubeVersion": "v1.36.2",
+  "octaviaVersion": "19.0.0",
+  "haproxyVersion": "3.0.19",
+  "haproxyRunning": true,
+  "echoBinarySha256": "d4e04b904229880dc2e32dbe58244b3bf46408c2e1e8325ebb83a69fab3d57a9",
+  "upstreamExit": 1,
+  "upstreamTestEvents": [
+    "=== RUN   TestLocalWeightCase",
+    "=== RUN   TestLocalWeightCase/HTTPRouteWeight",
+    "--- FAIL: TestLocalWeightCase (60.84s)",
+    "--- FAIL: TestLocalWeightCase/HTTPRouteWeight (60.71s)"
+  ],
+  "upstreamFailedChecks": [
+    "error waiting for HTTPRoute to have parents matching expectations"
+  ],
+  "upstreamHTTPWarmup": {
+    "subtestEntered": false,
+    "passed": false,
+    "requestLogs": 0,
+    "statusCodes": {},
+    "noResponseLogs": 0
+  },
+  "upstreamStatisticalSampling": {
+    "started": false,
+    "passed": false,
+    "failedAttemptNumbers": [],
+    "requestLogs": 0,
+    "statusCodes": {},
+    "noResponseLogs": 0
+  },
+  "gatewayCurrentConditions": {
+    "Accepted": "True/Accepted",
+    "Programmed": "True/Programmed"
+  },
+  "gatewayHasAddress": true,
+  "routePresent": true,
+  "routeBackendWeightsByRule": [
+    {
+      "infra-backend-v1": 70,
+      "infra-backend-v2": 30,
+      "infra-backend-v3": 0
+    }
+  ],
+  "routeCurrentParentConditions": [
+    {
+      "current": {
+        "Accepted": "False/UnsupportedValue",
+        "ResolvedRefs": "Unknown/Pending",
+        "gateway-api-openstack.github.io/Programmed": "False/Invalid"
+      },
+      "detail": [
+        "exactly one backendRef is supported",
+        "exactly one backendRef is supported"
+      ]
+    }
+  ],
+  "octaviaInventory": {
+    "loadBalancers": [
+      {
+        "pools": {
+          "count": 0
+        },
+        "listeners": {
+          "count": 1
+        }
+      }
+    ],
+    "listeners": [
+      {
+        "port": 80,
+        "l7policies": {
+          "count": 0
+        },
+        "defaultPool": "null",
+        "enabled": true
+      }
+    ],
+    "pools": [],
+    "healthmonitors": {
+      "count": 0,
+      "explicitArray": true
+    },
+    "policies": []
+  },
+  "octaviaWriteCountsByType": {
+    "loadbalancers": 1,
+    "listeners": 1
+  },
+  "supplementalHTTPAfterUpstream": {
+    "requests": 10,
+    "method": "GET",
+    "path": "/",
+    "statusCodes": {
+      "503": 10
+    },
+    "echoBackends": {},
+    "errors": {}
+  }
+}

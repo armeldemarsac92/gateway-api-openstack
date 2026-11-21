@@ -1,0 +1,214 @@
+{
+  "channel": "standard",
+  "case": "HTTPRouteRequestHeaderModifier",
+  "identities": {
+    "controllerBinaryRevision": "e17cf858d11d04cf35d298ad19d9498ccde6b491",
+    "controllerFixtureSourceRevision": "227730e96e92a5088982c8fc2f1979d5bde4d130",
+    "controllerBinarySha256": "166e2bf415025d2d3c32ac38a60d4a1ac91a05cf79412564982b9daf67bc613d",
+    "gatewayAPISourceRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+    "releaseBundleSha256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+    "originalCaseGoSha256": "72b14fa4767fa2585e8d6a8722dd98619237193808d6721a72931e14fbacd4b9",
+    "originalCaseYAMLSha256": "684c40e57358d3e77330831a709622d01b51de07ef3118a9ba9e2a93365dd5db",
+    "baseManifestSha256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+    "echoBinarySha256": "d4e04b904229880dc2e32dbe58244b3bf46408c2e1e8325ebb83a69fab3d57a9",
+    "kubernetes": "v1.36.2",
+    "provider": {
+      "octavia": {
+        "version": "19.0.0",
+        "packageFilesVerifiedAgainstWheelRecord": 626
+      },
+      "octavia-lib": {
+        "version": "3.12.0",
+        "packageFilesVerifiedAgainstWheelRecord": 24
+      }
+    },
+    "haproxy": "3.0.19",
+    "haproxyRunning": true
+  },
+  "prerequisites": {
+    "infra-backend-v1": {
+      "servicePorts": [
+        8080,
+        8081,
+        8082
+      ],
+      "readyEndpoints": 2,
+      "directProbes": [
+        {
+          "status": 200,
+          "backend": "infra-backend-v1",
+          "echoRequestMatched": true
+        },
+        {
+          "status": 200,
+          "backend": "infra-backend-v1",
+          "echoRequestMatched": true
+        }
+      ]
+    },
+    "infra-backend-v2": {
+      "servicePorts": [
+        8080
+      ],
+      "readyEndpoints": 2,
+      "directProbes": [
+        {
+          "status": 200,
+          "backend": "infra-backend-v2",
+          "echoRequestMatched": true
+        },
+        {
+          "status": 200,
+          "backend": "infra-backend-v2",
+          "echoRequestMatched": true
+        }
+      ]
+    },
+    "infra-backend-v3": {
+      "servicePorts": [
+        8080
+      ],
+      "readyEndpoints": 1,
+      "directProbes": [
+        {
+          "status": 200,
+          "backend": "infra-backend-v3",
+          "echoRequestMatched": true
+        }
+      ]
+    }
+  },
+  "upstream": {
+    "exit": 1,
+    "caseEntered": true,
+    "events": [
+      "=== RUN   TestLocalHeaderCase",
+      "=== RUN   TestLocalHeaderCase/HTTPRouteRequestHeaderModifier",
+      "--- FAIL: TestLocalHeaderCase (61.02s)",
+      "--- FAIL: TestLocalHeaderCase/HTTPRouteRequestHeaderModifier (60.92s)"
+    ],
+    "failedAssertions": {
+      "parentAcceptanceFailure": "error waiting for HTTPRoute to have parents matching expectations"
+    },
+    "conditionDiagnostics": {
+      "Accepted condition set to Status False with Reason UnsupportedValue, expected Status True": 600
+    },
+    "sourceTrace": [
+      "conformance.go:72",
+      "conformance.go:79",
+      "helpers.go:1360",
+      "helpers.go:513",
+      "helpers.go:527",
+      "helpers.go:854",
+      "helpers.go:856",
+      "httproute-request-header-modifier.go:61",
+      "suite.go:541"
+    ],
+    "routeParentsMatched": false,
+    "trafficSubtestsEntered": 0,
+    "requestLogs": 0,
+    "trafficStatusCodes": {}
+  },
+  "observedAfterUpstream": {
+    "gateway": {
+      "hasAddress": true,
+      "currentConditions": {
+        "Accepted": "True/Accepted",
+        "Programmed": "True/Programmed"
+      },
+      "listeners": [
+        {
+          "name": "http",
+          "attachedRoutes": 0,
+          "currentConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "Conflicted": "False/NoConflicts",
+            "Programmed": "True/Programmed"
+          }
+        }
+      ]
+    },
+    "route": {
+      "name": "request-header-modifier",
+      "present": true,
+      "currentParents": [
+        {
+          "parent": "same-namespace",
+          "controllerMatches": true,
+          "currentConditions": {
+            "Accepted": "False/UnsupportedValue",
+            "ResolvedRefs": "Unknown/Pending",
+            "gateway-api-openstack.github.io/Programmed": "False/Invalid"
+          },
+          "acceptedMessage": "RequestHeaderModifier requires route-scoped header operations in Octavia"
+        }
+      ]
+    },
+    "octaviaInventory": {
+      "loadBalancers": [
+        {
+          "pools": {
+            "count": 0
+          },
+          "listeners": {
+            "count": 1
+          }
+        }
+      ],
+      "listeners": [
+        {
+          "port": 80,
+          "l7policies": {
+            "count": 0
+          },
+          "defaultPool": "null",
+          "enabled": true
+        }
+      ],
+      "pools": [],
+      "healthmonitors": {
+        "count": 0,
+        "explicitArray": true
+      },
+      "policies": []
+    },
+    "octaviaWriteCountsByType": {
+      "loadbalancers": 1,
+      "listeners": 1
+    },
+    "supplementalGatewayProbes": [
+      {
+        "path": "/set",
+        "headers": {},
+        "status": 503
+      },
+      {
+        "path": "/add",
+        "headers": {
+          "X-Header-Add": "original"
+        },
+        "status": 503
+      },
+      {
+        "path": "/remove",
+        "headers": {
+          "X-Header-Remove": "original"
+        },
+        "status": 503
+      },
+      {
+        "path": "/multiple",
+        "headers": {},
+        "status": 503
+      },
+      {
+        "path": "/case-insensitivity",
+        "headers": {
+          "x-header-set": "original"
+        },
+        "status": 503
+      }
+    ]
+  }
+}

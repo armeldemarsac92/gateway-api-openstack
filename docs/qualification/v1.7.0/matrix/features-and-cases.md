@@ -80,8 +80,8 @@ The results come from focused runs of the pinned v1.7.0 case bodies. The envtest
 
 | Channel | PASS | FAIL | SKIP | UNRUN | Registered cases |
 |---|---:|---:|---:|---:|---:|
-| Standard | 43 | 29 | 1 | 97 | 170 |
-| Experimental | 42 | 30 | 1 | 97 | 170 |
+| Standard | 43 | 32 | 1 | 94 | 170 |
+| Experimental | 42 | 33 | 1 | 94 | 170 |
 
 **PASS** means the case met its upstream assertions in the linked fixture. **PASS (envtest status)** and **PASS (kind status)** identify cases whose assertions check status. **PASS (stock Service)** means an upstream mesh assertion passed on plain Kubernetes. Direct observations showed Service load balancing could eventually select the expected backend without enforcing the Route. `MeshBasic` checked ordinary connectivity. [Mesh control](../provider/stock-mesh.md)
 
@@ -162,7 +162,7 @@ The Experimental UDP all-listeners case has both a disk-backed failure and a pas
 | [HTTPRouteExactPathMatching](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/httproute-exact-path-matching.go) | Gateway, HTTPRoute | False | FAIL [local](../provider/http-path-rules.md) | FAIL [local](../provider/http-path-rules.md) |  |
 | [HTTPRouteHTTPSListener](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/httproute-https-listener.go) | Gateway, HTTPRoute | False | UNRUN | UNRUN |  |
 | [HTTPRouteHTTPSListenerDetectMisdirectedRequests](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/httproute-https-listener-detect-misdirected-requests.go) | Gateway, GatewayHTTPSListenerDetectMisdirectedRequests, HTTPRoute | False | UNRUN | UNRUN |  |
-| [HTTPRouteHeaderMatching](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/httproute-header-matching.go) | Gateway, HTTPRoute | False | UNRUN | UNRUN |  |
+| [HTTPRouteHeaderMatching](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/httproute-header-matching.go) | Gateway, HTTPRoute | False | FAIL | FAIL | [Stock controller and native assertions](../provider/stock-core-http-cases.md) |
 | [HTTPRouteHostnameIntersection](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/httproute-hostname-intersection.go) | Gateway, HTTPRoute | False | UNRUN | UNRUN |  |
 | [HTTPRouteInvalidBackendRefUnknownKind](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/httproute-invalid-backendref-unknown-kind.go) | Gateway, HTTPRoute | False | UNRUN | UNRUN |  |
 | [HTTPRouteInvalidCrossNamespaceBackendRef](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/httproute-invalid-cross-namespace-backend-ref.go) | Gateway, HTTPRoute, ReferenceGrant | False | FAIL [local](../provider/http-path-rules.md) | FAIL [local](../provider/http-path-rules.md) |  |
@@ -192,7 +192,7 @@ The Experimental UDP all-listeners case has both a disk-backed failure and a pas
 | [HTTPRouteRedirectPortAndScheme](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/httproute-redirect-port-and-scheme.go) | Gateway, HTTPRoute, HTTPRoutePortRedirect, GatewayPort8080 | False | UNRUN | UNRUN |  |
 | [HTTPRouteRedirectScheme](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/httproute-redirect-scheme.go) | Gateway, HTTPRoute, HTTPRouteSchemeRedirect | False | UNRUN | UNRUN |  |
 | [HTTPRouteReferenceGrant](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/httproute-reference-grant.go) | Gateway, HTTPRoute, ReferenceGrant | False | FAIL | FAIL | HTTP 503 after grant deletion (expected 500). [HTTP attachments](../provider/http-attachments.md) |
-| [HTTPRouteRequestHeaderModifier](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/httproute-request-header-modifier.go) | Gateway, HTTPRoute | False | UNRUN | UNRUN |  |
+| [HTTPRouteRequestHeaderModifier](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/httproute-request-header-modifier.go) | Gateway, HTTPRoute | False | FAIL | FAIL | [Stock controller and native assertions](../provider/stock-core-http-cases.md) |
 | [HTTPRouteRequestHeaderModifierBackendWeights](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/httproute-request-header-modifier-backend-weights.go) | Gateway, HTTPRouteBackendRequestHeaderModification, HTTPRoute | False | UNRUN | UNRUN |  |
 | [HTTPRouteRequestMirror](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/httproute-request-mirror.go) | Gateway, HTTPRoute, HTTPRouteRequestMirror | False | UNRUN | UNRUN |  |
 | [HTTPRouteRequestMultipleMirrors](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/httproute-request-multiple-mirrors.go) | Gateway, HTTPRoute, HTTPRouteRequestMirror, HTTPRouteRequestMultipleMirrors | False | UNRUN | UNRUN |  |
@@ -209,7 +209,7 @@ The Experimental UDP all-listeners case has both a disk-backed failure and a pas
 | [HTTPRouteSimpleSameNamespace](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/httproute-simple-same-namespace.go) | Gateway, HTTPRoute | False | PASS | PASS | [HTTP attachments](../provider/http-attachments.md) |
 | [HTTPRouteTimeoutBackendRequest](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/httproute-timeout-backend-request.go) | Gateway, HTTPRoute, HTTPRouteBackendTimeout | False | UNRUN | UNRUN |  |
 | [HTTPRouteTimeoutRequest](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/httproute-timeout-request.go) | Gateway, HTTPRoute, HTTPRouteRequestTimeout | False | UNRUN | UNRUN |  |
-| [HTTPRouteWeight](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/httproute-weight.go) | Gateway, HTTPRoute | False | UNRUN | UNRUN |  |
+| [HTTPRouteWeight](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/httproute-weight.go) | Gateway, HTTPRoute | False | FAIL | FAIL | [Stock controller and native assertions](../provider/stock-core-http-cases.md) |
 | [ListenerSetAllowedNamespaceNone](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/listenerset-allowed-namespace-none.go) | Gateway, ListenerSet | False | UNRUN | UNRUN |  |
 | [ListenerSetAllowedNamespaceSame](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/listenerset-allowed-namespace-same.go) | Gateway, ListenerSet | False | UNRUN | UNRUN |  |
 | [ListenerSetAllowedNamespaceSelector](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/listenerset-allowed-namespace-selector.go) | Gateway, ListenerSet | False | UNRUN | UNRUN |  |
