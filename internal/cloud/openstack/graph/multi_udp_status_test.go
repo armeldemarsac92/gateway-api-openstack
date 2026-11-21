@@ -55,6 +55,13 @@ func TestMultiUDPDeferredObservationRequiresServingRouteEdges(t *testing.T) {
 		t.Fatalf("failed member deferred a UDP route with obsolete forwarding proof: %+v", result.Routes)
 	}
 	member["provisioning_status"] = "ACTIVE"
+	port := member["protocol_port"]
+	member["protocol_port"] = float64(30081)
+	result = f.reconcile(provider)
+	if result.Routes[0].Result.ObservationDeferred {
+		t.Fatal("retained forwarding status after the observed member moved to another port")
+	}
+	member["protocol_port"] = port
 
 	// A formerly winning port remains attached to the pool until the graph
 	// can perform the withdrawal. That stale edge cannot support deferral.

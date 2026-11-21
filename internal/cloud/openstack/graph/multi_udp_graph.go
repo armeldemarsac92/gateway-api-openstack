@@ -322,11 +322,21 @@ func (p *Provider) deferredUDPRouteObservations(ctx context.Context, desired des
 			continue
 		}
 		observed := observedRouteGraph{pool: &pool}
-		deferred[index] = p.observeRoutePoolChildren(ctx, route.identity, &observed) == nil &&
-			observed.validateDefaultPoolChildren() == nil && observed.backendProvisioningIssue(false, true) == "" &&
-			hasActiveUDPBackend(route, observed, actual.state.VIPAddress)
+		if p.observeRoutePoolChildren(ctx, route.identity, &observed) != nil || observed.validateDefaultPoolChildren() != nil {
+			continue
+		}
+		changes, _, err := buildRouteEnsurePlan(route, observed)
+		deferred[index] = err == nil && udpRouteBackendReady(route, observed, actual.state.VIPAddress, changes, observed.backendProvisioningIssue(false, true))
 	}
 	return deferred
+}
+
+// Use the same convergence test when the whole graph is active and when a
+// pending sibling permits a read-only observation of this route's backend.
+func udpRouteBackendReady(route desiredRoute, observed observedRouteGraph, vip string, changes []routeMutation, provisioningIssue string) bool {
+	return observed.pool != nil && provisioningIssue == "" && len(changes) == 0 &&
+		slices.ContainsFunc(route.members, func(member cloud.Member) bool { return !member.Draining }) &&
+		hasActiveUDPBackend(route, observed, vip)
 }
 
 func (p *Provider) buildMultiUDPGraphPlan(desired desiredGatewayGraph, actual observedGatewayGraph) ([]graphMutation, cloud.GatewayGraphResult, error) {
@@ -385,9 +395,7 @@ func (p *Provider) buildMultiUDPGraphPlan(desired desiredGatewayGraph, actual ob
 			}
 			routeResult.State = state
 			issue := observed.backendProvisioningIssue(false, true)
-			canServe := slices.ContainsFunc(route.members, func(member cloud.Member) bool { return !member.Draining })
-			ready := observed.pool != nil && issue == "" && len(steps) == 0 && canServe &&
-				hasActiveUDPBackend(route, observed, actual.state.VIPAddress)
+			ready := udpRouteBackendReady(route, observed, actual.state.VIPAddress, steps, issue)
 			if ready {
 				readyByPool[observed.pool.ID] = true
 			}
