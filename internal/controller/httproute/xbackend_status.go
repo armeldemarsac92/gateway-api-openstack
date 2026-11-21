@@ -115,25 +115,9 @@ func (r *xBackendStatusReconciler) observeAncestors(ctx context.Context, key typ
 }
 
 func (r *xBackendStatusReconciler) hasAttachedConsumer(ctx context.Context, gateway *gatewayv1.Gateway, backend types.NamespacedName) (bool, error) {
-	gatewayKey := controller.ObjectKeyString(client.ObjectKeyFromObject(gateway))
-	filter := client.MatchingFields{controller.IndexHTTPRouteByParentGateway: gatewayKey}
-	var candidates []gatewayv1.HTTPRoute
-	for _, kind := range []gatewayv1.Kind{model.HTTPRouteKind, model.GRPCRouteKind} {
-		routes := r.routes.forRouteKind(kind)
-		peers, err := routes.listRoutes(ctx, filter)
-		if err != nil {
-			return false, err
-		}
-		for i := range peers {
-			var live gatewayv1.HTTPRoute
-			if err := routes.readRoute(ctx, routes.APIReader, client.ObjectKeyFromObject(&peers[i]), &live); err != nil {
-				if err := client.IgnoreNotFound(err); err != nil {
-					return false, err
-				}
-				continue
-			}
-			candidates = append(candidates, live)
-		}
+	candidates, err := r.routes.liveGatewayRoutePeers(ctx, gateway)
+	if err != nil {
+		return false, err
 	}
 	admission, err := r.routes.observeRouteGraphAdmission(ctx, gateway, candidates, nil)
 	if err != nil {
@@ -184,7 +168,7 @@ func mergeXBackendAncestors(backend *gatewayx.XBackend, controllerName gatewayv1
 		if condition, keep := remaining[key]; keep {
 			existing.Conditions = slices.Clone(existing.Conditions)
 			meta.SetStatusCondition(&existing.Conditions, condition)
-			existing.AncestorRef = xBackendAncestorRef(key)
+			existing.AncestorRef = gatewayAncestorRef(key)
 			merged = append(merged, existing)
 			delete(remaining, key)
 		}
@@ -195,14 +179,14 @@ func mergeXBackendAncestors(backend *gatewayx.XBackend, controllerName gatewayv1
 		if len(merged) >= maxXBackendAncestors {
 			break
 		}
-		entry := gatewayx.BackendAncestorStatus{ControllerName: controllerName, AncestorRef: xBackendAncestorRef(key)}
+		entry := gatewayx.BackendAncestorStatus{ControllerName: controllerName, AncestorRef: gatewayAncestorRef(key)}
 		meta.SetStatusCondition(&entry.Conditions, remaining[key])
 		merged = append(merged, entry)
 	}
 	return merged
 }
 
-func xBackendAncestorRef(key types.NamespacedName) gatewayv1.ParentReference {
+func gatewayAncestorRef(key types.NamespacedName) gatewayv1.ParentReference {
 	return gatewayv1.ParentReference{
 		Group: ptr.To(gatewayv1.Group(gatewayv1.GroupName)), Kind: ptr.To(gatewayv1.Kind("Gateway")),
 		Namespace: ptr.To(gatewayv1.Namespace(key.Namespace)), Name: gatewayv1.ObjectName(key.Name),

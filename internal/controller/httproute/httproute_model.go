@@ -276,13 +276,18 @@ func (r *Reconciler) buildRouteModelFromInputs(
 	}
 	if !r.usesHTTPBackendGroups(route) && rules[0].Redirect == nil {
 		match := matches[0]
-		members, err := routeBackendMembers(ctx, reader, rules[0].Backends[0], inputs, mode, topology.NodeAddressType)
+		backend := rules[0].Backends[0]
+		spec.Hostname, spec.PathType, spec.PathValue, spec.Precedence = match.Hostname, cloud.PathMatchType(match.Match.PathType), match.Match.PathValue, match.Precedence
+		spec.BackendTLS = inputs.backendTLSAvailability.validation(backend, ordinaryHTTP)
+		if spec.BackendTLS != nil && spec.BackendTLS.Denied {
+			return spec, model.Diagnostic{}, nil
+		}
+		members, err := routeBackendMembers(ctx, reader, backend, inputs, mode, topology.NodeAddressType)
 		if err != nil {
 			return cloud.RouteSpec{}, model.Diagnostic{}, err
 		}
-		spec.Hostname, spec.PathType, spec.PathValue, spec.Precedence = match.Hostname, cloud.PathMatchType(match.Match.PathType), match.Match.PathValue, match.Precedence
 		spec.Members = members
-		spec.BackendH2C = rules[0].Backends[0].UsesH2C()
+		spec.BackendH2C = spec.BackendTLS == nil && backend.UsesH2C()
 		return spec, model.Diagnostic{}, nil
 	}
 	diagnostic, err := r.lowerHTTPBackends(ctx, reader, route, listener, &spec, inputs, matches, rules, topology.NodeAddressType)
@@ -308,7 +313,7 @@ func routeBackendMembers(ctx context.Context, reader client.Reader, backend mode
 	if service == nil {
 		return nil, newRouteBuildError(routeErrorBackendNotFound, "backend Service %s was not found", key)
 	}
-	port, err := servicePortForBackend(service, *backend.Reference.Port, mode, inputs.input.BackendH2C)
+	port, err := servicePortForBackend(service, *backend.Reference.Port, mode, inputs.input.BackendH2C, backend.BackendTLS.Winner != nil)
 	if err != nil {
 		return nil, err
 	}
@@ -415,7 +420,8 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 	}
 	result, observed := groups[key]
 	var members []cloud.Member
-	if !observed {
+	tls := inputs.backendTLSAvailability.validation(backend, model.HTTPProfileRouteKind(route) == model.HTTPRouteKind)
+	if !observed && (tls == nil || !tls.Denied) {
 		var err error
 		members, result.diagnostic, err = groupedBackendMembers(ctx, reader, backend, inputs, spec.MemberMode, nodeAddressType)
 		if err != nil {
@@ -440,7 +446,7 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 		spec.HTTPBackends = append(spec.HTTPBackends, cloud.HTTPBackend{
 			Kind: key.kind, Namespace: key.object.Namespace, Name: key.object.Name, Port: port,
 			Members: members, Unavailable: len(members) == 0, InvalidReference: invalidReference,
-			BackendH2C: !invalid && backend.UsesH2C(),
+			BackendH2C: !invalid && tls == nil && backend.UsesH2C(), BackendTLS: tls,
 		})
 	}
 	groups[key] = result

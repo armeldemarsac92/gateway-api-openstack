@@ -71,6 +71,8 @@ type Reconciler struct {
 	Coordinator *graph.Coordinator
 	// APIReader performs safety-sensitive live reads.
 	APIReader client.Reader
+	// BackendTLSAvailable checks authenticated regional provider support.
+	BackendTLSAvailable func(context.Context) (bool, error)
 	// Recorder publishes Kubernetes Events.
 	Recorder events.EventRecorder
 	// Config contains immutable controller configuration.

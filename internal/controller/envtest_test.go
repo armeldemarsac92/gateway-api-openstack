@@ -98,8 +98,8 @@ func TestControllerEnvtest(t *testing.T) {
 			Scheme:                 scheme,
 			Metrics:                metricsserver.Options{BindAddress: "0"},
 			HealthProbeBindAddress: "0",
-			// The GRPC subtest runs a second controller installation in this process.
-			Controller: runtimeconfig.Controller{SkipNameValidation: ptr.To(cfg.GRPCExactMethodEnabled())},
+			// The optional feature subtests each run an additional installation.
+			Controller: runtimeconfig.Controller{SkipNameValidation: ptr.To(cfg.GRPCExactMethodEnabled() || cfg.BackendTLSPolicy)},
 		})
 		if err != nil {
 			t.Fatalf("create envtest manager: %v", err)
@@ -259,6 +259,14 @@ func TestControllerEnvtest(t *testing.T) {
 		provider := &recordingProvider{}
 		startManager(t, grpcConfig, provider)
 		testGRPCExactMethodRoute(t, apiClient, grpcConfig, provider)
+	})
+	t.Run("BackendTLSPolicy follows authorized Service and CA changes", func(t *testing.T) {
+		tlsConfig := config
+		tlsConfig.ControllerName = "backendtls.example.com/gateway-api-openstack"
+		tlsConfig.BackendTLSPolicy = true
+		provider := &recordingProvider{}
+		startManager(t, tlsConfig, provider)
+		testBackendTLSPolicy(t, apiClient, tlsConfig, provider)
 	})
 	if config.XBackendEnabled() {
 		t.Run("Experimental XBackend selects live Pod members", func(t *testing.T) {

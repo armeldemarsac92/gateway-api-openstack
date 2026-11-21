@@ -177,7 +177,7 @@ func TestXBackendStatusDuringDeletion(t *testing.T) {
 				backend.DeletionTimestamp = ptr.To(metav1.Now())
 				backend.Finalizers = []string{"example.net/cleanup"}
 				backend.Status.Ancestors = append(backend.Status.Ancestors, gatewayx.BackendAncestorStatus{
-					ControllerName: cfg.ControllerName, AncestorRef: xBackendAncestorRef(client.ObjectKeyFromObject(gateway)),
+					ControllerName: cfg.ControllerName, AncestorRef: gatewayAncestorRef(client.ObjectKeyFromObject(gateway)),
 					Conditions: []metav1.Condition{xBackendAcceptedCondition(backend, cloud.MemberModeEndpoint, false)},
 				})
 			}
