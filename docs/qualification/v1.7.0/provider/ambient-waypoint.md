@@ -30,9 +30,30 @@ Both test processes exited successfully. Each upstream report includes the share
 | MESH-HTTP | 7 passed | 7 passed |
 | MESH-GRPC | 3 passed | 3 passed |
 
-The HTTP cases cover matching, host and status redirects, request headers, the same-namespace case, weighted distribution, traffic splits and basic connectivity. The gRPC cases cover request metadata, weighted distribution and basic connectivity. The trial exercised a producer Route of each kind separately on the same Service. Consumer Routes, direct ClusterIP matching, simultaneous HTTPRoute and GRPCRoute attachments, XMesh semantics and a deployed Magnum cluster remain unqualified. [Per-case results, release checksums and image digests](ambient-waypoint-results.json)
+The HTTP cases cover matching, host and status redirects, request headers, the same-namespace case, weighted distribution, traffic splits and basic connectivity. The gRPC cases cover request metadata, weighted distribution and basic connectivity. The trial exercised a producer Route of each kind separately on the same Service. [Per-case results, release checksums and image digests](ambient-waypoint-results.json)
 
 The published archive contains the upstream reports, traffic fixtures and counts, runtime inventory, and cleanup receipts from the two clusters. It also includes the Kubernetes API check that namespace unenrollment preserves a later operator assignment. Its SHA-256 is `efef12b5ccfc3cce6c427d8f6c493cfadbc585a3e900ebcdf957d79df8b662ea`. [Download the local Core profile evidence](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-mesh-v1.7.0-4c08237/hibiscus-ambient-core-4c08237.tar.gz)
+
+## Extended results
+
+Both Gateway API v1.7.0 bundles produced the same results on separate disposable IPv4 kind clusters. Each upstream process ran 23 unique registered mesh cases and exited 1 because `MeshConsumerRoute` failed. The fork recorded zero cloud graph operations in both runs. [Per-case outcomes, profile counts and receipt checksums](ambient-waypoint-extended-results.json)
+
+| Scope | Standard | Experimental |
+|---|---:|---:|
+| All registered mesh cases | 22 passed, 1 failed | 22 passed, 1 failed |
+| MESH-HTTP Core in the upstream report | 7 passed | 7 passed |
+| MESH-HTTP Extended in the upstream report | 7 passed | 7 passed |
+| MESH-GRPC Core in the upstream report | 3 passed | 3 passed |
+
+The upstream report counts `MeshBasic` in both profiles. It omits seven cases that require shared HTTP features outside the mesh profile feature sets, including the failing consumer case. The report's Extended feature list records the features selected for the run.
+
+Two enrolled clients made normal HTTP requests from the producer and consumer namespaces to the fixture Service. The selected Services and the waypoint all used ClusterIP. The direct checks exercised the same upstream HTTPRoute manifests after the upstream suite had removed its fixtures.
+
+`MeshFrontendHostname` targets the resolved Service with a different HTTP `Host`. The direct checks also passed the literal `echo-v2` ClusterIP to the client. Both a literal IP `Host` and an `echo-v1` `Host` returned HTTP 200 from `echo-v2` with `X-Header-Set: set`. A request to the neighboring `echo-v1` ClusterIP with an `echo-v2` `Host` returned HTTP 200 from `echo-v1` without that header. The direct `echo-v2` PodIP also returned HTTP 200 without the header. Istio builds a waypoint route for the Service VIP with a wildcard virtual host for a normal Service. [Upstream hostname test](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/mesh/mesh-frontend-hostname.go) · [Pinned Istio waypoint route builder](https://github.com/istio/istio/blob/eed52ebb66ade45214088877b0f82855d954060d/pilot/pkg/networking/core/listener_waypoint.go#L1111-L1159)
+
+`MeshConsumerRoute` expects a client in the Route namespace to receive a response header. Istio reported `Accepted=True`, `ResolvedRefs=True` and `ResolvedWaypoints=True` at generation 1. Clients from both namespaces received the original HTTP 200 without the header through both Service DNS and the literal ClusterIP. A separate diagnostic with a narrow `ReferenceGrant` to `Service/echo-v1` produced the same result. Istio compiles the Route into a VirtualService in the Route's namespace. The Service waypoint selects routing config from the Service's namespace or its own namespace. Both are the producer namespace in this setup, so the generated waypoint config had no consumer route. Istio's own ambient suite excludes this feature. [Upstream consumer test](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/mesh/mesh-consumer-route.go) · [VirtualService namespace](https://github.com/istio/istio/blob/eed52ebb66ade45214088877b0f82855d954060d/pilot/pkg/config/kube/gateway/route_collections.go#L185-L205) · [Waypoint route selection](https://github.com/istio/istio/blob/eed52ebb66ade45214088877b0f82855d954060d/pilot/pkg/networking/core/listener_waypoint.go#L1163-L1180) · [Istio ambient suite selection](https://github.com/istio/istio/blob/eed52ebb66ade45214088877b0f82855d954060d/tests/integration/ambient/gateway_conformance_test.go#L100-L120)
+
+The operator removed both fixture namespaces and the three Istio runtime releases on each cluster. The base release and original CRDs remained installed until the clusters were deleted. The Experimental bundle included the live XMesh CRD. XMesh semantics, simultaneous HTTPRoute and GRPCRoute attachments, and a deployed Magnum cluster remain unqualified.
 
 ## Run the upstream Core cases
 
@@ -59,4 +80,10 @@ rtk env GATEWAY_API_CHANNEL="$channel" KIND_CLUSTER_NAME="$cluster" HIBISCUS_TES
   "$test_binary" -test.run '^TestKindAmbientMesh$' -test.v -test.timeout=12m
 ```
 
-The tagged test uses the unmodified v1.7.0 test registry with the Core features of `MESH-HTTP` and `MESH-GRPC`. It starts the real fork reconcilers with a recording adapter and requires zero cloud graph operations for the mesh fixtures. The verbose log shows the upstream report per profile and channel. MeshConsumerRoute, MeshClusterIPMatching and Experimental XMesh are outside these Core selections. Report consumer-namespace isolation, direct ClusterIP behavior and XMesh separately if exercised.
+The tagged test uses the unmodified v1.7.0 test registry with the Core features of `MESH-HTTP` and `MESH-GRPC`. It starts the real fork reconcilers with a recording adapter and requires zero cloud graph operations for the mesh fixtures. The verbose log shows the upstream report per profile and channel.
+
+## Run the upstream Extended cases
+
+Set `HIBISCUS_AMBIENT_MESH_EXTENDED=1` on the same test command and allow `-test.timeout=15m`. This selects every registered mesh case in v1.7.0 and also binds `Service/echo-v1` and `Service/echo-v2` to the same Service waypoint in the fixture. The runner uses the original test manifests and assertions. The test process exits nonzero if any selected case fails, and its output includes the result of each case.
+
+Use the per-case outcomes alongside the `ambient-extended-study` profile report. The v1.7.0 reporter includes a test in a profile only when all of its required features belong to that profile. [Upstream profile feature sets and matching](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/utils/suite/profiles.go)

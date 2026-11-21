@@ -1,0 +1,247 @@
+{
+  "channels": {
+    "experimental": {
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "deletedCluster": true,
+      "moduleCleanupExit": 0,
+      "receiptsSHA256": {
+        "cleanup.log": "3c5ce39b61ae1d4976c34266ff8ada076122f4a370065602d551690e13d935ce",
+        "cluster-removed.log": "dfe78ec4dcf3c9fd1336334acc54a1a458a684b7f037110300783a40f8d993b0",
+        "consumer-waypoint.json": "60be53dc7c38e41243ac2f8f455e54d2b6d7c8030a1f343695514b1b2e0371c0",
+        "etcd.log": "f23f0177ae6d4b7017fcaacd265360c0a7aa662f35571247acd86b32f6675ba7",
+        "frontend-waypoint.json": "c398b13b74f13f039061550b474ee6eaa0db8e303fe15ca23cc3e7740fefab11",
+        "install.log": "51a1b815fe4592df3b06a4fc309056e5051bde56807d15f84283b3f03fb66dcc",
+        "suite-full.log": "bc1c01489473f86422a578d5700c4a7a423368a3fa442dd4357c547238cd6ff8",
+        "wire-full.log": "954c516dd71f6f14c84cb778db7273f542013fa7252461b03da117ac3778d655"
+      },
+      "recordedCloudGraphs": 0,
+      "runtimeImages": [
+        "docker.io/istio/install-cni@sha256:fe7081ed2605166fef573a7987f183e91fd45c2a302f90998c879ca20112426e",
+        "docker.io/istio/pilot@sha256:17b581d9d75a1ab319d2816230626f06d65b48e3e798f98e3092a031843b3fe0",
+        "docker.io/istio/proxyv2@sha256:b153f8891c4eab1ef2a58d291e1e9ca00794561833bda82e3e26e26bf59ddebb",
+        "docker.io/istio/ztunnel@sha256:efa1115b58acd969bf876dfcee27751714e3ae317b2518e1a1d61f3ef037587e"
+      ],
+      "tmpfsEtcd": true,
+      "upstreamCases": {
+        "MeshBasic": "PASS",
+        "MeshConsumerRoute": "FAIL",
+        "MeshFrontend": "PASS",
+        "MeshFrontendHostname": "PASS",
+        "MeshGRPCRouteRequestHeaderModifier": "PASS",
+        "MeshGRPCRouteWeight": "PASS",
+        "MeshHTTPRoute303Redirect": "PASS",
+        "MeshHTTPRoute307Redirect": "PASS",
+        "MeshHTTPRoute308Redirect": "PASS",
+        "MeshHTTPRouteBackendRequestHeaderModifier": "PASS",
+        "MeshHTTPRouteMatching": "PASS",
+        "MeshHTTPRouteNamedRule": "PASS",
+        "MeshHTTPRouteQueryParamMatching": "PASS",
+        "MeshHTTPRouteRedirectHostAndStatus": "PASS",
+        "MeshHTTPRouteRedirectPath": "PASS",
+        "MeshHTTPRouteRedirectPort": "PASS",
+        "MeshHTTPRouteRequestHeaderModifier": "PASS",
+        "MeshHTTPRouteRewritePath": "PASS",
+        "MeshHTTPRouteSchemeRedirect": "PASS",
+        "MeshHTTPRouteSimpleSameNamespace": "PASS",
+        "MeshHTTPRouteWeight": "PASS",
+        "MeshPorts": "PASS",
+        "MeshTrafficSplit": "PASS"
+      },
+      "upstreamExit": 1,
+      "upstreamProfiles": {
+        "MESH-GRPC": {
+          "core": {
+            "result": "success",
+            "statistics": {
+              "Failed": 0,
+              "Passed": 3,
+              "Skipped": 0
+            }
+          },
+          "summary": "Core tests succeeded."
+        },
+        "MESH-HTTP": {
+          "core": {
+            "result": "success",
+            "statistics": {
+              "Failed": 0,
+              "Passed": 7,
+              "Skipped": 0
+            }
+          },
+          "extended": {
+            "result": "success",
+            "selectedFeatures": [
+              "MeshClusterIPMatching",
+              "MeshConsumerRoute",
+              "MeshHTTPRouteBackendRequestHeaderModification",
+              "MeshHTTPRouteNamedRouteRule",
+              "MeshHTTPRouteQueryParamMatching",
+              "MeshHTTPRouteRedirectPath",
+              "MeshHTTPRouteRedirectPort",
+              "MeshHTTPRouteRewritePath",
+              "MeshHTTPRouteSchemeRedirect"
+            ],
+            "statistics": {
+              "Failed": 0,
+              "Passed": 7,
+              "Skipped": 0
+            }
+          },
+          "summary": "Core tests succeeded. Extended tests succeeded."
+        }
+      },
+      "wire": {
+        "consumerAndProducerWithoutRouteHeader": {
+          "afterConsumerRoute": 8,
+          "afterDiagnosticReferenceGrant": 8,
+          "afterWithdrawal": 8,
+          "before": 8
+        },
+        "exit": 0,
+        "frontendLiteralHostWithRouteHeader": 2,
+        "frontendMatchingHostWithRouteHeader": 2,
+        "frontendMismatchedHostWithRouteHeader": 2,
+        "neighborIPWithoutRouteHeader": 2,
+        "podIPWithoutRouteHeader": 2,
+        "routeConditionsTrueAtGenerationOne": [
+          "Accepted",
+          "ResolvedRefs",
+          "ResolvedWaypoints"
+        ],
+        "routeParentController": "istio.io/gateway-controller",
+        "serviceClusterIPs": {
+          "echo-v1": "10.96.61.209",
+          "echo-v2": "10.96.8.25"
+        }
+      }
+    },
+    "standard": {
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "deletedCluster": true,
+      "moduleCleanupExit": 0,
+      "receiptsSHA256": {
+        "cleanup.log": "7fa7d7e6d827b455874ba06a87557f600e010d801cfbf698b618276e5a733f18",
+        "cluster-removed.log": "c8e4153478deed092cf1fdc394d81f21b84995cc203cf74eb76bec6ed0132049",
+        "consumer-waypoint.json": "7b3903e111939129158c6fca57663b25ddf901dc3509b677b17ab7ef3afb885b",
+        "etcd.log": "f23f0177ae6d4b7017fcaacd265360c0a7aa662f35571247acd86b32f6675ba7",
+        "frontend-waypoint.json": "c6abeb90b2e3ca3708156ef0c262c4294cb61c5b6afb1aa95c1dc8c2de7dcbd4",
+        "install.log": "e2282b4d8d73e0c21fb8a73aea07b8c31910dc016b991a5842d24525db509d24",
+        "suite-full.log": "d9c4a44183a5bd53fd0c96d791044ffa2c413b90d7030772e729970391fc5bc1",
+        "wire-full.log": "986755336421bbbf36b7d6fb1f816ac7c14b0596f7e93d412162d466e6b9613f"
+      },
+      "recordedCloudGraphs": 0,
+      "runtimeImages": [
+        "docker.io/istio/install-cni@sha256:fe7081ed2605166fef573a7987f183e91fd45c2a302f90998c879ca20112426e",
+        "docker.io/istio/pilot@sha256:17b581d9d75a1ab319d2816230626f06d65b48e3e798f98e3092a031843b3fe0",
+        "docker.io/istio/proxyv2@sha256:b153f8891c4eab1ef2a58d291e1e9ca00794561833bda82e3e26e26bf59ddebb",
+        "docker.io/istio/ztunnel@sha256:efa1115b58acd969bf876dfcee27751714e3ae317b2518e1a1d61f3ef037587e"
+      ],
+      "tmpfsEtcd": true,
+      "upstreamCases": {
+        "MeshBasic": "PASS",
+        "MeshConsumerRoute": "FAIL",
+        "MeshFrontend": "PASS",
+        "MeshFrontendHostname": "PASS",
+        "MeshGRPCRouteRequestHeaderModifier": "PASS",
+        "MeshGRPCRouteWeight": "PASS",
+        "MeshHTTPRoute303Redirect": "PASS",
+        "MeshHTTPRoute307Redirect": "PASS",
+        "MeshHTTPRoute308Redirect": "PASS",
+        "MeshHTTPRouteBackendRequestHeaderModifier": "PASS",
+        "MeshHTTPRouteMatching": "PASS",
+        "MeshHTTPRouteNamedRule": "PASS",
+        "MeshHTTPRouteQueryParamMatching": "PASS",
+        "MeshHTTPRouteRedirectHostAndStatus": "PASS",
+        "MeshHTTPRouteRedirectPath": "PASS",
+        "MeshHTTPRouteRedirectPort": "PASS",
+        "MeshHTTPRouteRequestHeaderModifier": "PASS",
+        "MeshHTTPRouteRewritePath": "PASS",
+        "MeshHTTPRouteSchemeRedirect": "PASS",
+        "MeshHTTPRouteSimpleSameNamespace": "PASS",
+        "MeshHTTPRouteWeight": "PASS",
+        "MeshPorts": "PASS",
+        "MeshTrafficSplit": "PASS"
+      },
+      "upstreamExit": 1,
+      "upstreamProfiles": {
+        "MESH-GRPC": {
+          "core": {
+            "result": "success",
+            "statistics": {
+              "Failed": 0,
+              "Passed": 3,
+              "Skipped": 0
+            }
+          },
+          "summary": "Core tests succeeded."
+        },
+        "MESH-HTTP": {
+          "core": {
+            "result": "success",
+            "statistics": {
+              "Failed": 0,
+              "Passed": 7,
+              "Skipped": 0
+            }
+          },
+          "extended": {
+            "result": "success",
+            "selectedFeatures": [
+              "MeshClusterIPMatching",
+              "MeshConsumerRoute",
+              "MeshHTTPRouteBackendRequestHeaderModification",
+              "MeshHTTPRouteNamedRouteRule",
+              "MeshHTTPRouteQueryParamMatching",
+              "MeshHTTPRouteRedirectPath",
+              "MeshHTTPRouteRedirectPort",
+              "MeshHTTPRouteRewritePath",
+              "MeshHTTPRouteSchemeRedirect"
+            ],
+            "statistics": {
+              "Failed": 0,
+              "Passed": 7,
+              "Skipped": 0
+            }
+          },
+          "summary": "Core tests succeeded. Extended tests succeeded."
+        }
+      },
+      "wire": {
+        "consumerAndProducerWithoutRouteHeader": {
+          "afterConsumerRoute": 8,
+          "afterDiagnosticReferenceGrant": 8,
+          "afterWithdrawal": 8,
+          "before": 8
+        },
+        "exit": 0,
+        "frontendLiteralHostWithRouteHeader": 2,
+        "frontendMatchingHostWithRouteHeader": 2,
+        "frontendMismatchedHostWithRouteHeader": 2,
+        "neighborIPWithoutRouteHeader": 2,
+        "podIPWithoutRouteHeader": 2,
+        "routeConditionsTrueAtGenerationOne": [
+          "Accepted",
+          "ResolvedRefs",
+          "ResolvedWaypoints"
+        ],
+        "routeParentController": "istio.io/gateway-controller",
+        "serviceClusterIPs": {
+          "echo-v1": "10.96.106.166",
+          "echo-v2": "10.96.39.179"
+        }
+      }
+    }
+  },
+  "gatewayAPIRelease": "v1.7.0",
+  "gatewayAPISource": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "guestRemovalReceiptSHA256": "60ca36d99abebecfe8e9701f528838ee3a8f51fc4de3bb2cf8ddb4d563ab08bb",
+  "istioRelease": "1.31.0",
+  "istioSource": "eed52ebb66ade45214088877b0f82855d954060d",
+  "kind": "v0.33.0",
+  "kubernetes": "v1.36.4",
+  "nodeImage": "docker.io/kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed",
+  "platform": "Linux amd64 IPv4 kind on Fedora 45 KVM, one active two-node cluster at a time",
+  "runnerSHA256": "f12cd7e63e03079c76843fd4a7ec15ca3dd6a974465fccb1550b1cd5c0e4f0e8",
+  "runnerSource": "a0340bcabe09c5afdc24b688cee4ebace1e46644"
+}
