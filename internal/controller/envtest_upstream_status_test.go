@@ -46,7 +46,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/l4route"
 )
 
-func startGatewayStatusReconcilers(t *testing.T, manager ctrl.Manager, cfg controller.Config, provider *recordingProvider) {
+func startGatewayStatusReconcilers(t *testing.T, manager ctrl.Manager, cfg controller.Config, provider *recordingProvider) *graph.Writer {
 	t.Helper()
 	class := &gatewayclass.Reconciler{Client: manager.GetClient(), APIReader: manager.GetAPIReader(), Config: cfg, TopologyResolver: provider}
 	if err := class.SetupWithManager(manager); err != nil {
@@ -70,6 +70,7 @@ func startGatewayStatusReconcilers(t *testing.T, manager ctrl.Manager, cfg contr
 	if err := route.SetupWithManager(manager); err != nil {
 		t.Fatal(err)
 	}
+	return writer
 }
 
 // These upstream cases exercise only the API server and controller watches.

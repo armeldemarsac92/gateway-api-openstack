@@ -26,6 +26,7 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -85,22 +86,7 @@ func TestKindUpstreamUDPStatus(t *testing.T) {
 
 func runKindUpstreamStatus(t *testing.T, className, channel string, routeFeature features.FeatureName, cases []suite.ConformanceTest) *suite.ConformanceTestSuite {
 	t.Helper()
-	kubeconfig := os.Getenv("HIBISCUS_TEST_KUBECONFIG")
-	if kubeconfig == "" {
-		t.Fatal("HIBISCUS_TEST_KUBECONFIG must point to the disposable cluster kubeconfig")
-	}
-	name := os.Getenv("KIND_CLUSTER_NAME")
-	if name == "" {
-		t.Fatal("KIND_CLUSTER_NAME must identify the disposable kind cluster")
-	}
-	cluster := "kind-" + name
-	restConfig, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
-		&clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfig},
-		&clientcmd.ConfigOverrides{CurrentContext: cluster},
-	).ClientConfig()
-	if err != nil {
-		t.Fatal(err)
-	}
+	restConfig := kindUpstreamRESTConfig(t)
 	scheme := testScheme(t)
 	clientOptions := client.Options{Scheme: scheme}
 	apiClient, err := client.New(restConfig, clientOptions)
@@ -123,50 +109,16 @@ func runKindUpstreamStatus(t *testing.T, className, channel string, routeFeature
 		t.Fatal(err)
 	}
 	startGatewayStatusReconcilers(t, manager, cfg, &recordingProvider{})
-
-	managerContext, stopManager := context.WithCancel(t.Context())
-	managerResult := make(chan error, 1)
-	go func() { managerResult <- manager.Start(managerContext) }()
-	t.Cleanup(func() {
-		stopManager()
-		select {
-		case err := <-managerResult:
-			if err != nil {
-				t.Errorf("manager stopped with error: %v", err)
-			}
-		case <-time.After(15 * time.Second):
-			t.Error("manager did not stop")
-		}
-	})
-	cacheContext, cancelCacheSync := context.WithTimeout(managerContext, 30*time.Second)
-	defer cancelCacheSync()
-	if !manager.GetCache().WaitForCacheSync(cacheContext) {
-		t.Fatal("manager cache did not sync")
-	}
+	startKindManager(t, manager)
 
 	parameters := envtestClassParameters(className)
-	class := &gatewayv1.GatewayClass{
-		ObjectMeta: metav1.ObjectMeta{Name: className},
-		Spec: gatewayv1.GatewayClassSpec{
-			ControllerName: cfg.ControllerName,
-			ParametersRef: &gatewayv1.ParametersReference{
-				Group: configv1alpha1.GroupName, Kind: configv1alpha1.GatewayClassConfigKind, Name: parameters.Name,
-			},
-		},
-	}
-	for _, object := range []client.Object{parameters, class} {
+	for _, object := range []client.Object{parameters, kindGatewayClass(cfg, parameters)} {
 		if err := apiClient.Create(t.Context(), object); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	manifestFS := []fs.FS{&conformance.Manifests}
-	baseManifests := "base/manifests.yaml"
-	if statusBase := os.Getenv("HIBISCUS_STATUS_BASE_DIR"); statusBase != "" {
-		t.Log("Using original base documents with the unrelated HTTPS Gateway omitted")
-		manifestFS = append(manifestFS, os.DirFS(statusBase))
-		baseManifests = "tcp-status-base.yaml"
-	}
+	baseManifests, manifestFS := kindConformanceManifests(t)
 	s, err := suite.NewConformanceTestSuite(suite.ConformanceOptions{
 		ConfigurableOptions: suite.ConfigurableOptions{
 			GatewayClassName:     className,
@@ -191,4 +143,72 @@ func runKindUpstreamStatus(t *testing.T, className, channel string, routeFeature
 		t.Fatal(err)
 	}
 	return s
+}
+
+func kindUpstreamRESTConfig(t *testing.T) *rest.Config {
+	t.Helper()
+	kubeconfig := os.Getenv("HIBISCUS_TEST_KUBECONFIG")
+	if kubeconfig == "" {
+		t.Fatal("HIBISCUS_TEST_KUBECONFIG must point to the disposable cluster kubeconfig")
+	}
+	name := os.Getenv("KIND_CLUSTER_NAME")
+	if name == "" {
+		t.Fatal("KIND_CLUSTER_NAME must identify the disposable kind cluster")
+	}
+	restConfig, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+		&clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfig},
+		&clientcmd.ConfigOverrides{CurrentContext: "kind-" + name},
+	).ClientConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return restConfig
+}
+
+func startKindManager(t *testing.T, manager ctrl.Manager) {
+	t.Helper()
+	// Keep reconcilers running while the suite waits for finalizers during cleanup.
+	managerContext, stopManager := context.WithCancel(context.WithoutCancel(t.Context()))
+	managerResult := make(chan error, 1)
+	go func() { managerResult <- manager.Start(managerContext) }()
+	t.Cleanup(func() {
+		stopManager()
+		select {
+		case err := <-managerResult:
+			if err != nil {
+				t.Errorf("manager stopped with error: %v", err)
+			}
+		case <-time.After(15 * time.Second):
+			t.Error("manager did not stop")
+		}
+	})
+	cacheContext, cancelCacheSync := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancelCacheSync()
+	if !manager.GetCache().WaitForCacheSync(cacheContext) {
+		t.Fatal("manager cache did not sync")
+	}
+}
+
+func kindGatewayClass(cfg controller.Config, parameters *configv1alpha1.OpenStackGatewayClassConfig) *gatewayv1.GatewayClass {
+	return &gatewayv1.GatewayClass{
+		ObjectMeta: metav1.ObjectMeta{Name: parameters.Name},
+		Spec: gatewayv1.GatewayClassSpec{
+			ControllerName: cfg.ControllerName,
+			ParametersRef: &gatewayv1.ParametersReference{
+				Group: configv1alpha1.GroupName, Kind: configv1alpha1.GatewayClassConfigKind, Name: parameters.Name,
+			},
+		},
+	}
+}
+
+func kindConformanceManifests(t *testing.T) (string, []fs.FS) {
+	t.Helper()
+	manifestFS := []fs.FS{&conformance.Manifests}
+	baseManifests := "base/manifests.yaml"
+	if statusBase := os.Getenv("HIBISCUS_STATUS_BASE_DIR"); statusBase != "" {
+		t.Log("Using original base documents with the unrelated HTTPS Gateway omitted")
+		manifestFS = append(manifestFS, os.DirFS(statusBase))
+		baseManifests = "tcp-status-base.yaml"
+	}
+	return baseManifests, manifestFS
 }

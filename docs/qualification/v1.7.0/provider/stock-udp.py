@@ -40,19 +40,19 @@ class StockUDP(base.BaseAPITest):
         self.rpc_client = self.enterContext(mock.patch.object(rpc, "get_client")).return_value
         return super()._make_app()
 
-    def install_network(self):
+    def install_network(self, member_cidr="198.51.100.0/24", vip_address=lambda requested: requested or VIP):
         subnet_id, member_subnet, network_id = (str(uuid4()) for _ in range(3))
         network = mock.Mock()
         subnets = {
             subnet_id: network_models.Subnet(id=subnet_id, network_id=network_id, cidr="192.0.2.0/24", ip_version=4),
-            member_subnet: network_models.Subnet(id=member_subnet, network_id=network_id, cidr="198.51.100.0/24", ip_version=4),
+            member_subnet: network_models.Subnet(id=member_subnet, network_id=network_id, cidr=member_cidr, ip_version=4),
         }
         network.get_subnet.side_effect = lambda subnet_id, context=None: subnets[str(subnet_id)]
         network.get_network.return_value = network_models.Network(
             id=network_id, subnets=list(subnets), port_security_enabled=True,
         )
         network.allocate_vip.side_effect = lambda lb: (
-            data_models.Vip(ip_address=lb.vip.ip_address or VIP, subnet_id=subnet_id,
+            data_models.Vip(ip_address=vip_address(lb.vip.ip_address), subnet_id=subnet_id,
                             network_id=network_id, port_id=str(uuid4())),
             [],
         )
@@ -280,15 +280,19 @@ class StockUDP(base.BaseAPITest):
         print("Stock API observed A, B, UDP-CONNECT on B and final detach. The two control load balancers and their six children matched.")
 
 
+def require_stock_versions(parser):
+    for dist, expected in (("octavia", "19.0.0"), ("octavia-lib", "3.12.0")):
+        installed = version(dist)
+        if installed != expected:
+            parser.error(f"expected {dist} {expected}, found {installed}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, help="New directory for the generated configurations")
     parser.add_argument("--controller-test", type=Path, help="Compiled Go graph test executable for the stock API run")
     args = parser.parse_args()
-    for dist, expected in (("octavia", "19.0.0"), ("octavia-lib", "3.12.0")):
-        installed = version(dist)
-        if installed != expected:
-            parser.error(f"expected {dist} {expected}, found {installed}")
+    require_stock_versions(parser)
     if args.output_dir is not None:
         args.output_dir.mkdir()
         StockUDP.output_dir = args.output_dir
