@@ -1,0 +1,367 @@
+{
+  "fixture": "local Kubernetes envtest and stock Octavia WSGI/SQLite, Amphora rendering and HAProxy",
+  "controller": "c75264dbe44932b430add1c1fd2ffd4fb07ea0e5",
+  "managerSHA256": "e3eadaaeb75285a09508560dee536dc94316c875863906d2c7ce2b6e6c66e43d",
+  "ociManifest": "sha256:8f3351cc24d716dd35efb6e67d7fa156530af59d3d65b10ac19017eb2dbaeeda",
+  "qualificationArchiveSHA256": "e0959f5553114c8b02d1bae2cda6707d4b3222b05d56b3cf4e464a4b4e8a5ea0",
+  "channels": {
+    "standard": {
+      "originalCase": "HTTPRouteRedirectHostAndStatus",
+      "baselineBinary": "166e2bf415025d2d3c32ac38a60d4a1ac91a05cf79412564982b9daf67bc613d",
+      "baselineStage": "RouteParentAcceptance",
+      "baselineNativeRequests": 0,
+      "native": {
+        "stage": "Passed",
+        "exit": 0,
+        "trafficSubtestsEntered": 2,
+        "trafficStatusCodes": {
+          "503": 80,
+          "302": 3,
+          "301": 3
+        },
+        "trafficLocations": {
+          "http://example.org/hostname-redirect": 3,
+          "http://example.org/host-and-status": 3
+        }
+      },
+      "supplementalReads": [
+        {
+          "path": "/hostname-redirect",
+          "status": 302,
+          "location": "http://example.org/hostname-redirect"
+        },
+        {
+          "path": "/host-and-status",
+          "status": 301,
+          "location": "http://example.org/host-and-status"
+        },
+        {
+          "path": "/hostname-redirect/Ab%2fCd%3F?q=%2f+One&Q=%2B&q=Second",
+          "status": 302,
+          "location": "http://example.org/hostname-redirect/Ab%2fCd%3F?q=%2f+One&Q=%2B&q=Second"
+        },
+        {
+          "path": "/host-and-status/Ab%2fCd%3F?q=%2f+One&Q=%2B&q=Second",
+          "status": 301,
+          "location": "http://example.org/host-and-status/Ab%2fCd%3F?q=%2f+One&Q=%2B&q=Second"
+        }
+      ],
+      "nativeRouteSnapshot": {
+        "name": "redirect-host-and-status",
+        "present": true,
+        "currentParents": [
+          {
+            "parent": "same-namespace",
+            "controllerMatches": true,
+            "currentConditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "False/Pending"
+            },
+            "acceptedMessage": null
+          }
+        ]
+      },
+      "subsequentStatusRun": {
+        "channel": "standard",
+        "case": "HTTPRouteRedirectHostAndStatus",
+        "controllerSHA256": "e3eadaaeb75285a09508560dee536dc94316c875863906d2c7ce2b6e6c66e43d",
+        "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+        "originalManifestSHA256": "60132023046b2b5348892c73cf7f2cd4e5a6dbf1862bffc554fb4acb76711850",
+        "generation": 1,
+        "statusTransitions": [
+          {
+            "elapsedSeconds": 0.07,
+            "conditions": {}
+          },
+          {
+            "elapsedSeconds": 1.36,
+            "conditions": {
+              "Accepted": "Unknown/Pending",
+              "ResolvedRefs": "Unknown/Pending",
+              "gateway-api-openstack.github.io/Programmed": "False/Pending"
+            }
+          },
+          {
+            "elapsedSeconds": 1.73,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "False/Pending"
+            }
+          },
+          {
+            "elapsedSeconds": 6.05,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          }
+        ],
+        "settled": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+        },
+        "traffic": [
+          {
+            "path": "/hostname-redirect",
+            "status": 302,
+            "location": "http://example.org/hostname-redirect"
+          },
+          {
+            "path": "/host-and-status",
+            "status": 301,
+            "location": "http://example.org/host-and-status"
+          }
+        ]
+      },
+      "insertion": {
+        "requests": 82,
+        "unexpected": 0,
+        "requestURI": "/legacy/continuity?sample=1"
+      },
+      "fixedHostStatusCodes": {
+        "conditions": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+        },
+        "traffic": [
+          {
+            "host": "api.tenant.example",
+            "requestURI": "/status-303?x=%2F",
+            "status": 303,
+            "location": "https://moved.example.test/status-303?x=%2F",
+            "backend": null
+          },
+          {
+            "host": "api.tenant.example",
+            "requestURI": "/status-307?x=%2F",
+            "status": 307,
+            "location": "https://moved.example.test/status-307?x=%2F",
+            "backend": null
+          },
+          {
+            "host": "api.tenant.example",
+            "requestURI": "/status-308?x=%2F",
+            "status": 308,
+            "location": "https://moved.example.test/status-308?x=%2F",
+            "backend": null
+          }
+        ]
+      },
+      "restart": {
+        "existingPoliciesReadByNewManager": 3,
+        "octaviaWrites": 0
+      },
+      "ownershipAudit": {
+        "exit": 0,
+        "matchedResourceCounts": {
+          "HealthMonitor": 1,
+          "L7Policy": 3,
+          "L7Rule": 7,
+          "Listener": 1,
+          "LoadBalancer": 1,
+          "Member": 1,
+          "Pool": 1
+        },
+        "auditSHA256": "017e8842bf0d3576952e81db49f340a50935f44f59c82133a69aec202365ceab",
+        "octaviaWrites": 0
+      },
+      "cleanup": {
+        "afterRoutes": {
+          "loadbalancers": 1,
+          "listeners": 1,
+          "pools": 0,
+          "l7policies": 0,
+          "healthmonitors": 0
+        },
+        "afterGateway": {
+          "loadbalancers": 0,
+          "listeners": 0,
+          "pools": 0,
+          "l7policies": 0,
+          "healthmonitors": 0
+        }
+      },
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1"
+    },
+    "experimental": {
+      "originalCase": "HTTPRouteRedirectHostAndStatus",
+      "baselineBinary": "166e2bf415025d2d3c32ac38a60d4a1ac91a05cf79412564982b9daf67bc613d",
+      "baselineStage": "RouteParentAcceptance",
+      "baselineNativeRequests": 0,
+      "native": {
+        "stage": "Passed",
+        "exit": 0,
+        "trafficSubtestsEntered": 2,
+        "trafficStatusCodes": {
+          "503": 112,
+          "302": 3,
+          "301": 3
+        },
+        "trafficLocations": {
+          "http://example.org/hostname-redirect": 3,
+          "http://example.org/host-and-status": 3
+        }
+      },
+      "supplementalReads": [
+        {
+          "path": "/hostname-redirect",
+          "status": 302,
+          "location": "http://example.org/hostname-redirect"
+        },
+        {
+          "path": "/host-and-status",
+          "status": 301,
+          "location": "http://example.org/host-and-status"
+        },
+        {
+          "path": "/hostname-redirect/Ab%2fCd%3F?q=%2f+One&Q=%2B&q=Second",
+          "status": 302,
+          "location": "http://example.org/hostname-redirect/Ab%2fCd%3F?q=%2f+One&Q=%2B&q=Second"
+        },
+        {
+          "path": "/host-and-status/Ab%2fCd%3F?q=%2f+One&Q=%2B&q=Second",
+          "status": 301,
+          "location": "http://example.org/host-and-status/Ab%2fCd%3F?q=%2f+One&Q=%2B&q=Second"
+        }
+      ],
+      "nativeRouteSnapshot": {
+        "name": "redirect-host-and-status",
+        "present": true,
+        "currentParents": [
+          {
+            "parent": "same-namespace",
+            "controllerMatches": true,
+            "currentConditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "False/Pending"
+            },
+            "acceptedMessage": null
+          }
+        ]
+      },
+      "subsequentStatusRun": {
+        "channel": "experimental",
+        "case": "HTTPRouteRedirectHostAndStatus",
+        "controllerSHA256": "e3eadaaeb75285a09508560dee536dc94316c875863906d2c7ce2b6e6c66e43d",
+        "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+        "originalManifestSHA256": "60132023046b2b5348892c73cf7f2cd4e5a6dbf1862bffc554fb4acb76711850",
+        "generation": 1,
+        "statusTransitions": [
+          {
+            "elapsedSeconds": 0.08,
+            "conditions": {}
+          },
+          {
+            "elapsedSeconds": 0.4,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "False/Pending"
+            }
+          },
+          {
+            "elapsedSeconds": 5.13,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          }
+        ],
+        "settled": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+        },
+        "traffic": [
+          {
+            "path": "/hostname-redirect",
+            "status": 302,
+            "location": "http://example.org/hostname-redirect"
+          },
+          {
+            "path": "/host-and-status",
+            "status": 301,
+            "location": "http://example.org/host-and-status"
+          }
+        ]
+      },
+      "insertion": {
+        "requests": 76,
+        "unexpected": 0,
+        "requestURI": "/legacy/continuity?sample=1"
+      },
+      "fixedHostStatusCodes": {
+        "conditions": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+        },
+        "traffic": [
+          {
+            "host": "api.tenant.example",
+            "requestURI": "/status-303?x=%2F",
+            "status": 303,
+            "location": "https://moved.example.test/status-303?x=%2F",
+            "backend": null
+          },
+          {
+            "host": "api.tenant.example",
+            "requestURI": "/status-307?x=%2F",
+            "status": 307,
+            "location": "https://moved.example.test/status-307?x=%2F",
+            "backend": null
+          },
+          {
+            "host": "api.tenant.example",
+            "requestURI": "/status-308?x=%2F",
+            "status": 308,
+            "location": "https://moved.example.test/status-308?x=%2F",
+            "backend": null
+          }
+        ]
+      },
+      "restart": {
+        "existingPoliciesReadByNewManager": 3,
+        "octaviaWrites": 0
+      },
+      "ownershipAudit": {
+        "exit": 0,
+        "matchedResourceCounts": {
+          "HealthMonitor": 1,
+          "L7Policy": 3,
+          "L7Rule": 7,
+          "Listener": 1,
+          "LoadBalancer": 1,
+          "Member": 1,
+          "Pool": 1
+        },
+        "auditSHA256": "017e8842bf0d3576952e81db49f340a50935f44f59c82133a69aec202365ceab",
+        "octaviaWrites": 0
+      },
+      "cleanup": {
+        "afterRoutes": {
+          "loadbalancers": 1,
+          "listeners": 1,
+          "pools": 0,
+          "l7policies": 0,
+          "healthmonitors": 0
+        },
+        "afterGateway": {
+          "loadbalancers": 0,
+          "listeners": 0,
+          "pools": 0,
+          "l7policies": 0,
+          "healthmonitors": 0
+        }
+      },
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53"
+    }
+  }
+}

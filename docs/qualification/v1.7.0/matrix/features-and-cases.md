@@ -80,8 +80,8 @@ The results come from focused runs of the pinned v1.7.0 case bodies. The envtest
 
 | Channel | PASS | FAIL | SKIP | UNRUN | Registered cases |
 |---|---:|---:|---:|---:|---:|
-| Standard | 43 | 32 | 1 | 94 | 170 |
-| Experimental | 42 | 33 | 1 | 94 | 170 |
+| Standard | 44 | 32 | 1 | 93 | 170 |
+| Experimental | 43 | 33 | 1 | 93 | 170 |
 
 **PASS** means the case met its upstream assertions in the linked fixture. **PASS (envtest status)** and **PASS (kind status)** identify cases whose assertions check status. **PASS (stock Service)** means an upstream mesh assertion passed on plain Kubernetes. Direct observations showed Service load balancing could eventually select the expected backend without enforcing the Route. `MeshBasic` checked ordinary connectivity. [Mesh control](../provider/stock-mesh.md)
 
@@ -186,7 +186,7 @@ The Experimental UDP all-listeners case has both a disk-backed failure and a pas
 | [HTTPRoutePathMatchOrder](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/httproute-path-match-order.go) | Gateway, HTTPRoute | False | FAIL [local](../provider/http-path-rules.md) | FAIL [local](../provider/http-path-rules.md) |  |
 | [HTTPRoutePreserveForeignStatus](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/httproute-preserve-foreign-status.go) | Gateway, HTTPRoute | True | PASS (envtest status) | PASS (envtest status) | [Current result and earlier failure](../provider/http-one-managed-parent.md) |
 | [HTTPRouteQueryParamMatching](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/httproute-query-param-matching.go) | Gateway, HTTPRoute, HTTPRouteQueryParamMatching | False | UNRUN | UNRUN |  |
-| [HTTPRouteRedirectHostAndStatus](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/httproute-redirect-host-and-status.go) | Gateway, HTTPRoute | False | UNRUN | UNRUN |  |
+| [HTTPRouteRedirectHostAndStatus](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/httproute-redirect-host-and-status.go) | Gateway, HTTPRoute | False | PASS | PASS | [Stock Octavia HTTP redirects](../provider/stock-http-redirect-controller.md) |
 | [HTTPRouteRedirectPath](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/httproute-redirect-path.go) | Gateway, HTTPRoute, HTTPRoutePathRedirect | False | UNRUN | UNRUN |  |
 | [HTTPRouteRedirectPort](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/httproute-redirect-port.go) | Gateway, HTTPRoute, HTTPRoutePortRedirect | False | UNRUN | UNRUN |  |
 | [HTTPRouteRedirectPortAndScheme](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/httproute-redirect-port-and-scheme.go) | Gateway, HTTPRoute, HTTPRoutePortRedirect, GatewayPort8080 | False | UNRUN | UNRUN |  |
