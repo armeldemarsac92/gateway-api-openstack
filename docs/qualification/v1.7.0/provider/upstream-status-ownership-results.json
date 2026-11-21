@@ -1,0 +1,32 @@
+{
+  "controllerSource": "455798411c13fd42f5c1568357f2c35cec2b2169",
+  "gatewayAPI": "v1.7.0",
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "kubernetes": "1.36.2",
+  "cloud": "recording provider",
+  "trafficExercised": false,
+  "runs": {
+    "standard": {
+      "exitCode": 1,
+      "releaseBundleValidation": "PASS",
+      "caseBodies": {
+        "GatewayNameMaximumLength": "PASS",
+        "HTTPRoutePreserveForeignStatus": "FAIL"
+      },
+      "rawLogSHA256": "cdeb7a8eb8c9e02393bd80afc22afeb9d8cfc48f55d4940dc6e0374d890e6626"
+    },
+    "experimental": {
+      "exitCode": 1,
+      "releaseBundleValidation": "PASS",
+      "caseBodies": {
+        "GatewayNameMaximumLength": "PASS",
+        "HTTPRoutePreserveForeignStatus": "FAIL"
+      },
+      "rawLogSHA256": "84b7a3f6929d90c4a92406f043bbe7b3a8ae35b22713d183597d33d14a72f3c5"
+    }
+  },
+  "gatewayStatusEvidence": "GatewayNameMaximumLength entered GatewayMustHaveLatestConditions with Accepted and Programmed at observedGeneration=0 and passed with current generation 1.",
+  "routeStatusEvidence": "HTTPRoutePreserveForeignStatus entered GatewayAndHTTPRoutesMustBeAccepted at upstream line 55 and timed out at initial parent acceptance. Accepted=False/UnsupportedValue at generation 1: exactly one Gateway parentRef is supported.",
+  "foreignStatusSeeded": false,
+  "foreignStatusEqualityReached": false
+}
