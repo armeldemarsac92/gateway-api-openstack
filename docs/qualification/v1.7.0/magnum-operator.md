@@ -2,6 +2,8 @@
 
 This integration targets Magnum 23.0.0 and the magnum-capi-helm 1.4.0 source at `a8b82c2480a286a10b60ecc1d94c6cd9f1d01823`. A new cluster on an operator-selected template can run the controller alongside the stock OpenStack cloud controller. The addon manages five workload objects. The platform supplies the shared Gateway API CRDs, the OpenStackGatewayClassConfig CRD, the GatewayClass and its parameters, the workload namespace, and a dedicated Cloud Secret.
 
+Clusters using the Octavia fork can render the five workload objects with fixed HTTP responses and weighted backend actions. [Provider enrollment and Magnum manifest](../../operator-octavia-http-actions.md)
+
 ## Build and configure
 
 1. Apply [the driver patch](../../../integrations/magnum-capi-helm/1.4.0.patch) to the exact upstream driver revision using `git apply --check` and `git apply`. Build the driver package using the normal Magnum operator packaging process. Deploy the same patched build and configuration to all conductors serving an opted-in template.
