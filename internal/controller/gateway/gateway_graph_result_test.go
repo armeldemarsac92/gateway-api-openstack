@@ -84,6 +84,59 @@ func TestGatewayDoesNotReportNewHostnameProgrammedWhileRoutesProgress(t *testing
 	}
 }
 
+func TestGatewayReportsProvenUDPListenerWhenSiblingFails(t *testing.T) {
+	cfg := testConfig()
+	gateway := &gatewayv1.Gateway{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "edge", UID: "gateway-uid", Generation: 1},
+		Spec: gatewayv1.GatewaySpec{GatewayClassName: "openstack", Listeners: []gatewayv1.Listener{
+			{Name: "dns", Protocol: gatewayv1.UDPProtocolType, Port: 53},
+			{Name: "radius", Protocol: gatewayv1.UDPProtocolType, Port: 1812},
+		}},
+	}
+	class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "openstack"}, Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName}}
+	kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gateway).WithObjects(class, gateway).Build()
+	reconciler := newTestReconciler(Reconciler{Client: kubeClient, APIReader: kubeClient, Config: cfg, Coordinator: &graph.Coordinator{}}, &recordingProvider{})
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(gateway)}
+	if result, err := reconciler.Reconcile(t.Context(), request); err != nil || !result.Requeue {
+		t.Fatalf("binding checkpoint = %v, %v", result, err)
+	}
+	component := cloud.GatewayProgressingResult("Waiting for the Gateway UDP listeners", time.Second)
+	component.State = cloud.GatewayState{LoadBalancerID: "lb-1", VIPAddress: "192.0.2.10"}
+	component.UDPReadyPorts = []int{53}
+	providerErr := cloud.NewProviderError(cloud.ErrorCategoryResourceFailure, errors.New("Octavia UDP listener provisioning status is ERROR"))
+	reconciler.Writer = fixedGatewayGraph{result: cloud.GatewayGraphResult{Gateway: component}, err: providerErr}
+	if result, err := reconciler.Reconcile(t.Context(), request); err != nil || result.RequeueAfter <= 0 {
+		t.Fatalf("provider failure = %v, %v", result, err)
+	}
+	var current gatewayv1.Gateway
+	if err := kubeClient.Get(t.Context(), request.NamespacedName, &current); err != nil {
+		t.Fatal(err)
+	}
+	programmed := meta.FindStatusCondition(current.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed))
+	if programmed == nil || programmed.Status != metav1.ConditionFalse || programmed.Reason != "ResourceFailed" {
+		t.Fatalf("aggregate failure condition = %#v", programmed)
+	}
+	if len(current.Status.Listeners) != 2 ||
+		!meta.IsStatusConditionTrue(current.Status.Listeners[0].Conditions, string(gatewayv1.ListenerConditionProgrammed)) ||
+		!meta.IsStatusConditionFalse(current.Status.Listeners[1].Conditions, string(gatewayv1.ListenerConditionProgrammed)) {
+		t.Fatalf("listener conditions = %+v", current.Status.Listeners)
+	}
+	if len(current.Status.Addresses) != 1 || current.Status.Addresses[0].Value != "192.0.2.10" {
+		t.Fatalf("proven address = %+v", current.Status.Addresses)
+	}
+
+	reconciler.Writer = fixedGatewayGraph{err: providerErr}
+	if _, err := reconciler.Reconcile(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	if err := kubeClient.Get(t.Context(), request.NamespacedName, &current); err != nil {
+		t.Fatal(err)
+	}
+	if !meta.IsStatusConditionFalse(current.Status.Listeners[0].Conditions, string(gatewayv1.ListenerConditionProgrammed)) {
+		t.Fatalf("listener inherited historical proof after an unproven failure: %+v", current.Status.Listeners[0])
+	}
+}
+
 func TestGatewayRouteFailurePreservesStatusAndRedactsDetails(t *testing.T) {
 	for _, category := range []cloud.ErrorCategory{cloud.ErrorCategoryRateLimit, cloud.ErrorCategoryAuthorization, ""} {
 		t.Run(string(category), func(t *testing.T) {

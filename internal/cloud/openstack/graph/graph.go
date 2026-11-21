@@ -108,9 +108,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		return result, err
 	}
 	if actual.outcome.State == cloud.OutcomeProgressing {
-		result = pendingGraphResult(desired, actual.outcome)
-		result.Gateway = observedGatewayResult(desired, actual, actual.outcome)
-		return result, nil
+		return p.pendingGraphResult(ctx, desired, actual), nil
 	}
 	if actual.protocol == cloud.ListenerProtocolUDP && actual.loadBalancer != nil {
 		for index, route := range desired.routes {
@@ -567,10 +565,16 @@ func validateGraphLoadBalancer(lb *octavia.LoadBalancer, requirements cloud.Gate
 	return nil
 }
 
-func pendingGraphResult(desired desiredGatewayGraph, outcome cloud.Outcome) cloud.GatewayGraphResult {
-	result := cloud.GatewayGraphResult{Outcome: outcome, Gateway: cloud.GatewayResult{Outcome: outcome}}
-	for _, route := range desired.routes {
-		result.Routes = append(result.Routes, cloud.RouteGraphResult{Identity: route.spec.Identity, Result: cloud.RouteResult{Outcome: outcome, ObservationDeferred: true}})
+func (p *Provider) pendingGraphResult(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph) cloud.GatewayGraphResult {
+	result := cloud.GatewayGraphResult{Outcome: actual.outcome, Gateway: observedGatewayResult(desired, actual, actual.outcome)}
+	var deferred map[int]bool
+	if actual.multiUDP {
+		deferred = p.deferredUDPRouteObservations(ctx, desired, actual, result.Gateway.UDPReadyPorts)
+	}
+	for index, route := range desired.routes {
+		result.Routes = append(result.Routes, cloud.RouteGraphResult{Identity: route.spec.Identity, Result: cloud.RouteResult{
+			Outcome: actual.outcome, ObservationDeferred: !actual.multiUDP || deferred[index],
+		}})
 	}
 	return result
 }

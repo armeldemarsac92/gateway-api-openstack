@@ -96,7 +96,9 @@ type RouteResult struct {
 	State   RouteState
 	Outcome Outcome
 	// ObservationDeferred means the parent is busy and the provider could not
-	// establish a new outcome for this route on this pass.
+	// establish a new outcome for this route on this pass. For scoped UDP, it
+	// also confirms the winning listeners still reach the route's active pool
+	// while a sibling listener is pending.
 	ObservationDeferred bool
 }
 

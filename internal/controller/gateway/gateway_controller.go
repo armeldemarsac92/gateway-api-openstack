@@ -180,7 +180,7 @@ func (r *Reconciler) reconcileGatewayBinding(
 			return r.setGatewayUnsupportedVersion(ctx, scope)
 		}
 		if _, classified := controller.ProviderFailurePolicyFor(err); classified {
-			return r.handleGatewayProviderFailure(ctx, scope, decision.listener, err)
+			return r.handleGatewayProviderFailure(ctx, scope, decision.listener, err, cloud.GatewayResult{})
 		}
 		return ctrl.Result{}, err
 	}
@@ -208,7 +208,7 @@ func (r *Reconciler) reconcileGatewayGraph(
 			}
 			return ctrl.Result{}, controller.SafeProviderReconcileError(controller.ProviderFailurePolicy{Message: "The route graph could not be reconciled"}, err)
 		}
-		return r.handleGatewayProviderFailure(ctx, scope, decision.listener, err)
+		return r.handleGatewayProviderFailure(ctx, scope, decision.listener, err, graphResult.Gateway)
 	}
 	gatewayResult := graphResult.Gateway
 	if err := gatewayResult.Outcome.Validate(); err != nil {

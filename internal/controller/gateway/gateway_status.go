@@ -211,6 +211,7 @@ func (r *Reconciler) handleGatewayProviderFailure(
 	scope *gatewayScope,
 	listener *gatewayv1.Listener,
 	providerErr error,
+	observation cloud.GatewayResult,
 ) (ctrl.Result, error) {
 	policy, ok := controller.ProviderFailurePolicyFor(providerErr)
 	if !ok {
@@ -232,7 +233,12 @@ func (r *Reconciler) handleGatewayProviderFailure(
 		policy.Message,
 		programmedGeneration,
 	)
-	if err := r.setGatewayProvisioningStatus(
+	var udpReadyPorts []int
+	if policy.Category == cloud.ErrorCategoryResourceFailure && observation.Outcome.State == cloud.OutcomeProgressing &&
+		controller.GatewayUsesMultipleUDPListeners(r.Config, gateway) {
+		udpReadyPorts = observation.UDPReadyPorts
+	}
+	if err := r.setGatewayListenerStatuses(
 		ctx,
 		gateway,
 		listener,
@@ -240,9 +246,14 @@ func (r *Reconciler) handleGatewayProviderFailure(
 		gatewayReason,
 		listenerReason,
 		policy.Message,
+		policy.Message,
 		policy.AdvancesObservedGeneration,
+		udpReadyPorts,
 	); err != nil {
 		return ctrl.Result{}, errors.Join(controller.SafeProviderReconcileError(policy, providerErr), err)
+	}
+	if address := observation.State.Address(); address != "" && len(udpReadyPorts) != 0 {
+		setGatewayAddress(gateway, address)
 	}
 	if transitioned {
 		scope.queueWarning(policy, "EnsureGateway")

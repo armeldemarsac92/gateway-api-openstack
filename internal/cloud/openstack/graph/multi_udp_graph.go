@@ -275,6 +275,60 @@ func udpGatewayResult(spec cloud.GatewaySpec, actual observedGatewayGraph, pendi
 	return result
 }
 
+// The shared parent can defer full route observation while a sibling listener
+// is pending. Keep existing proof only for routes whose exact edges still
+// reach an active, owned pool.
+func (p *Provider) deferredUDPRouteObservations(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, readyPorts []int) map[int]bool {
+	if len(readyPorts) == 0 || actual.loadBalancer.Pools == nil || len(desired.routes) == 0 {
+		return nil
+	}
+	readyPools := make(map[int]string, len(readyPorts))
+	pending := false
+	for _, listener := range actual.udpListeners {
+		switch {
+		case strings.HasPrefix(listener.ProvisioningStatus, "PENDING_"):
+			pending = true
+		case listener.ProvisioningStatus != "ACTIVE":
+			return nil
+		case slices.Contains(readyPorts, listener.ProtocolPort):
+			readyPools[listener.ProtocolPort] = listener.DefaultPoolID
+		}
+	}
+	if !pending || len(readyPools) == 0 {
+		return nil
+	}
+	poolItems, err := p.listGatewayPools(ctx, actual.loadBalancer)
+	if err != nil {
+		return nil
+	}
+	deferred := make(map[int]bool)
+	for index, route := range desired.routes {
+		ports := route.spec.UDPListenerPorts
+		if desired.spec.Routes[index].Disposition != cloud.GraphEnsure || len(ports) == 0 {
+			continue
+		}
+		poolID := readyPools[ports[0]]
+		if poolID == "" || slices.ContainsFunc(ports, func(port int) bool { return readyPools[port] != poolID }) {
+			continue
+		}
+		poolIndex := slices.IndexFunc(poolItems, func(pool pools.Pool) bool { return pool.ID == poolID })
+		if poolIndex == -1 {
+			continue
+		}
+		pool := poolItems[poolIndex]
+		if !pool.AdminStateUp || pool.ProvisioningStatus != "ACTIVE" || len(pool.Listeners) != len(ports) ||
+			!route.identity.MatchesRoute(pool.Tags, rolePool) ||
+			p.validateMultiUDPDefaultPool(pool, actual.loadBalancer.ID, actual.udpListeners, cloud.ListenerProtocolUDP) != nil {
+			continue
+		}
+		observed := observedRouteGraph{pool: &pool}
+		deferred[index] = p.observeRoutePoolChildren(ctx, route.identity, &observed) == nil &&
+			observed.validateDefaultPoolChildren() == nil && observed.backendProvisioningIssue(false, true) == "" &&
+			hasActiveUDPBackend(route, observed, actual.state.VIPAddress)
+	}
+	return deferred
+}
+
 func (p *Provider) buildMultiUDPGraphPlan(desired desiredGatewayGraph, actual observedGatewayGraph) ([]graphMutation, cloud.GatewayGraphResult, error) {
 	result := cloud.GatewayGraphResult{Outcome: cloud.ReadyOutcome(), Gateway: cloud.GatewayReadyResult(actual.state)}
 	ensureGateway := desired.spec.Gateway.Disposition == cloud.GraphEnsure

@@ -360,13 +360,15 @@ func (r *Reconciler) ensure(ctx context.Context, route *transportRoute, plan *ro
 		plan.programmed = routeCondition(route, "Programmed", policy.ConditionStatus, policy.Reason, policy.Message)
 		return controller.ProviderFailureResult(policy, err, string(route.GetUID()))
 	}
-	component, err := r.routeResult(result, identity)
+	// Scoped UDP needs a route-specific deferred observation. Whole-graph
+	// progress alone does not show which listener is pending.
+	component, err := r.routeResult(result, identity, len(plan.desired.UDPListenerPorts) == 0)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 	if component.Outcome.State == cloud.OutcomeProgressing {
 		target := r.currentTarget(route, plan.parents[0].ref, plan.target)
-		if len(plan.desired.UDPListenerPorts) != 0 || !component.ObservationDeferred || target == nil || target.Status != metav1.ConditionTrue || !r.retainProgrammedCondition(route, plan) {
+		if !component.ObservationDeferred || target == nil || target.Status != metav1.ConditionTrue || !r.retainProgrammedCondition(route, plan) {
 			message := controller.ProviderProgressMessage(component.Outcome, fmt.Sprintf("Octavia is programming the %s forwarding configuration", r.protocol()))
 			plan.programmed = routeCondition(route, "Programmed", metav1.ConditionFalse, "Pending", message)
 		}
@@ -387,7 +389,7 @@ func siblingFailure(err error, expected cloud.Identity) bool {
 	return parent == expected
 }
 
-func (r *Reconciler) routeResult(result cloud.GatewayGraphResult, expected cloud.Identity) (cloud.RouteResult, error) {
+func (r *Reconciler) routeResult(result cloud.GatewayGraphResult, expected cloud.Identity, allowDeferredFallback bool) (cloud.RouteResult, error) {
 	var found *cloud.RouteResult
 	for _, component := range result.Routes {
 		if component.Identity.RouteUID != expected.RouteUID {
@@ -400,7 +402,7 @@ func (r *Reconciler) routeResult(result cloud.GatewayGraphResult, expected cloud
 	}
 	if found == nil {
 		if result.Outcome.State == cloud.OutcomeProgressing {
-			return cloud.RouteResult{Outcome: result.Outcome, ObservationDeferred: true}, nil
+			return cloud.RouteResult{Outcome: result.Outcome, ObservationDeferred: allowDeferredFallback}, nil
 		}
 		return cloud.RouteResult{}, fmt.Errorf("provider omitted the %s component result", r.kind())
 	}

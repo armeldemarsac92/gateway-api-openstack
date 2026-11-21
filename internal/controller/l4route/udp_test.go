@@ -481,6 +481,92 @@ func TestUDPRouteElectionKeepsOtherListenerWhenOlderTargetIsInvalid(t *testing.T
 	}
 }
 
+func TestUDPRouteRetainsOnlyCommittedTargetDuringSiblingProgress(t *testing.T) {
+	for _, scenario := range []string{"same target", "changed ports", "changed backend", "own listener pending", "missing route observation"} {
+		t.Run(scenario, func(t *testing.T) {
+			gateway, class, route := udpRouteFixture()
+			gateway.Spec.Listeners = append(gateway.Spec.Listeners, gatewayv1.Listener{
+				Name: "other-udp", Protocol: gatewayv1.UDPProtocolType, Port: 8053,
+			})
+			ref, service, endpoints := udpBackendFixture(route.Namespace, "backend", 1, "10.1.2.1")
+			route.Spec.Rules[0].BackendRefs = []gatewayv1.BackendRef{ref}
+			older := route.DeepCopy()
+			older.Name, older.UID = "older-specific", "route-specific"
+			older.CreationTimestamp = metav1.NewTime(route.CreationTimestamp.Add(-time.Minute))
+			older.Spec.ParentRefs[0].SectionName = ptr.To(gatewayv1.SectionName("other-udp"))
+			r := testReconciler(t, gateway, class, route, service, endpoints)
+			r.Protocol, r.Coordinator = gatewayv1.UDPProtocolType, &graph.Coordinator{}
+			if scenario != "changed ports" {
+				if err := r.Create(t.Context(), older); err != nil {
+					t.Fatal(err)
+				}
+			}
+			identity := bindFixture(t, r, gateway, route, cloud.MemberModeEndpoint)
+			controller.SetGatewayUDPListenerMode(r.Config, gateway, true)
+			if err := r.Update(t.Context(), gateway); err != nil {
+				t.Fatal(err)
+			}
+			base := route.DeepCopy()
+			controller.SealUDPRouteAnchor(r.Config, route, identity, 8080)
+			if err := r.Patch(t.Context(), route, controller.OptimisticMergeFrom(base)); err != nil {
+				t.Fatal(err)
+			}
+			// The first pass checkpoints the new, port-scoped target.
+			route = reconcileUDPRoute(t, r, route)
+			r.Writer = readyRouteWriter(t, r)
+			route = reconcileUDPRoute(t, r, route)
+			checkRouteCondition(t, route, r.Config.ControllerName, r.Config.Domain()+"/Programmed", metav1.ConditionTrue, "Programmed")
+
+			switch scenario {
+			case "changed ports":
+				if err := r.Create(t.Context(), older); err != nil {
+					t.Fatal(err)
+				}
+			case "changed backend":
+				if err := r.Get(t.Context(), client.ObjectKeyFromObject(endpoints), endpoints); err != nil {
+					t.Fatal(err)
+				}
+				endpoints.Endpoints[0].Addresses = []string{"10.1.2.2"}
+				if err := r.Update(t.Context(), endpoints); err != nil {
+					t.Fatal(err)
+				}
+			}
+			observed := false
+			r.Writer = applyRouteGraphFunc(func(ctx context.Context, request graph.Request) (cloud.GatewayGraphResult, error) {
+				input, err := r.ObserveRouteGraph(ctx, request, request.Gateway)
+				if err != nil {
+					return cloud.GatewayGraphResult{}, err
+				}
+				if len(input.Nodes) != 1 || !slices.Equal(input.Nodes[0].Spec.UDPListenerPorts, []int{8080}) {
+					t.Fatalf("selected UDP ports = %+v", input.Nodes)
+				}
+				observed = true
+				pending := cloud.ProgressingOutcome("Waiting for a UDP listener", time.Second)
+				result := cloud.GatewayGraphResult{Outcome: pending}
+				if scenario != "missing route observation" {
+					result.Routes = []cloud.RouteGraphResult{{Identity: request.Identity, Result: cloud.RouteResult{
+						Outcome: pending, ObservationDeferred: scenario != "own listener pending",
+					}}}
+				}
+				return result, input.Validate(ctx)
+			})
+			route = reconcileUDPRoute(t, r, route)
+			if !observed {
+				checkRouteCondition(t, route, r.Config.ControllerName, r.Config.Domain()+"/Programmed", metav1.ConditionFalse, "Pending")
+				route = reconcileUDPRoute(t, r, route)
+			}
+			if !observed {
+				t.Fatal("did not reconcile the deferred provider observation")
+			}
+			if scenario == "same target" {
+				checkRouteCondition(t, route, r.Config.ControllerName, r.Config.Domain()+"/Programmed", metav1.ConditionTrue, "Programmed")
+			} else {
+				checkRouteCondition(t, route, r.Config.ControllerName, r.Config.Domain()+"/Programmed", metav1.ConditionFalse, "Pending")
+			}
+		})
+	}
+}
+
 func TestUDPRouteDetachesAfterRestartWithoutUDPListener(t *testing.T) {
 	gateway, class, route := udpRouteFixture()
 	r := testReconciler(t, gateway, class, route)

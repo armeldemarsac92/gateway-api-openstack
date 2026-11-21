@@ -131,7 +131,7 @@ func (r *Reconciler) detach(ctx context.Context, route *transportRoute, identity
 		}
 		return controller.ProviderFinalizationFailureResult(policy, err, string(route.GetUID()))
 	}
-	component, err := r.routeResult(result, identity)
+	component, err := r.routeResult(result, identity, false)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
