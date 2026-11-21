@@ -305,7 +305,8 @@ func gatewayProgrammed(gateway *gatewayv1.Gateway) bool {
 func (r *Reconciler) routeSpec(ctx context.Context, route *transportRoute, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, backends []serviceBackend, topology classconfig.Resolved, listenerPorts ...int) (cloud.RouteSpec, string, *model.Diagnostic, error) {
 	weighted := len(route.backendRefs) > 1
 	mode := topology.Topology.MemberMode
-	if weighted && mode != cloud.MemberModeEndpoint && !(r.protocol() == gatewayv1.UDPProtocolType && mode == cloud.MemberModeNodePort) {
+	supportsWeights := mode == cloud.MemberModeEndpoint || r.protocol() == gatewayv1.UDPProtocolType && mode == cloud.MemberModeNodePort
+	if weighted && !supportsWeights {
 		return cloud.RouteSpec{}, "", backendRejection(gatewayv1.RouteReasonUnsupportedValue, fmt.Sprintf("%s forwarding with multiple backend references requires Endpoint member mode", r.protocol())), nil
 	}
 	groups := make([]weightedServiceMembers, len(backends))

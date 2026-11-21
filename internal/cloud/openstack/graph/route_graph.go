@@ -1254,7 +1254,8 @@ func (r desiredRoute) udpNodePort() bool {
 // Endpoint mode always owns weight for readiness. A singleton UDP NodePort
 // leaves weights alone unless the observed member carries a managed share.
 func (r desiredRoute) memberWeight(member cloud.Member) *int {
-	if r.spec.MemberMode != cloud.MemberModeEndpoint && !(r.udpNodePort() && member.Weight > 0) {
+	managesWeight := r.spec.MemberMode == cloud.MemberModeEndpoint || r.udpNodePort() && member.Weight > 0
+	if !managesWeight {
 		return nil
 	}
 	weight := member.Weight
