@@ -142,7 +142,7 @@ func electRouteProfiles(candidates []routeProfileCandidate) map[routeObjectKey]b
 		return nil
 	}
 	slices.SortStableFunc(candidates, func(a, b routeProfileCandidate) int {
-		return cmp.Or(a.route.CreationTimestamp.Time.Compare(b.route.CreationTimestamp.Time),
+		return cmp.Or(a.route.CreationTimestamp.Compare(b.route.CreationTimestamp.Time),
 			cmp.Compare(a.route.Namespace, b.route.Namespace), cmp.Compare(a.route.Name, b.route.Name))
 	})
 	type hostProfile struct {

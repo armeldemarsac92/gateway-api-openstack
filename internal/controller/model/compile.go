@@ -108,8 +108,8 @@ func compileListeners(gateway *gatewayv1.Gateway, operatorHTTPS bool) []Listener
 		}
 		if listener.AllowedRoutes != nil {
 			for _, kind := range listener.AllowedRoutes.Kinds {
-				if !((kind.Kind == HTTPRouteKind || kind.Kind == GRPCRouteKind && listener.Protocol == gatewayv1.HTTPProtocolType) &&
-					(kind.Group == nil || *kind.Group == gatewayv1.GroupName)) {
+				supportedKind := kind.Kind == HTTPRouteKind || kind.Kind == GRPCRouteKind && listener.Protocol == gatewayv1.HTTPProtocolType
+				if !supportedKind || kind.Group != nil && *kind.Group != gatewayv1.GroupName {
 					compiled.Diagnostics = append(compiled.Diagnostics, Diagnostic{
 						Condition: string(gatewayv1.ListenerConditionResolvedRefs), Reason: string(gatewayv1.ListenerReasonInvalidRouteKinds),
 						Message: "listener allowedRoutes includes a kind not supported by the HTTP compiler",
