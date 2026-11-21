@@ -27,7 +27,7 @@ The current profile supports one active HTTP listener shared by HTTPRoutes that 
 The listener and route may use an exact hostname or a leading wildcard with Exact or PathPrefix path matching. On the Experimental channel, a nonempty pre-routing filter list rejects the listener. For an existing binding, the controller closes its owned traffic path, including during unrelated bundle skew.
 NodePort is the default member mode.
 The opt-in IPv4 Endpoint implementation awaits live network validation under [ADR 0007](adr/0007-direct-endpoint-members.md).
-The listener accepts a route according to its Same, All or Selector namespace policy. A dedicated UDP Gateway can use distinct ports on the same VIP. The Gateway-UID writer elects a route per listener and tracks every listener that shares a route-owned pool. Multiple active HTTP listeners, TLS, static address allocation and backend policies remain open.
+The listener accepts a route according to its Same, All or Selector namespace policy. A dedicated TCP or UDP Gateway can use distinct ports on the same VIP. The Gateway-UID writer elects a route per listener and tracks every listener that shares a route-owned pool. Multiple active HTTP listeners, TLS, static address allocation and backend policies remain open.
 
 ## Design principles
 

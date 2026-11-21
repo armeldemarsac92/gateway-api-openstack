@@ -1,6 +1,6 @@
 # Gateway API v1.7.0 live qualification
 
-Both channel runs are **UNRUN**. A designated disposable Hibiscus environment and runners with private network access are still required. This ledger covers Core and applicable Extended cases for each profile.
+All fourteen profile and channel combinations are **UNRUN**. A designated disposable Hibiscus environment and runners with private network access are still required. This ledger covers Core and applicable Extended cases for each profile.
 
 | Profile | Standard | Experimental |
 | --- | --- | --- |
@@ -11,6 +11,8 @@ Both channel runs are **UNRUN**. A designated disposable Hibiscus environment an
 | GATEWAY-GRPC | UNRUN | UNRUN |
 | MESH-HTTP | UNRUN | UNRUN |
 | MESH-GRPC | UNRUN | UNRUN |
+
+The scoped TCP cases ran in a local kind fixture using Octavia’s public API, the stock worker renderer and HAProxy. The full local GATEWAY-TCP Core attempts stopped during the upstream shared HTTPS setup. [Local TCP reports](provider/tcp-upstream.md)
 
 Both mesh Core profiles also ran on ordinary local Kubernetes Services without an enrolled dataplane. The upstream reports record the assertions that failed and the traffic that reached the echo pods. [Local mesh reports](provider/stock-mesh.md)
 

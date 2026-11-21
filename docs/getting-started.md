@@ -241,7 +241,7 @@ For a WebSocket backend, set `appProtocol: kubernetes.io/ws` on the TCP Service 
 
 ## Forward TCP to a Service
 
-For a TCP application, create a dedicated Gateway with one TCP listener. This example uses the existing `openstack` class, the `gateway-api-openstack-demo` namespace and a Service called `database` exposing port 5432. With the default class member mode, the Service must have an allocated NodePort and ready endpoints on reachable workers. In Endpoint mode the Amphora must be able to reach the pod addresses and ports.
+For TCP applications, create a dedicated TCP Gateway. The example uses one listener and the existing `openstack` class, the `gateway-api-openstack-demo` namespace and a Service called `database` exposing port 5432. With the default class member mode, the Service must have an allocated NodePort and ready endpoints on reachable workers. In Endpoint mode the Amphora must be able to reach the pod addresses and ports.
 
 ```yaml
 apiVersion: gateway.networking.k8s.io/v1
@@ -278,6 +278,8 @@ When several routes attach to this listener, `attachedRoutes` counts them all. T
 For several TCP Services, select a GatewayClass with `memberMode: Endpoint` and put one `backendRef` per Service port in the same rule. Two references with `weight: 70` and `weight: 30` target those shares of new TCP connections. The controller divides each share across that Service's ready endpoints. A weight of zero adds no members. An invalid zero-weight reference still reports `ResolvedRefs=False`.
 
 The controller withdraws forwarding if any positive-weight Service has no eligible endpoints. It reports `Programmed=False/UnsupportedValue` if the exact ratio requires an Octavia member weight above 256 or the pool would exceed HAProxy's limit of 4,095 active endpoints. Weighted NodePort requests also report `UnsupportedValue`. A weight change detaches the pool until Octavia confirms the new settings. Each active weighted member must report `backup: false` before the controller reattaches the pool. [Measured connection counts](qualification/v1.7.0/provider/tcp-upstream.md#weighted-tcp-connections) [Endpoint mode configuration](reference/class-configuration.md#direct-endpoint-members) · [HAProxy round robin limit](https://github.com/haproxy/haproxy/blob/v3.0.19/doc/configuration.txt#L5631-L5637)
+
+To expose more than one TCP port on this Gateway, configure every listener as TCP and give each a distinct name and port. Use one Gateway parent and one rule per TCPRoute. A Gateway-wide parent attaches to every eligible TCP listener. A parent with `sectionName`, `port` or both selects the exact matching listener. Each listener elects the oldest eligible route, breaking equal creation timestamps by namespace and name. A port with an unusable winning backend stays without forwarding until that route recovers or loses the listener election. A route that wins on multiple ports shares its pool across those ports. Verify that your VIP security group allows each port. Complete the controller rollout before adding the second port to an existing Gateway. After updating the Gateway or a route, check `Programmed=True` for the current generation on the Gateway and its selected listeners and check the route’s `<controller-domain>/Programmed` parent condition for the current route generation. Test a fresh connection to each port. [Enrollment and rollback](operator-recovery.md#multiport-tcp-upgrades)
 
 ## Forward UDP to a Service
 

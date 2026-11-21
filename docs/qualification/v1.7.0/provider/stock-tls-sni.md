@@ -20,6 +20,8 @@ The qualification capture contained 258 packets from the private namespace's loo
 
 The wire run covered the Amphora TCP listener. Opaque HTTPS was checked for API admission. Wildcard precedence, unmatched names, OVN, deployed control-plane convergence, Amphora agent reload and Gateway API conformance were outside this run.
 
+Gateway API v1.7.0 requires at least one hostname in a TLSRoute. Each wildcard requires a DNS suffix. A single route on a dedicated TLS listener still needs to select the permitted SNI names before forwarding. A TCP default pool alone forwards other names to the same backend, as the two-name probe shows. [Tagged TLSRoute contract](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/apis/v1/tlsroute_types.go#L52-L131)
+
 ## Reproduce
 
 Use the pins and Python environment in the [stock TCP probe](stock-tcp.md#reproduce), OpenSSL and a Linux user/network namespace with only loopback brought up. `OCTAVIA_PYTHON` and `HAPROXY_BIN` are absolute paths to the pinned Python and HAProxy executables. Run from the repository root.

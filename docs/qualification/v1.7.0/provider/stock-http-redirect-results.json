@@ -1,0 +1,615 @@
+{
+  "versions": {
+    "octavia": "19.0.0",
+    "octavia-lib": "3.12.0",
+    "haproxy": "3.0.19-ade9c1262"
+  },
+  "octavia_api": [
+    {
+      "method": "POST",
+      "path": "/v2/lbaas/l7policies",
+      "status": 201,
+      "body_fields": {
+        "listener_id": "<http-listener>",
+        "action": "REDIRECT_TO_POOL",
+        "position": 1,
+        "redirect_pool_id": "<echo-pool>"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/v2/lbaas/l7policies/<higher-exact-forwarding>",
+      "status": 200,
+      "readback_fields": {
+        "listener_id": "<http-listener>",
+        "action": "REDIRECT_TO_POOL",
+        "position": 1,
+        "redirect_prefix": null,
+        "redirect_url": null,
+        "redirect_http_code": null,
+        "redirect_pool_id": "<echo-pool>"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/v2/lbaas/l7policies/<higher-exact-forwarding>/rules",
+      "status": 201,
+      "body_fields": {
+        "type": "PATH",
+        "compare_type": "EQUAL_TO",
+        "value": "/legacy/stay"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/v2/lbaas/l7policies/<higher-exact-forwarding>/rules/<higher-exact-forwarding:PATH>",
+      "status": 200,
+      "readback_fields": {
+        "type": "PATH",
+        "compare_type": "EQUAL_TO",
+        "value": "/legacy/stay",
+        "invert": false
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/v2/lbaas/l7policies",
+      "status": 201,
+      "body_fields": {
+        "listener_id": "<http-listener>",
+        "action": "REDIRECT_PREFIX",
+        "position": 2,
+        "redirect_prefix": "https://moved.example.test:8443"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/v2/lbaas/l7policies/<redirect-prefix-apex>",
+      "status": 200,
+      "readback_fields": {
+        "listener_id": "<http-listener>",
+        "action": "REDIRECT_PREFIX",
+        "position": 2,
+        "redirect_prefix": "https://moved.example.test:8443",
+        "redirect_url": null,
+        "redirect_http_code": 302,
+        "redirect_pool_id": null
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/v2/lbaas/l7policies/<redirect-prefix-apex>/rules",
+      "status": 201,
+      "body_fields": {
+        "type": "PATH",
+        "compare_type": "EQUAL_TO",
+        "value": "/legacy"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/v2/lbaas/l7policies/<redirect-prefix-apex>/rules/<redirect-prefix-apex:PATH>",
+      "status": 200,
+      "readback_fields": {
+        "type": "PATH",
+        "compare_type": "EQUAL_TO",
+        "value": "/legacy",
+        "invert": false
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/v2/lbaas/l7policies",
+      "status": 201,
+      "body_fields": {
+        "listener_id": "<http-listener>",
+        "action": "REDIRECT_PREFIX",
+        "position": 3,
+        "redirect_prefix": "https://moved.example.test:8443"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/v2/lbaas/l7policies/<redirect-prefix-children>",
+      "status": 200,
+      "readback_fields": {
+        "listener_id": "<http-listener>",
+        "action": "REDIRECT_PREFIX",
+        "position": 3,
+        "redirect_prefix": "https://moved.example.test:8443",
+        "redirect_url": null,
+        "redirect_http_code": 302,
+        "redirect_pool_id": null
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/v2/lbaas/l7policies/<redirect-prefix-children>/rules",
+      "status": 201,
+      "body_fields": {
+        "type": "PATH",
+        "compare_type": "STARTS_WITH",
+        "value": "/legacy/"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/v2/lbaas/l7policies/<redirect-prefix-children>/rules/<redirect-prefix-children:PATH>",
+      "status": 200,
+      "readback_fields": {
+        "type": "PATH",
+        "compare_type": "STARTS_WITH",
+        "value": "/legacy/",
+        "invert": false
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/v2/lbaas/l7policies",
+      "status": 201,
+      "body_fields": {
+        "listener_id": "<http-listener>",
+        "action": "REDIRECT_PREFIX",
+        "position": 4,
+        "redirect_prefix": "https://moved.example.test:8443",
+        "redirect_http_code": 301
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/v2/lbaas/l7policies/<redirect-exact-301>",
+      "status": 200,
+      "readback_fields": {
+        "listener_id": "<http-listener>",
+        "action": "REDIRECT_PREFIX",
+        "position": 4,
+        "redirect_prefix": "https://moved.example.test:8443",
+        "redirect_url": null,
+        "redirect_http_code": 301,
+        "redirect_pool_id": null
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/v2/lbaas/l7policies/<redirect-exact-301>/rules",
+      "status": 201,
+      "body_fields": {
+        "type": "PATH",
+        "compare_type": "EQUAL_TO",
+        "value": "/permanent"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/v2/lbaas/l7policies/<redirect-exact-301>/rules/<redirect-exact-301:PATH>",
+      "status": 200,
+      "readback_fields": {
+        "type": "PATH",
+        "compare_type": "EQUAL_TO",
+        "value": "/permanent",
+        "invert": false
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/v2/lbaas/l7policies/<redirect-exact-301>/rules",
+      "status": 201,
+      "body_fields": {
+        "type": "HOST_NAME",
+        "compare_type": "REGEX",
+        "value": "^mixed\\.source\\.example\\.test(:[0-9]+)?$"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/v2/lbaas/l7policies/<redirect-exact-301>/rules/<redirect-exact-301:HOST_NAME>",
+      "status": 200,
+      "readback_fields": {
+        "type": "HOST_NAME",
+        "compare_type": "REGEX",
+        "value": "^mixed\\.source\\.example\\.test(:[0-9]+)?$",
+        "invert": false
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/v2/lbaas/l7policies",
+      "status": 201,
+      "body_fields": {
+        "listener_id": "<http-listener>",
+        "action": "REDIRECT_TO_URL",
+        "position": 5,
+        "redirect_url": "https://moved.example.test:8443/literal"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/v2/lbaas/l7policies/<literal-location>",
+      "status": 200,
+      "readback_fields": {
+        "listener_id": "<http-listener>",
+        "action": "REDIRECT_TO_URL",
+        "position": 5,
+        "redirect_prefix": null,
+        "redirect_url": "https://moved.example.test:8443/literal",
+        "redirect_http_code": 302,
+        "redirect_pool_id": null
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/v2/lbaas/l7policies/<literal-location>/rules",
+      "status": 201,
+      "body_fields": {
+        "type": "PATH",
+        "compare_type": "EQUAL_TO",
+        "value": "/literal"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/v2/lbaas/l7policies/<literal-location>/rules/<literal-location:PATH>",
+      "status": 200,
+      "readback_fields": {
+        "type": "PATH",
+        "compare_type": "EQUAL_TO",
+        "value": "/literal",
+        "invert": false
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/v2/lbaas/l7policies",
+      "status": 201,
+      "body_fields": {
+        "listener_id": "<http-listener>",
+        "action": "REDIRECT_PREFIX",
+        "position": 6,
+        "redirect_prefix": "https://moved.example.test"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/v2/lbaas/l7policies/<scheme-default-port>",
+      "status": 200,
+      "readback_fields": {
+        "listener_id": "<http-listener>",
+        "action": "REDIRECT_PREFIX",
+        "position": 6,
+        "redirect_prefix": "https://moved.example.test",
+        "redirect_url": null,
+        "redirect_http_code": 302,
+        "redirect_pool_id": null
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/v2/lbaas/l7policies/<scheme-default-port>/rules",
+      "status": 201,
+      "body_fields": {
+        "type": "PATH",
+        "compare_type": "EQUAL_TO",
+        "value": "/default-port"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/v2/lbaas/l7policies/<scheme-default-port>/rules/<scheme-default-port:PATH>",
+      "status": 200,
+      "readback_fields": {
+        "type": "PATH",
+        "compare_type": "EQUAL_TO",
+        "value": "/default-port",
+        "invert": false
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/v2/lbaas/l7policies",
+      "status": 201,
+      "body_fields": {
+        "listener_id": "<http-listener>",
+        "action": "REDIRECT_PREFIX",
+        "position": 7,
+        "redirect_prefix": "http://example.org:58175"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/v2/lbaas/l7policies/<listener-scheme-and-port>",
+      "status": 200,
+      "readback_fields": {
+        "listener_id": "<http-listener>",
+        "action": "REDIRECT_PREFIX",
+        "position": 7,
+        "redirect_prefix": "http://example.org:58175",
+        "redirect_url": null,
+        "redirect_http_code": 302,
+        "redirect_pool_id": null
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/v2/lbaas/l7policies/<listener-scheme-and-port>/rules",
+      "status": 201,
+      "body_fields": {
+        "type": "PATH",
+        "compare_type": "EQUAL_TO",
+        "value": "/hostname-redirect"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/v2/lbaas/l7policies/<listener-scheme-and-port>/rules/<listener-scheme-and-port:PATH>",
+      "status": 200,
+      "readback_fields": {
+        "type": "PATH",
+        "compare_type": "EQUAL_TO",
+        "value": "/hostname-redirect",
+        "invert": false
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/v2/lbaas/l7policies",
+      "status": 201,
+      "body_fields": {
+        "listener_id": "<http-listener>",
+        "action": "REDIRECT_TO_POOL",
+        "position": 8,
+        "redirect_pool_id": "<echo-pool>"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/v2/lbaas/l7policies/<sibling-catchall>",
+      "status": 200,
+      "readback_fields": {
+        "listener_id": "<http-listener>",
+        "action": "REDIRECT_TO_POOL",
+        "position": 8,
+        "redirect_prefix": null,
+        "redirect_url": null,
+        "redirect_http_code": null,
+        "redirect_pool_id": "<echo-pool>"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/v2/lbaas/l7policies/<sibling-catchall>/rules",
+      "status": 201,
+      "body_fields": {
+        "type": "PATH",
+        "compare_type": "STARTS_WITH",
+        "value": "/"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/v2/lbaas/l7policies/<sibling-catchall>/rules/<sibling-catchall:PATH>",
+      "status": 200,
+      "readback_fields": {
+        "type": "PATH",
+        "compare_type": "STARTS_WITH",
+        "value": "/",
+        "invert": false
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/v2/lbaas/l7policies",
+      "status": 400,
+      "body_fields": {
+        "listener_id": "<http-listener>",
+        "action": "REDIRECT_PREFIX",
+        "redirect_prefix": "/"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/v2/lbaas/l7policies",
+      "status": 400,
+      "body_fields": {
+        "listener_id": "<http-listener>",
+        "action": "REDIRECT_PREFIX",
+        "redirect_prefix": "https://"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/v2/lbaas/l7policies",
+      "status": 400,
+      "body_fields": {
+        "listener_id": "<http-listener>",
+        "action": "REDIRECT_TO_URL",
+        "redirect_url": "/"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/v2/lbaas/l7policies/<redirect-prefix-children>",
+      "status": 200,
+      "body_fields": {
+        "admin_state_up": false
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/v2/lbaas/l7policies/<redirect-prefix-children>",
+      "status": 200,
+      "readback_fields": {
+        "admin_state_up": false
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/v2/lbaas/l7policies/<sibling-catchall>",
+      "status": 200,
+      "body_fields": {
+        "admin_state_up": false
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/v2/lbaas/l7policies/<sibling-catchall>",
+      "status": 200,
+      "readback_fields": {
+        "admin_state_up": false
+      }
+    }
+  ],
+  "requests": [
+    {
+      "case": "prefix apex with query",
+      "request_target": "/legacy?q=One",
+      "host": "MiXeD.source.example.test:9123",
+      "observed": {
+        "status": 302,
+        "location": "https://moved.example.test:8443/legacy?q=One"
+      }
+    },
+    {
+      "case": "prefix with slash",
+      "request_target": "/legacy/",
+      "host": "MiXeD.source.example.test:9123",
+      "observed": {
+        "status": 302,
+        "location": "https://moved.example.test:8443/legacy/"
+      }
+    },
+    {
+      "case": "mixed case and percent encoding in path and query",
+      "request_target": "/legacy/Ab%2fCd%3F?q=%2f+One&Q=%2B&q=Second",
+      "host": "different.source.example.test:9010",
+      "observed": {
+        "status": 302,
+        "location": "https://moved.example.test:8443/legacy/Ab%2fCd%3F?q=%2f+One&Q=%2B&q=Second"
+      }
+    },
+    {
+      "case": "Exact uses path independent of query and Host port",
+      "request_target": "/permanent?x=%2F",
+      "host": "MiXeD.source.example.test:9123",
+      "observed": {
+        "status": 301,
+        "location": "https://moved.example.test:8443/permanent?x=%2F"
+      }
+    },
+    {
+      "case": "Exact trailing slash falls through",
+      "request_target": "/permanent/",
+      "host": "MiXeD.source.example.test:9123",
+      "observed": {
+        "status": 200,
+        "location": null,
+        "echo": "sibling /permanent/"
+      }
+    },
+    {
+      "case": "different Host falls through",
+      "request_target": "/permanent",
+      "host": "unmatched.example.test",
+      "observed": {
+        "status": 200,
+        "location": null,
+        "echo": "sibling /permanent"
+      }
+    },
+    {
+      "case": "PathPrefix requires a segment boundary",
+      "request_target": "/legacyish?x=%2F",
+      "host": "MiXeD.source.example.test:9123",
+      "observed": {
+        "status": 200,
+        "location": null,
+        "echo": "sibling /legacyish?x=%2F"
+      }
+    },
+    {
+      "case": "PathPrefix is case sensitive",
+      "request_target": "/Legacy/Ab",
+      "host": "MiXeD.source.example.test:9123",
+      "observed": {
+        "status": 200,
+        "location": null,
+        "echo": "sibling /Legacy/Ab"
+      }
+    },
+    {
+      "case": "URL action loses the query even on Exact",
+      "request_target": "/literal?x=one",
+      "host": "MiXeD.source.example.test:9123",
+      "observed": {
+        "status": 302,
+        "location": "https://moved.example.test:8443/literal"
+      },
+      "gateway_expected": {
+        "status": 302,
+        "location": "https://moved.example.test:8443/literal?x=one"
+      }
+    },
+    {
+      "case": "known scheme supplies omitted default port",
+      "request_target": "/default-port",
+      "host": "MiXeD.source.example.test:9123",
+      "observed": {
+        "status": 302,
+        "location": "https://moved.example.test/default-port"
+      }
+    },
+    {
+      "case": "listener supplies omitted scheme and port",
+      "request_target": "/hostname-redirect",
+      "host": "MiXeD.source.example.test:9123",
+      "observed": {
+        "status": 302,
+        "location": "http://example.org:58175/hostname-redirect"
+      }
+    },
+    {
+      "case": "frontend redirect preempts earlier Exact forwarding",
+      "request_target": "/legacy/stay",
+      "host": "MiXeD.source.example.test:9123",
+      "observed": {
+        "status": 302,
+        "location": "https://moved.example.test:8443/legacy/stay"
+      },
+      "gateway_expected": {
+        "status": 200,
+        "location": null,
+        "echo": "sibling /legacy/stay"
+      }
+    },
+    {
+      "case": "earlier Exact forwarding with both overlapping policies disabled",
+      "request_target": "/legacy/stay",
+      "host": "MiXeD.source.example.test:9123",
+      "observed": {
+        "status": 200,
+        "location": null,
+        "echo": "sibling /legacy/stay"
+      }
+    }
+  ],
+  "listener_port": 58175,
+  "amphora_frontend_rules": [
+    "acl <higher-exact-forwarding:PATH> path -m str /legacy/stay",
+    "use_backend <echo-pool>:<http-listener> if <higher-exact-forwarding:PATH>",
+    "acl <redirect-prefix-apex:PATH> path -m str /legacy",
+    "redirect code 302 prefix https://moved.example.test:8443 if <redirect-prefix-apex:PATH>",
+    "acl <redirect-prefix-children:PATH> path -m beg /legacy/",
+    "redirect code 302 prefix https://moved.example.test:8443 if <redirect-prefix-children:PATH>",
+    "acl <redirect-exact-301:PATH> path -m str /permanent",
+    "acl <redirect-exact-301:HOST_NAME> req.hdr(host) -i -m reg ^mixed\\\\.source\\\\.example\\\\.test(:[0-9]+)?$",
+    "redirect code 301 prefix https://moved.example.test:8443 if <redirect-exact-301:PATH> <redirect-exact-301:HOST_NAME>",
+    "acl <literal-location:PATH> path -m str /literal",
+    "redirect code 302 location https://moved.example.test:8443/literal if <literal-location:PATH>",
+    "acl <scheme-default-port:PATH> path -m str /default-port",
+    "redirect code 302 prefix https://moved.example.test if <scheme-default-port:PATH>",
+    "acl <listener-scheme-and-port:PATH> path -m str /hostname-redirect",
+    "redirect code 302 prefix http://example.org:58175 if <listener-scheme-and-port:PATH>",
+    "acl <sibling-catchall:PATH> path -m beg /",
+    "use_backend <echo-pool>:<http-listener> if <sibling-catchall:PATH>"
+  ],
+  "probe_passed": true
+}

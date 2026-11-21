@@ -8,7 +8,11 @@ For UDP, a public listener update selected different pools on the same VIP. The 
 
 Stock Octavia accepted three distinct UDP ports on one load balancer and allowed the same pool to be the default on two listeners. Removing one association preserved the other listeners’ rendered configurations. In a separate API check, deleting a pool still attached to two UDP listeners returned HTTP 204. A subsequent GET returned 404 for the pool and null default pool IDs for both listeners. The controller validates both the listener’s default pool and the pool’s reverse listener list before removing a shared pool. An existing Gateway keeps its original listener and pool when it gains a second UDP port. The local withdrawal lifecycle preserved the sibling on both channels. On Experimental the first port missed its deadline on disk. The same case passed on a single cluster with its etcd data on tmpfs. [Per-port counts](udp-upstream.md#experimental-run-with-isolated-etcd-storage) [Multiport traffic, drift and cleanup](udp-upstream.md#multiple-udp-listeners-on-one-gateway) · [Earlier stock API evidence](udp-upstream.md#weighted-endpoint-results)
 
+The public Octavia API can attach one TCP pool to several distinct TCP ports on one VIP. The stock loopback probes exercised detachment and deletion while a sibling used the shared pool, including a configuration reload through the Amphora agent routes. The Kubernetes Endpoint-mode runs exercise a Gateway-wide parent and exact `port` and `sectionName` selection. [Stock TCP API and reload probes](stock-tcp.md#reproduce-the-multiple-listener-probes) · [Upstream multiport cases](tcp-upstream.md#multiple-tcp-listeners-on-one-gateway)
+
 For TCP in Endpoint mode, the unmodified weight case sent 350, 150 and 0 of 500 new connections to three Services on each local channel. The default NodePort mode continues to select one Service. [Upstream connection counts](tcp-upstream.md#weighted-tcp-connections)
+
+A fixed-destination HTTP redirect can preserve the path and query using the stock `REDIRECT_PREFIX` action. A broad redirect also intercepted an Exact forwarding rule on the same listener even when the forwarding policy had a higher Octavia position. [Provider requests, paths and precedence](stock-http-redirect.md)
 
 ## Verified versions
 
