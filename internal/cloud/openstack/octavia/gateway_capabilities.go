@@ -28,6 +28,7 @@ const (
 	GatewayCapabilityFixedHTTPResponses      = "fixed_http_responses_v1"
 	GatewayCapabilityWeightedHTTPTargets     = "weighted_http_targets_v1"
 	GatewayCapabilityRequestHeaderOperations = "request_header_operations_v1"
+	GatewayCapabilityBackendH2C              = "backend_h2c_v1"
 )
 
 // MissingGatewayCapability reports an explicit negative capability discovery.

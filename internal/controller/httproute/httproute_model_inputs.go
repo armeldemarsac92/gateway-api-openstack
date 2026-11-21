@@ -17,6 +17,7 @@ limitations under the License.
 package httproute
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"maps"
@@ -45,7 +46,8 @@ type routeModelInputs struct {
 
 type routeGraphAdmission struct {
 	bindings   []routeGraphBinding
-	eligible   map[types.NamespacedName]routeGraphCandidate
+	eligible   map[routeObjectKey]routeGraphCandidate
+	conflicts  map[routeObjectKey]bool
 	active     []gatewayv1.HTTPRoute
 	namespaces []corev1.Namespace
 }
@@ -55,14 +57,30 @@ type routeGraphCandidate struct {
 	section                gatewayv1.SectionName
 }
 
+type routeProfileCandidate struct {
+	route     *gatewayv1.HTTPRoute
+	listener  *gatewayv1.Listener
+	namespace types.UID
+}
+
+type routeObjectKey struct {
+	kind gatewayv1.Kind
+	key  types.NamespacedName
+}
+
+func routeKey(route *gatewayv1.HTTPRoute) routeObjectKey {
+	return routeObjectKey{kind: model.HTTPProfileRouteKind(route), key: client.ObjectKeyFromObject(route)}
+}
+
 func (r *Reconciler) observeRouteGraphAdmission(ctx context.Context, gateway *gatewayv1.Gateway, routes []gatewayv1.HTTPRoute, requested *gatewayv1.HTTPRoute) (routeGraphAdmission, error) {
 	identity := controller.GatewayIdentity(r.Config, gateway)
 	http, _ := gatewaycontroller.HTTPRouteListeners(r.Config, gateway)
 	admission := routeGraphAdmission{
 		bindings: r.routeGraphBindings(routes, identity),
-		eligible: make(map[types.NamespacedName]routeGraphCandidate),
+		eligible: make(map[routeObjectKey]routeGraphCandidate),
 	}
 	byName := make(map[string][]corev1.Namespace)
+	var candidatesForElection []routeProfileCandidate
 	for i := range routes {
 		route := &routes[i]
 		if !route.DeletionTimestamp.IsZero() || !r.structurallySupportedRoute(route) ||
@@ -94,16 +112,64 @@ func (r *Reconciler) observeRouteGraphAdmission(ctx context.Context, gateway *ga
 		if err != nil {
 			continue
 		}
-		candidate := routeGraphCandidate{routeUID: route.UID, section: selected.Name}
+		candidate := routeProfileCandidate{route: route, listener: selected}
 		if len(namespaces) != 0 && model.ObservesRouteNamespace(selected) {
-			candidate.namespaceUID = namespaces[0].UID
+			candidate.namespace = namespaces[0].UID
 		}
-		admission.eligible[client.ObjectKeyFromObject(route)] = candidate
-		if controller.RouteClaimsGateway(r.Config, route, identity) || requested != nil && route.UID == requested.UID && client.ObjectKeyFromObject(route) == client.ObjectKeyFromObject(requested) {
+		candidatesForElection = append(candidatesForElection, candidate)
+	}
+	admission.conflicts = electRouteProfiles(candidatesForElection)
+	for _, candidate := range candidatesForElection {
+		route := candidate.route
+		if admission.conflicts[routeKey(route)] {
+			continue
+		}
+		admission.eligible[routeKey(route)] = routeGraphCandidate{routeUID: route.UID, section: candidate.listener.Name, namespaceUID: candidate.namespace}
+		if controller.RouteClaimsGateway(r.Config, route, identity) || requested != nil && route.UID == requested.UID && routeKey(route) == routeKey(requested) {
 			admission.active = append(admission.active, *route)
 		}
 	}
 	return admission, nil
+}
+
+// A frontend cannot direct the same effective hostname to both route kinds
+// without allowing HTTPRoute fallbacks to consume unmatched RPCs. Elect the
+// oldest eligible Route, then namespace/name, as allowed by the GRPCRoute API.
+func electRouteProfiles(candidates []routeProfileCandidate) map[routeObjectKey]bool {
+	if !slices.ContainsFunc(candidates, func(candidate routeProfileCandidate) bool {
+		return model.HTTPProfileRouteKind(candidate.route) == model.GRPCRouteKind
+	}) {
+		return nil
+	}
+	slices.SortStableFunc(candidates, func(a, b routeProfileCandidate) int {
+		return cmp.Or(a.route.CreationTimestamp.Time.Compare(b.route.CreationTimestamp.Time),
+			cmp.Compare(a.route.Namespace, b.route.Namespace), cmp.Compare(a.route.Name, b.route.Name))
+	})
+	type hostProfile struct {
+		port gatewayv1.PortNumber
+		kind gatewayv1.Kind
+	}
+	accepted := make(map[hostProfile][]gatewayv1.Hostname)
+	conflicts := make(map[routeObjectKey]bool)
+	for _, candidate := range candidates {
+		// The attachment step ensures exactly one effective hostname.
+		host := gatewayv1.Hostname(model.IntersectHostnames(candidate.listener.Hostname, candidate.route.Spec.Hostnames)[0])
+		kind := model.HTTPProfileRouteKind(candidate.route)
+		peer := model.GRPCRouteKind
+		if kind == model.GRPCRouteKind {
+			peer = model.HTTPRouteKind
+		}
+		peerHosts := accepted[hostProfile{port: candidate.listener.Port, kind: peer}]
+		if slices.ContainsFunc(peerHosts, func(other gatewayv1.Hostname) bool {
+			return host == "" || other == "" || len(model.IntersectHostnames(&host, []gatewayv1.Hostname{other})) != 0
+		}) {
+			conflicts[routeKey(candidate.route)] = true
+			continue
+		}
+		profile := hostProfile{port: candidate.listener.Port, kind: kind}
+		accepted[profile] = append(accepted[profile], host)
+	}
+	return conflicts
 }
 
 func (r *Reconciler) collectGraphRouteModelInputs(ctx context.Context, gateway *gatewayv1.Gateway, routes []gatewayv1.HTTPRoute, requested *gatewayv1.HTTPRoute) (*routeModelInputs, error) {
@@ -125,9 +191,10 @@ func (r *Reconciler) validateGraphRouteModel(ctx context.Context, inputs *routeM
 		return err
 	}
 	if !maps.Equal(inputs.admission.eligible, current.eligible) ||
+		!maps.Equal(inputs.admission.conflicts, current.conflicts) ||
 		!slices.Equal(inputs.admission.bindings, current.bindings) ||
 		!slices.EqualFunc(inputs.admission.active, current.active, func(a, b gatewayv1.HTTPRoute) bool {
-			return a.UID == b.UID && a.Generation == b.Generation && a.CreationTimestamp.Equal(&b.CreationTimestamp) &&
+			return model.HTTPProfileRouteKind(&a) == model.HTTPProfileRouteKind(&b) && a.UID == b.UID && a.Generation == b.Generation && a.CreationTimestamp.Equal(&b.CreationTimestamp) &&
 				equality.Semantic.DeepEqual(a.Spec, b.Spec)
 		}) {
 		return errHTTPRouteChanged
@@ -143,6 +210,7 @@ func (r *Reconciler) collectRouteModelInputs(ctx context.Context, reader client.
 		return nil, err
 	}
 	input.RequestHeaderModifier = r.Config.RequestHeaderModifier
+	input.BackendH2C = r.Config.BackendH2C
 	if r.Config.OperatorHTTPS && slices.ContainsFunc(gateway.Spec.Listeners, func(l gatewayv1.Listener) bool { return l.Protocol == gatewayv1.HTTPSProtocolType }) {
 		listeners, err := gatewaycontroller.HTTPRouteListeners(r.Config, gateway)
 		if err != nil {
@@ -171,8 +239,8 @@ func (inputs *routeModelInputs) validateBackends(ctx context.Context, reader cli
 		for _, rule := range route.Spec.Rules {
 			for _, ref := range rule.BackendRefs {
 				key, supported := model.BackendServiceReference(route.Namespace, ref.BackendObjectReference)
-				if supported && model.BackendReferenceAllowed(route.Namespace, key, inputs.input.ReferenceGrants) !=
-					model.BackendReferenceAllowed(route.Namespace, key, current.ReferenceGrants) {
+				if supported && model.BackendReferenceAllowedFor(model.HTTPProfileRouteKind(&route), route.Namespace, key, inputs.input.ReferenceGrants) !=
+					model.BackendReferenceAllowedFor(model.HTTPProfileRouteKind(&route), route.Namespace, key, current.ReferenceGrants) {
 					return errHTTPRouteChanged
 				}
 			}

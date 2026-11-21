@@ -151,6 +151,18 @@ func supportedRouteKinds(kind gatewayv1.Kind) []gatewayv1.RouteGroupKind {
 	return []gatewayv1.RouteGroupKind{{Group: &group, Kind: kind}}
 }
 
+func listenerSupportedRouteKinds(config controller.Config, listener gatewayv1.Listener) []gatewayv1.RouteGroupKind {
+	var result []gatewayv1.RouteGroupKind
+	kind := listenerRouteKind(listener.Protocol)
+	if kind != "" && listenerAllowsRouteKind(listener, kind) {
+		result = append(result, supportedRouteKinds(kind)...)
+	}
+	if listener.Protocol == gatewayv1.HTTPProtocolType && config.GRPCExactMethodEnabled() && listenerAllowsRouteKind(listener, model.GRPCRouteKind) {
+		result = append(result, supportedRouteKinds(model.GRPCRouteKind)...)
+	}
+	return result
+}
+
 func existingListenerConditions(gateway *gatewayv1.Gateway, listenerName gatewayv1.SectionName) []metav1.Condition {
 	return existingListenerConditionsFrom(gateway.Status.Listeners, listenerName)
 }
@@ -459,7 +471,7 @@ func (r *Reconciler) setGatewayListenerStatuses(
 	for _, listener := range listeners {
 		status := gatewayv1.ListenerStatus{
 			Name:           listener.Name,
-			SupportedKinds: supportedRouteKinds(listenerRouteKind(listener.Protocol)),
+			SupportedKinds: listenerSupportedRouteKinds(r.Config, *listener),
 			AttachedRoutes: counts[listener.Name],
 			Conditions:     existingListenerConditions(gateway, listener.Name),
 		}
@@ -495,7 +507,14 @@ func (r *Reconciler) attachedRouteCounts(ctx context.Context, gateway *gatewayv1
 		}
 		refs, parents, _ := controller.RouteParents(route)
 		routeNamespace := route.GetNamespace()
-		http, isHTTP := route.(*gatewayv1.HTTPRoute)
+		var hostnames []gatewayv1.Hostname
+		var httpKind gatewayv1.Kind
+		switch typed := route.(type) {
+		case *gatewayv1.HTTPRoute:
+			hostnames, httpKind = typed.Spec.Hostnames, model.HTTPRouteKind
+		case *gatewayv1.GRPCRoute:
+			hostnames, httpKind = typed.Spec.Hostnames, model.GRPCRouteKind
+		}
 		counted := make(map[gatewayv1.SectionName]bool, len(listeners))
 		for _, parentStatus := range parents {
 			accepted := meta.FindStatusCondition(parentStatus.Conditions, string(gatewayv1.RouteConditionAccepted))
@@ -510,7 +529,10 @@ func (r *Reconciler) attachedRouteCounts(ctx context.Context, gateway *gatewayv1
 				if !routeParentStatusTargetsListener(parentStatus, routeNamespace, gateway, listener, r.Config.ControllerName) {
 					continue
 				}
-				if isHTTP && len(model.IntersectHostnames(listener.Hostname, http.Spec.Hostnames)) == 0 {
+				if httpKind == model.GRPCRouteKind && listener.Protocol != gatewayv1.HTTPProtocolType {
+					continue
+				}
+				if httpKind != "" && (!listenerAllowsRouteKind(*listener, httpKind) || len(model.IntersectHostnames(listener.Hostname, hostnames)) == 0) {
 					continue
 				}
 				if _, observed := namespaces[routeNamespace]; !observed && model.ObservesRouteNamespace(listener) {
@@ -532,7 +554,7 @@ func (r *Reconciler) attachedRouteCounts(ctx context.Context, gateway *gatewayv1
 			}
 			// An accepted status can predate a Gateway edit. A parent that
 			// now spans multiple HTTP sections is outside the stock profile.
-			if isHTTP && len(matching) != 1 {
+			if httpKind != "" && len(matching) != 1 {
 				continue
 			}
 			for _, listener := range matching {
@@ -560,6 +582,15 @@ func (r *Reconciler) attachedRouteCounts(ctx context.Context, gateway *gatewayv1
 	}
 	if err := meta.EachListItem(routes, countRoute); err != nil {
 		return nil, err
+	}
+	if r.Config.GRPCExactMethodEnabled() && index == controller.IndexHTTPRouteByStatusGateway {
+		grpc := &gatewayv1.GRPCRouteList{}
+		if err := r.List(ctx, grpc, client.MatchingFields{index: gatewayKey}); err != nil {
+			return nil, err
+		}
+		if err := meta.EachListItem(grpc, countRoute); err != nil {
+			return nil, err
+		}
 	}
 	return counts, nil
 }

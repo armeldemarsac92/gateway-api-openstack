@@ -194,9 +194,10 @@ func (f *memberBurstFixture) runBurst(t *testing.T, source string, events, wantM
 		t.Fatalf("reconciles=%d, provider calls=%d, member changes=%d, want %d/%d/%d", reconciles, f.provider.calls, f.provider.changes, wantReconciles, wantReconciles, wantChanges)
 	}
 	reconcileGets, reconcileLists := f.reader.gets-mapGets, f.reader.lists-mapLists
-	// The complete live fences currently use 25 Get and 11 List calls per
-	// reconcile. Keep a small ceiling above that baseline as the fixture grows.
-	if reconcileGets > reconciles*30 || reconcileLists > reconciles*12 {
+	// The complete live fences also list GRPCRoutes during binding, writer
+	// observation, and validation. Keep that inventory even when h2c is off:
+	// a previously bound GRPCRoute may still own policies and pools.
+	if reconcileGets > reconciles*30 || reconcileLists > reconciles*14 {
 		t.Fatalf("reconciliation exceeded read budget: gets=%d, lists=%d, reconciles=%d", reconcileGets, reconcileLists, reconciles)
 	}
 	for key, uid := range f.routes {

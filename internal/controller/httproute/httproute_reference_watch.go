@@ -41,7 +41,7 @@ func (r *Reconciler) enqueueHTTPRoutesForReferenceGrant(ctx context.Context, obj
 	var consumers []gatewayv1.HTTPRoute
 	observed := make(map[types.NamespacedName]struct{})
 	for _, from := range grant.Spec.From {
-		if from.Group != gatewayv1.GroupName || from.Kind != "HTTPRoute" || string(from.Namespace) == grant.Namespace {
+		if from.Group != gatewayv1.GroupName || from.Kind != r.kind() || string(from.Namespace) == grant.Namespace {
 			continue
 		}
 		for _, to := range grant.Spec.To {
@@ -59,12 +59,12 @@ func (r *Reconciler) enqueueHTTPRoutesForReferenceGrant(ctx context.Context, obj
 				continue
 			}
 			observed[query] = struct{}{}
-			var routes gatewayv1.HTTPRouteList
-			if err := r.List(ctx, &routes, client.InNamespace(query.Namespace), client.MatchingFields{field: value}); err != nil {
+			routes, err := r.listRoutes(ctx, client.InNamespace(query.Namespace), client.MatchingFields{field: value})
+			if err != nil {
 				log.FromContext(ctx).Error(err, "Could not list HTTPRoutes for ReferenceGrant", "referenceGrant", client.ObjectKeyFromObject(grant))
 				continue
 			}
-			consumers = append(consumers, routes.Items...)
+			consumers = append(consumers, routes...)
 		}
 	}
 	return r.enqueueHTTPRouteConsumers(ctx, consumers)
@@ -75,16 +75,16 @@ func (r *Reconciler) enqueueHTTPRoutesForNamespace(ctx context.Context, object c
 	if !ok {
 		return nil
 	}
-	var routes gatewayv1.HTTPRouteList
 	// The cache's namespace index bounds this read to possible consumers of the
 	// changed namespace. Parent lookups then avoid scanning all Gateways.
-	if err := r.List(ctx, &routes, client.InNamespace(namespace.Name)); err != nil {
+	routes, err := r.listRoutes(ctx, client.InNamespace(namespace.Name))
+	if err != nil {
 		log.FromContext(ctx).Error(err, "Could not list HTTPRoutes for Namespace", "namespace", namespace.Name)
 		return nil
 	}
 	gateways := make(map[types.NamespacedName]*gatewayv1.Gateway)
 	var consumers []gatewayv1.HTTPRoute
-	for _, route := range routes.Items {
+	for _, route := range routes {
 		for _, parent := range route.Spec.ParentRefs {
 			if !controller.IsGatewayParentRef(parent) {
 				continue

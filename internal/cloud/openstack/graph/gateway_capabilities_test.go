@@ -361,3 +361,133 @@ func TestMissingHeaderCapabilityDoesNotBlockSiblingMembers(t *testing.T) {
 		t.Fatalf("expected one effective provider probe per snapshot, got %d", probes)
 	}
 }
+
+func TestH2CPoolWritesRequireEffectiveProviderCapability(t *testing.T) {
+	for _, tc := range []struct {
+		name                           string
+		capabilities                   []string
+		h2c, probe, write, unsupported bool
+	}{
+		{name: "stock pool", write: true},
+		{name: "provider lacks h2c", capabilities: []string{}, h2c: true, probe: true, unsupported: true},
+		{name: "provider discovery unavailable", h2c: true, probe: true},
+		{name: "provider supports h2c", capabilities: []string{"backend_h2c_v1"}, h2c: true, probe: true, write: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var probed, wrote bool
+			client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/lbaas/providers/amphora-region-alias/gateway_capabilities":
+					probed = true
+					if tc.capabilities == nil {
+						w.WriteHeader(http.StatusNotFound)
+						return
+					}
+					safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": tc.capabilities})
+				case r.Method == http.MethodPost && r.URL.Path == "/lbaas/pools":
+					wrote = true
+					var payload struct {
+						Pool struct {
+							Protocol   string `json:"protocol"`
+							BackendH2C *bool  `json:"backend_h2c"`
+						} `json:"pool"`
+					}
+					err := json.NewDecoder(r.Body).Decode(&payload)
+					if err != nil || payload.Pool.Protocol != "HTTP" ||
+						tc.h2c && (payload.Pool.BackendH2C == nil || !*payload.Pool.BackendH2C) ||
+						!tc.h2c && payload.Pool.BackendH2C != nil {
+						t.Errorf("unexpected pool request %#v, error %v", payload, err)
+					}
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusCreated)
+					_, _ = w.Write([]byte(`{"pool":{"id":"pool"}}`))
+				default:
+					t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			cfg := ProviderConfig{BackendH2C: true}
+			p := NewProvider(ServiceClients{LoadBalancer: client, ProjectID: "project-a", Region: "selected-region"}, cfg)
+			spec := completeGraphSpec(safetyTestIdentity(t))
+			spec.Routes[0].Spec.BackendH2C = tc.h2c
+			desired, err := p.buildDesiredGatewayGraph(spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lb := safetyObservedLoadBalancer()
+			lb.Provider = "amphora-region-alias"
+			actual := observedGatewayGraph{loadBalancer: lb, state: cloud.GatewayState{LoadBalancerID: lb.ID}}
+			result := cloud.GatewayGraphResult{Routes: []cloud.RouteGraphResult{{}}}
+			plan := []graphMutation{{kind: graphRouteMutation, route: routeMutation{kind: routeMutationCreatePool}}}
+			step, prepared, err := p.prepareNextGraphMutation(t.Context(), desired, actual, plan, &result)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if prepared {
+				if err := p.executeGraphMutation(t.Context(), desired, actual, step); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if prepared != tc.write || wrote != tc.write || probed != tc.probe {
+				t.Fatalf("probed=%t wrote=%t, want probed=%t wrote=%t", probed, wrote, tc.probe, tc.write)
+			}
+			route := result.Routes[0].Result
+			if (route.UnsupportedBackendProtocol != "") != tc.unsupported ||
+				!prepared && route.Outcome.State != cloud.OutcomeProgressing {
+				t.Fatalf("unexpected provider route outcome %#v", route)
+			}
+		})
+	}
+}
+
+func TestH2CPoolTransportChangeWithdrawsOldMembersBeforeUpdate(t *testing.T) {
+	route, observed := convergedRoutePlanFixture()
+	observed.members[0].ProvisioningStatus = "ACTIVE"
+	observed.pool.ProvisioningStatus = "ACTIVE"
+
+	var writes int
+	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/lbaas/pools":
+			safetyWriteJSON(t, w, map[string]any{"pools": []map[string]any{{"id": "pool-1", "protocol": "HTTP", "backend_h2c": true}}})
+		case r.Method == http.MethodGet && r.URL.Path == "/lbaas/providers/amphora/gateway_capabilities":
+			safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": []string{"backend_h2c_v1"}})
+		case r.Method == http.MethodPut && r.URL.Path == "/lbaas/pools/pool-1":
+			writes++
+			var body map[string]map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["pool"]["backend_h2c"] != false {
+				t.Errorf("h2c must be explicitly cleared: body = %#v, error %v", body, err)
+			}
+			safetyWriteJSON(t, w, map[string]any{"pool": map[string]any{"id": "pool-1"}})
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	p := NewProvider(ServiceClients{LoadBalancer: client}, ProviderConfig{BackendH2C: true})
+	desired, actual := fixedHTTPPlanFixture(route, observed)
+	desired.protocol = cloud.ListenerProtocolHTTP
+	actual.loadBalancer.Provider = "amphora"
+	inventory, err := p.listGatewayPoolInventory(t.Context(), actual.loadBalancer)
+	if err != nil || len(inventory.Items) != 1 || !inventory.BackendH2C["pool-1"] {
+		t.Fatalf("pool inventory did not observe its transport: %#v, error %v", inventory, err)
+	}
+	actual.routes[0].backendH2C = inventory.BackendH2C["pool-1"]
+	plan, _, err := p.buildGatewayGraphPlan(desired, actual)
+	if err != nil || len(plan) == 0 || plan[0].route.kind != routeMutationDisableMember {
+		t.Fatalf("old protocol must stop serving before the update: %#v, error %v", plan, err)
+	}
+
+	actual.routes[0].members[0].AdminStateUp = false
+	plan, _, err = p.buildGatewayGraphPlan(desired, actual)
+	if err != nil || len(plan) == 0 || plan[0].route.kind != routeMutationUpdatePool {
+		t.Fatalf("withdrawn backend must update its pool before re-enabling members: %#v, error %v", plan, err)
+	}
+	step, err := p.prepareGraphMutation(t.Context(), desired, actual, plan[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.executeGraphMutation(t.Context(), desired, actual, step); err != nil || writes != 1 {
+		t.Fatalf("pool update writes = %d, error %v", writes, err)
+	}
+}

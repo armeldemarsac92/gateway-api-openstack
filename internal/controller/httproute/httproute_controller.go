@@ -61,6 +61,7 @@ type cachedRouteDecision struct {
 // Reconciler owns the route-scoped Octavia resources for the current
 // HTTP forwarding profile.
 type Reconciler struct {
+	routeKind gatewayv1.Kind
 	// Client reads and patches cached Kubernetes objects.
 	client.Client
 	// Writer rebuilds and reconciles the complete Gateway graph.
@@ -77,9 +78,9 @@ type Reconciler struct {
 
 // Reconcile evaluates one HTTPRoute and converges the route resources in its
 // bound Gateway graph.
-// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;watch;update;patch
-// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes/finalizers,verbs=update
+// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes;grpcroutes,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes/status;grpcroutes/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes/finalizers;grpcroutes/finalizers,verbs=update
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gateways;gatewayclasses,verbs=get;list;watch
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=referencegrants,verbs=list;watch
 // +kubebuilder:rbac:groups="",resources=services;nodes;namespaces,verbs=get;list;watch
@@ -89,7 +90,7 @@ func (r *Reconciler) Reconcile(
 	ctx context.Context,
 	req ctrl.Request,
 ) (result ctrl.Result, retErr error) {
-	logger := log.FromContext(ctx).WithValues("httpRoute", req.NamespacedName)
+	logger := log.FromContext(ctx).WithValues("route", req.NamespacedName, "kind", r.kind())
 	ctx = log.IntoContext(ctx, logger)
 
 	scope, responsible, err := r.newHTTPRouteScope(ctx, req)
@@ -183,6 +184,13 @@ func (r *Reconciler) validateCachedRouteDecision(
 	decision cachedRouteDecision,
 ) (cachedRouteDecision, error) {
 	decision.parent = parent
+	if model.HTTPProfileRouteKind(route) == model.GRPCRouteKind {
+		if _, err := r.validateRouteStructure(route); err != nil {
+			decision.disposition = cachedRouteDetach
+			decision.statusUpdates = []parentStatusUpdate{{parent: parent.ref, status: statusForRouteBuildError(err)}}
+			return decision, nil
+		}
+	}
 	http, _ := gatewaycontroller.HTTPRouteListeners(r.Config, parent.gateway)
 	candidates, parentErr := routeParentCandidates(route, parent, http)
 	validationErr := parentErr
@@ -336,6 +344,11 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 		return ctrl.Result{}, fmt.Errorf("invalid HTTPRoute binding state %d", graphResult.bindingState)
 	}
 	if graphResult.Outcome.State == cloud.OutcomeProgressing {
+		if graphResult.backendDiagnostic.Reason == "" && graphResult.UnsupportedBackendProtocol != "" {
+			graphResult.backendDiagnostic = model.Diagnostic{
+				Reason: string(gatewayv1.RouteReasonUnsupportedProtocol), Message: graphResult.UnsupportedBackendProtocol,
+			}
+		}
 		if !graphResult.ObservationDeferred || r.currentRouteProgrammedCondition(httpRoute, parent.ref) == nil ||
 			!r.currentBackendResolution(httpRoute, parent.ref, graphResult.backendDiagnostic) {
 			message := controller.ProviderProgressMessage(graphResult.Outcome, "Octavia resources for the HTTPRoute are still progressing")

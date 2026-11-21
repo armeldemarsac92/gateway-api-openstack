@@ -42,9 +42,9 @@ func Compile(input Input) (Gateway, error) {
 	seenRoutes := make(map[string]bool, len(input.Routes))
 	for i := range input.Routes {
 		route := &input.Routes[i]
-		key := route.Namespace + "/" + route.Name
+		key := string(HTTPProfileRouteKind(route)) + "/" + route.Namespace + "/" + route.Name
 		if seenRoutes[key] {
-			return Gateway{}, fmt.Errorf("duplicate HTTPRoute input %s", key)
+			return Gateway{}, fmt.Errorf("duplicate route input %s", key)
 		}
 		seenRoutes[key] = true
 		var parents []int
@@ -108,7 +108,8 @@ func compileListeners(gateway *gatewayv1.Gateway, operatorHTTPS bool) []Listener
 		}
 		if listener.AllowedRoutes != nil {
 			for _, kind := range listener.AllowedRoutes.Kinds {
-				if kind.Kind != "HTTPRoute" || kind.Group != nil && *kind.Group != gatewayv1.GroupName {
+				if !((kind.Kind == HTTPRouteKind || kind.Kind == GRPCRouteKind && listener.Protocol == gatewayv1.HTTPProtocolType) &&
+					(kind.Group == nil || *kind.Group == gatewayv1.GroupName)) {
 					compiled.Diagnostics = append(compiled.Diagnostics, Diagnostic{
 						Condition: string(gatewayv1.ListenerConditionResolvedRefs), Reason: string(gatewayv1.ListenerReasonInvalidRouteKinds),
 						Message: "listener allowedRoutes includes a kind not supported by the HTTP compiler",

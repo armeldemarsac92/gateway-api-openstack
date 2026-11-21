@@ -79,7 +79,7 @@ func (r *Reconciler) bindRouteFromSnapshot(
 			*route = *desired
 			return nil
 		}
-		if err := r.Patch(ctx, desired, controller.OptimisticMergeFrom(base)); err != nil {
+		if err := r.patchRoute(ctx, desired, base, false); err != nil {
 			return err
 		}
 		bindingStored = true
@@ -109,7 +109,7 @@ func (r *Reconciler) getRouteBindingWithReader(
 	isDeleting bool,
 ) (*gatewayv1.HTTPRoute, cloud.Identity, bool, error) {
 	current := &gatewayv1.HTTPRoute{}
-	if err := reader.Get(ctx, routeKey, current); err != nil {
+	if err := r.readRoute(ctx, reader, routeKey, current); err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil, cloud.Identity{}, false, nil
 		}
@@ -157,7 +157,7 @@ func (r *Reconciler) clearStoredRouteBinding(
 			*route = *current
 			return nil
 		}
-		if err := r.Patch(ctx, current, controller.OptimisticMergeFrom(base)); err != nil {
+		if err := r.patchRoute(ctx, current, base, false); err != nil {
 			return client.IgnoreNotFound(err)
 		}
 		*route = *current

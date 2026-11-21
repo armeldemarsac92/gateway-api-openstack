@@ -63,6 +63,7 @@ type observedRouteRule struct {
 
 type observedRouteGraph struct {
 	pool                   *pools.Pool
+	backendH2C             bool
 	members                []pools.Member
 	memberBackupUnreported map[string]struct{}
 	memberAdminUnreported  map[string]struct{}
@@ -265,14 +266,15 @@ func (p *Provider) observeRouteGraphs(ctx context.Context, owners []routeGraphOw
 }
 
 func (p *Provider) observeRouteGraphsWithListeners(ctx context.Context, owners []routeGraphOwner, lb *octavia.LoadBalancer, listener *listeners.Listener, protocol string, scopedListeners []listeners.Listener) ([]observedRouteGraph, error) {
-	poolItems, err := p.listGatewayPools(ctx, lb)
+	poolInventory, err := p.listGatewayPoolInventory(ctx, lb)
 	if err != nil {
 		return nil, err
 	}
-	return p.observeRouteGraphsFromPools(ctx, owners, lb, listener, protocol, scopedListeners, poolItems, nil)
+	return p.observeRouteGraphsFromPools(ctx, owners, lb, listener, protocol, scopedListeners, poolInventory, nil)
 }
 
-func (p *Provider) observeRouteGraphsFromPools(ctx context.Context, owners []routeGraphOwner, lb *octavia.LoadBalancer, listener *listeners.Listener, protocol string, scopedListeners []listeners.Listener, poolItems []pools.Pool, recoverGateway *Identity) ([]observedRouteGraph, error) {
+func (p *Provider) observeRouteGraphsFromPools(ctx context.Context, owners []routeGraphOwner, lb *octavia.LoadBalancer, listener *listeners.Listener, protocol string, scopedListeners []listeners.Listener, poolInventory octavia.PoolInventory, recoverGateway *Identity) ([]observedRouteGraph, error) {
+	poolItems := poolInventory.Items
 	inventory := routeGraphInventory{
 		owners: slices.Clone(owners), graphs: make([]observedRouteGraph, len(owners)),
 		recoverGateway: recoverGateway, recoverAllRoutes: len(owners) == 0 || p.fixedHTTPResponses,
@@ -350,6 +352,7 @@ func (p *Provider) observeRouteGraphsFromPools(ctx context.Context, owners []rou
 			return nil, &cloud.GraphError{Identity: identity.Value(), Err: fmt.Errorf("%w: found multiple pools for one route", cloud.ErrOwnershipConflict)}
 		}
 		graph.pool = pool
+		graph.backendH2C = poolInventory.BackendH2C[pool.ID]
 		poolOwners[pool.ID] = poolRouteOwner{route: routeIndex, backend: role.backend}
 		if err := p.observeRoutePoolChildrenWithRole(ctx, owner, graph, role.backend); err != nil {
 			return nil, &cloud.GraphError{Identity: identity.Value(), Err: err}
@@ -552,7 +555,7 @@ func (p *Provider) observeRoutePoolChildrenWithRole(ctx context.Context, owner r
 	switch {
 	case graph.pool.Protocol == cloud.ListenerProtocolTCP:
 		graph.members, graph.memberBackupUnreported, err = p.octavia.ListMembersWithBackup(ctx, graph.pool.ID, opts)
-	case backend != "" || p.fixedHTTPResponses && graph.pool.Protocol == cloud.ListenerProtocolHTTP:
+	case backend != "" || (p.fixedHTTPResponses || p.backendH2C || graph.backendH2C) && graph.pool.Protocol == cloud.ListenerProtocolHTTP:
 		graph.members, graph.memberAdminUnreported, err = p.octavia.ListMembersWithAdminState(ctx, graph.pool.ID, opts)
 	default:
 		graph.members, err = p.octavia.ListCompleteMembers(ctx, graph.pool.ID, opts)
@@ -698,6 +701,7 @@ type routeMutation struct {
 	rule                    desiredRule
 	retry                   bool
 	clearPoolPersistence    bool
+	backendH2C              *bool
 	clearMemberBackup       bool
 	withdrawHTTPPolicy      bool
 	weightedTargets         *[]octavia.WeightedHTTPTarget
@@ -790,8 +794,23 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 		}
 		clearPersistence := pool.Persistence != (pools.SessionPersistence{}) &&
 			slices.ContainsFunc(desired.members, func(member cloud.Member) bool { return !member.Draining && member.Weight > 0 })
-		if pool.LBMethod != string(pools.LBMethodRoundRobin) || !pool.AdminStateUp || clearPersistence {
-			nonPolicyPlan = append(nonPolicyPlan, routeMutation{kind: routeMutationUpdatePool, id: pool.ID, clearPoolPersistence: clearPersistence})
+		if desired.spec.BackendH2C && pool.TLSEnabled {
+			return nil, state, fmt.Errorf("%w: pool %s uses TLS and cannot forward cleartext HTTP/2", cloud.ErrOwnershipConflict, pool.ID)
+		}
+		var backendH2C *bool
+		if desired.spec.BackendH2C != actual.backendH2C {
+			if desired.protocol() != cloud.ListenerProtocolHTTP {
+				return nil, state, fmt.Errorf("%w: non-HTTP pool %s reports h2c", cloud.ErrOwnershipConflict, pool.ID)
+			}
+			// Keep the policy in place while withdrawing traffic from members
+			// that still speak the previously configured protocol.
+			if steps, hold := httpMemberWithdrawal(actual); len(steps) != 0 || hold != "" {
+				return steps, routeStateFromObservation(actual), nil
+			}
+			backendH2C = boolPointer(desired.spec.BackendH2C)
+		}
+		if pool.LBMethod != string(pools.LBMethodRoundRobin) || !pool.AdminStateUp || clearPersistence || backendH2C != nil {
+			nonPolicyPlan = append(nonPolicyPlan, routeMutation{kind: routeMutationUpdatePool, id: pool.ID, clearPoolPersistence: clearPersistence, backendH2C: backendH2C})
 		}
 
 		desiredMembers := make(map[string]cloud.Member, len(desired.members))
@@ -1065,7 +1084,7 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 		if tagErr != nil {
 			return tagErr
 		}
-		_, err = p.octavia.CreatePool(ctx, pools.CreateOpts{
+		opts := pools.CreateOpts{
 			LBMethod:       pools.LBMethodRoundRobin,
 			Protocol:       pools.Protocol(desired.protocol()),
 			LoadbalancerID: desired.spec.Gateway.LoadBalancerID,
@@ -1073,7 +1092,8 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 			Description:    desired.identity.Description(desired.httpRole(rolePool, "")),
 			AdminStateUp:   boolPointer(true),
 			Tags:           tags,
-		})
+		}
+		_, err = p.octavia.CreatePool(ctx, octavia.CreatePoolOpts{CreateOpts: opts, BackendH2C: desired.spec.BackendH2C})
 	case routeMutationUpdatePool:
 		opts := pools.UpdateOpts{
 			LBMethod:     pools.LBMethodRoundRobin,
@@ -1083,7 +1103,7 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 			// Gophercloud encodes a non-nil empty persistence as a JSON null.
 			opts.Persistence = &pools.SessionPersistence{}
 		}
-		_, err = p.octavia.UpdatePool(ctx, step.id, opts)
+		_, err = p.octavia.UpdatePool(ctx, step.id, octavia.UpdatePoolOpts{UpdateOpts: opts, BackendH2C: step.backendH2C})
 	case routeMutationDisableMember:
 		_, err = p.octavia.UpdateMember(ctx, step.parentID, step.id, pools.UpdateMemberOpts{AdminStateUp: boolPointer(false)})
 	case routeMutationDeleteMember:

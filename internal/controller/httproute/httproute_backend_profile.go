@@ -60,7 +60,7 @@ func (r *Reconciler) checkRouteBackendProfile(ctx context.Context, reader client
 		}
 		return fmt.Errorf("get backend Service: %w", err)
 	}
-	_, err = servicePortForBackend(&service, *backend.Port, topology.Topology.MemberMode)
+	_, err = servicePortForBackend(&service, *backend.Port, topology.Topology.MemberMode, r.Config.BackendH2C)
 	var buildError *routeBuildError
 	if errors.As(err, &buildError) && buildError.kind == routeErrorPending {
 		return nil
@@ -79,7 +79,7 @@ func (r *Reconciler) liveBackendReferenceRejection(ctx context.Context, namespac
 	if err != nil {
 		return nil, err
 	}
-	return backendReferenceRejection(namespace, key, grants), nil
+	return backendReferenceRejection(r.kind(), namespace, key, grants), nil
 }
 
 // liveRouteBackendReferenceRejection checks grants independently of the
@@ -105,7 +105,7 @@ func (r *Reconciler) liveRouteBackendReferenceRejection(ctx context.Context, rou
 				}
 				observed[key.Namespace] = grants
 			}
-			if denied := backendReferenceRejection(route.Namespace, key, grants); denied != nil && rejection == nil {
+			if denied := backendReferenceRejection(model.HTTPProfileRouteKind(route), route.Namespace, key, grants); denied != nil && rejection == nil {
 				rejection = denied
 			}
 		}

@@ -45,7 +45,7 @@ func (r *Reconciler) setRouteUnsupportedVersion(
 		return ctrl.Result{}, controller.ErrAPIReaderRequired
 	}
 	var current gatewayv1.HTTPRoute
-	if err := r.APIReader.Get(ctx, client.ObjectKeyFromObject(route), &current); err != nil {
+	if err := r.readRoute(ctx, r.APIReader, client.ObjectKeyFromObject(route), &current); err != nil {
 		if apierrors.IsNotFound(err) {
 			scope.skipPatch = true
 		}

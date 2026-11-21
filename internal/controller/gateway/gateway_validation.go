@@ -31,6 +31,7 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia/amphora"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
 type gatewayValidationError struct {
@@ -142,8 +143,11 @@ func SupportedListenersForConfig(config controller.Config, gateway *gatewayv1.Ga
 		}
 		kind := listenerRouteKind(listener.Protocol)
 		if listener.AllowedRoutes != nil && slices.ContainsFunc(listener.AllowedRoutes.Kinds, func(ref gatewayv1.RouteGroupKind) bool {
-			return !isRouteGroupKind(ref, kind)
+			return !listenerSupportsRouteKind(config, *listener, ref)
 		}) {
+			if listener.Protocol == gatewayv1.HTTPProtocolType && config.GRPCExactMethodEnabled() {
+				return nil, fmt.Errorf("only HTTPRoute and GRPCRoute are supported in listener allowedRoutes.kinds")
+			}
 			return nil, fmt.Errorf("only %s is supported in listener allowedRoutes.kinds", kind)
 		}
 	}
@@ -332,6 +336,11 @@ func listenerRouteKind(protocol gatewayv1.ProtocolType) gatewayv1.Kind {
 	default:
 		return ""
 	}
+}
+
+func listenerSupportsRouteKind(config controller.Config, listener gatewayv1.Listener, ref gatewayv1.RouteGroupKind) bool {
+	return isRouteGroupKind(ref, listenerRouteKind(listener.Protocol)) ||
+		listener.Protocol == gatewayv1.HTTPProtocolType && config.GRPCExactMethodEnabled() && isRouteGroupKind(ref, model.GRPCRouteKind)
 }
 
 func listenerAllowsRouteKind(listener gatewayv1.Listener, routeKind gatewayv1.Kind) bool {
