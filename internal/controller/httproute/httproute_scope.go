@@ -70,7 +70,7 @@ func (r *Reconciler) newHTTPRouteScope(
 	req ctrl.Request,
 ) (*httpRouteScope, bool, error) {
 	route := &gatewayv1.HTTPRoute{}
-	if err := r.Get(ctx, req.NamespacedName, route); err != nil {
+	if err := r.readRoute(ctx, r.Client, req.NamespacedName, route); err != nil {
 		return nil, false, client.IgnoreNotFound(err)
 	}
 	scope := &httpRouteScope{route: route}
@@ -131,7 +131,7 @@ func (r *Reconciler) patchHTTPRoute(ctx context.Context, scope *httpRouteScope) 
 	}
 	if applied && scope.warning != nil &&
 		(scope.warning.cleanupCheckpointSaved || transitioned || scope.warning.recordOnStatusChange && changed) {
-		controller.RecordProviderWarning(r.Recorder, scope.route, scope.warning.policy, scope.warning.action)
+		controller.RecordProviderWarning(r.Recorder, routeAPIObject(scope.route), scope.warning.policy, scope.warning.action)
 	}
 	return nil
 }
@@ -147,7 +147,7 @@ func (r *Reconciler) patchHTTPRouteStatus(
 	err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		applied, changed, transitioned = false, false, false
 		current := &gatewayv1.HTTPRoute{}
-		if err := r.routePatchReader().Get(ctx, key, current); err != nil {
+		if err := r.readRoute(ctx, r.routePatchReader(), key, current); err != nil {
 			if apierrors.IsNotFound(err) {
 				return nil
 			}
@@ -169,7 +169,7 @@ func (r *Reconciler) patchHTTPRouteStatus(
 			*route = *current
 			return nil
 		}
-		if err := r.Status().Patch(ctx, current, controller.OptimisticMergeFrom(base)); err != nil {
+		if err := r.patchRoute(ctx, current, base, true); err != nil {
 			return err
 		}
 		changed = true
@@ -188,7 +188,7 @@ func (r *Reconciler) routeStatusCheckpointNeeded(
 		return false, nil
 	}
 	current := &gatewayv1.HTTPRoute{}
-	if err := r.routePatchReader().Get(ctx, client.ObjectKeyFromObject(scope.route), current); err != nil {
+	if err := r.readRoute(ctx, r.routePatchReader(), client.ObjectKeyFromObject(scope.route), current); err != nil {
 		return false, fmt.Errorf("read HTTPRoute status checkpoint: %w", err)
 	}
 	if !sameHTTPRouteRevision(
@@ -216,7 +216,7 @@ func (r *Reconciler) routeProviderFailureCheckpointExists(
 	updates []parentStatusUpdate,
 ) (bool, error) {
 	current := &gatewayv1.HTTPRoute{}
-	if err := r.routePatchReader().Get(ctx, client.ObjectKeyFromObject(scope.route), current); err != nil {
+	if err := r.readRoute(ctx, r.routePatchReader(), client.ObjectKeyFromObject(scope.route), current); err != nil {
 		return false, fmt.Errorf("read HTTPRoute provider failure checkpoint: %w", err)
 	}
 	if !sameHTTPRouteRevision(

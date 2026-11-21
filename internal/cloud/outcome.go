@@ -120,6 +120,8 @@ type RouteResult struct {
 	// also confirms the winning listeners still reach the route's active pool
 	// while a sibling listener is pending.
 	ObservationDeferred bool
+	// UnsupportedBackendProtocol is populated when the provider explicitly lacks a requested transport.
+	UnsupportedBackendProtocol string
 }
 
 // RouteReadyResult returns a converged HTTPRoute result.

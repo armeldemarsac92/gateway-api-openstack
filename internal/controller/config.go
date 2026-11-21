@@ -44,6 +44,8 @@ type Config struct {
 	WeightedHTTPTargets bool
 	// RequestHeaderModifier enables route-scoped L7 request header operations.
 	RequestHeaderModifier bool
+	// BackendH2C enables h2c for explicitly annotated HTTP backend Service ports.
+	BackendH2C bool
 	// OperatorHTTPS enables termination using operator-provisioned certificates.
 	OperatorHTTPS bool
 	// ControllerName is the exact Gateway API ownership identifier.

@@ -140,6 +140,9 @@ func (r *Reconciler) buildRouteValidationSnapshotFromInputs(
 			return routeValidationSnapshot{}, err
 		}
 	}
+	if inputs.admission.conflicts[routeKey(snapshot.route)] {
+		return routeValidationSnapshot{}, routeSnapshotRejection(purpose, routeProfileConflict())
+	}
 	listener, err := selectRouteAttachment(snapshot.route, snapshot.gateway, candidates, inputs.input.Namespaces)
 	if err != nil {
 		return routeValidationSnapshot{}, routeSnapshotRejection(purpose, err)
@@ -176,7 +179,7 @@ func (r *Reconciler) observeRouteValidationInputs(
 	}
 
 	var route gatewayv1.HTTPRoute
-	if err := r.APIReader.Get(ctx, client.ObjectKeyFromObject(expectedRoute), &route); err != nil {
+	if err := r.readRoute(ctx, r.APIReader, client.ObjectKeyFromObject(expectedRoute), &route); err != nil {
 		return routeValidationSnapshot{}, errors.Join(errHTTPRouteChanged, client.IgnoreNotFound(err))
 	}
 	if !sameHTTPRouteRevision(
@@ -387,7 +390,7 @@ func (r *Reconciler) sealRouteOwnershipSnapshot(ctx context.Context, snapshot ro
 		return err
 	}
 	var route gatewayv1.HTTPRoute
-	if err := r.APIReader.Get(ctx, client.ObjectKeyFromObject(snapshot.route), &route); err != nil {
+	if err := r.readRoute(ctx, r.APIReader, client.ObjectKeyFromObject(snapshot.route), &route); err != nil {
 		return errors.Join(errHTTPRouteChanged, client.IgnoreNotFound(err))
 	}
 	if !sameHTTPRouteRevision(
@@ -458,7 +461,7 @@ func (r *Reconciler) buildRouteCleanupSnapshot(
 		return routeCleanupSnapshot{}, controller.ErrAPIReaderRequired
 	}
 	var route gatewayv1.HTTPRoute
-	if err := r.APIReader.Get(ctx, client.ObjectKeyFromObject(expected), &route); err != nil {
+	if err := r.readRoute(ctx, r.APIReader, client.ObjectKeyFromObject(expected), &route); err != nil {
 		return routeCleanupSnapshot{}, errors.Join(errHTTPRouteChanged, client.IgnoreNotFound(err))
 	}
 	if !sameHTTPRouteRevision(
@@ -546,6 +549,19 @@ func (r *Reconciler) buildRouteCleanupSnapshot(
 	if !r.structurallySupportedRoute(&route) {
 		return snapshot, nil
 	}
+	if r.Config.GRPCExactMethodEnabled() {
+		routes, err := r.liveGraphRoutes(ctx, controller.GatewayIdentity(r.Config, parent.gateway))
+		if err != nil {
+			return routeCleanupSnapshot{}, err
+		}
+		admission, err := r.observeRouteGraphAdmission(ctx, parent.gateway, routes, &route)
+		if err != nil {
+			return routeCleanupSnapshot{}, err
+		}
+		if admission.conflicts[routeKey(&route)] {
+			return snapshot, nil
+		}
+	}
 	desired, err := r.buildRouteModelWithReader(ctx, r.APIReader, &route, parent.gateway)
 	if err != nil {
 		var buildError *routeBuildError
@@ -589,7 +605,7 @@ func (r *Reconciler) sealRouteCleanupSnapshot(
 	snapshot routeCleanupSnapshot,
 ) error {
 	var route gatewayv1.HTTPRoute
-	if err := r.APIReader.Get(ctx, client.ObjectKeyFromObject(snapshot.route), &route); err != nil {
+	if err := r.readRoute(ctx, r.APIReader, client.ObjectKeyFromObject(snapshot.route), &route); err != nil {
 		return errors.Join(errHTTPRouteChanged, client.IgnoreNotFound(err))
 	}
 	if !sameHTTPRouteRevision(

@@ -42,7 +42,7 @@ func (r *Reconciler) detachPreviousGateway(
 ) (ctrl.Result, error) {
 	routeUID, generation, isDeleting := route.UID, route.Generation, !route.DeletionTimestamp.IsZero()
 	current := &gatewayv1.HTTPRoute{}
-	if err := r.Get(ctx, client.ObjectKeyFromObject(route), current); err != nil {
+	if err := r.readRoute(ctx, r.Client, client.ObjectKeyFromObject(route), current); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	if !sameHTTPRouteRevision(current, routeUID, generation, isDeleting) {
@@ -173,7 +173,7 @@ func (r *Reconciler) patchRouteCleanupFailure(
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		changed = false
 		current := &gatewayv1.HTTPRoute{}
-		if err := r.routePatchReader().Get(ctx, routeKey, current); err != nil {
+		if err := r.readRoute(ctx, r.routePatchReader(), routeKey, current); err != nil {
 			return client.IgnoreNotFound(err)
 		}
 		if !sameHTTPRouteRevision(current, routeUID, generation, isDeleting) {
@@ -194,7 +194,7 @@ func (r *Reconciler) patchRouteCleanupFailure(
 			}
 			current.Annotations[key] = reason
 		}
-		if err := r.Patch(ctx, current, controller.OptimisticMergeFrom(base)); err != nil {
+		if err := r.patchRoute(ctx, current, base, false); err != nil {
 			return client.IgnoreNotFound(err)
 		}
 		changed = true
@@ -261,7 +261,7 @@ func (r *Reconciler) checkpointRouteDetaching(ctx context.Context, expected *gat
 		desired.Annotations = make(map[string]string)
 	}
 	desired.Annotations[r.Config.RouteLifecycleAnnotation()] = controller.RouteDetaching
-	if err := r.Patch(ctx, desired, controller.OptimisticMergeFrom(base)); err != nil {
+	if err := r.patchRoute(ctx, desired, base, false); err != nil {
 		return err
 	}
 	*expected = *desired

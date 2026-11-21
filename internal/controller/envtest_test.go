@@ -41,6 +41,7 @@ import (
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	runtimeconfig "sigs.k8s.io/controller-runtime/pkg/config"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -92,11 +93,13 @@ func TestControllerEnvtest(t *testing.T) {
 	config.GatewayAPIChannel = os.Getenv("GATEWAY_API_CHANNEL")
 	// Status and binding indexes belong to one controller name. Keep the
 	// manager-driven watches separate from the manually stepped reconcilers.
-	startManager := func(cfg controller.Config, provider *recordingProvider) ctrl.Manager {
+	startManager := func(t *testing.T, cfg controller.Config, provider *recordingProvider) ctrl.Manager {
 		manager, err := ctrl.NewManager(restConfig, ctrl.Options{
 			Scheme:                 scheme,
 			Metrics:                metricsserver.Options{BindAddress: "0"},
 			HealthProbeBindAddress: "0",
+			// The GRPC subtest runs a second controller installation in this process.
+			Controller: runtimeconfig.Controller{SkipNameValidation: ptr.To(cfg.GRPCExactMethodEnabled())},
 		})
 		if err != nil {
 			t.Fatalf("create envtest manager: %v", err)
@@ -134,11 +137,11 @@ func TestControllerEnvtest(t *testing.T) {
 
 		return manager
 	}
-	manager := startManager(config, nil)
+	manager := startManager(t, config, nil)
 	statusConfig := config
 	statusConfig.ControllerName = "status.example.com/gateway-api-openstack"
 	statusProvider := &recordingProvider{}
-	startManager(statusConfig, statusProvider)
+	startManager(t, statusConfig, statusProvider)
 
 	apiClient, err := client.New(restConfig, client.Options{Scheme: scheme})
 	if err != nil {
@@ -248,6 +251,14 @@ func TestControllerEnvtest(t *testing.T) {
 	})
 	t.Run("UDP worker NodePort follows endpoint protocol and grant", func(t *testing.T) {
 		testUDPNodePort(t, apiClient, statusConfig, statusProvider)
+	})
+	t.Run("GRPCRoute exact methods share the Gateway writer", func(t *testing.T) {
+		grpcConfig := config
+		grpcConfig.ControllerName = "grpc.example.com/gateway-api-openstack"
+		grpcConfig.BackendH2C, grpcConfig.FixedHTTPResponses = true, true
+		provider := &recordingProvider{}
+		startManager(t, grpcConfig, provider)
+		testGRPCExactMethodRoute(t, apiClient, grpcConfig, provider)
 	})
 	t.Run("HTTPRoute Service ReferenceGrant lifecycle", func(t *testing.T) {
 		testHTTPRouteServiceReferenceGrant(t, apiClient, cacheClient, config, gateway)

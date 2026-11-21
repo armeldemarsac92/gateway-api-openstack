@@ -39,19 +39,21 @@ import (
 )
 
 func (r *Reconciler) enqueueHTTPRoutePeers(ctx context.Context, object client.Object) []reconcile.Request {
-	route, ok := object.(*gatewayv1.HTTPRoute)
+	parents, _, ok := controller.RouteParents(object)
 	if !ok {
 		return nil
 	}
 	keys := map[types.NamespacedName]struct{}{}
+	route := &gatewayv1.HTTPRoute{Spec: gatewayv1.HTTPRouteSpec{CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: parents}}}
+	route.Namespace = object.GetNamespace()
 	for _, gatewayKey := range controller.ParentGatewayKeys(route) {
-		var routes gatewayv1.HTTPRouteList
-		if err := r.List(ctx, &routes, client.MatchingFields{controller.IndexHTTPRouteByParentGateway: gatewayKey}); err != nil {
+		routes, err := r.listRoutes(ctx, client.MatchingFields{controller.IndexHTTPRouteByParentGateway: gatewayKey})
+		if err != nil {
 			log.FromContext(ctx).Error(err, "Could not list HTTPRoutes for parent Gateway", "gateway", gatewayKey)
 			continue
 		}
-		for index := range routes.Items {
-			keys[client.ObjectKeyFromObject(&routes.Items[index])] = struct{}{}
+		for index := range routes {
+			keys[client.ObjectKeyFromObject(&routes[index])] = struct{}{}
 		}
 	}
 	return controller.SortedRequests(keys)
@@ -83,26 +85,26 @@ func (r *Reconciler) enqueueHTTPRoutesForGatewayClass(ctx context.Context, objec
 func (r *Reconciler) addHTTPRoutesForGateway(ctx context.Context, gateway *gatewayv1.Gateway, keys map[types.NamespacedName]struct{}) {
 	gatewayKey := controller.ObjectKeyString(client.ObjectKeyFromObject(gateway))
 	for _, indexName := range []string{controller.IndexHTTPRouteByParentGateway, controller.IndexHTTPRouteByStatusGateway, controller.IndexHTTPRouteByBoundGateway} {
-		var routes gatewayv1.HTTPRouteList
-		if err := r.List(ctx, &routes, client.MatchingFields{indexName: gatewayKey}); err != nil {
+		routes, err := r.listRoutes(ctx, client.MatchingFields{indexName: gatewayKey})
+		if err != nil {
 			log.FromContext(ctx).Error(err, "Could not list HTTPRoutes for Gateway", "gateway", client.ObjectKeyFromObject(gateway))
 			continue
 		}
-		for index := range routes.Items {
-			keys[client.ObjectKeyFromObject(&routes.Items[index])] = struct{}{}
+		for index := range routes {
+			keys[client.ObjectKeyFromObject(&routes[index])] = struct{}{}
 		}
 	}
 }
 
 func (r *Reconciler) enqueueHTTPRoutesForServiceKey(ctx context.Context, serviceKey types.NamespacedName) []reconcile.Request {
-	var direct gatewayv1.HTTPRouteList
-	if err := r.List(ctx, &direct, client.MatchingFields{
+	direct, err := r.listRoutes(ctx, client.MatchingFields{
 		controller.IndexHTTPRouteByBackendService: controller.ObjectKeyString(serviceKey),
-	}); err != nil {
+	})
+	if err != nil {
 		log.FromContext(ctx).Error(err, "Could not list HTTPRoutes for Service", "service", serviceKey)
 		return nil
 	}
-	return r.enqueueHTTPRouteConsumers(ctx, direct.Items)
+	return r.enqueueHTTPRouteConsumers(ctx, direct)
 }
 
 // A backend change can alter which bound fragments the shared listener can program.
@@ -119,13 +121,13 @@ func (r *Reconciler) enqueueHTTPRouteConsumers(ctx context.Context, routes []gat
 			// Routes sharing a parent need one indexed read per event,
 			// including when that read fails. Later events observe it again.
 			observedParents[gatewayKey] = struct{}{}
-			var peers gatewayv1.HTTPRouteList
-			if err := r.List(ctx, &peers, client.MatchingFields{controller.IndexHTTPRouteByParentGateway: gatewayKey}); err != nil {
+			peers, err := r.listRoutes(ctx, client.MatchingFields{controller.IndexHTTPRouteByParentGateway: gatewayKey})
+			if err != nil {
 				log.FromContext(ctx).Error(err, "Could not list HTTPRoutes sharing a Gateway", "gateway", gatewayKey)
 				continue
 			}
-			for peerIndex := range peers.Items {
-				keys[client.ObjectKeyFromObject(&peers.Items[peerIndex])] = struct{}{}
+			for peerIndex := range peers {
+				keys[client.ObjectKeyFromObject(&peers[peerIndex])] = struct{}{}
 			}
 		}
 	}
@@ -149,8 +151,8 @@ func (r *Reconciler) enqueueHTTPRoutesForNode(ctx context.Context, object client
 	if !ok {
 		return nil
 	}
-	var routes gatewayv1.HTTPRouteList
-	if err := r.List(ctx, &routes, client.MatchingFields{controller.IndexHTTPRouteByNodeBackend: controller.NodeBackendIndexValue}); err != nil {
+	routes, err := r.listRoutes(ctx, client.MatchingFields{controller.IndexHTTPRouteByNodeBackend: controller.NodeBackendIndexValue})
+	if err != nil {
 		log.FromContext(ctx).Error(err, "Could not list HTTPRoutes for Node", "node", node.Name)
 		return nil
 	}
@@ -160,8 +162,8 @@ func (r *Reconciler) enqueueHTTPRoutesForNode(ctx context.Context, object client
 		services:  make(map[types.NamespacedName]*nodeServiceObservation),
 		endpoints: make(map[types.NamespacedName]nodeEligibilityObservation),
 	}
-	for index := range routes.Items {
-		route := &routes.Items[index]
+	for index := range routes {
+		route := &routes[index]
 		backends, err := r.validateRouteStructure(route)
 		if err != nil {
 			continue
@@ -239,10 +241,21 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 	if r.Writer == nil {
 		return errors.New("gateway graph writer is required")
 	}
-	return ctrl.NewControllerManagedBy(manager).
-		For(&gatewayv1.HTTPRoute{}, builder.WithPredicates(controller.HTTPRouteReconcilePredicate(r.Config))).
-		// A changed route can alter the precedence of its peers on the same listener.
-		Watches(&gatewayv1.HTTPRoute{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutePeers), builder.WithPredicates(controller.HTTPRoutePeerPredicate())).
+	if err := r.setupRouteController(manager, &gatewayv1.HTTPRoute{}, "httproute"); err != nil {
+		return err
+	}
+	return r.forRouteKind(model.GRPCRouteKind).setupRouteController(manager, &gatewayv1.GRPCRoute{}, "grpcroute")
+}
+
+func (r *Reconciler) setupRouteController(manager ctrl.Manager, object client.Object, name string) error {
+	setup := ctrl.NewControllerManagedBy(manager).
+		For(object, builder.WithPredicates(controller.HTTPRouteReconcilePredicate(r.Config)))
+	// Watch both kinds while observing a shared routing graph, including peers
+	// whose earlier policy might have blocked this route from attaching.
+	for _, peer := range []client.Object{&gatewayv1.HTTPRoute{}, &gatewayv1.GRPCRoute{}} {
+		setup.Watches(peer, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutePeers), builder.WithPredicates(controller.HTTPRoutePeerPredicate()))
+	}
+	return setup.
 		Watches(&gatewayv1.Gateway{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForGateway), builder.WithPredicates(controller.GatewayForHTTPRoutePredicate(r.Config))).
 		Watches(&gatewayv1.GatewayClass{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForGatewayClass), builder.WithPredicates(controller.GatewayClassForGatewayPredicate())).
 		Watches(&corev1.Service{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForService), builder.WithPredicates(controller.ServicePredicate())).
@@ -250,6 +263,6 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 		Watches(&gatewayv1.ReferenceGrant{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForReferenceGrant), builder.WithPredicates(controller.GenerationOrDeletionChangedPredicate())).
 		Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForNamespace), builder.WithPredicates(controller.NamespacePredicate())).
 		Watches(&corev1.Node{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForNode), builder.WithPredicates(controller.NodePredicate(""))).
-		Named("httproute").
+		Named(name).
 		Complete(r)
 }

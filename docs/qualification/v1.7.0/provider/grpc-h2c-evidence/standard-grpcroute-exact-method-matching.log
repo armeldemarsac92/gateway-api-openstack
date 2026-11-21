@@ -1,0 +1,19 @@
+=== RUN   TestBackendH2C
+=== RUN   TestBackendH2C/HTTPRouteBackendProtocolH2C
+=== RUN   TestBackendH2C/GRPCExactMethodMatching
+=== RUN   TestBackendH2C/GRPCExactMethodMatching/0_request_to_'/gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/Echo'_should_go_to_grpc-infra-backend-v1
+=== PAUSE TestBackendH2C/GRPCExactMethodMatching/0_request_to_'/gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/Echo'_should_go_to_grpc-infra-backend-v1
+=== RUN   TestBackendH2C/GRPCExactMethodMatching/1_request_to_'/gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/EchoTwo'_should_go_to_grpc-infra-backend-v2
+=== PAUSE TestBackendH2C/GRPCExactMethodMatching/1_request_to_'/gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/EchoTwo'_should_go_to_grpc-infra-backend-v2
+=== RUN   TestBackendH2C/GRPCExactMethodMatching/2_request_to_'/gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/EchoThree'_should_receive_a_Unimplemented_(12)
+=== PAUSE TestBackendH2C/GRPCExactMethodMatching/2_request_to_'/gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/EchoThree'_should_receive_a_Unimplemented_(12)
+=== CONT  TestBackendH2C/GRPCExactMethodMatching/0_request_to_'/gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/Echo'_should_go_to_grpc-infra-backend-v1
+=== CONT  TestBackendH2C/GRPCExactMethodMatching/2_request_to_'/gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/EchoThree'_should_receive_a_Unimplemented_(12)
+=== CONT  TestBackendH2C/GRPCExactMethodMatching/1_request_to_'/gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/EchoTwo'_should_go_to_grpc-infra-backend-v2
+--- PASS: TestBackendH2C (6.97s)
+    --- SKIP: TestBackendH2C/HTTPRouteBackendProtocolH2C (0.00s)
+    --- PASS: TestBackendH2C/GRPCExactMethodMatching (0.84s)
+        --- PASS: TestBackendH2C/GRPCExactMethodMatching/2_request_to_'/gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/EchoThree'_should_receive_a_Unimplemented_(12) (0.00s)
+        --- PASS: TestBackendH2C/GRPCExactMethodMatching/0_request_to_'/gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/Echo'_should_go_to_grpc-infra-backend-v1 (5.25s)
+        --- PASS: TestBackendH2C/GRPCExactMethodMatching/1_request_to_'/gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/EchoTwo'_should_go_to_grpc-infra-backend-v2 (6.05s)
+PASS

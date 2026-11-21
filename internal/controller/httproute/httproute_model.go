@@ -68,12 +68,21 @@ func (r *Reconciler) structurallySupportedRoute(route *gatewayv1.HTTPRoute) bool
 
 // validateRouteStructure limits programming to the configured HTTP path profile.
 func (r *Reconciler) validateRouteStructure(route *gatewayv1.HTTPRoute) ([]gatewayv1.BackendObjectReference, error) {
+	grpc := model.HTTPProfileRouteKind(route) == model.GRPCRouteKind
+	if grpc {
+		if !r.Config.GRPCExactMethodEnabled() {
+			return nil, grpcProfileDisabled()
+		}
+		if len(route.Spec.Rules) == 0 {
+			return nil, newRouteBuildError(routeErrorUnsupported, "GRPCRoute requires exact service and method matches and one backendRef per rule, without headers, filters, named rules or session persistence")
+		}
+	}
 	if len(route.Spec.Rules) == 0 {
 		return nil, newRouteBuildError(routeErrorUnsupported, "at least one HTTPRoute rule is required")
 	}
 	references := make([]gatewayv1.BackendObjectReference, 0, len(route.Spec.Rules))
 	for _, rule := range route.Spec.Rules {
-		if err := validateRouteRule(rule, r.Config.FixedHTTPResponses, r.Config.WeightedHTTPTargets, r.Config.RequestHeaderModifier); err != nil {
+		if err := validateRouteRule(rule, r.Config.FixedHTTPResponses || grpc, r.Config.WeightedHTTPTargets && !grpc, r.Config.RequestHeaderModifier); err != nil {
 			return nil, err
 		}
 		for _, backend := range rule.BackendRefs {
@@ -171,8 +180,8 @@ func validateWeightedBackendRefs(refs []gatewayv1.HTTPBackendRef) error {
 	return nil
 }
 
-func backendReferenceRejection(namespace string, target types.NamespacedName, grants []gatewayv1.ReferenceGrant) *routeBuildError {
-	if !model.BackendReferenceAllowed(namespace, target, grants) {
+func backendReferenceRejection(kind gatewayv1.Kind, namespace string, target types.NamespacedName, grants []gatewayv1.ReferenceGrant) *routeBuildError {
+	if !model.BackendReferenceAllowedFor(kind, namespace, target, grants) {
 		return &routeBuildError{kind: routeErrorRefNotPermitted, message: fmt.Sprintf("backend Service %s is not permitted by a ReferenceGrant", target)}
 	}
 	return nil
@@ -238,6 +247,7 @@ func (r *Reconciler) buildRouteModelFromInputs(
 		MemberSubnetID:          topology.Topology.MemberSubnetID,
 		BackendSecurityGroupIDs: slices.Clone(topology.Topology.BackendSecurityGroupIDs),
 		HealthMonitor:           topology.HealthMonitor,
+		TCPHealthMonitor:        model.HTTPProfileRouteKind(route) == model.GRPCRouteKind,
 	}
 	if controller.GatewayListenerScope(r.Config, gateway) == gatewayv1.HTTPProtocolType {
 		spec.GatewayRequirements.ListenerPort, _ = strconv.Atoi(gateway.Annotations[r.Config.GatewayListenerPortAnnotation()])
@@ -246,12 +256,13 @@ func (r *Reconciler) buildRouteModelFromInputs(
 	}
 	if !r.usesHTTPBackendGroups(route) && rules[0].Redirect == nil {
 		match := matches[0]
-		members, err := routeBackendMembers(ctx, reader, route.Namespace, rules[0].Backends[0], inputs, mode, topology.NodeAddressType)
+		members, err := routeBackendMembers(ctx, reader, rules[0].Backends[0], inputs, mode, topology.NodeAddressType)
 		if err != nil {
 			return cloud.RouteSpec{}, model.Diagnostic{}, err
 		}
 		spec.Hostname, spec.PathType, spec.PathValue, spec.Precedence = match.Hostname, cloud.PathMatchType(match.Match.PathType), match.Match.PathValue, match.Precedence
 		spec.Members = members
+		spec.BackendH2C = model.ServicePortUsesH2C(rules[0].Backends[0].Port)
 		return spec, model.Diagnostic{}, nil
 	}
 	diagnostic, err := r.lowerHTTPBackends(ctx, reader, route, listener, &spec, inputs, matches, rules, topology.NodeAddressType)
@@ -261,16 +272,16 @@ func (r *Reconciler) buildRouteModelFromInputs(
 	return spec, diagnostic, nil
 }
 
-func routeBackendMembers(ctx context.Context, reader client.Reader, sourceNamespace string, backend model.BackendGroup, inputs *routeModelInputs, mode cloud.MemberMode, nodeAddressType corev1.NodeAddressType) ([]cloud.Member, error) {
+func routeBackendMembers(ctx context.Context, reader client.Reader, backend model.BackendGroup, inputs *routeModelInputs, mode cloud.MemberMode, nodeAddressType corev1.NodeAddressType) ([]cloud.Member, error) {
 	key := backend.Service
-	if rejection := backendReferenceRejection(sourceNamespace, key, inputs.input.ReferenceGrants); rejection != nil {
-		return nil, rejection
+	if backend.Authorization == model.BackendAuthorizationDenied {
+		return nil, newRouteBuildError(routeErrorRefNotPermitted, "backend Service %s is not permitted by a ReferenceGrant", key)
 	}
 	service := inputs.service(key)
 	if service == nil {
 		return nil, newRouteBuildError(routeErrorBackendNotFound, "backend Service %s was not found", key)
 	}
-	port, err := servicePortForBackend(service, *backend.Reference.Port, mode)
+	port, err := servicePortForBackend(service, *backend.Reference.Port, mode, inputs.input.BackendH2C)
 	if err != nil {
 		return nil, err
 	}
@@ -316,7 +327,7 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 		direct := len(rule.Backends) == 1 && hasHTTPBackendKey(rule.Backends[0])
 		weighted := cloud.HTTPWeightedRule{RuleIndex: rule.Index}
 		for _, backend := range rule.Backends {
-			index, diagnostic, err := r.lowerHTTPBackend(ctx, reader, route.Namespace, spec, inputs, backend, nodeAddressType, direct, groups)
+			index, diagnostic, err := r.lowerHTTPBackend(ctx, reader, route, spec, inputs, backend, nodeAddressType, direct, groups)
 			if err != nil {
 				return model.Diagnostic{}, err
 			}
@@ -361,7 +372,7 @@ func hasHTTPBackendKey(backend model.BackendGroup) bool {
 	return backend.Service.Name != "" && validBackendPort(backend.Reference.Port)
 }
 
-func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader, sourceNamespace string, spec *cloud.RouteSpec, inputs *routeModelInputs, backend model.BackendGroup, nodeAddressType corev1.NodeAddressType, direct bool, groups map[backendKey]httpBackendResolution) (*int, model.Diagnostic, error) {
+func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader, route *gatewayv1.HTTPRoute, spec *cloud.RouteSpec, inputs *routeModelInputs, backend model.BackendGroup, nodeAddressType corev1.NodeAddressType, direct bool, groups map[backendKey]httpBackendResolution) (*int, model.Diagnostic, error) {
 	if !hasHTTPBackendKey(backend) {
 		if backend.Diagnostic != nil {
 			return nil, *backend.Diagnostic, nil
@@ -373,7 +384,7 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 	var members []cloud.Member
 	if !observed {
 		var err error
-		members, result.diagnostic, err = groupedBackendMembers(ctx, reader, sourceNamespace, backend, inputs, spec.MemberMode, nodeAddressType)
+		members, result.diagnostic, err = groupedBackendMembers(ctx, reader, backend, inputs, spec.MemberMode, nodeAddressType)
 		if err != nil {
 			return nil, model.Diagnostic{}, err
 		}
@@ -388,12 +399,15 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 		// Keep an ordinary rule's pool identity when moving its sole share to
 		// the existing fixed-response policy. Weighted rules carry errors in
 		// their target list and do not need placeholder pools.
-		invalidReference := invalid && (r.Config.WeightedHTTPTargets ||
+		// A gRPC client maps the empty pool's HTTP 503 to UNAVAILABLE.
+		// The HTTP fixed 500 response would instead map to UNKNOWN.
+		invalidReference := invalid && model.HTTPProfileRouteKind(route) != model.GRPCRouteKind && (r.Config.WeightedHTTPTargets ||
 			result.diagnostic.Reason == string(gatewayv1.RouteReasonRefNotPermitted) ||
 			result.diagnostic.Reason == string(gatewayv1.RouteReasonBackendNotFound))
 		spec.HTTPBackends = append(spec.HTTPBackends, cloud.HTTPBackend{
 			Namespace: key.service.Namespace, Name: key.service.Name, Port: key.port,
 			Members: members, Unavailable: len(members) == 0, InvalidReference: invalidReference,
+			BackendH2C: !invalid && model.ServicePortUsesH2C(backend.Port),
 		})
 	}
 	groups[key] = result
@@ -418,11 +432,11 @@ func preferredBackendDiagnostic(current, next model.Diagnostic) model.Diagnostic
 	return current
 }
 
-func groupedBackendMembers(ctx context.Context, reader client.Reader, sourceNamespace string, backend model.BackendGroup, inputs *routeModelInputs, mode cloud.MemberMode, nodeAddressType corev1.NodeAddressType) ([]cloud.Member, model.Diagnostic, error) {
+func groupedBackendMembers(ctx context.Context, reader client.Reader, backend model.BackendGroup, inputs *routeModelInputs, mode cloud.MemberMode, nodeAddressType corev1.NodeAddressType) ([]cloud.Member, model.Diagnostic, error) {
 	if backend.Diagnostic != nil {
 		return nil, *backend.Diagnostic, nil
 	}
-	members, err := routeBackendMembers(ctx, reader, sourceNamespace, backend, inputs, mode, nodeAddressType)
+	members, err := routeBackendMembers(ctx, reader, backend, inputs, mode, nodeAddressType)
 	if err == nil {
 		return members, model.Diagnostic{}, nil
 	}

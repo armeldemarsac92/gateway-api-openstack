@@ -361,3 +361,269 @@ func TestMissingHeaderCapabilityDoesNotBlockSiblingMembers(t *testing.T) {
 		t.Fatalf("expected one effective provider probe per snapshot, got %d", probes)
 	}
 }
+
+func TestH2CPoolWritesRequireEffectiveProviderCapability(t *testing.T) {
+	for _, tc := range []struct {
+		name                           string
+		capabilities                   []string
+		h2c, probe, write, unsupported bool
+	}{
+		{name: "stock pool", write: true},
+		{name: "provider lacks h2c", capabilities: []string{}, h2c: true, probe: true, unsupported: true},
+		{name: "provider discovery unavailable", h2c: true, probe: true},
+		{name: "provider supports h2c", capabilities: []string{"backend_h2c_v1"}, h2c: true, probe: true, write: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var probed, wrote bool
+			client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/lbaas/providers/amphora-region-alias/gateway_capabilities":
+					probed = true
+					if tc.capabilities == nil {
+						w.WriteHeader(http.StatusNotFound)
+						return
+					}
+					safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": tc.capabilities})
+				case r.Method == http.MethodPost && r.URL.Path == "/lbaas/pools":
+					wrote = true
+					var payload struct {
+						Pool struct {
+							Protocol   string `json:"protocol"`
+							BackendH2C *bool  `json:"backend_h2c"`
+						} `json:"pool"`
+					}
+					err := json.NewDecoder(r.Body).Decode(&payload)
+					if err != nil || payload.Pool.Protocol != "HTTP" ||
+						tc.h2c && (payload.Pool.BackendH2C == nil || !*payload.Pool.BackendH2C) ||
+						!tc.h2c && payload.Pool.BackendH2C != nil {
+						t.Errorf("unexpected pool request %#v, error %v", payload, err)
+					}
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusCreated)
+					_, _ = w.Write([]byte(`{"pool":{"id":"pool"}}`))
+				default:
+					t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			cfg := ProviderConfig{BackendH2C: true}
+			p := NewProvider(ServiceClients{LoadBalancer: client, ProjectID: "project-a", Region: "selected-region"}, cfg)
+			spec := completeGraphSpec(safetyTestIdentity(t))
+			spec.Routes[0].Spec.BackendH2C = tc.h2c
+			desired, err := p.buildDesiredGatewayGraph(spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lb := safetyObservedLoadBalancer()
+			lb.Provider = "amphora-region-alias"
+			actual := observedGatewayGraph{loadBalancer: lb, state: cloud.GatewayState{LoadBalancerID: lb.ID}}
+			result := cloud.GatewayGraphResult{Routes: []cloud.RouteGraphResult{{}}}
+			plan := []graphMutation{{kind: graphRouteMutation, route: routeMutation{kind: routeMutationCreatePool}}}
+			step, prepared, err := p.prepareNextGraphMutation(t.Context(), desired, actual, plan, &result)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if prepared {
+				if err := p.executeGraphMutation(t.Context(), desired, actual, step); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if prepared != tc.write || wrote != tc.write || probed != tc.probe {
+				t.Fatalf("probed=%t wrote=%t, want probed=%t wrote=%t", probed, wrote, tc.probe, tc.write)
+			}
+			route := result.Routes[0].Result
+			if (route.UnsupportedBackendProtocol != "") != tc.unsupported ||
+				!prepared && route.Outcome.State != cloud.OutcomeProgressing {
+				t.Fatalf("unexpected provider route outcome %#v", route)
+			}
+		})
+	}
+}
+
+func TestH2CPoolTransportChangeWithdrawsOldMembersBeforeUpdate(t *testing.T) {
+	route, observed := convergedRoutePlanFixture()
+	observed.members[0].ProvisioningStatus = "ACTIVE"
+	observed.pool.ProvisioningStatus = "ACTIVE"
+
+	var writes int
+	transport := true
+	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/lbaas/pools":
+			safetyWriteJSON(t, w, map[string]any{"pools": []map[string]any{{"id": "pool-1", "protocol": "HTTP", "backend_h2c": transport}}})
+		case r.Method == http.MethodPut && r.URL.Path == "/lbaas/pools/pool-1":
+			writes++
+			var body map[string]map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["pool"]["backend_h2c"] != false || body["pool"]["admin_state_up"] != nil {
+				t.Errorf("h2c must be cleared without enabling the pool: body = %#v, error %v", body, err)
+			}
+			transport = false
+			safetyWriteJSON(t, w, map[string]any{"pool": map[string]any{"id": "pool-1"}})
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	p := NewProvider(ServiceClients{LoadBalancer: client}, ProviderConfig{BackendH2C: true})
+	desired, actual := fixedHTTPPlanFixture(route, observed)
+	desired.protocol = cloud.ListenerProtocolHTTP
+	actual.loadBalancer.Provider = "amphora"
+	inventory, err := p.listGatewayPoolInventory(t.Context(), actual.loadBalancer)
+	if err != nil || len(inventory.Items) != 1 || !inventory.BackendH2C["pool-1"] {
+		t.Fatalf("pool inventory did not observe its transport: %#v, error %v", inventory, err)
+	}
+	actual.routes[0].backendH2C = inventory.BackendH2C["pool-1"]
+	plan, _, err := p.buildGatewayGraphPlan(desired, actual)
+	if err != nil || len(plan) == 0 || plan[0].route.kind != routeMutationDisableMember {
+		t.Fatalf("old protocol must stop serving before the update: %#v, error %v", plan, err)
+	}
+
+	actual.routes[0].members[0].AdminStateUp = false
+	plan, _, err = p.buildGatewayGraphPlan(desired, actual)
+	if err != nil || len(plan) == 0 || plan[0].route.kind != routeMutationUpdatePool {
+		t.Fatalf("withdrawn backend must update its pool before re-enabling members: %#v, error %v", plan, err)
+	}
+	step, err := p.prepareGraphMutation(t.Context(), desired, actual, plan[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.executeGraphMutation(t.Context(), desired, actual, step); err != nil || writes != 1 {
+		t.Fatalf("pool update writes = %d, error %v", writes, err)
+	}
+
+	plan, _, err = p.buildGatewayGraphPlan(desired, actual)
+	if err != nil || len(plan) != 1 || plan[0].route.kind != routeMutationUpdatePool {
+		t.Fatalf("unconfirmed write must leave members disabled: %#v, error %v", plan, err)
+	}
+	inventory, err = p.listGatewayPoolInventory(t.Context(), actual.loadBalancer)
+	if err != nil || len(inventory.Items) != 1 || inventory.BackendH2C["pool-1"] {
+		t.Fatalf("updated pool transport was not observed: %#v, error %v", inventory, err)
+	}
+	actual.routes[0].backendH2C = inventory.BackendH2C["pool-1"]
+	actual.routes[0].pool.ProvisioningStatus = "PENDING_UPDATE"
+	plan, result, err := p.buildGatewayGraphPlan(desired, actual)
+	if err != nil || len(plan) != 0 || result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing {
+		t.Fatalf("pending transport cannot restore members: plan=%#v result=%#v error=%v", plan, result.Routes, err)
+	}
+	actual.routes[0].pool.ProvisioningStatus = "ACTIVE"
+	plan, _, err = p.buildGatewayGraphPlan(desired, actual)
+	if err != nil || len(plan) == 0 || plan[0].route.kind != routeMutationUpdateMember {
+		t.Fatalf("observed transport should restore members: %#v, error %v", plan, err)
+	}
+}
+
+func TestH2CUnavailableDoesNotBypassAnotherPoolsTransportUpdate(t *testing.T) {
+	for _, grouped := range []bool{false, true} {
+		name := "separate routes"
+		if grouped {
+			name = "same route"
+		}
+		t.Run(name, func(t *testing.T) {
+			a, aObserved := h2cPlanningPool("a", true)
+			b, bObserved := h2cPlanningPool("b", true)
+			stock, stockObserved := h2cPlanningPool("stock", false)
+			desired, actual := fixedHTTPPlanFixture(a, aObserved)
+			desired.protocol = cloud.ListenerProtocolHTTP
+			actual.loadBalancer.Provider = "amphora"
+			if grouped {
+				a.backendKey, b.backendKey, stock.backendKey = "a", "b", "stock"
+				desired.routes[0] = desiredRoute{httpParts: []desiredRoute{a, b, stock}}
+				actual.routes[0] = observedRouteGraph{httpParts: map[string]*observedRouteGraph{"a": &aObserved, "b": &bObserved, "stock": &stockObserved}}
+			} else {
+				desired.routes = append(desired.routes, b, stock)
+				for range 2 {
+					desired.spec.Routes = append(desired.spec.Routes, cloud.RouteGraphNode{Disposition: cloud.GraphEnsure})
+				}
+				actual.routes = append(actual.routes, bObserved, stockObserved)
+			}
+			p := h2cUnenrolledProvider(t)
+			plan, result, err := p.buildGatewayGraphPlan(desired, actual)
+			if err != nil || len(plan) == 0 {
+				t.Fatalf("plan = %#v, error %v", plan, err)
+			}
+			step, prepared, err := p.prepareNextGraphMutation(t.Context(), desired, actual, plan, &result)
+			if err != nil || !prepared || step.route.kind != routeMutationUpdateMember || step.route.parentID != "pool-stock" {
+				t.Fatalf("only the stock member can be enabled: step=%#v, prepared=%t, err=%v", step.route, prepared, err)
+			}
+			for _, step := range plan {
+				if step.route.kind == routeMutationUpdateMember && step.route.parentID != "pool-stock" {
+					t.Fatalf("planning exposed a member enable before transport confirmation: %#v", step)
+				}
+			}
+			if result.Routes[0].Result.UnsupportedBackendProtocol == "" ||
+				!grouped && (result.Routes[1].Result.UnsupportedBackendProtocol == "" || result.Routes[2].Result.UnsupportedBackendProtocol != "") {
+				t.Fatalf("missing h2c affected the wrong route(s): %#v", result.Routes)
+			}
+		})
+	}
+}
+
+func TestH2CDisabledPoolReactivationRequiresEnrollment(t *testing.T) {
+	route, observed := h2cPlanningPool("h2c", true)
+	observed.backendH2C, observed.pool.AdminStateUp = true, false
+	desired, actual := fixedHTTPPlanFixture(route, observed)
+	desired.protocol = cloud.ListenerProtocolHTTP
+	actual.loadBalancer.Provider = "amphora"
+	p := h2cUnenrolledProvider(t)
+	plan, result, err := p.buildGatewayGraphPlan(desired, actual)
+	if err != nil || len(plan) == 0 || plan[0].route.kind != routeMutationUpdatePool {
+		t.Fatalf("expected a pool enable: plan=%#v err=%v", plan, err)
+	}
+	_, prepared, err := p.prepareNextGraphMutation(t.Context(), desired, actual, plan, &result)
+	if prepared || err != nil || result.Routes[0].Result.UnsupportedBackendProtocol == "" {
+		t.Fatalf("pool must stay disabled without provider enrollment: prepared=%t result=%#v err=%v", prepared, result.Routes[0], err)
+	}
+}
+
+func TestH2CBackendWithTLSDriftOnlyWithdrawsItsPool(t *testing.T) {
+	incompatible, observedTLS := h2cPlanningPool("tls", true)
+	stock, observedStock := h2cPlanningPool("stock", false)
+	incompatible.backendKey, stock.backendKey = "tls", "stock"
+	observedTLS.pool.TLSEnabled, observedTLS.members[0].AdminStateUp = true, true
+	desired, actual := fixedHTTPPlanFixture(
+		desiredRoute{httpParts: []desiredRoute{incompatible, stock}},
+		observedRouteGraph{httpParts: map[string]*observedRouteGraph{"tls": &observedTLS, "stock": &observedStock}},
+	)
+
+	p := &Provider{}
+	plan, result, err := p.buildGatewayGraphPlan(desired, actual)
+	if err != nil || len(plan) != 1 || plan[0].route.kind != routeMutationDisableMember || plan[0].route.parentID != "pool-tls" {
+		t.Fatalf("TLS drift must withdraw its own member: plan=%#v err=%v", plan, err)
+	}
+	if result.Routes[0].Result.UnsupportedBackendProtocol == "" {
+		t.Fatalf("TLS drift was absent from the affected route: %#v", result.Routes)
+	}
+
+	observedTLS.members[0].AdminStateUp = false
+	plan, result, err = p.buildGatewayGraphPlan(desired, actual)
+	if err != nil || len(plan) != 1 || plan[0].route.kind != routeMutationUpdateMember || plan[0].route.parentID != "pool-stock" {
+		t.Fatalf("TLS drift must leave other backend convergence possible: plan=%#v err=%v", plan, err)
+	}
+	if result.Routes[0].Result.UnsupportedBackendProtocol == "" || result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing {
+		t.Fatalf("drained TLS backend must still report incompatible transport: %#v", result.Routes)
+	}
+}
+
+func h2cPlanningPool(name string, h2c bool) (desiredRoute, observedRouteGraph) {
+	route, observed := convergedRoutePlanFixture()
+	route.spec.BackendH2C = h2c
+	route.policies, observed.policies = nil, nil
+	observed.pool.ID, observed.pool.ProvisioningStatus = "pool-"+name, "ACTIVE"
+	observed.monitor.ProvisioningStatus = "ACTIVE"
+	observed.members[0].ID, observed.members[0].ProvisioningStatus = "member-"+name, "ACTIVE"
+	observed.members[0].AdminStateUp = false
+	return route, observed
+}
+
+func h2cUnenrolledProvider(t *testing.T) *Provider {
+	t.Helper()
+	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/lbaas/providers/amphora/gateway_capabilities" {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": []string{}})
+	}))
+	return NewProvider(ServiceClients{LoadBalancer: client}, ProviderConfig{BackendH2C: true})
+}

@@ -1,0 +1,9 @@
+{
+  "server": "11.4.13-MariaDB-ubu2404",
+  "migration": "61dc89ad2fb7",
+  "legacyPoolPreserved": true,
+  "lockedReadObservedCommittedTransport": true,
+  "clearedFlag": true,
+  "octaviaSourceRevision": "07ec2a9d13e1bc61e3eb0d32a6846c375d8fe2d6",
+  "octaviaLibSourceRevision": "b3ee4411c61b715220eb0a7dc196586e96b958c4"
+}

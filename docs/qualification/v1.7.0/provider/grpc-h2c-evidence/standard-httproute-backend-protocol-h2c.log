@@ -1,0 +1,45 @@
+=== RUN   TestBackendH2C
+=== RUN   TestBackendH2C/HTTPRouteBackendProtocolH2C
+=== RUN   TestBackendH2C/HTTPRouteBackendProtocolH2C/http2_prior_knowledge_request_should_reach_backend
+        < HTTP/2.0 404 Not Found
+        < HTTP/2.0 404 Not Found
+        < HTTP/2.0 404 Not Found
+        < HTTP/2.0 404 Not Found
+        < HTTP/2.0 404 Not Found
+        < HTTP/2.0 404 Not Found
+        < HTTP/2.0 404 Not Found
+        < HTTP/2.0 404 Not Found
+        < HTTP/2.0 404 Not Found
+        < HTTP/2.0 404 Not Found
+        < HTTP/2.0 404 Not Found
+        < HTTP/2.0 404 Not Found
+        < HTTP/2.0 404 Not Found
+        < HTTP/2.0 404 Not Found
+        < HTTP/2.0 404 Not Found
+        < HTTP/2.0 404 Not Found
+        < HTTP/2.0 404 Not Found
+        < HTTP/2.0 404 Not Found
+        < HTTP/2.0 404 Not Found
+        < HTTP/2.0 404 Not Found
+        < HTTP/2.0 404 Not Found
+        < HTTP/2.0 404 Not Found
+        < HTTP/2.0 404 Not Found
+        < HTTP/2.0 404 Not Found
+        < HTTP/2.0 404 Not Found
+        < HTTP/2.0 404 Not Found
+        < HTTP/2.0 404 Not Found
+        < HTTP/2.0 404 Not Found
+        < HTTP/2.0 404 Not Found
+        < HTTP/2.0 404 Not Found
+        < HTTP/2.0 404 Not Found
+        < HTTP/2.0 404 Not Found
+        < HTTP/2.0 404 Not Found
+        < HTTP/2.0 200 OK
+        < HTTP/2.0 200 OK
+        < HTTP/2.0 200 OK
+=== RUN   TestBackendH2C/GRPCExactMethodMatching
+--- PASS: TestBackendH2C (3.74s)
+    --- PASS: TestBackendH2C/HTTPRouteBackendProtocolH2C (3.67s)
+        --- PASS: TestBackendH2C/HTTPRouteBackendProtocolH2C/http2_prior_knowledge_request_should_reach_backend (3.35s)
+    --- SKIP: TestBackendH2C/GRPCExactMethodMatching (0.00s)
+PASS

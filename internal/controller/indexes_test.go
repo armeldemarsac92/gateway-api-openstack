@@ -87,13 +87,20 @@ func TestSetupIndexes(t *testing.T) {
 		{IndexL4RouteByBackendNamespace, []string{"apps"}},
 		{IndexL4RouteByBoundGateway, []string{"gateways/edge"}},
 	}
-	if want := len(wantTypes) + 2*len(l4Fields); len(indexer.indexes) != want {
-		t.Fatalf("registered indexes = %d, want %d", len(indexer.indexes), want)
-	}
+	want := len(wantTypes) + 2*len(l4Fields)
 	for field, object := range wantTypes {
 		if _, found := indexer.indexes[fieldIndexKey{objectType: reflect.TypeOf(object), field: field}]; !found {
 			t.Errorf("field index %q was not registered for %T", field, object)
 		}
+		if _, shared := object.(*gatewayv1.HTTPRoute); shared {
+			want++
+			if _, found := indexer.indexes[fieldIndexKey{objectType: reflect.TypeOf(&gatewayv1.GRPCRoute{}), field: field}]; !found {
+				t.Errorf("field index %q was not registered for GRPCRoute", field)
+			}
+		}
+	}
+	if len(indexer.indexes) != want {
+		t.Fatalf("registered indexes = %d, want %d", len(indexer.indexes), want)
 	}
 
 	gatewayClass := &gatewayv1.GatewayClass{Spec: gatewayv1.GatewayClassSpec{ControllerName: config.ControllerName}}

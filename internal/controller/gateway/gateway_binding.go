@@ -23,6 +23,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -104,15 +105,23 @@ func (r *Reconciler) sealScopedRoutes(ctx context.Context, snapshot *gatewayMuta
 	case gatewayv1.HTTPProtocolType:
 		list = &gatewayv1.HTTPRouteList{}
 	}
-	if err := r.APIReader.List(ctx, list); err != nil {
-		return false, err
+	lists := []client.ObjectList{list}
+	if protocol == gatewayv1.HTTPProtocolType {
+		lists = append(lists, &gatewayv1.GRPCRouteList{})
 	}
-	if list.GetContinue() != "" {
-		return false, fmt.Errorf("incomplete %s route enrollment list", protocol)
-	}
-	items, err := meta.ExtractList(list)
-	if err != nil {
-		return false, err
+	var items []runtime.Object
+	for _, list := range lists {
+		if err := r.APIReader.List(ctx, list); err != nil {
+			return false, err
+		}
+		if list.GetContinue() != "" {
+			return false, fmt.Errorf("incomplete %s route enrollment list", protocol)
+		}
+		routes, err := meta.ExtractList(list)
+		if err != nil {
+			return false, err
+		}
+		items = append(items, routes...)
 	}
 	var candidate client.Object
 	for _, item := range items {

@@ -39,11 +39,42 @@ func (s *Service) ListPools(ctx context.Context, opts pools.ListOpts) ([]pools.P
 	return items, nil
 }
 
-// ListCompletePools requires an explicit pool collection on every page.
-func (s *Service) ListCompletePools(ctx context.Context, opts pools.ListOpts) ([]pools.Pool, error) {
-	return listCompleteCollection(ctx, pools.List(s.client, opts), func(result pagination.PageResult) pagination.Page {
+// PoolInventory carries the provider extension separately from SDK pool types.
+type PoolInventory struct {
+	Items      []pools.Pool
+	BackendH2C map[string]bool
+}
+
+// ListPoolInventory requires an explicit pool collection on every page and
+// reads backend transport alongside the stock fields.
+func (s *Service) ListPoolInventory(ctx context.Context, opts pools.ListOpts) (PoolInventory, error) {
+	inventory := PoolInventory{BackendH2C: make(map[string]bool)}
+	items, err := listCompleteCollection(ctx, pools.List(s.client, opts), func(result pagination.PageResult) pagination.Page {
 		return pools.PoolPage{LinkedPageBase: pagination.LinkedPageBase{PageResult: result}}
-	}, "pools", pools.ExtractPools)
+	}, "pools", func(page pagination.Page) ([]pools.Pool, error) {
+		var response struct {
+			Pools []struct {
+				pools.Pool
+				BackendH2C bool `json:"backend_h2c"`
+			} `json:"pools"`
+		}
+		if err := page.(pools.PoolPage).ExtractInto(&response); err != nil {
+			return nil, err
+		}
+		if response.Pools == nil {
+			return nil, nil
+		}
+		items := make([]pools.Pool, 0, len(response.Pools))
+		for _, pool := range response.Pools {
+			items = append(items, pool.Pool)
+			if pool.BackendH2C {
+				inventory.BackendH2C[pool.ID] = true
+			}
+		}
+		return items, nil
+	})
+	inventory.Items = items
+	return inventory, err
 }
 
 func listCompleteCollection[T any](ctx context.Context, pager pagination.Pager, create func(pagination.PageResult) pagination.Page, field string, extract func(pagination.Page) ([]T, error)) ([]T, error) {
@@ -91,13 +122,41 @@ func missingCollection(field string) error {
 	return cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady, fmt.Errorf("missing %s collection in Octavia response", field))
 }
 
+// CreatePoolOpts adds optional backend transport to a stock pool create request.
+type CreatePoolOpts struct {
+	pools.CreateOpts
+	BackendH2C bool
+}
+
+func (opts CreatePoolOpts) ToPoolCreateMap() (map[string]any, error) {
+	body, err := opts.CreateOpts.ToPoolCreateMap()
+	if err == nil && opts.BackendH2C {
+		body["pool"].(map[string]any)["backend_h2c"] = true
+	}
+	return body, err
+}
+
+// UpdatePoolOpts adds optional backend transport to a stock pool update request.
+type UpdatePoolOpts struct {
+	pools.UpdateOpts
+	BackendH2C *bool
+}
+
+func (opts UpdatePoolOpts) ToPoolUpdateMap() (map[string]any, error) {
+	body, err := opts.UpdateOpts.ToPoolUpdateMap()
+	if err == nil && opts.BackendH2C != nil {
+		body["pool"].(map[string]any)["backend_h2c"] = *opts.BackendH2C
+	}
+	return body, err
+}
+
 // CreatePool creates one pool.
-func (s *Service) CreatePool(ctx context.Context, opts pools.CreateOpts) (*pools.Pool, error) {
+func (s *Service) CreatePool(ctx context.Context, opts pools.CreateOptsBuilder) (*pools.Pool, error) {
 	return pools.Create(ctx, s.client, opts).Extract()
 }
 
 // UpdatePool updates one pool.
-func (s *Service) UpdatePool(ctx context.Context, id string, opts pools.UpdateOpts) (*pools.Pool, error) {
+func (s *Service) UpdatePool(ctx context.Context, id string, opts pools.UpdateOptsBuilder) (*pools.Pool, error) {
 	return pools.Update(ctx, s.client, id, opts).Extract()
 }
 

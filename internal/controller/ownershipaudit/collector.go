@@ -59,6 +59,10 @@ func CollectOwnershipSnapshot(ctx context.Context, reader client.Reader, config 
 		return audit.KubernetesSnapshot{}, fmt.Errorf("list HTTPRoutes for ownership audit: %w", err)
 	}
 
+	var grpc gatewayv1.GRPCRouteList
+	if err := reader.List(ctx, &grpc); err != nil {
+		return audit.KubernetesSnapshot{}, fmt.Errorf("list GRPCRoutes for ownership audit: %w", err)
+	}
 	var streams gatewayv1.TCPRouteList
 	if err := reader.List(ctx, &streams); err != nil {
 		return audit.KubernetesSnapshot{}, fmt.Errorf("list TCPRoutes for ownership audit: %w", err)
@@ -67,7 +71,7 @@ func CollectOwnershipSnapshot(ctx context.Context, reader client.Reader, config 
 	if err := reader.List(ctx, &datagrams); err != nil {
 		return audit.KubernetesSnapshot{}, fmt.Errorf("list UDPRoutes for ownership audit: %w", err)
 	}
-	if gateways.Continue != "" || routes.Continue != "" || streams.Continue != "" || datagrams.Continue != "" {
+	if gateways.Continue != "" || routes.Continue != "" || grpc.Continue != "" || streams.Continue != "" || datagrams.Continue != "" {
 		return audit.KubernetesSnapshot{}, fmt.Errorf("incomplete Kubernetes ownership inventory")
 	}
 
@@ -94,6 +98,9 @@ func CollectOwnershipSnapshot(ctx context.Context, reader client.Reader, config 
 
 	for i := range routes.Items {
 		recordRoute(&snapshot, config, &routes.Items[i], "HTTPRoute")
+	}
+	for i := range grpc.Items {
+		recordRoute(&snapshot, config, &grpc.Items[i], "GRPCRoute")
 	}
 	for i := range streams.Items {
 		recordRoute(&snapshot, config, &streams.Items[i], "TCPRoute")

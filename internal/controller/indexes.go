@@ -202,6 +202,19 @@ func controllerFieldIndexes(config Config) []controllerFieldIndex {
 			},
 		},
 	}
+	// The field names are scoped to the Kubernetes kind by the cache.
+	for _, index := range indexes {
+		if _, ok := index.object.(*gatewayv1.HTTPRoute); !ok {
+			continue
+		}
+		indexes = append(indexes, controllerFieldIndex{object: &gatewayv1.GRPCRoute{}, field: index.field, extract: func(object client.Object) []string {
+			route, ok := object.(*gatewayv1.GRPCRoute)
+			if !ok {
+				return nil
+			}
+			return index.extract(model.ProjectGRPCRoute(route))
+		}})
+	}
 	for _, route := range []client.Object{&gatewayv1.TCPRoute{}, &gatewayv1.UDPRoute{}} {
 		indexes = append(indexes,
 			controllerFieldIndex{object: route, field: IndexL4RouteByParentGateway, extract: func(object client.Object) []string {
@@ -233,6 +246,8 @@ func controllerFieldIndexes(config Config) []controllerFieldIndex {
 func RouteParents(object client.Object) ([]gatewayv1.ParentReference, []gatewayv1.RouteParentStatus, bool) {
 	switch route := object.(type) {
 	case *gatewayv1.HTTPRoute:
+		return route.Spec.ParentRefs, route.Status.Parents, true
+	case *gatewayv1.GRPCRoute:
 		return route.Spec.ParentRefs, route.Status.Parents, true
 	case *gatewayv1.TCPRoute:
 		return route.Spec.ParentRefs, route.Status.Parents, true

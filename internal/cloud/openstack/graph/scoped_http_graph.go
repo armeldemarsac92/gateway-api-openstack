@@ -36,11 +36,11 @@ func (p *Provider) observeScopedHTTPGraph(ctx context.Context, desired desiredGa
 	if desired.spec.Gateway.Disposition == cloud.GraphDelete {
 		routeRecovery = &desired.identity
 	}
-	poolItems, err := p.listGatewayPools(ctx, actual.loadBalancer)
+	poolInventory, err := p.listGatewayPoolInventory(ctx, actual.loadBalancer)
 	if err != nil {
 		return actual, err
 	}
-	actual.routes, err = p.observeRouteGraphsFromPools(ctx, owners, actual.loadBalancer, nil, actual.protocol, actual.scopedListeners, poolItems, routeRecovery)
+	actual.routes, err = p.observeRouteGraphsFromPools(ctx, owners, actual.loadBalancer, nil, actual.protocol, actual.scopedListeners, poolInventory, routeRecovery)
 	if err != nil {
 		return actual, err
 	}
@@ -310,6 +310,7 @@ func deferredScopedHTTPRoutes(desired desiredGatewayGraph, actual observedGatewa
 		route := desired.routes[i]
 		port := scopedHTTPRoutePort(route)
 		if desired.spec.Routes[i].Disposition != cloud.GraphEnsure || !slices.Contains(readyPorts, port) || route.targetsPending ||
+			route.backendTransportNeedsWithdrawal(observed) ||
 			!route.fixedResponse && observed.backendProvisioningIssue(false, true) != "" {
 			continue
 		}

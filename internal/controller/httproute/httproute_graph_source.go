@@ -24,13 +24,13 @@ import (
 	"slices"
 	"strings"
 
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	gatewaycontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
 // ObserveRouteGraph rebuilds every bound fragment from a complete cluster read.
@@ -78,9 +78,11 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 			return graph.RouteInputs{}, err
 		}
 		if !present || !controller.SameGatewayIdentity(identity, request.Identity) {
-			return graph.RouteInputs{}, fmt.Errorf("%w: HTTPRoute binding does not match the Gateway graph", cloud.ErrOwnershipConflict)
+			return graph.RouteInputs{}, fmt.Errorf("%w: %s binding does not match the Gateway graph", cloud.ErrOwnershipConflict, model.HTTPProfileRouteKind(route))
 		}
-		requested := request.Route != nil && route.UID == request.Route.UID
+		kind := model.HTTPProfileRouteKind(route)
+		reconciler := r.forRouteKind(kind)
+		requested := request.Route != nil && route.UID == request.Route.UID && kind == model.HTTPProfileRouteKind(request.Route)
 		if requested {
 			foundRequested = true
 			if !sameHTTPRouteRevision(route, request.Route.UID, request.Route.Generation, !request.Route.DeletionTimestamp.IsZero()) {
@@ -92,7 +94,7 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 		switch lifecycle {
 		case controller.RouteAttached, controller.RouteDetaching:
 		default:
-			return graph.RouteInputs{}, fmt.Errorf("%w: HTTPRoute fragment lifecycle is missing or invalid", cloud.ErrOwnershipConflict)
+			return graph.RouteInputs{}, fmt.Errorf("%w: %s fragment lifecycle is missing or invalid", cloud.ErrOwnershipConflict, kind)
 		}
 		if request.Action == graph.DeleteGateway {
 			input.Nodes = append(input.Nodes, node)
@@ -101,19 +103,19 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 		if lifecycle == controller.RouteDetaching {
 			node.Disposition = cloud.GraphDelete
 			snapshot := routeCleanupSnapshot{route: route, identity: identity, disposition: routeCleanupRequired}
-			fences = append(fences, func(ctx context.Context) error { return r.sealRouteCleanupSnapshot(ctx, snapshot) })
+			fences = append(fences, func(ctx context.Context) error { return reconciler.sealRouteCleanupSnapshot(ctx, snapshot) })
 		} else if backends != nil {
 			if requested {
 				if !route.DeletionTimestamp.IsZero() {
 					return graph.RouteInputs{}, errHTTPRouteChanged
 				}
-			} else if _, eligible := backends.admission.eligible[client.ObjectKeyFromObject(route)]; !eligible {
+			} else if _, eligible := backends.admission.eligible[routeKey(route)]; !eligible {
 				// The peer reconciles revocation through its durable detach checkpoint.
 				node.WaitForHTTPPolicyRemoval = true
 				input.Nodes = append(input.Nodes, node)
 				continue
 			}
-			snapshot, err := r.buildRouteValidationSnapshotFromInputs(ctx, route, gateway, routeSnapshotForEnsure, backends)
+			snapshot, err := reconciler.buildRouteValidationSnapshotFromInputs(ctx, route, gateway, routeSnapshotForEnsure, backends)
 			if err != nil {
 				var rejection *routeBuildError
 				if !requested && errors.As(err, &rejection) {
@@ -131,7 +133,7 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 			}
 			node.Disposition, node.Spec = cloud.GraphEnsure, snapshot.desired
 			fences = append(fences, func(ctx context.Context) error {
-				return r.sealRouteOwnershipSnapshot(ctx, snapshot, routeBindingRequired)
+				return reconciler.sealRouteOwnershipSnapshot(ctx, snapshot, routeBindingRequired)
 			})
 		}
 		if request.Action == graph.DeleteRoute && requested && node.Disposition != cloud.GraphDelete {
@@ -164,15 +166,16 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 }
 
 func (r *Reconciler) liveGraphRoutes(ctx context.Context, identity cloud.Identity) ([]gatewayv1.HTTPRoute, error) {
-	var list gatewayv1.HTTPRouteList
-	if err := r.APIReader.List(ctx, &list); err != nil {
-		return nil, fmt.Errorf("list Gateway route fragments: %w", err)
+	http, err := r.forRouteKind(model.HTTPRouteKind).listLiveRoutes(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list HTTPRoute graph fragments: %w", err)
 	}
-	if list.Continue != "" {
-		return nil, errors.New("incomplete Gateway route fragment list")
+	grpc, err := r.forRouteKind(model.GRPCRouteKind).listLiveRoutes(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list GRPCRoute graph fragments: %w", err)
 	}
 	result := make([]gatewayv1.HTTPRoute, 0)
-	for _, route := range list.Items {
+	for _, route := range slices.Concat(http, grpc) {
 		if controller.RouteClaimsGateway(r.Config, &route, identity) {
 			result = append(result, route)
 			continue

@@ -47,11 +47,16 @@ func requireListenerDefaultPoolInventory(lbID string, inventory octavia.Listener
 }
 
 func (p *Provider) listGatewayPools(ctx context.Context, lb *octavia.LoadBalancer) ([]pools.Pool, error) {
-	items, err := p.octavia.ListCompletePools(ctx, pools.ListOpts{LoadbalancerID: lb.ID, ProjectID: p.projectID})
+	inventory, err := p.listGatewayPoolInventory(ctx, lb)
+	return inventory.Items, err
+}
+
+func (p *Provider) listGatewayPoolInventory(ctx context.Context, lb *octavia.LoadBalancer) (octavia.PoolInventory, error) {
+	inventory, err := p.octavia.ListPoolInventory(ctx, pools.ListOpts{LoadbalancerID: lb.ID, ProjectID: p.projectID})
 	if err != nil {
-		return nil, fmt.Errorf("list pools beneath Gateway: %w", err)
+		return inventory, fmt.Errorf("list pools beneath Gateway: %w", err)
 	}
-	return items, crossCheckChildInventory("load balancer", lb.ID, "pool", lb.Pools, items, func(item pools.Pool) string { return item.ID })
+	return inventory, crossCheckChildInventory("load balancer", lb.ID, "pool", lb.Pools, inventory.Items, func(item pools.Pool) string { return item.ID })
 }
 
 // Octavia's parent response supplies arrays of ID references. A missing or
