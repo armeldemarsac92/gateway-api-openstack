@@ -156,6 +156,9 @@ func runKindTrafficConformance(t *testing.T, channel, envPrefix string, options 
 	if err := cfg.ValidateInstalledGatewayAPIVersion(t.Context(), apiClient); err != nil {
 		t.Fatal(err)
 	}
+	if err := checkGatewaySuiteNamespaces(t.Context(), apiClient); err != nil {
+		t.Fatal(err)
+	}
 	manager, err := ctrl.NewManager(restConfig, ctrl.Options{
 		Logger: zap.New(zap.UseDevMode(true)),
 		Scheme: scheme, Metrics: metricsserver.Options{BindAddress: "0"}, HealthProbeBindAddress: "0",

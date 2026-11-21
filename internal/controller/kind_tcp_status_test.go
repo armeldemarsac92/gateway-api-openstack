@@ -29,12 +29,15 @@ import (
 	"testing/fstest"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	"sigs.k8s.io/gateway-api/conformance"
@@ -52,6 +55,33 @@ var kindTCPStatusCases = []suite.ConformanceTest{
 	tests.TCPRouteInvalidNonTCPListener,
 	tests.TCPRouteInvalidCrossNamespaceBackendRef,
 	tests.TCPRouteInvalidBackendRefNonexistent,
+}
+
+func checkGatewaySuiteNamespaces(ctx context.Context, reader client.Reader) error {
+	for _, name := range []string{suite.InfrastructureNamespace, suite.AppBackendNamespace, suite.WebBackendNamespace} {
+		err := reader.Get(ctx, client.ObjectKey{Name: name}, &corev1.Namespace{})
+		switch {
+		case err == nil:
+			return fmt.Errorf("upstream namespace %s already exists", name)
+		case !apierrors.IsNotFound(err):
+			return fmt.Errorf("check upstream namespace %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func TestKindGatewaySuiteRefusesExistingNamespace(t *testing.T) {
+	apiClient := fake.NewClientBuilder().Build()
+	if err := checkGatewaySuiteNamespaces(t.Context(), apiClient); err != nil {
+		t.Fatal(err)
+	}
+	existing := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: suite.WebBackendNamespace}}
+	if err := apiClient.Create(t.Context(), existing); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkGatewaySuiteNamespaces(t.Context(), apiClient); err == nil {
+		t.Fatal("an existing upstream namespace was accepted for suite cleanup")
+	}
 }
 
 func TestKindUpstreamTCPStatus(t *testing.T) {

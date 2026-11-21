@@ -23,7 +23,6 @@ import (
 	"os"
 	"testing"
 
-	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -88,11 +87,8 @@ func TestKindUpstreamGatewayProfile(t *testing.T) {
 	if err := cfg.ValidateInstalledGatewayAPIVersion(t.Context(), apiClient); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{suite.InfrastructureNamespace, suite.AppBackendNamespace, suite.WebBackendNamespace} {
-		err := apiClient.Get(t.Context(), client.ObjectKey{Name: name}, &corev1.Namespace{})
-		if !apierrors.IsNotFound(err) {
-			t.Fatalf("upstream namespace %s must be absent before this attempt (lookup error: %v)", name, err)
-		}
+	if err := checkGatewaySuiteNamespaces(t.Context(), apiClient); err != nil {
+		t.Fatal(err)
 	}
 	const className = "kind-upstream-gateway-profile"
 	parameters := envtestClassParameters(className)
