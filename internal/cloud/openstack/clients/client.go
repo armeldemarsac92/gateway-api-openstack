@@ -21,6 +21,7 @@ package clients
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -161,6 +162,77 @@ func (c ServiceClients) NewKeyManagerClient() (*gophercloud.ServiceClient, error
 		return nil, fmt.Errorf("authenticated service clients are required")
 	}
 	return gopheropenstack.NewKeyManagerV1(c.Network.ProviderClient, c.endpointOpts)
+}
+
+// NewBackendCAKeyManagerClient discovers Barbican in the selected region and
+// pins requests to the project and creator asserted by the Keystone token.
+// The client shares the authenticated transport and refreshes only to the same
+// principal. Redirects are disabled to keep tokens and payloads at the catalog
+// endpoint. Errors contain no token, provider URL, or response body.
+func (c ServiceClients) NewBackendCAKeyManagerClient() (*gophercloud.ServiceClient, string, error) {
+	if c.Region == "" || c.Region != c.endpointOpts.Region {
+		return nil, "", errors.New("backend CA requires a selected OpenStack region")
+	}
+	client, err := c.NewKeyManagerClient()
+	if err != nil {
+		return nil, "", errors.New("discover regional Barbican endpoint for backend CA")
+	}
+	shared := client.ProviderClient
+	requestClient := &gophercloud.ProviderClient{HTTPClient: shared.HTTPClient, UserAgent: shared.UserAgent}
+	requestClient.HTTPClient.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	requestClient.CopyTokenFrom(shared)
+	projectID, creatorID := keyManagerIdentity(requestClient.GetAuthResult())
+	if projectID == "" || projectID != c.ProjectID || creatorID == "" || requestClient.Token() == "" {
+		return nil, "", errors.New("backend CA requires an authenticated OpenStack project and creator")
+	}
+	if shared.ReauthFunc != nil {
+		requestClient.ReauthFunc = func(ctx context.Context) error {
+			if err := shared.Reauthenticate(ctx, requestClient.Token()); err != nil {
+				return errors.New("refresh OpenStack authentication for backend CA")
+			}
+			result := shared.GetAuthResult()
+			project, creator := keyManagerIdentity(result)
+			if project != projectID || creator != creatorID {
+				return errors.New("OpenStack principal changed during backend CA authentication")
+			}
+			if err := requestClient.SetTokenAndAuthResult(result); err != nil || requestClient.Token() == "" {
+				return errors.New("refresh OpenStack token for backend CA")
+			}
+			return nil
+		}
+	}
+	client.ProviderClient = requestClient
+	return client, creatorID, nil
+}
+
+func keyManagerIdentity(result gophercloud.AuthResult) (projectID, creatorID string) {
+	switch result := result.(type) {
+	case interface {
+		ExtractProject() (*tokensv3.Project, error)
+		ExtractUser() (*tokensv3.User, error)
+	}:
+		project, projectErr := result.ExtractProject()
+		user, userErr := result.ExtractUser()
+		if projectErr == nil && userErr == nil && project != nil && user != nil {
+			return project.ID, user.ID
+		}
+	case tokensv2.CreateResult:
+		return keyManagerV2Identity(tokensv2.GetResult{CreateResult: result})
+	case tokensv2.GetResult:
+		return keyManagerV2Identity(result)
+	}
+	return "", ""
+}
+
+func keyManagerV2Identity(result tokensv2.GetResult) (projectID, creatorID string) {
+	token, tokenErr := result.ExtractToken()
+	user, userErr := result.ExtractUser()
+	if tokenErr == nil && userErr == nil && token != nil && user != nil {
+		return token.Tenant.ID, user.ID
+	}
+	return "", ""
 }
 
 func newRateLimitedHTTPClient(tlsConfig *tls.Config, qps float64, burst int) http.Client {
