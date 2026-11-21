@@ -65,7 +65,7 @@ func TestWeightedHTTPRouteRevokesAndRestoresOnlyDeniedShare(t *testing.T) {
 		{PathType: cloud.PathMatchPrefix, PathValue: "/canary", Precedence: 1},
 	}
 	if len(spec.WeightedHTTPRules) != 1 || spec.WeightedHTTPRules[0].RuleIndex != 1 ||
-		!slices.Equal(spec.WeightedHTTPRules[0].Matches, wantMatches) {
+		!reflect.DeepEqual(spec.WeightedHTTPRules[0].Matches, wantMatches) {
 		t.Fatalf("weighted matches = %#v", spec.WeightedHTTPRules)
 	}
 	if len(spec.HTTPBackends) != 2 || len(spec.HTTPBackends[0].Matches) != 1 ||
@@ -119,7 +119,7 @@ func TestWeightedHTTPRouteRevokesAndRestoresOnlyDeniedShare(t *testing.T) {
 	denied := reconcile(metav1.ConditionFalse, gatewayv1.RouteReasonRefNotPermitted)
 	if len(denied.HTTPBackends) != 1 || !reflect.DeepEqual(denied.HTTPBackends[0], allowed.HTTPBackends[0]) ||
 		len(denied.WeightedHTTPRules) != 1 || denied.WeightedHTTPRules[0].RuleIndex != 1 ||
-		!slices.Equal(denied.WeightedHTTPRules[0].Matches, wantMatches) ||
+		!reflect.DeepEqual(denied.WeightedHTTPRules[0].Matches, wantMatches) ||
 		!reflect.DeepEqual(denied.WeightedHTTPRules[0].Targets, []cloud.HTTPWeightedTarget{{BackendIndex: ptr.To(0), Weight: 3}, {Weight: 1}}) {
 		t.Fatalf("revoked spec lost or redistributed a share: %#v", denied)
 	}

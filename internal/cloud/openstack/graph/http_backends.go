@@ -234,7 +234,11 @@ func planFixedResponseDuringMemberWithdrawal(desired desiredRoute, observed obse
 			if policy.fixedResponse && policy.policy.ProvisioningStatus == "ERROR" ||
 				!policy.fixedResponse && policy.policy.Action == string(l7policies.ActionRedirectToPool) &&
 					policy.policy.RedirectPoolID == observed.pool.ID {
-				return routeMutation{kind: routeMutationSetPolicyTarget, id: policy.policy.ID}, true
+				var operations []cloud.HTTPHeaderOperation
+				if policy.requestHeaderOperations != nil {
+					operations = []cloud.HTTPHeaderOperation{}
+				}
+				return routeMutation{kind: routeMutationSetPolicyTarget, id: policy.policy.ID, requestHeaderOperations: operations}, true
 			}
 		}
 	}
@@ -307,7 +311,8 @@ func observedForwardPolicyMatches(route desiredRoute, observed observedRouteGrap
 		return false
 	}
 	return slices.ContainsFunc(route.policies, func(wanted desiredPolicy) bool {
-		if wanted.role != policy.role || !observedHTTPPredicateMatches(policy, rulesFor(wanted, route.hostnameRuleValue)) {
+		if wanted.role != policy.role || !slices.Equal(wanted.requestHeaderOperations, policy.requestHeaderOperations) ||
+			!observedHTTPPredicateMatches(policy, rulesFor(wanted, route.hostnameRuleValue)) {
 			return false
 		}
 		switch {

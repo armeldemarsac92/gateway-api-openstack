@@ -19,6 +19,7 @@ package graph
 import (
 	"encoding/json"
 	"net/http"
+	"reflect"
 	"testing"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
@@ -122,5 +123,87 @@ func TestLostHTTPActionCapabilityOnlyAllowsRestrictiveWithdrawal(t *testing.T) {
 	actual.routes[0].policies[0].policy.AdminStateUp = false
 	if _, err := p.prepareGraphMutation(t.Context(), desired, actual, step); err == nil {
 		t.Fatal("missing capability allowed an extension write after verified disable")
+	}
+}
+
+func TestRequestHeaderPolicyDriftUsesEffectiveProviderAndCanClearAfterOptOut(t *testing.T) {
+	const path = "/lbaas/providers/amphora-region-alias/gateway_capabilities"
+	var advertise, clear bool
+	var probes, writes int
+	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == path:
+			probes++
+			capabilities := []string{octavia.GatewayCapabilityFixedHTTPResponses}
+			if advertise {
+				// The header capability authorizes the write independently.
+				capabilities = []string{octavia.GatewayCapabilityRequestHeaderOperations}
+			}
+			safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": capabilities})
+		case r.Method == http.MethodPut && r.URL.Path == "/lbaas/l7policies/policy-1":
+			writes++
+			var body map[string]map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			expected := []any{}
+			if !clear {
+				expected = []any{
+					map[string]any{"operation": "SET", "name": "x-color", "value": ""},
+					map[string]any{"operation": "REMOVE", "name": "x-old"},
+				}
+			}
+			if !reflect.DeepEqual(body["l7policy"], map[string]any{"request_header_operations": expected}) {
+				t.Errorf("policy update = %#v", body)
+			}
+			safetyWriteJSON(t, w, map[string]any{"l7policy": map[string]any{"id": "policy-1"}})
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	p := NewProvider(ServiceClients{LoadBalancer: client}, ProviderConfig{RequestHeaderModifier: true})
+	desired, observed := convergedRoutePlanFixture()
+	watched := &observed.policies[0]
+	watched.policy.ProvisioningStatus = "ACTIVE"
+	watched.requestHeaderOperations = []cloud.HTTPHeaderOperation{{Operation: cloud.HTTPHeaderSet, Name: "x-color", Value: "drifted"}}
+	operations := []cloud.HTTPHeaderOperation{
+		{Operation: cloud.HTTPHeaderSet, Name: "x-color"},
+		{Operation: cloud.HTTPHeaderRemove, Name: "x-old"},
+	}
+	desired.policies[0].requestHeaderOperations = operations
+	gateway := desiredGatewayGraph{protocol: cloud.ListenerProtocolHTTP, routes: []desiredRoute{desired}}
+	lb := safetyObservedLoadBalancer()
+	lb.Provider = "amphora-region-alias"
+	state := observedGatewayGraph{loadBalancer: lb}
+	reconfigure := func() error {
+		t.Helper()
+		steps, _, err := buildRouteEnsurePlan(desired, observed)
+		if err != nil || len(steps) != 1 || steps[0].kind != routeMutationSetPolicyHeaders {
+			t.Fatalf("expected one in-place header update, got %#v, %v", steps, err)
+		}
+		step, err := p.prepareGraphMutation(t.Context(), gateway, state, graphMutation{
+			kind: graphRouteMutation, route: steps[0],
+		})
+		if err != nil {
+			return err
+		}
+		return p.executeRouteMutation(t.Context(), desired, step.route)
+	}
+	if err := reconfigure(); err == nil || probes != 1 || writes != 0 {
+		t.Fatalf("missing header capability allowed a write, reads=%d writes=%d err=%v", probes, writes, err)
+	}
+	advertise = true
+	if err := reconfigure(); err != nil || probes != 2 || writes != 1 {
+		t.Fatalf("independent header patch failed, reads=%d writes=%d err=%v", probes, writes, err)
+	}
+	watched.requestHeaderOperations = operations
+	if plan, _, err := buildRouteEnsurePlan(desired, observed); err != nil || len(plan) != 0 {
+		t.Fatalf("stable request headers planned new mutations: %#v, %v", plan, err)
+	}
+	advertise, clear = false, true
+	desired.policies[0].requestHeaderOperations = nil
+	if err := reconfigure(); err != nil || probes != 2 || writes != 2 {
+		t.Fatalf("could not withdraw operations after opt-out, reads=%d writes=%d err=%v", probes, writes, err)
 	}
 }

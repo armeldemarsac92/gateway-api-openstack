@@ -595,19 +595,31 @@ func routeStateFromObservation(actual observedRouteGraph) cloud.RouteState {
 // prepareGraphMutation resolves provider prerequisites before the caller's
 // live Kubernetes authorization check, which stays adjacent to the write.
 func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, step graphMutation) (graphMutation, error) {
-	if !desired.fixedHTTPResponses || desired.protocol != cloud.ListenerProtocolHTTP {
+	if desired.protocol != cloud.ListenerProtocolHTTP {
 		return step, nil
 	}
+	var required []string
+	fixed := desired.fixedHTTPResponses
 	switch step.kind {
 	case graphCreateLoadBalancer, graphCreateListener, graphSetListenerNotFound, graphEnableListener, graphEnableLoadBalancer:
 	case graphRouteMutation:
-		if !routeNeedsHTTPCapability(graphRoutePart(desired, step), step.route) {
-			return step, nil
+		fixed = fixed && routeNeedsHTTPCapability(graphRoutePart(desired, step), step.route)
+		if len(step.route.requestHeaderOperations) != 0 {
+			required = append(required, octavia.GatewayCapabilityRequestHeaderOperations)
 		}
 	default:
 		return step, nil
 	}
-	if err := p.verifyGatewayHTTPCapabilities(ctx, desired, actual); err != nil {
+	if fixed {
+		required = append(required, octavia.GatewayCapabilityFixedHTTPResponses)
+		if p.weightedHTTPTargets {
+			required = append(required, octavia.GatewayCapabilityWeightedHTTPTargets)
+		}
+	}
+	if len(required) == 0 {
+		return step, nil
+	}
+	if err := p.verifyGatewayHTTPCapabilities(ctx, desired, actual, required); err != nil {
 		// A removed capability cannot authorize a target update. Still
 		// withdraw an affected serving policy using the stock API.
 		if step.kind == graphRouteMutation && step.withdrawHTTPPolicy && step.route.kind == routeMutationSetPolicyTarget &&

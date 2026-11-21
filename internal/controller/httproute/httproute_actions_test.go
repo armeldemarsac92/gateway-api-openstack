@@ -18,6 +18,7 @@ package httproute
 
 import (
 	"errors"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -60,7 +61,7 @@ func TestFixedRedirectProgramsWithoutBackendReads(t *testing.T) {
 	}
 	redirect := spec.HTTPRedirects[0]
 	if redirect.RuleIndex != 0 || redirect.Prefix != "http://moved.example.test" || redirect.StatusCode != 302 ||
-		!slices.Equal(redirect.Matches, []cloud.HTTPPathMatch{{PathType: cloud.PathMatchPrefix, PathValue: "/"}}) {
+		!reflect.DeepEqual(redirect.Matches, []cloud.HTTPPathMatch{{PathType: cloud.PathMatchPrefix, PathValue: "/"}}) {
 		t.Fatalf("redirect = %#v", redirect)
 	}
 	if len(f.reader.counts) != 0 {
@@ -148,19 +149,19 @@ func TestMixedFixedRedirectRetainsRuleAndListenerPrecedence(t *testing.T) {
 	}
 	group := spec.HTTPBackends[0]
 	if group.Name != "missing" || !group.Unavailable ||
-		!slices.Equal(group.Matches, []cloud.HTTPPathMatch{{Hostname: string(host), PathType: cloud.PathMatchExact, PathValue: "/stay", Precedence: 1}}) {
+		!reflect.DeepEqual(group.Matches, []cloud.HTTPPathMatch{{Hostname: string(host), PathType: cloud.PathMatchExact, PathValue: "/stay", Precedence: 1}}) {
 		t.Fatalf("backend = %#v", group)
 	}
 	first, archive := spec.HTTPRedirects[0], spec.HTTPRedirects[1]
 	if first.RuleIndex != 0 || first.Prefix != "http://moved.example.test" || first.StatusCode != 308 ||
-		!slices.Equal(first.Matches, []cloud.HTTPPathMatch{
+		!reflect.DeepEqual(first.Matches, []cloud.HTTPPathMatch{
 			{Hostname: string(host), PathType: cloud.PathMatchExact, PathValue: "/gone", Precedence: 0},
 			{Hostname: string(host), PathType: cloud.PathMatchPrefix, PathValue: "/old", Precedence: 4},
 		}) {
 		t.Fatalf("first redirect = %#v", first)
 	}
 	if archive.RuleIndex != 2 || archive.Prefix != "http://archive.example.test" ||
-		!slices.Equal(archive.Matches, []cloud.HTTPPathMatch{{Hostname: string(host), PathType: cloud.PathMatchPrefix, PathValue: "/archive", Precedence: 3}}) ||
+		!reflect.DeepEqual(archive.Matches, []cloud.HTTPPathMatch{{Hostname: string(host), PathType: cloud.PathMatchPrefix, PathValue: "/archive", Precedence: 3}}) ||
 		provider.routeSpecs[1].Precedence != 2 {
 		t.Fatalf("archive = %#v, peer = %#v", archive, provider.routeSpecs[1])
 	}
@@ -313,5 +314,44 @@ func TestUnsupportedAmphoraActionsDoNotBindOrProvision(t *testing.T) {
 				t.Fatal("unsupported action called the cloud provider")
 			}
 		})
+	}
+}
+
+func TestRequestHeaderModifierStaysOnWinningMatchWithSharedService(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	base := f.route.Spec.Rules[0]
+	modified := *base.DeepCopy()
+	modified.Matches = []gatewayv1.HTTPRouteMatch{{
+		Path: &gatewayv1.HTTPPathMatch{Type: ptr.To(gatewayv1.PathMatchExact), Value: ptr.To("/specific")},
+	}}
+	modified.Filters = []gatewayv1.HTTPRouteFilter{{
+		Type: gatewayv1.HTTPRouteFilterRequestHeaderModifier,
+		RequestHeaderModifier: &gatewayv1.HTTPHeaderFilter{
+			Set:    []gatewayv1.HTTPHeader{{Name: "X-Tenant", Value: "blue"}},
+			Add:    []gatewayv1.HTTPHeader{{Name: "X-Extra", Value: ""}},
+			Remove: []string{"X-Old"},
+		},
+	}}
+	f.route.Spec.Rules = []gatewayv1.HTTPRouteRule{base, modified}
+	if _, err := f.reconciler.buildRouteModelWithReader(t.Context(), f.reader, f.route, f.gateway); err == nil {
+		t.Fatal("stock controller accepted RequestHeaderModifier")
+	}
+	f.reconciler.Config.RequestHeaderModifier = true
+	spec, err := f.reconciler.buildRouteModelWithReader(t.Context(), f.reader, f.route, f.gateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(spec.HTTPBackends) != 1 || len(spec.HTTPBackends[0].Matches) != 2 {
+		t.Fatalf("expected two matches sharing one pool, got %+v", spec.HTTPBackends)
+	}
+	exact, other := spec.HTTPBackends[0].Matches[0], spec.HTTPBackends[0].Matches[1]
+	want := []cloud.HTTPHeaderOperation{
+		{Operation: cloud.HTTPHeaderSet, Name: "x-tenant", Value: "blue"},
+		{Operation: cloud.HTTPHeaderAdd, Name: "x-extra", Value: ""},
+		{Operation: cloud.HTTPHeaderRemove, Name: "x-old"},
+	}
+	if exact.PathValue != "/specific" || exact.Precedence >= other.Precedence ||
+		!slices.Equal(exact.RequestHeaderOperations, want) || len(other.RequestHeaderOperations) != 0 {
+		t.Fatalf("request operations or rank escaped the exact rule: %+v %+v", exact, other)
 	}
 }

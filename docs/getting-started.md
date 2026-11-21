@@ -448,6 +448,13 @@ controller restarts and while removing managed extension routes or Gateways.
 The operator must keep the API and workers compatible with the actions they
 advertise.
 
+With a compatible provider advertising `request_header_operations_v1`, add
+`--octavia-request-header-modifier` to enable the HTTPRoute
+`RequestHeaderModifier` filter. It sets, adds and removes request headers on
+the matching forwarding rule. The controller checks this capability
+independently of the fixed-response and weighted-target flags.
+[Provider setup and API contract](qualification/v1.7.0/provider/octavia-policy-header-proposal.md)
+
 ## Safe removal
 
 Keep the controller, its application credential, and OpenStack access running until every managed HTTPRoute, TCPRoute, UDPRoute and Gateway has finished finalization.

@@ -42,6 +42,8 @@ type Config struct {
 	FixedHTTPResponses bool
 	// WeightedHTTPTargets enables per-backend weighted policies in the local Amphora extension.
 	WeightedHTTPTargets bool
+	// RequestHeaderModifier enables route-scoped L7 request header operations.
+	RequestHeaderModifier bool
 	// OperatorHTTPS enables termination using operator-provisioned certificates.
 	OperatorHTTPS bool
 	// ControllerName is the exact Gateway API ownership identifier.

@@ -62,7 +62,7 @@ func TestInvalidHTTPBackendChangesOnlyItsPolicyTarget(t *testing.T) {
 	desired.members = []cloud.Member{{Address: "10.0.0.10", Port: 30080}}
 	plan, _, err = buildRouteEnsurePlan(desired, actual)
 	want[0].parentID = "pool-1"
-	if err != nil || len(plan) != 2 || plan[0].kind != routeMutationUpdateMember || plan[1] != want[0] {
+	if err != nil || len(plan) != 2 || plan[0].kind != routeMutationUpdateMember || !reflect.DeepEqual(plan[1], want[0]) {
 		t.Fatalf("prepare the original pool and restore it in place: plan = %#v, error = %v", plan, err)
 	}
 
@@ -297,7 +297,7 @@ func TestBuildRouteEnsurePlanDisablesPolicyBeforeChangingRules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildRouteEnsurePlan() error = %v", err)
 	}
-	if len(plan) == 0 || plan[0] != (routeMutation{kind: routeMutationDisablePolicy, id: "policy-1"}) {
+	if len(plan) == 0 || !reflect.DeepEqual(plan[0], routeMutation{kind: routeMutationDisablePolicy, id: "policy-1"}) {
 		t.Fatalf("first route mutation = %#v, want policy disable", firstRouteMutation(plan))
 	}
 }
@@ -458,10 +458,10 @@ func TestBuildRouteDeletionPlanDisablesPolicyBeforeDeletingRules(t *testing.T) {
 	if len(plan) < 2 {
 		t.Fatalf("route deletion plan = %#v, want policy disable and rule deletion", plan)
 	}
-	if plan[0] != (routeMutation{kind: routeMutationDisablePolicy, id: "policy-1"}) {
+	if !reflect.DeepEqual(plan[0], routeMutation{kind: routeMutationDisablePolicy, id: "policy-1"}) {
 		t.Fatalf("first route deletion = %#v, want policy disable", plan[0])
 	}
-	if plan[1] != (routeMutation{kind: routeMutationDeleteRule, id: "rule-path", parentID: "policy-1"}) {
+	if !reflect.DeepEqual(plan[1], routeMutation{kind: routeMutationDeleteRule, id: "rule-path", parentID: "policy-1"}) {
 		t.Fatalf("second route deletion = %#v, want path rule deletion", plan[1])
 	}
 }

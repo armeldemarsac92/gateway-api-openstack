@@ -25,6 +25,8 @@ import (
 
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
 	"github.com/gophercloud/gophercloud/v2/pagination"
+
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 )
 
 // ListCompletePolicies requires an explicit collection on every page.
@@ -108,12 +110,14 @@ func (target L7PolicyTarget) IsFixedServerError() bool {
 // L7PolicyObservation keeps readable pool references even when another field
 // prevents the entire target from decoding.
 type L7PolicyObservation struct {
-	Policy               l7policies.L7Policy
-	Target               *L7PolicyTarget
-	ExtendedTargetFields bool
-	PoolIDs              []string
-	PoolReference        json.RawMessage
-	AdminState           *bool
+	Policy                     l7policies.L7Policy
+	Target                     *L7PolicyTarget
+	ExtendedTargetFields       bool
+	PoolIDs                    []string
+	PoolReference              json.RawMessage
+	AdminState                 *bool
+	RequestHeaderOperations    []cloud.HTTPHeaderOperation
+	RequestHeaderOperationsErr error
 }
 
 // ListPolicyObservations retains every policy row across explicit API pages.
@@ -154,10 +158,11 @@ func (s *Service) ListPolicyObservations(ctx context.Context, opts l7policies.Li
 func readPolicyObservation(raw json.RawMessage) (L7PolicyObservation, error) {
 	var row struct {
 		l7policies.L7Policy
-		AdminState    *bool           `json:"admin_state_up"`
-		PoolReference json.RawMessage `json:"redirect_pool_id"`
-		Targets       json.RawMessage `json:"targets"`
-		FixedResponse json.RawMessage `json:"fixed_response"`
+		AdminState              *bool           `json:"admin_state_up"`
+		PoolReference           json.RawMessage `json:"redirect_pool_id"`
+		Targets                 json.RawMessage `json:"targets"`
+		FixedResponse           json.RawMessage `json:"fixed_response"`
+		RequestHeaderOperations json.RawMessage `json:"request_header_operations"`
 	}
 	if err := json.Unmarshal(raw, &row); err != nil {
 		return L7PolicyObservation{}, fmt.Errorf("extract L7 policy: %w", err)
@@ -189,6 +194,10 @@ func readPolicyObservation(raw json.RawMessage) (L7PolicyObservation, error) {
 	}
 	if len(row.FixedResponse) != 0 && string(row.FixedResponse) != "null" {
 		observation.ExtendedTargetFields = true
+	}
+	if row.RequestHeaderOperations != nil {
+		observation.RequestHeaderOperations, observation.RequestHeaderOperationsErr =
+			readPolicyRequestHeaderOperations(row.RequestHeaderOperations)
 	}
 	var target L7PolicyTarget
 	if json.Unmarshal(raw, &target) == nil {
@@ -242,13 +251,14 @@ func (s *Service) CreateFixedResponsePolicy(ctx context.Context, opts l7policies
 }
 
 // SetPolicyFixedResponse switches the target without changing state or position.
-func (s *Service) SetPolicyFixedResponse(ctx context.Context, id string) (*l7policies.L7Policy, error) {
-	return l7policies.Update(ctx, s.client, id, fixedResponsePolicyOpts{}).Extract()
+func (s *Service) SetPolicyFixedResponse(ctx context.Context, id string, operations []cloud.HTTPHeaderOperation) (*l7policies.L7Policy, error) {
+	return s.UpdatePolicyRequestHeaders(ctx, id, fixedResponsePolicyOpts{}, operations)
 }
 
 type weightedPolicyOpts struct {
 	l7policies.CreateOpts
-	targets []WeightedHTTPTarget
+	targets    []WeightedHTTPTarget
+	operations []cloud.HTTPHeaderOperation
 }
 
 func (opts weightedPolicyOpts) ToL7PolicyCreateMap() (map[string]any, error) {
@@ -257,6 +267,7 @@ func (opts weightedPolicyOpts) ToL7PolicyCreateMap() (map[string]any, error) {
 		return nil, err
 	}
 	body["l7policy"].(map[string]any)["targets"] = opts.targets
+	writePolicyRequestHeaderOperations(body, opts.operations)
 	return body, nil
 }
 
@@ -265,19 +276,19 @@ func (opts weightedPolicyOpts) ToL7PolicyUpdateMap() (map[string]any, error) {
 }
 
 // CreateWeightedPolicy creates a policy with independent weights per destination.
-func (s *Service) CreateWeightedPolicy(ctx context.Context, opts l7policies.CreateOpts, targets []WeightedHTTPTarget) (*l7policies.L7Policy, error) {
+func (s *Service) CreateWeightedPolicy(ctx context.Context, opts l7policies.CreateOpts, targets []WeightedHTTPTarget, operations []cloud.HTTPHeaderOperation) (*l7policies.L7Policy, error) {
 	opts.Action, opts.RedirectPoolID = ActionWeightedTargets, ""
-	return l7policies.Create(ctx, s.client, weightedPolicyOpts{CreateOpts: opts, targets: targets}).Extract()
+	return l7policies.Create(ctx, s.client, weightedPolicyOpts{CreateOpts: opts, targets: targets, operations: operations}).Extract()
 }
 
 // SetPolicyWeightedTargets replaces all slots in one request, retaining the policy position and state.
-func (s *Service) SetPolicyWeightedTargets(ctx context.Context, id string, targets []WeightedHTTPTarget) (*l7policies.L7Policy, error) {
-	return l7policies.Update(ctx, s.client, id, weightedPolicyOpts{targets: targets}).Extract()
+func (s *Service) SetPolicyWeightedTargets(ctx context.Context, id string, targets []WeightedHTTPTarget, operations []cloud.HTTPHeaderOperation) (*l7policies.L7Policy, error) {
+	return s.UpdatePolicyRequestHeaders(ctx, id, weightedPolicyOpts{targets: targets}, operations)
 }
 
 // CreatePolicy creates one L7 policy.
-func (s *Service) CreatePolicy(ctx context.Context, opts l7policies.CreateOpts) (*l7policies.L7Policy, error) {
-	return l7policies.Create(ctx, s.client, opts).Extract()
+func (s *Service) CreatePolicy(ctx context.Context, opts l7policies.CreateOpts, operations []cloud.HTTPHeaderOperation) (*l7policies.L7Policy, error) {
+	return l7policies.Create(ctx, s.client, policyWithRequestHeaders{create: opts, operations: operations}).Extract()
 }
 
 // UpdatePolicy updates one L7 policy.

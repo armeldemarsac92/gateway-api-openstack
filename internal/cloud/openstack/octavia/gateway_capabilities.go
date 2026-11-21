@@ -25,8 +25,9 @@ import (
 )
 
 const (
-	GatewayCapabilityFixedHTTPResponses  = "fixed_http_responses_v1"
-	GatewayCapabilityWeightedHTTPTargets = "weighted_http_targets_v1"
+	GatewayCapabilityFixedHTTPResponses      = "fixed_http_responses_v1"
+	GatewayCapabilityWeightedHTTPTargets     = "weighted_http_targets_v1"
+	GatewayCapabilityRequestHeaderOperations = "request_header_operations_v1"
 )
 
 // VerifyGatewayCapabilities checks the selected provider on the authenticated,

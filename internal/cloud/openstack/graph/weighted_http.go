@@ -88,7 +88,7 @@ func (p *Provider) buildDesiredWeightedHTTPParts(spec cloud.RouteSpec) ([]desire
 		if total == 0 {
 			return invalid(errors.New("weighted HTTP rules require positive total target weight"))
 		}
-		if err := part.buildHTTPMatchPolicies(rule.Matches); err != nil {
+		if err := p.buildHTTPMatchPolicies(&part, rule.Matches); err != nil {
 			return invalid(err)
 		}
 		parts = append(parts, part)

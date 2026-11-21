@@ -73,7 +73,7 @@ func (r *Reconciler) validateRouteStructure(route *gatewayv1.HTTPRoute) ([]gatew
 	}
 	references := make([]gatewayv1.BackendObjectReference, 0, len(route.Spec.Rules))
 	for _, rule := range route.Spec.Rules {
-		if err := validateRouteRule(rule, r.Config.FixedHTTPResponses, r.Config.WeightedHTTPTargets); err != nil {
+		if err := validateRouteRule(rule, r.Config.FixedHTTPResponses, r.Config.WeightedHTTPTargets, r.Config.RequestHeaderModifier); err != nil {
 			return nil, err
 		}
 		for _, backend := range rule.BackendRefs {
@@ -84,15 +84,15 @@ func (r *Reconciler) validateRouteStructure(route *gatewayv1.HTTPRoute) ([]gatew
 }
 
 func (r *Reconciler) usesHTTPBackendGroups(route *gatewayv1.HTTPRoute) bool {
-	return r.Config.FixedHTTPResponses || r.Config.WeightedHTTPTargets || len(route.Spec.Rules) > 1 || len(route.Spec.Rules) == 1 && len(route.Spec.Rules[0].Matches) > 1
+	return r.Config.FixedHTTPResponses || r.Config.WeightedHTTPTargets || r.Config.RequestHeaderModifier || len(route.Spec.Rules) > 1 || len(route.Spec.Rules) == 1 && len(route.Spec.Rules[0].Matches) > 1
 }
 
-func validateRouteRule(rule gatewayv1.HTTPRouteRule, fixedResponses, weightedTargets bool) error {
+func validateRouteRule(rule gatewayv1.HTTPRouteRule, fixedResponses, weightedTargets, requestHeaderModifier bool) error {
 	if rule.Name != nil || rule.Timeouts != nil || rule.Retry != nil || rule.SessionPersistence != nil { //nolint:staticcheck // The release still serves this deprecated Experimental field.
 		return newRouteBuildError(routeErrorUnsupported, "named rules, timeouts, retries, and session persistence are not supported")
 	}
 	if len(rule.Filters) != 0 || !fixedResponses && !weightedTargets {
-		if err := compileRouteAction(rule); err != nil {
+		if err := compileRouteAction(rule, requestHeaderModifier); err != nil {
 			return err
 		}
 	}
@@ -101,8 +101,7 @@ func validateRouteRule(rule gatewayv1.HTTPRouteRule, fixedResponses, weightedTar
 			return err
 		}
 	}
-	if len(rule.Filters) != 0 {
-		// The only supported filter is RequestRedirect, which has no backend.
+	if len(rule.Filters) == 1 && rule.Filters[0].Type == gatewayv1.HTTPRouteFilterRequestRedirect {
 		return nil
 	}
 	if len(rule.BackendRefs) == 0 && (fixedResponses || weightedTargets) {
@@ -332,8 +331,13 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 		default:
 			paths = &spec.WeightedHTTPRules[target.weighted].Matches
 		}
+		var operations []cloud.HTTPHeaderOperation
+		if target.pool != nil || target.fixed == nil && target.redirect == nil {
+			operations = rules[match.RuleIndex].RequestHeaderOperations
+		}
 		*paths = appendHTTPPathMatch(*paths, cloud.HTTPPathMatch{
 			Hostname: match.Hostname, PathType: cloud.PathMatchType(match.Match.PathType), PathValue: match.Match.PathValue, Precedence: match.Precedence,
+			RequestHeaderOperations: operations,
 		})
 	}
 	return firstDiagnostic, nil
