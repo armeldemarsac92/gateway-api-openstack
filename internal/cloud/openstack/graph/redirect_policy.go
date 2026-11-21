@@ -72,7 +72,7 @@ func (p *Provider) buildDesiredGatewayRoute(spec cloud.RouteSpec, forwards []clo
 			if _, _, err := httpPathPolicies(match, true); err != nil {
 				return invalid(err)
 			}
-			key := openstackidentity.HTTPMatchKey(match.Hostname, match.PathType, match.PathValue, match.Headers...)
+			key := openstackidentity.HTTPMatchKey(match.Hostname, match.PathType, match.PathValue, match.Method, match.Headers...)
 			route.redirectRanks = append(route.redirectRanks, match.Precedence)
 			selected, found := matches[key]
 			if found && selected.precedence <= match.Precedence {
@@ -94,7 +94,7 @@ func (p *Provider) buildDesiredGatewayRoute(spec cloud.RouteSpec, forwards []clo
 			for _, cell := range cells {
 				positive := match
 				positive.Hostname = cell.hostname
-				if err := appendRedirectPolicies(&part, redirect, positive, key, cell.guards); err != nil {
+				if err := p.appendRedirectPolicies(&part, redirect, positive, key, cell.guards); err != nil {
 					return invalid(err)
 				}
 			}
@@ -128,8 +128,8 @@ func validateRedirectDestination(redirect cloud.HTTPRedirect) error {
 	}
 }
 
-func appendRedirectPolicies(part *desiredRoute, redirect cloud.HTTPRedirect, positive cloud.HTTPPathMatch, matchKey string, guards []redirectGuard) error {
-	policies, hostname, err := httpPathPolicies(positive, true)
+func (p *Provider) appendRedirectPolicies(part *desiredRoute, redirect cloud.HTTPRedirect, positive cloud.HTTPPathMatch, matchKey string, guards []redirectGuard) error {
+	policies, hostname, err := p.httpPathPolicies(positive, true)
 	if err != nil {
 		return err
 	}

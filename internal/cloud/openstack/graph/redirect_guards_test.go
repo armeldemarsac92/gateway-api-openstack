@@ -18,6 +18,7 @@ package graph
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -198,5 +199,21 @@ func TestRedirectRequiresProvablePrecedenceWithExactHTTPHeaders(t *testing.T) {
 	cells, err := redirectCells(redirect, []cloud.HTTPPathMatch{forward})
 	if err != nil || len(cells) != 1 || len(cells[0].guards) != 1 {
 		t.Fatalf("redirect with the same header needs a path guard: %v, %v", cells, err)
+	}
+}
+
+func TestRedirectMethodPrecedenceRespectsDisjointAndSharedMethods(t *testing.T) {
+	redirect := cloud.HTTPPathMatch{PathType: cloud.PathMatchPrefix, PathValue: "/shop", Precedence: 2}
+	forward := cloud.HTTPPathMatch{PathType: cloud.PathMatchExact, PathValue: "/shop/item", Precedence: 1, Method: "POST"}
+	if cells, err := redirectCells(redirect, []cloud.HTTPPathMatch{forward}); !errors.Is(err, errHTTPMethodRedirectPrecedence) || len(cells) != 0 {
+		t.Fatalf("an unrestricted redirect must preserve the overlapping forward: %v, %v", cells, err)
+	}
+	redirect.Method = "GET"
+	if cells, err := redirectCells(redirect, []cloud.HTTPPathMatch{forward}); err != nil || len(cells) != 1 || len(cells[0].guards) != 0 {
+		t.Fatalf("disjoint methods need no path guard: %v, %v", cells, err)
+	}
+	redirect.Method = "POST"
+	if cells, err := redirectCells(redirect, []cloud.HTTPPathMatch{forward}); err != nil || len(cells) != 1 || len(cells[0].guards) != 1 {
+		t.Fatalf("a shared method needs a path guard: %v, %v", cells, err)
 	}
 }

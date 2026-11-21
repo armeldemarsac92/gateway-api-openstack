@@ -110,7 +110,7 @@ func TestLogicalModelCannotEnableUnmappedNodePortBehavior(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, _, err = supportedRouteModel(logical, gateway.Spec.Listeners[0], false, false, false)
+			_, _, err = supportedRouteModel(logical, gateway.Spec.Listeners[0], false, false, false, false)
 			var rejected *routeBuildError
 			if !errors.As(err, &rejected) || rejected.kind != routeErrorUnsupported {
 				t.Fatalf("unmapped logical model escaped NodePort lowering: %v", err)
@@ -174,5 +174,74 @@ func TestExactHTTPHeadersRejectUnsupportedPredicates(t *testing.T) {
 				t.Fatalf("expected UnsupportedValue mentioning %q, got %v", test.want, err)
 			}
 		})
+	}
+}
+
+func TestHTTPMethodLoweringRetainsConjunctionsAlternativesAndPrecedence(t *testing.T) {
+	cfg := testConfig()
+	cfg.HTTPMethodMatch, cfg.HTTPHeaderExact, cfg.FixedHTTPResponses = true, true, true
+	_, gateway := providerRouteParentObjects(cfg)
+	gateway.Spec.Listeners[0].Hostname = ptr.To(gatewayv1.Hostname("api.example.test"))
+	route := mapperTestHTTPRoute(gateway.Namespace, "api", gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name)}, "backend")
+	route.UID = "route-uid"
+	route.Spec.Rules[0].Matches = []gatewayv1.HTTPRouteMatch{
+		{Headers: []gatewayv1.HTTPHeaderMatch{{Name: "Version", Value: "four"}, {Name: "Color", Value: "blue"}}},
+		{Method: ptr.To(gatewayv1.HTTPMethodGet)},
+		{Method: ptr.To(gatewayv1.HTTPMethodPost)},
+		{Method: ptr.To(gatewayv1.HTTPMethodPost), Headers: []gatewayv1.HTTPHeaderMatch{{Name: "Version", Value: "two"}}},
+		{Method: ptr.To(gatewayv1.HTTPMethodPost)}, // duplicate alternative
+		{Path: &gatewayv1.HTTPPathMatch{Value: ptr.To("/shop")}},
+		{Path: &gatewayv1.HTTPPathMatch{Type: ptr.To(gatewayv1.PathMatchExact), Value: ptr.To("/")}},
+		{}, // separate unrestricted fallback
+	}
+	service, endpoints, node := validNodePortBackend(gateway.Namespace, "backend")
+	reader := indexedFakeClientBuilder(testScheme(t), cfg).WithObjects(service, endpoints, node).Build()
+	desired, err := (&Reconciler{Config: cfg}).buildRouteModelWithReader(t.Context(), reader, route, gateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(desired.HTTPBackends) != 1 {
+		t.Fatalf("got %d backends, want one", len(desired.HTTPBackends))
+	}
+	type predicate struct {
+		pathType     cloud.PathMatchType
+		path, method string
+		headers      int
+	}
+	var got []predicate
+	for _, match := range desired.HTTPBackends[0].Matches {
+		if match.Hostname != "api.example.test" {
+			t.Fatalf("missing listener hostname on %#v", match)
+		}
+		got = append(got, predicate{match.PathType, match.PathValue, match.Method, len(match.Headers)})
+	}
+	want := []predicate{
+		{cloud.PathMatchExact, "/", "", 0},
+		{cloud.PathMatchPrefix, "/shop", "", 0},
+		{cloud.PathMatchPrefix, "/", "POST", 1},
+		{cloud.PathMatchPrefix, "/", "GET", 0},
+		{cloud.PathMatchPrefix, "/", "POST", 0},
+		{cloud.PathMatchPrefix, "/", "", 2},
+		{cloud.PathMatchPrefix, "/", "", 0},
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("ranked predicates = %v, want %v", got, want)
+	}
+}
+
+func TestHTTPMethodAndQueryValidationAreIndependent(t *testing.T) {
+	for _, test := range []struct {
+		method gatewayv1.HTTPMethod
+		query  []gatewayv1.HTTPQueryParamMatch
+		want   string
+	}{
+		{method: "get", want: "unknown HTTP method"},
+		{method: gatewayv1.HTTPMethodGet, query: []gatewayv1.HTTPQueryParamMatch{{Name: "q", Value: "one"}}, want: "query parameter"},
+	} {
+		_, _, err := supportedMatch(gatewayv1.HTTPRouteMatch{Method: &test.method, QueryParams: test.query}, false, true)
+		var rejected *routeBuildError
+		if !errors.As(err, &rejected) || rejected.kind != routeErrorUnsupported || !strings.Contains(rejected.message, test.want) {
+			t.Fatalf("match = %#v, expected UnsupportedValue mentioning %q, got %v", test, test.want, err)
+		}
 	}
 }

@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"reflect"
 	"slices"
@@ -261,7 +262,7 @@ func TestMissingHeaderCapabilityDoesNotBlockSiblingMembers(t *testing.T) {
 		poolID, policyID, ruleID := name+"-pool", name, name+"-path"
 		matchKey := ""
 		if backendKey != "" {
-			matchKey = openstackidentity.HTTPMatchKey("", cloud.PathMatchExact, path)
+			matchKey = openstackidentity.HTTPMatchKey("", cloud.PathMatchExact, path, "")
 		}
 		tags := func(base, match string) []string {
 			return safetyRouteTags(t, identity, httpResourceRole(base, backendKey, match))
@@ -651,7 +652,7 @@ func TestExactHTTPHeadersUseCapableProviderAndLiteralRuleRequest(t *testing.T) {
 	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		switch {
 		case request.Method == http.MethodGet && request.URL.Path == "/lbaas/providers/amphora-region-alias/gateway_capabilities":
-			var capabilities []string
+			capabilities := []string{}
 			if advertise {
 				capabilities = []string{octavia.GatewayCapabilityHTTPHeaderExact}
 			}
@@ -731,21 +732,30 @@ func TestExactHTTPHeadersUseCapableProviderAndLiteralRuleRequest(t *testing.T) {
 	}
 }
 
-func TestExactHTTPHeaderCapabilityLossClosesOnlyItsListener(t *testing.T) {
+func TestHTTPPredicateCapabilityLossClosesOnlyItsListener(t *testing.T) {
+	for _, predicate := range []protectedHTTPPredicate{exactHTTPHeaderPredicate, httpMethodPredicate} {
+		t.Run(predicate.label, func(t *testing.T) {
+			testHTTPPredicateCapabilityLoss(t, predicate)
+		})
+	}
+}
+
+func testHTTPPredicateCapabilityLoss(t *testing.T, predicate protectedHTTPPredicate) {
+	t.Helper()
 	identity := safetyTestIdentity(t)
 	spec := completeGraphSpec(identity)
-	var replyCode = http.StatusServiceUnavailable
-	var capabilities []string
+	replyCode := http.StatusServiceUnavailable
+	replyBody := ""
 	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodGet || request.URL.Path != "/lbaas/providers/amphora/gateway_capabilities" {
 			t.Errorf("unexpected request %s %s", request.Method, request.URL.Path)
 		}
 		w.WriteHeader(replyCode)
-		safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": capabilities})
+		_, _ = w.Write([]byte(replyBody))
 	}))
-	p := NewProvider(ServiceClients{LoadBalancer: client}, ProviderConfig{HTTPHeaderExact: true})
+	p := NewProvider(ServiceClients{LoadBalancer: client}, ProviderConfig{})
 	wanted := desiredPolicy{role: "guarded", position: 1, path: "/", compareType: l7policies.CompareTypeEqual,
-		headers: []cloud.HTTPHeaderMatch{{Name: "color", Value: "blue"}}}
+		method: "GET", headers: []cloud.HTTPHeaderMatch{{Name: "color", Value: "blue"}}}
 	part := desiredRoute{backendKey: "backend", policies: []desiredPolicy{wanted}}
 	part.spec.ScopedListenerPorts = []int{80}
 	desired := desiredGatewayGraph{spec: spec, protocol: cloud.ListenerProtocolHTTP, routes: []desiredRoute{{httpParts: []desiredRoute{part}}}}
@@ -757,8 +767,11 @@ func TestExactHTTPHeaderCapabilityLossClosesOnlyItsListener(t *testing.T) {
 	}}
 	for _, rule := range rulesFor(wanted, "") {
 		base := openstackidentity.RoleRulePath
-		if rule.key != "" {
-			base = openstackidentity.RoleRuleHTTPHeaderExact
+		switch rule.ruleType {
+		case httpHeaderExactRuleType:
+			base = exactHTTPHeaderPredicate.role
+		case httpMethodRuleType:
+			base = httpMethodPredicate.role
 		}
 		policy.rules = append(policy.rules, observedRouteRule{base: base, flagsObserved: true, rule: l7policies.Rule{
 			CompareType: string(rule.compareType), RuleType: string(rule.ruleType), Key: rule.key, Value: rule.value,
@@ -774,7 +787,7 @@ func TestExactHTTPHeaderCapabilityLossClosesOnlyItsListener(t *testing.T) {
 
 	observe := func(plan ...graphMutation) []graphMutation {
 		result := cloud.GatewayGraphResult{Routes: []cloud.RouteGraphResult{{}}}
-		return p.protectExactHeaderTraffic(t.Context(), desired, actual, plan, &result)
+		return p.protectHTTPPredicateTraffic(t.Context(), desired, actual, plan, &result, predicate)
 	}
 	guardedRemoval := graphMutation{kind: graphRouteMutation, withdrawHTTPPolicy: true,
 		route: routeMutation{kind: routeMutationDisablePolicy, id: "guarded"}}
@@ -782,6 +795,35 @@ func TestExactHTTPHeaderCapabilityLossClosesOnlyItsListener(t *testing.T) {
 		t.Fatalf("temporary discovery failure would withdraw the last verified policy: %#v", steps)
 	}
 	replyCode = http.StatusOK
+	for _, reply := range []string{`{}`, `{"gateway_capabilities":null}`} {
+		replyBody = reply
+		if steps := observe(guardedRemoval); len(steps) != 0 {
+			t.Fatalf("an inconclusive discovery response %s should preserve the installed policy: %#v", reply, steps)
+		}
+	}
+
+	// A new match needs both capabilities. With just one advertised, its
+	// policy write is blocked without disabling the already active listener.
+	other := exactHTTPHeaderPredicate.capability
+	if predicate.capability == other {
+		other = httpMethodPredicate.capability
+	}
+	replyBody = fmt.Sprintf(`{"gateway_capabilities":[%q]}`, other)
+	partGraph.policies = nil
+	create := graphMutation{kind: graphRouteMutation, listenerID: "affected", backendKey: part.backendKey,
+		route: routeMutation{kind: routeMutationCreatePolicy, policy: wanted}}
+	steps := observe(create)
+	if len(steps) != 1 || steps[0].kind != graphRouteMutation {
+		t.Fatalf("an unavailable capability for a new policy must leave the existing listener active: %#v", steps)
+	}
+	result := cloud.GatewayGraphResult{Routes: []cloud.RouteGraphResult{{}}}
+	if _, prepared, err := p.prepareNextGraphMutation(t.Context(), desired, actual, steps, &result); err != nil || prepared ||
+		result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing {
+		t.Fatalf("only the new route should wait, got %#v, prepared %t, error %v", result, prepared, err)
+	}
+	partGraph.policies = []observedRoutePolicy{policy}
+
+	replyBody = `{"gateway_capabilities":[]}`
 	if steps := observe(guardedRemoval); len(steps) != 1 || steps[0].kind != graphDisableListener || steps[0].listenerID != "affected" {
 		t.Fatalf("confirmed loss should close the affected listener before touching its policy: %#v", steps)
 	}
@@ -791,7 +833,7 @@ func TestExactHTTPHeaderCapabilityLossClosesOnlyItsListener(t *testing.T) {
 	if steps := observe(restore, unrelated); len(steps) != 1 || steps[0].listenerID != "unrelated" {
 		t.Fatalf("closed affected listener must wait independently for the capability: %#v", steps)
 	}
-	capabilities = []string{octavia.GatewayCapabilityHTTPHeaderExact}
+	replyBody = fmt.Sprintf(`{"gateway_capabilities":[%q]}`, predicate.capability)
 	if steps := observe(restore); len(steps) != 1 || steps[0].kind != graphEnableListener {
 		t.Fatalf("recovery did not allow the verified listener to reopen: %#v", steps)
 	}
@@ -799,7 +841,8 @@ func TestExactHTTPHeaderCapabilityLossClosesOnlyItsListener(t *testing.T) {
 	if steps := observe(restore); len(steps) != 0 {
 		t.Fatalf("a closed listener cannot reopen before its predicate is active: %#v", steps)
 	}
-	capabilities = nil
+	partGraph.policies[0].policy.AdminStateUp = true
+	replyBody = `{"gateway_capabilities":[]}`
 	desired.spec.Routes[0].Disposition = cloud.GraphDelete
 	if steps := observe(guardedRemoval); len(steps) != 1 || steps[0].kind != graphRouteMutation {
 		t.Fatalf("owned policy cleanup must continue after the listener is closed: %#v", steps)
@@ -829,5 +872,149 @@ func TestExactHTTPHeadersUnavailableDoNotBlockAnIndependentStockPolicy(t *testin
 		[]graphMutation{blocked, samePort, otherPort}, &result)
 	if err != nil || !prepared || step.listenerID != otherPort.listenerID || calls != 1 {
 		t.Fatalf("independent stock policy = %#v, prepared=%t reads=%d err=%v", step, prepared, calls, err)
+	}
+}
+
+func TestHTTPMethodPolicyUsesRegionalCapabilityAndKeylessPublicRule(t *testing.T) {
+	spec := completeGraphSpec(safetyTestIdentity(t))
+	route := &spec.Routes[0].Spec
+	route.Hostname, route.PathType, route.PathValue = "", "", ""
+	route.HTTPBackends = []cloud.HTTPBackend{{
+		Namespace: "workloads", Name: "backend", Port: 8080, Members: route.Members,
+		Matches: []cloud.HTTPPathMatch{
+			{PathType: cloud.PathMatchPrefix, PathValue: "/", Method: "GET", Precedence: 0},
+			{PathType: cloud.PathMatchPrefix, PathValue: "/", Method: "POST", Precedence: 1},
+			{PathType: cloud.PathMatchPrefix, PathValue: "/", Precedence: 2},
+		},
+	}}
+	route.Members = nil
+	if _, err := (&Provider{projectID: "project-a", fixedHTTPResponses: true}).buildDesiredGatewayGraph(spec); !errors.Is(err, cloud.ErrTerminalValidation) {
+		t.Fatalf("missing controller opt-in returned %v", err)
+	}
+
+	var advertise bool
+	var writes int
+	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		switch {
+		case request.Method == http.MethodGet && request.URL.Path == "/lbaas/providers/amphora-region-alias/gateway_capabilities":
+			capabilities := []string{octavia.GatewayCapabilityFixedHTTPResponses}
+			if advertise {
+				capabilities = append(capabilities, octavia.GatewayCapabilityHTTPMethodMatch)
+			}
+			safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": capabilities})
+		case request.Method == http.MethodPost && request.URL.Path == "/lbaas/l7policies/policy/rules":
+			writes++
+			var body struct {
+				Rule struct {
+					Type    string   `json:"type"`
+					Compare string   `json:"compare_type"`
+					Key     *string  `json:"key"`
+					Value   string   `json:"value"`
+					Invert  bool     `json:"invert"`
+					Enabled bool     `json:"admin_state_up"`
+					Tags    []string `json:"tags"`
+				} `json:"rule"`
+			}
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			rule := body.Rule
+			role, tagged := openstackidentity.ResourceRole(rule.Tags)
+			base, _, _, parsed := openstackidentity.ParseHTTPFragmentRole(role)
+			if rule.Type != "HTTP_METHOD" || rule.Compare != "EQUAL_TO" || rule.Key != nil ||
+				rule.Value != "GET" || rule.Invert || !rule.Enabled || !tagged || !parsed || base != openstackidentity.RoleRuleHTTPMethod {
+				t.Fatalf("unexpected method predicate: %#v", rule)
+			}
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"rule":{"id":"method"}}`))
+		default:
+			t.Errorf("unexpected request %s %s", request.Method, request.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	p := NewProvider(ServiceClients{LoadBalancer: client, ProjectID: "project-a"}, ProviderConfig{HTTPMethodMatch: true, FixedHTTPResponses: true})
+	desired, err := p.buildDesiredGatewayGraph(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	part := desired.routes[0].httpParts[0]
+	var get desiredPolicy
+	roles := make(map[string]bool)
+	for _, policy := range part.policies {
+		roles[policy.role] = true
+		if policy.method == "GET" {
+			get = policy
+		}
+	}
+	rules := rulesFor(get, "")
+	if len(roles) != 3 || get.position != 1 || len(rules) != 1 || rules[0].ruleType != httpMethodRuleType {
+		t.Fatalf("unexpected policy identities or predicates: %#v", part.policies)
+	}
+	lb := safetyObservedLoadBalancer()
+	lb.Provider = "amphora-region-alias"
+	actual := observedGatewayGraph{loadBalancer: lb}
+	mutation := graphMutation{kind: graphRouteMutation, backendKey: part.backendKey}
+	for _, step := range []routeMutation{
+		{kind: routeMutationCreatePolicy, policy: get},
+		{kind: routeMutationCreateRule, parentID: "policy", rule: rules[0]},
+		{kind: routeMutationEnablePolicy, requiresHTTPMethod: true},
+	} {
+		mutation.route = step
+		_, err := p.prepareGraphMutation(t.Context(), desired, actual, mutation)
+		var missing *octavia.MissingGatewayCapability
+		if !errors.As(err, &missing) || missing.Capability != octavia.GatewayCapabilityHTTPMethodMatch {
+			t.Fatalf("missing method capability was not reported for %v: %v", step.kind, err)
+		}
+	}
+	advertise = true
+	mutation.route = routeMutation{kind: routeMutationCreateRule, parentID: "policy", rule: rules[0]}
+	prepared, err := p.prepareGraphMutation(t.Context(), desired, actual, mutation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.executeGraphMutation(t.Context(), desired, actual, prepared); err != nil || writes != 1 {
+		t.Fatalf("method rule writes = %d, error %v", writes, err)
+	}
+}
+
+func TestHTTPMethodProfileRootPrefixKeepsAPathIndependentRule(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		match   cloud.HTTPPathMatch
+		grouped bool
+		want    int
+	}{
+		{name: "legacy fallback", match: cloud.HTTPPathMatch{PathType: cloud.PathMatchPrefix, PathValue: "/"}, want: 1},
+		{name: "grouped fallback", match: cloud.HTTPPathMatch{PathType: cloud.PathMatchPrefix, PathValue: "/"}, grouped: true, want: 1},
+		{name: "hostname and headers", match: cloud.HTTPPathMatch{PathType: cloud.PathMatchPrefix, PathValue: "/", Hostname: "example.test",
+			Headers: []cloud.HTTPHeaderMatch{{Name: "color", Value: "blue"}}}, grouped: true, want: 3},
+		{name: "exact root", match: cloud.HTTPPathMatch{PathType: cloud.PathMatchExact, PathValue: "/"}, grouped: true, want: 1},
+		{name: "non-root prefix", match: cloud.HTTPPathMatch{PathType: cloud.PathMatchPrefix, PathValue: "/shop"}, grouped: true, want: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			stock, stockHost, err := (&Provider{}).httpPathPolicies(test.match, test.grouped)
+			if err != nil {
+				t.Fatal(err)
+			}
+			active, host, err := (&Provider{httpMethodMatch: true}).httpPathPolicies(test.match, test.grouped)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stockRules, activeRules := rulesFor(stock[0], stockHost), rulesFor(active[0], host)
+			if len(activeRules) != test.want || len(stockRules) != test.want ||
+				active[0].role != stock[0].role || activeRules[0].role != stockRules[0].role ||
+				!slices.Equal(activeRules[1:], stockRules[1:]) {
+				t.Fatalf("route or rule identities changed between profiles: stock %#v, active %#v", stockRules, activeRules)
+			}
+			if test.match.PathType == cloud.PathMatchPrefix && test.match.PathValue == "/" {
+				if stockRules[0].compareType != l7policies.CompareTypeStartWith || stockRules[0].invert ||
+					activeRules[0].ruleType != l7policies.TypePath || activeRules[0].compareType != l7policies.CompareTypeRegex ||
+					activeRules[0].value != "(^$)." || !activeRules[0].invert {
+					t.Fatalf("wrong root-prefix predicate: stock %#v, active %#v", stockRules[0], activeRules[0])
+				}
+			} else if activeRules[0] != stockRules[0] {
+				t.Fatalf("non-catch-all path changed between profiles: stock %#v, active %#v", stockRules[0], activeRules[0])
+			}
+		})
 	}
 }

@@ -23,6 +23,8 @@ import (
 	"strings"
 
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 )
 
 // NormalizeMatch applies Gateway API defaults and normalizes Core HTTP matches.
@@ -30,12 +32,10 @@ import (
 func NormalizeMatch(input gatewayv1.HTTPRouteMatch) (Match, error) {
 	result := Match{PathType: gatewayv1.PathMatchPathPrefix, PathValue: "/"}
 	if input.Method != nil {
-		switch *input.Method {
-		case gatewayv1.HTTPMethodGet, gatewayv1.HTTPMethodHead, gatewayv1.HTTPMethodPost, gatewayv1.HTTPMethodPut,
-			gatewayv1.HTTPMethodDelete, gatewayv1.HTTPMethodConnect, gatewayv1.HTTPMethodOptions, gatewayv1.HTTPMethodTrace, gatewayv1.HTTPMethodPatch:
-		default:
+		if !cloud.ValidHTTPMethod(string(*input.Method)) {
 			return Match{}, unsupported(fmt.Sprintf("unknown HTTP method %q", *input.Method), ScopeRoute)
 		}
+		result.Method = string(*input.Method)
 	}
 	for _, query := range input.QueryParams {
 		if query.Type != nil && *query.Type != gatewayv1.QueryParamMatchExact && *query.Type != gatewayv1.QueryParamMatchRegularExpression {
@@ -81,8 +81,8 @@ func NormalizeMatch(input gatewayv1.HTTPRouteMatch) (Match, error) {
 		result.Headers = append(result.Headers, HeaderMatch{Name: name, Value: header.Value})
 	}
 	slices.SortFunc(result.Headers, func(a, b HeaderMatch) int { return cmp.Compare(a.Name, b.Name) })
-	if input.Method != nil || len(input.QueryParams) != 0 {
-		return Match{}, unsupported("method and query parameter matching is not implemented", ScopeRule)
+	if len(input.QueryParams) != 0 {
+		return Match{}, unsupported("query parameter matching is not implemented", ScopeRule)
 	}
 	return result, nil
 }
@@ -130,7 +130,7 @@ func MatchingRouteHostname[T ~string](effective string, hostnames []T) string {
 }
 
 // compareMatches uses original route hostnames to break ties introduced by
-// listener intersection before applying path, header and route precedence.
+// listener intersection before applying path, method, header and route precedence.
 func compareMatches(a, b RouteMatch) int {
 	if order := CompareHostnameSpecificity(a.Hostname, b.Hostname); order != 0 {
 		return order
@@ -148,6 +148,12 @@ func compareMatches(a, b RouteMatch) int {
 		if order := cmp.Compare(len(b.Match.PathValue), len(a.Match.PathValue)); order != 0 {
 			return order
 		}
+	}
+	if (a.Match.Method == "") != (b.Match.Method == "") {
+		if a.Match.Method != "" {
+			return -1
+		}
+		return 1
 	}
 	if order := cmp.Compare(len(b.Match.Headers), len(a.Match.Headers)); order != 0 {
 		return order

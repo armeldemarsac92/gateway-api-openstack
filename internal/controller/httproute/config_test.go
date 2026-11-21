@@ -47,7 +47,7 @@ func TestStatusForRouteBuildError(t *testing.T) {
 }
 
 func TestSupportedMatchDefaultsToRootPrefix(t *testing.T) {
-	pathType, value, err := supportedMatch(gatewayv1.HTTPRouteMatch{}, false)
+	pathType, value, err := supportedMatch(gatewayv1.HTTPRouteMatch{}, false, false)
 	if err != nil || pathType != "PathPrefix" || value != "/" {
 		t.Fatalf("default HTTPRoute match = %q %q, %v", pathType, value, err)
 	}

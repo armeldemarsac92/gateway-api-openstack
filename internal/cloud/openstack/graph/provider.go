@@ -68,6 +68,7 @@ func NewIdentity(value cloud.Identity) (Identity, error) {
 type ProviderConfig struct {
 	FixedHTTPResponses    bool
 	HTTPHeaderExact       bool
+	HTTPMethodMatch       bool
 	WeightedHTTPTargets   bool
 	RequestHeaderModifier bool
 	BackendH2C            bool
@@ -81,6 +82,7 @@ type ProviderConfig struct {
 type Provider struct {
 	fixedHTTPResponses    bool
 	httpHeaderExact       bool
+	httpMethodMatch       bool
 	weightedHTTPTargets   bool
 	requestHeaderModifier bool
 	backendH2C            bool
@@ -107,6 +109,7 @@ func NewProvider(clients ServiceClients, cfg ProviderConfig) *Provider {
 	return &Provider{
 		fixedHTTPResponses:    cfg.FixedHTTPResponses || cfg.WeightedHTTPTargets,
 		httpHeaderExact:       cfg.HTTPHeaderExact,
+		httpMethodMatch:       cfg.HTTPMethodMatch,
 		weightedHTTPTargets:   cfg.WeightedHTTPTargets,
 		requestHeaderModifier: cfg.RequestHeaderModifier,
 		backendH2C:            cfg.BackendH2C,

@@ -52,9 +52,14 @@ func HTTPWeightedRuleKey(index int) string {
 }
 
 // HTTPMatchKey identifies a logical predicate across list edits and rank changes.
-func HTTPMatchKey(hostname string, pathType cloud.PathMatchType, path string, headers ...cloud.HTTPHeaderMatch) string {
+func HTTPMatchKey(hostname string, pathType cloud.PathMatchType, path, method string, headers ...cloud.HTTPHeaderMatch) string {
 	var predicate strings.Builder
 	predicate.WriteString(path)
+	if method != "" {
+		// The empty field name separates method matches from existing header-only keys.
+		predicate.WriteString("\x00\x00")
+		predicate.WriteString(method)
+	}
 	for _, header := range headers {
 		// Canonical HTTP header names and values cannot contain NUL.
 		predicate.WriteByte(0)
@@ -67,6 +72,9 @@ func HTTPMatchKey(hostname string, pathType cloud.PathMatchType, path string, he
 
 // RoleRuleHTTPHeaderExact identifies a predicate on a normalized header name.
 const RoleRuleHTTPHeaderExact = "l7-header-exact"
+
+// RoleRuleHTTPMethod identifies the single method predicate in a match.
+const RoleRuleHTTPMethod = "l7-http-method"
 
 // HTTPHeaderRuleKey identifies one field within an exact-header conjunction.
 func HTTPHeaderRuleKey(name string) string {
@@ -120,7 +128,7 @@ func httpMatchRole(role, base, match string, predicateKeys []string) string {
 		return ""
 	}
 	switch base {
-	case RolePolicyExact, RolePolicyPrefix, RoleRulePath, RoleRuleHost:
+	case RolePolicyExact, RolePolicyPrefix, RoleRulePath, RoleRuleHost, RoleRuleHTTPMethod:
 		if len(predicateKeys) == 0 {
 			return role + "/" + match
 		}
@@ -177,7 +185,7 @@ func HTTPRedirectRole(base, match, cell, guard string) string {
 	}
 	role := "http-redirect-v1/" + base + "/" + match + "/" + cell
 	switch base {
-	case RolePolicyExact, RolePolicyPrefix, RoleRulePath, RoleRuleHost:
+	case RolePolicyExact, RolePolicyPrefix, RoleRulePath, RoleRuleHost, RoleRuleHTTPMethod:
 		if guard == "" {
 			return role
 		}

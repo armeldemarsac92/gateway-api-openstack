@@ -26,6 +26,7 @@ import (
 
 const (
 	GatewayCapabilityHTTPHeaderExact         = "http_header_exact_v1"
+	GatewayCapabilityHTTPMethodMatch         = "http_method_match_v1"
 	GatewayCapabilityFixedHTTPResponses      = "fixed_http_responses_v1"
 	GatewayCapabilityWeightedHTTPTargets     = "weighted_http_targets_v1"
 	GatewayCapabilityRequestHeaderOperations = "request_header_operations_v1"
@@ -57,6 +58,9 @@ func (s *Service) VerifyGatewayCapabilities(ctx context.Context, provider string
 	endpoint := s.client.ServiceURL("lbaas", "providers", url.PathEscape(provider), "gateway_capabilities")
 	if _, err := s.client.Get(ctx, endpoint, &response, nil); err != nil {
 		return fmt.Errorf("discover Gateway capabilities for Octavia provider %q: %w", provider, err)
+	}
+	if response.Capabilities == nil {
+		return fmt.Errorf("discover Gateway capabilities for Octavia provider %q: response does not contain a capability list", provider)
 	}
 	for _, capability := range required {
 		if !slices.Contains(response.Capabilities, capability) {

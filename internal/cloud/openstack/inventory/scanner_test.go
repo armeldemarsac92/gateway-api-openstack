@@ -189,7 +189,7 @@ func TestScanWeightedPolicyRequiresEveryPoolToBelongToItsRouteAndListener(t *tes
 			records := auditTestRecords(route.Value())
 			policy := fixture.policies[0]
 			ruleKey := openstackidentity.HTTPWeightedRuleKey(0)
-			matchKey := openstackidentity.HTTPMatchKey("", cloud.PathMatchExact, "/weighted")
+			matchKey := openstackidentity.HTTPMatchKey("", cloud.PathMatchExact, "/weighted", "")
 			policy["tags"] = safetyRouteTags(t, route, openstackidentity.HTTPWeightedPolicyRole(rolePolicyExact, ruleKey, matchKey))
 			policy["action"] = "WEIGHTED_TARGETS"
 			policy["redirect_pool_id"] = nil
@@ -636,7 +636,7 @@ type auditRecordedRequest struct {
 
 func TestScanDistinguishesMissingRedirectPoolRelationship(t *testing.T) {
 	identity := safetyTestIdentity(t)
-	match := openstackidentity.HTTPMatchKey("example.test", cloud.PathMatchPrefix, "/")
+	match := openstackidentity.HTTPMatchKey("example.test", cloud.PathMatchPrefix, "/", "")
 	cell := openstackidentity.HTTPRedirectKey(match, "example.test", "prefix")
 	role := openstackidentity.HTTPRedirectRole(rolePolicyPrefix, match, cell, "")
 	for _, scenario := range []struct {
@@ -680,7 +680,7 @@ func TestScanDistinguishesMissingRedirectPoolRelationship(t *testing.T) {
 
 func TestScanMatchesPoolFreeFixedPolicyWithExplicitTarget(t *testing.T) {
 	identity := safetyTestIdentity(t)
-	match := openstackidentity.HTTPMatchKey("", cloud.PathMatchExact, "/omitted")
+	match := openstackidentity.HTTPMatchKey("", cloud.PathMatchExact, "/omitted", "")
 	fixed := openstackidentity.HTTPFixedRuleKey(0)
 	for _, statusCode := range []int{500, 302} {
 		fixture := newAuditScanFixture(t, identity)

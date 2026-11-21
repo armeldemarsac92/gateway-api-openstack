@@ -321,8 +321,8 @@ func TestAuditRecognizesOnlyCanonicalPoolFreeRedirects(t *testing.T) {
 	}
 	cell := openstackidentity.HTTPRedirectKey("match", "host", "cell")
 	guard := openstackidentity.HTTPRedirectKey("PATH", "EQUAL_TO", "/protected")
-	match := openstackidentity.HTTPMatchKey("example.test", cloud.PathMatchExact, "/")
-	otherMatch := openstackidentity.HTTPMatchKey("example.test", cloud.PathMatchExact, "/other")
+	match := openstackidentity.HTTPMatchKey("example.test", cloud.PathMatchExact, "/", "")
+	otherMatch := openstackidentity.HTTPMatchKey("example.test", cloud.PathMatchExact, "/other", "")
 	tags := func(base, matchKey, guard string) []string {
 		return safetyRouteTags(t, route, openstackidentity.HTTPRedirectRole(base, matchKey, cell, guard))
 	}

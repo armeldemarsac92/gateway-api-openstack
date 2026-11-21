@@ -154,7 +154,7 @@ func TestHTTPRouteOwnershipProofAcrossPoolsAndRules(t *testing.T) {
 		t.Fatal(err)
 	}
 	backend := HTTPBackendKey("apps", "users", 8080)
-	match := HTTPMatchKey("service.test", cloud.PathMatchExact, "/users")
+	match := HTTPMatchKey("service.test", cloud.PathMatchExact, "/users", "")
 	poolRole, pathRole := HTTPFragmentRole(RolePool, backend, ""), HTTPFragmentRole(RoleRulePath, backend, match)
 	proof := func(role string) RouteOwnerProof {
 		t.Helper()
@@ -196,7 +196,7 @@ func TestHTTPPolicyDescriptionFitsOctaviaAndPreservesMatchIdentity(t *testing.T)
 	}
 	backend := HTTPBackendKey("apps", "catalog", 80)
 	roleFor := func(path string) string {
-		return HTTPFragmentRole(RolePolicyExact, backend, HTTPMatchKey("", cloud.PathMatchExact, path))
+		return HTTPFragmentRole(RolePolicyExact, backend, HTTPMatchKey("", cloud.PathMatchExact, path, ""))
 	}
 	role := roleFor("/one")
 	description := id.Description(role)
@@ -228,7 +228,7 @@ func TestHTTPRedirectDescriptionsFitOctaviaAndPreserveMatchIdentity(t *testing.T
 	} {
 		t.Run(test.base, func(t *testing.T) {
 			roleFor := func(path string) string {
-				match := HTTPMatchKey("", cloud.PathMatchPrefix, path)
+				match := HTTPMatchKey("", cloud.PathMatchPrefix, path, "")
 				cell := HTTPRedirectKey(match, "", test.base)
 				return HTTPRedirectRole(test.base, match, cell, test.guard)
 			}

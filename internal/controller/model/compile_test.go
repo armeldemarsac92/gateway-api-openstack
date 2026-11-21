@@ -253,7 +253,6 @@ func TestNormalizeMatch(t *testing.T) {
 		{name: "invalid path", input: gatewayv1.HTTPRouteMatch{Path: &gatewayv1.HTTPPathMatch{Value: ptr.To("/api//")}}, scope: ScopeRule},
 		{name: "encoded slash", input: gatewayv1.HTTPRouteMatch{Path: &gatewayv1.HTTPPathMatch{Value: ptr.To("/api%2Fother")}}, scope: ScopeRule},
 		{name: "unknown path type", input: gatewayv1.HTTPRouteMatch{Path: &gatewayv1.HTTPPathMatch{Type: ptr.To(gatewayv1.PathMatchType("unknown"))}}, scope: ScopeRoute},
-		{name: "known method", input: gatewayv1.HTTPRouteMatch{Method: ptr.To(gatewayv1.HTTPMethodGet)}, scope: ScopeRule},
 		{name: "unknown method", input: gatewayv1.HTTPRouteMatch{Method: ptr.To(gatewayv1.HTTPMethod("unknown"))}, scope: ScopeRoute},
 	} {
 		t.Run(test.name, func(t *testing.T) {

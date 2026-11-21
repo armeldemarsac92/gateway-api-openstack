@@ -40,7 +40,10 @@ type redirectGuard struct {
 	value       string
 }
 
-var errExactHeaderRedirectPrecedence = errors.New("cannot preserve Octavia redirect precedence with an overlapping higher-priority forwarding rule that adds an exact HTTP header condition")
+var (
+	errExactHeaderRedirectPrecedence = errors.New("cannot preserve Octavia redirect precedence with an overlapping higher-priority forwarding rule that adds an exact HTTP header condition")
+	errHTTPMethodRedirectPrecedence  = errors.New("cannot preserve Octavia redirect precedence with an overlapping higher-priority forwarding rule that adds an HTTP method condition")
+)
 
 type redirectCell struct {
 	hostname string
@@ -170,9 +173,9 @@ func redirectCells(match cloud.HTTPPathMatch, forwards []cloud.HTTPPathMatch) ([
 	root := &redirectDomain{host: match.Hostname}
 	domains := map[string]*redirectDomain{root.host: root}
 	ordered := []*redirectDomain{root}
-	var unsupportedHeaders bool
+	var unsupportedMethod, unsupportedHeaders bool
 	for _, f := range forwards {
-		if f.Precedence >= match.Precedence {
+		if f.Precedence >= match.Precedence || f.Method != "" && match.Method != "" && f.Method != match.Method {
 			continue
 		}
 		path := pathOf(f)
@@ -184,6 +187,10 @@ func redirectCells(match cloud.HTTPPathMatch, forwards []cloud.HTTPPathMatch) ([
 		if hostContains(host, root.host) {
 			host = root.host
 		} else if !hostContains(root.host, host) {
+			continue
+		}
+		if f.Method != "" && match.Method == "" {
+			unsupportedMethod = true
 			continue
 		}
 		if slices.ContainsFunc(f.Headers, func(header cloud.HTTPHeaderMatch) bool {
@@ -203,6 +210,9 @@ func redirectCells(match cloud.HTTPPathMatch, forwards []cloud.HTTPPathMatch) ([
 	}
 	if root.shadowed {
 		return nil, nil
+	}
+	if unsupportedMethod {
+		return nil, errHTTPMethodRedirectPrecedence
 	}
 	if unsupportedHeaders {
 		return nil, errExactHeaderRedirectPrecedence
@@ -254,7 +264,13 @@ func redirectCells(match cloud.HTTPPathMatch, forwards []cloud.HTTPPathMatch) ([
 				cell.guards = append(cell.guards, redirectGuard{l7policies.TypePath, policy.compareType, policy.path})
 			}
 		}
-		positives := 1 + len(match.Headers) // one PATH predicate plus the positive header predicates
+		positives := len(match.Headers)
+		if usesHTTPPathPredicate(match) {
+			positives++
+		}
+		if match.Method != "" {
+			positives++
+		}
 		if d.host != "" {
 			positives++
 		}
