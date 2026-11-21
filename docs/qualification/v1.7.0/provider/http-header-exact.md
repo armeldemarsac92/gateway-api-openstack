@@ -1,0 +1,19 @@
+# Exact HTTPRoute request header matching
+
+An HTTPRoute selected two Services by their request headers on a private Amphora HTTP listener. The original Gateway API v1.7.0 `HTTPRouteHeaderMatching` case passed all 11 traffic subtests on Standard and Experimental with regional `http_header_exact_v1` and `fixed_http_responses_v1` enabled. The controller ran from the same linux/amd64 release image on both channels. [Operator setup](../../../operator-octavia-http-header-exact.md)
+
+| Request on the same VIP | Standard | Experimental |
+|---|---|---|
+| `Version: one` | 200 from v1 | 200 from v1 |
+| `Version: one, other` in one header field | 404 | 404 |
+| No matching header | 404 | 404 |
+| `Color: blue` | 200 from v1 | 200 from v1 |
+| `Color: red` or `Color: yellow` | 200 from v2 | 200 from v2 |
+
+Both listeners reported one attached route. The Gateway was programmed and the managed HTTPRoute parent had current-generation `Accepted=True` and `ResolvedRefs=True`. Immediately after the upstream case returned, the controller's own route `Programmed` condition still read `False/Pending` on each channel. A fresh Standard run using the portable replay also passed 11/11 and then observed `Programmed=True` within 35 seconds after the case. [Standard receipt](http-header-exact-evidence/standard.json) · [Experimental receipt](http-header-exact-evidence/experimental.json) · [Portable Standard run](http-header-exact-evidence/portable-standard.json)
+
+The case exercised seven forwarding policies. Each used the full set of AND predicates for one alternative. Its original requests included header conjunctions, overlapping rules and alternatives. Each channel's report covers this single registered case. [Standard upstream report](http-header-exact-evidence/standard-report.yaml) · [Experimental upstream report](http-header-exact-evidence/experimental-report.yaml) · [Pinned upstream test](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/httproute-header-matching.go)
+
+Earlier development runs exposed two distinct issues. The header flag alone left unmatched requests at HTTP 503. The published workload manifests enable fixed HTTP responses as well. With both capabilities, the original shared test fixture repeatedly set every descendant's provisioning status after each write. Some upstream request windows expired while the simulated worker was doing that. The final replay retains each real WSGI write, pending SQL state, HAProxy configuration publication and HTTP request. After publication it runs the corresponding Octavia worker status tasks on the changed object and its parents. The original test, request timeouts and expectations are unchanged. The replay includes receipts from both earlier configurations.
+
+The installed Octavia `19.0.1.dev6` wheel matched the public provider release. HAProxy 3.0.19 supports field names up to 255 bytes. A 256-byte name receives an explicit unsupported-value status in the controller. The fixture uses Kubernetes 1.36.2 envtest, five real upstream echo processes and HAProxy. It simulates Keystone, Neutron, asynchronous worker completion and transport to an Amphora. The integrated image is `sha256:358069a4210a218196078fab457a717ea92eedff4d5428db3d9b3fedd5fad5af` from `db720031f03f5c344be3decad81a1563dc734dde`. The archive `hibiscus-http-header-exact-db720031f03f.tar.gz` has SHA-256 `eea400a6553b71ca92a9fb19d4b5d465824ed9fc5adb32656127b32f7fe09272`. [Controller image and replay](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-db720031f03f5c344be3decad81a1563dc734dde) · [Provider wheel, migration and length checks](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-http-header-exact-5896c054cf70) · [Regional profiles](../live-runs.md)

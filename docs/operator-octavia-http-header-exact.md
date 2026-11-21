@@ -8,6 +8,8 @@ The exact-header profile programs Gateway API v1.7.0 header matches on a patched
 2. Using the controller's project credentials and regional Octavia endpoint, read `GET /v2/lbaas/providers/amphora/gateway_capabilities`. The response must advertise both `http_header_exact_v1` and `fixed_http_responses_v1`. The fixed response supplies the HTTP 404 required when every rule misses. [Fixed response setup](operator-octavia-http-actions.md)
 3. A standalone installation uses `config/octavia-http-header-exact`. For Magnum, render `kubectl kustomize integrations/magnum-capi-helm/workload-octavia-http-header-exact` as `gateway-controller.yaml` and pin its checksum and the controller image in the conductor configuration. Both manifests pass `--octavia-http-header-exact` and `--octavia-fixed-http-responses`. [Magnum operator procedure](qualification/v1.7.0/magnum-operator.md)
 
+Pin the qualified controller image to `ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:358069a4210a218196078fab457a717ea92eedff4d5428db3d9b3fedd5fad5af`. Use Octavia `19.0.1.dev6` from the provider release and apply migration `e9c83aa47e21` before enrolling the region. [Controller and replay](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-db720031f03f5c344be3decad81a1563dc734dde) · [Octavia wheel](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-http-header-exact-5896c054cf70) · [Both channel results](qualification/v1.7.0/provider/http-header-exact.md)
+
 ## Match limits
 
 Amphora's HAProxy HTTP parser supports field names up to 255 bytes. The controller reports `Accepted=False` with reason `UnsupportedValue` for a 256-byte name. Exact configured values support up to 4096 characters without surrounding spaces or tabs.
