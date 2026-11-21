@@ -1,0 +1,111 @@
+{
+  "channel": "standard",
+  "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+  "controllerSourceRevision": "41c3b27c85c459b55b017203b51328a61b5c7485",
+  "controllerStartupRevision": "41c3b27c85c459b55b017203b51328a61b5c7485",
+  "controllerImageManifestDigest": "sha256:82cce506e63b5d84f4488eb70bc91d34d1c40c711e5911c3cd2c648c3ff459cd",
+  "gatewayAPISourceRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "transports": {
+    "octaviaAPI": "HTTP over loopback",
+    "vip": "TCP",
+    "members": "TCP to simulated NodePorts"
+  },
+  "controllerBinarySHA256": "c651cfe02912791cc4e58e3b742bb664f7e1bf32716ac63be820e6296bc6412a",
+  "kubernetes": "v1.36.2",
+  "octaviaSourceRevision": "93689cb7701da65b5aad387bb824c477c64b0f2b",
+  "octaviaLibSourceRevision": "bc03e1856b60517e1b75db4fdf9b3edf55f3a019",
+  "haproxy": "3.0.19",
+  "haproxyMemberHealthAndWeights": {
+    "primary@worker-a": {
+      "status": "UP",
+      "checkStatus": "L4OK",
+      "weight": 3
+    },
+    "secondary@worker-a": {
+      "status": "UP",
+      "checkStatus": "L4OK",
+      "weight": 2
+    },
+    "primary@worker-b": {
+      "status": "UP",
+      "checkStatus": "L4OK",
+      "weight": 3
+    }
+  },
+  "conditions": {
+    "Accepted": "True/Accepted",
+    "ResolvedRefs": "True/ResolvedRefs",
+    "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+    "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+  },
+  "provider": {
+    "members": [
+      [
+        "198.51.100.11",
+        32000,
+        3
+      ],
+      [
+        "198.51.100.11",
+        32001,
+        2
+      ],
+      [
+        "198.51.100.12",
+        32000,
+        3
+      ]
+    ],
+    "poolAlgorithm": "ROUND_ROBIN",
+    "poolProtocol": "TCP",
+    "persistence": null,
+    "listenerProtocol": "TCP"
+  },
+  "newTCPConnections": 400,
+  "echoedBytesPerConnection": 256,
+  "backendCounts": {
+    "primary@worker-a": 152,
+    "primary@worker-b": 151,
+    "secondary@worker-a": 97
+  },
+  "serviceCounts": {
+    "primary": 303,
+    "secondary": 97
+  },
+  "targetCounts": {
+    "primary@worker-a": 150,
+    "primary@worker-b": 150,
+    "secondary@worker-a": 100
+  },
+  "tolerancePerBackend": 8,
+  "haproxyCounterDeltas": {
+    "primary@worker-a": {
+      "lbtot": 152,
+      "stot": 152,
+      "wretr": 0,
+      "wredis": 0,
+      "econ": 0
+    },
+    "secondary@worker-a": {
+      "lbtot": 97,
+      "stot": 97,
+      "wretr": 0,
+      "wredis": 0,
+      "econ": 0
+    },
+    "primary@worker-b": {
+      "lbtot": 151,
+      "stot": 151,
+      "wretr": 0,
+      "wredis": 0,
+      "econ": 0
+    }
+  },
+  "haproxyProcessUnchanged": true,
+  "cleanup": {
+    "deletedRouteAndGateway": true,
+    "octaviaGraphEmpty": true,
+    "vipClosed": true,
+    "servicesAndEndpointSlicesPreserved": true
+  }
+}

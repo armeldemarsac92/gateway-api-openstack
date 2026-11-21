@@ -1,11 +1,11 @@
 # Reproduce the Hibiscus development image
 
-Use the [local build record](image.json) for the exact source revision, linux/amd64 OCI manifest, archive digest and embedded manager digest. The normal and no-cache builds produced the same registry manifest. The OCI archive was built and checked locally.
+Use the [local build record](image.json) for the exact source revision, linux/amd64 OCI manifest, archive digest and embedded manager digest. The normal and no-cache builds produced the same registry manifest. The OCI archive was built and checked locally. The extracted manager handled the weighted TCP NodePort replay on both Gateway API v1.7.0 bundles. [Traffic receipts](provider/weighted-tcp-nodeports.md)
 
 On a linux/amd64 host, use a separate checkout of the recorded revision. The Dockerfile pins the Go 1.27.4 builder and distroless base by digest. Podman uses a fixed timestamp, and the build writes the full commit into the binary and the OCI revision label. The verification command exports gzip-compressed layers.
 
 ```sh
-revision=adb6f0fc44dee7d9016bca79442e68f94eb6e15e
+revision=41c3b27c85c459b55b017203b51328a61b5c7485
 test "$(git rev-parse HEAD)" = "$revision"
 image="localhost/hibiscus-controller:$revision"
 make container-build CONTAINER_TOOL=podman VERSION="$revision" IMAGE="$image"
