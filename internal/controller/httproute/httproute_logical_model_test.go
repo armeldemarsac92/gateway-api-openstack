@@ -110,10 +110,68 @@ func TestLogicalModelCannotEnableUnmappedNodePortBehavior(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, _, err = supportedRouteModel(logical, gateway.Spec.Listeners[0], false, false)
+			_, _, err = supportedRouteModel(logical, gateway.Spec.Listeners[0], false, false, false)
 			var rejected *routeBuildError
 			if !errors.As(err, &rejected) || rejected.kind != routeErrorUnsupported {
 				t.Fatalf("unmapped logical model escaped NodePort lowering: %v", err)
+			}
+		})
+	}
+}
+
+func TestExactHTTPHeadersLowerDistinctAlternativesAtTheirRank(t *testing.T) {
+	cfg := testConfig()
+	cfg.HTTPHeaderExact = true
+	_, gateway := providerRouteParentObjects(cfg)
+	route := mapperTestHTTPRoute(gateway.Namespace, "api", gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name)}, "backend")
+	route.UID = "route-uid"
+	route.Spec.Rules[0].Matches = []gatewayv1.HTTPRouteMatch{
+		{Headers: []gatewayv1.HTTPHeaderMatch{{Name: "X-Version", Value: "One, Two"}}},
+		{Headers: []gatewayv1.HTTPHeaderMatch{{Name: "X-Version", Value: "Three"}, {Name: "x-version", Type: ptr.To(gatewayv1.HeaderMatchRegularExpression), Value: "ignored"}, {Name: "color", Value: "orange"}}},
+		{Path: &gatewayv1.HTTPPathMatch{Type: ptr.To(gatewayv1.PathMatchExact), Value: ptr.To("/explicit")}},
+	}
+	service, endpoints, node := validNodePortBackend(gateway.Namespace, "backend")
+	reader := indexedFakeClientBuilder(testScheme(t), cfg).WithObjects(service, endpoints, node).Build()
+	r := &Reconciler{Config: cfg}
+	desired, err := r.buildRouteModelWithReader(t.Context(), reader, route, gateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(desired.HTTPBackends) != 1 || len(desired.HTTPBackends[0].Matches) != 3 {
+		t.Fatalf("want three independent policies on the same backend, got %#v", desired.HTTPBackends)
+	}
+	matches := desired.HTTPBackends[0].Matches
+	if matches[0].PathType != cloud.PathMatchExact || matches[0].Precedence != 0 ||
+		matches[1].Precedence != 1 || !slices.Equal(matches[1].Headers, []cloud.HTTPHeaderMatch{{Name: "color", Value: "orange"}, {Name: "x-version", Value: "Three"}}) ||
+		matches[2].Precedence != 2 || !slices.Equal(matches[2].Headers, []cloud.HTTPHeaderMatch{{Name: "x-version", Value: "One, Two"}}) {
+		t.Fatalf("incorrect effective predicates or precedence: %#v", matches)
+	}
+}
+
+func TestExactHTTPHeadersRejectUnsupportedPredicates(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		optIn bool
+		match gatewayv1.HTTPRouteMatch
+		want  string
+	}{
+		{name: "disabled", match: gatewayv1.HTTPRouteMatch{Headers: []gatewayv1.HTTPHeaderMatch{{Name: "version", Value: "one"}}}, want: "--octavia-http-header-exact"},
+		{name: "regex", optIn: true, match: gatewayv1.HTTPRouteMatch{Headers: []gatewayv1.HTTPHeaderMatch{{Name: "version", Type: ptr.To(gatewayv1.HeaderMatchRegularExpression), Value: "one"}}}, want: "RegularExpression"},
+		{name: "method", optIn: true, match: gatewayv1.HTTPRouteMatch{Method: ptr.To(gatewayv1.HTTPMethodGet)}, want: "method"},
+		{name: "query", optIn: true, match: gatewayv1.HTTPRouteMatch{QueryParams: []gatewayv1.HTTPQueryParamMatch{{Name: "version", Value: "one"}}}, want: "query parameter"},
+		{name: "name beyond HAProxy limit", optIn: true, match: gatewayv1.HTTPRouteMatch{Headers: []gatewayv1.HTTPHeaderMatch{{Name: gatewayv1.HTTPHeaderName(strings.Repeat("x", 256)), Value: "one"}}}, want: "255 bytes"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := testConfig()
+			cfg.HTTPHeaderExact = test.optIn
+			_, gateway := providerRouteParentObjects(cfg)
+			route := mapperTestHTTPRoute(gateway.Namespace, "api", gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name)}, "backend")
+			route.Spec.Rules[0].Matches = []gatewayv1.HTTPRouteMatch{test.match}
+			r := &Reconciler{Config: cfg}
+			_, err := r.validateRouteStructure(route)
+			var rejected *routeBuildError
+			if !errors.As(err, &rejected) || rejected.kind != routeErrorUnsupported || !strings.Contains(rejected.message, test.want) {
+				t.Fatalf("expected UnsupportedValue mentioning %q, got %v", test.want, err)
 			}
 		})
 	}

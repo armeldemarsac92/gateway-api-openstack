@@ -136,10 +136,7 @@ type Match struct {
 }
 
 // HeaderMatch is a normalized, case-insensitive name with an exact value.
-type HeaderMatch struct {
-	Name  string
-	Value string
-}
+type HeaderMatch = cloud.HTTPHeaderMatch
 
 // AttachmentState is the outcome of logical attachment evaluation.
 type AttachmentState string

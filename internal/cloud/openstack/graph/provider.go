@@ -67,6 +67,7 @@ func NewIdentity(value cloud.Identity) (Identity, error) {
 // observes an asynchronous Octavia operation again.
 type ProviderConfig struct {
 	FixedHTTPResponses    bool
+	HTTPHeaderExact       bool
 	WeightedHTTPTargets   bool
 	RequestHeaderModifier bool
 	BackendH2C            bool
@@ -79,6 +80,7 @@ type ProviderConfig struct {
 // Provider owns the OpenStack resource graph for managed Gateway API objects.
 type Provider struct {
 	fixedHTTPResponses    bool
+	httpHeaderExact       bool
 	weightedHTTPTargets   bool
 	requestHeaderModifier bool
 	backendH2C            bool
@@ -104,6 +106,7 @@ func NewProvider(clients ServiceClients, cfg ProviderConfig) *Provider {
 	}
 	return &Provider{
 		fixedHTTPResponses:    cfg.FixedHTTPResponses || cfg.WeightedHTTPTargets,
+		httpHeaderExact:       cfg.HTTPHeaderExact,
 		weightedHTTPTargets:   cfg.WeightedHTTPTargets,
 		requestHeaderModifier: cfg.RequestHeaderModifier,
 		backendH2C:            cfg.BackendH2C,

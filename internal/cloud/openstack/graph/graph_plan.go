@@ -24,6 +24,7 @@ import (
 	"slices"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	openstackidentity "github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/identity"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/loadbalancers"
@@ -620,6 +621,37 @@ func routeStateFromObservation(actual observedRouteGraph) cloud.RouteState {
 	return state
 }
 
+// missingExactHeaderWithdrawal protects policies whose last verified
+// rendering is no longer authorized by the effective Octavia provider.
+func (p *Provider) missingExactHeaderWithdrawal(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph) (graphMutation, bool) {
+	if !p.httpHeaderExact || desired.protocol != cloud.ListenerProtocolHTTP || desired.spec.Gateway.Disposition != cloud.GraphEnsure {
+		return graphMutation{}, false
+	}
+	for index, observed := range actual.routes {
+		if desired.spec.Routes[index].Disposition != cloud.GraphEnsure {
+			continue
+		}
+		for _, part := range observed.parts() {
+			for _, policy := range part.policies {
+				retry := policy.policy.ProvisioningStatus == "ERROR"
+				if !policy.adminObserved || policy.pending() || !policy.policy.AdminStateUp && !retry ||
+					!slices.ContainsFunc(policy.rules, func(rule observedRouteRule) bool {
+						return rule.base == openstackidentity.RoleRuleHTTPHeaderExact
+					}) {
+					continue
+				}
+				if err := p.verifyGatewayHTTPCapabilities(ctx, desired, actual, []string{octavia.GatewayCapabilityHTTPHeaderExact}); err == nil {
+					return graphMutation{}, false
+				}
+				return graphMutation{kind: graphRouteMutation, routeIndex: index, withdrawHTTPPolicy: true,
+					route:   routeMutation{kind: routeMutationDisablePolicy, id: policy.policy.ID, retry: retry},
+					message: "Disabling an exact HTTP header policy until Octavia advertises its capability"}, true
+			}
+		}
+	}
+	return graphMutation{}, false
+}
+
 type unavailableRouteCapability struct {
 	error
 	capability                 string
@@ -703,6 +735,10 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 		if len(step.route.requestHeaderOperations) != 0 {
 			required = append(required, octavia.GatewayCapabilityRequestHeaderOperations)
 		}
+		if step.route.requiresExactHeaders || len(step.route.policy.headers) != 0 && step.route.kind == routeMutationCreatePolicy ||
+			step.route.rule.ruleType == httpHeaderExactRuleType {
+			required = append(required, octavia.GatewayCapabilityHTTPHeaderExact)
+		}
 	default:
 		return step, nil
 	}
@@ -739,6 +775,9 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 			} else if len(step.route.requestHeaderOperations) != 0 && !step.withdrawHTTPPolicy &&
 				(!explicitlyMissing || missing.Capability == octavia.GatewayCapabilityRequestHeaderOperations) {
 				err = &unavailableRouteCapability{error: err, capability: octavia.GatewayCapabilityRequestHeaderOperations}
+			} else if slices.Contains(required, octavia.GatewayCapabilityHTTPHeaderExact) &&
+				(!explicitlyMissing || missing.Capability == octavia.GatewayCapabilityHTTPHeaderExact) {
+				err = &unavailableRouteCapability{error: err, capability: octavia.GatewayCapabilityHTTPHeaderExact}
 			}
 			return step, err
 		}

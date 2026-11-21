@@ -33,6 +33,8 @@ import (
 // Octavia's public member create and update APIs accept weights from 0 to 256.
 const maxOctaviaMemberWeight = 256
 
+const httpHeaderExactRuleType l7policies.RuleType = "HTTP_HEADER_EXACT"
+
 type desiredPolicy struct {
 	role                    string
 	position                int32
@@ -46,6 +48,7 @@ type desiredPolicy struct {
 	weighted                bool
 	weightedPlan            *weightedHTTPPolicyPlan
 	requestHeaderOperations []cloud.HTTPHeaderOperation
+	headers                 []cloud.HTTPHeaderMatch
 }
 
 type desiredRule struct {
@@ -53,6 +56,7 @@ type desiredRule struct {
 	ruleType    l7policies.RuleType
 	compareType l7policies.CompareType
 	value       string
+	key         string
 	invert      bool
 }
 
@@ -333,12 +337,15 @@ func (p *Provider) buildDesiredFixedHTTPParts(spec cloud.RouteSpec) ([]desiredRo
 func (p *Provider) buildHTTPMatchPolicies(r *desiredRoute, matches []cloud.HTTPPathMatch) error {
 	matchKeys := make(map[string]bool, len(matches))
 	for _, match := range matches {
-		match = normalizeGroupedHTTPMatch(match)
+		match, err := p.normalizeHTTPMatch(match)
+		if err != nil {
+			return err
+		}
 		policies, hostnameRuleValue, err := httpPathPolicies(match, true)
 		if err != nil {
 			return err
 		}
-		matchKey := openstackidentity.HTTPMatchKey(match.Hostname, match.PathType, match.PathValue)
+		matchKey := openstackidentity.HTTPMatchKey(match.Hostname, match.PathType, match.PathValue, match.Headers...)
 		if matchKeys[matchKey] {
 			return errors.New("duplicate HTTP match within one backend or weighted rule")
 		}
@@ -395,14 +402,22 @@ func httpResourceRole(base, backend, match string) string {
 	return openstackidentity.HTTPFragmentRole(base, backend, match)
 }
 
-func normalizeGroupedHTTPMatch(match cloud.HTTPPathMatch) cloud.HTTPPathMatch {
+func (p *Provider) normalizeHTTPMatch(match cloud.HTTPPathMatch) (cloud.HTTPPathMatch, error) {
+	if len(match.Headers) != 0 && !p.httpHeaderExact {
+		return cloud.HTTPPathMatch{}, errors.New("exact HTTP header matching requires --octavia-http-header-exact")
+	}
+	headers, err := cloud.NormalizeHTTPHeaderMatches(match.Headers)
+	if err != nil {
+		return cloud.HTTPPathMatch{}, err
+	}
+	match.Headers = headers
 	if match.PathType == cloud.PathMatchPrefix {
 		match.PathValue = strings.TrimRight(match.PathValue, "/")
 	}
 	if match.PathValue == "" {
 		match.PathValue = "/"
 	}
-	return match
+	return match, nil
 }
 
 func httpPathPolicies(match cloud.HTTPPathMatch, grouped bool) ([]desiredPolicy, string, error) {
@@ -428,10 +443,16 @@ func httpPathPolicies(match cloud.HTTPPathMatch, grouped bool) ([]desiredPolicy,
 			pattern, _ = amphora.LiteralPathPrefixPattern(pathRules.Exact)
 		}
 	}
+	var policies []desiredPolicy
 	if pattern != "" {
-		return []desiredPolicy{{role: role, position: 1, compareType: l7policies.CompareTypeRegex, path: pattern}}, hostnameRuleValue, nil
+		policies = []desiredPolicy{{role: role, position: 1, compareType: l7policies.CompareTypeRegex, path: pattern}}
+	} else {
+		policies = policiesFor(pathRules.Exact, pathRules.Prefix)
 	}
-	return policiesFor(pathRules.Exact, pathRules.Prefix), hostnameRuleValue, nil
+	for i := range policies {
+		policies[i].headers = match.Headers
+	}
+	return policies, hostnameRuleValue, nil
 }
 
 func policiesFor(exactPath, prefixPath string) []desiredPolicy {
@@ -461,6 +482,15 @@ func rulesFor(policy desiredPolicy, hostnameRuleValue string) []desiredRule {
 			ruleType:    l7policies.TypeHostName,
 			compareType: l7policies.CompareTypeRegex,
 			value:       hostnameRuleValue,
+		})
+	}
+	for _, header := range policy.headers {
+		rules = append(rules, desiredRule{
+			role:        policyRuleRole(policy, openstackidentity.RoleRuleHTTPHeaderExact, openstackidentity.HTTPHeaderRuleKey(header.Name)),
+			ruleType:    httpHeaderExactRuleType,
+			compareType: l7policies.CompareTypeEqual,
+			key:         header.Name,
+			value:       header.Value,
 		})
 	}
 	if policy.redirect != nil {

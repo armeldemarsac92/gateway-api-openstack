@@ -190,6 +190,12 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 			return result, err
 		}
 	}
+	if len(plan) == 0 || !plan[0].withdrawHTTPPolicy {
+		if step, withdraw := p.missingExactHeaderWithdrawal(ctx, desired, actual); withdraw {
+			plan = []graphMutation{step}
+			result.Routes[step.routeIndex].Result.Outcome = p.progressingOutcome(step.message)
+		}
+	}
 	if spec.Gateway.Disposition == cloud.GraphEnsure && (len(plan) == 0 || plan[0].kind != graphClearListenerDefaultPool && !plan[0].withdrawHTTPPolicy && !plan[0].isRestrictiveSNI()) {
 		if err := p.validateGraphTrafficSecurity(ctx, desired); err != nil {
 			result.Routes = observedRouteDeleteCompletions(desired, actual)

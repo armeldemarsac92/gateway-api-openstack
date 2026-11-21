@@ -185,3 +185,18 @@ func TestRedirectReportsControllerEncodingLimit(t *testing.T) {
 		t.Fatalf("got %d cells, error %v", len(cells), err)
 	}
 }
+
+func TestRedirectRequiresProvablePrecedenceWithExactHTTPHeaders(t *testing.T) {
+	redirect := cloud.HTTPPathMatch{PathType: cloud.PathMatchPrefix, PathValue: "/shop", Precedence: 2}
+	header := cloud.HTTPHeaderMatch{Name: "color", Value: "blue sky"}
+	forward := cloud.HTTPPathMatch{PathType: cloud.PathMatchExact, PathValue: "/shop/item",
+		Precedence: 1, Headers: []cloud.HTTPHeaderMatch{header}}
+	if cells, err := redirectCells(redirect, []cloud.HTTPPathMatch{forward}); err == nil || len(cells) != 0 {
+		t.Fatalf("overlapping forward header would let the redirect take precedence: %v, %v", cells, err)
+	}
+	redirect.Headers = []cloud.HTTPHeaderMatch{header}
+	cells, err := redirectCells(redirect, []cloud.HTTPPathMatch{forward})
+	if err != nil || len(cells) != 1 || len(cells[0].guards) != 1 {
+		t.Fatalf("redirect with the same header needs a path guard: %v, %v", cells, err)
+	}
+}
