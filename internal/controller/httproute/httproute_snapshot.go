@@ -96,6 +96,7 @@ type routeCleanupSnapshot struct {
 	disposition       routeCleanupDisposition
 	referenceRevoked  bool
 	attachmentRevoked bool
+	bundleUnsupported bool
 	parents           []routeParentObservation
 }
 
@@ -490,6 +491,7 @@ func (r *Reconciler) buildRouteCleanupSnapshot(
 	if err := r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
 		if errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) &&
 			!r.routeForwardingEstablished(&route, managedParentsFromObservations(parentObservations), stored) {
+			snapshot.bundleUnsupported = true
 			snapshot.parents = parentObservations
 			return snapshot, nil
 		}
@@ -600,6 +602,15 @@ func (r *Reconciler) sealRouteCleanupSnapshot(
 		}
 		if !slices.EqualFunc(snapshot.parents, parents, sameCleanupParentObservation) {
 			return errHTTPRouteChanged
+		}
+	}
+	if snapshot.bundleUnsupported {
+		err := r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader)
+		if err == nil {
+			return errHTTPRouteChanged
+		}
+		if !errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) {
+			return err
 		}
 	}
 	return nil

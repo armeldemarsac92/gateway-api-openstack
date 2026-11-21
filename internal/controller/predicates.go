@@ -101,7 +101,8 @@ func GatewayClassForGatewayPredicate() predicate.Predicate {
 		if !oldOK || !newOK {
 			return true
 		}
-		return generationOrDeletionChanged(oldClass, newClass) ||
+		return oldClass.UID != newClass.UID ||
+			generationOrDeletionChanged(oldClass, newClass) ||
 			gatewayClassConditionStateFor(oldClass, gatewayv1.GatewayClassConditionStatusAccepted) !=
 				gatewayClassConditionStateFor(newClass, gatewayv1.GatewayClassConditionStatusAccepted) ||
 			gatewayClassConditionStateFor(oldClass, gatewayv1.GatewayClassConditionStatusSupportedVersion) !=
@@ -189,7 +190,8 @@ func GatewayForHTTPRoutePredicate(config Config) predicate.Predicate {
 		if !oldOK || !newOK {
 			return true
 		}
-		return generationOrDeletionChanged(oldGateway, newGateway) ||
+		return oldGateway.UID != newGateway.UID ||
+			generationOrDeletionChanged(oldGateway, newGateway) ||
 			gatewayBindingChanged(config, oldGateway, newGateway) ||
 			gatewayAcceptedState(oldGateway) != gatewayAcceptedState(newGateway) ||
 			gatewayProgrammedState(oldGateway) != gatewayProgrammedState(newGateway)

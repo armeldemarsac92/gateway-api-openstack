@@ -113,7 +113,7 @@ func TestHTTPRouteForGatewayPredicate(t *testing.T) {
 
 func TestGatewayForHTTPRoutePredicate(t *testing.T) {
 	cfg := testConfig()
-	base := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "edge", Generation: 1}}
+	base := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "edge", UID: "original", Generation: 1}}
 	base.Status.Conditions = []metav1.Condition{{
 		Type:               string(gatewayv1.GatewayConditionProgrammed),
 		Status:             metav1.ConditionTrue,
@@ -129,6 +129,9 @@ func TestGatewayForHTTPRoutePredicate(t *testing.T) {
 	}}
 	pred := GatewayForHTTPRoutePredicate(cfg)
 
+	testPredicateUpdate(t, pred, base, mutateGateway(base, func(gateway *gatewayv1.Gateway) {
+		gateway.UID = "replacement"
+	}), true, "Gateway replacement at the same name")
 	testPredicateUpdate(t, pred, base, mutateGateway(base, func(gateway *gatewayv1.Gateway) {
 		gateway.Status.Addresses = []gatewayv1.GatewayStatusAddress{{Value: "192.0.2.10"}}
 		gateway.Status.Listeners = []gatewayv1.ListenerStatus{{Name: "http", AttachedRoutes: 1}}
@@ -196,7 +199,7 @@ func TestGatewayClassAndPeerPredicates(t *testing.T) {
 }
 
 func TestGatewayClassForGatewayPredicate(t *testing.T) {
-	class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "openstack", Generation: 1}}
+	class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "openstack", UID: "original", Generation: 1}}
 	SetCondition(&class.Status.Conditions, Condition(
 		string(gatewayv1.GatewayClassConditionStatusAccepted),
 		metav1.ConditionTrue,
@@ -213,6 +216,9 @@ func TestGatewayClassForGatewayPredicate(t *testing.T) {
 	))
 	pred := GatewayClassForGatewayPredicate()
 	testPredicateUpdate(t, pred, class, class.DeepCopy(), false, "unchanged GatewayClass")
+	replacement := class.DeepCopy()
+	replacement.UID = "replacement"
+	testPredicateUpdate(t, pred, class, replacement, true, "GatewayClass replacement at the same name")
 	messageChanged := class.DeepCopy()
 	meta.FindStatusCondition(messageChanged.Status.Conditions, string(gatewayv1.GatewayClassConditionStatusSupportedVersion)).Message = "still supported"
 	testPredicateUpdate(t, pred, class, messageChanged, false, "SupportedVersion message")

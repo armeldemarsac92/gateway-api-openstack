@@ -156,6 +156,33 @@ func TestHTTPRouteRechecksSecondaryParentOwnershipAtGraphFences(t *testing.T) {
 	}
 }
 
+func TestHTTPRouteRechecksBundleCompatibilityAtCleanupSeal(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	f.route.Spec.ParentRefs = append(f.route.Spec.ParentRefs, gatewayv1.ParentReference{Name: "missing"})
+	if err := f.client.Update(t.Context(), f.route); err != nil {
+		t.Fatal(err)
+	}
+	identity := controller.RouteIdentity(f.reconciler.Config, f.gateway, f.route)
+	reader := liveReaderWithUnsupportedVersion(f.client)
+	f.reconciler.APIReader = reader
+	cleanup, err := f.reconciler.buildRouteCleanupSnapshot(t.Context(), f.route, identity)
+	if err != nil || cleanup.disposition != routeCleanupRequired {
+		t.Fatalf("cleanup with an unsupported bundle = %v, %v, want required cleanup", cleanup.disposition, err)
+	}
+	if err := f.reconciler.sealRouteCleanupSnapshot(t.Context(), cleanup); err != nil {
+		t.Fatalf("cleanup seal with the bundle still unsupported = %v, want success", err)
+	}
+
+	reader.useClientCRDs = true
+	if err := f.reconciler.sealRouteCleanupSnapshot(t.Context(), cleanup); !errors.Is(err, errHTTPRouteChanged) {
+		t.Fatalf("cleanup seal after bundle recovery = %v, want stale cleanup", err)
+	}
+	current, err := f.reconciler.buildRouteCleanupSnapshot(t.Context(), f.route, identity)
+	if err != nil || current.disposition != routeCleanupStillDesired {
+		t.Fatalf("cleanup after bundle recovery = %v, %v, want forwarding to remain desired", current.disposition, err)
+	}
+}
+
 func TestHTTPRouteRefusesSeveralManagedParentRefs(t *testing.T) {
 	for _, sameGateway := range []bool{false, true} {
 		name := "distinct Gateways"
