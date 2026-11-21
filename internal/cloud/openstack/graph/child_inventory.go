@@ -42,8 +42,8 @@ func (p *Provider) listGatewayListeners(ctx context.Context, lb *octavia.LoadBal
 	return items, markedProtocol, crossCheckChildInventory("load balancer", lb.ID, "listener", lb.Listeners, items, func(item listeners.Listener) string { return item.ID })
 }
 
-func (p *Provider) listGatewayPools(ctx context.Context, lb *octavia.LoadBalancer) ([]pools.Pool, error) {
-	items, err := p.octavia.ListCompletePools(ctx, pools.ListOpts{LoadbalancerID: lb.ID, ProjectID: p.projectID})
+func (p *Provider) listGatewayPools(ctx context.Context, lb *octavia.LoadBalancer, requireMonitorID bool) ([]pools.Pool, error) {
+	items, err := p.octavia.ListCompletePools(ctx, pools.ListOpts{LoadbalancerID: lb.ID, ProjectID: p.projectID}, requireMonitorID)
 	if err != nil {
 		return nil, fmt.Errorf("list pools beneath Gateway: %w", err)
 	}

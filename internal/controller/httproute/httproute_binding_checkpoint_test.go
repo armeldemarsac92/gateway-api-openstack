@@ -17,20 +17,29 @@ limitations under the License.
 package httproute
 
 import (
+	"context"
 	"errors"
 	"testing"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	gatewaycontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 )
 
 func TestLegacyRouteBindingCompletesBeforeRestrictiveGatewayEditIsProgrammed(t *testing.T) {
+	t.Run("single port", func(t *testing.T) { testLegacyRouteBindingCompletes(t, false) })
+	t.Run("distinct ports", func(t *testing.T) { testLegacyRouteBindingCompletes(t, true) })
+}
+
+func testLegacyRouteBindingCompletes(t *testing.T, distinct bool) {
+	t.Helper()
 	ctx := t.Context()
 	cfg := testConfig()
 	class, gateway := providerRouteParentObjects(cfg)
@@ -40,7 +49,7 @@ func TestLegacyRouteBindingCompletesBeforeRestrictiveGatewayEditIsProgrammed(t *
 	kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).
 		WithStatusSubresource(gateway, route).
 		WithObjects(class, gateway, route, service, endpoints, node).Build()
-	provider := &recordingProvider{}
+	provider := &checkpointGraphProvider{}
 	coordinator := &graph.Coordinator{}
 	gatewayReconciler := newTestGatewayReconciler(gatewaycontroller.Reconciler{
 		Client: kubeClient, APIReader: kubeClient, Coordinator: coordinator, Config: cfg,
@@ -62,6 +71,9 @@ func TestLegacyRouteBindingCompletesBeforeRestrictiveGatewayEditIsProgrammed(t *
 		t.Fatal(err)
 	}
 	delete(route.Annotations, cfg.RouteProjectIDAnnotation())
+	if distinct {
+		delete(route.Annotations, cfg.RouteClusterIDAnnotation())
+	}
 	if err := kubeClient.Update(ctx, route); err != nil {
 		t.Fatal(err)
 	}
@@ -69,6 +81,16 @@ func TestLegacyRouteBindingCompletesBeforeRestrictiveGatewayEditIsProgrammed(t *
 		t.Fatal(err)
 	}
 	gateway.Spec.Listeners[0].Hostname = ptr.To(gatewayv1.Hostname("api.example.test"))
+	if distinct {
+		gateway.Spec.Listeners = append(gateway.Spec.Listeners, gatewayv1.Listener{
+			Name: "other", Protocol: gatewayv1.HTTPProtocolType, Port: 8080, Hostname: ptr.To(gatewayv1.Hostname("other.example.test")),
+		})
+		// As the route had no hostname before the Gateway edit, restrict the
+		// other section to a different namespace policy to keep selection unique.
+		gateway.Spec.Listeners[1].AllowedRoutes = &gatewayv1.AllowedRoutes{Namespaces: &gatewayv1.RouteNamespaces{
+			From: ptr.To(gatewayv1.NamespacesFromSelector), Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"other": "true"}},
+		}}
+	}
 	gateway.Generation++
 	if err := kubeClient.Update(ctx, gateway); err != nil {
 		t.Fatal(err)
@@ -83,9 +105,23 @@ func TestLegacyRouteBindingCompletesBeforeRestrictiveGatewayEditIsProgrammed(t *
 		t.Fatal(err)
 	}
 	if route.Annotations[cfg.RouteProjectIDAnnotation()] != cfg.OpenStackProjectID ||
+		route.Annotations[cfg.RouteClusterIDAnnotation()] != cfg.ClusterID ||
 		route.Annotations[cfg.RouteLifecycleAnnotation()] != controller.RouteAttached ||
 		len(provider.routeSpecs) != 1 || len(provider.deletedRoutes) != 0 {
 		t.Fatalf("checkpoint metadata = %#v, ensures = %d, deletes = %d", route.Annotations, len(provider.routeSpecs), len(provider.deletedRoutes))
+	}
+	if distinct {
+		for range 2 {
+			if _, err := gatewayReconciler.Reconcile(ctx, gatewayRequest); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := kubeClient.Get(ctx, routeRequest.NamespacedName, route); err != nil {
+			t.Fatal(err)
+		}
+		if port := controller.ScopedRouteAnchor(cfg, route, gatewayv1.HTTPProtocolType); port != 80 {
+			t.Fatalf("route enrollment anchor = %d, want 80", port)
+		}
 	}
 	if _, err := gatewayReconciler.Reconcile(ctx, gatewayRequest); err != nil {
 		t.Fatal(err)
@@ -97,6 +133,16 @@ func TestLegacyRouteBindingCompletesBeforeRestrictiveGatewayEditIsProgrammed(t *
 		provider.routeSpecs[1].Hostname != "api.example.test" || provider.routeSpecs[1].Identity != provider.routeSpecs[0].Identity {
 		t.Fatalf("Gateway status = %#v, forwarding = %#v; want current generation with restricted forwarding and unchanged route identity", gateway.Status, provider.routeSpecs)
 	}
+}
+
+type checkpointGraphProvider struct{ recordingProvider }
+
+func (p *checkpointGraphProvider) ReconcileGatewayGraph(ctx context.Context, spec cloud.GatewayGraphSpec) (cloud.GatewayGraphResult, error) {
+	result, err := p.recordingProvider.ReconcileGatewayGraph(ctx, spec)
+	for _, listener := range spec.Gateway.Spec.ScopedListeners {
+		result.Gateway.ScopedListenerReadyPorts = append(result.Gateway.ScopedListenerReadyPorts, listener.Port)
+	}
+	return result, err
 }
 
 func TestPendingGatewayCannotCompleteRouteBindingWithoutCurrentOwnership(t *testing.T) {

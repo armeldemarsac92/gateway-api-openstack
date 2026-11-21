@@ -119,12 +119,12 @@ func (r *Reconciler) buildRouteValidationSnapshotFromInputs(
 		return routeValidationSnapshot{}, err
 	}
 
+	if err := r.observeRouteBinding(&snapshot); err != nil {
+		return routeValidationSnapshot{}, err
+	}
 	candidates, err := r.validateRouteSnapshotParent(&snapshot, purpose)
 	if err != nil || snapshot.disposition == routeValidationGatewayPending {
 		return snapshot, err
-	}
-	if err := r.observeRouteBinding(&snapshot); err != nil {
-		return routeValidationSnapshot{}, err
 	}
 	if _, err := validateRouteStructure(snapshot.route); err != nil {
 		return routeValidationSnapshot{}, routeSnapshotRejection(purpose, err)
@@ -250,10 +250,15 @@ func (r *Reconciler) validateRouteSnapshotParent(
 	}
 	if controller.GatewayListenerScope(r.Config, snapshot.gateway) != gatewayv1.HTTPProtocolType {
 		if gatewaycontroller.HasMultipleHTTPListenerPorts(snapshot.gateway) {
-			snapshot.disposition = routeValidationGatewayPending
-			return nil, nil
-		}
-		if snapshot.gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] != strconv.Itoa(int(candidates[0].Port)) {
+			// Enrollment requires complete route checkpoints, so an established
+			// route must be able to repair its binding before enrollment finishes.
+			annotations := snapshot.route.Annotations
+			if !r.establishedRouteBinding(*snapshot) ||
+				(annotations[r.Config.RouteClusterIDAnnotation()] != "" && annotations[r.Config.RouteProjectIDAnnotation()] != "") {
+				snapshot.disposition = routeValidationGatewayPending
+				return nil, nil
+			}
+		} else if snapshot.gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] != strconv.Itoa(int(candidates[0].Port)) {
 			return nil, errHTTPRouteChanged
 		}
 	}
@@ -300,9 +305,7 @@ func (r *Reconciler) validateRouteBindingTransition(snapshot routeValidationSnap
 	// Both finalizers and the stored identity prove this attached route already
 	// belongs to the Gateway. Its metadata must be complete before the graph
 	// writer can program a newer Gateway generation.
-	completesAttachedBinding := snapshot.binding.matchesDesired && snapshot.binding.hasFinalizer &&
-		snapshot.route.Annotations[r.Config.RouteLifecycleAnnotation()] == controller.RouteAttached
-	if !snapshot.gatewayProgrammed && !completesAttachedBinding {
+	if !snapshot.gatewayProgrammed && !r.establishedRouteBinding(snapshot) {
 		return errHTTPRouteChanged
 	}
 	if !snapshot.binding.present && snapshot.binding.hasFinalizer {
@@ -316,6 +319,11 @@ func (r *Reconciler) validateRouteBindingTransition(snapshot routeValidationSnap
 		return errHTTPRouteChanged
 	}
 	return nil
+}
+
+func (r *Reconciler) establishedRouteBinding(snapshot routeValidationSnapshot) bool {
+	return snapshot.binding.matchesDesired && snapshot.binding.hasFinalizer &&
+		snapshot.route.Annotations[r.Config.RouteLifecycleAnnotation()] == controller.RouteAttached
 }
 
 func gatewayProgrammedForGeneration(gateway *gatewayv1.Gateway) bool {

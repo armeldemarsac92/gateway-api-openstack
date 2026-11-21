@@ -21,6 +21,7 @@ import (
 	"fmt"
 
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
+	"github.com/gophercloud/gophercloud/v2/pagination"
 )
 
 // ListPolicies lists and extracts L7 policies matching opts.
@@ -34,6 +35,13 @@ func (s *Service) ListPolicies(ctx context.Context, opts l7policies.ListOpts) ([
 		return nil, fmt.Errorf("extract L7 policies: %w", err)
 	}
 	return items, nil
+}
+
+// ListCompletePolicies requires an explicit collection on every page.
+func (s *Service) ListCompletePolicies(ctx context.Context, opts l7policies.ListOpts) ([]l7policies.L7Policy, error) {
+	return listCompleteCollection(ctx, l7policies.List(s.client, opts), func(result pagination.PageResult) pagination.Page {
+		return l7policies.L7PolicyPage{LinkedPageBase: pagination.LinkedPageBase{PageResult: result}}
+	}, "l7policies", l7policies.ExtractL7Policies)
 }
 
 // CreatePolicy creates one L7 policy.
@@ -62,6 +70,13 @@ func (s *Service) ListRules(ctx context.Context, policyID string, opts l7policie
 		return nil, fmt.Errorf("extract L7 rules: %w", err)
 	}
 	return items, nil
+}
+
+// ListCompleteRules requires an explicit collection on every page.
+func (s *Service) ListCompleteRules(ctx context.Context, policyID string, opts l7policies.ListRulesOpts) ([]l7policies.Rule, error) {
+	return listCompleteCollection(ctx, l7policies.ListRules(s.client, policyID, opts), func(result pagination.PageResult) pagination.Page {
+		return l7policies.RulePage{LinkedPageBase: pagination.LinkedPageBase{PageResult: result}}
+	}, "rules", l7policies.ExtractRules)
 }
 
 // CreateRule creates one L7 rule beneath a policy.

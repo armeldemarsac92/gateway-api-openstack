@@ -18,6 +18,7 @@ package graph
 
 import (
 	"context"
+	"fmt"
 	"slices"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
@@ -68,6 +69,18 @@ func (p *Provider) observeScopedHTTPGraph(ctx context.Context, desired desiredGa
 		}
 	}
 	return actual, nil
+}
+
+func (route observedRouteGraph) validateScopedHTTPPoolChildren() error {
+	listedMonitorID := ""
+	if route.monitor != nil {
+		listedMonitorID = route.monitor.ID
+	}
+	if route.pool.MonitorID != listedMonitorID || (route.monitor != nil && listedMonitorID == "") {
+		return cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady,
+			fmt.Errorf("pool %s references monitor %q but the monitor list reports %q", route.pool.ID, route.pool.MonitorID, listedMonitorID))
+	}
+	return crossCheckCompleteChildInventory("pool", route.pool.ID, "member", route.pool.Members, route.members, func(member pools.Member) string { return member.ID })
 }
 
 // Octavia's pool.listeners contains defaults and listeners whose policies are

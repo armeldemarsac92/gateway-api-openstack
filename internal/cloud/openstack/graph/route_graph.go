@@ -153,7 +153,7 @@ func (p *Provider) observeRouteGraphsWithListeners(ctx context.Context, owners [
 	graphs := make([]observedRouteGraph, len(owners))
 	defaultPool := usesDefaultPool(protocol)
 	scopedHTTP := protocol == cloud.ListenerProtocolHTTP && scopedListeners != nil
-	poolItems, err := p.listGatewayPools(ctx, lb)
+	poolItems, err := p.listGatewayPools(ctx, lb, scopedHTTP)
 	if err != nil {
 		return nil, err
 	}
@@ -219,11 +219,10 @@ func (p *Provider) observeRouteGraphsWithListeners(ctx context.Context, owners [
 			return nil, &cloud.GraphError{Identity: identity.Value(), Err: err}
 		}
 		if scopedHTTP {
-			if err := crossCheckCompleteChildInventory("pool", pool.ID, "member", pool.Members, graph.members, func(member pools.Member) string { return member.ID }); err != nil {
+			if err := graph.validateScopedHTTPPoolChildren(); err != nil {
 				return nil, &cloud.GraphError{Identity: identity.Value(), Err: err}
 			}
-		}
-		if usesDefaultPool(poolProtocol) || scopedHTTP {
+		} else if usesDefaultPool(poolProtocol) {
 			if err := graph.validateDefaultPoolChildren(); err != nil {
 				return nil, &cloud.GraphError{Identity: identity.Value(), Err: err}
 			}
@@ -250,7 +249,7 @@ func (p *Provider) observeRouteGraphsWithListeners(ctx context.Context, owners [
 }
 
 func (p *Provider) observeListenerPolicies(ctx context.Context, owners []routeGraphOwner, listener *listeners.Listener, protocol string, poolOwners map[string]int, graphs []observedRouteGraph, strict bool) error {
-	items, err := p.octavia.ListPolicies(ctx, l7policies.ListOpts{ListenerID: listener.ID, ProjectID: p.projectID})
+	items, err := p.octavia.ListCompletePolicies(ctx, l7policies.ListOpts{ListenerID: listener.ID, ProjectID: p.projectID})
 	if err != nil {
 		return fmt.Errorf("list Gateway L7 policies: %w", err)
 	}
@@ -372,7 +371,7 @@ func (p *Provider) observeRoutePoolChildren(ctx context.Context, identity Identi
 		memberKeys[key] = member.ID
 	}
 
-	monitorItems, err := p.octavia.ListMonitors(ctx, monitors.ListOpts{
+	monitorItems, err := p.octavia.ListCompleteMonitors(ctx, monitors.ListOpts{
 		PoolID:    graph.pool.ID,
 		ProjectID: p.projectID,
 	})
@@ -412,7 +411,7 @@ func (p *Provider) observeRoutePolicy(ctx context.Context, identity Identity, it
 	if item.ListenerID != "" && item.ListenerID != listenerID {
 		return observedRoutePolicy{}, fmt.Errorf("%w: L7 policy %s reports listener %s instead of %s", cloud.ErrOwnershipConflict, item.ID, item.ListenerID, listenerID)
 	}
-	ruleItems, err := p.octavia.ListRules(ctx, item.ID, l7policies.ListRulesOpts{ProjectID: p.projectID})
+	ruleItems, err := p.octavia.ListCompleteRules(ctx, item.ID, l7policies.ListRulesOpts{ProjectID: p.projectID})
 	if err != nil {
 		return observedRoutePolicy{}, fmt.Errorf("list rules beneath L7 policy %s: %w", item.ID, err)
 	}

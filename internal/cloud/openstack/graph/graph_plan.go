@@ -175,6 +175,8 @@ func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual obs
 		}
 		for _, step := range routePlan {
 			mutation := graphMutation{kind: graphRouteMutation, routeIndex: index, route: step, listenerID: listenerID, message: step.message()}
+			mutation.withdrawHTTPPolicy = scopedHTTP && withdrawing &&
+				(step.kind == routeMutationDisablePolicy || step.kind == routeMutationDeleteRule || step.kind == routeMutationDeletePolicy)
 			switch {
 			case withdrawing && step.kind == routeMutationDisablePolicy:
 				if step.retry {
@@ -209,6 +211,18 @@ func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual obs
 	// A failed teardown for one route must never leave another revoked route
 	// forwarding. Close all actionable policies, including fresh disables ahead
 	// of retries for previously failed disables, before touching descendants.
+	if scopedHTTP {
+		// A replacement's dependencies must never hold a verified withdrawal.
+		// Select withdrawal first even when an earlier prerequisite needs repair.
+		for _, steps := range [][]graphMutation{deleteDisables, deleteDisableRetries, deletions} {
+			for _, step := range steps {
+				if step.withdrawHTTPPolicy {
+					result.Outcome = p.progressingOutcome(step.message)
+					return []graphMutation{step}, result, nil
+				}
+			}
+		}
+	}
 	plan = append(plan, deleteDisables...)
 	plan = append(plan, deleteDisableRetries...)
 	plan = append(plan, deletions...)

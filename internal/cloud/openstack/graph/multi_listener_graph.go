@@ -322,7 +322,7 @@ func (p *Provider) deferredScopedRouteObservations(ctx context.Context, desired 
 	if !pending || len(readyPools) == 0 {
 		return nil
 	}
-	poolItems, err := p.listGatewayPools(ctx, actual.loadBalancer)
+	poolItems, err := p.listGatewayPools(ctx, actual.loadBalancer, false)
 	if err != nil {
 		return nil
 	}

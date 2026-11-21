@@ -222,6 +222,68 @@ func TestUnsupportedGatewayAPIVersionFreezesBoundGraph(t *testing.T) {
 	}
 }
 
+func TestUnsupportedGatewayAPIVersionRetainsUniqueUnsectionedHTTPRoute(t *testing.T) {
+	for _, ambiguous := range []bool{false, true} {
+		name := "unique hostname"
+		if ambiguous {
+			name = "ambiguous hostname"
+		}
+		t.Run(name, func(t *testing.T) {
+			cfg := testConfig()
+			class := unsupportedVersionGatewayClass(cfg)
+			gateway := programmedTestGateway(cfg)
+			gateway.Annotations[cfg.GatewayListenerProtocolAnnotation()] = string(gatewayv1.HTTPProtocolType)
+			controller.SetGatewayListenerScope(cfg, gateway, gatewayv1.HTTPProtocolType)
+			host := gatewayv1.Hostname("api.example.test")
+			gateway.Spec.Listeners[0].Hostname = &host
+			otherHost := gatewayv1.Hostname("other.example.test")
+			if ambiguous {
+				otherHost = host
+			}
+			gateway.Spec.Listeners = append(gateway.Spec.Listeners, gatewayv1.Listener{
+				Name: "other", Protocol: gatewayv1.HTTPProtocolType, Port: 8080, Hostname: &otherHost,
+			})
+			for _, listener := range gateway.Spec.Listeners {
+				gateway.Status.Listeners = append(gateway.Status.Listeners, gatewayv1.ListenerStatus{
+					Name: listener.Name,
+					Conditions: []metav1.Condition{Condition(string(gatewayv1.ListenerConditionProgrammed),
+						metav1.ConditionTrue, string(gatewayv1.ListenerReasonProgrammed), "Listener is programmed", gateway.Generation)},
+				})
+			}
+			route := mapperTestHTTPRoute(gateway.Namespace, "api", gatewayv1.ParentReference{Name: "edge"}, "backend")
+			route.UID, route.Generation = "route-uid", 1
+			route.Spec.Hostnames = []gatewayv1.Hostname{host}
+			route.Status.Parents = []gatewayv1.RouteParentStatus{{
+				ParentRef: route.Spec.ParentRefs[0], ControllerName: cfg.ControllerName,
+				Conditions: []metav1.Condition{Condition(cfg.Domain()+"/Programmed",
+					metav1.ConditionTrue, "Programmed", "HTTPRoute is programmed", route.Generation)},
+			}}
+			(&Reconciler{Config: cfg}).applyRouteBinding(route, gateway)
+			kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(route).
+				WithObjects(class, gateway, route).Build()
+			provider := &recordingProvider{}
+			reconciler := newTestReconciler(Reconciler{
+				Client: kubeClient, APIReader: kubeClient, Coordinator: &graph.Coordinator{}, Config: cfg,
+			}, provider)
+			request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(route)}
+			for range 3 {
+				if _, err := reconciler.Reconcile(t.Context(), request); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := kubeClient.Get(t.Context(), request.NamespacedName, route); err != nil {
+				t.Fatal(err)
+			}
+			if got := controllerutil.ContainsFinalizer(route, cfg.RouteFinalizer()); got == ambiguous || len(provider.routeSpecs) != 0 {
+				t.Fatalf("bundle skew with %s: bound = %t, ensures = %d", name, got, len(provider.routeSpecs))
+			}
+			if got := len(provider.deletedRoutes); got != 0 && !ambiguous || got != 1 && ambiguous {
+				t.Fatalf("bundle skew with %s: got %d route deletions", name, got)
+			}
+		})
+	}
+}
+
 func TestListenerHostnameChangesRemoveStaleRouteForwarding(t *testing.T) {
 	for _, test := range []struct {
 		name                string

@@ -305,7 +305,8 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct bool, worker *kindHT
 		}
 		return refs
 	}
-	var disagreePoolListeners string
+	var disagreePoolListeners, disagreePoolMonitor string
+	allowedHTTPPorts := []int{frontendAddress.Port}
 	readback := func(collection string, item record) record {
 		if !distinct {
 			return item
@@ -330,11 +331,37 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct bool, worker *kindHT
 				data["listeners"] = []record{}
 			}
 			data["members"] = ids(list(pool+"/"+id.(string)+"/members"), func(record) bool { return true })
+			data["healthmonitor_id"] = nil
+			for _, monitor := range list("/v2/lbaas/healthmonitors") {
+				if monitor["pool_id"] == id && id != disagreePoolMonitor {
+					data["healthmonitor_id"] = monitor["id"]
+				}
+			}
 		}
 		return data
 	}
 	cloudAPI := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		resource := req.URL.Path
+		if distinct && req.Method == http.MethodGet {
+			switch resource {
+			case "/":
+				safetyWriteJSON(t, w, record{"versions": []record{{"id": "v2.29", "status": "CURRENT"}}})
+				return
+			case "/v2/lbaas/providers":
+				safetyWriteJSON(t, w, record{"providers": []record{{"name": "amphora"}}})
+				return
+			case "/v2.0/subnets/vip-subnet":
+				safetyWriteJSON(t, w, record{"subnet": record{"id": "vip-subnet", "network_id": "private-net", "project_id": hibiscusProject, "cidr": "192.0.2.0/24", "ip_version": 4}})
+				return
+			case "/v2.0/security-groups/sg-a":
+				var rules []record
+				for _, port := range allowedHTTPPorts {
+					rules = append(rules, record{"direction": "ingress", "ethertype": "IPv4", "protocol": "tcp", "port_range_min": port, "port_range_max": port})
+				}
+				safetyWriteJSON(t, w, record{"security_group": record{"id": "sg-a", "project_id": hibiscusProject, "security_group_rules": rules}})
+				return
+			}
+		}
 		if resource == "/v2.0/floatingips" && req.Method == http.MethodGet {
 			safetyWriteJSON(t, w, record{"floatingips": []any{}})
 			return
@@ -471,7 +498,11 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct bool, worker *kindHT
 		}
 	})
 	newProvider := func() *Provider {
-		return newTestProvider(t, hibiscusServiceClients(cloudAPI), ProviderConfig{})
+		clients := hibiscusServiceClients(cloudAPI)
+		if distinct {
+			clients.LoadBalancer.Microversion = "2.29"
+		}
+		return newTestProvider(t, clients, ProviderConfig{})
 	}
 
 	provider := newProvider()
@@ -494,6 +525,10 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct bool, worker *kindHT
 	route.GatewayRequirements.ListenerPort = frontendAddress.Port
 	route.Members = []cloud.Member{{Address: backendAddress.Addr().String(), Port: int(backendAddress.Port())}}
 	route.HealthMonitor.Delay, route.HealthMonitor.Timeout = 2, 1
+	if distinct {
+		spec.Gateway.Spec.VIPSecurityGroupIDs = []string{"sg-a"}
+		route.GatewayRequirements.VIPSecurityGroupIDs = []string{"sg-a"}
+	}
 
 	reconcile := func(p *Provider, spec cloud.GatewayGraphSpec) cloud.GatewayGraphResult {
 		t.Helper()
@@ -525,6 +560,7 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct bool, worker *kindHT
 		}
 		defer func() { _ = secondReservation.Close() }()
 		secondAddress := secondReservation.Addr().(*net.TCPAddr)
+		allowedHTTPPorts = append(allowedHTTPPorts, secondAddress.Port)
 		const otherResponse = "hibiscus-other-port-backend"
 		secondBackend, _ := startPilotBackend(t, otherResponse)
 		second := spec.Routes[0]
@@ -606,6 +642,32 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct bool, worker *kindHT
 			t.Fatal(err)
 		}
 		probe(true)
+		// Change a section's port to one absent from the customer security
+		// group. The old policies must be withdrawn independently of the new
+		// port, and the unrelated listener and pool must remain in service.
+		replacementPort := 81
+		for slices.Contains(allowedHTTPPorts, replacementPort) {
+			replacementPort++
+		}
+		move.Gateway.Spec.ScopedListeners = slices.Clone(spec.Gateway.Spec.ScopedListeners)
+		move.Gateway.Spec.ScopedListeners[0].Port = replacementPort
+		move.Routes[0].Spec.ScopedListenerPorts = []int{replacementPort}
+		beforeMove := len(writes)
+		var moveErr error
+		for range 8 {
+			_, moveErr = newProvider().ReconcileGatewayGraph(ctx, move)
+			if moveErr != nil {
+				break
+			}
+		}
+		if !errors.Is(moveErr, cloud.ErrDependencyNotReady) || len(orderedPolicies("listener")) != 0 || len(list(listener)) != 2 ||
+			routeStateFromInventoryForTest(t, orderedPolicies("listener-2"), inventory, pool, secondBackend.Port) != secondState ||
+			inventory[pool+"/"+firstState[1]] == nil || inventory[gateway]["admin_state_up"] != true {
+			t.Fatalf("blocked port move did not independently withdraw its old policies: %v, writes %v", moveErr, writes[beforeMove:])
+		}
+		converge(newProvider(), spec)
+		firstState = routeStateFromInventoryForTest(t, orderedPolicies("listener"), inventory, pool, int(backendAddress.Port()))
+		stableWrites = len(writes)
 		spec.Gateway.Spec.ScopedListeners = spec.Gateway.Spec.ScopedListeners[1:]
 		spec.Routes[0].Disposition = cloud.GraphDelete
 		spec.Routes[0].Spec = cloud.RouteSpec{Identity: route.Identity}
@@ -614,6 +676,11 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct bool, worker *kindHT
 			t.Fatalf("cleanup began before verifying the first port's pool association: %v, writes %v", err, writes[stableWrites:])
 		}
 		disagreePoolListeners = ""
+		disagreePoolMonitor = firstState[1]
+		if _, err := provider.ReconcileGatewayGraph(ctx, spec); err == nil || len(writes) != stableWrites {
+			t.Fatalf("cleanup began while the pool omitted the listed monitor: %v, writes %v", err, writes[stableWrites:])
+		}
+		disagreePoolMonitor = ""
 		inventory[gateway]["provisioning_status"] = "PENDING_UPDATE"
 		inventory[listener+"/listener"]["provisioning_status"] = "PENDING_DELETE"
 		if result := reconcile(newProvider(), spec); result.Outcome.State != cloud.OutcomeProgressing || len(writes) != stableWrites ||

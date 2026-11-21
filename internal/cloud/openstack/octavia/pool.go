@@ -18,6 +18,7 @@ package octavia
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/pools"
@@ -40,23 +41,56 @@ func (s *Service) ListPools(ctx context.Context, opts pools.ListOpts) ([]pools.P
 }
 
 // ListCompletePools requires an explicit pool collection on every page.
-func (s *Service) ListCompletePools(ctx context.Context, opts pools.ListOpts) ([]pools.Pool, error) {
-	var items []pools.Pool
-	err := eachCollectionPage(ctx, pools.List(s.client, opts), func(result pagination.PageResult) pagination.Page {
+func (s *Service) ListCompletePools(ctx context.Context, opts pools.ListOpts, requireMonitorID bool) ([]pools.Pool, error) {
+	extract := pools.ExtractPools
+	if requireMonitorID {
+		extract = extractPoolsWithMonitorIDs
+	}
+	return listCompleteCollection(ctx, pools.List(s.client, opts), func(result pagination.PageResult) pagination.Page {
 		return pools.PoolPage{LinkedPageBase: pagination.LinkedPageBase{PageResult: result}}
-	}, func(page pagination.Page) error {
-		batch, err := pools.ExtractPools(page)
+	}, "pools", extract)
+}
+
+// Octavia reports a null healthmonitor_id for pools without a monitor.
+func extractPoolsWithMonitorIDs(page pagination.Page) ([]pools.Pool, error) {
+	var response struct {
+		Pools []struct {
+			pools.Pool
+			MonitorID json.RawMessage `json:"healthmonitor_id"`
+		} `json:"pools"`
+	}
+	if err := page.(pools.PoolPage).ExtractInto(&response); err != nil || response.Pools == nil {
+		return nil, err
+	}
+	items := make([]pools.Pool, 0, len(response.Pools))
+	for _, pool := range response.Pools {
+		if len(pool.MonitorID) == 0 {
+			return nil, cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady,
+				fmt.Errorf("pool %s omitted its healthmonitor_id", pool.ID))
+		}
+		if err := json.Unmarshal(pool.MonitorID, &pool.Pool.MonitorID); err != nil {
+			return nil, err
+		}
+		items = append(items, pool.Pool)
+	}
+	return items, nil
+}
+
+func listCompleteCollection[T any](ctx context.Context, pager pagination.Pager, create func(pagination.PageResult) pagination.Page, field string, extract func(pagination.Page) ([]T, error)) ([]T, error) {
+	var items []T
+	err := eachCollectionPage(ctx, pager, create, func(page pagination.Page) error {
+		batch, err := extract(page)
 		if err != nil {
 			return err
 		}
 		if batch == nil {
-			return missingCollection("pools")
+			return missingCollection(field)
 		}
 		items = append(items, batch...)
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("list pools: %w", err)
+		return nil, fmt.Errorf("list %s: %w", field, err)
 	}
 	return items, nil
 }

@@ -73,14 +73,15 @@ const (
 )
 
 type graphMutation struct {
-	kind           graphMutationKind
-	routeIndex     int
-	route          routeMutation
-	deletion       gatewayDeletionStep
-	poolID         string
-	listenerID     string
-	scopedListener cloud.ScopedListener
-	message        string
+	kind               graphMutationKind
+	routeIndex         int
+	route              routeMutation
+	deletion           gatewayDeletionStep
+	poolID             string
+	listenerID         string
+	withdrawHTTPPolicy bool
+	scopedListener     cloud.ScopedListener
+	message            string
 }
 
 // ReconcileGatewayGraph validates and observes every component before building
@@ -143,13 +144,14 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	}
 	var plan []graphMutation
 	defaultPool := usesDefaultPool(actual.protocol)
-	if defaultPool {
+	planBeforeSecurity := defaultPool || actual.scoped && actual.protocol == cloud.ListenerProtocolHTTP
+	if planBeforeSecurity {
 		plan, result, err = p.buildGatewayGraphPlan(desired, actual)
 		if err != nil {
 			return result, err
 		}
 	}
-	if spec.Gateway.Disposition == cloud.GraphEnsure && (len(plan) == 0 || plan[0].kind != graphClearListenerDefaultPool) {
+	if spec.Gateway.Disposition == cloud.GraphEnsure && (len(plan) == 0 || plan[0].kind != graphClearListenerDefaultPool && !plan[0].withdrawHTTPPolicy) {
 		routes := make([]cloud.RouteSpec, 0, len(desired.routes))
 		for index, route := range desired.routes {
 			if desired.spec.Routes[index].Disposition == cloud.GraphEnsure {
@@ -161,7 +163,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 			return result, err
 		}
 	}
-	if !defaultPool {
+	if !planBeforeSecurity {
 		plan, result, err = p.buildGatewayGraphPlan(desired, actual)
 		if err != nil {
 			return result, err

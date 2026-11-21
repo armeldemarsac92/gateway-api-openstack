@@ -169,7 +169,7 @@ func (p *Provider) validateGatewayDeletionListener(identity Identity, listener l
 }
 
 func (p *Provider) buildGatewayRouteDeletionPlan(ctx context.Context, identity Identity, listenerID string) (gatewayRouteDeletionPlan, error) {
-	policyList, err := p.octavia.ListPolicies(ctx, l7policies.ListOpts{
+	policyList, err := p.octavia.ListCompletePolicies(ctx, l7policies.ListOpts{
 		ListenerID: listenerID,
 		ProjectID:  p.projectID,
 	})
@@ -195,7 +195,7 @@ func (p *Provider) buildGatewayRouteDeletionPlan(ctx context.Context, identity I
 			return nil, fmt.Errorf("%w: L7 policy %s reports listener %s instead of %s", cloud.ErrOwnershipConflict, policy.ID, policy.ListenerID, listenerID)
 		}
 
-		ruleList, err := p.octavia.ListRules(ctx, policy.ID, l7policies.ListRulesOpts{ProjectID: p.projectID})
+		ruleList, err := p.octavia.ListCompleteRules(ctx, policy.ID, l7policies.ListRulesOpts{ProjectID: p.projectID})
 		if err != nil {
 			return nil, fmt.Errorf("list L7 rules beneath policy %s before Gateway deletion: %w", policy.ID, err)
 		}
@@ -222,7 +222,7 @@ func (p *Provider) buildGatewayRouteDeletionPlan(ctx context.Context, identity I
 }
 
 func (p *Provider) buildGatewayPoolDeletionPlan(ctx context.Context, identity Identity, lb *octavia.LoadBalancer) (gatewayPoolDeletionPlan, error) {
-	poolList, err := p.listGatewayPools(ctx, lb)
+	poolList, err := p.listGatewayPools(ctx, lb, false)
 	if err != nil {
 		return nil, err
 	}
@@ -280,7 +280,7 @@ func (p *Provider) buildGatewayPoolSubtreeDeletionPlan(ctx context.Context, iden
 }
 
 func (p *Provider) buildGatewayMonitorDeletionPlan(ctx context.Context, identity Identity, poolID string) (gatewayPoolDeletionPlan, error) {
-	monitorList, err := p.octavia.ListMonitors(ctx, monitors.ListOpts{PoolID: poolID, ProjectID: p.projectID})
+	monitorList, err := p.octavia.ListCompleteMonitors(ctx, monitors.ListOpts{PoolID: poolID, ProjectID: p.projectID})
 	if err != nil {
 		return nil, fmt.Errorf("list health monitors beneath pool %s before Gateway deletion: %w", poolID, err)
 	}
