@@ -145,7 +145,7 @@ func (r *Reconciler) reconcileGatewayReplacement(
 	scope *gatewayScope,
 	decision gatewayPhaseDecision,
 ) (ctrl.Result, error) {
-	message := "Listener port changed; replacing the controller-owned OpenStack resource graph"
+	message := "Listener port or protocol changed. Replacing the controller-owned OpenStack resource graph"
 	if err := r.setGatewayProgressing(ctx, scope.gateway, decision.listener, message); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -204,7 +204,7 @@ func (r *Reconciler) reconcileGatewayGraph(
 			if policy, classified := controller.ProviderFailurePolicyFor(err); classified {
 				return controller.ProviderFailureResult(policy, err, string(scope.gateway.UID))
 			}
-			return ctrl.Result{}, controller.SafeProviderReconcileError(controller.ProviderFailurePolicy{Message: "The HTTPRoute graph could not be reconciled"}, err)
+			return ctrl.Result{}, controller.SafeProviderReconcileError(controller.ProviderFailurePolicy{Message: "The route graph could not be reconciled"}, err)
 		}
 		return r.handleGatewayProviderFailure(ctx, scope, decision.listener, err)
 	}

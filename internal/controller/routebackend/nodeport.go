@@ -14,9 +14,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package httproute
+package routebackend
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"slices"
@@ -25,26 +26,28 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
-// backendNodes keeps readiness separate for each kube-proxy address family.
+// BackendNodes keeps readiness separate for each kube-proxy address family.
 // An unnamed Node records a ready endpoint usable with Cluster traffic policy.
-type backendNodes map[discoveryv1.AddressType]map[string]struct{}
+type BackendNodes map[discoveryv1.AddressType]map[string]struct{}
 
-// readyBackendNodes validates endpoints before the reader requests Nodes.
+// ReadyBackendNodes validates endpoints before the reader requests Nodes.
 // Calculation is separate from I/O so endpoint and member costs can be measured.
-func readyBackendNodes(service *corev1.Service, servicePort *corev1.ServicePort, slices []discoveryv1.EndpointSlice) (backendNodes, error) {
+func ReadyBackendNodes(service *corev1.Service, servicePort *corev1.ServicePort, slices []discoveryv1.EndpointSlice) (BackendNodes, *model.Diagnostic) {
 	readyEndpoint := false
-	localNodes := backendNodes{}
+	localNodes := BackendNodes{}
 	for _, slice := range slices {
-		if !sliceSupportsServicePort(service, servicePort, slice) {
+		if !slice.DeletionTimestamp.IsZero() || !sliceSupportsServicePort(service, servicePort, slice) {
 			continue
 		}
 		for _, endpoint := range slice.Endpoints {
-			if !endpointReady(endpoint.Conditions) {
+			if !EndpointReady(endpoint.Conditions) {
 				continue
 			}
 			readyEndpoint = true
@@ -59,10 +62,10 @@ func readyBackendNodes(service *corev1.Service, servicePort *corev1.ServicePort,
 		}
 	}
 	if !readyEndpoint {
-		return nil, newRouteBuildError(routeErrorPending, "backend Service %s has no ready endpoints", service.Name)
+		return nil, pending("backend Service %s has no ready endpoints", service.Name)
 	}
 	if service.Spec.ExternalTrafficPolicy == corev1.ServiceExternalTrafficPolicyLocal && len(localNodes) == 0 {
-		return nil, newRouteBuildError(routeErrorPending, "backend Service %s uses externalTrafficPolicy Local but ready endpoints do not identify their Nodes", service.Name)
+		return nil, pending("backend Service %s uses externalTrafficPolicy Local but ready endpoints do not identify their Nodes", service.Name)
 	}
 
 	return localNodes, nil
@@ -89,7 +92,8 @@ func sliceSupportsServicePort(service *corev1.Service, servicePort *corev1.Servi
 	return false
 }
 
-func nodePortMembersForNodes(service *corev1.Service, nodePort int32, addressType corev1.NodeAddressType, localNodes backendNodes, nodes []corev1.Node) ([]cloud.Member, error) {
+// NodePortMembersForNodes selects eligible workers according to Service traffic policy.
+func NodePortMembersForNodes(service *corev1.Service, nodePort int32, addressType corev1.NodeAddressType, localNodes BackendNodes, nodes []corev1.Node) ([]cloud.Member, *model.Diagnostic) {
 	members := make([]cloud.Member, 0, len(nodes))
 	providersByAddress := map[string]string{}
 	for index := range nodes {
@@ -104,7 +108,7 @@ func nodePortMembersForNodes(service *corev1.Service, nodePort int32, addressTyp
 		key := net.JoinHostPort(address, fmt.Sprintf("%d", nodePort))
 		if providerID, duplicate := providersByAddress[key]; duplicate {
 			if providerID != node.Spec.ProviderID {
-				return nil, newRouteBuildError(routeErrorPending, "backend Service %s has worker Nodes with conflicting provider IDs for the same selected address", service.Name)
+				return nil, pending("backend Service %s has worker Nodes with conflicting provider IDs for the same selected address", service.Name)
 			}
 			continue
 		}
@@ -112,7 +116,7 @@ func nodePortMembersForNodes(service *corev1.Service, nodePort int32, addressTyp
 		members = append(members, cloud.Member{Address: address, Port: int(nodePort), ProviderID: node.Spec.ProviderID})
 	}
 	if len(members) == 0 {
-		return nil, newRouteBuildError(routeErrorPending, "backend Service %s has no eligible worker Nodes with a %s address", service.Name, addressType)
+		return nil, pending("backend Service %s has no eligible worker Nodes with a %s address", service.Name, addressType)
 	}
 	sort.Slice(members, func(i, j int) bool {
 		if members[i].Address == members[j].Address {
@@ -123,7 +127,8 @@ func nodePortMembersForNodes(service *corev1.Service, nodePort int32, addressTyp
 	return members, nil
 }
 
-func endpointReady(conditions discoveryv1.EndpointConditions) bool {
+// EndpointReady checks whether kube-proxy can direct node traffic to an endpoint.
+func EndpointReady(conditions discoveryv1.EndpointConditions) bool {
 	if conditions.Terminating != nil && *conditions.Terminating {
 		return false
 	}
@@ -142,7 +147,7 @@ func readyNode(node *corev1.Node) bool {
 	return false
 }
 
-func nodeAddress(node *corev1.Node, addressType corev1.NodeAddressType, policy corev1.ServiceExternalTrafficPolicy, readyNodes backendNodes) string {
+func nodeAddress(node *corev1.Node, addressType corev1.NodeAddressType, policy corev1.ServiceExternalTrafficPolicy, readyNodes BackendNodes) string {
 	for _, address := range node.Status.Addresses {
 		ip := net.ParseIP(address.Address)
 		if address.Type != addressType || ip == nil {
@@ -163,4 +168,21 @@ func nodeAddress(node *corev1.Node, addressType corev1.NodeAddressType, policy c
 		return address.Address
 	}
 	return ""
+}
+
+// NodePortMembers obtains the workers only after establishing endpoint readiness.
+func NodePortMembers(ctx context.Context, reader client.Reader, service *corev1.Service, port *corev1.ServicePort, addressType corev1.NodeAddressType, endpoints []discoveryv1.EndpointSlice) ([]cloud.Member, *model.Diagnostic, error) {
+	local, diagnostic := ReadyBackendNodes(service, port, endpoints)
+	if diagnostic != nil {
+		return nil, diagnostic, nil
+	}
+	var nodes corev1.NodeList
+	if err := reader.List(ctx, &nodes); err != nil {
+		return nil, nil, fmt.Errorf("list backend Nodes: %w", err)
+	}
+	if nodes.Continue != "" {
+		return nil, nil, fmt.Errorf("incomplete backend Node list")
+	}
+	members, diagnostic := NodePortMembersForNodes(service, port.NodePort, addressType, local, nodes.Items)
+	return members, diagnostic, nil
 }

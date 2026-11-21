@@ -92,7 +92,7 @@ func TestControllerEnvtest(t *testing.T) {
 	config.GatewayAPIChannel = os.Getenv("GATEWAY_API_CHANNEL")
 	// Status and binding indexes belong to one controller name. Keep the
 	// manager-driven watches separate from the manually stepped reconcilers.
-	startManager := func(cfg controller.Config, watches bool) ctrl.Manager {
+	startManager := func(cfg controller.Config, provider *recordingProvider) ctrl.Manager {
 		manager, err := ctrl.NewManager(restConfig, ctrl.Options{
 			Scheme:                 scheme,
 			Metrics:                metricsserver.Options{BindAddress: "0"},
@@ -104,8 +104,8 @@ func TestControllerEnvtest(t *testing.T) {
 		if err := controller.SetupIndexes(t.Context(), manager.GetFieldIndexer(), cfg); err != nil {
 			t.Fatalf("set up controller indexes: %v", err)
 		}
-		if watches {
-			startGatewayStatusReconcilers(t, manager, cfg)
+		if provider != nil {
+			startGatewayStatusReconcilers(t, manager, cfg, provider)
 		}
 		managerContext, stopManager := context.WithCancel(context.Background())
 		managerResult := make(chan error, 1)
@@ -134,10 +134,11 @@ func TestControllerEnvtest(t *testing.T) {
 
 		return manager
 	}
-	manager := startManager(config, false)
+	manager := startManager(config, nil)
 	statusConfig := config
 	statusConfig.ControllerName = "status.example.com/gateway-api-openstack"
-	startManager(statusConfig, true)
+	statusProvider := &recordingProvider{}
+	startManager(statusConfig, statusProvider)
 
 	apiClient, err := client.New(restConfig, client.Options{Scheme: scheme})
 	if err != nil {
@@ -241,6 +242,9 @@ func TestControllerEnvtest(t *testing.T) {
 	testGraphWriterTriggerEquivalence(t, apiClient, cacheClient, config, gateway)
 	t.Run("shared Gateway follows tenant namespace labels", func(t *testing.T) {
 		testSharedHTTPGateway(t, apiClient, statusConfig)
+	})
+	t.Run("TCP listener selects one authorized backend", func(t *testing.T) {
+		testTCPGatewaySelection(t, apiClient, statusConfig, statusProvider)
 	})
 	t.Run("HTTPRoute Service ReferenceGrant lifecycle", func(t *testing.T) {
 		testHTTPRouteServiceReferenceGrant(t, apiClient, cacheClient, config, gateway)

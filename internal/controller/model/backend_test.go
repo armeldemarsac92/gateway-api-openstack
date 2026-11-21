@@ -341,3 +341,21 @@ func backendSlice(name string, addresses ...string) discoveryv1.EndpointSlice {
 	}
 	return endpointSlice
 }
+
+func TestTCPBackendReferenceRequiresTCPRouteGrant(t *testing.T) {
+	target := types.NamespacedName{Namespace: "data", Name: "db"}
+	grant := gatewayv1.ReferenceGrant{
+		ObjectMeta: metav1.ObjectMeta{Namespace: target.Namespace},
+		Spec: gatewayv1.ReferenceGrantSpec{
+			From: []gatewayv1.ReferenceGrantFrom{{Group: gatewayv1.GroupName, Kind: "HTTPRoute", Namespace: "tenant"}},
+			To:   []gatewayv1.ReferenceGrantTo{{Group: "", Kind: "Service", Name: ptr.To(gatewayv1.ObjectName(target.Name))}},
+		},
+	}
+	if BackendReferenceAllowedFor("TCPRoute", "tenant", target, []gatewayv1.ReferenceGrant{grant}) {
+		t.Fatal("HTTPRoute grant authorized a TCPRoute")
+	}
+	grant.Spec.From[0].Kind = "TCPRoute"
+	if !BackendReferenceAllowedFor("TCPRoute", "tenant", target, []gatewayv1.ReferenceGrant{grant}) || BackendReferenceAllowed("tenant", target, []gatewayv1.ReferenceGrant{grant}) {
+		t.Fatal("grant did not apply exclusively to its source kind")
+	}
+}

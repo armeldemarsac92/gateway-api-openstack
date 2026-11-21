@@ -43,6 +43,9 @@ func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual obs
 		}
 		return plan, result, nil
 	}
+	if isTCPGraph(desired, actual) {
+		return p.buildTCPGraphPlan(desired, actual)
+	}
 	result.Routes = observedRouteDeleteCompletions(desired, actual)
 	plan, err := buildGatewayPrerequisitePlan(desired, actual)
 	if err != nil {
@@ -86,13 +89,12 @@ func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual obs
 		switch node.Disposition {
 		case cloud.GraphDelete:
 			routePlan = buildRouteDeletionPlan(observed)
-			backendIssue = observed.backendProvisioningIssue(true)
+			backendIssue = observed.backendProvisioningIssue(true, false)
 		case cloud.GraphEnsure:
 			// Desired routes share the validated Gateway requirements. Their
 			// recorded IDs must still match this observation before planning.
-			if route.spec.Gateway.LoadBalancerID != "" && actual.state.LoadBalancerID != "" && route.spec.Gateway.LoadBalancerID != actual.state.LoadBalancerID ||
-				route.spec.Gateway.ListenerID != "" && actual.state.ListenerID != "" && route.spec.Gateway.ListenerID != actual.state.ListenerID {
-				return nil, result, &cloud.GraphError{Identity: route.spec.Identity, Err: fmt.Errorf("%w: route Gateway IDs differ from the observed graph", cloud.ErrOwnershipConflict)}
+			if err := validateRouteGatewayIDs(route.spec.Gateway, actual.state); err != nil {
+				return nil, result, &cloud.GraphError{Identity: route.spec.Identity, Err: err}
 			}
 			route.spec.Gateway = actual.state
 			routePlan, routeResult.State, err = buildRouteEnsurePlan(route, observed)
@@ -110,7 +112,7 @@ func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual obs
 			if slices.ContainsFunc(observed.policies, observedRoutePolicy.pending) {
 				ensureHold = "Waiting for Octavia L7 policy or rule provisioning"
 				routePlan = nil
-			} else if backendIssue := observed.backendProvisioningIssue(false); backendIssue != "" {
+			} else if backendIssue := observed.backendProvisioningIssue(false, false); backendIssue != "" {
 				ensureHold = backendIssue
 				canRestoreTraffic = false
 				// A blocked earlier route can leave an empty slot in the policy
@@ -213,7 +215,7 @@ func buildGatewayPrerequisitePlan(desired desiredGatewayGraph, actual observedGa
 	if actual.floatingIP != nil && networkID != "" && actual.floatingIP.FloatingNetworkID != networkID {
 		return nil, fmt.Errorf("%w: Gateway Floating IP network differs from its binding", cloud.ErrOwnershipConflict)
 	}
-	if actual.listener != nil && actual.listener.DefaultPoolID != "" {
+	if actual.listener != nil && actual.listener.DefaultPoolID != "" && !isTCPGraph(desired, actual) {
 		// Octavia may return a cleared field before Amphora applies it. Keep the
 		// frontend closed across that pending update so readback alone cannot
 		// mark the Gateway programmed before the data plane has changed.
@@ -232,7 +234,8 @@ func buildGatewayPrerequisitePlan(desired desiredGatewayGraph, actual observedGa
 }
 
 func buildGatewayTrafficRestorationPlan(desired desiredGatewayGraph, actual observedGatewayGraph) ([]graphMutation, error) {
-	if desired.spec.Gateway.Disposition != cloud.GraphEnsure || actual.loadBalancer == nil || actual.listener == nil || actual.listener.DefaultPoolID != "" {
+	if desired.spec.Gateway.Disposition != cloud.GraphEnsure || actual.loadBalancer == nil || actual.listener == nil ||
+		actual.listener.DefaultPoolID != "" && !isTCPGraph(desired, actual) {
 		return nil, nil
 	}
 	var plan []graphMutation
@@ -258,6 +261,9 @@ func buildGatewayTrafficRestorationPlan(desired desiredGatewayGraph, actual obse
 }
 
 func gatewayGraphDeletionPlan(actual observedGatewayGraph) []graphMutation {
+	if actual.deletion.tcpListener != nil && actual.deletion.tcpListener.DefaultPoolID != "" {
+		return []graphMutation{clearTCPListenerDefault()}
+	}
 	// Removing a predicate from a serving L7 policy can widen its match.
 	// Close all frontends first. The next pass waits for ACTIVE and revalidates
 	// the graph before changing any of its L7 resources.
@@ -338,13 +344,12 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 			return tagErr
 		}
 		_, err = p.octavia.CreateListener(ctx, listeners.CreateOpts{
-			LoadbalancerID: actual.state.LoadBalancerID, Protocol: listeners.ProtocolHTTP, ProtocolPort: spec.ListenerPort,
+			LoadbalancerID: actual.state.LoadBalancerID, Protocol: listeners.Protocol(cloud.NormalizeListenerProtocol(spec.ListenerProtocol)), ProtocolPort: spec.ListenerPort,
 			Name: spec.ListenerName, Description: desired.identity.Description(roleListener), AdminStateUp: boolPointer(true), Tags: tags,
 		})
-	case graphClearListenerDefaultPool:
+	case graphClearListenerDefaultPool, graphSetListenerDefaultPool:
 		// Gophercloud encodes an explicit empty DefaultPoolID as JSON null.
-		noDefaultPool := ""
-		_, err = p.octavia.UpdateListener(ctx, actual.state.ListenerID, listeners.UpdateOpts{DefaultPoolID: &noDefaultPool})
+		_, err = p.octavia.UpdateListener(ctx, actual.state.ListenerID, listeners.UpdateOpts{DefaultPoolID: &step.poolID})
 	case graphRouteMutation:
 		route := desired.routes[step.routeIndex]
 		route.spec.Gateway = actual.state

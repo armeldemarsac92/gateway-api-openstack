@@ -175,6 +175,7 @@ func gatewayBindingAnnotationKeys(config controller.Config) []string {
 	return []string{
 		config.GatewayTopologyAnnotation(),
 		config.GatewayListenerPortAnnotation(),
+		config.GatewayListenerProtocolAnnotation(),
 		config.GatewayClusterIDAnnotation(),
 		config.GatewayProjectIDAnnotation(),
 	}

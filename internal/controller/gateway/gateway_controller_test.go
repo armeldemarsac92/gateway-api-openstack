@@ -26,6 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
@@ -100,6 +101,38 @@ func TestGatewayRequestsForGatewayClass(t *testing.T) {
 	}
 	if requests := reconciler.gatewayRequestsForGatewayClass(context.Background(), matchingGateway); requests != nil {
 		t.Fatalf("requests for non-GatewayClass object = %#v, want nil", requests)
+	}
+}
+
+func TestGatewayWatchesTCPRouteStatusAndPreviousBinding(t *testing.T) {
+	config := testConfig()
+	reconciler := newTestReconciler(Reconciler{Config: config}, nil)
+	old := &gatewayv1.TCPRoute{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "apps", Name: "backend", Annotations: map[string]string{
+			config.RouteGatewayNamespaceAnnotation(): "old-gateways",
+			config.RouteGatewayNameAnnotation():      "old-edge",
+			config.RouteGatewayUIDAnnotation():       "old-uid",
+		}},
+	}
+	status := old.DeepCopy()
+	status.Status.Parents = []gatewayv1.RouteParentStatus{
+		{ParentRef: gatewayv1.ParentReference{Name: "edge"}, ControllerName: config.ControllerName},
+		{ParentRef: gatewayv1.ParentReference{Name: "foreign"}, ControllerName: "example.com/foreign"},
+	}
+	unbound := old.DeepCopy()
+	unbound.Annotations = nil
+	predicate := controller.TCPRouteForGatewayPredicate(config)
+	if !predicate.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: status}) ||
+		!predicate.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: unbound}) {
+		t.Fatal("status or binding update was filtered out")
+	}
+	requests := reconciler.gatewayRequestsForTCPRoute(t.Context(), status)
+	want := []reconcile.Request{
+		{NamespacedName: types.NamespacedName{Namespace: "apps", Name: "edge"}},
+		{NamespacedName: types.NamespacedName{Namespace: "old-gateways", Name: "old-edge"}},
+	}
+	if !reflect.DeepEqual(requests, want) {
+		t.Fatalf("Gateway requests = %v, want %v", requests, want)
 	}
 }
 

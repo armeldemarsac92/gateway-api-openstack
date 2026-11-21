@@ -26,8 +26,15 @@ import (
 	"testing"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
 	"github.com/gophercloud/gophercloud/v2"
+	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
+	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/loadbalancers"
 )
+
+func safetyObservedLoadBalancer() *octavia.LoadBalancer {
+	return &octavia.LoadBalancer{LoadBalancer: loadbalancers.LoadBalancer{ID: "load-balancer-1"}}
+}
 
 func TestEnsureFloatingIPValidatesEveryAttachedAddress(t *testing.T) {
 	identity := safetyTestIdentity(t)
@@ -209,7 +216,7 @@ func TestBuildGatewayDeletionPlanUsesDedicatedListAPIs(t *testing.T) {
 		LoadBalancer: safetyServiceClient(safetyGatewayGraphHandler(t, identity, "", requests)),
 		ProjectID:    "project-a",
 	}, ProviderConfig{})
-	deletionPlan, err := provider.buildGatewayDeletionPlan(context.Background(), identity, "load-balancer-1")
+	deletionPlan, err := provider.buildGatewayDeletionPlan(context.Background(), identity, safetyObservedLoadBalancer(), nil, "")
 	if err != nil {
 		t.Fatalf("buildGatewayDeletionPlan() error = %v", err)
 	}
@@ -274,7 +281,7 @@ func TestBuildGatewayDeletionPlanRejectsUnmanagedDescendants(t *testing.T) {
 				LoadBalancer: safetyServiceClient(safetyGatewayGraphHandler(t, identity, resource, newSafetyRequestLog())),
 				ProjectID:    "project-a",
 			}, ProviderConfig{})
-			_, err := provider.buildGatewayDeletionPlan(context.Background(), identity, "load-balancer-1")
+			_, err := provider.buildGatewayDeletionPlan(context.Background(), identity, safetyObservedLoadBalancer(), nil, "")
 			if !errors.Is(err, cloud.ErrOwnershipConflict) {
 				t.Fatalf("buildGatewayDeletionPlan() error = %v, want ownership conflict for unmanaged %s", err, resource)
 			}
@@ -362,9 +369,9 @@ func TestObserveRoutePoliciesRejectsForeignPolicyOrRule(t *testing.T) {
 				}
 			})
 			provider := newTestProvider(t, ServiceClients{LoadBalancer: safetyServiceClient(handler), ProjectID: "project-a"}, ProviderConfig{})
-			_, err := provider.observeGatewayRoutes(context.Background(), []Identity{identity}, cloud.GatewayState{LoadBalancerID: "load-balancer-1", ListenerID: "listener-1"})
+			_, err := provider.observeRouteGraphs(context.Background(), []Identity{identity}, safetyObservedLoadBalancer(), &listeners.Listener{ID: "listener-1"}, false)
 			if !errors.Is(err, cloud.ErrOwnershipConflict) {
-				t.Fatalf("observeGatewayRoutes() error = %v, want ownership conflict", err)
+				t.Fatalf("observeRouteGraphs() error = %v, want ownership conflict", err)
 			}
 		})
 	}

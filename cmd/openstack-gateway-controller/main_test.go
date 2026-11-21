@@ -41,7 +41,7 @@ func TestRequireGatewayAPIsIncludesReferenceGrant(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			resources := metav1.APIResourceList{
 				GroupVersion: gatewayv1.GroupVersion.String(),
-				APIResources: []metav1.APIResource{{Name: "gatewayclasses"}, {Name: "gateways"}, {Name: "httproutes"}},
+				APIResources: []metav1.APIResource{{Name: "gatewayclasses"}, {Name: "gateways"}, {Name: "httproutes"}, {Name: "tcproutes"}},
 			}
 			if installed {
 				resources.APIResources = append(resources.APIResources, metav1.APIResource{Name: "referencegrants"})

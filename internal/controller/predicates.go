@@ -172,8 +172,26 @@ func HTTPRouteForGatewayPredicate(config Config) predicate.Predicate {
 		return generationOrDeletionChanged(oldRoute, newRoute) ||
 			routeBindingChanged(config, oldRoute, newRoute) ||
 			!equality.Semantic.DeepEqual(
-				controllerRouteParentStatuses(oldRoute, config.ControllerName),
-				controllerRouteParentStatuses(newRoute, config.ControllerName),
+				controllerRouteParentStatuses(oldRoute.Status.Parents, config.ControllerName),
+				controllerRouteParentStatuses(newRoute.Status.Parents, config.ControllerName),
+			)
+	})
+}
+
+// TCPRouteForGatewayPredicate selects TCPRoute changes that may affect a
+// Gateway's attached route state.
+func TCPRouteForGatewayPredicate(config Config) predicate.Predicate {
+	return updatePredicate(func(oldObject, newObject client.Object) bool {
+		oldRoute, oldOK := oldObject.(*gatewayv1.TCPRoute)
+		newRoute, newOK := newObject.(*gatewayv1.TCPRoute)
+		if !oldOK || !newOK {
+			return true
+		}
+		return generationOrDeletionChanged(oldRoute, newRoute) ||
+			routeBindingChanged(config, oldRoute, newRoute) ||
+			!equality.Semantic.DeepEqual(
+				controllerRouteParentStatuses(oldRoute.Status.Parents, config.ControllerName),
+				controllerRouteParentStatuses(newRoute.Status.Parents, config.ControllerName),
 			)
 	})
 }
@@ -273,6 +291,7 @@ func gatewayBindingChanged(config Config, oldGateway, newGateway *gatewayv1.Gate
 	}
 	for _, key := range []string{
 		config.GatewayListenerPortAnnotation(),
+		config.GatewayListenerProtocolAnnotation(),
 		config.GatewayClusterIDAnnotation(),
 		config.GatewayProjectIDAnnotation(),
 	} {
@@ -283,7 +302,7 @@ func gatewayBindingChanged(config Config, oldGateway, newGateway *gatewayv1.Gate
 	return false
 }
 
-func routeBindingChanged(config Config, oldRoute, newRoute *gatewayv1.HTTPRoute) bool {
+func routeBindingChanged(config Config, oldRoute, newRoute client.Object) bool {
 	for _, key := range []string{
 		config.RouteLifecycleAnnotation(),
 		config.RouteGatewayNamespaceAnnotation(),
@@ -292,7 +311,7 @@ func routeBindingChanged(config Config, oldRoute, newRoute *gatewayv1.HTTPRoute)
 		config.RouteClusterIDAnnotation(),
 		config.RouteProjectIDAnnotation(),
 	} {
-		if oldRoute.Annotations[key] != newRoute.Annotations[key] {
+		if oldRoute.GetAnnotations()[key] != newRoute.GetAnnotations()[key] {
 			return true
 		}
 	}
@@ -302,9 +321,9 @@ func routeBindingChanged(config Config, oldRoute, newRoute *gatewayv1.HTTPRoute)
 	)
 }
 
-func controllerRouteFinalizers(config Config, route *gatewayv1.HTTPRoute) []string {
+func controllerRouteFinalizers(config Config, route client.Object) []string {
 	finalizers := make([]string, 0, 2)
-	for _, finalizer := range route.Finalizers {
+	for _, finalizer := range route.GetFinalizers() {
 		if finalizer == config.RouteFinalizer() || strings.HasPrefix(finalizer, config.RouteBindingFinalizerPrefix()) {
 			finalizers = append(finalizers, finalizer)
 		}
@@ -313,9 +332,9 @@ func controllerRouteFinalizers(config Config, route *gatewayv1.HTTPRoute) []stri
 	return finalizers
 }
 
-func controllerRouteParentStatuses(route *gatewayv1.HTTPRoute, controllerName gatewayv1.GatewayController) []gatewayv1.RouteParentStatus {
-	statuses := make([]gatewayv1.RouteParentStatus, 0, len(route.Status.Parents))
-	for _, status := range route.Status.Parents {
+func controllerRouteParentStatuses(parents []gatewayv1.RouteParentStatus, controllerName gatewayv1.GatewayController) []gatewayv1.RouteParentStatus {
+	statuses := make([]gatewayv1.RouteParentStatus, 0, len(parents))
+	for _, status := range parents {
 		if status.ControllerName == controllerName {
 			statuses = append(statuses, status)
 		}

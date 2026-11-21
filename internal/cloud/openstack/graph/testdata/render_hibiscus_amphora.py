@@ -1,7 +1,7 @@
 # Copyright 2026 The gateway-api-openstack Authors.
 # Licensed under the Apache License, Version 2.0.
 
-"""Project the local REST fixture onto stock Octavia HTTP data models."""
+"""Project the local REST fixture onto stock Octavia data models."""
 
 from importlib.metadata import version
 import json
@@ -34,12 +34,17 @@ def pool_from_inventory(inventory, gateway, pool):
               ip_address=member["address"], weight=member.get("weight", 1))
         for member in members
     ]
-    monitor, = (monitor for monitor in children(inventory, "/v2/lbaas/healthmonitors")
-                if monitor["pools"] == [{"id": pool["id"]}])
-    health_monitor = model(
-        data_models.HealthMonitor, monitor, "type delay timeout http_method url_path expected_codes",
-        rise_threshold=monitor["max_retries"], fall_threshold=monitor["max_retries_down"],
-    )
+    health_monitor = None
+    for monitor in children(inventory, "/v2/lbaas/healthmonitors"):
+        if monitor["pools"] != [{"id": pool["id"]}]:
+            continue
+        fields = "type delay timeout"
+        if monitor["type"] == "HTTP":
+            fields += " http_method url_path expected_codes"
+        health_monitor = model(
+            data_models.HealthMonitor, monitor, fields,
+            rise_threshold=monitor["max_retries"], fall_threshold=monitor["max_retries_down"],
+        )
     return model(data_models.Pool, pool, "protocol lb_algorithm",
                  members=backends, health_monitor=health_monitor,
                  tls_enabled=pool.get("tls_enabled", False))
@@ -61,7 +66,9 @@ def policy_from_inventory(inventory, listener, pools, policy):
 def listener_from_inventory(inventory):
     gateway = inventory["/v2/lbaas/loadbalancers/gateway"]
     listener = inventory["/v2/lbaas/listeners/listener"]
-    if listener["default_pool_id"] is not None:
+    default_pool_id = listener["default_pool_id"]
+    tcp = listener["protocol"] == "TCP"
+    if not tcp and default_pool_id is not None:
         raise ValueError("the pilot requires a listener without a default pool")
     if gateway["vip_address"] != "127.0.0.1":
         raise ValueError("the pilot expects a loopback frontend")
@@ -69,15 +76,19 @@ def listener_from_inventory(inventory):
         raise ValueError("listener is not attached to the observed Gateway")
 
     pools = {pool["id"]: pool_from_inventory(inventory, gateway, pool)
-             for pool in children(inventory, "/v2/lbaas/pools")}
+             for pool in children(inventory, "/v2/lbaas/pools")
+             if not tcp or pool["id"] == default_pool_id}
     # The Octavia database exposes the listener's policies in position order.
     ordered = sorted(children(inventory, "/v2/lbaas/l7policies"), key=lambda policy: policy["position"])
+    if tcp and ordered:
+        raise ValueError("TCP cannot have L7 policies")
     policies = [policy_from_inventory(inventory, listener, pools, policy) for policy in ordered]
     load_balancer = model(data_models.LoadBalancer, gateway, "project_id",
                           vip=data_models.Vip(ip_address=gateway["vip_address"]),
                           topology=constants.TOPOLOGY_SINGLE)
     return model(data_models.Listener, listener, "protocol protocol_port",
                  load_balancer=load_balancer, pools=list(pools.values()), l7policies=policies,
+                 default_pool=pools[default_pool_id] if default_pool_id is not None else None,
                  insert_headers=listener.get("insert_headers", {}))
 
 

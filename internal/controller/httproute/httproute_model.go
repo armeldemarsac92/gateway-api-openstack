@@ -129,6 +129,9 @@ func (r *Reconciler) buildRouteModelWithReader(
 	if err != nil {
 		return cloud.RouteSpec{}, newRouteBuildError(routeErrorUnsupported, "%s", err)
 	}
+	if listener.Protocol != gatewayv1.HTTPProtocolType {
+		return cloud.RouteSpec{}, newRouteBuildError(routeErrorNoMatchingParent, "no HTTP listener matches this route")
+	}
 	if err := validateRouteHostnames(listener.Hostname, route.Spec.Hostnames); err != nil {
 		return cloud.RouteSpec{}, err
 	}

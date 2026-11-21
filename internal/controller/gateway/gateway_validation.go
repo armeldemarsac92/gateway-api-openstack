@@ -23,6 +23,7 @@ import (
 	"slices"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
@@ -37,7 +38,8 @@ type gatewayValidationError struct {
 
 func hasListenerRequestFilters(gateway *gatewayv1.Gateway) bool {
 	return slices.ContainsFunc(gateway.Spec.Listeners, func(l gatewayv1.Listener) bool {
-		return l.Protocol == gatewayv1.HTTPProtocolType && l.Filters != nil && len(l.Filters.Requests) != 0
+		supportedProtocol := l.Protocol == gatewayv1.HTTPProtocolType || (l.Protocol == gatewayv1.TCPProtocolType && len(gateway.Spec.Listeners) == 1)
+		return supportedProtocol && l.Filters != nil && len(l.Filters.Requests) != 0
 	})
 }
 
@@ -55,8 +57,7 @@ func (r *Reconciler) getGatewayClass(ctx context.Context, gateway *gatewayv1.Gat
 	return &gatewayClass, gatewayClass.Spec.ControllerName == r.Config.ControllerName, nil
 }
 
-// Validate checks whether a Gateway can be represented by the current HTTP
-// profile and returns its single supported listener.
+// Validate returns the listener that the stock Amphora profile can program.
 func Validate(gateway *gatewayv1.Gateway) (*gatewayv1.Listener, error) {
 	if gateway.Spec.Infrastructure != nil {
 		return nil, &gatewayValidationError{
@@ -76,32 +77,69 @@ func Validate(gateway *gatewayv1.Gateway) (*gatewayv1.Listener, error) {
 			gatewayReason: gatewayv1.GatewayReasonInvalidParameters,
 		}
 	}
-	listener, err := HTTPListener(gateway)
-	if err != nil {
-		return nil, err
-	}
-	if listener.TLS != nil {
-		return nil, fmt.Errorf("only a plain HTTP listener is supported")
-	}
-	if hasListenerRequestFilters(gateway) {
-		return nil, fmt.Errorf("listener request filters cannot be enforced by the stock Amphora HTTP profile")
-	}
-	if listener.Hostname != nil {
-		if err := amphora.ValidateHostname(string(*listener.Hostname)); err != nil {
-			return nil, fmt.Errorf("invalid listener hostname: %w", err)
+	var listener *gatewayv1.Listener
+	if len(gateway.Spec.Listeners) == 1 && gateway.Spec.Listeners[0].Protocol == gatewayv1.TCPProtocolType {
+		listener = &gateway.Spec.Listeners[0]
+		if err := validateTCPListener(listener); err != nil {
+			return nil, err
+		}
+	} else {
+		var err error
+		listener, err = HTTPListener(gateway)
+		if err != nil {
+			return nil, err
+		}
+		if listener.TLS != nil {
+			return nil, fmt.Errorf("only a plain HTTP listener is supported")
+		}
+		if listener.Hostname != nil {
+			if err := amphora.ValidateHostname(string(*listener.Hostname)); err != nil {
+				return nil, fmt.Errorf("invalid listener hostname: %w", err)
+			}
 		}
 	}
-	if listener.AllowedRoutes != nil && len(listener.AllowedRoutes.Kinds) != 0 {
-		for _, kind := range listener.AllowedRoutes.Kinds {
-			if !isHTTPRouteGroupKind(kind) {
-				return nil, fmt.Errorf("only HTTPRoute is supported in listener allowedRoutes.kinds")
-			}
+	if hasListenerRequestFilters(gateway) {
+		return nil, fmt.Errorf("listener request filters cannot be enforced by the stock Amphora %s profile", listener.Protocol)
+	}
+	kind := listenerRouteKind(listener.Protocol)
+	if listener.AllowedRoutes != nil {
+		if slices.ContainsFunc(listener.AllowedRoutes.Kinds, func(ref gatewayv1.RouteGroupKind) bool {
+			return !isRouteGroupKind(ref, kind)
+		}) {
+			return nil, fmt.Errorf("only %s is supported in listener allowedRoutes.kinds", kind)
 		}
 	}
 	if err := validateAddresses(gateway.Spec.Addresses); err != nil {
 		return nil, err
 	}
 	return listener, nil
+}
+
+func validateTCPListener(listener *gatewayv1.Listener) error {
+	if listener.Hostname != nil || listener.TLS != nil {
+		return fmt.Errorf("TCP listeners do not support hostname or TLS")
+	}
+	if listener.AllowedRoutes == nil || listener.AllowedRoutes.Namespaces == nil {
+		return nil
+	}
+	namespaces := listener.AllowedRoutes.Namespaces
+	if namespaces.From == nil {
+		return nil
+	}
+	switch *namespaces.From {
+	case gatewayv1.NamespacesFromSame, gatewayv1.NamespacesFromAll:
+		return nil
+	case gatewayv1.NamespacesFromSelector:
+		if namespaces.Selector == nil {
+			return fmt.Errorf("listener allowedRoutes namespace policy requires a selector")
+		}
+		if _, err := metav1.LabelSelectorAsSelector(namespaces.Selector); err != nil {
+			return fmt.Errorf("invalid listener allowedRoutes namespace selector: %w", err)
+		}
+		return nil
+	default:
+		return fmt.Errorf("listener allowedRoutes namespace policy is unsupported")
+	}
 }
 
 func validateAddresses(addresses []gatewayv1.GatewaySpecAddress) error {
@@ -186,27 +224,38 @@ func HTTPListener(gateway *gatewayv1.Gateway) (*gatewayv1.Listener, error) {
 		}
 	}
 	if http == nil {
-		return nil, fmt.Errorf("a plain HTTP listener is required")
+		return nil, fmt.Errorf("a plain HTTP listener or a single TCP listener is required")
 	}
 	return http, nil
 }
 
-func listenerAllowsHTTPRoute(listener gatewayv1.Listener) bool {
+func listenerRouteKind(protocol gatewayv1.ProtocolType) gatewayv1.Kind {
+	switch protocol {
+	case gatewayv1.HTTPProtocolType:
+		return "HTTPRoute"
+	case gatewayv1.TCPProtocolType:
+		return "TCPRoute"
+	default:
+		return ""
+	}
+}
+
+func listenerAllowsRouteKind(listener gatewayv1.Listener, routeKind gatewayv1.Kind) bool {
 	if listener.AllowedRoutes == nil || len(listener.AllowedRoutes.Kinds) == 0 {
 		return true
 	}
 	for _, kind := range listener.AllowedRoutes.Kinds {
-		if isHTTPRouteGroupKind(kind) {
+		if isRouteGroupKind(kind, routeKind) {
 			return true
 		}
 	}
 	return false
 }
 
-func isHTTPRouteGroupKind(routeKind gatewayv1.RouteGroupKind) bool {
+func isRouteGroupKind(routeKind gatewayv1.RouteGroupKind, supportedKind gatewayv1.Kind) bool {
 	group := gatewayv1.Group(gatewayv1.GroupName)
 	if routeKind.Group != nil {
 		group = *routeKind.Group
 	}
-	return group == gatewayv1.Group(gatewayv1.GroupName) && routeKind.Kind == gatewayv1.Kind("HTTPRoute")
+	return supportedKind != "" && group == gatewayv1.Group(gatewayv1.GroupName) && routeKind.Kind == supportedKind
 }

@@ -40,6 +40,10 @@ func (r *Reconciler) ensureGateway(ctx context.Context, expected *gatewayv1.Gate
 }
 
 func (r *Reconciler) gatewaySpec(gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, topology classconfig.Resolved) cloud.GatewaySpec {
+	var protocol string
+	if listener.Protocol == gatewayv1.TCPProtocolType {
+		protocol = string(listener.Protocol)
+	}
 	return cloud.GatewaySpec{
 		Identity:            controller.GatewayIdentity(r.Config, gateway),
 		Provider:            "amphora",
@@ -47,6 +51,7 @@ func (r *Reconciler) gatewaySpec(gateway *gatewayv1.Gateway, listener *gatewayv1
 		ExternalNetworkID:   topology.Topology.ExternalNetworkID,
 		ListenerName:        resourceDisplayName(gateway.Namespace, gateway.Name, string(listener.Name)),
 		ListenerPort:        int(listener.Port),
+		ListenerProtocol:    protocol,
 		FlavorID:            topology.Topology.FlavorID,
 		AvailabilityZone:    topology.Topology.AvailabilityZone,
 		VIPSecurityGroupIDs: slices.Clone(topology.Topology.VIPSecurityGroupIDs),

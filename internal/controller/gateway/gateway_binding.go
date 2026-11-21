@@ -51,6 +51,7 @@ func (r *Reconciler) bindGateway(
 		gateway.Annotations = map[string]string{}
 	}
 	gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] = desiredListenerPort
+	gateway.Annotations[r.Config.GatewayListenerProtocolAnnotation()] = string(snapshot.listener.Protocol)
 	gateway.Annotations[r.Config.GatewayClusterIDAnnotation()] = r.Config.ClusterID
 	gateway.Annotations[r.Config.GatewayProjectIDAnnotation()] = r.Config.OpenStackProjectID
 	controllerutil.AddFinalizer(gateway, r.Config.GatewayFinalizer())

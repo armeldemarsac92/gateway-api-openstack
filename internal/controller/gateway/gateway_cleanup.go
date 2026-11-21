@@ -92,6 +92,7 @@ func (r *Reconciler) cleanupGateway(ctx context.Context, scope *gatewayScope) (c
 			return ctrl.Result{}, nil
 		}
 		scope.gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] = snapshot.listenerPort
+		scope.gateway.Annotations[r.Config.GatewayListenerProtocolAnnotation()] = string(snapshot.listenerProtocol)
 		if err := r.patchGatewayMetadata(ctx, scope); err != nil {
 			return ctrl.Result{}, fmt.Errorf("checkpoint Gateway graph replacement: %w", err)
 		}
@@ -100,6 +101,7 @@ func (r *Reconciler) cleanupGateway(ctx context.Context, scope *gatewayScope) (c
 	controller.ClearGatewayTopology(r.Config, scope.gateway)
 	controllerutil.RemoveFinalizer(scope.gateway, r.Config.GatewayFinalizer())
 	delete(scope.gateway.Annotations, r.Config.GatewayListenerPortAnnotation())
+	delete(scope.gateway.Annotations, r.Config.GatewayListenerProtocolAnnotation())
 	delete(scope.gateway.Annotations, r.Config.GatewayClusterIDAnnotation())
 	delete(scope.gateway.Annotations, r.Config.GatewayProjectIDAnnotation())
 	if err := r.patchGatewayMetadata(ctx, scope); err != nil {

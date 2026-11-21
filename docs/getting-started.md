@@ -44,7 +44,7 @@ kubectl get -f "$gateway_api_manifest" -o 'custom-columns=KIND:.kind,NAME:.metad
 The Standard manifest contains ten CRDs in `gateway.networking.k8s.io` and the `safe-upgrades.gateway.networking.k8s.io` admission policy and binding. Each has the v1.7.0 and `standard` annotations. Check the manifest inventory and any other installed Gateway API CRDs before proceeding.
 For Experimental qualification on a separate cluster, use `experimental-install.yaml` from the same release and set `GATEWAY_OPENSTACK_GATEWAY_API_CHANNEL` to `experimental` in the controller ConfigMap. That manifest has the same ten CRDs plus four in `gateway.networking.x-k8s.io`, all annotated `experimental`. The policy and binding carry `standard` in both manifests.
 
-Startup requires GatewayClass, Gateway, HTTPRoute, and ReferenceGrant to be available.
+Startup requires GatewayClass, Gateway, HTTPRoute, TCPRoute, and ReferenceGrant to be available.
 The controller reports bundle version and channel validation through the GatewayClass `SupportedVersion` condition.
 A mismatch blocks provisioning and repair. Finalization can continue while the required Kubernetes APIs are served. [Installed Gateway API version](design/architecture.md#installed-gateway-api-version)
 
@@ -237,9 +237,45 @@ A VIP without a Floating IP may not be reachable from the public Internet.
 
 See the [supported routing scope](../README.md#current-implementation) and [class configuration lifecycle](reference/class-configuration.md#configuration-after-gateway-creation) before extending this example.
 
+## Forward TCP to a Service
+
+For a TCP application, create a dedicated Gateway with one TCP listener. This example uses the existing `openstack` class, the `gateway-api-openstack-demo` namespace and a Service called `database` exposing port 5432. With the default class member mode, the Service must have an allocated NodePort and ready endpoints on reachable workers. In Endpoint mode the Amphora must be able to reach the pod addresses and ports.
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: database-edge
+  namespace: gateway-api-openstack-demo
+spec:
+  gatewayClassName: openstack
+  listeners:
+    - name: postgres
+      port: 5432
+      protocol: TCP
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: TCPRoute
+metadata:
+  name: database
+  namespace: gateway-api-openstack-demo
+spec:
+  parentRefs:
+    - name: database-edge
+      sectionName: postgres
+  rules:
+    - backendRefs:
+        - name: database
+          port: 5432
+```
+
+Use the Gateway address and listener port with the application's own TCP client. For PostgreSQL, a query such as `select 1` verifies a complete request and response. A successful TCP handshake alone can also occur on an empty listener.
+
+When several routes attach to this listener, `attachedRoutes` counts them all. The oldest route wins. For equal creation timestamps the controller orders routes by namespace and then name. Check each parent's `Accepted`, `ResolvedRefs` and `<controller-domain>/Programmed` conditions. A younger route reports `NotSelected`. A missing or unauthorized backend on the oldest route leaves forwarding withdrawn. To allow a Service in a different namespace, create a ReferenceGrant in that namespace with `from.kind: TCPRoute`. The listener's `allowedRoutes` separately controls which route namespaces may attach. Weighted traffic across several backends and multiple active listeners remain open. [Controller and provider checks](qualification/v1.7.0/provider/stock-tcp.md)
+
 ## Safe removal
 
-Keep the controller, its application credential, and OpenStack access running until every managed HTTPRoute and Gateway has finished finalization.
+Keep the controller, its application credential, and OpenStack access running until every managed HTTPRoute, TCPRoute and Gateway has finished finalization.
 Removing the Deployment or Secret first can leave OpenStack resources behind and leave Kubernetes objects stuck in deletion.
 
 For the basic example, delete in this order:
@@ -256,7 +292,7 @@ Each of the first three commands waits for deletion by default.
 If one remains blocked, keep the installation available and follow the [operator recovery guide](operator-recovery.md).
 Do not remove controller finalizers manually because doing so bypasses ownership checks and cleanup.
 
-Before uninstalling a shared controller, repeat the HTTPRoute, Gateway, and GatewayClass deletion sequence for every class using its exact controller name.
+Before uninstalling a shared controller, delete managed HTTPRoutes and TCPRoutes before their Gateways, then repeat the GatewayClass deletion for every class using its exact controller name.
 Remove a parameter object only after no class needs it.
 
 The base uninstall also deletes the OpenStackGatewayClassConfig CRD, which removes every instance of that API throughout the cluster.

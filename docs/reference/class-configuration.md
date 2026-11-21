@@ -69,8 +69,7 @@ Gateway `spec.infrastructure.parametersRef` is not supported.
 | `healthMonitor.maxRetries` | `3` | Successful checks required for recovery, from 1 through 10. |
 | `healthMonitor.maxRetriesDown` | `3` | Failed checks required to mark a member down, from 1 through 10. |
 
-Health monitors use HTTP `GET` and accept status codes `200-399`.
-Those settings are fixed.
+On HTTP listeners, health monitors send `GET` to `healthMonitor.path` and accept status codes `200-399`. On TCP listeners, Octavia performs a TCP connect check. The delay, timeout and retry settings apply to both protocols. The HTTP path applies only to HTTP monitors.
 There is no option to disable the health monitor or supply an existing Floating IP.
 
 Each subnet, external network, or security group reference must contain exactly one selector:

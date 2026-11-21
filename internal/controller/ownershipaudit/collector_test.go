@@ -55,12 +55,14 @@ func TestCollectOwnershipSnapshot(t *testing.T) {
 		},
 	}
 	applyRouteBinding(cfg, route, gateway)
+	stream := &gatewayv1.TCPRoute{ObjectMeta: *route.ObjectMeta.DeepCopy()}
+	stream.UID = "tcp-uid"
 	unboundGateway := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "unbound", UID: "unbound-gateway"}}
 	unboundRoute := &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "unbound", UID: "unbound-route"}}
 
 	reader := fake.NewClientBuilder().
 		WithScheme(testScheme(t)).
-		WithObjects(route, unboundRoute, gateway, unboundGateway).
+		WithObjects(route, stream, unboundRoute, gateway, unboundGateway).
 		Build()
 	snapshot, err := CollectOwnershipSnapshot(context.Background(), reader, cfg)
 	if err != nil {
@@ -69,8 +71,8 @@ func TestCollectOwnershipSnapshot(t *testing.T) {
 	if len(snapshot.Issues) != 0 {
 		t.Fatalf("CollectOwnershipSnapshot() issues = %#v, want none", snapshot.Issues)
 	}
-	if len(snapshot.Records) != 2 {
-		t.Fatalf("CollectOwnershipSnapshot() records = %#v, want two", snapshot.Records)
+	if len(snapshot.Records) != 3 {
+		t.Fatalf("CollectOwnershipSnapshot() records = %#v, want a Gateway, an HTTPRoute and a TCPRoute", snapshot.Records)
 	}
 
 	wantGatewayIdentity := cloud.Identity{
@@ -97,6 +99,10 @@ func TestCollectOwnershipSnapshot(t *testing.T) {
 	}
 	if got := snapshot.Records[1].Objects; len(got) != 1 || got[0].Kind != "HTTPRoute" || got[0].Name != route.Name {
 		t.Fatalf("second record objects = %#v, want HTTPRoute", got)
+	}
+	wantRouteIdentity.RouteUID = string(stream.UID)
+	if record := snapshot.Records[2]; record.Identity != wantRouteIdentity || len(record.Objects) != 1 || record.Objects[0].Kind != "TCPRoute" {
+		t.Fatalf("TCPRoute binding was not identified independently of the same-named HTTPRoute: %#v", record)
 	}
 	encoded, err := json.Marshal(snapshot)
 	if err != nil {

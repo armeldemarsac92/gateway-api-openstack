@@ -157,7 +157,7 @@ func TestBuildGatewayDeletionPlanValidatesProjectsAndParents(t *testing.T) {
 				ProjectID:    "project-a",
 			}, ProviderConfig{})
 
-			_, err := provider.buildGatewayDeletionPlan(context.Background(), identity, "load-balancer-1")
+			_, err := provider.buildGatewayDeletionPlan(context.Background(), identity, safetyObservedLoadBalancer(), nil, "")
 			if !errors.Is(err, cloud.ErrOwnershipConflict) {
 				t.Fatalf("buildGatewayDeletionPlan() error = %v, want ownership conflict", err)
 			}

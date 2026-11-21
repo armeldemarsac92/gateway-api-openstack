@@ -135,6 +135,12 @@ func (c Config) GatewayListenerPortAnnotation() string {
 	return c.Domain() + "/gateway-listener-port-" + c.controllerKey()
 }
 
+// GatewayListenerProtocolAnnotation returns the key that records the listener
+// protocol in a Gateway binding.
+func (c Config) GatewayListenerProtocolAnnotation() string {
+	return c.Domain() + "/gateway-listener-protocol-" + c.controllerKey()
+}
+
 // GatewayClusterIDAnnotation returns the key that records the cluster ID in a
 // Gateway binding.
 func (c Config) GatewayClusterIDAnnotation() string {

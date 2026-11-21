@@ -85,7 +85,7 @@ func (r *Reconciler) observeRouteGraphAdmission(ctx context.Context, gateway *ga
 			candidate.namespaceUID = namespaces[0].UID
 		}
 		admission.eligible = append(admission.eligible, candidate)
-		if r.hasGraphBindingClaim(route, identity) || requested != nil && route.UID == requested.UID && client.ObjectKeyFromObject(route) == client.ObjectKeyFromObject(requested) {
+		if controller.RouteClaimsGateway(r.Config, route, identity) || requested != nil && route.UID == requested.UID && client.ObjectKeyFromObject(route) == client.ObjectKeyFromObject(requested) {
 			admission.active = append(admission.active, *route)
 		}
 	}

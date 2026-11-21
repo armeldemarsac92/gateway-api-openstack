@@ -46,6 +46,7 @@ type Request struct {
 	Action   Action
 	Gateway  *gatewayv1.Gateway
 	Route    *gatewayv1.HTTPRoute
+	TCPRoute *gatewayv1.TCPRoute
 }
 
 // Reconciler is the sole Kubernetes-facing graph mutation boundary.
@@ -74,6 +75,35 @@ type GatewaySource interface {
 // RouteSource observes a complete live set of bound route fragments.
 type RouteSource interface {
 	ObserveRouteGraph(context.Context, Request, *gatewayv1.Gateway) (RouteInputs, error)
+}
+
+// RouteSources combines all served route kinds under the same Gateway writer lock.
+type RouteSources []RouteSource
+
+// ObserveRouteGraph collects ownership even for a kind no longer served by the listener.
+// Every source validates its observation before the provider can mutate the graph.
+func (sources RouteSources) ObserveRouteGraph(ctx context.Context, request Request, gateway *gatewayv1.Gateway) (RouteInputs, error) {
+	var combined RouteInputs
+	var fences []func(context.Context) error
+	for _, source := range sources {
+		input, err := source.ObserveRouteGraph(ctx, request, gateway)
+		if err != nil {
+			return RouteInputs{}, err
+		}
+		combined.Nodes = append(combined.Nodes, input.Nodes...)
+		if input.Validate != nil {
+			fences = append(fences, input.Validate)
+		}
+	}
+	combined.Validate = func(ctx context.Context) error {
+		for _, validate := range fences {
+			if err := validate(ctx); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return combined, nil
 }
 
 // Writer serializes fresh graph construction and the single provider operation.

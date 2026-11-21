@@ -51,6 +51,10 @@ type desiredRoute struct {
 	hostnameRuleValue string
 }
 
+func (r desiredRoute) protocol() string {
+	return cloud.NormalizeListenerProtocol(r.spec.GatewayRequirements.ListenerProtocol)
+}
+
 func (p *Provider) buildDesiredRoute(spec cloud.RouteSpec) (desiredRoute, error) {
 	identity, err := p.identity(spec.Identity)
 	if err != nil {
@@ -97,20 +101,31 @@ func (p *Provider) buildDesiredRoute(spec cloud.RouteSpec) (desiredRoute, error)
 	if strings.TrimSpace(spec.MemberSubnetID) == "" {
 		return invalid(errors.New("member subnet ID must not be empty"))
 	}
-	if spec.PathType != cloud.PathMatchExact && spec.PathType != cloud.PathMatchPrefix {
-		return invalid(fmt.Errorf("unsupported path match type %q", spec.PathType))
-	}
-	exactPath, prefixPath, err := amphora.PathRuleValues(spec.PathValue, spec.PathType == cloud.PathMatchPrefix)
-	if err != nil {
-		return invalid(err)
-	}
-
+	var policies []desiredPolicy
 	var hostnameRuleValue string
-	if spec.Hostname != "" {
-		hostnameRuleValue, err = amphora.HostnameRuleValue(spec.Hostname)
+	protocol := cloud.NormalizeListenerProtocol(spec.GatewayRequirements.ListenerProtocol)
+	switch protocol {
+	case cloud.ListenerProtocolHTTP:
+		if spec.PathType != cloud.PathMatchExact && spec.PathType != cloud.PathMatchPrefix {
+			return invalid(fmt.Errorf("unsupported path match type %q", spec.PathType))
+		}
+		exactPath, prefixPath, err := amphora.PathRuleValues(spec.PathValue, spec.PathType == cloud.PathMatchPrefix)
 		if err != nil {
 			return invalid(err)
 		}
+		policies = policiesFor(exactPath, prefixPath)
+		if spec.Hostname != "" {
+			hostnameRuleValue, err = amphora.HostnameRuleValue(spec.Hostname)
+			if err != nil {
+				return invalid(err)
+			}
+		}
+	case cloud.ListenerProtocolTCP:
+		if spec.Hostname != "" || spec.PathType != "" || spec.PathValue != "" {
+			return invalid(errors.New("a TCP route cannot contain HTTP matches"))
+		}
+	default:
+		return invalid(fmt.Errorf("unsupported listener protocol %q", protocol))
 	}
 
 	membersByKey := make(map[string]cloud.Member, len(spec.Members))
@@ -150,11 +165,12 @@ func (p *Provider) buildDesiredRoute(spec cloud.RouteSpec) (desiredRoute, error)
 	}
 
 	monitor := spec.HealthMonitor
-	if !strings.HasPrefix(monitor.Path, "/") {
+	if protocol == cloud.ListenerProtocolHTTP && !strings.HasPrefix(monitor.Path, "/") {
 		return invalid(fmt.Errorf("health check path %q must start with /", monitor.Path))
 	}
-	if monitor.Delay < 1 || monitor.Timeout < 1 || monitor.Timeout >= monitor.Delay ||
-		monitor.MaxRetries < 1 || monitor.MaxRetries > 10 || monitor.MaxRetriesDown < 1 || monitor.MaxRetriesDown > 10 {
+	if monitor != (cloud.HealthMonitorConfig{}) &&
+		(monitor.Delay < 1 || monitor.Timeout < 1 || monitor.Timeout >= monitor.Delay ||
+			monitor.MaxRetries < 1 || monitor.MaxRetries > 10 || monitor.MaxRetriesDown < 1 || monitor.MaxRetriesDown > 10) {
 		return invalid(errors.New("health monitor requires positive intervals, timeout below delay, and retry counts within 1-10"))
 	}
 	return desiredRoute{
@@ -162,7 +178,7 @@ func (p *Provider) buildDesiredRoute(spec cloud.RouteSpec) (desiredRoute, error)
 		spec:              spec,
 		members:           members,
 		healthMonitor:     monitor,
-		policies:          policiesFor(exactPath, prefixPath),
+		policies:          policies,
 		hostnameRuleValue: hostnameRuleValue,
 	}, nil
 }

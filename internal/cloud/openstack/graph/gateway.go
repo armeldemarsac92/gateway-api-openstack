@@ -22,6 +22,7 @@ import (
 	"regexp"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/loadbalancers"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/extensions/layer3/floatingips"
@@ -75,20 +76,32 @@ func (p *Provider) GetGateway(
 		return cloud.GatewayProgressingResult("Octavia load balancer is administratively disabled", p.pollInterval), true, nil
 	}
 
-	listener, err := p.findManagedGatewayListener(ctx, identity, loadBalancer.ID)
+	listener, err := p.findManagedGatewayListener(ctx, identity, loadBalancer)
 	if err != nil {
 		return cloud.GatewayResult{}, false, err
 	}
 	if listener == nil {
 		return cloud.GatewayProgressingResult("Octavia listener has not been created", p.pollInterval), true, nil
 	}
-	if listener.Protocol != string(listeners.ProtocolHTTP) {
+	if listener.Protocol != string(listeners.ProtocolHTTP) && listener.Protocol != string(listeners.ProtocolTCP) {
 		return cloud.GatewayResult{}, false, fmt.Errorf("%w: listener %s has protocol %s", cloud.ErrOwnershipConflict, listener.ID, listener.Protocol)
+	}
+	if listener.Protocol == cloud.ListenerProtocolTCP {
+		if err := validateTCPListener(listener, loadBalancer.ID); err != nil {
+			return cloud.GatewayResult{}, false, err
+		}
+		outcome, err := p.tcpListenerOutcome(listener, false)
+		if err != nil {
+			return cloud.GatewayResult{}, false, err
+		}
+		if outcome.State == cloud.OutcomeProgressing {
+			return cloud.GatewayResult{Outcome: outcome}, true, nil
+		}
 	}
 	if !listener.AdminStateUp {
 		return cloud.GatewayProgressingResult("Octavia listener is administratively disabled", p.pollInterval), true, nil
 	}
-	if listener.DefaultPoolID != "" {
+	if listener.Protocol == cloud.ListenerProtocolHTTP && listener.DefaultPoolID != "" {
 		return cloud.GatewayProgressingResult("Octavia listener has an unexpected default pool", p.pollInterval), true, nil
 	}
 	if listener.ProvisioningStatus == "ERROR" {
@@ -118,15 +131,13 @@ func (p *Provider) GetGateway(
 func (p *Provider) findManagedGatewayListener(
 	ctx context.Context,
 	identity Identity,
-	loadBalancerID string,
+	loadBalancer *octavia.LoadBalancer,
 ) (*listeners.Listener, error) {
-	listenerList, err := p.octavia.ListListeners(ctx, listeners.ListOpts{
-		LoadbalancerID: loadBalancerID,
-		ProjectID:      p.projectID,
-	})
+	listenerList, err := p.listGatewayListeners(ctx, loadBalancer)
 	if err != nil {
-		return nil, fmt.Errorf("list Gateway listeners: %w", err)
+		return nil, err
 	}
+	loadBalancerID := loadBalancer.ID
 	var owned *listeners.Listener
 	for index := range listenerList {
 		listener := &listenerList[index]

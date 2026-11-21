@@ -57,6 +57,120 @@ func TestHibiscusSharedHTTPTraffic(t *testing.T) {
 	testHibiscusPrivateHTTPTraffic(t, true)
 }
 
+func TestHibiscusTCPTraffic(t *testing.T) {
+	python, haproxy := os.Getenv("HIBISCUS_OCTAVIA_PYTHON"), os.Getenv("HIBISCUS_HAPROXY")
+	if python == "" && haproxy == "" {
+		t.Skip("set HIBISCUS_OCTAVIA_PYTHON and HIBISCUS_HAPROXY to run the loopback pilot")
+	}
+	if !filepath.IsAbs(python) || !filepath.IsAbs(haproxy) {
+		t.Fatal("HIBISCUS_OCTAVIA_PYTHON and HIBISCUS_HAPROXY must be absolute paths")
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	backend, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservation, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		_ = backend.Close()
+		t.Fatal(err)
+	}
+	defer func() { _ = reservation.Close() }()
+	payload := make([]byte, 256)
+	for i := range payload {
+		payload[i] = byte(i)
+	}
+	var echoCount atomic.Int32
+	echoDone := make(chan struct{})
+	go func() {
+		defer close(echoDone)
+		for {
+			conn, err := backend.Accept()
+			if err != nil {
+				return
+			}
+			func() {
+				defer func() { _ = conn.Close() }()
+				_ = conn.SetDeadline(time.Now().Add(time.Second))
+				got := make([]byte, len(payload))
+				if _, err := io.ReadFull(conn, got); err == nil && bytes.Equal(got, payload) {
+					echoCount.Add(1)
+					_, _ = conn.Write(got)
+				}
+			}()
+		}
+	}()
+	defer func() {
+		_ = backend.Close()
+		<-echoDone
+	}()
+
+	f := newTCPGraphFixture(t)
+	frontend := reservation.Addr().(*net.TCPAddr)
+	f.spec.Gateway.Spec.ListenerPort = frontend.Port
+	route := &f.spec.Routes[0]
+	route.Spec.GatewayRequirements.ListenerPort = frontend.Port
+	address := backend.Addr().(*net.TCPAddr)
+	route.Spec.Members = []cloud.Member{{Address: address.IP.String(), Port: address.Port}}
+	route.Spec.HealthMonitor.Delay, route.Spec.HealthMonitor.Timeout = 2, 1
+	provider := f.provider()
+	for range 6 {
+		f.reconcile(provider)
+	}
+	if f.inventory[tcpListener]["default_pool_id"] != "pool" {
+		t.Fatalf("listener does not target the converged pool: %v", f.writes)
+	}
+	f.inventory[tcpListener]["provisioning_status"] = "ACTIVE"
+	if result := f.reconcile(f.provider()); result.Outcome.State != cloud.OutcomeReady || len(f.writes) != 6 {
+		t.Fatalf("provider restart = %#v, writes %v", result, f.writes)
+	}
+	if err := reservation.Close(); err != nil {
+		t.Fatal(err)
+	}
+	startProxy := func() func() {
+		t.Helper()
+		data, err := json.Marshal(f.inventory)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return startPilotHAProxy(t, ctx, python, haproxy, data)
+	}
+	exchange := func() ([]byte, error) {
+		conn, err := net.DialTimeout("tcp", frontend.String(), time.Second)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = conn.Close() }()
+		if err := conn.SetDeadline(time.Now().Add(time.Second)); err != nil {
+			return nil, err
+		}
+		if _, err := conn.Write(payload); err != nil {
+			return nil, err
+		}
+		response := make([]byte, len(payload))
+		n, err := io.ReadFull(conn, response)
+		return response[:n], err
+	}
+	stopServing := startProxy()
+	if data, err := exchange(); err != nil || !bytes.Equal(data, payload) || echoCount.Load() != 1 {
+		t.Fatalf("attached TCP round trip = %x, %v, backend received %d requests", data, err, echoCount.Load())
+	}
+	route.Disposition = cloud.GraphPreserve
+	f.reconcile(provider)
+	f.inventory[tcpListener]["provisioning_status"] = "ACTIVE"
+	if result := f.reconcile(f.provider()); result.Outcome.State != cloud.OutcomeReady || f.inventory[tcpPool] == nil || len(f.writes) != 7 {
+		t.Fatalf("revocation after restart = %#v, writes %v", result, f.writes)
+	}
+	stopServing()
+	stopDetached := startProxy()
+	defer stopDetached()
+	if data, err := exchange(); len(data) != 0 || (err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, syscall.ECONNRESET) && !errors.Is(err, syscall.EPIPE)) || echoCount.Load() != 1 {
+		t.Fatalf("detached TCP round trip = %x, %v, backend received %d requests", data, err, echoCount.Load())
+	}
+	t.Logf("Stock HAProxy echoed all %d bytes after attach and forwarded no bytes after detach", len(payload))
+}
+
 func testHibiscusPrivateHTTPTraffic(t *testing.T, shared bool) {
 	python, haproxy := os.Getenv("HIBISCUS_OCTAVIA_PYTHON"), os.Getenv("HIBISCUS_HAPROXY")
 	if python == "" && haproxy == "" {

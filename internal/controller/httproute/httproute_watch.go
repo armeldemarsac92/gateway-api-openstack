@@ -35,6 +35,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/routebackend"
 )
 
 func (r *Reconciler) enqueueHTTPRoutePeers(ctx context.Context, object client.Object) []reconcile.Request {
@@ -196,7 +197,7 @@ func (r *Reconciler) nodeHasReadyEndpoint(ctx context.Context, serviceKey types.
 	}
 	for _, slice := range slices.Items {
 		for _, endpoint := range slice.Endpoints {
-			if endpoint.NodeName != nil && *endpoint.NodeName == nodeName && endpointReady(endpoint.Conditions) {
+			if endpoint.NodeName != nil && *endpoint.NodeName == nodeName && routebackend.EndpointReady(endpoint.Conditions) {
 				return true, nil
 			}
 		}

@@ -22,6 +22,7 @@ import (
 	"sort"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/monitors"
@@ -52,9 +53,11 @@ type gatewayPoolDeletionPlan []gatewayDeletionStep
 // gatewayDeletionPlan separates the load balancer graph into dependency
 // subplans. No step may run until all three subplans have been validated.
 type gatewayDeletionPlan struct {
-	listeners gatewayListenerDeletionPlan
-	routes    gatewayRouteDeletionPlan
-	pools     gatewayPoolDeletionPlan
+	listeners   gatewayListenerDeletionPlan
+	routes      gatewayRouteDeletionPlan
+	pools       gatewayPoolDeletionPlan
+	tcpListener *listeners.Listener
+	tcpPending  string
 }
 
 // orderedSteps flattens the validated subplans in reverse dependency order.
@@ -69,12 +72,34 @@ func (p gatewayDeletionPlan) orderedSteps() []gatewayDeletionStep {
 // buildGatewayDeletionPlan validates the complete load balancer graph before
 // returning any work. Callers must not execute a deletion step when this
 // method returns an error.
-func (p *Provider) buildGatewayDeletionPlan(ctx context.Context, identity Identity, loadBalancerID string) (gatewayDeletionPlan, error) {
-	listenerPlan, routePlan, err := p.buildGatewayListenerDeletionPlans(ctx, identity, loadBalancerID)
+func (p *Provider) buildGatewayDeletionPlan(ctx context.Context, identity Identity, lb *octavia.LoadBalancer, routeIdentities []Identity, protocol string) (gatewayDeletionPlan, error) {
+	listenerList, err := p.listGatewayListeners(ctx, lb)
 	if err != nil {
 		return gatewayDeletionPlan{}, err
 	}
-	poolPlan, err := p.buildGatewayPoolDeletionPlan(ctx, identity, loadBalancerID)
+	tcp := protocol == cloud.ListenerProtocolTCP
+	for _, listener := range listenerList {
+		tcp = tcp || listener.Protocol == cloud.ListenerProtocolTCP
+		if err := p.validateGatewayDeletionListener(identity, listener, lb.ID); err != nil {
+			return gatewayDeletionPlan{}, err
+		}
+	}
+	if tcp {
+		if len(listenerList) > 1 || len(listenerList) == 1 && (listenerList[0].Protocol != cloud.ListenerProtocolTCP ||
+			protocol != "" && protocol != cloud.ListenerProtocolTCP) {
+			return gatewayDeletionPlan{}, fmt.Errorf("%w: unexpected listener protocol or count before TCP Gateway deletion", cloud.ErrOwnershipConflict)
+		}
+		var listener *listeners.Listener
+		if len(listenerList) == 1 {
+			listener = &listenerList[0]
+		}
+		return p.buildTCPGatewayDeletionPlan(ctx, routeIdentities, lb, listener)
+	}
+	listenerPlan, routePlan, err := p.buildGatewayListenerDeletionPlans(ctx, identity, listenerList)
+	if err != nil {
+		return gatewayDeletionPlan{}, err
+	}
+	poolPlan, err := p.buildGatewayPoolDeletionPlan(ctx, identity, lb)
 	if err != nil {
 		return gatewayDeletionPlan{}, err
 	}
@@ -91,32 +116,13 @@ func (p *Provider) buildGatewayDeletionPlan(ctx context.Context, identity Identi
 func (p *Provider) buildGatewayListenerDeletionPlans(
 	ctx context.Context,
 	identity Identity,
-	loadBalancerID string,
+	listenerList []listeners.Listener,
 ) (gatewayListenerDeletionPlan, gatewayRouteDeletionPlan, error) {
-	listenerList, err := p.octavia.ListListeners(ctx, listeners.ListOpts{
-		LoadbalancerID: loadBalancerID,
-		ProjectID:      p.projectID,
-	})
-	if err != nil {
-		return nil, nil, fmt.Errorf("list listeners before Gateway deletion: %w", err)
-	}
 	sort.Slice(listenerList, func(i, j int) bool { return listenerList[i].ID < listenerList[j].ID })
 
 	listenerPlan := make(gatewayListenerDeletionPlan, 0, len(listenerList))
 	var routePlan gatewayRouteDeletionPlan
 	for _, listener := range listenerList {
-		if err := p.validateOptionalProject("listener", listener.ID, listener.ProjectID); err != nil {
-			return nil, nil, err
-		}
-		if !identity.MatchesGateway(listener.Tags, roleListener) {
-			return nil, nil, fmt.Errorf("%w: listener %s", cloud.ErrOwnershipConflict, listener.ID)
-		}
-		for _, parent := range listener.Loadbalancers {
-			if parent.ID != loadBalancerID {
-				return nil, nil, fmt.Errorf("%w: listener %s reports load balancer %s instead of %s", cloud.ErrOwnershipConflict, listener.ID, parent.ID, loadBalancerID)
-			}
-		}
-
 		listenerRoutePlan, err := p.buildGatewayRouteDeletionPlan(ctx, identity, listener.ID)
 		if err != nil {
 			return nil, nil, err
@@ -128,6 +134,24 @@ func (p *Provider) buildGatewayListenerDeletionPlans(
 		})
 	}
 	return listenerPlan, routePlan, nil
+}
+
+func (p *Provider) validateGatewayDeletionListener(identity Identity, listener listeners.Listener, loadBalancerID string) error {
+	if err := p.validateOptionalProject("listener", listener.ID, listener.ProjectID); err != nil {
+		return err
+	}
+	if !identity.MatchesGateway(listener.Tags, roleListener) {
+		return fmt.Errorf("%w: listener %s", cloud.ErrOwnershipConflict, listener.ID)
+	}
+	if listener.Protocol != "" && listener.Protocol != cloud.ListenerProtocolHTTP && listener.Protocol != cloud.ListenerProtocolTCP {
+		return fmt.Errorf("%w: unexpected listener protocol %q", cloud.ErrOwnershipConflict, listener.Protocol)
+	}
+	for _, parent := range listener.Loadbalancers {
+		if parent.ID != loadBalancerID {
+			return fmt.Errorf("%w: listener %s reports load balancer %s instead of %s", cloud.ErrOwnershipConflict, listener.ID, parent.ID, loadBalancerID)
+		}
+	}
+	return nil
 }
 
 func (p *Provider) buildGatewayRouteDeletionPlan(ctx context.Context, identity Identity, listenerID string) (gatewayRouteDeletionPlan, error) {
@@ -183,19 +207,19 @@ func (p *Provider) buildGatewayRouteDeletionPlan(ctx context.Context, identity I
 	return plan, nil
 }
 
-func (p *Provider) buildGatewayPoolDeletionPlan(ctx context.Context, identity Identity, loadBalancerID string) (gatewayPoolDeletionPlan, error) {
-	poolList, err := p.octavia.ListPools(ctx, pools.ListOpts{
-		LoadbalancerID: loadBalancerID,
-		ProjectID:      p.projectID,
-	})
+func (p *Provider) buildGatewayPoolDeletionPlan(ctx context.Context, identity Identity, lb *octavia.LoadBalancer) (gatewayPoolDeletionPlan, error) {
+	poolList, err := p.listGatewayPools(ctx, lb)
 	if err != nil {
-		return nil, fmt.Errorf("list pools before Gateway deletion: %w", err)
+		return nil, err
 	}
 	sort.Slice(poolList, func(i, j int) bool { return poolList[i].ID < poolList[j].ID })
 
 	var plan gatewayPoolDeletionPlan
 	for _, pool := range poolList {
-		if err := p.validateGatewayDeletionPool(identity, pool, loadBalancerID); err != nil {
+		if pool.Protocol == cloud.ListenerProtocolTCP {
+			return nil, fmt.Errorf("%w: TCP pool %s needs an explicit TCP Gateway or its owned listener for cleanup", cloud.ErrOwnershipConflict, pool.ID)
+		}
+		if err := p.validateGatewayDeletionPool(identity, pool, lb.ID); err != nil {
 			return nil, err
 		}
 		subtree, err := p.buildGatewayPoolSubtreeDeletionPlan(ctx, identity, pool.ID)

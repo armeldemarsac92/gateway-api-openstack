@@ -104,8 +104,8 @@ func (r *Reconciler) observeGatewayMutationSnapshot(
 	if expectedListenerPort != "" && listenerPort != expectedListenerPort {
 		return nil, errGatewayChanged
 	}
-	if binding == gatewayBindingRequired &&
-		gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] != listenerPort {
+	if r.gatewayListenerNeedsReplacement(&gateway, listener) ||
+		(binding == gatewayBindingRequired && gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] == "") {
 		return nil, errGatewayChanged
 	}
 
@@ -235,8 +235,7 @@ func (r *Reconciler) decideGatewayPhase(scope *gatewayScope) gatewayPhaseDecisio
 		return gatewayPhaseDecision{phase: gatewayPhaseInvalidSpec, validation: err}
 	}
 	listenerPort := strconv.Itoa(int(listener.Port))
-	storedListenerPort := gateway.Annotations[r.Config.GatewayListenerPortAnnotation()]
-	if storedListenerPort != "" && storedListenerPort != listenerPort {
+	if r.gatewayListenerNeedsReplacement(gateway, listener) {
 		return gatewayPhaseDecision{
 			phase: gatewayPhaseReplaceGraph, listener: listener, listenerPort: listenerPort,
 		}
@@ -254,6 +253,19 @@ func (r *Reconciler) gatewayBindingComplete(gateway *gatewayv1.Gateway) bool {
 		gateway.Annotations[r.Config.GatewayProjectIDAnnotation()] != ""
 }
 
+func (r *Reconciler) gatewayListenerNeedsReplacement(gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) bool {
+	storedPort := gateway.Annotations[r.Config.GatewayListenerPortAnnotation()]
+	return storedPort != "" && (storedPort != strconv.Itoa(int(listener.Port)) || r.boundListenerProtocol(gateway) != listener.Protocol)
+}
+
+func (r *Reconciler) boundListenerProtocol(gateway *gatewayv1.Gateway) gatewayv1.ProtocolType {
+	storedProtocol := gatewayv1.ProtocolType(gateway.Annotations[r.Config.GatewayListenerProtocolAnnotation()])
+	if storedProtocol == "" {
+		return gatewayv1.HTTPProtocolType
+	}
+	return storedProtocol
+}
+
 type gatewayCleanupDisposition string
 
 const (
@@ -265,9 +277,11 @@ const (
 // gatewayCleanupSnapshot records the live binding and the cleanup authority
 // derived from the current Gateway and GatewayClass lifecycle.
 type gatewayCleanupSnapshot struct {
-	identity     cloud.Identity
-	disposition  gatewayCleanupDisposition
-	listenerPort string
+	identity              cloud.Identity
+	disposition           gatewayCleanupDisposition
+	boundListenerProtocol gatewayv1.ProtocolType
+	listenerPort          string
+	listenerProtocol      gatewayv1.ProtocolType
 }
 
 func (r *Reconciler) observeGatewayCleanupSnapshot(
@@ -292,8 +306,9 @@ func (r *Reconciler) observeGatewayCleanupSnapshot(
 	}
 
 	snapshot := &gatewayCleanupSnapshot{
-		identity:    controller.StoredGatewayIdentity(r.Config, &gateway),
-		disposition: gatewayCleanupDelete,
+		identity:              controller.StoredGatewayIdentity(r.Config, &gateway),
+		disposition:           gatewayCleanupDelete,
+		boundListenerProtocol: r.boundListenerProtocol(&gateway),
 	}
 	if !gateway.DeletionTimestamp.IsZero() {
 		return snapshot, nil
@@ -333,10 +348,10 @@ func (r *Reconciler) observeGatewayCleanupSnapshot(
 		snapshot.disposition = gatewayCleanupRebuild
 		return snapshot, nil
 	}
-	storedListenerPort := gateway.Annotations[r.Config.GatewayListenerPortAnnotation()]
-	if storedListenerPort != "" && storedListenerPort != strconv.Itoa(int(listener.Port)) {
+	if r.gatewayListenerNeedsReplacement(&gateway, listener) {
 		snapshot.disposition = gatewayCleanupRebuild
 		snapshot.listenerPort = strconv.Itoa(int(listener.Port))
+		snapshot.listenerProtocol = listener.Protocol
 		return snapshot, nil
 	}
 

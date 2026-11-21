@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package httproute
+package routebackend
 
 import (
 	"cmp"
@@ -36,9 +36,9 @@ const (
 	endpointReadyForTraffic
 )
 
-// endpointMembers resolves conflicting observations conservatively. Removing an
+// EndpointMembers resolves conflicting observations conservatively. Removing an
 // unavailable duplicate must be observed before another copy can restore traffic.
-func endpointMembers(service *corev1.Service, endpoints []model.Endpoint) ([]cloud.Member, error) {
+func EndpointMembers(service *corev1.Service, endpoints []model.Endpoint) ([]cloud.Member, *model.Diagnostic) {
 	type endpointKey struct {
 		address string
 		port    int32
@@ -51,7 +51,7 @@ func endpointMembers(service *corev1.Service, endpoints []model.Endpoint) ([]clo
 		address, err := netip.ParseAddr(endpoint.Address)
 		if err != nil || !address.Is4() || !address.IsGlobalUnicast() || address.IsLoopback() ||
 			slices.Contains(service.Spec.ClusterIPs, address.String()) || service.Spec.ClusterIP == address.String() {
-			return nil, newRouteBuildError(routeErrorUnsupported, "backend EndpointSlice contains an unsafe endpoint address")
+			return nil, unsupported("backend EndpointSlice contains an unsafe endpoint address")
 		}
 		key := endpointKey{address: address.String(), port: endpoint.Port}
 		state := endpointUnavailable

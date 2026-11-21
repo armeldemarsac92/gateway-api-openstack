@@ -39,30 +39,42 @@ func (r *Reconciler) gatewayRequestsForHTTPRoute(_ context.Context, object clien
 	if !ok {
 		return nil
 	}
+	return r.gatewayRequestsForRoute(route, route.Spec.ParentRefs, route.Status.Parents)
+}
 
-	keys := make(map[types.NamespacedName]struct{}, len(route.Spec.ParentRefs)+len(route.Status.Parents)+1)
+func (r *Reconciler) gatewayRequestsForTCPRoute(_ context.Context, object client.Object) []reconcile.Request {
+	route, ok := object.(*gatewayv1.TCPRoute)
+	if !ok {
+		return nil
+	}
+	return r.gatewayRequestsForRoute(route, route.Spec.ParentRefs, route.Status.Parents)
+}
+
+func (r *Reconciler) gatewayRequestsForRoute(route client.Object, parents []gatewayv1.ParentReference, statuses []gatewayv1.RouteParentStatus) []reconcile.Request {
+	keys := make(map[types.NamespacedName]struct{}, len(parents)+len(statuses)+1)
 	addParent := func(parentRef gatewayv1.ParentReference) {
 		if !controller.IsGatewayParentRef(parentRef) || parentRef.Name == "" {
 			return
 		}
-		gatewayNamespace := route.Namespace
+		gatewayNamespace := route.GetNamespace()
 		if parentRef.Namespace != nil {
 			gatewayNamespace = string(*parentRef.Namespace)
 		}
 		keys[types.NamespacedName{Namespace: gatewayNamespace, Name: string(parentRef.Name)}] = struct{}{}
 	}
-	for _, parentRef := range route.Spec.ParentRefs {
+	for _, parentRef := range parents {
 		addParent(parentRef)
 	}
-	for _, parentStatus := range route.Status.Parents {
+	for _, parentStatus := range statuses {
 		if parentStatus.ControllerName != r.Config.ControllerName {
 			continue
 		}
 		addParent(parentStatus.ParentRef)
 	}
-	boundNamespace := route.Annotations[r.Config.RouteGatewayNamespaceAnnotation()]
-	boundName := route.Annotations[r.Config.RouteGatewayNameAnnotation()]
-	boundUID := route.Annotations[r.Config.RouteGatewayUIDAnnotation()]
+	annotations := route.GetAnnotations()
+	boundNamespace := annotations[r.Config.RouteGatewayNamespaceAnnotation()]
+	boundName := annotations[r.Config.RouteGatewayNameAnnotation()]
+	boundUID := annotations[r.Config.RouteGatewayUIDAnnotation()]
 	if boundNamespace != "" && boundName != "" && boundUID != "" {
 		keys[types.NamespacedName{Namespace: boundNamespace, Name: boundName}] = struct{}{}
 	}
@@ -106,6 +118,11 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 			&gatewayv1.HTTPRoute{},
 			handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForHTTPRoute),
 			builder.WithPredicates(controller.HTTPRouteForGatewayPredicate(r.Config)),
+		).
+		Watches(
+			&gatewayv1.TCPRoute{},
+			handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForTCPRoute),
+			builder.WithPredicates(controller.TCPRouteForGatewayPredicate(r.Config)),
 		).
 		Watches(
 			&gatewayv1.GatewayClass{},

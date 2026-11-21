@@ -75,6 +75,11 @@ func TestSetupIndexes(t *testing.T) {
 		IndexHTTPRouteByBoundGateway:     &gatewayv1.HTTPRoute{},
 		indexHTTPRouteByBoundGatewayUID:  &gatewayv1.HTTPRoute{},
 		IndexHTTPRouteByNodeBackend:      &gatewayv1.HTTPRoute{},
+		IndexTCPRouteByParentGateway:     &gatewayv1.TCPRoute{},
+		IndexTCPRouteByStatusGateway:     &gatewayv1.TCPRoute{},
+		IndexTCPRouteByBackendService:    &gatewayv1.TCPRoute{},
+		IndexTCPRouteByBackendNamespace:  &gatewayv1.TCPRoute{},
+		IndexTCPRouteByBoundGateway:      &gatewayv1.TCPRoute{},
 		IndexEndpointSliceByService:      &discoveryv1.EndpointSlice{},
 	}
 	if len(indexer.indexes) != len(wantTypes) {
@@ -105,6 +110,24 @@ func TestSetupIndexes(t *testing.T) {
 	assertIndexValues(t, indexer, IndexHTTPRouteByBoundGateway, route, []string{"gateways/edge"})
 	assertIndexValues(t, indexer, indexHTTPRouteByBoundGatewayUID, route, []string{"gateway-uid"})
 	assertIndexValues(t, indexer, IndexHTTPRouteByNodeBackend, route, []string{NodeBackendIndexValue})
+
+	tcpRoute := &gatewayv1.TCPRoute{
+		ObjectMeta: route.ObjectMeta,
+		Spec: gatewayv1.TCPRouteSpec{
+			CommonRouteSpec: route.Spec.CommonRouteSpec,
+			Rules: []gatewayv1.TCPRouteRule{{BackendRefs: []gatewayv1.BackendRef{
+				route.Spec.Rules[0].BackendRefs[0].BackendRef,
+				route.Spec.Rules[0].BackendRefs[1].BackendRef,
+				route.Spec.Rules[0].BackendRefs[1].BackendRef,
+			}}},
+		},
+		Status: gatewayv1.TCPRouteStatus{RouteStatus: route.Status.RouteStatus},
+	}
+	assertIndexValues(t, indexer, IndexTCPRouteByParentGateway, tcpRoute, []string{"gateways/edge", "routes/z-gateway"})
+	assertIndexValues(t, indexer, IndexTCPRouteByStatusGateway, tcpRoute, []string{"gateways/edge", "routes/status-gateway"})
+	assertIndexValues(t, indexer, IndexTCPRouteByBackendService, tcpRoute, []string{"apps/a-service", "routes/z-service"})
+	assertIndexValues(t, indexer, IndexTCPRouteByBackendNamespace, tcpRoute, []string{"apps"})
+	assertIndexValues(t, indexer, IndexTCPRouteByBoundGateway, tcpRoute, []string{"gateways/edge"})
 
 	endpointSlice := &discoveryv1.EndpointSlice{ObjectMeta: metav1.ObjectMeta{
 		Namespace: "apps",

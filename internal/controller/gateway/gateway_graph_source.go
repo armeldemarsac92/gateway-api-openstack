@@ -58,7 +58,11 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 			return graph.GatewayInput{}, errGatewayChanged
 		}
 		return graph.GatewayInput{
-			Object: request.Gateway.DeepCopy(), Node: cloud.GatewayGraphNode{Disposition: cloud.GraphDelete},
+			Object: request.Gateway.DeepCopy(),
+			Node: cloud.GatewayGraphNode{
+				Disposition: cloud.GraphDelete,
+				Spec:        cloud.GatewaySpec{ListenerProtocol: string(snapshot.boundListenerProtocol)},
+			},
 			Validate: func(ctx context.Context) error {
 				latest, err := r.observeGatewayCleanupSnapshot(ctx, request.Gateway)
 				if err != nil {

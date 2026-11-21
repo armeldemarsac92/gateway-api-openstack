@@ -63,7 +63,7 @@ func (r *Reconciler) setGatewayFailure(gateway *gatewayv1.Gateway, validationErr
 	gateway.Status.Listeners = make([]gatewayv1.ListenerStatus, 0, len(gateway.Spec.Listeners))
 	for _, listener := range gateway.Spec.Listeners {
 		gateway.Status.Listeners = append(gateway.Status.Listeners, unprogrammedListenerStatus(
-			listener, existingListeners, gateway.Generation, listenerSpecific, message,
+			listener, existingListeners, gateway.Generation, len(gateway.Spec.Listeners) > 1, listenerSpecific, message,
 		))
 	}
 }
@@ -72,6 +72,7 @@ func unprogrammedListenerStatus(
 	listener gatewayv1.Listener,
 	existing []gatewayv1.ListenerStatus,
 	generation int64,
+	multipleListeners bool,
 	listenerSpecific bool,
 	message string,
 ) gatewayv1.ListenerStatus {
@@ -79,9 +80,11 @@ func unprogrammedListenerStatus(
 		Name:       listener.Name,
 		Conditions: existingListenerConditionsFrom(existing, listener.Name),
 	}
-	protocolSupported := listener.Protocol == gatewayv1.HTTPProtocolType
-	if protocolSupported && listenerAllowsHTTPRoute(listener) {
-		status.SupportedKinds = supportedHTTPRouteKinds()
+	kind := listenerRouteKind(listener.Protocol)
+	tcpInMultipleListeners := listener.Protocol == gatewayv1.TCPProtocolType && multipleListeners
+	protocolSupported := kind != "" && !tcpInMultipleListeners
+	if protocolSupported && listenerAllowsRouteKind(listener, kind) {
+		status.SupportedKinds = supportedRouteKinds(kind)
 	}
 	acceptedStatus := metav1.ConditionFalse
 	acceptedReason := gatewayv1.ListenerReasonUnsupportedValue
@@ -90,6 +93,9 @@ func unprogrammedListenerStatus(
 	if !protocolSupported {
 		acceptedReason = gatewayv1.ListenerReasonUnsupportedProtocol
 		acceptedMessage = "Listener protocol is unsupported"
+		if tcpInMultipleListeners {
+			acceptedMessage = "TCP requires a Gateway with a single listener"
+		}
 	} else if !listenerSpecific {
 		acceptedStatus = metav1.ConditionTrue
 		acceptedReason = gatewayv1.ListenerReasonAccepted
@@ -100,8 +106,8 @@ func unprogrammedListenerStatus(
 	resolvedStatus := metav1.ConditionTrue
 	resolvedReason := gatewayv1.ListenerReasonResolvedRefs
 	resolvedMessage := "Listener has no unresolved references"
-	if listener.AllowedRoutes != nil && slices.ContainsFunc(listener.AllowedRoutes.Kinds, func(kind gatewayv1.RouteGroupKind) bool {
-		return !protocolSupported || !isHTTPRouteGroupKind(kind)
+	if listener.AllowedRoutes != nil && slices.ContainsFunc(listener.AllowedRoutes.Kinds, func(ref gatewayv1.RouteGroupKind) bool {
+		return !protocolSupported || !isRouteGroupKind(ref, kind)
 	}) {
 		resolvedStatus = metav1.ConditionFalse
 		resolvedReason = gatewayv1.ListenerReasonInvalidRouteKinds
@@ -118,7 +124,7 @@ func setGatewayAcceptedListeners(gateway *gatewayv1.Gateway, accepted gatewayv1.
 	message := "Gateway configuration is accepted"
 	if len(gateway.Spec.Listeners) > 1 {
 		reason = gatewayv1.GatewayReasonListenersNotValid
-		message = "The HTTP listener is accepted. Other listener protocols are unsupported"
+		message = "The HTTP listener is accepted. Other listeners cannot be programmed on this Gateway"
 	}
 	controller.SetCondition(&gateway.Status.Conditions, controller.Condition(
 		string(gatewayv1.GatewayConditionAccepted), metav1.ConditionTrue, string(reason), message, gateway.Generation,
@@ -129,16 +135,16 @@ func setGatewayAcceptedListeners(gateway *gatewayv1.Gateway, accepted gatewayv1.
 			listeners = append(listeners, accepted)
 		} else {
 			listeners = append(listeners, unprogrammedListenerStatus(
-				listener, gateway.Status.Listeners, gateway.Generation, true, "Listener protocol is unsupported",
+				listener, gateway.Status.Listeners, gateway.Generation, true, true, "Listener cannot be programmed on this Gateway",
 			))
 		}
 	}
 	gateway.Status.Listeners = listeners
 }
 
-func supportedHTTPRouteKinds() []gatewayv1.RouteGroupKind {
+func supportedRouteKinds(kind gatewayv1.Kind) []gatewayv1.RouteGroupKind {
 	group := gatewayv1.Group(gatewayv1.GroupName)
-	return []gatewayv1.RouteGroupKind{{Group: &group, Kind: gatewayv1.Kind("HTTPRoute")}}
+	return []gatewayv1.RouteGroupKind{{Group: &group, Kind: kind}}
 }
 
 func existingListenerConditions(gateway *gatewayv1.Gateway, listenerName gatewayv1.SectionName) []metav1.Condition {
@@ -353,7 +359,7 @@ func (r *Reconciler) setGatewayProvisioningStatus(
 	controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionProgrammed), programmed, string(gatewayReason), message, programmedGeneration))
 	listenerStatus := gatewayv1.ListenerStatus{
 		Name:           listener.Name,
-		SupportedKinds: supportedHTTPRouteKinds(),
+		SupportedKinds: supportedRouteKinds(listenerRouteKind(listener.Protocol)),
 		AttachedRoutes: attachedRoutes,
 		Conditions:     existingListenerConditions(gateway, listener.Name),
 	}
@@ -379,7 +385,7 @@ func (r *Reconciler) setGatewayProgrammed(ctx context.Context, gateway *gatewayv
 	controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionProgrammed), metav1.ConditionTrue, string(gatewayv1.GatewayReasonProgrammed), "Octavia load balancer and listener are active", gateway.Generation))
 	listenerStatus := gatewayv1.ListenerStatus{
 		Name:           listener.Name,
-		SupportedKinds: supportedHTTPRouteKinds(),
+		SupportedKinds: supportedRouteKinds(listenerRouteKind(listener.Protocol)),
 		AttachedRoutes: attachedRoutes,
 		Conditions:     existingListenerConditions(gateway, listener.Name),
 	}
@@ -396,46 +402,64 @@ func setAcceptedListenerConditions(conditions *[]metav1.Condition, generation in
 }
 
 func (r *Reconciler) attachedRouteCount(ctx context.Context, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) (int32, error) {
-	var routes gatewayv1.HTTPRouteList
-	if err := r.List(ctx, &routes, client.MatchingFields{
-		controller.IndexHTTPRouteByStatusGateway: controller.ObjectKeyString(client.ObjectKeyFromObject(gateway)),
-	}); err != nil {
-		return 0, err
-	}
+	gatewayKey := controller.ObjectKeyString(client.ObjectKeyFromObject(gateway))
 	var count int32
 	namespaces := make(map[string][]corev1.Namespace)
-	for _, route := range routes.Items {
-		if !route.DeletionTimestamp.IsZero() {
-			continue
+	countRoute := func(route client.Object, refs []gatewayv1.ParentReference, parents []gatewayv1.RouteParentStatus) error {
+		if !route.GetDeletionTimestamp().IsZero() {
+			return nil
 		}
-		for _, parentStatus := range route.Status.Parents {
-			if !routeParentStatusTargetsListener(parentStatus, route.Namespace, gateway, listener, r.Config.ControllerName) {
+		routeNamespace := route.GetNamespace()
+		for _, parentStatus := range parents {
+			if !routeParentStatusTargetsListener(parentStatus, routeNamespace, gateway, listener, r.Config.ControllerName) {
 				continue
 			}
 			accepted := meta.FindStatusCondition(parentStatus.Conditions, string(gatewayv1.RouteConditionAccepted))
-			if accepted == nil || accepted.Status != metav1.ConditionTrue || accepted.ObservedGeneration != route.Generation ||
-				!slices.ContainsFunc(route.Spec.ParentRefs, func(ref gatewayv1.ParentReference) bool {
-					return controller.ParentRefsEqual(ref, route.Namespace, parentStatus.ParentRef, route.Namespace)
+			if accepted == nil || accepted.Status != metav1.ConditionTrue || accepted.ObservedGeneration != route.GetGeneration() ||
+				!slices.ContainsFunc(refs, func(ref gatewayv1.ParentReference) bool {
+					return controller.ParentRefsEqual(ref, routeNamespace, parentStatus.ParentRef, routeNamespace)
 				}) {
 				continue
 			}
-			if _, observed := namespaces[route.Namespace]; !observed && model.ObservesRouteNamespace(listener) {
+			if _, observed := namespaces[routeNamespace]; !observed && model.ObservesRouteNamespace(listener) {
 				if r.APIReader == nil {
-					return 0, controller.ErrAPIReaderRequired
+					return controller.ErrAPIReaderRequired
 				}
-				namespace, err := graph.ReadRouteNamespace(ctx, r.APIReader, route.Namespace)
+				namespace, err := graph.ReadRouteNamespace(ctx, r.APIReader, routeNamespace)
 				if err != nil {
-					return 0, err
+					return err
 				}
-				namespaces[route.Namespace] = nil
+				namespaces[routeNamespace] = nil
 				if namespace != nil {
-					namespaces[route.Namespace] = []corev1.Namespace{*namespace}
+					namespaces[routeNamespace] = []corev1.Namespace{*namespace}
 				}
 			}
-			if model.AllowsRouteNamespace(listener, gateway.Namespace, route.Namespace, namespaces[route.Namespace]) {
+			if model.AllowsRouteNamespace(listener, gateway.Namespace, routeNamespace, namespaces[routeNamespace]) {
 				count++
 			}
 			break
+		}
+		return nil
+	}
+	if listener.Protocol == gatewayv1.TCPProtocolType {
+		var routes gatewayv1.TCPRouteList
+		if err := r.List(ctx, &routes, client.MatchingFields{controller.IndexTCPRouteByStatusGateway: gatewayKey}); err != nil {
+			return 0, err
+		}
+		for _, route := range routes.Items {
+			if err := countRoute(&route, route.Spec.ParentRefs, route.Status.Parents); err != nil {
+				return 0, err
+			}
+		}
+	} else {
+		var routes gatewayv1.HTTPRouteList
+		if err := r.List(ctx, &routes, client.MatchingFields{controller.IndexHTTPRouteByStatusGateway: gatewayKey}); err != nil {
+			return 0, err
+		}
+		for _, route := range routes.Items {
+			if err := countRoute(&route, route.Spec.ParentRefs, route.Status.Parents); err != nil {
+				return 0, err
+			}
 		}
 	}
 	return count, nil

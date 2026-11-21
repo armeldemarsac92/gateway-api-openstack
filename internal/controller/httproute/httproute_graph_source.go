@@ -53,10 +53,13 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 		if err != nil {
 			return graph.RouteInputs{}, err
 		}
-		// Cleanup requests use durable ownership without requiring backend reads.
-		backends, err = r.collectGraphRouteModelInputs(ctx, gateway, listener, routes, request.Route)
-		if err != nil {
-			return graph.RouteInputs{}, err
+		if listener.Protocol == gatewayv1.HTTPProtocolType {
+			backends, err = r.collectGraphRouteModelInputs(ctx, gateway, listener, routes, request.Route)
+			if err != nil {
+				return graph.RouteInputs{}, err
+			}
+		} else if request.Route != nil {
+			return graph.RouteInputs{}, newRouteBuildError(routeErrorNoMatchingParent, "no HTTP listener matches this route")
 		}
 	}
 	input := graph.RouteInputs{Nodes: make([]cloud.RouteGraphNode, 0, len(routes))}
@@ -68,7 +71,7 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 	foundRequested := request.Route == nil
 	for i := range routes {
 		route := &routes[i]
-		if !r.hasGraphBindingClaim(route, request.Identity) {
+		if !controller.RouteClaimsGateway(r.Config, route, request.Identity) {
 			continue
 		}
 		identity, present, err := r.storedRouteIdentity(route)
@@ -100,7 +103,7 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 			node.Disposition = cloud.GraphDelete
 			snapshot := routeCleanupSnapshot{route: route, identity: identity, disposition: routeCleanupRequired}
 			fences = append(fences, func(ctx context.Context) error { return r.sealRouteCleanupSnapshot(ctx, snapshot) })
-		} else if request.Action == graph.Ensure {
+		} else if backends != nil {
 			if !requested && !structurallySupportedRoute(route) {
 				input.Nodes = append(input.Nodes, node)
 				continue
@@ -172,7 +175,7 @@ func (r *Reconciler) liveGraphRoutes(ctx context.Context, identity cloud.Identit
 	}
 	result := make([]gatewayv1.HTTPRoute, 0)
 	for _, route := range list.Items {
-		if r.hasGraphBindingClaim(&route, identity) {
+		if controller.RouteClaimsGateway(r.Config, &route, identity) {
 			result = append(result, route)
 			continue
 		}
@@ -190,15 +193,6 @@ func (r *Reconciler) liveGraphRoutes(ctx context.Context, identity cloud.Identit
 	return result, nil
 }
 
-func (r *Reconciler) hasGraphBindingClaim(route *gatewayv1.HTTPRoute, identity cloud.Identity) bool {
-	boundUID := route.Annotations[r.Config.RouteGatewayUIDAnnotation()]
-	checkpoint := r.Config.RouteBindingFinalizer(identity.ClusterID, identity.OpenStackProjectID, identity.GatewayNamespace, identity.GatewayName, identity.GatewayUID)
-	return boundUID != "" && boundUID == identity.GatewayUID || slices.Contains(route.Finalizers, checkpoint) ||
-		boundUID == "" && slices.Contains(route.Finalizers, r.Config.RouteFinalizer()) &&
-			route.Annotations[r.Config.RouteGatewayNamespaceAnnotation()] == identity.GatewayNamespace &&
-			route.Annotations[r.Config.RouteGatewayNameAnnotation()] == identity.GatewayName
-}
-
 type routeGraphBinding struct {
 	route, boundNamespace, boundName, boundUID, lifecycle, project, cluster, finalizers string
 }
@@ -206,7 +200,7 @@ type routeGraphBinding struct {
 func (r *Reconciler) routeGraphBindings(routes []gatewayv1.HTTPRoute, identity cloud.Identity) []routeGraphBinding {
 	bindings := make([]routeGraphBinding, 0)
 	for _, route := range routes {
-		if !r.hasGraphBindingClaim(&route, identity) {
+		if !controller.RouteClaimsGateway(r.Config, &route, identity) {
 			continue
 		}
 		binding := routeGraphBinding{

@@ -1,6 +1,6 @@
 # Recover from provisioning and cleanup failures
 
-This guide covers network prerequisites and a Gateway or HTTPRoute that cannot finish cleanup.
+This guide covers network prerequisites and a Gateway, HTTPRoute or TCPRoute that cannot finish cleanup.
 The controller stops finalization when an OpenStack request fails or ownership cannot be proved.
 That behavior protects resources owned by another controller or cluster.
 
@@ -17,6 +17,8 @@ The public messages are deliberately brief and do not include OpenStack response
 ```sh
 kubectl -n <namespace> describe gateway <name>
 kubectl -n <namespace> describe httproute <name>
+# For a TCP route
+kubectl -n <namespace> describe tcproute <name>
 kubectl -n openstack-gateway-system logs \
   deployment/openstack-gateway-controller --all-containers
 ```
@@ -35,6 +37,8 @@ Authentication, authorization, quota, rate limiting, and service failures are di
 Restore the original access or service health and let the controller try again.
 A new credential is suitable only when it is scoped to the same project and has the required permissions.
 
+For TCP, compare the listener's `default_pool_id`, the load balancer's listener and pool IDs, and the listed child resources. A mismatch yields `DependencyNotReady` and retains the binding for another observation. An `ERROR` listener on an `ACTIVE` load balancer allows withdrawal of a proven default. If the listener stays in `ERROR` after its default clears, route cleanup holds the pool until the listener recovers. A normal deletion of the whole Gateway can remove that verified listener before finishing cleanup. Keep the controller running and check Octavia's provisioning status. [Provider behavior and regressions](../internal/cloud/openstack/graph/tcp_graph_test.go)
+
 ## Network prerequisites
 
 For provisioning blocked by referenced security or cloud capabilities, use the [read-only diagnostic workflow](getting-started.md#inspect-network-prerequisites).
@@ -47,7 +51,7 @@ Keep the original binding and investigate with the ownership audit.
 
 ## Run the ownership audit
 
-`openstack-gateway-audit` compares durable Gateway and HTTPRoute bindings with resources found in the authenticated OpenStack project.
+`openstack-gateway-audit` compares durable Gateway, HTTPRoute and TCPRoute bindings with resources found in the authenticated OpenStack project.
 It only lists and gets resources.
 It does not patch Kubernetes, adopt OpenStack resources, delete anything, or remove a finalizer.
 
@@ -79,7 +83,7 @@ When `--clouds-yaml` is omitted, the command uses `OS_CLIENT_CONFIG_FILE` when i
 Otherwise it reads the standard OpenStack authentication environment variables.
 `--openstack-cloud` defaults to `OS_CLOUD` and is required whenever a clouds.yaml path is selected.
 `--openstack-region` defaults to `OS_REGION_NAME`.
-The Kubernetes identity needs list access to Gateways and HTTPRoutes.
+The Kubernetes identity needs list access to Gateways, HTTPRoutes and TCPRoutes.
 The OpenStack credential needs read access to the relevant Octavia and Neutron APIs.
 
 The command writes only one JSON document to standard output.

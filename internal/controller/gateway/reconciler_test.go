@@ -21,6 +21,7 @@ import (
 	"errors"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -360,6 +361,170 @@ func TestGatewayListenerPortChangeReplacesOwnedGraph(t *testing.T) {
 	}
 	if len(provider.gatewaySpecs) != 1 || provider.gatewaySpecs[0].ListenerPort != 8080 || provider.gatewaySpecs[0].VIPSubnetID != testVIPSubnetID {
 		t.Fatalf("Gateway ensures = %#v", provider.gatewaySpecs)
+	}
+}
+
+func TestGatewayTCPListenerCountsAcceptedRoutes(t *testing.T) {
+	cfg := testConfig()
+	class := &gatewayv1.GatewayClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "openstack"},
+		Spec:       gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName},
+	}
+	gateway := &gatewayv1.Gateway{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "gateways", Name: "edge", UID: "gateway-uid", Generation: 1},
+		Spec: gatewayv1.GatewaySpec{GatewayClassName: "openstack", Listeners: []gatewayv1.Listener{{
+			Name: "tcp", Protocol: gatewayv1.TCPProtocolType, Port: 8080,
+			AllowedRoutes: &gatewayv1.AllowedRoutes{Namespaces: &gatewayv1.RouteNamespaces{
+				From:     ptr.To(gatewayv1.NamespacesFromSelector),
+				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"access": "allowed"}},
+			}},
+		}}},
+	}
+	allowed := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "allowed", Labels: map[string]string{"access": "allowed"}}}
+	denied := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "denied"}}
+	parent := gatewayv1.ParentReference{Name: "edge", Namespace: ptr.To(gatewayv1.Namespace(gateway.Namespace))}
+	newRoute := func(namespace, name string, observedGeneration int64) *gatewayv1.TCPRoute {
+		return &gatewayv1.TCPRoute{
+			ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: name, Generation: 2},
+			Spec:       gatewayv1.TCPRouteSpec{CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{parent}}},
+			Status: gatewayv1.TCPRouteStatus{RouteStatus: gatewayv1.RouteStatus{Parents: []gatewayv1.RouteParentStatus{{
+				ParentRef: parent, ControllerName: cfg.ControllerName,
+				Conditions: []metav1.Condition{Condition(string(gatewayv1.RouteConditionAccepted), metav1.ConditionTrue,
+					string(gatewayv1.RouteReasonAccepted), "Accepted", observedGeneration)},
+			}}}},
+		}
+	}
+	kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gateway).WithObjects(
+		class, gateway, allowed, denied, newRoute("allowed", "first", 2), newRoute("allowed", "second", 2),
+		newRoute("allowed", "stale", 1), newRoute("denied", "denied", 2),
+	).Build()
+	provider := &recordingProvider{}
+	reconciler := newTestReconciler(Reconciler{Client: kubeClient, Coordinator: &graph.Coordinator{}, APIReader: kubeClient, Config: cfg}, provider)
+	request := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: gateway.Namespace, Name: gateway.Name}}
+	if result, err := reconciler.Reconcile(t.Context(), request); err != nil || !result.Requeue {
+		t.Fatalf("binding checkpoint = %v, %v", result, err)
+	}
+	if _, err := reconciler.Reconcile(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.gatewaySpecs) != 1 || provider.gatewaySpecs[0].ListenerProtocol != "TCP" || provider.gatewaySpecs[0].ListenerPort != 8080 {
+		t.Fatalf("Gateway specs = %#v", provider.gatewaySpecs)
+	}
+	var got gatewayv1.Gateway
+	if err := kubeClient.Get(t.Context(), request.NamespacedName, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !meta.IsStatusConditionTrue(got.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed)) || len(got.Status.Listeners) != 1 {
+		t.Fatalf("Gateway status = %#v", got.Status)
+	}
+	listener := got.Status.Listeners[0]
+	if listener.AttachedRoutes != 2 || len(listener.SupportedKinds) != 1 || listener.SupportedKinds[0].Kind != "TCPRoute" ||
+		listener.SupportedKinds[0].Group == nil || *listener.SupportedKinds[0].Group != gatewayv1.Group(gatewayv1.GroupName) ||
+		!meta.IsStatusConditionTrue(listener.Conditions, string(gatewayv1.ListenerConditionProgrammed)) {
+		t.Fatalf("listener status = %#v", listener)
+	}
+}
+
+func TestGatewaySamePortProtocolChangeReplacesOwnedGraph(t *testing.T) {
+	cfg := testConfig()
+	class := &gatewayv1.GatewayClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "openstack"},
+		Spec:       gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName},
+	}
+	gateway := programmedTestGateway(cfg)
+	gateway.Generation++
+	gateway.Spec.Listeners[0].Protocol = gatewayv1.TCPProtocolType
+	kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gateway).WithObjects(class, gateway).Build()
+	provider := &recordingProvider{}
+	reconciler := newTestReconciler(Reconciler{Client: kubeClient, Coordinator: &graph.Coordinator{}, APIReader: kubeClient, Config: cfg}, provider)
+	request := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: gateway.Namespace, Name: gateway.Name}}
+	if _, err := reconciler.ObserveGatewayGraph(t.Context(), graph.Request{
+		Action: graph.Ensure, Gateway: gateway, Identity: controller.GatewayIdentity(cfg, gateway),
+	}); !errors.Is(err, errGatewayChanged) {
+		t.Fatalf("ensure across uncheckpointed protocol change = %v", err)
+	}
+	if result, err := reconciler.Reconcile(t.Context(), request); err != nil || !result.Requeue {
+		t.Fatalf("replacement status checkpoint = %v, %v", result, err)
+	}
+	if len(provider.deletedGateways) != 0 || len(provider.gatewaySpecs) != 0 {
+		t.Fatal("provider mutation bypassed the replacement status checkpoint")
+	}
+	var got gatewayv1.Gateway
+	if err := kubeClient.Get(t.Context(), request.NamespacedName, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Status.Listeners) != 1 || len(got.Status.Listeners[0].SupportedKinds) != 1 ||
+		got.Status.Listeners[0].SupportedKinds[0].Kind != "TCPRoute" ||
+		!meta.IsStatusConditionFalse(got.Status.Listeners[0].Conditions, string(gatewayv1.ListenerConditionProgrammed)) {
+		t.Fatalf("pending TCP listener status = %#v", got.Status.Listeners)
+	}
+	if _, err := reconciler.Reconcile(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.deletedGateways) != 1 || len(provider.gatewaySpecs) != 0 {
+		t.Fatalf("replacement deletes = %d, ensures = %d", len(provider.deletedGateways), len(provider.gatewaySpecs))
+	}
+	if err := kubeClient.Get(t.Context(), request.NamespacedName, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Annotations[cfg.GatewayListenerProtocolAnnotation()] != "TCP" || !controller.GatewayTopologyMetadataEqual(cfg, gateway, &got) {
+		t.Fatalf("TCP replacement annotations = %#v", got.Annotations)
+	}
+	if _, err := reconciler.Reconcile(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.gatewaySpecs) != 1 || provider.gatewaySpecs[0].ListenerProtocol != "TCP" || provider.gatewaySpecs[0].ListenerPort != 80 {
+		t.Fatalf("replacement Gateway specs = %#v", provider.gatewaySpecs)
+	}
+}
+
+func TestGatewayTCPListenerRejectsUnsupportedOptions(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		edit func(*gatewayv1.Listener)
+	}{
+		{name: "hostname", edit: func(l *gatewayv1.Listener) { l.Hostname = ptr.To(gatewayv1.Hostname("example.net")) }},
+		{name: "TLS", edit: func(l *gatewayv1.Listener) { l.TLS = &gatewayv1.ListenerTLSConfig{} }},
+		{name: "filter", edit: func(l *gatewayv1.Listener) {
+			l.Filters = &gatewayv1.ListenerFilters{Requests: []gatewayv1.ListenerFilter{{Type: gatewayv1.ListenerFilterExternalAuth}}}
+		}},
+		{name: "wrong route kind", edit: func(l *gatewayv1.Listener) {
+			l.AllowedRoutes = &gatewayv1.AllowedRoutes{Kinds: []gatewayv1.RouteGroupKind{{Kind: "HTTPRoute"}}}
+		}},
+		{name: "wrong TCPRoute group", edit: func(l *gatewayv1.Listener) {
+			l.AllowedRoutes = &gatewayv1.AllowedRoutes{Kinds: []gatewayv1.RouteGroupKind{{Group: ptr.To(gatewayv1.Group("example.net")), Kind: "TCPRoute"}}}
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			listener := gatewayv1.Listener{Name: "tcp", Protocol: gatewayv1.TCPProtocolType, Port: 8080}
+			test.edit(&listener)
+			gateway := &gatewayv1.Gateway{Spec: gatewayv1.GatewaySpec{Listeners: []gatewayv1.Listener{listener}}}
+			if _, err := Validate(gateway); err == nil {
+				t.Fatal("Gateway accepted an unsupported TCP listener option")
+			}
+		})
+	}
+}
+
+func TestGatewayKeepsHTTPWhenMixedWithTCP(t *testing.T) {
+	gateway := &gatewayv1.Gateway{Spec: gatewayv1.GatewaySpec{Listeners: []gatewayv1.Listener{
+		{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80},
+		{Name: "tcp", Protocol: gatewayv1.TCPProtocolType, Port: 8080},
+	}}}
+	listener, err := Validate(gateway)
+	if err != nil || listener.Protocol != gatewayv1.HTTPProtocolType {
+		t.Fatalf("listener = %#v, error = %v", listener, err)
+	}
+	setGatewayAcceptedListeners(gateway, gatewayv1.ListenerStatus{Name: listener.Name})
+	accepted := meta.FindStatusCondition(gateway.Status.Conditions, string(gatewayv1.GatewayConditionAccepted))
+	if accepted == nil || accepted.Status != metav1.ConditionTrue || accepted.Reason != string(gatewayv1.GatewayReasonListenersNotValid) {
+		t.Fatalf("Gateway Accepted condition = %#v", accepted)
+	}
+	tcpStatus := gateway.Status.Listeners[1]
+	accepted = meta.FindStatusCondition(tcpStatus.Conditions, string(gatewayv1.ListenerConditionAccepted))
+	if accepted == nil || accepted.Status != metav1.ConditionFalse || accepted.Reason != string(gatewayv1.ListenerReasonUnsupportedProtocol) ||
+		len(tcpStatus.SupportedKinds) != 0 {
+		t.Fatalf("TCP listener status = %#v", tcpStatus)
 	}
 }
 

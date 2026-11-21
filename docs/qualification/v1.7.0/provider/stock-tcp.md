@@ -8,6 +8,18 @@ In the upstream in-memory SQLite fixture, listing policies immediately after tha
 
 The probe uses Octavia's upstream `BaseAPITest` WSGI/SQLite fixture, the real Amphora API provider driver, and `JinjaTemplater.build_config` with model data read back from SQLite. The generated configuration goes directly to HAProxy. The fixture uses no-auth, substitutes Neutron and messaging dependencies, and advances provisioning statuses in place of the Amphora worker. The probe covers the Octavia API shape and local TCP forwarding. Cloud credentials, Neutron reachability, worker convergence, Amphora agent reload, failover, the Gateway API controller and its conformance suite remain outside the run.
 
+## Controller and provider checks
+
+The controller envtest creates a TCP Gateway with a namespace selector and two tenant TCPRoutes. Both routes report `Accepted=True` and the listener counts two attachments. Only the oldest route supplies a forwarding endpoint in the provider graph. Removing its TCPRoute ReferenceGrant withdraws that endpoint while an HTTPRoute grant to the same Service remains. When the listener stops admitting the oldest route's namespace, the second route becomes the only attachment and supplies its own endpoint. The test uses the release CRDs, a Kubernetes API server and the production controller watches. Its provider records the graph. [API-server scenario](../../../../internal/controller/envtest_tcp_test.go)
+
+The adapter checks IDs reported by the load balancer against the independently listed children. An incomplete inventory holds the route's cleanup checkpoint. A failed listener on a mutable parent permits a verified withdrawal. [Recovery procedure](../../../operator-recovery.md)
+
+The Gophercloud adapter creates a TCP listener with no default pool, provisions the selected pool and members, then updates the listener. Its independent traffic test replays that inventory through the stock Amphora renderer and HAProxy. A new adapter rediscovers the graph without writes. After the listener clears its selected pool, a fresh connection delivers zero bytes to the still-running member. Changes to the serving membership detach the pool before reconciliation. [Provider lifecycle](../../../../internal/cloud/openstack/graph/tcp_graph_test.go) · [Binary traffic test](../../../../internal/cloud/openstack/graph/hibiscus_traffic_test.go)
+
+If the release CRDs change while a route is bound, the controller checks the existing parent, programmed route generation and authorized Service. An edited backend or a lost Service triggers cleanup even while new provisioning is frozen. A NodePort Service without ready endpoints keeps `ResolvedRefs=True` after the port resolves and reports unavailable members through its program condition. A restarted writer can also remove a detached pool after the listener disappears, using the TCPRoute UID and verified cloud ownership. [Controller regressions](../../../../internal/controller/tcproute/graph_test.go) · [Cloud cleanup regression](../../../../internal/cloud/openstack/graph/tcp_graph_test.go)
+
+These local checks cover a single TCP listener and one Service backend. A real private VIP, traffic through a worker NodePort, the deployed restart and cleanup, weighted backends and the upstream GATEWAY-TCP report remain open.
+
 ## Reproduce
 
 Use Linux with unprivileged user namespaces, Python 3.14, and HAProxy 3.0.19. The version pins are `octavia` 19.0.0 at `93689cb7701da65b5aad387bb824c477c64b0f2b` and `octavia-lib` 3.12.0 at `bc03e1856b60517e1b75db4fdf9b3edf55f3a019`. [Hibiscus Octavia release](https://releases.openstack.org/hibiscus/index.html#octavia) · [Hibiscus octavia-lib release](https://releases.openstack.org/hibiscus/index.html#octavia-lib)
@@ -27,3 +39,13 @@ unshare --user --map-user=65534 --map-group=65534 \
 ```
 
 The probe exits successfully with `Ran 2 tests` and `OK` after checking the rejected L7 policy and validating TCP delivery before and after detachment. The pinned Hibiscus constraints select SQLAlchemy 2.0.52. [OpenStack requirements](https://github.com/openstack/requirements/blob/bbeadfcdd6cd8ac9abf888661d3fc65fa45c7480/upper-constraints.txt)
+
+With the same stock Octavia environment and HAProxy, run the controller adapter's binary traffic test from the repository root.
+
+```sh
+HIBISCUS_OCTAVIA_PYTHON=/tmp/octavia-tcp-venv/bin/python \
+HIBISCUS_HAPROXY="$HAPROXY_BIN" \
+go test -race -count=1 -v -run '^TestHibiscusTCPTraffic$' ./internal/cloud/openstack/graph
+```
+
+After `make envtest-assets`, run `make test-envtest` for Standard and `make test-envtest GATEWAY_API_CHANNEL=experimental` for Experimental. Each command starts a separate API server. The scenario is named `TCP listener selects one authorized backend`.

@@ -31,6 +31,7 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/routebackend"
 )
 
 func BenchmarkNodePortModel(b *testing.B) {
@@ -42,11 +43,11 @@ func BenchmarkNodePortModel(b *testing.B) {
 				b.ReportAllocs()
 				b.ResetTimer()
 				for b.Loop() {
-					localNodes, err := readyBackendNodes(service, &corev1.ServicePort{}, endpoints)
+					localNodes, err := routebackend.ReadyBackendNodes(service, &corev1.ServicePort{}, endpoints)
 					if err != nil {
 						b.Fatal(err)
 					}
-					members, err := nodePortMembersForNodes(service, 30080, corev1.NodeInternalIP, localNodes, nodes)
+					members, err := routebackend.NodePortMembersForNodes(service, 30080, corev1.NodeInternalIP, localNodes, nodes)
 					if err != nil || len(members) != count {
 						b.Fatalf("members = %d, error = %v", len(members), err)
 					}
@@ -210,12 +211,12 @@ func TestMemberModelPreservesInputOrderAndDeduplicatesAddresses(t *testing.T) {
 	nodes[1].Status.Addresses[0].Address = "10.0.0.0"
 	nodes = append(nodes, *nodes[0].DeepCopy())
 	service := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "backend"}}
-	localNodes, err := readyBackendNodes(service, &corev1.ServicePort{}, endpoints)
+	localNodes, err := routebackend.ReadyBackendNodes(service, &corev1.ServicePort{}, endpoints)
 	if err != nil {
 		t.Fatal(err)
 	}
 	before := nodes[0].Name
-	members, err := nodePortMembersForNodes(service, 30080, corev1.NodeInternalIP, localNodes, nodes)
+	members, err := routebackend.NodePortMembersForNodes(service, 30080, corev1.NodeInternalIP, localNodes, nodes)
 	if err != nil || len(members) != 2 || nodes[0].Name != before {
 		t.Fatalf("members = %#v, error = %v, first input = %s", members, err, nodes[0].Name)
 	}

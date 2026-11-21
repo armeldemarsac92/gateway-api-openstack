@@ -25,7 +25,7 @@ import (
 
 // Identity is the immutable ownership anchor for a Gateway and its resources.
 // Route fields are set only for resources whose lifecycle is owned by one
-// HTTPRoute.
+// route.
 type Identity struct {
 	OpenStackProjectID string `json:"openStackProjectID,omitempty"`
 	ClusterID          string `json:"clusterID"`
@@ -49,6 +49,7 @@ type GatewaySpec struct {
 	AvailabilityZone    string
 	ListenerName        string
 	ListenerPort        int
+	ListenerProtocol    string
 	VIPSecurityGroupIDs []string
 }
 
@@ -72,6 +73,7 @@ type GatewayRequirements struct {
 	FlavorID            string
 	AvailabilityZone    string
 	ListenerPort        int
+	ListenerProtocol    string
 	VIPSecurityGroupIDs []string
 }
 
@@ -80,7 +82,22 @@ func (r GatewayRequirements) Equal(other GatewayRequirements) bool {
 	return r.Provider == other.Provider && r.VIPSubnetID == other.VIPSubnetID &&
 		r.ExternalNetworkID == other.ExternalNetworkID && r.FlavorID == other.FlavorID &&
 		r.AvailabilityZone == other.AvailabilityZone && r.ListenerPort == other.ListenerPort &&
+		NormalizeListenerProtocol(r.ListenerProtocol) == NormalizeListenerProtocol(other.ListenerProtocol) &&
 		slices.Equal(r.VIPSecurityGroupIDs, other.VIPSecurityGroupIDs)
+}
+
+const (
+	ListenerProtocolHTTP = "HTTP"
+	ListenerProtocolTCP  = "TCP"
+)
+
+// NormalizeListenerProtocol interprets bindings written before listener
+// protocols were recorded as HTTP.
+func NormalizeListenerProtocol(protocol string) string {
+	if protocol == "" {
+		return ListenerProtocolHTTP
+	}
+	return protocol
 }
 
 // Address returns the client-facing address, preferring a Floating IP when
@@ -114,7 +131,7 @@ type Member struct {
 	ProviderID string
 }
 
-// RouteSpec describes the pool and L7 policies owned by one route.
+// RouteSpec describes the pool and forwarding configuration owned by one route.
 type RouteSpec struct {
 	Identity                Identity
 	Gateway                 GatewayState
@@ -132,7 +149,7 @@ type RouteSpec struct {
 	Members    []Member
 }
 
-// RouteState records the OpenStack objects produced for one HTTPRoute.
+// RouteState records the OpenStack objects produced for one route.
 type RouteState struct {
 	PoolID      string
 	MemberIDs   []string
@@ -160,7 +177,7 @@ func ValidateGatewayIdentity(id Identity) error {
 	return nil
 }
 
-// ValidateRouteIdentity verifies both the Gateway and HTTPRoute ownership
+// ValidateRouteIdentity verifies both the Gateway and route ownership
 // tuples.
 func ValidateRouteIdentity(id Identity) error {
 	if err := ValidateGatewayIdentity(id); err != nil {
