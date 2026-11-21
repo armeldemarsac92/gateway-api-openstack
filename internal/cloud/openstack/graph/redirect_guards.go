@@ -40,7 +40,7 @@ type redirectGuard struct {
 	value       string
 }
 
-var errExactHeaderRedirectPrecedence = errors.New("Octavia cannot preserve redirect precedence with an overlapping higher-priority forwarding rule that adds an exact HTTP header condition")
+var errExactHeaderRedirectPrecedence = errors.New("cannot preserve Octavia redirect precedence with an overlapping higher-priority forwarding rule that adds an exact HTTP header condition")
 
 type redirectCell struct {
 	hostname string
