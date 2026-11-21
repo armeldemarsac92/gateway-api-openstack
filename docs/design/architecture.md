@@ -42,7 +42,7 @@ The controller uses Gophercloud rather than shelling out to the OpenStack CLI.
 
 ### Installed Gateway API version
 
-The controller uses Gateway API v1.7.0. Standard is the default. Experimental requires explicitly selecting `--gateway-api-channel=experimental` or setting `GATEWAY_OPENSTACK_GATEWAY_API_CHANNEL=experimental` with the matching bundle.
+The controller uses Gateway API v1.7.0. Standard is the default. The Experimental installation uses the matching bundle and `config/experimental`, which sets `GATEWAY_OPENSTACK_GATEWAY_API_CHANNEL=experimental` and grants access to XBackends, their status and Pod observations. A custom install can set `--gateway-api-channel=experimental` and apply equivalent permissions.
 It checks installed Gateway API CRD bundle annotations and reports the result through GatewayClass `SupportedVersion`.
 A missing required CRD, missing bundle annotation, version mismatch, or channel mismatch blocks new bindings, provisioning, and repair.
 Explicit finalization of previously bound resources can continue while the APIs needed for cleanup are served.

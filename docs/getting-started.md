@@ -41,7 +41,7 @@ kubectl get -f "$gateway_api_manifest" -o 'custom-columns=KIND:.kind,NAME:.metad
 ```
 
 The Standard manifest contains ten CRDs in `gateway.networking.k8s.io` and the `safe-upgrades.gateway.networking.k8s.io` admission policy and binding. Each has the v1.7.0 and `standard` annotations. Check the manifest inventory and any other installed Gateway API CRDs before proceeding.
-For Experimental qualification on a separate cluster, use `experimental-install.yaml` from the same release and set `GATEWAY_OPENSTACK_GATEWAY_API_CHANNEL` to `experimental` in the controller ConfigMap. That manifest has the same ten CRDs plus four in `gateway.networking.x-k8s.io`, all annotated `experimental`. The policy and binding carry `standard` in both manifests.
+For Experimental qualification on a separate cluster, install `experimental-install.yaml` from the same release and base your controller overlay on `config/experimental`. This overlay selects the channel and grants the service account read access to XBackends and Pods and permission to patch XBackend status. Use the same overlay when upgrading a deployment that previously selected Experimental through its ConfigMap alone. That manifest has the same ten CRDs plus four in `gateway.networking.x-k8s.io`, all annotated `experimental`. The policy and binding carry `standard` in both manifests.
 
 Startup requires GatewayClass, Gateway, HTTPRoute, TCPRoute, UDPRoute, and ReferenceGrant to be available. `UDPRoute` uses `gateway.networking.k8s.io/v1` in both bundles. The TLS SNI opt-in also requires the `TLSRoute` v1 API.
 The controller reports bundle version and channel validation through the GatewayClass `SupportedVersion` condition.
@@ -112,11 +112,11 @@ The base installation includes the cluster-scoped OpenStackGatewayClassConfig CR
 Inspect its effect on any other installation using this API before applying or removing the base manifests.
 The controller also needs Namespace `get`, `list`, and `watch` access and ReferenceGrant `list` and `watch` access for backend input collection and reference events.
 Its startup and bundle checks require the ReferenceGrant API from the selected v1.7.0 bundle.
-Render and inspect the resources, then install them:
+Choose the site overlay containing your pinned image. Its base is `config/default` for Standard or `config/experimental` for Experimental. Set `controller_overlay` to the site overlay directory, then render and install it.
 
 ```sh
-kubectl kustomize config/default
-kubectl apply -k config/default
+kubectl kustomize "$controller_overlay"
+kubectl apply -k "$controller_overlay"
 kubectl -n openstack-gateway-system rollout status \
   deployment/openstack-gateway-controller
 ```
@@ -137,7 +137,7 @@ The ConfigMap uses the environment variables accepted by the controller binary.
 | --- | --- | --- |
 | Controller identity | `GATEWAY_OPENSTACK_CONTROLLER_NAME` | Defaults to `gateway-api-openstack.github.io/gateway-api-openstack`. Must exactly match GatewayClass. |
 | Cluster identity | `GATEWAY_OPENSTACK_CLUSTER_ID` | Required and stable. |
-| Gateway API channel | `GATEWAY_OPENSTACK_GATEWAY_API_CHANNEL` | Defaults to `standard`. Use `experimental` with the complete Experimental bundle. |
+| Gateway API channel | `GATEWAY_OPENSTACK_GATEWAY_API_CHANNEL` | Defaults to `standard`. The `config/experimental` overlay selects `experimental` with the permissions needed for that bundle. |
 | OpenStack resync | `GATEWAY_OPENSTACK_RESYNC_INTERVAL` | Base interval for observing converged resources again. Defaults to `10m` |
 | OpenStack request rate | `GATEWAY_OPENSTACK_API_QPS` | Average request limit shared by Keystone, Octavia, and Neutron. Defaults to `10` per second |
 | OpenStack request burst | `GATEWAY_OPENSTACK_API_BURST` | Short request burst allowed for the process. Defaults to `20` |
@@ -489,10 +489,10 @@ Check for remaining configuration objects:
 kubectl get openstackgatewayclassconfigs.gateway-api-openstack.github.io
 ```
 
-Only after the list is empty and no other installation needs the CRD, uninstall the base manifests:
+Once the list is empty and the installation is the last user of this CRD, select the same overlay directory used for installation and remove its manifests.
 
 ```sh
-kubectl delete -k config/default
+kubectl delete -k "$controller_overlay"
 ```
 
 If another installation uses this API, remove only the resources owned by this installation and retain the shared CRD and any shared RBAC resources.
