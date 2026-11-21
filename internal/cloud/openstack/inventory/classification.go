@@ -25,6 +25,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/audit"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	openstackidentity "github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/identity"
+	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
 )
 
 const (
@@ -168,16 +169,27 @@ func classifyAuditCandidate(
 		}
 	}
 	if candidate.resourceType == auditTypeL7Policy {
-		if candidate.redirectPoolID == "" {
-			return auditFinding(finding, audit.DispositionUnresolved, auditReasonMissingBackendPool,
-				"L7 policy does not report its redirect pool")
-		}
-		if !auditCandidateExists(candidates, auditTypePool, candidate.redirectPoolID) {
-			return auditFinding(finding, audit.DispositionUnresolved, auditReasonMissingBackendPool,
-				"L7 policy redirect pool is not present in the scoped inventory")
-		}
-		if err := validateAuditPolicyPool(candidates, candidate, candidate.redirectPoolID); err != nil {
-			return auditFinding(finding, audit.DispositionOwnershipConflict, auditReasonParentMismatch, err.Error())
+		if _, _, _, _, redirect := openstackidentity.ParseHTTPRedirectRole(role); redirect {
+			if !candidate.redirectPoolReported {
+				return auditFinding(finding, audit.DispositionUnresolved, auditReasonMissingBackendPool,
+					"HTTP redirect policy does not report its pool relationship")
+			}
+			if candidate.policyAction != string(l7policies.ActionRedirectPrefix) || !candidate.redirectPoolNull {
+				return auditFinding(finding, audit.DispositionOwnershipConflict, auditReasonParentMismatch,
+					"HTTP redirect policy does not report the owned prefix action and pool-free relationship")
+			}
+		} else {
+			if candidate.redirectPoolID == "" {
+				return auditFinding(finding, audit.DispositionUnresolved, auditReasonMissingBackendPool,
+					"L7 policy does not report its redirect pool")
+			}
+			if !auditCandidateExists(candidates, auditTypePool, candidate.redirectPoolID) {
+				return auditFinding(finding, audit.DispositionUnresolved, auditReasonMissingBackendPool,
+					"L7 policy redirect pool is not present in the scoped inventory")
+			}
+			if err := validateAuditPolicyPool(candidates, candidate, candidate.redirectPoolID); err != nil {
+				return auditFinding(finding, audit.DispositionOwnershipConflict, auditReasonParentMismatch, err.Error())
+			}
 		}
 	}
 
@@ -322,7 +334,13 @@ func auditCandidateRole(resourceType string, tags []string) (string, bool, error
 		return "", false, fmt.Errorf("resource has a missing, invalid or duplicate role identity tag")
 	}
 	baseRole := role
+	if role == openstackidentity.RoleRuleRedirectGuard {
+		return "", false, fmt.Errorf("redirect guard role requires a policy cell")
+	}
 	if base, _, _, fragmented := openstackidentity.ParseHTTPFragmentRole(role); fragmented {
+		baseRole = base
+	}
+	if base, _, _, _, redirect := openstackidentity.ParseHTTPRedirectRole(role); redirect {
 		baseRole = base
 	}
 	routeScoped := false
@@ -341,7 +359,7 @@ func auditCandidateRole(resourceType string, tags []string) (string, bool, error
 	case auditTypeL7Policy:
 		valid, routeScoped = baseRole == rolePolicyExact || baseRole == rolePolicyPrefix, true
 	case auditTypeL7Rule:
-		valid, routeScoped = baseRole == roleRulePath || baseRole == roleRuleHost, true
+		valid, routeScoped = baseRole == roleRulePath || baseRole == roleRuleHost || baseRole == openstackidentity.RoleRuleRedirectGuard, true
 	}
 	if !valid {
 		return "", false, fmt.Errorf("resource role does not match its OpenStack type")
@@ -562,6 +580,11 @@ func auditHTTPFragmentParentMatches(child, parent *auditCandidate, matchPath boo
 	parentRole, parentOK := openstackidentity.ResourceRole(parent.tags)
 	if !childOK || !parentOK {
 		return false
+	}
+	_, childRedirectMatch, childCell, _, childRedirect := openstackidentity.ParseHTTPRedirectRole(childRole)
+	_, parentRedirectMatch, parentCell, _, parentRedirect := openstackidentity.ParseHTTPRedirectRole(parentRole)
+	if childRedirect || parentRedirect {
+		return matchPath && childRedirect && parentRedirect && childRedirectMatch == parentRedirectMatch && childCell == parentCell
 	}
 	_, childBackend, childMatch, childFragment := openstackidentity.ParseHTTPFragmentRole(childRole)
 	_, parentBackend, parentMatch, parentFragment := openstackidentity.ParseHTTPFragmentRole(parentRole)

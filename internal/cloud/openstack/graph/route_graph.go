@@ -40,16 +40,19 @@ const routeMonitorExpectedCodes = "200-399"
 var errWeightedTCPBackupUnknown = errors.New("waiting for Octavia to report the backup flag for every weighted TCP member")
 
 type observedRoutePolicy struct {
-	policy    l7policies.L7Policy
-	role      string
-	rules     []observedRouteRule
-	versioned bool
+	policy        l7policies.L7Policy
+	role          string
+	rules         []observedRouteRule
+	versioned     bool
+	redirect      bool
+	adminObserved bool
 }
 
 type observedRouteRule struct {
-	rule l7policies.Rule
-	role string
-	base string
+	rule          l7policies.Rule
+	role          string
+	base          string
+	flagsObserved bool
 }
 
 type observedRouteGraph struct {
@@ -59,14 +62,15 @@ type observedRouteGraph struct {
 	memberAdminUnreported  map[string]struct{}
 	monitor                *monitors.Monitor
 	policies               []observedRoutePolicy
-	httpBackends           map[string]*observedRouteGraph
+	httpParts              map[string]*observedRouteGraph
 }
 
 type routeGraphOwner struct {
-	identity            Identity
-	cleanupProtocol     string
-	recovery            *openstackidentity.RouteOwnerProof
-	expectsHTTPBackends bool
+	identity                   Identity
+	cleanupProtocol            string
+	recovery                   *openstackidentity.RouteOwnerProof
+	expectsHTTPParts           bool
+	requiresPolicyAbsenceProof bool
 }
 
 func (owner routeGraphOwner) matchesRoute(tags []string, role string) bool {
@@ -79,6 +83,7 @@ func (owner routeGraphOwner) matchesRoute(tags []string, role string) bool {
 
 type routeResourceRole struct {
 	raw, base, backend, match string
+	redirect                  bool
 }
 
 func readRouteResourceRole(tags []string, bases ...string) (routeResourceRole, bool) {
@@ -86,18 +91,22 @@ func readRouteResourceRole(tags []string, bases ...string) (routeResourceRole, b
 	if !ok {
 		return routeResourceRole{}, false
 	}
-	if slices.Contains(bases, raw) {
+	if slices.Contains(bases, raw) && raw != roleRuleRedirectGuard {
 		return routeResourceRole{raw: raw, base: raw}, true
+	}
+	if base, match, cell, _, ok := openstackidentity.ParseHTTPRedirectRole(raw); ok {
+		return routeResourceRole{raw: raw, base: base, backend: redirectPartKey(match), match: cell, redirect: true}, slices.Contains(bases, base)
 	}
 	base, backend, match, ok := openstackidentity.ParseHTTPFragmentRole(raw)
 	return routeResourceRole{raw: raw, base: base, backend: backend, match: match}, ok && slices.Contains(bases, base)
 }
 
 type routeGraphInventory struct {
-	owners         []routeGraphOwner
-	graphs         []observedRouteGraph
-	recoverGateway *Identity
-	recovered      map[openstackidentity.RouteOwnerProof]int
+	owners           []routeGraphOwner
+	graphs           []observedRouteGraph
+	recoverGateway   *Identity
+	recoverAllRoutes bool
+	recovered        map[openstackidentity.RouteOwnerProof]int
 }
 
 func (inventory *routeGraphInventory) resolve(tags []string, bases ...string) (int, routeResourceRole, error) {
@@ -110,7 +119,7 @@ func (inventory *routeGraphInventory) resolve(tags []string, bases ...string) (i
 			return index, role, nil
 		}
 	}
-	if inventory.recoverGateway != nil {
+	if inventory.recoverGateway != nil && (inventory.recoverAllRoutes || role.redirect) {
 		if proof, ok := inventory.recoverGateway.RouteOwner(tags, role.raw); ok {
 			if index, ok := inventory.recovered[proof]; ok {
 				return index, role, nil
@@ -129,24 +138,24 @@ func (route *observedRouteGraph) part(backend string) *observedRouteGraph {
 	if backend == "" {
 		return route
 	}
-	if route.httpBackends == nil {
-		route.httpBackends = make(map[string]*observedRouteGraph)
+	if route.httpParts == nil {
+		route.httpParts = make(map[string]*observedRouteGraph)
 	}
-	if route.httpBackends[backend] == nil {
-		route.httpBackends[backend] = &observedRouteGraph{}
+	if route.httpParts[backend] == nil {
+		route.httpParts[backend] = &observedRouteGraph{}
 	}
-	return route.httpBackends[backend]
+	return route.httpParts[backend]
 }
 
 func (route observedRouteGraph) parts() []observedRouteGraph {
 	parts := []observedRouteGraph{route}
-	keys := make([]string, 0, len(route.httpBackends))
-	for key := range route.httpBackends {
+	keys := make([]string, 0, len(route.httpParts))
+	for key := range route.httpParts {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		parts = append(parts, *route.httpBackends[key])
+		parts = append(parts, *route.httpParts[key])
 	}
 	return parts
 }
@@ -256,14 +265,17 @@ func (p *Provider) observeRouteGraphsWithListeners(ctx context.Context, owners [
 }
 
 func (p *Provider) observeRouteGraphsFromPools(ctx context.Context, owners []routeGraphOwner, lb *octavia.LoadBalancer, listener *listeners.Listener, protocol string, scopedListeners []listeners.Listener, poolItems []pools.Pool, recoverGateway *Identity) ([]observedRouteGraph, error) {
-	inventory := routeGraphInventory{owners: slices.Clone(owners), graphs: make([]observedRouteGraph, len(owners)), recoverGateway: recoverGateway}
+	inventory := routeGraphInventory{
+		owners: slices.Clone(owners), graphs: make([]observedRouteGraph, len(owners)),
+		recoverGateway: recoverGateway, recoverAllRoutes: len(owners) == 0,
+	}
 	if recoverGateway != nil {
 		inventory.recovered = make(map[openstackidentity.RouteOwnerProof]int)
 	}
 	defaultPool := usesDefaultPool(protocol)
 	scopedHTTP := protocol == cloud.ListenerProtocolHTTP && scopedListeners != nil
 	strictHTTP := scopedHTTP || containsHTTPFragmentPool(poolItems) ||
-		slices.ContainsFunc(owners, func(owner routeGraphOwner) bool { return owner.expectsHTTPBackends })
+		slices.ContainsFunc(owners, func(owner routeGraphOwner) bool { return owner.expectsHTTPParts }) || recoverGateway != nil
 	if strictHTTP {
 		frontends := scopedListeners
 		if listener != nil {
@@ -362,6 +374,18 @@ func (p *Provider) observeRouteGraphsFromPools(ctx context.Context, owners []rou
 			return nil, err
 		}
 	}
+	if !strictHTTP && containsObservedRedirect(inventory.graphs) {
+		if listener == nil || listener.ProjectID != p.projectID || len(listener.Loadbalancers) != 1 || listener.Loadbalancers[0].ID != lb.ID {
+			return nil, fmt.Errorf("%w: HTTP redirect has an unproven listener parent or project", cloud.ErrOwnershipConflict)
+		}
+		if err := crossCheckCompleteChildInventory("load balancer", lb.ID, "listener", lb.Listeners, []listeners.Listener{*listener}, func(listener listeners.Listener) string { return listener.ID }); err != nil {
+			return nil, err
+		}
+		if err := crossCheckCompleteChildInventory("load balancer", lb.ID, "pool", lb.Pools, poolItems, func(pool pools.Pool) string { return pool.ID }); err != nil {
+			return nil, err
+		}
+		strictHTTP = true
+	}
 	if strictHTTP {
 		if err := validateScopedHTTPRouteRelationships(inventory.graphs); err != nil {
 			return nil, err
@@ -378,18 +402,31 @@ func containsHTTPFragmentPool(items []pools.Pool) bool {
 }
 
 func (p *Provider) observeListenerPolicies(ctx context.Context, inventory *routeGraphInventory, listener *listeners.Listener, protocol string, poolOwners map[string]poolRouteOwner, listenerByRoute map[int]string, strict bool) error {
-	items, err := p.octavia.ListCompletePolicies(ctx, l7policies.ListOpts{ListenerID: listener.ID, ProjectID: p.projectID})
+	items, err := p.octavia.ObservePolicies(ctx, l7policies.ListOpts{ListenerID: listener.ID, ProjectID: p.projectID})
 	if err != nil {
 		return fmt.Errorf("list Gateway L7 policies: %w", err)
 	}
 	otherCleanup := hasOtherCleanupProtocol(inventory.owners, protocol)
-	policyID := func(item l7policies.L7Policy) string { return item.ID }
+	policyID := func(item octavia.PolicyObservation) string { return item.ID }
+	if !strict && slices.ContainsFunc(items, func(item octavia.PolicyObservation) bool {
+		role, ok := readRouteResourceRole(item.Tags, rolePolicyExact, rolePolicyPrefix)
+		return ok && role.redirect
+	}) {
+		strict = true
+	}
+	refs := make([]octavia.PolicyObservation, 0, len(listener.L7Policies))
+	if listener.L7Policies == nil {
+		refs = nil
+	}
+	for _, ref := range listener.L7Policies {
+		refs = append(refs, octavia.PolicyObservation{L7Policy: l7policies.L7Policy{ID: ref.ID}})
+	}
 	if strict {
-		if err := crossCheckCompleteChildInventory("listener", listener.ID, "L7 policy", listener.L7Policies, items, policyID); err != nil {
+		if err := crossCheckCompleteChildInventory("listener", listener.ID, "L7 policy", refs, items, policyID); err != nil {
 			return err
 		}
-	} else if otherCleanup {
-		if err := crossCheckChildInventory("listener", listener.ID, "L7 policy", listener.L7Policies, items, policyID); err != nil {
+	} else if otherCleanup || slices.ContainsFunc(inventory.owners, func(owner routeGraphOwner) bool { return owner.requiresPolicyAbsenceProof }) {
+		if err := crossCheckChildInventory("listener", listener.ID, "L7 policy", refs, items, policyID); err != nil {
 			return err
 		}
 	}
@@ -409,19 +446,35 @@ func (p *Provider) observeListenerPolicies(ctx context.Context, inventory *route
 			return &cloud.GraphError{Identity: owner.identity.Value(), Err: fmt.Errorf("%w: L7 policy %s belongs to a different listener protocol", cloud.ErrOwnershipConflict, item.ID)}
 		}
 		strictPolicy := strict || role.backend != ""
-		if strictPolicy && (item.ProjectID != p.projectID || item.ListenerID != listener.ID || item.RedirectPoolID == "") {
+		if strictPolicy && (item.ProjectID != p.projectID || item.ListenerID != listener.ID || (!role.redirect && item.RedirectPoolID == "")) {
 			return &cloud.GraphError{Identity: owner.identity.Value(), Err: fmt.Errorf("%w: L7 policy %s has an unproven project, listener or pool", cloud.ErrOwnershipConflict, item.ID)}
 		}
-		observed, err := p.observeRoutePolicy(ctx, owner, item, listener.ID, role)
+		if role.redirect {
+			if protocol != cloud.ListenerProtocolHTTP || listener.ProjectID != p.projectID ||
+				(listener.Protocol != cloud.ListenerProtocolHTTP && listener.Protocol != terminatedHTTPS) || item.RedirectPoolID != "" {
+				return &cloud.GraphError{Identity: owner.identity.Value(), Err: fmt.Errorf("%w: HTTP redirect policy %s has an incompatible listener or pool", cloud.ErrOwnershipConflict, item.ID)}
+			}
+			if item.AdminState == nil || len(item.PoolReference) == 0 || item.Action == "" ||
+				(item.Action == string(l7policies.ActionRedirectPrefix) && (item.RedirectPrefix == "" || item.RedirectHttpCode == 0)) {
+				return &cloud.GraphError{Identity: owner.identity.Value(), Err: cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady,
+					fmt.Errorf("HTTP redirect policy %s has incomplete action or administrative state", item.ID))}
+			}
+		}
+		observed, err := p.observeRoutePolicy(ctx, owner, item.L7Policy, listener.ID, role)
 		if err != nil {
 			return &cloud.GraphError{Identity: owner.identity.Value(), Err: err}
 		}
-		if strictPolicy {
+		observed.adminObserved = item.AdminState != nil
+		if strictPolicy || owner.requiresPolicyAbsenceProof {
 			rules := make([]l7policies.Rule, 0, len(observed.rules))
 			for _, rule := range observed.rules {
 				rules = append(rules, rule.rule)
 			}
-			if err := crossCheckCompleteChildInventory("L7 policy", item.ID, "rule", item.Rules, rules, func(rule l7policies.Rule) string { return rule.ID }); err != nil {
+			check := crossCheckChildInventory[l7policies.Rule]
+			if strictPolicy {
+				check = crossCheckCompleteChildInventory[l7policies.Rule]
+			}
+			if err := check("L7 policy", item.ID, "rule", item.Rules, rules, func(rule l7policies.Rule) string { return rule.ID }); err != nil {
 				return err
 			}
 		}
@@ -532,29 +585,35 @@ func (p *Provider) observeRoutePolicy(ctx context.Context, owner routeGraphOwner
 	if item.ListenerID != "" && item.ListenerID != listenerID {
 		return observedRoutePolicy{}, fmt.Errorf("%w: L7 policy %s reports listener %s instead of %s", cloud.ErrOwnershipConflict, item.ID, item.ListenerID, listenerID)
 	}
-	ruleItems, err := p.octavia.ListCompleteRules(ctx, item.ID, l7policies.ListRulesOpts{ProjectID: p.projectID})
+	ruleItems, err := p.octavia.ObserveRules(ctx, item.ID, l7policies.ListRulesOpts{ProjectID: p.projectID})
 	if err != nil {
 		return observedRoutePolicy{}, fmt.Errorf("list rules beneath L7 policy %s: %w", item.ID, err)
 	}
 	sort.Slice(ruleItems, func(i, j int) bool { return ruleItems[i].ID < ruleItems[j].ID })
 	observedRules := make([]observedRouteRule, 0, len(ruleItems))
 	ruleRoles := make(map[string]string, len(ruleItems))
-	for _, rule := range ruleItems {
+	for _, observation := range ruleItems {
+		rule := observation.Rule
 		if err := p.validateOptionalProject("L7 rule", rule.ID, rule.ProjectID); err != nil {
 			return observedRoutePolicy{}, err
 		}
-		ruleRole, ok := readRouteResourceRole(rule.Tags, roleRulePath, roleRuleHost)
+		ruleRole, ok := readRouteResourceRole(rule.Tags, roleRulePath, roleRuleHost, roleRuleRedirectGuard)
 		if !ok || !owner.matchesRoute(rule.Tags, ruleRole.raw) || ruleRole.backend != role.backend ||
-			ruleRole.match != role.match || role.backend != "" && rule.ProjectID != p.projectID {
+			ruleRole.match != role.match || ruleRole.redirect != role.redirect || role.backend != "" && rule.ProjectID != p.projectID {
 			return observedRoutePolicy{}, fmt.Errorf("%w: L7 rule %s beneath policy %s has an unproven project or route, backend or match identity", cloud.ErrOwnershipConflict, rule.ID, item.ID)
+		}
+		flagsObserved := observation.AdminState != nil && observation.Inverted != nil
+		if role.redirect && (!flagsObserved || rule.RuleType == "" || rule.CompareType == "" || rule.Value == "") {
+			return observedRoutePolicy{}, cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady,
+				fmt.Errorf("HTTP redirect rule %s has incomplete predicate or administrative state", rule.ID))
 		}
 		if existingID := ruleRoles[ruleRole.raw]; existingID != "" {
 			return observedRoutePolicy{}, fmt.Errorf("%w: policy %s has duplicate %s rules %s and %s", cloud.ErrOwnershipConflict, item.ID, ruleRole.raw, existingID, rule.ID)
 		}
 		ruleRoles[ruleRole.raw] = rule.ID
-		observedRules = append(observedRules, observedRouteRule{rule: rule, role: ruleRole.raw, base: ruleRole.base})
+		observedRules = append(observedRules, observedRouteRule{rule: rule, role: ruleRole.raw, base: ruleRole.base, flagsObserved: flagsObserved})
 	}
-	return observedRoutePolicy{policy: item, role: role.raw, rules: observedRules, versioned: role.backend != ""}, nil
+	return observedRoutePolicy{policy: item, role: role.raw, rules: observedRules, versioned: role.backend != "", redirect: role.redirect}, nil
 }
 
 type routeMutationKind uint8
@@ -643,7 +702,11 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 	nonPolicyPlan := make([]routeMutation, 0)
 	state := cloud.RouteState{}
 	poolID := ""
-	if actual.pool == nil {
+	if desired.redirect {
+		if actual.pool != nil {
+			return nil, state, fmt.Errorf("%w: HTTP redirect has a pool", cloud.ErrOwnershipConflict)
+		}
+	} else if actual.pool == nil {
 		nonPolicyPlan = append(nonPolicyPlan, routeMutation{kind: routeMutationCreatePool})
 	} else {
 		pool := actual.pool
@@ -792,8 +855,12 @@ func buildRoutePolicyPlan(
 		policy := observedPolicy.policy
 		state.L7PolicyIDs = append(state.L7PolicyIDs, policy.ID)
 		start := len(plan)
-		if poolID == "" || policy.Action != string(l7policies.ActionRedirectToPool) || policy.RedirectPoolID != poolID {
-			plan = append(plan, routeMutation{kind: routeMutationUpdatePolicy, id: policy.ID, parentID: poolID})
+		if !desiredPolicyActionMatches(wantedPolicy, policy, poolID) {
+			step := routeMutation{kind: routeMutationUpdatePolicy, id: policy.ID, parentID: poolID}
+			if wantedPolicy.redirect != nil {
+				step.policy = wantedPolicy
+			}
+			plan = append(plan, step)
 		}
 
 		wantedRules := rulesFor(wantedPolicy, desired.hostnameRuleValue)
@@ -810,7 +877,7 @@ func buildRoutePolicyPlan(
 			rule := observedRule.rule
 			state.L7RuleIDs = append(state.L7RuleIDs, rule.ID)
 			if rule.RuleType != string(wantedRule.ruleType) || rule.CompareType != string(wantedRule.compareType) ||
-				rule.Value != wantedRule.value || rule.Invert || !rule.AdminStateUp || rule.ProvisioningStatus == "ERROR" {
+				rule.Value != wantedRule.value || rule.Invert != wantedRule.invert || !rule.AdminStateUp || rule.ProvisioningStatus == "ERROR" {
 				plan = append(plan, routeMutation{kind: routeMutationUpdateRule, id: rule.ID, parentID: policy.ID, rule: wantedRule})
 			}
 			delete(actualRules, wantedRule.role)
@@ -826,7 +893,8 @@ func buildRoutePolicyPlan(
 		// A failed policy update can leave Octavia's desired admin state in
 		// the database even while Amphora still uses an earlier configuration.
 		if policy.ProvisioningStatus == "ERROR" || len(plan) > start && policy.AdminStateUp {
-			disablePlan = append(disablePlan, routeMutation{kind: routeMutationDisablePolicy, id: policy.ID})
+			disablePlan = append(disablePlan, routeMutation{kind: routeMutationDisablePolicy, id: policy.ID,
+				retry: desired.redirect && policy.ProvisioningStatus == "ERROR", withdrawHTTPPolicy: desired.redirect})
 		}
 		// Moving a policy changes precedence only. Keep its current admin state
 		// and predicates and let Octavia shift the other positions atomically.
@@ -963,7 +1031,7 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 		if tagErr != nil {
 			return tagErr
 		}
-		_, err = p.octavia.CreatePolicy(ctx, l7policies.CreateOpts{
+		opts := l7policies.CreateOpts{
 			Name:           resourceName(desired.spec.Identity, step.policy.role),
 			ListenerID:     desired.spec.Gateway.ListenerID,
 			Action:         l7policies.ActionRedirectToPool,
@@ -972,13 +1040,19 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 			RedirectPoolID: step.parentID,
 			AdminStateUp:   boolPointer(false),
 			Tags:           tags,
-		})
+		}
+		if redirect := step.policy.redirect; redirect != nil {
+			opts.Action, opts.RedirectPrefix, opts.RedirectHttpCode = l7policies.ActionRedirectPrefix, redirect.prefix, redirect.statusCode
+		}
+		_, err = p.octavia.CreatePolicy(ctx, opts)
 	case routeMutationUpdatePolicy:
-		_, err = p.octavia.UpdatePolicy(ctx, step.id, l7policies.UpdateOpts{
-			Action:         l7policies.ActionRedirectToPool,
-			RedirectPoolID: &step.parentID,
-			AdminStateUp:   boolPointer(false),
-		})
+		opts := l7policies.UpdateOpts{AdminStateUp: boolPointer(false)}
+		if redirect := step.policy.redirect; redirect != nil {
+			opts.Action, opts.RedirectPrefix, opts.RedirectHttpCode = l7policies.ActionRedirectPrefix, &redirect.prefix, redirect.statusCode
+		} else {
+			opts.Action, opts.RedirectPoolID = l7policies.ActionRedirectToPool, &step.parentID
+		}
+		_, err = p.octavia.UpdatePolicy(ctx, step.id, opts)
 	case routeMutationMovePolicy:
 		_, err = p.octavia.UpdatePolicy(ctx, step.id, l7policies.UpdateOpts{Position: step.policy.position})
 	case routeMutationCreateRule:
@@ -990,6 +1064,7 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 			RuleType:     step.rule.ruleType,
 			CompareType:  step.rule.compareType,
 			Value:        step.rule.value,
+			Invert:       step.rule.invert,
 			AdminStateUp: boolPointer(true),
 			Tags:         tags,
 		})
@@ -998,7 +1073,7 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 			RuleType:     step.rule.ruleType,
 			CompareType:  step.rule.compareType,
 			Value:        step.rule.value,
-			Invert:       boolPointer(false),
+			Invert:       boolPointer(step.rule.invert),
 			AdminStateUp: boolPointer(true),
 		})
 	case routeMutationEnablePolicy:

@@ -443,7 +443,7 @@ func safetyGatewayGraphHandler(t *testing.T, identity Identity, unmanagedResourc
 					"loadbalancers": []any{map[string]any{"id": "load-balancer-1"}},
 					"tags":          tags["listener"],
 					"l7policies": []any{
-						map[string]any{"id": "nested-policy-without-tags"},
+						map[string]any{"id": "policy-1"},
 					},
 				},
 			}})
@@ -461,7 +461,7 @@ func safetyGatewayGraphHandler(t *testing.T, identity Identity, unmanagedResourc
 					"listener_id": "listener-1",
 					"tags":        tags["policy"],
 					"rules": []any{
-						map[string]any{"id": "nested-rule-without-tags"},
+						map[string]any{"id": "rule-1"},
 					},
 				},
 			}})

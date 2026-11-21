@@ -179,7 +179,15 @@ type HTTPBackend struct {
 	Matches     []HTTPPathMatch
 }
 
-// RouteSpec describes the pool and forwarding configuration owned by one route.
+// HTTPRedirect groups the alternatives of one fixed-destination redirect rule.
+type HTTPRedirect struct {
+	RuleIndex  int
+	Prefix     string
+	StatusCode int
+	Matches    []HTTPPathMatch
+}
+
+// RouteSpec describes the traffic configuration owned by one route.
 type RouteSpec struct {
 	Identity            Identity
 	Gateway             GatewayState
@@ -201,7 +209,8 @@ type RouteSpec struct {
 	Members    []Member
 	// HTTPBackends carries the complete set of paths and backend groups when
 	// the HTTPRoute has several rules or alternative matches.
-	HTTPBackends []HTTPBackend `json:",omitempty"`
+	HTTPBackends  []HTTPBackend  `json:",omitempty"`
+	HTTPRedirects []HTTPRedirect `json:",omitempty"`
 }
 
 // RouteState records the OpenStack objects produced for one route.

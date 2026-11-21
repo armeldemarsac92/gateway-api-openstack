@@ -212,7 +212,7 @@ func (r *Reconciler) validateCachedRouteDecision(
 		return decision, nil
 	}
 	// Grouped routes resolve each backend profile independently from the live inputs.
-	if backends, err := validateRouteStructure(route); err == nil && !hasMultipleRoutePaths(route) {
+	if backends, err := validateRouteStructure(route); err == nil && len(backends) == 1 && !hasMultipleRoutePaths(route) {
 		if err := r.checkRouteBackendProfile(ctx, r.Client, route.Namespace, backends[0], parent.gateway); err != nil {
 			var rejection *routeBuildError
 			if !errors.As(err, &rejection) {

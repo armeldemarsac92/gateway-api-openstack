@@ -88,6 +88,53 @@ func ParseHTTPFragmentRole(raw string) (base, backendKey, matchKey string, ok bo
 	return base, backendKey, matchKey, true
 }
 
+const RoleRuleRedirectGuard = "l7-rule-redirect-guard"
+
+// HTTPRedirectKey identifies a physical redirect predicate or one of its guards.
+func HTTPRedirectKey(first, second, third string) string {
+	return httpTupleKey(first, second, third)
+}
+
+// HTTPRedirectRole identifies a physical predicate within a logical redirect
+// match. Its identity is independent of position and destination changes.
+func HTTPRedirectRole(base, match, cell, guard string) string {
+	if !validHTTPKey(match) || !validHTTPKey(cell) {
+		return ""
+	}
+	role := "http-redirect-v1/" + base + "/" + match + "/" + cell
+	switch base {
+	case RolePolicyExact, RolePolicyPrefix, RoleRulePath, RoleRuleHost:
+		if guard == "" {
+			return role
+		}
+	case RoleRuleRedirectGuard:
+		if validHTTPKey(guard) {
+			return role + "/" + guard
+		}
+	}
+	return ""
+}
+
+// ParseHTTPRedirectRole accepts only the canonical form written by the controller.
+func ParseHTTPRedirectRole(raw string) (base, match, cell, guard string, ok bool) {
+	rest, ok := strings.CutPrefix(raw, "http-redirect-v1/")
+	if !ok {
+		return "", "", "", "", false
+	}
+	fields := strings.Split(rest, "/")
+	if len(fields) < 3 || len(fields) > 4 {
+		return "", "", "", "", false
+	}
+	if len(fields) == 4 {
+		guard = fields[3]
+	}
+	base, match, cell = fields[0], fields[1], fields[2]
+	if HTTPRedirectRole(base, match, cell, guard) != raw {
+		return "", "", "", "", false
+	}
+	return base, match, cell, guard, true
+}
+
 // ResourceRole returns the unique, canonically encoded role from provider tags.
 func ResourceRole(tags []string) (string, bool) {
 	encoded, ok := uniqueEncodedTag(tags, "role")
@@ -129,7 +176,8 @@ func (id Identity) RouteOwner(tags []string, role string) (RouteOwnerProof, bool
 	switch role {
 	case RolePool, RoleMember, RoleMonitor, RolePolicyExact, RolePolicyPrefix, RoleRulePath, RoleRuleHost:
 	default:
-		if _, _, _, ok := ParseHTTPFragmentRole(role); !ok {
+		_, _, _, backend := ParseHTTPFragmentRole(role)
+		if _, _, _, _, redirect := ParseHTTPRedirectRole(role); !backend && !redirect {
 			return RouteOwnerProof{}, false
 		}
 	}

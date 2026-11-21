@@ -33,7 +33,7 @@ func (p *Provider) observeScopedHTTPGraph(ctx context.Context, desired desiredGa
 		}
 	}
 	var routeRecovery *Identity
-	if desired.spec.Gateway.Disposition == cloud.GraphDelete && len(owners) == 0 {
+	if desired.spec.Gateway.Disposition == cloud.GraphDelete {
 		routeRecovery = &desired.identity
 	}
 	poolItems, err := p.listGatewayPools(ctx, actual.loadBalancer)
@@ -84,7 +84,7 @@ func validateScopedHTTPRouteRelationships(routes []observedRouteGraph) error {
 	memberPools, rulePolicies, policyListeners := make(map[string]string), make(map[string]string), make(map[string]string)
 	for _, route := range routes {
 		for _, part := range route.parts() {
-			if part.pool == nil || part.pool.Protocol != cloud.ListenerProtocolHTTP {
+			if part.pool != nil && part.pool.Protocol != cloud.ListenerProtocolHTTP {
 				continue
 			}
 			var referenced []pools.ListenerID
@@ -101,10 +101,16 @@ func validateScopedHTTPRouteRelationships(routes []observedRouteGraph) error {
 					rulePolicies[rule.rule.ID] = policy.policy.ID
 				}
 				layout[id] = append(layout[id], policy)
+				if part.pool == nil {
+					continue
+				}
 				edge := pools.ListenerID{ID: id}
 				if policy.policy.AdminStateUp && len(policy.rules) != 0 && !slices.Contains(referenced, edge) {
 					referenced = append(referenced, edge)
 				}
+			}
+			if part.pool == nil {
+				continue
 			}
 			if err := crossCheckCompleteChildInventory("HTTP pool", part.pool.ID, "listener", part.pool.Listeners, referenced, func(ref pools.ListenerID) string { return ref.ID }); err != nil {
 				return err
@@ -233,7 +239,7 @@ func scopedHTTPRoutePort(route desiredRoute) int {
 }
 
 func scopedHTTPGatewayResult(desired desiredGatewayGraph, actual observedGatewayGraph, pending cloud.Outcome) cloud.GatewayResult {
-	if hasHTTPBackends(desired, actual) {
+	if hasHTTPRouteParts(desired, actual) {
 		desired, actual, _ = httpPlanningParts(desired, actual)
 	}
 	result := scopedGatewayResult(desired.spec.Gateway.Spec, actual, pending)
@@ -280,7 +286,7 @@ func scopedHTTPGatewayResult(desired desiredGatewayGraph, actual observedGateway
 }
 
 func deferredScopedHTTPRoutes(desired desiredGatewayGraph, actual observedGatewayGraph, readyPorts []int) map[int]bool {
-	if hasHTTPBackends(desired, actual) {
+	if hasHTTPRouteParts(desired, actual) {
 		partDesired, partActual, owners := httpPlanningParts(desired, actual)
 		parts := deferredScopedHTTPRoutes(partDesired, partActual, readyPorts)
 		deferred, held := make(map[int]bool), make(map[int]bool)
@@ -305,7 +311,7 @@ func deferredScopedHTTPRoutes(desired desiredGatewayGraph, actual observedGatewa
 		}
 		steps, _, err := buildRouteEnsurePlan(route, observed)
 		_, withdrawalHold := httpMemberWithdrawal(observed)
-		deferred[i] = err == nil && len(steps) == 0 && (!route.unavailable || withdrawalHold == "")
+		deferred[i] = err == nil && route.redirectIssue == "" && len(steps) == 0 && (!route.unavailable || withdrawalHold == "")
 	}
 	return deferred
 }

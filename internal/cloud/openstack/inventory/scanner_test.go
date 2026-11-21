@@ -411,6 +411,50 @@ type auditRecordedRequest struct {
 	query  url.Values
 }
 
+func TestScanDistinguishesMissingRedirectPoolRelationship(t *testing.T) {
+	identity := safetyTestIdentity(t)
+	match := openstackidentity.HTTPMatchKey("example.test", cloud.PathMatchPrefix, "/")
+	cell := openstackidentity.HTTPRedirectKey(match, "example.test", "prefix")
+	role := openstackidentity.HTTPRedirectRole(rolePolicyPrefix, match, cell, "")
+	for _, scenario := range []struct {
+		name      string
+		reported  bool
+		noContent bool
+		want      audit.Disposition
+	}{
+		{name: "omitted pool relationship", want: audit.DispositionUnresolved},
+		{name: "explicit null", reported: true, want: audit.DispositionMatched},
+		{name: "empty 204 listing", noContent: true},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			fixture := newAuditScanFixture(t, identity)
+			fixture.noPolicyContent = scenario.noContent
+			fixture.paginate = true
+			fixture.policies[0]["action"] = "REDIRECT_PREFIX"
+			fixture.policies[0]["tags"] = safetyRouteTags(t, identity, role)
+			delete(fixture.policies[0], "redirect_pool_id")
+			if scenario.reported {
+				fixture.policies[0]["redirect_pool_id"] = nil
+			}
+			fixture.rules = nil
+			inventory, err := fixture.provider().Scan(t.Context(), auditTestScope(identity.Value()), auditTestRecords(identity.Value()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if scenario.noContent {
+				if slices.ContainsFunc(inventory.Resources, func(finding audit.ResourceFinding) bool { return finding.ID == "policy-1" }) {
+					t.Fatal("empty 204 listing reported a policy")
+				}
+				return
+			}
+			got := auditFindingByID(t, inventory.Resources, "policy-1")
+			if got.Disposition != scenario.want || !scenario.reported && got.Reason != auditReasonMissingBackendPool {
+				t.Fatalf("policy disposition = %s (%s), want %s", got.Disposition, got.Reason, scenario.want)
+			}
+		})
+	}
+}
+
 type auditScanFixture struct {
 	t                *testing.T
 	loadBalancers    []map[string]any
@@ -422,6 +466,7 @@ type auditScanFixture struct {
 	rules            []map[string]any
 	floatingIPs      []map[string]any
 	paginate         bool
+	noPolicyContent  bool
 	mutex            sync.Mutex
 	requests         []auditRecordedRequest
 	mutatingRequests int
@@ -514,6 +559,10 @@ func (f *auditScanFixture) serveHTTP(w http.ResponseWriter, request *http.Reques
 		items = auditFilterByParent(f.pools, "loadbalancers", request.URL.Query().Get("loadbalancer_id"))
 		items = auditFilterTags(items, request.URL.Query()["tags"])
 	case request.URL.Path == "/lbaas/l7policies":
+		if f.noPolicyContent {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		key, items = "l7policies", f.policies
 	case strings.HasPrefix(request.URL.Path, "/lbaas/pools/") && strings.HasSuffix(request.URL.Path, "/members"):
 		key = "members"
@@ -538,6 +587,9 @@ func (f *auditScanFixture) serveHTTP(w http.ResponseWriter, request *http.Reques
 }
 
 func (f *auditScanFixture) writeCollection(w http.ResponseWriter, request *http.Request, key string, items []map[string]any) {
+	if items == nil {
+		items = []map[string]any{}
+	}
 	if f.paginate && request.URL.Query().Get("page") == "" {
 		query := request.URL.Query()
 		query.Set("page", "2")
@@ -549,7 +601,7 @@ func (f *auditScanFixture) writeCollection(w http.ResponseWriter, request *http.
 		return
 	}
 	if f.paginate {
-		items = nil
+		items = []map[string]any{}
 	}
 	safetyWriteJSON(f.t, w, map[string]any{key: items})
 }

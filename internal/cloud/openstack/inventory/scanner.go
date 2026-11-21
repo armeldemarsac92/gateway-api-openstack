@@ -86,7 +86,7 @@ type octaviaReader interface {
 	ListPools(context.Context, pools.ListOpts) ([]pools.Pool, error)
 	ListMembers(context.Context, string, pools.ListMembersOpts) ([]pools.Member, error)
 	ListMonitors(context.Context, monitors.ListOpts) ([]monitors.Monitor, error)
-	ListPolicies(context.Context, l7policies.ListOpts) ([]l7policies.L7Policy, error)
+	ObservePolicies(context.Context, l7policies.ListOpts) ([]octavia.PolicyObservation, error)
 	ListRules(context.Context, string, l7policies.ListRulesOpts) ([]l7policies.Rule, error)
 }
 
@@ -246,20 +246,23 @@ func encode(value string) string {
 }
 
 type auditCandidate struct {
-	service            string
-	resourceType       string
-	id                 string
-	projectID          string
-	tenantID           string
-	provider           string
-	provisioningStatus string
-	tags               []string
-	description        string
-	portID             string
-	redirectPoolID     string
-	reportedParents    map[string]struct{}
-	observedParents    map[string]struct{}
-	observationChanged bool
+	service              string
+	resourceType         string
+	id                   string
+	projectID            string
+	tenantID             string
+	provider             string
+	provisioningStatus   string
+	tags                 []string
+	description          string
+	portID               string
+	redirectPoolID       string
+	policyAction         string
+	redirectPoolReported bool
+	redirectPoolNull     bool
+	reportedParents      map[string]struct{}
+	observedParents      map[string]struct{}
+	observationChanged   bool
 }
 
 type auditCandidateSet map[string]*auditCandidate
@@ -277,7 +280,8 @@ func (s auditCandidateSet) add(candidate auditCandidate) {
 	if existing.projectID != candidate.projectID || existing.tenantID != candidate.tenantID ||
 		existing.provider != candidate.provider || !slices.Equal(existing.tags, candidate.tags) ||
 		existing.description != candidate.description || existing.portID != candidate.portID ||
-		existing.redirectPoolID != candidate.redirectPoolID {
+		existing.redirectPoolID != candidate.redirectPoolID || existing.policyAction != candidate.policyAction ||
+		existing.redirectPoolReported != candidate.redirectPoolReported || existing.redirectPoolNull != candidate.redirectPoolNull {
 		existing.observationChanged = true
 	}
 	if existing.provisioningStatus != candidate.provisioningStatus {
@@ -422,7 +426,7 @@ func (p *Scanner) collectAuditPolicies(
 	scopeTags []string,
 	listenerIDs map[string]struct{},
 ) error {
-	items, err := p.octavia.ListPolicies(ctx, l7policies.ListOpts{
+	items, err := p.octavia.ObservePolicies(ctx, l7policies.ListOpts{
 		ProjectID: p.projectID,
 	})
 	if err != nil {
@@ -437,7 +441,8 @@ func (p *Scanner) collectAuditPolicies(
 			service: auditServiceOctavia, resourceType: auditTypeL7Policy,
 			id: item.ID, projectID: item.ProjectID,
 			provisioningStatus: item.ProvisioningStatus, tags: item.Tags,
-			redirectPoolID:  item.RedirectPoolID,
+			redirectPoolID: item.RedirectPoolID, policyAction: item.Action,
+			redirectPoolReported: len(item.PoolReference) != 0, redirectPoolNull: string(item.PoolReference) == "null",
 			reportedParents: singletonStringSet(item.ListenerID),
 			observedParents: singletonStringSetIf(descendant, item.ListenerID),
 		})

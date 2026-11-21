@@ -298,6 +298,54 @@ func TestAuditHTTPPathResourcesShareRouteButRequireTheirOwnBackend(t *testing.T)
 	}
 }
 
+func TestAuditRecognizesOnlyCanonicalPoolFreeRedirects(t *testing.T) {
+	route := safetyTestIdentity(t)
+	id := route.Value()
+	gatewayID := id
+	gatewayID.RouteNamespace, gatewayID.RouteName, gatewayID.RouteUID = "", "", ""
+	gateway, err := openstackidentity.NewIdentity(gatewayID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records := []preparedAuditRecord{
+		{identity: gateway, record: audit.OwnershipRecord{Identity: gatewayID}},
+		{identity: route, record: audit.OwnershipRecord{Identity: id}, isRoute: true},
+	}
+	candidates := auditCandidateSet{}
+	candidates.add(auditTestLoadBalancerCandidate(t, gatewayID, "lb"))
+	add := func(kind, name, parent string, tags []string, action string) {
+		candidates.add(auditCandidate{service: auditServiceOctavia, resourceType: kind,
+			id: name, projectID: id.OpenStackProjectID, tags: tags, policyAction: action,
+			redirectPoolReported: action == "REDIRECT_PREFIX", redirectPoolNull: action == "REDIRECT_PREFIX",
+			observedParents: singletonStringSet(parent), reportedParents: singletonStringSet(parent)})
+	}
+	cell := openstackidentity.HTTPRedirectKey("match", "host", "cell")
+	guard := openstackidentity.HTTPRedirectKey("PATH", "EQUAL_TO", "/protected")
+	match := openstackidentity.HTTPMatchKey("example.test", cloud.PathMatchExact, "/")
+	otherMatch := openstackidentity.HTTPMatchKey("example.test", cloud.PathMatchExact, "/other")
+	tags := func(base, matchKey, guard string) []string {
+		return safetyRouteTags(t, route, openstackidentity.HTTPRedirectRole(base, matchKey, cell, guard))
+	}
+	add(auditTypeListener, "listener", "lb", safetyGatewayTags(t, gateway, roleListener), "")
+	add(auditTypeL7Policy, "prefix", "listener", tags(rolePolicyPrefix, match, ""), "REDIRECT_PREFIX")
+	add(auditTypeL7Rule, "guard", "prefix", tags(openstackidentity.RoleRuleRedirectGuard, match, guard), "")
+	add(auditTypeL7Rule, "wrong-rule", "prefix", tags(openstackidentity.RoleRuleRedirectGuard, otherMatch, guard), "")
+	add(auditTypeL7Policy, "forward", "listener", safetyRouteTags(t, route, rolePolicyExact), "REDIRECT_TO_POOL")
+
+	findings := classifyAuditCandidates(candidates, records, auditTestScopeTags(id), id.OpenStackProjectID)
+	for _, resource := range []string{"prefix", "guard"} {
+		if got := auditFindingByID(t, findings, resource); got.Disposition != audit.DispositionMatched {
+			t.Fatalf("%s audit disposition = %v (%s)", resource, got.Disposition, got.Reason)
+		}
+	}
+	if got := auditFindingByID(t, findings, "wrong-rule"); got.Reason != auditReasonParentMismatch {
+		t.Fatalf("guard tagged for another rule was accepted: %s", got.Reason)
+	}
+	if got := auditFindingByID(t, findings, "forward"); got.Reason != auditReasonMissingBackendPool {
+		t.Fatalf("pool-free forwarding policy was accepted: %s", got.Reason)
+	}
+}
+
 func TestClassifyAuditFloatingIPDoesNotExposeDescription(t *testing.T) {
 	identity := auditTestCloudIdentity()
 	wrapped, err := openstackidentity.NewIdentity(identity)

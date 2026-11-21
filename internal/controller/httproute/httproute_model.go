@@ -73,11 +73,12 @@ func validateRouteStructure(route *gatewayv1.HTTPRoute) ([]gatewayv1.BackendObje
 	}
 	references := make([]gatewayv1.BackendObjectReference, 0, len(route.Spec.Rules))
 	for _, rule := range route.Spec.Rules {
-		reference, err := validateRouteRule(rule)
-		if err != nil {
+		if err := validateRouteRule(rule); err != nil {
 			return nil, err
 		}
-		references = append(references, reference)
+		if len(rule.BackendRefs) != 0 {
+			references = append(references, rule.BackendRefs[0].BackendObjectReference)
+		}
 	}
 	return references, nil
 }
@@ -86,39 +87,42 @@ func hasMultipleRoutePaths(route *gatewayv1.HTTPRoute) bool {
 	return len(route.Spec.Rules) > 1 || len(route.Spec.Rules) == 1 && len(route.Spec.Rules[0].Matches) > 1
 }
 
-func validateRouteRule(rule gatewayv1.HTTPRouteRule) (gatewayv1.BackendObjectReference, error) {
+func validateRouteRule(rule gatewayv1.HTTPRouteRule) error {
 	if rule.Name != nil || rule.Timeouts != nil || rule.Retry != nil || rule.SessionPersistence != nil { //nolint:staticcheck // The release still serves this deprecated Experimental field.
-		return gatewayv1.BackendObjectReference{}, newRouteBuildError(routeErrorUnsupported, "named rules, timeouts, retries, and session persistence are not supported")
+		return newRouteBuildError(routeErrorUnsupported, "named rules, timeouts, retries, and session persistence are not supported")
 	}
 	if err := compileRouteAction(rule); err != nil {
-		return gatewayv1.BackendObjectReference{}, err
+		return err
 	}
 	for _, match := range rule.Matches {
 		if _, _, err := supportedMatch(match); err != nil {
-			return gatewayv1.BackendObjectReference{}, err
+			return err
 		}
 	}
+	if len(rule.Filters) != 0 {
+		// The only supported filter is RequestRedirect, which has no backend.
+		return nil
+	}
 	if len(rule.BackendRefs) != 1 {
-		return gatewayv1.BackendObjectReference{}, newRouteBuildError(routeErrorUnsupported, "exactly one backendRef is supported")
+		return newRouteBuildError(routeErrorUnsupported, "exactly one backendRef is supported")
 	}
 	backend := rule.BackendRefs[0]
 	if len(backend.Filters) != 0 {
-		return gatewayv1.BackendObjectReference{}, newRouteBuildError(routeErrorUnsupported, "backendRef filters are not supported")
+		return newRouteBuildError(routeErrorUnsupported, "backendRef filters are not supported")
 	}
 	if backend.Weight != nil && *backend.Weight <= 0 {
-		return gatewayv1.BackendObjectReference{}, newRouteBuildError(routeErrorUnsupported, "a single backendRef must have positive weight")
+		return newRouteBuildError(routeErrorUnsupported, "a single backendRef must have positive weight")
 	}
 	if backend.Group != nil && *backend.Group != gatewayv1.Group("") {
-		return gatewayv1.BackendObjectReference{}, newRouteBuildError(routeErrorInvalidKind, "backendRef group %q is unsupported; use a core Service", *backend.Group)
+		return newRouteBuildError(routeErrorInvalidKind, "backendRef group %q is unsupported; use a core Service", *backend.Group)
 	}
 	if backend.Kind != nil && *backend.Kind != gatewayv1.Kind("Service") {
-		return gatewayv1.BackendObjectReference{}, newRouteBuildError(routeErrorInvalidKind, "backendRef kind %q is unsupported; use Service", *backend.Kind)
+		return newRouteBuildError(routeErrorInvalidKind, "backendRef kind %q is unsupported; use Service", *backend.Kind)
 	}
 	if backend.Port == nil || *backend.Port < 1 || *backend.Port > 65535 {
-		return gatewayv1.BackendObjectReference{}, newRouteBuildError(routeErrorUnsupported, "backendRef must specify a port between 1 and 65535")
+		return newRouteBuildError(routeErrorUnsupported, "backendRef must specify a port between 1 and 65535")
 	}
-
-	return backend.BackendObjectReference, nil
+	return nil
 }
 
 func backendReferenceRejection(namespace string, target types.NamespacedName, grants []gatewayv1.ReferenceGrant) *routeBuildError {
@@ -194,7 +198,7 @@ func (r *Reconciler) buildRouteModelFromInputs(
 		spec.GatewayRequirements.ListenerProtocol = cloud.ListenerProtocolHTTP
 		spec.ScopedListenerPorts = []int{int(listener.Port)}
 	}
-	if !hasMultipleRoutePaths(route) {
+	if !hasMultipleRoutePaths(route) && rules[0].Redirect == nil {
 		match := matches[0]
 		members, err := routeBackendMembers(ctx, reader, route.Namespace, rules[0].Backends[0], inputs, mode, topology.NodeAddressType)
 		if err != nil {
@@ -204,7 +208,7 @@ func (r *Reconciler) buildRouteModelFromInputs(
 		spec.Members = members
 		return spec, model.Diagnostic{}, nil
 	}
-	diagnostic, err := lowerHTTPBackends(ctx, reader, route, &spec, inputs, matches, rules, topology.NodeAddressType)
+	diagnostic, err := lowerHTTPRules(ctx, reader, route, listener, &spec, inputs, matches, rules, topology.NodeAddressType)
 	if err != nil {
 		return cloud.RouteSpec{}, model.Diagnostic{}, err
 	}
@@ -235,11 +239,18 @@ type backendKey struct {
 	port    int
 }
 
-func lowerHTTPBackends(ctx context.Context, reader client.Reader, route *gatewayv1.HTTPRoute, spec *cloud.RouteSpec, inputs *routeModelInputs, matches []model.RouteMatch, rules []model.Rule, nodeAddressType corev1.NodeAddressType) (model.Diagnostic, error) {
+func lowerHTTPRules(ctx context.Context, reader client.Reader, route *gatewayv1.HTTPRoute, listener gatewayv1.Listener, spec *cloud.RouteSpec, inputs *routeModelInputs, matches []model.RouteMatch, rules []model.Rule, nodeAddressType corev1.NodeAddressType) (model.Diagnostic, error) {
 	groups := make(map[backendKey]int, len(rules))
 	ruleGroups := make([]int, len(rules))
 	var firstDiagnostic model.Diagnostic
 	for i, rule := range rules {
+		if redirect := rule.Redirect; redirect != nil {
+			ruleGroups[i] = len(spec.HTTPRedirects)
+			spec.HTTPRedirects = append(spec.HTTPRedirects, cloud.HTTPRedirect{
+				RuleIndex: rule.Index, Prefix: routeRedirectPrefix(*redirect, listener), StatusCode: redirect.StatusCode,
+			})
+			continue
+		}
 		backend := rule.Backends[0]
 		key := backendKey{service: backend.Service, port: int(*backend.Reference.Port)}
 		index, found := groups[key]
@@ -263,16 +274,24 @@ func lowerHTTPBackends(ctx context.Context, reader client.Reader, route *gateway
 		ruleGroups[i] = index
 	}
 	for _, match := range matches {
-		backend := &spec.HTTPBackends[ruleGroups[match.RuleIndex]]
-		// Equivalent alternatives targeting this pool share one policy identity.
-		if slices.ContainsFunc(backend.Matches, func(previous cloud.HTTPPathMatch) bool {
-			return previous.Hostname == match.Hostname && previous.PathType == cloud.PathMatchType(match.Match.PathType) && previous.PathValue == match.Match.PathValue
+		loweredMatch := cloud.HTTPPathMatch{
+			Hostname: match.Hostname, PathType: cloud.PathMatchType(match.Match.PathType), PathValue: match.Match.PathValue, Precedence: match.Precedence,
+		}
+		index := ruleGroups[match.RuleIndex]
+		var groupMatches *[]cloud.HTTPPathMatch
+		if rules[match.RuleIndex].Redirect != nil {
+			groupMatches = &spec.HTTPRedirects[index].Matches
+		} else {
+			groupMatches = &spec.HTTPBackends[index].Matches
+		}
+		// Matches arrive in precedence order. Equivalent alternatives for
+		// the same action share the highest-ranked policy.
+		if slices.ContainsFunc(*groupMatches, func(previous cloud.HTTPPathMatch) bool {
+			return previous.Hostname == loweredMatch.Hostname && previous.PathType == loweredMatch.PathType && previous.PathValue == loweredMatch.PathValue
 		}) {
 			continue
 		}
-		backend.Matches = append(backend.Matches, cloud.HTTPPathMatch{
-			Hostname: match.Hostname, PathType: cloud.PathMatchType(match.Match.PathType), PathValue: match.Match.PathValue, Precedence: match.Precedence,
-		})
+		*groupMatches = append(*groupMatches, loweredMatch)
 	}
 	return firstDiagnostic, nil
 }
@@ -338,7 +357,10 @@ func supportedRouteModel(logical model.Gateway, selected gatewayv1.Listener) ([]
 		return unsupported()
 	}
 	for _, rule := range route.Rules {
-		if len(rule.Diagnostics) != 0 || len(rule.Backends) != 1 || rule.Backends[0].Reference.Port == nil || rule.Backends[0].Weight <= 0 {
+		if len(rule.Diagnostics) != 0 {
+			return unsupported()
+		}
+		if rule.Redirect == nil && (len(rule.Backends) != 1 || rule.Backends[0].Reference.Port == nil || rule.Backends[0].Weight <= 0) {
 			return unsupported()
 		}
 	}
@@ -359,7 +381,7 @@ func supportedMatch(match gatewayv1.HTTPRouteMatch) (cloud.PathMatchType, string
 		return "", "", newRouteBuildError(routeErrorUnsupported, "%s", err)
 	}
 	pathType := cloud.PathMatchType(normalized.PathType)
-	if _, _, err := amphora.PathRuleValues(normalized.PathValue, pathType == cloud.PathMatchPrefix); err != nil {
+	if _, err := amphora.PathRuleValues(normalized.PathValue, pathType == cloud.PathMatchPrefix); err != nil {
 		return "", "", newRouteBuildError(routeErrorUnsupported, "%s", err)
 	}
 	return pathType, normalized.PathValue, nil

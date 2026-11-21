@@ -163,12 +163,21 @@ func compileRoute(route *gatewayv1.HTTPRoute, input Input) Route {
 		if rule.Name != nil || rule.Timeouts != nil || rule.Retry != nil || rule.SessionPersistence != nil { //nolint:staticcheck // The release still serves this deprecated Experimental field.
 			compiled.Diagnostics = append(compiled.Diagnostics, *unsupported("named rules, timeouts, retries, and session persistence are not implemented", ScopeRule))
 		}
-		for _, filter := range rule.Filters {
-			scope := ScopeRule
-			if !knownFilter(filter.Type) {
-				scope = ScopeRoute
+		if len(rule.Filters) == 1 && rule.Filters[0].Type == gatewayv1.HTTPRouteFilterRequestRedirect {
+			redirect, err := NormalizeRequestRedirect(rule)
+			if err != nil {
+				compiled.Diagnostics = append(compiled.Diagnostics, *unsupported(err.Error(), ScopeRule))
+			} else {
+				compiled.Redirect = &redirect
 			}
-			compiled.Diagnostics = append(compiled.Diagnostics, *unsupported(fmt.Sprintf("HTTPRoute filter %s requires an explicit action model before lowering", filter.Type), scope))
+		} else {
+			for _, filter := range rule.Filters {
+				scope := ScopeRule
+				if !knownFilter(filter.Type) {
+					scope = ScopeRoute
+				}
+				compiled.Diagnostics = append(compiled.Diagnostics, *unsupported(fmt.Sprintf("HTTPRoute filter %s requires an explicit action model before lowering", filter.Type), scope))
+			}
 		}
 		for _, backend := range rule.BackendRefs {
 			if len(backend.Filters) != 0 {

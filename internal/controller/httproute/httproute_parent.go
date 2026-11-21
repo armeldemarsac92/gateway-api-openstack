@@ -207,6 +207,9 @@ func selectRouteAttachment(route *gatewayv1.HTTPRoute, gateway *gatewayv1.Gatewa
 	if selected == nil {
 		return nil, rejection
 	}
+	if err := validateRouteRedirectPrefixes(route, *selected); err != nil {
+		return nil, err
+	}
 	return selected, nil
 }
 

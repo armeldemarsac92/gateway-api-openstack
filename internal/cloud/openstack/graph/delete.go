@@ -22,6 +22,7 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
+	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/loadbalancers"
 )
 
@@ -35,6 +36,9 @@ func (p *Provider) executeGatewayDeletionStep(ctx context.Context, step gatewayD
 
 func (p *Provider) deleteGatewayResource(ctx context.Context, step gatewayDeletionStep) error {
 	switch step.resource {
+	case gatewayDisableL7Policy:
+		_, err := p.octavia.UpdatePolicy(ctx, step.resourceID, l7policies.UpdateOpts{AdminStateUp: boolPointer(false)})
+		return err
 	case gatewayDeletionL7Rule:
 		return p.octavia.DeleteRule(ctx, step.parentID, step.resourceID)
 	case gatewayDeletionL7Policy:

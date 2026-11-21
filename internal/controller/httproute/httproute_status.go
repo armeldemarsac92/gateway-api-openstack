@@ -57,6 +57,9 @@ func (r *Reconciler) setRouteStatusesAndDetach(
 	updates []parentStatusUpdate,
 ) (ctrl.Result, error) {
 	route := scope.route
+	if err := r.applyUnsupportedRouteReferenceStatus(ctx, route, updates); err != nil {
+		return ctrl.Result{}, err
+	}
 	providerStatusPublished := routeHasProviderFailureStatus(route, updates, r.Config.ControllerName, r.Config.Domain()+"/Programmed")
 	checkpointNeeded, err := r.routeCleanupStatusCheckpointNeeded(ctx, scope, updates)
 	if err != nil {
@@ -115,6 +118,33 @@ func (r *Reconciler) setRouteStatusesAndDetach(
 		scope.patchCause = controller.SafeProviderReconcileError(policy, cleanupErr)
 	}
 	return controller.ProviderFinalizationFailureResult(policy, cleanupErr, string(route.UID))
+}
+
+func (r *Reconciler) applyUnsupportedRouteReferenceStatus(ctx context.Context, route *gatewayv1.HTTPRoute, updates []parentStatusUpdate) error {
+	needsAuthorization := func(update parentStatusUpdate) bool {
+		return update.status.acceptedReason == string(gatewayv1.RouteReasonUnsupportedValue) &&
+			update.status.resolved == metav1.ConditionUnknown
+	}
+	if !slices.ContainsFunc(updates, needsAuthorization) {
+		return nil
+	}
+	// A bound route must detach even if a reference check fails. Its binding
+	// change enqueues the unbound route for independent status evaluation.
+	_, bound, err := r.storedRouteIdentity(route)
+	if err != nil || bound {
+		return err
+	}
+	rejection, err := r.liveRouteBackendReferenceRejection(ctx, route)
+	if err != nil || rejection == nil {
+		return err
+	}
+	diagnostic := model.Diagnostic{Reason: string(gatewayv1.RouteReasonRefNotPermitted), Message: rejection.message}
+	for i := range updates {
+		if needsAuthorization(updates[i]) {
+			updates[i].status = updates[i].status.withBackendDiagnostic(diagnostic)
+		}
+	}
+	return nil
 }
 
 func routeHasProviderFailureStatus(
@@ -310,7 +340,7 @@ func programmedRouteStatus() routeReconcileStatus {
 		resolvedMessage:   "All backend references are resolved",
 		programmed:        metav1.ConditionTrue,
 		programmedReason:  "Programmed",
-		programmedMessage: "Octavia pool, members, health monitor, and L7 policies are active",
+		programmedMessage: "Octavia configuration for the HTTPRoute is active",
 	}
 }
 

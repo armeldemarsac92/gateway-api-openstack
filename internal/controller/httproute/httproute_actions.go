@@ -18,12 +18,14 @@ package httproute
 
 import (
 	"net/http"
+	"strconv"
 
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
 // compileRouteAction rejects actions that the current Amphora model cannot emit.
-// No filter is supported yet, so report the first unsupported action.
 func compileRouteAction(rule gatewayv1.HTTPRouteRule) error {
 	if len(rule.Filters) == 0 {
 		if len(rule.BackendRefs) == 0 {
@@ -36,7 +38,10 @@ func compileRouteAction(rule gatewayv1.HTTPRouteRule) error {
 	case gatewayv1.HTTPRouteFilterRequestHeaderModifier:
 		return compileRequestHeaderModifier(filter.RequestHeaderModifier)
 	case gatewayv1.HTTPRouteFilterRequestRedirect:
-		return compileRequestRedirect(filter.RequestRedirect)
+		if _, err := model.NormalizeRequestRedirect(rule); err != nil {
+			return newRouteBuildError(routeErrorUnsupported, "%s", err)
+		}
+		return nil
 	default:
 		return newRouteBuildError(routeErrorUnsupported, "HTTPRoute filter %s is not supported", filter.Type)
 	}
@@ -49,15 +54,43 @@ func compileRequestHeaderModifier(_ *gatewayv1.HTTPHeaderFilter) error {
 	return newRouteBuildError(routeErrorUnsupported, "RequestHeaderModifier requires route-scoped header operations in Octavia")
 }
 
-func compileRequestRedirect(redirect *gatewayv1.HTTPRequestRedirectFilter) error {
-	if redirect != nil && redirect.Hostname != nil {
-		// Static-host redirects have an Octavia primitive. Phase 5 must prove
-		// scheme, port, path, query, and precedence before lowering them.
-		return newRouteBuildError(routeErrorUnsupported, "RequestRedirect with a fixed hostname is not implemented")
+// routeRedirectPrefix resolves the scheme and port before passing the fixed
+// prefix to Octavia, where the original path and query are appended.
+func routeRedirectPrefix(redirect model.RequestRedirect, listener gatewayv1.Listener) string {
+	scheme, port := redirect.Scheme, redirect.Port
+	if scheme == "" {
+		scheme = "http"
+		if listener.Protocol == gatewayv1.HTTPSProtocolType {
+			scheme = "https"
+		}
+		if port == 0 {
+			port = int(listener.Port)
+		}
 	}
-	// TODO(octavia): Lower redirects that preserve the request hostname when
-	// the public API supports dynamic redirects with the required semantics.
-	return newRouteBuildError(routeErrorUnsupported, "RequestRedirect without hostname requires request-hostname preservation in Octavia")
+	wellKnownPort := 80
+	if scheme == "https" {
+		wellKnownPort = 443
+	}
+	prefix := scheme + "://" + redirect.Hostname
+	if port != 0 && port != wellKnownPort {
+		prefix += ":" + strconv.Itoa(port)
+	}
+	return prefix
+}
+
+func validateRouteRedirectPrefixes(route *gatewayv1.HTTPRoute, listener gatewayv1.Listener) error {
+	const maxRedirectPrefixLength = 255 // Octavia's redirect_prefix SQL column.
+	for _, rule := range route.Spec.Rules {
+		if len(rule.Filters) != 1 || rule.Filters[0].Type != gatewayv1.HTTPRouteFilterRequestRedirect {
+			continue
+		}
+		redirect, err := model.NormalizeRequestRedirect(rule)
+		// Structural validation owns the diagnostics for malformed actions.
+		if err == nil && len(routeRedirectPrefix(redirect, listener)) > maxRedirectPrefixLength {
+			return newRouteBuildError(routeErrorUnsupported, "RequestRedirect prefix must fit in %d characters in Octavia", maxRedirectPrefixLength)
+		}
+	}
+	return nil
 }
 
 func compileHTTPResponse(statusCode int) error {

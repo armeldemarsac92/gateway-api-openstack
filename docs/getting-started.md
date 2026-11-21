@@ -411,6 +411,24 @@ If a rule references a Service in another namespace, create a ReferenceGrant in 
 
 Keep the current image running when migrating a multi-rule route back to the single-rule controller. [Rollback procedure](operator-recovery.md#roll-back-httproutes-with-several-paths)
 
+## Redirect an HTTPRoute to a fixed host
+
+Apply this rule to an HTTPRoute attached to the source listener. Requests to `/legacy` and its descendants receive a 301 with the original path and query on `https://moved.example.org`. Leave `backendRefs` empty on the redirect rule. Other rules in the HTTPRoute may point to Services.
+
+```yaml
+rules:
+  - matches:
+      - path: {type: PathPrefix, value: /legacy}
+    filters:
+      - type: RequestRedirect
+        requestRedirect:
+          scheme: https
+          hostname: moved.example.org
+          statusCode: 301
+```
+
+The default status is 302. With only `hostname`, the redirect uses the listener’s scheme and port. An explicit scheme selects its standard port unless the rule specifies another one. The fixed destination supports 301, 302, 303, 307 and 308. Dynamic request hosts and path replacement are outside this stock mapping. The parent’s `Accepted`, `ResolvedRefs` and controller-domain `Programmed` conditions describe the current generation. [Stock Octavia behavior](qualification/v1.7.0/provider/stock-http-redirect.md)
+
 ## Safe removal
 
 Keep the controller, its application credential, and OpenStack access running until every managed HTTPRoute, TCPRoute, UDPRoute and Gateway has finished finalization.

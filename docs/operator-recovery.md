@@ -74,6 +74,10 @@ Revisions through `308c8b246fca168e4a687704badaf40335e8cf40` support one rule an
 
 Delete the original multi-rule route or reduce it to one rule and one match. Wait for the current controller to remove its superseded policies, rules, pools, monitors and members. The [ownership audit](#run-the-ownership-audit) and Octavia inventory identify the route by its Gateway and Route UIDs. Verify that its versioned HTTP roles are gone and that the retained routes serve the intended backends before installing the older image.
 
+## Roll back HTTPRoute redirects
+
+Keep the redirect-capable manager and its credentials running while removing the `RequestRedirect` rules or deleting their Routes. For a replacement Service, wait for the current-generation parent to become programmed and verify the response on the affected hosts and paths. Read back the Route’s owned Octavia L7 policies and rules. After the obsolete redirect policies have disappeared and traffic matches the intended rollback, switch the manager image. A pure redirect owns L7 policies and rules. Deleting the whole Gateway also releases its listener and VIP.
+
 ## Roll back HTTPRoutes with additional parents
 
 The controller at `455798411c13fd42f5c1568357f2c35cec2b2169` requires one item in `spec.parentRefs`. Before rolling back, list routes that use this controller alongside other parents. Record which parents actually serve traffic and check the hostname, path and backend through each active entry point. If an extra reference is unused, remove it while the newer controller is running and verify the managed path. If another controller serves through an extra reference, migrate that attachment to a separately named HTTPRoute using its supported configuration and verify both paths before removing it from the original. Account for age-based selection where routes overlap. Keep the current image if the attachments cannot be migrated while preserving traffic. The previous image can withdraw this controller's Octavia fragment as soon as it encounters multiple references. [Controller and qualification](qualification/v1.7.0/provider/http-one-managed-parent.md)

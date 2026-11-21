@@ -26,14 +26,14 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
 )
 
-func hasHTTPBackends(desired desiredGatewayGraph, actual observedGatewayGraph) bool {
-	return slices.ContainsFunc(desired.routes, func(route desiredRoute) bool { return len(route.httpBackends) != 0 }) ||
-		slices.ContainsFunc(actual.routes, func(route observedRouteGraph) bool { return len(route.httpBackends) != 0 })
+func hasHTTPRouteParts(desired desiredGatewayGraph, actual observedGatewayGraph) bool {
+	return slices.ContainsFunc(desired.routes, func(route desiredRoute) bool { return len(route.httpParts) != 0 }) ||
+		slices.ContainsFunc(actual.routes, func(route observedRouteGraph) bool { return len(route.httpParts) != 0 })
 }
 
-// HTTP backend groups reuse the existing route planner while retaining one
-// owner, binding and result per HTTPRoute. An observed fragment holds its own
-// proved pool and policies even after the desired format or backends change.
+// Route parts reuse the route planner and retain one binding and result per
+// HTTPRoute. Inventory keeps each proved forwarding or redirect part across
+// replacements and deletions.
 func httpPlanningParts(desired desiredGatewayGraph, actual observedGatewayGraph) (desiredGatewayGraph, observedGatewayGraph, []int) {
 	partDesired, partActual := desired, actual
 	partDesired.spec.Routes, partDesired.routes, partActual.routes = nil, nil, nil
@@ -49,7 +49,7 @@ func httpPlanningParts(desired desiredGatewayGraph, actual observedGatewayGraph)
 			if obsolete && partNode.Disposition == cloud.GraphEnsure {
 				partNode.Disposition = cloud.GraphDelete
 			}
-			part.httpBackends, fragment.httpBackends = nil, nil
+			part.httpParts, fragment.httpParts = nil, nil
 			partDesired.spec.Routes = append(partDesired.spec.Routes, partNode)
 			partDesired.routes = append(partDesired.routes, part)
 			if actual.routes != nil {
@@ -57,19 +57,19 @@ func httpPlanningParts(desired desiredGatewayGraph, actual observedGatewayGraph)
 			}
 			owners = append(owners, index)
 		}
-		if len(route.httpBackends) == 0 || observed.pool != nil || len(observed.policies) != 0 {
-			appendPart(route, observed, len(route.httpBackends) != 0)
+		if len(route.httpParts) == 0 || observed.pool != nil || len(observed.policies) != 0 {
+			appendPart(route, observed, len(route.httpParts) != 0)
 		}
-		for _, backend := range route.httpBackends {
+		for _, backend := range route.httpParts {
 			var fragment observedRouteGraph
-			if part := observed.httpBackends[backend.backendKey]; part != nil {
+			if part := observed.httpParts[backend.backendKey]; part != nil {
 				fragment = *part
 			}
 			appendPart(backend, fragment, false)
 		}
-		keys := make([]string, 0, len(observed.httpBackends))
-		for key := range observed.httpBackends {
-			if !slices.ContainsFunc(route.httpBackends, func(backend desiredRoute) bool { return backend.backendKey == key }) {
+		keys := make([]string, 0, len(observed.httpParts))
+		for key := range observed.httpParts {
+			if !slices.ContainsFunc(route.httpParts, func(backend desiredRoute) bool { return backend.backendKey == key }) {
 				keys = append(keys, key)
 			}
 		}
@@ -77,13 +77,14 @@ func httpPlanningParts(desired desiredGatewayGraph, actual observedGatewayGraph)
 		for _, key := range keys {
 			part := route
 			part.backendKey = key
-			appendPart(part, *observed.httpBackends[key], true)
+			part.redirect = strings.HasPrefix(key, "redirect/")
+			appendPart(part, *observed.httpParts[key], true)
 		}
 	}
 	return partDesired, partActual, owners
 }
 
-func (p *Provider) buildHTTPBackendGraphPlan(desired desiredGatewayGraph, actual observedGatewayGraph) ([]graphMutation, cloud.GatewayGraphResult, error) {
+func (p *Provider) buildHTTPRoutePartsGraphPlan(desired desiredGatewayGraph, actual observedGatewayGraph) ([]graphMutation, cloud.GatewayGraphResult, error) {
 	partDesired, partActual, owners := httpPlanningParts(desired, actual)
 	plan, result, err := p.buildGatewayGraphPartPlan(partDesired, partActual, planHTTPPolicyHandovers(desired, partDesired, partActual, owners))
 	if err != nil {
@@ -127,6 +128,15 @@ func (p *Provider) buildHTTPBackendGraphPlan(desired desiredGatewayGraph, actual
 }
 
 func policyNeedsHostnameUpdate(route desiredRoute, policy observedRoutePolicy) bool {
+	if route.redirect {
+		for _, wanted := range route.policies {
+			if wanted.role == policy.role {
+				return !desiredPolicyActionMatches(wanted, policy.policy, "") ||
+					!observedHTTPPredicateMatches(policy, rulesFor(wanted, ""))
+			}
+		}
+		return true
+	}
 	if route.backendKey == "" {
 		return policy.hasOutdatedHostname(route.hostnameRuleValue)
 	}
@@ -240,12 +250,24 @@ func observedHTTPPredicateMatches(policy observedRoutePolicy, rules []desiredRul
 		if !slices.ContainsFunc(policy.rules, func(observed observedRouteRule) bool {
 			rule := observed.rule
 			return rule.RuleType == string(wanted.ruleType) && rule.CompareType == string(wanted.compareType) &&
-				rule.Value == wanted.value && rule.AdminStateUp && !rule.Invert
+				rule.Value == wanted.value && rule.AdminStateUp && rule.Invert == wanted.invert
 		}) {
 			return false
 		}
 	}
 	return true
+}
+
+func observedForwardPolicyMatches(route desiredRoute, observed observedRouteGraph, policy observedRoutePolicy) bool {
+	if observed.pool == nil || !policy.adminObserved || policy.policy.ProvisioningStatus != "ACTIVE" || slices.ContainsFunc(policy.rules, func(rule observedRouteRule) bool {
+		return !rule.flagsObserved || rule.rule.ProvisioningStatus != "ACTIVE"
+	}) {
+		return false
+	}
+	return slices.ContainsFunc(route.policies, func(wanted desiredPolicy) bool {
+		return wanted.role == policy.role && desiredPolicyActionMatches(wanted, policy.policy, observed.pool.ID) &&
+			observedHTTPPredicateMatches(policy, rulesFor(wanted, route.hostnameRuleValue))
+	})
 }
 
 func observedLegacyPrefixMatches(observed []observedRoutePolicy, regex desiredPolicy, hostname string) bool {
@@ -344,6 +366,11 @@ func planHTTPPolicyHandovers(original, desired desiredGatewayGraph, actual obser
 		}
 		node := desired.spec.Routes[index]
 		backend := desired.routes[index].backendKey
+		if desired.routes[index].redirect {
+			// Stock Amphora evaluates redirects ahead of forwarding regardless
+			// of policy position. Action changes must retire the old policy.
+			continue
+		}
 		if node.Disposition == cloud.GraphDelete && backend == "" && len(observed.policies) == 2 {
 			port := listenerPorts[observed.policies[0].policy.ListenerID]
 			if !actual.scoped || port != 0 {
@@ -382,7 +409,7 @@ func findHTTPPolicyReplacement(desired desiredGatewayGraph, owners []int, owner,
 	target := -1
 	var best desiredPolicy
 	for index, route := range desired.routes {
-		if owners[index] != owner || desired.spec.Routes[index].Disposition != cloud.GraphEnsure || scopedHTTPRoutePort(route) != port {
+		if route.redirect || owners[index] != owner || desired.spec.Routes[index].Disposition != cloud.GraphEnsure || scopedHTTPRoutePort(route) != port {
 			continue
 		}
 		if len(observed) == 1 && observed[0].versioned && route.backendKey == "" && observedGroupedPrefixMatches(observed[0], route) {

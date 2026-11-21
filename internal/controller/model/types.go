@@ -106,7 +106,17 @@ type Rule struct {
 	Index       int
 	Matches     []Match
 	Backends    []BackendGroup
+	Redirect    *RequestRedirect
 	Diagnostics []Diagnostic
+}
+
+// RequestRedirect is a fixed-host action with no path modifier or backend.
+// An empty scheme or a zero port is resolved for the selected listener.
+type RequestRedirect struct {
+	Hostname   string
+	Scheme     string
+	Port       int
+	StatusCode int
 }
 
 // Match is one alternative within a rule. Its header predicates are conjunctive.

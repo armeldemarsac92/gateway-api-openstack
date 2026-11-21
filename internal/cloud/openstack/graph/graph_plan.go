@@ -33,8 +33,8 @@ import (
 // buildGatewayGraphPlan is free of I/O. No plan is executable unless every
 // component passed validation, even when an earlier prerequisite needs repair.
 func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual observedGatewayGraph) ([]graphMutation, cloud.GatewayGraphResult, error) {
-	if desired.spec.Gateway.Disposition != cloud.GraphDelete && hasHTTPBackends(desired, actual) {
-		return p.buildHTTPBackendGraphPlan(desired, actual)
+	if desired.spec.Gateway.Disposition != cloud.GraphDelete && hasHTTPRouteParts(desired, actual) {
+		return p.buildHTTPRoutePartsGraphPlan(desired, actual)
 	}
 	return p.buildGatewayGraphPartPlan(desired, actual, nil)
 }
@@ -95,6 +95,13 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 	policyPending := make(map[int]bool)
 	policyCount := make(map[int]int32)
 	holdPolicyEnable := make(map[int]bool)
+	holdRedirectEnable := make(map[int]bool)
+	redirectPorts := make(map[int]bool)
+	for index, route := range desired.routes {
+		if route.redirect && desired.spec.Routes[index].Disposition == cloud.GraphEnsure {
+			redirectPorts[scopedHTTPRoutePort(route)] = true
+		}
+	}
 	for index, observed := range actual.routes {
 		node := desired.spec.Routes[index]
 		if groupedHTTP && node.Disposition == cloud.GraphEnsure && !policyPositionsMatch(desired.routes[index].policies, observed.policies) {
@@ -103,6 +110,10 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 		for _, policy := range observed.policies {
 			port := portByListenerID[policy.policy.ListenerID]
 			policyCount[port]++
+			if redirectPorts[port] && !policy.redirect && (node.Disposition != cloud.GraphEnsure ||
+				!observedForwardPolicyMatches(desired.routes[index], observed, policy)) {
+				holdRedirectEnable[port] = true
+			}
 			if policy.pending() {
 				policyPending[port] = true
 				holdPolicyOrder[port] = true
@@ -220,8 +231,24 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 				}
 			}
 		}
+		if node.Disposition == cloud.GraphEnsure && route.redirect && !withdrawing && holdRedirectEnable[port] {
+			routeResult.Outcome = p.progressingOutcome("Waiting for verified forwarding predicates on the redirect listener")
+			var withdrawal []routeMutation
+			for _, policy := range observed.policies {
+				if !policy.pending() && (policy.policy.AdminStateUp || policy.policy.ProvisioningStatus == "ERROR") {
+					withdrawal = append(withdrawal, routeMutation{kind: routeMutationDisablePolicy, id: policy.policy.ID,
+						retry: policy.policy.ProvisioningStatus == "ERROR", withdrawHTTPPolicy: true})
+				}
+			}
+			if len(withdrawal) > 0 {
+				routePlan = withdrawal
+			}
+		}
 		if len(routePlan) != 0 {
 			routeResult.Outcome = p.progressingOutcome(routePlan[0].message())
+		}
+		if route.redirectIssue != "" {
+			routeResult.Outcome = p.progressingOutcome(route.redirectIssue)
 		}
 		if ensureHold != "" {
 			routeResult.Outcome = p.progressingOutcome(ensureHold)
@@ -277,6 +304,8 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 				}
 			case ensureHold != "":
 				continue
+			case route.redirect && step.kind == routeMutationEnablePolicy && (holdRedirectEnable[port] || holdPolicyOrder[port]):
+				routeResult.Outcome = p.progressingOutcome("Waiting for verified HTTP forwarding policies before enabling the redirect")
 			case groupedHTTP && stepIndex != 0:
 				// Only the first actionable change in this backend is eligible
 				// for global ordering. Later changes may depend on it.
@@ -365,7 +394,7 @@ func httpPolicyTransition(desired desiredGatewayGraph, actual observedGatewayGra
 	if desired.spec.Gateway.Disposition != cloud.GraphEnsure || actual.protocol != cloud.ListenerProtocolHTTP || actual.listener == nil {
 		return ""
 	}
-	if hasHTTPBackends(desired, actual) {
+	if hasHTTPRouteParts(desired, actual) {
 		desired, actual, _ = httpPlanningParts(desired, actual)
 	}
 	for index, node := range desired.spec.Routes {
@@ -394,7 +423,7 @@ func observedRouteDeleteCompletions(desired desiredGatewayGraph, actual observed
 		if node.Disposition != cloud.GraphDelete {
 			continue
 		}
-		if index < len(actual.routes) && (actual.routes[index].pool != nil || len(actual.routes[index].policies) != 0 || len(actual.routes[index].httpBackends) != 0) {
+		if index < len(actual.routes) && (actual.routes[index].pool != nil || len(actual.routes[index].policies) != 0 || len(actual.routes[index].httpParts) != 0) {
 			continue
 		}
 		// Inventory was either completely observed or the parent was absent.
@@ -591,8 +620,8 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 	case graphRouteMutation:
 		route := desired.routes[step.routeIndex]
 		if step.backendKey != "" {
-			if index := slices.IndexFunc(route.httpBackends, func(backend desiredRoute) bool { return backend.backendKey == step.backendKey }); index != -1 {
-				route = route.httpBackends[index]
+			if index := slices.IndexFunc(route.httpParts, func(backend desiredRoute) bool { return backend.backendKey == step.backendKey }); index != -1 {
+				route = route.httpParts[index]
 			}
 		}
 		route.spec.Gateway = actual.state

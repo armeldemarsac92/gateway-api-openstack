@@ -18,30 +18,53 @@ package octavia
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
 	"github.com/gophercloud/gophercloud/v2/pagination"
 )
 
-// ListPolicies lists and extracts L7 policies matching opts.
-func (s *Service) ListPolicies(ctx context.Context, opts l7policies.ListOpts) ([]l7policies.L7Policy, error) {
-	pages, err := l7policies.List(s.client, opts).AllPages(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("list L7 policies: %w", err)
-	}
-	items, err := l7policies.ExtractL7Policies(pages)
-	if err != nil {
-		return nil, fmt.Errorf("extract L7 policies: %w", err)
-	}
-	return items, nil
-}
-
 // ListCompletePolicies requires an explicit collection on every page.
 func (s *Service) ListCompletePolicies(ctx context.Context, opts l7policies.ListOpts) ([]l7policies.L7Policy, error) {
-	return listCompleteCollection(ctx, l7policies.List(s.client, opts), func(result pagination.PageResult) pagination.Page {
-		return l7policies.L7PolicyPage{LinkedPageBase: pagination.LinkedPageBase{PageResult: result}}
-	}, "l7policies", l7policies.ExtractL7Policies)
+	return listCompleteCollection(ctx, l7policies.List(s.client, opts), completePolicyPage, "l7policies", l7policies.ExtractL7Policies)
+}
+
+func completePolicyPage(result pagination.PageResult) pagination.Page {
+	if result.StatusCode == http.StatusNoContent {
+		result.Body = map[string]any{"l7policies": []any{}}
+	}
+	return l7policies.L7PolicyPage{LinkedPageBase: pagination.LinkedPageBase{PageResult: result}}
+}
+
+// PolicyObservation preserves readback fields whose absence matters before
+// removing a redirect's rules or changing its action.
+type PolicyObservation struct {
+	l7policies.L7Policy
+	AdminState    *bool           `json:"admin_state_up"`
+	PoolReference json.RawMessage `json:"redirect_pool_id"`
+}
+
+func (s *Service) ObservePolicies(ctx context.Context, opts l7policies.ListOpts) ([]PolicyObservation, error) {
+	return listCompleteCollection(ctx, l7policies.List(s.client, opts), completePolicyPage, "l7policies", func(page pagination.Page) ([]PolicyObservation, error) {
+		var response struct {
+			Policies []PolicyObservation `json:"l7policies"`
+		}
+		err := page.(l7policies.L7PolicyPage).ExtractInto(&response)
+		for i := range response.Policies {
+			item := &response.Policies[i]
+			if item.AdminState != nil {
+				item.AdminStateUp = *item.AdminState
+			}
+			if len(item.PoolReference) != 0 {
+				if decodeErr := json.Unmarshal(item.PoolReference, &item.RedirectPoolID); decodeErr != nil {
+					return nil, decodeErr
+				}
+			}
+		}
+		return response.Policies, err
+	})
 }
 
 // CreatePolicy creates one L7 policy.
@@ -77,6 +100,34 @@ func (s *Service) ListCompleteRules(ctx context.Context, policyID string, opts l
 	return listCompleteCollection(ctx, l7policies.ListRules(s.client, policyID, opts), func(result pagination.PageResult) pagination.Page {
 		return l7policies.RulePage{LinkedPageBase: pagination.LinkedPageBase{PageResult: result}}
 	}, "rules", l7policies.ExtractRules)
+}
+
+// RuleObservation preserves the flags needed to confirm each redirect rule.
+type RuleObservation struct {
+	l7policies.Rule
+	AdminState *bool `json:"admin_state_up"`
+	Inverted   *bool `json:"invert"`
+}
+
+func (s *Service) ObserveRules(ctx context.Context, policyID string, opts l7policies.ListRulesOpts) ([]RuleObservation, error) {
+	return listCompleteCollection(ctx, l7policies.ListRules(s.client, policyID, opts), func(result pagination.PageResult) pagination.Page {
+		return l7policies.RulePage{LinkedPageBase: pagination.LinkedPageBase{PageResult: result}}
+	}, "rules", func(page pagination.Page) ([]RuleObservation, error) {
+		var response struct {
+			Rules []RuleObservation `json:"rules"`
+		}
+		err := page.(l7policies.RulePage).ExtractInto(&response)
+		for i := range response.Rules {
+			item := &response.Rules[i]
+			if item.AdminState != nil {
+				item.AdminStateUp = *item.AdminState
+			}
+			if item.Inverted != nil {
+				item.Invert = *item.Inverted
+			}
+		}
+		return response.Rules, err
+	})
 }
 
 // CreateRule creates one L7 rule beneath a policy.

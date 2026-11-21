@@ -23,22 +23,41 @@ import (
 	"unicode/utf8"
 )
 
-// PathRuleValues returns the values of the optional EQUAL_TO and STARTS_WITH
-// rules. Non-root prefixes need both to enforce element-wise matching.
-func PathRuleValues(path string, isPrefix bool) (exact, prefix string, err error) {
+// PathRules carries either an anchored REGEX rule or the literal L7 rules.
+type PathRules struct {
+	Exact  string
+	Prefix string
+	Regex  string
+}
+
+// PathRuleValues validates the Octavia rule values for a path match. A non-root
+// prefix uses two literal rules or an anchored regex with a segment boundary.
+func PathRuleValues(path string, isPrefix bool) (PathRules, error) {
 	if path == "" {
 		path = "/"
 	}
-	exact = path
 	if isPrefix {
-		exact = strings.TrimRight(path, "/")
-		prefix = exact + "/"
+		path = strings.TrimRight(path, "/")
 	}
-	length := max(utf8.RuneCountInString(exact), utf8.RuneCountInString(prefix))
+	rules := PathRules{Exact: path}
+	if isPrefix {
+		rules.Prefix = path + "/"
+	}
+	if strings.Contains(path, "'") {
+		// The stock Amphora template leaves apostrophes unescaped. Hex
+		// notation preserves the literal character through HAProxy parsing.
+		end := "$"
+		if isPrefix {
+			end = "($|/)"
+		}
+		literal := strings.ReplaceAll(regexp.QuoteMeta(path), "'", `\x27`)
+		rules = PathRules{Regex: "^" + literal + end}
+	}
+	length := max(utf8.RuneCountInString(rules.Exact), utf8.RuneCountInString(rules.Prefix), utf8.RuneCountInString(rules.Regex))
 	if length > maxL7RuleValueLength {
-		return "", "", fmt.Errorf("path requires an Octavia L7 rule value of %d characters, exceeding the %d character limit", length, maxL7RuleValueLength)
+		return PathRules{}, fmt.Errorf("path requires an Octavia L7 rule value of %d characters, exceeding the %d character limit", length, maxL7RuleValueLength)
 	}
-	return exact, prefix, nil
+	return rules, nil
 }
 
 var literalPathSegments = regexp.MustCompile(`^/[a-zA-Z0-9_/-]+$`)

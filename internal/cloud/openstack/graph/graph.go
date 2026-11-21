@@ -165,7 +165,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	}
 	var plan []graphMutation
 	defaultPool := usesDefaultPool(actual.protocol)
-	planBeforeSecurity := defaultPool || actual.scoped && actual.protocol == cloud.ListenerProtocolHTTP || hasHTTPBackends(desired, actual)
+	planBeforeSecurity := defaultPool || actual.scoped && actual.protocol == cloud.ListenerProtocolHTTP || hasHTTPRouteParts(desired, actual)
 	if planBeforeSecurity {
 		plan, result, err = p.buildGatewayGraphPlan(desired, actual)
 		if err != nil {
@@ -235,11 +235,11 @@ func (p *Provider) validateGraphTrafficSecurity(ctx context.Context, desired des
 	routes := make([]cloud.RouteSpec, 0, len(desired.routes))
 	for index, route := range desired.routes {
 		if desired.spec.Routes[index].Disposition == cloud.GraphEnsure && !deniedPorts[scopedHTTPRoutePort(route)] {
-			if len(route.httpBackends) == 0 {
+			if len(route.httpParts) == 0 {
 				routes = append(routes, route.spec)
 			}
-			for _, backend := range route.httpBackends {
-				if !backend.unavailable {
+			for _, backend := range route.httpParts {
+				if !backend.unavailable && !backend.redirect {
 					routes = append(routes, backend.spec)
 				}
 			}
@@ -384,6 +384,12 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 	rankByPort := make(map[int]int)
 	policiesByPort := make(map[int][]*desiredPolicy)
 	policyRanksByPort := make(map[int]map[int]bool)
+	var forwardingByPort map[int][]cloud.HTTPPathMatch
+	if slices.ContainsFunc(spec.Routes, func(node cloud.RouteGraphNode) bool {
+		return node.Disposition == cloud.GraphEnsure && len(node.Spec.HTTPRedirects) != 0
+	}) {
+		forwardingByPort = redirectForwardingByPort(spec)
+	}
 	for _, node := range spec.Routes {
 		id := node.Spec.Identity
 		if !validGraphDisposition(node.Disposition) {
@@ -463,7 +469,11 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 			if !node.Spec.GatewayRequirements.Equal(gatewayRequirements(spec.Gateway.Spec)) {
 				return desiredGatewayGraph{}, &cloud.GraphError{Identity: id, Err: fmt.Errorf("%w: route and Gateway infrastructure requirements differ", cloud.ErrOwnershipConflict)}
 			}
-			route, err = p.buildDesiredRoute(node.Spec)
+			physicalPort := httpPort
+			if physicalPort == 0 {
+				physicalPort = spec.Gateway.Spec.ListenerPort
+			}
+			route, err = p.buildDesiredGatewayRoute(node.Spec, forwardingByPort[physicalPort])
 			if err != nil {
 				return desiredGatewayGraph{}, &cloud.GraphError{Identity: id, Err: err}
 			}
@@ -473,15 +483,26 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 					ranks = make(map[int]bool)
 					policyRanksByPort[httpPort] = ranks
 				}
+				addRank := func(rank int) error {
+					if rank < 0 || ranks[rank] {
+						return &cloud.GraphError{Identity: id, Err: cloud.NewProviderError(cloud.ErrorCategoryTerminalValidation,
+							fmt.Errorf("HTTP match precedence %d must be nonnegative and distinct on its listener", rank))}
+					}
+					ranks[rank] = true
+					return nil
+				}
+				for _, rank := range route.redirectRanks {
+					if err := addRank(rank); err != nil {
+						return desiredGatewayGraph{}, err
+					}
+				}
 				for _, policies := range route.policySets() {
 					for i := range policies {
 						policy := &policies[i]
-						if policy.position == 1 {
-							if policy.precedence < 0 || ranks[policy.precedence] {
-								return desiredGatewayGraph{}, &cloud.GraphError{Identity: id, Err: cloud.NewProviderError(cloud.ErrorCategoryTerminalValidation,
-									fmt.Errorf("HTTP match precedence %d must be nonnegative and distinct on its listener", policy.precedence))}
+						if policy.redirect == nil && policy.position == 1 {
+							if err := addRank(policy.precedence); err != nil {
+								return desiredGatewayGraph{}, err
 							}
-							ranks[policy.precedence] = true
 						}
 						policiesByPort[httpPort] = append(policiesByPort[httpPort], policy)
 					}
@@ -565,8 +586,10 @@ func (d desiredGatewayGraph) routeOwners() []routeGraphOwner {
 	owners := make([]routeGraphOwner, len(d.routes))
 	for index, route := range d.routes {
 		owners[index].identity = route.identity
-		owners[index].expectsHTTPBackends = len(route.httpBackends) != 0
-		if d.spec.Routes[index].Disposition == cloud.GraphDelete {
+		owners[index].expectsHTTPParts = len(route.httpParts) != 0
+		node := d.spec.Routes[index]
+		owners[index].requiresPolicyAbsenceProof = node.Disposition == cloud.GraphDelete || node.WaitForHTTPPolicyRemoval
+		if node.Disposition == cloud.GraphDelete {
 			owners[index].cleanupProtocol = route.spec.GatewayRequirements.ListenerProtocol
 		}
 	}
@@ -743,7 +766,7 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 	if err != nil {
 		return actual, err
 	}
-	if hasHTTPBackends(desired, actual) {
+	if hasHTTPRouteParts(desired, actual) {
 		if err := requireListenerDefaultPoolInventory(lb.ID, inventory); err != nil {
 			return actual, err
 		}

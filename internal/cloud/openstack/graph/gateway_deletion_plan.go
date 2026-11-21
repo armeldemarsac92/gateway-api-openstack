@@ -36,6 +36,7 @@ var errHTTPFragmentCleanup = errors.New("HTTP backend fragments require complete
 type gatewayDeletionResource string
 
 const (
+	gatewayDisableL7Policy  gatewayDeletionResource = "L7 policy disable"
 	gatewayDeletionL7Rule   gatewayDeletionResource = "L7 rule"
 	gatewayDeletionL7Policy gatewayDeletionResource = "L7 policy"
 	gatewayDeletionListener gatewayDeletionResource = "listener"
@@ -153,7 +154,7 @@ func (p *Provider) buildGatewayListenerDeletionPlans(
 	listenerPlan := make(gatewayListenerDeletionPlan, 0, len(listenerList))
 	var routePlan gatewayRouteDeletionPlan
 	for _, listener := range listenerList {
-		listenerRoutePlan, err := p.buildGatewayRouteDeletionPlan(ctx, identity, listener.ID)
+		listenerRoutePlan, err := p.buildGatewayRouteDeletionPlan(ctx, identity, listener)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -184,13 +185,17 @@ func (p *Provider) validateGatewayDeletionListener(identity Identity, listener l
 	return nil
 }
 
-func (p *Provider) buildGatewayRouteDeletionPlan(ctx context.Context, identity Identity, listenerID string) (gatewayRouteDeletionPlan, error) {
+func (p *Provider) buildGatewayRouteDeletionPlan(ctx context.Context, identity Identity, listener listeners.Listener) (gatewayRouteDeletionPlan, error) {
+	listenerID := listener.ID
 	policyList, err := p.octavia.ListCompletePolicies(ctx, l7policies.ListOpts{
 		ListenerID: listenerID,
 		ProjectID:  p.projectID,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list L7 policies beneath listener %s before Gateway deletion: %w", listenerID, err)
+	}
+	if err := crossCheckChildInventory("listener", listenerID, "L7 policy", listener.L7Policies, policyList, func(policy l7policies.L7Policy) string { return policy.ID }); err != nil {
+		return nil, err
 	}
 	if slices.ContainsFunc(policyList, func(policy l7policies.L7Policy) bool {
 		role, ok := readRouteResourceRole(policy.Tags, rolePolicyExact, rolePolicyPrefix)
@@ -220,6 +225,9 @@ func (p *Provider) buildGatewayRouteDeletionPlan(ctx context.Context, identity I
 		ruleList, err := p.octavia.ListCompleteRules(ctx, policy.ID, l7policies.ListRulesOpts{ProjectID: p.projectID})
 		if err != nil {
 			return nil, fmt.Errorf("list L7 rules beneath policy %s before Gateway deletion: %w", policy.ID, err)
+		}
+		if err := crossCheckChildInventory("L7 policy", policy.ID, "rule", policy.Rules, ruleList, func(rule l7policies.Rule) string { return rule.ID }); err != nil {
+			return nil, err
 		}
 		sort.Slice(ruleList, func(i, j int) bool { return ruleList[i].ID < ruleList[j].ID })
 		for _, rule := range ruleList {
@@ -386,6 +394,7 @@ func matchesAnyGatewayRole(identity Identity, tags []string, roles ...string) bo
 // any rules that might widen a serving policy.
 func (p *Provider) httpGatewayDeletionPlan(routes []observedRouteGraph, listeners []listeners.Listener) (gatewayDeletionPlan, cloud.Outcome) {
 	var deletion gatewayDeletionPlan
+	var disables, retries gatewayRouteDeletionPlan
 	for _, route := range routes {
 		for _, part := range route.parts() {
 			if slices.ContainsFunc(part.policies, observedRoutePolicy.pending) {
@@ -395,6 +404,14 @@ func (p *Provider) httpGatewayDeletionPlan(routes []observedRouteGraph, listener
 				return gatewayDeletionPlan{}, p.progressingOutcome(issue)
 			}
 			for _, policy := range part.policies {
+				if policy.redirect {
+					step := gatewayDeletionStep{resource: gatewayDisableL7Policy, resourceID: policy.policy.ID}
+					if policy.policy.ProvisioningStatus == "ERROR" {
+						retries = append(retries, step)
+					} else if policy.policy.AdminStateUp {
+						disables = append(disables, step)
+					}
+				}
 				for _, rule := range policy.rules {
 					deletion.routes = append(deletion.routes, gatewayDeletionStep{
 						resource: gatewayDeletionL7Rule, resourceID: rule.rule.ID, parentID: policy.policy.ID,
@@ -407,6 +424,7 @@ func (p *Provider) httpGatewayDeletionPlan(routes []observedRouteGraph, listener
 			}
 		}
 	}
+	deletion.routes = append(append(disables, retries...), deletion.routes...)
 	for _, listener := range listeners {
 		deletion.listeners = append(deletion.listeners, listenerDeletionStep(listener.ID))
 	}
@@ -432,11 +450,7 @@ func (p *Provider) recoverHTTPBackendGatewayDeletion(ctx context.Context, identi
 	if err != nil {
 		return gatewayDeletionPlan{}, err
 	}
-	var recoverGateway *Identity
-	if len(owners) == 0 {
-		recoverGateway = &identity
-	}
-	routes, err := p.observeRouteGraphsFromPools(ctx, owners, lb, listener, cloud.ListenerProtocolHTTP, nil, poolItems, recoverGateway)
+	routes, err := p.observeRouteGraphsFromPools(ctx, owners, lb, listener, cloud.ListenerProtocolHTTP, nil, poolItems, &identity)
 	if err != nil {
 		return gatewayDeletionPlan{}, err
 	}

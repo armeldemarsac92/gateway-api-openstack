@@ -42,6 +42,7 @@ type desiredPolicy struct {
 	backendKey        string
 	matchKey          string
 	hostnameRuleValue string
+	redirect          *desiredRedirectPolicy
 }
 
 type desiredRule struct {
@@ -49,6 +50,7 @@ type desiredRule struct {
 	ruleType    l7policies.RuleType
 	compareType l7policies.CompareType
 	value       string
+	invert      bool
 }
 
 type desiredRoute struct {
@@ -58,9 +60,12 @@ type desiredRoute struct {
 	healthMonitor     cloud.HealthMonitorConfig
 	policies          []desiredPolicy
 	hostnameRuleValue string
-	httpBackends      []desiredRoute
+	httpParts         []desiredRoute
 	backendKey        string
 	unavailable       bool
+	redirect          bool
+	redirectRanks     []int
+	redirectIssue     string
 }
 
 func (r desiredRoute) protocol() string {
@@ -75,6 +80,9 @@ func (r desiredRoute) monitorType() string {
 }
 
 func (p *Provider) buildDesiredRoute(spec cloud.RouteSpec) (desiredRoute, error) {
+	if len(spec.HTTPRedirects) != 0 {
+		return desiredRoute{}, cloud.NewProviderError(cloud.ErrorCategoryTerminalValidation, errors.New("HTTP redirects require the complete Gateway routing snapshot"))
+	}
 	if len(spec.HTTPBackends) != 0 {
 		return p.buildDesiredHTTPBackends(spec)
 	}
@@ -241,7 +249,7 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 		}
 		backendKeys[key] = true
 		partSpec := spec
-		partSpec.HTTPBackends, partSpec.Members = nil, backend.Members
+		partSpec.HTTPBackends, partSpec.HTTPRedirects, partSpec.Members = nil, nil, backend.Members
 		part, err := p.buildDesiredRoutePart(partSpec, key, backend.Unavailable)
 		if err != nil {
 			return desiredRoute{}, err
@@ -253,12 +261,7 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 		}
 		matchKeys := make(map[string]bool, len(backend.Matches))
 		for _, match := range backend.Matches {
-			if match.PathType == cloud.PathMatchPrefix {
-				match.PathValue = strings.TrimRight(match.PathValue, "/")
-			}
-			if match.PathValue == "" {
-				match.PathValue = "/"
-			}
+			match = normalizeGroupedHTTPMatch(match)
 			policies, hostnameRuleValue, err := httpPathPolicies(match, true)
 			if err != nil {
 				return invalid(err)
@@ -283,18 +286,18 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 				part.policies = append(part.policies, policy)
 			}
 		}
-		route.httpBackends = append(route.httpBackends, part)
+		route.httpParts = append(route.httpParts, part)
 	}
-	sort.Slice(route.httpBackends, func(i, j int) bool { return route.httpBackends[i].backendKey < route.httpBackends[j].backendKey })
+	sort.Slice(route.httpParts, func(i, j int) bool { return route.httpParts[i].backendKey < route.httpParts[j].backendKey })
 	return route, nil
 }
 
 func (r desiredRoute) policySets() [][]desiredPolicy {
-	if len(r.httpBackends) == 0 {
+	if len(r.httpParts) == 0 {
 		return [][]desiredPolicy{r.policies}
 	}
-	policies := make([][]desiredPolicy, 0, len(r.httpBackends))
-	for _, backend := range r.httpBackends {
+	policies := make([][]desiredPolicy, 0, len(r.httpParts))
+	for _, backend := range r.httpParts {
 		policies = append(policies, backend.policies)
 	}
 	return policies
@@ -311,11 +314,21 @@ func httpResourceRole(base, backend, match string) string {
 	return openstackidentity.HTTPFragmentRole(base, backend, match)
 }
 
+func normalizeGroupedHTTPMatch(match cloud.HTTPPathMatch) cloud.HTTPPathMatch {
+	if match.PathType == cloud.PathMatchPrefix {
+		match.PathValue = strings.TrimRight(match.PathValue, "/")
+	}
+	if match.PathValue == "" {
+		match.PathValue = "/"
+	}
+	return match
+}
+
 func httpPathPolicies(match cloud.HTTPPathMatch, grouped bool) ([]desiredPolicy, string, error) {
 	if match.PathType != cloud.PathMatchExact && match.PathType != cloud.PathMatchPrefix {
 		return nil, "", fmt.Errorf("unsupported path match type %q", match.PathType)
 	}
-	exactPath, prefixPath, err := amphora.PathRuleValues(match.PathValue, match.PathType == cloud.PathMatchPrefix)
+	pathRules, err := amphora.PathRuleValues(match.PathValue, match.PathType == cloud.PathMatchPrefix)
 	if err != nil {
 		return nil, "", err
 	}
@@ -326,12 +339,18 @@ func httpPathPolicies(match cloud.HTTPPathMatch, grouped bool) ([]desiredPolicy,
 			return nil, "", err
 		}
 	}
-	if grouped && match.PathType == cloud.PathMatchPrefix {
-		if pattern, ok := amphora.LiteralPathPrefixPattern(exactPath); ok {
-			return []desiredPolicy{{role: rolePolicyPrefix, position: 1, compareType: l7policies.CompareTypeRegex, path: pattern}}, hostnameRuleValue, nil
+	role := rolePolicyExact
+	pattern := pathRules.Regex
+	if match.PathType == cloud.PathMatchPrefix {
+		role = rolePolicyPrefix
+		if pattern == "" && grouped {
+			pattern, _ = amphora.LiteralPathPrefixPattern(pathRules.Exact)
 		}
 	}
-	return policiesFor(exactPath, prefixPath), hostnameRuleValue, nil
+	if pattern != "" {
+		return []desiredPolicy{{role: role, position: 1, compareType: l7policies.CompareTypeRegex, path: pattern}}, hostnameRuleValue, nil
+	}
+	return policiesFor(pathRules.Exact, pathRules.Prefix), hostnameRuleValue, nil
 }
 
 func policiesFor(exactPath, prefixPath string) []desiredPolicy {
@@ -350,18 +369,26 @@ func rulesFor(policy desiredPolicy, hostnameRuleValue string) []desiredRule {
 		hostnameRuleValue = policy.hostnameRuleValue
 	}
 	rules := []desiredRule{{
-		role:        httpResourceRole(roleRulePath, policy.backendKey, policy.matchKey),
+		role:        policyRuleRole(policy, roleRulePath, ""),
 		ruleType:    l7policies.TypePath,
 		compareType: policy.compareType,
 		value:       policy.path,
 	}}
 	if hostnameRuleValue != "" {
 		rules = append(rules, desiredRule{
-			role:        httpResourceRole(roleRuleHost, policy.backendKey, policy.matchKey),
+			role:        policyRuleRole(policy, roleRuleHost, ""),
 			ruleType:    l7policies.TypeHostName,
 			compareType: l7policies.CompareTypeRegex,
 			value:       hostnameRuleValue,
 		})
+	}
+	if policy.redirect != nil {
+		for _, guard := range policy.redirect.guards {
+			rules = append(rules, desiredRule{
+				role:     policyRuleRole(policy, roleRuleRedirectGuard, redirectGuardKey(guard)),
+				ruleType: guard.ruleType, compareType: guard.compareType, value: guard.value, invert: true,
+			})
+		}
 	}
 	return rules
 }
