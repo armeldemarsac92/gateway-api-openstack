@@ -51,7 +51,7 @@ kubectl -n openstack-gateway-system create configmap openstack-gateway-tls-revis
   kubectl apply --server-side --field-manager=gateway-certificate-operator -f -
 ```
 
-The full ConfigMap directory is mounted read-only. After the kubelet projects a new map into the Pod, a subsequent HTTPS reconciliation reads it. Projection and provider provisioning both take time. With multiple controller replicas, verify the expected map is available to each replica before a planned leadership change. [Kubernetes projected ConfigMap updates](https://kubernetes.io/docs/concepts/configuration/configmap/#mounted-configmaps-are-updated-automatically)
+The full ConfigMap directory is mounted read-only. After the kubelet projects a new map into the Pod, a subsequent HTTPS reconciliation reads it. Healthy and settled listeners check enrollment at least once per five-second polling interval, subject to work-queue and API latency. Kubelet projection, provider retries and listener provisioning also affect the time until a new connection sees the change. With multiple controller replicas, verify the expected map is available to each replica before a planned leadership change. [Kubernetes projected ConfigMap updates](https://kubernetes.io/docs/concepts/configuration/configmap/#mounted-configmaps-are-updated-automatically)
 
 ## Attach a tenant route
 

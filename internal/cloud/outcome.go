@@ -86,9 +86,12 @@ type GatewayResult struct {
 	AddressAbsent bool
 	// HTTPPolicyTransition indicates an outdated rule or a policy awaiting withdrawal.
 	HTTPPolicyTransition bool
-	// ScopedListenerReadyPorts contains the individually programmed listener ports when
-	// the provider has observed a multi-listener TCP or UDP Gateway.
+	// ScopedListenerReadyPorts contains the individually programmed listener ports.
 	ScopedListenerReadyPorts []int
+	// ScopedListenerDeferredPorts still match their active frontends during a TLS
+	// withdrawal. The route inventory was deferred. Only a previously programmed
+	// section at the same generation can retain its status for this observation.
+	ScopedListenerDeferredPorts []int
 }
 
 // GatewayReadyResult returns a converged Gateway result.

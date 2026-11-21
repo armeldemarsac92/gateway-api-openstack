@@ -20,12 +20,12 @@ import (
 	"cmp"
 	"context"
 	"errors"
-	"reflect"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -215,113 +215,105 @@ func (r *Reconciler) addTLSGraphInput(ctx context.Context, snapshot *gatewayMuta
 			listener.TLS = &cloud.ListenerTLS{CertificateRef: resolution.ref}
 		}
 	}
-	input.TLS = &graph.TLSInput{
-		Check: func(ctx context.Context) (changed, denied []int) {
-			// Status must not attest a frontend from an obsolete Gateway
-			// revision or from a class/bundle that can no longer authorize it.
-			if err := r.sealGatewayMutationSnapshot(ctx, snapshot); err != nil {
-				for port := range resolutions {
-					changed = append(changed, port)
-				}
-				slices.Sort(changed)
-				return changed, changed
-			}
-			seen := make(map[int]bool, len(resolutions))
-			for _, listener := range snapshot.listeners {
-				port := int(listener.Port)
-				if listener.Protocol != gatewayv1.HTTPSProtocolType || seen[port] {
-					continue
-				}
-				seen[port] = true
-				current := r.resolveTLS(ctx, snapshot.gateway, listener)
-				if current.ref != resolutions[port].ref {
-					changed = append(changed, port)
-				}
-				if current.ref == "" {
-					denied = append(denied, port)
-				}
-			}
-			return changed, denied
-		},
-		Withdraw: func(ctx context.Context, ports []int, denied func(context.Context) []int) (graph.GatewayInput, error) {
-			return r.tlsWithdrawalInput(ctx, snapshot.gateway, input.Node.Spec.Identity, ports, func(ctx context.Context) error {
-				current := denied(ctx)
-				if !slices.ContainsFunc(ports, func(port int) bool { return !slices.Contains(current, port) }) {
-					return nil
-				}
-				return errGatewayChanged
-			})
-		},
-	}
 }
 
-func (r *Reconciler) tlsWithdrawalInput(ctx context.Context, expected *gatewayv1.Gateway, identity cloud.Identity, ports []int, authority func(context.Context) error) (graph.GatewayInput, error) {
+func (r *Reconciler) tlsWithdrawalInput(ctx context.Context, expected *gatewayv1.Gateway, identity cloud.Identity) (graph.GatewayInput, error) {
+	identity.RouteNamespace, identity.RouteName, identity.RouteUID = "", "", ""
 	port, err := strconv.Atoi(expected.Annotations[r.Config.GatewayListenerPortAnnotation()])
 	if err != nil || port < 1 || port > 65535 {
 		return graph.GatewayInput{}, errGatewayChanged
 	}
+	listeners, err := r.liveTLSListeners(ctx, expected, identity)
+	if err != nil {
+		return graph.GatewayInput{}, err
+	}
 	validate := func(ctx context.Context) error {
-		var live gatewayv1.Gateway
-		if err := r.APIReader.Get(ctx, client.ObjectKeyFromObject(expected), &live); err != nil {
-			return errors.Join(errGatewayChanged, client.IgnoreNotFound(err))
+		latest, err := r.liveTLSListeners(ctx, expected, identity)
+		if err != nil {
+			return err
 		}
-		owner := identity
-		owner.RouteNamespace, owner.RouteName, owner.RouteUID = "", "", ""
-		if live.UID != expected.UID || !controllerutil.ContainsFinalizer(&live, r.Config.GatewayFinalizer()) ||
-			controller.ValidateGatewayBinding(r.Config, &live) != nil ||
-			controller.GatewayListenerScope(r.Config, &live) != gatewayv1.HTTPProtocolType ||
-			!controller.GatewayBindingMetadataEqual(r.Config, expected, &live) ||
-			controller.StoredGatewayIdentity(r.Config, &live) != owner {
+		if !slices.EqualFunc(listeners, latest, func(a, b cloud.ScopedListener) bool {
+			return a.Port == b.Port && a.TLS.CertificateRef == b.TLS.CertificateRef
+		}) {
 			return errGatewayChanged
 		}
-		return authority(ctx)
+		return nil
 	}
 	spec := cloud.GatewaySpec{Identity: identity, ListenerProtocol: cloud.ListenerProtocolHTTP,
-		ListenerPort: port, ScopedListeners: make([]cloud.ScopedListener, 0, len(ports))}
-	for _, port := range ports {
-		spec.ScopedListeners = append(spec.ScopedListeners, cloud.ScopedListener{Port: port, TLS: &cloud.ListenerTLS{}})
-	}
+		ListenerPort: port, ScopedListeners: listeners}
 	return graph.GatewayInput{Node: cloud.GatewayGraphNode{Disposition: cloud.GraphWithdrawTLS, Spec: spec}, Validate: validate}, nil
+}
+
+// liveTLSListeners authorizes each HTTPS port against the current Gateway,
+// independent of the triggering revision and the ordinary route graph.
+func (r *Reconciler) liveTLSListeners(ctx context.Context, expected *gatewayv1.Gateway, identity cloud.Identity) ([]cloud.ScopedListener, error) {
+	var live gatewayv1.Gateway
+	if err := r.APIReader.Get(ctx, client.ObjectKeyFromObject(expected), &live); err != nil {
+		return nil, errors.Join(errGatewayChanged, client.IgnoreNotFound(err))
+	}
+	if live.UID != expected.UID || !controllerutil.ContainsFinalizer(&live, r.Config.GatewayFinalizer()) ||
+		controller.ValidateGatewayBinding(r.Config, &live) != nil ||
+		controller.GatewayListenerScope(r.Config, &live) != gatewayv1.HTTPProtocolType ||
+		r.boundListenerProtocol(&live) != gatewayv1.HTTPProtocolType ||
+		!controller.GatewayBindingMetadataEqual(r.Config, expected, &live) ||
+		controller.StoredGatewayIdentity(r.Config, &live) != identity {
+		return nil, errGatewayChanged
+	}
+	listeners := []cloud.ScopedListener{}
+	if !live.DeletionTimestamp.IsZero() {
+		return listeners, nil
+	}
+	var class gatewayv1.GatewayClass
+	if err := r.APIReader.Get(ctx, client.ObjectKey{Name: string(live.Spec.GatewayClassName)}, &class); err != nil {
+		if apierrors.IsNotFound(err) {
+			return listeners, nil
+		}
+		return nil, err
+	}
+	if class.Spec.ControllerName != r.Config.ControllerName || !class.DeletionTimestamp.IsZero() ||
+		!controller.GatewayClassSupportsInstalledVersion(&class) || !hasHTTPS(&live) {
+		return listeners, nil
+	}
+	if err := r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
+		if errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) {
+			return listeners, nil
+		}
+		return nil, err
+	}
+	profile, profileErr := SupportedListenersForConfig(r.Config, &live)
+	if profileErr != nil {
+		// A rejected Gateway spec cannot authorize termination, but its
+		// HTTPS ports still cannot fall back to a plaintext frontend.
+		profile = httpsProfileListeners(r.Config, &live)
+	}
+	for _, listener := range profile {
+		if listener.Protocol != gatewayv1.HTTPSProtocolType {
+			continue
+		}
+		port := int(listener.Port)
+		if len(listeners) != 0 && listeners[len(listeners)-1].Port == port {
+			continue
+		}
+		var ref string
+		if profileErr == nil {
+			ref = r.resolveTLS(ctx, &live, listener).ref
+		}
+		listeners = append(listeners, cloud.ScopedListener{
+			Name: resourceDisplayName(strconv.Itoa(port), live.Namespace, live.Name, string(listener.Name)),
+			Port: port,
+			TLS:  &cloud.ListenerTLS{CertificateRef: ref},
+		})
+	}
+	return listeners, nil
 }
 
 func (r *Reconciler) observeGatewayTLSWithdrawal(ctx context.Context, request graph.Request) (graph.GatewayInput, error) {
 	expected := request.Gateway
-	// A Gateway-only withdrawal is for cleanup or for an invalid release/spec.
-	// Never permit a route trigger to use that authority.
 	if expected == nil || request.Route != nil || request.TCPRoute != nil || request.UDPRoute != nil ||
-		request.Identity.RouteUID != "" || request.Identity != controller.StoredGatewayIdentity(r.Config, expected) {
+		request.Identity != controller.StoredGatewayIdentity(r.Config, expected) {
 		return graph.GatewayInput{}, errGatewayChanged
 	}
-	return r.tlsWithdrawalInput(ctx, expected, request.Identity, nil, func(ctx context.Context) error {
-		var live gatewayv1.Gateway
-		if err := r.APIReader.Get(ctx, client.ObjectKeyFromObject(expected), &live); err != nil {
-			return errors.Join(errGatewayChanged, client.IgnoreNotFound(err))
-		}
-		if live.UID != expected.UID || live.Generation != expected.Generation || !reflect.DeepEqual(live.Spec, expected.Spec) {
-			return errGatewayChanged
-		}
-		if !live.DeletionTimestamp.IsZero() {
-			return nil
-		}
-		var class gatewayv1.GatewayClass
-		if err := r.APIReader.Get(ctx, client.ObjectKey{Name: string(live.Spec.GatewayClassName)}, &class); err != nil {
-			return err
-		}
-		if !controller.GatewayClassSupportsInstalledVersion(&class) || class.Spec.ControllerName != r.Config.ControllerName ||
-			!class.DeletionTimestamp.IsZero() {
-			return nil
-		}
-		if err := r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
-			if errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) {
-				return nil
-			}
-			return err
-		}
-		if _, err := SupportedListenersForConfig(r.Config, &live); err != nil {
-			return nil
-		}
-		return errGatewayChanged
-	})
+	return r.tlsWithdrawalInput(ctx, expected, request.Identity)
 }
 
 func httpsPorts(gateway *gatewayv1.Gateway) []int {

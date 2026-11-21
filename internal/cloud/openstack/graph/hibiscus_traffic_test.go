@@ -337,7 +337,7 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct, https bool, worker 
 				data["listeners"] = []record{}
 			}
 			data["members"] = ids(list(pool+"/"+id.(string)+"/members"), func(record) bool { return true })
-			data["healthmonitor_id"] = nil
+			// Stock Octavia omits healthmonitor_id until a monitor is attached.
 			for _, monitor := range list("/v2/lbaas/healthmonitors") {
 				if monitor["pool_id"] == id && id != disagreePoolMonitor {
 					data["healthmonitor_id"] = monitor["id"]
@@ -614,6 +614,11 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct, https bool, worker 
 		if result := reconcile(newProvider(), spec); result.Outcome.State != cloud.OutcomeProgressing || server["admin_state_up"] != false || poolListReads != beforePoolReads ||
 			!slices.Equal(writes[before:], []string{"PUT " + tlsPath}) {
 			t.Fatalf("HTTPS withdrawal was blocked: %v, writes %v", result.Outcome, writes[before:])
+		} else if !slices.Equal(result.Gateway.ScopedListenerDeferredPorts, []int{frontendAddress.Port}) ||
+			!slices.ContainsFunc(result.Routes, func(route cloud.RouteGraphResult) bool {
+				return route.Identity == spec.Routes[0].Spec.Identity && route.Result.ObservationDeferred
+			}) {
+			t.Fatal("withdrawing one port replaced the sibling's last observation")
 		}
 		disagreePoolMonitor = ""
 		before = len(writes)
@@ -651,10 +656,14 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct, https bool, worker 
 		withdraw := cloud.GatewayGraphSpec{Identity: spec.Identity, Gateway: cloud.GatewayGraphNode{
 			Disposition: cloud.GraphWithdrawTLS, Spec: cloud.GatewaySpec{
 				Identity: spec.Identity, ListenerProtocol: cloud.ListenerProtocolHTTP, ListenerPort: frontendAddress.Port,
-				ScopedListeners: []cloud.ScopedListener{{Name: "https", Port: httpsPort, TLS: &cloud.ListenerTLS{}}},
+				ScopedListeners: []cloud.ScopedListener{{Port: httpsPort, TLS: &cloud.ListenerTLS{CertificateRef: refA}}},
 			},
 		}}
 		before = len(writes)
+		if result := reconcile(newProvider(), withdraw); result.Outcome.State != cloud.OutcomeReady || len(writes) != before {
+			t.Fatal("a currently approved certificate was withdrawn")
+		}
+		withdraw.Gateway.Spec.ScopedListeners[0].TLS = &cloud.ListenerTLS{}
 		mutationDenied := errors.New("authorization changed before mutation")
 		withdraw.ValidateMutation = func(context.Context) error { return mutationDenied }
 		if _, err := newProvider().ReconcileGatewayGraph(ctx, withdraw); !errors.Is(err, mutationDenied) || len(writes) != before {

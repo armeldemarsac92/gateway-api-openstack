@@ -128,6 +128,14 @@ func TestGatewayForHTTPRoutePredicate(t *testing.T) {
 		Message:            "accepted",
 	}}
 	pred := GatewayForHTTPRoutePredicate(cfg)
+	readySection := mutateGateway(base, func(gateway *gatewayv1.Gateway) {
+		gateway.Status.Listeners = []gatewayv1.ListenerStatus{{Name: "https", Conditions: []metav1.Condition{{
+			Type: string(gatewayv1.ListenerConditionProgrammed), Status: metav1.ConditionTrue, ObservedGeneration: gateway.Generation,
+		}}}}
+	})
+	testPredicateUpdate(t, pred, readySection, mutateGateway(readySection, func(gateway *gatewayv1.Gateway) {
+		gateway.Status.Listeners[0].Conditions[0].Status = metav1.ConditionFalse
+	}), true, "section withdrawal while aggregate conditions are unchanged")
 
 	testPredicateUpdate(t, pred, base, mutateGateway(base, func(gateway *gatewayv1.Gateway) {
 		gateway.UID = "replacement"

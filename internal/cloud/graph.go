@@ -28,8 +28,9 @@ const (
 	GraphPreserve GraphDisposition = "Preserve"
 	// GraphDelete removes a component after a durable Kubernetes checkpoint.
 	GraphDelete GraphDisposition = "Delete"
-	// GraphWithdrawTLS only closes the listed denied TLS ports on an existing
-	// Gateway. An empty, non-nil set closes every owned HTTPS listener.
+	// GraphWithdrawTLS closes owned frontends inconsistent with the current
+	// HTTPS port and certificate list. An empty list withdraws all owned TLS.
+	// This operation cannot create, enable or reconfigure listeners.
 	GraphWithdrawTLS GraphDisposition = "WithdrawTLS"
 )
 

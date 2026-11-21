@@ -92,17 +92,25 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 		return graph.GatewayInput{}, errors.New("invalid Gateway graph action")
 	}
 	snapshot, err := r.observeGatewayMutationSnapshot(ctx, request.Gateway, gatewayBindingRequired, "")
+	binding := request.Gateway
+	if snapshot != nil {
+		binding = snapshot.gateway
+	}
+	var input graph.GatewayInput
+	if controller.GatewayListenerScope(r.Config, binding) == gatewayv1.HTTPProtocolType {
+		input.ObserveTLS = func(ctx context.Context) (graph.GatewayInput, error) {
+			return r.tlsWithdrawalInput(ctx, binding, request.Identity)
+		}
+	}
 	if err != nil {
-		return graph.GatewayInput{}, err
+		return input, err
 	}
-	desired := r.gatewaySpec(snapshot.gateway, snapshot.listeners, snapshot.topology)
-	input := graph.GatewayInput{
-		Object: snapshot.gateway, Node: cloud.GatewayGraphNode{Disposition: cloud.GraphEnsure, Spec: desired},
-		Validate: func(ctx context.Context) error { return r.sealGatewayMutationSnapshot(ctx, snapshot) },
-	}
+	input.Object = snapshot.gateway
+	input.Node = cloud.GatewayGraphNode{Disposition: cloud.GraphEnsure, Spec: r.gatewaySpec(snapshot.gateway, snapshot.listeners, snapshot.topology)}
+	input.Validate = func(ctx context.Context) error { return r.sealGatewayMutationSnapshot(ctx, snapshot) }
 	if usesHTTPSProfile(r.Config, snapshot.gateway) {
 		if err := r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
-			return graph.GatewayInput{}, err
+			return input, err
 		}
 		r.addTLSGraphInput(ctx, snapshot, &input)
 	}

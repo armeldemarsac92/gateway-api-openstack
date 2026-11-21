@@ -85,7 +85,7 @@ func (r *Reconciler) Reconcile(
 			result = ctrl.Result{}
 			retErr = errors.Join(retErr, scope.patchCause, err)
 		}
-		if retErr == nil && !result.Requeue && scope.gateway.DeletionTimestamp.IsZero() &&
+		if retErr == nil && scope.patchCause == nil && !result.Requeue && scope.gateway.DeletionTimestamp.IsZero() &&
 			usesHTTPSProfile(r.Config, scope.gateway) && (result.RequeueAfter == 0 || result.RequeueAfter > httpsPollInterval) {
 			result.RequeueAfter = httpsPollInterval
 		}
@@ -135,6 +135,9 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, scope *gatewayScope) (
 }
 
 func (r *Reconciler) reconcileUnmanagedGateway(ctx context.Context, scope *gatewayScope) (ctrl.Result, error) {
+	if result, withdrawn, err := r.withdrawBoundTLS(ctx, scope.gateway); err != nil || !withdrawn {
+		return result, err
+	}
 	result, err := r.cleanupGateway(ctx, scope)
 	if err == nil && result.RequeueAfter == 0 {
 		log.FromContext(ctx).V(1).Info("Cleaned up OpenStack resources for unmanaged Gateway")
@@ -164,6 +167,9 @@ func (r *Reconciler) reconcileGatewayReplacement(
 	scope *gatewayScope,
 	decision gatewayPhaseDecision,
 ) (ctrl.Result, error) {
+	if result, withdrawn, err := r.withdrawBoundTLS(ctx, scope.gateway); err != nil || !withdrawn {
+		return result, err
+	}
 	// An address conflict already checkpoints that this generation is unprogrammed.
 	programmed := meta.FindStatusCondition(scope.gateway.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed))
 	if programmed != nil && programmed.ObservedGeneration == scope.gateway.Generation &&
@@ -223,15 +229,22 @@ func (r *Reconciler) reconcileGatewayGraph(
 	}
 	var changedTLS *graph.TLSAuthorizationChanged
 	var tlsIssues map[gatewayv1.SectionName]httpsListenerIssue
+	var keepGatewayProgrammed bool
 	if usesHTTPSProfile(r.Config, scope.gateway) {
 		tlsIssues = r.listenerTLSIssues(ctx, scope.gateway)
-		defer func() { r.applyHTTPSListenerStatus(scope.gateway, scope.original.Status, tlsIssues, changedTLS) }()
+		defer func() {
+			r.applyHTTPSListenerStatus(scope.gateway, scope.original.Status, tlsIssues, changedTLS, keepGatewayProgrammed)
+		}()
+	}
+	if ports := graphResult.Gateway.ScopedListenerDeferredPorts; len(ports) != 0 {
+		defer func() { preserveProgrammedListeners(scope.gateway, scope.original.Status, ports) }()
 	}
 	if err != nil {
-		if errors.As(err, &changedTLS) {
+		if errors.As(err, &changedTLS) && err == changedTLS {
 			return ctrl.Result{RequeueAfter: time.Second}, nil
 		}
-		if errors.Is(err, errGatewayChanged) {
+		policy, classified := controller.ProviderFailurePolicyFor(err)
+		if errors.Is(err, errGatewayChanged) && !classified {
 			return ctrl.Result{}, err
 		}
 		var componentError *cloud.GraphError
@@ -244,11 +257,15 @@ func (r *Reconciler) reconcileGatewayGraph(
 					return ctrl.Result{}, statusErr
 				}
 			}
-			if policy, classified := controller.ProviderFailurePolicyFor(err); classified {
+			if classified {
+				if !policy.ReturnError {
+					scope.patchCause = controller.SafeProviderReconcileError(policy, err)
+				}
 				return controller.ProviderFailureResult(policy, err, string(scope.gateway.UID))
 			}
 			return ctrl.Result{}, controller.SafeProviderReconcileError(controller.ProviderFailurePolicy{Message: "The route graph could not be reconciled"}, err)
 		}
+		keepGatewayProgrammed = classified
 		return r.handleGatewayProviderFailure(ctx, scope, decision.listener, err, graphResult.Gateway)
 	}
 	gatewayResult := graphResult.Gateway

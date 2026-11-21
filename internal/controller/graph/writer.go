@@ -66,13 +66,8 @@ type GatewayInput struct {
 	Object   *gatewayv1.Gateway
 	Node     cloud.GatewayGraphNode
 	Validate func(context.Context) error
-	TLS      *TLSInput
-}
-
-// TLSInput protects termination independently of route or provider readiness.
-type TLSInput struct {
-	Check    func(context.Context) (changed, denied []int)
-	Withdraw func(context.Context, []int, func(context.Context) []int) (GatewayInput, error)
+	// ObserveTLS rebuilds withdrawal authority even if ordinary graph input is incomplete.
+	ObserveTLS func(context.Context) (GatewayInput, error)
 }
 
 // TLSAuthorizationChanged identifies ports whose observed authorization became stale.
@@ -129,7 +124,7 @@ func (sources RouteSources) ObserveRouteGraph(ctx context.Context, request Reque
 	return combined, nil
 }
 
-// Writer serializes fresh graph construction and the single provider operation.
+// Writer serializes fresh graph construction and provider operations.
 // All fields are immutable process dependencies.
 type Writer struct {
 	Coordinator *Coordinator
@@ -158,7 +153,7 @@ func (w *Writer) ReconcileGraph(ctx context.Context, request Request) (cloud.Gat
 	gateway, err := w.Gateway.ObserveGatewayGraph(ctx, request)
 	w.observeStage(StageGatewayInput, started, err)
 	if err != nil {
-		return cloud.GatewayGraphResult{}, err
+		return w.finishTLS(ctx, request.Identity, gateway, cloud.GatewayGraphResult{}, err)
 	}
 	if request.Action == WithdrawTLS {
 		return w.withdrawTLS(ctx, request.Identity, gateway)
@@ -167,19 +162,19 @@ func (w *Writer) ReconcileGraph(ctx context.Context, request Request) (cloud.Gat
 	routes, err := w.Routes.ObserveRouteGraph(ctx, request, gateway.Object)
 	w.observeStage(StageRouteInput, started, err)
 	if err != nil {
-		return cloud.GatewayGraphResult{}, w.finishTLS(ctx, request.Identity, gateway.TLS, err)
+		return w.finishTLS(ctx, request.Identity, gateway, cloud.GatewayGraphResult{}, err)
 	}
 	started = time.Now()
 	err = validateInputs(ctx, gateway, routes)
 	w.observeStage(StageValidation, started, err)
 	if err != nil {
-		return cloud.GatewayGraphResult{}, w.finishTLS(ctx, request.Identity, gateway.TLS, err)
+		return w.finishTLS(ctx, request.Identity, gateway, cloud.GatewayGraphResult{}, err)
 	}
 	identity := request.Identity
 	identity.RouteNamespace, identity.RouteName, identity.RouteUID = "", "", ""
 	started = time.Now()
 	spec := cloud.GatewayGraphSpec{Identity: identity, Gateway: gateway.Node, Routes: routes.Nodes}
-	if gateway.Validate != nil || routes.Validate != nil || gateway.TLS != nil {
+	if gateway.Validate != nil || routes.Validate != nil || gateway.ObserveTLS != nil {
 		spec.ValidateMutation = func(ctx context.Context) error { return validateInputs(ctx, gateway, routes) }
 	}
 	result, err := w.Provider.ReconcileGatewayGraph(ctx, spec)
@@ -189,45 +184,86 @@ func (w *Writer) ReconcileGraph(ctx context.Context, request Request) (cloud.Gat
 		}
 	}
 	w.observeStage(StageProvider, started, err)
-	err = w.finishTLS(ctx, request.Identity, gateway.TLS, err)
-	return result, err
+	return w.finishTLS(ctx, request.Identity, gateway, result, err)
 }
 
-func (w *Writer) finishTLS(ctx context.Context, identity cloud.Identity, tls *TLSInput, graphErr error) error {
-	if tls == nil {
-		return graphErr
+func (w *Writer) finishTLS(ctx context.Context, identity cloud.Identity, gateway GatewayInput, result cloud.GatewayGraphResult, graphErr error) (cloud.GatewayGraphResult, error) {
+	if gateway.ObserveTLS == nil || (graphErr == nil && !hasTLSListeners(gateway)) {
+		return result, graphErr
 	}
-	currentlyDenied := func(ctx context.Context) []int {
-		ports, denied := tls.Check(ctx)
-		if graphErr != nil {
-			ports = append(slices.Clone(ports), denied...)
-			slices.Sort(ports)
-			ports = slices.Compact(ports)
+	input, err := gateway.ObserveTLS(ctx)
+	if err != nil {
+		return result, errors.Join(graphErr, err)
+	}
+	changed := changedTLSListeners(gateway, input)
+	if graphErr == nil && len(changed) == 0 {
+		return result, nil
+	}
+	// Keep a change detected by the provider's mutation fence even if the
+	// certificate is authorized again by the time we observe withdrawal.
+	for cause := graphErr; cause != nil; cause = errors.Unwrap(cause) {
+		if previous, ok := cause.(*TLSAuthorizationChanged); ok {
+			changed = append(changed, previous.Ports...)
+			slices.Sort(changed)
+			changed = slices.Compact(changed)
+			graphErr = nil
+			break
 		}
-		return ports
 	}
-	ports := currentlyDenied(ctx)
-	if len(ports) == 0 {
-		return graphErr
-	}
-	input, err := tls.Withdraw(ctx, ports, currentlyDenied)
+	withdrawal, err := w.withdrawTLS(ctx, identity, input)
 	if err == nil {
-		_, err = w.withdrawTLS(ctx, identity, input)
+		result.Gateway.ScopedListenerDeferredPorts = withdrawal.Gateway.ScopedListenerDeferredPorts
 	}
-	return errors.Join(graphErr, &TLSAuthorizationChanged{Ports: ports}, err)
+	if len(changed) != 0 {
+		change := &TLSAuthorizationChanged{Ports: changed}
+		if graphErr == nil && err == nil {
+			return result, change
+		}
+		return result, errors.Join(graphErr, change, err)
+	}
+	if err == nil {
+		return result, graphErr
+	}
+	return result, errors.Join(graphErr, err)
+}
+
+func hasTLSListeners(input GatewayInput) bool {
+	return slices.ContainsFunc(input.Node.Spec.ScopedListeners, func(listener cloud.ScopedListener) bool {
+		return listener.TLS != nil
+	})
+}
+
+func changedTLSListeners(observed, current GatewayInput) []int {
+	refs := make(map[int]string, len(current.Node.Spec.ScopedListeners))
+	for _, listener := range current.Node.Spec.ScopedListeners {
+		if listener.TLS != nil {
+			refs[listener.Port] = listener.TLS.CertificateRef
+		}
+	}
+	var ports []int
+	for _, listener := range observed.Node.Spec.ScopedListeners {
+		if listener.TLS != nil && refs[listener.Port] != listener.TLS.CertificateRef {
+			ports = append(ports, listener.Port)
+		}
+	}
+	return ports
 }
 
 func (w *Writer) withdrawTLS(ctx context.Context, identity cloud.Identity, input GatewayInput) (cloud.GatewayGraphResult, error) {
-	if input.Node.Disposition != cloud.GraphWithdrawTLS || input.Validate == nil {
+	if input.Node.Disposition != cloud.GraphWithdrawTLS || input.Node.Spec.ScopedListeners == nil || input.Validate == nil {
 		return cloud.GatewayGraphResult{}, errors.New("invalid TLS-only withdrawal authority")
 	}
 	if err := input.Validate(ctx); err != nil {
 		return cloud.GatewayGraphResult{}, err
 	}
 	identity.RouteNamespace, identity.RouteName, identity.RouteUID = "", "", ""
-	return w.Provider.ReconcileGatewayGraph(ctx, cloud.GatewayGraphSpec{
+	result, err := w.Provider.ReconcileGatewayGraph(ctx, cloud.GatewayGraphSpec{
 		Identity: identity, Gateway: input.Node, ValidateMutation: input.Validate,
 	})
+	if err == nil {
+		err = result.Outcome.Validate()
+	}
+	return result, err
 }
 
 func validateInputs(ctx context.Context, gateway GatewayInput, routes RouteInputs) error {
@@ -241,8 +277,12 @@ func validateInputs(ctx context.Context, gateway GatewayInput, routes RouteInput
 			return err
 		}
 	}
-	if gateway.TLS != nil {
-		if ports, _ := gateway.TLS.Check(ctx); len(ports) != 0 {
+	if gateway.ObserveTLS != nil && hasTLSListeners(gateway) {
+		current, err := gateway.ObserveTLS(ctx)
+		if err != nil {
+			return err
+		}
+		if ports := changedTLSListeners(gateway, current); len(ports) != 0 {
 			return &TLSAuthorizationChanged{Ports: ports}
 		}
 	}

@@ -79,6 +79,8 @@ func (p *Provider) observeScopedHTTPGraph(ctx context.Context, desired desiredGa
 }
 
 func (route observedRouteGraph) validateScopedHTTPPoolChildren() error {
+	// Stock Octavia omits the pool pointer until a monitor exists. Confirm it
+	// against the complete monitor collection before changing any children.
 	listedMonitorID := ""
 	if route.monitor != nil {
 		listedMonitorID = route.monitor.ID
@@ -166,13 +168,11 @@ func (p *Provider) planScopedHTTPSWithdrawal(desired desiredGatewayGraph, actual
 		adminObserved := actual.adminObserved[listener.ID]
 		var withdraw bool
 		switch disposition {
-		case cloud.GraphEnsure:
+		case cloud.GraphEnsure, cloud.GraphWithdrawTLS:
 			withdraw = https && (!present || !scopedHTTPListenerMatches(listener, spec, adminObserved) || listener.ProvisioningStatus == "ERROR") ||
 				!https && present && spec.TLS != nil
 		case cloud.GraphDelete:
 			withdraw = https
-		case cloud.GraphWithdrawTLS:
-			withdraw = present || len(configured) == 0 && https
 		}
 		if !withdraw {
 			continue
@@ -194,6 +194,32 @@ func (p *Provider) planScopedHTTPSWithdrawal(desired desiredGatewayGraph, actual
 		}
 	}
 	actual.withdrawTLS = retry
+}
+
+// A withdrawal runs before route observation. Keep the existing status only
+// for a sibling whose owned frontend is still enabled with its expected TLS.
+func unchangedHTTPSWithdrawalSiblings(desired desiredGatewayGraph, actual observedGatewayGraph) []int {
+	if actual.loadBalancer == nil || !actual.loadBalancer.AdminStateUp || actual.state.VIPAddress == "" {
+		return nil
+	}
+	configured := scopedHTTPListeners(desired)
+	var ports []int
+	for _, listener := range actual.scopedListeners {
+		if listener.ID == actual.withdrawTLS.listenerID || !actual.adminObserved[listener.ID] ||
+			!listener.AdminStateUp || listener.ProvisioningStatus != "ACTIVE" {
+			continue
+		}
+		spec, present := configured[listener.ProtocolPort]
+		// A withdrawal-only request lists every intended HTTPS port. An
+		// unlisted plaintext frontend is outside that request's scope.
+		if !present && desired.spec.Gateway.Disposition != cloud.GraphWithdrawTLS {
+			continue
+		}
+		if scopedHTTPListenerMatches(listener, spec, true) {
+			ports = append(ports, listener.ProtocolPort)
+		}
+	}
+	return ports
 }
 
 func scopedHTTPRoutePort(route desiredRoute) int {

@@ -153,7 +153,7 @@ func (p *Provider) observeRouteGraphsWithListeners(ctx context.Context, owners [
 	graphs := make([]observedRouteGraph, len(owners))
 	defaultPool := usesDefaultPool(protocol)
 	scopedHTTP := protocol == cloud.ListenerProtocolHTTP && scopedListeners != nil
-	poolItems, err := p.listGatewayPools(ctx, lb, scopedHTTP)
+	poolItems, err := p.listGatewayPools(ctx, lb)
 	if err != nil {
 		return nil, err
 	}

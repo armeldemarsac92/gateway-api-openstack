@@ -46,8 +46,8 @@ func requireListenerDefaultPoolInventory(lbID string, inventory octavia.Listener
 	return nil
 }
 
-func (p *Provider) listGatewayPools(ctx context.Context, lb *octavia.LoadBalancer, requireMonitorID bool) ([]pools.Pool, error) {
-	items, err := p.octavia.ListCompletePools(ctx, pools.ListOpts{LoadbalancerID: lb.ID, ProjectID: p.projectID}, requireMonitorID)
+func (p *Provider) listGatewayPools(ctx context.Context, lb *octavia.LoadBalancer) ([]pools.Pool, error) {
+	items, err := p.octavia.ListCompletePools(ctx, pools.ListOpts{LoadbalancerID: lb.ID, ProjectID: p.projectID})
 	if err != nil {
 		return nil, fmt.Errorf("list pools beneath Gateway: %w", err)
 	}

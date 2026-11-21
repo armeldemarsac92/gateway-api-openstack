@@ -69,7 +69,7 @@ func (r *Reconciler) setGatewayUnsupportedVersion(
 	))
 	result, withdrawn, err := r.withdrawBoundTLS(ctx, gateway)
 	if usesHTTPSProfile(r.Config, gateway) {
-		r.applyHTTPSListenerStatus(gateway, scope.original.Status, nil, &graph.TLSAuthorizationChanged{Ports: httpsPorts(gateway)})
+		r.applyHTTPSListenerStatus(gateway, scope.original.Status, nil, &graph.TLSAuthorizationChanged{Ports: httpsPorts(gateway)}, false)
 	}
 	if err != nil || !withdrawn {
 		return result, err

@@ -592,6 +592,7 @@ func (r *Reconciler) applyHTTPSListenerStatus(
 	previous gatewayv1.GatewayStatus,
 	issues map[gatewayv1.SectionName]httpsListenerIssue,
 	changed *graph.TLSAuthorizationChanged,
+	keepGatewayProgrammed bool,
 ) {
 	if len(issues) == 0 && changed == nil {
 		return
@@ -642,8 +643,10 @@ func (r *Reconciler) applyHTTPSListenerStatus(
 		controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionAccepted),
 			accepted, string(gatewayv1.GatewayReasonListenersNotValid), message, gateway.Generation))
 	}
-	controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionProgrammed),
-		metav1.ConditionFalse, string(programmedReason), message, gateway.Generation))
+	if !keepGatewayProgrammed {
+		controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionProgrammed),
+			metav1.ConditionFalse, string(programmedReason), message, gateway.Generation))
+	}
 	preserveTransitionTimes(gateway.Status.Conditions, previous.Conditions)
 }
 
@@ -654,6 +657,27 @@ func preserveTransitionTimes(current, previous []metav1.Condition) {
 		existing := meta.FindStatusCondition(previous, current[i].Type)
 		if existing != nil && existing.Status == current[i].Status {
 			current[i].LastTransitionTime = existing.LastTransitionTime
+		}
+	}
+}
+
+// A TLS withdrawal observes the unaffected frontends before reading their
+// routes. Retain a section's own prior proof only at this Gateway generation.
+func preserveProgrammedListeners(gateway *gatewayv1.Gateway, previous gatewayv1.GatewayStatus, ports []int) {
+	for _, listener := range gateway.Spec.Listeners {
+		if !slices.Contains(ports, int(listener.Port)) {
+			continue
+		}
+		old := meta.FindStatusCondition(existingListenerConditionsFrom(previous.Listeners, listener.Name), string(gatewayv1.ListenerConditionProgrammed))
+		if old == nil || old.ObservedGeneration != gateway.Generation || old.Status != metav1.ConditionTrue {
+			continue
+		}
+		for i := range gateway.Status.Listeners {
+			status := &gateway.Status.Listeners[i]
+			if status.Name == listener.Name {
+				controller.SetCondition(&status.Conditions, *old)
+				break
+			}
 		}
 	}
 }

@@ -194,7 +194,8 @@ func GatewayForHTTPRoutePredicate(config Config) predicate.Predicate {
 			generationOrDeletionChanged(oldGateway, newGateway) ||
 			gatewayBindingChanged(config, oldGateway, newGateway) ||
 			gatewayAcceptedState(oldGateway) != gatewayAcceptedState(newGateway) ||
-			gatewayProgrammedState(oldGateway) != gatewayProgrammedState(newGateway)
+			gatewayProgrammedState(oldGateway) != gatewayProgrammedState(newGateway) ||
+			!maps.Equal(programmedListenerSections(oldGateway), programmedListenerSections(newGateway))
 	})
 }
 
@@ -370,6 +371,18 @@ func gatewayProgrammedState(gateway *gatewayv1.Gateway) programmedState {
 		reason:             condition.Reason,
 		observedGeneration: condition.ObservedGeneration,
 	}
+}
+
+// A route bound to a section consumes that section's current Programmed state.
+func programmedListenerSections(gateway *gatewayv1.Gateway) map[gatewayv1.SectionName]bool {
+	ready := make(map[gatewayv1.SectionName]bool)
+	for _, listener := range gateway.Status.Listeners {
+		condition := meta.FindStatusCondition(listener.Conditions, string(gatewayv1.ListenerConditionProgrammed))
+		if condition != nil && condition.Status == metav1.ConditionTrue && condition.ObservedGeneration == gateway.Generation {
+			ready[listener.Name] = true
+		}
+	}
+	return ready
 }
 
 type endpointState struct {

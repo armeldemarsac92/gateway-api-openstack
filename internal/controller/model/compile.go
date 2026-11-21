@@ -90,7 +90,7 @@ func compileListeners(gateway *gatewayv1.Gateway, operatorHTTPS bool) []Listener
 				Condition: string(gatewayv1.ListenerConditionAccepted), Reason: string(gatewayv1.ListenerReasonUnsupportedValue),
 				Message: "pre-routing request filters are not implemented by the HTTP compiler",
 			})
-		case listener.Protocol != gatewayv1.HTTPProtocolType && !(operatorHTTPS && listener.Protocol == gatewayv1.HTTPSProtocolType):
+		case listener.Protocol != gatewayv1.HTTPProtocolType && (listener.Protocol != gatewayv1.HTTPSProtocolType || !operatorHTTPS):
 			compiled.Diagnostics = append(compiled.Diagnostics, Diagnostic{
 				Condition: string(gatewayv1.ListenerConditionAccepted), Reason: string(gatewayv1.ListenerReasonUnsupportedProtocol),
 				Message: "only HTTP listeners can be resolved without certificate inputs",

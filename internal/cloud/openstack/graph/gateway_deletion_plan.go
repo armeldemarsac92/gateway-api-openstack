@@ -227,7 +227,7 @@ func (p *Provider) buildGatewayRouteDeletionPlan(ctx context.Context, identity I
 }
 
 func (p *Provider) buildGatewayPoolDeletionPlan(ctx context.Context, identity Identity, lb *octavia.LoadBalancer) (gatewayPoolDeletionPlan, error) {
-	poolList, err := p.listGatewayPools(ctx, lb, false)
+	poolList, err := p.listGatewayPools(ctx, lb)
 	if err != nil {
 		return nil, err
 	}

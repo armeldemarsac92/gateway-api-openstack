@@ -290,3 +290,52 @@ type fixedGatewayGraph struct {
 func (w fixedGatewayGraph) ReconcileGraph(context.Context, graph.Request) (cloud.GatewayGraphResult, error) {
 	return w.result, w.err
 }
+
+func TestWithdrawalPreservesOnlyCurrentProgrammedSiblings(t *testing.T) {
+	g := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Generation: 3}}
+	for i, name := range []gatewayv1.SectionName{"withdrawing", "serving", "older", "new"} {
+		port := gatewayv1.PortNumber(443)
+		if i > 0 {
+			port = 8443
+		}
+		g.Spec.Listeners = append(g.Spec.Listeners, gatewayv1.Listener{Name: name, Port: port})
+		g.Status.Listeners = append(g.Status.Listeners, gatewayv1.ListenerStatus{Name: name, Conditions: []metav1.Condition{{
+			Type: string(gatewayv1.ListenerConditionProgrammed), Status: metav1.ConditionFalse,
+			ObservedGeneration: 3, Reason: "Pending", LastTransitionTime: metav1.Unix(100, 0),
+		}}})
+	}
+	previous := g.Status.DeepCopy()
+	for i := range previous.Listeners[:3] {
+		c := &previous.Listeners[i].Conditions[0]
+		c.Status, c.Reason, c.LastTransitionTime = metav1.ConditionTrue, "Programmed", metav1.Unix(50, 0)
+	}
+	previous.Listeners[2].Conditions[0].ObservedGeneration = 2
+	preserveProgrammedListeners(g, *previous, []int{8443})
+	for i, section := range g.Status.Listeners {
+		condition := section.Conditions[0]
+		if (condition.Status == metav1.ConditionTrue) != (i == 1) {
+			t.Fatalf("unexpected Programmed condition for %s: %v", section.Name, condition)
+		}
+		if i == 1 && !condition.LastTransitionTime.Equal(&previous.Listeners[i].Conditions[0].LastTransitionTime) {
+			t.Fatal("the retained sibling acquired a new transition timestamp")
+		}
+	}
+}
+
+func TestDeniedCertificatePreservesGatewayProviderFailure(t *testing.T) {
+	g := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Generation: 1}}
+	g.Spec.Listeners = []gatewayv1.Listener{{Name: "web", Port: 443, Protocol: gatewayv1.HTTPSProtocolType}}
+	g.Status.Conditions = []metav1.Condition{{Type: "Programmed", Status: metav1.ConditionFalse,
+		ObservedGeneration: 1, Reason: "NoResources", Message: "The provider quota is exhausted"}}
+	previous := g.Status.DeepCopy()
+	issues := map[gatewayv1.SectionName]httpsListenerIssue{"web": {
+		condition: gatewayv1.ListenerConditionResolvedRefs, reason: gatewayv1.ListenerReasonInvalidCertificateRef,
+		message: "No approved certificate is available for this listener",
+	}}
+	(&Reconciler{}).applyHTTPSListenerStatus(g, *previous, issues, nil, true)
+	aggregate := meta.FindStatusCondition(g.Status.Conditions, "Programmed")
+	if aggregate.Reason != "NoResources" || aggregate.Message != previous.Conditions[0].Message ||
+		!meta.IsStatusConditionFalse(g.Status.Listeners[0].Conditions, "ResolvedRefs") {
+		t.Fatalf("expected both provider failure and listener certificate status, got %v", g.Status)
+	}
+}

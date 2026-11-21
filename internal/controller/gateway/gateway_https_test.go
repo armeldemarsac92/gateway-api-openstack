@@ -18,6 +18,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"testing"
 	"time"
@@ -128,8 +129,9 @@ func TestHTTPSGatewayWithdrawsAuthorizationChangedDuringProviderCall(t *testing.
 		}
 		if spec.Gateway.Disposition == cloud.GraphWithdrawTLS {
 			ports := spec.Gateway.Spec.ScopedListeners
-			if len(spec.Routes) != 0 || len(ports) != 1 || ports[0].Port != 443 ||
-				ports[0].TLS == nil || ports[0].TLS.CertificateRef != "" {
+			if len(spec.Routes) != 0 || len(ports) != 2 || ports[0].Port != 443 ||
+				ports[0].TLS == nil || ports[0].TLS.CertificateRef != "" || ports[1].Port != 8443 ||
+				ports[1].TLS == nil || ports[1].TLS.CertificateRef != "approved-second" || ports[1].Name == "" {
 				t.Fatalf("withdrawal should only affect port 443: %#v", spec)
 			}
 			return cloud.GatewayGraphResult{Outcome: cloud.ReadyOutcome()}, nil
@@ -251,5 +253,170 @@ func TestEnrolledHTTPSGatewayWithdrawsTLSDuringUnsupportedBundle(t *testing.T) {
 	}
 	if !withdrew {
 		t.Fatal("no verified TLS withdrawal was requested")
+	}
+}
+
+type failingHTTPSRouteSource struct{ err error }
+
+func (s failingHTTPSRouteSource) ObserveRouteGraph(context.Context, graph.Request, *gatewayv1.Gateway) (graph.RouteInputs, error) {
+	return graph.RouteInputs{}, s.err
+}
+
+func TestHTTPSGatewayWithdrawsUsingLiveAuthorityAfterGraphFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name                      string
+		removeHTTPS               bool
+		terminatingClass          bool
+		unmanagedClass            bool
+		editAddressDuringProvider bool
+		revokeSectionDuringWrite  bool
+		denyCertificate           bool
+		restoreBeforeMutation     bool
+		portRefs                  map[int]string
+	}{
+		{name: "last HTTPS removed while routes are unavailable", removeHTTPS: true},
+		{name: "class terminates before snapshot", terminatingClass: true},
+		{name: "class controller leaves before snapshot", unmanagedClass: true},
+		{name: "unrelated Gateway edit during provider call", editAddressDuringProvider: true, portRefs: map[int]string{443: "approved-https", 8443: "approved-second"}},
+		{name: "revised certificate reference during provider failure", revokeSectionDuringWrite: true, portRefs: map[int]string{443: "", 8443: "approved-second"}},
+		{name: "stable denial with a provider failure", denyCertificate: true, portRefs: map[int]string{443: "", 8443: "approved-second"}},
+		{name: "denied certificate restored before mutation", denyCertificate: true, restoreBeforeMutation: true, portRefs: map[int]string{443: "", 8443: "approved-second"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			cfg := testConfig()
+			cfg.OperatorHTTPS = true
+			gw := programmedTestGateway(cfg)
+			gw.Spec.Listeners = append(gw.Spec.Listeners, testHTTPSListener("https", 443), testHTTPSListener("second", 8443))
+			gw.Annotations[cfg.GatewayListenerProtocolAnnotation()] = string(gatewayv1.HTTPProtocolType)
+			completeGatewayTopologyFixture(cfg, gw)
+			controller.SetGatewayListenerScope(cfg, gw, gatewayv1.HTTPProtocolType)
+			if tc.removeHTTPS {
+				gw.Spec.Listeners = gw.Spec.Listeners[:1]
+				gw.Generation++
+			}
+			class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "openstack"}, Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName}}
+			if tc.terminatingClass {
+				now := metav1.Now()
+				class.DeletionTimestamp = &now
+				class.Finalizers = []string{"example.com/cleanup"}
+			}
+			if tc.unmanagedClass {
+				class.Spec.ControllerName = "example.com/another-controller"
+			}
+			kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gw, class).WithObjects(gw, class).Build()
+			routeErr := errors.New("list HTTPRoutes failed")
+			providerErr := cloud.NewProviderError(cloud.ErrorCategoryRetryableService, errors.New("ordinary provider failure"))
+			var withdrew bool
+			denied := tc.denyCertificate
+			provider := httpsGraphProvider(func(ctx context.Context, spec cloud.GatewayGraphSpec) (cloud.GatewayGraphResult, error) {
+				if spec.Gateway.Disposition == cloud.GraphWithdrawTLS {
+					if withdrew {
+						t.Fatal("duplicate fallback withdrawal")
+					}
+					withdrew = true
+					listeners := spec.Gateway.Spec.ScopedListeners
+					if listeners == nil || len(listeners) != len(tc.portRefs) || len(spec.Routes) != 0 {
+						t.Fatalf("withdrawal allowlist = %#v", listeners)
+					}
+					for _, listener := range listeners {
+						ref, exists := tc.portRefs[listener.Port]
+						if !exists || listener.TLS == nil || listener.TLS.CertificateRef != ref {
+							t.Fatalf("withdrawal listener = %#v", listener)
+						}
+					}
+					if tc.restoreBeforeMutation {
+						denied = false
+					}
+					if err := spec.ValidateMutation(ctx); err != nil {
+						return cloud.GatewayGraphResult{}, err
+					}
+					if tc.restoreBeforeMutation {
+						t.Fatal("mutation must be fenced when the planned revocation is stale")
+					}
+					return cloud.GatewayGraphResult{Outcome: cloud.ReadyOutcome()}, nil
+				}
+				if err := spec.ValidateMutation(ctx); err != nil {
+					return cloud.GatewayGraphResult{}, err
+				}
+				if tc.editAddressDuringProvider || tc.revokeSectionDuringWrite {
+					live := gw.DeepCopy()
+					if err := kube.Get(ctx, client.ObjectKeyFromObject(gw), live); err != nil {
+						t.Fatal(err)
+					}
+					live.Generation++
+					if tc.revokeSectionDuringWrite {
+						live.Spec.Listeners[1].TLS.CertificateRefs[0].Name = "unapproved"
+					} else {
+						live.Spec.Addresses = []gatewayv1.GatewaySpecAddress{{Value: "192.0.2.123"}}
+					}
+					if err := kube.Update(ctx, live); err != nil {
+						t.Fatal(err)
+					}
+				}
+				return cloud.GatewayGraphResult{}, providerErr
+			})
+			r := newTestReconciler(Reconciler{Client: kube, APIReader: kube, Config: cfg, Coordinator: &graph.Coordinator{},
+				Certificates: resolveHTTPSFunc(func(_ context.Context, _ *gatewayv1.Gateway, listener *gatewayv1.Listener) (string, gatewayv1.ListenerConditionReason) {
+					if listener.Port == 443 && (denied || listener.TLS.CertificateRefs[0].Name == "unapproved") {
+						return "", gatewayv1.ListenerReasonRefNotPermitted
+					}
+					return "approved-" + string(listener.Name), ""
+				})}, provider)
+			wantErr := error(providerErr)
+			var err error
+			switch {
+			case tc.removeHTTPS:
+				r.Writer.(*graph.Writer).Routes = failingHTTPSRouteSource{err: routeErr}
+				wantErr = routeErr
+				_, err = r.ensureGateway(ctx, gw)
+			case tc.terminatingClass || tc.unmanagedClass:
+				wantErr = errGatewayChanged
+				_, err = r.ensureGateway(ctx, gw)
+			case tc.denyCertificate:
+				_, err = r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(gw)})
+			default:
+				_, err = r.ensureGateway(ctx, gw)
+			}
+			if !withdrew {
+				t.Error("missing fallback withdrawal")
+			}
+			if !errors.Is(err, wantErr) {
+				t.Errorf("graph returned %v, want %v", err, wantErr)
+			}
+			var changed *graph.TLSAuthorizationChanged
+			if tc.revokeSectionDuringWrite {
+				if !errors.As(err, &changed) || !slices.Equal(changed.Ports, []int{443}) {
+					t.Errorf("changed authorization = %v, want only port 443", changed)
+				}
+			} else if errors.As(err, &changed) {
+				t.Errorf("unchanged authorization was reported as a transition: %v", changed.Ports)
+			}
+			if tc.restoreBeforeMutation && !errors.Is(err, errGatewayChanged) {
+				t.Errorf("restored authorization did not fence withdrawal: %v", err)
+			}
+			if tc.denyCertificate && !tc.restoreBeforeMutation {
+				providerErr = cloud.ErrQuotaExceeded
+				policy, _ := controller.ProviderFailurePolicyFor(providerErr)
+				want, _ := controller.ProviderFailureResult(policy, providerErr, string(gw.UID))
+				withdrew = false
+				got, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(gw)})
+				if err != nil || got != want || !withdrew {
+					t.Errorf("quota failure = %v, %v, withdrawal attempted %t; want %v, nil, true", got, err, withdrew, want)
+				}
+				if err := kube.Get(ctx, client.ObjectKeyFromObject(gw), gw); err != nil {
+					t.Fatal(err)
+				}
+				programmed := meta.FindStatusCondition(gw.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed))
+				if programmed == nil || programmed.Message != policy.Message {
+					t.Errorf("Gateway Programmed = %#v, want quota diagnostic", programmed)
+				}
+				for _, listener := range gw.Status.Listeners {
+					if listener.Name == "https" && !meta.IsStatusConditionFalse(listener.Conditions, string(gatewayv1.ListenerConditionResolvedRefs)) {
+						t.Errorf("denied certificate was not reported: %#v", listener.Conditions)
+					}
+				}
+			}
+		})
 	}
 }

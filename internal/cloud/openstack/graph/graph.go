@@ -324,14 +324,17 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 		}
 		names := make(map[string]bool, len(spec.Gateway.Spec.ScopedListeners))
 		for _, listener := range spec.Gateway.Spec.ScopedListeners {
-			if listener.Port < 1 || listener.Port > 65535 || strings.TrimSpace(listener.Name) == "" || ports[listener.Port] || names[listener.Name] {
-				return invalid("scoped listeners require unique names and distinct ports within 1-65535")
+			if listener.Port < 1 || listener.Port > 65535 || ports[listener.Port] {
+				return invalid("scoped listeners require distinct ports within 1-65535")
+			}
+			if !withdrawTLS && (strings.TrimSpace(listener.Name) == "" || names[listener.Name]) {
+				return invalid("ensured scoped listeners require unique names")
 			}
 			if listener.TLS != nil && protocol != cloud.ListenerProtocolHTTP {
 				return invalid("TLS termination requires the scoped HTTP listener family")
 			}
-			if withdrawTLS && (listener.TLS == nil || listener.TLS.CertificateRef != "") {
-				return invalid("TLS withdrawal accepts only denied HTTPS listeners")
+			if withdrawTLS && listener.TLS == nil {
+				return invalid("TLS withdrawal requires the current HTTPS port and certificate list")
 			}
 			ports[listener.Port] = true
 			names[listener.Name] = true
@@ -793,6 +796,9 @@ func validateGraphLoadBalancer(lb *octavia.LoadBalancer, requirements cloud.Gate
 
 func (p *Provider) pendingGraphResult(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph) cloud.GatewayGraphResult {
 	result := cloud.GatewayGraphResult{Outcome: actual.outcome, Gateway: observedGatewayResult(desired, actual, actual.outcome)}
+	if actual.withdrawTLS != nil {
+		result.Gateway.ScopedListenerDeferredPorts = unchangedHTTPSWithdrawalSiblings(desired, actual)
+	}
 	var deferred map[int]bool
 	if actual.scoped {
 		if actual.protocol == cloud.ListenerProtocolHTTP {
@@ -802,8 +808,10 @@ func (p *Provider) pendingGraphResult(ctx context.Context, desired desiredGatewa
 		}
 	}
 	for index, route := range desired.routes {
+		deferSibling := desired.spec.Routes[index].Disposition == cloud.GraphEnsure &&
+			slices.Contains(result.Gateway.ScopedListenerDeferredPorts, scopedHTTPRoutePort(route))
 		result.Routes = append(result.Routes, cloud.RouteGraphResult{Identity: route.spec.Identity, Result: cloud.RouteResult{
-			Outcome: actual.outcome, ObservationDeferred: !actual.scoped || deferred[index],
+			Outcome: actual.outcome, ObservationDeferred: !actual.scoped || deferred[index] || deferSibling,
 		}})
 	}
 	return result
