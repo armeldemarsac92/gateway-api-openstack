@@ -34,6 +34,7 @@ import (
 	"sigs.k8s.io/gateway-api/conformance/tests"
 	meshtests "sigs.k8s.io/gateway-api/conformance/tests/mesh"
 	"sigs.k8s.io/gateway-api/conformance/utils/suite"
+	"sigs.k8s.io/gateway-api/pkg/features"
 	"sigs.k8s.io/yaml"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
@@ -42,6 +43,8 @@ import (
 // TestKindStockMeshStudy is a negative control using the existing ingress
 // reconcilers on disposable kind. Upstream assertions can fail by design.
 func TestKindStockMeshStudy(t *testing.T) {
+	cfg := testConfig()
+	cfg.GatewayAPIChannel = os.Getenv("GATEWAY_API_CHANNEL")
 	options := suite.ConfigurableOptions{
 		CleanupBaseResources: true,
 		CleanupTestResources: true,
@@ -49,7 +52,7 @@ func TestKindStockMeshStudy(t *testing.T) {
 	}
 	switch os.Getenv("HIBISCUS_MESH_STUDY") {
 	case "":
-		t.Skip("set HIBISCUS_MESH_STUDY=core or MeshFrontend on a disposable kind cluster")
+		t.Skip("set HIBISCUS_MESH_STUDY to core, all or MeshFrontend on a disposable kind cluster")
 	case "core":
 		options.ConformanceProfiles = []suite.ConformanceProfileName{
 			suite.MeshHTTPConformanceProfileName,
@@ -58,16 +61,20 @@ func TestKindStockMeshStudy(t *testing.T) {
 		// v1.7.0 otherwise attempts feature inference before adding profile defaults.
 		options.SupportedFeatures = sets.List(suite.MeshHTTPConformanceProfile.CoreFeatures.
 			Union(suite.MeshGRPCConformanceProfile.CoreFeatures))
+	case "all":
+		options.ConformanceProfiles, options.SupportedFeatures = selectKindProfileFeatures(t, []suite.ConformanceProfile{
+			suite.MeshHTTPConformanceProfile,
+			suite.MeshGRPCConformanceProfile,
+		}, cfg.GatewayAPIChannel)
+		t.Logf("Selected upstream feature union: %v", options.SupportedFeatures)
 	case meshtests.MeshFrontend.ShortName:
 		options.RunTest = meshtests.MeshFrontend.ShortName
 		options.SupportedFeatures = meshtests.MeshFrontend.Features
 	default:
-		t.Fatal("HIBISCUS_MESH_STUDY must be core or MeshFrontend")
+		t.Fatal("HIBISCUS_MESH_STUDY must be core, all or MeshFrontend")
 	}
 
-	cfg := testConfig()
-	cfg.GatewayAPIChannel = os.Getenv("GATEWAY_API_CHANNEL")
-	if cfg.GatewayAPIChannel != "standard" && cfg.GatewayAPIChannel != "experimental" {
+	if cfg.GatewayAPIChannel != features.FeatureChannelStandard && cfg.GatewayAPIChannel != features.FeatureChannelExperimental {
 		t.Fatal("GATEWAY_API_CHANNEL must be standard or experimental")
 	}
 	cfg.ClusterID = "kind-" + os.Getenv("KIND_CLUSTER_NAME")
@@ -119,6 +126,7 @@ func TestKindStockMeshStudy(t *testing.T) {
 	}
 	t.Logf("Stock kind %s mesh study with upstream features %v", cfg.GatewayAPIChannel, s.SupportedFeatures)
 	s.Setup(t, tests.ConformanceTests)
+	t.Log("Upstream shared setup completed")
 	if options.RunTest == "" {
 		t.Cleanup(func() {
 			report, err := s.Report()

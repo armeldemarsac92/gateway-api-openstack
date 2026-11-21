@@ -38,19 +38,27 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 )
 
-// TestKindUpstreamGatewayProfile attempts one upstream profile with the full
-// shared setup and a recording cloud adapter.
+// TestKindUpstreamGatewayProfile attempts upstream profiles with the full shared
+// setup and a recording cloud adapter.
 func TestKindUpstreamGatewayProfile(t *testing.T) {
-	var profile suite.ConformanceProfile
+	var profiles []suite.ConformanceProfile
 	switch suite.ConformanceProfileName(os.Getenv("HIBISCUS_GATEWAY_PROFILE")) {
 	case "":
-		t.Skip("set HIBISCUS_GATEWAY_PROFILE to GATEWAY-GRPC or GATEWAY-TLS on a disposable kind cluster")
+		t.Skip("set HIBISCUS_GATEWAY_PROFILE to GATEWAY-GRPC, GATEWAY-TLS or all on a disposable kind cluster")
 	case suite.GatewayGRPCConformanceProfileName:
-		profile = suite.GatewayGRPCConformanceProfile
+		profiles = []suite.ConformanceProfile{suite.GatewayGRPCConformanceProfile}
 	case suite.GatewayTLSConformanceProfileName:
-		profile = suite.GatewayTLSConformanceProfile
+		profiles = []suite.ConformanceProfile{suite.GatewayTLSConformanceProfile}
+	case "all":
+		profiles = []suite.ConformanceProfile{
+			suite.GatewayHTTPConformanceProfile,
+			suite.GatewayGRPCConformanceProfile,
+			suite.GatewayTLSConformanceProfile,
+			suite.GatewayTCPConformanceProfile,
+			suite.GatewayUDPConformanceProfile,
+		}
 	default:
-		t.Fatal("HIBISCUS_GATEWAY_PROFILE must be GATEWAY-GRPC or GATEWAY-TLS")
+		t.Fatal("HIBISCUS_GATEWAY_PROFILE must be GATEWAY-GRPC, GATEWAY-TLS or all")
 	}
 
 	cfg := testConfig()
@@ -59,22 +67,9 @@ func TestKindUpstreamGatewayProfile(t *testing.T) {
 		t.Fatal("GATEWAY_API_CHANNEL must be standard or experimental")
 	}
 	cfg.ClusterID = "kind-" + os.Getenv("KIND_CLUSTER_NAME")
-	extended := sets.New[features.FeatureName]()
-	for feature := range profile.ExtendedFeatures {
-		switch features.GetFeature(feature).Channel {
-		case features.FeatureChannelStandard:
-			extended.Insert(feature)
-		case features.FeatureChannelExperimental:
-			if cfg.GatewayAPIChannel == features.FeatureChannelExperimental {
-				extended.Insert(feature)
-			}
-		default:
-			t.Fatalf("unknown release channel for profile feature %s", feature)
-		}
-	}
-	t.Logf("Attempting %s on %s with the original upstream base and recording cloud adapter", profile.Name, cfg.GatewayAPIChannel)
-	t.Logf("Selected upstream Core features: %v", sets.List(profile.CoreFeatures))
-	t.Logf("Selected upstream Extended features: %v", sets.List(extended))
+	profileNames, selectedFeatures := selectKindProfileFeatures(t, profiles, cfg.GatewayAPIChannel)
+	t.Logf("Attempting %v on %s with the original upstream base and recording cloud adapter", profileNames, cfg.GatewayAPIChannel)
+	t.Logf("Selected upstream feature union: %v", selectedFeatures)
 
 	ctrl.SetLogger(zap.New())
 	restConfig := kindUpstreamRESTConfig(t)
@@ -115,8 +110,8 @@ func TestKindUpstreamGatewayProfile(t *testing.T) {
 	s, err := suite.NewConformanceTestSuite(suite.ConformanceOptions{
 		ConfigurableOptions: suite.ConfigurableOptions{
 			GatewayClassName:     className,
-			ConformanceProfiles:  []suite.ConformanceProfileName{profile.Name},
-			SupportedFeatures:    sets.List(profile.CoreFeatures.Union(extended)),
+			ConformanceProfiles:  profileNames,
+			SupportedFeatures:    selectedFeatures,
 			Mode:                 "kind-with-recording-cloud",
 			CleanupBaseResources: true,
 			CleanupTestResources: true,
@@ -149,4 +144,31 @@ func TestKindUpstreamGatewayProfile(t *testing.T) {
 	if err := s.Run(t, tests.ConformanceTests); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func selectKindProfileFeatures(t *testing.T, profiles []suite.ConformanceProfile, channel string) ([]suite.ConformanceProfileName, []features.FeatureName) {
+	t.Helper()
+	var names []suite.ConformanceProfileName
+	selected := sets.New[features.FeatureName]()
+	for _, profile := range profiles {
+		names = append(names, profile.Name)
+		extended := sets.New[features.FeatureName]()
+		for feature := range profile.ExtendedFeatures {
+			switch features.GetFeature(feature).Channel {
+			case features.FeatureChannelStandard:
+				extended.Insert(feature)
+			case features.FeatureChannelExperimental:
+				if channel == features.FeatureChannelExperimental {
+					extended.Insert(feature)
+				}
+			default:
+				t.Fatalf("unknown release channel for profile feature %s", feature)
+			}
+		}
+		t.Logf("%s selected upstream Core features: %v", profile.Name, sets.List(profile.CoreFeatures))
+		t.Logf("%s selected upstream Extended features: %v", profile.Name, sets.List(extended))
+		selected.Insert(profile.CoreFeatures.UnsortedList()...)
+		selected.Insert(extended.UnsortedList()...)
+	}
+	return names, sets.List(selected)
 }
