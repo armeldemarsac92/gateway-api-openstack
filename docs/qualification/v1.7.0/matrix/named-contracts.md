@@ -6,6 +6,7 @@ All 64 named features await qualification on a deployed Hibiscus cluster. The ta
 
 | Feature | Current local observation | Still open |
 |---|---|---|
+| `HTTPRouteBackendProtocolWebSocket` | The upstream case passed in Endpoint mode on each channel. The VIP and pod captures show the full HTTP/1.1 upgrade and text and binary request payloads. [Per-channel results](../provider/http-websocket.md#results-on-both-channels) | WebSocket traffic on a deployed Hibiscus cluster |
 | `GRPCRoute` | Two exact RPC paths routed over TLS with gRPC statuses and trailers. With a cleartext HTTP listener and non-TLS HTTP pools, both member connections carried HTTP/1.1 and the RPCs returned `UNAVAILABLE`. [Stock Amphora traffic](../provider/stock-grpc.md) | Kubernetes GRPCRoute, a cleartext HTTP/2 backend transport, broader matching, response semantics and both live gRPC profiles |
 | `Gateway` | Generation tracking, invalid route kinds, invalid parameters and unsupported protocol status run with the tagged upstream assertions. [Status cases](../../../../internal/controller/envtest_upstream_status_test.go) | Remaining listener, lifecycle and traffic cases |
 | `GatewayAddressEmpty` | A tenant may request one automatically assigned IP with default routability. Local tests check the stored request, the address returned by the provider and the controller's status. [Address tests](../../../../internal/controller/gateway/reconciler_test.go) | Address allocation and reachability in the tenant's real network |
