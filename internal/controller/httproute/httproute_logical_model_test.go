@@ -204,9 +204,9 @@ func TestHTTPMethodLoweringRetainsConjunctionsAlternativesAndPrecedence(t *testi
 		t.Fatalf("got %d backends, want one", len(desired.HTTPBackends))
 	}
 	type predicate struct {
-		pathType cloud.PathMatchType
+		pathType     cloud.PathMatchType
 		path, method string
-		headers int
+		headers      int
 	}
 	var got []predicate
 	for _, match := range desired.HTTPBackends[0].Matches {

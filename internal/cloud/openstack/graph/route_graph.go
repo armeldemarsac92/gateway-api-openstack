@@ -929,7 +929,7 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 			if policy.role == wantedPolicy.role && !policy.policy.AdminStateUp {
 				return []routeMutation{{kind: routeMutationEnablePolicy, id: policy.policy.ID,
 					requestHeaderOperations: wantedPolicy.requestHeaderOperations,
-					requiresExactHeaders: len(wantedPolicy.headers) != 0, requiresHTTPMethod: wantedPolicy.method != ""}}, state, nil
+					requiresExactHeaders:    len(wantedPolicy.headers) != 0, requiresHTTPMethod: wantedPolicy.method != ""}}, state, nil
 			}
 		}
 	}

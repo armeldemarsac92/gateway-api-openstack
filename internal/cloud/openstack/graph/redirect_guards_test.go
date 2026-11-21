@@ -17,8 +17,8 @@ limitations under the License.
 package graph
 
 import (
-	"errors"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
