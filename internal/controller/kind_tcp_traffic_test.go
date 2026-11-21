@@ -54,6 +54,8 @@ func TestKindUpstreamTCPTraffic(t *testing.T) {
 		cases = []suite.ConformanceTest{tests.TCPRouteMultipleRoutesAttachment, tests.TCPRouteReferenceGrant}
 	case "weighted":
 		cases = []suite.ConformanceTest{tests.TCPRouteWeightedRouting}
+	case "multiport":
+		cases = []suite.ConformanceTest{tests.TCPRouteParentRefAttachAll, tests.TCPRouteParentRefPortAndSectionName}
 	case "status":
 		cases = kindTCPStatusCases
 	case "profile":
@@ -63,7 +65,7 @@ func TestKindUpstreamTCPTraffic(t *testing.T) {
 		options.ConformanceProfiles = []suite.ConformanceProfileName{suite.GatewayTCPConformanceProfileName}
 		cases = tests.ConformanceTests
 	default:
-		t.Fatal("HIBISCUS_TCP_CASES must be traffic, status, weighted or profile")
+		t.Fatal("HIBISCUS_TCP_CASES must be traffic, status, weighted, multiport or profile")
 	}
 	if selection != "profile" {
 		if baseDir == "" {
