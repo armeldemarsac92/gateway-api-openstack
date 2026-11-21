@@ -39,15 +39,19 @@ type weightedServiceMembers struct {
 	members []cloud.Member
 }
 
-// weightedMembers divides each backend's weight among its unique ready
-// endpoints, then adds the shares of any endpoint reached through multiple backends.
+// weightedMembers divides each backend's weight among its unique eligible
+// destinations, then adds the shares of destinations reached through multiple backends.
 func weightedMembers(protocol string, groups []weightedServiceMembers) ([]cloud.Member, error) {
 	type readyGroup struct {
 		weight    int64
 		endpoints map[netip.AddrPort]struct{}
 	}
+	type weightedDestination struct {
+		member cloud.Member
+		share  big.Int
+	}
 	readyGroups := make([]readyGroup, 0, len(groups))
-	shares := make(map[netip.AddrPort]*big.Int)
+	destinations := make(map[netip.AddrPort]*weightedDestination)
 	denominator := big.NewInt(1)
 	var count, commonFactor big.Int
 	for i, group := range groups {
@@ -64,8 +68,12 @@ func weightedMembers(protocol string, groups []weightedServiceMembers) ([]cloud.
 				return nil, fmt.Errorf("%s backendRef %d has an invalid endpoint %q port %d", protocol, i+1, member.Address, member.Port)
 			}
 			endpoint := netip.AddrPortFrom(address, uint16(member.Port))
-			if _, found := shares[endpoint]; !found {
-				shares[endpoint] = new(big.Int)
+			destination := destinations[endpoint]
+			if destination == nil {
+				member.Address = address.String()
+				destinations[endpoint] = &weightedDestination{member: member}
+			} else if destination.member.ProviderID != member.ProviderID {
+				return nil, fmt.Errorf("%s backends have conflicting provider IDs for the same destination", protocol)
 			}
 			if !member.Draining {
 				ready[endpoint] = struct{}{}
@@ -94,7 +102,7 @@ func weightedMembers(protocol string, groups []weightedServiceMembers) ([]cloud.
 		share.Quo(denominator, &count)
 		share.Mul(&share, &weight)
 		for endpoint := range group.endpoints {
-			total := shares[endpoint]
+			total := &destinations[endpoint].share
 			total.Add(total, &share)
 		}
 	}
@@ -102,26 +110,24 @@ func weightedMembers(protocol string, groups []weightedServiceMembers) ([]cloud.
 	// Dividing by the GCD yields the smallest integral ratio and leaves draining
 	// endpoints at zero. If it exceeds Octavia's limit, no exact ratio can fit.
 	var gcd big.Int
-	for _, total := range shares {
-		gcd.GCD(nil, nil, &gcd, total)
+	for _, destination := range destinations {
+		gcd.GCD(nil, nil, &gcd, &destination.share)
 	}
-	members := make([]cloud.Member, 0, len(shares))
+	members := make([]cloud.Member, 0, len(destinations))
 	active := 0
-	for endpoint, total := range shares {
+	for _, destination := range destinations {
+		total := &destination.share
 		total.Quo(total, &gcd)
 		if !total.IsInt64() || total.Int64() > maxOctaviaMemberWeight {
 			return nil, fmt.Errorf("the exact %s backend ratio exceeds Octavia's maximum member weight of %d", protocol, maxOctaviaMemberWeight)
 		}
-		draining := total.Sign() == 0
-		if !draining {
+		member := destination.member
+		member.Draining = total.Sign() == 0
+		member.Weight = int(total.Int64())
+		if !member.Draining {
 			active++
 		}
-		members = append(members, cloud.Member{
-			Address:  endpoint.Addr().String(),
-			Port:     int(endpoint.Port()),
-			Draining: draining,
-			Weight:   int(total.Int64()),
-		})
+		members = append(members, member)
 	}
 	if protocol == cloud.ListenerProtocolTCP && active > maxTCPRoundRobinMembers {
 		return nil, fmt.Errorf("weighted TCP forwarding requires at most %d active endpoints in one HAProxy pool", maxTCPRoundRobinMembers)
