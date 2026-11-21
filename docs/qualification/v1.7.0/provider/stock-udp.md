@@ -17,6 +17,8 @@ The API run used the tagged SQLite functional fixture, simulated Neutron and mes
 
 Separate Kubernetes 1.36.2 API servers exercised the Standard and Experimental release bundles. A Service exposed port 53 over both TCP and UDP. The controller selected only its UDP worker NodePort. Switching the EndpointSlice to TCP withdrew forwarding, restoring UDP resumed it, and revoking the UDPRoute grant withdrew it again with the TCPRoute grant still present. The cloud provider recorded the requested graph in this test. Live Magnum provisioning, delivery through a deployed Amphora to the selected Kubernetes Service, weighted invalid backends and the complete UDP profile remain open. [Controller watches and NodePort test](../../../../internal/controller/envtest_udp_test.go)
 
+A separate Standard rehearsal used a live Kubernetes UDPRoute and NodePort with the Go adapter and the Octavia worker renderer. Packet capture confirmed the resulting VIP request and reply at a dedicated kind worker. [Controller to worker packet evidence](udp-worker.md)
+
 ## Direct provider probe
 
 One Octavia UDP listener at `192.0.2.30:18053` forwarded a 256-byte binary datagram to backend A. Updating its public `default_pool_id` to a second UDP pool switched the same VIP and port to backend B. Both replies included the expected backend identifier and the unchanged payload. Clearing `default_pool_id` removed the IPVS virtual service. A new UDP socket then received `ECONNREFUSED` from the VIP and neither backend received a third datagram. Both backends still echoed a direct client datagram after the detach. Each saw exactly one packet via the VIP and one direct control packet.

@@ -10,7 +10,7 @@ The controller ran against separate single-node Kubernetes v1.36.4 clusters with
 
 The upstream `UDPRouteNotAllowedByListeners` case requires `SupportTLSRoute` and a programmed TLS-only Gateway before its assertions run. The local check targets a supported HTTP listener. The other six upstream UDPRoute cases send packets to a Gateway address. [Upstream TLS case](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/udproute-not-allowed-by-listeners.go)
 
-On each cluster, the upstream UDP echo client received a datagram from the Ready `udp-echo` pod through a temporary NodePort on the kind control-plane node. This verified the Kubernetes backend path directly. A full GATEWAY-UDP report and traffic through an Amphora VIP to a Kubernetes worker remain open. [Upstream UDP echo client](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/utils/udp/udp.go)
+On each cluster, the upstream UDP echo client received a datagram from the Ready `udp-echo` pod through a temporary NodePort on the kind control-plane node. This verified the Kubernetes backend path directly. A separate Standard rehearsal sent a VIP datagram through a dedicated worker. A complete GATEWAY-UDP profile and a deployed Amphora remain open. [Dedicated worker traffic](udp-worker.md) [Upstream UDP echo client](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/utils/udp/udp.go)
 
 ## Rerun
 
