@@ -4,7 +4,7 @@ The [workload integration](../../../../integrations/istio-ambient/README.md) ins
 
 ## Run the upstream Core cases
 
-Use a fresh Linux amd64 kind cluster for each channel and the exact v1.7.0 [upstream release bundle](https://github.com/kubernetes-sigs/gateway-api/releases/tag/v1.7.0). The local runner also needs the fork's class-configuration CRD and the upstream fixture's pinned `echo-advanced:v0.1.0` image. Mirror the published linux/amd64 manifest using the [image procedure in the stock control](stock-mesh.md#reproduce). Preload the pinned ambient component images or provide registry access to the kind nodes.
+Use a fresh single-stack IPv4 Linux amd64 kind cluster for each channel and the exact v1.7.0 [upstream release bundle](https://github.com/kubernetes-sigs/gateway-api/releases/tag/v1.7.0). The local runner also needs the fork's class-configuration CRD and the upstream fixture's pinned `echo-advanced:v0.1.0` image. Mirror the published linux/amd64 manifest using the [image procedure in the stock control](stock-mesh.md#reproduce). Preload the pinned ambient component images or provide registry access to the kind nodes.
 
 For an offline node, use the component repository and digest from `integrations/istio-ambient/*.yaml`. Copy the amd64 manifest and blobs anonymously, import the archive on each node, and add the exact digest reference used by the pod specification. Here `repository` is the full image repository, `digest` includes the `sha256:` prefix, and `node` is the disposable kind node.
 
@@ -16,7 +16,7 @@ rtk sudo podman exec "$node" ctr -n k8s.io images tag \
   "$repository:1.31.0-distroless" "$repository@$digest"
 ```
 
-Install the mesh components and waypoint class using the operator procedure. Leave the two upstream mesh fixture namespaces absent before the test so the suite can apply and remove its fixtures. The runner enrolls both upstream fixture namespaces in ambient mode. It places the operator's Service waypoint in `gateway-conformance-mesh` and assigns only `Service/echo` to it. The remaining fixture Services take the ordinary Kubernetes path without that waypoint.
+Install the mesh components and waypoint class using the operator procedure. Leave the two upstream mesh fixture namespaces absent before the test so the suite can apply and remove its fixtures. The runner enrolls both upstream fixture namespaces in ambient mode. It places the operator's Service waypoint in `gateway-conformance-mesh` and assigns only `Service/echo` to it.
 
 Build and run from the repository root. Set `channel` to `standard` or `experimental`, `cluster` to the disposable kind name, and `kubeconfig` to the file containing context `kind-$cluster`.
 

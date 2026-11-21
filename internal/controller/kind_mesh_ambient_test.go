@@ -132,6 +132,9 @@ func TestKindAmbientMesh(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The v1.7.0 applier rewrites every Gateway's class. Mesh-only setup
+	// does not populate that field because it has no ingress GatewayClass.
+	s.Applier.GatewayClass = waypointClass.Name
 	t.Cleanup(func() {
 		report, err := s.Report()
 		if err != nil {
