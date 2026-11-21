@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
@@ -80,8 +81,19 @@ func (p *Provider) GetGateway(
 		return cloud.GatewayResult{}, false, err
 	}
 	var observed []listeners.Listener
+	var unverifiedAnchor int
+	if markedProtocol == cloud.ListenerProtocolTCP {
+		// Identity-only reads do not have the Gateway's frozen port. Check
+		// the inventory's shape, but withhold readiness for a legacy anchor.
+		for _, listener := range listenerList {
+			if !slices.ContainsFunc(listener.Tags, func(tag string) bool { return scopedPortTagProtocol(tag) != "" }) {
+				unverifiedAnchor = listener.ProtocolPort
+				break
+			}
+		}
+	}
 	if markedProtocol != "" {
-		observed, err = p.managedScopedListeners(identity, loadBalancer, listenerList, markedProtocol, 0)
+		observed, err = p.managedScopedListeners(identity, loadBalancer, listenerList, markedProtocol, unverifiedAnchor)
 	} else {
 		listener, singleErr := p.managedGatewayListener(identity, loadBalancer.ID, listenerList)
 		err = singleErr
@@ -91,6 +103,12 @@ func (p *Provider) GetGateway(
 	}
 	if err != nil {
 		return cloud.GatewayResult{}, false, err
+	}
+	if unverifiedAnchor != 0 {
+		return cloud.GatewayResult{
+			State:   cloud.GatewayState{LoadBalancerID: loadBalancer.ID, VIPPortID: loadBalancer.VipPortID, VIPAddress: loadBalancer.VipAddress},
+			Outcome: p.progressingOutcome("Waiting for the frozen TCP listener port to verify the Gateway"),
+		}, true, nil
 	}
 	if len(observed) == 0 {
 		return cloud.GatewayProgressingResult("Octavia listener has not been created", p.pollInterval), true, nil

@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -146,6 +147,27 @@ func (r *Reconciler) hasCurrentBackendTarget(route *transportRoute, parent gatew
 	}
 	current, _, _ := strings.Cut(condition.Message, "/")
 	return current == desired
+}
+
+// A previous target can prove an unchanged backend across a ParentRef edit.
+// Its hash covers the Gateway UID, route UID, Services and desired members.
+func (r *Reconciler) hasPreviousObservedBackendTarget(route *transportRoute, target string) bool {
+	backend, _, _ := strings.Cut(target, "/")
+	for _, parent := range route.status.Parents {
+		if parent.ControllerName != r.Config.ControllerName {
+			continue
+		}
+		condition := meta.FindStatusCondition(parent.Conditions, r.forwardingTargetType())
+		if condition == nil || condition.Status != metav1.ConditionTrue || condition.Reason != "Observed" ||
+			condition.ObservedGeneration >= route.GetGeneration() {
+			continue
+		}
+		previous, _, _ := strings.Cut(condition.Message, "/")
+		if previous == backend {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *Reconciler) planVersionSkew(ctx context.Context, route *transportRoute, plan *routePlan, backends []serviceBackend, bound bool) error {

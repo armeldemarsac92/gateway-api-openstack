@@ -341,7 +341,11 @@ func (r *Reconciler) ensure(ctx context.Context, route *transportRoute, plan *ro
 		return ctrl.Result{}, errors.New("gateway graph writer is required")
 	}
 	identity := plan.desired.Identity
-	result, err := r.Writer.ReconcileGraph(ctx, route.graphRequest(identity, graph.Ensure, plan.parents[0].gateway))
+	request := route.graphRequest(identity, graph.Ensure, plan.parents[0].gateway)
+	if r.protocol() == gatewayv1.TCPProtocolType && len(plan.desired.ScopedListenerPorts) != 0 {
+		request.ForwardingTarget = plan.target
+	}
+	result, err := r.Writer.ReconcileGraph(ctx, request)
 	if err != nil {
 		if errors.Is(err, controller.ErrGraphInputChanged) || errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) {
 			return ctrl.Result{}, err

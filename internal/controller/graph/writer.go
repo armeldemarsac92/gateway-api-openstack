@@ -48,6 +48,9 @@ type Request struct {
 	Route    *gatewayv1.HTTPRoute
 	TCPRoute *gatewayv1.TCPRoute
 	UDPRoute *gatewayv1.UDPRoute
+	// ForwardingTarget ties a TCPRoute-triggered status update to the exact
+	// backend and listener election rebuilt by the writer.
+	ForwardingTarget string
 }
 
 // Reconciler is the sole Kubernetes-facing graph mutation boundary.

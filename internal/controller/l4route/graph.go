@@ -219,15 +219,27 @@ func (r *Reconciler) observeRoutes(ctx context.Context, request graph.Request, e
 		winningNodes = nil
 	}
 	for _, winner := range winningNodes {
-		spec, backends, err := r.ensureRouteNode(ctx, winner.route, observedGateway, listeners[0], winners[winner.route.GetUID()])
+		spec, target, backends, err := r.observeRouteBackend(ctx, winner.route, observedGateway, listeners[0], winners[winner.route.GetUID()])
 		if err != nil {
 			return snapshot, err
 		}
 		snapshot.backends = append(snapshot.backends, backends)
-		if spec != nil {
-			snapshot.nodes[winner.index].Disposition = cloud.GraphEnsure
-			snapshot.nodes[winner.index].Spec = *spec
-			snapshot.nodes[winner.index].RetainScopedListenerPorts = nil
+		if spec == nil {
+			continue
+		}
+		node := &snapshot.nodes[winner.index]
+		if r.hasCurrentBackendTarget(winner.route, winner.route.parentRefs[0], target) {
+			if winner.index == requestedIndex && request.ForwardingTarget != "" && request.ForwardingTarget != target {
+				return snapshot, controller.ErrGraphInputChanged
+			}
+			node.Disposition = cloud.GraphEnsure
+			node.Spec = *spec
+			node.RetainScopedListenerPorts = nil
+		} else if scoped && r.protocol() == gatewayv1.TCPProtocolType && r.hasPreviousObservedBackendTarget(winner.route, target) {
+			// A selector edit can carry forward existing edges. The provider
+			// must confirm the old pool matches the freshly authorized backend.
+			node.Spec = *spec
+			node.RetainScopedListenerPorts = spec.ScopedListenerPorts
 		}
 	}
 	if trigger != nil {
@@ -255,43 +267,43 @@ func (r *Reconciler) liveGateway(ctx context.Context, identity cloud.Identity, e
 	return gateway, nil
 }
 
-func (r *Reconciler) ensureRouteNode(ctx context.Context, route *transportRoute, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, ports []int) (*cloud.RouteSpec, routeBackendRevisions, error) {
+func (r *Reconciler) observeRouteBackend(ctx context.Context, route *transportRoute, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, ports []int) (*cloud.RouteSpec, string, routeBackendRevisions, error) {
 	var revisions routeBackendRevisions
 	class, err := r.gatewayClass(ctx, gateway)
 	if err != nil || class == nil {
-		return nil, revisions, err
+		return nil, "", revisions, err
 	}
 	revisions.class = revisionOf(class)
 	if !controller.GatewayClassSupportsInstalledVersion(class) {
-		return nil, revisions, nil
+		return nil, "", revisions, nil
 	}
 	if err := r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
 		if errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) {
 			err = nil
 		}
-		return nil, revisions, err
+		return nil, "", revisions, err
 	}
 	topology, valid, err := r.gatewayTopology(gateway, listener)
 	if err != nil || !valid {
-		return nil, revisions, err
+		return nil, "", revisions, err
 	}
 	// Zero-weight references affect status only. Their authorization and
 	// revisions cannot change the serving destinations of the sealed graph.
 	refs, rejections, err := r.authorizedBackends(ctx, route, false)
 	revisions.grants = rejections.grants
 	if err != nil || rejections.active != nil || len(refs) == 0 {
-		return nil, revisions, err
+		return nil, "", revisions, err
 	}
 	services, rejections, err := r.backendServices(ctx, refs, false)
 	if err != nil || rejections.active != nil || len(services) == 0 {
-		return nil, revisions, err
+		return nil, "", revisions, err
 	}
 	for _, service := range services {
 		revisions.services = append(revisions.services, revisionOf(service.service))
 	}
 	spec, target, diagnostic, err := r.routeSpec(ctx, route, gateway, listener, services, topology, ports...)
-	if err != nil || diagnostic != nil || !r.hasCurrentBackendTarget(route, route.parentRefs[0], target) {
-		return nil, revisions, err
+	if err != nil || diagnostic != nil {
+		return nil, "", revisions, err
 	}
-	return &spec, revisions, nil
+	return &spec, target, revisions, nil
 }

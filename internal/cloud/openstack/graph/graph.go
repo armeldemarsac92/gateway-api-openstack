@@ -287,6 +287,16 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 		if transport := node.Spec.GatewayRequirements.ListenerProtocol; node.Disposition == cloud.GraphDelete && transport != "" && !supportedListenerProtocol(transport) {
 			return desiredGatewayGraph{}, &cloud.GraphError{Identity: id, Err: fmt.Errorf("%w: unsupported detaching route protocol %q", cloud.ErrOwnershipConflict, transport)}
 		}
+		if len(node.RetainScopedListenerPorts) != 0 {
+			if protocol != cloud.ListenerProtocolTCP || !node.Spec.GatewayRequirements.Equal(gatewayRequirements(spec.Gateway.Spec)) ||
+				!slices.Equal(node.RetainScopedListenerPorts, node.Spec.ScopedListenerPorts) {
+				return invalid("retaining TCP defaults requires the matching Gateway and backend specification")
+			}
+			route, err = p.buildDesiredRoute(node.Spec)
+			if err != nil {
+				return desiredGatewayGraph{}, &cloud.GraphError{Identity: id, Err: err}
+			}
+		}
 		if node.Disposition == cloud.GraphEnsure {
 			if spec.Gateway.Disposition != cloud.GraphEnsure {
 				return invalid("an ensured route requires an ensured Gateway")

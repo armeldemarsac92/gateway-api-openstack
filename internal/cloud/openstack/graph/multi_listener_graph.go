@@ -389,6 +389,22 @@ func (p *Provider) buildScopedListenerGraphPlan(desired desiredGatewayGraph, act
 		node := desired.spec.Routes[index]
 		routeResult := cloud.RouteReadyResult(routeStateFromObservation(observed))
 		switch node.Disposition {
+		case cloud.GraphPreserve:
+			if len(node.RetainScopedListenerPorts) == 0 || observed.pool == nil {
+				break
+			}
+			changes, _, err := buildRouteEnsurePlan(route, observed)
+			if errors.Is(err, errWeightedTCPBackupUnknown) {
+				break
+			}
+			if err != nil {
+				return nil, result, &cloud.GraphError{Identity: route.spec.Identity, Err: err}
+			}
+			if scopedRouteBackendReady(route, observed, actual.state.VIPAddress, changes, observed.backendProvisioningIssue(false, true)) {
+				for _, port := range node.RetainScopedListenerPorts {
+					keepEdge[port] = found[port].DefaultPoolID == observed.pool.ID
+				}
+			}
 		case cloud.GraphDelete:
 			if observed.pool != nil && len(observed.pool.Listeners) != 0 {
 				routeResult.Outcome = p.progressingOutcome("Waiting for listeners to detach before cleanup")
@@ -471,7 +487,7 @@ func (p *Provider) buildScopedListenerGraphPlan(desired desiredGatewayGraph, act
 			node := desired.spec.Routes[owner]
 			withdraw := node.Disposition == cloud.GraphDelete ||
 				node.Disposition == cloud.GraphEnsure && !keepEdge[listener.ProtocolPort] ||
-				node.RetainScopedListenerPorts != nil && !slices.Contains(node.RetainScopedListenerPorts, listener.ProtocolPort)
+				node.RetainScopedListenerPorts != nil && !keepEdge[listener.ProtocolPort]
 			if obsolete || withdraw {
 				step := clearListenerDefaultPool(actual.protocol)
 				step.listenerID = listener.ID
