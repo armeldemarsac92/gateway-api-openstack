@@ -17,12 +17,14 @@ limitations under the License.
 package gateway
 
 import (
+	"fmt"
 	"slices"
 	"testing"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -313,6 +315,92 @@ func TestTLSRouteRejectedByHTTPListenerReportsEachReferencedSection(t *testing.T
 	if len(got.Status.Parents) != 1 || got.Status.Parents[0].ControllerName != other.ControllerName {
 		t.Fatalf("detached TLSRoute should only retain the other controller's status: %#v", got.Status.Parents)
 	}
+}
+
+func TestTLSRouteRejectionSurvivesTerminatingGatewayClass(t *testing.T) {
+	cfg := testConfig()
+	cfg.TLSSNIPassthrough = true
+	gateway := programmedTestGateway(cfg)
+	class := &gatewayv1.GatewayClass{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              string(gateway.Spec.GatewayClassName),
+			DeletionTimestamp: ptr.To(metav1.Now()),
+			Finalizers:        []string{gatewayv1.GatewayClassFinalizerGatewaysExist},
+		},
+		Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName},
+	}
+	route := testSNIRoute(gateway, "tls", "unused", "app.example.test")
+	route.Spec.ParentRefs[0].SectionName = ptr.To(gateway.Spec.Listeners[0].Name)
+	route.Status.Parents = []gatewayv1.RouteParentStatus{{
+		ParentRef:      route.Spec.ParentRefs[0],
+		ControllerName: cfg.ControllerName,
+		Conditions: []metav1.Condition{controller.Condition("Accepted", metav1.ConditionFalse,
+			string(gatewayv1.RouteReasonNotAllowedByListeners), "No selected listener accepts TLSRoutes", route.Generation)},
+	}}
+	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gateway, route).WithObjects(class, gateway, route).Build()
+	r := newTestReconciler(Reconciler{Client: kube, APIReader: kube, Config: cfg, Coordinator: &graph.Coordinator{}}, &recordingProvider{})
+	if _, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(gateway)}); err != nil {
+		t.Fatal(err)
+	}
+	var got gatewayv1.TLSRoute
+	if err := kube.Get(t.Context(), client.ObjectKeyFromObject(route), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Status.Parents) != 1 || !meta.IsStatusConditionFalse(got.Status.Parents[0].Conditions, string(gatewayv1.RouteConditionAccepted)) {
+		t.Fatalf("the Gateway must retain its rejection while its GatewayClass still exists: %#v", got.Status.Parents)
+	}
+}
+
+func TestTLSRouteParentStatusCapacityPreservesForeignEntriesAndOwnedUpdates(t *testing.T) {
+	const parentLimit = 32
+	cfg := testConfig()
+	cfg.TLSSNIPassthrough = true
+	gateway := programmedTestGateway(cfg)
+	class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: string(gateway.Spec.GatewayClassName)}, Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName}}
+	route := testSNIRoute(gateway, "tls", "unused", "app.example.test")
+	route.Spec.ParentRefs = []gatewayv1.ParentReference{
+		{Name: gatewayv1.ObjectName(gateway.Name), SectionName: ptr.To(gateway.Spec.Listeners[0].Name)},
+		{Name: gatewayv1.ObjectName(gateway.Name), SectionName: ptr.To(gatewayv1.SectionName("absent"))},
+	}
+	foreign := make([]gatewayv1.RouteParentStatus, parentLimit-1)
+	for i := range foreign {
+		foreign[i] = gatewayv1.RouteParentStatus{
+			ParentRef:      route.Spec.ParentRefs[0],
+			ControllerName: gatewayv1.GatewayController(fmt.Sprintf("other-%d.example/controller", i)),
+		}
+	}
+	route.Status.Parents = append([]gatewayv1.RouteParentStatus{{
+		ParentRef:      gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name), SectionName: ptr.To(gatewayv1.SectionName("detached"))},
+		ControllerName: cfg.ControllerName,
+	}}, foreign...)
+	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gateway, route).WithObjects(class, gateway, route).Build()
+	r := newTestReconciler(Reconciler{Client: kube, APIReader: kube, Config: cfg, Coordinator: &graph.Coordinator{}}, &recordingProvider{})
+	reconcile := func() *gatewayv1.TLSRoute {
+		t.Helper()
+		if _, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(gateway)}); err != nil {
+			t.Fatal(err)
+		}
+		var got gatewayv1.TLSRoute
+		if err := kube.Get(t.Context(), client.ObjectKeyFromObject(route), &got); err != nil {
+			t.Fatal(err)
+		}
+		if len(got.Status.Parents) != parentLimit || !equality.Semantic.DeepEqual(got.Status.Parents[:len(foreign)], foreign) {
+			t.Fatalf("expected %d parent statuses with the foreign entries unchanged, got %d", parentLimit, len(got.Status.Parents))
+		}
+		status := got.Status.Parents[len(foreign)]
+		accepted := meta.FindStatusCondition(status.Conditions, string(gatewayv1.RouteConditionAccepted))
+		if status.ControllerName != cfg.ControllerName || !equality.Semantic.DeepEqual(status.ParentRef, route.Spec.ParentRefs[0]) ||
+			accepted == nil || accepted.Status != metav1.ConditionFalse || accepted.ObservedGeneration != got.Generation {
+			t.Fatalf("expected the current rejection in the remaining slot: %#v", status)
+		}
+		return &got
+	}
+	got := reconcile()
+	got.Generation++
+	if err := kube.Update(t.Context(), got); err != nil {
+		t.Fatal(err)
+	}
+	reconcile()
 }
 
 func TestTLSGatewayCleanupClearsOnlyItsOwnForwardingStatus(t *testing.T) {

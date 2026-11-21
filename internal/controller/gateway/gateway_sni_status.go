@@ -33,6 +33,9 @@ import (
 
 const sniParentNoMatchingListenerMessage = "The parentRef does not select a listener"
 
+// Gateway API limits RouteStatus.Parents to 32 entries across all controllers.
+const maxSNIRouteParentStatuses = 32
+
 func (r *Reconciler) reconcileSNIParentStatuses(ctx context.Context, key client.ObjectKey) error {
 	var routes gatewayv1.TLSRouteList
 	if err := r.List(ctx, &routes, client.MatchingFields{controller.IndexTLSRouteByGateway: controller.ObjectKeyString(key)}); err != nil {
@@ -98,7 +101,8 @@ func (r *Reconciler) readSNIParentGateway(ctx context.Context, key client.Object
 	if err := r.APIReader.Get(ctx, client.ObjectKey{Name: string(gateway.Spec.GatewayClassName)}, &class); err != nil {
 		return gateway, false, client.IgnoreNotFound(err)
 	}
-	return gateway, class.Spec.ControllerName == r.Config.ControllerName && class.DeletionTimestamp.IsZero(), nil
+	// A GatewayClass finalizer can keep a deleting class in use by this Gateway.
+	return gateway, class.Spec.ControllerName == r.Config.ControllerName, nil
 }
 
 func sniParentSelectsListener(ref gatewayv1.ParentReference, listener gatewayv1.Listener) bool {
@@ -157,6 +161,9 @@ func (r *Reconciler) updateSNIRouteParents(route *gatewayv1.TLSRoute, gateway *g
 		index := slices.IndexFunc(route.Status.Parents, func(status gatewayv1.RouteParentStatus) bool {
 			return r.ownsSNIParent(route, gateway, status) && matches(ref, status)
 		})
+		if index < 0 && len(route.Status.Parents) >= maxSNIRouteParentStatuses {
+			continue
+		}
 		status := gatewayv1.RouteParentStatus{ParentRef: ref, ControllerName: r.Config.ControllerName}
 		if index >= 0 {
 			status.Conditions = route.Status.Parents[index].Conditions
