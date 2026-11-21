@@ -2,6 +2,10 @@
 
 Octavia v2 created a TCP listener, a separate TCP pool, and a member. After a listener `PUT` set `default_pool_id`, HAProxy forwarded a 256-byte non-HTTP payload unchanged to a TCP echo server and returned the same bytes. A second `PUT` cleared `default_pool_id`. A fresh HAProxy process used the resulting configuration on the same VIP and port. The client could connect but got no echo, and the member received no additional payload. The member, pool, and listener were then deleted through the API and returned `404` after simulated worker completion.
 
+A separate TCP listener refused a public `REDIRECT_TO_POOL` L7 policy with HTTP 501. The Amphora driver reported that TCP listeners do not support L7 policies and sent no creation message to a worker. This covers a prerequisite for the proposed TLS passthrough mapping. Choosing between backends using the ClientHello SNI still requires a public stream-routing primitive. [Provider study](provider-feasibility.md#minimal-traffic-cases)
+
+In the upstream in-memory SQLite fixture, listing policies immediately after that 501 returned one `PENDING_CREATE` record. The API controller's error path explicitly rolls back its SQL transaction. Database rollback on a deployed Octavia service remains unverified. The rejection runs in its own fresh fixture and does not advance worker status after the failure. [Controller transaction](https://github.com/openstack/octavia/blob/93689cb7701da65b5aad387bb824c477c64b0f2b/octavia/api/v2/controllers/l7policy.py#L164)
+
 The probe uses Octavia's upstream `BaseAPITest` WSGI/SQLite fixture, the real Amphora API provider driver, and `JinjaTemplater.build_config` with model data read back from SQLite. The generated configuration goes directly to HAProxy. The fixture uses no-auth, substitutes Neutron and messaging dependencies, and advances provisioning statuses in place of the Amphora worker. The probe covers the Octavia API shape and local TCP forwarding. Cloud credentials, Neutron reachability, worker convergence, Amphora agent reload, failover, the Gateway API controller and its conformance suite remain outside the run.
 
 ## Reproduce
@@ -15,11 +19,11 @@ From this repository's root, set `HAPROXY_BIN` to the built binary's absolute pa
 ```sh
 python3.14 -m venv /tmp/octavia-tcp-venv
 /tmp/octavia-tcp-venv/bin/python -m pip install \
-  'octavia==19.0.0' 'octavia-lib==3.12.0' \
-  'fixtures==4.3.2' 'oslotest==6.2.0' 'WebTest==3.0.7'
+  -c 'https://raw.githubusercontent.com/openstack/requirements/bbeadfcdd6cd8ac9abf888661d3fc65fa45c7480/upper-constraints.txt' \
+  'octavia==19.0.0' 'octavia-lib==3.12.0' fixtures oslotest WebTest
 unshare --user --map-user=65534 --map-group=65534 \
   /tmp/octavia-tcp-venv/bin/python -u \
   docs/qualification/v1.7.0/provider/stock-tcp.py --haproxy "$HAPROXY_BIN"
 ```
 
-The probe exits successfully with `Ran 1 test` and `OK` after validating both HAProxy configurations and checking delivery before and after detachment.
+The probe exits successfully with `Ran 2 tests` and `OK` after checking the rejected L7 policy and validating TCP delivery before and after detachment. The pinned Hibiscus constraints select SQLAlchemy 2.0.52. [OpenStack requirements](https://github.com/openstack/requirements/blob/bbeadfcdd6cd8ac9abf888661d3fc65fa45c7480/upper-constraints.txt)

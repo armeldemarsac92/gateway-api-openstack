@@ -40,7 +40,7 @@ class StockTCP(base.BaseAPITest):
         self.rpc_client = self.enterContext(mock.patch.object(rpc, "get_client")).return_value
         return super()._make_app()
 
-    def test_default_pool_lifecycle(self):
+    def create_loopback_lb(self):
         subnet_id, network_id, port_id = (str(uuid4()) for _ in range(3))
         network = mock.Mock()
         network.get_subnet.return_value = network_models.Subnet(
@@ -55,7 +55,12 @@ class StockTCP(base.BaseAPITest):
             [],
         )
         self.enterContext(mock.patch.object(utils, "get_network_driver", return_value=network))
+        lb = self.create_load_balancer(subnet_id, provider="amphora", vip_address=LOOPBACK)["loadbalancer"]
+        self.assertEqual(("amphora", LOOPBACK), (lb["provider"], lb["vip_address"]))
+        self.set_lb_status(lb["id"])
+        return lb["id"]
 
+    def test_default_pool_lifecycle(self):
         echo = self.enterContext(socketserver.TCPServer((LOOPBACK, 0), Echo))
         echo.received = []
         thread = threading.Thread(target=echo.serve_forever, daemon=True)
@@ -66,10 +71,7 @@ class StockTCP(base.BaseAPITest):
             reserve.bind((LOOPBACK, 0))
             listener_port = reserve.getsockname()[1]
 
-        lb = self.create_load_balancer(subnet_id, provider="amphora", vip_address=LOOPBACK)["loadbalancer"]
-        self.assertEqual(("amphora", LOOPBACK), (lb["provider"], lb["vip_address"]))
-        lb_id = lb["id"]
-        self.set_lb_status(lb_id)
+        lb_id = self.create_loopback_lb()
         listener = self.create_listener("TCP", listener_port, lb_id, connection_limit=16)["listener"]
         listener_id = listener["id"]
         self.assertEqual(("TCP", listener_port, None), (
@@ -117,6 +119,19 @@ class StockTCP(base.BaseAPITest):
             [call.args[1] for call in self.rpc_client.cast.call_args_list],
         )
         print("API deleted the member, pool, and listener after simulated worker completion")
+
+    def test_tcp_listener_rejects_l7_policy(self):
+        lb_id = self.create_loopback_lb()
+        listener = self.create_listener("TCP", 8443, lb_id)["listener"]
+        self.set_lb_status(lb_id)
+        pool = self.create_pool(lb_id, "TCP", "ROUND_ROBIN")["pool"]
+        self.set_lb_status(lb_id)
+        refused = self.create_l7policy(listener["id"], "REDIRECT_TO_POOL", status=501, redirect_pool_id=pool["id"])
+        self.assertIn("TCP protocol listeners do not support L7 policies", refused["faultstring"])
+        self.assertNotIn("create_l7policy", [call.args[1] for call in self.rpc_client.cast.call_args_list])
+        print("The Amphora driver rejected an L7 forwarding policy on TCP before dispatch to a worker")
+        policies = self.get(self.L7POLICIES_PATH, params={"listener_id": listener["id"]}).json["l7policies"]
+        print("SQLite policy states after HTTP 501:", [policy["provisioning_status"] for policy in policies])
 
     def exchange(self, listener_id, port, amphora):
         with self.get_session() as session:

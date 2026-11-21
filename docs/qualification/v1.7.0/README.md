@@ -6,7 +6,7 @@ The fork provides a development controller and an opt-in Magnum driver patch. Th
 
 | Component | Development input | Deployed version |
 |---|---|---|
-| Controller base | [Audited upstream commit 0d41b7c](https://github.com/gateway-api-openstack/gateway-api-openstack/tree/0d41b7ce39125c012af8bd1bfba3a9c90f0d1252) | Unobserved |
+| Controller base | Upstream `main` matched the audited base on November 21, 2026. [Commit 0d41b7c](https://github.com/gateway-api-openstack/gateway-api-openstack/tree/0d41b7ce39125c012af8bd1bfba3a9c90f0d1252) | Unobserved |
 | Fork controller image | [Source revision, image and reproduction procedure](image-build.md) | Unobserved |
 | Gateway API and conformance suite | [v1.7.0, e26d183](https://github.com/kubernetes-sigs/gateway-api/tree/e26d183dbbc1bb782b78addbd26faba03955c152) | Unobserved |
 | Go | [1.27.4](https://go.dev/dl/#go1.27.4) | Build input |
