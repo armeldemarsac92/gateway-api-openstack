@@ -71,6 +71,8 @@ type GatewayInput struct {
 	Object   *gatewayv1.Gateway
 	Node     cloud.GatewayGraphNode
 	Validate func(context.Context) error
+	// ReportRoutes publishes verified status for the Gateway-owned TLSRoute set.
+	ReportRoutes func(context.Context, cloud.GatewayGraphResult, error) error
 	// ObserveTLS rebuilds withdrawal authority even if ordinary graph input is incomplete.
 	ObserveTLS func(context.Context) (GatewayInput, error)
 }
@@ -189,6 +191,9 @@ func (w *Writer) ReconcileGraph(ctx context.Context, request Request) (cloud.Gat
 		}
 	}
 	w.observeStage(StageProvider, started, err)
+	if gateway.ReportRoutes != nil {
+		err = errors.Join(err, gateway.ReportRoutes(ctx, result, err))
+	}
 	return w.finishTLS(ctx, request.Identity, gateway, result, err)
 }
 

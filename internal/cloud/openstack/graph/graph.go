@@ -38,6 +38,7 @@ type desiredGatewayGraph struct {
 	identity           Identity
 	routes             []desiredRoute
 	protocol           string
+	sni                []desiredSNIFragment
 }
 
 type observedGatewayGraph struct {
@@ -56,6 +57,7 @@ type observedGatewayGraph struct {
 	addressReadError         error
 	outcome                  cloud.Outcome
 	protocol                 string
+	sni                      map[sniFragmentKey]*observedSNIFragment
 }
 
 type graphMutationKind uint8
@@ -77,6 +79,7 @@ const (
 	graphDisableLoadBalancer
 	graphDeleteChild
 	graphDeleteLoadBalancer
+	graphSNIMutation
 )
 
 type graphMutation struct {
@@ -89,6 +92,8 @@ type graphMutation struct {
 	listenerID         string
 	withdrawHTTPPolicy bool
 	redactTLSError     bool
+	sniWithdrawal      bool
+	sni                sniMutation
 	scopedListener     cloud.ScopedListener
 	message            string
 }
@@ -140,6 +145,12 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		return result, err
 	}
 	if actual.addressReadError != nil {
+		if desired.protocol == cloud.ListenerProtocolTLSSNI {
+			if actual.outcome.State == cloud.OutcomeProgressing {
+				return p.pendingGraphResult(ctx, desired, actual), nil
+			}
+			return p.reconcileSNIWithdrawalWithoutAddress(ctx, desired, actual)
+		}
 		return p.reconcileWeightedWithdrawalWithoutAddress(ctx, desired, actual)
 	}
 	if spec.Gateway.Disposition == cloud.GraphWithdrawTLS {
@@ -172,14 +183,14 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	}
 	var plan []graphMutation
 	defaultPool := usesDefaultPool(actual.protocol)
-	planBeforeSecurity := defaultPool || actual.scoped && actual.protocol == cloud.ListenerProtocolHTTP || hasHTTPRouteParts(desired, actual)
+	planBeforeSecurity := actual.protocol == cloud.ListenerProtocolTLSSNI || defaultPool || actual.scoped && actual.protocol == cloud.ListenerProtocolHTTP || hasHTTPRouteParts(desired, actual)
 	if planBeforeSecurity {
 		plan, result, err = p.buildGatewayGraphPlan(desired, actual)
 		if err != nil {
 			return result, err
 		}
 	}
-	if spec.Gateway.Disposition == cloud.GraphEnsure && (len(plan) == 0 || plan[0].kind != graphClearListenerDefaultPool && !plan[0].withdrawHTTPPolicy) {
+	if spec.Gateway.Disposition == cloud.GraphEnsure && (len(plan) == 0 || plan[0].kind != graphClearListenerDefaultPool && !plan[0].withdrawHTTPPolicy && !plan[0].sniWithdrawal) {
 		if err := p.validateGraphTrafficSecurity(ctx, desired); err != nil {
 			result.Routes = observedRouteDeleteCompletions(desired, actual)
 			return result, err
@@ -192,10 +203,18 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		}
 	}
 	if len(plan) == 0 {
+		if desired.protocol == cloud.ListenerProtocolTLSSNI && spec.Gateway.Disposition == cloud.GraphEnsure && result.Outcome.State == cloud.OutcomeReady {
+			if err := p.verifySNICapability(ctx, desired, actual); err != nil {
+				return p.withdrawUndiscoverableSNI(ctx, desired, actual, err)
+			}
+		}
 		return result, nil
 	}
 	step, prepared, err := p.prepareNextGraphMutation(ctx, desired, actual, plan, &result)
 	if !prepared {
+		if desired.protocol == cloud.ListenerProtocolTLSSNI && err != nil {
+			return p.withdrawUndiscoverableSNI(ctx, desired, actual, err)
+		}
 		return result, err
 	}
 	if spec.ValidateMutation != nil {
@@ -269,6 +288,17 @@ func (p *Provider) reconcileWeightedWithdrawalWithoutAddress(ctx context.Context
 
 func (p *Provider) validateGraphTrafficSecurity(ctx context.Context, desired desiredGatewayGraph) error {
 	spec := desired.spec.Gateway.Spec
+	if desired.protocol == cloud.ListenerProtocolTLSSNI {
+		spec.ListenerProtocol = cloud.ListenerProtocolTCP
+		routes := make([]cloud.RouteSpec, 0, len(desired.sni))
+		for _, fragment := range desired.sni {
+			target := fragment.route
+			routes = append(routes, cloud.RouteSpec{Identity: target.Identity, Members: target.Members,
+				MemberSubnetID: target.BackendSubnetID, BackendSecurityGroupIDs: target.BackendSecurityGroupIDs,
+				GatewayRequirements: cloud.GatewayRequirements{ListenerProtocol: cloud.ListenerProtocolTCP}})
+		}
+		return p.topology.ValidateGatewaySecurity(ctx, spec, routes)
+	}
 	var deniedPorts map[int]bool
 	if desired.protocol == cloud.ListenerProtocolHTTP && slices.ContainsFunc(spec.ScopedListeners, func(listener cloud.ScopedListener) bool {
 		return !hasAuthorizedListener(listener)
@@ -372,7 +402,20 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 			}
 		}
 	}
-	if protocol != "" && !supportedListenerProtocol(protocol) {
+	if protocol == cloud.ListenerProtocolTLSSNI {
+		ensure := spec.Gateway.Disposition == cloud.GraphEnsure && p.tlsSNIPassthrough
+		cleanup := spec.Gateway.Disposition == cloud.GraphDelete && len(spec.Gateway.TLSSNIRoutes) == 0
+		if !ensure && !cleanup || spec.Gateway.Spec.ScopedListeners != nil || len(spec.Routes) != 0 ||
+			spec.Gateway.Spec.ListenerPort < 1 || spec.Gateway.Spec.ListenerPort > 65535 {
+			return invalid("invalid TLS SNI profile or TLS SNI passthrough is disabled")
+		}
+		targets, err := buildSNITargets(spec.Identity, spec.Gateway.TLSSNIRoutes)
+		if err != nil {
+			return desiredGatewayGraph{}, err
+		}
+		return desiredGatewayGraph{spec: spec, identity: identity, protocol: protocol, sni: targets}, nil
+	}
+	if len(spec.Gateway.TLSSNIRoutes) != 0 || protocol != "" && !supportedListenerProtocol(protocol) {
 		return invalid("Gateway listener protocol must be HTTP, TCP or UDP")
 	}
 	if spec.Gateway.Spec.ScopedListeners != nil {
@@ -727,12 +770,15 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 	}
 	actual.floatingIP, err = p.findGatewayFloatingIP(ctx, desired.identity, lb.VipPortID, lb.VipAddress)
 	if err != nil {
-		if !p.weightedHTTPTargets || desired.protocol != cloud.ListenerProtocolHTTP || desired.spec.Gateway.Disposition != cloud.GraphEnsure ||
-			observation.phase != loadBalancerPhaseActive || ctx.Err() != nil || errors.Is(err, cloud.ErrOwnershipConflict) {
+		canWithdraw := desired.protocol == cloud.ListenerProtocolTLSSNI ||
+			desired.protocol == cloud.ListenerProtocolHTTP && p.weightedHTTPTargets
+		observeSNIPending := desired.protocol == cloud.ListenerProtocolTLSSNI && lb.ProvisioningStatus == "PENDING_UPDATE"
+		if !canWithdraw || desired.spec.Gateway.Disposition != cloud.GraphEnsure ||
+			observation.phase != loadBalancerPhaseActive && !observeSNIPending || ctx.Err() != nil || errors.Is(err, cloud.ErrOwnershipConflict) {
 			return actual, err
 		}
-		// Still prove the Octavia graph so a restrictive in-place target
-		// withdrawal can run. Every other mutation needs address inventory.
+		// Still prove the Octavia graph so an in-place withdrawal can close
+		// unauthorized targets. Other mutations require the address inventory.
 		actual.addressReadError = err
 	}
 	if actual.floatingIP != nil {
@@ -755,6 +801,12 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 		if err != nil {
 			return actual, err
 		}
+	}
+	if desired.protocol == cloud.ListenerProtocolTLSSNI {
+		return p.observeSNIGraph(ctx, desired, actual, inventory)
+	}
+	if slices.Contains(lb.Tags, sniProfileTag) {
+		return actual, fmt.Errorf("%w: a TLS SNI load balancer cannot be adopted by another profile", cloud.ErrOwnershipConflict)
 	}
 	if actual.scoped {
 		if err := requireListenerDefaultPoolInventory(lb.ID, inventory); err != nil {
@@ -947,6 +999,18 @@ func validateGraphLoadBalancer(lb *octavia.LoadBalancer, requirements cloud.Gate
 
 func (p *Provider) pendingGraphResult(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph) cloud.GatewayGraphResult {
 	result := cloud.GatewayGraphResult{Outcome: actual.outcome, Gateway: observedGatewayResult(desired, actual, actual.outcome)}
+	if desired.protocol == cloud.ListenerProtocolTLSSNI {
+		if desired.spec.Gateway.Disposition == cloud.GraphEnsure && actual.loadBalancer != nil && actual.loadBalancer.AdminStateUp &&
+			actual.loadBalancer.ProvisioningStatus == "PENDING_UPDATE" && actual.listener != nil && actual.listener.AdminStateUp &&
+			actual.listener.DefaultPoolID == "" && actual.listener.ProvisioningStatus != "ERROR" &&
+			(desired.spec.Gateway.Spec.ExternalNetworkID == "" || actual.state.FloatingIPAddress != "") {
+			for _, fragment := range desired.sni {
+				result.Routes = append(result.Routes, cloud.RouteGraphResult{Identity: fragment.route.Identity,
+					Result: cloud.RouteResult{Outcome: actual.outcome, ObservationDeferred: true}})
+			}
+		}
+		return result
+	}
 	if actual.withdrawTLS != nil {
 		result.Gateway.ScopedListenerDeferredPorts = unchangedHTTPSWithdrawalSiblings(desired, actual)
 	}

@@ -48,6 +48,8 @@ type Config struct {
 	BackendH2C bool
 	// OperatorHTTPS enables termination using operator-provisioned certificates.
 	OperatorHTTPS bool
+	// TLSSNIPassthrough enables the advertised native TCP SNI policy extension.
+	TLSSNIPassthrough bool
 	// ControllerName is the exact Gateway API ownership identifier.
 	ControllerName gatewayv1.GatewayController
 	// GatewayAPIChannel selects the release CRDs accepted by this installation. Empty selects Standard.

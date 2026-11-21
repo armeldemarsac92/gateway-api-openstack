@@ -59,7 +59,7 @@ func TestRequireGatewayAPIs(t *testing.T) {
 				}
 			}))
 			t.Cleanup(server.Close)
-			err := requireGatewayAPIs(&rest.Config{Host: server.URL})
+			err := requireGatewayAPIs(&rest.Config{Host: server.URL}, false)
 			if missing == "" && err != nil {
 				t.Fatalf("requireGatewayAPIs() rejected available resources: %v", err)
 			}

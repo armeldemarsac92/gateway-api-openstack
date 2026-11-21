@@ -70,7 +70,7 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 		if snapshot.scopedListeners {
 			spec.ScopedListeners = []cloud.ScopedListener{}
 		}
-		return graph.GatewayInput{
+		input := graph.GatewayInput{
 			Object: request.Gateway.DeepCopy(),
 			Node: cloud.GatewayGraphNode{
 				Disposition: cloud.GraphDelete,
@@ -86,7 +86,19 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 				}
 				return nil
 			},
-		}, nil
+		}
+		if snapshot.boundListenerProtocol == gatewayv1.TLSProtocolType {
+			input.ReportRoutes = func(ctx context.Context, result cloud.GatewayGraphResult, providerErr error) error {
+				if providerErr != nil || result.Outcome.State != cloud.OutcomeReady || result.Gateway.AddressIssue != "" {
+					return nil
+				}
+				if err := input.Validate(ctx); err != nil {
+					return err
+				}
+				return r.clearSNIRouteParentStatuses(ctx, request.Gateway)
+			}
+		}
+		return input, nil
 	}
 	if request.Action != graph.Ensure {
 		return graph.GatewayInput{}, errors.New("invalid Gateway graph action")
@@ -108,6 +120,30 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 	input.Object = snapshot.gateway
 	input.Node = cloud.GatewayGraphNode{Disposition: cloud.GraphEnsure, Spec: r.gatewaySpec(snapshot.gateway, snapshot.listeners, snapshot.topology)}
 	input.Validate = func(ctx context.Context) error { return r.sealGatewayMutationSnapshot(ctx, snapshot) }
+	if snapshot.listener.Protocol == gatewayv1.TLSProtocolType {
+		observed, err := r.observeSNIRoutes(ctx, snapshot)
+		if err != nil {
+			return input, err
+		}
+		input.Node.TLSSNIRoutes = observed.targets()
+		validate := func(ctx context.Context) error {
+			latest, err := r.observeSNIRoutes(ctx, snapshot)
+			if err != nil {
+				return err
+			}
+			if !observed.sameInputs(latest) {
+				return errGatewayChanged
+			}
+			return r.sealGatewayMutationSnapshot(ctx, snapshot)
+		}
+		input.Validate = validate
+		input.ReportRoutes = func(ctx context.Context, result cloud.GatewayGraphResult, providerErr error) error {
+			if err := validate(ctx); err != nil {
+				return err
+			}
+			return r.reportSNIRoutes(ctx, snapshot.gateway, observed, result, providerErr)
+		}
+	}
 	if usesHTTPSProfile(r.Config, snapshot.gateway) {
 		if err := r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
 			return input, err

@@ -100,6 +100,22 @@ func SupportedListenersForConfig(config controller.Config, gateway *gatewayv1.Ga
 	}
 	var listeners []*gatewayv1.Listener
 	switch {
+	case config.TLSSNIPassthrough && hasSNIPassthroughListener(gateway):
+		if len(gateway.Spec.Listeners) != 1 {
+			return nil, fmt.Errorf("TLS SNI passthrough requires a dedicated Gateway with one listener")
+		}
+		listener := &gateway.Spec.Listeners[0]
+		if listener.Hostname != nil || listener.Port < 1 || listener.Port > 65535 || listener.TLS == nil ||
+			listener.TLS.Mode == nil || *listener.TLS.Mode != gatewayv1.TLSModePassthrough ||
+			len(listener.TLS.CertificateRefs) != 0 || len(listener.TLS.Options) != 0 {
+			return nil, fmt.Errorf("TLS SNI passthrough requires a valid port and Passthrough mode without listener hostname, certificates or TLS options")
+		}
+		if err := validateRouteNamespacePolicy(listener); err != nil {
+			return nil, err
+		}
+		listeners = append(listeners, listener)
+	case len(gateway.Spec.Listeners) == 1 && gateway.Spec.Listeners[0].Protocol == gatewayv1.TLSProtocolType:
+		return nil, fmt.Errorf("TLS SNI passthrough requires explicit controller opt-in")
 	case usesHTTPSProfile(config, gateway):
 		listeners := httpsProfileListeners(config, gateway)
 		if len(listeners) == 0 {
@@ -184,6 +200,10 @@ func validateL4Listener(listener *gatewayv1.Listener) error {
 	if listener.Hostname != nil || listener.TLS != nil {
 		return fmt.Errorf("%s listeners do not support hostname or TLS", listener.Protocol)
 	}
+	return validateRouteNamespacePolicy(listener)
+}
+
+func validateRouteNamespacePolicy(listener *gatewayv1.Listener) error {
 	if listener.AllowedRoutes == nil || listener.AllowedRoutes.Namespaces == nil {
 		return nil
 	}
@@ -333,13 +353,15 @@ func listenerRouteKind(protocol gatewayv1.ProtocolType) gatewayv1.Kind {
 		return "TCPRoute"
 	case gatewayv1.UDPProtocolType:
 		return "UDPRoute"
+	case gatewayv1.TLSProtocolType:
+		return "TLSRoute"
 	default:
 		return ""
 	}
 }
 
 func listenerSupportsRouteKind(config controller.Config, listener gatewayv1.Listener, ref gatewayv1.RouteGroupKind) bool {
-	return isRouteGroupKind(ref, listenerRouteKind(listener.Protocol)) ||
+	return (listener.Protocol != gatewayv1.TLSProtocolType || config.TLSSNIPassthrough) && isRouteGroupKind(ref, listenerRouteKind(listener.Protocol)) ||
 		listener.Protocol == gatewayv1.HTTPProtocolType && config.GRPCExactMethodEnabled() && isRouteGroupKind(ref, model.GRPCRouteKind)
 }
 
