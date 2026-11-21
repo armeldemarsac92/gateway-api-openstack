@@ -34,7 +34,6 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
-	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
@@ -47,13 +46,19 @@ type xBackendStatusReconciler struct {
 }
 
 func (r *xBackendStatusReconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {
-	backend, err := graph.ReadXBackend(ctx, r.routes.APIReader, request.NamespacedName)
-	if err != nil || backend == nil {
-		return ctrl.Result{}, err
+	backend := &gatewayx.XBackend{}
+	if err := r.routes.APIReader.Get(ctx, request.NamespacedName, backend); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	ancestors, err := r.observeAncestors(ctx, request.NamespacedName, backend)
-	if err != nil {
-		return ctrl.Result{}, err
+	// A finalizer may keep a terminating XBackend visible after its routes
+	// have withdrawn it. Clear our status while the object still exists.
+	var ancestors map[types.NamespacedName]metav1.Condition
+	if backend.DeletionTimestamp.IsZero() {
+		var err error
+		ancestors, err = r.observeAncestors(ctx, request.NamespacedName, backend)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 	base := backend.DeepCopy()
 	backend.Status.Ancestors = mergeXBackendAncestors(backend, r.routes.Config.ControllerName, ancestors)
@@ -85,7 +90,8 @@ func (r *xBackendStatusReconciler) observeAncestors(ctx context.Context, key typ
 		if err != nil {
 			return nil, err
 		}
-		if len(parents) == 1 && parents[0].gatewayClass.DeletionTimestamp.IsZero() && managedParentsSupportInstalledVersion(parents) {
+		// A class held by its referencing Gateways still owns them.
+		if len(parents) == 1 && managedParentsSupportInstalledVersion(parents) {
 			gateway := parents[0].gateway
 			byGateway[client.ObjectKeyFromObject(gateway)] = gateway
 		}

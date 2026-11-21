@@ -23,9 +23,12 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 
@@ -136,5 +139,71 @@ func TestXBackendAncestorLimitKeepsForeignStatusDuringDetach(t *testing.T) {
 	entry := got[len(foreign)]
 	if entry.AncestorRef.Name != "edge-a" || entry.Conditions[0].ObservedGeneration != backend.Generation {
 		t.Fatalf("unexpected replacement for the detached ancestor: %v", entry)
+	}
+}
+
+func TestXBackendStatusDuringDeletion(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		deleteClass        bool
+		wantOwnedAncestors int
+	}{
+		{name: "referenced GatewayClass is terminating", deleteClass: true, wantOwnedAncestors: 1},
+		{name: "XBackend held by a foreign finalizer is terminating", wantOwnedAncestors: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			class, gateway, route, _, _ := endpointRouteFixture(t)
+			ref := &route.Spec.Rules[0].BackendRefs[0]
+			ref.Group, ref.Kind, ref.Port = ptr.To(gatewayv1.Group(gatewayx.GroupName)), ptr.To(gatewayv1.Kind("XBackend")), nil
+			foreign := gatewayx.BackendAncestorStatus{
+				ControllerName: "example.net/foreign", AncestorRef: gatewayv1.ParentReference{Name: "foreign"},
+			}
+			backend := &gatewayx.XBackend{
+				ObjectMeta: metav1.ObjectMeta{Namespace: route.Namespace, Name: string(ref.Name), Generation: 2},
+				Spec: gatewayx.BackendSpec{
+					Type: gatewayx.BackendTypeEndpointSelector, Port: gatewayx.BackendPort{Number: 8087},
+					EndpointSelector: &gatewayx.EndpointSelectorBackend{LabelSelector: gatewayx.LabelSelector{
+						MatchLabels: map[gatewayv1.LabelKey]gatewayv1.LabelValue{"app": "backend"},
+					}},
+				},
+				Status: gatewayx.BackendStatus{Ancestors: []gatewayx.BackendAncestorStatus{foreign}},
+			}
+			cfg := testConfig()
+			cfg.GatewayAPIChannel = "experimental"
+			if tc.deleteClass {
+				class.DeletionTimestamp = ptr.To(metav1.Now())
+				class.Finalizers = []string{gatewayv1.GatewayClassFinalizerGatewaysExist}
+			} else {
+				backend.DeletionTimestamp = ptr.To(metav1.Now())
+				backend.Finalizers = []string{"example.net/cleanup"}
+				backend.Status.Ancestors = append(backend.Status.Ancestors, gatewayx.BackendAncestorStatus{
+					ControllerName: cfg.ControllerName, AncestorRef: xBackendAncestorRef(client.ObjectKeyFromObject(gateway)),
+					Conditions: []metav1.Condition{xBackendAcceptedCondition(backend, cloud.MemberModeEndpoint, false)},
+				})
+			}
+			scheme := testScheme(t)
+			if err := gatewayx.Install(scheme); err != nil {
+				t.Fatal(err)
+			}
+			kube := indexedFakeClientBuilder(scheme, cfg).WithStatusSubresource(backend).WithObjects(class, gateway, route, backend).Build()
+			status := &xBackendStatusReconciler{routes: &Reconciler{Client: kube, APIReader: kube, Config: cfg}}
+			key := client.ObjectKeyFromObject(backend)
+			if _, err := status.Reconcile(t.Context(), ctrl.Request{NamespacedName: key}); err != nil {
+				t.Fatal(err)
+			}
+			if err := kube.Get(t.Context(), key, backend); err != nil {
+				t.Fatal(err)
+			}
+			ancestors := backend.Status.Ancestors
+			if len(ancestors) != 1+tc.wantOwnedAncestors || !reflect.DeepEqual(ancestors[0], foreign) {
+				t.Fatalf("ancestors = %+v, want foreign entry and %d owned entries", ancestors, tc.wantOwnedAncestors)
+			}
+			if tc.wantOwnedAncestors == 1 {
+				condition := meta.FindStatusCondition(ancestors[1].Conditions, "Accepted")
+				if ancestors[1].ControllerName != cfg.ControllerName || condition == nil || condition.Status != metav1.ConditionTrue || condition.ObservedGeneration != backend.Generation {
+					t.Fatalf("active Gateway lost current acceptance: %+v", ancestors[1])
+				}
+			}
+		})
 	}
 }

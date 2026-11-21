@@ -122,8 +122,7 @@ func xBackendPodPredicate() predicate.Predicate {
 
 func (r *Reconciler) setupXBackendStatusController(manager ctrl.Manager) error {
 	status := &xBackendStatusReconciler{routes: r}
-	// Mapped update events run for both objects, including the old set of
-	// references and matching labels on a detach or label deletion.
+	// Map both route revisions so a detached backend is also reconciled.
 	mapRoute := func(ctx context.Context, object client.Object) []reconcile.Request {
 		var direct []types.NamespacedName
 		if route, ok := object.(*gatewayv1.HTTPRoute); ok {
@@ -138,7 +137,6 @@ func (r *Reconciler) setupXBackendStatusController(manager ctrl.Manager) error {
 	}
 	return ctrl.NewControllerManagedBy(manager).
 		For(&gatewayx.XBackend{}).
-		Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(r.enqueueXBackendsForPod), builder.WithPredicates(xBackendPodPredicate())).
 		Watches(&gatewayv1.HTTPRoute{}, handler.EnqueueRequestsFromMapFunc(mapRoute), builder.WithPredicates(controller.HTTPRouteReconcilePredicate(r.Config))).
 		Watches(&gatewayv1.GRPCRoute{}, handler.EnqueueRequestsFromMapFunc(mapRoute), builder.WithPredicates(controller.HTTPRouteReconcilePredicate(r.Config))).
 		Watches(&gatewayv1.Gateway{}, handler.EnqueueRequestsFromMapFunc(mapRoutes(r.enqueueHTTPRoutesForGateway)), builder.WithPredicates(controller.GatewayForHTTPRoutePredicate(r.Config))).
