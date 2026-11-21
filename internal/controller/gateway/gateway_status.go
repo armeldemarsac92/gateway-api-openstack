@@ -152,6 +152,10 @@ func supportedRouteKinds(kind gatewayv1.Kind) []gatewayv1.RouteGroupKind {
 }
 
 func listenerSupportedRouteKinds(config controller.Config, listener gatewayv1.Listener) []gatewayv1.RouteGroupKind {
+	if listener.Protocol == gatewayv1.TLSProtocolType && (!config.TLSSNIPassthrough || listener.TLS == nil ||
+		listener.TLS.Mode == nil || *listener.TLS.Mode != gatewayv1.TLSModePassthrough) {
+		return nil
+	}
 	var result []gatewayv1.RouteGroupKind
 	kind := listenerRouteKind(listener.Protocol)
 	if kind != "" && listenerAllowsRouteKind(listener, kind) {

@@ -52,6 +52,11 @@ func TestSNIPassthroughRequiresOptInAndDedicatedListener(t *testing.T) {
 	if got, err := SupportedListenersForConfig(config, gateway); err != nil || len(got) != 1 || got[0].Protocol != gatewayv1.TLSProtocolType {
 		t.Fatalf("wanted one TLS listener, got %v, %v", got, err)
 	}
+	terminating := gateway.Spec.Listeners[0].DeepCopy()
+	terminating.TLS.Mode = ptr.To(gatewayv1.TLSModeTerminate)
+	if kinds := listenerSupportedRouteKinds(config, *terminating); len(kinds) != 0 {
+		t.Fatalf("TLS termination advertises unsupported route kinds: %v", kinds)
+	}
 	gateway.Spec.Listeners = append(gateway.Spec.Listeners, gatewayv1.Listener{Name: "http", Port: 80, Protocol: gatewayv1.HTTPProtocolType})
 	if _, err := SupportedListenersForConfig(config, gateway); err == nil {
 		t.Fatal("accepted a mixed Gateway")
