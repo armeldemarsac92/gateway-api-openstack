@@ -176,15 +176,27 @@ type HTTPBackendKind string
 
 const HTTPBackendKindXBackend HTTPBackendKind = "gateway.networking.x-k8s.io/XBackend"
 
+// BackendTLSValidation requires authenticated TLS to a Service port. The
+// hostname is used as both SNI and the certificate identity. Denied keeps
+// the backend's HTTP matches and weight while withholding all forwarding.
+type BackendTLSValidation struct {
+	Hostname       string
+	CAConfigMapUID string
+	CADigest       string
+	CAPEM          []byte `json:"-"`
+	Denied         bool
+}
+
 // HTTPBackend groups the paths served by one backend within one HTTPRoute.
 // The zero kind denotes a core Service port.
 // Unavailable marks an unusable target. Its matches retain their position and
 // its pool must contain no members.
 type HTTPBackend struct {
 	// InvalidReference distinguishes an unresolved reference from a valid backend without endpoints.
-	InvalidReference bool            `json:",omitempty"`
-	BackendH2C       bool            `json:",omitempty"`
-	Kind             HTTPBackendKind `json:",omitempty"`
+	InvalidReference bool                  `json:",omitempty"`
+	BackendH2C       bool                  `json:",omitempty"`
+	BackendTLS       *BackendTLSValidation `json:",omitempty"`
+	Kind             HTTPBackendKind       `json:",omitempty"`
 	Namespace        string
 	Name             string
 	Port             int
@@ -245,7 +257,8 @@ type RouteSpec struct {
 	Members    []Member
 	// BackendH2C selects h2c for a scalar HTTP backend pool. Grouped routes
 	// carry transport on each HTTPBackend.
-	BackendH2C bool `json:",omitempty"`
+	BackendH2C bool                  `json:",omitempty"`
+	BackendTLS *BackendTLSValidation `json:",omitempty"`
 	// HTTPBackends carries the complete set of paths and backend groups when
 	// the HTTPRoute has several rules or alternative matches.
 	HTTPBackends      []HTTPBackend      `json:",omitempty"`
