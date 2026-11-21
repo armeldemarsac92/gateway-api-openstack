@@ -36,7 +36,7 @@ The controller uses Gateway API v1.7.0 and defaults to the Standard Channel. Its
 - One rule, one match and one backend Service per HTTPRoute. Across routes the listener orders matching hostnames, Exact and PathPrefix paths, route age and names.
 - HTTP/1.1 WebSocket Upgrade to a TCP Service port declaring `appProtocol: kubernetes.io/ws`. [Operator instructions](docs/getting-started.md) · [Qualification](docs/qualification/v1.7.0/provider/http-websocket.md)
 - An optional exact or wildcard hostname on the listener and at most one on the HTTPRoute. Only the names shared by both reach the backend.
-- One TCP listener on a dedicated Gateway. It forwards opaque streams to one Service port from the oldest attached TCPRoute. A newer attached route takes over when the older route detaches. [TCP example](docs/getting-started.md#forward-tcp-to-a-service)
+- One TCP listener on a dedicated Gateway. The oldest attached TCPRoute forwards new connections to one Service in NodePort mode or to weighted Services with routable pod IPs in Endpoint mode. A newer attached route takes over when the older route detaches. [TCP example](docs/getting-started.md#forward-tcp-to-a-service)
 - Distinct UDP ports on one dedicated Gateway share its VIP. Each listener selects its oldest eligible UDPRoute. A route that wins on several ports uses one shared pool. Endpoint mode supports weighted UDP Services with routable pod IPs. NodePort mode accepts a single Service. [UDP example](docs/getting-started.md#forward-udp-to-a-service)
 - Eligible worker NodePort members with Local or Cluster traffic policy
 - An opt-in IPv4 Endpoint mode for ClusterIP, headless, and NodePort Services, pending live network validation

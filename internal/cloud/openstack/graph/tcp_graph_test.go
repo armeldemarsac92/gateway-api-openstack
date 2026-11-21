@@ -925,8 +925,16 @@ func TestUDPGraphDetachesWithoutMembersInTheVIPFamily(t *testing.T) {
 	}
 }
 
-func TestUDPGraphReconcilesEndpointWeightThroughThePublicAPI(t *testing.T) {
-	f := newTransportGraphFixture(t, cloud.ListenerProtocolUDP)
+func TestTransportGraphReconcilesEndpointWeightThroughThePublicAPI(t *testing.T) {
+	for _, protocol := range []string{cloud.ListenerProtocolTCP, cloud.ListenerProtocolUDP} {
+		t.Run(protocol, func(t *testing.T) {
+			testTransportGraphReconcilesEndpointWeight(t, protocol)
+		})
+	}
+}
+
+func testTransportGraphReconcilesEndpointWeight(t *testing.T, protocol string) {
+	f := newTransportGraphFixture(t, protocol)
 	route := &f.spec.Routes[0].Spec
 	route.MemberMode = cloud.MemberModeEndpoint
 	member := &route.Members[0]
@@ -996,8 +1004,16 @@ func TestUDPGraphReconcilesEndpointWeightThroughThePublicAPI(t *testing.T) {
 	}
 }
 
-func TestWeightedUDPGraphClearsSourceIPPersistenceBeforeAttaching(t *testing.T) {
-	f := newTransportGraphFixture(t, cloud.ListenerProtocolUDP)
+func TestWeightedTransportGraphClearsSourceIPPersistenceBeforeAttaching(t *testing.T) {
+	for _, protocol := range []string{cloud.ListenerProtocolTCP, cloud.ListenerProtocolUDP} {
+		t.Run(protocol, func(t *testing.T) {
+			testWeightedTransportGraphClearsSourceIPPersistence(t, protocol)
+		})
+	}
+}
+
+func testWeightedTransportGraphClearsSourceIPPersistence(t *testing.T, protocol string) {
+	f := newTransportGraphFixture(t, protocol)
 	route := &f.spec.Routes[0].Spec
 	route.MemberMode = cloud.MemberModeEndpoint
 	for range 6 {

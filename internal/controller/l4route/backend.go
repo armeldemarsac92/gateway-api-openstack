@@ -66,11 +66,8 @@ func backendRejection(reason gatewayv1.RouteConditionReason, message string) *mo
 }
 
 func (r *Reconciler) authorizedBackends(ctx context.Context, route *transportRoute, includeZeroWeight bool) ([]serviceReference, backendRejections, error) {
-	if r.protocol() == gatewayv1.TCPProtocolType && len(route.backendRefs) != 1 {
-		return nil, backendRejections{active: backendRejection(gatewayv1.RouteReasonUnsupportedValue, "TCP forwarding requires one rule with exactly one Service backendRef")}, nil
-	}
 	if len(route.backendRefs) == 0 {
-		return nil, backendRejections{active: backendRejection(gatewayv1.RouteReasonUnsupportedValue, "UDP forwarding requires one rule with Service backendRefs")}, nil
+		return nil, backendRejections{active: backendRejection(gatewayv1.RouteReasonUnsupportedValue, fmt.Sprintf("%s forwarding requires one rule with Service backendRefs", r.protocol()))}, nil
 	}
 	type backendKey struct {
 		service client.ObjectKey

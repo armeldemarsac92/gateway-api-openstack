@@ -476,8 +476,7 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 		if pool.Protocol != desired.protocol() {
 			return nil, cloud.RouteState{}, fmt.Errorf("%w: pool %s has protocol %s", cloud.ErrOwnershipConflict, pool.ID, pool.Protocol)
 		}
-		clearPersistence := pool.Persistence != (pools.SessionPersistence{}) &&
-			desired.protocol() == cloud.ListenerProtocolUDP && desired.spec.MemberMode == cloud.MemberModeEndpoint &&
+		clearPersistence := pool.Persistence != (pools.SessionPersistence{}) && desired.spec.MemberMode == cloud.MemberModeEndpoint &&
 			slices.ContainsFunc(desired.members, func(member cloud.Member) bool { return !member.Draining && member.Weight > 0 })
 		if pool.LBMethod != string(pools.LBMethodRoundRobin) || !pool.AdminStateUp || clearPersistence {
 			nonPolicyPlan = append(nonPolicyPlan, routeMutation{kind: routeMutationUpdatePool, id: pool.ID, clearPoolPersistence: clearPersistence})
@@ -817,7 +816,7 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 	return nil
 }
 
-// Endpoint mode owns weight for readiness and explicit UDP traffic shares.
+// Endpoint mode owns weight for readiness and explicit TCP and UDP traffic shares.
 func desiredMemberWeight(mode cloud.MemberMode, member cloud.Member) *int {
 	if mode != cloud.MemberModeEndpoint {
 		return nil

@@ -178,7 +178,7 @@ func (r *Reconciler) planRoute(ctx context.Context, route *transportRoute, bindi
 	if plan.detach {
 		return plan, nil
 	}
-	// Multiple UDP references require Endpoint mode. Validate disabled Services
+	// Multiple backend references require Endpoint mode. Validate disabled Services
 	// against its constraints without resolving any endpoints for them.
 	backends, serviceRejections, err := r.backendServices(ctx, refs, len(route.backendRefs) > 1)
 	if err != nil {
@@ -294,7 +294,7 @@ func gatewayProgrammed(gateway *gatewayv1.Gateway) bool {
 func (r *Reconciler) routeSpec(ctx context.Context, route *transportRoute, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, backends []serviceBackend, topology classconfig.Resolved, listenerPorts ...int) (cloud.RouteSpec, string, *model.Diagnostic, error) {
 	weighted := len(route.backendRefs) > 1
 	if weighted && topology.Topology.MemberMode != cloud.MemberModeEndpoint {
-		return cloud.RouteSpec{}, "", backendRejection(gatewayv1.RouteReasonUnsupportedValue, "UDP forwarding with multiple backend references requires Endpoint member mode"), nil
+		return cloud.RouteSpec{}, "", backendRejection(gatewayv1.RouteReasonUnsupportedValue, fmt.Sprintf("%s forwarding with multiple backend references requires Endpoint member mode", r.protocol())), nil
 	}
 	groups := make([]weightedServiceMembers, len(backends))
 	for i, backend := range backends {
@@ -307,9 +307,9 @@ func (r *Reconciler) routeSpec(ctx context.Context, route *transportRoute, gatew
 	members := groups[0].members
 	if weighted {
 		var err error
-		members, err = weightedUDPMembers(groups)
-		if errors.Is(err, errUDPBackendWithoutReadyEndpoints) {
-			return cloud.RouteSpec{}, "", &model.Diagnostic{Reason: string(gatewayv1.RouteReasonPending), Message: "Waiting for eligible endpoints in every positive-weight UDP backend"}, nil
+		members, err = weightedMembers(string(r.protocol()), groups)
+		if errors.Is(err, errBackendWithoutReadyEndpoints) {
+			return cloud.RouteSpec{}, "", &model.Diagnostic{Reason: string(gatewayv1.RouteReasonPending), Message: fmt.Sprintf("Waiting for eligible endpoints in every positive-weight %s backend", r.protocol())}, nil
 		}
 		if err != nil {
 			return cloud.RouteSpec{}, "", &model.Diagnostic{Condition: "Programmed", Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: err.Error()}, nil

@@ -27,18 +27,21 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 )
 
-const maxOctaviaUDPMemberWeight = 256
+const maxOctaviaMemberWeight = 256
 
-var errUDPBackendWithoutReadyEndpoints = errors.New("positive-weight backend has no ready endpoints")
+// HAProxy's dynamic round robin scheduler limits active servers per pool.
+const maxTCPRoundRobinMembers = 4095
+
+var errBackendWithoutReadyEndpoints = errors.New("positive-weight backend has no ready endpoints")
 
 type weightedServiceMembers struct {
 	weight  int32
 	members []cloud.Member
 }
 
-// weightedUDPMembers divides each backend's weight among its unique ready
+// weightedMembers divides each backend's weight among its unique ready
 // endpoints, then adds the shares of any endpoint reached through multiple backends.
-func weightedUDPMembers(groups []weightedServiceMembers) ([]cloud.Member, error) {
+func weightedMembers(protocol string, groups []weightedServiceMembers) ([]cloud.Member, error) {
 	type readyGroup struct {
 		weight    int64
 		endpoints map[netip.AddrPort]struct{}
@@ -49,7 +52,7 @@ func weightedUDPMembers(groups []weightedServiceMembers) ([]cloud.Member, error)
 	var count, commonFactor big.Int
 	for i, group := range groups {
 		if group.weight < 0 {
-			return nil, fmt.Errorf("UDP backendRef %d has a negative weight", i+1)
+			return nil, fmt.Errorf("%s backendRef %d has a negative weight", protocol, i+1)
 		}
 		if group.weight == 0 {
 			continue
@@ -58,7 +61,7 @@ func weightedUDPMembers(groups []weightedServiceMembers) ([]cloud.Member, error)
 		for _, member := range group.members {
 			address, err := netip.ParseAddr(member.Address)
 			if err != nil || member.Port < 1 || member.Port > 65535 {
-				return nil, fmt.Errorf("UDP backendRef %d has an invalid endpoint %q port %d", i+1, member.Address, member.Port)
+				return nil, fmt.Errorf("%s backendRef %d has an invalid endpoint %q port %d", protocol, i+1, member.Address, member.Port)
 			}
 			endpoint := netip.AddrPortFrom(address, uint16(member.Port))
 			if _, found := shares[endpoint]; !found {
@@ -69,7 +72,7 @@ func weightedUDPMembers(groups []weightedServiceMembers) ([]cloud.Member, error)
 			}
 		}
 		if len(ready) == 0 {
-			return nil, fmt.Errorf("UDP backendRef %d: %w", i+1, errUDPBackendWithoutReadyEndpoints)
+			return nil, fmt.Errorf("%s backendRef %d: %w", protocol, i+1, errBackendWithoutReadyEndpoints)
 		}
 		readyGroups = append(readyGroups, readyGroup{weight: int64(group.weight), endpoints: ready})
 
@@ -103,17 +106,25 @@ func weightedUDPMembers(groups []weightedServiceMembers) ([]cloud.Member, error)
 		gcd.GCD(nil, nil, &gcd, total)
 	}
 	members := make([]cloud.Member, 0, len(shares))
+	active := 0
 	for endpoint, total := range shares {
 		total.Quo(total, &gcd)
-		if !total.IsInt64() || total.Int64() > maxOctaviaUDPMemberWeight {
-			return nil, fmt.Errorf("the exact UDP backend ratio exceeds Octavia's maximum member weight of %d", maxOctaviaUDPMemberWeight)
+		if !total.IsInt64() || total.Int64() > maxOctaviaMemberWeight {
+			return nil, fmt.Errorf("the exact %s backend ratio exceeds Octavia's maximum member weight of %d", protocol, maxOctaviaMemberWeight)
+		}
+		draining := total.Sign() == 0
+		if !draining {
+			active++
 		}
 		members = append(members, cloud.Member{
 			Address:  endpoint.Addr().String(),
 			Port:     int(endpoint.Port()),
-			Draining: total.Sign() == 0,
+			Draining: draining,
 			Weight:   int(total.Int64()),
 		})
+	}
+	if protocol == cloud.ListenerProtocolTCP && active > maxTCPRoundRobinMembers {
+		return nil, fmt.Errorf("weighted TCP forwarding requires at most %d active endpoints in one HAProxy pool", maxTCPRoundRobinMembers)
 	}
 	slices.SortFunc(members, func(left, right cloud.Member) int {
 		return cmp.Or(cmp.Compare(left.Address, right.Address), cmp.Compare(left.Port, right.Port))

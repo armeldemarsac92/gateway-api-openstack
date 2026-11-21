@@ -217,7 +217,7 @@ func TestInvalidEndpointWeightsFailBeforeCloudAccess(t *testing.T) {
 		{name: "above Octavia maximum", protocol: cloud.ListenerProtocolUDP, mode: cloud.MemberModeEndpoint, weight: 257},
 		{name: "conflicting duplicate", protocol: cloud.ListenerProtocolUDP, mode: cloud.MemberModeEndpoint, weight: 3, duplicate: true},
 		{name: "UDP NodePort", protocol: cloud.ListenerProtocolUDP, mode: cloud.MemberModeNodePort, weight: 1},
-		{name: "TCP Endpoint", protocol: cloud.ListenerProtocolTCP, mode: cloud.MemberModeEndpoint, weight: 1},
+		{name: "TCP NodePort", protocol: cloud.ListenerProtocolTCP, mode: cloud.MemberModeNodePort, weight: 1},
 		{name: "HTTP Endpoint", protocol: cloud.ListenerProtocolHTTP, mode: cloud.MemberModeEndpoint, weight: 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {

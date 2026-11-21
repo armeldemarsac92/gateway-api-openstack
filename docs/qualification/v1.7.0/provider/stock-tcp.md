@@ -18,7 +18,9 @@ The Gophercloud adapter creates a TCP listener with no default pool, provisions 
 
 If the release CRDs change while a route is bound, the controller checks the existing parent, programmed route generation and authorized Service. An edited backend or a lost Service triggers cleanup even while new provisioning is frozen. A NodePort Service without ready endpoints keeps `ResolvedRefs=True` after the port resolves and reports unavailable members through its program condition. A restarted writer can also remove a detached pool after the listener disappears, using the TCPRoute UID and verified cloud ownership. [Controller regressions](../../../../internal/controller/l4route/graph_test.go) · [Cloud cleanup regression](../../../../internal/cloud/openstack/graph/tcp_graph_test.go)
 
-These local checks cover a single TCP listener and one Service backend. A real private VIP, traffic through a worker NodePort, the deployed restart and cleanup, weighted backends and the upstream GATEWAY-TCP report remain open.
+In a separate local weighted probe, Gophercloud created and updated TCP `ROUND_ROBIN` members through the pinned Octavia public API and read each weight back by member ID. Octavia accepted 0 and 256 and returned HTTP 400 for 257. It accepted clearing `SOURCE_IP` persistence on the pool. HAProxy 3.0.19 ran the stock configuration rendered from those API writes. With weights 7, 7 and 6, three echo backends received 703, 702 and 595 of 2,000 new connections. After changing the same members to equal weights, each received 500 of 1,500 new connections. [Member API types](https://github.com/openstack/octavia/blob/93689cb7701da65b5aad387bb824c477c64b0f2b/octavia/api/v2/types/member.py) · [HAProxy pool template](https://github.com/openstack/octavia/blob/93689cb7701da65b5aad387bb824c477c64b0f2b/octavia/common/jinja/haproxy/combined_listeners/templates/macros.j2)
+
+These local checks use a loopback listener. Weighted TCPRoute traffic through Kubernetes pods, a real private Amphora VIP, on-cloud restart and cleanup, and the upstream GATEWAY-TCP report remain open.
 
 ## Reproduce
 

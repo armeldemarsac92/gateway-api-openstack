@@ -19,6 +19,7 @@ package l4route
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -38,7 +39,144 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 )
+
+func TestTCPRouteProgramsWeightedEndpointPool(t *testing.T) {
+	gateway, class, route := routeFixture()
+	gateway.Status.Addresses = []gatewayv1.GatewayStatusAddress{{Value: "192.0.2.30"}}
+	localRef, local, localEndpoints := transportBackendFixture(corev1.ProtocolTCP, route.Namespace, "primary", 70, "10.1.2.1", "10.1.2.2")
+	remoteRef, remote, remoteEndpoints := transportBackendFixture(corev1.ProtocolTCP, "other", "secondary", 30, "10.1.2.3")
+	remoteRef.Namespace = ptr.To(gatewayv1.Namespace(remote.Namespace))
+	disabledRef, disabled, disabledEndpoints := transportBackendFixture(corev1.ProtocolTCP, route.Namespace, "disabled", 0, "10.1.2.4")
+	route.Spec.Rules[0].BackendRefs = []gatewayv1.BackendRef{localRef, remoteRef, disabledRef}
+	grant := &gatewayv1.ReferenceGrant{
+		ObjectMeta: metav1.ObjectMeta{Namespace: remote.Namespace, Name: "allow-tcp"},
+		Spec: gatewayv1.ReferenceGrantSpec{
+			From: []gatewayv1.ReferenceGrantFrom{{Group: gatewayv1.GroupName, Kind: "TCPRoute", Namespace: gatewayv1.Namespace(route.Namespace)}},
+			To:   []gatewayv1.ReferenceGrantTo{{Kind: "Service", Name: &remoteRef.Name}},
+		},
+	}
+	r := testReconciler(t, gateway, class, route, local, localEndpoints, remote, remoteEndpoints, disabled, disabledEndpoints, grant)
+	identity := bindFixture(t, r, gateway, route, cloud.MemberModeEndpoint)
+	r.Coordinator = &graph.Coordinator{}
+	want := []cloud.Member{
+		{Address: "10.1.2.1", Port: 9090, Weight: 7},
+		{Address: "10.1.2.2", Port: 9090, Weight: 7},
+		{Address: "10.1.2.3", Port: 9090, Weight: 6},
+	}
+	r.Writer = applyRouteGraphFunc(func(ctx context.Context, request graph.Request) (cloud.GatewayGraphResult, error) {
+		input, err := r.ObserveRouteGraph(ctx, request, request.Gateway)
+		if err != nil {
+			return cloud.GatewayGraphResult{}, err
+		}
+		if request.Action != graph.Ensure || len(input.Nodes) != 1 || input.Nodes[0].Disposition != cloud.GraphEnsure ||
+			input.Nodes[0].Spec.Identity != identity || input.Nodes[0].Spec.GatewayRequirements.ListenerProtocol != cloud.ListenerProtocolTCP ||
+			!slices.Equal(input.Nodes[0].Spec.Members, want) {
+			t.Fatalf("expected owned TCP pool with members %+v, got %+v", want, input.Nodes)
+		}
+		return cloud.GatewayGraphResult{Outcome: cloud.ReadyOutcome(), Routes: []cloud.RouteGraphResult{
+			{Identity: identity, Result: cloud.RouteResult{Outcome: cloud.ReadyOutcome()}},
+		}}, input.Validate(ctx)
+	})
+	route = reconcileTCPRoute(t, r, route)
+	programmed := r.Config.Domain() + "/Programmed"
+	checkRouteCondition(t, route, r.Config.ControllerName, "ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")
+	checkRouteCondition(t, route, r.Config.ControllerName, programmed, metav1.ConditionTrue, "Programmed")
+	if err := r.Delete(t.Context(), disabled); err != nil {
+		t.Fatal(err)
+	}
+	route = reconcileTCPRoute(t, r, route)
+	checkRouteCondition(t, route, r.Config.ControllerName, "ResolvedRefs", metav1.ConditionFalse, "BackendNotFound")
+	checkRouteCondition(t, route, r.Config.ControllerName, programmed, metav1.ConditionTrue, "Programmed")
+
+	// A fresh reconciler must reject a sealed snapshot after the weight changes,
+	// then checkpoint the new target before asking Octavia to write it.
+	r = &Reconciler{Client: r.Client, APIReader: r.APIReader, Config: r.Config, Writer: r.Writer, Coordinator: &graph.Coordinator{}}
+	request := graph.Request{Identity: identity, Action: graph.Ensure, Gateway: gateway, TCPRoute: route}
+	snapshot, err := r.ObserveRouteGraph(t.Context(), request, gateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	route.Spec.Rules[0].BackendRefs[0].Weight = ptr.To(int32(60))
+	route.Generation++
+	if err := r.Update(t.Context(), route); err != nil {
+		t.Fatal(err)
+	}
+	if err := snapshot.Validate(t.Context()); !errors.Is(err, controller.ErrGraphInputChanged) {
+		t.Fatalf("changed weights did not invalidate the sealed graph: %v", err)
+	}
+	route = reconcileTCPRoute(t, r, route)
+	checkRouteCondition(t, route, r.Config.ControllerName, r.forwardingTargetType(), metav1.ConditionFalse, "Pending")
+	checkRouteCondition(t, route, r.Config.ControllerName, programmed, metav1.ConditionFalse, "Pending")
+	for i := range want {
+		want[i].Weight = 1
+	}
+	route = reconcileTCPRoute(t, r, route)
+	checkRouteCondition(t, route, r.Config.ControllerName, programmed, metav1.ConditionTrue, "Programmed")
+	setBundleSkew(t, r)
+	route = reconcileTCPRoute(t, r, route)
+	checkRouteCondition(t, route, r.Config.ControllerName, programmed, metav1.ConditionTrue, "Programmed")
+	// Restore the supported bundle before sealing the next provider graph.
+	setBundleVersion(t, r, gatewayconsts.BundleVersion)
+
+	// Revoking the grant for a positive share must invalidate prepared provider
+	// writes and must not silently redirect that share to the local backend.
+	request.TCPRoute = route
+	snapshot, err = r.ObserveRouteGraph(t.Context(), request, gateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Delete(t.Context(), grant); err != nil {
+		t.Fatal(err)
+	}
+	r.APIReader = denyServiceRead{Reader: r.Client, namespace: remote.Namespace}
+	if err := snapshot.Validate(t.Context()); !errors.Is(err, controller.ErrGraphInputChanged) {
+		t.Fatalf("revoked grant did not invalidate the sealed graph: %v", err)
+	}
+	route = reconcileTCPRoute(t, r, route)
+	checkRouteCondition(t, route, r.Config.ControllerName, "ResolvedRefs", metav1.ConditionFalse, "RefNotPermitted")
+	if route.Annotations[r.Config.RouteLifecycleAnnotation()] != controller.RouteDetaching {
+		t.Fatal("revoked TCP backend did not checkpoint pool withdrawal")
+	}
+}
+
+func TestTCPRouteRejectsUnusableWeightedDestinations(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		mode       cloud.MemberMode
+		weight     int32
+		endpoints  []string
+		resolved   metav1.ConditionStatus
+		reason     string
+		programmed string
+	}{
+		{"missing endpoint group", cloud.MemberModeEndpoint, 1, nil, metav1.ConditionTrue, "ResolvedRefs", "Pending"},
+		{"unrepresentable ratio", cloud.MemberModeEndpoint, 257, []string{"10.1.2.2"}, metav1.ConditionTrue, "ResolvedRefs", "UnsupportedValue"},
+		{"weighted NodePort", cloud.MemberModeNodePort, 1, []string{"10.1.2.2"}, metav1.ConditionFalse, "UnsupportedValue", "UnsupportedValue"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			gateway, class, route := routeFixture()
+			gateway.Status.Addresses = []gatewayv1.GatewayStatusAddress{{Value: "192.0.2.30"}}
+			firstRef, first, firstEndpoints := transportBackendFixture(corev1.ProtocolTCP, route.Namespace, "first", 1, "10.1.2.1")
+			secondRef, second, secondEndpoints := transportBackendFixture(corev1.ProtocolTCP, route.Namespace, "second", test.weight, test.endpoints...)
+			if test.mode == cloud.MemberModeNodePort {
+				first.Spec.Type, first.Spec.Ports[0].NodePort = corev1.ServiceTypeNodePort, 32001
+				second.Spec.Type, second.Spec.Ports[0].NodePort = corev1.ServiceTypeNodePort, 32002
+			}
+			route.Spec.Rules[0].BackendRefs = []gatewayv1.BackendRef{firstRef, secondRef}
+			r := testReconciler(t, gateway, class, route, first, firstEndpoints, second, secondEndpoints)
+			bindFixture(t, r, gateway, route, test.mode)
+			r.Coordinator = &graph.Coordinator{}
+			current := reconcileTCPRoute(t, r, route)
+			checkRouteCondition(t, current, r.Config.ControllerName, "ResolvedRefs", test.resolved, test.reason)
+			checkRouteCondition(t, current, r.Config.ControllerName, r.Config.Domain()+"/Programmed", metav1.ConditionFalse, test.programmed)
+			if current.Annotations[r.Config.RouteLifecycleAnnotation()] != controller.RouteDetaching {
+				t.Fatal("the unusable TCP forwarding target did not checkpoint withdrawal")
+			}
+		})
+	}
+}
 
 func TestTCPRouteReportsAttachmentAndDeniedBackendIndependently(t *testing.T) {
 	gateway, class, route := routeFixture()

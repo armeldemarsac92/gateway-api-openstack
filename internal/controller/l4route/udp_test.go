@@ -247,15 +247,20 @@ func TestWeightedUDPRouteWithdrawsWhenReferenceGrantIsRevoked(t *testing.T) {
 }
 
 func udpBackendFixture(namespace, name string, weight int32, addresses ...string) (gatewayv1.BackendRef, *corev1.Service, *discoveryv1.EndpointSlice) {
+	return transportBackendFixture(corev1.ProtocolUDP, namespace, name, weight, addresses...)
+}
+
+func transportBackendFixture(protocol corev1.Protocol, namespace, name string, weight int32, addresses ...string) (gatewayv1.BackendRef, *corev1.Service, *discoveryv1.EndpointSlice) {
 	ref := gatewayv1.BackendRef{BackendObjectReference: gatewayv1.BackendObjectReference{Name: gatewayv1.ObjectName(name), Port: ptr.To(gatewayv1.PortNumber(8080))}, Weight: &weight}
+	portName := strings.ToLower(string(protocol))
 	service := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: name, UID: types.UID(name + "-uid")},
-		Spec:       corev1.ServiceSpec{Ports: []corev1.ServicePort{{Name: "udp", Port: 8080, Protocol: corev1.ProtocolUDP}}},
+		Spec:       corev1.ServiceSpec{Ports: []corev1.ServicePort{{Name: portName, Port: 8080, Protocol: protocol}}},
 	}
 	endpoints := &discoveryv1.EndpointSlice{
 		ObjectMeta:  metav1.ObjectMeta{Namespace: namespace, Name: name, Labels: map[string]string{discoveryv1.LabelServiceName: name}},
 		AddressType: discoveryv1.AddressTypeIPv4,
-		Ports:       []discoveryv1.EndpointPort{{Name: ptr.To("udp"), Protocol: ptr.To(corev1.ProtocolUDP), Port: ptr.To(int32(9090))}},
+		Ports:       []discoveryv1.EndpointPort{{Name: &portName, Protocol: &protocol, Port: ptr.To(int32(9090))}},
 	}
 	for _, address := range addresses {
 		endpoints.Endpoints = append(endpoints.Endpoints, discoveryv1.Endpoint{Addresses: []string{address}})

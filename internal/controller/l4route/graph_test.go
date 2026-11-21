@@ -274,11 +274,16 @@ func TestMissingTCPBindingCheckpointBlocksMutation(t *testing.T) {
 
 func setBundleSkew(t *testing.T, r *Reconciler) {
 	t.Helper()
+	setBundleVersion(t, r, "unsupported")
+}
+
+func setBundleVersion(t *testing.T, r *Reconciler, version string) {
+	t.Helper()
 	crd := &apiextensionsv1.CustomResourceDefinition{}
 	if err := r.Get(t.Context(), client.ObjectKey{Name: "tcproutes.gateway.networking.k8s.io"}, crd); err != nil {
 		t.Fatal(err)
 	}
-	crd.Annotations[gatewayconsts.BundleVersionAnnotation] = "unsupported"
+	crd.Annotations[gatewayconsts.BundleVersionAnnotation] = version
 	if err := r.Update(t.Context(), crd); err != nil {
 		t.Fatal(err)
 	}
