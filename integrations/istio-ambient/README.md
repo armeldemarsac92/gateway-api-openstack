@@ -41,13 +41,14 @@ Check for `Accepted=True`, `ResolvedRefs=True`, and `ResolvedWaypoints=True` at 
 
 1. Delete the owned producer Routes or remove their Service parent from shared Routes. Wait for the original backend behavior to return using the same Service DNS from an enrolled client.
 2. Remove the Service binding with a JSON Patch that tests its current value. Repeat for every Service assigned to this waypoint. Check traffic again before deleting the waypoint Gateway. The test protects any concurrent reassignment of the label.
-3. Remove the ambient labels this deployment added after every waypoint binding and application using those namespaces has drained. Verify that the affected workloads leave ambient and retain connectivity. Keep any enrollment now managed by another owner.
+3. After the waypoint bindings and applications have drained, set `enrolled_namespace` to the recorded name of a namespace still managed by this deployment. Run the namespace patch once per enrolled namespace. The patch checks that the live mode is still `ambient` before removing the label. Verify that the affected workloads leave ambient and retain connectivity.
 
 ```sh
 kube -n "$destination_namespace" patch service "$service" --type=json -p \
   '[{"op":"test","path":"/metadata/labels/istio.io~1use-waypoint","value":"service-waypoint"},{"op":"remove","path":"/metadata/labels/istio.io~1use-waypoint"}]'
 kube -n "$destination_namespace" delete gateway service-waypoint --wait=true
-kube label namespace "$destination_namespace" "$client_namespace" istio.io/dataplane-mode-
+kube patch namespace "$enrolled_namespace" --type=json -p \
+  '[{"op":"test","path":"/metadata/labels/istio.io~1dataplane-mode","value":"ambient"},{"op":"remove","path":"/metadata/labels/istio.io~1dataplane-mode"}]'
 ```
 
 An exclusive installation may now uninstall the three runtime releases after verifying there are no remaining Istio clients, waypoints or workloads depending on them. Retain the base release and Istio CRDs with the platform, as removing the base chart can delete API data. Retain `istio-system` and the shared Gateway API bundle. Remove `istio-waypoint` only if this deployment created the class and no Gateway references it.
