@@ -21,8 +21,10 @@ import (
 	"slices"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
@@ -58,13 +60,37 @@ func (a backendTLSAvailability) validation(backend model.BackendGroup, ordinaryH
 	if winner == nil {
 		return nil
 	}
-	if winner.Validation == nil || a != backendTLSAvailable || !supportsBackendTLS(backend, ordinaryHTTP) {
+	if winner.AncestorSlot != backendtls.AncestorSlotHeld || winner.Validation == nil ||
+		a != backendTLSAvailable || !supportsBackendTLS(backend, ordinaryHTTP) {
 		return &cloud.BackendTLSValidation{Denied: true}
 	}
 	return &cloud.BackendTLSValidation{
 		Hostname: winner.Validation.Hostname, CAConfigMapUID: string(winner.Validation.CA.UID),
 		CADigest: winner.Validation.CA.Digest, CAPEM: slices.Clone(winner.Validation.CA.PEM),
 	}
+}
+
+func routeBackendTLSAncestorSlot(route *gatewayv1.HTTPRoute, inputs *routeModelInputs) backendtls.AncestorSlot {
+	var slot backendtls.AncestorSlot
+	if inputs.backendTLSAncestor == nil || model.HTTPProfileRouteKind(route) != model.HTTPRouteKind {
+		return slot
+	}
+	for _, compiled := range inputs.logical.Routes {
+		if compiled.Source.UID != route.UID || compiled.Source.Namespace != route.Namespace || compiled.Source.Name != route.Name {
+			continue
+		}
+		for _, rule := range compiled.Rules {
+			if rule.Redirect != nil {
+				continue
+			}
+			for _, backend := range rule.Backends {
+				if winner := backend.BackendTLS.Winner; backend.Weight > 0 && winner != nil {
+					slot = max(slot, winner.AncestorSlot)
+				}
+			}
+		}
+	}
+	return slot
 }
 
 func (a backendTLSAvailability) apply(condition metav1.Condition, supportedProtocol bool) metav1.Condition {

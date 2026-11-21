@@ -272,7 +272,7 @@ func (r *Reconciler) setupRouteController(manager ctrl.Manager, object client.Ob
 			Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForXBackendPod), builder.WithPredicates(xBackendPodPredicate()))
 	}
 	if r.Config.BackendTLSPolicy {
-		setup.Watches(&gatewayv1.BackendTLSPolicy{}, handler.EnqueueRequestsFromMapFunc(r.enqueueRoutesForBackendTLSPolicy), builder.WithPredicates(controller.GenerationOrDeletionChangedPredicate())).
+		setup.Watches(&gatewayv1.BackendTLSPolicy{}, handler.EnqueueRequestsFromMapFunc(r.enqueueRoutesForBackendTLSPolicy), builder.WithPredicates(r.backendTLSRoutePredicate())).
 			WatchesMetadata(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.enqueueRoutesForBackendTLSConfigMap))
 	}
 	return setup.

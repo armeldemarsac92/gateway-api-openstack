@@ -131,6 +131,9 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 			if requested && request.HTTPRouteBackendDiagnostic != nil && *request.HTTPRouteBackendDiagnostic != snapshot.backendDiagnostic {
 				return graph.RouteInputs{}, errHTTPRouteChanged
 			}
+			if requested && request.HTTPRouteBackendTLSAncestorSlot != nil && *request.HTTPRouteBackendTLSAncestorSlot != snapshot.backendTLSAncestorSlot {
+				return graph.RouteInputs{}, errHTTPRouteChanged
+			}
 			node.Disposition, node.Spec = cloud.GraphEnsure, snapshot.desired
 			fences = append(fences, func(ctx context.Context) error {
 				return reconciler.sealRouteOwnershipSnapshot(ctx, snapshot, routeBindingRequired)

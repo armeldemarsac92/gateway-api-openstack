@@ -32,6 +32,7 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	gatewaycontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
@@ -43,6 +44,7 @@ type routeModelInputs struct {
 	input                  model.Input
 	logical                model.Gateway
 	backendTLSAvailability backendTLSAvailability
+	backendTLSAncestor     *backendtls.GatewayAncestor
 	admission              routeGraphAdmission
 }
 
@@ -237,8 +239,10 @@ func (r *Reconciler) collectRouteModelInputs(ctx context.Context, reader client.
 		input.OperatorHTTPS = true
 	}
 	var availability backendTLSAvailability
+	var ancestor *backendtls.GatewayAncestor
 	if r.Config.BackendTLSPolicy {
-		if err := graph.CollectBackendTLSInputs(ctx, reader, &input); err != nil {
+		ancestor = &backendtls.GatewayAncestor{Key: client.ObjectKeyFromObject(gateway), ControllerName: r.Config.ControllerName}
+		if err := graph.CollectBackendTLSInputs(ctx, reader, &input, ancestor); err != nil {
 			return nil, err
 		}
 		if graph.HasValidBackendTLSWinner(input.BackendTLSPolicies) {
@@ -249,7 +253,7 @@ func (r *Reconciler) collectRouteModelInputs(ctx context.Context, reader client.
 	if err != nil {
 		return nil, fmt.Errorf("compile Gateway backend model: %w", err)
 	}
-	return &routeModelInputs{input: input, logical: logical, backendTLSAvailability: availability}, nil
+	return &routeModelInputs{input: input, logical: logical, backendTLSAvailability: availability, backendTLSAncestor: ancestor}, nil
 }
 
 func (r *Reconciler) xBackendMemberMode(gateway *gatewayv1.Gateway) (cloud.MemberMode, error) {
@@ -283,7 +287,7 @@ func (inputs *routeModelInputs) validateBackends(ctx context.Context, reader cli
 		}
 	}
 	if inputs.input.BackendTLSPolicies != nil {
-		if err := graph.CollectBackendTLSInputs(ctx, reader, &current); err != nil {
+		if err := graph.CollectBackendTLSInputs(ctx, reader, &current, inputs.backendTLSAncestor); err != nil {
 			return err
 		}
 	}

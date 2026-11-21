@@ -33,7 +33,7 @@ import (
 // CollectBackendTLSInputs observes policies for authorized Service ports. The
 // caller uses an uncached reader both for planning and just before mutation.
 // A namespaced policy list finds concurrent winners that indexed lookups could miss.
-func CollectBackendTLSInputs(ctx context.Context, reader client.Reader, input *model.Input) error {
+func CollectBackendTLSInputs(ctx context.Context, reader client.Reader, input *model.Input, ancestor *backendtls.GatewayAncestor) error {
 	input.BackendTLSPolicies = make(map[model.ServicePortKey]backendtls.Selection)
 	services := make(map[types.NamespacedName]*corev1.Service, len(input.Services))
 	for i := range input.Services {
@@ -71,6 +71,15 @@ func CollectBackendTLSInputs(ctx context.Context, reader client.Reader, input *m
 				selection, err := observeBackendTLS(ctx, reader, service, port, policies, cas)
 				if err != nil {
 					return err
+				}
+				if ancestor != nil && selection.Winner != nil {
+					for i := range policies[key.Namespace] {
+						policy := &policies[key.Namespace][i]
+						if policy.Name == selection.Winner.Key.Name {
+							selection.Winner.AncestorSlot = ancestor.Slot(policy)
+							break
+						}
+					}
 				}
 				input.BackendTLSPolicies[target] = selection
 			}
@@ -121,10 +130,10 @@ func observeBackendTLS(ctx context.Context, reader client.Reader, service *corev
 	return backendtls.Evaluate(service, port, items, cas), nil
 }
 
-// HasValidBackendTLSWinner reports whether any backend needs authenticated TLS.
+// HasValidBackendTLSWinner reports whether any backend can use authenticated TLS.
 func HasValidBackendTLSWinner(selections map[model.ServicePortKey]backendtls.Selection) bool {
 	for _, selection := range selections {
-		if selection.Winner != nil && selection.Winner.Validation != nil {
+		if selection.Winner != nil && selection.Winner.Validation != nil && selection.Winner.AncestorSlot == backendtls.AncestorSlotHeld {
 			return true
 		}
 	}

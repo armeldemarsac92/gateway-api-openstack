@@ -18,16 +18,22 @@ package httproute
 
 import (
 	"context"
+	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 )
 
 func TestBackendTLSPolicyProtectsOneWeightedShare(t *testing.T) {
@@ -91,4 +97,53 @@ func TestBackendTLSPolicyProtectsOneWeightedShare(t *testing.T) {
 	require.NoError(t, f.client.Get(t.Context(), key, f.route))
 	require.Len(t, f.route.Status.Parents, 1)
 	require.True(t, meta.IsStatusConditionTrue(f.route.Status.Parents[0].Conditions, string(gatewayv1.RouteConditionResolvedRefs)))
+}
+
+func TestBackendTLSAncestorCapacityPreservesRowsAndAllocatesOneReplacement(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	controllerName := f.reconciler.Config.ControllerName
+	namespace := f.route.Namespace
+	holder := types.NamespacedName{Namespace: namespace, Name: "holder"}
+	stale := types.NamespacedName{Namespace: namespace, Name: "stale"}
+	next := types.NamespacedName{Namespace: namespace, Name: "next"}
+	later := types.NamespacedName{Namespace: namespace, Name: "z-later"}
+	conditions := backendTLSPolicyConditions{
+		accepted:     metav1.Condition{Type: "Accepted", Status: metav1.ConditionTrue, Reason: "Accepted", Message: "Accepted", ObservedGeneration: 2},
+		resolvedRefs: metav1.Condition{Type: "ResolvedRefs", Status: metav1.ConditionTrue, Reason: "ResolvedRefs", Message: "Resolved", ObservedGeneration: 2},
+	}
+	var foreign []gatewayv1.PolicyAncestorStatus
+	for i := range backendtls.MaxAncestors - 2 {
+		foreign = append(foreign, gatewayv1.PolicyAncestorStatus{
+			AncestorRef:    gatewayv1.ParentReference{Name: gatewayv1.ObjectName(fmt.Sprintf("foreign-%d", i))},
+			ControllerName: "foreign.example.com/other",
+			Conditions:     []metav1.Condition{{Type: "Accepted", Status: metav1.ConditionFalse, Reason: "External", Message: "External", ObservedGeneration: 12}},
+		})
+	}
+	policy := &gatewayv1.BackendTLSPolicy{ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Generation: 2}}
+	policy.Status.Ancestors = slices.Concat(foreign, []gatewayv1.PolicyAncestorStatus{
+		{AncestorRef: gatewayv1.ParentReference{Name: "holder"}, ControllerName: controllerName},
+		{AncestorRef: gatewayAncestorRef(stale), ControllerName: controllerName},
+	})
+	previous := policy.DeepCopy()
+	policy.Status.Ancestors = mergeBackendTLSAncestors(policy, controllerName, map[types.NamespacedName]backendTLSPolicyConditions{
+		holder: conditions, next: conditions, later: conditions,
+	})
+	require.Len(t, policy.Status.Ancestors, backendtls.MaxAncestors)
+	require.Equal(t, foreign, policy.Status.Ancestors[:len(foreign)])
+	slot := func(key types.NamespacedName) backendtls.AncestorSlot {
+		return (backendtls.GatewayAncestor{Key: key, ControllerName: controllerName}).Slot(policy)
+	}
+	require.Equal(t, backendtls.AncestorSlotHeld, slot(holder))
+	require.Equal(t, backendtls.AncestorSlotHeld, slot(next))
+	require.Equal(t, backendtls.AncestorSlotFull, slot(stale))
+	require.Equal(t, backendtls.AncestorSlotFull, slot(later))
+	require.EqualValues(t, 2, meta.FindStatusCondition(policy.Status.Ancestors[len(foreign)+1].Conditions, "Accepted").ObservedGeneration)
+
+	predicate := f.reconciler.backendTLSRoutePredicate()
+	require.True(t, predicate.Update(event.UpdateEvent{ObjectOld: previous, ObjectNew: policy}))
+	conditionOnly := policy.DeepCopy()
+	conditionOnly.Status.Ancestors[0].Conditions[0].Message = "External condition changed"
+	require.False(t, predicate.Update(event.UpdateEvent{ObjectOld: policy, ObjectNew: conditionOnly}))
+	conditionOnly.Status.Ancestors = conditionOnly.Status.Ancestors[1:]
+	require.True(t, predicate.Update(event.UpdateEvent{ObjectOld: policy, ObjectNew: conditionOnly}))
 }

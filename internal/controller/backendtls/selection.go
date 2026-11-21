@@ -68,6 +68,7 @@ type PolicyResult struct {
 	Key          types.NamespacedName
 	UID          types.UID
 	Generation   int64
+	AncestorSlot AncestorSlot
 	Accepted     metav1.Condition
 	ResolvedRefs metav1.Condition
 	Validation   *Validation

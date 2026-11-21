@@ -32,6 +32,7 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
@@ -467,7 +468,7 @@ func (r *Reconciler) setGatewayListenerStatuses(
 	if err != nil {
 		listeners = []*gatewayv1.Listener{primary}
 	}
-	counts, err := r.attachedRouteCounts(ctx, gateway, listeners)
+	attached, err := r.attachedRoutes(ctx, gateway, listeners)
 	if err != nil {
 		return err
 	}
@@ -476,7 +477,7 @@ func (r *Reconciler) setGatewayListenerStatuses(
 		status := gatewayv1.ListenerStatus{
 			Name:           listener.Name,
 			SupportedKinds: listenerSupportedRouteKinds(r.Config, *listener),
-			AttachedRoutes: counts[listener.Name],
+			AttachedRoutes: attached.counts[listener.Name],
 			Conditions:     existingListenerConditions(gateway, listener.Name),
 		}
 		setAcceptedListenerConditions(&status.Conditions, gateway.Generation)
@@ -491,6 +492,15 @@ func (r *Reconciler) setGatewayListenerStatuses(
 	generation := controller.ConditionObservedGeneration(gateway.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed), gateway.Generation, advanceProgrammedGeneration)
 	controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionProgrammed), programmed, string(gatewayReason), gatewayMessage, generation))
 	r.setGatewayAcceptedListeners(gateway, statuses...)
+	if r.Config.BackendTLSPolicy {
+		conditionType := r.Config.Domain() + "/BackendTLSPoliciesReady"
+		if attached.backendTLSAncestorFull {
+			controller.SetCondition(&gateway.Status.Conditions, controller.Condition(conditionType, metav1.ConditionFalse,
+				backendtls.AncestorLimitReason, "A BackendTLSPolicy used by an attached route has no room for this Gateway in its ancestor status", gateway.Generation))
+		} else {
+			meta.RemoveStatusCondition(&gateway.Status.Conditions, conditionType)
+		}
+	}
 	return nil
 }
 
@@ -500,9 +510,14 @@ func setAcceptedListenerConditions(conditions *[]metav1.Condition, generation in
 	controller.SetCondition(conditions, controller.Condition(string(gatewayv1.ListenerConditionConflicted), metav1.ConditionFalse, string(gatewayv1.ListenerReasonNoConflicts), "Listener has no conflicts", generation))
 }
 
-func (r *Reconciler) attachedRouteCounts(ctx context.Context, gateway *gatewayv1.Gateway, listeners []*gatewayv1.Listener) (map[gatewayv1.SectionName]int32, error) {
+type attachedGatewayRoutes struct {
+	counts                 map[gatewayv1.SectionName]int32
+	backendTLSAncestorFull bool
+}
+
+func (r *Reconciler) attachedRoutes(ctx context.Context, gateway *gatewayv1.Gateway, listeners []*gatewayv1.Listener) (attachedGatewayRoutes, error) {
 	gatewayKey := controller.ObjectKeyString(client.ObjectKeyFromObject(gateway))
-	counts := make(map[gatewayv1.SectionName]int32, len(listeners))
+	attached := attachedGatewayRoutes{counts: make(map[gatewayv1.SectionName]int32, len(listeners))}
 	namespaces := make(map[string][]corev1.Namespace)
 	countRoute := func(object runtime.Object) error {
 		route := object.(client.Object)
@@ -567,10 +582,16 @@ func (r *Reconciler) attachedRouteCounts(ctx context.Context, gateway *gatewayv1
 			if httpKind != "" && len(matching) != 1 {
 				continue
 			}
+			if r.Config.BackendTLSPolicy && httpKind == model.HTTPRouteKind {
+				programmed := meta.FindStatusCondition(parentStatus.Conditions, r.Config.Domain()+"/Programmed")
+				attached.backendTLSAncestorFull = attached.backendTLSAncestorFull || programmed != nil &&
+					programmed.ObservedGeneration == route.GetGeneration() && programmed.Status == metav1.ConditionFalse &&
+					programmed.Reason == backendtls.AncestorLimitReason
+			}
 			for _, listener := range matching {
 				if !counted[listener.Name] {
 					counted[listener.Name] = true
-					counts[listener.Name]++
+					attached.counts[listener.Name]++
 				}
 			}
 		}
@@ -582,12 +603,13 @@ func (r *Reconciler) attachedRouteCounts(ctx context.Context, gateway *gatewayv1
 	case gatewayv1.TLSProtocolType:
 		var routes gatewayv1.TLSRouteList
 		if err := r.APIReader.List(ctx, &routes); err != nil {
-			return nil, err
+			return attachedGatewayRoutes{}, err
 		}
 		if routes.Continue != "" {
-			return nil, fmt.Errorf("incomplete TLSRoute inventory")
+			return attachedGatewayRoutes{}, fmt.Errorf("incomplete TLSRoute inventory")
 		}
-		return counts, meta.EachListItem(&routes, countRoute)
+		err := meta.EachListItem(&routes, countRoute)
+		return attached, err
 	case gatewayv1.TCPProtocolType:
 		routes = &gatewayv1.TCPRouteList{}
 	case gatewayv1.UDPProtocolType:
@@ -597,21 +619,21 @@ func (r *Reconciler) attachedRouteCounts(ctx context.Context, gateway *gatewayv1
 		index = controller.IndexHTTPRouteByStatusGateway
 	}
 	if err := r.List(ctx, routes, client.MatchingFields{index: gatewayKey}); err != nil {
-		return nil, err
+		return attachedGatewayRoutes{}, err
 	}
 	if err := meta.EachListItem(routes, countRoute); err != nil {
-		return nil, err
+		return attachedGatewayRoutes{}, err
 	}
 	if r.Config.GRPCExactMethodEnabled() && index == controller.IndexHTTPRouteByStatusGateway {
 		grpc := &gatewayv1.GRPCRouteList{}
 		if err := r.List(ctx, grpc, client.MatchingFields{index: gatewayKey}); err != nil {
-			return nil, err
+			return attachedGatewayRoutes{}, err
 		}
 		if err := meta.EachListItem(grpc, countRoute); err != nil {
-			return nil, err
+			return attachedGatewayRoutes{}, err
 		}
 	}
-	return counts, nil
+	return attached, nil
 }
 
 func routeParentStatusTargetsListener(

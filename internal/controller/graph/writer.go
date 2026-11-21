@@ -26,6 +26,7 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
@@ -59,6 +60,8 @@ type Request struct {
 	// HTTPRouteBackendDiagnostic ties ResolvedRefs to the backend observation
 	// that the graph writer uses for the requesting HTTPRoute.
 	HTTPRouteBackendDiagnostic *model.Diagnostic
+	// HTTPRouteBackendTLSAncestorSlot binds route status to the writer's slot observation.
+	HTTPRouteBackendTLSAncestorSlot *backendtls.AncestorSlot
 }
 
 // Reconciler is the sole Kubernetes-facing graph mutation boundary.

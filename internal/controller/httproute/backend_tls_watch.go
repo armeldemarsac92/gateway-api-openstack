@@ -18,6 +18,7 @@ package httproute
 
 import (
 	"context"
+	"maps"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -25,8 +26,10 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
@@ -51,6 +54,29 @@ func (r *Reconciler) enqueueRoutesForBackendTLSConfigMap(ctx context.Context, ob
 func (r *Reconciler) enqueueRoutesForBackendTLSPolicy(ctx context.Context, object client.Object) []reconcile.Request {
 	policy := object.(*gatewayv1.BackendTLSPolicy)
 	return r.enqueueRoutesForBackendTLSPolicies(ctx, []gatewayv1.BackendTLSPolicy{*policy})
+}
+
+func (r *Reconciler) backendTLSRoutePredicate() predicate.Predicate {
+	return predicate.Or(controller.GenerationOrDeletionChangedPredicate(), predicate.Funcs{UpdateFunc: func(e event.UpdateEvent) bool {
+		previous := e.ObjectOld.(*gatewayv1.BackendTLSPolicy)
+		current := e.ObjectNew.(*gatewayv1.BackendTLSPolicy)
+		if (len(previous.Status.Ancestors) >= backendtls.MaxAncestors) != (len(current.Status.Ancestors) >= backendtls.MaxAncestors) {
+			return true
+		}
+		return !maps.Equal(r.ownedBackendTLSAncestors(previous), r.ownedBackendTLSAncestors(current))
+	}})
+}
+
+func (r *Reconciler) ownedBackendTLSAncestors(policy *gatewayv1.BackendTLSPolicy) map[types.NamespacedName]struct{} {
+	keys := make(map[types.NamespacedName]struct{})
+	for _, entry := range policy.Status.Ancestors {
+		if entry.ControllerName == r.Config.ControllerName {
+			if key := backendtls.GatewayAncestorKey(entry.AncestorRef, policy.Namespace); key.Name != "" {
+				keys[key] = struct{}{}
+			}
+		}
+	}
+	return keys
 }
 
 func (r *Reconciler) enqueueRoutesForBackendTLSPolicies(ctx context.Context, policies []gatewayv1.BackendTLSPolicy) []reconcile.Request {

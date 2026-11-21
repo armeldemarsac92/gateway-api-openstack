@@ -38,8 +38,6 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
-const maxBackendTLSAncestors = 16
-
 type backendTLSPolicyStatusReconciler struct {
 	routes *Reconciler
 }
@@ -78,36 +76,25 @@ func (r *backendTLSPolicyStatusReconciler) Reconcile(ctx context.Context, reques
 
 func (r *backendTLSPolicyStatusReconciler) observeAncestors(ctx context.Context, policy *gatewayv1.BackendTLSPolicy) (map[types.NamespacedName]backendTLSPolicyConditions, error) {
 	targets := backendtls.ServiceKeys(policy)
-	candidates := map[types.NamespacedName]struct{}{}
-	for _, target := range targets {
-		consumers, err := r.routes.serviceConsumers(ctx, target)
-		if err != nil {
-			return nil, err
-		}
-		for i := range consumers {
-			candidates[client.ObjectKeyFromObject(&consumers[i])] = struct{}{}
-		}
-	}
-	if len(candidates) == 0 {
+	if len(targets) == 0 {
 		return nil, nil
 	}
+	// A missing cache index entry must not reclaim an occupied ancestor slot.
+	routes, err := r.routes.listLiveRoutes(ctx)
+	if err != nil {
+		return nil, err
+	}
 	gateways := map[types.NamespacedName]*gatewayv1.Gateway{}
-	for key := range candidates {
-		var route gatewayv1.HTTPRoute
-		if err := r.routes.APIReader.Get(ctx, key, &route); err != nil {
-			if err := client.IgnoreNotFound(err); err != nil {
-				return nil, err
-			}
-			continue
-		}
-		services := routeBackendTLSServices(&route)
+	for i := range routes {
+		route := &routes[i]
+		services := routeBackendTLSServices(route)
 		if !route.DeletionTimestamp.IsZero() || !slices.ContainsFunc(targets, func(key types.NamespacedName) bool {
 			_, used := services[key]
 			return used
 		}) {
 			continue
 		}
-		parents, err := r.routes.managedParentsWithReader(ctx, r.routes.APIReader, &route)
+		parents, err := r.routes.managedParentsWithReader(ctx, r.routes.APIReader, route)
 		if err != nil {
 			return nil, err
 		}
@@ -116,11 +103,32 @@ func (r *backendTLSPolicyStatusReconciler) observeAncestors(ctx context.Context,
 			gateways[client.ObjectKeyFromObject(gateway)] = gateway
 		}
 	}
+	if len(gateways) == 0 {
+		return nil, nil
+	}
+	grpc, err := r.routes.forRouteKind(model.GRPCRouteKind).listLiveRoutes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	peers := make(map[types.NamespacedName][]gatewayv1.HTTPRoute, len(gateways))
+	for _, route := range slices.Concat(routes, grpc) {
+		seen := map[types.NamespacedName]struct{}{}
+		for _, ref := range route.Spec.ParentRefs {
+			if !controller.IsGatewayParentRef(ref) {
+				continue
+			}
+			key := types.NamespacedName{Namespace: string(ptr.Deref(ref.Namespace, gatewayv1.Namespace(route.Namespace))), Name: string(ref.Name)}
+			if _, included := seen[key]; !included && gateways[key] != nil {
+				peers[key] = append(peers[key], route)
+				seen[key] = struct{}{}
+			}
+		}
+	}
 	ancestors := make(map[types.NamespacedName]backendTLSPolicyConditions, len(gateways))
 	availability := backendTLSUnknown
 	checked := false
 	for key, gateway := range gateways {
-		selection, supportedProtocol, err := r.observeGatewayConsumer(ctx, policy, gateway, targets)
+		selection, supportedProtocol, err := r.observeGatewayConsumer(ctx, policy, gateway, targets, peers[key])
 		if err != nil {
 			return nil, err
 		}
@@ -137,11 +145,7 @@ func (r *backendTLSPolicyStatusReconciler) observeAncestors(ctx context.Context,
 	return ancestors, nil
 }
 
-func (r *backendTLSPolicyStatusReconciler) observeGatewayConsumer(ctx context.Context, policy *gatewayv1.BackendTLSPolicy, gateway *gatewayv1.Gateway, targets []types.NamespacedName) (*backendtls.PolicyResult, bool, error) {
-	peers, err := r.routes.liveGatewayRoutePeers(ctx, gateway)
-	if err != nil {
-		return nil, false, err
-	}
+func (r *backendTLSPolicyStatusReconciler) observeGatewayConsumer(ctx context.Context, policy *gatewayv1.BackendTLSPolicy, gateway *gatewayv1.Gateway, targets []types.NamespacedName, peers []gatewayv1.HTTPRoute) (*backendtls.PolicyResult, bool, error) {
 	admission, err := r.routes.observeRouteGraphAdmission(ctx, gateway, peers, nil)
 	if err != nil {
 		return nil, false, err
@@ -197,7 +201,7 @@ func (r *backendTLSPolicyStatusReconciler) observeGatewayConsumer(ctx context.Co
 		}
 		input.Services = append(input.Services, service)
 	}
-	if err := graph.CollectBackendTLSInputs(ctx, r.routes.APIReader, &input); err != nil {
+	if err := graph.CollectBackendTLSInputs(ctx, r.routes.APIReader, &input, nil); err != nil {
 		return nil, false, err
 	}
 	var selected *backendtls.PolicyResult
@@ -249,20 +253,14 @@ func (r *Reconciler) liveGatewayRoutePeers(ctx context.Context, gateway *gateway
 }
 
 func mergeBackendTLSAncestors(policy *gatewayv1.BackendTLSPolicy, name gatewayv1.GatewayController, desired map[types.NamespacedName]backendTLSPolicyConditions) []gatewayv1.PolicyAncestorStatus {
-	var merged []gatewayv1.PolicyAncestorStatus
+	merged := make([]gatewayv1.PolicyAncestorStatus, 0, len(policy.Status.Ancestors))
 	remaining := maps.Clone(desired)
 	for _, entry := range policy.Status.Ancestors {
 		if entry.ControllerName != name {
 			merged = append(merged, entry)
 			continue
 		}
-		if !controller.IsGatewayParentRef(entry.AncestorRef) {
-			continue
-		}
-		key := types.NamespacedName{
-			Namespace: string(ptr.Deref(entry.AncestorRef.Namespace, gatewayv1.Namespace(policy.Namespace))),
-			Name:      string(entry.AncestorRef.Name),
-		}
+		key := backendtls.GatewayAncestorKey(entry.AncestorRef, policy.Namespace)
 		if conditions, keep := remaining[key]; keep {
 			entry.Conditions = slices.Clone(entry.Conditions)
 			setBackendTLSConditions(&entry, conditions)
@@ -274,7 +272,7 @@ func mergeBackendTLSAncestors(policy *gatewayv1.BackendTLSPolicy, name gatewayv1
 	for _, key := range slices.SortedFunc(maps.Keys(remaining), func(a, b types.NamespacedName) int {
 		return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
 	}) {
-		if len(merged) == maxBackendTLSAncestors {
+		if len(merged) >= backendtls.MaxAncestors {
 			break
 		}
 		entry := gatewayv1.PolicyAncestorStatus{ControllerName: name, AncestorRef: gatewayAncestorRef(key)}

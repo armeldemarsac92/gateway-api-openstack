@@ -24,6 +24,7 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
@@ -38,9 +39,10 @@ const (
 )
 
 type routeGraphResult struct {
-	bindingState      routeBindingState
-	backendObserved   bool
-	backendDiagnostic model.Diagnostic
+	bindingState           routeBindingState
+	backendObserved        bool
+	backendDiagnostic      model.Diagnostic
+	backendTLSAncestorSlot backendtls.AncestorSlot
 	cloud.RouteResult
 }
 
@@ -75,11 +77,15 @@ func (r *Reconciler) ensureRouteGraph(
 		return prepared, nil
 	}
 	expectedIdentity := controller.RouteIdentity(r.Config, expectedGateway, expectedRoute)
-	result, err := r.Writer.ReconcileGraph(ctx, graph.Request{
+	request := graph.Request{
 		Identity: expectedIdentity,
 		Action:   graph.Ensure, Gateway: expectedGateway, Route: expectedRoute,
 		HTTPRouteBackendDiagnostic: &prepared.backendDiagnostic,
-	})
+	}
+	if r.Config.BackendTLSPolicy {
+		request.HTTPRouteBackendTLSAncestorSlot = &prepared.backendTLSAncestorSlot
+	}
+	result, err := r.Writer.ReconcileGraph(ctx, request)
 	if err != nil {
 		return prepared, err
 	}
@@ -126,7 +132,11 @@ func (r *Reconciler) prepareRouteGraphBinding(ctx context.Context, route *gatewa
 	if err != nil {
 		return routeGraphResult{}, err
 	}
-	prepared := routeGraphResult{backendObserved: snapshot.backends != nil, backendDiagnostic: snapshot.backendDiagnostic}
+	prepared := routeGraphResult{
+		backendObserved:        snapshot.backends != nil,
+		backendDiagnostic:      snapshot.backendDiagnostic,
+		backendTLSAncestorSlot: snapshot.backendTLSAncestorSlot,
+	}
 	switch snapshot.disposition {
 	case routeValidationGatewayPending:
 		prepared.bindingState = routeBindingGatewayPending
