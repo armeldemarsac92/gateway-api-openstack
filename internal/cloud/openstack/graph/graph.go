@@ -48,6 +48,7 @@ type observedGatewayGraph struct {
 	routes          []observedRouteGraph
 	deletion        gatewayDeletionPlan
 	state           cloud.GatewayState
+	addressAbsent   bool
 	outcome         cloud.Outcome
 	protocol        string
 }
@@ -87,9 +88,13 @@ type graphMutation struct {
 // plan across calls, including after a timeout or a lost create response.
 func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.GatewayGraphSpec) (result cloud.GatewayGraphResult, retErr error) {
 	var addressIssue string
+	var addressBlocked bool
+	var actual observedGatewayGraph
 	defer func() {
+		result.Gateway.AddressAbsent = actual.addressAbsent
 		if retErr == nil {
 			result.Gateway.AddressIssue = addressIssue
+			result.Gateway.AddressBlocked = addressBlocked
 			return
 		}
 		var component *cloud.GraphError
@@ -106,24 +111,22 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	if err != nil {
 		return result, err
 	}
-	actual, err := p.observeGatewayGraph(ctx, desired)
+	actual, err = p.observeGatewayGraph(ctx, desired)
 	if err != nil {
 		result.Gateway = observedGatewayResult(desired, actual, p.progressingOutcome("Waiting for the Gateway infrastructure"))
 		return result, err
 	}
 	requested := spec.Gateway.Spec.RequestedVIPAddress
 	replacing := spec.Gateway.Disposition == cloud.GraphDelete && actual.loadBalancer != nil
-	if requested != "" && (spec.Gateway.Disposition == cloud.GraphEnsure || replacing) {
+	if hasAddressRequest(spec.Gateway.Spec) && (spec.Gateway.Disposition == cloud.GraphEnsure || replacing) {
 		addressIssue, err = p.requestedVIPIssue(ctx, spec.Gateway.Spec, actual)
 		if err != nil {
 			return result, err
 		}
-		floatingIPUnassigned := spec.Gateway.Spec.ExternalNetworkID != "" && actual.state.FloatingIPAddress == ""
-		if addressIssue != "" && (actual.loadBalancer == nil || replacing || floatingIPUnassigned) {
+		floatingIPUnassigned := spec.Gateway.Spec.ExternalNetworkID != "" && actual.addressAbsent
+		if actual.outcome.State == cloud.OutcomeReady && addressIssue != "" && (actual.loadBalancer == nil || replacing || floatingIPUnassigned) {
+			addressBlocked = true
 			actual.outcome = p.progressingOutcome(addressIssue)
-		}
-		if actual.loadBalancer != nil && actual.state.VIPAddress == "" {
-			actual.outcome = p.progressingOutcome("Waiting to observe the Octavia VIP address")
 		}
 	}
 	if actual.outcome.State == cloud.OutcomeProgressing {
@@ -174,8 +177,9 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		}
 	}
 	if err := p.executeGraphMutation(ctx, desired, actual, step); err != nil {
-		if step.kind == graphCreateLoadBalancer && requested != "" && apierrors.IsOctaviaVIPAddressConflict(err) {
+		if step.kind == graphCreateLoadBalancer && requested != "" && apierrors.IsOctaviaVIPAddressConflict(err, requested) {
 			addressIssue = fmt.Sprintf("Octavia reports that VIP %s is already in use. Request an available IPv4 address on the GatewayClass VIP subnet", requested)
+			addressBlocked = true
 			actual.outcome = p.progressingOutcome(addressIssue)
 			return p.pendingGraphResult(ctx, desired, actual), nil
 		}
@@ -188,7 +192,14 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	return result, nil
 }
 
+func hasAddressRequest(spec cloud.GatewaySpec) bool {
+	return spec.RequestedVIPAddress != "" || spec.AddressRejection != ""
+}
+
 func (p *Provider) requestedVIPIssue(ctx context.Context, spec cloud.GatewaySpec, actual observedGatewayGraph) (string, error) {
+	if spec.AddressRejection != "" {
+		return spec.AddressRejection, nil
+	}
 	if spec.ExternalNetworkID != "" {
 		return "A fixed Gateway address requires a GatewayClass without a Floating IP", nil
 	}
@@ -203,12 +214,12 @@ func (p *Provider) requestedVIPIssue(ctx context.Context, spec cloud.GatewaySpec
 		}
 		return "", nil
 	}
-	contains, err := p.topology.VIPSubnetContains(ctx, spec.VIPSubnetID, requested)
+	supported, err := p.topology.VIPSubnetSupports(ctx, spec.VIPSubnetID, requested)
 	if err != nil {
 		return "", err
 	}
-	if !contains {
-		return fmt.Sprintf("Requested VIP %s is outside the GatewayClass VIP subnet. Request an IPv4 address on that subnet", requested), nil
+	if !supported {
+		return fmt.Sprintf("Requested VIP %s is outside the GatewayClass VIP subnet or reserved by it. Request a usable IPv4 address on that subnet", requested), nil
 	}
 	return "", nil
 }
@@ -390,6 +401,9 @@ func observedGatewayResult(desired desiredGatewayGraph, actual observedGatewayGr
 		return result
 	}
 	if desired.spec.Gateway.Disposition == cloud.GraphEnsure {
+		if actual.state.VIPAddress == "" {
+			return result
+		}
 		protocol := cloud.NormalizeListenerProtocol(desired.spec.Gateway.Spec.ListenerProtocol)
 		if actual.listener.DefaultPoolID != "" || actual.listener.ProvisioningStatus == "ERROR" ||
 			usesDefaultPool(protocol) && actual.listener.ProvisioningStatus != "ACTIVE" ||
@@ -397,7 +411,7 @@ func observedGatewayResult(desired desiredGatewayGraph, actual observedGatewayGr
 			return result
 		}
 		networkID := desired.spec.Gateway.Spec.ExternalNetworkID
-		if networkID == "" && actual.floatingIP != nil || networkID != "" && (actual.floatingIP == nil || actual.floatingIP.FloatingNetworkID != networkID || actual.floatingIP.PortID == "") {
+		if networkID == "" && actual.floatingIP != nil || networkID != "" && actual.state.FloatingIPAddress == "" {
 			return result
 		}
 		result.Outcome = cloud.ReadyOutcome()
@@ -475,14 +489,29 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 			return actual, err
 		}
 	}
+	addressSpec := desired.spec.Gateway.Spec
+	observeAddress := desired.spec.Gateway.Disposition == cloud.GraphEnsure ||
+		desired.spec.Gateway.Disposition == cloud.GraphDelete && hasAddressRequest(addressSpec)
+	if observeAddress && lb.VipAddress == "" {
+		actual.outcome = p.progressingOutcome("Waiting to observe the Octavia VIP address")
+		return actual, nil
+	}
 	actual.floatingIP, err = p.findGatewayFloatingIP(ctx, desired.identity, lb.VipPortID, lb.VipAddress)
 	if err != nil {
 		return actual, err
 	}
 	if actual.floatingIP != nil {
 		actual.state.FloatingIPID = actual.floatingIP.ID
-		if actual.floatingIP.PortID != "" {
+		if actual.floatingIP.PortID != "" && (!observeAddress || actual.floatingIP.FloatingNetworkID == addressSpec.ExternalNetworkID) {
 			actual.state.FloatingIPAddress = actual.floatingIP.FloatingIP
+		}
+	}
+	if observeAddress && addressSpec.ExternalNetworkID != "" {
+		actual.addressAbsent = lb.VipPortID != "" && (actual.floatingIP == nil || actual.floatingIP.PortID == "")
+		if actual.floatingIP != nil && actual.floatingIP.FloatingNetworkID == addressSpec.ExternalNetworkID &&
+			actual.floatingIP.PortID != "" && actual.floatingIP.FloatingIP == "" {
+			actual.outcome = p.progressingOutcome("Waiting to observe the Gateway Floating IP address")
+			return actual, nil
 		}
 	}
 	owners := desired.routeOwners()
@@ -610,6 +639,7 @@ func (p *Provider) observeAbsentGateway(ctx context.Context, desired desiredGate
 	}
 	actual.floatingIP = floatingIP
 	if floatingIP == nil {
+		actual.addressAbsent = true
 		return actual, nil
 	}
 	actual.state.FloatingIPID = floatingIP.ID

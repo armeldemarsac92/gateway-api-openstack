@@ -78,6 +78,12 @@ type GatewayResult struct {
 	// AddressIssue explains why the requested fixed address cannot be assigned.
 	// The observed Gateway and route outcomes still describe the existing infrastructure.
 	AddressIssue string
+	// AddressBlocked indicates that the rejected address leaves no provider work
+	// to retry at the provisioning cadence.
+	AddressBlocked bool
+	// AddressAbsent is a complete observation that the client-facing address
+	// is unassigned. An incomplete observation leaves this false.
+	AddressAbsent bool
 	// ScopedListenerReadyPorts contains the individually programmed listener ports when
 	// the provider has observed a multi-listener TCP or UDP Gateway.
 	ScopedListenerReadyPorts []int

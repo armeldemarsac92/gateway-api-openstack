@@ -133,6 +133,14 @@ func TestUDPRouteProgramsWeightedEndpointPool(t *testing.T) {
 		}
 	})
 	checkRouteCondition(t, route, r.Config.ControllerName, r.Config.Domain()+"/Programmed", metav1.ConditionTrue, "Programmed")
+	gateway.Spec.Addresses = []gatewayv1.GatewaySpecAddress{{Type: ptr.To(gatewayv1.HostnameAddressType), Value: "dns.example.net"}}
+	gateway.Generation++
+	if err := r.Update(t.Context(), gateway); err != nil {
+		t.Fatal(err)
+	}
+	route = reconcileUDPRoute(t, r, route)
+	checkRouteCondition(t, route, r.Config.ControllerName, string(gatewayv1.RouteConditionAccepted), metav1.ConditionTrue, "Accepted")
+	checkRouteCondition(t, route, r.Config.ControllerName, r.Config.Domain()+"/Programmed", metav1.ConditionTrue, "Programmed")
 	disabled := &corev1.Service{}
 	if err := r.Get(t.Context(), client.ObjectKey{Namespace: grant.Namespace, Name: "disabled"}, disabled); err != nil {
 		t.Fatal(err)

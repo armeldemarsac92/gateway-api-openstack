@@ -249,7 +249,9 @@ func (r *Reconciler) handleGatewayProviderFailure(
 	); err != nil {
 		return ctrl.Result{}, errors.Join(controller.SafeProviderReconcileError(policy, providerErr), err)
 	}
-	if address := observation.State.Address(); address != "" && len(scopedReadyPorts) != 0 {
+	if observation.AddressAbsent {
+		gateway.Status.Addresses = nil
+	} else if address := r.observedGatewayAddress(gateway, observation.State); address != "" && len(scopedReadyPorts) != 0 {
 		setGatewayAddress(gateway, address)
 	}
 	if transitioned {
@@ -364,7 +366,7 @@ func (r *Reconciler) setGatewayProvisioningStatus(
 	return r.setGatewayListenerStatuses(ctx, gateway, listener, programmed, gatewayReason, listenerReason, message, message, advanceProgrammedGeneration, nil)
 }
 
-func (r *Reconciler) setGatewayProgrammed(ctx context.Context, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, gatewayState cloud.GatewayState) error {
+func (r *Reconciler) setGatewayProgrammed(ctx context.Context, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, address string) error {
 	message := "Octavia load balancer and listener are active"
 	if hasMultipleTransportListeners(gateway) {
 		message = "Octavia load balancer and listeners are active"
@@ -373,7 +375,7 @@ func (r *Reconciler) setGatewayProgrammed(ctx context.Context, gateway *gatewayv
 		gatewayv1.ListenerReasonProgrammed, message, "Octavia listener is active", true, nil); err != nil {
 		return err
 	}
-	setGatewayAddress(gateway, gatewayState.Address())
+	setGatewayAddress(gateway, address)
 	return nil
 }
 
@@ -388,16 +390,45 @@ func (r *Reconciler) setGatewayAddressUnusable(
 	if controller.GatewayListenerScope(r.Config, gateway) == "" && progress.State == cloud.OutcomeReady {
 		readyPorts = []int{int(listener.Port)}
 	}
-	if err := r.setGatewayListenerStatuses(ctx, gateway, listener, metav1.ConditionFalse, gatewayv1.GatewayReasonAddressNotUsable,
+	rejection := validateAddresses(gateway.Spec.Addresses)
+	programmedReason := gatewayv1.GatewayReasonAddressNotUsable
+	var rejectedCondition *metav1.Condition
+	if rejection != nil {
+		programmedReason = rejection.programmedReason
+		if rejection.gatewayReason != gatewayv1.GatewayReasonAccepted {
+			condition := controller.Condition(string(gatewayv1.GatewayConditionAccepted), metav1.ConditionFalse,
+				string(rejection.gatewayReason), rejection.message, gateway.Generation)
+			previous := meta.FindStatusCondition(gateway.Status.Conditions, condition.Type)
+			if previous != nil && previous.Status == condition.Status {
+				condition.LastTransitionTime = previous.LastTransitionTime
+			}
+			rejectedCondition = &condition
+		}
+	}
+	if err := r.setGatewayListenerStatuses(ctx, gateway, listener, metav1.ConditionFalse, programmedReason,
 		gatewayv1.ListenerReasonPending, result.AddressIssue, "Waiting for Octavia listener readiness", true, readyPorts); err != nil {
 		return err
 	}
-	if address := result.State.Address(); address != "" {
+	if rejectedCondition != nil {
+		controller.SetCondition(&gateway.Status.Conditions, *rejectedCondition)
+	}
+	if address := r.observedGatewayAddress(gateway, result.State); address != "" {
 		setGatewayAddress(gateway, address)
-	} else {
+	} else if result.AddressAbsent {
 		gateway.Status.Addresses = nil
 	}
 	return nil
+}
+
+func (r *Reconciler) observedGatewayAddress(gateway *gatewayv1.Gateway, state cloud.GatewayState) string {
+	topology, err := controller.StoredGatewayTopology(r.Config, gateway)
+	if err != nil {
+		return ""
+	}
+	if topology.Topology.ExternalNetworkID != "" {
+		return state.FloatingIPAddress
+	}
+	return state.VIPAddress
 }
 
 func setGatewayAddress(gateway *gatewayv1.Gateway, address string) {

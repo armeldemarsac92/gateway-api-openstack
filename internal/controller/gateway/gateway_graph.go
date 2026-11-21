@@ -58,9 +58,7 @@ func (r *Reconciler) gatewaySpec(gateway *gatewayv1.Gateway, listeners []*gatewa
 		AvailabilityZone:    topology.Topology.AvailabilityZone,
 		VIPSecurityGroupIDs: slices.Clone(topology.Topology.VIPSecurityGroupIDs),
 	}
-	if len(gateway.Spec.Addresses) == 1 {
-		spec.RequestedVIPAddress = gateway.Spec.Addresses[0].Value
-	}
+	setGatewayAddressRequest(&spec, gateway)
 	if controller.GatewayListenerScope(r.Config, gateway) != "" {
 		// Snapshot validation already verified the frozen listener port and topology.
 		spec.ListenerPort, _ = strconv.Atoi(gateway.Annotations[r.Config.GatewayListenerPortAnnotation()])
@@ -72,6 +70,14 @@ func (r *Reconciler) gatewaySpec(gateway *gatewayv1.Gateway, listeners []*gatewa
 		}
 	}
 	return spec
+}
+
+func setGatewayAddressRequest(spec *cloud.GatewaySpec, gateway *gatewayv1.Gateway) {
+	if rejection := validateAddresses(gateway.Spec.Addresses); rejection != nil {
+		spec.AddressRejection = rejection.message
+	} else if len(gateway.Spec.Addresses) == 1 {
+		spec.RequestedVIPAddress = gateway.Spec.Addresses[0].Value
+	}
 }
 
 func resourceDisplayName(parts ...string) string {

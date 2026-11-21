@@ -101,6 +101,9 @@ func (r *Reconciler) observeGatewayMutationSnapshot(
 	if validationErr != nil {
 		return nil, errGatewayChanged
 	}
+	if !r.gatewayBindingComplete(&gateway) && validateAddresses(gateway.Spec.Addresses) != nil {
+		return nil, errGatewayChanged
+	}
 	listener := listeners[0]
 	listenerPort := r.desiredListenerPort(&gateway, listener)
 	if expectedListenerPort != "" && listenerPort != expectedListenerPort {
@@ -237,6 +240,11 @@ func (r *Reconciler) decideGatewayPhase(scope *gatewayScope) gatewayPhaseDecisio
 	listener, err := Validate(gateway)
 	if err != nil {
 		return gatewayPhaseDecision{phase: gatewayPhaseInvalidSpec, validation: err}
+	}
+	if !r.gatewayBindingComplete(gateway) {
+		if err := validateAddresses(gateway.Spec.Addresses); err != nil {
+			return gatewayPhaseDecision{phase: gatewayPhaseInvalidSpec, validation: err}
+		}
 	}
 	listenerPort := r.desiredListenerPort(gateway, listener)
 	if r.gatewayListenerNeedsReplacement(gateway, listener) {

@@ -20,11 +20,12 @@ address or an IPAddress entry with an empty value requests the existing
 dynamic behavior, including Floating IP allocation when enabled by the class.
 [Octavia create API](https://docs.openstack.org/api-ref/load-balancer/v2/#create-load-balancer)
 
-A requested address outside the class subnet or a VIP conflict reported by
-Octavia produces `Accepted=True` and `Programmed=False` with reason
-`AddressNotUsable`. The condition names the problem so the tenant can choose an
-available IPv4 address on the class subnet. A fixed address requires private
-VIP mode. The profile supports a single IPv4 request and default routability.
+A requested address outside the class subnet, a subnet address reserved by
+Neutron, or a duplicate of the requested VIP produces `Accepted=True` and
+`Programmed=False` with reason `AddressNotUsable`. The condition helps the
+tenant choose an available IPv4 address on the class subnet. A fixed address
+requires private VIP mode. The profile supports a single IPv4 request and
+default routability.
 Unsupported address types produce `Accepted=False` with reason
 `UnsupportedAddress`. [Gateway API v1.7.0 conditions](https://github.com/kubernetes-sigs/gateway-api/blob/v1.7.0/apis/v1/gateway_types.go#L1364)
 
@@ -35,15 +36,21 @@ valid. The controller reports the observed VIP and `Programmed=False` with
 `spec.addresses` to clear the condition, or use a separate Gateway for the new
 address. [Octavia update request type](https://github.com/openstack/octavia/blob/19.0.0/octavia/api/v2/types/load_balancer.py)
 
+On a bound Gateway, listener admission and route reconciliation are evaluated
+independently of address assignment. A GatewayClass configured to allocate a
+Floating IP publishes only its observed Floating IP as the client address.
+
 ## Qualification
 
 - Focused controller and graph tests exercise the typed Octavia create payload,
-  out-of-subnet rejection, Octavia's VIP-specific HTTP 409, observed status,
-  preservation of a ready route and recovery after restoring the existing VIP.
+  Neutron subnet rules, duplicate and quota faults, VIP and Floating IP
+  observation, and preservation of eligible routes during a rejected address edit.
 - The upstream v1.7.0 `GatewayStaticAddresses` case passes in envtest with the
   Standard and Experimental release CRDs and a deterministic allocation fixture.
   It exercises live Kubernetes API-server admission, reconciliation and status.
   [Upstream case](https://github.com/kubernetes-sigs/gateway-api/blob/v1.7.0/conformance/tests/gateway-static-addresses.go)
-- The separate offline Octavia 19.0.0 probe exercised the stock API, Amphora
-  provider and Neutron driver with synthetic IPAM. Live Neutron allocation,
-  Amphora convergence and traffic remain unverified for this change.
+- The offline Octavia 19.0.0 probe exercised the stock API, Amphora provider and
+  Neutron driver with synthetic SDK responses. Separate Neutron 29.0.0 upstream
+  tests exercised fixed IP allocation and release using the stock database IPAM
+  driver. Live Neutron allocation, Amphora convergence and traffic require
+  separate qualification.

@@ -70,6 +70,7 @@ func Validate(gateway *gatewayv1.Gateway) (*gatewayv1.Listener, error) {
 }
 
 // SupportedListeners returns the admitted listeners in ascending port order.
+// Address assignment is evaluated separately from listener and route admission.
 func SupportedListeners(gateway *gatewayv1.Gateway) ([]*gatewayv1.Listener, error) {
 	if gateway.Spec.Infrastructure != nil {
 		return nil, &gatewayValidationError{
@@ -131,9 +132,6 @@ func SupportedListeners(gateway *gatewayv1.Gateway) ([]*gatewayv1.Listener, erro
 			return nil, fmt.Errorf("only %s is supported in listener allowedRoutes.kinds", kind)
 		}
 	}
-	if err := validateAddresses(gateway.Spec.Addresses); err != nil {
-		return nil, err
-	}
 	return listeners, nil
 }
 
@@ -190,7 +188,7 @@ func validateL4Listener(listener *gatewayv1.Listener) error {
 	}
 }
 
-func validateAddresses(addresses []gatewayv1.GatewaySpecAddress) error {
+func validateAddresses(addresses []gatewayv1.GatewaySpecAddress) *gatewayValidationError {
 	programmedReason := gatewayv1.GatewayReasonAddressNotAssigned
 	for _, request := range addresses {
 		if request.Value != "" {

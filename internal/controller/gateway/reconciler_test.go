@@ -163,6 +163,37 @@ func TestGatewayProgramsIPAddressUsingClassTopology(t *testing.T) {
 			if len(got) != 1 || got[0].Type == nil || *got[0].Type != gatewayv1.IPAddressType || got[0].Value != tc.wantAddress {
 				t.Fatalf("Gateway addresses = %#v, want IPAddress %s", got, tc.wantAddress)
 			}
+			if tc.externalNetwork == "" {
+				return
+			}
+			gateway.Spec.Addresses[0].Value = "192.0.2.20"
+			gateway.Generation++
+			if err := kubeClient.Update(t.Context(), gateway); err != nil {
+				t.Fatal(err)
+			}
+			ready.Outcome = cloud.ProgressingOutcome("Waiting for the Floating IP", time.Second)
+			ready.State.FloatingIPAddress = ""
+			ready.AddressIssue = "A fixed Gateway address requires a GatewayClass without a Floating IP"
+			for _, absent := range []bool{false, true} {
+				ready.AddressAbsent = absent
+				ready.AddressBlocked = absent
+				result, err := reconciler.Reconcile(t.Context(), request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := kubeClient.Get(t.Context(), request.NamespacedName, gateway); err != nil {
+					t.Fatal(err)
+				}
+				address := gateway.Status.Addresses
+				if absent {
+					want := controller.OpenStackResyncAfter(cfg.OpenStackResyncInterval, gateway.UID)
+					if len(address) != 0 || result.RequeueAfter != want {
+						t.Fatalf("detached Floating IP: addresses %#v, resync %s, want none and %s", address, result.RequeueAfter, want)
+					}
+				} else if len(address) != 1 || address[0].Value != tc.floatingIP {
+					t.Fatalf("incomplete observation: addresses %#v, want last observed Floating IP %s", address, tc.floatingIP)
+				}
+			}
 		})
 	}
 }
@@ -194,14 +225,16 @@ func TestGatewayShowsActualVIPDuringRejectedAddressEdit(t *testing.T) {
 	reconcile()
 	reconcile()
 	for _, edit := range []struct {
-		requested, issue string
-		wantStatus       metav1.ConditionStatus
-		wantReason       gatewayv1.GatewayConditionReason
+		request        gatewayv1.GatewaySpecAddress
+		issue          string
+		wantAccepted   gatewayv1.GatewayConditionReason
+		wantProgrammed gatewayv1.GatewayConditionReason
 	}{
-		{"192.0.2.11", "Keep the existing VIP 192.0.2.10 or use a different Gateway for 192.0.2.11", metav1.ConditionFalse, gatewayv1.GatewayReasonAddressNotUsable},
-		{"192.0.2.10", "", metav1.ConditionTrue, gatewayv1.GatewayReasonProgrammed},
+		{gatewayv1.GatewaySpecAddress{Value: "192.0.2.11"}, "Keep the existing VIP 192.0.2.10 or use a different Gateway for 192.0.2.11", gatewayv1.GatewayReasonAccepted, gatewayv1.GatewayReasonAddressNotUsable},
+		{gatewayv1.GatewaySpecAddress{Type: ptr.To(gatewayv1.HostnameAddressType), Value: "edge.example.net"}, "only the IPAddress Gateway address type is supported", gatewayv1.GatewayReasonUnsupportedAddress, gatewayv1.GatewayReasonAddressNotUsable},
+		{gatewayv1.GatewaySpecAddress{Value: "192.0.2.10"}, "", gatewayv1.GatewayReasonAccepted, gatewayv1.GatewayReasonProgrammed},
 	} {
-		gw.Spec.Addresses = []gatewayv1.GatewaySpecAddress{{Value: edit.requested}}
+		gw.Spec.Addresses = []gatewayv1.GatewaySpecAddress{edit.request}
 		gw.Generation++
 		if err := kube.Update(t.Context(), gw); err != nil {
 			t.Fatal(err)
@@ -213,10 +246,22 @@ func TestGatewayShowsActualVIPDuringRejectedAddressEdit(t *testing.T) {
 		}
 		accepted := meta.FindStatusCondition(gw.Status.Conditions, string(gatewayv1.GatewayConditionAccepted))
 		programmed := meta.FindStatusCondition(gw.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed))
-		if accepted == nil || accepted.Status != metav1.ConditionTrue || accepted.ObservedGeneration != gw.Generation ||
-			programmed == nil || programmed.Status != edit.wantStatus || programmed.Reason != string(edit.wantReason) ||
+		if accepted == nil || (accepted.Status == metav1.ConditionTrue) != (edit.wantAccepted == gatewayv1.GatewayReasonAccepted) ||
+			accepted.Reason != string(edit.wantAccepted) || accepted.ObservedGeneration != gw.Generation ||
+			programmed == nil || (programmed.Status == metav1.ConditionTrue) != (edit.wantProgrammed == gatewayv1.GatewayReasonProgrammed) || programmed.Reason != string(edit.wantProgrammed) ||
 			programmed.ObservedGeneration != gw.Generation || !strings.Contains(programmed.Message, edit.issue) {
-			t.Fatalf("conditions for %s = %#v", edit.requested, gw.Status.Conditions)
+			t.Fatalf("conditions for %s = %#v", edit.request.Value, gw.Status.Conditions)
+		}
+		if edit.wantAccepted == gatewayv1.GatewayReasonUnsupportedAddress {
+			spec := provider.gatewaySpecs[len(provider.gatewaySpecs)-1]
+			if spec.AddressRejection != edit.issue || spec.RequestedVIPAddress != "" {
+				t.Fatalf("unsupported address sent to graph = %#v", spec)
+			}
+			version := gw.ResourceVersion
+			reconcile()
+			if gw.ResourceVersion != version {
+				t.Fatalf("resync changed Gateway resourceVersion from %s to %s", version, gw.ResourceVersion)
+			}
 		}
 		if len(gw.Status.Listeners) != 1 || !meta.IsStatusConditionTrue(gw.Status.Listeners[0].Conditions, string(gatewayv1.ListenerConditionProgrammed)) {
 			t.Fatalf("live listener status = %#v", gw.Status.Listeners)

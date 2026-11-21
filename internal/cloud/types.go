@@ -59,6 +59,9 @@ type GatewaySpec struct {
 
 	// RequestedVIPAddress is an optional fixed private IPv4 address on VIPSubnetID.
 	RequestedVIPAddress string
+	// AddressRejection records an invalid address request on a bound Gateway.
+	// Existing listeners and routes remain eligible for reconciliation.
+	AddressRejection string
 }
 
 // ScopedListener is one named Octavia listener on a shared Gateway load balancer.

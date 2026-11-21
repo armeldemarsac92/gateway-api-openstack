@@ -87,24 +87,43 @@ func Classify(err error) error {
 // Octavia for a load balancer graph that has another action in progress. Read
 // paths and Neutron conflicts keep their own lifecycle-specific handling.
 func ClassifyOctaviaMutation(err error) error {
-	status, _, ok := openStackResponse(err)
+	status, body, ok := openStackResponse(err)
 	if err != nil && ok && status == http.StatusConflict {
+		if strings.HasPrefix(octaviaVIPConflictDetail(body), "Quota exceeded for resources:") {
+			return cloud.NewProviderError(cloud.ErrorCategoryQuota, err)
+		}
 		return cloud.NewProviderError(cloud.ErrorCategoryRetryableService, err)
 	}
 	return err
 }
 
-// IsOctaviaVIPAddressConflict identifies the VIP-specific conflict returned by
-// Octavia when allocating an Amphora VIP. Other 409s use the normal retry path.
-func IsOctaviaVIPAddressConflict(err error) bool {
+// IsOctaviaVIPAddressConflict identifies an allocation conflict for the
+// requested Amphora VIP. Octavia also wraps Neutron quota errors in this fault.
+func IsOctaviaVIPAddressConflict(err error, requested string) bool {
 	status, body, ok := openStackResponse(err)
 	if !ok || status != http.StatusConflict {
 		return false
 	}
+	detail := octaviaVIPConflictDetail(body)
+	if subnet, ok := strings.CutPrefix(detail, "IP address "+requested+" already allocated in subnet "); ok {
+		return strings.TrimSpace(subnet) != ""
+	}
+	inUse := "The IP address " + requested + " is in use."
+	return detail == inUse || strings.HasPrefix(detail, "Unable to complete operation for network ") && strings.HasSuffix(detail, ". "+inUse)
+}
+
+func octaviaVIPConflictDetail(body []byte) string {
 	var fault struct {
 		FaultString string `json:"faultstring"`
 	}
-	return json.Unmarshal(body, &fault) == nil && strings.HasPrefix(fault.FaultString, "The VIP IP address is already in use:")
+	if json.Unmarshal(body, &fault) != nil {
+		return ""
+	}
+	detail, ok := strings.CutPrefix(fault.FaultString, "The VIP IP address is already in use:")
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(detail)
 }
 
 func categoryForResponse(status int, body []byte) (cloud.ErrorCategory, bool) {

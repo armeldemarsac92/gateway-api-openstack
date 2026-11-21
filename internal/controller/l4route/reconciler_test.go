@@ -83,6 +83,15 @@ func TestTCPRouteProgramsWeightedEndpointPool(t *testing.T) {
 	programmed := r.Config.Domain() + "/Programmed"
 	checkRouteCondition(t, route, r.Config.ControllerName, "ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")
 	checkRouteCondition(t, route, r.Config.ControllerName, programmed, metav1.ConditionTrue, "Programmed")
+	// The Gateway keeps serving on its observed VIP when an address edit is rejected.
+	gateway.Spec.Addresses = []gatewayv1.GatewaySpecAddress{{Value: "2001:db8::30"}}
+	gateway.Generation++
+	if err := r.Update(t.Context(), gateway); err != nil {
+		t.Fatal(err)
+	}
+	route = reconcileTCPRoute(t, r, route)
+	checkRouteCondition(t, route, r.Config.ControllerName, string(gatewayv1.RouteConditionAccepted), metav1.ConditionTrue, "Accepted")
+	checkRouteCondition(t, route, r.Config.ControllerName, programmed, metav1.ConditionTrue, "Programmed")
 	if err := r.Delete(t.Context(), disabled); err != nil {
 		t.Fatal(err)
 	}

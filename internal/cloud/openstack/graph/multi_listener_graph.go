@@ -267,11 +267,11 @@ func listenerDeletionStep(id string) gatewayDeletionStep {
 
 func scopedGatewayResult(spec cloud.GatewaySpec, actual observedGatewayGraph, pending cloud.Outcome) cloud.GatewayResult {
 	result := cloud.GatewayResult{State: actual.state, Outcome: pending, ScopedListenerReadyPorts: []int{}}
-	if actual.loadBalancer == nil || !actual.loadBalancer.AdminStateUp || actual.scopedListeners == nil {
+	if actual.loadBalancer == nil || !actual.loadBalancer.AdminStateUp || actual.scopedListeners == nil || actual.state.VIPAddress == "" {
 		return result
 	}
 	if spec.ExternalNetworkID == "" && actual.floatingIP != nil ||
-		spec.ExternalNetworkID != "" && (actual.floatingIP == nil || actual.floatingIP.FloatingNetworkID != spec.ExternalNetworkID || actual.floatingIP.PortID == "") {
+		spec.ExternalNetworkID != "" && actual.state.FloatingIPAddress == "" {
 		return result
 	}
 	ready := make(map[int]bool, len(actual.scopedListeners))
