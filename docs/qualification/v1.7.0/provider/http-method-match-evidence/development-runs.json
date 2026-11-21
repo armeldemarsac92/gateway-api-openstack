@@ -1,0 +1,68 @@
+[
+  {
+    "run": "candidate-standard",
+    "channel": "standard",
+    "controllerSourceRevision": "46b258bfbc4804db8319bef4f975d251ffc71b49",
+    "controllerArtifact": "vcs-stamped-source-build",
+    "octavia": "19.0.1.dev7",
+    "exit": 1,
+    "passedAssertions": 8,
+    "recordedRequests": 1309,
+    "failedSubtests": [
+      "--- FAIL: TestLocalMethodCase/HTTPRouteMethodMatching/11_request_to_'/'_with_headers_should_go_to_infra-backend-v2 (30.00s)",
+      "--- FAIL: TestLocalMethodCase/HTTPRouteMethodMatching/0_request_to_'/'_should_go_to_infra-backend-v1 (30.00s)",
+      "--- FAIL: TestLocalMethodCase/HTTPRouteMethodMatching/10_request_to_'/path5'_should_go_to_infra-backend-v1 (30.00s)",
+      "--- FAIL: TestLocalMethodCase/HTTPRouteMethodMatching/7_request_to_'/path4'_with_headers_should_go_to_infra-backend-v1 (30.00s)"
+    ]
+  },
+  {
+    "run": "verified-standard",
+    "channel": "standard",
+    "controllerSourceRevision": "46b258bfbc4804db8319bef4f975d251ffc71b49",
+    "controllerArtifact": "sha256:1e1d6969ee043e186bf10ee32a3b4f2bee12aee2fb43bc0f4e9c6a7168dcbc3c",
+    "octavia": "19.0.1.dev7",
+    "exit": 1,
+    "passedAssertions": 10,
+    "recordedRequests": 1137,
+    "failedSubtests": [
+      "--- FAIL: TestLocalMethodCase/HTTPRouteMethodMatching/6_request_to_'/path3'_should_go_to_infra-backend-v1 (30.00s)",
+      "--- FAIL: TestLocalMethodCase/HTTPRouteMethodMatching/0_request_to_'/'_should_go_to_infra-backend-v1 (30.01s)"
+    ]
+  },
+  {
+    "run": "image-experimental",
+    "channel": "experimental",
+    "controllerSourceRevision": "46b258bfbc4804db8319bef4f975d251ffc71b49",
+    "controllerArtifact": "sha256:1e1d6969ee043e186bf10ee32a3b4f2bee12aee2fb43bc0f4e9c6a7168dcbc3c",
+    "octavia": "19.0.1.dev7",
+    "exit": 1,
+    "passedAssertions": 10,
+    "recordedRequests": 1150,
+    "failedSubtests": [
+      "--- FAIL: TestLocalMethodCase/HTTPRouteMethodMatching/6_request_to_'/path3'_should_go_to_infra-backend-v1 (30.00s)",
+      "--- FAIL: TestLocalMethodCase/HTTPRouteMethodMatching/0_request_to_'/'_should_go_to_infra-backend-v1 (30.00s)"
+    ]
+  },
+  {
+    "run": "timed-standard",
+    "channel": "standard",
+    "controllerSourceRevision": "46b258bfbc4804db8319bef4f975d251ffc71b49",
+    "controllerArtifact": "sha256:1e1d6969ee043e186bf10ee32a3b4f2bee12aee2fb43bc0f4e9c6a7168dcbc3c",
+    "octavia": "19.0.1.dev7",
+    "exit": 0,
+    "passedAssertions": 12,
+    "recordedRequests": 544,
+    "failedSubtests": []
+  },
+  {
+    "run": "timed-experimental",
+    "channel": "experimental",
+    "controllerSourceRevision": "46b258bfbc4804db8319bef4f975d251ffc71b49",
+    "controllerArtifact": "sha256:1e1d6969ee043e186bf10ee32a3b4f2bee12aee2fb43bc0f4e9c6a7168dcbc3c",
+    "octavia": "19.0.1.dev7",
+    "exit": 0,
+    "passedAssertions": 12,
+    "recordedRequests": 513,
+    "failedSubtests": []
+  }
+]

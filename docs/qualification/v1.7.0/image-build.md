@@ -1,11 +1,11 @@
 # Reproduce the Hibiscus development image
 
-Use the [local build record](image.json) for the exact source revision, linux/amd64 OCI manifest, archive digest and embedded manager digest. The normal and no-cache builds produced identical OCI manifests. The OCI archive was built and checked locally. The extracted manager routed complete header values through HAProxy with both regional opt-ins. All eleven assertions of the original HTTPRouteHeaderMatching case passed on Standard and Experimental. [Exact HTTP header results](provider/http-header-exact.md)
+Use the [local build record](image.json) for the exact source revision, linux/amd64 OCI manifest, archive digest and embedded manager digest. The normal and no-cache builds produced identical OCI manifests. The OCI archive was built and checked locally. The extracted manager routed the original method matching case through HAProxy with the regional method, exact-header and fixed-response capabilities enabled. All twelve upstream assertions passed on each local release bundle. [HTTP method results and archives](provider/http-method-match.md)
 
 On a linux/amd64 host, use a separate checkout of the recorded revision. The Dockerfile pins the Go 1.27.4 builder and distroless base by digest. Podman uses a fixed timestamp, and the build writes the full commit into the binary and the OCI revision label. The verification command exports gzip-compressed layers.
 
 ```sh
-revision=db720031f03f5c344be3decad81a1563dc734dde
+revision=1239d29f3faeaedeaab4805758946e6c951dccef
 test "$(git rev-parse HEAD)" = "$revision"
 image="localhost/hibiscus-controller:$revision"
 make container-build CONTAINER_TOOL=podman VERSION="$revision" IMAGE="$image"

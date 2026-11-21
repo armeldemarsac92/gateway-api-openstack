@@ -36,6 +36,7 @@ The controller uses Gateway API v1.7.0 and defaults to the Standard Channel. Its
 - A plain HTTP Gateway can serve separate backends on several ports of one VIP, including when the requests use the same host and path. Several sections can share one port when each section has a different exact hostname. A port with one section also supports a wildcard or an omitted hostname. Each section enforces its route namespace policy and reports its attachments. [Distinct HTTP ports](docs/qualification/v1.7.0/provider/http-distinct-ports.md) · [Same-port sections](docs/qualification/v1.7.0/provider/http-disjoint-sections.md)
 - A platform operator can enable HTTPS using one terminating listener per port and a verified Secret revision in Barbican. HTTPRoutes use their ordinary attachment and backend rules. [Set up HTTPS, rotate and revoke](docs/operator-https.md)
 - With the Amphora exact-header profile, HTTPRoutes select a backend by a complete request header value and return HTTP 404 when no rule matches. [Enable exact HTTP header matching](docs/operator-octavia-http-header-exact.md)
+- An operator can enable HTTP method matching on Amphora. HTTPRoutes can route GET and POST on the same path to different Services and combine methods with exact request headers. [Operator configuration](docs/operator-octavia-http-method-match.md) · [Upstream results](docs/qualification/v1.7.0/provider/http-method-match.md)
 - An operator can enable TLS passthrough on Amphora to route exact SNI names on one port to their IPv4 Services. A second opt-in adds wildcard SNI, with exact names and longer suffixes taking precedence. Each TLSRoute can serve several names that match its listener. Each application presents its own certificate. [Enable and use TLS SNI passthrough](docs/operator-octavia-tls-sni-passthrough.md)
 - An HTTPRoute with one managed Gateway reference can serve traffic even when the route also refers to a missing or foreign Gateway. Other controllers keep their own entries in route status. [Parent attachment and evidence](docs/qualification/v1.7.0/provider/http-one-managed-parent.md)
 - An HTTPRoute can send different paths to different Service ports. Each rule selects one Service port and can list alternative Exact or PathPrefix matches. The listener ranks the matches across its attached routes. [Configure path routing](docs/getting-started.md#route-several-paths-to-services)
@@ -65,7 +66,7 @@ See the [compatibility record](docs/providers/compatibility.md) for completed ch
 Development results do not establish general OpenStack support or Gateway API conformance.
 
 The [upstream roadmap](ROADMAP.md) targets complete GATEWAY-HTTP Core support and all declared Extended features. The [Hibiscus plan](docs/superpowers/plans/2026-11-20-hibiscus.md) extends the target to the full v1.7.0 release.
-It allows feature implementation and traffic validation to proceed alongside Octavia development after the corresponding design is accepted.
+The controller and public Octavia extensions are developed and exercised together where a Gateway API feature needs provider support.
 The [feasibility assessment](docs/design/conformance-feasibility.md) records the API blockers for individual features.
 The [conformance guide](docs/testing-conformance.md) describes the required suite and reporting workflow.
 

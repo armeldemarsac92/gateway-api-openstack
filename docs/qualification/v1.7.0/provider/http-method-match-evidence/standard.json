@@ -1,0 +1,1136 @@
+{
+  "channel": "standard",
+  "case": "HTTPRouteMethodMatching",
+  "passed": true,
+  "identities": {
+    "gatewayAPISourceRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+    "releaseBundleSha256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+    "originalCaseGoSha256": "2db6c7ae17f44191b79f65163e2edf77f7e505f677186d17cd5ef8b4cb4b588c",
+    "originalCaseYAMLSha256": "607f03f4a209041b88d69282b2966b3458211266488ae16db918e9c7ef364c5e",
+    "baseManifestSha256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+    "controllerSourceRevision": "1239d29f3faeaedeaab4805758946e6c951dccef",
+    "controllerArtifact": "sha256:28cc50a3bd94349805a0ac46606328a2aa111bd5ba56ea3b245ba9a122afeb3c",
+    "controllerBinarySha256": "d81ce01f0cb53cecb029a9749f2fc0565e3d3d443c7b42dcc41a28d3b7d5021a",
+    "controllerFlags": [
+      "--octavia-http-method-match",
+      "--octavia-http-header-exact",
+      "--octavia-fixed-http-responses"
+    ],
+    "conformanceBinarySha256": "d15aa9f9b72817981aa6f3cdfb112f68e62a6a5e240f6522c1664389b62b401b",
+    "echoBinarySha256": "d4e04b904229880dc2e32dbe58244b3bf46408c2e1e8325ebb83a69fab3d57a9",
+    "kubernetes": "v1.36.2",
+    "provider": {
+      "octavia": {
+        "version": "19.0.1.dev8",
+        "wheelSha256": "6a29e27993b6341bf88db30dcfbd158e88a2ae54ea145a8988a3e63c39f91c83",
+        "filesVerified": 633
+      },
+      "octaviaLib": {
+        "version": "3.12.1.dev3",
+        "wheelSha256": "5513991a6e004490221065b64be53f3dbdf3de1bab6e768ff2bc98f797c5cfc5",
+        "filesVerified": 24
+      },
+      "octaviaSourceRevision": "4444e6a83a8e977c118cf588c4dd2f1cfbea162e"
+    },
+    "haproxy": "3.0.19",
+    "haproxyRunning": true,
+    "haproxyBinarySha256": "847fad8188f01f5693cfba85731f37d554758526f39dc6f67162ec2c6a150885"
+  },
+  "prerequisites": {
+    "infra-backend-v1": {
+      "servicePorts": [
+        8080,
+        8081,
+        8082
+      ],
+      "readyEndpoints": 2,
+      "directProbes": [
+        {
+          "status": 200,
+          "backend": "infra-backend-v1",
+          "echoRequestMatched": true
+        },
+        {
+          "status": 200,
+          "backend": "infra-backend-v1",
+          "echoRequestMatched": true
+        }
+      ]
+    },
+    "infra-backend-v2": {
+      "servicePorts": [
+        8080
+      ],
+      "readyEndpoints": 2,
+      "directProbes": [
+        {
+          "status": 200,
+          "backend": "infra-backend-v2",
+          "echoRequestMatched": true
+        },
+        {
+          "status": 200,
+          "backend": "infra-backend-v2",
+          "echoRequestMatched": true
+        }
+      ]
+    },
+    "infra-backend-v3": {
+      "servicePorts": [
+        8080
+      ],
+      "readyEndpoints": 1,
+      "directProbes": [
+        {
+          "status": 200,
+          "backend": "infra-backend-v3",
+          "echoRequestMatched": true
+        }
+      ]
+    }
+  },
+  "upstream": {
+    "exit": 0,
+    "passed": true,
+    "trafficSubtestsPassed": 12,
+    "events": [
+      "--- PASS: TestLocalMethodCase/HTTPRouteMethodMatching (0.92s)",
+      "--- PASS: TestLocalMethodCase/HTTPRouteMethodMatching/6_request_to_'/path3'_should_go_to_infra-backend-v1 (21.55s)",
+      "--- PASS: TestLocalMethodCase/HTTPRouteMethodMatching/5_request_to_'/path2'_with_headers_should_go_to_infra-backend-v3 (0.00s)",
+      "--- PASS: TestLocalMethodCase/HTTPRouteMethodMatching/4_request_to_'/'_with_headers_should_go_to_infra-backend-v2 (1.33s)",
+      "--- PASS: TestLocalMethodCase/HTTPRouteMethodMatching/3_request_to_'/path1'_should_go_to_infra-backend-v1 (0.00s)",
+      "--- PASS: TestLocalMethodCase/HTTPRouteMethodMatching/2_request_to_'/'_should_receive_one_of_[] (0.00s)",
+      "--- PASS: TestLocalMethodCase/HTTPRouteMethodMatching/0_request_to_'/'_should_go_to_infra-backend-v1 (23.70s)",
+      "--- PASS: TestLocalMethodCase/HTTPRouteMethodMatching/1_request_to_'/'_should_go_to_infra-backend-v2 (1.42s)",
+      "--- PASS: TestLocalMethodCase/HTTPRouteMethodMatching/10_request_to_'/path5'_should_go_to_infra-backend-v1 (0.00s)",
+      "--- PASS: TestLocalMethodCase/HTTPRouteMethodMatching/9_request_to_'/path4'_should_receive_one_of_[] (0.00s)",
+      "--- PASS: TestLocalMethodCase/HTTPRouteMethodMatching/8_request_to_'/'_should_receive_one_of_[] (0.00s)",
+      "--- PASS: TestLocalMethodCase/HTTPRouteMethodMatching/7_request_to_'/path4'_with_headers_should_go_to_infra-backend-v1 (0.00s)",
+      "--- PASS: TestLocalMethodCase/HTTPRouteMethodMatching/11_request_to_'/'_with_headers_should_go_to_infra-backend-v2 (1.32s)"
+    ],
+    "requestLogCount": 523,
+    "responseStatusesBySubtest": {
+      "0": {
+        "404": 234,
+        "200": 3
+      },
+      "6": {
+        "404": 213,
+        "200": 3
+      },
+      "5": {
+        "200": 3
+      },
+      "4": {
+        "404": 13,
+        "200": 3
+      },
+      "3": {
+        "200": 3
+      },
+      "2": {
+        "404": 3
+      },
+      "1": {
+        "404": 14,
+        "200": 3
+      },
+      "11": {
+        "404": 13,
+        "200": 3
+      },
+      "10": {
+        "200": 3
+      },
+      "9": {
+        "404": 3
+      },
+      "8": {
+        "404": 3
+      },
+      "7": {
+        "200": 3
+      }
+    }
+  },
+  "readback": {
+    "providerCapabilitiesBeforeOptIn": [
+      "fixed_http_responses_v1",
+      "weighted_http_targets_v1"
+    ],
+    "providerCapabilitiesWithOptIn": [
+      "fixed_http_responses_v1",
+      "weighted_http_targets_v1",
+      "http_header_exact_v1",
+      "http_method_match_v1"
+    ],
+    "gatewayConditions": {
+      "Accepted": "True/Accepted",
+      "Programmed": "True/Programmed"
+    },
+    "listenerAttachedRoutes": [
+      1
+    ],
+    "routeParents": [
+      {
+        "parent": "same-namespace",
+        "controllerMatches": true,
+        "currentConditions": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "gateway-api-openstack.github.io/Programmed": "False/Pending"
+        }
+      }
+    ],
+    "settledParentWithin35Seconds": {
+      "Accepted": "True/Accepted",
+      "ResolvedRefs": "True/ResolvedRefs",
+      "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+    },
+    "octaviaPolicies": [
+      {
+        "position": 1,
+        "action": "REDIRECT_TO_POOL",
+        "rules": [
+          {
+            "type": "PATH",
+            "compare_type": "REGEX",
+            "key": null,
+            "value": "^/path2($|/)",
+            "provisioning_status": "ACTIVE"
+          },
+          {
+            "type": "HTTP_METHOD",
+            "compare_type": "EQUAL_TO",
+            "key": null,
+            "value": "POST",
+            "provisioning_status": "ACTIVE"
+          },
+          {
+            "type": "HTTP_HEADER_EXACT",
+            "compare_type": "EQUAL_TO",
+            "key": "version",
+            "value": "two",
+            "provisioning_status": "ACTIVE"
+          }
+        ]
+      },
+      {
+        "position": 2,
+        "action": "REDIRECT_TO_POOL",
+        "rules": [
+          {
+            "type": "PATH",
+            "compare_type": "REGEX",
+            "key": null,
+            "value": "^/path4($|/)",
+            "provisioning_status": "ACTIVE"
+          },
+          {
+            "type": "HTTP_METHOD",
+            "compare_type": "EQUAL_TO",
+            "key": null,
+            "value": "DELETE",
+            "provisioning_status": "ACTIVE"
+          },
+          {
+            "type": "HTTP_HEADER_EXACT",
+            "compare_type": "EQUAL_TO",
+            "key": "version",
+            "value": "three",
+            "provisioning_status": "ACTIVE"
+          }
+        ]
+      },
+      {
+        "position": 3,
+        "action": "REDIRECT_TO_POOL",
+        "rules": [
+          {
+            "type": "PATH",
+            "compare_type": "REGEX",
+            "key": null,
+            "value": "^/path1($|/)",
+            "provisioning_status": "ACTIVE"
+          },
+          {
+            "type": "HTTP_METHOD",
+            "compare_type": "EQUAL_TO",
+            "key": null,
+            "value": "GET",
+            "provisioning_status": "ACTIVE"
+          }
+        ]
+      },
+      {
+        "position": 4,
+        "action": "REDIRECT_TO_POOL",
+        "rules": [
+          {
+            "type": "PATH",
+            "compare_type": "REGEX",
+            "key": null,
+            "value": "^/path3($|/)",
+            "provisioning_status": "ACTIVE"
+          },
+          {
+            "type": "HTTP_METHOD",
+            "compare_type": "EQUAL_TO",
+            "key": null,
+            "value": "PATCH",
+            "provisioning_status": "ACTIVE"
+          }
+        ]
+      },
+      {
+        "position": 5,
+        "action": "REDIRECT_TO_POOL",
+        "rules": [
+          {
+            "type": "PATH",
+            "compare_type": "REGEX",
+            "key": null,
+            "value": "^/path5($|/)",
+            "provisioning_status": "ACTIVE"
+          }
+        ]
+      },
+      {
+        "position": 6,
+        "action": "REDIRECT_TO_POOL",
+        "rules": [
+          {
+            "type": "HTTP_METHOD",
+            "compare_type": "EQUAL_TO",
+            "key": null,
+            "value": "PUT",
+            "provisioning_status": "ACTIVE"
+          },
+          {
+            "type": "HTTP_HEADER_EXACT",
+            "compare_type": "EQUAL_TO",
+            "key": "version",
+            "value": "one",
+            "provisioning_status": "ACTIVE"
+          }
+        ]
+      },
+      {
+        "position": 7,
+        "action": "REDIRECT_TO_POOL",
+        "rules": [
+          {
+            "type": "HTTP_METHOD",
+            "compare_type": "EQUAL_TO",
+            "key": null,
+            "value": "POST",
+            "provisioning_status": "ACTIVE"
+          }
+        ]
+      },
+      {
+        "position": 8,
+        "action": "REDIRECT_TO_POOL",
+        "rules": [
+          {
+            "type": "HTTP_METHOD",
+            "compare_type": "EQUAL_TO",
+            "key": null,
+            "value": "GET",
+            "provisioning_status": "ACTIVE"
+          }
+        ]
+      },
+      {
+        "position": 9,
+        "action": "REDIRECT_TO_POOL",
+        "rules": [
+          {
+            "type": "HTTP_METHOD",
+            "compare_type": "EQUAL_TO",
+            "key": null,
+            "value": "PATCH",
+            "provisioning_status": "ACTIVE"
+          }
+        ]
+      },
+      {
+        "position": 10,
+        "action": "REDIRECT_TO_POOL",
+        "rules": [
+          {
+            "type": "PATH",
+            "compare_type": "REGEX",
+            "key": null,
+            "value": "(^$).",
+            "provisioning_status": "ACTIVE"
+          },
+          {
+            "type": "HTTP_HEADER_EXACT",
+            "compare_type": "EQUAL_TO",
+            "key": "version",
+            "value": "four",
+            "provisioning_status": "ACTIVE"
+          }
+        ]
+      }
+    ],
+    "activeExactMethodRules": {
+      "POST": 2,
+      "DELETE": 1,
+      "GET": 2,
+      "PATCH": 2,
+      "PUT": 1
+    },
+    "octaviaWriteCounts": {
+      "loadbalancers": 1,
+      "listeners": 1,
+      "pools": 8,
+      "healthmonitors": 3,
+      "l7policies": 38
+    },
+    "haproxyConfigSha256": "f7b56c72d7f00ffc19569720e61f17543fc75efec1e500ce5c23b9ce1bcc2e48",
+    "haproxyMethodACLs": {
+      "POST": 2,
+      "DELETE": 1,
+      "GET": 2,
+      "PATCH": 2,
+      "PUT": 1
+    },
+    "haproxyFixed404Rendered": true,
+    "httpRequests": [
+      {
+        "request": {
+          "method": "POST",
+          "path": "/",
+          "headers": {}
+        },
+        "expectedStatus": 200,
+        "expectedBackend": "infra-backend-v1",
+        "status": 200,
+        "backend": "infra-backend-v1",
+        "echoRequestMatched": true,
+        "passed": true
+      },
+      {
+        "request": {
+          "method": "GET",
+          "path": "/",
+          "headers": {}
+        },
+        "expectedStatus": 200,
+        "expectedBackend": "infra-backend-v2",
+        "status": 200,
+        "backend": "infra-backend-v2",
+        "echoRequestMatched": true,
+        "passed": true
+      },
+      {
+        "request": {
+          "method": "POST",
+          "path": "/path2",
+          "headers": {
+            "Version": "two"
+          }
+        },
+        "expectedStatus": 200,
+        "expectedBackend": "infra-backend-v3",
+        "status": 200,
+        "backend": "infra-backend-v3",
+        "echoRequestMatched": true,
+        "passed": true
+      },
+      {
+        "request": {
+          "method": "HEAD",
+          "path": "/",
+          "headers": {}
+        },
+        "expectedStatus": 404,
+        "expectedBackend": null,
+        "status": 404,
+        "passed": true
+      },
+      {
+        "request": {
+          "method": "PUT",
+          "path": "/",
+          "headers": {}
+        },
+        "expectedStatus": 404,
+        "expectedBackend": null,
+        "status": 404,
+        "passed": true
+      }
+    ],
+    "timing": {
+      "upstreamStartedSeconds": 6.534,
+      "upstreamCompletedSeconds": 32.602,
+      "octaviaWriteCompletions": [
+        {
+          "method": "POST",
+          "collection": "loadbalancers",
+          "sinceStartSeconds": 3.626,
+          "fixtureCompletionSeconds": 0.026,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": false,
+          "octaviaReadsSincePreviousWrite": 7,
+          "octaviaReadWSGISeconds": 0.04,
+          "octaviaWriteWSGISeconds": 0.033,
+          "beforeNextProviderRequestSeconds": 0.044,
+          "otherElapsedSeconds": 3.51
+        },
+        {
+          "method": "POST",
+          "collection": "listeners",
+          "sinceStartSeconds": 5.0,
+          "fixtureCompletionSeconds": 0.195,
+          "activatedHAProxyConfig": true,
+          "completedWithWorkerTasks": false,
+          "octaviaReadsSincePreviousWrite": 5,
+          "octaviaReadWSGISeconds": 0.073,
+          "octaviaWriteWSGISeconds": 0.034,
+          "beforeNextProviderRequestSeconds": 1.216,
+          "otherElapsedSeconds": 0.024
+        },
+        {
+          "method": "POST",
+          "collection": "pools",
+          "sinceStartSeconds": 7.025,
+          "fixtureCompletionSeconds": 0.076,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": false,
+          "octaviaReadsSincePreviousWrite": 17,
+          "octaviaReadWSGISeconds": 0.183,
+          "octaviaWriteWSGISeconds": 0.045,
+          "beforeNextProviderRequestSeconds": 1.21,
+          "otherElapsedSeconds": 0.392
+        },
+        {
+          "method": "POST",
+          "collection": "pools",
+          "sinceStartSeconds": 7.335,
+          "fixtureCompletionSeconds": 0.077,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": false,
+          "octaviaReadsSincePreviousWrite": 9,
+          "octaviaReadWSGISeconds": 0.099,
+          "octaviaWriteWSGISeconds": 0.039,
+          "beforeNextProviderRequestSeconds": 0.063,
+          "otherElapsedSeconds": 0.033
+        },
+        {
+          "method": "POST",
+          "collection": "healthmonitors",
+          "sinceStartSeconds": 7.661,
+          "fixtureCompletionSeconds": 0.083,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": false,
+          "octaviaReadsSincePreviousWrite": 9,
+          "octaviaReadWSGISeconds": 0.09,
+          "octaviaWriteWSGISeconds": 0.026,
+          "beforeNextProviderRequestSeconds": 0.092,
+          "otherElapsedSeconds": 0.041
+        },
+        {
+          "method": "POST",
+          "collection": "pools",
+          "sinceStartSeconds": 7.968,
+          "fixtureCompletionSeconds": 0.256,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": false,
+          "octaviaReadsSincePreviousWrite": 9,
+          "octaviaReadWSGISeconds": 0.095,
+          "octaviaWriteWSGISeconds": 0.034,
+          "beforeNextProviderRequestSeconds": 0.062,
+          "otherElapsedSeconds": 0.032
+        },
+        {
+          "method": "POST",
+          "collection": "pools",
+          "sinceStartSeconds": 8.461,
+          "fixtureCompletionSeconds": 0.106,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": false,
+          "octaviaReadsSincePreviousWrite": 11,
+          "octaviaReadWSGISeconds": 0.106,
+          "octaviaWriteWSGISeconds": 0.046,
+          "beforeNextProviderRequestSeconds": 0.053,
+          "otherElapsedSeconds": 0.031
+        },
+        {
+          "method": "POST",
+          "collection": "pools",
+          "sinceStartSeconds": 8.803,
+          "fixtureCompletionSeconds": 0.105,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": false,
+          "octaviaReadsSincePreviousWrite": 11,
+          "octaviaReadWSGISeconds": 0.109,
+          "octaviaWriteWSGISeconds": 0.042,
+          "beforeNextProviderRequestSeconds": 0.047,
+          "otherElapsedSeconds": 0.038
+        },
+        {
+          "method": "POST",
+          "collection": "healthmonitors",
+          "sinceStartSeconds": 9.14,
+          "fixtureCompletionSeconds": 0.12,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": false,
+          "octaviaReadsSincePreviousWrite": 11,
+          "octaviaReadWSGISeconds": 0.112,
+          "octaviaWriteWSGISeconds": 0.017,
+          "beforeNextProviderRequestSeconds": 0.063,
+          "otherElapsedSeconds": 0.04
+        },
+        {
+          "method": "POST",
+          "collection": "pools",
+          "sinceStartSeconds": 9.506,
+          "fixtureCompletionSeconds": 0.139,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": false,
+          "octaviaReadsSincePreviousWrite": 11,
+          "octaviaReadWSGISeconds": 0.117,
+          "octaviaWriteWSGISeconds": 0.04,
+          "beforeNextProviderRequestSeconds": 0.046,
+          "otherElapsedSeconds": 0.043
+        },
+        {
+          "method": "POST",
+          "collection": "pools",
+          "sinceStartSeconds": 9.914,
+          "fixtureCompletionSeconds": 0.144,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": false,
+          "octaviaReadsSincePreviousWrite": 13,
+          "octaviaReadWSGISeconds": 0.127,
+          "octaviaWriteWSGISeconds": 0.053,
+          "beforeNextProviderRequestSeconds": 0.048,
+          "otherElapsedSeconds": 0.042
+        },
+        {
+          "method": "POST",
+          "collection": "pools",
+          "sinceStartSeconds": 10.325,
+          "fixtureCompletionSeconds": 0.13,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": false,
+          "octaviaReadsSincePreviousWrite": 13,
+          "octaviaReadWSGISeconds": 0.133,
+          "octaviaWriteWSGISeconds": 0.046,
+          "beforeNextProviderRequestSeconds": 0.049,
+          "otherElapsedSeconds": 0.039
+        },
+        {
+          "method": "POST",
+          "collection": "healthmonitors",
+          "sinceStartSeconds": 10.723,
+          "fixtureCompletionSeconds": 0.141,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": false,
+          "octaviaReadsSincePreviousWrite": 13,
+          "octaviaReadWSGISeconds": 0.148,
+          "octaviaWriteWSGISeconds": 0.022,
+          "beforeNextProviderRequestSeconds": 0.063,
+          "otherElapsedSeconds": 0.035
+        },
+        {
+          "method": "POST",
+          "collection": "l7policies",
+          "sinceStartSeconds": 11.244,
+          "fixtureCompletionSeconds": 0.104,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 14,
+          "octaviaReadWSGISeconds": 0.146,
+          "octaviaWriteWSGISeconds": 0.128,
+          "beforeNextProviderRequestSeconds": 0.048,
+          "otherElapsedSeconds": 0.059
+        },
+        {
+          "method": "POST",
+          "collection": "l7rules",
+          "sinceStartSeconds": 11.711,
+          "fixtureCompletionSeconds": 0.153,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 14,
+          "octaviaReadWSGISeconds": 0.191,
+          "octaviaWriteWSGISeconds": 0.061,
+          "beforeNextProviderRequestSeconds": 0.062,
+          "otherElapsedSeconds": 0.05
+        },
+        {
+          "method": "POST",
+          "collection": "l7rules",
+          "sinceStartSeconds": 12.223,
+          "fixtureCompletionSeconds": 0.133,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 15,
+          "octaviaReadWSGISeconds": 0.182,
+          "octaviaWriteWSGISeconds": 0.059,
+          "beforeNextProviderRequestSeconds": 0.068,
+          "otherElapsedSeconds": 0.05
+        },
+        {
+          "method": "POST",
+          "collection": "l7rules",
+          "sinceStartSeconds": 12.711,
+          "fixtureCompletionSeconds": 0.145,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 15,
+          "octaviaReadWSGISeconds": 0.19,
+          "octaviaWriteWSGISeconds": 0.061,
+          "beforeNextProviderRequestSeconds": 0.052,
+          "otherElapsedSeconds": 0.052
+        },
+        {
+          "method": "POST",
+          "collection": "l7policies",
+          "sinceStartSeconds": 13.239,
+          "fixtureCompletionSeconds": 0.111,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 15,
+          "octaviaReadWSGISeconds": 0.178,
+          "octaviaWriteWSGISeconds": 0.105,
+          "beforeNextProviderRequestSeconds": 0.055,
+          "otherElapsedSeconds": 0.046
+        },
+        {
+          "method": "POST",
+          "collection": "l7rules",
+          "sinceStartSeconds": 13.717,
+          "fixtureCompletionSeconds": 0.16,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 15,
+          "octaviaReadWSGISeconds": 0.191,
+          "octaviaWriteWSGISeconds": 0.066,
+          "beforeNextProviderRequestSeconds": 0.067,
+          "otherElapsedSeconds": 0.043
+        },
+        {
+          "method": "POST",
+          "collection": "l7rules",
+          "sinceStartSeconds": 14.191,
+          "fixtureCompletionSeconds": 0.148,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 16,
+          "octaviaReadWSGISeconds": 0.166,
+          "octaviaWriteWSGISeconds": 0.054,
+          "beforeNextProviderRequestSeconds": 0.05,
+          "otherElapsedSeconds": 0.043
+        },
+        {
+          "method": "POST",
+          "collection": "l7rules",
+          "sinceStartSeconds": 14.686,
+          "fixtureCompletionSeconds": 0.135,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 16,
+          "octaviaReadWSGISeconds": 0.174,
+          "octaviaWriteWSGISeconds": 0.051,
+          "beforeNextProviderRequestSeconds": 0.078,
+          "otherElapsedSeconds": 0.044
+        },
+        {
+          "method": "POST",
+          "collection": "l7policies",
+          "sinceStartSeconds": 15.187,
+          "fixtureCompletionSeconds": 0.098,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 16,
+          "octaviaReadWSGISeconds": 0.178,
+          "octaviaWriteWSGISeconds": 0.099,
+          "beforeNextProviderRequestSeconds": 0.047,
+          "otherElapsedSeconds": 0.042
+        },
+        {
+          "method": "POST",
+          "collection": "l7rules",
+          "sinceStartSeconds": 15.593,
+          "fixtureCompletionSeconds": 0.149,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 16,
+          "octaviaReadWSGISeconds": 0.162,
+          "octaviaWriteWSGISeconds": 0.052,
+          "beforeNextProviderRequestSeconds": 0.057,
+          "otherElapsedSeconds": 0.037
+        },
+        {
+          "method": "POST",
+          "collection": "l7rules",
+          "sinceStartSeconds": 16.118,
+          "fixtureCompletionSeconds": 0.148,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 17,
+          "octaviaReadWSGISeconds": 0.175,
+          "octaviaWriteWSGISeconds": 0.064,
+          "beforeNextProviderRequestSeconds": 0.092,
+          "otherElapsedSeconds": 0.046
+        },
+        {
+          "method": "POST",
+          "collection": "l7policies",
+          "sinceStartSeconds": 16.654,
+          "fixtureCompletionSeconds": 0.316,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 17,
+          "octaviaReadWSGISeconds": 0.184,
+          "octaviaWriteWSGISeconds": 0.099,
+          "beforeNextProviderRequestSeconds": 0.059,
+          "otherElapsedSeconds": 0.046
+        },
+        {
+          "method": "POST",
+          "collection": "l7rules",
+          "sinceStartSeconds": 17.395,
+          "fixtureCompletionSeconds": 0.165,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 17,
+          "octaviaReadWSGISeconds": 0.184,
+          "octaviaWriteWSGISeconds": 0.061,
+          "beforeNextProviderRequestSeconds": 0.131,
+          "otherElapsedSeconds": 0.048
+        },
+        {
+          "method": "POST",
+          "collection": "l7rules",
+          "sinceStartSeconds": 17.912,
+          "fixtureCompletionSeconds": 0.161,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 18,
+          "octaviaReadWSGISeconds": 0.194,
+          "octaviaWriteWSGISeconds": 0.057,
+          "beforeNextProviderRequestSeconds": 0.057,
+          "otherElapsedSeconds": 0.044
+        },
+        {
+          "method": "POST",
+          "collection": "l7policies",
+          "sinceStartSeconds": 18.449,
+          "fixtureCompletionSeconds": 0.108,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 17,
+          "octaviaReadWSGISeconds": 0.181,
+          "octaviaWriteWSGISeconds": 0.108,
+          "beforeNextProviderRequestSeconds": 0.046,
+          "otherElapsedSeconds": 0.041
+        },
+        {
+          "method": "POST",
+          "collection": "l7rules",
+          "sinceStartSeconds": 18.932,
+          "fixtureCompletionSeconds": 0.168,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 18,
+          "octaviaReadWSGISeconds": 0.217,
+          "octaviaWriteWSGISeconds": 0.059,
+          "beforeNextProviderRequestSeconds": 0.053,
+          "otherElapsedSeconds": 0.045
+        },
+        {
+          "method": "POST",
+          "collection": "l7policies",
+          "sinceStartSeconds": 19.504,
+          "fixtureCompletionSeconds": 0.12,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 19,
+          "octaviaReadWSGISeconds": 0.208,
+          "octaviaWriteWSGISeconds": 0.103,
+          "beforeNextProviderRequestSeconds": 0.052,
+          "otherElapsedSeconds": 0.042
+        },
+        {
+          "method": "POST",
+          "collection": "l7rules",
+          "sinceStartSeconds": 20.012,
+          "fixtureCompletionSeconds": 0.179,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 20,
+          "octaviaReadWSGISeconds": 0.232,
+          "octaviaWriteWSGISeconds": 0.065,
+          "beforeNextProviderRequestSeconds": 0.047,
+          "otherElapsedSeconds": 0.044
+        },
+        {
+          "method": "POST",
+          "collection": "l7rules",
+          "sinceStartSeconds": 20.562,
+          "fixtureCompletionSeconds": 0.183,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 20,
+          "octaviaReadWSGISeconds": 0.218,
+          "octaviaWriteWSGISeconds": 0.063,
+          "beforeNextProviderRequestSeconds": 0.05,
+          "otherElapsedSeconds": 0.04
+        },
+        {
+          "method": "POST",
+          "collection": "l7policies",
+          "sinceStartSeconds": 21.212,
+          "fixtureCompletionSeconds": 0.124,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 20,
+          "octaviaReadWSGISeconds": 0.218,
+          "octaviaWriteWSGISeconds": 0.111,
+          "beforeNextProviderRequestSeconds": 0.089,
+          "otherElapsedSeconds": 0.049
+        },
+        {
+          "method": "POST",
+          "collection": "l7rules",
+          "sinceStartSeconds": 21.742,
+          "fixtureCompletionSeconds": 0.178,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 21,
+          "octaviaReadWSGISeconds": 0.237,
+          "octaviaWriteWSGISeconds": 0.066,
+          "beforeNextProviderRequestSeconds": 0.054,
+          "otherElapsedSeconds": 0.049
+        },
+        {
+          "method": "POST",
+          "collection": "l7policies",
+          "sinceStartSeconds": 22.368,
+          "fixtureCompletionSeconds": 0.13,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 21,
+          "octaviaReadWSGISeconds": 0.235,
+          "octaviaWriteWSGISeconds": 0.123,
+          "beforeNextProviderRequestSeconds": 0.04,
+          "otherElapsedSeconds": 0.051
+        },
+        {
+          "method": "POST",
+          "collection": "l7rules",
+          "sinceStartSeconds": 22.914,
+          "fixtureCompletionSeconds": 0.186,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 22,
+          "octaviaReadWSGISeconds": 0.253,
+          "octaviaWriteWSGISeconds": 0.063,
+          "beforeNextProviderRequestSeconds": 0.053,
+          "otherElapsedSeconds": 0.046
+        },
+        {
+          "method": "POST",
+          "collection": "l7policies",
+          "sinceStartSeconds": 23.766,
+          "fixtureCompletionSeconds": 0.138,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 22,
+          "octaviaReadWSGISeconds": 0.241,
+          "octaviaWriteWSGISeconds": 0.321,
+          "beforeNextProviderRequestSeconds": 0.059,
+          "otherElapsedSeconds": 0.045
+        },
+        {
+          "method": "POST",
+          "collection": "l7rules",
+          "sinceStartSeconds": 24.31,
+          "fixtureCompletionSeconds": 0.193,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 23,
+          "octaviaReadWSGISeconds": 0.251,
+          "octaviaWriteWSGISeconds": 0.066,
+          "beforeNextProviderRequestSeconds": 0.043,
+          "otherElapsedSeconds": 0.047
+        },
+        {
+          "method": "POST",
+          "collection": "l7policies",
+          "sinceStartSeconds": 24.957,
+          "fixtureCompletionSeconds": 0.134,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 23,
+          "octaviaReadWSGISeconds": 0.248,
+          "octaviaWriteWSGISeconds": 0.117,
+          "beforeNextProviderRequestSeconds": 0.041,
+          "otherElapsedSeconds": 0.048
+        },
+        {
+          "method": "POST",
+          "collection": "l7rules",
+          "sinceStartSeconds": 25.558,
+          "fixtureCompletionSeconds": 0.202,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 23,
+          "octaviaReadWSGISeconds": 0.278,
+          "octaviaWriteWSGISeconds": 0.075,
+          "beforeNextProviderRequestSeconds": 0.057,
+          "otherElapsedSeconds": 0.055
+        },
+        {
+          "method": "POST",
+          "collection": "l7rules",
+          "sinceStartSeconds": 26.223,
+          "fixtureCompletionSeconds": 0.221,
+          "activatedHAProxyConfig": false,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 24,
+          "octaviaReadWSGISeconds": 0.282,
+          "octaviaWriteWSGISeconds": 0.069,
+          "beforeNextProviderRequestSeconds": 0.055,
+          "otherElapsedSeconds": 0.057
+        },
+        {
+          "method": "PUT",
+          "collection": "l7policies",
+          "sinceStartSeconds": 26.966,
+          "fixtureCompletionSeconds": 0.196,
+          "activatedHAProxyConfig": true,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 24,
+          "octaviaReadWSGISeconds": 0.308,
+          "octaviaWriteWSGISeconds": 0.071,
+          "beforeNextProviderRequestSeconds": 0.086,
+          "otherElapsedSeconds": 0.058
+        },
+        {
+          "method": "PUT",
+          "collection": "l7policies",
+          "sinceStartSeconds": 27.614,
+          "fixtureCompletionSeconds": 0.198,
+          "activatedHAProxyConfig": true,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 24,
+          "octaviaReadWSGISeconds": 0.273,
+          "octaviaWriteWSGISeconds": 0.066,
+          "beforeNextProviderRequestSeconds": 0.063,
+          "otherElapsedSeconds": 0.049
+        },
+        {
+          "method": "PUT",
+          "collection": "l7policies",
+          "sinceStartSeconds": 28.268,
+          "fixtureCompletionSeconds": 0.206,
+          "activatedHAProxyConfig": true,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 24,
+          "octaviaReadWSGISeconds": 0.289,
+          "octaviaWriteWSGISeconds": 0.063,
+          "beforeNextProviderRequestSeconds": 0.048,
+          "otherElapsedSeconds": 0.056
+        },
+        {
+          "method": "PUT",
+          "collection": "l7policies",
+          "sinceStartSeconds": 28.91,
+          "fixtureCompletionSeconds": 0.2,
+          "activatedHAProxyConfig": true,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 24,
+          "octaviaReadWSGISeconds": 0.279,
+          "octaviaWriteWSGISeconds": 0.064,
+          "beforeNextProviderRequestSeconds": 0.041,
+          "otherElapsedSeconds": 0.053
+        },
+        {
+          "method": "PUT",
+          "collection": "l7policies",
+          "sinceStartSeconds": 29.548,
+          "fixtureCompletionSeconds": 0.197,
+          "activatedHAProxyConfig": true,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 23,
+          "octaviaReadWSGISeconds": 0.27,
+          "octaviaWriteWSGISeconds": 0.06,
+          "beforeNextProviderRequestSeconds": 0.058,
+          "otherElapsedSeconds": 0.05
+        },
+        {
+          "method": "PUT",
+          "collection": "l7policies",
+          "sinceStartSeconds": 30.207,
+          "fixtureCompletionSeconds": 0.197,
+          "activatedHAProxyConfig": true,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 24,
+          "octaviaReadWSGISeconds": 0.293,
+          "octaviaWriteWSGISeconds": 0.068,
+          "beforeNextProviderRequestSeconds": 0.051,
+          "otherElapsedSeconds": 0.05
+        },
+        {
+          "method": "PUT",
+          "collection": "l7policies",
+          "sinceStartSeconds": 30.874,
+          "fixtureCompletionSeconds": 0.386,
+          "activatedHAProxyConfig": true,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 24,
+          "octaviaReadWSGISeconds": 0.291,
+          "octaviaWriteWSGISeconds": 0.064,
+          "beforeNextProviderRequestSeconds": 0.058,
+          "otherElapsedSeconds": 0.058
+        },
+        {
+          "method": "PUT",
+          "collection": "l7policies",
+          "sinceStartSeconds": 31.701,
+          "fixtureCompletionSeconds": 0.202,
+          "activatedHAProxyConfig": true,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 24,
+          "octaviaReadWSGISeconds": 0.28,
+          "octaviaWriteWSGISeconds": 0.065,
+          "beforeNextProviderRequestSeconds": 0.047,
+          "otherElapsedSeconds": 0.048
+        },
+        {
+          "method": "PUT",
+          "collection": "l7policies",
+          "sinceStartSeconds": 32.361,
+          "fixtureCompletionSeconds": 0.262,
+          "activatedHAProxyConfig": true,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 24,
+          "octaviaReadWSGISeconds": 0.283,
+          "octaviaWriteWSGISeconds": 0.065,
+          "beforeNextProviderRequestSeconds": 0.057,
+          "otherElapsedSeconds": 0.053
+        },
+        {
+          "method": "PUT",
+          "collection": "l7policies",
+          "sinceStartSeconds": 33.162,
+          "fixtureCompletionSeconds": 0.193,
+          "activatedHAProxyConfig": true,
+          "completedWithWorkerTasks": true,
+          "octaviaReadsSincePreviousWrite": 24,
+          "octaviaReadWSGISeconds": 0.353,
+          "octaviaWriteWSGISeconds": 0.072,
+          "beforeNextProviderRequestSeconds": 0.054,
+          "otherElapsedSeconds": 0.06
+        }
+      ]
+    }
+  }
+}
