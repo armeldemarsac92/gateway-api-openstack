@@ -5,7 +5,7 @@ Use the [local build record](image.json) for the exact source revision, linux/am
 On a linux/amd64 host, use a separate checkout of the recorded revision. The Dockerfile pins the Go 1.27.4 builder and distroless base by digest. Podman uses a fixed timestamp, and the build writes the full commit into the binary and the OCI revision label. The verification command exports gzip-compressed layers.
 
 ```sh
-revision=ba6c47689d58a640523fd39e18c3a4bb3a9e0b31
+revision=adb6f0fc44dee7d9016bca79442e68f94eb6e15e
 test "$(git rev-parse HEAD)" = "$revision"
 image="localhost/hibiscus-controller:$revision"
 make container-build CONTAINER_TOOL=podman VERSION="$revision" IMAGE="$image"
