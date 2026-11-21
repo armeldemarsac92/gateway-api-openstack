@@ -18,6 +18,7 @@ package octavia
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/pools"
@@ -43,19 +44,38 @@ func (s *Service) ListPools(ctx context.Context, opts pools.ListOpts) ([]pools.P
 type PoolInventory struct {
 	Items      []pools.Pool
 	BackendH2C map[string]bool
+	BackendTLS map[string]PoolBackendTLS
+}
+
+// PoolBackendTLS records which transport fields the API actually reported.
+// Explicit null clears the nullable hostname and CA reference.
+type PoolBackendTLS struct {
+	Hostname         string
+	HostnameObserved bool
+	CAObserved       bool
+	EnabledObserved  bool
+	AdminObserved    bool
+}
+
+func (tls PoolBackendTLS) Complete() bool {
+	return tls.HostnameObserved && tls.CAObserved && tls.EnabledObserved && tls.AdminObserved
 }
 
 // ListPoolInventory requires an explicit pool collection on every page and
 // reads backend transport alongside the stock fields.
 func (s *Service) ListPoolInventory(ctx context.Context, opts pools.ListOpts) (PoolInventory, error) {
-	inventory := PoolInventory{BackendH2C: make(map[string]bool)}
+	inventory := PoolInventory{BackendH2C: make(map[string]bool), BackendTLS: make(map[string]PoolBackendTLS)}
 	items, err := listCompleteCollection(ctx, pools.List(s.client, opts), func(result pagination.PageResult) pagination.Page {
 		return pools.PoolPage{LinkedPageBase: pagination.LinkedPageBase{PageResult: result}}
 	}, "pools", func(page pagination.Page) ([]pools.Pool, error) {
 		var response struct {
 			Pools []struct {
 				pools.Pool
-				BackendH2C bool `json:"backend_h2c"`
+				BackendH2C bool            `json:"backend_h2c"`
+				Hostname   json.RawMessage `json:"backend_tls_hostname"`
+				CA         json.RawMessage `json:"ca_tls_container_ref"`
+				Enabled    *bool           `json:"tls_enabled"`
+				Admin      *bool           `json:"admin_state_up"`
 			} `json:"pools"`
 		}
 		if err := page.(pools.PoolPage).ExtractInto(&response); err != nil {
@@ -66,6 +86,15 @@ func (s *Service) ListPoolInventory(ctx context.Context, opts pools.ListOpts) (P
 		}
 		items := make([]pools.Pool, 0, len(response.Pools))
 		for _, pool := range response.Pools {
+			tls := PoolBackendTLS{HostnameObserved: len(pool.Hostname) != 0, CAObserved: len(pool.CA) != 0,
+				EnabledObserved: pool.Enabled != nil, AdminObserved: pool.Admin != nil}
+			if tls.HostnameObserved && json.Unmarshal(pool.Hostname, &tls.Hostname) != nil ||
+				tls.CAObserved && json.Unmarshal(pool.CA, &pool.CATLSContainerRef) != nil {
+				return nil, cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady, fmt.Errorf("invalid TLS field in Octavia pool inventory"))
+			}
+			pool.TLSEnabled = pool.Enabled != nil && *pool.Enabled
+			pool.AdminStateUp = pool.Admin != nil && *pool.Admin
+			inventory.BackendTLS[pool.ID] = tls
 			items = append(items, pool.Pool)
 			if pool.BackendH2C {
 				inventory.BackendH2C[pool.ID] = true
@@ -125,29 +154,57 @@ func missingCollection(field string) error {
 // CreatePoolOpts adds optional backend transport to a stock pool create request.
 type CreatePoolOpts struct {
 	pools.CreateOpts
-	BackendH2C bool
+	BackendH2C         bool
+	BackendTLSHostname string
 }
 
 func (opts CreatePoolOpts) ToPoolCreateMap() (map[string]any, error) {
 	body, err := opts.CreateOpts.ToPoolCreateMap()
-	if err == nil && opts.BackendH2C {
-		body["pool"].(map[string]any)["backend_h2c"] = true
+	if err != nil {
+		return nil, err
 	}
-	return body, err
+	pool := body["pool"].(map[string]any)
+	if opts.BackendH2C {
+		pool["backend_h2c"] = true
+	}
+	if opts.BackendTLSHostname != "" {
+		pool["backend_tls_hostname"] = opts.BackendTLSHostname
+	}
+	return body, nil
 }
 
 // UpdatePoolOpts adds optional backend transport to a stock pool update request.
 type UpdatePoolOpts struct {
 	pools.UpdateOpts
 	BackendH2C *bool
+	BackendTLS *BackendTLSSettings
+}
+
+// BackendTLSSettings changes hostname authentication and trust in one write.
+// A zero value explicitly clears it on a disabled pool.
+type BackendTLSSettings struct {
+	Hostname    string
+	CAReference string
 }
 
 func (opts UpdatePoolOpts) ToPoolUpdateMap() (map[string]any, error) {
 	body, err := opts.UpdateOpts.ToPoolUpdateMap()
-	if err == nil && opts.BackendH2C != nil {
-		body["pool"].(map[string]any)["backend_h2c"] = *opts.BackendH2C
+	if err != nil {
+		return nil, err
 	}
-	return body, err
+	pool := body["pool"].(map[string]any)
+	if opts.BackendH2C != nil {
+		pool["backend_h2c"] = *opts.BackendH2C
+	}
+	if tls := opts.BackendTLS; tls != nil {
+		pool["tls_enabled"] = tls.Hostname != ""
+		pool["backend_tls_hostname"], pool["ca_tls_container_ref"] = nil, nil
+		if tls.Hostname != "" {
+			pool["backend_tls_hostname"], pool["ca_tls_container_ref"] = tls.Hostname, tls.CAReference
+		}
+		pool["tls_container_ref"], pool["crl_container_ref"] = nil, nil
+	}
+	return body, nil
 }
 
 // CreatePool creates one pool.

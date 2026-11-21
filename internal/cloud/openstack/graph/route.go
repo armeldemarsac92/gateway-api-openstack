@@ -83,6 +83,7 @@ type desiredRoute struct {
 	targetsPending         bool
 	zeroWeightOnly         bool
 	weightedAuthorizations map[string]map[string]int
+	backendTLS             backendTLSPlan
 }
 
 func (r desiredRoute) protocol() string {
@@ -153,6 +154,10 @@ func (p *Provider) buildDesiredRoutePart(spec cloud.RouteSpec, backendKey string
 	default:
 		return invalid(fmt.Errorf("unsupported member mode %q", spec.MemberMode))
 	}
+	if spec.BackendTLS != nil && spec.BackendTLS.Denied {
+		unavailable, spec.Members = true, nil
+		spec.BackendH2C = false
+	}
 	if len(spec.Members) == 0 && spec.MemberMode != cloud.MemberModeEndpoint && !unavailable {
 		return invalid(errors.New("at least one ready backend member is required"))
 	}
@@ -162,7 +167,10 @@ func (p *Provider) buildDesiredRoutePart(spec cloud.RouteSpec, backendKey string
 	var policies []desiredPolicy
 	var hostnameRuleValue string
 	protocol := cloud.NormalizeListenerProtocol(spec.GatewayRequirements.ListenerProtocol)
-	if spec.BackendH2C && (protocol != cloud.ListenerProtocolHTTP || !p.backendH2C) {
+	if spec.BackendTLS != nil && protocol != cloud.ListenerProtocolHTTP {
+		return invalid(errors.New("BackendTLSPolicy requires an HTTP pool"))
+	}
+	if spec.BackendH2C && spec.BackendTLS == nil && (protocol != cloud.ListenerProtocolHTTP || !p.backendH2C) {
 		return invalid(errors.New("h2c requires an HTTP pool and --octavia-backend-h2c"))
 	}
 	switch protocol {
@@ -252,7 +260,7 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 		return desiredRoute{}, cloud.NewProviderError(cloud.ErrorCategoryTerminalValidation, err)
 	}
 	if cloud.NormalizeListenerProtocol(spec.GatewayRequirements.ListenerProtocol) != cloud.ListenerProtocolHTTP ||
-		spec.Hostname != "" || spec.PathType != "" || spec.PathValue != "" || len(spec.Members) != 0 || spec.BackendH2C {
+		spec.Hostname != "" || spec.PathType != "" || spec.PathValue != "" || len(spec.Members) != 0 || spec.BackendH2C || spec.BackendTLS != nil {
 		return invalid(errors.New("HTTP backend groups require HTTP routing without scalar matches or members"))
 	}
 	identity, err := p.identity(spec.Identity)
@@ -269,9 +277,10 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 		fixedResponse := p.fixedHTTPResponses && backend.InvalidReference
 		unavailable := backend.Unavailable || fixedResponse
 		validPort := backend.Port >= 1 && backend.Port <= 65535 || backend.Kind == cloud.HTTPBackendKindXBackend && backend.InvalidReference && backend.Port == 0
+		deniedTLS := backend.BackendTLS != nil && backend.BackendTLS.Denied
 		if strings.TrimSpace(backend.Namespace) == "" || strings.TrimSpace(backend.Name) == "" ||
 			(backend.Kind != "" && backend.Kind != cloud.HTTPBackendKindXBackend) || !validPort ||
-			len(backend.Matches) == 0 && !targetsUsed[index] || unavailable && len(backend.Members) != 0 {
+			len(backend.Matches) == 0 && !targetsUsed[index] || unavailable && !deniedTLS && len(backend.Members) != 0 {
 			return invalid(errors.New("each HTTP backend requires a supported reference and a match or weighted reference, and an unavailable backend must have no members"))
 		}
 		key := openstackidentity.HTTPBackendPoolKey(backend)
@@ -281,7 +290,7 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 		backendKeys[key] = true
 		partSpec := spec
 		partSpec.HTTPBackends, partSpec.HTTPRedirects, partSpec.FixedHTTPRules, partSpec.WeightedHTTPRules, partSpec.Members = nil, nil, nil, nil, backend.Members
-		partSpec.BackendH2C = backend.BackendH2C
+		partSpec.BackendH2C, partSpec.BackendTLS = backend.BackendH2C, backend.BackendTLS
 		part, err := p.buildDesiredRoutePart(partSpec, key, unavailable)
 		if err != nil {
 			return desiredRoute{}, err

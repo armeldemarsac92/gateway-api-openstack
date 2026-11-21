@@ -87,6 +87,28 @@ func (r Revision) String() string { return "[backend CA revision]" }
 // GoString redacts the reference in Go-syntax formatting.
 func (r Revision) GoString() string { return r.String() }
 
+// Find reads a verified revision for the exact ConfigMap UID and normalized
+// CA digest. Prefer a verified reference the pool already uses after a retry.
+func (s *Store) Find(ctx context.Context, gatewayUID, configMapUID, wantedDigest, preferredReference string) (Revision, error) {
+	if configMapUID == "" || !isDigest(wantedDigest) {
+		return Revision{}, cloud.NewProviderError(cloud.ErrorCategoryTerminalValidation, errors.New("backend CA requires a ConfigMap UID and normalized CA digest"))
+	}
+	client, prefix, err := s.open(gatewayUID)
+	if err != nil {
+		return Revision{}, err
+	}
+	revisions, err := client.verified(ctx, revisionName(prefix, configMapUID, wantedDigest), prefix)
+	if err != nil || len(revisions) == 0 {
+		return Revision{}, err
+	}
+	for _, revision := range revisions {
+		if revision.Reference() == preferredReference {
+			return revision, nil
+		}
+	}
+	return revisions[0], nil
+}
+
 // Ensure publishes the normalized, validated ConfigMap CA PEM once and
 // returns a verified reference. A retry first looks up the same immutable
 // revision in the authenticated project. Barbican can briefly omit a recent
@@ -101,7 +123,7 @@ func (s *Store) Ensure(ctx context.Context, gatewayUID, configMapUID string, nor
 		return Revision{}, err
 	}
 
-	name := prefix + digest([]byte(configMapUID)) + "-" + digest(normalizedPEM)
+	name := revisionName(prefix, configMapUID, digest(normalizedPEM))
 	revisions, err := client.verified(ctx, name, prefix)
 	if err != nil {
 		return Revision{}, err
@@ -152,7 +174,7 @@ func (s *Store) List(ctx context.Context, gatewayUID string) ([]Revision, error)
 // result preserves a live revision, and a missing or failed check fails closed.
 func (s *Store) Retire(ctx context.Context, gatewayUID string, revision Revision, isUnused func(context.Context, string) (bool, error)) error {
 	if isUnused == nil {
-		return errors.New("Octavia backend CA usage check is required")
+		return errors.New("backend CA retirement requires an Octavia usage check")
 	}
 	client, prefix, err := s.open(gatewayUID)
 	if err != nil {
@@ -214,6 +236,10 @@ func revisionDigest(name, prefix string) string {
 		return ""
 	}
 	return payloadDigest
+}
+
+func revisionName(prefix, configMapUID, pemDigest string) string {
+	return prefix + digest([]byte(configMapUID)) + "-" + pemDigest
 }
 
 func isDigest(value string) bool {

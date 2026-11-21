@@ -62,6 +62,7 @@ type observedRouteRule struct {
 type observedRouteGraph struct {
 	pool                   *pools.Pool
 	backendH2C             bool
+	backendTLS             octavia.PoolBackendTLS
 	members                []pools.Member
 	memberBackupUnreported map[string]struct{}
 	memberAdminUnreported  map[string]struct{}
@@ -76,6 +77,7 @@ type routeGraphOwner struct {
 	cleanupProtocol            string
 	recovery                   *openstackidentity.RouteOwnerProof
 	expectsHTTPParts           bool
+	expectsBackendTLS          bool
 	requiresPolicyAbsenceProof bool
 }
 
@@ -283,7 +285,10 @@ func (p *Provider) observeRouteGraphsFromPools(ctx context.Context, owners []rou
 	defaultPool := usesDefaultPool(protocol)
 	scopedHTTP := protocol == cloud.ListenerProtocolHTTP && scopedListeners != nil
 	strictHTTP := scopedHTTP || protocol == cloud.ListenerProtocolHTTP && p.fixedHTTPResponses || containsHTTPFragmentPool(poolItems) ||
-		slices.ContainsFunc(owners, func(owner routeGraphOwner) bool { return owner.expectsHTTPParts }) || recoverGateway != nil
+		slices.ContainsFunc(owners, func(owner routeGraphOwner) bool { return owner.expectsHTTPParts || owner.expectsBackendTLS }) ||
+		slices.ContainsFunc(poolItems, func(pool pools.Pool) bool {
+			return hasObservedBackendTLS(pool, poolInventory.BackendTLS[pool.ID])
+		}) || recoverGateway != nil
 	if strictHTTP {
 		frontends := scopedListeners
 		if listener != nil {
@@ -336,7 +341,11 @@ func (p *Provider) observeRouteGraphsFromPools(ctx context.Context, owners []rou
 				return nil, &cloud.GraphError{Identity: identity.Value(), Err: err}
 			}
 		} else if strictHTTP {
-			if err := validateDefaultPoolParent(*pool, lb.ID, cloud.ListenerProtocolHTTP); err != nil {
+			validateParent := validateDefaultPoolParent
+			if owner.expectsBackendTLS || hasObservedBackendTLS(*pool, poolInventory.BackendTLS[pool.ID]) {
+				validateParent = validateBoundPoolParent
+			}
+			if err := validateParent(*pool, lb.ID, cloud.ListenerProtocolHTTP); err != nil {
 				return nil, &cloud.GraphError{Identity: identity.Value(), Err: err}
 			}
 			if pool.ProjectID != p.projectID {
@@ -351,6 +360,7 @@ func (p *Provider) observeRouteGraphsFromPools(ctx context.Context, owners []rou
 		}
 		graph.pool = pool
 		graph.backendH2C = poolInventory.BackendH2C[pool.ID]
+		graph.backendTLS = poolInventory.BackendTLS[pool.ID]
 		poolOwners[pool.ID] = poolRouteOwner{route: routeIndex, backend: role.backend}
 		if err := p.observeRoutePoolChildrenWithRole(ctx, owner, graph, role.backend); err != nil {
 			return nil, &cloud.GraphError{Identity: identity.Value(), Err: err}
@@ -549,11 +559,12 @@ func (p *Provider) observeRoutePoolChildren(ctx context.Context, identity Identi
 
 func (p *Provider) observeRoutePoolChildrenWithRole(ctx context.Context, owner routeGraphOwner, graph *observedRouteGraph, backend string) error {
 	var err error
+	strictChildren := backend != "" || owner.expectsBackendTLS || hasObservedBackendTLS(*graph.pool, graph.backendTLS)
 	opts := pools.ListMembersOpts{ProjectID: p.projectID}
 	switch {
 	case graph.pool.Protocol == cloud.ListenerProtocolTCP:
 		graph.members, graph.memberBackupUnreported, err = p.octavia.ListMembersWithBackup(ctx, graph.pool.ID, opts)
-	case backend != "" || (p.fixedHTTPResponses || p.backendH2C || graph.backendH2C) && graph.pool.Protocol == cloud.ListenerProtocolHTTP:
+	case strictChildren || (p.fixedHTTPResponses || p.backendH2C || graph.backendH2C) && graph.pool.Protocol == cloud.ListenerProtocolHTTP:
 		graph.members, graph.memberAdminUnreported, err = p.octavia.ListMembersWithAdminState(ctx, graph.pool.ID, opts)
 	default:
 		graph.members, err = p.octavia.ListCompleteMembers(ctx, graph.pool.ID, opts)
@@ -576,7 +587,7 @@ func (p *Provider) observeRoutePoolChildrenWithRole(ctx context.Context, owner r
 		if err := p.validateOptionalProject("member", member.ID, member.ProjectID); err != nil {
 			return err
 		}
-		if backend != "" && member.ProjectID != p.projectID || !owner.matchesRoute(member.Tags, httpResourceRole(roleMember, backend, "")) {
+		if strictChildren && member.ProjectID != p.projectID || !owner.matchesRoute(member.Tags, httpResourceRole(roleMember, backend, "")) {
 			return fmt.Errorf("%w: pool %s contains member %s not owned by the selected route", cloud.ErrOwnershipConflict, graph.pool.ID, member.ID)
 		}
 		if member.PoolID != "" && member.PoolID != graph.pool.ID {
@@ -607,7 +618,7 @@ func (p *Provider) observeRoutePoolChildrenWithRole(ctx context.Context, owner r
 		if err := p.validateOptionalProject("health monitor", monitor.ID, monitor.ProjectID); err != nil {
 			return err
 		}
-		if backend != "" && (monitor.ProjectID != p.projectID || len(monitor.Pools) != 1) ||
+		if strictChildren && (monitor.ProjectID != p.projectID || len(monitor.Pools) != 1) ||
 			!owner.matchesRoute(monitor.Tags, httpResourceRole(roleMonitor, backend, "")) {
 			return fmt.Errorf("%w: pool %s contains health monitor %s not owned by the selected route", cloud.ErrOwnershipConflict, graph.pool.ID, monitor.ID)
 		}
@@ -668,6 +679,9 @@ type routeMutationKind uint8
 const (
 	routeMutationCreatePool routeMutationKind = iota
 	routeMutationUpdatePool
+	routeMutationPublishBackendCA
+	routeMutationClearPoolMembers
+	routeMutationSetBackendTLS
 	routeMutationDeleteMember
 	routeMutationDisableMember
 	routeMutationCreateMember
@@ -700,6 +714,9 @@ type routeMutation struct {
 	retry                   bool
 	clearPoolPersistence    bool
 	backendH2C              *bool
+	poolAdmin               *bool
+	poolTags                *[]string
+	backendTLS              *octavia.BackendTLSSettings
 	reenableH2CPool         bool
 	clearMemberBackup       bool
 	withdrawHTTPPolicy      bool
@@ -715,6 +732,12 @@ func (s routeMutation) message() string {
 		return "Created Octavia pool"
 	case routeMutationUpdatePool:
 		return "Updated Octavia pool"
+	case routeMutationPublishBackendCA:
+		return "Publishing the backend CA in Barbican"
+	case routeMutationClearPoolMembers:
+		return "Withdrawing Octavia backend members until TLS authorization is verified"
+	case routeMutationSetBackendTLS:
+		return "Updating authenticated TLS on the Octavia pool"
 	case routeMutationDisableMember:
 		return "Disabling an Octavia HTTP backend member"
 	case routeMutationDeleteMember:
@@ -768,6 +791,12 @@ func (r desiredRoute) backendTransportNeedsWithdrawal(observed observedRouteGrap
 }
 
 func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]routeMutation, cloud.RouteState, error) {
+	if step := desired.backendTLS.poolMutation(desired, actual); step != nil {
+		return []routeMutation{*step}, routeStateFromObservation(actual), nil
+	}
+	if !desired.backendTLS.allowsMembers() && !desired.backendTLS.denies() {
+		return nil, routeStateFromObservation(actual), nil
+	}
 	nonPolicyPlan := make([]routeMutation, 0)
 	state := cloud.RouteState{}
 	poolID := ""
@@ -796,7 +825,7 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 		if pool.Protocol != desired.protocol() {
 			return nil, cloud.RouteState{}, fmt.Errorf("%w: pool %s has protocol %s", cloud.ErrOwnershipConflict, pool.ID, pool.Protocol)
 		}
-		if desired.backendTransportNeedsWithdrawal(actual) {
+		if desired.backendTLS.allowsMembers() && desired.backendTransportNeedsWithdrawal(actual) {
 			if desired.protocol() != cloud.ListenerProtocolHTTP {
 				return nil, state, fmt.Errorf("%w: non-HTTP pool %s reports h2c", cloud.ErrOwnershipConflict, pool.ID)
 			}
@@ -814,6 +843,9 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 			if steps, hold := httpMemberWithdrawal(actual); len(steps) != 0 || hold != "" {
 				return steps, state, nil
 			}
+		}
+		if desired.backendTLS.denies() {
+			break
 		}
 		clearPersistence := pool.Persistence != (pools.SessionPersistence{}) &&
 			slices.ContainsFunc(desired.members, func(member cloud.Member) bool { return !member.Draining && member.Weight > 0 })
@@ -929,7 +961,7 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 			if policy.role == wantedPolicy.role && !policy.policy.AdminStateUp {
 				return []routeMutation{{kind: routeMutationEnablePolicy, id: policy.policy.ID,
 					requestHeaderOperations: wantedPolicy.requestHeaderOperations,
-					requiresExactHeaders: len(wantedPolicy.headers) != 0, requiresHTTPMethod: wantedPolicy.method != ""}}, state, nil
+					requiresExactHeaders:    len(wantedPolicy.headers) != 0, requiresHTTPMethod: wantedPolicy.method != ""}}, state, nil
 			}
 		}
 	}
@@ -1117,7 +1149,16 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 			AdminStateUp:   boolPointer(true),
 			Tags:           tags,
 		}
-		_, err = p.octavia.CreatePool(ctx, octavia.CreatePoolOpts{CreateOpts: opts, BackendH2C: desired.spec.BackendH2C})
+		if step.poolTags != nil {
+			opts.Tags = append(opts.Tags, (*step.poolTags)...)
+		}
+		var hostname string
+		if step.backendTLS != nil {
+			opts.TLSEnabled, opts.CATLSContainerRef = true, step.backendTLS.CAReference
+			hostname = step.backendTLS.Hostname
+		}
+		_, err = p.octavia.CreatePool(ctx, octavia.CreatePoolOpts{CreateOpts: opts,
+			BackendH2C: desired.spec.BackendH2C && desired.backendTLS.allowsMembers(), BackendTLSHostname: hostname})
 	case routeMutationUpdatePool:
 		opts := pools.UpdateOpts{LBMethod: pools.LBMethodRoundRobin}
 		if step.backendH2C == nil {
@@ -1128,6 +1169,13 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 			opts.Persistence = &pools.SessionPersistence{}
 		}
 		_, err = p.octavia.UpdatePool(ctx, step.id, octavia.UpdatePoolOpts{UpdateOpts: opts, BackendH2C: step.backendH2C})
+	case routeMutationPublishBackendCA:
+		return p.publishBackendCA(ctx, desired.spec)
+	case routeMutationClearPoolMembers:
+		err = p.octavia.ClearMembers(ctx, step.id)
+	case routeMutationSetBackendTLS:
+		opts := pools.UpdateOpts{AdminStateUp: step.poolAdmin, Tags: step.poolTags}
+		_, err = p.octavia.UpdatePool(ctx, step.id, octavia.UpdatePoolOpts{UpdateOpts: opts, BackendH2C: step.backendH2C, BackendTLS: step.backendTLS})
 	case routeMutationDisableMember:
 		_, err = p.octavia.UpdateMember(ctx, step.parentID, step.id, pools.UpdateMemberOpts{AdminStateUp: boolPointer(false)})
 	case routeMutationDeleteMember:
@@ -1292,6 +1340,9 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 		return nil
 	}
 	if err != nil {
+		if step.backendTLS != nil || step.kind == routeMutationSetBackendTLS || step.kind == routeMutationClearPoolMembers {
+			return redactBackendTLSMutationError(step, err)
+		}
 		return fmt.Errorf("%s: %w", step.message(), classifyOctaviaMutationError(err))
 	}
 	return nil
