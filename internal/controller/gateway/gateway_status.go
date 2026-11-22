@@ -68,6 +68,7 @@ func (r *Reconciler) setGatewayFailure(gateway *gatewayv1.Gateway, validationErr
 	for _, listener := range gateway.Spec.Listeners {
 		status := r.unprogrammedListenerStatus(listener, existingListeners, gateway.Generation, unsupportedMultipleL4, listenerSpecific, message)
 		if r.Config.TCPTLSTermination && mixedTLSModes(gateway.Spec.Listeners, listener) {
+			status.SupportedKinds = nil
 			message := "Terminate and Passthrough require separate TLS listener ports"
 			controller.SetCondition(&status.Conditions, controller.Condition(string(gatewayv1.ListenerConditionAccepted), metav1.ConditionFalse, string(gatewayv1.ListenerReasonProtocolConflict), message, gateway.Generation))
 			controller.SetCondition(&status.Conditions, controller.Condition(string(gatewayv1.ListenerConditionConflicted), metav1.ConditionTrue, string(gatewayv1.ListenerReasonProtocolConflict), message, gateway.Generation))

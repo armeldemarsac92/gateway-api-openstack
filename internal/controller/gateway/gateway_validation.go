@@ -109,7 +109,7 @@ func SupportedListenersForConfig(config controller.Config, gateway *gatewayv1.Ga
 			return nil, fmt.Errorf("TLSRoute requires an enabled TLS mode, a valid port and no TLS options")
 		}
 		if !terminatesTLS(listener) && len(listener.TLS.CertificateRefs) != 0 {
-			return nil, fmt.Errorf("Passthrough mode does not support certificate references")
+			return nil, fmt.Errorf("TLS passthrough mode does not support certificate references")
 		}
 		if listener.Hostname != nil {
 			if err := amphora.ValidateHostname(string(*listener.Hostname)); err != nil {

@@ -818,4 +818,9 @@ func TestTLSListenerModeStatus(t *testing.T) {
 	gateway.Spec.Listeners = append(gateway.Spec.Listeners, passthrough)
 	r.Config.TCPTLSTermination, r.Config.TLSSNIPassthrough = true, true
 	verify(gatewayv1.ListenerReasonProtocolConflict)
+	for _, listener := range gateway.Status.Listeners {
+		if len(listener.SupportedKinds) != 0 {
+			t.Fatalf("conflicting listener %s advertises route kinds %v", listener.Name, listener.SupportedKinds)
+		}
+	}
 }
