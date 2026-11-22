@@ -28,6 +28,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"maps"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -40,6 +41,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/backendca"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/clients"
+	openstackidentity "github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/identity"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
 	"github.com/google/uuid"
 	"github.com/gophercloud/gophercloud/v2/openstack/keymanager/v1/secrets"
@@ -95,11 +97,19 @@ func TestBackendTLSScalarQuarantinesBeforePublishingAndReopening(t *testing.T) {
 		"/lbaas/healthmonitors": {"healthmonitors": []any{monitor}},
 	}
 	capabilities := []string{octavia.GatewayCapabilityBackendTLSHostname}
+	const filterListenerURL = "/lbaas/listeners/filter-listener"
+	var filterListener map[string]any
 	var writes []string
 	handle := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(strings.TrimPrefix(r.URL.Path, "/octavia"), "/v2.0")
 		if r.Method == http.MethodGet {
 			pool["members"] = memberIDs
+			if path == "/lbaas/l7policies" && r.URL.Query().Get("listener_id") == "filter-listener" {
+				path = "/filter-policies"
+			}
+			if path == "/lbaas/healthmonitors" && r.URL.Query().Get("pool_id") == "peer-pool" {
+				path = "/peer-monitor"
+			}
 			if body := reads[path]; body != nil {
 				safetyWriteJSON(t, w, body)
 				return
@@ -121,6 +131,14 @@ func TestBackendTLSScalarQuarantinesBeforePublishingAndReopening(t *testing.T) {
 			}
 		}
 		switch {
+		case r.Method == http.MethodPut && path == filterListenerURL:
+			var body struct{ Listener map[string]any }
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.Listener) != 1 || body.Listener["admin_state_up"] != false {
+				t.Fatalf("filter listener must only be closed: request %v, error %v", body, err)
+			}
+			filterListener["admin_state_up"] = false
+			writes = append(writes, "close-filter-listener")
+			safetyWriteJSON(t, w, map[string]any{"listener": filterListener})
 		case r.Method == http.MethodPut && path == poolURL+"/members":
 			var body struct{ Members []json.RawMessage }
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Members == nil || len(body.Members) != 0 {
@@ -235,6 +253,128 @@ func TestBackendTLSScalarQuarantinesBeforePublishingAndReopening(t *testing.T) {
 	reconcile("disable")
 	pool["provisioning_status"] = "ACTIVE"
 	reconcile("drain", "enable", "member")
+
+	t.Run("CA revoked while another listener has incomplete filter inventory", func(t *testing.T) {
+		// Add a healthy backend on 80 and an unreadable filter policy on 8080
+		// to the already programmed TLS route.
+		configured := spec
+		configured.Gateway.Spec.ScopedListeners = []cloud.ScopedListener{{Name: "public", Port: 80}, {Name: "filter", Port: 8080}}
+		configured.Routes = slices.Clone(spec.Routes)
+		configured.Routes[0].Spec.ScopedListenerPorts = []int{80}
+		peer := configured.Routes[0]
+		peer.Spec.Identity.RouteName, peer.Spec.Identity.RouteUID = "peer", "peer-uid"
+		peer.Spec.BackendTLS, peer.Spec.PathValue, peer.Spec.Precedence = nil, "/peer", 1
+		peerID, err := provider.identity(peer.Spec.Identity)
+		if err != nil {
+			t.Fatal(err)
+		}
+		filter := cloud.RouteGraphNode{Disposition: cloud.GraphPreserve, Spec: cloud.RouteSpec{
+			Identity: peer.Spec.Identity, ScopedListenerPorts: []int{8080},
+		}}
+		filter.Spec.Identity.RouteName, filter.Spec.Identity.RouteUID = "filter", "filter-uid"
+		filterID, err := provider.identity(filter.Spec.Identity)
+		if err != nil {
+			t.Fatal(err)
+		}
+		configured.Routes = append(configured.Routes, peer, filter)
+
+		refs := func(ids ...string) []map[string]string {
+			result := make([]map[string]string, 0, len(ids))
+			for _, resourceID := range ids {
+				result = append(result, map[string]string{"id": resourceID})
+			}
+			return result
+		}
+		peerPool := maps.Clone(pool)
+		peerPool["id"], peerPool["tags"], peerPool["healthmonitor_id"], peerPool["members"] = "peer-pool", safetyRouteTags(t, peerID, rolePool), "peer-monitor", refs("peer-member")
+		peerPool["tls_enabled"], peerPool["backend_tls_hostname"], peerPool["ca_tls_container_ref"] = false, nil, nil
+		peerMember, peerMonitor := maps.Clone(member), maps.Clone(monitor)
+		peerMember["id"], peerMember["tags"] = "peer-member", safetyRouteTags(t, peerID, roleMember)
+		peerMonitor["id"], peerMonitor["pools"], peerMonitor["tags"] = "peer-monitor", refs("peer-pool"), safetyRouteTags(t, peerID, roleMonitor)
+		peerPolicy, peerPath, peerHost := maps.Clone(policy), maps.Clone(rules[0]), maps.Clone(rules[1])
+		peerPolicy["id"], peerPolicy["redirect_pool_id"], peerPolicy["position"] = "peer-policy", "peer-pool", 2
+		peerPolicy["rules"], peerPolicy["tags"] = refs("peer-path", "peer-host"), safetyRouteTags(t, peerID, rolePolicyExact)
+		peerPath["id"], peerPath["value"], peerPath["tags"] = "peer-path", "/peer", safetyRouteTags(t, peerID, roleRulePath)
+		peerHost["id"], peerHost["tags"] = "peer-host", safetyRouteTags(t, peerID, roleRuleHost)
+		filterListener = maps.Clone(listener)
+		filterListener["id"], filterListener["protocol_port"], filterListener["l7policies"] = "filter-listener", 8080, refs("filtered")
+		filterListener["tags"] = append(safetyGatewayTags(t, id, roleListener), scopedPortTag(cloud.ListenerProtocolHTTP, 8080))
+		filterRole := openstackidentity.HTTPWeightedPolicyRole(rolePolicyExact, openstackidentity.HTTPWeightedRuleKey(0),
+			openstackidentity.HTTPMatchKey("", cloud.PathMatchExact, "/filtered", ""))
+		filterPolicy := map[string]any{"id": "filtered", "project_id": project, "listener_id": "filter-listener", "action": "WEIGHTED_TARGETS",
+			"position": 1, "provisioning_status": "ACTIVE", "redirect_pool_id": nil, "targets": []octavia.WeightedHTTPTarget{fixedWeightedHTTPTarget(1)},
+			"rules": refs(), "tags": append(safetyRouteTags(t, filterID, filterRole), openstackidentity.BackendRequestFiltersPolicyTag)}
+
+		previousReads, previousLB, previousListener := maps.Clone(reads), maps.Clone(lb), maps.Clone(listener)
+		defer func() {
+			maps.Copy(lb, previousLB)
+			maps.Copy(listener, previousListener)
+			reads = previousReads
+		}()
+		lb["pools"], lb["listeners"], listener["l7policies"] = refs("pool-1", "peer-pool"), refs("listener-1", "filter-listener"), refs("policy-1", "peer-policy")
+		reads["/lbaas/listeners"] = map[string]any{"listeners": []any{listener, filterListener}}
+		reads["/lbaas/pools"] = map[string]any{"pools": []any{pool, peerPool}}
+		reads["/peer-monitor"] = map[string]any{"healthmonitors": []any{peerMonitor}}
+		reads["/lbaas/pools/peer-pool/members"] = map[string]any{"members": []any{peerMember}}
+		reads["/lbaas/l7policies"] = map[string]any{"l7policies": []any{policy, peerPolicy}}
+		reads["/lbaas/l7policies/peer-policy/rules"] = map[string]any{"rules": []any{peerPath, peerHost}}
+		reads["/filter-policies"] = map[string]any{"l7policies": []any{filterPolicy}}
+		reads["/lbaas/l7policies/filtered/rules"] = map[string]any{"rules": []any{}}
+
+		run := func(expected string, wantErr error) {
+			t.Helper()
+			writes = nil
+			result, err := provider.ReconcileGatewayGraph(t.Context(), configured)
+			var wantWrites []string
+			if expected != "" {
+				wantWrites = []string{expected}
+			}
+			var incomplete *backendRequestFilterInventoryError
+			if (wantErr == nil && err != nil || wantErr == cloud.ErrDependencyNotReady && !errors.As(err, &incomplete) ||
+				wantErr != nil && wantErr != cloud.ErrDependencyNotReady && !errors.Is(err, wantErr)) || !slices.Equal(writes, wantWrites) {
+				t.Fatalf("expected one reconciliation with write %q and %v: got %v, %v and %+v", expected, wantErr, writes, err, result)
+			}
+			if expected == "disable" && (!result.Outcome.MutationSubmitted || result.Routes[0].Result.ObservationDeferred) {
+				t.Fatalf("the withdrawn route must publish its progress: %+v", result.Routes)
+			}
+			if listener["admin_state_up"] != true || peerPool["admin_state_up"] != true || peerMember["admin_state_up"] != true {
+				t.Fatal("the healthy backend on port 80 was interrupted")
+			}
+		}
+		caReference := pool["ca_tls_container_ref"]
+		if pool["admin_state_up"] != true || caReference == nil || len(memberIDs) != 1 {
+			t.Fatal("the authenticated backend must initially be serving")
+		}
+		tls.Denied = true
+		run("close-filter-listener", cloud.ErrDependencyNotReady)
+		if filterListener["admin_state_up"] != false || pool["admin_state_up"] != true {
+			t.Fatal("the affected listener must close before the revoked pool changes")
+		}
+		configured.ValidateMutation = func(context.Context) error { return fence }
+		run("", fence)
+		configured.ValidateMutation = nil
+		pool["project_id"] = "foreign-project"
+		run("", cloud.ErrOwnershipConflict)
+		pool["project_id"] = project
+		run("disable", cloud.ErrDependencyNotReady)
+		if pool["admin_state_up"] != false || pool["ca_tls_container_ref"] != caReference {
+			t.Fatal("the revoked backend must be quarantined without changing its trust settings")
+		}
+		run("drain", cloud.ErrDependencyNotReady)
+		run("", cloud.ErrDependencyNotReady)
+		tls.Denied = false
+		run("", cloud.ErrDependencyNotReady)
+		if pool["admin_state_up"] != false || len(memberIDs) != 0 {
+			t.Fatal("incomplete policy inventory must prevent reopening and member restoration")
+		}
+		filterPolicy["admin_state_up"] = false
+		run("enable", nil)
+		run("member", nil)
+		if pool["admin_state_up"] != true || len(memberIDs) != 1 || pool["ca_tls_container_ref"] != caReference {
+			t.Fatal("the backend must resume with the verified CA after complete observation")
+		}
+	})
+
 	capabilities = []string{}
 	reconcile("disable", "drain")
 	tls.Denied = true

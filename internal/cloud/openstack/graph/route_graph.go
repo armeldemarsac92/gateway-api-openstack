@@ -58,6 +58,8 @@ type observedRoutePolicy struct {
 	requestHeaderOperations  []cloud.HTTPHeaderOperation
 	responseHeaderOperations []cloud.HTTPHeaderOperation
 	httpsListenerHostname    string
+
+	backendRequestFiltersTagged bool
 }
 
 type observedRouteRule struct {
@@ -392,17 +394,32 @@ func (p *Provider) observeRouteGraphsFromPools(ctx context.Context, owners []rou
 		return inventory.graphs, nil
 	}
 	listenerByRoute := make(map[int]string)
+	var frontends []listeners.Listener
 	if scopedHTTP {
-		for i := range scopedListeners {
-			if err := p.observeListenerPolicies(ctx, &inventory, &scopedListeners[i], protocol, poolOwners, listenerByRoute, true); err != nil {
-				return nil, err
-			}
-		}
+		frontends = scopedListeners
 	} else if listener != nil {
 		if strictHTTP && (listener.ProjectID != p.projectID || len(listener.Loadbalancers) != 1 || listener.Loadbalancers[0].ID != lb.ID) {
 			return nil, fmt.Errorf("%w: HTTP listener %s has an unproven parent or project", cloud.ErrOwnershipConflict, listener.ID)
 		}
-		if err := p.observeListenerPolicies(ctx, &inventory, listener, protocol, poolOwners, listenerByRoute, strictHTTP); err != nil {
+		frontends = []listeners.Listener{*listener}
+	}
+	for i := range frontends {
+		if err := p.observeListenerPolicies(ctx, &inventory, &frontends[i], protocol, poolOwners, listenerByRoute, strictHTTP); err != nil {
+			var incomplete *backendRequestFilterInventoryError
+			if strictHTTP && errors.As(err, &incomplete) {
+				// Pool ownership, membership and project were proved above.
+				// Keep that readback available only for TLS withdrawal.
+				incomplete.ownedPools = make([]observedRouteGraph, len(owners))
+				for _, owner := range poolOwners {
+					if owner.route >= len(owners) {
+						continue
+					}
+					part := inventory.graphs[owner.route].part(owner.backend)
+					*incomplete.ownedPools[owner.route].part(owner.backend) = observedRouteGraph{
+						pool: part.pool, backendTLS: part.backendTLS, backendH2C: part.backendH2C, members: part.members,
+					}
+				}
+			}
 			return nil, err
 		}
 	}
@@ -498,6 +515,13 @@ func (p *Provider) observeListenerPolicies(ctx context.Context, inventory *route
 			return &cloud.GraphError{Identity: owner.identity.Value(), Err: fmt.Errorf("%w: L7 policy %s has an unproven project, listener or pool", cloud.ErrOwnershipConflict, item.ID)}
 		}
 		target := observation.Target
+		backendFilterTag := slices.Contains(item.Tags, openstackidentity.BackendRequestFiltersPolicyTag)
+		hasBackendFilters := backendFilterTag || observation.TargetRequestFiltersPresent
+		if hasBackendFilters && item.ProjectID == p.projectID && item.ListenerID == listener.ID &&
+			(!role.weighted || !weighted || target == nil || target.AdminStateUp == nil || len(target.WeightedTargets) == 0) {
+			return &cloud.GraphError{Identity: owner.identity.Value(), Err: cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady,
+				&backendRequestFilterInventoryError{listenerID: listener.ID, policyID: item.ID})}
+		}
 		switch {
 		case requestRedirect && !role.redirect:
 			return &cloud.GraphError{Identity: owner.identity.Value(), Err: fmt.Errorf("%w: L7 policy %s reports a request redirect without its owning role", cloud.ErrOwnershipConflict, item.ID)}
@@ -513,7 +537,7 @@ func (p *Provider) observeListenerPolicies(ctx context.Context, inventory *route
 					fmt.Errorf("HTTP redirect policy %s has incomplete action or administrative state", item.ID))}
 			}
 		case role.weighted || weighted:
-			if !p.weightedHTTPTargets || !role.weighted || !weighted || target == nil || target.FixedResponse != nil || target.AdminStateUp == nil ||
+			if !p.weightedHTTPTargets && !hasBackendFilters || !role.weighted || !weighted || target == nil || target.FixedResponse != nil || target.AdminStateUp == nil ||
 				string(target.RedirectPool) != "null" || item.RedirectPoolID != "" || item.RedirectURL != "" || item.RedirectPrefix != "" || item.RedirectHttpCode != 0 ||
 				!ownedWeightedHTTPPolicyTargets(target.WeightedTargets, poolOwners, routeIndex) {
 				return &cloud.GraphError{Identity: owner.identity.Value(), Err: fmt.Errorf("%w: L7 policy %s has an unproven weighted HTTP target", cloud.ErrOwnershipConflict, item.ID)}
@@ -580,6 +604,7 @@ func (p *Provider) observeListenerPolicies(ctx context.Context, inventory *route
 		if observation.HasValidRequestURLRewrite() && (listener.Protocol == cloud.ListenerProtocolHTTP || listener.Protocol == terminatedHTTPS) {
 			observed.requestURLRewrite = observation.RequestURLRewrite
 		}
+		observed.backendRequestFiltersTagged = backendFilterTag
 		observed.fixedResponse = fixedResponse
 		observed.targetObserved = p.fixedHTTPResponses && role.backend != "" && !role.redirect
 		if weighted {
@@ -773,6 +798,7 @@ type routeMutation struct {
 	requestHeaderOperations  []cloud.HTTPHeaderOperation
 	responseHeaderOperations []cloud.HTTPHeaderOperation
 	requestURLRewriteUpdate  *octavia.RequestURLRewriteUpdate
+	policyTags               []string
 	requiresExactHeaders     bool
 	requiresExactQueryParams bool
 	requiresHTTPMethod       bool
@@ -1120,7 +1146,8 @@ func buildRoutePolicyPlan(
 		}
 		policyPlanStart := len(plan)
 		weighted := wantedPolicy.weightedPlan
-		targetUpdate := weighted != nil && (!slices.EqualFunc(weighted.targets, observedPolicy.weightedTargets, weightedTargetsEqual) || policy.ProvisioningStatus == "ERROR") ||
+		targetUpdate := weighted != nil && (!slices.EqualFunc(weighted.targets, observedPolicy.weightedTargets, weightedTargetsEqual) ||
+			hasWeightedTargetRequestFilters(weighted.targets) != observedPolicy.backendRequestFiltersTagged || policy.ProvisioningStatus == "ERROR") ||
 			desired.fixedResponse && (!observedPolicy.fixedResponse || policy.ProvisioningStatus == "ERROR") ||
 			!desired.fixedResponse && poolID != "" && (observedPolicy.fixedResponse ||
 				observedPolicy.targetObserved && policy.ProvisioningStatus == "ERROR" && policy.RedirectPoolID == poolID)
@@ -1133,6 +1160,7 @@ func buildRoutePolicyPlan(
 				requestHeaderOperations: requestPatch, responseHeaderOperations: responsePatch, requestURLRewriteUpdate: rewritePatch}
 			if weighted != nil {
 				step.weightedTargets = &weighted.targets
+				step.policyTags = backendRequestFilterTags(weighted.targets, observedPolicy, rewritePatch)
 			}
 			if len(wantedPolicy.requestHeaderOperations) != 0 {
 				step.requestHeaderOperations = wantedPolicy.requestHeaderOperations
@@ -1233,6 +1261,11 @@ func buildRoutePolicyPlan(
 		if policy.Position != wantedPolicy.position {
 			plan = append(plan, routeMutation{kind: routeMutationMovePolicy, id: policy.ID, policy: wantedPolicy})
 		}
+		if backendRequestFiltersPolicy.required(wantedPolicy) {
+			for i := policyPlanStart; i < len(plan); i++ {
+				plan[i].policy.targetRequestFilters = wantedPolicy.targetRequestFilters
+			}
+		}
 		if wantedPolicy.requestURLRewrite != nil {
 			for i := policyPlanStart; i < len(plan); i++ {
 				plan[i].policy.requestURLRewrite = wantedPolicy.requestURLRewrite
@@ -1248,8 +1281,8 @@ func buildRouteDeletionPlan(actual observedRouteGraph) []routeMutation {
 	plan := make([]routeMutation, 0)
 	for _, policy := range actual.policies {
 		if !policy.pending() && (policy.policy.AdminStateUp || policy.policy.ProvisioningStatus == "ERROR" ||
-			policy.hasRequestURLRewrite() && !observedPolicyDisabled(policy)) {
-			plan = append(plan, routeMutation{kind: routeMutationDisablePolicy, id: policy.policy.ID, retry: policy.policy.ProvisioningStatus == "ERROR" || policy.hasRequestURLRewrite() && !policy.adminObserved})
+			(policy.hasRequestURLRewrite() || policy.hasBackendRequestFilters()) && !observedPolicyDisabled(policy)) {
+			plan = append(plan, routeMutation{kind: routeMutationDisablePolicy, id: policy.policy.ID, retry: policy.policy.ProvisioningStatus == "ERROR" || (policy.hasRequestURLRewrite() || policy.hasBackendRequestFilters()) && !policy.adminObserved})
 		}
 	}
 	for _, policy := range actual.policies {
@@ -1422,6 +1455,9 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 		if step.policy.requestURLRewrite != nil {
 			tags = append(tags, openstackidentity.RequestURLRewritePolicyTag)
 		}
+		if step.weightedTargets != nil && hasWeightedTargetRequestFilters(*step.weightedTargets) {
+			tags = append(tags, openstackidentity.BackendRequestFiltersPolicyTag)
+		}
 		opts := l7policies.CreateOpts{
 			Name:           resourceName(desired.spec.Identity, step.policy.role),
 			ListenerID:     desired.spec.Gateway.ListenerID,
@@ -1461,7 +1497,8 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 		_, err = p.octavia.UpdatePolicyFilters(ctx, step.id, l7policies.UpdateOpts{},
 			octavia.PolicyFilters{Request: step.requestHeaderOperations, Response: step.responseHeaderOperations, URLRewrite: step.requestURLRewriteUpdate})
 	case routeMutationSetPolicyTarget:
-		filters := octavia.PolicyFilters{Request: step.requestHeaderOperations, Response: step.responseHeaderOperations, URLRewrite: step.requestURLRewriteUpdate}
+		filters := octavia.PolicyFilters{Request: step.requestHeaderOperations, Response: step.responseHeaderOperations,
+			URLRewrite: step.requestURLRewriteUpdate, Tags: step.policyTags}
 		if step.weightedTargets != nil {
 			_, err = p.octavia.SetPolicyWeightedTargets(ctx, step.id, *step.weightedTargets, filters)
 		} else if desired.fixedResponse {

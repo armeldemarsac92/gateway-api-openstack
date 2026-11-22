@@ -92,7 +92,7 @@ func (p *Provider) prepareBackendTLS(ctx context.Context, desired *desiredGatewa
 		actual.loadBalancer == nil || actual.loadBalancer.ProvisioningStatus != "ACTIVE" || len(actual.routes) != len(desired.routes) {
 		return nil
 	}
-	parts := backendTLSParts(desired, actual)
+	parts := backendTLSParts(desired, actual.routes)
 	early := firstBackendTLSWithdrawal(parts, func(part backendTLSPart) backendTLSPlan {
 		return part.preflight()
 	})
@@ -129,14 +129,14 @@ func (p *Provider) prepareBackendTLS(ctx context.Context, desired *desiredGatewa
 	return early
 }
 
-func backendTLSParts(desired *desiredGatewayGraph, actual observedGatewayGraph) []backendTLSPart {
+func backendTLSParts(desired *desiredGatewayGraph, routes []observedRouteGraph) []backendTLSPart {
 	var parts []backendTLSPart
 	for index := range desired.routes {
 		if desired.spec.Routes[index].Disposition != cloud.GraphEnsure {
 			continue
 		}
 		route := &desired.routes[index]
-		observed := actual.routes[index]
+		observed := routes[index]
 		hasPolicy := routeHasBackendTLSPolicy(*route)
 		add := func(part *desiredRoute, key string, actualPart observedRouteGraph) {
 			if part == nil && hasPolicy && actualPart.pool != nil || part != nil && part.spec.BackendTLS != nil ||

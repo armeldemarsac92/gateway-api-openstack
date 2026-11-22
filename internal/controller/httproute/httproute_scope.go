@@ -195,7 +195,7 @@ func (r *Reconciler) patchHTTPRouteStatus(
 			}
 		}
 		currentPlan := *plan
-		_, currentPlan.droppedRules = r.projectedRewriteRules(current)
+		_, currentPlan.droppedRules = r.projectedHTTPFilterRules(current)
 		if plan.kind == routeStatusPlanDeletingFailure {
 			updates, err := r.deletingFailureParentUpdates(ctx, current, plan.cleanupIdentity)
 			if err != nil {
@@ -257,7 +257,7 @@ func (r *Reconciler) routeCleanupStatusCheckpointNeeded(
 		return false, nil
 	}
 	desired := current.DeepCopy()
-	_, plan.droppedRules = r.projectedRewriteRules(current)
+	_, plan.droppedRules = r.projectedHTTPFilterRules(current)
 	plan.apply(r.Config, desired)
 	return !reflect.DeepEqual(current.Status, desired.Status), nil
 }

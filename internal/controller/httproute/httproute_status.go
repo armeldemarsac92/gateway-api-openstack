@@ -450,6 +450,14 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 	status.resolved = metav1.ConditionTrue
 	status.resolvedReason = string(gatewayv1.RouteReasonResolvedRefs)
 	status.resolvedMessage = "All backend references are resolved"
+	rules, _ := r.projectedHTTPFilterRules(route)
+	for _, rule := range rules {
+		for _, backend := range rule.BackendRefs {
+			if diagnostic := model.UnresolvedHTTPBackendExtension(backend); diagnostic != nil {
+				*status = status.withBackendDiagnostic(*diagnostic)
+			}
+		}
+	}
 	for _, backend := range backends {
 		if key, xbackend := model.XBackendReference(route.Namespace, backend); xbackend && r.Config.XBackendEnabled() && model.HTTPProfileRouteKind(route) == model.HTTPRouteKind {
 			if backend.Port != nil {
