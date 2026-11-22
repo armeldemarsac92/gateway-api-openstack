@@ -74,7 +74,7 @@ func (r *Reconciler) validateRouteStructure(route *gatewayv1.HTTPRoute) ([]gatew
 			return nil, grpcProfileDisabled()
 		}
 		if len(route.Spec.Rules) == 0 {
-			return nil, newRouteBuildError(routeErrorUnsupported, "GRPCRoute requires at least one match on an exact service and method or exact headers, and one backendRef per rule, without filters or session persistence")
+			return nil, newRouteBuildError(routeErrorUnsupported, "GRPCRoute requires an exact service and method or exact header match and one backendRef per rule. Only rule-level RequestHeaderModifier is supported.")
 		}
 	}
 	if len(route.Spec.Rules) == 0 {

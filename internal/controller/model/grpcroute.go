@@ -55,7 +55,7 @@ func ProjectGRPCRoute(route *gatewayv1.GRPCRoute) *gatewayv1.HTTPRoute {
 	}
 	rules := make([]gatewayv1.HTTPRouteRule, 0, len(route.Spec.Rules))
 	for _, rule := range route.Spec.Rules {
-		if len(rule.Matches) == 0 || len(rule.Filters) != 0 || len(rule.BackendRefs) != 1 ||
+		if len(rule.Matches) == 0 || len(rule.BackendRefs) != 1 ||
 			rule.SessionPersistence != nil { //nolint:staticcheck // Still served in the experimental bundle.
 			return projected
 		}
@@ -65,6 +65,15 @@ func ProjectGRPCRoute(route *gatewayv1.GRPCRoute) *gatewayv1.HTTPRoute {
 		}
 		lowered := gatewayv1.HTTPRouteRule{
 			BackendRefs: []gatewayv1.HTTPBackendRef{{BackendRef: *backend.BackendRef.DeepCopy()}},
+		}
+		for _, filter := range rule.Filters {
+			if filter.Type != gatewayv1.GRPCRouteFilterRequestHeaderModifier {
+				return projected
+			}
+			lowered.Filters = append(lowered.Filters, gatewayv1.HTTPRouteFilter{
+				Type:                  gatewayv1.HTTPRouteFilterRequestHeaderModifier,
+				RequestHeaderModifier: filter.RequestHeaderModifier.DeepCopy(),
+			})
 		}
 		for _, match := range rule.Matches {
 			projectedMatch, ok := projectGRPCMatch(match)

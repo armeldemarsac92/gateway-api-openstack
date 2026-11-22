@@ -81,6 +81,60 @@ func TestGRPCExactHeadersKeepAlternativesAndPrecedenceOnH2CBackends(t *testing.T
 	}
 }
 
+func TestGRPCRequestHeaderModifierFollowsItsMethod(t *testing.T) {
+	cfg := testConfig()
+	cfg.BackendH2C, cfg.FixedHTTPResponses = true, true
+	_, gateway := providerRouteParentObjects(cfg)
+	match := func(method string) gatewayv1.GRPCRouteMatch {
+		return gatewayv1.GRPCRouteMatch{Method: &gatewayv1.GRPCMethodMatch{Service: ptr.To("example.Echo"), Method: ptr.To(method)}}
+	}
+	route := &gatewayv1.GRPCRoute{ObjectMeta: metav1.ObjectMeta{Namespace: gateway.Namespace, Name: "echo", UID: "route-uid"}}
+	route.Spec.ParentRefs = []gatewayv1.ParentReference{{Name: gatewayv1.ObjectName(gateway.Name)}}
+	route.Spec.Rules = []gatewayv1.GRPCRouteRule{grpcRule("v1", match("Marked")), grpcRule("v1", match("Plain"))}
+	route.Spec.Rules[0].Filters = []gatewayv1.GRPCRouteFilter{{
+		Type: gatewayv1.GRPCRouteFilterRequestHeaderModifier,
+		RequestHeaderModifier: &gatewayv1.HTTPHeaderFilter{
+			Set:    []gatewayv1.HTTPHeader{{Name: "X-Mode", Value: "blue"}},
+			Add:    []gatewayv1.HTTPHeader{{Name: "X-Trace", Value: "one"}},
+			Remove: []string{"X-Legacy"},
+		},
+	}}
+	// The same method and backend select only the first rule's operations.
+	shadow := route.Spec.Rules[0].DeepCopy()
+	shadow.Filters[0].RequestHeaderModifier.Set[0].Value = "shadow"
+	route.Spec.Rules = append(route.Spec.Rules, *shadow)
+	projected := model.ProjectGRPCRoute(route)
+	if _, err := (&Reconciler{Config: cfg}).validateRouteStructure(projected); err == nil {
+		t.Fatal("gRPC request header operations must require operator enrollment")
+	}
+	cfg.RequestHeaderModifier = true
+	svc, endpoints, node := validNodePortBackend(gateway.Namespace, "v1")
+	svc.Spec.Ports[0].AppProtocol = ptr.To("kubernetes.io/h2c")
+	reader := indexedFakeClientBuilder(testScheme(t), cfg).WithObjects(svc, endpoints, node).Build()
+	desired, err := (&Reconciler{Config: cfg}).buildRouteModelWithReader(t.Context(), reader, projected, gateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(desired.HTTPBackends) != 1 || !desired.HTTPBackends[0].BackendH2C {
+		t.Fatalf("want one h2c backend, got %#v", desired.HTTPBackends)
+	}
+	got := make(map[string][]cloud.HTTPHeaderOperation)
+	for _, match := range desired.HTTPBackends[0].Matches {
+		got[match.PathValue] = match.RequestHeaderOperations
+	}
+	want := map[string][]cloud.HTTPHeaderOperation{
+		"/example.Echo/Marked": {
+			{Operation: cloud.HTTPHeaderSet, Name: "x-mode", Value: "blue"},
+			{Operation: cloud.HTTPHeaderAdd, Name: "x-trace", Value: "one"},
+			{Operation: cloud.HTTPHeaderRemove, Name: "x-legacy"},
+		},
+		"/example.Echo/Plain": nil,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("request headers by method = %#v, want %#v", got, want)
+	}
+}
+
 func TestGRPCExactHeadersRejectDisabledCapabilityAndUnsupportedMatches(t *testing.T) {
 	exact := gatewayv1.GRPCHeaderMatch{Name: "version", Value: "two"}
 	for _, test := range []struct {

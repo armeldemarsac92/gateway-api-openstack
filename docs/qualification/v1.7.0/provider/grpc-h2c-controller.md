@@ -44,3 +44,8 @@ Gateway writer. It also verifies Route status, overlapping HTTPRoute rejection,
 and finalization. Its recording provider does not serve traffic.
 
 See the [two-channel image qualification](opt-in-grpc-h2c.md) for native case transcripts, post-monitor-window RPC traffic and provider readbacks.
+
+
+## Modify request metadata on a gRPC rule
+
+Enable the controller's `--octavia-request-header-modifier` option together with the gRPC h2c and fixed-response options. The selected Amphora region must advertise `request_header_operations_v1`. Place a `RequestHeaderModifier` filter in the GRPCRoute rule. The selected method's backend receives its set, add and remove operations. Rules can share a Service and use different operations. If equally specific rules match the same call, the first rule's filter applies.
