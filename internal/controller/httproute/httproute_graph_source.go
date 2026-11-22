@@ -70,7 +70,8 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 	if backends == nil {
 		bindings = r.routeGraphBindings(routes, request.Identity)
 	}
-	fences := make([]func(context.Context) error, 0, len(routes))
+	var cleanups []routeCleanupSnapshot
+	var ensures []routeValidationSnapshot
 	foundRequested := request.Route == nil
 	for i := range routes {
 		route := &routes[i]
@@ -106,8 +107,7 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 		}
 		if lifecycle == controller.RouteDetaching {
 			node.Disposition = cloud.GraphDelete
-			snapshot := routeCleanupSnapshot{route: route, identity: identity, disposition: routeCleanupRequired}
-			fences = append(fences, func(ctx context.Context) error { return reconciler.sealRouteCleanupSnapshot(ctx, snapshot) })
+			cleanups = append(cleanups, routeCleanupSnapshot{route: route, identity: identity, disposition: routeCleanupRequired})
 		} else if backends != nil {
 			if requested {
 				if !route.DeletionTimestamp.IsZero() {
@@ -139,9 +139,7 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 				return graph.RouteInputs{}, errHTTPRouteChanged
 			}
 			node.Disposition, node.Spec = cloud.GraphEnsure, snapshot.desired
-			fences = append(fences, func(ctx context.Context) error {
-				return reconciler.sealRouteOwnershipSnapshot(ctx, snapshot, routeBindingRequired)
-			})
+			ensures = append(ensures, snapshot)
 		}
 		if request.Action == graph.DeleteRoute && requested && node.Disposition != cloud.GraphDelete {
 			return graph.RouteInputs{}, errHTTPRouteChanged
@@ -159,9 +157,22 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 		if backends == nil && !slices.Equal(bindings, r.routeGraphBindings(current, request.Identity)) {
 			return errHTTPRouteChanged
 		}
-		for _, fence := range fences {
-			if err := fence(ctx); err != nil {
+		for _, snapshot := range cleanups {
+			reconciler := r.forRouteKind(model.HTTPProfileRouteKind(snapshot.route))
+			if err := reconciler.sealRouteCleanupSnapshot(ctx, snapshot); err != nil {
 				return err
+			}
+		}
+		if len(ensures) != 0 {
+			authority, err := r.readRouteGatewayAuthority(ctx, gateway)
+			if err != nil {
+				return err
+			}
+			for _, snapshot := range ensures {
+				reconciler := r.forRouteKind(model.HTTPProfileRouteKind(snapshot.route))
+				if err := reconciler.sealRouteOwnershipWithGateway(ctx, snapshot, routeBindingRequired, authority); err != nil {
+					return err
+				}
 			}
 		}
 		if backends != nil {

@@ -395,12 +395,50 @@ func (r *Reconciler) sealRouteMutationSnapshot(
 	return r.validateGraphRouteModel(ctx, snapshot.backends, routes, snapshot.route)
 }
 
-// sealRouteOwnershipSnapshot checks durable route and Gateway authority. The
-// graph writer validates shared backend inputs once after all route fences.
+// sealRouteOwnershipSnapshot checks durable route and Gateway authority when
+// reconciling an individual route.
 func (r *Reconciler) sealRouteOwnershipSnapshot(ctx context.Context, snapshot routeValidationSnapshot, bindingRequirement routeBindingRequirement) error {
-	if err := r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
+	gateway, err := r.readRouteGatewayAuthority(ctx, snapshot.gateway)
+	if err != nil {
 		return err
 	}
+	return r.sealRouteOwnershipWithGateway(ctx, snapshot, bindingRequirement, gateway)
+}
+
+// readRouteGatewayAuthority observes the common authority for a single fence.
+// Each fragment must still match its own expected Gateway and route revision.
+func (r *Reconciler) readRouteGatewayAuthority(ctx context.Context, expected *gatewayv1.Gateway) (*gatewayv1.Gateway, error) {
+	if err := r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
+		return nil, err
+	}
+	var gateway gatewayv1.Gateway
+	if err := r.APIReader.Get(ctx, client.ObjectKeyFromObject(expected), &gateway); err != nil {
+		return nil, errors.Join(errHTTPRouteChanged, client.IgnoreNotFound(err))
+	}
+	if gateway.UID != expected.UID || gateway.Generation != expected.Generation || !gateway.DeletionTimestamp.IsZero() ||
+		!controllerutil.ContainsFinalizer(&gateway, r.Config.GatewayFinalizer()) ||
+		!controller.GatewayBindingMetadataEqual(r.Config, &gateway, expected) ||
+		controller.ValidateGatewayBinding(r.Config, &gateway) != nil {
+		return nil, errHTTPRouteChanged
+	}
+	var gatewayClass gatewayv1.GatewayClass
+	if err := r.APIReader.Get(
+		ctx,
+		types.NamespacedName{Name: string(gateway.Spec.GatewayClassName)},
+		&gatewayClass,
+	); err != nil {
+		return nil, errors.Join(errHTTPRouteChanged, client.IgnoreNotFound(err))
+	}
+	if gatewayClass.Spec.ControllerName != r.Config.ControllerName {
+		return nil, errHTTPRouteChanged
+	}
+	if !controller.GatewayClassSupportsInstalledVersion(&gatewayClass) {
+		return nil, controller.ErrUnsupportedGatewayAPIVersion
+	}
+	return &gateway, nil
+}
+
+func (r *Reconciler) sealRouteOwnershipWithGateway(ctx context.Context, snapshot routeValidationSnapshot, bindingRequirement routeBindingRequirement, gateway *gatewayv1.Gateway) error {
 	var route gatewayv1.HTTPRoute
 	if err := r.readRoute(ctx, r.APIReader, client.ObjectKeyFromObject(snapshot.route), &route); err != nil {
 		return errors.Join(errHTTPRouteChanged, client.IgnoreNotFound(err))
@@ -413,17 +451,8 @@ func (r *Reconciler) sealRouteOwnershipSnapshot(ctx context.Context, snapshot ro
 	) {
 		return errHTTPRouteChanged
 	}
-	var gateway gatewayv1.Gateway
-	if err := r.APIReader.Get(ctx, client.ObjectKeyFromObject(snapshot.gateway), &gateway); err != nil {
-		return errors.Join(errHTTPRouteChanged, client.IgnoreNotFound(err))
-	}
 	if gateway.UID != snapshot.gateway.UID || gateway.Generation != snapshot.gateway.Generation ||
-		!gateway.DeletionTimestamp.IsZero() {
-		return errHTTPRouteChanged
-	}
-	if !controllerutil.ContainsFinalizer(&gateway, r.Config.GatewayFinalizer()) ||
-		!controller.GatewayBindingMetadataEqual(r.Config, &gateway, snapshot.gateway) ||
-		controller.ValidateGatewayBinding(r.Config, &gateway) != nil {
+		!controller.GatewayBindingMetadataEqual(r.Config, gateway, snapshot.gateway) {
 		return errHTTPRouteChanged
 	}
 	if route.Annotations[r.Config.RouteLifecycleAnnotation()] != snapshot.route.Annotations[r.Config.RouteLifecycleAnnotation()] {
@@ -434,26 +463,12 @@ func (r *Reconciler) sealRouteOwnershipSnapshot(ctx context.Context, snapshot ro
 		if err != nil {
 			return err
 		}
-		if !present || stored != controller.RouteIdentity(r.Config, &gateway, &route) ||
+		if !present || stored != controller.RouteIdentity(r.Config, gateway, &route) ||
 			!controllerutil.ContainsFinalizer(&route, r.Config.RouteFinalizer()) {
 			return errHTTPRouteChanged
 		}
 	}
-	var gatewayClass gatewayv1.GatewayClass
-	if err := r.APIReader.Get(
-		ctx,
-		types.NamespacedName{Name: string(gateway.Spec.GatewayClassName)},
-		&gatewayClass,
-	); err != nil {
-		return errors.Join(errHTTPRouteChanged, client.IgnoreNotFound(err))
-	}
-	if gatewayClass.Spec.ControllerName != r.Config.ControllerName {
-		return errHTTPRouteChanged
-	}
-	if !controller.GatewayClassSupportsInstalledVersion(&gatewayClass) {
-		return controller.ErrUnsupportedGatewayAPIVersion
-	}
-	parents, err := r.parentsForGateway(ctx, &route, &gateway)
+	parents, err := r.parentsForGateway(ctx, &route, gateway)
 	if err != nil {
 		return err
 	}
