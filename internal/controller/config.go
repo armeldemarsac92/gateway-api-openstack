@@ -83,6 +83,12 @@ type Config struct {
 	OpenStackResyncInterval time.Duration
 }
 
+// GatewayAddressRoutabilityEnabled reports whether Gateway addresses have
+// per-address routability in the installed API schema.
+func (c Config) GatewayAddressRoutabilityEnabled() bool {
+	return c.GatewayAPIChannel == features.FeatureChannelExperimental
+}
+
 // XBackendEnabled reports whether this installation uses the Experimental bundle.
 func (c Config) XBackendEnabled() bool {
 	return c.GatewayAPIChannel == features.FeatureChannelExperimental

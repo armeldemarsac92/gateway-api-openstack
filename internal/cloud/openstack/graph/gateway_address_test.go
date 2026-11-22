@@ -34,6 +34,8 @@ func TestGatewayCreatesRequestedPrivateVIP(t *testing.T) {
 		name, address, subnet, externalNetwork, fault, issue string
 		status                                               int
 		creates                                              bool
+		alternatives                                         []string
+		fallback                                             bool
 		wantError                                            error
 	}{
 		{name: "dynamic", status: http.StatusCreated, creates: true},
@@ -50,10 +52,14 @@ func TestGatewayCreatesRequestedPrivateVIP(t *testing.T) {
 		{name: "neutron port quota", address: "192.0.2.20", status: http.StatusConflict, fault: "The VIP IP address is already in use: Quota exceeded for resources: ['port'].", creates: true, wantError: cloud.ErrQuotaExceeded},
 		{name: "conflict for another IP", address: "192.0.2.20", status: http.StatusConflict, fault: "The VIP IP address is already in use: IP address 192.0.2.21 already allocated in subnet provider-subnet", creates: true, wantError: cloud.ErrRetryableService},
 		{name: "other conflict", address: "192.0.2.20", status: http.StatusConflict, fault: "Another operation is in progress", creates: true, wantError: cloud.ErrRetryableService},
+		{name: "experimental unsupported requests", alternatives: []string{}, issue: "No address request is supported"},
+		{name: "automatic fallback after a confirmed conflict", address: "192.0.2.20", alternatives: []string{"198.51.100.20", "192.0.2.20", ""},
+			status: http.StatusConflict, fault: "The VIP IP address is already in use: The IP address 192.0.2.20 is in use.", creates: true, fallback: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			requests := &gatewayTransitionRequests{}
 			identity := safetyTestIdentity(t)
+			creates := 0
 			lb := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 				requests.record(req)
 				switch {
@@ -66,17 +72,22 @@ func TestGatewayCreatesRequestedPrivateVIP(t *testing.T) {
 					if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 						t.Fatal(err)
 					}
-					if opts := body.LoadBalancer; opts.VipAddress != test.address || opts.VipSubnetID != "vip-subnet" || opts.Provider != "amphora" {
-						t.Fatalf("Octavia create requested %q on %q using %q, want VIP %q on the class subnet", opts.VipAddress, opts.VipSubnetID, opts.Provider, test.address)
+					address, status, fault := test.address, test.status, test.fault
+					if test.fallback && creates == 1 {
+						address, status, fault = "", http.StatusCreated, ""
+					}
+					creates++
+					if opts := body.LoadBalancer; opts.VipAddress != address || opts.VipSubnetID != "vip-subnet" || opts.Provider != "amphora" {
+						t.Fatalf("Octavia create requested %q on %q using %q, want VIP %q on the class subnet", opts.VipAddress, opts.VipSubnetID, opts.Provider, address)
 					}
 					if !test.creates {
 						t.Error("Octavia received a create for an unusable VIP")
 						w.WriteHeader(http.StatusBadRequest)
 						return
 					}
-					w.WriteHeader(test.status)
-					if test.fault != "" {
-						safetyWriteJSON(t, w, map[string]any{"faultstring": test.fault})
+					w.WriteHeader(status)
+					if fault != "" {
+						safetyWriteJSON(t, w, map[string]any{"faultstring": fault})
 						return
 					}
 					safetyWriteJSON(t, w, map[string]any{"loadbalancer": gatewayTransitionLoadBalancer(safetyGatewayTags(t, identity, roleLoadBalancer), "PENDING_CREATE")})
@@ -101,6 +112,7 @@ func TestGatewayCreatesRequestedPrivateVIP(t *testing.T) {
 			spec := completeGraphSpec(identity)
 			spec.Routes = nil
 			spec.Gateway.Spec.RequestedVIPAddress = test.address
+			spec.Gateway.Spec.RequestedVIPAddresses = test.alternatives
 			spec.Gateway.Spec.ExternalNetworkID = test.externalNetwork
 			got, err := newTestProvider(t, ServiceClients{ProjectID: "project-a", LoadBalancer: safetyServiceClient(lb), Network: safetyServiceClient(network)}, ProviderConfig{}).
 				ReconcileGatewayGraph(t.Context(), spec)
@@ -114,6 +126,9 @@ func TestGatewayCreatesRequestedPrivateVIP(t *testing.T) {
 			var want []string
 			if test.creates {
 				want = []string{loadBalancers}
+			}
+			if test.fallback {
+				want = append(want, loadBalancers)
 			}
 			if writes := requests.mutationPaths(); !reflect.DeepEqual(writes, want) {
 				t.Fatalf("mutations = %v, want %v", writes, want)
@@ -167,6 +182,41 @@ func TestGatewayRejectsReplacementWithDifferentFixedVIP(t *testing.T) {
 	}
 	if result.Gateway.State.Address() != "192.0.2.10" || !strings.Contains(result.Gateway.AddressIssue, "192.0.2.20") {
 		t.Fatalf("result = %#v, want observed VIP and a replacement block", result)
+	}
+	if writes := requests.mutationPaths(); len(writes) != 0 {
+		t.Fatalf("mutations with rejected replacement = %v, want none", writes)
+	}
+}
+
+func TestExperimentalReplacementReportsIncompleteActivityObservation(t *testing.T) {
+	identity := safetyTestIdentity(t)
+	requests := &gatewayTransitionRequests{}
+	base := convergedRouteGraphHandler(t, requests, identity, true, true)
+	provisioningStatus, adminUp := "PENDING_UPDATE", true
+	handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.Method == http.MethodGet && req.URL.Path == "/lbaas/loadbalancers/load-balancer-1" {
+			lb := gatewayTransitionLoadBalancer(safetyGatewayTags(t, identity, roleLoadBalancer), provisioningStatus)
+			lb["admin_state_up"] = adminUp
+			safetyWriteJSON(t, w, map[string]any{"loadbalancer": lb})
+			return
+		}
+		base.ServeHTTP(w, req)
+	})
+	spec := completeGraphSpec(identity)
+	spec.Gateway.Disposition = cloud.GraphDelete
+	spec.Gateway.Spec.RequestedVIPAddresses = []string{}
+	spec.Routes[0].Disposition = cloud.GraphPreserve
+	provider := completeGraphProvider(t, handler, requests)
+	result, err := provider.ReconcileGatewayGraph(t.Context(), spec)
+	if err != nil || result.Gateway.AddressIssue == "" || result.Gateway.AddressActivityObserved ||
+		result.Gateway.AddressAbsent || result.Gateway.AddressBlocked || result.Outcome.State != cloud.OutcomeProgressing {
+		t.Fatalf("pending load balancer = %+v, %v, want rejection awaiting activity readback", result.Gateway, err)
+	}
+
+	provisioningStatus, adminUp = "ACTIVE", false
+	result, err = provider.ReconcileGatewayGraph(t.Context(), spec)
+	if err != nil || result.Gateway.AddressIssue == "" || !result.Gateway.AddressActivityObserved || result.Gateway.AddressActive {
+		t.Fatalf("closed load balancer = %+v, %v, want confirmed inactivity", result.Gateway, err)
 	}
 	if writes := requests.mutationPaths(); len(writes) != 0 {
 		t.Fatalf("mutations with rejected replacement = %v, want none", writes)

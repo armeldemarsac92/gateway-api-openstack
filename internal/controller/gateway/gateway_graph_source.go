@@ -59,8 +59,8 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 		// A listener replacement must not release an existing VIP when the
 		// same request changes the fixed address. Deletion has no such guard.
 		if snapshot.listenerPort != "" {
-			setGatewayAddressRequest(&spec, request.Gateway)
-			if spec.RequestedVIPAddress != "" || spec.AddressRejection != "" {
+			r.setGatewayAddressRequest(&spec, request.Gateway)
+			if spec.RequestedVIPAddress != "" || spec.AddressRejection != "" || spec.RequestedVIPAddresses != nil {
 				topology, err := controller.StoredGatewayTopology(r.Config, request.Gateway)
 				if err != nil {
 					return graph.GatewayInput{}, err

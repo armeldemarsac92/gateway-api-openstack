@@ -101,7 +101,7 @@ func (r *Reconciler) observeGatewayMutationSnapshot(
 	if validationErr != nil {
 		return nil, errGatewayChanged
 	}
-	if !r.gatewayBindingComplete(&gateway) && validateAddresses(gateway.Spec.Addresses) != nil {
+	if r.usesLegacyAddressAdmission(&gateway) && !r.gatewayBindingComplete(&gateway) && validateAddresses(gateway.Spec.Addresses) != nil {
 		return nil, errGatewayChanged
 	}
 	listener := listeners[0]
@@ -250,7 +250,7 @@ func (r *Reconciler) decideGatewayPhase(scope *gatewayScope) gatewayPhaseDecisio
 			gatewayReason: gatewayv1.GatewayReasonInvalidParameters, message: err.Error(),
 		}}
 	}
-	if !r.gatewayBindingComplete(gateway) {
+	if r.usesLegacyAddressAdmission(gateway) && !r.gatewayBindingComplete(gateway) {
 		if err := validateAddresses(gateway.Spec.Addresses); err != nil {
 			return gatewayPhaseDecision{phase: gatewayPhaseInvalidSpec, validation: err}
 		}

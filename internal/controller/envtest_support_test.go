@@ -21,6 +21,7 @@ package controller_test
 import (
 	"context"
 	"os"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -50,12 +51,16 @@ type recordingProvider struct {
 	mu               sync.Mutex
 	gatewaySpecs     []cloud.GatewaySpec
 	graphSpecs       []cloud.GatewayGraphSpec
+	gatewayStates    map[string]cloud.GatewayState
 	gatewayDeleteOut *cloud.Outcome
 	deletedGateways  []cloud.Identity
 }
 
 func (p *recordingProvider) EnsureGateway(_ context.Context, spec cloud.GatewaySpec) (cloud.GatewayResult, error) {
 	p.gatewaySpecs = append(p.gatewaySpecs, spec)
+	if spec.RequestedVIPAddresses != nil {
+		return p.ensureExperimentalGatewayAddress(spec), nil
+	}
 	vip := recordingProviderVIP
 	if spec.RequestedVIPAddress != "" {
 		if spec.RequestedVIPAddress != recordingProviderStaticVIP {
@@ -65,11 +70,39 @@ func (p *recordingProvider) EnsureGateway(_ context.Context, spec cloud.GatewayS
 		}
 		vip = recordingProviderStaticVIP
 	}
-	return cloud.GatewayReadyResult(cloud.GatewayState{
-		LoadBalancerID: "lb-1",
-		VIPAddress:     vip,
-		ListenerID:     "listener-1",
-	}), nil
+	return p.recordGatewayAddress(spec.Identity.GatewayUID, vip), nil
+}
+
+func (p *recordingProvider) ensureExperimentalGatewayAddress(spec cloud.GatewaySpec) cloud.GatewayResult {
+	if existing, ok := p.gatewayStates[spec.Identity.GatewayUID]; ok {
+		result := cloud.GatewayReadyResult(existing)
+		result.AddressActive = true
+		if !slices.Contains(spec.RequestedVIPAddresses, "") && !slices.Contains(spec.RequestedVIPAddresses, existing.VIPAddress) {
+			result.AddressIssue = "Fixture cannot replace the existing VIP"
+		}
+		return result
+	}
+	for _, candidate := range spec.RequestedVIPAddresses {
+		switch candidate {
+		case recordingProviderStaticVIP:
+			return p.recordGatewayAddress(spec.Identity.GatewayUID, recordingProviderStaticVIP)
+		case "":
+			return p.recordGatewayAddress(spec.Identity.GatewayUID, recordingProviderVIP)
+		}
+	}
+	result := cloud.GatewayProgressingResult("Fixture cannot allocate a requested VIP", time.Second)
+	result.AddressIssue = result.Outcome.Message
+	result.AddressAbsent, result.AddressBlocked = true, true
+	return result
+}
+
+func (p *recordingProvider) recordGatewayAddress(uid, vip string) cloud.GatewayResult {
+	state := cloud.GatewayState{LoadBalancerID: "lb-1", VIPAddress: vip, ListenerID: "listener-1"}
+	if p.gatewayStates == nil {
+		p.gatewayStates = make(map[string]cloud.GatewayState)
+	}
+	p.gatewayStates[uid] = state
+	return cloud.GatewayReadyResult(state)
 }
 
 func (p *recordingProvider) DeleteGateway(_ context.Context, identity cloud.Identity) (cloud.Outcome, error) {
@@ -77,6 +110,7 @@ func (p *recordingProvider) DeleteGateway(_ context.Context, identity cloud.Iden
 	if p.gatewayDeleteOut != nil {
 		return *p.gatewayDeleteOut, nil
 	}
+	delete(p.gatewayStates, identity.GatewayUID)
 	return cloud.ReadyOutcome(), nil
 }
 

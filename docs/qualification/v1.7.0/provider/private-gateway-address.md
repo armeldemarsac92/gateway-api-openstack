@@ -24,8 +24,8 @@ A requested address outside the class subnet, a subnet address reserved by
 Neutron, or a duplicate of the requested VIP produces `Accepted=True` and
 `Programmed=False` with reason `AddressNotUsable`. The condition helps the
 tenant choose an available IPv4 address on the class subnet. A fixed address
-requires private VIP mode. The profile supports a single IPv4 request and
-default routability.
+requires private VIP mode. Requests containing only fixed addresses with
+default routability keep the single-IPv4 admission rules on both channels.
 Unsupported address types produce `Accepted=False` with reason
 `UnsupportedAddress`. [Gateway API v1.7.0 conditions](https://github.com/kubernetes-sigs/gateway-api/blob/v1.7.0/apis/v1/gateway_types.go#L1364)
 
@@ -39,6 +39,32 @@ address. [Octavia update request type](https://github.com/openstack/octavia/blob
 On a bound Gateway, listener admission and route reconciliation are evaluated
 independently of address assignment. A GatewayClass configured to allocate a
 Floating IP publishes only its observed Floating IP as the client address.
+
+## Experimental address routability
+
+On the Experimental CRD channel an accepted GatewayClass advertises
+`GatewayAddressRoutability`. The controller evaluates address requests
+against the observed client address, the private VIP or the class's Floating
+IP. It explicitly reports the empty default scope or the requested conformance
+sentinel `testing.x-k8s.io/sentinel`. The sentinel carries no network
+reachability guarantee. Each physical IP can satisfy a single request.
+A compatible fixed request takes priority when several entries compete for
+the same address. [Gateway API address semantics](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/geps/gep-5093/index.md#spec-semantics)
+
+Once address assignment is observed, the Gateway's `AddressesAssigned`
+condition gives the outcome. The success reason is `AddressesAssigned`,
+the value in the published v1.7.0 Go API. `PartiallyAssigned` identifies
+the entries still unsatisfied. `NotAssigned` identifies a request for which
+no address could be assigned. While a previous address is still serving, the
+controller keeps it in status and removes it after observing that it is no
+longer active. The `Cluster` scope requires a Kubernetes Service ClusterIP
+and remains unsupported. [Upstream condition reasons](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/apis/v1/gateway_types.go#L1289)
+
+The supplemental envtest exercises the experimental assignment lifecycle
+using a Kubernetes API server and a recording provider. It also checks that
+Standard prunes the experimental field. The registered optional-address and
+static-address cases run on both channels. Gateway API v1.7.0 registers no
+case for this named routability feature. [Supplemental test](../../../../internal/controller/envtest_address_routability_test.go) · [Registered case entry points](../../../../internal/controller/envtest_upstream_status_test.go)
 
 ## Qualification
 
