@@ -78,7 +78,7 @@ func ObserveListenerSets(ctx context.Context, reader client.Reader, config contr
 		return !set.DeletionTimestamp.IsZero() || model.ListenerSetParentKey(&set) != gatewayKey
 	})
 	slices.SortFunc(sets, func(a, b gatewayv1.ListenerSet) int {
-		return cmp.Or(a.CreationTimestamp.Compare(b.CreationTimestamp.Time), cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
+		return cmp.Or(a.CreationTimestamp.Compare(b.CreationTimestamp.Time), cmp.Compare(client.ObjectKeyFromObject(&a).String(), client.ObjectKeyFromObject(&b).String()))
 	})
 	listeners, validationErr := SupportedListenersForConfig(config, gateway)
 	plainHTTP := validationErr == nil && len(listeners) == len(gateway.Spec.Listeners) &&

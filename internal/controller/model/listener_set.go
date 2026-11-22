@@ -22,6 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	"slices"
 )
 
 // ListenerSetRefKey resolves an HTTPRoute parentRef that targets a v1 ListenerSet.
@@ -75,4 +76,15 @@ func GatewayDisallowsListenerSets(gateway *gatewayv1.Gateway) bool {
 	policy := gateway.Spec.AllowedListeners
 	return policy == nil || policy.Namespaces == nil || policy.Namespaces.From == nil ||
 		*policy.Namespaces.From == gatewayv1.NamespacesFromNone
+}
+
+// ListenerSetRefObservesRouteNamespace identifies label-sensitive candidate
+// sections even while authorization is denied.
+func ListenerSetRefObservesRouteNamespace(set *gatewayv1.ListenerSet, ref gatewayv1.ParentReference) bool {
+	return slices.ContainsFunc(set.Spec.Listeners, func(entry gatewayv1.ListenerEntry) bool {
+		return entry.Protocol == gatewayv1.HTTPProtocolType &&
+			(ref.SectionName == nil || *ref.SectionName == entry.Name) &&
+			(ref.Port == nil || *ref.Port == entry.Port) &&
+			ObservesRouteNamespace(&gatewayv1.Listener{AllowedRoutes: entry.AllowedRoutes})
+	})
 }

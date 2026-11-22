@@ -26,6 +26,7 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
 // nodeEventInputs reuses dependency reads while mapping one Node event.
@@ -50,18 +51,20 @@ func (inputs *nodeEventInputs) hasNodePortParent(ctx context.Context, r *Reconci
 	// Routes with different reference sets cannot share an eligibility result.
 	var key string
 	if len(route.Spec.ParentRefs) == 1 {
-		keys := controller.ParentGatewayKeys(route)
-		if len(keys) == 0 {
+		if keys := controller.ParentGatewayKeys(route); len(keys) != 0 {
+			key = "Gateway/" + keys[0]
+		} else if set := model.ListenerSetRefKey(route.Spec.ParentRefs[0], route.Namespace); set.Name != "" && model.HTTPProfileRouteKind(route) == model.HTTPRouteKind {
+			key = "ListenerSet/" + set.String()
+		} else {
 			return false, nil
 		}
-		key = keys[0]
 		if observation, ok := inputs.parents[key]; ok {
 			return observation.eligible, observation.err
 		}
 	}
 	parents, err := r.managedParents(ctx, route)
 	observation := nodeEligibilityObservation{err: err}
-	if err == nil && len(parents) == 1 && controller.HasGatewayTopologyBinding(r.Config, parents[0].gateway) {
+	if err == nil && parentsShareGateway(parents) && controller.HasGatewayTopologyBinding(r.Config, parents[0].gateway) {
 		topology, err := controller.StoredGatewayTopology(r.Config, parents[0].gateway)
 		observation.err = err
 		observation.eligible = err == nil && topology.Topology.MemberMode == cloud.MemberModeNodePort

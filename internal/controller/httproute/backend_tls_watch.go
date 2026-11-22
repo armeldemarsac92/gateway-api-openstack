@@ -146,7 +146,7 @@ func (r *Reconciler) setupBackendTLSPolicyStatusController(manager ctrl.Manager)
 			return r.policyRequestsForRoutes(ctx, mapper(ctx, object), nil)
 		}
 	}
-	return ctrl.NewControllerManagedBy(manager).
+	setup := ctrl.NewControllerManagedBy(manager).
 		For(&gatewayv1.BackendTLSPolicy{}).
 		Watches(&gatewayv1.BackendTLSPolicy{}, handler.EnqueueRequestsFromMapFunc(r.enqueuePoliciesForSharedService), policySpec).
 		WatchesMetadata(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.enqueuePoliciesForConfigMap)).
@@ -158,8 +158,15 @@ func (r *Reconciler) setupBackendTLSPolicyStatusController(manager ctrl.Manager)
 		Watches(&gatewayv1.GRPCRoute{}, handler.EnqueueRequestsFromMapFunc(policiesForRoutes(r.enqueueHTTPRoutePeers)), routeState).
 		Watches(&gatewayv1.Gateway{}, handler.EnqueueRequestsFromMapFunc(policiesForRoutes(r.enqueueHTTPRoutesForGateway)), builder.WithPredicates(controller.GatewayForHTTPRoutePredicate(r.Config))).
 		Watches(&gatewayv1.GatewayClass{}, handler.EnqueueRequestsFromMapFunc(policiesForRoutes(r.enqueueHTTPRoutesForGatewayClass)), builder.WithPredicates(controller.GatewayClassForGatewayPredicate())).
-		Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(policiesForRoutes(r.enqueueHTTPRoutesForNamespace)), builder.WithPredicates(controller.NamespacePredicate())).
-		Named("backendtlspolicy").
+		Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(policiesForRoutes(r.enqueueHTTPRoutesForNamespace)), builder.WithPredicates(controller.NamespacePredicate()))
+	served, err := controller.ListenerSetServed(manager.GetRESTMapper())
+	if err != nil {
+		return err
+	}
+	if served {
+		setup.Watches(&gatewayv1.ListenerSet{}, handler.EnqueueRequestsFromMapFunc(policiesForRoutes(r.enqueueHTTPRoutesForListenerSet)))
+	}
+	return setup.Named("backendtlspolicy").
 		Complete(status)
 }
 

@@ -190,21 +190,11 @@ func (r *Reconciler) liveGraphRoutes(ctx context.Context, identity cloud.Identit
 		}
 		// An unbound candidate can change route selection while a graph is built.
 		for _, parent := range route.Spec.ParentRefs {
-			target := routeTargetsGateway(&route, parent, identity.GatewayNamespace, identity.GatewayName)
-			if setKey := model.ListenerSetRefKey(parent, route.Namespace); !target && setKey.Name != "" && model.HTTPProfileRouteKind(&route) == model.HTTPRouteKind {
-				setParent, observed := setParents[setKey]
-				if !observed {
-					var set gatewayv1.ListenerSet
-					if err := r.APIReader.Get(ctx, setKey, &set); err == nil {
-						setParent = model.ListenerSetParentKey(&set)
-					} else if !apierrors.IsNotFound(err) && !meta.IsNoMatchError(err) {
-						return nil, err
-					}
-					setParents[setKey] = setParent
-				}
-				target = setParent == gatewayKey
+			target, err := gatewayKeyForRouteParent(ctx, r.APIReader, &route, parent, setParents)
+			if err != nil {
+				return nil, err
 			}
-			if target {
+			if target == gatewayKey {
 				result = append(result, route)
 				break
 			}
@@ -214,6 +204,36 @@ func (r *Reconciler) liveGraphRoutes(ctx context.Context, identity cloud.Identit
 		return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name), cmp.Compare(a.UID, b.UID))
 	})
 	return result, nil
+}
+
+// gatewayKeyForRouteParent resolves the declared parent gate for inventory
+// selection. The caller still checks class ownership and listener admission.
+func gatewayKeyForRouteParent(ctx context.Context, reader client.Reader, route *gatewayv1.HTTPRoute, ref gatewayv1.ParentReference, setParents map[types.NamespacedName]types.NamespacedName) (types.NamespacedName, error) {
+	if controller.IsGatewayParentRef(ref) {
+		key := types.NamespacedName{Namespace: route.Namespace, Name: string(ref.Name)}
+		if ref.Namespace != nil {
+			key.Namespace = string(*ref.Namespace)
+		}
+		return key, nil
+	}
+	setKey := model.ListenerSetRefKey(ref, route.Namespace)
+	if setKey.Name == "" || model.HTTPProfileRouteKind(route) != model.HTTPRouteKind {
+		return types.NamespacedName{}, nil
+	}
+	parent, found := setParents[setKey]
+	if found {
+		return parent, nil
+	}
+	var set gatewayv1.ListenerSet
+	if err := reader.Get(ctx, setKey, &set); err == nil {
+		if set.DeletionTimestamp.IsZero() {
+			parent = model.ListenerSetParentKey(&set)
+		}
+	} else if !apierrors.IsNotFound(err) && !meta.IsNoMatchError(err) {
+		return types.NamespacedName{}, err
+	}
+	setParents[setKey] = parent
+	return parent, nil
 }
 
 type routeGraphBinding struct {

@@ -21,6 +21,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -83,9 +84,27 @@ func (r *Reconciler) enqueueHTTPRoutesForNamespace(ctx context.Context, object c
 		return nil
 	}
 	gateways := make(map[types.NamespacedName]*gatewayv1.Gateway)
+	sets := make(map[types.NamespacedName]*gatewayv1.ListenerSet)
 	var consumers []gatewayv1.HTTPRoute
 	for _, route := range routes {
 		for _, parent := range route.Spec.ParentRefs {
+			if key := model.ListenerSetRefKey(parent, route.Namespace); key.Name != "" && r.kind() == model.HTTPRouteKind {
+				set, observed := sets[key]
+				if !observed {
+					var candidate gatewayv1.ListenerSet
+					if err := r.Get(ctx, key, &candidate); err == nil {
+						set = &candidate
+					} else if !apierrors.IsNotFound(err) && !meta.IsNoMatchError(err) {
+						log.FromContext(ctx).Error(err, "Could not get ListenerSet for Namespace", "listenerSet", key)
+					}
+					sets[key] = set
+				}
+				if set != nil && model.ListenerSetRefObservesRouteNamespace(set, parent) {
+					consumers = append(consumers, route)
+					break
+				}
+				continue
+			}
 			if !controller.IsGatewayParentRef(parent) {
 				continue
 			}

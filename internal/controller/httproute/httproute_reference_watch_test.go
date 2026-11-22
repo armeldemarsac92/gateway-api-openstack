@@ -147,6 +147,28 @@ func TestNamespaceEventsFollowParentsWithNamespaceDependencies(t *testing.T) {
 	}
 }
 
+func TestNamespaceEventsReachRoutesAttachedOnlyToRemoteListenerSet(t *testing.T) {
+	set := &gatewayv1.ListenerSet{ObjectMeta: metav1.ObjectMeta{Namespace: "delegation", Name: "edge"},
+		Spec: gatewayv1.ListenerSetSpec{Listeners: []gatewayv1.ListenerEntry{{
+			Name: "selected", Protocol: gatewayv1.HTTPProtocolType, Port: 80,
+			AllowedRoutes: &gatewayv1.AllowedRoutes{Namespaces: &gatewayv1.RouteNamespaces{
+				From: ptr.To(gatewayv1.NamespacesFromSelector), Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "blue"}},
+			}},
+		}}},
+	}
+	ref := gatewayv1.ParentReference{Kind: ptr.To(gatewayv1.Kind("ListenerSet")), Name: "edge", Namespace: ptr.To(gatewayv1.Namespace("delegation"))}
+	route := mapperTestHTTPRoute("apps", "tenant", ref, "backend")
+	ref.SectionName = ptr.To(gatewayv1.SectionName("other"))
+	unrelated := mapperTestHTTPRoute("apps", "other", ref, "backend")
+	cfg := testConfig()
+	kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).WithObjects(set, route, unrelated).Build()
+	r := &Reconciler{Client: &referenceWatchClient{Client: kubeClient, t: t}, Config: cfg}
+	for _, team := range []string{"blue", "red"} {
+		namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: route.Namespace, Labels: map[string]string{"team": team}}}
+		assertRouteRequests(t, r.enqueueHTTPRoutesForNamespace(t.Context(), namespace), route)
+	}
+}
+
 func TestEndpointSliceServiceChangeAndServiceRecreationNotifyConsumers(t *testing.T) {
 	oldRoute := mapperTestHTTPRoute("apps", "old", gatewayv1.ParentReference{Name: "old"}, "old-service")
 	newRoute := mapperTestHTTPRoute("apps", "new", gatewayv1.ParentReference{Name: "new"}, "new-service")

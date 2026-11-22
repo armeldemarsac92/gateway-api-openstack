@@ -23,6 +23,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -231,6 +232,37 @@ func (r *Reconciler) gatewayRequestsForListenerSetNamespace(ctx context.Context,
 	for i := range sets.Items {
 		if key := model.ListenerSetParentKey(&sets.Items[i]); key.Name != "" {
 			keys[key] = struct{}{}
+		}
+	}
+	// ListenerSet-owned Route selectors can observe a namespace different
+	// from both the ListenerSet and its Gateway.
+	var routes gatewayv1.HTTPRouteList
+	if err := r.List(ctx, &routes, client.InNamespace(namespace.GetName())); err != nil {
+		log.FromContext(ctx).Error(err, "Could not list HTTPRoutes in Namespace", "namespace", namespace.GetName())
+		return controller.SortedRequests(keys)
+	}
+	observed := make(map[types.NamespacedName]*gatewayv1.ListenerSet)
+	for _, route := range routes.Items {
+		for _, ref := range route.Spec.ParentRefs {
+			key := model.ListenerSetRefKey(ref, route.Namespace)
+			if key.Name == "" {
+				continue
+			}
+			set, found := observed[key]
+			if !found {
+				var candidate gatewayv1.ListenerSet
+				if err := r.Get(ctx, key, &candidate); err == nil {
+					set = &candidate
+				} else if !apierrors.IsNotFound(err) {
+					log.FromContext(ctx).Error(err, "Could not get ListenerSet for Route namespace", "listenerSet", key)
+				}
+				observed[key] = set
+			}
+			if set != nil && model.ListenerSetRefObservesRouteNamespace(set, ref) {
+				if gateway := model.ListenerSetParentKey(set); gateway.Name != "" {
+					keys[gateway] = struct{}{}
+				}
+			}
 		}
 	}
 	return controller.SortedRequests(keys)

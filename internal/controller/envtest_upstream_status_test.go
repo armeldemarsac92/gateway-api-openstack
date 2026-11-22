@@ -27,6 +27,7 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	kubeyaml "k8s.io/apimachinery/pkg/util/yaml"
@@ -241,7 +242,12 @@ func testListenerSetParentLifecycle(t *testing.T, s *suite.ConformanceTestSuite,
 				Namespace: ptr.To(gatewayv1.Namespace(parent.Namespace)),
 				Name:      gatewayv1.ObjectName(parent.Name),
 			},
-			Listeners: []gatewayv1.ListenerEntry{{Name: "delegated", Port: 8080, Protocol: gatewayv1.HTTPProtocolType}},
+			Listeners: []gatewayv1.ListenerEntry{{
+				Name: "delegated", Port: 8080, Protocol: gatewayv1.HTTPProtocolType,
+				AllowedRoutes: &gatewayv1.AllowedRoutes{Namespaces: &gatewayv1.RouteNamespaces{
+					From: ptr.To(gatewayv1.NamespacesFromSelector), Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"listener-tenant": "allowed"}},
+				}},
+			}},
 		},
 	}
 	key := client.ObjectKeyFromObject(listenerSet)
@@ -299,6 +305,7 @@ func testListenerSetParentLifecycle(t *testing.T, s *suite.ConformanceTestSuite,
 	check(metav1.ConditionTrue, gatewayv1.ListenerSetReasonAccepted, gatewayv1.ListenerSetReasonProgrammed)
 	checkDelegatedPort(true)
 	kubernetes.GatewayMustHaveAttachedListeners(t, s.Client, s.TimeoutConfig, client.ObjectKeyFromObject(parent), 1)
+	testListenerSetRouteNamespaceLifecycle(t, s.Client, listenerSet, parent.Namespace)
 	setPolicy(&gatewayv1.AllowedListeners{})
 	deny()
 	checkDelegatedPort(false)
@@ -338,6 +345,57 @@ func testListenerSetParentLifecycle(t *testing.T, s *suite.ConformanceTestSuite,
 		t.Fatal(err)
 	}
 	deny()
+}
+
+func testListenerSetRouteNamespaceLifecycle(t *testing.T, c client.Client, set *gatewayv1.ListenerSet, routeNamespace string) {
+	t.Helper()
+	route := &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: routeNamespace, Name: "listener-tenant"}, Spec: gatewayv1.HTTPRouteSpec{
+		CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{{
+			Kind: ptr.To(gatewayv1.Kind("ListenerSet")), Name: gatewayv1.ObjectName(set.Name), Namespace: ptr.To(gatewayv1.Namespace(set.Namespace)),
+		}}},
+		Rules: []gatewayv1.HTTPRouteRule{{BackendRefs: []gatewayv1.HTTPBackendRef{{BackendRef: gatewayv1.BackendRef{BackendObjectReference: gatewayv1.BackendObjectReference{
+			Name: "infra-backend-v1", Port: ptr.To(gatewayv1.PortNumber(8080)),
+		}}}}}},
+	}}
+	if err := c.Create(t.Context(), route); err != nil {
+		t.Fatal(err)
+	}
+	for _, allowed := range []bool{false, true, false, true} {
+		team := "denied"
+		expected, reason, count := metav1.ConditionFalse, gatewayv1.RouteReasonNotAllowedByListeners, int32(0)
+		if allowed {
+			team = "allowed"
+			expected, reason, count = metav1.ConditionTrue, gatewayv1.RouteReasonAccepted, 1
+		}
+		var namespace corev1.Namespace
+		if err := c.Get(t.Context(), client.ObjectKey{Name: routeNamespace}, &namespace); err != nil {
+			t.Fatal(err)
+		}
+		base := namespace.DeepCopy()
+		if namespace.Labels == nil {
+			namespace.Labels = make(map[string]string)
+		}
+		namespace.Labels["listener-tenant"] = team
+		if err := c.Patch(t.Context(), &namespace, client.MergeFrom(base)); err != nil {
+			t.Fatal(err)
+		}
+		waitForEnvtest(t, func(ctx context.Context) (bool, error) {
+			var current gatewayv1.HTTPRoute
+			if err := c.Get(ctx, client.ObjectKeyFromObject(route), &current); err != nil {
+				return false, err
+			}
+			var delegation gatewayv1.ListenerSet
+			if err := c.Get(ctx, client.ObjectKeyFromObject(set), &delegation); err != nil {
+				return false, err
+			}
+			if len(current.Status.Parents) != 1 || len(delegation.Status.Listeners) != 1 {
+				return false, nil
+			}
+			accepted := meta.FindStatusCondition(current.Status.Parents[0].Conditions, string(gatewayv1.RouteConditionAccepted))
+			return accepted != nil && accepted.ObservedGeneration == route.Generation && accepted.Status == expected &&
+				accepted.Reason == string(reason) && delegation.Status.Listeners[0].AttachedRoutes == count, nil
+		})
+	}
 }
 
 // Use the upstream namespaces, same-namespace Gateway and referenced backend
