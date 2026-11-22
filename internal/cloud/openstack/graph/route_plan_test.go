@@ -481,16 +481,25 @@ func TestGRPCPoliciesRequireNativeContentType(t *testing.T) {
 		if !ok || role.match != policy.matchKey || role.backend != policy.backendKey {
 			t.Fatalf("policy %s has an unrecognized guard owner: %#v", policy.role, role)
 		}
-		expression := regexp.MustCompile(guard.value)
+		expression, err := regexp.CompilePOSIX(guard.value)
+		if err != nil {
+			t.Fatalf("policy %s requires a POSIX extended regular expression: %v", policy.role, err)
+		}
 		for _, test := range []struct {
 			name, contentType string
 			match             bool
 		}{
 			{name: "gRPC request", contentType: "application/grpc", match: true},
-			{name: "gRPC with protobuf subtype", contentType: "Application/GRPC+proto; charset=utf-8", match: true},
+			{name: "gRPC with protobuf codec", contentType: "application/grpc+proto", match: true},
+			{name: "mixed case and JSON codec with parameters", contentType: "Application/GRPC+JSON \t; charset=utf-8", match: true},
+			{name: "custom codec", contentType: "application/grpc+x.v2-!$%*+^_`|~", match: true},
 			{name: "ordinary GET /health"},
 			{name: "ordinary POST with JSON", contentType: "application/json"},
-			{name: "gRPC-Web is a different media type", contentType: "application/grpc-web+proto"},
+			{name: "gRPC-Web", contentType: "application/grpc-web+proto"},
+			{name: "empty codec", contentType: "application/grpc+; charset=utf-8"},
+			{name: "separator in codec", contentType: "application/grpc+custom/json"},
+			{name: "quoted codec", contentType: `application/grpc+"proto"`},
+			{name: "space in codec", contentType: "application/grpc+custom json"},
 		} {
 			if got := expression.MatchString(test.contentType); got != test.match {
 				t.Errorf("policy %s for %s (%q) matched = %t, want %t", policy.role, test.name, test.contentType, got, test.match)
