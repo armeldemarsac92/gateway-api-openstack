@@ -122,6 +122,14 @@ func NormalizeHTTPBackendRequestFilters(rule gatewayv1.HTTPRouteRule, backend ga
 	if len(backend.Filters) == 0 {
 		return nil, nil, nil
 	}
+	for _, filter := range backend.Filters {
+		if !knownFilter(filter.Type) {
+			return nil, nil, unsupported(fmt.Sprintf("backendRef filter %q is not supported", filter.Type), ScopeRoute)
+		}
+	}
+	if unresolved := UnresolvedHTTPBackendExtension(backend); unresolved != nil {
+		return nil, nil, unresolved
+	}
 	if !enabled {
 		return nil, nil, unsupported("backendRef request filters require --octavia-http-backend-request-filters and --octavia-weighted-http-targets", ScopeRule)
 	}
@@ -156,4 +164,20 @@ func NormalizeHTTPBackendRequestFilters(rule gatewayv1.HTTPRouteRule, backend ga
 			Scope: ScopeRule, Message: err.Error()}
 	}
 	return request, rewrite, nil
+}
+
+// UnresolvedHTTPBackendExtension reports a known ExtensionRef type whose
+// custom filter cannot be resolved by this controller.
+func UnresolvedHTTPBackendExtension(backend gatewayv1.HTTPBackendRef) *Diagnostic {
+	for _, filter := range backend.Filters {
+		if filter.Type != gatewayv1.HTTPRouteFilterExtensionRef {
+			continue
+		}
+		if ref := filter.ExtensionRef; ref != nil {
+			return backendDiagnostic(gatewayv1.RouteReasonUnsupportedValue,
+				fmt.Sprintf("backendRef ExtensionRef filter %s/%s %q cannot be resolved", ref.Group, ref.Kind, ref.Name))
+		}
+		return backendDiagnostic(gatewayv1.RouteReasonUnsupportedValue, "backendRef ExtensionRef filter is not supported")
+	}
+	return nil
 }

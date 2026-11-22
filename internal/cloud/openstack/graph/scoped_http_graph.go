@@ -246,17 +246,21 @@ func (p *Provider) planScopedHTTPSWithdrawal(desired desiredGatewayGraph, actual
 // A withdrawal runs before route observation. Keep the existing status only
 // for a sibling whose owned frontend is still enabled with its expected TLS.
 func unchangedHTTPSWithdrawalSiblings(desired desiredGatewayGraph, actual observedGatewayGraph) []int {
-	if actual.loadBalancer == nil || !actual.loadBalancer.AdminStateUp || actual.state.VIPAddress == "" {
-		return nil
-	}
-	configured := scopedHTTPListeners(desired)
 	step := actual.withdrawTLS
 	if step == nil {
 		step = actual.httpsIsolationMutation
 	}
+	return unchangedHTTPListenerSiblings(desired, actual, step.listenerID)
+}
+
+func unchangedHTTPListenerSiblings(desired desiredGatewayGraph, actual observedGatewayGraph, affectedListenerID string) []int {
+	if actual.loadBalancer == nil || !actual.loadBalancer.AdminStateUp || actual.state.VIPAddress == "" {
+		return nil
+	}
+	configured := scopedHTTPListeners(desired)
 	var ports []int
 	for _, listener := range actual.scopedListeners {
-		if listener.ID == step.listenerID || !actual.adminObserved[listener.ID] ||
+		if listener.ID == affectedListenerID || !actual.adminObserved[listener.ID] ||
 			!listener.AdminStateUp || listener.ProvisioningStatus != "ACTIVE" {
 			continue
 		}

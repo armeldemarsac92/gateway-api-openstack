@@ -212,7 +212,12 @@ func compileRoute(route *gatewayv1.HTTPRoute, input Input) Route {
 				input.BackendRequestFilters && HTTPProfileRouteKind(route) == HTTPRouteKind,
 				compiled.RequestHeaderOperations, compiled.URLRewrite)
 			if diagnostic != nil {
-				compiled.Diagnostics = append(compiled.Diagnostics, *diagnostic)
+				if diagnostic.Condition == string(gatewayv1.RouteConditionResolvedRefs) {
+					compiled.Backends[i].FilterDiagnostic = diagnostic
+					compiled.Backends[i].State = BackendInvalid
+				} else {
+					compiled.Diagnostics = append(compiled.Diagnostics, *diagnostic)
+				}
 				continue
 			}
 			compiled.Backends[i].RequestHeaderOperations = request

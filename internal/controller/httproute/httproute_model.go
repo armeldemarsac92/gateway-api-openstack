@@ -41,6 +41,7 @@ type routeErrorKind string
 
 const (
 	routeErrorUnsupported         routeErrorKind = "Unsupported"
+	routeErrorUnknownFilter       routeErrorKind = "UnknownFilter"
 	routeErrorInvalidKind         routeErrorKind = "InvalidKind"
 	routeErrorInvalid             routeErrorKind = "Invalid"
 	routeErrorIncompatibleFilters routeErrorKind = routeErrorKind(gatewayv1.RouteReasonIncompatibleFilters)
@@ -111,7 +112,12 @@ func (r *Reconciler) admittedHTTPRouteRules(route *gatewayv1.HTTPRoute) ([]gatew
 			valid = append(valid, rule)
 			continue
 		}
-		if !partial {
+		var buildError *routeBuildError
+		if !partial || errors.As(err, &buildError) && buildError.kind == routeErrorUnknownFilter ||
+			!r.Config.FixedHTTPResponses && !r.Config.WeightedHTTPTargets &&
+				slices.ContainsFunc(rule.BackendRefs, func(backend gatewayv1.HTTPBackendRef) bool {
+					return model.UnresolvedHTTPBackendExtension(backend) != nil
+				}) {
 			return nil, "", err
 		}
 		if first == nil {
@@ -202,7 +208,8 @@ func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, grpc bool) 
 	if weightedTargets {
 		request, _, rewrite, _ := model.NormalizeHTTPRuleFilters(rule, r.Config.RequestHeaderModifier, r.Config.ResponseHeaderModifier, r.Config.HTTPRequestURLRewrite)
 		for _, backend := range rule.BackendRefs {
-			if _, _, diagnostic := model.NormalizeHTTPBackendRequestFilters(rule, backend, r.Config.BackendRequestFilters, request, rewrite); diagnostic != nil {
+			if _, _, diagnostic := model.NormalizeHTTPBackendRequestFilters(rule, backend, r.Config.BackendRequestFilters, request, rewrite); diagnostic != nil &&
+				diagnostic.Condition != string(gatewayv1.RouteConditionResolvedRefs) {
 				return routeActionError(diagnostic)
 			}
 		}
@@ -213,6 +220,14 @@ func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, grpc bool) 
 	}
 	backend := rule.BackendRefs[0]
 	if len(backend.Filters) != 0 {
+		_, _, diagnostic := model.NormalizeHTTPBackendRequestFilters(rule, backend, false, nil, nil)
+		if diagnostic != nil && diagnostic.Scope == model.ScopeRoute {
+			return routeActionError(diagnostic)
+		}
+		if fixedResponses && !grpc && diagnostic != nil && diagnostic.Condition == string(gatewayv1.RouteConditionResolvedRefs) &&
+			ptr.Deref(backend.Weight, 1) > 0 {
+			return nil
+		}
 		return newRouteBuildError(routeErrorUnsupported, "backendRef filters are not supported")
 	}
 	if backend.Weight != nil && *backend.Weight <= 0 {
@@ -443,7 +458,13 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 			spec.FixedHTTPRules = append(spec.FixedHTTPRules, cloud.HTTPFixedRule{RuleIndex: rule.Index})
 			continue
 		}
-		direct := len(rule.Backends) == 1 && hasHTTPBackendKey(rule.Backends[0]) &&
+		if len(rule.Backends) == 1 && rule.Backends[0].FilterDiagnostic != nil && !r.Config.WeightedHTTPTargets {
+			firstDiagnostic = preferredBackendDiagnostic(firstDiagnostic, *rule.Backends[0].FilterDiagnostic)
+			targets[rule.Index].fixed = ptr.To(len(spec.FixedHTTPRules))
+			spec.FixedHTTPRules = append(spec.FixedHTTPRules, cloud.HTTPFixedRule{RuleIndex: rule.Index})
+			continue
+		}
+		direct := len(rule.Backends) == 1 && hasHTTPBackendKey(rule.Backends[0]) && rule.Backends[0].FilterDiagnostic == nil &&
 			len(rule.Backends[0].RequestHeaderOperations) == 0 && rule.Backends[0].URLRewrite == nil
 		weighted := cloud.HTTPWeightedRule{RuleIndex: rule.Index}
 		for _, backend := range rule.Backends {
@@ -502,6 +523,9 @@ func hasHTTPBackendKey(backend model.BackendGroup) bool {
 }
 
 func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader, route *gatewayv1.HTTPRoute, spec *cloud.RouteSpec, inputs *routeModelInputs, backend model.BackendGroup, nodeAddressType corev1.NodeAddressType, direct bool, groups map[backendKey]httpBackendResolution) (*int, model.Diagnostic, error) {
+	if backend.FilterDiagnostic != nil {
+		return nil, *backend.FilterDiagnostic, nil
+	}
 	if !hasHTTPBackendKey(backend) {
 		if backend.Diagnostic != nil {
 			return nil, *backend.Diagnostic, nil
@@ -633,7 +657,9 @@ func supportedRouteModel(logical model.Gateway, selected []*gatewayv1.Listener, 
 		if rule.Redirect != nil || len(rule.Backends) == 0 && fixedResponses {
 			continue
 		}
-		if !weightedTargets && (len(rule.Backends) != 1 || !hasHTTPBackendKey(rule.Backends[0]) || rule.Backends[0].Weight <= 0) {
+		if !weightedTargets && (len(rule.Backends) != 1 ||
+			(!hasHTTPBackendKey(rule.Backends[0]) && !(fixedResponses && rule.Backends[0].FilterDiagnostic != nil)) ||
+			rule.Backends[0].Weight <= 0) {
 			return unsupported()
 		}
 	}

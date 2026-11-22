@@ -798,3 +798,53 @@ func TestHTTPBackendURLRewriteUsesEnclosingMatchAndDropsConflictingRule(t *testi
 		t.Fatalf("URL rewrites changed the original matches or escaped target scope: %+v %+v", gotFull, gotPrefix)
 	}
 }
+
+func TestUnresolvedHTTPBackendExtensionKeepsPrivatePredicate(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	f.reconciler.Config.WeightedHTTPTargets = true
+	f.reconciler.Config.BackendRequestFilters = true
+	public := f.route.Spec.Rules[0]
+	public.Matches = nil
+	private := *public.DeepCopy()
+	private.Matches = []gatewayv1.HTTPRouteMatch{{Path: &gatewayv1.HTTPPathMatch{Value: ptr.To("/private")}}}
+	private.BackendRefs[0].Weight = ptr.To(int32(3))
+	private.BackendRefs[0].Filters = []gatewayv1.HTTPRouteFilter{{Type: gatewayv1.HTTPRouteFilterExtensionRef,
+		ExtensionRef: &gatewayv1.LocalObjectReference{Group: "example.test", Kind: "AccessFilter", Name: "private"}}}
+	private.BackendRefs = append(private.BackendRefs, public.BackendRefs[0])
+	f.route.Spec.Rules = []gatewayv1.HTTPRouteRule{public, private}
+	if err := f.client.Update(t.Context(), f.route); err != nil {
+		t.Fatal(err)
+	}
+	ready := cloud.RouteReadyResult(cloud.RouteState{L7PolicyIDs: []string{"private", "public"}})
+	provider := &recordingProvider{routeResult: &ready}
+	r := newTestReconciler(*f.reconciler, provider)
+	key := client.ObjectKeyFromObject(f.route)
+	if _, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: key}); err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.routeSpecs) != 1 {
+		t.Fatalf("expected to install both rules, got %+v", provider.routeSpecs)
+	}
+	spec := provider.routeSpecs[0]
+	if len(spec.WeightedHTTPRules) != 1 || len(spec.HTTPBackends) != 1 {
+		t.Fatalf("expected public fallback and a weighted private rule, got %+v", spec)
+	}
+	rule := spec.WeightedHTTPRules[0]
+	if len(rule.Matches) != 1 || rule.Matches[0].PathValue != "/private" ||
+		len(rule.Targets) != 2 || rule.Targets[0].BackendIndex != nil || rule.Targets[0].Weight != 3 ||
+		rule.Targets[1].BackendIndex == nil || rule.Targets[1].Weight != 1 ||
+		len(spec.HTTPBackends[0].Matches) != 1 || spec.HTTPBackends[0].Matches[0].PathValue != "/" ||
+		rule.Matches[0].Precedence >= spec.HTTPBackends[0].Matches[0].Precedence {
+		t.Fatalf("private requests would skip the unresolved filter or change the healthy share: %+v", spec)
+	}
+	if err := f.client.Get(t.Context(), key, f.route); err != nil {
+		t.Fatal(err)
+	}
+	conditions := f.route.Status.Parents[0].Conditions
+	accepted := meta.FindStatusCondition(conditions, string(gatewayv1.RouteConditionAccepted))
+	resolved := meta.FindStatusCondition(conditions, string(gatewayv1.RouteConditionResolvedRefs))
+	if accepted == nil || accepted.Status != metav1.ConditionTrue || resolved == nil || resolved.Status != metav1.ConditionFalse ||
+		resolved.Reason != string(gatewayv1.RouteReasonUnsupportedValue) || !strings.Contains(resolved.Message, "example.test/AccessFilter") {
+		t.Fatalf("unexpected conditions for unresolved backend filter: %+v", conditions)
+	}
+}
