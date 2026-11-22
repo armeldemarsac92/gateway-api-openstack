@@ -192,6 +192,12 @@ func testUpstreamGatewayStatus(t *testing.T, c client.Client, cfg controller.Con
 		} {
 			t.Run(tc.ShortName, func(t *testing.T) {
 				s.RunTest = tc.ShortName
+				if tc.ShortName == tests.ListenerSetAllowedNamespaceSame.ShortName ||
+					tc.ShortName == tests.ListenerSetAllowedNamespaceSelector.ShortName {
+					// Envtest has no controller manager to finalize Namespaces.
+					s.CleanupTestResources = false
+					defer func() { s.CleanupTestResources = true }()
+				}
 				tc.Run(t, s)
 			})
 		}
