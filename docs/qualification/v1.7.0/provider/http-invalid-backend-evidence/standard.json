@@ -1,0 +1,341 @@
+{
+  "channel": "standard",
+  "gatewayApiSourceRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "controllerSourceRevision": "577264d263dec1c8428efb487caaa82f549d56a8",
+  "octaviaSourceRevision": "032e44b82cb58361aec149f874c8eacbe89c275f",
+  "octaviaLibSourceRevision": "3c960017bc9c47783607f0efe7a24512cc9c1d2f",
+  "controllerBinarySha256": "581ddfd41684240fddd21fb758eac4bcd35066ff6b1abaed0f0a7a076510a784",
+  "echoBinarySha256": "d4e04b904229880dc2e32dbe58244b3bf46408c2e1e8325ebb83a69fab3d57a9",
+  "bundleSha256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+  "baseManifestSha256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+  "observedEchoPeers": [
+    {
+      "namespace": "gateway-conformance-infra",
+      "pod": "infra-backend-v1-local-0",
+      "directHTTPStatus": 200
+    },
+    {
+      "namespace": "gateway-conformance-infra",
+      "pod": "infra-backend-v1-local-1",
+      "directHTTPStatus": 200
+    },
+    {
+      "namespace": "gateway-conformance-infra",
+      "pod": "infra-backend-v2-local-0",
+      "directHTTPStatus": 200
+    },
+    {
+      "namespace": "gateway-conformance-infra",
+      "pod": "infra-backend-v2-local-1",
+      "directHTTPStatus": 200
+    },
+    {
+      "namespace": "gateway-conformance-infra",
+      "pod": "infra-backend-v3-local-0",
+      "directHTTPStatus": 200
+    },
+    {
+      "namespace": "gateway-conformance-web-backend",
+      "pod": "web-backend-local-0",
+      "directHTTPStatus": 200
+    },
+    {
+      "namespace": "gateway-conformance-web-backend",
+      "pod": "web-backend-local-1",
+      "directHTTPStatus": 200
+    },
+    {
+      "namespace": "gateway-conformance-app-backend",
+      "pod": "app-backend-v1-local-0",
+      "directHTTPStatus": 200
+    },
+    {
+      "namespace": "gateway-conformance-app-backend",
+      "pod": "app-backend-v1-local-1",
+      "directHTTPStatus": 200
+    },
+    {
+      "namespace": "gateway-conformance-app-backend",
+      "pod": "app-backend-v2-local-0",
+      "directHTTPStatus": 200
+    },
+    {
+      "namespace": "gateway-conformance-app-backend",
+      "pod": "app-backend-v2-local-1",
+      "directHTTPStatus": 200
+    }
+  ],
+  "cases": {
+    "HTTPRouteInvalidBackendRefUnknownKind": {
+      "passed": true,
+      "exit": 0,
+      "caseEvents": [
+        "--- PASS: TestLocalHTTPCore/HTTPRouteInvalidBackendRefUnknownKind (1.13s)",
+        "--- PASS: TestLocalHTTPCore/HTTPRouteInvalidBackendRefUnknownKind/HTTPRoute_with_Invalid_Kind_has_a_ResolvedRefs_Condition_with_status_False_and_Reason_InvalidKind (0.00s)",
+        "--- PASS: TestLocalHTTPCore/HTTPRouteInvalidBackendRefUnknownKind/HTTP_Request_to_invalid_backend_with_invalid_Kind_receives_a_500 (0.91s)"
+      ],
+      "subtestsPassed": 2,
+      "expectedSubtests": 2,
+      "reportSHA256": "137e10a0a1b745d28df54deb93106a943ccb46bbb18278b65b28e0b7833c844f",
+      "caseGoSHA256": "e09d5ffb19a9d6444d4b9f84508d04cbe66347dfd9623532daa0411df5d6643c",
+      "caseYAMLSHA256": "9a4286548aee5ca943eff38e67c7dc6335955c948c7fcd92e28e3c76388f0659",
+      "routeAfterCase": {
+        "generation": 1,
+        "backendRefs": [
+          [
+            {
+              "group": "unknownkind.example.com",
+              "kind": "NonExistent",
+              "name": "infra-backend-v1",
+              "port": 8080,
+              "weight": 1
+            }
+          ]
+        ],
+        "parents": [
+          {
+            "conditions": [
+              {
+                "lastTransitionTime": "2026-11-22T00:57:52Z",
+                "message": "Route is accepted by the Gateway",
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T00:57:52Z",
+                "message": "backendRef group \"unknownkind.example.com\" and kind \"NonExistent\" are unsupported",
+                "observedGeneration": 1,
+                "reason": "InvalidKind",
+                "status": "False",
+                "type": "ResolvedRefs"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T00:57:52Z",
+                "message": "Created Octavia L7 rule",
+                "observedGeneration": 1,
+                "reason": "Pending",
+                "status": "False",
+                "type": "gateway-api-openstack.github.io/Programmed"
+              }
+            ],
+            "controllerName": "gateway-api-openstack.github.io/gateway-api-openstack",
+            "parentRef": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "name": "same-namespace"
+            }
+          }
+        ]
+      }
+    },
+    "HTTPRouteInvalidNonExistentBackendRef": {
+      "passed": true,
+      "exit": 0,
+      "caseEvents": [
+        "--- PASS: TestLocalHTTPCore/HTTPRouteInvalidNonExistentBackendRef (1.02s)",
+        "--- PASS: TestLocalHTTPCore/HTTPRouteInvalidNonExistentBackendRef/HTTPRoute_with_only_a_nonexistent_BackendRef_has_a_ResolvedRefs_Condition_with_status_False_and_Reason_BackendNotFound (0.00s)",
+        "--- PASS: TestLocalHTTPCore/HTTPRouteInvalidNonExistentBackendRef/HTTP_Request_to_invalid_nonexistent_backend_receive_a_500 (0.00s)"
+      ],
+      "subtestsPassed": 2,
+      "expectedSubtests": 2,
+      "reportSHA256": "28226e8dbf3a79345ac2653d8ca56fb77a9a85fb352eb55ccc7605bb3158ca0b",
+      "caseGoSHA256": "edb977423d5271332f28591362afcd0a8579a7c84cdbfb485a8368da46a674e5",
+      "caseYAMLSHA256": "16198696c1d497b662c59c7e5e4e873834830b9f0f00f911302786f7b74a18a3",
+      "routeAfterCase": {
+        "generation": 1,
+        "backendRefs": [
+          [
+            {
+              "group": "",
+              "kind": "Service",
+              "name": "nonexistent",
+              "namespace": "gateway-conformance-infra",
+              "port": 8080,
+              "weight": 1
+            }
+          ]
+        ],
+        "parents": [
+          {
+            "conditions": [
+              {
+                "lastTransitionTime": "2026-11-22T00:57:55Z",
+                "message": "Route is accepted by the Gateway",
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T00:57:55Z",
+                "message": "backend Service gateway-conformance-infra/nonexistent was not found",
+                "observedGeneration": 1,
+                "reason": "BackendNotFound",
+                "status": "False",
+                "type": "ResolvedRefs"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T00:57:55Z",
+                "message": "Enabled converged Octavia L7 policy",
+                "observedGeneration": 1,
+                "reason": "Pending",
+                "status": "False",
+                "type": "gateway-api-openstack.github.io/Programmed"
+              }
+            ],
+            "controllerName": "gateway-api-openstack.github.io/gateway-api-openstack",
+            "parentRef": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "name": "same-namespace"
+            }
+          }
+        ]
+      }
+    },
+    "HTTPRouteInvalidReferenceGrant": {
+      "passed": true,
+      "exit": 0,
+      "caseEvents": [
+        "--- PASS: TestLocalHTTPCore/HTTPRouteInvalidReferenceGrant (1.03s)",
+        "--- PASS: TestLocalHTTPCore/HTTPRouteInvalidReferenceGrant/HTTPRoute_with_BackendRef_in_another_namespace_and_no_ReferenceGrant_covering_the_Service_has_a_ResolvedRefs_Condition_with_status_False_and_Reason_RefNotPermitted (0.00s)",
+        "--- PASS: TestLocalHTTPCore/HTTPRouteInvalidReferenceGrant/Simple_HTTP_request_not_should_reach_web-backend (0.00s)"
+      ],
+      "subtestsPassed": 2,
+      "expectedSubtests": 2,
+      "reportSHA256": "8970ccc873f23f047d455ede7592ec4c63d610a24e64261b956a2ec7aecbf0bd",
+      "caseGoSHA256": "54c6a6e25efc0edc250ef6ae490e454293ae3ed5bd971ff59ca66b888d4dec06",
+      "caseYAMLSHA256": "def162f88ce4dcda7dd7e12e6fee1a37129c0d1b5ba5cd8cb267a7e1fcbdb2f0",
+      "routeAfterCase": {
+        "generation": 1,
+        "backendRefs": [
+          [
+            {
+              "group": "",
+              "kind": "Service",
+              "name": "web-backend",
+              "namespace": "gateway-conformance-web-backend",
+              "port": 8080,
+              "weight": 1
+            }
+          ]
+        ],
+        "parents": [
+          {
+            "conditions": [
+              {
+                "lastTransitionTime": "2026-11-22T00:57:57Z",
+                "message": "Route is accepted by the Gateway",
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T00:57:57Z",
+                "message": "backend Service gateway-conformance-web-backend/web-backend is not permitted by a ReferenceGrant",
+                "observedGeneration": 1,
+                "reason": "RefNotPermitted",
+                "status": "False",
+                "type": "ResolvedRefs"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T00:57:57Z",
+                "message": "Enabled converged Octavia L7 policy",
+                "observedGeneration": 1,
+                "reason": "Pending",
+                "status": "False",
+                "type": "gateway-api-openstack.github.io/Programmed"
+              }
+            ],
+            "controllerName": "gateway-api-openstack.github.io/gateway-api-openstack",
+            "parentRef": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "name": "same-namespace"
+            }
+          }
+        ]
+      }
+    },
+    "HTTPRoutePartiallyInvalidViaInvalidReferenceGrant": {
+      "passed": true,
+      "exit": 0,
+      "caseEvents": [
+        "--- PASS: TestLocalHTTPCore/HTTPRoutePartiallyInvalidViaInvalidReferenceGrant (3.66s)",
+        "--- PASS: TestLocalHTTPCore/HTTPRoutePartiallyInvalidViaInvalidReferenceGrant/HTTPRoute_with_BackendRef_in_another_namespace_and_no_ReferenceGrant_covering_the_Service_has_a_ResolvedRefs_Condition_with_status_False_and_Reason_RefNotPermitted (0.00s)",
+        "--- PASS: TestLocalHTTPCore/HTTPRoutePartiallyInvalidViaInvalidReferenceGrant/HTTP_Request_to_invalid_backend_with_missing_referenceGrant_should_receive_a_500 (2.23s)",
+        "--- PASS: TestLocalHTTPCore/HTTPRoutePartiallyInvalidViaInvalidReferenceGrant/HTTP_Request_to_valid_sibling_backend_should_succeed (0.51s)"
+      ],
+      "subtestsPassed": 3,
+      "expectedSubtests": 3,
+      "reportSHA256": "3f486a0cb8cb1faedb058b86058eb2c2aee01503051b68cf5734360f591a8d9a",
+      "caseGoSHA256": "6e66628d0d80666ecc83aea2bebd8a3420d7ef4c51ad7d4d64eac3dfeaf7c727",
+      "caseYAMLSHA256": "ff9dcc29522e7aff1ab3765e48ef488419a1ffbc1009ee847b754f05beb89f84",
+      "routeAfterCase": {
+        "generation": 1,
+        "backendRefs": [
+          [
+            {
+              "group": "",
+              "kind": "Service",
+              "name": "app-backend-v2",
+              "namespace": "gateway-conformance-app-backend",
+              "port": 8080,
+              "weight": 1
+            }
+          ],
+          [
+            {
+              "group": "",
+              "kind": "Service",
+              "name": "app-backend-v1",
+              "namespace": "gateway-conformance-app-backend",
+              "port": 8080,
+              "weight": 1
+            }
+          ]
+        ],
+        "parents": [
+          {
+            "conditions": [
+              {
+                "lastTransitionTime": "2026-11-22T00:58:00Z",
+                "message": "Route is accepted by the Gateway",
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T00:58:00Z",
+                "message": "backend Service gateway-conformance-app-backend/app-backend-v2 is not permitted by a ReferenceGrant",
+                "observedGeneration": 1,
+                "reason": "RefNotPermitted",
+                "status": "False",
+                "type": "ResolvedRefs"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T00:58:00Z",
+                "message": "Enabled converged Octavia L7 policy",
+                "observedGeneration": 1,
+                "reason": "Pending",
+                "status": "False",
+                "type": "gateway-api-openstack.github.io/Programmed"
+              }
+            ],
+            "controllerName": "gateway-api-openstack.github.io/gateway-api-openstack",
+            "parentRef": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "name": "same-namespace"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "upstreamExit": 0
+}

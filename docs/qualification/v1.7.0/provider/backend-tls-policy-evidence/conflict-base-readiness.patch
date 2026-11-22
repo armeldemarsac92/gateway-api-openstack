@@ -1,0 +1,9 @@
+--- a/backend-tls-upstream/backend_tls_case_test.go
++++ b/backend-tls-upstream/backend_tls_case_test.go
+@@ -56,5 +56,6 @@
+ 		require.NoError(t, err)
+ 		require.NoError(t, os.WriteFile(options.ReportOutputPath, data, 0600))
+ 	})
++	kubernetes.NamespacesMustBeReady(t, run.Client, run.TimeoutConfig, []string{suite.InfrastructureNamespace})
+ 	require.NoError(t, run.Run(t, tests.ConformanceTests[index:index+1]))
+ }
