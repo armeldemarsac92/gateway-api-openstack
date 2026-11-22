@@ -62,6 +62,7 @@ Local verification passed the pinned linter, Go race tests, tagged E2E helper te
 
 | Local evidence | Observation |
 |---|---|
+| [Authenticated HTTP and HTTPS backends](provider/backend-tls-policy.md) | Two upstream BackendTLSPolicy status cases passed on each channel. In separate native traffic checks, an incorrect DNS name or CA produced 503 and restoring trust returned 200. |
 | [All five Gateway and both mesh profile selections](complete-local-profiles.md) | The original shared Gateway setup stopped at the four HTTPS listeners on each channel. The two mesh profiles ran 16 eligible cases. Seven further registered mesh bodies ran in an isolated supplement on ordinary Services. [Supplement and original cases](provider/mesh-registered-supplement.md) |
 | [Upstream status cases](../../../internal/controller/envtest_upstream_status_test.go) | Eight original v1.7.0 cases exercise GatewayClass, Gateway and HTTPRoute status through controller watches. The three listener selector cases cover an unmatched port, an unmatched section and a section/port mismatch. On each release channel the unmatched port reports `Accepted=False/NoMatchingParent` while its valid backend reports `ResolvedRefs=True`. [ParentRef results](provider/http-parentref-status.md) |
 | [Automatic IP address request](matrix/features-and-cases.md#complete-registered-test-inventory) | A separate test applies the tagged address manifest directly, reads back the empty IP request and checks the address reported by the controller. The cloud provider is simulated. |
