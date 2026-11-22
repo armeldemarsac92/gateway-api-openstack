@@ -296,7 +296,7 @@ func routeProfileConflict() error {
 }
 
 func grpcProfileDisabled() error {
-	return newRouteBuildError(routeErrorUnsupported, "GRPCRoute exact method matching requires Octavia backend h2c and fixed responses")
+	return newRouteBuildError(routeErrorUnsupported, "GRPCRoute requires Octavia backend h2c and fixed responses")
 }
 
 func validateRouteHostnames(listener *gatewayv1.Hostname, hostnames []gatewayv1.Hostname) error {

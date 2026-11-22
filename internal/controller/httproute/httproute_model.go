@@ -74,7 +74,7 @@ func (r *Reconciler) validateRouteStructure(route *gatewayv1.HTTPRoute) ([]gatew
 			return nil, grpcProfileDisabled()
 		}
 		if len(route.Spec.Rules) == 0 {
-			return nil, newRouteBuildError(routeErrorUnsupported, "GRPCRoute requires exact service and method matches and one backendRef per rule, without headers, filters or session persistence")
+			return nil, newRouteBuildError(routeErrorUnsupported, "GRPCRoute requires at least one match on an exact service and method or exact headers, and one backendRef per rule, without filters or session persistence")
 		}
 	}
 	if len(route.Spec.Rules) == 0 {
@@ -120,7 +120,7 @@ func (r *Reconciler) usesHTTPBackendGroups(route *gatewayv1.HTTPRoute) bool {
 func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, grpc bool) error {
 	fixedResponses := r.Config.FixedHTTPResponses || grpc
 	weightedTargets := r.Config.WeightedHTTPTargets && !grpc
-	exactHeaders := r.Config.HTTPHeaderExact && !grpc
+	exactHeaders := r.Config.HTTPHeaderExact
 	methodMatch := r.Config.HTTPMethodMatch && !grpc
 	if rule.Timeouts != nil || rule.Retry != nil || rule.SessionPersistence != nil { //nolint:staticcheck // The release still serves this deprecated Experimental field.
 		return newRouteBuildError(routeErrorUnsupported, "timeouts, retries, and session persistence are not supported")
@@ -246,7 +246,7 @@ func (r *Reconciler) buildRouteModelFromInputs(
 	isolated := gatewaycontroller.SharedHTTPSListener(r.Config, gateway, &listener)
 	matches, rules, err := supportedRouteModel(inputs.routeFragment(route), listeners, isolated,
 		r.Config.FixedHTTPResponses || r.Config.WeightedHTTPTargets, r.Config.WeightedHTTPTargets,
-		r.Config.HTTPHeaderExact && ordinaryHTTP, r.Config.HTTPMethodMatch && ordinaryHTTP)
+		r.Config.HTTPHeaderExact, r.Config.HTTPMethodMatch && ordinaryHTTP)
 	if err != nil {
 		return cloud.RouteSpec{}, model.Diagnostic{}, err
 	}
