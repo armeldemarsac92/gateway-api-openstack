@@ -1,0 +1,114 @@
+{
+  "case": "BackendTLSPolicyConflictResolution",
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "controllerRevision": "577264d263dec1c8428efb487caaa82f549d56a8",
+  "managerSHA256": "581ddfd41684240fddd21fb758eac4bcd35066ff6b1abaed0f0a7a076510a784",
+  "caseBodySHA256": "93e545da2af0a65d82c0cb60388e2e0175adf406278de7f27f66f87d2ffab28c",
+  "caseManifestSHA256": "ad6f210266dac418be158eb5de05194ad5e4dd560b1c85b8a0936e2f76699d76",
+  "channels": {
+    "standard": {
+      "result": "FAIL",
+      "baseReadyBeforeCase": "helpers.go:326: 2026-11-22T02:11:37.705269232+01:00: Gateways and Pods in gateway-conformance-infra namespaces ready",
+      "totalSubtests": 13,
+      "passedSubtests": 9,
+      "policyConditionsPassed": 6,
+      "positiveRequestsPassed": 2,
+      "positiveRequestsTotal": 4,
+      "originalSubtestEvents": [
+        "--- FAIL: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution (94.41s)",
+        "--- FAIL: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/Conflicting_BackendTLSPolicies_targeting_the_same_Service_without_a_section_name (30.09s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/Conflicting_BackendTLSPolicies_targeting_the_same_Service_without_a_section_name/First_BackendTLSPolicy_should_be_accepted (0.04s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/Conflicting_BackendTLSPolicies_targeting_the_same_Service_without_a_section_name/Second_BackendTLSPolicy_should_have_a_false_Accepted_condition_with_reason_Conflicted_ (0.04s)",
+        "--- FAIL: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/Conflicting_BackendTLSPolicies_targeting_the_same_Service_without_a_section_name/HTTP_request_sent_to_Service_using_the_accepted_BackendTLSPolicy_should_succeed (30.00s)",
+        "--- FAIL: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/Conflicting_BackendTLSPolicies_targeting_the_same_Service_with_the_same_section_name (30.01s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/Conflicting_BackendTLSPolicies_targeting_the_same_Service_with_the_same_section_name/First_BackendTLSPolicy_should_be_accepted (0.00s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/Conflicting_BackendTLSPolicies_targeting_the_same_Service_with_the_same_section_name/Second_BackendTLSPolicy_should_have_a_false_Accepted_condition_with_reason_Conflicted_ (0.00s)",
+        "--- FAIL: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/Conflicting_BackendTLSPolicies_targeting_the_same_Service_with_the_same_section_name/HTTP_request_sent_to_Service_using_the_accepted_BackendTLSPolicy_should_succeed (30.00s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/BackendTLSPolicies_targeting_the_same_Service_with_and_without_a_section_name (23.10s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/BackendTLSPolicies_targeting_the_same_Service_with_and_without_a_section_name/BackendTLSPolicy_with_section_name_should_be_accepted (0.04s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/BackendTLSPolicies_targeting_the_same_Service_with_and_without_a_section_name/BackendTLSPolicy_without_section_name_should_be_accepted (0.00s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/BackendTLSPolicies_targeting_the_same_Service_with_and_without_a_section_name/HTTP_request_sent_to_Service_using_the_BackendTLSPolicy_with_section_name_should_succeed (19.16s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/BackendTLSPolicies_targeting_the_same_Service_with_and_without_a_section_name/HTTP_request_sent_to_Service_using_the_BackendTLSPolicy_without_section_name_should_succeed (3.90s)"
+      ],
+      "releaseBundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "baseManifestSHA256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+      "provider": {
+        "octavia": {
+          "revision": "ba89a2d6237aa1a1b754ad7234899c12de39a4d2",
+          "version": "19.0.1.dev11",
+          "sha256": "965df48a31d61f21ef56d60c5659987fa139b142642998baedcaf6c0403f44ea",
+          "filesVerified": 632
+        },
+        "octaviaLib": {
+          "revision": "8ac88a770cc3b3ebf7cf647e11f25a4b3c6e91b6",
+          "version": "3.12.1.dev4",
+          "sha256": "e47a8a54cd9d15ad9333ed7acbe07d8baf0ba9567332414b4fdcd152761cc57c",
+          "filesVerified": 24
+        },
+        "barbican": {
+          "version": "23.0.0",
+          "endpoint": "regional HTTPS with verification"
+        },
+        "HAProxy": {
+          "version": "3.0.19-ade9c1262-octavia-strict-dns-v1",
+          "sha256": "fa8468efa26f95ed83a36afeb97b79730de285450b7a8fae94f7cf5e6d2d0824",
+          "strictDNSAgentCapability": true
+        }
+      },
+      "report": "standard-ordered-conflict-report.yaml",
+      "reportSHA256": "a42c59149debe4e516b149f0d9d12b9c5a57ec98ca9f06b087bca7a8c6d8cc32"
+    },
+    "experimental": {
+      "result": "FAIL",
+      "baseReadyBeforeCase": "helpers.go:326: 2026-11-22T02:14:20.891760597+01:00: Gateways and Pods in gateway-conformance-infra namespaces ready",
+      "totalSubtests": 13,
+      "passedSubtests": 9,
+      "policyConditionsPassed": 6,
+      "positiveRequestsPassed": 2,
+      "positiveRequestsTotal": 4,
+      "originalSubtestEvents": [
+        "--- FAIL: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution (93.06s)",
+        "--- FAIL: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/Conflicting_BackendTLSPolicies_targeting_the_same_Service_without_a_section_name (30.09s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/Conflicting_BackendTLSPolicies_targeting_the_same_Service_without_a_section_name/First_BackendTLSPolicy_should_be_accepted (0.04s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/Conflicting_BackendTLSPolicies_targeting_the_same_Service_without_a_section_name/Second_BackendTLSPolicy_should_have_a_false_Accepted_condition_with_reason_Conflicted_ (0.04s)",
+        "--- FAIL: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/Conflicting_BackendTLSPolicies_targeting_the_same_Service_without_a_section_name/HTTP_request_sent_to_Service_using_the_accepted_BackendTLSPolicy_should_succeed (30.00s)",
+        "--- FAIL: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/Conflicting_BackendTLSPolicies_targeting_the_same_Service_with_the_same_section_name (30.01s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/Conflicting_BackendTLSPolicies_targeting_the_same_Service_with_the_same_section_name/First_BackendTLSPolicy_should_be_accepted (0.00s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/Conflicting_BackendTLSPolicies_targeting_the_same_Service_with_the_same_section_name/Second_BackendTLSPolicy_should_have_a_false_Accepted_condition_with_reason_Conflicted_ (0.00s)",
+        "--- FAIL: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/Conflicting_BackendTLSPolicies_targeting_the_same_Service_with_the_same_section_name/HTTP_request_sent_to_Service_using_the_accepted_BackendTLSPolicy_should_succeed (30.00s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/BackendTLSPolicies_targeting_the_same_Service_with_and_without_a_section_name (22.09s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/BackendTLSPolicies_targeting_the_same_Service_with_and_without_a_section_name/BackendTLSPolicy_with_section_name_should_be_accepted (0.04s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/BackendTLSPolicies_targeting_the_same_Service_with_and_without_a_section_name/BackendTLSPolicy_without_section_name_should_be_accepted (0.00s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/BackendTLSPolicies_targeting_the_same_Service_with_and_without_a_section_name/HTTP_request_sent_to_Service_using_the_BackendTLSPolicy_with_section_name_should_succeed (18.06s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/BackendTLSPolicies_targeting_the_same_Service_with_and_without_a_section_name/HTTP_request_sent_to_Service_using_the_BackendTLSPolicy_without_section_name_should_succeed (3.98s)"
+      ],
+      "releaseBundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "baseManifestSHA256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+      "provider": {
+        "octavia": {
+          "revision": "ba89a2d6237aa1a1b754ad7234899c12de39a4d2",
+          "version": "19.0.1.dev11",
+          "sha256": "965df48a31d61f21ef56d60c5659987fa139b142642998baedcaf6c0403f44ea",
+          "filesVerified": 632
+        },
+        "octaviaLib": {
+          "revision": "8ac88a770cc3b3ebf7cf647e11f25a4b3c6e91b6",
+          "version": "3.12.1.dev4",
+          "sha256": "e47a8a54cd9d15ad9333ed7acbe07d8baf0ba9567332414b4fdcd152761cc57c",
+          "filesVerified": 24
+        },
+        "barbican": {
+          "version": "23.0.0",
+          "endpoint": "regional HTTPS with verification"
+        },
+        "HAProxy": {
+          "version": "3.0.19-ade9c1262-octavia-strict-dns-v1",
+          "sha256": "fa8468efa26f95ed83a36afeb97b79730de285450b7a8fae94f7cf5e6d2d0824",
+          "strictDNSAgentCapability": true
+        }
+      },
+      "report": "experimental-ordered-conflict-report.yaml",
+      "reportSHA256": "7d2844a1515e0731012896f505960248597076d0d6e281e9acc13fc40ccff24a"
+    }
+  }
+}
