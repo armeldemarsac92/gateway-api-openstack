@@ -756,7 +756,7 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 			step.route.rule.ruleType == httpMethodRuleType {
 			required = append(required, octavia.GatewayCapabilityHTTPMethodMatch)
 		}
-		if step.route.rule.ruleType == grpcContentTypeRuleType ||
+		if step.route.probeBeforeGRPCMigration || step.route.rule.ruleType == grpcContentTypeRuleType ||
 			step.route.policy.grpcContentTypeRule == grpcContentTypeRuleType &&
 				(step.route.kind == routeMutationCreatePolicy || step.route.kind == routeMutationEnablePolicy) {
 			required = append(required, octavia.GatewayCapabilityGRPCContentType)
@@ -799,9 +799,14 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 			}
 		}
 		if step.kind == graphRouteMutation {
-			err = &cloud.GraphError{Identity: desired.routes[step.routeIndex].spec.Identity, Err: err}
 			var missing *octavia.MissingGatewayCapability
 			explicitlyMissing := errors.As(err, &missing)
+			if step.route.probeBeforeGRPCMigration && explicitlyMissing && missing.Capability == octavia.GatewayCapabilityGRPCContentType {
+				// Regional opt-in requires the native predicate. An explicit
+				// negative response authorizes withdrawing the old policy.
+				return step, nil
+			}
+			err = &cloud.GraphError{Identity: desired.routes[step.routeIndex].spec.Identity, Err: err}
 			if slices.Contains(required, octavia.GatewayCapabilityBackendH2C) &&
 				(!explicitlyMissing || missing.Capability == octavia.GatewayCapabilityBackendH2C) {
 				err = &unavailableRouteCapability{error: err, capability: octavia.GatewayCapabilityBackendH2C,

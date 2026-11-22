@@ -83,14 +83,20 @@ matching deletes the native rule and creates an owned header rule after
 Octavia confirms the policy is disabled. This also works after regional
 enrollment has been withdrawn. The controller restores the policy after
 observing the new rule. The path, hostname and metadata rules retain their
-IDs. With the flag enabled, an absent capability leaves the affected GRPCRoute at
-`Programmed=False` while the controller waits for Octavia to advertise
-`grpc_content_type_v1`. If Octavia explicitly withdraws the capability from
-a listener already using it, the controller closes that listener until it can
-verify the policy again. This can interrupt ordinary HTTP on the same listener.
-An inconclusive discovery response delays new native writes and keeps
-existing verified traffic serving. To revert to the portable rule, remove
-the controller flag and let the graph converge before rolling back Octavia.
+IDs. Before interrupting a verified portable policy to adopt native matching,
+the controller checks the regional capability. An inconclusive response
+keeps the verified policy serving and delays migration. An explicit absence
+of `grpc_content_type_v1` with the flag enabled withdraws the portable
+policy and leaves the GRPCRoute at `Programmed=False`.
+
+If Octavia explicitly withdraws the capability from a listener already using
+it, the controller closes that listener after verifying Octavia ownership
+and the current Gateway configuration. The closure can proceed while
+Neutron's floating IP inventory is unavailable. All routes on the affected
+port report progress while the listener is closed, including ordinary HTTP
+routes. Routes on other ports continue independently. To revert to the
+portable rule, remove the controller flag and let the graph converge before
+rolling back Octavia.
 
 The regional option has local controller coverage for discovery, API
 payloads, mode changes and capability withdrawal. The native traffic

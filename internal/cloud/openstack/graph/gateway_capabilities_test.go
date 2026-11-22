@@ -1161,20 +1161,38 @@ func TestResponseHeaderPolicyActivationAndWithdrawalAcrossRestart(t *testing.T) 
 
 // Exercise controller restarts against the same Octavia inventory.
 func TestRegionalGRPCContentTypePolicyTransition(t *testing.T) {
+	t.Run("with metadata", func(t *testing.T) { testRegionalGRPCContentTypePolicyTransition(t, true) })
+	t.Run("without metadata", func(t *testing.T) { testRegionalGRPCContentTypePolicyTransition(t, false) })
+}
+
+func testRegionalGRPCContentTypePolicyTransition(t *testing.T, metadata bool) {
+	t.Helper()
 	type record = map[string]any
 	identity := safetyTestIdentity(t)
 	spec := completeGraphSpec(identity)
 	spec.Gateway.Spec.ScopedListeners = []cloud.ScopedListener{{Name: "grpc", Port: 80}, {Name: "http", Port: 8080}}
 	route := &spec.Routes[0].Spec
 	route.ScopedListenerPorts = []int{80}
-	match := cloud.HTTPPathMatch{Hostname: route.Hostname, PathType: cloud.PathMatchExact, PathValue: "/example.Echo/Echo",
-		Headers: []cloud.HTTPHeaderMatch{{Name: "x-version", Value: "v2"}}}
+	match := cloud.HTTPPathMatch{Hostname: route.Hostname, PathType: cloud.PathMatchExact, PathValue: "/example.Echo/Echo", Precedence: 1}
+	if metadata {
+		match.Headers = []cloud.HTTPHeaderMatch{{Name: "x-version", Value: "v2"}}
+	}
 	route.Hostname, route.PathType, route.PathValue = "", "", ""
 	route.GRPC = true
 	route.HTTPBackends = []cloud.HTTPBackend{{Namespace: "application", Name: "echo", Port: 8080,
 		Matches: []cloud.HTTPPathMatch{match}, Members: route.Members, BackendH2C: true}}
 	route.Members = nil
-	cfg := ProviderConfig{BackendH2C: true, FixedHTTPResponses: true, HTTPHeaderExact: true}
+	for _, port := range []int{80, 8080} {
+		id := identity.Value()
+		id.RouteName = fmt.Sprintf("http-%d", port)
+		id.RouteUID = id.RouteName
+		spec.Routes = append(spec.Routes, cloud.RouteGraphNode{Disposition: cloud.GraphEnsure, Spec: cloud.RouteSpec{
+			Identity: id, GatewayRequirements: route.GatewayRequirements, ScopedListenerPorts: []int{port},
+			MemberSubnetID: route.MemberSubnetID, HealthMonitor: route.HealthMonitor,
+			FixedHTTPRules: []cloud.HTTPFixedRule{{Matches: []cloud.HTTPPathMatch{{PathType: cloud.PathMatchExact, PathValue: "/http"}}}},
+		}})
+	}
+	cfg := ProviderConfig{BackendH2C: true, FixedHTTPResponses: true, HTTPHeaderExact: metadata}
 	initial := NewProvider(ServiceClients{ProjectID: "project-a"}, cfg)
 	desired, err := initial.buildDesiredGatewayGraph(spec)
 	if err != nil {
@@ -1195,8 +1213,8 @@ func TestRegionalGRPCContentTypePolicyTransition(t *testing.T) {
 		policyRefs = append(policyRefs, record{"id": rule["id"]})
 		rules = append(rules, rule)
 	}
-	if len(rules) != 4 || mediaRule == nil || mediaRule["key"] != "content-type" {
-		t.Fatalf("portable policy must include path, hostname, metadata and Content-Type: %v", rules)
+	if len(rules) != 3+len(match.Headers) || mediaRule == nil || mediaRule["key"] != "content-type" {
+		t.Fatalf("portable policy must include path, hostname, Content-Type and any metadata: %v", rules)
 	}
 	lb := gatewayTransitionLoadBalancer(safetyGatewayTags(t, identity, roleLoadBalancer), "ACTIVE")
 	grpcListeners := []record{{"id": "listener-1"}}
@@ -1218,7 +1236,7 @@ func TestRegionalGRPCContentTypePolicyTransition(t *testing.T) {
 		"type": "TCP", "delay": 10, "timeout": 5, "max_retries": 3, "max_retries_down": 3, "pools": lb["pools"],
 		"tags": safetyRouteTags(t, identity, part.httpRole(roleMonitor, ""))}
 	policy := record{"id": "policy", "project_id": "project-a", "listener_id": "listener-1", "action": "REDIRECT_TO_POOL",
-		"redirect_pool_id": "pool-1", "position": 1, "admin_state_up": true, "provisioning_status": "ACTIVE",
+		"redirect_pool_id": "pool-1", "position": wanted.position, "admin_state_up": true, "provisioning_status": "ACTIVE",
 		"rules": policyRefs, "tags": safetyRouteTags(t, identity, wanted.role)}
 	const capabilityPath = "/lbaas/providers/amphora/gateway_capabilities"
 	const policyPath = "/lbaas/l7policies/policy"
@@ -1230,8 +1248,29 @@ func TestRegionalGRPCContentTypePolicyTransition(t *testing.T) {
 		"/lbaas/listeners": {"listeners": []record{listener, httpListener}}, "/lbaas/pools": {"pools": []record{pool}},
 		"/lbaas/healthmonitors": {"healthmonitors": []record{monitor}}, "/lbaas/pools/pool-1/members": {"members": []record{member}},
 	}
-	var advertised bool
+	// Converged ordinary HTTP routes on the same and on a different port.
+	httpPolicies := make(map[string][]record)
+	for i, frontend := range []record{listener, httpListener} {
+		sibling := desired.routes[i+1].httpParts[0]
+		predicate := sibling.policies[0]
+		id := sibling.spec.Identity.RouteName
+		listenerID := frontend["id"].(string)
+		rule := rulesFor(predicate, "")[0]
+		httpPolicies[listenerID] = []record{{
+			"id": id, "project_id": "project-a", "listener_id": listenerID, "action": "FIXED_RESPONSE", "redirect_pool_id": nil,
+			"fixed_response": record{"status_code": 500}, "position": predicate.position, "admin_state_up": true,
+			"provisioning_status": "ACTIVE", "rules": []record{{"id": id + "-path"}},
+			"tags": safetyRouteTags(t, sibling.identity, predicate.role),
+		}}
+		reads["/lbaas/l7policies/"+id+"/rules"] = record{"rules": []record{{
+			"id": id + "-path", "project_id": "project-a", "type": rule.ruleType, "compare_type": rule.compareType,
+			"value": rule.value, "admin_state_up": true, "invert": false, "provisioning_status": "ACTIVE", "tags": safetyRouteTags(t, sibling.identity, rule.role),
+		}}}
+		frontend["l7policies"] = append(frontend["l7policies"].([]record), record{"id": id})
+	}
+	var advertised, discoveryOutage, networkOutage bool
 	present := true
+	var probes int
 	var writes []string
 	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		path := request.URL.Path
@@ -1241,6 +1280,11 @@ func TestRegionalGRPCContentTypePolicyTransition(t *testing.T) {
 				return
 			}
 			if path == capabilityPath {
+				probes++
+				if discoveryOutage {
+					w.WriteHeader(http.StatusServiceUnavailable)
+					return
+				}
 				capabilities := []string{octavia.GatewayCapabilityFixedHTTPResponses, octavia.GatewayCapabilityHTTPHeaderExact, octavia.GatewayCapabilityBackendH2C}
 				if advertised {
 					capabilities = append(capabilities, octavia.GatewayCapabilityGRPCContentType)
@@ -1249,8 +1293,9 @@ func TestRegionalGRPCContentTypePolicyTransition(t *testing.T) {
 				return
 			}
 			if path == "/lbaas/l7policies" {
-				policies := []record{}
-				if present && request.URL.Query().Get("listener_id") == "listener-1" {
+				listenerID := request.URL.Query().Get("listener_id")
+				policies := slices.Clone(httpPolicies[listenerID])
+				if present && listenerID == "listener-1" {
 					policies = append(policies, policy)
 				}
 				safetyWriteJSON(t, w, record{"l7policies": policies})
@@ -1309,7 +1354,7 @@ func TestRegionalGRPCContentTypePolicyTransition(t *testing.T) {
 			delete(resource, "key")
 		case rulesPath:
 			rule := patch["rule"]
-			if len(rules) != 3 || policy["admin_state_up"] != false || policy["provisioning_status"] != "ACTIVE" ||
+			if len(rules) != 2+len(match.Headers) || policy["admin_state_up"] != false || policy["provisioning_status"] != "ACTIVE" ||
 				rule["type"] != "HEADER" || rule["compare_type"] != "REGEX" || rule["key"] != "content-type" ||
 				rule["value"] != portableGRPCContentTypePattern || rule["admin_state_up"] != true || rule["invert"] == true {
 				t.Fatalf("invalid portable rule creation: %v, policy: %v", rule, policy)
@@ -1338,11 +1383,24 @@ func TestRegionalGRPCContentTypePolicyTransition(t *testing.T) {
 		safetyWriteJSON(t, w, record{kind: resource})
 	}))
 
+	network := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodGet || request.URL.Path != "/floatingips" {
+			t.Fatalf("unexpected Neutron request %s %s", request.Method, request.URL.Path)
+		}
+		if networkOutage {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		safetyWriteJSON(t, w, record{"floatingips": []record{}})
+	}))
+	run := func() (cloud.GatewayGraphResult, error) {
+		writes = nil
+		p := newTestProvider(t, ServiceClients{LoadBalancer: client, Network: network, ProjectID: "project-a", Region: "regional-endpoint"}, cfg)
+		return p.ReconcileGatewayGraph(t.Context(), spec)
+	}
 	reconcile := func(write string) cloud.GatewayGraphResult {
 		t.Helper()
-		writes = nil
-		p := newTestProvider(t, ServiceClients{LoadBalancer: client, ProjectID: "project-a", Region: "regional-endpoint"}, cfg)
-		result, err := p.ReconcileGatewayGraph(t.Context(), spec)
+		result, err := run()
 		var want []string
 		if write != "" {
 			want = []string{write}
@@ -1356,6 +1414,12 @@ func TestRegionalGRPCContentTypePolicyTransition(t *testing.T) {
 		t.Fatalf("default portable policy did not converge: %+v", result)
 	}
 	cfg.GRPCContentType = true
+	discoveryOutage = true
+	probes = 0
+	if result := reconcile(""); probes == 0 || policy["admin_state_up"] != true || result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing {
+		t.Fatalf("indeterminate discovery must preserve the verified portable policy: %+v", result)
+	}
+	discoveryOutage = false
 	reconcile(policyPath)
 	if result := reconcile(""); policy["admin_state_up"] != false ||
 		result.Routes[0].Result.Outcome.Message != "Waiting for Octavia to advertise grpc_content_type_v1" {
@@ -1374,11 +1438,28 @@ func TestRegionalGRPCContentTypePolicyTransition(t *testing.T) {
 		t.Fatalf("native policy did not converge: %+v", result)
 	}
 	advertised = false
-	reconcile(listenerPath)
-	if result := reconcile(""); listener["admin_state_up"] != false || result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing ||
-		!slices.Equal(result.Gateway.ScopedListenerReadyPorts, []int{8080}) {
-		t.Fatalf("revocation must close only the affected listener after restart: %+v", result)
+	networkOutage, discoveryOutage = true, true
+	if _, err := run(); err == nil || !strings.Contains(err.Error(), "discover Gateway Floating IPs") || len(writes) != 0 {
+		t.Fatalf("address and discovery failures must leave the verified listener serving: writes %v, error %v", writes, err)
 	}
+	discoveryOutage = false
+	fence := errors.New("Kubernetes snapshot changed")
+	spec.ValidateMutation = func(context.Context) error { return fence }
+	if _, err := run(); !errors.Is(err, fence) || len(writes) != 0 {
+		t.Fatalf("listener closure must revalidate after discovery: writes %v, error %v", writes, err)
+	}
+	spec.ValidateMutation = nil
+	assertRevoked := func(result cloud.GatewayGraphResult) {
+		t.Helper()
+		if listener["admin_state_up"] != false || result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing ||
+			result.Routes[1].Result.Outcome.State != cloud.OutcomeProgressing || result.Routes[1].Result.ObservationDeferred ||
+			result.Routes[2].Result.Outcome.State != cloud.OutcomeReady || !slices.Equal(result.Gateway.ScopedListenerReadyPorts, []int{8080}) {
+			t.Fatalf("revocation must close only the affected listener and mark all its routes progressing: %+v", result)
+		}
+	}
+	assertRevoked(reconcile(listenerPath))
+	networkOutage = false
+	assertRevoked(reconcile(""))
 	cfg.GRPCContentType = false
 	reconcile(policyPath)
 	reconcile(rulePath)
@@ -1391,7 +1472,7 @@ func TestRegionalGRPCContentTypePolicyTransition(t *testing.T) {
 
 	cfg.GRPCContentType = true
 	present = false
-	listener["l7policies"], pool["listeners"] = []record{}, []record{}
+	listener["l7policies"], pool["listeners"] = []record{{"id": "http-80"}}, []record{}
 	if result := reconcile(""); result.Routes[0].Result.Outcome.Message != "Waiting for Octavia to advertise grpc_content_type_v1" ||
 		listener["admin_state_up"] != true {
 		t.Fatalf("fresh native policy creation must wait for enrollment without closing the listener: %+v", result)

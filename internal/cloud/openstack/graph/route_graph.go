@@ -752,6 +752,7 @@ type routeMutation struct {
 	responseHeaderOperations []cloud.HTTPHeaderOperation
 	requiresExactHeaders     bool
 	requiresHTTPMethod       bool
+	probeBeforeGRPCMigration bool
 }
 
 func (s routeMutation) message() string {
@@ -1084,7 +1085,8 @@ func buildRoutePolicyPlan(
 				requestHeaderOperations: requestPatch, responseHeaderOperations: responsePatch})
 		}
 		start := len(plan)
-		if weighted == nil && !desired.fixedResponse && !observedPolicy.fixedResponse && !desiredPolicyActionMatches(wantedPolicy, policy, poolID) {
+		policyActionUpdate := weighted == nil && !desired.fixedResponse && !observedPolicy.fixedResponse && !desiredPolicyActionMatches(wantedPolicy, policy, poolID)
+		if policyActionUpdate {
 			plan = append(plan, routeMutation{kind: routeMutationUpdatePolicy, id: policy.ID, parentID: poolID, policy: wantedPolicy})
 		}
 
@@ -1132,8 +1134,19 @@ func buildRoutePolicyPlan(
 		if grpcContentTypeChanged && !observedPolicyDisabled(observedPolicy) ||
 			policy.ProvisioningStatus == "ERROR" && !targetUpdate && !headersUpdate || len(plan) > start && policy.AdminStateUp {
 			withdraw := desired.redirect || grpcContentTypeChanged
-			disablePlan = append(disablePlan, routeMutation{kind: routeMutationDisablePolicy, id: policy.ID,
-				retry: withdraw && policy.ProvisioningStatus == "ERROR", withdrawHTTPPolicy: withdraw})
+			disable := routeMutation{kind: routeMutationDisablePolicy, id: policy.ID,
+				retry: withdraw && policy.ProvisioningStatus == "ERROR", withdrawHTTPPolicy: withdraw}
+			// A verified portable policy can keep serving while discovery
+			// recovers. Predicate, target and scope drift still need withdrawal.
+			if grpcContentTypeChanged && wantedPolicy.grpcContentTypeRule == grpcContentTypeRuleType &&
+				!targetUpdate && !headersUpdate && !policyActionUpdate &&
+				observedPolicy.httpsListenerHostname == wantedPolicy.httpsListenerHostname && policy.Position == wantedPolicy.position &&
+				policy.AdminStateUp && observedForwardPolicySettled(observedPolicy) {
+				portable := wantedPolicy
+				portable.grpcContentTypeRule = l7policies.TypeHeader
+				disable.probeBeforeGRPCMigration = observedHTTPPredicateMatches(observedPolicy, rulesFor(portable, desired.hostnameRuleValue))
+			}
+			disablePlan = append(disablePlan, disable)
 		}
 		// Moving a policy changes precedence only. Keep its current admin state
 		// and predicates and let Octavia shift the other positions atomically.
