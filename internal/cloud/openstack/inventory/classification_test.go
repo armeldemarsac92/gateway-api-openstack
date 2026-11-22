@@ -278,6 +278,10 @@ func TestAuditHTTPPathResourcesShareRouteButRequireTheirOwnBackend(t *testing.T)
 	policyTags := safetyRouteTags(t, route, "http-v2/l7-policy-exact/"+first+"/"+match)
 	add(auditTypeL7Policy, "exact", "listener", policyTags, "first")
 	add(auditTypeL7Rule, "path", "exact", safetyRouteTags(t, route, "http-v2/l7-rule-path/"+first+"/"+match), "")
+	add(auditTypePool, "scalar-pool", "lb", safetyRouteTags(t, route, rolePool), "")
+	add(auditTypeL7Policy, "scalar", "listener", safetyRouteTags(t, route, rolePolicyPrefix), "scalar-pool")
+	exclusionRole := openstackidentity.ScalarHTTPHostExclusionRole(openstackidentity.HTTPRedirectKey("HOST_NAME", "EQUAL_TO", "direct.example.test"))
+	add(auditTypeL7Rule, "host-exclusion", "scalar", safetyRouteTags(t, route, exclusionRole), "")
 
 	classify := func() []audit.ResourceFinding {
 		return classifyAuditCandidates(candidates, records, auditTestScopeTags(id), id.OpenStackProjectID)
@@ -286,6 +290,22 @@ func TestAuditHTTPPathResourcesShareRouteButRequireTheirOwnBackend(t *testing.T)
 		if finding.Disposition != audit.DispositionMatched {
 			t.Fatalf("expected a matched HTTP graph, got %s: %s", finding.ID, finding.Reason)
 		}
+	}
+	guard := candidates[auditServiceOctavia+"\x00"+auditTypeL7Rule+"\x00host-exclusion"]
+	guard.observedParents, guard.reportedParents = singletonStringSet("exact"), singletonStringSet("exact")
+	if finding := auditFindingByID(t, classify(), "host-exclusion"); finding.Disposition != audit.DispositionOwnershipConflict || finding.Reason != auditReasonParentMismatch {
+		t.Fatalf("scalar exclusion attached to a grouped policy = %+v", finding)
+	}
+	foreignID := id
+	foreignID.RouteName, foreignID.RouteUID = "foreign", "foreign-uid"
+	foreign, err := openstackidentity.NewIdentity(foreignID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guard.observedParents, guard.reportedParents = singletonStringSet("scalar"), singletonStringSet("scalar")
+	guard.tags = safetyRouteTags(t, foreign, exclusionRole)
+	if finding := auditFindingByID(t, classify(), "host-exclusion"); finding.Disposition != audit.DispositionOwnershipConflict || finding.Reason != auditReasonParentMismatch {
+		t.Fatalf("foreign exclusion attached to a scalar policy = %+v", finding)
 	}
 	// Both pools belong to the same Route UID. Only the first pool belongs to this policy.
 	for _, candidate := range candidates {

@@ -101,6 +101,9 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 		default:
 			return graph.RouteInputs{}, fmt.Errorf("%w: %s fragment lifecycle is missing or invalid", cloud.ErrOwnershipConflict, kind)
 		}
+		if requested && request.Action == graph.Ensure && lifecycle != controller.RouteAttached {
+			return graph.RouteInputs{}, errHTTPRouteChanged
+		}
 		if request.Action == graph.DeleteGateway {
 			input.Nodes = append(input.Nodes, node)
 			continue
@@ -110,7 +113,8 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 			cleanups = append(cleanups, routeCleanupSnapshot{route: route, identity: identity, disposition: routeCleanupRequired})
 		} else if backends != nil {
 			if requested {
-				if !route.DeletionTimestamp.IsZero() {
+				if !route.DeletionTimestamp.IsZero() || request.HTTPRouteRejectedSections != nil &&
+					!slices.Equal(*request.HTTPRouteRejectedSections, backends.admission.rejectedSections[routeKey(route)]) {
 					return graph.RouteInputs{}, errHTTPRouteChanged
 				}
 			} else if _, eligible := backends.admission.eligible[routeKey(route)]; !eligible {

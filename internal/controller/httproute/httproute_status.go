@@ -76,6 +76,13 @@ func (r *Reconciler) setRouteStatusesAndDetach(
 	if cleanupErr == nil {
 		if providerStatusPublished {
 			scope.setStatuses(updates)
+			if route.Annotations[r.Config.RouteLifecycleAnnotation()] == controller.RouteDetaching {
+				// The detach checkpoint already verified the pre-detach election.
+				scope.statusPlan.profileObserved = false
+			}
+		} else {
+			// The rejection status was already durable before detaching.
+			scope.statusPlan = nil
 		}
 		return result, nil
 	}

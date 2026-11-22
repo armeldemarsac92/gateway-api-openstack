@@ -62,6 +62,8 @@ type Request struct {
 	HTTPRouteBackendDiagnostic *model.Diagnostic
 	// HTTPRouteBackendTLSAncestorSlot binds route status to the writer's slot observation.
 	HTTPRouteBackendTLSAncestorSlot *backendtls.AncestorSlot
+	// HTTPRouteRejectedSections ties per-parent status to the graph's profile election.
+	HTTPRouteRejectedSections *[]model.ListenerSection
 }
 
 // Reconciler is the sole Kubernetes-facing graph mutation boundary.

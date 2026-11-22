@@ -51,6 +51,8 @@ type routeStatusPlan struct {
 	referencesEvaluated bool
 	validateOwnership   bool
 	selection           routeSelection
+	profileObserved     bool
+	rejectedSections    []model.ListenerSection
 }
 
 type routeProviderWarning struct {
@@ -65,6 +67,7 @@ type httpRouteScope struct {
 	statusPlan       *routeStatusPlan
 	parentSelection  routeSelection
 	rejectedSections []model.ListenerSection
+	profileObserved  bool
 	warning          *routeProviderWarning
 	patchCause       error
 	skipPatch        bool
@@ -100,6 +103,8 @@ func (s *httpRouteScope) setStatuses(updates []parentStatusUpdate) {
 		updates:           append([]parentStatusUpdate(nil), updates...),
 		selection:         s.parentSelection,
 		validateOwnership: true,
+		profileObserved:   s.profileObserved,
+		rejectedSections:  s.rejectedSections,
 	}
 }
 
@@ -115,6 +120,8 @@ func (s *httpRouteScope) setProviderFailureStatuses(
 		policy:              policy,
 		referencesEvaluated: referencesEvaluated,
 		validateOwnership:   true,
+		profileObserved:     s.profileObserved,
+		rejectedSections:    s.rejectedSections,
 	}
 }
 
@@ -332,6 +339,22 @@ func (r *Reconciler) validateRouteStatusOwnership(
 			return previous.rejection == nil && current.rejection == nil || previous.rejection != nil && current.rejection != nil &&
 				previous.rejection.Error() == current.rejection.Error()
 		}) {
+			return errHTTPRouteChanged
+		}
+	}
+	if plan.profileObserved {
+		if !parentsShareGateway(parents) {
+			return errHTTPRouteChanged
+		}
+		gateway, expected := parents[0].gateway, plan.selection[0].parent.gateway
+		if gateway.UID != expected.UID || gateway.Generation != expected.Generation {
+			return errHTTPRouteChanged
+		}
+		admission, err := r.liveRouteGraphAdmission(ctx, gateway, route)
+		if err != nil {
+			return err
+		}
+		if !slices.Equal(plan.rejectedSections, admission.rejectedSections[routeKey(route)]) {
 			return errHTTPRouteChanged
 		}
 	}

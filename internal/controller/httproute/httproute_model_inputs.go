@@ -83,6 +83,14 @@ func routeKey(route *gatewayv1.HTTPRoute) routeObjectKey {
 	return routeObjectKey{kind: model.HTTPProfileRouteKind(route), key: client.ObjectKeyFromObject(route)}
 }
 
+func (r *Reconciler) liveRouteGraphAdmission(ctx context.Context, gateway *gatewayv1.Gateway, route *gatewayv1.HTTPRoute) (routeGraphAdmission, error) {
+	routes, err := r.liveGraphRoutes(ctx, controller.GatewayIdentity(r.Config, gateway))
+	if err != nil {
+		return routeGraphAdmission{}, err
+	}
+	return r.observeRouteGraphAdmission(ctx, gateway, routes, route)
+}
+
 func (r *Reconciler) observeRouteGraphAdmission(ctx context.Context, gateway *gatewayv1.Gateway, routes []gatewayv1.HTTPRoute, requested *gatewayv1.HTTPRoute) (routeGraphAdmission, error) {
 	identity := controller.GatewayIdentity(r.Config, gateway)
 	sets, err := gatewaycontroller.ObserveListenerSets(ctx, r.APIReader, r.Config, gateway)
