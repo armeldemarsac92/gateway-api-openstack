@@ -1,0 +1,29 @@
+# Terminate TLS for a TCP Service
+
+A Gateway listener with `protocol: TLS` and `tls.mode: Terminate` can accept client TLS for an application that speaks plaintext TCP. An attached TLSRoute selects the Service using its own hostname or the listener hostname. The listener requires an operator-enrolled certificate. A TLSRoute using passthrough on a separate Gateway can still deliver the original TLS session to its Service. [Certificate enrollment](../../../operator-https.md) · [Passthrough](tlsroute-sni.md)
+
+## Enable in an Amphora region
+
+Use Octavia `19.0.1.dev13` and octavia-lib `3.12.1.dev6`, including the corresponding database migration, worker and Amphora driver. In Octavia’s `[api_settings]`, enable `allow_tls_terminated_listeners` and include `amphora` in `enabled_tcp_tls_termination_providers`. Read the regional provider capability endpoint and check for `tcp_tls_termination_v1`. The database revision for this change is `b681388ab702`. [Octavia change](https://github.com/armeldemarsac92/octavia/pull/10) · [octavia-lib change](https://github.com/armeldemarsac92/octavia-lib/pull/6)
+
+Set `spec.memberMode: Endpoint` on the `OpenStackGatewayClassConfig`. Select IPv4 VIP and member subnets, configure Amphora to reach the Pod endpoints and check the return path from the Pods. [Direct endpoint network requirements](../../../reference/class-configuration.md#direct-endpoint-members)
+
+Use the controller’s `--octavia-tcp-tls-termination` option. The standalone and Magnum workload overlays include the operator certificate map. Enroll the exact Secret UID and resourceVersion with the existing certificate helper. Grant the Gateway access when the certificate Secret belongs to another namespace. Give the listener its own port and configure the backing Service to accept plaintext TCP. [Standalone overlay](../../../../config/octavia-tcp-tls-termination/kustomization.yaml) · [Magnum workload overlay](../../../../integrations/magnum-capi-helm/workload-octavia-tcp-tls-termination/kustomization.yaml) · [Enrollment procedure](../../../operator-https.md)
+
+Amphora exposes a TCP listener with `tcp_tls_termination=true`. SNI rules select plaintext TCP pools with `tls_enabled=false`. An unknown name on a named listener closes the connection. Removing a required grant or certificate enrollment withdraws forwarding. For rollback, drain the listener, remove its Gateway and verify cleanup in Octavia while the enrolled controller is still running.
+
+A listener and route that both omit hostnames, termination and passthrough on one port, and TLS from the load balancer to the TCP backend remain open. A mixed port reports `ProtocolConflict`. [Feature matrix](../matrix/named-contracts.md)
+
+## Local qualification
+
+Five original Gateway API v1.7.0 cases passed on each channel with controller `591810b7fee3`, Octavia `19.0.1.dev13` and octavia-lib `3.12.1.dev6`. The tests used separate kind clusters, the original TCP echo Pod, the native Octavia and Barbican APIs and Amphora-rendered HAProxy. The fixture supplied Keystone, Neutron and worker completion. [Standard results](tlsroute-termination-evidence/standard.json) · [Experimental results](tlsroute-termination-evidence/experimental.json)
+
+| Upstream case | Observed on Standard and Experimental |
+| --- | --- |
+| `TLSRouteTerminateSimpleSameNamespace` | The client negotiated TLS 1.3 and received `PONG`. The Pod received plaintext TCP on port 3000. |
+| `TLSRouteSimpleSameNamespace` | The passthrough client received `PONG` and the Pod reported a TLS 1.3 connection. |
+| `TLSRouteListenerTerminateSupportedKinds` | The terminating listener advertised TLSRoute in its supported kinds. |
+| `TLSRouteListenerMixedTerminationNotSupported` | The competing listeners reported `ProtocolConflict`, empty supported kinds and zero attached routes. |
+| `HTTPRouteDisallowedKind` | The HTTPRoute reported `Accepted=False/NotAllowedByListeners` and `ResolvedRefs=True`. The listener reported zero attachments. |
+
+For a replay, unpack the shared HTTPS fixture and the raw TLS supplement together in a new directory. The supplement includes the tested manager, provider wheels, per-case reports and invocation. Its instructions verify the SHA-256 of the shared fixture (`551fe443e951064f80d3446b93e666feacecc0c8dd8235d54468632060bdaac8`). The supplement SHA-256 is `1793be0bf491aa9673e61c0231daea2ee50e2915f6375da470ea7320f025b3c4`. [Shared fixture](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-98b0267937081ee4e2ff0c17114c2c08d9766ec8) · [Controller image and TLS supplement](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-591810b7fee341f42162be792bd8c61c2d176b37)
