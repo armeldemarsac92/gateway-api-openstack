@@ -18,7 +18,6 @@ package graph
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 
@@ -115,15 +114,15 @@ func backendRequestFilterTags(targets []octavia.WeightedHTTPTarget, observed obs
 type backendRequestFilterInventoryError struct {
 	listenerID string
 	policyID   string
+	ownedPools []observedRouteGraph
 }
 
 func (err *backendRequestFilterInventoryError) Error() string {
 	return fmt.Sprintf("L7 policy %s has incomplete or malformed Octavia backend request filter inventory", err.policyID)
 }
 
-func (p *Provider) backendFilterListenerWithInventoryError(actual observedGatewayGraph, err error) *listeners.Listener {
-	var incomplete *backendRequestFilterInventoryError
-	if !errors.As(err, &incomplete) || actual.loadBalancer == nil || actual.loadBalancer.ProvisioningStatus != "ACTIVE" {
+func (p *Provider) backendFilterListenerWithInventoryError(actual observedGatewayGraph, incomplete *backendRequestFilterInventoryError) *listeners.Listener {
+	if incomplete == nil || actual.loadBalancer == nil || actual.loadBalancer.ProvisioningStatus != "ACTIVE" {
 		return nil
 	}
 	listener := actual.listener

@@ -155,7 +155,9 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		result := p.pendingGraphResult(ctx, desired, actual)
 		return result, errors.Join(err, p.executeGraphMutation(ctx, desired, actual, step))
 	}
-	if listener := p.backendFilterListenerWithInventoryError(actual, err); listener != nil {
+	var incomplete *backendRequestFilterInventoryError
+	errors.As(err, &incomplete)
+	if listener := p.backendFilterListenerWithInventoryError(actual, incomplete); listener != nil {
 		message := "Waiting for complete Octavia backend request filter inventory"
 		actual.outcome = p.progressingOutcome(message)
 		result := p.pendingGraphResult(ctx, desired, actual)
@@ -172,16 +174,35 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		p.markGuardedHTTPListener(&result, listener.ProtocolPort, affected, message)
 		result.Gateway.HTTPPolicyTransition = true
 		closed := listener.ProvisioningStatus == "ACTIVE" && actual.adminObserved[listener.ID] && !listener.AdminStateUp
-		if closed || listener.ProvisioningStatus != "ACTIVE" && listener.ProvisioningStatus != "ERROR" {
+		if listener.ProvisioningStatus != "ACTIVE" && listener.ProvisioningStatus != "ERROR" {
 			return result, err
+		}
+		step := closeGuardedHTTPListener(*listener, message)
+		if closed {
+			if actual.protocol != cloud.ListenerProtocolHTTP || spec.Gateway.Disposition != cloud.GraphEnsure ||
+				len(incomplete.ownedPools) != len(desired.routes) {
+				return result, err
+			}
+			withdrawal := firstBackendTLSWithdrawal(backendTLSParts(&desired, incomplete.ownedPools), backendTLSPart.preflight)
+			if withdrawal == nil {
+				return result, err
+			}
+			step = *withdrawal
+			route := &result.Routes[step.routeIndex].Result
+			route.ObservationDeferred = false
+			route.Outcome = p.progressingOutcome(step.message)
 		}
 		if spec.ValidateMutation != nil {
 			if err := spec.ValidateMutation(ctx); err != nil {
 				return result, err
 			}
 		}
-		step := closeGuardedHTTPListener(*listener, message)
-		return result, errors.Join(err, p.executeGraphMutation(ctx, desired, actual, step))
+		mutationErr := p.executeGraphMutation(ctx, desired, actual, step)
+		if closed && mutationErr == nil {
+			result.Outcome.MutationSubmitted = true
+			result.Routes[step.routeIndex].Result.Outcome.MutationSubmitted = true
+		}
+		return result, errors.Join(err, mutationErr)
 	}
 	if err != nil {
 		pending := p.progressingOutcome("Waiting for the Gateway infrastructure")

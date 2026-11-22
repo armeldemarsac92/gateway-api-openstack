@@ -394,17 +394,32 @@ func (p *Provider) observeRouteGraphsFromPools(ctx context.Context, owners []rou
 		return inventory.graphs, nil
 	}
 	listenerByRoute := make(map[int]string)
+	var frontends []listeners.Listener
 	if scopedHTTP {
-		for i := range scopedListeners {
-			if err := p.observeListenerPolicies(ctx, &inventory, &scopedListeners[i], protocol, poolOwners, listenerByRoute, true); err != nil {
-				return nil, err
-			}
-		}
+		frontends = scopedListeners
 	} else if listener != nil {
 		if strictHTTP && (listener.ProjectID != p.projectID || len(listener.Loadbalancers) != 1 || listener.Loadbalancers[0].ID != lb.ID) {
 			return nil, fmt.Errorf("%w: HTTP listener %s has an unproven parent or project", cloud.ErrOwnershipConflict, listener.ID)
 		}
-		if err := p.observeListenerPolicies(ctx, &inventory, listener, protocol, poolOwners, listenerByRoute, strictHTTP); err != nil {
+		frontends = []listeners.Listener{*listener}
+	}
+	for i := range frontends {
+		if err := p.observeListenerPolicies(ctx, &inventory, &frontends[i], protocol, poolOwners, listenerByRoute, strictHTTP); err != nil {
+			var incomplete *backendRequestFilterInventoryError
+			if strictHTTP && errors.As(err, &incomplete) {
+				// Pool ownership, membership and project were proved above.
+				// Keep that readback available only for TLS withdrawal.
+				incomplete.ownedPools = make([]observedRouteGraph, len(owners))
+				for _, owner := range poolOwners {
+					if owner.route >= len(owners) {
+						continue
+					}
+					part := inventory.graphs[owner.route].part(owner.backend)
+					*incomplete.ownedPools[owner.route].part(owner.backend) = observedRouteGraph{
+						pool: part.pool, backendTLS: part.backendTLS, backendH2C: part.backendH2C, members: part.members,
+					}
+				}
+			}
 			return nil, err
 		}
 	}
