@@ -19,6 +19,14 @@ rtk kubectl --kubeconfig "$kubeconfig" --context "$context" wait \
 
 Use the namespace and class creation commands once. If either name already exists, verify ownership and configuration before proceeding. The installer verifies the chart checksums and reads the installed Gateway API version and channel before installing its four named releases. The releases add Istio's own RBAC, API and workloads. The values disable automatic creation of Istio GatewayClasses. The explicit class above selects the Service waypoint template, which provisions a ClusterIP Service. Gateway API CRDs are read-only inputs for this installer.
 
+## Enable HTTPRoutes owned by a client namespace
+
+Append `--consumer-routes` to the render or install command to select the Hibiscus build of Istio 1.31.0. This changes the istiod image. The workload nodes need access to the pinned linux/amd64 image. [Pilot image](consumer-routes.yaml) · [Source patch and image archive](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-istio-953e8af36734) · [Qualification](../../docs/qualification/v1.7.0/provider/ambient-waypoint.md#httproutes-owned-by-a-client-namespace)
+
+A client namespace on an enrolled, single-network mesh can set literal response headers for calls to a Kubernetes Service. Give the HTTPRoute a parent in the destination Service namespace, one `ResponseHeaderModifier` per rule and one backend that references the same Service and port. A parent without a port uses the backend port for that rule. The waypoint selects the route using the calling workload’s authenticated namespace. Other callers continue to receive the producer’s response. Foreign rerouting, GRPCRoute consumer attachments and Services configured for ingress forwarding through a waypoint report `Accepted=False/UnsupportedValue`.
+
+To return to the standard pilot, remove the consumer routes and verify the producer response from both namespaces. Rerun the install command with its four original arguments.
+
 ## Enroll workloads and bind one Service
 
 Get consent from the owners of each client and destination namespace. Ambient mode enrolls eligible pods throughout a labeled namespace. Use namespaces without sidecar injection, existing ambient enrollment or a namespace-level waypoint binding. Set `destination_namespace`, `client_namespace` and `service` to the selected resources. Use a cluster-internal Service and declare HTTP using `appProtocol: http` and cleartext gRPC using `appProtocol: kubernetes.io/h2c` on the relevant Service ports.
