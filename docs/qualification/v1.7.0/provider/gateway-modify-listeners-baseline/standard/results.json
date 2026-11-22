@@ -1,0 +1,42 @@
+{
+  "channel": "standard",
+  "controllerRevision": "1206fc60da9dbbb1f6557ed7cb62ff0c84e8ff00",
+  "managerSHA256": "893c49789c73be394fa74b3775ec5104b15c51fa7c6c2117ab05c26bf5e5e480",
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+  "octavia": {
+    "version": "19.0.1.dev32",
+    "sha256": "40e81eef37b31a10145c1d01f51a1fb91e7fab672ce58fe51501533922e70f8a",
+    "filesVerified": 639
+  },
+  "octaviaLib": {
+    "version": "3.12.1.dev9",
+    "sha256": "5fcb4353562d5d7269c63d058c791cd68b75dc1b7dafdd08b40d2ca5c05e009b",
+    "filesVerified": 24
+  },
+  "HAProxy": {
+    "version": "3.0.19-ade9c1262-octavia-strict-dns-v1",
+    "sha256": "fa8468efa26f95ed83a36afeb97b79730de285450b7a8fae94f7cf5e6d2d0824"
+  },
+  "case": "GatewayModifyListeners",
+  "result": {
+    "status": "failed",
+    "passed": false,
+    "expectedSubtests": 2,
+    "subtestsPassed": 1,
+    "groups": {
+      "should_be_able_to_add_a_listener_that_then_becomes_available_for_routing_traffic": {
+        "status": "FAIL"
+      },
+      "should_be_able_to_remove_listeners,_which_would_then_stop_routing_the_relevant_traffic": {
+        "status": "PASS"
+      }
+    },
+    "upstreamSHA256": {
+      "gateway-modify-listeners.go": "bec872bd4827515dbb1d5d3bb2d0d0e13d48337676a5be0a373a1c0aa9830166",
+      "gateway-modify-listeners.yaml": "ca1920e2547cb540583bc08617b5b5e72e528ef3674d0df3482f927eaaa84cdd"
+    },
+    "exit": 1
+  },
+  "upstreamReportSHA256": "256f3915dca09cd156af8c30f6dca2ab315d055621b60196dc771d15b2aab535"
+}
