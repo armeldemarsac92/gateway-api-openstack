@@ -36,6 +36,8 @@ func (s *Service) ListListeners(ctx context.Context, opts listeners.ListOpts) ([
 type ListenerInventory struct {
 	DefaultHTTPResponseCodes map[string]int
 	HTTPSVirtualHosts        map[string][]string
+	TCPTLSTermination        map[string]bool
+	SNICertificatesObserved  map[string]bool
 	Items                    []listeners.Listener
 	DefaultPoolsObserved     bool
 	AdminStatesObserved      map[string]bool
@@ -49,6 +51,8 @@ func (s *Service) ListListenerInventory(ctx context.Context, opts listeners.List
 	var response struct {
 		Listeners []struct {
 			listeners.Listener
+			TCPTLSTermination   *bool           `json:"tcp_tls_termination"`
+			SNICertificates     *[]string       `json:"sni_container_refs"`
 			VirtualHosts        json.RawMessage `json:"https_virtual_hosts"`
 			DefaultHTTPResponse *struct {
 				StatusCode int `json:"status_code"`
@@ -68,6 +72,19 @@ func (s *Service) ListListenerInventory(ctx context.Context, opts listeners.List
 	for i, observed := range response.Listeners {
 		item := &inventory.Items[i]
 		*item = observed.Listener
+		if observed.SNICertificates != nil {
+			item.SniContainerRefs = *observed.SNICertificates
+			if inventory.SNICertificatesObserved == nil {
+				inventory.SNICertificatesObserved = make(map[string]bool)
+			}
+			inventory.SNICertificatesObserved[item.ID] = true
+		}
+		if observed.TCPTLSTermination != nil {
+			if inventory.TCPTLSTermination == nil {
+				inventory.TCPTLSTermination = make(map[string]bool)
+			}
+			inventory.TCPTLSTermination[item.ID] = *observed.TCPTLSTermination
+		}
 		if observed.VirtualHosts != nil {
 			if inventory.HTTPSVirtualHosts == nil {
 				inventory.HTTPSVirtualHosts = make(map[string][]string)
@@ -107,6 +124,24 @@ func (s *Service) ListListenerInventory(ctx context.Context, opts listeners.List
 // CreateListener creates one listener.
 func (s *Service) CreateListener(ctx context.Context, opts listeners.CreateOpts) (*listeners.Listener, error) {
 	return listeners.Create(ctx, s.client, opts).Extract()
+}
+
+type tcpTLSListenerOptions struct{ listeners.CreateOpts }
+
+func (opts tcpTLSListenerOptions) ToListenerCreateMap() (map[string]any, error) {
+	body, err := opts.CreateOpts.ToListenerCreateMap()
+	if err == nil {
+		body["listener"].(map[string]any)["tcp_tls_termination"] = true
+	}
+	return body, err
+}
+
+// CreateTCPTLSListener creates a disabled TCP listener with immutable termination.
+func (s *Service) CreateTCPTLSListener(ctx context.Context, opts listeners.CreateOpts) (*listeners.Listener, error) {
+	if opts.Protocol != listeners.ProtocolTCP || opts.DefaultTlsContainerRef == "" || opts.AdminStateUp == nil || *opts.AdminStateUp {
+		return nil, fmt.Errorf("TCP TLS termination requires a disabled TCP listener and a default certificate")
+	}
+	return listeners.Create(ctx, s.client, tcpTLSListenerOptions{opts}).Extract()
 }
 
 // UpdateListener updates one listener.

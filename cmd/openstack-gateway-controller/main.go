@@ -104,7 +104,7 @@ func run(ctx context.Context) error {
 		apiBurst           int
 	)
 	var httpsListenerIsolation bool
-	var exactHTTPHeaders, httpMethodMatch, requestHeaderModifier, backendH2C, tlsSNIPassthrough, tlsSNISuffix bool
+	var exactHTTPHeaders, httpMethodMatch, requestHeaderModifier, backendH2C, tlsSNIPassthrough, tlsSNISuffix, tcpTLSTermination bool
 	zapOptions := zap.Options{Development: false}
 	zapOptions.BindFlags(flag.CommandLine)
 	flag.StringVar(&controllerName, "controller-name", envOr("GATEWAY_OPENSTACK_CONTROLLER_NAME", configv1alpha1.GroupName+"/gateway-api-openstack"), "Gateway API controllerName for this installation")
@@ -114,12 +114,13 @@ func run(ctx context.Context) error {
 	flag.BoolVar(&fixedHTTPResponses, "octavia-fixed-http-responses", false, "use the advertised Octavia fixed HTTP response capability")
 	flag.BoolVar(&weightedTargets, "octavia-weighted-http-targets", false, "use the advertised Octavia weighted HTTP target capability (requires --octavia-fixed-http-responses)")
 	flag.BoolVar(&tlsSNIPassthrough, "octavia-tls-sni-passthrough", false, "use the advertised Octavia TCP SNI passthrough capability for TLSRoutes")
+	flag.BoolVar(&tcpTLSTermination, "octavia-tcp-tls-termination", false, "use the advertised Octavia TCP termination capability for TLSRoutes with operator-enrolled certificates")
 	flag.BoolVar(&tlsSNISuffix, "octavia-tls-sni-suffix", false, "use the advertised Octavia wildcard SNI capability (requires --octavia-tls-sni-passthrough)")
 	flag.BoolVar(&backendTLSPolicy, "octavia-backend-tls-policy", false, "authenticate BackendTLSPolicy HTTP upstreams with the regional Octavia hostname capability and a Barbican CA (requires --octavia-microversion=2.8 or newer)")
 	flag.BoolVar(&httpsListenerIsolation, "octavia-https-listener-isolation", false, "isolate terminated HTTPS sections on a shared port using the regional Octavia capability (requires --tls-certificate-map)")
 	flag.BoolVar(&backendH2C, "octavia-backend-h2c", false, "use the advertised Octavia h2c backend transport capability")
 	flag.BoolVar(&requestHeaderModifier, "octavia-request-header-modifier", false, "use the advertised Octavia L7 request header operations capability")
-	flag.StringVar(&certificateMap, "tls-certificate-map", envOr("GATEWAY_OPENSTACK_TLS_CERTIFICATE_MAP", ""), "operator-managed TLS revision map for HTTPS listeners")
+	flag.StringVar(&certificateMap, "tls-certificate-map", envOr("GATEWAY_OPENSTACK_TLS_CERTIFICATE_MAP", ""), "operator-managed TLS revision map for terminating listeners")
 	flag.StringVar(&clusterID, "cluster-id", envOr("GATEWAY_OPENSTACK_CLUSTER_ID", ""), "stable unique identifier for this Kubernetes cluster (required)")
 	flag.StringVar(&region, "openstack-region", envOr("OS_REGION_NAME", ""), "OpenStack region; defaults to clouds.yaml or OS_REGION_NAME")
 	flag.StringVar(&microversion, "octavia-microversion", "2.5", "Octavia API microversion (2.5 or later is required for resource tags)")
@@ -168,6 +169,7 @@ func run(ctx context.Context) error {
 		HTTPSListenerIsolation:  httpsListenerIsolation,
 		TLSSNIPassthrough:       tlsSNIPassthrough,
 		TLSSNISuffix:            tlsSNISuffix,
+		TCPTLSTermination:       tcpTLSTermination,
 		ClusterID:               clusterID,
 		OpenStackResyncInterval: resyncInterval,
 	}
@@ -219,6 +221,7 @@ func run(ctx context.Context) error {
 		BackendH2C:            backendH2C,
 		TLSSNIPassthrough:     tlsSNIPassthrough,
 		TLSSNISuffix:          tlsSNISuffix,
+		TCPTLSTermination:     tcpTLSTermination,
 		OperationTimeout:      operationTimeout,
 		PollInterval:          pollInterval,
 
@@ -341,7 +344,7 @@ func requireGatewayAPIs(restConfig *rest.Config, cfg controller.Config) error {
 	if cfg.BackendTLSPolicy {
 		requiredResources = append(requiredResources, "backendtlspolicies")
 	}
-	if cfg.TLSSNIPassthrough {
+	if cfg.TLSRoutesEnabled() {
 		requiredResources = append(requiredResources, "tlsroutes")
 	}
 	for _, required := range requiredResources {

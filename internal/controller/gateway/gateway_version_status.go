@@ -20,6 +20,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"strconv"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -29,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 )
@@ -67,6 +70,10 @@ func (r *Reconciler) setGatewayUnsupportedVersion(
 		controller.UnsupportedGatewayAPIVersionMessage,
 		gateway.Generation,
 	))
+	scope.rawTLSVersionUnsupported = r.boundListenerProtocol(gateway) == cloud.ListenerProtocolTLSTerminate
+	if scope.rawTLSVersionUnsupported {
+		r.markRawTLSVersionUnsupported(gateway)
+	}
 	result, withdrawn, err := r.withdrawBoundTLS(ctx, gateway)
 	if usesHTTPSProfile(r.Config, gateway) {
 		r.applyHTTPSListenerStatus(gateway, scope.original.Status, nil, &graph.TLSAuthorizationChanged{Ports: httpsPorts(gateway)}, false)
@@ -89,6 +96,24 @@ func (r *Reconciler) setGatewayUnsupportedVersion(
 		result.RequeueAfter = controller.GatewayAPIVersionRequeueAfter(gateway.UID)
 	}
 	return result, nil
+}
+
+func (r *Reconciler) markRawTLSVersionUnsupported(gateway *gatewayv1.Gateway) {
+	message := controller.UnsupportedGatewayAPIVersionMessage
+	controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionProgrammed),
+		metav1.ConditionFalse, string(gatewayv1.GatewayReasonPending), message, gateway.Generation))
+	// The bound termination profile has only one listener. Limit the
+	// condition to that TLS section if the desired spec now has siblings.
+	port, _ := strconv.Atoi(gateway.Annotations[r.Config.GatewayListenerPortAnnotation()])
+	for i := range gateway.Status.Listeners {
+		status := &gateway.Status.Listeners[i]
+		if len(gateway.Status.Listeners) == 1 || slices.ContainsFunc(gateway.Spec.Listeners, func(listener gatewayv1.Listener) bool {
+			return listener.Name == status.Name && int(listener.Port) == port && terminatesTLS(&listener)
+		}) {
+			controller.SetCondition(&status.Conditions, controller.Condition(string(gatewayv1.ListenerConditionProgrammed),
+				metav1.ConditionFalse, string(gatewayv1.ListenerReasonPending), message, gateway.Generation))
+		}
+	}
 }
 
 func (r *Reconciler) gatewayStillManaged(

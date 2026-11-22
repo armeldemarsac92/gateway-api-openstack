@@ -80,6 +80,23 @@ func (p *Provider) GetGateway(
 	if err != nil {
 		return cloud.GatewayResult{}, false, err
 	}
+	if slices.Contains(loadBalancer.Tags, tcpTLSProfileTag) {
+		if markedProtocol != "" {
+			return cloud.GatewayResult{}, false, fmt.Errorf("%w: TCP TLS termination requires a dedicated listener", cloud.ErrOwnershipConflict)
+		}
+		listener, err := p.managedRawTLSListener(identity, loadBalancer, inventory, 0)
+		if err != nil {
+			return cloud.GatewayResult{}, false, err
+		}
+		state := cloud.GatewayState{LoadBalancerID: loadBalancer.ID, VIPPortID: loadBalancer.VipPortID, VIPAddress: loadBalancer.VipAddress}
+		if listener != nil {
+			state.ListenerID = listener.ID
+		}
+		return cloud.GatewayResult{State: state, Outcome: p.progressingOutcome("TCP TLS readiness requires the authorized Gateway graph")}, true, nil
+	}
+	if err := validateRawTLSDefault(inventory); err != nil {
+		return cloud.GatewayResult{}, false, err
+	}
 	listenerList := inventory.Items
 	var observed []listeners.Listener
 	var unverifiedAnchor int

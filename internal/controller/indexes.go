@@ -295,7 +295,7 @@ func controllerFieldIndexes(config Config) []controllerFieldIndex {
 			}},
 		)
 	}
-	if config.TLSSNIPassthrough {
+	if config.TLSRoutesEnabled() {
 		indexes = append(indexes, controllerFieldIndex{object: &gatewayv1.TLSRoute{}, field: IndexTLSRouteByGateway, extract: func(object client.Object) []string {
 			parents, statuses, _ := RouteParents(object)
 			keys := append(parentGatewayKeys(object.GetNamespace(), parents), statusGatewayKeys(config, object.GetNamespace(), statuses)...)

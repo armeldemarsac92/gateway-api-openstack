@@ -23,6 +23,7 @@ import (
 	"slices"
 
 	"k8s.io/apimachinery/pkg/api/equality"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -36,21 +37,45 @@ const sniParentNoMatchingListenerMessage = "The parentRef does not select a list
 // Gateway API limits RouteStatus.Parents to 32 entries across all controllers.
 const maxSNIRouteParentStatuses = 32
 
-func (r *Reconciler) reconcileSNIParentStatuses(ctx context.Context, key client.ObjectKey) error {
+func (r *Reconciler) reconcileSNIParentStatuses(ctx context.Context, key client.ObjectKey, versionBlocked *gatewayv1.Gateway) error {
+	if r.APIReader == nil {
+		return controller.ErrAPIReaderRequired
+	}
 	var routes gatewayv1.TLSRouteList
-	if err := r.List(ctx, &routes, client.MatchingFields{controller.IndexTLSRouteByGateway: controller.ObjectKeyString(key)}); err != nil {
-		return fmt.Errorf("list TLSRoutes for Gateway: %w", err)
+	if r.Config.TLSRoutesEnabled() {
+		if err := r.List(ctx, &routes, client.MatchingFields{controller.IndexTLSRouteByGateway: controller.ObjectKeyString(key)}); err != nil {
+			return fmt.Errorf("list TLSRoutes for Gateway: %w", err)
+		}
+	} else {
+		// The index is disabled after opt-out, but existing statuses can
+		// still belong to a bound TCP TLS listener.
+		if err := r.APIReader.List(ctx, &routes); err != nil {
+			if meta.IsNoMatchError(err) || apierrors.IsNotFound(err) {
+				return nil
+			}
+			return err
+		}
+		if routes.Continue != "" {
+			return fmt.Errorf("incomplete TLSRoute inventory")
+		}
+		target := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: key.Namespace, Name: key.Name}}
+		routes.Items = slices.DeleteFunc(routes.Items, func(route gatewayv1.TLSRoute) bool {
+			return !slices.ContainsFunc(route.Spec.ParentRefs, func(ref gatewayv1.ParentReference) bool {
+				return sniParentTargetsGateway(route.Namespace, ref, target)
+			}) && !slices.ContainsFunc(route.Status.Parents, func(status gatewayv1.RouteParentStatus) bool {
+				return r.ownsSNIParent(&route, target, status)
+			})
+		})
 	}
 	if len(routes.Items) == 0 {
 		return nil
-	}
-	if r.APIReader == nil {
-		return controller.ErrAPIReaderRequired
 	}
 	gateway, managed, err := r.readSNIParentGateway(ctx, key)
 	if err != nil {
 		return err
 	}
+	rawTLSVersionUnsupported := versionBlocked != nil && gateway.UID == versionBlocked.UID &&
+		gateway.Generation == versionBlocked.Generation && controller.GatewayBindingMetadataEqual(r.Config, gateway, versionBlocked)
 	var reportErr error
 	for i := range routes.Items {
 		var route gatewayv1.TLSRoute
@@ -64,6 +89,9 @@ func (r *Reconciler) reconcileSNIParentStatuses(ctx context.Context, key client.
 		target := route.DeepCopy()
 		if managed {
 			r.updateSNIRouteParents(target, gateway, func(status *gatewayv1.RouteParentStatus) bool {
+				if rawTLSVersionUnsupported {
+					return r.invalidateSNIForwarding(status, route.Generation)
+				}
 				reason, message := r.sniParentListenerRejection(gateway.Spec.Listeners, status.ParentRef)
 				if reason == "" {
 					return false
@@ -81,12 +109,24 @@ func (r *Reconciler) reconcileSNIParentStatuses(ctx context.Context, key client.
 		if err != nil {
 			return errors.Join(reportErr, err)
 		}
-		if managed != stillManaged || gateway.UID != latest.UID || gateway.Generation != latest.Generation {
+		if managed != stillManaged || gateway.UID != latest.UID || gateway.Generation != latest.Generation ||
+			rawTLSVersionUnsupported && !controller.GatewayBindingMetadataEqual(r.Config, gateway, latest) {
 			return errors.Join(reportErr, errGatewayChanged)
 		}
 		reportErr = errors.Join(reportErr, r.patchSNIRouteStatus(ctx, &route, target))
 	}
 	return reportErr
+}
+
+func (r *Reconciler) invalidateSNIForwarding(status *gatewayv1.RouteParentStatus, generation int64) bool {
+	programmedType, targetType := r.Config.Domain()+"/Programmed", r.Config.Domain()+"/ForwardingTarget"
+	if !meta.IsStatusConditionTrue(status.Conditions, programmedType) && meta.FindStatusCondition(status.Conditions, targetType) == nil {
+		return false
+	}
+	controller.SetCondition(&status.Conditions, controller.Condition(programmedType, metav1.ConditionFalse,
+		string(gatewayv1.RouteReasonPending), controller.UnsupportedGatewayAPIVersionMessage, generation))
+	meta.RemoveStatusCondition(&status.Conditions, targetType)
+	return true
 }
 
 func (r *Reconciler) readSNIParentGateway(ctx context.Context, key client.ObjectKey) (*gatewayv1.Gateway, bool, error) {
@@ -116,7 +156,7 @@ func (r *Reconciler) sniParentListenerRejection(listeners []gatewayv1.Listener, 
 			continue
 		}
 		selected = true
-		if listener.Protocol == gatewayv1.TLSProtocolType && len(listenerSupportedRouteKinds(r.Config, listener)) > 0 {
+		if listener.Protocol == gatewayv1.TLSProtocolType && len(listenerSupportedRouteKinds(r.Config, listener)) > 0 && !mixedTLSModes(listeners, listener) {
 			return "", ""
 		}
 	}

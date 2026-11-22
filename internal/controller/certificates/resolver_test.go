@@ -68,6 +68,9 @@ func TestCrossNamespaceGrantRevocationPrecedesMetadataRead(t *testing.T) {
 	if !reflect.DeepEqual(reader.reads, []string{"grants certs", "metadata certs/web"}) {
 		t.Fatalf("unexpected read sequence: %v", reader.reads)
 	}
+	listener.Protocol = gatewayv1.TLSProtocolType
+	listener.TLS.Mode = ptr.To(gatewayv1.TLSModeTerminate)
+	expectResolution(t, resolver, gateway, listener, firstID, "")
 	resolver.DiscoverEndpoint = func() (string, error) {
 		t.Fatal("reference status reached Barbican endpoint discovery")
 		return "", nil

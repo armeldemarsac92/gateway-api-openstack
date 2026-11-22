@@ -1,4 +1,4 @@
-// Package certificates resolves operator-enrolled revisions for HTTPS listeners.
+// Package certificates resolves operator-enrolled revisions for terminating listeners.
 package certificates
 
 import (
@@ -101,7 +101,7 @@ func (r *Resolver) authorizedBinding(ctx context.Context, gateway *gatewayv1.Gat
 
 func certificateTarget(gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) (client.ObjectKey, bool) {
 	tls := listener.TLS
-	if listener.Protocol != gatewayv1.HTTPSProtocolType || tls == nil ||
+	if (listener.Protocol != gatewayv1.HTTPSProtocolType && listener.Protocol != gatewayv1.TLSProtocolType) || tls == nil ||
 		(tls.Mode != nil && *tls.Mode != gatewayv1.TLSModeTerminate) ||
 		len(tls.CertificateRefs) != 1 || len(tls.Options) != 0 ||
 		(gateway.Spec.TLS != nil && (gateway.Spec.TLS.Frontend != nil || gateway.Spec.TLS.Backend != nil)) {

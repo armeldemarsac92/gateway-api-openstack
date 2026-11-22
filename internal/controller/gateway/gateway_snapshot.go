@@ -84,7 +84,7 @@ func (r *Reconciler) observeGatewayMutationSnapshot(
 	); err != nil {
 		return nil, errors.Join(errGatewayChanged, client.IgnoreNotFound(err))
 	}
-	if gatewayClass.Spec.ControllerName != r.Config.ControllerName || ((r.gatewayUsesListenerScope(&gateway) || r.Config.TLSSNIPassthrough && hasSNIPassthroughListener(&gateway)) && !gatewayClass.DeletionTimestamp.IsZero()) {
+	if gatewayClass.Spec.ControllerName != r.Config.ControllerName || ((r.gatewayUsesListenerScope(&gateway) || r.Config.TLSRoutesEnabled() && hasTLSListener(&gateway)) && !gatewayClass.DeletionTimestamp.IsZero()) {
 		return nil, errGatewayChanged
 	}
 	if !controller.GatewayClassSupportsInstalledVersion(&gatewayClass) {
@@ -281,7 +281,7 @@ func (r *Reconciler) gatewayNeedsBinding(gateway *gatewayv1.Gateway) bool {
 
 func (r *Reconciler) gatewayListenerNeedsReplacement(gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) bool {
 	storedPort := gateway.Annotations[r.Config.GatewayListenerPortAnnotation()]
-	return storedPort != "" && (storedPort != r.desiredListenerPort(gateway, listener) || r.boundListenerProtocol(gateway) != listenerFamily(listener))
+	return storedPort != "" && (storedPort != r.desiredListenerPort(gateway, listener) || r.boundListenerProtocol(gateway) != listenerBindingProtocol(listener))
 }
 
 func (r *Reconciler) desiredListenerPort(gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) string {
@@ -406,7 +406,7 @@ func (r *Reconciler) observeGatewayCleanupSnapshot(
 	if r.gatewayListenerNeedsReplacement(&gateway, listener) {
 		snapshot.disposition = gatewayCleanupRebuild
 		snapshot.listenerPort = strconv.Itoa(int(listener.Port))
-		snapshot.listenerProtocol = listenerFamily(listener)
+		snapshot.listenerProtocol = listenerBindingProtocol(listener)
 		return snapshot, nil
 	}
 
