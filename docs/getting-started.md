@@ -460,6 +460,22 @@ independently of the fixed-response and weighted-target flags.
 Kustomize deployments can add the standalone `config/components/octavia-request-header-modifier` component.
 [Provider setup and API contract](qualification/v1.7.0/provider/octavia-policy-header-proposal.md) · [Local qualification](qualification/v1.7.0/provider/opt-in-request-header-modifier.md)
 
+With a compatible provider advertising `response_header_operations_v1`, add
+`--octavia-response-header-modifier` or use
+`config/octavia-response-header-modifier` to enable rule-level HTTPRoute
+`ResponseHeaderModifier`. The filter sets, adds or removes response headers
+on the winning rule, including rules whose backends share a pool. To combine
+a request and a response filter on one rule, enable both flags or add both
+Kustomize components. Their declaration order is interchangeable.
+
+The modifier works with configured forwarding, weighted and fixed HTTP
+actions. A rule combining this filter with `RequestRedirect`, a filter on a
+`backendRef`, or a modification to a listener-managed connection or framing
+header is rejected. Removing the filter clears its operations in Octavia.
+If reconciliation confirms that an active policy's provider stopped
+advertising the capability, the controller closes the affected listener until
+it can verify the policy again or withdraw the response operations. [Provider packages and local traffic results](qualification/v1.7.0/provider/opt-in-response-header-modifier.md)
+
 ## Safe removal
 
 Keep the controller, its application credential, and OpenStack access running until every managed HTTPRoute, TCPRoute, UDPRoute and Gateway has finished finalization.

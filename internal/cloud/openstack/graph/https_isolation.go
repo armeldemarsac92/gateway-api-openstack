@@ -265,6 +265,7 @@ func (actual observedGatewayGraph) isolatedPoliciesReady(desired desiredGatewayG
 				return current.role == policy.role && current.policy.ListenerID == listener.ID &&
 					current.httpsListenerHostname == policy.httpsListenerHostname && current.policy.AdminStateUp &&
 					slices.Equal(current.requestHeaderOperations, policy.requestHeaderOperations) &&
+					slices.Equal(current.responseHeaderOperations, policy.responseHeaderOperations) &&
 					(route.redirect && observedForwardPolicySettled(current) && desiredPolicyActionMatches(policy, current.policy, "") &&
 						observedHTTPPredicateMatches(current, rulesFor(policy, route.hostnameRuleValue)) ||
 						!route.redirect && observedForwardPolicyMatches(route, observed, current))

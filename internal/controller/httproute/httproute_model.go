@@ -110,11 +110,8 @@ func (r *Reconciler) usesHTTPBackendGroups(route *gatewayv1.HTTPRoute) bool {
 	if len(rule.Matches) > 1 || len(rule.Matches) == 1 && (len(rule.Matches[0].Headers) != 0 || rule.Matches[0].Method != nil) {
 		return true
 	}
-	if !r.Config.RequestHeaderModifier || len(rule.Filters) != 1 || rule.Filters[0].Type != gatewayv1.HTTPRouteFilterRequestHeaderModifier {
-		return false
-	}
-	filter := rule.Filters[0].RequestHeaderModifier
-	return filter != nil && (len(filter.Set) != 0 || len(filter.Add) != 0 || len(filter.Remove) != 0)
+	request, response, _ := model.NormalizeHTTPHeaderFilters(rule.Filters, r.Config.RequestHeaderModifier, r.Config.ResponseHeaderModifier)
+	return len(request) != 0 || len(response) != 0
 }
 
 func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, grpc bool) error {
@@ -126,7 +123,7 @@ func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, grpc bool) 
 		return newRouteBuildError(routeErrorUnsupported, "timeouts, retries, and session persistence are not supported")
 	}
 	if len(rule.Filters) != 0 || !fixedResponses && !weightedTargets {
-		if err := compileRouteAction(rule, r.Config.RequestHeaderModifier); err != nil {
+		if err := compileRouteAction(rule, r.Config.RequestHeaderModifier, r.Config.ResponseHeaderModifier && !grpc); err != nil {
 			return err
 		}
 	}
@@ -403,6 +400,7 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 			Hostname: match.Hostname, PathType: cloud.PathMatchType(match.Match.PathType), PathValue: match.Match.PathValue, Precedence: match.Precedence,
 			HTTPSListenerHostname: match.httpsListenerHostname,
 			Method:                match.Match.Method, Headers: match.Match.Headers, RequestHeaderOperations: operations,
+			ResponseHeaderOperations: rules[match.RuleIndex].ResponseHeaderOperations,
 		})
 	}
 	return firstDiagnostic, nil

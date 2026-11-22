@@ -19,22 +19,47 @@ limitations under the License.
 package model
 
 import (
-	"errors"
+	"fmt"
 
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 )
 
-// NormalizeRequestHeaderModifier lowers the rule's single supported request filter.
-func NormalizeRequestHeaderModifier(filters []gatewayv1.HTTPRouteFilter) ([]cloud.HTTPHeaderOperation, error) {
-	if len(filters) != 1 || filters[0].Type != gatewayv1.HTTPRouteFilterRequestHeaderModifier ||
-		filters[0].RequestHeaderModifier == nil {
-		return nil, errors.New("a RequestHeaderModifier must specify one request header filter")
+// NormalizeHTTPHeaderFilters compiles at most one filter for each direction.
+// Request and response operations act on independent messages.
+func NormalizeHTTPHeaderFilters(filters []gatewayv1.HTTPRouteFilter, requestEnabled, responseEnabled bool) (request, response []cloud.HTTPHeaderOperation, err error) {
+	seen := make(map[gatewayv1.HTTPRouteFilterType]bool, len(filters))
+	for _, filter := range filters {
+		var enabled bool
+		var headerFilter *gatewayv1.HTTPHeaderFilter
+		var operations *[]cloud.HTTPHeaderOperation
+		switch filter.Type {
+		case gatewayv1.HTTPRouteFilterRequestHeaderModifier:
+			enabled, headerFilter, operations = requestEnabled, filter.RequestHeaderModifier, &request
+		case gatewayv1.HTTPRouteFilterResponseHeaderModifier:
+			enabled, headerFilter, operations = responseEnabled, filter.ResponseHeaderModifier, &response
+		default:
+			return nil, nil, fmt.Errorf("HTTPRoute filter %s is not supported in this combination", filter.Type)
+		}
+		if !enabled {
+			return nil, nil, fmt.Errorf("%s requires route-scoped header operations in Octavia", filter.Type)
+		}
+		if seen[filter.Type] || headerFilter == nil {
+			return nil, nil, fmt.Errorf("%s must specify one header filter per rule", filter.Type)
+		}
+		seen[filter.Type] = true
+		*operations, err = normalizeHTTPHeaderFilter(filter.Type, headerFilter)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
-	filter := filters[0].RequestHeaderModifier
+	return request, response, nil
+}
+
+func normalizeHTTPHeaderFilter(kind gatewayv1.HTTPRouteFilterType, filter *gatewayv1.HTTPHeaderFilter) ([]cloud.HTTPHeaderOperation, error) {
 	if len(filter.Set) > 16 || len(filter.Add) > 16 || len(filter.Remove) > 16 {
-		return nil, errors.New("request header modifier supports up to 16 headers per operation type")
+		return nil, fmt.Errorf("%s supports up to 16 headers per operation type", kind)
 	}
 
 	operations := make([]cloud.HTTPHeaderOperation, 0, len(filter.Set)+len(filter.Add)+len(filter.Remove))
@@ -46,6 +71,9 @@ func NormalizeRequestHeaderModifier(filters []gatewayv1.HTTPRouteFilter) ([]clou
 	}
 	for _, header := range filter.Remove {
 		operations = append(operations, cloud.HTTPHeaderOperation{Operation: cloud.HTTPHeaderRemove, Name: header})
+	}
+	if kind == gatewayv1.HTTPRouteFilterResponseHeaderModifier {
+		return cloud.NormalizeHTTPResponseHeaderOperations(operations)
 	}
 	return cloud.NormalizeHTTPHeaderOperations(operations)
 }

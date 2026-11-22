@@ -20,32 +20,47 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 )
 
-type policyWithRequestHeaders struct {
-	update     l7policies.UpdateOptsBuilder
-	operations []cloud.HTTPHeaderOperation
+const (
+	requestHeaderOperationsField  = "request_header_operations"
+	responseHeaderOperationsField = "response_header_operations"
+)
+
+// PolicyHeaders preserves omission (nil) and explicit removal (empty) independently.
+type PolicyHeaders struct {
+	Request, Response []cloud.HTTPHeaderOperation
 }
 
-func (opts policyWithRequestHeaders) ToL7PolicyUpdateMap() (map[string]any, error) {
+func (headers PolicyHeaders) write(body map[string]any) {
+	writePolicyHeaderOperations(body, requestHeaderOperationsField, headers.Request)
+	writePolicyHeaderOperations(body, responseHeaderOperationsField, headers.Response)
+}
+
+type policyWithHeaders struct {
+	update  l7policies.UpdateOptsBuilder
+	headers PolicyHeaders
+}
+
+func (opts policyWithHeaders) ToL7PolicyUpdateMap() (map[string]any, error) {
 	body, err := opts.update.ToL7PolicyUpdateMap()
 	if err == nil {
-		writePolicyRequestHeaderOperations(body, opts.operations)
+		opts.headers.write(body)
 	}
 	return body, err
 }
 
-// UpdatePolicyRequestHeaders can change the target and header operations in
-// one update. A nil slice omits the field and an empty slice clears it.
-func (s *Service) UpdatePolicyRequestHeaders(ctx context.Context, id string, opts l7policies.UpdateOptsBuilder, operations []cloud.HTTPHeaderOperation) (*l7policies.L7Policy, error) {
-	return l7policies.Update(ctx, s.client, id, policyWithRequestHeaders{update: opts, operations: operations}).Extract()
+// UpdatePolicyHeaders can change the target and header operations in one update.
+func (s *Service) UpdatePolicyHeaders(ctx context.Context, id string, opts l7policies.UpdateOptsBuilder, headers PolicyHeaders) (*l7policies.L7Policy, error) {
+	return l7policies.Update(ctx, s.client, id, policyWithHeaders{update: opts, headers: headers}).Extract()
 }
 
-func writePolicyRequestHeaderOperations(body map[string]any, operations []cloud.HTTPHeaderOperation) {
+func writePolicyHeaderOperations(body map[string]any, field string, operations []cloud.HTTPHeaderOperation) {
 	if operations == nil {
 		return
 	}
@@ -57,13 +72,13 @@ func writePolicyRequestHeaderOperations(body map[string]any, operations []cloud.
 		}
 		entries = append(entries, entry)
 	}
-	body["l7policy"].(map[string]any)["request_header_operations"] = entries
+	body["l7policy"].(map[string]any)[field] = entries
 }
 
-func readPolicyRequestHeaderOperations(raw json.RawMessage) ([]cloud.HTTPHeaderOperation, error) {
+func readPolicyHeaderOperations(raw json.RawMessage, field string) ([]cloud.HTTPHeaderOperation, error) {
 	var entries []map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &entries); err != nil || entries == nil {
-		return nil, errors.New("request_header_operations must be an array")
+		return nil, fmt.Errorf("%s must be an array", field)
 	}
 	operations := make([]cloud.HTTPHeaderOperation, 0, len(entries))
 	for _, entry := range entries {
@@ -71,7 +86,7 @@ func readPolicyRequestHeaderOperations(raw json.RawMessage) ([]cloud.HTTPHeaderO
 		var name *string
 		if json.Unmarshal(entry["operation"], &operation) != nil || operation == nil ||
 			json.Unmarshal(entry["name"], &name) != nil || name == nil {
-			return nil, errors.New("request header operation requires an action and a name")
+			return nil, errors.New("header operation requires an action and a name")
 		}
 		decoded := cloud.HTTPHeaderOperation{Operation: *operation, Name: *name}
 		if *operation == cloud.HTTPHeaderRemove {
@@ -89,6 +104,9 @@ func readPolicyRequestHeaderOperations(raw json.RawMessage) ([]cloud.HTTPHeaderO
 	}
 	if len(operations) == 0 {
 		return operations, nil
+	}
+	if field == responseHeaderOperationsField {
+		return cloud.NormalizeHTTPResponseHeaderOperations(operations)
 	}
 	return cloud.NormalizeHTTPHeaderOperations(operations)
 }

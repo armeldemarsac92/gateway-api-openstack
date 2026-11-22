@@ -21,13 +21,14 @@ package cloud
 import (
 	"cmp"
 	"errors"
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
 	"unicode/utf8"
 )
 
-// HTTPHeaderAction is one request header modification.
+// HTTPHeaderAction is one HTTP header modification.
 type HTTPHeaderAction string
 
 const (
@@ -84,35 +85,54 @@ func NormalizeHTTPHeaderMatches(headers []HTTPHeaderMatch) ([]HTTPHeaderMatch, e
 
 // NormalizeHTTPHeaderOperations validates literal operations and canonicalizes names.
 func NormalizeHTTPHeaderOperations(operations []HTTPHeaderOperation) ([]HTTPHeaderOperation, error) {
+	return normalizeHTTPHeaderOperations(operations, false)
+}
+
+// NormalizeHTTPResponseHeaderOperations also checks fields managed by Octavia.
+func NormalizeHTTPResponseHeaderOperations(operations []HTTPHeaderOperation) ([]HTTPHeaderOperation, error) {
+	return normalizeHTTPHeaderOperations(operations, true)
+}
+
+func normalizeHTTPHeaderOperations(operations []HTTPHeaderOperation, response bool) ([]HTTPHeaderOperation, error) {
+	direction := "request"
+	if response {
+		direction = "response"
+	}
 	if len(operations) == 0 {
 		return nil, nil
 	}
 	if len(operations) > 48 {
-		return nil, errors.New("request header modifier has more than 48 operations")
+		return nil, fmt.Errorf("%s header modifier has more than 48 operations", direction)
 	}
 	seen := make(map[string]bool, len(operations))
 	normalized := make([]HTTPHeaderOperation, 0, len(operations))
 	for _, operation := range operations {
 		if !httpHeaderName.MatchString(operation.Name) {
-			return nil, errors.New("invalid request header name")
+			return nil, fmt.Errorf("invalid %s header name", direction)
 		}
 		operation.Name = strings.ToLower(operation.Name)
+		if response {
+			switch operation.Name {
+			case "connection", "content-length", "keep-alive", "proxy-connection", "te", "trailer", "transfer-encoding", "upgrade":
+				return nil, fmt.Errorf("response header %q is managed by the Octavia listener", operation.Name)
+			}
+		}
 		if seen[operation.Name] {
-			return nil, errors.New("request header operation names must be unique regardless of case")
+			return nil, fmt.Errorf("%s header operation names must be unique regardless of case", direction)
 		}
 		seen[operation.Name] = true
 		switch operation.Operation {
 		case HTTPHeaderSet, HTTPHeaderAdd:
 			if !utf8.ValidString(operation.Value) || utf8.RuneCountInString(operation.Value) > 4096 ||
 				strings.ContainsFunc(operation.Value, func(c rune) bool { return c < ' ' && c != 9 || c == 127 }) {
-				return nil, errors.New("invalid request header value")
+				return nil, fmt.Errorf("invalid %s header value", direction)
 			}
 		case HTTPHeaderRemove:
 			if operation.Value != "" {
-				return nil, errors.New("REMOVE takes a request header name without a value")
+				return nil, fmt.Errorf("REMOVE takes a %s header name without a value", direction)
 			}
 		default:
-			return nil, errors.New("unrecognized request header operation")
+			return nil, fmt.Errorf("unrecognized %s header operation", direction)
 		}
 		normalized = append(normalized, operation)
 	}
