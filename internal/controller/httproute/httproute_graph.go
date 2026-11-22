@@ -40,6 +40,7 @@ const (
 
 type routeGraphResult struct {
 	bindingState           routeBindingState
+	selection              routeSelection
 	rejectedSections       []model.ListenerSection
 	backendObserved        bool
 	backendDiagnostic      model.Diagnostic
@@ -71,17 +72,15 @@ func (r *Reconciler) ensureRouteGraph(
 		return routeGraphResult{}, fmt.Errorf("gateway graph writer is required")
 	}
 	prepared, err := r.prepareRouteGraphBinding(ctx, expectedRoute, expectedGateway)
-	if err != nil {
-		return routeGraphResult{}, err
-	}
-	if prepared.bindingState != routeBindingReady {
-		return prepared, nil
+	if err != nil || prepared.bindingState != routeBindingReady {
+		return prepared, err
 	}
 	expectedIdentity := controller.RouteIdentity(r.Config, expectedGateway, expectedRoute)
 	request := graph.Request{
 		Identity: expectedIdentity,
 		Action:   graph.Ensure, Gateway: expectedGateway, Route: expectedRoute,
 		HTTPRouteBackendDiagnostic: &prepared.backendDiagnostic,
+		HTTPRouteRejectedSections:  &prepared.rejectedSections,
 	}
 	if r.Config.BackendTLSPolicy {
 		request.HTTPRouteBackendTLSAncestorSlot = &prepared.backendTLSAncestorSlot
@@ -130,14 +129,15 @@ func (r *Reconciler) prepareRouteGraphBinding(ctx context.Context, route *gatewa
 	}
 	defer release()
 	snapshot, err := r.buildRouteValidationSnapshot(ctx, route, gateway, routeSnapshotForEnsure)
-	if err != nil {
-		return routeGraphResult{}, err
-	}
 	prepared := routeGraphResult{
+		selection:              snapshot.selection,
 		rejectedSections:       snapshot.rejectedSections,
 		backendObserved:        snapshot.backends != nil,
 		backendDiagnostic:      snapshot.backendDiagnostic,
 		backendTLSAncestorSlot: snapshot.backendTLSAncestorSlot,
+	}
+	if err != nil {
+		return prepared, err
 	}
 	switch snapshot.disposition {
 	case routeValidationGatewayPending:

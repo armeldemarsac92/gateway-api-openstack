@@ -700,8 +700,11 @@ func auditRouteFragmentParentMatches(child, parent *auditCandidate, matchPath bo
 	if childRedirect || parentRedirect {
 		return matchPath && childRedirect && parentRedirect && childRedirectMatch == parentRedirectMatch && childCell == parentCell
 	}
-	_, childBackend, childMatch, childFragment := openstackidentity.ParseHTTPFragmentRole(childRole)
+	childBase, childBackend, childMatch, childFragment := openstackidentity.ParseHTTPFragmentRole(childRole)
 	_, parentBackend, parentMatch, parentFragment := openstackidentity.ParseHTTPFragmentRole(parentRole)
+	if matchPath && childBase == openstackidentity.RoleRuleHTTPHostExclusion && childFragment && childBackend == "" && childMatch == "" {
+		return parentRole == rolePolicyExact || parentRole == rolePolicyPrefix
+	}
 	return childFragment == parentFragment && childBackend == parentBackend &&
 		(!matchPath || childMatch == parentMatch && openstackidentity.IsHTTPWeightedPolicyRole(childRole) == openstackidentity.IsHTTPWeightedPolicyRole(parentRole))
 }

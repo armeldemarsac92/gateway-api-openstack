@@ -74,6 +74,7 @@ type routeValidationSnapshot struct {
 	route                  *gatewayv1.HTTPRoute
 	gateway                *gatewayv1.Gateway
 	parents                []managedRouteParent
+	selection              routeSelection
 	binding                routeBindingSnapshot
 	desired                cloud.RouteSpec
 	backends               *routeModelInputs
@@ -100,6 +101,7 @@ type routeCleanupSnapshot struct {
 	attachmentRevoked bool
 	bundleUnsupported bool
 	parents           []routeParentObservation
+	profileRejected   bool
 }
 
 func (r *Reconciler) buildRouteValidationSnapshot(
@@ -147,18 +149,19 @@ func (r *Reconciler) buildRouteValidationSnapshotFromInputs(
 		}
 	}
 	key := routeKey(snapshot.route)
-	if inputs.admission.profileRejectedParent(key) {
-		return routeValidationSnapshot{}, routeSnapshotRejection(purpose, routeProfileConflict())
-	}
 	selection, _, err := r.selectRouteParents(ctx, snapshot.route, snapshot.parents, inputs.input.ListenerSetSections)
 	if err != nil {
 		return routeValidationSnapshot{}, err
 	}
+	snapshot.selection = selection
 	snapshot.rejectedSections = inputs.admission.rejectedSections[key]
+	if inputs.admission.profileRejectedParent(key) {
+		return snapshot, routeSnapshotRejection(purpose, routeProfileConflict())
+	}
 	selection = selection.withoutProfileConflicts(snapshot.rejectedSections)
 	listeners := selection.listeners()
 	if len(listeners) == 0 {
-		return routeValidationSnapshot{}, routeSnapshotRejection(purpose, selection[0].rejection)
+		return snapshot, routeSnapshotRejection(purpose, selection[0].rejection)
 	}
 	if controller.GatewayListenerScope(r.Config, snapshot.gateway) != gatewayv1.HTTPProtocolType {
 		if gatewaycontroller.RequiresHTTPListenerScope(r.Config, snapshot.gateway) {
@@ -183,7 +186,7 @@ func (r *Reconciler) buildRouteValidationSnapshotFromInputs(
 	}
 	desired, diagnostic, err := r.buildRouteModelFromInputs(ctx, r.APIReader, snapshot.route, snapshot.gateway, listeners, inputs)
 	if err != nil {
-		return routeValidationSnapshot{}, routeSnapshotReadError(purpose, err)
+		return snapshot, routeSnapshotReadError(purpose, err)
 	}
 	snapshot.desired = desired
 	snapshot.backends = inputs
@@ -587,15 +590,12 @@ func (r *Reconciler) buildRouteCleanupSnapshot(
 		return snapshot, nil
 	}
 	if r.Config.GRPCExactMethodEnabled() {
-		routes, err := r.liveGraphRoutes(ctx, controller.GatewayIdentity(r.Config, parent.gateway))
-		if err != nil {
-			return routeCleanupSnapshot{}, err
-		}
-		admission, err := r.observeRouteGraphAdmission(ctx, parent.gateway, routes, &route)
+		admission, err := r.liveRouteGraphAdmission(ctx, parent.gateway, &route)
 		if err != nil {
 			return routeCleanupSnapshot{}, err
 		}
 		if admission.profileRejectedParent(routeKey(&route)) {
+			snapshot.profileRejected = true
 			return snapshot, nil
 		}
 	}
@@ -603,6 +603,8 @@ func (r *Reconciler) buildRouteCleanupSnapshot(
 	if err != nil {
 		var buildError *routeBuildError
 		if errors.As(err, &buildError) {
+			// ListenerSet projection can change after the earlier attachment read.
+			snapshot.attachmentRevoked = buildError.kind == routeErrorNoMatchingParent
 			return snapshot, nil
 		}
 		return routeCleanupSnapshot{}, err
@@ -669,15 +671,6 @@ func (r *Reconciler) sealRouteCleanupSnapshot(
 			return errHTTPRouteChanged
 		}
 	}
-	if snapshot.attachmentRevoked {
-		_, rejection, err := r.liveBoundRouteAttachment(ctx, &route, stored)
-		if err != nil {
-			return err
-		}
-		if rejection == nil {
-			return errHTTPRouteChanged
-		}
-	}
 	if snapshot.parents != nil {
 		parents, err := r.observeRouteParents(ctx, r.APIReader, &route)
 		if err != nil {
@@ -685,6 +678,19 @@ func (r *Reconciler) sealRouteCleanupSnapshot(
 		}
 		if !slices.EqualFunc(snapshot.parents, parents, sameCleanupParentObservation) {
 			return errHTTPRouteChanged
+		}
+		if snapshot.profileRejected {
+			managedParents := managedParentsFromObservations(parents)
+			if !parentsShareGateway(managedParents) {
+				return errHTTPRouteChanged
+			}
+			admission, err := r.liveRouteGraphAdmission(ctx, managedParents[0].gateway, &route)
+			if err != nil {
+				return err
+			}
+			if !admission.profileRejectedParent(routeKey(&route)) {
+				return errHTTPRouteChanged
+			}
 		}
 	}
 	if snapshot.bundleUnsupported {
@@ -696,11 +702,25 @@ func (r *Reconciler) sealRouteCleanupSnapshot(
 			return err
 		}
 	}
+	if snapshot.attachmentRevoked {
+		_, rejection, err := r.liveBoundRouteAttachment(ctx, &route, stored)
+		if err != nil {
+			return err
+		}
+		if rejection == nil {
+			return errHTTPRouteChanged
+		}
+	}
 	return nil
 }
 
 func sameCleanupParentObservation(a, b routeParentObservation) bool {
-	if a.managed != b.managed || (a.gateway == nil) != (b.gateway == nil) || (a.gatewayClass == nil) != (b.gatewayClass == nil) {
+	if a.managed != b.managed || (a.gateway == nil) != (b.gateway == nil) || (a.gatewayClass == nil) != (b.gatewayClass == nil) ||
+		(a.listenerSet == nil) != (b.listenerSet == nil) {
+		return false
+	}
+	if a.listenerSet != nil && (a.listenerSet.UID != b.listenerSet.UID || a.listenerSet.Generation != b.listenerSet.Generation ||
+		!a.listenerSet.DeletionTimestamp.Equal(b.listenerSet.DeletionTimestamp)) {
 		return false
 	}
 	if a.gateway != nil && (a.gateway.UID != b.gateway.UID || a.gateway.Generation != b.gateway.Generation) {

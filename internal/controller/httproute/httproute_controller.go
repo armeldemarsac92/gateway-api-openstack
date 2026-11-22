@@ -332,7 +332,11 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 ) (ctrl.Result, error) {
 	httpRoute := scope.route
 	graphResult, err := r.ensureRouteGraph(ctx, httpRoute, parent.gateway)
-	scope.rejectedSections = graphResult.rejectedSections
+	if graphResult.selection != nil {
+		scope.parentSelection = graphResult.selection
+		scope.rejectedSections = graphResult.rejectedSections
+		scope.profileObserved = r.Config.GRPCExactMethodEnabled()
+	}
 	if err != nil {
 		if errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) {
 			return r.setRouteUnsupportedVersion(ctx, scope)
