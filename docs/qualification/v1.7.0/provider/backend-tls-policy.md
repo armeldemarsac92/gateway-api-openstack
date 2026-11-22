@@ -26,6 +26,8 @@ The earlier registered `BackendTLSPolicy` run used manager `939285c` on each cha
 
 ## Traffic observed locally
 
+A subsequent cold replay passed all 13 policy conflict checks on each channel. The shared HTTPS replay exercised the full primary case and CA replacement. The reports retain the outcome of each attempt. [Controller revisions, fixture and reports](shared-https.md#cold-replay)
+
 The separate wire runs used the four rules in one HTTPRoute and a dedicated HTTPS Gateway. A Kubernetes API server stored the policies and ConfigMaps. The controller used the public Octavia and Barbican APIs. Amphora rendered the configuration for native HAProxy, and an isolated echo peer reported its backend SNI. Identity, networking and worker transport used local fixtures. [Standard traffic receipt](backend-tls-policy-evidence/standard-traffic.json) · [Experimental traffic receipt](backend-tls-policy-evidence/experimental-traffic.json)
 
 | Request after reconciliation | Standard | Experimental |

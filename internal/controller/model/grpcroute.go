@@ -67,17 +67,35 @@ func ProjectGRPCRoute(route *gatewayv1.GRPCRoute) *gatewayv1.HTTPRoute {
 			BackendRefs: []gatewayv1.HTTPBackendRef{{BackendRef: *backend.BackendRef.DeepCopy()}},
 		}
 		for _, match := range rule.Matches {
-			method := match.Method
-			if len(match.Headers) != 0 || method == nil || ptr.Deref(method.Type, gatewayv1.GRPCMethodMatchExact) != gatewayv1.GRPCMethodMatchExact ||
-				method.Service == nil || method.Method == nil || !grpcServiceName.MatchString(*method.Service) || !grpcMethodName.MatchString(*method.Method) {
+			projectedMatch, ok := projectGRPCMatch(match)
+			if !ok {
 				return projected
 			}
-			lowered.Matches = append(lowered.Matches, gatewayv1.HTTPRouteMatch{
-				Path: &gatewayv1.HTTPPathMatch{Type: ptr.To(gatewayv1.PathMatchExact), Value: ptr.To("/" + *method.Service + "/" + *method.Method)},
-			})
+			lowered.Matches = append(lowered.Matches, projectedMatch)
 		}
 		rules = append(rules, lowered)
 	}
 	projected.Spec.Rules = rules
 	return projected
+}
+
+func projectGRPCMatch(match gatewayv1.GRPCRouteMatch) (gatewayv1.HTTPRouteMatch, bool) {
+	var projected gatewayv1.HTTPRouteMatch
+	if method := match.Method; method != nil {
+		if ptr.Deref(method.Type, gatewayv1.GRPCMethodMatchExact) != gatewayv1.GRPCMethodMatchExact ||
+			method.Service == nil || method.Method == nil || !grpcServiceName.MatchString(*method.Service) || !grpcMethodName.MatchString(*method.Method) {
+			return projected, false
+		}
+		projected.Path = &gatewayv1.HTTPPathMatch{Type: ptr.To(gatewayv1.PathMatchExact), Value: ptr.To("/" + *method.Service + "/" + *method.Method)}
+	} else if len(match.Headers) == 0 {
+		return projected, false
+	}
+	for _, header := range match.Headers {
+		// The HTTP normalizer applies the same first-entry and exact-match rules.
+		projected.Headers = append(projected.Headers, gatewayv1.HTTPHeaderMatch{
+			Type: ptr.To(gatewayv1.HeaderMatchType(ptr.Deref(header.Type, gatewayv1.GRPCHeaderMatchExact))),
+			Name: gatewayv1.HTTPHeaderName(header.Name), Value: header.Value,
+		})
+	}
+	return projected, true
 }
