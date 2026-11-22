@@ -110,6 +110,7 @@ type desiredRoute struct {
 	weightedTargets        []desiredHTTPWeightedTarget
 	targetsPending         bool
 	zeroWeightOnly         bool
+	grpcFailurePoolID      string
 	weightedAuthorizations map[string]map[string]int
 	backendTLS             backendTLSPlan
 }

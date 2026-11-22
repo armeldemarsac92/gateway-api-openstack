@@ -22,6 +22,7 @@ import (
 	"strings"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -169,6 +170,62 @@ func TestGRPCRequestHeaderModifierFollowsItsMethod(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("request headers by method = %#v, want %#v", got, want)
+	}
+}
+
+func TestGRPCRouteWeightedH2CBackends(t *testing.T) {
+	cfg := testConfig()
+	cfg.BackendH2C, cfg.FixedHTTPResponses, cfg.WeightedHTTPTargets = true, true, true
+	_, gateway := providerRouteParentObjects(cfg)
+	v1, ep1, node := validNodePortBackend(gateway.Namespace, "v1")
+	v2, ep2, _ := validNodePortBackend(gateway.Namespace, "v2")
+	v3, ep3, _ := validNodePortBackend(gateway.Namespace, "v3")
+	for _, service := range []*corev1.Service{v1, v2, v3} {
+		service.Spec.Ports[0].AppProtocol = ptr.To("kubernetes.io/h2c")
+	}
+	reader := indexedFakeClientBuilder(testScheme(t), cfg).WithObjects(v1, ep1, v2, ep2, v3, ep3, node).Build()
+	route := &gatewayv1.GRPCRoute{ObjectMeta: metav1.ObjectMeta{Namespace: gateway.Namespace, Name: "weighted", UID: "route-uid"}}
+	route.Spec.ParentRefs = []gatewayv1.ParentReference{{Name: gatewayv1.ObjectName(gateway.Name)}}
+	rule := grpcRule("v1")
+	rule.BackendRefs = append(rule.BackendRefs, grpcRule("v2").BackendRefs[0], grpcRule("v3").BackendRefs[0])
+	for index, weight := range []int32{70, 30, 0} {
+		rule.BackendRefs[index].Weight = ptr.To(weight)
+	}
+	route.Spec.Rules = []gatewayv1.GRPCRouteRule{rule}
+	projected := model.ProjectGRPCRoute(route)
+	r := &Reconciler{Config: cfg}
+	desired, err := r.buildRouteModelWithReader(t.Context(), reader, projected, gateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !desired.GRPC || len(desired.HTTPBackends) != 3 || len(desired.WeightedHTTPRules) != 1 {
+		t.Fatalf("expected three backend pools and a weighted gRPC rule, got %#v", desired)
+	}
+	for index, backend := range desired.HTTPBackends {
+		if backend.Name != string(rule.BackendRefs[index].Name) || !backend.BackendH2C {
+			t.Fatalf("unexpected gRPC pool: %#v", backend)
+		}
+	}
+	wantTargets := []cloud.HTTPWeightedTarget{{BackendIndex: ptr.To(0), Weight: 70}, {BackendIndex: ptr.To(1), Weight: 30}, {BackendIndex: ptr.To(2), Weight: 0}}
+	if !reflect.DeepEqual(desired.WeightedHTTPRules[0].Targets, wantTargets) {
+		t.Fatalf("weighted gRPC targets = %#v", desired.WeightedHTTPRules[0].Targets)
+	}
+
+	denied := projected.DeepCopy()
+	denied.Spec.Rules[0].BackendRefs[1].Namespace = ptr.To(gatewayv1.Namespace("restricted"))
+	desired, err = r.buildRouteModelWithReader(t.Context(), reader, denied, gateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantTargets = []cloud.HTTPWeightedTarget{{BackendIndex: ptr.To(0), Weight: 70}, {Weight: 30}, {BackendIndex: ptr.To(1), Weight: 0}}
+	if len(desired.HTTPBackends) != 2 || len(desired.WeightedHTTPRules) != 1 ||
+		!reflect.DeepEqual(desired.WeightedHTTPRules[0].Targets, wantTargets) {
+		t.Fatalf("unauthorized gRPC target did not retain its failure share: %#v", desired)
+	}
+
+	r.Config.WeightedHTTPTargets = false
+	if _, err := r.buildRouteModelWithReader(t.Context(), reader, projected, gateway); err == nil || !strings.Contains(err.Error(), "--octavia-weighted-http-targets") {
+		t.Fatalf("multi-backend GRPCRoute requires the weighted provider opt-in: %v", err)
 	}
 }
 

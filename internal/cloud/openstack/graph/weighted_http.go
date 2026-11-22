@@ -29,6 +29,9 @@ import (
 const maxWeightedHTTPTargets = 16
 const maxHTTPTargetWeight = 1_000_000
 
+// The reserved identity does not overlap any Kubernetes Service port.
+var grpcFailurePoolKey = openstackidentity.HTTPBackendKey("", "grpc-unavailable", 0)
+
 type desiredHTTPWeightedTarget struct {
 	backendKey string
 	weight     int
@@ -82,16 +85,32 @@ func (p *Provider) buildDesiredWeightedHTTPParts(spec cloud.RouteSpec) ([]desire
 				backend := spec.HTTPBackends[index]
 				wanted.backendKey = openstackidentity.HTTPBackendPoolKey(backend)
 				used[index] = true
+			} else if spec.GRPC && target.Weight > 0 {
+				// Octavia fixed targets only support HTTP 404 and 500. An
+				// empty pool returns HTTP 503, which gRPC maps to UNAVAILABLE.
+				wanted.backendKey = grpcFailurePoolKey
 			}
 			part.weightedTargets = append(part.weightedTargets, wanted)
 		}
 		if total == 0 {
-			return invalid(errors.New("weighted HTTP rules require positive total target weight"))
+			if !spec.GRPC {
+				return invalid(errors.New("weighted HTTP rules require positive total target weight"))
+			}
+			// Capture just this match without forwarding to any declared Service.
+			part.weightedTargets = []desiredHTTPWeightedTarget{{backendKey: grpcFailurePoolKey, weight: 1}}
 		}
 		if err := p.buildHTTPMatchPolicies(&part, rule.Matches); err != nil {
 			return invalid(err)
 		}
 		parts = append(parts, part)
+	}
+	if spec.GRPC {
+		failure, err := p.buildDesiredRoutePart(partSpec, grpcFailurePoolKey, true)
+		if err != nil {
+			return nil, nil, err
+		}
+		failure.healthMonitor = cloud.HealthMonitorConfig{}
+		parts = append(parts, failure)
 	}
 	return parts, used, nil
 }
@@ -175,7 +194,7 @@ func resolveWeightedHTTPPart(part desiredRoute, route desiredRoute, observed obs
 			policy.requestHeaderOperations = nil
 		}
 		serving := servingWeightedPoolIDs(*policy, observed.httpParts[part.backendKey], listenerID)
-		plan := &weightedHTTPPolicyPlan{}
+		plan := &weightedHTTPPolicyPlan{pending: part.spec.GRPC && part.grpcFailurePoolID == ""}
 		for _, target := range part.weightedTargets {
 			resolved := octavia.WeightedHTTPTarget{Weight: target.weight}
 			if !policy.localRewriteFallback && target.backendKey != "" && !denied[target.backendKey] {
@@ -188,7 +207,11 @@ func resolveWeightedHTTPPart(part desiredRoute, route desiredRoute, observed obs
 				}
 			}
 			if resolved.PoolID == "" {
-				resolved = fixedWeightedHTTPTarget(target.weight)
+				if part.spec.GRPC {
+					resolved.PoolID = part.grpcFailurePoolID
+				} else {
+					resolved = fixedWeightedHTTPTarget(target.weight)
+				}
 			}
 			plan.targets = append(plan.targets, resolved)
 		}
@@ -196,6 +219,19 @@ func resolveWeightedHTTPPart(part desiredRoute, route desiredRoute, observed obs
 		part.targetsPending = part.targetsPending || plan.pending
 	}
 	return part
+}
+
+func observedGRPCFailurePoolID(route desiredRoute, observed observedRouteGraph) string {
+	if !route.spec.GRPC {
+		return ""
+	}
+	failure := observed.httpParts[grpcFailurePoolKey]
+	if failure == nil || failure.pool == nil || len(failure.members) != 0 ||
+		!failure.pool.AdminStateUp || failure.pool.ProvisioningStatus != "ACTIVE" ||
+		failure.pool.Protocol != cloud.ListenerProtocolHTTP || failure.pool.TLSEnabled {
+		return ""
+	}
+	return failure.pool.ID
 }
 
 func servingWeightedPoolIDs(wanted desiredPolicy, actual *observedRouteGraph, listenerID string) map[string]bool {
@@ -385,8 +421,15 @@ func weightedTargetWithdrawals(desired desiredRoute, observed observedRouteGraph
 		var withdrawn []octavia.WeightedHTTPTarget
 		zeroed := -1
 		retrySafeTarget := false
+		failureTarget := func(weight int) octavia.WeightedHTTPTarget {
+			if desired.spec.GRPC {
+				return octavia.WeightedHTTPTarget{Weight: weight, PoolID: desired.grpcFailurePoolID}
+			}
+			return fixedWeightedHTTPTarget(weight)
+		}
 		for i, target := range policy.weightedTargets {
-			if target.PoolID == "" {
+			if target.PoolID == "" && !desired.spec.GRPC ||
+				target.PoolID != "" && target.PoolID == desired.grpcFailurePoolID {
 				retrySafeTarget = true
 				continue
 			}
@@ -402,13 +445,13 @@ func weightedTargetWithdrawals(desired desiredRoute, observed observedRouteGraph
 				withdrawn[i].Weight = 0
 				zeroed = i
 			} else {
-				withdrawn[i] = fixedWeightedHTTPTarget(target.Weight)
+				withdrawn[i] = failureTarget(target.Weight)
 			}
 		}
 		if zeroed != -1 && !slices.ContainsFunc(withdrawn, func(target octavia.WeightedHTTPTarget) bool { return target.Weight > 0 }) {
 			// Octavia requires positive total weight. Keep this predicate
 			// closed while its replacement has no prepared positive pool.
-			withdrawn[zeroed] = fixedWeightedHTTPTarget(policy.weightedTargets[zeroed].Weight)
+			withdrawn[zeroed] = failureTarget(policy.weightedTargets[zeroed].Weight)
 		}
 		retry := withdrawn == nil || !policy.policy.AdminStateUp || policy.policy.ProvisioningStatus == "ERROR"
 		if withdrawn == nil && retrySafeTarget && policy.policy.ProvisioningStatus == "ERROR" {
@@ -419,6 +462,15 @@ func weightedTargetWithdrawals(desired desiredRoute, observed observedRouteGraph
 		if withdrawn != nil {
 			if policy.hasRequestURLRewrite() && !observedPolicyDisabled(policy) {
 				steps = append(steps, routeMutation{kind: routeMutationDisablePolicy, id: policy.policy.ID, retry: retry})
+				continue
+			}
+			if desired.spec.GRPC && desired.grpcFailurePoolID == "" {
+				// An older policy may predate the reserved pool, or that pool
+				// may need repair. Close the policy without sending RPCs to a
+				// revoked backend or programming an HTTP-only error response.
+				if policy.policy.AdminStateUp || policy.policy.ProvisioningStatus == "ERROR" {
+					steps = append(steps, routeMutation{kind: routeMutationDisablePolicy, id: policy.policy.ID, retry: retry})
+				}
 				continue
 			}
 			steps = append(steps, routeMutation{kind: routeMutationSetPolicyTarget, id: policy.policy.ID, weightedTargets: &withdrawn, retry: retry, withdrawHTTPPolicy: true})

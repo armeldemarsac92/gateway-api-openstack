@@ -34,6 +34,7 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
 func TestBackendTLSPolicyProtectsOneWeightedShare(t *testing.T) {
@@ -97,6 +98,55 @@ func TestBackendTLSPolicyProtectsOneWeightedShare(t *testing.T) {
 	require.NoError(t, f.client.Get(t.Context(), key, f.route))
 	require.Len(t, f.route.Status.Parents, 1)
 	require.True(t, meta.IsStatusConditionTrue(f.route.Status.Parents[0].Conditions, string(gatewayv1.RouteConditionResolvedRefs)))
+}
+
+func TestGRPCZeroWeightBackendResolvesIncompatibleTLS(t *testing.T) {
+	f, _, grpc := newRouteElectionFixture(t)
+	f.reconciler.Config.WeightedHTTPTargets = true
+	f.reconciler.Config.BackendTLSPolicy = true
+	f.service.Spec.Ports[0].AppProtocol = ptr.To("kubernetes.io/h2c")
+	require.NoError(t, f.client.Update(t.Context(), f.service))
+	zero := f.service.DeepCopy()
+	zero.Name, zero.UID, zero.ResourceVersion = "zero", "zero-uid", ""
+	ref := grpc.Spec.Rules[0].BackendRefs[0].DeepCopy()
+	ref.Name, ref.Weight = gatewayv1.ObjectName(zero.Name), ptr.To(int32(0))
+	grpc.Spec.Rules[0].BackendRefs = append(grpc.Spec.Rules[0].BackendRefs, *ref)
+	policy := &gatewayv1.BackendTLSPolicy{
+		ObjectMeta: metav1.ObjectMeta{Namespace: zero.Namespace, Name: "require-tls", UID: "policy-uid"},
+		Spec: gatewayv1.BackendTLSPolicySpec{
+			TargetRefs: []gatewayv1.LocalPolicyTargetReferenceWithSectionName{{
+				LocalPolicyTargetReference: gatewayv1.LocalPolicyTargetReference{Kind: "Service", Name: gatewayv1.ObjectName(zero.Name)},
+			}},
+			Validation: gatewayv1.BackendTLSPolicyValidation{Hostname: "api.example.test", WellKnownCACertificates: ptr.To(gatewayv1.WellKnownCACertificatesSystem)},
+		},
+	}
+	projected := model.ProjectGRPCRoute(grpc)
+	require.NoError(t, f.reconciler.applyRouteBinding(projected, f.gateway))
+	grpc.Annotations, grpc.Finalizers = projected.Annotations, projected.Finalizers
+	f.create(t, zero, grpc, policy)
+
+	provider := &recordingProvider{}
+	r := newTestReconciler(*f.reconciler, provider).forRouteKind(model.GRPCRouteKind)
+	key := client.ObjectKeyFromObject(grpc)
+	_, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: key})
+	require.NoError(t, err)
+	require.NoError(t, f.client.Get(t.Context(), key, grpc))
+	require.Len(t, grpc.Status.Parents, 1)
+	resolved := meta.FindStatusCondition(grpc.Status.Parents[0].Conditions, string(gatewayv1.RouteConditionResolvedRefs))
+	require.NotNil(t, resolved)
+	require.Equal(t, metav1.ConditionFalse, resolved.Status)
+	require.Equal(t, string(gatewayv1.RouteReasonUnsupportedProtocol), resolved.Reason)
+	require.NotEmpty(t, provider.routeSpecs)
+	for _, spec := range provider.routeSpecs {
+		if spec.GRPC {
+			require.Len(t, spec.HTTPBackends, 1)
+			require.Len(t, spec.WeightedHTTPRules, 1)
+			require.Equal(t, 0, spec.WeightedHTTPRules[0].Targets[1].Weight)
+			require.Nil(t, spec.WeightedHTTPRules[0].Targets[1].BackendIndex)
+			return
+		}
+	}
+	t.Fatal("missing GRPCRoute in provider graph")
 }
 
 func TestBackendTLSAncestorCapacityPreservesRowsAndAllocatesOneReplacement(t *testing.T) {

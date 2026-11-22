@@ -1,11 +1,11 @@
 # Reproduce the Hibiscus development image
 
-The ordinary and no-cache linux/amd64 builds produced the same OCI manifest. The archived executable ran the original HTTPRoute URL rewrite cases on both local kind clusters. The hostname and path cases passed. The case with a filter on a backend reference failed at route acceptance. [Build record](image.json) · [Case results](provider/http-request-url-rewrite.md)
+The ordinary and no-cache linux/amd64 builds produced the same OCI manifest. The archived executable passed the original weighted GRPCRoute ingress case on Standard and Experimental and served the ReferenceGrant lifecycle checks. [Build record](image.json) · [Status and traffic](provider/opt-in-grpc-h2c.md#weighted-grpcroute-backends)
 
 On a linux/amd64 host, use a separate checkout of the recorded revision. The Dockerfile pins the Go 1.27.4 builder and distroless base by digest. Podman uses a fixed timestamp, and the build writes the full commit into the binary and the OCI revision label. The verification command exports gzip-compressed layers.
 
 ```sh
-revision=1206fc60da9dbbb1f6557ed7cb62ff0c84e8ff00
+revision=f70be140741c0b15fe4b0da6b440661fc4641ef2
 test "$(git rev-parse HEAD)" = "$revision"
 image="localhost/hibiscus-controller:$revision"
 make container-build CONTAINER_TOOL=podman VERSION="$revision" IMAGE="$image"
