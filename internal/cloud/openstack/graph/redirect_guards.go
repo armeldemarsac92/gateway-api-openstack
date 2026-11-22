@@ -278,12 +278,11 @@ func redirectCells(match cloud.HTTPPathMatch, forwards []cloud.HTTPPathMatch) ([
 		if d.host != "" {
 			positives++
 		}
-		const maxRules = 50 // Octavia MAX_L7RULES_PER_L7POLICY
-		if len(cell.guards)+positives > maxRules {
+		if len(cell.guards)+positives > maxOctaviaL7RulesPerPolicy {
 			cell.guards = compactRedirectGuards(cell.guards)
 		}
-		if count := len(cell.guards) + positives; count > maxRules {
-			return nil, fmt.Errorf("controller encoding of redirect for host %q and path %q requires %d rules in one policy, exceeding the Octavia limit of %d", d.host, match.PathValue, count, maxRules)
+		if count := len(cell.guards) + positives; count > maxOctaviaL7RulesPerPolicy {
+			return nil, fmt.Errorf("controller encoding of redirect for host %q and path %q requires %d rules in one policy, exceeding the Octavia limit of %d", d.host, match.PathValue, count, maxOctaviaL7RulesPerPolicy)
 		}
 		cells = append(cells, cell)
 	}

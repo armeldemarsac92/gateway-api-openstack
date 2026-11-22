@@ -1059,6 +1059,7 @@ func buildRoutePolicyPlan(
 			plan = append(plan, routeMutation{kind: routeMutationSetPolicyHTTPSListenerHostname, id: policy.ID, policy: wantedPolicy})
 			continue
 		}
+		policyPlanStart := len(plan)
 		weighted := wantedPolicy.weightedPlan
 		targetUpdate := weighted != nil && (!slices.EqualFunc(weighted.targets, observedPolicy.weightedTargets, weightedTargetsEqual) || policy.ProvisioningStatus == "ERROR") ||
 			desired.fixedResponse && (!observedPolicy.fixedResponse || policy.ProvisioningStatus == "ERROR") ||
@@ -1086,14 +1087,17 @@ func buildRoutePolicyPlan(
 			plan = append(plan, routeMutation{kind: routeMutationUpdatePolicy, id: policy.ID, parentID: poolID, policy: wantedPolicy})
 		}
 
+		rulePlanStart := len(plan)
 		wantedRules := rulesFor(wantedPolicy, desired.hostnameRuleValue)
 		actualRules := make(map[string]observedRouteRule, len(observedPolicy.rules))
 		for _, rule := range observedPolicy.rules {
 			actualRules[rule.role] = rule
 		}
+		missingRules := 0
 		for _, wantedRule := range wantedRules {
 			observedRule, exists := actualRules[wantedRule.role]
 			if !exists {
+				missingRules++
 				plan = append(plan, routeMutation{kind: routeMutationCreateRule, parentID: policy.ID, rule: wantedRule})
 				continue
 			}
@@ -1116,8 +1120,20 @@ func buildRoutePolicyPlan(
 			staleRules = append(staleRules, rule)
 		}
 		sort.Slice(staleRules, func(i, j int) bool { return staleRules[i].rule.ID < staleRules[j].rule.ID })
+		staleRulePlanStart := len(plan)
 		for _, rule := range staleRules {
 			plan = append(plan, routeMutation{kind: routeMutationDeleteRule, id: rule.rule.ID, parentID: policy.ID})
+		}
+		if len(staleRules) != 0 && len(observedPolicy.rules)+missingRules > maxOctaviaL7RulesPerPolicy {
+			// Make room only after Octavia proves the policy is disabled.
+			// After each mutation the graph reads back the remaining rules.
+			if !observedPolicyDisabled(observedPolicy) {
+				disablePlan = append(disablePlan, routeMutation{kind: routeMutationDisablePolicy, id: policy.ID,
+					retry: policy.ProvisioningStatus == "ERROR", withdrawHTTPPolicy: true})
+				plan = plan[:policyPlanStart]
+				continue
+			}
+			plan = slices.Concat(plan[:rulePlanStart], plan[staleRulePlanStart:], plan[rulePlanStart:staleRulePlanStart])
 		}
 		// A failed policy update can leave Octavia's desired admin state in
 		// the database even while Amphora still uses an earlier configuration.

@@ -196,7 +196,6 @@ func (p *Provider) buildDesiredRoutePart(spec cloud.RouteSpec, backendKey string
 				for i := range policies {
 					policy := &policies[i]
 					policy.httpsListenerHostname = scope
-					policy.httpListenerHostname, policy.hostname = match.HTTPListenerHostname, match.Hostname
 					policy.matchKey = openstackidentity.HTTPListenerMatchKey(scope, match)
 					policy.hostnameRuleValue = hostnameRuleValue
 					policy.role = policyRuleRole(*policy, policy.role, "")
@@ -405,6 +404,7 @@ func (p *Provider) buildHTTPMatchPolicies(r *desiredRoute, matches []cloud.HTTPP
 		for _, policy := range policies {
 			policy.backendKey, policy.matchKey = r.backendKey, matchKey
 			policy.httpsListenerHostname = scope
+			policy.httpListenerHostname, policy.hostname = match.HTTPListenerHostname, match.Hostname
 			policy.hostnameRuleValue, policy.precedence = hostnameRuleValue, match.Precedence
 			policy.weighted = r.weightedTargets != nil
 			policy.requestHeaderOperations = operations
