@@ -24,6 +24,10 @@ import (
 	"slices"
 	"strings"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
@@ -66,7 +70,8 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 	if backends == nil {
 		bindings = r.routeGraphBindings(routes, request.Identity)
 	}
-	fences := make([]func(context.Context) error, 0, len(routes))
+	var cleanups []routeCleanupSnapshot
+	var ensures []routeValidationSnapshot
 	foundRequested := request.Route == nil
 	for i := range routes {
 		route := &routes[i]
@@ -102,8 +107,7 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 		}
 		if lifecycle == controller.RouteDetaching {
 			node.Disposition = cloud.GraphDelete
-			snapshot := routeCleanupSnapshot{route: route, identity: identity, disposition: routeCleanupRequired}
-			fences = append(fences, func(ctx context.Context) error { return reconciler.sealRouteCleanupSnapshot(ctx, snapshot) })
+			cleanups = append(cleanups, routeCleanupSnapshot{route: route, identity: identity, disposition: routeCleanupRequired})
 		} else if backends != nil {
 			if requested {
 				if !route.DeletionTimestamp.IsZero() {
@@ -135,9 +139,7 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 				return graph.RouteInputs{}, errHTTPRouteChanged
 			}
 			node.Disposition, node.Spec = cloud.GraphEnsure, snapshot.desired
-			fences = append(fences, func(ctx context.Context) error {
-				return reconciler.sealRouteOwnershipSnapshot(ctx, snapshot, routeBindingRequired)
-			})
+			ensures = append(ensures, snapshot)
 		}
 		if request.Action == graph.DeleteRoute && requested && node.Disposition != cloud.GraphDelete {
 			return graph.RouteInputs{}, errHTTPRouteChanged
@@ -155,9 +157,22 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 		if backends == nil && !slices.Equal(bindings, r.routeGraphBindings(current, request.Identity)) {
 			return errHTTPRouteChanged
 		}
-		for _, fence := range fences {
-			if err := fence(ctx); err != nil {
+		for _, snapshot := range cleanups {
+			reconciler := r.forRouteKind(model.HTTPProfileRouteKind(snapshot.route))
+			if err := reconciler.sealRouteCleanupSnapshot(ctx, snapshot); err != nil {
 				return err
+			}
+		}
+		if len(ensures) != 0 {
+			authority, err := r.readRouteGatewayAuthority(ctx, gateway)
+			if err != nil {
+				return err
+			}
+			for _, snapshot := range ensures {
+				reconciler := r.forRouteKind(model.HTTPProfileRouteKind(snapshot.route))
+				if err := reconciler.sealRouteOwnershipWithGateway(ctx, snapshot, routeBindingRequired, authority); err != nil {
+					return err
+				}
 			}
 		}
 		if backends != nil {
@@ -177,6 +192,8 @@ func (r *Reconciler) liveGraphRoutes(ctx context.Context, identity cloud.Identit
 	if err != nil {
 		return nil, fmt.Errorf("list GRPCRoute graph fragments: %w", err)
 	}
+	setParents := make(map[types.NamespacedName]types.NamespacedName)
+	gatewayKey := types.NamespacedName{Namespace: identity.GatewayNamespace, Name: identity.GatewayName}
 	result := make([]gatewayv1.HTTPRoute, 0)
 	for _, route := range slices.Concat(http, grpc) {
 		if controller.RouteClaimsGateway(r.Config, &route, identity) {
@@ -185,7 +202,11 @@ func (r *Reconciler) liveGraphRoutes(ctx context.Context, identity cloud.Identit
 		}
 		// An unbound candidate can change route selection while a graph is built.
 		for _, parent := range route.Spec.ParentRefs {
-			if routeTargetsGateway(&route, parent, identity.GatewayNamespace, identity.GatewayName) {
+			target, err := gatewayKeyForRouteParent(ctx, r.APIReader, &route, parent, setParents)
+			if err != nil {
+				return nil, err
+			}
+			if target == gatewayKey {
 				result = append(result, route)
 				break
 			}
@@ -195,6 +216,36 @@ func (r *Reconciler) liveGraphRoutes(ctx context.Context, identity cloud.Identit
 		return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name), cmp.Compare(a.UID, b.UID))
 	})
 	return result, nil
+}
+
+// gatewayKeyForRouteParent resolves the declared parent gate for inventory
+// selection. The caller still checks class ownership and listener admission.
+func gatewayKeyForRouteParent(ctx context.Context, reader client.Reader, route *gatewayv1.HTTPRoute, ref gatewayv1.ParentReference, setParents map[types.NamespacedName]types.NamespacedName) (types.NamespacedName, error) {
+	if controller.IsGatewayParentRef(ref) {
+		key := types.NamespacedName{Namespace: route.Namespace, Name: string(ref.Name)}
+		if ref.Namespace != nil {
+			key.Namespace = string(*ref.Namespace)
+		}
+		return key, nil
+	}
+	setKey := model.ListenerSetRefKey(ref, route.Namespace)
+	if setKey.Name == "" || model.HTTPProfileRouteKind(route) != model.HTTPRouteKind {
+		return types.NamespacedName{}, nil
+	}
+	parent, found := setParents[setKey]
+	if found {
+		return parent, nil
+	}
+	var set gatewayv1.ListenerSet
+	if err := reader.Get(ctx, setKey, &set); err == nil {
+		if set.DeletionTimestamp.IsZero() {
+			parent = model.ListenerSetParentKey(&set)
+		}
+	} else if !apierrors.IsNotFound(err) && !meta.IsNoMatchError(err) {
+		return types.NamespacedName{}, err
+	}
+	setParents[setKey] = parent
+	return parent, nil
 }
 
 type routeGraphBinding struct {

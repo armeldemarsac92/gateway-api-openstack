@@ -95,6 +95,20 @@ func (r *Reconciler) addHTTPRoutesForGateway(ctx context.Context, gateway *gatew
 			keys[client.ObjectKeyFromObject(&routes[index])] = struct{}{}
 		}
 	}
+	if r.kind() != model.HTTPRouteKind || model.GatewayDisallowsListenerSets(gateway) && gateway.Status.AttachedListenerSets == nil {
+		return
+	}
+	var sets gatewayv1.ListenerSetList
+	if err := r.List(ctx, &sets, client.MatchingFields{controller.IndexListenerSetByGateway: client.ObjectKeyFromObject(gateway).String()}); err != nil {
+		log.FromContext(ctx).Error(err, "Could not list ListenerSets for Gateway", "gateway", gatewayKey)
+		return
+	}
+	for i := range sets.Items {
+		for _, request := range r.enqueueHTTPRoutesForListenerSet(ctx, &sets.Items[i]) {
+			keys[request.NamespacedName] = struct{}{}
+		}
+	}
+
 }
 
 func (r *Reconciler) enqueueHTTPRoutesForServiceKey(ctx context.Context, serviceKey types.NamespacedName) []reconcile.Request {
@@ -267,6 +281,15 @@ func (r *Reconciler) setupRouteController(manager ctrl.Manager, object client.Ob
 	for _, peer := range []client.Object{&gatewayv1.HTTPRoute{}, &gatewayv1.GRPCRoute{}} {
 		setup.Watches(peer, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutePeers), builder.WithPredicates(controller.HTTPRoutePeerPredicate()))
 	}
+	if r.kind() == model.HTTPRouteKind {
+		served, err := controller.ListenerSetServed(manager.GetRESTMapper())
+		if err != nil {
+			return err
+		}
+		if served {
+			setup.Watches(&gatewayv1.ListenerSet{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForListenerSet))
+		}
+	}
 	if r.Config.XBackendEnabled() && r.kind() == model.HTTPRouteKind {
 		setup.Watches(&gatewayx.XBackend{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForXBackend), builder.WithPredicates(controller.GenerationOrDeletionChangedPredicate())).
 			Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForXBackendPod), builder.WithPredicates(xBackendPodPredicate()))
@@ -285,4 +308,18 @@ func (r *Reconciler) setupRouteController(manager ctrl.Manager, object client.Ob
 		Watches(&corev1.Node{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForNode), builder.WithPredicates(controller.NodePredicate(""))).
 		Named(name).
 		Complete(r)
+}
+
+func (r *Reconciler) enqueueHTTPRoutesForListenerSet(ctx context.Context, object client.Object) []reconcile.Request {
+	var routes gatewayv1.HTTPRouteList
+	key := client.ObjectKeyFromObject(object)
+	if err := r.List(ctx, &routes, client.MatchingFields{controller.IndexHTTPRouteByListenerSet: key.String()}); err != nil {
+		log.FromContext(ctx).Error(err, "Could not list HTTPRoutes for ListenerSet", "listenerSet", key)
+		return nil
+	}
+	keys := make(map[types.NamespacedName]struct{}, len(routes.Items))
+	for i := range routes.Items {
+		keys[client.ObjectKeyFromObject(&routes.Items[i])] = struct{}{}
+	}
+	return controller.SortedRequests(keys)
 }

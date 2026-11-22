@@ -569,6 +569,37 @@ func TestUnsupportedGatewayAPIVersionRevokesBoundServiceReference(t *testing.T) 
 	t.Run("edited backend", func(t *testing.T) { testServiceReferenceRevocationDuringVersionSkew(t, true) })
 }
 
+func TestVersionSkewCannotReuseNativeListenerProofForDelegatedRoute(t *testing.T) {
+	cfg := testConfig()
+	gateway := programmedTestGateway(cfg)
+	controller.SetGatewayListenerScope(cfg, gateway, gatewayv1.HTTPProtocolType)
+	native := gateway.Spec.Listeners[0]
+	gateway.Status.Listeners = []gatewayv1.ListenerStatus{{
+		Name: native.Name,
+		Conditions: []metav1.Condition{
+			controller.Condition(string(gatewayv1.ListenerConditionProgrammed), metav1.ConditionTrue, "Programmed", "Native listener ready", gateway.Generation),
+		},
+	}}
+	set := &gatewayv1.ListenerSet{ObjectMeta: metav1.ObjectMeta{Namespace: gateway.Namespace, Name: "delegated", Generation: 2}}
+	parent := gatewayv1.ParentReference{Kind: ptr.To(gatewayv1.Kind("ListenerSet")), Name: gatewayv1.ObjectName(set.Name), SectionName: &native.Name}
+	route := mapperTestHTTPRoute(gateway.Namespace, "api", parent, "backend")
+	route.UID, route.Generation = "route-uid", 1
+	route.Status.Parents = []gatewayv1.RouteParentStatus{{
+		ControllerName: cfg.ControllerName, ParentRef: parent,
+		Conditions: []metav1.Condition{
+			controller.Condition(cfg.Domain()+"/Programmed", metav1.ConditionTrue, "Programmed", "Earlier delegation ready", route.Generation),
+		},
+	}}
+	delegated := native
+	delegated.Hostname = ptr.To(gatewayv1.Hostname("delegated.example.com"))
+	attachment := boundHTTPAttachment{listeners: []*gatewayv1.Listener{&delegated}, gatewayGeneration: gateway.Generation}
+	reconciler := &Reconciler{Config: cfg}
+	parents := []managedRouteParent{{ref: parent, gateway: gateway, listenerSet: set}}
+	if reconciler.routeForwardingEstablished(route, parents, controller.RouteIdentity(cfg, gateway, route), attachment) {
+		t.Fatal("native Gateway status certified the configuration of a delegated section")
+	}
+}
+
 func TestUnsupportedGatewayAPIVersionRemovesOldTenantForwarding(t *testing.T) {
 	for _, action := range []string{"selector revoked", "parent retargeted"} {
 		t.Run(action, func(t *testing.T) {

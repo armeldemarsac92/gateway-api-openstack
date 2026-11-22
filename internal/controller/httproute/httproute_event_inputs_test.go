@@ -22,9 +22,13 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
 func TestNodeMapperReobservesDependenciesBetweenEvents(t *testing.T) {
@@ -109,5 +113,71 @@ func TestEndpointDeletionStillEnqueuesLocalBackends(t *testing.T) {
 		if !names[name] {
 			t.Errorf("EndpointSlice deletion did not enqueue %s", name)
 		}
+	}
+}
+
+func TestNodeMapperResolvesListenerSetAndNativeRefsToOneGateway(t *testing.T) {
+	r, reader, node := nodeFanoutFixture(t, 2, corev1.ServiceExternalTrafficPolicyCluster)
+	ctx := t.Context()
+	set := &gatewayv1.ListenerSet{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "delegation", Name: "tenant"},
+		Spec: gatewayv1.ListenerSetSpec{ParentRef: gatewayv1.ParentGatewayReference{
+			Name: "edge", Namespace: ptr.To(gatewayv1.Namespace("default")),
+		}},
+	}
+	if err := reader.Create(ctx, set); err != nil {
+		t.Fatal(err)
+	}
+	ref := gatewayv1.ParentReference{Kind: ptr.To(gatewayv1.Kind("ListenerSet")), Name: "tenant", Namespace: ptr.To(gatewayv1.Namespace("delegation"))}
+	var delegated, shared gatewayv1.HTTPRoute
+	for _, route := range []struct {
+		object *gatewayv1.HTTPRoute
+		name   string
+		share  bool
+	}{{&delegated, "route-0000", false}, {&shared, "route-0001", true}} {
+		if err := reader.Get(ctx, client.ObjectKey{Namespace: "default", Name: route.name}, route.object); err != nil {
+			t.Fatal(err)
+		}
+		if !route.share {
+			route.object.Spec.ParentRefs = nil
+		}
+		route.object.Spec.ParentRefs = append(route.object.Spec.ParentRefs, ref)
+		if err := reader.Update(ctx, route.object); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertRouteRequests(t, r.enqueueHTTPRoutesForNode(ctx, node), &delegated, &shared)
+}
+
+func TestBackendPolicyGatewayPeersIncludeDelegatedHTTPRoutesOnce(t *testing.T) {
+	cfg := testConfig()
+	gateway := programmedTestGateway(cfg)
+	gateway.Spec.AllowedListeners = &gatewayv1.AllowedListeners{Namespaces: &gatewayv1.ListenerNamespaces{From: ptr.To(gatewayv1.NamespacesFromAll)}}
+	set := &gatewayv1.ListenerSet{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "team", Name: "delegated"},
+		Spec: gatewayv1.ListenerSetSpec{ParentRef: gatewayv1.ParentGatewayReference{
+			Name: gatewayv1.ObjectName(gateway.Name), Namespace: ptr.To(gatewayv1.Namespace(gateway.Namespace)),
+		}},
+	}
+	setRef := gatewayv1.ParentReference{Kind: ptr.To(gatewayv1.Kind("ListenerSet")), Name: "delegated", Namespace: ptr.To(gatewayv1.Namespace(set.Namespace))}
+	directRef := gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name)}
+	delegated := mapperTestHTTPRoute(gateway.Namespace, "only-delegated", setRef, "backend")
+	combined := mapperTestHTTPRoute(gateway.Namespace, "both-parents", directRef, "backend")
+	combined.Spec.ParentRefs = append(combined.Spec.ParentRefs, setRef)
+	kubeClient := rawIndexedFakeClientBuilder(testScheme(t), cfg).WithObjects(gateway, set, delegated, combined).
+		WithIndex(&gatewayv1.ListenerSet{}, controller.IndexListenerSetByGateway, func(object client.Object) []string {
+			return []string{model.ListenerSetParentKey(object.(*gatewayv1.ListenerSet)).String()}
+		}).Build()
+	gatewayKey, err := gatewayKeyForRouteParent(t.Context(), kubeClient, delegated, setRef, make(map[client.ObjectKey]client.ObjectKey))
+	if err != nil || gatewayKey != client.ObjectKeyFromObject(gateway) {
+		t.Fatalf("live delegated Gateway = %s, error %v", gatewayKey, err)
+	}
+	r := &Reconciler{Client: kubeClient, APIReader: kubeClient, Config: cfg}
+	peers, err := r.liveGatewayRoutePeers(t.Context(), gateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(peers) != 2 || peers[0].Name == peers[1].Name {
+		t.Fatalf("policy peer inventory = %#v, want both routes once", peers)
 	}
 }

@@ -135,14 +135,21 @@ func (r *Reconciler) setupXBackendStatusController(manager ctrl.Manager) error {
 			return r.xBackendsForRouteRequests(ctx, mapper(ctx, object), nil)
 		}
 	}
-	return ctrl.NewControllerManagedBy(manager).
+	setup := ctrl.NewControllerManagedBy(manager).
 		For(&gatewayx.XBackend{}).
 		Watches(&gatewayv1.HTTPRoute{}, handler.EnqueueRequestsFromMapFunc(mapRoute), builder.WithPredicates(controller.HTTPRouteReconcilePredicate(r.Config))).
 		Watches(&gatewayv1.GRPCRoute{}, handler.EnqueueRequestsFromMapFunc(mapRoute), builder.WithPredicates(controller.HTTPRouteReconcilePredicate(r.Config))).
 		Watches(&gatewayv1.Gateway{}, handler.EnqueueRequestsFromMapFunc(mapRoutes(r.enqueueHTTPRoutesForGateway)), builder.WithPredicates(controller.GatewayForHTTPRoutePredicate(r.Config))).
 		Watches(&gatewayv1.GatewayClass{}, handler.EnqueueRequestsFromMapFunc(mapRoutes(r.enqueueHTTPRoutesForGatewayClass)), builder.WithPredicates(controller.GatewayClassForGatewayPredicate())).
-		Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(mapRoutes(r.enqueueHTTPRoutesForNamespace)), builder.WithPredicates(controller.NamespacePredicate())).
-		Named("xbackend").
+		Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(mapRoutes(r.enqueueHTTPRoutesForNamespace)), builder.WithPredicates(controller.NamespacePredicate()))
+	served, err := controller.ListenerSetServed(manager.GetRESTMapper())
+	if err != nil {
+		return err
+	}
+	if served {
+		setup.Watches(&gatewayv1.ListenerSet{}, handler.EnqueueRequestsFromMapFunc(mapRoutes(r.enqueueHTTPRoutesForListenerSet)))
+	}
+	return setup.Named("xbackend").
 		Complete(status)
 }
 

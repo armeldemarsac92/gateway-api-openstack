@@ -23,6 +23,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -35,9 +36,10 @@ import (
 	configv1alpha1 "github.com/gateway-api-openstack/gateway-api-openstack/api/v1alpha1"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
-func (r *Reconciler) gatewayRequestsForRoute(_ context.Context, route client.Object) []reconcile.Request {
+func (r *Reconciler) gatewayRequestsForRoute(ctx context.Context, route client.Object) []reconcile.Request {
 	parents, statuses, ok := controller.RouteParents(route)
 	if !ok {
 		return nil
@@ -45,6 +47,14 @@ func (r *Reconciler) gatewayRequestsForRoute(_ context.Context, route client.Obj
 	keys := make(map[types.NamespacedName]struct{}, len(parents)+len(statuses)+1)
 	addParent := func(parentRef gatewayv1.ParentReference) {
 		if !controller.IsGatewayParentRef(parentRef) || parentRef.Name == "" {
+			if key := model.ListenerSetRefKey(parentRef, route.GetNamespace()); key.Name != "" {
+				var set gatewayv1.ListenerSet
+				if err := r.Get(ctx, key, &set); err == nil {
+					if gateway := model.ListenerSetParentKey(&set); gateway.Name != "" {
+						keys[gateway] = struct{}{}
+					}
+				}
+			}
 			return
 		}
 		gatewayNamespace := route.GetNamespace()
@@ -115,6 +125,16 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 		for _, dependency := range []client.Object{&corev1.Service{}, &discoveryv1.EndpointSlice{}, &corev1.Namespace{}, &gatewayv1.ReferenceGrant{}} {
 			gatewayController.Watches(dependency, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForSNIDependency))
 		}
+	}
+	served, err := controller.ListenerSetServed(manager.GetRESTMapper())
+	if err != nil {
+		return err
+	}
+	if served {
+		gatewayController.Watches(&gatewayv1.ListenerSet{}, handler.EnqueueRequestsFromMapFunc(gatewayRequestsForListenerSet),
+			builder.WithPredicates(controller.GenerationOrDeletionChangedPredicate())).
+			Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForListenerSetNamespace),
+				builder.WithPredicates(controller.NamespacePredicate()))
 	}
 	if r.Config.OperatorHTTPS {
 		gatewayController.Watches(&gatewayv1.ReferenceGrant{}, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForCertificateGrant))
@@ -188,6 +208,60 @@ func (r *Reconciler) gatewayRequestsForCertificateGrant(ctx context.Context, obj
 					})
 			}) {
 				keys[client.ObjectKeyFromObject(gateway)] = struct{}{}
+			}
+		}
+	}
+	return controller.SortedRequests(keys)
+}
+
+func gatewayRequestsForListenerSet(_ context.Context, object client.Object) []reconcile.Request {
+	key := model.ListenerSetParentKey(object.(*gatewayv1.ListenerSet))
+	if key.Name == "" {
+		return nil
+	}
+	return []reconcile.Request{{NamespacedName: key}}
+}
+
+func (r *Reconciler) gatewayRequestsForListenerSetNamespace(ctx context.Context, namespace client.Object) []reconcile.Request {
+	var sets gatewayv1.ListenerSetList
+	if err := r.List(ctx, &sets, client.InNamespace(namespace.GetName())); err != nil {
+		log.FromContext(ctx).Error(err, "Could not list ListenerSets in Namespace", "namespace", namespace.GetName())
+		return nil
+	}
+	keys := make(map[types.NamespacedName]struct{}, len(sets.Items))
+	for i := range sets.Items {
+		if key := model.ListenerSetParentKey(&sets.Items[i]); key.Name != "" {
+			keys[key] = struct{}{}
+		}
+	}
+	// ListenerSet-owned Route selectors can observe a namespace different
+	// from both the ListenerSet and its Gateway.
+	var routes gatewayv1.HTTPRouteList
+	if err := r.List(ctx, &routes, client.InNamespace(namespace.GetName())); err != nil {
+		log.FromContext(ctx).Error(err, "Could not list HTTPRoutes in Namespace", "namespace", namespace.GetName())
+		return controller.SortedRequests(keys)
+	}
+	observed := make(map[types.NamespacedName]*gatewayv1.ListenerSet)
+	for _, route := range routes.Items {
+		for _, ref := range route.Spec.ParentRefs {
+			key := model.ListenerSetRefKey(ref, route.Namespace)
+			if key.Name == "" {
+				continue
+			}
+			set, found := observed[key]
+			if !found {
+				var candidate gatewayv1.ListenerSet
+				if err := r.Get(ctx, key, &candidate); err == nil {
+					set = &candidate
+				} else if !apierrors.IsNotFound(err) {
+					log.FromContext(ctx).Error(err, "Could not get ListenerSet for Route namespace", "listenerSet", key)
+				}
+				observed[key] = set
+			}
+			if set != nil && model.ListenerSetRefObservesRouteNamespace(set, ref) {
+				if gateway := model.ListenerSetParentKey(set); gateway.Name != "" {
+					keys[gateway] = struct{}{}
+				}
 			}
 		}
 	}

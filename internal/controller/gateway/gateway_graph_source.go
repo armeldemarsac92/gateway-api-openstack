@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -124,6 +125,23 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 	}
 	input.Object = snapshot.gateway
 	input.Node = cloud.GatewayGraphNode{Disposition: cloud.GraphEnsure, Spec: r.gatewaySpec(snapshot.gateway, snapshot.listeners, snapshot.topology)}
+	sets, err := ObserveListenerSets(ctx, r.APIReader, r.Config, snapshot.gateway)
+	if err != nil {
+		return input, err
+	}
+	for _, set := range sets.sets {
+		for _, entry := range set.entries {
+			if entry.rejection != "" {
+				continue
+			}
+			port := int(entry.listener.Port)
+			if !slices.ContainsFunc(input.Node.Spec.ScopedListeners, func(listener cloud.ScopedListener) bool { return listener.Port == port }) {
+				input.Node.Spec.ScopedListeners = append(input.Node.Spec.ScopedListeners, cloud.ScopedListener{
+					Port: port, Name: resourceDisplayName(strconv.Itoa(port), snapshot.gateway.Namespace, snapshot.gateway.Name, string(entry.listener.Name)),
+				})
+			}
+		}
+	}
 	input.Node.BackendCAOwned = controllerutil.ContainsFinalizer(snapshot.gateway, r.Config.BackendCAFinalizer())
 	if r.Config.BackendTLSPolicy && !input.Node.BackendCAOwned {
 		input.Node.ClaimBackendCA = func(ctx context.Context) error {
@@ -132,7 +150,19 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 			return r.Patch(ctx, desired, controller.OptimisticMergeFrom(snapshot.gateway))
 		}
 	}
-	input.Validate = func(ctx context.Context) error { return r.sealGatewayMutationSnapshot(ctx, snapshot) }
+	input.Validate = func(ctx context.Context) error {
+		if err := r.sealGatewayMutationSnapshot(ctx, snapshot); err != nil {
+			return err
+		}
+		current, err := ObserveListenerSets(ctx, r.APIReader, r.Config, snapshot.gateway)
+		if err != nil {
+			return err
+		}
+		if !sets.sameInputs(current) {
+			return errGatewayChanged
+		}
+		return nil
+	}
 	if snapshot.listener.Protocol == gatewayv1.TLSProtocolType {
 		if terminatesTLS(snapshot.listener) {
 			input.Node.TCPTLSCertificateRef = r.resolveCertificate(ctx, snapshot.gateway, snapshot.listener).tls.CertificateRef
