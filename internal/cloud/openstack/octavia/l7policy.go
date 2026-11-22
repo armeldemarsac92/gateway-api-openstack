@@ -175,6 +175,9 @@ type L7PolicyObservation struct {
 	RedirectRequestPresent      bool
 	RequestURLRewrite           *RequestURLRewrite
 	RequestURLRewriteReported   bool
+	RequestCORS                 *cloud.HTTPCORS
+	RequestCORSPresent          bool
+	RequestCORSReported         bool
 	RequestURLRewritePresent    bool
 	PoolIDs                     []string
 	PoolReference               json.RawMessage
@@ -230,6 +233,7 @@ func readPolicyObservation(raw json.RawMessage) (L7PolicyObservation, error) {
 		FixedResponse            json.RawMessage `json:"fixed_response"`
 		RedirectRequest          json.RawMessage `json:"redirect_request"`
 		RequestURLRewrite        json.RawMessage `json:"request_url_rewrite"`
+		RequestCORS              json.RawMessage `json:"request_cors"`
 		RequestHeaderOperations  json.RawMessage `json:"request_header_operations"`
 		ResponseHeaderOperations json.RawMessage `json:"response_header_operations"`
 	}
@@ -281,6 +285,11 @@ func readPolicyObservation(raw json.RawMessage) (L7PolicyObservation, error) {
 	if observation.RequestURLRewriteReported && string(row.RequestURLRewrite) != "null" {
 		observation.RequestURLRewritePresent = true
 		observation.RequestURLRewrite = readRequestURLRewrite(row.RequestURLRewrite)
+	}
+	observation.RequestCORSReported = row.RequestCORS != nil
+	if observation.RequestCORSReported && string(row.RequestCORS) != "null" {
+		observation.RequestCORSPresent = true
+		observation.RequestCORS = readRequestCORS(row.RequestCORS)
 	}
 	if row.RequestHeaderOperations != nil {
 		observation.RequestHeaderOperations, observation.RequestHeaderOperationsErr =
@@ -354,6 +363,7 @@ type PolicyCreateOpts struct {
 	RedirectRequest          *RequestRedirect
 	RequestURLRewrite        *RequestURLRewrite
 	InitialRules             []l7policies.CreateRuleOpts
+	RequestCORS              *cloud.HTTPCORS
 }
 
 func (opts PolicyCreateOpts) ToL7PolicyCreateMap() (map[string]any, error) {
@@ -409,6 +419,15 @@ func (opts PolicyCreateOpts) ToL7PolicyCreateMap() (map[string]any, error) {
 			return nil, fmt.Errorf("request URL rewrite requires a valid forwarding action")
 		}
 		policy[requestURLRewriteField] = opts.RequestURLRewrite
+	}
+	if opts.RequestCORS != nil {
+		if err := opts.RequestCORS.Validate(); err != nil {
+			return nil, err
+		}
+		if !forwardsToPools(string(opts.Action)) {
+			return nil, fmt.Errorf("CORS requires a forwarding policy")
+		}
+		policy[requestCORSField] = opts.RequestCORS
 	}
 	filters := PolicyFilters{Request: opts.RequestHeaderOperations, Response: opts.ResponseHeaderOperations}
 	return body, filters.write(body)

@@ -329,7 +329,7 @@ func TestBackendTLSScalarQuarantinesBeforePublishingAndReopening(t *testing.T) {
 			if expected != "" {
 				wantWrites = []string{expected}
 			}
-			var incomplete *backendRequestFilterInventoryError
+			var incomplete *httpFilterInventoryError
 			if (wantErr == nil && err != nil || wantErr == cloud.ErrDependencyNotReady && !errors.As(err, &incomplete) ||
 				wantErr != nil && wantErr != cloud.ErrDependencyNotReady && !errors.Is(err, wantErr)) || !slices.Equal(writes, wantWrites) {
 				t.Fatalf("expected one reconciliation with write %q and %v: got %v, %v and %+v", expected, wantErr, writes, err, result)
@@ -345,8 +345,20 @@ func TestBackendTLSScalarQuarantinesBeforePublishingAndReopening(t *testing.T) {
 		if pool["admin_state_up"] != true || caReference == nil || len(memberIDs) != 1 {
 			t.Fatal("the authenticated backend must initially be serving")
 		}
+		filterPolicy["tags"] = append(safetyRouteTags(t, filterID, filterRole), openstackidentity.RequestCORSPolicyTag)
+		filterPolicy["admin_state_up"] = true
 		tls.Denied = true
-		run("close-filter-listener", cloud.ErrDependencyNotReady)
+		for _, missing := range []string{"action", "position"} {
+			previous := filterPolicy[missing]
+			delete(filterPolicy, missing)
+			filterListener["admin_state_up"] = true
+			filterPolicy["targets"] = []octavia.WeightedHTTPTarget{{PoolID: "peer-pool", Weight: 1}}
+			run("", cloud.ErrOwnershipConflict)
+			filterPolicy["targets"] = []octavia.WeightedHTTPTarget{fixedWeightedHTTPTarget(1)}
+			run("close-filter-listener", cloud.ErrDependencyNotReady)
+			filterPolicy[missing] = previous
+		}
+		delete(filterPolicy, "position")
 		if filterListener["admin_state_up"] != false || pool["admin_state_up"] != true {
 			t.Fatal("the affected listener must close before the revoked pool changes")
 		}
@@ -367,7 +379,8 @@ func TestBackendTLSScalarQuarantinesBeforePublishingAndReopening(t *testing.T) {
 		if pool["admin_state_up"] != false || len(memberIDs) != 0 {
 			t.Fatal("incomplete policy inventory must prevent reopening and member restoration")
 		}
-		filterPolicy["admin_state_up"] = false
+		filterPolicy["position"], filterPolicy["admin_state_up"] = 1, false
+		filterPolicy["tags"] = append(safetyRouteTags(t, filterID, filterRole), openstackidentity.BackendRequestFiltersPolicyTag)
 		run("enable", nil)
 		run("member", nil)
 		if pool["admin_state_up"] != true || len(memberIDs) != 1 || pool["ca_tls_container_ref"] != caReference {

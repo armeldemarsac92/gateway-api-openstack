@@ -18,7 +18,9 @@ package httproute
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
@@ -44,6 +46,7 @@ type routeGraphResult struct {
 	rejectedSections       []model.ListenerSection
 	backendObserved        bool
 	backendDiagnostic      model.Diagnostic
+	corsFallback           bool
 	backendTLSAncestorSlot backendtls.AncestorSlot
 	cloud.RouteResult
 }
@@ -80,14 +83,24 @@ func (r *Reconciler) ensureRouteGraph(
 		Identity: expectedIdentity,
 		Action:   graph.Ensure, Gateway: expectedGateway, Route: expectedRoute,
 		HTTPRouteBackendDiagnostic: &prepared.backendDiagnostic,
+		HTTPRouteCORSFallback:      &prepared.corsFallback,
 		HTTPRouteRejectedSections:  &prepared.rejectedSections,
 	}
 	if r.Config.BackendTLSPolicy {
 		request.HTTPRouteBackendTLSAncestorSlot = &prepared.backendTLSAncestorSlot
 	}
 	result, err := r.Writer.ReconcileGraph(ctx, request)
+	var tlsChange *graph.TLSAuthorizationChanged
 	if err != nil {
-		return prepared, err
+		// A guarded listener can return an inventory error and still know
+		// which route observations were deferred. Require an exact component
+		// so the aggregate progress cannot certify an unobserved sibling.
+		if !result.Gateway.HTTPPolicyTransition || !errors.Is(err, cloud.ErrDependencyNotReady) ||
+			errors.As(err, &tlsChange) || !slices.ContainsFunc(result.Routes, func(route cloud.RouteGraphResult) bool {
+			return route.Identity == expectedIdentity
+		}) {
+			return prepared, err
+		}
 	}
 	component, err := routeComponentResult(result, expectedIdentity)
 	prepared.RouteResult = component
@@ -134,6 +147,7 @@ func (r *Reconciler) prepareRouteGraphBinding(ctx context.Context, route *gatewa
 		rejectedSections:       snapshot.rejectedSections,
 		backendObserved:        snapshot.backends != nil,
 		backendDiagnostic:      snapshot.backendDiagnostic,
+		corsFallback:           snapshot.corsFallback,
 		backendTLSAncestorSlot: snapshot.backendTLSAncestorSlot,
 	}
 	if err != nil {

@@ -848,3 +848,146 @@ func TestUnresolvedHTTPBackendExtensionKeepsPrivatePredicate(t *testing.T) {
 		t.Fatalf("unexpected conditions for unresolved backend filter: %+v", conditions)
 	}
 }
+
+func TestHTTPCORSLowersOnlyTheMatchingRule(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	plain := f.route.Spec.Rules[0]
+	filtered := *plain.DeepCopy()
+	filtered.Matches = []gatewayv1.HTTPRouteMatch{{
+		Path: &gatewayv1.HTTPPathMatch{Type: ptr.To(gatewayv1.PathMatchPathPrefix), Value: ptr.To("/cors")},
+	}}
+	filter := gatewayv1.HTTPRouteFilter{Type: gatewayv1.HTTPRouteFilterCORS, CORS: &gatewayv1.HTTPCORSFilter{
+		AllowOrigins: []gatewayv1.CORSOrigin{"https://www.foo.com", "https://*.bar.com:443"},
+		AllowMethods: []gatewayv1.HTTPMethodWithWildcard{"*"}, AllowHeaders: []gatewayv1.HTTPHeaderName{"*"},
+		ExposeHeaders: []gatewayv1.HTTPHeaderName{"X-Trace"}, AllowCredentials: ptr.To(true), MaxAge: 3600,
+	}}
+	filtered.Filters = []gatewayv1.HTTPRouteFilter{filter}
+	f.route.Spec.Rules = []gatewayv1.HTTPRouteRule{filtered}
+	build := func() (cloud.RouteSpec, error) {
+		return f.reconciler.buildRouteModelWithReader(t.Context(), f.reader, f.route, f.gateway)
+	}
+	if _, err := build(); err == nil || !strings.Contains(err.Error(), "--octavia-request-cors") {
+		t.Fatalf("missing CORS opt-in did not reject filtered route: %v", err)
+	}
+	f.reconciler.Config.HTTPCORS = true
+	f.route.Spec.Rules = []gatewayv1.HTTPRouteRule{plain, filtered}
+	spec, err := build()
+	if err != nil || len(spec.HTTPBackends) != 1 || len(spec.HTTPBackends[0].Matches) != 2 {
+		t.Fatalf("want two predicates using the same pool: %+v, %v", spec, err)
+	}
+	cors, fallback := spec.HTTPBackends[0].Matches[0], spec.HTTPBackends[0].Matches[1]
+	expected := &cloud.HTTPCORS{AllowOrigins: []string{"https://www.foo.com", "https://*.bar.com:443"},
+		AllowMethods: []string{"*"}, AllowHeaders: []string{"*"}, ExposeHeaders: []string{"X-Trace"},
+		AllowCredentials: ptr.To(true), MaxAge: 3600}
+	if cors.PathValue != "/cors" || cors.Precedence >= fallback.Precedence || !cors.CORS.Equal(expected) || fallback.CORS != nil {
+		t.Fatalf("CORS changed precedence, lost settings, or leaked to the fallback: %+v, %+v", cors, fallback)
+	}
+
+	f.reconciler.Config.WeightedHTTPTargets = true
+	missing := filtered.BackendRefs[0]
+	missing.Name = "missing"
+	filtered.BackendRefs[0].Weight, missing.Weight = ptr.To(int32(3)), ptr.To(int32(1))
+	filtered.BackendRefs = append(filtered.BackendRefs, missing)
+	f.route.Spec.Rules = []gatewayv1.HTTPRouteRule{plain, filtered}
+	spec, err = build()
+	if err != nil || len(spec.HTTPBackends) != 1 || len(spec.WeightedHTTPRules) != 1 {
+		t.Fatalf("want one weighted rule and the shared pool: %+v, %v", spec, err)
+	}
+	weighted := spec.WeightedHTTPRules[0]
+	if len(weighted.Matches) != 1 || !weighted.Matches[0].CORS.Equal(expected) || len(weighted.Targets) != 2 ||
+		!ptr.Equal(weighted.Targets[0].BackendIndex, ptr.To(0)) || weighted.Targets[0].Weight != 3 ||
+		weighted.Targets[1].BackendIndex != nil || weighted.Targets[1].Weight != 1 ||
+		len(spec.HTTPBackends[0].Matches) != 1 || spec.HTTPBackends[0].Matches[0].CORS != nil {
+		t.Fatalf("weighted settings or target isolation lost: %+v", spec)
+	}
+}
+
+func TestHTTPCORSRejectsUnsupportedFieldsAndCombinations(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	f.reconciler.Config.HTTPCORS, f.reconciler.Config.RequestHeaderModifier = true, true
+	original := f.route.Spec.Rules[0]
+	valid := gatewayv1.HTTPRouteFilter{Type: gatewayv1.HTTPRouteFilterCORS, CORS: &gatewayv1.HTTPCORSFilter{}}
+	badPort := gatewayv1.HTTPRouteFilter{Type: gatewayv1.HTTPRouteFilterCORS, CORS: &gatewayv1.HTTPCORSFilter{
+		AllowOrigins: []gatewayv1.CORSOrigin{"https://example.test:65536"},
+	}}
+	wildcard := gatewayv1.HTTPRouteFilter{Type: gatewayv1.HTTPRouteFilterCORS, CORS: &gatewayv1.HTTPCORSFilter{
+		AllowMethods: []gatewayv1.HTTPMethodWithWildcard{"*", "PUT"},
+	}}
+	redirect := gatewayv1.HTTPRouteFilter{Type: gatewayv1.HTTPRouteFilterRequestRedirect, RequestRedirect: &gatewayv1.HTTPRequestRedirectFilter{}}
+	origin := gatewayv1.HTTPRouteFilter{Type: gatewayv1.HTTPRouteFilterRequestHeaderModifier,
+		RequestHeaderModifier: &gatewayv1.HTTPHeaderFilter{Remove: []string{"Origin"}}}
+	for _, tc := range []struct {
+		name    string
+		filters []gatewayv1.HTTPRouteFilter
+		backend []gatewayv1.HTTPRouteFilter
+		reason  routeErrorKind
+	}{
+		{"port outside provider bounds", []gatewayv1.HTTPRouteFilter{badPort}, nil, routeErrorUnsupported},
+		{"mixed wildcard", []gatewayv1.HTTPRouteFilter{wildcard}, nil, routeErrorUnsupported},
+		{"redirect cannot carry CORS", []gatewayv1.HTTPRouteFilter{valid, redirect}, nil, routeErrorIncompatibleFilters},
+		{"request header overlaps CORS", []gatewayv1.HTTPRouteFilter{valid, origin}, nil, routeErrorIncompatibleFilters},
+		{"backend scoped CORS", nil, []gatewayv1.HTTPRouteFilter{valid}, routeErrorUnsupported},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rule := *original.DeepCopy()
+			rule.Filters, rule.BackendRefs[0].Filters = tc.filters, tc.backend
+			f.route.Spec.Rules = []gatewayv1.HTTPRouteRule{rule}
+			var rejection *routeBuildError
+			if _, err := f.reconciler.buildRouteModelWithReader(t.Context(), f.reader, f.route, f.gateway); !errors.As(err, &rejection) || rejection.kind != tc.reason {
+				t.Fatalf("expected %s, got %v", tc.reason, err)
+			}
+		})
+	}
+}
+
+func TestHTTPCORSUnresolvedBackendKeepsPublicRuleWithFixedResponses(t *testing.T) {
+	for _, reason := range []gatewayv1.RouteConditionReason{gatewayv1.RouteReasonBackendNotFound, gatewayv1.RouteReasonRefNotPermitted} {
+		t.Run(string(reason), func(t *testing.T) {
+			f := newRouteModelInputFixture(t)
+			f.reconciler.Config.HTTPCORS, f.reconciler.Config.FixedHTTPResponses = true, true
+			public := f.route.Spec.Rules[0]
+			public.Matches = []gatewayv1.HTTPRouteMatch{{
+				Path: &gatewayv1.HTTPPathMatch{Type: ptr.To(gatewayv1.PathMatchExact), Value: ptr.To("/public")},
+			}}
+			filtered := *public.DeepCopy()
+			filtered.Matches[0].Path.Value = ptr.To("/cors")
+			filtered.BackendRefs[0].Name = "missing"
+			if reason == gatewayv1.RouteReasonRefNotPermitted {
+				filtered.BackendRefs[0].Namespace = ptr.To(gatewayv1.Namespace("other"))
+			}
+			filtered.Filters = []gatewayv1.HTTPRouteFilter{{
+				Type: gatewayv1.HTTPRouteFilterCORS, CORS: &gatewayv1.HTTPCORSFilter{},
+			}}
+			f.route.Spec.Rules = []gatewayv1.HTTPRouteRule{public, filtered}
+			if err := f.client.Update(t.Context(), f.route); err != nil {
+				t.Fatal(err)
+			}
+			provider := &recordingProvider{}
+			r := newTestReconciler(*f.reconciler, provider)
+			key := client.ObjectKeyFromObject(f.route)
+			if _, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: key}); err != nil {
+				t.Fatal(err)
+			}
+			if len(provider.routeSpecs) != 1 || len(provider.deletedRoutes) != 0 {
+				t.Fatalf("expected the route to retain its provider attachment: %+v", provider)
+			}
+			backends := provider.routeSpecs[0].HTTPBackends
+			if len(backends) != 2 || backends[0].InvalidReference || len(backends[0].Members) == 0 ||
+				len(backends[0].Matches) != 1 || backends[0].Matches[0].PathValue != "/public" ||
+				!backends[1].InvalidReference || len(backends[1].Matches) != 1 ||
+				backends[1].Matches[0].PathValue != "/cors" || backends[1].Matches[0].CORS != nil {
+				t.Fatalf("expected the public rule to forward and the CORS rule to return a fixed response: %+v", backends)
+			}
+			if err := f.client.Get(t.Context(), key, f.route); err != nil {
+				t.Fatal(err)
+			}
+			conditions := f.route.Status.Parents[0].Conditions
+			resolved := meta.FindStatusCondition(conditions, string(gatewayv1.RouteConditionResolvedRefs))
+			if !meta.IsStatusConditionTrue(conditions, string(gatewayv1.RouteConditionAccepted)) ||
+				!meta.IsStatusConditionTrue(conditions, string(gatewayv1.RouteConditionPartiallyInvalid)) ||
+				resolved == nil || resolved.Status != metav1.ConditionFalse || resolved.Reason != string(reason) {
+				t.Fatalf("expected partial validity and %s: %+v", reason, conditions)
+			}
+		})
+	}
+}

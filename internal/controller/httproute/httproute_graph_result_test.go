@@ -115,6 +115,43 @@ func TestHTTPRouteCleanupFinishesFromItsOwnResult(t *testing.T) {
 	}
 }
 
+func TestHTTPRouteInventoryFailureUsesGuardedPortObservation(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	r := f.reconciler
+	id := controller.RouteIdentity(r.Config, f.gateway, f.route)
+	peer := id
+	peer.RouteUID, peer.RouteName = "sibling-uid", "sibling"
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(f.route)}
+	reconcile := func() *metav1.Condition {
+		t.Helper()
+		if _, err := r.Reconcile(t.Context(), request); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.client.Get(t.Context(), request.NamespacedName, f.route); err != nil {
+			t.Fatal(err)
+		}
+		return meta.FindStatusCondition(f.route.Status.Parents[0].Conditions, r.Config.Domain()+"/Programmed")
+	}
+	r.Writer = fixedRouteGraph{result: cloud.GatewayGraphResult{Outcome: cloud.ReadyOutcome(),
+		Routes: []cloud.RouteGraphResult{{Identity: id, Result: cloud.RouteReadyResult(cloud.RouteState{})}}}}
+	if condition := reconcile(); condition == nil || condition.Status != metav1.ConditionTrue {
+		t.Fatalf("initial route status = %+v", condition)
+	}
+	component := cloud.RouteProgressingResult("Waiting for complete Octavia CORS inventory", time.Second)
+	component.ObservationDeferred = true
+	result := cloud.GatewayGraphResult{Outcome: component.Outcome, Gateway: cloud.GatewayResult{HTTPPolicyTransition: true},
+		Routes: []cloud.RouteGraphResult{{Identity: id, Result: component}}}
+	r.Writer = fixedRouteGraph{result: result, err: &cloud.GraphError{Identity: peer, Err: cloud.ErrDependencyNotReady}}
+	if condition := reconcile(); condition == nil || condition.Status != metav1.ConditionTrue {
+		t.Fatalf("the sibling's incomplete inventory erased the route status: %+v", condition)
+	}
+	result.Routes[0].Result.ObservationDeferred = false
+	r.Writer = fixedRouteGraph{result: result, err: &cloud.GraphError{Identity: peer, Err: cloud.ErrDependencyNotReady}}
+	if condition := reconcile(); condition == nil || condition.Status != metav1.ConditionFalse || condition.Message != component.Outcome.Message {
+		t.Fatalf("the closed port's progress was not published: %+v", condition)
+	}
+}
+
 type fixedRouteGraph struct {
 	result cloud.GatewayGraphResult
 	err    error

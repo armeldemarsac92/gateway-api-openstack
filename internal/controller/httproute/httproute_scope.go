@@ -52,6 +52,7 @@ type routeStatusPlan struct {
 	kind                routeStatusPlanKind
 	updates             []parentStatusUpdate
 	droppedRules        string
+	corsFallback        bool
 	policy              controller.ProviderFailurePolicy
 	referencesEvaluated bool
 	validateOwnership   bool
@@ -76,6 +77,7 @@ type httpRouteScope struct {
 	parentGateway    *gatewayv1.Gateway
 	rejectedSections []model.ListenerSection
 	profileObserved  bool
+	corsFallback     bool
 	warning          *routeProviderWarning
 	patchCause       error
 	skipPatch        bool
@@ -112,6 +114,7 @@ func (s *httpRouteScope) setStatuses(updates []parentStatusUpdate) {
 		selection:         s.parentSelection,
 		validateOwnership: true,
 		profileObserved:   s.profileObserved,
+		corsFallback:      s.corsFallback,
 		rejectedSections:  s.rejectedSections,
 		gateway:           s.parentGateway,
 	}
@@ -130,6 +133,7 @@ func (s *httpRouteScope) setProviderFailureStatuses(
 		referencesEvaluated: referencesEvaluated,
 		validateOwnership:   true,
 		profileObserved:     s.profileObserved,
+		corsFallback:        s.corsFallback,
 		rejectedSections:    s.rejectedSections,
 		gateway:             s.parentGateway,
 	}
@@ -464,9 +468,16 @@ func (p *routeStatusPlan) updateParentStatuses(config controller.Config, route *
 		}
 		controller.SetCondition(&parentStatus.Conditions, controller.Condition(string(gatewayv1.RouteConditionAccepted), update.status.accepted, update.status.acceptedReason, update.status.acceptedMessage, route.Generation))
 		partial := string(gatewayv1.RouteConditionPartiallyInvalid)
-		if p.droppedRules != "" && update.status.accepted == metav1.ConditionTrue {
+		if (p.droppedRules != "" || p.corsFallback) && update.status.accepted == metav1.ConditionTrue {
+			message := p.droppedRules
+			if p.corsFallback {
+				if message != "" {
+					message += ". "
+				}
+				message += "CORS could not be applied to rules returning a fixed 500 response for an unresolved backend"
+			}
 			controller.SetCondition(&parentStatus.Conditions, controller.Condition(partial, metav1.ConditionTrue,
-				string(gatewayv1.RouteReasonUnsupportedValue), p.droppedRules, route.Generation))
+				string(gatewayv1.RouteReasonUnsupportedValue), message, route.Generation))
 		} else {
 			meta.RemoveStatusCondition(&parentStatus.Conditions, partial)
 		}

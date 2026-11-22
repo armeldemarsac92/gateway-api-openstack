@@ -184,6 +184,16 @@ func classifyAuditCandidate(
 					"Request URL rewrite policy does not report a complete rewrite")
 			}
 		}
+		if candidate.corsPresent || slices.Contains(candidate.tags, openstackidentity.RequestCORSPolicyTag) {
+			if redirect || candidate.policyAction != string(l7policies.ActionRedirectToPool) && candidate.policyAction != string(octavia.ActionWeightedTargets) {
+				return auditFinding(finding, audit.DispositionOwnershipConflict, auditReasonParentMismatch,
+					"CORS policy requires an owned forwarding action")
+			}
+			if !candidate.policyInventoryOK || !candidate.corsValid {
+				return auditFinding(finding, audit.DispositionUnresolved, auditReasonUnprovenPolicyTarget,
+					"CORS policy does not report complete settings")
+			}
+		}
 		switch {
 		case candidate.policyAction == string(octavia.ActionRedirectRequest):
 			if !redirect || candidate.redirectPoolID != "" || candidate.extendedPolicy() {

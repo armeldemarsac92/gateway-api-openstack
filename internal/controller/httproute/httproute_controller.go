@@ -338,6 +338,7 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 ) (ctrl.Result, error) {
 	httpRoute := scope.route
 	graphResult, err := r.ensureRouteGraph(ctx, httpRoute, parent.gateway)
+	scope.corsFallback = graphResult.corsFallback
 	if graphResult.selection != nil {
 		scope.parentSelection = graphResult.selection
 		scope.rejectedSections = graphResult.rejectedSections

@@ -143,7 +143,7 @@ func hasProjectableHTTPFilters(route *gatewayv1.HTTPRoute) bool {
 		return slices.ContainsFunc(rule.BackendRefs, func(backend gatewayv1.HTTPBackendRef) bool {
 			return len(backend.Filters) != 0
 		}) || slices.ContainsFunc(rule.Filters, func(filter gatewayv1.HTTPRouteFilter) bool {
-			return filter.Type == gatewayv1.HTTPRouteFilterURLRewrite
+			return filter.Type == gatewayv1.HTTPRouteFilterURLRewrite || filter.Type == gatewayv1.HTTPRouteFilterCORS
 		})
 	})
 }
@@ -176,8 +176,8 @@ func (r *Reconciler) usesHTTPBackendGroups(route *gatewayv1.HTTPRoute) bool {
 	if len(rule.Matches) > 1 || len(rule.Matches) == 1 && (len(rule.Matches[0].Headers) != 0 || rule.Matches[0].Method != nil) {
 		return true
 	}
-	request, response, rewrite, _ := model.NormalizeHTTPRuleFilters(rule, r.Config.RequestHeaderModifier, r.Config.ResponseHeaderModifier, r.Config.HTTPRequestURLRewrite)
-	return len(request) != 0 || len(response) != 0 || rewrite != nil
+	request, response, rewrite, cors, _ := model.NormalizeHTTPForwardingRuleFilters(rule, r.Config.RequestHeaderModifier, r.Config.ResponseHeaderModifier, r.Config.HTTPRequestURLRewrite, r.Config.HTTPCORS)
+	return len(request) != 0 || len(response) != 0 || rewrite != nil || cors != nil
 }
 
 func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, grpc bool) error {
@@ -191,7 +191,7 @@ func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, grpc bool) 
 		return newRouteBuildError(routeErrorUnsupported, "timeouts, retries, and session persistence are not supported")
 	}
 	if len(rule.Filters) != 0 || !fixedResponses && !weightedTargets {
-		if err := compileRouteAction(rule, r.Config.RequestHeaderModifier, r.Config.ResponseHeaderModifier && !grpc, r.Config.HTTPRequestRedirect && !grpc, r.Config.HTTPRequestURLRewrite && !grpc); err != nil {
+		if err := compileRouteAction(rule, r.Config.RequestHeaderModifier, r.Config.ResponseHeaderModifier && !grpc, r.Config.HTTPRequestRedirect && !grpc, r.Config.HTTPRequestURLRewrite && !grpc, r.Config.HTTPCORS && !grpc); err != nil {
 			return err
 		}
 	}
@@ -207,11 +207,16 @@ func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, grpc bool) 
 		return nil
 	}
 	if weightedTargets {
-		request, _, rewrite, _ := model.NormalizeHTTPRuleFilters(rule, r.Config.RequestHeaderModifier, r.Config.ResponseHeaderModifier, r.Config.HTTPRequestURLRewrite)
+		request, _, rewrite, cors, _ := model.NormalizeHTTPForwardingRuleFilters(rule, r.Config.RequestHeaderModifier, r.Config.ResponseHeaderModifier, r.Config.HTTPRequestURLRewrite, r.Config.HTTPCORS && !grpc)
 		for _, backend := range rule.BackendRefs {
-			if _, _, diagnostic := model.NormalizeHTTPBackendRequestFilters(rule, backend, r.Config.BackendRequestFilters && !grpc, request, rewrite); diagnostic != nil &&
-				diagnostic.Condition != string(gatewayv1.RouteConditionResolvedRefs) {
+			operations, _, diagnostic := model.NormalizeHTTPBackendRequestFilters(rule, backend, r.Config.BackendRequestFilters && !grpc, request, rewrite)
+			if diagnostic != nil && diagnostic.Condition != string(gatewayv1.RouteConditionResolvedRefs) {
 				return routeActionError(diagnostic)
+			}
+			if cors != nil {
+				if diagnostic := model.ValidateCORSHeaderComposition(operations, nil); diagnostic != nil {
+					return routeActionError(diagnostic)
+				}
 			}
 		}
 		return validateWeightedBackendRefs(rule.BackendRefs, grpc)
@@ -225,11 +230,15 @@ func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, grpc bool) 
 	backend := rule.BackendRefs[0]
 	if len(backend.Filters) != 0 {
 		_, _, diagnostic := model.NormalizeHTTPBackendRequestFilters(rule, backend, false, nil, nil)
-		if diagnostic != nil && diagnostic.Scope == model.ScopeRoute {
+		if diagnostic != nil && (diagnostic.Scope == model.ScopeRoute ||
+			slices.ContainsFunc(backend.Filters, func(filter gatewayv1.HTTPRouteFilter) bool { return filter.Type == gatewayv1.HTTPRouteFilterCORS })) {
 			return routeActionError(diagnostic)
 		}
 		if fixedResponses && !grpc && diagnostic != nil && diagnostic.Condition == string(gatewayv1.RouteConditionResolvedRefs) &&
 			ptr.Deref(backend.Weight, 1) > 0 {
+			if slices.ContainsFunc(rule.Filters, func(filter gatewayv1.HTTPRouteFilter) bool { return filter.Type == gatewayv1.HTTPRouteFilterCORS }) {
+				return newRouteBuildError(routeErrorUnsupported, "Octavia CORS on an unresolved backend requires --octavia-weighted-http-targets")
+			}
 			return nil
 		}
 		return newRouteBuildError(routeErrorUnsupported, "backendRef filters are not supported")
@@ -322,6 +331,11 @@ func (r *Reconciler) buildRouteModelWithReader(
 	return spec, err
 }
 
+type routeModelDiagnostics struct {
+	backend      model.Diagnostic
+	corsFallback bool
+}
+
 func (r *Reconciler) buildRouteModelFromInputs(
 	ctx context.Context,
 	reader client.Reader,
@@ -329,7 +343,7 @@ func (r *Reconciler) buildRouteModelFromInputs(
 	gateway *gatewayv1.Gateway,
 	listeners []*gatewayv1.Listener,
 	inputs *routeModelInputs,
-) (cloud.RouteSpec, model.Diagnostic, error) {
+) (cloud.RouteSpec, routeModelDiagnostics, error) {
 	ordinaryHTTP := model.HTTPProfileRouteKind(route) == model.HTTPRouteKind
 	listener := *listeners[0]
 	isolated := gatewaycontroller.SharedHTTPSListener(r.Config, gateway, &listener)
@@ -337,11 +351,11 @@ func (r *Reconciler) buildRouteModelFromInputs(
 		r.Config.FixedHTTPResponses || r.Config.WeightedHTTPTargets, r.Config.WeightedHTTPTargets,
 		r.Config.HTTPHeaderExact, r.Config.HTTPMethodMatch && ordinaryHTTP, r.Config.HTTPQueryParamExact && r.Config.FixedHTTPResponses && ordinaryHTTP)
 	if err != nil {
-		return cloud.RouteSpec{}, model.Diagnostic{}, err
+		return cloud.RouteSpec{}, routeModelDiagnostics{}, err
 	}
 	topology, err := controller.StoredGatewayTopology(r.Config, gateway)
 	if err != nil {
-		return cloud.RouteSpec{}, model.Diagnostic{}, err
+		return cloud.RouteSpec{}, routeModelDiagnostics{}, err
 	}
 	mode := topology.Topology.MemberMode
 	spec := cloud.RouteSpec{
@@ -372,7 +386,7 @@ func (r *Reconciler) buildRouteModelFromInputs(
 	if listener.Protocol == gatewayv1.HTTPProtocolType {
 		admitted, err := gatewaycontroller.HTTPRouteListeners(r.Config, gateway)
 		if err != nil {
-			return cloud.RouteSpec{}, model.Diagnostic{}, err
+			return cloud.RouteSpec{}, routeModelDiagnostics{}, err
 		}
 		if len(gatewaycontroller.HTTPListenerHostnames(admitted)[int(listener.Port)]) != 0 {
 			for i := range matches {
@@ -387,19 +401,19 @@ func (r *Reconciler) buildRouteModelFromInputs(
 		spec.Hostname, spec.PathType, spec.PathValue, spec.Precedence = match.Hostname, cloud.PathMatchType(match.Match.PathType), match.Match.PathValue, match.Precedence
 		spec.BackendTLS = inputs.backendTLSAvailability.validation(backend, ordinaryHTTP)
 		if spec.BackendTLS != nil && spec.BackendTLS.Denied {
-			return spec, model.Diagnostic{}, nil
+			return spec, routeModelDiagnostics{}, nil
 		}
 		members, err := routeBackendMembers(ctx, reader, backend, inputs, mode, topology.NodeAddressType)
 		if err != nil {
-			return cloud.RouteSpec{}, model.Diagnostic{}, err
+			return cloud.RouteSpec{}, routeModelDiagnostics{}, err
 		}
 		spec.Members = members
 		spec.BackendH2C = spec.BackendTLS == nil && backend.UsesH2C()
-		return spec, model.Diagnostic{}, nil
+		return spec, routeModelDiagnostics{}, nil
 	}
 	diagnostic, err := r.lowerHTTPBackends(ctx, reader, route, listener, &spec, inputs, matches, rules, topology.NodeAddressType)
 	if err != nil {
-		return cloud.RouteSpec{}, model.Diagnostic{}, err
+		return cloud.RouteSpec{}, routeModelDiagnostics{}, err
 	}
 	return spec, diagnostic, nil
 }
@@ -441,16 +455,17 @@ type httpBackendResolution struct {
 	diagnostic model.Diagnostic
 }
 
-func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader, route *gatewayv1.HTTPRoute, listener gatewayv1.Listener, spec *cloud.RouteSpec, inputs *routeModelInputs, matches []routeLoweredMatch, rules []model.Rule, nodeAddressType corev1.NodeAddressType) (model.Diagnostic, error) {
+func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader, route *gatewayv1.HTTPRoute, listener gatewayv1.Listener, spec *cloud.RouteSpec, inputs *routeModelInputs, matches []routeLoweredMatch, rules []model.Rule, nodeAddressType corev1.NodeAddressType) (routeModelDiagnostics, error) {
 	type ruleTarget struct {
-		pool     *int
-		weighted int
-		redirect *int
-		fixed    *int
+		pool         *int
+		weighted     int
+		redirect     *int
+		fixed        *int
+		corsFallback bool
 	}
 	groups := make(map[backendKey]httpBackendResolution, len(rules))
 	targets := make([]ruleTarget, len(rules))
-	var firstDiagnostic model.Diagnostic
+	var diagnostics routeModelDiagnostics
 	for _, rule := range rules {
 		if redirect := rule.Redirect; redirect != nil {
 			targets[rule.Index].redirect = ptr.To(len(spec.HTTPRedirects))
@@ -464,12 +479,13 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 		}
 		zeroOnly := spec.GRPC && !slices.ContainsFunc(rule.Backends, func(backend model.BackendGroup) bool { return backend.Weight > 0 })
 		if !spec.GRPC && len(rule.Backends) == 1 && rule.Backends[0].FilterDiagnostic != nil && !r.Config.WeightedHTTPTargets {
-			firstDiagnostic = preferredBackendDiagnostic(firstDiagnostic, *rule.Backends[0].FilterDiagnostic)
+			diagnostics.backend = preferredBackendDiagnostic(diagnostics.backend, *rule.Backends[0].FilterDiagnostic)
 			targets[rule.Index].fixed = ptr.To(len(spec.FixedHTTPRules))
 			spec.FixedHTTPRules = append(spec.FixedHTTPRules, cloud.HTTPFixedRule{RuleIndex: rule.Index})
 			continue
 		}
-		direct := !zeroOnly && len(rule.Backends) == 1 && hasHTTPBackendKey(rule.Backends[0]) && rule.Backends[0].FilterDiagnostic == nil &&
+		direct := !zeroOnly && (rule.CORS == nil || !r.Config.WeightedHTTPTargets) && len(rule.Backends) == 1 &&
+			hasHTTPBackendKey(rule.Backends[0]) && rule.Backends[0].FilterDiagnostic == nil &&
 			len(rule.Backends[0].RequestHeaderOperations) == 0 && rule.Backends[0].URLRewrite == nil
 		weighted := cloud.HTTPWeightedRule{RuleIndex: rule.Index}
 		for _, backend := range rule.Backends {
@@ -477,19 +493,25 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 				// Resolve the Kubernetes references without creating forwarding pools.
 				switch {
 				case backend.Diagnostic != nil:
-					firstDiagnostic = preferredBackendDiagnostic(firstDiagnostic, *backend.Diagnostic)
+					diagnostics.backend = preferredBackendDiagnostic(diagnostics.backend, *backend.Diagnostic)
 				case backend.BackendTLS.Winner != nil:
-					firstDiagnostic = preferredBackendDiagnostic(firstDiagnostic, unsupportedGRPCBackendTLS())
+					diagnostics.backend = preferredBackendDiagnostic(diagnostics.backend, unsupportedGRPCBackendTLS())
 				}
 				weighted.Targets = append(weighted.Targets, cloud.HTTPWeightedTarget{})
 				continue
 			}
 			index, diagnostic, err := r.lowerHTTPBackend(ctx, reader, route, spec, inputs, backend, nodeAddressType, direct, groups)
 			if err != nil {
-				return model.Diagnostic{}, err
+				return routeModelDiagnostics{}, err
 			}
-			firstDiagnostic = preferredBackendDiagnostic(firstDiagnostic, diagnostic)
+			diagnostics.backend = preferredBackendDiagnostic(diagnostics.backend, diagnostic)
 			if direct {
+				if rule.CORS != nil && index != nil && r.Config.FixedHTTPResponses && spec.HTTPBackends[*index].InvalidReference {
+					// Preserve this match as the usual fixed 500 response.
+					// Octavia cannot attach CORS to a standalone fixed response.
+					targets[rule.Index].corsFallback = true
+					diagnostics.corsFallback = true
+				}
 				targets[rule.Index].pool = index
 			} else {
 				target := cloud.HTTPWeightedTarget{BackendIndex: index, Weight: int(backend.Weight)}
@@ -522,6 +544,10 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 		if target.pool != nil || target.fixed == nil && target.redirect == nil {
 			operations = rules[match.RuleIndex].RequestHeaderOperations
 		}
+		cors := rules[match.RuleIndex].CORS
+		if target.corsFallback {
+			cors = nil
+		}
 		*paths = appendHTTPPathMatch(*paths, cloud.HTTPPathMatch{
 			Hostname: match.Hostname, PathType: cloud.PathMatchType(match.Match.PathType), PathValue: match.Match.PathValue, Precedence: match.Precedence,
 			HTTPListenerHostname: match.httpListenerHostname, HTTPSListenerHostname: match.httpsListenerHostname,
@@ -529,9 +555,10 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 			RequestHeaderOperations:  operations,
 			ResponseHeaderOperations: rules[match.RuleIndex].ResponseHeaderOperations,
 			URLRewrite:               rules[match.RuleIndex].URLRewrite,
+			CORS:                     cors,
 		})
 	}
-	return firstDiagnostic, nil
+	return diagnostics, nil
 }
 
 func hasHTTPBackendKey(backend model.BackendGroup) bool {

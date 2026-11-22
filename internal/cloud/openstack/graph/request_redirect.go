@@ -111,7 +111,8 @@ func (p *Provider) protectHTTPURLPolicyTraffic(ctx context.Context, desired desi
 			continue
 		}
 		retryClosure := listener.ProvisioningStatus == "ERROR" &&
-			(predicate.capability == octavia.GatewayCapabilityRequestURLRewrite || predicate.capability == octavia.GatewayCapabilityTargetRequestFilters)
+			(predicate.capability == octavia.GatewayCapabilityRequestURLRewrite || predicate.capability == octavia.GatewayCapabilityTargetRequestFilters ||
+				predicate.capability == octavia.GatewayCapabilityRequestCORS)
 		if available && !state.unsettled && !retryClosure {
 			continue
 		}
@@ -156,8 +157,9 @@ func (p *Provider) protectHTTPURLPolicyTraffic(ctx context.Context, desired desi
 			}
 			patch := step.route.requestURLRewriteUpdate
 			clearRewrite := patch != nil && patch.Value == nil
+			clearCORS := step.route.requestCORSUpdate != nil && step.route.requestCORSUpdate.Value == nil
 			targetWithdrawal := step.route.kind == routeMutationSetPolicyTarget && step.route.withdrawHTTPPolicy
-			if requiresWithdrawal[listenerID] && !httpURLPolicyCleanup(step.route.kind) && !clearRewrite && !targetWithdrawal {
+			if requiresWithdrawal[listenerID] && !httpURLPolicyCleanup(step.route.kind) && !clearRewrite && !clearCORS && !targetWithdrawal {
 				return true
 			}
 			return unavailable[listenerID] && writeRequiresCapability(graphRoutePart(desired, step), step.route)

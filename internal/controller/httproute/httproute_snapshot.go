@@ -84,6 +84,7 @@ type routeValidationSnapshot struct {
 	backends               *routeModelInputs
 	rejectedSections       []model.ListenerSection
 	backendDiagnostic      model.Diagnostic
+	corsFallback           bool
 	backendTLSAncestorSlot backendtls.AncestorSlot
 	gatewayProgrammed      bool
 	disposition            routeValidationDisposition
@@ -186,13 +187,14 @@ func (r *Reconciler) buildRouteValidationSnapshotFromInputs(
 			return routeValidationSnapshot{}, err
 		}
 	}
-	desired, diagnostic, err := r.buildRouteModelFromInputs(ctx, r.APIReader, snapshot.route, snapshot.gateway, listeners, inputs)
+	desired, diagnostics, err := r.buildRouteModelFromInputs(ctx, r.APIReader, snapshot.route, snapshot.gateway, listeners, inputs)
 	if err != nil {
 		return snapshot, routeSnapshotReadError(purpose, err)
 	}
 	snapshot.desired = desired
 	snapshot.backends = inputs
-	snapshot.backendDiagnostic = diagnostic
+	snapshot.backendDiagnostic = diagnostics.backend
+	snapshot.corsFallback = diagnostics.corsFallback
 	snapshot.backendTLSAncestorSlot = routeBackendTLSAncestorSlot(snapshot.route, inputs)
 
 	if purpose == routeSnapshotForEnsure {

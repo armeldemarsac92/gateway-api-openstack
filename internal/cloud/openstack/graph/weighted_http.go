@@ -490,7 +490,7 @@ func weightedTargetWithdrawals(desired desiredRoute, observed observedRouteGraph
 				steps = append(steps, obsoleteWeightedFilterPolicyStep(policy))
 				continue
 			}
-			if policy.hasRequestURLRewrite() && !observedPolicyDisabled(policy) {
+			if (policy.hasRequestURLRewrite() || policy.hasRequestCORS()) && !observedPolicyDisabled(policy) {
 				steps = append(steps, routeMutation{kind: routeMutationDisablePolicy, id: policy.policy.ID, retry: retry})
 				continue
 			}
@@ -517,8 +517,9 @@ func obsoleteWeightedFilterPolicyStep(policy observedRoutePolicy) routeMutation 
 }
 
 // A rule with no positive, authorized pool can replace its targets and clear
-// the stale rewrite in one restrictive write. Preserve its match and admin
-// state so requests receive the 500 without exposing a lower priority route.
+// the stale rewrite in one restrictive write. Keep the match so requests can
+// receive the 500 without exposing a lower priority route. An installed CORS
+// filter requires a disabled policy before the target list can change.
 func localOnlyURLRewriteWithdrawal(desired desiredRoute, observed observedRoutePolicy) (routeMutation, bool) {
 	if observed.requestURLRewrite == nil || !observed.adminObserved || observed.pending() {
 		return routeMutation{}, false
@@ -527,6 +528,9 @@ func localOnlyURLRewriteWithdrawal(desired desiredRoute, observed observedRouteP
 		if !wanted.localRewriteFallback || wanted.role != observed.role || wanted.httpsListenerHostname != observed.httpsListenerHostname ||
 			wanted.targetsPending() || !observedHTTPPredicateMatches(observed, rulesFor(wanted, desired.hostnameRuleValue)) {
 			continue
+		}
+		if observed.hasRequestCORS() && !observedPolicyDisabled(observed) {
+			return routeMutation{kind: routeMutationDisablePolicy, id: observed.policy.ID, retry: observed.policy.ProvisioningStatus == "ERROR"}, true
 		}
 		patch := policyURLRewritePatch(nil, observed)
 		patch.KeepPolicyState = true

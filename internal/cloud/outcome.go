@@ -100,9 +100,10 @@ type GatewayResult struct {
 	HTTPPolicyTransition bool
 	// ScopedListenerReadyPorts contains the individually programmed listener ports.
 	ScopedListenerReadyPorts []int
-	// ScopedListenerDeferredPorts still match their active frontends during a TLS
-	// withdrawal. The route inventory was deferred. Only a previously programmed
-	// section at the same generation can retain its status for this observation.
+	// ScopedListenerDeferredPorts still match their active frontends while
+	// route observations are deferred. Only previously programmed sections
+	// at the same generation can retain status. A nil list means the provider
+	// made no such observation. An empty list means no ports retain status.
 	ScopedListenerDeferredPorts []int
 }
 

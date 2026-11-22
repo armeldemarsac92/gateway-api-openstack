@@ -111,17 +111,22 @@ func backendRequestFilterTags(targets []octavia.WeightedHTTPTarget, observed obs
 	return append(tags, openstackidentity.BackendRequestFiltersPolicyTag)
 }
 
-type backendRequestFilterInventoryError struct {
+type httpFilterInventoryError struct {
 	listenerID string
 	policyID   string
+	filter     string
 	ownedPools []observedRouteGraph
+	cause      error
 }
 
-func (err *backendRequestFilterInventoryError) Error() string {
-	return fmt.Sprintf("L7 policy %s has incomplete or malformed Octavia backend request filter inventory", err.policyID)
+func (err *httpFilterInventoryError) Error() string {
+	if err.cause != nil {
+		return fmt.Sprintf("incomplete Octavia %s inventory on listener %s: %v", err.filter, err.listenerID, err.cause)
+	}
+	return fmt.Sprintf("L7 policy %s has incomplete or malformed Octavia %s inventory", err.policyID, err.filter)
 }
 
-func (p *Provider) backendFilterListenerWithInventoryError(actual observedGatewayGraph, incomplete *backendRequestFilterInventoryError) *listeners.Listener {
+func (p *Provider) httpFilterListenerWithInventoryError(actual observedGatewayGraph, incomplete *httpFilterInventoryError) *listeners.Listener {
 	if incomplete == nil || actual.loadBalancer == nil || actual.loadBalancer.ProvisioningStatus != "ACTIVE" {
 		return nil
 	}
@@ -143,5 +148,6 @@ func (p *Provider) backendFilterListenerWithInventoryError(actual observedGatewa
 
 func requestTransformListenerNeedsRecovery(desired desiredGatewayGraph, actual observedGatewayGraph, listener listeners.Listener) bool {
 	return rewriteListenerNeedsRecovery(desired, actual, listener) ||
-		requestPolicyListenerNeedsRecovery(desired, actual, listener, backendRequestFiltersPolicy)
+		requestPolicyListenerNeedsRecovery(desired, actual, listener, backendRequestFiltersPolicy) ||
+		requestPolicyListenerNeedsRecovery(desired, actual, listener, requestCORSPolicy)
 }

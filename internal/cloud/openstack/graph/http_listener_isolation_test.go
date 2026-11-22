@@ -31,7 +31,7 @@ import (
 )
 
 func TestPlainHTTPListenerIsolationReservesHostnamesBeforeRouteMatching(t *testing.T) {
-	provider := &Provider{projectID: "project-a"}
+	provider := &Provider{projectID: "project-a", httpCORS: true}
 	spec := completeGraphSpec(safetyTestIdentity(t))
 	port := spec.Gateway.Spec.ListenerPort
 	spec.Gateway.Spec.HTTPListenerHostnames = map[int][]string{port: {"*", "*.bar.com", "*.foo.bar.com", "foo.bar.com"}}
@@ -53,7 +53,8 @@ func TestPlainHTTPListenerIsolationReservesHostnamesBeforeRouteMatching(t *testi
 	wildcard.Spec.HTTPBackends = []cloud.HTTPBackend{{
 		Namespace: "default", Name: "wildcard", Port: 80, Members: wildcard.Spec.Members,
 		Matches: []cloud.HTTPPathMatch{
-			{HTTPListenerHostname: "*.bar.com", Hostname: "*.bar.com", PathType: cloud.PathMatchExact, PathValue: "/wildcard"},
+			{HTTPListenerHostname: "*.bar.com", Hostname: "*.bar.com", PathType: cloud.PathMatchExact, PathValue: "/wildcard",
+				CORS: &cloud.HTTPCORS{AllowOrigins: []string{"https://client.example"}}},
 			{HTTPListenerHostname: "*.bar.com", Hostname: "*.bar.com", PathType: cloud.PathMatchExact, PathValue: "/second", Precedence: 2},
 		},
 	}}
@@ -98,6 +99,9 @@ func TestPlainHTTPListenerIsolationReservesHostnamesBeforeRouteMatching(t *testi
 					}
 					if matched {
 						matches = append(matches, route.spec.Identity.RouteName)
+						if (policy.requestCORS != nil) != (route.spec.Identity.RouteName == "wildcard" && path == "/wildcard") {
+							t.Fatalf("CORS leaked or was omitted for host %q path %q", host, path)
+						}
 					}
 				}
 			}

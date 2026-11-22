@@ -266,6 +266,7 @@ func (actual observedGatewayGraph) isolatedPoliciesReady(desired desiredGatewayG
 					current.httpsListenerHostname == policy.httpsListenerHostname && current.policy.AdminStateUp &&
 					slices.Equal(current.requestHeaderOperations, policy.requestHeaderOperations) &&
 					slices.Equal(current.responseHeaderOperations, policy.responseHeaderOperations) &&
+					(policy.requestCORS == nil && !current.hasRequestCORS() || policy.requestCORS != nil && requestCORSPolicy.settled(policy, current)) &&
 					(route.redirect && observedForwardPolicySettled(current) && desiredPolicyActionMatches(policy, current, "") &&
 						observedHTTPPredicateMatches(current, rulesFor(policy, route.hostnameRuleValue)) ||
 						!route.redirect && observedForwardPolicyMatches(route, observed, current))

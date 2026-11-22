@@ -73,6 +73,40 @@ func writerFixture() *Writer {
 	}
 }
 
+func TestWriterKeepsGuardedHTTPPortsWhenTLSWithdrawalDoesNotObserveThem(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		ports []int
+		want  []int
+	}{
+		{name: "no new observation", want: []int{8080, 8443}},
+		{name: "new TLS withdrawal", ports: []int{80, 8080}, want: []int{8080}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			w := writerFixture()
+			gateway := GatewayInput{ObserveTLS: func(context.Context) (GatewayInput, error) {
+				return GatewayInput{Node: cloud.GatewayGraphNode{Disposition: cloud.GraphWithdrawTLS,
+					Spec: cloud.GatewaySpec{ScopedListeners: []cloud.ScopedListener{}}},
+					Validate: func(context.Context) error { return nil }}, nil
+			}}
+			w.Provider = graphProviderFunc(func(_ context.Context, spec cloud.GatewayGraphSpec) (cloud.GatewayGraphResult, error) {
+				if spec.Gateway.Disposition != cloud.GraphWithdrawTLS {
+					t.Fatal("expected TLS-only withdrawal")
+				}
+				return cloud.GatewayGraphResult{Outcome: cloud.ReadyOutcome(),
+					Gateway: cloud.GatewayResult{ScopedListenerDeferredPorts: test.ports}}, nil
+			})
+			initial := cloud.GatewayGraphResult{
+				Gateway: cloud.GatewayResult{HTTPPolicyTransition: true, ScopedListenerDeferredPorts: []int{8080, 8443}},
+			}
+			result, err := w.finishTLS(t.Context(), writerRequest().Identity, gateway, initial, cloud.ErrDependencyNotReady)
+			if !errors.Is(err, cloud.ErrDependencyNotReady) || !slices.Equal(result.Gateway.ScopedListenerDeferredPorts, test.want) {
+				t.Fatalf("expected the inventory error and deferred ports %v, got %+v, %v", test.want, result.Gateway, err)
+			}
+		})
+	}
+}
+
 func TestWriterObservesFreshInputsAfterAcquiringGateway(t *testing.T) {
 	w := writerFixture()
 	request := writerRequest()

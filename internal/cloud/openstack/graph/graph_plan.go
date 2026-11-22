@@ -686,7 +686,7 @@ func (p *Provider) prepareNextGraphMutation(ctx context.Context, desired desired
 	recordBlocked(first, blocked)
 	blockedHTTPPolicy := blocked.capability == octavia.GatewayCapabilityHTTPHeaderExact || blocked.capability == octavia.GatewayCapabilityHTTPMethodMatch ||
 		blocked.capability == octavia.GatewayCapabilityHTTPQueryParamExact || blocked.capability == octavia.GatewayCapabilityHTTPRequestRedirect ||
-		blocked.capability == octavia.GatewayCapabilityRequestURLRewrite ||
+		blocked.capability == octavia.GatewayCapabilityRequestURLRewrite || blocked.capability == octavia.GatewayCapabilityRequestCORS ||
 		blocked.capability == octavia.GatewayCapabilityTargetRequestFilters ||
 		blocked.capability == octavia.GatewayCapabilityRequestHeaderOperations && rewritePolicyWriteRequiresCapability(graphRoutePart(desired, first), first.route) ||
 		blocked.capability == octavia.GatewayCapabilityResponseHeaderOperations || blocked.capability == octavia.GatewayCapabilityGRPCContentType
@@ -774,6 +774,9 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 		if backendRequestFilterWriteRequiresCapability(part, step.route) {
 			required = append(required, octavia.GatewayCapabilityTargetRequestFilters)
 		}
+		if corsPolicyWriteRequiresCapability(part, step.route) {
+			required = append(required, octavia.GatewayCapabilityRequestCORS)
+		}
 		requiresRewrite := rewritePolicyWriteRequiresCapability(part, step.route)
 		if requiresRewrite {
 			required = append(required, octavia.GatewayCapabilityRequestURLRewrite)
@@ -820,7 +823,7 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 	withdrawTarget := step.kind == graphRouteMutation && step.withdrawHTTPPolicy && step.route.kind == routeMutationSetPolicyTarget
 	verify := p.verifyGatewayHTTPCapabilities
 	if slices.Contains(required, octavia.GatewayCapabilityHTTPRequestRedirect) || slices.Contains(required, octavia.GatewayCapabilityRequestURLRewrite) ||
-		slices.Contains(required, octavia.GatewayCapabilityTargetRequestFilters) {
+		slices.Contains(required, octavia.GatewayCapabilityTargetRequestFilters) || slices.Contains(required, octavia.GatewayCapabilityRequestCORS) {
 		verify = p.verifyGatewayHTTPURLCapabilities
 	}
 	err := verify(ctx, desired, actual, required)
@@ -872,6 +875,9 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 			} else if slices.Contains(required, octavia.GatewayCapabilityHTTPQueryParamExact) &&
 				(!explicitlyMissing || missing.Capability == octavia.GatewayCapabilityHTTPQueryParamExact) {
 				err = &unavailableRouteCapability{error: err, capability: octavia.GatewayCapabilityHTTPQueryParamExact}
+			} else if slices.Contains(required, octavia.GatewayCapabilityRequestCORS) &&
+				(!explicitlyMissing || missing.Capability == octavia.GatewayCapabilityRequestCORS) {
+				err = &unavailableRouteCapability{error: err, capability: octavia.GatewayCapabilityRequestCORS}
 			} else if slices.Contains(required, octavia.GatewayCapabilityTargetRequestFilters) &&
 				(!explicitlyMissing || missing.Capability == octavia.GatewayCapabilityTargetRequestFilters) {
 				err = &unavailableRouteCapability{error: err, capability: octavia.GatewayCapabilityTargetRequestFilters}
@@ -991,7 +997,7 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 		if desired.plainHTTPRuleLimits[port] != "" || slices.ContainsFunc(desired.routes, func(route desiredRoute) bool {
 			return httpURLPolicyRoutePort(desired, route) == port && slices.ContainsFunc(route.httpParts, func(part desiredRoute) bool {
 				return slices.ContainsFunc(part.policies, func(policy desiredPolicy) bool {
-					return requestRedirectPolicy.required(policy) || requestURLRewritePolicy.required(policy)
+					return requestRedirectPolicy.required(policy) || requestURLRewritePolicy.required(policy) || requestCORSPolicy.required(policy)
 				})
 			})
 		}) {

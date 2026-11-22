@@ -127,6 +127,9 @@ func NormalizeHTTPBackendRequestFilters(rule gatewayv1.HTTPRouteRule, backend ga
 			return nil, nil, unsupported(fmt.Sprintf("backendRef filter %q is not supported", filter.Type), ScopeRoute)
 		}
 	}
+	if slices.ContainsFunc(backend.Filters, isCORSFilter) {
+		return nil, nil, unsupported("Octavia CORS is supported on HTTPRoute rules only", ScopeRule)
+	}
 	if unresolved := UnresolvedHTTPBackendExtension(backend); unresolved != nil {
 		return nil, nil, unresolved
 	}

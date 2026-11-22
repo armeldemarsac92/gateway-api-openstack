@@ -60,6 +60,8 @@ type Request struct {
 	// HTTPRouteBackendDiagnostic ties ResolvedRefs to the backend observation
 	// that the graph writer uses for the requesting HTTPRoute.
 	HTTPRouteBackendDiagnostic *model.Diagnostic
+	// HTTPRouteCORSFallback binds partial rule status to the same observation.
+	HTTPRouteCORSFallback *bool
 	// HTTPRouteBackendTLSAncestorSlot binds route status to the writer's slot observation.
 	HTTPRouteBackendTLSAncestorSlot *backendtls.AncestorSlot
 	// HTTPRouteRejectedSections ties per-parent status to the graph's profile election.
@@ -226,8 +228,16 @@ func (w *Writer) finishTLS(ctx context.Context, identity cloud.Identity, gateway
 		}
 	}
 	withdrawal, err := w.withdrawTLS(ctx, identity, input)
-	if err == nil {
-		result.Gateway.ScopedListenerDeferredPorts = withdrawal.Gateway.ScopedListenerDeferredPorts
+	if err == nil && withdrawal.Gateway.ScopedListenerDeferredPorts != nil {
+		ports := withdrawal.Gateway.ScopedListenerDeferredPorts
+		if result.Gateway.HTTPPolicyTransition {
+			// The TLS observation can further restrict which ports retain
+			// status. It cannot certify a frontend guarded by the HTTP pass.
+			ports = slices.DeleteFunc(slices.Clone(ports), func(port int) bool {
+				return !slices.Contains(result.Gateway.ScopedListenerDeferredPorts, port)
+			})
+		}
+		result.Gateway.ScopedListenerDeferredPorts = ports
 	}
 	if len(changed) != 0 {
 		change := &TLSAuthorizationChanged{Ports: changed}

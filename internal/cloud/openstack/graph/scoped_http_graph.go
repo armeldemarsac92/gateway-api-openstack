@@ -276,7 +276,7 @@ func unchangedHTTPListenerSiblings(desired desiredGatewayGraph, actual observedG
 		return nil
 	}
 	configured := scopedHTTPListeners(desired)
-	var ports []int
+	ports := make([]int, 0, len(actual.scopedListeners))
 	for _, listener := range actual.scopedListeners {
 		if listener.ID == affectedListenerID || !actual.adminObserved[listener.ID] ||
 			!listener.AdminStateUp || listener.ProvisioningStatus != "ACTIVE" {
