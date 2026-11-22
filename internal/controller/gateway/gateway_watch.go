@@ -109,7 +109,7 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 		gatewayController.Watches(route, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForRoute),
 			builder.WithPredicates(controller.RouteForGatewayPredicate(r.Config)))
 	}
-	if r.Config.TLSSNIPassthrough {
+	if r.Config.TLSRoutesEnabled() {
 		gatewayController.Watches(&gatewayv1.TLSRoute{}, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForRoute),
 			builder.WithPredicates(controller.RouteForGatewayPredicate(r.Config)))
 		for _, dependency := range []client.Object{&corev1.Service{}, &discoveryv1.EndpointSlice{}, &corev1.Namespace{}, &gatewayv1.ReferenceGrant{}} {
@@ -182,7 +182,7 @@ func (r *Reconciler) gatewayRequestsForCertificateGrant(ctx context.Context, obj
 		for i := range gateways.Items {
 			gateway := &gateways.Items[i]
 			if slices.ContainsFunc(gateway.Spec.Listeners, func(listener gatewayv1.Listener) bool {
-				return listener.Protocol == gatewayv1.HTTPSProtocolType && listener.TLS != nil &&
+				return (listener.Protocol == gatewayv1.HTTPSProtocolType || terminatesTLS(&listener)) && listener.TLS != nil &&
 					slices.ContainsFunc(listener.TLS.CertificateRefs, func(ref gatewayv1.SecretObjectReference) bool {
 						return ref.Namespace != nil && string(*ref.Namespace) == grant.Namespace
 					})

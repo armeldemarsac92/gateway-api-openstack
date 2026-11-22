@@ -79,7 +79,8 @@ func (r *Reconciler) Reconcile(
 	ctx = log.IntoContext(ctx, logger)
 	logger.V(4).Info("Reconciling Gateway")
 
-	if r.Config.TLSSNIPassthrough {
+	scope, responsible, err := r.newGatewayScope(ctx, req)
+	if r.Config.TLSRoutesEnabled() || scope != nil && r.boundListenerProtocol(scope.gateway) == cloud.ListenerProtocolTLSTerminate {
 		// Route rejection and status cleanup do not gate Gateway graph mutations.
 		defer func() {
 			if err := r.reconcileSNIParentStatuses(ctx, req.NamespacedName); err != nil {
@@ -87,7 +88,6 @@ func (r *Reconciler) Reconcile(
 			}
 		}()
 	}
-	scope, responsible, err := r.newGatewayScope(ctx, req)
 	if err != nil || !responsible {
 		return ctrl.Result{}, err
 	}
@@ -97,7 +97,7 @@ func (r *Reconciler) Reconcile(
 			retErr = errors.Join(retErr, scope.patchCause, err)
 		}
 		if retErr == nil && scope.patchCause == nil && !result.Requeue && scope.gateway.DeletionTimestamp.IsZero() &&
-			(usesHTTPSProfile(r.Config, scope.gateway) || r.Config.TLSSNIPassthrough && hasSNIPassthroughListener(scope.gateway)) && (result.RequeueAfter == 0 || result.RequeueAfter > httpsPollInterval) {
+			(usesHTTPSProfile(r.Config, scope.gateway) || r.Config.TLSRoutesEnabled() && hasTLSListener(scope.gateway)) && (result.RequeueAfter == 0 || result.RequeueAfter > httpsPollInterval) {
 			result.RequeueAfter = httpsPollInterval
 		}
 	}()
@@ -245,6 +245,11 @@ func (r *Reconciler) reconcileGatewayGraph(
 		tlsIssues = r.listenerTLSIssues(ctx, scope.gateway)
 		defer func() {
 			r.applyHTTPSListenerStatus(scope.gateway, scope.original.Status, tlsIssues, changedTLS, keepGatewayProgrammed)
+		}()
+	}
+	if terminatesTLS(decision.listener) {
+		defer func() {
+			r.applyRawTLSListenerStatus(ctx, scope.gateway, decision.listener, changedTLS != nil)
 		}()
 	}
 	if ports := graphResult.Gateway.ScopedListenerDeferredPorts; len(ports) != 0 {

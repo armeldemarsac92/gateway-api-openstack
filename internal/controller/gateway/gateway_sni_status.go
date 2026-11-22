@@ -23,6 +23,7 @@ import (
 	"slices"
 
 	"k8s.io/apimachinery/pkg/api/equality"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -37,15 +38,37 @@ const sniParentNoMatchingListenerMessage = "The parentRef does not select a list
 const maxSNIRouteParentStatuses = 32
 
 func (r *Reconciler) reconcileSNIParentStatuses(ctx context.Context, key client.ObjectKey) error {
+	if r.APIReader == nil {
+		return controller.ErrAPIReaderRequired
+	}
 	var routes gatewayv1.TLSRouteList
-	if err := r.List(ctx, &routes, client.MatchingFields{controller.IndexTLSRouteByGateway: controller.ObjectKeyString(key)}); err != nil {
-		return fmt.Errorf("list TLSRoutes for Gateway: %w", err)
+	if r.Config.TLSRoutesEnabled() {
+		if err := r.List(ctx, &routes, client.MatchingFields{controller.IndexTLSRouteByGateway: controller.ObjectKeyString(key)}); err != nil {
+			return fmt.Errorf("list TLSRoutes for Gateway: %w", err)
+		}
+	} else {
+		// The index is disabled after opt-out, but existing statuses can
+		// still belong to a bound TCP TLS listener.
+		if err := r.APIReader.List(ctx, &routes); err != nil {
+			if meta.IsNoMatchError(err) || apierrors.IsNotFound(err) {
+				return nil
+			}
+			return err
+		}
+		if routes.Continue != "" {
+			return fmt.Errorf("incomplete TLSRoute inventory")
+		}
+		target := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: key.Namespace, Name: key.Name}}
+		routes.Items = slices.DeleteFunc(routes.Items, func(route gatewayv1.TLSRoute) bool {
+			return !slices.ContainsFunc(route.Spec.ParentRefs, func(ref gatewayv1.ParentReference) bool {
+				return sniParentTargetsGateway(route.Namespace, ref, target)
+			}) && !slices.ContainsFunc(route.Status.Parents, func(status gatewayv1.RouteParentStatus) bool {
+				return r.ownsSNIParent(&route, target, status)
+			})
+		})
 	}
 	if len(routes.Items) == 0 {
 		return nil
-	}
-	if r.APIReader == nil {
-		return controller.ErrAPIReaderRequired
 	}
 	gateway, managed, err := r.readSNIParentGateway(ctx, key)
 	if err != nil {
@@ -116,7 +139,7 @@ func (r *Reconciler) sniParentListenerRejection(listeners []gatewayv1.Listener, 
 			continue
 		}
 		selected = true
-		if listener.Protocol == gatewayv1.TLSProtocolType && len(listenerSupportedRouteKinds(r.Config, listener)) > 0 {
+		if listener.Protocol == gatewayv1.TLSProtocolType && len(listenerSupportedRouteKinds(r.Config, listener)) > 0 && !mixedTLSModes(listeners, listener) {
 			return "", ""
 		}
 	}

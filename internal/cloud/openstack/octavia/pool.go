@@ -207,6 +207,17 @@ func (opts UpdatePoolOpts) ToPoolUpdateMap() (map[string]any, error) {
 	return body, nil
 }
 
+// PlaintextTCPPoolOpts requests a TCP pool without backend re-encryption.
+type PlaintextTCPPoolOpts struct{ pools.CreateOpts }
+
+func (opts PlaintextTCPPoolOpts) ToPoolCreateMap() (map[string]any, error) {
+	body, err := opts.CreateOpts.ToPoolCreateMap()
+	if err == nil {
+		body["pool"].(map[string]any)["tls_enabled"] = false
+	}
+	return body, err
+}
+
 // CreatePool creates one pool.
 func (s *Service) CreatePool(ctx context.Context, opts pools.CreateOptsBuilder) (*pools.Pool, error) {
 	return pools.Create(ctx, s.client, opts).Extract()

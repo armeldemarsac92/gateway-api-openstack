@@ -745,6 +745,10 @@ func TestSNIPolicyWithdrawalDuringNeutronFailureAndDisabledCleanup(t *testing.T)
 			safetyWriteJSON(t, w, map[string]any{"floatingips": []any{}})
 		})),
 		LoadBalancer: safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet && r.URL.Path == "/lbaas/providers/amphora/gateway_capabilities" {
+				safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": []string{"tcp_tls_termination_v1", "tls_sni_passthrough_v1", "tls_sni_suffix_v1"}})
+				return
+			}
 			if body, found := reads[r.URL.Path]; r.Method == http.MethodGet && found {
 				safetyWriteJSON(t, w, body)
 				return
@@ -824,6 +828,36 @@ func TestSNIPolicyWithdrawalDuringNeutronFailureAndDisabledCleanup(t *testing.T)
 			t.Fatalf("feature off must never delete a foreign fragment: err=%v writes=%v", err, writes)
 		}
 	})
+	t.Run("terminated SNI reuses the owned forwarding graph", func(t *testing.T) {
+		writes, neutronFailed = nil, false
+		const certificate = "https://barbican.example/v1/secrets/approved"
+		listenerTags, lbTags := listener["tags"], lb["tags"]
+		listener["tags"] = append(safetyGatewayTags(t, routeID, roleListener), tcpTLSProfileTag)
+		lb["tags"] = append(safetyGatewayTags(t, routeID, roleLoadBalancer), tcpTLSProfileTag)
+		listener["tcp_tls_termination"], listener["default_tls_container_ref"], listener["sni_container_refs"] = true, certificate, []string{}
+		pool["tls_enabled"], policy["project_id"] = false, "project-a"
+		t.Cleanup(func() {
+			listener["tags"], lb["tags"] = listenerTags, lbTags
+			delete(listener, "tcp_tls_termination")
+			delete(listener, "default_tls_container_ref")
+			delete(listener, "sni_container_refs")
+			delete(pool, "tls_enabled")
+		})
+		ensure := spec
+		ensure.Gateway.Spec.ListenerProtocol = cloud.ListenerProtocolTLSTerminate
+		ensure.Gateway.TCPTLSCertificateRef = certificate
+		ensure.Gateway.TLSSNIRoutes = []cloud.TLSSNIRoute{targets[0].route}
+		provider := newTestProvider(t, clients, ProviderConfig{TCPTLSTermination: true})
+		result, err := provider.ReconcileGatewayGraph(t.Context(), ensure)
+		if err != nil || len(writes) != 0 || len(result.Routes) != 1 || result.Routes[0].Result.Outcome.State != cloud.OutcomeReady {
+			t.Fatalf("terminated TLSRoute not ready, result=%#v writes=%v err=%v", result, writes, err)
+		}
+		ensure.Gateway.TLSSNIRoutes = nil
+		result, err = provider.ReconcileGatewayGraph(t.Context(), ensure)
+		if err != nil || len(writes) != 1 || result.Outcome.State != cloud.OutcomeProgressing {
+			t.Fatalf("terminated TLSRoute withdrawal = %#v writes=%v err=%v", result, writes, err)
+		}
+	})
 	t.Run("same UID with different ownership tags is a conflict", func(t *testing.T) {
 		writes, neutronFailed = nil, false
 		policy["project_id"] = "project-a"
@@ -872,4 +906,173 @@ func TestSNIPendingLoadBalancerWithoutFragmentReadbackCannotDefer(t *testing.T) 
 	if got := p.pendingGraphResult(t.Context(), desired, actual).Routes; len(got) != 1 || got[0].Result.ObservationDeferred {
 		t.Fatalf("a pending new loadbalancer is not an eligible serving sibling, got %#v", got)
 	}
+}
+
+func TestTCPTLSTerminationPublicFrontendLifecycle(t *testing.T) {
+	identity := safetyTestIdentity(t)
+	spec := completeGraphSpec(identity)
+	spec.Routes = nil
+	spec.Gateway.Spec.ListenerProtocol = cloud.ListenerProtocolTLSTerminate
+	const first, replacement = "https://barbican.example/v1/secrets/first", "https://barbican.example/v1/secrets/replacement"
+	spec.Gateway.TCPTLSCertificateRef = first
+	ids := func(id string) []map[string]string { return []map[string]string{{"id": id}} }
+	lb := map[string]any{"id": "lb", "project_id": "project-a", "provider": "amphora",
+		"provisioning_status": "ACTIVE", "admin_state_up": true, "listeners": []any{}, "pools": []any{},
+		"vip_subnet_id": spec.Gateway.Spec.VIPSubnetID, "vip_port_id": "vip-port", "vip_address": "192.0.2.10",
+		"tags": append(safetyGatewayTags(t, identity, roleLoadBalancer), tcpTLSProfileTag)}
+	var listener map[string]any
+	capability, addressFailure := false, false
+	var writes []string
+	clients := ServiceClients{
+		ProjectID: "project-a",
+		Network: safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodGet || r.URL.Path != "/floatingips" {
+				t.Errorf("unexpected Neutron request: %s %s", r.Method, r.URL.Path)
+			}
+			if addressFailure {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			safetyWriteJSON(t, w, map[string]any{"floatingips": []any{}})
+		})),
+		LoadBalancer: safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.Method + " " + r.URL.Path {
+			case "GET /lbaas/loadbalancers":
+				safetyWriteJSON(t, w, map[string]any{"loadbalancers": []any{lb}})
+			case "GET /lbaas/loadbalancers/lb":
+				safetyWriteJSON(t, w, map[string]any{"loadbalancer": lb})
+			case "GET /lbaas/providers/amphora/gateway_capabilities":
+				capabilities := []string{"tls_sni_passthrough_v1", "tls_sni_suffix_v1"}
+				if capability {
+					capabilities = append(capabilities, "tcp_tls_termination_v1")
+				}
+				safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": capabilities})
+			case "GET /lbaas/listeners":
+				items := []any{}
+				if listener != nil {
+					items = append(items, listener)
+				}
+				safetyWriteJSON(t, w, map[string]any{"listeners": items})
+			case "GET /lbaas/pools":
+				safetyWriteJSON(t, w, map[string]any{"pools": []any{}})
+			case "GET /lbaas/l7policies":
+				safetyWriteJSON(t, w, map[string]any{"l7policies": []any{}})
+			case "POST /lbaas/pools":
+				var body struct {
+					Pool map[string]any `json:"pool"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Pool["protocol"] != "TCP" || body.Pool["tls_enabled"] != false {
+					t.Errorf("TCP TLS route requires an explicit plaintext TCP pool, got %#v, %v", body.Pool, err)
+				}
+				writes = append(writes, "pool")
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusCreated)
+				safetyWriteJSON(t, w, map[string]any{"pool": map[string]any{"id": "pool"}})
+			case "POST /lbaas/listeners", "PUT /lbaas/listeners/listener":
+				var body struct {
+					Listener map[string]any `json:"listener"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				change := body.Listener
+				if r.Method == http.MethodPost {
+					if change["tcp_tls_termination"] != true || change["protocol"] != "TCP" ||
+						change["admin_state_up"] != false || change["default_tls_container_ref"] != first || change["default_pool_id"] != nil {
+						t.Errorf("unexpected TCP TLS listener create: %#v", change)
+					}
+					listener = change
+					listener["id"], listener["project_id"], listener["provisioning_status"] = "listener", "project-a", "ACTIVE"
+					listener["loadbalancers"], listener["l7policies"], listener["default_pool_id"] = ids("lb"), []any{}, nil
+					listener["sni_container_refs"] = []string{}
+					lb["listeners"] = ids("listener")
+					writes = append(writes, "create")
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusCreated)
+				} else {
+					if len(change) != 1 {
+						t.Errorf("unexpected TCP TLS listener mutation: %#v", change)
+					}
+					switch {
+					case change["admin_state_up"] == false:
+						writes = append(writes, "disable")
+					case change["admin_state_up"] == true:
+						writes = append(writes, "enable")
+					case change["default_tls_container_ref"] == replacement && listener["admin_state_up"] == false:
+						writes = append(writes, "rotate")
+					default:
+						t.Errorf("unexpected TCP TLS listener mutation: %#v", change)
+					}
+					for key, value := range change {
+						listener[key] = value
+					}
+				}
+				safetyWriteJSON(t, w, map[string]any{"listener": listener})
+			default:
+				t.Errorf("unexpected Octavia request: %s %s", r.Method, r.URL.Path)
+				w.WriteHeader(http.StatusNotFound)
+			}
+		})),
+	}
+	provider := newTestProvider(t, clients, ProviderConfig{TCPTLSTermination: true})
+	check := func(p *Provider, spec cloud.GatewayGraphSpec, want cloud.OutcomeState, mutation string, wantErr error) {
+		t.Helper()
+		writes = nil
+		result, err := p.ReconcileGatewayGraph(t.Context(), spec)
+		if !errors.Is(err, wantErr) || (want != "" && result.Outcome.State != want) ||
+			want == cloud.OutcomeReady && result.Gateway.Outcome.State != want ||
+			(len(writes) != 0) != (mutation != "") || len(writes) > 1 || len(writes) > 0 && writes[0] != mutation {
+			t.Fatalf("wanted outcome=%q mutation=%q error=%v, got result=%#v writes=%v err=%v", want, mutation, wantErr, result, writes, err)
+		}
+	}
+	check(provider, spec, "", "", cloud.ErrDependencyNotReady)
+	capability = true
+	check(provider, spec, "", "create", nil)
+	check(provider, spec, "", "enable", nil)
+	check(provider, spec, cloud.OutcomeReady, "", nil)
+	routed := spec
+	routed.Gateway.TLSSNIRoutes = []cloud.TLSSNIRoute{{
+		Identity: identity.Value(), Hostname: "tls.example.com", ServiceUID: "tcp-backend",
+		Members: []cloud.Member{{Address: "192.0.2.101", Port: 3000}},
+	}}
+	check(provider, routed, cloud.OutcomeProgressing, "pool", nil)
+
+	// The whole frontend closes before certificate rotation, even during an
+	// unrelated Neutron failure. It cannot reopen before coherent readback.
+	addressFailure = true
+	spec.Gateway.TCPTLSCertificateRef = ""
+	check(provider, spec, "", "disable", nil)
+	spec.Gateway.TCPTLSCertificateRef = replacement
+	check(provider, spec, "", "rotate", nil)
+	addressFailure = false
+	check(provider, spec, "", "enable", nil)
+	capability, addressFailure = false, true
+	check(provider, spec, "", "disable", cloud.ErrDependencyNotReady)
+	capability, addressFailure = true, false
+	check(provider, spec, "", "enable", nil)
+	delete(listener, "tcp_tls_termination")
+	check(provider, spec, "", "disable", nil)
+	check(provider, spec, "", "", nil)
+	listener["tcp_tls_termination"] = true
+	check(provider, spec, "", "enable", nil)
+	delete(listener, "sni_container_refs")
+	check(provider, spec, "", "disable", nil)
+	listener["sni_container_refs"] = []string{}
+	check(provider, spec, "", "enable", nil)
+	restrict := spec
+	restrict.Gateway.Disposition = cloud.GraphWithdrawTLS
+	capability = false
+	check(provider, restrict, "", "disable", cloud.ErrDependencyNotReady)
+	capability = true
+	check(provider, spec, "", "enable", nil)
+
+	// A restarted controller with termination disabled can still withdraw a
+	// verified binding. A separate passthrough profile is not eligible.
+	spec.Gateway.Disposition, spec.Gateway.TCPTLSCertificateRef = cloud.GraphWithdrawTLS, ""
+	optedOut := newTestProvider(t, clients, ProviderConfig{})
+	listener["tags"] = append(safetyGatewayTags(t, identity, roleListener), sniProfileTag)
+	check(optedOut, spec, "", "", cloud.ErrOwnershipConflict)
+	listener["tags"] = append(safetyGatewayTags(t, identity, roleListener), tcpTLSProfileTag)
+	check(optedOut, spec, "", "disable", nil)
+	check(optedOut, spec, cloud.OutcomeReady, "", nil)
 }

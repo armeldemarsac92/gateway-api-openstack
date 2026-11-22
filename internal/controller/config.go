@@ -60,6 +60,8 @@ type Config struct {
 	TLSSNIPassthrough bool
 	// TLSSNISuffix enables the advertised wildcard SNI extension.
 	TLSSNISuffix bool
+	// TCPTLSTermination enables operator-enrolled certificates on TLSRoute listeners.
+	TCPTLSTermination bool
 	// ControllerName is the exact Gateway API ownership identifier.
 	ControllerName gatewayv1.GatewayController
 	// GatewayAPIChannel selects the release CRDs accepted by this installation. Empty selects Standard.
@@ -79,8 +81,16 @@ func (c Config) XBackendEnabled() bool {
 	return c.GatewayAPIChannel == features.FeatureChannelExperimental
 }
 
+// TLSRoutesEnabled reports whether TLSRoute dependencies need to be watched.
+func (c Config) TLSRoutesEnabled() bool {
+	return c.TLSSNIPassthrough || c.TCPTLSTermination
+}
+
 // Validate rejects configuration that could make ownership ambiguous.
 func (c Config) Validate() error {
+	if c.TCPTLSTermination && !c.OperatorHTTPS {
+		return fmt.Errorf("--octavia-tcp-tls-termination requires --tls-certificate-map")
+	}
 	if c.HTTPSListenerIsolation && !c.OperatorHTTPS {
 		return fmt.Errorf("--octavia-https-listener-isolation requires --tls-certificate-map")
 	}

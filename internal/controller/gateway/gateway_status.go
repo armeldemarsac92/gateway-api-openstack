@@ -66,9 +66,13 @@ func (r *Reconciler) setGatewayFailure(gateway *gatewayv1.Gateway, validationErr
 	controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionProgrammed), metav1.ConditionFalse, string(programmedReason), message, gateway.Generation))
 	gateway.Status.Listeners = make([]gatewayv1.ListenerStatus, 0, len(gateway.Spec.Listeners))
 	for _, listener := range gateway.Spec.Listeners {
-		gateway.Status.Listeners = append(gateway.Status.Listeners, r.unprogrammedListenerStatus(
-			listener, existingListeners, gateway.Generation, unsupportedMultipleL4, listenerSpecific, message,
-		))
+		status := r.unprogrammedListenerStatus(listener, existingListeners, gateway.Generation, unsupportedMultipleL4, listenerSpecific, message)
+		if r.Config.TCPTLSTermination && mixedTLSModes(gateway.Spec.Listeners, listener) {
+			message := "Terminate and Passthrough require separate TLS listener ports"
+			controller.SetCondition(&status.Conditions, controller.Condition(string(gatewayv1.ListenerConditionAccepted), metav1.ConditionFalse, string(gatewayv1.ListenerReasonProtocolConflict), message, gateway.Generation))
+			controller.SetCondition(&status.Conditions, controller.Condition(string(gatewayv1.ListenerConditionConflicted), metav1.ConditionTrue, string(gatewayv1.ListenerReasonProtocolConflict), message, gateway.Generation))
+		}
+		gateway.Status.Listeners = append(gateway.Status.Listeners, status)
 	}
 }
 
@@ -86,7 +90,7 @@ func (r *Reconciler) unprogrammedListenerStatus(
 	}
 	kind := listenerRouteKind(listener.Protocol)
 	l4InMultipleListeners := isL4Listener(listener.Protocol) && multipleListeners
-	protocolSupported := kind != "" && listener.Protocol != gatewayv1.HTTPSProtocolType && (listener.Protocol != gatewayv1.TLSProtocolType || r.Config.TLSSNIPassthrough) && !l4InMultipleListeners
+	protocolSupported := kind != "" && listener.Protocol != gatewayv1.HTTPSProtocolType && (listener.Protocol != gatewayv1.TLSProtocolType || r.Config.TLSRoutesEnabled() || terminatesTLS(&listener)) && !l4InMultipleListeners
 	if protocolSupported {
 		status.SupportedKinds = listenerSupportedRouteKinds(r.Config, listener)
 	}
@@ -153,8 +157,7 @@ func supportedRouteKinds(kind gatewayv1.Kind) []gatewayv1.RouteGroupKind {
 }
 
 func listenerSupportedRouteKinds(config controller.Config, listener gatewayv1.Listener) []gatewayv1.RouteGroupKind {
-	if listener.Protocol == gatewayv1.TLSProtocolType && (!config.TLSSNIPassthrough || listener.TLS == nil ||
-		listener.TLS.Mode == nil || *listener.TLS.Mode != gatewayv1.TLSModePassthrough) {
+	if listener.Protocol == gatewayv1.TLSProtocolType && !tlsListenerModeEnabled(config, &listener) {
 		return nil
 	}
 	var result []gatewayv1.RouteGroupKind
@@ -233,6 +236,9 @@ func (r *Reconciler) handleGatewayProviderFailure(
 	}
 	gateway := scope.gateway
 	gatewayReason, listenerReason := gatewayProviderFailureReasons(policy.Category)
+	if terminatesTLS(listener) && observation.Outcome.State == cloud.OutcomeProgressing && observation.Outcome.Message != "" {
+		policy.Message = observation.Outcome.Message
+	}
 	programmedGeneration := controller.ConditionObservedGeneration(
 		gateway.Status.Conditions,
 		string(gatewayv1.GatewayConditionProgrammed),
@@ -555,7 +561,7 @@ func (r *Reconciler) attachedRoutes(ctx context.Context, gateway *gatewayv1.Gate
 					continue
 				}
 				if tlsRoute, ok := route.(*gatewayv1.TLSRoute); ok {
-					hostnames, err := intersectSNIHostnames(listener, tlsRoute, r.Config.TLSSNISuffix)
+					hostnames, err := intersectSNIHostnames(listener, tlsRoute, allowsSNISuffix(r.Config, listener))
 					if err != nil || len(hostnames) == 0 || !listenerAllowsRouteKind(*listener, tlsRouteKind) {
 						continue
 					}

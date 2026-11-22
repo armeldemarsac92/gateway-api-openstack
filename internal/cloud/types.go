@@ -119,6 +119,8 @@ const (
 	ListenerProtocolUDP  = "UDP"
 	// ListenerProtocolTLSSNI describes a native TCP listener with no default.
 	ListenerProtocolTLSSNI = "TLS"
+	// ListenerProtocolTLSTerminate identifies the immutable TCP termination profile.
+	ListenerProtocolTLSTerminate = "TLS_TERMINATE"
 )
 
 // NormalizeListenerProtocol interprets bindings written before listener

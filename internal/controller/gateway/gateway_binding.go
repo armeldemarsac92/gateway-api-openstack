@@ -63,7 +63,7 @@ func (r *Reconciler) bindGateway(
 		gateway.Annotations = map[string]string{}
 	}
 	gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] = desiredListenerPort
-	gateway.Annotations[r.Config.GatewayListenerProtocolAnnotation()] = string(listenerFamily(snapshot.listener))
+	gateway.Annotations[r.Config.GatewayListenerProtocolAnnotation()] = string(listenerBindingProtocol(snapshot.listener))
 	gateway.Annotations[r.Config.GatewayClusterIDAnnotation()] = r.Config.ClusterID
 	gateway.Annotations[r.Config.GatewayProjectIDAnnotation()] = r.Config.OpenStackProjectID
 	if ports := desiredHTTPSIsolatedPorts(r.Config, gateway); ports != "" {

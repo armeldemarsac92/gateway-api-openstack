@@ -29,8 +29,8 @@ const (
 	// GraphDelete removes a component after a durable Kubernetes checkpoint.
 	GraphDelete GraphDisposition = "Delete"
 	// GraphWithdrawTLS closes owned frontends inconsistent with the current
-	// HTTPS port and certificate list. An empty list withdraws all owned TLS.
-	// This operation cannot create, enable or reconfigure listeners.
+	// authorized HTTPS ports or TCP TLS certificate. This operation cannot
+	// create, enable or reconfigure listeners.
 	GraphWithdrawTLS GraphDisposition = "WithdrawTLS"
 )
 
@@ -50,6 +50,9 @@ type GatewayGraphNode struct {
 	Disposition  GraphDisposition
 	Spec         GatewaySpec
 	TLSSNIRoutes []TLSSNIRoute
+	// TCPTLSCertificateRef is the currently authorized certificate for the raw
+	// TCP termination profile. An empty reference requires the listener closed.
+	TCPTLSCertificateRef string `json:",omitempty"`
 	// BackendCAOwned persists across controller restarts and operator opt-out.
 	BackendCAOwned bool `json:",omitempty"`
 	// ClaimBackendCA checkpoints ownership before creating a Barbican revision.
