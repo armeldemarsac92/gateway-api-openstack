@@ -125,11 +125,26 @@ func (r *Reconciler) reconcileDelete(ctx context.Context, scope *httpRouteScope)
 }
 
 func (r *Reconciler) reconcileNormal(ctx context.Context, scope *httpRouteScope) (ctrl.Result, error) {
-	if scope.route.Annotations[r.Config.RouteLifecycleAnnotation()] == controller.RouteDetaching {
+	detaching := scope.route.Annotations[r.Config.RouteLifecycleAnnotation()] == controller.RouteDetaching
+	parents, err := r.managedParents(ctx, scope.route)
+	if err != nil {
+		if detaching {
+			return r.finalizeRoute(ctx, scope)
+		}
+		if _, bindingErr := controller.StoredRouteGatewayBindings(r.Config, scope.route); bindingErr != nil {
+			return ctrl.Result{}, bindingErr
+		}
+		return ctrl.Result{}, err
+	}
+	groups := groupManagedRouteParents(parents)
+	if len(groups) > 1 || controller.HasRouteGatewayBindings(r.Config, scope.route) {
+		return r.reconcileRouteParents(ctx, scope.route, groups)
+	}
+	if detaching {
 		return r.finalizeRoute(ctx, scope)
 	}
 
-	decision, err := r.buildCachedRouteDecision(ctx, scope.route)
+	decision, err := r.buildCachedRouteDecision(ctx, scope.route, parents)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -146,17 +161,7 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, scope *httpRouteScope)
 	}
 }
 
-func (r *Reconciler) buildCachedRouteDecision(
-	ctx context.Context,
-	route *gatewayv1.HTTPRoute,
-) (cachedRouteDecision, error) {
-	parents, err := r.managedParents(ctx, route)
-	if err != nil {
-		if _, _, bindingErr := r.storedRouteIdentity(route); bindingErr != nil {
-			return cachedRouteDecision{}, bindingErr
-		}
-		return cachedRouteDecision{}, err
-	}
+func (r *Reconciler) buildCachedRouteDecision(ctx context.Context, route *gatewayv1.HTTPRoute, parents []managedRouteParent) (cachedRouteDecision, error) {
 	storedIdentity, bindingPresent, err := r.storedRouteIdentity(route)
 	if err != nil {
 		return cachedRouteDecision{}, err
@@ -254,7 +259,7 @@ func managedParentsSupportInstalledVersion(parents []managedRouteParent) bool {
 func unsupportedParentCountUpdates(parents []managedRouteParent) []parentStatusUpdate {
 	status := rejectedRouteStatus(
 		string(gatewayv1.RouteReasonUnsupportedValue),
-		"exactly one managed Gateway parentRef is supported",
+		"only one parentRef to the same managed Gateway is supported",
 	)
 	updates := make([]parentStatusUpdate, 0, len(parents))
 	for _, parent := range parents {

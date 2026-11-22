@@ -167,11 +167,12 @@ func controllerFieldIndexes(config Config) []controllerFieldIndex {
 				if !ok {
 					return nil
 				}
-				key := boundGatewayKey(config, route)
-				if key == "" {
-					return nil
+				keys, _ := RouteBoundGatewayKeys(config, route)
+				var index []string
+				for _, key := range keys {
+					index = append(index, ObjectKeyString(key))
 				}
-				return []string{key}
+				return index
 			},
 		},
 		{
@@ -179,10 +180,11 @@ func controllerFieldIndexes(config Config) []controllerFieldIndex {
 			field:  indexHTTPRouteByBoundGatewayUID,
 			extract: func(object client.Object) []string {
 				route, ok := object.(*gatewayv1.HTTPRoute)
-				if !ok || boundGatewayKey(config, route) == "" {
+				if !ok {
 					return nil
 				}
-				return []string{route.Annotations[config.RouteGatewayUIDAnnotation()]}
+				_, uids := RouteBoundGatewayKeys(config, route)
+				return uids
 			},
 		},
 		{

@@ -88,16 +88,21 @@ func (r *Reconciler) observeRouteGraphAdmission(ctx context.Context, gateway *ga
 	var candidatesForElection []routeProfileCandidate
 	for i := range routes {
 		route := &routes[i]
-		if !route.DeletionTimestamp.IsZero() || !r.structurallySupportedRoute(route) ||
-			route.Annotations[r.Config.RouteLifecycleAnnotation()] == controller.RouteDetaching {
+		if !route.DeletionTimestamp.IsZero() || !r.structurallySupportedRoute(route) {
 			continue
 		}
-		ref, err := r.soleParentForManagedGateway(ctx, route, gateway)
-		if err != nil {
-			return routeGraphAdmission{}, err
-		}
+		ref := parentForGateway(route, gateway)
 		if ref == nil {
 			continue
+		}
+		if controller.RouteClaimsGateway(r.Config, route, identity) {
+			binding, err := controller.StoredRouteGatewayBinding(r.Config, route, identity)
+			if err != nil {
+				return routeGraphAdmission{}, err
+			}
+			if binding.Lifecycle == controller.RouteDetaching {
+				continue
+			}
 		}
 		parent := managedRouteParent{ref: *ref, gateway: gateway}
 		candidates, err := routeParentCandidates(route, parent, http)

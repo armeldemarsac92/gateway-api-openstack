@@ -98,9 +98,10 @@ func (r *backendTLSPolicyStatusReconciler) observeAncestors(ctx context.Context,
 		if err != nil {
 			return nil, err
 		}
-		if len(parents) == 1 && managedParentsSupportInstalledVersion(parents) {
-			gateway := parents[0].gateway
-			gateways[client.ObjectKeyFromObject(gateway)] = gateway
+		for _, group := range groupManagedRouteParents(parents) {
+			if len(group.parents) == 1 && managedParentsSupportInstalledVersion(group.parents) {
+				gateways[client.ObjectKeyFromObject(group.gateway)] = group.gateway
+			}
 		}
 	}
 	if len(gateways) == 0 {

@@ -112,31 +112,28 @@ func managedParentsFromObservations(observations []routeParentObservation) []man
 	return parents
 }
 
-// soleParentForManagedGateway checks the other references against live ownership
-// while reusing an already validated Gateway from the current graph observation.
-func (r *Reconciler) soleParentForManagedGateway(ctx context.Context, route *gatewayv1.HTTPRoute, gateway *gatewayv1.Gateway) (*gatewayv1.ParentReference, error) {
+// parentForGateway selects the reference in this Gateway's graph. Multiple
+// references to different sections of the same Gateway share one fragment and
+// remain unsupported by the HTTP forwarding profile.
+func parentForGateway(route *gatewayv1.HTTPRoute, gateway *gatewayv1.Gateway) *gatewayv1.ParentReference {
 	var selected *gatewayv1.ParentReference
 	for i := range route.Spec.ParentRefs {
 		ref := &route.Spec.ParentRefs[i]
-		if !controller.IsGatewayParentRef(*ref) {
-			continue
-		}
 		if routeTargetsGateway(route, *ref, gateway.Namespace, gateway.Name) {
 			if selected != nil {
-				return nil, nil
+				return nil
 			}
 			selected = ref
-			continue
-		}
-		parent, err := r.observeRouteParent(ctx, r.APIReader, route.Namespace, *ref)
-		if err != nil {
-			return nil, err
-		}
-		if parent.managed {
-			return nil, nil
 		}
 	}
-	return selected, nil
+	return selected
+}
+
+func managedParentsForGateway(parents []managedRouteParent, identity cloud.Identity) []managedRouteParent {
+	return slices.DeleteFunc(slices.Clone(parents), func(parent managedRouteParent) bool {
+		return parent.gateway.Namespace != identity.GatewayNamespace ||
+			parent.gateway.Name != identity.GatewayName || string(parent.gateway.UID) != identity.GatewayUID
+	})
 }
 
 // routeParentCandidates applies the parentRef selectors before reading namespace

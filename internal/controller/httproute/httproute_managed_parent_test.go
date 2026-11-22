@@ -22,6 +22,8 @@ import (
 	"slices"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -32,6 +34,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
 func TestHTTPRouteUsesOnlyManagedParent(t *testing.T) {
@@ -111,7 +114,7 @@ func TestHTTPRouteUsesOnlyManagedParent(t *testing.T) {
 	}
 }
 
-func TestHTTPRouteRechecksSecondaryParentOwnershipAtGraphFences(t *testing.T) {
+func TestHTTPRouteGraphRemainsValidWhenAnotherGatewayBecomesManaged(t *testing.T) {
 	f := newRouteModelInputFixture(t)
 	other := &gatewayv1.Gateway{
 		ObjectMeta: metav1.ObjectMeta{Namespace: f.gateway.Namespace, Name: "other", UID: "other-uid"},
@@ -136,23 +139,13 @@ func TestHTTPRouteRechecksSecondaryParentOwnershipAtGraphFences(t *testing.T) {
 	if requests := f.reconciler.enqueueHTTPRoutesForGatewayClass(t.Context(), class); !slices.Equal(requests, []ctrl.Request{{NamespacedName: key}}) {
 		t.Fatalf("new GatewayClass should enqueue %v, got %v", key, requests)
 	}
-	if err := input.Validate(t.Context()); !errors.Is(err, errHTTPRouteChanged) {
-		t.Fatalf("graph seal with newly managed parent = %v, want stale graph", err)
+	if err := input.Validate(t.Context()); err != nil {
+		t.Fatalf("the other GatewayClass must not invalidate this Gateway's graph: %v", err)
 	}
 	identity := controller.RouteIdentity(f.reconciler.Config, f.gateway, f.route)
-	repair, err := f.reconciler.ObserveRouteGraph(t.Context(), graph.Request{Identity: identity, Action: graph.Ensure}, f.gateway)
-	if err != nil || len(repair.Nodes) != 1 || repair.Nodes[0].Disposition != cloud.GraphPreserve {
-		t.Fatalf("Gateway repair should preserve the fragment for route reconciliation, got %v and error %v", repair.Nodes, err)
-	}
 	cleanup, err := f.reconciler.buildRouteCleanupSnapshot(t.Context(), f.route, identity)
-	if err != nil || cleanup.disposition != routeCleanupRequired {
-		t.Fatalf("multiple managed refs should require detaching the original fragment, got %v and error %v", cleanup.disposition, err)
-	}
-	if err := f.client.Delete(t.Context(), class); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.reconciler.sealRouteCleanupSnapshot(t.Context(), cleanup); !errors.Is(err, errHTTPRouteChanged) {
-		t.Fatalf("cleanup seal after the second class disappears = %v, want stale cleanup", err)
+	if err != nil || cleanup.disposition != routeCleanupStillDesired {
+		t.Fatalf("the newly managed parent must not detach the original fragment, got %v and error %v", cleanup.disposition, err)
 	}
 }
 
@@ -208,45 +201,215 @@ func TestHTTPRouteRechecksSingletonGatewayClassRecoveryAtCleanupSeal(t *testing.
 	}
 }
 
-func TestHTTPRouteRefusesSeveralManagedParentRefs(t *testing.T) {
-	for _, sameGateway := range []bool{false, true} {
-		name := "distinct Gateways"
-		if sameGateway {
-			name = "two sections of one Gateway"
+func TestHTTPRouteRefusesSeveralRefsToSameGateway(t *testing.T) {
+	cfg := testConfig()
+	class, gateway, route, service, endpoints := endpointRouteFixture(t)
+	gateway.Spec.Listeners = append(gateway.Spec.Listeners, gatewayv1.Listener{Name: "other", Protocol: gatewayv1.HTTPProtocolType, Port: 81})
+	route.Spec.ParentRefs[0].SectionName = ptr.To(gateway.Spec.Listeners[0].Name)
+	route.Spec.ParentRefs = append(route.Spec.ParentRefs, gatewayv1.ParentReference{
+		Name: gatewayv1.ObjectName(gateway.Name), SectionName: ptr.To(gatewayv1.SectionName("other")),
+	})
+	kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(route).WithObjects(class, gateway, route, service, endpoints).Build()
+	provider := &recordingProvider{}
+	reconciler := newTestReconciler(Reconciler{Client: kubeClient, APIReader: kubeClient, Config: cfg, Coordinator: &graph.Coordinator{}}, provider)
+	req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(route)}
+	if _, err := reconciler.Reconcile(t.Context(), req); err != nil {
+		t.Fatal(err)
+	}
+	var current gatewayv1.HTTPRoute
+	if err := kubeClient.Get(t.Context(), req.NamespacedName, &current); err != nil {
+		t.Fatal(err)
+	}
+	if len(current.Status.Parents) != 2 || len(current.Finalizers) != 0 || len(provider.routeSpecs) != 0 {
+		t.Fatalf("want two rejections with no binding or forwarding, got status=%#v finalizers=%v route specs=%v",
+			current.Status, current.Finalizers, provider.routeSpecs)
+	}
+	for _, status := range current.Status.Parents {
+		accepted := meta.FindStatusCondition(status.Conditions, "Accepted")
+		if status.ControllerName != cfg.ControllerName || accepted == nil || accepted.Status != metav1.ConditionFalse ||
+			accepted.Reason != string(gatewayv1.RouteReasonUnsupportedValue) {
+			t.Fatalf("managed parent %v has Accepted=%#v, want False/UnsupportedValue", status.ParentRef, accepted)
 		}
-		t.Run(name, func(t *testing.T) {
+	}
+}
+
+func TestHTTPAndGRPCRouteMultipleGatewayLifecycle(t *testing.T) {
+	for _, kind := range []gatewayv1.Kind{model.HTTPRouteKind, model.GRPCRouteKind} {
+		t.Run(string(kind), func(t *testing.T) {
 			cfg := testConfig()
-			class, gateway, route, service, endpoints := endpointRouteFixture(t)
-			other := gateway.DeepCopy()
-			other.Name, other.UID = "other", "other-uid"
-			secondRef := gatewayv1.ParentReference{Name: gatewayv1.ObjectName(other.Name)}
-			if sameGateway {
-				gateway.Spec.Listeners = append(gateway.Spec.Listeners, gatewayv1.Listener{Name: "other", Protocol: gatewayv1.HTTPProtocolType, Port: 81})
-				route.Spec.ParentRefs[0].SectionName = ptr.To(gateway.Spec.Listeners[0].Name)
-				secondRef = gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name), SectionName: ptr.To(gatewayv1.SectionName("other"))}
+			class, first, http, service, endpoints := endpointRouteFixture(t)
+			second := first.DeepCopy()
+			second.Namespace, second.Name, second.UID = "infra-two", "other", "other-uid"
+			second.Status.Conditions = nil
+			second.Spec.Listeners[0].AllowedRoutes = &gatewayv1.AllowedRoutes{
+				Namespaces: &gatewayv1.RouteNamespaces{From: ptr.To(gatewayv1.NamespacesFromAll)},
 			}
-			route.Spec.ParentRefs = append(route.Spec.ParentRefs, secondRef)
-			kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(route).WithObjects(class, gateway, other, route, service, endpoints).Build()
+			firstRef := http.Spec.ParentRefs[0]
+			secondRef := gatewayv1.ParentReference{Name: gatewayv1.ObjectName(second.Name), Namespace: ptr.To(gatewayv1.Namespace(second.Namespace))}
+			meshRef := gatewayv1.ParentReference{Group: ptr.To(gatewayv1.Group("")), Kind: ptr.To(gatewayv1.Kind("Service")), Name: "mesh"}
+			meshStatus := gatewayv1.RouteParentStatus{
+				ParentRef: meshRef, ControllerName: cfg.ControllerName,
+				Conditions: []metav1.Condition{controller.Condition("Accepted", metav1.ConditionTrue, "Accepted", "Mesh status", http.Generation)},
+			}
+			http.Spec.ParentRefs = []gatewayv1.ParentReference{firstRef, meshRef}
+			http.Status.Parents = []gatewayv1.RouteParentStatus{meshStatus}
+			var route client.Object = http
+			if kind == model.GRPCRouteKind {
+				cfg.BackendH2C, cfg.FixedHTTPResponses = true, true
+				service.Spec.Ports[0].AppProtocol = ptr.To("kubernetes.io/h2c")
+				grpc := &gatewayv1.GRPCRoute{ObjectMeta: http.ObjectMeta, Status: gatewayv1.GRPCRouteStatus{RouteStatus: http.Status.RouteStatus}}
+				grpc.Spec.CommonRouteSpec = http.Spec.CommonRouteSpec
+				grpc.Spec.Rules = []gatewayv1.GRPCRouteRule{grpcRule("backend")}
+				route = grpc
+			}
+			namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: http.Namespace, UID: "routes-namespace-uid"}}
+			kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(route, second).
+				WithObjects(class, first, second, route, service, endpoints, namespace).Build()
 			provider := &recordingProvider{}
-			reconciler := newTestReconciler(Reconciler{Client: kubeClient, APIReader: kubeClient, Config: cfg, Coordinator: &graph.Coordinator{}}, provider)
+			reconciler := newTestReconciler(Reconciler{Client: kube, APIReader: kube, Config: cfg, Coordinator: &graph.Coordinator{}}, provider).forRouteKind(kind)
 			req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(route)}
-			if _, err := reconciler.Reconcile(t.Context(), req); err != nil {
-				t.Fatal(err)
-			}
-			var current gatewayv1.HTTPRoute
-			if err := kubeClient.Get(t.Context(), req.NamespacedName, &current); err != nil {
-				t.Fatal(err)
-			}
-			if len(current.Status.Parents) != 2 || len(current.Finalizers) != 0 || len(provider.routeSpecs) != 0 {
-				t.Fatalf("want two rejections with no binding or forwarding, got status=%#v finalizers=%v route specs=%v",
-					current.Status, current.Finalizers, provider.routeSpecs)
-			}
-			for _, status := range current.Status.Parents {
-				accepted := meta.FindStatusCondition(status.Conditions, "Accepted")
-				if status.ControllerName != cfg.ControllerName || accepted == nil || accepted.Status != metav1.ConditionFalse ||
-					accepted.Reason != string(gatewayv1.RouteReasonUnsupportedValue) {
-					t.Fatalf("managed parent %v has Accepted=%#v, want False/UnsupportedValue", status.ParentRef, accepted)
+			reconcile := func(times int) {
+				t.Helper()
+				for range times {
+					if _, err := reconciler.Reconcile(t.Context(), req); err != nil {
+						t.Fatal(err)
+					}
 				}
+			}
+			get := func() {
+				t.Helper()
+				if err := kube.Get(t.Context(), req.NamespacedName, route); err != nil {
+					t.Fatal(err)
+				}
+			}
+			updateParents := func(refs ...gatewayv1.ParentReference) {
+				t.Helper()
+				switch object := route.(type) {
+				case *gatewayv1.HTTPRoute:
+					object.Spec.ParentRefs = refs
+				case *gatewayv1.GRPCRoute:
+					object.Spec.ParentRefs = refs
+				}
+				route.SetGeneration(route.GetGeneration() + 1)
+				if err := kube.Update(t.Context(), route); err != nil {
+					t.Fatal(err)
+				}
+			}
+			assertProgrammed := func(want map[gatewayv1.ObjectName]metav1.ConditionStatus) {
+				t.Helper()
+				_, statuses, _ := controller.RouteParents(route)
+				if len(statuses) != len(want)+1 {
+					t.Fatalf("parent statuses = %#v, expected %v and the mesh status", statuses, want)
+				}
+				for _, status := range statuses {
+					if status.ParentRef.Name == meshRef.Name {
+						if !reflect.DeepEqual(status, meshStatus) {
+							t.Fatalf("mesh status changed: %#v", status)
+						}
+						continue
+					}
+					programmed := meta.FindStatusCondition(status.Conditions, cfg.Domain()+"/Programmed")
+					accepted := meta.FindStatusCondition(status.Conditions, string(gatewayv1.RouteConditionAccepted))
+					resolved := meta.FindStatusCondition(status.Conditions, string(gatewayv1.RouteConditionResolvedRefs))
+					if programmed == nil || programmed.Status != want[status.ParentRef.Name] || programmed.ObservedGeneration != route.GetGeneration() ||
+						accepted == nil || accepted.Status != metav1.ConditionTrue ||
+						resolved == nil || resolved.Status != metav1.ConditionTrue {
+						t.Fatalf("unexpected conditions for %v: %v", status.ParentRef, status.Conditions)
+					}
+				}
+			}
+			firstID := controller.RouteIdentity(cfg, first, route)
+			secondID := controller.RouteIdentity(cfg, second, route)
+
+			reconcile(2)
+			get()
+			assertProgrammed(map[gatewayv1.ObjectName]metav1.ConditionStatus{firstRef.Name: metav1.ConditionTrue})
+			if route.GetAnnotations()[cfg.RouteGatewayUIDAnnotation()] != string(first.UID) {
+				t.Fatal("expected a persisted legacy singleton before adding the second parent")
+			}
+
+			updateParents(firstRef, secondRef, meshRef)
+			reconcile(1)
+			get()
+			assertProgrammed(map[gatewayv1.ObjectName]metav1.ConditionStatus{firstRef.Name: metav1.ConditionTrue, secondRef.Name: metav1.ConditionFalse})
+			for _, spec := range provider.routeSpecs {
+				if spec.Identity != firstID {
+					t.Fatalf("unready Gateway was programmed: %v", spec.Identity)
+				}
+			}
+			if err := kube.Get(t.Context(), client.ObjectKeyFromObject(second), second); err != nil {
+				t.Fatal(err)
+			}
+			second.Status.Conditions = first.Status.Conditions
+			if err := kube.Status().Update(t.Context(), second); err != nil {
+				t.Fatal(err)
+			}
+			reconcile(2)
+			get()
+			assertProgrammed(map[gatewayv1.ObjectName]metav1.ConditionStatus{firstRef.Name: metav1.ConditionTrue, secondRef.Name: metav1.ConditionTrue})
+			bindings, err := controller.StoredRouteGatewayBindings(cfg, route)
+			if err != nil || len(bindings) != 2 || len(route.GetFinalizers()) != 3 {
+				t.Fatalf("expected two sealed checkpoints, got %v, %v, %v", bindings, route.GetFinalizers(), err)
+			}
+			if !slices.ContainsFunc(provider.routeSpecs, func(spec cloud.RouteSpec) bool { return spec.Identity == secondID }) {
+				t.Fatalf("no provider ensure for the second Gateway: %v", provider.routeSpecs)
+			}
+
+			updateParents(secondRef, meshRef)
+			reconcile(2)
+			get()
+			assertProgrammed(map[gatewayv1.ObjectName]metav1.ConditionStatus{secondRef.Name: metav1.ConditionTrue})
+			bindings, err = controller.StoredRouteGatewayBindings(cfg, route)
+			if err != nil || len(bindings) != 1 || bindings[0].Identity != secondID ||
+				!slices.Equal(provider.deletedRoutes, []cloud.Identity{firstID}) || len(route.GetFinalizers()) != 2 {
+				t.Fatalf("removing one parent affected the wrong checkpoint: %v, %v, %v, %v", bindings, route.GetFinalizers(), provider.deletedRoutes, err)
+			}
+
+			updateParents(firstRef, secondRef, meshRef)
+			reconcile(2)
+			get()
+			replacement := first.DeepCopy()
+			replacement.UID = "replacement-gateway-uid"
+			replacement.ResourceVersion = ""
+			if err := kube.Delete(t.Context(), first); err != nil {
+				t.Fatal(err)
+			}
+			reconcile(3)
+			get()
+			assertProgrammed(map[gatewayv1.ObjectName]metav1.ConditionStatus{firstRef.Name: metav1.ConditionFalse, secondRef.Name: metav1.ConditionTrue})
+			bindings, err = controller.StoredRouteGatewayBindings(cfg, route)
+			if err != nil || len(bindings) != 1 || bindings[0].Identity != secondID ||
+				!slices.Equal(provider.deletedRoutes, []cloud.Identity{firstID, firstID}) {
+				t.Fatalf("Gateway deletion affected the wrong checkpoint: %v, %v, %v", bindings, provider.deletedRoutes, err)
+			}
+			if err := kube.Get(t.Context(), client.ObjectKeyFromObject(first), first); err != nil {
+				t.Fatal(err)
+			}
+			first.Finalizers = nil
+			if err := kube.Update(t.Context(), first); err != nil {
+				t.Fatal(err)
+			}
+			if err := kube.Create(t.Context(), replacement); err != nil {
+				t.Fatal(err)
+			}
+			replacementID := controller.RouteIdentity(cfg, replacement, route)
+			reconcile(2)
+			get()
+			assertProgrammed(map[gatewayv1.ObjectName]metav1.ConditionStatus{firstRef.Name: metav1.ConditionTrue, secondRef.Name: metav1.ConditionTrue})
+			if err := kube.Delete(t.Context(), route); err != nil {
+				t.Fatal(err)
+			}
+			reconcile(1)
+			get()
+			if len(route.GetFinalizers()) != 3 || len(provider.deletedRoutes) != 2 {
+				t.Fatalf("deletion must retain both finalizers through the cleanup checkpoint: %v, %v", route.GetFinalizers(), provider.deletedRoutes)
+			}
+			reconcile(1)
+			if err := kube.Get(t.Context(), req.NamespacedName, route); !apierrors.IsNotFound(err) {
+				t.Fatalf("deleted route still exists: %v", err)
+			}
+			if len(provider.deletedRoutes) != 4 || !slices.Contains(provider.deletedRoutes[2:], replacementID) || !slices.Contains(provider.deletedRoutes[2:], secondID) {
+				t.Fatalf("finalization did not remove both owned fragments: %v", provider.deletedRoutes)
 			}
 		})
 	}

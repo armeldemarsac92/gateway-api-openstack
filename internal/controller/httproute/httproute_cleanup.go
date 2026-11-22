@@ -79,60 +79,19 @@ func (r *Reconciler) detachRoute(ctx context.Context, route *gatewayv1.HTTPRoute
 	if !present && controllerutil.ContainsFinalizer(current, r.Config.RouteFinalizer()) {
 		return ctrl.Result{}, fmt.Errorf("HTTPRoute %s has the controller finalizer but no complete stored Gateway identity", routeKey)
 	}
-	if present {
-		outcome, err := r.deleteRoute(ctx, current, stored)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("delete detached HTTPRoute resources: %w", err)
-		}
-		if err := outcome.Validate(); err != nil {
-			return ctrl.Result{}, fmt.Errorf("validate detached HTTPRoute deletion outcome: %w", err)
-		}
-		if outcome.State == cloud.OutcomeProgressing {
-			if err := r.clearRouteCleanupFailure(ctx, current); err != nil {
-				return ctrl.Result{}, fmt.Errorf("clear HTTPRoute cleanup failure checkpoint: %w", err)
-			}
-			*route = *current
-			return ctrl.Result{RequeueAfter: controller.ProviderProgressRequeueAfter(outcome, current.UID)}, nil
-		}
-		log.FromContext(ctx).V(1).Info("Deleted detached HTTPRoute resources", "gateway", types.NamespacedName{Namespace: stored.GatewayNamespace, Name: stored.GatewayName})
+	if !present {
+		return ctrl.Result{}, r.clearGatewayBinding(ctx, route, cloud.Identity{})
 	}
-	if err := r.clearStoredRouteBinding(ctx, route, stored, present); err != nil {
-		return ctrl.Result{}, err
-	}
-	log.FromContext(ctx).V(1).Info("Detached HTTPRoute from Gateway")
-	return ctrl.Result{}, nil
+	return r.detachGatewayBinding(ctx, route, current, stored)
 }
 
-func (r *Reconciler) finalizeRoute(ctx context.Context, scope *httpRouteScope) (ctrl.Result, error) {
-	route := scope.route
-	routeKey := client.ObjectKeyFromObject(route)
-	current, stored, present, err := r.getRouteBinding(
-		ctx,
-		routeKey,
-		route.UID,
-		route.Generation,
-		!route.DeletionTimestamp.IsZero(),
-	)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-	if current == nil {
-		return ctrl.Result{}, nil
-	}
-	if !controllerutil.ContainsFinalizer(current, r.Config.RouteFinalizer()) && !present {
-		return ctrl.Result{}, nil
-	}
-	if !present {
-		return ctrl.Result{}, fmt.Errorf("HTTPRoute %s has the controller finalizer but no complete stored Gateway identity", routeKey)
-	}
+func (r *Reconciler) detachGatewayBinding(ctx context.Context, route, current *gatewayv1.HTTPRoute, stored cloud.Identity) (ctrl.Result, error) {
 	outcome, err := r.deleteRoute(ctx, current, stored)
 	if err != nil {
-		providerErr := fmt.Errorf("delete HTTPRoute resources during finalization: %w", err)
-		*route = *current
-		return r.handleRouteFinalizationFailure(ctx, scope, stored, providerErr)
+		return ctrl.Result{}, fmt.Errorf("delete detached HTTPRoute resources: %w", err)
 	}
 	if err := outcome.Validate(); err != nil {
-		return ctrl.Result{}, fmt.Errorf("validate HTTPRoute finalization outcome: %w", err)
+		return ctrl.Result{}, fmt.Errorf("validate detached HTTPRoute deletion outcome: %w", err)
 	}
 	if outcome.State == cloud.OutcomeProgressing {
 		if err := r.clearRouteCleanupFailure(ctx, current); err != nil {
@@ -141,12 +100,48 @@ func (r *Reconciler) finalizeRoute(ctx context.Context, scope *httpRouteScope) (
 		*route = *current
 		return ctrl.Result{RequeueAfter: controller.ProviderProgressRequeueAfter(outcome, current.UID)}, nil
 	}
-	log.FromContext(ctx).V(1).Info("Deleted HTTPRoute resources during finalization", "gateway", types.NamespacedName{Namespace: stored.GatewayNamespace, Name: stored.GatewayName})
-	if err := r.clearStoredRouteBinding(ctx, route, stored, true); err != nil {
+	log.FromContext(ctx).V(1).Info("Deleted detached HTTPRoute resources", "gateway", types.NamespacedName{Namespace: stored.GatewayNamespace, Name: stored.GatewayName})
+	if err := r.clearGatewayBinding(ctx, route, stored); err != nil {
 		return ctrl.Result{}, err
 	}
-	log.FromContext(ctx).V(1).Info("Removed HTTPRoute finalizer")
+	log.FromContext(ctx).V(1).Info("Detached HTTPRoute from Gateway")
 	return ctrl.Result{}, nil
+}
+
+func (r *Reconciler) finalizeRoute(ctx context.Context, scope *httpRouteScope) (ctrl.Result, error) {
+	route := scope.route
+	current := &gatewayv1.HTTPRoute{}
+	if err := r.readRoute(ctx, r.routePatchReader(), client.ObjectKeyFromObject(route), current); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+	if !sameHTTPRouteRevision(current, route.UID, route.Generation, !route.DeletionTimestamp.IsZero()) {
+		return ctrl.Result{}, errHTTPRouteChanged
+	}
+	bindings, err := controller.StoredRouteGatewayBindings(r.Config, current)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if len(bindings) == 0 && controllerutil.ContainsFinalizer(current, r.Config.RouteFinalizer()) {
+		return ctrl.Result{}, fmt.Errorf("HTTPRoute %s has the controller finalizer but no complete stored Gateway identity", client.ObjectKeyFromObject(route))
+	}
+	var result ctrl.Result
+	var cleanupErrors error
+	for _, binding := range bindings {
+		progress, err := r.detachGatewayBinding(ctx, route, current, binding.Identity)
+		if err != nil {
+			*route = *current
+			progress, err = r.handleRouteFinalizationFailure(ctx, scope, binding.Identity, err)
+			// Publish the affected parent's failure before processing another binding.
+			if len(bindings) > 1 {
+				err = errors.Join(err, r.patchHTTPRoute(ctx, scope))
+				scope.statusPlan, scope.warning, scope.patchCause = nil, nil, nil
+			}
+		}
+		result = mergeRouteResult(result, progress)
+		cleanupErrors = errors.Join(cleanupErrors, err)
+		*current = *route
+	}
+	return result, cleanupErrors
 }
 
 func (r *Reconciler) setRouteCleanupFailure(
@@ -215,7 +210,14 @@ func (r *Reconciler) deleteRoute(
 	if r.Writer == nil {
 		return cloud.Outcome{}, fmt.Errorf("gateway graph writer is required")
 	}
-	if expected.Annotations[r.Config.RouteLifecycleAnnotation()] != controller.RouteDetaching {
+	binding, err := controller.StoredRouteGatewayBinding(r.Config, expected, identity)
+	if err != nil {
+		return cloud.Outcome{}, err
+	}
+	if binding.Identity != identity {
+		return cloud.Outcome{}, errHTTPRouteChanged
+	}
+	if binding.Lifecycle != controller.RouteDetaching {
 		if err := r.checkpointRouteDetaching(ctx, expected, identity); err != nil {
 			return cloud.Outcome{}, err
 		}
@@ -257,10 +259,9 @@ func (r *Reconciler) checkpointRouteDetaching(ctx context.Context, expected *gat
 	}
 	base := snapshot.route.DeepCopy()
 	desired := snapshot.route.DeepCopy()
-	if desired.Annotations == nil {
-		desired.Annotations = make(map[string]string)
+	if err := controller.MarkRouteGatewayDetaching(r.Config, desired, identity); err != nil {
+		return err
 	}
-	desired.Annotations[r.Config.RouteLifecycleAnnotation()] = controller.RouteDetaching
 	if err := r.patchRoute(ctx, desired, base, false); err != nil {
 		return err
 	}

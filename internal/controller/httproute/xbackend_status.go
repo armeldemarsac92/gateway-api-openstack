@@ -91,9 +91,10 @@ func (r *xBackendStatusReconciler) observeAncestors(ctx context.Context, key typ
 			return nil, err
 		}
 		// A class held by its referencing Gateways still owns them.
-		if len(parents) == 1 && managedParentsSupportInstalledVersion(parents) {
-			gateway := parents[0].gateway
-			byGateway[client.ObjectKeyFromObject(gateway)] = gateway
+		for _, group := range groupManagedRouteParents(parents) {
+			if len(group.parents) == 1 && managedParentsSupportInstalledVersion(group.parents) {
+				byGateway[client.ObjectKeyFromObject(group.gateway)] = group.gateway
+			}
 		}
 	}
 	ancestors := make(map[types.NamespacedName]metav1.Condition, len(byGateway))

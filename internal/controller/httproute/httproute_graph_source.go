@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strings"
 
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
@@ -73,11 +72,12 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 		if !controller.RouteClaimsGateway(r.Config, route, request.Identity) {
 			continue
 		}
-		identity, present, err := r.storedRouteIdentity(route)
+		binding, err := controller.StoredRouteGatewayBinding(r.Config, route, request.Identity)
+		identity := binding.Identity
 		if err != nil {
 			return graph.RouteInputs{}, err
 		}
-		if !present || !controller.SameGatewayIdentity(identity, request.Identity) {
+		if identity.RouteUID == "" {
 			return graph.RouteInputs{}, fmt.Errorf("%w: %s binding does not match the Gateway graph", cloud.ErrOwnershipConflict, model.HTTPProfileRouteKind(route))
 		}
 		kind := model.HTTPProfileRouteKind(route)
@@ -90,7 +90,7 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 			}
 		}
 		node := cloud.RouteGraphNode{Spec: cloud.RouteSpec{Identity: identity}, Disposition: cloud.GraphPreserve}
-		lifecycle := route.Annotations[r.Config.RouteLifecycleAnnotation()]
+		lifecycle := binding.Lifecycle
 		switch lifecycle {
 		case controller.RouteAttached, controller.RouteDetaching:
 		default:
@@ -198,8 +198,10 @@ func (r *Reconciler) liveGraphRoutes(ctx context.Context, identity cloud.Identit
 }
 
 type routeGraphBinding struct {
-	route, boundNamespace, boundName, boundUID, lifecycle, project, cluster, finalizers string
-	anchor                                                                              int
+	route           routeObjectKey
+	uid             string
+	binding         controller.RouteGatewayBinding
+	invalid, sealed bool
 }
 
 func (r *Reconciler) routeGraphBindings(routes []gatewayv1.HTTPRoute, identity cloud.Identity) []routeGraphBinding {
@@ -208,25 +210,11 @@ func (r *Reconciler) routeGraphBindings(routes []gatewayv1.HTTPRoute, identity c
 		if !controller.RouteClaimsGateway(r.Config, &route, identity) {
 			continue
 		}
-		binding := routeGraphBinding{
-			route:          route.Namespace + "/" + route.Name + "/" + string(route.UID),
-			boundNamespace: route.Annotations[r.Config.RouteGatewayNamespaceAnnotation()],
-			boundName:      route.Annotations[r.Config.RouteGatewayNameAnnotation()],
-			boundUID:       route.Annotations[r.Config.RouteGatewayUIDAnnotation()],
-			lifecycle:      route.Annotations[r.Config.RouteLifecycleAnnotation()],
-			project:        route.Annotations[r.Config.RouteProjectIDAnnotation()],
-			cluster:        route.Annotations[r.Config.RouteClusterIDAnnotation()],
-			anchor:         controller.ScopedRouteAnchor(r.Config, &route, gatewayv1.HTTPProtocolType),
-		}
-		var finalizers []string
-		for _, finalizer := range route.Finalizers {
-			if finalizer == r.Config.RouteFinalizer() || strings.HasPrefix(finalizer, r.Config.RouteBindingFinalizerPrefix()) {
-				finalizers = append(finalizers, finalizer)
-			}
-		}
-		slices.Sort(finalizers)
-		binding.finalizers = strings.Join(finalizers, "\x00")
-		bindings = append(bindings, binding)
+		binding, err := controller.StoredRouteGatewayBinding(r.Config, &route, identity)
+		bindings = append(bindings, routeGraphBinding{
+			route: routeKey(&route), uid: string(route.UID), binding: binding, invalid: err != nil,
+			sealed: controller.RouteGatewayBindingSealed(r.Config, &route, binding),
+		})
 	}
 	return bindings
 }

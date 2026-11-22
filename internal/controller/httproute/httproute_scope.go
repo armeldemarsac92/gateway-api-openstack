@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -38,6 +39,7 @@ const (
 	routeStatusPlanReplace routeStatusPlanKind = iota
 	routeStatusPlanProviderFailure
 	routeStatusPlanDeletingFailure
+	routeStatusPlanPrune
 )
 
 type routeStatusPlan struct {
@@ -47,6 +49,7 @@ type routeStatusPlan struct {
 	policy              controller.ProviderFailurePolicy
 	referencesEvaluated bool
 	validateOwnership   bool
+	gateway             *gatewayv1.Gateway
 }
 
 type routeProviderWarning struct {
@@ -57,12 +60,13 @@ type routeProviderWarning struct {
 }
 
 type httpRouteScope struct {
-	route       *gatewayv1.HTTPRoute
-	statusPlan  *routeStatusPlan
-	warning     *routeProviderWarning
-	patchCause  error
-	skipPatch   bool
-	versionSkew bool
+	route         *gatewayv1.HTTPRoute
+	statusPlan    *routeStatusPlan
+	warning       *routeProviderWarning
+	patchCause    error
+	skipPatch     bool
+	versionSkew   bool
+	parentGateway *gatewayv1.Gateway
 }
 
 func (r *Reconciler) newHTTPRouteScope(
@@ -85,6 +89,7 @@ func (s *httpRouteScope) setStatuses(updates []parentStatusUpdate) {
 		kind:              routeStatusPlanReplace,
 		updates:           append([]parentStatusUpdate(nil), updates...),
 		validateOwnership: true,
+		gateway:           s.parentGateway,
 	}
 }
 
@@ -99,6 +104,7 @@ func (s *httpRouteScope) setProviderFailureStatuses(
 		policy:              policy,
 		referencesEvaluated: referencesEvaluated,
 		validateOwnership:   true,
+		gateway:             s.parentGateway,
 	}
 }
 
@@ -157,7 +163,7 @@ func (r *Reconciler) patchHTTPRouteStatus(
 			return errHTTPRouteChanged
 		}
 		if plan.validateOwnership {
-			if err := r.validateRouteStatusOwnership(ctx, current, plan.updates); err != nil {
+			if err := r.validateRouteStatusOwnership(ctx, current, plan.updates, plan.gateway); err != nil {
 				return err
 			}
 		}
@@ -200,7 +206,7 @@ func (r *Reconciler) routeStatusCheckpointNeeded(
 		return false, errHTTPRouteChanged
 	}
 	if scope.statusPlan.validateOwnership {
-		if err := r.validateRouteStatusOwnership(ctx, current, scope.statusPlan.updates); err != nil {
+		if err := r.validateRouteStatusOwnership(ctx, current, scope.statusPlan.updates, scope.statusPlan.gateway); err != nil {
 			return false, err
 		}
 	}
@@ -233,6 +239,7 @@ func (r *Reconciler) routeProviderFailureCheckpointExists(
 		updates,
 		r.Config.ControllerName,
 		r.Config.Domain()+"/Programmed",
+		scope.parentGateway != nil,
 	), nil
 }
 
@@ -246,6 +253,7 @@ func (r *Reconciler) routeCleanupStatusCheckpointNeeded(
 		updates,
 		r.Config.ControllerName,
 		r.Config.Domain()+"/Programmed",
+		scope.parentGateway != nil,
 	) {
 		durable, err := r.routeProviderFailureCheckpointExists(ctx, scope, updates)
 		if err != nil {
@@ -263,6 +271,7 @@ func (r *Reconciler) validateRouteStatusOwnership(
 	ctx context.Context,
 	route *gatewayv1.HTTPRoute,
 	updates []parentStatusUpdate,
+	gateway *gatewayv1.Gateway,
 ) error {
 	parents, err := r.managedParentsWithReader(ctx, r.routePatchReader(), route)
 	if err != nil {
@@ -271,7 +280,8 @@ func (r *Reconciler) validateRouteStatusOwnership(
 	for _, update := range updates {
 		owned := false
 		for _, parent := range parents {
-			if controller.ParentRefsEqual(parent.ref, route.Namespace, update.parent, route.Namespace) {
+			if controller.ParentRefsEqual(parent.ref, route.Namespace, update.parent, route.Namespace) &&
+				(gateway == nil || gateway.UID == parent.gateway.UID && gateway.Generation == parent.gateway.Generation) {
 				owned = true
 				break
 			}
@@ -279,6 +289,9 @@ func (r *Reconciler) validateRouteStatusOwnership(
 		if !owned {
 			return errHTTPRouteChanged
 		}
+	}
+	if gateway != nil {
+		return nil
 	}
 	for _, parent := range parents {
 		planned := false
@@ -303,30 +316,75 @@ func (r *Reconciler) routePatchReader() client.Reader {
 }
 
 func (p *routeStatusPlan) apply(config controller.Config, route *gatewayv1.HTTPRoute) bool {
+	existing := route.Status.Parents
+	var retained []gatewayv1.RouteParentStatus
+	if p.gateway != nil {
+		for _, status := range route.Status.Parents {
+			if status.ControllerName != config.ControllerName {
+				continue
+			}
+			updated := false
+			for _, update := range p.updates {
+				if controller.ParentRefsEqual(status.ParentRef, route.Namespace, update.parent, route.Namespace) {
+					updated = true
+					break
+				}
+			}
+			if !updated && controller.IsGatewayParentRef(status.ParentRef) {
+				retained = append(retained, status)
+			}
+		}
+	}
+	var transitioned bool
 	switch p.kind {
 	case routeStatusPlanReplace:
 		applyRouteParentStatuses(config, route, p.updates)
-		return false
 	case routeStatusPlanProviderFailure:
-		return applyRouteProviderFailureStatuses(
-			config,
-			route,
-			p.updates,
-			p.policy,
-			p.referencesEvaluated,
-		)
+		transitioned = applyRouteProviderFailureStatuses(config, route, p.updates, p.policy, p.referencesEvaluated)
 	case routeStatusPlanDeletingFailure:
 		return applyDeletingRouteProviderFailure(config, route, p.parent, p.policy)
-	default:
+	case routeStatusPlanPrune:
+		route.Status.Parents = slices.DeleteFunc(route.Status.Parents, func(status gatewayv1.RouteParentStatus) bool {
+			return status.ControllerName == config.ControllerName && !hasNonGatewayParentRef(route, status.ParentRef) &&
+				!slices.ContainsFunc(p.updates, func(update parentStatusUpdate) bool {
+					return controller.ParentRefsEqual(update.parent, route.Namespace, status.ParentRef, route.Namespace)
+				})
+		})
 		return false
 	}
+	if p.gateway != nil {
+		combined := append(retained, route.Status.Parents...)
+		route.Status.Parents = retainRouteParentOrder(route.Namespace, combined, existing)
+	}
+	return transitioned
+}
+
+func retainRouteParentOrder(namespace string, current, previous []gatewayv1.RouteParentStatus) []gatewayv1.RouteParentStatus {
+	ordered := make([]gatewayv1.RouteParentStatus, 0, len(current))
+	for _, old := range previous {
+		index := slices.IndexFunc(current, func(parent gatewayv1.RouteParentStatus) bool {
+			return parent.ControllerName == old.ControllerName &&
+				controller.ParentRefsEqual(parent.ParentRef, namespace, old.ParentRef, namespace)
+		})
+		if index >= 0 {
+			ordered = append(ordered, current[index])
+			current = slices.Delete(current, index, index+1)
+		}
+	}
+	return append(ordered, current...)
+}
+
+func hasNonGatewayParentRef(route *gatewayv1.HTTPRoute, parent gatewayv1.ParentReference) bool {
+	return !controller.IsGatewayParentRef(parent) && slices.ContainsFunc(route.Spec.ParentRefs, func(ref gatewayv1.ParentReference) bool {
+		return controller.ParentRefsEqual(ref, route.Namespace, parent, route.Namespace)
+	})
 }
 
 func applyRouteParentStatuses(config controller.Config, route *gatewayv1.HTTPRoute, updates []parentStatusUpdate) {
 	existing := append([]gatewayv1.RouteParentStatus(nil), route.Status.Parents...)
 	parents := make([]gatewayv1.RouteParentStatus, 0, len(existing)+len(updates))
 	for _, parent := range existing {
-		if parent.ControllerName != config.ControllerName {
+		if parent.ControllerName != config.ControllerName || hasNonGatewayParentRef(route, parent.ParentRef) {
 			parents = append(parents, parent)
 		}
 	}
@@ -353,7 +411,7 @@ func applyRouteProviderFailureStatuses(
 	existing := append([]gatewayv1.RouteParentStatus(nil), route.Status.Parents...)
 	parents := make([]gatewayv1.RouteParentStatus, 0, len(existing)+len(updates))
 	for _, parent := range existing {
-		if parent.ControllerName != config.ControllerName {
+		if parent.ControllerName != config.ControllerName || hasNonGatewayParentRef(route, parent.ParentRef) {
 			parents = append(parents, parent)
 		}
 	}

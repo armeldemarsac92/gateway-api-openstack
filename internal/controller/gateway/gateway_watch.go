@@ -62,12 +62,9 @@ func (r *Reconciler) gatewayRequestsForRoute(_ context.Context, route client.Obj
 		}
 		addParent(parentStatus.ParentRef)
 	}
-	annotations := route.GetAnnotations()
-	boundNamespace := annotations[r.Config.RouteGatewayNamespaceAnnotation()]
-	boundName := annotations[r.Config.RouteGatewayNameAnnotation()]
-	boundUID := annotations[r.Config.RouteGatewayUIDAnnotation()]
-	if boundNamespace != "" && boundName != "" && boundUID != "" {
-		keys[types.NamespacedName{Namespace: boundNamespace, Name: boundName}] = struct{}{}
+	boundGateways, _ := controller.RouteBoundGatewayKeys(r.Config, route)
+	for _, key := range boundGateways {
+		keys[key] = struct{}{}
 	}
 	return controller.SortedRequests(keys)
 }
