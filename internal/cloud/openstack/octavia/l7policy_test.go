@@ -290,3 +290,28 @@ func TestResponseHeaderPolicyWire(t *testing.T) {
 		t.Fatalf("incorrect response operation readback: %#v, error %v", observed, err)
 	}
 }
+
+func TestRequestRedirectReadbackValidatesOptionalFieldsAndPath(t *testing.T) {
+	for _, scenario := range []struct {
+		name, fields string
+		valid        bool
+	}{
+		{"omitted hostname and path", "", true},
+		{"empty replacement", `,"replace_prefix":{"match":"/it's","replacement":""}`, true},
+		{"mixed case DNS hostname", `,"hostname":"Moved.Example.test"`, true},
+		{"empty full path", `,"replace_full_path":""`, true},
+		{"empty explicit hostname", `,"hostname":""`, false},
+		{"null hostname", `,"hostname":null`, false},
+		{"null prefix replacement", `,"replace_prefix":null`, false},
+		{"null full replacement", `,"replace_full_path":null`, false},
+		{"invalid path prefix", `,"replace_prefix":{"match":"/a//b","replacement":"/changed"}`, false},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			payload := `{"id":"policy","action":"REDIRECT_REQUEST","redirect_pool_id":null,"redirect_http_code":308,"admin_state_up":true,"redirect_request":{"scheme":"https","port":443` + scenario.fields + `}}`
+			observation, err := readPolicyObservation(json.RawMessage(payload))
+			if err != nil || !observation.RedirectRequestPresent || observation.HasValidRequestRedirect() != scenario.valid {
+				t.Fatalf("request redirect readback = %+v, %v, valid=%t", observation, err, scenario.valid)
+			}
+		})
+	}
+}

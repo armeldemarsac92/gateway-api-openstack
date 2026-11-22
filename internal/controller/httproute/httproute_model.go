@@ -41,6 +41,7 @@ type routeErrorKind string
 const (
 	routeErrorUnsupported         routeErrorKind = "Unsupported"
 	routeErrorInvalidKind         routeErrorKind = "InvalidKind"
+	routeErrorInvalid             routeErrorKind = "Invalid"
 	routeErrorBackendNotFound     routeErrorKind = "BackendNotFound"
 	routeErrorRefNotPermitted     routeErrorKind = "RefNotPermitted"
 	routeErrorUnsupportedProtocol routeErrorKind = "UnsupportedProtocol"
@@ -124,7 +125,7 @@ func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, grpc bool) 
 		return newRouteBuildError(routeErrorUnsupported, "timeouts, retries, and session persistence are not supported")
 	}
 	if len(rule.Filters) != 0 || !fixedResponses && !weightedTargets {
-		if err := compileRouteAction(rule, r.Config.RequestHeaderModifier, r.Config.ResponseHeaderModifier && !grpc); err != nil {
+		if err := compileRouteAction(rule, r.Config.RequestHeaderModifier, r.Config.ResponseHeaderModifier && !grpc, r.Config.HTTPRequestRedirect && !grpc); err != nil {
 			return err
 		}
 	}
@@ -372,9 +373,7 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 	for _, rule := range rules {
 		if redirect := rule.Redirect; redirect != nil {
 			targets[rule.Index].redirect = ptr.To(len(spec.HTTPRedirects))
-			spec.HTTPRedirects = append(spec.HTTPRedirects, cloud.HTTPRedirect{
-				RuleIndex: rule.Index, Prefix: routeRedirectPrefix(*redirect, listener), StatusCode: redirect.StatusCode,
-			})
+			spec.HTTPRedirects = append(spec.HTTPRedirects, lowerRequestRedirect(rule.Index, *redirect, listener))
 			continue
 		}
 		if len(rule.Backends) == 0 {

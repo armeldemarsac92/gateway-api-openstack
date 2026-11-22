@@ -44,13 +44,14 @@ func PathRuleValues(path string, isPrefix bool) (PathRules, error) {
 		rules.Prefix = path + "/"
 	}
 	if strings.Contains(path, "'") {
-		// The stock Amphora template leaves apostrophes unescaped. Hex
-		// notation preserves the literal character through HAProxy parsing.
+		// Amphora inserts the expression as an HAProxy token. Quote each
+		// apostrophe at the token boundary so both libc and PCRE receive
+		// the literal character. Keep dollar signs outside double quotes.
 		end := "$"
 		if isPrefix {
 			end = "($|/)"
 		}
-		literal := strings.ReplaceAll(regexp.QuoteMeta(path), "'", `\x27`)
+		literal := strings.ReplaceAll(regexp.QuoteMeta(path), "'", `"'"`)
 		rules = PathRules{Regex: "^" + literal + end}
 	}
 	length := max(utf8.RuneCountInString(rules.Exact), utf8.RuneCountInString(rules.Prefix), utf8.RuneCountInString(rules.Regex))

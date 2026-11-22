@@ -38,6 +38,7 @@ type Input struct {
 	OperatorHTTPS          bool
 	RequestHeaderModifier  bool
 	ResponseHeaderModifier bool
+	HTTPRequestRedirect    bool
 	BackendH2C             bool
 	EnableXBackend         bool
 	BackendTLSPolicies     map[ServicePortKey]backendtls.Selection `json:"-"`
@@ -130,13 +131,20 @@ type Rule struct {
 	Diagnostics              []Diagnostic
 }
 
-// RequestRedirect is a fixed-host action with no path modifier or backend.
+// RequestRedirect is an HTTP redirect action with no backend.
 // An empty scheme or a zero port is resolved for the selected listener.
 type RequestRedirect struct {
-	Hostname   string
-	Scheme     string
-	Port       int
-	StatusCode int
+	Hostname           string
+	Scheme             string
+	Port               int
+	StatusCode         int
+	ReplaceFullPath    *string `json:",omitempty"`
+	ReplacePrefixMatch *string `json:",omitempty"`
+}
+
+// NeedsRequestAction reports whether a stock fixed authority can express the redirect.
+func (r RequestRedirect) NeedsRequestAction() bool {
+	return r.Hostname == "" || r.ReplaceFullPath != nil || r.ReplacePrefixMatch != nil
 }
 
 // Match is one conjunction of predicates within a rule.

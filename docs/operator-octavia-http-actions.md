@@ -12,6 +12,16 @@ The local qualification records the original Gateway API cases and the settled 3
 
 The standard workload and Magnum manifests continue to use the stock Octavia API. The HTTP actions component changes two controller arguments and can be composed with the operator HTTPS component in an operator-owned kustomization. The HTTPS component has its own certificate and listener requirements. [Operator HTTPS](operator-https.md)
 
+## Enable request-derived redirects
+
+On the regional load-balancer endpoint, check that the configured Amphora provider advertises `http_request_redirect_v1` in `gateway_capabilities`. Add `--octavia-http-request-redirect` to the controller arguments in the operator overlay. This option can be used independently of weighted backends and fixed HTTP responses.
+
+An HTTPRoute `RequestRedirect` can then preserve the request hostname when `hostname` is omitted, replace the whole path, or replace the prefix of a `PathPrefix` match. Octavia preserves the query string. The selected listener supplies the scheme and port when neither is specified. An explicit scheme without a port uses its well-known port. All five redirect statuses are supported. Rules with a fixed hostname and no path modifier continue to use the stock `REDIRECT_PREFIX` action.
+
+The controller closes a dependent physical listener while verifying new redirect policies, when removing a request-derived redirect, and when regional discovery omits the capability or times out. A full Gateway reconciliation restores that listener after the complete policy and rule inventory matches the desired configuration and any required regional discovery succeeds. Other physical listeners remain eligible to serve traffic. Redirects retain the controller's HTTP listener and predicate limits. For example, the controller rejects a redirect when the existing inverted rules cannot represent an overlapping higher-priority forward that adds a method or exact header condition.
+
+To withdraw the mode, remove or replace the HTTPRoute rules that need it and wait for the affected listener to reopen. Verify that its owned `REDIRECT_REQUEST` policies have disappeared before rolling back the provider API or worker packages. The controller can remove previously installed policies when the region stops advertising the capability, using the retained Octavia read, disable and delete operations.
+
 ## Observe a grant change
 
 For a route with a weight-3 Service in its own namespace and a weight-1 Service in another namespace, match requests to the same rule and distinguish replies by application identity.

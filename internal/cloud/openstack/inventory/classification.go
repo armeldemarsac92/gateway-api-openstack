@@ -175,6 +175,18 @@ func classifyAuditCandidate(
 	if candidate.resourceType == auditTypeL7Policy {
 		_, _, _, _, redirect := openstackidentity.ParseHTTPRedirectRole(role)
 		switch {
+		case candidate.policyAction == string(octavia.ActionRedirectRequest):
+			if !redirect || candidate.redirectPoolID != "" || candidate.extendedPolicy() {
+				return auditFinding(finding, audit.DispositionOwnershipConflict, auditReasonParentMismatch,
+					"Request redirect policy has an incompatible ownership role or target relationship")
+			}
+			if !candidate.policyInventoryOK || !candidate.requestRedirectValid {
+				return auditFinding(finding, audit.DispositionUnresolved, auditReasonUnprovenPolicyTarget,
+					"Request redirect policy does not report a complete destination and pool-free relationship")
+			}
+		case candidate.requestRedirectPresent:
+			return auditFinding(finding, audit.DispositionOwnershipConflict, auditReasonParentMismatch,
+				"L7 policy reports request redirect fields for an incompatible action")
 		case redirect:
 			if !candidate.redirectPoolReported {
 				return auditFinding(finding, audit.DispositionUnresolved, auditReasonMissingBackendPool,

@@ -188,9 +188,9 @@ func compileRoute(route *gatewayv1.HTTPRoute, input Input) Route {
 			compiled.Diagnostics = append(compiled.Diagnostics, *unsupported("timeouts, retries, and session persistence are not implemented", ScopeRule))
 		}
 		if len(rule.Filters) == 1 && rule.Filters[0].Type == gatewayv1.HTTPRouteFilterRequestRedirect {
-			redirect, err := NormalizeRequestRedirect(rule)
+			redirect, err := NormalizeRequestRedirect(rule, input.HTTPRequestRedirect)
 			if err != nil {
-				compiled.Diagnostics = append(compiled.Diagnostics, *unsupported(err.Error(), ScopeRule))
+				compiled.Diagnostics = append(compiled.Diagnostics, *err)
 			} else {
 				compiled.Redirect = &redirect
 			}

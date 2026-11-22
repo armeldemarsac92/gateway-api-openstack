@@ -45,6 +45,8 @@ type observedRoutePolicy struct {
 	rules                    []observedRouteRule
 	versioned                bool
 	redirect                 bool
+	requestRedirect          *octavia.RequestRedirect
+	requestRedirectPresent   bool
 	adminObserved            bool
 	fixedResponse            bool
 	targetObserved           bool
@@ -462,7 +464,8 @@ func (p *Provider) observeListenerPolicies(ctx context.Context, inventory *route
 			return err
 		}
 	}
-	if p.fixedHTTPResponses && !complete {
+	if !complete && (p.fixedHTTPResponses || protocol == cloud.ListenerProtocolHTTP &&
+		(p.httpRequestRedirect || strict || !listener.AdminStateUp)) {
 		return cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady, errors.New("waiting for complete Octavia HTTP policy inventory"))
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -485,16 +488,19 @@ func (p *Provider) observeListenerPolicies(ctx context.Context, inventory *route
 		strictPolicy := strict || role.backend != "" || p.fixedHTTPResponses
 		fixedResponse := item.Action == string(octavia.ActionFixedResponse)
 		weighted := item.Action == string(octavia.ActionWeightedTargets)
+		requestRedirect := item.Action == string(octavia.ActionRedirectRequest) || observation.RedirectRequestPresent
 		if strictPolicy && (item.ProjectID != p.projectID || item.ListenerID != listener.ID ||
 			(!role.redirect && !fixedResponse && !weighted && item.RedirectPoolID == "")) {
 			return &cloud.GraphError{Identity: owner.identity.Value(), Err: fmt.Errorf("%w: L7 policy %s has an unproven project, listener or pool", cloud.ErrOwnershipConflict, item.ID)}
 		}
 		target := observation.Target
 		switch {
+		case requestRedirect && !role.redirect:
+			return &cloud.GraphError{Identity: owner.identity.Value(), Err: fmt.Errorf("%w: L7 policy %s reports a request redirect without its owning role", cloud.ErrOwnershipConflict, item.ID)}
 		case role.redirect:
 			if protocol != cloud.ListenerProtocolHTTP || listener.ProjectID != p.projectID ||
 				(listener.Protocol != cloud.ListenerProtocolHTTP && listener.Protocol != terminatedHTTPS) || item.RedirectPoolID != "" ||
-				observation.ExtendedTargetFields || fixedResponse || weighted {
+				observation.ExtendedTargetFields || fixedResponse || weighted || requestRedirect && string(observation.PoolReference) != "null" {
 				return &cloud.GraphError{Identity: owner.identity.Value(), Err: fmt.Errorf("%w: HTTP redirect policy %s has an incompatible listener or action", cloud.ErrOwnershipConflict, item.ID)}
 			}
 			if observation.AdminState == nil || len(observation.PoolReference) == 0 || item.Action == "" ||
@@ -561,6 +567,10 @@ func (p *Provider) observeListenerPolicies(ctx context.Context, inventory *route
 			return &cloud.GraphError{Identity: owner.identity.Value(), Err: fmt.Errorf("%w: HTTPRoute policies appear on multiple listeners", cloud.ErrOwnershipConflict)}
 		}
 		listenerByRoute[routeIndex] = listener.ID
+		observed.requestRedirectPresent = requestRedirect
+		if observation.HasValidRequestRedirect() {
+			observed.requestRedirect = observation.RedirectRequest
+		}
 		observed.fixedResponse = fixedResponse
 		observed.targetObserved = p.fixedHTTPResponses && role.backend != "" && !role.redirect
 		if weighted {
@@ -1060,6 +1070,19 @@ func buildRoutePolicyPlan(
 			continue
 		}
 		policy := observedPolicy.policy
+		if observedPolicy.requestRedirectPresent && wantedPolicy.redirect != nil && wantedPolicy.redirect.request == nil {
+			// Cleanup of the old extension works after regional opt-out. Recreate
+			// the stock policy after observing that its former rules are gone.
+			for _, step := range buildRouteDeletionPlan(observedRouteGraph{policies: []observedRoutePolicy{observedPolicy}}) {
+				step.withdrawHTTPPolicy = true
+				if step.kind == routeMutationDisablePolicy {
+					disablePlan = append(disablePlan, step)
+				} else {
+					plan = append(plan, step)
+				}
+			}
+			continue
+		}
 		state.L7PolicyIDs = append(state.L7PolicyIDs, policy.ID)
 		if wantedPolicy.httpsListenerHostname != "" && (observedPolicy.httpsListenerHostname != wantedPolicy.httpsListenerHostname ||
 			!observedPolicy.adminObserved) {
@@ -1090,7 +1113,7 @@ func buildRoutePolicyPlan(
 				requestHeaderOperations: requestPatch, responseHeaderOperations: responsePatch})
 		}
 		start := len(plan)
-		policyActionUpdate := weighted == nil && !desired.fixedResponse && !observedPolicy.fixedResponse && !desiredPolicyActionMatches(wantedPolicy, policy, poolID)
+		policyActionUpdate := weighted == nil && !desired.fixedResponse && !observedPolicy.fixedResponse && !desiredPolicyActionMatches(wantedPolicy, observedPolicy, poolID)
 		if policyActionUpdate {
 			plan = append(plan, routeMutation{kind: routeMutationUpdatePolicy, id: policy.ID, parentID: poolID, policy: wantedPolicy})
 		}
@@ -1361,12 +1384,13 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 			AdminStateUp:   boolPointer(false),
 			Tags:           tags,
 		}
-		if redirect := step.policy.redirect; redirect != nil {
-			opts.Action, opts.RedirectPrefix, opts.RedirectHttpCode = l7policies.ActionRedirectPrefix, redirect.prefix, redirect.statusCode
-		}
 		create := octavia.PolicyCreateOpts{CreateOpts: opts, FixedServerError: desired.fixedResponse,
 			RequestHeaderOperations: step.requestHeaderOperations, ResponseHeaderOperations: step.responseHeaderOperations,
 			HTTPSListenerHostname: step.policy.httpsListenerHostname}
+		if redirect := step.policy.redirect; redirect != nil {
+			create.Action, create.RedirectPrefix, create.RedirectHttpCode = l7policies.ActionRedirectPrefix, redirect.prefix, redirect.statusCode
+			create.RedirectRequest = redirect.request
+		}
 		if step.weightedTargets != nil {
 			create.WeightedTargets = *step.weightedTargets
 		}
@@ -1374,6 +1398,10 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 	case routeMutationUpdatePolicy:
 		opts := l7policies.UpdateOpts{AdminStateUp: boolPointer(false)}
 		if redirect := step.policy.redirect; redirect != nil {
+			if redirect.request != nil {
+				_, err = p.octavia.SetPolicyRequestRedirect(ctx, step.id, *redirect.request, redirect.statusCode)
+				break
+			}
 			opts.Action, opts.RedirectPrefix, opts.RedirectHttpCode = l7policies.ActionRedirectPrefix, &redirect.prefix, redirect.statusCode
 		} else {
 			opts.Action, opts.RedirectPoolID = l7policies.ActionRedirectToPool, &step.parentID
