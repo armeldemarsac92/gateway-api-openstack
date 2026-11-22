@@ -160,7 +160,7 @@ type L7PolicyTarget struct {
 
 func (target L7PolicyTarget) IsFixedServerError() bool {
 	return string(target.RedirectPool) == "null" && target.FixedResponse != nil &&
-		target.FixedResponse.StatusCode == http.StatusInternalServerError && target.AdminStateUp != nil
+		target.FixedResponse.StatusCode == http.StatusInternalServerError
 }
 
 // L7PolicyObservation keeps readable pool references even when another field
@@ -353,6 +353,7 @@ type PolicyCreateOpts struct {
 	FixedServerError         bool
 	RedirectRequest          *RequestRedirect
 	RequestURLRewrite        *RequestURLRewrite
+	InitialRules             []l7policies.CreateRuleOpts
 }
 
 func (opts PolicyCreateOpts) ToL7PolicyCreateMap() (map[string]any, error) {
@@ -377,6 +378,22 @@ func (opts PolicyCreateOpts) ToL7PolicyCreateMap() (map[string]any, error) {
 		return nil, err
 	}
 	policy := body["l7policy"].(map[string]any)
+	if len(opts.InitialRules) != 0 {
+		if opts.AdminStateUp == nil || *opts.AdminStateUp {
+			return nil, fmt.Errorf("initial L7 rules require an explicitly disabled policy")
+		}
+		rules := make([]map[string]any, 0, len(opts.InitialRules))
+		for _, rule := range opts.InitialRules {
+			body, err := rule.ToRuleCreateMap()
+			if err != nil {
+				return nil, err
+			}
+			fields := body["rule"].(map[string]any)
+			fields["invert"] = rule.Invert
+			rules = append(rules, fields)
+		}
+		policy["rules"] = rules
+	}
 	if opts.HTTPSListenerHostname != "" {
 		policy["https_listener_hostname"] = opts.HTTPSListenerHostname
 	}

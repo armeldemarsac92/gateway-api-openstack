@@ -119,6 +119,7 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 	policyPending := make(map[int]bool)
 	policyCount := make(map[int]int32)
 	holdPolicyEnable := make(map[int]bool)
+	initialRulesReadback := make(map[int]bool)
 	type redirectDomainKey struct {
 		port  int
 		scope string
@@ -143,6 +144,11 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 			if redirectDomains[domain] && !policy.redirect && !provedHandover && (node.Disposition != cloud.GraphEnsure ||
 				!observedForwardPolicyMatches(desired.routes[index], observed, policy)) {
 				holdRedirectEnable[domain] = true
+			}
+			if policy.initialRuleReadbackIncomplete() {
+				initialRulesReadback[port] = true
+				holdPolicyOrder[port] = true
+				canRestoreTraffic = false
 			}
 			if policy.pending() {
 				policyPending[port] = true
@@ -208,9 +214,16 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 					backendIssue = "Waiting for weighted HTTP policies to release the pool"
 				}
 			}
+			if len(routePlan) == 0 && slices.ContainsFunc(observed.policies, observedRoutePolicy.initialRuleReadbackIncomplete) {
+				ensureHold = initialL7RulesReadbackMessage
+			}
 		case node.Disposition == cloud.GraphEnsure:
 			routePlan, routeResult.State, err = buildRouteEnsurePlan(route, observed)
-			if err != nil {
+			if errors.Is(err, errInitialL7RulesUnverified) {
+				ensureHold = initialL7RulesReadbackMessage
+				holdPolicyOrder[port] = true
+				canRestoreTraffic = false
+			} else if err != nil {
 				return nil, result, &cloud.GraphError{Identity: route.spec.Identity, Err: err}
 			}
 			if withdrawBackendTransport && len(routePlan) == 0 {
@@ -269,9 +282,13 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 				_, ensureHold = httpMemberWithdrawal(observed)
 			}
 			if stage, ok := handovers.stages[index]; ok && !withdrawing && (ensureHold == "" || route.fixedResponse) &&
-				actual.loadBalancer != nil && (!scopedHTTP && actual.listener != nil || listenerID != "") && !policyPending[port] {
+				actual.loadBalancer != nil && (!scopedHTTP && actual.listener != nil || listenerID != "") && !policyPending[port] && !initialRulesReadback[port] {
 				steps, err := stage.plan(route, observed)
-				if err != nil {
+				if errors.Is(err, errInitialL7RulesUnverified) {
+					routeResult.Outcome = p.progressingOutcome(initialL7RulesReadbackMessage)
+					holdPolicyOrder[port] = true
+					canRestoreTraffic = false
+				} else if err != nil {
 					return nil, result, &cloud.GraphError{Identity: route.spec.Identity, Err: err}
 				}
 				if len(steps) != 0 && steps[0].kind != routeMutationDisableMember {
@@ -798,7 +815,7 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 		}
 	}
 	if len(required) == 0 {
-		return step, nil
+		return p.preparePolicyCreation(ctx, actual, desired, step)
 	}
 	withdrawTarget := step.kind == graphRouteMutation && step.withdrawHTTPPolicy && step.route.kind == routeMutationSetPolicyTarget
 	verify := p.verifyGatewayHTTPCapabilities
@@ -875,7 +892,7 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 		}
 		return step, err
 	}
-	return step, nil
+	return p.preparePolicyCreation(ctx, actual, desired, step)
 }
 
 func (actual observedGatewayGraph) policyListener(route observedRouteGraph, id string) *listeners.Listener {

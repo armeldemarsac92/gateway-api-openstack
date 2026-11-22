@@ -210,7 +210,7 @@ func classifyAuditCandidate(
 			target := candidate.policyTarget
 			if _, _, _, grouped := openstackidentity.ParseHTTPFragmentRole(role); !grouped ||
 				openstackidentity.IsHTTPWeightedPolicyRole(role) || !candidate.policyInventoryOK || target == nil ||
-				!target.IsFixedServerError() || len(target.WeightedTargets) != 0 || candidate.redirectPoolID != "" || candidate.policyRedirects {
+				!target.IsFixedServerError() || target.AdminStateUp == nil || len(target.WeightedTargets) != 0 || candidate.redirectPoolID != "" || candidate.policyRedirects {
 				return auditFinding(finding, audit.DispositionUnresolved, auditReasonUnprovenPolicyTarget,
 					"L7 policy does not report the owned fixed HTTP response and pool-free relationship")
 			}

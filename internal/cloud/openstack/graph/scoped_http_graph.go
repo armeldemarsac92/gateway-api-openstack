@@ -103,6 +103,7 @@ func validateScopedHTTPRouteRelationships(routes []observedRouteGraph) error {
 	layout := make(map[string][]observedRoutePolicy)
 	memberPools, rulePolicies, policyListeners := make(map[string]string), make(map[string]string), make(map[string]string)
 	poolListeners := make(map[string][]pools.ListenerID)
+	unprovenPoolListeners := make(map[string][]pools.ListenerID)
 	for _, route := range routes {
 		for _, part := range route.parts() {
 			if part.pool != nil && part.pool.Protocol != cloud.ListenerProtocolHTTP {
@@ -121,17 +122,14 @@ func validateScopedHTTPRouteRelationships(routes []observedRouteGraph) error {
 					rulePolicies[rule.rule.ID] = policy.policy.ID
 				}
 				layout[id] = append(layout[id], policy)
-				if policy.policy.AdminStateUp && len(policy.rules) != 0 {
-					edge := pools.ListenerID{ID: id}
-					add := func(poolID string) {
-						if poolID != "" && !slices.Contains(poolListeners[poolID], edge) {
-							poolListeners[poolID] = append(poolListeners[poolID], edge)
-						}
-					}
-					add(policy.policy.RedirectPoolID)
-					for _, target := range policy.weightedTargets {
-						add(target.PoolID)
-					}
+				switch {
+				case policy.policy.AdminStateUp && len(policy.rules) != 0:
+					addPolicyPoolListeners(poolListeners, policy, id)
+				case policy.initialRules && (!policy.adminObserved || policy.policy.AdminStateUp && policy.initialRulesPartial):
+					// An owned, incompletely read policy can still explain the
+					// link. Keep its withdrawal eligible while checking all
+					// other links against their proved parents.
+					addPolicyPoolListeners(unprovenPoolListeners, policy, id)
 				}
 			}
 		}
@@ -141,7 +139,14 @@ func validateScopedHTTPRouteRelationships(routes []observedRouteGraph) error {
 			if part.pool == nil || part.pool.Protocol != cloud.ListenerProtocolHTTP {
 				continue
 			}
-			if err := crossCheckCompleteChildInventory("HTTP pool", part.pool.ID, "listener", part.pool.Listeners, poolListeners[part.pool.ID], func(ref pools.ListenerID) string { return ref.ID }); err != nil {
+			known := poolListeners[part.pool.ID]
+			refs := part.pool.Listeners
+			if unproven := unprovenPoolListeners[part.pool.ID]; len(unproven) != 0 {
+				refs = slices.DeleteFunc(slices.Clone(refs), func(ref pools.ListenerID) bool {
+					return slices.Contains(unproven, ref) && !slices.Contains(known, ref)
+				})
+			}
+			if err := crossCheckCompleteChildInventory("HTTP pool", part.pool.ID, "listener", refs, known, func(ref pools.ListenerID) string { return ref.ID }); err != nil {
 				return err
 			}
 			for _, member := range part.members {
@@ -158,6 +163,19 @@ func validateScopedHTTPRouteRelationships(routes []observedRouteGraph) error {
 		}
 	}
 	return nil
+}
+
+func addPolicyPoolListeners(links map[string][]pools.ListenerID, policy observedRoutePolicy, listenerID string) {
+	edge := pools.ListenerID{ID: listenerID}
+	add := func(poolID string) {
+		if poolID != "" && !slices.Contains(links[poolID], edge) {
+			links[poolID] = append(links[poolID], edge)
+		}
+	}
+	add(policy.policy.RedirectPoolID)
+	for _, target := range policy.weightedTargets {
+		add(target.PoolID)
+	}
 }
 
 func scopedHTTPListeners(desired desiredGatewayGraph) map[int]cloud.ScopedListener {
