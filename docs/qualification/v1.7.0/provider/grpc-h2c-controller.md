@@ -98,9 +98,21 @@ routes. Routes on other ports continue independently. To revert to the
 portable rule, remove the controller flag and let the graph converge before
 rolling back Octavia.
 
-The regional option has local controller coverage for discovery, API
-payloads, mode changes and capability withdrawal. The native traffic
-qualification remains pending.
+The manager at `abcd5fd75914` passed all seven upstream request-header checks
+on both CRD channels. Two additional h2c calls checked the metadata at the
+echo backends. With the regional capability explicitly withdrawn, Octavia
+reported the listener closed, a new call returned `UNAVAILABLE` and the
+GRPCRoute reported `Programmed=False/Pending`. During withdrawal the
+Neutron fixture returned HTTP 503 to three floating IP reads on each channel.
+Disabling the controller option restored both backend calls and all three
+positive route conditions. The two forwarding policies and two non-media
+rules kept their IDs, and two native media rules were replaced.
+
+Both runs used the binary extracted from the same OCI image, Kubernetes
+envtest, Octavia REST, Amphora and HAProxy. The previous manager
+`702f18dc1ba8` had passed the registered case on both channels and timed out
+waiting for the withdrawn route status. The release includes both revisions'
+receipts and the replay inputs. [Image and per-channel results](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-abcd5fd75914f043df9ae000aa92664c481ba74a)
 
 ## Modify request metadata on a gRPC rule
 
