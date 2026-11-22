@@ -541,5 +541,80 @@
       },
       "receiptSHA256": "a6506f1f4d9259125e9ed3589e68b32453175cca051bc427fa93b05603ff299b"
     }
+  },
+  "portableMediaType": {
+    "sourceRevision": "a1807b022ba8bdd06a7dca3990cb0b861711ecdd",
+    "managerSHA256": "7890ac0c599db05c8670b8a7a80303ec5e736fbe63d160a3abaf68dad0f68588",
+    "imageManifest": "sha256:b5a10df4efec72c204c079439dc20305f5c641308f18e39c3d94d65f671e7e63",
+    "channels": {
+      "standard": {
+        "metadata": {
+          "case": "GRPCRouteRequestHeaderModifier",
+          "passed": true,
+          "subtestsPassed": 7,
+          "expected": 7,
+          "backendMetadata": true,
+          "receiptSHA256": "1f2ac1f70888b1636ca729f2fdf06c1af7a491c3ea97e95b50a66e4a47516971",
+          "haproxyBinarySHA256": "847fad8188f01f5693cfba85731f37d554758526f39dc6f67162ec2c6a150885"
+        },
+        "previousHostname": {
+          "case": "GRPCRouteMultipleRoutesAttachmentSameHostnameIntersection",
+          "sourceRevision": "2944c353dcb0afa7b8756373bf87a51001c33ad2",
+          "managerSHA256": "f4646b8ee3c3e34d81beec7f1ce90f902df1dfcc49bbef11bba05e5e92b30fb4",
+          "haproxyBinarySHA256": "fa8468efa26f95ed83a36afeb97b79730de285450b7a8fae94f7cf5e6d2d0824",
+          "passed": false,
+          "subtestsPassed": 0,
+          "expected": 2,
+          "receiptSHA256": "1e9739d9269848d76a74fbace4efbaddc64aab214a85bb5c5944a8a4e1f1070b",
+          "upstreamReportSHA256": "399af9930e3b746bb53105934596fcff9c232350d1cfe9a56691e2dcd93b5d11"
+        },
+        "portableHostname": {
+          "case": "GRPCRouteMultipleRoutesAttachmentSameHostnameIntersection",
+          "sourceRevision": "a1807b022ba8bdd06a7dca3990cb0b861711ecdd",
+          "managerSHA256": "7890ac0c599db05c8670b8a7a80303ec5e736fbe63d160a3abaf68dad0f68588",
+          "haproxyBinarySHA256": "fa8468efa26f95ed83a36afeb97b79730de285450b7a8fae94f7cf5e6d2d0824",
+          "passed": true,
+          "subtestsPassed": 2,
+          "expected": 2,
+          "receiptSHA256": "ac3e34c46dc790318a1a06e063abcf0cd26f76c3bfaea95266c4ee1e6a4fbf33",
+          "upstreamReportSHA256": "8ea76a81b3a1cd9b28ca21671b5149a082fb4130beac57fd9b3ee9c430859488"
+        }
+      },
+      "experimental": {
+        "metadata": {
+          "case": "GRPCRouteRequestHeaderModifier",
+          "passed": true,
+          "subtestsPassed": 7,
+          "expected": 7,
+          "backendMetadata": true,
+          "receiptSHA256": "dca9391c25e58986d96f5af1739e8b4bb5ad5bd0a1bb6aa5458f18104f8df858",
+          "haproxyBinarySHA256": "847fad8188f01f5693cfba85731f37d554758526f39dc6f67162ec2c6a150885"
+        },
+        "previousHostname": {
+          "case": "GRPCRouteMultipleRoutesAttachmentSameHostnameIntersection",
+          "sourceRevision": "2944c353dcb0afa7b8756373bf87a51001c33ad2",
+          "managerSHA256": "f4646b8ee3c3e34d81beec7f1ce90f902df1dfcc49bbef11bba05e5e92b30fb4",
+          "haproxyBinarySHA256": "fa8468efa26f95ed83a36afeb97b79730de285450b7a8fae94f7cf5e6d2d0824",
+          "passed": false,
+          "subtestsPassed": 0,
+          "expected": 2,
+          "receiptSHA256": "d66b622f0f5ee29f55082f1474d7009f79548fd628578116da37af1573f91077",
+          "upstreamReportSHA256": "ed1fa4fc31f29a28d35d82932fe3cb1800683edf89a141e5a73aa48624330460"
+        },
+        "portableHostname": {
+          "case": "GRPCRouteMultipleRoutesAttachmentSameHostnameIntersection",
+          "sourceRevision": "a1807b022ba8bdd06a7dca3990cb0b861711ecdd",
+          "managerSHA256": "7890ac0c599db05c8670b8a7a80303ec5e736fbe63d160a3abaf68dad0f68588",
+          "haproxyBinarySHA256": "fa8468efa26f95ed83a36afeb97b79730de285450b7a8fae94f7cf5e6d2d0824",
+          "passed": true,
+          "subtestsPassed": 2,
+          "expected": 2,
+          "receiptSHA256": "439105d5aa68ccd78873b603f826a2715785d720f8066ebd31937e0918e523d0",
+          "upstreamReportSHA256": "74c13898ddb0a2ee5ae6bc623b4ed479d86c84544ab0e9a4ca71ccca12c80bf3"
+        }
+      }
+    },
+    "evidenceArchiveSHA256": "025480e351dbc5e627ad9d351196297df473bfabc8bc4d0859c6c75d35a21c5c",
+    "evidenceRelease": "https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-a1807b022ba8bdd06a7dca3990cb0b861711ecdd"
   }
 }
