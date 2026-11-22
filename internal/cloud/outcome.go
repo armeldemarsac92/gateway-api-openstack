@@ -87,6 +87,9 @@ type GatewayResult struct {
 	// AddressBlocked indicates that the rejected address leaves no provider work
 	// to retry at the provisioning cadence.
 	AddressBlocked bool
+	// AddressActive reports that the observed address still has an enabled
+	// frontend, including when replacement was disallowed.
+	AddressActive bool
 	// AddressAbsent is a complete observation that the client-facing address
 	// is unassigned. An incomplete observation leaves this false.
 	AddressAbsent bool

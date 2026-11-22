@@ -64,7 +64,7 @@ func (r *Reconciler) gatewaySpec(gateway *gatewayv1.Gateway, listeners []*gatewa
 		return usesHTTPSProfile(r.Config, gateway) && httpsProfileIssue(r.Config, gateway, section) != nil
 	})
 	spec.HTTPListenerHostnames = HTTPListenerHostnames(admitted)
-	setGatewayAddressRequest(&spec, gateway)
+	r.setGatewayAddressRequest(&spec, gateway)
 	if controller.GatewayListenerScope(r.Config, gateway) != "" {
 		// Snapshot validation already verified the frozen listener port and topology.
 		spec.ListenerProtocol = string(listenerFamily(listener))
@@ -85,7 +85,11 @@ func (r *Reconciler) gatewaySpec(gateway *gatewayv1.Gateway, listeners []*gatewa
 	return spec
 }
 
-func setGatewayAddressRequest(spec *cloud.GatewaySpec, gateway *gatewayv1.Gateway) {
+func (r *Reconciler) setGatewayAddressRequest(spec *cloud.GatewaySpec, gateway *gatewayv1.Gateway) {
+	if r.Config.GatewayAddressRoutabilityEnabled() {
+		spec.RequestedVIPAddresses = requestedVIPCandidates(gateway.Spec.Addresses)
+		return
+	}
 	if rejection := validateAddresses(gateway.Spec.Addresses); rejection != nil {
 		spec.AddressRejection = rejection.message
 	} else if len(gateway.Spec.Addresses) == 1 {

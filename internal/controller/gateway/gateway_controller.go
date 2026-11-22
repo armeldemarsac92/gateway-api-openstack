@@ -127,6 +127,9 @@ func (r *Reconciler) reconcileDelete(ctx context.Context, scope *gatewayScope) (
 
 func (r *Reconciler) reconcileNormal(ctx context.Context, scope *gatewayScope) (ctrl.Result, error) {
 	decision := r.decideGatewayPhase(scope)
+	if scope.managed && !r.Config.GatewayAddressRoutabilityEnabled() {
+		meta.RemoveStatusCondition(&scope.gateway.Status.Conditions, string(gatewayv1.GatewayConditionAddressesAssigned))
+	}
 	switch decision.phase {
 	case gatewayPhaseIgnore:
 		return ctrl.Result{}, nil
@@ -247,6 +250,13 @@ func (r *Reconciler) reconcileGatewayGraph(
 	if errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) {
 		return r.setGatewayUnsupportedVersion(ctx, scope)
 	}
+	var componentError *cloud.GraphError
+	routeFailure := errors.As(err, &componentError) && componentError.Identity.RouteUID != ""
+	if r.Config.GatewayAddressRoutabilityEnabled() && !errors.Is(err, errGatewayChanged) && graphResult.Gateway.AddressIssue == "" &&
+		(err == nil || routeFailure || graphResult.Gateway.AddressAbsent) {
+		// Address readback is independent of listener and route readiness.
+		r.observeAddressAssignment(scope.gateway, graphResult.Gateway)
+	}
 	if !model.GatewayDisallowsListenerSets(scope.gateway) && !errors.Is(err, errGatewayChanged) {
 		if err := r.reportListenerSets(ctx, scope.gateway, sets, graphResult); err != nil {
 			return ctrl.Result{}, err
@@ -277,8 +287,7 @@ func (r *Reconciler) reconcileGatewayGraph(
 		if errors.Is(err, errGatewayChanged) && !classified {
 			return ctrl.Result{}, err
 		}
-		var componentError *cloud.GraphError
-		if errors.As(err, &componentError) && componentError.Identity.RouteUID != "" {
+		if routeFailure {
 			if graphResult.Gateway.HTTPPolicyTransition {
 				message := controller.ProviderProgressMessage(graphResult.Gateway.Outcome, "Waiting for HTTP policy changes")
 				if statusErr := r.setGatewayListenerStatuses(ctx, scope.gateway, decision.listener,
@@ -345,10 +354,12 @@ func (r *Reconciler) reconcileGatewayGraph(
 			metav1.ConditionFalse, gatewayv1.GatewayReasonNoResources, gatewayv1.ListenerReasonPending, message, message, true, gatewayResult.ScopedListenerReadyPorts); err != nil {
 			return ctrl.Result{}, err
 		}
-		if gatewayResult.AddressAbsent {
-			scope.gateway.Status.Addresses = nil
-		} else if address != "" && len(gatewayResult.ScopedListenerReadyPorts) != 0 {
-			setGatewayAddress(scope.gateway, address)
+		if !r.Config.GatewayAddressRoutabilityEnabled() {
+			if gatewayResult.AddressAbsent {
+				scope.gateway.Status.Addresses = nil
+			} else if address != "" && len(gatewayResult.ScopedListenerReadyPorts) != 0 {
+				setGatewayAddress(scope.gateway, address)
+			}
 		}
 		return ctrl.Result{RequeueAfter: controller.ProviderProgressRequeueAfter(progress, scope.gateway.UID)}, nil
 	}

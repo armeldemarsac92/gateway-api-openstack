@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	"sigs.k8s.io/gateway-api/pkg/features"
 
 	configv1alpha1 "github.com/gateway-api-openstack/gateway-api-openstack/api/v1alpha1"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
@@ -206,6 +207,9 @@ func (r *Reconciler) reconcileParameters(ctx context.Context, scope *gatewayClas
 	_, err := classconfig.Resolve(ctx, r.APIReader, r.TopologyResolver, live)
 	class.Status.SupportedFeatures = nil
 	if err == nil {
+		if r.Config.GatewayAddressRoutabilityEnabled() {
+			class.Status.SupportedFeatures = []gatewayv1.SupportedFeature{{Name: gatewayv1.FeatureName(features.SupportGatewayAddressRoutability)}}
+		}
 		// Gateway and HTTPRoute features require their complete core conformance
 		// profiles. The current HTTP subset does not justify declaring either.
 		controller.SetCondition(&class.Status.Conditions, controller.Condition(

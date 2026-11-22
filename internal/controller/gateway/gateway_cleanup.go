@@ -82,6 +82,9 @@ func (r *Reconciler) cleanupGateway(ctx context.Context, scope *gatewayScope) (c
 		}
 		return ctrl.Result{RequeueAfter: controller.OpenStackResyncAfter(r.Config.OpenStackResyncInterval, scope.gateway.UID)}, nil
 	}
+	if r.Config.GatewayAddressRoutabilityEnabled() && result.Gateway.AddressAbsent {
+		r.observeAddressAssignment(scope.gateway, result.Gateway)
+	}
 	outcome := result.Outcome
 	if err := outcome.Validate(); err != nil {
 		return ctrl.Result{}, fmt.Errorf("validate Gateway deletion outcome: %w", err)
