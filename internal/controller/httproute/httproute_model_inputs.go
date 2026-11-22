@@ -255,7 +255,7 @@ func (r *Reconciler) collectRouteModelInputs(ctx context.Context, reader client.
 
 func (r *Reconciler) collectRouteModelInputsForSets(ctx context.Context, reader client.Reader, gateway *gatewayv1.Gateway, routes []gatewayv1.HTTPRoute, namespaces []corev1.Namespace, sets map[types.NamespacedName][]gatewayv1.Listener) (*routeModelInputs, error) {
 	if !r.Config.BackendTLSPolicy && gatewaycontroller.BackendClientCertificateRef(gateway) != nil {
-		return nil, errors.New("Gateway backend client certificates require BackendTLSPolicy observation")
+		return nil, errors.New("backend client certificates on a Gateway require BackendTLSPolicy observation")
 	}
 	routes = slices.Clone(routes)
 	for i := range routes {
