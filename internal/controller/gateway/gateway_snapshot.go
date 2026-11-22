@@ -301,7 +301,7 @@ func (r *Reconciler) gatewayNeedsListenerScope(gateway *gatewayv1.Gateway) bool 
 }
 
 func (r *Reconciler) requestsListenerScope(gateway *gatewayv1.Gateway) bool {
-	return usesHTTPSProfile(r.Config, gateway) || hasMultipleTransportListeners(gateway) || HasMultipleHTTPListenerPorts(gateway)
+	return hasMultipleTransportListeners(gateway) || RequiresHTTPListenerScope(r.Config, gateway)
 }
 
 func (r *Reconciler) boundListenerProtocol(gateway *gatewayv1.Gateway) gatewayv1.ProtocolType {

@@ -266,6 +266,22 @@ func TestRouteGraphOrdersTwoBoundRoutes(t *testing.T) {
 			t.Fatalf("route %s = %s rank %d, want Ensure rank %d", node.Spec.Identity.RouteUID, node.Disposition, node.Spec.Precedence, want)
 		}
 	}
+	f.reader.authorityReads = make(map[string]int)
+	if err := input.Validate(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	wantReads := map[string]int{"Gateway API bundle": 1, "Gateway": 1, "GatewayClass": 1, "HTTPRoute": 2}
+	if !maps.Equal(f.reader.authorityReads, wantReads) {
+		t.Fatalf("authority reads = %v, want %v", f.reader.authorityReads, wantReads)
+	}
+
+	exact.Annotations[f.reconciler.Config.RouteLifecycleAnnotation()] = controller.RouteDetaching
+	if err := f.client.Update(t.Context(), exact); err != nil {
+		t.Fatal(err)
+	}
+	if err := input.Validate(t.Context()); !errors.Is(err, errHTTPRouteChanged) {
+		t.Fatalf("detaching peer passed the mutation fence: %v", err)
+	}
 }
 
 func TestRouteGraphRevokesHTTPPolicyAfterNamespaceLabelChange(t *testing.T) {
@@ -626,11 +642,22 @@ func replaceRouteModelInputObject(t *testing.T, kubeClient client.Client, object
 
 type routeModelDependencyReader struct {
 	client.Reader
-	counts map[string]int
-	forbid bool
+	counts         map[string]int
+	authorityReads map[string]int
+	forbid         bool
 }
 
 func (r *routeModelDependencyReader) Get(ctx context.Context, key client.ObjectKey, object client.Object, options ...client.GetOption) error {
+	if r.authorityReads != nil {
+		switch object.(type) {
+		case *gatewayv1.Gateway:
+			r.authorityReads["Gateway"]++
+		case *gatewayv1.GatewayClass:
+			r.authorityReads["GatewayClass"]++
+		case *gatewayv1.HTTPRoute:
+			r.authorityReads["HTTPRoute"]++
+		}
+	}
 	var kind string
 	switch object.(type) {
 	case *corev1.Service:
@@ -652,6 +679,9 @@ func (r *routeModelDependencyReader) Get(ctx context.Context, key client.ObjectK
 }
 
 func (r *routeModelDependencyReader) List(ctx context.Context, list client.ObjectList, options ...client.ListOption) error {
+	if r.authorityReads != nil && list.GetObjectKind().GroupVersionKind().Kind == "CustomResourceDefinitionList" {
+		r.authorityReads["Gateway API bundle"]++
+	}
 	var kind string
 	switch list.(type) {
 	case *discoveryv1.EndpointSliceList:

@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"slices"
 
+	"k8s.io/apimachinery/pkg/types"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
@@ -32,12 +33,22 @@ func Compile(input Input) (Gateway, error) {
 	if input.Gateway == nil {
 		return Gateway{}, errors.New("gateway input is required")
 	}
-	result := Gateway{Source: source(input.Gateway), Listeners: compileListeners(input.Gateway, input.OperatorHTTPS)}
-	if !GatewayDisallowsListenerSets(input.Gateway) || input.Gateway.Spec.TLS != nil {
+	result := Gateway{Source: source(input.Gateway), Listeners: compileListeners(input.Gateway.Spec.Listeners, input.OperatorHTTPS)}
+	if input.Gateway.Spec.TLS != nil {
 		result.Diagnostics = append(result.Diagnostics, Diagnostic{
 			Condition: string(gatewayv1.GatewayConditionAccepted), Reason: string(gatewayv1.GatewayReasonInvalidParameters),
-			Message: "ListenerSet attachment and Gateway-wide TLS are not implemented by the logical HTTP compiler",
+			Message: "Gateway-wide TLS is not implemented by the logical HTTP compiler",
 		})
+	}
+	gatewayListeners := result.Listeners
+	setListeners := make(map[types.NamespacedName][]Listener, len(input.ListenerSetSections))
+	for key, sections := range input.ListenerSetSections {
+		compiled := compileListeners(sections, false)
+		for i := range compiled {
+			compiled[i].ListenerSet = key
+		}
+		setListeners[key] = compiled
+		result.Listeners = append(result.Listeners, compiled...)
 	}
 	seenRoutes := make(map[string]bool, len(input.Routes))
 	for i := range input.Routes {
@@ -49,7 +60,7 @@ func Compile(input Input) (Gateway, error) {
 		seenRoutes[key] = true
 		var parents []int
 		for index, parent := range route.Spec.ParentRefs {
-			if targetsGateway(parent, route.Namespace, input.Gateway) {
+			if _, found := setListeners[ListenerSetRefKey(parent, route.Namespace)]; found || targetsGateway(parent, route.Namespace, input.Gateway) {
 				parents = append(parents, index)
 			}
 		}
@@ -58,7 +69,13 @@ func Compile(input Input) (Gateway, error) {
 		}
 		compiled := compileRoute(route, input)
 		for _, index := range parents {
-			parent := attachParent(input, route, index, result.Listeners)
+			ref := route.Spec.ParentRefs[index]
+			key := ListenerSetRefKey(ref, route.Namespace)
+			sections, listeners, namespace := input.Gateway.Spec.Listeners, gatewayListeners, input.Gateway.Namespace
+			if key.Name != "" {
+				sections, listeners, namespace = input.ListenerSetSections[key], setListeners[key], key.Namespace
+			}
+			parent := attachParent(input, route, index, sections, listeners, namespace)
 			if len(compiled.Diagnostics) != 0 {
 				parent.State = AttachmentRejected
 				parent.Diagnostics = append(parent.Diagnostics, compiled.Diagnostics...)
@@ -73,13 +90,15 @@ func Compile(input Input) (Gateway, error) {
 	for i := range result.Listeners {
 		populateListener(&result.Listeners[i], result.Routes)
 	}
-	slices.SortFunc(result.Listeners, func(a, b Listener) int { return cmp.Compare(a.Name, b.Name) })
+	slices.SortFunc(result.Listeners, func(a, b Listener) int {
+		return cmp.Or(cmp.Compare(a.ListenerSet.Namespace, b.ListenerSet.Namespace), cmp.Compare(a.ListenerSet.Name, b.ListenerSet.Name), cmp.Compare(a.Name, b.Name))
+	})
 	return result, nil
 }
 
-func compileListeners(gateway *gatewayv1.Gateway, operatorHTTPS bool) []Listener {
-	result := make([]Listener, 0, len(gateway.Spec.Listeners))
-	for _, listener := range gateway.Spec.Listeners {
+func compileListeners(sections []gatewayv1.Listener, operatorHTTPS bool) []Listener {
+	result := make([]Listener, 0, len(sections))
+	for _, listener := range sections {
 		compiled := Listener{Name: listener.Name, Port: listener.Port, Protocol: listener.Protocol}
 		if listener.Hostname != nil {
 			compiled.Hostname = string(*listener.Hostname)
@@ -237,7 +256,7 @@ func populateListener(listener *Listener, routes []Route) {
 	for _, route := range routes {
 		hostnames := make([]string, 0)
 		for _, parent := range route.Parents {
-			if parent.State != AttachmentAccepted {
+			if parent.State != AttachmentAccepted || ListenerSetRefKey(parent.Reference, route.Source.Namespace) != listener.ListenerSet {
 				continue
 			}
 			for _, attachment := range parent.Listeners {

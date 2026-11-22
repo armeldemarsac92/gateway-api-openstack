@@ -159,6 +159,16 @@ func (p *recordingProvider) ReconcileGatewayGraph(ctx context.Context, spec clou
 		result.Gateway.Outcome = outcome
 		return result, err
 	}
+	if spec.Gateway.Disposition == cloud.GraphEnsure {
+		gatewayResult, err := p.EnsureGateway(ctx, spec.Gateway.Spec)
+		result.Gateway, result.Outcome = gatewayResult, gatewayResult.Outcome
+		if err != nil || result.Outcome.State != cloud.OutcomeReady {
+			return result, err
+		}
+		for _, listener := range spec.Gateway.Spec.ScopedListeners {
+			result.Gateway.ScopedListenerReadyPorts = append(result.Gateway.ScopedListenerReadyPorts, listener.Port)
+		}
+	}
 	for _, route := range spec.Routes {
 		switch route.Disposition {
 		case cloud.GraphDelete:
@@ -176,12 +186,6 @@ func (p *recordingProvider) ReconcileGatewayGraph(ctx context.Context, spec clou
 				return result, err
 			}
 		}
-	}
-	if len(result.Routes) == 0 && spec.Gateway.Disposition == cloud.GraphEnsure {
-		gatewayResult, err := p.EnsureGateway(ctx, spec.Gateway.Spec)
-		result.Gateway = gatewayResult
-		result.Outcome = gatewayResult.Outcome
-		return result, err
 	}
 	return result, nil
 }

@@ -185,7 +185,7 @@ func TestControllerEnvtest(t *testing.T) {
 	})
 	cacheClient := manager.GetClient()
 	t.Run("upstream Gateway status cases", func(t *testing.T) {
-		testUpstreamGatewayStatus(t, apiClient, statusConfig)
+		testUpstreamGatewayStatus(t, apiClient, statusConfig, statusProvider)
 	})
 	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "controller-envtest"}}
 	if err := apiClient.Create(t.Context(), namespace); err != nil {

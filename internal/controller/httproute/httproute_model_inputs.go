@@ -50,16 +50,17 @@ type routeModelInputs struct {
 }
 
 type routeGraphAdmission struct {
-	bindings   []routeGraphBinding
-	eligible   map[routeObjectKey]routeGraphCandidate
-	conflicts  map[routeObjectKey]bool
-	active     []gatewayv1.HTTPRoute
-	namespaces []corev1.Namespace
+	listenerSets map[types.NamespacedName][]gatewayv1.Listener
+	bindings     []routeGraphBinding
+	eligible     map[routeObjectKey]routeGraphCandidate
+	conflicts    map[routeObjectKey]bool
+	active       []gatewayv1.HTTPRoute
+	namespaces   []corev1.Namespace
 }
 
 type routeGraphCandidate struct {
 	routeUID, namespaceUID types.UID
-	sections               []gatewayv1.SectionName
+	sections               []sectionIdentity
 }
 
 type routeProfileCandidate struct {
@@ -79,12 +80,16 @@ func routeKey(route *gatewayv1.HTTPRoute) routeObjectKey {
 
 func (r *Reconciler) observeRouteGraphAdmission(ctx context.Context, gateway *gatewayv1.Gateway, routes []gatewayv1.HTTPRoute, requested *gatewayv1.HTTPRoute) (routeGraphAdmission, error) {
 	identity := controller.GatewayIdentity(r.Config, gateway)
-	http, _ := gatewaycontroller.HTTPRouteListeners(r.Config, gateway)
-	admission := routeGraphAdmission{
-		bindings: r.routeGraphBindings(routes, identity),
-		eligible: make(map[routeObjectKey]routeGraphCandidate),
+	sets, err := gatewaycontroller.ObserveListenerSets(ctx, r.APIReader, r.Config, gateway)
+	if err != nil {
+		return routeGraphAdmission{}, err
 	}
-	byName := make(map[string][]corev1.Namespace)
+	admission := routeGraphAdmission{
+		listenerSets: sets.Sections(),
+		bindings:     r.routeGraphBindings(routes, identity),
+		eligible:     make(map[routeObjectKey]routeGraphCandidate),
+	}
+	namespacesByName := make(map[string][]corev1.Namespace)
 	var candidatesForElection []routeProfileCandidate
 	for i := range routes {
 		route := &routes[i]
@@ -92,29 +97,16 @@ func (r *Reconciler) observeRouteGraphAdmission(ctx context.Context, gateway *ga
 			route.Annotations[r.Config.RouteLifecycleAnnotation()] == controller.RouteDetaching {
 			continue
 		}
-		ref, err := r.soleParentForManagedGateway(ctx, route, gateway)
+		parents, err := r.parentsForGateway(ctx, route, gateway)
 		if err != nil {
 			return routeGraphAdmission{}, err
 		}
-		if ref == nil {
-			continue
-		}
-		parent := managedRouteParent{ref: *ref, gateway: gateway}
-		candidates, err := routeParentCandidates(route, parent, http)
+		selection, namespaces, err := r.selectRouteParentsWithNamespaces(ctx, route, parents, admission.listenerSets, namespacesByName)
 		if err != nil {
-			continue
+			return routeGraphAdmission{}, err
 		}
-		namespaces, observed := byName[route.Namespace]
-		if !observed && slices.ContainsFunc(candidates, model.ObservesRouteNamespace) {
-			namespaces, err = readRouteNamespaces(ctx, r.APIReader, candidates, route.Namespace)
-			if err != nil {
-				return routeGraphAdmission{}, err
-			}
-			byName[route.Namespace] = namespaces
-			admission.namespaces = append(admission.namespaces, namespaces...)
-		}
-		selected, err := r.selectRouteAttachments(route, gateway, candidates, namespaces)
-		if err != nil {
+		selected := selection.listeners()
+		if len(selected) == 0 {
 			continue
 		}
 		candidate := routeProfileCandidate{route: route, listeners: selected}
@@ -123,15 +115,19 @@ func (r *Reconciler) observeRouteGraphAdmission(ctx context.Context, gateway *ga
 		}
 		candidatesForElection = append(candidatesForElection, candidate)
 	}
+	for _, namespace := range namespacesByName {
+		admission.namespaces = append(admission.namespaces, namespace...)
+	}
+	slices.SortFunc(admission.namespaces, func(a, b corev1.Namespace) int { return cmp.Compare(a.Name, b.Name) })
 	admission.conflicts = electRouteProfiles(candidatesForElection)
 	for _, candidate := range candidatesForElection {
 		route := candidate.route
 		if admission.conflicts[routeKey(route)] {
 			continue
 		}
-		var sections []gatewayv1.SectionName
+		var sections []sectionIdentity
 		for _, listener := range candidate.listeners {
-			sections = append(sections, listener.Name)
+			sections = append(sections, listenerSectionIdentity(*listener))
 		}
 		admission.eligible[routeKey(route)] = routeGraphCandidate{routeUID: route.UID, sections: sections, namespaceUID: candidate.namespace}
 		if controller.RouteClaimsGateway(r.Config, route, identity) || requested != nil && route.UID == requested.UID && routeKey(route) == routeKey(requested) {
@@ -191,7 +187,7 @@ func (r *Reconciler) collectGraphRouteModelInputs(ctx context.Context, gateway *
 	if err != nil {
 		return nil, err
 	}
-	inputs, err := r.collectRouteModelInputs(ctx, r.APIReader, gateway, admission.active, admission.namespaces)
+	inputs, err := r.collectRouteModelInputsForSets(ctx, r.APIReader, gateway, admission.active, admission.namespaces, admission.listenerSets)
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +200,7 @@ func (r *Reconciler) validateGraphRouteModel(ctx context.Context, inputs *routeM
 	if err != nil {
 		return err
 	}
-	if !maps.EqualFunc(inputs.admission.eligible, current.eligible, func(a, b routeGraphCandidate) bool {
+	if !equality.Semantic.DeepEqual(inputs.admission.listenerSets, current.listenerSets) || !maps.EqualFunc(inputs.admission.eligible, current.eligible, func(a, b routeGraphCandidate) bool {
 		return a.routeUID == b.routeUID && a.namespaceUID == b.namespaceUID && slices.Equal(a.sections, b.sections)
 	}) ||
 		!maps.Equal(inputs.admission.conflicts, current.conflicts) ||
@@ -221,10 +217,15 @@ func (r *Reconciler) validateGraphRouteModel(ctx context.Context, inputs *routeM
 }
 
 func (r *Reconciler) collectRouteModelInputs(ctx context.Context, reader client.Reader, gateway *gatewayv1.Gateway, routes []gatewayv1.HTTPRoute, namespaces []corev1.Namespace) (*routeModelInputs, error) {
+	return r.collectRouteModelInputsForSets(ctx, reader, gateway, routes, namespaces, nil)
+}
+
+func (r *Reconciler) collectRouteModelInputsForSets(ctx context.Context, reader client.Reader, gateway *gatewayv1.Gateway, routes []gatewayv1.HTTPRoute, namespaces []corev1.Namespace, sets map[types.NamespacedName][]gatewayv1.Listener) (*routeModelInputs, error) {
 	input, err := graph.CollectBackendInputsWithNamespaces(ctx, reader, gateway, routes, namespaces)
 	if err != nil {
 		return nil, err
 	}
+	input.ListenerSetSections = sets
 	input.RequestHeaderModifier = r.Config.RequestHeaderModifier
 	input.ResponseHeaderModifier = r.Config.ResponseHeaderModifier
 	input.BackendH2C = r.Config.BackendH2C

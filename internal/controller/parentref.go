@@ -16,7 +16,26 @@ limitations under the License.
 
 package controller
 
-import gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+import (
+	"fmt"
+
+	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+)
+
+// ListenerSetServed checks discovery before registering a ListenerSet informer.
+func ListenerSetServed(mapper meta.RESTMapper) (bool, error) {
+	kind := schema.GroupKind{Group: gatewayv1.GroupName, Kind: "ListenerSet"}
+	_, err := mapper.RESTMapping(kind, gatewayv1.GroupVersion.Version)
+	if meta.IsNoMatchError(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("discover ListenerSet v1: %w", err)
+	}
+	return true, nil
+}
 
 // IsGatewayParentRef reports whether a ParentReference targets a Gateway.
 func IsGatewayParentRef(parent gatewayv1.ParentReference) bool {

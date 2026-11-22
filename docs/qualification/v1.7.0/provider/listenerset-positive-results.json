@@ -1,0 +1,551 @@
+{
+  "schemaVersion": 1,
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "statusEvidence": [
+    {
+      "channel": "standard",
+      "mode": "Kubernetes 1.36.2 envtest with recording OpenStack provider",
+      "controllerRevision": "afcc7cdc9074119984058aa03949684ad4abca25",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "registeredCases": {
+        "ListenerSetDefaultNotAllowed": "PASS",
+        "ListenerSetAllowedNamespaceNone": "PASS",
+        "ListenerSetAllowedNamespaceSame": "PASS",
+        "ListenerSetAllowedNamespaceSelector": "PASS",
+        "ListenerSetHostnameConflict": "PASS",
+        "ListenerSetProtocolConflict": "PASS",
+        "ListenerSetAllowedRoutesSupportedKinds": "PASS"
+      },
+      "listenerSetParentLifecycleAndRouteNamespaceLabelTransitions": "PASS",
+      "logSHA256": "5e32008836ec28436e42065217464484e34f8cef0d67ca068dec733b380d4250"
+    },
+    {
+      "channel": "experimental",
+      "mode": "Kubernetes 1.36.2 envtest with recording OpenStack provider",
+      "controllerRevision": "afcc7cdc9074119984058aa03949684ad4abca25",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "registeredCases": {
+        "ListenerSetDefaultNotAllowed": "PASS",
+        "ListenerSetAllowedNamespaceNone": "PASS",
+        "ListenerSetAllowedNamespaceSame": "PASS",
+        "ListenerSetAllowedNamespaceSelector": "PASS",
+        "ListenerSetHostnameConflict": "PASS",
+        "ListenerSetProtocolConflict": "PASS",
+        "ListenerSetAllowedRoutesSupportedKinds": "PASS"
+      },
+      "listenerSetParentLifecycleAndRouteNamespaceLabelTransitions": "PASS",
+      "logSHA256": "bd4237b21031e1ec57788a055859e107a64eaa15d01baaaeba674c0368fb1d4b"
+    }
+  ],
+  "coldKindEvidence": [
+    {
+      "mode": "cold Kind with upstream Pods and local Octavia REST, Amphora and HAProxy",
+      "channel": "standard",
+      "controllerRevision": "3d3041363d4394bd6a9b8e6115665d327c8271e7",
+      "managerSHA256": "9a5eccbd89483537fc2a7e4bf1a04a0aa17c35238836d1f5acbf8519f3730a4f",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "baseSHA256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+      "nodeManifestDigest": "sha256:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67",
+      "echoOCIDigests": {
+        "ociIndexDigest": "sha256:abd48b88affd1c16e8d60d06cdc661919a8980bba8fc9068f3d216d814268adb",
+        "platformManifestDigest": "sha256:fed223b186fbd83d50a4578d168c9e7d89341d8c1af616ebe0f62d53ab7451dc"
+      },
+      "octavia": {
+        "version": "19.0.1.dev12",
+        "sha256": "f01d67e066226338c14deefe8e8e1ee6f7b48656993e3d9c03fe4ebc3c7e86c8",
+        "filesVerified": 633
+      },
+      "octaviaLib": {
+        "version": "3.12.1.dev5",
+        "sha256": "29d060668d9449f491d9ce192a026dcd57340fcb364a6e2edcd664f267971305",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1",
+        "sha256": "fa8468efa26f95ed83a36afeb97b79730de285450b7a8fae94f7cf5e6d2d0824"
+      },
+      "flags": [
+        "--octavia-fixed-http-responses",
+        "--octavia-http-header-exact",
+        "--octavia-https-listener-isolation",
+        "--octavia-backend-tls-policy",
+        "--openstack-resync-interval=10m"
+      ],
+      "kubernetesAPIRelayTCPNoDelay": true,
+      "runnerExit": 1,
+      "registeredCases": {
+        "ListenerSetAllowedNamespaceSame": {
+          "exit": 0,
+          "expected": 0,
+          "passed": true,
+          "subtestsPassed": 0,
+          "requestLogCount": 0,
+          "caseGoSHA256": "51e2934c1711ea470e6682c1e9f3bd7817ed3a4c8988f936d7fa6aceaeb28329",
+          "manifestSHA256": "ea58db91141d508b1648c84df719c5cbb332842d99f17a3caa7a717ae7f39b82",
+          "logSHA256": "a290c83aaa37f4d00b3a0bf9cfc36c7552a5bbccf284de8b12a3067f218a01cf",
+          "upstreamReportSHA256": "eb748b23f6bd28648f48388dfbcb92f898f143dca11089f13570ad33af7436cb",
+          "scope": "admission-status"
+        },
+        "ListenerSetAllowedNamespaceSelector": {
+          "exit": 0,
+          "expected": 0,
+          "passed": true,
+          "subtestsPassed": 0,
+          "requestLogCount": 0,
+          "caseGoSHA256": "3922fb70ac3f9f1a7d28e36ea101dbaaeb299438f47983b6e829c6efb9b794f6",
+          "manifestSHA256": "031c61a29d1d6ab8b92cee3de8f0832e466097cd43803c78536ecb5dfff699b1",
+          "logSHA256": "7d60198243c02aab1727af40eb3e1c1920166a8acc8b3e30010167332ecf4769",
+          "upstreamReportSHA256": "28fc7dd078a39c905052b9afa18047b1a8e0caf5c96b0b7723a8c58fa3e98b7b",
+          "scope": "admission-status"
+        },
+        "ListenerSetHTTPRouting": {
+          "exit": 1,
+          "expected": 36,
+          "passed": false,
+          "subtestsPassed": 23,
+          "requestLogCount": 4147,
+          "caseGoSHA256": "b9f8cc812a62f5b4d882cbd7bd92fc752a2bd426a946817d30e129537a502d2a",
+          "manifestSHA256": "f4b5a3cbfeffc737ba692a07a2ad20557a017cd26faeed2e5a56bab72885bcb8",
+          "logSHA256": "ad292091781108a9619ce884a80038cdb0d0bc7154c0f1a3d4a85809d24a3f18",
+          "upstreamReportSHA256": "f881527413ae753817a8707a18505ba476a64ab4e5911d5b6100faa96ddfebd3",
+          "scope": "http-traffic",
+          "timing": {
+            "applyToFirstRequestSeconds": 15.23,
+            "firstToLastRequestSeconds": 210.0,
+            "httpStatusMismatches": {
+              "200->404": 4078
+            },
+            "failedSubtestDurationsSeconds": [
+              30.0
+            ],
+            "failedSubtestIndexes": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              12,
+              21,
+              26,
+              34,
+              35
+            ]
+          },
+          "routeParentProgrammedAtSnapshot": {
+            "False/Pending": 6,
+            "True/Programmed": 2
+          },
+          "restResponses": {
+            "GET providers 200": 182,
+            "GET loadbalancers 200": 247,
+            "POST loadbalancers 201": 5,
+            "GET listeners 200": 119,
+            "GET pools 200": 115,
+            "POST listeners 201": 5,
+            "GET l7policies 200": 108,
+            "PUT listeners 200": 1,
+            "DELETE listeners 204": 2,
+            "DELETE loadbalancers 204": 2,
+            "POST pools 201": 6,
+            "GET members 200": 381,
+            "GET healthmonitors 200": 381,
+            "POST members 201": 10,
+            "POST healthmonitors 201": 6,
+            "POST l7policies 201": 14,
+            "GET rules 200": 427,
+            "POST rules 201": 28,
+            "PUT l7policies 200": 9
+          },
+          "nativeHAProxyReloadCount": 14
+        }
+      }
+    },
+    {
+      "mode": "cold Kind with upstream Pods and local Octavia REST, Amphora and HAProxy",
+      "channel": "experimental",
+      "controllerRevision": "3d3041363d4394bd6a9b8e6115665d327c8271e7",
+      "managerSHA256": "9a5eccbd89483537fc2a7e4bf1a04a0aa17c35238836d1f5acbf8519f3730a4f",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "baseSHA256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+      "nodeManifestDigest": "sha256:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67",
+      "echoOCIDigests": {
+        "ociIndexDigest": "sha256:abd48b88affd1c16e8d60d06cdc661919a8980bba8fc9068f3d216d814268adb",
+        "platformManifestDigest": "sha256:fed223b186fbd83d50a4578d168c9e7d89341d8c1af616ebe0f62d53ab7451dc"
+      },
+      "octavia": {
+        "version": "19.0.1.dev12",
+        "sha256": "f01d67e066226338c14deefe8e8e1ee6f7b48656993e3d9c03fe4ebc3c7e86c8",
+        "filesVerified": 633
+      },
+      "octaviaLib": {
+        "version": "3.12.1.dev5",
+        "sha256": "29d060668d9449f491d9ce192a026dcd57340fcb364a6e2edcd664f267971305",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1",
+        "sha256": "fa8468efa26f95ed83a36afeb97b79730de285450b7a8fae94f7cf5e6d2d0824"
+      },
+      "flags": [
+        "--octavia-fixed-http-responses",
+        "--octavia-http-header-exact",
+        "--octavia-https-listener-isolation",
+        "--octavia-backend-tls-policy",
+        "--openstack-resync-interval=10m"
+      ],
+      "kubernetesAPIRelayTCPNoDelay": true,
+      "runnerExit": 1,
+      "registeredCases": {
+        "ListenerSetAllowedNamespaceSame": {
+          "exit": 0,
+          "expected": 0,
+          "passed": true,
+          "subtestsPassed": 0,
+          "requestLogCount": 0,
+          "caseGoSHA256": "51e2934c1711ea470e6682c1e9f3bd7817ed3a4c8988f936d7fa6aceaeb28329",
+          "manifestSHA256": "ea58db91141d508b1648c84df719c5cbb332842d99f17a3caa7a717ae7f39b82",
+          "logSHA256": "f1ac1241e622f08d6f78f85b07c4e7ad788d2cdfabba831a15d28c8876219719",
+          "upstreamReportSHA256": "9ec76f236ad2bf49e1d4cb6c583b153f55b97bb8b01f32495e1abe2394672a58",
+          "scope": "admission-status"
+        },
+        "ListenerSetAllowedNamespaceSelector": {
+          "exit": 0,
+          "expected": 0,
+          "passed": true,
+          "subtestsPassed": 0,
+          "requestLogCount": 0,
+          "caseGoSHA256": "3922fb70ac3f9f1a7d28e36ea101dbaaeb299438f47983b6e829c6efb9b794f6",
+          "manifestSHA256": "031c61a29d1d6ab8b92cee3de8f0832e466097cd43803c78536ecb5dfff699b1",
+          "logSHA256": "ec5d1b6f2196a97c96046e885436dcf498e91ab1f89463ae6f891ba83ee03df6",
+          "upstreamReportSHA256": "8ca8a5b99f143eb9d92b2bb54dd00dc6645271b1a77cdcb8927a5a4bf7589b39",
+          "scope": "admission-status"
+        },
+        "ListenerSetHTTPRouting": {
+          "exit": 1,
+          "expected": 36,
+          "passed": false,
+          "subtestsPassed": 22,
+          "requestLogCount": 4208,
+          "caseGoSHA256": "b9f8cc812a62f5b4d882cbd7bd92fc752a2bd426a946817d30e129537a502d2a",
+          "manifestSHA256": "f4b5a3cbfeffc737ba692a07a2ad20557a017cd26faeed2e5a56bab72885bcb8",
+          "logSHA256": "eb474b2ae1edc383edaf9a8c1789b0c48d8ff14f80bc22ca0aa0a2a52646e4b4",
+          "upstreamReportSHA256": "caa3e19eee93b3e63569c320452e88c53178689f245414e6f01a7b8400304e9c",
+          "scope": "http-traffic",
+          "timing": {
+            "applyToFirstRequestSeconds": 13.92,
+            "firstToLastRequestSeconds": 210.01,
+            "httpStatusMismatches": {
+              "200->404": 4142
+            },
+            "failedSubtestDurationsSeconds": [
+              30.0
+            ],
+            "failedSubtestIndexes": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              12,
+              20,
+              21,
+              26,
+              34,
+              35
+            ]
+          },
+          "routeParentProgrammedAtSnapshot": {
+            "False/Pending": 8
+          },
+          "restResponses": {
+            "GET providers 200": 167,
+            "GET loadbalancers 200": 237,
+            "POST loadbalancers 201": 5,
+            "GET listeners 200": 114,
+            "GET pools 200": 110,
+            "POST listeners 201": 5,
+            "GET l7policies 200": 103,
+            "PUT listeners 200": 1,
+            "DELETE listeners 204": 2,
+            "DELETE loadbalancers 204": 2,
+            "POST pools 201": 6,
+            "GET members 200": 360,
+            "GET healthmonitors 200": 360,
+            "POST members 201": 10,
+            "POST healthmonitors 201": 6,
+            "POST l7policies 201": 14,
+            "GET rules 200": 385,
+            "POST rules 201": 28,
+            "PUT l7policies 200": 5
+          },
+          "nativeHAProxyReloadCount": 11
+        }
+      }
+    },
+    {
+      "mode": "cold Kind with upstream Pods and local Octavia REST, Amphora and HAProxy",
+      "channel": "standard",
+      "controllerRevision": "72441149db900992244a02e6664b353b70442b66",
+      "managerSHA256": "47b936644a8c79cc2eea798689339991b551bbba2fa4c0aca4b8838f8fc964c3",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "baseSHA256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+      "nodeManifestDigest": "sha256:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67",
+      "echoOCIDigests": {
+        "ociIndexDigest": "sha256:abd48b88affd1c16e8d60d06cdc661919a8980bba8fc9068f3d216d814268adb",
+        "platformManifestDigest": "sha256:fed223b186fbd83d50a4578d168c9e7d89341d8c1af616ebe0f62d53ab7451dc"
+      },
+      "octavia": {
+        "version": "19.0.1.dev12",
+        "sha256": "f01d67e066226338c14deefe8e8e1ee6f7b48656993e3d9c03fe4ebc3c7e86c8",
+        "filesVerified": 633
+      },
+      "octaviaLib": {
+        "version": "3.12.1.dev5",
+        "sha256": "29d060668d9449f491d9ce192a026dcd57340fcb364a6e2edcd664f267971305",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1",
+        "sha256": "fa8468efa26f95ed83a36afeb97b79730de285450b7a8fae94f7cf5e6d2d0824"
+      },
+      "flags": [
+        "--octavia-fixed-http-responses",
+        "--octavia-http-header-exact",
+        "--octavia-https-listener-isolation",
+        "--octavia-backend-tls-policy",
+        "--openstack-resync-interval=10m"
+      ],
+      "kubernetesAPIRelayTCPNoDelay": true,
+      "runnerExit": 1,
+      "registeredCases": {
+        "ListenerSetAllowedNamespaceSame": {
+          "exit": 0,
+          "expected": 0,
+          "passed": true,
+          "subtestsPassed": 0,
+          "requestLogCount": 0,
+          "caseGoSHA256": "51e2934c1711ea470e6682c1e9f3bd7817ed3a4c8988f936d7fa6aceaeb28329",
+          "manifestSHA256": "ea58db91141d508b1648c84df719c5cbb332842d99f17a3caa7a717ae7f39b82",
+          "logSHA256": "e7d6ad2540ddfebc95ce1bf9ecfb9ef52c2860c816db464d37552b07c49d77af",
+          "upstreamReportSHA256": "a45aa258617eabece4d8b0a2db891e4314d540c8a924ec0f7634fc1ef1ab0e66",
+          "scope": "admission-status"
+        },
+        "ListenerSetAllowedNamespaceSelector": {
+          "exit": 0,
+          "expected": 0,
+          "passed": true,
+          "subtestsPassed": 0,
+          "requestLogCount": 0,
+          "caseGoSHA256": "3922fb70ac3f9f1a7d28e36ea101dbaaeb299438f47983b6e829c6efb9b794f6",
+          "manifestSHA256": "031c61a29d1d6ab8b92cee3de8f0832e466097cd43803c78536ecb5dfff699b1",
+          "logSHA256": "da3eba35037e686d9ebf9edd62a0f38a8ea3478d279db141e14316ea670639cd",
+          "upstreamReportSHA256": "1f99e2d5abadd2bb30e1620da8e9246b876f0b8ea25b62bb380d5639420dc7f3",
+          "scope": "admission-status"
+        },
+        "ListenerSetHTTPRouting": {
+          "exit": 1,
+          "expected": 36,
+          "passed": false,
+          "subtestsPassed": 24,
+          "requestLogCount": 3807,
+          "caseGoSHA256": "b9f8cc812a62f5b4d882cbd7bd92fc752a2bd426a946817d30e129537a502d2a",
+          "manifestSHA256": "f4b5a3cbfeffc737ba692a07a2ad20557a017cd26faeed2e5a56bab72885bcb8",
+          "logSHA256": "117161c9019def8da32ee65fad2f6821f0230c94cd297935fb11b63a98b5b602",
+          "upstreamReportSHA256": "95a6e9f5d2e04fe0a3d898b70b705afcac21ead2f3a251bc55a65bbc34318fd1",
+          "scope": "http-traffic",
+          "timing": {
+            "applyToFirstRequestSeconds": 13.83,
+            "firstToLastRequestSeconds": 197.32,
+            "httpStatusMismatches": {
+              "200->404": 3735
+            },
+            "failedSubtestDurationsSeconds": [
+              30.0
+            ],
+            "failedSubtestIndexes": [
+              0,
+              3,
+              4,
+              5,
+              6,
+              7,
+              12,
+              20,
+              21,
+              26,
+              34,
+              35
+            ]
+          },
+          "routeParentProgrammedAtSnapshot": {
+            "False/Pending": 7,
+            "True/Programmed": 1
+          },
+          "restResponses": {
+            "GET providers 200": 172,
+            "GET loadbalancers 200": 245,
+            "POST loadbalancers 201": 5,
+            "GET listeners 200": 118,
+            "GET pools 200": 114,
+            "POST listeners 201": 5,
+            "GET l7policies 200": 107,
+            "PUT listeners 200": 1,
+            "DELETE listeners 204": 2,
+            "DELETE loadbalancers 204": 2,
+            "POST pools 201": 6,
+            "GET members 200": 378,
+            "GET healthmonitors 200": 378,
+            "POST members 201": 10,
+            "POST healthmonitors 201": 6,
+            "POST l7policies 201": 14,
+            "GET rules 200": 415,
+            "POST rules 201": 28,
+            "PUT l7policies 200": 8
+          },
+          "nativeHAProxyReloadCount": 14
+        }
+      }
+    },
+    {
+      "mode": "cold Kind with upstream Pods and local Octavia REST, Amphora and HAProxy",
+      "channel": "experimental",
+      "controllerRevision": "72441149db900992244a02e6664b353b70442b66",
+      "managerSHA256": "47b936644a8c79cc2eea798689339991b551bbba2fa4c0aca4b8838f8fc964c3",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "baseSHA256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+      "nodeManifestDigest": "sha256:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67",
+      "echoOCIDigests": {
+        "ociIndexDigest": "sha256:abd48b88affd1c16e8d60d06cdc661919a8980bba8fc9068f3d216d814268adb",
+        "platformManifestDigest": "sha256:fed223b186fbd83d50a4578d168c9e7d89341d8c1af616ebe0f62d53ab7451dc"
+      },
+      "octavia": {
+        "version": "19.0.1.dev12",
+        "sha256": "f01d67e066226338c14deefe8e8e1ee6f7b48656993e3d9c03fe4ebc3c7e86c8",
+        "filesVerified": 633
+      },
+      "octaviaLib": {
+        "version": "3.12.1.dev5",
+        "sha256": "29d060668d9449f491d9ce192a026dcd57340fcb364a6e2edcd664f267971305",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1",
+        "sha256": "fa8468efa26f95ed83a36afeb97b79730de285450b7a8fae94f7cf5e6d2d0824"
+      },
+      "flags": [
+        "--octavia-fixed-http-responses",
+        "--octavia-http-header-exact",
+        "--octavia-https-listener-isolation",
+        "--octavia-backend-tls-policy",
+        "--openstack-resync-interval=10m"
+      ],
+      "kubernetesAPIRelayTCPNoDelay": true,
+      "runnerExit": 1,
+      "registeredCases": {
+        "ListenerSetAllowedNamespaceSame": {
+          "exit": 0,
+          "expected": 0,
+          "passed": true,
+          "subtestsPassed": 0,
+          "requestLogCount": 0,
+          "caseGoSHA256": "51e2934c1711ea470e6682c1e9f3bd7817ed3a4c8988f936d7fa6aceaeb28329",
+          "manifestSHA256": "ea58db91141d508b1648c84df719c5cbb332842d99f17a3caa7a717ae7f39b82",
+          "logSHA256": "292eac0f3f1c4bc1ac84bcc649b2d919678f4ae5e29efd72aadd93cdd9589985",
+          "upstreamReportSHA256": "3818602911a3a3846f321fb5eb67ed9395eb4f41f0ce36b10806a9604119711a",
+          "scope": "admission-status"
+        },
+        "ListenerSetAllowedNamespaceSelector": {
+          "exit": 0,
+          "expected": 0,
+          "passed": true,
+          "subtestsPassed": 0,
+          "requestLogCount": 0,
+          "caseGoSHA256": "3922fb70ac3f9f1a7d28e36ea101dbaaeb299438f47983b6e829c6efb9b794f6",
+          "manifestSHA256": "031c61a29d1d6ab8b92cee3de8f0832e466097cd43803c78536ecb5dfff699b1",
+          "logSHA256": "96199c153939d1ba77a7f6946cc02e0eee018b9cd29d1ea981732176f2ba5a3a",
+          "upstreamReportSHA256": "d2436071860455fca540916f3490ba8861bb5b3bbd67e58e92210b6069a5d446",
+          "scope": "admission-status"
+        },
+        "ListenerSetHTTPRouting": {
+          "exit": 1,
+          "expected": 36,
+          "passed": false,
+          "subtestsPassed": 25,
+          "requestLogCount": 3707,
+          "caseGoSHA256": "b9f8cc812a62f5b4d882cbd7bd92fc752a2bd426a946817d30e129537a502d2a",
+          "manifestSHA256": "f4b5a3cbfeffc737ba692a07a2ad20557a017cd26faeed2e5a56bab72885bcb8",
+          "logSHA256": "f3d9e75e33c07b174f4f32787a3ce47a5d250933c8e65b3a182a4fc89ff09bd7",
+          "upstreamReportSHA256": "04501af93346a117eece502437692d63a5ea30f8583a9d13ba2b38e00245358a",
+          "scope": "http-traffic",
+          "timing": {
+            "applyToFirstRequestSeconds": 16.93,
+            "firstToLastRequestSeconds": 186.6,
+            "httpStatusMismatches": {
+              "200->404": 3632
+            },
+            "failedSubtestDurationsSeconds": [
+              30.0
+            ],
+            "failedSubtestIndexes": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              12,
+              34,
+              35
+            ]
+          },
+          "routeParentProgrammedAtSnapshot": {
+            "False/Pending": 6,
+            "True/Programmed": 2
+          },
+          "restResponses": {
+            "GET providers 200": 172,
+            "GET loadbalancers 200": 247,
+            "POST loadbalancers 201": 5,
+            "GET listeners 200": 119,
+            "GET pools 200": 115,
+            "POST listeners 201": 5,
+            "GET l7policies 200": 108,
+            "PUT listeners 200": 1,
+            "DELETE listeners 204": 2,
+            "DELETE loadbalancers 204": 2,
+            "POST pools 201": 6,
+            "GET members 200": 384,
+            "GET healthmonitors 200": 384,
+            "POST members 201": 10,
+            "POST healthmonitors 201": 6,
+            "POST l7policies 201": 14,
+            "GET rules 200": 431,
+            "POST rules 201": 28,
+            "PUT l7policies 200": 9
+          },
+          "nativeHAProxyReloadCount": 15
+        }
+      }
+    }
+  ],
+  "latestGraphReadOptimizationSource": "9e63cf97a8b9201f19ca241c96cf37b4810f1d77",
+  "latestPackageTests": {
+    "controllerRevision": "72441149db900992244a02e6664b353b70442b66",
+    "gateway": "PASS",
+    "listenerset": "PASS",
+    "httproute": "PASS"
+  },
+  "kindScopeLimit": "Isolated cluster and local provider fixture. Full profiles and live Hibiscus are outside these runs."
+}
