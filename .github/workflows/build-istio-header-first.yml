@@ -52,6 +52,7 @@ jobs:
       - name: Test Gateway API and waypoint routing
         working-directory: istio
         run: |
+          export REPO_ROOT="$PWD"
           go test -count=1 -v ./pilot/pkg/config/kube/gateway -run 'Test(WaypointConsumerHTTPRouteContract|ConvertResources|SortHTTPRoutes)$' | tee ../result/source-tests-gateway.log
           go test -count=1 -v ./pilot/pkg/networking/core ./pilot/pkg/serviceregistry/ambient ./pilot/pkg/xds -run 'Test(WaypointConsumerUsesPrimary|WaypointConsumerParentIdentity|HasActiveServiceWaypointCanary|WaypointServiceConsumerRoute)$' | tee ../result/source-tests-waypoint.log
       - name: Build pilot-discovery
