@@ -99,10 +99,10 @@ index 1922dd1..95afe97 100644
  func (r routeParentReference) IsMesh() bool {
 diff --git a/pilot/pkg/config/kube/gateway/mesh_consumer_route.go b/pilot/pkg/config/kube/gateway/mesh_consumer_route.go
 new file mode 100644
-index 0000000..ea74334
+index 0000000..ef554e7
 --- /dev/null
 +++ b/pilot/pkg/config/kube/gateway/mesh_consumer_route.go
-@@ -0,0 +1,258 @@
+@@ -0,0 +1,259 @@
 +// Copyright Istio Authors
 +//
 +// Licensed under the Apache License, Version 2.0 (the "License");
@@ -121,6 +121,7 @@ index 0000000..ea74334
 +
 +import (
 +	"fmt"
++	"net/textproto"
 +	"strconv"
 +	"strings"
 +
@@ -289,14 +290,14 @@ index 0000000..ea74334
 +	if len(headers) == 0 {
 +		return nil
 +	}
-+	seen := make(map[gatewayv1.HTTPHeaderName]struct{}, len(headers))
++	seen := make(map[string]struct{}, len(headers))
 +	result := make([]gatewayv1.HTTPHeaderMatch, 0, len(headers))
 +	for _, header := range headers {
-+		header.Name = gatewayv1.HTTPHeaderName(strings.ToLower(string(header.Name)))
-+		if _, found := seen[header.Name]; found {
++		name := textproto.CanonicalMIMEHeaderKey(string(header.Name))
++		if _, found := seen[name]; found {
 +			continue
 +		}
-+		seen[header.Name] = struct{}{}
++		seen[name] = struct{}{}
 +		result = append(result, header)
 +	}
 +	return result
@@ -363,10 +364,10 @@ index 0000000..ea74334
 +}
 diff --git a/pilot/pkg/config/kube/gateway/mesh_consumer_route_test.go b/pilot/pkg/config/kube/gateway/mesh_consumer_route_test.go
 new file mode 100644
-index 0000000..138b8c3
+index 0000000..125cf73
 --- /dev/null
 +++ b/pilot/pkg/config/kube/gateway/mesh_consumer_route_test.go
-@@ -0,0 +1,143 @@
+@@ -0,0 +1,146 @@
 +// Copyright Istio Authors
 +//
 +// Licensed under the Apache License, Version 2.0 (the "License");
@@ -440,7 +441,7 @@ index 0000000..138b8c3
 +				t.Fatal(err)
 +			}
 +			headers := duplicate.Match[0].Headers
-+			first := headers["x_request-id"]
++			first := headers["X_Request-ID"]
 +			if _, exact := first.GetMatchType().(*istio.StringMatch_Exact); !exact || first.GetExact() != "sample" || len(headers) != 1 {
 +				t.Fatalf("expected only the first exact match, got %v", headers)
 +			}
@@ -483,6 +484,9 @@ index 0000000..138b8c3
 +		}},
 +		{"invalid request header name", func(r *gatewayv1.HTTPRouteRule) {
 +			r.Matches[0].Headers[0].Name = "X Request"
++		}},
++		{"non-ASCII request header name", func(r *gatewayv1.HTTPRouteRule) {
++			r.Matches[0].Headers[0].Name = "X-K"
 +		}},
 +		{"invalid Set name", func(r *gatewayv1.HTTPRouteRule) {
 +			r.Filters[0].ResponseHeaderModifier.Set[0].Name = "X Result"
