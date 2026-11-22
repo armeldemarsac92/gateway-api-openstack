@@ -1,0 +1,1649 @@
+{
+  "barbicanVersion": "23.0.0",
+  "baseGatewayStatusesByStage": {
+    "combined": {
+      "all-namespaces": {
+        "addresses": [
+          {
+            "type": "IPAddress",
+            "value": "192.0.2.30"
+          }
+        ],
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-11-22T10:34:36Z",
+            "observedGeneration": 1,
+            "reason": "Accepted",
+            "status": "True",
+            "type": "Accepted"
+          },
+          {
+            "lastTransitionTime": "2026-11-22T10:34:44Z",
+            "observedGeneration": 1,
+            "reason": "Programmed",
+            "status": "True",
+            "type": "Programmed"
+          }
+        ],
+        "listeners": [
+          {
+            "attachedRoutes": 0,
+            "conditions": [
+              {
+                "lastTransitionTime": "2026-11-22T10:34:36Z",
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:36Z",
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True",
+                "type": "ResolvedRefs"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:36Z",
+                "observedGeneration": 1,
+                "reason": "NoConflicts",
+                "status": "False",
+                "type": "Conflicted"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:44Z",
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True",
+                "type": "Programmed"
+              }
+            ],
+            "name": "http",
+            "supportedKinds": [
+              {
+                "group": "gateway.networking.k8s.io",
+                "kind": "HTTPRoute"
+              }
+            ]
+          }
+        ]
+      },
+      "backend-namespaces": {
+        "addresses": [
+          {
+            "type": "IPAddress",
+            "value": "192.0.2.31"
+          }
+        ],
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-11-22T10:34:36Z",
+            "observedGeneration": 1,
+            "reason": "Accepted",
+            "status": "True",
+            "type": "Accepted"
+          },
+          {
+            "lastTransitionTime": "2026-11-22T10:34:44Z",
+            "observedGeneration": 1,
+            "reason": "Programmed",
+            "status": "True",
+            "type": "Programmed"
+          }
+        ],
+        "listeners": [
+          {
+            "attachedRoutes": 0,
+            "conditions": [
+              {
+                "lastTransitionTime": "2026-11-22T10:34:36Z",
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:36Z",
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True",
+                "type": "ResolvedRefs"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:36Z",
+                "observedGeneration": 1,
+                "reason": "NoConflicts",
+                "status": "False",
+                "type": "Conflicted"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:44Z",
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True",
+                "type": "Programmed"
+              }
+            ],
+            "name": "http",
+            "supportedKinds": [
+              {
+                "group": "gateway.networking.k8s.io",
+                "kind": "HTTPRoute"
+              }
+            ]
+          }
+        ]
+      },
+      "same-namespace": {
+        "addresses": [
+          {
+            "type": "IPAddress",
+            "value": "192.0.2.32"
+          }
+        ],
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-11-22T10:34:37Z",
+            "observedGeneration": 1,
+            "reason": "Accepted",
+            "status": "True",
+            "type": "Accepted"
+          },
+          {
+            "lastTransitionTime": "2026-11-22T10:34:45Z",
+            "observedGeneration": 1,
+            "reason": "Programmed",
+            "status": "True",
+            "type": "Programmed"
+          }
+        ],
+        "listeners": [
+          {
+            "attachedRoutes": 0,
+            "conditions": [
+              {
+                "lastTransitionTime": "2026-11-22T10:34:37Z",
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:37Z",
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True",
+                "type": "ResolvedRefs"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:37Z",
+                "observedGeneration": 1,
+                "reason": "NoConflicts",
+                "status": "False",
+                "type": "Conflicted"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:45Z",
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True",
+                "type": "Programmed"
+              }
+            ],
+            "name": "http",
+            "supportedKinds": [
+              {
+                "group": "gateway.networking.k8s.io",
+                "kind": "HTTPRoute"
+              }
+            ]
+          }
+        ]
+      },
+      "same-namespace-with-https-listener": {
+        "addresses": [
+          {
+            "type": "IPAddress",
+            "value": "192.0.2.33"
+          }
+        ],
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-11-22T10:34:39Z",
+            "observedGeneration": 1,
+            "reason": "Accepted",
+            "status": "True",
+            "type": "Accepted"
+          },
+          {
+            "lastTransitionTime": "2026-11-22T10:34:49Z",
+            "observedGeneration": 1,
+            "reason": "Programmed",
+            "status": "True",
+            "type": "Programmed"
+          }
+        ],
+        "listeners": [
+          {
+            "attachedRoutes": 0,
+            "conditions": [
+              {
+                "lastTransitionTime": "2026-11-22T10:34:39Z",
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:39Z",
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True",
+                "type": "ResolvedRefs"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:39Z",
+                "observedGeneration": 1,
+                "reason": "NoConflicts",
+                "status": "False",
+                "type": "Conflicted"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:49Z",
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True",
+                "type": "Programmed"
+              }
+            ],
+            "name": "https",
+            "supportedKinds": [
+              {
+                "group": "gateway.networking.k8s.io",
+                "kind": "HTTPRoute"
+              }
+            ]
+          },
+          {
+            "attachedRoutes": 0,
+            "conditions": [
+              {
+                "lastTransitionTime": "2026-11-22T10:34:39Z",
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:39Z",
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True",
+                "type": "ResolvedRefs"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:39Z",
+                "observedGeneration": 1,
+                "reason": "NoConflicts",
+                "status": "False",
+                "type": "Conflicted"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:49Z",
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True",
+                "type": "Programmed"
+              }
+            ],
+            "name": "https-with-hostname",
+            "supportedKinds": [
+              {
+                "group": "gateway.networking.k8s.io",
+                "kind": "HTTPRoute"
+              }
+            ]
+          },
+          {
+            "attachedRoutes": 0,
+            "conditions": [
+              {
+                "lastTransitionTime": "2026-11-22T10:34:39Z",
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:39Z",
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True",
+                "type": "ResolvedRefs"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:39Z",
+                "observedGeneration": 1,
+                "reason": "NoConflicts",
+                "status": "False",
+                "type": "Conflicted"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:49Z",
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True",
+                "type": "Programmed"
+              }
+            ],
+            "name": "https-with-wildcard-hostname",
+            "supportedKinds": [
+              {
+                "group": "gateway.networking.k8s.io",
+                "kind": "HTTPRoute"
+              }
+            ]
+          },
+          {
+            "attachedRoutes": 0,
+            "conditions": [
+              {
+                "lastTransitionTime": "2026-11-22T10:34:39Z",
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:39Z",
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True",
+                "type": "ResolvedRefs"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:39Z",
+                "observedGeneration": 1,
+                "reason": "NoConflicts",
+                "status": "False",
+                "type": "Conflicted"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:49Z",
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True",
+                "type": "Programmed"
+              }
+            ],
+            "name": "https-with-hostname-matching-wildcard",
+            "supportedKinds": [
+              {
+                "group": "gateway.networking.k8s.io",
+                "kind": "HTTPRoute"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "terminate-only": {
+      "all-namespaces": {
+        "addresses": [
+          {
+            "type": "IPAddress",
+            "value": "192.0.2.30"
+          }
+        ],
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-11-22T10:34:36Z",
+            "observedGeneration": 1,
+            "reason": "Accepted",
+            "status": "True",
+            "type": "Accepted"
+          },
+          {
+            "lastTransitionTime": "2026-11-22T10:34:44Z",
+            "observedGeneration": 1,
+            "reason": "Programmed",
+            "status": "True",
+            "type": "Programmed"
+          }
+        ],
+        "listeners": [
+          {
+            "attachedRoutes": 0,
+            "conditions": [
+              {
+                "lastTransitionTime": "2026-11-22T10:34:36Z",
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:36Z",
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True",
+                "type": "ResolvedRefs"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:36Z",
+                "observedGeneration": 1,
+                "reason": "NoConflicts",
+                "status": "False",
+                "type": "Conflicted"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:44Z",
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True",
+                "type": "Programmed"
+              }
+            ],
+            "name": "http",
+            "supportedKinds": [
+              {
+                "group": "gateway.networking.k8s.io",
+                "kind": "HTTPRoute"
+              }
+            ]
+          }
+        ]
+      },
+      "backend-namespaces": {
+        "addresses": [
+          {
+            "type": "IPAddress",
+            "value": "192.0.2.31"
+          }
+        ],
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-11-22T10:34:36Z",
+            "observedGeneration": 1,
+            "reason": "Accepted",
+            "status": "True",
+            "type": "Accepted"
+          },
+          {
+            "lastTransitionTime": "2026-11-22T10:34:44Z",
+            "observedGeneration": 1,
+            "reason": "Programmed",
+            "status": "True",
+            "type": "Programmed"
+          }
+        ],
+        "listeners": [
+          {
+            "attachedRoutes": 0,
+            "conditions": [
+              {
+                "lastTransitionTime": "2026-11-22T10:34:36Z",
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:36Z",
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True",
+                "type": "ResolvedRefs"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:36Z",
+                "observedGeneration": 1,
+                "reason": "NoConflicts",
+                "status": "False",
+                "type": "Conflicted"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:44Z",
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True",
+                "type": "Programmed"
+              }
+            ],
+            "name": "http",
+            "supportedKinds": [
+              {
+                "group": "gateway.networking.k8s.io",
+                "kind": "HTTPRoute"
+              }
+            ]
+          }
+        ]
+      },
+      "same-namespace": {
+        "addresses": [
+          {
+            "type": "IPAddress",
+            "value": "192.0.2.32"
+          }
+        ],
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-11-22T10:34:37Z",
+            "observedGeneration": 1,
+            "reason": "Accepted",
+            "status": "True",
+            "type": "Accepted"
+          },
+          {
+            "lastTransitionTime": "2026-11-22T10:34:45Z",
+            "observedGeneration": 1,
+            "reason": "Programmed",
+            "status": "True",
+            "type": "Programmed"
+          }
+        ],
+        "listeners": [
+          {
+            "attachedRoutes": 0,
+            "conditions": [
+              {
+                "lastTransitionTime": "2026-11-22T10:34:37Z",
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:37Z",
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True",
+                "type": "ResolvedRefs"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:37Z",
+                "observedGeneration": 1,
+                "reason": "NoConflicts",
+                "status": "False",
+                "type": "Conflicted"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:45Z",
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True",
+                "type": "Programmed"
+              }
+            ],
+            "name": "http",
+            "supportedKinds": [
+              {
+                "group": "gateway.networking.k8s.io",
+                "kind": "HTTPRoute"
+              }
+            ]
+          }
+        ]
+      },
+      "same-namespace-with-https-listener": {
+        "addresses": [
+          {
+            "type": "IPAddress",
+            "value": "192.0.2.33"
+          }
+        ],
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-11-22T10:34:39Z",
+            "observedGeneration": 1,
+            "reason": "Accepted",
+            "status": "True",
+            "type": "Accepted"
+          },
+          {
+            "lastTransitionTime": "2026-11-22T10:34:49Z",
+            "observedGeneration": 1,
+            "reason": "Programmed",
+            "status": "True",
+            "type": "Programmed"
+          }
+        ],
+        "listeners": [
+          {
+            "attachedRoutes": 0,
+            "conditions": [
+              {
+                "lastTransitionTime": "2026-11-22T10:34:39Z",
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:39Z",
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True",
+                "type": "ResolvedRefs"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:39Z",
+                "observedGeneration": 1,
+                "reason": "NoConflicts",
+                "status": "False",
+                "type": "Conflicted"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:49Z",
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True",
+                "type": "Programmed"
+              }
+            ],
+            "name": "https",
+            "supportedKinds": [
+              {
+                "group": "gateway.networking.k8s.io",
+                "kind": "HTTPRoute"
+              }
+            ]
+          },
+          {
+            "attachedRoutes": 0,
+            "conditions": [
+              {
+                "lastTransitionTime": "2026-11-22T10:34:39Z",
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:39Z",
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True",
+                "type": "ResolvedRefs"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:39Z",
+                "observedGeneration": 1,
+                "reason": "NoConflicts",
+                "status": "False",
+                "type": "Conflicted"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:49Z",
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True",
+                "type": "Programmed"
+              }
+            ],
+            "name": "https-with-hostname",
+            "supportedKinds": [
+              {
+                "group": "gateway.networking.k8s.io",
+                "kind": "HTTPRoute"
+              }
+            ]
+          },
+          {
+            "attachedRoutes": 0,
+            "conditions": [
+              {
+                "lastTransitionTime": "2026-11-22T10:34:39Z",
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:39Z",
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True",
+                "type": "ResolvedRefs"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:39Z",
+                "observedGeneration": 1,
+                "reason": "NoConflicts",
+                "status": "False",
+                "type": "Conflicted"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:49Z",
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True",
+                "type": "Programmed"
+              }
+            ],
+            "name": "https-with-wildcard-hostname",
+            "supportedKinds": [
+              {
+                "group": "gateway.networking.k8s.io",
+                "kind": "HTTPRoute"
+              }
+            ]
+          },
+          {
+            "attachedRoutes": 0,
+            "conditions": [
+              {
+                "lastTransitionTime": "2026-11-22T10:34:39Z",
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:39Z",
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True",
+                "type": "ResolvedRefs"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:39Z",
+                "observedGeneration": 1,
+                "reason": "NoConflicts",
+                "status": "False",
+                "type": "Conflicted"
+              },
+              {
+                "lastTransitionTime": "2026-11-22T10:34:49Z",
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True",
+                "type": "Programmed"
+              }
+            ],
+            "name": "https-with-hostname-matching-wildcard",
+            "supportedKinds": [
+              {
+                "group": "gateway.networking.k8s.io",
+                "kind": "HTTPRoute"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+  "cases": {
+    "HTTPRouteDisallowedKind": {
+      "events": [
+        "--- PASS: TestRegisteredRawTLSCase/HTTPRouteDisallowedKind (9.83s)",
+        "--- PASS: TestRegisteredRawTLSCase/HTTPRouteDisallowedKind/Route_should_not_have_been_accepted_with_reason_NotAllowedByListeners (0.04s)",
+        "--- PASS: TestRegisteredRawTLSCase/HTTPRouteDisallowedKind/Route_should_not_have_Parents_set_in_status (0.04s)",
+        "--- PASS: TestRegisteredRawTLSCase/HTTPRouteDisallowedKind/Gateway_should_have_0_Routes_attached (0.00s)"
+      ],
+      "exit": 0,
+      "log": "httproute-disallowed-kind.log",
+      "passed": true,
+      "report": "httproute-disallowed-kind-report.yaml",
+      "stage": "combined",
+      "status": {
+        "gateway": {
+          "addresses": [
+            {
+              "type": "IPAddress",
+              "value": "192.0.2.37"
+            }
+          ],
+          "conditions": [
+            {
+              "lastTransitionTime": "2026-11-22T10:36:51Z",
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True",
+              "type": "Accepted"
+            },
+            {
+              "lastTransitionTime": "2026-11-22T10:36:58Z",
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True",
+              "type": "Programmed"
+            }
+          ],
+          "listeners": [
+            {
+              "attachedRoutes": 0,
+              "conditions": [
+                {
+                  "lastTransitionTime": "2026-11-22T10:36:51Z",
+                  "observedGeneration": 1,
+                  "reason": "Accepted",
+                  "status": "True",
+                  "type": "Accepted"
+                },
+                {
+                  "lastTransitionTime": "2026-11-22T10:36:51Z",
+                  "observedGeneration": 1,
+                  "reason": "ResolvedRefs",
+                  "status": "True",
+                  "type": "ResolvedRefs"
+                },
+                {
+                  "lastTransitionTime": "2026-11-22T10:36:51Z",
+                  "observedGeneration": 1,
+                  "reason": "NoConflicts",
+                  "status": "False",
+                  "type": "Conflicted"
+                },
+                {
+                  "lastTransitionTime": "2026-11-22T10:36:58Z",
+                  "observedGeneration": 1,
+                  "reason": "Programmed",
+                  "status": "True",
+                  "type": "Programmed"
+                }
+              ],
+              "name": "tls",
+              "supportedKinds": [
+                {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "TLSRoute"
+                }
+              ]
+            }
+          ]
+        },
+        "route": {
+          "parents": [
+            {
+              "conditions": [
+                {
+                  "lastTransitionTime": "2026-11-22T10:36:49Z",
+                  "observedGeneration": 1,
+                  "reason": "NotAllowedByListeners",
+                  "status": "False",
+                  "type": "Accepted"
+                },
+                {
+                  "lastTransitionTime": "2026-11-22T10:36:49Z",
+                  "observedGeneration": 1,
+                  "reason": "ResolvedRefs",
+                  "status": "True",
+                  "type": "ResolvedRefs"
+                },
+                {
+                  "lastTransitionTime": "2026-11-22T10:36:49Z",
+                  "observedGeneration": 1,
+                  "reason": "Invalid",
+                  "status": "False",
+                  "type": "gateway-api-openstack.github.io/Programmed"
+                }
+              ],
+              "controllerName": "gateway-api-openstack.github.io/gateway-api-openstack",
+              "parentRef": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "tlsroutes-only",
+                "namespace": "gateway-conformance-infra"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "TLSRouteListenerMixedTerminationNotSupported": {
+      "events": [
+        "--- PASS: TestRegisteredRawTLSCase/TLSRouteListenerMixedTerminationNotSupported (0.97s)",
+        "--- PASS: TestRegisteredRawTLSCase/TLSRouteListenerMixedTerminationNotSupported/Listener_with_unsupported_mixed_Terminate/Passthrough_must_have_Accepted=False_with_Reason=ProtocolConflict (0.80s)"
+      ],
+      "exit": 0,
+      "log": "tlsroute-listener-mixed-termination-not-supported.log",
+      "passed": true,
+      "report": "tlsroute-listener-mixed-termination-not-supported-report.yaml",
+      "stage": "combined",
+      "status": {
+        "gateway": {
+          "conditions": [
+            {
+              "lastTransitionTime": "2026-11-22T10:36:06Z",
+              "observedGeneration": 1,
+              "reason": "ListenersNotValid",
+              "status": "False",
+              "type": "Accepted"
+            },
+            {
+              "lastTransitionTime": "2026-11-22T10:36:06Z",
+              "observedGeneration": 1,
+              "reason": "Invalid",
+              "status": "False",
+              "type": "Programmed"
+            }
+          ],
+          "listeners": [
+            {
+              "attachedRoutes": 0,
+              "conditions": [
+                {
+                  "lastTransitionTime": "2026-11-22T10:36:06Z",
+                  "observedGeneration": 1,
+                  "reason": "ProtocolConflict",
+                  "status": "False",
+                  "type": "Accepted"
+                },
+                {
+                  "lastTransitionTime": "2026-11-22T10:36:06Z",
+                  "observedGeneration": 1,
+                  "reason": "ResolvedRefs",
+                  "status": "True",
+                  "type": "ResolvedRefs"
+                },
+                {
+                  "lastTransitionTime": "2026-11-22T10:36:06Z",
+                  "observedGeneration": 1,
+                  "reason": "ProtocolConflict",
+                  "status": "True",
+                  "type": "Conflicted"
+                },
+                {
+                  "lastTransitionTime": "2026-11-22T10:36:06Z",
+                  "observedGeneration": 1,
+                  "reason": "Invalid",
+                  "status": "False",
+                  "type": "Programmed"
+                }
+              ],
+              "name": "tls-terminate"
+            },
+            {
+              "attachedRoutes": 0,
+              "conditions": [
+                {
+                  "lastTransitionTime": "2026-11-22T10:36:06Z",
+                  "observedGeneration": 1,
+                  "reason": "ProtocolConflict",
+                  "status": "False",
+                  "type": "Accepted"
+                },
+                {
+                  "lastTransitionTime": "2026-11-22T10:36:06Z",
+                  "observedGeneration": 1,
+                  "reason": "ResolvedRefs",
+                  "status": "True",
+                  "type": "ResolvedRefs"
+                },
+                {
+                  "lastTransitionTime": "2026-11-22T10:36:06Z",
+                  "observedGeneration": 1,
+                  "reason": "ProtocolConflict",
+                  "status": "True",
+                  "type": "Conflicted"
+                },
+                {
+                  "lastTransitionTime": "2026-11-22T10:36:06Z",
+                  "observedGeneration": 1,
+                  "reason": "Invalid",
+                  "status": "False",
+                  "type": "Programmed"
+                }
+              ],
+              "name": "tls-passthrough"
+            }
+          ]
+        }
+      }
+    },
+    "TLSRouteListenerTerminateSupportedKinds": {
+      "events": [
+        "--- PASS: TestRegisteredRawTLSCase/TLSRouteListenerTerminateSupportedKinds (3.53s)",
+        "--- PASS: TestRegisteredRawTLSCase/TLSRouteListenerTerminateSupportedKinds/Listener_with_mode_Terminate_must_have_TLSRoute_in_SupportedKinds (3.40s)"
+      ],
+      "exit": 0,
+      "log": "tlsroute-listener-terminate-supported-kinds.log",
+      "passed": true,
+      "report": "tlsroute-listener-terminate-supported-kinds-report.yaml",
+      "stage": "terminate-only",
+      "status": {
+        "gateway": {
+          "conditions": [
+            {
+              "lastTransitionTime": "2026-11-22T10:35:58Z",
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True",
+              "type": "Accepted"
+            },
+            {
+              "lastTransitionTime": "2026-11-22T10:35:58Z",
+              "observedGeneration": 1,
+              "reason": "NoResources",
+              "status": "False",
+              "type": "Programmed"
+            }
+          ],
+          "listeners": [
+            {
+              "attachedRoutes": 0,
+              "conditions": [
+                {
+                  "lastTransitionTime": "2026-11-22T10:35:58Z",
+                  "observedGeneration": 1,
+                  "reason": "Accepted",
+                  "status": "True",
+                  "type": "Accepted"
+                },
+                {
+                  "lastTransitionTime": "2026-11-22T10:35:58Z",
+                  "observedGeneration": 1,
+                  "reason": "ResolvedRefs",
+                  "status": "True",
+                  "type": "ResolvedRefs"
+                },
+                {
+                  "lastTransitionTime": "2026-11-22T10:35:58Z",
+                  "observedGeneration": 1,
+                  "reason": "NoConflicts",
+                  "status": "False",
+                  "type": "Conflicted"
+                },
+                {
+                  "lastTransitionTime": "2026-11-22T10:35:58Z",
+                  "observedGeneration": 1,
+                  "reason": "Pending",
+                  "status": "False",
+                  "type": "Programmed"
+                }
+              ],
+              "name": "tls-terminate",
+              "supportedKinds": [
+                {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "TLSRoute"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "TLSRouteSimpleSameNamespace": {
+      "events": [
+        "--- PASS: TestRegisteredRawTLSCase/TLSRouteSimpleSameNamespace (26.48s)",
+        "--- PASS: TestRegisteredRawTLSCase/TLSRouteSimpleSameNamespace/Simple_TLS_request_matching_TLSRoute_should_reach_infra-backend (0.01s)"
+      ],
+      "exit": 0,
+      "log": "tlsroute-simple-same-namespace.log",
+      "native": {
+        "l7Rules": [
+          {
+            "compare_type": "EQUAL_TO",
+            "type": "TLS_SNI",
+            "value": "abc.example.com"
+          }
+        ],
+        "listener": {
+          "alpn_protocols": null,
+          "defaultPoolPresent": false,
+          "enrolledSecretRevision": false,
+          "protocol": "TCP",
+          "protocol_port": 443,
+          "tcp_tls_termination": null
+        },
+        "policyActions": [
+          "REDIRECT_TO_POOL"
+        ],
+        "pools": [
+          {
+            "protocol": "TCP",
+            "tls_enabled": false
+          }
+        ],
+        "wire": {
+          "backend": {
+            "ingress": "",
+            "isTLS": true,
+            "namespace": "gateway-conformance-infra",
+            "pod": "tcp-backend-6fbfc875c7-hmks5",
+            "service": "",
+            "tcpport": "3000",
+            "tls": {
+              "cipherSuite": "TLS_AES_128_GCM_SHA256",
+              "curves": "X25519MLKEM768",
+              "serverName": "abc.example.com",
+              "version": "TLS 1.3"
+            },
+            "tlsport": "8443"
+          },
+          "frontendTLS": "TLSv1.3",
+          "greeting": "Gateway API Test TCP Server",
+          "isTLS": "true",
+          "negotiatedALPN": null,
+          "peerSHA256": "2d584f1dc7ff1073ada348547a7f9ce5d2bf22a425317ada572535b10be8efba",
+          "ping": "PONG"
+        },
+        "workerConfigSHA256": "312fb0730cb1570d632e0b15c6a05b2875770fad03d4fff9fd26f52572ba3a94",
+        "workerTransport": [
+          "bind 192.0.2.36:443",
+          "mode tcp",
+          "acl <fixture-id> req.ssl_sni -i -m str abc.example.com",
+          "mode tcp",
+          "server <fixture-id> 198.51.100.11:8443 weight 1",
+          "server <fixture-id> 198.51.100.12:8443 weight 1"
+        ]
+      },
+      "passed": true,
+      "report": "tlsroute-simple-same-namespace-report.yaml",
+      "stage": "combined",
+      "status": {
+        "gateway": {
+          "addresses": [
+            {
+              "type": "IPAddress",
+              "value": "192.0.2.36"
+            }
+          ],
+          "conditions": [
+            {
+              "lastTransitionTime": "2026-11-22T10:36:08Z",
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True",
+              "type": "Accepted"
+            },
+            {
+              "lastTransitionTime": "2026-11-22T10:36:33Z",
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True",
+              "type": "Programmed"
+            }
+          ],
+          "listeners": [
+            {
+              "attachedRoutes": 1,
+              "conditions": [
+                {
+                  "lastTransitionTime": "2026-11-22T10:36:08Z",
+                  "observedGeneration": 1,
+                  "reason": "Accepted",
+                  "status": "True",
+                  "type": "Accepted"
+                },
+                {
+                  "lastTransitionTime": "2026-11-22T10:36:08Z",
+                  "observedGeneration": 1,
+                  "reason": "ResolvedRefs",
+                  "status": "True",
+                  "type": "ResolvedRefs"
+                },
+                {
+                  "lastTransitionTime": "2026-11-22T10:36:08Z",
+                  "observedGeneration": 1,
+                  "reason": "NoConflicts",
+                  "status": "False",
+                  "type": "Conflicted"
+                },
+                {
+                  "lastTransitionTime": "2026-11-22T10:36:33Z",
+                  "observedGeneration": 1,
+                  "reason": "Programmed",
+                  "status": "True",
+                  "type": "Programmed"
+                }
+              ],
+              "name": "https",
+              "supportedKinds": [
+                {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "TLSRoute"
+                }
+              ]
+            }
+          ]
+        },
+        "route": {
+          "parents": [
+            {
+              "conditions": [
+                {
+                  "lastTransitionTime": "2026-11-22T10:36:08Z",
+                  "observedGeneration": 1,
+                  "reason": "Accepted",
+                  "status": "True",
+                  "type": "Accepted"
+                },
+                {
+                  "lastTransitionTime": "2026-11-22T10:36:08Z",
+                  "observedGeneration": 1,
+                  "reason": "ResolvedRefs",
+                  "status": "True",
+                  "type": "ResolvedRefs"
+                },
+                {
+                  "lastTransitionTime": "2026-11-22T10:36:32Z",
+                  "observedGeneration": 1,
+                  "reason": "Programmed",
+                  "status": "True",
+                  "type": "gateway-api-openstack.github.io/Programmed"
+                },
+                {
+                  "lastTransitionTime": "2026-11-22T10:36:32Z",
+                  "observedGeneration": 1,
+                  "reason": "Observed",
+                  "status": "True",
+                  "type": "gateway-api-openstack.github.io/ForwardingTarget"
+                }
+              ],
+              "controllerName": "gateway-api-openstack.github.io/gateway-api-openstack",
+              "parentRef": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "gateway-tlsroute",
+                "namespace": "gateway-conformance-infra"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "TLSRouteTerminateSimpleSameNamespace": {
+      "events": [
+        "--- PASS: TestRegisteredRawTLSCase/TLSRouteTerminateSimpleSameNamespace (44.65s)",
+        "--- PASS: TestRegisteredRawTLSCase/TLSRouteTerminateSimpleSameNamespace/Simple_TLS_request_matching_terminated_TLSRoute_should_reach_tcp-backend_with_plain_text (0.01s)"
+      ],
+      "exit": 0,
+      "log": "tlsroute-terminate-simple-same-namespace.log",
+      "native": {
+        "l7Rules": [
+          {
+            "compare_type": "EQUAL_TO",
+            "type": "TLS_SNI",
+            "value": "tls.example.com"
+          }
+        ],
+        "listener": {
+          "alpn_protocols": null,
+          "defaultPoolPresent": false,
+          "enrolledSecretRevision": true,
+          "protocol": "TCP",
+          "protocol_port": 8443,
+          "tcp_tls_termination": true
+        },
+        "policyActions": [
+          "REDIRECT_TO_POOL"
+        ],
+        "pools": [
+          {
+            "protocol": "TCP",
+            "tls_enabled": false
+          }
+        ],
+        "wire": {
+          "backend": {
+            "ingress": "",
+            "isTLS": false,
+            "namespace": "gateway-conformance-infra",
+            "pod": "tcp-backend-6fbfc875c7-hmks5",
+            "service": "",
+            "tcpport": "3000",
+            "tlsport": "8443"
+          },
+          "frontendTLS": "TLSv1.3",
+          "greeting": "Gateway API Test TCP Server",
+          "isTLS": "false",
+          "negotiatedALPN": null,
+          "peerSHA256": "635e1ba183eebfd77721b82b996475628276ee6d3f6930b495f7d12881c6793d",
+          "ping": "PONG"
+        },
+        "workerConfigSHA256": "c7c5c0c59ff235f4b7c07ef31ac4a787e3ed0338a9501aa048e92e03d204c151",
+        "workerTransport": [
+          "bind 192.0.2.34:8443 ssl",
+          "mode tcp",
+          "acl <fixture-id> ssl_fc_sni -i -m str tls.example.com",
+          "mode tcp",
+          "server <fixture-id> 198.51.100.11:3000 weight 1",
+          "server <fixture-id> 198.51.100.12:3000 weight 1"
+        ]
+      },
+      "passed": true,
+      "report": "tlsroute-terminate-simple-same-namespace-report.yaml",
+      "stage": "terminate-only",
+      "status": {
+        "gateway": {
+          "addresses": [
+            {
+              "type": "IPAddress",
+              "value": "192.0.2.34"
+            }
+          ],
+          "conditions": [
+            {
+              "lastTransitionTime": "2026-11-22T10:34:53Z",
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True",
+              "type": "Accepted"
+            },
+            {
+              "lastTransitionTime": "2026-11-22T10:35:35Z",
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True",
+              "type": "Programmed"
+            }
+          ],
+          "listeners": [
+            {
+              "attachedRoutes": 1,
+              "conditions": [
+                {
+                  "lastTransitionTime": "2026-11-22T10:34:53Z",
+                  "observedGeneration": 1,
+                  "reason": "Accepted",
+                  "status": "True",
+                  "type": "Accepted"
+                },
+                {
+                  "lastTransitionTime": "2026-11-22T10:34:53Z",
+                  "observedGeneration": 1,
+                  "reason": "ResolvedRefs",
+                  "status": "True",
+                  "type": "ResolvedRefs"
+                },
+                {
+                  "lastTransitionTime": "2026-11-22T10:34:53Z",
+                  "observedGeneration": 1,
+                  "reason": "NoConflicts",
+                  "status": "False",
+                  "type": "Conflicted"
+                },
+                {
+                  "lastTransitionTime": "2026-11-22T10:35:35Z",
+                  "observedGeneration": 1,
+                  "reason": "Programmed",
+                  "status": "True",
+                  "type": "Programmed"
+                }
+              ],
+              "name": "tlsterminate",
+              "supportedKinds": [
+                {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "TLSRoute"
+                }
+              ]
+            }
+          ]
+        },
+        "route": {
+          "parents": [
+            {
+              "conditions": [
+                {
+                  "lastTransitionTime": "2026-11-22T10:34:53Z",
+                  "observedGeneration": 1,
+                  "reason": "Accepted",
+                  "status": "True",
+                  "type": "Accepted"
+                },
+                {
+                  "lastTransitionTime": "2026-11-22T10:34:53Z",
+                  "observedGeneration": 1,
+                  "reason": "ResolvedRefs",
+                  "status": "True",
+                  "type": "ResolvedRefs"
+                },
+                {
+                  "lastTransitionTime": "2026-11-22T10:35:35Z",
+                  "observedGeneration": 1,
+                  "reason": "Programmed",
+                  "status": "True",
+                  "type": "gateway-api-openstack.github.io/Programmed"
+                },
+                {
+                  "lastTransitionTime": "2026-11-22T10:35:35Z",
+                  "observedGeneration": 1,
+                  "reason": "Observed",
+                  "status": "True",
+                  "type": "gateway-api-openstack.github.io/ForwardingTarget"
+                }
+              ],
+              "controllerName": "gateway-api-openstack.github.io/gateway-api-openstack",
+              "parentRef": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "gateway-tlsroute-terminate",
+                "namespace": "gateway-conformance-infra"
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "channel": "experimental",
+  "controllerRevision": "591810b7fee341f42162be792bd8c61c2d176b37",
+  "gatewayApiRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "gatewayClassStatusByStage": {
+    "combined": {
+      "conditions": [
+        {
+          "lastTransitionTime": "2026-11-22T10:34:33Z",
+          "observedGeneration": 1,
+          "reason": "Accepted",
+          "status": "True",
+          "type": "Accepted"
+        },
+        {
+          "lastTransitionTime": "2026-11-22T10:34:33Z",
+          "observedGeneration": 1,
+          "reason": "SupportedVersion",
+          "status": "True",
+          "type": "SupportedVersion"
+        }
+      ]
+    },
+    "terminate-only": {
+      "conditions": [
+        {
+          "lastTransitionTime": "2026-11-22T10:34:33Z",
+          "observedGeneration": 1,
+          "reason": "Accepted",
+          "status": "True",
+          "type": "Accepted"
+        },
+        {
+          "lastTransitionTime": "2026-11-22T10:34:33Z",
+          "observedGeneration": 1,
+          "reason": "SupportedVersion",
+          "status": "True",
+          "type": "SupportedVersion"
+        }
+      ]
+    }
+  },
+  "haproxy": {
+    "sha256": "fa8468efa26f95ed83a36afeb97b79730de285450b7a8fae94f7cf5e6d2d0824",
+    "version": "3.0.19"
+  },
+  "managerSHA256": "bbe080fc59110b4e9903aec6248b338e40ac82d9d43194f89054a60df99fd107",
+  "octavia": {
+    "filesVerified": 634,
+    "revision": "68e37fe731847c13140747490b818e5bc6af6fd4",
+    "sha256": "586626fc62a1ad5235aa7b84e4d648b6ad6a40de824a3036423eaa989364ec57",
+    "version": "19.0.1.dev13"
+  },
+  "octaviaLib": {
+    "filesVerified": 24,
+    "revision": "dcdf7b4650c1c5b6da345b11c50e1688813e0bf1",
+    "sha256": "4f921bf5be0ef0c68864f50409f5f8459f4655856ebd0cb1868f2b31d50f740e",
+    "version": "3.12.1.dev6"
+  },
+  "passed": true,
+  "regionalCapabilities": {
+    "before": [
+      "fixed_http_responses_v1",
+      "weighted_http_targets_v1",
+      "backend_tls_hostname_v1",
+      "https_listener_isolation_v1"
+    ],
+    "combined": [
+      "fixed_http_responses_v1",
+      "weighted_http_targets_v1",
+      "backend_tls_hostname_v1",
+      "tcp_tls_termination_v1",
+      "tls_sni_passthrough_v1",
+      "https_listener_isolation_v1"
+    ],
+    "terminationOnly": [
+      "fixed_http_responses_v1",
+      "weighted_http_targets_v1",
+      "backend_tls_hostname_v1",
+      "tcp_tls_termination_v1",
+      "https_listener_isolation_v1"
+    ]
+  },
+  "relatedHTTPRouteCasePassed": true,
+  "rest": {
+    "DELETE l7policies 204": 2,
+    "DELETE listeners 204": 3,
+    "DELETE loadbalancers 204": 4,
+    "DELETE members 204": 4,
+    "DELETE pools 204": 2,
+    "DELETE rules 204": 2,
+    "GET l7policies 200": 163,
+    "GET listeners 200": 184,
+    "GET loadbalancers 200": 380,
+    "GET members 200": 27,
+    "GET pools 200": 174,
+    "GET providers 200": 219,
+    "GET rules 200": 17,
+    "POST l7policies 201": 2,
+    "POST listeners 201": 7,
+    "POST loadbalancers 201": 8,
+    "POST members 201": 4,
+    "POST pools 201": 2,
+    "POST rules 201": 2,
+    "PUT l7policies 200": 4,
+    "PUT listeners 200": 5
+  },
+  "runtime": {
+    "nodeImage": "docker.io/kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed",
+    "ociArchiveSHA256": "b7675809fd2cc0b9fb9273f1b0c85c422bc3c12361d66b99b83173ddb2d3c9b7",
+    "ociIndexDigest": "sha256:abd48b88affd1c16e8d60d06cdc661919a8980bba8fc9068f3d216d814268adb",
+    "platformManifestDigest": "sha256:fed223b186fbd83d50a4578d168c9e7d89341d8c1af616ebe0f62d53ab7451dc",
+    "pods": [
+      {
+        "imageID": "docker.io/library/import-2026-11-22@sha256:abd48b88affd1c16e8d60d06cdc661919a8980bba8fc9068f3d216d814268adb",
+        "ip": "198.51.100.5",
+        "name": "infra-backend-v1-667754889f-5pcfd",
+        "namespace": "gateway-conformance-infra",
+        "ready": true
+      },
+      {
+        "imageID": "docker.io/library/import-2026-11-22@sha256:abd48b88affd1c16e8d60d06cdc661919a8980bba8fc9068f3d216d814268adb",
+        "ip": "198.51.100.6",
+        "name": "infra-backend-v1-667754889f-5vkjc",
+        "namespace": "gateway-conformance-infra",
+        "ready": true
+      },
+      {
+        "imageID": "docker.io/library/import-2026-11-22@sha256:abd48b88affd1c16e8d60d06cdc661919a8980bba8fc9068f3d216d814268adb",
+        "ip": "198.51.100.11",
+        "name": "tcp-backend-6fbfc875c7-7n5l5",
+        "namespace": "gateway-conformance-infra",
+        "ready": true
+      },
+      {
+        "imageID": "docker.io/library/import-2026-11-22@sha256:abd48b88affd1c16e8d60d06cdc661919a8980bba8fc9068f3d216d814268adb",
+        "ip": "198.51.100.12",
+        "name": "tcp-backend-6fbfc875c7-hmks5",
+        "namespace": "gateway-conformance-infra",
+        "ready": true
+      },
+      {
+        "imageID": "docker.io/library/import-2026-11-22@sha256:abd48b88affd1c16e8d60d06cdc661919a8980bba8fc9068f3d216d814268adb",
+        "ip": "198.51.100.8",
+        "name": "app-backend-v1-55585fff9c-tw9xr",
+        "namespace": "gateway-conformance-app-backend",
+        "ready": true
+      },
+      {
+        "imageID": "docker.io/library/import-2026-11-22@sha256:abd48b88affd1c16e8d60d06cdc661919a8980bba8fc9068f3d216d814268adb",
+        "ip": "198.51.100.7",
+        "name": "app-backend-v1-55585fff9c-vhkjf",
+        "namespace": "gateway-conformance-app-backend",
+        "ready": true
+      },
+      {
+        "imageID": "docker.io/library/import-2026-11-22@sha256:abd48b88affd1c16e8d60d06cdc661919a8980bba8fc9068f3d216d814268adb",
+        "ip": "198.51.100.9",
+        "name": "web-backend-664c584979-cc2qt",
+        "namespace": "gateway-conformance-web-backend",
+        "ready": true
+      },
+      {
+        "imageID": "docker.io/library/import-2026-11-22@sha256:abd48b88affd1c16e8d60d06cdc661919a8980bba8fc9068f3d216d814268adb",
+        "ip": "198.51.100.10",
+        "name": "web-backend-664c584979-z9sln",
+        "namespace": "gateway-conformance-web-backend",
+        "ready": true
+      }
+    ],
+    "tcpEndpointSlices": [
+      {
+        "endpoints": [
+          {
+            "addresses": [
+              "198.51.100.12"
+            ],
+            "pod": "tcp-backend-6fbfc875c7-hmks5",
+            "ready": true
+          },
+          {
+            "addresses": [
+              "198.51.100.11"
+            ],
+            "pod": "tcp-backend-6fbfc875c7-7n5l5",
+            "ready": true
+          }
+        ],
+        "ports": [
+          3000,
+          8443
+        ]
+      }
+    ],
+    "tcpServicePorts": [
+      {
+        "name": "echo-tcp-plain",
+        "port": 3000,
+        "protocol": "TCP",
+        "targetPort": 3000
+      },
+      {
+        "name": "echo-tcp-tls",
+        "port": 8443,
+        "protocol": "TCP",
+        "targetPort": 8443
+      }
+    ]
+  },
+  "secretEnrollment": {
+    "tls-terminate-checks-certificate": {
+      "fingerprints": [
+        "635e1ba183eebfd77721b82b996475628276ee6d3f6930b495f7d12881c6793d"
+      ],
+      "providerPayloadVerified": true,
+      "revisionMatched": true
+    },
+    "tls-validity-checks-certificate": {
+      "fingerprints": [
+        "ec1d3335afe306fea4cc1300d38dc14ada58bfb210454f18312ee5eef45cf265"
+      ],
+      "providerPayloadVerified": true,
+      "revisionMatched": true
+    }
+  }
+}
