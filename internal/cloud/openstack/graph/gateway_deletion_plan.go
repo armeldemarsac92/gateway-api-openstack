@@ -409,13 +409,16 @@ func (p *Provider) httpGatewayDeletionPlan(routes []observedRouteGraph, listener
 				return gatewayDeletionPlan{}, p.progressingOutcome(issue)
 			}
 			for _, policy := range part.policies {
-				if policy.redirect {
+				if policy.redirect || policy.initialRules {
 					step := gatewayDeletionStep{resource: gatewayDisableL7Policy, resourceID: policy.policy.ID}
 					if policy.policy.ProvisioningStatus == "ERROR" {
 						retries = append(retries, step)
-					} else if policy.policy.AdminStateUp {
+					} else if policy.policy.AdminStateUp || policy.initialRuleClosureUnproven() {
 						disables = append(disables, step)
 					}
+				}
+				if policy.initialRulesPartial && !policy.initialRuleClosureUnproven() {
+					return gatewayDeletionPlan{}, p.progressingOutcome(initialL7RulesReadbackMessage)
 				}
 				for _, rule := range policy.rules {
 					deletion.routes = append(deletion.routes, gatewayDeletionStep{

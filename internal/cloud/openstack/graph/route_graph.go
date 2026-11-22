@@ -52,6 +52,8 @@ type observedRoutePolicy struct {
 	urlRewriteReported       bool
 	urlRewriteTagged         bool
 	adminObserved            bool
+	initialRules             bool
+	initialRulesPartial      bool
 	fixedResponse            bool
 	targetObserved           bool
 	weightedTargets          []octavia.WeightedHTTPTarget
@@ -210,7 +212,7 @@ func hasOtherCleanupProtocol(owners []routeGraphOwner, protocol string) bool {
 
 func (policy observedRoutePolicy) pending() bool {
 	unsettled := func(status string) bool {
-		if policy.versioned {
+		if policy.versioned || policy.initialRules {
 			return status != "ACTIVE" && status != "ERROR"
 		}
 		return strings.HasPrefix(status, "PENDING_")
@@ -469,6 +471,9 @@ func (p *Provider) observeListenerPolicies(ctx context.Context, inventory *route
 	}) {
 		strict = true
 	}
+	strictInventory := strict || slices.ContainsFunc(items, func(item octavia.L7PolicyObservation) bool {
+		return slices.Contains(item.Policy.Tags, initialL7RulesTag)
+	})
 	refs := make([]octavia.L7PolicyObservation, 0, len(listener.L7Policies))
 	if listener.L7Policies == nil {
 		refs = nil
@@ -476,7 +481,7 @@ func (p *Provider) observeListenerPolicies(ctx context.Context, inventory *route
 	for _, ref := range listener.L7Policies {
 		refs = append(refs, octavia.L7PolicyObservation{Policy: l7policies.L7Policy{ID: ref.ID}})
 	}
-	if strict {
+	if strictInventory {
 		if err := crossCheckCompleteChildInventory("listener", listener.ID, "L7 policy", refs, items, policyID); err != nil {
 			return err
 		}
@@ -486,7 +491,7 @@ func (p *Provider) observeListenerPolicies(ctx context.Context, inventory *route
 		}
 	}
 	if !complete && (p.fixedHTTPResponses || protocol == cloud.ListenerProtocolHTTP &&
-		(p.httpRequestRedirect || p.httpRequestURLRewrite || strict || !listener.AdminStateUp)) {
+		(p.httpRequestRedirect || p.httpRequestURLRewrite || strictInventory || !listener.AdminStateUp)) {
 		return cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady, errors.New("waiting for complete Octavia HTTP policy inventory"))
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -506,7 +511,8 @@ func (p *Provider) observeListenerPolicies(ctx context.Context, inventory *route
 		if owner.cleanupProtocol != "" && owner.cleanupProtocol != protocol {
 			return &cloud.GraphError{Identity: owner.identity.Value(), Err: fmt.Errorf("%w: L7 policy %s belongs to a different listener protocol", cloud.ErrOwnershipConflict, item.ID)}
 		}
-		strictPolicy := strict || role.backend != "" || p.fixedHTTPResponses
+		initialRules := slices.Contains(item.Tags, initialL7RulesTag)
+		strictPolicy := strict || initialRules || role.backend != "" || p.fixedHTTPResponses
 		fixedResponse := item.Action == string(octavia.ActionFixedResponse)
 		weighted := item.Action == string(octavia.ActionWeightedTargets)
 		requestRedirect := item.Action == string(octavia.ActionRedirectRequest) || observation.RedirectRequestPresent
@@ -531,24 +537,26 @@ func (p *Provider) observeListenerPolicies(ctx context.Context, inventory *route
 				observation.ExtendedTargetFields || fixedResponse || weighted || requestRedirect && string(observation.PoolReference) != "null" {
 				return &cloud.GraphError{Identity: owner.identity.Value(), Err: fmt.Errorf("%w: HTTP redirect policy %s has an incompatible listener or action", cloud.ErrOwnershipConflict, item.ID)}
 			}
-			if observation.AdminState == nil || len(observation.PoolReference) == 0 || item.Action == "" ||
+			if !initialRules && observation.AdminState == nil || len(observation.PoolReference) == 0 || item.Action == "" ||
 				(item.Action == string(l7policies.ActionRedirectPrefix) && (item.RedirectPrefix == "" || item.RedirectHttpCode == 0)) {
 				return &cloud.GraphError{Identity: owner.identity.Value(), Err: cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady,
 					fmt.Errorf("HTTP redirect policy %s has incomplete action or administrative state", item.ID))}
 			}
 		case role.weighted || weighted:
-			if !p.weightedHTTPTargets && !hasBackendFilters || !role.weighted || !weighted || target == nil || target.FixedResponse != nil || target.AdminStateUp == nil ||
+			if !p.weightedHTTPTargets && !hasBackendFilters || !role.weighted || !weighted || target == nil || target.FixedResponse != nil || !initialRules && target.AdminStateUp == nil ||
 				string(target.RedirectPool) != "null" || item.RedirectPoolID != "" || item.RedirectURL != "" || item.RedirectPrefix != "" || item.RedirectHttpCode != 0 ||
 				!ownedWeightedHTTPPolicyTargets(target.WeightedTargets, poolOwners, routeIndex) {
 				return &cloud.GraphError{Identity: owner.identity.Value(), Err: fmt.Errorf("%w: L7 policy %s has an unproven weighted HTTP target", cloud.ErrOwnershipConflict, item.ID)}
 			}
 		case fixedResponse:
-			if !p.fixedHTTPResponses || role.backend == "" || target == nil || !target.IsFixedServerError() || len(target.WeightedTargets) != 0 ||
+			if !p.fixedHTTPResponses || role.backend == "" || target == nil || !target.IsFixedServerError() ||
+				!initialRules && target.AdminStateUp == nil || len(target.WeightedTargets) != 0 ||
 				item.RedirectPoolID != "" || item.RedirectURL != "" || item.RedirectPrefix != "" || item.RedirectHttpCode != 0 {
 				return &cloud.GraphError{Identity: owner.identity.Value(), Err: fmt.Errorf("%w: L7 policy %s has an unproven fixed HTTP response", cloud.ErrOwnershipConflict, item.ID)}
 			}
 		case p.fixedHTTPResponses:
-			if item.Action != string(l7policies.ActionRedirectToPool) || target == nil || target.FixedResponse != nil || target.AdminStateUp == nil || len(target.WeightedTargets) != 0 ||
+			if item.Action != string(l7policies.ActionRedirectToPool) || target == nil || target.FixedResponse != nil || !initialRules && target.AdminStateUp == nil ||
+				len(target.WeightedTargets) != 0 ||
 				item.RedirectURL != "" || item.RedirectPrefix != "" {
 				return &cloud.GraphError{Identity: owner.identity.Value(), Err: fmt.Errorf("%w: L7 policy %s has an unproven forwarding action", cloud.ErrOwnershipConflict, item.ID)}
 			}
@@ -584,7 +592,11 @@ func (p *Provider) observeListenerPolicies(ctx context.Context, inventory *route
 				check = crossCheckCompleteChildInventory[l7policies.Rule]
 			}
 			if err := check("L7 policy", item.ID, "rule", item.Rules, rules, func(rule l7policies.Rule) string { return rule.ID }); err != nil {
-				return err
+				category, _ := cloud.ErrorCategoryOf(err)
+				if !initialRules || category != cloud.ErrorCategoryDependencyNotReady {
+					return err
+				}
+				observed.initialRulesPartial = true
 			}
 		}
 		if poolOwner, found := poolOwners[item.RedirectPoolID]; found && poolOwner != (poolRouteOwner{route: routeIndex, backend: role.backend}) ||
@@ -715,6 +727,7 @@ func (p *Provider) observeRoutePolicy(ctx context.Context, owner routeGraphOwner
 		return observedRoutePolicy{}, fmt.Errorf("list rules beneath L7 policy %s: %w", item.ID, err)
 	}
 	sort.Slice(ruleItems, func(i, j int) bool { return ruleItems[i].ID < ruleItems[j].ID })
+	initialRules := slices.Contains(item.Tags, initialL7RulesTag)
 	observedRules := make([]observedRouteRule, 0, len(ruleItems))
 	ruleRoles := make(map[string]string, len(ruleItems))
 	for _, observation := range ruleItems {
@@ -727,11 +740,11 @@ func (p *Provider) observeRoutePolicy(ctx context.Context, owner routeGraphOwner
 			openstackidentity.RoleRuleHTTPQueryParamExact, openstackidentity.RoleRuleHTTPMethod, openstackidentity.RoleRuleGRPCContentType)
 		if !ok || !owner.matchesRoute(rule.Tags, ruleRole.raw) || ruleRole.backend != role.backend ||
 			ruleRole.match != role.match || ruleRole.redirect != role.redirect || ruleRole.weighted != role.weighted ||
-			role.backend != "" && rule.ProjectID != p.projectID {
+			(role.backend != "" || initialRules) && rule.ProjectID != p.projectID {
 			return observedRoutePolicy{}, fmt.Errorf("%w: L7 rule %s beneath policy %s has an unproven project or route, backend or match identity", cloud.ErrOwnershipConflict, rule.ID, item.ID)
 		}
 		flagsObserved := observation.AdminState != nil && observation.Inverted != nil
-		if (role.redirect || openstackidentity.HTTPRuleNeedsPolicyIdentity(ruleRole.base)) &&
+		if !initialRules && (role.redirect || openstackidentity.HTTPRuleNeedsPolicyIdentity(ruleRole.base)) &&
 			(!flagsObserved || rule.RuleType == "" || rule.CompareType == "" || rule.Value == "") {
 			return observedRoutePolicy{}, cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady,
 				fmt.Errorf("HTTP rule %s has incomplete predicate or administrative state", rule.ID))
@@ -742,7 +755,7 @@ func (p *Provider) observeRoutePolicy(ctx context.Context, owner routeGraphOwner
 		ruleRoles[ruleRole.raw] = rule.ID
 		observedRules = append(observedRules, observedRouteRule{rule: rule, role: ruleRole.raw, base: ruleRole.base, flagsObserved: flagsObserved})
 	}
-	return observedRoutePolicy{policy: item, role: role.raw, rules: observedRules, versioned: role.backend != "", redirect: role.redirect}, nil
+	return observedRoutePolicy{policy: item, role: role.raw, rules: observedRules, versioned: role.backend != "", redirect: role.redirect, initialRules: initialRules}, nil
 }
 
 type routeMutationKind uint8
@@ -784,6 +797,7 @@ type routeMutation struct {
 	member                   cloud.Member
 	memberTags               *[]string
 	policy                   desiredPolicy
+	initialRules             []l7policies.CreateRuleOpts
 	rule                     desiredRule
 	retry                    bool
 	clearPoolPersistence     bool
@@ -1038,12 +1052,18 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 	if len(plan) != 0 {
 		return plan, state, nil
 	}
+	if slices.ContainsFunc(actual.policies, func(policy observedRoutePolicy) bool { return policy.initialRulesPartial }) {
+		return nil, state, errInitialL7RulesUnverified
+	}
 	for _, wantedPolicy := range desired.policies {
 		if wantedPolicy.targetsPending() {
 			continue
 		}
 		for _, policy := range actual.policies {
 			if policy.role == wantedPolicy.role && !policy.policy.AdminStateUp {
+				if policy.initialRules && !initialL7RulesReady(policy, rulesFor(wantedPolicy, desired.hostnameRuleValue)) {
+					return nil, state, errInitialL7RulesUnverified
+				}
 				return []routeMutation{{kind: routeMutationEnablePolicy, id: policy.policy.ID,
 					policy: desiredPolicy{httpsListenerHostname: wantedPolicy.httpsListenerHostname,
 						grpcContentTypeRule: wantedPolicy.grpcContentTypeRule, requestURLRewrite: wantedPolicy.requestURLRewrite,
@@ -1074,10 +1094,12 @@ func buildRoutePolicyPlan(
 		if _, wanted := desiredPolicies[policy.role]; wanted {
 			continue
 		}
-		if policy.policy.AdminStateUp || policy.policy.ProvisioningStatus == "ERROR" ||
-			policy.hasRequestURLRewrite() && !observedPolicyDisabled(policy) {
+		if policy.policy.AdminStateUp || policy.policy.ProvisioningStatus == "ERROR" || policy.closureUnverified() {
 			disablePlan = append(disablePlan, routeMutation{kind: routeMutationDisablePolicy, id: policy.policy.ID,
-				retry: policy.policy.ProvisioningStatus == "ERROR", withdrawHTTPPolicy: desired.backendKey != ""})
+				retry: policy.policy.ProvisioningStatus == "ERROR", withdrawHTTPPolicy: desired.backendKey != "" || policy.initialRules})
+		}
+		if policy.closureUnverified() || policy.initialRulesPartial {
+			continue
 		}
 		for _, rule := range policy.rules {
 			plan = append(plan, routeMutation{kind: routeMutationDeleteRule, id: rule.rule.ID, parentID: policy.policy.ID, withdrawHTTPPolicy: desired.backendKey != ""})
@@ -1139,8 +1161,11 @@ func buildRoutePolicyPlan(
 			continue
 		}
 		state.L7PolicyIDs = append(state.L7PolicyIDs, policy.ID)
+		if observedPolicy.initialRulesPartial {
+			continue
+		}
 		if wantedPolicy.httpsListenerHostname != "" && (observedPolicy.httpsListenerHostname != wantedPolicy.httpsListenerHostname ||
-			!observedPolicy.adminObserved) {
+			!observedPolicy.initialRules && !observedPolicy.adminObserved) {
 			plan = append(plan, routeMutation{kind: routeMutationSetPolicyHTTPSListenerHostname, id: policy.ID, policy: wantedPolicy})
 			continue
 		}
@@ -1202,7 +1227,8 @@ func buildRoutePolicyPlan(
 			rule := observedRule.rule
 			state.L7RuleIDs = append(state.L7RuleIDs, rule.ID)
 			replacingNativeMedia := rule.RuleType == string(grpcContentTypeRuleType) && wantedRule.ruleType != grpcContentTypeRuleType
-			if replacingNativeMedia || wantedRule.ruleType == httpMethodRuleType && rule.Key != "" {
+			unexpectedKey := rule.Key != "" && (wantedRule.ruleType == httpMethodRuleType || observedPolicy.initialRules && wantedRule.key == "")
+			if replacingNativeMedia || unexpectedKey {
 				// Octavia permits deletion after regional withdrawal. A PUT that
 				// changes the native media type still requires enrollment.
 				grpcContentTypeChanged = grpcContentTypeChanged || replacingNativeMedia
@@ -1225,6 +1251,12 @@ func buildRoutePolicyPlan(
 		staleRulePlanStart := len(plan)
 		for _, rule := range staleRules {
 			plan = append(plan, routeMutation{kind: routeMutationDeleteRule, id: rule.rule.ID, parentID: policy.ID})
+		}
+		if len(plan) > rulePlanStart && observedPolicy.initialRuleClosureUnproven() {
+			disablePlan = append(disablePlan, routeMutation{kind: routeMutationDisablePolicy, id: policy.ID,
+				retry: policy.ProvisioningStatus == "ERROR", withdrawHTTPPolicy: true})
+			plan = plan[:policyPlanStart]
+			continue
 		}
 		if len(staleRules) != 0 && len(observedPolicy.rules)+missingRules > maxOctaviaL7RulesPerPolicy {
 			// Make room only after Octavia proves the policy is disabled.
@@ -1277,21 +1309,35 @@ func buildRoutePolicyPlan(
 	return plan, disablePlan, state
 }
 
+func (policy observedRoutePolicy) closureUnverified() bool {
+	return (policy.initialRules || policy.hasRequestURLRewrite() || policy.hasBackendRequestFilters()) && !observedPolicyDisabled(policy)
+}
+
 func buildRouteDeletionPlan(actual observedRouteGraph) []routeMutation {
 	plan := make([]routeMutation, 0)
 	for _, policy := range actual.policies {
-		if !policy.pending() && (policy.policy.AdminStateUp || policy.policy.ProvisioningStatus == "ERROR" ||
-			(policy.hasRequestURLRewrite() || policy.hasBackendRequestFilters()) && !observedPolicyDisabled(policy)) {
-			plan = append(plan, routeMutation{kind: routeMutationDisablePolicy, id: policy.policy.ID, retry: policy.policy.ProvisioningStatus == "ERROR" || (policy.hasRequestURLRewrite() || policy.hasBackendRequestFilters()) && !policy.adminObserved})
+		if !policy.pending() && (policy.policy.AdminStateUp || policy.policy.ProvisioningStatus == "ERROR" || policy.closureUnverified()) {
+			plan = append(plan, routeMutation{kind: routeMutationDisablePolicy, id: policy.policy.ID,
+				retry: policy.policy.ProvisioningStatus == "ERROR" || (policy.hasRequestURLRewrite() || policy.hasBackendRequestFilters()) && !policy.adminObserved})
+		}
+	}
+	safeToRemove := func(policy observedRoutePolicy) bool {
+		return !policy.closureUnverified() && !policy.initialRulesPartial
+	}
+	for _, policy := range actual.policies {
+		if safeToRemove(policy) {
+			for _, rule := range policy.rules {
+				plan = append(plan, routeMutation{kind: routeMutationDeleteRule, id: rule.rule.ID, parentID: policy.policy.ID})
+			}
 		}
 	}
 	for _, policy := range actual.policies {
-		for _, rule := range policy.rules {
-			plan = append(plan, routeMutation{kind: routeMutationDeleteRule, id: rule.rule.ID, parentID: policy.policy.ID})
+		if safeToRemove(policy) {
+			plan = append(plan, routeMutation{kind: routeMutationDeletePolicy, id: policy.policy.ID})
 		}
 	}
-	for _, policy := range actual.policies {
-		plan = append(plan, routeMutation{kind: routeMutationDeletePolicy, id: policy.policy.ID})
+	if slices.ContainsFunc(actual.policies, func(policy observedRoutePolicy) bool { return !safeToRemove(policy) }) {
+		return plan
 	}
 	if actual.monitor != nil {
 		plan = append(plan, routeMutation{kind: routeMutationDeleteMonitor, id: actual.monitor.ID, parentID: actual.pool.ID})
@@ -1470,7 +1516,10 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 		}
 		create := octavia.PolicyCreateOpts{CreateOpts: opts, FixedServerError: desired.fixedResponse,
 			RequestHeaderOperations: step.requestHeaderOperations, ResponseHeaderOperations: step.responseHeaderOperations,
-			HTTPSListenerHostname: step.policy.httpsListenerHostname, RequestURLRewrite: step.policy.requestURLRewrite}
+			HTTPSListenerHostname: step.policy.httpsListenerHostname, RequestURLRewrite: step.policy.requestURLRewrite, InitialRules: step.initialRules}
+		if len(step.initialRules) != 0 {
+			create.Tags = append(create.Tags, initialL7RulesTag)
+		}
 		if redirect := step.policy.redirect; redirect != nil {
 			create.Action, create.RedirectPrefix, create.RedirectHttpCode = l7policies.ActionRedirectPrefix, redirect.prefix, redirect.statusCode
 			create.RedirectRequest = redirect.request
@@ -1478,7 +1527,12 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 		if step.weightedTargets != nil {
 			create.WeightedTargets = *step.weightedTargets
 		}
-		_, err = p.octavia.CreatePolicy(ctx, create)
+		created, createErr := p.octavia.CreatePolicy(ctx, create)
+		err = createErr
+		if err == nil && len(step.initialRules) != 0 &&
+			(created == nil || created.ID == "" || !validInitialRuleIDs(created.Rules, len(step.initialRules))) {
+			err = errors.New("create response from Octavia is missing policy or initial L7 rule IDs")
+		}
 	case routeMutationUpdatePolicy:
 		opts := l7policies.UpdateOpts{AdminStateUp: boolPointer(false)}
 		if redirect := step.policy.redirect; redirect != nil {
@@ -1509,19 +1563,11 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 	case routeMutationMovePolicy:
 		_, err = p.octavia.UpdatePolicy(ctx, step.id, l7policies.UpdateOpts{Position: step.policy.position})
 	case routeMutationCreateRule:
-		tags, tagErr := desired.identity.RouteTags(step.rule.role)
+		opts, tagErr := desired.createRuleOpts(step.rule)
 		if tagErr != nil {
 			return tagErr
 		}
-		_, err = p.octavia.CreateRule(ctx, step.parentID, l7policies.CreateRuleOpts{
-			RuleType:     step.rule.ruleType,
-			CompareType:  step.rule.compareType,
-			Value:        step.rule.value,
-			Key:          step.rule.key,
-			Invert:       step.rule.invert,
-			AdminStateUp: boolPointer(true),
-			Tags:         tags,
-		})
+		_, err = p.octavia.CreateRule(ctx, step.parentID, opts)
 	case routeMutationUpdateRule:
 		// Octavia clears the inherited header key on a native gRPC update.
 		var key *string

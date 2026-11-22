@@ -40,6 +40,12 @@ To withdraw the mode, remove or replace the HTTPRoute rules that need it and wai
 
 The local kind runs cover request-derived status codes, path, scheme and port. [Case evidence and outstanding HTTPS setup](qualification/v1.7.0/provider/http-request-redirect.md)
 
+## Create HTTP policies with their matching rules
+
+On a region running the Hibiscus Octavia API and workers, set `[api_settings] enabled_l7policy_initial_rules_providers = amphora`. Check that the regional Amphora provider advertises `l7policy_initial_rules_v1`, then pass `--octavia-l7policy-initial-rules` to the controller. [Octavia API and worker release](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-target-request-filters-76828b5ac955)
+
+For an HTTP or terminated HTTPS policy with two or more matching rules, the controller can create the disabled policy and its rules in one request. It reads the policy and each rule back before enabling traffic. If a create response is lost, the controller checks the listener inventory before submitting another create. Disabling the option returns new policies to individual rule creation. Policies already created with grouped rules retain their readback checks.
+
 ## Observe a grant change
 
 For a route with a weight-3 Service in its own namespace and a weight-1 Service in another namespace, match requests to the same rule and distinguish replies by application identity.

@@ -105,7 +105,7 @@ func run(ctx context.Context) error {
 		apiQPS             float64
 		apiBurst           int
 	)
-	var httpsListenerIsolation bool
+	var httpsListenerIsolation, initialL7Rules bool
 	var httpRequestRedirect bool
 	var httpRequestURLRewrite bool
 	var httpBackendRequestFilters bool
@@ -124,6 +124,7 @@ func run(ctx context.Context) error {
 	flag.BoolVar(&tcpTLSTermination, "octavia-tcp-tls-termination", false, "use the advertised Octavia TCP termination capability for TLSRoutes with operator-enrolled certificates")
 	flag.BoolVar(&tlsSNISuffix, "octavia-tls-sni-suffix", false, "use the advertised Octavia wildcard SNI capability (requires --octavia-tls-sni-passthrough)")
 	flag.BoolVar(&backendTLSPolicy, "octavia-backend-tls-policy", false, "authenticate BackendTLSPolicy HTTP upstreams with the regional Octavia hostname capability and a Barbican CA (requires --octavia-microversion=2.8 or newer)")
+	flag.BoolVar(&initialL7Rules, "octavia-l7policy-initial-rules", false, "create disabled HTTP(S) policies with their initial rules when the regional Octavia provider advertises support")
 	flag.BoolVar(&httpsListenerIsolation, "octavia-https-listener-isolation", false, "isolate terminated HTTPS sections on a shared port using the regional Octavia capability (requires --tls-certificate-map)")
 	flag.BoolVar(&httpBackendRequestFilters, "octavia-http-backend-request-filters", false, "use the advertised Octavia capability for HTTP backendRef request filters (requires --octavia-weighted-http-targets)")
 	flag.BoolVar(&httpRequestURLRewrite, "octavia-request-url-rewrite", false, "use the advertised Octavia L7 request URL rewrite capability")
@@ -251,6 +252,7 @@ func run(ctx context.Context) error {
 		PollInterval:           pollInterval,
 
 		HTTPSListenerIsolation: httpsListenerIsolation,
+		InitialL7Rules:         initialL7Rules,
 	}
 	openStackProvider := openstack.NewProvider(serviceClients, providerConfig)
 	if err := controller.SetupIndexes(ctx, manager.GetFieldIndexer(), controllerConfig); err != nil {
