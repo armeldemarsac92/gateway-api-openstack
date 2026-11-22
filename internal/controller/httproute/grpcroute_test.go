@@ -60,7 +60,7 @@ func TestGRPCExactHeadersKeepAlternativesAndPrecedenceOnH2CBackends(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(desired.HTTPBackends) != 2 || !desired.TCPHealthMonitor {
+	if len(desired.HTTPBackends) != 2 || !desired.GRPC {
 		t.Fatalf("want two gRPC backends with TCP health checks, got %#v", desired)
 	}
 	want := map[string][]cloud.HTTPPathMatch{
@@ -156,6 +156,9 @@ func TestGRPCDefaultAndServiceRulesUseMethodPrecedence(t *testing.T) {
 	desired, err := (&Reconciler{Config: cfg}).buildRouteModelWithReader(t.Context(), reader, model.ProjectGRPCRoute(route), gateway)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !desired.GRPC {
+		t.Fatal("gRPC service and default policies must be marked for native media type matching")
 	}
 	got := make(map[string][]cloud.HTTPPathMatch)
 	for _, backend := range desired.HTTPBackends {

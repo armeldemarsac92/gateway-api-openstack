@@ -102,7 +102,8 @@ func readRouteResourceRole(tags []string, bases ...string) (routeResourceRole, b
 	if !ok {
 		return routeResourceRole{}, false
 	}
-	if slices.Contains(bases, raw) && raw != roleRuleRedirectGuard && raw != openstackidentity.RoleRuleHTTPHeaderExact && raw != openstackidentity.RoleRuleHTTPMethod {
+	if slices.Contains(bases, raw) && raw != roleRuleRedirectGuard && raw != openstackidentity.RoleRuleHTTPHeaderExact &&
+		raw != openstackidentity.RoleRuleHTTPMethod && raw != openstackidentity.RoleRuleGRPCContentType {
 		return routeResourceRole{raw: raw, base: raw}, true
 	}
 	if base, match, cell, _, ok := openstackidentity.ParseHTTPRedirectRole(raw); ok {
@@ -675,14 +676,17 @@ func (p *Provider) observeRoutePolicy(ctx context.Context, owner routeGraphOwner
 		if err := p.validateOptionalProject("L7 rule", rule.ID, rule.ProjectID); err != nil {
 			return observedRoutePolicy{}, err
 		}
-		ruleRole, ok := readRouteResourceRole(rule.Tags, roleRulePath, roleRuleHost, roleRuleRedirectGuard, openstackidentity.RoleRuleHTTPHeaderExact, openstackidentity.RoleRuleHTTPMethod)
+		ruleRole, ok := readRouteResourceRole(rule.Tags, roleRulePath, roleRuleHost, roleRuleRedirectGuard,
+			openstackidentity.RoleRuleHTTPHeaderExact, openstackidentity.RoleRuleHTTPMethod, openstackidentity.RoleRuleGRPCContentType)
 		if !ok || !owner.matchesRoute(rule.Tags, ruleRole.raw) || ruleRole.backend != role.backend ||
 			ruleRole.match != role.match || ruleRole.redirect != role.redirect || ruleRole.weighted != role.weighted ||
 			role.backend != "" && rule.ProjectID != p.projectID {
 			return observedRoutePolicy{}, fmt.Errorf("%w: L7 rule %s beneath policy %s has an unproven project or route, backend or match identity", cloud.ErrOwnershipConflict, rule.ID, item.ID)
 		}
 		flagsObserved := observation.AdminState != nil && observation.Inverted != nil
-		if (role.redirect || ruleRole.base == openstackidentity.RoleRuleHTTPHeaderExact || ruleRole.base == openstackidentity.RoleRuleHTTPMethod) && (!flagsObserved || rule.RuleType == "" || rule.CompareType == "" || rule.Value == "") {
+		if (role.redirect || ruleRole.base == openstackidentity.RoleRuleHTTPHeaderExact ||
+			ruleRole.base == openstackidentity.RoleRuleHTTPMethod || ruleRole.base == openstackidentity.RoleRuleGRPCContentType) &&
+			(!flagsObserved || rule.RuleType == "" || rule.CompareType == "" || rule.Value == "") {
 			return observedRoutePolicy{}, cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady,
 				fmt.Errorf("HTTP rule %s has incomplete predicate or administrative state", rule.ID))
 		}
@@ -956,7 +960,7 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 		case actual.monitor.Type != desired.monitorType():
 			// The observer has already proved that this monitor belongs to
 			// the pool. Octavia requires replacement to change its type.
-			if !desired.spec.TCPHealthMonitor || actual.monitor.Type != monitors.TypeHTTP {
+			if !desired.spec.GRPC || actual.monitor.Type != monitors.TypeHTTP {
 				return nil, cloud.RouteState{}, fmt.Errorf("%w: health monitor %s has type %s", cloud.ErrOwnershipConflict, actual.monitor.ID, actual.monitor.Type)
 			}
 			nonPolicyPlan = append(nonPolicyPlan, routeMutation{kind: routeMutationDeleteMonitor, id: actual.monitor.ID, parentID: pool.ID})

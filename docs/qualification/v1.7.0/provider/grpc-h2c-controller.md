@@ -22,17 +22,21 @@ regional enrollment ends. The controller observes the new transport on the
 active pool before restoring members. A TLS mismatch drains the affected pool.
 Other pools on the Gateway can continue to reconcile.
 
-## GRPCRoute exact method matching
+## GRPCRoute matching
 
 Enable `--octavia-fixed-http-responses` alongside `--octavia-backend-h2c`.
 The HTTP listener uses the enrolled fixed HTTP 404 fallback for unmatched
 paths. gRPC clients map that response to `UNIMPLEMENTED`. A rule can select one
 method of a named gRPC service, all methods of that service, or all calls on its
 attached hostnames. Within a hostname, a matching exact method takes precedence
-over a service-wide match, then the default. Each rule selects one Service
-backend. A rule can have a unique
-name. Rule names do not change matching or precedence. The selected TCP port
-must declare `appProtocol: kubernetes.io/h2c`. GRPCRoute pools use TCP health
+over a service-wide match, then the default. Each policy requires a native
+gRPC Content-Type, such as `application/grpc` or `application/grpc+proto`,
+using an Octavia `HEADER` rule. HTTP requests with ordinary media types fall
+through to the listener's other policies or its default response. The
+Content-Type rule classifies requests by media type. The backend validates
+the gRPC protocol and message framing. Each rule selects one Service backend.
+A rule can have a unique name. Rule names do not change matching or precedence.
+The selected TCP port must declare `appProtocol: kubernetes.io/h2c`. GRPCRoute pools use TCP health
 checks with the GatewayClass timing and retry settings. Status and finalizers are
 written to the GRPCRoute. The existing Gateway graph writer reconciles the
 HTTP and gRPC routes together. When their effective hostnames overlap on a

@@ -260,11 +260,12 @@ type RouteSpec struct {
 	MemberSubnetID          string
 	BackendSecurityGroupIDs []string
 	HealthMonitor           HealthMonitorConfig
-	// TCPHealthMonitor selects a TCP probe for a native gRPC route's HTTP pools.
-	TCPHealthMonitor bool `json:",omitempty"`
-	Hostname         string
-	PathType         PathMatchType
-	PathValue        string
+	// GRPC restricts policies to native gRPC media types and uses TCP probes.
+	GRPC bool `json:",omitempty"`
+
+	Hostname  string
+	PathType  PathMatchType
+	PathValue string
 	// Precedence is the zero-based rank of this route on the Gateway listener.
 	// Smaller ranks are evaluated first. Ranks must be distinct among ensured routes.
 	Precedence int
