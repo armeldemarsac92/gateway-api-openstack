@@ -192,7 +192,7 @@ func testUpstreamGatewayStatus(t *testing.T, c client.Client, cfg controller.Con
 		for _, tc := range []suite.ConformanceTest{
 			tests.ListenerSetDefaultNotAllowed, tests.ListenerSetAllowedNamespaceNone, tests.ListenerSetAllowedNamespaceSame,
 			tests.ListenerSetAllowedNamespaceSelector, tests.ListenerSetHostnameConflict, tests.ListenerSetProtocolConflict,
-			tests.ListenerSetAllowedRoutesSupportedKinds,
+			tests.ListenerSetAllowedRoutesSupportedKinds, tests.ListenerSetRouteStatusScopedToParentRef,
 		} {
 			t.Run(tc.ShortName, func(t *testing.T) {
 				s.RunTest = tc.ShortName
