@@ -126,7 +126,7 @@ func TestWeightedPolicyWire(t *testing.T) {
 		Endpoint:       "http://octavia.test/",
 	})
 	disabled := false
-	if _, err := service.CreateWeightedPolicy(t.Context(), l7policies.CreateOpts{ListenerID: "listener", AdminStateUp: &disabled}, targets, nil); err != nil {
+	if _, err := service.CreatePolicy(t.Context(), PolicyCreateOpts{CreateOpts: l7policies.CreateOpts{ListenerID: "listener", AdminStateUp: &disabled}, WeightedTargets: targets}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := service.SetPolicyWeightedTargets(t.Context(), "policy", targets, nil); err != nil {
@@ -154,6 +154,38 @@ func TestWeightedPolicyReadsOnlyExplicitTargetFields(t *testing.T) {
 		if err := json.Unmarshal([]byte(body), &target); err == nil {
 			t.Errorf("accepted invalid weighted target %s", body)
 		}
+	}
+}
+
+func TestHTTPPolicyScopeAppliesToEachAction(t *testing.T) {
+	disabled := false
+	base := l7policies.CreateOpts{ListenerID: "shared", AdminStateUp: &disabled, Action: l7policies.ActionRedirectToPool, RedirectPoolID: "pool"}
+	for _, opts := range []PolicyCreateOpts{
+		{CreateOpts: base, HTTPSListenerHostname: "*"},
+		{CreateOpts: l7policies.CreateOpts{ListenerID: "shared", Action: l7policies.ActionRedirectPrefix, RedirectPrefix: "https://example.test"}, HTTPSListenerHostname: "www.example.test"},
+		{CreateOpts: base, HTTPSListenerHostname: "*.example.test", FixedServerError: true},
+		{CreateOpts: base, HTTPSListenerHostname: "www.example.test", WeightedTargets: []WeightedHTTPTarget{{Weight: 1, PoolID: "pool"}}},
+	} {
+		body, err := opts.ToL7PolicyCreateMap()
+		if err != nil {
+			t.Fatal(err)
+		}
+		fields := body["l7policy"].(map[string]any)
+		if fields["https_listener_hostname"] != opts.HTTPSListenerHostname {
+			t.Fatalf("policy scope = %v, want %s", fields, opts.HTTPSListenerHostname)
+		}
+	}
+	change, err := policyHTTPSHostname("*").ToL7PolicyUpdateMap()
+	if err != nil || !reflect.DeepEqual(change["l7policy"], map[string]any{"https_listener_hostname": "*", "admin_state_up": false}) {
+		t.Fatalf("scope repair = %v, err = %v", change, err)
+	}
+	scoped, err := readPolicyObservation(json.RawMessage(`{"id":"scoped","https_listener_hostname":"*"}`))
+	if err != nil || scoped.HTTPSListenerHostname != "*" {
+		t.Fatalf("scope readback = %q, err = %v", scoped.HTTPSListenerHostname, err)
+	}
+	plain, err := readPolicyObservation(json.RawMessage(`{"id":"plain"}`))
+	if err != nil || plain.HTTPSListenerHostname != "" {
+		t.Fatalf("plain scope = %q, err = %v", plain.HTTPSListenerHostname, err)
 	}
 }
 

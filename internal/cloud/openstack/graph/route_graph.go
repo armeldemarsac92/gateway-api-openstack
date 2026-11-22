@@ -1274,13 +1274,11 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 		if redirect := step.policy.redirect; redirect != nil {
 			opts.Action, opts.RedirectPrefix, opts.RedirectHttpCode = l7policies.ActionRedirectPrefix, redirect.prefix, redirect.statusCode
 		}
+		create := octavia.PolicyCreateOpts{CreateOpts: opts, FixedServerError: desired.fixedResponse, RequestHeaderOperations: step.requestHeaderOperations}
 		if step.weightedTargets != nil {
-			_, err = p.octavia.CreateWeightedPolicy(ctx, opts, *step.weightedTargets, step.requestHeaderOperations)
-		} else if desired.fixedResponse {
-			_, err = p.octavia.CreateFixedResponsePolicy(ctx, opts)
-		} else {
-			_, err = p.octavia.CreatePolicy(ctx, opts, step.requestHeaderOperations)
+			create.WeightedTargets = *step.weightedTargets
 		}
+		_, err = p.octavia.CreatePolicy(ctx, create)
 	case routeMutationUpdatePolicy:
 		opts := l7policies.UpdateOpts{AdminStateUp: boolPointer(false)}
 		if redirect := step.policy.redirect; redirect != nil {

@@ -81,6 +81,8 @@ type ProviderConfig struct {
 	TLSSNISuffix          bool
 	OperationTimeout      time.Duration
 	PollInterval          time.Duration
+
+	HTTPSListenerIsolation bool
 }
 
 // Provider owns the OpenStack resource graph for managed Gateway API objects.
@@ -102,6 +104,8 @@ type Provider struct {
 	topology              *topology.Resolver
 	operationTimeout      time.Duration
 	pollInterval          time.Duration
+
+	httpsListenerIsolation bool
 }
 
 // NewProvider creates an OpenStack provider. The clients are expected to have
@@ -131,6 +135,8 @@ func NewProvider(clients ServiceClients, cfg ProviderConfig) *Provider {
 		topology:              topology.NewResolver(clients, cfg.OperationTimeout),
 		operationTimeout:      cfg.OperationTimeout,
 		pollInterval:          cfg.PollInterval,
+
+		httpsListenerIsolation: cfg.HTTPSListenerIsolation,
 	}
 }
 
@@ -141,7 +147,20 @@ func (p *Provider) BackendTLSAvailable(ctx context.Context) (bool, error) {
 	if !p.backendTLSPolicy || p.backendCA == nil {
 		return false, nil
 	}
-	err := p.octavia.VerifyGatewayCapabilities(ctx, "amphora", octavia.GatewayCapabilityBackendTLSHostname)
+	return p.amphoraCapabilityAvailable(ctx, octavia.GatewayCapabilityBackendTLSHostname)
+}
+
+// HTTPSListenerIsolationAvailable checks the configured region before the
+// Kubernetes controller accepts virtual HTTPS listeners sharing a port.
+func (p *Provider) HTTPSListenerIsolationAvailable(ctx context.Context) (bool, error) {
+	if !p.httpsListenerIsolation {
+		return false, nil
+	}
+	return p.amphoraCapabilityAvailable(ctx, octavia.GatewayCapabilityHTTPSListenerIsolation)
+}
+
+func (p *Provider) amphoraCapabilityAvailable(ctx context.Context, capability string) (bool, error) {
+	err := p.octavia.VerifyGatewayCapabilities(ctx, "amphora", capability)
 	var missing *octavia.MissingGatewayCapability
 	if errors.As(err, &missing) {
 		return false, nil
