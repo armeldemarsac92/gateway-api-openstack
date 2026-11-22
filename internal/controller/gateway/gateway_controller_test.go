@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"testing"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -54,8 +55,6 @@ func TestSharedHTTPPortRejectsUnsupportedListenerShapes(t *testing.T) {
 	first := gatewayv1.Listener{Name: "first", Port: 80, Protocol: gatewayv1.HTTPProtocolType, Hostname: ptr.To(gatewayv1.Hostname("a.example.com"))}
 	for _, second := range []gatewayv1.Listener{
 		{Name: "same-host", Port: 80, Protocol: gatewayv1.HTTPProtocolType, Hostname: first.Hostname},
-		{Name: "wildcard", Port: 80, Protocol: gatewayv1.HTTPProtocolType, Hostname: ptr.To(gatewayv1.Hostname("*.example.com"))},
-		{Name: "catch-all", Port: 80, Protocol: gatewayv1.HTTPProtocolType},
 		{Name: "https", Port: 80, Protocol: gatewayv1.HTTPSProtocolType, Hostname: ptr.To(gatewayv1.Hostname("b.example.com"))},
 	} {
 		t.Run(string(second.Name), func(t *testing.T) {
@@ -64,6 +63,28 @@ func TestSharedHTTPPortRejectsUnsupportedListenerShapes(t *testing.T) {
 				t.Fatal("unsupported HTTP listener set was admitted")
 			}
 		})
+	}
+}
+
+func TestSharedHTTPPortAdmitsExactNestedWildcardAndCatchAll(t *testing.T) {
+	listeners := []gatewayv1.Listener{
+		{Name: "exact", Port: 80, Protocol: gatewayv1.HTTPProtocolType, Hostname: ptr.To(gatewayv1.Hostname("foo.bar.com"))},
+		{Name: "nested", Port: 80, Protocol: gatewayv1.HTTPProtocolType, Hostname: ptr.To(gatewayv1.Hostname("*.foo.bar.com"))},
+		{Name: "wildcard", Port: 80, Protocol: gatewayv1.HTTPProtocolType, Hostname: ptr.To(gatewayv1.Hostname("*.bar.com"))},
+		{Name: "catch-all", Port: 80, Protocol: gatewayv1.HTTPProtocolType},
+	}
+	gw := &gatewayv1.Gateway{Spec: gatewayv1.GatewaySpec{Listeners: listeners}}
+	admitted, err := SupportedListeners(gw)
+	if err != nil || len(admitted) != len(listeners) {
+		t.Fatalf("listeners = %v, error = %v", admitted, err)
+	}
+	want := []string{"*", "*.bar.com", "*.foo.bar.com", "foo.bar.com"}
+	if got := HTTPListenerHostnames(admitted); !slices.Equal(got[80], want) {
+		t.Fatalf("hostname selectors = %v, want %v", got[80], want)
+	}
+	gw.Spec.Listeners[0].Hostname = nil
+	if _, err := SupportedListeners(gw); err == nil {
+		t.Fatal("duplicate catch-all sections were admitted")
 	}
 }
 

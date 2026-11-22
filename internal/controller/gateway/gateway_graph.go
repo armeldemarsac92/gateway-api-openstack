@@ -58,6 +58,12 @@ func (r *Reconciler) gatewaySpec(gateway *gatewayv1.Gateway, listeners []*gatewa
 		AvailabilityZone:    topology.Topology.AvailabilityZone,
 		VIPSecurityGroupIDs: slices.Clone(topology.Topology.VIPSecurityGroupIDs),
 	}
+	// Some HTTPS-profile listeners are retained in the snapshot only to report
+	// their rejection. A rejected plaintext section cannot reserve hostnames.
+	admitted := slices.DeleteFunc(slices.Clone(listeners), func(section *gatewayv1.Listener) bool {
+		return usesHTTPSProfile(r.Config, gateway) && httpsProfileIssue(r.Config, gateway, section) != nil
+	})
+	spec.HTTPListenerHostnames = HTTPListenerHostnames(admitted)
 	setGatewayAddressRequest(&spec, gateway)
 	if controller.GatewayListenerScope(r.Config, gateway) != "" {
 		// Snapshot validation already verified the frozen listener port and topology.

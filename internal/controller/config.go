@@ -40,6 +40,8 @@ var gatewayControllerNamePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0
 type Config struct {
 	// HTTPHeaderExact enables exact HTTPRoute header matching on capable Amphora providers.
 	HTTPHeaderExact bool
+	// HTTPQueryParamExact enables exact HTTPRoute query parameter matching on capable Amphora providers.
+	HTTPQueryParamExact bool
 	// HTTPMethodMatch enables exact HTTPRoute method matching on capable Amphora providers.
 	HTTPMethodMatch bool
 	// FixedHTTPResponses enables the local Amphora fixed-response extension.
@@ -95,6 +97,9 @@ func (c Config) Validate() error {
 	}
 	if c.HTTPSListenerIsolation && !c.OperatorHTTPS {
 		return fmt.Errorf("--octavia-https-listener-isolation requires --tls-certificate-map")
+	}
+	if c.HTTPQueryParamExact && !c.FixedHTTPResponses {
+		return fmt.Errorf("--octavia-http-query-param-exact requires --octavia-fixed-http-responses")
 	}
 	if c.HTTPMethodMatch && !c.FixedHTTPResponses {
 		return fmt.Errorf("--octavia-http-method-match requires --octavia-fixed-http-responses")

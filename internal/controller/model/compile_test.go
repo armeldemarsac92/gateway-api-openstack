@@ -294,6 +294,8 @@ func TestNormalizeMatch(t *testing.T) {
 		{name: "encoded slash", input: gatewayv1.HTTPRouteMatch{Path: &gatewayv1.HTTPPathMatch{Value: ptr.To("/api%2Fother")}}, scope: ScopeRule},
 		{name: "unknown path type", input: gatewayv1.HTTPRouteMatch{Path: &gatewayv1.HTTPPathMatch{Type: ptr.To(gatewayv1.PathMatchType("unknown"))}}, scope: ScopeRoute},
 		{name: "unknown method", input: gatewayv1.HTTPRouteMatch{Method: ptr.To(gatewayv1.HTTPMethod("unknown"))}, scope: ScopeRoute},
+		{name: "regular expression query", input: gatewayv1.HTTPRouteMatch{QueryParams: []gatewayv1.HTTPQueryParamMatch{{Name: "q", Value: ".*", Type: ptr.To(gatewayv1.QueryParamMatchRegularExpression)}}}, scope: ScopeRule},
+		{name: "unknown query matcher", input: gatewayv1.HTTPRouteMatch{QueryParams: []gatewayv1.HTTPQueryParamMatch{{Name: "q", Value: "value", Type: ptr.To(gatewayv1.QueryParamMatchType("unknown"))}}}, scope: ScopeRoute},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			match, err := NormalizeMatch(test.input)

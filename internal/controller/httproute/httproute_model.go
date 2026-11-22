@@ -118,6 +118,7 @@ func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, grpc bool) 
 	fixedResponses := r.Config.FixedHTTPResponses || grpc
 	weightedTargets := r.Config.WeightedHTTPTargets && !grpc
 	exactHeaders := r.Config.HTTPHeaderExact
+	exactQueryParams := r.Config.HTTPQueryParamExact && r.Config.FixedHTTPResponses && !grpc
 	methodMatch := r.Config.HTTPMethodMatch && !grpc
 	if rule.Timeouts != nil || rule.Retry != nil || rule.SessionPersistence != nil { //nolint:staticcheck // The release still serves this deprecated Experimental field.
 		return newRouteBuildError(routeErrorUnsupported, "timeouts, retries, and session persistence are not supported")
@@ -128,7 +129,7 @@ func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, grpc bool) 
 		}
 	}
 	for _, match := range rule.Matches {
-		if _, _, err := supportedMatch(match, exactHeaders, methodMatch); err != nil {
+		if _, _, err := supportedMatch(match, exactHeaders, methodMatch, exactQueryParams); err != nil {
 			return err
 		}
 	}
@@ -271,7 +272,7 @@ func (r *Reconciler) buildRouteModelFromInputs(
 	isolated := gatewaycontroller.SharedHTTPSListener(r.Config, gateway, &listener)
 	matches, rules, err := supportedRouteModel(inputs.routeFragment(route), listeners, isolated,
 		r.Config.FixedHTTPResponses || r.Config.WeightedHTTPTargets, r.Config.WeightedHTTPTargets,
-		r.Config.HTTPHeaderExact, r.Config.HTTPMethodMatch && ordinaryHTTP)
+		r.Config.HTTPHeaderExact, r.Config.HTTPMethodMatch && ordinaryHTTP, r.Config.HTTPQueryParamExact && r.Config.FixedHTTPResponses && ordinaryHTTP)
 	if err != nil {
 		return cloud.RouteSpec{}, model.Diagnostic{}, err
 	}
@@ -303,11 +304,23 @@ func (r *Reconciler) buildRouteModelFromInputs(
 		spec.ScopedListenerPorts = []int{int(listener.Port)}
 	}
 	if len(listeners) == 1 && isolated {
-		spec.HTTPSListenerHostname = gatewaycontroller.HTTPSVirtualHostname(&listener)
+		spec.HTTPSListenerHostname = gatewaycontroller.HTTPVirtualHostname(&listener)
+	}
+	if listener.Protocol == gatewayv1.HTTPProtocolType {
+		admitted, err := gatewaycontroller.HTTPRouteListeners(r.Config, gateway)
+		if err != nil {
+			return cloud.RouteSpec{}, model.Diagnostic{}, err
+		}
+		if len(gatewaycontroller.HTTPListenerHostnames(admitted)[int(listener.Port)]) != 0 {
+			for i := range matches {
+				matches[i].httpListenerHostname = matches[i].sectionHostname
+			}
+		}
 	}
 	if len(matches) == 1 && !r.usesHTTPBackendGroups(route) && rules[0].Redirect == nil {
 		match := matches[0]
 		backend := rules[0].Backends[0]
+		spec.HTTPListenerHostname = match.httpListenerHostname
 		spec.Hostname, spec.PathType, spec.PathValue, spec.Precedence = match.Hostname, cloud.PathMatchType(match.Match.PathType), match.Match.PathValue, match.Precedence
 		spec.BackendTLS = inputs.backendTLSAvailability.validation(backend, ordinaryHTTP)
 		if spec.BackendTLS != nil && spec.BackendTLS.Denied {
@@ -426,8 +439,9 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 		}
 		*paths = appendHTTPPathMatch(*paths, cloud.HTTPPathMatch{
 			Hostname: match.Hostname, PathType: cloud.PathMatchType(match.Match.PathType), PathValue: match.Match.PathValue, Precedence: match.Precedence,
-			HTTPSListenerHostname: match.httpsListenerHostname,
-			Method:                match.Match.Method, Headers: match.Match.Headers, RequestHeaderOperations: operations,
+			HTTPListenerHostname: match.httpListenerHostname, HTTPSListenerHostname: match.httpsListenerHostname,
+			Method: match.Match.Method, Headers: match.Match.Headers, QueryParams: match.Match.QueryParams,
+			RequestHeaderOperations:  operations,
 			ResponseHeaderOperations: rules[match.RuleIndex].ResponseHeaderOperations,
 		})
 	}
@@ -489,9 +503,9 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 func appendHTTPPathMatch(matches []cloud.HTTPPathMatch, match cloud.HTTPPathMatch) []cloud.HTTPPathMatch {
 	// Equivalent alternatives targeting the same action share one policy identity.
 	if slices.ContainsFunc(matches, func(previous cloud.HTTPPathMatch) bool {
-		return previous.HTTPSListenerHostname == match.HTTPSListenerHostname && previous.Hostname == match.Hostname &&
+		return previous.HTTPListenerHostname == match.HTTPListenerHostname && previous.HTTPSListenerHostname == match.HTTPSListenerHostname && previous.Hostname == match.Hostname &&
 			previous.PathType == match.PathType && previous.PathValue == match.PathValue &&
-			previous.Method == match.Method && slices.Equal(previous.Headers, match.Headers)
+			previous.Method == match.Method && slices.Equal(previous.Headers, match.Headers) && slices.Equal(previous.QueryParams, match.QueryParams)
 	}) {
 		return matches
 	}
@@ -527,11 +541,13 @@ func groupedBackendMembers(ctx context.Context, reader client.Reader, backend mo
 type routeLoweredMatch struct {
 	model.RouteMatch
 	httpsListenerHostname string
+	httpListenerHostname  string
+	sectionHostname       string
 }
 
 // supportedRouteModel verifies that the compiled attachments match the sections
 // selected by admission before lowering any backend or policy.
-func supportedRouteModel(logical model.Gateway, selected []*gatewayv1.Listener, isolated, fixedResponses, weightedTargets, exactHeaders, methodMatch bool) ([]routeLoweredMatch, []model.Rule, error) {
+func supportedRouteModel(logical model.Gateway, selected []*gatewayv1.Listener, isolated, fixedResponses, weightedTargets, exactHeaders, methodMatch, exactQueryParams bool) ([]routeLoweredMatch, []model.Rule, error) {
 	unsupported := func() ([]routeLoweredMatch, []model.Rule, error) {
 		return nil, nil, newRouteBuildError(routeErrorUnsupported, "logical Gateway configuration is outside the supported HTTP profile")
 	}
@@ -589,13 +605,14 @@ func supportedRouteModel(logical model.Gateway, selected []*gatewayv1.Listener, 
 		delete(sections, section)
 		var hostname string
 		if isolated {
-			hostname = gatewaycontroller.HTTPSVirtualHostname(expected)
+			hostname = gatewaycontroller.HTTPVirtualHostname(expected)
 		}
 		for _, match := range listener.Rules {
-			if !exactHeaders && len(match.Match.Headers) != 0 || !methodMatch && match.Match.Method != "" {
+			if !exactHeaders && len(match.Match.Headers) != 0 || !methodMatch && match.Match.Method != "" ||
+				!exactQueryParams && len(match.Match.QueryParams) != 0 {
 				return unsupported()
 			}
-			matches = append(matches, routeLoweredMatch{RouteMatch: match, httpsListenerHostname: hostname})
+			matches = append(matches, routeLoweredMatch{RouteMatch: match, httpsListenerHostname: hostname, sectionHostname: gatewaycontroller.HTTPVirtualHostname(expected)})
 		}
 	}
 	if len(sections) != 0 {
@@ -604,12 +621,15 @@ func supportedRouteModel(logical model.Gateway, selected []*gatewayv1.Listener, 
 	return matches, route.Rules, nil
 }
 
-func supportedMatch(match gatewayv1.HTTPRouteMatch, exactHeaders, methodMatch bool) (cloud.PathMatchType, string, error) {
+func supportedMatch(match gatewayv1.HTTPRouteMatch, exactHeaders, methodMatch, exactQueryParams bool) (cloud.PathMatchType, string, error) {
 	if len(match.Headers) != 0 && !exactHeaders {
 		return "", "", newRouteBuildError(routeErrorUnsupported, "exact HTTP header matching requires --octavia-http-header-exact")
 	}
 	if match.Method != nil && !methodMatch {
 		return "", "", newRouteBuildError(routeErrorUnsupported, "HTTP method matching requires --octavia-http-method-match")
+	}
+	if len(match.QueryParams) != 0 && !exactQueryParams {
+		return "", "", newRouteBuildError(routeErrorUnsupported, "exact HTTP query parameter matching requires --octavia-http-query-param-exact and --octavia-fixed-http-responses")
 	}
 	normalized, err := model.NormalizeMatch(match)
 	if err != nil {

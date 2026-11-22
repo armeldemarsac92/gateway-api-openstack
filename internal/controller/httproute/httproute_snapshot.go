@@ -77,6 +77,7 @@ type routeValidationSnapshot struct {
 	binding                routeBindingSnapshot
 	desired                cloud.RouteSpec
 	backends               *routeModelInputs
+	rejectedSections       []model.ListenerSection
 	backendDiagnostic      model.Diagnostic
 	backendTLSAncestorSlot backendtls.AncestorSlot
 	gatewayProgrammed      bool
@@ -145,13 +146,16 @@ func (r *Reconciler) buildRouteValidationSnapshotFromInputs(
 			return routeValidationSnapshot{}, err
 		}
 	}
-	if inputs.admission.conflicts[routeKey(snapshot.route)] {
+	key := routeKey(snapshot.route)
+	if inputs.admission.profileRejectedParent(key) {
 		return routeValidationSnapshot{}, routeSnapshotRejection(purpose, routeProfileConflict())
 	}
 	selection, _, err := r.selectRouteParents(ctx, snapshot.route, snapshot.parents, inputs.input.ListenerSetSections)
 	if err != nil {
 		return routeValidationSnapshot{}, err
 	}
+	snapshot.rejectedSections = inputs.admission.rejectedSections[key]
+	selection = selection.withoutProfileConflicts(snapshot.rejectedSections)
 	listeners := selection.listeners()
 	if len(listeners) == 0 {
 		return routeValidationSnapshot{}, routeSnapshotRejection(purpose, selection[0].rejection)
@@ -591,7 +595,7 @@ func (r *Reconciler) buildRouteCleanupSnapshot(
 		if err != nil {
 			return routeCleanupSnapshot{}, err
 		}
-		if admission.conflicts[routeKey(&route)] {
+		if admission.profileRejectedParent(routeKey(&route)) {
 			return snapshot, nil
 		}
 	}

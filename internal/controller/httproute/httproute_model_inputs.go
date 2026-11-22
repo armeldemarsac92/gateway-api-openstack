@@ -50,12 +50,17 @@ type routeModelInputs struct {
 }
 
 type routeGraphAdmission struct {
-	listenerSets map[types.NamespacedName][]gatewayv1.Listener
-	bindings     []routeGraphBinding
-	eligible     map[routeObjectKey]routeGraphCandidate
-	conflicts    map[routeObjectKey]bool
-	active       []gatewayv1.HTTPRoute
-	namespaces   []corev1.Namespace
+	listenerSets     map[types.NamespacedName][]gatewayv1.Listener
+	bindings         []routeGraphBinding
+	eligible         map[routeObjectKey]routeGraphCandidate
+	rejectedSections map[routeObjectKey][]model.ListenerSection
+	active           []gatewayv1.HTTPRoute
+	namespaces       []corev1.Namespace
+}
+
+func (a routeGraphAdmission) profileRejectedParent(key routeObjectKey) bool {
+	_, eligible := a.eligible[key]
+	return !eligible && len(a.rejectedSections[key]) != 0
 }
 
 type routeGraphCandidate struct {
@@ -65,7 +70,7 @@ type routeGraphCandidate struct {
 
 type routeProfileCandidate struct {
 	route     *gatewayv1.HTTPRoute
-	listeners []*gatewayv1.Listener
+	selection routeSelection
 	namespace types.UID
 }
 
@@ -109,7 +114,7 @@ func (r *Reconciler) observeRouteGraphAdmission(ctx context.Context, gateway *ga
 		if len(selected) == 0 {
 			continue
 		}
-		candidate := routeProfileCandidate{route: route, listeners: selected}
+		candidate := routeProfileCandidate{route: route, selection: selection}
 		if len(namespaces) != 0 && slices.ContainsFunc(selected, model.ObservesRouteNamespace) {
 			candidate.namespace = namespaces[0].UID
 		}
@@ -119,17 +124,18 @@ func (r *Reconciler) observeRouteGraphAdmission(ctx context.Context, gateway *ga
 		admission.namespaces = append(admission.namespaces, namespace...)
 	}
 	slices.SortFunc(admission.namespaces, func(a, b corev1.Namespace) int { return cmp.Compare(a.Name, b.Name) })
-	admission.conflicts = electRouteProfiles(candidatesForElection)
+	admission.rejectedSections = electRouteProfiles(candidatesForElection)
 	for _, candidate := range candidatesForElection {
 		route := candidate.route
-		if admission.conflicts[routeKey(route)] {
-			continue
-		}
+		key := routeKey(route)
 		var sections []sectionIdentity
-		for _, listener := range candidate.listeners {
+		for _, listener := range candidate.selection.withoutProfileConflicts(admission.rejectedSections[key]).listeners() {
 			sections = append(sections, listenerSectionIdentity(*listener))
 		}
-		admission.eligible[routeKey(route)] = routeGraphCandidate{routeUID: route.UID, sections: sections, namespaceUID: candidate.namespace}
+		if len(sections) == 0 {
+			continue
+		}
+		admission.eligible[key] = routeGraphCandidate{routeUID: route.UID, sections: sections, namespaceUID: candidate.namespace}
 		if controller.RouteClaimsGateway(r.Config, route, identity) || requested != nil && route.UID == requested.UID && routeKey(route) == routeKey(requested) {
 			admission.active = append(admission.active, *route)
 		}
@@ -137,10 +143,10 @@ func (r *Reconciler) observeRouteGraphAdmission(ctx context.Context, gateway *ga
 	return admission, nil
 }
 
-// A frontend cannot direct the same effective hostname to both route kinds
+// One listener section cannot direct the same effective hostname to both route kinds
 // without allowing HTTPRoute fallbacks to consume unmatched RPCs. Elect the
 // oldest eligible Route, then namespace/name, as allowed by the GRPCRoute API.
-func electRouteProfiles(candidates []routeProfileCandidate) map[routeObjectKey]bool {
+func electRouteProfiles(candidates []routeProfileCandidate) map[routeObjectKey][]model.ListenerSection {
 	if !slices.ContainsFunc(candidates, func(candidate routeProfileCandidate) bool {
 		return model.HTTPProfileRouteKind(candidate.route) == model.GRPCRouteKind
 	}) {
@@ -151,33 +157,40 @@ func electRouteProfiles(candidates []routeProfileCandidate) map[routeObjectKey]b
 			cmp.Compare(a.route.Namespace, b.route.Namespace), cmp.Compare(a.route.Name, b.route.Name))
 	})
 	type hostProfile struct {
-		port gatewayv1.PortNumber
-		kind gatewayv1.Kind
+		port    gatewayv1.PortNumber
+		section model.ListenerSection
+		kind    gatewayv1.Kind
 	}
 	accepted := make(map[hostProfile][]gatewayv1.Hostname)
-	conflicts := make(map[routeObjectKey]bool)
+	conflicts := make(map[routeObjectKey][]model.ListenerSection)
 	for _, candidate := range candidates {
-		var hosts []gatewayv1.Hostname
-		for _, listener := range candidate.listeners {
-			for _, hostname := range model.IntersectHostnames(listener.Hostname, candidate.route.Spec.Hostnames) {
-				hosts = append(hosts, gatewayv1.Hostname(hostname))
-			}
-		}
-		port := candidate.listeners[0].Port
 		kind := model.HTTPProfileRouteKind(candidate.route)
 		peer := model.GRPCRouteKind
 		if kind == model.GRPCRouteKind {
 			peer = model.HTTPRouteKind
 		}
-		peerHosts := accepted[hostProfile{port: port, kind: peer}]
-		if slices.ContainsFunc(peerHosts, func(other gatewayv1.Hostname) bool {
-			return other == "" || slices.Contains(hosts, "") || len(model.IntersectHostnames(&other, hosts)) != 0
-		}) {
-			conflicts[routeKey(candidate.route)] = true
-			continue
+		key := routeKey(candidate.route)
+		for _, parent := range candidate.selection {
+			if parent.rejection != nil {
+				continue
+			}
+			for _, listener := range parent.listeners {
+				section := parent.section(listener.Name)
+				profile := hostProfile{port: listener.Port, section: section, kind: kind}
+				var hostnames []gatewayv1.Hostname
+				for _, hostname := range model.IntersectHostnames(listener.Hostname, candidate.route.Spec.Hostnames) {
+					hostnames = append(hostnames, gatewayv1.Hostname(hostname))
+				}
+				peerHosts := accepted[hostProfile{port: listener.Port, section: section, kind: peer}]
+				if slices.ContainsFunc(peerHosts, func(other gatewayv1.Hostname) bool {
+					return other == "" || slices.Contains(hostnames, "") || len(model.IntersectHostnames(&other, hostnames)) != 0
+				}) {
+					conflicts[key] = append(conflicts[key], section)
+					continue
+				}
+				accepted[profile] = append(accepted[profile], hostnames...)
+			}
 		}
-		profile := hostProfile{port: port, kind: kind}
-		accepted[profile] = append(accepted[profile], hosts...)
 	}
 	return conflicts
 }
@@ -203,7 +216,7 @@ func (r *Reconciler) validateGraphRouteModel(ctx context.Context, inputs *routeM
 	if !equality.Semantic.DeepEqual(inputs.admission.listenerSets, current.listenerSets) || !maps.EqualFunc(inputs.admission.eligible, current.eligible, func(a, b routeGraphCandidate) bool {
 		return a.routeUID == b.routeUID && a.namespaceUID == b.namespaceUID && slices.Equal(a.sections, b.sections)
 	}) ||
-		!maps.Equal(inputs.admission.conflicts, current.conflicts) ||
+		!maps.EqualFunc(inputs.admission.rejectedSections, current.rejectedSections, slices.Equal[[]model.ListenerSection]) ||
 		!slices.Equal(inputs.admission.bindings, current.bindings) ||
 		!slices.EqualFunc(inputs.admission.active, current.active, func(a, b gatewayv1.HTTPRoute) bool {
 			return model.HTTPProfileRouteKind(&a) == model.HTTPProfileRouteKind(&b) && a.UID == b.UID && a.Generation == b.Generation && a.CreationTimestamp.Equal(&b.CreationTimestamp) &&
@@ -339,8 +352,18 @@ func (inputs *routeModelInputs) endpointSlices(key types.NamespacedName) []disco
 func (inputs *routeModelInputs) routeFragment(route *gatewayv1.HTTPRoute) model.Gateway {
 	logical := inputs.logical
 	logical.Routes = nil
+	rejected := inputs.admission.rejectedSections[routeKey(route)]
 	for _, candidate := range inputs.logical.Routes {
 		if candidate.Source.UID == route.UID && candidate.Source.Namespace == route.Namespace && candidate.Source.Name == route.Name {
+			if len(rejected) != 0 {
+				candidate.Parents = slices.Clone(candidate.Parents)
+				for i := range candidate.Parents {
+					parent := &candidate.Parents[i]
+					parent.Listeners = slices.DeleteFunc(slices.Clone(parent.Listeners), func(listener model.ListenerAttachment) bool {
+						return slices.Contains(rejected, model.ListenerSection{ListenerSet: model.ListenerSetRefKey(parent.Reference, route.Namespace), Name: listener.Name})
+					})
+				}
+			}
 			logical.Routes = []model.Route{candidate}
 			break
 		}
@@ -353,7 +376,8 @@ func (inputs *routeModelInputs) routeFragment(route *gatewayv1.HTTPRoute) model.
 		listener := &logical.Listeners[i]
 		listener.Rules = nil
 		for _, rule := range inputs.logical.Listeners[i].Rules {
-			if rule.Route.UID == route.UID && rule.Route.Namespace == route.Namespace && rule.Route.Name == route.Name {
+			if rule.Route.UID == route.UID && rule.Route.Namespace == route.Namespace && rule.Route.Name == route.Name &&
+				!slices.Contains(rejected, model.ListenerSection{ListenerSet: listener.ListenerSet, Name: listener.Name}) {
 				rule.Precedence += sectionOffset
 				listener.Rules = append(listener.Rules, rule)
 			}

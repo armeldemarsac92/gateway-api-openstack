@@ -73,6 +73,15 @@ func HTTPMatchKey(hostname string, pathType cloud.PathMatchType, path, method st
 // HTTPListenerMatchKey scopes a logical HTTP match without changing existing keys.
 func HTTPListenerMatchKey(scope string, match cloud.HTTPPathMatch) string {
 	key := HTTPMatchKey(match.Hostname, match.PathType, match.PathValue, match.Method, match.Headers...)
+	if len(match.QueryParams) != 0 {
+		key = httpTupleKey("query-params", key, "")
+		for _, param := range match.QueryParams {
+			key = httpTupleKey(key, param.Name, param.Value)
+		}
+	}
+	if match.HTTPListenerHostname != "" {
+		return httpTupleKey("http-listener", match.HTTPListenerHostname, key)
+	}
 	if scope == "" {
 		return key
 	}
@@ -94,8 +103,24 @@ func ScopedHTTPPolicyRole(base, match string) string {
 	}
 }
 
+// RoleRuleHTTPHostExclusion identifies a stock inverted hostname predicate.
+const RoleRuleHTTPHostExclusion = "l7-host-exclusion"
+
+const scalarHTTPHostExclusionPrefix = "http-host-exclusion-v1/"
+
+// ScalarHTTPHostExclusionRole identifies an exclusion in a legacy scalar policy.
+func ScalarHTTPHostExclusionRole(guard string) string {
+	if !validHTTPKey(guard) {
+		return ""
+	}
+	return scalarHTTPHostExclusionPrefix + guard
+}
+
 // RoleRuleHTTPHeaderExact identifies a predicate on a normalized header name.
 const RoleRuleHTTPHeaderExact = "l7-header-exact"
+
+// RoleRuleHTTPQueryParamExact identifies a predicate on a case-sensitive query parameter name.
+const RoleRuleHTTPQueryParamExact = "l7-query-param-exact"
 
 // RoleRuleHTTPMethod identifies the single method predicate in a match.
 const RoleRuleHTTPMethod = "l7-http-method"
@@ -103,9 +128,24 @@ const RoleRuleHTTPMethod = "l7-http-method"
 // RoleRuleGRPCContentType identifies the native gRPC media type predicate.
 const RoleRuleGRPCContentType = "l7-grpc-content-type"
 
+// HTTPRuleNeedsPolicyIdentity reports whether a predicate must use a role scoped to its policy.
+func HTTPRuleNeedsPolicyIdentity(role string) bool {
+	switch role {
+	case RoleRuleRedirectGuard, RoleRuleHTTPHostExclusion, RoleRuleHTTPHeaderExact,
+		RoleRuleHTTPQueryParamExact, RoleRuleHTTPMethod, RoleRuleGRPCContentType:
+		return true
+	}
+	return false
+}
+
 // HTTPHeaderRuleKey identifies one field within an exact-header conjunction.
 func HTTPHeaderRuleKey(name string) string {
 	return httpTupleKey("exact-header", name, "")
+}
+
+// HTTPQueryParamRuleKey identifies one name within an exact query parameter conjunction.
+func HTTPQueryParamRuleKey(name string) string {
+	return httpTupleKey("exact-query-param", name, "")
 }
 
 func httpTupleKey(first, second, third string) string {
@@ -159,7 +199,7 @@ func httpMatchRole(role, base, match string, predicateKeys []string) string {
 		if len(predicateKeys) == 0 {
 			return role + "/" + match
 		}
-	case RoleRuleHTTPHeaderExact:
+	case RoleRuleHTTPHeaderExact, RoleRuleHTTPQueryParamExact, RoleRuleHTTPHostExclusion:
 		if len(predicateKeys) == 1 && validHTTPKey(predicateKeys[0]) {
 			return role + "/" + match + "/" + predicateKeys[0]
 		}
@@ -173,6 +213,9 @@ func IsHTTPWeightedPolicyRole(role string) bool {
 
 // ParseHTTPFragmentRole recognizes only roles the HTTP path writer can create.
 func ParseHTTPFragmentRole(raw string) (base, backendKey, matchKey string, ok bool) {
+	if guard, found := strings.CutPrefix(raw, scalarHTTPHostExclusionPrefix); found && validHTTPKey(guard) {
+		return RoleRuleHTTPHostExclusion, "", "", true
+	}
 	if scoped, found := strings.CutPrefix(raw, scopedHTTPRolePrefix); found {
 		base, match, _ := strings.Cut(scoped, "/")
 		if ScopedHTTPPolicyRole(base, match) == raw {
@@ -223,7 +266,7 @@ func HTTPRedirectRole(base, match, cell, guard string) string {
 		if guard == "" {
 			return role
 		}
-	case RoleRuleRedirectGuard, RoleRuleHTTPHeaderExact:
+	case RoleRuleRedirectGuard, RoleRuleHTTPHeaderExact, RoleRuleHTTPQueryParamExact, RoleRuleHTTPHostExclusion:
 		if validHTTPKey(guard) {
 			return role + "/" + guard
 		}

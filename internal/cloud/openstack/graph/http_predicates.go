@@ -41,6 +41,10 @@ var (
 		capability: octavia.GatewayCapabilityHTTPHeaderExact, role: openstackidentity.RoleRuleHTTPHeaderExact,
 		label: "exact HTTP header", required: func(policy desiredPolicy) bool { return len(policy.headers) != 0 },
 	}
+	exactHTTPQueryParamPredicate = protectedHTTPPredicate{
+		capability: octavia.GatewayCapabilityHTTPQueryParamExact, role: openstackidentity.RoleRuleHTTPQueryParamExact,
+		label: "exact HTTP query parameter", required: desiredPolicy.requiresExactQueryParams,
+	}
 	httpMethodPredicate = protectedHTTPPredicate{
 		capability: octavia.GatewayCapabilityHTTPMethodMatch, role: openstackidentity.RoleRuleHTTPMethod,
 		label: "HTTP method", required: func(policy desiredPolicy) bool { return policy.method != "" },
@@ -57,6 +61,11 @@ var (
 		},
 	}
 )
+
+func (policy desiredPolicy) requiresExactQueryParams() bool {
+	return len(policy.queryParams) != 0 || policy.redirect != nil &&
+		slices.ContainsFunc(policy.redirect.guards, func(guard redirectGuard) bool { return guard.ruleType == httpQueryParamExactRuleType })
+}
 
 type guardedHTTPListener struct {
 	desired, unsettled, installed bool

@@ -337,7 +337,35 @@ type routeParentSelection struct {
 	rejection error
 }
 
+func (p routeParentSelection) section(name gatewayv1.SectionName) model.ListenerSection {
+	section := model.ListenerSection{Name: name}
+	if p.parent.listenerSet != nil {
+		section.ListenerSet = client.ObjectKeyFromObject(p.parent.listenerSet)
+	}
+	return section
+}
+
 type routeSelection []routeParentSelection
+
+func (s routeSelection) withoutProfileConflicts(rejected []model.ListenerSection) routeSelection {
+	if len(rejected) == 0 {
+		return s
+	}
+	selected := slices.Clone(s)
+	for i := range selected {
+		parent := &selected[i]
+		if parent.rejection != nil {
+			continue
+		}
+		parent.listeners = slices.DeleteFunc(slices.Clone(parent.listeners), func(listener *gatewayv1.Listener) bool {
+			return slices.Contains(rejected, parent.section(listener.Name))
+		})
+		if len(parent.listeners) == 0 {
+			parent.rejection = routeProfileConflict()
+		}
+	}
+	return selected
+}
 
 func (s routeSelection) listeners() []*gatewayv1.Listener {
 	var listeners []*gatewayv1.Listener

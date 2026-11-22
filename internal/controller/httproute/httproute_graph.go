@@ -40,6 +40,7 @@ const (
 
 type routeGraphResult struct {
 	bindingState           routeBindingState
+	rejectedSections       []model.ListenerSection
 	backendObserved        bool
 	backendDiagnostic      model.Diagnostic
 	backendTLSAncestorSlot backendtls.AncestorSlot
@@ -133,6 +134,7 @@ func (r *Reconciler) prepareRouteGraphBinding(ctx context.Context, route *gatewa
 		return routeGraphResult{}, err
 	}
 	prepared := routeGraphResult{
+		rejectedSections:       snapshot.rejectedSections,
 		backendObserved:        snapshot.backends != nil,
 		backendDiagnostic:      snapshot.backendDiagnostic,
 		backendTLSAncestorSlot: snapshot.backendTLSAncestorSlot,

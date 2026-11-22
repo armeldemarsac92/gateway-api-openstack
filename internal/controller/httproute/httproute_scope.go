@@ -32,6 +32,7 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	gatewaycontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
 type routeStatusPlanKind int
@@ -60,13 +61,14 @@ type routeProviderWarning struct {
 }
 
 type httpRouteScope struct {
-	route           *gatewayv1.HTTPRoute
-	statusPlan      *routeStatusPlan
-	parentSelection routeSelection
-	warning         *routeProviderWarning
-	patchCause      error
-	skipPatch       bool
-	versionSkew     bool
+	route            *gatewayv1.HTTPRoute
+	statusPlan       *routeStatusPlan
+	parentSelection  routeSelection
+	rejectedSections []model.ListenerSection
+	warning          *routeProviderWarning
+	patchCause       error
+	skipPatch        bool
+	versionSkew      bool
 }
 
 func (r *Reconciler) newHTTPRouteScope(
@@ -86,7 +88,7 @@ func (r *Reconciler) newHTTPRouteScope(
 
 func (s *httpRouteScope) completeParentUpdates(updates []parentStatusUpdate) []parentStatusUpdate {
 	if len(s.parentSelection) > 1 && len(updates) == 1 {
-		return s.parentSelection.statusUpdates(updates[0].status)
+		return s.parentSelection.withoutProfileConflicts(s.rejectedSections).statusUpdates(updates[0].status)
 	}
 	return updates
 }

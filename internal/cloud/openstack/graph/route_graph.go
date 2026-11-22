@@ -81,6 +81,7 @@ type routeGraphOwner struct {
 	expectsHTTPParts           bool
 	expectsBackendTLS          bool
 	requiresPolicyAbsenceProof bool
+	requiresHTTPHostIsolation  bool
 }
 
 func (owner routeGraphOwner) matchesRoute(tags []string, role string) bool {
@@ -102,8 +103,7 @@ func readRouteResourceRole(tags []string, bases ...string) (routeResourceRole, b
 	if !ok {
 		return routeResourceRole{}, false
 	}
-	if slices.Contains(bases, raw) && raw != roleRuleRedirectGuard && raw != openstackidentity.RoleRuleHTTPHeaderExact &&
-		raw != openstackidentity.RoleRuleHTTPMethod && raw != openstackidentity.RoleRuleGRPCContentType {
+	if slices.Contains(bases, raw) && !openstackidentity.HTTPRuleNeedsPolicyIdentity(raw) {
 		return routeResourceRole{raw: raw, base: raw}, true
 	}
 	if base, match, cell, _, ok := openstackidentity.ParseHTTPRedirectRole(raw); ok {
@@ -290,7 +290,9 @@ func (p *Provider) observeRouteGraphsFromPools(ctx context.Context, owners []rou
 	defaultPool := usesDefaultPool(protocol)
 	scopedHTTP := protocol == cloud.ListenerProtocolHTTP && scopedListeners != nil
 	strictHTTP := scopedHTTP || protocol == cloud.ListenerProtocolHTTP && p.fixedHTTPResponses || containsHTTPFragmentPool(poolItems) ||
-		slices.ContainsFunc(owners, func(owner routeGraphOwner) bool { return owner.expectsHTTPParts || owner.expectsBackendTLS }) ||
+		slices.ContainsFunc(owners, func(owner routeGraphOwner) bool {
+			return owner.expectsHTTPParts || owner.expectsBackendTLS || owner.requiresHTTPHostIsolation
+		}) ||
 		slices.ContainsFunc(poolItems, func(pool pools.Pool) bool {
 			return hasObservedBackendTLS(pool, poolInventory.BackendTLS[pool.ID])
 		}) || recoverGateway != nil
@@ -677,15 +679,15 @@ func (p *Provider) observeRoutePolicy(ctx context.Context, owner routeGraphOwner
 			return observedRoutePolicy{}, err
 		}
 		ruleRole, ok := readRouteResourceRole(rule.Tags, roleRulePath, roleRuleHost, roleRuleRedirectGuard,
-			openstackidentity.RoleRuleHTTPHeaderExact, openstackidentity.RoleRuleHTTPMethod, openstackidentity.RoleRuleGRPCContentType)
+			openstackidentity.RoleRuleHTTPHostExclusion, openstackidentity.RoleRuleHTTPHeaderExact,
+			openstackidentity.RoleRuleHTTPQueryParamExact, openstackidentity.RoleRuleHTTPMethod, openstackidentity.RoleRuleGRPCContentType)
 		if !ok || !owner.matchesRoute(rule.Tags, ruleRole.raw) || ruleRole.backend != role.backend ||
 			ruleRole.match != role.match || ruleRole.redirect != role.redirect || ruleRole.weighted != role.weighted ||
 			role.backend != "" && rule.ProjectID != p.projectID {
 			return observedRoutePolicy{}, fmt.Errorf("%w: L7 rule %s beneath policy %s has an unproven project or route, backend or match identity", cloud.ErrOwnershipConflict, rule.ID, item.ID)
 		}
 		flagsObserved := observation.AdminState != nil && observation.Inverted != nil
-		if (role.redirect || ruleRole.base == openstackidentity.RoleRuleHTTPHeaderExact ||
-			ruleRole.base == openstackidentity.RoleRuleHTTPMethod || ruleRole.base == openstackidentity.RoleRuleGRPCContentType) &&
+		if (role.redirect || openstackidentity.HTTPRuleNeedsPolicyIdentity(ruleRole.base)) &&
 			(!flagsObserved || rule.RuleType == "" || rule.CompareType == "" || rule.Value == "") {
 			return observedRoutePolicy{}, cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady,
 				fmt.Errorf("HTTP rule %s has incomplete predicate or administrative state", rule.ID))
@@ -751,6 +753,7 @@ type routeMutation struct {
 	requestHeaderOperations  []cloud.HTTPHeaderOperation
 	responseHeaderOperations []cloud.HTTPHeaderOperation
 	requiresExactHeaders     bool
+	requiresExactQueryParams bool
 	requiresHTTPMethod       bool
 }
 
@@ -995,7 +998,8 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 					policy:                   desiredPolicy{httpsListenerHostname: wantedPolicy.httpsListenerHostname},
 					requestHeaderOperations:  wantedPolicy.requestHeaderOperations,
 					responseHeaderOperations: wantedPolicy.responseHeaderOperations,
-					requiresExactHeaders:     len(wantedPolicy.headers) != 0, requiresHTTPMethod: wantedPolicy.method != ""}}, state, nil
+					requiresExactHeaders:     len(wantedPolicy.headers) != 0,
+					requiresExactQueryParams: wantedPolicy.requiresExactQueryParams(), requiresHTTPMethod: wantedPolicy.method != ""}}, state, nil
 			}
 		}
 	}
@@ -1060,6 +1064,7 @@ func buildRoutePolicyPlan(
 			plan = append(plan, routeMutation{kind: routeMutationSetPolicyHTTPSListenerHostname, id: policy.ID, policy: wantedPolicy})
 			continue
 		}
+		policyPlanStart := len(plan)
 		weighted := wantedPolicy.weightedPlan
 		targetUpdate := weighted != nil && (!slices.EqualFunc(weighted.targets, observedPolicy.weightedTargets, weightedTargetsEqual) || policy.ProvisioningStatus == "ERROR") ||
 			desired.fixedResponse && (!observedPolicy.fixedResponse || policy.ProvisioningStatus == "ERROR") ||
@@ -1087,14 +1092,17 @@ func buildRoutePolicyPlan(
 			plan = append(plan, routeMutation{kind: routeMutationUpdatePolicy, id: policy.ID, parentID: poolID, policy: wantedPolicy})
 		}
 
+		rulePlanStart := len(plan)
 		wantedRules := rulesFor(wantedPolicy, desired.hostnameRuleValue)
 		actualRules := make(map[string]observedRouteRule, len(observedPolicy.rules))
 		for _, rule := range observedPolicy.rules {
 			actualRules[rule.role] = rule
 		}
+		missingRules := 0
 		for _, wantedRule := range wantedRules {
 			observedRule, exists := actualRules[wantedRule.role]
 			if !exists {
+				missingRules++
 				plan = append(plan, routeMutation{kind: routeMutationCreateRule, parentID: policy.ID, rule: wantedRule})
 				continue
 			}
@@ -1117,8 +1125,20 @@ func buildRoutePolicyPlan(
 			staleRules = append(staleRules, rule)
 		}
 		sort.Slice(staleRules, func(i, j int) bool { return staleRules[i].rule.ID < staleRules[j].rule.ID })
+		staleRulePlanStart := len(plan)
 		for _, rule := range staleRules {
 			plan = append(plan, routeMutation{kind: routeMutationDeleteRule, id: rule.rule.ID, parentID: policy.ID})
+		}
+		if len(staleRules) != 0 && len(observedPolicy.rules)+missingRules > maxOctaviaL7RulesPerPolicy {
+			// Make room only after Octavia proves the policy is disabled.
+			// After each mutation the graph reads back the remaining rules.
+			if !observedPolicyDisabled(observedPolicy) {
+				disablePlan = append(disablePlan, routeMutation{kind: routeMutationDisablePolicy, id: policy.ID,
+					retry: policy.ProvisioningStatus == "ERROR", withdrawHTTPPolicy: true})
+				plan = plan[:policyPlanStart]
+				continue
+			}
+			plan = slices.Concat(plan[:rulePlanStart], plan[staleRulePlanStart:], plan[rulePlanStart:staleRulePlanStart])
 		}
 		// A failed policy update can leave Octavia's desired admin state in
 		// the database even while Amphora still uses an earlier configuration.
@@ -1369,7 +1389,7 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 		})
 	case routeMutationUpdateRule:
 		var key *string
-		if step.rule.ruleType == httpHeaderExactRuleType {
+		if step.rule.ruleType == httpHeaderExactRuleType || step.rule.ruleType == httpQueryParamExactRuleType {
 			key = &step.rule.key
 		}
 		_, err = p.octavia.UpdateRule(ctx, step.parentID, step.id, l7policies.UpdateRuleOpts{
