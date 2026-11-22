@@ -1,0 +1,262 @@
+{
+  "passed": true,
+  "channel": "experimental",
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "fixtureScope": "integrated-candidate",
+  "controllerRevision": "696af2a79acc150028d7d5090b651a4bbf672297",
+  "managerSHA256": "6fbba45196a38302274ec16da1d1bdce81b044cd29387f4136e4eca4ed9cd893",
+  "openStackResyncInterval": "10m",
+  "kindAPITCPNoDelay": true,
+  "octavia": {
+    "revision": "ba89a2d6237aa1a1b754ad7234899c12de39a4d2",
+    "version": "19.0.1.dev11",
+    "sha256": "965df48a31d61f21ef56d60c5659987fa139b142642998baedcaf6c0403f44ea",
+    "filesVerified": 632
+  },
+  "octaviaLib": {
+    "revision": "8ac88a770cc3b3ebf7cf647e11f25a4b3c6e91b6",
+    "version": "3.12.1.dev4",
+    "sha256": "e47a8a54cd9d15ad9333ed7acbe07d8baf0ba9567332414b4fdcd152761cc57c",
+    "filesVerified": 24
+  },
+  "HAProxy": {
+    "version": "3.0.19-ade9c1262-octavia-strict-dns-v1",
+    "sha256": "fa8468efa26f95ed83a36afeb97b79730de285450b7a8fae94f7cf5e6d2d0824",
+    "strictDNSAgentCapability": true
+  },
+  "barbican": {
+    "version": "23.0.0",
+    "endpoint": "regional HTTPS with verification"
+  },
+  "echoSHA256": "d4e04b904229880dc2e32dbe58244b3bf46408c2e1e8325ebb83a69fab3d57a9",
+  "registeredCases": {
+    "BackendTLSPolicyConflictResolution": {
+      "passed": true,
+      "exit": 0,
+      "subtestsPassed": 13,
+      "events": [
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution (29.41s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/Conflicting_BackendTLSPolicies_targeting_the_same_Service_without_a_section_name (22.60s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/Conflicting_BackendTLSPolicies_targeting_the_same_Service_without_a_section_name/First_BackendTLSPolicy_should_be_accepted (0.00s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/Conflicting_BackendTLSPolicies_targeting_the_same_Service_without_a_section_name/Second_BackendTLSPolicy_should_have_a_false_Accepted_condition_with_reason_Conflicted_ (0.00s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/Conflicting_BackendTLSPolicies_targeting_the_same_Service_without_a_section_name/HTTP_request_sent_to_Service_using_the_accepted_BackendTLSPolicy_should_succeed (22.60s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/Conflicting_BackendTLSPolicies_targeting_the_same_Service_with_the_same_section_name (1.56s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/Conflicting_BackendTLSPolicies_targeting_the_same_Service_with_the_same_section_name/First_BackendTLSPolicy_should_be_accepted (0.00s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/Conflicting_BackendTLSPolicies_targeting_the_same_Service_with_the_same_section_name/Second_BackendTLSPolicy_should_have_a_false_Accepted_condition_with_reason_Conflicted_ (0.00s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/Conflicting_BackendTLSPolicies_targeting_the_same_Service_with_the_same_section_name/HTTP_request_sent_to_Service_using_the_accepted_BackendTLSPolicy_should_succeed (1.56s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/BackendTLSPolicies_targeting_the_same_Service_with_and_without_a_section_name (3.33s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/BackendTLSPolicies_targeting_the_same_Service_with_and_without_a_section_name/BackendTLSPolicy_with_section_name_should_be_accepted (0.00s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/BackendTLSPolicies_targeting_the_same_Service_with_and_without_a_section_name/BackendTLSPolicy_without_section_name_should_be_accepted (0.00s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/BackendTLSPolicies_targeting_the_same_Service_with_and_without_a_section_name/HTTP_request_sent_to_Service_using_the_BackendTLSPolicy_with_section_name_should_succeed (1.76s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/BackendTLSPolicies_targeting_the_same_Service_with_and_without_a_section_name/HTTP_request_sent_to_Service_using_the_BackendTLSPolicy_without_section_name_should_succeed (1.56s)"
+      ],
+      "expectedSubtests": 13,
+      "bodySHA256": "93e545da2af0a65d82c0cb60388e2e0175adf406278de7f27f66f87d2ffab28c",
+      "manifestSHA256": "ad6f210266dac418be158eb5de05194ad5e4dd560b1c85b8a0936e2f76699d76",
+      "requestLogCount": 278,
+      "wallSeconds": 32.28
+    }
+  },
+  "supplementalTraffic": {},
+  "releaseBundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+  "upstreamBaseManifestsSHA256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+  "frontendSecretEnrollment": "exact UID/resourceVersion and PKCS#12 verified by operator helper",
+  "regionalAmphoraCapabilities": [
+    "fixed_http_responses_v1",
+    "weighted_http_targets_v1",
+    "backend_tls_hostname_v1"
+  ],
+  "tlsEchoWorkload": {
+    "runtime": "kind",
+    "pods": [
+      {
+        "name": "tls-backend-5877f989d6-dk89f",
+        "phase": "Running",
+        "ready": true,
+        "imageID": "docker.io/library/import-2026-11-22@sha256:abd48b88affd1c16e8d60d06cdc661919a8980bba8fc9068f3d216d814268adb"
+      }
+    ]
+  },
+  "tlsEchoInputVerified": true,
+  "gatewayclass": {
+    "qualification": {
+      "generation": 1,
+      "conditions": {
+        "Accepted": "True/Accepted",
+        "SupportedVersion": "True/SupportedVersion"
+      }
+    }
+  },
+  "gateway": {
+    "same-namespace": {
+      "generation": 1,
+      "conditions": {
+        "Accepted": "True/Accepted",
+        "Programmed": "True/Programmed"
+      },
+      "listeners": [
+        {
+          "peer": "http",
+          "controller": null,
+          "observedGeneration": [
+            1
+          ],
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "Conflicted": "False/NoConflicts",
+            "Programmed": "True/Programmed"
+          }
+        }
+      ]
+    }
+  },
+  "httproute": {
+    "backendtlspolicy-conflict-resolution": {
+      "generation": 1,
+      "conditions": {},
+      "parents": [
+        {
+          "peer": "same-namespace",
+          "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+          "observedGeneration": [
+            1
+          ],
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "False/Pending"
+          }
+        }
+      ]
+    }
+  },
+  "backendtlspolicy": {
+    "conflicted-with-section-name-1": {
+      "generation": 1,
+      "conditions": {},
+      "ancestors": [
+        {
+          "peer": "same-namespace",
+          "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+          "observedGeneration": [
+            1
+          ],
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          }
+        }
+      ]
+    },
+    "conflicted-with-section-name-2": {
+      "generation": 1,
+      "conditions": {},
+      "ancestors": [
+        {
+          "peer": "same-namespace",
+          "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+          "observedGeneration": [
+            1
+          ],
+          "conditions": {
+            "Accepted": "False/Conflicted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          }
+        }
+      ]
+    },
+    "conflicted-without-section-name-1": {
+      "generation": 1,
+      "conditions": {},
+      "ancestors": [
+        {
+          "peer": "same-namespace",
+          "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+          "observedGeneration": [
+            1
+          ],
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          }
+        }
+      ]
+    },
+    "conflicted-without-section-name-2": {
+      "generation": 1,
+      "conditions": {},
+      "ancestors": [
+        {
+          "peer": "same-namespace",
+          "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+          "observedGeneration": [
+            1
+          ],
+          "conditions": {
+            "Accepted": "False/Conflicted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          }
+        }
+      ]
+    },
+    "not-conflicted-with-section-name": {
+      "generation": 1,
+      "conditions": {},
+      "ancestors": [
+        {
+          "peer": "same-namespace",
+          "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+          "observedGeneration": [
+            1
+          ],
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          }
+        }
+      ]
+    },
+    "not-conflicted-without-section-name": {
+      "generation": 1,
+      "conditions": {},
+      "ancestors": [
+        {
+          "peer": "same-namespace",
+          "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+          "observedGeneration": [
+            1
+          ],
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          }
+        }
+      ]
+    }
+  },
+  "restResponses": {
+    "GET providers 200": 98,
+    "GET loadbalancers 200": 69,
+    "POST loadbalancers 201": 1,
+    "GET listeners 200": 34,
+    "GET pools 200": 34,
+    "POST listeners 201": 1,
+    "GET l7policies 200": 33,
+    "POST pools 201": 4,
+    "GET members 200": 94,
+    "GET healthmonitors 200": 94,
+    "POST members 201": 4,
+    "POST healthmonitors 201": 4,
+    "POST l7policies 201": 4,
+    "GET rules 200": 46,
+    "POST rules 201": 8,
+    "PUT l7policies 200": 4
+  },
+  "nativeBatchMemberDeletes": 0,
+  "nativeHAProxyReloadCount": 5,
+  "strictDNSConfigReloadsByHostname": {
+    "other.example.com": 9,
+    "abc.example.com": 1
+  }
+}
