@@ -35,6 +35,50 @@
       },
       "listenerSetParentLifecycleAndRouteNamespaceLabelTransitions": "PASS",
       "logSHA256": "bd4237b21031e1ec57788a055859e107a64eaa15d01baaaeba674c0368fb1d4b"
+    },
+    {
+      "channel": "standard",
+      "mode": "Kubernetes 1.36.2 envtest with recording OpenStack provider",
+      "controllerRevision": "ce33dd73a1023f87e61756714f2b288aed1991ba",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "registeredCases": {
+        "ListenerSetRouteStatusScopedToParentRef": "PASS"
+      },
+      "originalCaseSHA256": "44cf3f387632cedbacade29b9f1e1df4be19edee002716f20101abdc0462df1d",
+      "originalManifestSHA256": "820a101d51e5d5efbcd5f3180c773767da414ca1f1b6b6e513fe5e6eb9070acf",
+      "upstreamSubtests": {
+        "Gateway-only_parentRef": "PASS",
+        "ListenerSet-only_parentRef": "PASS"
+      },
+      "upstreamParentStatusObservations": [
+        "Route gateway-conformance-infra/route-parentref-gwonly Parents matched expectations",
+        "Route gateway-conformance-infra/route-parentref-lsonly Parents matched expectations",
+        "Route gateway-conformance-infra/route-parentref-lsonly Parents matched expectations"
+      ],
+      "trafficRequests": 0,
+      "logSHA256": "2f377f9a36a31f051f6e60f427c8004b4de16ed6d459d212c842dc877e34d0c6"
+    },
+    {
+      "channel": "experimental",
+      "mode": "Kubernetes 1.36.2 envtest with recording OpenStack provider",
+      "controllerRevision": "ce33dd73a1023f87e61756714f2b288aed1991ba",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "registeredCases": {
+        "ListenerSetRouteStatusScopedToParentRef": "PASS"
+      },
+      "originalCaseSHA256": "44cf3f387632cedbacade29b9f1e1df4be19edee002716f20101abdc0462df1d",
+      "originalManifestSHA256": "820a101d51e5d5efbcd5f3180c773767da414ca1f1b6b6e513fe5e6eb9070acf",
+      "upstreamSubtests": {
+        "Gateway-only_parentRef": "PASS",
+        "ListenerSet-only_parentRef": "PASS"
+      },
+      "upstreamParentStatusObservations": [
+        "Route gateway-conformance-infra/route-parentref-gwonly Parents matched expectations",
+        "Route gateway-conformance-infra/route-parentref-lsonly Parents matched expectations",
+        "Route gateway-conformance-infra/route-parentref-lsonly Parents matched expectations"
+      ],
+      "trafficRequests": 0,
+      "logSHA256": "07ea598d25b545922d8b7d1d8da746799ba9b07b0f91b7932b73acfea632413d"
     }
   ],
   "coldKindEvidence": [
