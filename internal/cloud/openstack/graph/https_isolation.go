@@ -120,17 +120,21 @@ func (p *Provider) observeHTTPSIsolation(ctx context.Context, desired desiredGat
 		if desired.spec.Routes[index].Disposition != cloud.GraphEnsure {
 			continue
 		}
-		port := scopedHTTPRoutePort(route)
-		if len(httpsVirtualHosts(configured[port])) == 0 {
-			continue
-		}
-		if wanted[port] == nil {
-			wanted[port] = make(map[string][]httpsPolicyBinding)
-		}
-		for _, policies := range route.policySets() {
-			for _, policy := range policies {
+		add := func(part desiredRoute) {
+			port := scopedHTTPRoutePort(part)
+			if len(httpsVirtualHosts(configured[port])) == 0 {
+				return
+			}
+			if wanted[port] == nil {
+				wanted[port] = make(map[string][]httpsPolicyBinding)
+			}
+			for _, policy := range part.policies {
 				wanted[port][policy.role] = append(wanted[port][policy.role], httpsPolicyBinding{route.identity, policy.httpsListenerHostname})
 			}
+		}
+		add(route)
+		for _, part := range route.httpParts {
+			add(part)
 		}
 	}
 	for _, listener := range actual.scopedListeners {

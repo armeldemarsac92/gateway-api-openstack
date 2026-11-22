@@ -288,7 +288,7 @@ func TestObserveFixedPolicyRequiresVerifiedTargetAndOwner(t *testing.T) {
 			})))}
 			inventory := routeGraphInventory{owners: []routeGraphOwner{{identity: identity}}, graphs: make([]observedRouteGraph, 1)}
 			listener := &listeners.Listener{ID: "listener-1", L7Policies: []l7policies.L7Policy{{ID: "policy-1"}}}
-			err := provider.observeListenerPolicies(t.Context(), &inventory, listener, cloud.ListenerProtocolHTTP, nil, map[int]string{}, true)
+			err := provider.observeListenerPolicies(t.Context(), &inventory, listener, cloud.ListenerProtocolHTTP, nil, true)
 			if test.change || test.remove {
 				if !errors.Is(err, cloud.ErrOwnershipConflict) {
 					t.Fatalf("expected ambiguous or conflicting target to block the graph, got %v", err)

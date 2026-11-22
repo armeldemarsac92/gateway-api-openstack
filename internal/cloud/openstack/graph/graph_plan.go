@@ -995,8 +995,8 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 			tags = append(tags, scopedPortTag(protocol, port))
 		}
 		if desired.plainHTTPRuleLimits[port] != "" || slices.ContainsFunc(desired.routes, func(route desiredRoute) bool {
-			return httpURLPolicyRoutePort(desired, route) == port && slices.ContainsFunc(route.httpParts, func(part desiredRoute) bool {
-				return slices.ContainsFunc(part.policies, func(policy desiredPolicy) bool {
+			return slices.ContainsFunc(route.httpParts, func(part desiredRoute) bool {
+				return httpURLPolicyRoutePort(desired, part) == port && slices.ContainsFunc(part.policies, func(policy desiredPolicy) bool {
 					return requestRedirectPolicy.required(policy) || requestURLRewritePolicy.required(policy) || requestCORSPolicy.required(policy)
 				})
 			})

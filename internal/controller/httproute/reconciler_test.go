@@ -397,6 +397,215 @@ func TestGatewayWithAttachedRoutesWithPort8080(t *testing.T) {
 	}
 }
 
+func TestHTTPRouteParentTracksAddedAndRemovedPorts(t *testing.T) {
+	cfg := testConfig()
+	class, gateway := providerRouteParentObjects(cfg)
+	http := gateway.Spec.Listeners[0]
+	http.Hostname = ptr.To(gatewayv1.Hostname("http.example.test"))
+	other := gatewayv1.Listener{Name: "other", Port: 8080, Protocol: gatewayv1.HTTPProtocolType, Hostname: ptr.To(gatewayv1.Hostname("other.example.test"))}
+	blocked := gatewayv1.Listener{Name: "blocked", Port: 8081, Protocol: gatewayv1.HTTPProtocolType, Hostname: other.Hostname,
+		AllowedRoutes: &gatewayv1.AllowedRoutes{Namespaces: &gatewayv1.RouteNamespaces{From: ptr.To(gatewayv1.NamespacesFromSelector),
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"routes": "allowed"}}}}}
+	unmatched := gatewayv1.Listener{Name: "unmatched", Port: 8082, Protocol: gatewayv1.HTTPProtocolType, Hostname: ptr.To(gatewayv1.Hostname("unmatched.other.test"))}
+	both := []gatewayv1.Listener{http, other, blocked, unmatched}
+	gateway.Spec.Listeners = both
+	parent := gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name)}
+	route := mapperTestHTTPRoute(gateway.Namespace, "attached", parent, "backend")
+	route.UID, route.Generation = "attached-uid", 1
+	route.Spec.Hostnames = []gatewayv1.Hostname{"*.example.test"}
+	service, endpoints, node := validNodePortBackend(gateway.Namespace, "backend")
+	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gateway, route).
+		WithObjects(class, gateway, route, service, endpoints, node).Build()
+	ready := cloud.GatewayReadyResult(cloud.GatewayState{LoadBalancerID: "lb-1", ListenerID: "listener-1", VIPAddress: "192.0.2.10"})
+	ready.ScopedListenerReadyPorts = []int{80, 8080, 8081, 8082}
+	provider := &recordingProvider{gatewayResult: &ready}
+	coordinator := &graph.Coordinator{}
+	gr := newTestGatewayReconciler(gatewaycontroller.Reconciler{Client: kube, APIReader: kube, Coordinator: coordinator, Config: cfg}, provider)
+	r := &Reconciler{Client: kube, APIReader: kube, Writer: gr.Writer, Coordinator: coordinator, Config: cfg}
+
+	ctx := t.Context()
+	gatewayReq := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(gateway)}
+	routeReq := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(route)}
+	check := func(sections []gatewayv1.Listener, programmed bool, wantPorts []int, attached map[gatewayv1.SectionName]int32) {
+		t.Helper()
+		if err := kube.Get(ctx, gatewayReq.NamespacedName, gateway); err != nil {
+			t.Fatal(err)
+		}
+		if !slices.EqualFunc(gateway.Spec.Listeners, sections, func(a, b gatewayv1.Listener) bool { return a.Name == b.Name }) {
+			gateway.Spec.Listeners = sections
+			gateway.Generation++
+			if err := kube.Update(ctx, gateway); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for attempt := range 2 {
+			if _, err := gr.Reconcile(ctx, gatewayReq); err != nil {
+				t.Fatalf("Gateway reconciliation %d: %v", attempt, err)
+			}
+		}
+		for attempt := range 2 {
+			if _, err := r.Reconcile(ctx, routeReq); err != nil {
+				t.Fatalf("HTTPRoute reconciliation %d: %v", attempt, err)
+			}
+		}
+		if _, err := gr.Reconcile(ctx, gatewayReq); err != nil {
+			t.Fatalf("Gateway reconciliation after route update: %v", err)
+		}
+		if err := kube.Get(ctx, routeReq.NamespacedName, route); err != nil {
+			t.Fatal(err)
+		}
+		if len(route.Status.Parents) != 1 {
+			t.Fatalf("expected one status for the original parentRef, got %#v", route.Status.Parents)
+		}
+		assertElectionParentAccepted(t, route, parent, metav1.ConditionTrue)
+		hasProgrammed := meta.IsStatusConditionTrue(route.Status.Parents[0].Conditions, cfg.Domain()+"/Programmed")
+		if hasProgrammed != programmed {
+			t.Fatalf("expected Programmed=%t, got %#v", programmed, route.Status.Parents[0].Conditions)
+		}
+		if err := kube.Get(ctx, gatewayReq.NamespacedName, gateway); err != nil {
+			t.Fatal(err)
+		}
+		for name, count := range attached {
+			i := slices.IndexFunc(gateway.Status.Listeners, func(status gatewayv1.ListenerStatus) bool { return status.Name == name })
+			if i < 0 || gateway.Status.Listeners[i].AttachedRoutes != count {
+				t.Fatalf("expected %d attachment(s) on %q, got %#v", count, name, gateway.Status.Listeners)
+			}
+		}
+		if len(provider.routeSpecs) == 0 {
+			t.Fatal("controller provided no route graph")
+		}
+		spec := provider.routeSpecs[len(provider.routeSpecs)-1]
+		var ports []int
+		for port := range spec.HTTPPortSpecs() {
+			if len(port.ScopedListenerPorts) != 1 {
+				t.Fatalf("expected one physical port per compiled graph, got %v", port.ScopedListenerPorts)
+			}
+			number := port.ScopedListenerPorts[0]
+			ports = append(ports, number)
+			wantHost := map[int]string{80: string(*http.Hostname), 8080: string(*other.Hostname)}
+			if port.Hostname != wantHost[number] {
+				t.Fatalf("graph for port %d has hostname %q, want %q", number, port.Hostname, wantHost[number])
+			}
+		}
+		if !slices.Equal(ports, wantPorts) {
+			t.Fatalf("compiled listener ports = %v, want %v", ports, wantPorts)
+		}
+	}
+
+	pending := cloud.RouteProgressingResult("Second port's policy is still pending", time.Second)
+	provider.routeResult = &pending
+	counts := map[gatewayv1.SectionName]int32{http.Name: 1, other.Name: 1, blocked.Name: 0, unmatched.Name: 0}
+	check(both, false, []int{80, 8080}, counts)
+	provider.routeResult = nil
+	check(both, true, []int{80, 8080}, counts)
+	check([]gatewayv1.Listener{http, blocked, unmatched}, true, []int{80}, map[gatewayv1.SectionName]int32{http.Name: 1, blocked.Name: 0, unmatched.Name: 0})
+	check(both, true, []int{80, 8080}, counts)
+
+	route.Spec.ParentRefs[0].Port = &other.Port
+	route.Spec.ParentRefs[0].SectionName = &other.Name
+	route.Generation++
+	if err := kube.Update(ctx, route); err != nil {
+		t.Fatal(err)
+	}
+	parent = route.Spec.ParentRefs[0]
+	check(both, true, []int{8080}, map[gatewayv1.SectionName]int32{http.Name: 0, other.Name: 1, blocked.Name: 0, unmatched.Name: 0})
+}
+
+type routeTestCertificate struct {
+	authorized bool
+}
+
+func (c *routeTestCertificate) Resolve(context.Context, *gatewayv1.Gateway, *gatewayv1.Listener) (string, gatewayv1.ListenerConditionReason) {
+	if c.authorized {
+		return "https://barbican.example/v1/secrets/approved", ""
+	}
+	return "", gatewayv1.ListenerReasonInvalidCertificateRef
+}
+
+func (c *routeTestCertificate) ReferenceStatus(ctx context.Context, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) gatewayv1.ListenerConditionReason {
+	_, reason := c.Resolve(ctx, gateway, listener)
+	return reason
+}
+
+func TestHTTPRouteBindsWithOneSelectedListenerReady(t *testing.T) {
+	cfg := testConfig()
+	cfg.OperatorHTTPS, cfg.HTTPCORS = true, true
+	class, gateway := providerRouteParentObjects(cfg)
+	gateway.Status = gatewayv1.GatewayStatus{}
+	gateway.Spec.Listeners = append(gateway.Spec.Listeners, gatewayv1.Listener{
+		Name: "https", Port: 443, Protocol: gatewayv1.HTTPSProtocolType,
+		TLS: &gatewayv1.ListenerTLSConfig{CertificateRefs: []gatewayv1.SecretObjectReference{{Name: "certificate"}}},
+	})
+	parent := gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name)}
+	route := mapperTestHTTPRoute(gateway.Namespace, "attached", parent, "backend")
+	route.UID, route.Generation = "attached-uid", 1
+	route.Spec.Rules[0].Filters = []gatewayv1.HTTPRouteFilter{{
+		Type: gatewayv1.HTTPRouteFilterCORS,
+		CORS: &gatewayv1.HTTPCORSFilter{AllowOrigins: []gatewayv1.CORSOrigin{"https://client.example.test"}},
+	}}
+	service, endpoints, node := validNodePortBackend(gateway.Namespace, "backend")
+	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gateway, route).
+		WithObjects(class, gateway, route, service, endpoints, node).Build()
+	certificate := &routeTestCertificate{}
+	gatewayResult := cloud.GatewayReadyResult(cloud.GatewayState{LoadBalancerID: "lb-1", ListenerID: "listener-1", VIPAddress: "192.0.2.10"})
+	gatewayResult.ScopedListenerReadyPorts = []int{80}
+	routeResult := cloud.RouteProgressingResult("Waiting for the HTTPS listener", time.Second)
+	provider := &recordingProvider{gatewayResult: &gatewayResult, routeResult: &routeResult}
+	coordinator := &graph.Coordinator{}
+	gr := newTestGatewayReconciler(gatewaycontroller.Reconciler{Client: kube, APIReader: kube, Coordinator: coordinator, Config: cfg, Certificates: certificate}, provider)
+	r := &Reconciler{Client: kube, APIReader: kube, Writer: gr.Writer, Coordinator: coordinator, Config: cfg}
+
+	check := func(programmed bool) {
+		t.Helper()
+		for range 2 {
+			if _, err := gr.Reconcile(t.Context(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(gateway)}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := kube.Get(t.Context(), client.ObjectKeyFromObject(gateway), gateway); err != nil {
+			t.Fatal(err)
+		}
+		if !programmed && (!listenerProgrammedForGeneration(gateway, "http") || listenerProgrammedForGeneration(gateway, "https")) {
+			t.Fatalf("expected HTTP available with HTTPS pending, got %#v", gateway.Status.Listeners)
+		}
+		for range 2 {
+			if _, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(route)}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := kube.Get(t.Context(), client.ObjectKeyFromObject(route), route); err != nil {
+			t.Fatal(err)
+		}
+		if len(provider.routeSpecs) == 0 || !controllerutil.ContainsFinalizer(route, cfg.RouteFinalizer()) {
+			t.Fatal("an unavailable HTTPS listener prevented binding and programming the HTTP port")
+		}
+		last := provider.routeSpecs[len(provider.routeSpecs)-1]
+		if !slices.Equal(last.ScopedListenerPorts, []int{80}) || len(last.AdditionalHTTPPorts) != 1 ||
+			!slices.Equal(last.AdditionalHTTPPorts[0].ScopedListenerPorts, []int{443}) {
+			t.Fatalf("expected the provider to reconcile both selected ports, got %+v", last)
+		}
+		for port := range last.HTTPPortSpecs() {
+			if len(port.HTTPBackends) != 1 || len(port.HTTPBackends[0].Matches) != 1 ||
+				!port.HTTPBackends[0].Matches[0].CORS.Equal(&cloud.HTTPCORS{AllowOrigins: []string{"https://client.example.test"}}) {
+				t.Fatalf("expected CORS on the eligible port %v, got %+v", port.ScopedListenerPorts, port.HTTPBackends)
+			}
+		}
+		status := metav1.ConditionFalse
+		if programmed {
+			status = metav1.ConditionTrue
+		}
+		if len(route.Status.Parents) != 1 || !meta.IsStatusConditionPresentAndEqual(route.Status.Parents[0].Conditions, cfg.Domain()+"/Programmed", status) {
+			t.Fatalf("expected one parent with Programmed=%s, got %#v", status, route.Status.Parents)
+		}
+		assertElectionParentAccepted(t, route, parent, metav1.ConditionTrue)
+	}
+	check(false)
+	certificate.authorized = true
+	gatewayResult.ScopedListenerReadyPorts = []int{80, 443}
+	routeResult = cloud.RouteReadyResult(cloud.RouteState{})
+	check(true)
+}
+
 func TestExactHTTPSectionsShareOneGatewayListener(t *testing.T) {
 	cfg := testConfig()
 	class, gateway := providerRouteParentObjects(cfg)

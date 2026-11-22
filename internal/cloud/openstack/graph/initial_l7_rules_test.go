@@ -436,7 +436,7 @@ func TestInitialL7RulesLeaveLegacySiblingCleanupEligible(t *testing.T) {
 	listener := &listeners.Listener{ID: "listener", L7Policies: []l7policies.L7Policy{{ID: "marked"}, {ID: "legacy"}}}
 	inventory := routeGraphInventory{owners: []routeGraphOwner{{identity: identity}}, graphs: []observedRouteGraph{{}}}
 	if err := provider.observeListenerPolicies(t.Context(), &inventory, listener, cloud.ListenerProtocolHTTP,
-		map[string]poolRouteOwner{"pool": {}}, make(map[int]string), false); err != nil {
+		map[string]poolRouteOwner{"pool": {}}, false); err != nil {
 		t.Fatal(err)
 	}
 	plan := buildRouteDeletionPlan(inventory.graphs[0])

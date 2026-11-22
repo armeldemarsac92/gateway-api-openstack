@@ -110,7 +110,7 @@ func TestLogicalModelCannotEnableUnmappedNodePortBehavior(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, _, err = supportedRouteModel(logical, []*gatewayv1.Listener{&gateway.Spec.Listeners[0]}, false, false, false, false, false, false)
+			_, _, err = supportedRouteModel(logical, []*gatewayv1.Listener{&gateway.Spec.Listeners[0]}, false, false, false, false, false)
 			var rejected *routeBuildError
 			if !errors.As(err, &rejected) || rejected.kind != routeErrorUnsupported {
 				t.Fatalf("unmapped logical model escaped NodePort lowering: %v", err)

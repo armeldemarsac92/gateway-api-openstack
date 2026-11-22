@@ -338,7 +338,7 @@ func TestHTTPRouteRechecksSingletonGatewayClassRecoveryAtCleanupSeal(t *testing.
 	}
 }
 
-func TestHTTPRouteRefusesOneFragmentSpanningDifferentListenerPorts(t *testing.T) {
+func TestHTTPRouteWithTwoParentRefsWaitsForBothListenerPorts(t *testing.T) {
 	cfg := testConfig()
 	class, gateway, route, service, endpoints := endpointRouteFixture(t)
 	gateway.Spec.Listeners = append(gateway.Spec.Listeners, gatewayv1.Listener{Name: "other", Protocol: gatewayv1.HTTPProtocolType, Port: 81})
@@ -358,14 +358,14 @@ func TestHTTPRouteRefusesOneFragmentSpanningDifferentListenerPorts(t *testing.T)
 		t.Fatal(err)
 	}
 	if len(current.Status.Parents) != 2 || len(current.Finalizers) != 0 || len(provider.routeSpecs) != 0 {
-		t.Fatalf("want two rejections with no binding or forwarding, got status=%#v finalizers=%v route specs=%v",
+		t.Fatalf("want two parent statuses with no binding or forwarding, got status=%#v finalizers=%v route specs=%v",
 			current.Status, current.Finalizers, provider.routeSpecs)
 	}
 	for _, status := range current.Status.Parents {
 		accepted := meta.FindStatusCondition(status.Conditions, "Accepted")
-		if status.ControllerName != cfg.ControllerName || accepted == nil || accepted.Status != metav1.ConditionFalse ||
-			accepted.Reason != string(gatewayv1.RouteReasonUnsupportedValue) {
-			t.Fatalf("managed parent %v has Accepted=%#v, want False/UnsupportedValue", status.ParentRef, accepted)
+		if status.ControllerName != cfg.ControllerName || accepted == nil || accepted.Status != metav1.ConditionTrue ||
+			!meta.IsStatusConditionFalse(status.Conditions, cfg.Domain()+"/Programmed") {
+			t.Fatalf("managed parent %v must be accepted and pending: %+v", status.ParentRef, status.Conditions)
 		}
 	}
 }
