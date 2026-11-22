@@ -23,11 +23,12 @@ import (
 
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
 // compileRouteAction rejects actions that the current Amphora model cannot emit.
-func compileRouteAction(rule gatewayv1.HTTPRouteRule, requestHeaderModifier, responseHeaderModifier bool) error {
+func compileRouteAction(rule gatewayv1.HTTPRouteRule, requestHeaderModifier, responseHeaderModifier, requestAction bool) error {
 	if len(rule.Filters) == 0 {
 		if len(rule.BackendRefs) == 0 {
 			return compileHTTPResponse(http.StatusInternalServerError)
@@ -37,8 +38,12 @@ func compileRouteAction(rule gatewayv1.HTTPRouteRule, requestHeaderModifier, res
 	if slices.ContainsFunc(rule.Filters, func(filter gatewayv1.HTTPRouteFilter) bool {
 		return filter.Type == gatewayv1.HTTPRouteFilterRequestRedirect
 	}) {
-		if _, err := model.NormalizeRequestRedirect(rule); err != nil {
-			return newRouteBuildError(routeErrorUnsupported, "%s", err)
+		if _, diagnostic := model.NormalizeRequestRedirect(rule, requestAction); diagnostic != nil {
+			kind := routeErrorUnsupported
+			if diagnostic.Reason == string(routeErrorInvalid) {
+				kind = routeErrorInvalid
+			}
+			return newRouteBuildError(kind, "%s", diagnostic.Message)
 		}
 		return nil
 	}
@@ -48,39 +53,50 @@ func compileRouteAction(rule gatewayv1.HTTPRouteRule, requestHeaderModifier, res
 	return nil
 }
 
-// routeRedirectPrefix resolves the scheme and port before passing the fixed
-// prefix to Octavia, where the original path and query are appended.
-func routeRedirectPrefix(redirect model.RequestRedirect, listener gatewayv1.Listener) string {
-	scheme, port := redirect.Scheme, redirect.Port
+// lowerRequestRedirect resolves the destination as seen by the selected listener.
+func lowerRequestRedirect(ruleIndex int, redirect model.RequestRedirect, listener gatewayv1.Listener) cloud.HTTPRedirect {
+	scheme := redirect.Scheme
 	if scheme == "" {
 		scheme = "http"
 		if listener.Protocol == gatewayv1.HTTPSProtocolType {
 			scheme = "https"
-		}
-		if port == 0 {
-			port = int(listener.Port)
 		}
 	}
 	wellKnownPort := 80
 	if scheme == "https" {
 		wellKnownPort = 443
 	}
-	prefix := scheme + "://" + redirect.Hostname
-	if port != 0 && port != wellKnownPort {
-		prefix += ":" + strconv.Itoa(port)
+	port := redirect.Port
+	if port == 0 {
+		port = wellKnownPort
+		if redirect.Scheme == "" {
+			port = int(listener.Port)
+		}
 	}
-	return prefix
+	result := cloud.HTTPRedirect{RuleIndex: ruleIndex, StatusCode: redirect.StatusCode}
+	if redirect.NeedsRequestAction() {
+		result.Request = &cloud.HTTPRedirectRequest{
+			Scheme: scheme, Port: port, Hostname: redirect.Hostname,
+			ReplaceFullPath: redirect.ReplaceFullPath, ReplacePrefixMatch: redirect.ReplacePrefixMatch,
+		}
+		return result
+	}
+	result.Prefix = scheme + "://" + redirect.Hostname
+	if port != 0 && port != wellKnownPort {
+		result.Prefix += ":" + strconv.Itoa(port)
+	}
+	return result
 }
 
-func validateRouteRedirectPrefixes(route *gatewayv1.HTTPRoute, listener gatewayv1.Listener) error {
+func validateRouteRedirectPrefixes(route *gatewayv1.HTTPRoute, listener gatewayv1.Listener, requestAction bool) error {
 	const maxRedirectPrefixLength = 255 // Octavia's redirect_prefix SQL column.
 	for _, rule := range route.Spec.Rules {
 		if len(rule.Filters) != 1 || rule.Filters[0].Type != gatewayv1.HTTPRouteFilterRequestRedirect {
 			continue
 		}
-		redirect, err := model.NormalizeRequestRedirect(rule)
+		redirect, diagnostic := model.NormalizeRequestRedirect(rule, requestAction)
 		// Structural validation owns the diagnostics for malformed actions.
-		if err == nil && len(routeRedirectPrefix(redirect, listener)) > maxRedirectPrefixLength {
+		if diagnostic == nil && len(lowerRequestRedirect(0, redirect, listener).Prefix) > maxRedirectPrefixLength {
 			return newRouteBuildError(routeErrorUnsupported, "RequestRedirect prefix must fit in %d characters in Octavia", maxRedirectPrefixLength)
 		}
 	}

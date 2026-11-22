@@ -157,7 +157,7 @@ func policyNeedsHostnameUpdate(route desiredRoute, policy observedRoutePolicy) b
 	if route.redirect {
 		for _, wanted := range route.policies {
 			if wanted.role == policy.role {
-				return !desiredPolicyActionMatches(wanted, policy.policy, "") ||
+				return !desiredPolicyActionMatches(wanted, policy, "") ||
 					!observedHTTPPredicateMatches(policy, rulesFor(wanted, ""))
 			}
 		}
@@ -345,7 +345,7 @@ func observedForwardPolicyMatches(route desiredRoute, observed observedRouteGrap
 		case route.fixedResponse:
 			return policy.fixedResponse
 		default:
-			return observed.pool != nil && desiredPolicyActionMatches(wanted, policy.policy, observed.pool.ID)
+			return observed.pool != nil && desiredPolicyActionMatches(wanted, policy, observed.pool.ID)
 		}
 	})
 }

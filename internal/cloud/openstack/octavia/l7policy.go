@@ -42,6 +42,7 @@ func completePolicyPage(result pagination.PageResult) pagination.Page {
 }
 
 const (
+	ActionRedirectRequest l7policies.Action = "REDIRECT_REQUEST"
 	ActionFixedResponse   l7policies.Action = "FIXED_RESPONSE"
 	ActionWeightedTargets l7policies.Action = "WEIGHTED_TARGETS"
 )
@@ -114,6 +115,8 @@ type L7PolicyObservation struct {
 	HTTPSListenerHostname       string
 	Target                      *L7PolicyTarget
 	ExtendedTargetFields        bool
+	RedirectRequest             *RequestRedirect
+	RedirectRequestPresent      bool
 	PoolIDs                     []string
 	PoolReference               json.RawMessage
 	AdminState                  *bool
@@ -166,6 +169,7 @@ func readPolicyObservation(raw json.RawMessage) (L7PolicyObservation, error) {
 		PoolReference            json.RawMessage `json:"redirect_pool_id"`
 		Targets                  json.RawMessage `json:"targets"`
 		FixedResponse            json.RawMessage `json:"fixed_response"`
+		RedirectRequest          json.RawMessage `json:"redirect_request"`
 		RequestHeaderOperations  json.RawMessage `json:"request_header_operations"`
 		ResponseHeaderOperations json.RawMessage `json:"response_header_operations"`
 	}
@@ -204,6 +208,10 @@ func readPolicyObservation(raw json.RawMessage) (L7PolicyObservation, error) {
 	}
 	if len(row.FixedResponse) != 0 && string(row.FixedResponse) != "null" {
 		observation.ExtendedTargetFields = true
+	}
+	if len(row.RedirectRequest) != 0 && string(row.RedirectRequest) != "null" {
+		observation.RedirectRequestPresent = true
+		observation.RedirectRequest = readRequestRedirect(row.RedirectRequest)
 	}
 	if row.RequestHeaderOperations != nil {
 		observation.RequestHeaderOperations, observation.RequestHeaderOperationsErr =
@@ -274,10 +282,19 @@ type PolicyCreateOpts struct {
 	ResponseHeaderOperations []cloud.HTTPHeaderOperation
 	WeightedTargets          []WeightedHTTPTarget
 	FixedServerError         bool
+	RedirectRequest          *RequestRedirect
 }
 
 func (opts PolicyCreateOpts) ToL7PolicyCreateMap() (map[string]any, error) {
 	switch {
+	case opts.RedirectRequest != nil:
+		if opts.FixedServerError || opts.WeightedTargets != nil || opts.RedirectPoolID != "" || opts.RedirectURL != "" || opts.RedirectPrefix != "" {
+			return nil, fmt.Errorf("request redirect cannot be combined with another L7 target")
+		}
+		if !opts.RedirectRequest.Valid() || !SupportedRedirectCode(opts.RedirectHttpCode) {
+			return nil, fmt.Errorf("invalid request redirect destination or status code")
+		}
+		opts.Action = ActionRedirectRequest
 	case opts.FixedServerError && opts.WeightedTargets != nil:
 		return nil, fmt.Errorf("a policy cannot combine fixed and weighted actions")
 	case opts.FixedServerError:
@@ -297,6 +314,8 @@ func (opts PolicyCreateOpts) ToL7PolicyCreateMap() (map[string]any, error) {
 		setPolicyFixedServerError(body)
 	} else if opts.WeightedTargets != nil {
 		policy["targets"] = opts.WeightedTargets
+	} else if opts.RedirectRequest != nil {
+		policy["redirect_request"] = opts.RedirectRequest
 	}
 	(PolicyHeaders{Request: opts.RequestHeaderOperations, Response: opts.ResponseHeaderOperations}).write(body)
 	return body, nil

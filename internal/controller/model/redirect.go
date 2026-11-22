@@ -17,48 +17,53 @@ limitations under the License.
 package model
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"net/netip"
 	"strings"
+	"unicode/utf8"
 
 	"k8s.io/apimachinery/pkg/util/validation"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
-// NormalizeRequestRedirect validates the fixed-destination redirect profile.
-// The scheme and port remain unset until a listener is selected.
-func NormalizeRequestRedirect(rule gatewayv1.HTTPRouteRule) (RequestRedirect, error) {
+// NormalizeRequestRedirect validates the redirect before a listener is selected.
+func NormalizeRequestRedirect(rule gatewayv1.HTTPRouteRule, requestAction bool) (RequestRedirect, *Diagnostic) {
+	reject := func(message string) (RequestRedirect, *Diagnostic) {
+		return RequestRedirect{}, unsupported(message, ScopeRule)
+	}
+	invalid := func(message string) (RequestRedirect, *Diagnostic) {
+		return RequestRedirect{}, &Diagnostic{Condition: string(gatewayv1.RouteConditionAccepted), Reason: "Invalid", Message: message, Scope: ScopeRule}
+	}
 	if len(rule.Filters) != 1 || rule.Filters[0].Type != gatewayv1.HTTPRouteFilterRequestRedirect {
-		return RequestRedirect{}, errors.New("RequestRedirect must be the only filter in its rule")
+		return reject("RequestRedirect must be the only filter in its rule")
 	}
 	filter := rule.Filters[0].RequestRedirect
-	if filter == nil || filter.Hostname == nil {
-		return RequestRedirect{}, errors.New("RequestRedirect without hostname requires request-hostname preservation in Octavia")
+	if filter == nil {
+		return reject("RequestRedirect filter must specify requestRedirect")
 	}
 	if len(rule.BackendRefs) != 0 {
-		return RequestRedirect{}, errors.New("RequestRedirect cannot be combined with backendRefs")
+		return reject("RequestRedirect cannot be combined with backendRefs")
 	}
-	if filter.Path != nil {
-		return RequestRedirect{}, errors.New("RequestRedirect path modifiers are not supported")
+
+	redirect := RequestRedirect{StatusCode: http.StatusFound}
+	if filter.Hostname != nil {
+		redirect.Hostname = string(*filter.Hostname)
+		if !validRedirectHostname(redirect.Hostname) {
+			return reject("RequestRedirect hostname must be a fixed DNS name")
+		}
 	}
-	hostname := string(*filter.Hostname)
-	if !validRedirectHostname(hostname) {
-		return RequestRedirect{}, errors.New("RequestRedirect hostname must be a fixed DNS name")
-	}
-	redirect := RequestRedirect{Hostname: hostname, StatusCode: http.StatusFound}
 	if filter.Scheme != nil {
 		switch *filter.Scheme {
 		case "http", "https":
 			redirect.Scheme = *filter.Scheme
 		default:
-			return RequestRedirect{}, fmt.Errorf("RequestRedirect scheme %q is unsupported", *filter.Scheme)
+			return reject(fmt.Sprintf("RequestRedirect scheme %q is unsupported", *filter.Scheme))
 		}
 	}
 	if filter.Port != nil {
 		if *filter.Port < 1 || *filter.Port > 65535 {
-			return RequestRedirect{}, errors.New("RequestRedirect port must be between 1 and 65535")
+			return reject("RequestRedirect port must be between 1 and 65535")
 		}
 		redirect.Port = int(*filter.Port)
 	}
@@ -67,8 +72,44 @@ func NormalizeRequestRedirect(rule gatewayv1.HTTPRouteRule) (RequestRedirect, er
 		case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
 			redirect.StatusCode = *filter.StatusCode
 		default:
-			return RequestRedirect{}, fmt.Errorf("RequestRedirect status code %d is unsupported", *filter.StatusCode)
+			return reject(fmt.Sprintf("RequestRedirect status code %d is unsupported", *filter.StatusCode))
 		}
+	}
+	if path := filter.Path; path != nil {
+		switch path.Type {
+		case gatewayv1.FullPathHTTPPathModifier:
+			if path.ReplaceFullPath == nil || path.ReplacePrefixMatch != nil || utf8.RuneCountInString(*path.ReplaceFullPath) > 1024 {
+				return invalid("RequestRedirect ReplaceFullPath requires only a replaceFullPath value of up to 1024 characters")
+			}
+			replacement := *path.ReplaceFullPath
+			redirect.ReplaceFullPath = &replacement
+		case gatewayv1.PrefixMatchHTTPPathModifier:
+			if path.ReplacePrefixMatch == nil || path.ReplaceFullPath != nil || utf8.RuneCountInString(*path.ReplacePrefixMatch) > 1024 {
+				return invalid("RequestRedirect ReplacePrefixMatch requires only a replacePrefixMatch value of up to 1024 characters")
+			}
+			for _, match := range rule.Matches {
+				if match.Path == nil || match.Path.Type == nil {
+					continue
+				}
+				switch *match.Path.Type {
+				case gatewayv1.PathMatchPathPrefix:
+				case gatewayv1.PathMatchExact, gatewayv1.PathMatchRegularExpression:
+					return invalid("RequestRedirect ReplacePrefixMatch requires PathPrefix in every match")
+				default:
+					return reject(fmt.Sprintf("RequestRedirect ReplacePrefixMatch does not support path match type %q", *match.Path.Type))
+				}
+			}
+			replacement := *path.ReplacePrefixMatch
+			redirect.ReplacePrefixMatch = &replacement
+		default:
+			return reject(fmt.Sprintf("RequestRedirect path modifier type %q is unsupported", path.Type))
+		}
+	}
+	if !requestAction && redirect.NeedsRequestAction() {
+		if redirect.Hostname == "" {
+			return reject("RequestRedirect without hostname requires request-hostname preservation via --octavia-http-request-redirect")
+		}
+		return reject("RequestRedirect path modifiers require --octavia-http-request-redirect")
 	}
 	return redirect, nil
 }

@@ -278,7 +278,7 @@ func collectGuardedHTTPListener(states map[int]guardedHTTPListener, gateway desi
 					policy.policy.Position == wanted.position && policy.policy.AdminStateUp && observedForwardPolicySettled(policy) &&
 					(predicate.settled == nil || predicate.settled(wanted, policy)) &&
 					observedHTTPPredicateMatches(policy, rulesFor(wanted, route.hostnameRuleValue)) &&
-					(route.redirect && desiredPolicyActionMatches(wanted, policy.policy, "") ||
+					(route.redirect && desiredPolicyActionMatches(wanted, policy, "") ||
 						!route.redirect && observedForwardPolicyMatches(route, observed, policy))
 			})
 			mark(port, func(state *guardedHTTPListener) {

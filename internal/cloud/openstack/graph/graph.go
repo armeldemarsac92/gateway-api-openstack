@@ -239,6 +239,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	plan = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, exactHTTPQueryParamPredicate)
 	plan = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, httpMethodPredicate)
 	plan = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, responseHeaderModifierPolicy)
+	plan = p.protectRequestRedirectTraffic(ctx, desired, actual, plan, &result)
 	if spec.Gateway.Disposition == cloud.GraphEnsure && (len(plan) == 0 || plan[0].kind != graphClearListenerDefaultPool && !plan[0].withdrawHTTPPolicy && !plan[0].isRestrictiveSNI()) {
 		if err := p.validateGraphTrafficSecurity(ctx, desired); err != nil {
 			result.Routes = observedRouteDeleteCompletions(desired, actual)
@@ -318,6 +319,7 @@ func (p *Provider) reconcileWeightedWithdrawalWithoutAddress(ctx context.Context
 		return result, err
 	}
 	result.Gateway.Outcome = p.progressingOutcome("Waiting to observe the Gateway Floating IP inventory")
+	plan = p.protectRequestRedirectTraffic(ctx, desired, actual, plan, &result)
 	if len(plan) != 1 || !plan[0].withdrawHTTPPolicy {
 		return result, actual.addressReadError
 	}

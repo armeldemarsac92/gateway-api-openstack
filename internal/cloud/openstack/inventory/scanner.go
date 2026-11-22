@@ -246,29 +246,32 @@ func encode(value string) string {
 }
 
 type auditCandidate struct {
-	service              string
-	resourceType         string
-	id                   string
-	projectID            string
-	tenantID             string
-	provider             string
-	provisioningStatus   string
-	tags                 []string
-	description          string
-	portID               string
-	redirectPoolID       string
-	policyAction         string
-	redirectPoolReported bool
-	redirectPoolNull     bool
-	policyAdminStateUp   bool
-	policyRedirects      bool
-	policyUsesExtension  bool
-	policyTarget         *octavia.L7PolicyTarget
-	policyInventoryOK    bool
-	weightedPoolIDs      []string
-	reportedParents      map[string]struct{}
-	observedParents      map[string]struct{}
-	observationChanged   bool
+	service                string
+	resourceType           string
+	id                     string
+	projectID              string
+	tenantID               string
+	provider               string
+	provisioningStatus     string
+	tags                   []string
+	description            string
+	portID                 string
+	redirectPoolID         string
+	policyAction           string
+	redirectPoolReported   bool
+	redirectPoolNull       bool
+	policyAdminStateUp     bool
+	policyRedirects        bool
+	requestRedirect        *octavia.RequestRedirect
+	requestRedirectPresent bool
+	requestRedirectValid   bool
+	policyUsesExtension    bool
+	policyTarget           *octavia.L7PolicyTarget
+	policyInventoryOK      bool
+	weightedPoolIDs        []string
+	reportedParents        map[string]struct{}
+	observedParents        map[string]struct{}
+	observationChanged     bool
 }
 
 type auditCandidateSet map[string]*auditCandidate
@@ -289,6 +292,8 @@ func (s auditCandidateSet) add(candidate auditCandidate) {
 		existing.redirectPoolID != candidate.redirectPoolID || existing.policyAction != candidate.policyAction ||
 		existing.redirectPoolReported != candidate.redirectPoolReported || existing.redirectPoolNull != candidate.redirectPoolNull ||
 		existing.policyAdminStateUp != candidate.policyAdminStateUp || existing.policyRedirects != candidate.policyRedirects ||
+		existing.requestRedirectPresent != candidate.requestRedirectPresent || existing.requestRedirectValid != candidate.requestRedirectValid ||
+		!existing.requestRedirect.Equal(candidate.requestRedirect) ||
 		existing.extendedPolicy() || candidate.extendedPolicy() {
 		existing.observationChanged = true
 	}
@@ -454,6 +459,9 @@ func (p *Scanner) collectAuditPolicies(
 		}
 		candidate := auditPolicyCandidate(observation.Policy, listenerIDs)
 		candidate.policyUsesExtension = observation.ExtendedTargetFields
+		candidate.requestRedirect = observation.RedirectRequest
+		candidate.requestRedirectPresent = observation.RedirectRequestPresent
+		candidate.requestRedirectValid = observation.HasValidRequestRedirect()
 		candidate.policyTarget, candidate.policyInventoryOK = observation.Target, complete
 		candidate.weightedPoolIDs = observation.PoolIDs
 		candidate.redirectPoolReported = len(observation.PoolReference) != 0

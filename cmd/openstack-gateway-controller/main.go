@@ -105,12 +105,14 @@ func run(ctx context.Context) error {
 		apiBurst           int
 	)
 	var httpsListenerIsolation bool
+	var httpRequestRedirect bool
 	var exactHTTPHeaders, exactHTTPQueryParams, httpMethodMatch, requestHeaderModifier, responseHeaderModifier, backendH2C, tlsSNIPassthrough, tlsSNISuffix, tcpTLSTermination bool
 	zapOptions := zap.Options{Development: false}
 	zapOptions.BindFlags(flag.CommandLine)
 	flag.StringVar(&controllerName, "controller-name", envOr("GATEWAY_OPENSTACK_CONTROLLER_NAME", configv1alpha1.GroupName+"/gateway-api-openstack"), "Gateway API controllerName for this installation")
 	flag.StringVar(&gatewayAPIChannel, "gateway-api-channel", envOr("GATEWAY_OPENSTACK_GATEWAY_API_CHANNEL", "standard"), "Gateway API release channel: standard or experimental")
 	flag.BoolVar(&exactHTTPHeaders, "octavia-http-header-exact", false, "use the advertised Octavia exact HTTP header matching capability")
+	flag.BoolVar(&httpRequestRedirect, "octavia-http-request-redirect", false, "use the advertised Octavia capability for request-hostname preservation and redirect path modifiers")
 	flag.BoolVar(&exactHTTPQueryParams, "octavia-http-query-param-exact", false, "use the advertised Octavia exact HTTP query parameter matching capability (requires --octavia-fixed-http-responses)")
 	flag.BoolVar(&httpMethodMatch, "octavia-http-method-match", false, "use the advertised Octavia exact HTTP method matching capability (requires --octavia-fixed-http-responses)")
 	flag.BoolVar(&fixedHTTPResponses, "octavia-fixed-http-responses", false, "use the advertised Octavia fixed HTTP response capability")
@@ -163,6 +165,7 @@ func run(ctx context.Context) error {
 		GatewayAPIChannel:       gatewayAPIChannel,
 		HTTPHeaderExact:         exactHTTPHeaders,
 		HTTPQueryParamExact:     exactHTTPQueryParams,
+		HTTPRequestRedirect:     httpRequestRedirect,
 		HTTPMethodMatch:         httpMethodMatch,
 		FixedHTTPResponses:      fixedHTTPResponses,
 		WeightedHTTPTargets:     weightedTargets,
@@ -220,6 +223,7 @@ func run(ctx context.Context) error {
 		BackendTLSPolicy:       backendTLSPolicy,
 		HTTPHeaderExact:        exactHTTPHeaders,
 		HTTPQueryParamExact:    exactHTTPQueryParams,
+		HTTPRequestRedirect:    httpRequestRedirect,
 		HTTPMethodMatch:        httpMethodMatch,
 		FixedHTTPResponses:     fixedHTTPResponses,
 		WeightedHTTPTargets:    weightedTargets,

@@ -58,7 +58,8 @@ func TestStockRedirectUsesPolicyOnlyPublicAPI(t *testing.T) {
 			t.Fatal(err)
 		}
 		got := request.Policy
-		if got["action"] != "REDIRECT_PREFIX" || got["redirect_prefix"] != "https://moved.example.test:8443" ||
+		_, hasRequestRedirect := got["redirect_request"]
+		if hasRequestRedirect || got["action"] != "REDIRECT_PREFIX" || got["redirect_prefix"] != "https://moved.example.test:8443" ||
 			got["redirect_http_code"] != float64(301) || got["admin_state_up"] != false ||
 			got["redirect_pool_id"] != nil || got["listener_id"] != "listener" {
 			t.Fatalf("stock redirect request = %v", got)

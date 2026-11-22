@@ -219,12 +219,23 @@ type HTTPBackend struct {
 	Matches          []HTTPPathMatch
 }
 
-// HTTPRedirect groups the alternatives of one fixed-destination redirect rule.
+// HTTPRedirect groups the alternatives of one redirect rule.
 type HTTPRedirect struct {
 	RuleIndex  int
 	Prefix     string
 	StatusCode int
 	Matches    []HTTPPathMatch
+	Request    *HTTPRedirectRequest `json:",omitempty"`
+}
+
+// HTTPRedirectRequest holds the listener-specific destination and any replacement.
+// A prefix replacement uses the prefix of each individual HTTPPathMatch.
+type HTTPRedirectRequest struct {
+	Scheme             string
+	Port               int
+	Hostname           string
+	ReplaceFullPath    *string
+	ReplacePrefixMatch *string
 }
 
 // HTTPFixedRule groups the matches that require a local HTTP 500 response.

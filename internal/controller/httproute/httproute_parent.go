@@ -238,7 +238,7 @@ func (r *Reconciler) selectRouteAttachments(route *gatewayv1.HTTPRoute, parent m
 		if len(selected) != 0 && !gatewaycontroller.HTTPRouteSectionsSharePort(r.Config, parent.gateway, selected[0], listener) {
 			return nil, newRouteBuildError(routeErrorUnsupported, "the selected sections must share a physical HTTP or HTTPS listener")
 		}
-		if err := validateRouteRedirectPrefixes(route, *listener); err != nil {
+		if err := validateRouteRedirectPrefixes(route, *listener, r.Config.HTTPRequestRedirect); err != nil {
 			return nil, err
 		}
 		selected = append(selected, listener)

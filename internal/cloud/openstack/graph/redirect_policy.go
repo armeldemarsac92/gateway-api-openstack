@@ -25,6 +25,7 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	openstackidentity "github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/identity"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia/amphora"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
 )
@@ -34,6 +35,7 @@ const roleRuleRedirectGuard = openstackidentity.RoleRuleRedirectGuard
 type desiredRedirectPolicy struct {
 	matchKey   string
 	prefix     string
+	request    *octavia.RequestRedirect
 	statusCode int32
 	guards     []redirectGuard
 }
@@ -60,19 +62,26 @@ func (p *Provider) buildDesiredGatewayRoute(spec cloud.RouteSpec, forwards []clo
 		if redirect.RuleIndex < 0 || indexes[redirect.RuleIndex] || len(redirect.Matches) == 0 {
 			return invalid(errors.New("each HTTP redirect requires a distinct rule index and at least one match"))
 		}
+		if redirect.Request != nil && !p.httpRequestRedirect {
+			return invalid(errors.New("request-derived redirects require --octavia-http-request-redirect"))
+		}
 		if err := validateRedirectDestination(redirect); err != nil {
 			return invalid(err)
 		}
 		indexes[redirect.RuleIndex] = true
 		for _, match := range redirect.Matches {
-			if len(match.ResponseHeaderOperations) != 0 {
-				return invalid(errors.New("ResponseHeaderModifier cannot be combined with RequestRedirect in Octavia"))
+			if len(match.RequestHeaderOperations) != 0 || len(match.ResponseHeaderOperations) != 0 {
+				return invalid(errors.New("header modifiers cannot be combined with RequestRedirect in Octavia"))
 			}
 			match, err := p.normalizeHTTPMatch(match)
 			if err != nil {
 				return invalid(err)
 			}
 			if _, _, err := httpPathPolicies(match, true); err != nil {
+				return invalid(err)
+			}
+			request, err := compileRequestRedirect(redirect.Request, match)
+			if err != nil {
 				return invalid(err)
 			}
 			match.HTTPSListenerHostname = httpMatchScope(spec, match)
@@ -99,7 +108,7 @@ func (p *Provider) buildDesiredGatewayRoute(spec cloud.RouteSpec, forwards []clo
 			for _, cell := range cells {
 				positive := match
 				positive.Hostname = cell.hostname
-				if err := p.appendRedirectPolicies(&part, redirect, positive, key, cell.guards); err != nil {
+				if err := p.appendRedirectPolicies(&part, redirect, request, positive, key, cell.guards); err != nil {
 					return invalid(err)
 				}
 			}
@@ -110,6 +119,15 @@ func (p *Provider) buildDesiredGatewayRoute(spec cloud.RouteSpec, forwards []clo
 }
 
 func validateRedirectDestination(redirect cloud.HTTPRedirect) error {
+	if redirect.StatusCode < 301 || redirect.StatusCode > 308 || !octavia.SupportedRedirectCode(int32(redirect.StatusCode)) {
+		return errors.New("HTTP redirect code is outside the supported Octavia status codes")
+	}
+	if redirect.Request != nil {
+		if redirect.Prefix != "" {
+			return errors.New("HTTP redirect must specify a fixed prefix or a request-derived destination")
+		}
+		return nil
+	}
 	destination, err := url.Parse(redirect.Prefix)
 	if err != nil || len(redirect.Prefix) > 255 || destination.Scheme != "http" && destination.Scheme != "https" || destination.Host == "" ||
 		destination.User != nil || destination.Path != "" || redirect.Prefix != destination.Scheme+"://"+destination.Host ||
@@ -125,15 +143,27 @@ func validateRedirectDestination(redirect cloud.HTTPRedirect) error {
 			return errors.New("HTTP redirect port is outside 1-65535")
 		}
 	}
-	switch redirect.StatusCode {
-	case 301, 302, 303, 307, 308:
-		return nil
-	default:
-		return errors.New("HTTP redirect code is outside the supported Octavia status codes")
-	}
+	return nil
 }
 
-func (p *Provider) appendRedirectPolicies(part *desiredRoute, redirect cloud.HTTPRedirect, positive cloud.HTTPPathMatch, matchKey string, guards []redirectGuard) error {
+func compileRequestRedirect(redirect *cloud.HTTPRedirectRequest, match cloud.HTTPPathMatch) (*octavia.RequestRedirect, error) {
+	if redirect == nil {
+		return nil, nil
+	}
+	request := &octavia.RequestRedirect{Scheme: redirect.Scheme, Port: redirect.Port, Hostname: redirect.Hostname, ReplaceFullPath: redirect.ReplaceFullPath}
+	if redirect.ReplacePrefixMatch != nil {
+		if match.PathType != cloud.PathMatchPrefix {
+			return nil, errors.New("HTTP prefix replacement requires a PathPrefix match")
+		}
+		request.ReplacePrefix = &octavia.RedirectPrefixReplace{Match: pathOf(match).value, Replacement: *redirect.ReplacePrefixMatch}
+	}
+	if !request.Valid() {
+		return nil, errors.New("invalid HTTP request redirect destination")
+	}
+	return request, nil
+}
+
+func (p *Provider) appendRedirectPolicies(part *desiredRoute, redirect cloud.HTTPRedirect, request *octavia.RequestRedirect, positive cloud.HTTPPathMatch, matchKey string, guards []redirectGuard) error {
 	policies, hostname, err := p.httpPathPolicies(positive, true)
 	if err != nil {
 		return err
@@ -150,7 +180,7 @@ func (p *Provider) appendRedirectPolicies(part *desiredRoute, redirect cloud.HTT
 		policy.httpListenerHostname, policy.hostname = positive.HTTPListenerHostname, positive.Hostname
 		policy.role = openstackidentity.HTTPRedirectRole(policy.role, matchKey, policy.matchKey, "")
 		policy.redirect = &desiredRedirectPolicy{
-			matchKey: matchKey, prefix: redirect.Prefix, statusCode: int32(redirect.StatusCode), guards: guards,
+			matchKey: matchKey, prefix: redirect.Prefix, request: request, statusCode: int32(redirect.StatusCode), guards: guards,
 		}
 		if _, err := part.identity.RouteTags(policy.role); err != nil {
 			return err
@@ -195,11 +225,15 @@ func policyRuleRole(policy desiredPolicy, base, guard string) string {
 	return httpResourceRole(base, policy.backendKey, policy.matchKey)
 }
 
-func desiredPolicyActionMatches(wanted desiredPolicy, observed l7policies.L7Policy, poolID string) bool {
+func desiredPolicyActionMatches(wanted desiredPolicy, current observedRoutePolicy, poolID string) bool {
+	observed := current.policy
 	if wanted.redirect == nil {
 		return poolID != "" && observed.Action == string(l7policies.ActionRedirectToPool) && observed.RedirectPoolID == poolID
 	}
-	return observed.Action == string(l7policies.ActionRedirectPrefix) && observed.RedirectPoolID == "" && observed.RedirectURL == "" &&
+	if wanted.redirect.request != nil {
+		return current.requestRedirect.Equal(wanted.redirect.request) && observed.RedirectHttpCode == wanted.redirect.statusCode
+	}
+	return !current.requestRedirectPresent && observed.Action == string(l7policies.ActionRedirectPrefix) && observed.RedirectPoolID == "" && observed.RedirectURL == "" &&
 		observed.RedirectPrefix == wanted.redirect.prefix && observed.RedirectHttpCode == wanted.redirect.statusCode
 }
 

@@ -110,6 +110,74 @@ func TestFixedRedirectDefaultsUseSelectedListener(t *testing.T) {
 	}
 }
 
+func TestRequestRedirectUsesSelectedHTTPSListenerAndKeepsMatchAlternatives(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	cfg := f.reconciler.Config
+	cfg.OperatorHTTPS, cfg.HTTPRequestRedirect = true, true
+	f.reconciler.Config = cfg
+	secure := gatewayv1.SectionName("secure")
+	controller.SetGatewayListenerScope(cfg, f.gateway, gatewayv1.HTTPProtocolType)
+	f.gateway.Spec.Listeners = append(f.gateway.Spec.Listeners, gatewayv1.Listener{
+		Name: secure, Protocol: gatewayv1.HTTPSProtocolType, Port: 8443,
+		TLS: &gatewayv1.ListenerTLSConfig{CertificateRefs: []gatewayv1.SecretObjectReference{{Name: "certificate"}}},
+	})
+	f.route.Spec.ParentRefs[0].SectionName = &secure
+	rule := fixedRedirectRule("example.test")
+	redirect := rule.Filters[0].RequestRedirect
+	redirect.Hostname = nil
+	redirect.StatusCode = ptr.To(303)
+	redirect.Path = &gatewayv1.HTTPPathModifier{Type: gatewayv1.PrefixMatchHTTPPathModifier, ReplacePrefixMatch: ptr.To("")}
+	rule.Matches = []gatewayv1.HTTPRouteMatch{
+		{Path: &gatewayv1.HTTPPathMatch{Value: ptr.To("/app/")}},
+		{Path: &gatewayv1.HTTPPathMatch{Value: ptr.To("/alternate")}},
+	}
+	f.route.Spec.Rules = []gatewayv1.HTTPRouteRule{rule}
+	spec, err := f.reconciler.buildRouteModelWithReader(t.Context(), f.reader, f.route, f.gateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := spec.HTTPRedirects[0]
+	if got.Prefix != "" || got.Request == nil || got.Request.Hostname != "" || got.Request.Scheme != "https" ||
+		got.Request.Port != 8443 || !ptr.Equal(got.Request.ReplacePrefixMatch, ptr.To("")) || got.StatusCode != 303 ||
+		len(got.Matches) != 2 || got.Matches[0].PathValue != "/alternate" || got.Matches[1].PathValue != "/app" {
+		t.Fatalf("listener-specific request redirect = %+v, destination = %+v", got, got.Request)
+	}
+
+	redirect.Scheme = ptr.To("http")
+	redirect.Path = &gatewayv1.HTTPPathModifier{Type: gatewayv1.FullPathHTTPPathModifier, ReplaceFullPath: ptr.To("/a%20b")}
+	spec, err = f.reconciler.buildRouteModelWithReader(t.Context(), f.reader, f.route, f.gateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = spec.HTTPRedirects[0]
+	if got.Request == nil || got.Request.Port != 80 || got.Request.Scheme != "http" ||
+		!ptr.Equal(got.Request.ReplaceFullPath, ptr.To("/a%20b")) || got.Request.ReplacePrefixMatch != nil {
+		t.Fatalf("explicit scheme and full replacement = %+v", got.Request)
+	}
+}
+
+func TestRequestRedirectRejectsInvalidPrefixMatch(t *testing.T) {
+	rule := fixedRedirectRule("example.test")
+	action := rule.Filters[0].RequestRedirect
+	action.Path = &gatewayv1.HTTPPathModifier{Type: gatewayv1.PrefixMatchHTTPPathModifier, ReplacePrefixMatch: ptr.To("/new")}
+	rule.Matches = []gatewayv1.HTTPRouteMatch{{}, {Path: &gatewayv1.HTTPPathMatch{Type: ptr.To(gatewayv1.PathMatchExact)}}}
+	reconciler := &Reconciler{Config: controller.Config{HTTPRequestRedirect: true}}
+	status := statusForRouteBuildError(reconciler.validateRouteRule(rule, false))
+	if status.accepted != metav1.ConditionFalse || status.acceptedReason != "Invalid" {
+		t.Fatalf("incompatible match type has status %+v", status)
+	}
+	rule.Matches[1].Path.Type = ptr.To(gatewayv1.PathMatchType("FutureType"))
+	status = statusForRouteBuildError(reconciler.validateRouteRule(rule, false))
+	if status.acceptedReason != string(gatewayv1.RouteReasonUnsupportedValue) {
+		t.Fatalf("unknown match type has status %+v", status)
+	}
+	action.Path.Type = gatewayv1.HTTPPathModifierType("FutureModifier")
+	status = statusForRouteBuildError(reconciler.validateRouteRule(rule, false))
+	if status.acceptedReason != string(gatewayv1.RouteReasonUnsupportedValue) {
+		t.Fatalf("unknown path modifier has status %+v", status)
+	}
+}
+
 func TestMixedFixedRedirectRetainsRuleAndListenerPrecedence(t *testing.T) {
 	f := newRouteModelInputFixture(t)
 	host := gatewayv1.Hostname("app.example.test")
