@@ -75,6 +75,9 @@ type ScopedListener struct {
 // withdraws the frontend until an authorized reference becomes available.
 type ListenerTLS struct {
 	CertificateRef string
+	// VirtualHosts is the complete set of isolated HTTPS listener hostnames on
+	// this port. "*" denotes the hostname-unset section. Nil selects dedicated TLS.
+	VirtualHosts []string `json:",omitempty"`
 }
 
 // GatewayState is the provider-neutral result published to Gateway status and
@@ -163,6 +166,8 @@ type Member struct {
 
 // HTTPPathMatch describes one path and its optional conjunctive predicates at its listener rank.
 type HTTPPathMatch struct {
+	// HTTPSListenerHostname restricts this alternative to one logical HTTPS listener.
+	HTTPSListenerHostname   string `json:",omitempty"`
 	Hostname                string
 	PathType                PathMatchType
 	PathValue               string
@@ -241,6 +246,9 @@ type RouteSpec struct {
 	// BackendTLSObserved records a current policy inventory for this route.
 	// Only such an observation can release a previously protected backend.
 	BackendTLSObserved bool `json:"-"`
+	// HTTPSListenerHostname scopes scalar routes and supplies the default section
+	// for grouped matches that do not specify their own.
+	HTTPSListenerHostname string `json:",omitempty"`
 	// ScopedListenerPorts identifies the authorized listener ports. An HTTPRoute
 	// selects exactly one scoped port, while transport routes may win several.
 	// Single-listener bindings use GatewayRequirements.ListenerPort.

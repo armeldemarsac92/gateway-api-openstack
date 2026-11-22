@@ -48,6 +48,7 @@ type desiredPolicy struct {
 	backendKey              string
 	matchKey                string
 	hostnameRuleValue       string
+	httpsListenerHostname   string
 	redirect                *desiredRedirectPolicy
 	weighted                bool
 	weightedPlan            *weightedHTTPPolicyPlan
@@ -76,7 +77,7 @@ type desiredRoute struct {
 	backendKey             string
 	unavailable            bool
 	redirect               bool
-	redirectRanks          []int
+	redirectMatches        []cloud.HTTPPathMatch
 	redirectIssue          error
 	fixedResponse          bool
 	weightedTargets        []desiredHTTPWeightedTarget
@@ -176,15 +177,25 @@ func (p *Provider) buildDesiredRoutePart(spec cloud.RouteSpec, backendKey string
 	switch protocol {
 	case cloud.ListenerProtocolHTTP:
 		if backendKey == "" {
-			policies, hostnameRuleValue, err = p.httpPathPolicies(cloud.HTTPPathMatch{
+			match := cloud.HTTPPathMatch{
 				Hostname: spec.Hostname, PathType: spec.PathType, PathValue: spec.PathValue,
-			}, false)
+			}
+			policies, hostnameRuleValue, err = p.httpPathPolicies(match, false)
 			if err != nil {
 				return invalid(err)
 			}
+			if scope := spec.HTTPSListenerHostname; scope != "" {
+				for i := range policies {
+					policy := &policies[i]
+					policy.httpsListenerHostname = scope
+					policy.matchKey = openstackidentity.HTTPListenerMatchKey(scope, match)
+					policy.hostnameRuleValue = hostnameRuleValue
+					policy.role = policyRuleRole(*policy, policy.role, "")
+				}
+			}
 		}
 	case cloud.ListenerProtocolTCP, cloud.ListenerProtocolUDP:
-		if spec.Hostname != "" || spec.PathType != "" || spec.PathValue != "" {
+		if spec.Hostname != "" || spec.PathType != "" || spec.PathValue != "" || spec.HTTPSListenerHostname != "" {
 			return invalid(fmt.Errorf("a %s route cannot contain HTTP matches", protocol))
 		}
 	default:
@@ -359,7 +370,8 @@ func (p *Provider) buildHTTPMatchPolicies(r *desiredRoute, matches []cloud.HTTPP
 		if err != nil {
 			return err
 		}
-		matchKey := openstackidentity.HTTPMatchKey(match.Hostname, match.PathType, match.PathValue, match.Method, match.Headers...)
+		scope := httpMatchScope(r.spec, match)
+		matchKey := openstackidentity.HTTPListenerMatchKey(scope, match)
 		if matchKeys[matchKey] {
 			return errors.New("duplicate HTTP match within one backend or weighted rule")
 		}
@@ -376,6 +388,7 @@ func (p *Provider) buildHTTPMatchPolicies(r *desiredRoute, matches []cloud.HTTPP
 		}
 		for _, policy := range policies {
 			policy.backendKey, policy.matchKey = r.backendKey, matchKey
+			policy.httpsListenerHostname = scope
 			policy.hostnameRuleValue, policy.precedence = hostnameRuleValue, match.Precedence
 			policy.weighted = r.weightedTargets != nil
 			policy.requestHeaderOperations = operations

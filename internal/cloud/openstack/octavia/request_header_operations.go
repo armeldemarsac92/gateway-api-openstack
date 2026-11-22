@@ -27,17 +27,8 @@ import (
 )
 
 type policyWithRequestHeaders struct {
-	create     l7policies.CreateOptsBuilder
 	update     l7policies.UpdateOptsBuilder
 	operations []cloud.HTTPHeaderOperation
-}
-
-func (opts policyWithRequestHeaders) ToL7PolicyCreateMap() (map[string]any, error) {
-	body, err := opts.create.ToL7PolicyCreateMap()
-	if err == nil {
-		writePolicyRequestHeaderOperations(body, opts.operations)
-	}
-	return body, err
 }
 
 func (opts policyWithRequestHeaders) ToL7PolicyUpdateMap() (map[string]any, error) {

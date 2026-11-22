@@ -103,6 +103,7 @@ func run(ctx context.Context) error {
 		apiQPS             float64
 		apiBurst           int
 	)
+	var httpsListenerIsolation bool
 	var exactHTTPHeaders, httpMethodMatch, requestHeaderModifier, backendH2C, tlsSNIPassthrough, tlsSNISuffix bool
 	zapOptions := zap.Options{Development: false}
 	zapOptions.BindFlags(flag.CommandLine)
@@ -115,6 +116,7 @@ func run(ctx context.Context) error {
 	flag.BoolVar(&tlsSNIPassthrough, "octavia-tls-sni-passthrough", false, "use the advertised Octavia TCP SNI passthrough capability for TLSRoutes")
 	flag.BoolVar(&tlsSNISuffix, "octavia-tls-sni-suffix", false, "use the advertised Octavia wildcard SNI capability (requires --octavia-tls-sni-passthrough)")
 	flag.BoolVar(&backendTLSPolicy, "octavia-backend-tls-policy", false, "authenticate BackendTLSPolicy HTTP upstreams with the regional Octavia hostname capability and a Barbican CA (requires --octavia-microversion=2.8 or newer)")
+	flag.BoolVar(&httpsListenerIsolation, "octavia-https-listener-isolation", false, "isolate terminated HTTPS sections on a shared port using the regional Octavia capability (requires --tls-certificate-map)")
 	flag.BoolVar(&backendH2C, "octavia-backend-h2c", false, "use the advertised Octavia h2c backend transport capability")
 	flag.BoolVar(&requestHeaderModifier, "octavia-request-header-modifier", false, "use the advertised Octavia L7 request header operations capability")
 	flag.StringVar(&certificateMap, "tls-certificate-map", envOr("GATEWAY_OPENSTACK_TLS_CERTIFICATE_MAP", ""), "operator-managed TLS revision map for HTTPS listeners")
@@ -163,6 +165,7 @@ func run(ctx context.Context) error {
 		BackendH2C:              backendH2C,
 		BackendTLSPolicy:        backendTLSPolicy,
 		OperatorHTTPS:           certificateMap != "",
+		HTTPSListenerIsolation:  httpsListenerIsolation,
 		TLSSNIPassthrough:       tlsSNIPassthrough,
 		TLSSNISuffix:            tlsSNISuffix,
 		ClusterID:               clusterID,
@@ -218,6 +221,8 @@ func run(ctx context.Context) error {
 		TLSSNISuffix:          tlsSNISuffix,
 		OperationTimeout:      operationTimeout,
 		PollInterval:          pollInterval,
+
+		HTTPSListenerIsolation: httpsListenerIsolation,
 	}
 	openStackProvider := openstack.NewProvider(serviceClients, providerConfig)
 	if err := controller.SetupIndexes(ctx, manager.GetFieldIndexer(), controllerConfig); err != nil {
@@ -238,6 +243,7 @@ func run(ctx context.Context) error {
 		Config:           controllerConfig,
 	}
 	if controllerConfig.OperatorHTTPS {
+		gatewayReconciler.HTTPSListenerIsolationAvailable = openStackProvider.HTTPSListenerIsolationAvailable
 		gatewayReconciler.Certificates = &certificates.Resolver{
 			Path: certificateMap, Reader: manager.GetAPIReader(),
 			ClusterID: controllerConfig.ClusterID, ProjectID: serviceClients.ProjectID, Region: serviceClients.Region,

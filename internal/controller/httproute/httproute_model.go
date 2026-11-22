@@ -221,7 +221,7 @@ func (r *Reconciler) buildRouteModelWithReader(
 	if err != nil {
 		return cloud.RouteSpec{}, err
 	}
-	listener, err := boundRouteAttachment(route, gateway, http, namespaces)
+	listeners, err := r.boundRouteAttachments(route, gateway, http, namespaces)
 	if err != nil {
 		return cloud.RouteSpec{}, err
 	}
@@ -229,7 +229,7 @@ func (r *Reconciler) buildRouteModelWithReader(
 	if err != nil {
 		return cloud.RouteSpec{}, err
 	}
-	spec, _, err := r.buildRouteModelFromInputs(ctx, reader, route, gateway, *listener, inputs)
+	spec, _, err := r.buildRouteModelFromInputs(ctx, reader, route, gateway, listeners, inputs)
 	return spec, err
 }
 
@@ -238,11 +238,13 @@ func (r *Reconciler) buildRouteModelFromInputs(
 	reader client.Reader,
 	route *gatewayv1.HTTPRoute,
 	gateway *gatewayv1.Gateway,
-	listener gatewayv1.Listener,
+	listeners []*gatewayv1.Listener,
 	inputs *routeModelInputs,
 ) (cloud.RouteSpec, model.Diagnostic, error) {
 	ordinaryHTTP := model.HTTPProfileRouteKind(route) == model.HTTPRouteKind
-	matches, rules, err := supportedRouteModel(inputs.routeFragment(route), listener,
+	listener := *listeners[0]
+	isolated := gatewaycontroller.SharedHTTPSListener(r.Config, gateway, &listener)
+	matches, rules, err := supportedRouteModel(inputs.routeFragment(route), listeners, isolated,
 		r.Config.FixedHTTPResponses || r.Config.WeightedHTTPTargets, r.Config.WeightedHTTPTargets,
 		r.Config.HTTPHeaderExact && ordinaryHTTP, r.Config.HTTPMethodMatch && ordinaryHTTP)
 	if err != nil {
@@ -275,7 +277,10 @@ func (r *Reconciler) buildRouteModelFromInputs(
 		spec.GatewayRequirements.ListenerProtocol = cloud.ListenerProtocolHTTP
 		spec.ScopedListenerPorts = []int{int(listener.Port)}
 	}
-	if !r.usesHTTPBackendGroups(route) && rules[0].Redirect == nil {
+	if len(listeners) == 1 && isolated {
+		spec.HTTPSListenerHostname = gatewaycontroller.HTTPSVirtualHostname(&listener)
+	}
+	if len(matches) == 1 && !r.usesHTTPBackendGroups(route) && rules[0].Redirect == nil {
 		match := matches[0]
 		backend := rules[0].Backends[0]
 		spec.Hostname, spec.PathType, spec.PathValue, spec.Precedence = match.Hostname, cloud.PathMatchType(match.Match.PathType), match.Match.PathValue, match.Precedence
@@ -335,7 +340,7 @@ type httpBackendResolution struct {
 	diagnostic model.Diagnostic
 }
 
-func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader, route *gatewayv1.HTTPRoute, listener gatewayv1.Listener, spec *cloud.RouteSpec, inputs *routeModelInputs, matches []model.RouteMatch, rules []model.Rule, nodeAddressType corev1.NodeAddressType) (model.Diagnostic, error) {
+func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader, route *gatewayv1.HTTPRoute, listener gatewayv1.Listener, spec *cloud.RouteSpec, inputs *routeModelInputs, matches []routeLoweredMatch, rules []model.Rule, nodeAddressType corev1.NodeAddressType) (model.Diagnostic, error) {
 	type ruleTarget struct {
 		pool     *int
 		weighted int
@@ -396,7 +401,8 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 		}
 		*paths = appendHTTPPathMatch(*paths, cloud.HTTPPathMatch{
 			Hostname: match.Hostname, PathType: cloud.PathMatchType(match.Match.PathType), PathValue: match.Match.PathValue, Precedence: match.Precedence,
-			Method: match.Match.Method, Headers: match.Match.Headers, RequestHeaderOperations: operations,
+			HTTPSListenerHostname: match.httpsListenerHostname,
+			Method:                match.Match.Method, Headers: match.Match.Headers, RequestHeaderOperations: operations,
 		})
 	}
 	return firstDiagnostic, nil
@@ -457,7 +463,8 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 func appendHTTPPathMatch(matches []cloud.HTTPPathMatch, match cloud.HTTPPathMatch) []cloud.HTTPPathMatch {
 	// Equivalent alternatives targeting the same action share one policy identity.
 	if slices.ContainsFunc(matches, func(previous cloud.HTTPPathMatch) bool {
-		return previous.Hostname == match.Hostname && previous.PathType == match.PathType && previous.PathValue == match.PathValue &&
+		return previous.HTTPSListenerHostname == match.HTTPSListenerHostname && previous.Hostname == match.Hostname &&
+			previous.PathType == match.PathType && previous.PathValue == match.PathValue &&
 			previous.Method == match.Method && slices.Equal(previous.Headers, match.Headers)
 	}) {
 		return matches
@@ -491,46 +498,43 @@ func groupedBackendMembers(ctx context.Context, reader client.Reader, backend mo
 	return nil, model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: buildError.message}, nil
 }
 
-// supportedRouteModel only admits fragments on one section. Logical rule
-// diagnostics must be checked before creating any backend group.
-func supportedRouteModel(logical model.Gateway, selected gatewayv1.Listener, fixedResponses, weightedTargets, exactHeaders, methodMatch bool) ([]model.RouteMatch, []model.Rule, error) {
-	unsupported := func() ([]model.RouteMatch, []model.Rule, error) {
+type routeLoweredMatch struct {
+	model.RouteMatch
+	httpsListenerHostname string
+}
+
+// supportedRouteModel verifies that the compiled attachments match the sections
+// selected by admission before lowering any backend or policy.
+func supportedRouteModel(logical model.Gateway, selected []*gatewayv1.Listener, isolated, fixedResponses, weightedTargets, exactHeaders, methodMatch bool) ([]routeLoweredMatch, []model.Rule, error) {
+	unsupported := func() ([]routeLoweredMatch, []model.Rule, error) {
 		return nil, nil, newRouteBuildError(routeErrorUnsupported, "logical Gateway configuration is outside the supported HTTP profile")
 	}
 	if len(logical.Diagnostics) != 0 || len(logical.Routes) != 1 {
 		return unsupported()
 	}
-	var listener *model.Listener
-	for i := range logical.Listeners {
-		candidate := &logical.Listeners[i]
-		if candidate.Name == selected.Name && candidate.Port == selected.Port && candidate.Protocol == selected.Protocol && listener == nil {
-			listener = candidate
-			continue
-		}
-		// Lower one fragment only when no other section contains this route.
-		if candidate.Name == selected.Name || len(candidate.Rules) != 0 {
-			return unsupported()
-		}
-	}
 	route := logical.Routes[0]
-	if listener == nil || len(listener.Diagnostics) != 0 || len(route.Diagnostics) != 0 || len(listener.Rules) == 0 || len(route.Parents) != 1 {
+	if len(route.Diagnostics) != 0 || len(route.Parents) != 1 {
 		return unsupported()
 	}
 	parent := route.Parents[0]
 	if parent.State != model.AttachmentAccepted {
 		return unsupported()
 	}
-	attached := false
+	sections := make(map[gatewayv1.SectionName]*gatewayv1.Listener, len(selected))
+	for _, listener := range selected {
+		sections[listener.Name] = listener
+	}
+	attached := 0
 	for _, attachment := range parent.Listeners {
 		if attachment.State != model.AttachmentAccepted {
 			continue
 		}
-		if attached || attachment.Name != selected.Name {
+		if sections[attachment.Name] == nil {
 			return unsupported()
 		}
-		attached = true
+		attached++
 	}
-	if !attached {
+	if attached == 0 || attached != len(sections) {
 		return unsupported()
 	}
 	for _, rule := range route.Rules {
@@ -544,12 +548,34 @@ func supportedRouteModel(logical model.Gateway, selected gatewayv1.Listener, fix
 			return unsupported()
 		}
 	}
-	for _, match := range listener.Rules {
-		if !exactHeaders && len(match.Match.Headers) != 0 || !methodMatch && match.Match.Method != "" {
+	var matches []routeLoweredMatch
+	for _, listener := range logical.Listeners {
+		expected := sections[listener.Name]
+		if expected == nil {
+			if len(listener.Rules) != 0 {
+				return unsupported()
+			}
+			continue
+		}
+		if listener.Port != expected.Port || listener.Protocol != expected.Protocol || len(listener.Diagnostics) != 0 || len(listener.Rules) == 0 {
 			return unsupported()
 		}
+		delete(sections, listener.Name)
+		var hostname string
+		if isolated {
+			hostname = gatewaycontroller.HTTPSVirtualHostname(expected)
+		}
+		for _, match := range listener.Rules {
+			if !exactHeaders && len(match.Match.Headers) != 0 || !methodMatch && match.Match.Method != "" {
+				return unsupported()
+			}
+			matches = append(matches, routeLoweredMatch{RouteMatch: match, httpsListenerHostname: hostname})
+		}
 	}
-	return listener.Rules, route.Rules, nil
+	if len(sections) != 0 {
+		return unsupported()
+	}
+	return matches, route.Rules, nil
 }
 
 func supportedMatch(match gatewayv1.HTTPRouteMatch, exactHeaders, methodMatch bool) (cloud.PathMatchType, string, error) {

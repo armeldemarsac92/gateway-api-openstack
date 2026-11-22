@@ -577,10 +577,13 @@ func (r *Reconciler) attachedRoutes(ctx context.Context, gateway *gatewayv1.Gate
 					matching = append(matching, listener)
 				}
 			}
-			// An accepted status can predate a Gateway edit. A parent that
-			// now spans multiple HTTP sections is outside the stock profile.
-			if httpKind != "" && len(matching) != 1 {
-				continue
+			if httpKind != "" && len(matching) > 1 {
+				port := matching[0].Port
+				if slices.ContainsFunc(matching, func(listener *gatewayv1.Listener) bool {
+					return listener.Port != port || !SharedHTTPSListener(r.Config, gateway, listener)
+				}) {
+					continue
+				}
 			}
 			if r.Config.BackendTLSPolicy && httpKind == model.HTTPRouteKind {
 				programmed := meta.FindStatusCondition(parentStatus.Conditions, r.Config.Domain()+"/Programmed")
@@ -690,10 +693,6 @@ func (r *Reconciler) applyHTTPSListenerStatus(
 				conditionStatus = metav1.ConditionTrue
 				controller.SetCondition(&status.Conditions, controller.Condition(string(gatewayv1.ListenerConditionAccepted),
 					metav1.ConditionFalse, string(gatewayv1.ListenerReasonPortUnavailable), issue.message, gateway.Generation))
-			}
-			if issue.condition == gatewayv1.ListenerConditionAccepted || issue.condition == gatewayv1.ListenerConditionConflicted ||
-				issue.reason == gatewayv1.ListenerReasonInvalidRouteKinds {
-				status.AttachedRoutes = 0
 			}
 			controller.SetCondition(&status.Conditions, controller.Condition(string(issue.condition), conditionStatus, string(issue.reason), issue.message, gateway.Generation))
 			if statusIssue.resolvedRefs != nil {

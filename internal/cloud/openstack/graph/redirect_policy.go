@@ -72,8 +72,9 @@ func (p *Provider) buildDesiredGatewayRoute(spec cloud.RouteSpec, forwards []clo
 			if _, _, err := httpPathPolicies(match, true); err != nil {
 				return invalid(err)
 			}
-			key := openstackidentity.HTTPMatchKey(match.Hostname, match.PathType, match.PathValue, match.Method, match.Headers...)
-			route.redirectRanks = append(route.redirectRanks, match.Precedence)
+			match.HTTPSListenerHostname = httpMatchScope(spec, match)
+			key := openstackidentity.HTTPListenerMatchKey(match.HTTPSListenerHostname, match)
+			route.redirectMatches = append(route.redirectMatches, match)
 			selected, found := matches[key]
 			if found && selected.precedence <= match.Precedence {
 				continue
@@ -85,6 +86,7 @@ func (p *Provider) buildDesiredGatewayRoute(spec cloud.RouteSpec, forwards []clo
 			selected.precedence = match.Precedence
 			matches[key] = selected
 			part := desiredRoute{identity: route.identity, spec: route.spec, backendKey: redirectPartKey(key), redirect: true}
+			part.spec.HTTPSListenerHostname = match.HTTPSListenerHostname
 			cells, err := redirectCells(match, forwards)
 			if err != nil {
 				part.redirectIssue = err
@@ -141,6 +143,7 @@ func (p *Provider) appendRedirectPolicies(part *desiredRoute, redirect cloud.HTT
 	for _, policy := range policies {
 		policy.matchKey = openstackidentity.HTTPRedirectKey(matchKey, positive.Hostname, policy.role+"/"+strings.Join(guardKeys, "/"))
 		policy.hostnameRuleValue, policy.precedence = hostname, positive.Precedence
+		policy.httpsListenerHostname = positive.HTTPSListenerHostname
 		policy.role = openstackidentity.HTTPRedirectRole(policy.role, matchKey, policy.matchKey, "")
 		policy.redirect = &desiredRedirectPolicy{
 			matchKey: matchKey, prefix: redirect.Prefix, statusCode: int32(redirect.StatusCode), guards: guards,
@@ -175,6 +178,9 @@ func policyRuleRole(policy desiredPolicy, base, guard string) string {
 	}
 	if len(predicateKeys) != 0 {
 		return openstackidentity.HTTPFragmentRole(base, policy.backendKey, policy.matchKey, predicateKeys...)
+	}
+	if policy.backendKey == "" && policy.httpsListenerHostname != "" {
+		return openstackidentity.ScopedHTTPPolicyRole(base, policy.matchKey)
 	}
 	return httpResourceRole(base, policy.backendKey, policy.matchKey)
 }

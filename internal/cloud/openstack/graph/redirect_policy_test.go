@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"slices"
 	"testing"
@@ -80,6 +81,97 @@ func TestStockRedirectUsesPolicyOnlyPublicAPI(t *testing.T) {
 	}
 	if err := provider.executeRouteMutation(t.Context(), route, plan[0]); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestIsolatedHTTPSPoliciesKeepIndependentPredicatesForEachAction(t *testing.T) {
+	spec := completeGraphSpec(safetyTestIdentity(t))
+	port := spec.Gateway.Spec.ListenerPort
+	const host = "api.example.test"
+	spec.Gateway.Spec.ScopedListeners = []cloud.ScopedListener{{
+		Name: "shared", Port: port, TLS: &cloud.ListenerTLS{CertificateRef: "certificate", VirtualHosts: []string{"*", host}},
+	}}
+	route := &spec.Routes[0].Spec
+	route.ScopedListenerPorts = []int{port}
+	// The route-level selector supplies the default for the weighted match.
+	route.HTTPSListenerHostname = host
+	route.HTTPBackends = []cloud.HTTPBackend{{
+		Namespace: "apps", Name: "api", Port: 80, Members: route.Members, Matches: []cloud.HTTPPathMatch{{
+			Hostname: host, PathType: cloud.PathMatchPrefix, PathValue: "/app",
+		}},
+	}}
+	route.Hostname, route.PathType, route.PathValue, route.Members = "", "", "", nil
+	route.FixedHTTPRules = []cloud.HTTPFixedRule{{
+		RuleIndex: 1, Matches: []cloud.HTTPPathMatch{{
+			HTTPSListenerHostname: "*", Hostname: host, PathType: cloud.PathMatchExact, PathValue: "/app/private",
+		}},
+	}}
+	route.WeightedHTTPRules = []cloud.HTTPWeightedRule{{
+		RuleIndex: 2, Matches: []cloud.HTTPPathMatch{{
+			Hostname: host, PathType: cloud.PathMatchExact, PathValue: "/weighted", Precedence: 1,
+		}}, Targets: []cloud.HTTPWeightedTarget{{Weight: 1}},
+	}}
+	route.HTTPRedirects = []cloud.HTTPRedirect{{
+		RuleIndex: 3, Prefix: "https://moved.example.test", StatusCode: 302, Matches: []cloud.HTTPPathMatch{{
+			HTTPSListenerHostname: "*", Hostname: host, PathType: cloud.PathMatchPrefix, PathValue: "/app", Precedence: 1,
+		}},
+	}}
+
+	fields := make(map[string]string)
+	provider := completeGraphProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Policy map[string]any `json:"l7policy"`
+		}
+		if r.Method != http.MethodPost || r.URL.Path != "/lbaas/l7policies" || json.NewDecoder(r.Body).Decode(&request) != nil {
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		action, _ := request.Policy["action"].(string)
+		scope, _ := request.Policy["https_listener_hostname"].(string)
+		fields[action] = scope
+		if request.Policy["admin_state_up"] != false || request.Policy["listener_id"] != "shared" {
+			t.Errorf("policy must start disabled on the shared frontend: %v", request.Policy)
+		}
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"l7policy":{"id":"policy"}}`))
+	}), &gatewayTransitionRequests{})
+	provider.fixedHTTPResponses, provider.weightedHTTPTargets = true, true
+	desired, err := provider.buildDesiredGatewayGraph(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, part := range desired.routes[0].httpParts {
+		part.spec.Gateway.ListenerID = "shared"
+		for _, policy := range part.policies {
+			rules := rulesFor(policy, "")
+			if !slices.ContainsFunc(rules, func(rule desiredRule) bool { return rule.ruleType == l7policies.TypeHostName }) {
+				t.Fatalf("policy %q missing its independent Host predicate", policy.role)
+			}
+			if part.redirect && !slices.ContainsFunc(rules, func(rule desiredRule) bool {
+				return rule.invert && rule.ruleType == l7policies.TypePath && rule.value == "/app/private"
+			}) {
+				t.Fatal("redirect lacks the guard for higher-priority routing in its own section")
+			}
+			step := routeMutation{kind: routeMutationCreatePolicy, policy: policy}
+			if policy.weighted {
+				step.weightedTargets = &[]octavia.WeightedHTTPTarget{fixedWeightedHTTPTarget(1)}
+			} else if !part.redirect && !part.fixedResponse {
+				step.parentID = "pool"
+			}
+			if err := provider.executeRouteMutation(t.Context(), part, step); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	want := map[string]string{
+		string(l7policies.ActionRedirectToPool): host,
+		string(octavia.ActionWeightedTargets):   host,
+		string(octavia.ActionFixedResponse):     "*",
+		string(l7policies.ActionRedirectPrefix): "*",
+	}
+	if !maps.Equal(fields, want) {
+		t.Fatalf("native policy selectors = %v, want %v", fields, want)
 	}
 }
 

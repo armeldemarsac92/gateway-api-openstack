@@ -35,6 +35,7 @@ func (s *Service) ListListeners(ctx context.Context, opts listeners.ListOpts) ([
 // been disabled and detached. Both zero values otherwise accept missing JSON.
 type ListenerInventory struct {
 	DefaultHTTPResponseCodes map[string]int
+	HTTPSVirtualHosts        map[string][]string
 	Items                    []listeners.Listener
 	DefaultPoolsObserved     bool
 	AdminStatesObserved      map[string]bool
@@ -48,6 +49,7 @@ func (s *Service) ListListenerInventory(ctx context.Context, opts listeners.List
 	var response struct {
 		Listeners []struct {
 			listeners.Listener
+			VirtualHosts        json.RawMessage `json:"https_virtual_hosts"`
 			DefaultHTTPResponse *struct {
 				StatusCode int `json:"status_code"`
 			} `json:"default_http_response"`
@@ -66,6 +68,18 @@ func (s *Service) ListListenerInventory(ctx context.Context, opts listeners.List
 	for i, observed := range response.Listeners {
 		item := &inventory.Items[i]
 		*item = observed.Listener
+		if observed.VirtualHosts != nil {
+			if inventory.HTTPSVirtualHosts == nil {
+				inventory.HTTPSVirtualHosts = make(map[string][]string)
+			}
+			var hosts []string
+			if err := json.Unmarshal(observed.VirtualHosts, &hosts); err != nil || hosts == nil {
+				// Keep its identity and admin state available for withdrawal.
+				// A present, unreadable set cannot verify any allowed section.
+				hosts = []string{}
+			}
+			inventory.HTTPSVirtualHosts[item.ID] = hosts
+		}
 		if observed.DefaultHTTPResponse != nil {
 			if inventory.DefaultHTTPResponseCodes == nil {
 				inventory.DefaultHTTPResponseCodes = make(map[string]int)
@@ -123,6 +137,48 @@ func (notFoundListenerOptions) ToListenerUpdateMap() (map[string]any, error) {
 // CreateListenerWithNotFound creates an HTTP-family listener on the opt-in provider.
 func (s *Service) CreateListenerWithNotFound(ctx context.Context, opts listeners.CreateOpts) (*listeners.Listener, error) {
 	return listeners.Create(ctx, s.client, notFoundListenerOptions{opts}).Extract()
+}
+
+type isolatedHTTPSListenerOptions struct {
+	listeners.CreateOptsBuilder
+	virtualHosts []string
+}
+
+func (opts isolatedHTTPSListenerOptions) ToListenerCreateMap() (map[string]any, error) {
+	body, err := opts.CreateOptsBuilder.ToListenerCreateMap()
+	if err == nil {
+		body["listener"].(map[string]any)["https_virtual_hosts"] = opts.virtualHosts
+	}
+	return body, err
+}
+
+// CreateIsolatedHTTPSListener creates the disabled TLS listener with its complete
+// set of virtual hosts in the same request as its certificate and ownership tags.
+func (s *Service) CreateIsolatedHTTPSListener(ctx context.Context, opts listeners.CreateOpts, hosts []string, notFound bool) (*listeners.Listener, error) {
+	if len(hosts) == 0 || opts.Protocol != listeners.ProtocolTerminatedHTTPS || opts.AdminStateUp == nil || *opts.AdminStateUp {
+		return nil, fmt.Errorf("isolated HTTPS listener requires virtual hosts and a disabled TERMINATED_HTTPS frontend")
+	}
+	var create listeners.CreateOptsBuilder = opts
+	if notFound {
+		create = notFoundListenerOptions{opts}
+	}
+	return listeners.Create(ctx, s.client, isolatedHTTPSListenerOptions{create, hosts}).Extract()
+}
+
+type httpsVirtualHosts []string
+
+func (hosts httpsVirtualHosts) ToListenerUpdateMap() (map[string]any, error) {
+	if len(hosts) == 0 {
+		return nil, fmt.Errorf("isolated HTTPS listener requires at least one virtual host")
+	}
+	return map[string]any{"listener": map[string]any{"https_virtual_hosts": []string(hosts)}}, nil
+}
+
+// SetListenerHTTPSVirtualHosts changes the section inventory on a disabled
+// listener after policies referring to removed names have been retired.
+func (s *Service) SetListenerHTTPSVirtualHosts(ctx context.Context, id string, hosts []string) error {
+	_, err := listeners.Update(ctx, s.client, id, httpsVirtualHosts(hosts)).Extract()
+	return err
 }
 
 // SetListenerNotFound restores the unmatched response on an existing owned listener.

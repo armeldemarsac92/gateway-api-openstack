@@ -111,11 +111,15 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 	policyPending := make(map[int]bool)
 	policyCount := make(map[int]int32)
 	holdPolicyEnable := make(map[int]bool)
-	holdRedirectEnable := make(map[int]bool)
-	redirectPorts := make(map[int]bool)
+	type redirectDomainKey struct {
+		port  int
+		scope string
+	}
+	holdRedirectEnable := make(map[redirectDomainKey]bool)
+	redirectDomains := make(map[redirectDomainKey]bool)
 	for index, route := range desired.routes {
 		if route.redirect && desired.spec.Routes[index].Disposition == cloud.GraphEnsure {
-			redirectPorts[scopedHTTPRoutePort(route)] = true
+			redirectDomains[redirectDomainKey{scopedHTTPRoutePort(route), route.spec.HTTPSListenerHostname}] = true
 		}
 	}
 	for index, observed := range actual.routes {
@@ -127,9 +131,10 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 			port := portByListenerID[policy.policy.ListenerID]
 			policyCount[port]++
 			provedHandover := groupedHTTP && handovers.headerHandoverPredicates[policy.policy.ID]
-			if redirectPorts[port] && !policy.redirect && !provedHandover && (node.Disposition != cloud.GraphEnsure ||
+			domain := redirectDomainKey{port, policy.httpsListenerHostname}
+			if redirectDomains[domain] && !policy.redirect && !provedHandover && (node.Disposition != cloud.GraphEnsure ||
 				!observedForwardPolicyMatches(desired.routes[index], observed, policy)) {
-				holdRedirectEnable[port] = true
+				holdRedirectEnable[domain] = true
 			}
 			if policy.pending() {
 				policyPending[port] = true
@@ -158,6 +163,7 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 		withdrawBackendTransport := route.backendTransportNeedsWithdrawal(observed)
 		node := desired.spec.Routes[index]
 		port := scopedHTTPRoutePort(route)
+		redirectDomain := redirectDomainKey{port, route.spec.HTTPSListenerHostname}
 		var observedPort int
 		if len(observed.policies) != 0 {
 			observedPort = portByListenerID[observed.policies[0].policy.ListenerID]
@@ -279,7 +285,7 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 				routeResult.Outcome = p.progressingOutcome(step.message())
 			}
 		}
-		if node.Disposition == cloud.GraphEnsure && route.redirect && !withdrawing && holdRedirectEnable[port] {
+		if node.Disposition == cloud.GraphEnsure && route.redirect && !withdrawing && holdRedirectEnable[redirectDomain] {
 			routeResult.Outcome = p.progressingOutcome("Waiting for verified forwarding predicates on the redirect listener")
 			var withdrawal []routeMutation
 			for _, policy := range observed.policies {
@@ -369,7 +375,7 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 				}
 			case ensureHold != "":
 				continue
-			case route.redirect && step.kind == routeMutationEnablePolicy && (holdRedirectEnable[port] || holdPolicyOrder[port]):
+			case route.redirect && step.kind == routeMutationEnablePolicy && (holdRedirectEnable[redirectDomain] || holdPolicyOrder[port]):
 				routeResult.Outcome = p.progressingOutcome("Waiting for verified HTTP forwarding policies before enabling the redirect")
 			case groupedHTTP && stepIndex != 0:
 				// Only the first actionable change in this backend is eligible
@@ -697,10 +703,37 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 	if desired.protocol != cloud.ListenerProtocolHTTP {
 		return step, nil
 	}
+	if step.kind == graphRouteMutation && step.route.policy.httpsListenerHostname != "" &&
+		(step.route.kind == routeMutationCreatePolicy || step.route.kind == routeMutationEnablePolicy ||
+			step.route.kind == routeMutationSetPolicyHTTPSListenerHostname) {
+		port := scopedHTTPRoutePort(graphRoutePart(desired, step))
+		spec := scopedHTTPListeners(desired)[port]
+		i := slices.IndexFunc(actual.scopedListeners, func(listener listeners.Listener) bool {
+			return listener.ID == step.listenerID && listener.ProtocolPort == port
+		})
+		if i < 0 || !actual.scopedHTTPListenerMatches(actual.scopedListeners[i], spec) ||
+			!slices.Contains(httpsVirtualHosts(spec), step.route.policy.httpsListenerHostname) {
+			return step, cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady, errors.New("waiting for verified HTTPS listener isolation"))
+		}
+		listener := actual.scopedListeners[i]
+		if step.route.kind == routeMutationSetPolicyHTTPSListenerHostname && (listener.AdminStateUp || listener.ProvisioningStatus != "ACTIVE") {
+			return step, cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady, errors.New("waiting for a closed HTTPS listener before policy scope repair"))
+		}
+	}
 	var required []string
 	fixed := desired.fixedHTTPResponses
 	switch step.kind {
-	case graphCreateLoadBalancer, graphCreateListener, graphSetListenerNotFound, graphEnableListener, graphEnableLoadBalancer:
+	case graphCreateLoadBalancer:
+		if desired.spec.Gateway.Spec.ScopedListeners != nil &&
+			!slices.ContainsFunc(desired.spec.Gateway.Spec.ScopedListeners, func(spec cloud.ScopedListener) bool {
+				return hasAuthorizedListener(spec) && len(httpsVirtualHosts(spec)) == 0
+			}) {
+			if !p.httpsListenerIsolation {
+				return step, cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady, errors.New("controller opt-in for Octavia HTTPS listener isolation is disabled"))
+			}
+			required = append(required, octavia.GatewayCapabilityHTTPSListenerIsolation)
+		}
+	case graphCreateListener, graphSetListenerNotFound, graphEnableListener, graphEnableLoadBalancer:
 	case graphRouteMutation:
 		part := graphRoutePart(desired, step)
 		fixed = fixed && routeNeedsHTTPCapability(part, step.route)
@@ -867,7 +900,10 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 			Name: name, Description: desired.identity.Description(roleListener), AdminStateUp: boolPointer(enabled),
 			DefaultTlsContainerRef: certificateRef, Tags: tags,
 		}
-		if desired.fixedHTTPResponses && (protocol == cloud.ListenerProtocolHTTP || protocol == terminatedHTTPS) {
+		if hosts := httpsVirtualHosts(step.scopedListener); len(hosts) != 0 {
+			opts.Tags = append(opts.Tags, httpsIsolationTag)
+			_, err = p.octavia.CreateIsolatedHTTPSListener(ctx, opts, hosts, desired.fixedHTTPResponses)
+		} else if desired.fixedHTTPResponses && (protocol == cloud.ListenerProtocolHTTP || protocol == terminatedHTTPS) {
 			_, err = p.octavia.CreateListenerWithNotFound(ctx, opts)
 		} else {
 			_, err = p.octavia.CreateListener(ctx, opts)
@@ -877,6 +913,8 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 	case graphUpdateListenerCertificate:
 		ref := step.scopedListener.TLS.CertificateRef
 		_, err = p.octavia.UpdateListener(ctx, listenerID, listeners.UpdateOpts{DefaultTlsContainerRef: &ref})
+	case graphUpdateListenerVirtualHosts:
+		err = p.octavia.SetListenerHTTPSVirtualHosts(ctx, listenerID, httpsVirtualHosts(step.scopedListener))
 	case graphClearListenerDefaultPool, graphSetListenerDefaultPool:
 		// Gophercloud encodes an explicit empty DefaultPoolID as JSON null.
 		_, err = p.octavia.UpdateListener(ctx, listenerID, listeners.UpdateOpts{DefaultPoolID: &step.poolID})
@@ -888,6 +926,9 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 			return desired.spec.Gateway.ClaimBackendCA(ctx)
 		}
 		route := graphRoutePart(desired, step)
+		if actual.scoped && step.route.policy.httpsListenerHostname != "" && step.listenerID == "" {
+			return fmt.Errorf("%w: scoped HTTP policy has no verified listener", cloud.ErrOwnershipConflict)
+		}
 		route.spec.Gateway = actual.state
 		route.spec.Gateway.ListenerID = listenerID
 		return p.executeRouteMutation(ctx, route, step.route)

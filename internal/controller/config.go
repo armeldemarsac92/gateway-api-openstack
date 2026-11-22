@@ -54,6 +54,8 @@ type Config struct {
 	BackendTLSPolicy bool
 	// OperatorHTTPS enables termination using operator-provisioned certificates.
 	OperatorHTTPS bool
+	// HTTPSListenerIsolation enables shared ports for isolated HTTPS sections.
+	HTTPSListenerIsolation bool
 	// TLSSNIPassthrough enables the advertised native TCP SNI policy extension.
 	TLSSNIPassthrough bool
 	// TLSSNISuffix enables the advertised wildcard SNI extension.
@@ -79,6 +81,9 @@ func (c Config) XBackendEnabled() bool {
 
 // Validate rejects configuration that could make ownership ambiguous.
 func (c Config) Validate() error {
+	if c.HTTPSListenerIsolation && !c.OperatorHTTPS {
+		return fmt.Errorf("--octavia-https-listener-isolation requires --tls-certificate-map")
+	}
 	if c.HTTPMethodMatch && !c.FixedHTTPResponses {
 		return fmt.Errorf("--octavia-http-method-match requires --octavia-fixed-http-responses")
 	}
@@ -174,6 +179,11 @@ func (c Config) GatewayListenerPortAnnotation() string {
 // GatewayListenerModeAnnotation records enrollment in per-port listener ownership.
 func (c Config) GatewayListenerModeAnnotation(protocol gatewayv1.ProtocolType) string {
 	return c.Domain() + "/gateway-" + strings.ToLower(string(protocol)) + "-listener-mode-" + c.controllerKey()
+}
+
+// GatewayHTTPSIsolatedPortsAnnotation retains enrollment when a shared port loses its penultimate section.
+func (c Config) GatewayHTTPSIsolatedPortsAnnotation() string {
+	return c.Domain() + "/https-isolated-ports-" + c.controllerKey()
 }
 
 // GatewayListenerProtocolAnnotation returns the key that records the listener

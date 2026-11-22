@@ -40,9 +40,29 @@ func (p *Provider) observeScopedHTTPGraph(ctx context.Context, desired desiredGa
 	if err != nil {
 		return actual, err
 	}
-	actual.routes, err = p.observeRouteGraphsFromPools(ctx, owners, actual.loadBalancer, nil, actual.protocol, actual.scopedListeners, poolInventory, routeRecovery)
+	actual.routes, err = p.observeRouteGraphsFromPools(ctx, owners, actual.loadBalancer, nil, actual.protocol, actual.scopedListeners, poolInventory, routeRecovery, actual.httpsIsolationPolicies)
 	if err != nil {
 		return actual, err
+	}
+	for _, listener := range actual.scopedListeners {
+		if !actual.isHTTPSIsolated(listener) && slices.ContainsFunc(actual.routes, func(route observedRouteGraph) bool {
+			return slices.ContainsFunc(route.parts(), func(part observedRouteGraph) bool {
+				return slices.ContainsFunc(part.policies, func(policy observedRoutePolicy) bool {
+					return policy.policy.ListenerID == listener.ID && policy.httpsListenerHostname != ""
+				})
+			})
+		}) {
+			if actual.httpsIsolationUnverified == nil {
+				actual.httpsIsolationUnverified = make(map[string]bool)
+			}
+			actual.httpsIsolationUnverified[listener.ID] = true
+		}
+	}
+	if actual.loadBalancer.ProvisioningStatus == "ACTIVE" && len(actual.httpsIsolationUnverified) != 0 {
+		p.planScopedHTTPSWithdrawal(desired, &actual)
+		if actual.withdrawTLS != nil {
+			return actual, nil
+		}
 	}
 	configured := scopedHTTPListeners(desired)
 	for _, listener := range actual.scopedListeners {
@@ -173,11 +193,20 @@ func scopedHTTPListenerMatches(listener listeners.Listener, spec cloud.ScopedLis
 		listener.DefaultPoolID == "" && supportsSingleCertificate(listener) && listener.DefaultTlsContainerRef == spec.TLS.CertificateRef
 }
 
+func (actual observedGatewayGraph) scopedHTTPListenerMatches(listener listeners.Listener, spec cloud.ScopedListener) bool {
+	return scopedHTTPListenerMatches(listener, spec, actual.adminObserved[listener.ID]) && actual.httpsBindingMatches(listener, spec)
+}
+
+func httpsIsolationWithdrawal(listener listeners.Listener, spec cloud.ScopedListener) graphMutation {
+	if spec.Port == 0 {
+		spec.Port = listener.ProtocolPort
+	}
+	return graphMutation{kind: graphDisableListener, listenerID: listener.ID, scopedListener: spec,
+		redactTLSError: listener.Protocol == terminatedHTTPS, message: "Disabling Octavia listener to withdraw its HTTPS port"}
+}
+
 func (p *Provider) planScopedHTTPSWithdrawal(desired desiredGatewayGraph, actual *observedGatewayGraph) {
 	disposition := desired.spec.Gateway.Disposition
-	if disposition == cloud.GraphPreserve {
-		return
-	}
 	configured := scopedHTTPListeners(desired)
 	var retry *graphMutation
 	for _, listener := range actual.scopedListeners {
@@ -187,16 +216,16 @@ func (p *Provider) planScopedHTTPSWithdrawal(desired desiredGatewayGraph, actual
 		var withdraw bool
 		switch disposition {
 		case cloud.GraphEnsure, cloud.GraphWithdrawTLS:
-			withdraw = https && (!present || !scopedHTTPListenerMatches(listener, spec, adminObserved) || listener.ProvisioningStatus == "ERROR") ||
+			withdraw = https && (!present || !actual.scopedHTTPListenerMatches(listener, spec) || listener.ProvisioningStatus == "ERROR") ||
 				!https && present && spec.TLS != nil
 		case cloud.GraphDelete:
 			withdraw = https
 		}
+		withdraw = withdraw || actual.httpsIsolationUnverified[listener.ID]
 		if !withdraw {
 			continue
 		}
-		step := graphMutation{kind: graphDisableListener, listenerID: listener.ID, scopedListener: spec, redactTLSError: https,
-			message: "Disabling Octavia listener to withdraw its HTTPS port"}
+		step := httpsIsolationWithdrawal(listener, spec)
 		switch listener.ProvisioningStatus {
 		case "ACTIVE":
 			if listener.AdminStateUp || !adminObserved {
@@ -221,9 +250,13 @@ func unchangedHTTPSWithdrawalSiblings(desired desiredGatewayGraph, actual observ
 		return nil
 	}
 	configured := scopedHTTPListeners(desired)
+	step := actual.withdrawTLS
+	if step == nil {
+		step = actual.httpsIsolationMutation
+	}
 	var ports []int
 	for _, listener := range actual.scopedListeners {
-		if listener.ID == actual.withdrawTLS.listenerID || !actual.adminObserved[listener.ID] ||
+		if listener.ID == step.listenerID || !actual.adminObserved[listener.ID] ||
 			!listener.AdminStateUp || listener.ProvisioningStatus != "ACTIVE" {
 			continue
 		}
@@ -233,7 +266,7 @@ func unchangedHTTPSWithdrawalSiblings(desired desiredGatewayGraph, actual observ
 		if !present && desired.spec.Gateway.Disposition != cloud.GraphWithdrawTLS {
 			continue
 		}
-		if scopedHTTPListenerMatches(listener, spec, true) {
+		if actual.scopedHTTPListenerMatches(listener, spec) && !actual.httpsIsolationUnverified[listener.ID] {
 			ports = append(ports, listener.ProtocolPort)
 		}
 	}
@@ -261,7 +294,9 @@ func scopedHTTPGatewayResult(desired desiredGatewayGraph, actual observedGateway
 	unverified := make(map[int]bool)
 	for _, listener := range actual.scopedListeners {
 		portsByID[listener.ID] = listener.ProtocolPort
-		if spec, found := configured[listener.ProtocolPort]; !found || !scopedHTTPListenerMatches(listener, spec, actual.adminObserved[listener.ID]) || !actual.httpFallbackReady(listener, desired.fixedHTTPResponses) {
+		if spec, found := configured[listener.ProtocolPort]; !found || actual.httpsIsolationUnverified[listener.ID] ||
+			!actual.scopedHTTPListenerMatches(listener, spec) || !actual.httpFallbackReady(listener, desired.fixedHTTPResponses) ||
+			!actual.isolatedPoliciesReady(desired, listener) {
 			unverified[listener.ProtocolPort] = true
 		}
 	}
@@ -341,6 +376,10 @@ func scopedHTTPListenerPlan(desired desiredGatewayGraph, actual observedGatewayG
 		if desired.spec.Gateway.Disposition != cloud.GraphEnsure {
 			continue
 		}
+		if !actual.httpsBindingMatches(listener, spec) || !actual.isHTTPSIsolated(listener) && actual.httpsIsolationUnverified[listener.ID] {
+			// Enrollment is retained while isolation or authority cannot be proved.
+			continue
+		}
 		if !present || scopedHTTPProtocol(spec) != listener.Protocol {
 			retiring[listener.ID] = true
 			if len(listener.L7Policies) == 0 {
@@ -349,7 +388,7 @@ func scopedHTTPListenerPlan(desired desiredGatewayGraph, actual observedGatewayG
 			continue
 		}
 		adminObserved := actual.adminObserved[listener.ID]
-		if scopedHTTPListenerMatches(listener, spec, adminObserved) {
+		if actual.scopedHTTPListenerMatches(listener, spec) {
 			byPort[port] = listener
 			if desired.fixedHTTPResponses && listener.ProvisioningStatus == "ACTIVE" && actual.defaultHTTPResponseCodes[listener.ID] != 404 {
 				changes = append(changes, graphMutation{kind: graphSetListenerNotFound, listenerID: listener.ID, message: "Setting the default HTTP response on the scoped listener"})
@@ -362,7 +401,8 @@ func scopedHTTPListenerPlan(desired desiredGatewayGraph, actual observedGatewayG
 	}
 	if actual.loadBalancer != nil {
 		for _, listener := range desired.spec.Gateway.Spec.ScopedListeners {
-			if !occupied[listener.Port] && hasAuthorizedListener(listener) {
+			if !occupied[listener.Port] && hasAuthorizedListener(listener) &&
+				(len(httpsVirtualHosts(listener)) == 0 || actual.httpsIsolationAvailable) {
 				changes = append(changes, graphMutation{kind: graphCreateListener, scopedListener: listener,
 					redactTLSError: listener.TLS != nil, message: "Creating Octavia HTTP-family listener"})
 			}
@@ -380,13 +420,17 @@ func buildScopedHTTPTrafficRestorationPlan(desired desiredGatewayGraph, actual o
 	for _, listener := range actual.scopedListeners {
 		spec, present := configured[listener.ProtocolPort]
 		if !present || listener.Protocol != scopedHTTPProtocol(spec) {
+			if actual.isHTTPSIsolated(listener) {
+				continue
+			}
 			return nil, nil
 		}
 		if !hasAuthorizedListener(spec) {
 			// An independently denied port does not hold authorized siblings.
 			continue
 		}
-		if !scopedHTTPListenerMatches(listener, spec, actual.adminObserved[listener.ID]) || !actual.httpFallbackReady(listener, desired.fixedHTTPResponses) ||
+		if !actual.scopedHTTPListenerMatches(listener, spec) || !actual.httpFallbackReady(listener, desired.fixedHTTPResponses) ||
+			!actual.isolatedPoliciesReady(desired, listener) || actual.httpsIsolationUnverified[listener.ID] ||
 			listener.Protocol == terminatedHTTPS && listener.ProvisioningStatus != "ACTIVE" {
 			continue
 		}

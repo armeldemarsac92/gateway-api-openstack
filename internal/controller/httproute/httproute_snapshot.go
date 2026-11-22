@@ -145,19 +145,21 @@ func (r *Reconciler) buildRouteValidationSnapshotFromInputs(
 	if inputs.admission.conflicts[routeKey(snapshot.route)] {
 		return routeValidationSnapshot{}, routeSnapshotRejection(purpose, routeProfileConflict())
 	}
-	listener, err := selectRouteAttachment(snapshot.route, snapshot.gateway, candidates, inputs.input.Namespaces)
+	listeners, err := r.selectRouteAttachments(snapshot.route, snapshot.gateway, candidates, inputs.input.Namespaces)
 	if err != nil {
 		return routeValidationSnapshot{}, routeSnapshotRejection(purpose, err)
 	}
 	if controller.GatewayListenerScope(r.Config, snapshot.gateway) == gatewayv1.HTTPProtocolType {
-		snapshot.gatewayProgrammed = listenerProgrammedForGeneration(snapshot.gateway, listener.Name)
+		snapshot.gatewayProgrammed = !slices.ContainsFunc(listeners, func(listener *gatewayv1.Listener) bool {
+			return !listenerProgrammedForGeneration(snapshot.gateway, listener.Name)
+		})
 	}
 	if purpose == routeSnapshotForBinding {
 		if err := r.validateRouteBindingTransition(snapshot); err != nil {
 			return routeValidationSnapshot{}, err
 		}
 	}
-	desired, diagnostic, err := r.buildRouteModelFromInputs(ctx, r.APIReader, snapshot.route, snapshot.gateway, *listener, inputs)
+	desired, diagnostic, err := r.buildRouteModelFromInputs(ctx, r.APIReader, snapshot.route, snapshot.gateway, listeners, inputs)
 	if err != nil {
 		return routeValidationSnapshot{}, routeSnapshotReadError(purpose, err)
 	}

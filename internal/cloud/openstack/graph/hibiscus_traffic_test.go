@@ -52,27 +52,31 @@ import (
 // The Octavia API fixture stores the real Gophercloud writes. The stock render
 // and HAProxy operate on that inventory, including the administrative close.
 func TestHibiscusPrivateHTTPTraffic(t *testing.T) {
-	testHibiscusHTTPTraffic(t, false, false, false, false, nil)
+	testHibiscusHTTPTraffic(t, false, false, false, false, nil, false)
 }
 
 func TestHibiscusSharedHTTPTraffic(t *testing.T) {
-	testHibiscusHTTPTraffic(t, true, false, false, false, nil)
+	testHibiscusHTTPTraffic(t, true, false, false, false, nil, false)
 }
 
 func TestHibiscusDistinctHTTPListenerPorts(t *testing.T) {
-	testHibiscusHTTPTraffic(t, false, true, false, false, nil)
+	testHibiscusHTTPTraffic(t, false, true, false, false, nil, false)
 }
 
 func TestScopedHTTPBackendPathGroups(t *testing.T) {
-	testHibiscusHTTPTraffic(t, false, true, false, true, nil)
+	testHibiscusHTTPTraffic(t, false, true, false, true, nil, false)
 }
 
 func TestUnscopedHTTPBackendRecovery(t *testing.T) {
-	testHibiscusHTTPTraffic(t, false, false, false, true, nil)
+	testHibiscusHTTPTraffic(t, false, false, false, true, nil, false)
 }
 
 func TestScopedHTTPSListenerLifecycle(t *testing.T) {
-	testHibiscusHTTPTraffic(t, false, true, true, false, nil)
+	testHibiscusHTTPTraffic(t, false, true, true, false, nil, false)
+}
+
+func TestIsolatedHTTPSListenerLifecycle(t *testing.T) {
+	testHibiscusHTTPTraffic(t, false, true, true, false, nil, true)
 }
 
 // Point the pilot at a private kind worker NodePort with one Ready Gateway API
@@ -90,7 +94,7 @@ func TestHibiscusKindWorkerHTTP(t *testing.T) {
 	if pod == "" || namespace == "" {
 		t.Fatal("HIBISCUS_KIND_POD and HIBISCUS_KIND_NAMESPACE must identify the Ready echo-basic pod")
 	}
-	testHibiscusHTTPTraffic(t, false, false, false, false, &kindHTTPBackend{endpoint: endpoint, pod: pod, namespace: namespace})
+	testHibiscusHTTPTraffic(t, false, false, false, false, &kindHTTPBackend{endpoint: endpoint, pod: pod, namespace: namespace}, false)
 }
 
 type kindHTTPBackend struct {
@@ -220,7 +224,7 @@ func TestHibiscusTCPTraffic(t *testing.T) {
 	t.Logf("Stock HAProxy echoed all %d bytes after attach and forwarded no bytes after detach", len(payload))
 }
 
-func testHibiscusHTTPTraffic(t *testing.T, shared, distinct, https, grouped bool, worker *kindHTTPBackend) {
+func testHibiscusHTTPTraffic(t *testing.T, shared, distinct, https, grouped bool, worker *kindHTTPBackend, isolated bool) {
 	python, haproxy := os.Getenv("HIBISCUS_OCTAVIA_PYTHON"), os.Getenv("HIBISCUS_HAPROXY")
 	renderAvailable := python != "" || haproxy != ""
 	if worker == nil && !distinct && !grouped && !renderAvailable {
@@ -362,6 +366,8 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct, https, grouped bool
 	var disagreePoolListeners, disagreePoolMonitor string
 	var loseCertificateUpdateReply, holdMemberDisable bool
 	var poolListReads int
+	isolationAdvertised := isolated
+	var omitVirtualHosts bool
 	allowedHTTPPorts := []int{frontendAddress.Port}
 	readback := func(collection string, item record) record {
 		if !distinct && !grouped {
@@ -375,6 +381,9 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct, https, grouped bool
 			data["pools"] = ids(list(pool), func(child record) bool { return child["loadbalancer_id"] == id })
 		case listener:
 			data["l7policies"] = ids(orderedPolicies(id), func(record) bool { return true })
+			if omitVirtualHosts {
+				delete(data, "https_virtual_hosts")
+			}
 		case policy:
 			data["rules"] = ids(list(policy+"/"+id.(string)+"/rules"), func(record) bool { return true })
 		case pool:
@@ -405,6 +414,16 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct, https, grouped bool
 				return
 			case "/v2/lbaas/providers":
 				safetyWriteJSON(t, w, record{"providers": []record{{"name": "amphora"}}})
+				return
+			case "/v2/lbaas/providers/amphora/gateway_capabilities":
+				if !isolated {
+					t.Error("unexpected HTTPS isolation discovery")
+				}
+				if !isolationAdvertised {
+					http.Error(w, "discovery unavailable", http.StatusServiceUnavailable)
+					return
+				}
+				safetyWriteJSON(t, w, record{"gateway_capabilities": []string{octavia.GatewayCapabilityHTTPSListenerIsolation}})
 				return
 			case "/v2.0/subnets/vip-subnet":
 				safetyWriteJSON(t, w, record{"subnet": record{"id": "vip-subnet", "network_id": "private-net", "project_id": hibiscusProject, "cidr": "192.0.2.0/24", "ip_version": 4}})
@@ -484,6 +503,32 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct, https, grouped bool
 				return
 			}
 			data := payload[kind.key]
+			if isolated && collection == policy {
+				parent, scope := data["listener_id"], data["https_listener_hostname"]
+				if entry != nil {
+					parent = entry["listener_id"]
+					if _, set := data["https_listener_hostname"]; !set {
+						scope = entry["https_listener_hostname"]
+					}
+				}
+				hosts, _ := inventory[listener+"/"+parent.(string)]["https_virtual_hosts"].([]any)
+				if len(hosts) != 0 && !slices.Contains(hosts, scope) || len(hosts) == 0 && scope != nil {
+					t.Errorf("policy does not select exactly one native HTTPS section: %v", data)
+					http.Error(w, "invalid section", http.StatusBadRequest)
+					return
+				}
+				if data["https_listener_hostname"] != nil && data["admin_state_up"] != false {
+					t.Errorf("policy scope was written without an administrative close: %v", data)
+				}
+			}
+			if isolated && collection == listener && data["https_virtual_hosts"] != nil {
+				switch {
+				case req.Method == http.MethodPost && (data["admin_state_up"] != false || !slices.Contains(pilotTags(data["tags"]), httpsIsolationTag)):
+					t.Errorf("new isolated listener did not start closed with durable enrollment: %v", data)
+				case req.Method == http.MethodPut && (entry["admin_state_up"] != false || len(orderedPolicies(entry["id"])) != 0):
+					t.Errorf("changed native HTTPS hosts while the port or old selectors still existed: %v", entry)
+				}
+			}
 			if position, exists := data["position"]; collection == policy && exists {
 				if value, ok := position.(float64); !ok || value < 1 || value != float64(int(value)) {
 					reject()
@@ -514,6 +559,9 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct, https, grouped bool
 				if data["protocol"] == "TERMINATED_HTTPS" {
 					data["sni_container_refs"] = []string{}
 				}
+				if _, specified := data["invert"]; isolated && name == "rules" && !specified {
+					data["invert"] = false
+				}
 				resource = collection + "/" + id
 				if inventory[resource] != nil {
 					reject()
@@ -527,7 +575,7 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct, https, grouped bool
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusCreated)
 			} else if req.Method == http.MethodPut && entry != nil &&
-				(resource == gateway || collection == policy || distinct && collection == listener || grouped && (name == "members" || name == "rules")) {
+				(resource == gateway || collection == policy || distinct && collection == listener || (grouped || isolated) && (name == "members" || name == "rules")) {
 				if position, exists := data["position"]; collection == policy && exists {
 					placePolicy(entry, position)
 					delete(data, "position")
@@ -559,6 +607,11 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct, https, grouped bool
 			}
 			delete(inventory, resource)
 			if collection == policy {
+				if isolated {
+					for _, rule := range list(resource + "/rules") {
+						delete(inventory, resource+"/rules/"+rule["id"].(string))
+					}
+				}
 				for i, item := range orderedPolicies(entry["listener_id"]) {
 					item["position"] = i + 1
 				}
@@ -573,7 +626,7 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct, https, grouped bool
 		if distinct {
 			clients.LoadBalancer.Microversion = "2.29"
 		}
-		return newTestProvider(t, clients, ProviderConfig{})
+		return newTestProvider(t, clients, ProviderConfig{HTTPSListenerIsolation: isolated})
 	}
 
 	provider := newProvider()
@@ -1070,6 +1123,18 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct, https, grouped bool
 		httpsRoute := spec.Routes[0]
 		httpsRoute.Spec.Identity.RouteName, httpsRoute.Spec.Identity.RouteUID = "tls-route", "tls-route-uid"
 		httpsRoute.Spec.ScopedListenerPorts = []int{httpsPort}
+		const exactScope, wildcardScope = "api.example.test", "*.example.test"
+		if isolated {
+			spec.Gateway.Spec.ScopedListeners[0].TLS.VirtualHosts = []string{wildcardScope, exactScope}
+			member := httpsRoute.Spec.Members
+			httpsRoute.Spec.Hostname, httpsRoute.Spec.PathType, httpsRoute.Spec.PathValue, httpsRoute.Spec.Members = "", "", "", nil
+			httpsRoute.Spec.HTTPBackends = []cloud.HTTPBackend{{
+				Namespace: "test", Name: "api", Port: 80, Members: member, Matches: []cloud.HTTPPathMatch{
+					{HTTPSListenerHostname: exactScope, Hostname: exactScope, PathType: cloud.PathMatchExact, PathValue: "/api"},
+					{HTTPSListenerHostname: wildcardScope, Hostname: exactScope, PathType: cloud.PathMatchExact, PathValue: "/api"},
+				},
+			}}
+		}
 		spec.Routes = append(spec.Routes, httpsRoute)
 		result := converge(newProvider(), spec)
 		tlsID, httpID := "listener", "listener-2"
@@ -1083,6 +1148,113 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct, https, grouped bool
 			inventory[listener+"/"+httpID]["protocol"] != "HTTP" || len(orderedPolicies(tlsID)) == 0 ||
 			inventory[pool+"/"+orderedPolicies(tlsID)[0]["redirect_pool_id"].(string)]["protocol"] != "HTTP" {
 			t.Fatalf("HTTPS listener and HTTP routing did not converge: %v, writes %v", result.Gateway.Outcome, writes)
+		}
+
+		if isolated {
+			peer := inventory[listener+"/"+httpID]
+			rows := orderedPolicies(tlsID)
+			if len(rows) != 2 || rows[0]["https_listener_hostname"] != wildcardScope || rows[1]["https_listener_hostname"] != exactScope ||
+				!slices.Contains(pilotTags(server["tags"]), httpsIsolationTag) {
+				t.Fatalf("expected a single enrolled listener with two scoped policies, got %v", rows)
+			}
+			for _, row := range rows {
+				rules := list(policy + "/" + row["id"].(string) + "/rules")
+				if !slices.ContainsFunc(rules, func(rule record) bool { return rule["type"] == "HOST_NAME" }) {
+					t.Fatal("native scope replaced the independent HTTP hostname predicate")
+				}
+			}
+			assertClosed := func(provider *Provider) {
+				t.Helper()
+				before := len(writes)
+				result := reconcile(provider, spec)
+				if server["admin_state_up"] != false || peer["admin_state_up"] != true ||
+					!slices.Equal(result.Gateway.ScopedListenerDeferredPorts, []int{frontendAddress.Port}) ||
+					!slices.Equal(writes[before:], []string{"PUT " + tlsPath}) {
+					t.Fatalf("uncertainty did not withdraw only the isolated port: %v, writes %v", result.Gateway, writes[before:])
+				}
+			}
+
+			for _, drift := range []string{"", wildcardScope} {
+				if drift == "" {
+					delete(rows[1], "https_listener_hostname")
+				} else {
+					rows[1]["https_listener_hostname"] = drift
+				}
+				assertClosed(newProvider())
+				before := len(writes)
+				reconcile(newProvider(), spec)
+				if rows[1]["https_listener_hostname"] != exactScope || rows[1]["admin_state_up"] != false ||
+					server["admin_state_up"] != false || !slices.Equal(writes[before:], []string{"PUT " + policy + "/" + rows[1]["id"].(string)}) {
+					t.Fatalf("unverified policy scope did not repair while closed: %v, writes %v", rows[1], writes[before:])
+				}
+				converge(newProvider(), spec)
+			}
+			// A failed Kubernetes route read supplies only the Gateway's TLS
+			// snapshot. Membership in the host list cannot prove a route's section.
+			rows[1]["https_listener_hostname"] = wildcardScope
+			withdraw := cloud.GatewayGraphSpec{Identity: spec.Identity, Gateway: cloud.GatewayGraphNode{
+				Disposition: cloud.GraphWithdrawTLS, Spec: cloud.GatewaySpec{
+					Identity: spec.Identity, ListenerProtocol: cloud.ListenerProtocolHTTP, ListenerPort: frontendAddress.Port,
+					ScopedListeners: spec.Gateway.Spec.ScopedListeners[:1],
+				},
+			}}
+			before := len(writes)
+			result = reconcile(newProvider(), withdraw)
+			if server["admin_state_up"] != false || peer["admin_state_up"] != true ||
+				!slices.Equal(writes[before:], []string{"PUT " + tlsPath}) {
+				t.Fatalf("incomplete route snapshot preserved an unverified section: %v, writes %v", result.Outcome, writes[before:])
+			}
+			converge(newProvider(), spec)
+			omitVirtualHosts = true
+			assertClosed(newProvider())
+			// Each observed retirement is restricted to this closed listener.
+			omitVirtualHosts = false
+			converge(newProvider(), spec)
+
+			isolationAdvertised = false
+			assertClosed(newProvider())
+			before = len(writes)
+			reconcile(newProvider(), spec)
+			if len(writes) != before {
+				t.Fatalf("discovery failure allowed an isolated write: %v", writes[before:])
+			}
+			isolationAdvertised = true
+			converge(newProvider(), spec)
+
+			const replacementScope = "*.replacement.test"
+			spec.Gateway.Spec.ScopedListeners[0].TLS.VirtualHosts = []string{replacementScope, exactScope}
+			spec.Routes[1].Spec.HTTPBackends[0].Matches[1].HTTPSListenerHostname = replacementScope
+			assertClosed(newProvider())
+			converge(newProvider(), spec)
+			if len(orderedPolicies(tlsID)) != 2 || !slices.Equal(server["https_virtual_hosts"].([]any), []any{replacementScope, exactScope}) ||
+				!slices.Contains(pilotTags(server["tags"]), httpsIsolationTag) || peer["admin_state_up"] != true {
+				t.Fatalf("host-set replacement lost enrollment or changed a sibling: %v", server)
+			}
+
+			optedOut := newProvider()
+			optedOut.httpsListenerIsolation = false
+			spec.Gateway.Spec.ScopedListeners[0].TLS = &cloud.ListenerTLS{}
+			assertClosed(optedOut)
+			spec.Gateway.Spec.ScopedListeners[0].TLS = &cloud.ListenerTLS{CertificateRef: refA}
+			spec.Routes[1].Disposition = cloud.GraphPreserve
+			before = len(writes)
+			result = reconcile(optedOut, spec)
+			if server["admin_state_up"] != false || !slices.Contains(pilotTags(server["tags"]), httpsIsolationTag) ||
+				!slices.Equal(result.Gateway.ScopedListenerReadyPorts, []int{frontendAddress.Port}) || len(writes) != before {
+				t.Fatalf("opt-out reinterpreted the enclosed listener as ordinary HTTPS: %v, writes %v", result.Gateway, writes[before:])
+			}
+			spec.Gateway.Spec.ScopedListeners = spec.Gateway.Spec.ScopedListeners[1:]
+			spec.Routes[1].Disposition = cloud.GraphDelete
+			for range 24 {
+				reconcile(newProvider(), spec)
+				if inventory[tlsPath] == nil {
+					break
+				}
+			}
+			if inventory[tlsPath] != nil || peer["admin_state_up"] != true {
+				t.Fatalf("explicit port removal retained the isolated frontend or changed the HTTP sibling: %v", writes[before:])
+			}
+			return
 		}
 
 		// A retained route's temporarily incomplete inventory must not block

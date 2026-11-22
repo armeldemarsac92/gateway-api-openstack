@@ -1,8 +1,22 @@
 # Operator-provisioned HTTPS
 
-A tenant can use an HTTPS listener and an HTTPRoute on a private Amphora Gateway. The operator provisions a certificate in Barbican and approves the exact revision of a Kubernetes TLS Secret. The controller creates a stock Octavia `TERMINATED_HTTPS` listener with that certificate. Use one HTTPS listener per port and one certificate reference per listener. The Gateway can also serve plain HTTP on a different port.
+A tenant can use an HTTPS listener and an HTTPRoute on a private Amphora Gateway. The operator provisions a certificate in Barbican and approves the exact revision of a Kubernetes TLS Secret. With stock Octavia, use one `TERMINATED_HTTPS` listener per port and one certificate reference per listener. A region that supports HTTPS listener isolation can serve multiple hostnames on the same port. The Gateway can also serve plain HTTP on a different port.
 
-When two HTTPS listeners claim the same port, both report `Conflicted=True`, `Accepted=False` and `Programmed=False`. Check `ResolvedRefs` on each listener for its certificate authorization. A missing cross-namespace grant reports `RefNotPermitted` even during the conflict. Move one listener to a free port and verify each backend with a new TLS connection.
+In the stock configuration, two HTTPS listeners claiming the same port report `Conflicted=True`, `Accepted=False` and `Programmed=False`. Check `ResolvedRefs` on each listener for its certificate authorization. A missing cross-namespace grant reports `RefNotPermitted` even during the conflict. Move one listener to a free port and verify each backend with a new TLS connection.
+
+## Share an HTTPS port
+
+Upgrade the regional Octavia API, database, provider library, workers and Amphora agent with HTTPS listener isolation support. Enable `enabled_https_listener_isolation_providers = amphora` in Octavia's `[api_settings]`. Verify that the authenticated regional `GET /v2/lbaas/providers/amphora/gateway_capabilities` includes `https_listener_isolation_v1`. Use the standalone or Magnum shared-listener overlay to set `--octavia-https-listener-isolation` along with the operator certificate map. [Standalone overlay](../config/octavia-https-listener-isolation/kustomization.yaml) · [Magnum workload overlay](../integrations/magnum-capi-helm/workload-octavia-https-listener-isolation/kustomization.yaml)
+
+Give each HTTPS section on the port a distinct hostname. Use an exact DNS name, a leading wildcard such as `*.example.test`, or one section with no hostname. All sections must reference the same authorized Secret in the same namespace and use its current enrolled certificate revision. The certificate must cover the frontend hostnames that clients will verify.
+
+Amphora selects the most specific section for the TLS SNI and for each HTTP request authority. An exact name wins over a wildcard, the longest matching wildcard wins over a broader one, and the section with no hostname matches the remainder. If the two selections differ, that request receives HTTP 421. A selected section with no matching route returns HTTP 404. Each HTTPRoute retains its own hostname, path and namespace restrictions within the sections to which it is attached.
+
+Check a successful request for each application and its `attachedRoutes` count. On one HTTP/2 connection, send a request for the TLS section, then for a different section, then for the first section again. Expect the application's response, HTTP 421 and the application's response respectively. Revoking the common certificate grant withdraws this entire port. When changing the section set, the controller can temporarily disable the port while retiring old policies. Other independently authorized listener ports continue serving. [Local results on both channels](qualification/v1.7.0/provider/shared-https.md)
+
+Removing sections keeps the last HTTPS section isolated on its original port. Removing the last section retires the closed Octavia listener after its owned policies are gone. If the controller cannot verify which section owns a policy, it closes the affected port until it can read the route and its policy again. The attachment count still reflects the routes attached to each section.
+
+For rollback, first drain and remove the enrolled Gateway with the enabled controller and regional capability. Check the Octavia listener and policy inventory before turning off the option. A previously enrolled frontend remains closed if the operator disables isolation or a readback cannot confirm its section set.
 
 ## Enable the mode
 
@@ -119,6 +133,6 @@ Use a supported Service and member configuration for the backend. Check the list
 5. If OpenStack is unavailable or its load balancer is stuck in `ERROR`, the controller cannot confirm withdrawal until the provider accepts it. Use the public listener, its provisioning state and a fresh TLS check as evidence. A Kubernetes status alone cannot establish when the data plane stopped serving.
 6. Before disabling the mode or rolling back the image, migrate or drain HTTPS traffic while the current controller is running. Remove the HTTPS routes and listeners and verify withdrawal and ownership in Octavia. For an enrolled HTTP-family Gateway, follow the full distinct-port rollback procedure before installing an older controller. Keep certificate material available until that procedure finishes. [Gateway rollback](operator-recovery.md#roll-back-a-gateway-with-distinct-http-ports)
 
-Several HTTPS sections on the same physical port, automatic import of tenant keys, TLSRoute termination, client-certificate validation and shared-frontend SNI/authority isolation require separate implementation or qualification. [Gateway API TLS types](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/apis/v1/gateway_types.go) · [Octavia public listener API](https://docs.openstack.org/api-ref/load-balancer/v2/index.html)
+Automatic import of tenant keys, TLSRoute termination and client-certificate validation have their own qualification records. [Gateway API feature matrix](qualification/v1.7.0/matrix/named-contracts.md) · [Gateway API TLS types](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/apis/v1/gateway_types.go)
 
 A dedicated Amphora Gateway can route TLS connections by exact SNI and let the applications terminate TLS. [TLS passthrough setup](operator-octavia-tls-sni-passthrough.md)

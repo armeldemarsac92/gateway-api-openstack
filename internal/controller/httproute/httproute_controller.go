@@ -203,7 +203,7 @@ func (r *Reconciler) validateCachedRouteDecision(
 		if err != nil {
 			return cachedRouteDecision{}, err
 		}
-		_, validationErr = selectRouteAttachment(route, parent.gateway, candidates, namespaces)
+		_, validationErr = r.selectRouteAttachments(route, parent.gateway, candidates, namespaces)
 	}
 	if validationErr != nil {
 		status := statusForRouteBuildError(validationErr)

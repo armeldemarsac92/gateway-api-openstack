@@ -19,11 +19,72 @@ package octavia
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 	"testing"
 
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
 )
+
+func TestIsolatedHTTPSListenerIncludesVirtualHosts(t *testing.T) {
+	hosts := []string{"*", "*.example.test", "shop.example.test"}
+	handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if req.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`{"listeners":[{"id":"shared","https_virtual_hosts":["*","*.example.test","shop.example.test"]},{"id":"dedicated"},{"id":"invalid","admin_state_up":true,"https_virtual_hosts":false}]}`))
+			return
+		}
+		if req.Method == http.MethodPut {
+			var change struct {
+				Listener map[string][]string `json:"listener"`
+			}
+			if err := json.NewDecoder(req.Body).Decode(&change); err != nil || len(change.Listener) != 1 ||
+				!slices.Equal(change.Listener["https_virtual_hosts"], hosts[:2]) {
+				t.Fatalf("section change = %#v, err = %v", change, err)
+			}
+			_, _ = w.Write([]byte(`{"listener":{"id":"shared"}}`))
+			return
+		}
+		var body struct {
+			Listener struct {
+				VirtualHosts []string           `json:"https_virtual_hosts"`
+				DefaultTLS   string             `json:"default_tls_container_ref"`
+				Fallback     *FixedHTTPResponse `json:"default_http_response"`
+				Enabled      *bool              `json:"admin_state_up"`
+			} `json:"listener"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		item := body.Listener
+		if !slices.Equal(item.VirtualHosts, hosts) || item.DefaultTLS != "certificate" ||
+			item.Enabled == nil || *item.Enabled || item.Fallback == nil || item.Fallback.StatusCode != 404 {
+			t.Fatalf("wrong shared listener parameters: %+v", item)
+		}
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"listener":{"id":"shared"}}`))
+	})
+	service := NewService(&gophercloud.ServiceClient{ProviderClient: &gophercloud.ProviderClient{
+		HTTPClient: http.Client{Transport: loadBalancerTestTransport{handler}}}, Endpoint: "http://octavia.test/"})
+	disabled := false
+	_, err := service.CreateIsolatedHTTPSListener(t.Context(), listeners.CreateOpts{
+		LoadbalancerID: "lb", Protocol: listeners.ProtocolTerminatedHTTPS, ProtocolPort: 443,
+		DefaultTlsContainerRef: "certificate", AdminStateUp: &disabled,
+	}, hosts, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed, err := service.ListListenerInventory(t.Context(), listeners.ListOpts{})
+	if err != nil || !slices.Equal(observed.HTTPSVirtualHosts["shared"], hosts) || observed.HTTPSVirtualHosts["dedicated"] != nil {
+		t.Fatalf("virtual hosts = %#v, err = %v", observed.HTTPSVirtualHosts, err)
+	}
+	if observed.HTTPSVirtualHosts["invalid"] == nil || len(observed.HTTPSVirtualHosts["invalid"]) != 0 || !observed.AdminStatesObserved["invalid"] {
+		t.Fatalf("invalid enrollment lost its identity or appeared valid: %+v", observed)
+	}
+	if err := service.SetListenerHTTPSVirtualHosts(t.Context(), "shared", hosts[:2]); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestListenerNotFoundResponseRoundTrip(t *testing.T) {
 	var created, changed bool

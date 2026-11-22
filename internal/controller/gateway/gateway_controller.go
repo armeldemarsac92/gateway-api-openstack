@@ -41,6 +41,8 @@ import (
 type Reconciler struct {
 	// Certificates resolves operator-approved certificate references from live metadata.
 	Certificates CertificateResolver
+	// HTTPSListenerIsolationAvailable checks authenticated regional support.
+	HTTPSListenerIsolationAvailable func(context.Context) (bool, error)
 	// Client reads and patches cached Kubernetes objects.
 	client.Client
 	// Writer rebuilds and reconciles the complete Gateway graph.

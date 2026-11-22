@@ -111,6 +111,7 @@ func (target L7PolicyTarget) IsFixedServerError() bool {
 // prevents the entire target from decoding.
 type L7PolicyObservation struct {
 	Policy                     l7policies.L7Policy
+	HTTPSListenerHostname      string
 	Target                     *L7PolicyTarget
 	ExtendedTargetFields       bool
 	PoolIDs                    []string
@@ -158,6 +159,7 @@ func (s *Service) ListPolicyObservations(ctx context.Context, opts l7policies.Li
 func readPolicyObservation(raw json.RawMessage) (L7PolicyObservation, error) {
 	var row struct {
 		l7policies.L7Policy
+		HTTPSListenerHostname   json.RawMessage `json:"https_listener_hostname"`
 		AdminState              *bool           `json:"admin_state_up"`
 		PoolReference           json.RawMessage `json:"redirect_pool_id"`
 		Targets                 json.RawMessage `json:"targets"`
@@ -171,6 +173,11 @@ func readPolicyObservation(raw json.RawMessage) (L7PolicyObservation, error) {
 		return L7PolicyObservation{}, fmt.Errorf("L7 policy row does not report an ID")
 	}
 	observation := L7PolicyObservation{Policy: row.L7Policy, PoolReference: row.PoolReference, AdminState: row.AdminState}
+	if len(row.HTTPSListenerHostname) != 0 {
+		// A string is the only positive section proof. Keep the owning policy
+		// identifiable even when the endpoint cannot report a valid scope.
+		_ = json.Unmarshal(row.HTTPSListenerHostname, &observation.HTTPSListenerHostname)
+	}
 	if row.AdminState != nil {
 		observation.Policy.AdminStateUp = *row.AdminState
 	}
@@ -219,18 +226,7 @@ func l7PolicyPage(result pagination.PageResult) pagination.Page {
 	return l7policies.L7PolicyPage{LinkedPageBase: pagination.LinkedPageBase{PageResult: result}}
 }
 
-type fixedResponsePolicyOpts struct {
-	l7policies.CreateOpts
-}
-
-func (opts fixedResponsePolicyOpts) ToL7PolicyCreateMap() (map[string]any, error) {
-	body, err := opts.CreateOpts.ToL7PolicyCreateMap()
-	if err != nil {
-		return nil, err
-	}
-	setPolicyFixedServerError(body)
-	return body, nil
-}
+type fixedResponsePolicyOpts struct{}
 
 func (fixedResponsePolicyOpts) ToL7PolicyUpdateMap() (map[string]any, error) {
 	body := map[string]any{"l7policy": map[string]any{}}
@@ -244,41 +240,17 @@ func setPolicyFixedServerError(body map[string]any) {
 	policy["fixed_response"] = map[string]int{"status_code": http.StatusInternalServerError}
 }
 
-// CreateFixedResponsePolicy creates a policy for an unresolved Service reference.
-func (s *Service) CreateFixedResponsePolicy(ctx context.Context, opts l7policies.CreateOpts) (*l7policies.L7Policy, error) {
-	opts.Action, opts.RedirectPoolID = ActionFixedResponse, ""
-	return l7policies.Create(ctx, s.client, fixedResponsePolicyOpts{opts}).Extract()
-}
-
 // SetPolicyFixedResponse switches the target without changing state or position.
 func (s *Service) SetPolicyFixedResponse(ctx context.Context, id string, operations []cloud.HTTPHeaderOperation) (*l7policies.L7Policy, error) {
 	return s.UpdatePolicyRequestHeaders(ctx, id, fixedResponsePolicyOpts{}, operations)
 }
 
 type weightedPolicyOpts struct {
-	l7policies.CreateOpts
-	targets    []WeightedHTTPTarget
-	operations []cloud.HTTPHeaderOperation
-}
-
-func (opts weightedPolicyOpts) ToL7PolicyCreateMap() (map[string]any, error) {
-	body, err := opts.CreateOpts.ToL7PolicyCreateMap()
-	if err != nil {
-		return nil, err
-	}
-	body["l7policy"].(map[string]any)["targets"] = opts.targets
-	writePolicyRequestHeaderOperations(body, opts.operations)
-	return body, nil
+	targets []WeightedHTTPTarget
 }
 
 func (opts weightedPolicyOpts) ToL7PolicyUpdateMap() (map[string]any, error) {
 	return map[string]any{"l7policy": map[string]any{"action": ActionWeightedTargets, "targets": opts.targets}}, nil
-}
-
-// CreateWeightedPolicy creates a policy with independent weights per destination.
-func (s *Service) CreateWeightedPolicy(ctx context.Context, opts l7policies.CreateOpts, targets []WeightedHTTPTarget, operations []cloud.HTTPHeaderOperation) (*l7policies.L7Policy, error) {
-	opts.Action, opts.RedirectPoolID = ActionWeightedTargets, ""
-	return l7policies.Create(ctx, s.client, weightedPolicyOpts{CreateOpts: opts, targets: targets, operations: operations}).Extract()
 }
 
 // SetPolicyWeightedTargets replaces all slots in one request, retaining the policy position and state.
@@ -286,9 +258,59 @@ func (s *Service) SetPolicyWeightedTargets(ctx context.Context, id string, targe
 	return s.UpdatePolicyRequestHeaders(ctx, id, weightedPolicyOpts{targets: targets}, operations)
 }
 
-// CreatePolicy creates one L7 policy.
-func (s *Service) CreatePolicy(ctx context.Context, opts l7policies.CreateOpts, operations []cloud.HTTPHeaderOperation) (*l7policies.L7Policy, error) {
-	return l7policies.Create(ctx, s.client, policyWithRequestHeaders{create: opts, operations: operations}).Extract()
+// PolicyCreateOpts carries the section, request filters and target of one L7 policy.
+// All valid target actions on a shared port must select an HTTPS listener hostname.
+type PolicyCreateOpts struct {
+	l7policies.CreateOpts
+	HTTPSListenerHostname   string
+	RequestHeaderOperations []cloud.HTTPHeaderOperation
+	WeightedTargets         []WeightedHTTPTarget
+	FixedServerError        bool
+}
+
+func (opts PolicyCreateOpts) ToL7PolicyCreateMap() (map[string]any, error) {
+	switch {
+	case opts.FixedServerError && opts.WeightedTargets != nil:
+		return nil, fmt.Errorf("a policy cannot combine fixed and weighted actions")
+	case opts.FixedServerError:
+		opts.Action, opts.RedirectPoolID = ActionFixedResponse, ""
+	case opts.WeightedTargets != nil:
+		opts.Action, opts.RedirectPoolID = ActionWeightedTargets, ""
+	}
+	body, err := opts.CreateOpts.ToL7PolicyCreateMap()
+	if err != nil {
+		return nil, err
+	}
+	policy := body["l7policy"].(map[string]any)
+	if opts.HTTPSListenerHostname != "" {
+		policy["https_listener_hostname"] = opts.HTTPSListenerHostname
+	}
+	if opts.FixedServerError {
+		setPolicyFixedServerError(body)
+	} else if opts.WeightedTargets != nil {
+		policy["targets"] = opts.WeightedTargets
+	}
+	writePolicyRequestHeaderOperations(body, opts.RequestHeaderOperations)
+	return body, nil
+}
+
+// CreatePolicy submits the action and any HTTPS section together.
+func (s *Service) CreatePolicy(ctx context.Context, opts PolicyCreateOpts) (*l7policies.L7Policy, error) {
+	return l7policies.Create(ctx, s.client, opts).Extract()
+}
+
+type policyHTTPSHostname string
+
+func (name policyHTTPSHostname) ToL7PolicyUpdateMap() (map[string]any, error) {
+	if name == "" {
+		return nil, fmt.Errorf("isolated HTTPS policy requires a listener hostname")
+	}
+	return map[string]any{"l7policy": map[string]any{"https_listener_hostname": string(name), "admin_state_up": false}}, nil
+}
+
+// SetPolicyHTTPSListenerHostname changes a policy's section while keeping it disabled.
+func (s *Service) SetPolicyHTTPSListenerHostname(ctx context.Context, id, hostname string) (*l7policies.L7Policy, error) {
+	return l7policies.Update(ctx, s.client, id, policyHTTPSHostname(hostname)).Extract()
 }
 
 // UpdatePolicy updates one L7 policy.

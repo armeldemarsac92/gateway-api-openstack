@@ -34,7 +34,7 @@ The controller uses Gateway API v1.7.0 and defaults to the Standard Channel. Its
 
 - A Gateway can request one private IPv4 VIP at creation on a class with Floating IP mode `None`. [Configuration and allocation results](docs/qualification/v1.7.0/provider/private-gateway-address.md)
 - A plain HTTP Gateway can serve separate backends on several ports of one VIP, including when the requests use the same host and path. Several sections can share one port when each section has a different exact hostname. A port with one section also supports a wildcard or an omitted hostname. Each section enforces its route namespace policy and reports its attachments. [Distinct HTTP ports](docs/qualification/v1.7.0/provider/http-distinct-ports.md) · [Same-port sections](docs/qualification/v1.7.0/provider/http-disjoint-sections.md)
-- A platform operator can enable HTTPS using one terminating listener per port and a verified Secret revision in Barbican. HTTPRoutes use their ordinary attachment and backend rules. [Set up HTTPS, rotate and revoke](docs/operator-https.md)
+- A platform operator can enable HTTPS with a verified Secret revision in Barbican. An additional regional option lets applications share an HTTPS port using distinct hostnames and the same enrolled certificate. [Set up HTTPS, rotate and revoke](docs/operator-https.md)
 - With the Amphora exact-header profile, HTTPRoutes select a backend by a complete request header value and return HTTP 404 when no rule matches. [Enable exact HTTP header matching](docs/operator-octavia-http-header-exact.md)
 - An operator can enable HTTP method matching on Amphora. HTTPRoutes can route GET and POST on the same path to different Services and combine methods with exact request headers. [Operator configuration](docs/operator-octavia-http-method-match.md) · [Upstream results](docs/qualification/v1.7.0/provider/http-method-match.md)
 - An operator can enable TLS passthrough on Amphora to route exact SNI names on one port to their IPv4 Services. A second opt-in adds wildcard SNI, with exact names and longer suffixes taking precedence. Each TLSRoute can serve several names that match its listener. Each application presents its own certificate. [Enable and use TLS SNI passthrough](docs/operator-octavia-tls-sni-passthrough.md)
@@ -55,7 +55,7 @@ The controller uses Gateway API v1.7.0 and defaults to the Standard Channel. Its
 - Ownership validation, restart recovery, and ordered cleanup
 
 The [class configuration reference](docs/reference/class-configuration.md) describes member modes and their network prerequisites.
-An HTTPRoute, TCPRoute or UDPRoute may select a Service in another namespace when a ReferenceGrant there authorizes that route kind and source namespace. Shared-port HTTPS and overlapping plain HTTP sections on one port remain open. [Grant and revocation evidence](docs/qualification/v1.7.0/service-grants.md)
+An HTTPRoute, TCPRoute or UDPRoute may select a Service in another namespace when a ReferenceGrant there authorizes that route kind and source namespace. Overlapping plain HTTP sections on one port remain open. [Grant and revocation evidence](docs/qualification/v1.7.0/service-grants.md)
 The stock pilot targets Amphora. Other Gateway profiles, the two mesh profiles and the Experimental resources are tracked in the [v1.7.0 feature matrix](docs/qualification/v1.7.0/matrix/README.md).
 
 ## Development status

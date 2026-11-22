@@ -192,27 +192,28 @@ func routeTargetsGateway(route *gatewayv1.HTTPRoute, parent gatewayv1.ParentRefe
 	return controller.IsGatewayParentRef(parent) && parentNamespace == namespace && string(parent.Name) == name
 }
 
-func selectRouteAttachment(route *gatewayv1.HTTPRoute, gateway *gatewayv1.Gateway, candidates []*gatewayv1.Listener, namespaces []corev1.Namespace) (*gatewayv1.Listener, error) {
-	var selected *gatewayv1.Listener
+func (r *Reconciler) selectRouteAttachments(route *gatewayv1.HTTPRoute, gateway *gatewayv1.Gateway, candidates []*gatewayv1.Listener, namespaces []corev1.Namespace) ([]*gatewayv1.Listener, error) {
+	var selected []*gatewayv1.Listener
 	rejection := newRouteBuildError(routeErrorNotAllowed, "listener allowedRoutes does not allow this HTTPRoute namespace")
 	for _, listener := range candidates {
 		if !model.AllowsRouteNamespace(listener, gateway.Namespace, route.Namespace, namespaces) {
 			continue
 		}
-		if err := validateRouteHostnames(listener.Hostname, route.Spec.Hostnames); err != nil {
+		shared := gatewaycontroller.SharedHTTPSListener(r.Config, gateway, listener)
+		if err := validateRouteHostnames(listener.Hostname, route.Spec.Hostnames, shared); err != nil {
 			rejection = err
 			continue
 		}
-		if selected != nil {
+		if len(selected) != 0 && (!shared || selected[0].Protocol != listener.Protocol || selected[0].Port != listener.Port) {
 			return nil, newRouteBuildError(routeErrorUnsupported, "an HTTPRoute must attach to only one HTTP listener section")
 		}
-		selected = listener
+		if err := validateRouteRedirectPrefixes(route, *listener); err != nil {
+			return nil, err
+		}
+		selected = append(selected, listener)
 	}
 	if selected == nil {
 		return nil, rejection
-	}
-	if err := validateRouteRedirectPrefixes(route, *selected); err != nil {
-		return nil, err
 	}
 	return selected, nil
 }
@@ -231,7 +232,7 @@ func readRouteNamespaces(ctx context.Context, reader client.Reader, candidates [
 	return []corev1.Namespace{*namespace}, nil
 }
 
-func boundRouteAttachment(route *gatewayv1.HTTPRoute, gateway *gatewayv1.Gateway, http []*gatewayv1.Listener, namespaces []corev1.Namespace) (*gatewayv1.Listener, error) {
+func (r *Reconciler) boundRouteAttachments(route *gatewayv1.HTTPRoute, gateway *gatewayv1.Gateway, http []*gatewayv1.Listener, namespaces []corev1.Namespace) ([]*gatewayv1.Listener, error) {
 	rejection := newRouteBuildError(routeErrorNoMatchingParent, "HTTPRoute no longer targets the bound Gateway")
 	for _, ref := range route.Spec.ParentRefs {
 		if !routeTargetsGateway(route, ref, gateway.Namespace, gateway.Name) {
@@ -240,10 +241,10 @@ func boundRouteAttachment(route *gatewayv1.HTTPRoute, gateway *gatewayv1.Gateway
 		parent := managedRouteParent{ref: ref, gateway: gateway}
 		candidates, err := routeParentCandidates(route, parent, http)
 		if err == nil {
-			var listener *gatewayv1.Listener
-			listener, err = selectRouteAttachment(route, gateway, candidates, namespaces)
+			var listeners []*gatewayv1.Listener
+			listeners, err = r.selectRouteAttachments(route, gateway, candidates, namespaces)
 			if err == nil {
-				return listener, nil
+				return listeners, nil
 			}
 		}
 		rejection = err
@@ -252,7 +253,7 @@ func boundRouteAttachment(route *gatewayv1.HTTPRoute, gateway *gatewayv1.Gateway
 }
 
 type boundHTTPAttachment struct {
-	listener          *gatewayv1.Listener
+	listeners         []*gatewayv1.Listener
 	gatewayGeneration int64
 }
 
@@ -282,8 +283,8 @@ func (r *Reconciler) liveBoundRouteAttachment(ctx context.Context, route *gatewa
 	if err != nil {
 		return boundHTTPAttachment{}, nil, err
 	}
-	listener, rejection := boundRouteAttachment(route, &gateway, http, namespaces)
-	return boundHTTPAttachment{listener: listener, gatewayGeneration: gateway.Generation}, rejection, nil
+	listeners, rejection := r.boundRouteAttachments(route, &gateway, http, namespaces)
+	return boundHTTPAttachment{listeners: listeners, gatewayGeneration: gateway.Generation}, rejection, nil
 }
 
 func routeProfileConflict() error {
@@ -294,7 +295,7 @@ func grpcProfileDisabled() error {
 	return newRouteBuildError(routeErrorUnsupported, "GRPCRoute exact method matching requires Octavia backend h2c and fixed responses")
 }
 
-func validateRouteHostnames(listener *gatewayv1.Hostname, hostnames []gatewayv1.Hostname) error {
+func validateRouteHostnames(listener *gatewayv1.Hostname, hostnames []gatewayv1.Hostname, shared bool) error {
 	if listener != nil {
 		if err := amphora.ValidateHostname(string(*listener)); err != nil {
 			return newRouteBuildError(routeErrorUnsupported, "invalid listener hostname: %s", err)
@@ -310,11 +311,14 @@ func validateRouteHostnames(listener *gatewayv1.Hostname, hostnames []gatewayv1.
 	if len(effective) == 0 {
 		return newRouteBuildError(routeErrorNoMatchingHostname, "HTTPRoute and listener hostnames do not intersect")
 	}
-	if len(effective) > 1 {
+	if len(effective) > 1 && !shared {
 		return newRouteBuildError(routeErrorUnsupported, "at most one effective hostname is supported per HTTPRoute")
 	}
-	if effective[0] != "" {
-		if _, err := amphora.HostnameRuleValue(effective[0]); err != nil {
+	for _, hostname := range effective {
+		if hostname == "" {
+			continue
+		}
+		if _, err := amphora.HostnameRuleValue(hostname); err != nil {
 			return newRouteBuildError(routeErrorUnsupported, "%s", err)
 		}
 	}

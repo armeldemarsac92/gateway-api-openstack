@@ -61,19 +61,23 @@ func redirectForwardingByPort(spec cloud.GatewayGraphSpec) map[int][]cloud.HTTPP
 		if len(route.ScopedListenerPorts) == 1 {
 			port = route.ScopedListenerPorts[0]
 		}
-		if len(route.HTTPBackends) > 0 {
-			for _, backend := range route.HTTPBackends {
-				result[port] = append(result[port], backend.Matches...)
+		add := func(matches []cloud.HTTPPathMatch) {
+			for _, match := range matches {
+				match.HTTPSListenerHostname = httpMatchScope(route, match)
+				result[port] = append(result[port], match)
 			}
 		}
+		for _, backend := range route.HTTPBackends {
+			add(backend.Matches)
+		}
 		for _, rule := range route.WeightedHTTPRules {
-			result[port] = append(result[port], rule.Matches...)
+			add(rule.Matches)
 		}
 		for _, rule := range route.FixedHTTPRules {
-			result[port] = append(result[port], rule.Matches...)
+			add(rule.Matches)
 		}
 		if route.PathType != "" {
-			result[port] = append(result[port], cloud.HTTPPathMatch{Hostname: route.Hostname, PathType: route.PathType, PathValue: route.PathValue, Precedence: route.Precedence})
+			add([]cloud.HTTPPathMatch{{Hostname: route.Hostname, PathType: route.PathType, PathValue: route.PathValue, Precedence: route.Precedence}})
 		}
 	}
 	return result
@@ -175,7 +179,7 @@ func redirectCells(match cloud.HTTPPathMatch, forwards []cloud.HTTPPathMatch) ([
 	ordered := []*redirectDomain{root}
 	var unsupportedMethod, unsupportedHeaders bool
 	for _, f := range forwards {
-		if f.Precedence >= match.Precedence || f.Method != "" && match.Method != "" && f.Method != match.Method {
+		if f.HTTPSListenerHostname != match.HTTPSListenerHostname || f.Precedence >= match.Precedence || f.Method != "" && match.Method != "" && f.Method != match.Method {
 			continue
 		}
 		path := pathOf(f)

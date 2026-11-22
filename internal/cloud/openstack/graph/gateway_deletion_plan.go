@@ -455,7 +455,7 @@ func (p *Provider) recoverHTTPBackendGatewayDeletion(ctx context.Context, identi
 	if err != nil {
 		return gatewayDeletionPlan{}, err
 	}
-	routes, err := p.observeRouteGraphsFromPools(ctx, owners, lb, listener, cloud.ListenerProtocolHTTP, nil, poolInventory, &identity)
+	routes, err := p.observeRouteGraphsFromPools(ctx, owners, lb, listener, cloud.ListenerProtocolHTTP, nil, poolInventory, &identity, nil)
 	if err != nil {
 		return gatewayDeletionPlan{}, err
 	}

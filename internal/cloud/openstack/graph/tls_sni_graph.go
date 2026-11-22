@@ -803,10 +803,10 @@ func (p *Provider) executeSNIMutation(ctx context.Context, actual observedGatewa
 			// selectors. Prefer the denial as soon as it is enabled.
 			position = 1
 		}
-		_, err := p.octavia.CreatePolicy(ctx, l7policies.CreateOpts{
+		_, err := p.octavia.CreatePolicy(ctx, octavia.PolicyCreateOpts{CreateOpts: l7policies.CreateOpts{
 			Name: resourceName(step.target.route.Identity, roleSNIPolicy), ListenerID: actual.state.ListenerID, Action: l7policies.ActionRedirectToPool,
 			RedirectPoolID: step.parentID, AdminStateUp: boolPointer(false), Tags: tagsFor(roleSNIPolicy), Position: position,
-		}, nil)
+		}})
 		return err
 	case sniCreateRule:
 		_, err := p.octavia.CreateRule(ctx, step.parentID, l7policies.CreateRuleOpts{

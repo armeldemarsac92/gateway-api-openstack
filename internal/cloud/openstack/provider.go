@@ -62,6 +62,11 @@ func (p *Provider) BackendTLSAvailable(ctx context.Context) (bool, error) {
 	return p.graph.BackendTLSAvailable(ctx)
 }
 
+// HTTPSListenerIsolationAvailable checks the virtual listener capability in this region.
+func (p *Provider) HTTPSListenerIsolationAvailable(ctx context.Context) (bool, error) {
+	return p.graph.HTTPSListenerIsolationAvailable(ctx)
+}
+
 // GetGateway delegates read-only Gateway discovery to the graph package.
 func (p *Provider) GetGateway(ctx context.Context, identity cloud.Identity) (cloud.GatewayResult, bool, error) {
 	return p.graph.GetGateway(ctx, identity)
