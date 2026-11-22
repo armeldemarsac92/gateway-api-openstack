@@ -36,11 +36,15 @@ const (
 	backendTLSAvailable
 )
 
-func (r *Reconciler) backendTLSAvailability(ctx context.Context) backendTLSAvailability {
-	if r.BackendTLSAvailable == nil {
+func (r *Reconciler) backendTLSAvailability(ctx context.Context, requireH2 bool) backendTLSAvailability {
+	discover := r.BackendTLSAvailable
+	if requireH2 {
+		discover = r.GRPCBackendTLSAvailable
+	}
+	if discover == nil {
 		return backendTLSUnknown
 	}
-	supported, err := r.BackendTLSAvailable(ctx)
+	supported, err := discover(ctx)
 	switch {
 	case err != nil:
 		return backendTLSUnknown
@@ -51,17 +55,17 @@ func (r *Reconciler) backendTLSAvailability(ctx context.Context) backendTLSAvail
 	}
 }
 
-func supportsBackendTLS(backend model.BackendGroup, ordinaryHTTP bool) bool {
-	return ordinaryHTTP && !backend.UsesH2C()
+func supportsBackendTLS(backend model.BackendGroup) bool {
+	return backend.State == model.BackendResolved && !backend.UsesH2C()
 }
 
-func (a backendTLSAvailability) validation(backend model.BackendGroup, ordinaryHTTP bool) *cloud.BackendTLSValidation {
+func (a backendTLSAvailability) validation(backend model.BackendGroup) *cloud.BackendTLSValidation {
 	winner := backend.BackendTLS.Winner
 	if winner == nil {
 		return nil
 	}
 	if winner.AncestorSlot != backendtls.AncestorSlotHeld || winner.Validation == nil ||
-		a != backendTLSAvailable || !supportsBackendTLS(backend, ordinaryHTTP) {
+		a != backendTLSAvailable || !supportsBackendTLS(backend) {
 		return &cloud.BackendTLSValidation{Denied: true}
 	}
 	return &cloud.BackendTLSValidation{
@@ -72,7 +76,7 @@ func (a backendTLSAvailability) validation(backend model.BackendGroup, ordinaryH
 
 func routeBackendTLSAncestorSlot(route *gatewayv1.HTTPRoute, inputs *routeModelInputs) backendtls.AncestorSlot {
 	var slot backendtls.AncestorSlot
-	if inputs.backendTLSAncestor == nil || model.HTTPProfileRouteKind(route) != model.HTTPRouteKind {
+	if inputs.backendTLSAncestor == nil {
 		return slot
 	}
 	for _, compiled := range inputs.logical.Routes {
@@ -100,7 +104,7 @@ func (a backendTLSAvailability) apply(condition metav1.Condition, supportedProto
 	switch {
 	case !supportedProtocol:
 		condition.Status, condition.Reason, condition.Message =
-			metav1.ConditionFalse, "UnsupportedProtocol", "Backend TLS requires an HTTPRoute with an HTTP/1 backend"
+			metav1.ConditionFalse, "UnsupportedProtocol", "The backend Service protocol is incompatible with BackendTLSPolicy"
 	case a == backendTLSUnsupported:
 		condition.Status, condition.Reason, condition.Message =
 			metav1.ConditionFalse, "UnsupportedProvider", "The regional provider does not support authenticated backend TLS"

@@ -73,7 +73,7 @@ func CollectBackendTLSInputs(ctx context.Context, reader client.Reader, input *m
 						return err
 					}
 				}
-				if kind == model.HTTPRouteKind && ancestor != nil && selection.Winner != nil {
+				if ancestor != nil && selection.Winner != nil {
 					for i := range policies[key.Namespace] {
 						policy := &policies[key.Namespace][i]
 						if policy.Name == selection.Winner.Key.Name {

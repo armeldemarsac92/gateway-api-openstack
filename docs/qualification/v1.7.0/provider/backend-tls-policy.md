@@ -1,6 +1,6 @@
 # BackendTLSPolicy on Amphora
 
-An HTTPRoute can require an authenticated TLS connection to a Service port. The same controller can accept HTTP or terminate HTTPS at the Gateway. On the backend connection, Amphora sends the hostname from the policy as SNI, checks the DNS SAN against that hostname and verifies the chain with the policy's ConfigMap CA. The feature requires operator opt-in and the regional provider extension. [Operator configuration](../../../operator-octavia-backend-tls-policy.md)
+An HTTPRoute or GRPCRoute can require an authenticated TLS connection to a Service port. The same controller can accept HTTP or terminate HTTPS at the Gateway. On the backend connection, Amphora sends the hostname from the policy as SNI, checks the DNS SAN against that hostname and verifies the chain with the policy's ConfigMap CA. The feature requires operator opt-in and the regional provider extension. [Operator configuration](../../../operator-octavia-backend-tls-policy.md)
 
 ## Registered Gateway API cases
 
@@ -40,6 +40,26 @@ The separate wire runs used the four rules in one HTTPRoute and a dedicated HTTP
 | HTTPS for `backend-tls.wildcard.org` with backend SNI `abc.example.com` | 200 | 200 |
 
 Both clients verified the frontend hostname. In the four-rule runs, the first observed 503 after the CA became invalid took 8.20 and 8.75 seconds on Standard and Experimental. After restoration, the first 200 took 21.26 and 23.67 seconds. These are local observations from the probe windows. The matrix records the separate upstream cases listed above.
+
+## gRPC with required backend HTTP/2
+
+The original [`BackendTLSPolicyGRPCRoute` case](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/backendtlspolicy-grpcroute.go) passed 3/3 on Standard and Experimental. The linux/amd64 manager came from the OCI at `51ad8cc6316f6aac929961f70866f88053896982`. The gRPC client used the Gateway's HTTP listener and Amphora authenticated the TLS connection to the Service. [Controller release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-51ad8cc6316f6aac929961f70866f88053896982) · [Original reports, receipts and replay](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-51ad8cc6316f6aac929961f70866f88053896982/backendtlspolicy-grpcroute-51ad8cc-evidence.tar.gz)
+
+| Backend after convergence | Standard | Experimental |
+| --- | --- | --- |
+| Valid CA and DNS name, negotiated `h2` | gRPC OK | gRPC OK |
+| Wrong CA or DNS name | gRPC UNAVAILABLE | gRPC UNAVAILABLE |
+| Valid CA and DNS name, no negotiated ALPN | gRPC UNAVAILABLE, 5 completed TLS handshakes, 0 application bytes | gRPC UNAVAILABLE, 5 completed TLS handshakes, 0 application bytes |
+
+The upstream negative subtests accept a failed RPC. The original client saw HTTP 503 / gRPC UNAVAILABLE for the certificate mismatch and HTTP 404 / gRPC UNIMPLEMENTED for the hostname mismatch. The independent probe then targeted both mismatches with all three redirects and TLS pools active, yielding the gRPC statuses above.
+
+The provider opt-in requires the controller's gRPC profile and `--octavia-backend-tls-policy`, plus Amphora's `backend_tls_hostname_v1` and `backend_tls_h2_alpn_v1` capabilities. Octavia and the Amphora agent must be configured to advertise both capabilities. The local run used Octavia microversion 2.24. Octavia returned `backend_tls_require_h2=true` for all three active pools. The live HAProxy configuration for each pool used `alpn h2 require-alpn-h2`, SNI from the fixed policy hostname and strict DNS verification with the configured CA. [Operator configuration](../../../operator-octavia-backend-tls-policy.md) · [Octavia and Amphora distribution](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-backend-tls-h2-9729fed77683) · [octavia-lib distribution](https://github.com/armeldemarsac92/octavia-lib/releases/tag/hibiscus-backend-tls-h2-696c5ae9ceb2)
+
+Each policy supports one Service target and one ConfigMap CA in the Service namespace, with a single PEM CA certificate and a fixed DNS hostname checked against the certificate's DNS SAN. Explicit `subjectAltNames`, system trust roots, multi-CA bundles and client certificates remain outside this profile. The gRPC Service port can omit `appProtocol` or use `https`. A `kubernetes.io/h2c` port cannot use this policy.
+
+The routes and policies had current `Accepted=True` and `ResolvedRefs=True`. The controller-specific route condition `gateway-api-openstack.github.io/Programmed` still read `False/Pending` at capture. The fixture used an envtest API server, installed Octavia and Barbican APIs and native HAProxy. It simulated Keystone, Neutron, Octavia RPC completion, Amphora agent transport, Pod readiness and EndpointSlice publication. Deployed Hibiscus qualification remains open.
+
+The preliminary Standard attempt passed the original upstream case. Its supplemental check expected Octavia's legacy `alpn_protocols` list to contain only h2. The new `backend_tls_require_h2` flag does not change that legacy list, so the fixture stopped before the wire probes. The pack preserves that run's original report and receipt separately. The verified Standard and Experimental receipts use the corrected provider readback and the independent post-convergence probes. [Evidence pack](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-51ad8cc6316f6aac929961f70866f88053896982/backendtlspolicy-grpcroute-51ad8cc-evidence.tar.gz)
 
 ## Revisions
 

@@ -1,6 +1,6 @@
-# Authenticate HTTPRoute backends with BackendTLSPolicy
+# Authenticate HTTPRoute and GRPCRoute backends with BackendTLSPolicy
 
-An application can require the Gateway to encrypt its connection to a Service and verify the server's DNS identity. The listener can receive HTTP or terminate HTTPS. On the upstream connection, Amphora sends the policy hostname as SNI and verifies the certificate against the CA in the Service namespace.
+An application can require the Gateway to encrypt its connection to a Service and verify the server's DNS identity. HTTPRoute can attach to an HTTP listener or a listener that terminates HTTPS. The gRPC profile uses an HTTP listener. On the upstream connection, Amphora sends the policy hostname as SNI and verifies the certificate against the CA in the Service namespace.
 
 ## Enable the regional capability
 
@@ -8,6 +8,8 @@ An application can require the Gateway to encrypt its connection to a Service an
 2. Set `enabled_backend_tls_hostname_providers = amphora` in Octavia's `[api_settings]`. Using the controller's regional catalog and project, check that `GET /v2/lbaas/providers/amphora/gateway_capabilities` includes `backend_tls_hostname_v1`.
 3. Supply a stable cluster ID and a dedicated project-scoped identity with permission to publish, verify and retire its CA revisions in regional Barbican. The Octavia service identity needs access to each configured CA through its normal certificate manager.
 4. For a standalone installation render `config/octavia-backend-tls-policy`. For the Magnum workload addon render `integrations/magnum-capi-helm/workload-octavia-backend-tls-policy`. Each overlay sets `--octavia-backend-tls-policy` and Octavia microversion 2.8, and grants access to `BackendTLSPolicy`, its status and ConfigMaps. The controller watches ConfigMap metadata and reads the referenced CA after verifying the authorized Service port. If the installation also uses the Experimental release bundle, include the existing Experimental component. [Magnum operator procedure](qualification/v1.7.0/magnum-operator.md)
+
+For GRPCRoute, enable the existing gRPC profile and install the provider and Amphora builds that enforce negotiated HTTP/2. Set `enabled_backend_tls_h2_alpn_providers = amphora` alongside the hostname setting, then verify that the regional capability response includes `backend_tls_h2_alpn_v1` and `backend_tls_hostname_v1`. The controller requests `backend_tls_require_h2: true` and checks it alongside the configured hostname and CA on the owned pool before enabling it or enrolling members. Amphora closes backend TLS connections that do not negotiate `h2`. Missing capability, missing readback or invalid trust keeps the affected backend unavailable. The Service port may omit `appProtocol` or declare `https`. A port declaring `kubernetes.io/h2c` cannot use this policy.
 
 ## Protect a Service port
 
@@ -39,7 +41,7 @@ spec:
         name: catalog-ca
 ```
 
-An HTTPRoute continues to refer to the Service port by number. A cross-namespace backend also requires the usual ReferenceGrant in the Service namespace. Omitting `sectionName` applies the policy to the Service as a whole. A matching port-specific policy takes precedence. Competing policies for the same target and section are ordered by creation timestamp and name. [Service grant lifecycle](qualification/v1.7.0/service-grants.md)
+HTTPRoute and GRPCRoute continue to refer to the Service port by number. A cross-namespace backend also requires the usual ReferenceGrant in the Service namespace. Omitting `sectionName` applies the policy to the Service as a whole. A matching port-specific policy takes precedence. Competing policies for the same target and section are ordered by creation timestamp and name. [Service grant lifecycle](qualification/v1.7.0/service-grants.md)
 
 ## Verify and rotate trust
 
@@ -51,4 +53,4 @@ Changing the public CA certificate in `ca.crt` creates a new immutable Barbican 
 
 During rollback, keep the upgraded workers, strict Amphora runtime and Barbican identity available until protected routes and their cloud resources have been withdrawn. The controller records CA ownership in a Gateway finalizer before publication. After opt-out it keeps enrolled pools closed and can still retire this Gateway's CAs on deletion. The controller checks regional project pool and listener CA references before retiring an unused revision. A CA still used elsewhere is retained.
 
-This profile currently accepts one local Service target, one local ConfigMap CA reference with one PEM CA certificate, and a fixed DNS hostname for HTTP/1 backends. Explicit DNS or URI `subjectAltNames`, system trust roots, client certificates and gRPC or TCP backend re-encryption require additional implementation and qualification. Deployed Hibiscus qualification remains open.
+This profile currently accepts one local Service target, one local ConfigMap CA reference with one PEM CA certificate, and a fixed DNS hostname for HTTP/1 and gRPC backends. Explicit DNS or URI `subjectAltNames`, system trust roots, client certificates and TCP backend re-encryption require additional implementation and qualification. Deployed Hibiscus qualification remains open.

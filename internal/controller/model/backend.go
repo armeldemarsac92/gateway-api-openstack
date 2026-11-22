@@ -76,15 +76,18 @@ func resolveBackend(route *gatewayv1.HTTPRoute, reference gatewayv1.HTTPBackendR
 		return group
 	}
 	selection := input.BackendTLSPolicies[ServicePortKey{Service: group.Service, Port: int32(ptr.Deref(reference.Port, 0))}]
-	requiresTLS := HTTPProfileRouteKind(route) == HTTPRouteKind && selection.Winner != nil
+	requiresTLS := selection.Winner != nil
 	port, diagnostic := ResolveServicePortForBackendTLS(service, reference.Port, input.BackendH2C, requiresTLS)
+	// Retain a selected policy even when gRPC cannot use the Service's protocol.
+	grpc := HTTPProfileRouteKind(route) == GRPCRouteKind
+	if grpc && diagnostic == nil {
+		diagnostic = CheckGRPCBackendProtocol(port, requiresTLS)
+	}
+	if diagnostic == nil || grpc {
+		group.BackendTLS = selection.Clone()
+	}
 	if diagnostic != nil {
 		group.Diagnostic = diagnostic
-		return group
-	}
-	group.BackendTLS = selection.Clone()
-	if HTTPProfileRouteKind(route) == GRPCRouteKind && !ServicePortUsesH2C(port) {
-		group.Diagnostic = backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "GRPCRoute requires kubernetes.io/h2c on the backend Service port")
 		return group
 	}
 	group.Port = port.DeepCopy()
@@ -162,6 +165,21 @@ func ResolveServicePortForBackendTLS(service *corev1.Service, selected *gatewayv
 		return nil, backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "backend Service appProtocol is not supported for HTTP forwarding")
 	}
 	return port, diagnostic
+}
+
+// CheckGRPCBackendProtocol checks the transport against the Service port and
+// the selected policy, even when the policy's CA is temporarily unavailable.
+func CheckGRPCBackendProtocol(port *corev1.ServicePort, requiresTLS bool) *Diagnostic {
+	if requiresTLS {
+		if port.AppProtocol == nil || strings.EqualFold(*port.AppProtocol, "https") {
+			return nil
+		}
+		return backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "GRPCRoute cannot meet the backend Service's BackendTLSPolicy with its declared appProtocol")
+	}
+	if ServicePortUsesH2C(port) {
+		return nil
+	}
+	return backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "GRPCRoute requires kubernetes.io/h2c or a BackendTLSPolicy on the backend Service port")
 }
 
 // ServicePortUsesH2C reports whether the Service port explicitly selects cleartext HTTP/2.

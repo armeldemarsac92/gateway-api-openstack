@@ -445,7 +445,7 @@ func (r *Reconciler) buildRoutePortModel(
 		spec.HTTPListenerHostname = match.httpListenerHostname
 		spec.HTTPSListenerHostname = match.httpsListenerHostname
 		spec.Hostname, spec.PathType, spec.PathValue, spec.Precedence = match.Hostname, cloud.PathMatchType(match.Match.PathType), match.Match.PathValue, match.Precedence
-		spec.BackendTLS = inputs.backendTLSAvailability.validation(backend, ordinaryHTTP)
+		spec.BackendTLS = inputs.backendTLSAvailability[spec.GRPC].validation(backend)
 		if spec.BackendTLS != nil && spec.BackendTLS.Denied {
 			return spec, routeModelDiagnostics{}, nil
 		}
@@ -457,7 +457,7 @@ func (r *Reconciler) buildRoutePortModel(
 		spec.BackendH2C = spec.BackendTLS == nil && backend.UsesH2C()
 		return spec, routeModelDiagnostics{}, nil
 	}
-	diagnostic, err := r.lowerHTTPBackends(ctx, reader, route, listener, &spec, inputs, matches, rules, topology.NodeAddressType)
+	diagnostic, err := r.lowerHTTPBackends(ctx, reader, listener, &spec, inputs, matches, rules, topology.NodeAddressType)
 	if err != nil {
 		return cloud.RouteSpec{}, routeModelDiagnostics{}, err
 	}
@@ -501,7 +501,7 @@ type httpBackendResolution struct {
 	diagnostic model.Diagnostic
 }
 
-func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader, route *gatewayv1.HTTPRoute, listener gatewayv1.Listener, spec *cloud.RouteSpec, inputs *routeModelInputs, matches []routeLoweredMatch, rules []model.Rule, nodeAddressType corev1.NodeAddressType) (routeModelDiagnostics, error) {
+func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader, listener gatewayv1.Listener, spec *cloud.RouteSpec, inputs *routeModelInputs, matches []routeLoweredMatch, rules []model.Rule, nodeAddressType corev1.NodeAddressType) (routeModelDiagnostics, error) {
 	type ruleTarget struct {
 		pool         *int
 		weighted     int
@@ -537,16 +537,13 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 		for _, backend := range rule.Backends {
 			if zeroOnly {
 				// Resolve the Kubernetes references without creating forwarding pools.
-				switch {
-				case backend.Diagnostic != nil:
+				if backend.Diagnostic != nil {
 					diagnostics.backend = preferredBackendDiagnostic(diagnostics.backend, *backend.Diagnostic)
-				case backend.BackendTLS.Winner != nil:
-					diagnostics.backend = preferredBackendDiagnostic(diagnostics.backend, unsupportedGRPCBackendTLS())
 				}
 				weighted.Targets = append(weighted.Targets, cloud.HTTPWeightedTarget{})
 				continue
 			}
-			index, diagnostic, err := r.lowerHTTPBackend(ctx, reader, route, spec, inputs, backend, nodeAddressType, direct, groups)
+			index, diagnostic, err := r.lowerHTTPBackend(ctx, reader, spec, inputs, backend, nodeAddressType, direct, groups)
 			if err != nil {
 				return routeModelDiagnostics{}, err
 			}
@@ -611,7 +608,7 @@ func hasHTTPBackendKey(backend model.BackendGroup) bool {
 	return backend.XBackend.Name != "" || backend.Service.Name != "" && validBackendPort(backend.Reference.Port)
 }
 
-func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader, route *gatewayv1.HTTPRoute, spec *cloud.RouteSpec, inputs *routeModelInputs, backend model.BackendGroup, nodeAddressType corev1.NodeAddressType, direct bool, groups map[backendKey]httpBackendResolution) (*int, model.Diagnostic, error) {
+func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader, spec *cloud.RouteSpec, inputs *routeModelInputs, backend model.BackendGroup, nodeAddressType corev1.NodeAddressType, direct bool, groups map[backendKey]httpBackendResolution) (*int, model.Diagnostic, error) {
 	if backend.FilterDiagnostic != nil {
 		return nil, *backend.FilterDiagnostic, nil
 	}
@@ -629,19 +626,26 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 	}
 	result, observed := groups[key]
 	var members []cloud.Member
-	tls := inputs.backendTLSAvailability.validation(backend, model.HTTPProfileRouteKind(route) == model.HTTPRouteKind)
-	if spec.GRPC && !direct && tls != nil && tls.Denied {
-		return nil, unsupportedGRPCBackendTLS(), nil
-	}
-	if !observed && (tls == nil || !tls.Denied) {
-		var err error
-		members, result.diagnostic, err = groupedBackendMembers(ctx, reader, backend, inputs, spec.MemberMode, nodeAddressType)
-		if err != nil {
-			return nil, model.Diagnostic{}, err
+	tls := inputs.backendTLSAvailability[spec.GRPC].validation(backend)
+	if !observed {
+		switch {
+		case backend.Diagnostic != nil && spec.GRPC:
+			result.diagnostic = *backend.Diagnostic
+		case tls == nil || !tls.Denied:
+			var err error
+			members, result.diagnostic, err = groupedBackendMembers(ctx, reader, backend, inputs, spec.MemberMode, nodeAddressType)
+			if err != nil {
+				return nil, model.Diagnostic{}, err
+			}
 		}
 	}
+	if spec.GRPC && backend.Weight == 0 && tls != nil {
+		return nil, result.diagnostic, nil
+	}
 	invalid := result.diagnostic.Reason != ""
-	if !direct && invalid {
+	// Keep a denied policy's pool identity so the graph can quarantine it
+	// before rewriting the weighted rule to send its share to the failure pool.
+	if !direct && invalid && tls == nil {
 		groups[key] = result
 		return nil, result.diagnostic, nil
 	}
@@ -652,7 +656,7 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 		// their target list and do not need placeholder pools.
 		// A gRPC client maps the empty pool's HTTP 503 to UNAVAILABLE.
 		// The HTTP fixed 500 response would instead map to UNKNOWN.
-		invalidReference := invalid && model.HTTPProfileRouteKind(route) != model.GRPCRouteKind && (key.kind == cloud.HTTPBackendKindXBackend || r.Config.WeightedHTTPTargets ||
+		invalidReference := invalid && !spec.GRPC && (key.kind == cloud.HTTPBackendKindXBackend || r.Config.WeightedHTTPTargets ||
 			result.diagnostic.Reason == string(gatewayv1.RouteReasonRefNotPermitted) ||
 			result.diagnostic.Reason == string(gatewayv1.RouteReasonBackendNotFound))
 		spec.HTTPBackends = append(spec.HTTPBackends, cloud.HTTPBackend{
@@ -663,12 +667,6 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 	}
 	groups[key] = result
 	return result.index, result.diagnostic, nil
-}
-
-func unsupportedGRPCBackendTLS() model.Diagnostic {
-	return model.Diagnostic{
-		Reason: string(gatewayv1.RouteReasonUnsupportedProtocol), Message: "GRPCRoute cannot meet the backend Service's BackendTLSPolicy",
-	}
 }
 
 func appendHTTPPathMatch(matches []cloud.HTTPPathMatch, match cloud.HTTPPathMatch) []cloud.HTTPPathMatch {

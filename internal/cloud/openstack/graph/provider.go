@@ -128,7 +128,7 @@ type Provider struct {
 
 // NewProvider creates an OpenStack provider. The clients are expected to have
 // an Octavia microversion that supports tags (2.5 or later).
-func NewProvider(clients ServiceClients, cfg ProviderConfig) *Provider {
+func NewProvider(serviceClients ServiceClients, cfg ProviderConfig) *Provider {
 	if cfg.OperationTimeout <= 0 {
 		cfg.OperationTimeout = 10 * time.Minute
 	}
@@ -154,11 +154,11 @@ func NewProvider(clients ServiceClients, cfg ProviderConfig) *Provider {
 		tlsSNIPassthrough:      cfg.TLSSNIPassthrough,
 		tlsSNISuffix:           cfg.TLSSNISuffix,
 		tcpTLSTermination:      cfg.TCPTLSTermination,
-		projectID:              clients.ProjectID,
-		region:                 clients.Region,
-		neutron:                neutron.NewService(clients.Network),
-		octavia:                octavia.NewService(clients.LoadBalancer),
-		topology:               topology.NewResolver(clients, cfg.OperationTimeout),
+		projectID:              serviceClients.ProjectID,
+		region:                 serviceClients.Region,
+		neutron:                neutron.NewService(serviceClients.Network),
+		octavia:                octavia.NewService(serviceClients.LoadBalancer),
+		topology:               topology.NewResolver(serviceClients, cfg.OperationTimeout),
 		operationTimeout:       cfg.OperationTimeout,
 		pollInterval:           cfg.PollInterval,
 
@@ -169,12 +169,21 @@ func NewProvider(clients ServiceClients, cfg ProviderConfig) *Provider {
 
 var _ cloud.GraphProvider = (*Provider)(nil)
 
-// BackendTLSAvailable discovers support on the authenticated regional Amphora endpoint.
+// BackendTLSAvailable discovers hostname validation on the regional Amphora endpoint.
 func (p *Provider) BackendTLSAvailable(ctx context.Context) (bool, error) {
+	return p.backendTLSAvailable(ctx, false)
+}
+
+// GRPCBackendTLSAvailable also requires enforcement of negotiated h2.
+func (p *Provider) GRPCBackendTLSAvailable(ctx context.Context) (bool, error) {
+	return p.backendTLSAvailable(ctx, true)
+}
+
+func (p *Provider) backendTLSAvailable(ctx context.Context, requireH2 bool) (bool, error) {
 	if !p.backendTLSPolicy || p.backendCA == nil {
 		return false, nil
 	}
-	return p.amphoraCapabilityAvailable(ctx, octavia.GatewayCapabilityBackendTLSHostname)
+	return p.amphoraCapabilityAvailable(ctx, backendTLSCapabilities(requireH2)...)
 }
 
 // HTTPSListenerIsolationAvailable checks the configured region before the
@@ -186,8 +195,8 @@ func (p *Provider) HTTPSListenerIsolationAvailable(ctx context.Context) (bool, e
 	return p.amphoraCapabilityAvailable(ctx, octavia.GatewayCapabilityHTTPSListenerIsolation)
 }
 
-func (p *Provider) amphoraCapabilityAvailable(ctx context.Context, capability string) (bool, error) {
-	err := p.octavia.VerifyGatewayCapabilities(ctx, "amphora", capability)
+func (p *Provider) amphoraCapabilityAvailable(ctx context.Context, capabilities ...string) (bool, error) {
+	err := p.octavia.VerifyGatewayCapabilities(ctx, "amphora", capabilities...)
 	var missing *octavia.MissingGatewayCapability
 	if errors.As(err, &missing) {
 		return false, nil

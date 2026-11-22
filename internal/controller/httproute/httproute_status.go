@@ -437,7 +437,7 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 		}
 		return nil
 	}
-	rejection, err := r.liveRouteBackendReferenceRejection(ctx, route)
+	grantsByNamespace, rejection, err := r.observeRouteBackendPermissions(ctx, route)
 	if err != nil {
 		return err
 	}
@@ -456,6 +456,13 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 			if diagnostic := model.UnresolvedHTTPBackendExtension(backend); diagnostic != nil {
 				*status = status.withBackendDiagnostic(*diagnostic)
 			}
+		}
+	}
+	grpc := model.HTTPProfileRouteKind(route) == model.GRPCRouteKind
+	input := model.Input{Routes: []gatewayv1.HTTPRoute{*route}, BackendH2C: r.Config.BackendH2C}
+	if grpc {
+		for _, grants := range grantsByNamespace {
+			input.ReferenceGrants = append(input.ReferenceGrants, grants...)
 		}
 	}
 	for _, backend := range backends {
@@ -497,13 +504,24 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 		if err != nil {
 			return fmt.Errorf("get backend Service: %w", err)
 		}
-		port, diagnostic := model.ResolveServicePort(&service, backend.Port, r.Config.BackendH2C)
-		if diagnostic != nil {
+		if grpc {
+			input.Services = append(input.Services, service)
+		} else if _, diagnostic := model.ResolveServicePort(&service, backend.Port, r.Config.BackendH2C); diagnostic != nil {
 			*status = status.withBackendDiagnostic(*diagnostic)
-		} else if model.HTTPProfileRouteKind(route) == model.GRPCRouteKind && !model.ServicePortUsesH2C(port) {
-			*status = status.withBackendDiagnostic(model.Diagnostic{
-				Reason: string(gatewayv1.RouteReasonUnsupportedProtocol), Message: "GRPCRoute requires kubernetes.io/h2c on the backend Service port",
-			})
+		}
+	}
+	if grpc && r.Config.BackendTLSPolicy {
+		if err := graph.CollectBackendTLSInputs(ctx, r.routePatchReader(), &input, nil); err != nil {
+			return err
+		}
+	}
+	if grpc {
+		for _, rule := range route.Spec.Rules {
+			for _, backend := range model.ResolveBackends(route, rule, input) {
+				if backend.Diagnostic != nil {
+					*status = status.withBackendDiagnostic(*backend.Diagnostic)
+				}
+			}
 		}
 	}
 	return nil
