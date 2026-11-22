@@ -219,7 +219,9 @@ func newRouteElectionFixture(t *testing.T) (*routeModelInputFixture, *gatewayv1.
 	f.route.Spec.ParentRefs = append(f.route.Spec.ParentRefs, gatewayv1.ParentReference{
 		Kind: ptr.To(gatewayv1.Kind("ListenerSet")), Name: gatewayv1.ObjectName(set.Name), SectionName: &listener.Name,
 	})
-	f.reconciler.applyRouteBinding(f.route, f.gateway)
+	if err := f.reconciler.applyRouteBinding(f.route, f.gateway); err != nil {
+		t.Fatal(err)
+	}
 	for _, object := range []client.Object{f.gateway, f.route} {
 		if err := f.client.Update(t.Context(), object); err != nil {
 			t.Fatal(err)

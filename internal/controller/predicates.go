@@ -276,6 +276,7 @@ func routeBindingChanged(config Config, oldRoute, newRoute client.Object) bool {
 		config.RouteGatewayNamespaceAnnotation(),
 		config.RouteGatewayNameAnnotation(),
 		config.RouteGatewayUIDAnnotation(),
+		config.RouteGatewayBindingsAnnotation(),
 		config.RouteClusterIDAnnotation(),
 		config.RouteProjectIDAnnotation(),
 		config.RouteListenerPortAnnotation(gatewayv1.UDPProtocolType),

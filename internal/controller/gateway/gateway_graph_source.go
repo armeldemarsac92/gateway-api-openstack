@@ -222,22 +222,19 @@ func (r *Reconciler) observeGatewayForRouteDeletion(ctx context.Context, request
 	}
 	var routeAnchor int
 	if route != nil {
-		routeAnchor = controller.ScopedRouteAnchor(r.Config, route, routeProtocol)
-	}
-	if route != nil && (routeProtocol != gatewayv1.HTTPProtocolType || routeAnchor != 0) {
-		identity, present, err := controller.StoredRouteIdentity(r.Config, route)
+		binding, err := controller.StoredRouteGatewayBinding(r.Config, route, request.Identity)
 		if err != nil {
 			return graph.GatewayInput{}, err
 		}
-		if !present || identity != request.Identity ||
-			!controllerutil.ContainsFinalizer(route, r.Config.RouteFinalizer()) ||
-			route.GetAnnotations()[r.Config.RouteClusterIDAnnotation()] != identity.ClusterID ||
-			route.GetAnnotations()[r.Config.RouteProjectIDAnnotation()] != identity.OpenStackProjectID ||
-			route.GetAnnotations()[r.Config.RouteLifecycleAnnotation()] != controller.RouteDetaching {
-			return graph.GatewayInput{}, errGatewayChanged
-		}
-		if routeAnchor != 0 {
-			input.Node.Spec = cloud.GatewaySpec{ListenerProtocol: string(routeProtocol), ListenerPort: routeAnchor, ScopedListeners: []cloud.ScopedListener{}}
+		routeAnchor = binding.Anchor
+		if routeProtocol != gatewayv1.HTTPProtocolType || routeAnchor != 0 || controller.HasRouteGatewayBindings(r.Config, route) {
+			if binding.Identity != request.Identity || !controllerutil.ContainsFinalizer(route, r.Config.RouteFinalizer()) ||
+				!binding.ExplicitScope || binding.Lifecycle != controller.RouteDetaching {
+				return graph.GatewayInput{}, errGatewayChanged
+			}
+			if routeAnchor != 0 {
+				input.Node.Spec = cloud.GatewaySpec{ListenerProtocol: string(routeProtocol), ListenerPort: routeAnchor, ScopedListeners: []cloud.ScopedListener{}}
+			}
 		}
 	}
 

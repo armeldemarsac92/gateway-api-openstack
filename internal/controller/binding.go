@@ -158,6 +158,11 @@ func SameGatewayIdentity(left, right cloud.Identity) bool {
 // RouteClaimsGateway identifies complete or partial route ownership checkpoints
 // for one Gateway. The caller validates the full identity before acting on them.
 func RouteClaimsGateway(config Config, route client.Object, identity cloud.Identity) bool {
+	for _, binding := range unvalidatedRouteGatewayBindings(config, route) {
+		if binding.UID == identity.GatewayUID {
+			return true
+		}
+	}
 	boundUID := route.GetAnnotations()[config.RouteGatewayUIDAnnotation()]
 	checkpoint := config.RouteBindingFinalizer(identity.ClusterID, identity.OpenStackProjectID, identity.GatewayNamespace, identity.GatewayName, identity.GatewayUID)
 	return boundUID != "" && boundUID == identity.GatewayUID || slices.ContainsFunc(route.GetFinalizers(), func(finalizer string) bool {
@@ -289,7 +294,7 @@ func routeHasBindingAnnotations(config Config, route client.Object) bool {
 // this controller's durable binding.
 func RouteHasControllerBinding(config Config, route client.Object) bool {
 	return controllerutil.ContainsFinalizer(route, config.RouteFinalizer()) ||
-		hasRouteBindingFinalizer(config, route) ||
+		hasRouteBindingFinalizer(config, route) || HasRouteGatewayBindings(config, route) ||
 		routeHasBindingAnnotations(config, route) || hasScopedRouteAnchor(config, route)
 }
 
@@ -342,7 +347,7 @@ func scopedRouteProtocol(route client.Object) gatewayv1.ProtocolType {
 		return gatewayv1.TCPProtocolType
 	case *gatewayv1.UDPRoute:
 		return gatewayv1.UDPProtocolType
-	case *gatewayv1.HTTPRoute:
+	case *gatewayv1.HTTPRoute, *gatewayv1.GRPCRoute:
 		return gatewayv1.HTTPProtocolType
 	default:
 		return ""
@@ -357,7 +362,11 @@ func hasScopedRouteAnchor(config Config, route client.Object) bool {
 }
 
 func scopedRouteBindingFinalizer(config Config, route client.Object, protocol gatewayv1.ProtocolType, legacy string) string {
-	input := strings.Join([]string{route.GetNamespace(), route.GetName(), string(route.GetUID()), route.GetAnnotations()[config.RouteListenerPortAnnotation(protocol)]}, "\x00")
+	return routeBindingFinalizerWithAnchor(route, protocol, legacy, route.GetAnnotations()[config.RouteListenerPortAnnotation(protocol)])
+}
+
+func routeBindingFinalizerWithAnchor(route client.Object, protocol gatewayv1.ProtocolType, legacy, port string) string {
+	input := strings.Join([]string{route.GetNamespace(), route.GetName(), string(route.GetUID()), port}, "\x00")
 	digest := sha256.Sum256([]byte(input))
 	prefix := "-u-"
 	switch protocol {

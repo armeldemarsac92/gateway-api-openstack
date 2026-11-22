@@ -40,7 +40,9 @@ func TestRouteGraphInventoryRetainsBoundFragmentsWithoutParentRefs(t *testing.T)
 	binder := &Reconciler{Config: cfg}
 	boundRoute := func(namespace, lifecycle string) *gatewayv1.HTTPRoute {
 		route := &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "route", UID: types.UID(namespace + "-uid"), Generation: 1}}
-		binder.applyRouteBinding(route, boundGateway)
+		if err := binder.applyRouteBinding(route, boundGateway); err != nil {
+			t.Fatal(err)
+		}
 		route.Annotations[cfg.RouteLifecycleAnnotation()] = lifecycle
 		return route
 	}
@@ -76,7 +78,9 @@ func TestRouteGraphInventoryFenceDetectsNewCandidatesAndLifecycleChanges(t *test
 			gateway := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "edge", UID: "gateway-1"}}
 			route := &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "route", UID: "route-1", Generation: 1}}
 			r := &Reconciler{Config: cfg}
-			r.applyRouteBinding(route, gateway)
+			if err := r.applyRouteBinding(route, gateway); err != nil {
+				t.Fatal(err)
+			}
 			route.Annotations[cfg.RouteLifecycleAnnotation()] = controller.RouteDetaching
 			kubeClient := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(route).Build()
 			r.APIReader = kubeClient
@@ -100,7 +104,9 @@ func TestRouteGraphInventoryFenceDetectsNewCandidatesAndLifecycleChanges(t *test
 				switch change {
 				case "bound fragment":
 					created.Spec.ParentRefs = nil
-					r.applyRouteBinding(created, gateway)
+					if err := r.applyRouteBinding(created, gateway); err != nil {
+						t.Fatal(err)
+					}
 				case "unrelated route":
 					created.Spec.ParentRefs[0].Name = "other"
 				}
@@ -156,7 +162,9 @@ func TestRouteGraphRejectsUnknownBoundFragmentLifecycle(t *testing.T) {
 	gateway := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "edge", UID: "gateway-1"}}
 	route := &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "route", UID: "route-1", Generation: 1}}
 	r := &Reconciler{Config: cfg}
-	r.applyRouteBinding(route, gateway)
+	if err := r.applyRouteBinding(route, gateway); err != nil {
+		t.Fatal(err)
+	}
 	delete(route.Annotations, cfg.RouteLifecycleAnnotation())
 	r.APIReader = fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(route).Build()
 	_, err := r.ObserveRouteGraph(context.Background(), graph.Request{Identity: controller.RouteIdentity(cfg, gateway, route), Action: graph.DeleteRoute, Route: route}, nil)

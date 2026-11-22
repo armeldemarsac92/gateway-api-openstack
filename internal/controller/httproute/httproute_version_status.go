@@ -59,7 +59,20 @@ func (r *Reconciler) setRouteUnsupportedVersion(
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	identity, bound, err := r.storedRouteIdentity(&current)
+	var identity cloud.Identity
+	var bound bool
+	if scope.parentGateway == nil {
+		identity, bound, err = r.storedRouteIdentity(&current)
+	} else {
+		expected := controller.RouteIdentity(r.Config, scope.parentGateway, &current)
+		parents = managedParentsForGateway(parents, expected)
+		if len(parents) == 0 {
+			return ctrl.Result{}, errHTTPRouteChanged
+		}
+		var binding controller.RouteGatewayBinding
+		binding, err = controller.StoredRouteGatewayBinding(r.Config, &current, expected)
+		identity, bound = binding.Identity, binding.Identity.RouteUID != ""
+	}
 	if err != nil {
 		return ctrl.Result{}, err
 	}

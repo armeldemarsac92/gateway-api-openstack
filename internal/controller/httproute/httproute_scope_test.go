@@ -19,6 +19,9 @@ package httproute
 import (
 	"context"
 	"errors"
+	"fmt"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -235,13 +238,15 @@ func TestHTTPRouteProviderWarningWaitsForStatusPatch(t *testing.T) {
 			CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{parent}},
 		},
 	}
-	(newTestReconciler(Reconciler{Config: cfg}, nil)).applyRouteBinding(route, gateway)
+	if err := (newTestReconciler(Reconciler{Config: cfg}, nil)).applyRouteBinding(route, gateway); err != nil {
+		t.Fatal(err)
+	}
 	invalidStatus := statusForRouteBuildError(newRouteBuildError(
 		routeErrorUnsupported,
 		"exactly one HTTPRoute rule is supported",
 	))
 	updates := []parentStatusUpdate{{parent: parent, status: invalidStatus}}
-	applyRouteParentStatuses(cfg, route, updates)
+	(&routeStatusPlan{updates: updates}).apply(cfg, route)
 	route.Annotations[cfg.RouteLifecycleAnnotation()] = controller.RouteDetaching
 	baseClient := indexedFakeClientBuilder(testScheme(t), cfg).
 		WithStatusSubresource(route).
@@ -322,7 +327,9 @@ func TestHTTPRouteDetachReplacesPartialProviderFailureCheckpoint(t *testing.T) {
 			CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{parent}},
 		},
 	}
-	(newTestReconciler(Reconciler{Config: cfg}, nil)).applyRouteBinding(route, gateway)
+	if err := (newTestReconciler(Reconciler{Config: cfg}, nil)).applyRouteBinding(route, gateway); err != nil {
+		t.Fatal(err)
+	}
 	providerErr := cloud.NewProviderError(
 		cloud.ErrorCategoryOwnershipConflict,
 		errors.New("ownership conflict"),
@@ -332,16 +339,15 @@ func TestHTTPRouteDetachReplacesPartialProviderFailureCheckpoint(t *testing.T) {
 		t.Fatal("ownership conflict did not produce a provider failure policy")
 	}
 	policy = controller.ProviderCleanupFailurePolicy(policy, "HTTPRoute")
-	applyRouteProviderFailureStatuses(
-		cfg,
-		route,
-		[]parentStatusUpdate{{
+	(&routeStatusPlan{
+		kind: routeStatusPlanProviderFailure,
+		updates: []parentStatusUpdate{{
 			parent: parent,
 			status: providerFailureRouteStatus(policy, true),
 		}},
-		policy,
-		true,
-	)
+		policy:              policy,
+		referencesEvaluated: true,
+	}).apply(cfg, route)
 	route.Status.Parents = append(route.Status.Parents, gatewayv1.RouteParentStatus{
 		ParentRef:      gatewayv1.ParentReference{Name: "stale-gateway"},
 		ControllerName: cfg.ControllerName,
@@ -622,9 +628,50 @@ func assertRouteBindingPreserved(
 
 func TestApplyRouteParentStatusesKeepsRequiredEmptyArray(t *testing.T) {
 	route := &gatewayv1.HTTPRoute{}
-	applyRouteParentStatuses(testConfig(), route, nil)
+	(&routeStatusPlan{}).apply(testConfig(), route)
 	if route.Status.Parents == nil {
 		t.Fatal("status.parents is nil, want the required empty array")
+	}
+}
+
+func TestHTTPRouteParentStatusCapacityPreservesOtherControllers(t *testing.T) {
+	cfg := testConfig()
+	_, gateway := providerRouteParentObjects(cfg)
+	route := &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: gateway.Namespace, Generation: 1}}
+	ownRef := gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name)}
+	newRef := gatewayv1.ParentReference{Name: "unreported-gateway"}
+	foreign := make([]gatewayv1.RouteParentStatus, 31)
+	for index := range foreign {
+		foreign[index] = gatewayv1.RouteParentStatus{
+			ParentRef:      gatewayv1.ParentReference{Name: gatewayv1.ObjectName(fmt.Sprintf("other-%d", index))},
+			ControllerName: "other.example/controller",
+		}
+	}
+	// A foreign entry with the same ParentRef still belongs to its controller.
+	foreign[0].ParentRef = newRef
+	route.Status.Parents = slices.Clone(foreign)
+	route.Status.Parents = append(route.Status.Parents, gatewayv1.RouteParentStatus{ControllerName: cfg.ControllerName, ParentRef: ownRef})
+
+	plan := &routeStatusPlan{
+		gateway: gateway,
+		updates: []parentStatusUpdate{
+			{parent: newRef, status: programmedRouteStatus()},
+			{parent: ownRef, status: pendingRouteStatus("Current Gateway is pending")},
+		},
+	}
+	plan.apply(cfg, route)
+	if len(route.Status.Parents) != 32 || !reflect.DeepEqual(route.Status.Parents[:31], foreign) {
+		t.Fatalf("status update dropped or changed a foreign parent: %v", route.Status.Parents)
+	}
+	own := route.Status.Parents[31]
+	condition := findCondition(own.Conditions, cfg.Domain()+"/Programmed")
+	if own.ParentRef.Name != ownRef.Name || condition == nil || condition.Status != metav1.ConditionFalse || condition.Reason != "Pending" {
+		t.Fatalf("existing parent must still be updated at capacity: %v", own)
+	}
+	previous := route.DeepCopy()
+	plan.apply(cfg, route)
+	if !reflect.DeepEqual(previous.Status, route.Status) {
+		t.Fatal("repeated update of a full parent list changed route status")
 	}
 }
 

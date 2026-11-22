@@ -106,15 +106,26 @@ func (r *Reconciler) observeRouteGraphAdmission(ctx context.Context, gateway *ga
 	var candidatesForElection []routeProfileCandidate
 	for i := range routes {
 		route := &routes[i]
-		if !route.DeletionTimestamp.IsZero() || !r.structurallySupportedRoute(route) ||
-			route.Annotations[r.Config.RouteLifecycleAnnotation()] == controller.RouteDetaching {
+		if !route.DeletionTimestamp.IsZero() || !r.structurallySupportedRoute(route) {
 			continue
 		}
-		parents, err := r.parentsForGateway(ctx, route, gateway)
+		parents, err := r.parentsForGateway(ctx, r.APIReader, route, gateway)
 		if err != nil {
 			return routeGraphAdmission{}, err
 		}
-		selection, namespaces, err := r.selectRouteParentsWithNamespaces(ctx, route, parents, admission.listenerSets, namespacesByName)
+		if len(parents) == 0 {
+			continue
+		}
+		if controller.RouteClaimsGateway(r.Config, route, identity) {
+			binding, err := controller.StoredRouteGatewayBinding(r.Config, route, identity)
+			if err != nil {
+				return routeGraphAdmission{}, err
+			}
+			if binding.Lifecycle == controller.RouteDetaching {
+				continue
+			}
+		}
+		selection, namespaces, err := r.selectRouteParentsWithNamespaces(ctx, r.APIReader, route, parents, admission.listenerSets, namespacesByName)
 		if err != nil {
 			return routeGraphAdmission{}, err
 		}

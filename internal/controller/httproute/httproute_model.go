@@ -202,6 +202,8 @@ func backendReferenceRejection(kind gatewayv1.Kind, namespace string, target typ
 	return nil
 }
 
+var errRouteAttachmentRejected = errors.New("route attachment rejected")
+
 func (r *Reconciler) buildRouteModelWithReader(
 	ctx context.Context,
 	reader client.Reader,
@@ -211,47 +213,26 @@ func (r *Reconciler) buildRouteModelWithReader(
 	if _, err := r.validateRouteStructure(route); err != nil {
 		return cloud.RouteSpec{}, err
 	}
-	if slices.ContainsFunc(route.Spec.ParentRefs, func(ref gatewayv1.ParentReference) bool {
-		return model.ListenerSetRefKey(ref, route.Namespace).Name != ""
-	}) {
-		parents, err := r.parentsForGateway(ctx, route, gateway)
-		if err != nil {
-			return cloud.RouteSpec{}, err
-		}
-		projection, err := gatewaycontroller.ObserveListenerSets(ctx, reader, r.Config, gateway)
-		if err != nil {
-			return cloud.RouteSpec{}, err
-		}
-		sets := projection.Sections()
-		selection, namespaces, err := r.selectRouteParents(ctx, route, parents, sets)
-		if err != nil {
-			return cloud.RouteSpec{}, err
-		}
-		listeners := selection.listeners()
-		if len(listeners) == 0 {
-			return cloud.RouteSpec{}, newRouteBuildError(routeErrorNoMatchingParent, "no ListenerSet or Gateway listener accepts HTTPRoute")
-		}
-		inputs, err := r.collectRouteModelInputsForSets(ctx, reader, gateway, []gatewayv1.HTTPRoute{*route}, namespaces, sets)
-		if err != nil {
-			return cloud.RouteSpec{}, err
-		}
-		spec, _, err := r.buildRouteModelFromInputs(ctx, reader, route, gateway, listeners, inputs)
-		return spec, err
-	}
-
-	http, err := gatewaycontroller.ValidatedHTTPRouteListeners(r.Config, gateway)
-	if err != nil {
+	if _, err := gatewaycontroller.ValidatedHTTPRouteListeners(r.Config, gateway); err != nil {
 		return cloud.RouteSpec{}, newRouteBuildError(routeErrorUnsupported, "%s", err)
 	}
-	namespaces, err := readRouteNamespaces(ctx, reader, http, route.Namespace)
+	parents, err := r.parentsForGateway(ctx, reader, route, gateway)
 	if err != nil {
 		return cloud.RouteSpec{}, err
 	}
-	listeners, err := r.boundRouteAttachments(route, gateway, http, namespaces)
+	selection, namespaces, sets, err := r.observeRouteSelection(ctx, reader, route, parents)
 	if err != nil {
 		return cloud.RouteSpec{}, err
 	}
-	inputs, err := r.collectRouteModelInputs(ctx, reader, gateway, []gatewayv1.HTTPRoute{*route}, namespaces)
+	listeners := selection.listeners()
+	if len(listeners) == 0 {
+		rejection := newRouteBuildError(routeErrorNoMatchingParent, "HTTPRoute no longer targets the bound Gateway")
+		if len(selection) != 0 {
+			rejection = selection[0].rejection
+		}
+		return cloud.RouteSpec{}, errors.Join(rejection, errRouteAttachmentRejected)
+	}
+	inputs, err := r.collectRouteModelInputsForSets(ctx, reader, gateway, []gatewayv1.HTTPRoute{*route}, namespaces, sets)
 	if err != nil {
 		return cloud.RouteSpec{}, err
 	}
