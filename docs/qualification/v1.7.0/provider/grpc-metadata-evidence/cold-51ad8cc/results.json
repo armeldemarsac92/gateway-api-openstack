@@ -1,0 +1,240 @@
+{
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "controllerRevision": "51ad8cc6316f6aac929961f70866f88053896982",
+  "managerSHA256": "bc5fe381aa30cc627cbfa01449d812cdc12f4c2ede95ab1b2499aa8938be4a6f",
+  "channels": {
+    "standard": {
+      "case": "GRPCRouteHeaderMatching",
+      "report": "standard-grpcroute-header-matching-report.yaml",
+      "reportSHA256": "d6d9f94878b1ce4529fdafefd743ad893d42bb205650b1d5f6b28a928199a400",
+      "caseStartedAt": "2026-11-22T20:50:10.052+00:00",
+      "caseFinishedAt": "2026-11-22T20:50:21.898+00:00",
+      "caseGoSHA256": "0568a85cd86f208afa8e8957cebc6aa2c0ccde27f788d35beeae8e9924631349",
+      "manifestSHA256": "29c34f2c25ddd91688b96a7430ed14d1d948fd5ebd08757b732e97a2c8eb5c0c",
+      "status": "passed",
+      "exit": 0,
+      "timedOut": false,
+      "groups": {
+        "requests": {
+          "expected": 11,
+          "passed": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10
+          ],
+          "failed": [],
+          "skipped": []
+        }
+      },
+      "events": [
+        {
+          "status": "PASS",
+          "test": "TestLocalGatewayCase/GRPCRouteHeaderMatching"
+        },
+        {
+          "status": "PASS",
+          "test": "TestLocalGatewayCase/GRPCRouteHeaderMatching/0_request_to_'/gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/Echo'_with_headers_'{Version:one}'_should_go_to_grpc-infra-backend-v1"
+        },
+        {
+          "status": "PASS",
+          "test": "TestLocalGatewayCase/GRPCRouteHeaderMatching/5_request_to_'/gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/Echo'_with_headers_'{Some-Other-Header:one}'_should_receive_a_Unimplemented_(12)"
+        },
+        {
+          "status": "PASS",
+          "test": "TestLocalGatewayCase/GRPCRouteHeaderMatching/4_request_to_'/gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/Echo'_with_headers_'{Color:orange}'_should_receive_a_Unimplemented_(12)"
+        },
+        {
+          "status": "PASS",
+          "test": "TestLocalGatewayCase/GRPCRouteHeaderMatching/3_request_to_'/gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/Echo'_with_headers_'{Color:blue,Version:two}'_should_go_to_grpc-infra-backend-v2"
+        },
+        {
+          "status": "PASS",
+          "test": "TestLocalGatewayCase/GRPCRouteHeaderMatching/2_request_to_'/gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/Echo'_with_headers_'{Color:orange,Version:two}'_should_go_to_grpc-infra-backend-v1"
+        },
+        {
+          "status": "PASS",
+          "test": "TestLocalGatewayCase/GRPCRouteHeaderMatching/1_request_to_'/gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/Echo'_with_headers_'{Version:two}'_should_go_to_grpc-infra-backend-v2"
+        },
+        {
+          "status": "PASS",
+          "test": "TestLocalGatewayCase/GRPCRouteHeaderMatching/10_request_to_'/gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/Echo'_with_headers_'{Color:purple}'_should_receive_a_Unimplemented_(12)"
+        },
+        {
+          "status": "PASS",
+          "test": "TestLocalGatewayCase/GRPCRouteHeaderMatching/6_request_to_'/gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/Echo'_with_headers_'{Color:blue}'_should_go_to_grpc-infra-backend-v1"
+        },
+        {
+          "status": "PASS",
+          "test": "TestLocalGatewayCase/GRPCRouteHeaderMatching/8_request_to_'/gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/Echo'_with_headers_'{Color:red}'_should_go_to_grpc-infra-backend-v2"
+        },
+        {
+          "status": "PASS",
+          "test": "TestLocalGatewayCase/GRPCRouteHeaderMatching/7_request_to_'/gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/Echo'_with_headers_'{Color:green}'_should_go_to_grpc-infra-backend-v1"
+        },
+        {
+          "status": "PASS",
+          "test": "TestLocalGatewayCase/GRPCRouteHeaderMatching/9_request_to_'/gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/Echo'_with_headers_'{Color:yellow}'_should_go_to_grpc-infra-backend-v2"
+        }
+      ],
+      "nativeHAProxyReloadCount": 9,
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "baseSHA256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+      "flags": [
+        "--octavia-http-request-redirect",
+        "--octavia-fixed-http-responses",
+        "--octavia-https-listener-isolation",
+        "--octavia-backend-tls-policy",
+        "--openstack-resync-interval=10m",
+        "--octavia-backend-h2c",
+        "--octavia-http-header-exact",
+        "--octavia-l7policy-initial-rules"
+      ],
+      "octavia": {
+        "version": "19.0.1.dev39",
+        "sha256": "a4be86272fe8d1d2db0ea7831826c1d0115d5f19cae4151e2025cb923b747d8b",
+        "filesVerified": 642
+      },
+      "octaviaLib": {
+        "version": "3.12.1.dev11",
+        "sha256": "e0b6108a307ef354589812bdcd2c27f7f7bba9abf1ccf273991d6c5cec2aa39b",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1",
+        "sha256": "fa8468efa26f95ed83a36afeb97b79730de285450b7a8fae94f7cf5e6d2d0824"
+      },
+      "amphoraCapabilitiesAfterOptIn": [
+        "fixed_http_responses_v1",
+        "weighted_http_targets_v1",
+        "http_request_redirect_v1",
+        "l7policy_initial_rules_v1",
+        "http_header_exact_v1",
+        "backend_h2c_v1",
+        "backend_tls_hostname_v1",
+        "https_listener_isolation_v1"
+      ],
+      "nativeL7WorkerDispatch": {
+        "create_l7policy": 7,
+        "update_l7policy": 7
+      },
+      "kindNode": "docker.io/kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed"
+    },
+    "experimental": {
+      "case": "GRPCRouteListenerHostnameMatching",
+      "report": "experimental-grpcroute-listener-hostname-matching-report.yaml",
+      "reportSHA256": "de680180f504b42057087e3a8c1f596a2f10a5f525074bc402c413ce64228386",
+      "caseStartedAt": "2026-11-22T20:51:26.617+00:00",
+      "caseFinishedAt": "2026-11-22T20:51:38.995+00:00",
+      "caseGoSHA256": "66b842a37b03dd0d20c61604639c9ece08d02cf852b8c6da9a9692f00a0e5972",
+      "manifestSHA256": "1593c3237859a386ef5008502dd20439eb306d6a3e7439899bb4ab2c4970ded7",
+      "status": "passed",
+      "exit": 0,
+      "timedOut": false,
+      "groups": {
+        "requests": {
+          "expected": 8,
+          "passed": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "failed": [],
+          "skipped": []
+        }
+      },
+      "events": [
+        {
+          "status": "PASS",
+          "test": "TestLocalGatewayCase/GRPCRouteListenerHostnameMatching"
+        },
+        {
+          "status": "PASS",
+          "test": "TestLocalGatewayCase/GRPCRouteListenerHostnameMatching/4_request_to_'multiple.prefixes.bar.com/gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/Echo'_should_go_to_grpc-infra-backend-v3"
+        },
+        {
+          "status": "PASS",
+          "test": "TestLocalGatewayCase/GRPCRouteListenerHostnameMatching/7_request_to_'no.matching.host/gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/Echo'_should_receive_a_Unimplemented_(12)"
+        },
+        {
+          "status": "PASS",
+          "test": "TestLocalGatewayCase/GRPCRouteListenerHostnameMatching/6_request_to_'foo.com/gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/Echo'_should_receive_a_Unimplemented_(12)"
+        },
+        {
+          "status": "PASS",
+          "test": "TestLocalGatewayCase/GRPCRouteListenerHostnameMatching/5_request_to_'multiple.prefixes.foo.com/gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/Echo'_should_go_to_grpc-infra-backend-v3"
+        },
+        {
+          "status": "PASS",
+          "test": "TestLocalGatewayCase/GRPCRouteListenerHostnameMatching/0_request_to_'bar.com/gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/Echo'_should_go_to_grpc-infra-backend-v1"
+        },
+        {
+          "status": "PASS",
+          "test": "TestLocalGatewayCase/GRPCRouteListenerHostnameMatching/3_request_to_'boo.bar.com/gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/Echo'_should_go_to_grpc-infra-backend-v3"
+        },
+        {
+          "status": "PASS",
+          "test": "TestLocalGatewayCase/GRPCRouteListenerHostnameMatching/2_request_to_'baz.bar.com/gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/Echo'_should_go_to_grpc-infra-backend-v3"
+        },
+        {
+          "status": "PASS",
+          "test": "TestLocalGatewayCase/GRPCRouteListenerHostnameMatching/1_request_to_'foo.bar.com/gateway_api_conformance.echo_basic.grpcecho.GrpcEcho/Echo'_should_go_to_grpc-infra-backend-v2"
+        }
+      ],
+      "nativeHAProxyReloadCount": 7,
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "baseSHA256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+      "flags": [
+        "--octavia-http-request-redirect",
+        "--octavia-fixed-http-responses",
+        "--octavia-https-listener-isolation",
+        "--octavia-backend-tls-policy",
+        "--openstack-resync-interval=10m",
+        "--octavia-backend-h2c",
+        "--octavia-http-header-exact",
+        "--octavia-l7policy-initial-rules"
+      ],
+      "octavia": {
+        "version": "19.0.1.dev39",
+        "sha256": "a4be86272fe8d1d2db0ea7831826c1d0115d5f19cae4151e2025cb923b747d8b",
+        "filesVerified": 642
+      },
+      "octaviaLib": {
+        "version": "3.12.1.dev11",
+        "sha256": "e0b6108a307ef354589812bdcd2c27f7f7bba9abf1ccf273991d6c5cec2aa39b",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1",
+        "sha256": "fa8468efa26f95ed83a36afeb97b79730de285450b7a8fae94f7cf5e6d2d0824"
+      },
+      "amphoraCapabilitiesAfterOptIn": [
+        "fixed_http_responses_v1",
+        "weighted_http_targets_v1",
+        "http_request_redirect_v1",
+        "l7policy_initial_rules_v1",
+        "http_header_exact_v1",
+        "backend_h2c_v1",
+        "backend_tls_hostname_v1",
+        "https_listener_isolation_v1"
+      ],
+      "nativeL7WorkerDispatch": {
+        "create_l7policy": 4,
+        "update_l7policy": 4
+      },
+      "kindNode": "docker.io/kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed"
+    }
+  }
+}
