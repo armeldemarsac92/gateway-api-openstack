@@ -237,6 +237,110 @@ func (f httpsGraphProvider) ReconcileGatewayGraph(ctx context.Context, spec clou
 	return f(ctx, spec)
 }
 
+func TestGatewayTLSWithdrawalsConvergeIndependentlyAfterBackendOptOut(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		rejected bool
+		fails    cloud.GraphDisposition
+	}{
+		{name: "enrolled HTTPS grant revoked during backend failure", fails: cloud.GraphWithdrawBackendClientCertificate},
+		{name: "rejected Gateway with both options off during frontend failure", rejected: true, fails: cloud.GraphWithdrawTLS},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := testConfig()
+			cfg.OperatorHTTPS = !tc.rejected
+			gw := programmedTestGateway(cfg)
+			gw.Finalizers = append(gw.Finalizers, cfg.BackendCAFinalizer())
+			gw.Spec.Listeners = append(gw.Spec.Listeners, testHTTPSListener("https", 443))
+			gw.Spec.TLS = &gatewayv1.GatewayTLSConfig{Backend: &gatewayv1.GatewayBackendTLS{
+				ClientCertificateRef: &gatewayv1.SecretObjectReference{Name: "backend-client"},
+			}}
+			if tc.rejected {
+				gw.Spec.Infrastructure = &gatewayv1.GatewayInfrastructure{}
+			}
+			completeGatewayTopologyFixture(cfg, gw)
+			gw.Annotations[cfg.GatewayListenerProtocolAnnotation()] = string(gatewayv1.HTTPProtocolType)
+			controller.SetGatewayListenerScope(cfg, gw, gatewayv1.HTTPProtocolType)
+			gw.Status.Listeners = []gatewayv1.ListenerStatus{{Name: "https", Conditions: []metav1.Condition{
+				controller.Condition(string(gatewayv1.ListenerConditionProgrammed), metav1.ConditionTrue,
+					string(gatewayv1.ListenerReasonProgrammed), "Previously programmed", gw.Generation),
+			}}}
+			class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "openstack"}, Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName}}
+			kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gw, class).WithObjects(gw, class).Build()
+			var writes []cloud.GraphDisposition
+			failure := errors.New("withdrawal read failed")
+			fail := true
+			closed := make(map[cloud.GraphDisposition]bool)
+			provider := httpsGraphProvider(func(ctx context.Context, spec cloud.GatewayGraphSpec) (cloud.GatewayGraphResult, error) {
+				action := spec.Gateway.Disposition
+				writes = append(writes, action)
+				if err := spec.ValidateMutation(ctx); err != nil {
+					return cloud.GatewayGraphResult{}, err
+				}
+				switch action {
+				case cloud.GraphWithdrawTLS:
+					ports := spec.Gateway.Spec.ScopedListeners
+					if len(ports) != 1 || ports[0].Port != 443 || ports[0].TLS == nil || ports[0].TLS.CertificateRef != "" {
+						t.Fatalf("revoked HTTPS listener still authorized: %#v", ports)
+					}
+				case cloud.GraphWithdrawBackendClientCertificate:
+					if !spec.Gateway.BackendClientCertificate.Denied {
+						t.Fatal("backend certificate survived operator opt-out")
+					}
+				default:
+					t.Fatalf("unexpected graph operation during withdrawal: %s", action)
+				}
+				if fail && action == tc.fails {
+					return cloud.GatewayGraphResult{}, failure
+				}
+				if closed[action] {
+					return cloud.GatewayGraphResult{Outcome: cloud.ReadyOutcome()}, nil
+				}
+				closed[action] = true
+				progress := cloud.ProgressingOutcome("Waiting to verify TLS withdrawal", time.Second)
+				progress.MutationSubmitted = true
+				return cloud.GatewayGraphResult{Outcome: progress}, nil
+			})
+			r := newTestReconciler(Reconciler{Client: kube, APIReader: kube, Config: cfg, Coordinator: &graph.Coordinator{},
+				Certificates: resolveHTTPSFunc(func(context.Context, *gatewayv1.Gateway, *gatewayv1.Listener) (string, gatewayv1.ListenerConditionReason) {
+					return "", gatewayv1.ListenerReasonRefNotPermitted
+				})}, provider)
+			request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(gw)}
+			reconcile := func() (ctrl.Result, error) {
+				t.Helper()
+				writes = nil
+				result, err := r.Reconcile(t.Context(), request)
+				if !slices.Equal(writes, []cloud.GraphDisposition{cloud.GraphWithdrawTLS, cloud.GraphWithdrawBackendClientCertificate}) {
+					t.Fatalf("withdrawals did not run independently in order: %v, error %v", writes, err)
+				}
+				return result, err
+			}
+			if result, err := reconcile(); err != nil || result.RequeueAfter <= 0 || result.RequeueAfter > 250*time.Millisecond {
+				t.Fatalf("independent progress was lost during failure: %v, %v", result, err)
+			}
+			if err := kube.Get(t.Context(), request.NamespacedName, gw); err != nil {
+				t.Fatal(err)
+			}
+			listener := existingListenerConditions(gw, "https")
+			if !meta.IsStatusConditionFalse(listener, string(gatewayv1.ListenerConditionProgrammed)) ||
+				!tc.rejected && !meta.IsStatusConditionFalse(listener, string(gatewayv1.ListenerConditionResolvedRefs)) {
+				t.Fatalf("stale frontend status survived revocation: %v", listener)
+			}
+			fail = false
+			if result, err := reconcile(); err != nil || result.RequeueAfter <= 0 || result.RequeueAfter > 250*time.Millisecond {
+				t.Fatalf("failed withdrawal did not continue on retry: %v, %v", result, err)
+			}
+			if _, err := reconcile(); err != nil || !closed[cloud.GraphWithdrawTLS] || !closed[cloud.GraphWithdrawBackendClientCertificate] {
+				t.Fatalf("withdrawals did not converge after retry: %v, %v", closed, err)
+			}
+			fail = true
+			if result, err := reconcile(); !errors.Is(err, failure) || result != (ctrl.Result{}) {
+				t.Fatalf("error without outstanding operation didn't reach the work queue: %v, %v", result, err)
+			}
+		})
+	}
+}
+
 func TestHTTPSGatewayWithdrawsAuthorizationChangedDuringProviderCall(t *testing.T) {
 	cfg := testConfig()
 	cfg.OperatorHTTPS = true

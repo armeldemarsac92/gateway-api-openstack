@@ -62,7 +62,7 @@ func TestBackendTLSScalarQuarantinesBeforePublishingAndReopening(t *testing.T) {
 	memberIDs := []map[string]string{{"id": "member-1"}}
 	pool := map[string]any{
 		"id": "pool-1", "protocol": "HTTP", "lb_algorithm": "ROUND_ROBIN", "project_id": project,
-		"provisioning_status": "ACTIVE", "admin_state_up": true, "backend_tls_hostname": nil, "ca_tls_container_ref": nil, "tls_enabled": false,
+		"provisioning_status": "ACTIVE", "admin_state_up": true, "backend_tls_hostname": nil, "ca_tls_container_ref": nil, "tls_container_ref": nil, "tls_enabled": false,
 		"healthmonitor_id": "monitor-1", "listeners": []map[string]string{{"id": "listener-1"}},
 		"loadbalancers": []map[string]string{{"id": "load-balancer-1"}}, "tags": safetyRouteTags(t, id, rolePool),
 	}
@@ -156,6 +156,15 @@ func TestBackendTLSScalarQuarantinesBeforePublishingAndReopening(t *testing.T) {
 				t.Fatal("could not decode Octavia pool update")
 			}
 			require.NotContains(t, body.Pool, "backend_tls_require_h2")
+			if value, changed := body.Pool["tls_container_ref"]; changed && len(body.Pool) == 1 {
+				require.Nil(t, value)
+				require.Equal(t, false, pool["admin_state_up"])
+				require.Empty(t, memberIDs)
+				pool["tls_container_ref"] = nil
+				writes = append(writes, "forget-client")
+				safetyWriteJSON(t, w, map[string]any{"pool": pool})
+				return
+			}
 			if _, changed := body.Pool["backend_tls_hostname"]; changed {
 				if len(memberIDs) != 0 || body.Pool["tls_enabled"] != (body.Pool["backend_tls_hostname"] != nil) {
 					t.Fatal("TLS settings must change together on an empty pool")
@@ -185,6 +194,9 @@ func TestBackendTLSScalarQuarantinesBeforePublishingAndReopening(t *testing.T) {
 			if want := spec.Routes[0].Spec.BackendTLS; want != nil && (pool["backend_tls_hostname"] != want.Hostname || pool["tls_enabled"] != true ||
 				pool["ca_tls_container_ref"] == nil || pool["admin_state_up"] != true) {
 				t.Fatal("member exposed without the active authenticated pool")
+			}
+			if client := spec.Gateway.BackendClientCertificate; client.Denied || client.Reference != "" && pool["tls_container_ref"] != client.Reference {
+				t.Fatal("member exposed without the authorized backend client identity")
 			}
 			memberIDs = []map[string]string{{"id": "member-1"}}
 			writes = append(writes, "member")
@@ -238,6 +250,67 @@ func TestBackendTLSScalarQuarantinesBeforePublishingAndReopening(t *testing.T) {
 	}
 	spec.ValidateMutation = nil
 	reconcile("claim", "publish", "configure", "enable", "member")
+	const oldClient = "https://barbican.example/v1/secrets/old-client"
+	const newClient = "https://barbican.example/v1/secrets/new-client"
+	spec.Gateway.BackendClientCertificate.Reference = oldClient
+	reconcile("disable", "drain", "configure", "enable", "member")
+	require.Equal(t, oldClient, pool["tls_container_ref"])
+	spec.Gateway.BackendClientCertificate.Reference = newClient
+	reconcile("disable", "drain", "configure", "enable", "member")
+	require.Equal(t, newClient, pool["tls_container_ref"])
+	t.Run("withdraw after policy inventory failure", func(t *testing.T) {
+		spec := cloud.GatewayGraphSpec{Identity: spec.Identity, Gateway: cloud.GatewayGraphNode{
+			Disposition:              cloud.GraphWithdrawBackendClientCertificate,
+			Spec:                     cloud.GatewaySpec{Identity: spec.Identity},
+			BackendCAOwned:           true,
+			BackendClientCertificate: cloud.BackendClientCertificate{Denied: true},
+		}}
+		lane := openstackidentity.HTTPBackendKey("default", "weighted", 443)
+		oldPoolTags, oldMemberTags, oldMonitorTags := pool["tags"], member["tags"], monitor["tags"]
+		pool["tags"] = append(safetyRouteTags(t, id, httpResourceRole(rolePool, lane, "")), backendTLSManagedTag, backendTLSClientTag)
+		member["tags"] = safetyRouteTags(t, id, httpResourceRole(roleMember, lane, ""))
+		monitor["tags"] = safetyRouteTags(t, id, httpResourceRole(roleMonitor, lane, ""))
+		thirdParty := maps.Clone(pool)
+		thirdParty["id"] = "third-party-pool"
+		thirdParty["tags"] = safetyRouteTags(t, id, rolePool)
+		previousLB, previousPools := lb["pools"], reads["/lbaas/pools"]
+		lb["pools"] = []map[string]string{{"id": "pool-1"}, {"id": "third-party-pool"}}
+		reads["/lbaas/pools"] = map[string]any{"pools": []any{pool, thirdParty}}
+		defer func() {
+			pool["tags"], member["tags"], monitor["tags"] = oldPoolTags, oldMemberTags, oldMonitorTags
+			lb["pools"], reads["/lbaas/pools"] = previousLB, previousPools
+		}()
+		spec.ValidateMutation = func(context.Context) error { return fence }
+		writes = nil
+		_, err := provider.ReconcileGatewayGraph(t.Context(), spec)
+		require.ErrorIs(t, err, fence)
+		require.Empty(t, writes)
+		spec.ValidateMutation = func(context.Context) error { return nil }
+		for _, expected := range []string{"disable", "drain", "forget-client"} {
+			writes = nil
+			result, err := provider.ReconcileGatewayGraph(t.Context(), spec)
+			require.NoError(t, err)
+			require.True(t, result.Outcome.MutationSubmitted)
+			require.Equal(t, []string{expected}, writes)
+		}
+		writes = nil
+		result, err := provider.ReconcileGatewayGraph(t.Context(), spec)
+		require.NoError(t, err)
+		require.Equal(t, cloud.OutcomeReady, result.Outcome.State)
+		require.Empty(t, writes)
+		require.Equal(t, true, thirdParty["admin_state_up"])
+		require.Equal(t, newClient, thirdParty["tls_container_ref"])
+	})
+	require.Equal(t, false, pool["admin_state_up"])
+	require.Nil(t, pool["tls_container_ref"])
+	require.Empty(t, memberIDs)
+	reconcile("configure", "enable", "member")
+	spec.Gateway.BackendClientCertificate = cloud.BackendClientCertificate{}
+	tls.Denied = true
+	reconcile("disable", "drain", "forget-client")
+	require.Nil(t, pool["tls_container_ref"])
+	tls.Denied = false
+	reconcile("enable", "member")
 	tls.Hostname = "rotated.example.test"
 	reconcile("disable", "drain", "configure", "enable", "member")
 	tls.CAConfigMapUID = "recreated-configmap"
@@ -437,6 +510,8 @@ func TestGRPCBackendTLSRequiresRegionalEnforcementAndVerifiedPool(t *testing.T) 
 	spec.Gateway.LoadBalancerID = "load-balancer-1"
 	desired := desiredGatewayGraph{spec: graph, routes: []desiredRoute{{spec: *spec, identity: id}}}
 	desired.spec.Gateway.BackendCAOwned = true
+	const clientRef = "https://barbican.example/v1/secrets/grpc-client"
+	desired.spec.Gateway.BackendClientCertificate.Reference = clientRef
 	route := &desired.routes[0]
 	lb := &octavia.LoadBalancer{}
 	lb.ID, lb.Provider, lb.ProvisioningStatus = "load-balancer-1", "amphora", "ACTIVE"
@@ -528,6 +603,7 @@ func TestGRPCBackendTLSRequiresRegionalEnforcementAndVerifiedPool(t *testing.T) 
 	require.Equal(t, true, sent["tls_enabled"])
 	require.Equal(t, spec.BackendTLS.Hostname, sent["backend_tls_hostname"])
 	require.Equal(t, revision.Reference(), sent["ca_tls_container_ref"])
+	require.Equal(t, clientRef, sent["tls_container_ref"])
 	require.Equal(t, true, sent["backend_tls_require_h2"])
 	require.NotContains(t, sent, "alpn_protocols")
 	require.NotContains(t, sent, "backend_h2c")
@@ -536,6 +612,13 @@ func TestGRPCBackendTLSRequiresRegionalEnforcementAndVerifiedPool(t *testing.T) 
 	_, err = read()
 	require.ErrorIs(t, err, cloud.ErrOwnershipConflict)
 	pool["loadbalancers"] = []map[string]string{{"id": lb.ID}}
+
+	delete(pool, "tls_container_ref")
+	refresh()
+	require.Nil(t, prepare())
+	require.Equal(t, backendTLSBlocked, route.backendTLS.phase)
+	require.Nil(t, poolStep())
+	pool["tls_container_ref"] = clientRef
 
 	// Merely offering h2 cannot authorize reopening a protected pool.
 	pool["alpn_protocols"] = []string{"h2"}
@@ -551,6 +634,7 @@ func TestGRPCBackendTLSRequiresRegionalEnforcementAndVerifiedPool(t *testing.T) 
 	require.Equal(t, backendTLSConfigure, route.backendTLS.phase)
 	mutate(poolStep())
 	require.Equal(t, true, sent["backend_tls_require_h2"])
+	require.Equal(t, clientRef, sent["tls_container_ref"])
 	require.NotContains(t, sent, "admin_state_up")
 
 	refresh()
@@ -728,11 +812,33 @@ func scalarBackendTLSClients(t *testing.T, project string, octaviaHandler http.H
 
 func TestBackendTLSWeightedDenialPreservesHealthyShare(t *testing.T) {
 	desired, actual := weightedPlanFixture()
+	desired.spec.Gateway.BackendClientCertificate.Denied = true
+	actual.loadBalancer.ProvisioningStatus = "ACTIVE"
 	remote := &desired.routes[0].httpParts[1]
+	remote.spec.BackendTLS = newGraphBackendTLS(t)
+	local := actual.routes[0].httpParts[desired.routes[0].httpParts[0].backendKey]
+	local.pool.TLSContainerRef = "https://barbican.example/v1/secrets/third-party-client"
 	observed := actual.routes[0].httpParts[remote.backendKey]
-	remote.backendTLS = backendTLSPlan{phase: backendTLSDenied}
-	observed.members = nil
 	observed.pool.Tags = append(observed.pool.Tags, backendTLSManagedTag)
+	observed.pool.TLSContainerRef = "https://barbican.example/v1/secrets/revoked-client"
+	observed.backendTLS.AdminObserved, observed.backendTLS.ClientRefObserved = true, true
+	provider := &Provider{}
+	step := provider.prepareBackendTLS(t.Context(), &desired, actual)
+	require.NotNil(t, step)
+	require.Equal(t, remote.backendKey, step.backendKey)
+	require.Equal(t, new(false), step.route.poolAdmin)
+	observed.pool.AdminStateUp = false
+	step = provider.prepareBackendTLS(t.Context(), &desired, actual)
+	require.NotNil(t, step)
+	require.Equal(t, remote.backendKey, step.backendKey)
+	require.Equal(t, routeMutationClearPoolMembers, step.route.kind)
+	observed.members = nil
+	step = provider.prepareBackendTLS(t.Context(), &desired, actual)
+	require.NotNil(t, step)
+	require.Equal(t, remote.backendKey, step.backendKey)
+	require.True(t, step.route.clearTLSClientRef)
+	observed.pool.TLSContainerRef = ""
+	require.Nil(t, provider.prepareBackendTLS(t.Context(), &desired, actual))
 	steps := weightedPlan(t, desired, actual)
 	if len(steps) != 1 || steps[0].route.kind != routeMutationSetPolicyTarget || !steps[0].withdrawHTTPPolicy || steps[0].route.weightedTargets == nil {
 		t.Fatalf("wanted an in-place weighted withdrawal, got %#v", steps)
@@ -752,7 +858,7 @@ func TestBackendTLSRestartHoldsPoolRepresentationWithoutPolicyObservation(t *tes
 			pool.members = nil
 			pool.pool.ProvisioningStatus, pool.pool.AdminStateUp = "ACTIVE", false
 			pool.pool.Tags = append(pool.pool.Tags, backendTLSManagedTag)
-			pool.backendTLS = octavia.PoolBackendTLS{AdminObserved: true, EnabledObserved: true, CAObserved: true, HostnameObserved: true}
+			pool.backendTLS = octavia.PoolBackendTLS{AdminObserved: true, EnabledObserved: true, CAObserved: true, HostnameObserved: true, ClientRefObserved: true}
 			if grouped {
 				actual.routes[0] = pool
 			} else {

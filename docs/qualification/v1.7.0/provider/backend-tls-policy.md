@@ -55,11 +55,32 @@ The upstream negative subtests accept a failed RPC. The original client saw HTTP
 
 The provider opt-in requires the controller's gRPC profile and `--octavia-backend-tls-policy`, plus Amphora's `backend_tls_hostname_v1` and `backend_tls_h2_alpn_v1` capabilities. Octavia and the Amphora agent must be configured to advertise both capabilities. The local run used Octavia microversion 2.24. Octavia returned `backend_tls_require_h2=true` for all three active pools. The live HAProxy configuration for each pool used `alpn h2 require-alpn-h2`, SNI from the fixed policy hostname and strict DNS verification with the configured CA. [Operator configuration](../../../operator-octavia-backend-tls-policy.md) · [Octavia and Amphora distribution](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-backend-tls-h2-9729fed77683) · [octavia-lib distribution](https://github.com/armeldemarsac92/octavia-lib/releases/tag/hibiscus-backend-tls-h2-696c5ae9ceb2)
 
-Each policy supports one Service target and one ConfigMap CA in the Service namespace, with a single PEM CA certificate and a fixed DNS hostname checked against the certificate's DNS SAN. Explicit `subjectAltNames`, system trust roots, multi-CA bundles and client certificates remain outside this profile. The gRPC Service port can omit `appProtocol` or use `https`. A `kubernetes.io/h2c` port cannot use this policy.
+Each policy supports one Service target and one ConfigMap CA in the Service namespace, with a single PEM CA certificate and a fixed DNS hostname checked against the certificate's DNS SAN. Explicit `subjectAltNames`, system trust roots and multi-CA bundles remain outside this profile. A separate operator option enables the Gateway client identity described below. The gRPC Service port can omit `appProtocol` or use `https`. A `kubernetes.io/h2c` port cannot use this policy.
 
 The routes and policies had current `Accepted=True` and `ResolvedRefs=True`. The controller-specific route condition `gateway-api-openstack.github.io/Programmed` still read `False/Pending` at capture. The fixture used an envtest API server, installed Octavia and Barbican APIs and native HAProxy. It simulated Keystone, Neutron, Octavia RPC completion, Amphora agent transport, Pod readiness and EndpointSlice publication. Deployed Hibiscus qualification remains open.
 
 The preliminary Standard attempt passed the original upstream case. Its supplemental check expected Octavia's legacy `alpn_protocols` list to contain only h2. The new `backend_tls_require_h2` flag does not change that legacy list, so the fixture stopped before the wire probes. The pack preserves that run's original report and receipt separately. The verified Standard and Experimental receipts use the corrected provider readback and the independent post-convergence probes. [Evidence pack](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-51ad8cc6316f6aac929961f70866f88053896982/backendtlspolicy-grpcroute-51ad8cc-evidence.tar.gz)
+
+## Gateway client certificate
+
+An operator can enroll the referenced TLS Secret revision in Barbican and let Amphora present that identity to a backend covered by BackendTLSPolicy. Configure `--octavia-backend-tls-policy` and `--backend-client-certificate-map`. A Secret in another namespace also requires a matching ReferenceGrant. [Operator configuration](../../../operator-octavia-backend-tls-policy.md) · [Controller release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-7ac426fa239784dccab5a28851dd4d71094d7e04)
+
+| Original v1.7.0 case | Standard | Experimental |
+| --- | --- | --- |
+| `GatewayTLSBackendClientCertificate` | [PASS](gateway-backend-client-certificate/standard-gateway-tls-backend-client-certificate-report.yaml) | [PASS](gateway-backend-client-certificate/experimental-gateway-tls-backend-client-certificate-report.yaml) |
+| `GatewayInvalidTLSBackendConfiguration` | 5/5 status checks | 5/5 status checks |
+
+On each channel, the original echo returned HTTP 200, SNI `abc.example.com` and the exact expected client certificate. Octavia's pool list and detail both returned the enrolled `tls_container_ref`. The Gateway reported `Programmed=True` and `ResolvedRefs=True`. The HTTPRoute and BackendTLSPolicy both reported `Accepted=True` and `ResolvedRefs=True`. The additional controller-specific HTTPRoute Programmed condition still read `False/Pending` in each snapshot. [Conditions, certificate fingerprints and provider readback](gateway-backend-client-certificate/results.json)
+
+The published echo verifies a presented certificate and permits a connection without one. A separate run used the same echo revision with Go TLS set to `RequireAndVerifyClientCert`. On both channels the strict echo rejected a missing certificate and a certificate signed by another CA. It accepted the enrolled identity through the Gateway. On Standard, withdrawing a named cross-namespace ReferenceGrant produced `ResolvedRefs=False/RefNotPermitted`, disabled the pool, cleared the certificate reference and returned HTTP 503. Restoring the grant restored the enrolled certificate and HTTP 200. [Echo source](https://github.com/kubernetes-sigs/gateway-api-conformance-images/blob/426f3da3be8a66bdb0d205ea96892cf38404b942/echo-basic/echo-basic.go#L376-L398) · [Reports and portable replay](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-7ac426fa239784dccab5a28851dd4d71094d7e04/gateway-backend-client-certificate-replay.tar.gz)
+
+The five invalid-reference subtests ran against Kubernetes 1.36.2 envtest and a recording provider on the signed source. Each Gateway was accepted. A missing Secret, malformed Secret, unsupported group and unsupported kind each produced `ResolvedRefs=False/InvalidClientCertificateRef`. A cross-namespace Secret without a grant produced `ResolvedRefs=False/RefNotPermitted`. To replay with the envtest prerequisites and the chosen Gateway API CRD bundle, run the following from the controller checkout. [Status subtests](gateway-backend-client-certificate/results.json)
+
+```sh
+rtk proxy go test -tags=envtest -count=1 -run '^TestControllerEnvtest$/^upstream_Gateway_status_cases$/^GatewayInvalidTLSBackendConfiguration$' ./internal/controller
+```
+
+The wire fixture used the released manager, envtest, Octavia 19.0.1.dev39, octavia-lib 3.12.1.dev11, Barbican 23.0.0 and native HAProxy. It supplied Pod readiness, EndpointSlices, Keystone, Neutron, Octavia RPC completion and Amphora agent transport. Deployed Hibiscus qualification remains open. [Live profiles](../live-runs.md)
 
 ## Revisions
 

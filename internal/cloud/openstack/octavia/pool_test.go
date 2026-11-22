@@ -51,10 +51,10 @@ func TestPoolInventoryRequiresExplicitTLSReadback(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"pools":[
-			{"id":"plain","backend_tls_hostname":null,"ca_tls_container_ref":null,"tls_enabled":false,"admin_state_up":true},
-			{"id":"missing-boolean","backend_tls_hostname":null,"ca_tls_container_ref":null,"admin_state_up":true},
-			{"id":"missing-nullable","tls_enabled":false,"admin_state_up":true},
-			{"id":"protected","backend_tls_hostname":"backend.example.test","ca_tls_container_ref":"http://barbican.test/example","tls_enabled":true,"admin_state_up":false}
+			{"id":"plain","backend_tls_hostname":null,"ca_tls_container_ref":null,"tls_container_ref":null,"tls_enabled":false,"admin_state_up":true},
+			{"id":"missing-boolean","backend_tls_hostname":null,"ca_tls_container_ref":null,"tls_container_ref":null,"admin_state_up":true},
+			{"id":"missing-nullable","backend_tls_hostname":null,"ca_tls_container_ref":null,"tls_enabled":false,"admin_state_up":true},
+			{"id":"protected","backend_tls_hostname":"backend.example.test","ca_tls_container_ref":"http://barbican.test/example","tls_container_ref":"http://barbican.test/client","tls_enabled":true,"admin_state_up":false}
 		]}`))
 	})
 	service := NewService(&gophercloud.ServiceClient{
@@ -69,7 +69,7 @@ func TestPoolInventoryRequiresExplicitTLSReadback(t *testing.T) {
 		inventory.BackendTLS["missing-boolean"].Complete() || inventory.BackendTLS["missing-nullable"].Complete() {
 		t.Fatal("an omitted TLS field was treated as an explicit plain setting")
 	}
-	if protected := inventory.Items[3]; !protected.TLSEnabled || protected.AdminStateUp || protected.CATLSContainerRef == "" ||
+	if protected := inventory.Items[3]; !protected.TLSEnabled || protected.AdminStateUp || protected.CATLSContainerRef == "" || protected.TLSContainerRef != "http://barbican.test/client" ||
 		!inventory.BackendTLS["protected"].Complete() || inventory.BackendTLS["protected"].Hostname != "backend.example.test" {
 		t.Fatal("the protected pool settings were not preserved")
 	}

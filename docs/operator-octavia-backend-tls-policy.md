@@ -53,4 +53,36 @@ Changing the public CA certificate in `ca.crt` creates a new immutable Barbican 
 
 During rollback, keep the upgraded workers, strict Amphora runtime and Barbican identity available until protected routes and their cloud resources have been withdrawn. The controller records CA ownership in a Gateway finalizer before publication. After opt-out it keeps enrolled pools closed and can still retire this Gateway's CAs on deletion. The controller checks regional project pool and listener CA references before retiring an unused revision. A CA still used elsewhere is retained.
 
-This profile currently accepts one local Service target, one local ConfigMap CA reference with one PEM CA certificate, and a fixed DNS hostname for HTTP/1 and gRPC backends. Explicit DNS or URI `subjectAltNames`, system trust roots, client certificates and TCP backend re-encryption require additional implementation and qualification. Deployed Hibiscus qualification remains open.
+## Present a Gateway client certificate
+
+With the BackendTLSPolicy profile enabled, set `--backend-client-certificate-map=/etc/gateway-operator/backend-clients/map.json` on the controller or set `GATEWAY_OPENSTACK_BACKEND_CLIENT_CERTIFICATE_MAP` to that path. Mount a separate operator-controlled ConfigMap directory read-only at that location so kubelet can project updates. For each approved Secret name, give the controller ServiceAccount `get` via `resourceNames` in the Secret's namespace. The controller reads only metadata and needs neither Secret `list` nor `watch`. [Name-scoped Role and RoleBinding example](operator-https.md#enable-the-mode)
+
+On a protected operator host, use the enrollment helper with a dedicated working map. Verify that the TLS Secret contains a matched certificate chain and private key appropriate for TLS client authentication. Store the same chain and key as a new immutable, unencrypted PKCS#12 Barbican secret and grant Octavia read access. The helper compares the retrieved payload, Secret and creation receipt. Publish the resulting version 1 snapshot with top-level `"purpose": "backend-client"`. Both map types require the exact cluster, GatewayClass, project, region, Secret UID and resourceVersion. The purpose field gives the two maps separate enrollment authority. [Enrollment and receipt workflow](../hack/operator-certificates/README.md)
+
+```sh
+jq '.purpose = "backend-client"' "$BACKEND_CLIENT_WORKING_MAP" > "$BACKEND_CLIENT_PUBLISHED_MAP"
+kubectl -n openstack-gateway-system create configmap openstack-gateway-backend-clients \
+  --from-file=map.json="$BACKEND_CLIENT_PUBLISHED_MAP" --dry-run=client -o yaml |
+  kubectl apply --server-side --field-manager=gateway-certificate-operator -f -
+```
+
+Add the reference to the Gateway spec. A Secret in another namespace requires a ReferenceGrant from `gateway.networking.k8s.io/Gateway` and the Gateway namespace to the core `Secret` in the Secret namespace.
+
+```yaml
+spec:
+  tls:
+    backend:
+      clientCertificateRef:
+        name: catalog-client
+        namespace: certificates
+```
+
+The Gateway reports the current-generation `ResolvedRefs` condition. A missing or unverified TLS Secret reports `InvalidClientCertificateRef`, and a missing cross-namespace grant reports `RefNotPermitted`. The controller polls each configured Gateway for map, metadata and validity changes on its five-second certificate interval, subject to kubelet projection, queue and provider latency. Only the Service ports covered by BackendTLSPolicy use the client certificate. HTTP backends without a TLS policy continue to use their configured transport.
+
+Octavia uses the native `tls_container_ref` pool field from microversion 2.8. The existing regional hostname and, for gRPC, negotiated `h2` capabilities still apply. Stock Octavia can present a client certificate, but this profile requires the strict DNS and gRPC validation described above. Verify a fresh request through the Gateway to a server that requires the expected client certificate. Check that Octavia reports the enrolled reference on the active pool. [Octavia pool API](https://docs.openstack.org/api-ref/load-balancer/v2/#show-pool-details)
+
+During rotation or revocation, the controller disables the affected pool and removes its members before replacing or clearing the reference. It reads back the new identity, CA, hostname and required transport before restoring traffic. Revoking the grant or enrollment leaves the affected pool closed. Removing `clientCertificateRef` from the Gateway allows BackendTLSPolicy server authentication to resume after Octavia confirms the client reference was cleared. Turning off the operator option while the Gateway requests an identity keeps its protected pools closed. Keep the previous Barbican object readable until the closed or replaced pool no longer references it and all other consumers have been checked. Confirm withdrawal with Octavia provisioning status and fresh backend connections.
+
+If the controller cannot list BackendTLSPolicy resources, it can still close owned pools that carry a stale client certificate, then remove their owned members and clear the reference. A new Gateway requesting a client certificate is rejected if the controller is configured without BackendTLSPolicy observation. A previously bound Gateway can still withdraw enrolled identities.
+
+This profile currently accepts one local Service target, one local ConfigMap CA reference with one PEM CA certificate, and a fixed DNS hostname for HTTP/1 and gRPC backends. Explicit DNS or URI `subjectAltNames`, system trust roots and TCP backend re-encryption require additional implementation and qualification. Deployed Hibiscus qualification remains open.

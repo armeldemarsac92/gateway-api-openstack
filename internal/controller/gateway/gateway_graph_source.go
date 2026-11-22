@@ -46,6 +46,9 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 	if request.Action == graph.WithdrawTLS {
 		return r.observeGatewayTLSWithdrawal(ctx, request)
 	}
+	if request.Action == graph.WithdrawBackendClientCertificate {
+		return r.observeBackendClientCertificateWithdrawal(ctx, request.Gateway, request.Identity)
+	}
 	if request.Action == graph.DeleteGateway {
 		snapshot, err := r.observeGatewayCleanupSnapshot(ctx, request.Gateway)
 		if err != nil {
@@ -125,6 +128,9 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 	}
 	input.Object = snapshot.gateway
 	input.Node = cloud.GatewayGraphNode{Disposition: cloud.GraphEnsure, Spec: r.gatewaySpec(snapshot.gateway, snapshot.listeners, snapshot.topology)}
+	input.Node.BackendCAOwned = controllerutil.ContainsFinalizer(snapshot.gateway, r.Config.BackendCAFinalizer())
+	backendIdentity, _, _ := r.observeBackendClientCertificate(ctx, snapshot.gateway)
+	input.Node.BackendClientCertificate = backendIdentity
 	sets, err := ObserveListenerSets(ctx, r.APIReader, r.Config, snapshot.gateway)
 	if err != nil {
 		return input, err
@@ -142,7 +148,6 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 			}
 		}
 	}
-	input.Node.BackendCAOwned = controllerutil.ContainsFinalizer(snapshot.gateway, r.Config.BackendCAFinalizer())
 	if r.Config.BackendTLSPolicy && !input.Node.BackendCAOwned {
 		input.Node.ClaimBackendCA = func(ctx context.Context) error {
 			desired := snapshot.gateway.DeepCopy()
@@ -160,6 +165,12 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 		}
 		if !sets.sameInputs(current) {
 			return errGatewayChanged
+		}
+		if !backendIdentity.Denied {
+			latest, _, _ := r.observeBackendClientCertificate(ctx, snapshot.gateway)
+			if latest != backendIdentity {
+				return errGatewayChanged
+			}
 		}
 		return nil
 	}

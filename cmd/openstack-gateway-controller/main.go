@@ -86,6 +86,7 @@ func run(ctx context.Context) error {
 		controllerName     string
 		gatewayAPIChannel  string
 		certificateMap     string
+		backendClientMap   string
 		backendTLSPolicy   bool
 		grpcContentType    bool
 		fixedHTTPResponses bool
@@ -135,6 +136,7 @@ func run(ctx context.Context) error {
 	flag.BoolVar(&backendH2C, "octavia-backend-h2c", false, "use the advertised Octavia h2c backend transport capability")
 	flag.BoolVar(&requestHeaderModifier, "octavia-request-header-modifier", false, "use the advertised Octavia L7 request header operations capability")
 	flag.StringVar(&certificateMap, "tls-certificate-map", envOr("GATEWAY_OPENSTACK_TLS_CERTIFICATE_MAP", ""), "operator-managed TLS revision map for terminating listeners")
+	flag.StringVar(&backendClientMap, "backend-client-certificate-map", envOr("GATEWAY_OPENSTACK_BACKEND_CLIENT_CERTIFICATE_MAP", ""), "operator-managed TLS revision map for Gateway client certificates to TLS backends (requires --octavia-backend-tls-policy)")
 	flag.StringVar(&clusterID, "cluster-id", envOr("GATEWAY_OPENSTACK_CLUSTER_ID", ""), "stable unique identifier for this Kubernetes cluster (required)")
 	flag.StringVar(&region, "openstack-region", envOr("OS_REGION_NAME", ""), "OpenStack region; defaults to clouds.yaml or OS_REGION_NAME")
 	flag.StringVar(&microversion, "octavia-microversion", "2.5", "Octavia API microversion (2.5 or later is required for resource tags)")
@@ -195,6 +197,8 @@ func run(ctx context.Context) error {
 		TCPTLSTermination:       tcpTLSTermination,
 		ClusterID:               clusterID,
 		OpenStackResyncInterval: resyncInterval,
+
+		BackendClientCertificate: backendClientMap != "",
 	}
 	if err := controllerConfig.Validate(); err != nil {
 		return fmt.Errorf("invalid controller configuration: %w", err)
@@ -276,10 +280,9 @@ func run(ctx context.Context) error {
 		Recorder:         eventRecorder,
 		Config:           controllerConfig,
 	}
-	if controllerConfig.OperatorHTTPS {
-		gatewayReconciler.HTTPSListenerIsolationAvailable = openStackProvider.HTTPSListenerIsolationAvailable
-		gatewayReconciler.Certificates = &certificates.Resolver{
-			Path: certificateMap, Reader: manager.GetAPIReader(),
+	if controllerConfig.OperatorHTTPS || controllerConfig.BackendClientCertificate {
+		resolver := &certificates.Resolver{
+			Path: certificateMap, BackendClientPath: backendClientMap, Reader: manager.GetAPIReader(),
 			ClusterID: controllerConfig.ClusterID, ProjectID: serviceClients.ProjectID, Region: serviceClients.Region,
 			DiscoverEndpoint: func() (string, error) {
 				// Catalog availability can change while other Gateway listeners continue serving.
@@ -289,6 +292,13 @@ func run(ctx context.Context) error {
 				}
 				return keyManager.Endpoint, nil
 			},
+		}
+		if controllerConfig.OperatorHTTPS {
+			gatewayReconciler.HTTPSListenerIsolationAvailable = openStackProvider.HTTPSListenerIsolationAvailable
+			gatewayReconciler.Certificates = resolver
+		}
+		if controllerConfig.BackendClientCertificate {
+			gatewayReconciler.BackendClientCertificates = resolver
 		}
 	}
 	routeReconciler := &httproute.Reconciler{
