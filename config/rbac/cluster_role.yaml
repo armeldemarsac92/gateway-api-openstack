@@ -41,6 +41,7 @@ rules:
       - gateway.networking.k8s.io
     resources:
       - tlsroutes
+      - listenersets
     verbs:
       - get
       - list
@@ -65,6 +66,12 @@ rules:
     verbs:
       - get
       - update
+      - patch
+  - apiGroups:
+      - gateway.networking.k8s.io
+    resources:
+      - listenersets/status
+    verbs:
       - patch
   - apiGroups:
       - gateway.networking.k8s.io

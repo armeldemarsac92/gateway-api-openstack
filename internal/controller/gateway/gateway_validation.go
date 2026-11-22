@@ -86,7 +86,7 @@ func SupportedListenersForConfig(config controller.Config, gateway *gatewayv1.Ga
 			gatewayReason: gatewayv1.GatewayReasonInvalidParameters,
 		}
 	}
-	if gateway.Spec.AllowedListeners != nil {
+	if !model.GatewayDisallowsListenerSets(gateway) {
 		return nil, &gatewayValidationError{
 			message:       "spec.allowedListeners and ListenerSet attachment are not supported",
 			gatewayReason: gatewayv1.GatewayReasonInvalidParameters,

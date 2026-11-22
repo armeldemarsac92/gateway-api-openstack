@@ -33,10 +33,10 @@ func Compile(input Input) (Gateway, error) {
 		return Gateway{}, errors.New("gateway input is required")
 	}
 	result := Gateway{Source: source(input.Gateway), Listeners: compileListeners(input.Gateway, input.OperatorHTTPS)}
-	if input.Gateway.Spec.AllowedListeners != nil || input.Gateway.Spec.TLS != nil {
+	if !GatewayDisallowsListenerSets(input.Gateway) || input.Gateway.Spec.TLS != nil {
 		result.Diagnostics = append(result.Diagnostics, Diagnostic{
 			Condition: string(gatewayv1.GatewayConditionAccepted), Reason: string(gatewayv1.GatewayReasonInvalidParameters),
-			Message: "ListenerSets and Gateway-wide TLS are not implemented by the logical HTTP compiler",
+			Message: "ListenerSet attachment and Gateway-wide TLS are not implemented by the logical HTTP compiler",
 		})
 	}
 	seenRoutes := make(map[string]bool, len(input.Routes))
