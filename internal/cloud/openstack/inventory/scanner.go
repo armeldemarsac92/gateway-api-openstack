@@ -265,6 +265,9 @@ type auditCandidate struct {
 	requestRedirect        *octavia.RequestRedirect
 	requestRedirectPresent bool
 	requestRedirectValid   bool
+	urlRewrite             *octavia.RequestURLRewrite
+	urlRewritePresent      bool
+	urlRewriteValid        bool
 	policyUsesExtension    bool
 	policyTarget           *octavia.L7PolicyTarget
 	policyInventoryOK      bool
@@ -294,6 +297,8 @@ func (s auditCandidateSet) add(candidate auditCandidate) {
 		existing.policyAdminStateUp != candidate.policyAdminStateUp || existing.policyRedirects != candidate.policyRedirects ||
 		existing.requestRedirectPresent != candidate.requestRedirectPresent || existing.requestRedirectValid != candidate.requestRedirectValid ||
 		!existing.requestRedirect.Equal(candidate.requestRedirect) ||
+		existing.urlRewritePresent != candidate.urlRewritePresent || existing.urlRewriteValid != candidate.urlRewriteValid ||
+		!existing.urlRewrite.Equal(candidate.urlRewrite) ||
 		existing.extendedPolicy() || candidate.extendedPolicy() {
 		existing.observationChanged = true
 	}
@@ -462,6 +467,9 @@ func (p *Scanner) collectAuditPolicies(
 		candidate.requestRedirect = observation.RedirectRequest
 		candidate.requestRedirectPresent = observation.RedirectRequestPresent
 		candidate.requestRedirectValid = observation.HasValidRequestRedirect()
+		candidate.urlRewrite = observation.RequestURLRewrite
+		candidate.urlRewritePresent = observation.RequestURLRewritePresent
+		candidate.urlRewriteValid = observation.HasValidRequestURLRewrite()
 		candidate.policyTarget, candidate.policyInventoryOK = observation.Target, complete
 		candidate.weightedPoolIDs = observation.PoolIDs
 		candidate.redirectPoolReported = len(observation.PoolReference) != 0

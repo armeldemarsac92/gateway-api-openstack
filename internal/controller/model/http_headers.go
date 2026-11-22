@@ -26,9 +26,9 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 )
 
-// NormalizeHTTPHeaderFilters compiles at most one filter for each direction.
+// normalizeHTTPHeaderFilters compiles at most one filter for each direction.
 // Request and response operations act on independent messages.
-func NormalizeHTTPHeaderFilters(filters []gatewayv1.HTTPRouteFilter, requestEnabled, responseEnabled bool) (request, response []cloud.HTTPHeaderOperation, err error) {
+func normalizeHTTPHeaderFilters(filters []gatewayv1.HTTPRouteFilter, requestEnabled, responseEnabled bool) (request, response []cloud.HTTPHeaderOperation, err error) {
 	seen := make(map[gatewayv1.HTTPRouteFilterType]bool, len(filters))
 	for _, filter := range filters {
 		var enabled bool

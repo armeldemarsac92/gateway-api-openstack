@@ -24,6 +24,7 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -50,6 +51,7 @@ const (
 type routeStatusPlan struct {
 	kind                routeStatusPlanKind
 	updates             []parentStatusUpdate
+	droppedRules        string
 	policy              controller.ProviderFailurePolicy
 	referencesEvaluated bool
 	validateOwnership   bool
@@ -193,6 +195,7 @@ func (r *Reconciler) patchHTTPRouteStatus(
 			}
 		}
 		currentPlan := *plan
+		_, currentPlan.droppedRules = r.projectedRewriteRules(current)
 		if plan.kind == routeStatusPlanDeletingFailure {
 			updates, err := r.deletingFailureParentUpdates(ctx, current, plan.cleanupIdentity)
 			if err != nil {
@@ -254,6 +257,7 @@ func (r *Reconciler) routeCleanupStatusCheckpointNeeded(
 		return false, nil
 	}
 	desired := current.DeepCopy()
+	_, plan.droppedRules = r.projectedRewriteRules(current)
 	plan.apply(r.Config, desired)
 	return !reflect.DeepEqual(current.Status, desired.Status), nil
 }
@@ -459,6 +463,13 @@ func (p *routeStatusPlan) updateParentStatuses(config controller.Config, route *
 			)
 		}
 		controller.SetCondition(&parentStatus.Conditions, controller.Condition(string(gatewayv1.RouteConditionAccepted), update.status.accepted, update.status.acceptedReason, update.status.acceptedMessage, route.Generation))
+		partial := string(gatewayv1.RouteConditionPartiallyInvalid)
+		if p.droppedRules != "" && update.status.accepted == metav1.ConditionTrue {
+			controller.SetCondition(&parentStatus.Conditions, controller.Condition(partial, metav1.ConditionTrue,
+				string(gatewayv1.RouteReasonUnsupportedValue), p.droppedRules, route.Generation))
+		} else {
+			meta.RemoveStatusCondition(&parentStatus.Conditions, partial)
+		}
 		controller.SetCondition(&parentStatus.Conditions, controller.Condition(string(gatewayv1.RouteConditionResolvedRefs), update.status.resolved, update.status.resolvedReason, update.status.resolvedMessage, resolvedGeneration))
 		controller.SetCondition(&parentStatus.Conditions, controller.Condition(config.Domain()+"/Programmed", update.status.programmed, update.status.programmedReason, update.status.programmedMessage, programmedGeneration))
 		if existing >= 0 {

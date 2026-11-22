@@ -75,6 +75,7 @@ type ProviderConfig struct {
 	HTTPHeaderExact        bool
 	HTTPQueryParamExact    bool
 	HTTPRequestRedirect    bool
+	HTTPRequestURLRewrite  bool
 	HTTPMethodMatch        bool
 	WeightedHTTPTargets    bool
 	RequestHeaderModifier  bool
@@ -98,6 +99,7 @@ type Provider struct {
 	httpHeaderExact        bool
 	httpQueryParamExact    bool
 	httpRequestRedirect    bool
+	httpRequestURLRewrite  bool
 	httpMethodMatch        bool
 	weightedHTTPTargets    bool
 	requestHeaderModifier  bool
@@ -133,6 +135,7 @@ func NewProvider(clients ServiceClients, cfg ProviderConfig) *Provider {
 		fixedHTTPResponses:     cfg.FixedHTTPResponses || cfg.WeightedHTTPTargets,
 		httpHeaderExact:        cfg.HTTPHeaderExact,
 		httpQueryParamExact:    cfg.HTTPQueryParamExact,
+		httpRequestURLRewrite:  cfg.HTTPRequestURLRewrite,
 		httpRequestRedirect:    cfg.HTTPRequestRedirect,
 		httpMethodMatch:        cfg.HTTPMethodMatch,
 		weightedHTTPTargets:    cfg.WeightedHTTPTargets,

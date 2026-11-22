@@ -234,7 +234,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	var plan []graphMutation
 	defaultPool := usesDefaultPool(actual.protocol)
 	planBeforeSecurity := isSNIProtocol(actual.protocol) || defaultPool || actual.scoped && actual.protocol == cloud.ListenerProtocolHTTP || hasHTTPRouteParts(desired, actual) ||
-		len(desired.spec.Gateway.Spec.HTTPListenerHostnames) != 0 || observedPlainHTTPExclusions(actual.routes)
+		len(desired.spec.Gateway.Spec.HTTPListenerHostnames) != 0 || observedPlainHTTPExclusions(actual.routes) || containsObservedRequestURLRewrite(actual.routes)
 	if planBeforeSecurity {
 		plan, result, err = p.buildGatewayGraphPlan(desired, actual)
 		if err != nil {
@@ -242,6 +242,9 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		}
 	}
 	plan = p.protectRequestRedirectTraffic(ctx, desired, actual, plan, &result)
+	if !isHTTPListenerWithdrawal(plan) {
+		plan = p.protectRequestURLRewriteTraffic(ctx, desired, actual, plan, &result)
+	}
 	if !isHTTPListenerWithdrawal(plan) {
 		plan, _ = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, exactHTTPHeaderPredicate)
 		plan, _ = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, exactHTTPQueryParamPredicate)
@@ -334,6 +337,9 @@ func (p *Provider) reconcileHTTPWithdrawalWithoutAddress(ctx context.Context, de
 	}
 	result.Gateway.Outcome = p.progressingOutcome("Waiting to observe the Gateway Floating IP inventory")
 	plan = p.protectRequestRedirectTraffic(ctx, desired, actual, plan, &result)
+	if !isHTTPListenerWithdrawal(plan) {
+		plan = p.protectRequestURLRewriteTraffic(ctx, desired, actual, plan, &result)
+	}
 	var grpcWithdrawal []graphMutation
 	var confirmedClosed bool
 	if p.grpcContentType && !isHTTPListenerWithdrawal(plan) {
@@ -1148,8 +1154,6 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 			if err := validateDefaultPoolListener(actual.listener, lb.ID); err != nil {
 				return actual, err
 			}
-		} else if desired.spec.Gateway.Disposition == cloud.GraphEnsure && actual.listener.ProvisioningStatus == "ERROR" {
-			return actual, cloud.NewProviderError(cloud.ErrorCategoryResourceFailure, fmt.Errorf("octavia listener %s provisioning status is ERROR", actual.listener.ID))
 		}
 		if len(lb.VIPSecurityGroupIDs) > 0 && len(actual.listener.AllowedCIDRs) > 0 {
 			return actual, fmt.Errorf("%w: custom VIP security groups cannot be combined with listener allowed CIDRs", cloud.ErrOwnershipConflict)
@@ -1189,6 +1193,10 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 	if !defaultPool && actual.listener != nil && strings.HasPrefix(actual.listener.ProvisioningStatus, "PENDING_") {
 		actual.outcome = p.progressingOutcome("Waiting for Octavia listener provisioning")
 		return actual, nil
+	}
+	if !defaultPool && actual.listener != nil && desired.spec.Gateway.Disposition == cloud.GraphEnsure &&
+		actual.listener.ProvisioningStatus == "ERROR" && !rewriteListenerNeedsRecovery(desired, actual, *actual.listener) {
+		return actual, cloud.NewProviderError(cloud.ErrorCategoryResourceFailure, fmt.Errorf("octavia listener %s provisioning status is ERROR", actual.listener.ID))
 	}
 	if err := validateObservedPolicyLayout(actual.routes); err != nil {
 		return actual, err

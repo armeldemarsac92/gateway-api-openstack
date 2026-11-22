@@ -107,6 +107,7 @@ func run(ctx context.Context) error {
 	)
 	var httpsListenerIsolation bool
 	var httpRequestRedirect bool
+	var httpRequestURLRewrite bool
 	var exactHTTPHeaders, exactHTTPQueryParams, httpMethodMatch, requestHeaderModifier, responseHeaderModifier, backendH2C, tlsSNIPassthrough, tlsSNISuffix, tcpTLSTermination bool
 	zapOptions := zap.Options{Development: false}
 	zapOptions.BindFlags(flag.CommandLine)
@@ -123,6 +124,7 @@ func run(ctx context.Context) error {
 	flag.BoolVar(&tlsSNISuffix, "octavia-tls-sni-suffix", false, "use the advertised Octavia wildcard SNI capability (requires --octavia-tls-sni-passthrough)")
 	flag.BoolVar(&backendTLSPolicy, "octavia-backend-tls-policy", false, "authenticate BackendTLSPolicy HTTP upstreams with the regional Octavia hostname capability and a Barbican CA (requires --octavia-microversion=2.8 or newer)")
 	flag.BoolVar(&httpsListenerIsolation, "octavia-https-listener-isolation", false, "isolate terminated HTTPS sections on a shared port using the regional Octavia capability (requires --tls-certificate-map)")
+	flag.BoolVar(&httpRequestURLRewrite, "octavia-request-url-rewrite", false, "use the advertised Octavia L7 request URL rewrite capability")
 	flag.BoolVar(&responseHeaderModifier, "octavia-response-header-modifier", false, "use the advertised Octavia L7 response header operations capability")
 	flag.BoolVar(&grpcContentType, "octavia-grpc-content-type", false, "use the advertised Octavia native gRPC Content-Type rule for GRPCRoutes")
 	flag.BoolVar(&backendH2C, "octavia-backend-h2c", false, "use the advertised Octavia h2c backend transport capability")
@@ -167,6 +169,7 @@ func run(ctx context.Context) error {
 		GatewayAPIChannel:       gatewayAPIChannel,
 		HTTPHeaderExact:         exactHTTPHeaders,
 		HTTPQueryParamExact:     exactHTTPQueryParams,
+		HTTPRequestURLRewrite:   httpRequestURLRewrite,
 		HTTPRequestRedirect:     httpRequestRedirect,
 		HTTPMethodMatch:         httpMethodMatch,
 		FixedHTTPResponses:      fixedHTTPResponses,
@@ -225,6 +228,7 @@ func run(ctx context.Context) error {
 		BackendTLSPolicy:       backendTLSPolicy,
 		HTTPHeaderExact:        exactHTTPHeaders,
 		HTTPQueryParamExact:    exactHTTPQueryParams,
+		HTTPRequestURLRewrite:  httpRequestURLRewrite,
 		HTTPRequestRedirect:    httpRequestRedirect,
 		HTTPMethodMatch:        httpMethodMatch,
 		FixedHTTPResponses:     fixedHTTPResponses,

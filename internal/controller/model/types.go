@@ -39,6 +39,7 @@ type Input struct {
 	RequestHeaderModifier  bool
 	ResponseHeaderModifier bool
 	HTTPRequestRedirect    bool
+	HTTPRequestURLRewrite  bool
 	BackendH2C             bool
 	EnableXBackend         bool
 	BackendTLSPolicies     map[ServicePortKey]backendtls.Selection `json:"-"`
@@ -128,6 +129,7 @@ type Rule struct {
 	Redirect                 *RequestRedirect
 	RequestHeaderOperations  []cloud.HTTPHeaderOperation
 	ResponseHeaderOperations []cloud.HTTPHeaderOperation
+	URLRewrite               *cloud.HTTPURLRewrite
 	Diagnostics              []Diagnostic
 }
 

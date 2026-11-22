@@ -187,7 +187,16 @@ type HTTPPathMatch struct {
 	Headers                  []HTTPHeaderMatch     `json:",omitempty"`
 	QueryParams              []HTTPQueryParamMatch `json:",omitempty"`
 	RequestHeaderOperations  []HTTPHeaderOperation `json:",omitempty"`
+	URLRewrite               *HTTPURLRewrite       `json:",omitempty"`
 	ResponseHeaderOperations []HTTPHeaderOperation `json:",omitempty"`
+}
+
+// HTTPURLRewrite changes the request sent to the selected backend. A prefix
+// replacement uses the original PathPrefix of the enclosing HTTPPathMatch.
+type HTTPURLRewrite struct {
+	Hostname           string
+	ReplaceFullPath    *string
+	ReplacePrefixMatch *string
 }
 
 type HTTPBackendKind string

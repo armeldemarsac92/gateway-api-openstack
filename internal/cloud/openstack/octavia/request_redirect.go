@@ -36,10 +36,10 @@ type RequestRedirect struct {
 	Port            int                    `json:"port"`
 	Hostname        string                 `json:"hostname,omitempty"`
 	ReplaceFullPath *string                `json:"replace_full_path,omitempty"`
-	ReplacePrefix   *RedirectPrefixReplace `json:"replace_prefix,omitempty"`
+	ReplacePrefix   *PathPrefixReplacement `json:"replace_prefix,omitempty"`
 }
 
-type RedirectPrefixReplace struct {
+type PathPrefixReplacement struct {
 	Match       string `json:"match"`
 	Replacement string `json:"replacement"`
 }
@@ -48,24 +48,24 @@ func (r RequestRedirect) Valid() bool {
 	if r.Scheme != "http" && r.Scheme != "https" || r.Port < 1 || r.Port > 65535 {
 		return false
 	}
-	if r.Hostname != "" {
-		for i := range len(r.Hostname) {
-			if r.Hostname[i] >= utf8.RuneSelf {
+	return validURLModifier(r.Hostname, r.ReplaceFullPath, r.ReplacePrefix)
+}
+
+func validURLModifier(hostname string, full *string, prefix *PathPrefixReplacement) bool {
+	if hostname != "" {
+		for i := range len(hostname) {
+			if hostname[i] >= utf8.RuneSelf {
 				return false
 			}
 		}
-		if amphora.ValidateExactHostname(strings.ToLower(r.Hostname)) != nil {
+		if amphora.ValidateExactHostname(strings.ToLower(hostname)) != nil {
 			return false
 		}
 	}
-	if r.ReplaceFullPath != nil {
-		return r.ReplacePrefix == nil && validRedirectReplacement(*r.ReplaceFullPath)
+	if full != nil {
+		return prefix == nil && cloud.ValidHTTPPathReplacement(*full)
 	}
-	return r.ReplacePrefix == nil || len(r.ReplacePrefix.Match) <= 1024 && cloud.ValidHTTPPath(r.ReplacePrefix.Match) && validRedirectReplacement(r.ReplacePrefix.Replacement)
-}
-
-func validRedirectReplacement(value string) bool {
-	return utf8.ValidString(value) && utf8.RuneCountInString(value) <= 1024
+	return prefix == nil || len(prefix.Match) <= 1024 && cloud.ValidHTTPPath(prefix.Match) && cloud.ValidHTTPPathReplacement(prefix.Replacement)
 }
 
 func readRequestRedirect(raw json.RawMessage) *RequestRedirect {
@@ -95,20 +95,27 @@ func readRequestRedirect(raw json.RawMessage) *RequestRedirect {
 		}
 	}
 	if rawPrefix, present := fields["replace_prefix"]; present {
-		var prefix map[string]json.RawMessage
-		var match string
-		var replacement *string
-		// The empty string removes the matching prefix. Its field must be present.
-		if json.Unmarshal(rawPrefix, &prefix) != nil || len(prefix) != 2 ||
-			json.Unmarshal(prefix["match"], &match) != nil || json.Unmarshal(prefix["replacement"], &replacement) != nil || replacement == nil {
+		r.ReplacePrefix = readPathPrefixReplacement(rawPrefix)
+		if r.ReplacePrefix == nil {
 			return nil
 		}
-		r.ReplacePrefix = &RedirectPrefixReplace{Match: match, Replacement: *replacement}
 	}
 	if !r.Valid() {
 		return nil
 	}
 	return &r
+}
+
+func readPathPrefixReplacement(raw json.RawMessage) *PathPrefixReplacement {
+	var prefix map[string]json.RawMessage
+	var match string
+	var replacement *string
+	// An empty string removes the matching prefix. Its field must be present.
+	if json.Unmarshal(raw, &prefix) != nil || len(prefix) != 2 ||
+		json.Unmarshal(prefix["match"], &match) != nil || json.Unmarshal(prefix["replacement"], &replacement) != nil || replacement == nil {
+		return nil
+	}
+	return &PathPrefixReplacement{Match: match, Replacement: *replacement}
 }
 
 func (r *RequestRedirect) Equal(other *RequestRedirect) bool {
