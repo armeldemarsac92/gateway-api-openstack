@@ -1,15 +1,17 @@
 # Reproduce the Hibiscus development image
 
-The ordinary and no-cache linux/amd64 builds produced the same OCI manifest. The archived executable passed both original GatewayModifyListeners subtests on Standard and Experimental. Separate traffic probes checked the serving ports during listener and certificate changes. [Build record](image.json) · [Listener results](provider/http-distinct-ports.md#adding-and-removing-listeners)
+The ordinary and no-cache linux/amd64 builds of the gRPC backend TLS revision produced the same OCI manifest and manager executable. The archived executable passed all three subtests of `BackendTLSPolicyGRPCRoute` on Standard and Experimental. [Build record](image.json) · [gRPC qualification](provider/backend-tls-policy.md#grpc-with-required-backend-http2) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-51ad8cc6316f6aac929961f70866f88053896982) · [Evidence pack](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-51ad8cc6316f6aac929961f70866f88053896982/backendtlspolicy-grpcroute-51ad8cc-evidence.tar.gz)
+
+The ordinary and no-cache linux/amd64 builds produced the same OCI manifest. The previous multiport image passed both original GatewayModifyListeners subtests on Standard and Experimental. Separate traffic probes checked the serving ports during listener and certificate changes. [Build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-0d89da1a8b42d331d130ab11e86903850de7b685/image.json) · [Listener results](provider/http-distinct-ports.md#adding-and-removing-listeners)
 
 On a linux/amd64 host, use a separate checkout of the recorded revision. The Dockerfile pins the Go 1.27.4 builder and distroless base by digest. Podman uses a fixed timestamp, and the build writes the full commit into the binary and the OCI revision label. The verification command exports gzip-compressed layers.
 
 ```sh
-revision=0d89da1a8b42d331d130ab11e86903850de7b685
+revision=51ad8cc6316f6aac929961f70866f88053896982
 test "$(git rev-parse HEAD)" = "$revision"
 image="localhost/hibiscus-controller:$revision"
 make container-build CONTAINER_TOOL=podman VERSION="$revision" IMAGE="$image"
-skopeo copy --dest-compress-format gzip --dest-compress-level 5 \
+skopeo copy --format oci --dest-compress-format gzip --dest-compress-level 5 \
   "containers-storage:$image" oci-archive:controller-linux-amd64.oci.tar:hibiscus
 skopeo inspect --raw oci-archive:controller-linux-amd64.oci.tar:hibiscus | sha256sum
 ```
@@ -20,7 +22,7 @@ To compare a second build without layer cache, run the following in Bash. The im
 image_rebuilt="${image}-rebuilt"
 podman build --no-cache --timestamp=0 --identity-label=false \
   --build-arg VERSION="$revision" -t "$image_rebuilt" .
-skopeo copy --dest-compress-format gzip --dest-compress-level 5 \
+skopeo copy --format oci --dest-compress-format gzip --dest-compress-level 5 \
   "containers-storage:$image_rebuilt" oci:rebuilt-oci:hibiscus
 cmp <(skopeo inspect --raw oci-archive:controller-linux-amd64.oci.tar:hibiscus) \
     <(skopeo inspect --raw oci:rebuilt-oci:hibiscus)
