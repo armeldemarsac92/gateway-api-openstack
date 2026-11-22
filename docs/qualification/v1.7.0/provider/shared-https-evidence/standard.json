@@ -1,0 +1,1861 @@
+{
+  "passed": false,
+  "channel": "standard",
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "fixtureScope": "integrated-candidate",
+  "controllerRevision": "98b0267937081ee4e2ff0c17114c2c08d9766ec8",
+  "managerSHA256": "8a6800685cc73606e9d573e08958951800650764df902340429313b20bb61291",
+  "octavia": {
+    "revision": "f4d69e0931c97b48b3f6dbba57109b6ee17ecd91",
+    "version": "19.0.1.dev12",
+    "sha256": "f01d67e066226338c14deefe8e8e1ee6f7b48656993e3d9c03fe4ebc3c7e86c8",
+    "filesVerified": 633
+  },
+  "octaviaLib": {
+    "revision": "85fefecd6b16c1754ba2ea3f7578773d5a2cef38",
+    "version": "3.12.1.dev5",
+    "sha256": "29d060668d9449f491d9ce192a026dcd57340fcb364a6e2edcd664f267971305",
+    "filesVerified": 24
+  },
+  "HAProxy": {
+    "version": "3.0.19-ade9c1262-octavia-strict-dns-v1",
+    "sha256": "fa8468efa26f95ed83a36afeb97b79730de285450b7a8fae94f7cf5e6d2d0824",
+    "strictDNSAgentCapability": true
+  },
+  "barbican": {
+    "version": "23.0.0",
+    "endpoint": "regional HTTPS with verification"
+  },
+  "echoOCIArchiveSHA256": "b7675809fd2cc0b9fb9273f1b0c85c422bc3c12361d66b99b83173ddb2d3c9b7",
+  "registeredCases": {
+    "BackendTLSPolicy": {
+      "passed": false,
+      "exit": 1,
+      "subtestsPassed": 4,
+      "events": [
+        "--- FAIL: TestLocalSharedHTTPSCase/BackendTLSPolicy (71.77s)",
+        "--- PASS: TestLocalSharedHTTPSCase/BackendTLSPolicy/Re-encrypt_HTTPS_request_sent_to_Service_with_valid_BackendTLSPolicy_should_succeed (32.64s)",
+        "--- FAIL: TestLocalSharedHTTPSCase/BackendTLSPolicy/HTTP_request_sent_to_Service_with_valid_BackendTLSPolicy_should_succeed (30.09s)",
+        "--- PASS: TestLocalSharedHTTPSCase/BackendTLSPolicy/HTTP_request_sent_to_Service_targeted_by_BackendTLSPolicy_with_mismatched_hostname_should_return_an_HTTP_error (0.05s)",
+        "--- PASS: TestLocalSharedHTTPSCase/BackendTLSPolicy/HTTP_request_send_to_Service_targeted_by_BackendTLSPolicy_with_mismatched_cert_should_return_HTTP_error (0.36s)",
+        "--- PASS: TestLocalSharedHTTPSCase/BackendTLSPolicy/Changing_the_content_of_a_ConfigMap_used_by_BackendTLSPolicy_as_CA_certificate_should_be_reconciled_by_the_controller (2.55s)"
+      ],
+      "expectedSubtests": 5,
+      "bodySHA256": "26cdaab124f8fc21f5bd16307fffbfd6f3232cfe09c8a095582b1cf042e08d60",
+      "manifestSHA256": "6d965ea34fe0783998e15fbdba3650942b4838760a69af450bd31fce1e172a12",
+      "requestLogCount": 534
+    },
+    "HTTPRouteHTTPSListenerDetectMisdirectedRequests": {
+      "passed": false,
+      "exit": 1,
+      "subtestsPassed": 13,
+      "events": [
+        "--- FAIL: TestLocalSharedHTTPSCase/HTTPRouteHTTPSListenerDetectMisdirectedRequests (114.44s)",
+        "--- PASS: TestLocalSharedHTTPSCase/HTTPRouteHTTPSListenerDetectMisdirectedRequests/0_request_to_'example.org/detect-misdirected-requests'_should_go_to_infra-backend-v1 (0.02s)",
+        "--- PASS: TestLocalSharedHTTPSCase/HTTPRouteHTTPSListenerDetectMisdirectedRequests/1_request_to_'second-example.org/detect-misdirected-requests'_should_receive_one_of_[421] (0.01s)",
+        "--- PASS: TestLocalSharedHTTPSCase/HTTPRouteHTTPSListenerDetectMisdirectedRequests/2_request_to_'unknown-example.org/detect-misdirected-requests'_should_receive_one_of_[404] (0.01s)",
+        "--- PASS: TestLocalSharedHTTPSCase/HTTPRouteHTTPSListenerDetectMisdirectedRequests/3_request_to_'second-example.org/detect-misdirected-requests'_should_go_to_infra-backend-v2 (0.01s)",
+        "--- PASS: TestLocalSharedHTTPSCase/HTTPRouteHTTPSListenerDetectMisdirectedRequests/4_request_to_'example.org/detect-misdirected-requests'_should_receive_one_of_[421] (0.01s)",
+        "--- PASS: TestLocalSharedHTTPSCase/HTTPRouteHTTPSListenerDetectMisdirectedRequests/5_request_to_'unknown-example.org/detect-misdirected-requests'_should_receive_one_of_[421] (0.01s)",
+        "--- FAIL: TestLocalSharedHTTPSCase/HTTPRouteHTTPSListenerDetectMisdirectedRequests/6_request_to_'third-example.wildcard.org/detect-misdirected-requests'_should_go_to_infra-backend-v3 (30.00s)",
+        "--- FAIL: TestLocalSharedHTTPSCase/HTTPRouteHTTPSListenerDetectMisdirectedRequests/7_request_to_'fith-example.wildcard.org/detect-misdirected-requests'_should_go_to_infra-backend-v3 (30.00s)",
+        "--- PASS: TestLocalSharedHTTPSCase/HTTPRouteHTTPSListenerDetectMisdirectedRequests/8_request_to_'fourth-example.wildcard.org/detect-misdirected-requests'_should_receive_one_of_[421] (0.01s)",
+        "--- PASS: TestLocalSharedHTTPSCase/HTTPRouteHTTPSListenerDetectMisdirectedRequests/9_request_to_'second-example.org/detect-misdirected-requests'_should_receive_one_of_[421] (0.01s)",
+        "--- PASS: TestLocalSharedHTTPSCase/HTTPRouteHTTPSListenerDetectMisdirectedRequests/10_request_to_'unknown-example.org/detect-misdirected-requests'_should_receive_one_of_[421] (0.01s)",
+        "--- PASS: TestLocalSharedHTTPSCase/HTTPRouteHTTPSListenerDetectMisdirectedRequests/11_request_to_'fourth-example.wildcard.org/detect-misdirected-requests'_should_go_to_infra-backend-v1 (0.01s)",
+        "--- PASS: TestLocalSharedHTTPSCase/HTTPRouteHTTPSListenerDetectMisdirectedRequests/12_request_to_'fith-example.wildcard.org/detect-misdirected-requests'_should_receive_one_of_[421] (0.01s)",
+        "--- PASS: TestLocalSharedHTTPSCase/HTTPRouteHTTPSListenerDetectMisdirectedRequests/13_request_to_'example.org/detect-misdirected-requests'_should_go_to_infra-backend-v1 (0.01s)",
+        "--- PASS: TestLocalSharedHTTPSCase/HTTPRouteHTTPSListenerDetectMisdirectedRequests/14_request_to_'unknown-example.org/detect-misdirected-requests'_should_receive_one_of_[404] (0.01s)"
+      ],
+      "expectedSubtests": 15,
+      "bodySHA256": "8cc47f2f0ddf267d73f2e05624d04cf8e1782acf81ccf4aa9ea33e0e39eec439",
+      "manifestSHA256": "91b02cdafbeb414be15a9fbd50995d4eea16ccbd648a4622de8c117798ca4db3",
+      "requestLogCount": 622
+    },
+    "HTTPRouteHTTPSListener": {
+      "passed": true,
+      "exit": 0,
+      "subtestsPassed": 3,
+      "events": [
+        "--- PASS: TestLocalSharedHTTPSCase/HTTPRouteHTTPSListener (49.74s)",
+        "--- PASS: TestLocalSharedHTTPSCase/HTTPRouteHTTPSListener/0_request_to_'example.org/'_should_go_to_infra-backend-v1 (0.02s)",
+        "--- PASS: TestLocalSharedHTTPSCase/HTTPRouteHTTPSListener/1_request_to_'unknown-example.org/'_should_receive_one_of_[] (0.01s)",
+        "--- PASS: TestLocalSharedHTTPSCase/HTTPRouteHTTPSListener/2_request_to_'second-example.org/'_should_go_to_infra-backend-v2 (25.97s)"
+      ],
+      "expectedSubtests": 3,
+      "bodySHA256": "761407972feb55ff45015af92de0cbed74e7591b3a1425501f485d00c4f26a15",
+      "manifestSHA256": "c92fd99a2f4aab69d0066cd9383f208f84bb58aea9a9273cb2a0eb72018d6b4d",
+      "requestLogCount": 261
+    }
+  },
+  "supplementalTraffic": {
+    "reencryptHTTPS": {
+      "status": 200,
+      "frontendSNI": "https-listener.org",
+      "httpHost": "https-listener.org",
+      "frontendHostnameVerified": true,
+      "tlsVersion": "TLSv1.3",
+      "sessionReused": false,
+      "backendPod": "tls-backend-5877f989d6-9xbqc",
+      "path": "/backendtlspolicy",
+      "backendSNI": "abc.example.com"
+    },
+    "validHTTP": {
+      "status": 200,
+      "backendSNI": "abc.example.com",
+      "elapsedSeconds": 35.43,
+      "observedStatus": {
+        "404": 140,
+        "200": 1
+      }
+    },
+    "initialRouteConditions": {
+      "Accepted": "True/Accepted",
+      "ResolvedRefs": "True/ResolvedRefs",
+      "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+    },
+    "wrongHostname": {
+      "status": 503,
+      "elapsedSeconds": 0.0,
+      "observedStatus": {
+        "503": 1
+      }
+    },
+    "wrongCA": {
+      "status": 503,
+      "elapsedSeconds": 0.0,
+      "observedStatus": {
+        "503": 1
+      }
+    },
+    "beforeConfigMapChange": {
+      "status": 200,
+      "backendSNI": "abc.example.com",
+      "elapsedSeconds": 0.05,
+      "observedStatus": {
+        "200": 1
+      }
+    },
+    "whileCAInvalid": {
+      "conditions": {
+        "Accepted": "False/NoValidCACertificate",
+        "ResolvedRefs": "False/InvalidCACertificateRef"
+      },
+      "status": 503,
+      "elapsedSeconds": 10.83,
+      "observedStatus": {
+        "200": 36,
+        "503": 1
+      }
+    },
+    "afterCARestored": {
+      "conditions": {
+        "Accepted": "True/Accepted",
+        "ResolvedRefs": "True/ResolvedRefs"
+      },
+      "status": 200,
+      "backendSNI": "abc.example.com",
+      "elapsedSeconds": 36.66,
+      "observedStatus": {
+        "503": 144,
+        "200": 1
+      },
+      "routeConditions": {
+        "Accepted": "True/Accepted",
+        "ResolvedRefs": "True/ResolvedRefs",
+        "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+      }
+    },
+    "resumedTLS": [
+      {
+        "seed": {
+          "status": 200,
+          "frontendSNI": "second-example.org",
+          "httpHost": "second-example.org",
+          "frontendHostnameVerified": true,
+          "tlsVersion": "TLSv1.2",
+          "sessionReused": false,
+          "backendPod": "infra-backend-v2-5dc55c68cc-rcsnv",
+          "path": "/detect-misdirected-requests"
+        },
+        "resumedMatching": {
+          "status": 200,
+          "frontendSNI": "second-example.org",
+          "httpHost": "second-example.org",
+          "frontendHostnameVerified": true,
+          "tlsVersion": "TLSv1.2",
+          "sessionReused": true,
+          "backendPod": "infra-backend-v2-5dc55c68cc-gtzw5",
+          "path": "/detect-misdirected-requests"
+        },
+        "resumedDifferentHost": {
+          "status": 421,
+          "frontendSNI": "second-example.org",
+          "httpHost": "example.org",
+          "frontendHostnameVerified": true,
+          "tlsVersion": "TLSv1.2",
+          "sessionReused": true
+        },
+        "freshDifferentHost": {
+          "status": 421,
+          "frontendSNI": "second-example.org",
+          "httpHost": "example.org",
+          "frontendHostnameVerified": true,
+          "tlsVersion": "TLSv1.2",
+          "sessionReused": false
+        }
+      },
+      {
+        "seed": {
+          "status": 404,
+          "frontendSNI": "third-example.wildcard.org",
+          "httpHost": "third-example.wildcard.org",
+          "frontendHostnameVerified": true,
+          "tlsVersion": "TLSv1.2",
+          "sessionReused": false
+        },
+        "resumedMatching": {
+          "status": 404,
+          "frontendSNI": "third-example.wildcard.org",
+          "httpHost": "third-example.wildcard.org",
+          "frontendHostnameVerified": true,
+          "tlsVersion": "TLSv1.2",
+          "sessionReused": true
+        },
+        "resumedDifferentHost": {
+          "status": 421,
+          "frontendSNI": "third-example.wildcard.org",
+          "httpHost": "fourth-example.wildcard.org",
+          "frontendHostnameVerified": true,
+          "tlsVersion": "TLSv1.2",
+          "sessionReused": true
+        },
+        "freshDifferentHost": {
+          "status": 421,
+          "frontendSNI": "third-example.wildcard.org",
+          "httpHost": "fourth-example.wildcard.org",
+          "frontendHostnameVerified": true,
+          "tlsVersion": "TLSv1.2",
+          "sessionReused": false
+        },
+        "resumedOtherHostOnSameListener": {
+          "status": 404,
+          "frontendSNI": "third-example.wildcard.org",
+          "httpHost": "fith-example.wildcard.org",
+          "frontendHostnameVerified": true,
+          "tlsVersion": "TLSv1.2",
+          "sessionReused": true
+        }
+      }
+    ]
+  },
+  "caseStatuses": {
+    "BackendTLSPolicy": {
+      "gatewayclass": {
+        "qualification": {
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "SupportedVersion": "True/SupportedVersion"
+          },
+          "supportedFeatures": []
+        }
+      },
+      "gateway": {
+        "same-namespace": {
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "Programmed": "True/Programmed"
+          },
+          "addresses": [
+            "192.0.2.30"
+          ],
+          "specListeners": [
+            {
+              "name": "http",
+              "protocol": "HTTP",
+              "port": 80
+            }
+          ],
+          "listeners": [
+            {
+              "peer": "http",
+              "controller": null,
+              "section": null,
+              "attachedRoutes": 1,
+              "observedGeneration": [
+                1
+              ],
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts",
+                "Programmed": "True/Programmed"
+              }
+            }
+          ]
+        },
+        "same-namespace-with-https-listener": {
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "Programmed": "True/Programmed"
+          },
+          "addresses": [
+            "192.0.2.31"
+          ],
+          "specListeners": [
+            {
+              "name": "https",
+              "protocol": "HTTPS",
+              "port": 443
+            },
+            {
+              "name": "https-with-hostname",
+              "hostname": "second-example.org",
+              "protocol": "HTTPS",
+              "port": 443
+            },
+            {
+              "name": "https-with-wildcard-hostname",
+              "hostname": "*.wildcard.org",
+              "protocol": "HTTPS",
+              "port": 443
+            },
+            {
+              "name": "https-with-hostname-matching-wildcard",
+              "hostname": "fourth-example.wildcard.org",
+              "protocol": "HTTPS",
+              "port": 443
+            }
+          ],
+          "listeners": [
+            {
+              "peer": "https",
+              "controller": null,
+              "section": null,
+              "attachedRoutes": 1,
+              "observedGeneration": [
+                1
+              ],
+              "conditions": {
+                "Programmed": "True/Programmed",
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts"
+              }
+            },
+            {
+              "peer": "https-with-hostname",
+              "controller": null,
+              "section": null,
+              "attachedRoutes": 0,
+              "observedGeneration": [
+                1
+              ],
+              "conditions": {
+                "Programmed": "True/Programmed",
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts"
+              }
+            },
+            {
+              "peer": "https-with-wildcard-hostname",
+              "controller": null,
+              "section": null,
+              "attachedRoutes": 0,
+              "observedGeneration": [
+                1
+              ],
+              "conditions": {
+                "Programmed": "True/Programmed",
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts"
+              }
+            },
+            {
+              "peer": "https-with-hostname-matching-wildcard",
+              "controller": null,
+              "section": null,
+              "attachedRoutes": 0,
+              "observedGeneration": [
+                1
+              ],
+              "conditions": {
+                "Programmed": "True/Programmed",
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts"
+              }
+            }
+          ]
+        }
+      },
+      "httproute": {
+        "backendtlspolicy": {
+          "generation": 1,
+          "conditions": {},
+          "parents": [
+            {
+              "peer": "same-namespace",
+              "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+              "section": null,
+              "attachedRoutes": null,
+              "observedGeneration": [
+                1
+              ],
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "False/Pending"
+              }
+            }
+          ]
+        },
+        "backendtlspolicy-reencrypt": {
+          "generation": 1,
+          "conditions": {},
+          "parents": [
+            {
+              "peer": "same-namespace-with-https-listener",
+              "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+              "section": null,
+              "attachedRoutes": null,
+              "observedGeneration": [
+                1
+              ],
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              }
+            }
+          ]
+        }
+      },
+      "backendtlspolicy": {
+        "cert-mismatch": {
+          "generation": 1,
+          "conditions": {},
+          "ancestors": [
+            {
+              "peer": "same-namespace",
+              "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+              "section": null,
+              "attachedRoutes": null,
+              "observedGeneration": [
+                1
+              ],
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs"
+              }
+            }
+          ]
+        },
+        "host-mismatch": {
+          "generation": 1,
+          "conditions": {},
+          "ancestors": [
+            {
+              "peer": "same-namespace",
+              "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+              "section": null,
+              "attachedRoutes": null,
+              "observedGeneration": [
+                1
+              ],
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs"
+              }
+            }
+          ]
+        },
+        "normative-test": {
+          "generation": 1,
+          "conditions": {},
+          "ancestors": [
+            {
+              "peer": "same-namespace",
+              "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+              "section": null,
+              "attachedRoutes": null,
+              "observedGeneration": [
+                1
+              ],
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs"
+              }
+            },
+            {
+              "peer": "same-namespace-with-https-listener",
+              "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+              "section": null,
+              "attachedRoutes": null,
+              "observedGeneration": [
+                1
+              ],
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs"
+              }
+            }
+          ]
+        },
+        "reconcile-test": {
+          "generation": 3,
+          "conditions": {},
+          "ancestors": [
+            {
+              "peer": "same-namespace",
+              "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+              "section": null,
+              "attachedRoutes": null,
+              "observedGeneration": [
+                3
+              ],
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs"
+              }
+            }
+          ]
+        }
+      },
+      "restResponses": {
+        "GET providers 200": 353,
+        "GET loadbalancers 200": 98,
+        "POST loadbalancers 201": 2,
+        "GET listeners 200": 48,
+        "GET pools 200": 48,
+        "POST listeners 201": 2,
+        "GET l7policies 200": 46,
+        "PUT listeners 200": 1,
+        "POST pools 201": 5,
+        "GET members 200": 64,
+        "GET healthmonitors 200": 64,
+        "POST members 201": 5,
+        "POST healthmonitors 201": 5,
+        "POST l7policies 201": 3,
+        "GET rules 200": 18,
+        "POST rules 201": 4,
+        "PUT l7policies 200": 1
+      },
+      "nativeBatchMemberDeletes": 0,
+      "nativeHAProxyReloadCount": 4,
+      "strictDNSConfigReloadsByHostname": {
+        "abc.example.com": 1
+      }
+    },
+    "HTTPRouteHTTPSListenerDetectMisdirectedRequests": {
+      "gatewayclass": {
+        "qualification": {
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "SupportedVersion": "True/SupportedVersion"
+          },
+          "supportedFeatures": []
+        }
+      },
+      "gateway": {
+        "same-namespace": {
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "Programmed": "True/Programmed"
+          },
+          "addresses": [
+            "192.0.2.30"
+          ],
+          "specListeners": [
+            {
+              "name": "http",
+              "protocol": "HTTP",
+              "port": 80
+            }
+          ],
+          "listeners": [
+            {
+              "peer": "http",
+              "controller": null,
+              "section": null,
+              "attachedRoutes": 0,
+              "observedGeneration": [
+                1
+              ],
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts",
+                "Programmed": "True/Programmed"
+              }
+            }
+          ]
+        },
+        "same-namespace-with-https-listener": {
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "Programmed": "False/NoResources"
+          },
+          "addresses": [
+            "192.0.2.31"
+          ],
+          "specListeners": [
+            {
+              "name": "https",
+              "protocol": "HTTPS",
+              "port": 443
+            },
+            {
+              "name": "https-with-hostname",
+              "hostname": "second-example.org",
+              "protocol": "HTTPS",
+              "port": 443
+            },
+            {
+              "name": "https-with-wildcard-hostname",
+              "hostname": "*.wildcard.org",
+              "protocol": "HTTPS",
+              "port": 443
+            },
+            {
+              "name": "https-with-hostname-matching-wildcard",
+              "hostname": "fourth-example.wildcard.org",
+              "protocol": "HTTPS",
+              "port": 443
+            }
+          ],
+          "listeners": [
+            {
+              "peer": "https",
+              "controller": null,
+              "section": null,
+              "attachedRoutes": 1,
+              "observedGeneration": [
+                1
+              ],
+              "conditions": {
+                "Programmed": "False/Pending",
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts"
+              }
+            },
+            {
+              "peer": "https-with-hostname",
+              "controller": null,
+              "section": null,
+              "attachedRoutes": 1,
+              "observedGeneration": [
+                1
+              ],
+              "conditions": {
+                "Programmed": "False/Pending",
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts"
+              }
+            },
+            {
+              "peer": "https-with-wildcard-hostname",
+              "controller": null,
+              "section": null,
+              "attachedRoutes": 1,
+              "observedGeneration": [
+                1
+              ],
+              "conditions": {
+                "Programmed": "False/Pending",
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts"
+              }
+            },
+            {
+              "peer": "https-with-hostname-matching-wildcard",
+              "controller": null,
+              "section": null,
+              "attachedRoutes": 1,
+              "observedGeneration": [
+                1
+              ],
+              "conditions": {
+                "Programmed": "False/Pending",
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts"
+              }
+            }
+          ]
+        }
+      },
+      "httproute": {
+        "https-listener-detect-misdirected-requests-test-1": {
+          "generation": 1,
+          "conditions": {},
+          "parents": [
+            {
+              "peer": "same-namespace-with-https-listener",
+              "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+              "section": "https",
+              "attachedRoutes": null,
+              "observedGeneration": [
+                1
+              ],
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              }
+            }
+          ]
+        },
+        "https-listener-detect-misdirected-requests-test-2": {
+          "generation": 1,
+          "conditions": {},
+          "parents": [
+            {
+              "peer": "same-namespace-with-https-listener",
+              "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+              "section": "https-with-hostname",
+              "attachedRoutes": null,
+              "observedGeneration": [
+                1
+              ],
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              }
+            }
+          ]
+        },
+        "https-listener-detect-misdirected-requests-test-3": {
+          "generation": 1,
+          "conditions": {},
+          "parents": [
+            {
+              "peer": "same-namespace-with-https-listener",
+              "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+              "section": "https-with-wildcard-hostname",
+              "attachedRoutes": null,
+              "observedGeneration": [
+                1
+              ],
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "False/Pending"
+              }
+            }
+          ]
+        },
+        "https-listener-detect-misdirected-requests-test-4": {
+          "generation": 1,
+          "conditions": {},
+          "parents": [
+            {
+              "peer": "same-namespace-with-https-listener",
+              "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+              "section": "https-with-hostname-matching-wildcard",
+              "attachedRoutes": null,
+              "observedGeneration": [
+                1
+              ],
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "False/Pending"
+              }
+            }
+          ]
+        }
+      },
+      "backendtlspolicy": {},
+      "restResponses": {
+        "GET providers 200": 1000,
+        "GET loadbalancers 200": 408,
+        "POST loadbalancers 201": 2,
+        "GET listeners 200": 206,
+        "GET pools 200": 205,
+        "POST listeners 201": 2,
+        "GET l7policies 200": 201,
+        "PUT listeners 200": 3,
+        "POST pools 201": 9,
+        "GET members 200": 380,
+        "GET healthmonitors 200": 380,
+        "POST members 201": 16,
+        "POST healthmonitors 201": 9,
+        "POST l7policies 201": 8,
+        "GET rules 200": 252,
+        "POST rules 201": 16,
+        "PUT l7policies 200": 13,
+        "PUT pools 200": 8,
+        "PUT members 202": 4,
+        "DELETE rules 204": 10,
+        "DELETE l7policies 204": 5,
+        "DELETE healthmonitors 204": 5,
+        "DELETE members 204": 5,
+        "DELETE pools 204": 5
+      },
+      "nativeBatchMemberDeletes": 4,
+      "nativeHAProxyReloadCount": 29,
+      "strictDNSConfigReloadsByHostname": {
+        "abc.example.com": 31,
+        "mismatch.example.com": 8
+      }
+    },
+    "HTTPRouteHTTPSListener": {
+      "gatewayclass": {
+        "qualification": {
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "SupportedVersion": "True/SupportedVersion"
+          },
+          "supportedFeatures": []
+        }
+      },
+      "gateway": {
+        "same-namespace": {
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "Programmed": "True/Programmed"
+          },
+          "addresses": [
+            "192.0.2.30"
+          ],
+          "specListeners": [
+            {
+              "name": "http",
+              "protocol": "HTTP",
+              "port": 80
+            }
+          ],
+          "listeners": [
+            {
+              "peer": "http",
+              "controller": null,
+              "section": null,
+              "attachedRoutes": 0,
+              "observedGeneration": [
+                1
+              ],
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts",
+                "Programmed": "True/Programmed"
+              }
+            }
+          ]
+        },
+        "same-namespace-with-https-listener": {
+          "generation": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "Programmed": "False/NoResources"
+          },
+          "addresses": [
+            "192.0.2.31"
+          ],
+          "specListeners": [
+            {
+              "name": "https",
+              "protocol": "HTTPS",
+              "port": 443
+            },
+            {
+              "name": "https-with-hostname",
+              "hostname": "second-example.org",
+              "protocol": "HTTPS",
+              "port": 443
+            },
+            {
+              "name": "https-with-wildcard-hostname",
+              "hostname": "*.wildcard.org",
+              "protocol": "HTTPS",
+              "port": 443
+            },
+            {
+              "name": "https-with-hostname-matching-wildcard",
+              "hostname": "fourth-example.wildcard.org",
+              "protocol": "HTTPS",
+              "port": 443
+            }
+          ],
+          "listeners": [
+            {
+              "peer": "https",
+              "controller": null,
+              "section": null,
+              "attachedRoutes": 1,
+              "observedGeneration": [
+                1
+              ],
+              "conditions": {
+                "Programmed": "False/Pending",
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts"
+              }
+            },
+            {
+              "peer": "https-with-hostname",
+              "controller": null,
+              "section": null,
+              "attachedRoutes": 1,
+              "observedGeneration": [
+                1
+              ],
+              "conditions": {
+                "Programmed": "False/Pending",
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts"
+              }
+            },
+            {
+              "peer": "https-with-wildcard-hostname",
+              "controller": null,
+              "section": null,
+              "attachedRoutes": 0,
+              "observedGeneration": [
+                1
+              ],
+              "conditions": {
+                "Programmed": "False/Pending",
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts"
+              }
+            },
+            {
+              "peer": "https-with-hostname-matching-wildcard",
+              "controller": null,
+              "section": null,
+              "attachedRoutes": 0,
+              "observedGeneration": [
+                1
+              ],
+              "conditions": {
+                "Programmed": "False/Pending",
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts"
+              }
+            }
+          ]
+        }
+      },
+      "httproute": {
+        "httproute-https-test": {
+          "generation": 1,
+          "conditions": {},
+          "parents": [
+            {
+              "peer": "same-namespace-with-https-listener",
+              "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+              "section": null,
+              "attachedRoutes": null,
+              "observedGeneration": [
+                1
+              ],
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "False/Pending"
+              }
+            }
+          ]
+        },
+        "httproute-https-test-no-hostname": {
+          "generation": 1,
+          "conditions": {},
+          "parents": [
+            {
+              "peer": "same-namespace-with-https-listener",
+              "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+              "section": "https-with-hostname",
+              "attachedRoutes": null,
+              "observedGeneration": [
+                1
+              ],
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "False/Pending"
+              }
+            }
+          ]
+        }
+      },
+      "backendtlspolicy": {},
+      "restResponses": {
+        "GET providers 200": 1219,
+        "GET loadbalancers 200": 552,
+        "POST loadbalancers 201": 2,
+        "GET listeners 200": 279,
+        "GET pools 200": 276,
+        "POST listeners 201": 2,
+        "GET l7policies 200": 274,
+        "PUT listeners 200": 5,
+        "POST pools 201": 11,
+        "GET members 200": 493,
+        "GET healthmonitors 200": 493,
+        "POST members 201": 20,
+        "POST healthmonitors 201": 11,
+        "POST l7policies 201": 11,
+        "GET rules 200": 305,
+        "POST rules 201": 20,
+        "PUT l7policies 200": 18,
+        "PUT pools 200": 8,
+        "PUT members 202": 4,
+        "DELETE rules 204": 16,
+        "DELETE l7policies 204": 9,
+        "DELETE healthmonitors 204": 9,
+        "DELETE members 204": 12,
+        "DELETE pools 204": 9
+      },
+      "nativeBatchMemberDeletes": 4,
+      "nativeHAProxyReloadCount": 33,
+      "strictDNSConfigReloadsByHostname": {
+        "abc.example.com": 31,
+        "mismatch.example.com": 8
+      }
+    }
+  },
+  "independentColdWire": {
+    "validHTTP": [
+      {
+        "at": "2026-11-22T01:17:09.310+00:00",
+        "elapsedSeconds": 0.207,
+        "state": 404,
+        "status": 404
+      },
+      {
+        "at": "2026-11-22T01:18:57.977+00:00",
+        "elapsedSeconds": 108.874,
+        "state": 200,
+        "status": 200,
+        "backendSNI": "abc.example.com"
+      },
+      {
+        "at": "2026-11-22T01:19:15.995+00:00",
+        "elapsedSeconds": 126.892,
+        "state": 503,
+        "status": 503
+      },
+      {
+        "at": "2026-11-22T01:19:45.653+00:00",
+        "elapsedSeconds": 156.55,
+        "state": 200,
+        "status": 200,
+        "backendSNI": "abc.example.com"
+      },
+      {
+        "at": "2026-11-22T01:20:09.160+00:00",
+        "elapsedSeconds": 180.056,
+        "state": 404,
+        "status": 404
+      }
+    ],
+    "wrongBackendHostname": [
+      {
+        "at": "2026-11-22T01:17:09.311+00:00",
+        "elapsedSeconds": 0.207,
+        "state": 404,
+        "status": 404
+      },
+      {
+        "at": "2026-11-22T01:19:03.422+00:00",
+        "elapsedSeconds": 114.318,
+        "state": 503,
+        "status": 503
+      },
+      {
+        "at": "2026-11-22T01:20:11.929+00:00",
+        "elapsedSeconds": 182.826,
+        "state": 404,
+        "status": 404
+      }
+    ],
+    "wrongBackendCA": [
+      {
+        "at": "2026-11-22T01:17:09.311+00:00",
+        "elapsedSeconds": 0.208,
+        "state": 404,
+        "status": 404
+      },
+      {
+        "at": "2026-11-22T01:19:08.008+00:00",
+        "elapsedSeconds": 118.904,
+        "state": 503,
+        "status": 503
+      },
+      {
+        "at": "2026-11-22T01:20:14.951+00:00",
+        "elapsedSeconds": 185.848,
+        "state": 404,
+        "status": 404
+      }
+    ],
+    "sharedReencrypt": [
+      {
+        "at": "2026-11-22T01:17:09.314+00:00",
+        "elapsedSeconds": 0.211,
+        "state": 404,
+        "status": 404,
+        "frontendSNI": "https-listener.org",
+        "httpHost": "https-listener.org",
+        "frontendHostnameVerified": true,
+        "tlsVersion": "TLSv1.3",
+        "sessionReused": false
+      },
+      {
+        "at": "2026-11-22T01:17:42.930+00:00",
+        "elapsedSeconds": 33.827,
+        "state": 200,
+        "status": 200,
+        "frontendSNI": "https-listener.org",
+        "httpHost": "https-listener.org",
+        "frontendHostnameVerified": true,
+        "tlsVersion": "TLSv1.3",
+        "sessionReused": false,
+        "backendPod": "tls-backend-5877f989d6-9xbqc",
+        "path": "/backendtlspolicy",
+        "backendSNI": "abc.example.com"
+      },
+      {
+        "at": "2026-11-22T01:19:18.015+00:00",
+        "elapsedSeconds": 128.912,
+        "state": 503,
+        "status": 503,
+        "frontendSNI": "https-listener.org",
+        "httpHost": "https-listener.org",
+        "frontendHostnameVerified": true,
+        "tlsVersion": "TLSv1.3",
+        "sessionReused": false
+      },
+      {
+        "at": "2026-11-22T01:19:31.108+00:00",
+        "elapsedSeconds": 142.005,
+        "state": 200,
+        "status": 200,
+        "frontendSNI": "https-listener.org",
+        "httpHost": "https-listener.org",
+        "frontendHostnameVerified": true,
+        "tlsVersion": "TLSv1.3",
+        "sessionReused": false,
+        "backendPod": "tls-backend-5877f989d6-9xbqc",
+        "path": "/backendtlspolicy",
+        "backendSNI": "abc.example.com"
+      },
+      {
+        "at": "2026-11-22T01:20:06.007+00:00",
+        "elapsedSeconds": 176.904,
+        "state": "ConnectionRefusedError",
+        "error": "ConnectionRefusedError"
+      },
+      {
+        "at": "2026-11-22T01:20:31.632+00:00",
+        "elapsedSeconds": 202.529,
+        "state": 404,
+        "status": 404,
+        "frontendSNI": "https-listener.org",
+        "httpHost": "https-listener.org",
+        "frontendHostnameVerified": true,
+        "tlsVersion": "TLSv1.3",
+        "sessionReused": false
+      },
+      {
+        "at": "2026-11-22T01:22:53.510+00:00",
+        "elapsedSeconds": 344.407,
+        "state": "ConnectionRefusedError",
+        "error": "ConnectionRefusedError"
+      },
+      {
+        "at": "2026-11-22T01:23:47.155+00:00",
+        "elapsedSeconds": 398.052,
+        "state": 404,
+        "status": 404,
+        "frontendSNI": "https-listener.org",
+        "httpHost": "https-listener.org",
+        "frontendHostnameVerified": true,
+        "tlsVersion": "TLSv1.3",
+        "sessionReused": false
+      }
+    ],
+    "sharedPositive": [
+      {
+        "at": "2026-11-22T01:17:09.317+00:00",
+        "elapsedSeconds": 0.214,
+        "state": 404,
+        "status": 404,
+        "frontendSNI": "second-example.org",
+        "httpHost": "second-example.org",
+        "frontendHostnameVerified": true,
+        "tlsVersion": "TLSv1.3",
+        "sessionReused": false
+      },
+      {
+        "at": "2026-11-22T01:20:06.007+00:00",
+        "elapsedSeconds": 176.904,
+        "state": "ConnectionRefusedError",
+        "error": "ConnectionRefusedError"
+      },
+      {
+        "at": "2026-11-22T01:20:31.637+00:00",
+        "elapsedSeconds": 202.534,
+        "state": 404,
+        "status": 404,
+        "frontendSNI": "second-example.org",
+        "httpHost": "second-example.org",
+        "frontendHostnameVerified": true,
+        "tlsVersion": "TLSv1.3",
+        "sessionReused": false
+      },
+      {
+        "at": "2026-11-22T01:21:46.961+00:00",
+        "elapsedSeconds": 277.858,
+        "state": 200,
+        "status": 200,
+        "frontendSNI": "second-example.org",
+        "httpHost": "second-example.org",
+        "frontendHostnameVerified": true,
+        "tlsVersion": "TLSv1.3",
+        "sessionReused": false,
+        "backendPod": "infra-backend-v2-5dc55c68cc-gtzw5",
+        "path": "/detect-misdirected-requests"
+      },
+      {
+        "at": "2026-11-22T01:22:53.510+00:00",
+        "elapsedSeconds": 344.407,
+        "state": "ConnectionRefusedError",
+        "error": "ConnectionRefusedError"
+      },
+      {
+        "at": "2026-11-22T01:23:47.157+00:00",
+        "elapsedSeconds": 398.053,
+        "state": 404,
+        "status": 404,
+        "frontendSNI": "second-example.org",
+        "httpHost": "second-example.org",
+        "frontendHostnameVerified": true,
+        "tlsVersion": "TLSv1.3",
+        "sessionReused": false
+      },
+      {
+        "at": "2026-11-22T01:24:38.925+00:00",
+        "elapsedSeconds": 449.821,
+        "state": 200,
+        "status": 200,
+        "frontendSNI": "second-example.org",
+        "httpHost": "second-example.org",
+        "frontendHostnameVerified": true,
+        "tlsVersion": "TLSv1.3",
+        "sessionReused": false,
+        "backendPod": "infra-backend-v2-5dc55c68cc-rcsnv",
+        "path": "/detect-misdirected-requests"
+      }
+    ],
+    "sharedMisdirected": [
+      {
+        "at": "2026-11-22T01:17:09.319+00:00",
+        "elapsedSeconds": 0.216,
+        "state": 421,
+        "status": 421,
+        "frontendSNI": "second-example.org",
+        "httpHost": "example.org",
+        "frontendHostnameVerified": true,
+        "tlsVersion": "TLSv1.3",
+        "sessionReused": false
+      },
+      {
+        "at": "2026-11-22T01:20:06.007+00:00",
+        "elapsedSeconds": 176.904,
+        "state": "ConnectionRefusedError",
+        "error": "ConnectionRefusedError"
+      },
+      {
+        "at": "2026-11-22T01:20:31.643+00:00",
+        "elapsedSeconds": 202.54,
+        "state": 421,
+        "status": 421,
+        "frontendSNI": "second-example.org",
+        "httpHost": "example.org",
+        "frontendHostnameVerified": true,
+        "tlsVersion": "TLSv1.3",
+        "sessionReused": false
+      },
+      {
+        "at": "2026-11-22T01:22:53.510+00:00",
+        "elapsedSeconds": 344.407,
+        "state": "ConnectionRefusedError",
+        "error": "ConnectionRefusedError"
+      },
+      {
+        "at": "2026-11-22T01:23:47.159+00:00",
+        "elapsedSeconds": 398.055,
+        "state": 421,
+        "status": 421,
+        "frontendSNI": "second-example.org",
+        "httpHost": "example.org",
+        "frontendHostnameVerified": true,
+        "tlsVersion": "TLSv1.3",
+        "sessionReused": false
+      }
+    ]
+  },
+  "supplementalErrors": {
+    "HTTPRouteHTTPSListenerDetectMisdirectedRequests": "TLS session wire expectations failed for third-example.wildcard.org, fith-example.wildcard.org"
+  },
+  "controllerManagerOptIns": [
+    "octavia-https-listener-isolation",
+    "octavia-backend-tls-policy",
+    "octavia-fixed-http-responses",
+    "operator-tls-certificate-map"
+  ],
+  "releaseBundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+  "upstreamBaseManifestsSHA256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+  "frontendSecretEnrollment": "exact UID/resourceVersion and PKCS#12 verified by operator helper",
+  "regionalAmphoraCapabilitiesBeforeEnrollment": [
+    "fixed_http_responses_v1",
+    "weighted_http_targets_v1",
+    "backend_tls_hostname_v1"
+  ],
+  "regionalAmphoraCapabilities": [
+    "fixed_http_responses_v1",
+    "weighted_http_targets_v1",
+    "backend_tls_hostname_v1",
+    "https_listener_isolation_v1"
+  ],
+  "tlsEchoWorkload": {
+    "runtime": "kind",
+    "nodeImage": "docker.io/kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed",
+    "directTLSProbe": {
+      "status": 200,
+      "pod": "tls-backend-5877f989d6-9xbqc",
+      "backendSNI": "abc.example.com"
+    },
+    "pods": [
+      {
+        "name": "infra-backend-v1-667754889f-2wrx5",
+        "phase": "Running",
+        "ready": true,
+        "imageID": "docker.io/library/import-2026-11-22@sha256:abd48b88affd1c16e8d60d06cdc661919a8980bba8fc9068f3d216d814268adb"
+      },
+      {
+        "name": "infra-backend-v1-667754889f-pnzfq",
+        "phase": "Running",
+        "ready": true,
+        "imageID": "docker.io/library/import-2026-11-22@sha256:abd48b88affd1c16e8d60d06cdc661919a8980bba8fc9068f3d216d814268adb"
+      },
+      {
+        "name": "infra-backend-v2-5dc55c68cc-gtzw5",
+        "phase": "Running",
+        "ready": true,
+        "imageID": "docker.io/library/import-2026-11-22@sha256:abd48b88affd1c16e8d60d06cdc661919a8980bba8fc9068f3d216d814268adb"
+      },
+      {
+        "name": "infra-backend-v2-5dc55c68cc-rcsnv",
+        "phase": "Running",
+        "ready": true,
+        "imageID": "docker.io/library/import-2026-11-22@sha256:abd48b88affd1c16e8d60d06cdc661919a8980bba8fc9068f3d216d814268adb"
+      },
+      {
+        "name": "infra-backend-v3-89d8b6c87-8x627",
+        "phase": "Running",
+        "ready": true,
+        "imageID": "docker.io/library/import-2026-11-22@sha256:abd48b88affd1c16e8d60d06cdc661919a8980bba8fc9068f3d216d814268adb"
+      },
+      {
+        "name": "tls-backend-5877f989d6-9xbqc",
+        "phase": "Running",
+        "ready": true,
+        "imageID": "docker.io/library/import-2026-11-22@sha256:abd48b88affd1c16e8d60d06cdc661919a8980bba8fc9068f3d216d814268adb"
+      }
+    ],
+    "ociIndexDigest": "sha256:abd48b88affd1c16e8d60d06cdc661919a8980bba8fc9068f3d216d814268adb",
+    "platformManifestDigest": "sha256:fed223b186fbd83d50a4578d168c9e7d89341d8c1af616ebe0f62d53ab7451dc"
+  },
+  "preManager": {
+    "gatewayclass": {
+      "qualification": {
+        "generation": 1,
+        "conditions": {},
+        "supportedFeatures": []
+      }
+    },
+    "gateway": {
+      "same-namespace": {
+        "generation": 1,
+        "conditions": {},
+        "addresses": [],
+        "specListeners": [
+          {
+            "name": "http",
+            "protocol": "HTTP",
+            "port": 80
+          }
+        ]
+      },
+      "same-namespace-with-https-listener": {
+        "generation": 1,
+        "conditions": {},
+        "addresses": [],
+        "specListeners": [
+          {
+            "name": "https",
+            "protocol": "HTTPS",
+            "port": 443
+          },
+          {
+            "name": "https-with-hostname",
+            "hostname": "second-example.org",
+            "protocol": "HTTPS",
+            "port": 443
+          },
+          {
+            "name": "https-with-wildcard-hostname",
+            "hostname": "*.wildcard.org",
+            "protocol": "HTTPS",
+            "port": 443
+          },
+          {
+            "name": "https-with-hostname-matching-wildcard",
+            "hostname": "fourth-example.wildcard.org",
+            "protocol": "HTTPS",
+            "port": 443
+          }
+        ]
+      }
+    },
+    "httproute": {},
+    "backendtlspolicy": {},
+    "restResponses": {
+      "GET providers 200": 2
+    },
+    "nativeBatchMemberDeletes": 0,
+    "nativeHAProxyReloadCount": 0,
+    "strictDNSConfigReloadsByHostname": {}
+  },
+  "baseReadyBeforeRegisteredCases": {
+    "gatewayclass": {
+      "qualification": {
+        "generation": 1,
+        "conditions": {
+          "Accepted": "True/Accepted",
+          "SupportedVersion": "True/SupportedVersion"
+        },
+        "supportedFeatures": []
+      }
+    },
+    "gateway": {
+      "same-namespace": {
+        "generation": 1,
+        "conditions": {
+          "Accepted": "True/Accepted",
+          "Programmed": "True/Programmed"
+        },
+        "addresses": [
+          "192.0.2.30"
+        ],
+        "specListeners": [
+          {
+            "name": "http",
+            "protocol": "HTTP",
+            "port": 80
+          }
+        ],
+        "listeners": [
+          {
+            "peer": "http",
+            "controller": null,
+            "section": null,
+            "attachedRoutes": 0,
+            "observedGeneration": [
+              1
+            ],
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            }
+          }
+        ]
+      },
+      "same-namespace-with-https-listener": {
+        "generation": 1,
+        "conditions": {
+          "Accepted": "True/Accepted",
+          "Programmed": "True/Programmed"
+        },
+        "addresses": [
+          "192.0.2.31"
+        ],
+        "specListeners": [
+          {
+            "name": "https",
+            "protocol": "HTTPS",
+            "port": 443
+          },
+          {
+            "name": "https-with-hostname",
+            "hostname": "second-example.org",
+            "protocol": "HTTPS",
+            "port": 443
+          },
+          {
+            "name": "https-with-wildcard-hostname",
+            "hostname": "*.wildcard.org",
+            "protocol": "HTTPS",
+            "port": 443
+          },
+          {
+            "name": "https-with-hostname-matching-wildcard",
+            "hostname": "fourth-example.wildcard.org",
+            "protocol": "HTTPS",
+            "port": 443
+          }
+        ],
+        "listeners": [
+          {
+            "peer": "https",
+            "controller": null,
+            "section": null,
+            "attachedRoutes": 0,
+            "observedGeneration": [
+              1
+            ],
+            "conditions": {
+              "Programmed": "True/Programmed",
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts"
+            }
+          },
+          {
+            "peer": "https-with-hostname",
+            "controller": null,
+            "section": null,
+            "attachedRoutes": 0,
+            "observedGeneration": [
+              1
+            ],
+            "conditions": {
+              "Programmed": "True/Programmed",
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts"
+            }
+          },
+          {
+            "peer": "https-with-wildcard-hostname",
+            "controller": null,
+            "section": null,
+            "attachedRoutes": 0,
+            "observedGeneration": [
+              1
+            ],
+            "conditions": {
+              "Programmed": "True/Programmed",
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts"
+            }
+          },
+          {
+            "peer": "https-with-hostname-matching-wildcard",
+            "controller": null,
+            "section": null,
+            "attachedRoutes": 0,
+            "observedGeneration": [
+              1
+            ],
+            "conditions": {
+              "Programmed": "True/Programmed",
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts"
+            }
+          }
+        ]
+      }
+    },
+    "httproute": {},
+    "backendtlspolicy": {},
+    "restResponses": {
+      "GET providers 200": 33,
+      "GET loadbalancers 200": 14,
+      "POST loadbalancers 201": 2,
+      "GET listeners 200": 6,
+      "GET pools 200": 6,
+      "POST listeners 201": 2,
+      "GET l7policies 200": 4,
+      "PUT listeners 200": 1
+    },
+    "nativeBatchMemberDeletes": 0,
+    "nativeHAProxyReloadCount": 3,
+    "strictDNSConfigReloadsByHostname": {}
+  },
+  "gatewayclass": {
+    "qualification": {
+      "generation": 1,
+      "conditions": {
+        "Accepted": "True/Accepted",
+        "SupportedVersion": "True/SupportedVersion"
+      },
+      "supportedFeatures": []
+    }
+  },
+  "gateway": {
+    "same-namespace": {
+      "generation": 1,
+      "conditions": {
+        "Accepted": "True/Accepted",
+        "Programmed": "True/Programmed"
+      },
+      "addresses": [
+        "192.0.2.30"
+      ],
+      "specListeners": [
+        {
+          "name": "http",
+          "protocol": "HTTP",
+          "port": 80
+        }
+      ],
+      "listeners": [
+        {
+          "peer": "http",
+          "controller": null,
+          "section": null,
+          "attachedRoutes": 0,
+          "observedGeneration": [
+            1
+          ],
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "Conflicted": "False/NoConflicts",
+            "Programmed": "True/Programmed"
+          }
+        }
+      ]
+    },
+    "same-namespace-with-https-listener": {
+      "generation": 1,
+      "conditions": {
+        "Accepted": "True/Accepted",
+        "Programmed": "False/NoResources"
+      },
+      "addresses": [
+        "192.0.2.31"
+      ],
+      "specListeners": [
+        {
+          "name": "https",
+          "protocol": "HTTPS",
+          "port": 443
+        },
+        {
+          "name": "https-with-hostname",
+          "hostname": "second-example.org",
+          "protocol": "HTTPS",
+          "port": 443
+        },
+        {
+          "name": "https-with-wildcard-hostname",
+          "hostname": "*.wildcard.org",
+          "protocol": "HTTPS",
+          "port": 443
+        },
+        {
+          "name": "https-with-hostname-matching-wildcard",
+          "hostname": "fourth-example.wildcard.org",
+          "protocol": "HTTPS",
+          "port": 443
+        }
+      ],
+      "listeners": [
+        {
+          "peer": "https",
+          "controller": null,
+          "section": null,
+          "attachedRoutes": 1,
+          "observedGeneration": [
+            1
+          ],
+          "conditions": {
+            "Programmed": "False/Pending",
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "Conflicted": "False/NoConflicts"
+          }
+        },
+        {
+          "peer": "https-with-hostname",
+          "controller": null,
+          "section": null,
+          "attachedRoutes": 1,
+          "observedGeneration": [
+            1
+          ],
+          "conditions": {
+            "Programmed": "False/Pending",
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "Conflicted": "False/NoConflicts"
+          }
+        },
+        {
+          "peer": "https-with-wildcard-hostname",
+          "controller": null,
+          "section": null,
+          "attachedRoutes": 0,
+          "observedGeneration": [
+            1
+          ],
+          "conditions": {
+            "Programmed": "False/Pending",
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "Conflicted": "False/NoConflicts"
+          }
+        },
+        {
+          "peer": "https-with-hostname-matching-wildcard",
+          "controller": null,
+          "section": null,
+          "attachedRoutes": 0,
+          "observedGeneration": [
+            1
+          ],
+          "conditions": {
+            "Programmed": "False/Pending",
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "Conflicted": "False/NoConflicts"
+          }
+        }
+      ]
+    }
+  },
+  "httproute": {
+    "httproute-https-test": {
+      "generation": 1,
+      "conditions": {},
+      "parents": [
+        {
+          "peer": "same-namespace-with-https-listener",
+          "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+          "section": null,
+          "attachedRoutes": null,
+          "observedGeneration": [
+            1
+          ],
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "False/Pending"
+          }
+        }
+      ]
+    },
+    "httproute-https-test-no-hostname": {
+      "generation": 1,
+      "conditions": {},
+      "parents": [
+        {
+          "peer": "same-namespace-with-https-listener",
+          "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+          "section": "https-with-hostname",
+          "attachedRoutes": null,
+          "observedGeneration": [
+            1
+          ],
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "False/Pending"
+          }
+        }
+      ]
+    }
+  },
+  "backendtlspolicy": {},
+  "restResponses": {
+    "GET providers 200": 1219,
+    "GET loadbalancers 200": 552,
+    "POST loadbalancers 201": 2,
+    "GET listeners 200": 279,
+    "GET pools 200": 276,
+    "POST listeners 201": 2,
+    "GET l7policies 200": 274,
+    "PUT listeners 200": 5,
+    "POST pools 201": 11,
+    "GET members 200": 493,
+    "GET healthmonitors 200": 493,
+    "POST members 201": 20,
+    "POST healthmonitors 201": 11,
+    "POST l7policies 201": 11,
+    "GET rules 200": 305,
+    "POST rules 201": 20,
+    "PUT l7policies 200": 18,
+    "PUT pools 200": 8,
+    "PUT members 202": 4,
+    "DELETE rules 204": 16,
+    "DELETE l7policies 204": 9,
+    "DELETE healthmonitors 204": 9,
+    "DELETE members 204": 12,
+    "DELETE pools 204": 9
+  },
+  "nativeBatchMemberDeletes": 4,
+  "nativeHAProxyReloadCount": 33,
+  "strictDNSConfigReloadsByHostname": {
+    "abc.example.com": 31,
+    "mismatch.example.com": 8
+  },
+  "nativeSharedListener": {
+    "protocol": "TERMINATED_HTTPS",
+    "port": 443,
+    "virtualHosts": [
+      "*",
+      "*.wildcard.org",
+      "fourth-example.wildcard.org",
+      "second-example.org"
+    ],
+    "policiesBySection": {
+      "*": 1,
+      "second-example.org": 1,
+      "fourth-example.wildcard.org": 1
+    },
+    "renderedConfigSHA256": "e45060a428cda276cc5580c3b2798f1f80e8c3600fd907dba68d7c3c11852444",
+    "renderedIsolationRules": [
+      "http-request set-var(txn.octavia_https_sni_section) str(1) if !{ var(txn.octavia_https_sni_section) -m found } { ssl_fc_sni -m str -i fourth-example.wildcard.org }",
+      "http-request set-var(txn.octavia_https_authority_section) str(1) if !{ var(txn.octavia_https_authority_section) -m found } { var(txn.octavia_https_authority) -m str -i fourth-example.wildcard.org }",
+      "http-request set-var(txn.octavia_https_sni_section) str(2) if !{ var(txn.octavia_https_sni_section) -m found } { ssl_fc_sni -m str -i second-example.org }",
+      "http-request set-var(txn.octavia_https_authority_section) str(2) if !{ var(txn.octavia_https_authority_section) -m found } { var(txn.octavia_https_authority) -m str -i second-example.org }",
+      "http-request set-var(txn.octavia_https_sni_section) str(3) if !{ var(txn.octavia_https_sni_section) -m found } { ssl_fc_sni -m end -i .wildcard.org } octavia_https_sni_dns",
+      "http-request set-var(txn.octavia_https_authority_section) str(3) if !{ var(txn.octavia_https_authority_section) -m found } { var(txn.octavia_https_authority) -m end -i .wildcard.org } octavia_https_authority_dns",
+      "http-request set-var(txn.octavia_https_sni_section) str(4) if !{ var(txn.octavia_https_sni_section) -m found }",
+      "http-request set-var(txn.octavia_https_authority_section) str(4) if !{ var(txn.octavia_https_authority_section) -m found } { var(txn.octavia_https_authority) -m found }",
+      "http-request return status 404 unless { var(txn.octavia_https_authority_section) -m found }",
+      "http-request return status 421 unless { var(txn.octavia_https_authority_section),strcmp(txn.octavia_https_sni_section) -m int eq 0 }",
+      "use_backend <fixture-id>:<fixture-id> if { var(txn.octavia_https_authority_section) -m str 4 } <fixture-id> <fixture-id>",
+      "use_backend <fixture-id>:<fixture-id> if { var(txn.octavia_https_authority_section) -m str 1 } <fixture-id> <fixture-id>",
+      "use_backend <fixture-id>:<fixture-id> if { var(txn.octavia_https_authority_section) -m str 2 } <fixture-id> <fixture-id>"
+    ],
+    "physicalTLSBindCount": 1
+  }
+}

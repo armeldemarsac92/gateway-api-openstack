@@ -1,0 +1,91 @@
+{
+  "at": "2026-11-22T00:55:39.226+00:00",
+  "observations": {
+    "second-example.org": {
+      "seed": {
+        "status": 200,
+        "frontendSNI": "second-example.org",
+        "httpHost": "second-example.org",
+        "frontendHostnameVerified": true,
+        "tlsVersion": "TLSv1.2",
+        "sessionReused": false,
+        "backendPod": "infra-backend-v2-5dc55c68cc-7vbqx",
+        "path": "/detect-misdirected-requests"
+      },
+      "resumedSameHost": {
+        "status": 200,
+        "frontendSNI": "second-example.org",
+        "httpHost": "second-example.org",
+        "frontendHostnameVerified": true,
+        "tlsVersion": "TLSv1.2",
+        "sessionReused": true,
+        "backendPod": "infra-backend-v2-5dc55c68cc-hf9xh",
+        "path": "/detect-misdirected-requests"
+      },
+      "resumedDifferentHost": {
+        "status": 421,
+        "frontendSNI": "second-example.org",
+        "httpHost": "example.org",
+        "frontendHostnameVerified": true,
+        "tlsVersion": "TLSv1.2",
+        "sessionReused": true
+      },
+      "freshDifferentHost": {
+        "status": 421,
+        "frontendSNI": "second-example.org",
+        "httpHost": "example.org",
+        "frontendHostnameVerified": true,
+        "tlsVersion": "TLSv1.2",
+        "sessionReused": false
+      }
+    },
+    "third-example.wildcard.org": {
+      "seed": {
+        "status": 200,
+        "frontendSNI": "third-example.wildcard.org",
+        "httpHost": "third-example.wildcard.org",
+        "frontendHostnameVerified": true,
+        "tlsVersion": "TLSv1.2",
+        "sessionReused": false,
+        "backendPod": "infra-backend-v3-89d8b6c87-q8fjt",
+        "path": "/detect-misdirected-requests"
+      },
+      "resumedSameHost": {
+        "status": 200,
+        "frontendSNI": "third-example.wildcard.org",
+        "httpHost": "third-example.wildcard.org",
+        "frontendHostnameVerified": true,
+        "tlsVersion": "TLSv1.2",
+        "sessionReused": true,
+        "backendPod": "infra-backend-v3-89d8b6c87-q8fjt",
+        "path": "/detect-misdirected-requests"
+      },
+      "resumedDifferentHost": {
+        "status": 421,
+        "frontendSNI": "third-example.wildcard.org",
+        "httpHost": "fourth-example.wildcard.org",
+        "frontendHostnameVerified": true,
+        "tlsVersion": "TLSv1.2",
+        "sessionReused": true
+      },
+      "freshDifferentHost": {
+        "status": 421,
+        "frontendSNI": "third-example.wildcard.org",
+        "httpHost": "fourth-example.wildcard.org",
+        "frontendHostnameVerified": true,
+        "tlsVersion": "TLSv1.2",
+        "sessionReused": false
+      },
+      "resumedDifferentHostSameSection": {
+        "status": 200,
+        "frontendSNI": "third-example.wildcard.org",
+        "httpHost": "fith-example.wildcard.org",
+        "frontendHostnameVerified": true,
+        "tlsVersion": "TLSv1.2",
+        "sessionReused": true,
+        "backendPod": "infra-backend-v3-89d8b6c87-q8fjt",
+        "path": "/detect-misdirected-requests"
+      }
+    }
+  }
+}
