@@ -368,7 +368,8 @@ func (p *Provider) observeSNIGraph(ctx context.Context, desired desiredGatewayGr
 			if fragment.policy != nil || fragment.pool == nil || policy.ListenerID != listener.ID || policy.RedirectPoolID != fragment.pool.ID ||
 				policy.Action != string(l7policies.ActionRedirectToPool) || row.AdminState == nil || row.ExtendedTargetFields || row.RedirectRequestPresent ||
 				row.RequestHeaderOperationsErr != nil || len(row.RequestHeaderOperations) != 0 ||
-				row.ResponseHeaderOperationsErr != nil || len(row.ResponseHeaderOperations) != 0 || policy.RedirectURL != "" || policy.RedirectPrefix != "" {
+				row.ResponseHeaderOperationsErr != nil || len(row.ResponseHeaderOperations) != 0 || row.RequestURLRewritePresent ||
+				slices.Contains(policy.Tags, openstackidentity.RequestURLRewritePolicyTag) || policy.RedirectURL != "" || policy.RedirectPrefix != "" {
 				return actual, fmt.Errorf("%w: invalid TLS SNI policy relationship", cloud.ErrOwnershipConflict)
 			}
 			rules, err := p.octavia.ObserveRules(ctx, policy.ID, l7policies.ListRulesOpts{ProjectID: p.projectID})

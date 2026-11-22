@@ -195,16 +195,16 @@ func compileRoute(route *gatewayv1.HTTPRoute, input Input) Route {
 				compiled.Redirect = &redirect
 			}
 		} else {
-			request, response, err := NormalizeHTTPHeaderFilters(rule.Filters, input.RequestHeaderModifier,
-				input.ResponseHeaderModifier && HTTPProfileRouteKind(route) == HTTPRouteKind)
-			if err != nil {
-				scope := ScopeRule
+			ordinaryHTTP := HTTPProfileRouteKind(route) == HTTPRouteKind
+			request, response, rewrite, diagnostic := NormalizeHTTPRuleFilters(rule, input.RequestHeaderModifier,
+				input.ResponseHeaderModifier && ordinaryHTTP, input.HTTPRequestURLRewrite && ordinaryHTTP)
+			if diagnostic != nil {
 				if slices.ContainsFunc(rule.Filters, func(filter gatewayv1.HTTPRouteFilter) bool { return !knownFilter(filter.Type) }) {
-					scope = ScopeRoute
+					diagnostic.Scope = ScopeRoute
 				}
-				compiled.Diagnostics = append(compiled.Diagnostics, *unsupported(err.Error(), scope))
+				compiled.Diagnostics = append(compiled.Diagnostics, *diagnostic)
 			} else {
-				compiled.RequestHeaderOperations, compiled.ResponseHeaderOperations = request, response
+				compiled.RequestHeaderOperations, compiled.ResponseHeaderOperations, compiled.URLRewrite = request, response, rewrite
 			}
 		}
 		for _, backend := range rule.BackendRefs {

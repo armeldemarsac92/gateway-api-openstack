@@ -237,6 +237,7 @@ func planFixedResponseDuringMemberWithdrawal(desired desiredRoute, observed obse
 	for _, wanted := range desired.policies {
 		for _, policy := range observed.policies {
 			if policy.role != wanted.role || !policy.targetObserved || !policy.policy.AdminStateUp ||
+				policy.urlRewriteTagged && !policy.urlRewriteReported ||
 				policy.policy.ProvisioningStatus != "ACTIVE" && policy.policy.ProvisioningStatus != "ERROR" ||
 				slices.ContainsFunc(policy.rules, func(rule observedRouteRule) bool { return rule.rule.ProvisioningStatus != "ACTIVE" }) ||
 				!observedHTTPPredicateMatches(policy, rulesFor(wanted, desired.hostnameRuleValue)) {
@@ -252,7 +253,8 @@ func planFixedResponseDuringMemberWithdrawal(desired desiredRoute, observed obse
 				responsePatch := policyHeaderPatch(wanted.responseHeaderOperations, policy.responseHeaderOperations,
 					policy.policy.ProvisioningStatus == "ERROR")
 				return routeMutation{kind: routeMutationSetPolicyTarget, id: policy.policy.ID,
-					requestHeaderOperations: operations, responseHeaderOperations: responsePatch}, true
+					requestHeaderOperations: operations, responseHeaderOperations: responsePatch,
+					requestURLRewriteUpdate: policyURLRewritePatch(nil, policy)}, true
 			}
 		}
 	}
@@ -547,15 +549,21 @@ func hasHeaderOperationPolicies(policies []desiredPolicy) bool {
 func findHTTPPolicyReplacement(desired desiredGatewayGraph, owners []int, owner, port int, observed []observedRoutePolicy) (int, []desiredPolicy) {
 	target := -1
 	var best desiredPolicy
+	hadRewrite := slices.ContainsFunc(observed, observedRoutePolicy.hasRequestURLRewrite)
 	for index, route := range desired.routes {
 		if route.redirect || owners[index] != owner || desired.spec.Routes[index].Disposition != cloud.GraphEnsure || scopedHTTPRoutePort(route) != port {
 			continue
 		}
-		if len(observed) == 1 && observed[0].versioned && route.backendKey == "" &&
+		if !hadRewrite && len(observed) == 1 && observed[0].versioned && route.backendKey == "" &&
 			route.spec.HTTPSListenerHostname == observed[0].httpsListenerHostname && observedGroupedPrefixMatches(observed[0], route) {
 			return index, route.policies
 		}
 		for _, wanted := range route.policies {
+			// The rewrite guard closes the listener before dropping its old
+			// policy. Do not hold removal for a non-rewrite replacement.
+			if hadRewrite && wanted.requestURLRewrite == nil {
+				continue
+			}
 			if slices.ContainsFunc(observed, func(policy observedRoutePolicy) bool {
 				return policy.httpsListenerHostname != wanted.httpsListenerHostname
 			}) {

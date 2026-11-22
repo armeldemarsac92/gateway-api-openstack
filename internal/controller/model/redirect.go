@@ -21,10 +21,11 @@ import (
 	"net/http"
 	"net/netip"
 	"strings"
-	"unicode/utf8"
 
 	"k8s.io/apimachinery/pkg/util/validation"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 )
 
 // NormalizeRequestRedirect validates the redirect before a listener is selected.
@@ -49,7 +50,7 @@ func NormalizeRequestRedirect(rule gatewayv1.HTTPRouteRule, requestAction bool) 
 	redirect := RequestRedirect{StatusCode: http.StatusFound}
 	if filter.Hostname != nil {
 		redirect.Hostname = string(*filter.Hostname)
-		if !validRedirectHostname(redirect.Hostname) {
+		if !validURLModifierHostname(redirect.Hostname) {
 			return reject("RequestRedirect hostname must be a fixed DNS name")
 		}
 	}
@@ -78,13 +79,13 @@ func NormalizeRequestRedirect(rule gatewayv1.HTTPRouteRule, requestAction bool) 
 	if path := filter.Path; path != nil {
 		switch path.Type {
 		case gatewayv1.FullPathHTTPPathModifier:
-			if path.ReplaceFullPath == nil || path.ReplacePrefixMatch != nil || utf8.RuneCountInString(*path.ReplaceFullPath) > 1024 {
+			if path.ReplaceFullPath == nil || path.ReplacePrefixMatch != nil || !cloud.ValidHTTPPathReplacement(*path.ReplaceFullPath) {
 				return invalid("RequestRedirect ReplaceFullPath requires only a replaceFullPath value of up to 1024 characters")
 			}
 			replacement := *path.ReplaceFullPath
 			redirect.ReplaceFullPath = &replacement
 		case gatewayv1.PrefixMatchHTTPPathModifier:
-			if path.ReplacePrefixMatch == nil || path.ReplaceFullPath != nil || utf8.RuneCountInString(*path.ReplacePrefixMatch) > 1024 {
+			if path.ReplacePrefixMatch == nil || path.ReplaceFullPath != nil || !cloud.ValidHTTPPathReplacement(*path.ReplacePrefixMatch) {
 				return invalid("RequestRedirect ReplacePrefixMatch requires only a replacePrefixMatch value of up to 1024 characters")
 			}
 			for _, match := range rule.Matches {
@@ -114,7 +115,7 @@ func NormalizeRequestRedirect(rule gatewayv1.HTTPRouteRule, requestAction bool) 
 	return redirect, nil
 }
 
-func validRedirectHostname(hostname string) bool {
+func validURLModifierHostname(hostname string) bool {
 	if _, err := netip.ParseAddr(hostname); err == nil || len(validation.IsDNS1123Subdomain(hostname)) != 0 {
 		return false
 	}

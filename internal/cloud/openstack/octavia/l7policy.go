@@ -117,6 +117,9 @@ type L7PolicyObservation struct {
 	ExtendedTargetFields        bool
 	RedirectRequest             *RequestRedirect
 	RedirectRequestPresent      bool
+	RequestURLRewrite           *RequestURLRewrite
+	RequestURLRewriteReported   bool
+	RequestURLRewritePresent    bool
 	PoolIDs                     []string
 	PoolReference               json.RawMessage
 	AdminState                  *bool
@@ -170,6 +173,7 @@ func readPolicyObservation(raw json.RawMessage) (L7PolicyObservation, error) {
 		Targets                  json.RawMessage `json:"targets"`
 		FixedResponse            json.RawMessage `json:"fixed_response"`
 		RedirectRequest          json.RawMessage `json:"redirect_request"`
+		RequestURLRewrite        json.RawMessage `json:"request_url_rewrite"`
 		RequestHeaderOperations  json.RawMessage `json:"request_header_operations"`
 		ResponseHeaderOperations json.RawMessage `json:"response_header_operations"`
 	}
@@ -212,6 +216,11 @@ func readPolicyObservation(raw json.RawMessage) (L7PolicyObservation, error) {
 	if len(row.RedirectRequest) != 0 && string(row.RedirectRequest) != "null" {
 		observation.RedirectRequestPresent = true
 		observation.RedirectRequest = readRequestRedirect(row.RedirectRequest)
+	}
+	observation.RequestURLRewriteReported = row.RequestURLRewrite != nil
+	if observation.RequestURLRewriteReported && string(row.RequestURLRewrite) != "null" {
+		observation.RequestURLRewritePresent = true
+		observation.RequestURLRewrite = readRequestURLRewrite(row.RequestURLRewrite)
 	}
 	if row.RequestHeaderOperations != nil {
 		observation.RequestHeaderOperations, observation.RequestHeaderOperationsErr =
@@ -256,8 +265,8 @@ func setPolicyFixedServerError(body map[string]any) {
 }
 
 // SetPolicyFixedResponse switches the target without changing state or position.
-func (s *Service) SetPolicyFixedResponse(ctx context.Context, id string, headers PolicyHeaders) (*l7policies.L7Policy, error) {
-	return s.UpdatePolicyHeaders(ctx, id, fixedResponsePolicyOpts{}, headers)
+func (s *Service) SetPolicyFixedResponse(ctx context.Context, id string, headers PolicyFilters) (*l7policies.L7Policy, error) {
+	return s.UpdatePolicyFilters(ctx, id, fixedResponsePolicyOpts{}, headers)
 }
 
 type weightedPolicyOpts struct {
@@ -269,8 +278,8 @@ func (opts weightedPolicyOpts) ToL7PolicyUpdateMap() (map[string]any, error) {
 }
 
 // SetPolicyWeightedTargets replaces all slots in one request, retaining the policy position and state.
-func (s *Service) SetPolicyWeightedTargets(ctx context.Context, id string, targets []WeightedHTTPTarget, headers PolicyHeaders) (*l7policies.L7Policy, error) {
-	return s.UpdatePolicyHeaders(ctx, id, weightedPolicyOpts{targets: targets}, headers)
+func (s *Service) SetPolicyWeightedTargets(ctx context.Context, id string, targets []WeightedHTTPTarget, headers PolicyFilters) (*l7policies.L7Policy, error) {
+	return s.UpdatePolicyFilters(ctx, id, weightedPolicyOpts{targets: targets}, headers)
 }
 
 // PolicyCreateOpts carries the section, header filters and target of one L7 policy.
@@ -283,6 +292,7 @@ type PolicyCreateOpts struct {
 	WeightedTargets          []WeightedHTTPTarget
 	FixedServerError         bool
 	RedirectRequest          *RequestRedirect
+	RequestURLRewrite        *RequestURLRewrite
 }
 
 func (opts PolicyCreateOpts) ToL7PolicyCreateMap() (map[string]any, error) {
@@ -317,8 +327,14 @@ func (opts PolicyCreateOpts) ToL7PolicyCreateMap() (map[string]any, error) {
 	} else if opts.RedirectRequest != nil {
 		policy["redirect_request"] = opts.RedirectRequest
 	}
-	(PolicyHeaders{Request: opts.RequestHeaderOperations, Response: opts.ResponseHeaderOperations}).write(body)
-	return body, nil
+	if opts.RequestURLRewrite != nil {
+		if !opts.RequestURLRewrite.Valid() || !forwardsToPools(string(opts.Action)) {
+			return nil, fmt.Errorf("request URL rewrite requires a valid forwarding action")
+		}
+		policy[requestURLRewriteField] = opts.RequestURLRewrite
+	}
+	filters := PolicyFilters{Request: opts.RequestHeaderOperations, Response: opts.ResponseHeaderOperations}
+	return body, filters.write(body)
 }
 
 // CreatePolicy submits the action and any HTTPS section together.

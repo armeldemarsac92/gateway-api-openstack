@@ -12,6 +12,12 @@ The local qualification records the original Gateway API cases and the settled 3
 
 The standard workload and Magnum manifests continue to use the stock Octavia API. The HTTP actions component changes two controller arguments and can be composed with the operator HTTPS component in an operator-owned kustomization. The HTTPS component has its own certificate and listener requirements. [Operator HTTPS](operator-https.md)
 
+## Enable forwarding URL rewrites
+
+Use `--octavia-request-url-rewrite` when the effective Amphora driver on the regional endpoint advertises `request_url_rewrite_v1`. The rule matches the original request, then forwards it with the new hostname or path and the original query string. A prefix replacement uses the rule's single `PathPrefix` match. An empty `urlRewrite: {}` leaves the request unchanged.
+
+A combined `RequestHeaderModifier` requires its own controller opt-in and regional capability. Amphora applies request header operations before the URL rewrite. Place a modifier that changes `Host` before a hostname rewrite. A later `Host` operation is supported when it sets the hostname to the same value. Other later `Host` operations produce `IncompatibleFilters`.
+
 ## Enable request-derived redirects
 
 On the regional load-balancer endpoint, check that the configured Amphora provider advertises `http_request_redirect_v1` in `gateway_capabilities`. Add `--octavia-http-request-redirect` to the controller arguments in the operator overlay. This option can be used independently of weighted backends and fixed HTTP responses.

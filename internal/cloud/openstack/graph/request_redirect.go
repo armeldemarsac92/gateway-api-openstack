@@ -19,7 +19,9 @@ package graph
 import (
 	"context"
 	"errors"
+	"maps"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
@@ -29,6 +31,7 @@ import (
 
 var requestRedirectPolicy = protectedHTTPPredicate{
 	capability: octavia.GatewayCapabilityHTTPRequestRedirect,
+	label:      "request redirect",
 	required:   func(policy desiredPolicy) bool { return policy.redirect != nil && policy.redirect.request != nil },
 	observed:   func(policy observedRoutePolicy) bool { return policy.requestRedirectPresent },
 	settled: func(wanted desiredPolicy, observed observedRoutePolicy) bool {
@@ -40,6 +43,15 @@ var requestRedirectPolicy = protectedHTTPPredicate{
 // until its required destinations, predicates and policy positions are verified.
 // Withdrawal can proceed without the capability once the listener is closed.
 func (p *Provider) protectRequestRedirectTraffic(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, plan []graphMutation, result *cloud.GatewayGraphResult) []graphMutation {
+	return p.protectHTTPURLPolicyTraffic(ctx, desired, actual, plan, result, requestRedirectPolicy, p.httpRequestRedirect, redirectPolicyWriteRequiresCapability)
+}
+
+func (p *Provider) protectRequestURLRewriteTraffic(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, plan []graphMutation, result *cloud.GatewayGraphResult) []graphMutation {
+	return p.protectHTTPURLPolicyTraffic(ctx, desired, actual, plan, result, requestURLRewritePolicy, p.httpRequestURLRewrite, rewritePolicyWriteRequiresCapability)
+}
+
+func (p *Provider) protectHTTPURLPolicyTraffic(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, plan []graphMutation,
+	result *cloud.GatewayGraphResult, predicate protectedHTTPPredicate, enabled bool, writeRequiresCapability func(desiredRoute, routeMutation) bool) []graphMutation {
 	disposition := desired.spec.Gateway.Disposition
 	if actual.protocol != cloud.ListenerProtocolHTTP || disposition != cloud.GraphEnsure && disposition != cloud.GraphPreserve {
 		return plan
@@ -49,27 +61,19 @@ func (p *Provider) protectRequestRedirectTraffic(ctx context.Context, desired de
 		frontends = []listeners.Listener{*actual.listener}
 	}
 	portByID := make(map[string]int, len(frontends))
-	for _, listener := range frontends {
+	for index, listener := range frontends {
+		if !actual.scoped && listener.ProtocolPort == 0 {
+			listener.ProtocolPort = desired.spec.Gateway.Spec.ListenerPort
+			frontends[index].ProtocolPort = listener.ProtocolPort
+		}
 		portByID[listener.ID] = listener.ProtocolPort
 	}
-	states := guardedHTTPListeners(desired, actual, portByID, requestRedirectPolicy)
+	states := guardedHTTPListeners(desired, actual, portByID, predicate)
 	if len(states) == 0 {
 		return plan
 	}
-	available := false
-	waiting := "Octavia request redirect mode is disabled"
-	if disposition == cloud.GraphEnsure && p.httpRequestRedirect && actual.loadBalancer != nil {
-		err := p.verifyRequestRedirectCapabilities(ctx, desired, actual, []string{requestRedirectPolicy.capability})
-		var missing *octavia.MissingGatewayCapability
-		switch {
-		case err == nil:
-			available = true
-		case errors.As(err, &missing):
-			waiting = "Octavia does not advertise " + requestRedirectPolicy.capability
-		default:
-			waiting = "Could not verify Octavia capability " + requestRedirectPolicy.capability
-		}
-	}
+	verified := make(map[string]error)
+	unavailable := make(map[string]bool)
 	blocked := make(map[string]bool)
 	unverifiedClosed := make(map[string]bool)
 	requiresWithdrawal := make(map[string]bool)
@@ -82,10 +86,34 @@ func (p *Provider) protectRequestRedirectTraffic(ctx context.Context, desired de
 		for id := range state.policyIDs {
 			installedOn[id] = listener.ID
 		}
-		if available && !state.unsettled {
+		waiting := "Octavia " + predicate.label + " mode is disabled"
+		available := disposition == cloud.GraphEnsure && enabled && actual.loadBalancer != nil
+		if available && state.desired {
+			required := append([]string{predicate.capability}, slices.Sorted(maps.Keys(state.additionalCapabilities))...)
+			key := strings.Join(required, ",")
+			err, found := verified[key]
+			if !found {
+				err = p.verifyGatewayHTTPURLCapabilities(ctx, desired, actual, required)
+				verified[key] = err
+			}
+			var missing *octavia.MissingGatewayCapability
+			available = err == nil
+			switch {
+			case errors.As(err, &missing):
+				waiting = "Octavia does not advertise " + missing.Capability
+			case err != nil:
+				waiting = "Could not verify Octavia capability " + strings.Join(required, ", ")
+			}
+		}
+		unavailable[listener.ID] = !available
+		if predicate.capability == octavia.GatewayCapabilityRequestURLRewrite && (!state.desired || available) &&
+			listener.ProvisioningStatus == "ACTIVE" && localOnlyRewriteWithdrawalOnPort(plan, state) {
 			continue
 		}
-		reason := "Waiting for verified Octavia request redirects on this listener"
+		if available && !state.unsettled && (predicate.capability != octavia.GatewayCapabilityRequestURLRewrite || listener.ProvisioningStatus != "ERROR") {
+			continue
+		}
+		reason := "Waiting for verified Octavia " + predicate.label + " policies on this listener"
 		if !available && state.desired {
 			reason = waiting
 		}
@@ -124,16 +152,19 @@ func (p *Provider) protectRequestRedirectTraffic(ctx context.Context, desired de
 			if unverifiedClosed[listenerID] {
 				return true
 			}
-			if requiresWithdrawal[listenerID] && !redirectPolicyCleanup(step.route.kind) {
+			patch := step.route.requestURLRewriteUpdate
+			clearRewrite := patch != nil && patch.Value == nil
+			targetWithdrawal := step.route.kind == routeMutationSetPolicyTarget && step.route.withdrawHTTPPolicy
+			if requiresWithdrawal[listenerID] && !httpURLPolicyCleanup(step.route.kind) && !clearRewrite && !targetWithdrawal {
 				return true
 			}
-			return !available && redirectPolicyWriteRequiresCapability(graphRoutePart(desired, step), step.route)
+			return unavailable[listenerID] && writeRequiresCapability(graphRoutePart(desired, step), step.route)
 		}
 		return false
 	})
 }
 
-func requestRedirectRoutePort(gateway desiredGatewayGraph, route desiredRoute) int {
+func httpURLPolicyRoutePort(gateway desiredGatewayGraph, route desiredRoute) int {
 	if port := scopedHTTPRoutePort(route); port != 0 {
 		return port
 	}
@@ -141,15 +172,15 @@ func requestRedirectRoutePort(gateway desiredGatewayGraph, route desiredRoute) i
 }
 
 func redirectPolicyWriteRequiresCapability(route desiredRoute, step routeMutation) bool {
-	return isHTTPPolicyMutation(step.kind) && !redirectPolicyCleanup(step.kind) &&
+	return isHTTPPolicyMutation(step.kind) && !httpURLPolicyCleanup(step.kind) &&
 		slices.ContainsFunc(route.policies, requestRedirectPolicy.required)
 }
 
-func redirectPolicyCleanup(kind routeMutationKind) bool {
+func httpURLPolicyCleanup(kind routeMutationKind) bool {
 	return kind == routeMutationDisablePolicy || kind == routeMutationDeleteRule || kind == routeMutationDeletePolicy
 }
 
-func (p *Provider) verifyRequestRedirectCapabilities(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, required []string) error {
+func (p *Provider) verifyGatewayHTTPURLCapabilities(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, required []string) error {
 	// Discovery may stop responding during an outage. Preserve time in the
 	// parent context to validate and submit a restrictive listener update.
 	budget := 3 * time.Second

@@ -326,8 +326,8 @@ func statusForRouteBuildError(err error) routeReconcileStatus {
 	var buildError *routeBuildError
 	if errors.As(err, &buildError) {
 		switch buildError.kind {
-		case routeErrorInvalid:
-			return rejectedRouteStatus(string(routeErrorInvalid), buildError.message)
+		case routeErrorInvalid, routeErrorIncompatibleFilters:
+			return rejectedRouteStatus(string(buildError.kind), buildError.message)
 		case routeErrorInvalidKind:
 			return unresolvedRouteStatus(string(gatewayv1.RouteReasonInvalidKind), buildError.message)
 		case routeErrorBackendNotFound:

@@ -16,7 +16,16 @@ limitations under the License.
 
 package cloud
 
-import "strings"
+import (
+	"strings"
+	"unicode/utf8"
+)
+
+// ValidHTTPPathReplacement checks the length and encoding of a redirect or
+// rewrite replacement. Octavia encodes literal characters for the data plane.
+func ValidHTTPPathReplacement(value string) bool {
+	return utf8.ValidString(value) && utf8.RuneCountInString(value) <= 1024
+}
 
 // ValidHTTPPath checks the absolute path syntax used by Gateway API Exact and PathPrefix matches.
 func ValidHTTPPath(path string) bool {

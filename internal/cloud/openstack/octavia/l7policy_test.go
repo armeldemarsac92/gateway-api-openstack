@@ -129,7 +129,7 @@ func TestWeightedPolicyWire(t *testing.T) {
 	if _, err := service.CreatePolicy(t.Context(), PolicyCreateOpts{CreateOpts: l7policies.CreateOpts{ListenerID: "listener", AdminStateUp: &disabled}, WeightedTargets: targets}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.SetPolicyWeightedTargets(t.Context(), "policy", targets, PolicyHeaders{}); err != nil {
+	if _, err := service.SetPolicyWeightedTargets(t.Context(), "policy", targets, PolicyFilters{}); err != nil {
 		t.Fatal(err)
 	}
 	observed, complete, err := service.ListPolicyObservations(t.Context(), l7policies.ListOpts{})
@@ -275,10 +275,10 @@ func TestResponseHeaderPolicyWire(t *testing.T) {
 		t.Fatal(err)
 	}
 	clear := []cloud.HTTPHeaderOperation{}
-	if _, err := service.SetPolicyFixedResponse(t.Context(), "configured", PolicyHeaders{Request: clear, Response: response}); err != nil {
+	if _, err := service.SetPolicyFixedResponse(t.Context(), "configured", PolicyFilters{Request: clear, Response: response}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.UpdatePolicyHeaders(t.Context(), "configured", l7policies.UpdateOpts{}, PolicyHeaders{Response: clear}); err != nil {
+	if _, err := service.UpdatePolicyFilters(t.Context(), "configured", l7policies.UpdateOpts{}, PolicyFilters{Response: clear}); err != nil {
 		t.Fatal(err)
 	}
 	observed, complete, err := service.ListPolicyObservations(t.Context(), l7policies.ListOpts{})
@@ -313,5 +313,81 @@ func TestRequestRedirectReadbackValidatesOptionalFieldsAndPath(t *testing.T) {
 				t.Fatalf("request redirect readback = %+v, %v, valid=%t", observation, err, scenario.valid)
 			}
 		})
+	}
+}
+
+func TestRequestURLRewritePolicyWire(t *testing.T) {
+	const wantRewrite = `{"hostname":"backend.example.test","replace_prefix":{"match":"/incoming","replacement":""}}`
+	rewrite := &RequestURLRewrite{Hostname: "backend.example.test", ReplacePrefix: &PathPrefixReplacement{Match: "/incoming"}}
+	disabled := false
+	create := PolicyCreateOpts{
+		CreateOpts:              l7policies.CreateOpts{ListenerID: "http", Action: l7policies.ActionRedirectToPool, RedirectPoolID: "pool", AdminStateUp: &disabled},
+		RequestURLRewrite:       rewrite,
+		RequestHeaderOperations: []cloud.HTTPHeaderOperation{{Operation: cloud.HTTPHeaderRemove, Name: "x-example"}},
+	}
+	check := func(body map[string]any, err error, expected map[string]string) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for field, want := range expected {
+			value, present := body["l7policy"].(map[string]any)[field]
+			if !present {
+				t.Fatalf("%s was omitted", field)
+			}
+			raw, err := json.Marshal(value)
+			if err != nil || string(raw) != want {
+				t.Fatalf("%s = %s, %v, want %s", field, raw, err, want)
+			}
+		}
+	}
+	body, err := create.ToL7PolicyCreateMap()
+	check(body, err, map[string]string{
+		"action": `"REDIRECT_TO_POOL"`, "redirect_pool_id": `"pool"`, "admin_state_up": "false",
+		requestURLRewriteField: wantRewrite, requestHeaderOperationsField: `[{"name":"x-example","operation":"REMOVE"}]`,
+	})
+	create.WeightedTargets = []WeightedHTTPTarget{{PoolID: "pool-a", Weight: 2}, {PoolID: "pool-b", Weight: 1}}
+	body, err = create.ToL7PolicyCreateMap()
+	check(body, err, map[string]string{"action": `"WEIGHTED_TARGETS"`, requestURLRewriteField: wantRewrite})
+	body, err = (policyWithFilters{update: l7policies.UpdateOpts{}, filters: PolicyFilters{URLRewrite: &RequestURLRewriteUpdate{}}}).ToL7PolicyUpdateMap()
+	check(body, err, map[string]string{requestURLRewriteField: "null", "admin_state_up": "false"})
+	create.WeightedTargets = nil
+	create.FixedServerError = true
+	if _, err := create.ToL7PolicyCreateMap(); err == nil {
+		t.Fatal("a fixed response accepted a forwarding filter")
+	}
+
+	for _, tc := range []struct {
+		value                    string
+		reported, present, valid bool
+	}{
+		{wantRewrite, true, true, true},
+		{`{"replace_prefix":{"match":"/incoming","replacement":null}}`, true, true, false},
+		{"null", true, false, false},
+		{},
+	} {
+		row := `{"id":"policy","action":"REDIRECT_TO_POOL","redirect_pool_id":"pool","admin_state_up":false`
+		if tc.value != "" {
+			row += `,"request_url_rewrite":` + tc.value
+		}
+		got, err := readPolicyObservation(json.RawMessage(row + "}"))
+		if err != nil || got.RequestURLRewriteReported != tc.reported || got.RequestURLRewritePresent != tc.present ||
+			got.HasValidRequestURLRewrite() != tc.valid || tc.valid && !got.RequestURLRewrite.Equal(rewrite) {
+			t.Errorf("rewrite readback %s = %+v, %v", tc.value, got, err)
+		}
+	}
+}
+
+func TestRequestURLRewriteRejectsContradictoryForwardingTargets(t *testing.T) {
+	const row = `{"id":"policy","action":"REDIRECT_TO_POOL","redirect_pool_id":"pool","admin_state_up":true,"request_url_rewrite":{"hostname":"backend.example.test"}`
+	for _, conflicting := range []string{
+		`,"fixed_response":{"status_code":500}`,
+		`,"targets":[{"pool_id":"another","weight":1}]`,
+		`,"targets":[]`,
+	} {
+		got, err := readPolicyObservation(json.RawMessage(row + conflicting + "}"))
+		if err != nil || !got.RequestURLRewritePresent || got.HasValidRequestURLRewrite() {
+			t.Errorf("accepted a conflicting forwarding target %s: %+v, %v", conflicting, got, err)
+		}
 	}
 }

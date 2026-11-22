@@ -70,6 +70,9 @@ func (p *Provider) buildDesiredGatewayRoute(spec cloud.RouteSpec, forwards []clo
 		}
 		indexes[redirect.RuleIndex] = true
 		for _, match := range redirect.Matches {
+			if match.URLRewrite != nil {
+				return invalid(errors.New("URLRewrite cannot be combined with RequestRedirect"))
+			}
 			if len(match.RequestHeaderOperations) != 0 || len(match.ResponseHeaderOperations) != 0 {
 				return invalid(errors.New("header modifiers cannot be combined with RequestRedirect in Octavia"))
 			}
@@ -155,7 +158,7 @@ func compileRequestRedirect(redirect *cloud.HTTPRedirectRequest, match cloud.HTT
 		if match.PathType != cloud.PathMatchPrefix {
 			return nil, errors.New("HTTP prefix replacement requires a PathPrefix match")
 		}
-		request.ReplacePrefix = &octavia.RedirectPrefixReplace{Match: pathOf(match).value, Replacement: *redirect.ReplacePrefixMatch}
+		request.ReplacePrefix = &octavia.PathPrefixReplacement{Match: pathOf(match).value, Replacement: *redirect.ReplacePrefixMatch}
 	}
 	if !request.Valid() {
 		return nil, errors.New("invalid HTTP request redirect destination")
