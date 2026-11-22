@@ -22,7 +22,7 @@ A combined `RequestHeaderModifier` requires its own controller opt-in and region
 
 With weighted targets enabled, add `--octavia-http-backend-request-filters` to the controller arguments. Set `enabled_weighted_target_request_filter_providers = amphora` alongside `enabled_gateway_action_providers` in the Octavia API settings. The effective provider on the regional endpoint must advertise `weighted_http_target_request_filters_v1` along with the fixed-response and weighted-target capabilities. Rule-level request filters require their own flags and capabilities.
 
-A `backendRef` can use `RequestHeaderModifier` and `URLRewrite`. The route matches the original request. Octavia selects the target by weight, then applies rule headers, rule URL, target headers and target URL in that order. Separate references to the same Service port can carry separate filters. Weight-zero references receive no requests. An unresolved reference keeps its weighted share as a local HTTP 500 without target transformations.
+A `backendRef` can use `RequestHeaderModifier` and `URLRewrite`. The route matches the original request. Octavia selects the target by weight, then applies rule headers, rule URL, target headers and target URL in that order. Separate references to the same Service port can carry separate filters. Weight-zero references receive no requests. An unresolved backend or backend `ExtensionRef` keeps its weighted share as a local HTTP 500 without target transformations.
 
 A rule and a backend reference cannot both rewrite the request path or both rewrite the hostname. A hostname rewrite and a `Host` operation cannot be combined on a filtered target. An incompatible rule is rejected while valid sibling rules can still be programmed with `PartiallyInvalid=True`.
 

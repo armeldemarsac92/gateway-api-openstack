@@ -102,18 +102,14 @@ func (policy observedRoutePolicy) hasBackendRequestFilters() bool {
 }
 
 func backendRequestFilterTags(targets []octavia.WeightedHTTPTarget, observed observedRoutePolicy, rewrite *octavia.RequestURLRewriteUpdate) []string {
-	tagged := hasWeightedTargetRequestFilters(targets)
-	if tagged == observed.backendRequestFiltersTagged {
+	if observed.backendRequestFiltersTagged || !hasWeightedTargetRequestFilters(targets) {
 		return nil
 	}
 	tags := slices.Clone(observed.policy.Tags)
 	if rewrite != nil {
 		tags = slices.Clone(rewrite.Tags)
 	}
-	if tagged {
-		return append(tags, openstackidentity.BackendRequestFiltersPolicyTag)
-	}
-	return slices.DeleteFunc(tags, func(tag string) bool { return tag == openstackidentity.BackendRequestFiltersPolicyTag })
+	return append(tags, openstackidentity.BackendRequestFiltersPolicyTag)
 }
 
 type backendRequestFilterInventoryError struct {

@@ -503,7 +503,7 @@ func (p *Provider) observeListenerPolicies(ctx context.Context, inventory *route
 		backendFilterTag := slices.Contains(item.Tags, openstackidentity.BackendRequestFiltersPolicyTag)
 		hasBackendFilters := backendFilterTag || observation.TargetRequestFiltersPresent
 		if hasBackendFilters && item.ProjectID == p.projectID && item.ListenerID == listener.ID &&
-			(!role.weighted || !weighted || target == nil || len(target.WeightedTargets) == 0) {
+			(!role.weighted || !weighted || target == nil || target.AdminStateUp == nil || len(target.WeightedTargets) == 0) {
 			return &cloud.GraphError{Identity: owner.identity.Value(), Err: cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady,
 				&backendRequestFilterInventoryError{listenerID: listener.ID, policyID: item.ID})}
 		}
@@ -1123,20 +1123,6 @@ func buildRoutePolicyPlan(
 			}
 			continue
 		}
-		if observedPolicy.backendRequestFiltersTagged && !hasWeightedTargetRequestFilters(observedPolicy.weightedTargets) &&
-			!backendRequestFiltersPolicy.required(wantedPolicy) {
-			// The API may hide the transformations. Replace the policy only
-			// after its listener is closed and the old policy is disabled.
-			for _, step := range buildRouteDeletionPlan(observedRouteGraph{policies: []observedRoutePolicy{observedPolicy}}) {
-				step.withdrawHTTPPolicy = true
-				if step.kind == routeMutationDisablePolicy {
-					disablePlan = append(disablePlan, step)
-				} else {
-					plan = append(plan, step)
-				}
-			}
-			continue
-		}
 		state.L7PolicyIDs = append(state.L7PolicyIDs, policy.ID)
 		if wantedPolicy.httpsListenerHostname != "" && (observedPolicy.httpsListenerHostname != wantedPolicy.httpsListenerHostname ||
 			!observedPolicy.adminObserved) {
@@ -1160,7 +1146,6 @@ func buildRoutePolicyPlan(
 			if weighted != nil {
 				step.weightedTargets = &weighted.targets
 				step.policyTags = backendRequestFilterTags(weighted.targets, observedPolicy, rewritePatch)
-				step.withdrawHTTPPolicy = observedPolicy.hasBackendRequestFilters() && !hasWeightedTargetRequestFilters(weighted.targets)
 			}
 			if len(wantedPolicy.requestHeaderOperations) != 0 {
 				step.requestHeaderOperations = wantedPolicy.requestHeaderOperations

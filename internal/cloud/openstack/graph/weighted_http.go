@@ -429,6 +429,15 @@ func weightedTargetWithdrawals(desired desiredRoute, observed observedRouteGraph
 		if !found || policy.pending() {
 			continue
 		}
+		if policy.hasBackendRequestFilters() && !slices.ContainsFunc(desired.policies, func(wanted desiredPolicy) bool {
+			return wanted.role == policy.role && backendRequestFiltersPolicy.required(wanted)
+		}) {
+			// A legacy API can preserve hidden transformations on a target PUT.
+			// Delete the old policy with its marker intact, before waiting for
+			// new pools, and build a fresh policy from the complete vector.
+			steps = append(steps, obsoleteWeightedFilterPolicyStep(policy))
+			continue
+		}
 		if step, ok := localOnlyURLRewriteWithdrawal(desired, policy); ok {
 			steps = append(steps, step)
 			continue
@@ -475,6 +484,12 @@ func weightedTargetWithdrawals(desired desiredRoute, observed observedRouteGraph
 			withdrawn = policy.weightedTargets
 		}
 		if withdrawn != nil {
+			if policy.backendRequestFiltersTagged && !hasWeightedTargetRequestFilters(policy.weightedTargets) {
+				// A grant changed, but the API cannot prove what else would
+				// be written by replaying the remaining target slots.
+				steps = append(steps, obsoleteWeightedFilterPolicyStep(policy))
+				continue
+			}
 			if policy.hasRequestURLRewrite() && !observedPolicyDisabled(policy) {
 				steps = append(steps, routeMutation{kind: routeMutationDisablePolicy, id: policy.policy.ID, retry: retry})
 				continue
@@ -493,6 +508,12 @@ func weightedTargetWithdrawals(desired desiredRoute, observed observedRouteGraph
 		}
 	}
 	return steps
+}
+
+func obsoleteWeightedFilterPolicyStep(policy observedRoutePolicy) routeMutation {
+	step := buildRouteDeletionPlan(observedRouteGraph{policies: []observedRoutePolicy{policy}})[0]
+	step.withdrawHTTPPolicy = true
+	return step
 }
 
 // A rule with no positive, authorized pool can replace its targets and clear

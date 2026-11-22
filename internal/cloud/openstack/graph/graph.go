@@ -159,10 +159,14 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		message := "Waiting for complete Octavia backend request filter inventory"
 		actual.outcome = p.progressingOutcome(message)
 		result := p.pendingGraphResult(ctx, desired, actual)
+		result.Gateway.ScopedListenerDeferredPorts = unchangedHTTPListenerSiblings(desired, actual, listener.ID)
 		affected := make(map[int]bool)
 		for i, route := range desired.routes {
-			if httpURLPolicyRoutePort(desired, route) == listener.ProtocolPort {
+			port := httpURLPolicyRoutePort(desired, route)
+			if port == listener.ProtocolPort {
 				affected[i] = true
+			} else if desired.spec.Routes[i].Disposition == cloud.GraphEnsure && slices.Contains(result.Gateway.ScopedListenerDeferredPorts, port) {
+				result.Routes[i].Result.ObservationDeferred = true
 			}
 		}
 		p.markGuardedHTTPListener(&result, listener.ProtocolPort, affected, message)
