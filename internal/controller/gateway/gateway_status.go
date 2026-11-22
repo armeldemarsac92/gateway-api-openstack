@@ -694,10 +694,6 @@ func (r *Reconciler) applyHTTPSListenerStatus(
 				controller.SetCondition(&status.Conditions, controller.Condition(string(gatewayv1.ListenerConditionAccepted),
 					metav1.ConditionFalse, string(gatewayv1.ListenerReasonPortUnavailable), issue.message, gateway.Generation))
 			}
-			if issue.condition == gatewayv1.ListenerConditionAccepted || issue.condition == gatewayv1.ListenerConditionConflicted ||
-				issue.reason == gatewayv1.ListenerReasonInvalidRouteKinds {
-				status.AttachedRoutes = 0
-			}
 			controller.SetCondition(&status.Conditions, controller.Condition(string(issue.condition), conditionStatus, string(issue.reason), issue.message, gateway.Generation))
 			if statusIssue.resolvedRefs != nil {
 				controller.SetCondition(&status.Conditions, *statusIssue.resolvedRefs)

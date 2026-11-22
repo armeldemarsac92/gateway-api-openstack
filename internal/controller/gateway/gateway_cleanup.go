@@ -100,12 +100,14 @@ func (r *Reconciler) cleanupGateway(ctx context.Context, scope *gatewayScope) (c
 	}
 	if snapshot.disposition == gatewayCleanupRebuild {
 		if snapshot.listenerPort == "" {
-			if controller.GatewayListenerScope(r.Config, scope.gateway) == "" {
+			if controller.GatewayListenerScope(r.Config, scope.gateway) == "" && scope.gateway.Annotations[r.Config.GatewayHTTPSIsolatedPortsAnnotation()] == "" {
 				return ctrl.Result{}, nil
 			}
+			delete(scope.gateway.Annotations, r.Config.GatewayHTTPSIsolatedPortsAnnotation())
 			controller.SetGatewayListenerScope(r.Config, scope.gateway, "")
 			return ctrl.Result{}, r.patchGatewayMetadata(ctx, scope)
 		}
+		delete(scope.gateway.Annotations, r.Config.GatewayHTTPSIsolatedPortsAnnotation())
 		scope.gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] = snapshot.listenerPort
 		scope.gateway.Annotations[r.Config.GatewayListenerProtocolAnnotation()] = string(snapshot.listenerProtocol)
 		controller.SetGatewayListenerScope(r.Config, scope.gateway, "")
@@ -122,6 +124,7 @@ func (r *Reconciler) cleanupGateway(ctx context.Context, scope *gatewayScope) (c
 	delete(scope.gateway.Annotations, r.Config.GatewayListenerModeAnnotation(gatewayv1.UDPProtocolType))
 	delete(scope.gateway.Annotations, r.Config.GatewayListenerModeAnnotation(gatewayv1.TCPProtocolType))
 	delete(scope.gateway.Annotations, r.Config.GatewayListenerModeAnnotation(gatewayv1.HTTPProtocolType))
+	delete(scope.gateway.Annotations, r.Config.GatewayHTTPSIsolatedPortsAnnotation())
 	delete(scope.gateway.Annotations, r.Config.GatewayClusterIDAnnotation())
 	delete(scope.gateway.Annotations, r.Config.GatewayProjectIDAnnotation())
 	if err := r.patchGatewayMetadata(ctx, scope); err != nil {

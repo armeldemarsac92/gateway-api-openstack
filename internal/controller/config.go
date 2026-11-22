@@ -181,6 +181,11 @@ func (c Config) GatewayListenerModeAnnotation(protocol gatewayv1.ProtocolType) s
 	return c.Domain() + "/gateway-" + strings.ToLower(string(protocol)) + "-listener-mode-" + c.controllerKey()
 }
 
+// GatewayHTTPSIsolatedPortsAnnotation retains enrollment when a shared port loses its penultimate section.
+func (c Config) GatewayHTTPSIsolatedPortsAnnotation() string {
+	return c.Domain() + "/https-isolated-ports-" + c.controllerKey()
+}
+
 // GatewayListenerProtocolAnnotation returns the key that records the listener
 // protocol in a Gateway binding.
 func (c Config) GatewayListenerProtocolAnnotation() string {

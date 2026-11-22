@@ -1189,6 +1189,22 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct, https, grouped bool
 				}
 				converge(newProvider(), spec)
 			}
+			// A failed Kubernetes route read supplies only the Gateway's TLS
+			// snapshot. Membership in the host list cannot prove a route's section.
+			rows[1]["https_listener_hostname"] = wildcardScope
+			withdraw := cloud.GatewayGraphSpec{Identity: spec.Identity, Gateway: cloud.GatewayGraphNode{
+				Disposition: cloud.GraphWithdrawTLS, Spec: cloud.GatewaySpec{
+					Identity: spec.Identity, ListenerProtocol: cloud.ListenerProtocolHTTP, ListenerPort: frontendAddress.Port,
+					ScopedListeners: spec.Gateway.Spec.ScopedListeners[:1],
+				},
+			}}
+			before := len(writes)
+			result = reconcile(newProvider(), withdraw)
+			if server["admin_state_up"] != false || peer["admin_state_up"] != true ||
+				!slices.Equal(writes[before:], []string{"PUT " + tlsPath}) {
+				t.Fatalf("incomplete route snapshot preserved an unverified section: %v, writes %v", result.Outcome, writes[before:])
+			}
+			converge(newProvider(), spec)
 			omitVirtualHosts = true
 			assertClosed(newProvider())
 			// Each observed retirement is restricted to this closed listener.
@@ -1197,7 +1213,7 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct, https, grouped bool
 
 			isolationAdvertised = false
 			assertClosed(newProvider())
-			before := len(writes)
+			before = len(writes)
 			reconcile(newProvider(), spec)
 			if len(writes) != before {
 				t.Fatalf("discovery failure allowed an isolated write: %v", writes[before:])
@@ -1226,6 +1242,17 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct, https, grouped bool
 			if server["admin_state_up"] != false || !slices.Contains(pilotTags(server["tags"]), httpsIsolationTag) ||
 				!slices.Equal(result.Gateway.ScopedListenerReadyPorts, []int{frontendAddress.Port}) || len(writes) != before {
 				t.Fatalf("opt-out reinterpreted the enclosed listener as ordinary HTTPS: %v, writes %v", result.Gateway, writes[before:])
+			}
+			spec.Gateway.Spec.ScopedListeners = spec.Gateway.Spec.ScopedListeners[1:]
+			spec.Routes[1].Disposition = cloud.GraphDelete
+			for range 24 {
+				reconcile(newProvider(), spec)
+				if inventory[tlsPath] == nil {
+					break
+				}
+			}
+			if inventory[tlsPath] != nil || peer["admin_state_up"] != true {
+				t.Fatalf("explicit port removal retained the isolated frontend or changed the HTTP sibling: %v", writes[before:])
 			}
 			return
 		}

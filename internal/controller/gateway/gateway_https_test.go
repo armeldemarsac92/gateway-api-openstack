@@ -126,7 +126,7 @@ func TestSharedHTTPSGatewayProgramsAndWithdrawsPortAsAUnit(t *testing.T) {
 			if programmed != (!shared || len(wantHosts) != 0) {
 				t.Fatalf("unexpected %s readiness: %v", listener.Name, listener.Conditions)
 			}
-			if reason == "" && (listener.AttachedRoutes == 1) != shared {
+			if reason != gatewayv1.ListenerReasonHostnameConflict && (listener.AttachedRoutes == 1) != shared {
 				t.Fatalf("unexpected %s attachment count: %d", listener.Name, listener.AttachedRoutes)
 			}
 			if shared && reason != "" {
@@ -154,6 +154,19 @@ func TestSharedHTTPSGatewayProgramsAndWithdrawsPortAsAUnit(t *testing.T) {
 		t.Fatal(err)
 	}
 	verify(nil, gatewayv1.ListenerConditionConflicted, gatewayv1.ListenerReasonHostnameConflict)
+
+	gw.Spec.Listeners = []gatewayv1.Listener{gw.Spec.Listeners[0], exact, testHTTPSListener("dedicated", 8443)}
+	if err := kube.Update(t.Context(), gw); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Reconcile(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	remainingPorts := provider.gatewaySpecs[len(provider.gatewaySpecs)-1].ScopedListeners
+	if !slices.Equal(remainingPorts[1].TLS.VirtualHosts, []string{"foo.wildcard.org"}) || !SharedHTTPSListener(cfg, gw, &exact) ||
+		len(remainingPorts[2].TLS.VirtualHosts) != 0 {
+		t.Fatalf("after removing two sections, retained section = %+v and dedicated sibling = %+v", remainingPorts[1].TLS, remainingPorts[2].TLS)
+	}
 }
 
 func TestHTTPSGatewayWithdrawsRevokedPortAndPreservesSiblings(t *testing.T) {

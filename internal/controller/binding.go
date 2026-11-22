@@ -91,6 +91,7 @@ func GatewayHasControllerBinding(config Config, gateway *gatewayv1.Gateway) bool
 	}
 	for _, key := range []string{
 		config.GatewayListenerPortAnnotation(),
+		config.GatewayHTTPSIsolatedPortsAnnotation(),
 		config.GatewayListenerProtocolAnnotation(),
 		config.GatewayClusterIDAnnotation(),
 		config.GatewayProjectIDAnnotation(),
@@ -122,6 +123,7 @@ func GatewayBindingMetadataEqual(config Config, left, right *gatewayv1.Gateway) 
 	}
 	for _, key := range []string{
 		config.GatewayListenerPortAnnotation(),
+		config.GatewayHTTPSIsolatedPortsAnnotation(),
 		config.GatewayListenerProtocolAnnotation(),
 		config.GatewayClusterIDAnnotation(),
 		config.GatewayProjectIDAnnotation(),

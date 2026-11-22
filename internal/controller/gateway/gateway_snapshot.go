@@ -110,7 +110,7 @@ func (r *Reconciler) observeGatewayMutationSnapshot(
 		return nil, errGatewayChanged
 	}
 	if r.gatewayListenerNeedsReplacement(&gateway, listener) ||
-		(binding == gatewayBindingRequired && (!r.gatewayBindingComplete(&gateway) || r.gatewayNeedsListenerScope(&gateway))) {
+		(binding == gatewayBindingRequired && r.gatewayNeedsBinding(&gateway)) {
 		return nil, errGatewayChanged
 	}
 
@@ -261,7 +261,7 @@ func (r *Reconciler) decideGatewayPhase(scope *gatewayScope) gatewayPhaseDecisio
 			phase: gatewayPhaseReplaceGraph, listener: listener, listenerPort: listenerPort,
 		}
 	}
-	if !r.gatewayBindingComplete(gateway) || r.gatewayNeedsListenerScope(gateway) {
+	if r.gatewayNeedsBinding(gateway) {
 		return gatewayPhaseDecision{phase: gatewayPhaseBind, listener: listener, listenerPort: listenerPort}
 	}
 	return gatewayPhaseDecision{phase: gatewayPhaseEnsure, listener: listener, listenerPort: listenerPort}
@@ -272,6 +272,11 @@ func (r *Reconciler) gatewayBindingComplete(gateway *gatewayv1.Gateway) bool {
 		gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] != "" &&
 		gateway.Annotations[r.Config.GatewayClusterIDAnnotation()] != "" &&
 		gateway.Annotations[r.Config.GatewayProjectIDAnnotation()] != ""
+}
+
+func (r *Reconciler) gatewayNeedsBinding(gateway *gatewayv1.Gateway) bool {
+	return !r.gatewayBindingComplete(gateway) || r.gatewayNeedsListenerScope(gateway) ||
+		desiredHTTPSIsolatedPorts(r.Config, gateway) != gateway.Annotations[r.Config.GatewayHTTPSIsolatedPortsAnnotation()]
 }
 
 func (r *Reconciler) gatewayListenerNeedsReplacement(gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) bool {

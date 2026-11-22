@@ -147,9 +147,11 @@ func (p *Provider) observeHTTPSIsolation(ctx context.Context, desired desiredGat
 			bindingsMatch = actual.httpsIsolationAvailable && hasHTTPSIsolationEnrollment(listener) &&
 				len(actual.httpsVirtualHosts[listener.ID]) != 0
 		}
+		enrolled := hasHTTPSIsolationEnrollment(listener) && len(actual.httpsVirtualHosts[listener.ID]) != 0
+		changeHosts := len(hosts) != 0 && hasAuthorizedListener(spec) && (!isolated || enrolled)
+		removeFrontend := spec.TLS == nil && enrolled
 		retire := desired.spec.Gateway.Disposition == cloud.GraphEnsure && actual.httpsIsolationAvailable &&
-			len(hosts) != 0 && hasAuthorizedListener(spec) && !bindingsMatch &&
-			(!isolated || hasHTTPSIsolationEnrollment(listener) && len(actual.httpsVirtualHosts[listener.ID]) != 0)
+			!bindingsMatch && (changeHosts || removeFrontend)
 		if !bindingsMatch {
 			actual.httpsIsolationUnverified[listener.ID] = true
 		}
@@ -176,9 +178,8 @@ func (p *Provider) observeHTTPSIsolation(ctx context.Context, desired desiredGat
 				actual.httpsIsolationUnverified[listener.ID] = true
 				break
 			}
-			if desired.spec.Gateway.Disposition != cloud.GraphEnsure {
-				continue
-			}
+			// A withdrawal-only snapshot has no route owners. A valid section
+			// name alone cannot show that the policy belongs to that section.
 			role, ok := readRouteResourceRole(item.Policy.Tags, rolePolicyExact, rolePolicyPrefix)
 			if !ok || !slices.ContainsFunc(wanted[listener.ProtocolPort][role.raw], func(binding httpsPolicyBinding) bool {
 				return binding.scope == hostname && binding.owner.MatchesRoute(item.Policy.Tags, role.raw)
@@ -233,6 +234,11 @@ func (p *Provider) planHTTPSPolicyRetirement(ctx context.Context, desired desire
 		return
 	}
 	if listener.Protocol != terminatedHTTPS || !supportsSingleCertificate(listener) || listener.DefaultTlsContainerRef == "" {
+		return
+	}
+	if spec.TLS == nil {
+		actual.httpsIsolationMutation = &graphMutation{kind: graphDeleteChild, listenerID: listener.ID, scopedListener: spec, redactTLSError: true,
+			deletion: listenerDeletionStep(listener.ID), message: "Removing the closed Octavia HTTPS listener"}
 		return
 	}
 	actual.httpsIsolationMutation = &graphMutation{kind: graphUpdateListenerVirtualHosts, listenerID: listener.ID, scopedListener: spec, redactTLSError: true,

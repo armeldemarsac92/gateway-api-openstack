@@ -217,10 +217,31 @@ func HTTPSVirtualHostname(listener *gatewayv1.Listener) string {
 // SharedHTTPSListener identifies logical sections that need a virtual-host
 // selector when their port is programmed.
 func SharedHTTPSListener(config controller.Config, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) bool {
-	return config.OperatorHTTPS && config.HTTPSListenerIsolation && listener.Protocol == gatewayv1.HTTPSProtocolType &&
+	if !config.OperatorHTTPS || !config.HTTPSListenerIsolation || listener.Protocol != gatewayv1.HTTPSProtocolType {
+		return false
+	}
+	enrolled := gateway.Annotations[config.GatewayHTTPSIsolatedPortsAnnotation()]
+	return slices.Contains(strings.Split(enrolled, ","), strconv.Itoa(int(listener.Port))) ||
 		slices.ContainsFunc(gateway.Spec.Listeners, func(peer gatewayv1.Listener) bool {
 			return peer.Protocol == listener.Protocol && peer.Port == listener.Port && peer.Name != listener.Name
 		})
+}
+
+// Include only ports still assigned to HTTPS. A current singleton retains the
+// original scoped policy model through edits and controller restarts.
+func desiredHTTPSIsolatedPorts(config controller.Config, gateway *gatewayv1.Gateway) string {
+	if !config.OperatorHTTPS || !config.HTTPSListenerIsolation {
+		return gateway.Annotations[config.GatewayHTTPSIsolatedPortsAnnotation()]
+	}
+	var ports []string
+	for i := range gateway.Spec.Listeners {
+		listener := &gateway.Spec.Listeners[i]
+		if SharedHTTPSListener(config, gateway, listener) {
+			ports = append(ports, strconv.Itoa(int(listener.Port)))
+		}
+	}
+	slices.Sort(ports)
+	return strings.Join(slices.Compact(ports), ",")
 }
 
 func httpsSections(listeners []*gatewayv1.Listener) map[int][]*gatewayv1.Listener {
@@ -250,7 +271,7 @@ func (r *Reconciler) resolveHTTPSPort(ctx context.Context, gateway *gatewayv1.Ga
 		}
 	}
 	first := sections[0]
-	if len(sections) == 1 {
+	if len(sections) == 1 && !SharedHTTPSListener(r.Config, gateway, first) {
 		return r.resolveCertificate(ctx, gateway, first)
 	}
 	target := certificateSecret(gateway, first)
@@ -464,8 +485,7 @@ func (r *Reconciler) listenerTLSIssues(ctx context.Context, gateway *gatewayv1.G
 		issue := httpsProfileIssue(r.Config, gateway, listener)
 		var resolvedRefs *metav1.Condition
 		if listener.Protocol == gatewayv1.HTTPSProtocolType {
-			switch {
-			case issue == nil:
+			if issue == nil {
 				issue = resolutions[int(listener.Port)].issue
 			}
 			if issue != nil && issue.condition == gatewayv1.ListenerConditionConflicted {
