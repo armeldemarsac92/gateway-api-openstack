@@ -1,0 +1,24 @@
+{
+  "controllerSource": "3c8dd9883713c57ac152ebfb12210ec9eecbe6ca",
+  "gatewayAPIVersion": "v1.7.0",
+  "kubernetesEnvtestVersion": "1.36.2",
+  "provider": "recording OpenStack provider",
+  "readinessPod": "simulated Ready condition",
+  "channels": {
+    "standard": {
+      "registeredCases": {
+        "ListenerSetDefaultNotAllowed": "PASS",
+        "ListenerSetAllowedNamespaceNone": "PASS"
+      },
+      "parentLifecycle": "PASS"
+    },
+    "experimental": {
+      "registeredCases": {
+        "ListenerSetDefaultNotAllowed": "PASS",
+        "ListenerSetAllowedNamespaceNone": "PASS"
+      },
+      "parentLifecycle": "PASS"
+    }
+  },
+  "foreignStatusOwnership": "PASS"
+}
