@@ -1,0 +1,9 @@
+{
+  "istioBase": "eed52ebb66ade45214088877b0f82855d954060d",
+  "istioRevision": "953e8af367342ea0b230f6f98e99f919aa82372e",
+  "platform": "linux/amd64",
+  "ociArchiveSHA256": "2d8fc2c4926086b945109c83996c8fd45b8ec23d1059b0f76e3e1cc6ab055a65",
+  "pilotSHA256": "af859ab33c5b28a38ba6f50ea833d0c61acca7eb334679c8ebb17238bc23c63e",
+  "sourceTree": "e78a45a81d6af0c93f83e08ef09f0c053fa2cab1",
+  "sourcePatchSHA256": "5077b17868f951eabd4ce13648e307d5f497633ad82bfc2c2314d0315c43d1dd"
+}

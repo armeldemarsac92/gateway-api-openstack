@@ -1,0 +1,50 @@
+name: Publish Hibiscus ambient pilot
+
+on:
+  push:
+    branches: [hibiscus/v1.7.0]
+    paths:
+      - integrations/istio-ambient/consumer-pilot.json
+      - integrations/istio-ambient/consumer-routes.yaml
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: github.repository == 'armeldemarsac92/gateway-api-openstack'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify and publish the opt-in Istio pilot
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          module=integrations/istio-ambient
+          revision=$(jq -er '.istioRevision | select(test("^[a-f0-9]{40}$"))' "$module/consumer-pilot.json")
+          checksum=$(jq -er '.ociArchiveSHA256 | select(test("^[a-f0-9]{64}$"))' "$module/consumer-pilot.json")
+          short=${revision:0:12}
+          repository="ghcr.io/$GITHUB_REPOSITORY"
+          image=$(sed -n 's/^image: //p' "$module/consumer-routes.yaml")
+          asset="istio-pilot-1.31.0-hibiscus-$short-linux-amd64.oci.tar"
+          gh release download "hibiscus-istio-$short" --repo "$GITHUB_REPOSITORY" --pattern "$asset" --dir "$RUNNER_TEMP"
+          printf '%s  %s\n' "$checksum" "$RUNNER_TEMP/$asset" | sha256sum --check -
+          source="oci-archive:$RUNNER_TEMP/$asset"
+          digest="sha256:$(skopeo inspect --raw "$source" | sha256sum | cut -d' ' -f1)"
+          test "$image" = "$repository@$digest"
+          skopeo inspect --config "$source" | jq -e '.os=="linux" and .architecture=="amd64"' >/dev/null
+          authfile="$RUNNER_TEMP/hibiscus-pilot-registry.json"
+          trap 'rm -f "$authfile"' EXIT
+          printf '%s' "$GH_TOKEN" | skopeo login --authfile "$authfile" --username "$GITHUB_ACTOR" --password-stdin ghcr.io
+          skopeo copy --preserve-digests --dest-authfile "$authfile" "$source" "docker://$repository:istio-pilot-$short"
+          actual=$(skopeo inspect --authfile "$authfile" --raw "docker://$image" | sha256sum | cut -d' ' -f1)
+          test "sha256:$actual" = "$digest"
+          printf 'Published opted-in Istio pilot %s\n' "$image" >> "$GITHUB_STEP_SUMMARY"

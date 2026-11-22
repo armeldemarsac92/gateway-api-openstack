@@ -1,0 +1,1220 @@
+{
+  "scope": "local disposable VM / kind / Istio Ambient",
+  "gatewayAPISource": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "gatewayAPIVersion": "v1.7.0",
+  "pilotSource": "953e8af367342ea0b230f6f98e99f919aa82372e",
+  "pilotOCI": {
+    "path": "pilot-candidate.oci.tar",
+    "reference": "localhost/hibiscus-pilot:953e8af36734",
+    "platform": "linux/amd64",
+    "baseManifestDigest": "sha256:17b581d9d75a1ab319d2816230626f06d65b48e3e798f98e3092a031843b3fe0",
+    "manifestDigest": "sha256:fdb9d02e2b427f81d2763fce329361ac32432080cc14b7115315bed4508bbcc5",
+    "archiveIndexDigest": "sha256:405f70c7e95d72ed6d7c1a06ea37ec3cf293b70038cbf090c96f2192ed814127",
+    "configDigest": "sha256:f9b6226524d4aa623043694db7a961207896ff632b58889a7b06dd772c44d1a8",
+    "pilotDiscoverySHA256": "af859ab33c5b28a38ba6f50ea833d0c61acca7eb334679c8ebb17238bc23c63e",
+    "archiveSHA256": "2d8fc2c4926086b945109c83996c8fd45b8ec23d1059b0f76e3e1cc6ab055a65"
+  },
+  "kindImportedPlatformManifest": "sha256:ab752ce0fb504ecbf3f754af044fa678ce52051e86b1137dc4214b1364597cf4",
+  "upstreamRunnerSHA256": "f12cd7e63e03079c76843fd4a7ec15ca3dd6a974465fccb1550b1cd5c0e4f0e8",
+  "channels": {
+    "standard": {
+      "passed": true,
+      "exits": {
+        "install": 0,
+        "candidate": 0,
+        "suite": 0,
+        "lifecycle": 0,
+        "targeted": 0,
+        "header-first": 1,
+        "cleanup": 0,
+        "delete": 0,
+        "vm": 1
+      },
+      "readyPilotSourceAndOCIObserved": true,
+      "pilotRuntime": {
+        "gitRevision": "953e8af367342ea0b230f6f98e99f919aa82372e",
+        "readyImageReference": "localhost/hibiscus-pilot:953e8af36734",
+        "readyImageDigest": "sha256:405f70c7e95d72ed6d7c1a06ea37ec3cf293b70038cbf090c96f2192ed814127",
+        "readyDuringUpstreamSuite": true
+      },
+      "nodeImageObserved": true,
+      "vmPoweredOff": true,
+      "guestScriptSHA256": {
+        "consumer-targeted.sh": "400cb5718552dfa725d22f69ebd00a34c444b8c47dbaffb374255d992aa29592",
+        "consumer-header-first.sh": "b785f9b9cb8384859f55aa2d2ff6ff87e92b87b2276f7aaafa8fa8975df129d6",
+        "consumer-lifecycle.sh": "7bb9844d76318ffca960a763d721fc1248372a9274e78a91a3f8d792197d02c2"
+      },
+      "targetedScriptMatchesReplaySource": true,
+      "bundle": {
+        "sha256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+        "httpAndGRPCRouteCRDsObserved": true,
+        "xMeshCRDObserved": false
+      },
+      "upstreamCases": {
+        "MeshBasic": "PASS",
+        "MeshConsumerRoute": "PASS",
+        "MeshFrontend": "PASS",
+        "MeshFrontendHostname": "PASS",
+        "MeshGRPCRouteRequestHeaderModifier": "PASS",
+        "MeshGRPCRouteWeight": "PASS",
+        "MeshHTTPRoute303Redirect": "PASS",
+        "MeshHTTPRoute307Redirect": "PASS",
+        "MeshHTTPRoute308Redirect": "PASS",
+        "MeshHTTPRouteBackendRequestHeaderModifier": "PASS",
+        "MeshHTTPRouteMatching": "PASS",
+        "MeshHTTPRouteNamedRule": "PASS",
+        "MeshHTTPRouteQueryParamMatching": "PASS",
+        "MeshHTTPRouteRedirectHostAndStatus": "PASS",
+        "MeshHTTPRouteRedirectPath": "PASS",
+        "MeshHTTPRouteRedirectPort": "PASS",
+        "MeshHTTPRouteRequestHeaderModifier": "PASS",
+        "MeshHTTPRouteRewritePath": "PASS",
+        "MeshHTTPRouteSchemeRedirect": "PASS",
+        "MeshHTTPRouteSimpleSameNamespace": "PASS",
+        "MeshHTTPRouteWeight": "PASS",
+        "MeshPorts": "PASS",
+        "MeshTrafficSplit": "PASS"
+      },
+      "unexpectedUpstreamCases": [],
+      "meshConsumerSubtests": {
+        "request_from_consumer_route's_namespace_modified_by_HTTPRoute": "PASS",
+        "request_not_from_consumer_route's_namespace_not_modified_by_HTTPRoute": "PASS"
+      },
+      "gatewayGraphOperations": [
+        0
+      ],
+      "lifecycle": {
+        "consumer-after-removal": {
+          "expected": [
+            200,
+            "x-producer:retained"
+          ],
+          "observed": [
+            200,
+            "x-producer:retained"
+          ],
+          "passed": true
+        },
+        "consumer-before": {
+          "expected": [
+            200,
+            "x-producer:retained"
+          ],
+          "observed": [
+            200,
+            "x-producer:retained"
+          ],
+          "passed": true
+        },
+        "consumer-before-removal": {
+          "expected": [
+            200,
+            "x-header-set:set"
+          ],
+          "observed": [
+            200,
+            "x-header-set:set"
+          ],
+          "passed": true
+        },
+        "consumer-created": {
+          "expected": [
+            200,
+            "x-header-set:set"
+          ],
+          "observed": [
+            200,
+            "x-header-set:set"
+          ],
+          "passed": true
+        },
+        "consumer-modified": {
+          "expected": [
+            200,
+            "x-header-set:%REQ(X-Example)%"
+          ],
+          "observed": [
+            200,
+            "x-header-set:%REQ(X-Example)%"
+          ],
+          "passed": true
+        },
+        "fallback-after-priority-removal": {
+          "expected": [
+            200,
+            "x-header-set:set"
+          ],
+          "observed": [
+            200,
+            "x-header-set:set"
+          ],
+          "passed": true
+        },
+        "inherited-ingress-excludes-consumer": {
+          "expected": [
+            200,
+            "x-producer:retained"
+          ],
+          "observed": [
+            200,
+            "x-producer:retained"
+          ],
+          "passed": true
+        },
+        "neighbor": {
+          "expected": [
+            200,
+            null
+          ],
+          "observed": [
+            200,
+            null
+          ],
+          "passed": true
+        },
+        "other-port": {
+          "expected": [
+            200,
+            null
+          ],
+          "observed": [
+            200,
+            null
+          ],
+          "passed": true
+        },
+        "portless-exact-outranks-explicit-catchall": {
+          "expected": [
+            200,
+            "x-header-set:priority"
+          ],
+          "observed": [
+            200,
+            "x-header-set:priority"
+          ],
+          "passed": true
+        },
+        "portless-match-stays-on-backend-port": {
+          "expected": [
+            200,
+            null
+          ],
+          "observed": [
+            200,
+            null
+          ],
+          "passed": true
+        },
+        "producer-after-removal": {
+          "expected": [
+            200,
+            "x-producer:retained"
+          ],
+          "observed": [
+            200,
+            "x-producer:retained"
+          ],
+          "passed": true
+        },
+        "producer-after-update": {
+          "expected": [
+            200,
+            "x-producer:retained"
+          ],
+          "observed": [
+            200,
+            "x-producer:retained"
+          ],
+          "passed": true
+        },
+        "producer-before": {
+          "expected": [
+            200,
+            "x-producer:retained"
+          ],
+          "observed": [
+            200,
+            "x-producer:retained"
+          ],
+          "passed": true
+        },
+        "producer-during": {
+          "expected": [
+            200,
+            "x-producer:retained"
+          ],
+          "observed": [
+            200,
+            "x-producer:retained"
+          ],
+          "passed": true
+        },
+        "producer-during-priority": {
+          "expected": [
+            200,
+            "x-producer:retained"
+          ],
+          "observed": [
+            200,
+            "x-producer:retained"
+          ],
+          "passed": true
+        },
+        "producer-policy-denies-consumer": {
+          "expected": [
+            403,
+            "*"
+          ],
+          "observed": [
+            403,
+            "x-header-set:%REQ(X-Example)%"
+          ],
+          "passed": true
+        },
+        "rejected-mutation-retains-producer": {
+          "expected": [
+            200,
+            "x-producer:retained"
+          ],
+          "observed": [
+            200,
+            "x-producer:retained"
+          ],
+          "passed": true
+        },
+        "service-override-restores-consumer": {
+          "expected": [
+            200,
+            "x-header-set:%REQ(X-Example)%"
+          ],
+          "observed": [
+            200,
+            "x-header-set:%REQ(X-Example)%"
+          ],
+          "passed": true
+        }
+      },
+      "targeted": {
+        "traffic": {
+          "active-inherited-canary-retains-producer": {
+            "expected": [
+              200,
+              "x-producer:retained"
+            ],
+            "observed": [
+              200,
+              "x-producer:retained"
+            ],
+            "passed": true
+          },
+          "explicit-service-primary-ignores-inherited-canary": {
+            "expected": [
+              200,
+              "x-header-set:set"
+            ],
+            "observed": [
+              200,
+              "x-header-set:set"
+            ],
+            "passed": true
+          },
+          "header-control": {
+            "expected": [
+              200,
+              "x-header-set:set"
+            ],
+            "observed": [
+              200,
+              "x-header-set:set"
+            ],
+            "passed": true
+          },
+          "invalid-header-retains-producer": {
+            "expected": [
+              200,
+              "x-producer:retained"
+            ],
+            "observed": [
+              200,
+              "x-producer:retained"
+            ],
+            "passed": true
+          },
+          "invalid-matcher-retains-producer": {
+            "expected": [
+              200,
+              "x-producer:retained"
+            ],
+            "observed": [
+              200,
+              "x-producer:retained"
+            ],
+            "passed": true
+          },
+          "regex-retains-producer": {
+            "expected": [
+              200,
+              "x-producer:retained"
+            ],
+            "observed": [
+              200,
+              "x-producer:retained"
+            ],
+            "passed": true
+          },
+          "restored-after-invalid-matcher": {
+            "expected": [
+              200,
+              "x-header-set:set"
+            ],
+            "observed": [
+              200,
+              "x-header-set:set"
+            ],
+            "passed": true
+          },
+          "restored-header-route": {
+            "expected": [
+              200,
+              "x-header-set:set"
+            ],
+            "observed": [
+              200,
+              "x-header-set:set"
+            ],
+            "passed": true
+          },
+          "service-canary-opt-out-restores-consumer": {
+            "expected": [
+              200,
+              "x-header-set:set"
+            ],
+            "observed": [
+              200,
+              "x-header-set:set"
+            ],
+            "passed": true
+          }
+        },
+        "accepted": [
+          {
+            "observedGeneration": 1,
+            "status": "True",
+            "reason": "Accepted",
+            "message": "Route was valid"
+          },
+          {
+            "observedGeneration": 2,
+            "status": "False",
+            "reason": "UnsupportedValue",
+            "message": "consumer HTTPRoute rule 1: invalid or reserved response header"
+          },
+          {
+            "observedGeneration": 3,
+            "status": "True",
+            "reason": "Accepted",
+            "message": "Route was valid"
+          },
+          {
+            "observedGeneration": 4,
+            "status": "False",
+            "reason": "UnsupportedValue",
+            "message": "consumer HTTPRoute rule 1: invalid header match"
+          },
+          {
+            "observedGeneration": 5,
+            "status": "True",
+            "reason": "Accepted",
+            "message": "Route was valid"
+          },
+          {
+            "observedGeneration": 6,
+            "status": "False",
+            "reason": "UnsupportedValue",
+            "message": "consumer HTTPRoute rule 1: only Exact and PathPrefix path matches are supported"
+          },
+          {
+            "observedGeneration": 7,
+            "status": "True",
+            "reason": "Accepted",
+            "message": "Route was valid"
+          },
+          {
+            "observedGeneration": 7,
+            "status": "True",
+            "reason": "Accepted",
+            "message": "Route was valid"
+          },
+          {
+            "observedGeneration": 7,
+            "status": "False",
+            "reason": "UnsupportedValue",
+            "message": "consumer routes require a single Service waypoint with canary forwarding disabled"
+          },
+          {
+            "observedGeneration": 7,
+            "status": "True",
+            "reason": "Accepted",
+            "message": "Route was valid"
+          }
+        ],
+        "invalidHeaderRejectedByAPI": false,
+        "invalidMatcherRejectedByAPI": false,
+        "distinctCanaryAndPrimaryIdentities": true
+      },
+      "firstHeader": {
+        "replayedInSeparateVM": true,
+        "exits": {
+          "install": 0,
+          "candidate": 0,
+          "header-first": 0,
+          "cleanup": 0,
+          "delete": 0,
+          "vm": 0,
+          "header-first-setup": 0
+        },
+        "readyPilotSourceAndOCIObserved": true,
+        "nodeImageObserved": true,
+        "vmPoweredOff": true,
+        "guestScriptSHA256": {
+          "consumer-targeted.sh": "400cb5718552dfa725d22f69ebd00a34c444b8c47dbaffb374255d992aa29592",
+          "consumer-header-first.sh": "68cf3507d1adbb80b3c3e08502d166b0f47613a1f42ab28158ba159aff285028",
+          "consumer-lifecycle.sh": "91cc974799e0090be0a250e945e08cda908401c81177c7af8ff9fc2192c708d8"
+        },
+        "guestScriptsMatchReplaySource": true,
+        "ambientFixtureSource": "bcbe2c8abcacb3910cd4503e9d1a68a9414aa699",
+        "ambientFixtureSHA256": {
+          "integrations/istio-ambient/install.sh": "9cf2c4e0e24c1f631ca36a539b4fdbb2de5373bf789f82abebf887b6b3733224",
+          "integrations/istio-ambient/waypoint.yaml": "39a293f884e9565efc723c3c9a045213f78a437aa09343f4b3ef0abe5b9556f0",
+          "integrations/istio-ambient/waypoint-class.yaml": "5355dc71f37a4a1ef3663a87ecb9fad951ed1b431a6b49830b616a5cbfa6dcfb",
+          "config/crd/gateway-api-openstack.github.io_openstackgatewayclassconfigs.yaml": "39aa7fa4a30f187d5eed492fe3af821dc23498ab49ec4a37a6d4152cf70b8f16"
+        },
+        "singleExactControl": {
+          "single-exact-first-value": {
+            "expected": [
+              200,
+              "x-header-set:single-exact"
+            ],
+            "observed": [
+              200,
+              "x-header-set:single-exact"
+            ],
+            "passed": true
+          },
+          "single-exact-other-value": {
+            "expected": [
+              404,
+              null
+            ],
+            "observed": [
+              404,
+              null
+            ],
+            "passed": true
+          }
+        },
+        "duplicate": {
+          "exact-duplicate": {
+            "admission": "Stored",
+            "storedOrder": [
+              "X-Example=Exact=application",
+              "x-example=Exact=different"
+            ],
+            "admissionError": null,
+            "traffic": {
+              "exact-duplicate-first-value": {
+                "expected": [
+                  200,
+                  "x-header-set:exact-duplicate"
+                ],
+                "observed": [
+                  200,
+                  "x-header-set:exact-duplicate"
+                ],
+                "passed": true
+              },
+              "exact-duplicate-shadowed-value": {
+                "expected": [
+                  404,
+                  null
+                ],
+                "observed": [
+                  404,
+                  null
+                ],
+                "passed": true
+              }
+            }
+          },
+          "regex-duplicate": {
+            "admission": "Stored",
+            "storedOrder": [
+              "X-Example=Exact=application",
+              "x-example=RegularExpression=^different$"
+            ],
+            "admissionError": null,
+            "traffic": {
+              "regex-duplicate-first-value": {
+                "expected": [
+                  200,
+                  "x-header-set:regex-duplicate"
+                ],
+                "observed": [
+                  200,
+                  "x-header-set:regex-duplicate"
+                ],
+                "passed": true
+              },
+              "regex-duplicate-shadowed-value": {
+                "expected": [
+                  404,
+                  null
+                ],
+                "observed": [
+                  404,
+                  null
+                ],
+                "passed": true
+              }
+            }
+          }
+        },
+        "accepted": [
+          {
+            "observedGeneration": 2,
+            "status": "True",
+            "reason": "Accepted",
+            "message": "Route was valid"
+          },
+          {
+            "observedGeneration": 3,
+            "status": "True",
+            "reason": "Accepted",
+            "message": "Route was valid"
+          },
+          {
+            "observedGeneration": 4,
+            "status": "True",
+            "reason": "Accepted",
+            "message": "Route was valid"
+          },
+          {
+            "observedGeneration": 5,
+            "status": "False",
+            "reason": "UnsupportedValue",
+            "message": "consumer HTTPRoute rule 1: only Exact header matches are supported"
+          }
+        ],
+        "standaloneRegexAPIRejection": null,
+        "standaloneRegexTraffic": {
+          "standalone-regex-retains-producer": {
+            "expected": [
+              200,
+              "x-producer:retained"
+            ],
+            "observed": [
+              200,
+              "x-producer:retained"
+            ],
+            "passed": true
+          }
+        }
+      },
+      "initialHeaderFixture": {
+        "exit": 1,
+        "shadowedValueStatus": "404"
+      }
+    },
+    "experimental": {
+      "passed": true,
+      "exits": {
+        "install": 0,
+        "candidate": 0,
+        "suite": 0,
+        "lifecycle": 0,
+        "targeted": 0,
+        "header-first": 1,
+        "cleanup": 0,
+        "delete": 0,
+        "vm": 1
+      },
+      "readyPilotSourceAndOCIObserved": true,
+      "pilotRuntime": {
+        "gitRevision": "953e8af367342ea0b230f6f98e99f919aa82372e",
+        "readyImageReference": "localhost/hibiscus-pilot:953e8af36734",
+        "readyImageDigest": "sha256:405f70c7e95d72ed6d7c1a06ea37ec3cf293b70038cbf090c96f2192ed814127",
+        "readyDuringUpstreamSuite": true
+      },
+      "nodeImageObserved": true,
+      "vmPoweredOff": true,
+      "guestScriptSHA256": {
+        "consumer-targeted.sh": "400cb5718552dfa725d22f69ebd00a34c444b8c47dbaffb374255d992aa29592",
+        "consumer-header-first.sh": "b785f9b9cb8384859f55aa2d2ff6ff87e92b87b2276f7aaafa8fa8975df129d6",
+        "consumer-lifecycle.sh": "7bb9844d76318ffca960a763d721fc1248372a9274e78a91a3f8d792197d02c2"
+      },
+      "targetedScriptMatchesReplaySource": true,
+      "bundle": {
+        "sha256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+        "httpAndGRPCRouteCRDsObserved": true,
+        "xMeshCRDObserved": true
+      },
+      "upstreamCases": {
+        "MeshBasic": "PASS",
+        "MeshConsumerRoute": "PASS",
+        "MeshFrontend": "PASS",
+        "MeshFrontendHostname": "PASS",
+        "MeshGRPCRouteRequestHeaderModifier": "PASS",
+        "MeshGRPCRouteWeight": "PASS",
+        "MeshHTTPRoute303Redirect": "PASS",
+        "MeshHTTPRoute307Redirect": "PASS",
+        "MeshHTTPRoute308Redirect": "PASS",
+        "MeshHTTPRouteBackendRequestHeaderModifier": "PASS",
+        "MeshHTTPRouteMatching": "PASS",
+        "MeshHTTPRouteNamedRule": "PASS",
+        "MeshHTTPRouteQueryParamMatching": "PASS",
+        "MeshHTTPRouteRedirectHostAndStatus": "PASS",
+        "MeshHTTPRouteRedirectPath": "PASS",
+        "MeshHTTPRouteRedirectPort": "PASS",
+        "MeshHTTPRouteRequestHeaderModifier": "PASS",
+        "MeshHTTPRouteRewritePath": "PASS",
+        "MeshHTTPRouteSchemeRedirect": "PASS",
+        "MeshHTTPRouteSimpleSameNamespace": "PASS",
+        "MeshHTTPRouteWeight": "PASS",
+        "MeshPorts": "PASS",
+        "MeshTrafficSplit": "PASS"
+      },
+      "unexpectedUpstreamCases": [],
+      "meshConsumerSubtests": {
+        "request_from_consumer_route's_namespace_modified_by_HTTPRoute": "PASS",
+        "request_not_from_consumer_route's_namespace_not_modified_by_HTTPRoute": "PASS"
+      },
+      "gatewayGraphOperations": [
+        0
+      ],
+      "lifecycle": {
+        "consumer-after-removal": {
+          "expected": [
+            200,
+            "x-producer:retained"
+          ],
+          "observed": [
+            200,
+            "x-producer:retained"
+          ],
+          "passed": true
+        },
+        "consumer-before": {
+          "expected": [
+            200,
+            "x-producer:retained"
+          ],
+          "observed": [
+            200,
+            "x-producer:retained"
+          ],
+          "passed": true
+        },
+        "consumer-before-removal": {
+          "expected": [
+            200,
+            "x-header-set:set"
+          ],
+          "observed": [
+            200,
+            "x-header-set:set"
+          ],
+          "passed": true
+        },
+        "consumer-created": {
+          "expected": [
+            200,
+            "x-header-set:set"
+          ],
+          "observed": [
+            200,
+            "x-header-set:set"
+          ],
+          "passed": true
+        },
+        "consumer-modified": {
+          "expected": [
+            200,
+            "x-header-set:%REQ(X-Example)%"
+          ],
+          "observed": [
+            200,
+            "x-header-set:%REQ(X-Example)%"
+          ],
+          "passed": true
+        },
+        "fallback-after-priority-removal": {
+          "expected": [
+            200,
+            "x-header-set:set"
+          ],
+          "observed": [
+            200,
+            "x-header-set:set"
+          ],
+          "passed": true
+        },
+        "inherited-ingress-excludes-consumer": {
+          "expected": [
+            200,
+            "x-producer:retained"
+          ],
+          "observed": [
+            200,
+            "x-producer:retained"
+          ],
+          "passed": true
+        },
+        "neighbor": {
+          "expected": [
+            200,
+            null
+          ],
+          "observed": [
+            200,
+            null
+          ],
+          "passed": true
+        },
+        "other-port": {
+          "expected": [
+            200,
+            null
+          ],
+          "observed": [
+            200,
+            null
+          ],
+          "passed": true
+        },
+        "portless-exact-outranks-explicit-catchall": {
+          "expected": [
+            200,
+            "x-header-set:priority"
+          ],
+          "observed": [
+            200,
+            "x-header-set:priority"
+          ],
+          "passed": true
+        },
+        "portless-match-stays-on-backend-port": {
+          "expected": [
+            200,
+            null
+          ],
+          "observed": [
+            200,
+            null
+          ],
+          "passed": true
+        },
+        "producer-after-removal": {
+          "expected": [
+            200,
+            "x-producer:retained"
+          ],
+          "observed": [
+            200,
+            "x-producer:retained"
+          ],
+          "passed": true
+        },
+        "producer-after-update": {
+          "expected": [
+            200,
+            "x-producer:retained"
+          ],
+          "observed": [
+            200,
+            "x-producer:retained"
+          ],
+          "passed": true
+        },
+        "producer-before": {
+          "expected": [
+            200,
+            "x-producer:retained"
+          ],
+          "observed": [
+            200,
+            "x-producer:retained"
+          ],
+          "passed": true
+        },
+        "producer-during": {
+          "expected": [
+            200,
+            "x-producer:retained"
+          ],
+          "observed": [
+            200,
+            "x-producer:retained"
+          ],
+          "passed": true
+        },
+        "producer-during-priority": {
+          "expected": [
+            200,
+            "x-producer:retained"
+          ],
+          "observed": [
+            200,
+            "x-producer:retained"
+          ],
+          "passed": true
+        },
+        "producer-policy-denies-consumer": {
+          "expected": [
+            403,
+            "*"
+          ],
+          "observed": [
+            403,
+            "x-header-set:%REQ(X-Example)%"
+          ],
+          "passed": true
+        },
+        "rejected-mutation-retains-producer": {
+          "expected": [
+            200,
+            "x-producer:retained"
+          ],
+          "observed": [
+            200,
+            "x-producer:retained"
+          ],
+          "passed": true
+        },
+        "service-override-restores-consumer": {
+          "expected": [
+            200,
+            "x-header-set:%REQ(X-Example)%"
+          ],
+          "observed": [
+            200,
+            "x-header-set:%REQ(X-Example)%"
+          ],
+          "passed": true
+        }
+      },
+      "targeted": {
+        "traffic": {
+          "active-inherited-canary-retains-producer": {
+            "expected": [
+              200,
+              "x-producer:retained"
+            ],
+            "observed": [
+              200,
+              "x-producer:retained"
+            ],
+            "passed": true
+          },
+          "explicit-service-primary-ignores-inherited-canary": {
+            "expected": [
+              200,
+              "x-header-set:set"
+            ],
+            "observed": [
+              200,
+              "x-header-set:set"
+            ],
+            "passed": true
+          },
+          "header-control": {
+            "expected": [
+              200,
+              "x-header-set:set"
+            ],
+            "observed": [
+              200,
+              "x-header-set:set"
+            ],
+            "passed": true
+          },
+          "invalid-header-retains-producer": {
+            "expected": [
+              200,
+              "x-producer:retained"
+            ],
+            "observed": [
+              200,
+              "x-producer:retained"
+            ],
+            "passed": true
+          },
+          "regex-retains-producer": {
+            "expected": [
+              200,
+              "x-producer:retained"
+            ],
+            "observed": [
+              200,
+              "x-producer:retained"
+            ],
+            "passed": true
+          },
+          "restored-after-invalid-matcher": {
+            "expected": [
+              200,
+              "x-header-set:set"
+            ],
+            "observed": [
+              200,
+              "x-header-set:set"
+            ],
+            "passed": true
+          },
+          "restored-header-route": {
+            "expected": [
+              200,
+              "x-header-set:set"
+            ],
+            "observed": [
+              200,
+              "x-header-set:set"
+            ],
+            "passed": true
+          },
+          "service-canary-opt-out-restores-consumer": {
+            "expected": [
+              200,
+              "x-header-set:set"
+            ],
+            "observed": [
+              200,
+              "x-header-set:set"
+            ],
+            "passed": true
+          }
+        },
+        "accepted": [
+          {
+            "observedGeneration": 1,
+            "status": "True",
+            "reason": "Accepted",
+            "message": "Route was valid"
+          },
+          {
+            "observedGeneration": 2,
+            "status": "False",
+            "reason": "UnsupportedValue",
+            "message": "consumer HTTPRoute rule 1: invalid or reserved response header"
+          },
+          {
+            "observedGeneration": 3,
+            "status": "True",
+            "reason": "Accepted",
+            "message": "Route was valid"
+          },
+          {
+            "observedGeneration": 3,
+            "status": "True",
+            "reason": "Accepted",
+            "message": "Route was valid"
+          },
+          {
+            "observedGeneration": 4,
+            "status": "False",
+            "reason": "UnsupportedValue",
+            "message": "consumer HTTPRoute rule 1: only Exact and PathPrefix path matches are supported"
+          },
+          {
+            "observedGeneration": 5,
+            "status": "True",
+            "reason": "Accepted",
+            "message": "Route was valid"
+          },
+          {
+            "observedGeneration": 5,
+            "status": "True",
+            "reason": "Accepted",
+            "message": "Route was valid"
+          },
+          {
+            "observedGeneration": 5,
+            "status": "False",
+            "reason": "UnsupportedValue",
+            "message": "consumer routes require a single Service waypoint with canary forwarding disabled"
+          },
+          {
+            "observedGeneration": 5,
+            "status": "True",
+            "reason": "Accepted",
+            "message": "Route was valid"
+          }
+        ],
+        "invalidHeaderRejectedByAPI": false,
+        "invalidMatcherRejectedByAPI": true,
+        "distinctCanaryAndPrimaryIdentities": true
+      },
+      "firstHeader": {
+        "replayedInSeparateVM": true,
+        "exits": {
+          "install": 0,
+          "candidate": 0,
+          "header-first": 0,
+          "cleanup": 0,
+          "delete": 0,
+          "vm": 0,
+          "header-first-setup": 0
+        },
+        "readyPilotSourceAndOCIObserved": true,
+        "nodeImageObserved": true,
+        "vmPoweredOff": true,
+        "guestScriptSHA256": {
+          "consumer-targeted.sh": "400cb5718552dfa725d22f69ebd00a34c444b8c47dbaffb374255d992aa29592",
+          "consumer-header-first.sh": "68cf3507d1adbb80b3c3e08502d166b0f47613a1f42ab28158ba159aff285028",
+          "consumer-lifecycle.sh": "91cc974799e0090be0a250e945e08cda908401c81177c7af8ff9fc2192c708d8"
+        },
+        "guestScriptsMatchReplaySource": true,
+        "ambientFixtureSource": "bcbe2c8abcacb3910cd4503e9d1a68a9414aa699",
+        "ambientFixtureSHA256": {
+          "integrations/istio-ambient/install.sh": "9cf2c4e0e24c1f631ca36a539b4fdbb2de5373bf789f82abebf887b6b3733224",
+          "integrations/istio-ambient/waypoint.yaml": "39a293f884e9565efc723c3c9a045213f78a437aa09343f4b3ef0abe5b9556f0",
+          "integrations/istio-ambient/waypoint-class.yaml": "5355dc71f37a4a1ef3663a87ecb9fad951ed1b431a6b49830b616a5cbfa6dcfb",
+          "config/crd/gateway-api-openstack.github.io_openstackgatewayclassconfigs.yaml": "39aa7fa4a30f187d5eed492fe3af821dc23498ab49ec4a37a6d4152cf70b8f16"
+        },
+        "singleExactControl": {
+          "single-exact-first-value": {
+            "expected": [
+              200,
+              "x-header-set:single-exact"
+            ],
+            "observed": [
+              200,
+              "x-header-set:single-exact"
+            ],
+            "passed": true
+          },
+          "single-exact-other-value": {
+            "expected": [
+              404,
+              null
+            ],
+            "observed": [
+              404,
+              null
+            ],
+            "passed": true
+          }
+        },
+        "duplicate": {
+          "exact-duplicate": {
+            "admission": "Stored",
+            "storedOrder": [
+              "X-Example=Exact=application",
+              "x-example=Exact=different"
+            ],
+            "admissionError": null,
+            "traffic": {
+              "exact-duplicate-first-value": {
+                "expected": [
+                  200,
+                  "x-header-set:exact-duplicate"
+                ],
+                "observed": [
+                  200,
+                  "x-header-set:exact-duplicate"
+                ],
+                "passed": true
+              },
+              "exact-duplicate-shadowed-value": {
+                "expected": [
+                  404,
+                  null
+                ],
+                "observed": [
+                  404,
+                  null
+                ],
+                "passed": true
+              }
+            }
+          },
+          "regex-duplicate": {
+            "admission": "Stored",
+            "storedOrder": [
+              "X-Example=Exact=application",
+              "x-example=RegularExpression=^different$"
+            ],
+            "admissionError": null,
+            "traffic": {
+              "regex-duplicate-first-value": {
+                "expected": [
+                  200,
+                  "x-header-set:regex-duplicate"
+                ],
+                "observed": [
+                  200,
+                  "x-header-set:regex-duplicate"
+                ],
+                "passed": true
+              },
+              "regex-duplicate-shadowed-value": {
+                "expected": [
+                  404,
+                  null
+                ],
+                "observed": [
+                  404,
+                  null
+                ],
+                "passed": true
+              }
+            }
+          }
+        },
+        "accepted": [
+          {
+            "observedGeneration": 2,
+            "status": "True",
+            "reason": "Accepted",
+            "message": "Route was valid"
+          },
+          {
+            "observedGeneration": 3,
+            "status": "True",
+            "reason": "Accepted",
+            "message": "Route was valid"
+          },
+          {
+            "observedGeneration": 4,
+            "status": "True",
+            "reason": "Accepted",
+            "message": "Route was valid"
+          },
+          {
+            "observedGeneration": 5,
+            "status": "False",
+            "reason": "UnsupportedValue",
+            "message": "consumer HTTPRoute rule 1: only Exact header matches are supported"
+          }
+        ],
+        "standaloneRegexAPIRejection": null,
+        "standaloneRegexTraffic": {
+          "standalone-regex-retains-producer": {
+            "expected": [
+              200,
+              "x-producer:retained"
+            ],
+            "observed": [
+              200,
+              "x-producer:retained"
+            ],
+            "passed": true
+          }
+        }
+      },
+      "initialHeaderFixture": {
+        "exit": 1,
+        "shadowedValueStatus": "404"
+      }
+    }
+  }
+}

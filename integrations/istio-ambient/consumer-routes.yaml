@@ -1,0 +1,2 @@
+# Istio 1.31.0 with the Hibiscus consumer HTTPRoute patch, linux/amd64.
+image: ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:fdb9d02e2b427f81d2763fce329361ac32432080cc14b7115315bed4508bbcc5
