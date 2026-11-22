@@ -207,11 +207,16 @@ func compileRoute(route *gatewayv1.HTTPRoute, input Input) Route {
 				compiled.RequestHeaderOperations, compiled.ResponseHeaderOperations, compiled.URLRewrite = request, response, rewrite
 			}
 		}
-		for _, backend := range rule.BackendRefs {
-			if len(backend.Filters) != 0 {
-				compiled.Diagnostics = append(compiled.Diagnostics, *unsupported("backendRef filters are not implemented", ScopeRule))
-				break
+		for i, backend := range rule.BackendRefs {
+			request, rewrite, diagnostic := NormalizeHTTPBackendRequestFilters(rule, backend,
+				input.BackendRequestFilters && HTTPProfileRouteKind(route) == HTTPRouteKind,
+				compiled.RequestHeaderOperations, compiled.URLRewrite)
+			if diagnostic != nil {
+				compiled.Diagnostics = append(compiled.Diagnostics, *diagnostic)
+				continue
 			}
+			compiled.Backends[i].RequestHeaderOperations = request
+			compiled.Backends[i].URLRewrite = rewrite
 		}
 		matches := rule.Matches
 		if len(matches) == 0 {

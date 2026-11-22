@@ -33,8 +33,10 @@ const maxHTTPTargetWeight = 1_000_000
 var grpcFailurePoolKey = openstackidentity.HTTPBackendKey("", "grpc-unavailable", 0)
 
 type desiredHTTPWeightedTarget struct {
-	backendKey string
-	weight     int
+	backendKey              string
+	weight                  int
+	requestHeaderOperations []cloud.HTTPHeaderOperation
+	requestURLRewrite       *cloud.HTTPURLRewrite
 }
 
 type weightedHTTPPolicyPlan struct {
@@ -77,6 +79,12 @@ func (p *Provider) buildDesiredWeightedHTTPParts(spec cloud.RouteSpec) ([]desire
 			}
 			total += target.Weight
 			wanted := desiredHTTPWeightedTarget{weight: target.Weight}
+			if len(target.RequestHeaderOperations) != 0 || target.URLRewrite != nil {
+				if !p.backendRequestFilters || spec.GRPC || target.BackendIndex == nil || target.Weight == 0 {
+					return invalid(errors.New("HTTP backend request filters require opt-in and a positive forwarding target"))
+				}
+				wanted.requestHeaderOperations, wanted.requestURLRewrite = target.RequestHeaderOperations, target.URLRewrite
+			}
 			if target.BackendIndex != nil {
 				index := *target.BackendIndex
 				if index < 0 || index >= len(spec.HTTPBackends) || spec.HTTPBackends[index].InvalidReference {
@@ -127,6 +135,7 @@ func fixedWeightedHTTPTarget(weight int) octavia.WeightedHTTPTarget {
 
 func weightedTargetsEqual(a, b octavia.WeightedHTTPTarget) bool {
 	return a.Weight == b.Weight && a.PoolID == b.PoolID &&
+		slices.Equal(a.RequestHeaderOperations, b.RequestHeaderOperations) && a.RequestURLRewrite.Equal(b.RequestURLRewrite) &&
 		(a.FixedResponse == nil && b.FixedResponse == nil ||
 			a.FixedResponse != nil && b.FixedResponse != nil && *a.FixedResponse == *b.FixedResponse)
 }
@@ -195,7 +204,7 @@ func resolveWeightedHTTPPart(part desiredRoute, route desiredRoute, observed obs
 		}
 		serving := servingWeightedPoolIDs(*policy, observed.httpParts[part.backendKey], listenerID)
 		plan := &weightedHTTPPolicyPlan{pending: part.spec.GRPC && part.grpcFailurePoolID == ""}
-		for _, target := range part.weightedTargets {
+		for i, target := range part.weightedTargets {
 			resolved := octavia.WeightedHTTPTarget{Weight: target.weight}
 			if !policy.localRewriteFallback && target.backendKey != "" && !denied[target.backendKey] {
 				backend := observed.httpParts[target.backendKey]
@@ -212,8 +221,14 @@ func resolveWeightedHTTPPart(part desiredRoute, route desiredRoute, observed obs
 				} else {
 					resolved = fixedWeightedHTTPTarget(target.weight)
 				}
+			} else if policy.targetRequestFilters != nil {
+				filters := policy.targetRequestFilters[i]
+				resolved.RequestHeaderOperations, resolved.RequestURLRewrite = filters.RequestHeaderOperations, filters.RequestURLRewrite
 			}
 			plan.targets = append(plan.targets, resolved)
+		}
+		if !plan.pending && !hasWeightedTargetRequestFilters(plan.targets) {
+			policy.targetRequestFilters = nil
 		}
 		policy.weightedPlan = plan
 		part.targetsPending = part.targetsPending || plan.pending
@@ -473,7 +488,8 @@ func weightedTargetWithdrawals(desired desiredRoute, observed observedRouteGraph
 				}
 				continue
 			}
-			steps = append(steps, routeMutation{kind: routeMutationSetPolicyTarget, id: policy.policy.ID, weightedTargets: &withdrawn, retry: retry, withdrawHTTPPolicy: true})
+			steps = append(steps, routeMutation{kind: routeMutationSetPolicyTarget, id: policy.policy.ID, weightedTargets: &withdrawn,
+				policyTags: backendRequestFilterTags(withdrawn, policy, nil), retry: retry, withdrawHTTPPolicy: true})
 		}
 	}
 	return steps
@@ -495,6 +511,7 @@ func localOnlyURLRewriteWithdrawal(desired desiredRoute, observed observedRouteP
 		patch.KeepPolicyState = true
 		return routeMutation{kind: routeMutationSetPolicyTarget, id: observed.policy.ID, weightedTargets: &wanted.weightedPlan.targets,
 			requestURLRewriteUpdate: patch, requestHeaderOperations: policyHeaderPatch(nil, observed.requestHeaderOperations, false),
+			policyTags:         backendRequestFilterTags(wanted.weightedPlan.targets, observed, patch),
 			withdrawHTTPPolicy: true, retry: observed.policy.ProvisioningStatus == "ERROR"}, true
 	}
 	return routeMutation{}, false

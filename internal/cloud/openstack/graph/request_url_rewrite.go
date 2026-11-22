@@ -103,6 +103,10 @@ func containsObservedRequestURLRewrite(routes []observedRouteGraph) bool {
 }
 
 func rewriteListenerNeedsRecovery(desired desiredGatewayGraph, actual observedGatewayGraph, listener listeners.Listener) bool {
+	return requestPolicyListenerNeedsRecovery(desired, actual, listener, requestURLRewritePolicy)
+}
+
+func requestPolicyListenerNeedsRecovery(desired desiredGatewayGraph, actual observedGatewayGraph, listener listeners.Listener, predicate protectedHTTPPredicate) bool {
 	if actual.protocol != cloud.ListenerProtocolHTTP || listener.ProvisioningStatus != "ERROR" ||
 		actual.loadBalancer == nil || actual.loadBalancer.ProvisioningStatus != "ACTIVE" {
 		return false
@@ -111,7 +115,7 @@ func rewriteListenerNeedsRecovery(desired desiredGatewayGraph, actual observedGa
 	if !actual.scoped && port == 0 {
 		port = desired.spec.Gateway.Spec.ListenerPort
 	}
-	_, guarded := guardedHTTPListeners(desired, actual, map[string]int{listener.ID: port}, requestURLRewritePolicy)[port]
+	_, guarded := guardedHTTPListeners(desired, actual, map[string]int{listener.ID: port}, predicate)[port]
 	return guarded
 }
 

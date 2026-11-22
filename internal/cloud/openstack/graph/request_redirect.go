@@ -110,7 +110,9 @@ func (p *Provider) protectHTTPURLPolicyTraffic(ctx context.Context, desired desi
 			listener.ProvisioningStatus == "ACTIVE" && localOnlyRewriteWithdrawalOnPort(plan, state) {
 			continue
 		}
-		if available && !state.unsettled && (predicate.capability != octavia.GatewayCapabilityRequestURLRewrite || listener.ProvisioningStatus != "ERROR") {
+		retryClosure := listener.ProvisioningStatus == "ERROR" &&
+			(predicate.capability == octavia.GatewayCapabilityRequestURLRewrite || predicate.capability == octavia.GatewayCapabilityTargetRequestFilters)
+		if available && !state.unsettled && !retryClosure {
 			continue
 		}
 		reason := "Waiting for verified Octavia " + predicate.label + " policies on this listener"

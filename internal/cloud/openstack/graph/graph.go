@@ -155,6 +155,30 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		result := p.pendingGraphResult(ctx, desired, actual)
 		return result, errors.Join(err, p.executeGraphMutation(ctx, desired, actual, step))
 	}
+	if listener := p.backendFilterListenerWithInventoryError(actual, err); listener != nil {
+		message := "Waiting for complete Octavia backend request filter inventory"
+		actual.outcome = p.progressingOutcome(message)
+		result := p.pendingGraphResult(ctx, desired, actual)
+		affected := make(map[int]bool)
+		for i, route := range desired.routes {
+			if httpURLPolicyRoutePort(desired, route) == listener.ProtocolPort {
+				affected[i] = true
+			}
+		}
+		p.markGuardedHTTPListener(&result, listener.ProtocolPort, affected, message)
+		result.Gateway.HTTPPolicyTransition = true
+		closed := listener.ProvisioningStatus == "ACTIVE" && actual.adminObserved[listener.ID] && !listener.AdminStateUp
+		if closed || listener.ProvisioningStatus != "ACTIVE" && listener.ProvisioningStatus != "ERROR" {
+			return result, err
+		}
+		if spec.ValidateMutation != nil {
+			if err := spec.ValidateMutation(ctx); err != nil {
+				return result, err
+			}
+		}
+		step := closeGuardedHTTPListener(*listener, message)
+		return result, errors.Join(err, p.executeGraphMutation(ctx, desired, actual, step))
+	}
 	if err != nil {
 		pending := p.progressingOutcome("Waiting for the Gateway infrastructure")
 		if desired.protocol == cloud.ListenerProtocolTLSTerminate && actual.outcome.State == cloud.OutcomeProgressing {
@@ -244,6 +268,9 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	plan = p.protectRequestRedirectTraffic(ctx, desired, actual, plan, &result)
 	if !isHTTPListenerWithdrawal(plan) {
 		plan = p.protectRequestURLRewriteTraffic(ctx, desired, actual, plan, &result)
+	}
+	if !isHTTPListenerWithdrawal(plan) {
+		plan = p.protectBackendRequestFilterTraffic(ctx, desired, actual, plan, &result)
 	}
 	if !isHTTPListenerWithdrawal(plan) {
 		plan, _ = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, exactHTTPHeaderPredicate)
@@ -339,6 +366,9 @@ func (p *Provider) reconcileHTTPWithdrawalWithoutAddress(ctx context.Context, de
 	plan = p.protectRequestRedirectTraffic(ctx, desired, actual, plan, &result)
 	if !isHTTPListenerWithdrawal(plan) {
 		plan = p.protectRequestURLRewriteTraffic(ctx, desired, actual, plan, &result)
+	}
+	if !isHTTPListenerWithdrawal(plan) {
+		plan = p.protectBackendRequestFilterTraffic(ctx, desired, actual, plan, &result)
 	}
 	var grpcWithdrawal []graphMutation
 	var confirmedClosed bool
@@ -1195,7 +1225,7 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 		return actual, nil
 	}
 	if !defaultPool && actual.listener != nil && desired.spec.Gateway.Disposition == cloud.GraphEnsure &&
-		actual.listener.ProvisioningStatus == "ERROR" && !rewriteListenerNeedsRecovery(desired, actual, *actual.listener) {
+		actual.listener.ProvisioningStatus == "ERROR" && !requestTransformListenerNeedsRecovery(desired, actual, *actual.listener) {
 		return actual, cloud.NewProviderError(cloud.ErrorCategoryResourceFailure, fmt.Errorf("octavia listener %s provisioning status is ERROR", actual.listener.ID))
 	}
 	if err := validateObservedPolicyLayout(actual.routes); err != nil {

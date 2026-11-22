@@ -32,6 +32,7 @@ const (
 	GatewayCapabilityHTTPMethodMatch          = "http_method_match_v1"
 	GatewayCapabilityFixedHTTPResponses       = "fixed_http_responses_v1"
 	GatewayCapabilityWeightedHTTPTargets      = "weighted_http_targets_v1"
+	GatewayCapabilityTargetRequestFilters     = "weighted_http_target_request_filters_v1"
 	GatewayCapabilityRequestHeaderOperations  = "request_header_operations_v1"
 	GatewayCapabilityResponseHeaderOperations = "response_header_operations_v1"
 	GatewayCapabilityBackendH2C               = "backend_h2c_v1"

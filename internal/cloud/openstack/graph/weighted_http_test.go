@@ -31,6 +31,7 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/pools"
+	"k8s.io/utils/ptr"
 )
 
 func TestWeightedHTTPRuleRetainsPolicyRoleWhenGrantChanges(t *testing.T) {
@@ -177,7 +178,7 @@ func weightedPlanFixture() (desiredGatewayGraph, observedGatewayGraph) {
 	remotePool.pool.ID, remotePool.members[0].ID = "pool-remote", "member-remote"
 	weighted, policyGraph := convergedRoutePlanFixture()
 	weighted.backendKey = "weighted-rule"
-	weighted.weightedTargets = []desiredHTTPWeightedTarget{{local.backendKey, 3}, {remote.backendKey, 1}}
+	weighted.weightedTargets = []desiredHTTPWeightedTarget{{backendKey: local.backendKey, weight: 3}, {backendKey: remote.backendKey, weight: 1}}
 	policy := &policyGraph.policies[0]
 	policy.policy.Action, policy.policy.RedirectPoolID = string(octavia.ActionWeightedTargets), ""
 	policy.policy.ListenerID = "listener-1"
@@ -232,7 +233,7 @@ func TestWeightedHTTPGrantWithdrawalPrecedesPoolCleanup(t *testing.T) {
 	checkWithdrawal()
 	future := remote
 	future.backendKey = "future"
-	weighted.weightedTargets = append(weighted.weightedTargets, desiredHTTPWeightedTarget{future.backendKey, 1})
+	weighted.weightedTargets = append(weighted.weightedTargets, desiredHTTPWeightedTarget{backendKey: future.backendKey, weight: 1})
 	desired.routes[0].httpParts = []desiredRoute{local, future, weighted}
 	checkWithdrawal()
 	weighted.weightedTargets = weighted.weightedTargets[:2]
@@ -384,7 +385,7 @@ func TestWeightedHTTPZeroWeightDoesNotHoldPositiveTargets(t *testing.T) {
 	policy.policy.AdminStateUp, policy.weightedTargets[1].Weight = true, 1
 	future := remote
 	future.backendKey = "future"
-	weighted.weightedTargets = append(weighted.weightedTargets, desiredHTTPWeightedTarget{future.backendKey, 1})
+	weighted.weightedTargets = append(weighted.weightedTargets, desiredHTTPWeightedTarget{backendKey: future.backendKey, weight: 1})
 	desired.routes[0].httpParts = append(parts, future)
 	steps := weightedPlan(t, desired, actual)
 	want := []octavia.WeightedHTTPTarget{policy.weightedTargets[0], {PoolID: remotePool.pool.ID, Weight: 0}}
@@ -439,7 +440,7 @@ func TestWeightedHTTPRuleReorderKeepsAuthorizedPredicateServing(t *testing.T) {
 	second.backendKey = "second"
 	second.policies = slices.Clone(first.policies)
 	second.policies[0].role, second.policies[0].path, second.policies[0].position = "second-original", "/other", 2
-	second.weightedTargets = []desiredHTTPWeightedTarget{{local.backendKey, 3}, {third.backendKey, 1}}
+	second.weightedTargets = []desiredHTTPWeightedTarget{{backendKey: local.backendKey, weight: 3}, {backendKey: third.backendKey, weight: 1}}
 	secondPolicy := graphs[first.backendKey].policies[0]
 	secondPolicy.role = second.policies[0].role
 	secondPolicy.policy.ID, secondPolicy.policy.Position = "second-policy", 2
@@ -518,5 +519,74 @@ func TestObserveWeightedHTTPPolicyRequiresOwnedPoolEdges(t *testing.T) {
 				t.Fatalf("weighted target must account for the pool's listener edge: %v", err)
 			}
 		})
+	}
+}
+
+func TestWeightedTargetRequestFiltersRequireRegionalCapabilityAndReadback(t *testing.T) {
+	desired, actual := weightedPlanFixture()
+	desired.protocol = cloud.ListenerProtocolHTTP
+	actual.listener.ProtocolPort, actual.listener.ProvisioningStatus = 80, "ACTIVE"
+	actual.loadBalancer.Provider, actual.loadBalancer.ProvisioningStatus = "amphora-regional", "ACTIVE"
+	actual.adminObserved = map[string]bool{actual.listener.ID: true}
+	desired.spec.Gateway.Spec.ListenerPort = 80
+	part := &desired.routes[0].httpParts[2]
+	headers := []cloud.HTTPHeaderOperation{{Name: "backend", Operation: cloud.HTTPHeaderSet, Value: "local"}}
+	part.weightedTargets[0].requestHeaderOperations = headers
+	part.weightedTargets[0].requestURLRewrite = &cloud.HTTPURLRewrite{ReplacePrefixMatch: ptr.To("/new")}
+	filters, err := compileWeightedTargetRequestFilters(cloud.HTTPPathMatch{PathType: cloud.PathMatchPrefix, PathValue: "/old"}, part.weightedTargets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	part.policies[0].targetRequestFilters = filters
+	policy := &actual.routes[0].httpParts[part.backendKey].policies[0]
+	policy.policy.Position = part.policies[0].position
+	policy.adminObserved = true
+	policy.rules[0].flagsObserved = true
+	resolved := resolveWeightedHTTPPart(*part, desired.routes[0], actual.routes[0], "listener-1")
+	targets := resolved.policies[0].weightedPlan.targets
+	if len(targets) != 2 || !slices.Equal(targets[0].RequestHeaderOperations, headers) ||
+		targets[0].RequestURLRewrite == nil || targets[0].RequestURLRewrite.ReplacePrefix == nil ||
+		*targets[0].RequestURLRewrite.ReplacePrefix != (octavia.PathPrefixReplacement{Match: "/old", Replacement: "/new"}) ||
+		targets[1].HasRequestFilters() {
+		t.Fatalf("target filters leaked or were compiled on the wrong match: %+v", targets)
+	}
+	var capabilities = []string{octavia.GatewayCapabilityFixedHTTPResponses, octavia.GatewayCapabilityWeightedHTTPTargets}
+	provider := completeGraphProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/lbaas/providers/amphora-regional/gateway_capabilities" {
+			t.Errorf("unexpected discovery request: %s %s", r.Method, r.URL)
+		}
+		safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": capabilities})
+	}), &gatewayTransitionRequests{})
+	provider.backendRequestFilters, provider.weightedHTTPTargets = true, true
+	open := graphMutation{kind: graphEnableListener, listenerID: actual.listener.ID}
+	guard := func(plan ...graphMutation) []graphMutation {
+		return provider.protectBackendRequestFilterTraffic(t.Context(), desired, actual, plan, &cloud.GatewayGraphResult{})
+	}
+	if got := guard(open); len(got) != 1 || got[0].kind != graphDisableListener {
+		t.Fatalf("missing regional capability did not close the listener: %+v", got)
+	}
+	actual.listener.AdminStateUp = false
+	if got := guard(open); len(got) != 0 {
+		t.Fatalf("regional capability is required before opening: %+v", got)
+	}
+	capabilities = append(capabilities, octavia.GatewayCapabilityTargetRequestFilters)
+	policy.backendRequestFiltersTagged = true
+	if got := guard(open); len(got) != 0 {
+		t.Fatalf("tag without filter readback reopened the listener: %+v", got)
+	}
+	leaked := slices.Clone(targets)
+	leaked[1].RequestHeaderOperations = headers
+	policy.weightedTargets = leaked
+	if got := guard(open); len(got) != 0 {
+		t.Fatalf("transformation on another pool reopened the listener: %+v", got)
+	}
+	policy.weightedTargets = targets
+	if got := guard(open); len(got) != 1 || got[0].kind != graphEnableListener {
+		t.Fatalf("verified target vector did not permit reopening: %+v", got)
+	}
+	capabilities = capabilities[:2]
+	actual.listener.AdminStateUp = true
+	if got := guard(open); len(got) != 1 || got[0].kind != graphDisableListener {
+		t.Fatalf("regional capability withdrawal did not close the listener: %+v", got)
 	}
 }

@@ -113,3 +113,47 @@ func normalizeURLRewrite(filter *gatewayv1.HTTPURLRewriteFilter, matches []gatew
 func invalidURLRewrite(message string) *Diagnostic {
 	return &Diagnostic{Condition: string(gatewayv1.RouteConditionAccepted), Reason: "Invalid", Message: message, Scope: ScopeRule}
 }
+
+// NormalizeHTTPBackendRequestFilters validates filters for one backend occurrence
+// using the enclosing rule's path matches and request transformations.
+func NormalizeHTTPBackendRequestFilters(rule gatewayv1.HTTPRouteRule, backend gatewayv1.HTTPBackendRef, enabled bool,
+	ruleRequest []cloud.HTTPHeaderOperation, ruleRewrite *cloud.HTTPURLRewrite,
+) ([]cloud.HTTPHeaderOperation, *cloud.HTTPURLRewrite, *Diagnostic) {
+	if len(backend.Filters) == 0 {
+		return nil, nil, nil
+	}
+	if !enabled {
+		return nil, nil, unsupported("backendRef request filters require --octavia-http-backend-request-filters and --octavia-weighted-http-targets", ScopeRule)
+	}
+	matches := rule.Matches
+	for _, filter := range backend.Filters {
+		switch filter.Type {
+		case gatewayv1.HTTPRouteFilterRequestHeaderModifier:
+		case gatewayv1.HTTPRouteFilterURLRewrite:
+			if filter.URLRewrite != nil && filter.URLRewrite.Path != nil &&
+				filter.URLRewrite.Path.Type == gatewayv1.PrefixMatchHTTPPathModifier {
+				for _, match := range rule.Matches {
+					if match.Path != nil && match.Path.Type != nil && *match.Path.Type != gatewayv1.PathMatchPathPrefix {
+						return nil, nil, invalidURLRewrite("backendRef URLRewrite ReplacePrefixMatch requires PathPrefix matches")
+					}
+				}
+				// The normalized replacement is reused for each individual
+				// PathPrefix when compiling the weighted policies.
+				matches = []gatewayv1.HTTPRouteMatch{{Path: &gatewayv1.HTTPPathMatch{}}}
+			}
+		default:
+			return nil, nil, unsupported(fmt.Sprintf("backendRef filter %q is not supported", filter.Type), ScopeRule)
+		}
+	}
+	request, _, rewrite, diagnostic := NormalizeHTTPRuleFilters(gatewayv1.HTTPRouteRule{
+		Filters: backend.Filters, BackendRefs: []gatewayv1.HTTPBackendRef{backend}, Matches: matches,
+	}, true, false, true)
+	if diagnostic != nil {
+		return nil, nil, diagnostic
+	}
+	if err := cloud.ValidateHTTPBackendRequestFilterComposition(ruleRequest, request, ruleRewrite, rewrite); err != nil {
+		return nil, nil, &Diagnostic{Condition: string(gatewayv1.RouteConditionAccepted), Reason: string(gatewayv1.RouteReasonIncompatibleFilters),
+			Scope: ScopeRule, Message: err.Error()}
+	}
+	return request, rewrite, nil
+}

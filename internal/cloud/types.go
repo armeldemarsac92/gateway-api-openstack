@@ -260,8 +260,10 @@ type HTTPFixedRule struct {
 // HTTPWeightedTarget selects a backend pool by its index in RouteSpec.HTTPBackends.
 // A nil index reserves this share for HTTP 500 when the reference is unresolved.
 type HTTPWeightedTarget struct {
-	BackendIndex *int
-	Weight       int
+	BackendIndex            *int
+	Weight                  int
+	RequestHeaderOperations []HTTPHeaderOperation `json:",omitempty"`
+	URLRewrite              *HTTPURLRewrite       `json:",omitempty"`
 }
 
 // HTTPWeightedRule preserves backendRef order and owns the policies for its matches.

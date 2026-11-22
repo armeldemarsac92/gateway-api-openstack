@@ -96,12 +96,12 @@ func (r *Reconciler) validateRouteStructure(route *gatewayv1.HTTPRoute) ([]gatew
 	return references, nil
 }
 
-// admittedHTTPRouteRules drops invalid rules when a URLRewrite route also
+// admittedHTTPRouteRules drops invalid rules when a route with request filters also
 // contains valid rules. Keep the published object available for status and
 // create a projection with only admitted rules for backend reads and writes.
 func (r *Reconciler) admittedHTTPRouteRules(route *gatewayv1.HTTPRoute) ([]gatewayv1.HTTPRouteRule, string, error) {
 	grpc := model.HTTPProfileRouteKind(route) == model.GRPCRouteKind
-	partial := !grpc && hasRuleURLRewrite(route)
+	partial := !grpc && hasProjectableHTTPFilters(route)
 	var first error
 	var dropped []string
 	var valid []gatewayv1.HTTPRouteRule
@@ -132,16 +132,18 @@ func (r *Reconciler) admittedHTTPRouteRules(route *gatewayv1.HTTPRoute) ([]gatew
 	return valid, "Dropped Rule " + strings.Join(dropped, ", "), nil
 }
 
-func hasRuleURLRewrite(route *gatewayv1.HTTPRoute) bool {
+func hasProjectableHTTPFilters(route *gatewayv1.HTTPRoute) bool {
 	return slices.ContainsFunc(route.Spec.Rules, func(rule gatewayv1.HTTPRouteRule) bool {
-		return slices.ContainsFunc(rule.Filters, func(filter gatewayv1.HTTPRouteFilter) bool {
+		return slices.ContainsFunc(rule.BackendRefs, func(backend gatewayv1.HTTPBackendRef) bool {
+			return len(backend.Filters) != 0
+		}) || slices.ContainsFunc(rule.Filters, func(filter gatewayv1.HTTPRouteFilter) bool {
 			return filter.Type == gatewayv1.HTTPRouteFilterURLRewrite
 		})
 	})
 }
 
-func (r *Reconciler) projectedRewriteRules(route *gatewayv1.HTTPRoute) ([]gatewayv1.HTTPRouteRule, string) {
-	if hasRuleURLRewrite(route) {
+func (r *Reconciler) projectedHTTPFilterRules(route *gatewayv1.HTTPRoute) ([]gatewayv1.HTTPRouteRule, string) {
+	if hasProjectableHTTPFilters(route) {
 		if valid, dropped, _ := r.admittedHTTPRouteRules(route); dropped != "" {
 			return valid, dropped
 		}
@@ -150,7 +152,7 @@ func (r *Reconciler) projectedRewriteRules(route *gatewayv1.HTTPRoute) ([]gatewa
 }
 
 func (r *Reconciler) usesHTTPBackendGroups(route *gatewayv1.HTTPRoute) bool {
-	rules, _ := r.projectedRewriteRules(route)
+	rules, _ := r.projectedHTTPFilterRules(route)
 	if r.Config.FixedHTTPResponses || r.Config.WeightedHTTPTargets || len(rules) > 1 {
 		return true
 	}
@@ -199,6 +201,12 @@ func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, grpc bool) 
 		return nil
 	}
 	if weightedTargets {
+		request, _, rewrite, _ := model.NormalizeHTTPRuleFilters(rule, r.Config.RequestHeaderModifier, r.Config.ResponseHeaderModifier, r.Config.HTTPRequestURLRewrite)
+		for _, backend := range rule.BackendRefs {
+			if _, _, diagnostic := model.NormalizeHTTPBackendRequestFilters(rule, backend, r.Config.BackendRequestFilters && !grpc, request, rewrite); diagnostic != nil {
+				return routeActionError(diagnostic)
+			}
+		}
 		return validateWeightedBackendRefs(rule.BackendRefs, grpc)
 	}
 	if len(rule.BackendRefs) != 1 {
@@ -242,9 +250,6 @@ func validateWeightedBackendRefs(refs []gatewayv1.HTTPBackendRef, grpc bool) err
 	}
 	positive := false
 	for _, ref := range refs {
-		if len(ref.Filters) != 0 {
-			return newRouteBuildError(routeErrorUnsupported, "backendRef filters are not supported")
-		}
 		weight := ptr.Deref(ref.Weight, 1)
 		if weight < 0 || weight > 1000000 {
 			return newRouteBuildError(routeErrorUnsupported, "backendRef weight must be between 0 and 1000000")
@@ -443,7 +448,8 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 			continue
 		}
 		zeroOnly := spec.GRPC && !slices.ContainsFunc(rule.Backends, func(backend model.BackendGroup) bool { return backend.Weight > 0 })
-		direct := !zeroOnly && len(rule.Backends) == 1 && hasHTTPBackendKey(rule.Backends[0])
+		direct := !zeroOnly && len(rule.Backends) == 1 && hasHTTPBackendKey(rule.Backends[0]) &&
+			len(rule.Backends[0].RequestHeaderOperations) == 0 && rule.Backends[0].URLRewrite == nil
 		weighted := cloud.HTTPWeightedRule{RuleIndex: rule.Index}
 		for _, backend := range rule.Backends {
 			if zeroOnly {
@@ -465,7 +471,12 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 			if direct {
 				targets[rule.Index].pool = index
 			} else {
-				weighted.Targets = append(weighted.Targets, cloud.HTTPWeightedTarget{BackendIndex: index, Weight: int(backend.Weight)})
+				target := cloud.HTTPWeightedTarget{BackendIndex: index, Weight: int(backend.Weight)}
+				if index != nil && backend.Weight > 0 {
+					target.RequestHeaderOperations = backend.RequestHeaderOperations
+					target.URLRewrite = backend.URLRewrite
+				}
+				weighted.Targets = append(weighted.Targets, target)
 			}
 		}
 		if !direct {

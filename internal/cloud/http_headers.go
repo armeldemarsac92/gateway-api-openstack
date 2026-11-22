@@ -138,3 +138,27 @@ func normalizeHTTPHeaderOperations(operations []HTTPHeaderOperation, response bo
 	}
 	return normalized, nil
 }
+
+// ValidateHTTPBackendRequestFilterComposition checks the order supported by
+// Octavia: rule headers, rule URL, target headers, target URL.
+func ValidateHTTPBackendRequestFilterComposition(rule, target []HTTPHeaderOperation, ruleURL, targetURL *HTTPURLRewrite) error {
+	if len(target) == 0 && targetURL == nil {
+		return nil
+	}
+	if ruleURL != nil && targetURL != nil {
+		if ruleURL.Hostname != "" && targetURL.Hostname != "" {
+			return errors.New("a rule and its backendRef cannot both rewrite the hostname")
+		}
+		if (ruleURL.ReplaceFullPath != nil || ruleURL.ReplacePrefixMatch != nil) &&
+			(targetURL.ReplaceFullPath != nil || targetURL.ReplacePrefixMatch != nil) {
+			return errors.New("a rule and its backendRef cannot both rewrite the path")
+		}
+	}
+	if ruleURL != nil && ruleURL.Hostname != "" || targetURL != nil && targetURL.Hostname != "" {
+		changesHost := func(operation HTTPHeaderOperation) bool { return strings.EqualFold(operation.Name, "Host") }
+		if slices.ContainsFunc(rule, changesHost) || slices.ContainsFunc(target, changesHost) {
+			return errors.New("a Host header operation cannot be combined with hostname rewriting on a filtered backendRef")
+		}
+	}
+	return nil
+}
