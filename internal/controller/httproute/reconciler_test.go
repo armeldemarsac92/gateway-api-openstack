@@ -411,8 +411,11 @@ func TestExactHTTPSectionsShareOneGatewayListener(t *testing.T) {
 	bar.Spec.Hostnames = []gatewayv1.Hostname{"bar.com"}
 	foo := mapperTestHTTPRoute(gateway.Namespace, "foo", gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name), SectionName: &second.Name, Port: &second.Port}, "foo-service")
 	foo.UID, foo.Generation = "foo-uid", 1
-	ambiguous := mapperTestHTTPRoute(gateway.Namespace, "ambiguous", bar.Spec.ParentRefs[0], "bar-service")
-	ambiguous.UID, ambiguous.Generation = "ambiguous-uid", 1
+	portRoute := mapperTestHTTPRoute(gateway.Namespace, "by-port", gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name), Port: &second.Port}, "bar-service")
+	portRoute.UID, portRoute.Generation = "by-port-uid", 1
+	portRoute.Spec.Rules[0].Matches = []gatewayv1.HTTPRouteMatch{{
+		Path: &gatewayv1.HTTPPathMatch{Type: ptr.To(gatewayv1.PathMatchExact), Value: ptr.To("/by-port")},
+	}}
 	wrongPort := mapperTestHTTPRoute(gateway.Namespace, "wrong-port", gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name), SectionName: &second.Name, Port: ptr.To(gatewayv1.PortNumber(8443))}, "foo-service")
 	wrongPort.UID, wrongPort.Generation = "wrong-port-uid", 1
 	wrongNamespace := mapperTestHTTPRoute("tenant", "wrong-namespace", gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name), Namespace: ptr.To(gatewayv1.Namespace(gateway.Namespace)), SectionName: &second.Name}, "foo-service")
@@ -421,8 +424,8 @@ func TestExactHTTPSectionsShareOneGatewayListener(t *testing.T) {
 	fooService, fooEndpoints, _ := validNodePortBackend(gateway.Namespace, "foo-service")
 	fooService.Spec.Ports[0].NodePort = 30081
 
-	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gateway, foo, bar, ambiguous, wrongPort, wrongNamespace).
-		WithObjects(class, gateway, foo, bar, ambiguous, wrongPort, wrongNamespace, barService, barEndpoints, fooService, fooEndpoints, node).Build()
+	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gateway, foo, bar, portRoute, wrongPort, wrongNamespace).
+		WithObjects(class, gateway, foo, bar, portRoute, wrongPort, wrongNamespace, barService, barEndpoints, fooService, fooEndpoints, node).Build()
 	coordinator, provider := &graph.Coordinator{}, &recordingProvider{}
 	gr := newTestGatewayReconciler(gatewaycontroller.Reconciler{Client: kube, APIReader: kube, Coordinator: coordinator, Config: cfg}, provider)
 	r := &Reconciler{Client: kube, APIReader: kube, Writer: gr.Writer, Coordinator: coordinator, Config: cfg}
@@ -453,14 +456,14 @@ func TestExactHTTPSectionsShareOneGatewayListener(t *testing.T) {
 		}
 		reconcileGateway()
 	}
-	checkSections := func(names ...gatewayv1.SectionName) {
+	checkSections := func(count int32, names ...gatewayv1.SectionName) {
 		t.Helper()
 		if !gatewayProgrammedForGeneration(gateway) || len(gateway.Status.Listeners) != len(names) {
 			t.Fatalf("Gateway generation %d did not program %v: %#v", gateway.Generation, names, gateway.Status)
 		}
 		for i, listener := range gateway.Status.Listeners {
 			programmed := meta.FindStatusCondition(listener.Conditions, string(gatewayv1.ListenerConditionProgrammed))
-			if listener.Name != names[i] || listener.AttachedRoutes != 1 || programmed == nil || programmed.Status != metav1.ConditionTrue || programmed.ObservedGeneration != gateway.Generation {
+			if listener.Name != names[i] || listener.AttachedRoutes != count || programmed == nil || programmed.Status != metav1.ConditionTrue || programmed.ObservedGeneration != gateway.Generation {
 				t.Fatalf("incorrect status for section %q: %#v", names[i], listener)
 			}
 		}
@@ -472,7 +475,7 @@ func TestExactHTTPSectionsShareOneGatewayListener(t *testing.T) {
 	reconcileGateway()
 	savedBarBinding := bar.Annotations[cfg.RouteGatewayUIDAnnotation()]
 	listenerBinding := gateway.Annotations[cfg.GatewayListenerPortAnnotation()]
-	checkSections(first.Name)
+	checkSections(1, first.Name)
 
 	editSections(second, *first)
 	reconcileRoute(foo)
@@ -484,7 +487,6 @@ func TestExactHTTPSectionsShareOneGatewayListener(t *testing.T) {
 		route  *gatewayv1.HTTPRoute
 		reason gatewayv1.RouteConditionReason
 	}{
-		{ambiguous, gatewayv1.RouteReasonUnsupportedValue},
 		{wrongPort, gatewayv1.RouteReasonNoMatchingParent},
 		{wrongNamespace, gatewayv1.RouteReasonNotAllowedByListeners},
 	} {
@@ -498,7 +500,7 @@ func TestExactHTTPSectionsShareOneGatewayListener(t *testing.T) {
 		}
 	}
 	reconcileGateway()
-	checkSections(second.Name, first.Name)
+	checkSections(1, second.Name, first.Name)
 	if gateway.Annotations[cfg.GatewayListenerPortAnnotation()] != listenerBinding || bar.Annotations[cfg.RouteGatewayUIDAnnotation()] != savedBarBinding {
 		t.Fatal("adding a same-port section replaced a stored binding")
 	}
@@ -512,6 +514,35 @@ func TestExactHTTPSectionsShareOneGatewayListener(t *testing.T) {
 		byHost["bar.com"].Precedence == byHost["foo.com"].Precedence {
 		t.Fatalf("incorrect forwarding or precedence across shared sections: %#v", byHost)
 	}
+
+	reconcileRoute(portRoute)
+	reconcileRoute(portRoute)
+	if len(portRoute.Status.Parents) != 1 || !meta.IsStatusConditionTrue(portRoute.Status.Parents[0].Conditions, string(gatewayv1.RouteConditionAccepted)) {
+		t.Fatalf("route to both sections was not accepted: %#v", portRoute.Status)
+	}
+	var hostMatches []string
+	for i := len(provider.routeSpecs) - 1; i >= 0; i-- {
+		spec := provider.routeSpecs[i]
+		if spec.Identity.RouteUID != string(portRoute.UID) {
+			continue
+		}
+		if len(spec.HTTPBackends) != 1 || len(spec.HTTPBackends[0].Members) != 1 {
+			t.Fatalf("expected one Service for this port: %#v", spec)
+		}
+		for _, match := range spec.HTTPBackends[0].Matches {
+			if match.HTTPSListenerHostname != "" || match.PathValue != "/by-port" {
+				t.Fatalf("unexpected plain HTTP match: %#v", match)
+			}
+			hostMatches = append(hostMatches, match.Hostname)
+		}
+		break
+	}
+	slices.Sort(hostMatches)
+	if !slices.Equal(hostMatches, []string{"bar.com", "foo.com"}) {
+		t.Fatalf("forwarding hosts on the selected port = %v", hostMatches)
+	}
+	reconcileGateway()
+	checkSections(2, second.Name, first.Name)
 
 	second.Hostname = ptr.To(gatewayv1.Hostname("new.foo.com"))
 	preEditGraph := len(provider.routeSpecs)
@@ -528,11 +559,12 @@ func TestExactHTTPSectionsShareOneGatewayListener(t *testing.T) {
 	}
 
 	editSections(*first)
+	reconcileRoute(portRoute)
 	reconcileRoute(foo)
 	reconcileRoute(foo)
 	reconcileRoute(foo)
 	reconcileGateway()
-	checkSections(first.Name)
+	checkSections(2, first.Name)
 	if len(foo.Finalizers) != 0 || len(provider.deletedGateways) != 0 || gateway.Annotations[cfg.GatewayListenerPortAnnotation()] != listenerBinding {
 		t.Fatalf("removing the section did not release its route and retain the physical binding: finalizers %v, annotations %v", foo.Finalizers, gateway.Annotations)
 	}
@@ -1000,9 +1032,6 @@ func TestUnsupportedRouteIsRejectedBeforeBackendLookup(t *testing.T) {
 		change func(*gatewayv1.HTTPRoute)
 		kind   routeErrorKind
 	}{
-		{name: "multiple effective hostnames", change: func(route *gatewayv1.HTTPRoute) {
-			route.Spec.Hostnames = []gatewayv1.Hostname{"a.example.test", "b.example.test"}
-		}, kind: routeErrorUnsupported},
 		{name: "no matching declared hostname", host: ptr.To(gatewayv1.Hostname("*.example.test")), change: func(route *gatewayv1.HTTPRoute) {
 			route.Spec.Hostnames = []gatewayv1.Hostname{"example.test", "other.test"}
 		}, kind: routeErrorNoMatchingHostname},

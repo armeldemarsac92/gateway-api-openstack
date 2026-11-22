@@ -199,13 +199,12 @@ func (r *Reconciler) selectRouteAttachments(route *gatewayv1.HTTPRoute, gateway 
 		if !model.AllowsRouteNamespace(listener, gateway.Namespace, route.Namespace, namespaces) {
 			continue
 		}
-		shared := gatewaycontroller.SharedHTTPSListener(r.Config, gateway, listener)
-		if err := validateRouteHostnames(listener.Hostname, route.Spec.Hostnames, shared); err != nil {
+		if err := validateRouteHostnames(listener.Hostname, route.Spec.Hostnames); err != nil {
 			rejection = err
 			continue
 		}
-		if len(selected) != 0 && (!shared || selected[0].Protocol != listener.Protocol || selected[0].Port != listener.Port) {
-			return nil, newRouteBuildError(routeErrorUnsupported, "an HTTPRoute must attach to only one HTTP listener section")
+		if len(selected) != 0 && !gatewaycontroller.HTTPRouteSectionsSharePort(r.Config, gateway, selected[0], listener) {
+			return nil, newRouteBuildError(routeErrorUnsupported, "the selected sections must share a physical HTTP or HTTPS listener")
 		}
 		if err := validateRouteRedirectPrefixes(route, *listener); err != nil {
 			return nil, err
@@ -295,7 +294,7 @@ func grpcProfileDisabled() error {
 	return newRouteBuildError(routeErrorUnsupported, "GRPCRoute exact method matching requires Octavia backend h2c and fixed responses")
 }
 
-func validateRouteHostnames(listener *gatewayv1.Hostname, hostnames []gatewayv1.Hostname, shared bool) error {
+func validateRouteHostnames(listener *gatewayv1.Hostname, hostnames []gatewayv1.Hostname) error {
 	if listener != nil {
 		if err := amphora.ValidateHostname(string(*listener)); err != nil {
 			return newRouteBuildError(routeErrorUnsupported, "invalid listener hostname: %s", err)
@@ -310,9 +309,6 @@ func validateRouteHostnames(listener *gatewayv1.Hostname, hostnames []gatewayv1.
 	effective := model.IntersectHostnames(listener, hostnames)
 	if len(effective) == 0 {
 		return newRouteBuildError(routeErrorNoMatchingHostname, "HTTPRoute and listener hostnames do not intersect")
-	}
-	if len(effective) > 1 && !shared {
-		return newRouteBuildError(routeErrorUnsupported, "at most one effective hostname is supported per HTTPRoute")
 	}
 	for _, hostname := range effective {
 		if hostname == "" {

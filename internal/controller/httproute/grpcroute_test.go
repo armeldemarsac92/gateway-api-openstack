@@ -28,6 +28,22 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 )
 
+func TestHTTPAndGRPCConflictOnSecondHTTPHostname(t *testing.T) {
+	http := &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: "infra", Name: "a-http"}}
+	http.Spec.Hostnames = []gatewayv1.Hostname{"*.first.test", "*.shared.test"}
+	grpc := &gatewayv1.HTTPRoute{TypeMeta: metav1.TypeMeta{Kind: "GRPCRoute"}, ObjectMeta: metav1.ObjectMeta{Namespace: "infra", Name: "b-grpc"}}
+	grpc.Spec.Hostnames = []gatewayv1.Hostname{"svc.shared.test"}
+	listener := &gatewayv1.Listener{Protocol: gatewayv1.HTTPProtocolType, Port: 80}
+	candidates := []routeProfileCandidate{{route: http, listeners: []*gatewayv1.Listener{listener}}, {route: grpc, listeners: []*gatewayv1.Listener{listener}}}
+	if conflicts := electRouteProfiles(candidates); !conflicts[routeKey(grpc)] || conflicts[routeKey(http)] {
+		t.Fatalf("the older HTTPRoute must own every declared hostname: %v", conflicts)
+	}
+	grpc.Spec.Hostnames = []gatewayv1.Hostname{"shared.test"}
+	if conflicts := electRouteProfiles(candidates); len(conflicts) != 0 {
+		t.Fatalf("the wildcard cannot reserve the suffix apex: %v", conflicts)
+	}
+}
+
 func TestGatewayGraphPreservesBoundGRPCRouteWithSameNameAsHTTPRoute(t *testing.T) {
 	cfg := testConfig()
 	gateway := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "infra", Name: "edge", UID: "gateway"}}

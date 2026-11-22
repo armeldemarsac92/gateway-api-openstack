@@ -227,6 +227,14 @@ func SharedHTTPSListener(config controller.Config, gateway *gatewayv1.Gateway, l
 		})
 }
 
+// HTTPRouteSectionsSharePort checks that two admitted sections can use the same
+// physical listener. Plain HTTP admission already requires distinct exact hostnames
+// on a shared port. HTTPS also needs the regional virtual-host capability.
+func HTTPRouteSectionsSharePort(config controller.Config, gateway *gatewayv1.Gateway, first, next *gatewayv1.Listener) bool {
+	return first.Protocol == next.Protocol && first.Port == next.Port &&
+		(first.Protocol == gatewayv1.HTTPProtocolType || SharedHTTPSListener(config, gateway, next))
+}
+
 // Include only ports still assigned to HTTPS. A current singleton retains the
 // original scoped policy model through edits and controller restarts.
 func desiredHTTPSIsolatedPorts(config controller.Config, gateway *gatewayv1.Gateway) string {

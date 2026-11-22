@@ -578,9 +578,8 @@ func (r *Reconciler) attachedRoutes(ctx context.Context, gateway *gatewayv1.Gate
 				}
 			}
 			if httpKind != "" && len(matching) > 1 {
-				port := matching[0].Port
-				if slices.ContainsFunc(matching, func(listener *gatewayv1.Listener) bool {
-					return listener.Port != port || !SharedHTTPSListener(r.Config, gateway, listener)
+				if slices.ContainsFunc(matching[1:], func(listener *gatewayv1.Listener) bool {
+					return !HTTPRouteSectionsSharePort(r.Config, gateway, matching[0], listener)
 				}) {
 					continue
 				}
