@@ -66,6 +66,9 @@ func (r *Reconciler) setGatewayFailure(gateway *gatewayv1.Gateway, validationErr
 		gateway.Status.AttachedListenerSets = ptr.To(int32(0))
 	}
 	gateway.Status.Addresses = nil
+	if r.Config.GatewayAddressRoutabilityEnabled() {
+		meta.RemoveStatusCondition(&gateway.Status.Conditions, string(gatewayv1.GatewayConditionAddressesAssigned))
+	}
 	controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionAccepted), accepted, string(gatewayReason), message, gateway.Generation))
 	controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionProgrammed), metav1.ConditionFalse, string(programmedReason), message, gateway.Generation))
 	gateway.Status.Listeners = make([]gatewayv1.ListenerStatus, 0, len(gateway.Spec.Listeners))
@@ -219,6 +222,9 @@ func isControllerOwnedListenerCondition(conditionType string) bool {
 
 func (r *Reconciler) setGatewayFailureReason(gateway *gatewayv1.Gateway, reason gatewayv1.GatewayConditionReason, message string) {
 	gateway.Status.Addresses = nil
+	if r.Config.GatewayAddressRoutabilityEnabled() {
+		meta.RemoveStatusCondition(&gateway.Status.Conditions, string(gatewayv1.GatewayConditionAddressesAssigned))
+	}
 	gateway.Status.Listeners = listenerStatusesWithoutControllerConditions(gateway)
 	controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionAccepted), metav1.ConditionFalse, string(reason), message, gateway.Generation))
 	controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionProgrammed), metav1.ConditionFalse, string(gatewayv1.GatewayReasonInvalid), message, gateway.Generation))
@@ -277,10 +283,12 @@ func (r *Reconciler) handleGatewayProviderFailure(
 	); err != nil {
 		return ctrl.Result{}, errors.Join(controller.SafeProviderReconcileError(policy, providerErr), err)
 	}
-	if observation.AddressAbsent {
-		gateway.Status.Addresses = nil
-	} else if address := r.observedGatewayAddress(gateway, observation.State); address != "" && len(scopedReadyPorts) != 0 {
-		setGatewayAddress(gateway, address)
+	if !r.Config.GatewayAddressRoutabilityEnabled() {
+		if observation.AddressAbsent {
+			gateway.Status.Addresses = nil
+		} else if address := r.observedGatewayAddress(gateway, observation.State); address != "" && len(scopedReadyPorts) != 0 {
+			setGatewayAddress(gateway, address)
+		}
 	}
 	if transitioned {
 		scope.queueWarning(policy, "EnsureGateway")
@@ -403,7 +411,9 @@ func (r *Reconciler) setGatewayProgrammed(ctx context.Context, gateway *gatewayv
 		gatewayv1.ListenerReasonProgrammed, message, "Octavia listener is active", true, nil); err != nil {
 		return err
 	}
-	setGatewayAddress(gateway, address)
+	if !r.Config.GatewayAddressRoutabilityEnabled() {
+		setGatewayAddress(gateway, address)
+	}
 	return nil
 }
 
@@ -417,6 +427,20 @@ func (r *Reconciler) setGatewayAddressUnusable(
 	readyPorts := result.ScopedListenerReadyPorts
 	if controller.GatewayListenerScope(r.Config, gateway) == "" && progress.State == cloud.OutcomeReady {
 		readyPorts = []int{int(listener.Port)}
+	}
+	if r.Config.GatewayAddressRoutabilityEnabled() {
+		retained := r.observeAddressAssignment(gateway, result)
+		if !r.usesLegacyAddressAdmission(gateway) {
+			if retained && progress.State == cloud.OutcomeReady {
+				return r.setGatewayProgrammed(ctx, gateway, listener, "")
+			}
+			reason := gatewayv1.GatewayReasonAddressNotAssigned
+			if retained {
+				reason = gatewayv1.GatewayReasonNoResources
+			}
+			return r.setGatewayListenerStatuses(ctx, gateway, listener, metav1.ConditionFalse, reason,
+				gatewayv1.ListenerReasonPending, result.AddressIssue, "Waiting for Octavia listener readiness", true, readyPorts)
+		}
 	}
 	rejection := validateAddresses(gateway.Spec.Addresses)
 	programmedReason := gatewayv1.GatewayReasonAddressNotUsable
@@ -440,10 +464,12 @@ func (r *Reconciler) setGatewayAddressUnusable(
 	if rejectedCondition != nil {
 		controller.SetCondition(&gateway.Status.Conditions, *rejectedCondition)
 	}
-	if address := r.observedGatewayAddress(gateway, result.State); address != "" {
-		setGatewayAddress(gateway, address)
-	} else if result.AddressAbsent {
-		gateway.Status.Addresses = nil
+	if !r.Config.GatewayAddressRoutabilityEnabled() {
+		if address := r.observedGatewayAddress(gateway, result.State); address != "" {
+			setGatewayAddress(gateway, address)
+		} else if result.AddressAbsent {
+			gateway.Status.Addresses = nil
+		}
 	}
 	return nil
 }
@@ -728,7 +754,7 @@ func (r *Reconciler) applyHTTPSListenerStatus(
 		controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionAccepted),
 			accepted, string(gatewayv1.GatewayReasonListenersNotValid), message, gateway.Generation))
 	}
-	if !keepGatewayProgrammed {
+	if !keepGatewayProgrammed && !r.addressRejectionPreventsProgramming(gateway) {
 		controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionProgrammed),
 			metav1.ConditionFalse, string(programmedReason), message, gateway.Generation))
 	}

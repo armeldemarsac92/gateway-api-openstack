@@ -171,6 +171,9 @@ func testUpstreamGatewayStatus(t *testing.T, c client.Client, cfg controller.Con
 		}
 		tests.GatewayStaticAddresses.Run(t, s)
 	})
+	t.Run("GatewayAddressRoutability", func(t *testing.T) {
+		testGatewayAddressRoutability(t, c, cfg, provider, className)
+	})
 
 	t.Run("ListenerSet admission", func(t *testing.T) {
 		// Envtest has no scheduler. The original cases require a ready Pod

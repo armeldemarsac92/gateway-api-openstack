@@ -61,6 +61,8 @@ type observedGatewayGraph struct {
 	adminObserved            map[string]bool
 	state                    cloud.GatewayState
 	addressAbsent            bool
+	deletionFrontendActive   bool
+	frontendsObservedClosed  bool
 	addressReadError         error
 	outcome                  cloud.Outcome
 	protocol                 string
@@ -109,7 +111,7 @@ type graphMutation struct {
 }
 
 // ReconcileGatewayGraph validates and observes every component before building
-// one ordered plan. It executes at most its first mutation and never caches the
+// one ordered plan. It applies at most its first mutation and never caches the
 // plan across calls, including after a timeout or a lost create response.
 func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.GatewayGraphSpec) (result cloud.GatewayGraphResult, retErr error) {
 	var addressIssue string
@@ -117,6 +119,9 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	var actual observedGatewayGraph
 	defer func() {
 		result.Gateway.AddressAbsent = actual.addressAbsent
+		result.Gateway.AddressActive = hasActiveGatewayAddress(spec.Gateway.Spec, actual)
+		result.Gateway.AddressActivityObserved = actual.addressAbsent || result.Gateway.AddressActive ||
+			actual.frontendsObservedClosed || actual.loadBalancer != nil && !actual.loadBalancer.AdminStateUp
 		if retErr == nil {
 			result.Gateway.AddressIssue = addressIssue
 			result.Gateway.AddressBlocked = addressBlocked
@@ -200,15 +205,16 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	if spec.Gateway.Disposition == cloud.GraphWithdrawTLS {
 		return cloud.GatewayGraphResult{Gateway: cloud.GatewayResult{State: actual.state, Outcome: actual.outcome}, Outcome: actual.outcome}, nil
 	}
-	requested := spec.Gateway.Spec.RequestedVIPAddress
+	addressSpec := &desired.spec.Gateway.Spec
 	replacing := spec.Gateway.Disposition == cloud.GraphDelete && actual.loadBalancer != nil
-	if hasAddressRequest(spec.Gateway.Spec) && (spec.Gateway.Disposition == cloud.GraphEnsure || replacing) {
-		addressIssue, err = p.requestedVIPIssue(ctx, spec.Gateway.Spec, actual)
+	if hasAddressRequest(*addressSpec) && (spec.Gateway.Disposition == cloud.GraphEnsure || replacing) {
+		addressIssue, err = p.selectRequestedVIP(ctx, addressSpec, actual)
 		if err != nil {
 			return result, err
 		}
-		floatingIPUnassigned := spec.Gateway.Spec.ExternalNetworkID != "" && actual.addressAbsent
-		if actual.outcome.State == cloud.OutcomeReady && addressIssue != "" && (actual.loadBalancer == nil || replacing || floatingIPUnassigned) {
+		floatingIPUnassigned := addressSpec.ExternalNetworkID != "" && actual.addressAbsent
+		noRetainedAddress := addressSpec.RequestedVIPAddresses != nil && !hasActiveGatewayAddress(*addressSpec, actual)
+		if actual.outcome.State == cloud.OutcomeReady && addressIssue != "" && (actual.loadBalancer == nil || replacing || floatingIPUnassigned || noRetainedAddress) {
 			addressBlocked = true
 			actual.outcome = p.progressingOutcome(addressIssue)
 		}
@@ -277,13 +283,16 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 			return cloud.GatewayGraphResult{}, err
 		}
 	}
-	if err := p.executeGraphMutation(ctx, desired, actual, step); err != nil {
-		if step.kind == graphCreateLoadBalancer && requested != "" && apierrors.IsOctaviaVIPAddressConflict(err, requested) {
-			addressIssue = fmt.Sprintf("Octavia reports that VIP %s is already in use. Request an available IPv4 address on the GatewayClass VIP subnet", requested)
+	err = p.executeGraphMutation(ctx, desired, actual, step)
+	if step.kind == graphCreateLoadBalancer {
+		addressIssue, err = p.retryVIPConflict(ctx, &desired, actual, step, err)
+		if addressIssue != "" {
 			addressBlocked = true
 			actual.outcome = p.progressingOutcome(addressIssue)
 			return p.pendingGraphResult(ctx, desired, actual), nil
 		}
+	}
+	if err != nil {
 		if step.kind == graphRouteMutation {
 			return result, &cloud.GraphError{Identity: desired.routes[step.routeIndex].spec.Identity, Err: err}
 		}
@@ -432,7 +441,70 @@ func (p *Provider) validateGraphTrafficSecurity(ctx context.Context, desired des
 }
 
 func hasAddressRequest(spec cloud.GatewaySpec) bool {
-	return spec.RequestedVIPAddress != "" || spec.AddressRejection != ""
+	return spec.RequestedVIPAddress != "" || spec.AddressRejection != "" || spec.RequestedVIPAddresses != nil
+}
+
+// selectRequestedVIP respects the already allocated VIP. For an unbound
+// load balancer, it chooses the first usable fixed request or automatic
+// allocation when a request allows it.
+func (p *Provider) selectRequestedVIP(ctx context.Context, spec *cloud.GatewaySpec, actual observedGatewayGraph) (string, error) {
+	if spec.RequestedVIPAddresses == nil {
+		return p.requestedVIPIssue(ctx, *spec, actual)
+	}
+	issue := "No address request is supported by this GatewayClass"
+	for index, candidate := range spec.RequestedVIPAddresses {
+		spec.RequestedVIPAddress = candidate
+		if candidate != "" {
+			var err error
+			issue, err = p.requestedVIPIssue(ctx, *spec, actual)
+			if err != nil {
+				return "", err
+			}
+			if issue != "" {
+				continue
+			}
+		}
+		spec.RequestedVIPAddresses = spec.RequestedVIPAddresses[index:]
+		return "", nil
+	}
+	return issue, nil
+}
+
+// A definite Octavia address conflict rejects that candidate without creating
+// a load balancer. Recheck the live mutation fence before trying another one.
+func (p *Provider) retryVIPConflict(ctx context.Context, desired *desiredGatewayGraph, actual observedGatewayGraph, step graphMutation, createErr error) (string, error) {
+	spec := &desired.spec.Gateway.Spec
+	for spec.RequestedVIPAddress != "" && apierrors.IsOctaviaVIPAddressConflict(createErr, spec.RequestedVIPAddress) {
+		issue := fmt.Sprintf("Octavia reports that VIP %s is already in use. Request an available IPv4 address on the GatewayClass VIP subnet", spec.RequestedVIPAddress)
+		if len(spec.RequestedVIPAddresses) < 2 {
+			return issue, nil
+		}
+		spec.RequestedVIPAddresses = spec.RequestedVIPAddresses[1:]
+		alternativeIssue, err := p.selectRequestedVIP(ctx, spec, actual)
+		if err != nil {
+			return "", err
+		}
+		if alternativeIssue != "" {
+			return issue, nil
+		}
+		if validate := desired.spec.ValidateMutation; validate != nil {
+			if err := validate(ctx); err != nil {
+				return "", err
+			}
+		}
+		createErr = p.executeGraphMutation(ctx, *desired, actual, step)
+	}
+	return "", createErr
+}
+
+func hasActiveGatewayAddress(spec cloud.GatewaySpec, actual observedGatewayGraph) bool {
+	if actual.loadBalancer == nil || !actual.loadBalancer.AdminStateUp || actual.state.VIPAddress == "" ||
+		spec.ExternalNetworkID != "" && actual.state.FloatingIPAddress == "" {
+		return false
+	}
+	return actual.deletionFrontendActive || actual.listener != nil && actual.listener.AdminStateUp || slices.ContainsFunc(actual.scopedListeners, func(listener listeners.Listener) bool {
+		return listener.AdminStateUp
+	})
 }
 
 func (p *Provider) requestedVIPIssue(ctx context.Context, spec cloud.GatewaySpec, actual observedGatewayGraph) (string, error) {
@@ -1046,6 +1118,9 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 			return actual, nil
 		}
 		actual.deletion, err = p.buildGatewayDeletionPlanFromListeners(ctx, desired.identity, lb, owners, desired.protocol, inventory)
+		actual.deletionFrontendActive = err == nil && slices.ContainsFunc(inventory.Items, func(listener listeners.Listener) bool {
+			return listener.AdminStateUp
+		})
 		if actual.deletion.defaultPoolListener != nil {
 			actual.listener = actual.deletion.defaultPoolListener
 			actual.state.ListenerID = actual.listener.ID
@@ -1133,6 +1208,9 @@ func (p *Provider) observeGatewayListenerInventory(ctx context.Context, desired 
 	}
 	actual.defaultHTTPResponseCodes = inventory.DefaultHTTPResponseCodes
 	actual.adminObserved = inventory.AdminStatesObserved
+	actual.frontendsObservedClosed = !slices.ContainsFunc(inventory.Items, func(listener listeners.Listener) bool {
+		return !actual.adminObserved[listener.ID] || listener.AdminStateUp
+	})
 	actual.httpsVirtualHosts = inventory.HTTPSVirtualHosts
 	var bindingErr error
 	if markedProtocol != "" {

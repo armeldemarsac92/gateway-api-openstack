@@ -62,6 +62,10 @@ type GatewaySpec struct {
 
 	// RequestedVIPAddress is an optional fixed private IPv4 address on VIPSubnetID.
 	RequestedVIPAddress string
+	// RequestedVIPAddresses lists alternatives for the single VIP in preference
+	// order. An empty string allows automatic allocation. A nil list uses the
+	// legacy single-address contract. A non-nil empty list rejects assignment.
+	RequestedVIPAddresses []string
 	// AddressRejection records an invalid address request on a bound Gateway.
 	// Existing listeners and routes remain eligible for reconciliation.
 	AddressRejection string

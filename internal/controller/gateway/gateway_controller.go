@@ -127,6 +127,9 @@ func (r *Reconciler) reconcileDelete(ctx context.Context, scope *gatewayScope) (
 
 func (r *Reconciler) reconcileNormal(ctx context.Context, scope *gatewayScope) (ctrl.Result, error) {
 	decision := r.decideGatewayPhase(scope)
+	if scope.managed && !r.Config.GatewayAddressRoutabilityEnabled() {
+		meta.RemoveStatusCondition(&scope.gateway.Status.Conditions, string(gatewayv1.GatewayConditionAddressesAssigned))
+	}
 	switch decision.phase {
 	case gatewayPhaseIgnore:
 		return ctrl.Result{}, nil
@@ -186,10 +189,16 @@ func (r *Reconciler) reconcileGatewayReplacement(
 	if result, withdrawn, err := r.withdrawBoundTLS(ctx, scope.gateway); err != nil || !withdrawn {
 		return result, err
 	}
-	// An address conflict already checkpoints that this generation is unprogrammed.
+	// A rejected replacement already checkpointed this generation. Keep
+	// observing the old graph without overwriting the address diagnosis.
 	programmed := meta.FindStatusCondition(scope.gateway.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed))
+	assignment := meta.FindStatusCondition(scope.gateway.Status.Conditions, string(gatewayv1.GatewayConditionAddressesAssigned))
+	assignmentRejected := r.Config.GatewayAddressRoutabilityEnabled() && assignment != nil &&
+		assignment.ObservedGeneration == scope.gateway.Generation && assignment.Status == metav1.ConditionFalse &&
+		assignment.Reason == string(gatewayv1.GatewayReasonAddressesNotAssigned)
 	if programmed != nil && programmed.ObservedGeneration == scope.gateway.Generation &&
-		programmed.Status == metav1.ConditionFalse && (programmed.Reason == string(gatewayv1.GatewayReasonAddressNotUsable) ||
+		programmed.Status == metav1.ConditionFalse && (assignmentRejected ||
+		programmed.Reason == string(gatewayv1.GatewayReasonAddressNotUsable) ||
 		programmed.Reason == string(gatewayv1.GatewayReasonAddressNotAssigned)) {
 		return r.cleanupGateway(ctx, scope)
 	}
@@ -247,6 +256,13 @@ func (r *Reconciler) reconcileGatewayGraph(
 	if errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) {
 		return r.setGatewayUnsupportedVersion(ctx, scope)
 	}
+	var componentError *cloud.GraphError
+	routeFailure := errors.As(err, &componentError) && componentError.Identity.RouteUID != ""
+	if r.Config.GatewayAddressRoutabilityEnabled() && !errors.Is(err, errGatewayChanged) && graphResult.Gateway.AddressIssue == "" &&
+		(err == nil || routeFailure || graphResult.Gateway.AddressAbsent) {
+		// Address readback is independent of listener and route readiness.
+		r.observeAddressAssignment(scope.gateway, graphResult.Gateway)
+	}
 	if !model.GatewayDisallowsListenerSets(scope.gateway) && !errors.Is(err, errGatewayChanged) {
 		if err := r.reportListenerSets(ctx, scope.gateway, sets, graphResult); err != nil {
 			return ctrl.Result{}, err
@@ -277,8 +293,7 @@ func (r *Reconciler) reconcileGatewayGraph(
 		if errors.Is(err, errGatewayChanged) && !classified {
 			return ctrl.Result{}, err
 		}
-		var componentError *cloud.GraphError
-		if errors.As(err, &componentError) && componentError.Identity.RouteUID != "" {
+		if routeFailure {
 			if graphResult.Gateway.HTTPPolicyTransition {
 				message := controller.ProviderProgressMessage(graphResult.Gateway.Outcome, "Waiting for HTTP policy changes")
 				if statusErr := r.setGatewayListenerStatuses(ctx, scope.gateway, decision.listener,
@@ -345,10 +360,12 @@ func (r *Reconciler) reconcileGatewayGraph(
 			metav1.ConditionFalse, gatewayv1.GatewayReasonNoResources, gatewayv1.ListenerReasonPending, message, message, true, gatewayResult.ScopedListenerReadyPorts); err != nil {
 			return ctrl.Result{}, err
 		}
-		if gatewayResult.AddressAbsent {
-			scope.gateway.Status.Addresses = nil
-		} else if address != "" && len(gatewayResult.ScopedListenerReadyPorts) != 0 {
-			setGatewayAddress(scope.gateway, address)
+		if !r.Config.GatewayAddressRoutabilityEnabled() {
+			if gatewayResult.AddressAbsent {
+				scope.gateway.Status.Addresses = nil
+			} else if address != "" && len(gatewayResult.ScopedListenerReadyPorts) != 0 {
+				setGatewayAddress(scope.gateway, address)
+			}
 		}
 		return ctrl.Result{RequeueAfter: controller.ProviderProgressRequeueAfter(progress, scope.gateway.UID)}, nil
 	}
