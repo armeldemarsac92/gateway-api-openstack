@@ -25,7 +25,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -38,8 +37,6 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
-const indexByParent = "listenerSet.parentGateway"
-
 type reconciler struct {
 	client.Client
 	apiReader      client.Reader
@@ -48,16 +45,13 @@ type reconciler struct {
 
 // SetupWithManager registers ListenerSet v1 reconciliation when the API is served.
 func SetupWithManager(ctx context.Context, manager ctrl.Manager, controllerName gatewayv1.GatewayController) error {
-	kind := schema.GroupKind{Group: gatewayv1.GroupName, Kind: "ListenerSet"}
-	if _, err := manager.GetRESTMapper().RESTMapping(kind, gatewayv1.GroupVersion.Version); err != nil {
-		if meta.IsNoMatchError(err) {
-			return nil
-		}
-		return fmt.Errorf("discover ListenerSet v1: %w", err)
+	served, err := controller.ListenerSetServed(manager.GetRESTMapper())
+	if err != nil || !served {
+		return err
 	}
-	if err := manager.GetFieldIndexer().IndexField(ctx, &gatewayv1.ListenerSet{}, indexByParent, func(object client.Object) []string {
-		parent, valid := parentGatewayKey(object.(*gatewayv1.ListenerSet))
-		if !valid {
+	if err := manager.GetFieldIndexer().IndexField(ctx, &gatewayv1.ListenerSet{}, controller.IndexListenerSetByGateway, func(object client.Object) []string {
+		parent := model.ListenerSetParentKey(object.(*gatewayv1.ListenerSet))
+		if parent.Name == "" {
 			return nil
 		}
 		return []string{parent.String()}
@@ -68,28 +62,16 @@ func SetupWithManager(ctx context.Context, manager ctrl.Manager, controllerName 
 	return ctrl.NewControllerManagedBy(manager).
 		For(&gatewayv1.ListenerSet{}).
 		Watches(&gatewayv1.Gateway{}, handler.EnqueueRequestsFromMapFunc(r.requestsForGateway),
-			builder.WithPredicates(controller.GenerationOrDeletionChangedPredicate())).
+			builder.WithPredicates(controller.GatewayForHTTPRoutePredicate(controller.Config{ControllerName: controllerName}))).
 		Watches(&gatewayv1.GatewayClass{}, handler.EnqueueRequestsFromMapFunc(r.requestsForClass),
 			builder.WithPredicates(controller.GenerationOrDeletionChangedPredicate())).
 		Complete(r)
 }
 
-func parentGatewayKey(listenerSet *gatewayv1.ListenerSet) (client.ObjectKey, bool) {
-	ref := listenerSet.Spec.ParentRef
-	if ref.Name == "" || ref.Group != nil && *ref.Group != gatewayv1.GroupName || ref.Kind != nil && *ref.Kind != "Gateway" {
-		return client.ObjectKey{}, false
-	}
-	namespace := listenerSet.Namespace
-	if ref.Namespace != nil {
-		namespace = string(*ref.Namespace)
-	}
-	return client.ObjectKey{Namespace: namespace, Name: string(ref.Name)}, true
-}
-
 func (r *reconciler) requestsForGateway(ctx context.Context, gateway client.Object) []reconcile.Request {
 	key := client.ObjectKeyFromObject(gateway)
 	var sets gatewayv1.ListenerSetList
-	if err := r.List(ctx, &sets, client.MatchingFields{indexByParent: key.String()}); err != nil {
+	if err := r.List(ctx, &sets, client.MatchingFields{controller.IndexListenerSetByGateway: key.String()}); err != nil {
 		log.FromContext(ctx).Error(err, "Could not list ListenerSets for Gateway", "gateway", key)
 		return nil
 	}
@@ -123,21 +105,21 @@ func (r *reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if !listenerSet.DeletionTimestamp.IsZero() {
 		return ctrl.Result{}, nil
 	}
-	parent, valid := parentGatewayKey(&listenerSet)
-	if !valid {
-		return ctrl.Result{}, r.clearRejection(ctx, &listenerSet)
+	parent := model.ListenerSetParentKey(&listenerSet)
+	if parent.Name == "" {
+		return ctrl.Result{}, r.clearOwnedStatus(ctx, &listenerSet)
 	}
 	var gateway gatewayv1.Gateway
 	if err := r.apiReader.Get(ctx, parent, &gateway); err != nil {
 		if apierrors.IsNotFound(err) {
-			return ctrl.Result{}, r.clearRejection(ctx, &listenerSet)
+			return ctrl.Result{}, r.clearOwnedStatus(ctx, &listenerSet)
 		}
 		return ctrl.Result{}, err
 	}
 	var class gatewayv1.GatewayClass
 	if err := r.apiReader.Get(ctx, client.ObjectKey{Name: string(gateway.Spec.GatewayClassName)}, &class); err != nil {
 		if apierrors.IsNotFound(err) {
-			return ctrl.Result{}, r.clearRejection(ctx, &listenerSet)
+			return ctrl.Result{}, r.clearOwnedStatus(ctx, &listenerSet)
 		}
 		return ctrl.Result{}, err
 	}
@@ -155,6 +137,13 @@ func (r *reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	case model.GatewayDisallowsListenerSets(&gateway):
 		acceptedReason, programmedReason = gatewayv1.ListenerSetReasonNotAllowed, gatewayv1.ListenerSetReasonNotAllowed
 		message = "The parent Gateway does not allow ListenerSets"
+	case gatewayRejected(&gateway):
+		acceptedReason = gatewayv1.ListenerSetReasonParentNotAccepted
+		message = "The parent Gateway is not accepted"
+	default:
+		// The parent Gateway's graph reconciler reports admitted and denied
+		// namespaces with the winning listener and provider readiness.
+		return ctrl.Result{}, nil
 	}
 	message += r.messageSuffix()
 	controller.SetCondition(&listenerSet.Status.Conditions, controller.Condition(string(gatewayv1.ListenerSetConditionAccepted), metav1.ConditionFalse, string(acceptedReason), message, listenerSet.Generation))
@@ -163,20 +152,28 @@ func (r *reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	return ctrl.Result{}, r.patchStatus(ctx, base, &listenerSet)
 }
 
+func gatewayRejected(gateway *gatewayv1.Gateway) bool {
+	accepted := meta.FindStatusCondition(gateway.Status.Conditions, string(gatewayv1.GatewayConditionAccepted))
+	return accepted != nil && accepted.ObservedGeneration == gateway.Generation && accepted.Status == metav1.ConditionFalse
+}
+
 func (r *reconciler) messageSuffix() string {
 	return " (controller " + string(r.controllerName) + ")"
 }
 
 // ListenerSet v1 has one shared status without controller or parent entries.
-// Without a valid parent, withdraw only rejection conditions we published.
-func (r *reconciler) clearRejection(ctx context.Context, listenerSet *gatewayv1.ListenerSet) error {
+// Without a valid parent, withdraw the status published by this controller.
+func (r *reconciler) clearOwnedStatus(ctx context.Context, listenerSet *gatewayv1.ListenerSet) error {
 	base := listenerSet.DeepCopy()
 	for _, kind := range []gatewayv1.ListenerSetConditionType{gatewayv1.ListenerSetConditionAccepted, gatewayv1.ListenerSetConditionProgrammed} {
 		condition := meta.FindStatusCondition(listenerSet.Status.Conditions, string(kind))
-		if condition == nil || condition.Status != metav1.ConditionFalse || !strings.HasSuffix(condition.Message, r.messageSuffix()) {
+		if condition == nil || !strings.HasSuffix(condition.Message, r.messageSuffix()) {
 			continue
 		}
 		controller.SetCondition(&listenerSet.Status.Conditions, controller.Condition(string(kind), metav1.ConditionUnknown, string(gatewayv1.ListenerSetReasonPending), "Waiting for a managed parent Gateway", listenerSet.Generation))
+	}
+	if !equality.Semantic.DeepEqual(base.Status.Conditions, listenerSet.Status.Conditions) {
+		listenerSet.Status.Listeners = nil
 	}
 	return r.patchStatus(ctx, base, listenerSet)
 }

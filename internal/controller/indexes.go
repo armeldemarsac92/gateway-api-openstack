@@ -41,6 +41,9 @@ const (
 	IndexGatewayByClass = "spec.gatewayClassName"
 	// IndexHTTPRouteByParentGateway indexes HTTPRoutes by parent Gateway key.
 	IndexHTTPRouteByParentGateway = "spec.parentGateway"
+	// IndexHTTPRouteByListenerSet indexes HTTPRoutes by their declared ListenerSet parents.
+	IndexHTTPRouteByListenerSet = "spec.parentListenerSet"
+	IndexListenerSetByGateway   = "spec.listenerSetParentGateway"
 	// IndexHTTPRouteByStatusGateway indexes HTTPRoutes by status parent Gateway key.
 	IndexHTTPRouteByStatusGateway = "status.parentGateway"
 	// IndexHTTPRouteByBackendService indexes HTTPRoutes by backend Service key.
@@ -215,6 +218,16 @@ func controllerFieldIndexes(config Config) []controllerFieldIndex {
 			},
 		},
 	}
+	indexes = append(indexes, controllerFieldIndex{object: &gatewayv1.HTTPRoute{}, field: IndexHTTPRouteByListenerSet, extract: func(object client.Object) []string {
+		refs, _, _ := RouteParents(object)
+		var keys []string
+		for _, ref := range refs {
+			if key := model.ListenerSetRefKey(ref, object.GetNamespace()); key.Name != "" {
+				keys = append(keys, key.String())
+			}
+		}
+		return keys
+	}})
 	// The field names are scoped to the Kubernetes kind by the cache.
 	for _, index := range indexes {
 		if _, ok := index.object.(*gatewayv1.HTTPRoute); !ok {

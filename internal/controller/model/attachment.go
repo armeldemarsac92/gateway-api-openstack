@@ -37,18 +37,18 @@ func targetsGateway(parent gatewayv1.ParentReference, namespace string, gateway 
 	return namespace == gateway.Namespace && string(parent.Name) == gateway.Name
 }
 
-func attachParent(input Input, route *gatewayv1.HTTPRoute, parentIndex int, listeners []Listener) ParentAttachment {
+func attachParent(input Input, route *gatewayv1.HTTPRoute, parentIndex int, sections []gatewayv1.Listener, listeners []Listener, parentNamespace string) ParentAttachment {
 	parent := route.Spec.ParentRefs[parentIndex]
 	result := ParentAttachment{Index: parentIndex, Reference: *parent.DeepCopy(), State: AttachmentRejected}
-	for i := range input.Gateway.Spec.Listeners {
-		listener := &input.Gateway.Spec.Listeners[i]
+	for i := range sections {
+		listener := &sections[i]
 		if parent.SectionName != nil && *parent.SectionName != listener.Name || parent.Port != nil && *parent.Port != listener.Port {
 			continue
 		}
 		attachment := ListenerAttachment{Name: listener.Name, State: AttachmentRejected}
 		if !acceptsHTTP(listeners[i]) || HTTPProfileRouteKind(route) == GRPCRouteKind && listener.Protocol != gatewayv1.HTTPProtocolType {
 			attachment.Diagnostics = append(attachment.Diagnostics, routeDiagnostic(gatewayv1.RouteReasonNotAllowedByListeners, "listener does not accept HTTPRoute configuration"))
-		} else if !allowsRoute(listener, HTTPProfileRouteKind(route), input.Gateway.Namespace, route.Namespace, input.Namespaces) {
+		} else if !allowsRoute(listener, HTTPProfileRouteKind(route), parentNamespace, route.Namespace, input.Namespaces) {
 			attachment.Diagnostics = append(attachment.Diagnostics, routeDiagnostic(gatewayv1.RouteReasonNotAllowedByListeners, "listener does not allow this HTTPRoute kind or namespace"))
 		} else {
 			attachment.Hostnames = IntersectHostnames(listener.Hostname, route.Spec.Hostnames)

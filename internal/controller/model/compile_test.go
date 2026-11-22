@@ -74,6 +74,36 @@ func TestCompileGatewayListenersWithDelegationDenied(t *testing.T) {
 	}
 }
 
+func TestCompileSeparatesGatewayAndListenerSetSectionsWithTheSameName(t *testing.T) {
+	gateway := logicalGateway()
+	gateway.Spec.Listeners[0].Hostname = ptr.To(gatewayv1.Hostname("gateway.example.com"))
+	set := types.NamespacedName{Namespace: "apps", Name: "delegated"}
+	delegated := *gateway.Spec.Listeners[0].DeepCopy()
+	delegated.Hostname = ptr.To(gatewayv1.Hostname("delegated.example.com"))
+	both := logicalRoute("shared", "/shared")
+	both.Spec.ParentRefs = append(both.Spec.ParentRefs, gatewayv1.ParentReference{
+		Kind: ptr.To(gatewayv1.Kind("ListenerSet")), Name: gatewayv1.ObjectName(set.Name), SectionName: ptr.To(delegated.Name),
+	})
+	direct := logicalRoute("gateway", "/gateway")
+	result := compileLogical(t, Input{
+		Gateway: gateway, ListenerSetSections: map[types.NamespacedName][]gatewayv1.Listener{set: {delegated}},
+		Routes: []gatewayv1.HTTPRoute{both, direct},
+	})
+	if len(result.Listeners) != 2 {
+		t.Fatalf("compiled listeners = %#v, want both owners", result.Listeners)
+	}
+	for _, listener := range result.Listeners {
+		if listener.ListenerSet == set {
+			if listener.AttachedRoutes != 1 || len(listener.Rules) != 1 ||
+				listener.Rules[0].Route.Name != both.Name || listener.Rules[0].Hostname != string(*delegated.Hostname) {
+				t.Fatalf("delegated listener compiled rules from the wrong sections: %#v", listener)
+			}
+		} else if listener.AttachedRoutes != 2 || len(listener.Rules) != 2 {
+			t.Fatalf("native listener lost its selected routes: %#v", listener)
+		}
+	}
+}
+
 func TestCompileOrdersWholeGateway(t *testing.T) {
 	broad := logicalRoute("broad", "/api")
 	specific := logicalRoute("specific", "/api/admin/")

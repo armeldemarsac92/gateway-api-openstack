@@ -37,6 +37,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia/amphora"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
 const httpsPollInterval = 5 * time.Second
@@ -191,7 +192,11 @@ func listenerFamily(listener *gatewayv1.Listener) gatewayv1.ProtocolType {
 // RequiresHTTPListenerScope identifies HTTP-family configurations that require
 // the frozen per-port ownership checkpoint before any route can program.
 func RequiresHTTPListenerScope(config controller.Config, gateway *gatewayv1.Gateway) bool {
-	return usesHTTPSProfile(config, gateway) || HasMultipleHTTPListenerPorts(gateway)
+	if usesHTTPSProfile(config, gateway) || HasMultipleHTTPListenerPorts(gateway) {
+		return true
+	}
+	listeners, err := HTTPListeners(gateway)
+	return err == nil && len(listeners) == len(gateway.Spec.Listeners) && !model.GatewayDisallowsListenerSets(gateway)
 }
 
 type tlsResolution struct {

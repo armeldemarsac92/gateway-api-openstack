@@ -21,6 +21,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/types"
 	"slices"
 	"strings"
 
@@ -177,6 +180,8 @@ func (r *Reconciler) liveGraphRoutes(ctx context.Context, identity cloud.Identit
 	if err != nil {
 		return nil, fmt.Errorf("list GRPCRoute graph fragments: %w", err)
 	}
+	setParents := make(map[types.NamespacedName]types.NamespacedName)
+	gatewayKey := types.NamespacedName{Namespace: identity.GatewayNamespace, Name: identity.GatewayName}
 	result := make([]gatewayv1.HTTPRoute, 0)
 	for _, route := range slices.Concat(http, grpc) {
 		if controller.RouteClaimsGateway(r.Config, &route, identity) {
@@ -185,7 +190,21 @@ func (r *Reconciler) liveGraphRoutes(ctx context.Context, identity cloud.Identit
 		}
 		// An unbound candidate can change route selection while a graph is built.
 		for _, parent := range route.Spec.ParentRefs {
-			if routeTargetsGateway(&route, parent, identity.GatewayNamespace, identity.GatewayName) {
+			target := routeTargetsGateway(&route, parent, identity.GatewayNamespace, identity.GatewayName)
+			if setKey := model.ListenerSetRefKey(parent, route.Namespace); !target && setKey.Name != "" && model.HTTPProfileRouteKind(&route) == model.HTTPRouteKind {
+				setParent, observed := setParents[setKey]
+				if !observed {
+					var set gatewayv1.ListenerSet
+					if err := r.APIReader.Get(ctx, setKey, &set); err == nil {
+						setParent = model.ListenerSetParentKey(&set)
+					} else if !apierrors.IsNotFound(err) && !meta.IsNoMatchError(err) {
+						return nil, err
+					}
+					setParents[setKey] = setParent
+				}
+				target = setParent == gatewayKey
+			}
+			if target {
 				result = append(result, route)
 				break
 			}

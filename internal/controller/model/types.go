@@ -44,6 +44,7 @@ type Input struct {
 	MemberMode             cloud.MemberMode
 	XBackends              []XBackendObservation
 	Gateway                *gatewayv1.Gateway
+	ListenerSetSections    map[types.NamespacedName][]gatewayv1.Listener
 	Routes                 []gatewayv1.HTTPRoute
 	Namespaces             []corev1.Namespace
 	Services               []corev1.Service
@@ -91,8 +92,15 @@ type Gateway struct {
 	Diagnostics []Diagnostic
 }
 
+// ListenerSection identifies a section within its Gateway or ListenerSet.
+type ListenerSection struct {
+	ListenerSet types.NamespacedName
+	Name        gatewayv1.SectionName
+}
+
 // Listener keeps its logical identity even if a future mapping shares resources.
 type Listener struct {
+	ListenerSet    types.NamespacedName
 	Name           gatewayv1.SectionName
 	Port           gatewayv1.PortNumber
 	Protocol       gatewayv1.ProtocolType

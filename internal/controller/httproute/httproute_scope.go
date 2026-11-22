@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -30,6 +31,7 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	gatewaycontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
 )
 
 type routeStatusPlanKind int
@@ -47,6 +49,7 @@ type routeStatusPlan struct {
 	policy              controller.ProviderFailurePolicy
 	referencesEvaluated bool
 	validateOwnership   bool
+	selection           routeSelection
 }
 
 type routeProviderWarning struct {
@@ -57,12 +60,13 @@ type routeProviderWarning struct {
 }
 
 type httpRouteScope struct {
-	route       *gatewayv1.HTTPRoute
-	statusPlan  *routeStatusPlan
-	warning     *routeProviderWarning
-	patchCause  error
-	skipPatch   bool
-	versionSkew bool
+	route           *gatewayv1.HTTPRoute
+	statusPlan      *routeStatusPlan
+	parentSelection routeSelection
+	warning         *routeProviderWarning
+	patchCause      error
+	skipPatch       bool
+	versionSkew     bool
 }
 
 func (r *Reconciler) newHTTPRouteScope(
@@ -80,10 +84,19 @@ func (r *Reconciler) newHTTPRouteScope(
 	return scope, controller.RouteHasControllerBinding(r.Config, route), nil
 }
 
+func (s *httpRouteScope) completeParentUpdates(updates []parentStatusUpdate) []parentStatusUpdate {
+	if len(s.parentSelection) > 1 && len(updates) == 1 {
+		return s.parentSelection.statusUpdates(updates[0].status)
+	}
+	return updates
+}
+
 func (s *httpRouteScope) setStatuses(updates []parentStatusUpdate) {
+	updates = s.completeParentUpdates(updates)
 	s.statusPlan = &routeStatusPlan{
 		kind:              routeStatusPlanReplace,
 		updates:           append([]parentStatusUpdate(nil), updates...),
+		selection:         s.parentSelection,
 		validateOwnership: true,
 	}
 }
@@ -95,7 +108,8 @@ func (s *httpRouteScope) setProviderFailureStatuses(
 ) {
 	s.statusPlan = &routeStatusPlan{
 		kind:                routeStatusPlanProviderFailure,
-		updates:             append([]parentStatusUpdate(nil), updates...),
+		updates:             append([]parentStatusUpdate(nil), s.completeParentUpdates(updates)...),
+		selection:           s.parentSelection,
 		policy:              policy,
 		referencesEvaluated: referencesEvaluated,
 		validateOwnership:   true,
@@ -157,7 +171,7 @@ func (r *Reconciler) patchHTTPRouteStatus(
 			return errHTTPRouteChanged
 		}
 		if plan.validateOwnership {
-			if err := r.validateRouteStatusOwnership(ctx, current, plan.updates); err != nil {
+			if err := r.validateRouteStatusOwnership(ctx, current, plan); err != nil {
 				return err
 			}
 		}
@@ -200,7 +214,7 @@ func (r *Reconciler) routeStatusCheckpointNeeded(
 		return false, errHTTPRouteChanged
 	}
 	if scope.statusPlan.validateOwnership {
-		if err := r.validateRouteStatusOwnership(ctx, current, scope.statusPlan.updates); err != nil {
+		if err := r.validateRouteStatusOwnership(ctx, current, scope.statusPlan); err != nil {
 			return false, err
 		}
 	}
@@ -241,6 +255,7 @@ func (r *Reconciler) routeCleanupStatusCheckpointNeeded(
 	scope *httpRouteScope,
 	updates []parentStatusUpdate,
 ) (bool, error) {
+	updates = scope.completeParentUpdates(updates)
 	if routeHasProviderFailureStatus(
 		scope.route,
 		updates,
@@ -262,8 +277,9 @@ func (r *Reconciler) routeCleanupStatusCheckpointNeeded(
 func (r *Reconciler) validateRouteStatusOwnership(
 	ctx context.Context,
 	route *gatewayv1.HTTPRoute,
-	updates []parentStatusUpdate,
+	plan *routeStatusPlan,
 ) error {
+	updates := plan.updates
 	parents, err := r.managedParentsWithReader(ctx, r.routePatchReader(), route)
 	if err != nil {
 		return err
@@ -289,6 +305,31 @@ func (r *Reconciler) validateRouteStatusOwnership(
 			}
 		}
 		if !planned {
+			return errHTTPRouteChanged
+		}
+	}
+	if slices.ContainsFunc(plan.selection, func(attachment routeParentSelection) bool { return attachment.parent.listenerSet != nil }) {
+		if !parentsShareGateway(parents) {
+			return errHTTPRouteChanged
+		}
+		projection, err := gatewaycontroller.ObserveListenerSets(ctx, r.routePatchReader(), r.Config, parents[0].gateway)
+		if err != nil {
+			return err
+		}
+		current, _, err := r.selectRouteParents(ctx, route, parents, projection.Sections())
+		if err != nil {
+			return err
+		}
+		if !slices.EqualFunc(plan.selection, current, func(previous, current routeParentSelection) bool {
+			if !controller.ParentRefsEqual(previous.parent.ref, route.Namespace, current.parent.ref, route.Namespace) ||
+				!slices.EqualFunc(previous.listeners, current.listeners, func(a, b *gatewayv1.Listener) bool {
+					return listenerSectionIdentity(*a) == listenerSectionIdentity(*b)
+				}) {
+				return false
+			}
+			return previous.rejection == nil && current.rejection == nil || previous.rejection != nil && current.rejection != nil &&
+				previous.rejection.Error() == current.rejection.Error()
+		}) {
 			return errHTTPRouteChanged
 		}
 	}
