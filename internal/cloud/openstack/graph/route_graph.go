@@ -393,7 +393,6 @@ func (p *Provider) observeRouteGraphsFromPools(ctx context.Context, owners []rou
 	if defaultPool {
 		return inventory.graphs, nil
 	}
-	listenerByRoute := make(map[int]string)
 	var frontends []listeners.Listener
 	if scopedHTTP {
 		frontends = scopedListeners
@@ -404,7 +403,7 @@ func (p *Provider) observeRouteGraphsFromPools(ctx context.Context, owners []rou
 		frontends = []listeners.Listener{*listener}
 	}
 	for i := range frontends {
-		if err := p.observeListenerPolicies(ctx, &inventory, &frontends[i], protocol, poolOwners, listenerByRoute, strictHTTP); err != nil {
+		if err := p.observeListenerPolicies(ctx, &inventory, &frontends[i], protocol, poolOwners, strictHTTP); err != nil {
 			var incomplete *backendRequestFilterInventoryError
 			if strictHTTP && errors.As(err, &incomplete) {
 				// Pool ownership, membership and project were proved above.
@@ -450,7 +449,7 @@ func containsHTTPFragmentPool(items []pools.Pool) bool {
 	})
 }
 
-func (p *Provider) observeListenerPolicies(ctx context.Context, inventory *routeGraphInventory, listener *listeners.Listener, protocol string, poolOwners map[string]poolRouteOwner, listenerByRoute map[int]string, strict bool) error {
+func (p *Provider) observeListenerPolicies(ctx context.Context, inventory *routeGraphInventory, listener *listeners.Listener, protocol string, poolOwners map[string]poolRouteOwner, strict bool) error {
 	cached, found := inventory.scopedPolicies[listener.ID]
 	items, complete, err := cached.items, cached.complete, cached.err
 	if !found {
@@ -591,10 +590,10 @@ func (p *Provider) observeListenerPolicies(ctx context.Context, inventory *route
 			(otherCleanup || strictPolicy) && !found && item.RedirectPoolID != "" {
 			return &cloud.GraphError{Identity: owner.identity.Value(), Err: fmt.Errorf("%w: L7 policy %s redirects to an unproven pool %s", cloud.ErrOwnershipConflict, item.ID, item.RedirectPoolID)}
 		}
-		if previous := listenerByRoute[routeIndex]; strictPolicy && previous != "" && previous != listener.ID {
-			return &cloud.GraphError{Identity: owner.identity.Value(), Err: fmt.Errorf("%w: HTTPRoute policies appear on multiple listeners", cloud.ErrOwnershipConflict)}
+		graph := inventory.graphs[routeIndex].part(role.backend)
+		if strictPolicy && len(graph.policies) != 0 && graph.policies[0].policy.ListenerID != listener.ID {
+			return &cloud.GraphError{Identity: owner.identity.Value(), Err: fmt.Errorf("%w: HTTPRoute fragment policies appear on multiple listeners", cloud.ErrOwnershipConflict)}
 		}
-		listenerByRoute[routeIndex] = listener.ID
 		observed.requestRedirectPresent = requestRedirect
 		if observation.HasValidRequestRedirect() {
 			observed.requestRedirect = observation.RedirectRequest
@@ -610,7 +609,6 @@ func (p *Provider) observeListenerPolicies(ctx context.Context, inventory *route
 		if weighted {
 			observed.weightedTargets = target.WeightedTargets
 		}
-		graph := inventory.graphs[routeIndex].part(role.backend)
 		for _, policy := range graph.policies {
 			if policy.role == observed.role {
 				return &cloud.GraphError{Identity: owner.identity.Value(), Err: fmt.Errorf("%w: duplicate %s policies %s and %s", cloud.ErrOwnershipConflict, observed.role, policy.policy.ID, item.ID)}

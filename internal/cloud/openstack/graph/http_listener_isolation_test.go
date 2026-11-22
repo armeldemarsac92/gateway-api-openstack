@@ -274,6 +274,78 @@ func TestPlainHTTPHostnameReplacementAtOctaviaRuleLimit(t *testing.T) {
 	}
 }
 
+func TestPlainHTTPRuleLimitOnlyBlocksTheAffectedPortOfARoute(t *testing.T) {
+	const primary, secondary = 80, 8080
+	for _, blocked := range []int{primary, secondary} {
+		t.Run(fmt.Sprint(blocked), func(t *testing.T) {
+			provider := &Provider{projectID: "project-a", httpRequestRedirect: true}
+			spec := redirectGraphSpec(t)
+			spec.Gateway.Spec.ExternalNetworkID = ""
+			spec.Gateway.Spec.ScopedListeners = []cloud.ScopedListener{{Name: "primary", Port: primary}, {Name: "secondary", Port: secondary}}
+			hosts := []string{"*.example.test"}
+			for i := range maxOctaviaL7RulesPerPolicy {
+				hosts = append(hosts, fmt.Sprintf("host-%02d.%s.%s.%s.example.test", i,
+					strings.Repeat("a", 45), strings.Repeat("b", 45), strings.Repeat("c", 45)))
+			}
+			spec.Gateway.Spec.HTTPListenerHostnames = map[int][]string{blocked: hosts}
+			onPrimary := &spec.Routes[0].Spec
+			onPrimary.Gateway = cloud.GatewayState{}
+			onPrimary.ScopedListenerPorts = []int{primary}
+			onSecondary := *onPrimary
+			onSecondary.ScopedListenerPorts, onSecondary.ScopeHTTPResources = []int{secondary}, true
+			onSecondary.HTTPRedirects = slices.Clone(onPrimary.HTTPRedirects)
+			onSecondary.HTTPRedirects[0].Matches = slices.Clone(onPrimary.HTTPRedirects[0].Matches)
+			for _, route := range []*cloud.RouteSpec{onPrimary, &onSecondary} {
+				filter := &route.HTTPRedirects[0]
+				filter.Prefix, filter.Request = "", &cloud.HTTPRedirectRequest{Scheme: "https", Port: 443}
+				if route.ScopedListenerPorts[0] == blocked {
+					filter.Matches[0].HTTPListenerHostname = hosts[0]
+				}
+			}
+			onPrimary.AdditionalHTTPPorts = []cloud.RouteSpec{onSecondary}
+			desired, err := provider.buildDesiredGatewayGraph(spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(desired.plainHTTPRuleLimits) != 1 || desired.plainHTTPRuleLimits[blocked] == "" {
+				t.Fatalf("expected an Octavia rule limit on port %d, got %v", blocked, desired.plainHTTPRuleLimits)
+			}
+
+			lb := safetyObservedLoadBalancer()
+			lb.AdminStateUp, lb.ProvisioningStatus = true, "ACTIVE"
+			actual := observedGatewayGraph{loadBalancer: lb, scoped: true, protocol: cloud.ListenerProtocolHTTP,
+				state:         cloud.GatewayState{LoadBalancerID: lb.ID, VIPAddress: "192.0.2.10"},
+				adminObserved: map[string]bool{"primary": true, "secondary": true},
+				routes:        []observedRouteGraph{{}},
+				scopedListeners: []listeners.Listener{
+					{ID: "primary", Protocol: cloud.ListenerProtocolHTTP, ProtocolPort: primary, AdminStateUp: true, ProvisioningStatus: "ACTIVE"},
+					{ID: "secondary", Protocol: cloud.ListenerProtocolHTTP, ProtocolPort: secondary, AdminStateUp: true, ProvisioningStatus: "ACTIVE"},
+				},
+			}
+			bad := 0
+			if blocked == secondary {
+				bad = 1
+			}
+			affected, independent := &actual.scopedListeners[bad], &actual.scopedListeners[1-bad]
+			plan, result, err := provider.buildGatewayGraphPlan(desired, actual)
+			if err != nil || len(plan) != 1 || plan[0].kind != graphDisableListener || plan[0].listenerID != affected.ID ||
+				result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing {
+				t.Fatalf("the port at its rule limit must close first: plan %+v, result %+v, error %v", plan, result, err)
+			}
+			affected.AdminStateUp = false
+			plan, result, err = provider.buildGatewayGraphPlan(desired, actual)
+			if err != nil || len(plan) != 1 {
+				t.Fatalf("expected only the independent filter write with the affected port closed, got %d steps and error %v", len(plan), err)
+			}
+			if plan[0].kind != graphRouteMutation || plan[0].listenerID != independent.ID ||
+				plan[0].route.kind != routeMutationCreatePolicy || !requestRedirectPolicy.required(plan[0].route.policy) ||
+				result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing {
+				t.Fatalf("unexpected write %q on %q while route is %s", plan[0].message, plan[0].listenerID, result.Routes[0].Result.Outcome.State)
+			}
+		})
+	}
+}
+
 func observedPolicyRule(rule desiredRule) observedRouteRule {
 	return observedRouteRule{role: rule.role, flagsObserved: true, rule: l7policies.Rule{
 		RuleType: string(rule.ruleType), CompareType: string(rule.compareType), Value: rule.value,

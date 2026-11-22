@@ -164,10 +164,13 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		result.Gateway.ScopedListenerDeferredPorts = unchangedHTTPListenerSiblings(desired, actual, listener.ID)
 		affected := make(map[int]bool)
 		for i, route := range desired.routes {
-			port := httpURLPolicyRoutePort(desired, route)
-			if port == listener.ProtocolPort {
-				affected[i] = true
-			} else if desired.spec.Routes[i].Disposition == cloud.GraphEnsure && slices.Contains(result.Gateway.ScopedListenerDeferredPorts, port) {
+			for spec := range route.spec.HTTPPortSpecs() {
+				if httpURLPolicyRoutePort(desired, desiredRoute{spec: spec}) == listener.ProtocolPort {
+					affected[i] = true
+					break
+				}
+			}
+			if !affected[i] && deferScopedHTTPRouteSibling(desired.spec.Routes[i], result.Gateway.ScopedListenerDeferredPorts) {
 				result.Routes[i].Result.ObservationDeferred = true
 			}
 		}
@@ -487,14 +490,16 @@ func (p *Provider) validateGraphTrafficSecurity(ctx context.Context, desired des
 	}
 	routes := make([]cloud.RouteSpec, 0, len(desired.routes))
 	for index, route := range desired.routes {
-		if desired.spec.Routes[index].Disposition == cloud.GraphEnsure && !deniedPorts[scopedHTTPRoutePort(route)] {
-			if len(route.httpParts) == 0 && !route.backendTLS.denies() {
-				routes = append(routes, route.spec)
-			}
-			for _, backend := range route.httpParts {
-				if !backend.backendTLS.denies() && !backend.unavailable && !backend.redirect && !backend.fixedResponse && backend.weightedTargets == nil {
-					routes = append(routes, backend.spec)
-				}
+		if desired.spec.Routes[index].Disposition != cloud.GraphEnsure {
+			continue
+		}
+		if (len(route.httpParts) == 0 || len(route.policies) != 0) && !route.backendTLS.denies() && !deniedPorts[scopedHTTPRoutePort(route)] {
+			routes = append(routes, route.spec)
+		}
+		for _, backend := range route.httpParts {
+			if !deniedPorts[scopedHTTPRoutePort(backend)] && !backend.backendTLS.denies() &&
+				!backend.unavailable && !backend.redirect && !backend.fixedResponse && backend.weightedTargets == nil {
+				routes = append(routes, backend.spec)
 			}
 		}
 	}
@@ -753,16 +758,36 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 	identities := make(map[string]struct{}, len(spec.Routes))
 	lastRank := -1
 	portWinners := make(map[int]bool, len(ports))
-	rankByPort := make(map[int]int)
 	policiesByPort := make(map[int][]*desiredPolicy)
 	type policyRankScope struct {
 		port  int
 		scope string
 	}
 	policyRanks := make(map[policyRankScope]map[int]bool)
+	addRank := func(port int, scope string, rank int) error {
+		key := policyRankScope{port, scope}
+		ranks := policyRanks[key]
+		if ranks == nil {
+			ranks = make(map[int]bool)
+			policyRanks[key] = ranks
+		}
+		if rank < 0 || ranks[rank] {
+			return cloud.NewProviderError(cloud.ErrorCategoryTerminalValidation,
+				fmt.Errorf("HTTP match precedence %d must be nonnegative and distinct in its listener section", rank))
+		}
+		ranks[rank] = true
+		return nil
+	}
 	var forwardingByPort map[int][]cloud.HTTPPathMatch
 	if slices.ContainsFunc(spec.Routes, func(node cloud.RouteGraphNode) bool {
-		return node.Disposition == cloud.GraphEnsure && len(node.Spec.HTTPRedirects) != 0
+		if node.Disposition == cloud.GraphEnsure {
+			for route := range node.Spec.HTTPPortSpecs() {
+				if len(route.HTTPRedirects) != 0 {
+					return true
+				}
+			}
+		}
+		return false
 	}) {
 		forwardingByPort = redirectForwardingByPort(spec)
 	}
@@ -792,13 +817,11 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 		if node.Disposition == cloud.GraphEnsure {
 			assigned = node.Spec.ScopedListenerPorts
 		}
-		var httpPort int
-		if protocol == cloud.ListenerProtocolHTTP && len(ports) != 0 && node.Disposition == cloud.GraphEnsure {
-			if len(assigned) != 1 || !ports[assigned[0]] {
-				return invalid("a scoped HTTPRoute requires exactly one port from the Gateway listener set")
-			}
-			httpPort = assigned[0]
-		} else {
+		scopedHTTP := protocol == cloud.ListenerProtocolHTTP && len(ports) != 0 && node.Disposition == cloud.GraphEnsure
+		if (!scopedHTTP || node.Spec.GRPC) && (node.Spec.ScopeHTTPResources || len(node.Spec.AdditionalHTTPPorts) != 0) {
+			return invalid("per-port HTTP resources require an ensured scoped HTTPRoute")
+		}
+		if !scopedHTTP {
 			for index, port := range assigned {
 				if !ports[port] || portWinners[port] || index > 0 && assigned[index-1] >= port {
 					return invalid("scoped route elections require sorted, distinct ports from the Gateway listener set")
@@ -831,92 +854,57 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 			if usesDefaultPool(protocol) && len(ports) == 0 && lastRank != -1 {
 				return invalid(fmt.Sprintf("a %s listener allows at most one ensured route", protocol))
 			}
-			previousRank, hasRank := rankByPort[httpPort]
 			if protocol != cloud.ListenerProtocolHTTP && (node.Spec.Precedence < 0 ||
-				len(ports) == 0 && hasRank && node.Spec.Precedence == previousRank) {
+				len(ports) == 0 && lastRank == node.Spec.Precedence) {
 				return desiredGatewayGraph{}, &cloud.GraphError{Identity: id, Err: cloud.NewProviderError(cloud.ErrorCategoryTerminalValidation,
 					fmt.Errorf("route precedence %d must be nonnegative and distinct among ensured routes", node.Spec.Precedence))}
 			}
 			lastRank = node.Spec.Precedence
-			rankByPort[httpPort] = node.Spec.Precedence
 			if len(ports) == 0 && len(node.Spec.ScopedListenerPorts) != 0 || len(ports) != 0 && len(node.Spec.ScopedListenerPorts) == 0 {
 				return invalid("an ensured route of a multi-listener Gateway requires its selected ports")
 			}
 			if !node.Spec.GatewayRequirements.Equal(gatewayRequirements(spec.Gateway.Spec)) {
 				return desiredGatewayGraph{}, &cloud.GraphError{Identity: id, Err: fmt.Errorf("%w: route and Gateway infrastructure requirements differ", cloud.ErrOwnershipConflict)}
 			}
-			physicalPort := httpPort
-			if physicalPort == 0 {
-				physicalPort = spec.Gateway.Spec.ListenerPort
-			}
-			route, err = p.buildDesiredGatewayRoute(node.Spec, forwardingByPort[physicalPort])
-			if err != nil {
-				return desiredGatewayGraph{}, &cloud.GraphError{Identity: id, Err: err}
-			}
-			if protocol == cloud.ListenerProtocolHTTP {
-				plainHosts := spec.Gateway.Spec.HTTPListenerHostnames[physicalPort]
-				hosts := isolatedHosts[httpPort]
-				validateScope := func(scope string) error {
-					if len(hosts) == 0 && scope == "" || slices.Contains(hosts, scope) ||
-						unauthorizedHTTPSPorts[httpPort] && (scope == "*" || amphora.ValidateSNIHostname(scope) == nil) {
-						return nil
+			seenPorts := make(map[int]bool)
+			for portSpec := range node.Spec.HTTPPortSpecs() {
+				var httpPort int
+				if scopedHTTP {
+					assigned := portSpec.ScopedListenerPorts
+					if len(assigned) != 1 || !ports[assigned[0]] || seenPorts[assigned[0]] {
+						return invalid("each HTTPRoute port requires a distinct port from the Gateway listener set")
 					}
-					return &cloud.GraphError{Identity: id, Err: cloud.NewProviderError(cloud.ErrorCategoryTerminalValidation,
-						errors.New("HTTP matches require exactly one configured hostname on an isolated HTTPS listener"))}
+					httpPort = assigned[0]
+					if portSpec.ScopeHTTPResources && (portSpec.GRPC || httpPort == spec.Gateway.Spec.ListenerPort) ||
+						len(seenPorts) != 0 && (!portSpec.ScopeHTTPResources || len(portSpec.AdditionalHTTPPorts) != 0 ||
+							portSpec.Identity != id || !portSpec.GatewayRequirements.Equal(node.Spec.GatewayRequirements)) {
+						return invalid("invalid additional HTTPRoute port identity")
+					}
 				}
-				if node.Spec.HTTPSListenerHostname != "" {
-					if err := validateScope(node.Spec.HTTPSListenerHostname); err != nil {
+				physicalPort := httpPort
+				if physicalPort == 0 {
+					physicalPort = spec.Gateway.Spec.ListenerPort
+				}
+				// The parent retains the full API-facing spec. Compile each port's
+				// data plane independently before combining its parts.
+				portSpec.AdditionalHTTPPorts = nil
+				portRoute, err := p.buildDesiredGatewayRoute(portSpec, forwardingByPort[physicalPort])
+				if err != nil {
+					return desiredGatewayGraph{}, &cloud.GraphError{Identity: id, Err: err}
+				}
+				if protocol == cloud.ListenerProtocolHTTP {
+					if err := collectHTTPPortPolicies(&desired, portRoute, httpPort, physicalPort, isolatedHosts[httpPort],
+						unauthorizedHTTPSPorts[httpPort], addRank, policiesByPort); err != nil {
 						return desiredGatewayGraph{}, err
 					}
 				}
-				addRank := func(scope string, rank int) error {
-					key := policyRankScope{httpPort, scope}
-					ranks := policyRanks[key]
-					if ranks == nil {
-						ranks = make(map[int]bool)
-						policyRanks[key] = ranks
-					}
-					if rank < 0 || ranks[rank] {
-						return &cloud.GraphError{Identity: id, Err: cloud.NewProviderError(cloud.ErrorCategoryTerminalValidation,
-							fmt.Errorf("HTTP match precedence %d must be nonnegative and distinct in its listener section", rank))}
-					}
-					ranks[rank] = true
-					return nil
+				if len(seenPorts) == 0 {
+					route = portRoute
+					route.spec.AdditionalHTTPPorts = node.Spec.AdditionalHTTPPorts
+				} else {
+					route.httpParts = append(route.httpParts, portRoute.httpParts...)
 				}
-				for _, match := range route.redirectMatches {
-					if err := validateScope(match.HTTPSListenerHostname); err != nil {
-						return desiredGatewayGraph{}, err
-					}
-					if err := validatePlainHTTPMatch(plainHosts, match.HTTPListenerHostname, match.Hostname); err != nil {
-						return desiredGatewayGraph{}, &cloud.GraphError{Identity: id, Err: err}
-					}
-					if err := addRank(listenerScope(match.HTTPListenerHostname, match.HTTPSListenerHostname), match.Precedence); err != nil {
-						return desiredGatewayGraph{}, err
-					}
-				}
-				for _, policies := range route.policySets() {
-					for i := range policies {
-						policy := &policies[i]
-						if err := validateScope(policy.httpsListenerHostname); err != nil {
-							return desiredGatewayGraph{}, err
-						}
-						if err := addPlainHTTPExclusions(plainHosts, policy, route.hostnameRuleValue); err != nil {
-							if !errors.Is(err, errPlainHTTPRuleLimit) {
-								return desiredGatewayGraph{}, &cloud.GraphError{Identity: id, Err: err}
-							}
-							if desired.plainHTTPRuleLimits == nil {
-								desired.plainHTTPRuleLimits = make(map[int]string)
-							}
-							desired.plainHTTPRuleLimits[physicalPort] = err.Error()
-						}
-						if policy.redirect == nil && policy.position == 1 {
-							if err := addRank(listenerScope(policy.httpListenerHostname, policy.httpsListenerHostname), policy.precedence); err != nil {
-								return desiredGatewayGraph{}, err
-							}
-						}
-						policiesByPort[httpPort] = append(policiesByPort[httpPort], policy)
-					}
-				}
+				seenPorts[httpPort] = true
 			}
 		}
 		desired.routes = append(desired.routes, route)
@@ -940,6 +928,61 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 		}
 	}
 	return desired, nil
+}
+
+func collectHTTPPortPolicies(desired *desiredGatewayGraph, portRoute desiredRoute, httpPort, physicalPort int, hosts []string,
+	certificateUnavailable bool, addRank func(int, string, int) error, policiesByPort map[int][]*desiredPolicy,
+) error {
+	id := portRoute.spec.Identity
+	plainHosts := desired.spec.Gateway.Spec.HTTPListenerHostnames[physicalPort]
+	validateScope := func(scope string) error {
+		if len(hosts) == 0 && scope == "" || slices.Contains(hosts, scope) ||
+			certificateUnavailable && (scope == "*" || amphora.ValidateSNIHostname(scope) == nil) {
+			return nil
+		}
+		return &cloud.GraphError{Identity: id, Err: cloud.NewProviderError(cloud.ErrorCategoryTerminalValidation,
+			errors.New("HTTP matches require exactly one configured hostname on an isolated HTTPS listener"))}
+	}
+	if portRoute.spec.HTTPSListenerHostname != "" {
+		if err := validateScope(portRoute.spec.HTTPSListenerHostname); err != nil {
+			return err
+		}
+	}
+	for _, match := range portRoute.redirectMatches {
+		if err := validateScope(match.HTTPSListenerHostname); err != nil {
+			return err
+		}
+		if err := validatePlainHTTPMatch(plainHosts, match.HTTPListenerHostname, match.Hostname); err != nil {
+			return &cloud.GraphError{Identity: id, Err: err}
+		}
+		if err := addRank(httpPort, listenerScope(match.HTTPListenerHostname, match.HTTPSListenerHostname), match.Precedence); err != nil {
+			return &cloud.GraphError{Identity: id, Err: err}
+		}
+	}
+	for _, policies := range portRoute.policySets() {
+		for i := range policies {
+			policy := &policies[i]
+			if err := validateScope(policy.httpsListenerHostname); err != nil {
+				return err
+			}
+			if err := addPlainHTTPExclusions(plainHosts, policy, portRoute.hostnameRuleValue); err != nil {
+				if !errors.Is(err, errPlainHTTPRuleLimit) {
+					return &cloud.GraphError{Identity: id, Err: err}
+				}
+				if desired.plainHTTPRuleLimits == nil {
+					desired.plainHTTPRuleLimits = make(map[int]string)
+				}
+				desired.plainHTTPRuleLimits[physicalPort] = err.Error()
+			}
+			if policy.redirect == nil && policy.position == 1 {
+				if err := addRank(httpPort, listenerScope(policy.httpListenerHostname, policy.httpsListenerHostname), policy.precedence); err != nil {
+					return &cloud.GraphError{Identity: id, Err: err}
+				}
+			}
+			policiesByPort[httpPort] = append(policiesByPort[httpPort], policy)
+		}
+	}
+	return nil
 }
 
 func httpMatchScope(spec cloud.RouteSpec, match cloud.HTTPPathMatch) string {
@@ -1402,11 +1445,17 @@ func (p *Provider) pendingGraphResult(ctx context.Context, desired desiredGatewa
 		}
 	}
 	for index, route := range desired.routes {
-		deferSibling := desired.spec.Routes[index].Disposition == cloud.GraphEnsure &&
-			slices.Contains(result.Gateway.ScopedListenerDeferredPorts, scopedHTTPRoutePort(route))
+		deferSibling := deferScopedHTTPRouteSibling(desired.spec.Routes[index], result.Gateway.ScopedListenerDeferredPorts)
 		result.Routes = append(result.Routes, cloud.RouteGraphResult{Identity: route.spec.Identity, Result: cloud.RouteResult{
-			Outcome: actual.outcome, ObservationDeferred: !actual.scoped || deferred[index] || deferSibling,
+			Outcome: actual.outcome, ObservationDeferred: deferred[index] || deferSibling || !actual.scoped && len(route.spec.AdditionalHTTPPorts) == 0,
 		}})
 	}
 	return result
+}
+
+// Frontend readback alone can preserve a checkpoint for a sibling on one
+// port. A multiport Route needs policy readback across its selected ports.
+func deferScopedHTTPRouteSibling(node cloud.RouteGraphNode, ports []int) bool {
+	return node.Disposition == cloud.GraphEnsure && len(node.Spec.AdditionalHTTPPorts) == 0 &&
+		len(node.Spec.ScopedListenerPorts) == 1 && slices.Contains(ports, node.Spec.ScopedListenerPorts[0])
 }

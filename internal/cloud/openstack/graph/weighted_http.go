@@ -67,7 +67,7 @@ func (p *Provider) buildDesiredWeightedHTTPParts(spec cloud.RouteSpec) ([]desire
 			return invalid(errors.New("weighted HTTP rules require a unique rule index, a match and 1 to 16 targets"))
 		}
 		seen[rule.RuleIndex] = true
-		part, err := p.buildDesiredRoutePart(partSpec, openstackidentity.HTTPWeightedRuleKey(rule.RuleIndex), true)
+		part, err := p.buildDesiredRoutePart(partSpec, scopeHTTPKey(spec, openstackidentity.HTTPWeightedRuleKey(rule.RuleIndex)), true)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -91,7 +91,7 @@ func (p *Provider) buildDesiredWeightedHTTPParts(spec cloud.RouteSpec) ([]desire
 					return invalid(errors.New("weighted HTTP targets must reference an authorized backend"))
 				}
 				backend := spec.HTTPBackends[index]
-				wanted.backendKey = openstackidentity.HTTPBackendPoolKey(backend)
+				wanted.backendKey = scopeHTTPKey(spec, openstackidentity.HTTPBackendPoolKey(backend))
 				used[index] = true
 			} else if spec.GRPC && target.Weight > 0 {
 				// Octavia fixed targets only support HTTP 404 and 500. An
@@ -364,7 +364,7 @@ func observedWeightedPoolWeights(demand map[string]int, observed observedRouteGr
 // Compare the observed match with the desired policy that will replace it,
 // including policies whose rule index shifted. Route-wide authority still
 // closes genuine revocations when an edit removed the predicate altogether.
-func weightedPolicyAuthorizations(route desiredRoute, actual observedRouteGraph, routeDemand map[string]int) map[string]map[string]int {
+func weightedPolicyAuthorizations(route desiredRoute, actual observedRouteGraph, portsByListener map[string]int) map[string]map[string]int {
 	var out map[string]map[string]int
 	denied := deniedBackendTLSKeys(route)
 	for _, part := range actual.httpParts {
@@ -372,9 +372,19 @@ func weightedPolicyAuthorizations(route desiredRoute, actual observedRouteGraph,
 			if !isObservedWeightedHTTPPolicy(policy) {
 				continue
 			}
-			demand := routeDemand
-			if replacement := matchingWeightedPolicyReplacement(route, policy); replacement != nil {
+			port := portsByListener[policy.policy.ListenerID]
+			replacement := matchingWeightedPolicyReplacement(route, policy, port)
+			demand := make(map[string]int)
+			if replacement != nil {
 				demand = policyWeightedBackendDemand(*replacement)
+			} else {
+				for _, wanted := range route.httpParts {
+					if scopedHTTPRoutePort(wanted) == port {
+						for key, weight := range policyWeightedBackendDemand(wanted) {
+							demand[key] += weight
+						}
+					}
+				}
 			}
 			if out == nil {
 				out = make(map[string]map[string]int)
@@ -401,10 +411,13 @@ func deniedBackendTLSKeys(route desiredRoute) map[string]bool {
 	return denied
 }
 
-func matchingWeightedPolicyReplacement(route desiredRoute, policy observedRoutePolicy) *desiredRoute {
+func matchingWeightedPolicyReplacement(route desiredRoute, policy observedRoutePolicy, port int) *desiredRoute {
 	var best *desiredRoute
 	var position int32
 	for _, part := range route.httpParts {
+		if scopedHTTPRoutePort(part) != port {
+			continue
+		}
 		for _, wanted := range part.policies {
 			if !observedHTTPPredicateMatches(policy, rulesFor(wanted, part.hostnameRuleValue)) {
 				continue

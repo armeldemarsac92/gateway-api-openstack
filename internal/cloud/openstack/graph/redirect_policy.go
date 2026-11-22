@@ -46,7 +46,8 @@ func redirectPartKey(matchKey string) string {
 
 func (p *Provider) buildDesiredGatewayRoute(spec cloud.RouteSpec, forwards []cloud.HTTPPathMatch) (desiredRoute, error) {
 	if len(spec.HTTPRedirects) == 0 {
-		return p.buildDesiredRoute(spec)
+		route, err := p.buildDesiredRoute(spec)
+		return scopeHTTPScalar(route), err
 	}
 	route, err := p.buildDesiredHTTPBackends(spec)
 	if err != nil {
@@ -88,7 +89,7 @@ func (p *Provider) buildDesiredGatewayRoute(spec cloud.RouteSpec, forwards []clo
 				return invalid(err)
 			}
 			match.HTTPSListenerHostname = httpMatchScope(spec, match)
-			key := openstackidentity.HTTPListenerMatchKey(match.HTTPSListenerHostname, match)
+			key := scopeHTTPKey(spec, openstackidentity.HTTPListenerMatchKey(match.HTTPSListenerHostname, match))
 			route.redirectMatches = append(route.redirectMatches, match)
 			selected, found := matches[key]
 			if found && selected.precedence <= match.Precedence {

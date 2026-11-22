@@ -122,9 +122,11 @@ func retainedBackendCAs(spec cloud.GatewayGraphSpec, actual observedGatewayGraph
 	}
 	for _, node := range spec.Routes {
 		if node.Disposition == cloud.GraphEnsure {
-			selectRevision(node.Spec.BackendTLS)
-			for _, backend := range node.Spec.HTTPBackends {
-				selectRevision(backend.BackendTLS)
+			for spec := range node.Spec.HTTPPortSpecs() {
+				selectRevision(spec.BackendTLS)
+				for _, backend := range spec.HTTPBackends {
+					selectRevision(backend.BackendTLS)
+				}
 			}
 		}
 	}

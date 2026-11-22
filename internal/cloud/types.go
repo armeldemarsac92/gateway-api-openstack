@@ -20,6 +20,7 @@ package cloud
 
 import (
 	"fmt"
+	"iter"
 	"slices"
 )
 
@@ -286,10 +287,15 @@ type RouteSpec struct {
 	// HTTPSListenerHostname scopes scalar routes and supplies the default section
 	// for grouped matches that do not specify their own.
 	HTTPSListenerHostname string `json:",omitempty"`
-	// ScopedListenerPorts identifies the authorized listener ports. An HTTPRoute
-	// selects exactly one scoped port, while transport routes may win several.
-	// Single-listener bindings use GatewayRequirements.ListenerPort.
-	ScopedListenerPorts     []int `json:",omitempty"`
+	// ScopedListenerPorts identifies a physical HTTP port or the elected ports
+	// of a transport Route. Unscoped bindings use GatewayRequirements.ListenerPort.
+	ScopedListenerPorts []int `json:",omitempty"`
+	// ScopeHTTPResources distinguishes this port's resources from the legacy
+	// roles on the Gateway binding's anchor port.
+	ScopeHTTPResources bool `json:",omitempty"`
+	// AdditionalHTTPPorts contains the same route's desired traffic on other
+	// physical ports. All ports share one ownership binding and result.
+	AdditionalHTTPPorts     []RouteSpec `json:",omitempty"`
 	MemberMode              MemberMode
 	MemberSubnetID          string
 	BackendSecurityGroupIDs []string
@@ -314,6 +320,20 @@ type RouteSpec struct {
 	FixedHTTPRules    []HTTPFixedRule    `json:",omitempty"`
 	HTTPRedirects     []HTTPRedirect     `json:",omitempty"`
 	WeightedHTTPRules []HTTPWeightedRule `json:",omitempty"`
+}
+
+// HTTPPortSpecs visits each physical port's traffic specification.
+func (s RouteSpec) HTTPPortSpecs() iter.Seq[RouteSpec] {
+	return func(yield func(RouteSpec) bool) {
+		if !yield(s) {
+			return
+		}
+		for _, port := range s.AdditionalHTTPPorts {
+			if !yield(port) {
+				return
+			}
+		}
+	}
 }
 
 // RouteState records the OpenStack objects produced for one route.

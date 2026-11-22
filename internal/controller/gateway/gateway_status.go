@@ -614,7 +614,7 @@ func (r *Reconciler) attachedRoutes(ctx context.Context, gateway *gatewayv1.Gate
 					matching = append(matching, listener)
 				}
 			}
-			if httpKind != "" && len(matching) > 1 {
+			if httpKind == model.GRPCRouteKind && len(matching) > 1 {
 				if slices.ContainsFunc(matching[1:], func(listener *gatewayv1.Listener) bool {
 					return !HTTPRouteSectionsSharePort(r.Config, gateway, matching[0], listener)
 				}) {

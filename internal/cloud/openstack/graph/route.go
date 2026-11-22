@@ -147,6 +147,40 @@ func (p *Provider) buildDesiredRoute(spec cloud.RouteSpec) (desiredRoute, error)
 	return route, err
 }
 
+// scopeHTTPKey keeps the legacy roles on the anchor and encodes all other
+// ports in existing HTTP role formats. The same route and port always produce
+// the same keys, regardless of listener order or changes on another port.
+func scopeHTTPKey(spec cloud.RouteSpec, key string) string {
+	if !spec.ScopeHTTPResources || len(spec.ScopedListenerPorts) != 1 {
+		return key
+	}
+	return openstackidentity.HTTPBackendKey("listener-port", key, spec.ScopedListenerPorts[0])
+}
+
+func scopeHTTPScalar(route desiredRoute) desiredRoute {
+	if !route.spec.ScopeHTTPResources || len(route.httpParts) != 0 {
+		return route
+	}
+	part := route
+	part.backendKey = scopeHTTPKey(route.spec, "")
+	matchKey := openstackidentity.HTTPListenerMatchKey(route.spec.HTTPSListenerHostname, cloud.HTTPPathMatch{
+		HTTPListenerHostname: route.spec.HTTPListenerHostname, Hostname: route.spec.Hostname,
+		PathType: route.spec.PathType, PathValue: route.spec.PathValue,
+	})
+	for i := range part.policies {
+		policy := &part.policies[i]
+		base := policy.role
+		if parsed, _, _, ok := openstackidentity.ParseHTTPFragmentRole(base); ok {
+			base = parsed
+		}
+		policy.backendKey, policy.matchKey = part.backendKey, matchKey
+		policy.hostnameRuleValue = route.hostnameRuleValue
+		policy.role = policyRuleRole(*policy, base, "")
+	}
+	route.policies, route.httpParts = nil, []desiredRoute{part}
+	return route
+}
+
 func (p *Provider) buildDesiredRoutePart(spec cloud.RouteSpec, backendKey string, unavailable bool) (desiredRoute, error) {
 	identity, err := p.identity(spec.Identity)
 	if err != nil {
@@ -330,7 +364,7 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 			len(backend.Matches) == 0 && !targetsUsed[index] || unavailable && !deniedTLS && len(backend.Members) != 0 {
 			return invalid(errors.New("each HTTP backend requires a supported reference and a match or weighted reference, and an unavailable backend must have no members"))
 		}
-		key := openstackidentity.HTTPBackendPoolKey(backend)
+		key := scopeHTTPKey(spec, openstackidentity.HTTPBackendPoolKey(backend))
 		if backendKeys[key] {
 			return invalid(errors.New("duplicate HTTP backend within one route"))
 		}
@@ -382,7 +416,7 @@ func (p *Provider) buildDesiredFixedHTTPParts(spec cloud.RouteSpec) ([]desiredRo
 			return invalid(errors.New("fixed HTTP rules require a unique rule index and at least one match"))
 		}
 		seen[rule.RuleIndex] = true
-		part, err := p.buildDesiredRoutePart(partSpec, openstackidentity.HTTPFixedRuleKey(rule.RuleIndex), true)
+		part, err := p.buildDesiredRoutePart(partSpec, scopeHTTPKey(spec, openstackidentity.HTTPFixedRuleKey(rule.RuleIndex)), true)
 		if err != nil {
 			return nil, err
 		}
@@ -476,10 +510,10 @@ func (p *Provider) buildHTTPMatchPolicies(r *desiredRoute, matches []cloud.HTTPP
 }
 
 func (r desiredRoute) policySets() [][]desiredPolicy {
-	if len(r.httpParts) == 0 {
-		return [][]desiredPolicy{r.policies}
+	policies := make([][]desiredPolicy, 0, 1+len(r.httpParts))
+	if len(r.policies) != 0 {
+		policies = append(policies, r.policies)
 	}
-	policies := make([][]desiredPolicy, 0, len(r.httpParts))
 	for _, backend := range r.httpParts {
 		policies = append(policies, backend.policies)
 	}

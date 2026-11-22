@@ -144,7 +144,7 @@ func backendTLSParts(desired *desiredGatewayGraph, routes []observedRouteGraph) 
 				parts = append(parts, backendTLSPart{index: index, key: key, desired: part, observed: actualPart})
 			}
 		}
-		if len(route.httpParts) == 0 {
+		if len(route.httpParts) == 0 || len(route.policies) != 0 {
 			add(route, "", observed)
 		} else {
 			add(nil, "", observed)

@@ -24,6 +24,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia/amphora"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
+	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/pools"
 )
 
 func hasHTTPRouteParts(desired desiredGatewayGraph, actual observedGatewayGraph) bool {
@@ -38,6 +39,10 @@ func httpPlanningParts(desired desiredGatewayGraph, actual observedGatewayGraph)
 	partDesired, partActual := desired, actual
 	partDesired.spec.Routes, partDesired.routes, partActual.routes = nil, nil, nil
 	var owners []int
+	portsByListener := make(map[string]int, len(actual.scopedListeners))
+	for _, listener := range actual.scopedListeners {
+		portsByListener[listener.ID] = listener.ProtocolPort
+	}
 	for index, route := range desired.routes {
 		node := desired.spec.Routes[index]
 		var observed observedRouteGraph
@@ -48,7 +53,7 @@ func httpPlanningParts(desired desiredGatewayGraph, actual observedGatewayGraph)
 		var authorizations map[string]map[string]int
 		demand := weightedBackendDemand(route)
 		if node.Disposition == cloud.GraphEnsure {
-			authorizations = weightedPolicyAuthorizations(route, observed, demand)
+			authorizations = weightedPolicyAuthorizations(route, observed, portsByListener)
 		}
 		failurePoolID := observedGRPCFailurePoolID(route, observed)
 		appendPart := func(part desiredRoute, fragment observedRouteGraph, obsolete bool) {
@@ -62,6 +67,7 @@ func httpPlanningParts(desired desiredGatewayGraph, actual observedGatewayGraph)
 			if fragment.pool != nil {
 				fragment.weightedPoolHeld = uncertainTargets || heldPools[fragment.pool.ID]
 			}
+			partNode.Spec = part.spec
 			partDesired.spec.Routes = append(partDesired.spec.Routes, partNode)
 			partDesired.routes = append(partDesired.routes, part)
 			if actual.routes != nil {
@@ -69,8 +75,8 @@ func httpPlanningParts(desired desiredGatewayGraph, actual observedGatewayGraph)
 			}
 			owners = append(owners, index)
 		}
-		if len(route.httpParts) == 0 || observed.pool != nil || len(observed.policies) != 0 {
-			appendPart(route, observed, len(route.httpParts) != 0)
+		if len(route.httpParts) == 0 || len(route.policies) != 0 || observed.pool != nil || len(observed.policies) != 0 {
+			appendPart(route, observed, len(route.httpParts) != 0 && len(route.policies) == 0)
 		}
 		for _, backend := range route.httpParts {
 			var fragment observedRouteGraph
@@ -417,7 +423,12 @@ func planHTTPPolicyHandovers(original, desired desiredGatewayGraph, actual obser
 	}
 	stageReplacement := func(source, target, port int, old []observedRoutePolicy, wantedPolicies []desiredPolicy) bool {
 		prior, next := desired.routes[source], desired.routes[target]
-		oldPool := actual.routes[source].pool
+		previous := actual.routes[source]
+		if next.spec.ScopeHTTPResources && !next.fixedResponse && next.weightedTargets == nil &&
+			!scopeHandoverKeepsAuthorizedMembers(next, previous) {
+			return false
+		}
+		oldPool := previous.pool
 		// A scalar/grouped transition for a modifier keeps the same match.
 		// During staging, its proved old predicate still protects redirects.
 		provedHeaderHandover := (prior.backendKey == "") != (next.backendKey == "") &&
@@ -541,6 +552,23 @@ func planHTTPPolicyHandovers(original, desired desiredGatewayGraph, actual obser
 		}
 	}
 	return handover
+}
+
+// During a port-role migration, an older forwarding predicate may remain
+// active only while every observed destination is still authorized.
+func scopeHandoverKeepsAuthorizedMembers(next desiredRoute, previous observedRouteGraph) bool {
+	if previous.pool == nil {
+		return true
+	}
+	if next.unavailable || next.backendTransportNeedsWithdrawal(previous) ||
+		next.spec.BackendTLS != nil || hasBackendTLSSettings(*previous.pool, previous.backendTLS) {
+		return false
+	}
+	return !slices.ContainsFunc(previous.members, func(existing pools.Member) bool {
+		return !slices.ContainsFunc(next.members, func(current cloud.Member) bool {
+			return existing.Address == current.Address && existing.ProtocolPort == current.Port && existing.SubnetID == next.spec.MemberSubnetID
+		})
+	})
 }
 
 func hasHeaderOperationPolicies(policies []desiredPolicy) bool {
