@@ -143,7 +143,11 @@ func (p ListenerSetProjection) sameInputs(other ListenerSetProjection) bool {
 	return slices.EqualFunc(p.sets, other.sets, func(a, b admittedListenerSet) bool {
 		return a.object.UID == b.object.UID && client.ObjectKeyFromObject(a.object) == client.ObjectKeyFromObject(b.object) &&
 			a.object.Generation == b.object.Generation && equality.Semantic.DeepEqual(a.object.Spec, b.object.Spec) &&
-			a.namespaceVersion == b.namespaceVersion && a.allowed == b.allowed && equality.Semantic.DeepEqual(a.entries, b.entries)
+			a.namespaceVersion == b.namespaceVersion && a.allowed == b.allowed &&
+			slices.EqualFunc(a.entries, b.entries, func(left, right listenerSetEntry) bool {
+				return left.rejection == right.rejection && left.conflicted == right.conflicted &&
+					left.invalidRouteKinds == right.invalidRouteKinds && equality.Semantic.DeepEqual(left.listener, right.listener)
+			})
 	})
 }
 
