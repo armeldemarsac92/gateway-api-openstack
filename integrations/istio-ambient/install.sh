@@ -2,14 +2,19 @@
 set -euo pipefail
 
 usage() {
-    printf '%s\n' 'Usage: install.sh render CHART_DIR' \
-        '       install.sh install CHART_DIR KUBECONFIG CONTEXT standard|experimental' >&2
+    printf '%s\n' 'Usage: install.sh render CHART_DIR [--consumer-routes]' \
+        '       install.sh install CHART_DIR KUBECONFIG CONTEXT standard|experimental [--consumer-routes]' >&2
     exit 2
 }
 
 mode=${1:-}
 charts=${2:-}
 [[ -n "$charts" ]] || usage
+consumer_routes=false
+if [[ ${!#} == --consumer-routes ]]; then
+    consumer_routes=true
+    set -- "${@:1:$#-1}"
+fi
 case "$mode" in
     render) [[ $# -eq 2 ]] || usage ;;
     install)
@@ -55,6 +60,10 @@ deploy_chart() {
 }
 
 deploy_chart hibiscus-ambient-base base --set global.enableReaderRBAC=false
-deploy_chart hibiscus-ambient-istiod istiod --values "$module/istiod.yaml"
+pilot_values=(--values "$module/istiod.yaml")
+if [[ "$consumer_routes" == true ]]; then
+    pilot_values+=(--values "$module/consumer-routes.yaml")
+fi
+deploy_chart hibiscus-ambient-istiod istiod "${pilot_values[@]}"
 deploy_chart hibiscus-ambient-cni cni --values "$module/cni.yaml"
 deploy_chart hibiscus-ambient-ztunnel ztunnel --values "$module/ztunnel.yaml"

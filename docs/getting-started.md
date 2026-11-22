@@ -474,7 +474,7 @@ actions. A rule combining this filter with `RequestRedirect`, a filter on a
 header is rejected. Removing the filter clears its operations in Octavia.
 If reconciliation confirms that an active policy's provider stopped
 advertising the capability, the controller closes the affected listener until
-it can verify the policy again or withdraw the response operations.
+it can verify the policy again or withdraw the response operations. [Provider packages and local traffic results](qualification/v1.7.0/provider/opt-in-response-header-modifier.md)
 
 ## Safe removal
 
