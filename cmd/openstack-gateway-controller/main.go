@@ -45,6 +45,7 @@ import (
 
 	configv1alpha1 "github.com/gateway-api-openstack/gateway-api-openstack/api/v1alpha1"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/backendca"
 	openstackobservability "github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/observability"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/certificates"
@@ -84,6 +85,7 @@ func run(ctx context.Context) error {
 		controllerName     string
 		gatewayAPIChannel  string
 		certificateMap     string
+		backendTLSPolicy   bool
 		fixedHTTPResponses bool
 		weightedTargets    bool
 		clusterID          string
@@ -112,6 +114,7 @@ func run(ctx context.Context) error {
 	flag.BoolVar(&weightedTargets, "octavia-weighted-http-targets", false, "use the advertised Octavia weighted HTTP target capability (requires --octavia-fixed-http-responses)")
 	flag.BoolVar(&tlsSNIPassthrough, "octavia-tls-sni-passthrough", false, "use the advertised Octavia TCP SNI passthrough capability for TLSRoutes")
 	flag.BoolVar(&tlsSNISuffix, "octavia-tls-sni-suffix", false, "use the advertised Octavia wildcard SNI capability (requires --octavia-tls-sni-passthrough)")
+	flag.BoolVar(&backendTLSPolicy, "octavia-backend-tls-policy", false, "authenticate BackendTLSPolicy HTTP upstreams with the regional Octavia hostname capability and a Barbican CA (requires --octavia-microversion=2.8 or newer)")
 	flag.BoolVar(&backendH2C, "octavia-backend-h2c", false, "use the advertised Octavia h2c backend transport capability")
 	flag.BoolVar(&requestHeaderModifier, "octavia-request-header-modifier", false, "use the advertised Octavia L7 request header operations capability")
 	flag.StringVar(&certificateMap, "tls-certificate-map", envOr("GATEWAY_OPENSTACK_TLS_CERTIFICATE_MAP", ""), "operator-managed TLS revision map for HTTPS listeners")
@@ -137,6 +140,7 @@ func run(ctx context.Context) error {
 	openStackClientConfig := openstack.ClientConfig{
 		Region:         region,
 		Microversion:   microversion,
+		RequirePoolTLS: backendTLSPolicy,
 		CloudsYAMLPath: cloudsYAML,
 		CloudName:      cloudName,
 		AllowInsecure:  allowInsecure,
@@ -157,6 +161,7 @@ func run(ctx context.Context) error {
 		WeightedHTTPTargets:     weightedTargets,
 		RequestHeaderModifier:   requestHeaderModifier,
 		BackendH2C:              backendH2C,
+		BackendTLSPolicy:        backendTLSPolicy,
 		OperatorHTTPS:           certificateMap != "",
 		TLSSNIPassthrough:       tlsSNIPassthrough,
 		TLSSNISuffix:            tlsSNISuffix,
@@ -178,7 +183,7 @@ func run(ctx context.Context) error {
 	}
 
 	restConfig := ctrl.GetConfigOrDie()
-	if err := requireGatewayAPIs(restConfig, tlsSNIPassthrough, controllerConfig.XBackendEnabled()); err != nil {
+	if err := requireGatewayAPIs(restConfig, controllerConfig); err != nil {
 		return err
 	}
 	manager, err := ctrl.NewManager(restConfig, ctrl.Options{
@@ -200,7 +205,9 @@ func run(ctx context.Context) error {
 		return err
 	}
 	controllerConfig.OpenStackProjectID = serviceClients.ProjectID
-	openStackProvider := openstack.NewProvider(serviceClients, openstack.ProviderConfig{
+	providerConfig := openstack.ProviderConfig{
+		BackendCA:             backendca.New(clusterID, serviceClients),
+		BackendTLSPolicy:      backendTLSPolicy,
 		HTTPHeaderExact:       exactHTTPHeaders,
 		HTTPMethodMatch:       httpMethodMatch,
 		FixedHTTPResponses:    fixedHTTPResponses,
@@ -211,7 +218,8 @@ func run(ctx context.Context) error {
 		TLSSNISuffix:          tlsSNISuffix,
 		OperationTimeout:      operationTimeout,
 		PollInterval:          pollInterval,
-	})
+	}
+	openStackProvider := openstack.NewProvider(serviceClients, providerConfig)
 	if err := controller.SetupIndexes(ctx, manager.GetFieldIndexer(), controllerConfig); err != nil {
 		return fmt.Errorf("set up controller field indexes: %w", err)
 	}
@@ -244,11 +252,12 @@ func run(ctx context.Context) error {
 		}
 	}
 	routeReconciler := &httproute.Reconciler{
-		Client:      manager.GetClient(),
-		Coordinator: graphCoordinator,
-		APIReader:   manager.GetAPIReader(),
-		Recorder:    eventRecorder,
-		Config:      controllerConfig,
+		BackendTLSAvailable: openStackProvider.BackendTLSAvailable,
+		Client:              manager.GetClient(),
+		Coordinator:         graphCoordinator,
+		APIReader:           manager.GetAPIReader(),
+		Recorder:            eventRecorder,
+		Config:              controllerConfig,
 	}
 	tcpReconciler := &l4route.Reconciler{
 		Protocol: gatewayv1.TCPProtocolType,
@@ -309,7 +318,7 @@ func configureOpenStackRequestMetrics(config *openstack.ClientConfig, registerer
 	return nil
 }
 
-func requireGatewayAPIs(restConfig *rest.Config, tlsSNIPassthrough, xbackendEnabled bool) error {
+func requireGatewayAPIs(restConfig *rest.Config, cfg controller.Config) error {
 	discoveryClient, err := discovery.NewDiscoveryClientForConfig(restConfig)
 	if err != nil {
 		return fmt.Errorf("create Kubernetes discovery client: %w", err)
@@ -323,7 +332,10 @@ func requireGatewayAPIs(restConfig *rest.Config, tlsSNIPassthrough, xbackendEnab
 		availableResources = append(availableResources, resource.Name)
 	}
 	requiredResources := []string{"gatewayclasses", "gateways", "httproutes", "tcproutes", "udproutes", "referencegrants"}
-	if tlsSNIPassthrough {
+	if cfg.BackendTLSPolicy {
+		requiredResources = append(requiredResources, "backendtlspolicies")
+	}
+	if cfg.TLSSNIPassthrough {
 		requiredResources = append(requiredResources, "tlsroutes")
 	}
 	for _, required := range requiredResources {
@@ -331,7 +343,7 @@ func requireGatewayAPIs(restConfig *rest.Config, tlsSNIPassthrough, xbackendEnab
 			return fmt.Errorf("required Gateway API resource %s is missing from %s; install the selected Gateway API %s bundle", required, gatewayv1.GroupVersion, gatewayconsts.BundleVersion)
 		}
 	}
-	if xbackendEnabled {
+	if cfg.XBackendEnabled() {
 		resources, err := discoveryClient.ServerResourcesForGroupVersion(gatewayx.GroupVersion.String())
 		if err != nil {
 			return fmt.Errorf("required Experimental XBackend API is unavailable; install the Gateway API %s Experimental bundle: %w", gatewayconsts.BundleVersion, err)

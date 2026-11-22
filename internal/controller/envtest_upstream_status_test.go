@@ -19,6 +19,7 @@ limitations under the License.
 package controller_test
 
 import (
+	"context"
 	"errors"
 	"io"
 	"io/fs"
@@ -58,6 +59,9 @@ func startGatewayStatusReconcilers(t *testing.T, manager ctrl.Manager, cfg contr
 	}
 	writer := gateway.Writer.(*graph.Writer)
 	route := writer.Routes.(*httproute.Reconciler)
+	if cfg.BackendTLSPolicy {
+		route.BackendTLSAvailable = func(context.Context) (bool, error) { return true, nil }
+	}
 	tcp := &l4route.Reconciler{Protocol: gatewayv1.TCPProtocolType, Client: manager.GetClient(), APIReader: manager.GetAPIReader(), Config: cfg, Writer: writer, Coordinator: writer.Coordinator}
 	udp := &l4route.Reconciler{Protocol: gatewayv1.UDPProtocolType, Client: manager.GetClient(), APIReader: manager.GetAPIReader(), Config: cfg, Writer: writer, Coordinator: writer.Coordinator}
 	writer.Routes = graph.RouteSources{route, tcp, udp}

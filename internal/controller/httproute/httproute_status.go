@@ -33,6 +33,7 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
@@ -360,6 +361,20 @@ func (s routeReconcileStatus) withBackendDiagnostic(diagnostic model.Diagnostic)
 		s.resolved = metav1.ConditionFalse
 		s.resolvedReason = diagnostic.Reason
 		s.resolvedMessage = diagnostic.Message
+	}
+	return s
+}
+
+func (s routeReconcileStatus) withBackendTLSAncestor(slot backendtls.AncestorSlot) routeReconcileStatus {
+	switch slot {
+	case backendtls.AncestorSlotFull:
+		s.programmed, s.programmedReason, s.programmedMessage =
+			metav1.ConditionFalse, backendtls.AncestorLimitReason, backendtls.AncestorLimitMessage
+	case backendtls.AncestorSlotPending:
+		if s.programmed == metav1.ConditionTrue {
+			s.programmed, s.programmedReason, s.programmedMessage =
+				metav1.ConditionFalse, "Pending", "Waiting for BackendTLSPolicy ancestor status for this Gateway"
+		}
 	}
 	return s
 }

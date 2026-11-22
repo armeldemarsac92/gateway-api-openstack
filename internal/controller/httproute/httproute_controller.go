@@ -32,6 +32,7 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	gatewaycontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
@@ -71,6 +72,8 @@ type Reconciler struct {
 	Coordinator *graph.Coordinator
 	// APIReader performs safety-sensitive live reads.
 	APIReader client.Reader
+	// BackendTLSAvailable checks authenticated regional provider support.
+	BackendTLSAvailable func(context.Context) (bool, error)
 	// Recorder publishes Kubernetes Events.
 	Recorder events.EventRecorder
 	// Config contains immutable controller configuration.
@@ -360,14 +363,17 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 				Reason: string(gatewayv1.RouteReasonUnsupportedProtocol), Message: graphResult.UnsupportedBackendProtocol,
 			}
 		}
-		if !graphResult.ObservationDeferred || r.currentRouteProgrammedCondition(httpRoute, parent.ref) == nil ||
+		if !graphResult.ObservationDeferred || graphResult.backendTLSAncestorSlot != backendtls.AncestorSlotHeld ||
+			r.currentRouteProgrammedCondition(httpRoute, parent.ref) == nil ||
 			!r.currentBackendResolution(httpRoute, parent.ref, graphResult.backendDiagnostic) {
 			message := controller.ProviderProgressMessage(graphResult.Outcome, "Octavia resources for the HTTPRoute are still progressing")
-			scope.setStatuses([]parentStatusUpdate{{parent: parent.ref, status: pendingRouteStatus(message).withBackendDiagnostic(graphResult.backendDiagnostic)}})
+			status := pendingRouteStatus(message).withBackendDiagnostic(graphResult.backendDiagnostic).withBackendTLSAncestor(graphResult.backendTLSAncestorSlot)
+			scope.setStatuses([]parentStatusUpdate{{parent: parent.ref, status: status}})
 		}
 		return ctrl.Result{RequeueAfter: controller.ProviderProgressRequeueAfter(graphResult.Outcome, httpRoute.UID)}, nil
 	}
-	scope.setStatuses([]parentStatusUpdate{{parent: parent.ref, status: programmedRouteStatus().withBackendDiagnostic(graphResult.backendDiagnostic)}})
+	status := programmedRouteStatus().withBackendDiagnostic(graphResult.backendDiagnostic).withBackendTLSAncestor(graphResult.backendTLSAncestorSlot)
+	scope.setStatuses([]parentStatusUpdate{{parent: parent.ref, status: status}})
 	log.FromContext(ctx).V(1).Info("Programmed HTTPRoute", "gateway", client.ObjectKeyFromObject(parent.gateway))
 	return ctrl.Result{RequeueAfter: controller.OpenStackResyncAfter(r.Config.OpenStackResyncInterval, httpRoute.UID)}, nil
 }

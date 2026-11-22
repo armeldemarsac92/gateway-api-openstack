@@ -1,0 +1,429 @@
+//go:build envtest
+
+/*
+Copyright 2026 The gateway-api-openstack Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package controller_test
+
+import (
+	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/x509"
+	"encoding/pem"
+	"fmt"
+	"math/big"
+	"slices"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/retry"
+	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+
+	configv1alpha1 "github.com/gateway-api-openstack/gateway-api-openstack/api/v1alpha1"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
+)
+
+func testBackendTLSPolicy(t *testing.T, c client.Client, cfg controller.Config, provider *recordingProvider) {
+	t.Helper()
+	ctx := t.Context()
+	const frontend, backend = "backend-tls-frontend", "backend-tls-service"
+	parameters := envtestClassParameters(frontend)
+	parameters.Spec.MemberMode = configv1alpha1.MemberModeEndpoint
+	class := &gatewayv1.GatewayClass{
+		ObjectMeta: metav1.ObjectMeta{Name: frontend},
+		Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName, ParametersRef: &gatewayv1.ParametersReference{
+			Group: configv1alpha1.GroupName, Kind: configv1alpha1.GatewayClassConfigKind, Name: parameters.Name,
+		}},
+	}
+	gateway := &gatewayv1.Gateway{
+		ObjectMeta: metav1.ObjectMeta{Namespace: frontend, Name: "edge"},
+		Spec:       gatewayv1.GatewaySpec{GatewayClassName: gatewayv1.ObjectName(class.Name), Listeners: []gatewayv1.Listener{{Name: "http", Protocol: gatewayv1.HTTPProtocolType, Port: 80}}},
+	}
+	service := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Namespace: backend, Name: "api"},
+		Spec:       corev1.ServiceSpec{Ports: []corev1.ServicePort{{Name: "secure", Port: 80, AppProtocol: ptr.To("HTTPS")}}},
+	}
+	endpoints := &discoveryv1.EndpointSlice{
+		ObjectMeta:  metav1.ObjectMeta{Namespace: backend, Name: "api", Labels: map[string]string{discoveryv1.LabelServiceName: service.Name}},
+		AddressType: discoveryv1.AddressTypeIPv4,
+		Ports:       []discoveryv1.EndpointPort{{Name: ptr.To("secure"), Port: ptr.To(int32(8443))}},
+		Endpoints:   []discoveryv1.Endpoint{{Addresses: []string{"192.0.2.101"}}},
+	}
+	policy := &gatewayv1.BackendTLSPolicy{
+		ObjectMeta: metav1.ObjectMeta{Namespace: backend, Name: "aa-tls"},
+		Spec: gatewayv1.BackendTLSPolicySpec{
+			TargetRefs: []gatewayv1.LocalPolicyTargetReferenceWithSectionName{{
+				LocalPolicyTargetReference: gatewayv1.LocalPolicyTargetReference{Kind: "Service", Name: gatewayv1.ObjectName(service.Name)},
+				SectionName:                ptr.To(gatewayv1.SectionName("secure")),
+			}},
+			Validation: gatewayv1.BackendTLSPolicyValidation{
+				Hostname: "api.example.test", CACertificateRefs: []gatewayv1.LocalObjectReference{{Kind: "ConfigMap", Name: "trust"}},
+			},
+		},
+	}
+	peer := policy.DeepCopy()
+	peer.Name, peer.Spec.Validation.Hostname = "zz-tls", "backup.example.test"
+	route := envtestHTTPRoute(frontend, "consumer", gateway.Name, service.Name)
+	route.Spec.Rules[0].BackendRefs[0].Namespace = ptr.To(gatewayv1.Namespace(backend))
+	grant := &gatewayv1.ReferenceGrant{
+		ObjectMeta: metav1.ObjectMeta{Namespace: backend, Name: "allow"},
+		Spec: gatewayv1.ReferenceGrantSpec{
+			From: []gatewayv1.ReferenceGrantFrom{{Group: gatewayv1.GroupName, Kind: "HTTPRoute", Namespace: frontend}},
+			To:   []gatewayv1.ReferenceGrantTo{{Group: "", Kind: "Service", Name: ptr.To(gatewayv1.ObjectName(service.Name))}},
+		},
+	}
+	for _, object := range []client.Object{
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: frontend}}, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: backend}},
+		parameters, class, gateway, service, endpoints, policy, peer, route,
+	} {
+		require.NoError(t, c.Create(ctx, object))
+	}
+
+	routeKey := client.ObjectKeyFromObject(route)
+	var waitingFor string
+	defer func() {
+		if t.Failed() {
+			_ = c.Get(ctx, routeKey, route)
+			t.Logf("waiting for %s, latest route status: %+v, policy: %+v, peer: %+v", waitingFor, route.Status, policy.Status, peer.Status)
+			provider.mu.Lock()
+			defer provider.mu.Unlock()
+			for _, graph := range slices.Backward(provider.graphSpecs) {
+				for _, node := range graph.Routes {
+					if node.Spec.Identity.RouteUID == string(route.UID) && node.Disposition == cloud.GraphEnsure {
+						if tls := node.Spec.BackendTLS; tls != nil {
+							t.Logf("latest backend TLS graph, denied=%t hostname=%s members=%d", tls.Denied, tls.Hostname, len(node.Spec.Members))
+						}
+						return
+					}
+				}
+			}
+		}
+	}()
+	waitResolvedRefs := func(reason gatewayv1.RouteConditionReason) {
+		t.Helper()
+		waitingFor = "route ResolvedRefs/" + string(reason)
+		waitForEnvtest(t, func(ctx context.Context) (bool, error) {
+			if err := c.Get(ctx, routeKey, route); err != nil {
+				return false, err
+			}
+			for _, parent := range route.Status.Parents {
+				if parent.ControllerName == cfg.ControllerName {
+					condition := meta.FindStatusCondition(parent.Conditions, string(gatewayv1.RouteConditionResolvedRefs))
+					return condition != nil && condition.ObservedGeneration == route.Generation && condition.Reason == string(reason), nil
+				}
+			}
+			return false, nil
+		})
+	}
+	waitPolicy := func(current *gatewayv1.BackendTLSPolicy, accepted, resolved gatewayv1.PolicyConditionReason) {
+		t.Helper()
+		key := client.ObjectKeyFromObject(current)
+		waitingFor = current.Name + " Accepted/" + string(accepted) + " ResolvedRefs/" + string(resolved)
+		waitForEnvtest(t, func(ctx context.Context) (bool, error) {
+			if err := c.Get(ctx, key, current); err != nil {
+				return false, err
+			}
+			for _, ancestor := range current.Status.Ancestors {
+				if ancestor.ControllerName == cfg.ControllerName && ancestor.AncestorRef.Name == gatewayv1.ObjectName(gateway.Name) &&
+					ptr.Deref(ancestor.AncestorRef.Namespace, "") == frontend {
+					a := meta.FindStatusCondition(ancestor.Conditions, string(gatewayv1.PolicyConditionAccepted))
+					r := meta.FindStatusCondition(ancestor.Conditions, string(gatewayv1.BackendTLSPolicyConditionResolvedRefs))
+					return a != nil && a.ObservedGeneration == current.Generation && a.Reason == string(accepted) &&
+						r != nil && r.ObservedGeneration == current.Generation && r.Reason == string(resolved), nil
+				}
+			}
+			return false, nil
+		})
+	}
+	waitGraph := func(matches func(cloud.RouteSpec) bool) {
+		t.Helper()
+		waitForEnvtest(t, func(context.Context) (bool, error) {
+			provider.mu.Lock()
+			defer provider.mu.Unlock()
+			for _, graph := range slices.Backward(provider.graphSpecs) {
+				for _, node := range graph.Routes {
+					if node.Spec.Identity.RouteUID == string(route.UID) && node.Disposition == cloud.GraphEnsure {
+						return matches(node.Spec), nil
+					}
+				}
+			}
+			return false, nil
+		})
+	}
+	waitDenied := func() {
+		t.Helper()
+		waitingFor = "a denied backend graph"
+		waitGraph(func(spec cloud.RouteSpec) bool {
+			return spec.BackendTLS != nil && spec.BackendTLS.Denied && len(spec.Members) == 0
+		})
+	}
+	waitTLS := func(hostname gatewayv1.PreciseHostname, source *corev1.ConfigMap) {
+		t.Helper()
+		waitingFor = "a TLS backend graph for " + string(hostname)
+		waitGraph(func(spec cloud.RouteSpec) bool {
+			tls := spec.BackendTLS
+			return tls != nil && !tls.Denied && tls.Hostname == string(hostname) &&
+				tls.CAConfigMapUID == string(source.UID) && tls.CADigest != "" && string(tls.CAPEM) == source.Data["ca.crt"] &&
+				slices.Equal(spec.Members, []cloud.Member{{Address: "192.0.2.101", Port: 8443}})
+		})
+	}
+
+	waitResolvedRefs(gatewayv1.RouteReasonRefNotPermitted)
+	require.NoError(t, c.Get(ctx, client.ObjectKeyFromObject(policy), policy))
+	require.Empty(t, policy.Status.Ancestors)
+	require.NoError(t, c.Create(ctx, grant))
+	waitResolvedRefs(gatewayv1.RouteReasonResolvedRefs)
+	waitDenied()
+	waitPolicy(policy, gatewayv1.BackendTLSPolicyReasonNoValidCACertificate, gatewayv1.BackendTLSPolicyReasonInvalidCACertificateRef)
+	waitPolicy(peer, gatewayv1.PolicyReasonConflicted, gatewayv1.BackendTLSPolicyReasonInvalidCACertificateRef)
+
+	ca := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: backend, Name: "trust"}, Data: map[string]string{"ca.crt": backendTLSTestCA(t)}}
+	require.NoError(t, c.Create(ctx, ca))
+	waitTLS(policy.Spec.Validation.Hostname, ca)
+	waitPolicy(policy, gatewayv1.PolicyReasonAccepted, gatewayv1.BackendTLSPolicyReasonResolvedRefs)
+
+	foreign := gatewayv1.PolicyAncestorStatus{
+		ControllerName: "foreign.example.com/gateway",
+		AncestorRef:    gatewayv1.ParentReference{Name: "foreign"},
+		Conditions:     []metav1.Condition{{Type: "Accepted", Status: metav1.ConditionTrue, Reason: "Accepted", Message: "External condition", ObservedGeneration: 1, LastTransitionTime: metav1.Now()}},
+	}
+	policy.Status.Ancestors = append(policy.Status.Ancestors, foreign)
+	require.NoError(t, c.Status().Update(ctx, policy))
+	policy.Spec.Validation.Hostname = "updated.example.test"
+	require.NoError(t, c.Update(ctx, policy))
+	waitTLS(policy.Spec.Validation.Hostname, ca)
+	waitPolicy(policy, gatewayv1.PolicyReasonAccepted, gatewayv1.BackendTLSPolicyReasonResolvedRefs)
+	require.True(t, slices.ContainsFunc(policy.Status.Ancestors, func(entry gatewayv1.PolicyAncestorStatus) bool {
+		return entry.ControllerName == foreign.ControllerName && entry.AncestorRef.Name == foreign.AncestorRef.Name &&
+			meta.IsStatusConditionTrue(entry.Conditions, "Accepted")
+	}))
+
+	waitingFor = "the full BackendTLSPolicy and the next Gateway recovering when an ancestor row is freed"
+	testBackendTLSAncestorCapacity(t, c, cfg, provider, gateway, route, policy)
+
+	ca.Data["ca.crt"] = backendTLSTestCA(t)
+	require.NoError(t, c.Update(ctx, ca))
+	waitTLS(policy.Spec.Validation.Hostname, ca)
+	require.NoError(t, c.Delete(ctx, policy))
+	waitTLS(peer.Spec.Validation.Hostname, ca)
+	waitPolicy(peer, gatewayv1.PolicyReasonAccepted, gatewayv1.BackendTLSPolicyReasonResolvedRefs)
+	require.NoError(t, c.Delete(ctx, ca))
+	waitDenied()
+	waitPolicy(peer, gatewayv1.BackendTLSPolicyReasonNoValidCACertificate, gatewayv1.BackendTLSPolicyReasonInvalidCACertificateRef)
+
+	service.Spec.Ports[0].Name, service.Spec.Ports[0].AppProtocol = "other", nil
+	require.NoError(t, c.Update(ctx, service))
+	waitingFor = "the Service port without a selected policy"
+	waitGraph(func(spec cloud.RouteSpec) bool { return spec.BackendTLS == nil })
+	waitPolicy(peer, gatewayv1.PolicyReasonTargetNotFound, gatewayv1.PolicyReasonTargetNotFound)
+}
+
+func testBackendTLSAncestorCapacity(t *testing.T, c client.Client, cfg controller.Config, provider *recordingProvider, gateway *gatewayv1.Gateway, route *gatewayv1.HTTPRoute, policy *gatewayv1.BackendTLSPolicy) {
+	t.Helper()
+	ctx := t.Context()
+	policyKey := client.ObjectKeyFromObject(policy)
+	isForeign := func(row gatewayv1.PolicyAncestorStatus) bool { return row.ControllerName != cfg.ControllerName }
+	foreignRows := func() []gatewayv1.PolicyAncestorStatus {
+		var rows []gatewayv1.PolicyAncestorStatus
+		for _, row := range policy.Status.Ancestors {
+			if isForeign(row) {
+				rows = append(rows, row)
+			}
+		}
+		return rows
+	}
+	updateRows := func(update func()) {
+		t.Helper()
+		require.NoError(t, retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			if err := c.Get(ctx, policyKey, policy); err != nil {
+				return err
+			}
+			update()
+			return c.Status().Update(ctx, policy)
+		}))
+	}
+	updateRows(func() {
+		for len(policy.Status.Ancestors) < backendtls.MaxAncestors {
+			index := len(policy.Status.Ancestors)
+			policy.Status.Ancestors = append(policy.Status.Ancestors, gatewayv1.PolicyAncestorStatus{
+				AncestorRef:    gatewayv1.ParentReference{Name: gatewayv1.ObjectName(fmt.Sprintf("foreign-%d", index))},
+				ControllerName: "foreign.example.com/gateway",
+				Conditions:     []metav1.Condition{{Type: "Accepted", Status: metav1.ConditionTrue, Reason: "Accepted", Message: "External condition", ObservedGeneration: 42, LastTransitionTime: metav1.NewTime(time.Unix(100, 0))}},
+			})
+		}
+	})
+	wantForeign := foreignRows()
+	require.Len(t, wantForeign, backendtls.MaxAncestors-1)
+	holder := backendtls.GatewayAncestor{Key: client.ObjectKeyFromObject(gateway), ControllerName: cfg.ControllerName}
+
+	next := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Name: "next", Namespace: gateway.Namespace}, Spec: *gateway.Spec.DeepCopy()}
+	challenger := &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Name: "next-consumer", Namespace: route.Namespace}, Spec: *route.Spec.DeepCopy()}
+	challenger.Spec.ParentRefs[0].Name = gatewayv1.ObjectName(next.Name)
+	challenger.Spec.Rules[0].Matches = []gatewayv1.HTTPRouteMatch{{Path: &gatewayv1.HTTPPathMatch{Type: ptr.To(gatewayv1.PathMatchPathPrefix), Value: ptr.To("/secure")}}}
+	healthy := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Namespace: next.Namespace, Name: "plain"},
+		Spec:       corev1.ServiceSpec{Ports: []corev1.ServicePort{{Name: "http", Port: 80}}},
+	}
+	healthyEndpoints := &discoveryv1.EndpointSlice{
+		ObjectMeta:  metav1.ObjectMeta{Namespace: healthy.Namespace, Name: healthy.Name, Labels: map[string]string{discoveryv1.LabelServiceName: healthy.Name}},
+		AddressType: discoveryv1.AddressTypeIPv4,
+		Ports:       []discoveryv1.EndpointPort{{Name: ptr.To("http"), Port: ptr.To(int32(8080))}},
+		Endpoints:   []discoveryv1.Endpoint{{Addresses: []string{"192.0.2.102"}}},
+	}
+	plainRoute := envtestHTTPRoute(next.Namespace, "next-plain", next.Name, healthy.Name)
+	for _, object := range []client.Object{next, healthy, healthyEndpoints, plainRoute, challenger} {
+		require.NoError(t, c.Create(ctx, object))
+	}
+	nextKey, routeKey := client.ObjectKeyFromObject(next), client.ObjectKeyFromObject(challenger)
+	candidate := backendtls.GatewayAncestor{Key: nextKey, ControllerName: cfg.ControllerName}
+	conditionType := cfg.Domain() + "/BackendTLSPoliciesReady"
+	waitRouteAndGateway := func(blocked bool) {
+		t.Helper()
+		waitForEnvtest(t, func(ctx context.Context) (bool, error) {
+			if err := c.Get(ctx, routeKey, challenger); err != nil {
+				return false, err
+			}
+			if err := c.Get(ctx, nextKey, next); err != nil {
+				return false, err
+			}
+			if !meta.IsStatusConditionTrue(next.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed)) {
+				return false, nil
+			}
+			gatewayLimit := meta.FindStatusCondition(next.Status.Conditions, conditionType)
+			if blocked && (gatewayLimit == nil || gatewayLimit.Status != metav1.ConditionFalse ||
+				gatewayLimit.Reason != backendtls.AncestorLimitReason || gatewayLimit.ObservedGeneration != next.Generation) ||
+				!blocked && gatewayLimit != nil {
+				return false, nil
+			}
+			for _, parent := range challenger.Status.Parents {
+				programmed := meta.FindStatusCondition(parent.Conditions, cfg.Domain()+"/Programmed")
+				if parent.ControllerName != cfg.ControllerName || programmed == nil || programmed.ObservedGeneration != challenger.Generation ||
+					!meta.IsStatusConditionTrue(parent.Conditions, string(gatewayv1.RouteConditionResolvedRefs)) {
+					continue
+				}
+				if blocked {
+					return programmed.Status == metav1.ConditionFalse && programmed.Reason == backendtls.AncestorLimitReason, nil
+				}
+				return programmed.Status == metav1.ConditionTrue, nil
+			}
+			return false, nil
+		})
+	}
+	waitRouteAndGateway(true)
+	waitForEnvtest(t, func(context.Context) (bool, error) {
+		provider.mu.Lock()
+		defer provider.mu.Unlock()
+		for _, spec := range slices.Backward(provider.graphSpecs) {
+			if spec.Identity.GatewayUID != string(next.UID) {
+				continue
+			}
+			var plainReady, challengerDenied bool
+			for _, node := range spec.Routes {
+				if node.Disposition != cloud.GraphEnsure {
+					continue
+				}
+				switch node.Spec.Identity.RouteUID {
+				case string(plainRoute.UID):
+					plainReady = node.Spec.BackendTLS == nil && len(node.Spec.Members) == 1
+				case string(challenger.UID):
+					challengerDenied = node.Spec.BackendTLS != nil && node.Spec.BackendTLS.Denied && len(node.Spec.Members) == 0
+				}
+			}
+			return plainReady && challengerDenied, nil
+		}
+		return false, nil
+	})
+	require.NoError(t, c.Get(ctx, policyKey, policy))
+	require.Equal(t, backendtls.AncestorSlotHeld, holder.Slot(policy))
+	require.Equal(t, backendtls.AncestorSlotFull, candidate.Slot(policy))
+	require.Equal(t, wantForeign, foreignRows())
+	provider.mu.Lock()
+	var holderBackend *cloud.BackendTLSValidation
+	for _, spec := range provider.graphSpecs {
+		for _, node := range spec.Routes {
+			if node.Disposition != cloud.GraphEnsure {
+				continue
+			}
+			switch node.Spec.Identity.RouteUID {
+			case string(route.UID):
+				holderBackend = node.Spec.BackendTLS
+			case string(challenger.UID):
+				if node.Spec.BackendTLS == nil || !node.Spec.BackendTLS.Denied || len(node.Spec.Members) != 0 {
+					provider.mu.Unlock()
+					t.Fatal("the affected backend became reachable before its Gateway acquired a row")
+				}
+			}
+		}
+	}
+	provider.mu.Unlock()
+	require.NotNil(t, holderBackend)
+	require.False(t, holderBackend.Denied)
+
+	removed := wantForeign[len(wantForeign)-1].AncestorRef.Name
+	updateRows(func() {
+		policy.Status.Ancestors = slices.DeleteFunc(policy.Status.Ancestors, func(entry gatewayv1.PolicyAncestorStatus) bool {
+			return isForeign(entry) && entry.AncestorRef.Name == removed
+		})
+	})
+	waitRouteAndGateway(false)
+	require.NoError(t, c.Get(ctx, policyKey, policy))
+	require.Equal(t, backendtls.AncestorSlotHeld, holder.Slot(policy))
+	require.Equal(t, backendtls.AncestorSlotHeld, candidate.Slot(policy))
+	require.Equal(t, wantForeign[:len(wantForeign)-1], foreignRows())
+	for _, row := range policy.Status.Ancestors {
+		if row.ControllerName == cfg.ControllerName {
+			for _, condition := range row.Conditions {
+				require.Equal(t, policy.Generation, condition.ObservedGeneration)
+			}
+		}
+	}
+	provider.mu.Lock()
+	defer provider.mu.Unlock()
+	for _, spec := range slices.Backward(provider.graphSpecs) {
+		for _, node := range spec.Routes {
+			if node.Spec.Identity.RouteUID == string(challenger.UID) && node.Disposition == cloud.GraphEnsure {
+				require.NotNil(t, node.Spec.BackendTLS)
+				require.False(t, node.Spec.BackendTLS.Denied)
+				require.Len(t, node.Spec.Members, 1)
+				return
+			}
+		}
+	}
+	t.Fatal("no backend TLS graph for the newly allocated Gateway")
+}
+
+func backendTLSTestCA(t *testing.T) string {
+	t.Helper()
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	certificate := &x509.Certificate{
+		SerialNumber: big.NewInt(1), BasicConstraintsValid: true, IsCA: true, KeyUsage: x509.KeyUsageCertSign,
+		NotBefore: time.Unix(0, 0), NotAfter: time.Unix(4_100_000_000, 0),
+	}
+	der, err := x509.CreateCertificate(rand.Reader, certificate, certificate, public, private)
+	require.NoError(t, err)
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
+}

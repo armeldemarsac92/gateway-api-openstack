@@ -1,0 +1,46 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+patches:
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      labelSelector: app.kubernetes.io/name=openstack-gateway-controller
+    patch: |-
+      - op: test
+        path: /spec/template/spec/containers/0/name
+        value: controller
+      - op: test
+        path: /spec/template/spec/containers/0/args/3
+        value: --octavia-microversion=2.5
+      - op: replace
+        path: /spec/template/spec/containers/0/args/3
+        value: --octavia-microversion=2.8
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: --octavia-backend-tls-policy
+  - target:
+      group: rbac.authorization.k8s.io
+      version: v1
+      kind: ClusterRole
+      labelSelector: app.kubernetes.io/name=openstack-gateway-controller
+    patch: |-
+      - op: add
+        path: /rules/-
+        value:
+          apiGroups: ["gateway.networking.k8s.io"]
+          resources: ["backendtlspolicies"]
+          verbs: ["get", "list", "watch"]
+      - op: add
+        path: /rules/-
+        value:
+          apiGroups: ["gateway.networking.k8s.io"]
+          resources: ["backendtlspolicies/status"]
+          verbs: ["get", "patch"]
+      - op: add
+        path: /rules/-
+        value:
+          apiGroups: [""]
+          resources: ["configmaps"]
+          verbs: ["get", "list", "watch"]

@@ -115,6 +115,7 @@ func (r *Reconciler) cleanupGateway(ctx context.Context, scope *gatewayScope) (c
 		return ctrl.Result{Requeue: true}, nil
 	}
 	controller.ClearGatewayTopology(r.Config, scope.gateway)
+	controllerutil.RemoveFinalizer(scope.gateway, r.Config.BackendCAFinalizer())
 	controllerutil.RemoveFinalizer(scope.gateway, r.Config.GatewayFinalizer())
 	delete(scope.gateway.Annotations, r.Config.GatewayListenerPortAnnotation())
 	delete(scope.gateway.Annotations, r.Config.GatewayListenerProtocolAnnotation())

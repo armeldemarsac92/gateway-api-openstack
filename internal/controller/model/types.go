@@ -27,6 +27,7 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 )
 
 // Input is an immutable, request-local observation supplied by the caller.
@@ -38,6 +39,7 @@ type Input struct {
 	RequestHeaderModifier bool
 	BackendH2C            bool
 	EnableXBackend        bool
+	BackendTLSPolicies    map[ServicePortKey]backendtls.Selection `json:"-"`
 	MemberMode            cloud.MemberMode
 	XBackends             []XBackendObservation
 	Gateway               *gatewayv1.Gateway

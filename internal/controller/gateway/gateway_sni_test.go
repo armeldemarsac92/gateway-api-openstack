@@ -194,11 +194,11 @@ func TestSNIRouteHostnamePrecedence(t *testing.T) {
 			if err := r.reportSNIRoutes(t.Context(), snapshot, observed, cloud.GatewayGraphResult{}, nil); err != nil {
 				t.Fatal(err)
 			}
-			if counts, err := r.attachedRouteCounts(t.Context(), gateway, []*gatewayv1.Listener{&listener}); err != nil || counts[listener.Name] != 2 {
+			if counts, err := r.attachedRoutes(t.Context(), gateway, []*gatewayv1.Listener{&listener}); err != nil || counts.counts[listener.Name] != 2 {
 				t.Fatalf("attached routes = %v, want 2: %v", counts, err)
 			}
 			listener.Hostname = ptr.To(gatewayv1.Hostname("changed.other.invalid"))
-			if counts, err := r.attachedRouteCounts(t.Context(), gateway, []*gatewayv1.Listener{&listener}); err != nil || counts[listener.Name] != 0 {
+			if counts, err := r.attachedRoutes(t.Context(), gateway, []*gatewayv1.Listener{&listener}); err != nil || counts.counts[listener.Name] != 0 {
 				t.Fatalf("attached routes after listener edit = %v, want 0: %v", counts, err)
 			}
 		})
@@ -615,7 +615,7 @@ func TestSNIRouteDeferredReadbackRequiresSameAuthorizedTargets(t *testing.T) {
 	report(true)
 	result.Routes[0].Result = cloud.RouteResult{ObservationDeferred: true}
 	report(true)
-	if counts, err := r.attachedRouteCounts(t.Context(), gateway, []*gatewayv1.Listener{&listener}); err != nil || counts[listener.Name] != 1 {
+	if counts, err := r.attachedRoutes(t.Context(), gateway, []*gatewayv1.Listener{&listener}); err != nil || counts.counts[listener.Name] != 1 {
 		t.Fatalf("attached routes = %v, want one route for both hostnames: %v", counts, err)
 	}
 

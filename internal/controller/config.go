@@ -50,6 +50,8 @@ type Config struct {
 	RequestHeaderModifier bool
 	// BackendH2C enables h2c for HTTP backends that explicitly request it.
 	BackendH2C bool
+	// BackendTLSPolicy enables Service port policy selection for HTTP forwarding.
+	BackendTLSPolicy bool
 	// OperatorHTTPS enables termination using operator-provisioned certificates.
 	OperatorHTTPS bool
 	// TLSSNIPassthrough enables the advertised native TCP SNI policy extension.
@@ -111,6 +113,11 @@ func IsValidControllerName(name gatewayv1.GatewayController) bool {
 // controller name uniquely.
 func (c Config) GatewayFinalizer() string {
 	return c.Domain() + "/gateway-finalizer-" + c.controllerKey()
+}
+
+// BackendCAFinalizer records a Gateway's responsibility for its Barbican CAs.
+func (c Config) BackendCAFinalizer() string {
+	return c.Domain() + "/backend-ca-" + c.controllerKey()
 }
 
 // RouteFinalizer returns the controller-scoped HTTPRoute finalizer.

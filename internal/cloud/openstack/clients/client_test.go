@@ -209,6 +209,21 @@ func TestAllowReauthentication(t *testing.T) {
 	}
 }
 
+func TestPoolTLSRequiresOctavia28(t *testing.T) {
+	cfg := ClientConfig{Microversion: "2.5", APIQPS: 1, APIBurst: 1}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	cfg.RequirePoolTLS = true
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("accepted backend TLS with a pre-2.8 microversion")
+	}
+	cfg.Microversion = "2.10"
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestValidateMicroversionUsesNumericComponents(t *testing.T) {
 	for _, value := range []string{"2.5", "2.10", "3.0"} {
 		if err := ValidateMicroversion(value); err != nil {

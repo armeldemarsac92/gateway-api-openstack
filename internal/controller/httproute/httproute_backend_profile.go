@@ -60,7 +60,10 @@ func (r *Reconciler) checkRouteBackendProfile(ctx context.Context, reader client
 		}
 		return fmt.Errorf("get backend Service: %w", err)
 	}
-	_, err = servicePortForBackend(&service, *backend.Port, topology.Topology.MemberMode, r.Config.BackendH2C)
+	// The live model establishes whether an HTTPS port selects a policy and
+	// may be programmed. The cached precheck only considers the feature gate.
+	checkBackendTLS := r.Config.BackendTLSPolicy && r.kind() == model.HTTPRouteKind
+	_, err = servicePortForBackend(&service, *backend.Port, topology.Topology.MemberMode, r.Config.BackendH2C, checkBackendTLS)
 	var buildError *routeBuildError
 	if errors.As(err, &buildError) && buildError.kind == routeErrorPending {
 		return nil

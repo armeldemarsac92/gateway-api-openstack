@@ -85,7 +85,8 @@ func GatewayHasControllerBinding(config Config, gateway *gatewayv1.Gateway) bool
 	if HasGatewayListenerScopeBinding(config, gateway) {
 		return true
 	}
-	if controllerutil.ContainsFinalizer(gateway, config.GatewayFinalizer()) || HasGatewayTopologyBinding(config, gateway) {
+	if controllerutil.ContainsFinalizer(gateway, config.GatewayFinalizer()) ||
+		controllerutil.ContainsFinalizer(gateway, config.BackendCAFinalizer()) || HasGatewayTopologyBinding(config, gateway) {
 		return true
 	}
 	for _, key := range []string{
@@ -115,8 +116,8 @@ func GatewayBindingMetadataEqual(config Config, left, right *gatewayv1.Gateway) 
 	if !GatewayTopologyMetadataEqual(config, left, right) {
 		return false
 	}
-	if controllerutil.ContainsFinalizer(left, config.GatewayFinalizer()) !=
-		controllerutil.ContainsFinalizer(right, config.GatewayFinalizer()) {
+	if controllerutil.ContainsFinalizer(left, config.GatewayFinalizer()) != controllerutil.ContainsFinalizer(right, config.GatewayFinalizer()) ||
+		controllerutil.ContainsFinalizer(left, config.BackendCAFinalizer()) != controllerutil.ContainsFinalizer(right, config.BackendCAFinalizer()) {
 		return false
 	}
 	for _, key := range []string{

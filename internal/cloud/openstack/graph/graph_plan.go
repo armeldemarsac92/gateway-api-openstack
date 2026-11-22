@@ -294,6 +294,8 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 		}
 		if len(routePlan) != 0 {
 			routeResult.Outcome = p.progressingOutcome(routePlan[0].message())
+		} else if route.backendTLS.issue != "" {
+			routeResult.Outcome = p.progressingOutcome(route.backendTLS.issue)
 		}
 		if errors.Is(route.redirectIssue, errExactHeaderRedirectPrecedence) || errors.Is(route.redirectIssue, errHTTPMethodRedirectPrecedence) {
 			routeResult.UnsupportedMatch = route.redirectIssue.Error()
@@ -703,7 +705,7 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 		part := graphRoutePart(desired, step)
 		fixed = fixed && routeNeedsHTTPCapability(part, step.route)
 		if step.route.reenableH2CPool || step.route.backendH2C != nil && *step.route.backendH2C ||
-			step.route.kind == routeMutationCreatePool && part.spec.BackendH2C {
+			step.route.kind == routeMutationCreatePool && part.spec.BackendH2C && part.backendTLS.allowsMembers() {
 			required = append(required, octavia.GatewayCapabilityBackendH2C)
 		}
 		if len(step.route.requestHeaderOperations) != 0 {
@@ -879,6 +881,12 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 		// Gophercloud encodes an explicit empty DefaultPoolID as JSON null.
 		_, err = p.octavia.UpdateListener(ctx, listenerID, listeners.UpdateOpts{DefaultPoolID: &step.poolID})
 	case graphRouteMutation:
+		if step.route.kind == routeMutationClaimBackendCA {
+			if desired.spec.Gateway.ClaimBackendCA == nil {
+				return errors.New("backend CA ownership checkpoint is unavailable")
+			}
+			return desired.spec.Gateway.ClaimBackendCA(ctx)
+		}
 		route := graphRoutePart(desired, step)
 		route.spec.Gateway = actual.state
 		route.spec.Gateway.ListenerID = listenerID

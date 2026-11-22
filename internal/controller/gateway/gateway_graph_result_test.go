@@ -152,12 +152,12 @@ func TestGatewayExcludesRemovedHostnameFromSingletonAttachedRoutes(t *testing.T)
 	}}
 	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithObjects(route).Build()
 	r := &Reconciler{Client: kube, Config: cfg}
-	counts, err := r.attachedRouteCounts(t.Context(), gateway, []*gatewayv1.Listener{survivor, removed})
-	if err != nil || counts[removed.Name] != 1 || counts[survivor.Name] != 0 {
+	counts, err := r.attachedRoutes(t.Context(), gateway, []*gatewayv1.Listener{survivor, removed})
+	if err != nil || counts.counts[removed.Name] != 1 || counts.counts[survivor.Name] != 0 {
 		t.Fatalf("shared counts = %v, %v", counts, err)
 	}
-	counts, err = r.attachedRouteCounts(t.Context(), gateway, []*gatewayv1.Listener{survivor})
-	if err != nil || counts[survivor.Name] != 0 {
+	counts, err = r.attachedRoutes(t.Context(), gateway, []*gatewayv1.Listener{survivor})
+	if err != nil || counts.counts[survivor.Name] != 0 {
 		t.Fatalf("singleton counts before the old route status is refreshed = %v, %v", counts, err)
 	}
 }

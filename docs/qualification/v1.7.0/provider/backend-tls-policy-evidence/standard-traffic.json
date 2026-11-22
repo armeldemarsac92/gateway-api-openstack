@@ -1,0 +1,318 @@
+{
+  "passed": true,
+  "channel": "standard",
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "fixtureScope": "native-wire-diagnostic",
+  "controllerRevision": "577264d263dec1c8428efb487caaa82f549d56a8",
+  "managerSHA256": "581ddfd41684240fddd21fb758eac4bcd35066ff6b1abaed0f0a7a076510a784",
+  "octavia": {
+    "revision": "ba89a2d6237aa1a1b754ad7234899c12de39a4d2",
+    "version": "19.0.1.dev11",
+    "sha256": "965df48a31d61f21ef56d60c5659987fa139b142642998baedcaf6c0403f44ea",
+    "filesVerified": 632
+  },
+  "octaviaLib": {
+    "revision": "8ac88a770cc3b3ebf7cf647e11f25a4b3c6e91b6",
+    "version": "3.12.1.dev4",
+    "sha256": "e47a8a54cd9d15ad9333ed7acbe07d8baf0ba9567332414b4fdcd152761cc57c",
+    "filesVerified": 24
+  },
+  "HAProxy": {
+    "version": "3.0.19-ade9c1262-octavia-strict-dns-v1",
+    "sha256": "fa8468efa26f95ed83a36afeb97b79730de285450b7a8fae94f7cf5e6d2d0824",
+    "strictDNSAgentCapability": true
+  },
+  "barbican": {
+    "version": "23.0.0",
+    "endpoint": "regional HTTPS with verification"
+  },
+  "echoSHA256": "d4e04b904229880dc2e32dbe58244b3bf46408c2e1e8325ebb83a69fab3d57a9",
+  "registeredCases": {},
+  "supplementalTraffic": {
+    "reencryptHTTPS": {
+      "status": 200,
+      "frontendSNI": "backend-tls.wildcard.org",
+      "frontendHostnameVerified": true,
+      "backendSNI": "abc.example.com"
+    },
+    "validHTTP": {
+      "status": 200,
+      "backendSNI": "abc.example.com",
+      "elapsedSeconds": 21.19,
+      "observedStatus": {
+        "404": 83,
+        "200": 1
+      }
+    },
+    "initialRouteConditions": {
+      "Accepted": "True/Accepted",
+      "ResolvedRefs": "True/ResolvedRefs",
+      "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+    },
+    "wrongHostname": {
+      "status": 503,
+      "elapsedSeconds": 0.0,
+      "observedStatus": {
+        "503": 1
+      }
+    },
+    "wrongCA": {
+      "status": 503,
+      "elapsedSeconds": 0.0,
+      "observedStatus": {
+        "503": 1
+      }
+    },
+    "beforeConfigMapChange": {
+      "status": 200,
+      "backendSNI": "abc.example.com",
+      "elapsedSeconds": 0.01,
+      "observedStatus": {
+        "200": 1
+      }
+    },
+    "whileCAInvalid": {
+      "conditions": {
+        "Accepted": "False/NoValidCACertificate",
+        "ResolvedRefs": "False/InvalidCACertificateRef"
+      },
+      "status": 503,
+      "elapsedSeconds": 8.2,
+      "observedStatus": {
+        "200": 32,
+        "503": 1
+      }
+    },
+    "afterCARestored": {
+      "conditions": {
+        "Accepted": "True/Accepted",
+        "ResolvedRefs": "True/ResolvedRefs"
+      },
+      "status": 200,
+      "backendSNI": "abc.example.com",
+      "elapsedSeconds": 21.26,
+      "observedStatus": {
+        "503": 82,
+        "200": 1
+      },
+      "routeConditions": {
+        "Accepted": "True/Accepted",
+        "ResolvedRefs": "True/ResolvedRefs",
+        "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+      }
+    }
+  },
+  "releaseBundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+  "upstreamBaseManifestsSHA256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+  "frontendSecretEnrollment": "exact UID/resourceVersion and PKCS#12 verified by operator helper",
+  "regionalAmphoraCapabilities": [
+    "fixed_http_responses_v1",
+    "weighted_http_targets_v1",
+    "backend_tls_hostname_v1"
+  ],
+  "tlsEchoWorkload": {
+    "runtime": "envtest with isolated echo peer"
+  },
+  "tlsEchoInputVerified": true,
+  "gatewayclass": {
+    "qualification": {
+      "generation": 1,
+      "conditions": {
+        "Accepted": "True/Accepted",
+        "SupportedVersion": "True/SupportedVersion"
+      }
+    }
+  },
+  "gateway": {
+    "native-https-reencrypt": {
+      "generation": 1,
+      "conditions": {
+        "Accepted": "True/Accepted",
+        "Programmed": "True/Programmed"
+      },
+      "listeners": [
+        {
+          "peer": "https",
+          "controller": null,
+          "observedGeneration": [
+            1
+          ],
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "Conflicted": "False/NoConflicts",
+            "Programmed": "True/Programmed"
+          }
+        }
+      ]
+    },
+    "same-namespace": {
+      "generation": 1,
+      "conditions": {
+        "Accepted": "True/Accepted",
+        "Programmed": "True/Programmed"
+      },
+      "listeners": [
+        {
+          "peer": "http",
+          "controller": null,
+          "observedGeneration": [
+            1
+          ],
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "Conflicted": "False/NoConflicts",
+            "Programmed": "True/Programmed"
+          }
+        }
+      ]
+    }
+  },
+  "httproute": {
+    "backendtlspolicy": {
+      "generation": 1,
+      "conditions": {},
+      "parents": [
+        {
+          "peer": "same-namespace",
+          "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+          "observedGeneration": [
+            1
+          ],
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          }
+        }
+      ]
+    },
+    "native-https-reencrypt": {
+      "generation": 1,
+      "conditions": {},
+      "parents": [
+        {
+          "peer": "native-https-reencrypt",
+          "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+          "observedGeneration": [
+            1
+          ],
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          }
+        }
+      ]
+    }
+  },
+  "backendtlspolicy": {
+    "cert-mismatch": {
+      "generation": 1,
+      "conditions": {},
+      "ancestors": [
+        {
+          "peer": "same-namespace",
+          "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+          "observedGeneration": [
+            1
+          ],
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          }
+        }
+      ]
+    },
+    "host-mismatch": {
+      "generation": 1,
+      "conditions": {},
+      "ancestors": [
+        {
+          "peer": "same-namespace",
+          "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+          "observedGeneration": [
+            1
+          ],
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          }
+        }
+      ]
+    },
+    "normative-test": {
+      "generation": 1,
+      "conditions": {},
+      "ancestors": [
+        {
+          "peer": "same-namespace",
+          "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+          "observedGeneration": [
+            1
+          ],
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          }
+        },
+        {
+          "peer": "native-https-reencrypt",
+          "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+          "observedGeneration": [
+            1
+          ],
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          }
+        }
+      ]
+    },
+    "reconcile-test": {
+      "generation": 1,
+      "conditions": {},
+      "ancestors": [
+        {
+          "peer": "same-namespace",
+          "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+          "observedGeneration": [
+            1
+          ],
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          }
+        }
+      ]
+    }
+  },
+  "restResponses": {
+    "GET providers 200": 359,
+    "GET loadbalancers 200": 180,
+    "POST loadbalancers 201": 2,
+    "GET listeners 200": 89,
+    "GET pools 200": 90,
+    "POST listeners 201": 2,
+    "GET l7policies 200": 85,
+    "POST pools 201": 5,
+    "GET members 200": 196,
+    "GET healthmonitors 200": 195,
+    "POST members 201": 9,
+    "POST healthmonitors 201": 5,
+    "PUT listeners 200": 1,
+    "POST l7policies 201": 5,
+    "GET rules 200": 140,
+    "POST rules 201": 10,
+    "PUT l7policies 200": 5,
+    "PUT pools 200": 8,
+    "PUT members 202": 4
+  },
+  "nativeBatchMemberDeletes": 4,
+  "nativeHAProxyReloadCount": 20,
+  "strictDNSConfigReloadsByHostname": {
+    "abc.example.com": 26,
+    "mismatch.example.com": 7
+  }
+}

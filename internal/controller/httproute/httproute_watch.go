@@ -249,7 +249,12 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 		return err
 	}
 	if r.Config.XBackendEnabled() {
-		return r.setupXBackendStatusController(manager)
+		if err := r.setupXBackendStatusController(manager); err != nil {
+			return err
+		}
+	}
+	if r.Config.BackendTLSPolicy {
+		return r.setupBackendTLSPolicyStatusController(manager)
 	}
 	return nil
 }
@@ -265,6 +270,10 @@ func (r *Reconciler) setupRouteController(manager ctrl.Manager, object client.Ob
 	if r.Config.XBackendEnabled() && r.kind() == model.HTTPRouteKind {
 		setup.Watches(&gatewayx.XBackend{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForXBackend), builder.WithPredicates(controller.GenerationOrDeletionChangedPredicate())).
 			Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForXBackendPod), builder.WithPredicates(xBackendPodPredicate()))
+	}
+	if r.Config.BackendTLSPolicy {
+		setup.Watches(&gatewayv1.BackendTLSPolicy{}, handler.EnqueueRequestsFromMapFunc(r.enqueueRoutesForBackendTLSPolicy), builder.WithPredicates(r.backendTLSRoutePredicate())).
+			WatchesMetadata(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.enqueueRoutesForBackendTLSConfigMap))
 	}
 	return setup.
 		Watches(&gatewayv1.Gateway{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForGateway), builder.WithPredicates(controller.GatewayForHTTPRoutePredicate(r.Config))).

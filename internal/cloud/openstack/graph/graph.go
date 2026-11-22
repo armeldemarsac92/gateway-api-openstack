@@ -144,6 +144,22 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		result.Gateway = observedGatewayResult(desired, actual, p.progressingOutcome("Waiting for the Gateway infrastructure"))
 		return result, err
 	}
+	if step := p.prepareBackendTLS(ctx, &desired, actual); step != nil {
+		if validate := spec.ValidateMutation; validate != nil {
+			if err := validate(ctx); err != nil {
+				return cloud.GatewayGraphResult{}, err
+			}
+		}
+		actual.outcome = p.progressingOutcome(step.message)
+		result := p.pendingGraphResult(ctx, desired, actual)
+		result.Routes[step.routeIndex].Result.ObservationDeferred = false
+		if err := p.executeGraphMutation(ctx, desired, actual, *step); err != nil {
+			return result, &cloud.GraphError{Identity: desired.routes[step.routeIndex].spec.Identity, Err: err}
+		}
+		result.Outcome.MutationSubmitted = true
+		result.Routes[step.routeIndex].Result.Outcome.MutationSubmitted = true
+		return result, nil
+	}
 	if actual.addressReadError != nil {
 		if desired.protocol == cloud.ListenerProtocolTLSSNI {
 			if actual.outcome.State == cloud.OutcomeProgressing {
@@ -210,7 +226,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 				return p.withdrawUndiscoverableSNI(ctx, desired, actual, err)
 			}
 		}
-		return result, nil
+		return p.retireUnusedBackendCA(ctx, desired.spec, actual, result)
 	}
 	step, prepared, err := p.prepareNextGraphMutation(ctx, desired, actual, plan, &result)
 	if !prepared {
@@ -253,7 +269,8 @@ func (p *Provider) recordGraphMutationOutcome(result *cloud.GatewayGraphResult, 
 			return port == step.scopedListener.Port
 		})
 	}
-	if step.kind == graphRouteMutation && step.backendKey != "" {
+	if step.kind == graphRouteMutation && (step.backendKey != "" || step.route.kind == routeMutationClaimBackendCA || step.route.kind == routeMutationPublishBackendCA ||
+		step.route.kind == routeMutationSetBackendTLS || step.route.backendTLS != nil) {
 		result.Outcome.MutationSubmitted = true
 		outcome := &result.Routes[step.routeIndex].Result.Outcome
 		outcome.MutationSubmitted = outcome.State == cloud.OutcomeProgressing
@@ -326,11 +343,11 @@ func (p *Provider) validateGraphTrafficSecurity(ctx context.Context, desired des
 	routes := make([]cloud.RouteSpec, 0, len(desired.routes))
 	for index, route := range desired.routes {
 		if desired.spec.Routes[index].Disposition == cloud.GraphEnsure && !deniedPorts[scopedHTTPRoutePort(route)] {
-			if len(route.httpParts) == 0 {
+			if len(route.httpParts) == 0 && !route.backendTLS.denies() {
 				routes = append(routes, route.spec)
 			}
 			for _, backend := range route.httpParts {
-				if !backend.unavailable && !backend.redirect && !backend.fixedResponse && backend.weightedTargets == nil {
+				if !backend.backendTLS.denies() && !backend.unavailable && !backend.redirect && !backend.fixedResponse && backend.weightedTargets == nil {
 					routes = append(routes, backend.spec)
 				}
 			}
@@ -486,6 +503,9 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 		}
 		return a.RouteUID < b.RouteUID
 	})
+	// Transport reconciliation can hold a route whose old pools must stay
+	// protected. Keep the request's authority snapshot immutable.
+	spec.Routes = slices.Clone(spec.Routes)
 	desired := desiredGatewayGraph{spec: spec, identity: identity, protocol: protocol, fixedHTTPResponses: p.fixedHTTPResponses}
 	identities := make(map[string]struct{}, len(spec.Routes))
 	lastRank := -1
@@ -701,6 +721,7 @@ func (d desiredGatewayGraph) routeOwners() []routeGraphOwner {
 	for index, route := range d.routes {
 		owners[index].identity = route.identity
 		owners[index].expectsHTTPParts = len(route.httpParts) != 0
+		owners[index].expectsBackendTLS = routeHasBackendTLSPolicy(route)
 		node := d.spec.Routes[index]
 		owners[index].requiresPolicyAbsenceProof = node.Disposition == cloud.GraphDelete || node.WaitForHTTPPolicyRemoval
 		if node.Disposition == cloud.GraphDelete {
@@ -783,8 +804,7 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 	}
 	actual.floatingIP, err = p.findGatewayFloatingIP(ctx, desired.identity, lb.VipPortID, lb.VipAddress)
 	if err != nil {
-		canWithdraw := desired.protocol == cloud.ListenerProtocolTLSSNI ||
-			desired.protocol == cloud.ListenerProtocolHTTP && p.weightedHTTPTargets
+		canWithdraw := desired.protocol == cloud.ListenerProtocolTLSSNI || desired.protocol == cloud.ListenerProtocolHTTP
 		observeSNIPending := desired.protocol == cloud.ListenerProtocolTLSSNI && lb.ProvisioningStatus == "PENDING_UPDATE"
 		if !canWithdraw || desired.spec.Gateway.Disposition != cloud.GraphEnsure ||
 			observation.phase != loadBalancerPhaseActive && !observeSNIPending || ctx.Err() != nil || errors.Is(err, cloud.ErrOwnershipConflict) {

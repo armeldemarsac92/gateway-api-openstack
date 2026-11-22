@@ -32,6 +32,7 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	gatewaycontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
@@ -70,15 +71,16 @@ type routeBindingSnapshot struct {
 // that authorizes a route graph mutation. It is local to one mutation attempt
 // and must not be retained after releasing the Gateway graph lock.
 type routeValidationSnapshot struct {
-	route             *gatewayv1.HTTPRoute
-	gateway           *gatewayv1.Gateway
-	parentRef         gatewayv1.ParentReference
-	binding           routeBindingSnapshot
-	desired           cloud.RouteSpec
-	backends          *routeModelInputs
-	backendDiagnostic model.Diagnostic
-	gatewayProgrammed bool
-	disposition       routeValidationDisposition
+	route                  *gatewayv1.HTTPRoute
+	gateway                *gatewayv1.Gateway
+	parentRef              gatewayv1.ParentReference
+	binding                routeBindingSnapshot
+	desired                cloud.RouteSpec
+	backends               *routeModelInputs
+	backendDiagnostic      model.Diagnostic
+	backendTLSAncestorSlot backendtls.AncestorSlot
+	gatewayProgrammed      bool
+	disposition            routeValidationDisposition
 }
 
 type routeCleanupDisposition int
@@ -162,6 +164,7 @@ func (r *Reconciler) buildRouteValidationSnapshotFromInputs(
 	snapshot.desired = desired
 	snapshot.backends = inputs
 	snapshot.backendDiagnostic = diagnostic
+	snapshot.backendTLSAncestorSlot = routeBackendTLSAncestorSlot(snapshot.route, inputs)
 
 	if purpose == routeSnapshotForEnsure {
 		r.setRouteBindingDisposition(&snapshot)

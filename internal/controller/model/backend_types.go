@@ -18,6 +18,8 @@ package model
 
 import (
 	corev1 "k8s.io/api/core/v1"
+
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/types"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -45,6 +47,12 @@ const (
 	BackendInvalid BackendState = "Invalid"
 )
 
+// ServicePortKey identifies a selected core Service TCP port.
+type ServicePortKey struct {
+	Service types.NamespacedName
+	Port    int32
+}
+
 // BackendGroup preserves one backendRef's contribution independently of endpoints.
 // Groups are not combined even when their Services or endpoints overlap.
 type BackendGroup struct {
@@ -60,6 +68,7 @@ type BackendGroup struct {
 	Port            *corev1.ServicePort
 	Endpoints       []Endpoint
 	Diagnostic      *Diagnostic
+	BackendTLS      backendtls.Selection
 }
 
 // UsesH2C reports the protocol selected by its backend kind.

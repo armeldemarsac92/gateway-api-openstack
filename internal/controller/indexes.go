@@ -23,6 +23,7 @@ import (
 	"sort"
 
 	configv1alpha1 "github.com/gateway-api-openstack/gateway-api-openstack/api/v1alpha1"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -48,6 +49,10 @@ const (
 	IndexHTTPRouteByXBackend = "spec.xBackend"
 	// IndexXBackendByPodLabel indexes each matchLabels pair in an EndpointSelector.
 	IndexXBackendByPodLabel = "spec.podLabel"
+	// IndexBackendTLSPolicyByService indexes local core Service targets.
+	IndexBackendTLSPolicyByService = "spec.targetService"
+	// IndexBackendTLSPolicyByCA indexes supported local CA ConfigMap references.
+	IndexBackendTLSPolicyByCA = "spec.caConfigMap"
 	// IndexHTTPRouteByBackendNamespace indexes cross-namespace Service references.
 	IndexHTTPRouteByBackendNamespace = "spec.backendNamespace"
 	// IndexHTTPRouteByBoundGateway indexes HTTPRoutes by bound Gateway key.
@@ -242,6 +247,23 @@ func controllerFieldIndexes(config Config) []controllerFieldIndex {
 			controllerFieldIndex{object: route, field: IndexL4RouteByBoundGateway, extract: func(object client.Object) []string {
 				if key := boundGatewayKey(config, object); key != "" {
 					return []string{key}
+				}
+				return nil
+			}},
+		)
+	}
+	if config.BackendTLSPolicy {
+		indexes = append(indexes,
+			controllerFieldIndex{object: &gatewayv1.BackendTLSPolicy{}, field: IndexBackendTLSPolicyByService, extract: func(object client.Object) []string {
+				var keys []string
+				for _, key := range backendtls.ServiceKeys(object.(*gatewayv1.BackendTLSPolicy)) {
+					keys = append(keys, ObjectKeyString(key))
+				}
+				return keys
+			}},
+			controllerFieldIndex{object: &gatewayv1.BackendTLSPolicy{}, field: IndexBackendTLSPolicyByCA, extract: func(object client.Object) []string {
+				if key, supported := backendtls.ConfigMapKey(object.(*gatewayv1.BackendTLSPolicy)); supported {
+					return []string{ObjectKeyString(key)}
 				}
 				return nil
 			}},

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/netip"
 	"slices"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
@@ -74,11 +75,14 @@ func resolveBackend(route *gatewayv1.HTTPRoute, reference gatewayv1.HTTPBackendR
 		group.Diagnostic = backendDiagnostic(gatewayv1.RouteReasonUnsupportedValue, "backend Service must use ClusterIP or NodePort type")
 		return group
 	}
-	port, diagnostic := ResolveServicePort(service, reference.Port, input.BackendH2C)
+	selection := input.BackendTLSPolicies[ServicePortKey{Service: group.Service, Port: int32(ptr.Deref(reference.Port, 0))}]
+	requiresTLS := HTTPProfileRouteKind(route) == HTTPRouteKind && selection.Winner != nil
+	port, diagnostic := ResolveServicePortForBackendTLS(service, reference.Port, input.BackendH2C, requiresTLS)
 	if diagnostic != nil {
 		group.Diagnostic = diagnostic
 		return group
 	}
+	group.BackendTLS = selection.Clone()
 	if HTTPProfileRouteKind(route) == GRPCRouteKind && !ServicePortUsesH2C(port) {
 		group.Diagnostic = backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "GRPCRoute requires kubernetes.io/h2c on the backend Service port")
 		return group
@@ -144,9 +148,16 @@ func findBackendService(key types.NamespacedName, services []corev1.Service) *co
 
 // ResolveServicePort resolves the referenced TCP port and HTTP appProtocol.
 func ResolveServicePort(service *corev1.Service, selected *gatewayv1.PortNumber, backendH2C bool) (*corev1.ServicePort, *Diagnostic) {
+	return ResolveServicePortForBackendTLS(service, selected, backendH2C, false)
+}
+
+// ResolveServicePortForBackendTLS also allows a port that explicitly requires
+// HTTPS when the caller establishes that plaintext forwarding is prohibited.
+func ResolveServicePortForBackendTLS(service *corev1.Service, selected *gatewayv1.PortNumber, backendH2C, backendTLS bool) (*corev1.ServicePort, *Diagnostic) {
 	port, diagnostic := ResolveTCPServicePort(service, selected)
 	if diagnostic == nil && port.AppProtocol != nil &&
 		(!backendH2C || !ServicePortUsesH2C(port)) &&
+		(!backendTLS || !strings.EqualFold(*port.AppProtocol, "https")) &&
 		!slices.Contains([]string{"http", "kubernetes.io/http", "kubernetes.io/ws"}, *port.AppProtocol) {
 		return nil, backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "backend Service appProtocol is not supported for HTTP forwarding")
 	}
