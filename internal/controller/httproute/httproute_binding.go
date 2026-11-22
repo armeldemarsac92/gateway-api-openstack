@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
@@ -74,7 +75,9 @@ func (r *Reconciler) bindRouteFromSnapshot(
 
 		base := snapshot.route.DeepCopy()
 		desired := snapshot.route.DeepCopy()
-		r.applyRouteBinding(desired, snapshot.gateway)
+		if err := r.applyRouteBinding(desired, snapshot.gateway); err != nil {
+			return err
+		}
 		if routeBindingMetadataEqual(base, desired) {
 			*route = *desired
 			return nil
@@ -97,19 +100,8 @@ func (r *Reconciler) getRouteBinding(
 	generation int64,
 	isDeleting bool,
 ) (*gatewayv1.HTTPRoute, cloud.Identity, bool, error) {
-	return r.getRouteBindingWithReader(ctx, r.Client, routeKey, routeUID, generation, isDeleting)
-}
-
-func (r *Reconciler) getRouteBindingWithReader(
-	ctx context.Context,
-	reader client.Reader,
-	routeKey types.NamespacedName,
-	routeUID types.UID,
-	generation int64,
-	isDeleting bool,
-) (*gatewayv1.HTTPRoute, cloud.Identity, bool, error) {
 	current := &gatewayv1.HTTPRoute{}
-	if err := r.readRoute(ctx, reader, routeKey, current); err != nil {
+	if err := r.readRoute(ctx, r.Client, routeKey, current); err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil, cloud.Identity{}, false, nil
 		}
@@ -122,60 +114,74 @@ func (r *Reconciler) getRouteBindingWithReader(
 	return current, stored, present, err
 }
 
-func (r *Reconciler) clearStoredRouteBinding(
-	ctx context.Context,
-	route *gatewayv1.HTTPRoute,
-	expected cloud.Identity,
-	expectedPresent bool,
-) error {
+// clearGatewayBinding removes only the completed fragment from a fresh route.
+func (r *Reconciler) clearGatewayBinding(ctx context.Context, route *gatewayv1.HTTPRoute, identity cloud.Identity) error {
 	if r.APIReader == nil {
 		return controller.ErrAPIReaderRequired
 	}
-	routeKey := client.ObjectKeyFromObject(route)
-	routeUID, generation, isDeleting := route.UID, route.Generation, !route.DeletionTimestamp.IsZero()
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		current, stored, present, err := r.getRouteBindingWithReader(
-			ctx,
-			r.APIReader,
-			routeKey,
-			routeUID,
-			generation,
-			isDeleting,
-		)
+		current := &gatewayv1.HTTPRoute{}
+		if err := r.readRoute(ctx, r.APIReader, client.ObjectKeyFromObject(route), current); err != nil {
+			return client.IgnoreNotFound(err)
+		}
+		if !sameHTTPRouteRevision(current, route.UID, route.Generation, !route.DeletionTimestamp.IsZero()) {
+			return errHTTPRouteChanged
+		}
+		bindings, err := controller.StoredRouteGatewayBindings(r.Config, current)
 		if err != nil {
 			return err
 		}
-		if current == nil {
-			return nil
-		}
-		if present != expectedPresent || present && stored != expected {
-			return errHTTPRouteChanged
+		if identity.RouteUID == "" {
+			if len(bindings) != 0 || controllerutil.ContainsFinalizer(current, r.Config.RouteFinalizer()) {
+				return errHTTPRouteChanged
+			}
+		} else {
+			found := false
+			for _, binding := range bindings {
+				if binding.Identity == identity {
+					found = true
+					if binding.Lifecycle != controller.RouteDetaching {
+						return errHTTPRouteChanged
+					}
+					break
+				}
+			}
+			if !found {
+				*route = *current
+				return nil
+			}
 		}
 		base := current.DeepCopy()
-		r.clearRouteBinding(current)
-		if routeBindingMetadataEqual(base, current) {
-			*route = *current
-			return nil
+		if err := controller.RemoveRouteGatewayBinding(r.Config, current, bindings, identity); err != nil {
+			return err
 		}
-		if err := r.patchRoute(ctx, current, base, false); err != nil {
-			return client.IgnoreNotFound(err)
+		if !routeBindingMetadataEqual(base, current) {
+			if err := r.patchRoute(ctx, current, base, false); err != nil {
+				return client.IgnoreNotFound(err)
+			}
 		}
 		*route = *current
 		return nil
 	})
 }
 
-func (r *Reconciler) applyRouteBinding(route *gatewayv1.HTTPRoute, gateway *gatewayv1.Gateway) {
+func (r *Reconciler) applyRouteBinding(route *gatewayv1.HTTPRoute, gateway *gatewayv1.Gateway) error {
 	identity := controller.RouteIdentity(r.Config, gateway, route)
-	controller.ApplyRouteBinding(r.Config, route, identity)
-	port, _ := strconv.Atoi(gateway.Annotations[r.Config.GatewayListenerPortAnnotation()])
-	storedAnchor := controller.ScopedRouteAnchor(r.Config, route, gatewayv1.HTTPProtocolType)
-	if controller.GatewayListenerScope(r.Config, gateway) == gatewayv1.HTTPProtocolType || storedAnchor != 0 && storedAnchor == port {
-		// A Gateway edit can interrupt enrollment after this route was sealed.
-		controller.SealRouteAnchor(r.Config, route, identity, port)
-	} else if storedAnchor != 0 {
-		delete(route.Annotations, r.Config.RouteListenerPortAnnotation(gatewayv1.HTTPProtocolType))
+	bindings, err := controller.StoredRouteGatewayBindings(r.Config, route)
+	if err != nil {
+		return err
 	}
+	port, _ := strconv.Atoi(gateway.Annotations[r.Config.GatewayListenerPortAnnotation()])
+	binding := controller.RouteGatewayBinding{Identity: identity, Lifecycle: controller.RouteAttached, ExplicitScope: true}
+	for _, existing := range bindings {
+		if existing.Identity == identity && existing.Anchor == port {
+			binding.Anchor = existing.Anchor
+		}
+	}
+	if controller.GatewayListenerScope(r.Config, gateway) == gatewayv1.HTTPProtocolType {
+		binding.Anchor = port
+	}
+	return controller.ApplyHTTPRouteGatewayBinding(r.Config, route, bindings, binding)
 }
 
 func (r *Reconciler) clearRouteBinding(route *gatewayv1.HTTPRoute) {

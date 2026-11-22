@@ -54,7 +54,9 @@ func TestReconcilersShareGatewayGraphCoordinator(t *testing.T) {
 	route.UID = "route-1"
 	route.Generation = 1
 	routeBinder := newTestReconciler(Reconciler{Config: config}, nil)
-	routeBinder.applyRouteBinding(route, gateway)
+	if err := routeBinder.applyRouteBinding(route, gateway); err != nil {
+		t.Fatal(err)
+	}
 	route.Annotations[config.RouteLifecycleAnnotation()] = controller.RouteDetaching
 	kubeClient := indexedFakeClientBuilder(testScheme(t), config).WithObjects(route).Build()
 	if err := kubeClient.Get(context.Background(), client.ObjectKeyFromObject(route), route); err != nil {
@@ -144,7 +146,9 @@ func TestHTTPRouteDeleteRevalidatesBindingAfterWaitingForGraph(t *testing.T) {
 	route.UID = "route-1"
 	route.Generation = 1
 	binder := newTestReconciler(Reconciler{Config: config}, nil)
-	binder.applyRouteBinding(route, gateway)
+	if err := binder.applyRouteBinding(route, gateway); err != nil {
+		t.Fatal(err)
+	}
 	kubeClient := indexedFakeClientBuilder(testScheme(t), config).WithObjects(route).Build()
 	if err := kubeClient.Get(context.Background(), client.ObjectKeyFromObject(route), route); err != nil {
 		t.Fatal(err)

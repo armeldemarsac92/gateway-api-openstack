@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -78,11 +77,12 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 		if !controller.RouteClaimsGateway(r.Config, route, request.Identity) {
 			continue
 		}
-		identity, present, err := r.storedRouteIdentity(route)
+		binding, err := controller.StoredRouteGatewayBinding(r.Config, route, request.Identity)
+		identity := binding.Identity
 		if err != nil {
 			return graph.RouteInputs{}, err
 		}
-		if !present || !controller.SameGatewayIdentity(identity, request.Identity) {
+		if identity.RouteUID == "" {
 			return graph.RouteInputs{}, fmt.Errorf("%w: %s binding does not match the Gateway graph", cloud.ErrOwnershipConflict, model.HTTPProfileRouteKind(route))
 		}
 		kind := model.HTTPProfileRouteKind(route)
@@ -95,11 +95,14 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 			}
 		}
 		node := cloud.RouteGraphNode{Spec: cloud.RouteSpec{Identity: identity}, Disposition: cloud.GraphPreserve}
-		lifecycle := route.Annotations[r.Config.RouteLifecycleAnnotation()]
+		lifecycle := binding.Lifecycle
 		switch lifecycle {
 		case controller.RouteAttached, controller.RouteDetaching:
 		default:
 			return graph.RouteInputs{}, fmt.Errorf("%w: %s fragment lifecycle is missing or invalid", cloud.ErrOwnershipConflict, kind)
+		}
+		if requested && request.Action == graph.Ensure && lifecycle != controller.RouteAttached {
+			return graph.RouteInputs{}, errHTTPRouteChanged
 		}
 		if request.Action == graph.DeleteGateway {
 			input.Nodes = append(input.Nodes, node)
@@ -110,7 +113,8 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 			cleanups = append(cleanups, routeCleanupSnapshot{route: route, identity: identity, disposition: routeCleanupRequired})
 		} else if backends != nil {
 			if requested {
-				if !route.DeletionTimestamp.IsZero() {
+				if !route.DeletionTimestamp.IsZero() || request.HTTPRouteRejectedSections != nil &&
+					!slices.Equal(*request.HTTPRouteRejectedSections, backends.admission.rejectedSections[routeKey(route)]) {
 					return graph.RouteInputs{}, errHTTPRouteChanged
 				}
 			} else if _, eligible := backends.admission.eligible[routeKey(route)]; !eligible {
@@ -249,8 +253,10 @@ func gatewayKeyForRouteParent(ctx context.Context, reader client.Reader, route *
 }
 
 type routeGraphBinding struct {
-	route, boundNamespace, boundName, boundUID, lifecycle, project, cluster, finalizers string
-	anchor                                                                              int
+	route           routeObjectKey
+	uid             string
+	binding         controller.RouteGatewayBinding
+	invalid, sealed bool
 }
 
 func (r *Reconciler) routeGraphBindings(routes []gatewayv1.HTTPRoute, identity cloud.Identity) []routeGraphBinding {
@@ -259,25 +265,11 @@ func (r *Reconciler) routeGraphBindings(routes []gatewayv1.HTTPRoute, identity c
 		if !controller.RouteClaimsGateway(r.Config, &route, identity) {
 			continue
 		}
-		binding := routeGraphBinding{
-			route:          route.Namespace + "/" + route.Name + "/" + string(route.UID),
-			boundNamespace: route.Annotations[r.Config.RouteGatewayNamespaceAnnotation()],
-			boundName:      route.Annotations[r.Config.RouteGatewayNameAnnotation()],
-			boundUID:       route.Annotations[r.Config.RouteGatewayUIDAnnotation()],
-			lifecycle:      route.Annotations[r.Config.RouteLifecycleAnnotation()],
-			project:        route.Annotations[r.Config.RouteProjectIDAnnotation()],
-			cluster:        route.Annotations[r.Config.RouteClusterIDAnnotation()],
-			anchor:         controller.ScopedRouteAnchor(r.Config, &route, gatewayv1.HTTPProtocolType),
-		}
-		var finalizers []string
-		for _, finalizer := range route.Finalizers {
-			if finalizer == r.Config.RouteFinalizer() || strings.HasPrefix(finalizer, r.Config.RouteBindingFinalizerPrefix()) {
-				finalizers = append(finalizers, finalizer)
-			}
-		}
-		slices.Sort(finalizers)
-		binding.finalizers = strings.Join(finalizers, "\x00")
-		bindings = append(bindings, binding)
+		binding, err := controller.StoredRouteGatewayBinding(r.Config, &route, identity)
+		bindings = append(bindings, routeGraphBinding{
+			route: routeKey(&route), uid: string(route.UID), binding: binding, invalid: err != nil,
+			sealed: controller.RouteGatewayBindingSealed(r.Config, &route, binding),
+		})
 	}
 	return bindings
 }

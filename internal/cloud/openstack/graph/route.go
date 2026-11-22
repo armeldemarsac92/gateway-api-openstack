@@ -34,8 +34,9 @@ import (
 const maxOctaviaMemberWeight = 256
 
 const (
-	httpHeaderExactRuleType l7policies.RuleType = "HTTP_HEADER_EXACT"
-	httpMethodRuleType      l7policies.RuleType = "HTTP_METHOD"
+	httpHeaderExactRuleType     l7policies.RuleType = "HTTP_HEADER_EXACT"
+	httpQueryParamExactRuleType l7policies.RuleType = "HTTP_QUERY_PARAM_EXACT"
+	httpMethodRuleType          l7policies.RuleType = "HTTP_METHOD"
 )
 
 // Match the native media type with a POSIX ERE so HAProxy can use either libc
@@ -55,6 +56,9 @@ type desiredPolicy struct {
 	backendKey               string
 	matchKey                 string
 	hostnameRuleValue        string
+	hostname                 string
+	httpListenerHostname     string
+	httpHostExclusions       []redirectGuard
 	httpsListenerHostname    string
 	redirect                 *desiredRedirectPolicy
 	weighted                 bool
@@ -63,6 +67,7 @@ type desiredPolicy struct {
 	responseHeaderOperations []cloud.HTTPHeaderOperation
 	method                   string
 	headers                  []cloud.HTTPHeaderMatch
+	queryParams              []cloud.HTTPQueryParamMatch
 	grpc                     bool
 }
 
@@ -196,6 +201,10 @@ func (p *Provider) buildDesiredRoutePart(spec cloud.RouteSpec, backendKey string
 			if err != nil {
 				return invalid(err)
 			}
+			for i := range policies {
+				policies[i].hostname = spec.Hostname
+				policies[i].httpListenerHostname = spec.HTTPListenerHostname
+			}
 			if scope := spec.HTTPSListenerHostname; scope != "" {
 				for i := range policies {
 					policy := &policies[i]
@@ -207,7 +216,7 @@ func (p *Provider) buildDesiredRoutePart(spec cloud.RouteSpec, backendKey string
 			}
 		}
 	case cloud.ListenerProtocolTCP, cloud.ListenerProtocolUDP:
-		if spec.Hostname != "" || spec.PathType != "" || spec.PathValue != "" || spec.HTTPSListenerHostname != "" {
+		if spec.Hostname != "" || spec.PathType != "" || spec.PathValue != "" || spec.HTTPSListenerHostname != "" || spec.HTTPListenerHostname != "" {
 			return invalid(fmt.Errorf("a %s route cannot contain HTTP matches", protocol))
 		}
 	default:
@@ -408,6 +417,7 @@ func (p *Provider) buildHTTPMatchPolicies(r *desiredRoute, matches []cloud.HTTPP
 		for _, policy := range policies {
 			policy.backendKey, policy.matchKey = r.backendKey, matchKey
 			policy.httpsListenerHostname = scope
+			policy.httpListenerHostname, policy.hostname = match.HTTPListenerHostname, match.Hostname
 			policy.hostnameRuleValue, policy.precedence = hostnameRuleValue, match.Precedence
 			policy.weighted = r.weightedTargets != nil
 			policy.requestHeaderOperations = operations
@@ -454,6 +464,9 @@ func (p *Provider) normalizeHTTPMatch(match cloud.HTTPPathMatch) (cloud.HTTPPath
 	if len(match.Headers) != 0 && !p.httpHeaderExact {
 		return cloud.HTTPPathMatch{}, errors.New("exact HTTP header matching requires --octavia-http-header-exact")
 	}
+	if len(match.QueryParams) != 0 && (!p.httpQueryParamExact || !p.fixedHTTPResponses) {
+		return cloud.HTTPPathMatch{}, errors.New("exact HTTP query parameter matching requires --octavia-http-query-param-exact and --octavia-fixed-http-responses")
+	}
 	if match.Method != "" {
 		if !p.httpMethodMatch || !p.fixedHTTPResponses {
 			return cloud.HTTPPathMatch{}, errors.New("HTTP method matching requires --octavia-http-method-match and --octavia-fixed-http-responses")
@@ -467,6 +480,9 @@ func (p *Provider) normalizeHTTPMatch(match cloud.HTTPPathMatch) (cloud.HTTPPath
 		return cloud.HTTPPathMatch{}, err
 	}
 	match.Headers = headers
+	if match.QueryParams, err = cloud.NormalizeHTTPQueryParamMatches(match.QueryParams); err != nil {
+		return cloud.HTTPPathMatch{}, err
+	}
 	if match.PathType == cloud.PathMatchPrefix {
 		match.PathValue = strings.TrimRight(match.PathValue, "/")
 	}
@@ -512,7 +528,7 @@ func httpPathPolicies(match cloud.HTTPPathMatch, grouped bool) ([]desiredPolicy,
 		}
 	}
 	if !usesHTTPPathPredicate(match) {
-		return []desiredPolicy{{role: rolePolicyPrefix, position: 1, method: match.Method, headers: match.Headers}}, hostnameRuleValue, nil
+		return []desiredPolicy{{role: rolePolicyPrefix, position: 1, method: match.Method, headers: match.Headers, queryParams: match.QueryParams}}, hostnameRuleValue, nil
 	}
 	role := rolePolicyExact
 	pattern := pathRules.Regex
@@ -531,6 +547,7 @@ func httpPathPolicies(match cloud.HTTPPathMatch, grouped bool) ([]desiredPolicy,
 	for i := range policies {
 		policies[i].method = match.Method
 		policies[i].headers = match.Headers
+		policies[i].queryParams = match.QueryParams
 	}
 	return policies, hostnameRuleValue, nil
 }
@@ -594,11 +611,30 @@ func rulesFor(policy desiredPolicy, hostnameRuleValue string) []desiredRule {
 			value:       header.Value,
 		})
 	}
+	for _, param := range policy.queryParams {
+		rules = append(rules, desiredRule{
+			role:        policyRuleRole(policy, openstackidentity.RoleRuleHTTPQueryParamExact, openstackidentity.HTTPQueryParamRuleKey(param.Name)),
+			ruleType:    httpQueryParamExactRuleType,
+			compareType: l7policies.CompareTypeEqual,
+			key:         param.Name,
+			value:       param.Value,
+		})
+	}
+	for _, guard := range policy.httpHostExclusions {
+		rules = append(rules, desiredRule{
+			role:     policyRuleRole(policy, openstackidentity.RoleRuleHTTPHostExclusion, redirectGuardKey(guard)),
+			ruleType: guard.ruleType, compareType: guard.compareType, value: guard.value, invert: true,
+		})
+	}
 	if policy.redirect != nil {
 		for _, guard := range policy.redirect.guards {
+			base := roleRuleRedirectGuard
+			if guard.ruleType == httpQueryParamExactRuleType {
+				base = openstackidentity.RoleRuleHTTPQueryParamExact
+			}
 			rules = append(rules, desiredRule{
-				role:     policyRuleRole(policy, roleRuleRedirectGuard, redirectGuardKey(guard)),
-				ruleType: guard.ruleType, compareType: guard.compareType, value: guard.value, invert: true,
+				role:     policyRuleRole(policy, base, redirectGuardKey(guard)),
+				ruleType: guard.ruleType, compareType: guard.compareType, key: guard.key, value: guard.value, invert: true,
 			})
 		}
 	}

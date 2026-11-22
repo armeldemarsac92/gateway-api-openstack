@@ -141,11 +141,12 @@ type RequestRedirect struct {
 
 // Match is one conjunction of predicates within a rule.
 type Match struct {
-	Index     int
-	PathType  gatewayv1.PathMatchType
-	PathValue string
-	Method    string
-	Headers   []HeaderMatch
+	Index       int
+	PathType    gatewayv1.PathMatchType
+	PathValue   string
+	Method      string
+	Headers     []HeaderMatch
+	QueryParams []cloud.HTTPQueryParamMatch
 }
 
 // HeaderMatch is a normalized, case-insensitive name with an exact value.

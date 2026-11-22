@@ -24,6 +24,8 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
@@ -32,6 +34,41 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
+
+func TestGRPCRouteIgnoresListenerSetAlongsideDirectParent(t *testing.T) {
+	f, _, grpc := newRouteElectionFixture(t)
+	f.service.Spec.Ports[0].AppProtocol = ptr.To("kubernetes.io/h2c")
+	if err := f.client.Update(t.Context(), f.service); err != nil {
+		t.Fatal(err)
+	}
+	direct, delegated := grpc.Spec.ParentRefs[0], f.route.Spec.ParentRefs[1]
+	grpc.Spec.ParentRefs = []gatewayv1.ParentReference{direct, delegated}
+	grpc.Spec.Hostnames = f.route.Spec.Hostnames
+	route := model.ProjectGRPCRoute(grpc)
+	if err := f.reconciler.applyRouteBinding(route, f.gateway); err != nil {
+		t.Fatal(err)
+	}
+	grpc.Annotations, grpc.Finalizers = route.Annotations, route.Finalizers
+	f.create(t, grpc)
+	provider := &recordingProvider{}
+	r := newTestReconciler(*f.reconciler, provider).forRouteKind(model.GRPCRouteKind)
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(grpc)}
+	if _, err := r.Reconcile(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.client.Get(t.Context(), request.NamespacedName, grpc); err != nil {
+		t.Fatal(err)
+	}
+	route = model.ProjectGRPCRoute(grpc)
+	assertElectionParentAccepted(t, route, direct, metav1.ConditionTrue)
+	if len(grpc.Status.Parents) != 1 ||
+		findRouteParentCondition(route, r.Config.ControllerName, delegated, string(gatewayv1.RouteConditionAccepted)) != nil {
+		t.Fatalf("expected status only for the direct parent, got %v", grpc.Status.Parents)
+	}
+	if len(provider.routeSpecs) != 2 || !provider.routeSpecs[0].GRPC && !provider.routeSpecs[1].GRPC {
+		t.Fatalf("expected both eligible route fragments, including the GRPCRoute, got %v", provider.routeSpecs)
+	}
+}
 
 func TestGRPCExactHeadersKeepAlternativesAndPrecedenceOnH2CBackends(t *testing.T) {
 	cfg := testConfig()
@@ -221,13 +258,103 @@ func TestHTTPAndGRPCConflictOnSecondHTTPHostname(t *testing.T) {
 	grpc := &gatewayv1.HTTPRoute{TypeMeta: metav1.TypeMeta{Kind: "GRPCRoute"}, ObjectMeta: metav1.ObjectMeta{Namespace: "infra", Name: "b-grpc"}}
 	grpc.Spec.Hostnames = []gatewayv1.Hostname{"svc.shared.test"}
 	listener := &gatewayv1.Listener{Protocol: gatewayv1.HTTPProtocolType, Port: 80}
-	candidates := []routeProfileCandidate{{route: http, listeners: []*gatewayv1.Listener{listener}}, {route: grpc, listeners: []*gatewayv1.Listener{listener}}}
-	if conflicts := electRouteProfiles(candidates); !conflicts[routeKey(grpc)] || conflicts[routeKey(http)] {
+	candidates := []routeProfileCandidate{{route: http, selection: routeSelection{{listeners: []*gatewayv1.Listener{listener}}}}, {route: grpc, selection: routeSelection{{listeners: []*gatewayv1.Listener{listener}}}}}
+	if conflicts := electRouteProfiles(candidates); len(conflicts[routeKey(grpc)]) != 1 || len(conflicts[routeKey(http)]) != 0 {
 		t.Fatalf("the older HTTPRoute must own every declared hostname: %v", conflicts)
 	}
 	grpc.Spec.Hostnames = []gatewayv1.Hostname{"shared.test"}
 	if conflicts := electRouteProfiles(candidates); len(conflicts) != 0 {
 		t.Fatalf("the wildcard cannot reserve the suffix apex: %v", conflicts)
+	}
+}
+
+func TestGRPCConflictOnlyRejectsTheOwningHTTPParent(t *testing.T) {
+	const section gatewayv1.SectionName = "http"
+	direct := routeParentSelection{
+		parent: managedRouteParent{ref: gatewayv1.ParentReference{Name: "edge", SectionName: ptr.To(section)}},
+		listeners: []*gatewayv1.Listener{{
+			Name: section, Port: 80, Protocol: gatewayv1.HTTPProtocolType, Hostname: ptr.To(gatewayv1.Hostname("api.example.com")),
+		}},
+	}
+	delegated := routeParentSelection{
+		parent: managedRouteParent{
+			ref:         gatewayv1.ParentReference{Kind: ptr.To(gatewayv1.Kind("ListenerSet")), Name: "public", SectionName: ptr.To(section)},
+			listenerSet: &gatewayv1.ListenerSet{ObjectMeta: metav1.ObjectMeta{Namespace: "infra", Name: "public"}},
+		},
+		listeners: []*gatewayv1.Listener{{
+			Name: section, Port: 80, Protocol: gatewayv1.HTTPProtocolType, Hostname: ptr.To(gatewayv1.Hostname("*.example.com")),
+		}},
+	}
+	http := &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: "infra", Name: "http", CreationTimestamp: metav1.Unix(2, 0)}}
+	grpc := &gatewayv1.GRPCRoute{ObjectMeta: metav1.ObjectMeta{Namespace: "infra", Name: "grpc", CreationTimestamp: metav1.Unix(1, 0)}}
+	grpc.Spec.Hostnames = []gatewayv1.Hostname{"api.example.com"}
+	selection := routeSelection{direct, delegated}
+	conflicts := electRouteProfiles([]routeProfileCandidate{
+		{route: http, selection: selection},
+		{route: model.ProjectGRPCRoute(grpc), selection: routeSelection{direct}},
+	})
+	scope := httpRouteScope{parentSelection: selection, rejectedSections: conflicts[routeKey(http)]}
+	updates := scope.completeParentUpdates([]parentStatusUpdate{{parent: direct.parent.ref, status: programmedRouteStatus()}})
+	if len(updates) != 2 {
+		t.Fatalf("got %d parent status updates, want both references", len(updates))
+	}
+	if updates[0].parent.Name != "edge" || updates[0].status.accepted != metav1.ConditionFalse ||
+		updates[0].status.acceptedReason != string(gatewayv1.RouteReasonNotAllowedByListeners) {
+		t.Errorf("Gateway parent should report the older GRPCRoute conflict: %+v", updates[0])
+	}
+	if updates[1].parent.Name != "public" || updates[1].status != programmedRouteStatus() {
+		t.Errorf("ListenerSet parent should keep serving its wildcard: %+v", updates[1])
+	}
+	if len(selection[0].listeners) != 1 || selection[0].rejection != nil {
+		t.Error("reporting a profile conflict changed the observed parent selection")
+	}
+}
+
+func TestSharedPlainHTTPModelLowersGRPCAuthorityOnBothWildcards(t *testing.T) {
+	cfg := testConfig()
+	cfg.BackendH2C, cfg.FixedHTTPResponses = true, true
+	_, gateway := providerRouteParentObjects(cfg)
+	port := gateway.Spec.Listeners[0].Port
+	gateway.Spec.Listeners = []gatewayv1.Listener{
+		{Name: "exact", Port: port, Protocol: gatewayv1.HTTPProtocolType, Hostname: ptr.To(gatewayv1.Hostname("foo.bar.com"))},
+		{Name: "wildcard-bar", Port: port, Protocol: gatewayv1.HTTPProtocolType, Hostname: ptr.To(gatewayv1.Hostname("*.bar.com"))},
+		{Name: "wildcard-foo", Port: port, Protocol: gatewayv1.HTTPProtocolType, Hostname: ptr.To(gatewayv1.Hostname("*.foo.com"))},
+	}
+	route := &gatewayv1.GRPCRoute{ObjectMeta: metav1.ObjectMeta{Namespace: gateway.Namespace, Name: "echo", UID: "route-uid"}}
+	route.Spec.ParentRefs = []gatewayv1.ParentReference{{Name: gatewayv1.ObjectName(gateway.Name), Port: &port}}
+	route.Spec.Hostnames = []gatewayv1.Hostname{"*.bar.com", "*.foo.com"}
+	route.Spec.Rules = []gatewayv1.GRPCRouteRule{grpcRule("v1", gatewayv1.GRPCRouteMatch{
+		Method: &gatewayv1.GRPCMethodMatch{Service: ptr.To("example.Echo"), Method: ptr.To("Echo")},
+	})}
+	backend, endpoints, node := validNodePortBackend(gateway.Namespace, "v1")
+	backend.Spec.Ports[0].AppProtocol = ptr.To("kubernetes.io/h2c")
+	reader := indexedFakeClientBuilder(testScheme(t), cfg).WithObjects(backend, endpoints, node).Build()
+
+	desired, err := (&Reconciler{Config: cfg}).buildRouteModelWithReader(t.Context(), reader, model.ProjectGRPCRoute(route), gateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(desired.HTTPBackends) != 1 || !desired.GRPC || !desired.HTTPBackends[0].BackendH2C {
+		t.Fatalf("want a single h2c backend with TCP health checks, got %#v", desired)
+	}
+	want := []cloud.HTTPPathMatch{
+		{HTTPListenerHostname: "foo.bar.com", Hostname: "foo.bar.com", PathType: cloud.PathMatchExact, PathValue: "/example.Echo/Echo", Precedence: 0},
+		{HTTPListenerHostname: "*.bar.com", Hostname: "*.bar.com", PathType: cloud.PathMatchExact, PathValue: "/example.Echo/Echo", Precedence: 1},
+		{HTTPListenerHostname: "*.foo.com", Hostname: "*.foo.com", PathType: cloud.PathMatchExact, PathValue: "/example.Echo/Echo", Precedence: 2},
+	}
+	if got := desired.HTTPBackends[0].Matches; !reflect.DeepEqual(got, want) {
+		t.Fatalf("gRPC authority and section constraints = %#v, want %#v", got, want)
+	}
+
+	exact := &gateway.Spec.Listeners[0]
+	wildcard := &gateway.Spec.Listeners[1]
+	http := &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: gateway.Namespace, Name: "http-on-wildcard"}}
+	candidates := []routeProfileCandidate{
+		{route: http, selection: routeSelection{{listeners: []*gatewayv1.Listener{wildcard}}}},
+		{route: model.ProjectGRPCRoute(route), selection: routeSelection{{listeners: []*gatewayv1.Listener{exact}}}},
+	}
+	if conflicts := electRouteProfiles(candidates); len(conflicts) != 0 {
+		t.Fatalf("different listener sections must not compete across HTTP and gRPC: %v", conflicts)
 	}
 }
 

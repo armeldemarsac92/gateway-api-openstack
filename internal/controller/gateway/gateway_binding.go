@@ -137,18 +137,15 @@ func (r *Reconciler) sealScopedRoutes(ctx context.Context, snapshot *gatewayMuta
 		if !controller.RouteClaimsGateway(r.Config, route, gatewayID) {
 			continue
 		}
-		id, present, err := controller.StoredRouteIdentity(r.Config, route)
+		binding, err := controller.StoredRouteGatewayBinding(r.Config, route, gatewayID)
 		if err != nil {
 			return false, err
 		}
-		lifecycle := route.GetAnnotations()[r.Config.RouteLifecycleAnnotation()]
-		if !present || !controller.SameGatewayIdentity(id, gatewayID) ||
-			!controllerutil.ContainsFinalizer(route, r.Config.RouteFinalizer()) ||
-			route.GetAnnotations()[r.Config.RouteClusterIDAnnotation()] != id.ClusterID || route.GetAnnotations()[r.Config.RouteProjectIDAnnotation()] != id.OpenStackProjectID ||
-			(lifecycle != controller.RouteAttached && lifecycle != controller.RouteDetaching) {
+		if binding.Identity.RouteUID == "" || !controllerutil.ContainsFinalizer(route, r.Config.RouteFinalizer()) ||
+			!binding.ExplicitScope || (binding.Lifecycle != controller.RouteAttached && binding.Lifecycle != controller.RouteDetaching) {
 			return false, fmt.Errorf("incomplete %s route enrollment binding for %s/%s", protocol, route.GetNamespace(), route.GetName())
 		}
-		port := controller.ScopedRouteAnchor(r.Config, route, protocol)
+		port := binding.Anchor
 		if port == anchor {
 			continue
 		}
@@ -165,7 +162,9 @@ func (r *Reconciler) sealScopedRoutes(ctx context.Context, snapshot *gatewayMuta
 		return true, nil
 	}
 	base := candidate.DeepCopyObject().(client.Object)
-	controller.SealRouteAnchor(r.Config, candidate, gatewayID, anchor)
+	if err := controller.SealRouteGatewayAnchor(r.Config, candidate, gatewayID, anchor); err != nil {
+		return false, err
+	}
 	if err := r.sealGatewayMutationSnapshot(ctx, snapshot); err != nil {
 		return false, err
 	}

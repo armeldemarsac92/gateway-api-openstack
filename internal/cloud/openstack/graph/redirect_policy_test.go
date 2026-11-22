@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"net/url"
 	"slices"
 	"testing"
 
@@ -626,5 +627,80 @@ func TestExactHTTPHeaderRedirectConflictKeepsForwardPolicy(t *testing.T) {
 	if err != nil || !forwarding || len(result.Routes) != 1 ||
 		result.Routes[0].Result.UnsupportedMatch != errExactHeaderRedirectPrecedence.Error() {
 		t.Fatalf("missing forwarding or route diagnosis: %t %#v %v", forwarding, result.Routes, err)
+	}
+}
+
+func TestExactHTTPQueryForwardingKeepsRedirectAsFallback(t *testing.T) {
+	spec := redirectGraphSpec(t)
+	route := &spec.Routes[0].Spec
+	route.HTTPRedirects[0].StatusCode = 302
+	template := completeGraphSpec(safetyTestIdentity(t)).Routes[0].Spec
+	route.MemberSubnetID, route.HealthMonitor = template.MemberSubnetID, template.HealthMonitor
+	route.HTTPBackends = []cloud.HTTPBackend{{
+		Namespace: "default", Name: "backend", Port: 80, Members: template.Members,
+		Matches: []cloud.HTTPPathMatch{
+			{Hostname: "*.example.test", PathType: cloud.PathMatchPrefix, PathValue: "/app", Precedence: 1,
+				QueryParams: []cloud.HTTPQueryParamMatch{{Name: "preview", Value: "1"}}},
+			{Hostname: "api.example.test", PathType: cloud.PathMatchExact, PathValue: "/app/details", Precedence: 0,
+				QueryParams: []cloud.HTTPQueryParamMatch{{Name: "preview", Value: "2"}, {Name: "color", Value: "blue"}}},
+		},
+	}}
+	desired, err := (&Provider{projectID: "project-a", fixedHTTPResponses: true, httpQueryParamExact: true}).buildDesiredGatewayGraph(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var redirects []desiredPolicy
+	for _, part := range desired.routes[0].httpParts {
+		if part.redirectIssue != nil {
+			t.Fatal(part.redirectIssue)
+		}
+		for _, policy := range part.policies {
+			if policy.redirect == nil {
+				continue
+			}
+			if policy.position < 3 || policy.redirect.statusCode != 302 || !policy.requiresExactQueryParams() {
+				t.Fatalf("redirect priority, status or query capability changed: %#v", policy)
+			}
+			for _, rule := range rulesFor(policy, "") {
+				if rule.ruleType == httpQueryParamExactRuleType && (!rule.invert || rule.key == "" || rule.compareType != l7policies.CompareTypeEqual) {
+					t.Fatalf("query complement must use an inverted, keyed exact rule: %#v", rule)
+				}
+			}
+			redirects = append(redirects, policy)
+		}
+	}
+	if len(redirects) != 4 {
+		t.Fatalf("expected the general fallback and three scoped alternatives, got %d", len(redirects))
+	}
+	for _, test := range []struct {
+		host, path, query string
+		redirects         bool
+	}{
+		{"www.example.test", "/app", "preview=1", false},
+		{"www.example.test", "/app", "preview=0", true},
+		{"www.example.test", "/app", "", true},
+		{"www.example.test", "/app", "Preview=1", true},
+		{"api.example.test", "/app/details", "preview=1&color=blue", false},
+		{"api.example.test", "/app/details", "preview=2&color=blue", false},
+		{"api.example.test", "/app/details", "preview=2", true},
+		{"api.example.test", "/app/details", "color=blue", true},
+		{"api.example.test", "/app", "preview=2&color=blue", true},
+		{"www.example.test", "/app/details", "preview=2&color=blue", true},
+	} {
+		params, err := url.ParseQuery(test.query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := slices.ContainsFunc(redirects, func(policy desiredPolicy) bool {
+			return hostContains(policy.hostname, test.host) && !slices.ContainsFunc(policy.redirect.guards, func(guard redirectGuard) bool {
+				if guard.ruleType == httpQueryParamExactRuleType {
+					return params.Get(guard.key) == guard.value
+				}
+				return redirectGuardMatches(t, guard, test.host, test.path)
+			})
+		})
+		if got != test.redirects {
+			t.Errorf("redirect for %s%s?%s = %t, want %t", test.host, test.path, test.query, got, test.redirects)
+		}
 	}
 }

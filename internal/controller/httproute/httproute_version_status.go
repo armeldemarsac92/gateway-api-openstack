@@ -59,7 +59,20 @@ func (r *Reconciler) setRouteUnsupportedVersion(
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	identity, bound, err := r.storedRouteIdentity(&current)
+	var identity cloud.Identity
+	var bound bool
+	if scope.parentGateway == nil {
+		identity, bound, err = r.storedRouteIdentity(&current)
+	} else {
+		expected := controller.RouteIdentity(r.Config, scope.parentGateway, &current)
+		parents = managedParentsForGateway(parents, expected)
+		if len(parents) == 0 {
+			return ctrl.Result{}, errHTTPRouteChanged
+		}
+		var binding controller.RouteGatewayBinding
+		binding, err = controller.StoredRouteGatewayBinding(r.Config, &current, expected)
+		identity, bound = binding.Identity, binding.Identity.RouteUID != ""
+	}
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -158,6 +171,10 @@ func (r *Reconciler) routeForwardingEstablished(route *gatewayv1.HTTPRoute, pare
 		return false
 	}
 	gatewayProgrammed := gatewayProgrammedForGeneration(parent.gateway)
+	if len(gatewaycontroller.HTTPListenerHostnames(listeners)[int(listener.Port)]) != 0 &&
+		(!gatewayProgrammed || parent.ref.SectionName == nil && !stableUnqualifiedRouteAttachment(route, parent, listeners, listener)) {
+		return false
+	}
 	if controller.GatewayListenerScope(r.Config, parent.gateway) == gatewayv1.HTTPProtocolType {
 		if controller.ValidateGatewayBinding(r.Config, parent.gateway) != nil {
 			return false
@@ -204,6 +221,7 @@ func stableUnqualifiedRouteAttachment(route *gatewayv1.HTTPRoute, parent managed
 		return false
 	}
 	effective := model.IntersectHostnames(selected.Hostname, route.Spec.Hostnames)
+	sharedPlainHTTP := len(gatewaycontroller.HTTPListenerHostnames(listeners)[int(selected.Port)]) != 0
 	for _, candidate := range candidates {
 		if candidate.Name == selected.Name || validateRouteHostnames(candidate.Hostname, route.Spec.Hostnames) != nil {
 			continue
@@ -211,7 +229,7 @@ func stableUnqualifiedRouteAttachment(route *gatewayv1.HTTPRoute, parent managed
 		if !model.ObservesRouteNamespace(candidate) && !model.AllowsRouteNamespace(candidate, parent.gateway.Namespace, route.Namespace, nil) {
 			continue
 		}
-		if candidate.Port != selected.Port || !slices.Equal(model.IntersectHostnames(candidate.Hostname, route.Spec.Hostnames), effective) {
+		if sharedPlainHTTP || candidate.Port != selected.Port || !slices.Equal(model.IntersectHostnames(candidate.Hostname, route.Spec.Hostnames), effective) {
 			return false
 		}
 	}

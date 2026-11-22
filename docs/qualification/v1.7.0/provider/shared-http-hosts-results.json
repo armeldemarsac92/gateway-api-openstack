@@ -1,0 +1,125 @@
+{
+  "gatewayAPIVersion": "v1.7.0",
+  "channels": {
+    "standard": {
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "receiptSHA256": "0a28b9e697da40c0fe5a8326ad91e84f7f8ed384b1b6940756e3f20fbaab05cc",
+      "cases": {
+        "HTTPRouteQueryParamMatching": {
+          "exit": 1,
+          "passed": false,
+          "subtestsPassed": 6,
+          "expected": 19,
+          "caseGoSHA256": "435cc4246e59f2e836db2a9b865adddb17af23dac4ff36444403f8a2a6cf3e73",
+          "manifestSHA256": "1286d996d94224166daa84db02c9b9b3b59f0a882607be5d2ee542f2a7c0870a",
+          "upstreamReportSHA256": "cf887f66bea6587b77807d89635b3cf5168a172ac0259835da9dd47641cc7dee"
+        },
+        "HTTPRouteListenerHostnameMatching": {
+          "exit": 1,
+          "passed": false,
+          "subtestsPassed": 0,
+          "expected": 8,
+          "caseGoSHA256": "f03d4f5c933e2f917d15d97ab4d620c6ca6d0829ae056109296aca5931d2b5d1",
+          "manifestSHA256": "2553b340c416dd5a4bdeb1c667a30012bf7c9748e398401b1399e8e87abc0b3a",
+          "upstreamReportSHA256": "77f758ead0ddf85fdf077c3738f60e7114330451af6832b2d1ccd485b289f1f0"
+        },
+        "HTTPRouteHostnameIntersection": {
+          "exit": 1,
+          "passed": false,
+          "subtestsPassed": 34,
+          "expected": 37,
+          "caseGoSHA256": "edc64db8bf55734d1a553b0b109a43a03aeeeb527dabe460c177ce012b843944",
+          "manifestSHA256": "92ece7d8caf7bd8e13ea869f38629b3dadff3d975613e0f0a425c962ee3664fd",
+          "upstreamReportSHA256": "6ccbc48e1cb1ab3186b199ee90ebdb25777d84382fa35dae8f97251efbfefb23",
+          "failedTrafficSubtests": [
+            "'very.specific.com/s1'_should_go_to_infra-backend-v1",
+            "'very.specific.com/s3'_should_go_to_infra-backend-v3"
+          ]
+        },
+        "GRPCRouteListenerHostnameMatching": {
+          "exit": 1,
+          "passed": false,
+          "subtestsPassed": 0,
+          "expected": 8,
+          "caseGoSHA256": "66b842a37b03dd0d20c61604639c9ece08d02cf852b8c6da9a9692f00a0e5972",
+          "manifestSHA256": "1593c3237859a386ef5008502dd20439eb306d6a3e7439899bb4ab2c4970ded7",
+          "upstreamReportSHA256": "4b20d5399f413bf0aa80567fe9b268bc74fcc78ff7c26671248b12f3cbcfa744"
+        }
+      }
+    },
+    "experimental": {
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "receiptSHA256": "80897e220046a7b606ebfbac2ccbf29dd35a46073f81f3e6b3d697bd3d7100ef",
+      "cases": {
+        "HTTPRouteQueryParamMatching": {
+          "exit": 1,
+          "passed": false,
+          "subtestsPassed": 6,
+          "expected": 19,
+          "caseGoSHA256": "435cc4246e59f2e836db2a9b865adddb17af23dac4ff36444403f8a2a6cf3e73",
+          "manifestSHA256": "1286d996d94224166daa84db02c9b9b3b59f0a882607be5d2ee542f2a7c0870a",
+          "upstreamReportSHA256": "f763548a0698cd46bb6a9645636be88ce845610ec04fc8fd061549f744e44025"
+        },
+        "HTTPRouteListenerHostnameMatching": {
+          "exit": 1,
+          "passed": false,
+          "subtestsPassed": 0,
+          "expected": 8,
+          "caseGoSHA256": "f03d4f5c933e2f917d15d97ab4d620c6ca6d0829ae056109296aca5931d2b5d1",
+          "manifestSHA256": "2553b340c416dd5a4bdeb1c667a30012bf7c9748e398401b1399e8e87abc0b3a",
+          "upstreamReportSHA256": "ddb31045321850d2161e184af3c110692d908fcb0957b64d1efab0a4eca0bfa4"
+        },
+        "HTTPRouteHostnameIntersection": {
+          "exit": 1,
+          "passed": false,
+          "subtestsPassed": 34,
+          "expected": 37,
+          "caseGoSHA256": "edc64db8bf55734d1a553b0b109a43a03aeeeb527dabe460c177ce012b843944",
+          "manifestSHA256": "92ece7d8caf7bd8e13ea869f38629b3dadff3d975613e0f0a425c962ee3664fd",
+          "upstreamReportSHA256": "3850234230bad21ddf2995c42727408e22a5e1d8db702ed7435356cde4aff7cc",
+          "failedTrafficSubtests": [
+            "'very.specific.com/s1'_should_go_to_infra-backend-v1",
+            "'foo.bar.anotherwildcard.io/s4'_should_go_to_infra-backend-v1"
+          ]
+        },
+        "GRPCRouteListenerHostnameMatching": {
+          "exit": 1,
+          "passed": false,
+          "subtestsPassed": 0,
+          "expected": 8,
+          "caseGoSHA256": "66b842a37b03dd0d20c61604639c9ece08d02cf852b8c6da9a9692f00a0e5972",
+          "manifestSHA256": "1593c3237859a386ef5008502dd20439eb306d6a3e7439899bb4ab2c4970ded7",
+          "upstreamReportSHA256": "719ed63af89ae87d4afa0647ebe51451704c9aeab80ab488c98c7ef947e33eb1"
+        }
+      }
+    }
+  },
+  "controllerRevision": "6ef34c071eea586e758572981b1aee025148ba6e",
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "managerSHA256": "85cf257e2d3f197e6dbb7a01132e9b39c403760cc52891777cd489096dd1d19e",
+  "octavia": {
+    "version": "19.0.1.dev25",
+    "sha256": "6319ddc6e655e5155ca7ce483fb5230c3688b82ad689be9aa4e6957337f8bda0",
+    "filesVerified": 636
+  },
+  "octaviaLib": {
+    "version": "3.12.1.dev7",
+    "sha256": "ccbf34aa870239d6e0f48bee7d63f34398a9d7bffd0fa98ea36674f8dc343eb4",
+    "filesVerified": 24
+  },
+  "HAProxy": {
+    "version": "3.0.19-ade9c1262-octavia-strict-dns-v1",
+    "sha256": "fa8468efa26f95ed83a36afeb97b79730de285450b7a8fae94f7cf5e6d2d0824"
+  },
+  "flags": [
+    "--octavia-fixed-http-responses",
+    "--octavia-http-header-exact",
+    "--octavia-http-query-param-exact",
+    "--octavia-backend-h2c",
+    "--octavia-https-listener-isolation",
+    "--octavia-backend-tls-policy",
+    "--openstack-resync-interval=10m"
+  ],
+  "reportsRelease": "https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-shared-hosts-6ef34c071eea",
+  "reportsArchiveSHA256": "7776c7787414bede855112ac81fea5eaf9f671193e46ace2b21ef24136b6ec06"
+}

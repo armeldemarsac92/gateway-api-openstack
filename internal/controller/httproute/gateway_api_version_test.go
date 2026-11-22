@@ -53,7 +53,9 @@ func TestHTTPRouteMutationBoundaryChecksLiveGatewayAPIVersion(t *testing.T) {
 	route := mapperTestHTTPRoute("default", "api", gatewayv1.ParentReference{Name: "edge"}, "backend")
 	route.UID = "route-uid"
 	route.Generation = 1
-	(newTestReconciler(Reconciler{Config: cfg}, nil)).applyRouteBinding(route, gateway)
+	if err := (newTestReconciler(Reconciler{Config: cfg}, nil)).applyRouteBinding(route, gateway); err != nil {
+		t.Fatal(err)
+	}
 	service, endpointSlice, node := validNodePortBackend("default", "backend")
 	cachedClient := indexedFakeClientBuilder(testScheme(t), cfg).
 		WithObjects(gatewayClass, gateway, route, service, endpointSlice, node).
@@ -87,7 +89,9 @@ func TestHTTPRouteReconcileChecksLiveVersionBeforeDetach(t *testing.T) {
 	route := mapperTestHTTPRoute("default", "api", gatewayv1.ParentReference{Name: "edge"}, "backend")
 	route.UID = "route-uid"
 	route.Generation = 1
-	(newTestReconciler(Reconciler{Config: cfg}, nil)).applyRouteBinding(route, gateway)
+	if err := (newTestReconciler(Reconciler{Config: cfg}, nil)).applyRouteBinding(route, gateway); err != nil {
+		t.Fatal(err)
+	}
 	route.Spec.ParentRefs = append(route.Spec.ParentRefs, gatewayv1.ParentReference{Name: "edge"})
 	cachedClient := indexedFakeClientBuilder(testScheme(t), cfg).
 		WithStatusSubresource(route).
@@ -141,7 +145,9 @@ func TestUnsupportedGatewayAPIVersionFreezesBoundGraph(t *testing.T) {
 	route.UID = "route-uid"
 	route.Generation = 1
 	routeBinder := newTestReconciler(Reconciler{Config: cfg}, nil)
-	routeBinder.applyRouteBinding(route, gateway)
+	if err := routeBinder.applyRouteBinding(route, gateway); err != nil {
+		t.Fatal(err)
+	}
 	route.Status.Parents = []gatewayv1.RouteParentStatus{{
 		ParentRef:      route.Spec.ParentRefs[0],
 		ControllerName: cfg.ControllerName,
@@ -259,7 +265,9 @@ func TestUnsupportedGatewayAPIVersionRetainsUniqueUnsectionedHTTPRoute(t *testin
 				Conditions: []metav1.Condition{Condition(cfg.Domain()+"/Programmed",
 					metav1.ConditionTrue, "Programmed", "HTTPRoute is programmed", route.Generation)},
 			}}
-			(&Reconciler{Config: cfg}).applyRouteBinding(route, gateway)
+			if err := (&Reconciler{Config: cfg}).applyRouteBinding(route, gateway); err != nil {
+				t.Fatal(err)
+			}
 			kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(route).
 				WithObjects(class, gateway, route).Build()
 			provider := &recordingProvider{}
@@ -989,7 +997,9 @@ func TestUnsupportedGatewayAPIVersionAllowsControllerHandoffCleanup(t *testing.T
 	route := mapperTestHTTPRoute("default", "api", gatewayv1.ParentReference{Name: "edge"}, "backend")
 	route.UID = "route-uid"
 	route.Generation = 1
-	(newTestReconciler(Reconciler{Config: cfg}, nil)).applyRouteBinding(route, gateway)
+	if err := (newTestReconciler(Reconciler{Config: cfg}, nil)).applyRouteBinding(route, gateway); err != nil {
+		t.Fatal(err)
+	}
 	cachedClient := indexedFakeClientBuilder(testScheme(t), cfg).
 		WithStatusSubresource(gateway, route).
 		WithObjects(otherClass, gateway, route).
@@ -1048,7 +1058,9 @@ func TestVersionMismatchDoesNotTrustCachedControllerHandoff(t *testing.T) {
 	route := mapperTestHTTPRoute("default", "api", gatewayv1.ParentReference{Name: "edge"}, "backend")
 	route.UID = "route-uid"
 	route.Generation = 1
-	(newTestReconciler(Reconciler{Config: cfg}, nil)).applyRouteBinding(route, gateway)
+	if err := (newTestReconciler(Reconciler{Config: cfg}, nil)).applyRouteBinding(route, gateway); err != nil {
+		t.Fatal(err)
+	}
 	cachedClient := indexedFakeClientBuilder(testScheme(t), cfg).
 		WithStatusSubresource(gateway, route).
 		WithObjects(cachedClass, gateway, route).
@@ -1269,7 +1281,9 @@ func TestHTTPRouteProviderMutationRechecksControllerOwnership(t *testing.T) {
 	route := mapperTestHTTPRoute("default", "api", gatewayv1.ParentReference{Name: "edge"}, "backend")
 	route.UID = "route-uid"
 	route.Generation = 1
-	(newTestReconciler(Reconciler{Config: cfg}, nil)).applyRouteBinding(route, gateway)
+	if err := (newTestReconciler(Reconciler{Config: cfg}, nil)).applyRouteBinding(route, gateway); err != nil {
+		t.Fatal(err)
+	}
 	service, endpointSlice, node := validNodePortBackend("default", "backend")
 	kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).
 		WithStatusSubresource(route).
@@ -1304,7 +1318,9 @@ func TestHTTPRouteProviderMutationRechecksGatewayBinding(t *testing.T) {
 	route := mapperTestHTTPRoute("default", "api", gatewayv1.ParentReference{Name: "edge"}, "backend")
 	route.UID = "route-uid"
 	route.Generation = 1
-	(newTestReconciler(Reconciler{Config: cfg}, nil)).applyRouteBinding(route, gateway)
+	if err := (newTestReconciler(Reconciler{Config: cfg}, nil)).applyRouteBinding(route, gateway); err != nil {
+		t.Fatal(err)
+	}
 	service, endpointSlice, node := validNodePortBackend("default", "backend")
 	kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).
 		WithStatusSubresource(route).
@@ -1399,7 +1415,9 @@ func TestHTTPRouteCleanupRebuildsLiveDesiredState(t *testing.T) {
 			route := mapperTestHTTPRoute("default", "api", gatewayv1.ParentReference{Name: "edge"}, "backend")
 			route.UID = "route-uid"
 			route.Generation = 1
-			(newTestReconciler(Reconciler{Config: cfg}, nil)).applyRouteBinding(route, liveGateway)
+			if err := (newTestReconciler(Reconciler{Config: cfg}, nil)).applyRouteBinding(route, liveGateway); err != nil {
+				t.Fatal(err)
+			}
 			kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).
 				WithStatusSubresource(route).
 				WithObjects(gatewayClass, cachedGateway, route, cachedService, endpointSlice, node).
