@@ -62,6 +62,7 @@ type observedGatewayGraph struct {
 	state                    cloud.GatewayState
 	addressAbsent            bool
 	deletionFrontendActive   bool
+	frontendsObservedClosed  bool
 	addressReadError         error
 	outcome                  cloud.Outcome
 	protocol                 string
@@ -119,6 +120,8 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	defer func() {
 		result.Gateway.AddressAbsent = actual.addressAbsent
 		result.Gateway.AddressActive = hasActiveGatewayAddress(spec.Gateway.Spec, actual)
+		result.Gateway.AddressActivityObserved = actual.addressAbsent || result.Gateway.AddressActive ||
+			actual.frontendsObservedClosed || actual.loadBalancer != nil && !actual.loadBalancer.AdminStateUp
 		if retErr == nil {
 			result.Gateway.AddressIssue = addressIssue
 			result.Gateway.AddressBlocked = addressBlocked
@@ -1173,6 +1176,9 @@ func (p *Provider) observeGatewayListenerInventory(ctx context.Context, desired 
 	}
 	actual.defaultHTTPResponseCodes = inventory.DefaultHTTPResponseCodes
 	actual.adminObserved = inventory.AdminStatesObserved
+	actual.frontendsObservedClosed = !slices.ContainsFunc(inventory.Items, func(listener listeners.Listener) bool {
+		return !actual.adminObserved[listener.ID] || listener.AdminStateUp
+	})
 	actual.httpsVirtualHosts = inventory.HTTPSVirtualHosts
 	var bindingErr error
 	if markedProtocol != "" {

@@ -80,6 +80,10 @@ func (r *Reconciler) cleanupGateway(ctx context.Context, scope *gatewayScope) (c
 		if err := r.setGatewayAddressUnusable(ctx, scope.gateway, listeners[0], result.Gateway, result.Gateway.Outcome); err != nil {
 			return ctrl.Result{}, err
 		}
+		if r.Config.GatewayAddressRoutabilityEnabled() && !result.Gateway.AddressActivityObserved && !result.Gateway.AddressBlocked &&
+			result.Outcome.State == cloud.OutcomeProgressing {
+			return ctrl.Result{RequeueAfter: controller.ProviderProgressRequeueAfter(result.Outcome, scope.gateway.UID)}, nil
+		}
 		return ctrl.Result{RequeueAfter: controller.OpenStackResyncAfter(r.Config.OpenStackResyncInterval, scope.gateway.UID)}, nil
 	}
 	if r.Config.GatewayAddressRoutabilityEnabled() && result.Gateway.AddressAbsent {

@@ -115,6 +115,8 @@ func (r *Reconciler) applyRawTLSListenerStatus(ctx context.Context, gateway *gat
 		controller.SetCondition(conditions, controller.Condition(string(gatewayv1.ListenerConditionResolvedRefs), metav1.ConditionFalse, string(reason), message, gateway.Generation))
 	}
 	controller.SetCondition(conditions, controller.Condition(string(gatewayv1.ListenerConditionProgrammed), metav1.ConditionFalse, string(reason), message, gateway.Generation))
-	controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionProgrammed),
-		metav1.ConditionFalse, string(gatewayv1.GatewayReasonListenersNotValid), message, gateway.Generation))
+	if !r.addressRejectionPreventsProgramming(gateway) {
+		controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionProgrammed),
+			metav1.ConditionFalse, string(gatewayv1.GatewayReasonListenersNotValid), message, gateway.Generation))
+	}
 }

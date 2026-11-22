@@ -430,15 +430,17 @@ func (r *Reconciler) setGatewayAddressUnusable(
 	}
 	if r.Config.GatewayAddressRoutabilityEnabled() {
 		retained := r.observeAddressAssignment(gateway, result)
-		if retained && progress.State == cloud.OutcomeReady {
-			return r.setGatewayProgrammed(ctx, gateway, listener, "")
+		if !r.usesLegacyAddressAdmission(gateway) {
+			if retained && progress.State == cloud.OutcomeReady {
+				return r.setGatewayProgrammed(ctx, gateway, listener, "")
+			}
+			reason := gatewayv1.GatewayReasonAddressNotAssigned
+			if retained {
+				reason = gatewayv1.GatewayReasonNoResources
+			}
+			return r.setGatewayListenerStatuses(ctx, gateway, listener, metav1.ConditionFalse, reason,
+				gatewayv1.ListenerReasonPending, result.AddressIssue, "Waiting for Octavia listener readiness", true, readyPorts)
 		}
-		reason := gatewayv1.GatewayReasonAddressNotAssigned
-		if retained {
-			reason = gatewayv1.GatewayReasonNoResources
-		}
-		return r.setGatewayListenerStatuses(ctx, gateway, listener, metav1.ConditionFalse, reason,
-			gatewayv1.ListenerReasonPending, result.AddressIssue, "Waiting for Octavia listener readiness", true, readyPorts)
 	}
 	rejection := validateAddresses(gateway.Spec.Addresses)
 	programmedReason := gatewayv1.GatewayReasonAddressNotUsable
@@ -462,10 +464,12 @@ func (r *Reconciler) setGatewayAddressUnusable(
 	if rejectedCondition != nil {
 		controller.SetCondition(&gateway.Status.Conditions, *rejectedCondition)
 	}
-	if address := r.observedGatewayAddress(gateway, result.State); address != "" {
-		setGatewayAddress(gateway, address)
-	} else if result.AddressAbsent {
-		gateway.Status.Addresses = nil
+	if !r.Config.GatewayAddressRoutabilityEnabled() {
+		if address := r.observedGatewayAddress(gateway, result.State); address != "" {
+			setGatewayAddress(gateway, address)
+		} else if result.AddressAbsent {
+			gateway.Status.Addresses = nil
+		}
 	}
 	return nil
 }
@@ -750,7 +754,7 @@ func (r *Reconciler) applyHTTPSListenerStatus(
 		controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionAccepted),
 			accepted, string(gatewayv1.GatewayReasonListenersNotValid), message, gateway.Generation))
 	}
-	if !keepGatewayProgrammed {
+	if !keepGatewayProgrammed && !r.addressRejectionPreventsProgramming(gateway) {
 		controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionProgrammed),
 			metav1.ConditionFalse, string(programmedReason), message, gateway.Generation))
 	}

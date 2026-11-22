@@ -86,7 +86,7 @@ func (r *Reconciler) gatewaySpec(gateway *gatewayv1.Gateway, listeners []*gatewa
 }
 
 func (r *Reconciler) setGatewayAddressRequest(spec *cloud.GatewaySpec, gateway *gatewayv1.Gateway) {
-	if r.Config.GatewayAddressRoutabilityEnabled() {
+	if !r.usesLegacyAddressAdmission(gateway) {
 		spec.RequestedVIPAddresses = requestedVIPCandidates(gateway.Spec.Addresses)
 		return
 	}

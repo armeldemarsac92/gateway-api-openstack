@@ -189,10 +189,16 @@ func (r *Reconciler) reconcileGatewayReplacement(
 	if result, withdrawn, err := r.withdrawBoundTLS(ctx, scope.gateway); err != nil || !withdrawn {
 		return result, err
 	}
-	// An address conflict already checkpoints that this generation is unprogrammed.
+	// A rejected replacement already checkpointed this generation. Keep
+	// observing the old graph without overwriting the address diagnosis.
 	programmed := meta.FindStatusCondition(scope.gateway.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed))
+	assignment := meta.FindStatusCondition(scope.gateway.Status.Conditions, string(gatewayv1.GatewayConditionAddressesAssigned))
+	assignmentRejected := r.Config.GatewayAddressRoutabilityEnabled() && assignment != nil &&
+		assignment.ObservedGeneration == scope.gateway.Generation && assignment.Status == metav1.ConditionFalse &&
+		assignment.Reason == string(gatewayv1.GatewayReasonAddressesNotAssigned)
 	if programmed != nil && programmed.ObservedGeneration == scope.gateway.Generation &&
-		programmed.Status == metav1.ConditionFalse && (programmed.Reason == string(gatewayv1.GatewayReasonAddressNotUsable) ||
+		programmed.Status == metav1.ConditionFalse && (assignmentRejected ||
+		programmed.Reason == string(gatewayv1.GatewayReasonAddressNotUsable) ||
 		programmed.Reason == string(gatewayv1.GatewayReasonAddressNotAssigned)) {
 		return r.cleanupGateway(ctx, scope)
 	}

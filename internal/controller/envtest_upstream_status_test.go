@@ -161,20 +161,16 @@ func testUpstreamGatewayStatus(t *testing.T, c client.Client, cfg controller.Con
 		}
 	})
 
-	// The legacy static-address suite requires all-or-nothing handling. The
-	// Experimental routability contract permits partial assignment instead.
-	if !cfg.GatewayAddressRoutabilityEnabled() {
-		t.Run(tests.GatewayStaticAddresses.ShortName, func(t *testing.T) {
-			s.RunTest = tests.GatewayStaticAddresses.ShortName
-			s.Applier.UsableNetworkAddresses = []gatewayv1.GatewaySpecAddress{
-				{Type: ptr.To(gatewayv1.IPAddressType), Value: recordingProviderStaticVIP},
-			}
-			s.Applier.UnusableNetworkAddresses = []gatewayv1.GatewaySpecAddress{
-				{Type: ptr.To(gatewayv1.IPAddressType), Value: "198.51.100.10"},
-			}
-			tests.GatewayStaticAddresses.Run(t, s)
-		})
-	}
+	t.Run(tests.GatewayStaticAddresses.ShortName, func(t *testing.T) {
+		s.RunTest = tests.GatewayStaticAddresses.ShortName
+		s.Applier.UsableNetworkAddresses = []gatewayv1.GatewaySpecAddress{
+			{Type: ptr.To(gatewayv1.IPAddressType), Value: recordingProviderStaticVIP},
+		}
+		s.Applier.UnusableNetworkAddresses = []gatewayv1.GatewaySpecAddress{
+			{Type: ptr.To(gatewayv1.IPAddressType), Value: "198.51.100.10"},
+		}
+		tests.GatewayStaticAddresses.Run(t, s)
+	})
 	t.Run("GatewayAddressRoutability", func(t *testing.T) {
 		testGatewayAddressRoutability(t, c, cfg, provider, className)
 	})

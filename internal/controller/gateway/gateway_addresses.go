@@ -33,6 +33,19 @@ import (
 
 const sentinelRoutability gatewayv1.GatewayAddressRoutabilityType = "testing.x-k8s.io/sentinel"
 
+// A list containing only fixed values with default routability retains the
+// existing static-address admission contract. An automatic address or a
+// required scope opts into the Experimental assignment behavior.
+func (r *Reconciler) usesLegacyAddressAdmission(gateway *gatewayv1.Gateway) bool {
+	if !r.Config.GatewayAddressRoutabilityEnabled() {
+		return true
+	}
+	addresses := gateway.Spec.Addresses
+	return len(addresses) != 0 && !slices.ContainsFunc(addresses, func(request gatewayv1.GatewaySpecAddress) bool {
+		return request.Value == "" || request.Routability != gatewayv1.GatewayAddressRoutabilityDefault
+	})
+}
+
 func supportedAddressRequest(request gatewayv1.GatewaySpecAddress) (value string, supported bool) {
 	if ptr.Deref(request.Type, gatewayv1.IPAddressType) != gatewayv1.IPAddressType ||
 		(request.Routability != gatewayv1.GatewayAddressRoutabilityDefault && request.Routability != sentinelRoutability) {
@@ -96,6 +109,15 @@ func setExperimentalStatusAddress(gateway *gatewayv1.Gateway, address string, ro
 	gateway.Status.Addresses = []gatewayv1.GatewayStatusAddress{{
 		Type: ptr.To(gatewayv1.IPAddressType), Value: address, Routability: ptr.To(routability),
 	}}
+}
+
+func (r *Reconciler) addressRejectionPreventsProgramming(gateway *gatewayv1.Gateway) bool {
+	if !r.Config.GatewayAddressRoutabilityEnabled() {
+		return false
+	}
+	programmed := meta.FindStatusCondition(gateway.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed))
+	return programmed != nil && programmed.Status == metav1.ConditionFalse && programmed.ObservedGeneration == gateway.Generation &&
+		programmed.Reason == string(gatewayv1.GatewayReasonAddressNotAssigned)
 }
 
 func setAddressAssignmentCondition(gateway *gatewayv1.Gateway, satisfied int, providerIssue string) {
@@ -164,10 +186,15 @@ func (r *Reconciler) observeAddressAssignment(gateway *gatewayv1.Gateway, observ
 			return false
 		}
 	}
-	retained := address != "" && !observation.AddressAbsent &&
-		(observation.AddressActive || observation.Outcome.State == cloud.OutcomeReady)
+	retained := address != "" && !observation.AddressAbsent && observation.AddressActive
 	if observation.AddressIssue == "" && !retained {
 		return false
+	}
+	if !observation.AddressAbsent && !observation.AddressActive && !observation.AddressActivityObserved {
+		// In particular, Octavia may report PENDING_UPDATE before we can
+		// re-read enabled listeners or the Floating IP during replacement.
+		setAddressAssignmentCondition(gateway, -1, observation.AddressIssue)
+		return len(gateway.Status.Addresses) != 0
 	}
 	if retained {
 		routability := gatewayv1.GatewayAddressRoutabilityDefault

@@ -30,6 +30,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	"sigs.k8s.io/gateway-api/pkg/features"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
@@ -280,6 +281,122 @@ func TestGatewayReplacementReportsImmutableAddress(t *testing.T) {
 		programmed.Reason != string(gatewayv1.GatewayReasonAddressNotUsable) || len(current.Status.Addresses) != 1 || current.Status.Addresses[0].Value != "192.0.2.10" {
 		t.Fatalf("status = %#v, want actual address and current-generation address rejection", current.Status)
 	}
+}
+
+func TestExperimentalAddressReplacementWaitsForActivityReadback(t *testing.T) {
+	cfg := testConfig()
+	cfg.GatewayAPIChannel = features.FeatureChannelExperimental
+	gateway := programmedTestGateway(cfg)
+	setExperimentalStatusAddress(gateway, "192.0.2.10", sentinelRoutability)
+	gateway.Spec.Listeners[0].Port++
+	gateway.Spec.Addresses = []gatewayv1.GatewaySpecAddress{{Routability: "example.com/unknown"}}
+	gateway.Generation++
+	class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "openstack"}, Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName}}
+	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gateway).WithObjects(class, gateway).Build()
+	component := cloud.GatewayProgressingResult("Waiting to observe the pending Octavia load balancer", time.Second)
+	component.State.LoadBalancerID = "lb-1"
+	component.AddressIssue = "Unsupported address scope"
+	writer := &fixedGatewayGraph{result: cloud.GatewayGraphResult{Outcome: component.Outcome, Gateway: component}}
+	r := newTestReconciler(Reconciler{Client: kube, APIReader: kube, Config: cfg, Writer: writer}, nil)
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(gateway)}
+	if _, err := r.Reconcile(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := r.Reconcile(t.Context(), request)
+	if err != nil || result.RequeueAfter <= 0 || result.RequeueAfter >= cfg.OpenStackResyncInterval/2 {
+		t.Fatalf("incomplete replacement observation = %v, %v; want a prompt recheck", result, err)
+	}
+	current := &gatewayv1.Gateway{}
+	if err := kube.Get(t.Context(), request.NamespacedName, current); err != nil {
+		t.Fatal(err)
+	}
+	addresses := current.Status.Addresses
+	assignment := meta.FindStatusCondition(current.Status.Conditions, string(gatewayv1.GatewayConditionAddressesAssigned))
+	if len(addresses) != 1 || addresses[0].Value != "192.0.2.10" ||
+		ptr.Deref(addresses[0].Routability, "") != sentinelRoutability || assignment == nil ||
+		assignment.Reason != string(gatewayv1.GatewayReasonAddressesNotAssigned) || assignment.ObservedGeneration != gateway.Generation {
+		t.Fatalf("incomplete observation lost the retained sentinel address or counted it as assigned: %+v", current.Status)
+	}
+
+	// A subsequent complete observation finds a disabled frontend, while
+	// the VIP itself has not yet been released by Octavia.
+	writer.result.Gateway.AddressActivityObserved = true
+	writer.result.Gateway.AddressBlocked = true
+	writer.result.Gateway.State.VIPAddress = "192.0.2.10"
+	if _, err := r.Reconcile(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	if err := kube.Get(t.Context(), request.NamespacedName, current); err != nil {
+		t.Fatal(err)
+	}
+	programmed := meta.FindStatusCondition(current.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed))
+	if len(current.Status.Addresses) != 0 || programmed == nil || programmed.Status != metav1.ConditionFalse ||
+		programmed.Reason != string(gatewayv1.GatewayReasonAddressNotAssigned) {
+		t.Fatalf("confirmed inactivity must clear the retained address: %+v", current.Status)
+	}
+}
+
+func TestExperimentalAddressRejectionComposesWithDeniedHTTPSReference(t *testing.T) {
+	cfg := testConfig()
+	cfg.GatewayAPIChannel = features.FeatureChannelExperimental
+	cfg.OperatorHTTPS = true
+	gateway := programmedTestGateway(cfg)
+	gateway.Status = gatewayv1.GatewayStatus{}
+	gateway.Annotations, gateway.Finalizers = nil, nil
+	gateway.Spec.Addresses = []gatewayv1.GatewaySpecAddress{{Routability: "example.com/unknown"}}
+	gateway.Spec.Listeners = append(gateway.Spec.Listeners, testHTTPSListener("https", 443))
+	class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "openstack"}, Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName}}
+	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gateway).WithObjects(class, gateway).Build()
+	component := cloud.GatewayProgressingResult("Address scope cannot be assigned", time.Second)
+	component.AddressIssue, component.AddressAbsent, component.AddressActivityObserved = component.Outcome.Message, true, true
+	writer := &fixedGatewayGraph{result: cloud.GatewayGraphResult{Outcome: component.Outcome, Gateway: component}}
+	authorized := false
+	r := newTestReconciler(Reconciler{Client: kube, APIReader: kube, Config: cfg, Writer: writer,
+		Coordinator: &graph.Coordinator{},
+		Certificates: resolveHTTPSFunc(func(context.Context, *gatewayv1.Gateway, *gatewayv1.Listener) (string, gatewayv1.ListenerConditionReason) {
+			if !authorized {
+				return "", gatewayv1.ListenerReasonRefNotPermitted
+			}
+			return "approved-certificate", ""
+		})}, &recordingProvider{})
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(gateway)}
+	if result, err := r.Reconcile(t.Context(), request); err != nil || !result.Requeue {
+		t.Fatalf("initial binding checkpoint = %v, %v", result, err)
+	}
+	verify := func(programmedReason, assignmentReason gatewayv1.GatewayConditionReason, refsReason gatewayv1.ListenerConditionReason) {
+		t.Helper()
+		if _, err := r.Reconcile(t.Context(), request); err != nil {
+			t.Fatal(err)
+		}
+		if err := kube.Get(t.Context(), request.NamespacedName, gateway); err != nil {
+			t.Fatal(err)
+		}
+		programmed := meta.FindStatusCondition(gateway.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed))
+		assignment := meta.FindStatusCondition(gateway.Status.Conditions, string(gatewayv1.GatewayConditionAddressesAssigned))
+		refs := meta.FindStatusCondition(existingListenerConditions(gateway, "https"), string(gatewayv1.ListenerConditionResolvedRefs))
+		wantProgrammed := metav1.ConditionFalse
+		if programmedReason == gatewayv1.GatewayReasonProgrammed {
+			wantProgrammed = metav1.ConditionTrue
+		}
+		if programmed == nil || programmed.Status != wantProgrammed || programmed.Reason != string(programmedReason) ||
+			assignment == nil || assignment.Reason != string(assignmentReason) || refs == nil || refs.Reason != string(refsReason) {
+			t.Fatalf("Gateway and listener conditions = %+v, want %s, %s, and %s", gateway.Status, programmedReason, assignmentReason, refsReason)
+		}
+	}
+	verify(gatewayv1.GatewayReasonAddressNotAssigned, gatewayv1.GatewayReasonAddressesNotAssigned, gatewayv1.ListenerReasonRefNotPermitted)
+
+	gateway.Spec.Addresses[0].Routability = sentinelRoutability
+	gateway.Generation++
+	if err := kube.Update(t.Context(), gateway); err != nil {
+		t.Fatal(err)
+	}
+	ready := cloud.GatewayReadyResult(cloud.GatewayState{LoadBalancerID: "lb-1", VIPAddress: "192.0.2.10"})
+	ready.ScopedListenerReadyPorts = []int{80, 443}
+	writer.result = cloud.GatewayGraphResult{Outcome: ready.Outcome, Gateway: ready}
+	verify(gatewayv1.GatewayReasonListenersNotValid, gatewayv1.GatewayReasonAddressesAssigned, gatewayv1.ListenerReasonRefNotPermitted)
+	authorized = true
+	verify(gatewayv1.GatewayReasonProgrammed, gatewayv1.GatewayReasonAddressesAssigned, gatewayv1.ListenerReasonResolvedRefs)
 }
 
 type fixedGatewayGraph struct {

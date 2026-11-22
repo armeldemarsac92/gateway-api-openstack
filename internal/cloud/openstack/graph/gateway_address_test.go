@@ -188,6 +188,41 @@ func TestGatewayRejectsReplacementWithDifferentFixedVIP(t *testing.T) {
 	}
 }
 
+func TestExperimentalReplacementReportsIncompleteActivityObservation(t *testing.T) {
+	identity := safetyTestIdentity(t)
+	requests := &gatewayTransitionRequests{}
+	base := convergedRouteGraphHandler(t, requests, identity, true, true)
+	provisioningStatus, adminUp := "PENDING_UPDATE", true
+	handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.Method == http.MethodGet && req.URL.Path == "/lbaas/loadbalancers/load-balancer-1" {
+			lb := gatewayTransitionLoadBalancer(safetyGatewayTags(t, identity, roleLoadBalancer), provisioningStatus)
+			lb["admin_state_up"] = adminUp
+			safetyWriteJSON(t, w, map[string]any{"loadbalancer": lb})
+			return
+		}
+		base.ServeHTTP(w, req)
+	})
+	spec := completeGraphSpec(identity)
+	spec.Gateway.Disposition = cloud.GraphDelete
+	spec.Gateway.Spec.RequestedVIPAddresses = []string{}
+	spec.Routes[0].Disposition = cloud.GraphPreserve
+	provider := completeGraphProvider(t, handler, requests)
+	result, err := provider.ReconcileGatewayGraph(t.Context(), spec)
+	if err != nil || result.Gateway.AddressIssue == "" || result.Gateway.AddressActivityObserved ||
+		result.Gateway.AddressAbsent || result.Gateway.AddressBlocked || result.Outcome.State != cloud.OutcomeProgressing {
+		t.Fatalf("pending load balancer = %+v, %v, want rejection awaiting activity readback", result.Gateway, err)
+	}
+
+	provisioningStatus, adminUp = "ACTIVE", false
+	result, err = provider.ReconcileGatewayGraph(t.Context(), spec)
+	if err != nil || result.Gateway.AddressIssue == "" || !result.Gateway.AddressActivityObserved || result.Gateway.AddressActive {
+		t.Fatalf("closed load balancer = %+v, %v, want confirmed inactivity", result.Gateway, err)
+	}
+	if writes := requests.mutationPaths(); len(writes) != 0 {
+		t.Fatalf("mutations with rejected replacement = %v, want none", writes)
+	}
+}
+
 func TestGatewayRejectsStaticAddressBeforeAllocatingFloatingIP(t *testing.T) {
 	identity := safetyTestIdentity(t)
 	requests := &gatewayTransitionRequests{}
