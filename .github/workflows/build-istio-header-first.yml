@@ -1,0 +1,73 @@
+name: Build Istio consumer header candidate
+
+on:
+  push:
+    branches: [hibiscus/build-istio-header-first]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      ISTIO_BASE: eed52ebb66ade45214088877b0f82855d954060d
+      ISTIO_CANDIDATE: ca22ba8343e6ee0c92aad6d5d2c6b112c30093be
+      ISTIO_TREE: b55695a23c3c7f888fc3299f8ee5bd3c9a448da8
+      PATCH_SHA256: 15177b7c089d6628ef8ad1def784cf6eeae8861c22cb0bb4210da7d78f1e5c41
+      CGO_ENABLED: '0'
+      GOOS: linux
+      GOARCH: amd64
+      GOTOOLCHAIN: local
+      GOMAXPROCS: '2'
+      GOFLAGS: '-p=2 -trimpath'
+      GOMEMLIMIT: 2GiB
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - name: Verify source
+        run: |
+          patch=istio-1.31.0-service-consumer-http-route.patch
+          printf '%s  %s\n' "$PATCH_SHA256" "$patch" | sha256sum -c -
+          git clone --depth 1 --branch 1.31.0 https://github.com/istio/istio.git istio
+          mkdir result
+          cd istio
+          test "$(git rev-parse HEAD)" = "$ISTIO_BASE"
+          git apply --index --binary --whitespace=nowarn "../$patch"
+          test "$(git write-tree)" = "$ISTIO_TREE"
+          test "$(go env GOVERSION)" = go1.27.4
+          printf '%s\n' "$ISTIO_BASE" > ../result/pilot-base.txt
+          printf '%s\n' "$ISTIO_CANDIDATE" > ../result/pilot-source.txt
+          printf '%s\n' "$ISTIO_TREE" > ../result/verified-patch-tree.txt
+          printf '%s\n' "$PATCH_SHA256" > ../result/verified-patch-sha256.txt
+      - name: Test Gateway API and waypoint routing
+        working-directory: istio
+        run: |
+          go test -count=1 -v ./pilot/pkg/config/kube/gateway -run 'Test(WaypointConsumerHTTPRouteContract|ConvertResources|SortHTTPRoutes)$' | tee ../result/source-tests-gateway.log
+          go test -count=1 -v ./pilot/pkg/networking/core ./pilot/pkg/serviceregistry/ambient ./pilot/pkg/xds -run 'Test(WaypointConsumerUsesPrimary|WaypointConsumerParentIdentity|HasActiveServiceWaypointCanary|WaypointServiceConsumerRoute)$' | tee ../result/source-tests-waypoint.log
+      - name: Build pilot-discovery
+        working-directory: istio
+        run: |
+          test "$(git write-tree)" = "$ISTIO_TREE"
+          git diff --exit-code
+          go build -buildvcs=false -ldflags "-s -w -X istio.io/istio/pkg/version.buildVersion=1.31.0 -X istio.io/istio/pkg/version.buildGitRevision=$ISTIO_CANDIDATE" -o ../result/pilot-discovery ./pilot/cmd/pilot-discovery
+          cd ../result
+          ./pilot-discovery version 2>&1 | tee pilot-version.txt
+          grep -F "$ISTIO_CANDIDATE" pilot-version.txt
+          go version -m ./pilot-discovery > pilot-go-build-info.txt
+          sha256sum pilot-discovery > pilot-binary-sha256.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: source-and-pilot-discovery
+          path: result/
+          if-no-files-found: error
+          retention-days: 2

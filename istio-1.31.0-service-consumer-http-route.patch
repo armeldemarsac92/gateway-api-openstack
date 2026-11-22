@@ -1,0 +1,1503 @@
+diff --git a/pilot/pkg/config/kube/gateway/conditions.go b/pilot/pkg/config/kube/gateway/conditions.go
+index e308132..728fd18 100644
+--- a/pilot/pkg/config/kube/gateway/conditions.go
++++ b/pilot/pkg/config/kube/gateway/conditions.go
+@@ -94,7 +94,7 @@ func createRouteStatus(
+ 			return rankParentNoErrors
+ 		}
+ 		switch result.DeniedReason.Reason {
+-		case ParentErrorNotAllowed:
++		case ParentErrorNotAllowed, ParentErrorUnsupportedValue:
+ 			return rankParentErrorNotAllowed
+ 		case ParentErrorNoHostname:
+ 			return rankParentErrorNoHostname
+@@ -226,6 +226,7 @@ type ParentErrorReason string
+ const (
+ 	ParentErrorNotAccepted       = ParentErrorReason(k8s.RouteReasonNoMatchingParent)
+ 	ParentErrorNotAllowed        = ParentErrorReason(k8s.RouteReasonNotAllowedByListeners)
++	ParentErrorUnsupportedValue  = ParentErrorReason(k8s.RouteReasonUnsupportedValue)
+ 	ParentErrorNoHostname        = ParentErrorReason(k8s.RouteReasonNoMatchingListenerHostname)
+ 	ParentErrorParentRefConflict = ParentErrorReason("ParentRefConflict")
+ 	ParentNoError                = ParentErrorReason("")
+diff --git a/pilot/pkg/config/kube/gateway/conversion.go b/pilot/pkg/config/kube/gateway/conversion.go
+index 1922dd1..95afe97 100644
+--- a/pilot/pkg/config/kube/gateway/conversion.go
++++ b/pilot/pkg/config/kube/gateway/conversion.go
+@@ -90,6 +90,15 @@ func sortRoutesByCreationTime(configs []RouteWithKey) {
+ 		if r := cmp.Compare(configs[i].Namespace, configs[j].Namespace); r != 0 {
+ 			return r == -1
+ 		}
++		if _, consumer := configs[i].Extra[constants.ConfigExtraMeshConsumerService]; consumer {
++			// Generated names append "~<index>~<kind>". Compare the resource names
++			// so prefix-related names such as "foo" and "foo-bar" sort correctly.
++			iName, _, _ := strings.Cut(configs[i].Name, "~")
++			jName, _, _ := strings.Cut(configs[j].Name, "~")
++			if iName != jName {
++				return iName < jName
++			}
++		}
+ 		return cmp.Compare(configs[i].Name, configs[j].Name) == -1
+ 	})
+ }
+@@ -100,8 +109,9 @@ func sortedConfigByCreationTime(configs []config.Config) []config.Config {
+ }
+ 
+ func convertHTTPRoute(ctx RouteContext, r k8s.HTTPRouteRule,
+-	obj *k8s.HTTPRoute, pos int, enforceRefGrant bool,
++	obj *k8s.HTTPRoute, pos int, mode routeConversionMode,
+ ) (*istio.HTTPRoute, *inferencePoolConfig, *ConfigError) {
++	enforceRefGrant := mode == routeConversionGateway
+ 	vs := &istio.HTTPRoute{}
+ 	if r.Name != nil {
+ 		vs.Name = string(*r.Name)
+@@ -116,6 +126,9 @@ func convertHTTPRoute(ctx RouteContext, r k8s.HTTPRouteRule,
+ 		if err != nil {
+ 			return nil, nil, err
+ 		}
++		if mode == routeConversionWaypointConsumer {
++			match.Headers = waypointConsumerHeaderMatches(match.Headers)
++		}
+ 		headers, err := createHeadersMatch(match)
+ 		if err != nil {
+ 			return nil, nil, err
+@@ -339,17 +352,6 @@ func convertGRPCRoute(ctx RouteContext, r k8s.GRPCRouteRule,
+ 	return vs, nil
+ }
+ 
+-func parentTypes(rpi []routeParentReference) (mesh, gateway bool) {
+-	for _, r := range rpi {
+-		if r.IsMesh() {
+-			mesh = true
+-		} else {
+-			gateway = true
+-		}
+-	}
+-	return mesh, gateway
+-}
+-
+ func augmentPortMatch(routes []*istio.HTTPRoute, port k8s.PortNumber) []*istio.HTTPRoute {
+ 	res := make([]*istio.HTTPRoute, 0, len(routes))
+ 	for _, r := range routes {
+@@ -1582,6 +1584,9 @@ func createGRPCHeadersMatch(match k8s.GRPCRouteMatch) (map[string]*istio.StringM
+ }
+ 
+ func createURIMatch(match k8s.HTTPRouteMatch) (*istio.StringMatch, *ConfigError) {
++	if match.Path == nil {
++		return &istio.StringMatch{MatchType: &istio.StringMatch_Prefix{Prefix: "/"}}, nil
++	}
+ 	tp := k8s.PathMatchPathPrefix
+ 	if match.Path.Type != nil {
+ 		tp = *match.Path.Type
+@@ -1733,6 +1738,8 @@ type routeParentReference struct {
+ 	ParentSection   k8s.SectionName
+ 	// WaypointError, if present, indicates why the reference does not have valid configuration for generating a Waypoint
+ 	WaypointError *WaypointError
++	// WaypointConsumer indicates that the parent passed the ambient consumer route checks.
++	WaypointConsumer bool
+ }
+ 
+ func (r routeParentReference) IsMesh() bool {
+diff --git a/pilot/pkg/config/kube/gateway/mesh_consumer_route.go b/pilot/pkg/config/kube/gateway/mesh_consumer_route.go
+new file mode 100644
+index 0000000..ea74334
+--- /dev/null
++++ b/pilot/pkg/config/kube/gateway/mesh_consumer_route.go
+@@ -0,0 +1,258 @@
++// Copyright Istio Authors
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//     http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package gateway
++
++import (
++	"fmt"
++	"strconv"
++	"strings"
++
++	"golang.org/x/net/http/httpguts"
++	corev1 "k8s.io/api/core/v1"
++	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
++	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
++
++	"istio.io/api/label"
++	istio "istio.io/api/networking/v1alpha3"
++	"istio.io/istio/pilot/pkg/config/kube/gatewaycommon"
++	"istio.io/istio/pilot/pkg/features"
++	"istio.io/istio/pilot/pkg/model"
++	"istio.io/istio/pilot/pkg/serviceregistry/ambient"
++	"istio.io/istio/pkg/config"
++	"istio.io/istio/pkg/config/constants"
++	"istio.io/istio/pkg/config/gateway/kube"
++	configkube "istio.io/istio/pkg/config/kube"
++	"istio.io/istio/pkg/config/schema/gvk"
++	"istio.io/istio/pkg/kube/controllers"
++	"istio.io/istio/pkg/kube/krt"
++	"istio.io/istio/pkg/maps"
++	"istio.io/istio/pkg/ptr"
++	"istio.io/istio/pkg/slices"
++)
++
++func (parent routeParentReference) isMeshConsumerService(namespace string) bool {
++	return parent.IsMesh() && parent.InternalKind == gvk.Service && parent.ParentKey.Namespace != namespace
++}
++
++func configureWaypointConsumerParent(ctx RouteContext, parent *routeParentReference, obj controllers.Object) {
++	if !features.EnableAmbientWaypoints || parent.DeniedReason != nil || !parent.isMeshConsumerService(obj.GetNamespace()) {
++		return
++	}
++	var http *gatewayv1.HTTPRoute
++	switch route := obj.(type) {
++	case *gatewayv1.HTTPRoute:
++		http = route
++	case *gatewayv1.GRPCRoute:
++	default:
++		return
++	}
++
++	key := parent.ParentKey
++	service := ptr.Flatten(krt.FetchOne(ctx.Krt, ctx.Services, krt.FilterKey(key.Namespace+"/"+key.Name)))
++	if service == nil {
++		return
++	}
++	namespace := ptr.Flatten(krt.FetchOne(ctx.Krt, ctx.Namespaces, krt.FilterKey(key.Namespace)))
++	var nsMeta *metav1.ObjectMeta
++	var nsLabels map[string]string
++	if namespace != nil {
++		nsMeta = &namespace.ObjectMeta
++		nsLabels = namespace.Labels
++	}
++	waypointLabels := service.Labels
++	if _, present := waypointLabels[label.IoIstioUseWaypoint.Name]; !present {
++		waypointLabels = nsLabels
++	}
++	if !waypointConfigured(waypointLabels) {
++		return // Keep the existing sidecar configuration for Services without a waypoint.
++	}
++	_, ingress := model.IngressUseWaypointFromLabels(service.Labels, nsLabels)
++	var message string
++	switch {
++	case features.EnableAmbientMultiNetwork || ingress:
++		message = "consumer routes require a single-network Service waypoint without ingress forwarding"
++	case ambient.HasActiveServiceWaypointCanary(service.ObjectMeta, nsMeta):
++		message = "consumer routes require a single Service waypoint with canary forwarding disabled"
++	case service.Spec.Type == corev1.ServiceTypeExternalName || service.Spec.ClusterIP == corev1.ClusterIPNone:
++		message = "consumer routes require a Kubernetes Service VIP"
++	case http == nil:
++		message = "the ambient consumer route subset supports HTTPRoute"
++	default:
++		message = waypointConsumerHTTPRouteError(http, *parent, service)
++	}
++	if message != "" {
++		parent.DeniedReason = &ParentError{Reason: ParentErrorUnsupportedValue, Message: message}
++		return
++	}
++	parent.WaypointConsumer = true
++}
++
++func waypointConsumerHTTPRouteError(route *gatewayv1.HTTPRoute, parent routeParentReference, service *corev1.Service) string {
++	for i, rule := range route.Spec.Rules {
++		fail := func(message string) string { return fmt.Sprintf("consumer HTTPRoute rule %d: %s", i+1, message) }
++		if rule.Timeouts != nil || rule.Retry != nil || rule.SessionPersistence != nil {
++			return fail("only response header modification and forwarding are supported")
++		}
++		for _, match := range rule.Matches {
++			if match.Path != nil {
++				switch ptr.OrDefault(match.Path.Type, gatewayv1.PathMatchPathPrefix) {
++				case gatewayv1.PathMatchExact, gatewayv1.PathMatchPathPrefix:
++				default:
++					return fail("only Exact and PathPrefix path matches are supported")
++				}
++			}
++			for _, header := range waypointConsumerHeaderMatches(match.Headers) {
++				if ptr.OrDefault(header.Type, gatewayv1.HeaderMatchExact) != gatewayv1.HeaderMatchExact {
++					return fail("only Exact header matches are supported")
++				}
++				if !httpguts.ValidHeaderFieldName(string(header.Name)) || !isValidHeaderValue(header.Value) {
++					return fail("invalid header match")
++				}
++			}
++			for _, query := range match.QueryParams {
++				if ptr.OrDefault(query.Type, gatewayv1.QueryParamMatchExact) != gatewayv1.QueryParamMatchExact {
++					return fail("only Exact query parameter matches are supported")
++				}
++			}
++		}
++		if len(rule.BackendRefs) != 1 {
++			return fail("one BackendRef to the parent Service is required")
++		}
++		backend := rule.BackendRefs[0]
++		ref := gatewaycommon.NormalizeReference(backend.Group, backend.Kind, gvk.Service)
++		if ref != gvk.Service || string(backend.Name) != service.Name ||
++			string(ptr.OrDefault(backend.Namespace, gatewayv1.Namespace(route.Namespace))) != service.Namespace ||
++			backend.Port == nil || ptr.OrDefault(backend.Weight, 1) <= 0 || len(backend.Filters) != 0 {
++			return fail("the backend must forward all traffic to the parent Kubernetes Service with an explicit port and no backend filters")
++		}
++		port := *backend.Port
++		if parent.OriginalReference.Port != nil && *parent.OriginalReference.Port != port {
++			return fail("backend port must match the Service parent port")
++		}
++		section := ptr.OrEmpty(parent.OriginalReference.SectionName)
++		if slices.FindFunc(service.Spec.Ports, func(p corev1.ServicePort) bool {
++			protocol := configkube.ConvertProtocol(p.Port, p.Name, p.Protocol, p.AppProtocol)
++			return gatewayv1.PortNumber(p.Port) == port && (section == "" || string(section) == p.Name) &&
++				(protocol.IsHTTP() || protocol.IsUnsupported())
++		}) == nil {
++			return fail("the backend port must be an HTTP-capable port of the parent Service")
++		}
++		if len(rule.Filters) != 1 {
++			return fail("one ResponseHeaderModifier filter is required")
++		}
++		filter := rule.Filters[0]
++		if filter.Type != gatewayv1.HTTPRouteFilterResponseHeaderModifier || filter.ResponseHeaderModifier == nil {
++			return fail("only ResponseHeaderModifier filters are supported")
++		}
++		headers := filter.ResponseHeaderModifier
++		if len(headers.Set)+len(headers.Add)+len(headers.Remove) == 0 {
++			return fail("at least one response header operation is required")
++		}
++		for _, h := range headers.Set {
++			if invalidConsumerResponseHeader(string(h.Name)) || !isValidHeaderValue(h.Value) {
++				return fail("invalid or reserved response header")
++			}
++		}
++		for _, h := range headers.Add {
++			if invalidConsumerResponseHeader(string(h.Name)) || !isValidHeaderValue(h.Value) {
++				return fail("invalid or reserved response header")
++			}
++		}
++		for _, h := range headers.Remove {
++			if invalidConsumerResponseHeader(h) {
++				return fail("invalid or reserved response header")
++			}
++		}
++	}
++	return ""
++}
++
++// Gateway API uses only the first match for each case-insensitive header name.
++func waypointConsumerHeaderMatches(headers []gatewayv1.HTTPHeaderMatch) []gatewayv1.HTTPHeaderMatch {
++	if len(headers) == 0 {
++		return nil
++	}
++	seen := make(map[gatewayv1.HTTPHeaderName]struct{}, len(headers))
++	result := make([]gatewayv1.HTTPHeaderMatch, 0, len(headers))
++	for _, header := range headers {
++		header.Name = gatewayv1.HTTPHeaderName(strings.ToLower(string(header.Name)))
++		if _, found := seen[header.Name]; found {
++			continue
++		}
++		seen[header.Name] = struct{}{}
++		result = append(result, header)
++	}
++	return result
++}
++
++func invalidConsumerResponseHeader(name string) bool {
++	switch strings.ToLower(name) {
++	case "host", "connection", "content-length", "keep-alive", "proxy-connection", "te", "trailer", "transfer-encoding", "upgrade":
++		return true
++	}
++	return !httpguts.ValidHeaderFieldName(name)
++}
++
++func waypointConsumerVirtualServices(obj *gatewayv1.HTTPRoute, parent routeParentReference, domain string, routes []*istio.HTTPRoute, start int) []RouteWithKey {
++	key := parent.ParentKey
++	hostname := key.Name + "." + key.Namespace + ".svc." + domain
++	// Each admitted rule has a single backend. Its port is also the effective
++	// listener port when the parent omitted a port. One key for both forms
++	// lets the regular Gateway API sorter compare their matches together.
++	byPort := make(map[uint32][]*istio.HTTPRoute)
++	for _, rule := range routes {
++		if len(rule.Route) != 1 || rule.Route[0].GetDestination().GetHost() != hostname {
++			continue
++		}
++		port := rule.Route[0].GetDestination().GetPort().GetNumber()
++		if port != 0 {
++			byPort[port] = append(byPort[port], rule)
++		}
++	}
++	var out []RouteWithKey
++	for _, port := range slices.Sort(maps.Keys(byPort)) {
++		rules := augmentPortMatch(byPort[port], gatewayv1.PortNumber(port))
++		for _, rule := range rules {
++			for _, match := range rule.Match {
++				if match.Uri == nil {
++					match.Uri = &istio.StringMatch{MatchType: &istio.StringMatch_Prefix{Prefix: "/"}}
++				}
++			}
++		}
++		sortHTTPRoutes(rules)
++		out = append(out, RouteWithKey{
++			Key: obj.Namespace + "/consumer/" + strconv.FormatUint(uint64(port), 10) + "/" + hostname,
++			Config: config.Config{
++				Meta: config.Meta{
++					CreationTimestamp: obj.CreationTimestamp.Time,
++					GroupVersionKind:  gvk.VirtualService,
++					Name:              obj.Name + "~" + strconv.Itoa(start+len(out)) + "~" + constants.KubernetesGatewayName,
++					Annotations:       routeMeta(obj),
++					Namespace:         obj.Namespace,
++					Domain:            domain,
++				},
++				Spec: &istio.VirtualService{
++					Hosts:    []string{hostname},
++					Gateways: []string{parent.InternalName},
++					Http:     rules,
++				},
++				Extra: map[string]any{constants.ConfigExtraMeshConsumerService: kube.MeshConsumerService{
++					Namespace: key.Namespace, Name: key.Name, Port: port,
++				}},
++			},
++		})
++	}
++	return out
++}
+diff --git a/pilot/pkg/config/kube/gateway/mesh_consumer_route_test.go b/pilot/pkg/config/kube/gateway/mesh_consumer_route_test.go
+new file mode 100644
+index 0000000..138b8c3
+--- /dev/null
++++ b/pilot/pkg/config/kube/gateway/mesh_consumer_route_test.go
+@@ -0,0 +1,143 @@
++// Copyright Istio Authors
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//     http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package gateway
++
++import (
++	"testing"
++
++	corev1 "k8s.io/api/core/v1"
++	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
++	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
++
++	istio "istio.io/api/networking/v1alpha3"
++	"istio.io/istio/pkg/ptr"
++)
++
++func TestWaypointConsumerHTTPRouteContract(t *testing.T) {
++	service := &corev1.Service{
++		ObjectMeta: metav1.ObjectMeta{Namespace: "producer", Name: "echo"},
++		Spec: corev1.ServiceSpec{Ports: []corev1.ServicePort{
++			{Name: "http", Port: 80, Protocol: corev1.ProtocolTCP},
++			{Name: "http-alt", Port: 8080, Protocol: corev1.ProtocolTCP},
++		}},
++	}
++	route := &gatewayv1.HTTPRoute{
++		ObjectMeta: metav1.ObjectMeta{Namespace: "consumer"},
++		Spec: gatewayv1.HTTPRouteSpec{Rules: []gatewayv1.HTTPRouteRule{{
++			Matches: []gatewayv1.HTTPRouteMatch{{
++				Headers:     []gatewayv1.HTTPHeaderMatch{{Name: "X_Request-ID", Value: "sample"}},
++				QueryParams: []gatewayv1.HTTPQueryParamMatch{{Name: "page", Value: "1"}},
++			}},
++			Filters: []gatewayv1.HTTPRouteFilter{{
++				Type:                   gatewayv1.HTTPRouteFilterResponseHeaderModifier,
++				ResponseHeaderModifier: &gatewayv1.HTTPHeaderFilter{Set: []gatewayv1.HTTPHeader{{Name: "X-Result", Value: "value"}}},
++			}},
++			BackendRefs: []gatewayv1.HTTPBackendRef{{BackendRef: gatewayv1.BackendRef{
++				BackendObjectReference: gatewayv1.BackendObjectReference{
++					Name: "echo", Namespace: ptr.Of(gatewayv1.Namespace("producer")), Port: ptr.Of(gatewayv1.PortNumber(80)),
++				},
++			}}},
++		}}},
++	}
++
++	parent := routeParentReference{OriginalReference: gatewayv1.ParentReference{Port: ptr.Of(gatewayv1.PortNumber(80))}}
++	for _, duplicateType := range []gatewayv1.HeaderMatchType{gatewayv1.HeaderMatchExact, gatewayv1.HeaderMatchRegularExpression} {
++		t.Run("ignore duplicate "+string(duplicateType)+" match", func(t *testing.T) {
++			consumer := route.DeepCopy()
++			rule := consumer.Spec.Rules[0]
++			rule.Matches[0].Headers = append(rule.Matches[0].Headers, gatewayv1.HTTPHeaderMatch{
++				Name: "x_request-id", Value: "different", Type: &duplicateType,
++			})
++			if message := waypointConsumerHTTPRouteError(consumer, parent, service); message != "" {
++				t.Fatalf("duplicate header rejected an otherwise supported route: %s", message)
++			}
++
++			// These conversions exercise header matching without resolving a backend.
++			rule.BackendRefs = nil
++			duplicate, _, err := convertHTTPRoute(RouteContext{}, rule, consumer, 0, routeConversionWaypointConsumer)
++			if err != nil {
++				t.Fatal(err)
++			}
++			headers := duplicate.Match[0].Headers
++			first := headers["x_request-id"]
++			if _, exact := first.GetMatchType().(*istio.StringMatch_Exact); !exact || first.GetExact() != "sample" || len(headers) != 1 {
++				t.Fatalf("expected only the first exact match, got %v", headers)
++			}
++
++			rule.Matches[0].Headers = rule.Matches[0].Headers[:1]
++			single, _, err := convertHTTPRoute(RouteContext{}, rule, consumer, 1, routeConversionWaypointConsumer)
++			if err != nil {
++				t.Fatal(err)
++			}
++			routes := []*istio.HTTPRoute{single, duplicate}
++			sortHTTPRoutes(routes)
++			if routes[0] != single {
++				t.Fatal("duplicate header incorrectly took precedence over the preceding single-header rule")
++			}
++		})
++	}
++
++	for _, tc := range []struct {
++		name   string
++		update func(*gatewayv1.HTTPRouteRule)
++	}{
++		{"literal response header", nil},
++		{"missing response modifier", func(r *gatewayv1.HTTPRouteRule) { r.Filters = nil }},
++		{"request mutation", func(r *gatewayv1.HTTPRouteRule) { r.Filters[0].Type = gatewayv1.HTTPRouteFilterRequestHeaderModifier }},
++		{"mirror", func(r *gatewayv1.HTTPRouteRule) { r.Filters[0].Type = gatewayv1.HTTPRouteFilterRequestMirror }},
++		{"redirect", func(r *gatewayv1.HTTPRouteRule) { r.Filters[0].Type = gatewayv1.HTTPRouteFilterRequestRedirect }},
++		{"rewrite", func(r *gatewayv1.HTTPRouteRule) { r.Filters[0].Type = gatewayv1.HTTPRouteFilterURLRewrite }},
++		{"unknown action", func(r *gatewayv1.HTTPRouteRule) { r.Filters[0].Type = "NewAction" }},
++		{"framing response header", func(r *gatewayv1.HTTPRouteRule) {
++			r.Filters[0].ResponseHeaderModifier.Set[0].Name = "Transfer-Encoding"
++		}},
++		{"regex path match", func(r *gatewayv1.HTTPRouteRule) {
++			r.Matches[0].Path = &gatewayv1.HTTPPathMatch{Type: ptr.Of(gatewayv1.PathMatchRegularExpression), Value: ptr.Of("/items/[0-9]+")}
++		}},
++		{"regex header match", func(r *gatewayv1.HTTPRouteRule) {
++			r.Matches[0].Headers[0].Type = ptr.Of(gatewayv1.HeaderMatchRegularExpression)
++		}},
++		{"regex query match", func(r *gatewayv1.HTTPRouteRule) {
++			r.Matches[0].QueryParams[0].Type = ptr.Of(gatewayv1.QueryParamMatchRegularExpression)
++		}},
++		{"invalid request header name", func(r *gatewayv1.HTTPRouteRule) {
++			r.Matches[0].Headers[0].Name = "X Request"
++		}},
++		{"invalid Set name", func(r *gatewayv1.HTTPRouteRule) {
++			r.Filters[0].ResponseHeaderModifier.Set[0].Name = "X Result"
++		}},
++		{"invalid Add name", func(r *gatewayv1.HTTPRouteRule) {
++			r.Filters[0].ResponseHeaderModifier.Add = []gatewayv1.HTTPHeader{{Name: "X Result", Value: "value"}}
++		}},
++		{"invalid Remove name", func(r *gatewayv1.HTTPRouteRule) {
++			r.Filters[0].ResponseHeaderModifier.Remove = []string{"X Result"}
++		}},
++		{"other Service", func(r *gatewayv1.HTTPRouteRule) { r.BackendRefs[0].Name = "other" }},
++		{"different port", func(r *gatewayv1.HTTPRouteRule) { r.BackendRefs[0].Port = ptr.Of(gatewayv1.PortNumber(8080)) }},
++		{"disabled backend", func(r *gatewayv1.HTTPRouteRule) { r.BackendRefs[0].Weight = ptr.Of(int32(0)) }},
++		{"backend filters", func(r *gatewayv1.HTTPRouteRule) { r.BackendRefs[0].Filters = r.Filters }},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			consumer := route.DeepCopy()
++			if tc.update != nil {
++				tc.update(&consumer.Spec.Rules[0])
++			}
++			message := waypointConsumerHTTPRouteError(consumer, parent, service)
++			if (message != "") != (tc.update != nil) {
++				t.Fatalf("unexpected result %q", message)
++			}
++		})
++	}
++}
+diff --git a/pilot/pkg/config/kube/gateway/route_collections.go b/pilot/pkg/config/kube/gateway/route_collections.go
+index 13c7977..f5b70b7 100644
+--- a/pilot/pkg/config/kube/gateway/route_collections.go
++++ b/pilot/pkg/config/kube/gateway/route_collections.go
+@@ -86,7 +86,7 @@ func HTTPRouteCollection(
+ 		}{}
+ 		status := obj.Status.DeepCopy()
+ 		route := obj.Spec
+-		parentStatus, parentRefs, meshResult, gwResult := computeRoute(ctx, obj, func(mesh bool, obj *gatewayv1.HTTPRoute) iter.Seq2[*istio.HTTPRoute, *ConfigError] {
++		parentStatus, parentRefs, conversions := computeRoute(ctx, obj, func(mode routeConversionMode, obj *gatewayv1.HTTPRoute) iter.Seq2[*istio.HTTPRoute, *ConfigError] {
+ 			return func(yield func(*istio.HTTPRoute, *ConfigError) bool) {
+ 				for n, r := range route.Rules {
+ 					// split the rule to make sure each rule has up to one match
+@@ -98,7 +98,7 @@ func HTTPRouteCollection(
+ 						if m != nil {
+ 							r.Matches = []gatewayv1.HTTPRouteMatch{*m}
+ 						}
+-						istioRoute, ipCfg, configErr := convertHTTPRoute(ctx, r, obj, n, !mesh)
++						istioRoute, ipCfg, configErr := convertHTTPRoute(ctx, r, obj, n, mode)
+ 						if istioRoute != nil && ipCfg != nil && ipCfg.enableExtProc {
+ 							inferencePoolCfgPairs = append(inferencePoolCfgPairs, struct {
+ 								name string
+@@ -124,12 +124,17 @@ func HTTPRouteCollection(
+ 		count := 0
+ 		virtualServices := []RouteWithKey{}
+ 		for _, parent := range filteredReferences(parentRefs) {
++			routes := conversions[parent.conversionMode()].routes
++			if parent.WaypointConsumer {
++				configs := waypointConsumerVirtualServices(obj, parent, ctx.DomainSuffix, routes, count)
++				virtualServices = append(virtualServices, configs...)
++				count += len(configs)
++				continue
++			}
+ 			// for gateway routes, build one VS per gateway+host
+ 			routeKey := parent.InternalName
+ 			vsHosts := hostnameToStringList(route.Hostnames)
+-			routes := gwResult.routes
+ 			if parent.IsMesh() {
+-				routes = meshResult.routes
+ 				// for mesh routes, build one VS per namespace/port->host
+ 				routeKey = obj.Namespace
+ 				if parent.OriginalReference.Port != nil {
+@@ -172,6 +177,11 @@ func HTTPRouteCollection(
+ 
+ 				// Populate Extra field for inference pool configs
+ 				extraData := make(map[string]any)
++				if parent.isMeshConsumerService(obj.Namespace) {
++					extraData[constants.ConfigExtraMeshConsumerService] = kube.MeshConsumerService{
++						Namespace: parent.ParentKey.Namespace, Name: parent.ParentKey.Name,
++					}
++				}
+ 				currentRouteInferenceConfigs := make(map[string]kube.InferencePoolRouteRuleConfig)
+ 				for _, httpRule := range routes { // These are []*istio.HTTPRoute
+ 					if ipCfg, found := routeRuleToInferencePoolCfg[httpRule.Name]; found {
+@@ -313,7 +323,7 @@ func GRPCRouteCollection(
+ 		routeRuleToInferencePoolCfg := make(map[string]*inferencePoolConfig)
+ 		status := obj.Status.DeepCopy()
+ 		route := obj.Spec
+-		parentStatus, parentRefs, meshResult, gwResult := computeRoute(ctx, obj, func(mesh bool, obj *gatewayv1.GRPCRoute) iter.Seq2[*istio.HTTPRoute, *ConfigError] {
++		parentStatus, parentRefs, conversions := computeRoute(ctx, obj, func(mode routeConversionMode, obj *gatewayv1.GRPCRoute) iter.Seq2[*istio.HTTPRoute, *ConfigError] {
+ 			return func(yield func(*istio.HTTPRoute, *ConfigError) bool) {
+ 				for n, r := range route.Rules {
+ 					// split the rule to make sure each rule has up to one match
+@@ -326,7 +336,7 @@ func GRPCRouteCollection(
+ 							r.Matches = []gatewayv1.GRPCRouteMatch{*m}
+ 						}
+ 						// GRPCRoute conversion currently doesn't return ipCfg.
+-						istioRoute, configErr := convertGRPCRoute(ctx, r, obj, n, !mesh)
++						istioRoute, configErr := convertGRPCRoute(ctx, r, obj, n, mode == routeConversionGateway)
+ 						// Placeholder if GRPCRoute ever supports inference pools via ipCfg:
+ 						// if istioRoute != nil && ipCfg != nil && ipCfg.enableExtProc {
+ 						// 	routeRuleToInferencePoolCfg[istioRoute.Name] = ipCfg
+@@ -346,9 +356,8 @@ func GRPCRouteCollection(
+ 			// for gateway routes, build one VS per gateway+host
+ 			routeKey := parent.InternalName
+ 			vsHosts := hostnameToStringList(route.Hostnames)
+-			routes := gwResult.routes
++			routes := conversions[parent.conversionMode()].routes
+ 			if parent.IsMesh() {
+-				routes = meshResult.routes
+ 				// for mesh routes, build one VS per namespace/port->host
+ 				routeKey = obj.Namespace
+ 				if parent.OriginalReference.Port != nil {
+@@ -387,6 +396,11 @@ func GRPCRouteCollection(
+ 
+ 				// Populate Extra field for inference pool configs (if GRPCRoute supports them)
+ 				extraData := make(map[string]any)
++				if parent.isMeshConsumerService(obj.Namespace) {
++					extraData[constants.ConfigExtraMeshConsumerService] = kube.MeshConsumerService{
++						Namespace: parent.ParentKey.Namespace, Name: parent.ParentKey.Name,
++					}
++				}
+ 				currentRouteInferenceConfigs := make(map[string]kube.InferencePoolRouteRuleConfig)
+ 				for _, httpRule := range routes {
+ 					if ipCfg, found := routeRuleToInferencePoolCfg[httpRule.Name]; found { // This map will be empty for GRPCRoute for now
+@@ -461,11 +475,11 @@ func TCPRouteCollection(
+ 		ctx := inputs.WithCtx(krtctx)
+ 		status := obj.Status.DeepCopy()
+ 		route := obj.Spec
+-		parentStatus, parentRefs, meshResult, gwResult := computeRoute(ctx, obj,
+-			func(mesh bool, obj *gatewayv1.TCPRoute) iter.Seq2[*istio.TCPRoute, *ConfigError] {
++		parentStatus, parentRefs, conversions := computeRoute(ctx, obj,
++			func(mode routeConversionMode, obj *gatewayv1.TCPRoute) iter.Seq2[*istio.TCPRoute, *ConfigError] {
+ 				return func(yield func(*istio.TCPRoute, *ConfigError) bool) {
+ 					for _, r := range route.Rules {
+-						if !yield(convertTCPRoute(ctx, r, obj, !mesh)) {
++						if !yield(convertTCPRoute(ctx, r, obj, mode == routeConversionGateway)) {
+ 							return
+ 						}
+ 					}
+@@ -476,10 +490,9 @@ func TCPRouteCollection(
+ 		vs := []config.Config{}
+ 		count := 0
+ 		for _, parent := range filteredReferences(parentRefs) {
+-			routes := gwResult.routes
++			routes := conversions[parent.conversionMode()].routes
+ 			vsHosts := []string{"*"}
+ 			if parent.IsMesh() {
+-				routes = meshResult.routes
+ 				if parent.OriginalReference.Port != nil {
+ 					routes = augmentTCPPortMatch(routes, *parent.OriginalReference.Port)
+ 				}
+@@ -558,11 +571,11 @@ func TLSRouteCollection(
+ 		ctx := inputs.WithCtx(krtctx)
+ 		status := obj.Status.DeepCopy()
+ 		route := obj.Spec
+-		parentStatus, parentRefs, meshResult, gwResult := computeRoute(ctx,
+-			obj, func(mesh bool, obj *gatewayv1.TLSRoute) iter.Seq2[*istio.TLSRoute, *ConfigError] {
++		parentStatus, parentRefs, conversions := computeRoute(ctx,
++			obj, func(mode routeConversionMode, obj *gatewayv1.TLSRoute) iter.Seq2[*istio.TLSRoute, *ConfigError] {
+ 				return func(yield func(*istio.TLSRoute, *ConfigError) bool) {
+ 					for _, r := range route.Rules {
+-						if !yield(convertTLSRoute(ctx, r, obj, !mesh)) {
++						if !yield(convertTLSRoute(ctx, r, obj, mode == routeConversionGateway)) {
+ 							return
+ 						}
+ 					}
+@@ -573,10 +586,9 @@ func TLSRouteCollection(
+ 		count := 0
+ 		vs := []config.Config{}
+ 		for _, parent := range filteredReferences(parentRefs) {
+-			routes := gwResult.routes
++			routes := conversions[parent.conversionMode()].routes
+ 			vsHosts := hostnameToStringList(route.Hostnames)
+ 			if parent.IsMesh() {
+-				routes = meshResult.routes
+ 				ref := types.NamespacedName{
+ 					Namespace: string(ptr.OrDefault(parent.OriginalReference.Namespace, gatewayv1.Namespace(obj.Namespace))),
+ 					Name:      string(parent.OriginalReference.Name),
+@@ -638,17 +650,44 @@ func TLSRouteCollection(
+ 	}
+ }
+ 
++// A single HTTPRoute can attach to both a consumer waypoint and a regular
++// parent. Keep its converted matches and errors separate for each parent type.
++type routeConversionMode uint8
++
++const (
++	routeConversionMesh routeConversionMode = iota
++	routeConversionGateway
++	routeConversionWaypointConsumer
++	routeConversionModeCount
++)
++
++func (parent routeParentReference) conversionMode() routeConversionMode {
++	switch {
++	case parent.WaypointConsumer:
++		return routeConversionWaypointConsumer
++	case parent.IsMesh():
++		return routeConversionMesh
++	default:
++		return routeConversionGateway
++	}
++}
++
+ // computeRoute holds the common route building logic shared amongst all types
+ func computeRoute[T controllers.Object, O comparable](ctx RouteContext, obj T, translator func(
+-	mesh bool,
++	mode routeConversionMode,
+ 	obj T,
+ ) iter.Seq2[O, *ConfigError],
+-) ([]gatewayv1.RouteParentStatus, []routeParentReference, conversionResult[O], conversionResult[O]) {
++) ([]gatewayv1.RouteParentStatus, []routeParentReference, [routeConversionModeCount]conversionResult[O]) {
+ 	parentRefs := extractParentReferenceInfo(ctx, ctx.RouteParents, obj)
++	var needed [routeConversionModeCount]bool
++	for i := range parentRefs {
++		configureWaypointConsumerParent(ctx, &parentRefs[i], obj)
++		needed[parentRefs[i].conversionMode()] = true
++	}
+ 
+-	convertRules := func(mesh bool) conversionResult[O] {
++	convertRules := func(mode routeConversionMode) conversionResult[O] {
+ 		res := conversionResult[O]{}
+-		for vs, err := range translator(mesh, obj) {
++		for vs, err := range translator(mode, obj) {
+ 			// This was a hard error
+ 			if controllers.IsNil(vs) {
+ 				res.error = err
+@@ -662,22 +701,26 @@ func computeRoute[T controllers.Object, O comparable](ctx RouteContext, obj T, t
+ 		}
+ 		return res
+ 	}
+-	meshResult, gwResult := buildMeshAndGatewayRoutes(parentRefs, convertRules)
++	var conversions [routeConversionModeCount]conversionResult[O]
++	for mode, convert := range needed {
++		if convert {
++			conversions[mode] = convertRules(routeConversionMode(mode))
++		}
++	}
+ 
+ 	rpResults := slices.Map(parentRefs, func(r routeParentReference) RouteParentResult {
+ 		res := RouteParentResult{
+ 			OriginalReference: r.OriginalReference,
+ 			DeniedReason:      r.DeniedReason,
+-			RouteError:        gwResult.error,
++			RouteError:        conversions[r.conversionMode()].error,
+ 		}
+ 		if r.IsMesh() {
+-			res.RouteError = meshResult.error
+ 			res.WaypointError = r.WaypointError
+ 		}
+ 		return res
+ 	})
+ 	parents := createRouteStatus(rpResults, obj.GetNamespace(), obj.GetGeneration(), GetCommonRouteStateParents(obj))
+-	return parents, parentRefs, meshResult, gwResult
++	return parents, parentRefs, conversions
+ }
+ 
+ // RouteContext defines a common set of inputs to a route collection. This should be built once per route translation and
+@@ -728,19 +771,6 @@ func (r RouteWithKey) Equals(o RouteWithKey) bool {
+ 	return r.Config.Equals(&o.Config)
+ }
+ 
+-// buildMeshAndGatewayRoutes contains common logic to build a set of routes with mesh and/or gateway semantics
+-func buildMeshAndGatewayRoutes[T any](parentRefs []routeParentReference, convertRules func(mesh bool) T) (T, T) {
+-	var meshResult, gwResult T
+-	needMesh, needGw := parentTypes(parentRefs)
+-	if needMesh {
+-		meshResult = convertRules(true)
+-	}
+-	if needGw {
+-		gwResult = convertRules(false)
+-	}
+-	return meshResult, gwResult
+-}
+-
+ // RouteResult holds the result of a route collection
+ type RouteResult[I controllers.Object, IStatus any] struct {
+ 	// VirtualServices are the primary output that configures the internal routing logic
+diff --git a/pilot/pkg/model/service.go b/pilot/pkg/model/service.go
+index acf6758..4f73906 100644
+--- a/pilot/pkg/model/service.go
++++ b/pilot/pkg/model/service.go
+@@ -2217,3 +2217,22 @@ func equalUsingPremarshaled[T proto.Message](a T, am *anypb.Any, b T, bm *anypb.
+ 	// Fallback to equals
+ 	return protoconv.Equals(a, b)
+ }
++
++// IngressUseWaypointFromLabels returns whether the ingress-use-waypoint label is
++// present and whether its value is "true". It checks the service labels first,
++// then falls back to namespace labels.
++func IngressUseWaypointFromLabels(serviceLabels, namespaceLabels map[string]string) (labelPresent bool, useWaypoint bool) {
++	var val string
++	val, labelPresent = serviceLabels[label.IoIstioIngressUseWaypoint.Name]
++	if !labelPresent && namespaceLabels != nil {
++		val, labelPresent = namespaceLabels[label.IoIstioIngressUseWaypoint.Name]
++	}
++	if !labelPresent {
++		return false, false
++	}
++	parsed, err := strconv.ParseBool(val)
++	if err != nil {
++		log.Warnf("invalid value for label %s: %s, defaulting to false", label.IoIstioIngressUseWaypoint.Name, val)
++	}
++	return true, err == nil && parsed
++}
+diff --git a/pilot/pkg/networking/core/listener_waypoint.go b/pilot/pkg/networking/core/listener_waypoint.go
+index f600c7c..2619a81 100644
+--- a/pilot/pkg/networking/core/listener_waypoint.go
++++ b/pilot/pkg/networking/core/listener_waypoint.go
+@@ -17,6 +17,7 @@ package core
+ import (
+ 	"fmt"
+ 	"net/netip"
++	"regexp"
+ 	"strconv"
+ 	"strings"
+ 	"time"
+@@ -33,6 +34,7 @@ import (
+ 	sfsnetwork "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/set_filter_state/v3"
+ 	tcp "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/tcp_proxy/v3"
+ 	celformatter "github.com/envoyproxy/go-control-plane/envoy/extensions/formatter/cel/v3"
++	networkinput "github.com/envoyproxy/go-control-plane/envoy/extensions/matching/common_inputs/network/v3"
+ 	tls "github.com/envoyproxy/go-control-plane/envoy/extensions/transport_sockets/tls/v3"
+ 	googleproto "google.golang.org/protobuf/proto"
+ 	"google.golang.org/protobuf/types/known/durationpb"
+@@ -52,18 +54,23 @@ import (
+ 	"istio.io/istio/pilot/pkg/networking/telemetry"
+ 	"istio.io/istio/pilot/pkg/networking/util"
+ 	security "istio.io/istio/pilot/pkg/security/model"
++	"istio.io/istio/pilot/pkg/serviceregistry/provider"
+ 	netutil "istio.io/istio/pilot/pkg/util/network"
+ 	"istio.io/istio/pilot/pkg/util/protoconv"
+ 	xdsfilters "istio.io/istio/pilot/pkg/xds/filters"
+ 	"istio.io/istio/pkg/config"
+ 	"istio.io/istio/pkg/config/constants"
++	"istio.io/istio/pkg/config/gateway/kube"
+ 	"istio.io/istio/pkg/config/host"
+ 	"istio.io/istio/pkg/config/protocol"
+ 	"istio.io/istio/pkg/log"
++	"istio.io/istio/pkg/maps"
+ 	"istio.io/istio/pkg/proto"
+ 	"istio.io/istio/pkg/slices"
++	"istio.io/istio/pkg/spiffe"
+ 	"istio.io/istio/pkg/util/sets"
+ 	"istio.io/istio/pkg/wellknown"
++	"istio.io/istio/pkg/workloadapi"
+ )
+ 
+ // These are both the current defaults used by the ztunnel hyper http2 server
+@@ -1125,15 +1132,27 @@ func buildWaypointInboundHTTPRouteConfig(lb *ListenerBuilder, svc *model.Service
+ 		return buildSidecarInboundHTTPRouteConfig(svc, lb, cc)
+ 	}
+ 
+-	virtualServices := getVirtualServiceForWaypoint(lb.node.ConfigNamespace, svc, lb.node.SidecarScope.EgressListeners[0].VirtualServices())
++	virtualServices := lb.node.SidecarScope.EgressListeners[0].VirtualServices()
+ 
+ 	// Typically we setup routes with the Host header match. However, for waypoint inbound we are actually using
+ 	// hostname purely to match to the Service VIP. So we only need a single VHost, with routes compute based on the VS.
+ 	// For destinations, we need to hit the inbound clusters if it is an internal destination, otherwise outbound.
+ 	// Iterate all matching VirtualServices and merge their routes, consistent with gateway.go behavior.
+ 	var routes []*route.Route
++	consumerRoutes := make(map[string][]*route.Route)
++	allowConsumers := lb.waypointAllowsServiceConsumers(svc)
+ 	for _, vs := range virtualServices {
+-		if vs.Spec.(*networking.VirtualService).Http == nil {
++		spec := vs.Spec.(*networking.VirtualService)
++		if consumer, found := vs.Extra[constants.ConfigExtraMeshConsumerService].(kube.MeshConsumerService); found {
++			if allowConsumers && waypointConsumerParentMatches(consumer, spec, svc, cc.port.Port) {
++				if rules := lb.waypointConsumerHTTPRoutes(vs, cc); len(rules) != 0 {
++					consumerRoutes[vs.Namespace] = append(consumerRoutes[vs.Namespace], rules...)
++				}
++			}
++			continue
++		}
++		if len(spec.Http) == 0 || !virtualServiceMatchesWaypointService(spec, svc) ||
++			vs.Namespace != lb.node.ConfigNamespace && vs.Namespace != svc.Attributes.Namespace {
+ 			continue
+ 		}
+ 		vsRoutes, err := lb.waypointInboundRoute(*vs, cc.port.Port)
+@@ -1143,14 +1162,28 @@ func buildWaypointInboundHTTPRouteConfig(lb *ListenerBuilder, svc *model.Service
+ 		}
+ 		routes = append(routes, vsRoutes...)
+ 	}
++	vhostName := inboundVirtualHostPrefix + strconv.Itoa(cc.port.Port) // Format: "inbound|http|%d"
+ 	if len(routes) == 0 {
+-		return buildSidecarInboundHTTPRouteConfig(svc, lb, cc)
++		defaultConfig := buildSidecarInboundHTTPRouteConfig(svc, lb, cc)
++		if len(consumerRoutes) != 0 {
++			for _, vhost := range defaultConfig.VirtualHosts {
++				if vhost.Name == vhostName && vhost.Matcher == nil {
++					vhost.Matcher = waypointHTTPConsumerMatcher(lb.push.Mesh.GetTrustDomain(), consumerRoutes, vhost.Routes)
++					vhost.Routes = nil
++				}
++			}
++		}
++		return defaultConfig
+ 	}
+ 
+ 	inboundVHost := &route.VirtualHost{
+-		Name:    inboundVirtualHostPrefix + strconv.Itoa(cc.port.Port), // Format: "inbound|http|%d"
++		Name:    vhostName,
+ 		Domains: buildRouteVHostDomains(svc),
+-		Routes:  routes,
++	}
++	if len(consumerRoutes) == 0 {
++		inboundVHost.Routes = routes
++	} else {
++		inboundVHost.Matcher = waypointHTTPConsumerMatcher(lb.push.Mesh.GetTrustDomain(), consumerRoutes, routes)
+ 	}
+ 
+ 	return &route.RouteConfiguration{
+@@ -1168,16 +1201,142 @@ func getVirtualServiceForWaypoint(configNamespace string, svc *model.Service, co
+ 			// We only allow routes in the same namespace as the service or in the waypoint's own namespace
+ 			continue
+ 		}
+-		virtualService := cfg.Spec.(*networking.VirtualService)
++		if virtualServiceMatchesWaypointService(cfg.Spec.(*networking.VirtualService), svc) {
++			matching = append(matching, cfg)
++		}
++	}
++	return matching
++}
++
++func virtualServiceMatchesWaypointService(vs *networking.VirtualService, svc *model.Service) bool {
++	for _, vsHost := range vs.Hosts {
++		if host.Name(vsHost).Matches(svc.Hostname) {
++			return true
++		}
++	}
++	return false
++}
++
++// Match only direct HBONE to a Service waypoint. Ingress and multi-network
++// gateways can present an intermediary identity instead of the caller's identity.
++func (lb *ListenerBuilder) waypointAllowsServiceConsumers(svc *model.Service) bool {
++	if features.EnableAmbientMultiNetwork || isAmbientEastWestGateway(lb.node) {
++		return false
++	}
++	waypoints := lb.push.ServicesWithWaypoint(svc.Attributes.Namespace + "/" + svc.Hostname.String())
++	if len(waypoints) == 0 || waypoints[0].IngressUseWaypoint {
++		return false
++	}
++	return waypointConsumerUsesPrimary(waypoints[0].Service, model.WaypointKeyForProxy(lb.node))
++}
++
++// Check the raw destinations used by ambient clients, even when the gateway
++// endpoint view cannot resolve a weighted waypoint to a hostname.
++func waypointConsumerUsesPrimary(service *workloadapi.Service, key model.WaypointKey) bool {
++	primary := service.GetWaypoint()
++	ref, ok := model.WaypointReferenceFromGatewayAddress(primary)
++	if !ok || !ref.Matches(key) {
++		return false
++	}
++	weighted := service.GetWeightedWaypoints()
++	if len(weighted) == 0 {
++		return true
++	}
++	primaryReceivesTraffic := false
++	for _, waypoint := range weighted {
++		if waypoint.GetWeight() == 0 {
++			continue
++		}
++		if !googleproto.Equal(waypoint.GetDestination(), primary) {
++			return false
++		}
++		primaryReceivesTraffic = true
++	}
++	return primaryReceivesTraffic
++}
++
++func waypointConsumerParentMatches(parent kube.MeshConsumerService, spec *networking.VirtualService, service *model.Service, port int) bool {
++	return service.Attributes.ServiceRegistry == provider.Kubernetes &&
++		parent.Port == uint32(port) && parent.Name == service.Attributes.Name &&
++		parent.Namespace == service.Attributes.Namespace &&
++		len(spec.Hosts) == 1 && spec.Hosts[0] == service.Hostname.String()
++}
+ 
+-		for _, vsHost := range virtualService.Hosts {
+-			if host.Name(vsHost).Matches(svc.Hostname) {
+-				matching = append(matching, cfg)
+-				break
++func (lb *ListenerBuilder) waypointConsumerHTTPRoutes(vs *config.Config, cc inboundChainConfig) []*route.Route {
++	var routes []*route.Route
++	for _, rule := range vs.Spec.(*networking.VirtualService).Http {
++		headers := istio_route.TranslateHeadersOperations(&networking.Headers{Response: rule.GetHeaders().GetResponse()})
++		for _, header := range headers.ResponseHeadersToAdd {
++			// Prevent Envoy substitution formatters from interpreting user-entered values.
++			header.Header.Value = strings.ReplaceAll(header.Header.Value, "%", "%%")
++		}
++		for _, match := range rule.GetMatch() {
++			if match.GetPort() != uint32(cc.port.Port) {
++				continue
+ 			}
++			// The frontend's existing Service/port chain runs the normal authn and
++			// authz filters. Use the same Service/port cluster with a fixed action.
++			r := istio_route.BuildDefaultHTTPOutboundRoute(cc.clusterName, telemetry.TraceOperation(string(cc.telemetryMetadata.InstanceHostname), cc.port.Port), lb.push.Mesh)
++			r.Name = rule.GetName()
++			r.Match = istio_route.TranslateRouteMatch(*vs, match)
++			r.Metadata = util.BuildConfigInfoMetadata(vs.Meta)
++			r.ResponseHeadersToAdd = headers.ResponseHeadersToAdd
++			r.ResponseHeadersToRemove = headers.ResponseHeadersToRemove
++			routes = append(routes, r)
+ 		}
+ 	}
+-	return matching
++	return routes
++}
++
++func waypointHTTPConsumerMatcher(trustDomain string, consumers map[string][]*route.Route, producer []*route.Route) *matcher.Matcher {
++	toRouteList := func(routes []*route.Route) *matcher.Matcher_OnMatch {
++		return &matcher.Matcher_OnMatch{
++			OnMatch: &matcher.Matcher_OnMatch_Action{
++				Action: &xds.TypedExtensionConfig{
++					Name:        "route-list",
++					TypedConfig: protoconv.MessageToAny(&route.RouteList{Routes: routes}),
++				},
++			},
++		}
++	}
++
++	input := &xds.TypedExtensionConfig{
++		Name: "envoy.matching.inputs.filter_state",
++		TypedConfig: protoconv.MessageToAny(&networkinput.FilterStateInput{
++			Key: xdsfilters.WaypointPeerPrincipalFilterStateKey,
++		}),
++	}
++	var fields []*matcher.Matcher_MatcherList_FieldMatcher
++	for _, namespace := range slices.Sort(maps.Keys(consumers)) {
++		prefix := spiffe.Identity{TrustDomain: trustDomain, Namespace: namespace}.String()
++		// Require one complete service-account identity in this mesh trust domain.
++		// The peer principal is taken from the outer HBONE client certificate.
++		principal := `^` + regexp.QuoteMeta(prefix) + `[a-z0-9][a-z0-9.-]*$`
++		fields = append(fields, &matcher.Matcher_MatcherList_FieldMatcher{
++			Predicate: &matcher.Matcher_MatcherList_Predicate{
++				MatchType: &matcher.Matcher_MatcherList_Predicate_SinglePredicate_{
++					SinglePredicate: &matcher.Matcher_MatcherList_Predicate_SinglePredicate{
++						Input: input,
++						Matcher: &matcher.Matcher_MatcherList_Predicate_SinglePredicate_ValueMatch{
++							ValueMatch: &matcher.StringMatcher{
++								MatchPattern: &matcher.StringMatcher_SafeRegex{
++									SafeRegex: &matcher.RegexMatcher{
++										EngineType: &matcher.RegexMatcher_GoogleRe2{GoogleRe2: &matcher.RegexMatcher_GoogleRE2{}},
++										Regex:      principal,
++									},
++								},
++							},
++						},
++					},
++				},
++			},
++			OnMatch: toRouteList(consumers[namespace]),
++		})
++	}
++	return &matcher.Matcher{
++		MatcherType: &matcher.Matcher_MatcherList_{MatcherList: &matcher.Matcher_MatcherList{Matchers: fields}},
++		OnNoMatch:   toRouteList(producer),
++	}
+ }
+ 
+ func (lb *ListenerBuilder) waypointInboundRoute(virtualService config.Config, listenPort int) ([]*route.Route, error) {
+diff --git a/pilot/pkg/networking/core/listener_waypoint_test.go b/pilot/pkg/networking/core/listener_waypoint_test.go
+index aaccb81..9c814a0 100644
+--- a/pilot/pkg/networking/core/listener_waypoint_test.go
++++ b/pilot/pkg/networking/core/listener_waypoint_test.go
+@@ -17,8 +17,12 @@ package core
+ import (
+ 	"testing"
+ 
++	networking "istio.io/api/networking/v1alpha3"
+ 	"istio.io/istio/pilot/pkg/model"
++	"istio.io/istio/pilot/pkg/serviceregistry/provider"
+ 	xdsfilters "istio.io/istio/pilot/pkg/xds/filters"
++	"istio.io/istio/pkg/config/gateway/kube"
++	"istio.io/istio/pkg/workloadapi"
+ )
+ 
+ func TestXFCCIncludeClientIdentityEnabled(t *testing.T) {
+@@ -112,3 +116,71 @@ func TestWaypointXFCCClientIdentityFilterConfig(t *testing.T) {
+ 		t.Fatal("filter missing typed config")
+ 	}
+ }
++
++func TestWaypointConsumerUsesPrimary(t *testing.T) {
++	primary := &workloadapi.GatewayAddress{
++		Destination: &workloadapi.GatewayAddress_Hostname{Hostname: &workloadapi.NamespacedHostname{
++			Namespace: "producer", Hostname: "waypoint.producer.svc.cluster.local",
++		}},
++		HboneMtlsPort: 15008,
++	}
++	canary := &workloadapi.GatewayAddress{
++		Destination: &workloadapi.GatewayAddress_Address{Address: &workloadapi.NetworkAddress{
++			Address: []byte{10, 0, 0, 2},
++		}},
++		HboneMtlsPort: 15008,
++	}
++	key := model.WaypointKey{Namespace: "producer", Hostnames: []string{primary.GetHostname().GetHostname()}}
++	for _, tt := range []struct {
++		name          string
++		canaryWeight  uint32
++		includeCanary bool
++		want          bool
++	}{
++		{name: "primary", want: true},
++		{name: "disabled canary", includeCanary: true, want: true},
++		{name: "weighted canary", includeCanary: true, canaryWeight: 25},
++		{name: "canary receives all traffic", includeCanary: true, canaryWeight: 100},
++	} {
++		t.Run(tt.name, func(t *testing.T) {
++			service := &workloadapi.Service{Waypoint: primary}
++			if tt.includeCanary {
++				service.WeightedWaypoints = []*workloadapi.WeightedWaypoint{
++					{Destination: primary, Weight: 100 - tt.canaryWeight},
++					{Destination: canary, Weight: tt.canaryWeight},
++				}
++			}
++			if got := waypointConsumerUsesPrimary(service, key); got != tt.want {
++				t.Fatalf("waypointConsumerUsesPrimary = %t, want %t", got, tt.want)
++			}
++		})
++	}
++	otherWaypoint := model.WaypointKey{Addresses: []string{"10.0.0.2"}}
++	if waypointConsumerUsesPrimary(&workloadapi.Service{Waypoint: primary}, otherWaypoint) {
++		t.Fatal("a different waypoint matched the Service's primary")
++	}
++}
++
++func TestWaypointConsumerParentIdentity(t *testing.T) {
++	parent := kube.MeshConsumerService{Namespace: "producer", Name: "echo", Port: 80}
++	hostname := "echo.producer.svc.cluster.local"
++	spec := &networking.VirtualService{Hosts: []string{hostname}}
++	service := &model.Service{Hostname: "echo.producer.svc.cluster.local", Attributes: model.ServiceAttributes{
++		Name: "echo", Namespace: "producer", ServiceRegistry: provider.Kubernetes,
++	}}
++	if !waypointConsumerParentMatches(parent, spec, service, 80) {
++		t.Fatal("exact Kubernetes parent and port did not match")
++	}
++	if waypointConsumerParentMatches(parent, spec, service, 8080) {
++		t.Fatal("a different port matched")
++	}
++	service.Attributes.ServiceRegistry = provider.External
++	if waypointConsumerParentMatches(parent, spec, service, 80) {
++		t.Fatal("a ServiceEntry with the same host matched")
++	}
++	service.Attributes.ServiceRegistry = provider.Kubernetes
++	spec.Hosts[0] = "*.producer.svc.cluster.local"
++	if waypointConsumerParentMatches(parent, spec, service, 80) {
++		t.Fatal("a wildcard host matched")
++	}
++}
+diff --git a/pilot/pkg/serviceregistry/ambient/services.go b/pilot/pkg/serviceregistry/ambient/services.go
+index 384c2f8..9b89db3 100644
+--- a/pilot/pkg/serviceregistry/ambient/services.go
++++ b/pilot/pkg/serviceregistry/ambient/services.go
+@@ -18,12 +18,10 @@ package ambient
+ import (
+ 	"fmt"
+ 	"net/netip"
+-	"strconv"
+ 
+ 	v1 "k8s.io/api/core/v1"
+ 	"k8s.io/apimachinery/pkg/labels"
+ 
+-	"istio.io/api/label"
+ 	meshapi "istio.io/api/mesh/v1alpha1"
+ 	"istio.io/api/networking/v1alpha3"
+ 	networkingclient "istio.io/client-go/pkg/apis/networking/v1"
+@@ -283,7 +281,7 @@ func serviceServiceBuilder(
+ 			if ns != nil {
+ 				nsLabels = (*ns).Labels
+ 			}
+-			waypointStatus.IngressLabelPresent, waypointStatus.IngressUseWaypoint = ingressUseWaypointFromLabels(s.Labels, nsLabels)
++			waypointStatus.IngressLabelPresent, waypointStatus.IngressUseWaypoint = model.IngressUseWaypointFromLabels(s.Labels, nsLabels)
+ 		}
+ 		waypointStatus.Error = wperr
+ 
+@@ -483,7 +481,7 @@ func serviceEntriesInfo(
+ 	waypoint := model.WaypointBindingStatus{}
+ 	if w != nil {
+ 		waypoint.ResourceName = w.ResourceName()
+-		waypoint.IngressLabelPresent, waypoint.IngressUseWaypoint = ingressUseWaypointFromLabels(s.Labels, nsLabels)
++		waypoint.IngressLabelPresent, waypoint.IngressUseWaypoint = model.IngressUseWaypointFromLabels(s.Labels, nsLabels)
+ 	}
+ 	if wperr != nil {
+ 		waypoint.Error = wperr
+@@ -772,22 +770,3 @@ func setCanonical(se model.ServiceInfo) model.ServiceInfo {
+ 	se.Service.Canonical = true
+ 	return precomputeService(se)
+ }
+-
+-// ingressUseWaypointFromLabels returns whether the ingress-use-waypoint label is
+-// present and whether its value is "true". It checks the service labels first,
+-// then falls back to namespace labels.
+-func ingressUseWaypointFromLabels(serviceLabels, namespaceLabels map[string]string) (labelPresent bool, useWaypoint bool) {
+-	var val string
+-	val, labelPresent = serviceLabels[label.IoIstioIngressUseWaypoint.Name]
+-	if !labelPresent && namespaceLabels != nil {
+-		val, labelPresent = namespaceLabels[label.IoIstioIngressUseWaypoint.Name]
+-	}
+-	if !labelPresent {
+-		return false, false
+-	}
+-	parsed, err := strconv.ParseBool(val)
+-	if err != nil {
+-		log.Warnf("invalid value for label %s: %s, defaulting to false", label.IoIstioIngressUseWaypoint.Name, val)
+-	}
+-	return true, err == nil && parsed
+-}
+diff --git a/pilot/pkg/serviceregistry/ambient/services_test.go b/pilot/pkg/serviceregistry/ambient/services_test.go
+index 46bd131..f0e4d6b 100644
+--- a/pilot/pkg/serviceregistry/ambient/services_test.go
++++ b/pilot/pkg/serviceregistry/ambient/services_test.go
+@@ -2990,9 +2990,9 @@ func TestIngressUseWaypointFromLabels(t *testing.T) {
+ 	}
+ 	for _, tt := range tests {
+ 		t.Run(tt.name, func(t *testing.T) {
+-			gotPresent, gotUse := ingressUseWaypointFromLabels(tt.serviceLabels, tt.namespaceLabels)
++			gotPresent, gotUse := model.IngressUseWaypointFromLabels(tt.serviceLabels, tt.namespaceLabels)
+ 			if gotPresent != tt.wantPresent || gotUse != tt.wantUseWaypoint {
+-				t.Errorf("ingressUseWaypointFromLabels() = (present=%v, use=%v), want (present=%v, use=%v)",
++				t.Errorf("model.IngressUseWaypointFromLabels() = (present=%v, use=%v), want (present=%v, use=%v)",
+ 					gotPresent, gotUse, tt.wantPresent, tt.wantUseWaypoint)
+ 			}
+ 		})
+diff --git a/pilot/pkg/serviceregistry/ambient/waypoints.go b/pilot/pkg/serviceregistry/ambient/waypoints.go
+index 2405501..1e21d09 100644
+--- a/pilot/pkg/serviceregistry/ambient/waypoints.go
++++ b/pilot/pkg/serviceregistry/ambient/waypoints.go
+@@ -292,6 +292,29 @@ func resolveCanaryWaypoint(
+ 	return w, nil
+ }
+ 
++// HasActiveServiceWaypointCanary reports whether the configured Service binding enables
++// forwarding to a distinct canary. An unavailable canary may later become ready.
++func HasActiveServiceWaypointCanary(service metav1.ObjectMeta, nsMeta *metav1.ObjectMeta) bool {
++	primary, disabled := GetUseWaypoint(service, service.Namespace)
++	if disabled {
++		return false
++	}
++	if primary != nil {
++		nsMeta = nil
++	} else if nsMeta != nil {
++		primary, _ = GetUseWaypoint(*nsMeta, service.Namespace)
++	}
++	if primary == nil {
++		return false
++	}
++	canary := getUseWaypointCanary(service, nsMeta, service.Namespace)
++	if canary == nil || *canary == *primary {
++		return false
++	}
++	weight, valid := getCanaryWeight(service, nsMeta)
++	return valid && weight > 0
++}
++
+ // buildWeightedWaypoints returns [{primary, 100-weight}, {canary, weight}] for a valid canary.
+ // Canary errors are reported on the binding status and fall back to the primary waypoint.
+ func buildWeightedWaypoints(
+diff --git a/pilot/pkg/serviceregistry/ambient/waypoints_test.go b/pilot/pkg/serviceregistry/ambient/waypoints_test.go
+index a08ec04..8410d53 100644
+--- a/pilot/pkg/serviceregistry/ambient/waypoints_test.go
++++ b/pilot/pkg/serviceregistry/ambient/waypoints_test.go
+@@ -377,6 +377,36 @@ func TestGetCanaryWeight(t *testing.T) {
+ 	}
+ }
+ 
++func TestHasActiveServiceWaypointCanary(t *testing.T) {
++	primary := label.IoIstioUseWaypoint.Name
++	canary := label.IoIstioUseWaypointCanary.Name
++	canaryNamespace := label.IoIstioUseWaypointCanaryNamespace.Name
++	weight := annotation.IoIstioUseWaypointCanaryWeight.Name
++	namespace := metav1.ObjectMeta{
++		Labels:      map[string]string{primary: "stable", canary: "candidate"},
++		Annotations: map[string]string{weight: "25"},
++	}
++	for _, tt := range []struct {
++		name        string
++		labels      map[string]string
++		annotations map[string]string
++		want        bool
++	}{
++		{name: "inherits primary and canary", want: true},
++		{name: "Service primary replaces Namespace binding", labels: map[string]string{primary: "stable"}},
++		{name: "Service configures direct canary", labels: map[string]string{primary: "stable", canary: "candidate"}, annotations: map[string]string{weight: "20"}, want: true},
++		{name: "Service opts out of canary", labels: map[string]string{canary: "none"}},
++		{name: "Service sets zero weight", annotations: map[string]string{weight: "0"}},
++		{name: "same name in another namespace", labels: map[string]string{canary: "stable", canaryNamespace: "other"}, want: true},
++		{name: "same waypoint", labels: map[string]string{canary: "stable"}},
++	} {
++		t.Run(tt.name, func(t *testing.T) {
++			service := metav1.ObjectMeta{Namespace: "producer", Labels: tt.labels, Annotations: tt.annotations}
++			assert.Equal(t, HasActiveServiceWaypointCanary(service, &namespace), tt.want)
++		})
++	}
++}
++
+ func TestServiceOwningWaypoints(t *testing.T) {
+ 	primary := &workloadapi.GatewayAddress{
+ 		Destination:   &workloadapi.GatewayAddress_Hostname{Hostname: &workloadapi.NamespacedHostname{Namespace: "ns", Hostname: "primary"}},
+diff --git a/pilot/pkg/xds/filters/filters.go b/pilot/pkg/xds/filters/filters.go
+index 5b51af3..baa3b3e 100644
+--- a/pilot/pkg/xds/filters/filters.go
++++ b/pilot/pkg/xds/filters/filters.go
+@@ -89,6 +89,9 @@ const (
+ 
+ // Define static filters to be reused across the codebase. This avoids duplicate marshaling/unmarshaling
+ // This should not be used for filters that will be mutated
++// WaypointPeerPrincipalFilterStateKey carries the mTLS peer URI SAN from HBONE termination.
++const WaypointPeerPrincipalFilterStateKey = "io.istio.peer_principal"
++
+ var (
+ 	RetryPreviousHosts = &route.RetryPolicy_RetryHostPredicate{
+ 		Name: "envoy.retry_host_predicates.previous_hosts",
+@@ -312,7 +315,7 @@ var (
+ 						SharedWithUpstream: sfsvalue.FilterStateValue_ONCE,
+ 					}, {
+ 						Key: &sfsvalue.FilterStateValue_ObjectKey{
+-							ObjectKey: "io.istio.peer_principal",
++							ObjectKey: WaypointPeerPrincipalFilterStateKey,
+ 						},
+ 						FactoryKey: "istio.hashable_string",
+ 						Value: &sfsvalue.FilterStateValue_FormatString{
+@@ -434,7 +437,7 @@ var (
+ 						SharedWithUpstream: sfsvalue.FilterStateValue_ONCE,
+ 					}, {
+ 						Key: &sfsvalue.FilterStateValue_ObjectKey{
+-							ObjectKey: "io.istio.peer_principal",
++							ObjectKey: WaypointPeerPrincipalFilterStateKey,
+ 						},
+ 						FactoryKey: "envoy.string",
+ 						Value: &sfsvalue.FilterStateValue_FormatString{
+diff --git a/pilot/pkg/xds/waypoint_test.go b/pilot/pkg/xds/waypoint_test.go
+index ed7c599..c870c85 100644
+--- a/pilot/pkg/xds/waypoint_test.go
++++ b/pilot/pkg/xds/waypoint_test.go
+@@ -16,14 +16,18 @@ package xds_test
+ 
+ import (
+ 	"fmt"
++	"regexp"
+ 	"strings"
+ 	"testing"
+ 	"time"
+ 
+ 	udpa "github.com/cncf/xds/go/udpa/type/v1"
++	matcher "github.com/cncf/xds/go/xds/type/matcher/v3"
+ 	clusterv3 "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
+ 	listenerv3 "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
++	route "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
+ 	hcm "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
++	networkinput "github.com/envoyproxy/go-control-plane/envoy/extensions/matching/common_inputs/network/v3"
+ 	upstream "github.com/envoyproxy/go-control-plane/envoy/extensions/upstreams/http/v3"
+ 	. "github.com/onsi/gomega"
+ 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+@@ -1069,6 +1073,138 @@ spec:
+ 	assert.Equal(t, sets.New(prefixes...).Contains("/route-b"), true)
+ }
+ 
++func TestWaypointServiceConsumerRoute(t *testing.T) {
++	test.SetForTest(t, &features.EnableAmbientWaypoints, true)
++	app := `apiVersion: v1
++kind: Service
++metadata:
++  name: app
++  namespace: default
++  labels:
++    istio.io/use-waypoint: waypoint
++spec:
++  clusterIP: 1.2.3.4
++  selector:
++    app: app
++  ports:
++  - name: http
++    port: 80
++`
++	makeRoute := func(namespace string) string {
++		return fmt.Sprintf(`apiVersion: gateway.networking.k8s.io/v1
++kind: HTTPRoute
++metadata:
++  name: app-route
++  namespace: %s
++spec:
++  parentRefs:
++  - group: ""
++    kind: Service
++    name: app
++    namespace: default
++    port: 80
++  rules:
++  - filters:
++    - type: ResponseHeaderModifier
++      responseHeaderModifier:
++        set:
++        - name: X-Route
++          value: %s
++    backendRefs:
++    - name: app
++      namespace: default
++      port: 80
++`, namespace, namespace)
++	}
++	d, proxy := setupWaypointTest(t, waypointGateway, waypointSvc, waypointInstance, app, appPod,
++		makeRoute("default"), makeRoute("consumer"), strings.NewReplacer(
++			"name: app-route", "name: specific",
++			"    port: 80\n  rules:", "  rules:",
++			"  - filters:", "  - matches:\n    - path:\n        type: Exact\n        value: /specific\n    filters:",
++			"value: consumer", `value: "%REQ(X-Example)%"`,
++		).Replace(makeRoute("consumer")))
++
++	l := xdstest.ExtractListener("main_internal", d.Listeners(proxy))
++	fc := xdstest.ExtractFilterChain(model.BuildSubsetKey(model.TrafficDirectionInboundVIP, "http", "app.default.svc.cluster.local", 80), l)
++	hcm := xdstest.ExtractHTTPConnectionManager(t, fc)
++	vhosts := hcm.GetRouteConfig().GetVirtualHosts()
++	assert.Equal(t, len(vhosts), 1)
++	m := vhosts[0].GetMatcher()
++	fields := m.GetMatcherList().GetMatchers()
++	assert.Equal(t, len(fields), 1)
++	predicate := fields[0].GetPredicate().GetSinglePredicate()
++	input := &networkinput.FilterStateInput{}
++	if err := predicate.GetInput().GetTypedConfig().UnmarshalTo(input); err != nil {
++		t.Fatal(err)
++	}
++	assert.Equal(t, input.GetKey(), "io.istio.peer_principal")
++
++	compiledMatcher := predicate.GetValueMatch().GetSafeRegex()
++	assert.Equal(t, compiledMatcher.GetGoogleRe2() != nil, true)
++	principal := regexp.MustCompile(compiledMatcher.GetRegex())
++	assert.Equal(t, principal.MatchString("spiffe://cluster.local/ns/consumer/sa/client"), true)
++	assert.Equal(t, principal.MatchString("spiffe://cluster.local/ns/default/sa/client"), false)
++	assert.Equal(t, principal.MatchString("spiffe://other.local/ns/consumer/sa/client"), false)
++	assert.Equal(t, principal.MatchString(""), false)
++
++	routeList := func(action *matcher.Matcher_OnMatch) []*route.Route {
++		t.Helper()
++		list := &route.RouteList{}
++		if err := action.GetAction().GetTypedConfig().UnmarshalTo(list); err != nil {
++			t.Fatal(err)
++		}
++		return list.GetRoutes()
++	}
++	consumer := routeList(fields[0].GetOnMatch())
++	assert.Equal(t, len(consumer), 2)
++	assert.Equal(t, consumer[0].GetMatch().GetPath(), "/specific")
++	assert.Equal(t, consumer[0].GetResponseHeadersToAdd()[0].GetHeader().GetValue(), "%%REQ(X-Example)%%")
++	assert.Equal(t, consumer[0].GetRoute().GetCluster(), fc.GetName())
++	assert.Equal(t, consumer[1].GetResponseHeadersToAdd()[0].GetHeader().GetValue(), "consumer")
++
++	producer := routeList(m.GetOnNoMatch())
++	assert.Equal(t, len(producer), 1)
++	assert.Equal(t, producer[0].GetResponseHeadersToAdd()[0].GetHeader().GetValue(), "default")
++
++	for _, tc := range []struct {
++		name           string
++		serviceLabel   string
++		namespaceLabel string
++		multiNetwork   bool
++		wantConsumer   bool
++	}{
++		{name: "ingress Service", serviceLabel: "True"},
++		{name: "ingress Namespace", namespaceLabel: "true"},
++		{name: "Service overrides Namespace", serviceLabel: "false", namespaceLabel: "true", wantConsumer: true},
++		{name: "multi-network", multiNetwork: true},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			test.SetForTest(t, &features.EnableAmbientMultiNetwork, tc.multiNetwork)
++			service := app
++			if tc.serviceLabel != "" {
++				service = strings.Replace(service, "  labels:", fmt.Sprintf("  labels:\n    istio.io/ingress-use-waypoint: %q", tc.serviceLabel), 1)
++			}
++			namespace := fmt.Sprintf(`apiVersion: v1
++kind: Namespace
++metadata:
++  name: default
++  labels:
++    istio.io/ingress-use-waypoint: %q
++`, tc.namespaceLabel)
++			d, proxy := setupWaypointTest(t, waypointGateway, waypointSvc, waypointInstance, service, appPod,
++				namespace, makeRoute("default"), makeRoute("consumer"))
++			l := xdstest.ExtractListener("main_internal", d.Listeners(proxy))
++			fc := xdstest.ExtractFilterChain(model.BuildSubsetKey(model.TrafficDirectionInboundVIP, "http", "app.default.svc.cluster.local", 80), l)
++			hcm := xdstest.ExtractHTTPConnectionManager(t, fc)
++			vhost := hcm.GetRouteConfig().GetVirtualHosts()[0]
++			assert.Equal(t, vhost.GetMatcher() != nil, tc.wantConsumer)
++			if !tc.wantConsumer {
++				assert.Equal(t, vhost.GetRoutes()[0].GetResponseHeadersToAdd()[0].GetHeader().GetValue(), "default")
++			}
++		})
++	}
++}
++
+ func setupWaypointTest(t *testing.T, configs ...string) (*xds.FakeDiscoveryServer, *model.Proxy) {
+ 	test.SetForTest(t, &features.EnableDualStack, true)
+ 	test.SetForTest(t, &features.EnableIngressWaypointRouting, true)
+diff --git a/pkg/config/constants/constants.go b/pkg/config/constants/constants.go
+index 91be742..f1598fd 100644
+--- a/pkg/config/constants/constants.go
++++ b/pkg/config/constants/constants.go
+@@ -232,4 +232,7 @@ const (
+ 
+ 	// TODO: think about a better name?
+ 	ConfigExtraPerRouteRuleInferencePoolConfigs = "perRouteRuleInferencePoolConfigs"
++
++	// ConfigExtraMeshConsumerService contains the parent Service and effective listener port for a consumer route.
++	ConfigExtraMeshConsumerService = "meshConsumerService"
+ )
+diff --git a/pkg/config/gateway/kube/gatewayapi.go b/pkg/config/gateway/kube/gatewayapi.go
+index b389069..278849a 100644
+--- a/pkg/config/gateway/kube/gatewayapi.go
++++ b/pkg/config/gateway/kube/gatewayapi.go
+@@ -36,3 +36,11 @@ func IsInternalGatewayReference(gatewayName string) bool {
+ func InternalGatewayName(gwName, lName string) string {
+ 	return fmt.Sprintf("%s~%s~%s", gwName, constants.KubernetesGatewayName, lName)
+ }
++
++// MeshConsumerService identifies the parent Service of a generated cross-namespace route.
++// Port is zero when the route is only available to sidecars.
++type MeshConsumerService struct {
++	Namespace string
++	Name      string
++	Port      uint32
++}
