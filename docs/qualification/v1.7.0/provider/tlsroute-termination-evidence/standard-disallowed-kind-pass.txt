@@ -1,0 +1,4 @@
+--- PASS: TestRegisteredRawTLSCase/HTTPRouteDisallowedKind (9.83s)
+--- PASS: TestRegisteredRawTLSCase/HTTPRouteDisallowedKind/Route_should_not_have_been_accepted_with_reason_NotAllowedByListeners (0.04s)
+--- PASS: TestRegisteredRawTLSCase/HTTPRouteDisallowedKind/Route_should_not_have_Parents_set_in_status (0.04s)
+--- PASS: TestRegisteredRawTLSCase/HTTPRouteDisallowedKind/Gateway_should_have_0_Routes_attached (0.00s)
