@@ -25,6 +25,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -47,8 +48,8 @@ type reconciler struct {
 
 // SetupWithManager registers ListenerSet v1 reconciliation when the API is served.
 func SetupWithManager(ctx context.Context, manager ctrl.Manager, controllerName gatewayv1.GatewayController) error {
-	gvk := gatewayv1.SchemeGroupVersion.WithKind("ListenerSet")
-	if _, err := manager.GetRESTMapper().RESTMapping(gvk.GroupKind(), gvk.Version); err != nil {
+	kind := schema.GroupKind{Group: gatewayv1.GroupName, Kind: "ListenerSet"}
+	if _, err := manager.GetRESTMapper().RESTMapping(kind, gatewayv1.GroupVersion.Version); err != nil {
 		if meta.IsNoMatchError(err) {
 			return nil
 		}
