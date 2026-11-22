@@ -244,7 +244,10 @@ func planFixedResponseDuringMemberWithdrawal(desired desiredRoute, observed obse
 				if policy.requestHeaderOperations != nil {
 					operations = []cloud.HTTPHeaderOperation{}
 				}
-				return routeMutation{kind: routeMutationSetPolicyTarget, id: policy.policy.ID, requestHeaderOperations: operations}, true
+				responsePatch := policyHeaderPatch(wanted.responseHeaderOperations, policy.responseHeaderOperations,
+					policy.policy.ProvisioningStatus == "ERROR")
+				return routeMutation{kind: routeMutationSetPolicyTarget, id: policy.policy.ID,
+					requestHeaderOperations: operations, responseHeaderOperations: responsePatch}, true
 			}
 		}
 	}
@@ -410,8 +413,8 @@ func planHTTPPolicyHandovers(original, desired desiredGatewayGraph, actual obser
 		provedHeaderHandover := (prior.backendKey == "") != (next.backendKey == "") &&
 			!next.fixedResponse && next.weightedTargets == nil && oldPool != nil &&
 			(slices.ContainsFunc(old, func(policy observedRoutePolicy) bool {
-				return len(policy.requestHeaderOperations) != 0
-			}) || hasRequestHeaderPolicies(wantedPolicies)) &&
+				return len(policy.requestHeaderOperations) != 0 || len(policy.responseHeaderOperations) != 0
+			}) || hasHeaderOperationPolicies(wantedPolicies)) &&
 			!slices.ContainsFunc(old, func(policy observedRoutePolicy) bool {
 				return !observedForwardPolicySettled(policy) ||
 					policy.policy.Action != string(l7policies.ActionRedirectToPool) ||
@@ -484,13 +487,13 @@ func planHTTPPolicyHandovers(original, desired desiredGatewayGraph, actual obser
 		if node.Disposition == cloud.GraphDelete {
 			route := original.routes[owner]
 			headerPredecessor := backend == "" && slices.ContainsFunc(route.httpParts, func(part desiredRoute) bool {
-				return hasRequestHeaderPolicies(part.policies)
+				return hasHeaderOperationPolicies(part.policies)
 			})
 			for _, policy := range observed.policies {
 				// Rule cleanup keeps an explicitly disabled predecessor out
 				// of forwarding throughout the header handover.
 				if observedPolicyDisabled(policy) && (headerPredecessor ||
-					backend != "" && len(route.httpParts) == 0 && len(policy.requestHeaderOperations) != 0) {
+					backend != "" && len(route.httpParts) == 0 && (len(policy.requestHeaderOperations) != 0 || len(policy.responseHeaderOperations) != 0)) {
 					handover.headerHandoverPredicates[policy.policy.ID] = true
 				}
 			}
@@ -530,8 +533,10 @@ func planHTTPPolicyHandovers(original, desired desiredGatewayGraph, actual obser
 	return handover
 }
 
-func hasRequestHeaderPolicies(policies []desiredPolicy) bool {
-	return slices.ContainsFunc(policies, func(policy desiredPolicy) bool { return len(policy.requestHeaderOperations) != 0 })
+func hasHeaderOperationPolicies(policies []desiredPolicy) bool {
+	return slices.ContainsFunc(policies, func(policy desiredPolicy) bool {
+		return len(policy.requestHeaderOperations) != 0 || len(policy.responseHeaderOperations) != 0
+	})
 }
 
 func findHTTPPolicyReplacement(desired desiredGatewayGraph, owners []int, owner, port int, observed []observedRoutePolicy) (int, []desiredPolicy) {

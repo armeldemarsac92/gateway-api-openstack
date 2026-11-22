@@ -32,6 +32,8 @@ type protectedHTTPPredicate struct {
 	role       string
 	label      string
 	required   func(desiredPolicy) bool
+	observed   func(observedRoutePolicy) bool
+	settled    func(desiredPolicy, observedRoutePolicy) bool
 }
 
 var (
@@ -42,6 +44,17 @@ var (
 	httpMethodPredicate = protectedHTTPPredicate{
 		capability: octavia.GatewayCapabilityHTTPMethodMatch, role: openstackidentity.RoleRuleHTTPMethod,
 		label: "HTTP method", required: func(policy desiredPolicy) bool { return policy.method != "" },
+	}
+	responseHeaderModifierPolicy = protectedHTTPPredicate{
+		capability: octavia.GatewayCapabilityResponseHeaderOperations,
+		label:      "response header modification",
+		required:   func(policy desiredPolicy) bool { return len(policy.responseHeaderOperations) != 0 },
+		observed: func(policy observedRoutePolicy) bool {
+			return len(policy.responseHeaderOperations) != 0 && !observedPolicyDisabled(policy)
+		},
+		settled: func(wanted desiredPolicy, observed observedRoutePolicy) bool {
+			return slices.Equal(wanted.responseHeaderOperations, observed.responseHeaderOperations)
+		},
 	}
 )
 
@@ -75,6 +88,17 @@ func (p *Provider) protectHTTPPredicateTraffic(ctx context.Context, desired desi
 	states := guardedHTTPListeners(desired, actual, portByID, predicate)
 	if len(states) == 0 {
 		return plan
+	}
+	if predicate.observed != nil {
+		// Creation and activation have their own capability checks. Reprobe
+		// here only when readback shows previously installed operations.
+		installed := false
+		for _, state := range states {
+			installed = installed || state.installed
+		}
+		if !installed {
+			return plan
+		}
 	}
 	policyListeners := make(map[string]string)
 	for _, listener := range observedListeners {
@@ -136,6 +160,9 @@ func (p *Provider) protectHTTPPredicateTraffic(ctx context.Context, desired desi
 		frontendBlocked[listener.ID] = discoveryErr != nil || state.unsettled
 		reason := unavailable
 		if !confirmedMissing {
+			if predicate.observed != nil && discoveryErr != nil && state.installed && state.desired {
+				p.markGuardedHTTPListener(result, listener.ProtocolPort, state, "Waiting for Octavia to advertise "+predicate.capability)
+			}
 			if listener.ID != withdrawalListener || closed(listener) {
 				continue
 			}
@@ -165,6 +192,11 @@ func (p *Provider) protectHTTPPredicateTraffic(ctx context.Context, desired desi
 		case graphRouteMutation:
 			// Restrictive target updates leave the guarded predicate in place.
 			if step.withdrawHTTPPolicy && step.route.kind == routeMutationSetPolicyTarget {
+				return false
+			}
+			if predicate.observed != nil && step.route.kind == routeMutationSetPolicyHeaders &&
+				step.route.responseHeaderOperations != nil && len(step.route.responseHeaderOperations) == 0 {
+				// A clear is accepted even when the regional capability is unavailable.
 				return false
 			}
 			if discoveryErr == nil || closedByID[listenerID] || !state.installed || !isHTTPPolicyMutation(step.route.kind) {
@@ -235,6 +267,7 @@ func collectGuardedHTTPListener(states map[int]guardedHTTPListener, gateway desi
 			settled := slices.ContainsFunc(observed.policies, func(policy observedRoutePolicy) bool {
 				return policy.role == wanted.role && portByID[policy.policy.ListenerID] == port &&
 					policy.policy.Position == wanted.position && policy.policy.AdminStateUp && observedForwardPolicySettled(policy) &&
+					(predicate.settled == nil || predicate.settled(wanted, policy)) &&
 					observedHTTPPredicateMatches(policy, rulesFor(wanted, route.hostnameRuleValue)) &&
 					(route.redirect && desiredPolicyActionMatches(wanted, policy.policy, "") ||
 						!route.redirect && observedForwardPolicyMatches(route, observed, policy))
@@ -246,9 +279,7 @@ func collectGuardedHTTPListener(states map[int]guardedHTTPListener, gateway desi
 	}
 	for _, policy := range observed.policies {
 		observedPort, present := portByID[policy.policy.ListenerID]
-		if !present || !slices.ContainsFunc(policy.rules, func(rule observedRouteRule) bool {
-			return rule.base == predicate.role
-		}) {
+		if !present || !predicate.policyInstalled(policy) {
 			continue
 		}
 		mark(observedPort, func(state *guardedHTTPListener) {
@@ -260,4 +291,13 @@ func collectGuardedHTTPListener(states map[int]guardedHTTPListener, gateway desi
 			state.unsettled = state.unsettled || observedPort != port || !wantedAtPort[policy.role]
 		})
 	}
+}
+
+func (predicate protectedHTTPPredicate) policyInstalled(policy observedRoutePolicy) bool {
+	if predicate.observed != nil {
+		return predicate.observed(policy)
+	}
+	return slices.ContainsFunc(policy.rules, func(rule observedRouteRule) bool {
+		return rule.base == predicate.role
+	})
 }

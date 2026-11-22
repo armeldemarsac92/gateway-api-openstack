@@ -25,17 +25,18 @@ import (
 )
 
 const (
-	GatewayCapabilityHTTPHeaderExact         = "http_header_exact_v1"
-	GatewayCapabilityHTTPMethodMatch         = "http_method_match_v1"
-	GatewayCapabilityFixedHTTPResponses      = "fixed_http_responses_v1"
-	GatewayCapabilityWeightedHTTPTargets     = "weighted_http_targets_v1"
-	GatewayCapabilityRequestHeaderOperations = "request_header_operations_v1"
-	GatewayCapabilityBackendH2C              = "backend_h2c_v1"
-	GatewayCapabilityBackendTLSHostname      = "backend_tls_hostname_v1"
-	GatewayCapabilityHTTPSListenerIsolation  = "https_listener_isolation_v1"
-	GatewayCapabilityTLSSNIPassthrough       = "tls_sni_passthrough_v1"
-	GatewayCapabilityTLSSNISuffix            = "tls_sni_suffix_v1"
-	GatewayCapabilityTCPTLSTermination       = "tcp_tls_termination_v1"
+	GatewayCapabilityHTTPHeaderExact          = "http_header_exact_v1"
+	GatewayCapabilityHTTPMethodMatch          = "http_method_match_v1"
+	GatewayCapabilityFixedHTTPResponses       = "fixed_http_responses_v1"
+	GatewayCapabilityWeightedHTTPTargets      = "weighted_http_targets_v1"
+	GatewayCapabilityRequestHeaderOperations  = "request_header_operations_v1"
+	GatewayCapabilityResponseHeaderOperations = "response_header_operations_v1"
+	GatewayCapabilityBackendH2C               = "backend_h2c_v1"
+	GatewayCapabilityBackendTLSHostname       = "backend_tls_hostname_v1"
+	GatewayCapabilityHTTPSListenerIsolation   = "https_listener_isolation_v1"
+	GatewayCapabilityTLSSNIPassthrough        = "tls_sni_passthrough_v1"
+	GatewayCapabilityTLSSNISuffix             = "tls_sni_suffix_v1"
+	GatewayCapabilityTCPTLSTermination        = "tcp_tls_termination_v1"
 )
 
 // MissingGatewayCapability reports an explicit negative capability discovery.

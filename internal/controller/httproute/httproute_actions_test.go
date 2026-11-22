@@ -394,3 +394,67 @@ func TestRequestHeaderOptInOnlyGroupsRoutesWithOperations(t *testing.T) {
 		t.Fatalf("removing the modifier did not restore the scalar route: %+v", restored)
 	}
 }
+
+func TestResponseHeaderModifierIsScopedToWinningRule(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	plain := f.route.Spec.Rules[0]
+	filtered := *plain.DeepCopy()
+	filtered.Matches = []gatewayv1.HTTPRouteMatch{{
+		Path: &gatewayv1.HTTPPathMatch{Type: ptr.To(gatewayv1.PathMatchExact), Value: ptr.To("/filtered")},
+	}}
+	request := gatewayv1.HTTPRouteFilter{
+		Type:                  gatewayv1.HTTPRouteFilterRequestHeaderModifier,
+		RequestHeaderModifier: &gatewayv1.HTTPHeaderFilter{Remove: []string{"X-Request"}},
+	}
+	response := gatewayv1.HTTPRouteFilter{
+		Type: gatewayv1.HTTPRouteFilterResponseHeaderModifier,
+		ResponseHeaderModifier: &gatewayv1.HTTPHeaderFilter{
+			Set:    []gatewayv1.HTTPHeader{{Name: "X-Color", Value: "blue"}},
+			Add:    []gatewayv1.HTTPHeader{{Name: "X-Extra", Value: "second"}},
+			Remove: []string{"X-Old"},
+		},
+	}
+	f.route.Spec.Rules = []gatewayv1.HTTPRouteRule{plain, filtered}
+	f.reconciler.Config.RequestHeaderModifier = true
+	build := func(filters ...gatewayv1.HTTPRouteFilter) (cloud.RouteSpec, error) {
+		f.route.Spec.Rules[1].Filters = filters
+		return f.reconciler.buildRouteModelWithReader(t.Context(), f.reader, f.route, f.gateway)
+	}
+	if _, err := build(request, response); err == nil || !strings.Contains(err.Error(), "ResponseHeaderModifier") {
+		t.Fatalf("response opt-in was not enforced: %v", err)
+	}
+	f.reconciler.Config.ResponseHeaderModifier = true
+	responseFirst, err := build(response, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestFirst, err := build(request, response)
+	if err != nil || !reflect.DeepEqual(responseFirst, requestFirst) {
+		t.Fatalf("filter order changed the route model: %+v, %v", requestFirst, err)
+	}
+	if len(responseFirst.HTTPBackends) != 1 || len(responseFirst.HTTPBackends[0].Matches) != 2 {
+		t.Fatalf("expected both rules on the same pool: %+v", responseFirst.HTTPBackends)
+	}
+	matched, fallback := responseFirst.HTTPBackends[0].Matches[0], responseFirst.HTTPBackends[0].Matches[1]
+	wantResponse := []cloud.HTTPHeaderOperation{
+		{Operation: cloud.HTTPHeaderSet, Name: "x-color", Value: "blue"},
+		{Operation: cloud.HTTPHeaderAdd, Name: "x-extra", Value: "second"},
+		{Operation: cloud.HTTPHeaderRemove, Name: "x-old"},
+	}
+	wantRequest := []cloud.HTTPHeaderOperation{{Operation: cloud.HTTPHeaderRemove, Name: "x-request"}}
+	if matched.PathValue != "/filtered" || matched.Precedence >= fallback.Precedence ||
+		!slices.Equal(matched.RequestHeaderOperations, wantRequest) || !slices.Equal(matched.ResponseHeaderOperations, wantResponse) ||
+		len(fallback.RequestHeaderOperations)+len(fallback.ResponseHeaderOperations) != 0 {
+		t.Fatalf("operations escaped the winning match: matched=%+v fallback=%+v", matched, fallback)
+	}
+	if _, err := build(response, response); err == nil {
+		t.Fatal("accepted duplicate response modifiers on one rule")
+	}
+	if _, err := build(response, fixedRedirectRule("elsewhere.example.test").Filters[0]); err == nil {
+		t.Fatal("accepted response modifiers on an Octavia redirect action")
+	}
+	response.ResponseHeaderModifier.Remove = []string{"Transfer-Encoding"}
+	if _, err := build(response); err == nil || !strings.Contains(err.Error(), "managed by the Octavia listener") {
+		t.Fatalf("response framing field accepted: %v", err)
+	}
+}

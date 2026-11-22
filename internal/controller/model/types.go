@@ -35,19 +35,20 @@ import (
 // virtue of their presence in these collections.
 type Input struct {
 	// OperatorHTTPS allows HTTPS sections admitted by the stock frontend profile.
-	OperatorHTTPS         bool
-	RequestHeaderModifier bool
-	BackendH2C            bool
-	EnableXBackend        bool
-	BackendTLSPolicies    map[ServicePortKey]backendtls.Selection `json:"-"`
-	MemberMode            cloud.MemberMode
-	XBackends             []XBackendObservation
-	Gateway               *gatewayv1.Gateway
-	Routes                []gatewayv1.HTTPRoute
-	Namespaces            []corev1.Namespace
-	Services              []corev1.Service
-	EndpointSlices        []discoveryv1.EndpointSlice
-	ReferenceGrants       []gatewayv1.ReferenceGrant
+	OperatorHTTPS          bool
+	RequestHeaderModifier  bool
+	ResponseHeaderModifier bool
+	BackendH2C             bool
+	EnableXBackend         bool
+	BackendTLSPolicies     map[ServicePortKey]backendtls.Selection `json:"-"`
+	MemberMode             cloud.MemberMode
+	XBackends              []XBackendObservation
+	Gateway                *gatewayv1.Gateway
+	Routes                 []gatewayv1.HTTPRoute
+	Namespaces             []corev1.Namespace
+	Services               []corev1.Service
+	EndpointSlices         []discoveryv1.EndpointSlice
+	ReferenceGrants        []gatewayv1.ReferenceGrant
 }
 
 // Source identifies the exact Kubernetes revision that contributed a model.
@@ -112,12 +113,13 @@ type Route struct {
 
 // Rule retains its original position and Service groups independently of endpoints.
 type Rule struct {
-	Index                   int
-	Matches                 []Match
-	Backends                []BackendGroup
-	Redirect                *RequestRedirect
-	RequestHeaderOperations []cloud.HTTPHeaderOperation
-	Diagnostics             []Diagnostic
+	Index                    int
+	Matches                  []Match
+	Backends                 []BackendGroup
+	Redirect                 *RequestRedirect
+	RequestHeaderOperations  []cloud.HTTPHeaderOperation
+	ResponseHeaderOperations []cloud.HTTPHeaderOperation
+	Diagnostics              []Diagnostic
 }
 
 // RequestRedirect is a fixed-host action with no path modifier or backend.

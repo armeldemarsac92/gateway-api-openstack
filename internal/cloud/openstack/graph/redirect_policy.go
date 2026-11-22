@@ -65,6 +65,9 @@ func (p *Provider) buildDesiredGatewayRoute(spec cloud.RouteSpec, forwards []clo
 		}
 		indexes[redirect.RuleIndex] = true
 		for _, match := range redirect.Matches {
+			if len(match.ResponseHeaderOperations) != 0 {
+				return invalid(errors.New("ResponseHeaderModifier cannot be combined with RequestRedirect in Octavia"))
+			}
 			match, err := p.normalizeHTTPMatch(match)
 			if err != nil {
 				return invalid(err)

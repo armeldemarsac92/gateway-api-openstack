@@ -129,7 +129,7 @@ func TestWeightedPolicyWire(t *testing.T) {
 	if _, err := service.CreatePolicy(t.Context(), PolicyCreateOpts{CreateOpts: l7policies.CreateOpts{ListenerID: "listener", AdminStateUp: &disabled}, WeightedTargets: targets}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.SetPolicyWeightedTargets(t.Context(), "policy", targets, nil); err != nil {
+	if _, err := service.SetPolicyWeightedTargets(t.Context(), "policy", targets, PolicyHeaders{}); err != nil {
 		t.Fatal(err)
 	}
 	observed, complete, err := service.ListPolicyObservations(t.Context(), l7policies.ListOpts{})
@@ -199,5 +199,94 @@ func TestAuditReadbackTreatsFormattedEmptyTargetsAsInactive(t *testing.T) {
 	observation, err := readPolicyObservation(row)
 	if err != nil || observation.ExtendedTargetFields {
 		t.Fatalf("empty JSON array activated private target handling: %v, %v", observation.ExtendedTargetFields, err)
+	}
+}
+
+func TestResponseHeaderPolicyWire(t *testing.T) {
+	const path = "/lbaas/l7policies"
+	records := []json.RawMessage{
+		json.RawMessage(`{"id":"configured","response_header_operations":[{"operation":"SET","name":"X-Color","value":"blue"},{"operation":"ADD","name":"x-extra","value":""},{"operation":"REMOVE","name":"x-old"}]}`),
+		json.RawMessage(`{"id":"cleared","response_header_operations":[]}`),
+		json.RawMessage(`{"id":"stock"}`),
+		json.RawMessage(`{"id":"malformed","response_header_operations":null}`),
+	}
+	response := []cloud.HTTPHeaderOperation{
+		{Operation: cloud.HTTPHeaderSet, Name: "x-color", Value: "blue"},
+		{Operation: cloud.HTTPHeaderAdd, Name: "x-extra"},
+		{Operation: cloud.HTTPHeaderRemove, Name: "x-old"},
+	}
+	const responseJSON = `[{"name":"x-color","operation":"SET","value":"blue"},{"name":"x-extra","operation":"ADD","value":""},{"name":"x-old","operation":"REMOVE"}]`
+	const requestJSON = `[{"name":"x-request","operation":"REMOVE"}]`
+	call := 0
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			if r.URL.Path != path || call != 3 {
+				t.Fatalf("unexpected policy read on call %d: %s", call, r.URL)
+			}
+			if err := json.NewEncoder(w).Encode(map[string]any{"l7policies": records}); err != nil {
+				t.Fatal(err)
+			}
+			return
+		}
+		var body struct {
+			Policy map[string]json.RawMessage `json:"l7policy"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		switch call {
+		case 0:
+			if r.Method != http.MethodPost || r.URL.Path != path ||
+				string(body.Policy[responseHeaderOperationsField]) != responseJSON ||
+				string(body.Policy[requestHeaderOperationsField]) != requestJSON ||
+				string(body.Policy["admin_state_up"]) != "false" {
+				t.Fatalf("unexpected policy create %s %s: %v", r.Method, r.URL, body.Policy)
+			}
+			w.WriteHeader(http.StatusCreated)
+		case 1:
+			if r.Method != http.MethodPut || r.URL.Path != path+"/configured" ||
+				string(body.Policy["action"]) != `"FIXED_RESPONSE"` ||
+				string(body.Policy[responseHeaderOperationsField]) != responseJSON ||
+				string(body.Policy[requestHeaderOperationsField]) != "[]" {
+				t.Fatalf("unexpected fixed response update %s %s: %v", r.Method, r.URL, body.Policy)
+			}
+		case 2:
+			if r.Method != http.MethodPut || r.URL.Path != path+"/configured" ||
+				string(body.Policy[responseHeaderOperationsField]) != "[]" || len(body.Policy) != 1 {
+				t.Fatalf("unexpected independent response clear %s %s: %v", r.Method, r.URL, body.Policy)
+			}
+		default:
+			t.Fatalf("unexpected policy write %s %s", r.Method, r.URL)
+		}
+		call++
+		_, _ = w.Write([]byte(`{"l7policy":{"id":"configured"}}`))
+	})
+	service := NewService(&gophercloud.ServiceClient{
+		ProviderClient: &gophercloud.ProviderClient{HTTPClient: http.Client{Transport: loadBalancerTestTransport{handler}}},
+		Endpoint:       "http://octavia.test/",
+	})
+	disabled := false
+	if _, err := service.CreatePolicy(t.Context(), PolicyCreateOpts{
+		CreateOpts:               l7policies.CreateOpts{ListenerID: "listener", Action: l7policies.ActionRedirectToPool, RedirectPoolID: "pool", AdminStateUp: &disabled},
+		RequestHeaderOperations:  []cloud.HTTPHeaderOperation{{Operation: cloud.HTTPHeaderRemove, Name: "x-request"}},
+		ResponseHeaderOperations: response,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	clear := []cloud.HTTPHeaderOperation{}
+	if _, err := service.SetPolicyFixedResponse(t.Context(), "configured", PolicyHeaders{Request: clear, Response: response}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.UpdatePolicyHeaders(t.Context(), "configured", l7policies.UpdateOpts{}, PolicyHeaders{Response: clear}); err != nil {
+		t.Fatal(err)
+	}
+	observed, complete, err := service.ListPolicyObservations(t.Context(), l7policies.ListOpts{})
+	if err != nil || !complete || len(observed) != len(records) ||
+		!reflect.DeepEqual(observed[0].ResponseHeaderOperations, response) ||
+		!reflect.DeepEqual(observed[1].ResponseHeaderOperations, clear) ||
+		observed[2].ResponseHeaderOperations != nil || observed[2].ResponseHeaderOperationsErr != nil ||
+		observed[3].ResponseHeaderOperationsErr == nil {
+		t.Fatalf("incorrect response operation readback: %#v, error %v", observed, err)
 	}
 }

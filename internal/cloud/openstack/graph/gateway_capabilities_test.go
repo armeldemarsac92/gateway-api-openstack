@@ -140,6 +140,42 @@ func TestLostHTTPActionCapabilityOnlyAllowsRestrictiveWithdrawal(t *testing.T) {
 	}
 }
 
+func TestHTTPBackendWithdrawalCombinesResponseHeaderChangesWhenAvailable(t *testing.T) {
+	advertise := true
+	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/lbaas/providers/amphora/gateway_capabilities" {
+			t.Fatalf("unexpected capability request %s %s", r.Method, r.URL.Path)
+		}
+		capabilities := []string{octavia.GatewayCapabilityFixedHTTPResponses}
+		if advertise {
+			capabilities = append(capabilities, octavia.GatewayCapabilityResponseHeaderOperations)
+		}
+		safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": capabilities})
+	}))
+	p := NewProvider(ServiceClients{LoadBalancer: client}, ProviderConfig{FixedHTTPResponses: true})
+	desired := desiredGatewayGraph{fixedHTTPResponses: true, protocol: cloud.ListenerProtocolHTTP, routes: []desiredRoute{{fixedResponse: true}}}
+	lb := safetyObservedLoadBalancer()
+	lb.Provider = "amphora"
+	actual := observedGatewayGraph{loadBalancer: lb}
+	operations := []cloud.HTTPHeaderOperation{{Operation: cloud.HTTPHeaderSet, Name: "x-color", Value: "blue"}}
+	step := graphMutation{kind: graphRouteMutation, withdrawHTTPPolicy: true,
+		route: routeMutation{kind: routeMutationSetPolicyTarget, id: "policy", responseHeaderOperations: operations}}
+	check := func(want []cloud.HTTPHeaderOperation) {
+		t.Helper()
+		prepared, err := p.prepareGraphMutation(t.Context(), desired, actual, step)
+		if err != nil || prepared.kind != graphRouteMutation || prepared.route.kind != routeMutationSetPolicyTarget ||
+			!reflect.DeepEqual(prepared.route.responseHeaderOperations, want) {
+			t.Fatalf("target withdrawal has wrong response operations: %#v, %v", prepared, err)
+		}
+	}
+
+	check(operations)
+	advertise = false
+	check(nil)
+	step.route.responseHeaderOperations = []cloud.HTTPHeaderOperation{}
+	check(step.route.responseHeaderOperations)
+}
+
 func TestRequestHeaderPolicyDriftUsesEffectiveProviderAndCanClearAfterOptOut(t *testing.T) {
 	const path = "/lbaas/providers/amphora-region-alias/gateway_capabilities"
 	var advertise, clear bool
@@ -1016,5 +1052,109 @@ func TestHTTPMethodProfileRootPrefixKeepsAPathIndependentRule(t *testing.T) {
 				t.Fatalf("non-catch-all path changed between profiles: stock %#v, active %#v", stockRules[0], activeRules[0])
 			}
 		})
+	}
+}
+
+func TestResponseHeaderPolicyActivationAndWithdrawalAcrossRestart(t *testing.T) {
+	part, observation := convergedRoutePlanFixture()
+	part.backendKey = "backend"
+	part.spec.ScopedListenerPorts = []int{80}
+	wanted := []cloud.HTTPHeaderOperation{{Operation: cloud.HTTPHeaderSet, Name: "x-color", Value: "blue"}}
+	part.policies[0].responseHeaderOperations = wanted
+	policy := &observation.policies[0]
+	policy.policy.ListenerID, policy.policy.ProvisioningStatus = "affected", "ACTIVE"
+	policy.policy.AdminStateUp, policy.adminObserved = false, true
+	policy.rules[0].rule.ProvisioningStatus, policy.rules[0].flagsObserved = "ACTIVE", true
+
+	spec := completeGraphSpec(safetyTestIdentity(t))
+	desired := desiredGatewayGraph{spec: spec, protocol: cloud.ListenerProtocolHTTP, routes: []desiredRoute{{httpParts: []desiredRoute{part}}}}
+	lb := safetyObservedLoadBalancer()
+	lb.Provider = "amphora-region-alias"
+	actual := observedGatewayGraph{loadBalancer: lb, scoped: true, scopedListeners: []listeners.Listener{
+		{ID: "affected", ProtocolPort: 80, ProvisioningStatus: "ACTIVE", AdminStateUp: true},
+		{ID: "unrelated", ProtocolPort: 8080, ProvisioningStatus: "ACTIVE", AdminStateUp: true},
+	}, adminObserved: map[string]bool{"affected": true, "unrelated": true},
+		routes: []observedRouteGraph{{httpParts: map[string]*observedRouteGraph{"backend": &observation}}}}
+
+	advertise := false
+	probes, writes := 0, 0
+	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/lbaas/providers/amphora-region-alias/gateway_capabilities":
+			probes++
+			capabilities := []string{}
+			if advertise {
+				capabilities = append(capabilities, octavia.GatewayCapabilityResponseHeaderOperations)
+			}
+			safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": capabilities})
+		case r.Method == http.MethodPut && r.URL.Path == "/lbaas/l7policies/policy-1":
+			writes++
+			var body struct {
+				Policy map[string]json.RawMessage `json:"l7policy"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if len(body.Policy) != 1 || string(body.Policy["response_header_operations"]) != "[]" {
+				t.Fatalf("withdrawal did not send an independent clear: %s", body.Policy)
+			}
+			safetyWriteJSON(t, w, map[string]any{"l7policy": map[string]string{"id": "policy-1"}})
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	provider := NewProvider(ServiceClients{LoadBalancer: client}, ProviderConfig{ResponseHeaderModifier: true})
+	next := func(want routeMutationKind) graphMutation {
+		t.Helper()
+		steps, _, err := buildRouteEnsurePlan(part, observation)
+		if err != nil || len(steps) < 1 || steps[0].kind != want {
+			t.Fatalf("expected %v first, got %+v, error %v", want, steps, err)
+		}
+		return graphMutation{kind: graphRouteMutation, listenerID: "affected", backendKey: "backend", route: steps[0]}
+	}
+	noReadback := next(routeMutationSetPolicyHeaders)
+	_, err := provider.prepareGraphMutation(t.Context(), desired, actual, noReadback)
+	var unavailable *unavailableRouteCapability
+	if !errors.As(err, &unavailable) || unavailable.capability != octavia.GatewayCapabilityResponseHeaderOperations || writes != 0 {
+		t.Fatalf("plan wrote without response capability: %v, %d", err, writes)
+	}
+	policy.responseHeaderOperations = wanted
+	enable := next(routeMutationEnablePolicy)
+	if _, err := provider.prepareGraphMutation(t.Context(), desired, actual, enable); !errors.As(err, &unavailable) {
+		t.Fatalf("activation must verify capability after policy readback: %v", err)
+	}
+	advertise = true
+	if _, err := provider.prepareGraphMutation(t.Context(), desired, actual, enable); err != nil {
+		t.Fatalf("advertised capability did not permit activation: %v", err)
+	}
+
+	// The replacement controller starts with API observations and no process state.
+	policy.policy.AdminStateUp = true
+	advertise = false
+	provider = NewProvider(ServiceClients{LoadBalancer: client}, ProviderConfig{ResponseHeaderModifier: true})
+	result := cloud.GatewayGraphResult{Routes: []cloud.RouteGraphResult{{}}}
+	steps := provider.protectHTTPPredicateTraffic(t.Context(), desired, actual, nil, &result, responseHeaderModifierPolicy)
+	if len(steps) != 1 || steps[0].kind != graphDisableListener || steps[0].listenerID != "affected" ||
+		result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing {
+		t.Fatalf("a restarted controller did not withdraw the affected listener: %+v, %+v", steps, result)
+	}
+	actual.scopedListeners[0].AdminStateUp = false
+	part.policies[0].responseHeaderOperations = nil
+	provider = NewProvider(ServiceClients{LoadBalancer: client}, ProviderConfig{})
+	clear := next(routeMutationSetPolicyHeaders)
+	steps = provider.protectHTTPPredicateTraffic(t.Context(), desired, actual, []graphMutation{clear}, &result, responseHeaderModifierPolicy)
+	if len(steps) != 1 {
+		t.Fatalf("clear was lost while capability was unavailable: %+v", steps)
+	}
+	prepared, err := provider.prepareGraphMutation(t.Context(), desired, actual, steps[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := provider.executeRouteMutation(t.Context(), part, prepared.route); err != nil || writes != 1 || probes != 5 {
+		t.Fatalf("withdrawal failed without capability and opt-in: writes=%d probes=%d error=%v", writes, probes, err)
+	}
+	policy.responseHeaderOperations = []cloud.HTTPHeaderOperation{}
+	if plan, _, err := buildRouteEnsurePlan(part, observation); err != nil || len(plan) != 0 {
+		t.Fatalf("a verified clear did not converge: %+v, %v", plan, err)
 	}
 }
