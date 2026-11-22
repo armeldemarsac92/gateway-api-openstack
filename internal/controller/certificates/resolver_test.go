@@ -52,6 +52,71 @@ func TestResolveFollowsOnlyTheEnrolledSecretRevision(t *testing.T) {
 	}
 }
 
+func TestBackendClientCertificateUsesItsOwnEnrollmentAndGrant(t *testing.T) {
+	resolver, gateway, listener, reader := resolverFixture(t)
+	resolver.BackendClientPath = filepath.Join(t.TempDir(), "backend-clients.json")
+	writeBackendMap := func(row string) {
+		t.Helper()
+		data := strings.Replace(mapJSON(row), `"version":1`, `"version":1,"purpose":"backend-client"`, 1)
+		writeSnapshot(t, resolver.BackendClientPath, data)
+	}
+	gateway.Namespace = "application"
+	gateway.Spec.TLS = &gatewayv1.GatewayTLSConfig{Backend: &gatewayv1.GatewayBackendTLS{
+		ClientCertificateRef: &gatewayv1.SecretObjectReference{Name: "web", Namespace: ptr.To(gatewayv1.Namespace("certs"))},
+	}}
+	writeMap(t, resolver.Path, rowJSON("uid-a", "rv/alpha", firstID))
+
+	check := func(id string, reason gatewayv1.GatewayConditionReason) {
+		t.Helper()
+		got, gotReason, message := resolver.ResolveBackendClientCertificate(t.Context(), gateway)
+		want := ""
+		if id != "" {
+			want = "https://barbican.example:443/v1/secrets/" + id
+		}
+		if got != want || gotReason != reason || (reason != "") != (message != "") {
+			t.Fatalf("backend client identity = %q, %q, %q; want %q, %q", got, gotReason, message, want, reason)
+		}
+	}
+	check("", gatewayv1.GatewayReasonRefNotPermitted)
+	if !reflect.DeepEqual(reader.reads, []string{"grants certs"}) {
+		t.Fatalf("unpermitted client certificate reads = %v, want only grant lookup", reader.reads)
+	}
+	reader.grants = []gatewayv1.ReferenceGrant{{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "certs"},
+		Spec: gatewayv1.ReferenceGrantSpec{
+			From: []gatewayv1.ReferenceGrantFrom{{Group: gatewayv1.GroupName, Kind: "Gateway", Namespace: "application"}},
+			To:   []gatewayv1.ReferenceGrantTo{{Kind: "Secret", Name: ptr.To(gatewayv1.ObjectName("web"))}},
+		},
+	}}
+	check("", gatewayv1.GatewayReasonInvalidClientCertificateRef)
+	writeMap(t, resolver.BackendClientPath, rowJSON("uid-a", "rv/alpha", firstID))
+	check("", gatewayv1.GatewayReasonInvalidClientCertificateRef)
+	writeBackendMap(rowJSON("uid-a", "rv/alpha", firstID))
+	check(firstID, "")
+	listener.TLS.CertificateRefs[0].Namespace = ptr.To(gatewayv1.Namespace("certs"))
+	expectResolution(t, resolver, gateway, listener, firstID, "")
+	frontend := resolver.Path
+	resolver.Path = resolver.BackendClientPath
+	expectResolution(t, resolver, gateway, listener, "", gatewayv1.ListenerReasonInvalidCertificateRef)
+	resolver.Path = frontend
+	reader.metadata.ResourceVersion = "rotated"
+	check("", gatewayv1.GatewayReasonInvalidClientCertificateRef)
+	writeBackendMap(rowJSON("uid-a", "rotated", secondID))
+	check(secondID, "")
+	resolver.DiscoverEndpoint = func() (string, error) { return "", nil }
+	check("", "BackendClientCertificateUnavailable")
+	gateway.Spec.TLS.Backend.ClientCertificateRef.Kind = ptr.To(gatewayv1.Kind("Other"))
+	reader.reads = nil
+	check("", gatewayv1.GatewayReasonRefNotPermitted)
+	reader.grants[0].Spec.To[0].Kind = "Other"
+	check("", gatewayv1.GatewayReasonInvalidClientCertificateRef)
+	if !reflect.DeepEqual(reader.reads, []string{"grants certs", "grants certs"}) {
+		t.Fatalf("unsupported backend client reference caused a Secret read: %v", reader.reads)
+	}
+	reader.grants = nil
+	check("", gatewayv1.GatewayReasonRefNotPermitted)
+}
+
 func TestCrossNamespaceGrantRevocationPrecedesMetadataRead(t *testing.T) {
 	resolver, gateway, listener, reader := resolverFixture(t)
 	gateway.Namespace = "application"
@@ -244,8 +309,13 @@ func rowJSON(uid, version, id string) string {
 
 func writeMap(t *testing.T, path, rows string) {
 	t.Helper()
+	writeSnapshot(t, path, mapJSON(rows))
+}
+
+func writeSnapshot(t *testing.T, path, data string) {
+	t.Helper()
 	// Replace the read-only file the same way a new mounted snapshot becomes visible.
-	if err := os.WriteFile(path+".new", []byte(mapJSON(rows)), 0o444); err != nil {
+	if err := os.WriteFile(path+".new", []byte(data), 0o444); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Rename(path+".new", path); err != nil {

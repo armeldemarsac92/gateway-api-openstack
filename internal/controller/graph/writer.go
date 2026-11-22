@@ -42,6 +42,8 @@ const (
 	DeleteRoute Action = "DeleteRoute"
 	// WithdrawTLS disables owned TLS frontends without granting graph mutation authority.
 	WithdrawTLS Action = "WithdrawTLS"
+	// WithdrawBackendClientCertificate closes owned pools with stale identities.
+	WithdrawBackendClientCertificate Action = "WithdrawBackendClientCertificate"
 )
 
 // Request carries the identity and Kubernetes revision that triggered a write.
@@ -167,22 +169,25 @@ func (w *Writer) ReconcileGraph(ctx context.Context, request Request) (cloud.Gat
 	gateway, err := w.Gateway.ObserveGatewayGraph(ctx, request)
 	w.observeStage(StageGatewayInput, started, err)
 	if err != nil {
-		return w.finishTLS(ctx, request.Identity, gateway, cloud.GatewayGraphResult{}, err)
+		return w.finishFailedEnsure(ctx, request, gateway, cloud.GatewayGraphResult{}, err)
 	}
 	if request.Action == WithdrawTLS {
 		return w.withdrawTLS(ctx, request.Identity, gateway)
+	}
+	if request.Action == WithdrawBackendClientCertificate {
+		return w.withdrawBackendClientCertificate(ctx, request.Identity, gateway)
 	}
 	started = time.Now()
 	routes, err := w.Routes.ObserveRouteGraph(ctx, request, gateway.Object)
 	w.observeStage(StageRouteInput, started, err)
 	if err != nil {
-		return w.finishTLS(ctx, request.Identity, gateway, cloud.GatewayGraphResult{}, err)
+		return w.finishFailedEnsure(ctx, request, gateway, cloud.GatewayGraphResult{}, err)
 	}
 	started = time.Now()
 	err = validateInputs(ctx, gateway, routes)
 	w.observeStage(StageValidation, started, err)
 	if err != nil {
-		return w.finishTLS(ctx, request.Identity, gateway, cloud.GatewayGraphResult{}, err)
+		return w.finishFailedEnsure(ctx, request, gateway, cloud.GatewayGraphResult{}, err)
 	}
 	identity := request.Identity
 	identity.RouteNamespace, identity.RouteName, identity.RouteUID = "", "", ""
@@ -201,9 +206,41 @@ func (w *Writer) ReconcileGraph(ctx context.Context, request Request) (cloud.Gat
 	if gateway.ReportRoutes != nil {
 		err = errors.Join(err, gateway.ReportRoutes(ctx, result, err))
 	}
+	if err != nil {
+		return w.finishFailedEnsure(ctx, request, gateway, result, err)
+	}
 	return w.finishTLS(ctx, request.Identity, gateway, result, err)
 }
 
+func (w *Writer) finishFailedEnsure(ctx context.Context, request Request, gateway GatewayInput, result cloud.GatewayGraphResult, graphErr error) (cloud.GatewayGraphResult, error) {
+	if request.Action == Ensure && gateway.Node.BackendCAOwned &&
+		cloud.NormalizeListenerProtocol(gateway.Node.Spec.ListenerProtocol) == cloud.ListenerProtocolHTTP {
+		request.Action = WithdrawBackendClientCertificate
+		request.Gateway = gateway.Object
+		input, err := w.Gateway.ObserveGatewayGraph(ctx, request)
+		if err == nil {
+			_, err = w.withdrawBackendClientCertificate(ctx, request.Identity, input)
+		}
+		if err != nil {
+			graphErr = errors.Join(graphErr, err)
+		}
+	}
+	return w.finishTLS(ctx, request.Identity, gateway, result, graphErr)
+}
+
+func (w *Writer) withdrawBackendClientCertificate(ctx context.Context, identity cloud.Identity, input GatewayInput) (cloud.GatewayGraphResult, error) {
+	if input.Node.Disposition != cloud.GraphWithdrawBackendClientCertificate || input.Validate == nil {
+		return cloud.GatewayGraphResult{}, errors.New("invalid backend client certificate withdrawal authority")
+	}
+	identity.RouteNamespace, identity.RouteName, identity.RouteUID = "", "", ""
+	result, err := w.Provider.ReconcileGatewayGraph(ctx, cloud.GatewayGraphSpec{
+		Identity: identity, Gateway: input.Node, ValidateMutation: input.Validate,
+	})
+	if err == nil {
+		err = result.Outcome.Validate()
+	}
+	return result, err
+}
 func (w *Writer) finishTLS(ctx context.Context, identity cloud.Identity, gateway GatewayInput, result cloud.GatewayGraphResult, graphErr error) (cloud.GatewayGraphResult, error) {
 	if gateway.ObserveTLS == nil || (graphErr == nil && !hasTLSListeners(gateway)) {
 		return result, graphErr

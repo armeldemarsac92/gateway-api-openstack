@@ -41,7 +41,8 @@ import (
 // Reconciler owns the Gateway-scoped Octavia resources.
 type Reconciler struct {
 	// Certificates resolves operator-approved certificate references from live metadata.
-	Certificates CertificateResolver
+	Certificates              CertificateResolver
+	BackendClientCertificates BackendClientCertificateResolver
 	// HTTPSListenerIsolationAvailable checks authenticated regional support.
 	HTTPSListenerIsolationAvailable func(context.Context) (bool, error)
 	// Client reads and patches cached Kubernetes objects.
@@ -97,12 +98,17 @@ func (r *Reconciler) Reconcile(
 		return ctrl.Result{}, err
 	}
 	defer func() {
+		if scope.managed && scope.gateway.DeletionTimestamp.IsZero() {
+			r.setBackendClientCertificateStatus(ctx, scope.gateway)
+		}
 		if err := r.patchGateway(ctx, scope); err != nil {
 			result = ctrl.Result{}
 			retErr = errors.Join(retErr, scope.patchCause, err)
 		}
 		if retErr == nil && scope.patchCause == nil && !result.Requeue && scope.gateway.DeletionTimestamp.IsZero() &&
-			(usesHTTPSProfile(r.Config, scope.gateway) || r.Config.TLSRoutesEnabled() && hasTLSListener(scope.gateway)) && (result.RequeueAfter == 0 || result.RequeueAfter > httpsPollInterval) {
+			(usesHTTPSProfile(r.Config, scope.gateway) || r.Config.TLSRoutesEnabled() && hasTLSListener(scope.gateway) ||
+				r.Config.BackendClientCertificate && BackendClientCertificateRef(scope.gateway) != nil) &&
+			(result.RequeueAfter == 0 || result.RequeueAfter > httpsPollInterval) {
 			result.RequeueAfter = httpsPollInterval
 		}
 	}()
@@ -147,6 +153,13 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, scope *gatewayScope) (
 	case gatewayPhaseBind:
 		return r.reconcileGatewayBinding(ctx, scope, decision)
 	case gatewayPhaseEnsure:
+		if BackendClientCertificateRef(scope.gateway) != nil && !r.Config.BackendTLSPolicy {
+			result, err := r.withdrawGatewayCertificates(ctx, scope.gateway)
+			if usesHTTPSProfile(r.Config, scope.gateway) {
+				r.applyHTTPSListenerStatus(scope.gateway, scope.original.Status, r.listenerTLSIssues(ctx, scope.gateway), nil, false)
+			}
+			return result, err
+		}
 		return r.reconcileGatewayGraph(ctx, scope, decision)
 	default:
 		return ctrl.Result{}, fmt.Errorf("unsupported Gateway reconciliation phase %d", decision.phase)
@@ -170,6 +183,9 @@ func (r *Reconciler) reconcileRejectedGateway(
 	decision gatewayPhaseDecision,
 ) (ctrl.Result, error) {
 	r.setGatewayFailure(scope.gateway, decision.validation)
+	if BackendClientCertificateRef(scope.gateway) != nil && !r.Config.BackendTLSPolicy {
+		return r.withdrawGatewayCertificates(ctx, scope.gateway)
+	}
 	if result, withdrawn, err := r.withdrawBoundTLS(ctx, scope.gateway); err != nil || !withdrawn {
 		return result, err
 	}

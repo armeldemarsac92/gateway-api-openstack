@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
@@ -121,11 +122,49 @@ func TestBackendTLSOwnershipSurvivesOptOutAndIsUsedAtDeletion(t *testing.T) {
 	if after := observe(graph.Ensure); !after.Node.BackendCAOwned || after.Node.ClaimBackendCA != nil {
 		t.Fatal("opt-out lost ownership of previously published CAs")
 	}
+	tls := &gatewayv1.GatewayTLSConfig{Backend: &gatewayv1.GatewayBackendTLS{
+		ClientCertificateRef: &gatewayv1.SecretObjectReference{Name: "backend-client"},
+	}}
+	unbound := &gatewayv1.Gateway{Spec: gatewayv1.GatewaySpec{Listeners: gw.Spec.Listeners, TLS: tls}}
+	if _, err := SupportedListenersForConfig(r.Config, unbound); err == nil {
+		t.Fatal("a new Gateway requested a client identity without policy observation")
+	}
+	gw.Spec.TLS = tls
+	if err := kube.Update(t.Context(), gw); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SupportedListenersForConfig(r.Config, gw); err != nil {
+		t.Fatalf("opt-out invalidated the listener of the bound Gateway: %v", err)
+	}
+	withdrawal := observe(graph.WithdrawBackendClientCertificate)
+	if withdrawal.Node.Disposition != cloud.GraphWithdrawBackendClientCertificate ||
+		!withdrawal.Node.BackendClientCertificate.Denied || withdrawal.Validate(t.Context()) != nil {
+		t.Fatal("opt-out did not preserve narrow withdrawal authority for the bound Gateway")
+	}
 	if err := kube.Delete(t.Context(), gw); err != nil {
 		t.Fatal(err)
 	}
 	if removal := observe(graph.DeleteGateway); !removal.Node.BackendCAOwned || removal.Node.ClaimBackendCA != nil {
 		t.Fatal("Gateway finalization lost its CA cleanup obligation")
+	}
+}
+
+func TestBackendClientCertificateRemovalKeepsCurrentListenerFailure(t *testing.T) {
+	gw := &gatewayv1.Gateway{
+		ObjectMeta: metav1.ObjectMeta{Generation: 2},
+		Status: gatewayv1.GatewayStatus{
+			Conditions: []metav1.Condition{controller.Condition(string(gatewayv1.GatewayConditionResolvedRefs),
+				metav1.ConditionTrue, string(gatewayv1.GatewayReasonResolvedRefs), "Client certificate enrolled", 1)},
+			Listeners: []gatewayv1.ListenerStatus{{Name: "https", Conditions: []metav1.Condition{
+				controller.Condition(string(gatewayv1.ListenerConditionResolvedRefs), metav1.ConditionFalse,
+					string(gatewayv1.ListenerReasonInvalidCertificateRef), "Certificate unavailable", 2),
+			}}},
+		},
+	}
+	(&Reconciler{}).setBackendClientCertificateStatus(t.Context(), gw)
+	got := meta.FindStatusCondition(gw.Status.Conditions, string(gatewayv1.GatewayConditionResolvedRefs))
+	if got == nil || got.Status != metav1.ConditionFalse || got.Reason != string(gatewayv1.GatewayReasonListenersNotResolved) || got.ObservedGeneration != 2 {
+		t.Fatalf("lost current listener failure while removing backend identity: %+v", got)
 	}
 }
 

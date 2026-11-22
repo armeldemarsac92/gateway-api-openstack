@@ -847,6 +847,7 @@ type routeMutation struct {
 	poolAdmin                *bool
 	poolTags                 *[]string
 	backendTLS               *octavia.BackendTLSSettings
+	clearTLSClientRef        bool
 	reenableH2CPool          bool
 	clearMemberBackup        bool
 	withdrawHTTPPolicy       bool
@@ -1462,13 +1463,14 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 		}
 		var hostname string
 		requireH2 := step.backendTLS != nil && step.backendTLS.RequireH2 != nil && *step.backendTLS.RequireH2
-		if desired.spec.GRPC && step.poolTags != nil {
-			// A protected gRPC pool starts closed. Only an independent,
-			// ownership-checked inventory can authorize reopening it.
+		if step.poolTags != nil && (desired.spec.GRPC || step.backendTLS != nil && step.backendTLS.ClientCertificateReference != "") {
+			// A gRPC TLS pool or a pool with a client identity starts closed.
+			// Reopening requires independent, ownership-checked readback.
 			opts.AdminStateUp = boolPointer(false)
 		}
 		if step.backendTLS != nil {
 			opts.TLSEnabled, opts.CATLSContainerRef = true, step.backendTLS.CAReference
+			opts.TLSContainerRef = step.backendTLS.ClientCertificateReference
 			hostname = step.backendTLS.Hostname
 		}
 		_, err = p.octavia.CreatePool(ctx, octavia.CreatePoolOpts{CreateOpts: opts,
@@ -1490,7 +1492,8 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 		err = p.octavia.ClearMembers(ctx, step.id)
 	case routeMutationSetBackendTLS:
 		opts := pools.UpdateOpts{AdminStateUp: step.poolAdmin, Tags: step.poolTags}
-		_, err = p.octavia.UpdatePool(ctx, step.id, octavia.UpdatePoolOpts{UpdateOpts: opts, BackendH2C: step.backendH2C, BackendTLS: step.backendTLS})
+		_, err = p.octavia.UpdatePool(ctx, step.id, octavia.UpdatePoolOpts{UpdateOpts: opts, BackendH2C: step.backendH2C, BackendTLS: step.backendTLS,
+			ClearTLSClientRef: step.clearTLSClientRef})
 	case routeMutationDisableMember:
 		_, err = p.octavia.UpdateMember(ctx, step.parentID, step.id, pools.UpdateMemberOpts{AdminStateUp: boolPointer(false)})
 	case routeMutationDeleteMember:

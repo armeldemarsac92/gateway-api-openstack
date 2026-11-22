@@ -26,6 +26,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia/amphora"
@@ -85,9 +86,18 @@ func SupportedListenersForConfig(config controller.Config, gateway *gatewayv1.Ga
 			gatewayReason: gatewayv1.GatewayReasonInvalidParameters,
 		}
 	}
-	if gateway.Spec.TLS != nil {
+	if model.UnsupportedGatewayWideTLS(gateway.Spec.TLS) {
 		return nil, &gatewayValidationError{
-			message:       "gateway-wide spec.tls is not supported",
+			message:       "Gateway-wide spec.tls supports only backend configuration",
+			gatewayReason: gatewayv1.GatewayReasonInvalidParameters,
+		}
+	}
+	// A bound Gateway with an enrollment checkpoint may still observe its
+	// listeners for withdrawal. Route compilation cannot run without policies.
+	if BackendClientCertificateRef(gateway) != nil && !config.BackendTLSPolicy &&
+		(!controllerutil.ContainsFinalizer(gateway, config.GatewayFinalizer()) || !controllerutil.ContainsFinalizer(gateway, config.BackendCAFinalizer())) {
+		return nil, &gatewayValidationError{
+			message:       "Gateway backend client certificates require BackendTLSPolicy observation",
 			gatewayReason: gatewayv1.GatewayReasonInvalidParameters,
 		}
 	}

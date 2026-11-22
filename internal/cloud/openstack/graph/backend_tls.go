@@ -34,6 +34,7 @@ import (
 
 const backendTLSManagedTag = "gateway-api-openstack.backend-tls=v1"
 const backendTLSRevisionTagPrefix = "gateway-api-openstack.backend-tls-ca="
+const backendTLSClientTag = "gateway-api-openstack.backend-tls-client=v1"
 
 type backendTLSPhase uint8
 
@@ -49,16 +50,19 @@ const (
 )
 
 type backendTLSPlan struct {
-	phase    backendTLSPhase
-	settings octavia.BackendTLSSettings
-	issue    string
+	phase                  backendTLSPhase
+	settings               octavia.BackendTLSSettings
+	issue                  string
+	clearClientCertificate bool
 }
 
 type backendTLSPart struct {
-	index    int
-	key      string
-	desired  *desiredRoute
-	observed observedRouteGraph
+	index             int
+	key               string
+	desired           *desiredRoute
+	observed          observedRouteGraph
+	clientCertificate cloud.BackendClientCertificate
+	retiring          bool
 }
 
 func (plan backendTLSPlan) denies() bool {
@@ -125,6 +129,9 @@ func (p *Provider) prepareBackendTLS(ctx context.Context, desired *desiredGatewa
 	}
 	frontends := scopedHTTPListeners(*desired)
 	step := firstBackendTLSWithdrawal(parts, func(part backendTLSPart) backendTLSPlan {
+		if part.retiring {
+			return part.preflight()
+		}
 		if part.desired == nil {
 			// Keep the old pool and its durable marker until a live policy
 			// inventory authorizes the replacement representation.
@@ -139,7 +146,7 @@ func (p *Provider) prepareBackendTLS(ctx context.Context, desired *desiredGatewa
 			part.desired.backendTLS = backendTLSPlan{phase: backendTLSBlocked, issue: "Waiting for the authorized HTTP listener"}
 			return part.desired.backendTLS
 		}
-		part.desired.backendTLS = p.observeBackendTLS(ctx, *part.desired, part.observed, capable, desired.spec.Gateway.BackendCAOwned)
+		part.desired.backendTLS = p.observeBackendTLS(ctx, *part.desired, part.observed, capable, desired.spec.Gateway.BackendCAOwned, part.clientCertificate)
 		return part.desired.backendTLS
 	})
 	if step != nil && (!step.route.retry || early == nil) {
@@ -151,19 +158,18 @@ func (p *Provider) prepareBackendTLS(ctx context.Context, desired *desiredGatewa
 func backendTLSParts(desired *desiredGatewayGraph, routes []observedRouteGraph) []backendTLSPart {
 	var parts []backendTLSPart
 	for index := range desired.routes {
-		if desired.spec.Routes[index].Disposition != cloud.GraphEnsure {
-			continue
-		}
+		retiring := desired.spec.Routes[index].Disposition != cloud.GraphEnsure
 		route := &desired.routes[index]
 		observed := routes[index]
 		hasPolicy := routeHasBackendTLSPolicy(*route)
 		add := func(part *desiredRoute, key string, actualPart observedRouteGraph) {
 			if part == nil && hasPolicy && actualPart.pool != nil || part != nil && part.spec.BackendTLS != nil ||
 				actualPart.pool != nil && hasObservedBackendTLS(*actualPart.pool, actualPart.backendTLS) {
-				parts = append(parts, backendTLSPart{index: index, key: key, desired: part, observed: actualPart})
+				parts = append(parts, backendTLSPart{index: index, key: key, desired: part, observed: actualPart,
+					retiring: retiring, clientCertificate: desired.spec.Gateway.BackendClientCertificate})
 			}
 		}
-		if len(route.httpParts) == 0 || len(route.policies) != 0 {
+		if !retiring && (len(route.httpParts) == 0 || len(route.policies) != 0) {
 			add(route, "", observed)
 		} else {
 			add(nil, "", observed)
@@ -193,8 +199,20 @@ func (part backendTLSPart) preflight() backendTLSPlan {
 	if pool == nil {
 		return backendTLSPlan{}
 	}
+	managed := slices.Contains(pool.Tags, backendTLSManagedTag)
+	staleClient := part.clientCertificate.Denied || pool.TLSContainerRef != part.clientCertificate.Reference
+	clearClient := managed && staleClient
+	if part.retiring {
+		if managed && (staleClient || !part.observed.backendTLS.ClientRefObserved && slices.Contains(pool.Tags, backendTLSClientTag)) {
+			return backendTLSPlan{phase: backendTLSDenied, clearClientCertificate: true}
+		}
+		return backendTLSPlan{}
+	}
+	if part.clientCertificate.Denied && part.desired != nil && part.desired.spec.BackendTLS != nil {
+		return backendTLSPlan{phase: backendTLSBlocked, clearClientCertificate: clearClient}
+	}
 	if part.desired == nil || part.desired.spec.BackendTLS == nil || part.desired.spec.BackendTLS.Denied {
-		return backendTLSPlan{phase: backendTLSDenied}
+		return backendTLSPlan{phase: backendTLSDenied, clearClientCertificate: clearClient}
 	}
 	tls := part.desired.spec.BackendTLS
 	observed := part.observed.backendTLS
@@ -202,7 +220,7 @@ func (part backendTLSPart) preflight() backendTLSPlan {
 		!validBackendTLS(tls) || !backendTLSReadbackComplete(*part.desired, part.observed) || observed.Hostname != tls.Hostname ||
 		part.desired.spec.GRPC && !observed.RequireH2 ||
 		!pool.TLSEnabled || pool.CATLSContainerRef == "" || part.observed.backendH2C || part.desired.spec.BackendH2C ||
-		pool.TLSContainerRef != "" || pool.CRLContainerRef != "" || differentBackendTLSRevision(pool.Tags, backendTLSRevisionTag(tls)) {
+		pool.TLSContainerRef != part.clientCertificate.Reference || pool.CRLContainerRef != "" || differentBackendTLSRevision(pool.Tags, backendTLSRevisionTag(tls)) {
 		return backendTLSPlan{phase: backendTLSConfigure}
 	}
 	return backendTLSPlan{}
@@ -211,16 +229,20 @@ func (part backendTLSPart) preflight() backendTLSPlan {
 func firstBackendTLSWithdrawal(parts []backendTLSPart, plan func(backendTLSPart) backendTLSPlan) *graphMutation {
 	var first *graphMutation
 	for _, part := range parts {
+		if pool := part.observed.pool; pool != nil && pool.TLSContainerRef != "" && !slices.Contains(pool.Tags, backendTLSManagedTag) &&
+			(part.desired == nil || part.desired.spec.BackendTLS == nil) {
+			continue
+		}
 		protect := part.desired == nil || part.desired.spec.BackendTLS != nil
 		requireH2 := part.desired != nil && part.desired.spec.GRPC && protect
 		step := plan(part).withdrawal(protect, requireH2, part.observed)
 		// An unsupported protected pool can block member drains anywhere on
 		// the load balancer. Disable unsafe protected pools first.
 		if step != nil && (first == nil || first.route.retry && !step.retry ||
-			first.route.retry == step.retry && first.route.kind == routeMutationClearPoolMembers && step.kind == routeMutationSetBackendTLS) {
+			first.route.retry == step.retry && first.route.poolAdmin == nil && step.poolAdmin != nil) {
 			first = &graphMutation{kind: graphRouteMutation, routeIndex: part.index, backendKey: part.key,
 				route: *step, withdrawHTTPPolicy: true, message: step.message()}
-			if step.kind == routeMutationSetBackendTLS && !step.retry {
+			if step.poolAdmin != nil && !step.retry {
 				return first
 			}
 		}
@@ -228,7 +250,7 @@ func firstBackendTLSWithdrawal(parts []backendTLSPart, plan func(backendTLSPart)
 	return first
 }
 
-func (p *Provider) observeBackendTLS(ctx context.Context, desired desiredRoute, observed observedRouteGraph, capable func(requireH2 bool) bool, ownsCA bool) backendTLSPlan {
+func (p *Provider) observeBackendTLS(ctx context.Context, desired desiredRoute, observed observedRouteGraph, capable func(requireH2 bool) bool, ownsCA bool, clientCertificate cloud.BackendClientCertificate) backendTLSPlan {
 	tls, pool := desired.spec.BackendTLS, observed.pool
 	blocked := func(message string) backendTLSPlan {
 		return backendTLSPlan{phase: backendTLSBlocked, issue: message}
@@ -249,6 +271,9 @@ func (p *Provider) observeBackendTLS(ctx context.Context, desired desiredRoute, 
 	}
 	if tls.Denied {
 		return backendTLSPlan{phase: backendTLSDenied}
+	}
+	if clientCertificate.Denied {
+		return backendTLSPlan{phase: backendTLSBlocked, issue: "Waiting for an authorized Gateway backend client certificate", clearClientCertificate: true}
 	}
 	if !validBackendTLS(tls) || desired.spec.BackendH2C {
 		return blocked("Backend TLS requires a valid CA and DNS hostname on an HTTP backend")
@@ -278,13 +303,13 @@ func (p *Provider) observeBackendTLS(ctx context.Context, desired desiredRoute, 
 	case revision.Digest() != tls.CADigest:
 		return blocked("Waiting for the authorized backend CA revision")
 	}
-	settings := octavia.BackendTLSSettings{Hostname: tls.Hostname, CAReference: revision.Reference()}
+	settings := octavia.BackendTLSSettings{Hostname: tls.Hostname, CAReference: revision.Reference(), ClientCertificateReference: clientCertificate.Reference}
 	if desired.spec.GRPC {
 		settings.RequireH2 = boolPointer(true)
 	}
 	if pool == nil || pool.ProvisioningStatus != "ACTIVE" || !pool.TLSEnabled || observed.backendTLS.Hostname != settings.Hostname ||
 		preferred != settings.CAReference || observed.backendH2C || desired.spec.GRPC && !observed.backendTLS.RequireH2 ||
-		pool.TLSContainerRef != "" || pool.CRLContainerRef != "" {
+		pool.TLSContainerRef != settings.ClientCertificateReference || pool.CRLContainerRef != "" {
 		return backendTLSPlan{phase: backendTLSConfigure, settings: settings}
 	}
 	return backendTLSPlan{phase: backendTLSVerified, settings: settings}
@@ -307,15 +332,18 @@ func differentBackendTLSRevision(tags []string, expected string) bool {
 	})
 }
 
-func backendTLSTags(tags []string, managed bool, revision string) []string {
+func backendTLSTags(tags []string, managed bool, revision string, clientCertificate bool) []string {
 	tags = slices.DeleteFunc(slices.Clone(tags), func(tag string) bool {
-		return tag == backendTLSManagedTag || strings.HasPrefix(tag, backendTLSRevisionTagPrefix)
+		return tag == backendTLSManagedTag || tag == backendTLSClientTag || strings.HasPrefix(tag, backendTLSRevisionTagPrefix)
 	})
 	if managed {
 		tags = append(tags, backendTLSManagedTag)
 	}
 	if revision != "" {
 		tags = append(tags, revision)
+	}
+	if clientCertificate {
+		tags = append(tags, backendTLSClientTag)
 	}
 	return tags
 }
@@ -328,7 +356,8 @@ func (plan backendTLSPlan) withdrawal(protect, requireH2 bool, observed observed
 	managed := slices.Contains(pool.Tags, backendTLSManagedTag)
 	enrolling := protect && !managed
 	if enrolling || (pool.AdminStateUp || !observed.backendTLS.AdminObserved || pool.ProvisioningStatus == "ERROR") &&
-		(requireH2 || hasBackendTLSSettings(*pool, observed.backendTLS) || managed && (!observed.backendTLS.Complete() || len(observed.members) != 0 || pool.ProvisioningStatus == "ERROR")) {
+		(requireH2 || plan.settings.ClientCertificateReference != "" ||
+			hasBackendTLSSettings(*pool, observed.backendTLS) || managed && (!observed.backendTLS.Complete() || len(observed.members) != 0 || pool.ProvisioningStatus == "ERROR")) {
 		// A regional or runtime capability loss can reject a reload of a
 		// protected pool even with no members. Administrative disable is
 		// supported without reenrolling TLS or reading revoked CA material.
@@ -343,6 +372,10 @@ func (plan backendTLSPlan) withdrawal(protect, requireH2 bool, observed observed
 		// The public batch API removes both server traffic and health probes
 		// in one reload, while an enabled empty pool still selects this match.
 		return &routeMutation{kind: routeMutationClearPoolMembers, id: pool.ID}
+	}
+	if plan.clearClientCertificate && pool.ProvisioningStatus == "ACTIVE" && observed.backendTLS.AdminObserved &&
+		!pool.AdminStateUp && observed.backendTLS.ClientRefObserved && pool.TLSContainerRef != "" {
+		return &routeMutation{kind: routeMutationSetBackendTLS, id: pool.ID, clearTLSClientRef: true}
 	}
 	return nil
 }
@@ -367,7 +400,7 @@ func (plan backendTLSPlan) poolMutation(desired desiredRoute, observed observedR
 		step := routeMutation{kind: routeMutationCreatePool, poolTags: &managedTags}
 		if plan.phase == backendTLSConfigure {
 			step.backendTLS = &plan.settings
-			step.poolTags = new(backendTLSTags(nil, true, backendTLSRevisionTag(desired.spec.BackendTLS)))
+			step.poolTags = new(backendTLSTags(nil, true, backendTLSRevisionTag(desired.spec.BackendTLS), plan.settings.ClientCertificateReference != ""))
 		}
 		return &step
 	}
@@ -396,7 +429,7 @@ func (plan backendTLSPlan) poolMutation(desired desiredRoute, observed observedR
 			// after its hostname is cleared. Reopen it empty before unmarking.
 			step.poolAdmin = boolPointer(true)
 		default:
-			step.poolTags = new(backendTLSTags(pool.Tags, false, ""))
+			step.poolTags = new(backendTLSTags(pool.Tags, false, "", false))
 		}
 		return &step
 	}
@@ -405,13 +438,15 @@ func (plan backendTLSPlan) poolMutation(desired desiredRoute, observed observedR
 	}
 	if plan.phase == backendTLSConfigure || plan.phase == backendTLSVerified {
 		revision := backendTLSRevisionTag(desired.spec.BackendTLS)
-		if step.poolTags != nil || !slices.Contains(pool.Tags, revision) || differentBackendTLSRevision(pool.Tags, revision) {
-			tags := backendTLSTags(pool.Tags, true, revision)
+		clientCertificate := plan.settings.ClientCertificateReference != ""
+		if step.poolTags != nil || !slices.Contains(pool.Tags, revision) || differentBackendTLSRevision(pool.Tags, revision) ||
+			slices.Contains(pool.Tags, backendTLSClientTag) != clientCertificate {
+			tags := backendTLSTags(pool.Tags, true, revision, clientCertificate)
 			step.poolTags = &tags
 		}
 	}
 	switch {
-	case plan.phase == backendTLSConfigure && len(observed.members) == 0:
+	case plan.phase == backendTLSConfigure && len(observed.members) == 0 && (plan.settings.ClientCertificateReference == "" || !pool.AdminStateUp):
 		step.backendTLS = &plan.settings
 		if observed.backendH2C {
 			step.backendH2C = boolPointer(false)

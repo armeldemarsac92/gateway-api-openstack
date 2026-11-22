@@ -19,6 +19,7 @@ package httproute
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -253,6 +254,9 @@ func (r *Reconciler) collectRouteModelInputs(ctx context.Context, reader client.
 }
 
 func (r *Reconciler) collectRouteModelInputsForSets(ctx context.Context, reader client.Reader, gateway *gatewayv1.Gateway, routes []gatewayv1.HTTPRoute, namespaces []corev1.Namespace, sets map[types.NamespacedName][]gatewayv1.Listener) (*routeModelInputs, error) {
+	if !r.Config.BackendTLSPolicy && gatewaycontroller.BackendClientCertificateRef(gateway) != nil {
+		return nil, errors.New("Gateway backend client certificates require BackendTLSPolicy observation")
+	}
 	routes = slices.Clone(routes)
 	for i := range routes {
 		if rules, dropped := r.projectedHTTPFilterRules(&routes[i]); dropped != "" {

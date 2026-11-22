@@ -69,9 +69,13 @@ func validName(target client.ObjectKey) bool {
 		len(validation.IsDNS1123Subdomain(target.Name)) == 0
 }
 
-func findBinding(path string, scope bindingScope, target client.ObjectKey) (binding, bool) {
+func findBinding(path, purpose string, scope bindingScope, target client.ObjectKey) (binding, bool) {
+	if !scope.valid() {
+		return binding{}, false
+	}
 	var snapshot struct {
 		Version   int          `json:"version"`
+		Purpose   string       `json:"purpose"`
 		Scope     bindingScope `json:"scope"`
 		Revisions []binding    `json:"revisions"`
 	}
@@ -87,7 +91,7 @@ func findBinding(path string, scope bindingScope, target client.ObjectKey) (bind
 	payload, err := io.ReadAll(io.LimitReader(file, maxSnapshotBytes+1))
 	if err != nil || len(payload) > maxSnapshotBytes ||
 		json.Unmarshal(payload, &snapshot, json.RejectUnknownMembers(true)) != nil ||
-		snapshot.Version != 1 || snapshot.Scope != scope || snapshot.Revisions == nil {
+		snapshot.Version != 1 || snapshot.Purpose != purpose || snapshot.Scope != scope || snapshot.Revisions == nil {
 		return binding{}, false
 	}
 	var selected binding

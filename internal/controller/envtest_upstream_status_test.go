@@ -21,8 +21,11 @@ package controller_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -45,12 +48,15 @@ import (
 	configv1alpha1 "github.com/gateway-api-openstack/gateway-api-openstack/api/v1alpha1"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/certificates"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gatewayclass"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/httproute"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/l4route"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/listenerset"
 )
+
+const upstreamStatusGatewayClass = "upstream-status"
 
 func startGatewayStatusReconcilers(t *testing.T, manager ctrl.Manager, cfg controller.Config, provider *recordingProvider) *graph.Writer {
 	t.Helper()
@@ -59,6 +65,19 @@ func startGatewayStatusReconcilers(t *testing.T, manager ctrl.Manager, cfg contr
 		t.Fatal(err)
 	}
 	gateway := newEnvtestGatewayReconciler(manager.GetClient(), manager.GetAPIReader(), provider, cfg)
+	if cfg.BackendClientCertificate {
+		const region = "RegionOne"
+		path := filepath.Join(t.TempDir(), "backend-clients.json")
+		snapshot := fmt.Appendf(nil, `{"version":1,"purpose":"backend-client","scope":{"cluster":%q,"gatewayClass":%q,"project":%q,"region":%q},"revisions":[]}`,
+			cfg.ClusterID, upstreamStatusGatewayClass, cfg.OpenStackProjectID, region)
+		if err := os.WriteFile(path, snapshot, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		gateway.BackendClientCertificates = &certificates.Resolver{
+			BackendClientPath: path, ClusterID: cfg.ClusterID, ProjectID: cfg.OpenStackProjectID,
+			Region: region, Endpoint: "https://barbican.example", Reader: manager.GetAPIReader(),
+		}
+	}
 	if err := gateway.SetupWithManager(manager); err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +108,7 @@ func startGatewayStatusReconcilers(t *testing.T, manager ctrl.Manager, cfg contr
 // Upstream profile setup also needs ready workloads and is run separately.
 func testUpstreamGatewayStatus(t *testing.T, c client.Client, cfg controller.Config, provider *recordingProvider) {
 	t.Helper()
-	const className = "upstream-status"
+	const className = upstreamStatusGatewayClass
 	parameters := envtestClassParameters(className)
 	// The upstream backend Services use ClusterIP.
 	parameters.Spec.MemberMode = configv1alpha1.MemberModeEndpoint
@@ -214,6 +233,7 @@ func testUpstreamGatewayStatus(t *testing.T, c client.Client, cfg controller.Con
 		tests.GatewayClassObservedGenerationBump,
 		tests.GatewayInvalidRouteKind,
 		tests.GatewayInvalidParametersRef,
+		tests.GatewayInvalidTLSBackendConfiguration,
 		tests.GatewayListenerUnsupportedProtocol,
 		tests.GatewayNameMaximumLength,
 		tests.HTTPRouteInvalidCrossNamespaceParentRef,

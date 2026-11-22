@@ -1,4 +1,4 @@
-// Package certificates resolves operator-enrolled revisions for terminating listeners.
+// Package certificates resolves operator-enrolled TLS certificate revisions.
 package certificates
 
 import (
@@ -12,22 +12,27 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
+const BackendClientPurpose = "backend-client"
+
 // Resolver reads a protected enrollment snapshot and uses the uncached Reader
 // to check current ReferenceGrants and Secret metadata.
 type Resolver struct {
-	Path             string
-	ClusterID        string
-	ProjectID        string
-	Region           string
-	Endpoint         string
-	DiscoverEndpoint func() (string, error)
-	Reader           client.Reader
+	Path              string
+	BackendClientPath string
+	ClusterID         string
+	ProjectID         string
+	Region            string
+	Endpoint          string
+	DiscoverEndpoint  func() (string, error)
+	Reader            client.Reader
 }
 
 // Resolve returns a Barbican reference only for the live revision of an enrolled
@@ -37,7 +42,61 @@ func (r *Resolver) Resolve(ctx context.Context, gateway *gatewayv1.Gateway, list
 	if reason != "" {
 		return "", reason
 	}
+	return r.barbicanRef(row)
+}
 
+// ResolveBackendClientCertificate uses the operator's backend identity enrollment
+// and checks the grant before reading Secret metadata or discovering Barbican.
+func (r *Resolver) ResolveBackendClientCertificate(ctx context.Context, gateway *gatewayv1.Gateway) (string, gatewayv1.GatewayConditionReason, string) {
+	const invalid = gatewayv1.GatewayReasonInvalidClientCertificateRef
+	if gateway == nil || gateway.Spec.TLS == nil || gateway.Spec.TLS.Backend == nil || gateway.Spec.TLS.Backend.ClientCertificateRef == nil {
+		return "", invalid, "The Gateway has no backend client certificate reference"
+	}
+	ref := *gateway.Spec.TLS.Backend.ClientCertificateRef
+	target, valid := secretKey(gateway.Namespace, ref)
+	if !valid {
+		return "", invalid, "The backend client certificate reference must have a valid Secret name and namespace"
+	}
+	if r == nil || r.Reader == nil || r.BackendClientPath == "" {
+		return "", "BackendClientCertificateUnavailable", "The operator backend client certificate resolver is unavailable"
+	}
+	group, kind := ptr.Deref(ref.Group, ""), ptr.Deref(ref.Kind, "Secret")
+	if allowed, observed := r.referenceAllowed(ctx, gateway, target, group, kind); !observed {
+		return "", "BackendClientCertificateUnavailable", "The ReferenceGrants for the backend client certificate could not be read"
+	} else if !allowed {
+		return "", gatewayv1.GatewayReasonRefNotPermitted, "No ReferenceGrant permits this Gateway to use the backend client certificate reference"
+	}
+	if group != "" {
+		return "", invalid, "The backend client certificate reference must use the core API group"
+	}
+	if kind != "Secret" {
+		return "", invalid, "The backend client certificate reference must use kind Secret"
+	}
+	row, found := findBinding(r.BackendClientPath, BackendClientPurpose, r.scope(gateway), target)
+	metadata, err := r.secretMetadata(ctx, target)
+	if apierrors.IsNotFound(err) || err == nil && !metadata.DeletionTimestamp.IsZero() {
+		return "", invalid, "The backend client certificate Secret does not exist or is being deleted"
+	}
+	if !found {
+		return "", invalid, "The backend client certificate Secret has no verified operator enrollment for a kubernetes.io/tls Secret with matching tls.crt and tls.key"
+	}
+	if err != nil {
+		return "", "BackendClientCertificateUnavailable", "The enrolled backend client certificate Secret metadata could not be read"
+	}
+	if !matchesRevision(metadata, target, row) {
+		return "", invalid, "The live backend client certificate Secret UID or resourceVersion differs from its operator enrollment"
+	}
+	if !row.validAt(time.Now()) {
+		return "", "BackendClientCertificateNotCurrent", "The enrolled backend client certificate is outside its validity period"
+	}
+	reference, reason := r.barbicanRef(row)
+	if reason != "" {
+		return "", "BackendClientCertificateUnavailable", "The regional Barbican endpoint for the backend client certificate is unavailable"
+	}
+	return reference, "", ""
+}
+
+func (r *Resolver) barbicanRef(row binding) (string, gatewayv1.ListenerConditionReason) {
 	const invalid = gatewayv1.ListenerReasonInvalidCertificateRef
 	endpoint := r.Endpoint
 	if r.DiscoverEndpoint != nil {
@@ -66,37 +125,67 @@ func (r *Resolver) ReferenceStatus(ctx context.Context, gateway *gatewayv1.Gatew
 
 func (r *Resolver) authorizedBinding(ctx context.Context, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) (binding, gatewayv1.ListenerConditionReason) {
 	const invalid = gatewayv1.ListenerReasonInvalidCertificateRef
-	if r == nil || r.Path == "" || r.Reader == nil || gateway == nil || listener == nil {
+	if gateway == nil || listener == nil {
 		return binding{}, invalid
 	}
-	scope := bindingScope{Cluster: r.ClusterID, GatewayClass: string(gateway.Spec.GatewayClassName), Project: r.ProjectID, Region: r.Region}
 	target, valid := certificateTarget(gateway, listener)
-	if !valid || !scope.valid() {
+	if !valid {
 		return binding{}, invalid
 	}
-	if target.Namespace != gateway.Namespace {
-		var grants gatewayv1.ReferenceGrantList
-		if err := r.Reader.List(ctx, &grants, client.InNamespace(target.Namespace)); err != nil || grants.Continue != "" {
-			return binding{}, invalid
-		}
-		if !permitsCertificate(grants.Items, gateway.Namespace, target) {
-			return binding{}, gatewayv1.ListenerReasonRefNotPermitted
-		}
+	return r.authorizedSecret(ctx, gateway, target)
+}
+
+func (r *Resolver) authorizedSecret(ctx context.Context, gateway *gatewayv1.Gateway, target client.ObjectKey) (binding, gatewayv1.ListenerConditionReason) {
+	const invalid = gatewayv1.ListenerReasonInvalidCertificateRef
+	if r == nil || r.Reader == nil || r.Path == "" {
+		return binding{}, invalid
+	}
+	scope := r.scope(gateway)
+	if !scope.valid() {
+		return binding{}, invalid
+	}
+	if allowed, observed := r.referenceAllowed(ctx, gateway, target, "", "Secret"); !observed {
+		return binding{}, invalid
+	} else if !allowed {
+		return binding{}, gatewayv1.ListenerReasonRefNotPermitted
 	}
 
-	row, found := findBinding(r.Path, scope, target)
+	row, found := findBinding(r.Path, "", scope, target)
 	if !found || !row.validAt(time.Now()) {
 		return binding{}, invalid
 	}
-	metadata := &metav1.PartialObjectMetadata{}
-	metadata.SetGroupVersionKind(corev1.SchemeGroupVersion.WithKind("Secret"))
-	if err := r.Reader.Get(ctx, target, metadata); err != nil ||
-		metadata.Namespace != target.Namespace || metadata.Name != target.Name ||
-		string(metadata.UID) != row.UID || metadata.ResourceVersion != row.ResourceVersion ||
-		!metadata.DeletionTimestamp.IsZero() {
+	metadata, err := r.secretMetadata(ctx, target)
+	if err != nil || !matchesRevision(metadata, target, row) {
 		return binding{}, invalid
 	}
 	return row, ""
+}
+
+func (r *Resolver) scope(gateway *gatewayv1.Gateway) bindingScope {
+	return bindingScope{Cluster: r.ClusterID, GatewayClass: string(gateway.Spec.GatewayClassName), Project: r.ProjectID, Region: r.Region}
+}
+
+func (r *Resolver) referenceAllowed(ctx context.Context, gateway *gatewayv1.Gateway, target client.ObjectKey, group gatewayv1.Group, kind gatewayv1.Kind) (allowed, observed bool) {
+	if target.Namespace == gateway.Namespace {
+		return true, true
+	}
+	var grants gatewayv1.ReferenceGrantList
+	if err := r.Reader.List(ctx, &grants, client.InNamespace(target.Namespace)); err != nil || grants.Continue != "" {
+		return false, false
+	}
+	return permitsReference(grants.Items, gateway.Namespace, target, group, kind), true
+}
+
+func (r *Resolver) secretMetadata(ctx context.Context, target client.ObjectKey) (*metav1.PartialObjectMetadata, error) {
+	metadata := &metav1.PartialObjectMetadata{}
+	metadata.SetGroupVersionKind(corev1.SchemeGroupVersion.WithKind("Secret"))
+	return metadata, r.Reader.Get(ctx, target, metadata)
+}
+
+func matchesRevision(metadata *metav1.PartialObjectMetadata, target client.ObjectKey, row binding) bool {
+	return metadata.Namespace == target.Namespace && metadata.Name == target.Name &&
+		string(metadata.UID) == row.UID && metadata.ResourceVersion == row.ResourceVersion &&
+		metadata.DeletionTimestamp.IsZero()
 }
 
 func certificateTarget(gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) (client.ObjectKey, bool) {
@@ -104,22 +193,29 @@ func certificateTarget(gateway *gatewayv1.Gateway, listener *gatewayv1.Listener)
 	if (listener.Protocol != gatewayv1.HTTPSProtocolType && listener.Protocol != gatewayv1.TLSProtocolType) || tls == nil ||
 		(tls.Mode != nil && *tls.Mode != gatewayv1.TLSModeTerminate) ||
 		len(tls.CertificateRefs) != 1 || len(tls.Options) != 0 ||
-		(gateway.Spec.TLS != nil && (gateway.Spec.TLS.Frontend != nil || gateway.Spec.TLS.Backend != nil)) {
+		(gateway.Spec.TLS != nil && gateway.Spec.TLS.Frontend != nil) {
 		return client.ObjectKey{}, false
 	}
-	ref := tls.CertificateRefs[0]
+	return secretTarget(gateway.Namespace, tls.CertificateRefs[0])
+}
+
+func secretTarget(sourceNamespace string, ref gatewayv1.SecretObjectReference) (client.ObjectKey, bool) {
 	if (ref.Group != nil && *ref.Group != "") || (ref.Kind != nil && *ref.Kind != "Secret") {
 		return client.ObjectKey{}, false
 	}
-	namespace := gateway.Namespace
+	return secretKey(sourceNamespace, ref)
+}
+
+func secretKey(sourceNamespace string, ref gatewayv1.SecretObjectReference) (client.ObjectKey, bool) {
+	namespace := sourceNamespace
 	if ref.Namespace != nil {
 		namespace = string(*ref.Namespace)
 	}
 	target := client.ObjectKey{Namespace: namespace, Name: string(ref.Name)}
-	return target, validName(target) && len(validation.IsDNS1123Label(gateway.Namespace)) == 0
+	return target, validName(target) && len(validation.IsDNS1123Label(sourceNamespace)) == 0
 }
 
-func permitsCertificate(grants []gatewayv1.ReferenceGrant, namespace string, target client.ObjectKey) bool {
+func permitsReference(grants []gatewayv1.ReferenceGrant, namespace string, target client.ObjectKey, group gatewayv1.Group, kind gatewayv1.Kind) bool {
 	for _, grant := range grants {
 		if grant.Namespace != target.Namespace || !grant.DeletionTimestamp.IsZero() {
 			continue
@@ -128,7 +224,7 @@ func permitsCertificate(grants []gatewayv1.ReferenceGrant, namespace string, tar
 			return ref.Group == gatewayv1.GroupName && ref.Kind == "Gateway" && string(ref.Namespace) == namespace
 		})
 		to := slices.ContainsFunc(grant.Spec.To, func(ref gatewayv1.ReferenceGrantTo) bool {
-			return ref.Group == "" && ref.Kind == "Secret" && (ref.Name == nil || string(*ref.Name) == target.Name)
+			return ref.Group == group && ref.Kind == kind && (ref.Name == nil || string(*ref.Name) == target.Name)
 		})
 		if from && to {
 			return true

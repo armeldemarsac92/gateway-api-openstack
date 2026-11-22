@@ -133,7 +133,7 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 			Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForListenerSetNamespace),
 				builder.WithPredicates(controller.NamespacePredicate()))
 	}
-	if r.Config.OperatorHTTPS {
+	if r.Config.OperatorHTTPS || r.Config.BackendClientCertificate {
 		gatewayController.Watches(&gatewayv1.ReferenceGrant{}, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForCertificateGrant))
 	}
 	return gatewayController.
@@ -198,6 +198,10 @@ func (r *Reconciler) gatewayRequestsForCertificateGrant(ctx context.Context, obj
 		}
 		for i := range gateways.Items {
 			gateway := &gateways.Items[i]
+			if ref := BackendClientCertificateRef(gateway); r.Config.BackendClientCertificate &&
+				ref != nil && ref.Namespace != nil && string(*ref.Namespace) == grant.Namespace {
+				keys[client.ObjectKeyFromObject(gateway)] = struct{}{}
+			}
 			if slices.ContainsFunc(gateway.Spec.Listeners, func(listener gatewayv1.Listener) bool {
 				return (listener.Protocol == gatewayv1.HTTPSProtocolType || terminatesTLS(&listener)) && listener.TLS != nil &&
 					slices.ContainsFunc(listener.TLS.CertificateRefs, func(ref gatewayv1.SecretObjectReference) bool {

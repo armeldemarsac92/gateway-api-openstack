@@ -32,6 +32,9 @@ const (
 	// authorized HTTPS ports or TCP TLS certificate. This operation cannot
 	// create, enable or reconfigure listeners.
 	GraphWithdrawTLS GraphDisposition = "WithdrawTLS"
+	// GraphWithdrawBackendClientCertificate restricts owned HTTP pools carrying
+	// stale client identities without requiring a complete route graph.
+	GraphWithdrawBackendClientCertificate GraphDisposition = "WithdrawBackendClientCertificate"
 )
 
 // GatewayGraphSpec contains the complete authority and desired graph for one
@@ -53,10 +56,19 @@ type GatewayGraphNode struct {
 	// TCPTLSCertificateRef is the currently authorized certificate for the raw
 	// TCP termination profile. An empty reference requires the listener closed.
 	TCPTLSCertificateRef string `json:",omitempty"`
+	// BackendClientCertificate applies only to HTTP-family pools selected by BackendTLSPolicy.
+	BackendClientCertificate BackendClientCertificate
 	// BackendCAOwned persists across controller restarts and operator opt-out.
 	BackendCAOwned bool `json:",omitempty"`
 	// ClaimBackendCA checkpoints ownership before creating a Barbican revision.
 	ClaimBackendCA func(context.Context) error `json:"-"`
+}
+
+// BackendClientCertificate is the current Gateway client identity, or a denial
+// when the Gateway requests an identity that cannot be authorized.
+type BackendClientCertificate struct {
+	Reference string
+	Denied    bool
 }
 
 // TLSSNIRoute is one effective hostname and its authorized TCP destinations.

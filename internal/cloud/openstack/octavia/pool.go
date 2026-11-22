@@ -48,11 +48,12 @@ type PoolInventory struct {
 }
 
 // PoolBackendTLS records which transport fields the API actually reported.
-// Explicit null clears the nullable hostname and CA reference.
+// Explicit null is a reported absence of a hostname or certificate reference.
 type PoolBackendTLS struct {
 	Hostname          string
 	HostnameObserved  bool
 	CAObserved        bool
+	ClientRefObserved bool
 	RequireH2         bool
 	RequireH2Observed bool
 	EnabledObserved   bool
@@ -60,7 +61,7 @@ type PoolBackendTLS struct {
 }
 
 func (tls PoolBackendTLS) Complete() bool {
-	return tls.HostnameObserved && tls.CAObserved && tls.EnabledObserved && tls.AdminObserved
+	return tls.HostnameObserved && tls.CAObserved && tls.ClientRefObserved && tls.EnabledObserved && tls.AdminObserved
 }
 
 // ListPoolInventory requires an explicit pool collection on every page and
@@ -76,6 +77,7 @@ func (s *Service) ListPoolInventory(ctx context.Context, opts pools.ListOpts) (P
 				BackendH2C bool            `json:"backend_h2c"`
 				Hostname   json.RawMessage `json:"backend_tls_hostname"`
 				CA         json.RawMessage `json:"ca_tls_container_ref"`
+				ClientRef  json.RawMessage `json:"tls_container_ref"`
 				RequireH2  *bool           `json:"backend_tls_require_h2"`
 				Enabled    *bool           `json:"tls_enabled"`
 				Admin      *bool           `json:"admin_state_up"`
@@ -90,10 +92,12 @@ func (s *Service) ListPoolInventory(ctx context.Context, opts pools.ListOpts) (P
 		items := make([]pools.Pool, 0, len(response.Pools))
 		for _, pool := range response.Pools {
 			tls := PoolBackendTLS{HostnameObserved: len(pool.Hostname) != 0, CAObserved: len(pool.CA) != 0,
+				ClientRefObserved: len(pool.ClientRef) != 0,
 				RequireH2Observed: pool.RequireH2 != nil, EnabledObserved: pool.Enabled != nil, AdminObserved: pool.Admin != nil}
 			tls.RequireH2 = pool.RequireH2 != nil && *pool.RequireH2
 			if tls.HostnameObserved && json.Unmarshal(pool.Hostname, &tls.Hostname) != nil ||
-				tls.CAObserved && json.Unmarshal(pool.CA, &pool.CATLSContainerRef) != nil {
+				tls.CAObserved && json.Unmarshal(pool.CA, &pool.CATLSContainerRef) != nil ||
+				tls.ClientRefObserved && json.Unmarshal(pool.ClientRef, &pool.TLSContainerRef) != nil {
 				return nil, cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady, fmt.Errorf("invalid TLS field in Octavia pool inventory"))
 			}
 			pool.TLSEnabled = pool.Enabled != nil && *pool.Enabled
@@ -184,17 +188,19 @@ func (opts CreatePoolOpts) ToPoolCreateMap() (map[string]any, error) {
 // UpdatePoolOpts adds optional backend transport to a stock pool update request.
 type UpdatePoolOpts struct {
 	pools.UpdateOpts
-	BackendH2C *bool
-	BackendTLS *BackendTLSSettings
+	BackendH2C        *bool
+	BackendTLS        *BackendTLSSettings
+	ClearTLSClientRef bool
 }
 
-// BackendTLSSettings changes hostname authentication and trust in one write.
-// A zero value clears hostname and CA on a disabled pool. RequireH2 is
+// BackendTLSSettings changes hostname authentication, trust and client identity in one write.
+// A zero value clears these settings on a disabled pool. RequireH2 is
 // optional so existing HTTP pools do not use the gRPC provider extension.
 type BackendTLSSettings struct {
-	Hostname    string
-	CAReference string
-	RequireH2   *bool
+	Hostname                   string
+	CAReference                string
+	ClientCertificateReference string
+	RequireH2                  *bool
 }
 
 func (opts UpdatePoolOpts) ToPoolUpdateMap() (map[string]any, error) {
@@ -213,9 +219,15 @@ func (opts UpdatePoolOpts) ToPoolUpdateMap() (map[string]any, error) {
 			pool["backend_tls_hostname"], pool["ca_tls_container_ref"] = tls.Hostname, tls.CAReference
 		}
 		pool["tls_container_ref"], pool["crl_container_ref"] = nil, nil
+		if tls.ClientCertificateReference != "" {
+			pool["tls_container_ref"] = tls.ClientCertificateReference
+		}
 		if tls.RequireH2 != nil {
 			pool["backend_tls_require_h2"] = *tls.RequireH2
 		}
+	}
+	if opts.ClearTLSClientRef {
+		pool["tls_container_ref"] = nil
 	}
 	return body, nil
 }

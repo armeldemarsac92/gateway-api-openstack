@@ -34,10 +34,10 @@ func Compile(input Input) (Gateway, error) {
 		return Gateway{}, errors.New("gateway input is required")
 	}
 	result := Gateway{Source: source(input.Gateway), Listeners: compileListeners(input.Gateway.Spec.Listeners, input.OperatorHTTPS)}
-	if input.Gateway.Spec.TLS != nil {
+	if UnsupportedGatewayWideTLS(input.Gateway.Spec.TLS) {
 		result.Diagnostics = append(result.Diagnostics, Diagnostic{
 			Condition: string(gatewayv1.GatewayConditionAccepted), Reason: string(gatewayv1.GatewayReasonInvalidParameters),
-			Message: "Gateway-wide TLS is not implemented by the logical HTTP compiler",
+			Message: "Gateway-wide spec.tls supports only backend configuration",
 		})
 	}
 	gatewayListeners := result.Listeners
@@ -96,6 +96,12 @@ func Compile(input Input) (Gateway, error) {
 		return cmp.Or(cmp.Compare(a.ListenerSet.Namespace, b.ListenerSet.Namespace), cmp.Compare(a.ListenerSet.Name, b.ListenerSet.Name), cmp.Compare(a.Name, b.Name))
 	})
 	return result, nil
+}
+
+// UnsupportedGatewayWideTLS identifies the frontend and empty TLS shapes
+// outside this profile. Backend client identity is lowered at the pool boundary.
+func UnsupportedGatewayWideTLS(tls *gatewayv1.GatewayTLSConfig) bool {
+	return tls != nil && (tls.Frontend != nil || tls.Backend == nil)
 }
 
 func compileListeners(sections []gatewayv1.Listener, operatorHTTPS bool) []Listener {

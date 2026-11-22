@@ -65,6 +65,8 @@ type Config struct {
 	BackendH2C bool
 	// BackendTLSPolicy enables Service port policy selection for HTTP forwarding.
 	BackendTLSPolicy bool
+	// BackendClientCertificate enables the operator's separate backend client certificate map.
+	BackendClientCertificate bool
 	// OperatorHTTPS enables termination using operator-provisioned certificates.
 	OperatorHTTPS bool
 	// HTTPSListenerIsolation enables shared ports for isolated HTTPS sections.
@@ -107,6 +109,9 @@ func (c Config) TLSRoutesEnabled() bool {
 
 // Validate rejects configuration that could make ownership ambiguous.
 func (c Config) Validate() error {
+	if c.BackendClientCertificate && !c.BackendTLSPolicy {
+		return fmt.Errorf("--backend-client-certificate-map requires --octavia-backend-tls-policy")
+	}
 	if c.TCPTLSTermination && !c.OperatorHTTPS {
 		return fmt.Errorf("--octavia-tcp-tls-termination requires --tls-certificate-map")
 	}

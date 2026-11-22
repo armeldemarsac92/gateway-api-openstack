@@ -136,6 +136,9 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	}()
 	ctx, cancel := p.operationContext(ctx)
 	defer cancel()
+	if spec.Gateway.Disposition == cloud.GraphWithdrawBackendClientCertificate {
+		return p.withdrawBackendClientCertificate(ctx, spec)
+	}
 
 	desired, err := p.buildDesiredGatewayGraph(spec)
 	if err != nil {
