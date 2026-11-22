@@ -1,0 +1,265 @@
+{
+  "controllerRevision": "7ac426fa239784dccab5a28851dd4d71094d7e04",
+  "managerSHA256": "f408d5f8ad43af3863024a6d9fa0a6a1fb5efc29110451a94478c146729beb90",
+  "manifestDigest": "sha256:5c1c73a7b55b6935f5f7d030368e67a177c32e570352b475d5acd56d1c2b1971",
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "replaySHA256": "f65fd11e012b9195e4d9f8e5b17355cc40b7a94f43c50fe64e9d3c9581e4f5f3",
+  "channels": {
+    "standard": {
+      "upstream": {
+        "reportSHA256": "2e8881cc2afcdf75c5a8e119b53d211e66dd1b38cdd468b4f82c308911c3c243",
+        "caseGoSHA256": "34bc8fed7b7b280fa7a6f156fc9c9132cf8a142ed1a450c67d24b60285337fc5",
+        "manifestSHA256": "12accbbbcf75603857f9a07017f8f7faf19310d17bf15e6c3704efa038df555d",
+        "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+        "conditions": {
+          "gateway": {
+            "Accepted": "True/Accepted",
+            "Programmed": "True/Programmed",
+            "ResolvedRefs": "True/ResolvedRefs"
+          },
+          "httpRoute": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "False/Pending"
+          },
+          "backendTLSPolicy": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          }
+        },
+        "wire": {
+          "status": 200,
+          "namespace": "gateway-conformance-infra",
+          "pod": "tls-backend-with-client-cert-validation-local-0",
+          "backendSNI": "abc.example.com",
+          "clientCertificateSHA256": [
+            "cc32883d318fde8f7db5fa9ed2f07fcc29efbff089fd14d2e2345b0835d4a2b2"
+          ],
+          "expectedClientCertificateSHA256": "cc32883d318fde8f7db5fa9ed2f07fcc29efbff089fd14d2e2345b0835d4a2b2",
+          "expectedCertificatePresented": true
+        },
+        "providerReadBackThroughCollectionAndDetail": true,
+        "pool": {
+          "tls_container_ref": "matched regional Barbican enrollment",
+          "ca_tls_container_ref": "matched upstream CA by rendered content",
+          "tls_enabled": true,
+          "backend_tls_hostname": "abc.example.com",
+          "admin_state_up": true
+        },
+        "directWithoutCertificate": {
+          "status": 200,
+          "clientCertificatePresented": false
+        },
+        "report": "standard-gateway-tls-backend-client-certificate-report.yaml"
+      },
+      "strict": {
+        "reportSHA256": "c4643e809958b2877941b1493252ff5a1a40072c1f515ee061ada9a57f827373",
+        "caseGoSHA256": "34bc8fed7b7b280fa7a6f156fc9c9132cf8a142ed1a450c67d24b60285337fc5",
+        "manifestSHA256": "12accbbbcf75603857f9a07017f8f7faf19310d17bf15e6c3704efa038df555d",
+        "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+        "conditions": {
+          "gateway": {
+            "Accepted": "True/Accepted",
+            "Programmed": "True/Programmed",
+            "ResolvedRefs": "True/ResolvedRefs"
+          },
+          "httpRoute": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "False/Pending"
+          },
+          "backendTLSPolicy": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          }
+        },
+        "wire": {
+          "status": 200,
+          "namespace": "gateway-conformance-infra",
+          "pod": "tls-backend-with-client-cert-validation-local-0",
+          "backendSNI": "abc.example.com",
+          "clientCertificateSHA256": [
+            "006e374418bfc82e4be0ca32d7c028e3a62f5fe4b6ef25ea5ea759a97f96f26b"
+          ],
+          "expectedClientCertificateSHA256": "006e374418bfc82e4be0ca32d7c028e3a62f5fe4b6ef25ea5ea759a97f96f26b",
+          "expectedCertificatePresented": true
+        },
+        "providerReadBackThroughCollectionAndDetail": true,
+        "pool": {
+          "tls_container_ref": "matched regional Barbican enrollment",
+          "ca_tls_container_ref": "matched upstream CA by rendered content",
+          "tls_enabled": true,
+          "backend_tls_hostname": "abc.example.com",
+          "admin_state_up": true
+        },
+        "directWithoutCertificate": {
+          "tlsRejection": "TLSV13_ALERT_CERTIFICATE_REQUIRED"
+        },
+        "directWithUntrustedCertificate": {
+          "tlsRejection": "TLSV1_ALERT_UNKNOWN_CA"
+        },
+        "extraNamedReferenceGrantCycle": {
+          "granted": {
+            "wireStatus": 200,
+            "nativeCertificateReference": "matches enrollment",
+            "poolEnabled": true,
+            "gatewayConditions": {
+              "Accepted": "True/Accepted",
+              "Programmed": "False/NoResources",
+              "ResolvedRefs": "True/ResolvedRefs"
+            }
+          },
+          "revoked": {
+            "wireStatus": 503,
+            "nativeCertificateReference": "cleared",
+            "poolEnabled": false,
+            "gatewayConditions": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed",
+              "ResolvedRefs": "False/RefNotPermitted"
+            }
+          },
+          "restored": {
+            "wireStatus": 200,
+            "nativeCertificateReference": "matches enrollment",
+            "poolEnabled": true,
+            "gatewayConditions": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed",
+              "ResolvedRefs": "True/ResolvedRefs"
+            }
+          }
+        }
+      },
+      "invalidConfigurations": {
+        "caseGoSHA256": "197cf065f7782140ce6647b42d4fb48f74e9616d71bb8a5fd4bd82c8e29a4ff1",
+        "manifestSHA256": "dc791660cb9698231f8fa9418adf11395a0c03bc30558579c4691e2d5ad6b97b",
+        "goTest": "PASS",
+        "subtestsPassed": [
+          "Malformed_secret_referenced_as_ClientCertificateRef_in_Gateway_backend_TLS_configuration",
+          "Nonexistent_secret_referenced_as_ClientCertificateRef_in_Gateway_backend_TLS_configuration",
+          "Secret_referenced_from_another_namespace_without_any_ReferenceGrant_as_ClientCertificateRef_in_Gateway_backend_TLS_configuration",
+          "Unsupported_group_resource_referenced_as_ClientCertificateRef_in_Gateway_backend_TLS_configuration",
+          "Unsupported_kind_resource_referenced_as_ClientCertificateRef_inGateway_backend_TLS_configuration"
+        ],
+        "envtestVersion": "1.36.2",
+        "provider": "recording provider for Gateway status",
+        "gatewayAccepted": "True/Accepted",
+        "gatewayResolvedRefs": "False/InvalidClientCertificateRef for missing or malformed Secret and unsupported group or kind, False/RefNotPermitted for a missing cross-namespace grant"
+      }
+    },
+    "experimental": {
+      "upstream": {
+        "reportSHA256": "458d4edb24e25b8b9aa818ef08f974ce4df6d2a4da19589afd5f031050179bdd",
+        "caseGoSHA256": "34bc8fed7b7b280fa7a6f156fc9c9132cf8a142ed1a450c67d24b60285337fc5",
+        "manifestSHA256": "12accbbbcf75603857f9a07017f8f7faf19310d17bf15e6c3704efa038df555d",
+        "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+        "conditions": {
+          "gateway": {
+            "Accepted": "True/Accepted",
+            "Programmed": "True/Programmed",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "AddressesAssigned": "True/AddressesAssigned"
+          },
+          "httpRoute": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "False/Pending"
+          },
+          "backendTLSPolicy": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          }
+        },
+        "wire": {
+          "status": 200,
+          "namespace": "gateway-conformance-infra",
+          "pod": "tls-backend-with-client-cert-validation-local-0",
+          "backendSNI": "abc.example.com",
+          "clientCertificateSHA256": [
+            "4d00adfe6fbe6d856b716ffef287e8ab3ddac5aa8bc2b4f56b5dcf79fef0c226"
+          ],
+          "expectedClientCertificateSHA256": "4d00adfe6fbe6d856b716ffef287e8ab3ddac5aa8bc2b4f56b5dcf79fef0c226",
+          "expectedCertificatePresented": true
+        },
+        "providerReadBackThroughCollectionAndDetail": true,
+        "pool": {
+          "tls_container_ref": "matched regional Barbican enrollment",
+          "ca_tls_container_ref": "matched upstream CA by rendered content",
+          "tls_enabled": true,
+          "backend_tls_hostname": "abc.example.com",
+          "admin_state_up": true
+        },
+        "directWithoutCertificate": {
+          "status": 200,
+          "clientCertificatePresented": false
+        },
+        "report": "experimental-gateway-tls-backend-client-certificate-report.yaml"
+      },
+      "strict": {
+        "reportSHA256": "b6f4cc392f537707d81976d1ef4cee7dabb1dba008e5e5b1b6a6607af1c61aa9",
+        "caseGoSHA256": "34bc8fed7b7b280fa7a6f156fc9c9132cf8a142ed1a450c67d24b60285337fc5",
+        "manifestSHA256": "12accbbbcf75603857f9a07017f8f7faf19310d17bf15e6c3704efa038df555d",
+        "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+        "conditions": {
+          "gateway": {
+            "Accepted": "True/Accepted",
+            "Programmed": "True/Programmed",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "AddressesAssigned": "True/AddressesAssigned"
+          },
+          "httpRoute": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "False/Pending"
+          },
+          "backendTLSPolicy": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs"
+          }
+        },
+        "wire": {
+          "status": 200,
+          "namespace": "gateway-conformance-infra",
+          "pod": "tls-backend-with-client-cert-validation-local-0",
+          "backendSNI": "abc.example.com",
+          "clientCertificateSHA256": [
+            "f7efac990d1f459faab1ec56d945a955e1f11e3cb14e2c27d4a65bf1229a028b"
+          ],
+          "expectedClientCertificateSHA256": "f7efac990d1f459faab1ec56d945a955e1f11e3cb14e2c27d4a65bf1229a028b",
+          "expectedCertificatePresented": true
+        },
+        "providerReadBackThroughCollectionAndDetail": true,
+        "pool": {
+          "tls_container_ref": "matched regional Barbican enrollment",
+          "ca_tls_container_ref": "matched upstream CA by rendered content",
+          "tls_enabled": true,
+          "backend_tls_hostname": "abc.example.com",
+          "admin_state_up": true
+        },
+        "directWithoutCertificate": {
+          "tlsRejection": "TLSV13_ALERT_CERTIFICATE_REQUIRED"
+        },
+        "directWithUntrustedCertificate": {
+          "tlsRejection": "TLSV1_ALERT_UNKNOWN_CA"
+        }
+      },
+      "invalidConfigurations": {
+        "caseGoSHA256": "197cf065f7782140ce6647b42d4fb48f74e9616d71bb8a5fd4bd82c8e29a4ff1",
+        "manifestSHA256": "dc791660cb9698231f8fa9418adf11395a0c03bc30558579c4691e2d5ad6b97b",
+        "goTest": "PASS",
+        "subtestsPassed": [
+          "Malformed_secret_referenced_as_ClientCertificateRef_in_Gateway_backend_TLS_configuration",
+          "Nonexistent_secret_referenced_as_ClientCertificateRef_in_Gateway_backend_TLS_configuration",
+          "Secret_referenced_from_another_namespace_without_any_ReferenceGrant_as_ClientCertificateRef_in_Gateway_backend_TLS_configuration",
+          "Unsupported_group_resource_referenced_as_ClientCertificateRef_in_Gateway_backend_TLS_configuration",
+          "Unsupported_kind_resource_referenced_as_ClientCertificateRef_inGateway_backend_TLS_configuration"
+        ],
+        "envtestVersion": "1.36.2",
+        "provider": "recording provider for Gateway status",
+        "gatewayAccepted": "True/Accepted",
+        "gatewayResolvedRefs": "False/InvalidClientCertificateRef for missing or malformed Secret and unsupported group or kind, False/RefNotPermitted for a missing cross-namespace grant"
+      }
+    }
+  }
+}
