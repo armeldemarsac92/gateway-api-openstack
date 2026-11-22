@@ -27,9 +27,40 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
+
+func TestNodeMapperEnqueuesRouteWithOneNodePortGateway(t *testing.T) {
+	r, reader, node := nodeFanoutFixture(t, 1, corev1.ServiceExternalTrafficPolicyLocal)
+	ctx := t.Context()
+	var endpointGateway gatewayv1.Gateway
+	if err := reader.Get(ctx, client.ObjectKey{Namespace: "default", Name: "foreign"}, &endpointGateway); err != nil {
+		t.Fatal(err)
+	}
+	endpointGateway.Spec.GatewayClassName = "managed"
+	topology := testBoundTopology()
+	topology.Topology.MemberMode = cloud.MemberModeEndpoint
+	if err := controller.BindGatewayTopology(r.Config, &endpointGateway, topology); err != nil {
+		t.Fatal(err)
+	}
+	if err := reader.Update(ctx, &endpointGateway); err != nil {
+		t.Fatal(err)
+	}
+	var route gatewayv1.HTTPRoute
+	if err := reader.Get(ctx, client.ObjectKey{Namespace: "default", Name: "route-0000"}, &route); err != nil {
+		t.Fatal(err)
+	}
+	route.Spec.ParentRefs = append([]gatewayv1.ParentReference{{Name: "foreign"}}, route.Spec.ParentRefs...)
+	if err := reader.Update(ctx, &route); err != nil {
+		t.Fatal(err)
+	}
+	requests := r.enqueueHTTPRoutesForNode(ctx, node)
+	if len(requests) != 1 || requests[0].NamespacedName != client.ObjectKeyFromObject(&route) {
+		t.Fatalf("Node requests = %v, want the route attached to the NodePort Gateway", requests)
+	}
+}
 
 func TestNodeMapperReobservesDependenciesBetweenEvents(t *testing.T) {
 	const count = 3

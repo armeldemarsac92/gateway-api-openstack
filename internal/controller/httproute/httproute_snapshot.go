@@ -65,6 +65,9 @@ type routeBindingSnapshot struct {
 	present        bool
 	hasFinalizer   bool
 	matchesDesired bool
+	lifecycle      string
+	explicitScope  bool
+	otherBindings  bool
 }
 
 // routeValidationSnapshot contains one live view of every Kubernetes input
@@ -166,9 +169,7 @@ func (r *Reconciler) buildRouteValidationSnapshotFromInputs(
 	if controller.GatewayListenerScope(r.Config, snapshot.gateway) != gatewayv1.HTTPProtocolType {
 		if gatewaycontroller.RequiresHTTPListenerScope(r.Config, snapshot.gateway) {
 			// An established route can repair its binding before enrollment.
-			annotations := snapshot.route.Annotations
-			if !r.establishedRouteBinding(snapshot) ||
-				annotations[r.Config.RouteClusterIDAnnotation()] != "" && annotations[r.Config.RouteProjectIDAnnotation()] != "" {
+			if !r.establishedRouteBinding(snapshot) || snapshot.binding.explicitScope {
 				snapshot.disposition = routeValidationGatewayPending
 				return snapshot, nil
 			}
@@ -194,7 +195,9 @@ func (r *Reconciler) buildRouteValidationSnapshotFromInputs(
 	snapshot.backendTLSAncestorSlot = routeBackendTLSAncestorSlot(snapshot.route, inputs)
 
 	if purpose == routeSnapshotForEnsure {
-		r.setRouteBindingDisposition(&snapshot)
+		if err := r.setRouteBindingDisposition(&snapshot); err != nil {
+			return routeValidationSnapshot{}, err
+		}
 	}
 	return snapshot, nil
 }
@@ -291,34 +294,59 @@ func routeSelectionsProgrammed(gateway *gatewayv1.Gateway, selection routeSelect
 }
 
 func (r *Reconciler) observeRouteBinding(snapshot *routeValidationSnapshot) error {
-	if snapshot.route.Annotations[r.Config.RouteLifecycleAnnotation()] == controller.RouteDetaching {
-		return errHTTPRouteChanged
-	}
-	storedIdentity, bindingPresent, err := r.storedRouteIdentity(snapshot.route)
+	desiredIdentity := controller.RouteIdentity(r.Config, snapshot.gateway, snapshot.route)
+	binding, err := controller.StoredRouteGatewayBinding(r.Config, snapshot.route, desiredIdentity)
 	if err != nil {
 		return err
 	}
-	desiredIdentity := controller.RouteIdentity(r.Config, snapshot.gateway, snapshot.route)
+	if binding.Lifecycle == controller.RouteDetaching {
+		return errHTTPRouteChanged
+	}
 	snapshot.binding = routeBindingSnapshot{
-		identity:       storedIdentity,
-		present:        bindingPresent,
+		identity:       binding.Identity,
+		present:        binding.Identity.RouteUID != "",
 		hasFinalizer:   controllerutil.ContainsFinalizer(snapshot.route, r.Config.RouteFinalizer()),
-		matchesDesired: bindingPresent && storedIdentity == desiredIdentity,
+		matchesDesired: binding.Identity == desiredIdentity,
+		lifecycle:      binding.Lifecycle,
+		explicitScope:  binding.ExplicitScope,
+	}
+	if !snapshot.binding.present {
+		bindings, err := controller.StoredRouteGatewayBindings(r.Config, snapshot.route)
+		if err != nil {
+			return err
+		}
+		snapshot.binding.otherBindings = len(bindings) != 0
+		for _, existing := range bindings {
+			old := existing.Identity
+			// Preserve the singleton handoff and fence Gateway recreation by UID.
+			if old.GatewayNamespace == desiredIdentity.GatewayNamespace && old.GatewayName == desiredIdentity.GatewayName {
+				return errHTTPRouteChanged
+			}
+			if !controller.HasRouteGatewayBindings(r.Config, snapshot.route) &&
+				!slices.ContainsFunc(snapshot.route.Spec.ParentRefs, func(ref gatewayv1.ParentReference) bool {
+					return routeTargetsGateway(snapshot.route, ref, old.GatewayNamespace, old.GatewayName)
+				}) {
+				return errHTTPRouteChanged
+			}
+		}
 	}
 	return nil
 }
 
-func (r *Reconciler) setRouteBindingDisposition(snapshot *routeValidationSnapshot) {
+func (r *Reconciler) setRouteBindingDisposition(snapshot *routeValidationSnapshot) error {
 	boundToCurrentGateway := snapshot.binding.matchesDesired && snapshot.binding.hasFinalizer
 	if !snapshot.gatewayProgrammed && !boundToCurrentGateway {
 		snapshot.disposition = routeValidationGatewayPending
-		return
+		return nil
 	}
 	desiredBinding := snapshot.route.DeepCopy()
-	r.applyRouteBinding(desiredBinding, snapshot.gateway)
+	if err := r.applyRouteBinding(desiredBinding, snapshot.gateway); err != nil {
+		return err
+	}
 	if !routeBindingMetadataEqual(snapshot.route, desiredBinding) {
 		snapshot.disposition = routeValidationBindingRequired
 	}
+	return nil
 }
 
 // validateRouteBindingTransition prevents a binding checkpoint from adopting
@@ -332,7 +360,7 @@ func (r *Reconciler) validateRouteBindingTransition(snapshot routeValidationSnap
 	if !snapshot.gatewayProgrammed && !r.establishedRouteBinding(snapshot) {
 		return errHTTPRouteChanged
 	}
-	if !snapshot.binding.present && snapshot.binding.hasFinalizer {
+	if !snapshot.binding.present && snapshot.binding.hasFinalizer && !snapshot.binding.otherBindings {
 		return fmt.Errorf(
 			"HTTPRoute %s has the controller finalizer but no complete stored Gateway identity",
 			client.ObjectKeyFromObject(snapshot.route),
@@ -347,7 +375,7 @@ func (r *Reconciler) validateRouteBindingTransition(snapshot routeValidationSnap
 
 func (r *Reconciler) establishedRouteBinding(snapshot routeValidationSnapshot) bool {
 	return snapshot.binding.matchesDesired && snapshot.binding.hasFinalizer &&
-		snapshot.route.Annotations[r.Config.RouteLifecycleAnnotation()] == controller.RouteAttached
+		snapshot.binding.lifecycle == controller.RouteAttached
 }
 
 func gatewayProgrammedForGeneration(gateway *gatewayv1.Gateway) bool {
@@ -462,18 +490,17 @@ func (r *Reconciler) sealRouteOwnershipWithGateway(ctx context.Context, snapshot
 		!controller.GatewayBindingMetadataEqual(r.Config, gateway, snapshot.gateway) {
 		return errHTTPRouteChanged
 	}
-	if route.Annotations[r.Config.RouteLifecycleAnnotation()] != snapshot.route.Annotations[r.Config.RouteLifecycleAnnotation()] {
+	desired := controller.RouteIdentity(r.Config, gateway, &route)
+	binding, err := controller.StoredRouteGatewayBinding(r.Config, &route, desired)
+	if err != nil {
+		return err
+	}
+	if binding.Lifecycle != snapshot.binding.lifecycle {
 		return errHTTPRouteChanged
 	}
-	if bindingRequirement == routeBindingRequired {
-		stored, present, err := r.storedRouteIdentity(&route)
-		if err != nil {
-			return err
-		}
-		if !present || stored != controller.RouteIdentity(r.Config, gateway, &route) ||
-			!controllerutil.ContainsFinalizer(&route, r.Config.RouteFinalizer()) {
-			return errHTTPRouteChanged
-		}
+	if bindingRequirement == routeBindingRequired &&
+		(binding.Identity != desired || !controllerutil.ContainsFinalizer(&route, r.Config.RouteFinalizer())) {
+		return errHTTPRouteChanged
 	}
 	parents, err := r.parentsForGateway(ctx, &route, gateway)
 	if err != nil {
@@ -512,11 +539,12 @@ func (r *Reconciler) buildRouteCleanupSnapshot(
 	) || route.ResourceVersion != expected.ResourceVersion {
 		return routeCleanupSnapshot{}, errHTTPRouteChanged
 	}
-	stored, present, err := r.storedRouteIdentity(&route)
+	storedBinding, err := controller.StoredRouteGatewayBinding(r.Config, &route, expectedIdentity)
+	stored := storedBinding.Identity
 	if err != nil {
 		return routeCleanupSnapshot{}, err
 	}
-	if !present || stored != expectedIdentity {
+	if stored != expectedIdentity {
 		return routeCleanupSnapshot{}, errHTTPRouteChanged
 	}
 	snapshot := routeCleanupSnapshot{
@@ -524,7 +552,7 @@ func (r *Reconciler) buildRouteCleanupSnapshot(
 		identity:    stored,
 		disposition: routeCleanupRequired,
 	}
-	if !route.DeletionTimestamp.IsZero() || route.Annotations[r.Config.RouteLifecycleAnnotation()] == controller.RouteDetaching {
+	if !route.DeletionTimestamp.IsZero() || storedBinding.Lifecycle == controller.RouteDetaching {
 		return snapshot, nil
 	}
 	attachment, attachmentRejection, err := r.liveBoundRouteAttachment(ctx, &route, stored)
@@ -559,7 +587,7 @@ func (r *Reconciler) buildRouteCleanupSnapshot(
 			return snapshot, nil
 		}
 		if errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) &&
-			!r.routeForwardingEstablished(&route, managedParentsFromObservations(parentObservations), stored, attachment) {
+			!r.routeForwardingEstablished(&route, managedParentsForGateway(managedParentsFromObservations(parentObservations), stored), stored, attachment) {
 			snapshot.bundleUnsupported = true
 			snapshot.parents = parentObservations
 			return snapshot, nil
@@ -571,8 +599,8 @@ func (r *Reconciler) buildRouteCleanupSnapshot(
 		return routeCleanupSnapshot{}, err
 	}
 	snapshot.parents = parentObservations
-	managedParents := managedParentsFromObservations(parentObservations)
-	if !parentsShareGateway(managedParents) {
+	managedParents := managedParentsForGateway(managedParentsFromObservations(parentObservations), stored)
+	if len(managedParents) == 0 {
 		return snapshot, nil
 	}
 	parent := managedParents[0]
@@ -655,11 +683,11 @@ func (r *Reconciler) sealRouteCleanupSnapshot(
 	) || route.ResourceVersion != snapshot.route.ResourceVersion {
 		return errHTTPRouteChanged
 	}
-	stored, present, err := r.storedRouteIdentity(&route)
+	binding, err := controller.StoredRouteGatewayBinding(r.Config, &route, snapshot.identity)
 	if err != nil {
 		return err
 	}
-	if !present || stored != snapshot.identity {
+	if binding.Identity != snapshot.identity {
 		return errHTTPRouteChanged
 	}
 	if snapshot.referenceRevoked {
@@ -680,8 +708,8 @@ func (r *Reconciler) sealRouteCleanupSnapshot(
 			return errHTTPRouteChanged
 		}
 		if snapshot.profileRejected {
-			managedParents := managedParentsFromObservations(parents)
-			if !parentsShareGateway(managedParents) {
+			managedParents := managedParentsForGateway(managedParentsFromObservations(parents), snapshot.identity)
+			if len(managedParents) == 0 {
 				return errHTTPRouteChanged
 			}
 			admission, err := r.liveRouteGraphAdmission(ctx, managedParents[0].gateway, &route)
@@ -703,7 +731,7 @@ func (r *Reconciler) sealRouteCleanupSnapshot(
 		}
 	}
 	if snapshot.attachmentRevoked {
-		_, rejection, err := r.liveBoundRouteAttachment(ctx, &route, stored)
+		_, rejection, err := r.liveBoundRouteAttachment(ctx, &route, binding.Identity)
 		if err != nil {
 			return err
 		}

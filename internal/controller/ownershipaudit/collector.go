@@ -143,18 +143,23 @@ func recordRoute(snapshot *audit.KubernetesSnapshot, config controller.Config, r
 		return
 	}
 	object := audit.ObjectReference{APIVersion: gatewayv1.GroupVersion.String(), Kind: kind, Namespace: route.GetNamespace(), Name: route.GetName(), UID: string(route.GetUID())}
-	identity, present, err := controller.StoredRouteIdentity(config, route)
-	annotations := route.GetAnnotations()
-	scoped := annotations[config.RouteClusterIDAnnotation()] != "" && annotations[config.RouteProjectIDAnnotation()] != ""
-	checkpoint := config.RouteBindingFinalizer(config.ClusterID, config.OpenStackProjectID, identity.GatewayNamespace, identity.GatewayName, identity.GatewayUID)
-	if err != nil || !present || !scoped && !slices.Contains(route.GetFinalizers(), checkpoint) {
+	bindings, err := controller.StoredRouteGatewayBindings(config, route)
+	if err != nil || len(bindings) == 0 {
 		snapshot.Issues = append(snapshot.Issues, invalidBindingIssue(object))
 		return
 	}
-	snapshot.Records = append(snapshot.Records, audit.OwnershipRecord{
-		Identity: identity,
-		Objects:  []audit.ObjectReference{object},
-	})
+	for _, binding := range bindings {
+		identity := binding.Identity
+		checkpoint := config.RouteBindingFinalizer(config.ClusterID, config.OpenStackProjectID, identity.GatewayNamespace, identity.GatewayName, identity.GatewayUID)
+		if !binding.ExplicitScope && !slices.Contains(route.GetFinalizers(), checkpoint) {
+			snapshot.Issues = append(snapshot.Issues, invalidBindingIssue(object))
+			return
+		}
+		snapshot.Records = append(snapshot.Records, audit.OwnershipRecord{
+			Identity: identity,
+			Objects:  []audit.ObjectReference{object},
+		})
+	}
 }
 
 func invalidBindingIssue(object audit.ObjectReference) audit.KubernetesIssue {

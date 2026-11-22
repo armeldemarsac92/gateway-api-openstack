@@ -133,27 +133,33 @@ func managedParentsFromObservations(observations []routeParentObservation) []man
 func (r *Reconciler) parentsForGateway(ctx context.Context, route *gatewayv1.HTTPRoute, gateway *gatewayv1.Gateway) ([]managedRouteParent, error) {
 	var selected []managedRouteParent
 	for _, ref := range route.Spec.ParentRefs {
-		if routeTargetsGateway(route, ref, gateway.Namespace, gateway.Name) {
-			selected = append(selected, managedRouteParent{ref: ref, gateway: gateway})
+		if controller.IsGatewayParentRef(ref) {
+			if routeTargetsGateway(route, ref, gateway.Namespace, gateway.Name) {
+				selected = append(selected, managedRouteParent{ref: ref, gateway: gateway})
+			}
 			continue
 		}
-		if !controller.IsGatewayParentRef(ref) && (model.HTTPProfileRouteKind(route) != model.HTTPRouteKind || model.ListenerSetRefKey(ref, route.Namespace).Name == "") {
+		if model.HTTPProfileRouteKind(route) != model.HTTPRouteKind || model.ListenerSetRefKey(ref, route.Namespace).Name == "" {
 			continue
 		}
 		parent, err := r.observeRouteParent(ctx, r.APIReader, route.Namespace, ref)
 		if err != nil {
 			return nil, err
 		}
-		if !parent.managed {
+		if !parent.managed || parent.gateway.UID != gateway.UID || client.ObjectKeyFromObject(parent.gateway) != client.ObjectKeyFromObject(gateway) {
 			continue
-		}
-		if parent.gateway.UID != gateway.UID || client.ObjectKeyFromObject(parent.gateway) != client.ObjectKeyFromObject(gateway) {
-			return nil, nil
 		}
 		parent.gateway = gateway
 		selected = append(selected, parent.managedRouteParent)
 	}
 	return selected, nil
+}
+
+func managedParentsForGateway(parents []managedRouteParent, identity cloud.Identity) []managedRouteParent {
+	return slices.DeleteFunc(slices.Clone(parents), func(parent managedRouteParent) bool {
+		return parent.gateway.Namespace != identity.GatewayNamespace ||
+			parent.gateway.Name != identity.GatewayName || string(parent.gateway.UID) != identity.GatewayUID
+	})
 }
 
 func (p managedRouteParent) namespace() string {

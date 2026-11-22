@@ -421,7 +421,9 @@ func providerOutcomeRouteFixture(
 			}},
 		},
 	}
-	(newTestReconciler(Reconciler{Config: cfg}, nil)).applyRouteBinding(route, gateway)
+	if err := (newTestReconciler(Reconciler{Config: cfg}, nil)).applyRouteBinding(route, gateway); err != nil {
+		t.Fatal(err)
+	}
 	service := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "backend"},
 		Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeNodePort, Ports: []corev1.ServicePort{{Port: 8080, NodePort: 30080}}},
@@ -589,7 +591,7 @@ func TestHTTPRouteDetachFailurePublishesCleanupStatus(t *testing.T) {
 		parent: parent,
 		status: rejectedRouteStatus(string(gatewayv1.RouteReasonUnsupportedValue), "HTTPRoute configuration is unsupported"),
 	}}
-	applyRouteParentStatuses(cfg, route, updates)
+	(&routeStatusPlan{updates: updates}).apply(cfg, route)
 	route.Annotations[cfg.RouteLifecycleAnnotation()] = controller.RouteDetaching
 	kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).
 		WithStatusSubresource(route).

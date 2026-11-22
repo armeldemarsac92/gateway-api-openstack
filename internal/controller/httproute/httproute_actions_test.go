@@ -133,7 +133,9 @@ func TestMixedFixedRedirectRetainsRuleAndListenerPrecedence(t *testing.T) {
 	peerRule := pathBackendRule("/old/peer", gatewayv1.PathMatchExact, gatewayv1.ObjectName(f.service.Name))
 	peerRule.BackendRefs[0].Port = ptr.To(gatewayv1.PortNumber(f.service.Spec.Ports[0].Port))
 	peer.Spec.Rules = []gatewayv1.HTTPRouteRule{peerRule}
-	f.reconciler.applyRouteBinding(peer, f.gateway)
+	if err := f.reconciler.applyRouteBinding(peer, f.gateway); err != nil {
+		t.Fatal(err)
+	}
 	f.create(t, peer)
 	provider := &recordingProvider{}
 	r := newTestReconciler(*f.reconciler, provider)
