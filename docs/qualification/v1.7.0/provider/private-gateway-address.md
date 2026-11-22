@@ -66,6 +66,14 @@ Standard prunes the experimental field. The registered optional-address and
 static-address cases run on both channels. Gateway API v1.7.0 registers no
 case for this named routability feature. [Supplemental test](../../../../internal/controller/envtest_address_routability_test.go) · [Registered case entry points](../../../../internal/controller/envtest_upstream_status_test.go)
 
+The executable extracted from image `a3d84b12b57d` also ran against fresh
+Kubernetes v1.36.2 API servers with the two release bundles. Experimental
+reported the requested sentinel, retained the active VIP when its new scope
+was unsatisfiable and restored the default scope on the same VIP. Standard
+pruned the sentinel and programmed the fixed IP. Both runs used the
+controller's normal cloud client against local HTTP fixtures for Keystone,
+Neutron and Octavia. [OCI image, channel receipts and replay](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-a3d84b12b57d610b14fc8c08c5c85710355c1251)
+
 ## Qualification
 
 - Focused controller and graph tests exercise the typed Octavia create payload,
