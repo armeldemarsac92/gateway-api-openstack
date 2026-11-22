@@ -464,7 +464,8 @@ func (p *Provider) observeListenerPolicies(ctx context.Context, inventory *route
 			return err
 		}
 	}
-	if p.fixedHTTPResponses && !complete {
+	if !complete && (p.fixedHTTPResponses || protocol == cloud.ListenerProtocolHTTP &&
+		(p.httpRequestRedirect || strict || !listener.AdminStateUp)) {
 		return cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady, errors.New("waiting for complete Octavia HTTP policy inventory"))
 	}
 	sort.Slice(items, func(i, j int) bool {

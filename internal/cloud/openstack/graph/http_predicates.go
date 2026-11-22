@@ -241,6 +241,9 @@ func guardedHTTPListeners(desired desiredGatewayGraph, actual observedGatewayGra
 	if hasHTTPRouteParts(desired, actual) {
 		parts, observedParts, owners := httpPlanningParts(desired, actual)
 		for index, part := range parts.routes {
+			if desired.spec.Gateway.Disposition == cloud.GraphPreserve && parts.spec.Routes[index].Disposition != cloud.GraphDelete {
+				continue
+			}
 			var observed observedRouteGraph
 			if index < len(observedParts.routes) {
 				observed = observedParts.routes[index]

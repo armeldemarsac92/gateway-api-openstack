@@ -17,13 +17,13 @@ limitations under the License.
 package octavia
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia/amphora"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
 	"k8s.io/utils/ptr"
@@ -48,38 +48,62 @@ func (r RequestRedirect) Valid() bool {
 	if r.Scheme != "http" && r.Scheme != "https" || r.Port < 1 || r.Port > 65535 {
 		return false
 	}
-	if r.Hostname != "" && amphora.ValidateExactHostname(r.Hostname) != nil {
-		return false
+	if r.Hostname != "" {
+		for i := range len(r.Hostname) {
+			if r.Hostname[i] >= utf8.RuneSelf {
+				return false
+			}
+		}
+		if amphora.ValidateExactHostname(strings.ToLower(r.Hostname)) != nil {
+			return false
+		}
 	}
 	if r.ReplaceFullPath != nil {
-		return r.ReplacePrefix == nil && utf8.RuneCountInString(*r.ReplaceFullPath) <= 1024
+		return r.ReplacePrefix == nil && validRedirectReplacement(*r.ReplaceFullPath)
 	}
-	return r.ReplacePrefix == nil || strings.HasPrefix(r.ReplacePrefix.Match, "/") && utf8.RuneCountInString(r.ReplacePrefix.Replacement) <= 1024
+	return r.ReplacePrefix == nil || len(r.ReplacePrefix.Match) <= 1024 && cloud.ValidHTTPPath(r.ReplacePrefix.Match) && validRedirectReplacement(r.ReplacePrefix.Replacement)
+}
+
+func validRedirectReplacement(value string) bool {
+	return utf8.ValidString(value) && utf8.RuneCountInString(value) <= 1024
 }
 
 func readRequestRedirect(raw json.RawMessage) *RequestRedirect {
-	// A missing replacement differs from an explicitly empty replacement.
-	var data struct {
-		Scheme          string  `json:"scheme"`
-		Port            int     `json:"port"`
-		Hostname        string  `json:"hostname"`
-		ReplaceFullPath *string `json:"replace_full_path"`
-		ReplacePrefix   *struct {
-			Match       string  `json:"match"`
-			Replacement *string `json:"replacement"`
-		} `json:"replace_prefix"`
-	}
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if decoder.Decode(&data) != nil {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil {
 		return nil
 	}
-	r := RequestRedirect{Scheme: data.Scheme, Port: data.Port, Hostname: data.Hostname, ReplaceFullPath: data.ReplaceFullPath}
-	if prefix := data.ReplacePrefix; prefix != nil {
-		if prefix.Replacement == nil {
+	for key := range fields {
+		switch key {
+		case "scheme", "port", "hostname", "replace_full_path", "replace_prefix":
+		default:
 			return nil
 		}
-		r.ReplacePrefix = &RedirectPrefixReplace{Match: prefix.Match, Replacement: *prefix.Replacement}
+	}
+	var r RequestRedirect
+	if json.Unmarshal(fields["scheme"], &r.Scheme) != nil || json.Unmarshal(fields["port"], &r.Port) != nil {
+		return nil
+	}
+	if hostname, present := fields["hostname"]; present {
+		if json.Unmarshal(hostname, &r.Hostname) != nil || r.Hostname == "" {
+			return nil
+		}
+	}
+	if full, present := fields["replace_full_path"]; present {
+		if json.Unmarshal(full, &r.ReplaceFullPath) != nil || r.ReplaceFullPath == nil {
+			return nil
+		}
+	}
+	if rawPrefix, present := fields["replace_prefix"]; present {
+		var prefix map[string]json.RawMessage
+		var match string
+		var replacement *string
+		// The empty string removes the matching prefix. Its field must be present.
+		if json.Unmarshal(rawPrefix, &prefix) != nil || len(prefix) != 2 ||
+			json.Unmarshal(prefix["match"], &match) != nil || json.Unmarshal(prefix["replacement"], &replacement) != nil || replacement == nil {
+			return nil
+		}
+		r.ReplacePrefix = &RedirectPrefixReplace{Match: match, Replacement: *replacement}
 	}
 	if !r.Valid() {
 		return nil

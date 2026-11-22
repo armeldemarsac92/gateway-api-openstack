@@ -17,10 +17,13 @@ limitations under the License.
 package graph
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
@@ -254,4 +257,128 @@ func TestRequestRedirectShadowingAndUnsupportedGuard(t *testing.T) {
 		Matches: []cloud.HTTPPathMatch{{Hostname: f.Hostname, PathType: f.PathType, PathValue: f.PathValue, Precedence: f.Precedence, Method: "GET"}}}}
 	f.Hostname, f.PathType, f.PathValue, f.Members = "", "", "", nil
 	check(errHTTPMethodRedirectPrecedence)
+}
+
+func TestRequestRedirectDeleteRoutePreservesGatewayAndClosesItsPort(t *testing.T) {
+	p := &Provider{projectID: "project-a"}
+	spec := redirectGraphSpec(t)
+	port := spec.Gateway.Spec.ListenerPort
+	spec.Gateway = cloud.GatewayGraphNode{Disposition: cloud.GraphPreserve, Spec: cloud.GatewaySpec{
+		ListenerProtocol: cloud.ListenerProtocolHTTP, ListenerPort: port, ScopedListeners: []cloud.ScopedListener{},
+	}}
+	spec.Routes[0].Disposition = cloud.GraphDelete
+	independent := spec.Routes[0]
+	independent.Spec.Identity.RouteName, independent.Spec.Identity.RouteUID = "z-independent", "independent"
+	independent.Disposition = cloud.GraphPreserve
+	spec.Routes = append(spec.Routes, independent)
+	desired, err := p.buildDesiredGatewayGraph(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actual := observedGatewayGraph{loadBalancer: safetyObservedLoadBalancer(), protocol: cloud.ListenerProtocolHTTP, scoped: true,
+		adminObserved: map[string]bool{"owned": true, "independent": true}, scopedListeners: []listeners.Listener{
+			{ID: "owned", ProtocolPort: port, AdminStateUp: true, ProvisioningStatus: "ACTIVE"},
+			{ID: "independent", ProtocolPort: port + 1, AdminStateUp: true, ProvisioningStatus: "ACTIVE"},
+		}, routes: []observedRouteGraph{{}, {}}}
+	part := actual.routes[0].part("redirect/owned")
+	part.policies = []observedRoutePolicy{{redirect: true, requestRedirectPresent: true, adminObserved: true,
+		policy: l7policies.L7Policy{ID: "policy", ListenerID: "owned", AdminStateUp: true, ProvisioningStatus: "ACTIVE"}}}
+	actual.routes[1].part("redirect/independent").policies = []observedRoutePolicy{{redirect: true, requestRedirectPresent: true, adminObserved: true,
+		policy: l7policies.L7Policy{ID: "independent-policy", ListenerID: "independent", AdminStateUp: true, ProvisioningStatus: "ACTIVE"}}}
+	plan := func() []graphMutation {
+		t.Helper()
+		steps, result, err := p.buildGatewayGraphPlan(desired, actual)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p.protectRequestRedirectTraffic(t.Context(), desired, actual, steps, &result)
+	}
+	if got := plan(); len(got) != 1 || got[0].kind != graphDisableListener || got[0].listenerID != "owned" {
+		t.Fatalf("route deletion must first close its own listener: %v", got)
+	}
+	actual.scopedListeners[0].AdminStateUp = false
+	actual.scopedListeners[0].ProvisioningStatus = "PENDING_UPDATE"
+	if got := plan(); len(got) != 0 {
+		t.Fatalf("route deletion must wait for ACTIVE/down: %v", got)
+	}
+	actual.scopedListeners[0].ProvisioningStatus = "ACTIVE"
+	if got := plan(); len(got) != 1 || got[0].kind != graphRouteMutation || got[0].route.kind != routeMutationDisablePolicy {
+		t.Fatalf("route deletion can proceed only after closure: %v", got)
+	}
+	part.policies = nil
+	if got := plan(); slices.ContainsFunc(got, func(step graphMutation) bool { return step.kind == graphEnableListener }) {
+		t.Fatalf("preserved Gateway cannot reopen the listener: %v", got)
+	}
+}
+
+func TestRequestRedirectDiscoveryTimeoutLeavesTimeToClose(t *testing.T) {
+	p := completeGraphProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/lbaas/providers/amphora/gateway_capabilities":
+			<-r.Context().Done()
+			w.WriteHeader(http.StatusGatewayTimeout)
+		case r.Method == http.MethodPut && r.URL.Path == "/lbaas/listeners/listener":
+			if err := r.Context().Err(); err != nil {
+				t.Fatal(err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"listener":{"id":"listener","admin_state_up":false}}`))
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}), &gatewayTransitionRequests{})
+	p.httpRequestRedirect = true
+	spec := redirectGraphSpec(t)
+	redirect := &spec.Routes[0].Spec.HTTPRedirects[0]
+	redirect.Prefix, redirect.Request = "", &cloud.HTTPRedirectRequest{Scheme: "http", Port: 80}
+	desired, err := p.buildDesiredGatewayGraph(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actual := observedGatewayGraph{loadBalancer: safetyObservedLoadBalancer(), protocol: cloud.ListenerProtocolHTTP,
+		listener:      &listeners.Listener{ID: "listener", ProtocolPort: spec.Gateway.Spec.ListenerPort, ProvisioningStatus: "ACTIVE", AdminStateUp: true},
+		adminObserved: map[string]bool{"listener": true}}
+	actual.loadBalancer.Provider = "amphora"
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	var result cloud.GatewayGraphResult
+	steps := p.protectRequestRedirectTraffic(ctx, desired, actual, nil, &result)
+	if len(steps) != 1 || steps[0].kind != graphDisableListener || result.Outcome.Message != "Could not verify Octavia capability http_request_redirect_v1" {
+		t.Fatalf("timed out discovery must plan an explicit listener close: %v, %v", steps, result.Outcome)
+	}
+	if err := p.executeGraphMutation(ctx, desired, actual, steps[0]); err != nil {
+		t.Fatalf("close after regional discovery timeout: %v", err)
+	}
+}
+
+func TestRequestRedirectRequiresExplicitEmptyPolicyInventory(t *testing.T) {
+	status := http.StatusNoContent
+	p := completeGraphProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/lbaas/l7policies" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		if status == http.StatusOK {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"l7policies":[]}`))
+			return
+		}
+		w.WriteHeader(status)
+	}), &gatewayTransitionRequests{})
+	listener := &listeners.Listener{ID: "listener", L7Policies: []l7policies.L7Policy{}, AdminStateUp: true}
+	inventory := routeGraphInventory{}
+	read := func() error {
+		return p.observeListenerPolicies(t.Context(), &inventory, listener, cloud.ListenerProtocolHTTP, nil, nil, false)
+	}
+	p.httpRequestRedirect = true
+	if err := read(); !errors.Is(err, cloud.ErrDependencyNotReady) {
+		t.Fatalf("extension enabled with an incomplete collection: %v", err)
+	}
+	p.httpRequestRedirect, listener.AdminStateUp = false, false
+	if err := read(); !errors.Is(err, cloud.ErrDependencyNotReady) {
+		t.Fatalf("closed listener cannot reopen after opt-out on incomplete readback: %v", err)
+	}
+	status = http.StatusOK
+	if err := read(); err != nil {
+		t.Fatalf("explicit empty policy inventory: %v", err)
+	}
 }

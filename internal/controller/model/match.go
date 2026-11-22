@@ -72,7 +72,7 @@ func NormalizeMatch(input gatewayv1.HTTPRouteMatch) (Match, error) {
 	default:
 		return Match{}, unsupported(fmt.Sprintf("unknown path match type %q", result.PathType), ScopeRoute)
 	}
-	if !validPath(result.PathValue) {
+	if !cloud.ValidHTTPPath(result.PathValue) {
 		return Match{}, unsupported(fmt.Sprintf("path %q is not a valid absolute Gateway API path", result.PathValue), ScopeRule)
 	}
 	if result.PathType == gatewayv1.PathMatchPathPrefix && len(result.PathValue) > 1 {
@@ -97,28 +97,6 @@ func NormalizeMatch(input gatewayv1.HTTPRouteMatch) (Match, error) {
 	}
 	slices.SortFunc(result.Headers, func(a, b HeaderMatch) int { return cmp.Compare(a.Name, b.Name) })
 	return result, nil
-}
-
-func validPath(path string) bool {
-	if !strings.HasPrefix(path, "/") || strings.Contains(path, "//") || strings.Contains(path, "/./") || strings.Contains(path, "/../") ||
-		strings.Contains(strings.ToLower(path), "%2f") || strings.Contains(path, "#") || strings.HasSuffix(path, "/.") || strings.HasSuffix(path, "/..") {
-		return false
-	}
-	for i := 0; i < len(path); i++ {
-		c := path[i]
-		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.ContainsRune("-/_~.!$&'()*+,;=:@", rune(c)) {
-			continue
-		}
-		if c != '%' || i+2 >= len(path) || !hex(path[i+1]) || !hex(path[i+2]) {
-			return false
-		}
-		i += 2
-	}
-	return true
-}
-
-func hex(c byte) bool {
-	return c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F'
 }
 
 func unsupported(message string, scope DiagnosticScope) *Diagnostic {

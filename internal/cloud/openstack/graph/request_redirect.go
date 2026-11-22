@@ -18,7 +18,9 @@ package graph
 
 import (
 	"context"
+	"errors"
 	"slices"
+	"time"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
@@ -38,7 +40,8 @@ var requestRedirectPolicy = protectedHTTPPredicate{
 // until its required destinations, predicates and policy positions are verified.
 // Withdrawal can proceed without the capability once the listener is closed.
 func (p *Provider) protectRequestRedirectTraffic(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, plan []graphMutation, result *cloud.GatewayGraphResult) []graphMutation {
-	if desired.protocol != cloud.ListenerProtocolHTTP || desired.spec.Gateway.Disposition != cloud.GraphEnsure {
+	disposition := desired.spec.Gateway.Disposition
+	if actual.protocol != cloud.ListenerProtocolHTTP || disposition != cloud.GraphEnsure && disposition != cloud.GraphPreserve {
 		return plan
 	}
 	frontends := actual.scopedListeners
@@ -54,8 +57,18 @@ func (p *Provider) protectRequestRedirectTraffic(ctx context.Context, desired de
 		return plan
 	}
 	available := false
-	if p.httpRequestRedirect && actual.loadBalancer != nil {
-		available = p.verifyGatewayHTTPCapabilities(ctx, desired, actual, []string{requestRedirectPolicy.capability}) == nil
+	waiting := "Octavia request redirect mode is disabled"
+	if disposition == cloud.GraphEnsure && p.httpRequestRedirect && actual.loadBalancer != nil {
+		err := p.verifyRequestRedirectCapabilities(ctx, desired, actual, []string{requestRedirectPolicy.capability})
+		var missing *octavia.MissingGatewayCapability
+		switch {
+		case err == nil:
+			available = true
+		case errors.As(err, &missing):
+			waiting = "Octavia does not advertise " + requestRedirectPolicy.capability
+		default:
+			waiting = "Could not verify Octavia capability " + requestRedirectPolicy.capability
+		}
 	}
 	blocked := make(map[string]bool)
 	unverifiedClosed := make(map[string]bool)
@@ -74,7 +87,7 @@ func (p *Provider) protectRequestRedirectTraffic(ctx context.Context, desired de
 		}
 		reason := "Waiting for verified Octavia request redirects on this listener"
 		if !available && state.desired {
-			reason = "Waiting for Octavia to advertise " + requestRedirectPolicy.capability
+			reason = waiting
 		}
 		for i, route := range desired.routes {
 			if desired.spec.Routes[i].Disposition == cloud.GraphEnsure && requestRedirectRoutePort(desired, route) == listener.ProtocolPort {
@@ -139,4 +152,16 @@ func redirectPolicyWriteRequiresCapability(route desiredRoute, step routeMutatio
 
 func redirectPolicyCleanup(kind routeMutationKind) bool {
 	return kind == routeMutationDisablePolicy || kind == routeMutationDeleteRule || kind == routeMutationDeletePolicy
+}
+
+func (p *Provider) verifyRequestRedirectCapabilities(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, required []string) error {
+	// Discovery may stop responding during an outage. Preserve time in the
+	// parent context to validate and submit a restrictive listener update.
+	budget := 3 * time.Second
+	if deadline, ok := ctx.Deadline(); ok {
+		budget = min(budget, time.Until(deadline)/3)
+	}
+	discovery, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+	return p.verifyGatewayHTTPCapabilities(discovery, desired, actual, required)
 }

@@ -786,7 +786,11 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 		return step, nil
 	}
 	withdrawTarget := step.kind == graphRouteMutation && step.withdrawHTTPPolicy && step.route.kind == routeMutationSetPolicyTarget
-	err := p.verifyGatewayHTTPCapabilities(ctx, desired, actual, required)
+	verify := p.verifyGatewayHTTPCapabilities
+	if slices.Contains(required, octavia.GatewayCapabilityHTTPRequestRedirect) {
+		verify = p.verifyRequestRedirectCapabilities
+	}
+	err := verify(ctx, desired, actual, required)
 	var missingResponseHeaders *octavia.MissingGatewayCapability
 	if withdrawTarget && len(step.route.responseHeaderOperations) != 0 &&
 		errors.As(err, &missingResponseHeaders) && missingResponseHeaders.Capability == octavia.GatewayCapabilityResponseHeaderOperations {
@@ -796,7 +800,7 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 		required = slices.DeleteFunc(required, func(capability string) bool {
 			return capability == octavia.GatewayCapabilityResponseHeaderOperations
 		})
-		err = p.verifyGatewayHTTPCapabilities(ctx, desired, actual, required)
+		err = verify(ctx, desired, actual, required)
 	}
 	if err != nil {
 		// Removing a withdrawal predicate would expose a lower-priority
