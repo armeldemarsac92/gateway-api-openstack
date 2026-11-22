@@ -162,10 +162,7 @@ func (p ListenerSetProjection) count() int32 {
 }
 
 func projectListenerSetEntry(spec gatewayv1.ListenerEntry, plainHTTP bool, siblings []*gatewayv1.Listener) listenerSetEntry {
-	listener := gatewayv1.Listener{
-		Name: spec.Name, Port: spec.Port, Protocol: spec.Protocol, Hostname: spec.Hostname,
-		TLS: spec.TLS, AllowedRoutes: spec.AllowedRoutes, Filters: spec.Filters,
-	}
+	listener := gatewayv1.Listener(spec)
 	entry := listenerSetEntry{listener: listener}
 	if listener.AllowedRoutes != nil && len(listener.AllowedRoutes.Kinds) != 0 {
 		for _, ref := range listener.AllowedRoutes.Kinds {

@@ -128,8 +128,9 @@ func (r *reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 
 	base := listenerSet.DeepCopy()
-	acceptedReason, programmedReason := gatewayv1.ListenerSetReasonListenersNotValid, gatewayv1.ListenerSetReasonInvalid
-	message := "The controller cannot configure delegated listeners"
+	var acceptedReason gatewayv1.ListenerSetConditionReason
+	var message string
+	programmedReason := gatewayv1.ListenerSetReasonInvalid
 	switch {
 	case !gateway.DeletionTimestamp.IsZero() || !class.DeletionTimestamp.IsZero():
 		acceptedReason = gatewayv1.ListenerSetReasonParentNotAccepted

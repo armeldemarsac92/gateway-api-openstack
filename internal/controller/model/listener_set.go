@@ -17,12 +17,13 @@ limitations under the License.
 package model
 
 import (
+	"slices"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
-	"slices"
 )
 
 // ListenerSetRefKey resolves an HTTPRoute parentRef that targets a v1 ListenerSet.
