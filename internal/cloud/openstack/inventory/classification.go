@@ -373,7 +373,7 @@ func auditCandidateRole(resourceType string, tags []string) (string, bool, error
 		return role, true, nil
 	}
 	baseRole := role
-	if role == openstackidentity.RoleRuleRedirectGuard || role == openstackidentity.RoleRuleHTTPHostExclusion || role == openstackidentity.RoleRuleHTTPHeaderExact || role == openstackidentity.RoleRuleHTTPMethod {
+	if role == openstackidentity.RoleRuleRedirectGuard || role == openstackidentity.RoleRuleHTTPHostExclusion || role == openstackidentity.RoleRuleHTTPHeaderExact || role == openstackidentity.RoleRuleHTTPQueryParamExact || role == openstackidentity.RoleRuleHTTPMethod {
 		return "", false, fmt.Errorf("HTTP predicate role requires a policy identity")
 	}
 	if base, _, _, fragmented := openstackidentity.ParseHTTPFragmentRole(role); fragmented {
@@ -398,7 +398,7 @@ func auditCandidateRole(resourceType string, tags []string) (string, bool, error
 	case auditTypeL7Policy:
 		valid, routeScoped = baseRole == rolePolicyExact || baseRole == rolePolicyPrefix, true
 	case auditTypeL7Rule:
-		valid, routeScoped = baseRole == roleRulePath || baseRole == roleRuleHost || baseRole == openstackidentity.RoleRuleRedirectGuard || baseRole == openstackidentity.RoleRuleHTTPHostExclusion || baseRole == openstackidentity.RoleRuleHTTPHeaderExact || baseRole == openstackidentity.RoleRuleHTTPMethod, true
+		valid, routeScoped = baseRole == roleRulePath || baseRole == roleRuleHost || baseRole == openstackidentity.RoleRuleRedirectGuard || baseRole == openstackidentity.RoleRuleHTTPHostExclusion || baseRole == openstackidentity.RoleRuleHTTPHeaderExact || baseRole == openstackidentity.RoleRuleHTTPQueryParamExact || baseRole == openstackidentity.RoleRuleHTTPMethod, true
 	}
 	if !valid {
 		return "", false, fmt.Errorf("resource role does not match its OpenStack type")

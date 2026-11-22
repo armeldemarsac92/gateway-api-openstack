@@ -311,7 +311,8 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 		} else if route.backendTLS.issue != "" {
 			routeResult.Outcome = p.progressingOutcome(route.backendTLS.issue)
 		}
-		if errors.Is(route.redirectIssue, errExactHeaderRedirectPrecedence) || errors.Is(route.redirectIssue, errHTTPMethodRedirectPrecedence) {
+		if errors.Is(route.redirectIssue, errExactHeaderRedirectPrecedence) || errors.Is(route.redirectIssue, errHTTPMethodRedirectPrecedence) ||
+			errors.Is(route.redirectIssue, errExactQueryParamRedirectPrecedence) {
 			routeResult.UnsupportedMatch = route.redirectIssue.Error()
 		} else if route.redirectIssue != nil {
 			routeResult.Outcome = p.progressingOutcome(route.redirectIssue.Error())
@@ -667,6 +668,7 @@ func (p *Provider) prepareNextGraphMutation(ctx context.Context, desired desired
 	}
 	recordBlocked(first, blocked)
 	blockedHTTPPolicy := blocked.capability == octavia.GatewayCapabilityHTTPHeaderExact || blocked.capability == octavia.GatewayCapabilityHTTPMethodMatch ||
+		blocked.capability == octavia.GatewayCapabilityHTTPQueryParamExact ||
 		blocked.capability == octavia.GatewayCapabilityResponseHeaderOperations
 	result.Outcome = result.Routes[first.routeIndex].Result.Outcome
 	seen := map[poolRouteOwner]bool{{route: first.routeIndex, backend: first.backendKey}: true}
@@ -760,6 +762,10 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 			step.route.rule.ruleType == httpHeaderExactRuleType {
 			required = append(required, octavia.GatewayCapabilityHTTPHeaderExact)
 		}
+		if step.route.requiresExactQueryParams || len(step.route.policy.queryParams) != 0 && step.route.kind == routeMutationCreatePolicy ||
+			step.route.rule.ruleType == httpQueryParamExactRuleType {
+			required = append(required, octavia.GatewayCapabilityHTTPQueryParamExact)
+		}
 		if step.route.requiresHTTPMethod || step.route.policy.method != "" && step.route.kind == routeMutationCreatePolicy ||
 			step.route.rule.ruleType == httpMethodRuleType {
 			required = append(required, octavia.GatewayCapabilityHTTPMethodMatch)
@@ -818,6 +824,9 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 			} else if slices.Contains(required, octavia.GatewayCapabilityHTTPHeaderExact) &&
 				(!explicitlyMissing || missing.Capability == octavia.GatewayCapabilityHTTPHeaderExact) {
 				err = &unavailableRouteCapability{error: err, capability: octavia.GatewayCapabilityHTTPHeaderExact}
+			} else if slices.Contains(required, octavia.GatewayCapabilityHTTPQueryParamExact) &&
+				(!explicitlyMissing || missing.Capability == octavia.GatewayCapabilityHTTPQueryParamExact) {
+				err = &unavailableRouteCapability{error: err, capability: octavia.GatewayCapabilityHTTPQueryParamExact}
 			} else if slices.Contains(required, octavia.GatewayCapabilityHTTPMethodMatch) &&
 				(!explicitlyMissing || missing.Capability == octavia.GatewayCapabilityHTTPMethodMatch) {
 				err = &unavailableRouteCapability{error: err, capability: octavia.GatewayCapabilityHTTPMethodMatch}

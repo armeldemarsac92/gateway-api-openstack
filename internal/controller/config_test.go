@@ -58,6 +58,7 @@ func TestConfigValidateRejectsUnsupportedOrAmbiguousValues(t *testing.T) {
 		name   string
 		mutate func(*Config)
 	}{
+		{name: "HTTP query parameters without fixed responses", mutate: func(cfg *Config) { cfg.HTTPQueryParamExact = true }},
 		{name: "HTTP method without fixed responses", mutate: func(cfg *Config) { cfg.HTTPMethodMatch = true }},
 		{name: "SNI suffix without passthrough", mutate: func(cfg *Config) { cfg.TLSSNISuffix = true }},
 		{name: "invalid controller name", mutate: func(cfg *Config) { cfg.ControllerName = "NOT_A_DOMAIN/controller" }},

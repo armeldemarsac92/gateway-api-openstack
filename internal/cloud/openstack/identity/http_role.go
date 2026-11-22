@@ -73,6 +73,12 @@ func HTTPMatchKey(hostname string, pathType cloud.PathMatchType, path, method st
 // HTTPListenerMatchKey scopes a logical HTTP match without changing existing keys.
 func HTTPListenerMatchKey(scope string, match cloud.HTTPPathMatch) string {
 	key := HTTPMatchKey(match.Hostname, match.PathType, match.PathValue, match.Method, match.Headers...)
+	if len(match.QueryParams) != 0 {
+		key = httpTupleKey("query-params", key, "")
+		for _, param := range match.QueryParams {
+			key = httpTupleKey(key, param.Name, param.Value)
+		}
+	}
 	if match.HTTPListenerHostname != "" {
 		return httpTupleKey("http-listener", match.HTTPListenerHostname, key)
 	}
@@ -113,12 +119,20 @@ func ScalarHTTPHostExclusionRole(guard string) string {
 // RoleRuleHTTPHeaderExact identifies a predicate on a normalized header name.
 const RoleRuleHTTPHeaderExact = "l7-header-exact"
 
+// RoleRuleHTTPQueryParamExact identifies a predicate on a case-sensitive query parameter name.
+const RoleRuleHTTPQueryParamExact = "l7-query-param-exact"
+
 // RoleRuleHTTPMethod identifies the single method predicate in a match.
 const RoleRuleHTTPMethod = "l7-http-method"
 
 // HTTPHeaderRuleKey identifies one field within an exact-header conjunction.
 func HTTPHeaderRuleKey(name string) string {
 	return httpTupleKey("exact-header", name, "")
+}
+
+// HTTPQueryParamRuleKey identifies one name within an exact query parameter conjunction.
+func HTTPQueryParamRuleKey(name string) string {
+	return httpTupleKey("exact-query-param", name, "")
 }
 
 func httpTupleKey(first, second, third string) string {
@@ -172,7 +186,7 @@ func httpMatchRole(role, base, match string, predicateKeys []string) string {
 		if len(predicateKeys) == 0 {
 			return role + "/" + match
 		}
-	case RoleRuleHTTPHeaderExact, RoleRuleHTTPHostExclusion:
+	case RoleRuleHTTPHeaderExact, RoleRuleHTTPQueryParamExact, RoleRuleHTTPHostExclusion:
 		if len(predicateKeys) == 1 && validHTTPKey(predicateKeys[0]) {
 			return role + "/" + match + "/" + predicateKeys[0]
 		}
@@ -239,7 +253,7 @@ func HTTPRedirectRole(base, match, cell, guard string) string {
 		if guard == "" {
 			return role
 		}
-	case RoleRuleRedirectGuard, RoleRuleHTTPHeaderExact, RoleRuleHTTPHostExclusion:
+	case RoleRuleRedirectGuard, RoleRuleHTTPHeaderExact, RoleRuleHTTPQueryParamExact, RoleRuleHTTPHostExclusion:
 		if validHTTPKey(guard) {
 			return role + "/" + guard
 		}

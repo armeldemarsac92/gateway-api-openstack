@@ -103,7 +103,7 @@ func readRouteResourceRole(tags []string, bases ...string) (routeResourceRole, b
 	if !ok {
 		return routeResourceRole{}, false
 	}
-	if slices.Contains(bases, raw) && raw != roleRuleRedirectGuard && raw != openstackidentity.RoleRuleHTTPHostExclusion && raw != openstackidentity.RoleRuleHTTPHeaderExact && raw != openstackidentity.RoleRuleHTTPMethod {
+	if slices.Contains(bases, raw) && raw != roleRuleRedirectGuard && raw != openstackidentity.RoleRuleHTTPHostExclusion && raw != openstackidentity.RoleRuleHTTPHeaderExact && raw != openstackidentity.RoleRuleHTTPQueryParamExact && raw != openstackidentity.RoleRuleHTTPMethod {
 		return routeResourceRole{raw: raw, base: raw}, true
 	}
 	if base, match, cell, _, ok := openstackidentity.ParseHTTPRedirectRole(raw); ok {
@@ -678,14 +678,14 @@ func (p *Provider) observeRoutePolicy(ctx context.Context, owner routeGraphOwner
 		if err := p.validateOptionalProject("L7 rule", rule.ID, rule.ProjectID); err != nil {
 			return observedRoutePolicy{}, err
 		}
-		ruleRole, ok := readRouteResourceRole(rule.Tags, roleRulePath, roleRuleHost, roleRuleRedirectGuard, openstackidentity.RoleRuleHTTPHostExclusion, openstackidentity.RoleRuleHTTPHeaderExact, openstackidentity.RoleRuleHTTPMethod)
+		ruleRole, ok := readRouteResourceRole(rule.Tags, roleRulePath, roleRuleHost, roleRuleRedirectGuard, openstackidentity.RoleRuleHTTPHostExclusion, openstackidentity.RoleRuleHTTPHeaderExact, openstackidentity.RoleRuleHTTPQueryParamExact, openstackidentity.RoleRuleHTTPMethod)
 		if !ok || !owner.matchesRoute(rule.Tags, ruleRole.raw) || ruleRole.backend != role.backend ||
 			ruleRole.match != role.match || ruleRole.redirect != role.redirect || ruleRole.weighted != role.weighted ||
 			role.backend != "" && rule.ProjectID != p.projectID {
 			return observedRoutePolicy{}, fmt.Errorf("%w: L7 rule %s beneath policy %s has an unproven project or route, backend or match identity", cloud.ErrOwnershipConflict, rule.ID, item.ID)
 		}
 		flagsObserved := observation.AdminState != nil && observation.Inverted != nil
-		if (role.redirect || ruleRole.base == openstackidentity.RoleRuleHTTPHostExclusion || ruleRole.base == openstackidentity.RoleRuleHTTPHeaderExact || ruleRole.base == openstackidentity.RoleRuleHTTPMethod) && (!flagsObserved || rule.RuleType == "" || rule.CompareType == "" || rule.Value == "") {
+		if (role.redirect || ruleRole.base == openstackidentity.RoleRuleHTTPHostExclusion || ruleRole.base == openstackidentity.RoleRuleHTTPHeaderExact || ruleRole.base == openstackidentity.RoleRuleHTTPQueryParamExact || ruleRole.base == openstackidentity.RoleRuleHTTPMethod) && (!flagsObserved || rule.RuleType == "" || rule.CompareType == "" || rule.Value == "") {
 			return observedRoutePolicy{}, cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady,
 				fmt.Errorf("HTTP rule %s has incomplete predicate or administrative state", rule.ID))
 		}
@@ -750,6 +750,7 @@ type routeMutation struct {
 	requestHeaderOperations  []cloud.HTTPHeaderOperation
 	responseHeaderOperations []cloud.HTTPHeaderOperation
 	requiresExactHeaders     bool
+	requiresExactQueryParams bool
 	requiresHTTPMethod       bool
 }
 
@@ -994,7 +995,8 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 					policy:                   desiredPolicy{httpsListenerHostname: wantedPolicy.httpsListenerHostname},
 					requestHeaderOperations:  wantedPolicy.requestHeaderOperations,
 					responseHeaderOperations: wantedPolicy.responseHeaderOperations,
-					requiresExactHeaders:     len(wantedPolicy.headers) != 0, requiresHTTPMethod: wantedPolicy.method != ""}}, state, nil
+					requiresExactHeaders:     len(wantedPolicy.headers) != 0,
+					requiresExactQueryParams: len(wantedPolicy.queryParams) != 0, requiresHTTPMethod: wantedPolicy.method != ""}}, state, nil
 			}
 		}
 	}
@@ -1368,7 +1370,7 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 		})
 	case routeMutationUpdateRule:
 		var key *string
-		if step.rule.ruleType == httpHeaderExactRuleType {
+		if step.rule.ruleType == httpHeaderExactRuleType || step.rule.ruleType == httpQueryParamExactRuleType {
 			key = &step.rule.key
 		}
 		_, err = p.octavia.UpdateRule(ctx, step.parentID, step.id, l7policies.UpdateRuleOpts{

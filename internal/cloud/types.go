@@ -181,6 +181,7 @@ type HTTPPathMatch struct {
 	Precedence               int
 	Method                   string                `json:",omitempty"`
 	Headers                  []HTTPHeaderMatch     `json:",omitempty"`
+	QueryParams              []HTTPQueryParamMatch `json:",omitempty"`
 	RequestHeaderOperations  []HTTPHeaderOperation `json:",omitempty"`
 	ResponseHeaderOperations []HTTPHeaderOperation `json:",omitempty"`
 }

@@ -217,3 +217,27 @@ func TestRedirectMethodPrecedenceRespectsDisjointAndSharedMethods(t *testing.T) 
 		t.Fatalf("a shared method needs a path guard: %v, %v", cells, err)
 	}
 }
+
+func TestRedirectGuardsRespectExactQueryParameterOverlap(t *testing.T) {
+	redirect := cloud.HTTPPathMatch{PathType: cloud.PathMatchPrefix, PathValue: "/shop", Precedence: 1,
+		QueryParams: []cloud.HTTPQueryParamMatch{{Name: "animal", Value: "whale"}}}
+	for _, test := range []struct {
+		param  cloud.HTTPQueryParamMatch
+		guards int
+		err    error
+	}{
+		{param: cloud.HTTPQueryParamMatch{Name: "animal", Value: "whale"}, guards: 1},
+		{param: cloud.HTTPQueryParamMatch{Name: "animal", Value: "dolphin"}},
+		{param: cloud.HTTPQueryParamMatch{Name: "ANIMAL", Value: "whale"}, err: errExactQueryParamRedirectPrecedence},
+	} {
+		forward := cloud.HTTPPathMatch{PathType: cloud.PathMatchExact, PathValue: "/shop/health",
+			QueryParams: []cloud.HTTPQueryParamMatch{test.param}}
+		cells, err := redirectCells(redirect, []cloud.HTTPPathMatch{forward})
+		if !errors.Is(err, test.err) {
+			t.Fatalf("query param %v: error %v, want %v", test.param, err, test.err)
+		}
+		if err == nil && (len(cells) != 1 || len(cells[0].guards) != test.guards) {
+			t.Fatalf("query param %v: redirect cells = %v, want %d guards", test.param, cells, test.guards)
+		}
+	}
+}

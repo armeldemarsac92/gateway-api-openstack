@@ -34,8 +34,9 @@ import (
 const maxOctaviaMemberWeight = 256
 
 const (
-	httpHeaderExactRuleType l7policies.RuleType = "HTTP_HEADER_EXACT"
-	httpMethodRuleType      l7policies.RuleType = "HTTP_METHOD"
+	httpHeaderExactRuleType     l7policies.RuleType = "HTTP_HEADER_EXACT"
+	httpQueryParamExactRuleType l7policies.RuleType = "HTTP_QUERY_PARAM_EXACT"
+	httpMethodRuleType          l7policies.RuleType = "HTTP_METHOD"
 )
 
 type desiredPolicy struct {
@@ -59,6 +60,7 @@ type desiredPolicy struct {
 	responseHeaderOperations []cloud.HTTPHeaderOperation
 	method                   string
 	headers                  []cloud.HTTPHeaderMatch
+	queryParams              []cloud.HTTPQueryParamMatch
 }
 
 type desiredRule struct {
@@ -450,6 +452,9 @@ func (p *Provider) normalizeHTTPMatch(match cloud.HTTPPathMatch) (cloud.HTTPPath
 	if len(match.Headers) != 0 && !p.httpHeaderExact {
 		return cloud.HTTPPathMatch{}, errors.New("exact HTTP header matching requires --octavia-http-header-exact")
 	}
+	if len(match.QueryParams) != 0 && (!p.httpQueryParamExact || !p.fixedHTTPResponses) {
+		return cloud.HTTPPathMatch{}, errors.New("exact HTTP query parameter matching requires --octavia-http-query-param-exact and --octavia-fixed-http-responses")
+	}
 	if match.Method != "" {
 		if !p.httpMethodMatch || !p.fixedHTTPResponses {
 			return cloud.HTTPPathMatch{}, errors.New("HTTP method matching requires --octavia-http-method-match and --octavia-fixed-http-responses")
@@ -463,6 +468,9 @@ func (p *Provider) normalizeHTTPMatch(match cloud.HTTPPathMatch) (cloud.HTTPPath
 		return cloud.HTTPPathMatch{}, err
 	}
 	match.Headers = headers
+	if match.QueryParams, err = cloud.NormalizeHTTPQueryParamMatches(match.QueryParams); err != nil {
+		return cloud.HTTPPathMatch{}, err
+	}
 	if match.PathType == cloud.PathMatchPrefix {
 		match.PathValue = strings.TrimRight(match.PathValue, "/")
 	}
@@ -508,7 +516,7 @@ func httpPathPolicies(match cloud.HTTPPathMatch, grouped bool) ([]desiredPolicy,
 		}
 	}
 	if !usesHTTPPathPredicate(match) {
-		return []desiredPolicy{{role: rolePolicyPrefix, position: 1, method: match.Method, headers: match.Headers}}, hostnameRuleValue, nil
+		return []desiredPolicy{{role: rolePolicyPrefix, position: 1, method: match.Method, headers: match.Headers, queryParams: match.QueryParams}}, hostnameRuleValue, nil
 	}
 	role := rolePolicyExact
 	pattern := pathRules.Regex
@@ -527,6 +535,7 @@ func httpPathPolicies(match cloud.HTTPPathMatch, grouped bool) ([]desiredPolicy,
 	for i := range policies {
 		policies[i].method = match.Method
 		policies[i].headers = match.Headers
+		policies[i].queryParams = match.QueryParams
 	}
 	return policies, hostnameRuleValue, nil
 }
@@ -579,6 +588,15 @@ func rulesFor(policy desiredPolicy, hostnameRuleValue string) []desiredRule {
 			compareType: l7policies.CompareTypeEqual,
 			key:         header.Name,
 			value:       header.Value,
+		})
+	}
+	for _, param := range policy.queryParams {
+		rules = append(rules, desiredRule{
+			role:        policyRuleRole(policy, openstackidentity.RoleRuleHTTPQueryParamExact, openstackidentity.HTTPQueryParamRuleKey(param.Name)),
+			ruleType:    httpQueryParamExactRuleType,
+			compareType: l7policies.CompareTypeEqual,
+			key:         param.Name,
+			value:       param.Value,
 		})
 	}
 	for _, guard := range policy.httpHostExclusions {

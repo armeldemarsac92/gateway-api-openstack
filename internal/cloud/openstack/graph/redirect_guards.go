@@ -41,8 +41,9 @@ type redirectGuard struct {
 }
 
 var (
-	errExactHeaderRedirectPrecedence = errors.New("cannot preserve Octavia redirect precedence with an overlapping higher-priority forwarding rule that adds an exact HTTP header condition")
-	errHTTPMethodRedirectPrecedence  = errors.New("cannot preserve Octavia redirect precedence with an overlapping higher-priority forwarding rule that adds an HTTP method condition")
+	errExactHeaderRedirectPrecedence     = errors.New("cannot preserve Octavia redirect precedence with an overlapping higher-priority forwarding rule that adds an exact HTTP header condition")
+	errExactQueryParamRedirectPrecedence = errors.New("cannot preserve Octavia redirect precedence with an overlapping higher-priority forwarding rule that adds an exact HTTP query parameter condition")
+	errHTTPMethodRedirectPrecedence      = errors.New("cannot preserve Octavia redirect precedence with an overlapping higher-priority forwarding rule that adds an HTTP method condition")
 )
 
 type redirectCell struct {
@@ -177,7 +178,7 @@ func redirectCells(match cloud.HTTPPathMatch, forwards []cloud.HTTPPathMatch) ([
 	root := &redirectDomain{host: match.Hostname}
 	domains := map[string]*redirectDomain{root.host: root}
 	ordered := []*redirectDomain{root}
-	var unsupportedMethod, unsupportedHeaders bool
+	var unsupportedMethod, unsupportedHeaders, unsupportedQueryParams bool
 	for _, f := range forwards {
 		if f.HTTPListenerHostname != match.HTTPListenerHostname || f.HTTPSListenerHostname != match.HTTPSListenerHostname || f.Precedence >= match.Precedence || f.Method != "" && match.Method != "" && f.Method != match.Method {
 			continue
@@ -193,6 +194,25 @@ func redirectCells(match cloud.HTTPPathMatch, forwards []cloud.HTTPPathMatch) ([
 		} else if !hostContains(root.host, host) {
 			continue
 		}
+		forwardParams, err := cloud.NormalizeHTTPQueryParamMatches(f.QueryParams)
+		if err != nil {
+			return nil, err
+		}
+		var queryDisjoint, queryAddsCondition bool
+		for _, param := range forwardParams {
+			i := slices.IndexFunc(match.QueryParams, func(other cloud.HTTPQueryParamMatch) bool {
+				return other.Name == param.Name
+			})
+			if i < 0 {
+				queryAddsCondition = true
+			} else if match.QueryParams[i].Value != param.Value {
+				queryDisjoint = true
+				break
+			}
+		}
+		if queryDisjoint {
+			continue
+		}
 		if f.Method != "" && match.Method == "" {
 			unsupportedMethod = true
 			continue
@@ -201,6 +221,10 @@ func redirectCells(match cloud.HTTPPathMatch, forwards []cloud.HTTPPathMatch) ([
 			return !slices.Contains(match.Headers, header)
 		}) {
 			unsupportedHeaders = true
+			continue
+		}
+		if queryAddsCondition {
+			unsupportedQueryParams = true
 			continue
 		}
 		d := domains[host]
@@ -220,6 +244,9 @@ func redirectCells(match cloud.HTTPPathMatch, forwards []cloud.HTTPPathMatch) ([
 	}
 	if unsupportedHeaders {
 		return nil, errExactHeaderRedirectPrecedence
+	}
+	if unsupportedQueryParams {
+		return nil, errExactQueryParamRedirectPrecedence
 	}
 	// A wildcard ancestor has fewer literal DNS labels than its descendants.
 	sort.Slice(ordered[1:], func(i, j int) bool {
@@ -268,7 +295,7 @@ func redirectCells(match cloud.HTTPPathMatch, forwards []cloud.HTTPPathMatch) ([
 				cell.guards = append(cell.guards, redirectGuard{l7policies.TypePath, policy.compareType, policy.path})
 			}
 		}
-		positives := len(match.Headers)
+		positives := len(match.Headers) + len(match.QueryParams)
 		if usesHTTPPathPredicate(match) {
 			positives++
 		}

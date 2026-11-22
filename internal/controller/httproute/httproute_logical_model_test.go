@@ -110,7 +110,7 @@ func TestLogicalModelCannotEnableUnmappedNodePortBehavior(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, _, err = supportedRouteModel(logical, []*gatewayv1.Listener{&gateway.Spec.Listeners[0]}, false, false, false, false, false)
+			_, _, err = supportedRouteModel(logical, []*gatewayv1.Listener{&gateway.Spec.Listeners[0]}, false, false, false, false, false, false)
 			var rejected *routeBuildError
 			if !errors.As(err, &rejected) || rejected.kind != routeErrorUnsupported {
 				t.Fatalf("unmapped logical model escaped NodePort lowering: %v", err)
@@ -238,10 +238,84 @@ func TestHTTPMethodAndQueryValidationAreIndependent(t *testing.T) {
 		{method: "get", want: "unknown HTTP method"},
 		{method: gatewayv1.HTTPMethodGet, query: []gatewayv1.HTTPQueryParamMatch{{Name: "q", Value: "one"}}, want: "query parameter"},
 	} {
-		_, _, err := supportedMatch(gatewayv1.HTTPRouteMatch{Method: &test.method, QueryParams: test.query}, false, true)
+		_, _, err := supportedMatch(gatewayv1.HTTPRouteMatch{Method: &test.method, QueryParams: test.query}, false, true, false)
 		var rejected *routeBuildError
 		if !errors.As(err, &rejected) || rejected.kind != routeErrorUnsupported || !strings.Contains(rejected.message, test.want) {
 			t.Fatalf("match = %#v, expected UnsupportedValue mentioning %q, got %v", test, test.want, err)
+		}
+	}
+}
+
+func TestExactHTTPQueryParametersComposeAndRespectMatchPrecedence(t *testing.T) {
+	cfg := testConfig()
+	cfg.HTTPQueryParamExact, cfg.FixedHTTPResponses, cfg.HTTPHeaderExact, cfg.HTTPMethodMatch = true, true, true, true
+	_, gateway := providerRouteParentObjects(cfg)
+	route := mapperTestHTTPRoute(gateway.Namespace, "api", gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name)}, "backend")
+	route.UID = "route-uid"
+	animal := gatewayv1.HTTPQueryParamMatch{Name: "animal", Value: "whale"}
+	color := gatewayv1.HTTPQueryParamMatch{Name: "Animal", Value: "é blue&+", Type: ptr.To(gatewayv1.QueryParamMatchExact)}
+	duplicate := gatewayv1.HTTPQueryParamMatch{Name: "animal", Value: "ignored", Type: ptr.To(gatewayv1.QueryParamMatchRegularExpression)}
+	route.Spec.Rules[0].Matches = []gatewayv1.HTTPRouteMatch{
+		{},
+		{QueryParams: []gatewayv1.HTTPQueryParamMatch{animal}},
+		{QueryParams: []gatewayv1.HTTPQueryParamMatch{{Name: "animal", Value: "dolphin"}}},
+		{QueryParams: []gatewayv1.HTTPQueryParamMatch{animal, duplicate, color}},
+		{QueryParams: []gatewayv1.HTTPQueryParamMatch{color, animal}}, // Equivalent conjunction.
+		{Headers: []gatewayv1.HTTPHeaderMatch{{Name: "Version", Value: "one"}}, QueryParams: []gatewayv1.HTTPQueryParamMatch{animal}},
+		{Method: ptr.To(gatewayv1.HTTPMethodGet), QueryParams: []gatewayv1.HTTPQueryParamMatch{animal}},
+		{Path: &gatewayv1.HTTPPathMatch{Value: ptr.To("/path")}, QueryParams: []gatewayv1.HTTPQueryParamMatch{animal}},
+		{Path: &gatewayv1.HTTPPathMatch{Type: ptr.To(gatewayv1.PathMatchExact), Value: ptr.To("/")}},
+	}
+	service, endpoints, node := validNodePortBackend(gateway.Namespace, "backend")
+	reader := indexedFakeClientBuilder(testScheme(t), cfg).WithObjects(service, endpoints, node).Build()
+	desired, err := (&Reconciler{Config: cfg}).buildRouteModelWithReader(t.Context(), reader, route, gateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(desired.HTTPBackends) != 1 {
+		t.Fatalf("expected one backend, got %#v", desired.HTTPBackends)
+	}
+	matches := desired.HTTPBackends[0].Matches
+	if len(matches) != 8 || matches[0].PathType != cloud.PathMatchExact || matches[1].PathValue != "/path" ||
+		matches[2].Method != "GET" || len(matches[3].Headers) != 1 || len(matches[7].QueryParams) != 0 {
+		t.Fatalf("unexpected path, method, header or fallback priority: %#v", matches)
+	}
+	want := [][]cloud.HTTPQueryParamMatch{
+		{{Name: "Animal", Value: "é blue&+"}, {Name: "animal", Value: "whale"}},
+		{{Name: "animal", Value: "whale"}},
+		{{Name: "animal", Value: "dolphin"}},
+	}
+	for i, params := range want {
+		match := matches[i+4]
+		if !slices.Equal(match.QueryParams, params) {
+			t.Fatalf("rank %d: got %#v, want %#v", match.Precedence, match.QueryParams, params)
+		}
+	}
+}
+
+func TestExactHTTPQueryParameterLimits(t *testing.T) {
+	name := strings.Repeat("q", 256)
+	value := strings.Repeat("é", 1024)
+	for _, test := range []struct {
+		name, value string
+		want        string
+	}{
+		{name: name, value: value},
+		{name: name + "q", value: "x", want: "1–256"},
+		{name: "q", value: value + "é", want: "1–1024"},
+		{name: "q", want: "1–1024"},
+	} {
+		match := gatewayv1.HTTPRouteMatch{QueryParams: []gatewayv1.HTTPQueryParamMatch{{Name: gatewayv1.HTTPHeaderName(test.name), Value: test.value}}}
+		_, _, err := supportedMatch(match, false, false, true)
+		if test.want == "" {
+			if err != nil {
+				t.Fatalf("legal maximum query name and value: %v", err)
+			}
+			continue
+		}
+		var rejected *routeBuildError
+		if !errors.As(err, &rejected) || rejected.kind != routeErrorUnsupported || !strings.Contains(rejected.message, test.want) {
+			t.Fatalf("expected UnsupportedValue mentioning %q, got %v", test.want, err)
 		}
 	}
 }
