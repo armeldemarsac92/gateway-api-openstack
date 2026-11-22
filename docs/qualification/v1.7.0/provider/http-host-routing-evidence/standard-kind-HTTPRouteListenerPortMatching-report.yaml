@@ -1,0 +1,73 @@
+apiVersion: gateway.networking.k8s.io/v1
+date: "2026-11-22T11:31:37+01:00"
+gatewayAPIChannel: standard
+gatewayAPIVersion: v1.7.0
+implementation:
+  contact:
+  - https://github.com/armeldemarsac92/gateway-api-openstack/issues
+  organization: Gateway API for OpenStack
+  project: Hibiscus
+  url: https://github.com/armeldemarsac92/gateway-api-openstack
+  version: 3914abef6c37bf09e96491b048a068a1862c896f
+kind: ConformanceReport
+mode: local-single-case
+profiles:
+- core:
+    result: success
+    statistics:
+      Failed: 0
+      Passed: 0
+      Skipped: 0
+  extended:
+    result: success
+    statistics:
+      Failed: 0
+      Passed: 1
+      Skipped: 0
+    supportedFeatures:
+    - HTTPRouteParentRefPort
+    unsupportedFeatures:
+    - BackendTLSPolicy
+    - BackendTLSPolicySANValidation
+    - ClusterTrustBundle
+    - GatewayAddressEmpty
+    - GatewayAddressRoutability
+    - GatewayAddressRoutabilityCluster
+    - GatewayBackendClientCertificate
+    - GatewayFrontendClientCertificateValidation
+    - GatewayFrontendClientCertificateValidationInsecureFallback
+    - GatewayHTTPListenerIsolation
+    - GatewayHTTPSListenerDetectMisdirectedRequests
+    - GatewayInfrastructure
+    - GatewayListenerFilters
+    - GatewayPort8080
+    - GatewayRouteHostnameIntersectionPrecedence
+    - GatewayStaticAddresses
+    - HTTPRoute303RedirectStatusCode
+    - HTTPRoute307RedirectStatusCode
+    - HTTPRoute308RedirectStatusCode
+    - HTTPRouteBackendProtocolH2C
+    - HTTPRouteBackendProtocolWebSocket
+    - HTTPRouteBackendRequestHeaderModification
+    - HTTPRouteBackendTimeout
+    - HTTPRouteBackendURLRewrite
+    - HTTPRouteCORS
+    - HTTPRouteDestinationPortMatching
+    - HTTPRouteHostRewrite
+    - HTTPRouteMethodMatching
+    - HTTPRouteNamedRouteRule
+    - HTTPRoutePathRedirect
+    - HTTPRoutePathRewrite
+    - HTTPRoutePortRedirect
+    - HTTPRouteQueryParamMatching
+    - HTTPRouteRequestMirror
+    - HTTPRouteRequestMultipleMirrors
+    - HTTPRouteRequestPercentageMirror
+    - HTTPRouteRequestTimeout
+    - HTTPRouteResponseHeaderModification
+    - HTTPRouteRetryCodes
+    - HTTPRouteRetryConnectionError
+    - HTTPRouteSchemeRedirect
+    - ListenerSet
+  name: GATEWAY-HTTP
+  summary: Core tests succeeded. Extended tests succeeded.

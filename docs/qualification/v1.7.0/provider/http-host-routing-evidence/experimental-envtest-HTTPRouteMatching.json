@@ -1,0 +1,225 @@
+{
+  "channel": "experimental",
+  "case": "HTTPRouteMatching",
+  "passed": true,
+  "upstream": {
+    "exit": 0,
+    "passed": true,
+    "trafficSubtestsPassed": 9,
+    "events": [
+      "--- PASS: TestLocalHeaderCase/HTTPRouteMatching (0.92s)",
+      "--- PASS: TestLocalHeaderCase/HTTPRouteMatching/5_request_to_'/'_with_headers_should_go_to_infra-backend-v2 (6.79s)",
+      "--- PASS: TestLocalHeaderCase/HTTPRouteMatching/4_request_to_'/v2/example'_should_go_to_infra-backend-v2 (0.00s)",
+      "--- PASS: TestLocalHeaderCase/HTTPRouteMatching/3_request_to_'/v2'_should_go_to_infra-backend-v2 (0.01s)",
+      "--- PASS: TestLocalHeaderCase/HTTPRouteMatching/2_request_to_'/'_with_headers_should_go_to_infra-backend-v1 (0.00s)",
+      "--- PASS: TestLocalHeaderCase/HTTPRouteMatching/0_request_to_'/'_should_go_to_infra-backend-v1 (7.31s)",
+      "--- PASS: TestLocalHeaderCase/HTTPRouteMatching/1_request_to_'/example'_should_go_to_infra-backend-v1 (0.51s)",
+      "--- PASS: TestLocalHeaderCase/HTTPRouteMatching/7_request_to_'/v2example'_should_go_to_infra-backend-v1 (0.01s)",
+      "--- PASS: TestLocalHeaderCase/HTTPRouteMatching/8_request_to_'/foo/v2/example'_should_go_to_infra-backend-v1 (0.02s)",
+      "--- PASS: TestLocalHeaderCase/HTTPRouteMatching/6_request_to_'/v2/'_should_go_to_infra-backend-v2 (0.00s)"
+    ],
+    "requestLogCount": 171,
+    "responseStatusesBySubtest": {
+      "0": {
+        "404": 72,
+        "200": 3
+      },
+      "5": {
+        "404": 67,
+        "200": 3
+      },
+      "4": {
+        "200": 3
+      },
+      "3": {
+        "200": 3
+      },
+      "2": {
+        "200": 3
+      },
+      "1": {
+        "404": 5,
+        "200": 3
+      },
+      "7": {
+        "200": 3
+      },
+      "8": {
+        "200": 3
+      },
+      "6": {
+        "200": 3
+      }
+    }
+  },
+  "controllerRevision": "577264d263dec1c8428efb487caaa82f549d56a8",
+  "controllerManifest": "sha256:d27c0ee0dbcf415e50274613df7322551f0fe1a546b51fe9518f091b5dc6be63",
+  "managerSHA256": "581ddfd41684240fddd21fb758eac4bcd35066ff6b1abaed0f0a7a076510a784",
+  "provider": {
+    "octavia": {
+      "version": "19.0.1.dev6",
+      "wheelSha256": "00ce0a3cb11f39779e5d7b8e6fe79618ac9058943ae22e9c2330b54fde73272c",
+      "filesVerified": 632
+    },
+    "octaviaLib": {
+      "version": "3.12.1.dev3",
+      "wheelSha256": "5513991a6e004490221065b64be53f3dbdf3de1bab6e768ff2bc98f797c5cfc5",
+      "filesVerified": 24
+    },
+    "octaviaSourceRevision": "5896c054cf709b8b082c332157409e3c7e27cafc"
+  },
+  "regionalCapabilities": [
+    "fixed_http_responses_v1",
+    "weighted_http_targets_v1",
+    "http_header_exact_v1"
+  ],
+  "baseManifestSHA256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+  "releaseBundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+  "caseGoSHA256": "78273ce6c3182047f8feff585508789fc0918abcb8fb0d989ef4bf280f52af13",
+  "caseManifestSHA256": "4567cadf8721fd2d86f6f0daa7cdb29c38bfed347ac8c0cde8c8c3a74417f229",
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "echoSHA256": "d4e04b904229880dc2e32dbe58244b3bf46408c2e1e8325ebb83a69fab3d57a9",
+  "readyEchoPeers": {
+    "infra-backend-v1": {
+      "servicePorts": [
+        8080,
+        8081,
+        8082
+      ],
+      "readyEndpoints": 2,
+      "directProbes": [
+        {
+          "status": 200,
+          "backend": "infra-backend-v1",
+          "echoRequestMatched": true
+        },
+        {
+          "status": 200,
+          "backend": "infra-backend-v1",
+          "echoRequestMatched": true
+        }
+      ]
+    },
+    "infra-backend-v2": {
+      "servicePorts": [
+        8080
+      ],
+      "readyEndpoints": 2,
+      "directProbes": [
+        {
+          "status": 200,
+          "backend": "infra-backend-v2",
+          "echoRequestMatched": true
+        },
+        {
+          "status": 200,
+          "backend": "infra-backend-v2",
+          "echoRequestMatched": true
+        }
+      ]
+    },
+    "infra-backend-v3": {
+      "servicePorts": [
+        8080
+      ],
+      "readyEndpoints": 1,
+      "directProbes": [
+        {
+          "status": 200,
+          "backend": "infra-backend-v3",
+          "echoRequestMatched": true
+        }
+      ]
+    }
+  },
+  "syntheticReadyPodsBackedByEchoProcesses": [
+    "infra-backend-v1-local-0",
+    "infra-backend-v1-local-1",
+    "infra-backend-v2-local-0",
+    "infra-backend-v2-local-1",
+    "infra-backend-v3-local-0"
+  ],
+  "routeParents": {
+    "matching": [
+      {
+        "parent": "same-namespace",
+        "controllerMatches": true,
+        "currentConditions": {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "gateway-api-openstack.github.io/Programmed": "False/Pending"
+        }
+      }
+    ]
+  },
+  "policies": [
+    {
+      "position": 1,
+      "action": "REDIRECT_TO_POOL",
+      "rules": [
+        {
+          "type": "PATH",
+          "compare_type": "REGEX",
+          "key": null,
+          "value": "^/v2($|/)",
+          "provisioning_status": "ACTIVE"
+        }
+      ]
+    },
+    {
+      "position": 2,
+      "action": "REDIRECT_TO_POOL",
+      "rules": [
+        {
+          "type": "PATH",
+          "compare_type": "STARTS_WITH",
+          "key": null,
+          "value": "/",
+          "provisioning_status": "ACTIVE"
+        },
+        {
+          "type": "HTTP_HEADER_EXACT",
+          "compare_type": "EQUAL_TO",
+          "key": "version",
+          "value": "one",
+          "provisioning_status": "ACTIVE"
+        }
+      ]
+    },
+    {
+      "position": 3,
+      "action": "REDIRECT_TO_POOL",
+      "rules": [
+        {
+          "type": "PATH",
+          "compare_type": "STARTS_WITH",
+          "key": null,
+          "value": "/",
+          "provisioning_status": "ACTIVE"
+        },
+        {
+          "type": "HTTP_HEADER_EXACT",
+          "compare_type": "EQUAL_TO",
+          "key": "version",
+          "value": "two",
+          "provisioning_status": "ACTIVE"
+        }
+      ]
+    },
+    {
+      "position": 4,
+      "action": "REDIRECT_TO_POOL",
+      "rules": [
+        {
+          "type": "PATH",
+          "compare_type": "STARTS_WITH",
+          "key": null,
+          "value": "/",
+          "provisioning_status": "ACTIVE"
+        }
+      ]
+    }
+  ],
+  "haproxyConfigSHA256": "44f3eee220ebe5d88007b1f4b4836d824bb2a891f89b9b4d4081f4550ff8b134",
+  "haproxyBinarySHA256": "847fad8188f01f5693cfba85731f37d554758526f39dc6f67162ec2c6a150885"
+}

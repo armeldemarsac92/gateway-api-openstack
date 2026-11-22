@@ -1,11 +1,11 @@
 # Reproduce the Hibiscus development image
 
-The normal and no-cache builds produced identical linux/amd64 OCI manifests. The manager extracted from the archive has the same SHA-256 as the binary used for five TLSRoute and HTTPRoute cases on both channels. [Build record](image.json) · [TLSRoute termination and replay](provider/tlsroute-termination.md)
+The normal and no-cache builds produced identical linux/amd64 OCI manifests. The manager extracted from the archive has the same SHA-256 as the binary used for the kind HTTP route-hostname and listener-port checks on both channels. [Build record](image.json) · [Case results and replay](provider/http-host-routing.md)
 
 On a linux/amd64 host, use a separate checkout of the recorded revision. The Dockerfile pins the Go 1.27.4 builder and distroless base by digest. Podman uses a fixed timestamp, and the build writes the full commit into the binary and the OCI revision label. The verification command exports gzip-compressed layers.
 
 ```sh
-revision=591810b7fee341f42162be792bd8c61c2d176b37
+revision=3914abef6c37bf09e96491b048a068a1862c896f
 test "$(git rev-parse HEAD)" = "$revision"
 image="localhost/hibiscus-controller:$revision"
 make container-build CONTAINER_TOOL=podman VERSION="$revision" IMAGE="$image"
