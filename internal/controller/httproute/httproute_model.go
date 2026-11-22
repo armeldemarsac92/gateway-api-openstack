@@ -658,7 +658,7 @@ func supportedRouteModel(logical model.Gateway, selected []*gatewayv1.Listener, 
 			continue
 		}
 		if !weightedTargets && (len(rule.Backends) != 1 ||
-			(!hasHTTPBackendKey(rule.Backends[0]) && !(fixedResponses && rule.Backends[0].FilterDiagnostic != nil)) ||
+			(!hasHTTPBackendKey(rule.Backends[0]) && (!fixedResponses || rule.Backends[0].FilterDiagnostic == nil)) ||
 			rule.Backends[0].Weight <= 0) {
 			return unsupported()
 		}
