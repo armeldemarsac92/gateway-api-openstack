@@ -196,15 +196,15 @@ func compileRoute(route *gatewayv1.HTTPRoute, input Input) Route {
 			}
 		} else {
 			ordinaryHTTP := HTTPProfileRouteKind(route) == HTTPRouteKind
-			request, response, rewrite, diagnostic := NormalizeHTTPRuleFilters(rule, input.RequestHeaderModifier,
-				input.ResponseHeaderModifier && ordinaryHTTP, input.HTTPRequestURLRewrite && ordinaryHTTP)
+			request, response, rewrite, cors, diagnostic := NormalizeHTTPForwardingRuleFilters(rule, input.RequestHeaderModifier,
+				input.ResponseHeaderModifier && ordinaryHTTP, input.HTTPRequestURLRewrite && ordinaryHTTP, input.HTTPCORS && ordinaryHTTP)
 			if diagnostic != nil {
 				if slices.ContainsFunc(rule.Filters, func(filter gatewayv1.HTTPRouteFilter) bool { return !knownFilter(filter.Type) }) {
 					diagnostic.Scope = ScopeRoute
 				}
 				compiled.Diagnostics = append(compiled.Diagnostics, *diagnostic)
 			} else {
-				compiled.RequestHeaderOperations, compiled.ResponseHeaderOperations, compiled.URLRewrite = request, response, rewrite
+				compiled.RequestHeaderOperations, compiled.ResponseHeaderOperations, compiled.URLRewrite, compiled.CORS = request, response, rewrite, cors
 			}
 		}
 		for i, backend := range rule.BackendRefs {
@@ -219,6 +219,12 @@ func compileRoute(route *gatewayv1.HTTPRoute, input Input) Route {
 					compiled.Diagnostics = append(compiled.Diagnostics, *diagnostic)
 				}
 				continue
+			}
+			if compiled.CORS != nil {
+				if diagnostic := ValidateCORSHeaderComposition(request, nil); diagnostic != nil {
+					compiled.Diagnostics = append(compiled.Diagnostics, *diagnostic)
+					continue
+				}
 			}
 			compiled.Backends[i].RequestHeaderOperations = request
 			compiled.Backends[i].URLRewrite = rewrite

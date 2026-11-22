@@ -70,6 +70,9 @@ func (p *Provider) buildDesiredGatewayRoute(spec cloud.RouteSpec, forwards []clo
 		}
 		indexes[redirect.RuleIndex] = true
 		for _, match := range redirect.Matches {
+			if match.CORS != nil {
+				return invalid(errors.New("CORS cannot be combined with RequestRedirect"))
+			}
 			if match.URLRewrite != nil {
 				return invalid(errors.New("URLRewrite cannot be combined with RequestRedirect"))
 			}

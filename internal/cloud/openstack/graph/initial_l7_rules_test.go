@@ -305,7 +305,7 @@ func TestInitialL7RulesRequireExplicitCapabilityOnScopedHTTPS(t *testing.T) {
 	}
 }
 
-func TestInitialL7RulesPreserveWeightedTargetsAndURLRewrite(t *testing.T) {
+func TestInitialL7RulesPreserveWeightedTargetsAndRequestFilters(t *testing.T) {
 	identity := safetyTestIdentity(t)
 	desired := desiredRoute{identity: identity}
 	desired.spec.Identity = identity.Value()
@@ -330,11 +330,12 @@ func TestInitialL7RulesPreserveWeightedTargetsAndURLRewrite(t *testing.T) {
 		var tags []string
 		if err := json.Unmarshal(got["tags"], &tags); err != nil ||
 			!slices.Contains(tags, initialL7RulesTag) || !slices.Contains(tags, openstackidentity.BackendRequestFiltersPolicyTag) ||
-			!slices.Contains(tags, openstackidentity.RequestURLRewritePolicyTag) {
+			!slices.Contains(tags, openstackidentity.RequestURLRewritePolicyTag) || !slices.Contains(tags, openstackidentity.RequestCORSPolicyTag) {
 			t.Fatalf("grouped creation lost a request filter or rule marker: %s", got["tags"])
 		}
 		if string(got["action"]) != `"WEIGHTED_TARGETS"` || string(got["admin_state_up"]) != "false" ||
-			string(got["targets"]) != expectedTargets || string(got["request_url_rewrite"]) != `{"hostname":"upstream.example.test"}` || len(got["rules"]) == 0 {
+			string(got["targets"]) != expectedTargets || string(got["request_cors"]) != `{"allow_origins":["https://client.example"]}` ||
+			string(got["request_url_rewrite"]) != `{"hostname":"upstream.example.test"}` || len(got["rules"]) == 0 {
 			t.Fatalf("weighted policy with initial rules = %s", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -342,7 +343,8 @@ func TestInitialL7RulesPreserveWeightedTargetsAndURLRewrite(t *testing.T) {
 		safetyWriteJSON(t, w, map[string]any{"l7policy": map[string]any{"id": "weighted", "rules": []map[string]string{{"id": "one"}, {"id": "two"}}}})
 	}), &gatewayTransitionRequests{})
 	path := desiredPolicy{path: "/api", compareType: l7policies.CompareTypeEqual, role: rolePolicyExact,
-		requestURLRewrite: &octavia.RequestURLRewrite{Hostname: "upstream.example.test"}}
+		requestURLRewrite: &octavia.RequestURLRewrite{Hostname: "upstream.example.test"},
+		requestCORS:       &cloud.HTTPCORS{AllowOrigins: []string{"https://client.example"}}}
 	step := routeMutation{kind: routeMutationCreatePolicy, policy: path, weightedTargets: &targets}
 	for _, rule := range rulesFor(path, "^example[.]test$") {
 		opts, err := desired.createRuleOpts(rule)
@@ -469,6 +471,17 @@ func TestInitialL7RulesRebuildUnexpectedPathKeyWhileClosed(t *testing.T) {
 	check(routeMutationCreateRule)
 	path.rule.Key = ""
 	policy.rules = []observedRouteRule{*path}
+	check(routeMutationEnablePolicy)
+
+	// Complete rule readback cannot activate a policy whose tagged CORS
+	// settings the region has stopped reporting.
+	desired.policies[0].requestCORS = &cloud.HTTPCORS{AllowOrigins: []string{"https://client.example"}}
+	policy.corsTagged = true
+	if plan, _, err := buildRouteEnsurePlan(desired, actual); err != nil || len(plan) != 0 {
+		t.Fatalf("grouped policy with missing CORS readback: plan %v, error %v", plan, err)
+	}
+	policy.requestCORS = desired.policies[0].requestCORS
+	policy.corsReported, policy.corsPresent = true, true
 	check(routeMutationEnablePolicy)
 }
 

@@ -308,6 +308,23 @@ func TestRequestURLRewriteWithdrawsToOnlyLocalWeightedResponses(t *testing.T) {
 	if !localOnlyRewriteWithdrawalOnPort([]graphMutation{gatewayStep}, guardedHTTPListener{obsoleteIDs: map[string]bool{old.policy.ID: true}}) {
 		t.Fatal("local-only restrictive update could not proceed without closing the port")
 	}
+
+	old.corsTagged = true
+	steps = weightedTargetWithdrawals(resolved, observedRouteGraph{policies: []observedRoutePolicy{old}})
+	if len(steps) != 1 || steps[0].kind != routeMutationDisablePolicy || steps[0].weightedTargets != nil {
+		t.Fatalf("CORS requires observing a disabled policy before changing targets: %+v", steps)
+	}
+	old.policy.AdminStateUp = false
+	old.policy.ProvisioningStatus = "PENDING_UPDATE"
+	if steps = weightedTargetWithdrawals(resolved, observedRouteGraph{policies: []observedRoutePolicy{old}}); len(steps) != 0 {
+		t.Fatalf("target update started before the disable settled: %+v", steps)
+	}
+	old.policy.ProvisioningStatus = "ACTIVE"
+	steps = weightedTargetWithdrawals(resolved, observedRouteGraph{policies: []observedRoutePolicy{old}})
+	if len(steps) != 1 || steps[0].kind != routeMutationSetPolicyTarget || steps[0].weightedTargets == nil ||
+		steps[0].requestURLRewriteUpdate == nil || steps[0].requestURLRewriteUpdate.Value != nil {
+		t.Fatalf("settled disable did not permit restrictive withdrawal: %+v", steps)
+	}
 }
 
 func observedPolicyForRewriteTest(wanted desiredPolicy, listenerID, poolID string) observedRoutePolicy {

@@ -139,6 +139,9 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 			if requested && request.HTTPRouteBackendDiagnostic != nil && *request.HTTPRouteBackendDiagnostic != snapshot.backendDiagnostic {
 				return graph.RouteInputs{}, errHTTPRouteChanged
 			}
+			if requested && request.HTTPRouteCORSFallback != nil && *request.HTTPRouteCORSFallback != snapshot.corsFallback {
+				return graph.RouteInputs{}, errHTTPRouteChanged
+			}
 			if requested && request.HTTPRouteBackendTLSAncestorSlot != nil && *request.HTTPRouteBackendTLSAncestorSlot != snapshot.backendTLSAncestorSlot {
 				return graph.RouteInputs{}, errHTTPRouteChanged
 			}

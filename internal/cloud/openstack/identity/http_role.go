@@ -370,3 +370,6 @@ const RequestURLRewritePolicyTag = "gw-api-request-url-rewrite"
 // BackendRequestFiltersPolicyTag identifies weighted policies with per-target
 // transformations even when the Octavia API does not report them.
 const BackendRequestFiltersPolicyTag = "gw-api-backend-request-filters"
+
+// RequestCORSPolicyTag identifies policies using CORS across Octavia downgrades.
+const RequestCORSPolicyTag = "gw-api-request-cors"

@@ -256,9 +256,12 @@ func (p *Provider) markGuardedHTTPListener(result *cloud.GatewayGraphResult, por
 
 func guardedHTTPListeners(desired desiredGatewayGraph, actual observedGatewayGraph, portByID map[string]int, predicate protectedHTTPPredicate) map[int]guardedHTTPListener {
 	states := make(map[int]guardedHTTPListener)
-	if !hasHTTPRouteParts(desired, actual) &&
-		(predicate.capability != octavia.GatewayCapabilityRequestURLRewrite || !containsObservedRequestURLRewrite(actual.routes)) {
-		return states
+	if !hasHTTPRouteParts(desired, actual) {
+		observedFilter := predicate.capability == octavia.GatewayCapabilityRequestURLRewrite && containsObservedRequestURLRewrite(actual.routes) ||
+			predicate.capability == octavia.GatewayCapabilityRequestCORS && containsObservedCORS(actual.routes)
+		if !observedFilter {
+			return states
+		}
 	}
 	parts, observedParts, owners := httpPlanningParts(desired, actual)
 	for index, part := range parts.routes {

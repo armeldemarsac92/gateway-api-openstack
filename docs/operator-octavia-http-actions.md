@@ -28,6 +28,16 @@ A rule and a backend reference cannot both rewrite the request path or both rewr
 
 The affected physical listener stays closed while Octavia's regional capability or the applied target filters cannot be verified. Remove or replace the filters and verify recovery before rolling back the provider.
 
+## Enable rule-level CORS
+
+Set `enabled_request_cors_providers = amphora` in Octavia's `[api_settings]` after installing the CORS migration, API, octavia-lib, workers and Amphora images with HAProxy 2.2 or newer. Verify that the effective provider advertises `request_cors_v1` on the controller's regional endpoint. Add `--octavia-request-cors` to the controller arguments. The flag defaults to off.
+
+Add `type: CORS` and `cors` under an HTTPRoute forwarding rule's `filters`. Amphora applies the winning policy's origin, credentials, methods, allowed and exposed headers, and preflight max age to that rule's selected targets. Preflights use the original OPTIONS request for route matching. `cors: {}` denies all origins. Weighted rules still require their own operator opt-ins and capabilities. The provider can answer a preflight before returning an unavailable weighted target's HTTP 500 for ordinary requests.
+
+This mode supports CORS on HTTP and terminated HTTPS forwarding policies. CORS and RequestRedirect on the same rule, backendRef CORS, and header modifiers that touch CORS request fields or overwrite CORS response fields or Vary are unsupported. The provider requires a forwarding action, so the controller rejects CORS rules without backendRefs. Enable weighted targets to handle invalid backend references with the fixed-response profile.
+
+The controller closes the affected physical listener if discovery or policy readback cannot verify the active CORS settings. It opens the listener once the required regional capabilities, policies and rules are verified. Remove the HTTPRoute filter and confirm that Octavia no longer reports `request_cors` on the owned policies before retiring the provider extension.
+
 ## Enable request-derived redirects
 
 On the regional load-balancer endpoint, check that the configured Amphora provider advertises `http_request_redirect_v1` in `gateway_capabilities`. Add `--octavia-http-request-redirect` to the controller arguments in the operator overlay. This option can be used independently of weighted backends and fixed HTTP responses.

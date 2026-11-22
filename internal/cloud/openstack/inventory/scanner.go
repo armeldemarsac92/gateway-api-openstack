@@ -268,6 +268,8 @@ type auditCandidate struct {
 	urlRewrite             *octavia.RequestURLRewrite
 	urlRewritePresent      bool
 	urlRewriteValid        bool
+	corsPresent            bool
+	corsValid              bool
 	policyUsesExtension    bool
 	policyTarget           *octavia.L7PolicyTarget
 	policyInventoryOK      bool
@@ -470,6 +472,8 @@ func (p *Scanner) collectAuditPolicies(
 		candidate.urlRewrite = observation.RequestURLRewrite
 		candidate.urlRewritePresent = observation.RequestURLRewritePresent
 		candidate.urlRewriteValid = observation.HasValidRequestURLRewrite()
+		candidate.corsPresent = observation.RequestCORSPresent
+		candidate.corsValid = observation.HasValidRequestCORS()
 		candidate.policyTarget, candidate.policyInventoryOK = observation.Target, complete
 		candidate.weightedPoolIDs = observation.PoolIDs
 		candidate.redirectPoolReported = len(observation.PoolReference) != 0

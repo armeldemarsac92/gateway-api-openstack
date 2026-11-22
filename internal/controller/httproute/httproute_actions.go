@@ -28,7 +28,7 @@ import (
 )
 
 // compileRouteAction rejects actions that the current Amphora model cannot emit.
-func compileRouteAction(rule gatewayv1.HTTPRouteRule, requestHeaderModifier, responseHeaderModifier, requestAction, requestURLRewrite bool) error {
+func compileRouteAction(rule gatewayv1.HTTPRouteRule, requestHeaderModifier, responseHeaderModifier, requestAction, requestURLRewrite, corsEnabled bool) error {
 	if len(rule.Filters) == 0 {
 		if len(rule.BackendRefs) == 0 {
 			return compileHTTPResponse(http.StatusInternalServerError)
@@ -37,11 +37,13 @@ func compileRouteAction(rule gatewayv1.HTTPRouteRule, requestHeaderModifier, res
 	}
 	if slices.ContainsFunc(rule.Filters, func(filter gatewayv1.HTTPRouteFilter) bool {
 		return filter.Type == gatewayv1.HTTPRouteFilterRequestRedirect
+	}) && !slices.ContainsFunc(rule.Filters, func(filter gatewayv1.HTTPRouteFilter) bool {
+		return filter.Type == gatewayv1.HTTPRouteFilterCORS
 	}) {
 		_, diagnostic := model.NormalizeRequestRedirect(rule, requestAction)
 		return routeActionError(diagnostic)
 	}
-	_, _, _, diagnostic := model.NormalizeHTTPRuleFilters(rule, requestHeaderModifier, responseHeaderModifier, requestURLRewrite)
+	_, _, _, _, diagnostic := model.NormalizeHTTPForwardingRuleFilters(rule, requestHeaderModifier, responseHeaderModifier, requestURLRewrite, corsEnabled)
 	return routeActionError(diagnostic)
 }
 

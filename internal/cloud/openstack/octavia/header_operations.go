@@ -36,6 +36,7 @@ const (
 type PolicyFilters struct {
 	Request, Response []cloud.HTTPHeaderOperation
 	URLRewrite        *RequestURLRewriteUpdate
+	CORS              *RequestCORSUpdate
 	Tags              []string
 }
 
@@ -44,6 +45,11 @@ func (filters PolicyFilters) write(body map[string]any) error {
 	writePolicyHeaderOperations(body, responseHeaderOperationsField, filters.Response)
 	if filters.URLRewrite != nil {
 		if err := filters.URLRewrite.write(body); err != nil {
+			return err
+		}
+	}
+	if filters.CORS != nil {
+		if err := filters.CORS.write(body); err != nil {
 			return err
 		}
 	}

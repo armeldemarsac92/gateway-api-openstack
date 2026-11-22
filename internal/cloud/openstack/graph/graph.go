@@ -155,23 +155,27 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		result := p.pendingGraphResult(ctx, desired, actual)
 		return result, errors.Join(err, p.executeGraphMutation(ctx, desired, actual, step))
 	}
-	var incomplete *backendRequestFilterInventoryError
+	var incomplete *httpFilterInventoryError
 	errors.As(err, &incomplete)
-	if listener := p.backendFilterListenerWithInventoryError(actual, incomplete); listener != nil {
-		message := "Waiting for complete Octavia backend request filter inventory"
+	if listener := p.httpFilterListenerWithInventoryError(actual, incomplete); listener != nil {
+		message := "Waiting for complete Octavia " + incomplete.filter + " inventory"
+		affectedPort := listener.ProtocolPort
+		if !actual.scoped && affectedPort == 0 {
+			affectedPort = desired.spec.Gateway.Spec.ListenerPort
+		}
 		actual.outcome = p.progressingOutcome(message)
 		result := p.pendingGraphResult(ctx, desired, actual)
 		result.Gateway.ScopedListenerDeferredPorts = unchangedHTTPListenerSiblings(desired, actual, listener.ID)
 		affected := make(map[int]bool)
 		for i, route := range desired.routes {
 			port := httpURLPolicyRoutePort(desired, route)
-			if port == listener.ProtocolPort {
+			if port == affectedPort {
 				affected[i] = true
 			} else if desired.spec.Routes[i].Disposition == cloud.GraphEnsure && slices.Contains(result.Gateway.ScopedListenerDeferredPorts, port) {
 				result.Routes[i].Result.ObservationDeferred = true
 			}
 		}
-		p.markGuardedHTTPListener(&result, listener.ProtocolPort, affected, message)
+		p.markGuardedHTTPListener(&result, affectedPort, affected, message)
 		result.Gateway.HTTPPolicyTransition = true
 		closed := listener.ProvisioningStatus == "ACTIVE" && actual.adminObserved[listener.ID] && !listener.AdminStateUp
 		if listener.ProvisioningStatus != "ACTIVE" && listener.ProvisioningStatus != "ERROR" {
@@ -198,9 +202,15 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 			}
 		}
 		mutationErr := p.executeGraphMutation(ctx, desired, actual, step)
-		if closed && mutationErr == nil {
+		if mutationErr == nil {
 			result.Outcome.MutationSubmitted = true
-			result.Routes[step.routeIndex].Result.Outcome.MutationSubmitted = true
+			if closed {
+				result.Routes[step.routeIndex].Result.Outcome.MutationSubmitted = true
+			} else {
+				for index := range affected {
+					result.Routes[index].Result.Outcome.MutationSubmitted = true
+				}
+			}
 		}
 		return result, errors.Join(err, mutationErr)
 	}
@@ -283,7 +293,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	var plan []graphMutation
 	defaultPool := usesDefaultPool(actual.protocol)
 	planBeforeSecurity := isSNIProtocol(actual.protocol) || defaultPool || actual.scoped && actual.protocol == cloud.ListenerProtocolHTTP || hasHTTPRouteParts(desired, actual) ||
-		len(desired.spec.Gateway.Spec.HTTPListenerHostnames) != 0 || observedPlainHTTPExclusions(actual.routes) || containsObservedRequestURLRewrite(actual.routes)
+		len(desired.spec.Gateway.Spec.HTTPListenerHostnames) != 0 || observedPlainHTTPExclusions(actual.routes) || containsObservedRequestURLRewrite(actual.routes) || containsObservedCORS(actual.routes)
 	if planBeforeSecurity {
 		plan, result, err = p.buildGatewayGraphPlan(desired, actual)
 		if err != nil {
@@ -296,6 +306,9 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	}
 	if !isHTTPListenerWithdrawal(plan) {
 		plan = p.protectBackendRequestFilterTraffic(ctx, desired, actual, plan, &result)
+	}
+	if !isHTTPListenerWithdrawal(plan) {
+		plan = p.protectCORSTraffic(ctx, desired, actual, plan, &result)
 	}
 	if !isHTTPListenerWithdrawal(plan) {
 		plan, _ = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, exactHTTPHeaderPredicate)
@@ -394,6 +407,9 @@ func (p *Provider) reconcileHTTPWithdrawalWithoutAddress(ctx context.Context, de
 	}
 	if !isHTTPListenerWithdrawal(plan) {
 		plan = p.protectBackendRequestFilterTraffic(ctx, desired, actual, plan, &result)
+	}
+	if !isHTTPListenerWithdrawal(plan) {
+		plan = p.protectCORSTraffic(ctx, desired, actual, plan, &result)
 	}
 	var grpcWithdrawal []graphMutation
 	var confirmedClosed bool
@@ -1016,6 +1032,11 @@ func (d desiredGatewayGraph) routeOwners() []routeGraphOwner {
 	for index, route := range d.routes {
 		owners[index].identity = route.identity
 		owners[index].expectsHTTPParts = len(route.httpParts) != 0
+		if slices.ContainsFunc(route.policySets(), func(policies []desiredPolicy) bool {
+			return slices.ContainsFunc(policies, requestCORSPolicy.required)
+		}) {
+			owners[index].requestCORSPort = httpURLPolicyRoutePort(d, route)
+		}
 		owners[index].requiresHTTPHostIsolation = len(d.spec.Gateway.Spec.HTTPListenerHostnames) != 0
 		owners[index].expectsBackendTLS = routeHasBackendTLSPolicy(route)
 		node := d.spec.Routes[index]

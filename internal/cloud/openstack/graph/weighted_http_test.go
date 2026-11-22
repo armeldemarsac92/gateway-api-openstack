@@ -724,7 +724,7 @@ func TestWeightedTargetMissingPolicyAdminStateClosesOnlyOwnedListener(t *testing
 	p.fixedHTTPResponses, p.weightedHTTPTargets = true, true
 	for range 2 {
 		result, err := p.ReconcileGatewayGraph(t.Context(), spec)
-		var incomplete *backendRequestFilterInventoryError
+		var incomplete *httpFilterInventoryError
 		if !errors.As(err, &incomplete) || incomplete.policyID != "tagged" ||
 			!result.Gateway.HTTPPolicyTransition || !slices.Equal(result.Gateway.ScopedListenerDeferredPorts, []int{port + 1}) ||
 			len(result.Routes) != 2 || result.Routes[0].Result.ObservationDeferred || !result.Routes[1].Result.ObservationDeferred {
