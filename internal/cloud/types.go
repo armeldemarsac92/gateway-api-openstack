@@ -54,8 +54,11 @@ type GatewaySpec struct {
 	// multi-listener mode. ListenerPort retains its original binding port so
 	// an existing unscoped listener can be recognized after a restart.
 	// Cleanup carries an empty, non-nil set and the same frozen port.
-	ScopedListeners     []ScopedListener
-	VIPSecurityGroupIDs []string
+	ScopedListeners []ScopedListener
+	// HTTPListenerHostnames lists all sections on plaintext ports that need hostname isolation.
+	// "*" denotes the section with no hostname.
+	HTTPListenerHostnames map[int][]string `json:",omitempty"`
+	VIPSecurityGroupIDs   []string
 
 	// RequestedVIPAddress is an optional fixed private IPv4 address on VIPSubnetID.
 	RequestedVIPAddress string
@@ -168,6 +171,8 @@ type Member struct {
 
 // HTTPPathMatch describes one path and its optional conjunctive predicates at its listener rank.
 type HTTPPathMatch struct {
+	// HTTPListenerHostname identifies the section of a shared plaintext port.
+	HTTPListenerHostname string `json:",omitempty"`
 	// HTTPSListenerHostname restricts this alternative to one logical HTTPS listener.
 	HTTPSListenerHostname    string `json:",omitempty"`
 	Hostname                 string
@@ -176,6 +181,7 @@ type HTTPPathMatch struct {
 	Precedence               int
 	Method                   string                `json:",omitempty"`
 	Headers                  []HTTPHeaderMatch     `json:",omitempty"`
+	QueryParams              []HTTPQueryParamMatch `json:",omitempty"`
 	RequestHeaderOperations  []HTTPHeaderOperation `json:",omitempty"`
 	ResponseHeaderOperations []HTTPHeaderOperation `json:",omitempty"`
 }
@@ -249,6 +255,8 @@ type RouteSpec struct {
 	// BackendTLSObserved records a current policy inventory for this route.
 	// Only such an observation can release a previously protected backend.
 	BackendTLSObserved bool `json:"-"`
+	// HTTPListenerHostname scopes a scalar route on a shared plaintext port.
+	HTTPListenerHostname string `json:",omitempty"`
 	// HTTPSListenerHostname scopes scalar routes and supplies the default section
 	// for grouped matches that do not specify their own.
 	HTTPSListenerHostname string `json:",omitempty"`

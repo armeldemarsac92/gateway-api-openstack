@@ -27,7 +27,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 )
 
-// NormalizeMatch applies Gateway API defaults and normalizes Core HTTP matches.
+// NormalizeMatch applies Gateway API defaults and normalizes supported HTTP matches.
 // Unsupported predicates return a diagnostic rather than widening the match.
 func NormalizeMatch(input gatewayv1.HTTPRouteMatch) (Match, error) {
 	result := Match{PathType: gatewayv1.PathMatchPathPrefix, PathValue: "/"}
@@ -37,11 +37,26 @@ func NormalizeMatch(input gatewayv1.HTTPRouteMatch) (Match, error) {
 		}
 		result.Method = string(*input.Method)
 	}
+	seenQueries := make(map[gatewayv1.HTTPHeaderName]bool, len(input.QueryParams))
 	for _, query := range input.QueryParams {
-		if query.Type != nil && *query.Type != gatewayv1.QueryParamMatchExact && *query.Type != gatewayv1.QueryParamMatchRegularExpression {
-			return Match{}, unsupported(fmt.Sprintf("unknown query match type %q", *query.Type), ScopeRoute)
+		result.QueryParams = append(result.QueryParams, cloud.HTTPQueryParamMatch{Name: string(query.Name), Value: query.Value})
+		if seenQueries[query.Name] {
+			continue
+		}
+		seenQueries[query.Name] = true
+		if query.Type != nil && *query.Type != gatewayv1.QueryParamMatchExact {
+			scope := ScopeRoute
+			if *query.Type == gatewayv1.QueryParamMatchRegularExpression {
+				scope = ScopeRule
+			}
+			return Match{}, unsupported(fmt.Sprintf("query parameter match type %q is not implemented", *query.Type), scope)
 		}
 	}
+	queryParams, err := cloud.NormalizeHTTPQueryParamMatches(result.QueryParams)
+	if err != nil {
+		return Match{}, unsupported(err.Error(), ScopeRule)
+	}
+	result.QueryParams = queryParams
 	if input.Path != nil {
 		if input.Path.Type != nil {
 			result.PathType = *input.Path.Type
@@ -81,9 +96,6 @@ func NormalizeMatch(input gatewayv1.HTTPRouteMatch) (Match, error) {
 		result.Headers = append(result.Headers, HeaderMatch{Name: name, Value: header.Value})
 	}
 	slices.SortFunc(result.Headers, func(a, b HeaderMatch) int { return cmp.Compare(a.Name, b.Name) })
-	if len(input.QueryParams) != 0 {
-		return Match{}, unsupported("query parameter matching is not implemented", ScopeRule)
-	}
 	return result, nil
 }
 
@@ -130,7 +142,7 @@ func MatchingRouteHostname[T ~string](effective string, hostnames []T) string {
 }
 
 // compareMatches uses original route hostnames to break ties introduced by
-// listener intersection before applying path, method, header and route precedence.
+// listener intersection before applying path, method, header, query and route precedence.
 func compareMatches(a, b RouteMatch) int {
 	if order := CompareHostnameSpecificity(a.Hostname, b.Hostname); order != 0 {
 		return order
@@ -156,6 +168,9 @@ func compareMatches(a, b RouteMatch) int {
 		return 1
 	}
 	if order := cmp.Compare(len(b.Match.Headers), len(a.Match.Headers)); order != 0 {
+		return order
+	}
+	if order := cmp.Compare(len(b.Match.QueryParams), len(a.Match.QueryParams)); order != 0 {
 		return order
 	}
 	if order := a.Route.CreationTimestamp.Compare(b.Route.CreationTimestamp.Time); order != 0 {

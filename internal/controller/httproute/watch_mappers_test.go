@@ -115,7 +115,9 @@ func TestHTTPRouteRequestsForServicePreserveContendersAndDetachedBindings(t *tes
 	other := mapperTestHTTPRoute("default", "other", gatewayv1.ParentReference{Name: "other-edge"}, "changed")
 	otherPeer := mapperTestHTTPRoute("default", "other-peer", gatewayv1.ParentReference{Name: "other-edge"}, "stable")
 	detaching := mapperTestHTTPRoute("default", "detaching", gatewayv1.ParentReference{Name: "removed"}, "changed")
-	(&Reconciler{Config: cfg}).applyRouteBinding(detaching, &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "removed", UID: "old-gateway"}})
+	if err := (&Reconciler{Config: cfg}).applyRouteBinding(detaching, &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "removed", UID: "old-gateway"}}); err != nil {
+		t.Fatal(err)
+	}
 	detaching.Annotations[cfg.RouteLifecycleAnnotation()] = controller.RouteDetaching
 	detaching.Spec.ParentRefs = nil
 	unrelated := mapperTestHTTPRoute("default", "unrelated", gatewayv1.ParentReference{Name: "unrelated"}, "stable")

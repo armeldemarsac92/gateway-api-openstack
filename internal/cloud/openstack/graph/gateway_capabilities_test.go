@@ -769,7 +769,7 @@ func TestExactHTTPHeadersUseCapableProviderAndLiteralRuleRequest(t *testing.T) {
 }
 
 func TestHTTPPredicateCapabilityLossClosesOnlyItsListener(t *testing.T) {
-	for _, predicate := range []protectedHTTPPredicate{exactHTTPHeaderPredicate, httpMethodPredicate} {
+	for _, predicate := range []protectedHTTPPredicate{exactHTTPHeaderPredicate, httpMethodPredicate, exactHTTPQueryParamPredicate} {
 		t.Run(predicate.label, func(t *testing.T) {
 			testHTTPPredicateCapabilityLoss(t, predicate)
 		})
@@ -791,7 +791,8 @@ func testHTTPPredicateCapabilityLoss(t *testing.T, predicate protectedHTTPPredic
 	}))
 	p := NewProvider(ServiceClients{LoadBalancer: client}, ProviderConfig{})
 	wanted := desiredPolicy{role: "guarded", position: 1, path: "/", compareType: l7policies.CompareTypeEqual,
-		method: "GET", headers: []cloud.HTTPHeaderMatch{{Name: "color", Value: "blue"}}}
+		method: "GET", headers: []cloud.HTTPHeaderMatch{{Name: "color", Value: "blue"}},
+		queryParams: []cloud.HTTPQueryParamMatch{{Name: "color", Value: "blue"}}}
 	part := desiredRoute{backendKey: "backend", policies: []desiredPolicy{wanted}}
 	part.spec.ScopedListenerPorts = []int{80}
 	desired := desiredGatewayGraph{spec: spec, protocol: cloud.ListenerProtocolHTTP, routes: []desiredRoute{{httpParts: []desiredRoute{part}}}}
@@ -808,6 +809,8 @@ func testHTTPPredicateCapabilityLoss(t *testing.T, predicate protectedHTTPPredic
 			base = exactHTTPHeaderPredicate.role
 		case httpMethodRuleType:
 			base = httpMethodPredicate.role
+		case httpQueryParamExactRuleType:
+			base = exactHTTPQueryParamPredicate.role
 		}
 		policy.rules = append(policy.rules, observedRouteRule{base: base, flagsObserved: true, rule: l7policies.Rule{
 			CompareType: string(rule.compareType), RuleType: string(rule.ruleType), Key: rule.key, Value: rule.value,
@@ -1485,5 +1488,158 @@ func testRegionalGRPCContentTypePolicyTransition(t *testing.T, metadata bool) {
 	if result := reconcile(""); result.Routes[0].Result.Outcome.Message != "Waiting for Octavia to advertise grpc_content_type_v1" ||
 		listener["admin_state_up"] != true {
 		t.Fatalf("fresh native policy creation must wait for enrollment without closing the listener: %+v", result)
+	}
+}
+
+func TestExactHTTPQueryParameterReconcilesRegionalRuleReadback(t *testing.T) {
+	spec := completeGraphSpec(safetyTestIdentity(t))
+	route := &spec.Routes[0].Spec
+	route.Hostname, route.PathType, route.PathValue = "", "", ""
+	const name, value = "ANIMAL", "é whale&+%2F"
+	match := cloud.HTTPPathMatch{PathType: cloud.PathMatchPrefix, PathValue: "/", QueryParams: []cloud.HTTPQueryParamMatch{{Name: name, Value: value}}}
+	route.HTTPBackends = []cloud.HTTPBackend{{Namespace: "workloads", Name: "backend", Port: 8080, Members: route.Members, Matches: []cloud.HTTPPathMatch{match}}}
+	route.Members = nil
+	for _, p := range []*Provider{
+		{projectID: "project-a", fixedHTTPResponses: true},
+		{projectID: "project-a", httpQueryParamExact: true},
+	} {
+		if _, err := p.buildDesiredGatewayGraph(spec); !errors.Is(err, cloud.ErrTerminalValidation) {
+			t.Fatalf("missing opt-in or fixed fallback returned %v", err)
+		}
+	}
+
+	const rulesURL = "/lbaas/l7policies/policy/rules"
+	capabilities := []string{"fixed_http_responses_v1"}
+	var rules []octavia.RuleObservation
+	var queryWrites int
+	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/lbaas/providers/amphora-region-alias/gateway_capabilities":
+			safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": capabilities})
+		case req.Method == http.MethodGet && req.URL.Path == rulesURL:
+			safetyWriteJSON(t, w, map[string]any{"rules": rules})
+		case req.Method == http.MethodPost && req.URL.Path == rulesURL,
+			req.Method == http.MethodPut && req.URL.Path == rulesURL+"/query":
+			var body struct {
+				Rule octavia.RuleObservation `json:"rule"`
+			}
+			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			rule := body.Rule
+			rule.ID, rule.ProjectID, rule.ProvisioningStatus = "path", "project-a", "ACTIVE"
+			if rule.RuleType == "HTTP_QUERY_PARAM_EXACT" {
+				queryWrites++
+				rule.ID = "query"
+				if rule.CompareType != "EQUAL_TO" || rule.Key != name || rule.Value != value ||
+					rule.AdminState == nil || !*rule.AdminState || rule.Inverted != nil && *rule.Inverted {
+					t.Fatalf("unexpected query predicate: %#v", rule)
+				}
+			}
+			if rule.Inverted == nil {
+				rule.Inverted = new(false)
+			}
+			if req.Method == http.MethodPost {
+				rules = append(rules, rule)
+				w.WriteHeader(http.StatusCreated)
+			} else {
+				rule.Tags = rules[1].Tags
+				rules[1] = rule
+			}
+			safetyWriteJSON(t, w, map[string]any{"rule": rule})
+		default:
+			t.Errorf("unexpected %s %s", req.Method, req.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	p := NewProvider(ServiceClients{LoadBalancer: client, ProjectID: "project-a"}, ProviderConfig{HTTPQueryParamExact: true, FixedHTTPResponses: true})
+	desired, err := p.buildDesiredGatewayGraph(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	part := desired.routes[0].httpParts[0]
+	policy := part.policies[0]
+	predicates := rulesFor(policy, "")
+	if len(predicates) != 2 || predicates[1].ruleType != httpQueryParamExactRuleType {
+		t.Fatalf("missing query conjunction: %#v", predicates)
+	}
+	lb := safetyObservedLoadBalancer()
+	lb.Provider = "amphora-region-alias"
+	actual := observedGatewayGraph{loadBalancer: lb}
+	writeRule := func(mutation routeMutation) {
+		t.Helper()
+		step, err := p.prepareGraphMutation(t.Context(), desired, actual, graphMutation{kind: graphRouteMutation, backendKey: part.backendKey, route: mutation})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := p.executeGraphMutation(t.Context(), desired, actual, step); err != nil {
+			t.Fatal(err)
+		}
+	}
+	queryCreate := routeMutation{kind: routeMutationCreateRule, parentID: "policy", rule: predicates[1]}
+	for _, mutation := range []routeMutation{
+		{kind: routeMutationCreatePolicy, policy: policy},
+		queryCreate,
+		{kind: routeMutationEnablePolicy, requiresExactQueryParams: true},
+	} {
+		var missing *octavia.MissingGatewayCapability
+		_, err := p.prepareGraphMutation(t.Context(), desired, actual, graphMutation{kind: graphRouteMutation, backendKey: part.backendKey, route: mutation})
+		if !errors.As(err, &missing) || missing.Capability != "http_query_param_exact_v1" {
+			t.Fatalf("mutation %v bypassed query capability discovery: %v", mutation.kind, err)
+		}
+	}
+	capabilities = append(capabilities, "http_query_param_exact_v1")
+	writeRule(routeMutation{kind: routeMutationCreateRule, parentID: "policy", rule: predicates[0]})
+	writeRule(queryCreate)
+
+	rawPolicy := l7policies.L7Policy{ID: "policy", ProjectID: "project-a", ListenerID: "listener",
+		Position: policy.position, ProvisioningStatus: "ACTIVE", AdminStateUp: true,
+		Action: string(l7policies.ActionRedirectToPool), RedirectPoolID: "pool"}
+	tags, err := part.identity.RouteTags(policy.role)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policyRole, ok := readRouteResourceRole(tags, rolePolicyPrefix)
+	if !ok {
+		t.Fatalf("unrecognized policy identity %q", policy.role)
+	}
+	observe := func() observedRoutePolicy {
+		t.Helper()
+		observed, err := p.observeRoutePolicy(t.Context(), routeGraphOwner{identity: part.identity}, rawPolicy, "listener", policyRole)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return observed
+	}
+	if observed := observe(); queryWrites != 1 || !observedHTTPPredicateMatches(observed, predicates) {
+		t.Fatalf("query write did not round trip: %#v", observed)
+	}
+	rules[1].Key = "animal"
+	rules[1].Value = "stale"
+	plan, disable, _ := buildRoutePolicyPlan(part, []observedRoutePolicy{observe()}, "pool")
+	if len(disable) != 1 || disable[0].kind != routeMutationDisablePolicy || len(plan) != 1 || plan[0].kind != routeMutationUpdateRule {
+		t.Fatalf("query drift must disable the live policy before repair: %v %v", disable, plan)
+	}
+	rawPolicy.AdminStateUp = false // The next pass sees the completed disable.
+	writeRule(plan[0])
+	if observed := observe(); queryWrites != 2 || !observedHTTPPredicateMatches(observed, predicates) {
+		t.Fatalf("query update did not round trip: %#v", observed)
+	}
+	rawPolicy.AdminStateUp = true
+	for _, params := range [][]cloud.HTTPQueryParamMatch{nil, {{Name: name, Value: "dolphin"}}} {
+		route.HTTPBackends[0].Matches[0].QueryParams = params
+		replacement, err := p.buildDesiredGatewayGraph(spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		part := replacement.routes[0].httpParts[0]
+		plan, disable, _ := buildRoutePolicyPlan(part, []observedRoutePolicy{observe()}, "pool")
+		if len(disable) != 1 || disable[0].kind != routeMutationDisablePolicy ||
+			!slices.ContainsFunc(plan, func(step routeMutation) bool { return step.kind == routeMutationDeleteRule && step.id == "query" }) ||
+			!slices.ContainsFunc(plan, func(step routeMutation) bool {
+				return step.kind == routeMutationCreatePolicy && step.policy.role != policy.role
+			}) {
+			t.Fatalf("query change %v must retire the old policy without broadening it: %v %v", params, disable, plan)
+		}
 	}
 }

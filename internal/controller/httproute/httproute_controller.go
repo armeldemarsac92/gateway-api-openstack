@@ -127,11 +127,26 @@ func (r *Reconciler) reconcileDelete(ctx context.Context, scope *httpRouteScope)
 }
 
 func (r *Reconciler) reconcileNormal(ctx context.Context, scope *httpRouteScope) (ctrl.Result, error) {
-	if scope.route.Annotations[r.Config.RouteLifecycleAnnotation()] == controller.RouteDetaching {
+	detaching := scope.route.Annotations[r.Config.RouteLifecycleAnnotation()] == controller.RouteDetaching
+	parents, err := r.managedParents(ctx, scope.route)
+	if err != nil {
+		if detaching {
+			return r.finalizeRoute(ctx, scope)
+		}
+		if _, bindingErr := controller.StoredRouteGatewayBindings(r.Config, scope.route); bindingErr != nil {
+			return ctrl.Result{}, bindingErr
+		}
+		return ctrl.Result{}, err
+	}
+	groups := groupManagedRouteParents(parents)
+	if len(groups) > 1 || controller.HasRouteGatewayBindings(r.Config, scope.route) {
+		return r.reconcileRouteParents(ctx, scope.route, groups)
+	}
+	if detaching {
 		return r.finalizeRoute(ctx, scope)
 	}
 
-	decision, err := r.buildCachedRouteDecision(ctx, scope.route)
+	decision, err := r.buildCachedRouteDecision(ctx, scope.route, parents)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -148,17 +163,7 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, scope *httpRouteScope)
 	}
 }
 
-func (r *Reconciler) buildCachedRouteDecision(
-	ctx context.Context,
-	route *gatewayv1.HTTPRoute,
-) (cachedRouteDecision, error) {
-	parents, err := r.managedParents(ctx, route)
-	if err != nil {
-		if _, _, bindingErr := r.storedRouteIdentity(route); bindingErr != nil {
-			return cachedRouteDecision{}, bindingErr
-		}
-		return cachedRouteDecision{}, err
-	}
+func (r *Reconciler) buildCachedRouteDecision(ctx context.Context, route *gatewayv1.HTTPRoute, parents []managedRouteParent) (cachedRouteDecision, error) {
 	storedIdentity, bindingPresent, err := r.storedRouteIdentity(route)
 	if err != nil {
 		return cachedRouteDecision{}, err
@@ -194,7 +199,10 @@ func (r *Reconciler) validateCachedRouteDecision(
 	if model.HTTPProfileRouteKind(route) == model.GRPCRouteKind {
 		if _, err := r.validateRouteStructure(route); err != nil {
 			decision.disposition = cachedRouteDetach
-			decision.statusUpdates = []parentStatusUpdate{{parent: parent.ref, status: statusForRouteBuildError(err)}}
+			status := statusForRouteBuildError(err)
+			for _, target := range parents {
+				decision.statusUpdates = append(decision.statusUpdates, parentStatusUpdate{parent: target.ref, status: status})
+			}
 			return decision, nil
 		}
 	}
@@ -246,9 +254,7 @@ func (r *Reconciler) validateCachedRouteDecision(
 }
 
 func parentsShareGateway(parents []managedRouteParent) bool {
-	return len(parents) == 1 || len(parents) > 1 && slices.ContainsFunc(parents, func(parent managedRouteParent) bool {
-		return parent.listenerSet != nil
-	}) && !slices.ContainsFunc(parents[1:], func(parent managedRouteParent) bool {
+	return len(parents) > 0 && !slices.ContainsFunc(parents[1:], func(parent managedRouteParent) bool {
 		return parent.gateway.UID != parents[0].gateway.UID || client.ObjectKeyFromObject(parent.gateway) != client.ObjectKeyFromObject(parents[0].gateway)
 	})
 }
@@ -277,7 +283,7 @@ func managedParentsSupportInstalledVersion(parents []managedRouteParent) bool {
 func unsupportedParentCountUpdates(parents []managedRouteParent) []parentStatusUpdate {
 	status := rejectedRouteStatus(
 		string(gatewayv1.RouteReasonUnsupportedValue),
-		"exactly one managed Gateway parentRef is supported",
+		"the selected parentRefs belong to different Gateway graphs",
 	)
 	updates := make([]parentStatusUpdate, 0, len(parents))
 	for _, parent := range parents {
@@ -332,6 +338,11 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 ) (ctrl.Result, error) {
 	httpRoute := scope.route
 	graphResult, err := r.ensureRouteGraph(ctx, httpRoute, parent.gateway)
+	if graphResult.selection != nil {
+		scope.parentSelection = graphResult.selection
+		scope.rejectedSections = graphResult.rejectedSections
+		scope.profileObserved = r.Config.GRPCExactMethodEnabled()
+	}
 	if err != nil {
 		if errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) {
 			return r.setRouteUnsupportedVersion(ctx, scope)

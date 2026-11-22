@@ -147,6 +147,7 @@ func (p *Provider) appendRedirectPolicies(part *desiredRoute, redirect cloud.HTT
 		policy.matchKey = openstackidentity.HTTPRedirectKey(matchKey, positive.Hostname, policy.role+"/"+strings.Join(guardKeys, "/"))
 		policy.hostnameRuleValue, policy.precedence = hostname, positive.Precedence
 		policy.httpsListenerHostname = positive.HTTPSListenerHostname
+		policy.httpListenerHostname, policy.hostname = positive.HTTPListenerHostname, positive.Hostname
 		policy.role = openstackidentity.HTTPRedirectRole(policy.role, matchKey, policy.matchKey, "")
 		policy.redirect = &desiredRedirectPolicy{
 			matchKey: matchKey, prefix: redirect.Prefix, statusCode: int32(redirect.StatusCode), guards: guards,
@@ -165,6 +166,9 @@ func (p *Provider) appendRedirectPolicies(part *desiredRoute, redirect cloud.HTT
 }
 
 func redirectGuardKey(guard redirectGuard) string {
+	if guard.ruleType == httpQueryParamExactRuleType {
+		return openstackidentity.HTTPRedirectKey("query-exclusion", guard.key, guard.value)
+	}
 	return openstackidentity.HTTPRedirectKey(string(guard.ruleType), string(guard.compareType), guard.value)
 }
 
@@ -178,6 +182,9 @@ func policyRuleRole(policy desiredPolicy, base, guard string) string {
 	}
 	if policy.weighted {
 		return openstackidentity.HTTPWeightedPolicyRole(base, policy.backendKey, policy.matchKey, predicateKeys...)
+	}
+	if base == openstackidentity.RoleRuleHTTPHostExclusion && policy.backendKey == "" {
+		return openstackidentity.ScalarHTTPHostExclusionRole(guard)
 	}
 	if len(predicateKeys) != 0 {
 		return openstackidentity.HTTPFragmentRole(base, policy.backendKey, policy.matchKey, predicateKeys...)

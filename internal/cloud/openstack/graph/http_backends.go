@@ -149,6 +149,11 @@ func (p *Provider) buildHTTPRoutePartsGraphPlan(desired desiredGatewayGraph, act
 }
 
 func policyNeedsHostnameUpdate(route desiredRoute, policy observedRoutePolicy) bool {
+	if hasPlainHTTPExclusions(policy) || slices.ContainsFunc(route.policies, func(wanted desiredPolicy) bool { return wanted.httpListenerHostname != "" }) {
+		return !slices.ContainsFunc(route.policies, func(wanted desiredPolicy) bool {
+			return wanted.role == policy.role && plainHTTPHostRulesMatch(wanted, route.hostnameRuleValue, policy)
+		})
+	}
 	if route.redirect {
 		for _, wanted := range route.policies {
 			if wanted.role == policy.role {

@@ -36,10 +36,18 @@ func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual obs
 	if isSNIProtocol(desired.protocol) {
 		return p.buildSNIGraphPlan(desired, actual)
 	}
+	var plan []graphMutation
+	var result cloud.GatewayGraphResult
+	var err error
 	if desired.spec.Gateway.Disposition != cloud.GraphDelete && hasHTTPRouteParts(desired, actual) {
-		return p.buildHTTPRoutePartsGraphPlan(desired, actual)
+		plan, result, err = p.buildHTTPRoutePartsGraphPlan(desired, actual)
+	} else {
+		plan, result, err = p.buildGatewayGraphPartPlan(desired, actual, nil)
 	}
-	return p.buildGatewayGraphPartPlan(desired, actual, nil)
+	if err == nil {
+		plan = p.protectPlainHTTPIsolation(desired, actual, plan, &result)
+	}
+	return plan, result, err
 }
 
 func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual observedGatewayGraph, handovers *httpPolicyHandovers) ([]graphMutation, cloud.GatewayGraphResult, error) {
@@ -303,7 +311,8 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 		} else if route.backendTLS.issue != "" {
 			routeResult.Outcome = p.progressingOutcome(route.backendTLS.issue)
 		}
-		if errors.Is(route.redirectIssue, errExactHeaderRedirectPrecedence) || errors.Is(route.redirectIssue, errHTTPMethodRedirectPrecedence) {
+		if errors.Is(route.redirectIssue, errExactHeaderRedirectPrecedence) || errors.Is(route.redirectIssue, errHTTPMethodRedirectPrecedence) ||
+			errors.Is(route.redirectIssue, errExactQueryParamRedirectPrecedence) {
 			routeResult.UnsupportedMatch = route.redirectIssue.Error()
 		} else if route.redirectIssue != nil {
 			routeResult.Outcome = p.progressingOutcome(route.redirectIssue.Error())
@@ -659,6 +668,7 @@ func (p *Provider) prepareNextGraphMutation(ctx context.Context, desired desired
 	}
 	recordBlocked(first, blocked)
 	blockedHTTPPolicy := blocked.capability == octavia.GatewayCapabilityHTTPHeaderExact || blocked.capability == octavia.GatewayCapabilityHTTPMethodMatch ||
+		blocked.capability == octavia.GatewayCapabilityHTTPQueryParamExact ||
 		blocked.capability == octavia.GatewayCapabilityResponseHeaderOperations || blocked.capability == octavia.GatewayCapabilityGRPCContentType
 	result.Outcome = result.Routes[first.routeIndex].Result.Outcome
 	seen := map[poolRouteOwner]bool{{route: first.routeIndex, backend: first.backendKey}: true}
@@ -752,6 +762,10 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 			step.route.rule.ruleType == httpHeaderExactRuleType {
 			required = append(required, octavia.GatewayCapabilityHTTPHeaderExact)
 		}
+		if step.route.requiresExactQueryParams || step.route.policy.requiresExactQueryParams() && step.route.kind == routeMutationCreatePolicy ||
+			step.route.rule.ruleType == httpQueryParamExactRuleType {
+			required = append(required, octavia.GatewayCapabilityHTTPQueryParamExact)
+		}
 		if step.route.requiresHTTPMethod || step.route.policy.method != "" && step.route.kind == routeMutationCreatePolicy ||
 			step.route.rule.ruleType == httpMethodRuleType {
 			required = append(required, octavia.GatewayCapabilityHTTPMethodMatch)
@@ -820,6 +834,9 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 			} else if slices.Contains(required, octavia.GatewayCapabilityHTTPHeaderExact) &&
 				(!explicitlyMissing || missing.Capability == octavia.GatewayCapabilityHTTPHeaderExact) {
 				err = &unavailableRouteCapability{error: err, capability: octavia.GatewayCapabilityHTTPHeaderExact}
+			} else if slices.Contains(required, octavia.GatewayCapabilityHTTPQueryParamExact) &&
+				(!explicitlyMissing || missing.Capability == octavia.GatewayCapabilityHTTPQueryParamExact) {
+				err = &unavailableRouteCapability{error: err, capability: octavia.GatewayCapabilityHTTPQueryParamExact}
 			} else if slices.Contains(required, octavia.GatewayCapabilityHTTPMethodMatch) &&
 				(!explicitlyMissing || missing.Capability == octavia.GatewayCapabilityHTTPMethodMatch) {
 				err = &unavailableRouteCapability{error: err, capability: octavia.GatewayCapabilityHTTPMethodMatch}
@@ -926,6 +943,9 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 				protocol, enabled, certificateRef = terminatedHTTPS, false, tls.CertificateRef
 			}
 			tags = append(tags, scopedPortTag(protocol, port))
+		}
+		if desired.plainHTTPRuleLimits[port] != "" {
+			enabled = false
 		}
 		opts := listeners.CreateOpts{
 			LoadbalancerID: actual.state.LoadBalancerID, Protocol: listeners.Protocol(protocol), ProtocolPort: port,

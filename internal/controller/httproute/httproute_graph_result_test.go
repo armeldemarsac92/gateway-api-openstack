@@ -70,7 +70,9 @@ func TestHTTPRouteRequiresItsComponentOutcome(t *testing.T) {
 			route.UID = "route-uid"
 			route.Generation = 1
 			seed := &Reconciler{Config: cfg}
-			seed.applyRouteBinding(route, gateway)
+			if err := seed.applyRouteBinding(route, gateway); err != nil {
+				t.Fatal(err)
+			}
 			service, endpoints, node := validNodePortBackend("default", "backend")
 			kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).WithObjects(class, gateway, route, service, endpoints, node).Build()
 			expectedIdentity := controller.RouteIdentity(cfg, gateway, route)

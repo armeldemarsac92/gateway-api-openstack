@@ -65,7 +65,9 @@ func TestHTTPRoutePathMatchOrderGroupsThreeBackends(t *testing.T) {
 	peer := f.candidate("other")
 	peer.Spec.Rules = []gatewayv1.HTTPRouteRule{pathBackendRule("/another-exact", exact, gatewayv1.ObjectName(f.service.Name))}
 	peer.Spec.Rules[0].BackendRefs[0].Port = ptr.To(gatewayv1.PortNumber(f.service.Spec.Ports[0].Port))
-	f.reconciler.applyRouteBinding(peer, f.gateway)
+	if err := f.reconciler.applyRouteBinding(peer, f.gateway); err != nil {
+		t.Fatal(err)
+	}
 	f.create(t, peer)
 	for i, name := range []string{"infra-backend-v1", "infra-backend-v2", "infra-backend-v3"} {
 		service, endpoints := f.service.DeepCopy(), f.endpoints.DeepCopy()
@@ -251,7 +253,9 @@ func TestRouteGraphOrdersTwoBoundRoutes(t *testing.T) {
 	exact.Spec.Rules[0].Matches = []gatewayv1.HTTPRouteMatch{{Path: &gatewayv1.HTTPPathMatch{
 		Type: ptr.To(gatewayv1.PathMatchExact), Value: ptr.To("/accounts"),
 	}}}
-	f.reconciler.applyRouteBinding(exact, f.gateway)
+	if err := f.reconciler.applyRouteBinding(exact, f.gateway); err != nil {
+		t.Fatal(err)
+	}
 	f.create(t, exact)
 	input := f.observe(t)
 	if len(input.Nodes) != 2 {
@@ -385,12 +389,16 @@ func TestRouteGraphFenceDetectsBackendDependencyChanges(t *testing.T) {
 			case "missing Service creation":
 				candidate := f.candidate("z-missing")
 				candidate.Spec.Rules[0].BackendRefs[0].Name = "missing"
-				f.reconciler.applyRouteBinding(candidate, f.gateway)
+				if err := f.reconciler.applyRouteBinding(candidate, f.gateway); err != nil {
+					t.Fatal(err)
+				}
 				f.create(t, candidate)
 			case "ReferenceGrant revocation":
 				candidate := f.candidate("z-cross-namespace")
 				candidate.Spec.Rules[0].BackendRefs[0].Namespace = ptr.To(gatewayv1.Namespace("shared"))
-				f.reconciler.applyRouteBinding(candidate, f.gateway)
+				if err := f.reconciler.applyRouteBinding(candidate, f.gateway); err != nil {
+					t.Fatal(err)
+				}
 				service := f.service.DeepCopy()
 				service.Namespace, service.ResourceVersion, service.UID = "shared", "", "shared-service"
 				grant = &gatewayv1.ReferenceGrant{
@@ -479,7 +487,9 @@ func TestRouteGraphPreservesRevokedTenantUntilDetachCheckpoint(t *testing.T) {
 	sibling.Namespace, sibling.UID = namespace.Name, "tenant-sibling"
 	sibling.Spec.ParentRefs[0].Namespace = ptr.To(gatewayv1.Namespace(f.gateway.Namespace))
 	sibling.Spec.Rules[0].BackendRefs[0].Namespace = ptr.To(gatewayv1.Namespace("foreign"))
-	f.reconciler.applyRouteBinding(sibling, f.gateway)
+	if err := f.reconciler.applyRouteBinding(sibling, f.gateway); err != nil {
+		t.Fatal(err)
+	}
 	f.create(t, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: f.route.Namespace, Labels: map[string]string{"edge": "shared"}}}, namespace, sibling)
 	input := f.observe(t)
 	if len(input.Nodes) != 2 || input.Nodes[0].Disposition != cloud.GraphEnsure || input.Nodes[1].Disposition != cloud.GraphPreserve || input.Nodes[1].Spec.Identity.RouteUID != string(sibling.UID) {
@@ -589,8 +599,10 @@ func newRouteModelInputFixture(t *testing.T) *routeModelInputFixture {
 	class, gateway, route, service, endpoints := endpointRouteFixture(t)
 	endpoints.UID = "slice-uid"
 	r := &Reconciler{Config: testConfig(), Coordinator: &graph.Coordinator{}}
-	r.applyRouteBinding(route, gateway)
-	kubeClient := indexedFakeClientBuilder(testScheme(t), r.Config).WithStatusSubresource(route).WithObjects(class, gateway, route, service, endpoints).Build()
+	if err := r.applyRouteBinding(route, gateway); err != nil {
+		t.Fatal(err)
+	}
+	kubeClient := indexedFakeClientBuilder(testScheme(t), r.Config).WithStatusSubresource(route, &gatewayv1.GRPCRoute{}).WithObjects(class, gateway, route, service, endpoints).Build()
 	for _, object := range []client.Object{gateway, route, service, endpoints} {
 		if err := kubeClient.Get(t.Context(), client.ObjectKeyFromObject(object), object); err != nil {
 			t.Fatal(err)
@@ -732,6 +744,141 @@ func TestHTTPSRouteSelectsDedicatedSectionAndInheritsHostname(t *testing.T) {
 	}
 }
 
+func TestSharedPlainHTTPModelKeepsListenerScopeAcrossAttachments(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	f.gateway.Spec.Listeners[0].Name = "wildcard"
+	f.gateway.Spec.Listeners[0].Hostname = ptr.To(gatewayv1.Hostname("*.bar.com"))
+	port := f.gateway.Spec.Listeners[0].Port
+	f.gateway.Spec.Listeners = append(f.gateway.Spec.Listeners,
+		gatewayv1.Listener{Name: "exact", Port: port, Protocol: gatewayv1.HTTPProtocolType, Hostname: ptr.To(gatewayv1.Hostname("foo.bar.com"))},
+		gatewayv1.Listener{Name: "catch-all", Port: port, Protocol: gatewayv1.HTTPProtocolType},
+	)
+	f.route.Spec.ParentRefs[0].SectionName = nil
+	f.route.Spec.Hostnames = []gatewayv1.Hostname{"foo.bar.com"}
+	if err := f.client.Update(t.Context(), f.gateway); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.client.Update(t.Context(), f.route); err != nil {
+		t.Fatal(err)
+	}
+	input := f.observe(t)
+	if len(input.Nodes) != 1 || input.Nodes[0].Disposition != cloud.GraphEnsure {
+		t.Fatalf("route graph = %#v", input.Nodes)
+	}
+	route := input.Nodes[0].Spec
+	if len(route.HTTPBackends) != 1 {
+		t.Fatalf("route backends = %#v", route.HTTPBackends)
+	}
+	scopes := make([]string, 0, len(route.HTTPBackends[0].Matches))
+	for _, match := range route.HTTPBackends[0].Matches {
+		if match.Hostname != "foo.bar.com" || match.HTTPSListenerHostname != "" {
+			t.Fatalf("wrong hostname intersection or TLS scope: %#v", match)
+		}
+		scopes = append(scopes, match.HTTPListenerHostname)
+	}
+	slices.Sort(scopes)
+	if want := []string{"*", "*.bar.com", "foo.bar.com"}; !slices.Equal(scopes, want) {
+		t.Fatalf("scopes = %v, want %v", scopes, want)
+	}
+	if err := input.Validate(t.Context()); err != nil {
+		t.Fatalf("graph fence: %v", err)
+	}
+}
+
+func TestHTTPRouteWithTwoSectionRefsForwardsOnlyOnThoseSections(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	port := f.gateway.Spec.Listeners[0].Port
+	f.gateway.Spec.Listeners = []gatewayv1.Listener{
+		{Name: "one", Port: port, Protocol: gatewayv1.HTTPProtocolType, Hostname: ptr.To(gatewayv1.Hostname("*.one.test"))},
+		{Name: "two", Port: port, Protocol: gatewayv1.HTTPProtocolType, Hostname: ptr.To(gatewayv1.Hostname("*.two.test"))},
+		{Name: "other", Port: port, Protocol: gatewayv1.HTTPProtocolType, Hostname: ptr.To(gatewayv1.Hostname("other.test"))},
+	}
+	f.route.Spec.Hostnames = nil
+	ref := f.route.Spec.ParentRefs[0]
+	ref.SectionName = ptr.To(gatewayv1.SectionName("one"))
+	f.route.Spec.ParentRefs = []gatewayv1.ParentReference{ref}
+	ref.SectionName = ptr.To(gatewayv1.SectionName("two"))
+	f.route.Spec.ParentRefs = append(f.route.Spec.ParentRefs, ref)
+	if err := f.client.Update(t.Context(), f.gateway); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.client.Update(t.Context(), f.route); err != nil {
+		t.Fatal(err)
+	}
+	input := f.observe(t)
+	if len(input.Nodes) != 1 || input.Nodes[0].Disposition != cloud.GraphEnsure || len(input.Nodes[0].Spec.HTTPBackends) != 1 {
+		t.Fatalf("expected one active backend shared by the two references, got %#v", input.Nodes)
+	}
+	var hosts []string
+	for _, match := range input.Nodes[0].Spec.HTTPBackends[0].Matches {
+		hosts = append(hosts, match.HTTPListenerHostname)
+	}
+	slices.Sort(hosts)
+	if !slices.Equal(hosts, []string{"*.one.test", "*.two.test"}) {
+		t.Fatalf("forwarding scopes = %v, want only the referenced sections", hosts)
+	}
+	if err := input.Validate(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSharedPlainHTTPProfileConflictPreservesSiblingAttachments(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	cfg := &f.reconciler.Config
+	cfg.BackendH2C, cfg.FixedHTTPResponses = true, true
+	exact := gatewayv1.SectionName("exact")
+	port := f.gateway.Spec.Listeners[0].Port
+	f.gateway.Spec.Listeners = []gatewayv1.Listener{
+		{Name: exact, Port: port, Protocol: gatewayv1.HTTPProtocolType, Hostname: ptr.To(gatewayv1.Hostname("foo.bar.com"))},
+		{Name: "wildcard", Port: port, Protocol: gatewayv1.HTTPProtocolType, Hostname: ptr.To(gatewayv1.Hostname("*.bar.com"))},
+		{Name: "catch-all", Port: port, Protocol: gatewayv1.HTTPProtocolType},
+	}
+	f.route.Spec.ParentRefs[0].SectionName = nil
+	f.route.CreationTimestamp = metav1.Unix(2, 0)
+	if err := f.client.Update(t.Context(), f.gateway); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.client.Update(t.Context(), f.route); err != nil {
+		t.Fatal(err)
+	}
+	grpc := &gatewayv1.GRPCRoute{ObjectMeta: metav1.ObjectMeta{
+		Name: "earlier-grpc", Namespace: f.route.Namespace, UID: "earlier-grpc", CreationTimestamp: metav1.Unix(1, 0),
+	}}
+	grpc.Spec.ParentRefs = []gatewayv1.ParentReference{{Name: gatewayv1.ObjectName(f.gateway.Name), SectionName: &exact}}
+	grpc.Spec.Rules = []gatewayv1.GRPCRouteRule{grpcRule("grpc-service", gatewayv1.GRPCRouteMatch{
+		Method: &gatewayv1.GRPCMethodMatch{Service: ptr.To("example.Echo"), Method: ptr.To("Echo")},
+	})}
+	f.create(t, grpc)
+
+	input := f.observe(t)
+	if len(input.Nodes) != 1 || input.Nodes[0].Disposition != cloud.GraphEnsure {
+		t.Fatalf("partially accepted HTTPRoute must remain in the graph, nodes %#v", input.Nodes)
+	}
+	var scopes []string
+	for _, backend := range input.Nodes[0].Spec.HTTPBackends {
+		for _, match := range backend.Matches {
+			scopes = append(scopes, match.HTTPListenerHostname)
+		}
+	}
+	slices.Sort(scopes)
+	if want := []string{"*", "*.bar.com"}; !slices.Equal(scopes, want) {
+		t.Fatalf("HTTPRoute sections = %v, want %v", scopes, want)
+	}
+	if err := input.Validate(t.Context()); err != nil {
+		t.Fatalf("partial admission fence: %v", err)
+	}
+
+	f.route.Spec.ParentRefs[0].SectionName = &exact
+	if err := f.client.Update(t.Context(), f.route); err != nil {
+		t.Fatal(err)
+	}
+	_, err := f.reconciler.buildRouteValidationSnapshot(t.Context(), f.route, f.gateway, routeSnapshotForEnsure)
+	var rejection *routeBuildError
+	if !errors.As(err, &rejection) || rejection.Error() != routeProfileConflict().Error() {
+		t.Fatalf("parent selecting only the conflicting section must be rejected, got %v", err)
+	}
+}
+
 func TestSharedHTTPSRouteKeepsSectionAndHTTPHostConstraints(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -768,7 +915,9 @@ func TestSharedHTTPSRouteKeepsSectionAndHTTPHostConstraints(t *testing.T) {
 			if err := f.client.Update(t.Context(), f.gateway); err != nil {
 				t.Fatal(err)
 			}
-			f.reconciler.applyRouteBinding(f.route, f.gateway)
+			if err := f.reconciler.applyRouteBinding(f.route, f.gateway); err != nil {
+				t.Fatal(err)
+			}
 			f.route.Spec.ParentRefs[0].SectionName, f.route.Spec.ParentRefs[0].Port = tc.section, tc.port
 			f.route.Spec.Hostnames = tc.hosts
 			f.route.Spec.Rules[0].Matches = []gatewayv1.HTTPRouteMatch{{

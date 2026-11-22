@@ -73,6 +73,7 @@ type ProviderConfig struct {
 	BackendTLSPolicy       bool
 	FixedHTTPResponses     bool
 	HTTPHeaderExact        bool
+	HTTPQueryParamExact    bool
 	HTTPMethodMatch        bool
 	WeightedHTTPTargets    bool
 	RequestHeaderModifier  bool
@@ -94,6 +95,7 @@ type Provider struct {
 	backendTLSPolicy       bool
 	fixedHTTPResponses     bool
 	httpHeaderExact        bool
+	httpQueryParamExact    bool
 	httpMethodMatch        bool
 	weightedHTTPTargets    bool
 	requestHeaderModifier  bool
@@ -128,6 +130,7 @@ func NewProvider(clients ServiceClients, cfg ProviderConfig) *Provider {
 		backendTLSPolicy:       cfg.BackendTLSPolicy,
 		fixedHTTPResponses:     cfg.FixedHTTPResponses || cfg.WeightedHTTPTargets,
 		httpHeaderExact:        cfg.HTTPHeaderExact,
+		httpQueryParamExact:    cfg.HTTPQueryParamExact,
 		httpMethodMatch:        cfg.HTTPMethodMatch,
 		weightedHTTPTargets:    cfg.WeightedHTTPTargets,
 		requestHeaderModifier:  cfg.RequestHeaderModifier,

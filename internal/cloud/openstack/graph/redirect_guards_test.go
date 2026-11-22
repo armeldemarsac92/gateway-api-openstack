@@ -217,3 +217,44 @@ func TestRedirectMethodPrecedenceRespectsDisjointAndSharedMethods(t *testing.T) 
 		t.Fatalf("a shared method needs a path guard: %v, %v", cells, err)
 	}
 }
+
+func TestRedirectGuardsRespectExactQueryParameterOverlap(t *testing.T) {
+	redirect := cloud.HTTPPathMatch{PathType: cloud.PathMatchPrefix, PathValue: "/shop", Precedence: 1,
+		QueryParams: []cloud.HTTPQueryParamMatch{{Name: "animal", Value: "whale"}}}
+	for _, test := range []struct {
+		param            cloud.HTTPQueryParamMatch
+		policies, guards int
+	}{
+		{param: cloud.HTTPQueryParamMatch{Name: "animal", Value: "whale"}, policies: 1, guards: 1},
+		{param: cloud.HTTPQueryParamMatch{Name: "animal", Value: "dolphin"}, policies: 1},
+		{param: cloud.HTTPQueryParamMatch{Name: "ANIMAL", Value: "whale"}, policies: 2, guards: 1},
+	} {
+		forward := cloud.HTTPPathMatch{PathType: cloud.PathMatchExact, PathValue: "/shop/health",
+			QueryParams: []cloud.HTTPQueryParamMatch{test.param}}
+		cells, err := redirectCells(redirect, []cloud.HTTPPathMatch{forward})
+		if err != nil || len(cells) != test.policies {
+			t.Fatalf("query param %v: redirect cells = %v, error = %v", test.param, cells, err)
+		}
+		for _, cell := range cells {
+			if len(cell.guards) != test.guards {
+				t.Fatalf("query param %v: redirect cell = %v, want %d guards", test.param, cell, test.guards)
+			}
+		}
+	}
+}
+
+func TestRedirectQueryExceptionsReturnAnExplicitErrorAtExpansionLimit(t *testing.T) {
+	redirect := cloud.HTTPPathMatch{PathType: cloud.PathMatchPrefix, PathValue: "/shop", Precedence: 8}
+	var forwards []cloud.HTTPPathMatch
+	for i := range 8 {
+		forward := redirect
+		forward.Precedence = i
+		forward.QueryParams = []cloud.HTTPQueryParamMatch{
+			{Name: fmt.Sprintf("preview%d", i), Value: "on"}, {Name: fmt.Sprintf("color%d", i), Value: "blue"},
+		}
+		forwards = append(forwards, forward)
+	}
+	if cells, err := redirectCells(redirect, forwards); len(cells) != 0 || !errors.Is(err, errExactQueryParamRedirectPrecedence) {
+		t.Fatalf("oversized complement returned %d policies, error %v", len(cells), err)
+	}
+}

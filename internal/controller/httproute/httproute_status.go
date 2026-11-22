@@ -61,10 +61,11 @@ func (r *Reconciler) setRouteStatusesAndDetach(
 	updates []parentStatusUpdate,
 ) (ctrl.Result, error) {
 	route := scope.route
-	if err := r.applyUnsupportedRouteReferenceStatus(ctx, route, updates); err != nil {
+	updates = scope.completeParentUpdates(updates)
+	if err := r.applyUnsupportedRouteReferenceStatus(ctx, scope, updates); err != nil {
 		return ctrl.Result{}, err
 	}
-	providerStatusPublished := routeHasProviderFailureStatus(route, updates, r.Config.ControllerName, r.Config.Domain()+"/Programmed")
+	providerStatusPublished := routeHasProviderFailureStatus(route, updates, r.Config.ControllerName, r.Config.Domain()+"/Programmed", scope.parentGateway != nil)
 	checkpointNeeded, err := r.routeCleanupStatusCheckpointNeeded(ctx, scope, updates)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -72,10 +73,31 @@ func (r *Reconciler) setRouteStatusesAndDetach(
 	if checkpointNeeded {
 		return ctrl.Result{Requeue: true}, nil
 	}
-	result, cleanupErr := r.detachRoute(ctx, route)
+	var result ctrl.Result
+	var cleanupErr error
+	var identity cloud.Identity
+	if scope.parentGateway == nil {
+		result, cleanupErr = r.detachRoute(ctx, route)
+	} else {
+		identity = controller.RouteIdentity(r.Config, scope.parentGateway, route)
+		binding, err := controller.StoredRouteGatewayBinding(r.Config, route, identity)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if binding.Identity == identity {
+			result, cleanupErr = r.detachGatewayBinding(ctx, route, route.DeepCopy(), identity)
+		}
+	}
 	if cleanupErr == nil {
 		if providerStatusPublished {
 			scope.setStatuses(updates)
+			if route.Annotations[r.Config.RouteLifecycleAnnotation()] == controller.RouteDetaching {
+				// The detach checkpoint already verified the pre-detach election.
+				scope.statusPlan.profileObserved = false
+			}
+		} else {
+			// The rejection status was already durable before detaching.
+			scope.statusPlan = nil
 		}
 		return result, nil
 	}
@@ -88,11 +110,11 @@ func (r *Reconciler) setRouteStatusesAndDetach(
 			scope.statusPlan = nil
 			return ctrl.Result{}, errHTTPRouteChanged
 		}
-		_, present, bindingErr := r.storedRouteIdentity(route)
+		bindings, bindingErr := controller.StoredRouteGatewayBindings(r.Config, route)
 		if bindingErr != nil {
 			return ctrl.Result{}, bindingErr
 		}
-		if !present {
+		if len(bindings) == 0 {
 			return ctrl.Result{}, cleanupErr
 		}
 		return r.setRouteUnsupportedVersion(ctx, scope)
@@ -102,7 +124,7 @@ func (r *Reconciler) setRouteStatusesAndDetach(
 		return ctrl.Result{}, cleanupErr
 	}
 	policy = controller.ProviderCleanupFailurePolicy(policy, "HTTPRoute")
-	diagnosticTransitioned, diagnosticErr := r.setRouteCleanupFailure(ctx, route, policy.Reason)
+	diagnosticTransitioned, diagnosticErr := r.patchRouteCleanupFailure(ctx, route, identity, policy.Reason)
 	providerUpdates := routeProviderFailureUpdates(updates, policy)
 	if len(providerUpdates) == 0 {
 		scope.setStatuses(nil)
@@ -124,7 +146,8 @@ func (r *Reconciler) setRouteStatusesAndDetach(
 	return controller.ProviderFinalizationFailureResult(policy, cleanupErr, string(route.UID))
 }
 
-func (r *Reconciler) applyUnsupportedRouteReferenceStatus(ctx context.Context, route *gatewayv1.HTTPRoute, updates []parentStatusUpdate) error {
+func (r *Reconciler) applyUnsupportedRouteReferenceStatus(ctx context.Context, scope *httpRouteScope, updates []parentStatusUpdate) error {
+	route := scope.route
 	needsAuthorization := func(update parentStatusUpdate) bool {
 		return update.status.acceptedReason == string(gatewayv1.RouteReasonUnsupportedValue) &&
 			update.status.resolved == metav1.ConditionUnknown
@@ -134,9 +157,14 @@ func (r *Reconciler) applyUnsupportedRouteReferenceStatus(ctx context.Context, r
 	}
 	// A bound route must detach even if a reference check fails. Its binding
 	// change enqueues the unbound route for independent status evaluation.
-	_, bound, err := r.storedRouteIdentity(route)
-	if err != nil || bound {
+	bindings, err := controller.StoredRouteGatewayBindings(r.Config, route)
+	if err != nil {
 		return err
+	}
+	for _, binding := range bindings {
+		if scope.parentGateway == nil || controller.SameGatewayIdentity(binding.Identity, controller.RouteIdentity(r.Config, scope.parentGateway, route)) {
+			return nil
+		}
 	}
 	rejection, err := r.liveRouteBackendReferenceRejection(ctx, route)
 	if err != nil || rejection == nil {
@@ -156,6 +184,7 @@ func routeHasProviderFailureStatus(
 	updates []parentStatusUpdate,
 	controllerName gatewayv1.GatewayController,
 	conditionType string,
+	partial bool,
 ) bool {
 	if len(updates) == 0 {
 		return false
@@ -176,8 +205,11 @@ func routeHasProviderFailureStatus(
 			return false
 		}
 	}
+	if partial {
+		return true
+	}
 	for _, parent := range route.Status.Parents {
-		if parent.ControllerName != controllerName {
+		if parent.ControllerName != controllerName || hasNonGatewayParentRef(route, parent.ParentRef) {
 			continue
 		}
 		planned := false
@@ -255,11 +287,8 @@ func (r *Reconciler) handleRouteFinalizationFailure(
 	}
 	route := scope.route
 	policy = controller.ProviderCleanupFailurePolicy(policy, "HTTPRoute")
-	diagnosticTransitioned, diagnosticErr := r.setRouteCleanupFailure(ctx, route, policy.Reason)
-	parent, found := parentRefForStoredGateway(route, identity)
-	if found {
-		scope.setDeletingFailureStatus(parent, policy)
-	}
+	diagnosticTransitioned, diagnosticErr := r.patchRouteCleanupFailure(ctx, route, identity, policy.Reason)
+	scope.setDeletingFailureStatus(policy, identity)
 	if diagnosticErr != nil {
 		return ctrl.Result{}, errors.Join(
 			controller.SafeProviderReconcileError(policy, providerErr),
@@ -288,20 +317,6 @@ func providerFailureRouteStatus(policy controller.ProviderFailurePolicy, referen
 	status.programmedReason = policy.Reason
 	status.programmedMessage = policy.Message
 	return status
-}
-
-func parentRefForStoredGateway(route *gatewayv1.HTTPRoute, identity cloud.Identity) (gatewayv1.ParentReference, bool) {
-	parent := gatewayv1.ParentReference{Name: gatewayv1.ObjectName(identity.GatewayName)}
-	if identity.GatewayNamespace != route.Namespace {
-		namespace := gatewayv1.Namespace(identity.GatewayNamespace)
-		parent.Namespace = &namespace
-	}
-	for _, candidate := range route.Spec.ParentRefs {
-		if controller.SameGatewayTarget(candidate, route.Namespace, parent, route.Namespace) {
-			return candidate, true
-		}
-	}
-	return gatewayv1.ParentReference{}, false
 }
 
 func statusForRouteBuildError(err error) routeReconcileStatus {

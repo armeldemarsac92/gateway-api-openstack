@@ -373,8 +373,7 @@ func auditCandidateRole(resourceType string, tags []string) (string, bool, error
 		return role, true, nil
 	}
 	baseRole := role
-	if role == openstackidentity.RoleRuleRedirectGuard || role == openstackidentity.RoleRuleHTTPHeaderExact ||
-		role == openstackidentity.RoleRuleHTTPMethod || role == openstackidentity.RoleRuleGRPCContentType {
+	if openstackidentity.HTTPRuleNeedsPolicyIdentity(role) {
 		return "", false, fmt.Errorf("HTTP predicate role requires a policy identity")
 	}
 	if base, _, _, fragmented := openstackidentity.ParseHTTPFragmentRole(role); fragmented {
@@ -399,8 +398,7 @@ func auditCandidateRole(resourceType string, tags []string) (string, bool, error
 	case auditTypeL7Policy:
 		valid, routeScoped = baseRole == rolePolicyExact || baseRole == rolePolicyPrefix, true
 	case auditTypeL7Rule:
-		valid, routeScoped = baseRole == roleRulePath || baseRole == roleRuleHost || baseRole == openstackidentity.RoleRuleRedirectGuard ||
-			baseRole == openstackidentity.RoleRuleHTTPHeaderExact || baseRole == openstackidentity.RoleRuleHTTPMethod || baseRole == openstackidentity.RoleRuleGRPCContentType, true
+		valid, routeScoped = baseRole == roleRulePath || baseRole == roleRuleHost || openstackidentity.HTTPRuleNeedsPolicyIdentity(baseRole), true
 	}
 	if !valid {
 		return "", false, fmt.Errorf("resource role does not match its OpenStack type")
@@ -702,8 +700,11 @@ func auditRouteFragmentParentMatches(child, parent *auditCandidate, matchPath bo
 	if childRedirect || parentRedirect {
 		return matchPath && childRedirect && parentRedirect && childRedirectMatch == parentRedirectMatch && childCell == parentCell
 	}
-	_, childBackend, childMatch, childFragment := openstackidentity.ParseHTTPFragmentRole(childRole)
+	childBase, childBackend, childMatch, childFragment := openstackidentity.ParseHTTPFragmentRole(childRole)
 	_, parentBackend, parentMatch, parentFragment := openstackidentity.ParseHTTPFragmentRole(parentRole)
+	if matchPath && childBase == openstackidentity.RoleRuleHTTPHostExclusion && childFragment && childBackend == "" && childMatch == "" {
+		return parentRole == rolePolicyExact || parentRole == rolePolicyPrefix
+	}
 	return childFragment == parentFragment && childBackend == parentBackend &&
 		(!matchPath || childMatch == parentMatch && openstackidentity.IsHTTPWeightedPolicyRole(childRole) == openstackidentity.IsHTTPWeightedPolicyRole(parentRole))
 }

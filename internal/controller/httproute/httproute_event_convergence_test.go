@@ -102,7 +102,9 @@ func newMemberBurstFixture(t *testing.T, count int) *memberBurstFixture {
 		gateway.UID = types.UID(gateway.Name)
 		route := mapperTestHTTPRoute("default", fmt.Sprintf("route-%02d", index), gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name)}, service.Name)
 		route.UID, route.Generation = types.UID(route.Name), 1
-		(&Reconciler{Config: cfg}).applyRouteBinding(route, gateway)
+		if err := (&Reconciler{Config: cfg}).applyRouteBinding(route, gateway); err != nil {
+			t.Fatal(err)
+		}
 		fixture.routes[client.ObjectKeyFromObject(route)] = route.UID
 		provider.members[string(route.UID)] = map[cloud.Member]string{
 			fixture.unchanged: "unchanged-member",
