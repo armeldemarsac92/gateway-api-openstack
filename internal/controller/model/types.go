@@ -44,7 +44,7 @@ type Input struct {
 	MemberMode             cloud.MemberMode
 	XBackends              []XBackendObservation
 	Gateway                *gatewayv1.Gateway
-	ListenerSetSections    map[types.NamespacedName][]gatewayv1.Listener
+	ListenerSetSections    map[types.NamespacedName][]gatewayv1.Listener `json:"-"`
 	Routes                 []gatewayv1.HTTPRoute
 	Namespaces             []corev1.Namespace
 	Services               []corev1.Service

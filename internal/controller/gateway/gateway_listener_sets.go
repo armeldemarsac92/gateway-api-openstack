@@ -292,6 +292,8 @@ func (r *Reconciler) listenerSetEntryStatus(ctx context.Context, set *gatewayv1.
 	}
 	if entry.invalidRouteKinds {
 		controller.SetCondition(&status.Conditions, controller.Condition(string(gatewayv1.ListenerEntryConditionResolvedRefs), metav1.ConditionFalse, string(gatewayv1.ListenerEntryReasonInvalidRouteKinds), "The listener supports HTTPRoute on delegated HTTP listeners", set.Generation))
+	} else if listener.TLS != nil && entry.rejection != "" {
+		controller.SetCondition(&status.Conditions, controller.Condition(string(gatewayv1.ListenerEntryConditionResolvedRefs), metav1.ConditionUnknown, string(gatewayv1.ListenerReasonPending), "TLS reference resolution is unavailable for delegated listeners", set.Generation))
 	}
 	programmed, reason := metav1.ConditionFalse, gatewayv1.ListenerReasonPending
 	if entry.rejection != "" {
