@@ -12,7 +12,7 @@ The controller from the linux/amd64 OCI image at `1206fc60da9d` ran the upstream
 | `HTTPRouteRewritePath` | PASS 6/6 | PASS 6/6 |
 | `HTTPRouteBackendURLRewrite` | FAIL 0/2 | FAIL 0/2 |
 
-Both successful cases reached `Accepted=True`, `ResolvedRefs=True` and the controller's `Programmed=True` for the current generation after the traffic assertions. The host case selected the expected backend and observed the forwarded hostname. The path case verified full replacement, prefix stripping and request header modification on the same rule. The backend-level case was rejected with `Accepted=False/UnsupportedValue` before it sent a request.
+Both successful cases reached `Accepted=True`, `ResolvedRefs=True` and the controller's `Programmed=True` for the current generation after the traffic assertions. The host case selected the expected backend and observed the forwarded hostname. The path case verified full replacement, prefix stripping and request header modification on the same rule. The backend-level case was rejected with `Accepted=False/UnsupportedValue` before it sent a request. The subsequent regional per-backend filter release passed both requests in this backend-level case on each channel. [Per-backend qualification](http-backend-request-filters.md)
 
 The baseline image at `069b0de0ed94` used the previous provider release with URL rewriting unavailable. All three cases stopped before the request assertions on both channels. The evidence archive includes the baseline, the first controller candidate and the reviewed image. [Case receipts and replay](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-1206fc60da9dbbb1f6557ed7cb62ff0c84e8ff00)
 
