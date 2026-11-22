@@ -328,7 +328,7 @@ func observedForwardPolicyMatches(route desiredRoute, observed observedRouteGrap
 		return false
 	}
 	return slices.ContainsFunc(route.policies, func(wanted desiredPolicy) bool {
-		if wanted.role != policy.role || !observedHTTPPredicateMatches(policy, rulesFor(wanted, route.hostnameRuleValue)) {
+		if wanted.role != policy.role || wanted.httpsListenerHostname != policy.httpsListenerHostname || !observedHTTPPredicateMatches(policy, rulesFor(wanted, route.hostnameRuleValue)) {
 			return false
 		}
 		switch {
@@ -541,10 +541,16 @@ func findHTTPPolicyReplacement(desired desiredGatewayGraph, owners []int, owner,
 		if route.redirect || owners[index] != owner || desired.spec.Routes[index].Disposition != cloud.GraphEnsure || scopedHTTPRoutePort(route) != port {
 			continue
 		}
-		if len(observed) == 1 && observed[0].versioned && route.backendKey == "" && observedGroupedPrefixMatches(observed[0], route) {
+		if len(observed) == 1 && observed[0].versioned && route.backendKey == "" &&
+			route.spec.HTTPSListenerHostname == observed[0].httpsListenerHostname && observedGroupedPrefixMatches(observed[0], route) {
 			return index, route.policies
 		}
 		for _, wanted := range route.policies {
+			if slices.ContainsFunc(observed, func(policy observedRoutePolicy) bool {
+				return policy.httpsListenerHostname != wanted.httpsListenerHostname
+			}) {
+				continue
+			}
 			matches := len(observed) == 1 && observedHTTPPredicateMatches(observed[0], rulesFor(wanted, route.hostnameRuleValue)) ||
 				len(observed) == 2 && route.backendKey != "" && observedLegacyPrefixMatches(observed, wanted, route.hostnameRuleValue)
 			if matches && (target < 0 || wanted.position < best.position) {

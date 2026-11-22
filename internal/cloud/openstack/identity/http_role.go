@@ -70,6 +70,30 @@ func HTTPMatchKey(hostname string, pathType cloud.PathMatchType, path, method st
 	return httpTupleKey(hostname, string(pathType), predicate.String())
 }
 
+// HTTPListenerMatchKey scopes a logical HTTP match without changing existing keys.
+func HTTPListenerMatchKey(scope string, match cloud.HTTPPathMatch) string {
+	key := HTTPMatchKey(match.Hostname, match.PathType, match.PathValue, match.Method, match.Headers...)
+	if scope == "" {
+		return key
+	}
+	return httpTupleKey("https-listener", scope, key)
+}
+
+const scopedHTTPRolePrefix = "http-https-listener-v1/"
+
+// ScopedHTTPPolicyRole preserves scalar route pool identity while scoping its policies and rules.
+func ScopedHTTPPolicyRole(base, match string) string {
+	if !validHTTPKey(match) {
+		return ""
+	}
+	switch base {
+	case RolePolicyExact, RolePolicyPrefix, RoleRulePath, RoleRuleHost:
+		return scopedHTTPRolePrefix + base + "/" + match
+	default:
+		return ""
+	}
+}
+
 // RoleRuleHTTPHeaderExact identifies a predicate on a normalized header name.
 const RoleRuleHTTPHeaderExact = "l7-header-exact"
 
@@ -146,6 +170,13 @@ func IsHTTPWeightedPolicyRole(role string) bool {
 
 // ParseHTTPFragmentRole recognizes only roles the HTTP path writer can create.
 func ParseHTTPFragmentRole(raw string) (base, backendKey, matchKey string, ok bool) {
+	if scoped, found := strings.CutPrefix(raw, scopedHTTPRolePrefix); found {
+		base, match, _ := strings.Cut(scoped, "/")
+		if ScopedHTTPPolicyRole(base, match) == raw {
+			return base, "", match, true
+		}
+		return "", "", "", false
+	}
 	prefix, formatRole := "http-v2/", HTTPFragmentRole
 	if IsHTTPWeightedPolicyRole(raw) {
 		prefix, formatRole = weightedHTTPRolePrefix, HTTPWeightedPolicyRole

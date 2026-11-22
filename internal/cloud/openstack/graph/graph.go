@@ -28,6 +28,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/apierrors"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia/amphora"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/extensions/layer3/floatingips"
 )
@@ -43,6 +44,11 @@ type desiredGatewayGraph struct {
 
 type observedGatewayGraph struct {
 	defaultHTTPResponseCodes map[string]int
+	httpsVirtualHosts        map[string][]string
+	httpsIsolationAvailable  bool
+	httpsIsolationPolicies   map[string]httpsPolicyInventory
+	httpsIsolationUnverified map[string]bool
+	httpsIsolationMutation   *graphMutation
 	loadBalancer             *octavia.LoadBalancer
 	listener                 *listeners.Listener
 	scopedListeners          []listeners.Listener
@@ -70,6 +76,7 @@ const (
 	graphCreateListener
 	graphDisableListener
 	graphUpdateListenerCertificate
+	graphUpdateListenerVirtualHosts
 	graphSetListenerNotFound
 	graphClearListenerDefaultPool
 	graphSetListenerDefaultPool
@@ -143,6 +150,20 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	if err != nil {
 		result.Gateway = observedGatewayResult(desired, actual, p.progressingOutcome("Waiting for the Gateway infrastructure"))
 		return result, err
+	}
+	if step := actual.httpsIsolationMutation; step != nil {
+		if validate := spec.ValidateMutation; validate != nil {
+			if err := validate(ctx); err != nil {
+				return cloud.GatewayGraphResult{}, err
+			}
+		}
+		actual.outcome = p.progressingOutcome(step.message)
+		result := p.pendingGraphResult(ctx, desired, actual)
+		if err := p.executeGraphMutation(ctx, desired, actual, *step); err != nil {
+			return result, err
+		}
+		p.recordGraphMutationOutcome(&result, *step)
+		return result, nil
 	}
 	if step := p.prepareBackendTLS(ctx, &desired, actual); step != nil {
 		if validate := spec.ValidateMutation; validate != nil {
@@ -457,6 +478,8 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 		}
 	}
 	ports := make(map[int]bool, len(spec.Gateway.Spec.ScopedListeners))
+	isolatedHosts := make(map[int][]string)
+	unauthorizedHTTPSPorts := make(map[int]bool)
 	if len(spec.Gateway.Spec.ScopedListeners) != 0 {
 		if spec.Gateway.Disposition != cloud.GraphEnsure && !withdrawTLS {
 			return invalid("a listener set requires an ensured Gateway")
@@ -471,6 +494,18 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 			}
 			if listener.TLS != nil && protocol != cloud.ListenerProtocolHTTP {
 				return invalid("TLS termination requires the scoped HTTP listener family")
+			}
+			if listener.TLS != nil {
+				unauthorizedHTTPSPorts[listener.Port] = !hasAuthorizedListener(listener)
+				hosts := listener.TLS.VirtualHosts
+				for i, host := range hosts {
+					if host != "*" && amphora.ValidateSNIHostname(host) != nil || i > 0 && hosts[i-1] >= host {
+						return invalid("isolated HTTPS listener hostnames must be valid, sorted and distinct")
+					}
+				}
+				if len(hosts) != 0 {
+					isolatedHosts[listener.Port] = hosts
+				}
 			}
 			if withdrawTLS && listener.TLS == nil {
 				return invalid("TLS withdrawal requires the current HTTPS port and certificate list")
@@ -512,7 +547,11 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 	portWinners := make(map[int]bool, len(ports))
 	rankByPort := make(map[int]int)
 	policiesByPort := make(map[int][]*desiredPolicy)
-	policyRanksByPort := make(map[int]map[int]bool)
+	type policyRankScope struct {
+		port  int
+		scope string
+	}
+	policyRanks := make(map[policyRankScope]map[int]bool)
 	var forwardingByPort map[int][]cloud.HTTPPathMatch
 	if slices.ContainsFunc(spec.Routes, func(node cloud.RouteGraphNode) bool {
 		return node.Disposition == cloud.GraphEnsure && len(node.Spec.HTTPRedirects) != 0
@@ -607,29 +646,50 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 				return desiredGatewayGraph{}, &cloud.GraphError{Identity: id, Err: err}
 			}
 			if protocol == cloud.ListenerProtocolHTTP {
-				ranks := policyRanksByPort[httpPort]
-				if ranks == nil {
-					ranks = make(map[int]bool)
-					policyRanksByPort[httpPort] = ranks
+				hosts := isolatedHosts[httpPort]
+				validateScope := func(scope string) error {
+					if len(hosts) == 0 && scope == "" || slices.Contains(hosts, scope) ||
+						unauthorizedHTTPSPorts[httpPort] && (scope == "*" || amphora.ValidateSNIHostname(scope) == nil) {
+						return nil
+					}
+					return &cloud.GraphError{Identity: id, Err: cloud.NewProviderError(cloud.ErrorCategoryTerminalValidation,
+						errors.New("HTTP matches require exactly one configured hostname on an isolated HTTPS listener"))}
 				}
-				addRank := func(rank int) error {
+				if node.Spec.HTTPSListenerHostname != "" {
+					if err := validateScope(node.Spec.HTTPSListenerHostname); err != nil {
+						return desiredGatewayGraph{}, err
+					}
+				}
+				addRank := func(scope string, rank int) error {
+					key := policyRankScope{httpPort, scope}
+					ranks := policyRanks[key]
+					if ranks == nil {
+						ranks = make(map[int]bool)
+						policyRanks[key] = ranks
+					}
 					if rank < 0 || ranks[rank] {
 						return &cloud.GraphError{Identity: id, Err: cloud.NewProviderError(cloud.ErrorCategoryTerminalValidation,
-							fmt.Errorf("HTTP match precedence %d must be nonnegative and distinct on its listener", rank))}
+							fmt.Errorf("HTTP match precedence %d must be nonnegative and distinct in its listener section", rank))}
 					}
 					ranks[rank] = true
 					return nil
 				}
-				for _, rank := range route.redirectRanks {
-					if err := addRank(rank); err != nil {
+				for _, match := range route.redirectMatches {
+					if err := validateScope(match.HTTPSListenerHostname); err != nil {
+						return desiredGatewayGraph{}, err
+					}
+					if err := addRank(match.HTTPSListenerHostname, match.Precedence); err != nil {
 						return desiredGatewayGraph{}, err
 					}
 				}
 				for _, policies := range route.policySets() {
 					for i := range policies {
 						policy := &policies[i]
+						if err := validateScope(policy.httpsListenerHostname); err != nil {
+							return desiredGatewayGraph{}, err
+						}
 						if policy.redirect == nil && policy.position == 1 {
-							if err := addRank(policy.precedence); err != nil {
+							if err := addRank(policy.httpsListenerHostname, policy.precedence); err != nil {
 								return desiredGatewayGraph{}, err
 							}
 						}
@@ -641,7 +701,12 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 		desired.routes = append(desired.routes, route)
 	}
 	for _, policies := range policiesByPort {
-		sort.SliceStable(policies, func(i, j int) bool { return policies[i].precedence < policies[j].precedence })
+		sort.SliceStable(policies, func(i, j int) bool {
+			if policies[i].httpsListenerHostname != policies[j].httpsListenerHostname {
+				return policies[i].httpsListenerHostname < policies[j].httpsListenerHostname
+			}
+			return policies[i].precedence < policies[j].precedence
+		})
 		for i, policy := range policies {
 			policy.position = int32(i + 1)
 		}
@@ -652,6 +717,13 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 		}
 	}
 	return desired, nil
+}
+
+func httpMatchScope(spec cloud.RouteSpec, match cloud.HTTPPathMatch) string {
+	if match.HTTPSListenerHostname != "" {
+		return match.HTTPSListenerHostname
+	}
+	return spec.HTTPSListenerHostname
 }
 
 func (actual observedGatewayGraph) httpFallbackReady(listener listeners.Listener, required bool) bool {
@@ -775,13 +847,14 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 	// TLS authorization is decided using only public LB/frontend readbacks.
 	// In particular, an unrelated pool or Neutron failure cannot hold it.
 	var inventory octavia.ListenerInventory
-	listed := actual.scoped && actual.protocol == cloud.ListenerProtocolHTTP || desired.spec.Gateway.Disposition == cloud.GraphDelete
+	listed := actual.protocol == cloud.ListenerProtocolHTTP || desired.spec.Gateway.Disposition == cloud.GraphDelete
 	if listed {
 		inventory, err = p.observeGatewayListenerInventory(ctx, desired, &actual)
 		if err != nil {
 			return actual, err
 		}
 		if actual.scoped && actual.protocol == cloud.ListenerProtocolHTTP {
+			p.observeHTTPSIsolation(ctx, desired, &actual, inventory.DefaultPoolsObserved)
 			if observation.phase == loadBalancerPhaseActive {
 				p.planScopedHTTPSWithdrawal(desired, &actual)
 			}
@@ -794,6 +867,9 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 		if err := validateGraphLoadBalancer(lb, gatewayRequirements(desired.spec.Gateway.Spec)); err != nil {
 			return actual, err
 		}
+	}
+	if actual.httpsIsolationMutation != nil {
+		return actual, nil
 	}
 	addressSpec := desired.spec.Gateway.Spec
 	observeAddress := desired.spec.Gateway.Disposition == cloud.GraphEnsure ||
@@ -833,6 +909,15 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 		inventory, err = p.observeGatewayListenerInventory(ctx, desired, &actual)
 		if err != nil {
 			return actual, err
+		}
+		if actual.scoped && actual.protocol == cloud.ListenerProtocolHTTP {
+			p.observeHTTPSIsolation(ctx, desired, &actual, inventory.DefaultPoolsObserved)
+			if observation.phase == loadBalancerPhaseActive {
+				p.planScopedHTTPSWithdrawal(desired, &actual)
+			}
+			if actual.withdrawTLS != nil || actual.httpsIsolationMutation != nil {
+				return actual, nil
+			}
 		}
 	}
 	if desired.protocol == cloud.ListenerProtocolTLSSNI {
@@ -942,12 +1027,18 @@ func (p *Provider) observeGatewayListenerInventory(ctx context.Context, desired 
 	}
 	actual.defaultHTTPResponseCodes = inventory.DefaultHTTPResponseCodes
 	actual.adminObserved = inventory.AdminStatesObserved
+	actual.httpsVirtualHosts = inventory.HTTPSVirtualHosts
+	var bindingErr error
 	if markedProtocol != "" {
-		if actual.protocol != "" && actual.protocol != markedProtocol {
-			return inventory, fmt.Errorf("%w: scoped listeners differ from the Gateway protocol binding", cloud.ErrOwnershipConflict)
+		switch {
+		case actual.protocol != "" && actual.protocol != markedProtocol:
+			bindingErr = fmt.Errorf("%w: scoped listeners differ from the Gateway protocol binding", cloud.ErrOwnershipConflict)
+		case desired.spec.Gateway.Disposition == cloud.GraphEnsure && !actual.scoped:
+			bindingErr = fmt.Errorf("%w: scoped listeners require the Gateway listener set", cloud.ErrOwnershipConflict)
 		}
-		if desired.spec.Gateway.Disposition == cloud.GraphEnsure && !actual.scoped {
-			return inventory, fmt.Errorf("%w: scoped listeners require the Gateway listener set", cloud.ErrOwnershipConflict)
+		if bindingErr != nil && (markedProtocol != cloud.ListenerProtocolHTTP ||
+			!slices.ContainsFunc(inventory.Items, actual.isHTTPSIsolated)) {
+			return inventory, bindingErr
 		}
 		actual.protocol, actual.scoped = markedProtocol, true
 	}
@@ -971,8 +1062,18 @@ func (p *Provider) observeGatewayListenerInventory(ctx context.Context, desired 
 			return inventory, err
 		}
 		actual.state.ListenerID = scopedRepresentativeListenerID(actual.scopedListeners, anchor)
+		if bindingErr != nil && lb.ProvisioningStatus == "ACTIVE" {
+			for _, listener := range actual.scopedListeners {
+				if actual.isHTTPSIsolated(listener) && (listener.ProvisioningStatus == "ERROR" || listener.ProvisioningStatus == "ACTIVE" &&
+					(listener.AdminStateUp || !actual.adminObserved[listener.ID])) {
+					step := httpsIsolationWithdrawal(listener, cloud.ScopedListener{Port: listener.ProtocolPort})
+					actual.withdrawTLS = &step
+					break
+				}
+			}
+		}
 	}
-	return inventory, nil
+	return inventory, bindingErr
 }
 
 func validateObservedPolicyLayout(routes []observedRouteGraph) error {
@@ -1042,7 +1143,7 @@ func (p *Provider) pendingGraphResult(ctx context.Context, desired desiredGatewa
 		}
 		return result
 	}
-	if actual.withdrawTLS != nil {
+	if actual.withdrawTLS != nil || actual.httpsIsolationMutation != nil {
 		result.Gateway.ScopedListenerDeferredPorts = unchangedHTTPSWithdrawalSiblings(desired, actual)
 	}
 	var deferred map[int]bool

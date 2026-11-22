@@ -50,6 +50,7 @@ type observedRoutePolicy struct {
 	targetObserved          bool
 	weightedTargets         []octavia.WeightedHTTPTarget
 	requestHeaderOperations []cloud.HTTPHeaderOperation
+	httpsListenerHostname   string
 }
 
 type observedRouteRule struct {
@@ -116,6 +117,7 @@ type routeGraphInventory struct {
 	recoverGateway   *Identity
 	recoverAllRoutes bool
 	recovered        map[openstackidentity.RouteOwnerProof]int
+	scopedPolicies   map[string]httpsPolicyInventory
 }
 
 func (inventory *routeGraphInventory) resolve(tags []string, bases ...string) (int, routeResourceRole, error) {
@@ -270,14 +272,15 @@ func (p *Provider) observeRouteGraphsWithListeners(ctx context.Context, owners [
 	if err != nil {
 		return nil, err
 	}
-	return p.observeRouteGraphsFromPools(ctx, owners, lb, listener, protocol, scopedListeners, poolInventory, nil)
+	return p.observeRouteGraphsFromPools(ctx, owners, lb, listener, protocol, scopedListeners, poolInventory, nil, nil)
 }
 
-func (p *Provider) observeRouteGraphsFromPools(ctx context.Context, owners []routeGraphOwner, lb *octavia.LoadBalancer, listener *listeners.Listener, protocol string, scopedListeners []listeners.Listener, poolInventory octavia.PoolInventory, recoverGateway *Identity) ([]observedRouteGraph, error) {
+func (p *Provider) observeRouteGraphsFromPools(ctx context.Context, owners []routeGraphOwner, lb *octavia.LoadBalancer, listener *listeners.Listener, protocol string, scopedListeners []listeners.Listener, poolInventory octavia.PoolInventory, recoverGateway *Identity, scopedPolicies map[string]httpsPolicyInventory) ([]observedRouteGraph, error) {
 	poolItems := poolInventory.Items
 	inventory := routeGraphInventory{
 		owners: slices.Clone(owners), graphs: make([]observedRouteGraph, len(owners)),
 		recoverGateway: recoverGateway, recoverAllRoutes: len(owners) == 0 || p.fixedHTTPResponses,
+		scopedPolicies: scopedPolicies,
 	}
 	if recoverGateway != nil {
 		inventory.recovered = make(map[openstackidentity.RouteOwnerProof]int)
@@ -421,7 +424,13 @@ func containsHTTPFragmentPool(items []pools.Pool) bool {
 }
 
 func (p *Provider) observeListenerPolicies(ctx context.Context, inventory *routeGraphInventory, listener *listeners.Listener, protocol string, poolOwners map[string]poolRouteOwner, listenerByRoute map[int]string, strict bool) error {
-	items, complete, err := p.octavia.ListPolicyObservations(ctx, l7policies.ListOpts{ListenerID: listener.ID, ProjectID: p.projectID})
+	cached, found := inventory.scopedPolicies[listener.ID]
+	items, complete, err := cached.items, cached.complete, cached.err
+	if !found {
+		items, complete, err = p.octavia.ListPolicyObservations(ctx, l7policies.ListOpts{ListenerID: listener.ID, ProjectID: p.projectID})
+	} else if !complete && err == nil {
+		err = cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady, errors.New("waiting for complete Octavia HTTPS policy inventory"))
+	}
 	if err != nil {
 		return fmt.Errorf("list Gateway L7 policies: %w", err)
 	}
@@ -515,6 +524,7 @@ func (p *Provider) observeListenerPolicies(ctx context.Context, inventory *route
 				cloud.ErrorCategoryDependencyNotReady, fmt.Errorf("L7 policy %s reports invalid request header operations: %w", item.ID, observation.RequestHeaderOperationsErr))}
 		}
 		observed.requestHeaderOperations = observation.RequestHeaderOperations
+		observed.httpsListenerHostname = observation.HTTPSListenerHostname
 		observed.adminObserved = observation.AdminState != nil
 		if strictPolicy || owner.requiresPolicyAbsenceProof {
 			rules := make([]l7policies.Rule, 0, len(observed.rules))
@@ -694,6 +704,7 @@ const (
 	routeMutationDeletePolicy
 	routeMutationCreatePolicy
 	routeMutationUpdatePolicy
+	routeMutationSetPolicyHTTPSListenerHostname
 	routeMutationSetPolicyTarget
 	routeMutationSetPolicyHeaders
 	routeMutationMovePolicy
@@ -765,6 +776,8 @@ func (s routeMutation) message() string {
 		return "Updated Octavia L7 policy"
 	case routeMutationSetPolicyTarget:
 		return "Updated Octavia L7 policy target"
+	case routeMutationSetPolicyHTTPSListenerHostname:
+		return "Updating the HTTPS listener scope on a disabled Octavia HTTP policy"
 	case routeMutationSetPolicyHeaders:
 		return "Updated Octavia L7 policy request headers"
 	case routeMutationMovePolicy:
@@ -963,6 +976,7 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 		for _, policy := range actual.policies {
 			if policy.role == wantedPolicy.role && !policy.policy.AdminStateUp {
 				return []routeMutation{{kind: routeMutationEnablePolicy, id: policy.policy.ID,
+					policy:                  desiredPolicy{httpsListenerHostname: wantedPolicy.httpsListenerHostname},
 					requestHeaderOperations: wantedPolicy.requestHeaderOperations,
 					requiresExactHeaders:    len(wantedPolicy.headers) != 0, requiresHTTPMethod: wantedPolicy.method != ""}}, state, nil
 			}
@@ -1023,6 +1037,11 @@ func buildRoutePolicyPlan(
 		}
 		policy := observedPolicy.policy
 		state.L7PolicyIDs = append(state.L7PolicyIDs, policy.ID)
+		if wantedPolicy.httpsListenerHostname != "" && (observedPolicy.httpsListenerHostname != wantedPolicy.httpsListenerHostname ||
+			!observedPolicy.adminObserved) {
+			plan = append(plan, routeMutation{kind: routeMutationSetPolicyHTTPSListenerHostname, id: policy.ID, policy: wantedPolicy})
+			continue
+		}
 		weighted := wantedPolicy.weightedPlan
 		targetUpdate := weighted != nil && (!slices.EqualFunc(weighted.targets, observedPolicy.weightedTargets, weightedTargetsEqual) || policy.ProvisioningStatus == "ERROR") ||
 			desired.fixedResponse && (!observedPolicy.fixedResponse || policy.ProvisioningStatus == "ERROR") ||
@@ -1274,7 +1293,8 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 		if redirect := step.policy.redirect; redirect != nil {
 			opts.Action, opts.RedirectPrefix, opts.RedirectHttpCode = l7policies.ActionRedirectPrefix, redirect.prefix, redirect.statusCode
 		}
-		create := octavia.PolicyCreateOpts{CreateOpts: opts, FixedServerError: desired.fixedResponse, RequestHeaderOperations: step.requestHeaderOperations}
+		create := octavia.PolicyCreateOpts{CreateOpts: opts, FixedServerError: desired.fixedResponse,
+			RequestHeaderOperations: step.requestHeaderOperations, HTTPSListenerHostname: step.policy.httpsListenerHostname}
 		if step.weightedTargets != nil {
 			create.WeightedTargets = *step.weightedTargets
 		}
@@ -1287,6 +1307,8 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 			opts.Action, opts.RedirectPoolID = l7policies.ActionRedirectToPool, &step.parentID
 		}
 		_, err = p.octavia.UpdatePolicy(ctx, step.id, opts)
+	case routeMutationSetPolicyHTTPSListenerHostname:
+		_, err = p.octavia.SetPolicyHTTPSListenerHostname(ctx, step.id, step.policy.httpsListenerHostname)
 	case routeMutationSetPolicyHeaders:
 		_, err = p.octavia.UpdatePolicyRequestHeaders(ctx, step.id, l7policies.UpdateOpts{}, step.requestHeaderOperations)
 	case routeMutationSetPolicyTarget:
