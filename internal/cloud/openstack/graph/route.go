@@ -25,6 +25,7 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	openstackidentity "github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/identity"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia/amphora"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/monitors"
@@ -66,6 +67,7 @@ type desiredPolicy struct {
 	weightedPlan             *weightedHTTPPolicyPlan
 	requestHeaderOperations  []cloud.HTTPHeaderOperation
 	responseHeaderOperations []cloud.HTTPHeaderOperation
+	requestURLRewrite        *octavia.RequestURLRewrite
 	method                   string
 	headers                  []cloud.HTTPHeaderMatch
 	queryParams              []cloud.HTTPQueryParamMatch
@@ -424,6 +426,17 @@ func (p *Provider) buildHTTPMatchPolicies(r *desiredRoute, matches []cloud.HTTPP
 		if len(responseOperations) != 0 && !p.responseHeaderModifier {
 			return errors.New("response header operations require controller opt-in for Octavia")
 		}
+		rewrite, err := compileRequestURLRewrite(match)
+		if err != nil {
+			return err
+		}
+		if rewrite != nil && (!p.httpRequestURLRewrite || r.spec.GRPC || r.redirect) {
+			return errors.New("forwarding URL rewrites require --octavia-request-url-rewrite on an HTTPRoute")
+		}
+		if r.fixedResponse {
+			// No request is forwarded when a backend is invalid.
+			rewrite = nil
+		}
 		for _, policy := range policies {
 			policy.backendKey, policy.matchKey = r.backendKey, matchKey
 			policy.httpsListenerHostname = scope
@@ -432,6 +445,7 @@ func (p *Provider) buildHTTPMatchPolicies(r *desiredRoute, matches []cloud.HTTPP
 			policy.weighted = r.weightedTargets != nil
 			policy.requestHeaderOperations = operations
 			policy.responseHeaderOperations = responseOperations
+			policy.requestURLRewrite = rewrite
 			if r.spec.GRPC {
 				policy.grpcContentTypeRule = l7policies.TypeHeader
 				if p.grpcContentType {

@@ -45,6 +45,8 @@ type Config struct {
 
 	// HTTPRequestRedirect enables request-derived Octavia HTTP redirects.
 	HTTPRequestRedirect bool
+	// HTTPRequestURLRewrite enables forwarding with rule-scoped Octavia URL rewrites.
+	HTTPRequestURLRewrite bool
 	// HTTPMethodMatch enables exact HTTPRoute method matching on capable Amphora providers.
 	HTTPMethodMatch bool
 	// FixedHTTPResponses enables the local Amphora fixed-response extension.

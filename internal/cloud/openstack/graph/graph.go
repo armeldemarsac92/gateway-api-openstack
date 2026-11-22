@@ -234,7 +234,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	var plan []graphMutation
 	defaultPool := usesDefaultPool(actual.protocol)
 	planBeforeSecurity := isSNIProtocol(actual.protocol) || defaultPool || actual.scoped && actual.protocol == cloud.ListenerProtocolHTTP || hasHTTPRouteParts(desired, actual) ||
-		len(desired.spec.Gateway.Spec.HTTPListenerHostnames) != 0 || observedPlainHTTPExclusions(actual.routes)
+		len(desired.spec.Gateway.Spec.HTTPListenerHostnames) != 0 || observedPlainHTTPExclusions(actual.routes) || containsObservedRequestURLRewrite(actual.routes)
 	if planBeforeSecurity {
 		plan, result, err = p.buildGatewayGraphPlan(desired, actual)
 		if err != nil {
@@ -242,6 +242,9 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		}
 	}
 	plan = p.protectRequestRedirectTraffic(ctx, desired, actual, plan, &result)
+	if !isHTTPListenerWithdrawal(plan) {
+		plan = p.protectRequestURLRewriteTraffic(ctx, desired, actual, plan, &result)
+	}
 	if !isHTTPListenerWithdrawal(plan) {
 		plan, _ = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, exactHTTPHeaderPredicate)
 		plan, _ = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, exactHTTPQueryParamPredicate)
@@ -334,6 +337,9 @@ func (p *Provider) reconcileHTTPWithdrawalWithoutAddress(ctx context.Context, de
 	}
 	result.Gateway.Outcome = p.progressingOutcome("Waiting to observe the Gateway Floating IP inventory")
 	plan = p.protectRequestRedirectTraffic(ctx, desired, actual, plan, &result)
+	if !isHTTPListenerWithdrawal(plan) {
+		plan = p.protectRequestURLRewriteTraffic(ctx, desired, actual, plan, &result)
+	}
 	var grpcWithdrawal []graphMutation
 	var confirmedClosed bool
 	if p.grpcContentType && !isHTTPListenerWithdrawal(plan) {

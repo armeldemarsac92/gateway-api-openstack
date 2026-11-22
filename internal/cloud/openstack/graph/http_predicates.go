@@ -252,18 +252,20 @@ func (p *Provider) markGuardedHTTPListener(result *cloud.GatewayGraphResult, por
 
 func guardedHTTPListeners(desired desiredGatewayGraph, actual observedGatewayGraph, portByID map[string]int, predicate protectedHTTPPredicate) map[int]guardedHTTPListener {
 	states := make(map[int]guardedHTTPListener)
-	if hasHTTPRouteParts(desired, actual) {
-		parts, observedParts, owners := httpPlanningParts(desired, actual)
-		for index, part := range parts.routes {
-			if desired.spec.Gateway.Disposition == cloud.GraphPreserve && parts.spec.Routes[index].Disposition != cloud.GraphDelete {
-				continue
-			}
-			var observed observedRouteGraph
-			if index < len(observedParts.routes) {
-				observed = observedParts.routes[index]
-			}
-			collectGuardedHTTPListener(states, desired, portByID, part, observed, parts.spec.Routes[index].Disposition, owners[index], predicate)
+	if !hasHTTPRouteParts(desired, actual) &&
+		(predicate.capability != octavia.GatewayCapabilityRequestURLRewrite || !containsObservedRequestURLRewrite(actual.routes)) {
+		return states
+	}
+	parts, observedParts, owners := httpPlanningParts(desired, actual)
+	for index, part := range parts.routes {
+		if desired.spec.Gateway.Disposition == cloud.GraphPreserve && parts.spec.Routes[index].Disposition != cloud.GraphDelete {
+			continue
 		}
+		var observed observedRouteGraph
+		if index < len(observedParts.routes) {
+			observed = observedParts.routes[index]
+		}
+		collectGuardedHTTPListener(states, desired, portByID, part, observed, parts.spec.Routes[index].Disposition, owners[index], predicate)
 	}
 	if len(states) == 0 {
 		return states

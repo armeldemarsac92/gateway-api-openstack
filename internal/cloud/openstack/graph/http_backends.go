@@ -237,6 +237,7 @@ func planFixedResponseDuringMemberWithdrawal(desired desiredRoute, observed obse
 	for _, wanted := range desired.policies {
 		for _, policy := range observed.policies {
 			if policy.role != wanted.role || !policy.targetObserved || !policy.policy.AdminStateUp ||
+				policy.urlRewriteTagged && !policy.urlRewriteReported ||
 				policy.policy.ProvisioningStatus != "ACTIVE" && policy.policy.ProvisioningStatus != "ERROR" ||
 				slices.ContainsFunc(policy.rules, func(rule observedRouteRule) bool { return rule.rule.ProvisioningStatus != "ACTIVE" }) ||
 				!observedHTTPPredicateMatches(policy, rulesFor(wanted, desired.hostnameRuleValue)) {
@@ -252,7 +253,8 @@ func planFixedResponseDuringMemberWithdrawal(desired desiredRoute, observed obse
 				responsePatch := policyHeaderPatch(wanted.responseHeaderOperations, policy.responseHeaderOperations,
 					policy.policy.ProvisioningStatus == "ERROR")
 				return routeMutation{kind: routeMutationSetPolicyTarget, id: policy.policy.ID,
-					requestHeaderOperations: operations, responseHeaderOperations: responsePatch}, true
+					requestHeaderOperations: operations, responseHeaderOperations: responsePatch,
+					requestURLRewriteUpdate: policyURLRewritePatch(nil, policy)}, true
 			}
 		}
 	}

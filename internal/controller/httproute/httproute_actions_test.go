@@ -528,3 +528,60 @@ func TestResponseHeaderModifierIsScopedToWinningRule(t *testing.T) {
 		t.Fatalf("response framing field accepted: %v", err)
 	}
 }
+
+func TestURLRewriteIsScopedToForwardingRule(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	plain := f.route.Spec.Rules[0]
+	filtered := *plain.DeepCopy()
+	f.route.Spec.Hostnames = []gatewayv1.Hostname{"incoming.example.test"}
+	filtered.Matches = []gatewayv1.HTTPRouteMatch{{
+		Path: &gatewayv1.HTTPPathMatch{Type: ptr.To(gatewayv1.PathMatchPathPrefix), Value: ptr.To("/original/")},
+	}}
+	rewrite := gatewayv1.HTTPRouteFilter{
+		Type: gatewayv1.HTTPRouteFilterURLRewrite,
+		URLRewrite: &gatewayv1.HTTPURLRewriteFilter{
+			Hostname: ptr.To(gatewayv1.PreciseHostname("backend.example.test")),
+			Path:     &gatewayv1.HTTPPathModifier{Type: gatewayv1.PrefixMatchHTTPPathModifier, ReplacePrefixMatch: ptr.To("")},
+		},
+	}
+	headers := gatewayv1.HTTPRouteFilter{
+		Type:                  gatewayv1.HTTPRouteFilterRequestHeaderModifier,
+		RequestHeaderModifier: &gatewayv1.HTTPHeaderFilter{Remove: []string{"X-Remove"}},
+	}
+	filtered.Filters = []gatewayv1.HTTPRouteFilter{rewrite, headers}
+	f.route.Spec.Rules = []gatewayv1.HTTPRouteRule{plain, filtered}
+	build := func() (cloud.RouteSpec, error) {
+		return f.reconciler.buildRouteModelWithReader(t.Context(), f.reader, f.route, f.gateway)
+	}
+	if _, err := build(); err == nil || !strings.Contains(err.Error(), "--octavia-request-url-rewrite") {
+		t.Fatalf("rewrite opt-in was not enforced: %v", err)
+	}
+	f.reconciler.Config.HTTPRequestURLRewrite = true
+	if _, err := build(); err == nil || !strings.Contains(err.Error(), "RequestHeaderModifier") {
+		t.Fatalf("header modifier opt-in was not enforced: %v", err)
+	}
+	f.reconciler.Config.RequestHeaderModifier = true
+	spec, err := build()
+	if err != nil || len(spec.HTTPBackends) != 1 || len(spec.HTTPBackends[0].Matches) != 2 || len(spec.HTTPRedirects) != 0 {
+		t.Fatalf("expected two forwarding matches and one backend: %#v, %v", spec, err)
+	}
+	matched, fallback := spec.HTTPBackends[0].Matches[0], spec.HTTPBackends[0].Matches[1]
+	if matched.Hostname != "incoming.example.test" || matched.PathValue != "/original" ||
+		matched.Precedence >= fallback.Precedence || matched.URLRewrite == nil ||
+		matched.URLRewrite.Hostname != "backend.example.test" ||
+		!ptr.Equal(matched.URLRewrite.ReplacePrefixMatch, ptr.To("")) ||
+		!slices.Equal(matched.RequestHeaderOperations, []cloud.HTTPHeaderOperation{{Operation: cloud.HTTPHeaderRemove, Name: "x-remove"}}) ||
+		fallback.URLRewrite != nil || len(fallback.RequestHeaderOperations) != 0 {
+		t.Fatalf("unexpected forwarding match or fallback: %#v, %#v", matched, fallback)
+	}
+	f.route.Spec.Rules[1].Matches[0].Path.Type = ptr.To(gatewayv1.PathMatchExact)
+	var rejected *routeBuildError
+	if _, err := build(); !errors.As(err, &rejected) || rejected.kind != routeErrorInvalid {
+		t.Fatalf("ReplacePrefixMatch accepted an Exact predicate: %v", err)
+	}
+	f.route.Spec.Rules[1].Filters = nil
+	f.route.Spec.Rules[1].BackendRefs[0].Filters = []gatewayv1.HTTPRouteFilter{rewrite}
+	if _, err := build(); err == nil || !strings.Contains(err.Error(), "backendRef filters") {
+		t.Fatalf("backendRef rewrite filter was accepted: %v", err)
+	}
+}

@@ -405,7 +405,11 @@ func weightedTargetWithdrawals(desired desiredRoute, observed observedRouteGraph
 			withdrawn = policy.weightedTargets
 		}
 		if withdrawn != nil {
-			steps = append(steps, routeMutation{kind: routeMutationSetPolicyTarget, id: policy.policy.ID, weightedTargets: &withdrawn, retry: retry})
+			if policy.hasRequestURLRewrite() && !observedPolicyDisabled(policy) {
+				steps = append(steps, routeMutation{kind: routeMutationDisablePolicy, id: policy.policy.ID, retry: retry})
+				continue
+			}
+			steps = append(steps, routeMutation{kind: routeMutationSetPolicyTarget, id: policy.policy.ID, weightedTargets: &withdrawn, retry: retry, withdrawHTTPPolicy: true})
 		}
 	}
 	return steps

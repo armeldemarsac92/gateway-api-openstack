@@ -32,32 +32,37 @@ const (
 	responseHeaderOperationsField = "response_header_operations"
 )
 
-// PolicyHeaders preserves omission (nil) and explicit removal (empty) independently.
-type PolicyHeaders struct {
+// PolicyFilters preserves omission and explicit removal independently.
+type PolicyFilters struct {
 	Request, Response []cloud.HTTPHeaderOperation
+	URLRewrite        *RequestURLRewriteUpdate
 }
 
-func (headers PolicyHeaders) write(body map[string]any) {
-	writePolicyHeaderOperations(body, requestHeaderOperationsField, headers.Request)
-	writePolicyHeaderOperations(body, responseHeaderOperationsField, headers.Response)
+func (filters PolicyFilters) write(body map[string]any) error {
+	writePolicyHeaderOperations(body, requestHeaderOperationsField, filters.Request)
+	writePolicyHeaderOperations(body, responseHeaderOperationsField, filters.Response)
+	if filters.URLRewrite != nil {
+		return filters.URLRewrite.write(body)
+	}
+	return nil
 }
 
-type policyWithHeaders struct {
+type policyWithFilters struct {
 	update  l7policies.UpdateOptsBuilder
-	headers PolicyHeaders
+	filters PolicyFilters
 }
 
-func (opts policyWithHeaders) ToL7PolicyUpdateMap() (map[string]any, error) {
+func (opts policyWithFilters) ToL7PolicyUpdateMap() (map[string]any, error) {
 	body, err := opts.update.ToL7PolicyUpdateMap()
 	if err == nil {
-		opts.headers.write(body)
+		err = opts.filters.write(body)
 	}
 	return body, err
 }
 
-// UpdatePolicyHeaders can change the target and header operations in one update.
-func (s *Service) UpdatePolicyHeaders(ctx context.Context, id string, opts l7policies.UpdateOptsBuilder, headers PolicyHeaders) (*l7policies.L7Policy, error) {
-	return l7policies.Update(ctx, s.client, id, policyWithHeaders{update: opts, headers: headers}).Extract()
+// UpdatePolicyFilters can change the target and forwarding filters in one update.
+func (s *Service) UpdatePolicyFilters(ctx context.Context, id string, opts l7policies.UpdateOptsBuilder, filters PolicyFilters) (*l7policies.L7Policy, error) {
+	return l7policies.Update(ctx, s.client, id, policyWithFilters{update: opts, filters: filters}).Extract()
 }
 
 func writePolicyHeaderOperations(body map[string]any, field string, operations []cloud.HTTPHeaderOperation) {

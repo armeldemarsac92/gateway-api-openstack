@@ -28,7 +28,7 @@ import (
 )
 
 // compileRouteAction rejects actions that the current Amphora model cannot emit.
-func compileRouteAction(rule gatewayv1.HTTPRouteRule, requestHeaderModifier, responseHeaderModifier, requestAction bool) error {
+func compileRouteAction(rule gatewayv1.HTTPRouteRule, requestHeaderModifier, responseHeaderModifier, requestAction, requestURLRewrite bool) error {
 	if len(rule.Filters) == 0 {
 		if len(rule.BackendRefs) == 0 {
 			return compileHTTPResponse(http.StatusInternalServerError)
@@ -38,19 +38,22 @@ func compileRouteAction(rule gatewayv1.HTTPRouteRule, requestHeaderModifier, res
 	if slices.ContainsFunc(rule.Filters, func(filter gatewayv1.HTTPRouteFilter) bool {
 		return filter.Type == gatewayv1.HTTPRouteFilterRequestRedirect
 	}) {
-		if _, diagnostic := model.NormalizeRequestRedirect(rule, requestAction); diagnostic != nil {
-			kind := routeErrorUnsupported
-			if diagnostic.Reason == string(routeErrorInvalid) {
-				kind = routeErrorInvalid
-			}
-			return newRouteBuildError(kind, "%s", diagnostic.Message)
-		}
+		_, diagnostic := model.NormalizeRequestRedirect(rule, requestAction)
+		return routeActionError(diagnostic)
+	}
+	_, _, _, diagnostic := model.NormalizeHTTPRuleFilters(rule, requestHeaderModifier, responseHeaderModifier, requestURLRewrite)
+	return routeActionError(diagnostic)
+}
+
+func routeActionError(diagnostic *model.Diagnostic) error {
+	if diagnostic == nil {
 		return nil
 	}
-	if _, _, err := model.NormalizeHTTPHeaderFilters(rule.Filters, requestHeaderModifier, responseHeaderModifier); err != nil {
-		return newRouteBuildError(routeErrorUnsupported, "%s", err)
+	kind := routeErrorUnsupported
+	if diagnostic.Reason == string(routeErrorInvalid) {
+		kind = routeErrorInvalid
 	}
-	return nil
+	return newRouteBuildError(kind, "%s", diagnostic.Message)
 }
 
 // lowerRequestRedirect resolves the destination as seen by the selected listener.

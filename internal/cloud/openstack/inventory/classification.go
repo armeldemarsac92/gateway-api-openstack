@@ -174,6 +174,16 @@ func classifyAuditCandidate(
 	}
 	if candidate.resourceType == auditTypeL7Policy {
 		_, _, _, _, redirect := openstackidentity.ParseHTTPRedirectRole(role)
+		if candidate.urlRewritePresent || slices.Contains(candidate.tags, openstackidentity.RequestURLRewritePolicyTag) {
+			if redirect || candidate.policyAction != string(l7policies.ActionRedirectToPool) && candidate.policyAction != string(octavia.ActionWeightedTargets) {
+				return auditFinding(finding, audit.DispositionOwnershipConflict, auditReasonParentMismatch,
+					"Request URL rewrite policy requires an owned forwarding action")
+			}
+			if !candidate.policyInventoryOK || !candidate.urlRewriteValid {
+				return auditFinding(finding, audit.DispositionUnresolved, auditReasonUnprovenPolicyTarget,
+					"Request URL rewrite policy does not report a complete rewrite")
+			}
+		}
 		switch {
 		case candidate.policyAction == string(octavia.ActionRedirectRequest):
 			if !redirect || candidate.redirectPoolID != "" || candidate.extendedPolicy() {
