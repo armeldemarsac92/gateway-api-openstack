@@ -579,18 +579,20 @@ func TestHTTPRouteParentRefSelectorsMustMatchTheSameListener(t *testing.T) {
 	}
 }
 
-func TestHTTPRouteResolvesBackendReferencesWhenNamespaceAttachmentIsDenied(t *testing.T) {
+func TestHTTPRouteResolvesBackendReferencesWhenAttachmentIsDenied(t *testing.T) {
 	for _, test := range []struct {
 		name     string
 		port     int32
 		remote   bool
 		grant    bool
 		disjoint bool
+		tlsOnly  bool
 		group    gatewayv1.Group
 		kind     gatewayv1.Kind
 		resolved metav1.ConditionStatus
 		reason   gatewayv1.RouteConditionReason
 	}{
+		{name: "TLS-only listener", port: 8080, tlsOnly: true, resolved: metav1.ConditionTrue, reason: gatewayv1.RouteReasonResolvedRefs},
 		{name: "ClusterIP Service", port: 8080, resolved: metav1.ConditionTrue, reason: gatewayv1.RouteReasonResolvedRefs},
 		{name: "disjoint hostname", port: 8080, disjoint: true, resolved: metav1.ConditionTrue, reason: gatewayv1.RouteReasonResolvedRefs},
 		{name: "missing Service", resolved: metav1.ConditionFalse, reason: gatewayv1.RouteReasonBackendNotFound},
@@ -604,6 +606,14 @@ func TestHTTPRouteResolvesBackendReferencesWhenNamespaceAttachmentIsDenied(t *te
 			ctx := t.Context()
 			cfg := testConfig()
 			class, gateway := providerRouteParentObjects(cfg)
+			if test.tlsOnly {
+				gateway.Spec.Listeners = []gatewayv1.Listener{{
+					Name: "tls", Protocol: gatewayv1.TLSProtocolType, Port: 443,
+					TLS:           &gatewayv1.ListenerTLSConfig{Mode: ptr.To(gatewayv1.TLSModePassthrough)},
+					AllowedRoutes: &gatewayv1.AllowedRoutes{Kinds: []gatewayv1.RouteGroupKind{{Kind: "TLSRoute"}}},
+				}}
+				cfg.TLSSNIPassthrough = true
+			}
 			parent := gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name), Namespace: ptr.To(gatewayv1.Namespace(gateway.Namespace))}
 			route := mapperTestHTTPRoute("tenant", "api", parent, "backend")
 			route.UID, route.Generation = "route-uid", 1

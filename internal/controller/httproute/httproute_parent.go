@@ -155,10 +155,12 @@ func routeParentCandidates(route *gatewayv1.HTTPRoute, parent managedRouteParent
 	if !slices.ContainsFunc(parent.gateway.Spec.Listeners, selects) {
 		return nil, newRouteBuildError(routeErrorNoMatchingParent, "parentRef does not select a Gateway listener")
 	}
-	if len(http) == 0 {
+	kind := model.HTTPProfileRouteKind(route)
+	if len(http) == 0 && slices.ContainsFunc(parent.gateway.Spec.Listeners, func(listener gatewayv1.Listener) bool {
+		return selects(listener) && (listener.Protocol == gatewayv1.HTTPProtocolType || listener.Protocol == gatewayv1.HTTPSProtocolType)
+	}) {
 		return nil, newRouteBuildError(routeErrorUnsupported, "parent Gateway does not have a supported HTTP listener configuration")
 	}
-	kind := model.HTTPProfileRouteKind(route)
 	var candidates []*gatewayv1.Listener
 	for _, listener := range http {
 		if !selects(*listener) {
@@ -167,7 +169,10 @@ func routeParentCandidates(route *gatewayv1.HTTPRoute, parent managedRouteParent
 		if kind == model.GRPCRouteKind && listener.Protocol != gatewayv1.HTTPProtocolType {
 			continue
 		}
-		if (listener.Protocol != gatewayv1.HTTPProtocolType && listener.Protocol != gatewayv1.HTTPSProtocolType) || (listener.Protocol == gatewayv1.HTTPProtocolType && listener.TLS != nil) {
+		if listener.Protocol != gatewayv1.HTTPProtocolType && listener.Protocol != gatewayv1.HTTPSProtocolType {
+			continue
+		}
+		if listener.Protocol == gatewayv1.HTTPProtocolType && listener.TLS != nil {
 			return nil, newRouteBuildError(routeErrorUnsupported, "parent listener does not support HTTPRoute")
 		}
 		if listener.AllowedRoutes != nil && len(listener.AllowedRoutes.Kinds) != 0 &&
