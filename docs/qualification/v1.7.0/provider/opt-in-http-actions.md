@@ -27,6 +27,19 @@ Three selected original v1.7.0 cases each passed on Standard and Experimental wi
 
 Each channel had its own Kubernetes API server and published release bundle. The upstream case code, manifest application and HTTP assertions were unchanged. A scoped base supplied the original HTTP Gateway and four Services. Seven independent echo-basic processes ran in separate network namespaces, including two replicas with the original `web-backend` identity. The envtest API held Pod readiness records based on successful direct probes and EndpointSlices pointing to those peers. These results cover the selected cases with the opt-in provider. The [earlier stock observations](http-attachments.md), [full local profile attempts](../complete-local-profiles.md) and [deployed Hibiscus profile ledger](../live-runs.md) retain their own results.
 
+## Invalid backend references
+
+Four more original v1.7.0 cases passed on both channels with controller `577264d263dec1c8428efb487caaa82f549d56a8` and the opt-in Amphora response actions. Every route reported `Accepted=True`. Its `ResolvedRefs` condition identified the invalid reference. [Standard observations](http-invalid-backend-evidence/standard.json) · [Experimental observations](http-invalid-backend-evidence/experimental.json)
+
+| Registered case | ResolvedRefs reason | Traffic through the Gateway | Subtests per channel |
+|---|---|---|---:|
+| `HTTPRouteInvalidBackendRefUnknownKind` | `InvalidKind` | HTTP 500 | 2/2 |
+| `HTTPRouteInvalidNonExistentBackendRef` | `BackendNotFound` | HTTP 500 | 2/2 |
+| `HTTPRouteInvalidReferenceGrant` | `RefNotPermitted` | HTTP 500 | 2/2 |
+| `HTTPRoutePartiallyInvalidViaInvalidReferenceGrant` | `RefNotPermitted` | The denied path `/v2` returned 500. The allowed path `/` returned 200 from `gateway-conformance-app-backend/app-backend-v1`. | 3/3 |
+
+The fixture used the released controller binary with each channel’s RBAC, the Kubernetes API server and etcd, Octavia’s public API, the Amphora renderer and HAProxy. Eleven upstream echo processes answered direct probes. The fixture recorded their readiness and addresses in the API server as Pods and EndpointSlices. Keystone, Neutron and the worker lifecycle were simulated. The archived lifecycle below separately exercises live grant removal, restoration and weighted traffic.
+
 ## Settled ReferenceGrant lifecycle
 
 The same HTTPRoute keeps its UID, generation, parent and 3:1 weights across grant removal and restoration. The HAProxy samples contain 1,024 requests from fresh connections and 1,024 requests over one keep-alive connection in each phase and channel. Each value below is the count for the one-quarter target, shown as fresh / keep-alive.
