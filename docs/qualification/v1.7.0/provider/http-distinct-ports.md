@@ -24,6 +24,23 @@ The stock probe supplies local VIP networking, Amphora placement and agent respo
 
 Both envtest runs used Kubernetes 1.36.2 with the channel's v1.7.0 CRDs, release admission objects, scoped Namespace and Service prerequisites, and a recording OpenStack provider. The upstream case body, manifest and deadlines were unchanged. It checks route attachment counts selected by section on a Gateway with two physical ports. The full `GatewayWithAttachedRoutes` case has a recorded failure on both channels on the preceding revision because the HTTPS listener omitted HTTPRoute from its supported kinds. [Upstream case source](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/gateway-with-attached-routes.go) · [Status receipts](http-port-results.json) · [Earlier attached-route results](http-disjoint-sections.md#original-gateway-api-cases)
 
+## Adding and removing listeners
+
+On controller `0d89da1a8b42d331d130ab11e86903850de7b685`, an HTTPRoute attached to a Gateway by name follows all eligible HTTP and HTTPS listeners. The original v1.7.0 `GatewayModifyListeners` case passed both subtests on Standard and Experimental in separate local kind clusters. The test checks Kubernetes conditions and route attachment after adding or removing a listener. With the earlier `1206fc60da9d` image, adding a listener failed and removal passed on each channel. [Upstream case](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/gateway-modify-listeners.go) · [Earlier Standard receipt](gateway-modify-listeners-baseline/standard/results.json) · [Earlier Experimental receipt](gateway-modify-listeners-baseline/experimental/results.json)
+
+Separate traffic probes opened fresh connections during four transitions. Each successful sample reached an echo Pod with the expected path. The HTTPS probes also checked the serving certificate.
+
+| Transition | Port under continuous probe | Standard successful / total | Experimental successful / total |
+|---|---|---|---|
+| Add HTTP 80 to a Gateway serving HTTPS 443 | HTTPS 443 | 33/33 | 39/39 |
+| Remove HTTPS 443 from a Gateway also serving HTTP 80 | HTTP 80 | 32/32 | 38/38 |
+| Change the HTTPS listener to an invalid certificate reference | HTTP 80 | 9/9 | 10/10 |
+| Restore the HTTPS certificate reference | HTTP 80 | 10/10 | 11/11 |
+
+The added port served the route. Removing port 443 deleted its Octavia listener and closed the port. An invalid certificate disabled the 443 listener and connections were refused. Restoring the reference reopened 443 with the expected certificate. The VIP, load balancer and surviving listener kept their IDs through each transition. The runner used the local Octavia 19.0.1.dev38 API, Amphora L7 worker, Barbican and HAProxy. Identity, networking, placement and agent transport came from the fixture. Region-level continuity on deployed Hibiscus remains unverified.
+
+The first Standard wire run encountered 36 refused HTTPS connections during the add transition. The fixture used a 121-byte pathname for the HAProxy UNIX socket probe. The Experimental wire run was stopped when the same pathname issue was identified. The counts above come from the rerun with a shorter fixture path and the same controller image. The bundle includes both original reports, wire and inventory receipts, build records, the first-attempt record and replay inputs. [Download the evidence and replay](<https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-0d89da1a8b42d331d130ab11e86903850de7b685/gateway-modify-listeners-v1.7.0-0d89da1a8b42.tar.gz>)
+
 ## Rollback
 
 A two-version local check reloaded the current controller's stored Kubernetes objects into the preceding same-port controller at `d6278819244862c6dca7654ccc779f60622e62c9`. The earlier controller reconciled an unenrolled singleton through its recorded NodePort. It rejected both a two-port Gateway and an enrolled Gateway reduced to a single port. In each enrolled case, the Gateway reported invalid conditions and cleared its status address, route reconciliation reported a binding finalizer mismatch and the recording provider received zero calls. Separately the current controller requested cleanup and finalized the enrolled route and Gateway against the recording provider. [Compatibility and cleanup receipts](http-port-results.json)

@@ -1,11 +1,11 @@
 # Reproduce the Hibiscus development image
 
-The ordinary and no-cache linux/amd64 builds produced the same OCI manifest. The archived executable passed all 17 assertions of the original HTTPRouteCORS case on both Standard and Experimental. [Build record](image.json) · [CORS results](provider/http-cors.md)
+The ordinary and no-cache linux/amd64 builds produced the same OCI manifest. The archived executable passed both original GatewayModifyListeners subtests on Standard and Experimental. Separate traffic probes checked the serving ports during listener and certificate changes. [Build record](image.json) · [Listener results](provider/http-distinct-ports.md#adding-and-removing-listeners)
 
 On a linux/amd64 host, use a separate checkout of the recorded revision. The Dockerfile pins the Go 1.27.4 builder and distroless base by digest. Podman uses a fixed timestamp, and the build writes the full commit into the binary and the OCI revision label. The verification command exports gzip-compressed layers.
 
 ```sh
-revision=092e5207eb24b895014553c12a29e2f8281ed87a
+revision=0d89da1a8b42d331d130ab11e86903850de7b685
 test "$(git rev-parse HEAD)" = "$revision"
 image="localhost/hibiscus-controller:$revision"
 make container-build CONTAINER_TOOL=podman VERSION="$revision" IMAGE="$image"
