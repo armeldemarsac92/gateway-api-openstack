@@ -235,12 +235,15 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 			return result, err
 		}
 	}
-	plan, _ = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, exactHTTPHeaderPredicate)
-	plan, _ = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, exactHTTPQueryParamPredicate)
-	plan, _ = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, httpMethodPredicate)
-	plan, _ = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, responseHeaderModifierPolicy)
-	if p.grpcContentType {
-		plan, _ = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, grpcContentTypePredicate)
+	plan = p.protectRequestRedirectTraffic(ctx, desired, actual, plan, &result)
+	if !isHTTPListenerWithdrawal(plan) {
+		plan, _ = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, exactHTTPHeaderPredicate)
+		plan, _ = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, exactHTTPQueryParamPredicate)
+		plan, _ = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, httpMethodPredicate)
+		plan, _ = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, responseHeaderModifierPolicy)
+		if p.grpcContentType {
+			plan, _ = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, grpcContentTypePredicate)
+		}
 	}
 	if spec.Gateway.Disposition == cloud.GraphEnsure && (len(plan) == 0 || plan[0].kind != graphClearListenerDefaultPool && !plan[0].withdrawHTTPPolicy && !plan[0].isRestrictiveSNI()) {
 		if err := p.validateGraphTrafficSecurity(ctx, desired); err != nil {
@@ -321,9 +324,10 @@ func (p *Provider) reconcileHTTPWithdrawalWithoutAddress(ctx context.Context, de
 		return result, err
 	}
 	result.Gateway.Outcome = p.progressingOutcome("Waiting to observe the Gateway Floating IP inventory")
+	plan = p.protectRequestRedirectTraffic(ctx, desired, actual, plan, &result)
 	var grpcWithdrawal []graphMutation
 	var confirmedClosed bool
-	if p.grpcContentType {
+	if p.grpcContentType && !isHTTPListenerWithdrawal(plan) {
 		// An empty plan allows only confirmed capability withdrawal to
 		// request a listener closure while the address read is failing.
 		grpcWithdrawal, confirmedClosed = p.protectHTTPPredicateTraffic(ctx, desired, actual, nil, &result, grpcContentTypePredicate)
@@ -357,6 +361,10 @@ func (p *Provider) reconcileHTTPWithdrawalWithoutAddress(ctx context.Context, de
 	}
 	p.recordGraphMutationOutcome(&result, step)
 	return result, nil
+}
+
+func isHTTPListenerWithdrawal(plan []graphMutation) bool {
+	return len(plan) == 1 && plan[0].kind == graphDisableListener && plan[0].withdrawHTTPPolicy
 }
 
 func canWithdrawHTTPWithoutAddress(step graphMutation, desired desiredGatewayGraph, actual observedGatewayGraph) bool {

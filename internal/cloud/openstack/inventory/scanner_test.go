@@ -678,6 +678,38 @@ func TestScanDistinguishesMissingRedirectPoolRelationship(t *testing.T) {
 	}
 }
 
+func TestScanRequestRedirectRequiresOwnedPolicyAndReportedDestination(t *testing.T) {
+	identity := safetyTestIdentity(t)
+	match := openstackidentity.HTTPMatchKey("example.test", cloud.PathMatchPrefix, "/app", "")
+	cell := openstackidentity.HTTPRedirectKey(match, "example.test", "prefix")
+	role := openstackidentity.HTTPRedirectRole(rolePolicyPrefix, match, cell, "")
+	for _, scenario := range []struct {
+		name, role string
+		request    map[string]any
+		want       audit.Disposition
+	}{
+		{"complete", role, map[string]any{"scheme": "http", "port": 80}, audit.DispositionMatched},
+		{"missing destination", role, nil, audit.DispositionUnresolved},
+		{"foreign role", rolePolicyPrefix, map[string]any{"scheme": "http", "port": 80}, audit.DispositionOwnershipConflict},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			fixture := newAuditScanFixture(t, identity)
+			policy := fixture.policies[0]
+			policy["action"], policy["tags"] = "REDIRECT_REQUEST", safetyRouteTags(t, identity, scenario.role)
+			policy["redirect_pool_id"], policy["redirect_http_code"], policy["admin_state_up"] = nil, 308, true
+			policy["redirect_request"] = scenario.request
+			fixture.rules = nil
+			inventory, err := fixture.provider().Scan(t.Context(), auditTestScope(identity.Value()), auditTestRecords(identity.Value()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := auditFindingByID(t, inventory.Resources, "policy-1"); got.Disposition != scenario.want {
+				t.Fatalf("request redirect audit = %s (%s), want %s", got.Disposition, got.Reason, scenario.want)
+			}
+		})
+	}
+}
+
 func TestScanMatchesPoolFreeFixedPolicyWithExplicitTarget(t *testing.T) {
 	identity := safetyTestIdentity(t)
 	match := openstackidentity.HTTPMatchKey("", cloud.PathMatchExact, "/omitted", "")

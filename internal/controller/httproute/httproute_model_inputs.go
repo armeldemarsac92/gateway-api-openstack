@@ -260,6 +260,7 @@ func (r *Reconciler) collectRouteModelInputsForSets(ctx context.Context, reader 
 	input.ListenerSetSections = sets
 	input.RequestHeaderModifier = r.Config.RequestHeaderModifier
 	input.ResponseHeaderModifier = r.Config.ResponseHeaderModifier
+	input.HTTPRequestRedirect = r.Config.HTTPRequestRedirect
 	input.BackendH2C = r.Config.BackendH2C
 	input.EnableXBackend = r.Config.XBackendEnabled()
 	if input.EnableXBackend {

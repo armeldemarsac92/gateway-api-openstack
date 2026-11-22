@@ -44,11 +44,11 @@ func TestApostrophePathRules(t *testing.T) {
 		fallsThru []string
 	}{
 		{
-			name: "exact", path: "/o'clock+books", pattern: `^/o\x27clock\+books$`,
+			name: "exact", path: "/o'clock+books", pattern: `^/o"'"clock\+books$`,
 			matches: []string{"/o'clock+books"}, fallsThru: []string{"/o'clock+books/", "/o'clockbooks", "/o%27clock+books"},
 		},
 		{
-			name: "prefix", path: "/o'clock/", isPrefix: true, pattern: `^/o\x27clock($|/)`,
+			name: "prefix", path: "/o'clock/", isPrefix: true, pattern: `^/o"'"clock($|/)`,
 			matches: []string{"/o'clock", "/o'clock/", "/o'clock/noon"}, fallsThru: []string{"/o'clockish", "/O'clock"},
 		},
 	} {
@@ -57,7 +57,7 @@ func TestApostrophePathRules(t *testing.T) {
 			if err != nil || rules != (PathRules{Regex: tc.pattern}) {
 				t.Fatalf("path rules = %+v, %v, want only regex %q", rules, err, tc.pattern)
 			}
-			pattern := regexp.MustCompile(rules.Regex)
+			pattern := regexp.MustCompile(strings.ReplaceAll(rules.Regex, `"'"`, "'"))
 			for _, path := range tc.matches {
 				if !pattern.MatchString(path) {
 					t.Errorf("pattern does not match %q", path)
@@ -73,7 +73,7 @@ func TestApostrophePathRules(t *testing.T) {
 }
 
 func TestApostrophePathRuleValueLength(t *testing.T) {
-	path := "/o'clock/" + strings.Repeat("a", 237)
+	path := "/o'clock/" + strings.Repeat("a", 238)
 	if rules, err := PathRuleValues(path, true); err != nil || len(rules.Regex) != 255 {
 		t.Fatalf("path rules = %+v, %v, want a 255-character regex", rules, err)
 	}

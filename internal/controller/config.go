@@ -42,6 +42,9 @@ type Config struct {
 	HTTPHeaderExact bool
 	// HTTPQueryParamExact enables exact HTTPRoute query parameter matching on capable Amphora providers.
 	HTTPQueryParamExact bool
+
+	// HTTPRequestRedirect enables request-derived Octavia HTTP redirects.
+	HTTPRequestRedirect bool
 	// HTTPMethodMatch enables exact HTTPRoute method matching on capable Amphora providers.
 	HTTPMethodMatch bool
 	// FixedHTTPResponses enables the local Amphora fixed-response extension.
