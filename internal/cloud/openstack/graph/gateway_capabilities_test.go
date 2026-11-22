@@ -1158,3 +1158,242 @@ func TestResponseHeaderPolicyActivationAndWithdrawalAcrossRestart(t *testing.T) 
 		t.Fatalf("a verified clear did not converge: %+v, %v", plan, err)
 	}
 }
+
+// Exercise controller restarts against the same Octavia inventory.
+func TestRegionalGRPCContentTypePolicyTransition(t *testing.T) {
+	type record = map[string]any
+	identity := safetyTestIdentity(t)
+	spec := completeGraphSpec(identity)
+	spec.Gateway.Spec.ScopedListeners = []cloud.ScopedListener{{Name: "grpc", Port: 80}, {Name: "http", Port: 8080}}
+	route := &spec.Routes[0].Spec
+	route.ScopedListenerPorts = []int{80}
+	match := cloud.HTTPPathMatch{Hostname: route.Hostname, PathType: cloud.PathMatchExact, PathValue: "/example.Echo/Echo",
+		Headers: []cloud.HTTPHeaderMatch{{Name: "x-version", Value: "v2"}}}
+	route.Hostname, route.PathType, route.PathValue = "", "", ""
+	route.GRPC = true
+	route.HTTPBackends = []cloud.HTTPBackend{{Namespace: "application", Name: "echo", Port: 8080,
+		Matches: []cloud.HTTPPathMatch{match}, Members: route.Members, BackendH2C: true}}
+	route.Members = nil
+	cfg := ProviderConfig{BackendH2C: true, FixedHTTPResponses: true, HTTPHeaderExact: true}
+	initial := NewProvider(ServiceClients{ProjectID: "project-a"}, cfg)
+	desired, err := initial.buildDesiredGatewayGraph(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	part := desired.routes[0].httpParts[0]
+	wanted := part.policies[0]
+	policyRefs, rules := []record{}, []record{}
+	var mediaRule record
+	for _, predicate := range rulesFor(wanted, "") {
+		rule := record{"id": string(predicate.ruleType), "project_id": "project-a", "provisioning_status": "ACTIVE", "admin_state_up": true,
+			"type": predicate.ruleType, "compare_type": predicate.compareType, "key": predicate.key, "value": predicate.value,
+			"invert": predicate.invert, "tags": safetyRouteTags(t, identity, predicate.role)}
+		if predicate.ruleType == l7policies.TypeHeader {
+			rule["id"] = "media-rule"
+			mediaRule = rule
+		}
+		policyRefs = append(policyRefs, record{"id": rule["id"]})
+		rules = append(rules, rule)
+	}
+	if len(rules) != 4 || mediaRule == nil || mediaRule["key"] != "content-type" {
+		t.Fatalf("portable policy must include path, hostname, metadata and Content-Type: %v", rules)
+	}
+	lb := gatewayTransitionLoadBalancer(safetyGatewayTags(t, identity, roleLoadBalancer), "ACTIVE")
+	grpcListeners := []record{{"id": "listener-1"}}
+	lb["listeners"], lb["pools"] = []record{{"id": "listener-1"}, {"id": "http-listener"}}, []record{{"id": "pool-1"}}
+	listener := record{"id": "listener-1", "project_id": "project-a", "provisioning_status": "ACTIVE", "admin_state_up": true,
+		"protocol": "HTTP", "protocol_port": 80, "default_pool_id": nil, "default_http_response": record{"status_code": 404},
+		"loadbalancers": []record{{"id": lb["id"]}}, "l7policies": []record{{"id": "policy"}}, "tags": safetyGatewayTags(t, identity, roleListener)}
+	httpListener := record{"id": "http-listener", "project_id": "project-a", "provisioning_status": "ACTIVE", "admin_state_up": true,
+		"protocol": "HTTP", "protocol_port": 8080, "default_pool_id": nil, "default_http_response": record{"status_code": 404},
+		"loadbalancers": listener["loadbalancers"], "l7policies": []record{},
+		"tags": append(safetyGatewayTags(t, identity, roleListener), scopedPortTag(cloud.ListenerProtocolHTTP, 8080))}
+	pool := record{"id": "pool-1", "project_id": "project-a", "provisioning_status": "ACTIVE", "admin_state_up": true,
+		"protocol": "HTTP", "backend_h2c": true, "lb_algorithm": "ROUND_ROBIN", "healthmonitor_id": "monitor",
+		"loadbalancers": listener["loadbalancers"], "listeners": grpcListeners, "members": []record{{"id": "member"}},
+		"tags": safetyRouteTags(t, identity, part.httpRole(rolePool, ""))}
+	member := record{"id": "member", "project_id": "project-a", "provisioning_status": "ACTIVE", "admin_state_up": true,
+		"address": "10.0.0.10", "protocol_port": 30080, "subnet_id": "member-subnet", "tags": safetyRouteTags(t, identity, part.httpRole(roleMember, ""))}
+	monitor := record{"id": "monitor", "project_id": "project-a", "provisioning_status": "ACTIVE", "admin_state_up": true,
+		"type": "TCP", "delay": 10, "timeout": 5, "max_retries": 3, "max_retries_down": 3, "pools": lb["pools"],
+		"tags": safetyRouteTags(t, identity, part.httpRole(roleMonitor, ""))}
+	policy := record{"id": "policy", "project_id": "project-a", "listener_id": "listener-1", "action": "REDIRECT_TO_POOL",
+		"redirect_pool_id": "pool-1", "position": 1, "admin_state_up": true, "provisioning_status": "ACTIVE",
+		"rules": policyRefs, "tags": safetyRouteTags(t, identity, wanted.role)}
+	const capabilityPath = "/lbaas/providers/amphora/gateway_capabilities"
+	const policyPath = "/lbaas/l7policies/policy"
+	const rulesPath = policyPath + "/rules"
+	const rulePath = rulesPath + "/media-rule"
+	const listenerPath = "/lbaas/listeners/listener-1"
+	reads := map[string]record{
+		"/lbaas/loadbalancers": {"loadbalancers": []record{lb}}, "/lbaas/loadbalancers/load-balancer-1": {"loadbalancer": lb},
+		"/lbaas/listeners": {"listeners": []record{listener, httpListener}}, "/lbaas/pools": {"pools": []record{pool}},
+		"/lbaas/healthmonitors": {"healthmonitors": []record{monitor}}, "/lbaas/pools/pool-1/members": {"members": []record{member}},
+	}
+	var advertised bool
+	present := true
+	var writes []string
+	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		path := request.URL.Path
+		if request.Method == http.MethodGet {
+			if path == rulesPath {
+				safetyWriteJSON(t, w, record{"rules": rules})
+				return
+			}
+			if path == capabilityPath {
+				capabilities := []string{octavia.GatewayCapabilityFixedHTTPResponses, octavia.GatewayCapabilityHTTPHeaderExact, octavia.GatewayCapabilityBackendH2C}
+				if advertised {
+					capabilities = append(capabilities, octavia.GatewayCapabilityGRPCContentType)
+				}
+				safetyWriteJSON(t, w, record{"gateway_capabilities": capabilities})
+				return
+			}
+			if path == "/lbaas/l7policies" {
+				policies := []record{}
+				if present && request.URL.Query().Get("listener_id") == "listener-1" {
+					policies = append(policies, policy)
+				}
+				safetyWriteJSON(t, w, record{"l7policies": policies})
+				return
+			}
+			if body, ok := reads[path]; ok {
+				safetyWriteJSON(t, w, body)
+				return
+			}
+		}
+		if request.Method == http.MethodDelete && path == rulePath {
+			if policy["admin_state_up"] != false || policy["provisioning_status"] != "ACTIVE" || mediaRule["type"] != "GRPC_CONTENT_TYPE" {
+				t.Fatalf("unexpected native rule deletion with policy %v and rule %v", policy, mediaRule)
+			}
+			writes = append(writes, path)
+			removeMedia := func(r record) bool { return r["id"] == mediaRule["id"] }
+			policyRefs = slices.DeleteFunc(policyRefs, removeMedia)
+			rules = slices.DeleteFunc(rules, removeMedia)
+			policy["rules"] = policyRefs
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if request.Method != http.MethodPut && (path != rulesPath || request.Method != http.MethodPost) {
+			t.Fatalf("unexpected %s %s", request.Method, path)
+		}
+		writes = append(writes, path)
+		var patch map[string]record
+		if err := json.NewDecoder(request.Body).Decode(&patch); err != nil {
+			t.Fatal(err)
+		}
+		var resource record
+		var kind string
+		switch path {
+		case policyPath, listenerPath:
+			resource, kind = policy, "l7policy"
+			if path == listenerPath {
+				resource, kind = listener, "listener"
+			}
+			if len(patch[kind]) != 1 || patch[kind]["admin_state_up"] == nil {
+				t.Fatalf("expected only an administrative state change on %s: %v", kind, patch)
+			}
+		case rulePath:
+			resource, kind = mediaRule, "rule"
+			rule := patch[kind]
+			if !advertised {
+				w.WriteHeader(http.StatusNotImplemented)
+				return
+			}
+			if policy["admin_state_up"] != false || rule["invert"] != false || rule["admin_state_up"] != true || rule["tags"] != nil {
+				t.Fatalf("unexpected Content-Type update: %v with policy state %v", patch, policy["admin_state_up"])
+			}
+			if _, keyed := rule["key"]; rule["type"] != "GRPC_CONTENT_TYPE" || rule["compare_type"] != "EQUAL_TO" ||
+				rule["value"] != "application/grpc" || keyed {
+				t.Fatalf("invalid native predicate: %v", rule)
+			}
+			delete(resource, "key")
+		case rulesPath:
+			rule := patch["rule"]
+			if len(rules) != 3 || policy["admin_state_up"] != false || policy["provisioning_status"] != "ACTIVE" ||
+				rule["type"] != "HEADER" || rule["compare_type"] != "REGEX" || rule["key"] != "content-type" ||
+				rule["value"] != portableGRPCContentTypePattern || rule["admin_state_up"] != true || rule["invert"] == true {
+				t.Fatalf("invalid portable rule creation: %v, policy: %v", rule, policy)
+			}
+			rule["id"], rule["project_id"], rule["provisioning_status"] = "portable-media-rule", "project-a", "ACTIVE"
+			rule["invert"] = false
+			rules = append(rules, rule)
+			policyRefs = append(policyRefs, record{"id": rule["id"]})
+			policy["rules"] = policyRefs
+			w.WriteHeader(http.StatusCreated)
+			safetyWriteJSON(t, w, record{"rule": rule})
+			return
+		default:
+			t.Fatalf("unexpected mutation %s", path)
+		}
+		for key, value := range patch[kind] {
+			resource[key] = value
+		}
+		if path == policyPath {
+			pool["listeners"] = []record{}
+			if policy["admin_state_up"] == true {
+				pool["listeners"] = grpcListeners
+			}
+			policy["provisioning_status"] = "ACTIVE"
+		}
+		safetyWriteJSON(t, w, record{kind: resource})
+	}))
+
+	reconcile := func(write string) cloud.GatewayGraphResult {
+		t.Helper()
+		writes = nil
+		p := newTestProvider(t, ServiceClients{LoadBalancer: client, ProjectID: "project-a", Region: "regional-endpoint"}, cfg)
+		result, err := p.ReconcileGatewayGraph(t.Context(), spec)
+		var want []string
+		if write != "" {
+			want = []string{write}
+		}
+		if err != nil || !slices.Equal(writes, want) {
+			t.Fatalf("expected mutation %q, got %v with error %v and result %+v", write, writes, err, result)
+		}
+		return result
+	}
+	if result := reconcile(""); result.Outcome.State != cloud.OutcomeReady {
+		t.Fatalf("default portable policy did not converge: %+v", result)
+	}
+	cfg.GRPCContentType = true
+	reconcile(policyPath)
+	if result := reconcile(""); policy["admin_state_up"] != false ||
+		result.Routes[0].Result.Outcome.Message != "Waiting for Octavia to advertise grpc_content_type_v1" {
+		t.Fatalf("missing native capability must leave the old policy closed and report the prerequisite: %+v", result)
+	}
+	advertised = true
+	reconcile(rulePath)
+	advertised = false
+	if result := reconcile(""); policy["admin_state_up"] != false || listener["admin_state_up"] != true ||
+		result.Outcome.State != cloud.OutcomeProgressing {
+		t.Fatalf("a staged native rule must wait for enrollment without closing the serving listener: %+v", result)
+	}
+	advertised = true
+	reconcile(policyPath)
+	if result := reconcile(""); result.Outcome.State != cloud.OutcomeReady {
+		t.Fatalf("native policy did not converge: %+v", result)
+	}
+	advertised = false
+	reconcile(listenerPath)
+	if result := reconcile(""); listener["admin_state_up"] != false || result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing ||
+		!slices.Equal(result.Gateway.ScopedListenerReadyPorts, []int{8080}) {
+		t.Fatalf("revocation must close only the affected listener after restart: %+v", result)
+	}
+	cfg.GRPCContentType = false
+	reconcile(policyPath)
+	reconcile(rulePath)
+	reconcile(rulesPath)
+	reconcile(policyPath)
+	reconcile(listenerPath)
+	if result := reconcile(""); result.Outcome.State != cloud.OutcomeReady {
+		t.Fatalf("portable rollback did not converge: %+v", result)
+	}
+
+	cfg.GRPCContentType = true
+	present = false
+	listener["l7policies"], pool["listeners"] = []record{}, []record{}
+	if result := reconcile(""); result.Routes[0].Result.Outcome.Message != "Waiting for Octavia to advertise grpc_content_type_v1" ||
+		listener["admin_state_up"] != true {
+		t.Fatalf("fresh native policy creation must wait for enrollment without closing the listener: %+v", result)
+	}
+}

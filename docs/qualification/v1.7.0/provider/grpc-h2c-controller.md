@@ -30,10 +30,11 @@ paths. gRPC clients map that response to `UNIMPLEMENTED`. A rule can select one
 method of a named gRPC service, all methods of that service, or all calls on its
 attached hostnames. Within a hostname, a matching exact method takes precedence
 over a service-wide match, then the default. Each policy requires a native
-gRPC Content-Type, such as `application/grpc` or `application/grpc+proto`,
-using an Octavia `HEADER REGEX` rule compatible with HAProxy's POSIX and PCRE
-engines. The rule matches the media type case-insensitively, including optional
-parameters and a custom `+codec` suffix. Supported codec characters are the HTTP
+gRPC Content-Type, such as `application/grpc` or `application/grpc+proto`.
+By default, the controller uses an Octavia `HEADER REGEX` rule compatible with
+HAProxy's POSIX and PCRE engines. The rule matches the media type
+case-insensitively, including optional parameters and a custom `+codec` suffix.
+Supported codec characters are the HTTP
 token characters except `#`, `&` and `'`, which the Octavia template cannot pass
 to both regex engines. The template uses HAProxy's `req.hdr` fetch, which can
 match a value within a malformed comma-separated Content-Type field. HTTP
@@ -57,6 +58,43 @@ and finalization. Its recording provider does not serve traffic.
 
 See the [two-channel image qualification](opt-in-grpc-h2c.md) for native case transcripts, post-monitor-window RPC traffic and provider readbacks.
 
+### Regional Content-Type rule
+
+Add `--octavia-grpc-content-type` to use Octavia's `GRPC_CONTENT_TYPE`
+rule for GRPCRoute policies. This option defaults to off. The existing gRPC
+backend transport, default response and metadata settings still apply. The
+native rule checks that the request has a single Content-Type field. It
+matches `application/grpc` case-insensitively, including an optional HTTP
+token after `+` and optional media type parameters. The Amphora rule accepts
+quoted parameter values containing commas and excludes gRPC-Web.
+
+Apply the Octavia database migration `4f1a36c90e8b` and upgrade the regional
+API, workers and Amphora fleet. Validate the Amphora configuration with the
+fleet's HAProxy build, then include the effective provider name in
+`[api_settings] enabled_grpc_content_type_providers` on each regional API
+replica. The controller reads `GET /lbaas/providers/{driver}/gateway_capabilities`
+on its authenticated regional endpoint before creating or activating a
+native policy and before writing a native rule. The provider on the load
+balancer must advertise `grpc_content_type_v1`.
+
+When changing modes, the controller disables the owned policy. Enabling native
+matching converts the Content-Type rule in place. Reverting to portable
+matching deletes the native rule and creates an owned header rule after
+Octavia confirms the policy is disabled. This also works after regional
+enrollment has been withdrawn. The controller restores the policy after
+observing the new rule. The path, hostname and metadata rules retain their
+IDs. With the flag enabled, an absent capability leaves the affected GRPCRoute at
+`Programmed=False` while the controller waits for Octavia to advertise
+`grpc_content_type_v1`. If Octavia explicitly withdraws the capability from
+a listener already using it, the controller closes that listener until it can
+verify the policy again. This can interrupt ordinary HTTP on the same listener.
+An inconclusive discovery response delays new native writes and keeps
+existing verified traffic serving. To revert to the portable rule, remove
+the controller flag and let the graph converge before rolling back Octavia.
+
+The regional option has local controller coverage for discovery, API
+payloads, mode changes and capability withdrawal. The native traffic
+qualification remains pending.
 
 ## Modify request metadata on a gRPC rule
 

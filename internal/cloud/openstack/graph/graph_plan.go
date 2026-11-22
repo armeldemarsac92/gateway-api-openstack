@@ -659,7 +659,7 @@ func (p *Provider) prepareNextGraphMutation(ctx context.Context, desired desired
 	}
 	recordBlocked(first, blocked)
 	blockedHTTPPolicy := blocked.capability == octavia.GatewayCapabilityHTTPHeaderExact || blocked.capability == octavia.GatewayCapabilityHTTPMethodMatch ||
-		blocked.capability == octavia.GatewayCapabilityResponseHeaderOperations
+		blocked.capability == octavia.GatewayCapabilityResponseHeaderOperations || blocked.capability == octavia.GatewayCapabilityGRPCContentType
 	result.Outcome = result.Routes[first.routeIndex].Result.Outcome
 	seen := map[poolRouteOwner]bool{{route: first.routeIndex, backend: first.backendKey}: true}
 	for _, sibling := range plan[1:] {
@@ -756,6 +756,11 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 			step.route.rule.ruleType == httpMethodRuleType {
 			required = append(required, octavia.GatewayCapabilityHTTPMethodMatch)
 		}
+		if step.route.rule.ruleType == grpcContentTypeRuleType ||
+			step.route.policy.grpcContentTypeRule == grpcContentTypeRuleType &&
+				(step.route.kind == routeMutationCreatePolicy || step.route.kind == routeMutationEnablePolicy) {
+			required = append(required, octavia.GatewayCapabilityGRPCContentType)
+		}
 	default:
 		return step, nil
 	}
@@ -813,6 +818,9 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 			} else if slices.Contains(required, octavia.GatewayCapabilityHTTPMethodMatch) &&
 				(!explicitlyMissing || missing.Capability == octavia.GatewayCapabilityHTTPMethodMatch) {
 				err = &unavailableRouteCapability{error: err, capability: octavia.GatewayCapabilityHTTPMethodMatch}
+			} else if slices.Contains(required, octavia.GatewayCapabilityGRPCContentType) &&
+				(!explicitlyMissing || missing.Capability == octavia.GatewayCapabilityGRPCContentType) {
+				err = &unavailableRouteCapability{error: err, capability: octavia.GatewayCapabilityGRPCContentType}
 			}
 			return step, err
 		}

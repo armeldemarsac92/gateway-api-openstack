@@ -45,6 +45,18 @@ var (
 		capability: octavia.GatewayCapabilityHTTPMethodMatch, role: openstackidentity.RoleRuleHTTPMethod,
 		label: "HTTP method", required: func(policy desiredPolicy) bool { return policy.method != "" },
 	}
+	grpcContentTypePredicate = protectedHTTPPredicate{
+		capability: octavia.GatewayCapabilityGRPCContentType,
+		label:      "native gRPC Content-Type",
+		required: func(policy desiredPolicy) bool {
+			return policy.grpcContentTypeRule == grpcContentTypeRuleType
+		},
+		observed: func(policy observedRoutePolicy) bool {
+			return !observedPolicyDisabled(policy) && slices.ContainsFunc(policy.rules, func(rule observedRouteRule) bool {
+				return rule.base == openstackidentity.RoleRuleGRPCContentType && rule.rule.RuleType == string(grpcContentTypeRuleType)
+			})
+		},
+	}
 	responseHeaderModifierPolicy = protectedHTTPPredicate{
 		capability: octavia.GatewayCapabilityResponseHeaderOperations,
 		label:      "response header modification",
