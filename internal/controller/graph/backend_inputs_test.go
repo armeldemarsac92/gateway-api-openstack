@@ -321,7 +321,7 @@ func TestBackendTLSUnreadableCAStillProtectsOnlyItsService(t *testing.T) {
 	reader.failures = map[string]error{"ConfigMap app/root": apierrors.NewForbidden(corev1.Resource("configmaps"), "root", errors.New("read denied"))}
 	route := backendInputRoute("r", "app", backendInputReference("protected", "", 80, 3), backendInputReference("healthy", "", 80, 1))
 	input := model.Input{Gateway: backendInputGateway(), Services: []corev1.Service{*protected, *healthy}, Routes: []gatewayv1.HTTPRoute{route}}
-	if err := CollectBackendTLSInputs(t.Context(), reader, &input); err != nil {
+	if err := CollectBackendTLSInputs(t.Context(), reader, &input, nil); err != nil {
 		t.Fatal(err)
 	}
 	denied := input.BackendTLSPolicies[model.ServicePortKey{Service: client.ObjectKeyFromObject(protected), Port: 80}].Winner
