@@ -1,0 +1,211 @@
+{
+  "controllerRevision": "6e41a107c7ce7ce2a25782386aba9f8ec542faa5",
+  "managerSHA256": "4f9751227ca7767bd33902060c9ef270166b8bdd900af7012dad67b293b3acf4",
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "octavia": {
+    "version": "19.0.1.dev14",
+    "sha256": "68ff1c266128f05ebd545283d30a033fdb3e4d95a4f4a9b65823a68e05d05a4d",
+    "filesVerified": 635
+  },
+  "octaviaLib": {
+    "version": "3.12.1.dev7",
+    "sha256": "ccbf34aa870239d6e0f48bee7d63f34398a9d7bffd0fa98ea36674f8dc343eb4",
+    "filesVerified": 24
+  },
+  "HAProxy": {
+    "version": "3.0.19-ade9c1262-octavia-strict-dns-v1",
+    "sha256": "fa8468efa26f95ed83a36afeb97b79730de285450b7a8fae94f7cf5e6d2d0824"
+  },
+  "channels": {
+    "standard": {
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "originalReceiptSHA256": "758a04d73e43b5d631fe0803a4ed9921f4455b2a3ed206e4797c5aba1c4097d6",
+      "cases": {
+        "HTTPRouteListenerHostnameMatching": {
+          "caseGoSHA256": "f03d4f5c933e2f917d15d97ab4d620c6ca6d0829ae056109296aca5931d2b5d1",
+          "manifestSHA256": "2553b340c416dd5a4bdeb1c667a30012bf7c9748e398401b1399e8e87abc0b3a",
+          "exit": 1,
+          "subtestsPassed": 0,
+          "expected": 8,
+          "requestLogCount": 0,
+          "gatewayConditions": {
+            "httproute-listener-hostname-matching": {
+              "conditions": {
+                "Accepted": "False/ListenersNotValid",
+                "Programmed": "False/Invalid"
+              },
+              "listeners": 4
+            }
+          }
+        },
+        "HTTPRouteMultipleGateways": {
+          "caseGoSHA256": "1f02cb4e8c27d7b6b0da386d51bab091ef799cb91f0c28c5dcc86edb101dc92d",
+          "manifestSHA256": "0c200242115c56571306c740cc1f787ec9f9fb7d9210d669e8e0872319bc2c1a",
+          "exit": 1,
+          "subtestsPassed": 0,
+          "expected": 6,
+          "requestLogCount": 0,
+          "routeParentConditions": {
+            "all-namespaces-dedicated-route": [
+              {
+                "gateway": "all-namespaces",
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                }
+              }
+            ],
+            "multiple-gateways-shared-route": [
+              {
+                "gateway": "same-namespace",
+                "conditions": {
+                  "Accepted": "False/UnsupportedValue",
+                  "ResolvedRefs": "Unknown/Pending",
+                  "gateway-api-openstack.github.io/Programmed": "False/Invalid"
+                }
+              },
+              {
+                "gateway": "all-namespaces",
+                "conditions": {
+                  "Accepted": "False/UnsupportedValue",
+                  "ResolvedRefs": "Unknown/Pending",
+                  "gateway-api-openstack.github.io/Programmed": "False/Invalid"
+                }
+              }
+            ],
+            "same-namespace-dedicated-route": [
+              {
+                "gateway": "same-namespace",
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                }
+              }
+            ]
+          }
+        },
+        "HTTPRouteHostnameIntersection": {
+          "caseGoSHA256": "edc64db8bf55734d1a553b0b109a43a03aeeeb527dabe460c177ce012b843944",
+          "manifestSHA256": "92ece7d8caf7bd8e13ea869f38629b3dadff3d975613e0f0a425c962ee3664fd",
+          "exit": 1,
+          "subtestsPassed": 0,
+          "expected": 37,
+          "requestLogCount": 0,
+          "gatewayConditions": {
+            "httproute-hostname-intersection": {
+              "conditions": {
+                "Accepted": "False/ListenersNotValid",
+                "Programmed": "False/Invalid"
+              },
+              "listeners": 3
+            },
+            "httproute-hostname-intersection-all": {
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "Programmed": "True/Programmed"
+              },
+              "listeners": 1
+            }
+          }
+        }
+      }
+    },
+    "experimental": {
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "originalReceiptSHA256": "0cb03841c5049e4b668f4560efa22d7b84091e41f985aafeba9b73e23d74e0b0",
+      "cases": {
+        "HTTPRouteListenerHostnameMatching": {
+          "caseGoSHA256": "f03d4f5c933e2f917d15d97ab4d620c6ca6d0829ae056109296aca5931d2b5d1",
+          "manifestSHA256": "2553b340c416dd5a4bdeb1c667a30012bf7c9748e398401b1399e8e87abc0b3a",
+          "exit": 1,
+          "subtestsPassed": 0,
+          "expected": 8,
+          "requestLogCount": 0,
+          "gatewayConditions": {
+            "httproute-listener-hostname-matching": {
+              "conditions": {
+                "Accepted": "False/ListenersNotValid",
+                "Programmed": "False/Invalid"
+              },
+              "listeners": 4
+            }
+          }
+        },
+        "HTTPRouteMultipleGateways": {
+          "caseGoSHA256": "1f02cb4e8c27d7b6b0da386d51bab091ef799cb91f0c28c5dcc86edb101dc92d",
+          "manifestSHA256": "0c200242115c56571306c740cc1f787ec9f9fb7d9210d669e8e0872319bc2c1a",
+          "exit": 1,
+          "subtestsPassed": 0,
+          "expected": 6,
+          "requestLogCount": 0,
+          "routeParentConditions": {
+            "all-namespaces-dedicated-route": [
+              {
+                "gateway": "all-namespaces",
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                }
+              }
+            ],
+            "multiple-gateways-shared-route": [
+              {
+                "gateway": "same-namespace",
+                "conditions": {
+                  "Accepted": "False/UnsupportedValue",
+                  "ResolvedRefs": "Unknown/Pending",
+                  "gateway-api-openstack.github.io/Programmed": "False/Invalid"
+                }
+              },
+              {
+                "gateway": "all-namespaces",
+                "conditions": {
+                  "Accepted": "False/UnsupportedValue",
+                  "ResolvedRefs": "Unknown/Pending",
+                  "gateway-api-openstack.github.io/Programmed": "False/Invalid"
+                }
+              }
+            ],
+            "same-namespace-dedicated-route": [
+              {
+                "gateway": "same-namespace",
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                }
+              }
+            ]
+          }
+        },
+        "HTTPRouteHostnameIntersection": {
+          "caseGoSHA256": "edc64db8bf55734d1a553b0b109a43a03aeeeb527dabe460c177ce012b843944",
+          "manifestSHA256": "92ece7d8caf7bd8e13ea869f38629b3dadff3d975613e0f0a425c962ee3664fd",
+          "exit": 1,
+          "subtestsPassed": 0,
+          "expected": 37,
+          "requestLogCount": 0,
+          "gatewayConditions": {
+            "httproute-hostname-intersection": {
+              "conditions": {
+                "Accepted": "False/ListenersNotValid",
+                "Programmed": "False/Invalid"
+              },
+              "listeners": 3
+            },
+            "httproute-hostname-intersection-all": {
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "Programmed": "True/Programmed"
+              },
+              "listeners": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}
