@@ -244,7 +244,10 @@ func planFixedResponseDuringMemberWithdrawal(desired desiredRoute, observed obse
 				if policy.requestHeaderOperations != nil {
 					operations = []cloud.HTTPHeaderOperation{}
 				}
-				return routeMutation{kind: routeMutationSetPolicyTarget, id: policy.policy.ID, requestHeaderOperations: operations}, true
+				responsePatch := policyHeaderPatch(wanted.responseHeaderOperations, policy.responseHeaderOperations,
+					policy.policy.ProvisioningStatus == "ERROR")
+				return routeMutation{kind: routeMutationSetPolicyTarget, id: policy.policy.ID,
+					requestHeaderOperations: operations, responseHeaderOperations: responsePatch}, true
 			}
 		}
 	}

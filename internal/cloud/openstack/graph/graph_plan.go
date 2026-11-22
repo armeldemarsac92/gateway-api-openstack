@@ -338,13 +338,6 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 				(scopedHTTP || groupedHTTP) && (withdrawPolicy || memberWithdrawal || fixTarget)
 			switch {
 			case fixTarget:
-				// An invalid backend must be withdrawn even if Octavia no
-				// longer accepts new response modifications. Keep installed
-				// operations on the fixed action until the ordinary header
-				// plan can apply any desired replacement.
-				if len(step.responseHeaderOperations) != 0 {
-					mutation.route.responseHeaderOperations = nil
-				}
 				if stepIndex == 0 && ensureHold == "" {
 					queueTargetWithdrawal(mutation, observed, &fixedTargetWithdrawals)
 				}
@@ -775,11 +768,23 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 	if len(required) == 0 {
 		return step, nil
 	}
-	if err := p.verifyGatewayHTTPCapabilities(ctx, desired, actual, required); err != nil {
+	withdrawTarget := step.kind == graphRouteMutation && step.withdrawHTTPPolicy && step.route.kind == routeMutationSetPolicyTarget
+	err := p.verifyGatewayHTTPCapabilities(ctx, desired, actual, required)
+	var missingResponseHeaders *octavia.MissingGatewayCapability
+	if withdrawTarget && len(step.route.responseHeaderOperations) != 0 &&
+		errors.As(err, &missingResponseHeaders) && missingResponseHeaders.Capability == octavia.GatewayCapabilityResponseHeaderOperations {
+		// Retain the installed operations if the region no longer accepts
+		// new ones. The restrictive action still needs its own capability.
+		step.route.responseHeaderOperations = nil
+		required = slices.DeleteFunc(required, func(capability string) bool {
+			return capability == octavia.GatewayCapabilityResponseHeaderOperations
+		})
+		err = p.verifyGatewayHTTPCapabilities(ctx, desired, actual, required)
+	}
+	if err != nil {
 		// Removing a withdrawal predicate would expose a lower-priority
 		// route. Close its verified listener until the target is updated.
-		if step.kind == graphRouteMutation && step.withdrawHTTPPolicy && step.route.kind == routeMutationSetPolicyTarget &&
-			step.routeIndex < len(actual.routes) {
+		if withdrawTarget && step.routeIndex < len(actual.routes) {
 			listener := actual.policyListener(actual.routes[step.routeIndex], step.route.id)
 			if listener != nil && (listener.ProvisioningStatus == "ERROR" || listener.ProvisioningStatus == "ACTIVE" && (listener.AdminStateUp || !actual.adminObserved[listener.ID])) {
 				return graphMutation{kind: graphDisableListener, listenerID: listener.ID,

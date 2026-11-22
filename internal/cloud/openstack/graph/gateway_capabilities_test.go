@@ -140,6 +140,42 @@ func TestLostHTTPActionCapabilityOnlyAllowsRestrictiveWithdrawal(t *testing.T) {
 	}
 }
 
+func TestHTTPBackendWithdrawalCombinesResponseHeaderChangesWhenAvailable(t *testing.T) {
+	advertise := true
+	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/lbaas/providers/amphora/gateway_capabilities" {
+			t.Fatalf("unexpected capability request %s %s", r.Method, r.URL.Path)
+		}
+		capabilities := []string{octavia.GatewayCapabilityFixedHTTPResponses}
+		if advertise {
+			capabilities = append(capabilities, octavia.GatewayCapabilityResponseHeaderOperations)
+		}
+		safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": capabilities})
+	}))
+	p := NewProvider(ServiceClients{LoadBalancer: client}, ProviderConfig{FixedHTTPResponses: true})
+	desired := desiredGatewayGraph{fixedHTTPResponses: true, protocol: cloud.ListenerProtocolHTTP, routes: []desiredRoute{{fixedResponse: true}}}
+	lb := safetyObservedLoadBalancer()
+	lb.Provider = "amphora"
+	actual := observedGatewayGraph{loadBalancer: lb}
+	operations := []cloud.HTTPHeaderOperation{{Operation: cloud.HTTPHeaderSet, Name: "x-color", Value: "blue"}}
+	step := graphMutation{kind: graphRouteMutation, withdrawHTTPPolicy: true,
+		route: routeMutation{kind: routeMutationSetPolicyTarget, id: "policy", responseHeaderOperations: operations}}
+	check := func(want []cloud.HTTPHeaderOperation) {
+		t.Helper()
+		prepared, err := p.prepareGraphMutation(t.Context(), desired, actual, step)
+		if err != nil || prepared.kind != graphRouteMutation || prepared.route.kind != routeMutationSetPolicyTarget ||
+			!reflect.DeepEqual(prepared.route.responseHeaderOperations, want) {
+			t.Fatalf("target withdrawal has wrong response operations: %#v, %v", prepared, err)
+		}
+	}
+
+	check(operations)
+	advertise = false
+	check(nil)
+	step.route.responseHeaderOperations = []cloud.HTTPHeaderOperation{}
+	check(step.route.responseHeaderOperations)
+}
+
 func TestRequestHeaderPolicyDriftUsesEffectiveProviderAndCanClearAfterOptOut(t *testing.T) {
 	const path = "/lbaas/providers/amphora-region-alias/gateway_capabilities"
 	var advertise, clear bool

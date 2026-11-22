@@ -87,17 +87,28 @@ func TestInvalidHTTPBackendSwitchesPolicyWhenMemberDisableFails(t *testing.T) {
 	desired, observed := fixedHTTPPlanFixture(desiredRoute{httpParts: []desiredRoute{route}},
 		observedRouteGraph{httpParts: map[string]*observedRouteGraph{route.backendKey: &actual}})
 
-	check := func(want routeMutationKind, id string) {
+	check := func(want routeMutationKind, id string) routeMutation {
 		t.Helper()
 		plan, _, err := (&Provider{}).buildGatewayGraphPlan(desired, observed)
 		if err != nil || len(plan) != 1 || plan[0].route.kind != want || plan[0].route.id != id || !plan[0].withdrawHTTPPolicy {
 			t.Fatalf("want priority for %v on %s, plan = %#v, error = %v", want, id, plan, err)
 		}
+		return plan[0].route
 	}
 	policy.rules[0].rule.Value = "/unexpected"
 	check(routeMutationDisableMember, actual.members[0].ID)
 	policy.rules[0].rule.Value = route.policies[0].path
-	check(routeMutationSetPolicyTarget, policy.policy.ID)
+	policy.responseHeaderOperations = []cloud.HTTPHeaderOperation{{Operation: cloud.HTTPHeaderRemove, Name: "x-old"}}
+	route.policies[0].responseHeaderOperations = []cloud.HTTPHeaderOperation{{Operation: cloud.HTTPHeaderSet, Name: "x-color", Value: "blue"}}
+	change := check(routeMutationSetPolicyTarget, policy.policy.ID)
+	if !reflect.DeepEqual(change.responseHeaderOperations, route.policies[0].responseHeaderOperations) {
+		t.Fatalf("fixed target omitted the response header replacement: %#v", change)
+	}
+	route.policies[0].responseHeaderOperations = nil
+	clear := check(routeMutationSetPolicyTarget, policy.policy.ID)
+	if clear.responseHeaderOperations == nil || len(clear.responseHeaderOperations) != 0 {
+		t.Fatalf("fixed target omitted the response header clear: %#v", clear)
+	}
 	policy.fixedResponse, policy.policy.ProvisioningStatus = true, "ERROR"
 	policy.policy.Action, policy.policy.RedirectPoolID = "FIXED_RESPONSE", ""
 	check(routeMutationSetPolicyTarget, policy.policy.ID)
