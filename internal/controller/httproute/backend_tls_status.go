@@ -27,7 +27,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -98,7 +97,7 @@ func (r *backendTLSPolicyStatusReconciler) observeAncestors(ctx context.Context,
 		if err != nil {
 			return nil, err
 		}
-		if len(parents) == 1 && managedParentsSupportInstalledVersion(parents) {
+		if parentsShareGateway(parents) && managedParentsSupportInstalledVersion(parents) {
 			gateway := parents[0].gateway
 			gateways[client.ObjectKeyFromObject(gateway)] = gateway
 		}
@@ -111,13 +110,14 @@ func (r *backendTLSPolicyStatusReconciler) observeAncestors(ctx context.Context,
 		return nil, err
 	}
 	peers := make(map[types.NamespacedName][]gatewayv1.HTTPRoute, len(gateways))
+	setParents := make(map[types.NamespacedName]types.NamespacedName)
 	for _, route := range slices.Concat(routes, grpc) {
 		seen := map[types.NamespacedName]struct{}{}
 		for _, ref := range route.Spec.ParentRefs {
-			if !controller.IsGatewayParentRef(ref) {
-				continue
+			key, err := gatewayKeyForRouteParent(ctx, r.routes.APIReader, &route, ref, setParents)
+			if err != nil {
+				return nil, err
 			}
-			key := types.NamespacedName{Namespace: string(ptr.Deref(ref.Namespace, gatewayv1.Namespace(route.Namespace))), Name: string(ref.Name)}
 			if _, included := seen[key]; !included && gateways[key] != nil {
 				peers[key] = append(peers[key], route)
 				seen[key] = struct{}{}
@@ -238,9 +238,30 @@ func (r *Reconciler) liveGatewayRoutePeers(ctx context.Context, gateway *gateway
 		if err != nil {
 			return nil, err
 		}
+		if kind == model.HTTPRouteKind && !model.GatewayDisallowsListenerSets(gateway) {
+			var sets gatewayv1.ListenerSetList
+			if err := r.List(ctx, &sets, client.MatchingFields{controller.IndexListenerSetByGateway: client.ObjectKeyFromObject(gateway).String()}); err != nil {
+				if !meta.IsNoMatchError(err) {
+					return nil, err
+				}
+			}
+			for _, set := range sets.Items {
+				delegated, err := routes.listRoutes(ctx, client.MatchingFields{controller.IndexHTTPRouteByListenerSet: client.ObjectKeyFromObject(&set).String()})
+				if err != nil {
+					return nil, err
+				}
+				peers = append(peers, delegated...)
+			}
+		}
+		seen := make(map[types.NamespacedName]bool, len(peers))
 		for i := range peers {
+			key := client.ObjectKeyFromObject(&peers[i])
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
 			var live gatewayv1.HTTPRoute
-			if err := routes.readRoute(ctx, routes.APIReader, client.ObjectKeyFromObject(&peers[i]), &live); err != nil {
+			if err := routes.readRoute(ctx, routes.APIReader, key, &live); err != nil {
 				if err := client.IgnoreNotFound(err); err != nil {
 					return nil, err
 				}

@@ -69,6 +69,7 @@ func TestSetupIndexes(t *testing.T) {
 		IndexGatewayClassByParameters:    &gatewayv1.GatewayClass{},
 		IndexGatewayByClass:              &gatewayv1.Gateway{},
 		IndexHTTPRouteByParentGateway:    &gatewayv1.HTTPRoute{},
+		IndexHTTPRouteByListenerSet:      &gatewayv1.HTTPRoute{},
 		IndexHTTPRouteByStatusGateway:    &gatewayv1.HTTPRoute{},
 		IndexHTTPRouteByBackendService:   &gatewayv1.HTTPRoute{},
 		IndexHTTPRouteByBackendNamespace: &gatewayv1.HTTPRoute{},
@@ -110,6 +111,12 @@ func TestSetupIndexes(t *testing.T) {
 	assertIndexValues(t, indexer, IndexGatewayByClass, gateway, []string{"openstack"})
 
 	route := indexedTestHTTPRoute(config)
+	listenerSetKind := gatewayv1.Kind("ListenerSet")
+	route.Spec.ParentRefs = append(route.Spec.ParentRefs, gatewayv1.ParentReference{Kind: &listenerSetKind, Name: "delegated"})
+	grpcRoute := &gatewayv1.GRPCRoute{ObjectMeta: route.ObjectMeta, Spec: gatewayv1.GRPCRouteSpec{CommonRouteSpec: route.Spec.CommonRouteSpec}}
+	for _, object := range []client.Object{route, grpcRoute} {
+		assertIndexValues(t, indexer, IndexHTTPRouteByListenerSet, object, []string{"routes/delegated"})
+	}
 	assertIndexValues(t, indexer, IndexHTTPRouteByParentGateway, route, []string{"gateways/edge", "routes/z-gateway"})
 	assertIndexValues(t, indexer, IndexHTTPRouteByStatusGateway, route, []string{"gateways/edge", "routes/status-gateway"})
 	assertIndexValues(t, indexer, IndexHTTPRouteByBackendService, route, []string{"apps/a-service", "routes/z-service"})

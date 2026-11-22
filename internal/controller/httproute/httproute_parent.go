@@ -23,6 +23,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -39,6 +40,7 @@ type managedRouteParent struct {
 	ref          gatewayv1.ParentReference
 	gateway      *gatewayv1.Gateway
 	gatewayClass *gatewayv1.GatewayClass
+	listenerSet  *gatewayv1.ListenerSet
 }
 
 type routeParentObservation struct {
@@ -65,7 +67,7 @@ func (r *Reconciler) managedParentsWithReader(
 func (r *Reconciler) observeRouteParents(ctx context.Context, reader client.Reader, route *gatewayv1.HTTPRoute) ([]routeParentObservation, error) {
 	parents := make([]routeParentObservation, 0, len(route.Spec.ParentRefs))
 	for _, parentRef := range route.Spec.ParentRefs {
-		if !controller.IsGatewayParentRef(parentRef) {
+		if !controller.IsGatewayParentRef(parentRef) && (model.HTTPProfileRouteKind(route) != model.HTTPRouteKind || model.ListenerSetRefKey(parentRef, route.Namespace).Name == "") {
 			continue
 		}
 		parent, err := r.observeRouteParent(ctx, reader, route.Namespace, parentRef)
@@ -79,11 +81,26 @@ func (r *Reconciler) observeRouteParents(ctx context.Context, reader client.Read
 
 func (r *Reconciler) observeRouteParent(ctx context.Context, reader client.Reader, namespace string, ref gatewayv1.ParentReference) (routeParentObservation, error) {
 	parent := routeParentObservation{managedRouteParent: managedRouteParent{ref: ref}}
+	key := types.NamespacedName{Namespace: namespace, Name: string(ref.Name)}
 	if ref.Namespace != nil {
-		namespace = string(*ref.Namespace)
+		key.Namespace = string(*ref.Namespace)
+	}
+	if setKey := model.ListenerSetRefKey(ref, namespace); setKey.Name != "" {
+		var set gatewayv1.ListenerSet
+		if err := reader.Get(ctx, setKey, &set); err != nil {
+			if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+				return parent, nil
+			}
+			return routeParentObservation{}, fmt.Errorf("get parent ListenerSet: %w", err)
+		}
+		key = model.ListenerSetParentKey(&set)
+		parent.listenerSet = &set
+		if key.Name == "" {
+			return parent, nil
+		}
 	}
 	var gateway gatewayv1.Gateway
-	if err := reader.Get(ctx, types.NamespacedName{Namespace: namespace, Name: string(ref.Name)}, &gateway); err != nil {
+	if err := reader.Get(ctx, key, &gateway); err != nil {
 		if apierrors.IsNotFound(err) {
 			return parent, nil
 		}
@@ -112,31 +129,43 @@ func managedParentsFromObservations(observations []routeParentObservation) []man
 	return parents
 }
 
-// soleParentForManagedGateway checks the other references against live ownership
-// while reusing an already validated Gateway from the current graph observation.
-func (r *Reconciler) soleParentForManagedGateway(ctx context.Context, route *gatewayv1.HTTPRoute, gateway *gatewayv1.Gateway) (*gatewayv1.ParentReference, error) {
-	var selected *gatewayv1.ParentReference
-	for i := range route.Spec.ParentRefs {
-		ref := &route.Spec.ParentRefs[i]
-		if !controller.IsGatewayParentRef(*ref) {
+// parentsForGateway validates that controller-owned parent references share
+// one Gateway graph. The existing single-Gateway-parent profile is preserved
+// for routes that never reference a ListenerSet.
+func (r *Reconciler) parentsForGateway(ctx context.Context, route *gatewayv1.HTTPRoute, gateway *gatewayv1.Gateway) ([]managedRouteParent, error) {
+	var selected []managedRouteParent
+	for _, ref := range route.Spec.ParentRefs {
+		if routeTargetsGateway(route, ref, gateway.Namespace, gateway.Name) {
+			selected = append(selected, managedRouteParent{ref: ref, gateway: gateway})
 			continue
 		}
-		if routeTargetsGateway(route, *ref, gateway.Namespace, gateway.Name) {
-			if selected != nil {
-				return nil, nil
-			}
-			selected = ref
+		if !controller.IsGatewayParentRef(ref) && (model.HTTPProfileRouteKind(route) != model.HTTPRouteKind || model.ListenerSetRefKey(ref, route.Namespace).Name == "") {
 			continue
 		}
-		parent, err := r.observeRouteParent(ctx, r.APIReader, route.Namespace, *ref)
+		parent, err := r.observeRouteParent(ctx, r.APIReader, route.Namespace, ref)
 		if err != nil {
 			return nil, err
 		}
-		if parent.managed {
+		if !parent.managed {
+			continue
+		}
+		if parent.gateway.UID != gateway.UID || client.ObjectKeyFromObject(parent.gateway) != client.ObjectKeyFromObject(gateway) {
 			return nil, nil
 		}
+		parent.gateway = gateway
+		selected = append(selected, parent.managedRouteParent)
+	}
+	if len(selected) > 1 && !slices.ContainsFunc(selected, func(p managedRouteParent) bool { return p.listenerSet != nil }) {
+		return nil, nil
 	}
 	return selected, nil
+}
+
+func (p managedRouteParent) namespace() string {
+	if p.listenerSet != nil {
+		return p.listenerSet.Namespace
+	}
+	return p.gateway.Namespace
 }
 
 // routeParentCandidates applies the parentRef selectors before reading namespace
@@ -145,18 +174,21 @@ func routeParentCandidates(route *gatewayv1.HTTPRoute, parent managedRouteParent
 	if parent.gateway.DeletionTimestamp != nil {
 		return nil, newRouteBuildError(routeErrorPending, "parent Gateway is being deleted")
 	}
-	if !routeTargetsGateway(route, parent.ref, parent.gateway.Namespace, parent.gateway.Name) {
-		return nil, newRouteBuildError(routeErrorNoMatchingParent, "parentRef does not target this Gateway")
-	}
 	selects := func(listener gatewayv1.Listener) bool {
 		return (parent.ref.SectionName == nil || *parent.ref.SectionName == listener.Name) &&
 			(parent.ref.Port == nil || *parent.ref.Port == listener.Port)
 	}
-	if !slices.ContainsFunc(parent.gateway.Spec.Listeners, selects) {
+	if parent.listenerSet != nil {
+		if !slices.ContainsFunc(parent.listenerSet.Spec.Listeners, func(entry gatewayv1.ListenerEntry) bool {
+			return (parent.ref.SectionName == nil || *parent.ref.SectionName == entry.Name) && (parent.ref.Port == nil || *parent.ref.Port == entry.Port)
+		}) {
+			return nil, newRouteBuildError(routeErrorNoMatchingParent, "parentRef does not select a ListenerSet section")
+		}
+	} else if !slices.ContainsFunc(parent.gateway.Spec.Listeners, selects) {
 		return nil, newRouteBuildError(routeErrorNoMatchingParent, "parentRef does not select a Gateway listener")
 	}
 	kind := model.HTTPProfileRouteKind(route)
-	if len(http) == 0 && slices.ContainsFunc(parent.gateway.Spec.Listeners, func(listener gatewayv1.Listener) bool {
+	if parent.listenerSet == nil && len(http) == 0 && slices.ContainsFunc(parent.gateway.Spec.Listeners, func(listener gatewayv1.Listener) bool {
 		return selects(listener) && (listener.Protocol == gatewayv1.HTTPProtocolType || listener.Protocol == gatewayv1.HTTPSProtocolType)
 	}) {
 		return nil, newRouteBuildError(routeErrorUnsupported, "parent Gateway does not have a supported HTTP listener configuration")
@@ -197,18 +229,18 @@ func routeTargetsGateway(route *gatewayv1.HTTPRoute, parent gatewayv1.ParentRefe
 	return controller.IsGatewayParentRef(parent) && parentNamespace == namespace && string(parent.Name) == name
 }
 
-func (r *Reconciler) selectRouteAttachments(route *gatewayv1.HTTPRoute, gateway *gatewayv1.Gateway, candidates []*gatewayv1.Listener, namespaces []corev1.Namespace) ([]*gatewayv1.Listener, error) {
+func (r *Reconciler) selectRouteAttachments(route *gatewayv1.HTTPRoute, parent managedRouteParent, candidates []*gatewayv1.Listener, namespaces []corev1.Namespace) ([]*gatewayv1.Listener, error) {
 	var selected []*gatewayv1.Listener
 	rejection := newRouteBuildError(routeErrorNotAllowed, "listener allowedRoutes does not allow this HTTPRoute namespace")
 	for _, listener := range candidates {
-		if !model.AllowsRouteNamespace(listener, gateway.Namespace, route.Namespace, namespaces) {
+		if !model.AllowsRouteNamespace(listener, parent.namespace(), route.Namespace, namespaces) {
 			continue
 		}
 		if err := validateRouteHostnames(listener.Hostname, route.Spec.Hostnames); err != nil {
 			rejection = err
 			continue
 		}
-		if len(selected) != 0 && !gatewaycontroller.HTTPRouteSectionsSharePort(r.Config, gateway, selected[0], listener) {
+		if len(selected) != 0 && !gatewaycontroller.HTTPRouteSectionsSharePort(r.Config, parent.gateway, selected[0], listener) {
 			return nil, newRouteBuildError(routeErrorUnsupported, "the selected sections must share a physical HTTP or HTTPS listener")
 		}
 		if err := validateRouteRedirectPrefixes(route, *listener); err != nil {
@@ -246,7 +278,7 @@ func (r *Reconciler) boundRouteAttachments(route *gatewayv1.HTTPRoute, gateway *
 		candidates, err := routeParentCandidates(route, parent, http)
 		if err == nil {
 			var listeners []*gatewayv1.Listener
-			listeners, err = r.selectRouteAttachments(route, gateway, candidates, namespaces)
+			listeners, err = r.selectRouteAttachments(route, parent, candidates, namespaces)
 			if err == nil {
 				return listeners, nil
 			}
@@ -267,11 +299,6 @@ func (r *Reconciler) liveBoundRouteAttachment(ctx context.Context, route *gatewa
 	if model.HTTPProfileRouteKind(route) == model.GRPCRouteKind && !r.Config.GRPCExactMethodEnabled() {
 		return boundHTTPAttachment{}, grpcProfileDisabled(), nil
 	}
-	if !slices.ContainsFunc(route.Spec.ParentRefs, func(ref gatewayv1.ParentReference) bool {
-		return routeTargetsGateway(route, ref, identity.GatewayNamespace, identity.GatewayName)
-	}) {
-		return boundHTTPAttachment{}, newRouteBuildError(routeErrorNoMatchingParent, "HTTPRoute no longer targets the bound Gateway"), nil
-	}
 	var gateway gatewayv1.Gateway
 	if err := r.APIReader.Get(ctx, client.ObjectKey{Namespace: identity.GatewayNamespace, Name: identity.GatewayName}, &gateway); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -282,13 +309,114 @@ func (r *Reconciler) liveBoundRouteAttachment(ctx context.Context, route *gatewa
 	if string(gateway.UID) != identity.GatewayUID {
 		return boundHTTPAttachment{}, newRouteBuildError(routeErrorNoMatchingParent, "the bound Gateway was replaced"), nil
 	}
-	http, _ := gatewaycontroller.HTTPRouteListeners(r.Config, &gateway)
-	namespaces, err := readRouteNamespaces(ctx, r.APIReader, http, route.Namespace)
+	parents, err := r.parentsForGateway(ctx, route, &gateway)
 	if err != nil {
 		return boundHTTPAttachment{}, nil, err
 	}
-	listeners, rejection := r.boundRouteAttachments(route, &gateway, http, namespaces)
-	return boundHTTPAttachment{listeners: listeners, gatewayGeneration: gateway.Generation}, rejection, nil
+	sets, err := gatewaycontroller.ObserveListenerSets(ctx, r.APIReader, r.Config, &gateway)
+	if err != nil {
+		return boundHTTPAttachment{}, nil, err
+	}
+	selection, _, err := r.selectRouteParents(ctx, route, parents, sets.Sections())
+	if err != nil {
+		return boundHTTPAttachment{}, nil, err
+	}
+	selected := selection.listeners()
+	if len(selected) == 0 {
+		if len(selection) != 0 {
+			return boundHTTPAttachment{}, selection[0].rejection, nil
+		}
+		return boundHTTPAttachment{}, newRouteBuildError(routeErrorNoMatchingParent, "HTTPRoute no longer targets an available listener on the bound Gateway"), nil
+	}
+	return boundHTTPAttachment{listeners: selected, gatewayGeneration: gateway.Generation}, nil, nil
+}
+
+type routeParentSelection struct {
+	parent    managedRouteParent
+	listeners []*gatewayv1.Listener
+	rejection error
+}
+
+type routeSelection []routeParentSelection
+
+func (s routeSelection) listeners() []*gatewayv1.Listener {
+	var listeners []*gatewayv1.Listener
+	for _, parent := range s {
+		if parent.rejection == nil {
+			for _, listener := range parent.listeners {
+				if !slices.ContainsFunc(listeners, func(previous *gatewayv1.Listener) bool {
+					return listenerSectionIdentity(*previous) == listenerSectionIdentity(*listener)
+				}) {
+					listeners = append(listeners, listener)
+				}
+			}
+		}
+	}
+	return listeners
+}
+
+func (r *Reconciler) selectRouteParents(ctx context.Context, route *gatewayv1.HTTPRoute, parents []managedRouteParent, sets map[types.NamespacedName][]gatewayv1.Listener) (routeSelection, []corev1.Namespace, error) {
+	return r.selectRouteParentsWithNamespaces(ctx, route, parents, sets, make(map[string][]corev1.Namespace))
+}
+
+func (r *Reconciler) selectRouteParentsWithNamespaces(ctx context.Context, route *gatewayv1.HTTPRoute, parents []managedRouteParent, sets map[types.NamespacedName][]gatewayv1.Listener, cache map[string][]corev1.Namespace) (routeSelection, []corev1.Namespace, error) {
+	var selection routeSelection
+	if len(parents) == 0 {
+		return nil, nil, nil
+	}
+	gateway := parents[0].gateway
+	http, _ := gatewaycontroller.HTTPRouteListeners(r.Config, gateway)
+	namespaces, namespaceObserved := cache[route.Namespace]
+	for _, parent := range parents {
+		available := http
+		if parent.listenerSet != nil {
+			available = nil
+			for _, section := range sets[client.ObjectKeyFromObject(parent.listenerSet)] {
+				available = append(available, &section)
+			}
+		}
+		candidates, rejection := routeParentCandidates(route, parent, available)
+		var selected []*gatewayv1.Listener
+		if rejection == nil {
+			if !namespaceObserved && slices.ContainsFunc(candidates, model.ObservesRouteNamespace) {
+				var err error
+				namespaces, err = readRouteNamespaces(ctx, r.APIReader, candidates, route.Namespace)
+				if err != nil {
+					return nil, nil, err
+				}
+				namespaceObserved = true
+				cache[route.Namespace] = namespaces
+			}
+			selected, rejection = r.selectRouteAttachments(route, parent, candidates, namespaces)
+		}
+		selection = append(selection, routeParentSelection{parent: parent, listeners: selected, rejection: rejection})
+	}
+	listeners := selection.listeners()
+	if len(listeners) > 1 && slices.ContainsFunc(listeners[1:], func(listener *gatewayv1.Listener) bool {
+		return !gatewaycontroller.HTTPRouteSectionsSharePort(r.Config, gateway, listeners[0], listener)
+	}) {
+		for i := range selection {
+			if selection[i].rejection == nil {
+				selection[i].rejection = newRouteBuildError(routeErrorUnsupported, "the selected sections must share a physical HTTP or HTTPS listener")
+			}
+		}
+	}
+	return selection, namespaces, nil
+}
+
+type sectionIdentity struct {
+	name     gatewayv1.SectionName
+	port     gatewayv1.PortNumber
+	protocol gatewayv1.ProtocolType
+	hostname string
+}
+
+func listenerSectionIdentity(listener gatewayv1.Listener) sectionIdentity {
+	result := sectionIdentity{name: listener.Name, port: listener.Port, protocol: listener.Protocol}
+	if listener.Hostname != nil {
+		result.hostname = string(*listener.Hostname)
+	}
+	return result
 }
 
 func routeProfileConflict() error {

@@ -210,6 +210,34 @@ func (r *Reconciler) buildRouteModelWithReader(
 	if _, err := r.validateRouteStructure(route); err != nil {
 		return cloud.RouteSpec{}, err
 	}
+	if slices.ContainsFunc(route.Spec.ParentRefs, func(ref gatewayv1.ParentReference) bool {
+		return model.ListenerSetRefKey(ref, route.Namespace).Name != ""
+	}) {
+		parents, err := r.parentsForGateway(ctx, route, gateway)
+		if err != nil {
+			return cloud.RouteSpec{}, err
+		}
+		projection, err := gatewaycontroller.ObserveListenerSets(ctx, reader, r.Config, gateway)
+		if err != nil {
+			return cloud.RouteSpec{}, err
+		}
+		sets := projection.Sections()
+		selection, namespaces, err := r.selectRouteParents(ctx, route, parents, sets)
+		if err != nil {
+			return cloud.RouteSpec{}, err
+		}
+		listeners := selection.listeners()
+		if len(listeners) == 0 {
+			return cloud.RouteSpec{}, newRouteBuildError(routeErrorNoMatchingParent, "no ListenerSet or Gateway listener accepts HTTPRoute")
+		}
+		inputs, err := r.collectRouteModelInputsForSets(ctx, reader, gateway, []gatewayv1.HTTPRoute{*route}, namespaces, sets)
+		if err != nil {
+			return cloud.RouteSpec{}, err
+		}
+		spec, _, err := r.buildRouteModelFromInputs(ctx, reader, route, gateway, listeners, inputs)
+		return spec, err
+	}
+
 	http, err := gatewaycontroller.ValidatedHTTPRouteListeners(r.Config, gateway)
 	if err != nil {
 		return cloud.RouteSpec{}, newRouteBuildError(routeErrorUnsupported, "%s", err)
@@ -511,28 +539,26 @@ func supportedRouteModel(logical model.Gateway, selected []*gatewayv1.Listener, 
 		return unsupported()
 	}
 	route := logical.Routes[0]
-	if len(route.Diagnostics) != 0 || len(route.Parents) != 1 {
+	if len(route.Diagnostics) != 0 {
 		return unsupported()
 	}
-	parent := route.Parents[0]
-	if parent.State != model.AttachmentAccepted {
-		return unsupported()
-	}
-	sections := make(map[gatewayv1.SectionName]*gatewayv1.Listener, len(selected))
+	sections := make(map[sectionIdentity]*gatewayv1.Listener, len(selected))
 	for _, listener := range selected {
-		sections[listener.Name] = listener
+		sections[listenerSectionIdentity(*listener)] = listener
 	}
-	attached := 0
-	for _, attachment := range parent.Listeners {
-		if attachment.State != model.AttachmentAccepted {
+	accepted := make(map[model.ListenerSection]bool)
+	for _, parent := range route.Parents {
+		if parent.State != model.AttachmentAccepted {
 			continue
 		}
-		if sections[attachment.Name] == nil {
-			return unsupported()
+		key := model.ListenerSetRefKey(parent.Reference, route.Source.Namespace)
+		for _, attachment := range parent.Listeners {
+			if attachment.State == model.AttachmentAccepted {
+				accepted[model.ListenerSection{ListenerSet: key, Name: attachment.Name}] = true
+			}
 		}
-		attached++
 	}
-	if attached == 0 || attached != len(sections) {
+	if len(accepted) == 0 || len(accepted) != len(sections) {
 		return unsupported()
 	}
 	for _, rule := range route.Rules {
@@ -548,17 +574,19 @@ func supportedRouteModel(logical model.Gateway, selected []*gatewayv1.Listener, 
 	}
 	var matches []routeLoweredMatch
 	for _, listener := range logical.Listeners {
-		expected := sections[listener.Name]
+		section := sectionIdentity{name: listener.Name, port: listener.Port, protocol: listener.Protocol, hostname: listener.Hostname}
+		expected := sections[section]
 		if expected == nil {
 			if len(listener.Rules) != 0 {
 				return unsupported()
 			}
 			continue
 		}
-		if listener.Port != expected.Port || listener.Protocol != expected.Protocol || len(listener.Diagnostics) != 0 || len(listener.Rules) == 0 {
+		if !accepted[model.ListenerSection{ListenerSet: listener.ListenerSet, Name: listener.Name}] ||
+			len(listener.Diagnostics) != 0 || len(listener.Rules) == 0 {
 			return unsupported()
 		}
-		delete(sections, listener.Name)
+		delete(sections, section)
 		var hostname string
 		if isolated {
 			hostname = gatewaycontroller.HTTPSVirtualHostname(expected)

@@ -35,6 +35,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/classconfig"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
 // Reconciler owns the Gateway-scoped Octavia resources.
@@ -238,9 +239,18 @@ func (r *Reconciler) reconcileGatewayGraph(
 	scope *gatewayScope,
 	decision gatewayPhaseDecision,
 ) (ctrl.Result, error) {
+	sets, err := ObserveListenerSets(ctx, r.APIReader, r.Config, scope.gateway)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
 	graphResult, err := r.ensureGateway(ctx, scope.gateway)
 	if errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) {
 		return r.setGatewayUnsupportedVersion(ctx, scope)
+	}
+	if !model.GatewayDisallowsListenerSets(scope.gateway) && !errors.Is(err, errGatewayChanged) {
+		if err := r.reportListenerSets(ctx, scope.gateway, sets, graphResult); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 	var changedTLS *graph.TLSAuthorizationChanged
 	var tlsIssues map[gatewayv1.SectionName]httpsListenerStatusIssue

@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -57,6 +58,7 @@ type cachedRouteDecision struct {
 	storedIdentity cloud.Identity
 	bindingPresent bool
 	statusUpdates  []parentStatusUpdate
+	selection      routeSelection
 	disposition    cachedRouteDisposition
 }
 
@@ -173,20 +175,21 @@ func (r *Reconciler) buildCachedRouteDecision(
 		base.disposition = cachedRouteDetach
 		return base, nil
 	}
-	if len(parents) != 1 {
+	if !parentsShareGateway(parents) {
 		base.disposition = cachedRouteDetach
 		base.statusUpdates = unsupportedParentCountUpdates(parents)
 		return base, nil
 	}
-	return r.validateCachedRouteDecision(ctx, route, parents[0], base)
+	return r.validateCachedRouteDecision(ctx, route, parents, base)
 }
 
 func (r *Reconciler) validateCachedRouteDecision(
 	ctx context.Context,
 	route *gatewayv1.HTTPRoute,
-	parent managedRouteParent,
+	parents []managedRouteParent,
 	decision cachedRouteDecision,
 ) (cachedRouteDecision, error) {
+	parent := parents[0]
 	decision.parent = parent
 	if model.HTTPProfileRouteKind(route) == model.GRPCRouteKind {
 		if _, err := r.validateRouteStructure(route); err != nil {
@@ -195,32 +198,35 @@ func (r *Reconciler) validateCachedRouteDecision(
 			return decision, nil
 		}
 	}
-	http, _ := gatewaycontroller.HTTPRouteListeners(r.Config, parent.gateway)
-	candidates, parentErr := routeParentCandidates(route, parent, http)
-	validationErr := parentErr
-	if parentErr == nil {
-		namespaces, err := readRouteNamespaces(ctx, r.APIReader, candidates, route.Namespace)
-		if err != nil {
-			return cachedRouteDecision{}, err
-		}
-		_, validationErr = r.selectRouteAttachments(route, parent.gateway, candidates, namespaces)
+	sets, err := gatewaycontroller.ObserveListenerSets(ctx, r.APIReader, r.Config, parent.gateway)
+	if err != nil {
+		return cachedRouteDecision{}, err
 	}
-	if validationErr != nil {
-		status := statusForRouteBuildError(validationErr)
-		resolveBackend := status.acceptedReason == string(gatewayv1.RouteReasonNoMatchingParent) ||
-			status.acceptedReason == string(gatewayv1.RouteReasonNotAllowedByListeners)
-		// An established route must detach even if a backend read fails.
-		// Clearing its binding enqueues it again for reference evaluation.
-		if !decision.bindingPresent && resolveBackend {
-			if err := r.resolveRouteReferences(ctx, route, &status); err != nil {
-				return cachedRouteDecision{}, err
-			}
+	selection, _, err := r.selectRouteParents(ctx, route, parents, sets.Sections())
+	if err != nil {
+		return cachedRouteDecision{}, err
+	}
+	decision.selection = selection
+	for _, attachment := range selection {
+		if attachment.rejection == nil {
+			decision.parent, parent = attachment.parent, attachment.parent
+			break
 		}
+	}
+	if len(selection.listeners()) == 0 {
 		decision.disposition = cachedRouteDetach
-		decision.statusUpdates = []parentStatusUpdate{{
-			parent: parent.ref,
-			status: status,
-		}}
+		for _, attachment := range selection {
+			status := statusForRouteBuildError(attachment.rejection)
+			resolveBackend := status.acceptedReason == string(gatewayv1.RouteReasonNoMatchingParent) ||
+				status.acceptedReason == string(gatewayv1.RouteReasonNotAllowedByListeners)
+			// An established route must detach even if a backend read fails.
+			if !decision.bindingPresent && resolveBackend {
+				if err := r.resolveRouteReferences(ctx, route, &status); err != nil {
+					return cachedRouteDecision{}, err
+				}
+			}
+			decision.statusUpdates = append(decision.statusUpdates, parentStatusUpdate{parent: attachment.parent.ref, status: status})
+		}
 		return decision, nil
 	}
 	// Grouped routes resolve each backend profile independently from the live inputs.
@@ -231,15 +237,32 @@ func (r *Reconciler) validateCachedRouteDecision(
 				return cachedRouteDecision{}, err
 			}
 			decision.disposition = cachedRouteDetach
-			decision.statusUpdates = []parentStatusUpdate{{
-				parent: parent.ref,
-				status: backendProfileRejectionStatus(rejection),
-			}}
+			decision.statusUpdates = selection.statusUpdates(backendProfileRejectionStatus(rejection))
 			return decision, nil
 		}
 	}
 	decision.disposition = cachedRouteReady
 	return decision, nil
+}
+
+func parentsShareGateway(parents []managedRouteParent) bool {
+	return len(parents) == 1 || len(parents) > 1 && slices.ContainsFunc(parents, func(parent managedRouteParent) bool {
+		return parent.listenerSet != nil
+	}) && !slices.ContainsFunc(parents[1:], func(parent managedRouteParent) bool {
+		return parent.gateway.UID != parents[0].gateway.UID || client.ObjectKeyFromObject(parent.gateway) != client.ObjectKeyFromObject(parents[0].gateway)
+	})
+}
+
+func (s routeSelection) statusUpdates(status routeReconcileStatus) []parentStatusUpdate {
+	updates := make([]parentStatusUpdate, 0, len(s))
+	for _, selected := range s {
+		update := parentStatusUpdate{parent: selected.parent.ref, status: status}
+		if selected.rejection != nil {
+			update.status = statusForRouteBuildError(selected.rejection)
+		}
+		updates = append(updates, update)
+	}
+	return updates
 }
 
 func managedParentsSupportInstalledVersion(parents []managedRouteParent) bool {
@@ -269,6 +292,7 @@ func (r *Reconciler) reconcileSelectedRoute(
 	decision cachedRouteDecision,
 ) (ctrl.Result, error) {
 	httpRoute := scope.route
+	scope.parentSelection = decision.selection
 	parent := decision.parent
 	if decision.bindingPresent && !controller.SameGatewayIdentity(
 		decision.storedIdentity,

@@ -91,7 +91,7 @@ func (r *xBackendStatusReconciler) observeAncestors(ctx context.Context, key typ
 			return nil, err
 		}
 		// A class held by its referencing Gateways still owns them.
-		if len(parents) == 1 && managedParentsSupportInstalledVersion(parents) {
+		if parentsShareGateway(parents) && managedParentsSupportInstalledVersion(parents) {
 			gateway := parents[0].gateway
 			byGateway[client.ObjectKeyFromObject(gateway)] = gateway
 		}
