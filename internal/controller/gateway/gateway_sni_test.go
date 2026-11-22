@@ -681,7 +681,7 @@ func TestTLSRouteTerminateUsesCertificateBindingAndListenerHostname(t *testing.T
 			To:   []gatewayv1.ReferenceGrantTo{{Kind: "Secret", Name: ptr.To(gatewayv1.ObjectName("certificate"))}},
 		},
 	}
-	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gateway, route).WithObjects(class, gateway, route, service, endpoints, grant).Build()
+	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(class, gateway, route).WithObjects(class, gateway, route, service, endpoints, grant).Build()
 	const certificate = "https://barbican.example/v1/secrets/approved"
 	var last cloud.GatewayGraphNode
 	r := newTestReconciler(Reconciler{Client: kube, APIReader: kube, Config: cfg, Coordinator: &graph.Coordinator{},
@@ -739,6 +739,39 @@ func TestTLSRouteTerminateUsesCertificateBindingAndListenerHostname(t *testing.T
 		!meta.IsStatusConditionTrue(route.Status.Parents[0].Conditions, cfg.Domain()+"/Programmed") {
 		t.Fatalf("named upstream route graph = %#v, status = %#v", last, route.Status)
 	}
+
+	foreign := route.Status.Parents[0].DeepCopy()
+	foreign.ControllerName = "other.example/controller"
+	route.Status.Parents = append(route.Status.Parents, *foreign)
+	if err := kube.Status().Update(t.Context(), route); err != nil {
+		t.Fatal(err)
+	}
+	controller.SetCondition(&class.Status.Conditions, controller.Condition(string(gatewayv1.GatewayClassConditionStatusSupportedVersion),
+		metav1.ConditionFalse, string(gatewayv1.GatewayClassReasonUnsupportedVersion), "Unsupported version", class.Generation))
+	if err := kube.Status().Update(t.Context(), class); err != nil {
+		t.Fatal(err)
+	}
+	reconcile()
+	owned := route.Status.Parents[0].Conditions
+	if last.Disposition != cloud.GraphWithdrawTLS || last.TCPTLSCertificateRef != "" ||
+		!meta.IsStatusConditionFalse(gateway.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed)) ||
+		!meta.IsStatusConditionFalse(gateway.Status.Listeners[0].Conditions, string(gatewayv1.ListenerConditionProgrammed)) ||
+		!meta.IsStatusConditionFalse(owned, cfg.Domain()+"/Programmed") || meta.FindStatusCondition(owned, cfg.Domain()+"/ForwardingTarget") != nil ||
+		!meta.IsStatusConditionTrue(owned, string(gatewayv1.RouteConditionAccepted)) ||
+		!equality.Semantic.DeepEqual(route.Status.Parents[1], *foreign) {
+		t.Fatalf("version skew: graph = %#v Gateway = %#v listeners = %#v route = %#v", last, gateway.Status.Conditions, gateway.Status.Listeners, route.Status)
+	}
+	controller.SetCondition(&class.Status.Conditions, controller.Condition(string(gatewayv1.GatewayClassConditionStatusSupportedVersion),
+		metav1.ConditionTrue, string(gatewayv1.GatewayClassReasonSupportedVersion), "Supported version", class.Generation))
+	if err := kube.Status().Update(t.Context(), class); err != nil {
+		t.Fatal(err)
+	}
+	reconcile()
+	if !meta.IsStatusConditionTrue(gateway.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed)) ||
+		!meta.IsStatusConditionTrue(route.Status.Parents[0].Conditions, cfg.Domain()+"/Programmed") {
+		t.Fatalf("programming did not recover: Gateway = %#v route = %#v", gateway.Status.Conditions, route.Status)
+	}
+
 	if err := kube.Delete(t.Context(), grant); err != nil {
 		t.Fatal(err)
 	}

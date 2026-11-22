@@ -37,7 +37,7 @@ const sniParentNoMatchingListenerMessage = "The parentRef does not select a list
 // Gateway API limits RouteStatus.Parents to 32 entries across all controllers.
 const maxSNIRouteParentStatuses = 32
 
-func (r *Reconciler) reconcileSNIParentStatuses(ctx context.Context, key client.ObjectKey) error {
+func (r *Reconciler) reconcileSNIParentStatuses(ctx context.Context, key client.ObjectKey, versionBlocked *gatewayv1.Gateway) error {
 	if r.APIReader == nil {
 		return controller.ErrAPIReaderRequired
 	}
@@ -74,6 +74,8 @@ func (r *Reconciler) reconcileSNIParentStatuses(ctx context.Context, key client.
 	if err != nil {
 		return err
 	}
+	rawTLSVersionUnsupported := versionBlocked != nil && gateway.UID == versionBlocked.UID &&
+		gateway.Generation == versionBlocked.Generation && controller.GatewayBindingMetadataEqual(r.Config, gateway, versionBlocked)
 	var reportErr error
 	for i := range routes.Items {
 		var route gatewayv1.TLSRoute
@@ -87,6 +89,9 @@ func (r *Reconciler) reconcileSNIParentStatuses(ctx context.Context, key client.
 		target := route.DeepCopy()
 		if managed {
 			r.updateSNIRouteParents(target, gateway, func(status *gatewayv1.RouteParentStatus) bool {
+				if rawTLSVersionUnsupported {
+					return r.invalidateSNIForwarding(status, route.Generation)
+				}
 				reason, message := r.sniParentListenerRejection(gateway.Spec.Listeners, status.ParentRef)
 				if reason == "" {
 					return false
@@ -104,12 +109,24 @@ func (r *Reconciler) reconcileSNIParentStatuses(ctx context.Context, key client.
 		if err != nil {
 			return errors.Join(reportErr, err)
 		}
-		if managed != stillManaged || gateway.UID != latest.UID || gateway.Generation != latest.Generation {
+		if managed != stillManaged || gateway.UID != latest.UID || gateway.Generation != latest.Generation ||
+			rawTLSVersionUnsupported && !controller.GatewayBindingMetadataEqual(r.Config, gateway, latest) {
 			return errors.Join(reportErr, errGatewayChanged)
 		}
 		reportErr = errors.Join(reportErr, r.patchSNIRouteStatus(ctx, &route, target))
 	}
 	return reportErr
+}
+
+func (r *Reconciler) invalidateSNIForwarding(status *gatewayv1.RouteParentStatus, generation int64) bool {
+	programmedType, targetType := r.Config.Domain()+"/Programmed", r.Config.Domain()+"/ForwardingTarget"
+	if !meta.IsStatusConditionTrue(status.Conditions, programmedType) && meta.FindStatusCondition(status.Conditions, targetType) == nil {
+		return false
+	}
+	controller.SetCondition(&status.Conditions, controller.Condition(programmedType, metav1.ConditionFalse,
+		string(gatewayv1.RouteReasonPending), controller.UnsupportedGatewayAPIVersionMessage, generation))
+	meta.RemoveStatusCondition(&status.Conditions, targetType)
+	return true
 }
 
 func (r *Reconciler) readSNIParentGateway(ctx context.Context, key client.ObjectKey) (*gatewayv1.Gateway, bool, error) {

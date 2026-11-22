@@ -83,7 +83,11 @@ func (r *Reconciler) Reconcile(
 	if r.Config.TLSRoutesEnabled() || scope != nil && r.boundListenerProtocol(scope.gateway) == cloud.ListenerProtocolTLSTerminate {
 		// Route rejection and status cleanup do not gate Gateway graph mutations.
 		defer func() {
-			if err := r.reconcileSNIParentStatuses(ctx, req.NamespacedName); err != nil {
+			var versionBlocked *gatewayv1.Gateway
+			if scope != nil && scope.rawTLSVersionUnsupported {
+				versionBlocked = scope.gateway
+			}
+			if err := r.reconcileSNIParentStatuses(ctx, req.NamespacedName, versionBlocked); err != nil {
 				retErr = errors.Join(retErr, err)
 			}
 		}()

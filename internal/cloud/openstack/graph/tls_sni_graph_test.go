@@ -852,6 +852,10 @@ func TestSNIPolicyWithdrawalDuringNeutronFailureAndDisabledCleanup(t *testing.T)
 		if err != nil || len(writes) != 0 || len(result.Routes) != 1 || result.Routes[0].Result.Outcome.State != cloud.OutcomeReady {
 			t.Fatalf("terminated TLSRoute not ready, result=%#v writes=%v err=%v", result, writes, err)
 		}
+		observation, found, err := provider.GetGateway(t.Context(), ensure.Identity)
+		if err != nil || !found || observation.Outcome.State != cloud.OutcomeProgressing || observation.State.ListenerID != "listener" {
+			t.Fatalf("identity-only TCP TLS observation = %#v found=%t err=%v", observation, found, err)
+		}
 		ensure.Gateway.TLSSNIRoutes = nil
 		result, err = provider.ReconcileGatewayGraph(t.Context(), ensure)
 		if err != nil || len(writes) != 1 || result.Outcome.State != cloud.OutcomeProgressing {
@@ -1030,6 +1034,13 @@ func TestTCPTLSTerminationPublicFrontendLifecycle(t *testing.T) {
 	check(provider, spec, "", "create", nil)
 	check(provider, spec, "", "enable", nil)
 	check(provider, spec, cloud.OutcomeReady, "", nil)
+	observation, found, err := provider.GetGateway(t.Context(), spec.Identity)
+	if err != nil || !found || observation.Outcome.State != cloud.OutcomeProgressing || observation.State.ListenerID != "listener" {
+		t.Fatalf("empty listener identity-only TCP TLS observation = %#v found=%t err=%v", observation, found, err)
+	}
+	delete(listener, "admin_state_up")
+	check(provider, spec, cloud.OutcomeProgressing, "disable", nil)
+	check(provider, spec, "", "enable", nil)
 	routed := spec
 	routed.Gateway.TLSSNIRoutes = []cloud.TLSSNIRoute{{
 		Identity: identity.Value(), Hostname: "tls.example.com", ServiceUID: "tcp-backend",
@@ -1071,8 +1082,16 @@ func TestTCPTLSTerminationPublicFrontendLifecycle(t *testing.T) {
 	spec.Gateway.Disposition, spec.Gateway.TCPTLSCertificateRef = cloud.GraphWithdrawTLS, ""
 	optedOut := newTestProvider(t, clients, ProviderConfig{})
 	listener["tags"] = append(safetyGatewayTags(t, identity, roleListener), sniProfileTag)
+	if _, found, err := provider.GetGateway(t.Context(), spec.Identity); found || !errors.Is(err, cloud.ErrOwnershipConflict) {
+		t.Fatalf("identity-only read accepted a different listener profile: found=%t err=%v", found, err)
+	}
 	check(optedOut, spec, "", "", cloud.ErrOwnershipConflict)
 	listener["tags"] = append(safetyGatewayTags(t, identity, roleListener), tcpTLSProfileTag)
 	check(optedOut, spec, "", "disable", nil)
+	listener["provisioning_status"] = "ERROR"
+	check(optedOut, spec, cloud.OutcomeProgressing, "disable", nil)
+	listener["provisioning_status"] = "PENDING_UPDATE"
+	check(optedOut, spec, cloud.OutcomeProgressing, "", nil)
+	listener["provisioning_status"] = "ACTIVE"
 	check(optedOut, spec, cloud.OutcomeReady, "", nil)
 }

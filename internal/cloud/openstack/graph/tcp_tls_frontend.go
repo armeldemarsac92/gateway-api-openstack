@@ -47,27 +47,34 @@ func otherSNIListenerProfileTag(protocol string) string {
 	return tcpTLSProfileTag
 }
 
+func (p *Provider) managedRawTLSListener(identity Identity, lb *octavia.LoadBalancer, inventory octavia.ListenerInventory, port int) (*listeners.Listener, error) {
+	if !slices.Contains(lb.Tags, tcpTLSProfileTag) || slices.Contains(lb.Tags, sniProfileTag) {
+		return nil, fmt.Errorf("%w: load balancer lacks the TCP TLS termination profile identity", cloud.ErrOwnershipConflict)
+	}
+	if err := crossCheckCompleteChildInventory("load balancer", lb.ID, "listener", lb.Listeners, inventory.Items, func(listener listeners.Listener) string { return listener.ID }); err != nil {
+		return nil, err
+	}
+	listener, err := p.managedGatewayListener(identity, lb.ID, inventory.Items)
+	if err != nil || listener == nil {
+		return listener, err
+	}
+	if listener.ID == "" || listener.Protocol != cloud.ListenerProtocolTCP || listener.ProtocolPort < 1 || listener.ProtocolPort > 65535 ||
+		port != 0 && listener.ProtocolPort != port || !slices.Contains(listener.Tags, tcpTLSProfileTag) ||
+		slices.Contains(listener.Tags, sniProfileTag) || len(listener.Loadbalancers) != 1 || listener.Loadbalancers[0].ID != lb.ID {
+		return nil, fmt.Errorf("%w: listener differs from the TCP TLS termination profile binding", cloud.ErrOwnershipConflict)
+	}
+	return listener, nil
+}
+
 // Observe the frontend before Neutron or route children can block withdrawal.
 // A TLS extension or certificate readback is traffic proof only. Ownership
 // comes from the independent Gateway identity, profile and parent relations.
 func (p *Provider) observeRawTLSFrontend(ctx context.Context, desired desiredGatewayGraph, actual *observedGatewayGraph, inventory octavia.ListenerInventory, active bool) (bool, error) {
-	lb := actual.loadBalancer
-	if !slices.Contains(lb.Tags, tcpTLSProfileTag) || slices.Contains(lb.Tags, sniProfileTag) {
-		return true, fmt.Errorf("%w: load balancer lacks the TCP TLS termination profile identity", cloud.ErrOwnershipConflict)
-	}
-	if err := crossCheckCompleteChildInventory("load balancer", lb.ID, "listener", lb.Listeners, inventory.Items, func(listener listeners.Listener) string { return listener.ID }); err != nil {
-		return true, err
-	}
-	listener, err := p.managedGatewayListener(desired.identity, lb.ID, inventory.Items)
+	listener, err := p.managedRawTLSListener(desired.identity, actual.loadBalancer, inventory, desired.spec.Gateway.Spec.ListenerPort)
 	if err != nil {
 		return true, err
 	}
 	if listener != nil {
-		if listener.ID == "" || listener.Protocol != cloud.ListenerProtocolTCP || listener.ProtocolPort != desired.spec.Gateway.Spec.ListenerPort ||
-			!slices.Contains(listener.Tags, tcpTLSProfileTag) || slices.Contains(listener.Tags, sniProfileTag) ||
-			len(listener.Loadbalancers) != 1 || listener.Loadbalancers[0].ID != lb.ID || !actual.adminObserved[listener.ID] {
-			return true, fmt.Errorf("%w: listener differs from the TCP TLS termination profile binding", cloud.ErrOwnershipConflict)
-		}
 		actual.listener, actual.state.ListenerID = listener, listener.ID
 	}
 	dedicated := listener != nil && inventory.DefaultPoolsObserved && listener.DefaultPoolID == "" &&
@@ -89,6 +96,8 @@ func (p *Provider) observeRawTLSFrontend(ctx context.Context, desired desiredGat
 		actual.rawTLSCapabilityVerified = dependencyErr == nil
 		if dependencyErr != nil {
 			closeMessage = "Closing the TCP TLS listener until Octavia advertises its capability"
+		} else if listener != nil && (!actual.adminObserved[listener.ID] || listener.ProvisioningStatus == "ERROR") {
+			closeMessage = "Waiting for verified TCP TLS listener administrative state"
 		} else if listener != nil && !inventory.TCPTLSTermination[listener.ID] {
 			closeMessage = "Waiting for verified immutable TCP TLS listener mode"
 		} else if listener != nil && !dedicated {
@@ -100,10 +109,15 @@ func (p *Provider) observeRawTLSFrontend(ctx context.Context, desired desiredGat
 		}
 	}
 
-	// Octavia serializes provisioning writes. A pending disable becomes a
-	// withdrawal only after the authoritative listener readback is ACTIVE.
-	if listener != nil && active && listener.AdminStateUp && closeMessage != "" {
-		actual.withdrawTLS = &graphMutation{kind: graphDisableListener, redactTLSError: true, sniWithdrawal: true, message: closeMessage}
+	if listener != nil && closeMessage != "" &&
+		(listener.ProvisioningStatus != "ACTIVE" || listener.AdminStateUp || !actual.adminObserved[listener.ID]) {
+		// ERROR can report admin_state_up=false before Amphora closes
+		// the listener. Retry the close once the parent permits writes.
+		if active && (listener.ProvisioningStatus == "ACTIVE" || listener.ProvisioningStatus == "ERROR") {
+			actual.withdrawTLS = &graphMutation{kind: graphDisableListener, redactTLSError: true, sniWithdrawal: true, message: closeMessage}
+		} else {
+			actual.outcome = p.progressingOutcome("Waiting to verify the TCP TLS listener withdrawal")
+		}
 		return true, dependencyErr
 	}
 	if disposition == cloud.GraphDelete {
