@@ -1,0 +1,106 @@
+{
+  "controllerRevision": "6e41a107c7ce7ce2a25782386aba9f8ec542faa5",
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "managerSHA256": "4f9751227ca7767bd33902060c9ef270166b8bdd900af7012dad67b293b3acf4",
+  "baseSHA256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+  "flags": [
+    "--octavia-fixed-http-responses",
+    "--octavia-http-header-exact",
+    "--octavia-https-listener-isolation",
+    "--octavia-backend-tls-policy",
+    "--octavia-request-header-modifier",
+    "--octavia-response-header-modifier",
+    "--openstack-resync-interval=10m"
+  ],
+  "octavia": {
+    "version": "19.0.1.dev14",
+    "sha256": "68ff1c266128f05ebd545283d30a033fdb3e4d95a4f4a9b65823a68e05d05a4d",
+    "filesVerified": 635
+  },
+  "octaviaLib": {
+    "version": "3.12.1.dev7",
+    "sha256": "ccbf34aa870239d6e0f48bee7d63f34398a9d7bffd0fa98ea36674f8dc343eb4",
+    "filesVerified": 24
+  },
+  "HAProxy": {
+    "version": "3.0.19-ade9c1262-octavia-strict-dns-v1",
+    "sha256": "fa8468efa26f95ed83a36afeb97b79730de285450b7a8fae94f7cf5e6d2d0824"
+  },
+  "image": {
+    "repository": "ghcr.io/armeldemarsac92/gateway-api-openstack",
+    "sourceRevision": "6e41a107c7ce7ce2a25782386aba9f8ec542faa5",
+    "manifestDigest": "sha256:4e0e7ca8b5a3d9049451664026bed7e40ebf3767f458ac85caa79623303afeef",
+    "platform": "linux/amd64",
+    "ociArchiveSHA256": "51fd9f79f29ef240162dcd391c00c9ccf405407747f2b5cfa72d7794a4468af7",
+    "managerSHA256": "4f9751227ca7767bd33902060c9ef270166b8bdd900af7012dad67b293b3acf4"
+  },
+  "nodeImage": "docker.io/kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed",
+  "echoPlatformDigest": "sha256:fed223b186fbd83d50a4578d168c9e7d89341d8c1af616ebe0f62d53ab7451dc",
+  "scope": "Local Kind with upstream echo Pods, the published controller manager, native Octavia/Barbican APIs and Amphora-rendered HAProxy. Network, identity and cloud workers use fixtures.",
+  "channels": {
+    "standard": {
+      "registeredCase": "HTTPRouteResponseHeaderModifier",
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "passed": true,
+      "exit": 0,
+      "subtestsPassed": 8,
+      "expected": 8,
+      "events": [
+        "--- PASS: TestLocalHTTPCase/HTTPRouteResponseHeaderModifier (1.13s)",
+        "--- PASS: TestLocalHTTPCase/HTTPRouteResponseHeaderModifier/4_request_to_'/remove'_should_go_to_infra-backend-v1 (12.56s)",
+        "--- PASS: TestLocalHTTPCase/HTTPRouteResponseHeaderModifier/0_request_to_'/set'_should_go_to_infra-backend-v1 (13.47s)",
+        "--- PASS: TestLocalHTTPCase/HTTPRouteResponseHeaderModifier/3_request_to_'/add'_should_go_to_infra-backend-v1 (1.94s)",
+        "--- PASS: TestLocalHTTPCase/HTTPRouteResponseHeaderModifier/2_request_to_'/add'_should_go_to_infra-backend-v1 (1.03s)",
+        "--- PASS: TestLocalHTTPCase/HTTPRouteResponseHeaderModifier/1_request_to_'/set'_should_go_to_infra-backend-v1 (0.02s)",
+        "--- PASS: TestLocalHTTPCase/HTTPRouteResponseHeaderModifier/7_request_to_'/response-and-request-header-modifiers'_with_headers_should_go_to_infra-backend-v1 (0.02s)",
+        "--- PASS: TestLocalHTTPCase/HTTPRouteResponseHeaderModifier/5_request_to_'/multiple'_should_go_to_infra-backend-v1 (0.02s)",
+        "--- PASS: TestLocalHTTPCase/HTTPRouteResponseHeaderModifier/6_request_to_'/case-insensitivity'_should_go_to_infra-backend-v1 (0.02s)"
+      ],
+      "requestLogCount": 310,
+      "nativeHAProxyReloadCount": 9,
+      "caseGoSHA256": "680991da77df603fa86e10b6a86ed90677d76b095dfdeeb5ea904b615a6658da",
+      "manifestSHA256": "9033aaa4b763c791c036f429b2f32f8050364c9e78d77a1500cbe26f35c0a99c",
+      "parentConditionsAfterCase": [
+        {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "gateway-api-openstack.github.io/Programmed": "False/Pending"
+        }
+      ],
+      "reportSHA256": "5352a4ea5b154ad94d8212907bba2af440f3e9bd5312bef60e5306612eecfa31",
+      "logSHA256": "d38563a698c8f10f82e7d8703cd7a7bf0142d0797a586a6e1938fff3cb4f5acd"
+    },
+    "experimental": {
+      "registeredCase": "HTTPRouteResponseHeaderModifier",
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "passed": true,
+      "exit": 0,
+      "subtestsPassed": 8,
+      "expected": 8,
+      "events": [
+        "--- PASS: TestLocalHTTPCase/HTTPRouteResponseHeaderModifier (1.24s)",
+        "--- PASS: TestLocalHTTPCase/HTTPRouteResponseHeaderModifier/4_request_to_'/remove'_should_go_to_infra-backend-v1 (12.45s)",
+        "--- PASS: TestLocalHTTPCase/HTTPRouteResponseHeaderModifier/0_request_to_'/set'_should_go_to_infra-backend-v1 (13.37s)",
+        "--- PASS: TestLocalHTTPCase/HTTPRouteResponseHeaderModifier/3_request_to_'/add'_should_go_to_infra-backend-v1 (1.75s)",
+        "--- PASS: TestLocalHTTPCase/HTTPRouteResponseHeaderModifier/2_request_to_'/add'_should_go_to_infra-backend-v1 (0.83s)",
+        "--- PASS: TestLocalHTTPCase/HTTPRouteResponseHeaderModifier/6_request_to_'/case-insensitivity'_should_go_to_infra-backend-v1 (0.02s)",
+        "--- PASS: TestLocalHTTPCase/HTTPRouteResponseHeaderModifier/1_request_to_'/set'_should_go_to_infra-backend-v1 (0.02s)",
+        "--- PASS: TestLocalHTTPCase/HTTPRouteResponseHeaderModifier/7_request_to_'/response-and-request-header-modifiers'_with_headers_should_go_to_infra-backend-v1 (0.02s)",
+        "--- PASS: TestLocalHTTPCase/HTTPRouteResponseHeaderModifier/5_request_to_'/multiple'_should_go_to_infra-backend-v1 (0.03s)"
+      ],
+      "requestLogCount": 304,
+      "nativeHAProxyReloadCount": 9,
+      "caseGoSHA256": "680991da77df603fa86e10b6a86ed90677d76b095dfdeeb5ea904b615a6658da",
+      "manifestSHA256": "9033aaa4b763c791c036f429b2f32f8050364c9e78d77a1500cbe26f35c0a99c",
+      "parentConditionsAfterCase": [
+        {
+          "Accepted": "True/Accepted",
+          "ResolvedRefs": "True/ResolvedRefs",
+          "gateway-api-openstack.github.io/Programmed": "False/Pending"
+        }
+      ],
+      "reportSHA256": "9beaa86b4b559e55fa0a61e15705d12e6c0c949c0bb08ab060b85d6c783c06b6",
+      "logSHA256": "92143c84f25072e28b08f0e5500fefbd0d40a0c9781c5909000819e64b82a104"
+    }
+  }
+}
