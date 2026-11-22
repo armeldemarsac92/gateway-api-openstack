@@ -31,7 +31,7 @@ func TestIsolatedHTTPSListenerIncludesVirtualHosts(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if req.Method == http.MethodGet {
-			_, _ = w.Write([]byte(`{"listeners":[{"id":"shared","https_virtual_hosts":["*","*.example.test","shop.example.test"]},{"id":"dedicated"}]}`))
+			_, _ = w.Write([]byte(`{"listeners":[{"id":"shared","https_virtual_hosts":["*","*.example.test","shop.example.test"]},{"id":"dedicated"},{"id":"invalid","admin_state_up":true,"https_virtual_hosts":false}]}`))
 			return
 		}
 		if req.Method == http.MethodPut {
@@ -77,6 +77,9 @@ func TestIsolatedHTTPSListenerIncludesVirtualHosts(t *testing.T) {
 	observed, err := service.ListListenerInventory(t.Context(), listeners.ListOpts{})
 	if err != nil || !slices.Equal(observed.HTTPSVirtualHosts["shared"], hosts) || observed.HTTPSVirtualHosts["dedicated"] != nil {
 		t.Fatalf("virtual hosts = %#v, err = %v", observed.HTTPSVirtualHosts, err)
+	}
+	if observed.HTTPSVirtualHosts["invalid"] == nil || len(observed.HTTPSVirtualHosts["invalid"]) != 0 || !observed.AdminStatesObserved["invalid"] {
+		t.Fatalf("invalid enrollment lost its identity or appeared valid: %+v", observed)
 	}
 	if err := service.SetListenerHTTPSVirtualHosts(t.Context(), "shared", hosts[:2]); err != nil {
 		t.Fatal(err)

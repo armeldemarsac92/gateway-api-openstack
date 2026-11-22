@@ -49,7 +49,7 @@ func (s *Service) ListListenerInventory(ctx context.Context, opts listeners.List
 	var response struct {
 		Listeners []struct {
 			listeners.Listener
-			VirtualHosts        []string `json:"https_virtual_hosts"`
+			VirtualHosts        json.RawMessage `json:"https_virtual_hosts"`
 			DefaultHTTPResponse *struct {
 				StatusCode int `json:"status_code"`
 			} `json:"default_http_response"`
@@ -72,7 +72,13 @@ func (s *Service) ListListenerInventory(ctx context.Context, opts listeners.List
 			if inventory.HTTPSVirtualHosts == nil {
 				inventory.HTTPSVirtualHosts = make(map[string][]string)
 			}
-			inventory.HTTPSVirtualHosts[item.ID] = observed.VirtualHosts
+			var hosts []string
+			if err := json.Unmarshal(observed.VirtualHosts, &hosts); err != nil || hosts == nil {
+				// Keep its identity and admin state available for withdrawal.
+				// A present, unreadable set cannot verify any allowed section.
+				hosts = []string{}
+			}
+			inventory.HTTPSVirtualHosts[item.ID] = hosts
 		}
 		if observed.DefaultHTTPResponse != nil {
 			if inventory.DefaultHTTPResponseCodes == nil {

@@ -187,6 +187,10 @@ func TestHTTPPolicyScopeAppliesToEachAction(t *testing.T) {
 	if err != nil || plain.HTTPSListenerHostname != "" {
 		t.Fatalf("plain scope = %q, err = %v", plain.HTTPSListenerHostname, err)
 	}
+	unreadable, err := readPolicyObservation(json.RawMessage(`{"id":"invalid","https_listener_hostname":false}`))
+	if err != nil || unreadable.HTTPSListenerHostname != "" || unreadable.Policy.ID != "invalid" {
+		t.Fatalf("unreadable policy lost its identity or appeared authorized: %+v, err = %v", unreadable, err)
+	}
 }
 
 func TestAuditReadbackTreatsFormattedEmptyTargetsAsInactive(t *testing.T) {

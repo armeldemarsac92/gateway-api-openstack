@@ -159,7 +159,7 @@ func (s *Service) ListPolicyObservations(ctx context.Context, opts l7policies.Li
 func readPolicyObservation(raw json.RawMessage) (L7PolicyObservation, error) {
 	var row struct {
 		l7policies.L7Policy
-		HTTPSListenerHostname   string          `json:"https_listener_hostname"`
+		HTTPSListenerHostname   json.RawMessage `json:"https_listener_hostname"`
 		AdminState              *bool           `json:"admin_state_up"`
 		PoolReference           json.RawMessage `json:"redirect_pool_id"`
 		Targets                 json.RawMessage `json:"targets"`
@@ -172,8 +172,12 @@ func readPolicyObservation(raw json.RawMessage) (L7PolicyObservation, error) {
 	if strings.TrimSpace(row.ID) == "" {
 		return L7PolicyObservation{}, fmt.Errorf("L7 policy row does not report an ID")
 	}
-	observation := L7PolicyObservation{Policy: row.L7Policy, PoolReference: row.PoolReference, AdminState: row.AdminState,
-		HTTPSListenerHostname: row.HTTPSListenerHostname}
+	observation := L7PolicyObservation{Policy: row.L7Policy, PoolReference: row.PoolReference, AdminState: row.AdminState}
+	if len(row.HTTPSListenerHostname) != 0 {
+		// A string is the only positive section proof. Keep the owning policy
+		// identifiable even when the endpoint cannot report a valid scope.
+		_ = json.Unmarshal(row.HTTPSListenerHostname, &observation.HTTPSListenerHostname)
+	}
 	if row.AdminState != nil {
 		observation.Policy.AdminStateUp = *row.AdminState
 	}
