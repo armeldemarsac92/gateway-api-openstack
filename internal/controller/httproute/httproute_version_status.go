@@ -144,7 +144,10 @@ func (r *Reconciler) setRouteUnsupportedVersion(
 // routeForwardingEstablished requires the current route revision and proof
 // that the established forwarding fits within the current listener hostname.
 func (r *Reconciler) routeForwardingEstablished(route *gatewayv1.HTTPRoute, parents []managedRouteParent, identity cloud.Identity, attachment boundHTTPAttachment) bool {
-	if len(attachment.listeners) != 1 || len(parents) != 1 || parents[0].gateway.Generation != attachment.gatewayGeneration ||
+	// A delegated section can change independently of the Gateway generation.
+	// Existing Route status cannot attest which ListenerSet revision was installed.
+	if len(attachment.listeners) != 1 || len(parents) != 1 || parents[0].listenerSet != nil ||
+		parents[0].gateway.Generation != attachment.gatewayGeneration ||
 		!controller.SameGatewayIdentity(identity, controller.RouteIdentity(r.Config, parents[0].gateway, route)) {
 		return false
 	}
