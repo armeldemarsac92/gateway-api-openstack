@@ -64,6 +64,16 @@ func compileLogical(t *testing.T, input Input) Gateway {
 	return result
 }
 
+func TestCompileGatewayListenersWithDelegationDenied(t *testing.T) {
+	allow := &gatewayv1.AllowedListeners{Namespaces: &gatewayv1.ListenerNamespaces{From: ptr.To(gatewayv1.NamespacesFromNone)}}
+	gateway := logicalGateway()
+	gateway.Spec.AllowedListeners = allow
+	result := compileLogical(t, Input{Gateway: gateway, Routes: []gatewayv1.HTTPRoute{logicalRoute("shop", "/")}})
+	if len(result.Diagnostics) != 0 || len(result.Listeners) != 1 || result.Listeners[0].AttachedRoutes != 1 {
+		t.Fatalf("gateway with delegation disabled lost its own listener or route: %#v", result)
+	}
+}
+
 func TestCompileOrdersWholeGateway(t *testing.T) {
 	broad := logicalRoute("broad", "/api")
 	specific := logicalRoute("specific", "/api/admin/")

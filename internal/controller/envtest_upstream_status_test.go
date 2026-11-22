@@ -25,6 +25,7 @@ import (
 	"io/fs"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	kubeyaml "k8s.io/apimachinery/pkg/util/yaml"
@@ -45,6 +46,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/httproute"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/l4route"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/listenerset"
 )
 
 func startGatewayStatusReconcilers(t *testing.T, manager ctrl.Manager, cfg controller.Config, provider *recordingProvider) *graph.Writer {
@@ -55,6 +57,9 @@ func startGatewayStatusReconcilers(t *testing.T, manager ctrl.Manager, cfg contr
 	}
 	gateway := newEnvtestGatewayReconciler(manager.GetClient(), manager.GetAPIReader(), provider, cfg)
 	if err := gateway.SetupWithManager(manager); err != nil {
+		t.Fatal(err)
+	}
+	if err := listenerset.SetupWithManager(t.Context(), manager, cfg.ControllerName); err != nil {
 		t.Fatal(err)
 	}
 	writer := gateway.Writer.(*graph.Writer)
@@ -105,7 +110,8 @@ func testUpstreamGatewayStatus(t *testing.T, c client.Client, cfg controller.Con
 		Applier: kubernetes.Applier{GatewayClass: className, ControllerName: string(cfg.ControllerName), ManifestFS: []fs.FS{&conformance.Manifests}},
 		TimeoutConfig: config.TimeoutConfig{GWCMustBeAccepted: envtestWaitTimeout, LatestObservedGenerationSet: envtestWaitTimeout,
 			GatewayMustHaveCondition: envtestWaitTimeout, GatewayStatusMustHaveListeners: envtestWaitTimeout,
-			GatewayMustHaveAddress: envtestWaitTimeout, HTTPRouteMustHaveCondition: envtestWaitTimeout},
+			GatewayMustHaveAddress: envtestWaitTimeout, HTTPRouteMustHaveCondition: envtestWaitTimeout,
+			NamespacesMustBeReady: envtestWaitTimeout, ListenerSetMustHaveCondition: envtestWaitTimeout},
 	}
 	config.SetupTimeoutConfig(&s.TimeoutConfig)
 	kubernetes.GWCMustHaveAcceptedConditionTrue(t, c, s.TimeoutConfig, className)
@@ -163,6 +169,31 @@ func testUpstreamGatewayStatus(t *testing.T, c client.Client, cfg controller.Con
 		tests.GatewayStaticAddresses.Run(t, s)
 	})
 
+	t.Run("ListenerSet rejection", func(t *testing.T) {
+		// Envtest has no scheduler. The original cases require a ready Pod
+		// before checking Gateway and ListenerSet status.
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Namespace: suite.InfrastructureNamespace, Name: "listenerset-status-fixture"},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "fixture", Image: "unused"}}},
+		}
+		if err := c.Create(t.Context(), pod); err != nil {
+			t.Fatal(err)
+		}
+		pod.Status.Phase = corev1.PodSucceeded
+		if err := c.Status().Update(t.Context(), pod); err != nil {
+			t.Fatal(err)
+		}
+		for _, tc := range []suite.ConformanceTest{tests.ListenerSetDefaultNotAllowed, tests.ListenerSetAllowedNamespaceNone} {
+			t.Run(tc.ShortName, func(t *testing.T) {
+				s.RunTest = tc.ShortName
+				tc.Run(t, s)
+			})
+		}
+	})
+	t.Run("ListenerSet parent lifecycle", func(t *testing.T) {
+		testListenerSetParentLifecycle(t, s, className)
+	})
+
 	for _, tc := range []suite.ConformanceTest{
 		tests.GatewayClassObservedGenerationBump,
 		tests.GatewayInvalidRouteKind,
@@ -180,6 +211,99 @@ func testUpstreamGatewayStatus(t *testing.T, c client.Client, cfg controller.Con
 			tc.Run(t, s)
 		})
 	}
+}
+
+func testListenerSetParentLifecycle(t *testing.T, s *suite.ConformanceTestSuite, className string) {
+	t.Helper()
+	parent := &gatewayv1.Gateway{
+		ObjectMeta: metav1.ObjectMeta{Namespace: suite.InfrastructureNamespace, Name: "listenerset-parent-lifecycle"},
+		Spec: gatewayv1.GatewaySpec{
+			GatewayClassName: gatewayv1.ObjectName(className),
+			Listeners:        []gatewayv1.Listener{{Name: "http", Port: 80, Protocol: gatewayv1.HTTPProtocolType}},
+		},
+	}
+	listenerSet := &gatewayv1.ListenerSet{
+		ObjectMeta: metav1.ObjectMeta{Namespace: suite.WebBackendNamespace, Name: "listenerset-parent-lifecycle"},
+		Spec: gatewayv1.ListenerSetSpec{
+			ParentRef: gatewayv1.ParentGatewayReference{
+				Namespace: ptr.To(gatewayv1.Namespace(parent.Namespace)),
+				Name:      gatewayv1.ObjectName(parent.Name),
+			},
+			Listeners: []gatewayv1.ListenerEntry{{Name: "delegated", Port: 8080, Protocol: gatewayv1.HTTPProtocolType}},
+		},
+	}
+	key := client.ObjectKeyFromObject(listenerSet)
+	check := func(status metav1.ConditionStatus, accepted, programmed gatewayv1.ListenerSetConditionReason) {
+		t.Helper()
+		kubernetes.ListenerSetMustHaveCondition(t, s.Client, s.TimeoutConfig, key, metav1.Condition{
+			Type: string(gatewayv1.ListenerSetConditionAccepted), Status: status, Reason: string(accepted),
+		})
+		kubernetes.ListenerSetMustHaveCondition(t, s.Client, s.TimeoutConfig, key, metav1.Condition{
+			Type: string(gatewayv1.ListenerSetConditionProgrammed), Status: status, Reason: string(programmed),
+		})
+	}
+	deny := func() {
+		t.Helper()
+		check(metav1.ConditionFalse, gatewayv1.ListenerSetReasonNotAllowed, gatewayv1.ListenerSetReasonNotAllowed)
+	}
+	for _, obj := range []client.Object{listenerSet, parent} {
+		if err := s.Client.Create(t.Context(), obj); err != nil {
+			t.Fatal(err)
+		}
+	}
+	deny()
+
+	setPolicy := func(policy *gatewayv1.AllowedListeners) {
+		t.Helper()
+		if err := s.Client.Get(t.Context(), client.ObjectKeyFromObject(parent), parent); err != nil {
+			t.Fatal(err)
+		}
+		base := parent.DeepCopy()
+		parent.Spec.AllowedListeners = policy
+		if err := s.Client.Patch(t.Context(), parent, client.MergeFrom(base)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setPolicy(&gatewayv1.AllowedListeners{Namespaces: &gatewayv1.ListenerNamespaces{From: ptr.To(gatewayv1.NamespacesFromAll)}})
+	check(metav1.ConditionFalse, gatewayv1.ListenerSetReasonListenersNotValid, gatewayv1.ListenerSetReasonInvalid)
+	setPolicy(&gatewayv1.AllowedListeners{})
+	deny()
+	kubernetes.GatewayMustHaveAttachedListeners(t, s.Client, s.TimeoutConfig, client.ObjectKeyFromObject(parent), 0)
+
+	if err := s.Client.Get(t.Context(), key, listenerSet); err != nil {
+		t.Fatal(err)
+	}
+	base := listenerSet.DeepCopy()
+	listenerSet.Spec.Listeners[0].Name = "updated"
+	if err := s.Client.Patch(t.Context(), listenerSet, client.MergeFrom(base)); err != nil {
+		t.Fatal(err)
+	}
+	deny()
+
+	if err := s.Client.Delete(t.Context(), parent); err != nil {
+		t.Fatal(err)
+	}
+	check(metav1.ConditionUnknown, gatewayv1.ListenerSetReasonPending, gatewayv1.ListenerSetReasonPending)
+
+	if err := s.Client.Get(t.Context(), key, listenerSet); err != nil {
+		t.Fatal(err)
+	}
+	base = listenerSet.DeepCopy()
+	listenerSet.Spec.ParentRef.Namespace = nil
+	if err := s.Client.Patch(t.Context(), listenerSet, client.MergeFrom(base)); err != nil {
+		t.Fatal(err)
+	}
+	local := &gatewayv1.Gateway{
+		ObjectMeta: metav1.ObjectMeta{Namespace: listenerSet.Namespace, Name: parent.Name},
+		Spec: gatewayv1.GatewaySpec{
+			GatewayClassName: parent.Spec.GatewayClassName,
+			Listeners:        parent.Spec.Listeners,
+		},
+	}
+	if err := s.Client.Create(t.Context(), local); err != nil {
+		t.Fatal(err)
+	}
+	deny()
 }
 
 // Use the upstream namespaces, same-namespace Gateway and referenced backend

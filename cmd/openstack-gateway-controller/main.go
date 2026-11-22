@@ -54,6 +54,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/httproute"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/l4route"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/listenerset"
 )
 
 // version is overridden at build time with -X main.version=<release>.
@@ -287,6 +288,9 @@ func run(ctx context.Context) error {
 	gatewayReconciler.Writer, routeReconciler.Writer, tcpReconciler.Writer, udpReconciler.Writer = writer, writer, writer, writer
 	if err := gatewayReconciler.SetupWithManager(manager); err != nil {
 		return fmt.Errorf("set up Gateway controller: %w", err)
+	}
+	if err := listenerset.SetupWithManager(ctx, manager, controllerConfig.ControllerName); err != nil {
+		return fmt.Errorf("set up ListenerSet controller: %w", err)
 	}
 	if err := routeReconciler.SetupWithManager(manager); err != nil {
 		return fmt.Errorf("set up HTTPRoute controller: %w", err)

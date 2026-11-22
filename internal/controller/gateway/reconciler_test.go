@@ -995,7 +995,10 @@ func TestValidateGatewayRejectsUnsupportedGatewayWideFields(t *testing.T) {
 		mutate func(*gatewayv1.GatewaySpec)
 	}{
 		{name: "infrastructure", mutate: func(spec *gatewayv1.GatewaySpec) { spec.Infrastructure = &gatewayv1.GatewayInfrastructure{} }},
-		{name: "allowed listeners", mutate: func(spec *gatewayv1.GatewaySpec) { spec.AllowedListeners = &gatewayv1.AllowedListeners{} }},
+		{name: "listener delegation", mutate: func(spec *gatewayv1.GatewaySpec) {
+			all := gatewayv1.NamespacesFromAll
+			spec.AllowedListeners = &gatewayv1.AllowedListeners{Namespaces: &gatewayv1.ListenerNamespaces{From: &all}}
+		}},
 		{name: "gateway TLS", mutate: func(spec *gatewayv1.GatewaySpec) { spec.TLS = &gatewayv1.GatewayTLSConfig{} }},
 		{name: "listener authorization", mutate: func(spec *gatewayv1.GatewaySpec) {
 			spec.Listeners[0].Filters = &gatewayv1.ListenerFilters{Requests: []gatewayv1.ListenerFilter{{Type: gatewayv1.ListenerFilterExternalAuth}}}

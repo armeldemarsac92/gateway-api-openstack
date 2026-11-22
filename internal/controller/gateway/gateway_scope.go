@@ -22,12 +22,14 @@ import (
 	"strings"
 
 	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
 type gatewayProviderWarning struct {
@@ -95,6 +97,9 @@ func (r *Reconciler) patchGateway(ctx context.Context, scope *gatewayScope) erro
 		return nil
 	}
 	desired := scope.gateway.DeepCopy()
+	if scope.managed && model.GatewayDisallowsListenerSets(desired) && ptr.Deref(desired.Status.AttachedListenerSets, 0) != 0 {
+		desired.Status.AttachedListenerSets = ptr.To(int32(0))
+	}
 	if !equality.Semantic.DeepEqual(scope.original.Status, desired.Status) {
 		statusBase := desired.DeepCopy()
 		statusBase.Status = scope.original.Status
