@@ -40,6 +40,7 @@ type Input struct {
 	ResponseHeaderModifier bool
 	HTTPRequestRedirect    bool
 	HTTPRequestURLRewrite  bool
+	BackendRequestFilters  bool
 	BackendH2C             bool
 	EnableXBackend         bool
 	BackendTLSPolicies     map[ServicePortKey]backendtls.Selection `json:"-"`

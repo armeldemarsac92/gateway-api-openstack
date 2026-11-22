@@ -71,7 +71,7 @@ func (p *Provider) observeScopedHTTPGraph(ctx context.Context, desired desiredGa
 		}
 		spec, present := configured[listener.ProtocolPort]
 		retiring := !present || scopedHTTPProtocol(spec) != listener.Protocol
-		actual.outcome, err = p.defaultPoolListenerOutcome(&listener, retiring || listener.Protocol == terminatedHTTPS || rewriteListenerNeedsRecovery(desired, actual, listener))
+		actual.outcome, err = p.defaultPoolListenerOutcome(&listener, retiring || listener.Protocol == terminatedHTTPS || requestTransformListenerNeedsRecovery(desired, actual, listener))
 		if err != nil {
 			return actual, err
 		}

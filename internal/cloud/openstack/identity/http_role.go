@@ -366,3 +366,7 @@ func (id Identity) RouteOwner(tags []string, role string) (RouteOwnerProof, bool
 // RequestURLRewritePolicyTag records use of the extension on an owned L7
 // policy. A stock Octavia may omit the field from its policy inventory.
 const RequestURLRewritePolicyTag = "gw-api-request-url-rewrite"
+
+// BackendRequestFiltersPolicyTag identifies weighted policies with per-target
+// transformations even when the Octavia API does not report them.
+const BackendRequestFiltersPolicyTag = "gw-api-backend-request-filters"
