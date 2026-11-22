@@ -38,6 +38,13 @@ const (
 	httpMethodRuleType      l7policies.RuleType = "HTTP_METHOD"
 )
 
+// Match the native media type with a POSIX ERE so HAProxy can use either libc
+// or PCRE. Octavia's HAProxy template cannot pass #, & or ' through portably,
+// so the optional codec accepts the rest of the HTTP token alphabet. Including
+// a space in the blank class avoids a nested-set warning from Octavia's Python
+// regex validator.
+const grpcContentType = "^[Aa][Pp][Pp][Ll][Ii][Cc][Aa][Tt][Ii][Oo][Nn]/[Gg][Rr][Pp][Cc]([+][A-Za-z0-9!$%*+.^_`|~-]+)?[ [:blank:]]*(;|$)"
+
 type desiredPolicy struct {
 	role                     string
 	position                 int32
@@ -56,6 +63,7 @@ type desiredPolicy struct {
 	responseHeaderOperations []cloud.HTTPHeaderOperation
 	method                   string
 	headers                  []cloud.HTTPHeaderMatch
+	grpc                     bool
 }
 
 type desiredRule struct {
@@ -96,7 +104,7 @@ func (r desiredRoute) monitorType() string {
 	if r.protocol() == cloud.ListenerProtocolUDP {
 		return monitors.TypeUDPConnect
 	}
-	if r.spec.TCPHealthMonitor {
+	if r.spec.GRPC {
 		return monitors.TypeTCP
 	}
 	return r.protocol()
@@ -108,6 +116,9 @@ func (p *Provider) buildDesiredRoute(spec cloud.RouteSpec) (desiredRoute, error)
 	}
 	if len(spec.HTTPBackends) != 0 || len(spec.WeightedHTTPRules) != 0 || len(spec.FixedHTTPRules) != 0 {
 		return p.buildDesiredHTTPBackends(spec)
+	}
+	if spec.GRPC {
+		return desiredRoute{}, cloud.NewProviderError(cloud.ErrorCategoryTerminalValidation, errors.New("gRPC routing requires HTTP backend groups"))
 	}
 	route, err := p.buildDesiredRoutePart(spec, "", false)
 	for index := range route.policies {
@@ -401,6 +412,7 @@ func (p *Provider) buildHTTPMatchPolicies(r *desiredRoute, matches []cloud.HTTPP
 			policy.weighted = r.weightedTargets != nil
 			policy.requestHeaderOperations = operations
 			policy.responseHeaderOperations = responseOperations
+			policy.grpc = r.spec.GRPC
 			policy.role = policyRuleRole(policy, policy.role, "")
 			if _, err := r.identity.RouteTags(policy.role); err != nil {
 				return err
@@ -554,6 +566,15 @@ func rulesFor(policy desiredPolicy, hostnameRuleValue string) []desiredRule {
 			ruleType:    l7policies.TypeHostName,
 			compareType: l7policies.CompareTypeRegex,
 			value:       hostnameRuleValue,
+		})
+	}
+	if policy.grpc {
+		rules = append(rules, desiredRule{
+			role:        policyRuleRole(policy, openstackidentity.RoleRuleGRPCContentType, ""),
+			ruleType:    l7policies.TypeHeader,
+			compareType: l7policies.CompareTypeRegex,
+			key:         "content-type",
+			value:       grpcContentType,
 		})
 	}
 	if policy.method != "" {

@@ -60,7 +60,7 @@ func TestGRPCExactHeadersKeepAlternativesAndPrecedenceOnH2CBackends(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(desired.HTTPBackends) != 2 || !desired.TCPHealthMonitor {
+	if len(desired.HTTPBackends) != 2 || !desired.GRPC {
 		t.Fatalf("want two gRPC backends with TCP health checks, got %#v", desired)
 	}
 	want := map[string][]cloud.HTTPPathMatch{
@@ -81,6 +81,104 @@ func TestGRPCExactHeadersKeepAlternativesAndPrecedenceOnH2CBackends(t *testing.T
 	}
 }
 
+func TestGRPCRequestHeaderModifierFollowsItsMethod(t *testing.T) {
+	cfg := testConfig()
+	cfg.BackendH2C, cfg.FixedHTTPResponses = true, true
+	_, gateway := providerRouteParentObjects(cfg)
+	match := func(method string) gatewayv1.GRPCRouteMatch {
+		return gatewayv1.GRPCRouteMatch{Method: &gatewayv1.GRPCMethodMatch{Service: ptr.To("example.Echo"), Method: ptr.To(method)}}
+	}
+	route := &gatewayv1.GRPCRoute{ObjectMeta: metav1.ObjectMeta{Namespace: gateway.Namespace, Name: "echo", UID: "route-uid"}}
+	route.Spec.ParentRefs = []gatewayv1.ParentReference{{Name: gatewayv1.ObjectName(gateway.Name)}}
+	route.Spec.Rules = []gatewayv1.GRPCRouteRule{grpcRule("v1", match("Marked")), grpcRule("v1", match("Plain"))}
+	route.Spec.Rules[0].Filters = []gatewayv1.GRPCRouteFilter{{
+		Type: gatewayv1.GRPCRouteFilterRequestHeaderModifier,
+		RequestHeaderModifier: &gatewayv1.HTTPHeaderFilter{
+			Set:    []gatewayv1.HTTPHeader{{Name: "X-Mode", Value: "blue"}},
+			Add:    []gatewayv1.HTTPHeader{{Name: "X-Trace", Value: "one"}},
+			Remove: []string{"X-Legacy"},
+		},
+	}}
+	// The same method and backend select only the first rule's operations.
+	shadow := route.Spec.Rules[0].DeepCopy()
+	shadow.Filters[0].RequestHeaderModifier.Set[0].Value = "shadow"
+	route.Spec.Rules = append(route.Spec.Rules, *shadow)
+	projected := model.ProjectGRPCRoute(route)
+	if _, err := (&Reconciler{Config: cfg}).validateRouteStructure(projected); err == nil {
+		t.Fatal("gRPC request header operations must require operator enrollment")
+	}
+	cfg.RequestHeaderModifier = true
+	svc, endpoints, node := validNodePortBackend(gateway.Namespace, "v1")
+	svc.Spec.Ports[0].AppProtocol = ptr.To("kubernetes.io/h2c")
+	reader := indexedFakeClientBuilder(testScheme(t), cfg).WithObjects(svc, endpoints, node).Build()
+	desired, err := (&Reconciler{Config: cfg}).buildRouteModelWithReader(t.Context(), reader, projected, gateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(desired.HTTPBackends) != 1 || !desired.HTTPBackends[0].BackendH2C {
+		t.Fatalf("want one h2c backend, got %#v", desired.HTTPBackends)
+	}
+	got := make(map[string][]cloud.HTTPHeaderOperation)
+	for _, match := range desired.HTTPBackends[0].Matches {
+		got[match.PathValue] = match.RequestHeaderOperations
+	}
+	want := map[string][]cloud.HTTPHeaderOperation{
+		"/example.Echo/Marked": {
+			{Operation: cloud.HTTPHeaderSet, Name: "x-mode", Value: "blue"},
+			{Operation: cloud.HTTPHeaderAdd, Name: "x-trace", Value: "one"},
+			{Operation: cloud.HTTPHeaderRemove, Name: "x-legacy"},
+		},
+		"/example.Echo/Plain": nil,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("request headers by method = %#v, want %#v", got, want)
+	}
+}
+
+func TestGRPCDefaultAndServiceRulesUseMethodPrecedence(t *testing.T) {
+	cfg := testConfig()
+	cfg.BackendH2C, cfg.FixedHTTPResponses = true, true
+	_, gateway := providerRouteParentObjects(cfg)
+	route := &gatewayv1.GRPCRoute{ObjectMeta: metav1.ObjectMeta{Namespace: gateway.Namespace, Name: "echo", UID: "grpc"}}
+	route.Spec.ParentRefs = []gatewayv1.ParentReference{{Name: gatewayv1.ObjectName(gateway.Name)}}
+	service := ptr.To("example.Echo")
+	route.Spec.Rules = []gatewayv1.GRPCRouteRule{
+		grpcRule("v1"),
+		grpcRule("v2", gatewayv1.GRPCRouteMatch{Method: &gatewayv1.GRPCMethodMatch{Service: service}}),
+		grpcRule("v1", gatewayv1.GRPCRouteMatch{Method: &gatewayv1.GRPCMethodMatch{Service: service, Method: ptr.To("Echo")}}),
+		grpcRule("v2", gatewayv1.GRPCRouteMatch{}),
+	}
+	v1, ep1, node := validNodePortBackend(gateway.Namespace, "v1")
+	v2, ep2, _ := validNodePortBackend(gateway.Namespace, "v2")
+	v1.Spec.Ports[0].AppProtocol = ptr.To("kubernetes.io/h2c")
+	v2.Spec.Ports[0].AppProtocol = ptr.To("kubernetes.io/h2c")
+	reader := indexedFakeClientBuilder(testScheme(t), cfg).WithObjects(v1, ep1, v2, ep2, node).Build()
+	desired, err := (&Reconciler{Config: cfg}).buildRouteModelWithReader(t.Context(), reader, model.ProjectGRPCRoute(route), gateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !desired.GRPC {
+		t.Fatal("gRPC service and default policies must be marked for native media type matching")
+	}
+	got := make(map[string][]cloud.HTTPPathMatch)
+	for _, backend := range desired.HTTPBackends {
+		got[backend.Name] = backend.Matches
+	}
+	want := map[string][]cloud.HTTPPathMatch{
+		"v1": {
+			{PathType: cloud.PathMatchExact, PathValue: "/example.Echo/Echo", Precedence: 0},
+			{PathType: cloud.PathMatchPrefix, PathValue: "/", Precedence: 2},
+		},
+		"v2": {
+			{PathType: cloud.PathMatchPrefix, PathValue: "/example.Echo", Precedence: 1},
+			{PathType: cloud.PathMatchPrefix, PathValue: "/", Precedence: 3},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("gRPC matches by backend = %#v, want %#v", got, want)
+	}
+}
+
 func TestGRPCExactHeadersRejectDisabledCapabilityAndUnsupportedMatches(t *testing.T) {
 	exact := gatewayv1.GRPCHeaderMatch{Name: "version", Value: "two"}
 	for _, test := range []struct {
@@ -91,8 +189,8 @@ func TestGRPCExactHeadersRejectDisabledCapabilityAndUnsupportedMatches(t *testin
 	}{
 		{name: "opt-in disabled", match: gatewayv1.GRPCRouteMatch{Headers: []gatewayv1.GRPCHeaderMatch{exact}}, message: "--octavia-http-header-exact"},
 		{name: "regex", enrolled: true, match: gatewayv1.GRPCRouteMatch{Headers: []gatewayv1.GRPCHeaderMatch{{Type: ptr.To(gatewayv1.GRPCHeaderMatchRegularExpression), Name: "version", Value: "t.*"}}}, message: "RegularExpression"},
-		{name: "partial method", enrolled: true, match: gatewayv1.GRPCRouteMatch{Method: &gatewayv1.GRPCMethodMatch{Service: ptr.To("example.Echo")}, Headers: []gatewayv1.GRPCHeaderMatch{exact}}, message: "exact service and method"},
-		{name: "catch-all", enrolled: true, message: "exact service and method"},
+		{name: "method without a service", enrolled: true, match: gatewayv1.GRPCRouteMatch{Method: &gatewayv1.GRPCMethodMatch{Method: ptr.To("Echo")}, Headers: []gatewayv1.GRPCHeaderMatch{exact}}, message: "exact service"},
+		{name: "empty method object", enrolled: true, match: gatewayv1.GRPCRouteMatch{Method: &gatewayv1.GRPCMethodMatch{}}, message: "exact service"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			cfg := testConfig()

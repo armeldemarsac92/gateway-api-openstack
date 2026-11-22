@@ -20,6 +20,8 @@ import (
 	"errors"
 	"net/http"
 	"reflect"
+	"regexp"
+	"slices"
 	"testing"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
@@ -444,9 +446,74 @@ func TestBuildRouteEnsurePlanDisablesPolicyBeforeRecreatingDeletedRule(t *testin
 	}
 }
 
+func TestGRPCPoliciesRequireNativeContentType(t *testing.T) {
+	spec := completeGraphSpec(safetyTestIdentity(t))
+	route := &spec.Routes[0].Spec
+	route.Hostname, route.PathType, route.PathValue = "", "", ""
+	route.GRPC = true
+	route.HTTPBackends = []cloud.HTTPBackend{{
+		Namespace: "workloads", Name: "echo", Port: 8080, Members: route.Members, BackendH2C: true,
+		Matches: []cloud.HTTPPathMatch{
+			{PathType: cloud.PathMatchExact, PathValue: "/example.Echo/Echo", Precedence: 0},
+			{PathType: cloud.PathMatchPrefix, PathValue: "/example.Echo", Precedence: 1},
+			{PathType: cloud.PathMatchPrefix, PathValue: "/", Precedence: 2},
+		},
+	}}
+	route.Members = nil
+	p := &Provider{projectID: "project-a", backendH2C: true, fixedHTTPResponses: true}
+	graph, err := p.buildDesiredGatewayGraph(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	part := graph.routes[0].httpParts[0]
+	var ranks [3]bool
+	for _, policy := range part.policies {
+		ranks[policy.precedence] = true
+		rules := rulesFor(policy, "")
+		index := slices.IndexFunc(rules, func(rule desiredRule) bool { return rule.key == "content-type" })
+		if index == -1 || rules[index].ruleType != l7policies.TypeHeader ||
+			rules[index].compareType != l7policies.CompareTypeRegex || rules[index].invert {
+			t.Fatalf("policy %s requires a positive Octavia HEADER REGEX, got %#v", policy.role, rules)
+		}
+		guard := rules[index]
+		tags := safetyRouteTags(t, part.identity, guard.role)
+		role, ok := readRouteResourceRole(tags, openstackidentity.RoleRuleGRPCContentType)
+		if !ok || role.match != policy.matchKey || role.backend != policy.backendKey {
+			t.Fatalf("policy %s has an unrecognized guard owner: %#v", policy.role, role)
+		}
+		expression, err := regexp.CompilePOSIX(guard.value)
+		if err != nil {
+			t.Fatalf("policy %s requires a POSIX extended regular expression: %v", policy.role, err)
+		}
+		for _, test := range []struct {
+			name, contentType string
+			match             bool
+		}{
+			{name: "gRPC request", contentType: "application/grpc", match: true},
+			{name: "gRPC with protobuf codec", contentType: "application/grpc+proto", match: true},
+			{name: "mixed case and JSON codec with parameters", contentType: "Application/GRPC+JSON \t; charset=utf-8", match: true},
+			{name: "custom codec", contentType: "application/grpc+x.v2-!$%*+^_`|~", match: true},
+			{name: "ordinary GET /health"},
+			{name: "ordinary POST with JSON", contentType: "application/json"},
+			{name: "gRPC-Web", contentType: "application/grpc-web+proto"},
+			{name: "empty codec", contentType: "application/grpc+; charset=utf-8"},
+			{name: "separator in codec", contentType: "application/grpc+custom/json"},
+			{name: "quoted codec", contentType: `application/grpc+"proto"`},
+			{name: "space in codec", contentType: "application/grpc+custom json"},
+		} {
+			if got := expression.MatchString(test.contentType); got != test.match {
+				t.Errorf("policy %s for %s (%q) matched = %t, want %t", policy.role, test.name, test.contentType, got, test.match)
+			}
+		}
+	}
+	if ranks != [3]bool{true, true, true} {
+		t.Fatalf("missing exact, service or default policies: %v", ranks)
+	}
+}
+
 func TestGRPCRouteTCPMonitorReplacesOwnedHTTPMonitor(t *testing.T) {
 	desired, actual := convergedRoutePlanFixture()
-	desired.spec.TCPHealthMonitor = true
+	desired.spec.GRPC = true
 	plan, _, err := buildRouteEnsurePlan(desired, actual)
 	want := []routeMutation{{kind: routeMutationDeleteMonitor, id: "monitor-1", parentID: "pool-1"}}
 	if err != nil || !reflect.DeepEqual(plan, want) {

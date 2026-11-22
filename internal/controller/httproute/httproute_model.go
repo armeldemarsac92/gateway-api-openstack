@@ -74,7 +74,7 @@ func (r *Reconciler) validateRouteStructure(route *gatewayv1.HTTPRoute) ([]gatew
 			return nil, grpcProfileDisabled()
 		}
 		if len(route.Spec.Rules) == 0 {
-			return nil, newRouteBuildError(routeErrorUnsupported, "GRPCRoute requires at least one match on an exact service and method or exact headers, and one backendRef per rule, without filters or session persistence")
+			return nil, newRouteBuildError(routeErrorUnsupported, "GRPCRoute rules support one backendRef, an optional exact service and method, exact header matches, and a rule-level RequestHeaderModifier.")
 		}
 	}
 	if len(route.Spec.Rules) == 0 {
@@ -295,7 +295,7 @@ func (r *Reconciler) buildRouteModelFromInputs(
 		MemberSubnetID:          topology.Topology.MemberSubnetID,
 		BackendSecurityGroupIDs: slices.Clone(topology.Topology.BackendSecurityGroupIDs),
 		HealthMonitor:           topology.HealthMonitor,
-		TCPHealthMonitor:        model.HTTPProfileRouteKind(route) == model.GRPCRouteKind,
+		GRPC:                    model.HTTPProfileRouteKind(route) == model.GRPCRouteKind,
 	}
 	if controller.GatewayListenerScope(r.Config, gateway) == gatewayv1.HTTPProtocolType {
 		spec.GatewayRequirements.ListenerPort, _ = strconv.Atoi(gateway.Annotations[r.Config.GatewayListenerPortAnnotation()])

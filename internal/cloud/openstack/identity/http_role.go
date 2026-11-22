@@ -100,6 +100,9 @@ const RoleRuleHTTPHeaderExact = "l7-header-exact"
 // RoleRuleHTTPMethod identifies the single method predicate in a match.
 const RoleRuleHTTPMethod = "l7-http-method"
 
+// RoleRuleGRPCContentType identifies the native gRPC media type predicate.
+const RoleRuleGRPCContentType = "l7-grpc-content-type"
+
 // HTTPHeaderRuleKey identifies one field within an exact-header conjunction.
 func HTTPHeaderRuleKey(name string) string {
 	return httpTupleKey("exact-header", name, "")
@@ -152,7 +155,7 @@ func httpMatchRole(role, base, match string, predicateKeys []string) string {
 		return ""
 	}
 	switch base {
-	case RolePolicyExact, RolePolicyPrefix, RoleRulePath, RoleRuleHost, RoleRuleHTTPMethod:
+	case RolePolicyExact, RolePolicyPrefix, RoleRulePath, RoleRuleHost, RoleRuleHTTPMethod, RoleRuleGRPCContentType:
 		if len(predicateKeys) == 0 {
 			return role + "/" + match
 		}
