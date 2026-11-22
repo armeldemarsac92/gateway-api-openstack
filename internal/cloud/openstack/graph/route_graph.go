@@ -40,17 +40,18 @@ const routeMonitorExpectedCodes = "200-399"
 var errWeightedTCPBackupUnknown = errors.New("waiting for Octavia to report the backup flag for every weighted TCP member")
 
 type observedRoutePolicy struct {
-	policy                  l7policies.L7Policy
-	role                    string
-	rules                   []observedRouteRule
-	versioned               bool
-	redirect                bool
-	adminObserved           bool
-	fixedResponse           bool
-	targetObserved          bool
-	weightedTargets         []octavia.WeightedHTTPTarget
-	requestHeaderOperations []cloud.HTTPHeaderOperation
-	httpsListenerHostname   string
+	policy                   l7policies.L7Policy
+	role                     string
+	rules                    []observedRouteRule
+	versioned                bool
+	redirect                 bool
+	adminObserved            bool
+	fixedResponse            bool
+	targetObserved           bool
+	weightedTargets          []octavia.WeightedHTTPTarget
+	requestHeaderOperations  []cloud.HTTPHeaderOperation
+	responseHeaderOperations []cloud.HTTPHeaderOperation
+	httpsListenerHostname    string
 }
 
 type observedRouteRule struct {
@@ -523,7 +524,17 @@ func (p *Provider) observeListenerPolicies(ctx context.Context, inventory *route
 			return &cloud.GraphError{Identity: owner.identity.Value(), Err: cloud.NewProviderError(
 				cloud.ErrorCategoryDependencyNotReady, fmt.Errorf("L7 policy %s reports invalid request header operations: %w", item.ID, observation.RequestHeaderOperationsErr))}
 		}
+		if observation.ResponseHeaderOperationsErr != nil {
+			return &cloud.GraphError{Identity: owner.identity.Value(), Err: cloud.NewProviderError(
+				cloud.ErrorCategoryDependencyNotReady, fmt.Errorf("L7 policy %s reports invalid response header operations: %w", item.ID, observation.ResponseHeaderOperationsErr))}
+		}
+		if len(observation.ResponseHeaderOperations) != 0 && item.Action != string(l7policies.ActionRedirectToPool) &&
+			!fixedResponse && !weighted {
+			return &cloud.GraphError{Identity: owner.identity.Value(), Err: cloud.NewProviderError(
+				cloud.ErrorCategoryDependencyNotReady, fmt.Errorf("L7 policy %s reports response header operations on an incompatible action", item.ID))}
+		}
 		observed.requestHeaderOperations = observation.RequestHeaderOperations
+		observed.responseHeaderOperations = observation.ResponseHeaderOperations
 		observed.httpsListenerHostname = observation.HTTPSListenerHostname
 		observed.adminObserved = observation.AdminState != nil
 		if strictPolicy || owner.requiresPolicyAbsenceProof {
@@ -716,26 +727,27 @@ const (
 )
 
 type routeMutation struct {
-	kind                    routeMutationKind
-	id                      string
-	parentID                string
-	member                  cloud.Member
-	memberTags              *[]string
-	policy                  desiredPolicy
-	rule                    desiredRule
-	retry                   bool
-	clearPoolPersistence    bool
-	backendH2C              *bool
-	poolAdmin               *bool
-	poolTags                *[]string
-	backendTLS              *octavia.BackendTLSSettings
-	reenableH2CPool         bool
-	clearMemberBackup       bool
-	withdrawHTTPPolicy      bool
-	weightedTargets         *[]octavia.WeightedHTTPTarget
-	requestHeaderOperations []cloud.HTTPHeaderOperation
-	requiresExactHeaders    bool
-	requiresHTTPMethod      bool
+	kind                     routeMutationKind
+	id                       string
+	parentID                 string
+	member                   cloud.Member
+	memberTags               *[]string
+	policy                   desiredPolicy
+	rule                     desiredRule
+	retry                    bool
+	clearPoolPersistence     bool
+	backendH2C               *bool
+	poolAdmin                *bool
+	poolTags                 *[]string
+	backendTLS               *octavia.BackendTLSSettings
+	reenableH2CPool          bool
+	clearMemberBackup        bool
+	withdrawHTTPPolicy       bool
+	weightedTargets          *[]octavia.WeightedHTTPTarget
+	requestHeaderOperations  []cloud.HTTPHeaderOperation
+	responseHeaderOperations []cloud.HTTPHeaderOperation
+	requiresExactHeaders     bool
+	requiresHTTPMethod       bool
 }
 
 func (s routeMutation) message() string {
@@ -779,7 +791,7 @@ func (s routeMutation) message() string {
 	case routeMutationSetPolicyHTTPSListenerHostname:
 		return "Updating the HTTPS listener scope on a disabled Octavia HTTP policy"
 	case routeMutationSetPolicyHeaders:
-		return "Updated Octavia L7 policy request headers"
+		return "Updated Octavia L7 policy header operations"
 	case routeMutationMovePolicy:
 		return "Updated Octavia L7 policy position"
 	case routeMutationCreateRule:
@@ -976,9 +988,10 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 		for _, policy := range actual.policies {
 			if policy.role == wantedPolicy.role && !policy.policy.AdminStateUp {
 				return []routeMutation{{kind: routeMutationEnablePolicy, id: policy.policy.ID,
-					policy:                  desiredPolicy{httpsListenerHostname: wantedPolicy.httpsListenerHostname},
-					requestHeaderOperations: wantedPolicy.requestHeaderOperations,
-					requiresExactHeaders:    len(wantedPolicy.headers) != 0, requiresHTTPMethod: wantedPolicy.method != ""}}, state, nil
+					policy:                   desiredPolicy{httpsListenerHostname: wantedPolicy.httpsListenerHostname},
+					requestHeaderOperations:  wantedPolicy.requestHeaderOperations,
+					responseHeaderOperations: wantedPolicy.responseHeaderOperations,
+					requiresExactHeaders:     len(wantedPolicy.headers) != 0, requiresHTTPMethod: wantedPolicy.method != ""}}, state, nil
 			}
 		}
 	}
@@ -1028,7 +1041,8 @@ func buildRoutePolicyPlan(
 		}
 		if !exists {
 			step := routeMutation{kind: routeMutationCreatePolicy, parentID: poolID, policy: wantedPolicy,
-				requestHeaderOperations: wantedPolicy.requestHeaderOperations}
+				requestHeaderOperations:  wantedPolicy.requestHeaderOperations,
+				responseHeaderOperations: wantedPolicy.responseHeaderOperations}
 			if wantedPolicy.weightedPlan != nil {
 				step.weightedTargets = &wantedPolicy.weightedPlan.targets
 			}
@@ -1047,23 +1061,22 @@ func buildRoutePolicyPlan(
 			desired.fixedResponse && (!observedPolicy.fixedResponse || policy.ProvisioningStatus == "ERROR") ||
 			!desired.fixedResponse && poolID != "" && (observedPolicy.fixedResponse ||
 				observedPolicy.targetObserved && policy.ProvisioningStatus == "ERROR" && policy.RedirectPoolID == poolID)
-		operations := wantedPolicy.requestHeaderOperations
-		headersUpdate := !slices.Equal(operations, observedPolicy.requestHeaderOperations) ||
-			policy.ProvisioningStatus == "ERROR" && (operations != nil || observedPolicy.requestHeaderOperations != nil)
-		if operations == nil && headersUpdate {
-			operations = []cloud.HTTPHeaderOperation{}
-		}
+		requestPatch := policyHeaderPatch(wantedPolicy.requestHeaderOperations, observedPolicy.requestHeaderOperations, policy.ProvisioningStatus == "ERROR")
+		responsePatch := policyHeaderPatch(wantedPolicy.responseHeaderOperations, observedPolicy.responseHeaderOperations, policy.ProvisioningStatus == "ERROR")
+		headersUpdate := requestPatch != nil || responsePatch != nil
 		if targetUpdate {
-			step := routeMutation{kind: routeMutationSetPolicyTarget, id: policy.ID, parentID: poolID}
+			step := routeMutation{kind: routeMutationSetPolicyTarget, id: policy.ID, parentID: poolID,
+				requestHeaderOperations: requestPatch, responseHeaderOperations: responsePatch}
 			if weighted != nil {
 				step.weightedTargets = &weighted.targets
 			}
-			if headersUpdate || len(operations) != 0 {
-				step.requestHeaderOperations = operations
+			if len(wantedPolicy.requestHeaderOperations) != 0 {
+				step.requestHeaderOperations = wantedPolicy.requestHeaderOperations
 			}
 			plan = append(plan, step)
 		} else if headersUpdate {
-			plan = append(plan, routeMutation{kind: routeMutationSetPolicyHeaders, id: policy.ID, requestHeaderOperations: operations})
+			plan = append(plan, routeMutation{kind: routeMutationSetPolicyHeaders, id: policy.ID,
+				requestHeaderOperations: requestPatch, responseHeaderOperations: responsePatch})
 		}
 		start := len(plan)
 		if weighted == nil && !desired.fixedResponse && !observedPolicy.fixedResponse && !desiredPolicyActionMatches(wantedPolicy, policy, poolID) {
@@ -1143,6 +1156,18 @@ func buildRouteDeletionPlan(actual observedRouteGraph) []routeMutation {
 		plan = append(plan, routeMutation{kind: routeMutationDeletePool, id: actual.pool.ID})
 	}
 	return plan
+}
+
+// policyHeaderPatch omits already-converged directions and explicitly clears
+// installed operations when the desired rule no longer has a filter.
+func policyHeaderPatch(wanted, observed []cloud.HTTPHeaderOperation, retry bool) []cloud.HTTPHeaderOperation {
+	if slices.Equal(wanted, observed) && !(retry && (wanted != nil || observed != nil)) {
+		return nil
+	}
+	if wanted == nil {
+		return []cloud.HTTPHeaderOperation{}
+	}
+	return wanted
 }
 
 func routeNeedsHTTPCapability(route desiredRoute, step routeMutation) bool {
@@ -1294,7 +1319,8 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 			opts.Action, opts.RedirectPrefix, opts.RedirectHttpCode = l7policies.ActionRedirectPrefix, redirect.prefix, redirect.statusCode
 		}
 		create := octavia.PolicyCreateOpts{CreateOpts: opts, FixedServerError: desired.fixedResponse,
-			RequestHeaderOperations: step.requestHeaderOperations, HTTPSListenerHostname: step.policy.httpsListenerHostname}
+			RequestHeaderOperations: step.requestHeaderOperations, ResponseHeaderOperations: step.responseHeaderOperations,
+			HTTPSListenerHostname: step.policy.httpsListenerHostname}
 		if step.weightedTargets != nil {
 			create.WeightedTargets = *step.weightedTargets
 		}
@@ -1310,14 +1336,16 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 	case routeMutationSetPolicyHTTPSListenerHostname:
 		_, err = p.octavia.SetPolicyHTTPSListenerHostname(ctx, step.id, step.policy.httpsListenerHostname)
 	case routeMutationSetPolicyHeaders:
-		_, err = p.octavia.UpdatePolicyRequestHeaders(ctx, step.id, l7policies.UpdateOpts{}, step.requestHeaderOperations)
+		_, err = p.octavia.UpdatePolicyHeaders(ctx, step.id, l7policies.UpdateOpts{},
+			octavia.PolicyHeaders{Request: step.requestHeaderOperations, Response: step.responseHeaderOperations})
 	case routeMutationSetPolicyTarget:
+		headers := octavia.PolicyHeaders{Request: step.requestHeaderOperations, Response: step.responseHeaderOperations}
 		if step.weightedTargets != nil {
-			_, err = p.octavia.SetPolicyWeightedTargets(ctx, step.id, *step.weightedTargets, step.requestHeaderOperations)
+			_, err = p.octavia.SetPolicyWeightedTargets(ctx, step.id, *step.weightedTargets, headers)
 		} else if desired.fixedResponse {
-			_, err = p.octavia.SetPolicyFixedResponse(ctx, step.id, step.requestHeaderOperations)
+			_, err = p.octavia.SetPolicyFixedResponse(ctx, step.id, headers)
 		} else {
-			_, err = p.octavia.UpdatePolicyRequestHeaders(ctx, step.id, l7policies.UpdateOpts{RedirectPoolID: &step.parentID}, step.requestHeaderOperations)
+			_, err = p.octavia.UpdatePolicyHeaders(ctx, step.id, l7policies.UpdateOpts{RedirectPoolID: &step.parentID}, headers)
 		}
 	case routeMutationMovePolicy:
 		_, err = p.octavia.UpdatePolicy(ctx, step.id, l7policies.UpdateOpts{Position: step.policy.position})

@@ -18,6 +18,7 @@ package httproute
 
 import (
 	"net/http"
+	"slices"
 	"strconv"
 
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -26,31 +27,25 @@ import (
 )
 
 // compileRouteAction rejects actions that the current Amphora model cannot emit.
-func compileRouteAction(rule gatewayv1.HTTPRouteRule, requestHeaderModifier bool) error {
+func compileRouteAction(rule gatewayv1.HTTPRouteRule, requestHeaderModifier, responseHeaderModifier bool) error {
 	if len(rule.Filters) == 0 {
 		if len(rule.BackendRefs) == 0 {
 			return compileHTTPResponse(http.StatusInternalServerError)
 		}
 		return nil
 	}
-	filter := rule.Filters[0]
-	switch filter.Type {
-	case gatewayv1.HTTPRouteFilterRequestHeaderModifier:
-		if !requestHeaderModifier {
-			return newRouteBuildError(routeErrorUnsupported, "RequestHeaderModifier requires route-scoped header operations in Octavia")
-		}
-		if _, err := model.NormalizeRequestHeaderModifier(rule.Filters); err != nil {
-			return newRouteBuildError(routeErrorUnsupported, "%s", err)
-		}
-		return nil
-	case gatewayv1.HTTPRouteFilterRequestRedirect:
+	if slices.ContainsFunc(rule.Filters, func(filter gatewayv1.HTTPRouteFilter) bool {
+		return filter.Type == gatewayv1.HTTPRouteFilterRequestRedirect
+	}) {
 		if _, err := model.NormalizeRequestRedirect(rule); err != nil {
 			return newRouteBuildError(routeErrorUnsupported, "%s", err)
 		}
 		return nil
-	default:
-		return newRouteBuildError(routeErrorUnsupported, "HTTPRoute filter %s is not supported", filter.Type)
 	}
+	if _, _, err := model.NormalizeHTTPHeaderFilters(rule.Filters, requestHeaderModifier, responseHeaderModifier); err != nil {
+		return newRouteBuildError(routeErrorUnsupported, "%s", err)
+	}
+	return nil
 }
 
 // routeRedirectPrefix resolves the scheme and port before passing the fixed

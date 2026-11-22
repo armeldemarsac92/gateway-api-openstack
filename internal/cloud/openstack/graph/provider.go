@@ -69,43 +69,45 @@ func NewIdentity(value cloud.Identity) (Identity, error) {
 // observes an asynchronous Octavia operation again.
 type ProviderConfig struct {
 	// BackendCA can retire previously published revisions after opt-out.
-	BackendCA             *backendca.Store
-	BackendTLSPolicy      bool
-	FixedHTTPResponses    bool
-	HTTPHeaderExact       bool
-	HTTPMethodMatch       bool
-	WeightedHTTPTargets   bool
-	RequestHeaderModifier bool
-	BackendH2C            bool
-	TLSSNIPassthrough     bool
-	TLSSNISuffix          bool
-	TCPTLSTermination     bool
-	OperationTimeout      time.Duration
-	PollInterval          time.Duration
+	BackendCA              *backendca.Store
+	BackendTLSPolicy       bool
+	FixedHTTPResponses     bool
+	HTTPHeaderExact        bool
+	HTTPMethodMatch        bool
+	WeightedHTTPTargets    bool
+	RequestHeaderModifier  bool
+	ResponseHeaderModifier bool
+	BackendH2C             bool
+	TLSSNIPassthrough      bool
+	TLSSNISuffix           bool
+	TCPTLSTermination      bool
+	OperationTimeout       time.Duration
+	PollInterval           time.Duration
 
 	HTTPSListenerIsolation bool
 }
 
 // Provider owns the OpenStack resource graph for managed Gateway API objects.
 type Provider struct {
-	backendCA             *backendca.Store
-	backendTLSPolicy      bool
-	fixedHTTPResponses    bool
-	httpHeaderExact       bool
-	httpMethodMatch       bool
-	weightedHTTPTargets   bool
-	requestHeaderModifier bool
-	backendH2C            bool
-	tlsSNIPassthrough     bool
-	tlsSNISuffix          bool
-	tcpTLSTermination     bool
-	projectID             string
-	region                string
-	neutron               *neutron.Service
-	octavia               *octavia.Service
-	topology              *topology.Resolver
-	operationTimeout      time.Duration
-	pollInterval          time.Duration
+	backendCA              *backendca.Store
+	backendTLSPolicy       bool
+	fixedHTTPResponses     bool
+	httpHeaderExact        bool
+	httpMethodMatch        bool
+	weightedHTTPTargets    bool
+	requestHeaderModifier  bool
+	responseHeaderModifier bool
+	backendH2C             bool
+	tlsSNIPassthrough      bool
+	tlsSNISuffix           bool
+	tcpTLSTermination      bool
+	projectID              string
+	region                 string
+	neutron                *neutron.Service
+	octavia                *octavia.Service
+	topology               *topology.Resolver
+	operationTimeout       time.Duration
+	pollInterval           time.Duration
 
 	httpsListenerIsolation bool
 }
@@ -120,24 +122,25 @@ func NewProvider(clients ServiceClients, cfg ProviderConfig) *Provider {
 		cfg.PollInterval = 2 * time.Second
 	}
 	return &Provider{
-		backendCA:             cfg.BackendCA,
-		backendTLSPolicy:      cfg.BackendTLSPolicy,
-		fixedHTTPResponses:    cfg.FixedHTTPResponses || cfg.WeightedHTTPTargets,
-		httpHeaderExact:       cfg.HTTPHeaderExact,
-		httpMethodMatch:       cfg.HTTPMethodMatch,
-		weightedHTTPTargets:   cfg.WeightedHTTPTargets,
-		requestHeaderModifier: cfg.RequestHeaderModifier,
-		backendH2C:            cfg.BackendH2C,
-		tlsSNIPassthrough:     cfg.TLSSNIPassthrough,
-		tlsSNISuffix:          cfg.TLSSNISuffix,
-		tcpTLSTermination:     cfg.TCPTLSTermination,
-		projectID:             clients.ProjectID,
-		region:                clients.Region,
-		neutron:               neutron.NewService(clients.Network),
-		octavia:               octavia.NewService(clients.LoadBalancer),
-		topology:              topology.NewResolver(clients, cfg.OperationTimeout),
-		operationTimeout:      cfg.OperationTimeout,
-		pollInterval:          cfg.PollInterval,
+		backendCA:              cfg.BackendCA,
+		backendTLSPolicy:       cfg.BackendTLSPolicy,
+		fixedHTTPResponses:     cfg.FixedHTTPResponses || cfg.WeightedHTTPTargets,
+		httpHeaderExact:        cfg.HTTPHeaderExact,
+		httpMethodMatch:        cfg.HTTPMethodMatch,
+		weightedHTTPTargets:    cfg.WeightedHTTPTargets,
+		requestHeaderModifier:  cfg.RequestHeaderModifier,
+		responseHeaderModifier: cfg.ResponseHeaderModifier,
+		backendH2C:             cfg.BackendH2C,
+		tlsSNIPassthrough:      cfg.TLSSNIPassthrough,
+		tlsSNISuffix:           cfg.TLSSNISuffix,
+		tcpTLSTermination:      cfg.TCPTLSTermination,
+		projectID:              clients.ProjectID,
+		region:                 clients.Region,
+		neutron:                neutron.NewService(clients.Network),
+		octavia:                octavia.NewService(clients.LoadBalancer),
+		topology:               topology.NewResolver(clients, cfg.OperationTimeout),
+		operationTimeout:       cfg.OperationTimeout,
+		pollInterval:           cfg.PollInterval,
 
 		httpsListenerIsolation: cfg.HTTPSListenerIsolation,
 	}

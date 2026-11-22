@@ -110,15 +110,17 @@ func (target L7PolicyTarget) IsFixedServerError() bool {
 // L7PolicyObservation keeps readable pool references even when another field
 // prevents the entire target from decoding.
 type L7PolicyObservation struct {
-	Policy                     l7policies.L7Policy
-	HTTPSListenerHostname      string
-	Target                     *L7PolicyTarget
-	ExtendedTargetFields       bool
-	PoolIDs                    []string
-	PoolReference              json.RawMessage
-	AdminState                 *bool
-	RequestHeaderOperations    []cloud.HTTPHeaderOperation
-	RequestHeaderOperationsErr error
+	Policy                      l7policies.L7Policy
+	HTTPSListenerHostname       string
+	Target                      *L7PolicyTarget
+	ExtendedTargetFields        bool
+	PoolIDs                     []string
+	PoolReference               json.RawMessage
+	AdminState                  *bool
+	RequestHeaderOperations     []cloud.HTTPHeaderOperation
+	RequestHeaderOperationsErr  error
+	ResponseHeaderOperations    []cloud.HTTPHeaderOperation
+	ResponseHeaderOperationsErr error
 }
 
 // ListPolicyObservations retains every policy row across explicit API pages.
@@ -159,12 +161,13 @@ func (s *Service) ListPolicyObservations(ctx context.Context, opts l7policies.Li
 func readPolicyObservation(raw json.RawMessage) (L7PolicyObservation, error) {
 	var row struct {
 		l7policies.L7Policy
-		HTTPSListenerHostname   json.RawMessage `json:"https_listener_hostname"`
-		AdminState              *bool           `json:"admin_state_up"`
-		PoolReference           json.RawMessage `json:"redirect_pool_id"`
-		Targets                 json.RawMessage `json:"targets"`
-		FixedResponse           json.RawMessage `json:"fixed_response"`
-		RequestHeaderOperations json.RawMessage `json:"request_header_operations"`
+		HTTPSListenerHostname    json.RawMessage `json:"https_listener_hostname"`
+		AdminState               *bool           `json:"admin_state_up"`
+		PoolReference            json.RawMessage `json:"redirect_pool_id"`
+		Targets                  json.RawMessage `json:"targets"`
+		FixedResponse            json.RawMessage `json:"fixed_response"`
+		RequestHeaderOperations  json.RawMessage `json:"request_header_operations"`
+		ResponseHeaderOperations json.RawMessage `json:"response_header_operations"`
 	}
 	if err := json.Unmarshal(raw, &row); err != nil {
 		return L7PolicyObservation{}, fmt.Errorf("extract L7 policy: %w", err)
@@ -204,7 +207,11 @@ func readPolicyObservation(raw json.RawMessage) (L7PolicyObservation, error) {
 	}
 	if row.RequestHeaderOperations != nil {
 		observation.RequestHeaderOperations, observation.RequestHeaderOperationsErr =
-			readPolicyRequestHeaderOperations(row.RequestHeaderOperations)
+			readPolicyHeaderOperations(row.RequestHeaderOperations, requestHeaderOperationsField)
+	}
+	if row.ResponseHeaderOperations != nil {
+		observation.ResponseHeaderOperations, observation.ResponseHeaderOperationsErr =
+			readPolicyHeaderOperations(row.ResponseHeaderOperations, responseHeaderOperationsField)
 	}
 	var target L7PolicyTarget
 	if json.Unmarshal(raw, &target) == nil {
@@ -241,8 +248,8 @@ func setPolicyFixedServerError(body map[string]any) {
 }
 
 // SetPolicyFixedResponse switches the target without changing state or position.
-func (s *Service) SetPolicyFixedResponse(ctx context.Context, id string, operations []cloud.HTTPHeaderOperation) (*l7policies.L7Policy, error) {
-	return s.UpdatePolicyRequestHeaders(ctx, id, fixedResponsePolicyOpts{}, operations)
+func (s *Service) SetPolicyFixedResponse(ctx context.Context, id string, headers PolicyHeaders) (*l7policies.L7Policy, error) {
+	return s.UpdatePolicyHeaders(ctx, id, fixedResponsePolicyOpts{}, headers)
 }
 
 type weightedPolicyOpts struct {
@@ -254,18 +261,19 @@ func (opts weightedPolicyOpts) ToL7PolicyUpdateMap() (map[string]any, error) {
 }
 
 // SetPolicyWeightedTargets replaces all slots in one request, retaining the policy position and state.
-func (s *Service) SetPolicyWeightedTargets(ctx context.Context, id string, targets []WeightedHTTPTarget, operations []cloud.HTTPHeaderOperation) (*l7policies.L7Policy, error) {
-	return s.UpdatePolicyRequestHeaders(ctx, id, weightedPolicyOpts{targets: targets}, operations)
+func (s *Service) SetPolicyWeightedTargets(ctx context.Context, id string, targets []WeightedHTTPTarget, headers PolicyHeaders) (*l7policies.L7Policy, error) {
+	return s.UpdatePolicyHeaders(ctx, id, weightedPolicyOpts{targets: targets}, headers)
 }
 
-// PolicyCreateOpts carries the section, request filters and target of one L7 policy.
+// PolicyCreateOpts carries the section, header filters and target of one L7 policy.
 // All valid target actions on a shared port must select an HTTPS listener hostname.
 type PolicyCreateOpts struct {
 	l7policies.CreateOpts
-	HTTPSListenerHostname   string
-	RequestHeaderOperations []cloud.HTTPHeaderOperation
-	WeightedTargets         []WeightedHTTPTarget
-	FixedServerError        bool
+	HTTPSListenerHostname    string
+	RequestHeaderOperations  []cloud.HTTPHeaderOperation
+	ResponseHeaderOperations []cloud.HTTPHeaderOperation
+	WeightedTargets          []WeightedHTTPTarget
+	FixedServerError         bool
 }
 
 func (opts PolicyCreateOpts) ToL7PolicyCreateMap() (map[string]any, error) {
@@ -290,7 +298,7 @@ func (opts PolicyCreateOpts) ToL7PolicyCreateMap() (map[string]any, error) {
 	} else if opts.WeightedTargets != nil {
 		policy["targets"] = opts.WeightedTargets
 	}
-	writePolicyRequestHeaderOperations(body, opts.RequestHeaderOperations)
+	(PolicyHeaders{Request: opts.RequestHeaderOperations, Response: opts.ResponseHeaderOperations}).write(body)
 	return body, nil
 }
 

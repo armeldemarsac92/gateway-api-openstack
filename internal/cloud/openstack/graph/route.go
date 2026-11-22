@@ -39,22 +39,23 @@ const (
 )
 
 type desiredPolicy struct {
-	role                    string
-	position                int32
-	compareType             l7policies.CompareType
-	path                    string
-	pathInvert              bool
-	precedence              int
-	backendKey              string
-	matchKey                string
-	hostnameRuleValue       string
-	httpsListenerHostname   string
-	redirect                *desiredRedirectPolicy
-	weighted                bool
-	weightedPlan            *weightedHTTPPolicyPlan
-	requestHeaderOperations []cloud.HTTPHeaderOperation
-	method                  string
-	headers                 []cloud.HTTPHeaderMatch
+	role                     string
+	position                 int32
+	compareType              l7policies.CompareType
+	path                     string
+	pathInvert               bool
+	precedence               int
+	backendKey               string
+	matchKey                 string
+	hostnameRuleValue        string
+	httpsListenerHostname    string
+	redirect                 *desiredRedirectPolicy
+	weighted                 bool
+	weightedPlan             *weightedHTTPPolicyPlan
+	requestHeaderOperations  []cloud.HTTPHeaderOperation
+	responseHeaderOperations []cloud.HTTPHeaderOperation
+	method                   string
+	headers                  []cloud.HTTPHeaderMatch
 }
 
 type desiredRule struct {
@@ -386,12 +387,20 @@ func (p *Provider) buildHTTPMatchPolicies(r *desiredRoute, matches []cloud.HTTPP
 		if r.fixedResponse {
 			operations = nil
 		}
+		responseOperations, err := cloud.NormalizeHTTPResponseHeaderOperations(match.ResponseHeaderOperations)
+		if err != nil {
+			return err
+		}
+		if len(responseOperations) != 0 && !p.responseHeaderModifier {
+			return errors.New("response header operations require controller opt-in for Octavia")
+		}
 		for _, policy := range policies {
 			policy.backendKey, policy.matchKey = r.backendKey, matchKey
 			policy.httpsListenerHostname = scope
 			policy.hostnameRuleValue, policy.precedence = hostnameRuleValue, match.Precedence
 			policy.weighted = r.weightedTargets != nil
 			policy.requestHeaderOperations = operations
+			policy.responseHeaderOperations = responseOperations
 			policy.role = policyRuleRole(policy, policy.role, "")
 			if _, err := r.identity.RouteTags(policy.role); err != nil {
 				return err

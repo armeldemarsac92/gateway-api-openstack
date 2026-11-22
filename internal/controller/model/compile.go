@@ -173,21 +173,17 @@ func compileRoute(route *gatewayv1.HTTPRoute, input Input) Route {
 			} else {
 				compiled.Redirect = &redirect
 			}
-		} else if input.RequestHeaderModifier && len(rule.Filters) == 1 &&
-			rule.Filters[0].Type == gatewayv1.HTTPRouteFilterRequestHeaderModifier {
-			operations, err := NormalizeRequestHeaderModifier(rule.Filters)
-			if err != nil {
-				compiled.Diagnostics = append(compiled.Diagnostics, *unsupported(err.Error(), ScopeRule))
-			} else {
-				compiled.RequestHeaderOperations = operations
-			}
 		} else {
-			for _, filter := range rule.Filters {
+			request, response, err := NormalizeHTTPHeaderFilters(rule.Filters, input.RequestHeaderModifier,
+				input.ResponseHeaderModifier && HTTPProfileRouteKind(route) == HTTPRouteKind)
+			if err != nil {
 				scope := ScopeRule
-				if !knownFilter(filter.Type) {
+				if slices.ContainsFunc(rule.Filters, func(filter gatewayv1.HTTPRouteFilter) bool { return !knownFilter(filter.Type) }) {
 					scope = ScopeRoute
 				}
-				compiled.Diagnostics = append(compiled.Diagnostics, *unsupported(fmt.Sprintf("HTTPRoute filter %s requires an explicit action model before lowering", filter.Type), scope))
+				compiled.Diagnostics = append(compiled.Diagnostics, *unsupported(err.Error(), scope))
+			} else {
+				compiled.RequestHeaderOperations, compiled.ResponseHeaderOperations = request, response
 			}
 		}
 		for _, backend := range rule.BackendRefs {

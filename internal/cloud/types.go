@@ -169,14 +169,15 @@ type Member struct {
 // HTTPPathMatch describes one path and its optional conjunctive predicates at its listener rank.
 type HTTPPathMatch struct {
 	// HTTPSListenerHostname restricts this alternative to one logical HTTPS listener.
-	HTTPSListenerHostname   string `json:",omitempty"`
-	Hostname                string
-	PathType                PathMatchType
-	PathValue               string
-	Precedence              int
-	Method                  string                `json:",omitempty"`
-	Headers                 []HTTPHeaderMatch     `json:",omitempty"`
-	RequestHeaderOperations []HTTPHeaderOperation `json:",omitempty"`
+	HTTPSListenerHostname    string `json:",omitempty"`
+	Hostname                 string
+	PathType                 PathMatchType
+	PathValue                string
+	Precedence               int
+	Method                   string                `json:",omitempty"`
+	Headers                  []HTTPHeaderMatch     `json:",omitempty"`
+	RequestHeaderOperations  []HTTPHeaderOperation `json:",omitempty"`
+	ResponseHeaderOperations []HTTPHeaderOperation `json:",omitempty"`
 }
 
 type HTTPBackendKind string

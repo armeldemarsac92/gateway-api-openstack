@@ -105,7 +105,7 @@ func run(ctx context.Context) error {
 		apiBurst           int
 	)
 	var httpsListenerIsolation bool
-	var exactHTTPHeaders, httpMethodMatch, requestHeaderModifier, backendH2C, tlsSNIPassthrough, tlsSNISuffix, tcpTLSTermination bool
+	var exactHTTPHeaders, httpMethodMatch, requestHeaderModifier, responseHeaderModifier, backendH2C, tlsSNIPassthrough, tlsSNISuffix, tcpTLSTermination bool
 	zapOptions := zap.Options{Development: false}
 	zapOptions.BindFlags(flag.CommandLine)
 	flag.StringVar(&controllerName, "controller-name", envOr("GATEWAY_OPENSTACK_CONTROLLER_NAME", configv1alpha1.GroupName+"/gateway-api-openstack"), "Gateway API controllerName for this installation")
@@ -119,6 +119,7 @@ func run(ctx context.Context) error {
 	flag.BoolVar(&tlsSNISuffix, "octavia-tls-sni-suffix", false, "use the advertised Octavia wildcard SNI capability (requires --octavia-tls-sni-passthrough)")
 	flag.BoolVar(&backendTLSPolicy, "octavia-backend-tls-policy", false, "authenticate BackendTLSPolicy HTTP upstreams with the regional Octavia hostname capability and a Barbican CA (requires --octavia-microversion=2.8 or newer)")
 	flag.BoolVar(&httpsListenerIsolation, "octavia-https-listener-isolation", false, "isolate terminated HTTPS sections on a shared port using the regional Octavia capability (requires --tls-certificate-map)")
+	flag.BoolVar(&responseHeaderModifier, "octavia-response-header-modifier", false, "use the advertised Octavia L7 response header operations capability")
 	flag.BoolVar(&backendH2C, "octavia-backend-h2c", false, "use the advertised Octavia h2c backend transport capability")
 	flag.BoolVar(&requestHeaderModifier, "octavia-request-header-modifier", false, "use the advertised Octavia L7 request header operations capability")
 	flag.StringVar(&certificateMap, "tls-certificate-map", envOr("GATEWAY_OPENSTACK_TLS_CERTIFICATE_MAP", ""), "operator-managed TLS revision map for terminating listeners")
@@ -164,6 +165,7 @@ func run(ctx context.Context) error {
 		FixedHTTPResponses:      fixedHTTPResponses,
 		WeightedHTTPTargets:     weightedTargets,
 		RequestHeaderModifier:   requestHeaderModifier,
+		ResponseHeaderModifier:  responseHeaderModifier,
 		BackendH2C:              backendH2C,
 		BackendTLSPolicy:        backendTLSPolicy,
 		OperatorHTTPS:           certificateMap != "",
@@ -212,19 +214,20 @@ func run(ctx context.Context) error {
 	}
 	controllerConfig.OpenStackProjectID = serviceClients.ProjectID
 	providerConfig := openstack.ProviderConfig{
-		BackendCA:             backendca.New(clusterID, serviceClients),
-		BackendTLSPolicy:      backendTLSPolicy,
-		HTTPHeaderExact:       exactHTTPHeaders,
-		HTTPMethodMatch:       httpMethodMatch,
-		FixedHTTPResponses:    fixedHTTPResponses,
-		WeightedHTTPTargets:   weightedTargets,
-		RequestHeaderModifier: requestHeaderModifier,
-		BackendH2C:            backendH2C,
-		TLSSNIPassthrough:     tlsSNIPassthrough,
-		TLSSNISuffix:          tlsSNISuffix,
-		TCPTLSTermination:     tcpTLSTermination,
-		OperationTimeout:      operationTimeout,
-		PollInterval:          pollInterval,
+		BackendCA:              backendca.New(clusterID, serviceClients),
+		BackendTLSPolicy:       backendTLSPolicy,
+		HTTPHeaderExact:        exactHTTPHeaders,
+		HTTPMethodMatch:        httpMethodMatch,
+		FixedHTTPResponses:     fixedHTTPResponses,
+		WeightedHTTPTargets:    weightedTargets,
+		RequestHeaderModifier:  requestHeaderModifier,
+		ResponseHeaderModifier: responseHeaderModifier,
+		BackendH2C:             backendH2C,
+		TLSSNIPassthrough:      tlsSNIPassthrough,
+		TLSSNISuffix:           tlsSNISuffix,
+		TCPTLSTermination:      tcpTLSTermination,
+		OperationTimeout:       operationTimeout,
+		PollInterval:           pollInterval,
 
 		HTTPSListenerIsolation: httpsListenerIsolation,
 	}

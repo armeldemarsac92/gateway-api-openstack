@@ -48,6 +48,8 @@ type Config struct {
 	WeightedHTTPTargets bool
 	// RequestHeaderModifier enables route-scoped L7 request header operations.
 	RequestHeaderModifier bool
+	// ResponseHeaderModifier enables route-scoped L7 response header operations.
+	ResponseHeaderModifier bool
 	// BackendH2C enables h2c for HTTP backends that explicitly request it.
 	BackendH2C bool
 	// BackendTLSPolicy enables Service port policy selection for HTTP forwarding.

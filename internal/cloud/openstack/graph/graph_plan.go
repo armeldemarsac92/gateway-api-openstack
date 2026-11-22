@@ -338,6 +338,13 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 				(scopedHTTP || groupedHTTP) && (withdrawPolicy || memberWithdrawal || fixTarget)
 			switch {
 			case fixTarget:
+				// An invalid backend must be withdrawn even if Octavia no
+				// longer accepts new response modifications. Keep installed
+				// operations on the fixed action until the ordinary header
+				// plan can apply any desired replacement.
+				if len(step.responseHeaderOperations) != 0 {
+					mutation.route.responseHeaderOperations = nil
+				}
 				if stepIndex == 0 && ensureHold == "" {
 					queueTargetWithdrawal(mutation, observed, &fixedTargetWithdrawals)
 				}
@@ -658,7 +665,8 @@ func (p *Provider) prepareNextGraphMutation(ctx context.Context, desired desired
 		}
 	}
 	recordBlocked(first, blocked)
-	blockedHTTPPredicate := blocked.capability == octavia.GatewayCapabilityHTTPHeaderExact || blocked.capability == octavia.GatewayCapabilityHTTPMethodMatch
+	blockedHTTPPolicy := blocked.capability == octavia.GatewayCapabilityHTTPHeaderExact || blocked.capability == octavia.GatewayCapabilityHTTPMethodMatch ||
+		blocked.capability == octavia.GatewayCapabilityResponseHeaderOperations
 	result.Outcome = result.Routes[first.routeIndex].Result.Outcome
 	seen := map[poolRouteOwner]bool{{route: first.routeIndex, backend: first.backendKey}: true}
 	for _, sibling := range plan[1:] {
@@ -672,7 +680,7 @@ func (p *Provider) prepareNextGraphMutation(ctx context.Context, desired desired
 		// Each pool can contribute only its first planned action. Subsequent
 		// actions may rely on a write whose result has yet to be observed.
 		seen[owner] = true
-		independentListener := blockedHTTPPredicate && first.listenerID != "" && sibling.listenerID != "" && first.listenerID != sibling.listenerID
+		independentListener := blockedHTTPPolicy && first.listenerID != "" && sibling.listenerID != "" && first.listenerID != sibling.listenerID
 		switch sibling.route.kind {
 		case routeMutationCreatePool, routeMutationUpdatePool, routeMutationCreateMember, routeMutationUpdateMember:
 		default:
@@ -744,6 +752,9 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 		if len(step.route.requestHeaderOperations) != 0 {
 			required = append(required, octavia.GatewayCapabilityRequestHeaderOperations)
 		}
+		if len(step.route.responseHeaderOperations) != 0 {
+			required = append(required, octavia.GatewayCapabilityResponseHeaderOperations)
+		}
 		if step.route.requiresExactHeaders || len(step.route.policy.headers) != 0 && step.route.kind == routeMutationCreatePolicy ||
 			step.route.rule.ruleType == httpHeaderExactRuleType {
 			required = append(required, octavia.GatewayCapabilityHTTPHeaderExact)
@@ -788,6 +799,9 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 			} else if len(step.route.requestHeaderOperations) != 0 && !step.withdrawHTTPPolicy &&
 				(!explicitlyMissing || missing.Capability == octavia.GatewayCapabilityRequestHeaderOperations) {
 				err = &unavailableRouteCapability{error: err, capability: octavia.GatewayCapabilityRequestHeaderOperations}
+			} else if len(step.route.responseHeaderOperations) != 0 && !step.withdrawHTTPPolicy &&
+				(!explicitlyMissing || missing.Capability == octavia.GatewayCapabilityResponseHeaderOperations) {
+				err = &unavailableRouteCapability{error: err, capability: octavia.GatewayCapabilityResponseHeaderOperations}
 			} else if slices.Contains(required, octavia.GatewayCapabilityHTTPHeaderExact) &&
 				(!explicitlyMissing || missing.Capability == octavia.GatewayCapabilityHTTPHeaderExact) {
 				err = &unavailableRouteCapability{error: err, capability: octavia.GatewayCapabilityHTTPHeaderExact}

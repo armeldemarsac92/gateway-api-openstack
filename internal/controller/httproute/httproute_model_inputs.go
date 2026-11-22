@@ -226,6 +226,7 @@ func (r *Reconciler) collectRouteModelInputs(ctx context.Context, reader client.
 		return nil, err
 	}
 	input.RequestHeaderModifier = r.Config.RequestHeaderModifier
+	input.ResponseHeaderModifier = r.Config.ResponseHeaderModifier
 	input.BackendH2C = r.Config.BackendH2C
 	input.EnableXBackend = r.Config.XBackendEnabled()
 	if input.EnableXBackend {
