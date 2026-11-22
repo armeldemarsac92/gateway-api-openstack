@@ -202,7 +202,7 @@ func stableUnqualifiedRouteAttachment(route *gatewayv1.HTTPRoute, parent managed
 	}
 	effective := model.IntersectHostnames(selected.Hostname, route.Spec.Hostnames)
 	for _, candidate := range candidates {
-		if candidate.Name == selected.Name || validateRouteHostnames(candidate.Hostname, route.Spec.Hostnames, false) != nil {
+		if candidate.Name == selected.Name || validateRouteHostnames(candidate.Hostname, route.Spec.Hostnames) != nil {
 			continue
 		}
 		if !model.ObservesRouteNamespace(candidate) && !model.AllowsRouteNamespace(candidate, parent.gateway.Namespace, route.Namespace, nil) {

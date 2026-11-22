@@ -19,6 +19,7 @@ package httproute
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -290,6 +291,7 @@ func TestListenerHostnameChangesRemoveStaleRouteForwarding(t *testing.T) {
 		versionSkew         bool
 		routeHosts          []gatewayv1.Hostname
 		initialListenerHost gatewayv1.Hostname
+		initialSecondHost   gatewayv1.Hostname
 		updatedListenerHost gatewayv1.Hostname
 		otherListenerHost   gatewayv1.Hostname
 		wantAccepted        metav1.ConditionStatus
@@ -311,10 +313,15 @@ func TestListenerHostnameChangesRemoveStaleRouteForwarding(t *testing.T) {
 		{
 			name: "listener edit admits two distinct constraints", routeHosts: []gatewayv1.Hostname{"api.example.test", "other.example.test"},
 			initialListenerHost: "api.example.test", updatedListenerHost: "*.example.test",
-			wantAccepted: metav1.ConditionFalse, wantReason: "UnsupportedValue",
+			wantAccepted: metav1.ConditionTrue, wantReason: "Accepted",
 		},
 		{
-			name: "added section makes established attachment ambiguous during skew", versionSkew: true,
+			name: "remove one of two established sections during skew", versionSkew: true,
+			initialListenerHost: "api.example.test", initialSecondHost: "other.example.test", updatedListenerHost: "api.example.test",
+			wantAccepted: metav1.ConditionUnknown, wantReason: "Pending",
+		},
+		{
+			name: "added section changes the established host set during skew", versionSkew: true,
 			initialListenerHost: "api.example.test", updatedListenerHost: "api.example.test", otherListenerHost: "other.example.test",
 			wantAccepted: metav1.ConditionUnknown, wantReason: "Pending",
 		},
@@ -333,6 +340,11 @@ func TestListenerHostnameChangesRemoveStaleRouteForwarding(t *testing.T) {
 			gateway := programmedTestGateway(cfg)
 			if test.initialListenerHost != "" {
 				gateway.Spec.Listeners[0].Hostname = &test.initialListenerHost
+			}
+			if test.initialSecondHost != "" {
+				second := *gateway.Spec.Listeners[0].DeepCopy()
+				second.Name, second.Hostname = "other", &test.initialSecondHost
+				gateway.Spec.Listeners = append(gateway.Spec.Listeners, second)
 			}
 			route := mapperTestHTTPRoute(gateway.Namespace, "api", gatewayv1.ParentReference{Name: "edge"}, "backend")
 			route.UID, route.Generation = "route-uid", 1
@@ -358,6 +370,12 @@ func TestListenerHostnameChangesRemoveStaleRouteForwarding(t *testing.T) {
 			if len(provider.routeSpecs) != 1 {
 				t.Fatalf("route was never programmed: %v", provider.routeSpecs)
 			}
+			if test.initialSecondHost != "" {
+				groups := provider.routeSpecs[0].HTTPBackends
+				if len(groups) != 1 || len(groups[0].Matches) != 2 {
+					t.Fatalf("both original hostname policies must be established: %#v", groups)
+				}
+			}
 			if test.versionSkew {
 				if err := kubeClient.Get(ctx, client.ObjectKeyFromObject(class), class); err != nil {
 					t.Fatal(err)
@@ -371,6 +389,9 @@ func TestListenerHostnameChangesRemoveStaleRouteForwarding(t *testing.T) {
 				t.Fatal(err)
 			}
 			gateway.Spec.Listeners[0].Hostname = &test.updatedListenerHost
+			if test.initialSecondHost != "" {
+				gateway.Spec.Listeners = gateway.Spec.Listeners[:1]
+			}
 			if test.otherListenerHost != "" {
 				second := *gateway.Spec.Listeners[0].DeepCopy()
 				second.Name, second.Hostname = "other", &test.otherListenerHost
@@ -386,14 +407,27 @@ func TestListenerHostnameChangesRemoveStaleRouteForwarding(t *testing.T) {
 					t.Fatal(err)
 				}
 				accepted := meta.FindStatusCondition(route.Status.Parents[0].Conditions, string(gatewayv1.RouteConditionAccepted))
-				if accepted == nil || accepted.Status != metav1.ConditionFalse || accepted.Reason != string(gatewayv1.RouteReasonUnsupportedValue) {
-					t.Fatalf("established route did not report its ambiguous attachment before cleanup: %#v", accepted)
+				if accepted == nil || accepted.Status != metav1.ConditionUnknown || accepted.Reason != string(gatewayv1.RouteReasonPending) {
+					t.Fatalf("route with newly eligible sections during version skew = %#v", accepted)
 				}
 			}
 			for range 3 {
 				reconcile()
 			}
-			if len(provider.deletedRoutes) != 1 || provider.deletedRoutes[0] != provider.routeSpecs[0].Identity ||
+			if test.wantAccepted == metav1.ConditionTrue {
+				if len(provider.deletedRoutes) != 0 || len(provider.routeSpecs) < 2 {
+					t.Fatalf("expanding the hostname set did not update forwarding: ensured %d, removed %d", len(provider.routeSpecs), len(provider.deletedRoutes))
+				}
+				groups := provider.routeSpecs[len(provider.routeSpecs)-1].HTTPBackends
+				if len(groups) != 1 || len(groups[0].Matches) != 2 {
+					t.Fatalf("expanded hostname policies = %#v", groups)
+				}
+				hosts := []string{groups[0].Matches[0].Hostname, groups[0].Matches[1].Hostname}
+				slices.Sort(hosts)
+				if !slices.Equal(hosts, []string{"api.example.test", "other.example.test"}) {
+					t.Fatalf("expanded hostnames = %v", hosts)
+				}
+			} else if len(provider.deletedRoutes) != 1 || provider.deletedRoutes[0] != provider.routeSpecs[0].Identity ||
 				len(provider.routeSpecs) != 1 || len(provider.deletedGateways) != 0 {
 				t.Fatalf("expected cleanup of only the stale route graph, got route ensures %v, route deletions %v, Gateway deletions %v",
 					provider.routeSpecs, provider.deletedRoutes, provider.deletedGateways)

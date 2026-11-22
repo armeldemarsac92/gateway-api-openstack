@@ -259,7 +259,7 @@ listeners:
     hostname: api.example.com
 ```
 
-Set one managed parent reference on each HTTPRoute. This reference selects the second port. Create a separate route for the first port with `sectionName: http` and `port: 80`. Give each rule one backend Service reference. The backends can differ while the hostname and path stay the same.
+Set one managed parent reference on each HTTPRoute. This reference selects the second port. With several distinct exact hostnames on that port, a port-only reference serves every section that allows the route. Add `sectionName` to select one of them. Create a separate route for the first port with `sectionName: http` and `port: 80`. Give each rule one backend Service reference. The backends can differ while the hostname and path stay the same.
 
 ```yaml
 parentRefs:

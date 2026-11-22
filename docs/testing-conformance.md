@@ -3,9 +3,9 @@
 The first Amphora traffic target is a Standard-channel HTTPRoute. The complete Gateway API v1.7.0 qualification covers five Gateway profiles and two mesh profiles. The HTTP Core profile includes Gateway, HTTPRoute, ReferenceGrant and HTTPS termination. [v1.7.0 profile definitions](https://github.com/kubernetes-sigs/gateway-api/blob/v1.7.0/conformance/utils/suite/profiles.go)
 The [Hibiscus qualification runner](qualification/v1.7.0/live-runs.md) can exercise all seven profiles on the two channels. The [qualification record](qualification/v1.7.0/README.md) tracks those runs.
 
-## Implementation gaps
+## Initial Amphora scope
 
-This table describes implementation coverage, not test results.
+This table records the original HTTP baseline. The [v1.7.0 feature matrix](qualification/v1.7.0/matrix/named-contracts.md) tracks subsequent implementations and observations for all profiles.
 The [compatibility record](providers/compatibility.md) summarizes the available evidence.
 
 | Area | Current implementation | Remaining Core work |

@@ -1,8 +1,8 @@
 # Multiple declared HTTPRoute hostnames on one listener
 
-The Amphora HTTP controller intersects each valid declared hostname with the selected listener and ignores declarations outside that intersection. If all matching declarations yield a single distinct constraint, each of the route's existing Octavia policies uses one `HOST_NAME` rule alongside its path rule. The strongest original matching hostname still determines precedence when routes share the same effective hostname. [Gateway API v1.7.0 hostname rules](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/apis/v1/httproute_types.go#L61-L108)
+The Amphora HTTP controller intersects each declared hostname with the selected listeners. It creates a policy branch for each distinct effective hostname and match. A listener with no hostname can serve both `example.com` and `example.net` from one HTTPRoute. When routes share an effective hostname, the strongest matching declaration determines precedence. [Gateway API v1.7.0 hostname rules](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/apis/v1/httproute_types.go#L61-L108)
 
-An empty intersection gives `Accepted=False/NoMatchingListenerHostname`. Two or more distinct effective constraints give `Accepted=False/UnsupportedValue` because the graph supports one hostname per route. Either rejection withdraws the affected route's existing policies. During Gateway API version skew, a changed listener whose current generation has yet to be programmed can retain forwarding only if every declared hostname already fits its restriction.
+An empty intersection gives `Accepted=False/NoMatchingListenerHostname` and withdraws the route's policies. When HTTPRoute and GRPCRoute share a port, the controller checks every effective hostname for overlap before assigning priority to the older route. During Gateway API version skew, a changed listener whose current generation has yet to be programmed can retain forwarding only if every declared hostname already fits its restriction.
 
 ## Qualification
 
