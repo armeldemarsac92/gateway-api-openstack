@@ -109,7 +109,7 @@ func (r *Reconciler) observeRouteGraphAdmission(ctx context.Context, gateway *ga
 		if !route.DeletionTimestamp.IsZero() || !r.structurallySupportedRoute(route) {
 			continue
 		}
-		parents, err := r.parentsForGateway(ctx, route, gateway)
+		parents, err := r.parentsForGateway(ctx, r.APIReader, route, gateway)
 		if err != nil {
 			return routeGraphAdmission{}, err
 		}
@@ -125,7 +125,7 @@ func (r *Reconciler) observeRouteGraphAdmission(ctx context.Context, gateway *ga
 				continue
 			}
 		}
-		selection, namespaces, err := r.selectRouteParentsWithNamespaces(ctx, route, parents, admission.listenerSets, namespacesByName)
+		selection, namespaces, err := r.selectRouteParentsWithNamespaces(ctx, r.APIReader, route, parents, admission.listenerSets, namespacesByName)
 		if err != nil {
 			return routeGraphAdmission{}, err
 		}

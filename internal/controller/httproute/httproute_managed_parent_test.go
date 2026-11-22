@@ -149,6 +149,143 @@ func TestHTTPRouteGraphRemainsValidWhenAnotherGatewayBecomesManaged(t *testing.T
 	}
 }
 
+func TestHTTPRouteMultiGatewayCleanupKeepsAllNativeSections(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	ctx, r := t.Context(), f.reconciler
+	listener := &f.gateway.Spec.Listeners[0]
+	listener.Hostname = ptr.To(gatewayv1.Hostname("first.example.test"))
+	listener.AllowedRoutes = &gatewayv1.AllowedRoutes{Namespaces: &gatewayv1.RouteNamespaces{
+		From:     ptr.To(gatewayv1.NamespacesFromSelector),
+		Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"routes": "allowed"}},
+	}}
+	second := listener.DeepCopy()
+	second.Name, second.Hostname = "second", ptr.To(gatewayv1.Hostname("second.example.test"))
+	f.gateway.Spec.Listeners = append(f.gateway.Spec.Listeners, *second)
+	other := f.gateway.DeepCopy()
+	other.Name, other.UID, other.ResourceVersion = "other", "other-uid", ""
+	other.Spec.Listeners = other.Spec.Listeners[:1]
+	other.Spec.Listeners[0].AllowedRoutes = nil
+	f.route.Spec.ParentRefs[0].SectionName = &listener.Name
+	f.route.Spec.ParentRefs = append(f.route.Spec.ParentRefs,
+		gatewayv1.ParentReference{Name: gatewayv1.ObjectName(f.gateway.Name), SectionName: &second.Name},
+		gatewayv1.ParentReference{Name: gatewayv1.ObjectName(other.Name)})
+	f.route.Spec.Hostnames = []gatewayv1.Hostname{*listener.Hostname, *second.Hostname}
+	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: f.route.Namespace, UID: "ns-uid", Labels: map[string]string{"routes": "allowed"}}}
+	f.create(t, other, namespace)
+	for _, object := range []client.Object{f.gateway, f.route} {
+		if err := f.client.Update(ctx, object); err != nil {
+			t.Fatal(err)
+		}
+	}
+	observation := f.observe(t)
+	if got := electionHostnames(observation.Nodes[0].Spec); !slices.Equal(got, []string{"first.example.test", "second.example.test"}) {
+		t.Fatalf("programmed hostnames = %v, want both native sections", got)
+	}
+	identity := controller.RouteIdentity(r.Config, f.gateway, f.route)
+	// Consent changes after the first live attachment read and is restored
+	// before the cleanup checkpoint can be committed.
+	reads := 0
+	reader := r.APIReader
+	r.APIReader = &electionCheckpointReader{
+		Reader: reader,
+		beforeGet: func(object client.Object) {
+			if _, ok := object.(*corev1.Namespace); ok {
+				reads++
+				switch reads {
+				case 2:
+					namespace.Labels = nil
+				case 3:
+					namespace.Labels = map[string]string{"routes": "allowed"}
+				default:
+					return
+				}
+				if err := f.client.Update(ctx, namespace); err != nil {
+					t.Fatal(err)
+				}
+			}
+		},
+		beforeList: func(client.ObjectList) {},
+	}
+	cleanup, err := r.buildRouteCleanupSnapshot(ctx, f.route, identity)
+	if err != nil || cleanup.disposition != routeCleanupRequired {
+		t.Fatalf("revoked attachment cleanup = %v, %v", cleanup.disposition, err)
+	}
+	if err := r.sealRouteCleanupSnapshot(ctx, cleanup); !errors.Is(err, errHTTPRouteChanged) {
+		t.Fatalf("cleanup validation after renewed consent = %v, want stale input", err)
+	}
+	r.APIReader = reader
+	cleanup, err = r.buildRouteCleanupSnapshot(ctx, f.route, identity)
+	if err != nil || cleanup.disposition != routeCleanupStillDesired {
+		t.Fatalf("renewed consent cleanup = %v, %v, want the binding retained", cleanup.disposition, err)
+	}
+}
+
+func TestHTTPRouteAddsDirectGatewayToLegacyListenerSetBinding(t *testing.T) {
+	f, set, _ := newRouteElectionFixture(t)
+	ctx := t.Context()
+	_, second, _, _, _ := endpointRouteFixture(t)
+	second.Name, second.UID = "other", "other-uid"
+	f.create(t, second)
+	delegated := f.route.Spec.ParentRefs[1]
+	direct := gatewayv1.ParentReference{Name: gatewayv1.ObjectName(second.Name)}
+	f.route.Spec.ParentRefs = []gatewayv1.ParentReference{delegated, direct}
+	if err := f.client.Update(ctx, f.route); err != nil {
+		t.Fatal(err)
+	}
+	provider := &recordingProvider{}
+	r := newTestReconciler(*f.reconciler, provider)
+	firstID, secondID := controller.RouteIdentity(r.Config, f.gateway, f.route), controller.RouteIdentity(r.Config, second, f.route)
+
+	snapshot, err := r.buildRouteValidationSnapshot(ctx, f.route, second, routeSnapshotForBinding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	set.Spec.ParentRef.Name = "unrelated"
+	if err := f.client.Update(ctx, set); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.sealRouteOwnershipSnapshot(ctx, snapshot, routeBindingOptional); !errors.Is(err, errHTTPRouteChanged) {
+		t.Fatalf("binding checkpoint after ListenerSet moved to another Gateway = %v, want stale input", err)
+	}
+	if _, err := r.buildRouteValidationSnapshot(ctx, f.route, second, routeSnapshotForBinding); !errors.Is(err, errHTTPRouteChanged) {
+		t.Fatalf("legacy binding after ListenerSet moved to another Gateway = %v, want stale input", err)
+	}
+	set.Spec.ParentRef.Name = gatewayv1.ObjectName(f.gateway.Name)
+	if err := f.client.Update(ctx, set); err != nil {
+		t.Fatal(err)
+	}
+	stale := f.route.DeepCopy()
+	r.clearRouteBinding(stale)
+	previous := f.gateway.DeepCopy()
+	previous.UID = "previous-uid"
+	if err := r.applyRouteBinding(stale, previous); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.observeRouteBinding(ctx, &routeValidationSnapshot{route: stale, gateway: second}); !errors.Is(err, errHTTPRouteChanged) {
+		t.Fatalf("legacy binding for replaced Gateway = %v, want stale input", err)
+	}
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(f.route)}
+	for range 2 {
+		if _, err := r.Reconcile(ctx, request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.client.Get(ctx, request.NamespacedName, f.route); err != nil {
+		t.Fatal(err)
+	}
+	bindings, err := controller.StoredRouteGatewayBindings(r.Config, f.route)
+	if err != nil || len(bindings) != 2 {
+		t.Fatalf("expected two independent bindings, got %v, %v", bindings, err)
+	}
+	for _, id := range []cloud.Identity{firstID, secondID} {
+		binding, err := controller.StoredRouteGatewayBinding(r.Config, f.route, id)
+		if err != nil || binding.Identity != id || binding.Lifecycle != controller.RouteAttached ||
+			!slices.ContainsFunc(provider.routeSpecs, func(spec cloud.RouteSpec) bool { return spec.Identity == id }) {
+			t.Fatalf("Gateway %s has binding %v, error %v, provider specs %v", id.GatewayName, binding, err, provider.routeSpecs)
+		}
+	}
+}
+
 func TestHTTPRouteRechecksBundleCompatibilityAtCleanupSeal(t *testing.T) {
 	f := newRouteModelInputFixture(t)
 	f.route.Spec.ParentRefs = append(f.route.Spec.ParentRefs, gatewayv1.ParentReference{Name: "missing"})

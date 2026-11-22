@@ -653,7 +653,7 @@ func TestHTTPRouteResolvesBackendReferencesWhenAttachmentIsDenied(t *testing.T) 
 				listener := &gateway.Spec.Listeners[0]
 				listener.Hostname = ptr.To(gatewayv1.Hostname("gateway.example.test"))
 				route.Spec.Hostnames = []gatewayv1.Hostname{"route.example.test"}
-				_, rejection := (&Reconciler{Config: cfg}).boundRouteAttachments(route, gateway, []*gatewayv1.Listener{listener}, nil)
+				_, rejection := (&Reconciler{Config: cfg}).selectRouteAttachments(route, managedRouteParent{ref: parent, gateway: gateway}, []*gatewayv1.Listener{listener}, nil)
 				status := statusForRouteBuildError(rejection)
 				if status.acceptedReason != string(gatewayv1.RouteReasonNotAllowedByListeners) {
 					t.Fatalf("bound route attachment reason = %s, want NotAllowedByListeners", status.acceptedReason)

@@ -20,6 +20,7 @@ import (
 	"errors"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -57,7 +58,7 @@ func TestHTTPRouteScopedStatusSelection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	parents, err := r.parentsForGateway(t.Context(), route, f.gateway)
+	parents, err := r.parentsForGateway(t.Context(), r.APIReader, route, f.gateway)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,4 +106,55 @@ func TestHTTPRouteScopedStatusSelection(t *testing.T) {
 	for _, ref := range neighborRefs {
 		assertProgrammedReason(ref, "Pending")
 	}
+}
+
+func TestHTTPRouteScopedSingletonRevalidatesNamespaceBeforeStatus(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	ctx, r := t.Context(), f.reconciler
+	neighbor := f.gateway.DeepCopy()
+	neighbor.Name, neighbor.UID, neighbor.ResourceVersion = "neighbor", "neighbor-uid", ""
+	f.gateway.Spec.Listeners[0].AllowedRoutes = &gatewayv1.AllowedRoutes{Namespaces: &gatewayv1.RouteNamespaces{
+		From:     ptr.To(gatewayv1.NamespacesFromSelector),
+		Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"routes": "allowed"}},
+	}}
+	neighborRef := gatewayv1.ParentReference{Name: gatewayv1.ObjectName(neighbor.Name)}
+	f.route.Spec.ParentRefs = append(f.route.Spec.ParentRefs, neighborRef)
+	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: f.route.Namespace, UID: "ns-uid", Labels: map[string]string{"routes": "allowed"}}}
+	f.create(t, neighbor, namespace)
+	if err := f.client.Update(ctx, f.gateway); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.client.Update(ctx, f.route); err != nil {
+		t.Fatal(err)
+	}
+	statusFor := func(gateway *gatewayv1.Gateway) *httpRouteScope {
+		t.Helper()
+		parents, err := r.parentsForGateway(ctx, r.APIReader, f.route, gateway)
+		if err != nil {
+			t.Fatal(err)
+		}
+		selection, _, err := r.selectRouteParents(ctx, f.route, parents, nil)
+		if err != nil || len(selection.listeners()) != 1 {
+			t.Fatalf("initial selection for %s = %v, %v", gateway.Name, selection, err)
+		}
+		scope := &httpRouteScope{route: f.route, parentGateway: gateway, parentSelection: selection}
+		scope.setStatuses(selection.statusUpdates(programmedRouteStatus()))
+		return scope
+	}
+	firstPlan, neighborPlan := statusFor(f.gateway), statusFor(neighbor)
+
+	namespace.Labels = nil
+	if err := f.client.Update(ctx, namespace); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.patchHTTPRoute(ctx, firstPlan); !errors.Is(err, errHTTPRouteChanged) {
+		t.Fatalf("publish status after namespace authorization was revoked = %v, want stale input", err)
+	}
+	if err := r.patchHTTPRoute(ctx, neighborPlan); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.route.Status.Parents) != 1 {
+		t.Fatalf("expected only the sibling's status, got %v", f.route.Status.Parents)
+	}
+	assertElectionParentAccepted(t, f.route, neighborRef, metav1.ConditionTrue)
 }

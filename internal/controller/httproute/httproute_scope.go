@@ -32,7 +32,6 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
-	gatewaycontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
@@ -345,13 +344,7 @@ func (r *Reconciler) validateRouteStatusOwnership(
 			parents[0].gateway.UID != expected.UID || parents[0].gateway.Generation != expected.Generation {
 			return errHTTPRouteChanged
 		}
-	}
-	if len(plan.selection) > 1 || slices.ContainsFunc(plan.selection, func(attachment routeParentSelection) bool { return attachment.parent.listenerSet != nil }) {
-		projection, err := gatewaycontroller.ObserveListenerSets(ctx, r.routePatchReader(), r.Config, parents[0].gateway)
-		if err != nil {
-			return err
-		}
-		current, _, err := r.selectRouteParents(ctx, route, parents, projection.Sections())
+		current, _, _, err := r.observeRouteSelection(ctx, r.routePatchReader(), route, parents)
 		if err != nil {
 			return err
 		}

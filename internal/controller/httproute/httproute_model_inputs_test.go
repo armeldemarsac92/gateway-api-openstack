@@ -602,7 +602,7 @@ func newRouteModelInputFixture(t *testing.T) *routeModelInputFixture {
 	if err := r.applyRouteBinding(route, gateway); err != nil {
 		t.Fatal(err)
 	}
-	kubeClient := indexedFakeClientBuilder(testScheme(t), r.Config).WithStatusSubresource(route).WithObjects(class, gateway, route, service, endpoints).Build()
+	kubeClient := indexedFakeClientBuilder(testScheme(t), r.Config).WithStatusSubresource(route, &gatewayv1.GRPCRoute{}).WithObjects(class, gateway, route, service, endpoints).Build()
 	for _, object := range []client.Object{gateway, route, service, endpoints} {
 		if err := kubeClient.Get(t.Context(), client.ObjectKeyFromObject(object), object); err != nil {
 			t.Fatal(err)

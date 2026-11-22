@@ -68,6 +68,7 @@ type routeBindingSnapshot struct {
 	lifecycle      string
 	explicitScope  bool
 	otherBindings  bool
+	legacySibling  cloud.Identity
 }
 
 // routeValidationSnapshot contains one live view of every Kubernetes input
@@ -128,7 +129,7 @@ func (r *Reconciler) buildRouteValidationSnapshotFromInputs(
 		return routeValidationSnapshot{}, err
 	}
 
-	if err := r.observeRouteBinding(&snapshot); err != nil {
+	if err := r.observeRouteBinding(ctx, &snapshot); err != nil {
 		return routeValidationSnapshot{}, err
 	}
 	if _, validationErr := gatewaycontroller.ValidatedHTTPRouteListeners(r.Config, snapshot.gateway); validationErr != nil {
@@ -244,7 +245,7 @@ func (r *Reconciler) observeRouteValidationInputs(
 	if gatewayClass.Spec.ControllerName != r.Config.ControllerName {
 		return routeValidationSnapshot{}, errHTTPRouteChanged
 	}
-	parents, err := r.parentsForGateway(ctx, &route, &gateway)
+	parents, err := r.parentsForGateway(ctx, r.APIReader, &route, &gateway)
 	if err != nil {
 		return routeValidationSnapshot{}, err
 	}
@@ -293,7 +294,7 @@ func routeSelectionsProgrammed(gateway *gatewayv1.Gateway, selection routeSelect
 	return true
 }
 
-func (r *Reconciler) observeRouteBinding(snapshot *routeValidationSnapshot) error {
+func (r *Reconciler) observeRouteBinding(ctx context.Context, snapshot *routeValidationSnapshot) error {
 	desiredIdentity := controller.RouteIdentity(r.Config, snapshot.gateway, snapshot.route)
 	binding, err := controller.StoredRouteGatewayBinding(r.Config, snapshot.route, desiredIdentity)
 	if err != nil {
@@ -322,13 +323,26 @@ func (r *Reconciler) observeRouteBinding(snapshot *routeValidationSnapshot) erro
 			if old.GatewayNamespace == desiredIdentity.GatewayNamespace && old.GatewayName == desiredIdentity.GatewayName {
 				return errHTTPRouteChanged
 			}
-			if !controller.HasRouteGatewayBindings(r.Config, snapshot.route) &&
-				!slices.ContainsFunc(snapshot.route.Spec.ParentRefs, func(ref gatewayv1.ParentReference) bool {
-					return routeTargetsGateway(snapshot.route, ref, old.GatewayNamespace, old.GatewayName)
-				}) {
-				return errHTTPRouteChanged
+			if !controller.HasRouteGatewayBindings(r.Config, snapshot.route) {
+				if err := r.validateLegacySiblingBinding(ctx, snapshot.route, old); err != nil {
+					return err
+				}
+				snapshot.binding.legacySibling = old
 			}
 		}
+	}
+	return nil
+}
+
+// A legacy binding can be carried into the multi-Gateway checkpoint only
+// while a current parent still resolves to its original Gateway UID.
+func (r *Reconciler) validateLegacySiblingBinding(ctx context.Context, route *gatewayv1.HTTPRoute, identity cloud.Identity) error {
+	parents, err := r.managedParentsWithReader(ctx, r.APIReader, route)
+	if err != nil {
+		return err
+	}
+	if len(managedParentsForGateway(parents, identity)) == 0 {
+		return errHTTPRouteChanged
 	}
 	return nil
 }
@@ -495,6 +509,18 @@ func (r *Reconciler) sealRouteOwnershipWithGateway(ctx context.Context, snapshot
 	if err != nil {
 		return err
 	}
+	if legacy := snapshot.binding.legacySibling; legacy.RouteUID != "" {
+		sibling, err := controller.StoredRouteGatewayBinding(r.Config, &route, legacy)
+		if err != nil {
+			return err
+		}
+		if sibling.Identity != legacy {
+			return errHTTPRouteChanged
+		}
+		if err := r.validateLegacySiblingBinding(ctx, &route, legacy); err != nil {
+			return err
+		}
+	}
 	if binding.Lifecycle != snapshot.binding.lifecycle {
 		return errHTTPRouteChanged
 	}
@@ -502,7 +528,7 @@ func (r *Reconciler) sealRouteOwnershipWithGateway(ctx context.Context, snapshot
 		(binding.Identity != desired || !controllerutil.ContainsFinalizer(&route, r.Config.RouteFinalizer())) {
 		return errHTTPRouteChanged
 	}
-	parents, err := r.parentsForGateway(ctx, &route, gateway)
+	parents, err := r.parentsForGateway(ctx, r.APIReader, &route, gateway)
 	if err != nil {
 		return err
 	}
@@ -631,8 +657,8 @@ func (r *Reconciler) buildRouteCleanupSnapshot(
 	if err != nil {
 		var buildError *routeBuildError
 		if errors.As(err, &buildError) {
-			// ListenerSet projection can change after the earlier attachment read.
-			snapshot.attachmentRevoked = buildError.kind == routeErrorNoMatchingParent
+			// Attachment authorization can change after the earlier read.
+			snapshot.attachmentRevoked = errors.Is(err, errRouteAttachmentRejected)
 			return snapshot, nil
 		}
 		return routeCleanupSnapshot{}, err

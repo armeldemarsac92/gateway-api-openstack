@@ -53,14 +53,16 @@ func Compile(input Input) (Gateway, error) {
 	seenRoutes := make(map[string]bool, len(input.Routes))
 	for i := range input.Routes {
 		route := &input.Routes[i]
-		key := string(HTTPProfileRouteKind(route)) + "/" + route.Namespace + "/" + route.Name
+		kind := HTTPProfileRouteKind(route)
+		key := string(kind) + "/" + route.Namespace + "/" + route.Name
 		if seenRoutes[key] {
 			return Gateway{}, fmt.Errorf("duplicate route input %s", key)
 		}
 		seenRoutes[key] = true
 		var parents []int
 		for index, parent := range route.Spec.ParentRefs {
-			if _, found := setListeners[ListenerSetRefKey(parent, route.Namespace)]; found || targetsGateway(parent, route.Namespace, input.Gateway) {
+			_, delegated := setListeners[ListenerSetRefKey(parent, route.Namespace)]
+			if targetsGateway(parent, route.Namespace, input.Gateway) || kind == HTTPRouteKind && delegated {
 				parents = append(parents, index)
 			}
 		}

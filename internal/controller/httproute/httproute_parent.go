@@ -130,7 +130,7 @@ func managedParentsFromObservations(observations []routeParentObservation) []man
 }
 
 // parentsForGateway resolves every owned section in the same Gateway graph.
-func (r *Reconciler) parentsForGateway(ctx context.Context, route *gatewayv1.HTTPRoute, gateway *gatewayv1.Gateway) ([]managedRouteParent, error) {
+func (r *Reconciler) parentsForGateway(ctx context.Context, reader client.Reader, route *gatewayv1.HTTPRoute, gateway *gatewayv1.Gateway) ([]managedRouteParent, error) {
 	var selected []managedRouteParent
 	for _, ref := range route.Spec.ParentRefs {
 		if controller.IsGatewayParentRef(ref) {
@@ -142,7 +142,7 @@ func (r *Reconciler) parentsForGateway(ctx context.Context, route *gatewayv1.HTT
 		if model.HTTPProfileRouteKind(route) != model.HTTPRouteKind || model.ListenerSetRefKey(ref, route.Namespace).Name == "" {
 			continue
 		}
-		parent, err := r.observeRouteParent(ctx, r.APIReader, route.Namespace, ref)
+		parent, err := r.observeRouteParent(ctx, reader, route.Namespace, ref)
 		if err != nil {
 			return nil, err
 		}
@@ -269,24 +269,18 @@ func readRouteNamespaces(ctx context.Context, reader client.Reader, candidates [
 	return []corev1.Namespace{*namespace}, nil
 }
 
-func (r *Reconciler) boundRouteAttachments(route *gatewayv1.HTTPRoute, gateway *gatewayv1.Gateway, http []*gatewayv1.Listener, namespaces []corev1.Namespace) ([]*gatewayv1.Listener, error) {
-	rejection := newRouteBuildError(routeErrorNoMatchingParent, "HTTPRoute no longer targets the bound Gateway")
-	for _, ref := range route.Spec.ParentRefs {
-		if !routeTargetsGateway(route, ref, gateway.Namespace, gateway.Name) {
-			continue
+// observeRouteSelection reads the dependencies of one Gateway's parent group.
+func (r *Reconciler) observeRouteSelection(ctx context.Context, reader client.Reader, route *gatewayv1.HTTPRoute, parents []managedRouteParent) (routeSelection, []corev1.Namespace, map[types.NamespacedName][]gatewayv1.Listener, error) {
+	var sets map[types.NamespacedName][]gatewayv1.Listener
+	if slices.ContainsFunc(parents, func(parent managedRouteParent) bool { return parent.listenerSet != nil }) {
+		projection, err := gatewaycontroller.ObserveListenerSets(ctx, reader, r.Config, parents[0].gateway)
+		if err != nil {
+			return nil, nil, nil, err
 		}
-		parent := managedRouteParent{ref: ref, gateway: gateway}
-		candidates, err := routeParentCandidates(route, parent, http)
-		if err == nil {
-			var listeners []*gatewayv1.Listener
-			listeners, err = r.selectRouteAttachments(route, parent, candidates, namespaces)
-			if err == nil {
-				return listeners, nil
-			}
-		}
-		rejection = err
+		sets = projection.Sections()
 	}
-	return nil, rejection
+	selection, namespaces, err := r.selectRouteParentsWithNamespaces(ctx, reader, route, parents, sets, make(map[string][]corev1.Namespace))
+	return selection, namespaces, sets, err
 }
 
 type boundHTTPAttachment struct {
@@ -310,15 +304,11 @@ func (r *Reconciler) liveBoundRouteAttachment(ctx context.Context, route *gatewa
 	if string(gateway.UID) != identity.GatewayUID {
 		return boundHTTPAttachment{}, newRouteBuildError(routeErrorNoMatchingParent, "the bound Gateway was replaced"), nil
 	}
-	parents, err := r.parentsForGateway(ctx, route, &gateway)
+	parents, err := r.parentsForGateway(ctx, r.APIReader, route, &gateway)
 	if err != nil {
 		return boundHTTPAttachment{}, nil, err
 	}
-	sets, err := gatewaycontroller.ObserveListenerSets(ctx, r.APIReader, r.Config, &gateway)
-	if err != nil {
-		return boundHTTPAttachment{}, nil, err
-	}
-	selection, _, err := r.selectRouteParents(ctx, route, parents, sets.Sections())
+	selection, _, _, err := r.observeRouteSelection(ctx, r.APIReader, route, parents)
 	if err != nil {
 		return boundHTTPAttachment{}, nil, err
 	}
@@ -385,10 +375,10 @@ func (s routeSelection) listeners() []*gatewayv1.Listener {
 }
 
 func (r *Reconciler) selectRouteParents(ctx context.Context, route *gatewayv1.HTTPRoute, parents []managedRouteParent, sets map[types.NamespacedName][]gatewayv1.Listener) (routeSelection, []corev1.Namespace, error) {
-	return r.selectRouteParentsWithNamespaces(ctx, route, parents, sets, make(map[string][]corev1.Namespace))
+	return r.selectRouteParentsWithNamespaces(ctx, r.APIReader, route, parents, sets, make(map[string][]corev1.Namespace))
 }
 
-func (r *Reconciler) selectRouteParentsWithNamespaces(ctx context.Context, route *gatewayv1.HTTPRoute, parents []managedRouteParent, sets map[types.NamespacedName][]gatewayv1.Listener, cache map[string][]corev1.Namespace) (routeSelection, []corev1.Namespace, error) {
+func (r *Reconciler) selectRouteParentsWithNamespaces(ctx context.Context, reader client.Reader, route *gatewayv1.HTTPRoute, parents []managedRouteParent, sets map[types.NamespacedName][]gatewayv1.Listener, cache map[string][]corev1.Namespace) (routeSelection, []corev1.Namespace, error) {
 	var selection routeSelection
 	if len(parents) == 0 {
 		return nil, nil, nil
@@ -409,7 +399,7 @@ func (r *Reconciler) selectRouteParentsWithNamespaces(ctx context.Context, route
 		if rejection == nil {
 			if !namespaceObserved && slices.ContainsFunc(candidates, model.ObservesRouteNamespace) {
 				var err error
-				namespaces, err = readRouteNamespaces(ctx, r.APIReader, candidates, route.Namespace)
+				namespaces, err = readRouteNamespaces(ctx, reader, candidates, route.Namespace)
 				if err != nil {
 					return nil, nil, err
 				}

@@ -24,6 +24,8 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
@@ -32,6 +34,41 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
+
+func TestGRPCRouteIgnoresListenerSetAlongsideDirectParent(t *testing.T) {
+	f, _, grpc := newRouteElectionFixture(t)
+	f.service.Spec.Ports[0].AppProtocol = ptr.To("kubernetes.io/h2c")
+	if err := f.client.Update(t.Context(), f.service); err != nil {
+		t.Fatal(err)
+	}
+	direct, delegated := grpc.Spec.ParentRefs[0], f.route.Spec.ParentRefs[1]
+	grpc.Spec.ParentRefs = []gatewayv1.ParentReference{direct, delegated}
+	grpc.Spec.Hostnames = f.route.Spec.Hostnames
+	route := model.ProjectGRPCRoute(grpc)
+	if err := f.reconciler.applyRouteBinding(route, f.gateway); err != nil {
+		t.Fatal(err)
+	}
+	grpc.Annotations, grpc.Finalizers = route.Annotations, route.Finalizers
+	f.create(t, grpc)
+	provider := &recordingProvider{}
+	r := newTestReconciler(*f.reconciler, provider).forRouteKind(model.GRPCRouteKind)
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(grpc)}
+	if _, err := r.Reconcile(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.client.Get(t.Context(), request.NamespacedName, grpc); err != nil {
+		t.Fatal(err)
+	}
+	route = model.ProjectGRPCRoute(grpc)
+	assertElectionParentAccepted(t, route, direct, metav1.ConditionTrue)
+	if len(grpc.Status.Parents) != 1 ||
+		findRouteParentCondition(route, r.Config.ControllerName, delegated, string(gatewayv1.RouteConditionAccepted)) != nil {
+		t.Fatalf("expected status only for the direct parent, got %v", grpc.Status.Parents)
+	}
+	if len(provider.routeSpecs) != 2 || !provider.routeSpecs[0].GRPC && !provider.routeSpecs[1].GRPC {
+		t.Fatalf("expected both eligible route fragments, including the GRPCRoute, got %v", provider.routeSpecs)
+	}
+}
 
 func TestGRPCExactHeadersKeepAlternativesAndPrecedenceOnH2CBackends(t *testing.T) {
 	cfg := testConfig()
