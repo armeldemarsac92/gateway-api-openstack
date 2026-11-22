@@ -22,6 +22,8 @@ The controller closes a dependent physical listener while verifying new redirect
 
 To withdraw the mode, remove or replace the HTTPRoute rules that need it and wait for the affected listener to reopen. Verify that its owned `REDIRECT_REQUEST` policies have disappeared before rolling back the provider API or worker packages. The controller can remove previously installed policies when the region stops advertising the capability, using the retained Octavia read, disable and delete operations.
 
+The local kind runs cover request-derived status codes, path, scheme and port. [Case evidence and outstanding HTTPS setup](qualification/v1.7.0/provider/http-request-redirect.md)
+
 ## Observe a grant change
 
 For a route with a weight-3 Service in its own namespace and a weight-1 Service in another namespace, match requests to the same rule and distinguish replies by application identity.
