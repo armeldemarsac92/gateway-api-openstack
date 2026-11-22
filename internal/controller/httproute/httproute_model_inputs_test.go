@@ -773,6 +773,43 @@ func TestSharedPlainHTTPModelKeepsListenerScopeAcrossAttachments(t *testing.T) {
 	}
 }
 
+func TestHTTPRouteWithTwoSectionRefsForwardsOnlyOnThoseSections(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	port := f.gateway.Spec.Listeners[0].Port
+	f.gateway.Spec.Listeners = []gatewayv1.Listener{
+		{Name: "one", Port: port, Protocol: gatewayv1.HTTPProtocolType, Hostname: ptr.To(gatewayv1.Hostname("*.one.test"))},
+		{Name: "two", Port: port, Protocol: gatewayv1.HTTPProtocolType, Hostname: ptr.To(gatewayv1.Hostname("*.two.test"))},
+		{Name: "other", Port: port, Protocol: gatewayv1.HTTPProtocolType, Hostname: ptr.To(gatewayv1.Hostname("other.test"))},
+	}
+	f.route.Spec.Hostnames = nil
+	ref := f.route.Spec.ParentRefs[0]
+	ref.SectionName = ptr.To(gatewayv1.SectionName("one"))
+	f.route.Spec.ParentRefs = []gatewayv1.ParentReference{ref}
+	ref.SectionName = ptr.To(gatewayv1.SectionName("two"))
+	f.route.Spec.ParentRefs = append(f.route.Spec.ParentRefs, ref)
+	if err := f.client.Update(t.Context(), f.gateway); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.client.Update(t.Context(), f.route); err != nil {
+		t.Fatal(err)
+	}
+	input := f.observe(t)
+	if len(input.Nodes) != 1 || input.Nodes[0].Disposition != cloud.GraphEnsure || len(input.Nodes[0].Spec.HTTPBackends) != 1 {
+		t.Fatalf("expected one active backend shared by the two references, got %#v", input.Nodes)
+	}
+	var hosts []string
+	for _, match := range input.Nodes[0].Spec.HTTPBackends[0].Matches {
+		hosts = append(hosts, match.HTTPListenerHostname)
+	}
+	slices.Sort(hosts)
+	if !slices.Equal(hosts, []string{"*.one.test", "*.two.test"}) {
+		t.Fatalf("forwarding scopes = %v, want only the referenced sections", hosts)
+	}
+	if err := input.Validate(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSharedPlainHTTPProfileConflictPreservesSiblingAttachments(t *testing.T) {
 	f := newRouteModelInputFixture(t)
 	cfg := &f.reconciler.Config

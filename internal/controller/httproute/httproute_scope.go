@@ -310,7 +310,7 @@ func (r *Reconciler) validateRouteStatusOwnership(
 			return errHTTPRouteChanged
 		}
 	}
-	if slices.ContainsFunc(plan.selection, func(attachment routeParentSelection) bool { return attachment.parent.listenerSet != nil }) {
+	if len(plan.selection) > 1 || slices.ContainsFunc(plan.selection, func(attachment routeParentSelection) bool { return attachment.parent.listenerSet != nil }) {
 		if !parentsShareGateway(parents) {
 			return errHTTPRouteChanged
 		}

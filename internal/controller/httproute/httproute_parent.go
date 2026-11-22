@@ -129,9 +129,7 @@ func managedParentsFromObservations(observations []routeParentObservation) []man
 	return parents
 }
 
-// parentsForGateway validates that controller-owned parent references share
-// one Gateway graph. The existing single-Gateway-parent profile is preserved
-// for routes that never reference a ListenerSet.
+// parentsForGateway resolves every owned section in the same Gateway graph.
 func (r *Reconciler) parentsForGateway(ctx context.Context, route *gatewayv1.HTTPRoute, gateway *gatewayv1.Gateway) ([]managedRouteParent, error) {
 	var selected []managedRouteParent
 	for _, ref := range route.Spec.ParentRefs {
@@ -154,9 +152,6 @@ func (r *Reconciler) parentsForGateway(ctx context.Context, route *gatewayv1.HTT
 		}
 		parent.gateway = gateway
 		selected = append(selected, parent.managedRouteParent)
-	}
-	if len(selected) > 1 && !slices.ContainsFunc(selected, func(p managedRouteParent) bool { return p.listenerSet != nil }) {
-		return nil, nil
 	}
 	return selected, nil
 }

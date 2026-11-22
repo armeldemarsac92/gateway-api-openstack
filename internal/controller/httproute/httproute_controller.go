@@ -246,9 +246,7 @@ func (r *Reconciler) validateCachedRouteDecision(
 }
 
 func parentsShareGateway(parents []managedRouteParent) bool {
-	return len(parents) == 1 || len(parents) > 1 && slices.ContainsFunc(parents, func(parent managedRouteParent) bool {
-		return parent.listenerSet != nil
-	}) && !slices.ContainsFunc(parents[1:], func(parent managedRouteParent) bool {
+	return len(parents) > 0 && !slices.ContainsFunc(parents[1:], func(parent managedRouteParent) bool {
 		return parent.gateway.UID != parents[0].gateway.UID || client.ObjectKeyFromObject(parent.gateway) != client.ObjectKeyFromObject(parents[0].gateway)
 	})
 }
@@ -277,7 +275,7 @@ func managedParentsSupportInstalledVersion(parents []managedRouteParent) bool {
 func unsupportedParentCountUpdates(parents []managedRouteParent) []parentStatusUpdate {
 	status := rejectedRouteStatus(
 		string(gatewayv1.RouteReasonUnsupportedValue),
-		"exactly one managed Gateway parentRef is supported",
+		"the selected parentRefs belong to different Gateway graphs",
 	)
 	updates := make([]parentStatusUpdate, 0, len(parents))
 	for _, parent := range parents {
