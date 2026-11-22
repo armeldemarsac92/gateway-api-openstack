@@ -233,11 +233,11 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 			return result, err
 		}
 	}
-	plan = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, exactHTTPHeaderPredicate)
-	plan = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, httpMethodPredicate)
-	plan = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, responseHeaderModifierPolicy)
+	plan, _ = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, exactHTTPHeaderPredicate)
+	plan, _ = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, httpMethodPredicate)
+	plan, _ = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, responseHeaderModifierPolicy)
 	if p.grpcContentType {
-		plan = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, grpcContentTypePredicate)
+		plan, _ = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, grpcContentTypePredicate)
 	}
 	if spec.Gateway.Disposition == cloud.GraphEnsure && (len(plan) == 0 || plan[0].kind != graphClearListenerDefaultPool && !plan[0].withdrawHTTPPolicy && !plan[0].isRestrictiveSNI()) {
 		if err := p.validateGraphTrafficSecurity(ctx, desired); err != nil {
@@ -319,15 +319,21 @@ func (p *Provider) reconcileHTTPWithdrawalWithoutAddress(ctx context.Context, de
 	}
 	result.Gateway.Outcome = p.progressingOutcome("Waiting to observe the Gateway Floating IP inventory")
 	var grpcWithdrawal []graphMutation
+	var confirmedClosed bool
 	if p.grpcContentType {
 		// An empty plan allows only confirmed capability withdrawal to
 		// request a listener closure while the address read is failing.
-		grpcWithdrawal = p.protectHTTPPredicateTraffic(ctx, desired, actual, nil, &result, grpcContentTypePredicate)
+		grpcWithdrawal, confirmedClosed = p.protectHTTPPredicateTraffic(ctx, desired, actual, nil, &result, grpcContentTypePredicate)
 	}
 	if len(grpcWithdrawal) != 0 {
 		plan = grpcWithdrawal
 	} else if len(plan) != 1 || !plan[0].withdrawHTTPPolicy || plan[0].kind != graphRouteMutation ||
 		plan[0].route.kind != routeMutationSetPolicyTarget || plan[0].route.weightedTargets == nil {
+		if confirmedClosed {
+			// The Octavia readback is enough to report the closed listener
+			// and its routes as pending. Requeue without changing traffic.
+			return result, nil
+		}
 		return result, actual.addressReadError
 	}
 	step, err := p.prepareGraphMutation(ctx, desired, actual, plan[0])

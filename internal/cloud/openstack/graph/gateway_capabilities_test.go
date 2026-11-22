@@ -823,7 +823,8 @@ func testHTTPPredicateCapabilityLoss(t *testing.T, predicate protectedHTTPPredic
 
 	observe := func(plan ...graphMutation) []graphMutation {
 		result := cloud.GatewayGraphResult{Routes: []cloud.RouteGraphResult{{}}}
-		return p.protectHTTPPredicateTraffic(t.Context(), desired, actual, plan, &result, predicate)
+		steps, _ := p.protectHTTPPredicateTraffic(t.Context(), desired, actual, plan, &result, predicate)
+		return steps
 	}
 	guardedRemoval := graphMutation{kind: graphRouteMutation, withdrawHTTPPolicy: true,
 		route: routeMutation{kind: routeMutationDisablePolicy, id: "guarded"}}
@@ -1133,7 +1134,7 @@ func TestResponseHeaderPolicyActivationAndWithdrawalAcrossRestart(t *testing.T) 
 	advertise = false
 	provider = NewProvider(ServiceClients{LoadBalancer: client}, ProviderConfig{ResponseHeaderModifier: true})
 	result := cloud.GatewayGraphResult{Routes: []cloud.RouteGraphResult{{}}}
-	steps := provider.protectHTTPPredicateTraffic(t.Context(), desired, actual, nil, &result, responseHeaderModifierPolicy)
+	steps, _ := provider.protectHTTPPredicateTraffic(t.Context(), desired, actual, nil, &result, responseHeaderModifierPolicy)
 	if len(steps) != 1 || steps[0].kind != graphDisableListener || steps[0].listenerID != "affected" ||
 		result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing {
 		t.Fatalf("a restarted controller did not withdraw the affected listener: %+v, %+v", steps, result)
@@ -1142,7 +1143,7 @@ func TestResponseHeaderPolicyActivationAndWithdrawalAcrossRestart(t *testing.T) 
 	part.policies[0].responseHeaderOperations = nil
 	provider = NewProvider(ServiceClients{LoadBalancer: client}, ProviderConfig{})
 	clear := next(routeMutationSetPolicyHeaders)
-	steps = provider.protectHTTPPredicateTraffic(t.Context(), desired, actual, []graphMutation{clear}, &result, responseHeaderModifierPolicy)
+	steps, _ = provider.protectHTTPPredicateTraffic(t.Context(), desired, actual, []graphMutation{clear}, &result, responseHeaderModifierPolicy)
 	if len(steps) != 1 {
 		t.Fatalf("clear was lost while capability was unavailable: %+v", steps)
 	}
@@ -1451,13 +1452,21 @@ func testRegionalGRPCContentTypePolicyTransition(t *testing.T, metadata bool) {
 	spec.ValidateMutation = nil
 	assertRevoked := func(result cloud.GatewayGraphResult) {
 		t.Helper()
-		if listener["admin_state_up"] != false || result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing ||
+		if listener["admin_state_up"] != false || listener["provisioning_status"] != "ACTIVE" ||
+			result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing || result.Routes[0].Result.ObservationDeferred ||
 			result.Routes[1].Result.Outcome.State != cloud.OutcomeProgressing || result.Routes[1].Result.ObservationDeferred ||
 			result.Routes[2].Result.Outcome.State != cloud.OutcomeReady || !slices.Equal(result.Gateway.ScopedListenerReadyPorts, []int{8080}) {
 			t.Fatalf("revocation must close only the affected listener and mark all its routes progressing: %+v", result)
 		}
 	}
 	assertRevoked(reconcile(listenerPath))
+	for range 2 {
+		result := reconcile("")
+		assertRevoked(result)
+		if message := result.Routes[0].Result.Outcome.Message; message != "Octavia withdrew the native gRPC Content-Type capability on this listener" {
+			t.Fatalf("confirmed revocation must reach the route status during the Floating IP outage: %s", message)
+		}
+	}
 	networkOutage = false
 	assertRevoked(reconcile(""))
 	cfg.GRPCContentType = false
