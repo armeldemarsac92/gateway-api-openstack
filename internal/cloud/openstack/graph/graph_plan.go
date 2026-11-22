@@ -36,10 +36,18 @@ func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual obs
 	if isSNIProtocol(desired.protocol) {
 		return p.buildSNIGraphPlan(desired, actual)
 	}
+	var plan []graphMutation
+	var result cloud.GatewayGraphResult
+	var err error
 	if desired.spec.Gateway.Disposition != cloud.GraphDelete && hasHTTPRouteParts(desired, actual) {
-		return p.buildHTTPRoutePartsGraphPlan(desired, actual)
+		plan, result, err = p.buildHTTPRoutePartsGraphPlan(desired, actual)
+	} else {
+		plan, result, err = p.buildGatewayGraphPartPlan(desired, actual, nil)
 	}
-	return p.buildGatewayGraphPartPlan(desired, actual, nil)
+	if err == nil {
+		plan = p.protectPlainHTTPIsolation(desired, actual, plan, &result)
+	}
+	return plan, result, err
 }
 
 func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual observedGatewayGraph, handovers *httpPolicyHandovers) ([]graphMutation, cloud.GatewayGraphResult, error) {
@@ -913,6 +921,9 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 				protocol, enabled, certificateRef = terminatedHTTPS, false, tls.CertificateRef
 			}
 			tags = append(tags, scopedPortTag(protocol, port))
+		}
+		if desired.plainHTTPRuleLimits[port] != "" {
+			enabled = false
 		}
 		opts := listeners.CreateOpts{
 			LoadbalancerID: actual.state.LoadBalancerID, Protocol: listeners.Protocol(protocol), ProtocolPort: port,

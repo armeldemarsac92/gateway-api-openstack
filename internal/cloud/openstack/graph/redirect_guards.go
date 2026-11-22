@@ -77,7 +77,7 @@ func redirectForwardingByPort(spec cloud.GatewayGraphSpec) map[int][]cloud.HTTPP
 			add(rule.Matches)
 		}
 		if route.PathType != "" {
-			add([]cloud.HTTPPathMatch{{Hostname: route.Hostname, PathType: route.PathType, PathValue: route.PathValue, Precedence: route.Precedence}})
+			add([]cloud.HTTPPathMatch{{HTTPListenerHostname: route.HTTPListenerHostname, Hostname: route.Hostname, PathType: route.PathType, PathValue: route.PathValue, Precedence: route.Precedence}})
 		}
 	}
 	return result
@@ -179,7 +179,7 @@ func redirectCells(match cloud.HTTPPathMatch, forwards []cloud.HTTPPathMatch) ([
 	ordered := []*redirectDomain{root}
 	var unsupportedMethod, unsupportedHeaders bool
 	for _, f := range forwards {
-		if f.HTTPSListenerHostname != match.HTTPSListenerHostname || f.Precedence >= match.Precedence || f.Method != "" && match.Method != "" && f.Method != match.Method {
+		if f.HTTPListenerHostname != match.HTTPListenerHostname || f.HTTPSListenerHostname != match.HTTPSListenerHostname || f.Precedence >= match.Precedence || f.Method != "" && match.Method != "" && f.Method != match.Method {
 			continue
 		}
 		path := pathOf(f)

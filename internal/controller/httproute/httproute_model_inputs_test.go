@@ -702,6 +702,47 @@ func TestHTTPSRouteSelectsDedicatedSectionAndInheritsHostname(t *testing.T) {
 	}
 }
 
+func TestSharedPlainHTTPModelKeepsListenerScopeAcrossAttachments(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	f.gateway.Spec.Listeners[0].Name = "wildcard"
+	f.gateway.Spec.Listeners[0].Hostname = ptr.To(gatewayv1.Hostname("*.bar.com"))
+	port := f.gateway.Spec.Listeners[0].Port
+	f.gateway.Spec.Listeners = append(f.gateway.Spec.Listeners,
+		gatewayv1.Listener{Name: "exact", Port: port, Protocol: gatewayv1.HTTPProtocolType, Hostname: ptr.To(gatewayv1.Hostname("foo.bar.com"))},
+		gatewayv1.Listener{Name: "catch-all", Port: port, Protocol: gatewayv1.HTTPProtocolType},
+	)
+	f.route.Spec.ParentRefs[0].SectionName = nil
+	f.route.Spec.Hostnames = []gatewayv1.Hostname{"foo.bar.com"}
+	if err := f.client.Update(t.Context(), f.gateway); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.client.Update(t.Context(), f.route); err != nil {
+		t.Fatal(err)
+	}
+	input := f.observe(t)
+	if len(input.Nodes) != 1 || input.Nodes[0].Disposition != cloud.GraphEnsure {
+		t.Fatalf("route graph = %#v", input.Nodes)
+	}
+	route := input.Nodes[0].Spec
+	if len(route.HTTPBackends) != 1 {
+		t.Fatalf("route backends = %#v", route.HTTPBackends)
+	}
+	scopes := make([]string, 0, len(route.HTTPBackends[0].Matches))
+	for _, match := range route.HTTPBackends[0].Matches {
+		if match.Hostname != "foo.bar.com" || match.HTTPSListenerHostname != "" {
+			t.Fatalf("wrong hostname intersection or TLS scope: %#v", match)
+		}
+		scopes = append(scopes, match.HTTPListenerHostname)
+	}
+	slices.Sort(scopes)
+	if want := []string{"*", "*.bar.com", "foo.bar.com"}; !slices.Equal(scopes, want) {
+		t.Fatalf("scopes = %v, want %v", scopes, want)
+	}
+	if err := input.Validate(t.Context()); err != nil {
+		t.Fatalf("graph fence: %v", err)
+	}
+}
+
 func TestSharedHTTPSRouteKeepsSectionAndHTTPHostConstraints(t *testing.T) {
 	for _, tc := range []struct {
 		name    string

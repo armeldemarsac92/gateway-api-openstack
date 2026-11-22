@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"net/netip"
 	"slices"
-	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -293,7 +292,7 @@ func validateAddresses(addresses []gatewayv1.GatewaySpecAddress) *gatewayValidat
 }
 
 // HTTPListeners selects the HTTP sections of the stock profile. Multiple
-// sections on each port must have pairwise distinct, encodable exact hostnames.
+// sections on each port must have pairwise distinct, encodable hostnames.
 func HTTPListeners(gateway *gatewayv1.Gateway) ([]*gatewayv1.Listener, error) {
 	var http []*gatewayv1.Listener
 	ports := make(map[gatewayv1.PortNumber]int, len(gateway.Spec.Listeners))
@@ -318,7 +317,7 @@ func HTTPListeners(gateway *gatewayv1.Gateway) ([]*gatewayv1.Listener, error) {
 	if len(http) != len(gateway.Spec.Listeners) {
 		return nil, fmt.Errorf("multiple HTTP sections require a Gateway with only plain HTTP listeners")
 	}
-	hostnames := make(map[gatewayv1.PortNumber]map[gatewayv1.Hostname]bool)
+	hostnames := make(map[gatewayv1.PortNumber]map[string]bool)
 	names := make(map[gatewayv1.SectionName]bool, len(http))
 	for _, listener := range http {
 		if listener.Port < 1 || listener.Port > 65535 {
@@ -332,15 +331,18 @@ func HTTPListeners(gateway *gatewayv1.Gateway) ([]*gatewayv1.Listener, error) {
 			continue
 		}
 		if hostnames[listener.Port] == nil {
-			hostnames[listener.Port] = make(map[gatewayv1.Hostname]bool)
+			hostnames[listener.Port] = make(map[string]bool)
 		}
-		if listener.Hostname == nil || strings.HasPrefix(string(*listener.Hostname), "*.") || hostnames[listener.Port][*listener.Hostname] {
-			return nil, fmt.Errorf("same-port HTTP sections require distinct exact hostnames")
+		host := listenerHostname(listener)
+		if hostnames[listener.Port][host] {
+			return nil, fmt.Errorf("same-port HTTP sections require distinct hostnames")
 		}
-		if _, err := amphora.HostnameRuleValue(string(*listener.Hostname)); err != nil {
-			return nil, fmt.Errorf("unsupported shared HTTP listener hostname: %w", err)
+		if host != "" {
+			if _, err := amphora.HostnameRuleValue(host); err != nil {
+				return nil, fmt.Errorf("unsupported shared HTTP listener hostname: %w", err)
+			}
 		}
-		hostnames[listener.Port][*listener.Hostname] = true
+		hostnames[listener.Port][host] = true
 	}
 	return http, nil
 }

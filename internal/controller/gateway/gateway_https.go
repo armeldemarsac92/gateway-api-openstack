@@ -109,10 +109,16 @@ func httpsProfileIssue(config controller.Config, gateway *gatewayv1.Gateway, lis
 			}
 			return &httpsListenerIssue{gatewayv1.ListenerConditionConflicted, gatewayv1.ListenerReasonProtocolConflict, "HTTPS requires a dedicated listener port"}
 		}
-		if peer.Protocol != gatewayv1.HTTPProtocolType || listener.Hostname == nil || peer.Hostname == nil ||
-			strings.HasPrefix(string(*listener.Hostname), "*.") || strings.HasPrefix(string(*peer.Hostname), "*.") ||
-			*peer.Hostname == *listener.Hostname {
-			return &httpsListenerIssue{gatewayv1.ListenerConditionConflicted, gatewayv1.ListenerReasonHostnameConflict, "Same-port HTTP sections require distinct exact hostnames"}
+		if peer.Protocol != gatewayv1.HTTPProtocolType {
+			return &httpsListenerIssue{gatewayv1.ListenerConditionConflicted, gatewayv1.ListenerReasonProtocolConflict, "HTTP sections cannot share their port with another protocol"}
+		}
+		if listenerHostname(listener) == listenerHostname(peer) {
+			return &httpsListenerIssue{gatewayv1.ListenerConditionConflicted, gatewayv1.ListenerReasonHostnameConflict, "Same-port HTTP sections require distinct hostnames"}
+		}
+		if host := listenerHostname(listener); host != "" {
+			if _, err := amphora.HostnameRuleValue(host); err != nil {
+				return invalid(gatewayv1.ListenerReasonUnsupportedValue, "Shared HTTP listener hostname is unsupported")
+			}
 		}
 	}
 	if listener.Hostname != nil && amphora.ValidateHostname(string(*listener.Hostname)) != nil {
@@ -206,8 +212,31 @@ func listenerHostname(listener *gatewayv1.Listener) string {
 	return string(*listener.Hostname)
 }
 
-// HTTPSVirtualHostname encodes the catch-all selector explicitly for Octavia.
-func HTTPSVirtualHostname(listener *gatewayv1.Listener) string {
+// HTTPListenerHostnames supplies all hostname selectors on plaintext ports with
+// a wildcard or catch-all section. Exact-only sections are already disjoint.
+func HTTPListenerHostnames(listeners []*gatewayv1.Listener) map[int][]string {
+	ports := make(map[int][]string)
+	for _, listener := range listeners {
+		if listener.Protocol == gatewayv1.HTTPProtocolType {
+			port := int(listener.Port)
+			ports[port] = append(ports[port], HTTPVirtualHostname(listener))
+		}
+	}
+	for port, hosts := range ports {
+		if len(hosts) < 2 || !slices.ContainsFunc(hosts, func(host string) bool { return strings.HasPrefix(host, "*") }) {
+			delete(ports, port)
+			continue
+		}
+		slices.Sort(hosts)
+	}
+	if len(ports) == 0 {
+		return nil
+	}
+	return ports
+}
+
+// HTTPVirtualHostname encodes the catch-all selector explicitly for Octavia.
+func HTTPVirtualHostname(listener *gatewayv1.Listener) string {
 	if hostname := listenerHostname(listener); hostname != "" {
 		return hostname
 	}
@@ -228,8 +257,7 @@ func SharedHTTPSListener(config controller.Config, gateway *gatewayv1.Gateway, l
 }
 
 // HTTPRouteSectionsSharePort checks that two admitted sections can use the same
-// physical listener. Plain HTTP admission already requires distinct exact hostnames
-// on a shared port. HTTPS also needs the regional virtual-host capability.
+// physical listener. HTTPS also needs the regional virtual-host capability.
 func HTTPRouteSectionsSharePort(config controller.Config, gateway *gatewayv1.Gateway, first, next *gatewayv1.Listener) bool {
 	return first.Protocol == next.Protocol && first.Port == next.Port &&
 		(first.Protocol == gatewayv1.HTTPProtocolType || SharedHTTPSListener(config, gateway, next))
@@ -288,7 +316,7 @@ func (r *Reconciler) resolveHTTPSPort(ctx context.Context, gateway *gatewayv1.Ga
 		if certificateSecret(gateway, listener) != target {
 			return tlsResolution{issue: &httpsListenerIssue{gatewayv1.ListenerConditionAccepted, gatewayv1.ListenerReasonUnsupportedValue, "HTTPS sections on a shared port require the same certificate Secret"}}
 		}
-		hosts = append(hosts, HTTPSVirtualHostname(listener))
+		hosts = append(hosts, HTTPVirtualHostname(listener))
 	}
 	// All sections share the same authorization and metadata revision. Resolve
 	// the common target once so a snapshot can never combine revisions.

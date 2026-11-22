@@ -275,11 +275,23 @@ func (r *Reconciler) buildRouteModelFromInputs(
 		spec.ScopedListenerPorts = []int{int(listener.Port)}
 	}
 	if len(listeners) == 1 && isolated {
-		spec.HTTPSListenerHostname = gatewaycontroller.HTTPSVirtualHostname(&listener)
+		spec.HTTPSListenerHostname = gatewaycontroller.HTTPVirtualHostname(&listener)
+	}
+	if listener.Protocol == gatewayv1.HTTPProtocolType {
+		admitted, err := gatewaycontroller.HTTPRouteListeners(r.Config, gateway)
+		if err != nil {
+			return cloud.RouteSpec{}, model.Diagnostic{}, err
+		}
+		if len(gatewaycontroller.HTTPListenerHostnames(admitted)[int(listener.Port)]) != 0 {
+			for i := range matches {
+				matches[i].httpListenerHostname = matches[i].sectionHostname
+			}
+		}
 	}
 	if len(matches) == 1 && !r.usesHTTPBackendGroups(route) && rules[0].Redirect == nil {
 		match := matches[0]
 		backend := rules[0].Backends[0]
+		spec.HTTPListenerHostname = match.httpListenerHostname
 		spec.Hostname, spec.PathType, spec.PathValue, spec.Precedence = match.Hostname, cloud.PathMatchType(match.Match.PathType), match.Match.PathValue, match.Precedence
 		spec.BackendTLS = inputs.backendTLSAvailability.validation(backend, ordinaryHTTP)
 		if spec.BackendTLS != nil && spec.BackendTLS.Denied {
@@ -398,8 +410,8 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 		}
 		*paths = appendHTTPPathMatch(*paths, cloud.HTTPPathMatch{
 			Hostname: match.Hostname, PathType: cloud.PathMatchType(match.Match.PathType), PathValue: match.Match.PathValue, Precedence: match.Precedence,
-			HTTPSListenerHostname: match.httpsListenerHostname,
-			Method:                match.Match.Method, Headers: match.Match.Headers, RequestHeaderOperations: operations,
+			HTTPListenerHostname: match.httpListenerHostname, HTTPSListenerHostname: match.httpsListenerHostname,
+			Method: match.Match.Method, Headers: match.Match.Headers, RequestHeaderOperations: operations,
 			ResponseHeaderOperations: rules[match.RuleIndex].ResponseHeaderOperations,
 		})
 	}
@@ -461,7 +473,7 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 func appendHTTPPathMatch(matches []cloud.HTTPPathMatch, match cloud.HTTPPathMatch) []cloud.HTTPPathMatch {
 	// Equivalent alternatives targeting the same action share one policy identity.
 	if slices.ContainsFunc(matches, func(previous cloud.HTTPPathMatch) bool {
-		return previous.HTTPSListenerHostname == match.HTTPSListenerHostname && previous.Hostname == match.Hostname &&
+		return previous.HTTPListenerHostname == match.HTTPListenerHostname && previous.HTTPSListenerHostname == match.HTTPSListenerHostname && previous.Hostname == match.Hostname &&
 			previous.PathType == match.PathType && previous.PathValue == match.PathValue &&
 			previous.Method == match.Method && slices.Equal(previous.Headers, match.Headers)
 	}) {
@@ -499,6 +511,8 @@ func groupedBackendMembers(ctx context.Context, reader client.Reader, backend mo
 type routeLoweredMatch struct {
 	model.RouteMatch
 	httpsListenerHostname string
+	httpListenerHostname  string
+	sectionHostname       string
 }
 
 // supportedRouteModel verifies that the compiled attachments match the sections
@@ -561,13 +575,13 @@ func supportedRouteModel(logical model.Gateway, selected []*gatewayv1.Listener, 
 		delete(sections, listener.Name)
 		var hostname string
 		if isolated {
-			hostname = gatewaycontroller.HTTPSVirtualHostname(expected)
+			hostname = gatewaycontroller.HTTPVirtualHostname(expected)
 		}
 		for _, match := range listener.Rules {
 			if !exactHeaders && len(match.Match.Headers) != 0 || !methodMatch && match.Match.Method != "" {
 				return unsupported()
 			}
-			matches = append(matches, routeLoweredMatch{RouteMatch: match, httpsListenerHostname: hostname})
+			matches = append(matches, routeLoweredMatch{RouteMatch: match, httpsListenerHostname: hostname, sectionHostname: gatewaycontroller.HTTPVirtualHostname(expected)})
 		}
 	}
 	if len(sections) != 0 {

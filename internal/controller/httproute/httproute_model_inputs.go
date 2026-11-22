@@ -141,7 +141,7 @@ func (r *Reconciler) observeRouteGraphAdmission(ctx context.Context, gateway *ga
 	return admission, nil
 }
 
-// A frontend cannot direct the same effective hostname to both route kinds
+// One listener section cannot direct the same effective hostname to both route kinds
 // without allowing HTTPRoute fallbacks to consume unmatched RPCs. Elect the
 // oldest eligible Route, then namespace/name, as allowed by the GRPCRoute API.
 func electRouteProfiles(candidates []routeProfileCandidate) map[routeObjectKey]bool {
@@ -155,33 +155,38 @@ func electRouteProfiles(candidates []routeProfileCandidate) map[routeObjectKey]b
 			cmp.Compare(a.route.Namespace, b.route.Namespace), cmp.Compare(a.route.Name, b.route.Name))
 	})
 	type hostProfile struct {
-		port gatewayv1.PortNumber
-		kind gatewayv1.Kind
+		port    gatewayv1.PortNumber
+		section gatewayv1.SectionName
+		kind    gatewayv1.Kind
 	}
 	accepted := make(map[hostProfile][]gatewayv1.Hostname)
 	conflicts := make(map[routeObjectKey]bool)
 	for _, candidate := range candidates {
-		var hosts []gatewayv1.Hostname
-		for _, listener := range candidate.listeners {
-			for _, hostname := range model.IntersectHostnames(listener.Hostname, candidate.route.Spec.Hostnames) {
-				hosts = append(hosts, gatewayv1.Hostname(hostname))
-			}
-		}
-		port := candidate.listeners[0].Port
+		hosts := make(map[hostProfile][]gatewayv1.Hostname, len(candidate.listeners))
 		kind := model.HTTPProfileRouteKind(candidate.route)
 		peer := model.GRPCRouteKind
 		if kind == model.GRPCRouteKind {
 			peer = model.HTTPRouteKind
 		}
-		peerHosts := accepted[hostProfile{port: port, kind: peer}]
-		if slices.ContainsFunc(peerHosts, func(other gatewayv1.Hostname) bool {
-			return other == "" || slices.Contains(hosts, "") || len(model.IntersectHostnames(&other, hosts)) != 0
-		}) {
-			conflicts[routeKey(candidate.route)] = true
-			continue
+		key := routeKey(candidate.route)
+		for _, listener := range candidate.listeners {
+			profile := hostProfile{port: listener.Port, section: listener.Name, kind: kind}
+			for _, hostname := range model.IntersectHostnames(listener.Hostname, candidate.route.Spec.Hostnames) {
+				hosts[profile] = append(hosts[profile], gatewayv1.Hostname(hostname))
+			}
+			peerHosts := accepted[hostProfile{port: listener.Port, section: listener.Name, kind: peer}]
+			if slices.ContainsFunc(peerHosts, func(other gatewayv1.Hostname) bool {
+				return other == "" || slices.Contains(hosts[profile], "") || len(model.IntersectHostnames(&other, hosts[profile])) != 0
+			}) {
+				conflicts[key] = true
+				break
+			}
 		}
-		profile := hostProfile{port: port, kind: kind}
-		accepted[profile] = append(accepted[profile], hosts...)
+		if !conflicts[key] {
+			for profile, hostnames := range hosts {
+				accepted[profile] = append(accepted[profile], hostnames...)
+			}
+		}
 	}
 	return conflicts
 }

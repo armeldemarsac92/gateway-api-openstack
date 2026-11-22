@@ -81,6 +81,7 @@ type routeGraphOwner struct {
 	expectsHTTPParts           bool
 	expectsBackendTLS          bool
 	requiresPolicyAbsenceProof bool
+	requiresHTTPHostIsolation  bool
 }
 
 func (owner routeGraphOwner) matchesRoute(tags []string, role string) bool {
@@ -102,7 +103,7 @@ func readRouteResourceRole(tags []string, bases ...string) (routeResourceRole, b
 	if !ok {
 		return routeResourceRole{}, false
 	}
-	if slices.Contains(bases, raw) && raw != roleRuleRedirectGuard && raw != openstackidentity.RoleRuleHTTPHeaderExact && raw != openstackidentity.RoleRuleHTTPMethod {
+	if slices.Contains(bases, raw) && raw != roleRuleRedirectGuard && raw != openstackidentity.RoleRuleHTTPHostExclusion && raw != openstackidentity.RoleRuleHTTPHeaderExact && raw != openstackidentity.RoleRuleHTTPMethod {
 		return routeResourceRole{raw: raw, base: raw}, true
 	}
 	if base, match, cell, _, ok := openstackidentity.ParseHTTPRedirectRole(raw); ok {
@@ -289,7 +290,9 @@ func (p *Provider) observeRouteGraphsFromPools(ctx context.Context, owners []rou
 	defaultPool := usesDefaultPool(protocol)
 	scopedHTTP := protocol == cloud.ListenerProtocolHTTP && scopedListeners != nil
 	strictHTTP := scopedHTTP || protocol == cloud.ListenerProtocolHTTP && p.fixedHTTPResponses || containsHTTPFragmentPool(poolItems) ||
-		slices.ContainsFunc(owners, func(owner routeGraphOwner) bool { return owner.expectsHTTPParts || owner.expectsBackendTLS }) ||
+		slices.ContainsFunc(owners, func(owner routeGraphOwner) bool {
+			return owner.expectsHTTPParts || owner.expectsBackendTLS || owner.requiresHTTPHostIsolation
+		}) ||
 		slices.ContainsFunc(poolItems, func(pool pools.Pool) bool {
 			return hasObservedBackendTLS(pool, poolInventory.BackendTLS[pool.ID])
 		}) || recoverGateway != nil
@@ -675,14 +678,14 @@ func (p *Provider) observeRoutePolicy(ctx context.Context, owner routeGraphOwner
 		if err := p.validateOptionalProject("L7 rule", rule.ID, rule.ProjectID); err != nil {
 			return observedRoutePolicy{}, err
 		}
-		ruleRole, ok := readRouteResourceRole(rule.Tags, roleRulePath, roleRuleHost, roleRuleRedirectGuard, openstackidentity.RoleRuleHTTPHeaderExact, openstackidentity.RoleRuleHTTPMethod)
+		ruleRole, ok := readRouteResourceRole(rule.Tags, roleRulePath, roleRuleHost, roleRuleRedirectGuard, openstackidentity.RoleRuleHTTPHostExclusion, openstackidentity.RoleRuleHTTPHeaderExact, openstackidentity.RoleRuleHTTPMethod)
 		if !ok || !owner.matchesRoute(rule.Tags, ruleRole.raw) || ruleRole.backend != role.backend ||
 			ruleRole.match != role.match || ruleRole.redirect != role.redirect || ruleRole.weighted != role.weighted ||
 			role.backend != "" && rule.ProjectID != p.projectID {
 			return observedRoutePolicy{}, fmt.Errorf("%w: L7 rule %s beneath policy %s has an unproven project or route, backend or match identity", cloud.ErrOwnershipConflict, rule.ID, item.ID)
 		}
 		flagsObserved := observation.AdminState != nil && observation.Inverted != nil
-		if (role.redirect || ruleRole.base == openstackidentity.RoleRuleHTTPHeaderExact || ruleRole.base == openstackidentity.RoleRuleHTTPMethod) && (!flagsObserved || rule.RuleType == "" || rule.CompareType == "" || rule.Value == "") {
+		if (role.redirect || ruleRole.base == openstackidentity.RoleRuleHTTPHostExclusion || ruleRole.base == openstackidentity.RoleRuleHTTPHeaderExact || ruleRole.base == openstackidentity.RoleRuleHTTPMethod) && (!flagsObserved || rule.RuleType == "" || rule.CompareType == "" || rule.Value == "") {
 			return observedRoutePolicy{}, cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady,
 				fmt.Errorf("HTTP rule %s has incomplete predicate or administrative state", rule.ID))
 		}

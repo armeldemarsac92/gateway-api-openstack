@@ -133,6 +133,54 @@ func TestHTTPAndGRPCConflictOnSecondHTTPHostname(t *testing.T) {
 	}
 }
 
+func TestSharedPlainHTTPModelLowersGRPCAuthorityOnBothWildcards(t *testing.T) {
+	cfg := testConfig()
+	cfg.BackendH2C, cfg.FixedHTTPResponses = true, true
+	_, gateway := providerRouteParentObjects(cfg)
+	port := gateway.Spec.Listeners[0].Port
+	gateway.Spec.Listeners = []gatewayv1.Listener{
+		{Name: "exact", Port: port, Protocol: gatewayv1.HTTPProtocolType, Hostname: ptr.To(gatewayv1.Hostname("foo.bar.com"))},
+		{Name: "wildcard-bar", Port: port, Protocol: gatewayv1.HTTPProtocolType, Hostname: ptr.To(gatewayv1.Hostname("*.bar.com"))},
+		{Name: "wildcard-foo", Port: port, Protocol: gatewayv1.HTTPProtocolType, Hostname: ptr.To(gatewayv1.Hostname("*.foo.com"))},
+	}
+	route := &gatewayv1.GRPCRoute{ObjectMeta: metav1.ObjectMeta{Namespace: gateway.Namespace, Name: "echo", UID: "route-uid"}}
+	route.Spec.ParentRefs = []gatewayv1.ParentReference{{Name: gatewayv1.ObjectName(gateway.Name), Port: &port}}
+	route.Spec.Hostnames = []gatewayv1.Hostname{"*.bar.com", "*.foo.com"}
+	route.Spec.Rules = []gatewayv1.GRPCRouteRule{grpcRule("v1", gatewayv1.GRPCRouteMatch{
+		Method: &gatewayv1.GRPCMethodMatch{Service: ptr.To("example.Echo"), Method: ptr.To("Echo")},
+	})}
+	backend, endpoints, node := validNodePortBackend(gateway.Namespace, "v1")
+	backend.Spec.Ports[0].AppProtocol = ptr.To("kubernetes.io/h2c")
+	reader := indexedFakeClientBuilder(testScheme(t), cfg).WithObjects(backend, endpoints, node).Build()
+
+	desired, err := (&Reconciler{Config: cfg}).buildRouteModelWithReader(t.Context(), reader, model.ProjectGRPCRoute(route), gateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(desired.HTTPBackends) != 1 || !desired.TCPHealthMonitor || !desired.HTTPBackends[0].BackendH2C {
+		t.Fatalf("want a single h2c backend with TCP health checks, got %#v", desired)
+	}
+	want := []cloud.HTTPPathMatch{
+		{HTTPListenerHostname: "foo.bar.com", Hostname: "foo.bar.com", PathType: cloud.PathMatchExact, PathValue: "/example.Echo/Echo", Precedence: 0},
+		{HTTPListenerHostname: "*.bar.com", Hostname: "*.bar.com", PathType: cloud.PathMatchExact, PathValue: "/example.Echo/Echo", Precedence: 1},
+		{HTTPListenerHostname: "*.foo.com", Hostname: "*.foo.com", PathType: cloud.PathMatchExact, PathValue: "/example.Echo/Echo", Precedence: 2},
+	}
+	if got := desired.HTTPBackends[0].Matches; !reflect.DeepEqual(got, want) {
+		t.Fatalf("gRPC authority and section constraints = %#v, want %#v", got, want)
+	}
+
+	exact := &gateway.Spec.Listeners[0]
+	wildcard := &gateway.Spec.Listeners[1]
+	http := &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: gateway.Namespace, Name: "http-on-wildcard"}}
+	candidates := []routeProfileCandidate{
+		{route: http, listeners: []*gatewayv1.Listener{wildcard}},
+		{route: model.ProjectGRPCRoute(route), listeners: []*gatewayv1.Listener{exact}},
+	}
+	if conflicts := electRouteProfiles(candidates); len(conflicts) != 0 {
+		t.Fatalf("different listener sections must not compete across HTTP and gRPC: %v", conflicts)
+	}
+}
+
 func TestGatewayGraphPreservesBoundGRPCRouteWithSameNameAsHTTPRoute(t *testing.T) {
 	cfg := testConfig()
 	gateway := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "infra", Name: "edge", UID: "gateway"}}

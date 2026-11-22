@@ -48,6 +48,9 @@ type desiredPolicy struct {
 	backendKey               string
 	matchKey                 string
 	hostnameRuleValue        string
+	hostname                 string
+	httpListenerHostname     string
+	httpHostExclusions       []redirectGuard
 	httpsListenerHostname    string
 	redirect                 *desiredRedirectPolicy
 	weighted                 bool
@@ -185,10 +188,15 @@ func (p *Provider) buildDesiredRoutePart(spec cloud.RouteSpec, backendKey string
 			if err != nil {
 				return invalid(err)
 			}
+			for i := range policies {
+				policies[i].hostname = spec.Hostname
+				policies[i].httpListenerHostname = spec.HTTPListenerHostname
+			}
 			if scope := spec.HTTPSListenerHostname; scope != "" {
 				for i := range policies {
 					policy := &policies[i]
 					policy.httpsListenerHostname = scope
+					policy.httpListenerHostname, policy.hostname = match.HTTPListenerHostname, match.Hostname
 					policy.matchKey = openstackidentity.HTTPListenerMatchKey(scope, match)
 					policy.hostnameRuleValue = hostnameRuleValue
 					policy.role = policyRuleRole(*policy, policy.role, "")
@@ -196,7 +204,7 @@ func (p *Provider) buildDesiredRoutePart(spec cloud.RouteSpec, backendKey string
 			}
 		}
 	case cloud.ListenerProtocolTCP, cloud.ListenerProtocolUDP:
-		if spec.Hostname != "" || spec.PathType != "" || spec.PathValue != "" || spec.HTTPSListenerHostname != "" {
+		if spec.Hostname != "" || spec.PathType != "" || spec.PathValue != "" || spec.HTTPSListenerHostname != "" || spec.HTTPListenerHostname != "" {
 			return invalid(fmt.Errorf("a %s route cannot contain HTTP matches", protocol))
 		}
 	default:
@@ -571,6 +579,12 @@ func rulesFor(policy desiredPolicy, hostnameRuleValue string) []desiredRule {
 			compareType: l7policies.CompareTypeEqual,
 			key:         header.Name,
 			value:       header.Value,
+		})
+	}
+	for _, guard := range policy.httpHostExclusions {
+		rules = append(rules, desiredRule{
+			role:     policyRuleRole(policy, openstackidentity.RoleRuleHTTPHostExclusion, redirectGuardKey(guard)),
+			ruleType: guard.ruleType, compareType: guard.compareType, value: guard.value, invert: true,
 		})
 	}
 	if policy.redirect != nil {

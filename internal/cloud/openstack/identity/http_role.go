@@ -73,6 +73,9 @@ func HTTPMatchKey(hostname string, pathType cloud.PathMatchType, path, method st
 // HTTPListenerMatchKey scopes a logical HTTP match without changing existing keys.
 func HTTPListenerMatchKey(scope string, match cloud.HTTPPathMatch) string {
 	key := HTTPMatchKey(match.Hostname, match.PathType, match.PathValue, match.Method, match.Headers...)
+	if match.HTTPListenerHostname != "" {
+		return httpTupleKey("http-listener", match.HTTPListenerHostname, key)
+	}
 	if scope == "" {
 		return key
 	}
@@ -92,6 +95,19 @@ func ScopedHTTPPolicyRole(base, match string) string {
 	default:
 		return ""
 	}
+}
+
+// RoleRuleHTTPHostExclusion identifies a stock inverted hostname predicate.
+const RoleRuleHTTPHostExclusion = "l7-host-exclusion"
+
+const scalarHTTPHostExclusionPrefix = "http-host-exclusion-v1/"
+
+// ScalarHTTPHostExclusionRole identifies an exclusion in a legacy scalar policy.
+func ScalarHTTPHostExclusionRole(guard string) string {
+	if !validHTTPKey(guard) {
+		return ""
+	}
+	return scalarHTTPHostExclusionPrefix + guard
 }
 
 // RoleRuleHTTPHeaderExact identifies a predicate on a normalized header name.
@@ -156,7 +172,7 @@ func httpMatchRole(role, base, match string, predicateKeys []string) string {
 		if len(predicateKeys) == 0 {
 			return role + "/" + match
 		}
-	case RoleRuleHTTPHeaderExact:
+	case RoleRuleHTTPHeaderExact, RoleRuleHTTPHostExclusion:
 		if len(predicateKeys) == 1 && validHTTPKey(predicateKeys[0]) {
 			return role + "/" + match + "/" + predicateKeys[0]
 		}
@@ -170,6 +186,9 @@ func IsHTTPWeightedPolicyRole(role string) bool {
 
 // ParseHTTPFragmentRole recognizes only roles the HTTP path writer can create.
 func ParseHTTPFragmentRole(raw string) (base, backendKey, matchKey string, ok bool) {
+	if guard, found := strings.CutPrefix(raw, scalarHTTPHostExclusionPrefix); found && validHTTPKey(guard) {
+		return RoleRuleHTTPHostExclusion, "", "", true
+	}
 	if scoped, found := strings.CutPrefix(raw, scopedHTTPRolePrefix); found {
 		base, match, _ := strings.Cut(scoped, "/")
 		if ScopedHTTPPolicyRole(base, match) == raw {
@@ -220,7 +239,7 @@ func HTTPRedirectRole(base, match, cell, guard string) string {
 		if guard == "" {
 			return role
 		}
-	case RoleRuleRedirectGuard, RoleRuleHTTPHeaderExact:
+	case RoleRuleRedirectGuard, RoleRuleHTTPHeaderExact, RoleRuleHTTPHostExclusion:
 		if validHTTPKey(guard) {
 			return role + "/" + guard
 		}

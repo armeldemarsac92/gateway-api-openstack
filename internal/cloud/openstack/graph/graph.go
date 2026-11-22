@@ -34,12 +34,13 @@ import (
 )
 
 type desiredGatewayGraph struct {
-	fixedHTTPResponses bool
-	spec               cloud.GatewayGraphSpec
-	identity           Identity
-	routes             []desiredRoute
-	protocol           string
-	sni                []desiredSNIFragment
+	fixedHTTPResponses  bool
+	plainHTTPRuleLimits map[int]string
+	spec                cloud.GatewayGraphSpec
+	identity            Identity
+	routes              []desiredRoute
+	protocol            string
+	sni                 []desiredSNIFragment
 }
 
 type observedGatewayGraph struct {
@@ -226,7 +227,8 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	}
 	var plan []graphMutation
 	defaultPool := usesDefaultPool(actual.protocol)
-	planBeforeSecurity := isSNIProtocol(actual.protocol) || defaultPool || actual.scoped && actual.protocol == cloud.ListenerProtocolHTTP || hasHTTPRouteParts(desired, actual)
+	planBeforeSecurity := isSNIProtocol(actual.protocol) || defaultPool || actual.scoped && actual.protocol == cloud.ListenerProtocolHTTP || hasHTTPRouteParts(desired, actual) ||
+		len(desired.spec.Gateway.Spec.HTTPListenerHostnames) != 0 || observedPlainHTTPExclusions(actual.routes)
 	if planBeforeSecurity {
 		plan, result, err = p.buildGatewayGraphPlan(desired, actual)
 		if err != nil {
@@ -315,8 +317,8 @@ func (p *Provider) reconcileWeightedWithdrawalWithoutAddress(ctx context.Context
 		return result, err
 	}
 	result.Gateway.Outcome = p.progressingOutcome("Waiting to observe the Gateway Floating IP inventory")
-	if len(plan) != 1 || !plan[0].withdrawHTTPPolicy || plan[0].kind != graphRouteMutation ||
-		plan[0].route.kind != routeMutationSetPolicyTarget || plan[0].route.weightedTargets == nil {
+	if len(plan) != 1 || !plan[0].withdrawHTTPPolicy || plan[0].kind != graphDisableListener &&
+		(plan[0].kind != graphRouteMutation || plan[0].route.kind != routeMutationSetPolicyTarget || plan[0].route.weightedTargets == nil) {
 		return result, actual.addressReadError
 	}
 	step, err := p.prepareGraphMutation(ctx, desired, actual, plan[0])
@@ -528,6 +530,24 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 			return spec.Gateway.Spec.ScopedListeners[i].Port < spec.Gateway.Spec.ScopedListeners[j].Port
 		})
 	}
+	for port, hosts := range spec.Gateway.Spec.HTTPListenerHostnames {
+		_, httpsPort := unauthorizedHTTPSPorts[port]
+		if protocol != cloud.ListenerProtocolHTTP || spec.Gateway.Disposition != cloud.GraphEnsure ||
+			len(ports) == 0 && port != spec.Gateway.Spec.ListenerPort || len(ports) != 0 && !ports[port] ||
+			httpsPort || len(hosts) < 2 {
+			return invalid("invalid isolated plaintext HTTP listener port")
+		}
+		for i, host := range hosts {
+			if i > 0 && hosts[i-1] >= host {
+				return invalid("isolated plaintext HTTP listener hostnames must be sorted and distinct")
+			}
+			if host != "*" {
+				if _, err := amphora.HostnameRuleValue(host); err != nil {
+					return invalid(err.Error())
+				}
+			}
+		}
+	}
 	// Copy before sorting: callers can reuse their immutable reconciliation input.
 	spec.Routes = append([]cloud.RouteGraphNode(nil), spec.Routes...)
 	sort.Slice(spec.Routes, func(i, j int) bool {
@@ -656,6 +676,7 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 				return desiredGatewayGraph{}, &cloud.GraphError{Identity: id, Err: err}
 			}
 			if protocol == cloud.ListenerProtocolHTTP {
+				plainHosts := spec.Gateway.Spec.HTTPListenerHostnames[physicalPort]
 				hosts := isolatedHosts[httpPort]
 				validateScope := func(scope string) error {
 					if len(hosts) == 0 && scope == "" || slices.Contains(hosts, scope) ||
@@ -688,7 +709,10 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 					if err := validateScope(match.HTTPSListenerHostname); err != nil {
 						return desiredGatewayGraph{}, err
 					}
-					if err := addRank(match.HTTPSListenerHostname, match.Precedence); err != nil {
+					if err := validatePlainHTTPMatch(plainHosts, match.HTTPListenerHostname, match.Hostname); err != nil {
+						return desiredGatewayGraph{}, &cloud.GraphError{Identity: id, Err: err}
+					}
+					if err := addRank(listenerScope(match.HTTPListenerHostname, match.HTTPSListenerHostname), match.Precedence); err != nil {
 						return desiredGatewayGraph{}, err
 					}
 				}
@@ -698,8 +722,17 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 						if err := validateScope(policy.httpsListenerHostname); err != nil {
 							return desiredGatewayGraph{}, err
 						}
+						if err := addPlainHTTPExclusions(plainHosts, policy, route.hostnameRuleValue); err != nil {
+							if !errors.Is(err, errPlainHTTPRuleLimit) {
+								return desiredGatewayGraph{}, &cloud.GraphError{Identity: id, Err: err}
+							}
+							if desired.plainHTTPRuleLimits == nil {
+								desired.plainHTTPRuleLimits = make(map[int]string)
+							}
+							desired.plainHTTPRuleLimits[physicalPort] = err.Error()
+						}
 						if policy.redirect == nil && policy.position == 1 {
-							if err := addRank(policy.httpsListenerHostname, policy.precedence); err != nil {
+							if err := addRank(listenerScope(policy.httpListenerHostname, policy.httpsListenerHostname), policy.precedence); err != nil {
 								return desiredGatewayGraph{}, err
 							}
 						}
@@ -712,8 +745,10 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 	}
 	for _, policies := range policiesByPort {
 		sort.SliceStable(policies, func(i, j int) bool {
-			if policies[i].httpsListenerHostname != policies[j].httpsListenerHostname {
-				return policies[i].httpsListenerHostname < policies[j].httpsListenerHostname
+			a := listenerScope(policies[i].httpListenerHostname, policies[i].httpsListenerHostname)
+			b := listenerScope(policies[j].httpListenerHostname, policies[j].httpsListenerHostname)
+			if a != b {
+				return a < b
 			}
 			return policies[i].precedence < policies[j].precedence
 		})
@@ -803,6 +838,7 @@ func (d desiredGatewayGraph) routeOwners() []routeGraphOwner {
 	for index, route := range d.routes {
 		owners[index].identity = route.identity
 		owners[index].expectsHTTPParts = len(route.httpParts) != 0
+		owners[index].requiresHTTPHostIsolation = len(d.spec.Gateway.Spec.HTTPListenerHostnames) != 0
 		owners[index].expectsBackendTLS = routeHasBackendTLSPolicy(route)
 		node := d.spec.Routes[index]
 		owners[index].requiresPolicyAbsenceProof = node.Disposition == cloud.GraphDelete || node.WaitForHTTPPolicyRemoval
