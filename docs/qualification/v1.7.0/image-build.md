@@ -1,11 +1,11 @@
 # Reproduce the Hibiscus development image
 
-The ordinary and no-cache builds of the Linux amd64 controller produced the same OCI manifest. The executable from the archived image ran the Gateway address assignment lifecycle against Kubernetes on each CRD channel. [Build record](image.json) · [Experimental transitions and Standard pruning](provider/private-gateway-address.md#experimental-address-routability)
+The ordinary and no-cache linux/amd64 builds produced the same OCI manifest. The archived executable ran the original HTTPRoute URL rewrite cases on both local kind clusters. The hostname and path cases passed. The case with a filter on a backend reference failed at route acceptance. [Build record](image.json) · [Case results](provider/http-request-url-rewrite.md)
 
 On a linux/amd64 host, use a separate checkout of the recorded revision. The Dockerfile pins the Go 1.27.4 builder and distroless base by digest. Podman uses a fixed timestamp, and the build writes the full commit into the binary and the OCI revision label. The verification command exports gzip-compressed layers.
 
 ```sh
-revision=a3d84b12b57d610b14fc8c08c5c85710355c1251
+revision=1206fc60da9dbbb1f6557ed7cb62ff0c84e8ff00
 test "$(git rev-parse HEAD)" = "$revision"
 image="localhost/hibiscus-controller:$revision"
 make container-build CONTAINER_TOOL=podman VERSION="$revision" IMAGE="$image"
