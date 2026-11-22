@@ -4,6 +4,12 @@ A controller with `--octavia-backend-h2c` forwards a Service port declaring `app
 
 The Hibiscus wheels for the qualified provider pair match the local builds. [Octavia wheel release](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-backend-h2c-bdcd6e3de928) · [octavia-lib wheel release](https://github.com/armeldemarsac92/octavia-lib/releases/tag/hibiscus-backend-h2c-bb1a993ac954)
 
+## Weighted GRPCRoute backends
+
+On an HTTP listener, `--octavia-weighted-http-targets` adds support for rules with multiple Service references to the gRPC h2c profile. The configured Octavia region must advertise `weighted_http_targets_v1`. Each forwarding Service uses its own h2c pool. A reference with omitted weight has weight 1. A zero-weight reference is still validated, including any incompatible BackendTLSPolicy, and receives no traffic. A rule with zero total weight sends its matching RPCs to the empty pool and leaves other rules active. Filters on individual references are unsupported.
+
+An invalid positive-weight reference in a weighted rule sets the parent’s `ResolvedRefs` to `False`. Before activating weighted rules, the controller prepares an empty pool owned by the route. It can move the revoked share to that pool in place, where HTTP 503 maps to gRPC `UNAVAILABLE`. On restoration, the share stays on the empty pool until the authorized pool is ready. If an existing weighted policy predates the empty pool or the pool is unavailable at withdrawal, the controller closes the affected policy until it can safely configure the target again.
+
 ## Gateway API v1.7.0 cases
 
 Both channels ran the original upstream Go cases and applied their unmodified route manifests. The adapter selected one case at a time with upstream conformance options. The manager came from the qualified linux/amd64 OCI archive. It reported revision `e6fbd1a853aceaed3a141b406d5860f5242b9ecb` at startup. The registry manifest was `sha256:d9e0126c2d7f46fa919fb99a8bba36c54c6570b6f7e05609d177e944ebea7c60`. [Upstream case sources](https://github.com/kubernetes-sigs/gateway-api/tree/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests)

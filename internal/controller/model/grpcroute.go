@@ -55,16 +55,18 @@ func ProjectGRPCRoute(route *gatewayv1.GRPCRoute) *gatewayv1.HTTPRoute {
 	}
 	rules := make([]gatewayv1.HTTPRouteRule, 0, len(route.Spec.Rules))
 	for _, rule := range route.Spec.Rules {
-		if len(rule.BackendRefs) != 1 ||
+		if len(rule.BackendRefs) == 0 ||
 			rule.SessionPersistence != nil { //nolint:staticcheck // Still served in the experimental bundle.
 			return projected
 		}
-		backend := rule.BackendRefs[0]
-		if len(backend.Filters) != 0 {
-			return projected
-		}
 		lowered := gatewayv1.HTTPRouteRule{
-			BackendRefs: []gatewayv1.HTTPBackendRef{{BackendRef: *backend.BackendRef.DeepCopy()}},
+			BackendRefs: make([]gatewayv1.HTTPBackendRef, 0, len(rule.BackendRefs)),
+		}
+		for _, backend := range rule.BackendRefs {
+			if len(backend.Filters) != 0 {
+				return projected
+			}
+			lowered.BackendRefs = append(lowered.BackendRefs, gatewayv1.HTTPBackendRef{BackendRef: *backend.BackendRef.DeepCopy()})
 		}
 		for _, filter := range rule.Filters {
 			if filter.Type != gatewayv1.GRPCRouteFilterRequestHeaderModifier {

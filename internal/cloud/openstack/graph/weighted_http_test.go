@@ -275,6 +275,65 @@ func TestWeightedHTTPGrantWithdrawalPrecedesPoolCleanup(t *testing.T) {
 	}
 }
 
+func TestWeightedGRPCGrantUsesPreparedFailurePool(t *testing.T) {
+	desired, actual := weightedPlanFixture()
+	route := &desired.routes[0]
+	route.spec.GRPC = true
+	local, remote, weighted := route.httpParts[0], route.httpParts[1], route.httpParts[2]
+	weighted.spec.GRPC = true
+	graphs := actual.routes[0].httpParts
+	policy := &graphs[weighted.backendKey].policies[0]
+	policy.policy.AdminStateUp = false
+	failure, empty := convergedRoutePlanFixture()
+	failure.backendKey, failure.unavailable = grpcFailurePoolKey, true
+	failure.members, failure.policies, failure.healthMonitor = nil, nil, cloud.HealthMonitorConfig{}
+	empty.members, empty.policies, empty.monitor = nil, nil, nil
+	empty.pool.ID, empty.pool.ProvisioningStatus = "pool-unavailable", "ACTIVE"
+	route.httpParts = []desiredRoute{local, remote, weighted, failure}
+	firstStep := func(kind routeMutationKind, backend string) graphMutation {
+		t.Helper()
+		steps := weightedPlan(t, desired, actual)
+		if len(steps) != 1 || steps[0].route.kind != kind || steps[0].backendKey != backend {
+			t.Fatalf("want %v for %s, got %#v", kind, backend, steps)
+		}
+		return steps[0]
+	}
+	firstStep(routeMutationCreatePool, grpcFailurePoolKey)
+	graphs[grpcFailurePoolKey] = &empty
+	firstStep(routeMutationEnablePolicy, weighted.backendKey)
+	policy.policy.AdminStateUp = true
+
+	remoteTarget := policy.weightedTargets[1]
+	withdrawn := []octavia.WeightedHTTPTarget{policy.weightedTargets[0], {Weight: remoteTarget.Weight, PoolID: empty.pool.ID}}
+	weighted.weightedTargets[1].backendKey = grpcFailurePoolKey
+	route.httpParts = []desiredRoute{local, weighted, failure}
+	delete(graphs, grpcFailurePoolKey)
+	firstStep(routeMutationDisablePolicy, weighted.backendKey)
+	graphs[grpcFailurePoolKey] = &empty
+	step := firstStep(routeMutationSetPolicyTarget, weighted.backendKey)
+	if !step.withdrawHTTPPolicy || step.route.weightedTargets == nil || !slices.EqualFunc(*step.route.weightedTargets, withdrawn, weightedTargetsEqual) {
+		t.Fatalf("want unchanged weights with a gRPC failure pool, got %#v", step)
+	}
+	policy.weightedTargets = withdrawn
+
+	delete(graphs, remote.backendKey)
+	weighted.weightedTargets[1].backendKey = remote.backendKey
+	route.httpParts = []desiredRoute{local, remote, weighted, failure}
+	firstStep(routeMutationCreatePool, remote.backendKey)
+	_, restoredPool := convergedRoutePlanFixture()
+	restoredPool.pool.ID, restoredPool.pool.ProvisioningStatus = "pool-restored", "ACTIVE"
+	restoredPool.members, restoredPool.monitor, restoredPool.policies = nil, nil, nil
+	graphs[remote.backendKey] = &restoredPool
+	firstStep(routeMutationCreateMember, remote.backendKey)
+	restoredPool.members = []pools.Member{{ID: "member-restored", Address: remote.members[0].Address,
+		ProtocolPort: remote.members[0].Port, SubnetID: remote.spec.MemberSubnetID, AdminStateUp: true, ProvisioningStatus: "ACTIVE"}}
+	step = firstStep(routeMutationSetPolicyTarget, weighted.backendKey)
+	restored := []octavia.WeightedHTTPTarget{withdrawn[0], {Weight: remoteTarget.Weight, PoolID: restoredPool.pool.ID}}
+	if step.withdrawHTTPPolicy || step.route.weightedTargets == nil || !slices.EqualFunc(*step.route.weightedTargets, restored, weightedTargetsEqual) {
+		t.Fatalf("restore the original share after the replacement is ready, got %#v", step)
+	}
+}
+
 func TestWeightedHTTPOwnedPoolMustConvergeBeforeEnablingEachPolicy(t *testing.T) {
 	desired, actual := weightedPlanFixture()
 	parts := desired.routes[0].httpParts
