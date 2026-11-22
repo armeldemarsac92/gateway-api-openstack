@@ -39,9 +39,12 @@ const (
 	httpMethodRuleType          l7policies.RuleType = "HTTP_METHOD"
 )
 
-// Match the native media type and optional codec token. Hex escapes protect
-// special characters through Octavia's Jinja renderer and HAProxy parsing.
-const grpcContentType = `(?i)^application/grpc([+][a-z0-9!\x23\x24%\x26\x27*+.^_\x60|~-]+)?[ \t]*(;|$)`
+// Match the native media type with a POSIX ERE so HAProxy can use either libc
+// or PCRE. Octavia's HAProxy template cannot pass #, & or ' through portably,
+// so the optional codec accepts the rest of the HTTP token alphabet. Including
+// a space in the blank class avoids a nested-set warning from Octavia's Python
+// regex validator.
+const grpcContentType = "^[Aa][Pp][Pp][Ll][Ii][Cc][Aa][Tt][Ii][Oo][Nn]/[Gg][Rr][Pp][Cc]([+][A-Za-z0-9!$%*+.^_`|~-]+)?[ [:blank:]]*(;|$)"
 
 type desiredPolicy struct {
 	role                     string
