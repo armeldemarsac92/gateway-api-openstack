@@ -53,7 +53,10 @@ func (p *Provider) buildDesiredWeightedHTTPParts(spec cloud.RouteSpec) ([]desire
 	if !p.weightedHTTPTargets {
 		return invalid(errors.New("HTTP weighted targets require the Octavia weighted HTTP capability"))
 	}
+	// Reserve a pool identity outside the namespace and port of any Service.
+	failurePoolKey := openstackidentity.HTTPBackendKey("", "grpc-unavailable", 0)
 	var parts []desiredRoute
+	var needsGRPCFailurePool bool
 	used, seen := make(map[int]bool), make(map[int]bool)
 	partSpec := spec
 	partSpec.HTTPBackends, partSpec.HTTPRedirects, partSpec.FixedHTTPRules, partSpec.WeightedHTTPRules = nil, nil, nil, nil
@@ -82,6 +85,11 @@ func (p *Provider) buildDesiredWeightedHTTPParts(spec cloud.RouteSpec) ([]desire
 				backend := spec.HTTPBackends[index]
 				wanted.backendKey = openstackidentity.HTTPBackendPoolKey(backend)
 				used[index] = true
+			} else if spec.GRPC && target.Weight > 0 {
+				// Octavia fixed targets only support HTTP 404 and 500. An
+				// empty pool returns HTTP 503, which gRPC maps to UNAVAILABLE.
+				wanted.backendKey = failurePoolKey
+				needsGRPCFailurePool = true
 			}
 			part.weightedTargets = append(part.weightedTargets, wanted)
 		}
@@ -92,6 +100,14 @@ func (p *Provider) buildDesiredWeightedHTTPParts(spec cloud.RouteSpec) ([]desire
 			return invalid(err)
 		}
 		parts = append(parts, part)
+	}
+	if needsGRPCFailurePool {
+		failure, err := p.buildDesiredRoutePart(partSpec, failurePoolKey, true)
+		if err != nil {
+			return nil, nil, err
+		}
+		failure.healthMonitor = cloud.HealthMonitorConfig{}
+		parts = append(parts, failure)
 	}
 	return parts, used, nil
 }

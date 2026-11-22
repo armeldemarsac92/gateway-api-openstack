@@ -75,7 +75,7 @@ func (r *Reconciler) validateRouteStructure(route *gatewayv1.HTTPRoute) ([]gatew
 			return nil, grpcProfileDisabled()
 		}
 		if len(route.Spec.Rules) == 0 {
-			return nil, newRouteBuildError(routeErrorUnsupported, "GRPCRoute rules support one backendRef, an optional exact service and method, exact header matches, and a rule-level RequestHeaderModifier.")
+			return nil, newRouteBuildError(routeErrorUnsupported, "GRPCRoute rules require backendRefs and support an optional exact service and method, exact header matches, and a rule-level RequestHeaderModifier")
 		}
 	}
 	if len(route.Spec.Rules) == 0 {
@@ -117,7 +117,7 @@ func (r *Reconciler) usesHTTPBackendGroups(route *gatewayv1.HTTPRoute) bool {
 
 func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, grpc bool) error {
 	fixedResponses := r.Config.FixedHTTPResponses || grpc
-	weightedTargets := r.Config.WeightedHTTPTargets && !grpc
+	weightedTargets := r.Config.WeightedHTTPTargets && (!grpc || len(rule.BackendRefs) > 1)
 	exactHeaders := r.Config.HTTPHeaderExact
 	exactQueryParams := r.Config.HTTPQueryParamExact && r.Config.FixedHTTPResponses && !grpc
 	methodMatch := r.Config.HTTPMethodMatch && !grpc
@@ -144,6 +144,9 @@ func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, grpc bool) 
 		return validateWeightedBackendRefs(rule.BackendRefs)
 	}
 	if len(rule.BackendRefs) != 1 {
+		if grpc {
+			return newRouteBuildError(routeErrorUnsupported, "multiple GRPCRoute backendRefs require --octavia-weighted-http-targets")
+		}
 		return newRouteBuildError(routeErrorUnsupported, "exactly one backendRef is supported")
 	}
 	backend := rule.BackendRefs[0]
@@ -448,6 +451,11 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 	result, observed := groups[key]
 	var members []cloud.Member
 	tls := inputs.backendTLSAvailability.validation(backend, model.HTTPProfileRouteKind(route) == model.HTTPRouteKind)
+	if spec.GRPC && !direct && tls != nil && tls.Denied {
+		return nil, model.Diagnostic{
+			Reason: string(gatewayv1.RouteReasonUnsupportedProtocol), Message: "GRPCRoute cannot meet the backend Service's BackendTLSPolicy",
+		}, nil
+	}
 	if !observed && (tls == nil || !tls.Denied) {
 		var err error
 		members, result.diagnostic, err = groupedBackendMembers(ctx, reader, backend, inputs, spec.MemberMode, nodeAddressType)
