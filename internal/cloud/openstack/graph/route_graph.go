@@ -1161,7 +1161,7 @@ func buildRouteDeletionPlan(actual observedRouteGraph) []routeMutation {
 // policyHeaderPatch omits already-converged directions and explicitly clears
 // installed operations when the desired rule no longer has a filter.
 func policyHeaderPatch(wanted, observed []cloud.HTTPHeaderOperation, retry bool) []cloud.HTTPHeaderOperation {
-	if slices.Equal(wanted, observed) && !(retry && (wanted != nil || observed != nil)) {
+	if wanted == nil && observed == nil || !retry && slices.Equal(wanted, observed) {
 		return nil
 	}
 	if wanted == nil {
