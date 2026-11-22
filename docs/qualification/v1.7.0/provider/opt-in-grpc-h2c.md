@@ -10,6 +10,19 @@ On an HTTP listener, `--octavia-weighted-http-targets` adds support for rules wi
 
 An invalid positive-weight reference in a weighted rule sets the parent’s `ResolvedRefs` to `False`. Before activating weighted rules, the controller prepares an empty pool owned by the route. It can move the revoked share to that pool in place, where HTTP 503 maps to gRPC `UNAVAILABLE`. On restoration, the share stays on the empty pool until the authorized pool is ready. If an existing weighted policy predates the empty pool or the pool is unavailable at withdrawal, the controller closes the affected policy until it can safely configure the target again.
 
+The original Gateway API v1.7.0 `GRPCRouteWeight` case passed on Standard and Experimental with the entrypoint from the linux/amd64 image at `f70be140741c`. The default upstream gRPC client checked the 70 / 30 / 0 distribution. The earlier controller at `82274f3036f4` reported `Accepted=False/UnsupportedValue` on Standard. [Upstream case](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/grpcroute-weight.go) · [Image, checksums and per-channel results](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-f70be140741c0b15fe4b0da6b440661fc4641ef2)
+
+| Supplemental sample of 500 RPCs | Standard, v1 / v2 / v3 / unavailable | Experimental, v1 / v2 / v3 / unavailable |
+| --- | --- | --- |
+| Original 70 / 30 / 0 rule | 342 / 158 / 0 / 0 | 349 / 151 / 0 / 0 |
+| Cross-namespace reference authorized | 341 / 159 / 0 / 0 | 350 / 150 / 0 / 0 |
+| ReferenceGrant withdrawn | 341 / 0 / 0 / 159 | 337 / 0 / 0 / 163 |
+| ReferenceGrant restored | 348 / 152 / 0 / 0 | 343 / 157 / 0 / 0 |
+
+Each supplemental sample started after the route status and Octavia readback converged. The 30-weight reference pointed to the Service protected by the grant. The route stayed accepted. Its `ResolvedRefs` condition reported `False/RefNotPermitted` on withdrawal and returned to `True/ResolvedRefs` on restoration. In both channels, the separate all-zero rule returned `UNAVAILABLE` on 500 of 500 RPCs while its healthy sibling continued forwarding. [Status and traffic by transition](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-f70be140741c0b15fe4b0da6b440661fc4641ef2)
+
+The runs used Kubernetes v1.36.2 envtest, Octavia 19.0.1.dev32, octavia-lib 3.12.1.dev9, HAProxy 3.0.19 and six live echo processes. The fixture supplied project identity, networking, worker completion, agent transport and Kubernetes Pod readiness. Calls in flight at grant withdrawal and a deployed Hibiscus region require separate measurements. [Provider wheels](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-url-rewrite-provider-ebc2e6f04562) · [Provider library](https://github.com/armeldemarsac92/octavia-lib/releases/tag/hibiscus-url-rewrite-provider-3009042e8073)
+
 ## Gateway API v1.7.0 cases
 
 Both channels ran the original upstream Go cases and applied their unmodified route manifests. The adapter selected one case at a time with upstream conformance options. The manager came from the qualified linux/amd64 OCI archive. It reported revision `e6fbd1a853aceaed3a141b406d5860f5242b9ecb` at startup. The registry manifest was `sha256:d9e0126c2d7f46fa919fb99a8bba36c54c6570b6f7e05609d177e944ebea7c60`. [Upstream case sources](https://github.com/kubernetes-sigs/gateway-api/tree/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests)
