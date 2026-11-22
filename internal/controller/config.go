@@ -54,6 +54,8 @@ type Config struct {
 	BackendTLSPolicy bool
 	// OperatorHTTPS enables termination using operator-provisioned certificates.
 	OperatorHTTPS bool
+	// HTTPSListenerIsolation enables shared ports for isolated HTTPS sections.
+	HTTPSListenerIsolation bool
 	// TLSSNIPassthrough enables the advertised native TCP SNI policy extension.
 	TLSSNIPassthrough bool
 	// TLSSNISuffix enables the advertised wildcard SNI extension.
@@ -79,6 +81,9 @@ func (c Config) XBackendEnabled() bool {
 
 // Validate rejects configuration that could make ownership ambiguous.
 func (c Config) Validate() error {
+	if c.HTTPSListenerIsolation && !c.OperatorHTTPS {
+		return fmt.Errorf("--octavia-https-listener-isolation requires --tls-certificate-map")
+	}
 	if c.HTTPMethodMatch && !c.FixedHTTPResponses {
 		return fmt.Errorf("--octavia-http-method-match requires --octavia-fixed-http-responses")
 	}

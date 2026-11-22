@@ -101,6 +101,12 @@ func httpsProfileIssue(config controller.Config, gateway *gatewayv1.Gateway, lis
 			continue
 		}
 		if listener.Protocol == gatewayv1.HTTPSProtocolType || peer.Protocol == gatewayv1.HTTPSProtocolType {
+			if config.HTTPSListenerIsolation && listener.Protocol == gatewayv1.HTTPSProtocolType && peer.Protocol == gatewayv1.HTTPSProtocolType {
+				if listenerHostname(listener) == listenerHostname(peer) {
+					return &httpsListenerIssue{gatewayv1.ListenerConditionConflicted, gatewayv1.ListenerReasonHostnameConflict, "HTTPS sections on a shared port require distinct hostnames"}
+				}
+				continue
+			}
 			return &httpsListenerIssue{gatewayv1.ListenerConditionConflicted, gatewayv1.ListenerReasonProtocolConflict, "HTTPS requires a dedicated listener port"}
 		}
 		if peer.Protocol != gatewayv1.HTTPProtocolType || listener.Hostname == nil || peer.Hostname == nil ||
@@ -114,6 +120,9 @@ func httpsProfileIssue(config controller.Config, gateway *gatewayv1.Gateway, lis
 	}
 	if listener.Filters != nil && len(listener.Filters.Requests) != 0 {
 		return invalid(gatewayv1.ListenerReasonUnsupportedValue, "Listener request filters are unsupported")
+	}
+	if err := validateRouteNamespacePolicy(listener); err != nil {
+		return invalid(gatewayv1.ListenerReasonUnsupportedValue, err.Error())
 	}
 	if issue := httpRouteKindsIssue(config, listener); issue != nil {
 		return issue
@@ -186,15 +195,89 @@ func RequiresHTTPListenerScope(config controller.Config, gateway *gatewayv1.Gate
 }
 
 type tlsResolution struct {
-	ref   string
+	tls   cloud.ListenerTLS
 	issue *httpsListenerIssue
 }
 
-func (r *Reconciler) resolveTLS(ctx context.Context, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) tlsResolution {
-	if issue := httpsProfileIssue(r.Config, gateway, listener); issue != nil {
-		return tlsResolution{issue: issue}
+func listenerHostname(listener *gatewayv1.Listener) string {
+	if listener.Hostname == nil {
+		return ""
 	}
-	return r.resolveCertificate(ctx, gateway, listener)
+	return string(*listener.Hostname)
+}
+
+// HTTPSVirtualHostname encodes the catch-all selector explicitly for Octavia.
+func HTTPSVirtualHostname(listener *gatewayv1.Listener) string {
+	if hostname := listenerHostname(listener); hostname != "" {
+		return hostname
+	}
+	return "*"
+}
+
+// SharedHTTPSListener identifies logical sections that need a virtual-host
+// selector when their port is programmed.
+func SharedHTTPSListener(config controller.Config, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) bool {
+	return config.OperatorHTTPS && config.HTTPSListenerIsolation && listener.Protocol == gatewayv1.HTTPSProtocolType &&
+		slices.ContainsFunc(gateway.Spec.Listeners, func(peer gatewayv1.Listener) bool {
+			return peer.Protocol == listener.Protocol && peer.Port == listener.Port && peer.Name != listener.Name
+		})
+}
+
+func httpsSections(listeners []*gatewayv1.Listener) map[int][]*gatewayv1.Listener {
+	ports := make(map[int][]*gatewayv1.Listener)
+	for _, listener := range listeners {
+		if listener.Protocol == gatewayv1.HTTPSProtocolType {
+			port := int(listener.Port)
+			ports[port] = append(ports[port], listener)
+		}
+	}
+	return ports
+}
+
+func certificateSecret(gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) client.ObjectKey {
+	ref := listener.TLS.CertificateRefs[0]
+	target := client.ObjectKey{Namespace: gateway.Namespace, Name: string(ref.Name)}
+	if ref.Namespace != nil {
+		target.Namespace = string(*ref.Namespace)
+	}
+	return target
+}
+
+func (r *Reconciler) resolveHTTPSPort(ctx context.Context, gateway *gatewayv1.Gateway, sections []*gatewayv1.Listener) tlsResolution {
+	for _, listener := range sections {
+		if issue := httpsProfileIssue(r.Config, gateway, listener); issue != nil {
+			return tlsResolution{issue: issue}
+		}
+	}
+	first := sections[0]
+	if len(sections) == 1 {
+		return r.resolveCertificate(ctx, gateway, first)
+	}
+	target := certificateSecret(gateway, first)
+	hosts := make([]string, 0, len(sections))
+	for _, listener := range sections {
+		if certificateSecret(gateway, listener) != target {
+			return tlsResolution{issue: &httpsListenerIssue{gatewayv1.ListenerConditionAccepted, gatewayv1.ListenerReasonUnsupportedValue, "HTTPS sections on a shared port require the same certificate Secret"}}
+		}
+		hosts = append(hosts, HTTPSVirtualHostname(listener))
+	}
+	// All sections share the same authorization and metadata revision. Resolve
+	// the common target once so a snapshot can never combine revisions.
+	resolution := r.resolveCertificate(ctx, gateway, first)
+	if resolution.issue != nil {
+		return resolution
+	}
+	available := false
+	if r.HTTPSListenerIsolationAvailable != nil {
+		supported, err := r.HTTPSListenerIsolationAvailable(ctx)
+		available = supported && err == nil
+	}
+	if !available {
+		return tlsResolution{issue: &httpsListenerIssue{gatewayv1.ListenerConditionAccepted, gatewayv1.ListenerReasonUnsupportedValue, "Octavia HTTPS listener isolation is unavailable in this region"}}
+	}
+	slices.Sort(hosts)
+	resolution.tls.VirtualHosts = hosts
+	return resolution
 }
 
 func (r *Reconciler) resolveCertificate(ctx context.Context, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) tlsResolution {
@@ -204,7 +287,7 @@ func (r *Reconciler) resolveCertificate(ctx context.Context, gateway *gatewayv1.
 		ref, reason = r.Certificates.Resolve(ctx, gateway, listener)
 	}
 	if ref != "" && reason == "" {
-		return tlsResolution{ref: ref}
+		return tlsResolution{tls: cloud.ListenerTLS{CertificateRef: ref}}
 	}
 	return tlsResolution{issue: certificateReferenceIssue(reason)}
 }
@@ -220,16 +303,12 @@ func certificateReferenceIssue(reason gatewayv1.ListenerConditionReason) *httpsL
 }
 
 func (r *Reconciler) addTLSGraphInput(ctx context.Context, snapshot *gatewayMutationSnapshot, input *graph.GatewayInput) {
-	resolutions := make(map[int]tlsResolution)
-	for _, listener := range snapshot.listeners {
-		if listener.Protocol == gatewayv1.HTTPSProtocolType {
-			resolutions[int(listener.Port)] = r.resolveTLS(ctx, snapshot.gateway, listener)
-		}
-	}
+	sections := httpsSections(snapshot.listeners)
 	for i := range input.Node.Spec.ScopedListeners {
 		listener := &input.Node.Spec.ScopedListeners[i]
-		if resolution, https := resolutions[listener.Port]; https {
-			listener.TLS = &cloud.ListenerTLS{CertificateRef: resolution.ref}
+		if peers := sections[listener.Port]; len(peers) != 0 {
+			resolution := r.resolveHTTPSPort(ctx, snapshot.gateway, peers)
+			listener.TLS = &resolution.tls
 		}
 	}
 }
@@ -250,7 +329,7 @@ func (r *Reconciler) tlsWithdrawalInput(ctx context.Context, expected *gatewayv1
 			return err
 		}
 		if !slices.EqualFunc(listeners, latest, func(a, b cloud.ScopedListener) bool {
-			return a.Port == b.Port && a.TLS.CertificateRef == b.TLS.CertificateRef
+			return a.Port == b.Port && a.TLS.CertificateRef == b.TLS.CertificateRef && slices.Equal(a.TLS.VirtualHosts, b.TLS.VirtualHosts)
 		}) {
 			return errGatewayChanged
 		}
@@ -303,6 +382,7 @@ func (r *Reconciler) liveTLSListeners(ctx context.Context, expected *gatewayv1.G
 		// HTTPS ports still cannot fall back to a plaintext frontend.
 		profile = httpsProfileListeners(r.Config, &live)
 	}
+	sections := httpsSections(profile)
 	for _, listener := range profile {
 		if listener.Protocol != gatewayv1.HTTPSProtocolType {
 			continue
@@ -311,14 +391,14 @@ func (r *Reconciler) liveTLSListeners(ctx context.Context, expected *gatewayv1.G
 		if len(listeners) != 0 && listeners[len(listeners)-1].Port == port {
 			continue
 		}
-		var ref string
+		var tls cloud.ListenerTLS
 		if profileErr == nil {
-			ref = r.resolveTLS(ctx, &live, listener).ref
+			tls = r.resolveHTTPSPort(ctx, &live, sections[port]).tls
 		}
 		listeners = append(listeners, cloud.ScopedListener{
 			Name: resourceDisplayName(strconv.Itoa(port), live.Namespace, live.Name, string(listener.Name)),
 			Port: port,
-			TLS:  &cloud.ListenerTLS{CertificateRef: ref},
+			TLS:  &tls,
 		})
 	}
 	return listeners, nil
@@ -372,6 +452,10 @@ type httpsListenerStatusIssue struct {
 
 func (r *Reconciler) listenerTLSIssues(ctx context.Context, gateway *gatewayv1.Gateway) map[gatewayv1.SectionName]httpsListenerStatusIssue {
 	issues := make(map[gatewayv1.SectionName]httpsListenerStatusIssue)
+	resolutions := make(map[int]tlsResolution)
+	for port, sections := range httpsSections(httpsProfileListeners(r.Config, gateway)) {
+		resolutions[port] = r.resolveHTTPSPort(ctx, gateway, sections)
+	}
 	for i := range gateway.Spec.Listeners {
 		listener := &gateway.Spec.Listeners[i]
 		if listener.Protocol != gatewayv1.HTTPProtocolType && listener.Protocol != gatewayv1.HTTPSProtocolType {
@@ -382,8 +466,9 @@ func (r *Reconciler) listenerTLSIssues(ctx context.Context, gateway *gatewayv1.G
 		if listener.Protocol == gatewayv1.HTTPSProtocolType {
 			switch {
 			case issue == nil:
-				issue = r.resolveCertificate(ctx, gateway, listener).issue
-			case issue.condition == gatewayv1.ListenerConditionConflicted:
+				issue = resolutions[int(listener.Port)].issue
+			}
+			if issue != nil && issue.condition == gatewayv1.ListenerConditionConflicted {
 				resolvedRefs = r.conflictedHTTPSReferenceCondition(ctx, gateway, listener)
 			}
 		}

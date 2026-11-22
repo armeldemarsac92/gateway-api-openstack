@@ -41,6 +41,7 @@ import (
 // routeModelInputs keeps selection and lowering on the same request-local
 // observation. The graph source supplies the complete current route inventory.
 type routeModelInputs struct {
+	gateway                *gatewayv1.Gateway
 	input                  model.Input
 	logical                model.Gateway
 	backendTLSAvailability backendTLSAvailability
@@ -58,12 +59,13 @@ type routeGraphAdmission struct {
 
 type routeGraphCandidate struct {
 	routeUID, namespaceUID types.UID
-	section                gatewayv1.SectionName
+	sections               []gatewayv1.SectionName
 }
 
 type routeProfileCandidate struct {
 	route     *gatewayv1.HTTPRoute
 	listener  *gatewayv1.Listener
+	sections  []gatewayv1.SectionName
 	namespace types.UID
 }
 
@@ -112,12 +114,15 @@ func (r *Reconciler) observeRouteGraphAdmission(ctx context.Context, gateway *ga
 			byName[route.Namespace] = namespaces
 			admission.namespaces = append(admission.namespaces, namespaces...)
 		}
-		selected, err := selectRouteAttachment(route, gateway, candidates, namespaces)
+		selected, err := r.selectRouteAttachments(route, gateway, candidates, namespaces)
 		if err != nil {
 			continue
 		}
-		candidate := routeProfileCandidate{route: route, listener: selected}
-		if len(namespaces) != 0 && model.ObservesRouteNamespace(selected) {
+		candidate := routeProfileCandidate{route: route, listener: selected[0]}
+		for _, listener := range selected {
+			candidate.sections = append(candidate.sections, listener.Name)
+		}
+		if len(namespaces) != 0 && slices.ContainsFunc(selected, model.ObservesRouteNamespace) {
 			candidate.namespace = namespaces[0].UID
 		}
 		candidatesForElection = append(candidatesForElection, candidate)
@@ -128,7 +133,7 @@ func (r *Reconciler) observeRouteGraphAdmission(ctx context.Context, gateway *ga
 		if admission.conflicts[routeKey(route)] {
 			continue
 		}
-		admission.eligible[routeKey(route)] = routeGraphCandidate{routeUID: route.UID, section: candidate.listener.Name, namespaceUID: candidate.namespace}
+		admission.eligible[routeKey(route)] = routeGraphCandidate{routeUID: route.UID, sections: candidate.sections, namespaceUID: candidate.namespace}
 		if controller.RouteClaimsGateway(r.Config, route, identity) || requested != nil && route.UID == requested.UID && routeKey(route) == routeKey(requested) {
 			admission.active = append(admission.active, *route)
 		}
@@ -190,11 +195,13 @@ func (r *Reconciler) collectGraphRouteModelInputs(ctx context.Context, gateway *
 }
 
 func (r *Reconciler) validateGraphRouteModel(ctx context.Context, inputs *routeModelInputs, routes []gatewayv1.HTTPRoute, requested *gatewayv1.HTTPRoute) error {
-	current, err := r.observeRouteGraphAdmission(ctx, inputs.input.Gateway, routes, requested)
+	current, err := r.observeRouteGraphAdmission(ctx, inputs.gateway, routes, requested)
 	if err != nil {
 		return err
 	}
-	if !maps.Equal(inputs.admission.eligible, current.eligible) ||
+	if !maps.EqualFunc(inputs.admission.eligible, current.eligible, func(a, b routeGraphCandidate) bool {
+		return a.routeUID == b.routeUID && a.namespaceUID == b.namespaceUID && slices.Equal(a.sections, b.sections)
+	}) ||
 		!maps.Equal(inputs.admission.conflicts, current.conflicts) ||
 		!slices.Equal(inputs.admission.bindings, current.bindings) ||
 		!slices.EqualFunc(inputs.admission.active, current.active, func(a, b gatewayv1.HTTPRoute) bool {
@@ -253,7 +260,7 @@ func (r *Reconciler) collectRouteModelInputs(ctx context.Context, reader client.
 	if err != nil {
 		return nil, fmt.Errorf("compile Gateway backend model: %w", err)
 	}
-	return &routeModelInputs{input: input, logical: logical, backendTLSAvailability: availability, backendTLSAncestor: ancestor}, nil
+	return &routeModelInputs{gateway: gateway, input: input, logical: logical, backendTLSAvailability: availability, backendTLSAncestor: ancestor}, nil
 }
 
 func (r *Reconciler) xBackendMemberMode(gateway *gatewayv1.Gateway) (cloud.MemberMode, error) {

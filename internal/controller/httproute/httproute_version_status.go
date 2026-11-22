@@ -144,11 +144,11 @@ func (r *Reconciler) setRouteUnsupportedVersion(
 // routeForwardingEstablished requires the current route revision and proof
 // that the established forwarding fits within the current listener hostname.
 func (r *Reconciler) routeForwardingEstablished(route *gatewayv1.HTTPRoute, parents []managedRouteParent, identity cloud.Identity, attachment boundHTTPAttachment) bool {
-	listener := attachment.listener
-	if listener == nil || len(parents) != 1 || parents[0].gateway.Generation != attachment.gatewayGeneration ||
+	if len(attachment.listeners) != 1 || len(parents) != 1 || parents[0].gateway.Generation != attachment.gatewayGeneration ||
 		!controller.SameGatewayIdentity(identity, controller.RouteIdentity(r.Config, parents[0].gateway, route)) {
 		return false
 	}
+	listener := attachment.listeners[0]
 	parent := parents[0]
 	listeners, err := gatewaycontroller.ValidatedHTTPRouteListeners(r.Config, parent.gateway)
 	if err != nil {
@@ -202,7 +202,7 @@ func stableUnqualifiedRouteAttachment(route *gatewayv1.HTTPRoute, parent managed
 	}
 	effective := model.IntersectHostnames(selected.Hostname, route.Spec.Hostnames)
 	for _, candidate := range candidates {
-		if candidate.Name == selected.Name || validateRouteHostnames(candidate.Hostname, route.Spec.Hostnames) != nil {
+		if candidate.Name == selected.Name || validateRouteHostnames(candidate.Hostname, route.Spec.Hostnames, false) != nil {
 			continue
 		}
 		if !model.ObservesRouteNamespace(candidate) && !model.AllowsRouteNamespace(candidate, parent.gateway.Namespace, route.Namespace, nil) {

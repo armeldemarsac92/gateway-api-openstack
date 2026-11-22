@@ -25,6 +25,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -57,6 +58,102 @@ func (r testHTTPSReferenceResolver) ReferenceStatus(_ context.Context, _ *gatewa
 func testHTTPSListener(name gatewayv1.SectionName, port gatewayv1.PortNumber) gatewayv1.Listener {
 	return gatewayv1.Listener{Name: name, Port: port, Protocol: gatewayv1.HTTPSProtocolType,
 		TLS: &gatewayv1.ListenerTLSConfig{CertificateRefs: []gatewayv1.SecretObjectReference{{Name: "certificate"}}}}
+}
+
+func TestSharedHTTPSGatewayProgramsAndWithdrawsPortAsAUnit(t *testing.T) {
+	cfg := testConfig()
+	cfg.OperatorHTTPS, cfg.HTTPSListenerIsolation = true, true
+	gw := programmedTestGateway(cfg)
+	exact := testHTTPSListener("exact", 443)
+	exact.Hostname = ptr.To(gatewayv1.Hostname("foo.wildcard.org"))
+	exact.TLS.CertificateRefs[0].Namespace = ptr.To(gatewayv1.Namespace(gw.Namespace))
+	wildcard := testHTTPSListener("wildcard", 443)
+	wildcard.Hostname = ptr.To(gatewayv1.Hostname("*.wildcard.org"))
+	gw.Spec.Listeners = append(gw.Spec.Listeners, exact, testHTTPSListener("default", 443), wildcard, testHTTPSListener("dedicated", 8443))
+	class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "openstack"}, Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName}}
+	parent := gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gw.Name), Port: ptr.To(gatewayv1.PortNumber(443))}
+	route := &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: gw.Namespace, Name: "route", Generation: 1}}
+	route.Spec.ParentRefs, route.Spec.Hostnames = []gatewayv1.ParentReference{parent}, []gatewayv1.Hostname{*exact.Hostname}
+	route.Status.Parents = []gatewayv1.RouteParentStatus{{ParentRef: parent, ControllerName: cfg.ControllerName, Conditions: []metav1.Condition{
+		controller.Condition(string(gatewayv1.RouteConditionAccepted), metav1.ConditionTrue, string(gatewayv1.RouteReasonAccepted), "Accepted", route.Generation),
+	}}}
+	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gw, class, route).WithObjects(gw, class, route).Build()
+	ready := cloud.GatewayReadyResult(cloud.GatewayState{LoadBalancerID: "lb-1", VIPAddress: "192.0.2.10"})
+	provider := &recordingProvider{gatewayResult: &ready}
+	available, revoked := true, false
+	r := newTestReconciler(Reconciler{Client: kube, APIReader: kube, Config: cfg, Coordinator: &graph.Coordinator{},
+		HTTPSListenerIsolationAvailable: func(context.Context) (bool, error) { return available, nil },
+		Certificates: resolveHTTPSFunc(func(_ context.Context, _ *gatewayv1.Gateway, listener *gatewayv1.Listener) (string, gatewayv1.ListenerConditionReason) {
+			if listener.Port == 8443 {
+				return "dedicated-certificate", ""
+			}
+			if revoked {
+				return "", gatewayv1.ListenerReasonRefNotPermitted
+			}
+			return "shared-certificate", ""
+		})}, provider)
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(gw)}
+	if result, err := r.Reconcile(t.Context(), request); err != nil || !result.Requeue {
+		t.Fatalf("enrollment = %v, %v", result, err)
+	}
+	verify := func(wantHosts []string, condition gatewayv1.ListenerConditionType, reason gatewayv1.ListenerConditionReason) {
+		t.Helper()
+		ready.ScopedListenerReadyPorts = []int{80, 8443}
+		if len(wantHosts) != 0 {
+			ready.ScopedListenerReadyPorts = append(ready.ScopedListenerReadyPorts, 443)
+		}
+		if _, err := r.Reconcile(t.Context(), request); err != nil {
+			t.Fatal(err)
+		}
+		scoped := provider.gatewaySpecs[len(provider.gatewaySpecs)-1].ScopedListeners
+		if len(scoped) != 3 || scoped[0].Port != 80 || scoped[0].TLS != nil || scoped[1].Port != 443 ||
+			scoped[1].TLS == nil || !slices.Equal(scoped[1].TLS.VirtualHosts, wantHosts) || scoped[2].Port != 8443 ||
+			scoped[2].TLS == nil || scoped[2].TLS.CertificateRef != "dedicated-certificate" || len(scoped[2].TLS.VirtualHosts) != 0 {
+			t.Fatalf("unexpected physical ports: %#v", scoped)
+		}
+		if wantCertificate := len(wantHosts) != 0; (scoped[1].TLS.CertificateRef == "shared-certificate") != wantCertificate {
+			t.Fatalf("unexpected shared authorization: %#v", scoped[1].TLS)
+		}
+		if err := kube.Get(t.Context(), request.NamespacedName, gw); err != nil {
+			t.Fatal(err)
+		}
+		if len(gw.Status.Listeners) != 5 {
+			t.Fatalf("logical listeners = %#v", gw.Status.Listeners)
+		}
+		for _, listener := range gw.Status.Listeners {
+			shared := listener.Name == "default" || listener.Name == "exact" || listener.Name == "wildcard"
+			programmed := meta.IsStatusConditionTrue(listener.Conditions, string(gatewayv1.ListenerConditionProgrammed))
+			if programmed != (!shared || len(wantHosts) != 0) {
+				t.Fatalf("unexpected %s readiness: %v", listener.Name, listener.Conditions)
+			}
+			if reason == "" && (listener.AttachedRoutes == 1) != shared {
+				t.Fatalf("unexpected %s attachment count: %d", listener.Name, listener.AttachedRoutes)
+			}
+			if shared && reason != "" {
+				issue := meta.FindStatusCondition(listener.Conditions, string(condition))
+				if issue == nil || issue.Reason != string(reason) {
+					t.Fatalf("unexpected %s authorization: %v", listener.Name, listener.Conditions)
+				}
+			}
+		}
+	}
+	verify([]string{"*", "*.wildcard.org", "foo.wildcard.org"}, "", "")
+	revoked = true
+	verify(nil, gatewayv1.ListenerConditionResolvedRefs, gatewayv1.ListenerReasonRefNotPermitted)
+	revoked, available = false, false
+	verify(nil, gatewayv1.ListenerConditionAccepted, gatewayv1.ListenerReasonUnsupportedValue)
+	available = true
+	gw.Spec.Listeners[1].TLS.CertificateRefs[0].Name = "other-secret"
+	if err := kube.Update(t.Context(), gw); err != nil {
+		t.Fatal(err)
+	}
+	verify(nil, gatewayv1.ListenerConditionAccepted, gatewayv1.ListenerReasonUnsupportedValue)
+	gw.Spec.Listeners[1].TLS.CertificateRefs[0].Name = "certificate"
+	gw.Spec.Listeners[1].Hostname = nil
+	if err := kube.Update(t.Context(), gw); err != nil {
+		t.Fatal(err)
+	}
+	verify(nil, gatewayv1.ListenerConditionConflicted, gatewayv1.ListenerReasonHostnameConflict)
 }
 
 func TestHTTPSGatewayWithdrawsRevokedPortAndPreservesSiblings(t *testing.T) {

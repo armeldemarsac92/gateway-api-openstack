@@ -577,10 +577,13 @@ func (r *Reconciler) attachedRoutes(ctx context.Context, gateway *gatewayv1.Gate
 					matching = append(matching, listener)
 				}
 			}
-			// An accepted status can predate a Gateway edit. A parent that
-			// now spans multiple HTTP sections is outside the stock profile.
-			if httpKind != "" && len(matching) != 1 {
-				continue
+			if httpKind != "" && len(matching) > 1 {
+				port := matching[0].Port
+				if slices.ContainsFunc(matching, func(listener *gatewayv1.Listener) bool {
+					return listener.Port != port || !SharedHTTPSListener(r.Config, gateway, listener)
+				}) {
+					continue
+				}
 			}
 			if r.Config.BackendTLSPolicy && httpKind == model.HTTPRouteKind {
 				programmed := meta.FindStatusCondition(parentStatus.Conditions, r.Config.Domain()+"/Programmed")

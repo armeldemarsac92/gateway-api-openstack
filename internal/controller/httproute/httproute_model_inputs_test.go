@@ -702,6 +702,88 @@ func TestHTTPSRouteSelectsDedicatedSectionAndInheritsHostname(t *testing.T) {
 	}
 }
 
+func TestSharedHTTPSRouteKeepsSectionAndHTTPHostConstraints(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		section *gatewayv1.SectionName
+		port    *gatewayv1.PortNumber
+		hosts   []gatewayv1.Hostname
+		want    map[string]string
+	}{
+		{name: "unqualified parent covers exact and wildcard", hosts: []gatewayv1.Hostname{"foo.wildcard.org"}, want: map[string]string{
+			"*": "foo.wildcard.org", "*.wildcard.org": "foo.wildcard.org", "foo.wildcard.org": "foo.wildcard.org",
+		}},
+		{name: "port parent keeps an explicitly constrained catch-all", port: ptr.To(gatewayv1.PortNumber(443)), hosts: []gatewayv1.Hostname{"example.org"}, want: map[string]string{
+			"*": "example.org",
+		}},
+		{name: "section parent inherits hostname", section: ptr.To(gatewayv1.SectionName("exact")), want: map[string]string{
+			"foo.wildcard.org": "foo.wildcard.org",
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newRouteModelInputFixture(t)
+			cfg := &f.reconciler.Config
+			cfg.OperatorHTTPS, cfg.HTTPSListenerIsolation = true, true
+			f.gateway.Spec.Listeners = nil
+			for _, section := range []struct{ name, hostname string }{{"exact", "foo.wildcard.org"}, {"wildcard", "*.wildcard.org"}, {"default", ""}} {
+				listener := gatewayv1.Listener{Name: gatewayv1.SectionName(section.name), Port: 443, Protocol: gatewayv1.HTTPSProtocolType,
+					TLS: &gatewayv1.ListenerTLSConfig{CertificateRefs: []gatewayv1.SecretObjectReference{{Name: "certificate"}}}}
+				if section.hostname != "" {
+					listener.Hostname = ptr.To(gatewayv1.Hostname(section.hostname))
+				}
+				f.gateway.Spec.Listeners = append(f.gateway.Spec.Listeners, listener)
+			}
+			f.gateway.Annotations[cfg.GatewayListenerProtocolAnnotation()] = string(gatewayv1.HTTPProtocolType)
+			controller.SetGatewayListenerScope(*cfg, f.gateway, gatewayv1.HTTPProtocolType)
+			if err := f.client.Update(t.Context(), f.gateway); err != nil {
+				t.Fatal(err)
+			}
+			f.reconciler.applyRouteBinding(f.route, f.gateway)
+			f.route.Spec.ParentRefs[0].SectionName, f.route.Spec.ParentRefs[0].Port = tc.section, tc.port
+			f.route.Spec.Hostnames = tc.hosts
+			f.route.Spec.Rules[0].Matches = []gatewayv1.HTTPRouteMatch{{
+				Path: &gatewayv1.HTTPPathMatch{Type: ptr.To(gatewayv1.PathMatchPathPrefix), Value: ptr.To("/detect-misdirected-requests")},
+			}}
+			if err := f.client.Update(t.Context(), f.route); err != nil {
+				t.Fatal(err)
+			}
+			input := f.observe(t)
+			if len(input.Nodes) != 1 {
+				t.Fatalf("route graph = %#v", input.Nodes)
+			}
+			spec := input.Nodes[0].Spec
+			if !slices.Equal(spec.ScopedListenerPorts, []int{443}) {
+				t.Fatalf("route physical ports = %#v", spec.ScopedListenerPorts)
+			}
+			got := map[string]string{}
+			const path = "/detect-misdirected-requests"
+			if len(tc.want) == 1 {
+				if spec.PathValue != path || len(spec.Members) != 1 {
+					t.Fatalf("scalar route = %#v", spec)
+				}
+				got[spec.HTTPSListenerHostname] = spec.Hostname
+			} else {
+				if spec.HTTPSListenerHostname != "" || len(spec.HTTPBackends) != 1 || len(spec.HTTPBackends[0].Members) != 1 ||
+					len(spec.HTTPBackends[0].Matches) != len(tc.want) {
+					t.Fatalf("grouped route = %#v", spec)
+				}
+				for _, match := range spec.HTTPBackends[0].Matches {
+					if match.PathValue != path {
+						t.Fatalf("path lost in grouped match: %#v", match)
+					}
+					got[match.HTTPSListenerHostname] = match.Hostname
+				}
+			}
+			if !maps.Equal(got, tc.want) {
+				t.Fatalf("HTTPS section selectors and HTTP host predicates = %v, want %v", got, tc.want)
+			}
+			if err := input.Validate(t.Context()); err != nil {
+				t.Fatalf("graph fence: %v", err)
+			}
+		})
+	}
+}
+
 func TestFixedHTTPResponseRequiresInvalidBackendReference(t *testing.T) {
 	for _, target := range []string{"ready", "empty", "prohibited"} {
 		t.Run(target, func(t *testing.T) {

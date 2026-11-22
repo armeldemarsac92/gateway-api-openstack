@@ -247,15 +247,16 @@ func hasTLSListeners(input GatewayInput) bool {
 }
 
 func changedTLSListeners(observed, current GatewayInput) []int {
-	refs := make(map[int]string, len(current.Node.Spec.ScopedListeners))
+	listeners := make(map[int]cloud.ListenerTLS, len(current.Node.Spec.ScopedListeners))
 	for _, listener := range current.Node.Spec.ScopedListeners {
 		if listener.TLS != nil {
-			refs[listener.Port] = listener.TLS.CertificateRef
+			listeners[listener.Port] = *listener.TLS
 		}
 	}
 	var ports []int
 	for _, listener := range observed.Node.Spec.ScopedListeners {
-		if listener.TLS != nil && refs[listener.Port] != listener.TLS.CertificateRef {
+		current := listeners[listener.Port]
+		if listener.TLS != nil && (current.CertificateRef != listener.TLS.CertificateRef || !slices.Equal(current.VirtualHosts, listener.TLS.VirtualHosts)) {
 			ports = append(ports, listener.Port)
 		}
 	}

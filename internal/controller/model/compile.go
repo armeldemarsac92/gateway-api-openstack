@@ -122,18 +122,19 @@ func compileListeners(gateway *gatewayv1.Gateway, operatorHTTPS bool) []Listener
 	}
 	// Only supported protocols participate in conflicts. In particular, an
 	// unsupported TCP listener cannot displace HTTP on the same port.
-	// Exact and wildcard hostnames may overlap, but identical HTTP hostnames
+	// Exact and wildcard hostnames may overlap, but identical HTTP or HTTPS hostnames
 	// on the same port conflict regardless of input order or TLS configuration.
 	for i := range result {
-		if result[i].Protocol != gatewayv1.HTTPProtocolType {
+		protocol := result[i].Protocol
+		if protocol != gatewayv1.HTTPProtocolType && (protocol != gatewayv1.HTTPSProtocolType || !operatorHTTPS) {
 			continue
 		}
 		for j := i + 1; j < len(result); j++ {
-			if result[j].Protocol != gatewayv1.HTTPProtocolType || result[i].Port != result[j].Port {
+			if result[j].Protocol != protocol || result[i].Port != result[j].Port {
 				continue
 			}
 			if result[i].Hostname == result[j].Hostname {
-				diagnostic := Diagnostic{Condition: string(gatewayv1.ListenerConditionConflicted), Reason: string(gatewayv1.ListenerReasonHostnameConflict), Message: "HTTP listeners on the same port have identical hostnames"}
+				diagnostic := Diagnostic{Condition: string(gatewayv1.ListenerConditionConflicted), Reason: string(gatewayv1.ListenerReasonHostnameConflict), Message: fmt.Sprintf("%s listeners on the same port have identical hostnames", protocol)}
 				result[i].Diagnostics = append(result[i].Diagnostics, diagnostic)
 				result[j].Diagnostics = append(result[j].Diagnostics, diagnostic)
 			}
