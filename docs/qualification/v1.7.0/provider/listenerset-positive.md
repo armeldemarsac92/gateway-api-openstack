@@ -38,6 +38,10 @@ The newer build cherry-picked `9e63cf97a8b9201f19ca241c96cf37b4810f1d77` to shar
 - Standard logged 3807 HTTP request attempts, starting 13.83 s after manifest application began. The request attempts spanned 197.32 s. The upstream assertions observed 3735 responses with 404 when the case expected 200. Failed probes elapsed 30.00 s. At the post-case snapshot, 7 HTTPRoute parent conditions still reported `Programmed=False/Pending`.
 - Experimental logged 3707 HTTP request attempts, starting 16.93 s after manifest application began. The request attempts spanned 186.60 s. The upstream assertions observed 3632 responses with 404 when the case expected 200. Failed probes elapsed 30.00 s. At the post-case snapshot, 6 HTTPRoute parent conditions still reported `Programmed=False/Pending`.
 
-The shared Kind lock was acquired at `2026-11-22T13:10:34Z`. Standard finished at `2026-11-22T14:15:44+01:00` and Experimental at `2026-11-22T14:20:33+01:00`. The cause of the remaining convergence delay is unresolved. The earlier native failures remain recorded. Prior host and VM attempts without case reports stopped in setup. The matrix counts an HTTP routing PASS only when the original case passes all 36 assertions.
+The shared Kind lock was acquired at `2026-11-22T13:10:34Z`. Standard finished at `2026-11-22T14:15:44+01:00` and Experimental at `2026-11-22T14:20:33+01:00`. These runs did not identify the cause of the remaining convergence delay. The earlier native failures remain recorded. Prior host and VM attempts without case reports stopped in setup. The matrix counts an HTTP routing PASS only when the original case passes all 36 assertions.
 
 [Machine-readable results](listenerset-positive-results.json) identify each mode, revision, bundle and original report hash. The local `hibiscus-listenerset-72441149db90.tar.gz` archive preserves the reports, logs and replay scripts. Live Hibiscus cloud, managed Amphora behavior and the full Gateway profiles remain unqualified by these runs.
+
+## Grouped initial L7 rules
+
+On controller `7ed5e90f0862`, the registered namespace, dual-parent and missing-section cases passed on both channels. The 36-request HTTP routing case reached 35/36 on Standard and 34/36 on Experimental. Each failing request hit the original 30-second deadline. [Case results, failed requests and replay](listener-hostname-runs/README.md)

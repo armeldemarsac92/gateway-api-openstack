@@ -1,0 +1,26 @@
+{
+  "channel": "standard",
+  "controllerRevision": "7ed5e90f086200258d1aa0f3b6af3244c8655b81",
+  "case": "ListenerSetHTTPRouting",
+  "attempts": 297,
+  "successfulAttempts": 0,
+  "host": "gateway-listener-1.com",
+  "path": "/route",
+  "lastHTTPStatus": 404,
+  "expectedHTTPStatus": 200,
+  "deadline": "2026-11-22T21:19:57.674485636+01:00",
+  "firstRecordedRoutePath": {
+    "at": "2026-11-22T20:19:58.209+00:00",
+    "protocol": "HTTP",
+    "configSHA256": "17a1e69508da7646561ebd426426a32cfdafac161f66d4d21fa934f3048d93c9",
+    "paths": [
+      "^/gateway-section-route($|/)",
+      "^/gateway-route($|/)",
+      "^/route($|/)"
+    ]
+  },
+  "delaySeconds": 0.534515,
+  "rawCaseLogSHA256": "0052c53d7d13ac148e75a80c8090733d7eee2f7ae8bc910789d06a088eb95067",
+  "rawReloadLogSHA256": "55483b0c8f4efc615a1987cbb059ff74ec49ed90cc7e175f77f741e5ffaa164f",
+  "scope": "The path list spans listeners and the timing does not identify the selected hostname after convergence."
+}

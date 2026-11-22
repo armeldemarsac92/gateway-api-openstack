@@ -1,0 +1,86 @@
+{
+  "channel": "standard",
+  "controllerRevision": "1206fc60da9dbbb1f6557ed7cb62ff0c84e8ff00",
+  "managerSHA256": "893c49789c73be394fa74b3775ec5104b15c51fa7c6c2117ab05c26bf5e5e480",
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+  "octavia": {
+    "version": "19.0.1.dev32",
+    "sha256": "40e81eef37b31a10145c1d01f51a1fb91e7fab672ce58fe51501533922e70f8a",
+    "filesVerified": 639
+  },
+  "octaviaLib": {
+    "version": "3.12.1.dev9",
+    "sha256": "5fcb4353562d5d7269c63d058c791cd68b75dc1b7dafdd08b40d2ca5c05e009b",
+    "filesVerified": 24
+  },
+  "HAProxy": {
+    "version": "3.0.19-ade9c1262-octavia-strict-dns-v1",
+    "sha256": "fa8468efa26f95ed83a36afeb97b79730de285450b7a8fae94f7cf5e6d2d0824"
+  },
+  "case": "GatewayHTTPListenerIsolation",
+  "result": {
+    "status": "failed",
+    "passed": false,
+    "expectedSubtests": 32,
+    "subtestsPassed": 14,
+    "groups": {
+      "hostnames_are_configured_only_in_listeners": {
+        "status": "FAIL",
+        "passed": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14
+        ],
+        "failed": [
+          0,
+          15
+        ],
+        "skipped": [],
+        "notRun": []
+      },
+      "intersecting_hostnames_are_configured_in_listeners_and_HTTPRoutes": {
+        "status": "FAIL",
+        "passed": [],
+        "failed": [],
+        "skipped": [],
+        "notRun": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15
+        ]
+      }
+    },
+    "upstreamSHA256": {
+      "gateway-http-listener-isolation.go": "0e7e64f766e4fe65c27f30ed677e56cdd9415c41c7c41053008cf12fca19fb9c",
+      "gateway-http-listener-isolation.yaml": "764ac89c05bbdc6b56951cce8b85c2788251bbe3d00c8243b360a6b4db231508",
+      "gateway-http-listener-isolation-with-hostname-intersection.yaml": "3154c91ca18ad2730608ec0d5af75a8f1fc41b69ecbeb2c2b04dd86a70088c91"
+    },
+    "exit": 1
+  },
+  "upstreamReportSHA256": "775d1555e44e44ebbe81ac34588a0ab3b14fda2402c45719af9bce66b7a8cc93"
+}
