@@ -729,7 +729,7 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 				return hasAuthorizedListener(spec) && len(httpsVirtualHosts(spec)) == 0
 			}) {
 			if !p.httpsListenerIsolation {
-				return step, cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady, errors.New("Octavia HTTPS listener isolation is disabled"))
+				return step, cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady, errors.New("controller opt-in for Octavia HTTPS listener isolation is disabled"))
 			}
 			required = append(required, octavia.GatewayCapabilityHTTPSListenerIsolation)
 		}
