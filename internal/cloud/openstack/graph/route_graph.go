@@ -1103,8 +1103,11 @@ func buildRoutePolicyPlan(
 			}
 			rule := observedRule.rule
 			state.L7RuleIDs = append(state.L7RuleIDs, rule.ID)
-			if wantedRule.ruleType == httpMethodRuleType && rule.Key != "" {
-				// Recreate the disabled rule to remove a key from a keyless predicate.
+			replacingNativeMedia := rule.RuleType == string(grpcContentTypeRuleType) && wantedRule.ruleType != grpcContentTypeRuleType
+			if replacingNativeMedia || wantedRule.ruleType == httpMethodRuleType && rule.Key != "" {
+				// Octavia permits deletion after regional withdrawal. A PUT that
+				// changes the native media type still requires enrollment.
+				grpcContentTypeChanged = grpcContentTypeChanged || replacingNativeMedia
 				plan = append(plan, routeMutation{kind: routeMutationDeleteRule, id: rule.ID, parentID: policy.ID})
 				delete(actualRules, wantedRule.role)
 				continue
@@ -1126,7 +1129,8 @@ func buildRoutePolicyPlan(
 		}
 		// A failed policy update can leave Octavia's desired admin state in
 		// the database even while Amphora still uses an earlier configuration.
-		if policy.ProvisioningStatus == "ERROR" && (grpcContentTypeChanged || !targetUpdate && !headersUpdate) || len(plan) > start && policy.AdminStateUp {
+		if grpcContentTypeChanged && !observedPolicyDisabled(observedPolicy) ||
+			policy.ProvisioningStatus == "ERROR" && !targetUpdate && !headersUpdate || len(plan) > start && policy.AdminStateUp {
 			withdraw := desired.redirect || grpcContentTypeChanged
 			disablePlan = append(disablePlan, routeMutation{kind: routeMutationDisablePolicy, id: policy.ID,
 				retry: withdraw && policy.ProvisioningStatus == "ERROR", withdrawHTTPPolicy: withdraw})
@@ -1373,8 +1377,7 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 			Tags:         tags,
 		})
 	case routeMutationUpdateRule:
-		// Octavia clears the inherited key when it receives GRPC_CONTENT_TYPE
-		// without a key. Converting back to HEADER needs the key explicitly.
+		// Octavia clears the inherited header key on a native gRPC update.
 		var key *string
 		if step.rule.key != "" {
 			key = &step.rule.key

@@ -77,10 +77,13 @@ on its authenticated regional endpoint before creating or activating a
 native policy and before writing a native rule. The provider on the load
 balancer must advertise `grpc_content_type_v1`.
 
-When changing modes, the controller disables the owned policy, updates its
-Content-Type rule in place, then restores the policy after Octavia readback.
-The path, hostname and gRPC metadata predicates retain their IDs. With the
-flag enabled, an absent capability leaves the affected GRPCRoute at
+When changing modes, the controller disables the owned policy. Enabling native
+matching converts the Content-Type rule in place. Reverting to portable
+matching deletes the native rule and creates an owned header rule after
+Octavia confirms the policy is disabled. This also works after regional
+enrollment has been withdrawn. The controller restores the policy after
+observing the new rule. The path, hostname and metadata rules retain their
+IDs. With the flag enabled, an absent capability leaves the affected GRPCRoute at
 `Programmed=False` while the controller waits for Octavia to advertise
 `grpc_content_type_v1`. If Octavia explicitly withdraws the capability from
 a listener already using it, the controller closes that listener until it can

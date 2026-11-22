@@ -1159,8 +1159,7 @@ func TestResponseHeaderPolicyActivationAndWithdrawalAcrossRestart(t *testing.T) 
 	}
 }
 
-// Exercise the same graph entry point the controller uses, with Octavia
-// inventory that preserves the policy and rule IDs across controller restarts.
+// Exercise controller restarts against the same Octavia inventory.
 func TestRegionalGRPCContentTypePolicyTransition(t *testing.T) {
 	type record = map[string]any
 	identity := safetyTestIdentity(t)
@@ -1223,13 +1222,13 @@ func TestRegionalGRPCContentTypePolicyTransition(t *testing.T) {
 		"rules": policyRefs, "tags": safetyRouteTags(t, identity, wanted.role)}
 	const capabilityPath = "/lbaas/providers/amphora/gateway_capabilities"
 	const policyPath = "/lbaas/l7policies/policy"
-	const rulePath = policyPath + "/rules/media-rule"
+	const rulesPath = policyPath + "/rules"
+	const rulePath = rulesPath + "/media-rule"
 	const listenerPath = "/lbaas/listeners/listener-1"
 	reads := map[string]record{
 		"/lbaas/loadbalancers": {"loadbalancers": []record{lb}}, "/lbaas/loadbalancers/load-balancer-1": {"loadbalancer": lb},
 		"/lbaas/listeners": {"listeners": []record{listener, httpListener}}, "/lbaas/pools": {"pools": []record{pool}},
 		"/lbaas/healthmonitors": {"healthmonitors": []record{monitor}}, "/lbaas/pools/pool-1/members": {"members": []record{member}},
-		policyPath + "/rules": {"rules": rules},
 	}
 	var advertised bool
 	present := true
@@ -1237,6 +1236,10 @@ func TestRegionalGRPCContentTypePolicyTransition(t *testing.T) {
 	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		path := request.URL.Path
 		if request.Method == http.MethodGet {
+			if path == rulesPath {
+				safetyWriteJSON(t, w, record{"rules": rules})
+				return
+			}
 			if path == capabilityPath {
 				capabilities := []string{octavia.GatewayCapabilityFixedHTTPResponses, octavia.GatewayCapabilityHTTPHeaderExact, octavia.GatewayCapabilityBackendH2C}
 				if advertised {
@@ -1258,7 +1261,19 @@ func TestRegionalGRPCContentTypePolicyTransition(t *testing.T) {
 				return
 			}
 		}
-		if request.Method != http.MethodPut {
+		if request.Method == http.MethodDelete && path == rulePath {
+			if policy["admin_state_up"] != false || policy["provisioning_status"] != "ACTIVE" || mediaRule["type"] != "GRPC_CONTENT_TYPE" {
+				t.Fatalf("unexpected native rule deletion with policy %v and rule %v", policy, mediaRule)
+			}
+			writes = append(writes, path)
+			removeMedia := func(r record) bool { return r["id"] == mediaRule["id"] }
+			policyRefs = slices.DeleteFunc(policyRefs, removeMedia)
+			rules = slices.DeleteFunc(rules, removeMedia)
+			policy["rules"] = policyRefs
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if request.Method != http.MethodPut && (path != rulesPath || request.Method != http.MethodPost) {
 			t.Fatalf("unexpected %s %s", request.Method, path)
 		}
 		writes = append(writes, path)
@@ -1280,20 +1295,33 @@ func TestRegionalGRPCContentTypePolicyTransition(t *testing.T) {
 		case rulePath:
 			resource, kind = mediaRule, "rule"
 			rule := patch[kind]
+			if !advertised {
+				w.WriteHeader(http.StatusNotImplemented)
+				return
+			}
 			if policy["admin_state_up"] != false || rule["invert"] != false || rule["admin_state_up"] != true || rule["tags"] != nil {
 				t.Fatalf("unexpected Content-Type update: %v with policy state %v", patch, policy["admin_state_up"])
 			}
-			if cfg.GRPCContentType {
-				if _, keyed := rule["key"]; rule["type"] != "GRPC_CONTENT_TYPE" || rule["compare_type"] != "EQUAL_TO" ||
-					rule["value"] != "application/grpc" || keyed || !advertised {
-					t.Fatalf("invalid native predicate: %v", rule)
-				}
-				// The regional API clears the inherited header name.
-				delete(resource, "key")
-			} else if rule["type"] != "HEADER" || rule["compare_type"] != "REGEX" ||
-				rule["value"] != portableGRPCContentTypePattern || rule["key"] != "content-type" {
-				t.Fatalf("invalid portable predicate: %v", rule)
+			if _, keyed := rule["key"]; rule["type"] != "GRPC_CONTENT_TYPE" || rule["compare_type"] != "EQUAL_TO" ||
+				rule["value"] != "application/grpc" || keyed {
+				t.Fatalf("invalid native predicate: %v", rule)
 			}
+			delete(resource, "key")
+		case rulesPath:
+			rule := patch["rule"]
+			if len(rules) != 3 || policy["admin_state_up"] != false || policy["provisioning_status"] != "ACTIVE" ||
+				rule["type"] != "HEADER" || rule["compare_type"] != "REGEX" || rule["key"] != "content-type" ||
+				rule["value"] != portableGRPCContentTypePattern || rule["admin_state_up"] != true || rule["invert"] == true {
+				t.Fatalf("invalid portable rule creation: %v, policy: %v", rule, policy)
+			}
+			rule["id"], rule["project_id"], rule["provisioning_status"] = "portable-media-rule", "project-a", "ACTIVE"
+			rule["invert"] = false
+			rules = append(rules, rule)
+			policyRefs = append(policyRefs, record{"id": rule["id"]})
+			policy["rules"] = policyRefs
+			w.WriteHeader(http.StatusCreated)
+			safetyWriteJSON(t, w, record{"rule": rule})
+			return
 		default:
 			t.Fatalf("unexpected mutation %s", path)
 		}
@@ -1354,6 +1382,7 @@ func TestRegionalGRPCContentTypePolicyTransition(t *testing.T) {
 	cfg.GRPCContentType = false
 	reconcile(policyPath)
 	reconcile(rulePath)
+	reconcile(rulesPath)
 	reconcile(policyPath)
 	reconcile(listenerPath)
 	if result := reconcile(""); result.Outcome.State != cloud.OutcomeReady {
