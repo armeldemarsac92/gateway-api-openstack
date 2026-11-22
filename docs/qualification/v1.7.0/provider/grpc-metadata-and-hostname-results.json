@@ -1,0 +1,545 @@
+{
+  "version": "v1.7.0",
+  "metadata": {
+    "standard": {
+      "controllerSourceRevision": "2944c353dcb0afa7b8756373bf87a51001c33ad2",
+      "controllerBinarySha256": "f4646b8ee3c3e34d81beec7f1ce90f902df1dfcc49bbef11bba05e5e92b30fb4",
+      "gatewayApiSourceRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "bundleSha256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "octaviaSourceRevision": "a19cac51955b84c2b3421ac7b4a405eaef5947de",
+      "octaviaLibSourceRevision": "110243191ea0fe3991962ad283af6b3ce749da76",
+      "providerWheelSHA256": {
+        "octavia-19.0.1.dev14-py3-none-any.whl": "68ff1c266128f05ebd545283d30a033fdb3e4d95a4f4a9b65823a68e05d05a4d",
+        "octavia_lib-3.12.1.dev7-py3-none-any.whl": "ccbf34aa870239d6e0f48bee7d63f34398a9d7bffd0fa98ea36674f8dc343eb4"
+      },
+      "controllerFlags": [
+        "--leader-elect=false",
+        "--metrics-bind-address=0",
+        "--health-probe-bind-address=0",
+        "--gateway-api-channel=standard",
+        "--openstack-poll-interval=50ms",
+        "--openstack-api-qps=120",
+        "--openstack-api-burst=160",
+        "--openstack-operation-timeout=30s",
+        "--octavia-fixed-http-responses",
+        "--octavia-backend-h2c",
+        "--octavia-request-header-modifier"
+      ],
+      "kubernetes": "v1.36.2",
+      "haproxy": "3.0.19",
+      "receiptSHA256": "1587efbb4e558ec08c3ecc55ec161dc4761509413cacf5c2493a6b26b3801b91",
+      "registeredCase": "GRPCRouteRequestHeaderModifier",
+      "upstreamExit": 0,
+      "caseGoSHA256": "5bd8a36a2f07ef1022de2a52e912a2ec374f67206f1d2d67e89a02434f9fbe6b",
+      "caseYAMLSHA256": "8d0d99fbf0b1ae84fe5abb80e01cf020a9364fe95ad9c6efe19564823a613111",
+      "passedSubcases": [
+        "Add_headers_--_X-Header-Add_should_append_the_new_value_to_the_original_value",
+        "Add_headers_--_X-Header-Add_should_have_the_original_value",
+        "Case_sensitivity_check_for_header_names",
+        "Multiple_operations_-_all_header_operations_should_be_applied",
+        "Remove_headers_--_X-Header-Remove_should_be_removed",
+        "Set_headers_--_X-Header-Set_should_get_overwritten_with_the_original_value",
+        "Set_headers_--_X-Header-Set_should_have_the_original_value"
+      ],
+      "expectedSubcases": 7,
+      "backendMetadata": {
+        "passed": true,
+        "source": "upstream echo protobuf assertions"
+      },
+      "routeAfterCase": [
+        {
+          "parentRef": {
+            "group": "gateway.networking.k8s.io",
+            "kind": "Gateway",
+            "name": "same-namespace"
+          },
+          "controllerName": "gateway-api-openstack.github.io/gateway-api-openstack",
+          "currentConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "False/Pending"
+          }
+        }
+      ],
+      "routeAfterSettlement": [
+        {
+          "parentRef": {
+            "group": "gateway.networking.k8s.io",
+            "kind": "Gateway",
+            "name": "same-namespace"
+          },
+          "controllerName": "gateway-api-openstack.github.io/gateway-api-openstack",
+          "currentConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          }
+        }
+      ],
+      "noHTTPRouteShadow": true
+    },
+    "experimental": {
+      "controllerSourceRevision": "2944c353dcb0afa7b8756373bf87a51001c33ad2",
+      "controllerBinarySha256": "f4646b8ee3c3e34d81beec7f1ce90f902df1dfcc49bbef11bba05e5e92b30fb4",
+      "gatewayApiSourceRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "bundleSha256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "octaviaSourceRevision": "a19cac51955b84c2b3421ac7b4a405eaef5947de",
+      "octaviaLibSourceRevision": "110243191ea0fe3991962ad283af6b3ce749da76",
+      "providerWheelSHA256": {
+        "octavia-19.0.1.dev14-py3-none-any.whl": "68ff1c266128f05ebd545283d30a033fdb3e4d95a4f4a9b65823a68e05d05a4d",
+        "octavia_lib-3.12.1.dev7-py3-none-any.whl": "ccbf34aa870239d6e0f48bee7d63f34398a9d7bffd0fa98ea36674f8dc343eb4"
+      },
+      "controllerFlags": [
+        "--leader-elect=false",
+        "--metrics-bind-address=0",
+        "--health-probe-bind-address=0",
+        "--gateway-api-channel=experimental",
+        "--openstack-poll-interval=50ms",
+        "--openstack-api-qps=120",
+        "--openstack-api-burst=160",
+        "--openstack-operation-timeout=30s",
+        "--octavia-fixed-http-responses",
+        "--octavia-backend-h2c",
+        "--octavia-request-header-modifier"
+      ],
+      "kubernetes": "v1.36.2",
+      "haproxy": "3.0.19",
+      "receiptSHA256": "d54c2edbd58bdf765f41039821090bde402f1e720c62bff25fd3084832e97ab5",
+      "registeredCase": "GRPCRouteRequestHeaderModifier",
+      "upstreamExit": 0,
+      "caseGoSHA256": "5bd8a36a2f07ef1022de2a52e912a2ec374f67206f1d2d67e89a02434f9fbe6b",
+      "caseYAMLSHA256": "8d0d99fbf0b1ae84fe5abb80e01cf020a9364fe95ad9c6efe19564823a613111",
+      "passedSubcases": [
+        "Add_headers_--_X-Header-Add_should_append_the_new_value_to_the_original_value",
+        "Add_headers_--_X-Header-Add_should_have_the_original_value",
+        "Case_sensitivity_check_for_header_names",
+        "Multiple_operations_-_all_header_operations_should_be_applied",
+        "Remove_headers_--_X-Header-Remove_should_be_removed",
+        "Set_headers_--_X-Header-Set_should_get_overwritten_with_the_original_value",
+        "Set_headers_--_X-Header-Set_should_have_the_original_value"
+      ],
+      "expectedSubcases": 7,
+      "backendMetadata": {
+        "passed": true,
+        "source": "upstream echo protobuf assertions"
+      },
+      "routeAfterCase": [
+        {
+          "parentRef": {
+            "group": "gateway.networking.k8s.io",
+            "kind": "Gateway",
+            "name": "same-namespace"
+          },
+          "controllerName": "gateway-api-openstack.github.io/gateway-api-openstack",
+          "currentConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "False/Pending"
+          }
+        }
+      ],
+      "routeAfterSettlement": [
+        {
+          "parentRef": {
+            "group": "gateway.networking.k8s.io",
+            "kind": "Gateway",
+            "name": "same-namespace"
+          },
+          "controllerName": "gateway-api-openstack.github.io/gateway-api-openstack",
+          "currentConditions": {
+            "Accepted": "True/Accepted",
+            "ResolvedRefs": "True/ResolvedRefs",
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+          }
+        }
+      ],
+      "noHTTPRouteShadow": true
+    }
+  },
+  "initialHostnameAndAttachment": {
+    "standard": {
+      "controllerRevision": "d5bc7e000c27c6c3a9296aa46b6ef6ef1f9ec2b3",
+      "managerSHA256": "0d14957deac84110ce426af24a93918096b24fe3aedb7d58e716b12336929ad1",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "octavia": {
+        "version": "19.0.1.dev13",
+        "sha256": "586626fc62a1ad5235aa7b84e4d648b6ad6a40de824a3036423eaa989364ec57",
+        "filesVerified": 634
+      },
+      "octaviaLib": {
+        "version": "3.12.1.dev6",
+        "sha256": "4f921bf5be0ef0c68864f50409f5f8459f4655856ebd0cb1868f2b31d50f740e",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1",
+        "sha256": "fa8468efa26f95ed83a36afeb97b79730de285450b7a8fae94f7cf5e6d2d0824"
+      },
+      "infrastructure": "isolated kind with real upstream Pods and local Octavia REST/Amphora/HAProxy",
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "registeredCases": {
+        "GRPCRouteListenerHostnameMatching": {
+          "passed": false,
+          "exit": 1,
+          "subtestsPassed": 0,
+          "expected": 8,
+          "caseGoSHA256": "66b842a37b03dd0d20c61604639c9ece08d02cf852b8c6da9a9692f00a0e5972",
+          "manifestSHA256": "1593c3237859a386ef5008502dd20439eb306d6a3e7439899bb4ab2c4970ded7",
+          "gateway": {
+            "conditions": {
+              "Accepted": "False/ListenersNotValid",
+              "Programmed": "False/Invalid"
+            },
+            "specListeners": [
+              {
+                "name": "listener-1",
+                "hostname": "bar.com",
+                "protocol": "HTTP",
+                "port": 80
+              },
+              {
+                "name": "listener-2",
+                "hostname": "foo.bar.com",
+                "protocol": "HTTP",
+                "port": 80
+              },
+              {
+                "name": "listener-3",
+                "hostname": "*.bar.com",
+                "protocol": "HTTP",
+                "port": 80
+              },
+              {
+                "name": "listener-4",
+                "hostname": "*.foo.com",
+                "protocol": "HTTP",
+                "port": 80
+              }
+            ]
+          }
+        },
+        "GRPCRouteMultipleGateways": {
+          "passed": false,
+          "exit": 1,
+          "subtestsPassed": 0,
+          "expected": 6,
+          "caseGoSHA256": "6020d155d1a4b222c97a92fa5aaabde5d2d02232772250b451614e642cc201ed",
+          "manifestSHA256": "2530563128d0b85b006d4eee6f27aa191505dd4ce5c0fc837889c1391a091fb8",
+          "parents": [
+            {
+              "name": "all-namespaces-dedicated-route",
+              "generation": 1,
+              "parents": [
+                {
+                  "parent": "all-namespaces",
+                  "conditions": [
+                    {
+                      "type": "Accepted",
+                      "status": "True",
+                      "reason": "Accepted",
+                      "observedGeneration": 1
+                    },
+                    {
+                      "type": "ResolvedRefs",
+                      "status": "True",
+                      "reason": "ResolvedRefs",
+                      "observedGeneration": 1
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/Programmed",
+                      "status": "True",
+                      "reason": "Programmed",
+                      "observedGeneration": 1
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "multiple-gateways-shared-route",
+              "generation": 1,
+              "parents": [
+                {
+                  "parent": "same-namespace",
+                  "conditions": [
+                    {
+                      "type": "Accepted",
+                      "status": "False",
+                      "reason": "UnsupportedValue",
+                      "observedGeneration": 1
+                    },
+                    {
+                      "type": "ResolvedRefs",
+                      "status": "Unknown",
+                      "reason": "Pending",
+                      "observedGeneration": 1
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/Programmed",
+                      "status": "False",
+                      "reason": "Invalid",
+                      "observedGeneration": 1
+                    }
+                  ]
+                },
+                {
+                  "parent": "all-namespaces",
+                  "conditions": [
+                    {
+                      "type": "Accepted",
+                      "status": "False",
+                      "reason": "UnsupportedValue",
+                      "observedGeneration": 1
+                    },
+                    {
+                      "type": "ResolvedRefs",
+                      "status": "Unknown",
+                      "reason": "Pending",
+                      "observedGeneration": 1
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/Programmed",
+                      "status": "False",
+                      "reason": "Invalid",
+                      "observedGeneration": 1
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "same-namespace-dedicated-route",
+              "generation": 1,
+              "parents": [
+                {
+                  "parent": "same-namespace",
+                  "conditions": [
+                    {
+                      "type": "Accepted",
+                      "status": "True",
+                      "reason": "Accepted",
+                      "observedGeneration": 1
+                    },
+                    {
+                      "type": "ResolvedRefs",
+                      "status": "True",
+                      "reason": "ResolvedRefs",
+                      "observedGeneration": 1
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/Programmed",
+                      "status": "True",
+                      "reason": "Programmed",
+                      "observedGeneration": 1
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "GRPCRouteMultipleRoutesAttachmentSameHostnameIntersection": {
+          "passed": true,
+          "exit": 0,
+          "subtestsPassed": 2,
+          "expected": 2,
+          "caseGoSHA256": "04a76053fcf904e90c7d3a0f6983da0aacf18f4334579a3e5d3c739a397e4e61",
+          "manifestSHA256": "b3fb815f2ba83dfd13898d5215c692d4246ca469d5011849e9dfc8dd1a87c0d7"
+        }
+      },
+      "receiptSHA256": "4ad092e7807ecb4a560f9b52254e1b994f67b44ba9cca4a3b07c90d2fa7129d5"
+    },
+    "experimental": {
+      "controllerRevision": "d5bc7e000c27c6c3a9296aa46b6ef6ef1f9ec2b3",
+      "managerSHA256": "0d14957deac84110ce426af24a93918096b24fe3aedb7d58e716b12336929ad1",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "octavia": {
+        "version": "19.0.1.dev13",
+        "sha256": "586626fc62a1ad5235aa7b84e4d648b6ad6a40de824a3036423eaa989364ec57",
+        "filesVerified": 634
+      },
+      "octaviaLib": {
+        "version": "3.12.1.dev6",
+        "sha256": "4f921bf5be0ef0c68864f50409f5f8459f4655856ebd0cb1868f2b31d50f740e",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1",
+        "sha256": "fa8468efa26f95ed83a36afeb97b79730de285450b7a8fae94f7cf5e6d2d0824"
+      },
+      "infrastructure": "isolated kind with real upstream Pods and local Octavia REST/Amphora/HAProxy",
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "registeredCases": {
+        "GRPCRouteListenerHostnameMatching": {
+          "passed": false,
+          "exit": 1,
+          "subtestsPassed": 0,
+          "expected": 8,
+          "caseGoSHA256": "66b842a37b03dd0d20c61604639c9ece08d02cf852b8c6da9a9692f00a0e5972",
+          "manifestSHA256": "1593c3237859a386ef5008502dd20439eb306d6a3e7439899bb4ab2c4970ded7",
+          "gateway": {
+            "conditions": {
+              "Accepted": "False/ListenersNotValid",
+              "Programmed": "False/Invalid"
+            },
+            "specListeners": [
+              {
+                "name": "listener-1",
+                "hostname": "bar.com",
+                "protocol": "HTTP",
+                "port": 80
+              },
+              {
+                "name": "listener-2",
+                "hostname": "foo.bar.com",
+                "protocol": "HTTP",
+                "port": 80
+              },
+              {
+                "name": "listener-3",
+                "hostname": "*.bar.com",
+                "protocol": "HTTP",
+                "port": 80
+              },
+              {
+                "name": "listener-4",
+                "hostname": "*.foo.com",
+                "protocol": "HTTP",
+                "port": 80
+              }
+            ]
+          }
+        },
+        "GRPCRouteMultipleGateways": {
+          "passed": false,
+          "exit": 1,
+          "subtestsPassed": 0,
+          "expected": 6,
+          "caseGoSHA256": "6020d155d1a4b222c97a92fa5aaabde5d2d02232772250b451614e642cc201ed",
+          "manifestSHA256": "2530563128d0b85b006d4eee6f27aa191505dd4ce5c0fc837889c1391a091fb8",
+          "parents": [
+            {
+              "name": "all-namespaces-dedicated-route",
+              "generation": 1,
+              "parents": [
+                {
+                  "parent": "all-namespaces",
+                  "conditions": [
+                    {
+                      "type": "Accepted",
+                      "status": "True",
+                      "reason": "Accepted",
+                      "observedGeneration": 1
+                    },
+                    {
+                      "type": "ResolvedRefs",
+                      "status": "True",
+                      "reason": "ResolvedRefs",
+                      "observedGeneration": 1
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/Programmed",
+                      "status": "True",
+                      "reason": "Programmed",
+                      "observedGeneration": 1
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "multiple-gateways-shared-route",
+              "generation": 1,
+              "parents": [
+                {
+                  "parent": "same-namespace",
+                  "conditions": [
+                    {
+                      "type": "Accepted",
+                      "status": "False",
+                      "reason": "UnsupportedValue",
+                      "observedGeneration": 1
+                    },
+                    {
+                      "type": "ResolvedRefs",
+                      "status": "Unknown",
+                      "reason": "Pending",
+                      "observedGeneration": 1
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/Programmed",
+                      "status": "False",
+                      "reason": "Invalid",
+                      "observedGeneration": 1
+                    }
+                  ]
+                },
+                {
+                  "parent": "all-namespaces",
+                  "conditions": [
+                    {
+                      "type": "Accepted",
+                      "status": "False",
+                      "reason": "UnsupportedValue",
+                      "observedGeneration": 1
+                    },
+                    {
+                      "type": "ResolvedRefs",
+                      "status": "Unknown",
+                      "reason": "Pending",
+                      "observedGeneration": 1
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/Programmed",
+                      "status": "False",
+                      "reason": "Invalid",
+                      "observedGeneration": 1
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "same-namespace-dedicated-route",
+              "generation": 1,
+              "parents": [
+                {
+                  "parent": "same-namespace",
+                  "conditions": [
+                    {
+                      "type": "Accepted",
+                      "status": "True",
+                      "reason": "Accepted",
+                      "observedGeneration": 1
+                    },
+                    {
+                      "type": "ResolvedRefs",
+                      "status": "True",
+                      "reason": "ResolvedRefs",
+                      "observedGeneration": 1
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/Programmed",
+                      "status": "True",
+                      "reason": "Programmed",
+                      "observedGeneration": 1
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "GRPCRouteMultipleRoutesAttachmentSameHostnameIntersection": {
+          "passed": true,
+          "exit": 0,
+          "subtestsPassed": 2,
+          "expected": 2,
+          "caseGoSHA256": "04a76053fcf904e90c7d3a0f6983da0aacf18f4334579a3e5d3c739a397e4e61",
+          "manifestSHA256": "b3fb815f2ba83dfd13898d5215c692d4246ca469d5011849e9dfc8dd1a87c0d7"
+        }
+      },
+      "receiptSHA256": "a6506f1f4d9259125e9ed3589e68b32453175cca051bc427fa93b05603ff299b"
+    }
+  }
+}
