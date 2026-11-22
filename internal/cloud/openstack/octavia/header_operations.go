@@ -36,13 +36,19 @@ const (
 type PolicyFilters struct {
 	Request, Response []cloud.HTTPHeaderOperation
 	URLRewrite        *RequestURLRewriteUpdate
+	Tags              []string
 }
 
 func (filters PolicyFilters) write(body map[string]any) error {
 	writePolicyHeaderOperations(body, requestHeaderOperationsField, filters.Request)
 	writePolicyHeaderOperations(body, responseHeaderOperationsField, filters.Response)
 	if filters.URLRewrite != nil {
-		return filters.URLRewrite.write(body)
+		if err := filters.URLRewrite.write(body); err != nil {
+			return err
+		}
+	}
+	if filters.Tags != nil {
+		body["l7policy"].(map[string]any)["tags"] = filters.Tags
 	}
 	return nil
 }
@@ -69,6 +75,10 @@ func writePolicyHeaderOperations(body map[string]any, field string, operations [
 	if operations == nil {
 		return
 	}
+	body["l7policy"].(map[string]any)[field] = headerOperationEntries(operations)
+}
+
+func headerOperationEntries(operations []cloud.HTTPHeaderOperation) []map[string]any {
 	entries := make([]map[string]any, 0, len(operations))
 	for _, operation := range operations {
 		entry := map[string]any{"operation": operation.Operation, "name": operation.Name}
@@ -77,7 +87,7 @@ func writePolicyHeaderOperations(body map[string]any, field string, operations [
 		}
 		entries = append(entries, entry)
 	}
-	body["l7policy"].(map[string]any)[field] = entries
+	return entries
 }
 
 func readPolicyHeaderOperations(raw json.RawMessage, field string) ([]cloud.HTTPHeaderOperation, error) {

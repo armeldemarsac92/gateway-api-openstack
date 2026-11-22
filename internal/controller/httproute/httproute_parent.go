@@ -232,7 +232,7 @@ func routeTargetsGateway(route *gatewayv1.HTTPRoute, parent gatewayv1.ParentRefe
 
 func (r *Reconciler) selectRouteAttachments(route *gatewayv1.HTTPRoute, parent managedRouteParent, candidates []*gatewayv1.Listener, namespaces []corev1.Namespace) ([]*gatewayv1.Listener, error) {
 	var selected []*gatewayv1.Listener
-	if rules, dropped := r.projectedRewriteRules(route); dropped != "" {
+	if rules, dropped := r.projectedHTTPFilterRules(route); dropped != "" {
 		projection := *route
 		projection.Spec.Rules = rules
 		route = &projection

@@ -692,6 +692,10 @@ func validAuditWeightedTarget(policy *auditCandidate) bool {
 		len(target.WeightedTargets) == 0 || len(target.WeightedTargets) > 16 {
 		return false
 	}
+	if slices.Contains(policy.tags, openstackidentity.BackendRequestFiltersPolicyTag) &&
+		!slices.ContainsFunc(target.WeightedTargets, octavia.WeightedHTTPTarget.HasRequestFilters) {
+		return false
+	}
 	total := 0
 	for _, slot := range target.WeightedTargets {
 		if slot.Weight < 0 || slot.Weight > 1_000_000 ||

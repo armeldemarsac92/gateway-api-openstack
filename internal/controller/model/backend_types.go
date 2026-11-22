@@ -23,6 +23,8 @@ import (
 	discoveryv1 "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/types"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 )
 
 // BackendAuthorization records whether the source may reference the target.
@@ -69,6 +71,10 @@ type BackendGroup struct {
 	Endpoints       []Endpoint
 	Diagnostic      *Diagnostic
 	BackendTLS      backendtls.Selection
+
+	FilterDiagnostic        *Diagnostic
+	RequestHeaderOperations []cloud.HTTPHeaderOperation
+	URLRewrite              *cloud.HTTPURLRewrite
 }
 
 // UsesH2C reports the protocol selected by its backend kind.

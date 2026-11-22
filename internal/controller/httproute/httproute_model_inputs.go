@@ -255,7 +255,7 @@ func (r *Reconciler) collectRouteModelInputs(ctx context.Context, reader client.
 func (r *Reconciler) collectRouteModelInputsForSets(ctx context.Context, reader client.Reader, gateway *gatewayv1.Gateway, routes []gatewayv1.HTTPRoute, namespaces []corev1.Namespace, sets map[types.NamespacedName][]gatewayv1.Listener) (*routeModelInputs, error) {
 	routes = slices.Clone(routes)
 	for i := range routes {
-		if rules, dropped := r.projectedRewriteRules(&routes[i]); dropped != "" {
+		if rules, dropped := r.projectedHTTPFilterRules(&routes[i]); dropped != "" {
 			routes[i].Spec.Rules = rules
 		}
 	}
@@ -268,6 +268,7 @@ func (r *Reconciler) collectRouteModelInputsForSets(ctx context.Context, reader 
 	input.ResponseHeaderModifier = r.Config.ResponseHeaderModifier
 	input.HTTPRequestRedirect = r.Config.HTTPRequestRedirect
 	input.HTTPRequestURLRewrite = r.Config.HTTPRequestURLRewrite
+	input.BackendRequestFilters = r.Config.BackendRequestFilters && r.Config.WeightedHTTPTargets
 	input.BackendH2C = r.Config.BackendH2C
 	input.EnableXBackend = r.Config.XBackendEnabled()
 	if input.EnableXBackend {

@@ -108,6 +108,7 @@ func run(ctx context.Context) error {
 	var httpsListenerIsolation bool
 	var httpRequestRedirect bool
 	var httpRequestURLRewrite bool
+	var httpBackendRequestFilters bool
 	var exactHTTPHeaders, exactHTTPQueryParams, httpMethodMatch, requestHeaderModifier, responseHeaderModifier, backendH2C, tlsSNIPassthrough, tlsSNISuffix, tcpTLSTermination bool
 	zapOptions := zap.Options{Development: false}
 	zapOptions.BindFlags(flag.CommandLine)
@@ -124,6 +125,7 @@ func run(ctx context.Context) error {
 	flag.BoolVar(&tlsSNISuffix, "octavia-tls-sni-suffix", false, "use the advertised Octavia wildcard SNI capability (requires --octavia-tls-sni-passthrough)")
 	flag.BoolVar(&backendTLSPolicy, "octavia-backend-tls-policy", false, "authenticate BackendTLSPolicy HTTP upstreams with the regional Octavia hostname capability and a Barbican CA (requires --octavia-microversion=2.8 or newer)")
 	flag.BoolVar(&httpsListenerIsolation, "octavia-https-listener-isolation", false, "isolate terminated HTTPS sections on a shared port using the regional Octavia capability (requires --tls-certificate-map)")
+	flag.BoolVar(&httpBackendRequestFilters, "octavia-http-backend-request-filters", false, "use the advertised Octavia capability for HTTP backendRef request filters (requires --octavia-weighted-http-targets)")
 	flag.BoolVar(&httpRequestURLRewrite, "octavia-request-url-rewrite", false, "use the advertised Octavia L7 request URL rewrite capability")
 	flag.BoolVar(&responseHeaderModifier, "octavia-response-header-modifier", false, "use the advertised Octavia L7 response header operations capability")
 	flag.BoolVar(&grpcContentType, "octavia-grpc-content-type", false, "use the advertised Octavia native gRPC Content-Type rule for GRPCRoutes")
@@ -148,6 +150,9 @@ func run(ctx context.Context) error {
 	if weightedTargets && !fixedHTTPResponses {
 		return fmt.Errorf("--octavia-weighted-http-targets requires --octavia-fixed-http-responses")
 	}
+	if httpBackendRequestFilters && !weightedTargets {
+		return fmt.Errorf("--octavia-http-backend-request-filters requires --octavia-weighted-http-targets")
+	}
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&zapOptions)))
 	openStackClientConfig := openstack.ClientConfig{
 		Region:         region,
@@ -170,6 +175,7 @@ func run(ctx context.Context) error {
 		HTTPHeaderExact:         exactHTTPHeaders,
 		HTTPQueryParamExact:     exactHTTPQueryParams,
 		HTTPRequestURLRewrite:   httpRequestURLRewrite,
+		BackendRequestFilters:   httpBackendRequestFilters,
 		HTTPRequestRedirect:     httpRequestRedirect,
 		HTTPMethodMatch:         httpMethodMatch,
 		FixedHTTPResponses:      fixedHTTPResponses,
@@ -229,6 +235,7 @@ func run(ctx context.Context) error {
 		HTTPHeaderExact:        exactHTTPHeaders,
 		HTTPQueryParamExact:    exactHTTPQueryParams,
 		HTTPRequestURLRewrite:  httpRequestURLRewrite,
+		BackendRequestFilters:  httpBackendRequestFilters,
 		HTTPRequestRedirect:    httpRequestRedirect,
 		HTTPMethodMatch:        httpMethodMatch,
 		FixedHTTPResponses:     fixedHTTPResponses,

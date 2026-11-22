@@ -68,6 +68,7 @@ type desiredPolicy struct {
 	requestHeaderOperations  []cloud.HTTPHeaderOperation
 	responseHeaderOperations []cloud.HTTPHeaderOperation
 	requestURLRewrite        *octavia.RequestURLRewrite
+	targetRequestFilters     []octavia.WeightedHTTPTarget
 	localRewriteFallback     bool
 	method                   string
 	headers                  []cloud.HTTPHeaderMatch
@@ -439,7 +440,12 @@ func (p *Provider) buildHTTPMatchPolicies(r *desiredRoute, matches []cloud.HTTPP
 			// No request is forwarded when a backend is invalid.
 			rewrite = nil
 		}
+		targetFilters, err := compileWeightedTargetRequestFilters(match, r.weightedTargets)
+		if err != nil {
+			return err
+		}
 		for _, policy := range policies {
+			policy.targetRequestFilters = targetFilters
 			policy.backendKey, policy.matchKey = r.backendKey, matchKey
 			policy.httpsListenerHostname = scope
 			policy.httpListenerHostname, policy.hostname = match.HTTPListenerHostname, match.Hostname

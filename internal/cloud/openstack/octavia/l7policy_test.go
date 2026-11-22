@@ -22,6 +22,7 @@ import (
 	"errors"
 	"net/http"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
@@ -388,6 +389,33 @@ func TestRequestURLRewriteRejectsContradictoryForwardingTargets(t *testing.T) {
 		got, err := readPolicyObservation(json.RawMessage(row + conflicting + "}"))
 		if err != nil || !got.RequestURLRewritePresent || got.HasValidRequestURLRewrite() {
 			t.Errorf("accepted a conflicting forwarding target %s: %+v, %v", conflicting, got, err)
+		}
+	}
+}
+
+func TestWeightedTargetRequestFiltersWireAndInventory(t *testing.T) {
+	const vector = `[{"weight":10,"pool_id":"one","request_header_operations":[{"name":"backend","operation":"SET","value":"one"},{"name":"x-remove","operation":"REMOVE"}],"request_url_rewrite":{"hostname":"one.example.test","replace_prefix":{"match":"/old","replacement":"/new"}}},{"weight":10,"pool_id":"two"},{"weight":1,"fixed_response":{"status_code":500}}]`
+	var targets []WeightedHTTPTarget
+	if err := json.Unmarshal([]byte(vector), &targets); err != nil {
+		t.Fatal(err)
+	}
+	if !targets[0].HasRequestFilters() || targets[1].HasRequestFilters() || targets[2].HasRequestFilters() {
+		t.Fatalf("unexpected readback: %+v", targets)
+	}
+	wire, err := json.Marshal(targets)
+	if err != nil || string(wire) != vector {
+		t.Fatalf("mismatched provider payload: %s, %v", wire, err)
+	}
+	malformed := []string{
+		`{"weight":1,"fixed_response":{"status_code":500},"request_header_operations":[]}`,
+		`{"weight":1,"pool_id":"one","request_header_operations":[{"operation":"REMOVE","name":"x","value":""}]}`,
+		`{"weight":1,"pool_id":"one","request_url_rewrite":{"replace_prefix":{"match":"/old"}}}`,
+	}
+	for _, target := range malformed {
+		row := `{"id":"policy","action":"WEIGHTED_TARGETS","targets":[` + target + `,{"weight":10,"pool_id":"two"}]}`
+		got, err := readPolicyObservation(json.RawMessage(row))
+		if err != nil || got.Target != nil || !got.TargetRequestFiltersPresent || !slices.Contains(got.PoolIDs, "two") {
+			t.Fatalf("malformed target lost its known dependencies or was accepted: %+v, %v", got, err)
 		}
 	}
 }

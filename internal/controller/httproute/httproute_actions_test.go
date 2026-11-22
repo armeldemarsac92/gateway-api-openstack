@@ -676,3 +676,175 @@ func TestURLRewriteHostFilterOrderAndEmptyRewrite(t *testing.T) {
 		t.Fatalf("an identical Host set is representable in either order: %v", err)
 	}
 }
+
+func TestHTTPBackendRequestFiltersPreserveTargetOccurrences(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	f.reconciler.Config.WeightedHTTPTargets = true
+	backend := f.route.Spec.Rules[0].BackendRefs[0]
+	headerFor := func(value string) gatewayv1.HTTPRouteFilter {
+		return gatewayv1.HTTPRouteFilter{Type: gatewayv1.HTTPRouteFilterRequestHeaderModifier,
+			RequestHeaderModifier: &gatewayv1.HTTPHeaderFilter{Set: []gatewayv1.HTTPHeader{{Name: "Backend", Value: value}}}}
+	}
+	first, second, unfiltered, invalid, zero := backend, backend, backend, backend, backend
+	first.Weight, second.Weight, zero.Weight = ptr.To(int32(10)), ptr.To(int32(10)), ptr.To(int32(0))
+	first.Filters = []gatewayv1.HTTPRouteFilter{headerFor("first")}
+	second.Filters = []gatewayv1.HTTPRouteFilter{headerFor("second")}
+	invalid.Name, invalid.Filters = "missing", first.Filters
+	zero.Filters = second.Filters
+	f.route.Spec.Rules = []gatewayv1.HTTPRouteRule{{BackendRefs: []gatewayv1.HTTPBackendRef{first, second, unfiltered, invalid, zero}}}
+	build := func() (cloud.RouteSpec, error) {
+		return f.reconciler.buildRouteModelWithReader(t.Context(), f.reader, f.route, f.gateway)
+	}
+	if _, err := build(); err == nil || !strings.Contains(err.Error(), "--octavia-http-backend-request-filters") {
+		t.Fatalf("missing opt-in did not reject backend filters: %v", err)
+	}
+	f.reconciler.Config.BackendRequestFilters = true
+	spec, err := build()
+	if err != nil || len(spec.HTTPBackends) != 1 || len(spec.WeightedHTTPRules) != 1 {
+		t.Fatalf("want one backend pool with one weighted rule: %+v, %v", spec, err)
+	}
+	rule := spec.WeightedHTTPRules[0]
+	if len(rule.Targets) != 5 || len(rule.Matches) != 1 || len(rule.Matches[0].RequestHeaderOperations) != 0 {
+		t.Fatalf("unexpected weighted rule: %+v", rule)
+	}
+	for i, target := range rule.Targets {
+		if !ptr.Equal(target.BackendIndex, []*int{ptr.To(0), ptr.To(0), ptr.To(0), nil, ptr.To(0)}[i]) ||
+			target.Weight != []int{10, 10, 1, 1, 0}[i] {
+			t.Fatalf("target %d lost its pool or weight: %+v", i, target)
+		}
+		if i < 2 {
+			want := cloud.HTTPHeaderOperation{Operation: cloud.HTTPHeaderSet, Name: "backend", Value: []string{"first", "second"}[i]}
+			if !slices.Equal(target.RequestHeaderOperations, []cloud.HTTPHeaderOperation{want}) {
+				t.Fatalf("target %d has wrong filter: %+v", i, target)
+			}
+		} else if len(target.RequestHeaderOperations) != 0 {
+			t.Fatalf("target %d received another backend's filter: %+v", i, target)
+		}
+	}
+	if err := f.client.Update(t.Context(), f.route); err != nil {
+		t.Fatal(err)
+	}
+	ready := cloud.RouteReadyResult(cloud.RouteState{L7PolicyIDs: []string{"weighted"}})
+	r := newTestReconciler(*f.reconciler, &recordingProvider{routeResult: &ready})
+	key := client.ObjectKeyFromObject(f.route)
+	if _, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: key}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.client.Get(t.Context(), key, f.route); err != nil {
+		t.Fatal(err)
+	}
+	conditions := f.route.Status.Parents[0].Conditions
+	accepted := meta.FindStatusCondition(conditions, string(gatewayv1.RouteConditionAccepted))
+	resolved := meta.FindStatusCondition(conditions, string(gatewayv1.RouteConditionResolvedRefs))
+	if accepted == nil || accepted.Status != metav1.ConditionTrue || resolved == nil ||
+		resolved.Status != metav1.ConditionFalse || resolved.Reason != string(gatewayv1.RouteReasonBackendNotFound) {
+		t.Fatalf("invalid backend's reserved share did not preserve route and ref status: %+v", conditions)
+	}
+}
+
+func TestHTTPBackendURLRewriteUsesEnclosingMatchAndDropsConflictingRule(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	f.reconciler.Config.WeightedHTTPTargets = true
+	f.reconciler.Config.BackendRequestFilters = true
+	f.reconciler.Config.HTTPRequestURLRewrite = true
+	rewriteRule := func(path string, modifier *gatewayv1.HTTPPathModifier) gatewayv1.HTTPRouteRule {
+		rule := *f.route.Spec.Rules[0].DeepCopy()
+		rule.Matches = []gatewayv1.HTTPRouteMatch{{Path: &gatewayv1.HTTPPathMatch{Value: ptr.To(path)}}}
+		rule.BackendRefs[0].Filters = []gatewayv1.HTTPRouteFilter{{Type: gatewayv1.HTTPRouteFilterURLRewrite,
+			URLRewrite: &gatewayv1.HTTPURLRewriteFilter{Path: modifier}}}
+		return rule
+	}
+	full := rewriteRule("/full", &gatewayv1.HTTPPathModifier{Type: gatewayv1.FullPathHTTPPathModifier, ReplaceFullPath: ptr.To("/rewritten-full")})
+	prefix := rewriteRule("/prefix", &gatewayv1.HTTPPathModifier{Type: gatewayv1.PrefixMatchHTTPPathModifier, ReplacePrefixMatch: ptr.To("/rewritten-prefix")})
+	conflict := *prefix.DeepCopy()
+	conflict.Name = ptr.To(gatewayv1.SectionName("conflict"))
+	conflict.Filters = full.BackendRefs[0].Filters
+	if err := f.reconciler.validateRouteRule(conflict, false); err == nil || statusForRouteBuildError(err).acceptedReason != string(gatewayv1.RouteReasonIncompatibleFilters) {
+		t.Fatalf("overlapping rule and backend path rewrites did not produce IncompatibleFilters: %v", err)
+	}
+	hostname := gatewayv1.HTTPRouteFilter{Type: gatewayv1.HTTPRouteFilterURLRewrite,
+		URLRewrite: &gatewayv1.HTTPURLRewriteFilter{Hostname: ptr.To(gatewayv1.PreciseHostname("backend.example.test"))}}
+	composed := *prefix.DeepCopy()
+	composed.Filters = []gatewayv1.HTTPRouteFilter{hostname}
+	if err := f.reconciler.validateRouteRule(composed, false); err != nil {
+		t.Fatalf("rule hostname and backend path rewrite should compose: %v", err)
+	}
+	composed.BackendRefs[0].Filters = append(composed.BackendRefs[0].Filters, gatewayv1.HTTPRouteFilter{
+		Type: gatewayv1.HTTPRouteFilterRequestHeaderModifier, RequestHeaderModifier: &gatewayv1.HTTPHeaderFilter{Remove: []string{"Host"}},
+	})
+	if err := f.reconciler.validateRouteRule(composed, false); err == nil || statusForRouteBuildError(err).acceptedReason != string(gatewayv1.RouteReasonIncompatibleFilters) {
+		t.Fatalf("rule hostname rewrite with a backend Host operation did not produce IncompatibleFilters: %v", err)
+	}
+	exact := *prefix.DeepCopy()
+	exact.Matches[0].Path.Type = ptr.To(gatewayv1.PathMatchExact)
+	var rejected *routeBuildError
+	if err := f.reconciler.validateRouteRule(exact, false); !errors.As(err, &rejected) || rejected.kind != routeErrorInvalid {
+		t.Fatalf("accepted a ReplacePrefixMatch on Exact: %v", err)
+	}
+	f.route.Spec.Rules = []gatewayv1.HTTPRouteRule{full, conflict, prefix}
+	_, dropped := f.reconciler.projectedHTTPFilterRules(f.route)
+	if !strings.HasPrefix(dropped, "Dropped Rule conflict") {
+		t.Fatalf("expected partial invalidity for the conflicting rule, got %q", dropped)
+	}
+	spec, err := f.reconciler.buildRouteModelWithReader(t.Context(), f.reader, f.route, f.gateway)
+	if err != nil || len(spec.WeightedHTTPRules) != 2 || len(spec.HTTPBackends) != 1 {
+		t.Fatalf("expected two valid rewrites and one shared backend: %+v, %v", spec, err)
+	}
+	gotFull, gotPrefix := spec.WeightedHTTPRules[0], spec.WeightedHTTPRules[1]
+	if gotFull.Matches[0].PathValue != "/full" || gotPrefix.Matches[0].PathValue != "/prefix" ||
+		gotFull.Matches[0].URLRewrite != nil || gotPrefix.Matches[0].URLRewrite != nil ||
+		!ptr.Equal(gotFull.Targets[0].URLRewrite.ReplaceFullPath, ptr.To("/rewritten-full")) ||
+		!ptr.Equal(gotPrefix.Targets[0].URLRewrite.ReplacePrefixMatch, ptr.To("/rewritten-prefix")) {
+		t.Fatalf("URL rewrites changed the original matches or escaped target scope: %+v %+v", gotFull, gotPrefix)
+	}
+}
+
+func TestUnresolvedHTTPBackendExtensionKeepsPrivatePredicate(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	f.reconciler.Config.WeightedHTTPTargets = true
+	f.reconciler.Config.BackendRequestFilters = true
+	public := f.route.Spec.Rules[0]
+	public.Matches = nil
+	private := *public.DeepCopy()
+	private.Matches = []gatewayv1.HTTPRouteMatch{{Path: &gatewayv1.HTTPPathMatch{Value: ptr.To("/private")}}}
+	private.BackendRefs[0].Weight = ptr.To(int32(3))
+	private.BackendRefs[0].Filters = []gatewayv1.HTTPRouteFilter{{Type: gatewayv1.HTTPRouteFilterExtensionRef,
+		ExtensionRef: &gatewayv1.LocalObjectReference{Group: "example.test", Kind: "AccessFilter", Name: "private"}}}
+	private.BackendRefs = append(private.BackendRefs, public.BackendRefs[0])
+	f.route.Spec.Rules = []gatewayv1.HTTPRouteRule{public, private}
+	if err := f.client.Update(t.Context(), f.route); err != nil {
+		t.Fatal(err)
+	}
+	ready := cloud.RouteReadyResult(cloud.RouteState{L7PolicyIDs: []string{"private", "public"}})
+	provider := &recordingProvider{routeResult: &ready}
+	r := newTestReconciler(*f.reconciler, provider)
+	key := client.ObjectKeyFromObject(f.route)
+	if _, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: key}); err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.routeSpecs) != 1 {
+		t.Fatalf("expected to install both rules, got %+v", provider.routeSpecs)
+	}
+	spec := provider.routeSpecs[0]
+	if len(spec.WeightedHTTPRules) != 1 || len(spec.HTTPBackends) != 1 {
+		t.Fatalf("expected public fallback and a weighted private rule, got %+v", spec)
+	}
+	rule := spec.WeightedHTTPRules[0]
+	if len(rule.Matches) != 1 || rule.Matches[0].PathValue != "/private" ||
+		len(rule.Targets) != 2 || rule.Targets[0].BackendIndex != nil || rule.Targets[0].Weight != 3 ||
+		rule.Targets[1].BackendIndex == nil || rule.Targets[1].Weight != 1 ||
+		len(spec.HTTPBackends[0].Matches) != 1 || spec.HTTPBackends[0].Matches[0].PathValue != "/" ||
+		rule.Matches[0].Precedence >= spec.HTTPBackends[0].Matches[0].Precedence {
+		t.Fatalf("private requests would skip the unresolved filter or change the healthy share: %+v", spec)
+	}
+	if err := f.client.Get(t.Context(), key, f.route); err != nil {
+		t.Fatal(err)
+	}
+	conditions := f.route.Status.Parents[0].Conditions
+	accepted := meta.FindStatusCondition(conditions, string(gatewayv1.RouteConditionAccepted))
+	resolved := meta.FindStatusCondition(conditions, string(gatewayv1.RouteConditionResolvedRefs))
+	if accepted == nil || accepted.Status != metav1.ConditionTrue || resolved == nil || resolved.Status != metav1.ConditionFalse ||
+		resolved.Reason != string(gatewayv1.RouteReasonUnsupportedValue) || !strings.Contains(resolved.Message, "example.test/AccessFilter") {
+		t.Fatalf("unexpected conditions for unresolved backend filter: %+v", conditions)
+	}
+}

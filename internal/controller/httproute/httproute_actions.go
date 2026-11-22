@@ -49,6 +49,9 @@ func routeActionError(diagnostic *model.Diagnostic) error {
 	if diagnostic == nil {
 		return nil
 	}
+	if diagnostic.Scope == model.ScopeRoute {
+		return newRouteBuildError(routeErrorUnknownFilter, "%s", diagnostic.Message)
+	}
 	kind := routeErrorUnsupported
 	switch diagnostic.Reason {
 	case string(routeErrorInvalid):

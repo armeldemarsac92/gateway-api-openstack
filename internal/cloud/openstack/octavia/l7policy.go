@@ -54,9 +54,43 @@ type FixedHTTPResponse struct {
 
 // WeightedHTTPTarget is one ordered destination on an Octavia L7 policy.
 type WeightedHTTPTarget struct {
-	Weight        int                `json:"weight"`
-	PoolID        string             `json:"pool_id,omitempty"`
-	FixedResponse *FixedHTTPResponse `json:"fixed_response,omitempty"`
+	Weight                  int
+	PoolID                  string
+	FixedResponse           *FixedHTTPResponse
+	RequestHeaderOperations []cloud.HTTPHeaderOperation
+	RequestURLRewrite       *RequestURLRewrite
+}
+
+func (target WeightedHTTPTarget) HasRequestFilters() bool {
+	return len(target.RequestHeaderOperations) != 0 || target.RequestURLRewrite != nil
+}
+
+func (target WeightedHTTPTarget) MarshalJSON() ([]byte, error) {
+	fields := struct {
+		Weight        int                `json:"weight"`
+		PoolID        string             `json:"pool_id,omitempty"`
+		FixedResponse *FixedHTTPResponse `json:"fixed_response,omitempty"`
+		Operations    []map[string]any   `json:"request_header_operations,omitempty"`
+		Rewrite       *RequestURLRewrite `json:"request_url_rewrite,omitempty"`
+	}{Weight: target.Weight}
+	switch {
+	case target.PoolID != "" && target.FixedResponse == nil:
+		fields.PoolID = target.PoolID
+		if len(target.RequestHeaderOperations) != 0 {
+			fields.Operations = headerOperationEntries(target.RequestHeaderOperations)
+		}
+		if target.RequestURLRewrite != nil {
+			if !target.RequestURLRewrite.Valid() {
+				return nil, fmt.Errorf("invalid weighted policy target URL rewrite")
+			}
+			fields.Rewrite = target.RequestURLRewrite
+		}
+	case target.PoolID == "" && target.FixedResponse != nil && !target.HasRequestFilters():
+		fields.FixedResponse = target.FixedResponse
+	default:
+		return nil, fmt.Errorf("weighted policy target must select one destination and can only filter requests forwarded to a pool")
+	}
+	return json.Marshal(fields)
 }
 
 // UnmarshalJSON checks the two mutually exclusive target forms defined by Octavia.
@@ -67,15 +101,32 @@ func (target *WeightedHTTPTarget) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	var weight *int
-	if len(fields) != 2 || json.Unmarshal(fields["weight"], &weight) != nil ||
+	if json.Unmarshal(fields["weight"], &weight) != nil ||
 		weight == nil || *weight < 0 || *weight > 1_000_000 {
 		return fmt.Errorf("weighted policy target requires a weight from 0 to 1000000 and one destination")
 	}
 	decoded := WeightedHTTPTarget{Weight: *weight}
+	delete(fields, "weight")
 	switch {
 	case fields["pool_id"] != nil:
 		if err := json.Unmarshal(fields["pool_id"], &decoded.PoolID); err != nil || decoded.PoolID == "" {
 			return fmt.Errorf("weighted policy target has an invalid pool ID")
+		}
+		delete(fields, "pool_id")
+		if raw, ok := fields[requestHeaderOperationsField]; ok {
+			operations, err := readPolicyHeaderOperations(raw, requestHeaderOperationsField)
+			if err != nil {
+				return err
+			}
+			decoded.RequestHeaderOperations = operations
+			delete(fields, requestHeaderOperationsField)
+		}
+		if raw, ok := fields[requestURLRewriteField]; ok {
+			decoded.RequestURLRewrite = readRequestURLRewrite(raw)
+			if decoded.RequestURLRewrite == nil {
+				return fmt.Errorf("invalid weighted policy target URL rewrite")
+			}
+			delete(fields, requestURLRewriteField)
 		}
 	case fields["fixed_response"] != nil:
 		var response map[string]int
@@ -87,8 +138,12 @@ func (target *WeightedHTTPTarget) UnmarshalJSON(data []byte) error {
 			return fmt.Errorf("weighted policy fixed response requires a single status_code of 404 or 500")
 		}
 		decoded.FixedResponse = &FixedHTTPResponse{StatusCode: code}
+		delete(fields, "fixed_response")
 	default:
 		return fmt.Errorf("weighted policy target has no recognized destination")
+	}
+	if len(fields) != 0 {
+		return fmt.Errorf("weighted policy target has unexpected fields")
 	}
 	*target = decoded
 	return nil
@@ -115,6 +170,7 @@ type L7PolicyObservation struct {
 	HTTPSListenerHostname       string
 	Target                      *L7PolicyTarget
 	ExtendedTargetFields        bool
+	TargetRequestFiltersPresent bool
 	RedirectRequest             *RequestRedirect
 	RedirectRequestPresent      bool
 	RequestURLRewrite           *RequestURLRewrite
@@ -202,11 +258,15 @@ func readPolicyObservation(raw json.RawMessage) (L7PolicyObservation, error) {
 		err := json.Unmarshal(row.Targets, &slots)
 		observation.ExtendedTargetFields = err != nil || len(slots) > 0
 		for _, rawSlot := range slots {
-			var slot struct {
-				PoolID string `json:"pool_id"`
+			var slot map[string]json.RawMessage
+			if json.Unmarshal(rawSlot, &slot) != nil {
+				continue
 			}
-			if json.Unmarshal(rawSlot, &slot) == nil && strings.TrimSpace(slot.PoolID) != "" {
-				observation.PoolIDs = append(observation.PoolIDs, slot.PoolID)
+			observation.TargetRequestFiltersPresent = observation.TargetRequestFiltersPresent ||
+				slot[requestHeaderOperationsField] != nil || slot[requestURLRewriteField] != nil
+			var poolID string
+			if json.Unmarshal(slot["pool_id"], &poolID) == nil && strings.TrimSpace(poolID) != "" {
+				observation.PoolIDs = append(observation.PoolIDs, poolID)
 			}
 		}
 	}
