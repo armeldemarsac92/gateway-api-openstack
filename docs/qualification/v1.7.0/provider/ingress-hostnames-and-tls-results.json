@@ -1,0 +1,242 @@
+{
+  "controllerRevision": "3c8dd9883713c57ac152ebfb12210ec9eecbe6ca",
+  "managerSHA256": "12e3b36f2884072fa05ea401f393b6954d22212410b2a0b0356bad94a89ce1eb",
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "baseSHA256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+  "flags": [
+    "--octavia-fixed-http-responses",
+    "--octavia-http-header-exact",
+    "--octavia-https-listener-isolation",
+    "--octavia-backend-tls-policy",
+    "--openstack-resync-interval=10m"
+  ],
+  "octavia": {
+    "version": "19.0.1.dev12",
+    "sha256": "f01d67e066226338c14deefe8e8e1ee6f7b48656993e3d9c03fe4ebc3c7e86c8",
+    "filesVerified": 633
+  },
+  "octaviaLib": {
+    "version": "3.12.1.dev5",
+    "sha256": "29d060668d9449f491d9ce192a026dcd57340fcb364a6e2edcd664f267971305",
+    "filesVerified": 24
+  },
+  "HAProxy": {
+    "version": "3.0.19-ade9c1262-octavia-strict-dns-v1",
+    "sha256": "fa8468efa26f95ed83a36afeb97b79730de285450b7a8fae94f7cf5e6d2d0824"
+  },
+  "scope": "Disposable kind cluster on each Gateway API v1.7.0 channel with real upstream echo Pods, the controller image binary, local Octavia/Barbican APIs and native Amphora-rendered HAProxy. Keystone, Neutron and cloud worker completion use fixtures.",
+  "nodeImage": "docker.io/kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed",
+  "echoPlatformDigest": "sha256:fed223b186fbd83d50a4578d168c9e7d89341d8c1af616ebe0f62d53ab7451dc",
+  "channels": {
+    "standard": {
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "cases": {
+        "GatewayInvalidTLSConfiguration": {
+          "passed": true,
+          "exit": 0,
+          "subtestsPassed": 4,
+          "expected": 4,
+          "caseGoSHA256": "aeb33c90f7a1e71a5b959a3636a088b318f873ede4928b790056ac48b2c00d91",
+          "manifestSHA256": "bcbd9503ecca3bd2113ffe3ef66adc31e26203bbd9730bd42f543528f2b66b14",
+          "events": [
+            "--- PASS: TestLocalHTTPCase/GatewayInvalidTLSConfiguration (0.04s)",
+            "--- PASS: TestLocalHTTPCase/GatewayInvalidTLSConfiguration/Nonexistent_secret_referenced_as_CertificateRef_in_a_Gateway_listener (0.51s)",
+            "--- PASS: TestLocalHTTPCase/GatewayInvalidTLSConfiguration/Unsupported_group_resource_referenced_as_CertificateRef_in_a_Gateway_listener (0.10s)",
+            "--- PASS: TestLocalHTTPCase/GatewayInvalidTLSConfiguration/Unsupported_kind_resource_referenced_as_CertificateRef_in_a_Gateway_listener (0.70s)",
+            "--- PASS: TestLocalHTTPCase/GatewayInvalidTLSConfiguration/Malformed_secret_referenced_as_CertificateRef_in_a_Gateway_listener (0.21s)"
+          ],
+          "logSHA256": "e9532ab51bf2ff89ed03f30844dfd5d1ef1a4ac35930cad9995136e7e4833b45",
+          "reportSHA256": "df93abc690233ad38e2719c9bbc7c1b3bdb98913a9b1dcb2208663a6dcbc52e1"
+        },
+        "HTTPRouteRedirectPortAndScheme": {
+          "passed": false,
+          "exit": 1,
+          "subtestsPassed": 0,
+          "expected": 15,
+          "caseGoSHA256": "c12ea7dd9dd3b92cc7c4d18979b6712d9a8558d3e8d7e37f715a4e0aa75cbd33",
+          "manifestSHA256": "eac2ae96d588884c572b700119de02cd5b2c37952de1726d10b9b0f782a3d7f5",
+          "events": [
+            "--- FAIL: TestLocalHTTPCase/HTTPRouteRedirectPortAndScheme (67.59s)"
+          ],
+          "logSHA256": "2f74e2bad137936897dd595c5e634f60ca07a17033f4c24ed0b0d225ae259d88",
+          "reportSHA256": "68bb510ff2527885d8fa6889fcc051b3920edcfa765c96da57c978e835ecfbb7",
+          "gatewayConditionsAfterCase": {
+            "same-namespace": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed"
+            },
+            "same-namespace-with-http-listener-on-8080": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed"
+            },
+            "same-namespace-with-https-listener": {
+              "Accepted": "True/Accepted",
+              "Programmed": "False/NoResources"
+            }
+          },
+          "routeParentConditionsAfterCase": {
+            "http-route-for-listener-on-port-443": [
+              {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "False/Pending"
+              }
+            ],
+            "http-route-for-listener-on-port-80": [
+              {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              }
+            ],
+            "http-route-for-listener-on-port-8080": [
+              {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              }
+            ]
+          },
+          "providerHTTPCountsAfterCase": {
+            "GET providers 200": 254,
+            "GET loadbalancers 200": 171,
+            "POST loadbalancers 201": 3,
+            "GET listeners 200": 78,
+            "GET pools 200": 78,
+            "POST listeners 201": 3,
+            "GET l7policies 200": 75,
+            "PUT listeners 200": 1,
+            "POST l7policies 201": 24,
+            "GET rules 200": 426,
+            "POST rules 201": 32,
+            "PUT l7policies 200": 9
+          }
+        },
+        "HTTPRouteMultipleRoutesAttachmentSameHostnameIntersection": {
+          "passed": true,
+          "exit": 0,
+          "subtestsPassed": 6,
+          "expected": 6,
+          "caseGoSHA256": "ef83a02f43deae7ffc9791a4a16e52e5116e8408862517ce2748a4c067869758",
+          "manifestSHA256": "a69972c621d2900d2b953aad72d6c7fd21425ba9658251b6475d3199518afd1d",
+          "events": [
+            "--- PASS: TestLocalHTTPCase/HTTPRouteMultipleRoutesAttachmentSameHostnameIntersection (65.04s)",
+            "--- PASS: TestLocalHTTPCase/HTTPRouteMultipleRoutesAttachmentSameHostnameIntersection/HTTPRoute_exact_hostname_match_takes_precedence_over_HTTPRoute_wildcard_hostname_match_despite_having_newer_creation_timestamp (19.16s)",
+            "--- PASS: TestLocalHTTPCase/HTTPRouteMultipleRoutesAttachmentSameHostnameIntersection/HTTPRoute_exact_hostname_match_takes_precedence_over_HTTPRoute_wildcard_hostname_match_despite_having_newer_creation_timestamp_and_less_specific_PathPrefix_match (10.13s)",
+            "--- PASS: TestLocalHTTPCase/HTTPRouteMultipleRoutesAttachmentSameHostnameIntersection/HTTPRoute_exact_hostname_match_passes_unmatched_traffic_to_HTTPRoute_wildcard_hostname_match (8.27s)",
+            "--- PASS: TestLocalHTTPCase/HTTPRouteMultipleRoutesAttachmentSameHostnameIntersection/HTTPRoute_more_specific_wildcard_hostname_match_takes_precedence_over_HTTPRoute_less_specific_wildcard_hostname_match_despite_having_newer_creation_timestamp (7.15s)",
+            "--- PASS: TestLocalHTTPCase/HTTPRouteMultipleRoutesAttachmentSameHostnameIntersection/HTTPRoute_more_specific_wildcard_hostname_match_takes_precedence_over_HTTPRoute_less_specific_wildcard_hostname_match_despite_having_newer_creation_timestamp_and_less_specific_PathPrefix_match (6.78s)",
+            "--- PASS: TestLocalHTTPCase/HTTPRouteMultipleRoutesAttachmentSameHostnameIntersection/HTTPRoute_more_specific_wildcard_hostname_match_passes_unmatched_traffic_to_HTTPRoute_less_specific_wildcard_hostname_match (7.55s)"
+          ],
+          "logSHA256": "08ef59089c6fbac26581bf7cd7db99d0287f1dc545130d900def33a6f9a9ac97",
+          "reportSHA256": "292374553996c9058b38af2dfbeb37f023019d9eb7de6b9be6956f4030639229"
+        }
+      }
+    },
+    "experimental": {
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "cases": {
+        "GatewayInvalidTLSConfiguration": {
+          "passed": true,
+          "exit": 0,
+          "subtestsPassed": 4,
+          "expected": 4,
+          "caseGoSHA256": "aeb33c90f7a1e71a5b959a3636a088b318f873ede4928b790056ac48b2c00d91",
+          "manifestSHA256": "bcbd9503ecca3bd2113ffe3ef66adc31e26203bbd9730bd42f543528f2b66b14",
+          "events": [
+            "--- PASS: TestLocalHTTPCase/GatewayInvalidTLSConfiguration (0.03s)",
+            "--- PASS: TestLocalHTTPCase/GatewayInvalidTLSConfiguration/Nonexistent_secret_referenced_as_CertificateRef_in_a_Gateway_listener (0.61s)",
+            "--- PASS: TestLocalHTTPCase/GatewayInvalidTLSConfiguration/Unsupported_kind_resource_referenced_as_CertificateRef_in_a_Gateway_listener (0.71s)",
+            "--- PASS: TestLocalHTTPCase/GatewayInvalidTLSConfiguration/Unsupported_group_resource_referenced_as_CertificateRef_in_a_Gateway_listener (0.10s)",
+            "--- PASS: TestLocalHTTPCase/GatewayInvalidTLSConfiguration/Malformed_secret_referenced_as_CertificateRef_in_a_Gateway_listener (0.21s)"
+          ],
+          "logSHA256": "2012e3f425d911f34c503b56027880af55d177c920b2e0f3bb4bef094976f9d1",
+          "reportSHA256": "2f07a33f713272d56791ec703c324b8166f0145c60306f812b46778a66c0f2a8"
+        },
+        "HTTPRouteRedirectPortAndScheme": {
+          "passed": false,
+          "exit": 1,
+          "subtestsPassed": 0,
+          "expected": 15,
+          "caseGoSHA256": "c12ea7dd9dd3b92cc7c4d18979b6712d9a8558d3e8d7e37f715a4e0aa75cbd33",
+          "manifestSHA256": "eac2ae96d588884c572b700119de02cd5b2c37952de1726d10b9b0f782a3d7f5",
+          "events": [
+            "--- FAIL: TestLocalHTTPCase/HTTPRouteRedirectPortAndScheme (67.47s)"
+          ],
+          "logSHA256": "26f5e739193f332dfdf5baebd7125e1ec08c47b0e617703624bca1f66c244dbd",
+          "reportSHA256": "d931ca8992c1e0d4ad5a19a6254afcf31b8b06a8803af78c4a966ae82d844d8f",
+          "gatewayConditionsAfterCase": {
+            "same-namespace": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed"
+            },
+            "same-namespace-with-http-listener-on-8080": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed"
+            },
+            "same-namespace-with-https-listener": {
+              "Accepted": "True/Accepted",
+              "Programmed": "False/NoResources"
+            }
+          },
+          "routeParentConditionsAfterCase": {
+            "http-route-for-listener-on-port-443": [
+              {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "False/Pending"
+              }
+            ],
+            "http-route-for-listener-on-port-80": [
+              {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              }
+            ],
+            "http-route-for-listener-on-port-8080": [
+              {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              }
+            ]
+          },
+          "providerHTTPCountsAfterCase": {
+            "GET providers 200": 248,
+            "GET loadbalancers 200": 169,
+            "POST loadbalancers 201": 3,
+            "GET listeners 200": 77,
+            "GET pools 200": 77,
+            "POST listeners 201": 3,
+            "GET l7policies 200": 74,
+            "PUT listeners 200": 1,
+            "POST l7policies 201": 24,
+            "GET rules 200": 411,
+            "POST rules 201": 31,
+            "PUT l7policies 200": 9
+          }
+        },
+        "HTTPRouteMultipleRoutesAttachmentSameHostnameIntersection": {
+          "passed": true,
+          "exit": 0,
+          "subtestsPassed": 6,
+          "expected": 6,
+          "caseGoSHA256": "ef83a02f43deae7ffc9791a4a16e52e5116e8408862517ce2748a4c067869758",
+          "manifestSHA256": "a69972c621d2900d2b953aad72d6c7fd21425ba9658251b6475d3199518afd1d",
+          "events": [
+            "--- PASS: TestLocalHTTPCase/HTTPRouteMultipleRoutesAttachmentSameHostnameIntersection (64.06s)",
+            "--- PASS: TestLocalHTTPCase/HTTPRouteMultipleRoutesAttachmentSameHostnameIntersection/HTTPRoute_exact_hostname_match_takes_precedence_over_HTTPRoute_wildcard_hostname_match_despite_having_newer_creation_timestamp (17.64s)",
+            "--- PASS: TestLocalHTTPCase/HTTPRouteMultipleRoutesAttachmentSameHostnameIntersection/HTTPRoute_exact_hostname_match_takes_precedence_over_HTTPRoute_wildcard_hostname_match_despite_having_newer_creation_timestamp_and_less_specific_PathPrefix_match (10.16s)",
+            "--- PASS: TestLocalHTTPCase/HTTPRouteMultipleRoutesAttachmentSameHostnameIntersection/HTTPRoute_exact_hostname_match_passes_unmatched_traffic_to_HTTPRoute_wildcard_hostname_match (8.26s)",
+            "--- PASS: TestLocalHTTPCase/HTTPRouteMultipleRoutesAttachmentSameHostnameIntersection/HTTPRoute_more_specific_wildcard_hostname_match_takes_precedence_over_HTTPRoute_less_specific_wildcard_hostname_match_despite_having_newer_creation_timestamp (6.42s)",
+            "--- PASS: TestLocalHTTPCase/HTTPRouteMultipleRoutesAttachmentSameHostnameIntersection/HTTPRoute_more_specific_wildcard_hostname_match_takes_precedence_over_HTTPRoute_less_specific_wildcard_hostname_match_despite_having_newer_creation_timestamp_and_less_specific_PathPrefix_match (7.19s)",
+            "--- PASS: TestLocalHTTPCase/HTTPRouteMultipleRoutesAttachmentSameHostnameIntersection/HTTPRoute_more_specific_wildcard_hostname_match_passes_unmatched_traffic_to_HTTPRoute_less_specific_wildcard_hostname_match (8.09s)"
+          ],
+          "logSHA256": "6b3d6dc07096cac7820cc0f6c407a55e2f29447330038bdbc91205c26db1dfc8",
+          "reportSHA256": "0cd43c29b35fe73e05fc3f170eae7856fe75abbf6b1fa9f6489d5ee234f7f75e"
+        }
+      }
+    }
+  }
+}
