@@ -1,0 +1,133 @@
+{
+  "channel": "experimental",
+  "controllerRevision": "577264d263dec1c8428efb487caaa82f549d56a8",
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "managerSHA256": "581ddfd41684240fddd21fb758eac4bcd35066ff6b1abaed0f0a7a076510a784",
+  "cases": {
+    "BackendTLSPolicyInvalidKind": {
+      "passed": true,
+      "exit": 0,
+      "subtestsPassed": 3,
+      "events": [
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyInvalidKind (13.92s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyInvalidKind/BackendTLSPolicy_with_a_single_invalid_CACertificateRef_has_a_Accepted_Condition_with_status_False_and_Reason_NoValidCACertificate (0.04s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyInvalidKind/BackendTLSPolicy_with_a_single_invalid_CACertificateRef_has_a_ResolvedRefs_Condition_with_status_False_and_Reason_InvalidKind (0.04s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyInvalidKind/HTTP_Request_to_backend_targeted_by_an_invalid_BackendTLSPolicy_receive_a_5xx (9.92s)"
+      ],
+      "expectedSubtests": 3,
+      "bodySHA256": "880a4798101c4ff7a348b2604210e619baccd2f6a443e0099eed33b0bf344d4b",
+      "manifestSHA256": "ef551251851f66b32d1ae6bb817e4b8774d720b745b74a9c981d773bc8ecbab0",
+      "requestLogCount": 101,
+      "tlsEchoWorkload": {
+        "runtime": "kind",
+        "pods": [
+          {
+            "name": "tls-backend-5877f989d6-562rh",
+            "phase": "Running",
+            "ready": true,
+            "imageID": "docker.io/library/import-2026-11-22@sha256:abd48b88affd1c16e8d60d06cdc661919a8980bba8fc9068f3d216d814268adb"
+          }
+        ]
+      },
+      "controlPlaneStorage": "kind default",
+      "report": "experimental-backendtlspolicy-invalid-kind-report.yaml",
+      "reportSHA256": "bf15fa5fc99d04dee2354b6410d36feaee7a34da29df4fa29022e02105491728"
+    },
+    "BackendTLSPolicyInvalidCACertificateRef": {
+      "passed": true,
+      "exit": 0,
+      "subtestsPassed": 8,
+      "events": [
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyInvalidCACertificateRef (29.28s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyInvalidCACertificateRef/BackendTLSPolicy_nonexistent-ca-certificate-ref (21.84s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyInvalidCACertificateRef/BackendTLSPolicy_nonexistent-ca-certificate-ref/BackendTLSPolicy_with_a_single_invalid_CACertificateRef_has_a_Accepted_Condition_with_status_False_and_Reason_NoValidCACertificate (0.04s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyInvalidCACertificateRef/BackendTLSPolicy_nonexistent-ca-certificate-ref/BackendTLSPolicy_with_a_single_invalid_CACertificateRef_has_a_ResolvedRefs_Condition_with_status_False_and_Reason_InvalidCACertificateRef (0.04s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyInvalidCACertificateRef/BackendTLSPolicy_nonexistent-ca-certificate-ref/HTTP_Request_to_backend_targeted_by_an_invalid_BackendTLSPolicy_receive_a_5xx (21.75s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyInvalidCACertificateRef/BackendTLSPolicy_malformed-ca-certificate-ref (2.47s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyInvalidCACertificateRef/BackendTLSPolicy_malformed-ca-certificate-ref/BackendTLSPolicy_with_a_single_invalid_CACertificateRef_has_a_Accepted_Condition_with_status_False_and_Reason_NoValidCACertificate (0.00s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyInvalidCACertificateRef/BackendTLSPolicy_malformed-ca-certificate-ref/BackendTLSPolicy_with_a_single_invalid_CACertificateRef_has_a_ResolvedRefs_Condition_with_status_False_and_Reason_InvalidCACertificateRef (0.04s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyInvalidCACertificateRef/BackendTLSPolicy_malformed-ca-certificate-ref/HTTP_Request_to_backend_targeted_by_an_invalid_BackendTLSPolicy_receive_a_5xx (2.43s)"
+      ],
+      "expectedSubtests": 8,
+      "bodySHA256": "17e1f8f09c3425a2cc86379fd60ef3ea08fd4653263ea73708f2523e9517421e",
+      "manifestSHA256": "3f6512ad0bbb4eb0836b8da7d273c9207a4e6bc1be96de2782558e37d0693684",
+      "requestLogCount": 245,
+      "tlsEchoWorkload": {
+        "runtime": "kind",
+        "pods": [
+          {
+            "name": "tls-backend-5877f989d6-ws22n",
+            "phase": "Running",
+            "ready": true,
+            "imageID": "docker.io/library/import-2026-11-22@sha256:abd48b88affd1c16e8d60d06cdc661919a8980bba8fc9068f3d216d814268adb"
+          }
+        ]
+      },
+      "controlPlaneStorage": "tmpfs",
+      "report": "experimental-backendtlspolicy-invalid-ca-certificate-ref-report.yaml",
+      "reportSHA256": "c576c1965fabb123288df7dce45a0ac42841cadbcf9c56e26f047c6f248b0387"
+    },
+    "BackendTLSPolicyConflictResolution": {
+      "passed": false,
+      "exit": 1,
+      "subtestsPassed": 9,
+      "events": [
+        "--- FAIL: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution (98.10s)",
+        "--- FAIL: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/Conflicting_BackendTLSPolicies_targeting_the_same_Service_without_a_section_name (30.04s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/Conflicting_BackendTLSPolicies_targeting_the_same_Service_without_a_section_name/First_BackendTLSPolicy_should_be_accepted (0.04s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/Conflicting_BackendTLSPolicies_targeting_the_same_Service_without_a_section_name/Second_BackendTLSPolicy_should_have_a_false_Accepted_condition_with_reason_Conflicted_ (0.00s)",
+        "--- FAIL: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/Conflicting_BackendTLSPolicies_targeting_the_same_Service_without_a_section_name/HTTP_request_sent_to_Service_using_the_accepted_BackendTLSPolicy_should_succeed (30.00s)",
+        "--- FAIL: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/Conflicting_BackendTLSPolicies_targeting_the_same_Service_with_the_same_section_name (30.05s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/Conflicting_BackendTLSPolicies_targeting_the_same_Service_with_the_same_section_name/First_BackendTLSPolicy_should_be_accepted (0.04s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/Conflicting_BackendTLSPolicies_targeting_the_same_Service_with_the_same_section_name/Second_BackendTLSPolicy_should_have_a_false_Accepted_condition_with_reason_Conflicted_ (0.00s)",
+        "--- FAIL: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/Conflicting_BackendTLSPolicies_targeting_the_same_Service_with_the_same_section_name/HTTP_request_sent_to_Service_using_the_accepted_BackendTLSPolicy_should_succeed (30.00s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/BackendTLSPolicies_targeting_the_same_Service_with_and_without_a_section_name (33.14s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/BackendTLSPolicies_targeting_the_same_Service_with_and_without_a_section_name/BackendTLSPolicy_with_section_name_should_be_accepted (0.04s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/BackendTLSPolicies_targeting_the_same_Service_with_and_without_a_section_name/BackendTLSPolicy_without_section_name_should_be_accepted (0.01s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/BackendTLSPolicies_targeting_the_same_Service_with_and_without_a_section_name/HTTP_request_sent_to_Service_using_the_BackendTLSPolicy_with_section_name_should_succeed (29.19s)",
+        "--- PASS: TestLocalBackendTLSCase/BackendTLSPolicyConflictResolution/BackendTLSPolicies_targeting_the_same_Service_with_and_without_a_section_name/HTTP_request_sent_to_Service_using_the_BackendTLSPolicy_without_section_name_should_succeed (3.90s)"
+      ],
+      "expectedSubtests": 13,
+      "bodySHA256": "93e545da2af0a65d82c0cb60388e2e0175adf406278de7f27f66f87d2ffab28c",
+      "manifestSHA256": "ad6f210266dac418be158eb5de05194ad5e4dd560b1c85b8a0936e2f76699d76",
+      "requestLogCount": 923,
+      "tlsEchoWorkload": {
+        "runtime": "kind",
+        "pods": [
+          {
+            "name": "tls-backend-5877f989d6-hdt4l",
+            "phase": "Running",
+            "ready": true,
+            "imageID": "docker.io/library/import-2026-11-22@sha256:abd48b88affd1c16e8d60d06cdc661919a8980bba8fc9068f3d216d814268adb"
+          }
+        ]
+      },
+      "controlPlaneStorage": "kind default",
+      "report": "experimental-backendtlspolicy-conflict-resolution-report.yaml",
+      "reportSHA256": "4c67cec8ac22b0eacfdc844bcbea3752193d10c103b181a1aa44c687f0615d7d"
+    }
+  },
+  "releaseBundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+  "upstreamBaseManifestsSHA256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+  "octavia": {
+    "revision": "ba89a2d6237aa1a1b754ad7234899c12de39a4d2",
+    "version": "19.0.1.dev11",
+    "sha256": "965df48a31d61f21ef56d60c5659987fa139b142642998baedcaf6c0403f44ea",
+    "filesVerified": 632
+  },
+  "octaviaLib": {
+    "revision": "8ac88a770cc3b3ebf7cf647e11f25a4b3c6e91b6",
+    "version": "3.12.1.dev4",
+    "sha256": "e47a8a54cd9d15ad9333ed7acbe07d8baf0ba9567332414b4fdcd152761cc57c",
+    "filesVerified": 24
+  },
+  "HAProxy": {
+    "version": "3.0.19-ade9c1262-octavia-strict-dns-v1",
+    "sha256": "fa8468efa26f95ed83a36afeb97b79730de285450b7a8fae94f7cf5e6d2d0824",
+    "strictDNSAgentCapability": true
+  },
+  "barbican": {
+    "version": "23.0.0",
+    "endpoint": "regional HTTPS with verification"
+  }
+}

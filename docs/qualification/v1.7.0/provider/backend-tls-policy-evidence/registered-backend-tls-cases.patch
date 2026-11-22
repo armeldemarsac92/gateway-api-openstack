@@ -1,0 +1,57 @@
+--- a/backend-tls-upstream/run.sh
++++ b/backend-tls-upstream/run.sh
+@@ -48,6 +48,12 @@
+ case_files="$GATEWAY_API_SOURCE/conformance/tests/backendtlspolicy"
+ rtk proxy printf '%s  %s\n' \
+     "$CONTROLLER_BINARY_SHA256" "$CONTROLLER_BINARY" \
++    880a4798101c4ff7a348b2604210e619baccd2f6a443e0099eed33b0bf344d4b "$GATEWAY_API_SOURCE/conformance/tests/backendtlspolicy-invalid-kind.go" \
++    ef551251851f66b32d1ae6bb817e4b8774d720b745b74a9c981d773bc8ecbab0 "$GATEWAY_API_SOURCE/conformance/tests/backendtlspolicy-invalid-kind.yaml" \
++    17e1f8f09c3425a2cc86379fd60ef3ea08fd4653263ea73708f2523e9517421e "$GATEWAY_API_SOURCE/conformance/tests/backendtlspolicy-invalid-ca-certificate-ref.go" \
++    3f6512ad0bbb4eb0836b8da7d273c9207a4e6bc1be96de2782558e37d0693684 "$GATEWAY_API_SOURCE/conformance/tests/backendtlspolicy-invalid-ca-certificate-ref.yaml" \
++    93e545da2af0a65d82c0cb60388e2e0175adf406278de7f27f66f87d2ffab28c "$GATEWAY_API_SOURCE/conformance/tests/backendtlspolicy-conflict-resolution.go" \
++    ad6f210266dac418be158eb5de05194ad5e4dd560b1c85b8a0936e2f76699d76 "$GATEWAY_API_SOURCE/conformance/tests/backendtlspolicy-conflict-resolution.yaml" \
+     "$bundle_sha" "$GATEWAY_API_BUNDLE" \
+     26cdaab124f8fc21f5bd16307fffbfd6f3232cfe09c8a095582b1cf042e08d60 "$case_files.go" \
+     6d965ea34fe0783998e15fbdba3650942b4838760a69af450bd31fce1e172a12 "$case_files.yaml" \
+--- a/backend-tls-upstream/scenario.py
++++ b/backend-tls-upstream/scenario.py
+@@ -37,6 +37,9 @@
+ GATEWAYS = ("same-namespace", "same-namespace-with-https-listener")
+ STEMS = {
+     "BackendTLSPolicy": "backendtlspolicy",
++    "BackendTLSPolicyInvalidKind": "backendtlspolicy-invalid-kind",
++    "BackendTLSPolicyInvalidCACertificateRef": "backendtlspolicy-invalid-ca-certificate-ref",
++    "BackendTLSPolicyConflictResolution": "backendtlspolicy-conflict-resolution",
+     "BackendTLSPolicyObservedGenerationBump": "backendtlspolicy-observed-generation-bump",
+     "BackendTLSPolicyPreserveForeignStatus": "backendtlspolicy-preserve-foreign-status",
+ }
+@@ -309,7 +312,7 @@
+     prefix = "TestLocalBackendTLSCase/" + case
+     events = [line.strip() for line in log.splitlines()
+               if re.match(r"\s*--- (PASS|FAIL|SKIP): " + prefix + r"(?:[/ (]|$)", line)]
+-    expected = {PRIMARY: 5, "BackendTLSPolicyObservedGenerationBump": 1, "BackendTLSPolicyPreserveForeignStatus": 0}
++    expected = {PRIMARY: 5, "BackendTLSPolicyObservedGenerationBump": 1, "BackendTLSPolicyPreserveForeignStatus": 0, "BackendTLSPolicyInvalidKind": 3, "BackendTLSPolicyInvalidCACertificateRef": 8, "BackendTLSPolicyConflictResolution": 13}
+     subtests = sum(event.startswith("--- PASS: " + prefix + "/") for event in events)
+     passed = (run.returncode == 0 and subtests == expected[case]
+               and any(event.startswith("--- PASS: " + prefix + " (") for event in events))
+--- a/backend-tls-upstream/run-kind.sh
++++ b/backend-tls-upstream/run-kind.sh
+@@ -24,7 +24,17 @@
+     rtk proxy rm -rf -- "$private"
+ }
+ trap cleanup EXIT
++config="$here/kind.yaml"
++if [[ ${KIND_ETCD_TMPFS:-0} == 1 ]]; then
++    config="$private/kind.yaml"
++    rtk proxy mkdir -m 0700 "$private/etcd"
++    rtk proxy cp "$here/kind.yaml" "$config"
++    rtk proxy printf '  extraMounts:\n  - hostPath: %s\n    containerPath: /var/lib/etcd\n' "$private/etcd" >> "$config"
++fi
+ rtk proxy systemd-run --user --scope --quiet -p Delegate=yes rtk proxy "$KIND_BINARY" create cluster \
+-    --name "$name" --image "$node" --config "$here/kind.yaml" --kubeconfig "$LOCAL_KIND_ADMIN_CONFIG" --wait 90s
++    --name "$name" --image "$node" --config "$config" --kubeconfig "$LOCAL_KIND_ADMIN_CONFIG" --wait 90s
++if [[ ${KIND_ETCD_TMPFS:-0} == 1 ]]; then
++    test "$(rtk proxy "$KIND_PROVIDER" exec "$name-control-plane" stat -f -c %T /var/lib/etcd)" = tmpfs
++fi
+ rtk proxy "$KIND_PROVIDER" exec -i "$name-control-plane" ctr -n k8s.io images import --digests - < "$KIND_ECHO_ARCHIVE"
+ rtk proxy bash "$here/run.sh" "$1" "$2"
