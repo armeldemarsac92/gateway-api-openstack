@@ -992,7 +992,8 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 		for _, policy := range actual.policies {
 			if policy.role == wantedPolicy.role && !policy.policy.AdminStateUp {
 				return []routeMutation{{kind: routeMutationEnablePolicy, id: policy.policy.ID,
-					policy:                   desiredPolicy{httpsListenerHostname: wantedPolicy.httpsListenerHostname},
+					policy: desiredPolicy{httpsListenerHostname: wantedPolicy.httpsListenerHostname,
+						grpcContentTypeRule: wantedPolicy.grpcContentTypeRule},
 					requestHeaderOperations:  wantedPolicy.requestHeaderOperations,
 					responseHeaderOperations: wantedPolicy.responseHeaderOperations,
 					requiresExactHeaders:     len(wantedPolicy.headers) != 0, requiresHTTPMethod: wantedPolicy.method != ""}}, state, nil
@@ -1092,9 +1093,11 @@ func buildRoutePolicyPlan(
 		for _, rule := range observedPolicy.rules {
 			actualRules[rule.role] = rule
 		}
+		grpcContentTypeChanged := false
 		for _, wantedRule := range wantedRules {
 			observedRule, exists := actualRules[wantedRule.role]
 			if !exists {
+				grpcContentTypeChanged = grpcContentTypeChanged || wantedRule.ruleType == wantedPolicy.grpcContentTypeRule
 				plan = append(plan, routeMutation{kind: routeMutationCreateRule, parentID: policy.ID, rule: wantedRule})
 				continue
 			}
@@ -1107,7 +1110,8 @@ func buildRoutePolicyPlan(
 				continue
 			}
 			if rule.RuleType != string(wantedRule.ruleType) || rule.CompareType != string(wantedRule.compareType) ||
-				wantedRule.key != "" && rule.Key != wantedRule.key || rule.Value != wantedRule.value || rule.Invert != wantedRule.invert || !rule.AdminStateUp || rule.ProvisioningStatus == "ERROR" {
+				!wantedRule.matchesKey(rule.Key) || rule.Value != wantedRule.value || rule.Invert != wantedRule.invert || !rule.AdminStateUp || rule.ProvisioningStatus == "ERROR" {
+				grpcContentTypeChanged = grpcContentTypeChanged || wantedRule.ruleType == wantedPolicy.grpcContentTypeRule
 				plan = append(plan, routeMutation{kind: routeMutationUpdateRule, id: rule.ID, parentID: policy.ID, rule: wantedRule})
 			}
 			delete(actualRules, wantedRule.role)
@@ -1122,9 +1126,10 @@ func buildRoutePolicyPlan(
 		}
 		// A failed policy update can leave Octavia's desired admin state in
 		// the database even while Amphora still uses an earlier configuration.
-		if policy.ProvisioningStatus == "ERROR" && !targetUpdate && !headersUpdate || len(plan) > start && policy.AdminStateUp {
+		if policy.ProvisioningStatus == "ERROR" && (grpcContentTypeChanged || !targetUpdate && !headersUpdate) || len(plan) > start && policy.AdminStateUp {
+			withdraw := desired.redirect || grpcContentTypeChanged
 			disablePlan = append(disablePlan, routeMutation{kind: routeMutationDisablePolicy, id: policy.ID,
-				retry: desired.redirect && policy.ProvisioningStatus == "ERROR", withdrawHTTPPolicy: desired.redirect})
+				retry: withdraw && policy.ProvisioningStatus == "ERROR", withdrawHTTPPolicy: withdraw})
 		}
 		// Moving a policy changes precedence only. Keep its current admin state
 		// and predicates and let Octavia shift the other positions atomically.
@@ -1368,8 +1373,10 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 			Tags:         tags,
 		})
 	case routeMutationUpdateRule:
+		// Octavia clears the inherited key when it receives GRPC_CONTENT_TYPE
+		// without a key. Converting back to HEADER needs the key explicitly.
 		var key *string
-		if step.rule.ruleType == httpHeaderExactRuleType {
+		if step.rule.key != "" {
 			key = &step.rule.key
 		}
 		_, err = p.octavia.UpdateRule(ctx, step.parentID, step.id, l7policies.UpdateRuleOpts{
