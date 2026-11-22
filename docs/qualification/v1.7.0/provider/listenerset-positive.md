@@ -18,6 +18,12 @@ On `afcc7cdc9074119984058aa03949684ad4abca25`, all seven upstream status cases p
 
 The local parent lifecycle also passed on both channels at that revision. It covers parent deletion and replacement, and toggles a Namespace label between allowed and denied values. Each change updates the HTTPRoute's acceptance and the ListenerSet's attached route count. The original `ListenerSetAllowedNamespaceSame` and `ListenerSetAllowedNamespaceSelector` cases also passed on Kind with both channels and both Kind controller revisions. These two cases assert status and issue zero HTTP requests. [Earlier rejection evidence](listenerset-rejection.md)
 
+## Route status for an explicit parent
+
+On controller `ce33dd73a1023f87e61756714f2b288aed1991ba`, `ListenerSetRouteStatusScopedToParentRef` passed on both Standard and Experimental. The Gateway-parented HTTPRoute reported exactly one accepted Gateway parent. The ListenerSet-parented HTTPRoute reported exactly one accepted ListenerSet parent. The upstream case also checked the Gateway's attached ListenerSet count and the ListenerSet's status. It sends no traffic. [Upstream assertions](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/listenerset-route-status-scoped-to-parentref.go) · [Per-channel receipts](listenerset-positive-results.json)
+
+Both runs used the controller's reconcilers, a Kubernetes 1.36.2 envtest API server and a recording OpenStack provider. With the envtest prerequisites set for the selected bundle, run `go test -tags envtest -count=1 -run 'TestControllerEnvtest/upstream_Gateway_status_cases/ListenerSet_admission/ListenerSetRouteStatusScopedToParentRef' ./internal/controller`.
+
 ## HTTP routing on cold Kind
 
 The original `ListenerSetHTTPRouting` checks 36 combinations of hostname, path and Gateway or ListenerSet parent reference. Each channel started a fresh Kind cluster in an isolated KVM guest. The test used the upstream echo Pods and the local Octavia REST, Amphora and HAProxy fixture.
