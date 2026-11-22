@@ -135,6 +135,47 @@ func TestGRPCRequestHeaderModifierFollowsItsMethod(t *testing.T) {
 	}
 }
 
+func TestGRPCDefaultAndServiceRulesUseMethodPrecedence(t *testing.T) {
+	cfg := testConfig()
+	cfg.BackendH2C, cfg.FixedHTTPResponses = true, true
+	_, gateway := providerRouteParentObjects(cfg)
+	route := &gatewayv1.GRPCRoute{ObjectMeta: metav1.ObjectMeta{Namespace: gateway.Namespace, Name: "echo", UID: "grpc"}}
+	route.Spec.ParentRefs = []gatewayv1.ParentReference{{Name: gatewayv1.ObjectName(gateway.Name)}}
+	service := ptr.To("example.Echo")
+	route.Spec.Rules = []gatewayv1.GRPCRouteRule{
+		grpcRule("v1"),
+		grpcRule("v2", gatewayv1.GRPCRouteMatch{Method: &gatewayv1.GRPCMethodMatch{Service: service}}),
+		grpcRule("v1", gatewayv1.GRPCRouteMatch{Method: &gatewayv1.GRPCMethodMatch{Service: service, Method: ptr.To("Echo")}}),
+		grpcRule("v2", gatewayv1.GRPCRouteMatch{}),
+	}
+	v1, ep1, node := validNodePortBackend(gateway.Namespace, "v1")
+	v2, ep2, _ := validNodePortBackend(gateway.Namespace, "v2")
+	v1.Spec.Ports[0].AppProtocol = ptr.To("kubernetes.io/h2c")
+	v2.Spec.Ports[0].AppProtocol = ptr.To("kubernetes.io/h2c")
+	reader := indexedFakeClientBuilder(testScheme(t), cfg).WithObjects(v1, ep1, v2, ep2, node).Build()
+	desired, err := (&Reconciler{Config: cfg}).buildRouteModelWithReader(t.Context(), reader, model.ProjectGRPCRoute(route), gateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make(map[string][]cloud.HTTPPathMatch)
+	for _, backend := range desired.HTTPBackends {
+		got[backend.Name] = backend.Matches
+	}
+	want := map[string][]cloud.HTTPPathMatch{
+		"v1": {
+			{PathType: cloud.PathMatchExact, PathValue: "/example.Echo/Echo", Precedence: 0},
+			{PathType: cloud.PathMatchPrefix, PathValue: "/", Precedence: 2},
+		},
+		"v2": {
+			{PathType: cloud.PathMatchPrefix, PathValue: "/example.Echo", Precedence: 1},
+			{PathType: cloud.PathMatchPrefix, PathValue: "/", Precedence: 3},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("gRPC matches by backend = %#v, want %#v", got, want)
+	}
+}
+
 func TestGRPCExactHeadersRejectDisabledCapabilityAndUnsupportedMatches(t *testing.T) {
 	exact := gatewayv1.GRPCHeaderMatch{Name: "version", Value: "two"}
 	for _, test := range []struct {
@@ -145,8 +186,8 @@ func TestGRPCExactHeadersRejectDisabledCapabilityAndUnsupportedMatches(t *testin
 	}{
 		{name: "opt-in disabled", match: gatewayv1.GRPCRouteMatch{Headers: []gatewayv1.GRPCHeaderMatch{exact}}, message: "--octavia-http-header-exact"},
 		{name: "regex", enrolled: true, match: gatewayv1.GRPCRouteMatch{Headers: []gatewayv1.GRPCHeaderMatch{{Type: ptr.To(gatewayv1.GRPCHeaderMatchRegularExpression), Name: "version", Value: "t.*"}}}, message: "RegularExpression"},
-		{name: "partial method", enrolled: true, match: gatewayv1.GRPCRouteMatch{Method: &gatewayv1.GRPCMethodMatch{Service: ptr.To("example.Echo")}, Headers: []gatewayv1.GRPCHeaderMatch{exact}}, message: "exact service and method"},
-		{name: "catch-all", enrolled: true, message: "exact service and method"},
+		{name: "method without a service", enrolled: true, match: gatewayv1.GRPCRouteMatch{Method: &gatewayv1.GRPCMethodMatch{Method: ptr.To("Echo")}, Headers: []gatewayv1.GRPCHeaderMatch{exact}}, message: "exact service"},
+		{name: "empty method object", enrolled: true, match: gatewayv1.GRPCRouteMatch{Method: &gatewayv1.GRPCMethodMatch{}}, message: "exact service"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			cfg := testConfig()

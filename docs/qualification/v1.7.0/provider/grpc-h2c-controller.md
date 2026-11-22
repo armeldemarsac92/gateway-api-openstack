@@ -26,8 +26,11 @@ Other pools on the Gateway can continue to reconcile.
 
 Enable `--octavia-fixed-http-responses` alongside `--octavia-backend-h2c`.
 The HTTP listener uses the enrolled fixed HTTP 404 fallback for unmatched
-paths. gRPC clients map that response to `UNIMPLEMENTED`. Each rule specifies
-the exact service and method and one Service backend. A rule can have a unique
+paths. gRPC clients map that response to `UNIMPLEMENTED`. A rule can select one
+method of a named gRPC service, all methods of that service, or all calls on its
+attached hostnames. Within a hostname, a matching exact method takes precedence
+over a service-wide match, then the default. Each rule selects one Service
+backend. A rule can have a unique
 name. Rule names do not change matching or precedence. The selected TCP port
 must declare `appProtocol: kubernetes.io/h2c`. GRPCRoute pools use TCP health
 checks with the GatewayClass timing and retry settings. Status and finalizers are

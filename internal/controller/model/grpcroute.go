@@ -55,7 +55,7 @@ func ProjectGRPCRoute(route *gatewayv1.GRPCRoute) *gatewayv1.HTTPRoute {
 	}
 	rules := make([]gatewayv1.HTTPRouteRule, 0, len(route.Spec.Rules))
 	for _, rule := range route.Spec.Rules {
-		if len(rule.Matches) == 0 || len(rule.BackendRefs) != 1 ||
+		if len(rule.BackendRefs) != 1 ||
 			rule.SessionPersistence != nil { //nolint:staticcheck // Still served in the experimental bundle.
 			return projected
 		}
@@ -92,12 +92,19 @@ func projectGRPCMatch(match gatewayv1.GRPCRouteMatch) (gatewayv1.HTTPRouteMatch,
 	var projected gatewayv1.HTTPRouteMatch
 	if method := match.Method; method != nil {
 		if ptr.Deref(method.Type, gatewayv1.GRPCMethodMatchExact) != gatewayv1.GRPCMethodMatchExact ||
-			method.Service == nil || method.Method == nil || !grpcServiceName.MatchString(*method.Service) || !grpcMethodName.MatchString(*method.Method) {
+			method.Service == nil || !grpcServiceName.MatchString(*method.Service) {
 			return projected, false
 		}
-		projected.Path = &gatewayv1.HTTPPathMatch{Type: ptr.To(gatewayv1.PathMatchExact), Value: ptr.To("/" + *method.Service + "/" + *method.Method)}
-	} else if len(match.Headers) == 0 {
-		return projected, false
+		path := "/" + *method.Service
+		pathType := gatewayv1.PathMatchPathPrefix
+		if method.Method != nil {
+			if !grpcMethodName.MatchString(*method.Method) {
+				return projected, false
+			}
+			path += "/" + *method.Method
+			pathType = gatewayv1.PathMatchExact
+		}
+		projected.Path = &gatewayv1.HTTPPathMatch{Type: &pathType, Value: &path}
 	}
 	for _, header := range match.Headers {
 		// The HTTP normalizer applies the same first-entry and exact-match rules.
