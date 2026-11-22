@@ -17,6 +17,7 @@ limitations under the License.
 package graph
 
 import (
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
@@ -49,6 +50,15 @@ func TestPlainHTTPListenerIsolationReservesHostnamesBeforeRouteMatching(t *testi
 	exact.Spec.Identity.RouteName, exact.Spec.Identity.RouteUID = "exact", "exact"
 	exact.Spec.HTTPListenerHostname, exact.Spec.Hostname = "foo.bar.com", "foo.bar.com"
 	exact.Spec.PathValue = "/exact"
+	wildcard.Spec.HTTPBackends = []cloud.HTTPBackend{{
+		Namespace: "default", Name: "wildcard", Port: 80, Members: wildcard.Spec.Members,
+		Matches: []cloud.HTTPPathMatch{
+			{HTTPListenerHostname: "*.bar.com", Hostname: "*.bar.com", PathType: cloud.PathMatchExact, PathValue: "/wildcard"},
+			{HTTPListenerHostname: "*.bar.com", Hostname: "*.bar.com", PathType: cloud.PathMatchExact, PathValue: "/second", Precedence: 2},
+		},
+	}}
+	wildcard.Spec.Hostname, wildcard.Spec.PathType, wildcard.Spec.PathValue = "", "", ""
+	wildcard.Spec.Members = nil
 	redirect := redirectGraphSpec(t).Routes[0]
 	redirect.Spec.Identity.RouteName, redirect.Spec.Identity.RouteUID = "redirect", "redirect"
 	redirect.Spec.HTTPRedirects[0].Matches = []cloud.HTTPPathMatch{{
@@ -105,6 +115,8 @@ func TestPlainHTTPListenerIsolationReservesHostnamesBeforeRouteMatching(t *testi
 	probe("deep.foo.bar.com", "/nested", "nested")
 	probe("deep.foo.bar.com", "/wildcard", "")
 	probe("deep.sub.bar.com", "/wildcard", "wildcard")
+	probe("deep.sub.bar.com", "/second", "wildcard")
+	probe("foo.bar.com", "/second", "")
 	probe("deep.sub.bar.com", "/wrong-path", "")
 	probe("bar.com", "/", fallback.Spec.Identity.RouteName)
 	probe("foo.bar.com", "/move", "")
@@ -174,4 +186,97 @@ func TestPlainHTTPListenerIsolationClosesFrontendBeforeChangingRules(t *testing.
 	if plan := provider.protectPlainHTTPIsolation(prev, actual, enable, &result); len(plan) != 1 || plan[0].kind != graphDisableListener {
 		t.Fatalf("removing the listener must reconcile the obsolete exclusion, plan %#v", plan)
 	}
+}
+
+func TestPlainHTTPRedirectPathChangeWithdrawsOnlyItsObsoletePolicy(t *testing.T) {
+	provider := &Provider{projectID: "project-a"}
+	spec := redirectGraphSpec(t)
+	port := spec.Gateway.Spec.ListenerPort
+	spec.Gateway.Spec.HTTPListenerHostnames = map[int][]string{port: {"*.example.test", "exact.example.test"}}
+	match := &spec.Routes[0].Spec.HTTPRedirects[0].Matches[0]
+	match.HTTPListenerHostname = "*.example.test"
+	match.PathType = cloud.PathMatchExact
+	before, err := provider.buildDesiredGatewayGraph(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := before.routes[0].httpParts[0]
+	wanted := original.policies[0]
+	frontend := &listeners.Listener{ID: "listener", Protocol: cloud.ListenerProtocolHTTP, ProtocolPort: port,
+		ProvisioningStatus: "ACTIVE", AdminStateUp: true}
+	observation := observedRoutePolicy{
+		role: wanted.role, adminObserved: true, redirect: true, versioned: true,
+		policy: l7policies.L7Policy{ID: "obsolete", ListenerID: frontend.ID, Position: 1, AdminStateUp: true,
+			ProvisioningStatus: "ACTIVE", Action: string(l7policies.ActionRedirectPrefix),
+			RedirectPrefix: wanted.redirect.prefix, RedirectHttpCode: wanted.redirect.statusCode},
+	}
+	for _, rule := range rulesFor(wanted, "") {
+		observation.rules = append(observation.rules, observedPolicyRule(rule))
+	}
+	actual := observedGatewayGraph{
+		protocol: cloud.ListenerProtocolHTTP, listener: frontend, loadBalancer: &octavia.LoadBalancer{},
+		adminObserved: map[string]bool{frontend.ID: true},
+		routes: []observedRouteGraph{{httpParts: map[string]*observedRouteGraph{
+			original.backendKey: {policies: []observedRoutePolicy{observation}},
+		}}},
+	}
+	match.PathValue = "/new"
+	after, err := provider.buildDesiredGatewayGraph(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, _, err := provider.buildGatewayGraphPlan(after, actual)
+	if err != nil || len(plan) != 1 || plan[0].kind != graphRouteMutation || plan[0].route.kind != routeMutationDisablePolicy ||
+		plan[0].route.id != observation.policy.ID || !plan[0].withdrawHTTPPolicy {
+		t.Fatalf("route-only edit must withdraw its obsolete redirect, plan %#v, error %v", plan, err)
+	}
+}
+
+func TestPlainHTTPHostnameReplacementAtOctaviaRuleLimit(t *testing.T) {
+	wanted := desiredPolicy{role: rolePolicyExact, position: 1, path: "/path", compareType: l7policies.CompareTypeEqual}
+	for i := 1; i < maxOctaviaL7RulesPerPolicy; i++ {
+		wanted.httpHostExclusions = append(wanted.httpHostExclusions, redirectGuard{
+			l7policies.TypeHostName, l7policies.CompareTypeRegex, fmt.Sprintf("^host-%d[.]example[.]test$", i),
+		})
+	}
+	desired := desiredRoute{policies: []desiredPolicy{wanted}}
+	observation := observedRoutePolicy{
+		role: wanted.role, adminObserved: true,
+		policy: l7policies.L7Policy{ID: "policy", Position: 1, AdminStateUp: true, ProvisioningStatus: "ACTIVE",
+			Action: string(l7policies.ActionRedirectToPool), RedirectPoolID: "pool"},
+	}
+	for _, rule := range rulesFor(wanted, "") {
+		observation.rules = append(observation.rules, observedPolicyRule(rule))
+	}
+	last := &observation.rules[len(observation.rules)-1]
+	last.role, last.rule.ID, last.rule.Value = "obsolete", "obsolete", "^retired[.]example[.]test$"
+
+	plan, disable, _ := buildRoutePolicyPlan(desired, []observedRoutePolicy{observation}, "pool")
+	if len(plan) != 0 || len(disable) != 1 || disable[0].kind != routeMutationDisablePolicy {
+		t.Fatalf("active full policy must be disabled, plan %#v, disables %#v", plan, disable)
+	}
+	observation.policy.AdminStateUp = false
+	observation.policy.ProvisioningStatus = "ERROR"
+	plan, disable, _ = buildRoutePolicyPlan(desired, []observedRoutePolicy{observation}, "pool")
+	if len(plan) != 0 || len(disable) != 1 || !disable[0].retry {
+		t.Fatalf("uncertain disable must be retried, plan %#v, disables %#v", plan, disable)
+	}
+	observation.policy.ProvisioningStatus = "ACTIVE"
+	plan, disable, _ = buildRoutePolicyPlan(desired, []observedRoutePolicy{observation}, "pool")
+	if len(disable) != 0 || len(plan) != 2 || plan[0].kind != routeMutationDeleteRule || plan[0].id != "obsolete" ||
+		plan[1].kind != routeMutationCreateRule {
+		t.Fatalf("disable readback must permit deletion before creation, plan %#v, disables %#v", plan, disable)
+	}
+	observation.rules = observation.rules[:len(observation.rules)-1]
+	plan, _, _ = buildRoutePolicyPlan(desired, []observedRoutePolicy{observation}, "pool")
+	if len(plan) != 1 || plan[0].kind != routeMutationCreateRule || !plan[0].rule.invert {
+		t.Fatalf("once space is observed, retry must create the replacement exclusion, plan %#v", plan)
+	}
+}
+
+func observedPolicyRule(rule desiredRule) observedRouteRule {
+	return observedRouteRule{role: rule.role, flagsObserved: true, rule: l7policies.Rule{
+		RuleType: string(rule.ruleType), CompareType: string(rule.compareType), Value: rule.value,
+		Invert: rule.invert, AdminStateUp: true, ProvisioningStatus: "ACTIVE",
+	}}
 }

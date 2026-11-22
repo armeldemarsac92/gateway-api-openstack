@@ -318,11 +318,23 @@ func (p *Provider) reconcileWeightedWithdrawalWithoutAddress(ctx context.Context
 		return result, err
 	}
 	result.Gateway.Outcome = p.progressingOutcome("Waiting to observe the Gateway Floating IP inventory")
-	if len(plan) != 1 || !plan[0].withdrawHTTPPolicy || plan[0].kind != graphDisableListener &&
-		(plan[0].kind != graphRouteMutation || plan[0].route.kind != routeMutationSetPolicyTarget || plan[0].route.weightedTargets == nil) {
+	if len(plan) != 1 || !plan[0].withdrawHTTPPolicy {
 		return result, actual.addressReadError
 	}
-	step, err := p.prepareGraphMutation(ctx, desired, actual, plan[0])
+	withdrawal := plan[0]
+	switch withdrawal.kind {
+	case graphDisableListener:
+	case graphRouteMutation:
+		weightedTarget := withdrawal.route.kind == routeMutationSetPolicyTarget && withdrawal.route.weightedTargets != nil
+		isolatedPolicy := withdrawal.route.kind == routeMutationDisablePolicy &&
+			(len(desired.spec.Gateway.Spec.HTTPListenerHostnames) != 0 || observedPlainHTTPExclusions(actual.routes))
+		if !weightedTarget && !isolatedPolicy {
+			return result, actual.addressReadError
+		}
+	default:
+		return result, actual.addressReadError
+	}
+	step, err := p.prepareGraphMutation(ctx, desired, actual, withdrawal)
 	if err != nil {
 		return result, err
 	}

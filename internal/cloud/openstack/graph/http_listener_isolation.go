@@ -42,6 +42,8 @@ func validatePlainHTTPMatch(hosts []string, section, hostname string) error {
 	return cloud.NewProviderError(cloud.ErrorCategoryTerminalValidation, errors.New("HTTP match is outside its configured plaintext listener section"))
 }
 
+const maxOctaviaL7RulesPerPolicy = 50
+
 var errPlainHTTPRuleLimit = errors.New("plaintext hostname isolation exceeds the Octavia limit of 50 L7 rules per policy")
 
 func addPlainHTTPExclusions(hosts []string, policy *desiredPolicy, scalarHostname string) error {
@@ -74,11 +76,10 @@ func addPlainHTTPExclusions(hosts []string, policy *desiredPolicy, scalarHostnam
 			l7policies.TypeHostName, l7policies.CompareTypeRegex, value,
 		})
 	}
-	const maxRules = 50 // Octavia MAX_L7RULES_PER_L7POLICY
-	if len(rulesFor(*policy, scalarHostname)) > maxRules {
+	if len(rulesFor(*policy, scalarHostname)) > maxOctaviaL7RulesPerPolicy {
 		policy.httpHostExclusions = compactRedirectGuards(policy.httpHostExclusions)
 	}
-	if len(rulesFor(*policy, scalarHostname)) > maxRules {
+	if len(rulesFor(*policy, scalarHostname)) > maxOctaviaL7RulesPerPolicy {
 		return fmt.Errorf("%w on section %q", errPlainHTTPRuleLimit, section)
 	}
 	return nil
@@ -124,9 +125,8 @@ func observedPlainHTTPExclusions(routes []observedRouteGraph) bool {
 	})
 }
 
-// Close the port before changing a serving policy's hostname predicates. A
-// disabled, ACTIVE policy can be staged normally. Close also when retiring an
-// old section, before restoring its hostnames to a broader section.
+// Changing hostname predicates in place requires a closed port. Withdraw an
+// obsolete policy by itself before restoring any traffic it used to match.
 func (p *Provider) protectPlainHTTPIsolation(desired desiredGatewayGraph, actual observedGatewayGraph, plan []graphMutation, result *cloud.GatewayGraphResult) []graphMutation {
 	if desired.protocol != cloud.ListenerProtocolHTTP || desired.spec.Gateway.Disposition != cloud.GraphEnsure {
 		return plan
@@ -156,6 +156,8 @@ func (p *Provider) protectPlainHTTPIsolation(desired desiredGatewayGraph, actual
 		parts, observed, owners = httpPlanningParts(desired, actual)
 	}
 	blocked := make(map[string]bool)
+	var obsoletePolicy *graphMutation
+	var pendingObsoletePolicy bool
 	for port, issue := range desired.plainHTTPRuleLimits {
 		state := guardedHTTPListener{routes: make(map[int]bool)}
 		for i, route := range desired.routes {
@@ -185,13 +187,23 @@ func (p *Provider) protectPlainHTTPIsolation(desired desiredGatewayGraph, actual
 				if policy.policy.ListenerID != frontend.ID || observedPolicyDisabled(policy) {
 					continue
 				}
-				if parts.spec.Routes[i].Disposition == cloud.GraphEnsure && port == frontend.ProtocolPort &&
-					slices.ContainsFunc(wanted.policies, func(expected desiredPolicy) bool {
-						return expected.role == policy.role && plainHTTPHostRulesMatch(expected, wanted.hostnameRuleValue, policy)
-					}) {
+				atTarget := parts.spec.Routes[i].Disposition == cloud.GraphEnsure && port == frontend.ProtocolPort
+				match := slices.IndexFunc(wanted.policies, func(expected desiredPolicy) bool { return expected.role == policy.role })
+				if !atTarget || match < 0 {
+					// Policy identity also changes with a route's path. Closing just
+					// the obsolete policy leaves the other sections available.
+					if policy.pending() {
+						pendingObsoletePolicy = true
+					} else if obsoletePolicy == nil {
+						step := routeMutation{kind: routeMutationDisablePolicy, id: policy.policy.ID, retry: policy.policy.ProvisioningStatus == "ERROR"}
+						obsoletePolicy = &graphMutation{kind: graphRouteMutation, routeIndex: owners[i], backendKey: wanted.backendKey,
+							listenerID: frontend.ID, route: step, withdrawHTTPPolicy: true, message: step.message()}
+					}
 					continue
 				}
-				state.routes[owners[i]] = true
+				if !plainHTTPHostRulesMatch(wanted.policies[match], wanted.hostnameRuleValue, policy) {
+					state.routes[owners[i]] = true
+				}
 			}
 		}
 		reason := desired.plainHTTPRuleLimits[frontend.ProtocolPort]
@@ -211,6 +223,16 @@ func (p *Provider) protectPlainHTTPIsolation(desired desiredGatewayGraph, actual
 			return []graphMutation{closeGuardedHTTPListener(frontend, "Closing the HTTP listener before changing hostname isolation")}
 		}
 		// An uncertain prior close must settle before any policy changes.
+		return nil
+	}
+	if obsoletePolicy != nil {
+		result.Outcome = p.progressingOutcome(obsoletePolicy.message)
+		result.Routes[obsoletePolicy.routeIndex].Result.Outcome = result.Outcome
+		result.Routes[obsoletePolicy.routeIndex].Result.ObservationDeferred = false
+		return []graphMutation{*obsoletePolicy}
+	}
+	if pendingObsoletePolicy {
+		result.Outcome = p.progressingOutcome("Waiting for obsolete plaintext HTTP policy readback")
 		return nil
 	}
 	return slices.DeleteFunc(plan, func(step graphMutation) bool {

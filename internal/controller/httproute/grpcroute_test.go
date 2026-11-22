@@ -124,7 +124,7 @@ func TestHTTPAndGRPCConflictOnSecondHTTPHostname(t *testing.T) {
 	grpc.Spec.Hostnames = []gatewayv1.Hostname{"svc.shared.test"}
 	listener := &gatewayv1.Listener{Protocol: gatewayv1.HTTPProtocolType, Port: 80}
 	candidates := []routeProfileCandidate{{route: http, listeners: []*gatewayv1.Listener{listener}}, {route: grpc, listeners: []*gatewayv1.Listener{listener}}}
-	if conflicts := electRouteProfiles(candidates); !conflicts[routeKey(grpc)] || conflicts[routeKey(http)] {
+	if conflicts := electRouteProfiles(candidates); len(conflicts[routeKey(grpc)]) != 1 || len(conflicts[routeKey(http)]) != 0 {
 		t.Fatalf("the older HTTPRoute must own every declared hostname: %v", conflicts)
 	}
 	grpc.Spec.Hostnames = []gatewayv1.Hostname{"shared.test"}

@@ -142,13 +142,17 @@ func (r *Reconciler) buildRouteValidationSnapshotFromInputs(
 			return routeValidationSnapshot{}, err
 		}
 	}
-	if inputs.admission.conflicts[routeKey(snapshot.route)] {
+	key := routeKey(snapshot.route)
+	if inputs.admission.profileRejectedParent(key) {
 		return routeValidationSnapshot{}, routeSnapshotRejection(purpose, routeProfileConflict())
 	}
 	listeners, err := r.selectRouteAttachments(snapshot.route, snapshot.gateway, candidates, inputs.input.Namespaces)
 	if err != nil {
 		return routeValidationSnapshot{}, routeSnapshotRejection(purpose, err)
 	}
+	listeners = slices.DeleteFunc(listeners, func(listener *gatewayv1.Listener) bool {
+		return slices.Contains(inputs.admission.rejectedSections[key], listener.Name)
+	})
 	if controller.GatewayListenerScope(r.Config, snapshot.gateway) == gatewayv1.HTTPProtocolType {
 		snapshot.gatewayProgrammed = !slices.ContainsFunc(listeners, func(listener *gatewayv1.Listener) bool {
 			return !listenerProgrammedForGeneration(snapshot.gateway, listener.Name)
@@ -563,7 +567,7 @@ func (r *Reconciler) buildRouteCleanupSnapshot(
 		if err != nil {
 			return routeCleanupSnapshot{}, err
 		}
-		if admission.conflicts[routeKey(&route)] {
+		if admission.profileRejectedParent(routeKey(&route)) {
 			return snapshot, nil
 		}
 	}
