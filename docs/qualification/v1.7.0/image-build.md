@@ -1,11 +1,11 @@
 # Reproduce the Hibiscus development image
 
-The archived Linux amd64 manager ran the seven original HTTP redirect cases on both CRD channels. Six passed on each channel. The combined port-and-scheme case timed out before its four HTTPS sections were programmed. [Build record](image.json) · [Per-case results](provider/http-request-redirect.md#registered-cases)
+The ordinary and no-cache builds of the Linux amd64 controller produced the same OCI manifest. The executable from the archived image ran the Gateway address assignment lifecycle against Kubernetes on each CRD channel. [Build record](image.json) · [Experimental transitions and Standard pruning](provider/private-gateway-address.md#experimental-address-routability)
 
 On a linux/amd64 host, use a separate checkout of the recorded revision. The Dockerfile pins the Go 1.27.4 builder and distroless base by digest. Podman uses a fixed timestamp, and the build writes the full commit into the binary and the OCI revision label. The verification command exports gzip-compressed layers.
 
 ```sh
-revision=069b0de0ed941587f44a2664acfedf50b3459aa3
+revision=a3d84b12b57d610b14fc8c08c5c85710355c1251
 test "$(git rev-parse HEAD)" = "$revision"
 image="localhost/hibiscus-controller:$revision"
 make container-build CONTAINER_TOOL=podman VERSION="$revision" IMAGE="$image"
