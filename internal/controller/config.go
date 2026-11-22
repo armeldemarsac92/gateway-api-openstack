@@ -237,6 +237,13 @@ func (c Config) RouteCleanupFailureAnnotation() string {
 	return c.Domain() + "/httproute-cleanup-failure-" + c.controllerKey()
 }
 
+// RouteGatewayCleanupFailureAnnotation scopes a multi-parent route's cleanup
+// diagnostic to one immutable Gateway UID.
+func (c Config) RouteGatewayCleanupFailureAnnotation(gatewayUID string) string {
+	digest := sha256.Sum256([]byte(gatewayUID))
+	return fmt.Sprintf("%s-%x", c.RouteCleanupFailureAnnotation(), digest[:12])
+}
+
 func (c Config) controllerKey() string {
 	digest := sha256.Sum256([]byte(c.ControllerName))
 	return fmt.Sprintf("%x", digest[:6])

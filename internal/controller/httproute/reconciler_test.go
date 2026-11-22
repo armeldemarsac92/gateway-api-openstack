@@ -1418,7 +1418,9 @@ func TestEnsureRouteGraphRejectsUnsafeBindingTransition(t *testing.T) {
 				oldGateway := programmedTestGateway(cfg)
 				oldGateway.Name = "old-edge"
 				oldGateway.UID = "old-gateway-uid"
-				reconciler.applyRouteBinding(route, oldGateway)
+				if err := reconciler.applyRouteBinding(route, oldGateway); err != nil {
+					t.Fatal(err)
+				}
 			},
 			wantChanged: true,
 		},

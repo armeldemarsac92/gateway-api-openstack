@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"k8s.io/apimachinery/pkg/types"
@@ -94,7 +95,7 @@ func (r *Reconciler) detachGatewayBinding(ctx context.Context, route, current *g
 		return ctrl.Result{}, fmt.Errorf("validate detached HTTPRoute deletion outcome: %w", err)
 	}
 	if outcome.State == cloud.OutcomeProgressing {
-		if err := r.clearRouteCleanupFailure(ctx, current); err != nil {
+		if _, err := r.patchRouteCleanupFailure(ctx, current, stored, ""); err != nil {
 			return ctrl.Result{}, fmt.Errorf("clear HTTPRoute cleanup failure checkpoint: %w", err)
 		}
 		*route = *current
@@ -144,22 +145,10 @@ func (r *Reconciler) finalizeRoute(ctx context.Context, scope *httpRouteScope) (
 	return result, cleanupErrors
 }
 
-func (r *Reconciler) setRouteCleanupFailure(
-	ctx context.Context,
-	route *gatewayv1.HTTPRoute,
-	reason string,
-) (bool, error) {
-	return r.patchRouteCleanupFailure(ctx, route, reason)
-}
-
-func (r *Reconciler) clearRouteCleanupFailure(ctx context.Context, route *gatewayv1.HTTPRoute) error {
-	_, err := r.patchRouteCleanupFailure(ctx, route, "")
-	return err
-}
-
 func (r *Reconciler) patchRouteCleanupFailure(
 	ctx context.Context,
 	route *gatewayv1.HTTPRoute,
+	identity cloud.Identity,
 	reason string,
 ) (bool, error) {
 	routeKey := client.ObjectKeyFromObject(route)
@@ -174,7 +163,23 @@ func (r *Reconciler) patchRouteCleanupFailure(
 		if !sameHTTPRouteRevision(current, routeUID, generation, isDeleting) {
 			return errHTTPRouteChanged
 		}
+		bindings, err := controller.StoredRouteGatewayBindings(r.Config, current)
+		if err != nil {
+			return err
+		}
+		target := identity
+		if target.RouteUID == "" && len(bindings) == 1 {
+			target = bindings[0].Identity
+		}
+		if !slices.ContainsFunc(bindings, func(binding controller.RouteGatewayBinding) bool {
+			return binding.Identity == target
+		}) {
+			return errHTTPRouteChanged
+		}
 		key := r.Config.RouteCleanupFailureAnnotation()
+		if controller.HasRouteGatewayBindings(r.Config, current) {
+			key = r.Config.RouteGatewayCleanupFailureAnnotation(target.GatewayUID)
+		}
 		if current.Annotations[key] == reason {
 			*route = *current
 			return nil

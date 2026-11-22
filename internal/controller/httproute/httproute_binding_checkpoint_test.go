@@ -165,7 +165,9 @@ func TestPendingGatewayCannotCompleteRouteBindingWithoutCurrentOwnership(t *test
 			if test.previousUID {
 				boundGateway.UID = "previous-gateway-uid"
 			}
-			r.applyRouteBinding(route, boundGateway)
+			if err := r.applyRouteBinding(route, boundGateway); err != nil {
+				t.Fatal(err)
+			}
 			delete(route.Annotations, cfg.RouteProjectIDAnnotation())
 			if !test.keepFinalizers {
 				route.Finalizers = nil

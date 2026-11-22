@@ -414,3 +414,99 @@ func TestHTTPAndGRPCRouteMultipleGatewayLifecycle(t *testing.T) {
 		})
 	}
 }
+
+func TestReplacementGatewayWaitsForCleanupOfPreviousUID(t *testing.T) {
+	cfg := testConfig()
+	class, previous, route, service, endpoints := endpointRouteFixture(t)
+	replacement := previous.DeepCopy()
+	replacement.UID = "replacement-uid"
+	sibling := previous.DeepCopy()
+	sibling.Name, sibling.UID = "sibling", "sibling-uid"
+	replacedRef := route.Spec.ParentRefs[0]
+	siblingRef := gatewayv1.ParentReference{Name: gatewayv1.ObjectName(sibling.Name)}
+	route.Spec.ParentRefs = append(route.Spec.ParentRefs, siblingRef)
+	plan := &routeStatusPlan{updates: []parentStatusUpdate{
+		{parent: replacedRef, status: programmedRouteStatus()},
+		{parent: siblingRef, status: programmedRouteStatus()},
+	}}
+	plan.apply(cfg, route)
+
+	r := Reconciler{Config: cfg, Coordinator: &graph.Coordinator{}}
+	if err := r.applyRouteBinding(route, previous); err != nil {
+		t.Fatal(err)
+	}
+	legacyKey := cfg.RouteCleanupFailureAnnotation()
+	route.Annotations[legacyKey] = controller.ProviderReasonInvalidConfiguration
+	if err := r.applyRouteBinding(route, sibling); err != nil {
+		t.Fatal(err)
+	}
+	previousKey := cfg.RouteGatewayCleanupFailureAnnotation(string(previous.UID))
+	siblingKey := cfg.RouteGatewayCleanupFailureAnnotation(string(sibling.UID))
+	if route.Annotations[legacyKey] != "" || route.Annotations[previousKey] != controller.ProviderReasonInvalidConfiguration || route.Annotations[siblingKey] != "" {
+		t.Fatalf("legacy diagnostic did not migrate to its original Gateway: %v", route.Annotations)
+	}
+
+	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(route).
+		WithObjects(class, replacement, sibling, route, service, endpoints).Build()
+	r.Client, r.APIReader = kube, kube
+	provider := &recordingProvider{}
+	reconciler := newTestReconciler(r, provider)
+	req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(route)}
+	siblingFailure := controller.ProviderReasonQuotaExceeded
+	if _, err := reconciler.patchRouteCleanupFailure(t.Context(), route, controller.RouteIdentity(cfg, sibling, route), siblingFailure); err != nil {
+		t.Fatal(err)
+	}
+
+	check := func(previousFailure string) {
+		t.Helper()
+		if err := kube.Get(t.Context(), req.NamespacedName, route); err != nil {
+			t.Fatal(err)
+		}
+		if route.Annotations[previousKey] != previousFailure || route.Annotations[siblingKey] != siblingFailure ||
+			route.Annotations[cfg.RouteGatewayCleanupFailureAnnotation(string(replacement.UID))] != "" {
+			t.Fatalf("cleanup diagnostics were changed for the wrong Gateway: %v", route.Annotations)
+		}
+		if len(route.Status.Parents) != 2 {
+			t.Fatalf("expected two parents, got %v", route.Status.Parents)
+		}
+		for _, parent := range route.Status.Parents {
+			programmed := meta.FindStatusCondition(parent.Conditions, cfg.Domain()+"/Programmed")
+			switch parent.ParentRef.Name {
+			case replacedRef.Name:
+				if programmed == nil || programmed.Status != metav1.ConditionFalse || programmed.Reason != "Pending" {
+					t.Fatalf("replacement reported the old Gateway's status: %v", programmed)
+				}
+			case siblingRef.Name:
+				if programmed == nil || programmed.Status != metav1.ConditionTrue {
+					t.Fatalf("unaffected Gateway lost its programmed status: %v", programmed)
+				}
+			default:
+				t.Fatalf("unexpected parent status: %v", parent)
+			}
+		}
+	}
+
+	if _, err := reconciler.Reconcile(t.Context(), req); err != nil {
+		t.Fatal(err)
+	}
+	check("")
+	if len(provider.deletedRoutes) != 0 {
+		t.Fatal("provider cleanup preceded the detaching checkpoint")
+	}
+
+	provider.routeDeleteErr = cloud.NewProviderError(cloud.ErrorCategoryOwnershipConflict, errors.New("previous Gateway cleanup is blocked"))
+	if _, err := reconciler.Reconcile(t.Context(), req); err != nil {
+		t.Fatal(err)
+	}
+	check(controller.ProviderReasonOwnershipConflict)
+
+	provider.routeDeleteErr = nil
+	if _, err := reconciler.Reconcile(t.Context(), req); err != nil {
+		t.Fatal(err)
+	}
+	check("")
+	bindings, err := controller.StoredRouteGatewayBindings(cfg, route)
+	if err != nil || len(bindings) != 1 || bindings[0].Identity.GatewayUID != string(sibling.UID) {
+		t.Fatalf("cleanup should remove only the previous UID, got %v, %v", bindings, err)
+	}
+}

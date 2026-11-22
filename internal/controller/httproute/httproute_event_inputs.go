@@ -61,10 +61,19 @@ func (inputs *nodeEventInputs) hasNodePortParent(ctx context.Context, r *Reconci
 	}
 	parents, err := r.managedParents(ctx, route)
 	observation := nodeEligibilityObservation{err: err}
-	if err == nil && len(parents) == 1 && controller.HasGatewayTopologyBinding(r.Config, parents[0].gateway) {
-		topology, err := controller.StoredGatewayTopology(r.Config, parents[0].gateway)
-		observation.err = err
-		observation.eligible = err == nil && topology.Topology.MemberMode == cloud.MemberModeNodePort
+	for _, parent := range parents {
+		if !controller.HasGatewayTopologyBinding(r.Config, parent.gateway) {
+			continue
+		}
+		topology, err := controller.StoredGatewayTopology(r.Config, parent.gateway)
+		if err != nil {
+			observation.err = err
+			continue
+		}
+		if topology.Topology.MemberMode == cloud.MemberModeNodePort {
+			observation = nodeEligibilityObservation{eligible: true}
+			break
+		}
 	}
 	if key != "" {
 		inputs.parents[key] = observation

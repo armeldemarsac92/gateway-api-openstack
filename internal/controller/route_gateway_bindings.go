@@ -223,7 +223,13 @@ func storeRouteGatewayBindings(config Config, route client.Object, bindings []Ro
 	if err != nil {
 		return err
 	}
-	failure := route.GetAnnotations()[config.RouteCleanupFailureAnnotation()]
+	// Only the singleton format identifies the owner of an unscoped reason.
+	// The multi-parent format keeps one diagnostic per Gateway UID.
+	var legacyFailure, legacyGatewayUID string
+	if !HasRouteGatewayBindings(config, route) {
+		legacyFailure = route.GetAnnotations()[config.RouteCleanupFailureAnnotation()]
+		legacyGatewayUID = route.GetAnnotations()[config.RouteGatewayUIDAnnotation()]
+	}
 	ClearRouteBinding(config, route)
 	delete(route.GetAnnotations(), config.RouteGatewayBindingsAnnotation())
 	if len(bindings) == 0 {
@@ -234,13 +240,13 @@ func storeRouteGatewayBindings(config Config, route client.Object, bindings []Ro
 		annotations = map[string]string{}
 	}
 	annotations[config.RouteGatewayBindingsAnnotation()] = string(contents)
-	if failure != "" {
-		annotations[config.RouteCleanupFailureAnnotation()] = failure
-	}
-	route.SetAnnotations(annotations)
 	for _, binding := range bindings {
 		controllerutil.AddFinalizer(route, routeGatewayBindingFinalizer(config, route, binding))
+		if legacyFailure != "" && binding.Identity.GatewayUID == legacyGatewayUID {
+			annotations[config.RouteGatewayCleanupFailureAnnotation(legacyGatewayUID)] = legacyFailure
+		}
 	}
+	route.SetAnnotations(annotations)
 	controllerutil.AddFinalizer(route, config.RouteFinalizer())
 	return nil
 }
@@ -252,7 +258,11 @@ func RemoveRouteGatewayBinding(config Config, route client.Object, bindings []Ro
 		return nil
 	}
 	bindings = slices.DeleteFunc(bindings, func(binding RouteGatewayBinding) bool { return binding.Identity == identity })
-	return storeRouteGatewayBindings(config, route, bindings)
+	if err := storeRouteGatewayBindings(config, route, bindings); err != nil {
+		return err
+	}
+	delete(route.GetAnnotations(), config.RouteGatewayCleanupFailureAnnotation(identity.GatewayUID))
+	return nil
 }
 
 // SealRouteGatewayAnchor updates only the checkpoint for the enrolling Gateway.

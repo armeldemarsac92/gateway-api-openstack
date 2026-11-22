@@ -56,7 +56,9 @@ func (r *endpointOnlyReader) List(ctx context.Context, list client.ObjectList, o
 func TestEndpointMembershipChangesPreserveAttachedRoute(t *testing.T) {
 	cfg := testConfig()
 	class, gateway, route, service, endpointSlice := endpointRouteFixture(t)
-	(&Reconciler{Config: cfg}).applyRouteBinding(route, gateway)
+	if err := (&Reconciler{Config: cfg}).applyRouteBinding(route, gateway); err != nil {
+		t.Fatal(err)
+	}
 	kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gateway, route).WithObjects(class, gateway, route, service, endpointSlice).Build()
 	reader := &endpointOnlyReader{Client: kubeClient}
 	provider := &recordingProvider{}
@@ -114,7 +116,9 @@ func TestEndpointServiceMutationFence(t *testing.T) {
 		t.Run(change, func(t *testing.T) {
 			cfg := testConfig()
 			class, gateway, route, service, endpointSlice := endpointRouteFixture(t)
-			(&Reconciler{Config: cfg}).applyRouteBinding(route, gateway)
+			if err := (&Reconciler{Config: cfg}).applyRouteBinding(route, gateway); err != nil {
+				t.Fatal(err)
+			}
 			reader := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gateway, route).WithObjects(class, gateway, route, service, endpointSlice).Build()
 			r := &Reconciler{Config: cfg, Client: reader, APIReader: reader}
 			snapshot, err := r.buildRouteValidationSnapshot(t.Context(), route, gateway, routeSnapshotForEnsure)

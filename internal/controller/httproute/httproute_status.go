@@ -74,10 +74,11 @@ func (r *Reconciler) setRouteStatusesAndDetach(
 	}
 	var result ctrl.Result
 	var cleanupErr error
+	var identity cloud.Identity
 	if scope.parentGateway == nil {
 		result, cleanupErr = r.detachRoute(ctx, route)
 	} else {
-		identity := controller.RouteIdentity(r.Config, scope.parentGateway, route)
+		identity = controller.RouteIdentity(r.Config, scope.parentGateway, route)
 		binding, err := controller.StoredRouteGatewayBinding(r.Config, route, identity)
 		if err != nil {
 			return ctrl.Result{}, err
@@ -115,7 +116,7 @@ func (r *Reconciler) setRouteStatusesAndDetach(
 		return ctrl.Result{}, cleanupErr
 	}
 	policy = controller.ProviderCleanupFailurePolicy(policy, "HTTPRoute")
-	diagnosticTransitioned, diagnosticErr := r.setRouteCleanupFailure(ctx, route, policy.Reason)
+	diagnosticTransitioned, diagnosticErr := r.patchRouteCleanupFailure(ctx, route, identity, policy.Reason)
 	providerUpdates := routeProviderFailureUpdates(updates, policy)
 	if len(providerUpdates) == 0 {
 		scope.setStatuses(nil)
@@ -278,10 +279,9 @@ func (r *Reconciler) handleRouteFinalizationFailure(
 	}
 	route := scope.route
 	policy = controller.ProviderCleanupFailurePolicy(policy, "HTTPRoute")
-	diagnosticTransitioned, diagnosticErr := r.setRouteCleanupFailure(ctx, route, policy.Reason)
-	parent, found := parentRefForStoredGateway(route, identity)
-	if found {
-		scope.setDeletingFailureStatus(parent, policy)
+	diagnosticTransitioned, diagnosticErr := r.patchRouteCleanupFailure(ctx, route, identity, policy.Reason)
+	if parent, found := parentRefForStoredGateway(route, identity); found {
+		scope.setDeletingFailureStatus(parent, policy, identity)
 	}
 	if diagnosticErr != nil {
 		return ctrl.Result{}, errors.Join(

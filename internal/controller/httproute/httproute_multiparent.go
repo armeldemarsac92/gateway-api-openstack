@@ -72,16 +72,42 @@ func (r *Reconciler) reconcileRouteParents(ctx context.Context, route *gatewayv1
 		return ctrl.Result{}, err
 	}
 
-	var result ctrl.Result
-	var reconcileErr error
 	detaching := make(map[client.ObjectKey]struct{})
+	replacements := make(map[client.ObjectKey]struct{})
+	var cleanup []cloud.Identity
 	for _, binding := range bindings {
 		identity := binding.Identity
 		key := client.ObjectKey{Namespace: identity.GatewayNamespace, Name: identity.GatewayName}
-		if desired[key] == identity && binding.Lifecycle != controller.RouteDetaching {
+		wanted, found := desired[key]
+		if wanted == identity && binding.Lifecycle != controller.RouteDetaching {
 			continue
 		}
 		detaching[key] = struct{}{}
+		if found && wanted.GatewayUID != identity.GatewayUID {
+			replacements[key] = struct{}{}
+		}
+		cleanup = append(cleanup, identity)
+	}
+
+	for _, group := range groups {
+		if _, replacing := replacements[client.ObjectKeyFromObject(group.gateway)]; !replacing {
+			continue
+		}
+		scope := &httpRouteScope{route: route, parentGateway: group.gateway}
+		status := pendingRouteStatus("OpenStack resources for the previous Gateway are being removed")
+		updates := make([]parentStatusUpdate, 0, len(group.parents))
+		for _, parent := range group.parents {
+			updates = append(updates, parentStatusUpdate{parent: parent.ref, status: status})
+		}
+		scope.setStatuses(updates)
+		if err := r.patchHTTPRoute(ctx, scope); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	var result ctrl.Result
+	var reconcileErr error
+	for _, identity := range cleanup {
 		progress, err := r.detachGatewayBinding(ctx, route, route.DeepCopy(), identity)
 		if err != nil {
 			scope := &httpRouteScope{route: route}
