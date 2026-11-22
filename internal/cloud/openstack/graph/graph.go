@@ -194,7 +194,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 			}
 			return p.reconcileSNIWithdrawalWithoutAddress(ctx, desired, actual)
 		}
-		return p.reconcileWeightedWithdrawalWithoutAddress(ctx, desired, actual)
+		return p.reconcileHTTPWithdrawalWithoutAddress(ctx, desired, actual)
 	}
 	if spec.Gateway.Disposition == cloud.GraphWithdrawTLS {
 		return cloud.GatewayGraphResult{Gateway: cloud.GatewayResult{State: actual.state, Outcome: actual.outcome}, Outcome: actual.outcome}, nil
@@ -308,7 +308,7 @@ func (p *Provider) recordGraphMutationOutcome(result *cloud.GatewayGraphResult, 
 	}
 }
 
-func (p *Provider) reconcileWeightedWithdrawalWithoutAddress(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph) (cloud.GatewayGraphResult, error) {
+func (p *Provider) reconcileHTTPWithdrawalWithoutAddress(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph) (cloud.GatewayGraphResult, error) {
 	if actual.loadBalancer == nil || actual.loadBalancer.ProvisioningStatus != "ACTIVE" || actual.outcome.State != cloud.OutcomeReady ||
 		len(actual.routes) != len(desired.routes) {
 		return cloud.GatewayGraphResult{}, actual.addressReadError
@@ -318,7 +318,15 @@ func (p *Provider) reconcileWeightedWithdrawalWithoutAddress(ctx context.Context
 		return result, err
 	}
 	result.Gateway.Outcome = p.progressingOutcome("Waiting to observe the Gateway Floating IP inventory")
-	if len(plan) != 1 || !plan[0].withdrawHTTPPolicy || plan[0].kind != graphRouteMutation ||
+	var grpcWithdrawal []graphMutation
+	if p.grpcContentType {
+		// An empty plan allows only confirmed capability withdrawal to
+		// request a listener closure while the address read is failing.
+		grpcWithdrawal = p.protectHTTPPredicateTraffic(ctx, desired, actual, nil, &result, grpcContentTypePredicate)
+	}
+	if len(grpcWithdrawal) != 0 {
+		plan = grpcWithdrawal
+	} else if len(plan) != 1 || !plan[0].withdrawHTTPPolicy || plan[0].kind != graphRouteMutation ||
 		plan[0].route.kind != routeMutationSetPolicyTarget || plan[0].route.weightedTargets == nil {
 		return result, actual.addressReadError
 	}
