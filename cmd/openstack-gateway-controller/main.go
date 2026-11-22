@@ -87,6 +87,7 @@ func run(ctx context.Context) error {
 		gatewayAPIChannel  string
 		certificateMap     string
 		backendTLSPolicy   bool
+		grpcContentType    bool
 		fixedHTTPResponses bool
 		weightedTargets    bool
 		clusterID          string
@@ -121,6 +122,7 @@ func run(ctx context.Context) error {
 	flag.BoolVar(&backendTLSPolicy, "octavia-backend-tls-policy", false, "authenticate BackendTLSPolicy HTTP upstreams with the regional Octavia hostname capability and a Barbican CA (requires --octavia-microversion=2.8 or newer)")
 	flag.BoolVar(&httpsListenerIsolation, "octavia-https-listener-isolation", false, "isolate terminated HTTPS sections on a shared port using the regional Octavia capability (requires --tls-certificate-map)")
 	flag.BoolVar(&responseHeaderModifier, "octavia-response-header-modifier", false, "use the advertised Octavia L7 response header operations capability")
+	flag.BoolVar(&grpcContentType, "octavia-grpc-content-type", false, "use the advertised Octavia native gRPC Content-Type rule for GRPCRoutes")
 	flag.BoolVar(&backendH2C, "octavia-backend-h2c", false, "use the advertised Octavia h2c backend transport capability")
 	flag.BoolVar(&requestHeaderModifier, "octavia-request-header-modifier", false, "use the advertised Octavia L7 request header operations capability")
 	flag.StringVar(&certificateMap, "tls-certificate-map", envOr("GATEWAY_OPENSTACK_TLS_CERTIFICATE_MAP", ""), "operator-managed TLS revision map for terminating listeners")
@@ -226,6 +228,7 @@ func run(ctx context.Context) error {
 		RequestHeaderModifier:  requestHeaderModifier,
 		ResponseHeaderModifier: responseHeaderModifier,
 		BackendH2C:             backendH2C,
+		GRPCContentType:        grpcContentType,
 		TLSSNIPassthrough:      tlsSNIPassthrough,
 		TLSSNISuffix:           tlsSNISuffix,
 		TCPTLSTermination:      tcpTLSTermination,

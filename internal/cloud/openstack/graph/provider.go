@@ -79,6 +79,7 @@ type ProviderConfig struct {
 	RequestHeaderModifier  bool
 	ResponseHeaderModifier bool
 	BackendH2C             bool
+	GRPCContentType        bool
 	TLSSNIPassthrough      bool
 	TLSSNISuffix           bool
 	TCPTLSTermination      bool
@@ -100,6 +101,7 @@ type Provider struct {
 	requestHeaderModifier  bool
 	responseHeaderModifier bool
 	backendH2C             bool
+	grpcContentType        bool
 	tlsSNIPassthrough      bool
 	tlsSNISuffix           bool
 	tcpTLSTermination      bool
@@ -134,6 +136,7 @@ func NewProvider(clients ServiceClients, cfg ProviderConfig) *Provider {
 		requestHeaderModifier:  cfg.RequestHeaderModifier,
 		responseHeaderModifier: cfg.ResponseHeaderModifier,
 		backendH2C:             cfg.BackendH2C,
+		grpcContentType:        cfg.GRPCContentType,
 		tlsSNIPassthrough:      cfg.TLSSNIPassthrough,
 		tlsSNISuffix:           cfg.TLSSNISuffix,
 		tcpTLSTermination:      cfg.TCPTLSTermination,

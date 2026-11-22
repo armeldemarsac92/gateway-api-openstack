@@ -1,11 +1,11 @@
 # Reproduce the Hibiscus development image
 
-The normal and no-cache builds produced the same linux/amd64 OCI manifest. The manager in the archived image passed all seven subtests in the original gRPC request-header case on each channel. [Build record](image.json) · [Request metadata results](provider/grpc-h2c-controller.md#modify-request-metadata-on-a-grpc-rule)
+The normal and no-cache builds produced the same linux/amd64 OCI manifest. The manager in the archived image passed all seven subtests in the original gRPC request-header case on each channel. The regional withdrawal and portable rollback also passed on both channels. [Build record](image.json) · [Request metadata results](provider/grpc-h2c-controller.md#regional-content-type-rule)
 
 On a linux/amd64 host, use a separate checkout of the recorded revision. The Dockerfile pins the Go 1.27.4 builder and distroless base by digest. Podman uses a fixed timestamp, and the build writes the full commit into the binary and the OCI revision label. The verification command exports gzip-compressed layers.
 
 ```sh
-revision=2944c353dcb0afa7b8756373bf87a51001c33ad2
+revision=abcd5fd75914f043df9ae000aa92664c481ba74a
 test "$(git rev-parse HEAD)" = "$revision"
 image="localhost/hibiscus-controller:$revision"
 make container-build CONTAINER_TOOL=podman VERSION="$revision" IMAGE="$image"

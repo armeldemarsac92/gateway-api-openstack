@@ -195,7 +195,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 			}
 			return p.reconcileSNIWithdrawalWithoutAddress(ctx, desired, actual)
 		}
-		return p.reconcileWeightedWithdrawalWithoutAddress(ctx, desired, actual)
+		return p.reconcileHTTPWithdrawalWithoutAddress(ctx, desired, actual)
 	}
 	if spec.Gateway.Disposition == cloud.GraphWithdrawTLS {
 		return cloud.GatewayGraphResult{Gateway: cloud.GatewayResult{State: actual.state, Outcome: actual.outcome}, Outcome: actual.outcome}, nil
@@ -235,10 +235,13 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 			return result, err
 		}
 	}
-	plan = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, exactHTTPHeaderPredicate)
-	plan = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, exactHTTPQueryParamPredicate)
-	plan = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, httpMethodPredicate)
-	plan = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, responseHeaderModifierPolicy)
+	plan, _ = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, exactHTTPHeaderPredicate)
+	plan, _ = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, exactHTTPQueryParamPredicate)
+	plan, _ = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, httpMethodPredicate)
+	plan, _ = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, responseHeaderModifierPolicy)
+	if p.grpcContentType {
+		plan, _ = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, grpcContentTypePredicate)
+	}
 	if spec.Gateway.Disposition == cloud.GraphEnsure && (len(plan) == 0 || plan[0].kind != graphClearListenerDefaultPool && !plan[0].withdrawHTTPPolicy && !plan[0].isRestrictiveSNI()) {
 		if err := p.validateGraphTrafficSecurity(ctx, desired); err != nil {
 			result.Routes = observedRouteDeleteCompletions(desired, actual)
@@ -308,7 +311,7 @@ func (p *Provider) recordGraphMutationOutcome(result *cloud.GatewayGraphResult, 
 	}
 }
 
-func (p *Provider) reconcileWeightedWithdrawalWithoutAddress(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph) (cloud.GatewayGraphResult, error) {
+func (p *Provider) reconcileHTTPWithdrawalWithoutAddress(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph) (cloud.GatewayGraphResult, error) {
 	if actual.loadBalancer == nil || actual.loadBalancer.ProvisioningStatus != "ACTIVE" || actual.outcome.State != cloud.OutcomeReady ||
 		len(actual.routes) != len(desired.routes) {
 		return cloud.GatewayGraphResult{}, actual.addressReadError
@@ -318,22 +321,25 @@ func (p *Provider) reconcileWeightedWithdrawalWithoutAddress(ctx context.Context
 		return result, err
 	}
 	result.Gateway.Outcome = p.progressingOutcome("Waiting to observe the Gateway Floating IP inventory")
-	if len(plan) != 1 || !plan[0].withdrawHTTPPolicy {
+	var grpcWithdrawal []graphMutation
+	var confirmedClosed bool
+	if p.grpcContentType {
+		// An empty plan allows only confirmed capability withdrawal to
+		// request a listener closure while the address read is failing.
+		grpcWithdrawal, confirmedClosed = p.protectHTTPPredicateTraffic(ctx, desired, actual, nil, &result, grpcContentTypePredicate)
+	}
+	if len(grpcWithdrawal) != 0 {
+		plan = grpcWithdrawal
+	}
+	if len(plan) != 1 || !canWithdrawHTTPWithoutAddress(plan[0], desired, actual) {
+		if confirmedClosed {
+			// The Octavia readback is enough to report the closed listener
+			// and its routes as pending. Requeue without changing traffic.
+			return result, nil
+		}
 		return result, actual.addressReadError
 	}
 	withdrawal := plan[0]
-	switch withdrawal.kind {
-	case graphDisableListener:
-	case graphRouteMutation:
-		weightedTarget := withdrawal.route.kind == routeMutationSetPolicyTarget && withdrawal.route.weightedTargets != nil
-		isolatedPolicy := withdrawal.route.kind == routeMutationDisablePolicy &&
-			(len(desired.spec.Gateway.Spec.HTTPListenerHostnames) != 0 || observedPlainHTTPExclusions(actual.routes))
-		if !weightedTarget && !isolatedPolicy {
-			return result, actual.addressReadError
-		}
-	default:
-		return result, actual.addressReadError
-	}
 	step, err := p.prepareGraphMutation(ctx, desired, actual, withdrawal)
 	if err != nil {
 		return result, err
@@ -351,6 +357,24 @@ func (p *Provider) reconcileWeightedWithdrawalWithoutAddress(ctx context.Context
 	}
 	p.recordGraphMutationOutcome(&result, step)
 	return result, nil
+}
+
+func canWithdrawHTTPWithoutAddress(step graphMutation, desired desiredGatewayGraph, actual observedGatewayGraph) bool {
+	if !step.withdrawHTTPPolicy {
+		return false
+	}
+	switch step.kind {
+	case graphDisableListener:
+		return true
+	case graphRouteMutation:
+		switch step.route.kind {
+		case routeMutationSetPolicyTarget:
+			return step.route.weightedTargets != nil
+		case routeMutationDisablePolicy:
+			return len(desired.spec.Gateway.Spec.HTTPListenerHostnames) != 0 || observedPlainHTTPExclusions(actual.routes)
+		}
+	}
+	return false
 }
 
 func (p *Provider) validateGraphTrafficSecurity(ctx context.Context, desired desiredGatewayGraph) error {

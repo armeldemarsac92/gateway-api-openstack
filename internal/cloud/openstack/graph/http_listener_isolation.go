@@ -159,13 +159,13 @@ func (p *Provider) protectPlainHTTPIsolation(desired desiredGatewayGraph, actual
 	var obsoletePolicy *graphMutation
 	var pendingObsoletePolicy bool
 	for port, issue := range desired.plainHTTPRuleLimits {
-		state := guardedHTTPListener{routes: make(map[int]bool)}
+		affectedRoutes := make(map[int]bool)
 		for i, route := range desired.routes {
 			if desired.spec.Routes[i].Disposition == cloud.GraphEnsure && physicalPort(route) == port {
-				state.routes[i] = true
+				affectedRoutes[i] = true
 			}
 		}
-		p.markGuardedHTTPListener(result, port, state, issue)
+		p.markGuardedHTTPListener(result, port, affectedRoutes, issue)
 		result.Gateway.HTTPPolicyTransition = true
 	}
 	for _, frontend := range frontends {
@@ -179,7 +179,7 @@ func (p *Provider) protectPlainHTTPIsolation(desired desiredGatewayGraph, actual
 		}) {
 			continue
 		}
-		state := guardedHTTPListener{routes: make(map[int]bool)}
+		affectedRoutes := make(map[int]bool)
 		for i, route := range observed.routes {
 			wanted := parts.routes[i]
 			port := physicalPort(wanted)
@@ -202,17 +202,17 @@ func (p *Provider) protectPlainHTTPIsolation(desired desiredGatewayGraph, actual
 					continue
 				}
 				if !plainHTTPHostRulesMatch(wanted.policies[match], wanted.hostnameRuleValue, policy) {
-					state.routes[owners[i]] = true
+					affectedRoutes[owners[i]] = true
 				}
 			}
 		}
 		reason := desired.plainHTTPRuleLimits[frontend.ProtocolPort]
 		if reason == "" {
-			if len(state.routes) == 0 {
+			if len(affectedRoutes) == 0 {
 				continue
 			}
 			reason = "Waiting for plaintext HTTP listener hostname isolation"
-			p.markGuardedHTTPListener(result, frontend.ProtocolPort, state, reason)
+			p.markGuardedHTTPListener(result, frontend.ProtocolPort, affectedRoutes, reason)
 			result.Gateway.HTTPPolicyTransition = true
 		}
 		blocked[frontend.ID] = true

@@ -37,14 +37,15 @@ const (
 	httpHeaderExactRuleType     l7policies.RuleType = "HTTP_HEADER_EXACT"
 	httpQueryParamExactRuleType l7policies.RuleType = "HTTP_QUERY_PARAM_EXACT"
 	httpMethodRuleType          l7policies.RuleType = "HTTP_METHOD"
+	grpcContentTypeRuleType     l7policies.RuleType = "GRPC_CONTENT_TYPE"
 )
 
-// Match the native media type with a POSIX ERE so HAProxy can use either libc
-// or PCRE. Octavia's HAProxy template cannot pass #, & or ' through portably,
+// Match gRPC media types with a POSIX ERE so HAProxy can use either libc or
+// PCRE. Octavia's stock HAProxy template cannot pass #, & or ' through portably,
 // so the optional codec accepts the rest of the HTTP token alphabet. Including
 // a space in the blank class avoids a nested-set warning from Octavia's Python
 // regex validator.
-const grpcContentType = "^[Aa][Pp][Pp][Ll][Ii][Cc][Aa][Tt][Ii][Oo][Nn]/[Gg][Rr][Pp][Cc]([+][A-Za-z0-9!$%*+.^_`|~-]+)?[ [:blank:]]*(;|$)"
+const portableGRPCContentTypePattern = "^[Aa][Pp][Pp][Ll][Ii][Cc][Aa][Tt][Ii][Oo][Nn]/[Gg][Rr][Pp][Cc]([+][A-Za-z0-9!$%*+.^_`|~-]+)?[ [:blank:]]*(;|$)"
 
 type desiredPolicy struct {
 	role                     string
@@ -68,7 +69,7 @@ type desiredPolicy struct {
 	method                   string
 	headers                  []cloud.HTTPHeaderMatch
 	queryParams              []cloud.HTTPQueryParamMatch
-	grpc                     bool
+	grpcContentTypeRule      l7policies.RuleType
 }
 
 type desiredRule struct {
@@ -78,6 +79,15 @@ type desiredRule struct {
 	value       string
 	key         string
 	invert      bool
+}
+
+func (rule desiredRule) matchesKey(key string) bool {
+	switch rule.ruleType {
+	case httpMethodRuleType, grpcContentTypeRuleType:
+		return key == ""
+	default:
+		return rule.key == "" || key == rule.key
+	}
 }
 
 type desiredRoute struct {
@@ -422,7 +432,12 @@ func (p *Provider) buildHTTPMatchPolicies(r *desiredRoute, matches []cloud.HTTPP
 			policy.weighted = r.weightedTargets != nil
 			policy.requestHeaderOperations = operations
 			policy.responseHeaderOperations = responseOperations
-			policy.grpc = r.spec.GRPC
+			if r.spec.GRPC {
+				policy.grpcContentTypeRule = l7policies.TypeHeader
+				if p.grpcContentType {
+					policy.grpcContentTypeRule = grpcContentTypeRuleType
+				}
+			}
 			policy.role = policyRuleRole(policy, policy.role, "")
 			if _, err := r.identity.RouteTags(policy.role); err != nil {
 				return err
@@ -585,13 +600,21 @@ func rulesFor(policy desiredPolicy, hostnameRuleValue string) []desiredRule {
 			value:       hostnameRuleValue,
 		})
 	}
-	if policy.grpc {
+	switch policy.grpcContentTypeRule {
+	case grpcContentTypeRuleType:
+		rules = append(rules, desiredRule{
+			role:        policyRuleRole(policy, openstackidentity.RoleRuleGRPCContentType, ""),
+			ruleType:    grpcContentTypeRuleType,
+			compareType: l7policies.CompareTypeEqual,
+			value:       "application/grpc",
+		})
+	case l7policies.TypeHeader:
 		rules = append(rules, desiredRule{
 			role:        policyRuleRole(policy, openstackidentity.RoleRuleGRPCContentType, ""),
 			ruleType:    l7policies.TypeHeader,
 			compareType: l7policies.CompareTypeRegex,
 			key:         "content-type",
-			value:       grpcContentType,
+			value:       portableGRPCContentTypePattern,
 		})
 	}
 	if policy.method != "" {

@@ -49,6 +49,18 @@ var (
 		capability: octavia.GatewayCapabilityHTTPMethodMatch, role: openstackidentity.RoleRuleHTTPMethod,
 		label: "HTTP method", required: func(policy desiredPolicy) bool { return policy.method != "" },
 	}
+	grpcContentTypePredicate = protectedHTTPPredicate{
+		capability: octavia.GatewayCapabilityGRPCContentType,
+		label:      "native gRPC Content-Type",
+		required: func(policy desiredPolicy) bool {
+			return policy.grpcContentTypeRule == grpcContentTypeRuleType
+		},
+		observed: func(policy observedRoutePolicy) bool {
+			return !observedPolicyDisabled(policy) && slices.ContainsFunc(policy.rules, func(rule observedRouteRule) bool {
+				return rule.base == openstackidentity.RoleRuleGRPCContentType && rule.rule.RuleType == string(grpcContentTypeRuleType)
+			})
+		},
+	}
 	responseHeaderModifierPolicy = protectedHTTPPredicate{
 		capability: octavia.GatewayCapabilityResponseHeaderOperations,
 		label:      "response header modification",
@@ -69,16 +81,17 @@ func (policy desiredPolicy) requiresExactQueryParams() bool {
 
 type guardedHTTPListener struct {
 	desired, unsettled, installed bool
-	routes                        map[int]bool
+	policyRoutes, frontendRoutes  map[int]bool
 	policyIDs                     map[string]bool
 }
 
 // protectHTTPPredicateTraffic uses the same verified listener and policy inventory
 // as the graph writer. A confirmed revocation closes the port before changing
-// its predicates. A discovery error alone leaves an existing port serving.
-func (p *Provider) protectHTTPPredicateTraffic(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, plan []graphMutation, result *cloud.GatewayGraphResult, predicate protectedHTTPPredicate) []graphMutation {
+// its predicates. A discovery error alone leaves an existing port serving. The
+// second result reports whether a revoked listener was observed closed.
+func (p *Provider) protectHTTPPredicateTraffic(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, plan []graphMutation, result *cloud.GatewayGraphResult, predicate protectedHTTPPredicate) ([]graphMutation, bool) {
 	if desired.protocol != cloud.ListenerProtocolHTTP || desired.spec.Gateway.Disposition != cloud.GraphEnsure {
-		return plan
+		return plan, false
 	}
 	observedListeners := actual.scopedListeners
 	if !actual.scoped && actual.listener != nil {
@@ -96,7 +109,7 @@ func (p *Provider) protectHTTPPredicateTraffic(ctx context.Context, desired desi
 	}
 	states := guardedHTTPListeners(desired, actual, portByID, predicate)
 	if len(states) == 0 {
-		return plan
+		return plan, false
 	}
 	if predicate.observed != nil {
 		// Creation and activation have their own capability checks. Reprobe
@@ -106,7 +119,7 @@ func (p *Provider) protectHTTPPredicateTraffic(ctx context.Context, desired desi
 			installed = installed || state.installed
 		}
 		if !installed {
-			return plan
+			return plan, false
 		}
 	}
 	policyListeners := make(map[string]string)
@@ -133,9 +146,6 @@ func (p *Provider) protectHTTPPredicateTraffic(ctx context.Context, desired desi
 	}
 	var missing *octavia.MissingGatewayCapability
 	confirmedMissing := errors.As(discoveryErr, &missing)
-	closed := func(listener listeners.Listener) bool {
-		return actual.adminObserved[listener.ID] && !listener.AdminStateUp && listener.ProvisioningStatus == "ACTIVE"
-	}
 	frontendBlocked := make(map[string]bool)
 	closedByID := make(map[string]bool, len(observedListeners))
 	waiting := "Waiting for Octavia " + predicate.label + " policies to be verified"
@@ -155,12 +165,14 @@ func (p *Provider) protectHTTPPredicateTraffic(ctx context.Context, desired desi
 			}
 		}
 	}
+	confirmedClosed := false
 	for _, listener := range observedListeners {
 		state, relevant := states[listener.ProtocolPort]
 		if !relevant {
 			continue
 		}
-		closedByID[listener.ID] = closed(listener)
+		closed := actual.adminObserved[listener.ID] && !listener.AdminStateUp && listener.ProvisioningStatus == "ACTIVE"
+		closedByID[listener.ID] = closed
 		// New policies are gated separately. Close a listener only when
 		// ownership inventory proves an installed dependency was withdrawn.
 		if confirmedMissing && !state.installed {
@@ -170,16 +182,18 @@ func (p *Provider) protectHTTPPredicateTraffic(ctx context.Context, desired desi
 		reason := unavailable
 		if !confirmedMissing {
 			if predicate.observed != nil && discoveryErr != nil && state.installed && state.desired {
-				p.markGuardedHTTPListener(result, listener.ProtocolPort, state, "Waiting for Octavia to advertise "+predicate.capability)
+				p.markGuardedHTTPListener(result, listener.ProtocolPort, state.policyRoutes, "Waiting for Octavia to advertise "+predicate.capability)
 			}
-			if listener.ID != withdrawalListener || closed(listener) {
+			if listener.ID != withdrawalListener || closed {
 				continue
 			}
 			reason = "Closing the affected listener before withdrawing an Octavia " + predicate.label + " policy"
 		}
-		p.markGuardedHTTPListener(result, listener.ProtocolPort, state, reason)
-		if !closed(listener) && (listener.ProvisioningStatus == "ACTIVE" || listener.ProvisioningStatus == "ERROR") {
-			return []graphMutation{closeGuardedHTTPListener(listener, reason)}
+		p.markGuardedHTTPListener(result, listener.ProtocolPort, state.frontendRoutes, reason)
+		if closed {
+			confirmedClosed = confirmedClosed || confirmedMissing
+		} else if listener.ProvisioningStatus == "ACTIVE" || listener.ProvisioningStatus == "ERROR" {
+			return []graphMutation{closeGuardedHTTPListener(listener, reason)}, confirmedClosed
 		}
 	}
 	return slices.DeleteFunc(plan, func(step graphMutation) bool {
@@ -188,13 +202,13 @@ func (p *Provider) protectHTTPPredicateTraffic(ctx context.Context, desired desi
 		switch step.kind {
 		case graphEnableListener:
 			if frontendBlocked[listenerID] {
-				p.markGuardedHTTPListener(result, portByID[listenerID], state, waiting)
+				p.markGuardedHTTPListener(result, portByID[listenerID], state.frontendRoutes, waiting)
 				return true
 			}
 		case graphEnableLoadBalancer:
 			for _, listener := range observedListeners {
 				if frontendBlocked[listener.ID] && !closedByID[listener.ID] {
-					p.markGuardedHTTPListener(result, listener.ProtocolPort, states[listener.ProtocolPort], waiting)
+					p.markGuardedHTTPListener(result, listener.ProtocolPort, states[listener.ProtocolPort].frontendRoutes, waiting)
 					return true
 				}
 			}
@@ -211,11 +225,11 @@ func (p *Provider) protectHTTPPredicateTraffic(ctx context.Context, desired desi
 			if discoveryErr == nil || closedByID[listenerID] || !state.installed || !isHTTPPolicyMutation(step.route.kind) {
 				return false
 			}
-			p.markGuardedHTTPListener(result, portByID[listenerID], state, waiting)
+			p.markGuardedHTTPListener(result, portByID[listenerID], state.policyRoutes, waiting)
 			return true
 		}
 		return false
-	})
+	}), confirmedClosed
 }
 
 func closeGuardedHTTPListener(listener listeners.Listener, reason string) graphMutation {
@@ -224,9 +238,9 @@ func closeGuardedHTTPListener(listener listeners.Listener, reason string) graphM
 		withdrawHTTPPolicy: true, message: reason}
 }
 
-func (p *Provider) markGuardedHTTPListener(result *cloud.GatewayGraphResult, port int, state guardedHTTPListener, reason string) {
+func (p *Provider) markGuardedHTTPListener(result *cloud.GatewayGraphResult, port int, routes map[int]bool, reason string) {
 	result.Outcome = p.progressingOutcome(reason)
-	for index := range state.routes {
+	for index := range routes {
 		if index < len(result.Routes) {
 			result.Routes[index].Result.Outcome = result.Outcome
 			result.Routes[index].Result.ObservationDeferred = false
@@ -248,6 +262,40 @@ func guardedHTTPListeners(desired desiredGatewayGraph, actual observedGatewayGra
 			collectGuardedHTTPListener(states, desired, portByID, part, observed, parts.spec.Routes[index].Disposition, owners[index], predicate)
 		}
 	}
+	if len(states) == 0 {
+		return states
+	}
+	// Closing a physical listener affects ordinary HTTP policies on that
+	// port too. Keep their progress independent from policies on other ports.
+	addFrontendRoute := func(port, index int) {
+		state, guarded := states[port]
+		if !guarded {
+			return
+		}
+		if state.frontendRoutes == nil {
+			state.frontendRoutes = make(map[int]bool)
+		}
+		state.frontendRoutes[index] = true
+		states[port] = state
+	}
+	for index, route := range desired.routes {
+		if desired.spec.Routes[index].Disposition == cloud.GraphEnsure {
+			port := scopedHTTPRoutePort(route)
+			if port == 0 {
+				port = desired.spec.Gateway.Spec.ListenerPort
+			}
+			addFrontendRoute(port, index)
+		}
+		if index < len(actual.routes) {
+			for _, part := range actual.routes[index].parts() {
+				for _, policy := range part.policies {
+					if port, present := portByID[policy.policy.ListenerID]; present {
+						addFrontendRoute(port, index)
+					}
+				}
+			}
+		}
+	}
 	return states
 }
 
@@ -255,10 +303,10 @@ func collectGuardedHTTPListener(states map[int]guardedHTTPListener, gateway desi
 	route desiredRoute, observed observedRouteGraph, disposition cloud.GraphDisposition, owner int, predicate protectedHTTPPredicate) {
 	mark := func(port int, change func(*guardedHTTPListener)) {
 		state := states[port]
-		if state.routes == nil {
-			state.routes = make(map[int]bool)
+		if state.policyRoutes == nil {
+			state.policyRoutes = make(map[int]bool)
 		}
-		state.routes[owner] = true
+		state.policyRoutes[owner] = true
 		change(&state)
 		states[port] = state
 	}

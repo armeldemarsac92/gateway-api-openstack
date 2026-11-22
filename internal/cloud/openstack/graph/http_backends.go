@@ -312,7 +312,7 @@ func observedHTTPPredicateMatches(policy observedRoutePolicy, rules []desiredRul
 		if !slices.ContainsFunc(policy.rules, func(observed observedRouteRule) bool {
 			rule := observed.rule
 			return rule.RuleType == string(wanted.ruleType) && rule.CompareType == string(wanted.compareType) &&
-				(wanted.key == "" && wanted.ruleType != httpMethodRuleType || rule.Key == wanted.key) && rule.Value == wanted.value && rule.AdminStateUp && rule.Invert == wanted.invert
+				wanted.matchesKey(rule.Key) && rule.Value == wanted.value && rule.AdminStateUp && rule.Invert == wanted.invert
 		}) {
 			return false
 		}

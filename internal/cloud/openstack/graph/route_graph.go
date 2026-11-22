@@ -755,6 +755,7 @@ type routeMutation struct {
 	requiresExactHeaders     bool
 	requiresExactQueryParams bool
 	requiresHTTPMethod       bool
+	probeBeforeGRPCMigration bool
 }
 
 func (s routeMutation) message() string {
@@ -995,7 +996,8 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 		for _, policy := range actual.policies {
 			if policy.role == wantedPolicy.role && !policy.policy.AdminStateUp {
 				return []routeMutation{{kind: routeMutationEnablePolicy, id: policy.policy.ID,
-					policy:                   desiredPolicy{httpsListenerHostname: wantedPolicy.httpsListenerHostname},
+					policy: desiredPolicy{httpsListenerHostname: wantedPolicy.httpsListenerHostname,
+						grpcContentTypeRule: wantedPolicy.grpcContentTypeRule},
 					requestHeaderOperations:  wantedPolicy.requestHeaderOperations,
 					responseHeaderOperations: wantedPolicy.responseHeaderOperations,
 					requiresExactHeaders:     len(wantedPolicy.headers) != 0,
@@ -1088,7 +1090,8 @@ func buildRoutePolicyPlan(
 				requestHeaderOperations: requestPatch, responseHeaderOperations: responsePatch})
 		}
 		start := len(plan)
-		if weighted == nil && !desired.fixedResponse && !observedPolicy.fixedResponse && !desiredPolicyActionMatches(wantedPolicy, policy, poolID) {
+		policyActionUpdate := weighted == nil && !desired.fixedResponse && !observedPolicy.fixedResponse && !desiredPolicyActionMatches(wantedPolicy, policy, poolID)
+		if policyActionUpdate {
 			plan = append(plan, routeMutation{kind: routeMutationUpdatePolicy, id: policy.ID, parentID: poolID, policy: wantedPolicy})
 		}
 
@@ -1099,23 +1102,29 @@ func buildRoutePolicyPlan(
 			actualRules[rule.role] = rule
 		}
 		missingRules := 0
+		grpcContentTypeChanged := false
 		for _, wantedRule := range wantedRules {
 			observedRule, exists := actualRules[wantedRule.role]
 			if !exists {
+				grpcContentTypeChanged = grpcContentTypeChanged || wantedRule.ruleType == wantedPolicy.grpcContentTypeRule
 				missingRules++
 				plan = append(plan, routeMutation{kind: routeMutationCreateRule, parentID: policy.ID, rule: wantedRule})
 				continue
 			}
 			rule := observedRule.rule
 			state.L7RuleIDs = append(state.L7RuleIDs, rule.ID)
-			if wantedRule.ruleType == httpMethodRuleType && rule.Key != "" {
-				// Recreate the disabled rule to remove a key from a keyless predicate.
+			replacingNativeMedia := rule.RuleType == string(grpcContentTypeRuleType) && wantedRule.ruleType != grpcContentTypeRuleType
+			if replacingNativeMedia || wantedRule.ruleType == httpMethodRuleType && rule.Key != "" {
+				// Octavia permits deletion after regional withdrawal. A PUT that
+				// changes the native media type still requires enrollment.
+				grpcContentTypeChanged = grpcContentTypeChanged || replacingNativeMedia
 				plan = append(plan, routeMutation{kind: routeMutationDeleteRule, id: rule.ID, parentID: policy.ID})
 				delete(actualRules, wantedRule.role)
 				continue
 			}
 			if rule.RuleType != string(wantedRule.ruleType) || rule.CompareType != string(wantedRule.compareType) ||
-				wantedRule.key != "" && rule.Key != wantedRule.key || rule.Value != wantedRule.value || rule.Invert != wantedRule.invert || !rule.AdminStateUp || rule.ProvisioningStatus == "ERROR" {
+				!wantedRule.matchesKey(rule.Key) || rule.Value != wantedRule.value || rule.Invert != wantedRule.invert || !rule.AdminStateUp || rule.ProvisioningStatus == "ERROR" {
+				grpcContentTypeChanged = grpcContentTypeChanged || wantedRule.ruleType == wantedPolicy.grpcContentTypeRule
 				plan = append(plan, routeMutation{kind: routeMutationUpdateRule, id: rule.ID, parentID: policy.ID, rule: wantedRule})
 			}
 			delete(actualRules, wantedRule.role)
@@ -1142,9 +1151,22 @@ func buildRoutePolicyPlan(
 		}
 		// A failed policy update can leave Octavia's desired admin state in
 		// the database even while Amphora still uses an earlier configuration.
-		if policy.ProvisioningStatus == "ERROR" && !targetUpdate && !headersUpdate || len(plan) > start && policy.AdminStateUp {
-			disablePlan = append(disablePlan, routeMutation{kind: routeMutationDisablePolicy, id: policy.ID,
-				retry: desired.redirect && policy.ProvisioningStatus == "ERROR", withdrawHTTPPolicy: desired.redirect})
+		if grpcContentTypeChanged && !observedPolicyDisabled(observedPolicy) ||
+			policy.ProvisioningStatus == "ERROR" && !targetUpdate && !headersUpdate || len(plan) > start && policy.AdminStateUp {
+			withdraw := desired.redirect || grpcContentTypeChanged
+			disable := routeMutation{kind: routeMutationDisablePolicy, id: policy.ID,
+				retry: withdraw && policy.ProvisioningStatus == "ERROR", withdrawHTTPPolicy: withdraw}
+			// A verified portable policy can keep serving while discovery
+			// recovers. Predicate, target and scope drift still need withdrawal.
+			if grpcContentTypeChanged && wantedPolicy.grpcContentTypeRule == grpcContentTypeRuleType &&
+				!targetUpdate && !headersUpdate && !policyActionUpdate &&
+				observedPolicy.httpsListenerHostname == wantedPolicy.httpsListenerHostname && policy.Position == wantedPolicy.position &&
+				policy.AdminStateUp && observedForwardPolicySettled(observedPolicy) {
+				portable := wantedPolicy
+				portable.grpcContentTypeRule = l7policies.TypeHeader
+				disable.probeBeforeGRPCMigration = observedHTTPPredicateMatches(observedPolicy, rulesFor(portable, desired.hostnameRuleValue))
+			}
+			disablePlan = append(disablePlan, disable)
 		}
 		// Moving a policy changes precedence only. Keep its current admin state
 		// and predicates and let Octavia shift the other positions atomically.
@@ -1388,8 +1410,9 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 			Tags:         tags,
 		})
 	case routeMutationUpdateRule:
+		// Octavia clears the inherited header key on a native gRPC update.
 		var key *string
-		if step.rule.ruleType == httpHeaderExactRuleType || step.rule.ruleType == httpQueryParamExactRuleType {
+		if step.rule.key != "" {
 			key = &step.rule.key
 		}
 		_, err = p.octavia.UpdateRule(ctx, step.parentID, step.id, l7policies.UpdateRuleOpts{
