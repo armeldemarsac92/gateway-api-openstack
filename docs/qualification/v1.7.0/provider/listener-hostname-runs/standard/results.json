@@ -1,0 +1,437 @@
+{
+  "channel": "standard",
+  "controllerRevision": "7ed5e90f086200258d1aa0f3b6af3244c8655b81",
+  "managerSHA256": "ce20f7761f3ec9c4db7e784edfd84067455c95145303acc0a2cc412f911a0ecb",
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+  "baseSHA256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+  "octavia": {
+    "version": "19.0.1.dev38",
+    "sha256": "76d50374b0291acf3e1c0f14c772a7a57e5dae3404c36812e4dab14631b21d26",
+    "filesVerified": 641
+  },
+  "octaviaLib": {
+    "version": "3.12.1.dev10",
+    "sha256": "fa25031c568488d08c3ce457961a02261871b2919e0c15046c2ba0d1fbb0f2ce",
+    "filesVerified": 24
+  },
+  "HAProxy": {
+    "version": "3.0.19-ade9c1262-octavia-strict-dns-v1",
+    "sha256": "fa8468efa26f95ed83a36afeb97b79730de285450b7a8fae94f7cf5e6d2d0824"
+  },
+  "infrastructure": "isolated kind with real upstream Pods and local Octavia REST/Amphora/HAProxy",
+  "flags": [
+    "--octavia-http-request-redirect",
+    "--octavia-fixed-http-responses",
+    "--octavia-https-listener-isolation",
+    "--octavia-backend-tls-policy",
+    "--openstack-resync-interval=10m",
+    "--octavia-l7policy-initial-rules"
+  ],
+  "controllerInitialRulesMode": "enabled",
+  "amphoraCapabilitiesAfterOptIn": [
+    "fixed_http_responses_v1",
+    "weighted_http_targets_v1",
+    "http_request_redirect_v1",
+    "l7policy_initial_rules_v1",
+    "backend_tls_hostname_v1",
+    "https_listener_isolation_v1"
+  ],
+  "nativeL7WorkerDispatch": {
+    "create_l7policy": 48,
+    "update_l7policy": 82,
+    "delete_l7rule": 68,
+    "delete_l7policy": 34
+  },
+  "runnerExit": 1,
+  "cases": {
+    "ListenerSetGatewayParentSectionNameNotFound": {
+      "status": "passed",
+      "expected": 0,
+      "subtestsPassed": 0,
+      "groups": {
+        "requests": {
+          "expected": 0,
+          "passed": [],
+          "failed": [],
+          "skipped": []
+        }
+      },
+      "inlineRequestPathsObserved": [
+        "/goodsection",
+        "/badsection"
+      ],
+      "exit": 0,
+      "timedOut": false,
+      "requestLogCount": 42,
+      "caseStartedAt": "2026-11-22T20:17:42.129+00:00",
+      "caseFinishedAt": "2026-11-22T20:17:48.077+00:00",
+      "upstreamReport": "listenerset-gateway-parent-section-name-not-found-report.yaml",
+      "caseGoSHA256": "55cacfcfcaa58cb660cfe31907092e07dca14ffa7df7c366ce7b7d38fb3202bf",
+      "manifestSHA256": "2490454329f1a5e8c45b0b6b75b87139f1189dc062c3d0699c23ae97c8b24279",
+      "groupOutcomes": [
+        {
+          "status": "PASS",
+          "test": "TestLocalGatewayCase/ListenerSetGatewayParentSectionNameNotFound"
+        }
+      ],
+      "failedRequests": [],
+      "reportSHA256": "e318a8b584f842ccb8797b12ca15b72f894deb7cd1e02168a1f8c5a6edd6d435"
+    },
+    "ListenerSetDualParentRefIndependence": {
+      "status": "passed",
+      "expected": 4,
+      "subtestsPassed": 4,
+      "groups": {
+        "Both_parentRefs_are_Accepted": {
+          "expected": 2,
+          "passed": [
+            0,
+            1
+          ],
+          "failed": [],
+          "skipped": []
+        },
+        "One_of_two_parentRefs_is_Accepted": {
+          "expected": 2,
+          "passed": [
+            0,
+            1
+          ],
+          "failed": [],
+          "skipped": []
+        }
+      },
+      "inlineRequestPathsObserved": [],
+      "exit": 0,
+      "timedOut": false,
+      "requestLogCount": 176,
+      "caseStartedAt": "2026-11-22T20:17:54.534+00:00",
+      "caseFinishedAt": "2026-11-22T20:18:04.986+00:00",
+      "upstreamReport": "listenerset-dual-parentref-independence-report.yaml",
+      "caseGoSHA256": "206e055fb30dee45311e440d240efec29b081d56343bb5c59e1f22885d1ad608",
+      "manifestSHA256": "5c951d1417d629d7eeaacd18f01b92b960ce26112051af8c817ffbcbc4cd7d36",
+      "groupOutcomes": [
+        {
+          "status": "PASS",
+          "test": "TestLocalGatewayCase/ListenerSetDualParentRefIndependence"
+        },
+        {
+          "status": "PASS",
+          "test": "TestLocalGatewayCase/ListenerSetDualParentRefIndependence/Both_parentRefs_are_Accepted"
+        },
+        {
+          "status": "PASS",
+          "test": "TestLocalGatewayCase/ListenerSetDualParentRefIndependence/One_of_two_parentRefs_is_Accepted"
+        }
+      ],
+      "failedRequests": [],
+      "reportSHA256": "302a90493120f74a4756967e9ab195a70609cb07437fc01804d1357ef17c2eed"
+    },
+    "ListenerSetAllowedRoutesNamespaces": {
+      "status": "passed",
+      "expected": 11,
+      "subtestsPassed": 11,
+      "groups": {
+        "Same-namespace_ListenerSet": {
+          "expected": 9,
+          "passed": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8
+          ],
+          "failed": [],
+          "skipped": []
+        },
+        "Cross-namespace_ListenerSet": {
+          "expected": 2,
+          "passed": [
+            0,
+            1
+          ],
+          "failed": [],
+          "skipped": []
+        }
+      },
+      "inlineRequestPathsObserved": [],
+      "exit": 0,
+      "timedOut": false,
+      "requestLogCount": 574,
+      "caseStartedAt": "2026-11-22T20:18:16.773+00:00",
+      "caseFinishedAt": "2026-11-22T20:18:46.989+00:00",
+      "upstreamReport": "listenerset-allowed-routes-namespaces-report.yaml",
+      "caseGoSHA256": "e040da6adb4d348edfbf25e063ca4ff8708f13e8be18939d836d0f38c2aa4b02",
+      "manifestSHA256": "f5bd0a6ce0fad9fb8f3646afe6ce31f33194c663f4feb0b3a6b762bf47069d1f",
+      "groupOutcomes": [
+        {
+          "status": "PASS",
+          "test": "TestLocalGatewayCase/ListenerSetAllowedRoutesNamespaces"
+        },
+        {
+          "status": "PASS",
+          "test": "TestLocalGatewayCase/ListenerSetAllowedRoutesNamespaces/Same-namespace_ListenerSet"
+        },
+        {
+          "status": "PASS",
+          "test": "TestLocalGatewayCase/ListenerSetAllowedRoutesNamespaces/Cross-namespace_ListenerSet"
+        }
+      ],
+      "failedRequests": [],
+      "reportSHA256": "63202513f609cbd37845b9c7ec9036cd9cdd3e901b876384ee462d5276b9d8f7"
+    },
+    "ListenerSetHTTPRouting": {
+      "status": "failed",
+      "expected": 36,
+      "subtestsPassed": 35,
+      "groups": {
+        "requests": {
+          "expected": 36,
+          "passed": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35
+          ],
+          "failed": [
+            0
+          ],
+          "skipped": []
+        }
+      },
+      "inlineRequestPathsObserved": [],
+      "exit": 1,
+      "timedOut": false,
+      "requestLogCount": 1082,
+      "caseStartedAt": "2026-11-22T20:19:14.693+00:00",
+      "caseFinishedAt": "2026-11-22T20:20:18.090+00:00",
+      "upstreamReport": "listenerset-http-routing-report.yaml",
+      "caseGoSHA256": "b9f8cc812a62f5b4d882cbd7bd92fc752a2bd426a946817d30e129537a502d2a",
+      "manifestSHA256": "f4b5a3cbfeffc737ba692a07a2ad20557a017cd26faeed2e5a56bab72885bcb8",
+      "groupOutcomes": [
+        {
+          "status": "FAIL",
+          "test": "TestLocalGatewayCase/ListenerSetHTTPRouting"
+        }
+      ],
+      "failedRequests": [
+        "0_request_to_'gateway-listener-1.com/route'_should_go_to_infra-backend-v1"
+      ],
+      "reportSHA256": "82c79157c7dffdad8b67ae9a125136cd7675f276e3a7807575ae80b9b45124aa"
+    },
+    "HTTPRouteHostnameIntersection": {
+      "status": "passed",
+      "expected": 33,
+      "subtestsPassed": 33,
+      "groups": {
+        "HTTPRoutes_that_do_intersect_with_listener_hostnames": {
+          "expected": 25,
+          "passed": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24
+          ],
+          "failed": [],
+          "skipped": []
+        },
+        "HTTPRoutes_that_do_not_intersect_with_listener_hostnames": {
+          "expected": 2,
+          "passed": [
+            0,
+            1
+          ],
+          "failed": [],
+          "skipped": []
+        },
+        "HTTPRoutes_have_to_be_counted_in_AttachedRoutes_only_if_they_are_Accepted": {
+          "expected": 0,
+          "passed": [],
+          "failed": [],
+          "skipped": []
+        },
+        "HTTPRoutes_intersects_with_an_unspecified_hostname_listener": {
+          "expected": 6,
+          "passed": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "failed": [],
+          "skipped": []
+        }
+      },
+      "inlineRequestPathsObserved": [],
+      "exit": 0,
+      "timedOut": false,
+      "requestLogCount": 446,
+      "caseStartedAt": "2026-11-22T20:21:20.368+00:00",
+      "caseFinishedAt": "2026-11-22T20:21:42.156+00:00",
+      "upstreamReport": "httproute-hostname-intersection-report.yaml",
+      "caseGoSHA256": "edc64db8bf55734d1a553b0b109a43a03aeeeb527dabe460c177ce012b843944",
+      "manifestSHA256": "92ece7d8caf7bd8e13ea869f38629b3dadff3d975613e0f0a425c962ee3664fd",
+      "groupOutcomes": [
+        {
+          "status": "PASS",
+          "test": "TestLocalGatewayCase/HTTPRouteHostnameIntersection"
+        },
+        {
+          "status": "PASS",
+          "test": "TestLocalGatewayCase/HTTPRouteHostnameIntersection/HTTPRoutes_that_do_intersect_with_listener_hostnames"
+        },
+        {
+          "status": "PASS",
+          "test": "TestLocalGatewayCase/HTTPRouteHostnameIntersection/HTTPRoutes_that_do_not_intersect_with_listener_hostnames"
+        },
+        {
+          "status": "PASS",
+          "test": "TestLocalGatewayCase/HTTPRouteHostnameIntersection/HTTPRoutes_have_to_be_counted_in_AttachedRoutes_only_if_they_are_Accepted"
+        },
+        {
+          "status": "PASS",
+          "test": "TestLocalGatewayCase/HTTPRouteHostnameIntersection/HTTPRoutes_intersects_with_an_unspecified_hostname_listener"
+        }
+      ],
+      "failedRequests": [],
+      "reportSHA256": "2917ab5a6f3f07cd866a30d4e5a66fa260a916c2db57f7097175eba5295c1cff"
+    },
+    "GatewayHTTPListenerIsolation": {
+      "status": "passed",
+      "expected": 32,
+      "subtestsPassed": 32,
+      "groups": {
+        "hostnames_are_configured_only_in_listeners": {
+          "expected": 16,
+          "passed": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15
+          ],
+          "failed": [],
+          "skipped": []
+        },
+        "intersecting_hostnames_are_configured_in_listeners_and_HTTPRoutes": {
+          "expected": 16,
+          "passed": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15
+          ],
+          "failed": [],
+          "skipped": []
+        }
+      },
+      "inlineRequestPathsObserved": [],
+      "exit": 0,
+      "timedOut": false,
+      "requestLogCount": 754,
+      "caseStartedAt": "2026-11-22T20:22:11.529+00:00",
+      "caseFinishedAt": "2026-11-22T20:22:48.307+00:00",
+      "upstreamReport": "gateway-http-listener-isolation-report.yaml",
+      "caseGoSHA256": "0e7e64f766e4fe65c27f30ed677e56cdd9415c41c7c41053008cf12fca19fb9c",
+      "manifestSHA256": "764ac89c05bbdc6b56951cce8b85c2788251bbe3d00c8243b360a6b4db231508",
+      "groupOutcomes": [
+        {
+          "status": "PASS",
+          "test": "TestLocalGatewayCase/GatewayHTTPListenerIsolation"
+        },
+        {
+          "status": "PASS",
+          "test": "TestLocalGatewayCase/GatewayHTTPListenerIsolation/hostnames_are_configured_only_in_listeners"
+        },
+        {
+          "status": "PASS",
+          "test": "TestLocalGatewayCase/GatewayHTTPListenerIsolation/intersecting_hostnames_are_configured_in_listeners_and_HTTPRoutes"
+        }
+      ],
+      "failedRequests": [],
+      "reportSHA256": "9a0c97905eee9eb0834259278cacc6ec45457cd916117a6ce52336574ce1bb70"
+    }
+  }
+}
