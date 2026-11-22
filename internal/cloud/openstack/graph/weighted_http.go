@@ -157,6 +157,9 @@ func resolveWeightedHTTPPart(part desiredRoute, route desiredRoute, observed obs
 	part.policies = slices.Clone(part.policies)
 	ready := make(map[string]bool)
 	denied := deniedBackendTLSKeys(route)
+	allLocal := !slices.ContainsFunc(part.weightedTargets, func(target desiredHTTPWeightedTarget) bool {
+		return target.weight > 0 && target.backendKey != "" && !denied[target.backendKey]
+	})
 	for _, target := range part.weightedTargets {
 		if backend := observed.httpParts[target.backendKey]; target.weight > 0 && backend != nil && backend.pool != nil {
 			if _, checked := ready[target.backendKey]; !checked {
@@ -166,11 +169,16 @@ func resolveWeightedHTTPPart(part desiredRoute, route desiredRoute, observed obs
 	}
 	for i := range part.policies {
 		policy := &part.policies[i]
+		if allLocal && policy.requestURLRewrite != nil {
+			policy.localRewriteFallback = true
+			policy.requestURLRewrite = nil
+			policy.requestHeaderOperations = nil
+		}
 		serving := servingWeightedPoolIDs(*policy, observed.httpParts[part.backendKey], listenerID)
 		plan := &weightedHTTPPolicyPlan{}
 		for _, target := range part.weightedTargets {
 			resolved := octavia.WeightedHTTPTarget{Weight: target.weight}
-			if target.backendKey != "" && !denied[target.backendKey] {
+			if !policy.localRewriteFallback && target.backendKey != "" && !denied[target.backendKey] {
 				backend := observed.httpParts[target.backendKey]
 				if backend != nil && backend.pool != nil {
 					resolved.PoolID = backend.pool.ID
@@ -370,6 +378,10 @@ func weightedTargetWithdrawals(desired desiredRoute, observed observedRouteGraph
 		if !found || policy.pending() {
 			continue
 		}
+		if step, ok := localOnlyURLRewriteWithdrawal(desired, policy); ok {
+			steps = append(steps, step)
+			continue
+		}
 		var withdrawn []octavia.WeightedHTTPTarget
 		zeroed := -1
 		retrySafeTarget := false
@@ -413,4 +425,25 @@ func weightedTargetWithdrawals(desired desiredRoute, observed observedRouteGraph
 		}
 	}
 	return steps
+}
+
+// A rule with no positive, authorized pool can replace its targets and clear
+// the stale rewrite in one restrictive write. Preserve its match and admin
+// state so requests receive the 500 without exposing a lower priority route.
+func localOnlyURLRewriteWithdrawal(desired desiredRoute, observed observedRoutePolicy) (routeMutation, bool) {
+	if observed.requestURLRewrite == nil || !observed.adminObserved || observed.pending() {
+		return routeMutation{}, false
+	}
+	for _, wanted := range desired.policies {
+		if !wanted.localRewriteFallback || wanted.role != observed.role || wanted.httpsListenerHostname != observed.httpsListenerHostname ||
+			wanted.targetsPending() || !observedHTTPPredicateMatches(observed, rulesFor(wanted, desired.hostnameRuleValue)) {
+			continue
+		}
+		patch := policyURLRewritePatch(nil, observed)
+		patch.KeepPolicyState = true
+		return routeMutation{kind: routeMutationSetPolicyTarget, id: observed.policy.ID, weightedTargets: &wanted.weightedPlan.targets,
+			requestURLRewriteUpdate: patch, requestHeaderOperations: policyHeaderPatch(nil, observed.requestHeaderOperations, false),
+			withdrawHTTPPolicy: true, retry: observed.policy.ProvisioningStatus == "ERROR"}, true
+	}
+	return routeMutation{}, false
 }

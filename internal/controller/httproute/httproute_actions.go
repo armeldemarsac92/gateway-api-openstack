@@ -50,8 +50,11 @@ func routeActionError(diagnostic *model.Diagnostic) error {
 		return nil
 	}
 	kind := routeErrorUnsupported
-	if diagnostic.Reason == string(routeErrorInvalid) {
+	switch diagnostic.Reason {
+	case string(routeErrorInvalid):
 		kind = routeErrorInvalid
+	case string(routeErrorIncompatibleFilters):
+		kind = routeErrorIncompatibleFilters
 	}
 	return newRouteBuildError(kind, "%s", diagnostic.Message)
 }

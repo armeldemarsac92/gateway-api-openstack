@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -42,6 +43,7 @@ const (
 	routeErrorUnsupported         routeErrorKind = "Unsupported"
 	routeErrorInvalidKind         routeErrorKind = "InvalidKind"
 	routeErrorInvalid             routeErrorKind = "Invalid"
+	routeErrorIncompatibleFilters routeErrorKind = routeErrorKind(gatewayv1.RouteReasonIncompatibleFilters)
 	routeErrorBackendNotFound     routeErrorKind = "BackendNotFound"
 	routeErrorRefNotPermitted     routeErrorKind = "RefNotPermitted"
 	routeErrorUnsupportedProtocol routeErrorKind = "UnsupportedProtocol"
@@ -81,11 +83,12 @@ func (r *Reconciler) validateRouteStructure(route *gatewayv1.HTTPRoute) ([]gatew
 	if len(route.Spec.Rules) == 0 {
 		return nil, newRouteBuildError(routeErrorUnsupported, "at least one HTTPRoute rule is required")
 	}
-	references := make([]gatewayv1.BackendObjectReference, 0, len(route.Spec.Rules))
-	for _, rule := range route.Spec.Rules {
-		if err := r.validateRouteRule(rule, grpc); err != nil {
-			return nil, err
-		}
+	rules, _, err := r.admittedHTTPRouteRules(route)
+	if err != nil {
+		return nil, err
+	}
+	references := make([]gatewayv1.BackendObjectReference, 0, len(rules))
+	for _, rule := range rules {
 		for _, backend := range rule.BackendRefs {
 			references = append(references, backend.BackendObjectReference)
 		}
@@ -93,14 +96,68 @@ func (r *Reconciler) validateRouteStructure(route *gatewayv1.HTTPRoute) ([]gatew
 	return references, nil
 }
 
+// admittedHTTPRouteRules drops invalid rules when a URLRewrite route also
+// contains valid rules. Keep the published object available for status and
+// create a projection with only admitted rules for backend reads and writes.
+func (r *Reconciler) admittedHTTPRouteRules(route *gatewayv1.HTTPRoute) ([]gatewayv1.HTTPRouteRule, string, error) {
+	grpc := model.HTTPProfileRouteKind(route) == model.GRPCRouteKind
+	partial := !grpc && hasRuleURLRewrite(route)
+	var first error
+	var dropped []string
+	var valid []gatewayv1.HTTPRouteRule
+	for index, rule := range route.Spec.Rules {
+		err := r.validateRouteRule(rule, grpc)
+		if err == nil {
+			valid = append(valid, rule)
+			continue
+		}
+		if !partial {
+			return nil, "", err
+		}
+		if first == nil {
+			first = err
+		}
+		ruleName := strconv.Itoa(index + 1)
+		if rule.Name != nil {
+			ruleName = string(*rule.Name)
+		}
+		dropped = append(dropped, fmt.Sprintf("%s (%v)", ruleName, err))
+	}
+	if len(dropped) == 0 {
+		return route.Spec.Rules, "", nil
+	}
+	if len(valid) == 0 {
+		return nil, "", first
+	}
+	return valid, "Dropped Rule " + strings.Join(dropped, ", "), nil
+}
+
+func hasRuleURLRewrite(route *gatewayv1.HTTPRoute) bool {
+	return slices.ContainsFunc(route.Spec.Rules, func(rule gatewayv1.HTTPRouteRule) bool {
+		return slices.ContainsFunc(rule.Filters, func(filter gatewayv1.HTTPRouteFilter) bool {
+			return filter.Type == gatewayv1.HTTPRouteFilterURLRewrite
+		})
+	})
+}
+
+func (r *Reconciler) projectedRewriteRules(route *gatewayv1.HTTPRoute) ([]gatewayv1.HTTPRouteRule, string) {
+	if hasRuleURLRewrite(route) {
+		if valid, dropped, _ := r.admittedHTTPRouteRules(route); dropped != "" {
+			return valid, dropped
+		}
+	}
+	return route.Spec.Rules, ""
+}
+
 func (r *Reconciler) usesHTTPBackendGroups(route *gatewayv1.HTTPRoute) bool {
-	if r.Config.FixedHTTPResponses || r.Config.WeightedHTTPTargets || len(route.Spec.Rules) > 1 {
+	rules, _ := r.projectedRewriteRules(route)
+	if r.Config.FixedHTTPResponses || r.Config.WeightedHTTPTargets || len(rules) > 1 {
 		return true
 	}
-	if len(route.Spec.Rules) == 0 {
+	if len(rules) == 0 {
 		return false
 	}
-	rule := route.Spec.Rules[0]
+	rule := rules[0]
 	if r.Config.XBackendEnabled() && model.HTTPProfileRouteKind(route) == model.HTTPRouteKind {
 		for _, ref := range rule.BackendRefs {
 			if _, supported := model.XBackendReference(route.Namespace, ref.BackendObjectReference); supported {

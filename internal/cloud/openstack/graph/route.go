@@ -68,6 +68,7 @@ type desiredPolicy struct {
 	requestHeaderOperations  []cloud.HTTPHeaderOperation
 	responseHeaderOperations []cloud.HTTPHeaderOperation
 	requestURLRewrite        *octavia.RequestURLRewrite
+	localRewriteFallback     bool
 	method                   string
 	headers                  []cloud.HTTPHeaderMatch
 	queryParams              []cloud.HTTPQueryParamMatch

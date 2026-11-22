@@ -549,7 +549,7 @@ func TestURLRewriteIsScopedToForwardingRule(t *testing.T) {
 		RequestHeaderModifier: &gatewayv1.HTTPHeaderFilter{Remove: []string{"X-Remove"}},
 	}
 	filtered.Filters = []gatewayv1.HTTPRouteFilter{rewrite, headers}
-	f.route.Spec.Rules = []gatewayv1.HTTPRouteRule{plain, filtered}
+	f.route.Spec.Rules = []gatewayv1.HTTPRouteRule{filtered}
 	build := func() (cloud.RouteSpec, error) {
 		return f.reconciler.buildRouteModelWithReader(t.Context(), f.reader, f.route, f.gateway)
 	}
@@ -561,6 +561,7 @@ func TestURLRewriteIsScopedToForwardingRule(t *testing.T) {
 		t.Fatalf("header modifier opt-in was not enforced: %v", err)
 	}
 	f.reconciler.Config.RequestHeaderModifier = true
+	f.route.Spec.Rules = []gatewayv1.HTTPRouteRule{plain, filtered}
 	spec, err := build()
 	if err != nil || len(spec.HTTPBackends) != 1 || len(spec.HTTPBackends[0].Matches) != 2 || len(spec.HTTPRedirects) != 0 {
 		t.Fatalf("expected two forwarding matches and one backend: %#v, %v", spec, err)
@@ -574,14 +575,104 @@ func TestURLRewriteIsScopedToForwardingRule(t *testing.T) {
 		fallback.URLRewrite != nil || len(fallback.RequestHeaderOperations) != 0 {
 		t.Fatalf("unexpected forwarding match or fallback: %#v, %#v", matched, fallback)
 	}
-	f.route.Spec.Rules[1].Matches[0].Path.Type = ptr.To(gatewayv1.PathMatchExact)
+	f.route.Spec.Rules = f.route.Spec.Rules[1:]
+	f.route.Spec.Rules[0].Matches[0].Path.Type = ptr.To(gatewayv1.PathMatchExact)
 	var rejected *routeBuildError
 	if _, err := build(); !errors.As(err, &rejected) || rejected.kind != routeErrorInvalid {
 		t.Fatalf("ReplacePrefixMatch accepted an Exact predicate: %v", err)
 	}
-	f.route.Spec.Rules[1].Filters = nil
-	f.route.Spec.Rules[1].BackendRefs[0].Filters = []gatewayv1.HTTPRouteFilter{rewrite}
+	f.route.Spec.Rules[0].Filters = nil
+	f.route.Spec.Rules[0].BackendRefs[0].Filters = []gatewayv1.HTTPRouteFilter{rewrite}
 	if _, err := build(); err == nil || !strings.Contains(err.Error(), "backendRef filters") {
 		t.Fatalf("backendRef rewrite filter was accepted: %v", err)
+	}
+}
+
+func TestURLRewriteDropsInvalidRuleAndClearsPartialCondition(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	f.reconciler.Config.HTTPRequestURLRewrite = true
+	f.route.Generation = 7
+	plain := f.route.Spec.Rules[0]
+	plain.Matches = []gatewayv1.HTTPRouteMatch{{Path: &gatewayv1.HTTPPathMatch{Type: ptr.To(gatewayv1.PathMatchExact), Value: ptr.To("/ordinary")}}}
+	invalid := *plain.DeepCopy()
+	invalid.Name = ptr.To(gatewayv1.SectionName("wrong-match"))
+	invalid.Matches[0].Path.Value = ptr.To("/rewrite")
+	invalid.BackendRefs[0].Name = "not-read"
+	invalid.Filters = []gatewayv1.HTTPRouteFilter{{Type: gatewayv1.HTTPRouteFilterURLRewrite,
+		URLRewrite: &gatewayv1.HTTPURLRewriteFilter{
+			Path: &gatewayv1.HTTPPathModifier{Type: gatewayv1.PrefixMatchHTTPPathModifier, ReplacePrefixMatch: ptr.To("/new")},
+		},
+	}}
+	f.route.Spec.Rules = []gatewayv1.HTTPRouteRule{invalid, plain}
+	if err := f.client.Update(t.Context(), f.route); err != nil {
+		t.Fatal(err)
+	}
+	ready := cloud.RouteReadyResult(cloud.RouteState{L7PolicyIDs: []string{"ordinary"}})
+	provider := &recordingProvider{routeResult: &ready}
+	r := newTestReconciler(*f.reconciler, provider)
+	key := client.ObjectKeyFromObject(f.route)
+	reconcile := func() []metav1.Condition {
+		t.Helper()
+		if _, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: key}); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.client.Get(t.Context(), key, f.route); err != nil {
+			t.Fatal(err)
+		}
+		return f.route.Status.Parents[0].Conditions
+	}
+	conditions := reconcile()
+	accepted := meta.FindStatusCondition(conditions, string(gatewayv1.RouteConditionAccepted))
+	partial := meta.FindStatusCondition(conditions, string(gatewayv1.RouteConditionPartiallyInvalid))
+	if accepted == nil || accepted.Status != metav1.ConditionTrue || accepted.ObservedGeneration != 7 ||
+		partial == nil || partial.Status != metav1.ConditionTrue || partial.ObservedGeneration != 7 ||
+		!strings.HasPrefix(partial.Message, "Dropped Rule wrong-match") {
+		t.Fatalf("partially invalid route has unexpected conditions: %+v", conditions)
+	}
+	programmed := provider.routeSpecs[0]
+	if programmed.PathValue != "/ordinary" || len(programmed.HTTPBackends) != 0 || len(programmed.HTTPRedirects) != 0 {
+		t.Fatalf("the invalid rule reached the provider: %+v", programmed)
+	}
+	f.route.Generation++
+	f.route.Spec.Rules = []gatewayv1.HTTPRouteRule{plain}
+	if err := f.client.Update(t.Context(), f.route); err != nil {
+		t.Fatal(err)
+	}
+	if partial := meta.FindStatusCondition(reconcile(), string(gatewayv1.RouteConditionPartiallyInvalid)); partial != nil {
+		t.Fatalf("a fully valid route retained PartiallyInvalid: %+v", partial)
+	}
+}
+
+func TestURLRewriteHostFilterOrderAndEmptyRewrite(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	route := f.route
+	rule := &route.Spec.Rules[0]
+	rewrite := gatewayv1.HTTPRouteFilter{Type: gatewayv1.HTTPRouteFilterURLRewrite, URLRewrite: &gatewayv1.HTTPURLRewriteFilter{}}
+	rule.Filters = []gatewayv1.HTTPRouteFilter{rewrite}
+	spec, err := f.reconciler.buildRouteModelWithReader(t.Context(), f.reader, route, f.gateway)
+	if err != nil || len(spec.HTTPBackends) != 0 || len(spec.HTTPRedirects) != 0 || len(spec.Members) == 0 {
+		t.Fatalf("empty rewrite must use ordinary forwarding without opt-in: %+v, %v", spec, err)
+	}
+	f.reconciler.Config.HTTPRequestURLRewrite, f.reconciler.Config.RequestHeaderModifier = true, true
+	rewrite.URLRewrite.Hostname = ptr.To(gatewayv1.PreciseHostname("backend.example.test"))
+	host := gatewayv1.HTTPRouteFilter{Type: gatewayv1.HTTPRouteFilterRequestHeaderModifier,
+		RequestHeaderModifier: &gatewayv1.HTTPHeaderFilter{Set: []gatewayv1.HTTPHeader{{Name: "HOST", Value: "other.example.test"}}}}
+	rule.Filters = []gatewayv1.HTTPRouteFilter{host, rewrite}
+	if _, err := f.reconciler.validateRouteStructure(route); err != nil {
+		t.Fatalf("Host before URLRewrite is representable: %v", err)
+	}
+	rule.Filters = []gatewayv1.HTTPRouteFilter{rewrite, host}
+	_, err = f.reconciler.validateRouteStructure(route)
+	if err == nil {
+		t.Fatal("accepted a Host mutation after URLRewrite")
+	}
+	status := statusForRouteBuildError(err)
+	if status.acceptedReason != string(gatewayv1.RouteReasonIncompatibleFilters) ||
+		!strings.Contains(status.acceptedMessage, "cannot change Host after URLRewrite") {
+		t.Fatalf("conflicting Host order returned %+v, %v", status, err)
+	}
+	host.RequestHeaderModifier.Set[0].Value = "backend.example.test"
+	if _, err := f.reconciler.validateRouteStructure(route); err != nil {
+		t.Fatalf("an identical Host set is representable in either order: %v", err)
 	}
 }

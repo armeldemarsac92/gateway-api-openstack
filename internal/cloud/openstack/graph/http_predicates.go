@@ -28,12 +28,13 @@ import (
 )
 
 type protectedHTTPPredicate struct {
-	capability string
-	role       string
-	label      string
-	required   func(desiredPolicy) bool
-	observed   func(observedRoutePolicy) bool
-	settled    func(desiredPolicy, observedRoutePolicy) bool
+	capability             string
+	role                   string
+	label                  string
+	required               func(desiredPolicy) bool
+	observed               func(observedRoutePolicy) bool
+	settled                func(desiredPolicy, observedRoutePolicy) bool
+	additionalCapabilities func(desiredPolicy) []string
 }
 
 var (
@@ -83,6 +84,9 @@ type guardedHTTPListener struct {
 	desired, unsettled, installed bool
 	policyRoutes, frontendRoutes  map[int]bool
 	policyIDs                     map[string]bool
+	obsoleteIDs                   map[string]bool
+	unsettledDesired              bool
+	additionalCapabilities        map[string]bool
 }
 
 // protectHTTPPredicateTraffic uses the same verified listener and policy inventory
@@ -336,6 +340,15 @@ func collectGuardedHTTPListener(states map[int]guardedHTTPListener, gateway desi
 			})
 			mark(port, func(state *guardedHTTPListener) {
 				state.desired, state.unsettled = true, state.unsettled || !settled
+				state.unsettledDesired = state.unsettledDesired || !settled
+				if predicate.additionalCapabilities != nil {
+					for _, capability := range predicate.additionalCapabilities(wanted) {
+						if state.additionalCapabilities == nil {
+							state.additionalCapabilities = make(map[string]bool)
+						}
+						state.additionalCapabilities[capability] = true
+					}
+				}
 			})
 		}
 	}
@@ -350,7 +363,13 @@ func collectGuardedHTTPListener(states map[int]guardedHTTPListener, gateway desi
 				state.policyIDs = make(map[string]bool)
 			}
 			state.policyIDs[policy.policy.ID] = true
-			state.unsettled = state.unsettled || observedPort != port || !wantedAtPort[policy.role]
+			if observedPort != port || !wantedAtPort[policy.role] {
+				state.unsettled = true
+				if state.obsoleteIDs == nil {
+					state.obsoleteIDs = make(map[string]bool)
+				}
+				state.obsoleteIDs[policy.policy.ID] = true
+			}
 		})
 	}
 }

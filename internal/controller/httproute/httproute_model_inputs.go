@@ -253,6 +253,12 @@ func (r *Reconciler) collectRouteModelInputs(ctx context.Context, reader client.
 }
 
 func (r *Reconciler) collectRouteModelInputsForSets(ctx context.Context, reader client.Reader, gateway *gatewayv1.Gateway, routes []gatewayv1.HTTPRoute, namespaces []corev1.Namespace, sets map[types.NamespacedName][]gatewayv1.Listener) (*routeModelInputs, error) {
+	routes = slices.Clone(routes)
+	for i := range routes {
+		if rules, dropped := r.projectedRewriteRules(&routes[i]); dropped != "" {
+			routes[i].Spec.Rules = rules
+		}
+	}
 	input, err := graph.CollectBackendInputsWithNamespaces(ctx, reader, gateway, routes, namespaces)
 	if err != nil {
 		return nil, err

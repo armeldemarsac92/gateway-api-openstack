@@ -669,7 +669,9 @@ func (p *Provider) prepareNextGraphMutation(ctx context.Context, desired desired
 	recordBlocked(first, blocked)
 	blockedHTTPPolicy := blocked.capability == octavia.GatewayCapabilityHTTPHeaderExact || blocked.capability == octavia.GatewayCapabilityHTTPMethodMatch ||
 		blocked.capability == octavia.GatewayCapabilityHTTPQueryParamExact || blocked.capability == octavia.GatewayCapabilityHTTPRequestRedirect ||
-		blocked.capability == octavia.GatewayCapabilityRequestURLRewrite || blocked.capability == octavia.GatewayCapabilityResponseHeaderOperations || blocked.capability == octavia.GatewayCapabilityGRPCContentType
+		blocked.capability == octavia.GatewayCapabilityRequestURLRewrite ||
+		blocked.capability == octavia.GatewayCapabilityRequestHeaderOperations && rewritePolicyWriteRequiresCapability(graphRoutePart(desired, first), first.route) ||
+		blocked.capability == octavia.GatewayCapabilityResponseHeaderOperations || blocked.capability == octavia.GatewayCapabilityGRPCContentType
 	result.Outcome = result.Routes[first.routeIndex].Result.Outcome
 	seen := map[poolRouteOwner]bool{{route: first.routeIndex, backend: first.backendKey}: true}
 	for _, sibling := range plan[1:] {
@@ -751,17 +753,18 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 		if redirectPolicyWriteRequiresCapability(part, step.route) {
 			required = append(required, octavia.GatewayCapabilityHTTPRequestRedirect)
 		}
-		if rewritePolicyWriteRequiresCapability(part, step.route) {
+		requiresRewrite := rewritePolicyWriteRequiresCapability(part, step.route)
+		if requiresRewrite {
 			required = append(required, octavia.GatewayCapabilityRequestURLRewrite)
 		}
 		if step.route.reenableH2CPool || step.route.backendH2C != nil && *step.route.backendH2C ||
 			step.route.kind == routeMutationCreatePool && part.spec.BackendH2C && part.backendTLS.allowsMembers() {
 			required = append(required, octavia.GatewayCapabilityBackendH2C)
 		}
-		if len(step.route.requestHeaderOperations) != 0 {
+		if len(step.route.requestHeaderOperations) != 0 || requiresRewrite && len(step.route.policy.requestHeaderOperations) != 0 {
 			required = append(required, octavia.GatewayCapabilityRequestHeaderOperations)
 		}
-		if len(step.route.responseHeaderOperations) != 0 {
+		if len(step.route.responseHeaderOperations) != 0 || requiresRewrite && len(step.route.policy.responseHeaderOperations) != 0 {
 			required = append(required, octavia.GatewayCapabilityResponseHeaderOperations)
 		}
 		if step.route.requiresExactHeaders || len(step.route.policy.headers) != 0 && step.route.kind == routeMutationCreatePolicy ||
@@ -835,10 +838,10 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 				(!explicitlyMissing || missing.Capability == octavia.GatewayCapabilityBackendH2C) {
 				err = &unavailableRouteCapability{error: err, capability: octavia.GatewayCapabilityBackendH2C,
 					unsupportedBackendProtocol: explicitlyMissing && graphRoutePart(desired, step).spec.BackendH2C}
-			} else if len(step.route.requestHeaderOperations) != 0 && !step.withdrawHTTPPolicy &&
+			} else if slices.Contains(required, octavia.GatewayCapabilityRequestHeaderOperations) && !step.withdrawHTTPPolicy &&
 				(!explicitlyMissing || missing.Capability == octavia.GatewayCapabilityRequestHeaderOperations) {
 				err = &unavailableRouteCapability{error: err, capability: octavia.GatewayCapabilityRequestHeaderOperations}
-			} else if len(step.route.responseHeaderOperations) != 0 && !step.withdrawHTTPPolicy &&
+			} else if slices.Contains(required, octavia.GatewayCapabilityResponseHeaderOperations) && !step.withdrawHTTPPolicy &&
 				(!explicitlyMissing || missing.Capability == octavia.GatewayCapabilityResponseHeaderOperations) {
 				err = &unavailableRouteCapability{error: err, capability: octavia.GatewayCapabilityResponseHeaderOperations}
 			} else if slices.Contains(required, octavia.GatewayCapabilityHTTPHeaderExact) &&

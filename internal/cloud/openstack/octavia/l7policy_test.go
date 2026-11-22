@@ -377,3 +377,17 @@ func TestRequestURLRewritePolicyWire(t *testing.T) {
 		}
 	}
 }
+
+func TestRequestURLRewriteRejectsContradictoryForwardingTargets(t *testing.T) {
+	const row = `{"id":"policy","action":"REDIRECT_TO_POOL","redirect_pool_id":"pool","admin_state_up":true,"request_url_rewrite":{"hostname":"backend.example.test"}`
+	for _, conflicting := range []string{
+		`,"fixed_response":{"status_code":500}`,
+		`,"targets":[{"pool_id":"another","weight":1}]`,
+		`,"targets":[]`,
+	} {
+		got, err := readPolicyObservation(json.RawMessage(row + conflicting + "}"))
+		if err != nil || !got.RequestURLRewritePresent || got.HasValidRequestURLRewrite() {
+			t.Errorf("accepted a conflicting forwarding target %s: %+v, %v", conflicting, got, err)
+		}
+	}
+}

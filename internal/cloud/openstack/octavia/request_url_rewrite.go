@@ -78,8 +78,18 @@ func readRequestURLRewrite(raw json.RawMessage) *RequestURLRewrite {
 }
 
 func (o L7PolicyObservation) HasValidRequestURLRewrite() bool {
-	return o.RequestURLRewrite != nil && o.AdminState != nil && forwardsToPools(o.Policy.Action) &&
-		o.Policy.RedirectURL == "" && o.Policy.RedirectPrefix == "" && !o.RedirectRequestPresent
+	if o.RequestURLRewrite == nil || o.AdminState == nil || o.Target == nil || o.Target.FixedResponse != nil ||
+		o.Policy.RedirectURL != "" || o.Policy.RedirectPrefix != "" || o.RedirectRequestPresent {
+		return false
+	}
+	switch o.Policy.Action {
+	case string(l7policies.ActionRedirectToPool):
+		return o.Policy.RedirectPoolID != "" && o.Target.WeightedTargets == nil && !o.ExtendedTargetFields
+	case string(ActionWeightedTargets):
+		return o.Policy.RedirectPoolID == "" && string(o.PoolReference) == "null" && len(o.Target.WeightedTargets) != 0
+	default:
+		return false
+	}
 }
 
 func forwardsToPools(action string) bool {
@@ -89,8 +99,9 @@ func forwardsToPools(action string) bool {
 // RequestURLRewriteUpdate distinguishes a concrete rewrite from an explicit
 // null. The tags record that field's use across restarts and stock downgrades.
 type RequestURLRewriteUpdate struct {
-	Value *RequestURLRewrite
-	Tags  []string
+	Value           *RequestURLRewrite
+	Tags            []string
+	KeepPolicyState bool
 }
 
 func (update RequestURLRewriteUpdate) write(body map[string]any) error {
@@ -99,7 +110,9 @@ func (update RequestURLRewriteUpdate) write(body map[string]any) error {
 	}
 	policy := body["l7policy"].(map[string]any)
 	policy[requestURLRewriteField] = update.Value
-	policy["admin_state_up"] = false
+	if !update.KeepPolicyState {
+		policy["admin_state_up"] = false
+	}
 	if update.Tags != nil {
 		policy["tags"] = update.Tags
 	}

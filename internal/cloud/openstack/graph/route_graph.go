@@ -1020,7 +1020,8 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 			if policy.role == wantedPolicy.role && !policy.policy.AdminStateUp {
 				return []routeMutation{{kind: routeMutationEnablePolicy, id: policy.policy.ID,
 					policy: desiredPolicy{httpsListenerHostname: wantedPolicy.httpsListenerHostname,
-						grpcContentTypeRule: wantedPolicy.grpcContentTypeRule},
+						grpcContentTypeRule: wantedPolicy.grpcContentTypeRule, requestURLRewrite: wantedPolicy.requestURLRewrite,
+						requestHeaderOperations: wantedPolicy.requestHeaderOperations, responseHeaderOperations: wantedPolicy.responseHeaderOperations},
 					requestHeaderOperations:  wantedPolicy.requestHeaderOperations,
 					responseHeaderOperations: wantedPolicy.responseHeaderOperations,
 					requiresExactHeaders:     len(wantedPolicy.headers) != 0,
@@ -1231,6 +1232,13 @@ func buildRoutePolicyPlan(
 		// and predicates and let Octavia shift the other positions atomically.
 		if policy.Position != wantedPolicy.position {
 			plan = append(plan, routeMutation{kind: routeMutationMovePolicy, id: policy.ID, policy: wantedPolicy})
+		}
+		if wantedPolicy.requestURLRewrite != nil {
+			for i := policyPlanStart; i < len(plan); i++ {
+				plan[i].policy.requestURLRewrite = wantedPolicy.requestURLRewrite
+				plan[i].policy.requestHeaderOperations = wantedPolicy.requestHeaderOperations
+				plan[i].policy.responseHeaderOperations = wantedPolicy.responseHeaderOperations
+			}
 		}
 	}
 	return plan, disablePlan, state

@@ -19,7 +19,9 @@ package graph
 import (
 	"context"
 	"errors"
+	"maps"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
@@ -70,20 +72,8 @@ func (p *Provider) protectHTTPURLPolicyTraffic(ctx context.Context, desired desi
 	if len(states) == 0 {
 		return plan
 	}
-	available := false
-	waiting := "Octavia " + predicate.label + " mode is disabled"
-	if disposition == cloud.GraphEnsure && enabled && actual.loadBalancer != nil {
-		err := p.verifyGatewayHTTPURLCapabilities(ctx, desired, actual, []string{predicate.capability})
-		var missing *octavia.MissingGatewayCapability
-		switch {
-		case err == nil:
-			available = true
-		case errors.As(err, &missing):
-			waiting = "Octavia does not advertise " + predicate.capability
-		default:
-			waiting = "Could not verify Octavia capability " + predicate.capability
-		}
-	}
+	verified := make(map[string]error)
+	unavailable := make(map[string]bool)
 	blocked := make(map[string]bool)
 	unverifiedClosed := make(map[string]bool)
 	requiresWithdrawal := make(map[string]bool)
@@ -96,7 +86,31 @@ func (p *Provider) protectHTTPURLPolicyTraffic(ctx context.Context, desired desi
 		for id := range state.policyIDs {
 			installedOn[id] = listener.ID
 		}
-		if available && !state.unsettled {
+		waiting := "Octavia " + predicate.label + " mode is disabled"
+		available := disposition == cloud.GraphEnsure && enabled && actual.loadBalancer != nil
+		if available && state.desired {
+			required := append([]string{predicate.capability}, slices.Sorted(maps.Keys(state.additionalCapabilities))...)
+			key := strings.Join(required, ",")
+			err, found := verified[key]
+			if !found {
+				err = p.verifyGatewayHTTPURLCapabilities(ctx, desired, actual, required)
+				verified[key] = err
+			}
+			var missing *octavia.MissingGatewayCapability
+			available = err == nil
+			switch {
+			case errors.As(err, &missing):
+				waiting = "Octavia does not advertise " + missing.Capability
+			case err != nil:
+				waiting = "Could not verify Octavia capability " + strings.Join(required, ", ")
+			}
+		}
+		unavailable[listener.ID] = !available
+		if predicate.capability == octavia.GatewayCapabilityRequestURLRewrite && (!state.desired || available) &&
+			listener.ProvisioningStatus == "ACTIVE" && localOnlyRewriteWithdrawalOnPort(plan, state) {
+			continue
+		}
+		if available && !state.unsettled && (predicate.capability != octavia.GatewayCapabilityRequestURLRewrite || listener.ProvisioningStatus != "ERROR") {
 			continue
 		}
 		reason := "Waiting for verified Octavia " + predicate.label + " policies on this listener"
@@ -144,7 +158,7 @@ func (p *Provider) protectHTTPURLPolicyTraffic(ctx context.Context, desired desi
 			if requiresWithdrawal[listenerID] && !httpURLPolicyCleanup(step.route.kind) && !clearRewrite && !targetWithdrawal {
 				return true
 			}
-			return !available && writeRequiresCapability(graphRoutePart(desired, step), step.route)
+			return unavailable[listenerID] && writeRequiresCapability(graphRoutePart(desired, step), step.route)
 		}
 		return false
 	})

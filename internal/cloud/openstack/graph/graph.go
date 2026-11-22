@@ -1154,8 +1154,6 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 			if err := validateDefaultPoolListener(actual.listener, lb.ID); err != nil {
 				return actual, err
 			}
-		} else if desired.spec.Gateway.Disposition == cloud.GraphEnsure && actual.listener.ProvisioningStatus == "ERROR" {
-			return actual, cloud.NewProviderError(cloud.ErrorCategoryResourceFailure, fmt.Errorf("octavia listener %s provisioning status is ERROR", actual.listener.ID))
 		}
 		if len(lb.VIPSecurityGroupIDs) > 0 && len(actual.listener.AllowedCIDRs) > 0 {
 			return actual, fmt.Errorf("%w: custom VIP security groups cannot be combined with listener allowed CIDRs", cloud.ErrOwnershipConflict)
@@ -1195,6 +1193,10 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 	if !defaultPool && actual.listener != nil && strings.HasPrefix(actual.listener.ProvisioningStatus, "PENDING_") {
 		actual.outcome = p.progressingOutcome("Waiting for Octavia listener provisioning")
 		return actual, nil
+	}
+	if !defaultPool && actual.listener != nil && desired.spec.Gateway.Disposition == cloud.GraphEnsure &&
+		actual.listener.ProvisioningStatus == "ERROR" && !rewriteListenerNeedsRecovery(desired, actual, *actual.listener) {
+		return actual, cloud.NewProviderError(cloud.ErrorCategoryResourceFailure, fmt.Errorf("octavia listener %s provisioning status is ERROR", actual.listener.ID))
 	}
 	if err := validateObservedPolicyLayout(actual.routes); err != nil {
 		return actual, err
