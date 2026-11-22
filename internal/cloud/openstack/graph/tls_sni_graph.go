@@ -246,7 +246,8 @@ func (p *Provider) sniOwnership(identity Identity, tags []string, project, id, r
 
 func (p *Provider) observeSNIGraph(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, inventory octavia.ListenerInventory) (observedGatewayGraph, error) {
 	lb := actual.loadBalancer
-	if !slices.Contains(lb.Tags, sniProfileTag) {
+	profileTag := sniListenerProfileTag(desired.protocol)
+	if !slices.Contains(lb.Tags, profileTag) || slices.Contains(lb.Tags, otherSNIListenerProfileTag(desired.protocol)) {
 		return actual, fmt.Errorf("%w: load balancer lacks the TLS SNI profile identity", cloud.ErrOwnershipConflict)
 	}
 	if err := crossCheckCompleteChildInventory("load balancer", lb.ID, "listener", lb.Listeners, inventory.Items, func(listener listeners.Listener) string { return listener.ID }); err != nil {
@@ -261,8 +262,10 @@ func (p *Provider) observeSNIGraph(ctx context.Context, desired desiredGatewayGr
 	if listener != nil {
 		actual.state.ListenerID = listener.ID
 		if listener.Protocol != cloud.ListenerProtocolTCP || listener.ProtocolPort != desired.spec.Gateway.Spec.ListenerPort ||
-			!slices.Contains(listener.Tags, sniProfileTag) || len(listener.Loadbalancers) != 1 || listener.Loadbalancers[0].ID != lb.ID ||
-			!actual.adminObserved[listener.ID] || listener.DefaultTlsContainerRef != "" || len(listener.SniContainerRefs) != 0 {
+			!slices.Contains(listener.Tags, profileTag) || slices.Contains(listener.Tags, otherSNIListenerProfileTag(desired.protocol)) ||
+			len(listener.Loadbalancers) != 1 || listener.Loadbalancers[0].ID != lb.ID || !actual.adminObserved[listener.ID] ||
+			desired.protocol == cloud.ListenerProtocolTLSSNI && (inventory.TCPTLSTermination[listener.ID] ||
+				listener.DefaultTlsContainerRef != "" || len(listener.SniContainerRefs) != 0) {
 			return actual, fmt.Errorf("%w: listener differs from the TLS SNI profile binding", cloud.ErrOwnershipConflict)
 		}
 		if err := requireListenerDefaultPoolInventory(lb.ID, inventory); err != nil {
@@ -316,6 +319,16 @@ func (p *Provider) observeSNIGraph(ctx context.Context, desired desiredGatewayGr
 			pool.Loadbalancers[0].ID != lb.ID || pool.MonitorID != "" || poolInventory.BackendH2C[pool.ID] ||
 			len(pool.Listeners) > 1 || (len(pool.Listeners) == 1 && (listener == nil || pool.Listeners[0].ID != listener.ID)) {
 			return actual, fmt.Errorf("%w: invalid TLS SNI pool relationship", cloud.ErrOwnershipConflict)
+		}
+		if desired.protocol == cloud.ListenerProtocolTLSTerminate && desired.spec.Gateway.Disposition == cloud.GraphEnsure &&
+			!poolInventory.BackendTLS[pool.ID].EnabledObserved {
+			message := "Waiting to verify that TCP TLS pool transport is plaintext"
+			actual.outcome = p.progressingOutcome(message)
+			actual.rawTLSVerified = false
+			if listener != nil && listener.AdminStateUp && lb.ProvisioningStatus == "ACTIVE" {
+				actual.withdrawTLS = &graphMutation{kind: graphDisableListener, redactTLSError: true, sniWithdrawal: true, message: message}
+			}
+			return actual, nil
 		}
 		members, unreported, err := p.octavia.ListMembersWithAdminState(ctx, pool.ID, pools.ListMembersOpts{ProjectID: p.projectID})
 		if err != nil {
@@ -430,7 +443,8 @@ func (fragment *observedSNIFragment) matches(wanted desiredSNIFragment) bool {
 
 func sniFrontendObserved(desired desiredGatewayGraph, actual observedGatewayGraph) bool {
 	lb, listener := actual.loadBalancer, actual.listener
-	if desired.spec.Gateway.Disposition != cloud.GraphEnsure || lb == nil || !lb.AdminStateUp ||
+	if desired.spec.Gateway.Disposition != cloud.GraphEnsure ||
+		desired.protocol == cloud.ListenerProtocolTLSTerminate && (!actual.rawTLSCapabilityVerified || !actual.rawTLSVerified) || lb == nil || !lb.AdminStateUp ||
 		listener == nil || !listener.AdminStateUp || listener.DefaultPoolID != "" ||
 		desired.spec.Gateway.Spec.ExternalNetworkID != "" && actual.state.FloatingIPAddress == "" {
 		return false
@@ -785,10 +799,15 @@ func (p *Provider) executeSNIMutation(ctx context.Context, actual observedGatewa
 	}
 	switch step.kind {
 	case sniCreatePool:
-		_, err := p.octavia.CreatePool(ctx, pools.CreateOpts{
+		opts := pools.CreateOpts{
 			Protocol: pools.ProtocolTCP, LBMethod: pools.LBMethodRoundRobin, LoadbalancerID: actual.state.LoadBalancerID,
 			Name: resourceName(step.target.route.Identity, roleSNIPool), AdminStateUp: boolPointer(true), Tags: tagsFor(roleSNIPool),
-		})
+		}
+		var builder pools.CreateOptsBuilder = opts
+		if actual.protocol == cloud.ListenerProtocolTLSTerminate {
+			builder = octavia.PlaintextTCPPoolOpts{CreateOpts: opts}
+		}
+		_, err := p.octavia.CreatePool(ctx, builder)
 		return err
 	case sniCreateMember:
 		_, err := p.octavia.CreateMember(ctx, step.parentID, pools.CreateMemberOpts{
@@ -830,7 +849,12 @@ func (p *Provider) verifySNICapability(ctx context.Context, desired desiredGatew
 		provider = actual.loadBalancer.Provider
 	}
 	required := []string{octavia.GatewayCapabilityTLSSNIPassthrough}
-	if graphUsesSNISuffix(desired, actual) {
+	if desired.protocol == cloud.ListenerProtocolTLSTerminate {
+		if actual.rawTLSCapabilityVerified {
+			return nil
+		}
+		required = []string{octavia.GatewayCapabilityTCPTLSTermination}
+	} else if graphUsesSNISuffix(desired, actual) {
 		required = append(required, octavia.GatewayCapabilityTLSSNISuffix)
 	}
 	if err := p.octavia.VerifyGatewayCapabilities(ctx, provider, required...); err != nil {
@@ -854,7 +878,7 @@ func graphUsesSNISuffix(desired desiredGatewayGraph, actual observedGatewayGraph
 }
 
 func (p *Provider) withdrawUndiscoverableSNI(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, cause error) (cloud.GatewayGraphResult, error) {
-	outcome := p.progressingOutcome("Octavia TLS SNI passthrough capability is unavailable")
+	outcome := p.progressingOutcome("Octavia TLS SNI capability is unavailable")
 	result := cloud.GatewayGraphResult{
 		Outcome: outcome, Gateway: cloud.GatewayResult{State: actual.state, Outcome: outcome},
 		Routes: sniRouteResults(desired.sni, cloud.RouteResult{Outcome: outcome}),

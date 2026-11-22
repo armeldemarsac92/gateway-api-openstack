@@ -652,3 +652,175 @@ func testSNIListener() gatewayv1.Listener {
 	return gatewayv1.Listener{Name: "sni", Port: 443, Protocol: gatewayv1.TLSProtocolType,
 		TLS: &gatewayv1.ListenerTLSConfig{Mode: ptr.To(gatewayv1.TLSModePassthrough)}}
 }
+
+func TestTLSRouteTerminateUsesCertificateBindingAndListenerHostname(t *testing.T) {
+	cfg := testConfig()
+	cfg.OperatorHTTPS, cfg.TCPTLSTermination = true, true
+	gateway := programmedTestGateway(cfg)
+	listener := testHTTPSListener("sni", 8443)
+	listener.Protocol = gatewayv1.TLSProtocolType
+	listener.Hostname = ptr.To(gatewayv1.Hostname("tls.example.com"))
+	listener.AllowedRoutes = &gatewayv1.AllowedRoutes{Kinds: []gatewayv1.RouteGroupKind{{Kind: tlsRouteKind}}}
+	listener.TLS.Mode = ptr.To(gatewayv1.TLSModeTerminate)
+	listener.TLS.CertificateRefs[0].Namespace = ptr.To(gatewayv1.Namespace("certs"))
+	gateway.Spec.Listeners = []gatewayv1.Listener{listener}
+	gateway.Annotations[cfg.GatewayListenerProtocolAnnotation()] = cloud.ListenerProtocolTLSTerminate
+	gateway.Annotations[cfg.GatewayListenerPortAnnotation()] = "8443"
+	topology := testBoundTopology()
+	topology.Topology.MemberMode = cloud.MemberModeEndpoint
+	if err := controller.BindGatewayTopology(cfg, gateway, topology); err != nil {
+		t.Fatal(err)
+	}
+	class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "openstack"}, Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName}}
+	route := testSNIRoute(gateway, "route", gateway.Namespace)
+	service, endpoints := testSNIBackend(gateway.Namespace, "service-a", "192.0.2.101")
+	grant := &gatewayv1.ReferenceGrant{
+		ObjectMeta: metav1.ObjectMeta{Name: "certificate", Namespace: "certs"},
+		Spec: gatewayv1.ReferenceGrantSpec{
+			From: []gatewayv1.ReferenceGrantFrom{{Group: gatewayv1.GroupName, Kind: "Gateway", Namespace: gatewayv1.Namespace(gateway.Namespace)}},
+			To:   []gatewayv1.ReferenceGrantTo{{Kind: "Secret", Name: ptr.To(gatewayv1.ObjectName("certificate"))}},
+		},
+	}
+	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(class, gateway, route).WithObjects(class, gateway, route, service, endpoints, grant).Build()
+	const certificate = "https://barbican.example/v1/secrets/approved"
+	var last cloud.GatewayGraphNode
+	r := newTestReconciler(Reconciler{Client: kube, APIReader: kube, Config: cfg, Coordinator: &graph.Coordinator{},
+		Certificates: resolveHTTPSFunc(func(ctx context.Context, _ *gatewayv1.Gateway, _ *gatewayv1.Listener) (string, gatewayv1.ListenerConditionReason) {
+			if err := kube.Get(ctx, client.ObjectKeyFromObject(grant), &gatewayv1.ReferenceGrant{}); err != nil {
+				return "", gatewayv1.ListenerReasonRefNotPermitted
+			}
+			return certificate, ""
+		}),
+	}, httpsGraphProvider(func(_ context.Context, spec cloud.GatewayGraphSpec) (cloud.GatewayGraphResult, error) {
+		last = spec.Gateway
+		result := cloud.GatewayGraphResult{Outcome: cloud.ReadyOutcome(), Gateway: cloud.GatewayReadyResult(cloud.GatewayState{VIPAddress: "192.0.2.10"})}
+		if last.Disposition == cloud.GraphEnsure && last.TCPTLSCertificateRef != "" {
+			result.Routes = []cloud.RouteGraphResult{{
+				Identity: controller.RouteIdentity(cfg, gateway, route),
+				Result:   cloud.RouteReadyResult(cloud.RouteState{}),
+			}}
+		}
+		return result, nil
+	}))
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(gateway)}
+	if requests := r.gatewayRequestsForCertificateGrant(t.Context(), grant); !slices.Equal(requests, []ctrl.Request{request}) {
+		t.Fatalf("certificate grant requests = %#v", requests)
+	}
+	reconcile := func() {
+		t.Helper()
+		if _, err := r.Reconcile(t.Context(), request); err != nil {
+			t.Fatal(err)
+		}
+		if err := kube.Get(t.Context(), request.NamespacedName, gateway); err != nil {
+			t.Fatal(err)
+		}
+		if err := kube.Get(t.Context(), client.ObjectKeyFromObject(route), route); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reconcile()
+	if last.Spec.ListenerProtocol != cloud.ListenerProtocolTLSTerminate || last.TCPTLSCertificateRef != certificate ||
+		len(last.TLSSNIRoutes) != 1 || last.TLSSNIRoutes[0].Hostname != string(*listener.Hostname) ||
+		!slices.Equal(last.TLSSNIRoutes[0].Members, []cloud.Member{{Address: "192.0.2.101", Port: 9443}}) {
+		t.Fatalf("Gateway graph = %#v", last)
+	}
+	status := gateway.Status.Listeners[0]
+	if status.AttachedRoutes != 1 || !equality.Semantic.DeepEqual(status.SupportedKinds, supportedRouteKinds(tlsRouteKind)) ||
+		!meta.IsStatusConditionTrue(status.Conditions, string(gatewayv1.ListenerConditionAccepted)) ||
+		!meta.IsStatusConditionTrue(route.Status.Parents[0].Conditions, cfg.Domain()+"/Programmed") {
+		t.Fatalf("Listener = %#v, route = %#v", status, route.Status)
+	}
+	route.Spec.Hostnames = []gatewayv1.Hostname{*listener.Hostname}
+	if err := kube.Update(t.Context(), route); err != nil {
+		t.Fatal(err)
+	}
+	reconcile()
+	if len(last.TLSSNIRoutes) != 1 || last.TLSSNIRoutes[0].Hostname != string(*listener.Hostname) ||
+		!meta.IsStatusConditionTrue(route.Status.Parents[0].Conditions, cfg.Domain()+"/Programmed") {
+		t.Fatalf("named upstream route graph = %#v, status = %#v", last, route.Status)
+	}
+
+	foreign := route.Status.Parents[0].DeepCopy()
+	foreign.ControllerName = "other.example/controller"
+	route.Status.Parents = append(route.Status.Parents, *foreign)
+	if err := kube.Status().Update(t.Context(), route); err != nil {
+		t.Fatal(err)
+	}
+	controller.SetCondition(&class.Status.Conditions, controller.Condition(string(gatewayv1.GatewayClassConditionStatusSupportedVersion),
+		metav1.ConditionFalse, string(gatewayv1.GatewayClassReasonUnsupportedVersion), "Unsupported version", class.Generation))
+	if err := kube.Status().Update(t.Context(), class); err != nil {
+		t.Fatal(err)
+	}
+	reconcile()
+	owned := route.Status.Parents[0].Conditions
+	if last.Disposition != cloud.GraphWithdrawTLS || last.TCPTLSCertificateRef != "" ||
+		!meta.IsStatusConditionFalse(gateway.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed)) ||
+		!meta.IsStatusConditionFalse(gateway.Status.Listeners[0].Conditions, string(gatewayv1.ListenerConditionProgrammed)) ||
+		!meta.IsStatusConditionFalse(owned, cfg.Domain()+"/Programmed") || meta.FindStatusCondition(owned, cfg.Domain()+"/ForwardingTarget") != nil ||
+		!meta.IsStatusConditionTrue(owned, string(gatewayv1.RouteConditionAccepted)) ||
+		!equality.Semantic.DeepEqual(route.Status.Parents[1], *foreign) {
+		t.Fatalf("version skew: graph = %#v Gateway = %#v listeners = %#v route = %#v", last, gateway.Status.Conditions, gateway.Status.Listeners, route.Status)
+	}
+	controller.SetCondition(&class.Status.Conditions, controller.Condition(string(gatewayv1.GatewayClassConditionStatusSupportedVersion),
+		metav1.ConditionTrue, string(gatewayv1.GatewayClassReasonSupportedVersion), "Supported version", class.Generation))
+	if err := kube.Status().Update(t.Context(), class); err != nil {
+		t.Fatal(err)
+	}
+	reconcile()
+	if !meta.IsStatusConditionTrue(gateway.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed)) ||
+		!meta.IsStatusConditionTrue(route.Status.Parents[0].Conditions, cfg.Domain()+"/Programmed") {
+		t.Fatalf("programming did not recover: Gateway = %#v route = %#v", gateway.Status.Conditions, route.Status)
+	}
+
+	if err := kube.Delete(t.Context(), grant); err != nil {
+		t.Fatal(err)
+	}
+	reconcile()
+	status = gateway.Status.Listeners[0]
+	refs := meta.FindStatusCondition(status.Conditions, string(gatewayv1.ListenerConditionResolvedRefs))
+	if last.TCPTLSCertificateRef != "" || refs == nil || refs.Status != metav1.ConditionFalse || refs.Reason != string(gatewayv1.ListenerReasonRefNotPermitted) ||
+		!meta.IsStatusConditionFalse(route.Status.Parents[0].Conditions, cfg.Domain()+"/Programmed") {
+		t.Fatalf("certificate revocation graph = %#v, listener = %#v, route = %#v", last, status, route.Status)
+	}
+
+	r.Config.TCPTLSTermination = false
+	reconcile()
+	if last.Disposition != cloud.GraphWithdrawTLS || last.TCPTLSCertificateRef != "" ||
+		last.Spec.ListenerProtocol != cloud.ListenerProtocolTLSTerminate ||
+		!meta.IsStatusConditionFalse(route.Status.Parents[0].Conditions, string(gatewayv1.RouteConditionAccepted)) {
+		t.Fatalf("opt-out graph = %#v, route = %#v", last, route.Status)
+	}
+}
+
+func TestTLSListenerModeStatus(t *testing.T) {
+	cfg := testConfig()
+	termination := testHTTPSListener("terminate", 8443)
+	termination.Protocol = gatewayv1.TLSProtocolType
+	passthrough := testSNIListener()
+	passthrough.Port = termination.Port
+	gateway := &gatewayv1.Gateway{Spec: gatewayv1.GatewaySpec{Listeners: []gatewayv1.Listener{termination}}}
+	r := &Reconciler{Config: cfg}
+	verify := func(reason gatewayv1.ListenerConditionReason) {
+		t.Helper()
+		_, err := SupportedListenersForConfig(r.Config, gateway)
+		if err == nil {
+			t.Fatal("listener configuration should be rejected")
+		}
+		r.setGatewayFailure(gateway, err)
+		for _, listener := range gateway.Status.Listeners {
+			accepted := meta.FindStatusCondition(listener.Conditions, string(gatewayv1.ListenerConditionAccepted))
+			if accepted == nil || accepted.Status != metav1.ConditionFalse || accepted.Reason != string(reason) || listener.AttachedRoutes != 0 {
+				t.Fatalf("listener %s Accepted = %#v, routes = %d, expected %s", listener.Name, accepted, listener.AttachedRoutes, reason)
+			}
+		}
+	}
+	verify(gatewayv1.ListenerReasonUnsupportedValue)
+	gateway.Spec.Listeners = append(gateway.Spec.Listeners, passthrough)
+	r.Config.TCPTLSTermination, r.Config.TLSSNIPassthrough = true, true
+	verify(gatewayv1.ListenerReasonProtocolConflict)
+	for _, listener := range gateway.Status.Listeners {
+		if len(listener.SupportedKinds) != 0 {
+			t.Fatalf("conflicting listener %s advertises route kinds %v", listener.Name, listener.SupportedKinds)
+		}
+	}
+}

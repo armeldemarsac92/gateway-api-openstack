@@ -36,13 +36,14 @@ type gatewayProviderWarning struct {
 }
 
 type gatewayScope struct {
-	gateway      *gatewayv1.Gateway
-	original     *gatewayv1.Gateway
-	gatewayClass *gatewayv1.GatewayClass
-	managed      bool
-	skipPatch    bool
-	warnings     []gatewayProviderWarning
-	patchCause   error
+	gateway                  *gatewayv1.Gateway
+	original                 *gatewayv1.Gateway
+	gatewayClass             *gatewayv1.GatewayClass
+	managed                  bool
+	skipPatch                bool
+	warnings                 []gatewayProviderWarning
+	patchCause               error
+	rawTLSVersionUnsupported bool
 }
 
 func (r *Reconciler) newGatewayScope(

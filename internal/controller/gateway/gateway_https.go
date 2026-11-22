@@ -439,6 +439,9 @@ func (r *Reconciler) observeGatewayTLSWithdrawal(ctx context.Context, request gr
 		request.Identity != controller.StoredGatewayIdentity(r.Config, expected) {
 		return graph.GatewayInput{}, errGatewayChanged
 	}
+	if r.boundListenerProtocol(expected) == cloud.ListenerProtocolTLSTerminate {
+		return r.rawTLSWithdrawalInput(ctx, expected, request.Identity)
+	}
 	return r.tlsWithdrawalInput(ctx, expected, request.Identity)
 }
 
@@ -453,7 +456,8 @@ func httpsPorts(gateway *gatewayv1.Gateway) []int {
 }
 
 func (r *Reconciler) withdrawBoundTLS(ctx context.Context, gateway *gatewayv1.Gateway) (ctrl.Result, bool, error) {
-	if controller.GatewayListenerScope(r.Config, gateway) != gatewayv1.HTTPProtocolType {
+	if controller.GatewayListenerScope(r.Config, gateway) != gatewayv1.HTTPProtocolType &&
+		r.boundListenerProtocol(gateway) != cloud.ListenerProtocolTLSTerminate {
 		return ctrl.Result{}, true, nil
 	}
 	if r.Writer == nil {

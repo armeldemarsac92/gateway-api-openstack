@@ -88,7 +88,7 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 				return nil
 			},
 		}
-		if snapshot.boundListenerProtocol == gatewayv1.TLSProtocolType {
+		if snapshot.boundListenerProtocol == gatewayv1.TLSProtocolType || snapshot.boundListenerProtocol == cloud.ListenerProtocolTLSTerminate {
 			input.ReportRoutes = func(ctx context.Context, result cloud.GatewayGraphResult, providerErr error) error {
 				if providerErr != nil || result.Outcome.State != cloud.OutcomeReady || result.Gateway.AddressIssue != "" {
 					return nil
@@ -114,6 +114,10 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 		input.ObserveTLS = func(ctx context.Context) (graph.GatewayInput, error) {
 			return r.tlsWithdrawalInput(ctx, binding, request.Identity)
 		}
+	} else if r.boundListenerProtocol(binding) == cloud.ListenerProtocolTLSTerminate {
+		input.ObserveTLS = func(ctx context.Context) (graph.GatewayInput, error) {
+			return r.rawTLSWithdrawalInput(ctx, binding, request.Identity)
+		}
 	}
 	if err != nil {
 		return input, err
@@ -130,6 +134,9 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 	}
 	input.Validate = func(ctx context.Context) error { return r.sealGatewayMutationSnapshot(ctx, snapshot) }
 	if snapshot.listener.Protocol == gatewayv1.TLSProtocolType {
+		if terminatesTLS(snapshot.listener) {
+			input.Node.TCPTLSCertificateRef = r.resolveCertificate(ctx, snapshot.gateway, snapshot.listener).tls.CertificateRef
+		}
 		observed, err := r.observeSNIRoutes(ctx, snapshot)
 		if err != nil {
 			return input, err
@@ -149,6 +156,15 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 		input.ReportRoutes = func(ctx context.Context, result cloud.GatewayGraphResult, providerErr error) error {
 			if err := validate(ctx); err != nil {
 				return err
+			}
+			if terminatesTLS(snapshot.listener) {
+				current, err := input.ObserveTLS(ctx)
+				if err != nil {
+					return err
+				}
+				if current.Node.TCPTLSCertificateRef == "" || current.Node.TCPTLSCertificateRef != input.Node.TCPTLSCertificateRef {
+					result.Routes = nil
+				}
 			}
 			return r.reportSNIRoutes(ctx, snapshot, observed, result, providerErr)
 		}

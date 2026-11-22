@@ -47,15 +47,45 @@ import (
 
 const tlsRouteKind gatewayv1.Kind = "TLSRoute"
 
-func hasSNIPassthroughListener(gateway *gatewayv1.Gateway) bool {
+func hasTLSListener(gateway *gatewayv1.Gateway) bool {
 	return slices.ContainsFunc(gateway.Spec.Listeners, func(l gatewayv1.Listener) bool {
 		return l.Protocol == gatewayv1.TLSProtocolType
 	})
 }
 
+func terminatesTLS(listener *gatewayv1.Listener) bool {
+	return listener.Protocol == gatewayv1.TLSProtocolType && listener.TLS != nil &&
+		(listener.TLS.Mode == nil || *listener.TLS.Mode == gatewayv1.TLSModeTerminate)
+}
+
+func listenerBindingProtocol(listener *gatewayv1.Listener) gatewayv1.ProtocolType {
+	if terminatesTLS(listener) {
+		return cloud.ListenerProtocolTLSTerminate
+	}
+	return listenerFamily(listener)
+}
+
+func tlsListenerModeEnabled(config controller.Config, listener *gatewayv1.Listener) bool {
+	if terminatesTLS(listener) {
+		return config.TCPTLSTermination
+	}
+	return config.TLSSNIPassthrough && listener.TLS != nil &&
+		listener.TLS.Mode != nil && *listener.TLS.Mode == gatewayv1.TLSModePassthrough
+}
+
+func allowsSNISuffix(config controller.Config, listener *gatewayv1.Listener) bool {
+	return terminatesTLS(listener) || config.TLSSNISuffix
+}
+
+func mixedTLSModes(listeners []gatewayv1.Listener, listener gatewayv1.Listener) bool {
+	return listener.Protocol == gatewayv1.TLSProtocolType && slices.ContainsFunc(listeners, func(peer gatewayv1.Listener) bool {
+		return peer.Protocol == gatewayv1.TLSProtocolType && peer.Port == listener.Port && terminatesTLS(&peer) != terminatesTLS(&listener)
+	})
+}
+
 func validateSNITopology(listener *gatewayv1.Listener, topology classconfig.Resolved) error {
 	if listener.Protocol == gatewayv1.TLSProtocolType && topology.Topology.MemberMode != cloud.MemberModeEndpoint {
-		return &classconfig.InvalidParametersError{Message: "TLS SNI passthrough requires Endpoint member mode"}
+		return &classconfig.InvalidParametersError{Message: "TLSRoute requires Endpoint member mode"}
 	}
 	return nil
 }
@@ -150,7 +180,7 @@ func (r *Reconciler) observeSNIRoutes(ctx context.Context, snapshot *gatewayMuta
 			if err := r.resolveSNIBackend(ctx, snapshot, entry); err != nil {
 				return nil, err
 			}
-			if r.Config.TLSSNISuffix && len(entry.targets) == 0 {
+			if allowsSNISuffix(r.Config, snapshot.listener) && len(entry.targets) == 0 {
 				for _, hostname := range entry.hostnames {
 					for broader := range owners {
 						if amphora.SNISuffixCovers(broader, hostname) {
@@ -215,7 +245,7 @@ func (r *Reconciler) admitSNIRoute(ctx context.Context, snapshot *gatewayMutatio
 		return nil
 	}
 	if len(route.Spec.ParentRefs) != 1 {
-		entry.reject(gatewayv1.RouteReasonUnsupportedValue, "TLS SNI passthrough requires one Gateway parentRef")
+		entry.reject(gatewayv1.RouteReasonUnsupportedValue, "TLSRoute requires one Gateway parentRef")
 		return nil
 	}
 	var namespaces []corev1.Namespace
@@ -232,7 +262,7 @@ func (r *Reconciler) admitSNIRoute(ctx context.Context, snapshot *gatewayMutatio
 		entry.reject(gatewayv1.RouteReasonNotAllowedByListeners, "The listener does not allow this TLSRoute kind or namespace")
 		return nil
 	}
-	hostnames, err := intersectSNIHostnames(listener, route, r.Config.TLSSNISuffix)
+	hostnames, err := intersectSNIHostnames(listener, route, allowsSNISuffix(r.Config, listener))
 	if err != nil {
 		entry.reject(gatewayv1.RouteReasonUnsupportedValue, err.Error())
 		return nil
@@ -243,7 +273,7 @@ func (r *Reconciler) admitSNIRoute(ctx context.Context, snapshot *gatewayMutatio
 	}
 	if len(route.Spec.Rules) != 1 || len(route.Spec.Rules[0].BackendRefs) != 1 ||
 		ptr.Deref(route.Spec.Rules[0].BackendRefs[0].Weight, 1) != 1 {
-		entry.reject(gatewayv1.RouteReasonUnsupportedValue, "TLS SNI passthrough requires one rule and one backendRef of weight 1")
+		entry.reject(gatewayv1.RouteReasonUnsupportedValue, "TLSRoute requires one rule and one backendRef of weight 1")
 		return nil
 	}
 	entry.hostnames = hostnames

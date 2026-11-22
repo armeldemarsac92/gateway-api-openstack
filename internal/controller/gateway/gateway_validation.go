@@ -100,15 +100,16 @@ func SupportedListenersForConfig(config controller.Config, gateway *gatewayv1.Ga
 	}
 	var listeners []*gatewayv1.Listener
 	switch {
-	case config.TLSSNIPassthrough && hasSNIPassthroughListener(gateway):
+	case config.TLSRoutesEnabled() && hasTLSListener(gateway):
 		if len(gateway.Spec.Listeners) != 1 {
-			return nil, fmt.Errorf("TLS SNI passthrough requires a dedicated Gateway with one listener")
+			return nil, fmt.Errorf("TLSRoute requires a dedicated Gateway with one listener")
 		}
 		listener := &gateway.Spec.Listeners[0]
-		if listener.Port < 1 || listener.Port > 65535 || listener.TLS == nil ||
-			listener.TLS.Mode == nil || *listener.TLS.Mode != gatewayv1.TLSModePassthrough ||
-			len(listener.TLS.CertificateRefs) != 0 || len(listener.TLS.Options) != 0 {
-			return nil, fmt.Errorf("TLS SNI passthrough requires a valid port and Passthrough mode without certificates or TLS options")
+		if listener.Port < 1 || listener.Port > 65535 || !tlsListenerModeEnabled(config, listener) || len(listener.TLS.Options) != 0 {
+			return nil, fmt.Errorf("TLSRoute requires an enabled TLS mode, a valid port and no TLS options")
+		}
+		if !terminatesTLS(listener) && len(listener.TLS.CertificateRefs) != 0 {
+			return nil, fmt.Errorf("TLS passthrough mode does not support certificate references")
 		}
 		if listener.Hostname != nil {
 			if err := amphora.ValidateHostname(string(*listener.Hostname)); err != nil {
@@ -120,7 +121,7 @@ func SupportedListenersForConfig(config controller.Config, gateway *gatewayv1.Ga
 		}
 		listeners = append(listeners, listener)
 	case len(gateway.Spec.Listeners) == 1 && gateway.Spec.Listeners[0].Protocol == gatewayv1.TLSProtocolType:
-		return nil, fmt.Errorf("TLS SNI passthrough requires explicit controller opt-in")
+		return nil, fmt.Errorf("TLSRoute requires explicit controller opt-in")
 	case usesHTTPSProfile(config, gateway):
 		listeners := httpsProfileListeners(config, gateway)
 		if len(listeners) == 0 {
@@ -366,7 +367,7 @@ func listenerRouteKind(protocol gatewayv1.ProtocolType) gatewayv1.Kind {
 }
 
 func listenerSupportsRouteKind(config controller.Config, listener gatewayv1.Listener, ref gatewayv1.RouteGroupKind) bool {
-	return (listener.Protocol != gatewayv1.TLSProtocolType || config.TLSSNIPassthrough) && isRouteGroupKind(ref, listenerRouteKind(listener.Protocol)) ||
+	return (listener.Protocol != gatewayv1.TLSProtocolType || tlsListenerModeEnabled(config, &listener)) && isRouteGroupKind(ref, listenerRouteKind(listener.Protocol)) ||
 		listener.Protocol == gatewayv1.HTTPProtocolType && config.GRPCExactMethodEnabled() && isRouteGroupKind(ref, model.GRPCRouteKind)
 }
 

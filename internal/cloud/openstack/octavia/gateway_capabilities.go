@@ -35,6 +35,7 @@ const (
 	GatewayCapabilityHTTPSListenerIsolation  = "https_listener_isolation_v1"
 	GatewayCapabilityTLSSNIPassthrough       = "tls_sni_passthrough_v1"
 	GatewayCapabilityTLSSNISuffix            = "tls_sni_suffix_v1"
+	GatewayCapabilityTCPTLSTermination       = "tcp_tls_termination_v1"
 )
 
 // MissingGatewayCapability reports an explicit negative capability discovery.
