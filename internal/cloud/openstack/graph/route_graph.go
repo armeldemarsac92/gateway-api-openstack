@@ -996,7 +996,7 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 					requestHeaderOperations:  wantedPolicy.requestHeaderOperations,
 					responseHeaderOperations: wantedPolicy.responseHeaderOperations,
 					requiresExactHeaders:     len(wantedPolicy.headers) != 0,
-					requiresExactQueryParams: len(wantedPolicy.queryParams) != 0, requiresHTTPMethod: wantedPolicy.method != ""}}, state, nil
+					requiresExactQueryParams: wantedPolicy.requiresExactQueryParams(), requiresHTTPMethod: wantedPolicy.method != ""}}, state, nil
 			}
 		}
 	}

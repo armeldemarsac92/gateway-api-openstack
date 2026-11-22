@@ -32,17 +32,18 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia/amphora"
 )
 
-// Amphora evaluates redirect actions before pool selection. Inverted stock L7
+// Amphora evaluates redirect actions before pool selection. Inverted L7
 // rules exclude requests belonging to higher-priority forward actions.
 type redirectGuard struct {
 	ruleType    l7policies.RuleType
 	compareType l7policies.CompareType
 	value       string
+	key         string
 }
 
 var (
 	errExactHeaderRedirectPrecedence     = errors.New("cannot preserve Octavia redirect precedence with an overlapping higher-priority forwarding rule that adds an exact HTTP header condition")
-	errExactQueryParamRedirectPrecedence = errors.New("cannot preserve Octavia redirect precedence with an overlapping higher-priority forwarding rule that adds an exact HTTP query parameter condition")
+	errExactQueryParamRedirectPrecedence = errors.New("exact HTTP query parameter exceptions exceed the redirect policy encoding limits")
 	errHTTPMethodRedirectPrecedence      = errors.New("cannot preserve Octavia redirect precedence with an overlapping higher-priority forwarding rule that adds an HTTP method condition")
 )
 
@@ -119,11 +120,17 @@ func hostContains(outer, inner string) bool {
 // domain only the additional exceptions introduced there. This keeps a
 // host-specific forwarding rule from suppressing a redirect on other hosts.
 type redirectDomain struct {
-	host     string
-	paths    []redirectPath
-	shadowed bool
-	active   *redirectDomain
-	children []string
+	host            string
+	paths           []redirectPath
+	queryExceptions []redirectQueryException
+	shadowed        bool
+	active          *redirectDomain
+	children        []string
+}
+
+type redirectQueryException struct {
+	path   redirectPath // Empty when the forward path covers the redirect.
+	params []cloud.HTTPQueryParamMatch
 }
 
 func parentDomain(host, root string, domains map[string]*redirectDomain) *redirectDomain {
@@ -178,7 +185,7 @@ func redirectCells(match cloud.HTTPPathMatch, forwards []cloud.HTTPPathMatch) ([
 	root := &redirectDomain{host: match.Hostname}
 	domains := map[string]*redirectDomain{root.host: root}
 	ordered := []*redirectDomain{root}
-	var unsupportedMethod, unsupportedHeaders, unsupportedQueryParams bool
+	var unsupportedMethod, unsupportedHeaders bool
 	for _, f := range forwards {
 		if f.HTTPListenerHostname != match.HTTPListenerHostname || f.HTTPSListenerHostname != match.HTTPSListenerHostname || f.Precedence >= match.Precedence || f.Method != "" && match.Method != "" && f.Method != match.Method {
 			continue
@@ -198,13 +205,14 @@ func redirectCells(match cloud.HTTPPathMatch, forwards []cloud.HTTPPathMatch) ([
 		if err != nil {
 			return nil, err
 		}
-		var queryDisjoint, queryAddsCondition bool
+		var queryDisjoint bool
+		var extraParams []cloud.HTTPQueryParamMatch
 		for _, param := range forwardParams {
 			i := slices.IndexFunc(match.QueryParams, func(other cloud.HTTPQueryParamMatch) bool {
 				return other.Name == param.Name
 			})
 			if i < 0 {
-				queryAddsCondition = true
+				extraParams = append(extraParams, param)
 			} else if match.QueryParams[i].Value != param.Value {
 				queryDisjoint = true
 				break
@@ -223,18 +231,22 @@ func redirectCells(match cloud.HTTPPathMatch, forwards []cloud.HTTPPathMatch) ([
 			unsupportedHeaders = true
 			continue
 		}
-		if queryAddsCondition {
-			unsupportedQueryParams = true
-			continue
-		}
 		d := domains[host]
 		if d == nil {
 			d = &redirectDomain{host: host}
 			domains[host] = d
 			ordered = append(ordered, d)
 		}
-		d.shadowed = d.shadowed || covers
-		d.paths = append(d.paths, path)
+		if len(extraParams) != 0 {
+			exception := redirectQueryException{params: extraParams}
+			if !covers {
+				exception.path = path
+			}
+			d.queryExceptions = append(d.queryExceptions, exception)
+		} else {
+			d.shadowed = d.shadowed || covers
+			d.paths = append(d.paths, path)
+		}
 	}
 	if root.shadowed {
 		return nil, nil
@@ -244,9 +256,6 @@ func redirectCells(match cloud.HTTPPathMatch, forwards []cloud.HTTPPathMatch) ([
 	}
 	if unsupportedHeaders {
 		return nil, errExactHeaderRedirectPrecedence
-	}
-	if unsupportedQueryParams {
-		return nil, errExactQueryParamRedirectPrecedence
 	}
 	// A wildcard ancestor has fewer literal DNS labels than its descendants.
 	sort.Slice(ordered[1:], func(i, j int) bool {
@@ -266,7 +275,9 @@ func redirectCells(match cloud.HTTPPathMatch, forwards []cloud.HTTPPathMatch) ([
 			continue
 		}
 		d.paths = minimalRedirectPaths(append(d.paths, parent.paths...))
-		if !d.shadowed && slices.Equal(d.paths, parent.paths) {
+		addsExceptions := len(d.queryExceptions) != 0
+		d.queryExceptions = append(d.queryExceptions, parent.queryExceptions...)
+		if !d.shadowed && !addsExceptions && slices.Equal(d.paths, parent.paths) {
 			d.active = parent.active
 			continue
 		}
@@ -284,16 +295,14 @@ func redirectCells(match cloud.HTTPPathMatch, forwards []cloud.HTTPPathMatch) ([
 			if err != nil {
 				return nil, err
 			}
-			cell.guards = append(cell.guards, redirectGuard{l7policies.TypeHostName, l7policies.CompareTypeRegex, regex})
+			cell.guards = append(cell.guards, redirectGuard{ruleType: l7policies.TypeHostName, compareType: l7policies.CompareTypeRegex, value: regex})
 		}
 		for _, path := range d.paths {
-			policies, _, err := httpPathPolicies(cloud.HTTPPathMatch{PathType: path.kind, PathValue: path.value}, true)
+			guards, err := redirectPathGuards(path)
 			if err != nil {
 				return nil, err
 			}
-			for _, policy := range policies {
-				cell.guards = append(cell.guards, redirectGuard{l7policies.TypePath, policy.compareType, policy.path})
-			}
+			cell.guards = append(cell.guards, guards...)
 		}
 		positives := len(match.Headers) + len(match.QueryParams)
 		if usesHTTPPathPredicate(match) {
@@ -311,9 +320,94 @@ func redirectCells(match cloud.HTTPPathMatch, forwards []cloud.HTTPPathMatch) ([
 		if count := len(cell.guards) + positives; count > maxOctaviaL7RulesPerPolicy {
 			return nil, fmt.Errorf("controller encoding of redirect for host %q and path %q requires %d rules in one policy, exceeding the Octavia limit of %d", d.host, match.PathValue, count, maxOctaviaL7RulesPerPolicy)
 		}
-		cells = append(cells, cell)
+		alternatives := []redirectCell{cell}
+		for _, exception := range d.queryExceptions {
+			if exception.path.kind != "" && slices.ContainsFunc(d.paths, func(path redirectPath) bool {
+				return path.contains(exception.path)
+			}) {
+				continue
+			}
+			var err error
+			alternatives, err = excludeRedirectQueryMatch(alternatives, exception, positives)
+			if err != nil {
+				return nil, err
+			}
+		}
+		cells = append(cells, alternatives...)
 	}
 	return cells, nil
+}
+
+func redirectPathGuards(path redirectPath) ([]redirectGuard, error) {
+	policies, _, err := httpPathPolicies(cloud.HTTPPathMatch{PathType: path.kind, PathValue: path.value}, true)
+	if err != nil {
+		return nil, err
+	}
+	var guards []redirectGuard
+	for _, policy := range policies {
+		guards = append(guards, redirectGuard{ruleType: l7policies.TypePath, compareType: policy.compareType, value: policy.path})
+	}
+	return guards, nil
+}
+
+// Octavia requires all rules in a policy to match. To exclude a higher
+// forwarding match, create an alternative for each of its conditions that
+// could fail. A path with multiple encodings fails only if they all fail.
+func excludeRedirectQueryMatch(cells []redirectCell, exception redirectQueryException, positives int) ([]redirectCell, error) {
+	options := make([][]redirectGuard, 0, len(exception.params)+1)
+	if exception.path.kind != "" {
+		pathGuards, err := redirectPathGuards(exception.path)
+		if err != nil {
+			return nil, err
+		}
+		options = append(options, pathGuards)
+	}
+	for _, param := range exception.params {
+		options = append(options, []redirectGuard{{ruleType: httpQueryParamExactRuleType,
+			compareType: l7policies.CompareTypeEqual, key: param.Name, value: param.Value}})
+	}
+	// Bound the expansion of overlapping AND matches on one hostname.
+	const maxAlternatives = 64
+	var next []redirectCell
+	for _, cell := range cells {
+		failures := options
+		if slices.ContainsFunc(options, func(option []redirectGuard) bool {
+			return containsRedirectGuards(cell.guards, option)
+		}) {
+			failures = [][]redirectGuard{nil}
+		}
+		for _, option := range failures {
+			guards := slices.Clone(cell.guards)
+			for _, guard := range option {
+				if !slices.Contains(guards, guard) {
+					guards = append(guards, guard)
+				}
+			}
+			if len(guards)+positives > maxOctaviaL7RulesPerPolicy {
+				guards = compactRedirectGuards(guards)
+			}
+			if len(guards)+positives > maxOctaviaL7RulesPerPolicy {
+				return nil, fmt.Errorf("%w: more than %d rules in one policy", errExactQueryParamRedirectPrecedence, maxOctaviaL7RulesPerPolicy)
+			}
+			if slices.ContainsFunc(next, func(existing redirectCell) bool {
+				return containsRedirectGuards(guards, existing.guards)
+			}) {
+				continue
+			}
+			next = slices.DeleteFunc(next, func(existing redirectCell) bool {
+				return containsRedirectGuards(existing.guards, guards)
+			})
+			next = append(next, redirectCell{hostname: cell.hostname, guards: guards})
+			if len(next) > maxAlternatives {
+				return nil, fmt.Errorf("%w: the controller allows %d policies per redirect match and hostname", errExactQueryParamRedirectPrecedence, maxAlternatives)
+			}
+		}
+	}
+	return next, nil
+}
+
+func containsRedirectGuards(guards, subset []redirectGuard) bool {
+	return !slices.ContainsFunc(subset, func(guard redirectGuard) bool { return !slices.Contains(guards, guard) })
 }
 
 // HAProxy evaluates every rule on a policy as a conjunction. Several inverted
@@ -321,6 +415,11 @@ func redirectCells(match cloud.HTTPPathMatch, forwards []cloud.HTTPPathMatch) ([
 func compactRedirectGuards(guards []redirectGuard) []redirectGuard {
 	const maxValueLength = 255
 	var result []redirectGuard
+	for _, guard := range guards {
+		if guard.ruleType != l7policies.TypeHostName && guard.ruleType != l7policies.TypePath {
+			result = append(result, guard)
+		}
+	}
 	for _, kind := range []l7policies.RuleType{l7policies.TypeHostName, l7policies.TypePath} {
 		pattern := ""
 		length := 0
@@ -341,7 +440,7 @@ func compactRedirectGuards(guards []redirectGuard) []redirectGuard {
 				continue
 			}
 			if length != 0 && length+1+size > maxValueLength {
-				result = append(result, redirectGuard{kind, l7policies.CompareTypeRegex, pattern})
+				result = append(result, redirectGuard{ruleType: kind, compareType: l7policies.CompareTypeRegex, value: pattern})
 				pattern = ""
 				length = 0
 			}
@@ -353,7 +452,7 @@ func compactRedirectGuards(guards []redirectGuard) []redirectGuard {
 			length += size
 		}
 		if length > 0 {
-			result = append(result, redirectGuard{kind, l7policies.CompareTypeRegex, pattern})
+			result = append(result, redirectGuard{ruleType: kind, compareType: l7policies.CompareTypeRegex, value: pattern})
 		}
 	}
 	return result

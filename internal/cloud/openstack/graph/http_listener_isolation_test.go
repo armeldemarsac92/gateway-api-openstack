@@ -236,7 +236,7 @@ func TestPlainHTTPHostnameReplacementAtOctaviaRuleLimit(t *testing.T) {
 	wanted := desiredPolicy{role: rolePolicyExact, position: 1, path: "/path", compareType: l7policies.CompareTypeEqual}
 	for i := 1; i < maxOctaviaL7RulesPerPolicy; i++ {
 		wanted.httpHostExclusions = append(wanted.httpHostExclusions, redirectGuard{
-			l7policies.TypeHostName, l7policies.CompareTypeRegex, fmt.Sprintf("^host-%d[.]example[.]test$", i),
+			ruleType: l7policies.TypeHostName, compareType: l7policies.CompareTypeRegex, value: fmt.Sprintf("^host-%d[.]example[.]test$", i),
 		})
 	}
 	desired := desiredRoute{policies: []desiredPolicy{wanted}}

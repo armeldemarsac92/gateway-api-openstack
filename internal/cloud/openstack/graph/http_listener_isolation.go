@@ -73,7 +73,7 @@ func addPlainHTTPExclusions(hosts []string, policy *desiredPolicy, scalarHostnam
 			return err
 		}
 		policy.httpHostExclusions = append(policy.httpHostExclusions, redirectGuard{
-			l7policies.TypeHostName, l7policies.CompareTypeRegex, value,
+			ruleType: l7policies.TypeHostName, compareType: l7policies.CompareTypeRegex, value: value,
 		})
 	}
 	if len(rulesFor(*policy, scalarHostname)) > maxOctaviaL7RulesPerPolicy {

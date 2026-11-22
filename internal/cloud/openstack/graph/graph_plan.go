@@ -762,7 +762,7 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 			step.route.rule.ruleType == httpHeaderExactRuleType {
 			required = append(required, octavia.GatewayCapabilityHTTPHeaderExact)
 		}
-		if step.route.requiresExactQueryParams || len(step.route.policy.queryParams) != 0 && step.route.kind == routeMutationCreatePolicy ||
+		if step.route.requiresExactQueryParams || step.route.policy.requiresExactQueryParams() && step.route.kind == routeMutationCreatePolicy ||
 			step.route.rule.ruleType == httpQueryParamExactRuleType {
 			required = append(required, octavia.GatewayCapabilityHTTPQueryParamExact)
 		}

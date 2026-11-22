@@ -607,9 +607,13 @@ func rulesFor(policy desiredPolicy, hostnameRuleValue string) []desiredRule {
 	}
 	if policy.redirect != nil {
 		for _, guard := range policy.redirect.guards {
+			base := roleRuleRedirectGuard
+			if guard.ruleType == httpQueryParamExactRuleType {
+				base = openstackidentity.RoleRuleHTTPQueryParamExact
+			}
 			rules = append(rules, desiredRule{
-				role:     policyRuleRole(policy, roleRuleRedirectGuard, redirectGuardKey(guard)),
-				ruleType: guard.ruleType, compareType: guard.compareType, value: guard.value, invert: true,
+				role:     policyRuleRole(policy, base, redirectGuardKey(guard)),
+				ruleType: guard.ruleType, compareType: guard.compareType, key: guard.key, value: guard.value, invert: true,
 			})
 		}
 	}

@@ -166,6 +166,9 @@ func (p *Provider) appendRedirectPolicies(part *desiredRoute, redirect cloud.HTT
 }
 
 func redirectGuardKey(guard redirectGuard) string {
+	if guard.ruleType == httpQueryParamExactRuleType {
+		return openstackidentity.HTTPRedirectKey("query-exclusion", guard.key, guard.value)
+	}
 	return openstackidentity.HTTPRedirectKey(string(guard.ruleType), string(guard.compareType), guard.value)
 }
 
