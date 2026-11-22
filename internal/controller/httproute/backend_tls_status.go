@@ -83,6 +83,13 @@ func (r *backendTLSPolicyStatusReconciler) observeAncestors(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
+	if r.routes.Config.GRPCExactMethodEnabled() {
+		grpc, err := r.routes.forRouteKind(model.GRPCRouteKind).listLiveRoutes(ctx)
+		if err != nil {
+			return nil, err
+		}
+		routes = append(routes, grpc...)
+	}
 	gateways := map[types.NamespacedName]*gatewayv1.Gateway{}
 	for i := range routes {
 		route := &routes[i]
@@ -106,13 +113,9 @@ func (r *backendTLSPolicyStatusReconciler) observeAncestors(ctx context.Context,
 	if len(gateways) == 0 {
 		return nil, nil
 	}
-	grpc, err := r.routes.forRouteKind(model.GRPCRouteKind).listLiveRoutes(ctx)
-	if err != nil {
-		return nil, err
-	}
 	peers := make(map[types.NamespacedName][]gatewayv1.HTTPRoute, len(gateways))
 	setParents := make(map[types.NamespacedName]types.NamespacedName)
-	for _, route := range slices.Concat(routes, grpc) {
+	for _, route := range routes {
 		seen := map[types.NamespacedName]struct{}{}
 		for _, ref := range route.Spec.ParentRefs {
 			key, err := gatewayKeyForRouteParent(ctx, r.routes.APIReader, &route, ref, setParents)
@@ -126,37 +129,48 @@ func (r *backendTLSPolicyStatusReconciler) observeAncestors(ctx context.Context,
 		}
 	}
 	ancestors := make(map[types.NamespacedName]backendTLSPolicyConditions, len(gateways))
-	availability := backendTLSUnknown
-	checked := false
+	availability := make(map[bool]backendTLSAvailability, 2)
 	for key, gateway := range gateways {
-		selection, supportedProtocol, err := r.observeGatewayConsumer(ctx, policy, gateway, targets, peers[key])
+		consumer, err := r.observeGatewayConsumer(ctx, policy, gateway, targets, peers[key])
 		if err != nil {
 			return nil, err
 		}
-		if selection == nil {
+		if consumer.selection == nil {
 			continue
 		}
-		if selection.Accepted.Status == metav1.ConditionTrue && supportedProtocol && !checked {
-			availability, checked = r.routes.backendTLSAvailability(ctx), true
+		if _, checked := availability[consumer.requiresHTTP2]; !checked &&
+			consumer.selection.Accepted.Status == metav1.ConditionTrue && consumer.supportedProtocol {
+			availability[consumer.requiresHTTP2] = r.routes.backendTLSAvailability(ctx, consumer.requiresHTTP2)
 		}
 		ancestors[key] = backendTLSPolicyConditions{
-			accepted: availability.apply(selection.Accepted, supportedProtocol), resolvedRefs: selection.ResolvedRefs,
+			accepted:     availability[consumer.requiresHTTP2].apply(consumer.selection.Accepted, consumer.supportedProtocol),
+			resolvedRefs: consumer.selection.ResolvedRefs,
 		}
 	}
 	return ancestors, nil
 }
 
-func (r *backendTLSPolicyStatusReconciler) observeGatewayConsumer(ctx context.Context, policy *gatewayv1.BackendTLSPolicy, gateway *gatewayv1.Gateway, targets []types.NamespacedName, peers []gatewayv1.HTTPRoute) (*backendtls.PolicyResult, bool, error) {
+type backendTLSConsumer struct {
+	selection         *backendtls.PolicyResult
+	supportedProtocol bool
+	requiresHTTP2     bool
+}
+
+func (r *backendTLSPolicyStatusReconciler) observeGatewayConsumer(ctx context.Context, policy *gatewayv1.BackendTLSPolicy, gateway *gatewayv1.Gateway, targets []types.NamespacedName, peers []gatewayv1.HTTPRoute) (backendTLSConsumer, error) {
 	admission, err := r.routes.observeRouteGraphAdmission(ctx, gateway, peers, nil)
 	if err != nil {
-		return nil, false, err
+		return backendTLSConsumer{}, err
 	}
 	input := model.Input{BackendH2C: r.routes.Config.BackendH2C}
-	consumers := map[types.NamespacedName]map[string]struct{}{}
+	type source struct {
+		kind      gatewayv1.Kind
+		namespace string
+	}
+	consumers := map[types.NamespacedName]map[source]struct{}{}
 	grantsRequired := false
 	for i := range peers {
 		route := &peers[i]
-		if _, eligible := admission.eligible[routeKey(route)]; !eligible || model.HTTPProfileRouteKind(route) != model.HTTPRouteKind {
+		if _, eligible := admission.eligible[routeKey(route)]; !eligible {
 			continue
 		}
 		services := routeBackendTLSServices(route)
@@ -166,9 +180,9 @@ func (r *backendTLSPolicyStatusReconciler) observeGatewayConsumer(ctx context.Co
 				continue
 			}
 			if consumers[key] == nil {
-				consumers[key] = map[string]struct{}{}
+				consumers[key] = map[source]struct{}{}
 			}
-			consumers[key][route.Namespace] = struct{}{}
+			consumers[key][source{kind: model.HTTPProfileRouteKind(route), namespace: route.Namespace}] = struct{}{}
 			usesTarget = true
 			grantsRequired = grantsRequired || route.Namespace != key.Namespace
 		}
@@ -179,13 +193,13 @@ func (r *backendTLSPolicyStatusReconciler) observeGatewayConsumer(ctx context.Co
 	if grantsRequired {
 		input.ReferenceGrants, err = graph.ListBackendReferenceGrants(ctx, r.routes.APIReader, policy.Namespace)
 		if err != nil {
-			return nil, false, err
+			return backendTLSConsumer{}, err
 		}
 	}
-	for key, namespaces := range consumers {
+	for key, sources := range consumers {
 		authorized := false
-		for namespace := range namespaces {
-			if model.BackendReferenceAllowed(namespace, key, input.ReferenceGrants) {
+		for consumer := range sources {
+			if model.BackendReferenceAllowedFor(consumer.kind, consumer.namespace, key, input.ReferenceGrants) {
 				authorized = true
 				break
 			}
@@ -196,17 +210,16 @@ func (r *backendTLSPolicyStatusReconciler) observeGatewayConsumer(ctx context.Co
 		var service corev1.Service
 		if err := r.routes.APIReader.Get(ctx, key, &service); err != nil {
 			if err := client.IgnoreNotFound(err); err != nil {
-				return nil, false, err
+				return backendTLSConsumer{}, err
 			}
 			continue
 		}
 		input.Services = append(input.Services, service)
 	}
 	if err := graph.CollectBackendTLSInputs(ctx, r.routes.APIReader, &input, nil); err != nil {
-		return nil, false, err
+		return backendTLSConsumer{}, err
 	}
-	var selected *backendtls.PolicyResult
-	supportedProtocol := true
+	result := backendTLSConsumer{supportedProtocol: true}
 	for i := range input.Routes {
 		route := &input.Routes[i]
 		for _, rule := range route.Spec.Rules {
@@ -214,17 +227,18 @@ func (r *backendTLSPolicyStatusReconciler) observeGatewayConsumer(ctx context.Co
 				if backend.Weight == 0 {
 					continue
 				}
-				for _, result := range backend.BackendTLS.Policies {
-					if result.UID != policy.UID || result.Generation != policy.Generation {
+				for _, selection := range backend.BackendTLS.Policies {
+					if selection.UID != policy.UID || selection.Generation != policy.Generation {
 						continue
 					}
-					selected = &result
-					supportedProtocol = supportedProtocol && supportsBackendTLS(backend, true)
+					result.selection = &selection
+					result.supportedProtocol = result.supportedProtocol && supportsBackendTLS(backend)
+					result.requiresHTTP2 = result.requiresHTTP2 || model.HTTPProfileRouteKind(route) == model.GRPCRouteKind
 				}
 			}
 		}
 	}
-	return selected, supportedProtocol, nil
+	return result, nil
 }
 
 // liveGatewayRoutePeers refreshes candidate routes before evaluating attachment.

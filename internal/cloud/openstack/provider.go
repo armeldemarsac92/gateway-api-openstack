@@ -62,6 +62,11 @@ func (p *Provider) BackendTLSAvailable(ctx context.Context) (bool, error) {
 	return p.graph.BackendTLSAvailable(ctx)
 }
 
+// GRPCBackendTLSAvailable discovers hostname validation and mandatory h2 negotiation.
+func (p *Provider) GRPCBackendTLSAvailable(ctx context.Context) (bool, error) {
+	return p.graph.GRPCBackendTLSAvailable(ctx)
+}
+
 // HTTPSListenerIsolationAvailable checks the virtual listener capability in this region.
 func (p *Provider) HTTPSListenerIsolationAvailable(ctx context.Context) (bool, error) {
 	return p.graph.HTTPSListenerIsolationAvailable(ctx)

@@ -76,6 +76,8 @@ type Reconciler struct {
 	APIReader client.Reader
 	// BackendTLSAvailable checks authenticated regional provider support.
 	BackendTLSAvailable func(context.Context) (bool, error)
+	// GRPCBackendTLSAvailable also checks enforcement of negotiated h2.
+	GRPCBackendTLSAvailable func(context.Context) (bool, error)
 	// Recorder publishes Kubernetes Events.
 	Recorder events.EventRecorder
 	// Config contains immutable controller configuration.

@@ -88,26 +88,31 @@ func (r *Reconciler) liveBackendReferenceRejection(ctx context.Context, namespac
 // liveRouteBackendReferenceRejection checks grants independently of the
 // bundle version and Service readiness.
 func (r *Reconciler) liveRouteBackendReferenceRejection(ctx context.Context, route *gatewayv1.HTTPRoute) (*routeBuildError, error) {
+	_, rejection, err := r.observeRouteBackendPermissions(ctx, route)
+	return rejection, err
+}
+
+func (r *Reconciler) observeRouteBackendPermissions(ctx context.Context, route *gatewayv1.HTTPRoute) (map[string][]gatewayv1.ReferenceGrant, *routeBuildError, error) {
 	observed := make(map[string][]gatewayv1.ReferenceGrant)
 	var rejection *routeBuildError
 	for _, rule := range route.Spec.Rules {
 		for _, ref := range rule.BackendRefs {
 			if target, xbackend := model.XBackendReference(route.Namespace, ref.BackendObjectReference); xbackend && r.Config.XBackendEnabled() && model.HTTPProfileRouteKind(route) == model.HTTPRouteKind && target.Namespace != route.Namespace {
-				return &routeBuildError{kind: routeErrorRefNotPermitted, message: "XBackend must be in the same namespace as its HTTPRoute"}, nil
+				return nil, &routeBuildError{kind: routeErrorRefNotPermitted, message: "XBackend must be in the same namespace as its HTTPRoute"}, nil
 			}
 			key, supported := model.BackendServiceReference(route.Namespace, ref.BackendObjectReference)
 			if !supported || key.Namespace == route.Namespace {
 				continue
 			}
 			if r.APIReader == nil {
-				return nil, controller.ErrAPIReaderRequired
+				return nil, nil, controller.ErrAPIReaderRequired
 			}
 			grants, found := observed[key.Namespace]
 			if !found {
 				var err error
 				grants, err = graph.ListBackendReferenceGrants(ctx, r.APIReader, key.Namespace)
 				if err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 				observed[key.Namespace] = grants
 			}
@@ -116,5 +121,5 @@ func (r *Reconciler) liveRouteBackendReferenceRejection(ctx context.Context, rou
 			}
 		}
 	}
-	return rejection, nil
+	return observed, rejection, nil
 }

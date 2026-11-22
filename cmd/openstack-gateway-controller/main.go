@@ -124,7 +124,7 @@ func run(ctx context.Context) error {
 	flag.BoolVar(&tlsSNIPassthrough, "octavia-tls-sni-passthrough", false, "use the advertised Octavia TCP SNI passthrough capability for TLSRoutes")
 	flag.BoolVar(&tcpTLSTermination, "octavia-tcp-tls-termination", false, "use the advertised Octavia TCP termination capability for TLSRoutes with operator-enrolled certificates")
 	flag.BoolVar(&tlsSNISuffix, "octavia-tls-sni-suffix", false, "use the advertised Octavia wildcard SNI capability (requires --octavia-tls-sni-passthrough)")
-	flag.BoolVar(&backendTLSPolicy, "octavia-backend-tls-policy", false, "authenticate BackendTLSPolicy HTTP upstreams with the regional Octavia hostname capability and a Barbican CA (requires --octavia-microversion=2.8 or newer)")
+	flag.BoolVar(&backendTLSPolicy, "octavia-backend-tls-policy", false, "authenticate BackendTLSPolicy upstreams with the regional Octavia hostname capability and a Barbican CA (requires --octavia-microversion=2.8 or newer and regional h2 enforcement for GRPCRoute)")
 	flag.BoolVar(&initialL7Rules, "octavia-l7policy-initial-rules", false, "create disabled HTTP(S) policies with their initial rules when the regional Octavia provider advertises support")
 	flag.BoolVar(&httpsListenerIsolation, "octavia-https-listener-isolation", false, "isolate terminated HTTPS sections on a shared port using the regional Octavia capability (requires --tls-certificate-map)")
 	flag.BoolVar(&httpBackendRequestFilters, "octavia-http-backend-request-filters", false, "use the advertised Octavia capability for HTTP backendRef request filters (requires --octavia-weighted-http-targets)")
@@ -292,12 +292,13 @@ func run(ctx context.Context) error {
 		}
 	}
 	routeReconciler := &httproute.Reconciler{
-		BackendTLSAvailable: openStackProvider.BackendTLSAvailable,
-		Client:              manager.GetClient(),
-		Coordinator:         graphCoordinator,
-		APIReader:           manager.GetAPIReader(),
-		Recorder:            eventRecorder,
-		Config:              controllerConfig,
+		BackendTLSAvailable:     openStackProvider.BackendTLSAvailable,
+		GRPCBackendTLSAvailable: openStackProvider.GRPCBackendTLSAvailable,
+		Client:                  manager.GetClient(),
+		Coordinator:             graphCoordinator,
+		APIReader:               manager.GetAPIReader(),
+		Recorder:                eventRecorder,
+		Config:                  controllerConfig,
 	}
 	tcpReconciler := &l4route.Reconciler{
 		Protocol: gatewayv1.TCPProtocolType,

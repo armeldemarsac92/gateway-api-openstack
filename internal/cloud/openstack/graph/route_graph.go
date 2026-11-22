@@ -1461,12 +1461,19 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 			opts.Tags = append(opts.Tags, (*step.poolTags)...)
 		}
 		var hostname string
+		requireH2 := step.backendTLS != nil && step.backendTLS.RequireH2 != nil && *step.backendTLS.RequireH2
+		if desired.spec.GRPC && step.poolTags != nil {
+			// A protected gRPC pool starts closed. Only an independent,
+			// ownership-checked inventory can authorize reopening it.
+			opts.AdminStateUp = boolPointer(false)
+		}
 		if step.backendTLS != nil {
 			opts.TLSEnabled, opts.CATLSContainerRef = true, step.backendTLS.CAReference
 			hostname = step.backendTLS.Hostname
 		}
 		_, err = p.octavia.CreatePool(ctx, octavia.CreatePoolOpts{CreateOpts: opts,
-			BackendH2C: desired.spec.BackendH2C && desired.backendTLS.allowsMembers(), BackendTLSHostname: hostname})
+			BackendH2C:         desired.spec.BackendH2C && desired.backendTLS.allowsMembers(),
+			BackendTLSHostname: hostname, BackendTLSRequireH2: requireH2})
 	case routeMutationUpdatePool:
 		opts := pools.UpdateOpts{LBMethod: pools.LBMethodRoundRobin}
 		if step.backendH2C == nil {

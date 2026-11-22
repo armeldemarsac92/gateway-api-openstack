@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -33,6 +34,7 @@ import (
 	"sigs.k8s.io/gateway-api/pkg/features"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 )
 
@@ -161,6 +163,54 @@ func TestGatewayExcludesRemovedHostnameFromSingletonAttachedRoutes(t *testing.T)
 	if err != nil || counts.counts[survivor.Name] != 0 {
 		t.Fatalf("singleton counts before the old route status is refreshed = %v, %v", counts, err)
 	}
+}
+
+func TestGatewayReportsGRPCBackendTLSAncestorLimitUntilRouteRecovers(t *testing.T) {
+	cfg := testConfig()
+	cfg.BackendTLSPolicy, cfg.BackendH2C, cfg.FixedHTTPResponses = true, true, true
+	gateway := programmedTestGateway(cfg)
+	parent := gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name)}
+	route := &gatewayv1.GRPCRoute{
+		ObjectMeta: metav1.ObjectMeta{Namespace: gateway.Namespace, Name: "rpc", Generation: 1},
+		Spec: gatewayv1.GRPCRouteSpec{
+			CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{parent}},
+		},
+	}
+	route.Status.Parents = []gatewayv1.RouteParentStatus{{
+		ParentRef: parent, ControllerName: cfg.ControllerName,
+		Conditions: []metav1.Condition{
+			{Type: string(gatewayv1.RouteConditionAccepted), Status: metav1.ConditionTrue, ObservedGeneration: route.Generation},
+			{Type: cfg.Domain() + "/Programmed", Status: metav1.ConditionFalse, ObservedGeneration: route.Generation, Reason: backendtls.AncestorLimitReason},
+		},
+	}}
+	class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "openstack"}, Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName}}
+	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gateway, route).WithObjects(class, gateway, route).Build()
+	result := cloud.GatewayGraphResult{
+		Outcome: cloud.ReadyOutcome(),
+		Gateway: cloud.GatewayReadyResult(cloud.GatewayState{LoadBalancerID: "load-balancer", ListenerID: "listener", VIPAddress: "192.0.2.10"}),
+	}
+	r := newTestReconciler(Reconciler{Client: kube, APIReader: kube, Config: cfg, Writer: fixedGatewayGraph{result: result}}, nil)
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(gateway)}
+	status := func() *metav1.Condition {
+		t.Helper()
+		_, err := r.Reconcile(t.Context(), request)
+		require.NoError(t, err)
+		require.NoError(t, kube.Get(t.Context(), request.NamespacedName, gateway))
+		require.Len(t, gateway.Status.Listeners, 1)
+		require.EqualValues(t, 1, gateway.Status.Listeners[0].AttachedRoutes)
+		require.True(t, meta.IsStatusConditionTrue(gateway.Status.Conditions, string(gatewayv1.GatewayConditionProgrammed)))
+		return meta.FindStatusCondition(gateway.Status.Conditions, cfg.Domain()+"/BackendTLSPoliciesReady")
+	}
+	full := status()
+	require.NotNil(t, full)
+	require.Equal(t, metav1.ConditionFalse, full.Status)
+	require.Equal(t, backendtls.AncestorLimitReason, full.Reason)
+	require.Equal(t, gateway.Generation, full.ObservedGeneration)
+
+	route.Status.Parents[0].Conditions[1].Status = metav1.ConditionTrue
+	route.Status.Parents[0].Conditions[1].Reason = "Programmed"
+	require.NoError(t, kube.Status().Update(t.Context(), route))
+	require.Nil(t, status())
 }
 
 func TestGatewayReportsProvenUDPListenerWhenSiblingFails(t *testing.T) {

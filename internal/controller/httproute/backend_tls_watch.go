@@ -141,30 +141,44 @@ func (r *Reconciler) setupBackendTLSPolicyStatusController(manager ctrl.Manager)
 	status := &backendTLSPolicyStatusReconciler{routes: r}
 	policySpec := builder.WithPredicates(controller.GenerationOrDeletionChangedPredicate())
 	routeState := builder.WithPredicates(controller.HTTPRouteReconcilePredicate(r.Config))
-	policiesForRoutes := func(mapper handler.MapFunc) handler.MapFunc {
+	grpc := r.forRouteKind(model.GRPCRouteKind)
+	policiesForRoutes := func(httpRoutes, grpcRoutes handler.MapFunc) handler.MapFunc {
 		return func(ctx context.Context, object client.Object) []reconcile.Request {
-			return r.policyRequestsForRoutes(ctx, mapper(ctx, object), nil)
+			requests := r.policyRequestsForRoutes(ctx, httpRoutes(ctx, object), nil)
+			if grpcRoutes != nil {
+				requests = append(requests, grpc.policyRequestsForRoutes(ctx, grpcRoutes(ctx, object), nil)...)
+			}
+			return requests
 		}
+	}
+	policiesForPeer := func(ctx context.Context, object client.Object) []reconcile.Request {
+		var services map[types.NamespacedName]struct{}
+		switch route := object.(type) {
+		case *gatewayv1.HTTPRoute:
+			services = routeBackendTLSServices(route)
+		case *gatewayv1.GRPCRoute:
+			services = routeBackendTLSServices(model.ProjectGRPCRoute(route))
+		}
+		return append(r.policyRequestsForRoutes(ctx, r.enqueueHTTPRoutePeers(ctx, object), services),
+			grpc.policyRequestsForRoutes(ctx, grpc.enqueueHTTPRoutePeers(ctx, object), nil)...)
 	}
 	setup := ctrl.NewControllerManagedBy(manager).
 		For(&gatewayv1.BackendTLSPolicy{}).
 		Watches(&gatewayv1.BackendTLSPolicy{}, handler.EnqueueRequestsFromMapFunc(r.enqueuePoliciesForSharedService), policySpec).
 		WatchesMetadata(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.enqueuePoliciesForConfigMap)).
 		Watches(&corev1.Service{}, handler.EnqueueRequestsFromMapFunc(r.enqueuePoliciesForService), builder.WithPredicates(controller.ServicePredicate())).
-		Watches(&gatewayv1.ReferenceGrant{}, handler.EnqueueRequestsFromMapFunc(policiesForRoutes(r.enqueueHTTPRoutesForReferenceGrant)), policySpec).
-		Watches(&gatewayv1.HTTPRoute{}, handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, object client.Object) []reconcile.Request {
-			return r.policyRequestsForRoutes(ctx, r.enqueueHTTPRoutePeers(ctx, object), routeBackendTLSServices(object.(*gatewayv1.HTTPRoute)))
-		}), routeState).
-		Watches(&gatewayv1.GRPCRoute{}, handler.EnqueueRequestsFromMapFunc(policiesForRoutes(r.enqueueHTTPRoutePeers)), routeState).
-		Watches(&gatewayv1.Gateway{}, handler.EnqueueRequestsFromMapFunc(policiesForRoutes(r.enqueueHTTPRoutesForGateway)), builder.WithPredicates(controller.GatewayForHTTPRoutePredicate(r.Config))).
-		Watches(&gatewayv1.GatewayClass{}, handler.EnqueueRequestsFromMapFunc(policiesForRoutes(r.enqueueHTTPRoutesForGatewayClass)), builder.WithPredicates(controller.GatewayClassForGatewayPredicate())).
-		Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(policiesForRoutes(r.enqueueHTTPRoutesForNamespace)), builder.WithPredicates(controller.NamespacePredicate()))
+		Watches(&gatewayv1.ReferenceGrant{}, handler.EnqueueRequestsFromMapFunc(policiesForRoutes(r.enqueueHTTPRoutesForReferenceGrant, grpc.enqueueHTTPRoutesForReferenceGrant)), policySpec).
+		Watches(&gatewayv1.HTTPRoute{}, handler.EnqueueRequestsFromMapFunc(policiesForPeer), routeState).
+		Watches(&gatewayv1.GRPCRoute{}, handler.EnqueueRequestsFromMapFunc(policiesForPeer), routeState).
+		Watches(&gatewayv1.Gateway{}, handler.EnqueueRequestsFromMapFunc(policiesForRoutes(r.enqueueHTTPRoutesForGateway, grpc.enqueueHTTPRoutesForGateway)), builder.WithPredicates(controller.GatewayForHTTPRoutePredicate(r.Config))).
+		Watches(&gatewayv1.GatewayClass{}, handler.EnqueueRequestsFromMapFunc(policiesForRoutes(r.enqueueHTTPRoutesForGatewayClass, grpc.enqueueHTTPRoutesForGatewayClass)), builder.WithPredicates(controller.GatewayClassForGatewayPredicate())).
+		Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(policiesForRoutes(r.enqueueHTTPRoutesForNamespace, grpc.enqueueHTTPRoutesForNamespace)), builder.WithPredicates(controller.NamespacePredicate()))
 	served, err := controller.ListenerSetServed(manager.GetRESTMapper())
 	if err != nil {
 		return err
 	}
 	if served {
-		setup.Watches(&gatewayv1.ListenerSet{}, handler.EnqueueRequestsFromMapFunc(policiesForRoutes(r.enqueueHTTPRoutesForListenerSet)))
+		setup.Watches(&gatewayv1.ListenerSet{}, handler.EnqueueRequestsFromMapFunc(policiesForRoutes(r.enqueueHTTPRoutesForListenerSet, nil)))
 	}
 	return setup.Named("backendtlspolicy").
 		Complete(status)
@@ -203,9 +217,9 @@ func (r *Reconciler) policyRequestsForRoutes(ctx context.Context, requests []rec
 	}
 	for _, request := range requests {
 		var route gatewayv1.HTTPRoute
-		if err := r.Get(ctx, request.NamespacedName, &route); err != nil {
+		if err := r.readRoute(ctx, r.Client, request.NamespacedName, &route); err != nil {
 			if err := client.IgnoreNotFound(err); err != nil {
-				log.FromContext(ctx).Error(err, "Could not get HTTPRoute for BackendTLSPolicy", "route", request.NamespacedName)
+				log.FromContext(ctx).Error(err, "Could not get route for BackendTLSPolicy", "kind", r.kind(), "route", request.NamespacedName)
 			}
 			continue
 		}

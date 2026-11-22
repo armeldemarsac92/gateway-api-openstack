@@ -18,11 +18,17 @@ package httproute
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
+	"math/big"
 	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -33,6 +39,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
@@ -98,6 +105,150 @@ func TestBackendTLSPolicyProtectsOneWeightedShare(t *testing.T) {
 	require.NoError(t, f.client.Get(t.Context(), key, f.route))
 	require.Len(t, f.route.Status.Parents, 1)
 	require.True(t, meta.IsStatusConditionTrue(f.route.Status.Parents[0].Conditions, string(gatewayv1.RouteConditionResolvedRefs)))
+}
+
+func TestGRPCBackendTLSPolicyResolvesAndProtectsBackend(t *testing.T) {
+	f, _, grpc := newRouteElectionFixture(t)
+	f.reconciler.Config.BackendTLSPolicy = true
+	requiredH2 := true
+	f.reconciler.GRPCBackendTLSAvailable = func(context.Context) (bool, error) { return requiredH2, nil }
+	// Match the upstream fixture: a named TCP Service port 443 with no appProtocol.
+	service := f.service.DeepCopy()
+	service.Name, service.UID, service.ResourceVersion = "grpc-tls", "grpc-tls-uid", ""
+	service.Spec.Ports[0].Name, service.Spec.Ports[0].Port, service.Spec.Ports[0].AppProtocol = "btls", 443, nil
+	endpoints := f.endpoints.DeepCopy()
+	endpoints.Name, endpoints.UID, endpoints.ResourceVersion = "grpc-tls", "grpc-tls-slice", ""
+	endpoints.Labels[discoveryv1.LabelServiceName] = service.Name
+	endpoints.Ports[0].Name, endpoints.Ports[0].Port = ptr.To("btls"), ptr.To(int32(8443))
+	grpc.Spec.Rules[0].BackendRefs[0].Name = gatewayv1.ObjectName(service.Name)
+	grpc.Spec.Rules[0].BackendRefs[0].Port = ptr.To(gatewayv1.PortNumber(443))
+	projected := model.ProjectGRPCRoute(grpc)
+	require.NoError(t, f.reconciler.applyRouteBinding(projected, f.gateway))
+	grpc.Annotations, grpc.Finalizers = projected.Annotations, projected.Finalizers
+
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	cert := &x509.Certificate{SerialNumber: big.NewInt(1), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign}
+	der, err := x509.CreateCertificate(rand.Reader, cert, cert, public, private)
+	require.NoError(t, err)
+	ca := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: service.Namespace, Name: "grpc-ca", UID: "grpc-ca-uid"},
+		Data: map[string]string{"ca.crt": string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))}}
+	policy := &gatewayv1.BackendTLSPolicy{
+		ObjectMeta: metav1.ObjectMeta{Namespace: service.Namespace, Name: "grpc-tls", UID: "grpc-policy-uid", Generation: 1},
+		Spec: gatewayv1.BackendTLSPolicySpec{
+			TargetRefs: []gatewayv1.LocalPolicyTargetReferenceWithSectionName{{
+				LocalPolicyTargetReference: gatewayv1.LocalPolicyTargetReference{Kind: "Service", Name: gatewayv1.ObjectName(service.Name)},
+				SectionName:                ptr.To(gatewayv1.SectionName("btls")),
+			}},
+			Validation: gatewayv1.BackendTLSPolicyValidation{
+				Hostname: "backend.example.test", CACertificateRefs: []gatewayv1.LocalObjectReference{{Kind: "ConfigMap", Name: gatewayv1.ObjectName(ca.Name)}},
+			},
+		},
+	}
+	f.create(t, service, endpoints, grpc, ca, policy)
+	policyKey, routeKey := client.ObjectKeyFromObject(policy), client.ObjectKeyFromObject(grpc)
+	status := &backendTLSPolicyStatusReconciler{routes: f.reconciler}
+	reconcilePolicy := func() []metav1.Condition {
+		t.Helper()
+		_, err := status.Reconcile(t.Context(), ctrl.Request{NamespacedName: policyKey})
+		require.NoError(t, err)
+		require.NoError(t, f.client.Get(t.Context(), policyKey, policy))
+		for _, ancestor := range policy.Status.Ancestors {
+			if ancestor.ControllerName == f.reconciler.Config.ControllerName {
+				require.Equal(t, gatewayv1.ObjectName(f.gateway.Name), ancestor.AncestorRef.Name)
+				return ancestor.Conditions
+			}
+		}
+		return nil
+	}
+
+	provider := &recordingProvider{}
+	route := newTestReconciler(*f.reconciler, provider).forRouteKind(model.GRPCRouteKind)
+	reconcileRoute := func() cloud.HTTPBackend {
+		t.Helper()
+		provider.routeSpecs = nil
+		_, err := route.Reconcile(t.Context(), ctrl.Request{NamespacedName: routeKey})
+		require.NoError(t, err)
+		for _, spec := range provider.routeSpecs {
+			if spec.GRPC {
+				require.Len(t, spec.HTTPBackends, 1)
+				return spec.HTTPBackends[0]
+			}
+		}
+		t.Fatal("missing GRPCRoute in provider graph")
+		return cloud.HTTPBackend{}
+	}
+
+	// Pending ancestor admission must neither enroll nor send cleartext.
+	before := reconcileRoute()
+	require.NotNil(t, before.BackendTLS)
+	require.True(t, before.BackendTLS.Denied)
+	require.Empty(t, before.Members)
+	for i := range backendtls.MaxAncestors {
+		policy.Status.Ancestors = append(policy.Status.Ancestors, gatewayv1.PolicyAncestorStatus{
+			AncestorRef:    gatewayv1.ParentReference{Name: gatewayv1.ObjectName(fmt.Sprintf("foreign-%d", i))},
+			ControllerName: "foreign.example.com/gateway",
+		})
+	}
+	require.NoError(t, f.client.Status().Update(t.Context(), policy))
+	require.Nil(t, reconcilePolicy())
+	full := reconcileRoute()
+	require.NotNil(t, full.BackendTLS)
+	require.True(t, full.BackendTLS.Denied)
+	require.NoError(t, f.client.Get(t.Context(), routeKey, grpc))
+	require.Len(t, grpc.Status.Parents, 1)
+	programmed := meta.FindStatusCondition(grpc.Status.Parents[0].Conditions, f.reconciler.Config.Domain()+"/Programmed")
+	require.NotNil(t, programmed)
+	require.Equal(t, backendtls.AncestorLimitReason, programmed.Reason)
+
+	foreign := slices.Clone(policy.Status.Ancestors[:backendtls.MaxAncestors-1])
+	policy.Status.Ancestors = foreign
+	require.NoError(t, f.client.Status().Update(t.Context(), policy))
+	conditions := reconcilePolicy()
+	require.Len(t, policy.Status.Ancestors, backendtls.MaxAncestors)
+	require.Equal(t, foreign, policy.Status.Ancestors[:len(foreign)])
+	require.True(t, meta.IsStatusConditionTrue(conditions, string(gatewayv1.PolicyConditionAccepted)))
+	require.True(t, meta.IsStatusConditionTrue(conditions, string(gatewayv1.BackendTLSPolicyConditionResolvedRefs)))
+	resolved := reconcileRoute()
+	require.NotNil(t, resolved.BackendTLS)
+	require.False(t, resolved.BackendTLS.Denied)
+	require.False(t, resolved.BackendH2C)
+	require.Equal(t, "backend.example.test", resolved.BackendTLS.Hostname)
+	require.Equal(t, string(ca.UID), resolved.BackendTLS.CAConfigMapUID)
+	require.Equal(t, []cloud.Member{{Address: "192.0.2.20", Port: 8443}}, resolved.Members)
+	require.NoError(t, f.client.Get(t.Context(), routeKey, grpc))
+	require.Len(t, grpc.Status.Parents, 1)
+	require.True(t, meta.IsStatusConditionTrue(grpc.Status.Parents[0].Conditions, string(gatewayv1.RouteConditionResolvedRefs)))
+
+	requiredH2 = false
+	conditions = reconcilePolicy()
+	accepted := meta.FindStatusCondition(conditions, string(gatewayv1.PolicyConditionAccepted))
+	require.NotNil(t, accepted)
+	require.Equal(t, metav1.ConditionFalse, accepted.Status)
+	require.Equal(t, "UnsupportedProvider", accepted.Reason)
+	unavailable := reconcileRoute()
+	require.NotNil(t, unavailable.BackendTLS)
+	require.True(t, unavailable.BackendTLS.Denied)
+	require.Empty(t, unavailable.Members)
+
+	requiredH2 = true
+	require.False(t, reconcileRoute().BackendTLS.Denied)
+	require.NoError(t, f.client.Delete(t.Context(), ca))
+	conditions = reconcilePolicy()
+	require.True(t, meta.IsStatusConditionFalse(conditions, string(gatewayv1.BackendTLSPolicyConditionResolvedRefs)))
+	denied := reconcileRoute()
+	require.NotNil(t, denied.BackendTLS)
+	require.True(t, denied.BackendTLS.Denied)
+	require.False(t, denied.BackendH2C)
+	require.Empty(t, denied.Members)
+
+	require.NoError(t, f.client.Delete(t.Context(), policy))
+	removed := reconcileRoute()
+	require.Nil(t, removed.BackendTLS)
+	require.False(t, removed.BackendH2C)
+	require.Empty(t, removed.Members)
+	require.NoError(t, f.client.Get(t.Context(), routeKey, grpc))
+	require.True(t, meta.IsStatusConditionFalse(grpc.Status.Parents[0].Conditions, string(gatewayv1.RouteConditionResolvedRefs)))
 }
 
 func TestGRPCZeroWeightBackendResolvesIncompatibleTLS(t *testing.T) {
