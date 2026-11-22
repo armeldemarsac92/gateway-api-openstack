@@ -117,7 +117,8 @@ func (r *Reconciler) usesHTTPBackendGroups(route *gatewayv1.HTTPRoute) bool {
 
 func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, grpc bool) error {
 	fixedResponses := r.Config.FixedHTTPResponses || grpc
-	weightedTargets := r.Config.WeightedHTTPTargets && (!grpc || len(rule.BackendRefs) > 1)
+	weightedTargets := r.Config.WeightedHTTPTargets && (!grpc || len(rule.BackendRefs) > 1 ||
+		len(rule.BackendRefs) == 1 && ptr.Deref(rule.BackendRefs[0].Weight, 1) == 0)
 	exactHeaders := r.Config.HTTPHeaderExact
 	exactQueryParams := r.Config.HTTPQueryParamExact && r.Config.FixedHTTPResponses && !grpc
 	methodMatch := r.Config.HTTPMethodMatch && !grpc
@@ -141,7 +142,7 @@ func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, grpc bool) 
 		return nil
 	}
 	if weightedTargets {
-		return validateWeightedBackendRefs(rule.BackendRefs)
+		return validateWeightedBackendRefs(rule.BackendRefs, grpc)
 	}
 	if len(rule.BackendRefs) != 1 {
 		if grpc {
@@ -178,7 +179,7 @@ func validBackendPort(port *gatewayv1.PortNumber) bool {
 	return port != nil && *port >= 1 && *port <= 65535
 }
 
-func validateWeightedBackendRefs(refs []gatewayv1.HTTPBackendRef) error {
+func validateWeightedBackendRefs(refs []gatewayv1.HTTPBackendRef, grpc bool) error {
 	if len(refs) < 1 || len(refs) > 16 {
 		return newRouteBuildError(routeErrorUnsupported, "a weighted rule requires between 1 and 16 backendRefs")
 	}
@@ -193,7 +194,7 @@ func validateWeightedBackendRefs(refs []gatewayv1.HTTPBackendRef) error {
 		}
 		positive = positive || weight > 0
 	}
-	if !positive {
+	if !positive && !grpc {
 		return newRouteBuildError(routeErrorUnsupported, "Octavia weighted rules require a positive total weight")
 	}
 	return nil
@@ -384,9 +385,21 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 			spec.FixedHTTPRules = append(spec.FixedHTTPRules, cloud.HTTPFixedRule{RuleIndex: rule.Index})
 			continue
 		}
-		direct := len(rule.Backends) == 1 && hasHTTPBackendKey(rule.Backends[0])
+		zeroOnly := spec.GRPC && !slices.ContainsFunc(rule.Backends, func(backend model.BackendGroup) bool { return backend.Weight > 0 })
+		direct := !zeroOnly && len(rule.Backends) == 1 && hasHTTPBackendKey(rule.Backends[0])
 		weighted := cloud.HTTPWeightedRule{RuleIndex: rule.Index}
 		for _, backend := range rule.Backends {
+			if zeroOnly {
+				// Resolve the Kubernetes references without creating forwarding pools.
+				switch {
+				case backend.Diagnostic != nil:
+					firstDiagnostic = preferredBackendDiagnostic(firstDiagnostic, *backend.Diagnostic)
+				case backend.BackendTLS.Winner != nil:
+					firstDiagnostic = preferredBackendDiagnostic(firstDiagnostic, unsupportedGRPCBackendTLS())
+				}
+				weighted.Targets = append(weighted.Targets, cloud.HTTPWeightedTarget{})
+				continue
+			}
 			index, diagnostic, err := r.lowerHTTPBackend(ctx, reader, route, spec, inputs, backend, nodeAddressType, direct, groups)
 			if err != nil {
 				return model.Diagnostic{}, err
@@ -452,9 +465,7 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 	var members []cloud.Member
 	tls := inputs.backendTLSAvailability.validation(backend, model.HTTPProfileRouteKind(route) == model.HTTPRouteKind)
 	if spec.GRPC && !direct && tls != nil && tls.Denied {
-		return nil, model.Diagnostic{
-			Reason: string(gatewayv1.RouteReasonUnsupportedProtocol), Message: "GRPCRoute cannot meet the backend Service's BackendTLSPolicy",
-		}, nil
+		return nil, unsupportedGRPCBackendTLS(), nil
 	}
 	if !observed && (tls == nil || !tls.Denied) {
 		var err error
@@ -486,6 +497,12 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 	}
 	groups[key] = result
 	return result.index, result.diagnostic, nil
+}
+
+func unsupportedGRPCBackendTLS() model.Diagnostic {
+	return model.Diagnostic{
+		Reason: string(gatewayv1.RouteReasonUnsupportedProtocol), Message: "GRPCRoute cannot meet the backend Service's BackendTLSPolicy",
+	}
 }
 
 func appendHTTPPathMatch(matches []cloud.HTTPPathMatch, match cloud.HTTPPathMatch) []cloud.HTTPPathMatch {

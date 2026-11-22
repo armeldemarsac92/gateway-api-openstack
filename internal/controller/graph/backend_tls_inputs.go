@@ -49,7 +49,7 @@ func CollectBackendTLSInputs(ctx context.Context, reader client.Reader, input *m
 		kind := model.HTTPProfileRouteKind(route)
 		for _, rule := range route.Spec.Rules {
 			for _, backend := range rule.BackendRefs {
-				if ptr.Deref(backend.Weight, 1) == 0 {
+				if ptr.Deref(backend.Weight, 1) == 0 && kind != model.GRPCRouteKind {
 					continue
 				}
 				key, serviceRef := model.BackendServiceReference(route.Namespace, backend.BackendObjectReference)
@@ -65,14 +65,15 @@ func CollectBackendTLSInputs(ctx context.Context, reader client.Reader, input *m
 					continue
 				}
 				target := model.ServicePortKey{Service: key, Port: port.Port}
-				if _, observed := input.BackendTLSPolicies[target]; observed {
-					continue
+				selection, observed := input.BackendTLSPolicies[target]
+				if !observed {
+					var err error
+					selection, err = observeBackendTLS(ctx, reader, service, port, policies, cas)
+					if err != nil {
+						return err
+					}
 				}
-				selection, err := observeBackendTLS(ctx, reader, service, port, policies, cas)
-				if err != nil {
-					return err
-				}
-				if ancestor != nil && selection.Winner != nil {
+				if kind == model.HTTPRouteKind && ancestor != nil && selection.Winner != nil {
 					for i := range policies[key.Namespace] {
 						policy := &policies[key.Namespace][i]
 						if policy.Name == selection.Winner.Key.Name {

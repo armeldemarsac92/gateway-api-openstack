@@ -50,6 +50,7 @@ func httpPlanningParts(desired desiredGatewayGraph, actual observedGatewayGraph)
 		if node.Disposition == cloud.GraphEnsure {
 			authorizations = weightedPolicyAuthorizations(route, observed, demand)
 		}
+		failurePoolID := observedGRPCFailurePoolID(route, observed)
 		appendPart := func(part desiredRoute, fragment observedRouteGraph, obsolete bool) {
 			partNode := node
 			if obsolete && partNode.Disposition == cloud.GraphEnsure {
@@ -57,6 +58,7 @@ func httpPlanningParts(desired desiredGatewayGraph, actual observedGatewayGraph)
 			}
 			part.httpParts, fragment.httpParts = nil, nil
 			part.weightedAuthorizations = authorizations
+			part.grpcFailurePoolID = failurePoolID
 			if fragment.pool != nil {
 				fragment.weightedPoolHeld = uncertainTargets || heldPools[fragment.pool.ID]
 			}
@@ -76,6 +78,7 @@ func httpPlanningParts(desired desiredGatewayGraph, actual observedGatewayGraph)
 				fragment = *part
 			}
 			if backend.weightedTargets != nil {
+				backend.grpcFailurePoolID = failurePoolID
 				backend = resolveWeightedHTTPPart(backend, route, observed, servingWeightedListenerID(actual, backend))
 			} else if weight, referenced := demand[backend.backendKey]; referenced && weight == 0 && len(backend.policies) == 0 {
 				backend.zeroWeightOnly = true

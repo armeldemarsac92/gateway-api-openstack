@@ -6,9 +6,9 @@ The Hibiscus wheels for the qualified provider pair match the local builds. [Oct
 
 ## Weighted GRPCRoute backends
 
-On an HTTP listener, `--octavia-weighted-http-targets` adds support for rules with multiple Service references to the gRPC h2c profile. The configured Octavia region must advertise `weighted_http_targets_v1`. Each Service uses its own h2c pool. A reference with omitted weight has weight 1. A zero-weight reference is still validated and receives no traffic. A rule with zero total weight is rejected because the Octavia weighted action requires a positive total. Filters on individual references are unsupported.
+On an HTTP listener, `--octavia-weighted-http-targets` adds support for rules with multiple Service references to the gRPC h2c profile. The configured Octavia region must advertise `weighted_http_targets_v1`. Each forwarding Service uses its own h2c pool. A reference with omitted weight has weight 1. A zero-weight reference is still validated, including any incompatible BackendTLSPolicy, and receives no traffic. A rule with zero total weight sends its matching RPCs to the empty pool and leaves other rules active. Filters on individual references are unsupported.
 
-An invalid positive-weight reference sets the parent’s `ResolvedRefs` to `False`. The weighted action keeps that share and directs it to an empty pool owned by the route, which produces HTTP 503 and maps to gRPC `UNAVAILABLE`. During withdrawal of a previously authorized target, Octavia may briefly serve the existing weighted HTTP 500 response while the empty pool is being prepared. That response maps to gRPC `UNKNOWN`.
+An invalid positive-weight reference in a weighted rule sets the parent’s `ResolvedRefs` to `False`. Before activating weighted rules, the controller prepares an empty pool owned by the route. It can move the revoked share to that pool in place, where HTTP 503 maps to gRPC `UNAVAILABLE`. On restoration, the share stays on the empty pool until the authorized pool is ready. If an existing weighted policy predates the empty pool or the pool is unavailable at withdrawal, the controller closes the affected policy until it can safely configure the target again.
 
 ## Gateway API v1.7.0 cases
 
