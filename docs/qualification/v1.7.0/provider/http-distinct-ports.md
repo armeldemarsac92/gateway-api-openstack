@@ -2,7 +2,9 @@
 
 A Gateway can serve plain HTTP on several ports of one VIP. Requests to the same host and path can reach a different Service on each port. Octavia uses one HTTP listener per port with no default pool. Each HTTPRoute owns its forwarding policies and backend pool. A port with multiple Gateway listener sections requires distinct exact hostnames. A port with one section also accepts a wildcard or an omitted hostname. [Tenant example](../../../getting-started.md#serve-http-on-two-ports-of-one-gateway) · [Same-port sections](http-disjoint-sections.md)
 
-Use distinct section names and plain HTTP on every listener when a Gateway has several HTTP sections. Each route can select one or more eligible exact-hostname sections on a single physical port through its managed Gateway reference. Set `sectionName`, `port` or both. Both selectors, when set, must match the same section. Section selection also checks the route kind, namespace policy and hostname intersection. The controller attaches the route to each eligible section on the selected port and counts it once per section. If eligible sections span multiple ports, choose the intended port in the parent reference. Without a namespace policy, a section accepts routes from the Gateway's own namespace. Each section reports its own conditions and attachment count.
+Give each Gateway listener a distinct section name. An HTTPRoute can attach to all eligible sections through one Gateway parent reference. Use `port` or `sectionName` to narrow that selection. When both are set, they must match the same section. Each section checks the route kind, namespace policy and hostname intersection. By default a section accepts routes from the Gateway's own namespace. A route is counted once on each attached section, including when the sections use different physical ports.
+
+Each port has its own forwarding policies. If a route selects HTTP and terminated HTTPS and the TLS certificate is unavailable, a ready HTTP listener can serve the route while the HTTPS listener stays closed. The controller's `Programmed` condition on that parent tracks all the selected ports. [HTTPS configuration](../../../operator-https.md)
 
 Adding a port to an already bound Gateway enrolls it in per-port bindings and adopts the original listener in place. The controller keeps the original binding port recorded after a port is removed. Cleanup withdraws the policies for the retiring graph and verifies Octavia relationships before removing owned resources. The referenced frontend security group rules must already allow each desired port. As in the same-port case, the stock miss response observed in the local fixture is HTTP 503. Gateway API requires HTTP 404. [Proposed public response capability](octavia-http-local-responses.md)
 
@@ -21,6 +23,23 @@ The stock probe supplies local VIP networking, Amphora placement and agent respo
 | `GatewayWithAttachedRoutesWithPort8080` | PASS, 0.52 s | PASS, 0.42 s |
 
 Both envtest runs used Kubernetes 1.36.2 with the channel's v1.7.0 CRDs, release admission objects, scoped Namespace and Service prerequisites, and a recording OpenStack provider. The upstream case body, manifest and deadlines were unchanged. It checks route attachment counts selected by section on a Gateway with two physical ports. The full `GatewayWithAttachedRoutes` case has a recorded failure on both channels on the preceding revision because the HTTPS listener omitted HTTPRoute from its supported kinds. [Upstream case source](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/gateway-with-attached-routes.go) · [Status receipts](http-port-results.json) · [Earlier attached-route results](http-disjoint-sections.md#original-gateway-api-cases)
+
+## Adding and removing listeners
+
+On controller `0d89da1a8b42d331d130ab11e86903850de7b685`, an HTTPRoute attached to a Gateway by name follows all eligible HTTP and HTTPS listeners. The original v1.7.0 `GatewayModifyListeners` case passed both subtests on Standard and Experimental in separate local kind clusters. The test checks Kubernetes conditions and route attachment after adding or removing a listener. With the earlier `1206fc60da9d` image, adding a listener failed and removal passed on each channel. [Upstream case](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/conformance/tests/gateway-modify-listeners.go) · [Earlier Standard receipt](gateway-modify-listeners-baseline/standard/results.json) · [Earlier Experimental receipt](gateway-modify-listeners-baseline/experimental/results.json)
+
+Separate traffic probes opened fresh connections during four transitions. Each successful sample reached an echo Pod with the expected path. The HTTPS probes also checked the serving certificate.
+
+| Transition | Port under continuous probe | Standard successful / total | Experimental successful / total |
+|---|---|---|---|
+| Add HTTP 80 to a Gateway serving HTTPS 443 | HTTPS 443 | 33/33 | 39/39 |
+| Remove HTTPS 443 from a Gateway also serving HTTP 80 | HTTP 80 | 32/32 | 38/38 |
+| Change the HTTPS listener to an invalid certificate reference | HTTP 80 | 9/9 | 10/10 |
+| Restore the HTTPS certificate reference | HTTP 80 | 10/10 | 11/11 |
+
+The added port served the route. Removing port 443 deleted its Octavia listener and closed the port. An invalid certificate disabled the 443 listener and connections were refused. Restoring the reference reopened 443 with the expected certificate. The VIP, load balancer and surviving listener kept their IDs through each transition. The runner used the local Octavia 19.0.1.dev38 API, Amphora L7 worker, Barbican and HAProxy. Identity, networking, placement and agent transport came from the fixture. Region-level continuity on deployed Hibiscus remains unverified.
+
+The first Standard wire run encountered 36 refused HTTPS connections during the add transition. The fixture used a 121-byte pathname for the HAProxy UNIX socket probe. The Experimental wire run was stopped when the same pathname issue was identified. The counts above come from the rerun with a shorter fixture path and the same controller image. The bundle includes both original reports, wire and inventory receipts, build records, the first-attempt record and replay inputs. [Download the evidence and replay](<https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-0d89da1a8b42d331d130ab11e86903850de7b685/gateway-modify-listeners-v1.7.0-0d89da1a8b42.tar.gz>)
 
 ## Rollback
 

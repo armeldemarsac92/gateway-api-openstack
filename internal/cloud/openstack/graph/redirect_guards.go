@@ -55,31 +55,32 @@ type redirectCell struct {
 func redirectForwardingByPort(spec cloud.GatewayGraphSpec) map[int][]cloud.HTTPPathMatch {
 	result := make(map[int][]cloud.HTTPPathMatch)
 	for _, node := range spec.Routes {
-		route := node.Spec
-		if node.Disposition != cloud.GraphEnsure || cloud.NormalizeListenerProtocol(route.GatewayRequirements.ListenerProtocol) != cloud.ListenerProtocolHTTP {
+		if node.Disposition != cloud.GraphEnsure || cloud.NormalizeListenerProtocol(node.Spec.GatewayRequirements.ListenerProtocol) != cloud.ListenerProtocolHTTP {
 			continue
 		}
-		port := route.GatewayRequirements.ListenerPort
-		if len(route.ScopedListenerPorts) == 1 {
-			port = route.ScopedListenerPorts[0]
-		}
-		add := func(matches []cloud.HTTPPathMatch) {
-			for _, match := range matches {
-				match.HTTPSListenerHostname = httpMatchScope(route, match)
-				result[port] = append(result[port], match)
+		for route := range node.Spec.HTTPPortSpecs() {
+			port := route.GatewayRequirements.ListenerPort
+			if len(route.ScopedListenerPorts) == 1 {
+				port = route.ScopedListenerPorts[0]
 			}
-		}
-		for _, backend := range route.HTTPBackends {
-			add(backend.Matches)
-		}
-		for _, rule := range route.WeightedHTTPRules {
-			add(rule.Matches)
-		}
-		for _, rule := range route.FixedHTTPRules {
-			add(rule.Matches)
-		}
-		if route.PathType != "" {
-			add([]cloud.HTTPPathMatch{{HTTPListenerHostname: route.HTTPListenerHostname, Hostname: route.Hostname, PathType: route.PathType, PathValue: route.PathValue, Precedence: route.Precedence}})
+			add := func(matches []cloud.HTTPPathMatch) {
+				for _, match := range matches {
+					match.HTTPSListenerHostname = httpMatchScope(route, match)
+					result[port] = append(result[port], match)
+				}
+			}
+			for _, backend := range route.HTTPBackends {
+				add(backend.Matches)
+			}
+			for _, rule := range route.WeightedHTTPRules {
+				add(rule.Matches)
+			}
+			for _, rule := range route.FixedHTTPRules {
+				add(rule.Matches)
+			}
+			if route.PathType != "" {
+				add([]cloud.HTTPPathMatch{{HTTPListenerHostname: route.HTTPListenerHostname, Hostname: route.Hostname, PathType: route.PathType, PathValue: route.PathValue, Precedence: route.Precedence}})
+			}
 		}
 	}
 	return result

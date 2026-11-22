@@ -246,9 +246,6 @@ func (r *Reconciler) selectRouteAttachments(route *gatewayv1.HTTPRoute, parent m
 			rejection = err
 			continue
 		}
-		if len(selected) != 0 && !gatewaycontroller.HTTPRouteSectionsSharePort(r.Config, parent.gateway, selected[0], listener) {
-			return nil, newRouteBuildError(routeErrorUnsupported, "the selected sections must share a physical HTTP or HTTPS listener")
-		}
 		if err := validateRouteRedirectPrefixes(route, *listener, r.Config.HTTPRequestRedirect); err != nil {
 			return nil, err
 		}
@@ -416,7 +413,7 @@ func (r *Reconciler) selectRouteParentsWithNamespaces(ctx context.Context, reade
 		selection = append(selection, routeParentSelection{parent: parent, listeners: selected, rejection: rejection})
 	}
 	listeners := selection.listeners()
-	if len(listeners) > 1 && slices.ContainsFunc(listeners[1:], func(listener *gatewayv1.Listener) bool {
+	if model.HTTPProfileRouteKind(route) == model.GRPCRouteKind && len(listeners) > 1 && slices.ContainsFunc(listeners[1:], func(listener *gatewayv1.Listener) bool {
 		return !gatewaycontroller.HTTPRouteSectionsSharePort(r.Config, gateway, listeners[0], listener)
 	}) {
 		for i := range selection {

@@ -1,0 +1,24 @@
+apiVersion: gateway.networking.k8s.io/v1
+date: "2026-11-22T18:35:19+01:00"
+gatewayAPIChannel: standard
+gatewayAPIVersion: v1.7.0
+implementation:
+  contact:
+  - https://github.com/armeldemarsac92/gateway-api-openstack/issues
+  organization: Gateway API for OpenStack
+  project: Hibiscus
+  url: https://github.com/armeldemarsac92/gateway-api-openstack
+  version: 1206fc60da9dbbb1f6557ed7cb62ff0c84e8ff00
+kind: ConformanceReport
+mode: local-single-case
+profiles:
+- core:
+    failedTests:
+    - GatewayModifyListeners
+    result: failure
+    statistics:
+      Failed: 1
+      Passed: 0
+      Skipped: 0
+  name: GATEWAY-HTTP
+  summary: Core tests failed with 1 test failures.

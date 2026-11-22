@@ -292,11 +292,10 @@ func guardedHTTPListeners(desired desiredGatewayGraph, actual observedGatewayGra
 	}
 	for index, route := range desired.routes {
 		if desired.spec.Routes[index].Disposition == cloud.GraphEnsure {
-			port := scopedHTTPRoutePort(route)
-			if port == 0 {
-				port = desired.spec.Gateway.Spec.ListenerPort
+			for spec := range route.spec.HTTPPortSpecs() {
+				port := httpURLPolicyRoutePort(desired, desiredRoute{spec: spec})
+				addFrontendRoute(port, index)
 			}
-			addFrontendRoute(port, index)
 		}
 		if index < len(actual.routes) {
 			for _, part := range actual.routes[index].parts() {

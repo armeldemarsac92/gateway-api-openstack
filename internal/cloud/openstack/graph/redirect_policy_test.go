@@ -375,7 +375,7 @@ func TestStockRedirectRejectsIncompleteOrForeignRuleReadback(t *testing.T) {
 				}
 			}), &gatewayTransitionRequests{})
 			inventory := routeGraphInventory{owners: []routeGraphOwner{{identity: identity}}, graphs: []observedRouteGraph{{}}}
-			err := provider.observeListenerPolicies(t.Context(), &inventory, listener, cloud.ListenerProtocolHTTP, nil, make(map[int]string), true)
+			err := provider.observeListenerPolicies(t.Context(), &inventory, listener, cloud.ListenerProtocolHTTP, nil, true)
 			if !errors.Is(err, test.want) {
 				t.Fatalf("observe redirect = %v, want %v", err, test.want)
 			}

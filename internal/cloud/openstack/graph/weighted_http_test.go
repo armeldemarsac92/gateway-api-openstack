@@ -504,7 +504,7 @@ func TestObserveWeightedHTTPPolicyRequiresOwnedPoolEdges(t *testing.T) {
 			inventory := routeGraphInventory{owners: []routeGraphOwner{{identity: identity}}, graphs: make([]observedRouteGraph, 1)}
 			listener := &listeners.Listener{ID: "listener-1", L7Policies: []l7policies.L7Policy{{ID: "policy-1"}}}
 			err := provider.observeListenerPolicies(t.Context(), &inventory, listener, cloud.ListenerProtocolHTTP,
-				map[string]poolRouteOwner{"pool-1": tc.owner}, map[int]string{}, true)
+				map[string]poolRouteOwner{"pool-1": tc.owner}, true)
 			if !tc.want {
 				if !errors.Is(err, cloud.ErrOwnershipConflict) {
 					t.Fatalf("weighted pool edge must be proved, got %v", err)
@@ -672,11 +672,15 @@ func TestWeightedTargetMissingPolicyAdminStateClosesOnlyOwnedListener(t *testing
 	spec := completeGraphSpec(id)
 	port := spec.Gateway.Spec.ListenerPort
 	spec.Gateway.Spec.ListenerProtocol = cloud.ListenerProtocolHTTP
-	spec.Gateway.Spec.ScopedListeners = []cloud.ScopedListener{{Name: "affected", Port: port}, {Name: "sibling", Port: port + 1}}
+	spec.Gateway.Spec.ScopedListeners = []cloud.ScopedListener{{Name: "sibling", Port: port}, {Name: "affected", Port: port + 1}}
 	spec.Routes[0].Spec.ScopedListenerPorts = []int{port}
+	secondary := spec.Routes[0].Spec
+	secondary.ScopedListenerPorts, secondary.ScopeHTTPResources = []int{port + 1}, true
+	spec.Routes[0].Spec.AdditionalHTTPPorts = []cloud.RouteSpec{secondary}
 	sibling := spec.Routes[0]
 	sibling.Spec.Identity.RouteName, sibling.Spec.Identity.RouteUID = "sibling", "sibling-uid"
-	sibling.Spec.ScopedListenerPorts = []int{port + 1}
+	sibling.Spec.AdditionalHTTPPorts = nil
+	sibling.Spec.Precedence++
 	spec.Routes = append(spec.Routes, sibling)
 	refs := func(id string) []map[string]string { return []map[string]string{{"id": id}} }
 	newListener := func(name string, port int, policies []map[string]string) map[string]any {
@@ -685,8 +689,8 @@ func TestWeightedTargetMissingPolicyAdminStateClosesOnlyOwnedListener(t *testing
 			"l7policies": policies, "default_http_response": map[string]int{"status_code": 404},
 			"tags": append(safetyGatewayTags(t, id, roleListener), scopedPortTag(cloud.ListenerProtocolHTTP, port))}
 	}
-	affected := newListener("affected", port, refs("tagged"))
-	neighbor := newListener("sibling", port+1, []map[string]string{})
+	affected := newListener("affected", port+1, refs("tagged"))
+	neighbor := newListener("sibling", port, []map[string]string{})
 	lb := map[string]any{"id": "lb", "project_id": "project-a", "provider": "amphora", "provisioning_status": "ACTIVE", "admin_state_up": true,
 		"vip_subnet_id": spec.Gateway.Spec.VIPSubnetID, "vip_address": "192.0.2.10", "vip_port_id": "vip-port",
 		"pools": []any{}, "listeners": append(refs("affected"), refs("sibling")...), "tags": safetyGatewayTags(t, id, roleLoadBalancer)}
@@ -698,10 +702,17 @@ func TestWeightedTargetMissingPolicyAdminStateClosesOnlyOwnedListener(t *testing
 	reads := map[string]map[string]any{
 		"/lbaas/loadbalancers": {"loadbalancers": []any{lb}}, "/lbaas/loadbalancers/lb": {"loadbalancer": lb},
 		"/lbaas/listeners": {"listeners": []any{affected, neighbor}}, "/lbaas/pools": {"pools": []any{}},
-		"/lbaas/l7policies": {"l7policies": []any{policy}},
 	}
 	var writes []string
 	p := completeGraphProvider(t, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.Method == http.MethodGet && req.URL.Path == "/lbaas/l7policies" {
+			policies := []any{}
+			if req.URL.Query().Get("listener_id") == "affected" {
+				policies = append(policies, policy)
+			}
+			safetyWriteJSON(t, w, map[string]any{"l7policies": policies})
+			return
+		}
 		if body, found := reads[req.URL.Path]; req.Method == http.MethodGet && found {
 			safetyWriteJSON(t, w, body)
 			return
@@ -726,7 +737,7 @@ func TestWeightedTargetMissingPolicyAdminStateClosesOnlyOwnedListener(t *testing
 		result, err := p.ReconcileGatewayGraph(t.Context(), spec)
 		var incomplete *httpFilterInventoryError
 		if !errors.As(err, &incomplete) || incomplete.policyID != "tagged" ||
-			!result.Gateway.HTTPPolicyTransition || !slices.Equal(result.Gateway.ScopedListenerDeferredPorts, []int{port + 1}) ||
+			!result.Gateway.HTTPPolicyTransition || !slices.Equal(result.Gateway.ScopedListenerDeferredPorts, []int{port}) ||
 			len(result.Routes) != 2 || result.Routes[0].Result.ObservationDeferred || !result.Routes[1].Result.ObservationDeferred {
 			t.Fatalf("affected listener should remain guarded while sibling status is deferred: %+v, %v", result, err)
 		}

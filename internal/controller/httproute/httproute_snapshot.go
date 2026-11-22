@@ -86,7 +86,7 @@ type routeValidationSnapshot struct {
 	backendDiagnostic      model.Diagnostic
 	corsFallback           bool
 	backendTLSAncestorSlot backendtls.AncestorSlot
-	gatewayProgrammed      bool
+	gatewayReadyForBinding bool
 	disposition            routeValidationDisposition
 }
 
@@ -178,9 +178,12 @@ func (r *Reconciler) buildRouteValidationSnapshotFromInputs(
 		} else if snapshot.gateway.Annotations[r.Config.GatewayListenerPortAnnotation()] != strconv.Itoa(int(listeners[0].Port)) {
 			return routeValidationSnapshot{}, errHTTPRouteChanged
 		}
-		snapshot.gatewayProgrammed = gatewayProgrammedForGeneration(snapshot.gateway)
+		snapshot.gatewayReadyForBinding = gatewayProgrammedForGeneration(snapshot.gateway)
 	} else {
-		snapshot.gatewayProgrammed = routeSelectionsProgrammed(snapshot.gateway, selection)
+		multiplePorts := slices.ContainsFunc(listeners[1:], func(listener *gatewayv1.Listener) bool {
+			return listener.Port != listeners[0].Port
+		})
+		snapshot.gatewayReadyForBinding = routeSelectionReadyForBinding(snapshot.gateway, selection, multiplePorts)
 	}
 	if purpose == routeSnapshotForBinding {
 		if err := r.validateRouteBindingTransition(snapshot); err != nil {
@@ -269,31 +272,35 @@ func (r *Reconciler) observeRouteValidationInputs(
 	}, nil
 }
 
-func routeSelectionsProgrammed(gateway *gatewayv1.Gateway, selection routeSelection) bool {
+func routeSelectionReadyForBinding(gateway *gatewayv1.Gateway, selection routeSelection, multiplePorts bool) bool {
+	// A scoped Route can start on its ready ports while the provider still
+	// verifies all selected ports before reporting the Route as programmed.
+	var selected, ready int
 	for _, parent := range selection {
 		if parent.rejection != nil {
 			continue
 		}
 		for _, listener := range parent.listeners {
+			selected++
 			if parent.parent.listenerSet == nil {
-				if !listenerProgrammedForGeneration(gateway, listener.Name) {
-					return false
+				if listenerProgrammedForGeneration(gateway, listener.Name) {
+					ready++
 				}
 				continue
 			}
 			set := parent.parent.listenerSet
-			if !slices.ContainsFunc(set.Status.Listeners, func(status gatewayv1.ListenerEntryStatus) bool {
+			if slices.ContainsFunc(set.Status.Listeners, func(status gatewayv1.ListenerEntryStatus) bool {
 				if status.Name != listener.Name {
 					return false
 				}
 				programmed := meta.FindStatusCondition(status.Conditions, string(gatewayv1.ListenerEntryConditionProgrammed))
 				return programmed != nil && programmed.Status == metav1.ConditionTrue && programmed.ObservedGeneration == set.Generation
 			}) {
-				return false
+				ready++
 			}
 		}
 	}
-	return true
+	return ready != 0 && (multiplePorts || ready == selected)
 }
 
 func (r *Reconciler) observeRouteBinding(ctx context.Context, snapshot *routeValidationSnapshot) error {
@@ -351,7 +358,7 @@ func (r *Reconciler) validateLegacySiblingBinding(ctx context.Context, route *ga
 
 func (r *Reconciler) setRouteBindingDisposition(snapshot *routeValidationSnapshot) error {
 	boundToCurrentGateway := snapshot.binding.matchesDesired && snapshot.binding.hasFinalizer
-	if !snapshot.gatewayProgrammed && !boundToCurrentGateway {
+	if !snapshot.gatewayReadyForBinding && !boundToCurrentGateway {
 		snapshot.disposition = routeValidationGatewayPending
 		return nil
 	}
@@ -373,7 +380,7 @@ func (r *Reconciler) validateRouteBindingTransition(snapshot routeValidationSnap
 	// Both finalizers and the stored identity prove this attached route already
 	// belongs to the Gateway. Its metadata must be complete before the graph
 	// writer can program a newer Gateway generation.
-	if !snapshot.gatewayProgrammed && !r.establishedRouteBinding(snapshot) {
+	if !snapshot.gatewayReadyForBinding && !r.establishedRouteBinding(snapshot) {
 		return errHTTPRouteChanged
 	}
 	if !snapshot.binding.present && snapshot.binding.hasFinalizer && !snapshot.binding.otherBindings {

@@ -135,12 +135,6 @@ func (p *Provider) protectPlainHTTPIsolation(desired desiredGatewayGraph, actual
 	if len(configured) == 0 && !observedPlainHTTPExclusions(actual.routes) {
 		return plan
 	}
-	physicalPort := func(route desiredRoute) int {
-		if port := scopedHTTPRoutePort(route); port != 0 {
-			return port
-		}
-		return desired.spec.Gateway.Spec.ListenerPort
-	}
 	var frontends []listeners.Listener
 	if actual.scoped {
 		frontends = actual.scopedListeners
@@ -160,9 +154,9 @@ func (p *Provider) protectPlainHTTPIsolation(desired desiredGatewayGraph, actual
 	var pendingObsoletePolicy bool
 	for port, issue := range desired.plainHTTPRuleLimits {
 		affectedRoutes := make(map[int]bool)
-		for i, route := range desired.routes {
-			if desired.spec.Routes[i].Disposition == cloud.GraphEnsure && physicalPort(route) == port {
-				affectedRoutes[i] = true
+		for i, route := range parts.routes {
+			if parts.spec.Routes[i].Disposition == cloud.GraphEnsure && httpURLPolicyRoutePort(desired, route) == port {
+				affectedRoutes[owners[i]] = true
 			}
 		}
 		p.markGuardedHTTPListener(result, port, affectedRoutes, issue)
@@ -182,7 +176,7 @@ func (p *Provider) protectPlainHTTPIsolation(desired desiredGatewayGraph, actual
 		affectedRoutes := make(map[int]bool)
 		for i, route := range observed.routes {
 			wanted := parts.routes[i]
-			port := physicalPort(wanted)
+			port := httpURLPolicyRoutePort(desired, wanted)
 			for _, policy := range route.policies {
 				if policy.policy.ListenerID != frontend.ID || observedPolicyDisabled(policy) {
 					continue
@@ -248,7 +242,10 @@ func (p *Provider) protectPlainHTTPIsolation(desired desiredGatewayGraph, actual
 				return blocked[frontend.ID] && (!actual.adminObserved[frontend.ID] || frontend.AdminStateUp || frontend.ProvisioningStatus != "ACTIVE")
 			})
 		case graphRouteMutation:
-			return desired.plainHTTPRuleLimits[physicalPort(desired.routes[step.routeIndex])] != ""
+			// Once the listener is closed, obsolete policies can still be
+			// withdrawn. Other writes need a representable policy on their port.
+			port := httpURLPolicyRoutePort(desired, graphRoutePart(desired, step))
+			return desired.plainHTTPRuleLimits[port] != "" && !httpURLPolicyCleanup(step.route.kind)
 		default:
 			return false
 		}

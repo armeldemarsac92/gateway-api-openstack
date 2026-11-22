@@ -99,7 +99,7 @@ func TestRequestRedirectPolicyWireAndReadback(t *testing.T) {
 	observe := func() observedRouteGraph {
 		t.Helper()
 		inventory := routeGraphInventory{owners: []routeGraphOwner{{identity: identity}}, graphs: []observedRouteGraph{{}}}
-		if err := provider.observeListenerPolicies(t.Context(), &inventory, &listener, cloud.ListenerProtocolHTTP, nil, make(map[int]string), true); err != nil {
+		if err := provider.observeListenerPolicies(t.Context(), &inventory, &listener, cloud.ListenerProtocolHTTP, nil, true); err != nil {
 			t.Fatal(err)
 		}
 		return *inventory.graphs[0].part(part.backendKey)
@@ -367,7 +367,7 @@ func TestRequestRedirectRequiresExplicitEmptyPolicyInventory(t *testing.T) {
 	listener := &listeners.Listener{ID: "listener", L7Policies: []l7policies.L7Policy{}, AdminStateUp: true}
 	inventory := routeGraphInventory{}
 	read := func() error {
-		return p.observeListenerPolicies(t.Context(), &inventory, listener, cloud.ListenerProtocolHTTP, nil, nil, false)
+		return p.observeListenerPolicies(t.Context(), &inventory, listener, cloud.ListenerProtocolHTTP, nil, false)
 	}
 	p.httpRequestRedirect = true
 	if err := read(); !errors.Is(err, cloud.ErrDependencyNotReady) {

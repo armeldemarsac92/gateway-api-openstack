@@ -367,7 +367,8 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct, https, grouped bool
 	var loseCertificateUpdateReply, holdMemberDisable bool
 	var poolListReads int
 	isolationAdvertised := isolated
-	var omitVirtualHosts bool
+	var omitVirtualHosts, enableHTTPFilters bool
+	var omitPolicyRowsFor, omitURLRewriteFor string
 	allowedHTTPPorts := []int{frontendAddress.Port}
 	readback := func(collection string, item record) record {
 		if !distinct && !grouped {
@@ -416,14 +417,21 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct, https, grouped bool
 				safetyWriteJSON(t, w, record{"providers": []record{{"name": "amphora"}}})
 				return
 			case "/v2/lbaas/providers/amphora/gateway_capabilities":
-				if !isolated {
-					t.Error("unexpected HTTPS isolation discovery")
+				var capabilities []string
+				if isolated {
+					if !isolationAdvertised {
+						http.Error(w, "discovery unavailable", http.StatusServiceUnavailable)
+						return
+					}
+					capabilities = append(capabilities, octavia.GatewayCapabilityHTTPSListenerIsolation)
 				}
-				if !isolationAdvertised {
-					http.Error(w, "discovery unavailable", http.StatusServiceUnavailable)
-					return
+				if enableHTTPFilters {
+					capabilities = append(capabilities, octavia.GatewayCapabilityRequestCORS, octavia.GatewayCapabilityRequestURLRewrite)
 				}
-				safetyWriteJSON(t, w, record{"gateway_capabilities": []string{octavia.GatewayCapabilityHTTPSListenerIsolation}})
+				if len(capabilities) == 0 {
+					t.Error("unexpected Gateway capability discovery")
+				}
+				safetyWriteJSON(t, w, record{"gateway_capabilities": capabilities})
 				return
 			case "/v2.0/subnets/vip-subnet":
 				safetyWriteJSON(t, w, record{"subnet": record{"id": "vip-subnet", "network_id": "private-net", "project_id": hibiscusProject, "cidr": "192.0.2.0/24", "ip_version": 4}})
@@ -476,6 +484,9 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct, https, grouped bool
 			items := list(collection)
 			if collection == policy {
 				items = orderedPolicies(parentID)
+				if parentID == omitPolicyRowsFor {
+					items = []record{}
+				}
 			}
 			items = slices.DeleteFunc(items, func(data record) bool {
 				if kind.parentKey != "" && data[kind.parentKey] != parentID {
@@ -486,6 +497,9 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct, https, grouped bool
 			})
 			for i, item := range items {
 				items[i] = readback(collection, item)
+				if collection == policy && parentID == omitURLRewriteFor {
+					delete(items[i], "request_url_rewrite")
+				}
 			}
 			safetyWriteJSON(t, w, record{name: items})
 			return
@@ -559,7 +573,7 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct, https, grouped bool
 				if data["protocol"] == "TERMINATED_HTTPS" {
 					data["sni_container_refs"] = []string{}
 				}
-				if _, specified := data["invert"]; isolated && name == "rules" && !specified {
+				if _, specified := data["invert"]; (isolated || enableHTTPFilters) && name == "rules" && !specified {
 					data["invert"] = false
 				}
 				resource = collection + "/" + id
@@ -626,7 +640,7 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct, https, grouped bool
 		if distinct {
 			clients.LoadBalancer.Microversion = "2.29"
 		}
-		return newTestProvider(t, clients, ProviderConfig{HTTPSListenerIsolation: isolated})
+		return newTestProvider(t, clients, ProviderConfig{HTTPSListenerIsolation: isolated, HTTPCORS: enableHTTPFilters, HTTPRequestURLRewrite: enableHTTPFilters})
 	}
 
 	provider := newProvider()
@@ -1136,10 +1150,59 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct, https, grouped bool
 			}}
 		}
 		spec.Routes = append(spec.Routes, httpsRoute)
+		if !isolated {
+			t.Run("start without an HTTPS certificate", func(t *testing.T) {
+				cold := spec
+				cold.Routes = slices.Clone(spec.Routes[:1])
+				primary := &cold.Routes[0].Spec
+				secondary := *primary
+				secondary.ScopedListenerPorts, secondary.ScopeHTTPResources = []int{httpsPort}, true
+				primary.AdditionalHTTPPorts = []cloud.RouteSpec{secondary}
+				cold.Gateway.Spec.ScopedListeners = slices.Clone(spec.Gateway.Spec.ScopedListeners)
+				cold.Gateway.Spec.ScopedListeners[0].TLS = &cloud.ListenerTLS{}
+				before := len(writes)
+				for range 24 {
+					last := len(writes)
+					result := reconcile(newProvider(), cold)
+					if len(result.Routes) != 1 || result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing ||
+						result.Routes[0].Result.ObservationDeferred {
+						t.Fatalf("an unavailable HTTPS port cannot certify the parent: %+v", result.Routes)
+					}
+					if len(writes) == last {
+						break
+					}
+				}
+				frontends := list(listener)
+				if len(frontends) != 1 || frontends[0]["protocol"] != "HTTP" ||
+					frontends[0]["admin_state_up"] != true || inventory[gateway]["admin_state_up"] != true {
+					t.Fatalf("expected an enabled HTTP listener and no HTTPS listener, got %v, writes %v", frontends, writes[before:])
+				}
+				httpID := frontends[0]["id"].(string)
+				original := routeStateFromInventoryForTest(t, orderedPolicies(httpID), inventory, pool, int(backendAddress.Port()))
+				if got := selectedPool(httpID, primary.Hostname, primary.PathValue); got != original[1] {
+					t.Fatalf("HTTP request selected pool %q with HTTPS unavailable, want %q", got, original[1])
+				}
+				cold.Gateway.Spec.ScopedListeners[0].TLS = &cloud.ListenerTLS{CertificateRef: refA}
+				result := converge(newProvider(), cold)
+				if result.Routes[0].Result.Outcome.State != cloud.OutcomeReady || len(result.Routes[0].Result.State.L7PolicyIDs) != 2 ||
+					!slices.Contains(result.Gateway.ScopedListenerReadyPorts, httpsPort) ||
+					routeStateFromInventoryForTest(t, orderedPolicies(httpID), inventory, pool, int(backendAddress.Port())) != original {
+					t.Fatalf("HTTPS recovery must complete the route and preserve its HTTP backend: %+v", result)
+				}
+			})
+		}
 		result := converge(newProvider(), spec)
-		tlsID, httpID := "listener", "listener-2"
-		if httpsPort > frontendAddress.Port {
-			tlsID, httpID = httpID, tlsID
+		var tlsID, httpID string
+		for _, frontend := range list(listener) {
+			switch frontend["protocol"] {
+			case terminatedHTTPS:
+				tlsID = frontend["id"].(string)
+			case cloud.ListenerProtocolHTTP:
+				httpID = frontend["id"].(string)
+			}
+		}
+		if tlsID == "" || httpID == "" {
+			t.Fatal("expected both HTTP and HTTPS listeners")
 		}
 		tlsPath := listener + "/" + tlsID
 		server := inventory[tlsPath]
@@ -1148,6 +1211,146 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct, https, grouped bool
 			inventory[listener+"/"+httpID]["protocol"] != "HTTP" || len(orderedPolicies(tlsID)) == 0 ||
 			inventory[pool+"/"+orderedPolicies(tlsID)[0]["redirect_pool_id"].(string)]["protocol"] != "HTTP" {
 			t.Fatalf("HTTPS listener and HTTP routing did not converge: %v, writes %v", result.Gateway.Outcome, writes)
+		}
+
+		if !isolated {
+			t.Run("one route on HTTPS and HTTP", func(t *testing.T) {
+				want := spec
+				want.Routes = slices.Clone(spec.Routes)
+				primary := &want.Routes[0].Spec
+				second := *primary
+				second.ScopedListenerPorts, second.ScopeHTTPResources = []int{httpsPort}, true
+				second.PathType, second.PathValue, second.Precedence = cloud.PathMatchExact, "/multi-port", 1
+				primary.AdditionalHTTPPorts = []cloud.RouteSpec{second}
+				original := routeStateFromInventoryForTest(t, orderedPolicies(httpID), inventory, pool, int(backendAddress.Port()))
+				peerPolicy := orderedPolicies(tlsID)[0]["id"]
+
+				assertReady := func(result cloud.GatewayGraphResult) {
+					t.Helper()
+					if len(result.Routes) != 2 || result.Routes[0].Result.Outcome.State != cloud.OutcomeReady {
+						t.Fatalf("expected one ready result for the route with two ports: %+v", result.Routes)
+					}
+					state := result.Routes[0].Result.State
+					if state.PoolID != original[1] || len(state.PoolIDs) != 1 || state.PoolIDs[0] == original[1] || len(state.L7PolicyIDs) != 2 {
+						t.Fatalf("expected separate forwarding graphs across both ports: %+v", state)
+					}
+					rows := orderedPolicies(tlsID)
+					if len(rows) != 2 || rows[0]["id"] != peerPolicy || rows[1]["admin_state_up"] != true ||
+						rows[1]["redirect_pool_id"] != state.PoolIDs[0] {
+						t.Fatalf("HTTPS policies did not retain the peer and reach the port's backend: %v", rows)
+					}
+				}
+				result := reconcile(newProvider(), want)
+				if len(result.Routes) != 2 || result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing {
+					t.Fatalf("one existing port certified an incomplete route: %+v", result)
+				}
+				assertReady(converge(newProvider(), want))
+				stableWrites := len(writes)
+				assertReady(reconcile(newProvider(), want))
+				if len(writes) != stableWrites {
+					t.Fatalf("restart changed the two-port forwarding graph: %v", writes[stableWrites:])
+				}
+
+				finishWithPeer := func(desired cloud.GatewayGraphSpec) {
+					t.Helper()
+					converge(newProvider(), desired)
+					rows := orderedPolicies(tlsID)
+					if len(rows) != 1 || rows[0]["id"] != peerPolicy {
+						t.Fatalf("retiring a port removed or replaced its unrelated peer: %v", rows)
+					}
+				}
+				finishWithPeer(spec)
+				if state := routeStateFromInventoryForTest(t, orderedPolicies(httpID), inventory, pool, int(backendAddress.Port())); state != original {
+					t.Fatalf("retiring the additional port changed the anchor: %+v -> %+v", original, state)
+				}
+				assertReady(converge(newProvider(), want))
+
+				want.Routes[0] = cloud.RouteGraphNode{Disposition: cloud.GraphDelete, Spec: cloud.RouteSpec{Identity: primary.Identity}}
+				finishWithPeer(want)
+				if len(orderedPolicies(httpID)) != 0 || len(list(pool)) != 1 {
+					t.Fatal("route deletion left forwarding policies or pools")
+				}
+				finishWithPeer(spec)
+			})
+		}
+
+		if !isolated {
+			t.Run("CORS and URL rewrite on both ports", func(t *testing.T) {
+				enableHTTPFilters = true
+				want := spec
+				want.Gateway.Spec.ScopedListeners = slices.Clone(spec.Gateway.Spec.ScopedListeners)
+				primary := spec.Routes[0].Spec
+				primary.Identity.RouteName, primary.Identity.RouteUID = "filtered", "filtered-uid"
+				primary.Hostname, primary.PathType, primary.PathValue, primary.Members = "", "", "", nil
+				const requestPath = "/filtered"
+				rewrittenPath := "/upstream"
+				primary.HTTPBackends = []cloud.HTTPBackend{{
+					Namespace: "test", Name: "backend", Port: 80, Members: spec.Routes[0].Spec.Members,
+					Matches: []cloud.HTTPPathMatch{{PathType: cloud.PathMatchExact, PathValue: requestPath, Precedence: 1,
+						CORS:       &cloud.HTTPCORS{AllowOrigins: []string{"https://client.example.test"}},
+						URLRewrite: &cloud.HTTPURLRewrite{ReplaceFullPath: &rewrittenPath}}},
+				}}
+				secondary := primary
+				secondary.ScopedListenerPorts, secondary.ScopeHTTPResources = []int{httpsPort}, true
+				primary.AdditionalHTTPPorts = []cloud.RouteSpec{secondary}
+				want.Routes = append(slices.Clone(spec.Routes), cloud.RouteGraphNode{Disposition: cloud.GraphEnsure, Spec: primary})
+				filteredState := func(result cloud.GatewayGraphResult) cloud.RouteResult {
+					t.Helper()
+					for _, route := range result.Routes {
+						if route.Identity == primary.Identity {
+							return route.Result
+						}
+					}
+					t.Fatal("missing result for the two-port filtered route")
+					return cloud.RouteResult{}
+				}
+				ready := func() {
+					t.Helper()
+					state := filteredState(converge(newProvider(), want))
+					if state.Outcome.State != cloud.OutcomeReady || len(state.State.L7PolicyIDs) != 2 {
+						t.Fatalf("both filtered policies must be ready: %+v", state)
+					}
+					for _, id := range []string{httpID, tlsID} {
+						if !slices.ContainsFunc(orderedPolicies(id), func(row record) bool {
+							return row["request_cors"] != nil && row["request_url_rewrite"] != nil && row["admin_state_up"] == true
+						}) || selectedPool(id, "route.example.test", requestPath) == "" {
+							t.Fatalf("listener %s has no serving CORS/URL rewrite policy: %v", id, orderedPolicies(id))
+						}
+					}
+				}
+				expectTLSClosed := func() {
+					t.Helper()
+					before := len(writes)
+					result, err := newProvider().ReconcileGatewayGraph(ctx, want)
+					var incomplete *httpFilterInventoryError
+					if omitPolicyRowsFor != "" && (!errors.As(err, &incomplete) || incomplete.filter != "CORS") ||
+						omitPolicyRowsFor == "" && err != nil {
+						t.Fatalf("unexpected error closing the affected listener: %v", err)
+					}
+					state := filteredState(result)
+					if state.Outcome.State != cloud.OutcomeProgressing || state.ObservationDeferred ||
+						server["admin_state_up"] != false || !slices.Equal(writes[before:], []string{"PUT " + tlsPath}) ||
+						selectedPool(httpID, "route.example.test", requestPath) == "" {
+						t.Fatalf("closure must preserve the active HTTP sibling: state %+v, writes %v", state, writes[before:])
+					}
+				}
+				ready()
+				omitPolicyRowsFor = tlsID
+				expectTLSClosed()
+				omitPolicyRowsFor = ""
+				ready()
+				omitURLRewriteFor = tlsID
+				expectTLSClosed()
+				omitURLRewriteFor = ""
+				ready()
+				want.Gateway.Spec.ScopedListeners[0].TLS = &cloud.ListenerTLS{}
+				expectTLSClosed()
+				want.Gateway.Spec.ScopedListeners[0].TLS = &cloud.ListenerTLS{CertificateRef: refA}
+				ready()
+				want.Routes[2] = cloud.RouteGraphNode{Disposition: cloud.GraphDelete, Spec: cloud.RouteSpec{Identity: primary.Identity}}
+				converge(newProvider(), want)
+				enableHTTPFilters = false
+			})
 		}
 
 		if isolated {
