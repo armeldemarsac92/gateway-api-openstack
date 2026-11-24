@@ -100,6 +100,9 @@ type GatewayResult struct {
 	HTTPPolicyTransition bool
 	// ScopedListenerReadyPorts contains the individually programmed listener ports.
 	ScopedListenerReadyPorts []int
+	// ScopedListenerServingPorts contains verified physical ports on which
+	// only some HTTPS sections may be serving. This evidence is for discovery.
+	ScopedListenerServingPorts []int
 	// ScopedTLSClosedPorts contains denied HTTPS ports with settled absence
 	// or a verified disabled listener. Accepting a withdrawal write is insufficient.
 	ScopedTLSClosedPorts []int

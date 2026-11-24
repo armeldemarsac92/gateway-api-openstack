@@ -237,8 +237,8 @@ func (hosts httpsVirtualHosts) ToListenerUpdateMap() (map[string]any, error) {
 	return map[string]any{"listener": map[string]any{"https_virtual_hosts": []string(hosts)}}, nil
 }
 
-// SetListenerHTTPSVirtualHosts changes the section inventory on a disabled
-// listener after policies referring to removed names have been retired.
+// SetListenerHTTPSVirtualHosts updates the section inventory after policies
+// referring to removed names have been retired.
 func (s *Service) SetListenerHTTPSVirtualHosts(ctx context.Context, id string, hosts []string) error {
 	_, err := listeners.Update(ctx, s.client, id, httpsVirtualHosts(hosts)).Extract()
 	return err

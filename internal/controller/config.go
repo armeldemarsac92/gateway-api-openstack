@@ -38,6 +38,8 @@ var gatewayControllerNamePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0
 
 // Config is the cluster-wide controller configuration.
 type Config struct {
+	// GatewayInfrastructureMetadata enables headless Service discovery of Octavia VIPs.
+	GatewayInfrastructureMetadata bool
 	// HTTPHeaderExact enables exact HTTPRoute header matching on capable Amphora providers.
 	HTTPHeaderExact bool
 	// HTTPQueryParamExact enables exact HTTPRoute query parameter matching on capable Amphora providers.

@@ -1,0 +1,208 @@
+{
+  "gatewayAPI": "v1.7.0",
+  "controller": "ae93701ffbdde389ba4fac3172fd5f4e1202629f",
+  "image": {
+    "repository": "ghcr.io/armeldemarsac92/gateway-api-openstack",
+    "sourceRevision": "ae93701ffbdde389ba4fac3172fd5f4e1202629f",
+    "sourceLabel": "https://github.com/armeldemarsac92/gateway-api-openstack",
+    "manifestDigest": "sha256:b61ae779d8b547012910ca756810ca23dcd675ad4e3b39e911eafa83fb6f51fa",
+    "configDigest": "sha256:a18cfa7c54bd627ee30f88cdf318dbe9fe6c49605a83398a7bec4159c84feaf9",
+    "platform": "linux/amd64",
+    "entrypoint": "/openstack-gateway-controller",
+    "user": "65532:65532",
+    "ociArchiveSHA256": "a93a570b8b63eb51154909eb65173a71569850209320f99d89215def790aa4e7",
+    "managerSHA256": "e1764a3890cdfd11da9c30efff3feff89c6d69ea73f423356c53d447ead54a41",
+    "normalAndNoCacheBuildsMatch": true
+  },
+  "channels": {
+    "standard": {
+      "reportSHA256": "b0231faf24563ba48672d77fa6d2f8ebafb21d68efb9c2a452779d7ec282477a",
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "registeredTestSHA256": "3e72596995dc90260237d4681d716ea9bce75932803864ac8eac4bc3fa3e3c5e",
+      "registeredManifestSHA256": "e3637142700e38f421bd1ab4295de547b85b540614422589b7b7f2f45cef987b",
+      "octavia": {
+        "revision": "106934d092ee2a66030d3f3f25bca1cfc6081bea",
+        "version": "19.0.1.dev43",
+        "sha256": "c2ee877681896ce34304d51165255e890325e72b682aafbb71478e238316f315",
+        "filesVerified": 649
+      },
+      "octaviaLib": {
+        "revision": "71d3d7d1956e0d566228d1669a0fe5200696ccf4",
+        "version": "3.12.1.dev13",
+        "sha256": "9c3908b1371d872083757fd59446189f31fc179f8b2326f94d2a50f49037df45",
+        "filesVerified": 24
+      },
+      "readyEchoPods": 2,
+      "service": {
+        "name": "gateway-gateway-with-infrastructure-metadata",
+        "selectorless": true,
+        "headless": true,
+        "labels": {
+          "key2": "value2"
+        },
+        "annotations": {
+          "key1": "value1"
+        }
+      },
+      "endpointSlice": {
+        "name": "gateway-gateway-with-infrastructure-metadata-ipv4",
+        "family": "IPv4",
+        "endpoints": [
+          {
+            "addresses": [
+              "192.0.2.30"
+            ],
+            "conditions": {
+              "ready": true
+            }
+          }
+        ],
+        "ports": [
+          {
+            "name": "tcp-8080",
+            "port": 8080,
+            "protocol": "TCP"
+          }
+        ],
+        "label": {
+          "key2": "value2"
+        },
+        "annotation": {
+          "key1": "value1"
+        }
+      },
+      "dns": {
+        "fqdn": "gateway-gateway-with-infrastructure-metadata.gateway-conformance-infra.svc.cluster.local",
+        "addresses": [
+          "192.0.2.30"
+        ],
+        "remote": "192.0.2.30:8080",
+        "status": 200,
+        "echo": {
+          "namespace": "gateway-conformance-infra",
+          "path": "/infrastructure-dns-qualification",
+          "pod": "infra-backend-v1-667754889f-v7lns"
+        }
+      },
+      "provider": {
+        "vip": "192.0.2.30",
+        "listener": {
+          "protocol": "HTTP",
+          "port": 8080,
+          "status": "ACTIVE"
+        },
+        "haproxyConfigSHA256": "ed4710b8e06afe97aa968892d6801813bcd936d5c535b3c7ca28b60b319c7a6a",
+        "haproxyVersion": "3.0.19-ade9c1262-octavia-strict-dns-v1",
+        "haproxyBinarySHA256": "fa8468efa26f95ed83a36afeb97b79730de285450b7a8fae94f7cf5e6d2d0824"
+      },
+      "withdrawal": {
+        "octaviaReadback": 404,
+        "endpointSlices": 0,
+        "dnsNoLongerResolves": true,
+        "serviceUIDRetained": true
+      }
+    },
+    "experimental": {
+      "reportSHA256": "81389f36f2dd092c407d9afc8c7c18032f20ea13b6f3943834fb532c776adf8f",
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "registeredTestSHA256": "3e72596995dc90260237d4681d716ea9bce75932803864ac8eac4bc3fa3e3c5e",
+      "registeredManifestSHA256": "e3637142700e38f421bd1ab4295de547b85b540614422589b7b7f2f45cef987b",
+      "octavia": {
+        "revision": "106934d092ee2a66030d3f3f25bca1cfc6081bea",
+        "version": "19.0.1.dev43",
+        "sha256": "c2ee877681896ce34304d51165255e890325e72b682aafbb71478e238316f315",
+        "filesVerified": 649
+      },
+      "octaviaLib": {
+        "revision": "71d3d7d1956e0d566228d1669a0fe5200696ccf4",
+        "version": "3.12.1.dev13",
+        "sha256": "9c3908b1371d872083757fd59446189f31fc179f8b2326f94d2a50f49037df45",
+        "filesVerified": 24
+      },
+      "readyEchoPods": 2,
+      "service": {
+        "name": "gateway-gateway-with-infrastructure-metadata",
+        "selectorless": true,
+        "headless": true,
+        "labels": {
+          "key2": "value2"
+        },
+        "annotations": {
+          "key1": "value1"
+        }
+      },
+      "endpointSlice": {
+        "name": "gateway-gateway-with-infrastructure-metadata-ipv4",
+        "family": "IPv4",
+        "endpoints": [
+          {
+            "addresses": [
+              "192.0.2.30"
+            ],
+            "conditions": {
+              "ready": true
+            }
+          }
+        ],
+        "ports": [
+          {
+            "name": "tcp-8080",
+            "port": 8080,
+            "protocol": "TCP"
+          }
+        ],
+        "label": {
+          "key2": "value2"
+        },
+        "annotation": {
+          "key1": "value1"
+        }
+      },
+      "dns": {
+        "fqdn": "gateway-gateway-with-infrastructure-metadata.gateway-conformance-infra.svc.cluster.local",
+        "addresses": [
+          "192.0.2.30"
+        ],
+        "remote": "192.0.2.30:8080",
+        "status": 200,
+        "echo": {
+          "namespace": "gateway-conformance-infra",
+          "path": "/infrastructure-dns-qualification",
+          "pod": "infra-backend-v1-667754889f-pz8ng"
+        }
+      },
+      "provider": {
+        "vip": "192.0.2.30",
+        "listener": {
+          "protocol": "HTTP",
+          "port": 8080,
+          "status": "ACTIVE"
+        },
+        "haproxyConfigSHA256": "28141a88c93f4946b17a8d758c7f63a3e9f10362eed6241887291a4af60c7eda",
+        "haproxyVersion": "3.0.19-ade9c1262-octavia-strict-dns-v1",
+        "haproxyBinarySHA256": "fa8468efa26f95ed83a36afeb97b79730de285450b7a8fae94f7cf5e6d2d0824"
+      },
+      "withdrawal": {
+        "octaviaReadback": 404,
+        "endpointSlices": 0,
+        "dnsNoLongerResolves": true,
+        "serviceUIDRetained": true
+      }
+    }
+  },
+  "real": [
+    "Kubernetes API with real Pods",
+    "CoreDNS resolution in a client Pod",
+    "Octavia public REST and its database",
+    "native HAProxy",
+    "HTTP echo backend"
+  ],
+  "simulated": [
+    "Keystone catalog and identity",
+    "Neutron VIP allocation",
+    "Octavia job scheduling",
+    "Amphora transport",
+    "VM to VIP network relay"
+  ],
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152"
+}

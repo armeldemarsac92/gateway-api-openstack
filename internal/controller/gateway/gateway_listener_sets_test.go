@@ -66,7 +66,7 @@ func TestNamespaceWatchRechecksGatewayForRouteOnForeignListenerSet(t *testing.T)
 		Spec: gatewayv1.ListenerSetSpec{
 			ParentRef: gatewayv1.ParentGatewayReference{Name: "edge", Namespace: ptr.To(gatewayv1.Namespace(gatewayKey.Namespace))},
 			Listeners: []gatewayv1.ListenerEntry{{
-				Name: "app", Protocol: gatewayv1.HTTPProtocolType, Port: 8080,
+				Name: "app", Protocol: gatewayv1.HTTPSProtocolType, Port: 8443,
 				AllowedRoutes: &gatewayv1.AllowedRoutes{Namespaces: &gatewayv1.RouteNamespaces{
 					From: ptr.To(gatewayv1.NamespacesFromSelector), Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "blue"}},
 				}},
