@@ -19,3 +19,5 @@ Add an `IPAddress` entry with `routability: Cluster` under `spec.addresses`. Eac
 For a Gateway that only requests Cluster addresses, the controller reserves at least one Service IP before programming the Octavia frontend. If a replacement request cannot be fulfilled, a previously assigned ClusterIP can keep serving while the Gateway reports the new request as unassigned.
 
 The controller withdraws the ClusterIP Services when the last Cluster request is removed. To disable ClusterIP publication, remove the Cluster requests, then remove `--gateway-address-routability-cluster` while keeping the infrastructure metadata permissions until cleanup has finished.
+
+If the last usable ClusterIP is lost, the controller disables its own load balancer. It can reopen the same frontend when a usable address becomes available. [Local traffic and withdrawal](qualification/v1.7.0/provider/gateway-infrastructure.md#experimental-clusterip-reachability)
