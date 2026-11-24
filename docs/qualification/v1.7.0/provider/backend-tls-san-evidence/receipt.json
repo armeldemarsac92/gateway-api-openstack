@@ -1,0 +1,238 @@
+{
+  "gatewayAPIVersion": "v1.7.0",
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "controller": "4cc686c5334a8db0e045ab9cd06cbb367adef119",
+  "image": {
+    "repository": "ghcr.io/armeldemarsac92/gateway-api-openstack",
+    "sourceRevision": "4cc686c5334a8db0e045ab9cd06cbb367adef119",
+    "sourceLabel": "https://github.com/armeldemarsac92/gateway-api-openstack",
+    "manifestDigest": "sha256:6ddd7eece7ed4cb9be851f25f903ba611181361c318e3a191ffd1ecff541846d",
+    "configDigest": "sha256:307a4a7e3464ce24d6a284d441059df010772eb043b3f68bf54809f765ea347f",
+    "platform": "linux/amd64",
+    "entrypoint": "/openstack-gateway-controller",
+    "user": "65532:65532",
+    "ociArchiveSHA256": "51fc9534227b0a24f0e17d9bd61a7a4a284069635565d7a670bbfa53acc3bd9d",
+    "managerSHA256": "8a07f1bfa671cb43520cb7e807ff7fa231215d8eb62187a4c38ce66c0f58fe71",
+    "normalAndNoCacheBuildsMatch": true
+  },
+  "channels": {
+    "standard": {
+      "case": "BackendTLSPolicySANValidation",
+      "passedSubtests": 6,
+      "validDNSSubtestSeconds": 16.43,
+      "reportSHA256": "82c006675541bc391a5a51c9340f8b9b7f461e1c6652bf311defdc3ddb1b6cfd",
+      "runnerSHA256": "de9cdeb62c794b24716cc6f2548d784f8c2de9fcf0773c26d31fb828d3257d4d",
+      "octavia": {
+        "revision": "53db584246b12351085e7c4c18fb0ebda2a11b65",
+        "version": "19.0.1.dev41",
+        "sha256": "264593363e9002fea342f798dde24f4fb086f89929b1643f7bb3874ea11af08b",
+        "filesVerified": 647
+      },
+      "octaviaLib": {
+        "revision": "7df306215a9e6db04674b75fc8fc86aacea38cfd",
+        "version": "3.12.1.dev12",
+        "sha256": "4cb40b8a277216481a43c8e97088b33afc4a970cd72b11d6b72918c1a339ca93",
+        "filesVerified": 24
+      },
+      "haProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1",
+        "sha256": "55bf3823b5fc2c34d21cac551ff23635cfc555c0223e4470e5696a98dcb4fd4e"
+      },
+      "traffic": {
+        "/backendtlspolicy-san-dns": {
+          "status": 200,
+          "backendSNI": "abc.example.com",
+          "expectedPod": true
+        },
+        "/backendtlspolicy-san-dns-mismatch": {
+          "status": 503
+        },
+        "/backendtlspolicy-san-uri": {
+          "status": 200,
+          "backendSNI": "abc.example.com",
+          "expectedPod": true
+        },
+        "/backendtlspolicy-san-uri-mismatch": {
+          "status": 503
+        },
+        "/backendtlspolicy-multiple-sans": {
+          "status": 200,
+          "backendSNI": "abc.example.com",
+          "expectedPod": true
+        },
+        "/backendtlspolicy-multiple-mismatch-sans": {
+          "status": 503
+        }
+      },
+      "afterRegionalWithdrawal": {
+        "policies": {
+          "san-dns": {
+            "same-namespace": {
+              "Accepted": "False/UnsupportedProvider",
+              "ResolvedRefs": "True/ResolvedRefs"
+            }
+          },
+          "san-dns-mismatch": {
+            "same-namespace": {
+              "Accepted": "False/UnsupportedProvider",
+              "ResolvedRefs": "True/ResolvedRefs"
+            }
+          },
+          "san-uri": {
+            "same-namespace": {
+              "Accepted": "False/UnsupportedProvider",
+              "ResolvedRefs": "True/ResolvedRefs"
+            }
+          },
+          "san-uri-mismatch": {
+            "same-namespace": {
+              "Accepted": "False/UnsupportedProvider",
+              "ResolvedRefs": "True/ResolvedRefs"
+            }
+          },
+          "multiple-sans": {
+            "same-namespace": {
+              "Accepted": "False/UnsupportedProvider",
+              "ResolvedRefs": "True/ResolvedRefs"
+            }
+          },
+          "multiple-mismatch-sans": {
+            "same-namespace": {
+              "Accepted": "False/UnsupportedProvider",
+              "ResolvedRefs": "True/ResolvedRefs"
+            }
+          }
+        },
+        "traffic": {
+          "/backendtlspolicy-san-dns": {
+            "status": 503
+          },
+          "/backendtlspolicy-san-dns-mismatch": {
+            "status": 503
+          },
+          "/backendtlspolicy-san-uri": {
+            "status": 503
+          },
+          "/backendtlspolicy-san-uri-mismatch": {
+            "status": 503
+          },
+          "/backendtlspolicy-multiple-sans": {
+            "status": 503
+          },
+          "/backendtlspolicy-multiple-mismatch-sans": {
+            "status": 503
+          }
+        }
+      }
+    },
+    "experimental": {
+      "case": "BackendTLSPolicySANValidation",
+      "passedSubtests": 6,
+      "validDNSSubtestSeconds": 17.16,
+      "reportSHA256": "1933863f9010fbe43b4f00bd73f081d8a50f6d2aab7323d83de668f49ebc2f88",
+      "runnerSHA256": "de9cdeb62c794b24716cc6f2548d784f8c2de9fcf0773c26d31fb828d3257d4d",
+      "octavia": {
+        "revision": "53db584246b12351085e7c4c18fb0ebda2a11b65",
+        "version": "19.0.1.dev41",
+        "sha256": "264593363e9002fea342f798dde24f4fb086f89929b1643f7bb3874ea11af08b",
+        "filesVerified": 647
+      },
+      "octaviaLib": {
+        "revision": "7df306215a9e6db04674b75fc8fc86aacea38cfd",
+        "version": "3.12.1.dev12",
+        "sha256": "4cb40b8a277216481a43c8e97088b33afc4a970cd72b11d6b72918c1a339ca93",
+        "filesVerified": 24
+      },
+      "haProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1",
+        "sha256": "55bf3823b5fc2c34d21cac551ff23635cfc555c0223e4470e5696a98dcb4fd4e"
+      },
+      "traffic": {
+        "/backendtlspolicy-san-dns": {
+          "status": 200,
+          "backendSNI": "abc.example.com",
+          "expectedPod": true
+        },
+        "/backendtlspolicy-san-dns-mismatch": {
+          "status": 503
+        },
+        "/backendtlspolicy-san-uri": {
+          "status": 200,
+          "backendSNI": "abc.example.com",
+          "expectedPod": true
+        },
+        "/backendtlspolicy-san-uri-mismatch": {
+          "status": 503
+        },
+        "/backendtlspolicy-multiple-sans": {
+          "status": 200,
+          "backendSNI": "abc.example.com",
+          "expectedPod": true
+        },
+        "/backendtlspolicy-multiple-mismatch-sans": {
+          "status": 503
+        }
+      },
+      "afterRegionalWithdrawal": {
+        "policies": {
+          "san-dns": {
+            "same-namespace": {
+              "Accepted": "False/UnsupportedProvider",
+              "ResolvedRefs": "True/ResolvedRefs"
+            }
+          },
+          "san-dns-mismatch": {
+            "same-namespace": {
+              "Accepted": "False/UnsupportedProvider",
+              "ResolvedRefs": "True/ResolvedRefs"
+            }
+          },
+          "san-uri": {
+            "same-namespace": {
+              "Accepted": "False/UnsupportedProvider",
+              "ResolvedRefs": "True/ResolvedRefs"
+            }
+          },
+          "san-uri-mismatch": {
+            "same-namespace": {
+              "Accepted": "False/UnsupportedProvider",
+              "ResolvedRefs": "True/ResolvedRefs"
+            }
+          },
+          "multiple-sans": {
+            "same-namespace": {
+              "Accepted": "False/UnsupportedProvider",
+              "ResolvedRefs": "True/ResolvedRefs"
+            }
+          },
+          "multiple-mismatch-sans": {
+            "same-namespace": {
+              "Accepted": "False/UnsupportedProvider",
+              "ResolvedRefs": "True/ResolvedRefs"
+            }
+          }
+        },
+        "traffic": {
+          "/backendtlspolicy-san-dns": {
+            "status": 503
+          },
+          "/backendtlspolicy-san-dns-mismatch": {
+            "status": 503
+          },
+          "/backendtlspolicy-san-uri": {
+            "status": 503
+          },
+          "/backendtlspolicy-san-uri-mismatch": {
+            "status": 503
+          },
+          "/backendtlspolicy-multiple-sans": {
+            "status": 503
+          },
+          "/backendtlspolicy-multiple-mismatch-sans": {
+            "status": 503
+          }
+        }
+      }
+    }
+  }
+}
