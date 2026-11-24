@@ -130,13 +130,3 @@ func observeBackendTLS(ctx context.Context, reader client.Reader, service *corev
 	}
 	return backendtls.Evaluate(service, port, items, cas), nil
 }
-
-// HasValidBackendTLSWinner reports whether any backend can use authenticated TLS.
-func HasValidBackendTLSWinner(selections map[model.ServicePortKey]backendtls.Selection) bool {
-	for _, selection := range selections {
-		if selection.Winner != nil && selection.Winner.Validation != nil && selection.Winner.AncestorSlot == backendtls.AncestorSlotHeld {
-			return true
-		}
-	}
-	return false
-}

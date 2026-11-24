@@ -210,6 +210,9 @@ func (r *Reconciler) reconcileParameters(ctx context.Context, scope *gatewayClas
 		if r.Config.GatewayAddressRoutabilityEnabled() {
 			class.Status.SupportedFeatures = []gatewayv1.SupportedFeature{{Name: gatewayv1.FeatureName(features.SupportGatewayAddressRoutability)}}
 		}
+		if r.Config.GatewayInfrastructureMetadata {
+			class.Status.SupportedFeatures = append(class.Status.SupportedFeatures, gatewayv1.SupportedFeature{Name: gatewayv1.FeatureName(features.SupportGatewayInfrastructure)})
+		}
 		// Gateway and HTTPRoute features require their complete core conformance
 		// profiles. The current HTTP subset does not justify declaring either.
 		controller.SetCondition(&class.Status.Conditions, controller.Condition(

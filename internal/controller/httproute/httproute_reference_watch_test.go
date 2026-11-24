@@ -158,14 +158,19 @@ func TestNamespaceEventsReachRoutesAttachedOnlyToRemoteListenerSet(t *testing.T)
 	}
 	ref := gatewayv1.ParentReference{Kind: ptr.To(gatewayv1.Kind("ListenerSet")), Name: "edge", Namespace: ptr.To(gatewayv1.Namespace("delegation"))}
 	route := mapperTestHTTPRoute("apps", "tenant", ref, "backend")
+	https := set.Spec.Listeners[0].DeepCopy()
+	https.Name, https.Protocol, https.Port = "secure", gatewayv1.HTTPSProtocolType, 443
+	set.Spec.Listeners = append(set.Spec.Listeners, *https)
+	ref.SectionName = ptr.To(https.Name)
+	secureRoute := mapperTestHTTPRoute("apps", "secure", ref, "backend")
 	ref.SectionName = ptr.To(gatewayv1.SectionName("other"))
 	unrelated := mapperTestHTTPRoute("apps", "other", ref, "backend")
 	cfg := testConfig()
-	kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).WithObjects(set, route, unrelated).Build()
+	kubeClient := indexedFakeClientBuilder(testScheme(t), cfg).WithObjects(set, route, secureRoute, unrelated).Build()
 	r := &Reconciler{Client: &referenceWatchClient{Client: kubeClient, t: t}, Config: cfg}
 	for _, team := range []string{"blue", "red"} {
 		namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: route.Namespace, Labels: map[string]string{"team": team}}}
-		assertRouteRequests(t, r.enqueueHTTPRoutesForNamespace(t.Context(), namespace), route)
+		assertRouteRequests(t, r.enqueueHTTPRoutesForNamespace(t.Context(), namespace), route, secureRoute)
 	}
 }
 

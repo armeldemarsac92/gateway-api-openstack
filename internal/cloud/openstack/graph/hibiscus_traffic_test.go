@@ -539,8 +539,13 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct, https, grouped bool
 				switch {
 				case req.Method == http.MethodPost && (data["admin_state_up"] != false || !slices.Contains(pilotTags(data["tags"]), httpsIsolationTag)):
 					t.Errorf("new isolated listener did not start closed with durable enrollment: %v", data)
-				case req.Method == http.MethodPut && (entry["admin_state_up"] != false || len(orderedPolicies(entry["id"])) != 0):
-					t.Errorf("changed native HTTPS hosts while the port or old selectors still existed: %v", entry)
+				case req.Method == http.MethodPut:
+					wanted := data["https_virtual_hosts"].([]any)
+					for _, child := range orderedPolicies(entry["id"]) {
+						if !slices.Contains(wanted, child["https_listener_hostname"]) {
+							t.Errorf("changed native HTTPS hosts while a removed selector still existed: %v", child)
+						}
+					}
 				}
 			}
 			if position, exists := data["position"]; collection == policy && exists {
@@ -1372,6 +1377,7 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct, https, grouped bool
 				result := reconcile(provider, spec)
 				if server["admin_state_up"] != false || peer["admin_state_up"] != true ||
 					!slices.Equal(result.Gateway.ScopedListenerDeferredPorts, []int{frontendAddress.Port}) ||
+					slices.Contains(result.Gateway.ScopedListenerServingPorts, httpsPort) ||
 					!slices.Equal(writes[before:], []string{"PUT " + tlsPath}) {
 					t.Fatalf("uncertainty did not withdraw only the isolated port: %v, writes %v", result.Gateway, writes[before:])
 				}
@@ -1433,6 +1439,162 @@ func testHibiscusHTTPTraffic(t *testing.T, shared, distinct, https, grouped bool
 				!slices.Contains(pilotTags(server["tags"]), httpsIsolationTag) || peer["admin_state_up"] != true {
 				t.Fatalf("host-set replacement lost enrollment or changed a sibling: %v", server)
 			}
+
+			t.Run("independent section withdrawal and restoration preserve the active bind", func(t *testing.T) {
+				for _, host := range []string{exactScope, replacementScope} {
+					reduced := spec
+					reduced.Gateway.Spec.ScopedListeners = slices.Clone(spec.Gateway.Spec.ScopedListeners)
+					reduced.Gateway.Spec.ScopedListeners[0].TLS = &cloud.ListenerTLS{CertificateRef: refA, VirtualHosts: []string{host}}
+					reduced.Routes = slices.Clone(spec.Routes)
+					route := &reduced.Routes[1].Spec
+					route.HTTPBackends = slices.Clone(route.HTTPBackends)
+					route.HTTPBackends[0].Matches = slices.DeleteFunc(slices.Clone(route.HTTPBackends[0].Matches), func(match cloud.HTTPPathMatch) bool {
+						return match.HTTPSListenerHostname != host
+					})
+
+					var preserved, retired any
+					for _, child := range orderedPolicies(tlsID) {
+						if child["https_listener_hostname"] == host {
+							preserved = child["id"]
+						} else {
+							retired = child["id"]
+						}
+					}
+					observe := func(want cloud.GatewayGraphSpec) cloud.GatewayGraphResult {
+						t.Helper()
+						result := reconcile(newProvider(), want)
+						if server["admin_state_up"] != true ||
+							!slices.ContainsFunc(orderedPolicies(tlsID), func(row record) bool {
+								return row["id"] == preserved && row["admin_state_up"] == true
+							}) {
+							t.Fatalf("withdrawal or restoration disabled the active bind or policy %v: %v", preserved, writes)
+						}
+						return result
+					}
+
+					withdraw := reduced
+					if host == replacementScope {
+						withdraw.Routes = nil
+						withdraw.Gateway.Disposition = cloud.GraphWithdrawTLS
+						withdraw.Gateway.Spec.ScopedListeners = withdraw.Gateway.Spec.ScopedListeners[:1]
+						withdraw.Gateway.TLSWithdrawalPorts = []int{httpsPort}
+						withdraw.Gateway.TLSWithdrawalPreviousHosts = map[int][]string{httpsPort: spec.Gateway.Spec.ScopedListeners[0].TLS.VirtualHosts}
+						withdraw.HTTPSPolicyAuthority = &reduced
+					}
+
+					// Octavia cannot remove two still-serving policies in one
+					// write. Close before doing any selective retirement.
+					if host == exactScope {
+						retiredPolicy := maps.Clone(inventory[policy+"/"+retired.(string)])
+						const extra = "also-serving"
+						retiredPolicy["id"], retiredPolicy["position"] = extra, 3
+						inventory[policy+"/"+extra] = retiredPolicy
+						start := len(writes)
+						reconcile(newProvider(), withdraw)
+						if server["admin_state_up"] != false || !slices.Equal(writes[start:], []string{"PUT " + tlsPath}) {
+							t.Fatalf("multiple active policies for the withdrawn section must close the listener: %v", writes[start:])
+						}
+						delete(inventory, policy+"/"+extra)
+						converge(newProvider(), spec)
+					}
+
+					cleanup := cloud.GatewayGraphSpec{Identity: spec.Identity, Gateway: cloud.GatewayGraphNode{
+						Disposition: cloud.GraphPreserve, Spec: cloud.GatewaySpec{
+							ListenerProtocol: cloud.ListenerProtocolHTTP, ListenerPort: frontendAddress.Port, ScopedListeners: []cloud.ScopedListener{},
+						},
+					}, HTTPSPolicyAuthority: &reduced, Routes: slices.Clone(spec.Routes)}
+					for i := range cleanup.Routes {
+						cleanup.Routes[i] = cloud.RouteGraphNode{Disposition: cloud.GraphPreserve, Spec: cloud.RouteSpec{Identity: spec.Routes[i].Spec.Identity}}
+					}
+
+					before := len(writes)
+					if state := observe(cleanup); len(writes) != before || state.Outcome.State != cloud.OutcomeProgressing {
+						t.Fatalf("route cleanup must yield the shared contraction to the Gateway: %v, %v", writes[before:], state.Outcome)
+					}
+					state := observe(withdraw)
+					if !slices.Contains(state.Gateway.ScopedListenerServingPorts, httpsPort) || slices.Contains(state.Gateway.ScopedListenerReadyPorts, httpsPort) {
+						t.Fatalf("expected physical discovery proof without logical readiness, got %+v", state.Gateway)
+					}
+					if !slices.Equal(writes[before:], []string{"DELETE " + policy + "/" + retired.(string)}) {
+						t.Fatalf("the first mutation must retire only the withdrawn policy, got %v", writes[before:])
+					}
+					fresh := cloud.GatewayGraphSpec{Identity: spec.Identity, Gateway: cloud.GatewayGraphNode{
+						Disposition: cloud.GraphWithdrawTLS, Spec: reduced.Gateway.Spec,
+					}, HTTPSPolicyAuthority: &reduced}
+					fresh.Gateway.Spec.ScopedListeners = fresh.Gateway.Spec.ScopedListeners[:1]
+					observe(fresh)
+					if !slices.Equal(writes[before+1:], []string{"PUT " + tlsPath}) ||
+						!slices.Equal(server["https_virtual_hosts"].([]any), []any{host}) {
+						t.Fatalf("the second mutation must contract the host set in place, got %v", writes[before+1:])
+					}
+					observe(reduced)
+					before = len(writes)
+					observe(withdraw)
+					if len(writes) != before {
+						t.Fatalf("an older fence must accept an already verified contraction: %v", writes[before:])
+					}
+					cleanup.HTTPSPolicyAuthority = &spec
+					observe(cleanup)
+					if len(writes) != before {
+						t.Fatalf("cleanup must preserve the smaller proved inventory during restoration: %v", writes[before:])
+					}
+					// A revoked backend may still be cleaning up when the grant
+					// returns. Octavia reports the parent as pending while the
+					// contracted HTTPS listener and its peer remain active.
+					inventory[gateway]["provisioning_status"] = "PENDING_UPDATE"
+					t.Cleanup(func() { inventory[gateway]["provisioning_status"] = "ACTIVE" })
+					state = observe(spec)
+					if state.Outcome.State != cloud.OutcomeProgressing || len(writes) != before ||
+						!slices.Contains(state.Gateway.ScopedListenerServingPorts, httpsPort) ||
+						slices.Contains(state.Gateway.ScopedListenerReadyPorts, httpsPort) {
+						t.Fatalf("restoration during cleanup lost serving discovery or advanced logical readiness: %+v", state.Gateway)
+					}
+					stale := spec
+					staleAuthority := errors.New("authorization changed after Octavia readback")
+					stale.ValidateMutation = func(context.Context) error { return staleAuthority }
+					state, err := newProvider().ReconcileGatewayGraph(ctx, stale)
+					if !errors.Is(err, staleAuthority) || len(writes) != before ||
+						slices.Contains(state.Gateway.ScopedListenerServingPorts, httpsPort) {
+						t.Fatalf("pending restoration advertised stale authority: %+v, %v", state.Gateway, err)
+					}
+
+					assertUnpublished := func() {
+						t.Helper()
+						state, err := newProvider().ReconcileGatewayGraph(ctx, spec)
+						if err != nil && !errors.Is(err, cloud.ErrOwnershipConflict) {
+							t.Fatalf("unexpected observation error: %v", err)
+						}
+						if len(writes) != before || slices.Contains(state.Gateway.ScopedListenerServingPorts, httpsPort) ||
+							slices.Contains(state.Gateway.ScopedListenerReadyPorts, httpsPort) {
+							t.Fatalf("pending restoration advertised an unverified listener or policy: %+v", state.Gateway)
+						}
+					}
+					peerPolicy := inventory[policy+"/"+preserved.(string)]
+					target := peerPolicy["redirect_pool_id"]
+					peerPolicy["redirect_pool_id"] = orderedPolicies(httpID)[0]["redirect_pool_id"]
+					assertUnpublished()
+					peerPolicy["redirect_pool_id"] = target
+
+					server["admin_state_up"] = false
+					assertUnpublished()
+					server["admin_state_up"] = true
+					inventory[gateway]["provisioning_status"] = "ACTIVE"
+
+					observe(spec)
+					if !slices.Equal(writes[before:], []string{"PUT " + tlsPath}) || len(orderedPolicies(tlsID)) != 1 {
+						t.Fatalf("restoration must register the scope before creating policies, got %v", writes[before:])
+					}
+					for range 24 {
+						state = observe(spec)
+						if state.Outcome.State == cloud.OutcomeReady {
+							break
+						}
+					}
+					if state.Outcome.State != cloud.OutcomeReady || len(orderedPolicies(tlsID)) != 2 {
+						t.Fatalf("the restored section did not program: %v", state.Outcome)
+					}
+				}
+			})
 
 			optedOut := newProvider()
 			optedOut.httpsListenerIsolation = false

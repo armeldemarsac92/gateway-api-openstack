@@ -445,7 +445,7 @@ func (r *Reconciler) buildRoutePortModel(
 		spec.HTTPListenerHostname = match.httpListenerHostname
 		spec.HTTPSListenerHostname = match.httpsListenerHostname
 		spec.Hostname, spec.PathType, spec.PathValue, spec.Precedence = match.Hostname, cloud.PathMatchType(match.Match.PathType), match.Match.PathValue, match.Precedence
-		spec.BackendTLS = inputs.backendTLSAvailability[spec.GRPC].validation(backend)
+		spec.BackendTLS = inputs.backendTLSValidation(backend, spec.GRPC)
 		if spec.BackendTLS != nil && spec.BackendTLS.Denied {
 			return spec, routeModelDiagnostics{}, nil
 		}
@@ -626,7 +626,7 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 	}
 	result, observed := groups[key]
 	var members []cloud.Member
-	tls := inputs.backendTLSAvailability[spec.GRPC].validation(backend)
+	tls := inputs.backendTLSValidation(backend, spec.GRPC)
 	if !observed {
 		switch {
 		case backend.Diagnostic != nil && spec.GRPC:

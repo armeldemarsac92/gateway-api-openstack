@@ -31,12 +31,16 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia/amphora"
 )
 
-// Validation requires the hostname for both backend SNI and certificate identity.
+// Validation requires a backend SNI hostname and a trusted CA.
 type Validation struct {
-	Hostname string
-	CA       CA
+	Hostname        string
+	SubjectAltNames []cloud.BackendTLSSubjectAltName
+	CA              CA
 }
 
 // CA identifies the ConfigMap and the exact normalized trust payload.
@@ -90,14 +94,23 @@ func validate(result *PolicyResult, spec gatewayv1.BackendTLSPolicySpec, configM
 
 	hostname := string(policy.Hostname)
 	switch {
-	case len(policy.SubjectAltNames) > 0:
-		result.reject(gatewayv1.PolicyReasonInvalid, "Explicit subjectAltNames require unsupported BackendTLSPolicySANValidation")
 	case !isPreciseHostname(hostname):
 		result.reject(gatewayv1.PolicyReasonInvalid, "Backend TLS hostname must be a precise DNS hostname")
 	case len(spec.Options) > 0:
 		result.reject(gatewayv1.PolicyReasonInvalid, "BackendTLSPolicy TLS options are unsupported")
 	default:
-		result.Validation = &Validation{Hostname: hostname, CA: ca}
+		names := make([]cloud.BackendTLSSubjectAltName, 0, len(policy.SubjectAltNames))
+		for _, name := range policy.SubjectAltNames {
+			names = append(names, cloud.BackendTLSSubjectAltName{
+				Type: string(name.Type), Hostname: string(name.Hostname), URI: string(name.URI),
+			})
+		}
+		names, err := amphora.NormalizeBackendTLSSubjectAltNames(names)
+		if err != nil {
+			result.reject(gatewayv1.PolicyReasonInvalid, err.Error())
+			return
+		}
+		result.Validation = &Validation{Hostname: hostname, CA: ca, SubjectAltNames: names}
 	}
 }
 

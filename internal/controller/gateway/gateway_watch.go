@@ -26,6 +26,7 @@ import (
 	discoveryv1 "k8s.io/api/discovery/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -136,6 +137,10 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 			Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForListenerSetNamespace),
 				builder.WithPredicates(controller.NamespacePredicate()))
 	}
+	if r.Config.GatewayInfrastructureMetadata {
+		gatewayController.Owns(&corev1.Service{}).Owns(&discoveryv1.EndpointSlice{}).
+			Watches(&discoveryv1.EndpointSlice{}, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForForeignDiscoverySlice))
+	}
 	if r.Config.OperatorHTTPS || r.Config.BackendClientCertificate {
 		gatewayController.Watches(&gatewayv1.ReferenceGrant{}, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForCertificateGrant))
 	}
@@ -155,6 +160,29 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 		Watches(&configv1alpha1.OpenStackGatewayClassConfig{}, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForParameters), builder.WithPredicates(controller.GenerationOrDeletionChangedPredicate())).
 		Named("gateway").
 		Complete(r)
+}
+
+// A slice owned elsewhere can still affect discovery through the Service label.
+func (r *Reconciler) gatewayRequestsForForeignDiscoverySlice(ctx context.Context, object client.Object) []reconcile.Request {
+	name := object.GetLabels()[discoveryv1.LabelServiceName]
+	if !strings.HasPrefix(name, "gateway-") && !strings.HasPrefix(name, "gw-") {
+		return nil
+	}
+	key := client.ObjectKey{Namespace: object.GetNamespace(), Name: name}
+	var service corev1.Service
+	if err := r.Get(ctx, key, &service); err != nil || service.Annotations[discoveryControllerAnnotation] != string(r.Config.ControllerName) {
+		return nil
+	}
+	owner := metav1.GetControllerOfNoCopy(&service)
+	if owner == nil || owner.Kind != "Gateway" || owner.APIVersion != gatewayv1.GroupVersion.String() {
+		return nil
+	}
+	gateway := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: service.Namespace, Name: owner.Name, UID: owner.UID}}
+	endpointSlice := object.(*discoveryv1.EndpointSlice)
+	if endpointSlice.Name == discoverySliceKey(key, endpointSlice.AddressType).Name && r.ownsDiscoveryObject(gateway, endpointSlice) {
+		return nil
+	}
+	return []reconcile.Request{{NamespacedName: client.ObjectKeyFromObject(gateway)}}
 }
 
 // Parameter updates can leave GatewayClass conditions unchanged. Wake unbound
