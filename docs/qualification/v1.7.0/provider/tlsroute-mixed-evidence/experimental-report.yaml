@@ -1,0 +1,49 @@
+apiVersion: gateway.networking.k8s.io/v1
+date: "2026-11-25T00:54:12+01:00"
+gatewayAPIChannel: experimental
+gatewayAPIVersion: v1.7.0
+implementation:
+  contact:
+  - https://github.com/armeldemarsac92/gateway-api-openstack/issues
+  organization: Gateway API for OpenStack
+  project: Hibiscus
+  url: https://github.com/armeldemarsac92/gateway-api-openstack
+  version: e98465b9dbf9251af98fd917ca616744f7140894
+kind: ConformanceReport
+mode: local-single-case
+profiles:
+- core:
+    result: success
+    statistics:
+      Failed: 0
+      Passed: 0
+      Skipped: 0
+  extended:
+    result: success
+    statistics:
+      Failed: 0
+      Passed: 1
+      Skipped: 0
+    supportedFeatures:
+    - TLSRouteModeMixed
+    - TLSRouteModeTerminate
+    unsupportedFeatures:
+    - BackendTLSPolicy
+    - BackendTLSPolicySANValidation
+    - ClusterTrustBundle
+    - GatewayAddressEmpty
+    - GatewayAddressRoutability
+    - GatewayAddressRoutabilityCluster
+    - GatewayBackendClientCertificate
+    - GatewayFrontendClientCertificateValidation
+    - GatewayFrontendClientCertificateValidationInsecureFallback
+    - GatewayHTTPListenerIsolation
+    - GatewayHTTPSListenerDetectMisdirectedRequests
+    - GatewayInfrastructure
+    - GatewayListenerFilters
+    - GatewayPort8080
+    - GatewayRouteHostnameIntersectionPrecedence
+    - GatewayStaticAddresses
+    - ListenerSet
+  name: GATEWAY-TLS
+  summary: Core tests succeeded. Extended tests succeeded.
