@@ -45,7 +45,7 @@ type routeModelInputs struct {
 	gateway                *gatewayv1.Gateway
 	input                  model.Input
 	logical                model.Gateway
-	backendTLSAvailability map[bool]backendTLSAvailability
+	backendTLSAvailability map[backendTLSRequirements]backendTLSAvailability
 	backendTLSAncestor     *backendtls.GatewayAncestor
 	admission              routeGraphAdmission
 }
@@ -304,22 +304,14 @@ func (r *Reconciler) collectRouteModelInputsForSets(ctx context.Context, reader 
 			}
 		}
 	}
-	var availability map[bool]backendTLSAvailability
+	var availability map[backendTLSRequirements]backendTLSAvailability
 	var ancestor *backendtls.GatewayAncestor
 	if r.Config.BackendTLSPolicy {
 		ancestor = &backendtls.GatewayAncestor{Key: client.ObjectKeyFromObject(gateway), ControllerName: r.Config.ControllerName}
 		if err := graph.CollectBackendTLSInputs(ctx, reader, &input, ancestor); err != nil {
 			return nil, err
 		}
-		if graph.HasValidBackendTLSWinner(input.BackendTLSPolicies) {
-			availability = make(map[bool]backendTLSAvailability, 2)
-			for i := range routes {
-				requireH2 := model.HTTPProfileRouteKind(&routes[i]) == model.GRPCRouteKind
-				if _, checked := availability[requireH2]; !checked {
-					availability[requireH2] = r.backendTLSAvailability(ctx, requireH2)
-				}
-			}
-		}
+		availability = r.discoverBackendTLSProfiles(ctx, routes, input.BackendTLSPolicies)
 	}
 	logical, err := model.Compile(input)
 	if err != nil {

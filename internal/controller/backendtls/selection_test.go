@@ -31,6 +31,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 )
 
 func TestEvaluateSectionPrecedence(t *testing.T) {
@@ -221,8 +223,6 @@ func TestEvaluateInvalidCA(t *testing.T) {
 func TestEvaluateUnsupportedTLSValidation(t *testing.T) {
 	service := testService()
 	maps := testConfigMaps(testCertificate(t, true))
-	hostnameSAN := []gatewayv1.SubjectAltName{{Type: gatewayv1.HostnameSubjectAltNameType, Hostname: "backend.example.com"}}
-	uriSAN := []gatewayv1.SubjectAltName{{Type: gatewayv1.URISubjectAltNameType, URI: "spiffe://example.org/backend"}}
 	for _, tt := range []struct {
 		name       string
 		change     func(*gatewayv1.BackendTLSPolicyValidation)
@@ -232,8 +232,18 @@ func TestEvaluateUnsupportedTLSValidation(t *testing.T) {
 			v.CACertificateRefs = nil
 			v.WellKnownCACertificates = ptr.To(gatewayv1.WellKnownCACertificatesSystem)
 		}, "Well-known"},
-		{"explicit DNS SAN", func(v *gatewayv1.BackendTLSPolicyValidation) { v.SubjectAltNames = hostnameSAN }, "BackendTLSPolicySANValidation"},
-		{"explicit URI SAN", func(v *gatewayv1.BackendTLSPolicyValidation) { v.SubjectAltNames = uriSAN }, "BackendTLSPolicySANValidation"},
+		{"IP SAN", func(v *gatewayv1.BackendTLSPolicyValidation) {
+			v.SubjectAltNames = []gatewayv1.SubjectAltName{{Type: gatewayv1.HostnameSubjectAltNameType, Hostname: "192.0.2.1"}}
+		}, "subjectAltNames"},
+		{"malformed URI SAN", func(v *gatewayv1.BackendTLSPolicyValidation) {
+			v.SubjectAltNames = []gatewayv1.SubjectAltName{{Type: gatewayv1.URISubjectAltNameType, URI: "spiffe://id.example.test/workload%2g"}}
+		}, "subjectAltNames"},
+		{"multiple SAN values in one entry", func(v *gatewayv1.BackendTLSPolicyValidation) {
+			v.SubjectAltNames = []gatewayv1.SubjectAltName{{Type: gatewayv1.HostnameSubjectAltNameType, Hostname: "backend.example.com", URI: "urn:example:backend"}}
+		}, "subjectAltNames"},
+		{"too many SANs", func(v *gatewayv1.BackendTLSPolicyValidation) {
+			v.SubjectAltNames = make([]gatewayv1.SubjectAltName, 6)
+		}, "at most five"},
 		{"wildcard SNI", func(v *gatewayv1.BackendTLSPolicyValidation) { v.Hostname = "*.example.com" }, "precise DNS hostname"},
 		{"IP SNI", func(v *gatewayv1.BackendTLSPolicyValidation) { v.Hostname = "192.0.2.1" }, "precise DNS hostname"},
 	} {
@@ -248,6 +258,29 @@ func TestEvaluateUnsupportedTLSValidation(t *testing.T) {
 			requireCondition(t, result.Winner.ResolvedRefs, metav1.ConditionTrue, gatewayv1.BackendTLSPolicyReasonResolvedRefs)
 		})
 	}
+}
+
+func TestEvaluateBackendTLSSubjectAltNames(t *testing.T) {
+	service := testService()
+	policy := testPolicy("policy", "")
+	policy.Spec.Validation.Hostname = "sni.example.test"
+	policy.Spec.Validation.SubjectAltNames = []gatewayv1.SubjectAltName{
+		{Type: gatewayv1.URISubjectAltNameType, URI: "spiffe://ID.example.test/workload%2fa"},
+		{Type: gatewayv1.HostnameSubjectAltNameType, Hostname: "*.backend.example.test"},
+	}
+	result := Evaluate(service, &service.Spec.Ports[0], []gatewayv1.BackendTLSPolicy{policy}, testConfigMaps(testCertificate(t, true)))
+	require.NotNil(t, result.Winner)
+	requireCondition(t, result.Winner.Accepted, metav1.ConditionTrue, gatewayv1.PolicyReasonAccepted)
+	require.NotNil(t, result.Winner.Validation)
+	require.Equal(t, "sni.example.test", result.Winner.Validation.Hostname)
+	require.Equal(t, []cloud.BackendTLSSubjectAltName{
+		{Type: cloud.BackendTLSSANHostname, Hostname: "*.backend.example.test"},
+		{Type: cloud.BackendTLSSANURI, URI: "spiffe://ID.example.test/workload%2fa"},
+	}, result.Winner.Validation.SubjectAltNames)
+
+	clone := result.Clone()
+	clone.Winner.Validation.SubjectAltNames[0].Hostname = "changed.example.test"
+	require.Equal(t, "*.backend.example.test", result.Winner.Validation.SubjectAltNames[0].Hostname)
 }
 
 func requireRejectedCA(t *testing.T, result *PolicyResult, reason gatewayv1.PolicyConditionReason) {

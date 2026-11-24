@@ -98,6 +98,7 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 		result.Gateway.HTTPPolicyTransition = true
 	}
 	groupedHTTP := handovers != nil
+	var staleMemberWithdrawal bool
 	var deleteDisables, deleteDisableRetries, deletions, memberDisables, memberDisableRetries []graphMutation
 	var staging, fixedStaging, fixedTargetWithdrawals []graphMutation
 	var weightedWithdrawals, targetRetries, closedListenerTargets []graphMutation
@@ -358,6 +359,13 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 				canRestoreTraffic = false
 			}
 		}
+		if groupedHTTP && p.initialL7Rules && !staleMemberWithdrawal && ensureHold == "" {
+			// Keep the normal backend order while a stale member needs to
+			// be removed, even if a pool update must precede its deletion.
+			staleMemberWithdrawal = slices.ContainsFunc(routePlan, func(step routeMutation) bool {
+				return step.kind == routeMutationDeleteMember
+			})
+		}
 		for stepIndex, step := range routePlan {
 			if groupedHTTP && step.kind == routeMutationEnablePolicy {
 				for _, policy := range observed.policies {
@@ -464,20 +472,39 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 	// its rank. Each new call refreshes the list after Octavia shifts positions.
 	// Filling this prefix first keeps inserts and moves within the current list.
 	if groupedHTTP {
+		var preparedTLS []graphMutation
 		ensures = slices.DeleteFunc(ensures, func(step graphMutation) bool {
 			port := scopedHTTPRoutePort(desired.routes[step.routeIndex])
 			if handovers.ports[port] && isHTTPPolicyMutation(step.route.kind) {
 				return true
 			}
 			switch step.route.kind {
-			case routeMutationEnablePolicy:
-				return holdPolicyEnable[port] || holdPolicyOrder[port]
-			case routeMutationMovePolicy, routeMutationCreatePolicy:
+			case routeMutationCreatePolicy, routeMutationEnablePolicy:
+				if holdPolicyOrder[port] {
+					return true
+				}
+				listenerID := step.listenerID
+				if !scopedHTTP && gatewayReady && actual.listener.ProvisioningStatus == "ACTIVE" {
+					listenerID = actual.listener.ID
+				}
+				frontendReady := scopedHTTP && slices.Contains(result.Gateway.ScopedListenerReadyPorts, port) ||
+					!scopedHTTP && gatewayReady
+				if p.initialL7Rules && !staleMemberWithdrawal && frontendReady && listenerID != "" &&
+					independentPreparedTLSPolicy(desired, actual, step, listenerID, port, policyCount[port]) {
+					preparedTLS = append(preparedTLS, step)
+					return true
+				}
+				return step.route.kind == routeMutationEnablePolicy && holdPolicyEnable[port]
+			case routeMutationMovePolicy:
 				return holdPolicyOrder[port]
 			default:
 				return false
 			}
 		})
+		slices.SortStableFunc(preparedTLS, func(a, b graphMutation) int {
+			return cmp.Compare(a.route.policy.position, b.route.policy.position)
+		})
+		plan = append(plan, preparedTLS...)
 		orderHTTPBackendMutations(ensures)
 	}
 	plan = append(plan, ensures...)

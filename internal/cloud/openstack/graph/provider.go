@@ -174,19 +174,25 @@ var _ cloud.GraphProvider = (*Provider)(nil)
 
 // BackendTLSAvailable discovers hostname validation on the regional Amphora endpoint.
 func (p *Provider) BackendTLSAvailable(ctx context.Context) (bool, error) {
-	return p.backendTLSAvailable(ctx, false)
+	return p.backendTLSAvailable(ctx, false, false)
 }
 
 // GRPCBackendTLSAvailable also requires enforcement of negotiated h2.
 func (p *Provider) GRPCBackendTLSAvailable(ctx context.Context) (bool, error) {
-	return p.backendTLSAvailable(ctx, true)
+	return p.backendTLSAvailable(ctx, true, false)
 }
 
-func (p *Provider) backendTLSAvailable(ctx context.Context, requireH2 bool) (bool, error) {
+// BackendTLSSANAvailable discovers explicit SAN authentication for the
+// selected transport on the regional Amphora endpoint.
+func (p *Provider) BackendTLSSANAvailable(ctx context.Context, requireH2 bool) (bool, error) {
+	return p.backendTLSAvailable(ctx, requireH2, true)
+}
+
+func (p *Provider) backendTLSAvailable(ctx context.Context, requireH2, requireSAN bool) (bool, error) {
 	if !p.backendTLSPolicy || p.backendCA == nil {
 		return false, nil
 	}
-	return p.amphoraCapabilityAvailable(ctx, backendTLSCapabilities(requireH2)...)
+	return p.amphoraCapabilityAvailable(ctx, backendTLSCapabilities(requireH2, requireSAN)...)
 }
 
 // HTTPSListenerIsolationAvailable checks the configured region before the

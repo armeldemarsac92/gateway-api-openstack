@@ -36,7 +36,7 @@ type Selection struct {
 	Policies []PolicyResult
 }
 
-// Clone detaches the policy conditions and CA bytes used in a compiled backend.
+// Clone detaches the policy conditions and TLS inputs used in a compiled backend.
 func (s Selection) Clone() Selection {
 	copy := Selection{Policies: slices.Clone(s.Policies)}
 	for i := range copy.Policies {
@@ -56,6 +56,7 @@ func (r PolicyResult) clone() PolicyResult {
 	if r.Validation != nil {
 		validation := *r.Validation
 		validation.CA.PEM = slices.Clone(validation.CA.PEM)
+		validation.SubjectAltNames = slices.Clone(validation.SubjectAltNames)
 		r.Validation = &validation
 	}
 	return r

@@ -232,15 +232,29 @@ type HTTPBackendKind string
 const HTTPBackendKindXBackend HTTPBackendKind = "gateway.networking.x-k8s.io/XBackend"
 
 // BackendTLSValidation requires authenticated TLS to a Service port. The
-// hostname is used as both SNI and the certificate identity. Denied keeps
+// hostname is used as SNI and authenticates the certificate if no SANs are
+// configured. Denied keeps
 // the backend's HTTP matches and weight while withholding all forwarding.
 type BackendTLSValidation struct {
-	Hostname       string
-	CAConfigMapUID string
-	CADigest       string
-	CAPEM          []byte `json:"-"`
-	Denied         bool
+	Hostname        string
+	SubjectAltNames []BackendTLSSubjectAltName `json:",omitempty"`
+	CAConfigMapUID  string
+	CADigest        string
+	CAPEM           []byte `json:"-"`
+	Denied          bool
 }
+
+// BackendTLSSubjectAltName is one typed certificate identity in Octavia's API.
+type BackendTLSSubjectAltName struct {
+	Type     string `json:"type"`
+	Hostname string `json:"hostname,omitempty"`
+	URI      string `json:"uri,omitempty"`
+}
+
+const (
+	BackendTLSSANHostname = "Hostname"
+	BackendTLSSANURI      = "URI"
+)
 
 // HTTPBackend groups the paths served by one backend within one HTTPRoute.
 // The zero kind denotes a core Service port.

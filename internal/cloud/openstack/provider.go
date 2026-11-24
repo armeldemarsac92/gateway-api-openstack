@@ -62,6 +62,11 @@ func (p *Provider) BackendTLSAvailable(ctx context.Context) (bool, error) {
 	return p.graph.BackendTLSAvailable(ctx)
 }
 
+// BackendTLSSANAvailable discovers explicit SAN authentication for HTTP or gRPC.
+func (p *Provider) BackendTLSSANAvailable(ctx context.Context, requireH2 bool) (bool, error) {
+	return p.graph.BackendTLSSANAvailable(ctx, requireH2)
+}
+
 // GRPCBackendTLSAvailable discovers hostname validation and mandatory h2 negotiation.
 func (p *Provider) GRPCBackendTLSAvailable(ctx context.Context) (bool, error) {
 	return p.graph.GRPCBackendTLSAvailable(ctx)
