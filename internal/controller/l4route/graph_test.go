@@ -40,6 +40,7 @@ import (
 
 func TestGraphFencesRevokedTCPReferenceGrant(t *testing.T) {
 	gateway, class, route := routeFixture()
+	gateway.Spec.Infrastructure = &gatewayv1.GatewayInfrastructure{Labels: map[gatewayv1.LabelKey]gatewayv1.LabelValue{"team": "edge"}}
 	route.Spec.Rules[0].BackendRefs[0].Namespace = ptr.To(gatewayv1.Namespace("backend"))
 	service := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{Namespace: "backend", Name: "backend", UID: "service-uid"},
@@ -53,6 +54,7 @@ func TestGraphFencesRevokedTCPReferenceGrant(t *testing.T) {
 		},
 	}
 	r := testReconciler(t, gateway, class, route, service, grant)
+	r.Config.GatewayInfrastructureMetadata = true
 	identity := bindFixture(t, r, gateway, route, cloud.MemberModeEndpoint)
 	input, err := r.ObserveRouteGraph(t.Context(), graph.Request{Identity: identity, Action: graph.Ensure, Gateway: gateway, TCPRoute: route}, gateway)
 	if err != nil {

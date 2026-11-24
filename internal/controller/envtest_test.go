@@ -141,6 +141,7 @@ func TestControllerEnvtest(t *testing.T) {
 	statusConfig := config
 	statusConfig.ControllerName = "status.example.com/gateway-api-openstack"
 	statusConfig.BackendTLSPolicy, statusConfig.BackendClientCertificate = true, true
+	statusConfig.GatewayInfrastructureMetadata = true
 	statusProvider := &recordingProvider{}
 	startManager(t, statusConfig, statusProvider)
 
