@@ -110,7 +110,10 @@ func TestBackendTLSPolicyProtectsOneWeightedShare(t *testing.T) {
 func TestGRPCBackendTLSPolicyResolvesAndProtectsBackend(t *testing.T) {
 	f, _, grpc := newRouteElectionFixture(t)
 	f.reconciler.Config.BackendTLSPolicy = true
-	requiredH2 := true
+	requiredH2, sanCapable := true, false
+	f.reconciler.BackendTLSSANAvailable = func(_ context.Context, requireH2 bool) (bool, error) {
+		return sanCapable && requireH2, nil
+	}
 	f.reconciler.GRPCBackendTLSAvailable = func(context.Context) (bool, error) { return requiredH2, nil }
 	// Match the upstream fixture: a named TCP Service port 443 with no appProtocol.
 	service := f.service.DeepCopy()
@@ -233,6 +236,27 @@ func TestGRPCBackendTLSPolicyResolvesAndProtectsBackend(t *testing.T) {
 
 	requiredH2 = true
 	require.False(t, reconcileRoute().BackendTLS.Denied)
+	policy.Spec.Validation.SubjectAltNames = []gatewayv1.SubjectAltName{
+		{Type: gatewayv1.URISubjectAltNameType, URI: "spiffe://id.example.test/workload%2fa"},
+	}
+	policy.Generation++
+	require.NoError(t, f.client.Update(t.Context(), policy))
+	conditions = reconcilePolicy()
+	accepted = meta.FindStatusCondition(conditions, string(gatewayv1.PolicyConditionAccepted))
+	require.NotNil(t, accepted)
+	require.Equal(t, policy.Generation, accepted.ObservedGeneration)
+	require.Equal(t, metav1.ConditionFalse, accepted.Status)
+	require.Contains(t, accepted.Message, "subjectAltNames")
+	require.True(t, meta.IsStatusConditionTrue(conditions, string(gatewayv1.BackendTLSPolicyConditionResolvedRefs)))
+	require.True(t, reconcileRoute().BackendTLS.Denied)
+
+	sanCapable = true
+	conditions = reconcilePolicy()
+	require.True(t, meta.IsStatusConditionTrue(conditions, string(gatewayv1.PolicyConditionAccepted)))
+	resolved = reconcileRoute()
+	require.False(t, resolved.BackendTLS.Denied)
+	require.Equal(t, []cloud.BackendTLSSubjectAltName{{Type: cloud.BackendTLSSANURI, URI: "spiffe://id.example.test/workload%2fa"}}, resolved.BackendTLS.SubjectAltNames)
+
 	require.NoError(t, f.client.Delete(t.Context(), ca))
 	conditions = reconcilePolicy()
 	require.True(t, meta.IsStatusConditionFalse(conditions, string(gatewayv1.BackendTLSPolicyConditionResolvedRefs)))

@@ -1481,9 +1481,11 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 			opts.Tags = append(opts.Tags, (*step.poolTags)...)
 		}
 		var hostname string
+		var subjectAltNames []cloud.BackendTLSSubjectAltName
 		requireH2 := step.backendTLS != nil && step.backendTLS.RequireH2 != nil && *step.backendTLS.RequireH2
-		if step.poolTags != nil && (desired.spec.GRPC || step.backendTLS != nil && step.backendTLS.ClientCertificateReference != "") {
-			// A gRPC TLS pool or a pool with a client identity starts closed.
+		if step.poolTags != nil && (desired.spec.GRPC || step.backendTLS != nil &&
+			(step.backendTLS.ClientCertificateReference != "" || len(step.backendTLS.SubjectAltNames) != 0)) {
+			// gRPC TLS, client certificates and explicit SANs start closed.
 			// Reopening requires independent, ownership-checked readback.
 			opts.AdminStateUp = boolPointer(false)
 		}
@@ -1491,10 +1493,11 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 			opts.TLSEnabled, opts.CATLSContainerRef = true, step.backendTLS.CAReference
 			opts.TLSContainerRef = step.backendTLS.ClientCertificateReference
 			hostname = step.backendTLS.Hostname
+			subjectAltNames = step.backendTLS.SubjectAltNames
 		}
 		_, err = p.octavia.CreatePool(ctx, octavia.CreatePoolOpts{CreateOpts: opts,
 			BackendH2C:         desired.spec.BackendH2C && desired.backendTLS.allowsMembers(),
-			BackendTLSHostname: hostname, BackendTLSRequireH2: requireH2})
+			BackendTLSHostname: hostname, BackendTLSSubjectAltNames: subjectAltNames, BackendTLSRequireH2: requireH2})
 	case routeMutationUpdatePool:
 		opts := pools.UpdateOpts{LBMethod: pools.LBMethodRoundRobin}
 		if step.backendH2C == nil {

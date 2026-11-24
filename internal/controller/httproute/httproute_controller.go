@@ -80,6 +80,8 @@ type Reconciler struct {
 	BackendTLSAvailable func(context.Context) (bool, error)
 	// GRPCBackendTLSAvailable also checks enforcement of negotiated h2.
 	GRPCBackendTLSAvailable func(context.Context) (bool, error)
+	// BackendTLSSANAvailable checks explicit SANs and the selected transport.
+	BackendTLSSANAvailable func(context.Context, bool) (bool, error)
 	// Recorder publishes Kubernetes Events.
 	Recorder events.EventRecorder
 	// Config contains immutable controller configuration.

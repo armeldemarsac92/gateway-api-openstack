@@ -36,9 +36,22 @@ const (
 	backendTLSAvailable
 )
 
-func (r *Reconciler) backendTLSAvailability(ctx context.Context, requireH2 bool) backendTLSAvailability {
+type backendTLSRequirements struct {
+	requireH2  bool
+	requireSAN bool
+}
+
+func (r *Reconciler) backendTLSAvailability(ctx context.Context, requirements backendTLSRequirements) backendTLSAvailability {
 	discover := r.BackendTLSAvailable
-	if requireH2 {
+	switch {
+	case requirements.requireSAN:
+		if r.BackendTLSSANAvailable == nil {
+			return backendTLSUnknown
+		}
+		discover = func(ctx context.Context) (bool, error) {
+			return r.BackendTLSSANAvailable(ctx, requirements.requireH2)
+		}
+	case requirements.requireH2:
 		discover = r.GRPCBackendTLSAvailable
 	}
 	if discover == nil {
@@ -55,22 +68,47 @@ func (r *Reconciler) backendTLSAvailability(ctx context.Context, requireH2 bool)
 	}
 }
 
+// discoverBackendTLSProfiles probes ordinary and explicit SAN policies
+// separately, including when HTTP and gRPC share a graph.
+func (r *Reconciler) discoverBackendTLSProfiles(ctx context.Context, routes []gatewayv1.HTTPRoute, selections map[model.ServicePortKey]backendtls.Selection) map[backendTLSRequirements]backendTLSAvailability {
+	modes := make(map[bool]struct{}, 2)
+	for _, selection := range selections {
+		winner := selection.Winner
+		if winner != nil && winner.Validation != nil && winner.AncestorSlot == backendtls.AncestorSlotHeld {
+			modes[len(winner.Validation.SubjectAltNames) != 0] = struct{}{}
+		}
+	}
+	availability := make(map[backendTLSRequirements]backendTLSAvailability, 4)
+	for i := range routes {
+		requireH2 := model.HTTPProfileRouteKind(&routes[i]) == model.GRPCRouteKind
+		for requireSAN := range modes {
+			requirements := backendTLSRequirements{requireH2: requireH2, requireSAN: requireSAN}
+			if _, checked := availability[requirements]; !checked {
+				availability[requirements] = r.backendTLSAvailability(ctx, requirements)
+			}
+		}
+	}
+	return availability
+}
+
 func supportsBackendTLS(backend model.BackendGroup) bool {
 	return backend.State == model.BackendResolved && !backend.UsesH2C()
 }
 
-func (a backendTLSAvailability) validation(backend model.BackendGroup) *cloud.BackendTLSValidation {
+func (inputs *routeModelInputs) backendTLSValidation(backend model.BackendGroup, requireH2 bool) *cloud.BackendTLSValidation {
 	winner := backend.BackendTLS.Winner
 	if winner == nil {
 		return nil
 	}
 	if winner.AncestorSlot != backendtls.AncestorSlotHeld || winner.Validation == nil ||
-		a != backendTLSAvailable || !supportsBackendTLS(backend) {
+		!supportsBackendTLS(backend) ||
+		inputs.backendTLSAvailability[backendTLSRequirements{requireH2: requireH2, requireSAN: len(winner.Validation.SubjectAltNames) != 0}] != backendTLSAvailable {
 		return &cloud.BackendTLSValidation{Denied: true}
 	}
 	return &cloud.BackendTLSValidation{
-		Hostname: winner.Validation.Hostname, CAConfigMapUID: string(winner.Validation.CA.UID),
-		CADigest: winner.Validation.CA.Digest, CAPEM: slices.Clone(winner.Validation.CA.PEM),
+		Hostname: winner.Validation.Hostname, SubjectAltNames: slices.Clone(winner.Validation.SubjectAltNames),
+		CAConfigMapUID: string(winner.Validation.CA.UID),
+		CADigest:       winner.Validation.CA.Digest, CAPEM: slices.Clone(winner.Validation.CA.PEM),
 	}
 }
 
@@ -97,9 +135,13 @@ func routeBackendTLSAncestorSlot(route *gatewayv1.HTTPRoute, inputs *routeModelI
 	return slot
 }
 
-func (a backendTLSAvailability) apply(condition metav1.Condition, supportedProtocol bool) metav1.Condition {
+func (a backendTLSAvailability) apply(condition metav1.Condition, supportedProtocol, requireSAN bool) metav1.Condition {
 	if condition.Status != metav1.ConditionTrue {
 		return condition
+	}
+	profile := "authenticated backend TLS"
+	if requireSAN {
+		profile += " with explicit subjectAltNames"
 	}
 	switch {
 	case !supportedProtocol:
@@ -107,10 +149,10 @@ func (a backendTLSAvailability) apply(condition metav1.Condition, supportedProto
 			metav1.ConditionFalse, "UnsupportedProtocol", "The backend Service protocol is incompatible with BackendTLSPolicy"
 	case a == backendTLSUnsupported:
 		condition.Status, condition.Reason, condition.Message =
-			metav1.ConditionFalse, "UnsupportedProvider", "The regional provider does not support authenticated backend TLS"
+			metav1.ConditionFalse, "UnsupportedProvider", "The regional provider does not support "+profile
 	case a == backendTLSUnknown:
 		condition.Status, condition.Reason, condition.Message =
-			metav1.ConditionUnknown, "Pending", "Regional provider support for authenticated backend TLS could not be verified"
+			metav1.ConditionUnknown, "Pending", "Regional provider support for "+profile+" could not be verified"
 	default:
 		condition.Message = "Backend TLS validation is accepted by the Gateway"
 	}

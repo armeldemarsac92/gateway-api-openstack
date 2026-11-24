@@ -315,6 +315,7 @@ func run(ctx context.Context) error {
 		ListenerSetObserver:     gatewayReconciler.ObserveListenerSets,
 		BackendTLSAvailable:     openStackProvider.BackendTLSAvailable,
 		GRPCBackendTLSAvailable: openStackProvider.GRPCBackendTLSAvailable,
+		BackendTLSSANAvailable:  openStackProvider.BackendTLSSANAvailable,
 		Client:                  manager.GetClient(),
 		Coordinator:             graphCoordinator,
 		APIReader:               manager.GetAPIReader(),
