@@ -99,6 +99,21 @@ func enrollEnvtestServingCertificate(t *testing.T, cfg controller.Config, certif
 	}
 }
 
+// Envtest has no namespace controller. Retire the namespaced fixture objects
+// while leaving the manifest's test-only Namespace to the API server teardown.
+func cleanupEnvtestListenerObjects(t *testing.T, c client.Client, objects ...client.Object) {
+	t.Helper()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), envtestWaitTimeout)
+		defer cancel()
+		for _, obj := range objects {
+			if err := client.IgnoreNotFound(c.Delete(ctx, obj)); err != nil {
+				t.Errorf("delete %T %s: %v", obj, client.ObjectKeyFromObject(obj), err)
+			}
+		}
+	})
+}
+
 func testUpstreamListenerSetReferenceGrant(t *testing.T, s *suite.ConformanceTestSuite, cfg controller.Config, provider *recordingProvider, certificateMap string) {
 	t.Helper()
 	// The published suite normally creates this Secret before the case runs.
@@ -108,28 +123,25 @@ func testUpstreamListenerSetReferenceGrant(t *testing.T, s *suite.ConformanceTes
 	}
 	enrollEnvtestServingCertificate(t, cfg, certificateMap, secret)
 
-	// Envtest leaves the Namespace finalizer pending. The manifest cannot use
-	// upstream namespace cleanup, but its cross-namespace grants must expire
-	// with this case, including when a transition fails.
+	const gatewayName = "gateway-with-listener-sets-test-reference-grant"
+	const delegatedName = "listenerset-with-reference-grant"
 	grantNames := []string{"reference-grant-for-gateway", "reference-grant-for-listener-set"}
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), s.TimeoutConfig.DeleteTimeout)
-		defer cancel()
-		for _, name := range grantNames {
-			grant := &gatewayv1.ReferenceGrant{ObjectMeta: metav1.ObjectMeta{Namespace: suite.WebBackendNamespace, Name: name}}
-			if err := client.IgnoreNotFound(s.Client.Delete(ctx, grant)); err != nil {
-				t.Errorf("clean up ReferenceGrant %s: %v", name, err)
-			}
-		}
-	})
+	objects := []client.Object{
+		&gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: suite.InfrastructureNamespace, Name: gatewayName}},
+		&gatewayv1.ListenerSet{ObjectMeta: metav1.ObjectMeta{Namespace: suite.InfrastructureNamespace, Name: delegatedName}},
+		&gatewayv1.ListenerSet{ObjectMeta: metav1.ObjectMeta{Namespace: "gateway-api-listener-sets-test-reference-grant-ns", Name: "listenerset-without-reference-grant"}},
+		secret,
+	}
+	for _, name := range grantNames {
+		objects = append(objects, &gatewayv1.ReferenceGrant{ObjectMeta: metav1.ObjectMeta{Namespace: suite.WebBackendNamespace, Name: name}})
+	}
+	cleanupEnvtestListenerObjects(t, s.Client, objects...)
 	upstream := tests.ListenerSetReferenceGrant
 	s.RunTest = upstream.ShortName
 	s.CleanupTestResources = false
 	defer func() { s.CleanupTestResources = true }()
 	upstream.Run(t, s)
 
-	const gatewayName = "gateway-with-listener-sets-test-reference-grant"
-	const delegatedName = "listenerset-with-reference-grant"
 	const gatewayHost = "gateway-listener.com"
 	const delegatedHost = "listenerset-with-reference-grant-listener.com"
 	const delegatedSection = "listenerset-with-reference-grant-listener"
@@ -141,6 +153,7 @@ func testUpstreamListenerSetReferenceGrant(t *testing.T, s *suite.ConformanceTes
 	delegatedRoute.Spec.ParentRefs[0].Kind = ptr.To(gatewayv1.Kind("ListenerSet"))
 	delegatedRoute.Spec.ParentRefs[0].Namespace = ptr.To(gatewayv1.Namespace(suite.InfrastructureNamespace))
 	delegatedRoute.Spec.ParentRefs[0].SectionName = ptr.To(gatewayv1.SectionName(delegatedSection))
+	cleanupEnvtestListenerObjects(t, s.Client, gatewayRoute, delegatedRoute)
 	for _, route := range []*gatewayv1.HTTPRoute{gatewayRoute, delegatedRoute} {
 		route.Spec.Rules[0].BackendRefs[0].Port = ptr.To(gatewayv1.PortNumber(8080))
 		if err := s.Client.Create(t.Context(), route); err != nil {
@@ -309,6 +322,7 @@ func testDelegatedFrontendClientValidation(t *testing.T, c client.Client, cfg co
 	route.Spec.ParentRefs[0].Kind = ptr.To(gatewayv1.Kind("ListenerSet"))
 	route.Spec.ParentRefs[0].SectionName = ptr.To(gatewayv1.SectionName(listenerName))
 	route.Spec.Rules[0].BackendRefs[0].Port = ptr.To(gatewayv1.PortNumber(8080))
+	cleanupEnvtestListenerObjects(t, c, route, set, gateway, grant, ca)
 	for _, object := range []client.Object{ca, grant, gateway, set, route} {
 		if err := c.Create(t.Context(), object); err != nil {
 			t.Fatalf("create %T: %v", object, err)
