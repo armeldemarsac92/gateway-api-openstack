@@ -48,6 +48,14 @@ func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual obs
 	}
 	if err == nil {
 		plan = p.protectPlainHTTPIsolation(desired, actual, plan, &result)
+		if len(plan) == 0 && actual.scoped && actual.protocol == cloud.ListenerProtocolHTTP {
+			// Already closed frontends cannot forward. Repair their fallback
+			// after actionable changes so unreadable state cannot starve a peer.
+			if step := actual.nextFrontendFallbackClear(desired); step != nil {
+				plan = []graphMutation{*step}
+				result.Outcome = p.progressingOutcome(step.message)
+			}
+		}
 	}
 	return plan, result, err
 }
@@ -1025,17 +1033,25 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 			Name: name, Description: desired.identity.Description(roleListener), AdminStateUp: boolPointer(enabled),
 			DefaultTlsContainerRef: certificateRef, Tags: tags,
 		}
+		var frontendFallback bool
 		if step.scopedListener.TLS != nil && step.scopedListener.TLS.ClientValidation != nil {
 			opts.ClientAuthentication = listeners.ClientAuthenticationMandatory
 			opts.ClientCATLSContainerRef = actual.frontendCA[port].ref
+			frontendFallback = step.scopedListener.TLS.ClientValidation.InsecureFallback
+			if frontendFallback {
+				opts.Tags = append(opts.Tags, frontendFallbackTag)
+			}
 		}
 		if desired.protocol == cloud.ListenerProtocolTLSTerminate {
 			_, err = p.octavia.CreateTCPTLSListener(ctx, opts)
 			step.redactTLSError = true
-		} else if hosts := httpsVirtualHosts(step.scopedListener); len(hosts) != 0 {
-			opts.Tags = append(opts.Tags, httpsIsolationTag)
-			_, err = p.octavia.CreateIsolatedHTTPSListener(ctx, opts, hosts, desired.fixedHTTPResponses)
-		} else if desired.fixedHTTPResponses && (protocol == cloud.ListenerProtocolHTTP || protocol == terminatedHTTPS) {
+		} else if protocol == terminatedHTTPS {
+			hosts := httpsVirtualHosts(step.scopedListener)
+			if len(hosts) != 0 {
+				opts.Tags = append(opts.Tags, httpsIsolationTag)
+			}
+			_, err = p.octavia.CreateHTTPSListener(ctx, opts, hosts, desired.fixedHTTPResponses, frontendFallback)
+		} else if desired.fixedHTTPResponses && protocol == cloud.ListenerProtocolHTTP {
 			_, err = p.octavia.CreateListenerWithNotFound(ctx, opts)
 		} else {
 			_, err = p.octavia.CreateListener(ctx, opts)
@@ -1049,10 +1065,25 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 		}
 		opts := listeners.UpdateOpts{DefaultTlsContainerRef: &ref}
 		if step.updateClientAuth {
-			err = p.octavia.SetListenerClientAuthentication(ctx, listenerID, opts, actual.frontendCA[step.scopedListener.Port].ref)
+			validation := step.scopedListener.TLS.ClientValidation
+			fallback := validation != nil && validation.InsecureFallback
+			if fallback {
+				i := slices.IndexFunc(actual.scopedListeners, func(l listeners.Listener) bool { return l.ID == listenerID })
+				if i < 0 {
+					return fmt.Errorf("cannot prove ownership of Octavia HTTPS listener")
+				}
+				tags := actual.scopedListeners[i].Tags
+				if !slices.Contains(tags, frontendFallbackTag) {
+					tags = append(slices.Clone(tags), frontendFallbackTag)
+					opts.Tags = &tags
+				}
+			}
+			err = p.octavia.SetListenerClientAuthentication(ctx, listenerID, opts, actual.frontendCA[step.scopedListener.Port].ref, fallback)
 		} else {
 			_, err = p.octavia.UpdateListener(ctx, listenerID, opts)
 		}
+	case graphDisableFrontendClientAuthFallback:
+		err = p.octavia.DisableListenerClientAuthFallback(ctx, listenerID)
 	case graphPublishFrontendCA:
 		node := desired.spec.Gateway
 		if !node.BackendCAOwned {

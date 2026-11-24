@@ -20,7 +20,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -29,6 +31,8 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
 	"github.com/stretchr/testify/require"
 )
+
+const fallbackField = "client_authentication_insecure_fallback"
 
 func TestFrontendClientValidationPublishesRotatesAndWithdrawsOnlyItsListener(t *testing.T) {
 	id := safetyTestIdentity(t)
@@ -56,6 +60,8 @@ func TestFrontendClientValidationPublishesRotatesAndWithdrawsOnlyItsListener(t *
 	plain := newListener("listener-http", "HTTP", 80)
 	var secure, peer, policy map[string]any
 	var rejectCARead bool
+	var enrolled, capabilityEndpointMissing, fallbackFieldHidden, fallbackFieldUnreadable bool
+	var readSupportedFallback bool
 	var writes []string
 	octavia := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(strings.TrimPrefix(r.URL.Path, "/octavia"), "/v2.0")
@@ -78,7 +84,14 @@ func TestFrontendClientValidationPublishesRotatesAndWithdrawsOnlyItsListener(t *
 			case path == "/lbaas/listeners":
 				items := []any{plain}
 				if secure != nil {
-					items = append(items, secure)
+					readback := maps.Clone(secure)
+					if fallbackFieldHidden {
+						delete(readback, fallbackField)
+					}
+					if fallbackFieldUnreadable {
+						readback[fallbackField] = "false"
+					}
+					items = append(items, readback)
 				}
 				if peer != nil {
 					items = append(items, peer)
@@ -89,7 +102,16 @@ func TestFrontendClientValidationPublishesRotatesAndWithdrawsOnlyItsListener(t *
 				safetyWriteJSON(t, w, map[string]any{"pools": []any{}})
 				return
 			case path == "/lbaas/providers/amphora/gateway_capabilities":
-				safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": []string{octavia.GatewayCapabilityHTTPSListenerIsolation}})
+				if capabilityEndpointMissing {
+					http.NotFound(w, r)
+					return
+				}
+				capabilities := []string{octavia.GatewayCapabilityHTTPSListenerIsolation}
+				if enrolled {
+					capabilities = append(capabilities, octavia.GatewayCapabilityFrontendAuthFallback)
+					readSupportedFallback = true
+				}
+				safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": capabilities})
 				return
 			case path == "/lbaas/l7policies":
 				items := []any{}
@@ -114,6 +136,13 @@ func TestFrontendClientValidationPublishesRotatesAndWithdrawsOnlyItsListener(t *
 			require.Equal(t, "server-certificate", body.Listener["default_tls_container_ref"])
 			require.Equal(t, "MANDATORY", body.Listener["client_authentication"])
 			require.NotEmpty(t, body.Listener["client_ca_tls_container_ref"])
+			if tls.ClientValidation.InsecureFallback {
+				require.True(t, readSupportedFallback)
+				require.Equal(t, true, body.Listener[fallbackField])
+				require.Contains(t, pilotTags(body.Listener["tags"]), frontendFallbackTag)
+			} else {
+				require.NotContains(t, body.Listener, fallbackField)
+			}
 			secure = newListener("listener-https", terminatedHTTPS, 443)
 			for key, value := range body.Listener {
 				secure[key] = value
@@ -121,6 +150,14 @@ func TestFrontendClientValidationPublishesRotatesAndWithdrawsOnlyItsListener(t *
 			writes = append(writes, "create")
 			w.WriteHeader(http.StatusCreated)
 			safetyWriteJSON(t, w, map[string]any{"listener": secure})
+			return
+		case r.Method == http.MethodPut && path == "/lbaas/listeners/listener-peer":
+			var body struct{ Listener map[string]any }
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			require.Equal(t, map[string]any{"admin_state_up": true}, body.Listener)
+			peer["admin_state_up"] = true
+			writes = append(writes, "open-peer")
+			safetyWriteJSON(t, w, map[string]any{"listener": peer})
 			return
 		case r.Method == http.MethodPut && path == "/lbaas/listeners/listener-https":
 			var body struct{ Listener map[string]any }
@@ -135,16 +172,35 @@ func TestFrontendClientValidationPublishesRotatesAndWithdrawsOnlyItsListener(t *
 				}
 				writes = append(writes, "close")
 			case true:
+				if secure[fallbackField] == true {
+					require.True(t, readSupportedFallback)
+					require.False(t, fallbackFieldHidden || fallbackFieldUnreadable)
+				}
 				writes = append(writes, "open")
 			default:
 				require.Equal(t, false, secure["admin_state_up"])
-				require.Equal(t, "server-certificate", body.Listener["default_tls_container_ref"])
-				if tls.ClientValidation == nil {
+				switch {
+				case body.Listener[fallbackField] == false:
+					require.Len(t, body.Listener, 1)
+					writes = append(writes, "disable-fallback")
+				case body.Listener[fallbackField] == true:
+					require.True(t, readSupportedFallback)
+					require.False(t, fallbackFieldHidden || fallbackFieldUnreadable)
+					require.Equal(t, "server-certificate", body.Listener["default_tls_container_ref"])
+					require.Equal(t, "MANDATORY", body.Listener["client_authentication"])
+					require.NotEmpty(t, body.Listener["client_ca_tls_container_ref"])
+					if !slices.Contains(pilotTags(secure["tags"]), frontendFallbackTag) {
+						require.Contains(t, pilotTags(body.Listener["tags"]), frontendFallbackTag)
+					}
+					writes = append(writes, "enable-fallback")
+				case tls.ClientValidation == nil:
+					require.Equal(t, "server-certificate", body.Listener["default_tls_container_ref"])
 					require.Equal(t, "NONE", body.Listener["client_authentication"])
 					require.Contains(t, body.Listener, "client_ca_tls_container_ref")
 					require.Nil(t, body.Listener["client_ca_tls_container_ref"])
 					writes = append(writes, "clear")
-				} else {
+				default:
+					require.Equal(t, "server-certificate", body.Listener["default_tls_container_ref"])
 					require.Equal(t, "MANDATORY", body.Listener["client_authentication"])
 					if secure["client_authentication"] == "OPTIONAL" {
 						require.Equal(t, secure["client_ca_tls_container_ref"], body.Listener["client_ca_tls_container_ref"])
@@ -169,7 +225,8 @@ func TestFrontendClientValidationPublishesRotatesAndWithdrawsOnlyItsListener(t *
 		http.NotFound(w, r)
 	})
 	services := scalarBackendTLSClients(t, project, octavia, &writes)
-	provider := newTestProvider(t, services, ProviderConfig{BackendCA: backendca.New(id.Value().ClusterID, services), HTTPSListenerIsolation: true})
+	config := ProviderConfig{BackendCA: backendca.New(id.Value().ClusterID, services), HTTPSListenerIsolation: true}
+	provider := newTestProvider(t, services, config)
 	spec.Gateway.ClaimBackendCA = func(context.Context) error {
 		spec.Gateway.BackendCAOwned = true
 		writes = append(writes, "claim")
@@ -180,6 +237,7 @@ func TestFrontendClientValidationPublishesRotatesAndWithdrawsOnlyItsListener(t *
 		var result cloud.GatewayGraphResult
 		for _, write := range expected {
 			writes = nil
+			readSupportedFallback = false
 			var err error
 			result, err = provider.ReconcileGatewayGraph(t.Context(), spec)
 			require.NoError(t, err)
@@ -187,6 +245,7 @@ func TestFrontendClientValidationPublishesRotatesAndWithdrawsOnlyItsListener(t *
 		}
 		if len(expected) == 0 {
 			writes = nil
+			readSupportedFallback = false
 			var err error
 			result, err = provider.ReconcileGatewayGraph(t.Context(), spec)
 			require.NoError(t, err)
@@ -288,4 +347,62 @@ func TestFrontendClientValidationPublishesRotatesAndWithdrawsOnlyItsListener(t *
 	tls.ClientValidation = nil
 	reconcile("close", "clear", "open", "retire")
 	require.Equal(t, []int{80, 443}, reconcile().Gateway.ScopedListenerReadyPorts)
+
+	secure = nil
+	peer = newListener("listener-peer", terminatedHTTPS, 8443)
+	peer["default_tls_container_ref"] = "peer-certificate"
+	spec.Gateway.Spec.ScopedListeners = []cloud.ScopedListener{{Name: "http", Port: 80},
+		{Name: "https", Port: 443, TLS: tls}, {Name: "peer", Port: 8443, TLS: &cloud.ListenerTLS{CertificateRef: "peer-certificate"}}}
+	tls.ClientValidation = trust
+	trust.InsecureFallback = true
+	require.Equal(t, []int{443}, reconcile().Gateway.FrontendFallbackUnavailablePorts)
+
+	enrolled = true
+	reconcile("publish", "create", "open")
+	baseCA := secure["client_ca_tls_container_ref"]
+	require.Equal(t, []int{80, 443, 8443}, reconcile().Gateway.ScopedListenerReadyPorts)
+
+	// Keep the enrollment tag across a controller restart and an API
+	// response that temporarily omits the previously configured field.
+	fallbackFieldHidden = true
+	provider = newTestProvider(t, services, config)
+	peer["admin_state_up"] = false
+	reconcile("close", "open-peer", "disable-fallback", "disable-fallback")
+	require.Equal(t, false, secure["admin_state_up"])
+	require.Equal(t, true, peer["admin_state_up"])
+	fallbackFieldHidden = false
+	reconcile("enable-fallback", "open")
+
+	// Loss of capability closes only the fallback port and writes false even
+	// though the Gateway still requests fallback.
+	capabilityEndpointMissing = true
+	reconcile("close", "disable-fallback")
+	unavailable := reconcile()
+	require.Equal(t, []int{443}, unavailable.Gateway.FrontendFallbackUnavailablePorts)
+	require.Equal(t, []int{443}, unavailable.Gateway.ScopedTLSClosedPorts)
+	require.Equal(t, []int{80, 8443}, unavailable.Gateway.ScopedListenerReadyPorts)
+	capabilityEndpointMissing = false
+	reconcile("enable-fallback", "open")
+
+	trust.InsecureFallback = false
+	fallbackFieldUnreadable = true
+	reconcile("close", "disable-fallback", "disable-fallback")
+	fallbackFieldUnreadable = false
+	reconcile("open")
+	require.Equal(t, "MANDATORY", secure["client_authentication"])
+	require.Equal(t, baseCA, secure["client_ca_tls_container_ref"])
+	require.Equal(t, false, secure[fallbackField])
+	require.Equal(t, []int{80, 443, 8443}, reconcile().Gateway.ScopedListenerReadyPorts)
+
+	// A managed listener does not establish ownership of externally set
+	// client authentication. Preserve the untracked fallback and foreign CA.
+	tls.ClientValidation = nil
+	secure["tags"] = slices.DeleteFunc(pilotTags(secure["tags"]), func(tag string) bool { return tag == frontendFallbackTag })
+	secure["admin_state_up"] = false
+	secure["client_ca_tls_container_ref"] = "foreign-client-ca"
+	secure[fallbackField] = true
+	require.Equal(t, []int{80, 8443}, reconcile().Gateway.ScopedListenerReadyPorts)
+	require.Equal(t, false, secure["admin_state_up"])
+	require.Equal(t, "foreign-client-ca", secure["client_ca_tls_container_ref"])
+	require.Equal(t, true, secure[fallbackField])
 }

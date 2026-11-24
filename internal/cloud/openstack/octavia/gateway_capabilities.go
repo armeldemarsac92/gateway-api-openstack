@@ -40,6 +40,7 @@ const (
 	GatewayCapabilityGRPCContentType          = "grpc_content_type_v1"
 	GatewayCapabilityBackendTLSHostname       = "backend_tls_hostname_v1"
 	GatewayCapabilityBackendTLSH2ALPN         = "backend_tls_h2_alpn_v1"
+	GatewayCapabilityFrontendAuthFallback     = "frontend_client_auth_insecure_fallback_v1"
 	GatewayCapabilityHTTPSListenerIsolation   = "https_listener_isolation_v1"
 	GatewayCapabilityTLSSNIPassthrough        = "tls_sni_passthrough_v1"
 	GatewayCapabilityTLSSNISuffix             = "tls_sni_suffix_v1"
