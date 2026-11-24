@@ -108,6 +108,20 @@ func testUpstreamListenerSetReferenceGrant(t *testing.T, s *suite.ConformanceTes
 	}
 	enrollEnvtestServingCertificate(t, cfg, certificateMap, secret)
 
+	// Envtest leaves the Namespace finalizer pending. The manifest cannot use
+	// upstream namespace cleanup, but its cross-namespace grants must expire
+	// with this case, including when a transition fails.
+	grantNames := []string{"reference-grant-for-gateway", "reference-grant-for-listener-set"}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), s.TimeoutConfig.DeleteTimeout)
+		defer cancel()
+		for _, name := range grantNames {
+			grant := &gatewayv1.ReferenceGrant{ObjectMeta: metav1.ObjectMeta{Namespace: suite.WebBackendNamespace, Name: name}}
+			if err := client.IgnoreNotFound(s.Client.Delete(ctx, grant)); err != nil {
+				t.Errorf("clean up ReferenceGrant %s: %v", name, err)
+			}
+		}
+	})
 	upstream := tests.ListenerSetReferenceGrant
 	s.RunTest = upstream.ShortName
 	s.CleanupTestResources = false
@@ -233,7 +247,7 @@ func testUpstreamListenerSetReferenceGrant(t *testing.T, s *suite.ConformanceTes
 		t.Logf("Gateway grant=%v, ListenerSet grant=%v: listener status, scoped route parents and provider hosts %v agree", gatewayAllowed, delegatedAllowed, hosts)
 	}
 	check(true, true)
-	for _, name := range []string{"reference-grant-for-listener-set", "reference-grant-for-gateway"} {
+	for _, name := range grantNames {
 		var grant gatewayv1.ReferenceGrant
 		if err := s.Client.Get(t.Context(), client.ObjectKey{Namespace: suite.WebBackendNamespace, Name: name}, &grant); err != nil {
 			t.Fatal(err)
