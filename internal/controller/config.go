@@ -79,6 +79,8 @@ type Config struct {
 	TLSSNISuffix bool
 	// TCPTLSTermination enables operator-enrolled certificates on TLSRoute listeners.
 	TCPTLSTermination bool
+	// TCPTLSMixedMode enables same-port TCP TLS termination and passthrough.
+	TCPTLSMixedMode bool
 	// ControllerName is the exact Gateway API ownership identifier.
 	ControllerName gatewayv1.GatewayController
 	// GatewayAPIChannel selects the release CRDs accepted by this installation. Empty selects Standard.
@@ -119,6 +121,9 @@ func (c Config) Validate() error {
 	}
 	if c.TCPTLSTermination && !c.OperatorHTTPS {
 		return fmt.Errorf("--octavia-tcp-tls-termination requires --tls-certificate-map")
+	}
+	if c.TCPTLSMixedMode && (!c.TCPTLSTermination || !c.TLSSNIPassthrough) {
+		return fmt.Errorf("--octavia-tcp-tls-mixed-mode requires --octavia-tcp-tls-termination and --octavia-tls-sni-passthrough")
 	}
 	if c.HTTPSListenerIsolation && !c.OperatorHTTPS {
 		return fmt.Errorf("--octavia-https-listener-isolation requires --tls-certificate-map")
@@ -210,6 +215,11 @@ func (c Config) RouteGatewayNameAnnotation() string {
 // on an HTTPRoute.
 func (c Config) RouteGatewayUIDAnnotation() string {
 	return c.Domain() + "/route-gateway-uid-" + c.controllerKey()
+}
+
+// GatewaySNISelectorsAnnotation identifies the retired selector archive for metadata cleanup.
+func (c Config) GatewaySNISelectorsAnnotation() string {
+	return c.Domain() + "/sni-selectors-" + c.controllerKey()
 }
 
 // GatewayListenerPortAnnotation returns the key that records the listener port

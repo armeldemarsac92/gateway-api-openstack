@@ -125,10 +125,10 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 		for _, dependency := range []client.Object{&corev1.Service{}, &discoveryv1.EndpointSlice{}, &corev1.Namespace{}, &gatewayv1.ReferenceGrant{}} {
 			gatewayController.Watches(dependency, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForSNIDependency))
 		}
+		gatewayController.Watches(&gatewayv1.BackendTLSPolicy{}, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForSNIDependency))
 	}
 	if r.Config.TCPTLSTermination && r.Config.BackendTLSPolicy {
-		gatewayController.Watches(&gatewayv1.BackendTLSPolicy{}, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForSNIDependency)).
-			WatchesMetadata(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForSNIBackendCA))
+		gatewayController.WatchesMetadata(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForSNIBackendCA))
 	}
 
 	served, err := controller.ListenerSetServed(manager.GetRESTMapper())

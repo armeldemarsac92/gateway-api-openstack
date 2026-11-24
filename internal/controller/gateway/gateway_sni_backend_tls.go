@@ -96,7 +96,7 @@ func (r *Reconciler) ObserveTLSRouteBackendTLSPolicy(ctx context.Context, policy
 			continue
 		}
 		listeners, err := SupportedListenersForConfig(r.Config, parent)
-		if err != nil || len(listeners) != 1 || !terminatesTLS(listeners[0]) {
+		if err != nil || !terminatesTLS(listeners[0]) {
 			continue
 		}
 		var class gatewayv1.GatewayClass
@@ -113,7 +113,7 @@ func (r *Reconciler) ObserveTLSRouteBackendTLSPolicy(ctx context.Context, policy
 		if err := r.validateBoundSNITopology(parent, listeners[0]); err != nil {
 			continue
 		}
-		snapshot := &gatewayMutationSnapshot{gateway: parent, listener: listeners[0]}
+		snapshot := &gatewayMutationSnapshot{gateway: parent, listener: listeners[0], listeners: listeners}
 		observation, err := r.admitSNIRoutes(ctx, snapshot, peers[key])
 		if err != nil {
 			return nil, err
@@ -121,7 +121,7 @@ func (r *Reconciler) ObserveTLSRouteBackendTLSPolicy(ctx context.Context, policy
 		owners := observation.hostnameOwners()
 		for i := range observation {
 			entry := &observation[i]
-			if !slices.ContainsFunc(entry.hostnames, func(host string) bool { return owners[host].index == i }) {
+			if !terminatesTLS(entry.listener) || !slices.ContainsFunc(entry.hostnames, func(host string) bool { return owners[host].index == i }) {
 				continue
 			}
 			backend, ok := TLSRouteBackendService(entry.route)

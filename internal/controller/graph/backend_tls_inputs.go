@@ -19,6 +19,7 @@ package graph
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -90,20 +91,39 @@ func NewBackendTLSObserver(reader client.Reader) *BackendTLSObserver {
 	return &BackendTLSObserver{reader: reader, policies: map[string][]gatewayv1.BackendTLSPolicy{}, cas: map[types.NamespacedName]*corev1.ConfigMap{}}
 }
 
-// Observe requires the caller to authorize the Service reference first.
-func (o *BackendTLSObserver) Observe(ctx context.Context, service *corev1.Service, port *corev1.ServicePort, ancestor *backendtls.GatewayAncestor) (backendtls.Selection, error) {
-	namespace := service.Namespace
+func (o *BackendTLSObserver) policiesInNamespace(ctx context.Context, namespace string) ([]gatewayv1.BackendTLSPolicy, error) {
 	items, observed := o.policies[namespace]
 	if !observed {
 		var list gatewayv1.BackendTLSPolicyList
 		if err := o.reader.List(ctx, &list, client.InNamespace(namespace)); err != nil {
-			return backendtls.Selection{}, fmt.Errorf("list BackendTLSPolicies in namespace %s: %w", namespace, err)
+			return nil, fmt.Errorf("list BackendTLSPolicies in namespace %s: %w", namespace, err)
 		}
 		if list.Continue != "" {
-			return backendtls.Selection{}, fmt.Errorf("incomplete BackendTLSPolicy list in namespace %s", namespace)
+			return nil, fmt.Errorf("incomplete BackendTLSPolicy list in namespace %s", namespace)
 		}
 		items = list.Items
 		o.policies[namespace] = items
+	}
+	return items, nil
+}
+
+// HasPolicy checks if a Service port requires backend authentication, without
+// reading a CA when the caller cannot originate TLS.
+func (o *BackendTLSObserver) HasPolicy(ctx context.Context, service *corev1.Service, port *corev1.ServicePort) (bool, error) {
+	items, err := o.policiesInNamespace(ctx, service.Namespace)
+	if err != nil {
+		return false, err
+	}
+	return slices.ContainsFunc(items, func(policy gatewayv1.BackendTLSPolicy) bool {
+		return policy.DeletionTimestamp.IsZero() && backendtls.AppliesToServicePort(&policy, service, port)
+	}), nil
+}
+
+// Observe requires the caller to authorize the Service reference first.
+func (o *BackendTLSObserver) Observe(ctx context.Context, service *corev1.Service, port *corev1.ServicePort, ancestor *backendtls.GatewayAncestor) (backendtls.Selection, error) {
+	items, err := o.policiesInNamespace(ctx, service.Namespace)
+	if err != nil {
+		return backendtls.Selection{}, err
 	}
 	for i := range items {
 		policy := &items[i]

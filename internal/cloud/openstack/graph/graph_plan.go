@@ -1056,8 +1056,8 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 			opts.ClientAuthentication = listeners.ClientAuthenticationMandatory
 			opts.ClientCATLSContainerRef = actual.frontendCA[port].ref
 		}
-		if desired.protocol == cloud.ListenerProtocolTLSTerminate {
-			_, err = p.octavia.CreateTCPTLSListener(ctx, opts)
+		if cloud.IsTCPTLSListenerProtocol(desired.protocol) {
+			_, err = p.octavia.CreateTCPTLSListener(ctx, opts, desired.protocol == cloud.ListenerProtocolTLSMixed)
 			step.redactTLSError = true
 		} else if hosts := httpsVirtualHosts(step.scopedListener); len(hosts) != 0 {
 			opts.Tags = append(opts.Tags, httpsIsolationTag)
@@ -1075,6 +1075,11 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 			ref = step.scopedListener.TLS.CertificateRef
 		}
 		opts := listeners.UpdateOpts{DefaultTlsContainerRef: &ref}
+		if desired.protocol == cloud.ListenerProtocolTLSMixed {
+			// An older graph could have enrolled additional SNI references.
+			// Replace the authorized set atomically while the frontend is closed.
+			opts.SniContainerRefs = new([]string{})
+		}
 		if step.updateClientAuth {
 			err = p.octavia.SetListenerClientAuthentication(ctx, listenerID, opts, actual.frontendCA[step.scopedListener.Port].ref)
 		} else {
@@ -1114,7 +1119,7 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 		err = p.executeSNIMutation(ctx, desired, actual, step.sni)
 	case graphEnableListener, graphDisableListener:
 		enabled := step.kind == graphEnableListener
-		step.redactTLSError = step.redactTLSError || desired.protocol == cloud.ListenerProtocolTLSTerminate
+		step.redactTLSError = step.redactTLSError || cloud.IsTCPTLSListenerProtocol(desired.protocol)
 		if step.withdrawClientCA && slices.ContainsFunc(actual.scopedListeners, func(listener listeners.Listener) bool {
 			return listener.ID == listenerID && listener.ProvisioningStatus == "ERROR" &&
 				actual.adminObserved[listener.ID] && !listener.AdminStateUp

@@ -112,7 +112,7 @@ func sniDisablePoolStep(fragment *observedSNIFragment) graphMutation {
 // prepareSNIRouteBackendTLS turns unavailable TLS backends into closed
 // selectors before planning creates and attaches any new resources.
 func (p *Provider) prepareSNIRouteBackendTLS(ctx context.Context, desired *desiredGatewayGraph, actual observedGatewayGraph) error {
-	if desired.protocol != cloud.ListenerProtocolTLSTerminate || desired.spec.Gateway.Disposition != cloud.GraphEnsure {
+	if !cloud.IsTCPTLSListenerProtocol(desired.protocol) || desired.spec.Gateway.Disposition != cloud.GraphEnsure {
 		return nil
 	}
 	hasStrictPool := slices.ContainsFunc(desired.sni, func(target desiredSNIFragment) bool { return target.route.BackendTLS != nil })
@@ -179,7 +179,7 @@ func (p *Provider) prepareSNIRouteBackendTLS(ctx context.Context, desired *desir
 				continue
 			}
 			guards, err := buildSNITargets(desired.spec.Identity, []cloud.TLSSNIRoute{{
-				Identity: target.route.Identity, Hostname: host, Deny: true,
+				Identity: target.route.Identity, Hostname: host, Deny: true, Passthrough: target.route.Passthrough,
 			}})
 			if err != nil {
 				return err

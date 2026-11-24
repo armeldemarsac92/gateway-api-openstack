@@ -87,6 +87,7 @@ type ProviderConfig struct {
 	TLSSNIPassthrough      bool
 	TLSSNISuffix           bool
 	TCPTLSTermination      bool
+	TCPTLSMixedMode        bool
 	OperationTimeout       time.Duration
 	PollInterval           time.Duration
 
@@ -115,6 +116,7 @@ type Provider struct {
 	tlsSNIPassthrough      bool
 	tlsSNISuffix           bool
 	tcpTLSTermination      bool
+	tcpTLSMixedMode        bool
 	projectID              string
 	region                 string
 	neutron                *neutron.Service
@@ -156,6 +158,7 @@ func NewProvider(serviceClients ServiceClients, cfg ProviderConfig) *Provider {
 		tlsSNIPassthrough:      cfg.TLSSNIPassthrough,
 		tlsSNISuffix:           cfg.TLSSNISuffix,
 		tcpTLSTermination:      cfg.TCPTLSTermination,
+		tcpTLSMixedMode:        cfg.TCPTLSMixedMode,
 		projectID:              serviceClients.ProjectID,
 		region:                 serviceClients.Region,
 		neutron:                neutron.NewService(serviceClients.Network),

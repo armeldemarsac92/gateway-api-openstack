@@ -37,6 +37,7 @@ type ListenerInventory struct {
 	DefaultHTTPResponseCodes map[string]int
 	HTTPSVirtualHosts        map[string][]string
 	TCPTLSTermination        map[string]bool
+	TCPTLSMixedMode          map[string]bool
 	SNICertificatesObserved  map[string]bool
 	Items                    []listeners.Listener
 	DefaultPoolsObserved     bool
@@ -51,7 +52,8 @@ func (s *Service) ListListenerInventory(ctx context.Context, opts listeners.List
 	var response struct {
 		Listeners []struct {
 			listeners.Listener
-			TCPTLSTermination   *bool           `json:"tcp_tls_termination"`
+			TCPTLSTermination   json.RawMessage `json:"tcp_tls_termination"`
+			TCPTLSMixedMode     json.RawMessage `json:"tcp_tls_mixed_mode"`
 			SNICertificates     *[]string       `json:"sni_container_refs"`
 			VirtualHosts        json.RawMessage `json:"https_virtual_hosts"`
 			DefaultHTTPResponse *struct {
@@ -83,7 +85,15 @@ func (s *Service) ListListenerInventory(ctx context.Context, opts listeners.List
 			if inventory.TCPTLSTermination == nil {
 				inventory.TCPTLSTermination = make(map[string]bool)
 			}
-			inventory.TCPTLSTermination[item.ID] = *observed.TCPTLSTermination
+			inventory.TCPTLSTermination[item.ID] = string(observed.TCPTLSTermination) == "true"
+		}
+		if observed.TCPTLSMixedMode != nil {
+			if inventory.TCPTLSMixedMode == nil {
+				inventory.TCPTLSMixedMode = make(map[string]bool)
+			}
+			// Only a literal true verifies mixed mode. Preserve listener
+			// identity and admin state so a malformed row can still close.
+			inventory.TCPTLSMixedMode[item.ID] = string(observed.TCPTLSMixedMode) == "true"
 		}
 		if observed.VirtualHosts != nil {
 			if inventory.HTTPSVirtualHosts == nil {
@@ -126,22 +136,29 @@ func (s *Service) CreateListener(ctx context.Context, opts listeners.CreateOpts)
 	return listeners.Create(ctx, s.client, opts).Extract()
 }
 
-type tcpTLSListenerOptions struct{ listeners.CreateOpts }
+type tcpTLSListenerOptions struct {
+	listeners.CreateOpts
+	mixed bool
+}
 
 func (opts tcpTLSListenerOptions) ToListenerCreateMap() (map[string]any, error) {
 	body, err := opts.CreateOpts.ToListenerCreateMap()
 	if err == nil {
-		body["listener"].(map[string]any)["tcp_tls_termination"] = true
+		fields := body["listener"].(map[string]any)
+		fields["tcp_tls_termination"] = true
+		if opts.mixed {
+			fields["tcp_tls_mixed_mode"] = true
+		}
 	}
 	return body, err
 }
 
 // CreateTCPTLSListener creates a disabled TCP listener with immutable termination.
-func (s *Service) CreateTCPTLSListener(ctx context.Context, opts listeners.CreateOpts) (*listeners.Listener, error) {
+func (s *Service) CreateTCPTLSListener(ctx context.Context, opts listeners.CreateOpts, mixed bool) (*listeners.Listener, error) {
 	if opts.Protocol != listeners.ProtocolTCP || opts.DefaultTlsContainerRef == "" || opts.AdminStateUp == nil || *opts.AdminStateUp {
 		return nil, fmt.Errorf("TCP TLS termination requires a disabled TCP listener and a default certificate")
 	}
-	return listeners.Create(ctx, s.client, tcpTLSListenerOptions{opts}).Extract()
+	return listeners.Create(ctx, s.client, tcpTLSListenerOptions{CreateOpts: opts, mixed: mixed}).Extract()
 }
 
 // UpdateListener updates one listener.

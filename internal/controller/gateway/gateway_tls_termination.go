@@ -40,6 +40,7 @@ func (r *Reconciler) rawTLSWithdrawalInput(ctx context.Context, expected *gatewa
 	if err != nil || port < 1 || port > 65535 {
 		return graph.GatewayInput{}, errGatewayChanged
 	}
+	protocol := r.boundListenerProtocol(expected)
 	observe := func(ctx context.Context) (string, error) {
 		var live gatewayv1.Gateway
 		if err := r.APIReader.Get(ctx, client.ObjectKeyFromObject(expected), &live); err != nil {
@@ -47,7 +48,7 @@ func (r *Reconciler) rawTLSWithdrawalInput(ctx context.Context, expected *gatewa
 		}
 		if live.UID != expected.UID || !controllerutil.ContainsFinalizer(&live, r.Config.GatewayFinalizer()) ||
 			controller.ValidateGatewayBinding(r.Config, &live) != nil ||
-			r.boundListenerProtocol(&live) != cloud.ListenerProtocolTLSTerminate ||
+			r.boundListenerProtocol(&live) != protocol || !cloud.IsTCPTLSListenerProtocol(string(protocol)) ||
 			!controller.GatewayBindingMetadataEqual(r.Config, expected, &live) ||
 			controller.StoredGatewayIdentity(r.Config, &live) != identity {
 			return "", errGatewayChanged
@@ -56,7 +57,8 @@ func (r *Reconciler) rawTLSWithdrawalInput(ctx context.Context, expected *gatewa
 			return "", nil
 		}
 		listeners, err := SupportedListenersForConfig(r.Config, &live)
-		if err != nil || len(listeners) != 1 || !terminatesTLS(listeners[0]) || int(listeners[0].Port) != port ||
+		if err != nil || !terminatesTLS(listeners[0]) || int(listeners[0].Port) != port ||
+			listenerBindingProtocol(r.Config, &live, listeners[0]) != protocol ||
 			r.validateBoundSNITopology(&live, listeners[0]) != nil {
 			return "", nil
 		}
@@ -77,7 +79,8 @@ func (r *Reconciler) rawTLSWithdrawalInput(ctx context.Context, expected *gatewa
 			}
 			return "", err
 		}
-		return r.resolveCertificate(ctx, &live, listeners[0]).tls.CertificateRef, nil
+		ref, _ := r.rawTLSCertificate(ctx, &live, listeners)
+		return ref, nil
 	}
 	ref, err := observe(ctx)
 	if err != nil {
@@ -86,7 +89,7 @@ func (r *Reconciler) rawTLSWithdrawalInput(ctx context.Context, expected *gatewa
 	return graph.GatewayInput{
 		Node: cloud.GatewayGraphNode{
 			Disposition:          cloud.GraphWithdrawTLS,
-			Spec:                 cloud.GatewaySpec{Identity: identity, ListenerProtocol: cloud.ListenerProtocolTLSTerminate, ListenerPort: port},
+			Spec:                 cloud.GatewaySpec{Identity: identity, ListenerProtocol: string(protocol), ListenerPort: port},
 			TCPTLSCertificateRef: ref,
 		},
 		Validate: func(ctx context.Context) error {
@@ -99,8 +102,40 @@ func (r *Reconciler) rawTLSWithdrawalInput(ctx context.Context, expected *gatewa
 	}, nil
 }
 
-func (r *Reconciler) applyRawTLSListenerStatus(ctx context.Context, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, changed bool) {
-	issue := r.resolveCertificate(ctx, gateway, listener).issue
+// A mixed frontend uses one certificate for all terminating sections. A
+// global SNI certificate list cannot express section-level authorization.
+func (r *Reconciler) rawTLSCertificate(ctx context.Context, gateway *gatewayv1.Gateway, listeners []*gatewayv1.Listener) (string, map[gatewayv1.SectionName]*httpsListenerIssue) {
+	issues := make(map[gatewayv1.SectionName]*httpsListenerIssue)
+	var reference string
+	var distinct bool
+	for _, listener := range listeners {
+		if !terminatesTLS(listener) {
+			continue
+		}
+		resolution := r.resolveCertificate(ctx, gateway, listener)
+		if resolution.issue != nil {
+			issues[listener.Name] = resolution.issue
+			continue
+		}
+		ref := resolution.tls.CertificateRef
+		distinct = distinct || reference != "" && reference != ref
+		reference = ref
+	}
+	if distinct {
+		for _, listener := range listeners {
+			if terminatesTLS(listener) && issues[listener.Name] == nil {
+				issues[listener.Name] = &httpsListenerIssue{gatewayv1.ListenerConditionAccepted, gatewayv1.ListenerReasonUnsupportedValue,
+					"Terminating sections on one mixed TLS port require the same operator certificate"}
+			}
+		}
+	}
+	if len(issues) != 0 {
+		return "", issues
+	}
+	return reference, issues
+}
+
+func (r *Reconciler) applyRawTLSListenerStatus(gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, issue *httpsListenerIssue, changed bool) {
 	if issue == nil && !changed {
 		return
 	}
@@ -112,7 +147,7 @@ func (r *Reconciler) applyRawTLSListenerStatus(ctx context.Context, gateway *gat
 	reason, message := gatewayv1.ListenerReasonPending, "Listener certificate authorization changed during reconciliation"
 	if issue != nil {
 		reason, message = issue.reason, issue.message
-		controller.SetCondition(conditions, controller.Condition(string(gatewayv1.ListenerConditionResolvedRefs), metav1.ConditionFalse, string(reason), message, gateway.Generation))
+		controller.SetCondition(conditions, controller.Condition(string(issue.condition), metav1.ConditionFalse, string(reason), message, gateway.Generation))
 	}
 	controller.SetCondition(conditions, controller.Condition(string(gatewayv1.ListenerConditionProgrammed), metav1.ConditionFalse, string(reason), message, gateway.Generation))
 	if !r.addressRejectionPreventsProgramming(gateway) {

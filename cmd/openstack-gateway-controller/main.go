@@ -112,7 +112,7 @@ func run(ctx context.Context) error {
 	var httpRequestURLRewrite bool
 	var httpCORS bool
 	var httpBackendRequestFilters bool
-	var exactHTTPHeaders, exactHTTPQueryParams, httpMethodMatch, requestHeaderModifier, responseHeaderModifier, backendH2C, tlsSNIPassthrough, tlsSNISuffix, tcpTLSTermination bool
+	var exactHTTPHeaders, exactHTTPQueryParams, httpMethodMatch, requestHeaderModifier, responseHeaderModifier, backendH2C, tlsSNIPassthrough, tlsSNISuffix, tcpTLSTermination, tcpTLSMixedMode bool
 	zapOptions := zap.Options{Development: false}
 	zapOptions.BindFlags(flag.CommandLine)
 	flag.StringVar(&controllerName, "controller-name", envOr("GATEWAY_OPENSTACK_CONTROLLER_NAME", configv1alpha1.GroupName+"/gateway-api-openstack"), "Gateway API controllerName for this installation")
@@ -125,6 +125,7 @@ func run(ctx context.Context) error {
 	flag.BoolVar(&weightedTargets, "octavia-weighted-http-targets", false, "use the advertised Octavia weighted HTTP target capability (requires --octavia-fixed-http-responses)")
 	flag.BoolVar(&tlsSNIPassthrough, "octavia-tls-sni-passthrough", false, "use the advertised Octavia TCP SNI passthrough capability for TLSRoutes")
 	flag.BoolVar(&tcpTLSTermination, "octavia-tcp-tls-termination", false, "use the advertised Octavia TCP termination capability for TLSRoutes with operator-enrolled certificates")
+	flag.BoolVar(&tcpTLSMixedMode, "octavia-tcp-tls-mixed-mode", false, "use advertised Octavia mixed termination and passthrough on the same TLS listener port")
 	flag.BoolVar(&tlsSNISuffix, "octavia-tls-sni-suffix", false, "use the advertised Octavia wildcard SNI capability (requires --octavia-tls-sni-passthrough)")
 	flag.BoolVar(&backendTLSPolicy, "octavia-backend-tls-policy", false, "authenticate BackendTLSPolicy upstreams with the regional Octavia hostname capability and a Barbican CA (requires --octavia-microversion=2.8 or newer and regional h2 enforcement for GRPCRoute)")
 	flag.BoolVar(&l7PolicyBatchActivation, "octavia-l7policy-batch-activation", false, "enable prepared HTTP forwarding policies together when the regional Octavia provider advertises support")
@@ -200,6 +201,7 @@ func run(ctx context.Context) error {
 		TLSSNIPassthrough:       tlsSNIPassthrough,
 		TLSSNISuffix:            tlsSNISuffix,
 		TCPTLSTermination:       tcpTLSTermination,
+		TCPTLSMixedMode:         tcpTLSMixedMode,
 		ClusterID:               clusterID,
 		OpenStackResyncInterval: resyncInterval,
 
@@ -262,6 +264,7 @@ func run(ctx context.Context) error {
 		TLSSNIPassthrough:      tlsSNIPassthrough,
 		TLSSNISuffix:           tlsSNISuffix,
 		TCPTLSTermination:      tcpTLSTermination,
+		TCPTLSMixedMode:        tcpTLSMixedMode,
 		OperationTimeout:       operationTimeout,
 		PollInterval:           pollInterval,
 
@@ -396,7 +399,7 @@ func requireGatewayAPIs(restConfig *rest.Config, cfg controller.Config) error {
 		availableResources = append(availableResources, resource.Name)
 	}
 	requiredResources := []string{"gatewayclasses", "gateways", "httproutes", "tcproutes", "udproutes", "referencegrants"}
-	if cfg.BackendTLSPolicy {
+	if cfg.BackendTLSPolicy || cfg.TLSRoutesEnabled() {
 		requiredResources = append(requiredResources, "backendtlspolicies")
 	}
 	if cfg.TLSRoutesEnabled() {

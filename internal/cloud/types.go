@@ -155,7 +155,14 @@ const (
 	ListenerProtocolTLSSNI = "TLS"
 	// ListenerProtocolTLSTerminate identifies the immutable TCP termination profile.
 	ListenerProtocolTLSTerminate = "TLS_TERMINATE"
+	// ListenerProtocolTLSMixed binds a shared TCP frontend with a mode per SNI policy.
+	ListenerProtocolTLSMixed = "TLS_MIXED"
 )
+
+// IsTCPTLSListenerProtocol identifies TCP frontend profiles with authorized certificates.
+func IsTCPTLSListenerProtocol(protocol string) bool {
+	return protocol == ListenerProtocolTLSTerminate || protocol == ListenerProtocolTLSMixed
+}
 
 // NormalizeListenerProtocol interprets bindings written before listener
 // protocols were recorded as HTTP.

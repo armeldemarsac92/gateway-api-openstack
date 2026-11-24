@@ -32,6 +32,7 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
@@ -74,7 +75,7 @@ func (r *Reconciler) setGatewayFailure(gateway *gatewayv1.Gateway, validationErr
 	gateway.Status.Listeners = make([]gatewayv1.ListenerStatus, 0, len(gateway.Spec.Listeners))
 	for _, listener := range gateway.Spec.Listeners {
 		status := r.unprogrammedListenerStatus(listener, existingListeners, gateway.Generation, unsupportedMultipleL4, listenerSpecific, message)
-		if r.Config.TCPTLSTermination && mixedTLSModes(gateway.Spec.Listeners, listener) {
+		if r.Config.TCPTLSTermination && !r.Config.TCPTLSMixedMode && mixedTLSModes(gateway.Spec.Listeners, listener) {
 			status.SupportedKinds = nil
 			message := "Terminate and Passthrough require separate TLS listener ports"
 			controller.SetCondition(&status.Conditions, controller.Condition(string(gatewayv1.ListenerConditionAccepted), metav1.ConditionFalse, string(gatewayv1.ListenerReasonProtocolConflict), message, gateway.Generation))
@@ -282,6 +283,19 @@ func (r *Reconciler) handleGatewayProviderFailure(
 		scopedReadyPorts,
 	); err != nil {
 		return ctrl.Result{}, errors.Join(controller.SafeProviderReconcileError(policy, providerErr), err)
+	}
+	var missing *octavia.MissingGatewayCapability
+	if errors.As(providerErr, &missing) && missing.Capability == octavia.GatewayCapabilityTCPTLSMixedMode {
+		const message = "Octavia does not advertise same-port mixed TLS in this region"
+		controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionAccepted), metav1.ConditionFalse,
+			string(gatewayv1.GatewayReasonListenersNotValid), message, gateway.Generation))
+		for i := range gateway.Status.Listeners {
+			conditions := &gateway.Status.Listeners[i].Conditions
+			controller.SetCondition(conditions, controller.Condition(string(gatewayv1.ListenerConditionAccepted), metav1.ConditionFalse,
+				string(gatewayv1.ListenerReasonProtocolConflict), message, gateway.Generation))
+			controller.SetCondition(conditions, controller.Condition(string(gatewayv1.ListenerConditionConflicted), metav1.ConditionTrue,
+				string(gatewayv1.ListenerReasonProtocolConflict), message, gateway.Generation))
+		}
 	}
 	if !r.Config.GatewayAddressRoutabilityEnabled() {
 		if observation.AddressAbsent {
@@ -622,7 +636,7 @@ func (r *Reconciler) attachedRoutes(ctx context.Context, gateway *gatewayv1.Gate
 				}
 			}
 			if r.Config.BackendTLSPolicy && len(matching) != 0 &&
-				(httpKind != "" || terminatesTLS(matching[0])) {
+				(httpKind != "" || slices.ContainsFunc(matching, terminatesTLS)) {
 				programmed := meta.FindStatusCondition(parentStatus.Conditions, r.Config.Domain()+"/Programmed")
 				attached.backendTLSAncestorFull = attached.backendTLSAncestorFull || programmed != nil &&
 					programmed.ObservedGeneration == route.GetGeneration() && programmed.Status == metav1.ConditionFalse &&
