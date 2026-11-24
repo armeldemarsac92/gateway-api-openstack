@@ -117,7 +117,7 @@ func (r *Reconciler) Reconcile(
 		// Owner references also allow Kubernetes to collect discovery objects
 		// when the Gateway is removed. A discovery error must not hold up Octavia cleanup.
 		defer func() {
-			retErr = errors.Join(retErr, r.withdrawGatewayDiscovery(ctx, scope.gateway, true))
+			retErr = errors.Join(retErr, r.withdrawGatewayPublications(ctx, scope.gateway, true))
 		}()
 		return r.reconcileDelete(ctx, scope)
 	}
@@ -141,15 +141,15 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, scope *gatewayScope) (
 	if decision.phase == gatewayPhaseCleanupUnmanaged {
 		// Clean up the discovery name before releasing our last responsibility
 		// for a Gateway that has been handed off to another controller.
-		if err := r.withdrawGatewayDiscovery(ctx, scope.gateway, true); err != nil {
+		if err := r.withdrawGatewayPublications(ctx, scope.gateway, true); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
 	switch decision.phase {
 	case gatewayPhaseUnsupportedVersion, gatewayPhaseInvalidBinding, gatewayPhaseInvalidSpec:
-		defer func() { retErr = errors.Join(retErr, r.withdrawGatewayDiscovery(ctx, scope.gateway, true)) }()
+		defer func() { retErr = errors.Join(retErr, r.withdrawGatewayPublications(ctx, scope.gateway, true)) }()
 	case gatewayPhaseReplaceGraph:
-		defer func() { retErr = errors.Join(retErr, r.withdrawGatewayDiscovery(ctx, scope.gateway, false)) }()
+		defer func() { retErr = errors.Join(retErr, r.withdrawGatewayPublications(ctx, scope.gateway, false)) }()
 	}
 	if scope.managed && !r.Config.GatewayAddressRoutabilityEnabled() {
 		meta.RemoveStatusCondition(&scope.gateway.Status.Conditions, string(gatewayv1.GatewayConditionAddressesAssigned))
@@ -176,7 +176,7 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, scope *gatewayScope) (
 			if usesHTTPSProfile(r.Config, scope.gateway) {
 				r.applyHTTPSListenerStatus(scope.gateway, scope.original.Status, r.listenerTLSIssues(ctx, scope.gateway), nil, false)
 			}
-			return result, errors.Join(err, r.withdrawGatewayDiscovery(ctx, scope.gateway, false))
+			return result, errors.Join(err, r.withdrawGatewayPublications(ctx, scope.gateway, false))
 		}
 		return r.reconcileGatewayGraph(ctx, scope, decision)
 	default:
@@ -289,18 +289,30 @@ func (r *Reconciler) reconcileGatewayGraph(
 	graphResult, err := r.ensureGateway(ctx, scope.gateway)
 	if errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) {
 		result, versionErr := r.setGatewayUnsupportedVersion(ctx, scope)
-		return result, errors.Join(versionErr, r.withdrawGatewayDiscovery(ctx, scope.gateway, true))
+		return result, errors.Join(versionErr, r.withdrawGatewayPublications(ctx, scope.gateway, true))
 	}
 	var componentError *cloud.GraphError
 	routeFailure := errors.As(err, &componentError) && componentError.Identity.RouteUID != ""
 	policy, classified := controller.ProviderFailurePolicyFor(err)
+	var cluster clusterAddressAssignments
 	if r.Config.GatewayInfrastructureMetadata && !errors.Is(err, errGatewayChanged) {
 		observation := graphResult.Gateway
 		// Explicit scoped readback still describes the serving listeners if
 		// another listener failed. A nil observation leaves discovery intact.
-		if err == nil || routeFailure || observation.AddressAbsent || len(observation.ScopedListenerDeferredPorts) != 0 ||
-			scopedGatewayFailurePorts(r.Config, scope.gateway, policy.Category, observation) != nil {
+		observed := err == nil || routeFailure || observation.AddressAbsent || len(observation.ScopedListenerDeferredPorts) != 0 ||
+			scopedGatewayFailurePorts(r.Config, scope.gateway, policy.Category, observation) != nil
+		var clusterErr error
+		cluster, clusterErr = r.reconcileClusterAddresses(ctx, scope.gateway, decision.listener, observation, observed)
+		if errors.Is(clusterErr, errGatewayChanged) {
+			return ctrl.Result{}, clusterErr
+		}
+		defer func() { retErr = errors.Join(retErr, clusterErr) }()
+		if observed {
 			defer func() {
+				if clusterAddressRejection(scope.gateway, cluster) {
+					retErr = errors.Join(retErr, r.withdrawGatewayDiscovery(ctx, scope.gateway, false))
+					return
+				}
 				retErr = errors.Join(retErr, r.reconcileGatewayDiscovery(ctx, scope.gateway, decision.listener, observation))
 			}()
 		} else {
@@ -309,10 +321,11 @@ func (r *Reconciler) reconcileGatewayGraph(
 			}()
 		}
 	}
-	if r.Config.GatewayAddressRoutabilityEnabled() && !errors.Is(err, errGatewayChanged) && graphResult.Gateway.AddressIssue == "" &&
-		(err == nil || routeFailure || graphResult.Gateway.AddressAbsent) {
+	if r.Config.GatewayAddressRoutabilityEnabled() && !errors.Is(err, errGatewayChanged) &&
+		(graphResult.Gateway.AddressIssue == "" && (err == nil || routeFailure || graphResult.Gateway.AddressAbsent) ||
+			err != nil && (cluster.requested || hasClusterStatusAddress(scope.gateway))) {
 		// Address readback is independent of listener and route readiness.
-		r.observeAddressAssignment(scope.gateway, graphResult.Gateway)
+		r.observeAddressAssignment(scope.gateway, graphResult.Gateway, cluster)
 	}
 	if !model.GatewayDisallowsListenerSets(scope.gateway) && !errors.Is(err, errGatewayChanged) {
 		if err := r.reportListenerSets(ctx, scope.gateway, sets, graphResult); err != nil {
@@ -342,6 +355,10 @@ func (r *Reconciler) reconcileGatewayGraph(
 		}
 		if errors.Is(err, errGatewayChanged) && !classified {
 			return ctrl.Result{}, err
+		}
+		if clusterAddressRejection(scope.gateway, cluster) {
+			defer controller.SetCondition(&scope.gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionProgrammed),
+				metav1.ConditionFalse, string(gatewayv1.GatewayReasonAddressNotAssigned), "No Gateway address request could be assigned", scope.gateway.Generation))
 		}
 		if routeFailure {
 			if graphResult.Gateway.HTTPPolicyTransition {
@@ -389,7 +406,7 @@ func (r *Reconciler) reconcileGatewayGraph(
 		}
 	}
 	if gatewayResult.AddressIssue != "" {
-		if err := r.setGatewayAddressUnusable(ctx, scope.gateway, decision.listener, gatewayResult, progress); err != nil {
+		if err := r.setGatewayAddressUnusable(ctx, scope.gateway, decision.listener, gatewayResult, progress, cluster); err != nil {
 			return ctrl.Result{}, err
 		}
 		if !gatewayResult.AddressBlocked && gatewayResult.State.LoadBalancerID != "" && graphResult.Outcome.State == cloud.OutcomeProgressing {
@@ -398,11 +415,19 @@ func (r *Reconciler) reconcileGatewayGraph(
 		return ctrl.Result{RequeueAfter: controller.OpenStackResyncAfter(r.Config.OpenStackResyncInterval, scope.gateway.UID)}, nil
 	}
 	address := r.observedGatewayAddress(scope.gateway, gatewayResult.State)
-	if progress.State == cloud.OutcomeReady && address == "" {
+	if progress.State == cloud.OutcomeReady && address == "" && len(cluster.addresses) == 0 {
 		progress = cloud.ProgressingOutcome("Waiting to observe the Gateway address", time.Second)
 	}
 	if listenerFamily(decision.listener) == gatewayv1.TLSProtocolType && graphResult.Outcome.State == cloud.OutcomeProgressing && progress.State == cloud.OutcomeReady {
 		progress = graphResult.Outcome
+	}
+	if clusterAddressRejection(scope.gateway, cluster) && (progress.State == cloud.OutcomeReady || len(cluster.issues) != 0) {
+		const message = "No Gateway address request could be assigned"
+		if err := r.setGatewayProvisioningStatus(ctx, scope.gateway, decision.listener, metav1.ConditionFalse,
+			gatewayv1.GatewayReasonAddressNotAssigned, gatewayv1.ListenerReasonPending, message, true); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: controller.OpenStackResyncAfter(r.Config.OpenStackResyncInterval, scope.gateway.UID)}, nil
 	}
 	if progress.State == cloud.OutcomeProgressing {
 		message := controller.ProviderProgressMessage(progress, "Octavia resources for the Gateway are still progressing")

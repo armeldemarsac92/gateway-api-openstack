@@ -119,12 +119,12 @@ func metadataDigest(value string) string {
 func reservedDiscoveryLabel(key string) bool {
 	switch key {
 	case gatewayv1.GatewayNameLabelKey, gatewayv1.GatewayClassNameLabelKey, discoveryv1.LabelServiceName,
-		discoveryv1.LabelManagedBy, discoveryv1.LabelSkipMirror, corev1.IsHeadlessService:
+		discoveryv1.LabelManagedBy, discoveryv1.LabelSkipMirror, corev1.IsHeadlessService, clusterAddressGatewayLabel, serviceProxyNameLabel:
 		return true
 	}
 	return false
 }
 
 func reservedDiscoveryAnnotation(key string) bool {
-	return key == discoveryControllerAnnotation || key == discoveryMetadataAnnotation
+	return key == discoveryControllerAnnotation || key == discoveryMetadataAnnotation || key == clusterFrontendVIPAnnotation
 }

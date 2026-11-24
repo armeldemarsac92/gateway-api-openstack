@@ -427,19 +427,20 @@ func (r *Reconciler) setGatewayAddressUnusable(
 	listener *gatewayv1.Listener,
 	result cloud.GatewayResult,
 	progress cloud.Outcome,
+	cluster clusterAddressAssignments,
 ) error {
 	readyPorts := result.ScopedListenerReadyPorts
 	if controller.GatewayListenerScope(r.Config, gateway) == "" && progress.State == cloud.OutcomeReady {
 		readyPorts = []int{int(listener.Port)}
 	}
 	if r.Config.GatewayAddressRoutabilityEnabled() {
-		retained := r.observeAddressAssignment(gateway, result)
+		serving := r.observeAddressAssignment(gateway, result, cluster) || len(cluster.addresses) != 0
 		if !r.usesLegacyAddressAdmission(gateway) {
-			if retained && progress.State == cloud.OutcomeReady {
+			if serving && progress.State == cloud.OutcomeReady {
 				return r.setGatewayProgrammed(ctx, gateway, listener, "")
 			}
 			reason := gatewayv1.GatewayReasonAddressNotAssigned
-			if retained {
+			if serving {
 				reason = gatewayv1.GatewayReasonNoResources
 			}
 			return r.setGatewayListenerStatuses(ctx, gateway, listener, metav1.ConditionFalse, reason,

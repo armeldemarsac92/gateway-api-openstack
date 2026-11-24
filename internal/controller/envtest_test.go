@@ -142,6 +142,11 @@ func TestControllerEnvtest(t *testing.T) {
 	statusConfig.ControllerName = "status.example.com/gateway-api-openstack"
 	statusConfig.BackendTLSPolicy, statusConfig.BackendClientCertificate = true, true
 	statusConfig.GatewayInfrastructureMetadata = true
+	statusConfig.ClusterGatewayAddresses = statusConfig.GatewayAddressRoutabilityEnabled()
+	if statusConfig.ClusterGatewayAddresses {
+		// Allow the ClusterIP collision case to observe the normal resync.
+		statusConfig.OpenStackResyncInterval = 3 * time.Second
+	}
 	statusProvider := &recordingProvider{}
 	startManager(t, statusConfig, statusProvider)
 

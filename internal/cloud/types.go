@@ -70,6 +70,15 @@ type GatewaySpec struct {
 	// AddressRejection records an invalid address request on a bound Gateway.
 	// Existing listeners and routes remain eligible for reconciliation.
 	AddressRejection string
+	// ClusterAddressLoss is set when Cluster requests cannot reserve an
+	// address. Only a valid provider address or a retained active address
+	// can then justify keeping the frontend enabled.
+	ClusterAddressLoss *ClusterAddressLoss
+}
+
+type ClusterAddressLoss struct {
+	RetainedClusterVIPs       []string
+	RetainedProviderAddresses []string
 }
 
 // ScopedListener is one named Octavia listener on a shared Gateway load balancer.

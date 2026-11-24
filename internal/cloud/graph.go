@@ -64,6 +64,14 @@ type GatewayGraphNode struct {
 	ClaimBackendCA func(context.Context) error `json:"-"`
 }
 
+// AddressWithdrawalOnly indicates that there is no remaining address to
+// evaluate. The provider only needs to observe and disable the owned frontend.
+func (node GatewayGraphNode) AddressWithdrawalOnly() bool {
+	loss := node.Spec.ClusterAddressLoss
+	return node.Disposition == GraphEnsure && loss != nil && len(node.Spec.RequestedVIPAddresses) == 0 &&
+		len(loss.RetainedClusterVIPs) == 0 && len(loss.RetainedProviderAddresses) == 0
+}
+
 // BackendClientCertificate is the current Gateway client identity, or a denial
 // when the Gateway requests an identity that cannot be authorized.
 type BackendClientCertificate struct {
