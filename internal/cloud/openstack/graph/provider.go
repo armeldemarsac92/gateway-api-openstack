@@ -90,8 +90,9 @@ type ProviderConfig struct {
 	OperationTimeout       time.Duration
 	PollInterval           time.Duration
 
-	HTTPSListenerIsolation bool
-	InitialL7Rules         bool
+	HTTPSListenerIsolation  bool
+	InitialL7Rules          bool
+	L7PolicyBatchActivation bool
 }
 
 // Provider owns the OpenStack resource graph for managed Gateway API objects.
@@ -122,8 +123,9 @@ type Provider struct {
 	operationTimeout       time.Duration
 	pollInterval           time.Duration
 
-	httpsListenerIsolation bool
-	initialL7Rules         bool
+	httpsListenerIsolation  bool
+	initialL7Rules          bool
+	l7PolicyBatchActivation bool
 }
 
 // NewProvider creates an OpenStack provider. The clients are expected to have
@@ -162,8 +164,9 @@ func NewProvider(serviceClients ServiceClients, cfg ProviderConfig) *Provider {
 		operationTimeout:       cfg.OperationTimeout,
 		pollInterval:           cfg.PollInterval,
 
-		httpsListenerIsolation: cfg.HTTPSListenerIsolation,
-		initialL7Rules:         cfg.InitialL7Rules,
+		httpsListenerIsolation:  cfg.HTTPSListenerIsolation,
+		initialL7Rules:          cfg.InitialL7Rules,
+		l7PolicyBatchActivation: cfg.L7PolicyBatchActivation,
 	}
 }
 

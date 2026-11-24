@@ -58,6 +58,7 @@ type observedRoutePolicy struct {
 	adminObserved            bool
 	initialRules             bool
 	initialRulesPartial      bool
+	activationOptions        string
 	fixedResponse            bool
 	targetObserved           bool
 	weightedTargets          []octavia.WeightedHTTPTarget
@@ -82,6 +83,7 @@ type observedRouteGraph struct {
 	members                []pools.Member
 	memberBackupUnreported map[string]struct{}
 	memberAdminUnreported  map[string]struct{}
+	memberBatchUnreported  map[string]struct{}
 	monitor                *monitors.Monitor
 	policies               []observedRoutePolicy
 	httpParts              map[string]*observedRouteGraph
@@ -626,6 +628,7 @@ func (p *Provider) observeListenerPolicies(ctx context.Context, inventory *route
 		observed.responseHeaderOperations = observation.ResponseHeaderOperations
 		observed.httpsListenerHostname = observation.HTTPSListenerHostname
 		observed.adminObserved = observation.AdminState != nil
+		observed.activationOptions = observation.ActivationOptions
 		if strictPolicy || owner.requiresPolicyAbsenceProof {
 			rules := make([]l7policies.Rule, 0, len(observed.rules))
 			for _, rule := range observed.rules {
@@ -685,6 +688,9 @@ func (p *Provider) observeRoutePoolChildrenWithRole(ctx context.Context, owner r
 	switch {
 	case graph.pool.Protocol == cloud.ListenerProtocolTCP:
 		graph.members, graph.memberBackupUnreported, err = p.octavia.ListMembersWithBackup(ctx, graph.pool.ID, opts)
+	case p.l7PolicyBatchActivation && graph.pool.Protocol == cloud.ListenerProtocolHTTP:
+		inspectAdmin := strictChildren || p.fixedHTTPResponses || p.backendH2C || graph.backendH2C
+		graph.members, graph.memberAdminUnreported, graph.memberBatchUnreported, err = p.octavia.ListMembersForPolicyActivation(ctx, graph.pool.ID, opts, inspectAdmin)
 	case strictChildren || (p.fixedHTTPResponses || p.backendH2C || graph.backendH2C) && graph.pool.Protocol == cloud.ListenerProtocolHTTP:
 		graph.members, graph.memberAdminUnreported, err = p.octavia.ListMembersWithAdminState(ctx, graph.pool.ID, opts)
 	default:
@@ -936,6 +942,10 @@ func (r desiredRoute) backendTransportNeedsWithdrawal(observed observedRouteGrap
 }
 
 func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]routeMutation, cloud.RouteState, error) {
+	return buildRouteEnsurePlanWithActivations(desired, actual, false)
+}
+
+func buildRouteEnsurePlanWithActivations(desired desiredRoute, actual observedRouteGraph, batchActivations bool) ([]routeMutation, cloud.RouteState, error) {
 	if step := desired.backendTLS.poolMutation(desired, actual); step != nil {
 		return []routeMutation{*step}, routeStateFromObservation(actual), nil
 	}
@@ -1109,20 +1119,29 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 			if policy.role == wantedPolicy.role && !policy.policy.AdminStateUp &&
 				(wantedPolicy.requestCORS == nil || requestCORSPolicy.settled(wantedPolicy, policy)) {
 				if policy.initialRules && !initialL7RulesReady(policy, rulesFor(wantedPolicy, desired.hostnameRuleValue)) {
+					if len(plan) != 0 {
+						return plan, state, nil
+					}
 					return nil, state, errInitialL7RulesUnverified
 				}
-				return []routeMutation{{kind: routeMutationEnablePolicy, id: policy.policy.ID,
+				if len(plan) != 0 && !policy.initialRules {
+					return plan, state, nil
+				}
+				plan = append(plan, routeMutation{kind: routeMutationEnablePolicy, id: policy.policy.ID,
 					policy: desiredPolicy{httpsListenerHostname: wantedPolicy.httpsListenerHostname,
 						grpcContentTypeRule: wantedPolicy.grpcContentTypeRule, requestURLRewrite: wantedPolicy.requestURLRewrite, requestCORS: wantedPolicy.requestCORS,
 						requestHeaderOperations: wantedPolicy.requestHeaderOperations, responseHeaderOperations: wantedPolicy.responseHeaderOperations},
 					requestHeaderOperations:  wantedPolicy.requestHeaderOperations,
 					responseHeaderOperations: wantedPolicy.responseHeaderOperations,
 					requiresExactHeaders:     len(wantedPolicy.headers) != 0,
-					requiresExactQueryParams: wantedPolicy.requiresExactQueryParams(), requiresHTTPMethod: wantedPolicy.method != ""}}, state, nil
+					requiresExactQueryParams: wantedPolicy.requiresExactQueryParams(), requiresHTTPMethod: wantedPolicy.method != ""})
+				if !batchActivations || !policy.initialRules {
+					return plan, state, nil
+				}
 			}
 		}
 	}
-	return nil, state, nil
+	return plan, state, nil
 }
 
 func buildRoutePolicyPlan(

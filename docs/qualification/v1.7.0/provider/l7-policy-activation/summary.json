@@ -1,0 +1,1281 @@
+{
+  "artifacts": {
+    "controllerArtifact": {
+      "repository": "ghcr.io/armeldemarsac92/gateway-api-openstack",
+      "sourceRevision": "0cde3dcd7e494e3d9986ff3c5650353e5f6a3def",
+      "sourceLabel": "https://github.com/armeldemarsac92/gateway-api-openstack",
+      "manifestDigest": "sha256:f73cf0de44b303929bb32c3f32f73a37ac29bb6778409bb4f193f742eb33cb18",
+      "configDigest": "sha256:4a4cf801a9f67909f5e0821c986698677b38a0758863ba11aa544001a15742b8",
+      "platform": "linux/amd64",
+      "entrypoint": "/openstack-gateway-controller",
+      "user": "65532:65532",
+      "ociArchiveSHA256": "fb92cfe85c1687174e11c9e4e6ebaa38c6b144859f6e0f30011d50fc7b1c58de",
+      "managerSHA256": "e5b3f2566c90cc6172a476794295a70679258ef0833066f33a9181392002ed43"
+    },
+    "octavia": {
+      "revision": "5f2a2f4f4ba9912239584403a7d83e150df63460",
+      "version": "19.0.1.dev40",
+      "sha256": "d3deae59820822377cbd785df1e78014f7faeb291679c0c6bac66857d5a95f8a",
+      "filesVerified": 646
+    },
+    "octaviaLib": {
+      "revision": "696c5ae9ceb2cef1862c3af6dbcdbe812ee175f3",
+      "version": "3.12.1.dev11",
+      "sha256": "e0b6108a307ef354589812bdcd2c27f7f7bba9abf1ccf273991d6c5cec2aa39b",
+      "filesVerified": 24
+    },
+    "HAProxy": {
+      "version": "3.0.19-ade9c1262-octavia-strict-dns-v1",
+      "sha256": "fa8468efa26f95ed83a36afeb97b79730de285450b7a8fae94f7cf5e6d2d0824"
+    },
+    "gatewayAPI": {
+      "version": "v1.7.0",
+      "revision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "case": "ListenerSetHTTPRouting",
+      "caseGoSHA256": "b9f8cc812a62f5b4d882cbd7bd92fc752a2bd426a946817d30e129537a502d2a",
+      "caseYAMLSHA256": "f4b5a3cbfeffc737ba692a07a2ad20557a017cd26faeed2e5a56bab72885bcb8",
+      "baseManifestSHA256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+      "registeredRunnerSHA256": "de9cdeb62c794b24716cc6f2548d784f8c2de9fcf0773c26d31fb828d3257d4d"
+    },
+    "fedoraSHA256": "50bdc5e70f6a24f540932d15411c1c6ae9fcfa40fb990d876d83c5cc823b2ad0",
+    "kindBinarySHA256": "aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d",
+    "kindNodePlatformDigest": "sha256:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67"
+  },
+  "channels": {
+    "standard": {
+      "channel": "standard",
+      "sameUpstreamInputs": true,
+      "caseStartAt": "2026-11-24T20:52:26.428+00:00",
+      "caseFinishAt": "2026-11-24T20:53:10.342+00:00",
+      "caseDurationSeconds": 43.914,
+      "firstUpstreamRequestAt": "2026-11-24T20:52:42.495040+00:00",
+      "earliestTrafficAssertionDeadline": "2026-11-24T20:53:12.495040+00:00",
+      "candidateAssertions": {
+        "PASS": 36
+      },
+      "referenceAssertions": {
+        "PASS": 35,
+        "FAIL": 1
+      },
+      "assertions": [
+        {
+          "index": 0,
+          "request": "'gateway-listener-1.com/route'_should_go_to_infra-backend-v1",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 1,
+          "request": "'gateway-listener-2.com/route'_should_go_to_infra-backend-v1",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 2,
+          "request": "'listener-set-http-routing-1-listener-1.com/route'_should_go_to_infra-backend-v1",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 3,
+          "request": "'listener-set-http-routing-1-listener-2.com/route'_should_go_to_infra-backend-v1",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 4,
+          "request": "'listener-set-http-routing-2-listener-1.com/route'_should_go_to_infra-backend-v1",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 5,
+          "request": "'listener-set-http-routing-2-listener-2.com/route'_should_go_to_infra-backend-v1",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 6,
+          "request": "'gateway-listener-1.com/gateway-route'_should_go_to_infra-backend-v2",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 7,
+          "request": "'gateway-listener-2.com/gateway-route'_should_go_to_infra-backend-v2",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 8,
+          "request": "'listener-set-http-routing-1-listener-1.com/gateway-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 9,
+          "request": "'listener-set-http-routing-1-listener-2.com/gateway-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 10,
+          "request": "'listener-set-http-routing-2-listener-1.com/gateway-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 11,
+          "request": "'listener-set-http-routing-2-listener-2.com/gateway-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 12,
+          "request": "'gateway-listener-1.com/gateway-section-route'_should_go_to_infra-backend-v3",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 13,
+          "request": "'gateway-listener-2.com/gateway-section-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 14,
+          "request": "'listener-set-http-routing-1-listener-1.com/gateway-section-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 15,
+          "request": "'listener-set-http-routing-1-listener-2.com/gateway-section-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 16,
+          "request": "'listener-set-http-routing-2-listener-1.com/gateway-section-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 17,
+          "request": "'listener-set-http-routing-2-listener-2.com/gateway-section-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 18,
+          "request": "'gateway-listener-1.com/listener-set-http-routing-1-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 19,
+          "request": "'gateway-listener-2.com/listener-set-http-routing-1-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 20,
+          "request": "'listener-set-http-routing-1-listener-1.com/listener-set-http-routing-1-route'_should_go_to_infra-backend-v2",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 21,
+          "request": "'listener-set-http-routing-1-listener-2.com/listener-set-http-routing-1-route'_should_go_to_infra-backend-v2",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 22,
+          "request": "'listener-set-http-routing-2-listener-1.com/listener-set-http-routing-1-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 23,
+          "request": "'listener-set-http-routing-2-listener-2.com/listener-set-http-routing-1-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 24,
+          "request": "'gateway-listener-1.com/listener-set-http-routing-1-section-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 25,
+          "request": "'gateway-listener-2.com/listener-set-http-routing-1-section-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 26,
+          "request": "'listener-set-http-routing-1-listener-1.com/listener-set-http-routing-1-section-route'_should_go_to_infra-backend-v3",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 27,
+          "request": "'listener-set-http-routing-1-listener-2.com/listener-set-http-routing-1-section-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 28,
+          "request": "'listener-set-http-routing-2-listener-1.com/listener-set-http-routing-1-section-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 29,
+          "request": "'listener-set-http-routing-2-listener-2.com/listener-set-http-routing-1-section-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 30,
+          "request": "'gateway-listener-1.com/listener-set-http-routing-2-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 31,
+          "request": "'gateway-listener-2.com/listener-set-http-routing-2-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 32,
+          "request": "'listener-set-http-routing-1-listener-1.com/listener-set-http-routing-2-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 33,
+          "request": "'listener-set-http-routing-1-listener-2.com/listener-set-http-routing-2-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 34,
+          "request": "'listener-set-http-routing-2-listener-1.com/listener-set-http-routing-2-route'_should_go_to_infra-backend-v2",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 35,
+          "request": "'listener-set-http-routing-2-listener-2.com/listener-set-http-routing-2-route'_should_go_to_infra-backend-v2",
+          "reference": "FAIL",
+          "candidate": "PASS"
+        }
+      ],
+      "rest": {
+        "GET providers 200": 49,
+        "GET loadbalancers 200": 93,
+        "POST loadbalancers 201": 1,
+        "GET listeners 200": 46,
+        "GET pools 200": 46,
+        "POST listeners 201": 1,
+        "GET l7policies 200": 59,
+        "POST pools 201": 6,
+        "GET members 200": 165,
+        "GET healthmonitors 200": 165,
+        "POST members 201": 10,
+        "POST healthmonitors 201": 6,
+        "POST l7policies 201": 14,
+        "GET rules 200": 105,
+        "GET l7policy_activation 200": 1,
+        "POST l7policy_activation 204": 1
+      },
+      "preparedPolicyCount": 14,
+      "preparedDisabledWithTwoRules": 14,
+      "singlePolicyEnableCount": 0,
+      "httpReloadCount": 2,
+      "caseToBatchActiveSeconds": 43.484,
+      "firstRequestToBatchActiveSeconds": 27.417,
+      "provedSingleActivationOf14": true,
+      "deadlineMarginSeconds": 2.583,
+      "mutations": {
+        "total": 39,
+        "operations": {
+          "POST healthmonitors 201": 6,
+          "POST l7policies 201": 14,
+          "POST l7policy_activation 204": 1,
+          "POST listeners 201": 1,
+          "POST loadbalancers 201": 1,
+          "POST members 201": 10,
+          "POST pools 201": 6
+        }
+      },
+      "beforeBatchActivation": {
+        "mutations": {
+          "total": 52,
+          "operations": {
+            "POST healthmonitors 201": 6,
+            "POST l7policies 201": 14,
+            "POST listeners 201": 1,
+            "POST loadbalancers 201": 1,
+            "POST members 201": 10,
+            "POST pools 201": 6,
+            "PUT l7policies 200": 14
+          }
+        },
+        "httpReloadCount": 15,
+        "ruleReads": 287,
+        "singlePolicyPUTs": 14
+      },
+      "batchPOST": {
+        "at": "2026-11-24T20:53:09.482+00:00",
+        "operation": "POST l7policy_activation 204",
+        "seconds": 0.7089,
+        "finishedAt": "2026-11-24T20:53:10.190+00:00",
+        "listenerId": "756f4644-ae2f-4156-bcfb-fe8a6c883da7",
+        "graphRevision": "21204f2144c532271350a9bec0610d9778d7ec99ca849d2c47a8e557e0212ac8",
+        "expectedOrder": [
+          "b7817e47-2f96-4af2-985b-83b12cd868ef",
+          "931f961e-c5f7-4464-ade9-92463f5dca39",
+          "46f71df7-615e-4335-91b7-4606e5939d30",
+          "8132b47b-09a5-4e0e-a673-c55dfe4cea51",
+          "50ded2d5-eea0-45dc-b74d-0be6da02448f",
+          "5bf68ac3-f586-454d-9e1e-20bad117745f",
+          "db26f375-e8ff-4fde-92ea-7cadcc8c72ff",
+          "2fb66d64-6992-4375-a6f4-1bec389a4565",
+          "36bf07fa-6259-4fcd-9e57-eaae58696408",
+          "ad4769a3-2c1c-4ecf-a400-b6673bfcad4c",
+          "6092d146-b274-4f33-b1b8-732a7e38b017",
+          "b8fa5878-ee5c-4b0f-a57f-18d4bba9c466",
+          "b682aed8-f60f-484d-8bd2-46a50605a526",
+          "5deae9e8-de1c-480c-a5ae-3f1f12e1fadb"
+        ],
+        "policyRevisions": {
+          "b7817e47-2f96-4af2-985b-83b12cd868ef": "4cd5627d28d5f9cdc7ae534853137470919fad2da1a5aeb4093ae8667dc5b720",
+          "931f961e-c5f7-4464-ade9-92463f5dca39": "ece771db8823324fdb58a13f1a91176e2524ad11c126db38c6770a282bf01730",
+          "46f71df7-615e-4335-91b7-4606e5939d30": "efe7f514e35ab5e6cfc4f94f167ace63091d71404f4769c409d1b74cddcda760",
+          "8132b47b-09a5-4e0e-a673-c55dfe4cea51": "08a72b7c2eabe175ef44a73ca3d31d03c1937ac660f780a0011dc94354591a62",
+          "50ded2d5-eea0-45dc-b74d-0be6da02448f": "2a80f5b2e3707ecb6c3b6d800b276f97f313f16373b59e1c9b0806f0697e25a0",
+          "5bf68ac3-f586-454d-9e1e-20bad117745f": "e01ae35a8b8b792e0ba7f56add23370f9061beff22c85caa3ff4841e1a288434",
+          "db26f375-e8ff-4fde-92ea-7cadcc8c72ff": "33759e1ab0b086aa06965d5c5b00f04e01eeefce2ee9a58537e7128df4b7c6f8",
+          "2fb66d64-6992-4375-a6f4-1bec389a4565": "5eb9a41ce85072a76fe732b701b68e64350089a73065ac19838740f5a030364d",
+          "36bf07fa-6259-4fcd-9e57-eaae58696408": "3f1bd2912a01eacbb8f6c90d5d3b955a97b4bad4982d3b00add4d46668f0808f",
+          "ad4769a3-2c1c-4ecf-a400-b6673bfcad4c": "fd06ca0597674128f3344c08eda946bbde74c22af7a10a1a487d5622b753bcb8",
+          "6092d146-b274-4f33-b1b8-732a7e38b017": "b743e618df8427bfd3d9e52a1365870ce8a64d2a705b39bea894f5c30b4e8751",
+          "b8fa5878-ee5c-4b0f-a57f-18d4bba9c466": "7bed6f9ca851bcb958d421839a00ff2f771361d96dc193b73c9decc2b7a74e9b",
+          "b682aed8-f60f-484d-8bd2-46a50605a526": "08cfb7015bbc5fe12db9b7ca3ad17bc1a4d02fca2b7b609c59029debed4fe574",
+          "5deae9e8-de1c-480c-a5ae-3f1f12e1fadb": "46ced061f4fedeee9703bad57db2130fb9cf79906bb991e1203283fbbfc1b126"
+        },
+        "policyIds": [
+          "b7817e47-2f96-4af2-985b-83b12cd868ef",
+          "931f961e-c5f7-4464-ade9-92463f5dca39",
+          "46f71df7-615e-4335-91b7-4606e5939d30",
+          "8132b47b-09a5-4e0e-a673-c55dfe4cea51",
+          "50ded2d5-eea0-45dc-b74d-0be6da02448f",
+          "5bf68ac3-f586-454d-9e1e-20bad117745f",
+          "db26f375-e8ff-4fde-92ea-7cadcc8c72ff",
+          "2fb66d64-6992-4375-a6f4-1bec389a4565",
+          "36bf07fa-6259-4fcd-9e57-eaae58696408",
+          "ad4769a3-2c1c-4ecf-a400-b6673bfcad4c",
+          "6092d146-b274-4f33-b1b8-732a7e38b017",
+          "b8fa5878-ee5c-4b0f-a57f-18d4bba9c466",
+          "b682aed8-f60f-484d-8bd2-46a50605a526",
+          "5deae9e8-de1c-480c-a5ae-3f1f12e1fadb"
+        ]
+      },
+      "batchRPC": {
+        "activationId": "2e435ec3-6b18-4b70-a3b4-2fc0312181b7",
+        "listenerId": "756f4644-ae2f-4156-bcfb-fe8a6c883da7",
+        "loadBalancerId": "ae8e6209-2cc0-499b-a489-dda22e42d229",
+        "graphRevision": "21204f2144c532271350a9bec0610d9778d7ec99ca849d2c47a8e557e0212ac8",
+        "policyIds": [
+          "b7817e47-2f96-4af2-985b-83b12cd868ef",
+          "931f961e-c5f7-4464-ade9-92463f5dca39",
+          "46f71df7-615e-4335-91b7-4606e5939d30",
+          "8132b47b-09a5-4e0e-a673-c55dfe4cea51",
+          "50ded2d5-eea0-45dc-b74d-0be6da02448f",
+          "5bf68ac3-f586-454d-9e1e-20bad117745f",
+          "db26f375-e8ff-4fde-92ea-7cadcc8c72ff",
+          "2fb66d64-6992-4375-a6f4-1bec389a4565",
+          "36bf07fa-6259-4fcd-9e57-eaae58696408",
+          "ad4769a3-2c1c-4ecf-a400-b6673bfcad4c",
+          "6092d146-b274-4f33-b1b8-732a7e38b017",
+          "b8fa5878-ee5c-4b0f-a57f-18d4bba9c466",
+          "b682aed8-f60f-484d-8bd2-46a50605a526",
+          "5deae9e8-de1c-480c-a5ae-3f1f12e1fadb"
+        ],
+        "policyRevisions": {
+          "b7817e47-2f96-4af2-985b-83b12cd868ef": "4cd5627d28d5f9cdc7ae534853137470919fad2da1a5aeb4093ae8667dc5b720",
+          "931f961e-c5f7-4464-ade9-92463f5dca39": "ece771db8823324fdb58a13f1a91176e2524ad11c126db38c6770a282bf01730",
+          "46f71df7-615e-4335-91b7-4606e5939d30": "efe7f514e35ab5e6cfc4f94f167ace63091d71404f4769c409d1b74cddcda760",
+          "8132b47b-09a5-4e0e-a673-c55dfe4cea51": "08a72b7c2eabe175ef44a73ca3d31d03c1937ac660f780a0011dc94354591a62",
+          "50ded2d5-eea0-45dc-b74d-0be6da02448f": "2a80f5b2e3707ecb6c3b6d800b276f97f313f16373b59e1c9b0806f0697e25a0",
+          "5bf68ac3-f586-454d-9e1e-20bad117745f": "e01ae35a8b8b792e0ba7f56add23370f9061beff22c85caa3ff4841e1a288434",
+          "db26f375-e8ff-4fde-92ea-7cadcc8c72ff": "33759e1ab0b086aa06965d5c5b00f04e01eeefce2ee9a58537e7128df4b7c6f8",
+          "2fb66d64-6992-4375-a6f4-1bec389a4565": "5eb9a41ce85072a76fe732b701b68e64350089a73065ac19838740f5a030364d",
+          "36bf07fa-6259-4fcd-9e57-eaae58696408": "3f1bd2912a01eacbb8f6c90d5d3b955a97b4bad4982d3b00add4d46668f0808f",
+          "ad4769a3-2c1c-4ecf-a400-b6673bfcad4c": "fd06ca0597674128f3344c08eda946bbde74c22af7a10a1a487d5622b753bcb8",
+          "6092d146-b274-4f33-b1b8-732a7e38b017": "b743e618df8427bfd3d9e52a1365870ce8a64d2a705b39bea894f5c30b4e8751",
+          "b8fa5878-ee5c-4b0f-a57f-18d4bba9c466": "7bed6f9ca851bcb958d421839a00ff2f771361d96dc193b73c9decc2b7a74e9b",
+          "b682aed8-f60f-484d-8bd2-46a50605a526": "08cfb7015bbc5fe12db9b7ca3ad17bc1a4d02fca2b7b609c59029debed4fe574",
+          "5deae9e8-de1c-480c-a5ae-3f1f12e1fadb": "46ced061f4fedeee9703bad57db2130fb9cf79906bb991e1203283fbbfc1b126"
+        },
+        "before": [
+          {
+            "id": "b7817e47-2f96-4af2-985b-83b12cd868ef",
+            "enabled": false,
+            "provisioningStatus": "PENDING_UPDATE"
+          },
+          {
+            "id": "931f961e-c5f7-4464-ade9-92463f5dca39",
+            "enabled": false,
+            "provisioningStatus": "PENDING_UPDATE"
+          },
+          {
+            "id": "46f71df7-615e-4335-91b7-4606e5939d30",
+            "enabled": false,
+            "provisioningStatus": "PENDING_UPDATE"
+          },
+          {
+            "id": "8132b47b-09a5-4e0e-a673-c55dfe4cea51",
+            "enabled": false,
+            "provisioningStatus": "PENDING_UPDATE"
+          },
+          {
+            "id": "50ded2d5-eea0-45dc-b74d-0be6da02448f",
+            "enabled": false,
+            "provisioningStatus": "PENDING_UPDATE"
+          },
+          {
+            "id": "5bf68ac3-f586-454d-9e1e-20bad117745f",
+            "enabled": false,
+            "provisioningStatus": "PENDING_UPDATE"
+          },
+          {
+            "id": "db26f375-e8ff-4fde-92ea-7cadcc8c72ff",
+            "enabled": false,
+            "provisioningStatus": "PENDING_UPDATE"
+          },
+          {
+            "id": "2fb66d64-6992-4375-a6f4-1bec389a4565",
+            "enabled": false,
+            "provisioningStatus": "PENDING_UPDATE"
+          },
+          {
+            "id": "36bf07fa-6259-4fcd-9e57-eaae58696408",
+            "enabled": false,
+            "provisioningStatus": "PENDING_UPDATE"
+          },
+          {
+            "id": "ad4769a3-2c1c-4ecf-a400-b6673bfcad4c",
+            "enabled": false,
+            "provisioningStatus": "PENDING_UPDATE"
+          },
+          {
+            "id": "6092d146-b274-4f33-b1b8-732a7e38b017",
+            "enabled": false,
+            "provisioningStatus": "PENDING_UPDATE"
+          },
+          {
+            "id": "b8fa5878-ee5c-4b0f-a57f-18d4bba9c466",
+            "enabled": false,
+            "provisioningStatus": "PENDING_UPDATE"
+          },
+          {
+            "id": "b682aed8-f60f-484d-8bd2-46a50605a526",
+            "enabled": false,
+            "provisioningStatus": "PENDING_UPDATE"
+          },
+          {
+            "id": "5deae9e8-de1c-480c-a5ae-3f1f12e1fadb",
+            "enabled": false,
+            "provisioningStatus": "PENDING_UPDATE"
+          }
+        ],
+        "after": [
+          {
+            "id": "b7817e47-2f96-4af2-985b-83b12cd868ef",
+            "enabled": true,
+            "provisioningStatus": "ACTIVE"
+          },
+          {
+            "id": "931f961e-c5f7-4464-ade9-92463f5dca39",
+            "enabled": true,
+            "provisioningStatus": "ACTIVE"
+          },
+          {
+            "id": "46f71df7-615e-4335-91b7-4606e5939d30",
+            "enabled": true,
+            "provisioningStatus": "ACTIVE"
+          },
+          {
+            "id": "8132b47b-09a5-4e0e-a673-c55dfe4cea51",
+            "enabled": true,
+            "provisioningStatus": "ACTIVE"
+          },
+          {
+            "id": "50ded2d5-eea0-45dc-b74d-0be6da02448f",
+            "enabled": true,
+            "provisioningStatus": "ACTIVE"
+          },
+          {
+            "id": "5bf68ac3-f586-454d-9e1e-20bad117745f",
+            "enabled": true,
+            "provisioningStatus": "ACTIVE"
+          },
+          {
+            "id": "db26f375-e8ff-4fde-92ea-7cadcc8c72ff",
+            "enabled": true,
+            "provisioningStatus": "ACTIVE"
+          },
+          {
+            "id": "2fb66d64-6992-4375-a6f4-1bec389a4565",
+            "enabled": true,
+            "provisioningStatus": "ACTIVE"
+          },
+          {
+            "id": "36bf07fa-6259-4fcd-9e57-eaae58696408",
+            "enabled": true,
+            "provisioningStatus": "ACTIVE"
+          },
+          {
+            "id": "ad4769a3-2c1c-4ecf-a400-b6673bfcad4c",
+            "enabled": true,
+            "provisioningStatus": "ACTIVE"
+          },
+          {
+            "id": "6092d146-b274-4f33-b1b8-732a7e38b017",
+            "enabled": true,
+            "provisioningStatus": "ACTIVE"
+          },
+          {
+            "id": "b8fa5878-ee5c-4b0f-a57f-18d4bba9c466",
+            "enabled": true,
+            "provisioningStatus": "ACTIVE"
+          },
+          {
+            "id": "b682aed8-f60f-484d-8bd2-46a50605a526",
+            "enabled": true,
+            "provisioningStatus": "ACTIVE"
+          },
+          {
+            "id": "5deae9e8-de1c-480c-a5ae-3f1f12e1fadb",
+            "enabled": true,
+            "provisioningStatus": "ACTIVE"
+          }
+        ],
+        "descriptorBefore": {
+          "id": "2e435ec3-6b18-4b70-a3b4-2fc0312181b7",
+          "phase": "pending"
+        },
+        "descriptorAfter": {
+          "id": "2e435ec3-6b18-4b70-a3b4-2fc0312181b7",
+          "phase": "applied",
+          "applied_revision": "5425ce4b195b354ee326614ad5ec04a182d0480be8497de7c450db9971cac65e"
+        },
+        "uploads": [
+          {
+            "at": "2026-11-24T20:53:09.853+00:00",
+            "amphoraId": "2b2621a1-f42c-40d3-a324-853285243607",
+            "configSHA256": "c012aa1401593cf57decaceffb533618cccd9e8532e5d1077ad899cba51e847b"
+          }
+        ],
+        "reloads": [
+          {
+            "at": "2026-11-24T20:53:09.853+00:00",
+            "amphoraId": "2b2621a1-f42c-40d3-a324-853285243607"
+          }
+        ],
+        "workerStartedAt": "2026-11-24T20:53:09.736+00:00",
+        "workerFinishedAt": "2026-11-24T20:53:10.059+00:00",
+        "processActivations": [
+          {
+            "at": "2026-11-24T20:53:09.912+00:00",
+            "protocol": "HTTP",
+            "configSHA256": "c012aa1401593cf57decaceffb533618cccd9e8532e5d1077ad899cba51e847b"
+          }
+        ]
+      },
+      "postConvergence": {
+        "seconds": 45.69,
+        "traffic": [
+          {
+            "host": "gateway-listener-1.com",
+            "path": "/route",
+            "requestedAt": "2026-11-24T20:55:12.464+00:00",
+            "respondedAt": "2026-11-24T20:55:12.471+00:00",
+            "durationMs": 6.8,
+            "status": 200,
+            "pod": "infra-backend-v1-667754889f-nb4hd",
+            "namespace": "gateway-conformance-infra",
+            "expectedBackend": "infra-backend-v1",
+            "passed": true,
+            "podReady": true,
+            "podImageID": "docker.io/library/import-2026-11-24@sha256:abd48b88affd1c16e8d60d06cdc661919a8980bba8fc9068f3d216d814268adb"
+          },
+          {
+            "host": "listener-set-http-routing-2-listener-2.com",
+            "path": "/listener-set-http-routing-2-route",
+            "requestedAt": "2026-11-24T20:55:12.471+00:00",
+            "respondedAt": "2026-11-24T20:55:12.477+00:00",
+            "durationMs": 6.6,
+            "status": 200,
+            "pod": "infra-backend-v2-5dc55c68cc-27777",
+            "namespace": "gateway-conformance-infra",
+            "expectedBackend": "infra-backend-v2",
+            "passed": true,
+            "podReady": true,
+            "podImageID": "docker.io/library/import-2026-11-24@sha256:abd48b88affd1c16e8d60d06cdc661919a8980bba8fc9068f3d216d814268adb"
+          }
+        ]
+      },
+      "patchedCandidate": {
+        "candidateAssertions": {
+          "PASS": 36
+        },
+        "caseDurationSeconds": 27.69,
+        "firstRequestToBatchActiveSeconds": 17.341
+      },
+      "upstreamReportSHA256": "ef06b647b1790abd614d87084595425d4c8c0dcd12739b8ae865bbd3d3dcf0d2",
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "echo": {
+        "ociIndexDigest": "sha256:abd48b88affd1c16e8d60d06cdc661919a8980bba8fc9068f3d216d814268adb",
+        "platformManifestDigest": "sha256:fed223b186fbd83d50a4578d168c9e7d89341d8c1af616ebe0f62d53ab7451dc"
+      }
+    },
+    "experimental": {
+      "channel": "experimental",
+      "sameUpstreamInputs": true,
+      "caseStartAt": "2026-11-24T21:01:27.583+00:00",
+      "caseFinishAt": "2026-11-24T21:02:07.389+00:00",
+      "caseDurationSeconds": 39.806,
+      "firstUpstreamRequestAt": "2026-11-24T21:01:41.411528+00:00",
+      "earliestTrafficAssertionDeadline": "2026-11-24T21:02:11.411528+00:00",
+      "candidateAssertions": {
+        "PASS": 36
+      },
+      "referenceAssertions": {
+        "FAIL": 2,
+        "PASS": 34
+      },
+      "assertions": [
+        {
+          "index": 0,
+          "request": "'gateway-listener-1.com/route'_should_go_to_infra-backend-v1",
+          "reference": "FAIL",
+          "candidate": "PASS"
+        },
+        {
+          "index": 1,
+          "request": "'gateway-listener-2.com/route'_should_go_to_infra-backend-v1",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 2,
+          "request": "'listener-set-http-routing-1-listener-1.com/route'_should_go_to_infra-backend-v1",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 3,
+          "request": "'listener-set-http-routing-1-listener-2.com/route'_should_go_to_infra-backend-v1",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 4,
+          "request": "'listener-set-http-routing-2-listener-1.com/route'_should_go_to_infra-backend-v1",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 5,
+          "request": "'listener-set-http-routing-2-listener-2.com/route'_should_go_to_infra-backend-v1",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 6,
+          "request": "'gateway-listener-1.com/gateway-route'_should_go_to_infra-backend-v2",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 7,
+          "request": "'gateway-listener-2.com/gateway-route'_should_go_to_infra-backend-v2",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 8,
+          "request": "'listener-set-http-routing-1-listener-1.com/gateway-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 9,
+          "request": "'listener-set-http-routing-1-listener-2.com/gateway-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 10,
+          "request": "'listener-set-http-routing-2-listener-1.com/gateway-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 11,
+          "request": "'listener-set-http-routing-2-listener-2.com/gateway-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 12,
+          "request": "'gateway-listener-1.com/gateway-section-route'_should_go_to_infra-backend-v3",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 13,
+          "request": "'gateway-listener-2.com/gateway-section-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 14,
+          "request": "'listener-set-http-routing-1-listener-1.com/gateway-section-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 15,
+          "request": "'listener-set-http-routing-1-listener-2.com/gateway-section-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 16,
+          "request": "'listener-set-http-routing-2-listener-1.com/gateway-section-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 17,
+          "request": "'listener-set-http-routing-2-listener-2.com/gateway-section-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 18,
+          "request": "'gateway-listener-1.com/listener-set-http-routing-1-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 19,
+          "request": "'gateway-listener-2.com/listener-set-http-routing-1-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 20,
+          "request": "'listener-set-http-routing-1-listener-1.com/listener-set-http-routing-1-route'_should_go_to_infra-backend-v2",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 21,
+          "request": "'listener-set-http-routing-1-listener-2.com/listener-set-http-routing-1-route'_should_go_to_infra-backend-v2",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 22,
+          "request": "'listener-set-http-routing-2-listener-1.com/listener-set-http-routing-1-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 23,
+          "request": "'listener-set-http-routing-2-listener-2.com/listener-set-http-routing-1-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 24,
+          "request": "'gateway-listener-1.com/listener-set-http-routing-1-section-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 25,
+          "request": "'gateway-listener-2.com/listener-set-http-routing-1-section-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 26,
+          "request": "'listener-set-http-routing-1-listener-1.com/listener-set-http-routing-1-section-route'_should_go_to_infra-backend-v3",
+          "reference": "FAIL",
+          "candidate": "PASS"
+        },
+        {
+          "index": 27,
+          "request": "'listener-set-http-routing-1-listener-2.com/listener-set-http-routing-1-section-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 28,
+          "request": "'listener-set-http-routing-2-listener-1.com/listener-set-http-routing-1-section-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 29,
+          "request": "'listener-set-http-routing-2-listener-2.com/listener-set-http-routing-1-section-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 30,
+          "request": "'gateway-listener-1.com/listener-set-http-routing-2-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 31,
+          "request": "'gateway-listener-2.com/listener-set-http-routing-2-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 32,
+          "request": "'listener-set-http-routing-1-listener-1.com/listener-set-http-routing-2-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 33,
+          "request": "'listener-set-http-routing-1-listener-2.com/listener-set-http-routing-2-route'_should_receive_one_of_[]",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 34,
+          "request": "'listener-set-http-routing-2-listener-1.com/listener-set-http-routing-2-route'_should_go_to_infra-backend-v2",
+          "reference": "PASS",
+          "candidate": "PASS"
+        },
+        {
+          "index": 35,
+          "request": "'listener-set-http-routing-2-listener-2.com/listener-set-http-routing-2-route'_should_go_to_infra-backend-v2",
+          "reference": "PASS",
+          "candidate": "PASS"
+        }
+      ],
+      "rest": {
+        "GET providers 200": 45,
+        "GET loadbalancers 200": 91,
+        "POST loadbalancers 201": 1,
+        "GET listeners 200": 45,
+        "GET pools 200": 45,
+        "POST listeners 201": 1,
+        "GET l7policies 200": 58,
+        "POST pools 201": 6,
+        "GET members 200": 162,
+        "GET healthmonitors 200": 162,
+        "POST members 201": 10,
+        "POST healthmonitors 201": 6,
+        "POST l7policies 201": 14,
+        "GET rules 200": 105,
+        "GET l7policy_activation 200": 1,
+        "POST l7policy_activation 204": 1
+      },
+      "preparedPolicyCount": 14,
+      "preparedDisabledWithTwoRules": 14,
+      "singlePolicyEnableCount": 0,
+      "httpReloadCount": 2,
+      "caseToBatchActiveSeconds": 39.5,
+      "firstRequestToBatchActiveSeconds": 25.671,
+      "provedSingleActivationOf14": true,
+      "deadlineMarginSeconds": 4.329,
+      "mutations": {
+        "total": 39,
+        "operations": {
+          "POST healthmonitors 201": 6,
+          "POST l7policies 201": 14,
+          "POST l7policy_activation 204": 1,
+          "POST listeners 201": 1,
+          "POST loadbalancers 201": 1,
+          "POST members 201": 10,
+          "POST pools 201": 6
+        }
+      },
+      "beforeBatchActivation": {
+        "mutations": {
+          "total": 52,
+          "operations": {
+            "POST healthmonitors 201": 6,
+            "POST l7policies 201": 14,
+            "POST listeners 201": 1,
+            "POST loadbalancers 201": 1,
+            "POST members 201": 10,
+            "POST pools 201": 6,
+            "PUT l7policies 200": 14
+          }
+        },
+        "httpReloadCount": 15,
+        "ruleReads": 287,
+        "singlePolicyPUTs": 14
+      },
+      "batchPOST": {
+        "at": "2026-11-24T21:02:06.811+00:00",
+        "operation": "POST l7policy_activation 204",
+        "seconds": 0.4647,
+        "finishedAt": "2026-11-24T21:02:07.276+00:00",
+        "listenerId": "e9b18e28-e6f3-4dbb-8908-bdd8c5717eaa",
+        "graphRevision": "dacb9ef5c137bb559be656931c3b94cbeb8d0c49f38fa07d68e0278b4a69cc4c",
+        "expectedOrder": [
+          "12be7f2d-94e7-455d-bd72-e1f1943f3f3a",
+          "c1f90662-62ca-430c-ba7a-a3001ba6d3d2",
+          "8c22e162-baa6-4917-ad28-ad44ac820c8a",
+          "3ee026d8-1bf9-43e4-b73c-7ab7305f679f",
+          "36417d7d-df1b-477d-b7e2-0d0ec915d34b",
+          "04863aa2-eecb-4c62-8259-284bf2316f76",
+          "6ab0e0e7-2704-4b91-abb9-9c2903cd4b4a",
+          "7a32ed7f-3cbf-4b3a-b5f8-ebcef3b03ea1",
+          "391c178c-8f0a-4dcb-8958-cbb3c20bd656",
+          "3b6fa17c-64f5-4a49-bbdf-0b3a39037bc0",
+          "ec8409ef-87bc-4a56-80b8-854d16f5a792",
+          "dc37b42c-16f7-4200-9db7-6138724e6de3",
+          "236a9861-79fa-406c-9502-908a1eb74d03",
+          "681c578c-24da-4995-af30-79dc3715956e"
+        ],
+        "policyRevisions": {
+          "12be7f2d-94e7-455d-bd72-e1f1943f3f3a": "2389188e66b1f024a8c9bcf4e390a788e7b02541fc6d6caa700f143fc5646e71",
+          "c1f90662-62ca-430c-ba7a-a3001ba6d3d2": "a1a52903733e168fb796a15ac1cf80f941c54b3afa00cd4257cce443977c541f",
+          "8c22e162-baa6-4917-ad28-ad44ac820c8a": "b34187c60893a353941cff183af7b6ee94b3076483034c98f561225819089657",
+          "3ee026d8-1bf9-43e4-b73c-7ab7305f679f": "e24d3300ff0f78a3b46ce8c6fbc4b88c444e239a91f94ec2b8034a4921e8602b",
+          "36417d7d-df1b-477d-b7e2-0d0ec915d34b": "7b864b755c1b097c1d19d6b1c59f10b1dd8aaafce5775c40919a2fdc101f172c",
+          "04863aa2-eecb-4c62-8259-284bf2316f76": "e0fc2526559e7d95b6ba482281ce789c46666c09063af1a12618661d7c625609",
+          "6ab0e0e7-2704-4b91-abb9-9c2903cd4b4a": "ad42f8de025378c79c42333d2fcafee3b0a69f5805d204969723e69158ae0e6b",
+          "7a32ed7f-3cbf-4b3a-b5f8-ebcef3b03ea1": "2e671e06faac8a993f3efd6bdaef2cc924783e38710eb8dab920654ae8d5b6e7",
+          "391c178c-8f0a-4dcb-8958-cbb3c20bd656": "7ef1067853c41207b9035681fbf8a1006815e0cc9d5f20a1d39261748688c5c2",
+          "3b6fa17c-64f5-4a49-bbdf-0b3a39037bc0": "1a610a5e5e185abcd0b20ed2e2fb9a94179ac5860a2609c9d6236af12eeb8872",
+          "ec8409ef-87bc-4a56-80b8-854d16f5a792": "84fcbcd8943d98e3c3eb685f232d84eef206f84199d88aacc911615f42e0d8cc",
+          "dc37b42c-16f7-4200-9db7-6138724e6de3": "190d0af1647993ac53f0047916feded02084f1f39d2f847d965133fbdf35e282",
+          "236a9861-79fa-406c-9502-908a1eb74d03": "b074b465f75ffeafb0f514b3ef7d5021444780dcaab9ad863e63cc46d3ffc79c",
+          "681c578c-24da-4995-af30-79dc3715956e": "3566e34a29e68f2c9850e30a694e856acaa0556e2fa49f4c07e44b9989e0790c"
+        },
+        "policyIds": [
+          "12be7f2d-94e7-455d-bd72-e1f1943f3f3a",
+          "c1f90662-62ca-430c-ba7a-a3001ba6d3d2",
+          "8c22e162-baa6-4917-ad28-ad44ac820c8a",
+          "3ee026d8-1bf9-43e4-b73c-7ab7305f679f",
+          "36417d7d-df1b-477d-b7e2-0d0ec915d34b",
+          "04863aa2-eecb-4c62-8259-284bf2316f76",
+          "6ab0e0e7-2704-4b91-abb9-9c2903cd4b4a",
+          "7a32ed7f-3cbf-4b3a-b5f8-ebcef3b03ea1",
+          "391c178c-8f0a-4dcb-8958-cbb3c20bd656",
+          "3b6fa17c-64f5-4a49-bbdf-0b3a39037bc0",
+          "ec8409ef-87bc-4a56-80b8-854d16f5a792",
+          "dc37b42c-16f7-4200-9db7-6138724e6de3",
+          "236a9861-79fa-406c-9502-908a1eb74d03",
+          "681c578c-24da-4995-af30-79dc3715956e"
+        ]
+      },
+      "batchRPC": {
+        "activationId": "177b7fd4-0635-4d7a-94f1-886c81421552",
+        "listenerId": "e9b18e28-e6f3-4dbb-8908-bdd8c5717eaa",
+        "loadBalancerId": "0483cb1f-29f0-4fc3-8d7d-6b96de529294",
+        "graphRevision": "dacb9ef5c137bb559be656931c3b94cbeb8d0c49f38fa07d68e0278b4a69cc4c",
+        "policyIds": [
+          "12be7f2d-94e7-455d-bd72-e1f1943f3f3a",
+          "c1f90662-62ca-430c-ba7a-a3001ba6d3d2",
+          "8c22e162-baa6-4917-ad28-ad44ac820c8a",
+          "3ee026d8-1bf9-43e4-b73c-7ab7305f679f",
+          "36417d7d-df1b-477d-b7e2-0d0ec915d34b",
+          "04863aa2-eecb-4c62-8259-284bf2316f76",
+          "6ab0e0e7-2704-4b91-abb9-9c2903cd4b4a",
+          "7a32ed7f-3cbf-4b3a-b5f8-ebcef3b03ea1",
+          "391c178c-8f0a-4dcb-8958-cbb3c20bd656",
+          "3b6fa17c-64f5-4a49-bbdf-0b3a39037bc0",
+          "ec8409ef-87bc-4a56-80b8-854d16f5a792",
+          "dc37b42c-16f7-4200-9db7-6138724e6de3",
+          "236a9861-79fa-406c-9502-908a1eb74d03",
+          "681c578c-24da-4995-af30-79dc3715956e"
+        ],
+        "policyRevisions": {
+          "12be7f2d-94e7-455d-bd72-e1f1943f3f3a": "2389188e66b1f024a8c9bcf4e390a788e7b02541fc6d6caa700f143fc5646e71",
+          "c1f90662-62ca-430c-ba7a-a3001ba6d3d2": "a1a52903733e168fb796a15ac1cf80f941c54b3afa00cd4257cce443977c541f",
+          "8c22e162-baa6-4917-ad28-ad44ac820c8a": "b34187c60893a353941cff183af7b6ee94b3076483034c98f561225819089657",
+          "3ee026d8-1bf9-43e4-b73c-7ab7305f679f": "e24d3300ff0f78a3b46ce8c6fbc4b88c444e239a91f94ec2b8034a4921e8602b",
+          "36417d7d-df1b-477d-b7e2-0d0ec915d34b": "7b864b755c1b097c1d19d6b1c59f10b1dd8aaafce5775c40919a2fdc101f172c",
+          "04863aa2-eecb-4c62-8259-284bf2316f76": "e0fc2526559e7d95b6ba482281ce789c46666c09063af1a12618661d7c625609",
+          "6ab0e0e7-2704-4b91-abb9-9c2903cd4b4a": "ad42f8de025378c79c42333d2fcafee3b0a69f5805d204969723e69158ae0e6b",
+          "7a32ed7f-3cbf-4b3a-b5f8-ebcef3b03ea1": "2e671e06faac8a993f3efd6bdaef2cc924783e38710eb8dab920654ae8d5b6e7",
+          "391c178c-8f0a-4dcb-8958-cbb3c20bd656": "7ef1067853c41207b9035681fbf8a1006815e0cc9d5f20a1d39261748688c5c2",
+          "3b6fa17c-64f5-4a49-bbdf-0b3a39037bc0": "1a610a5e5e185abcd0b20ed2e2fb9a94179ac5860a2609c9d6236af12eeb8872",
+          "ec8409ef-87bc-4a56-80b8-854d16f5a792": "84fcbcd8943d98e3c3eb685f232d84eef206f84199d88aacc911615f42e0d8cc",
+          "dc37b42c-16f7-4200-9db7-6138724e6de3": "190d0af1647993ac53f0047916feded02084f1f39d2f847d965133fbdf35e282",
+          "236a9861-79fa-406c-9502-908a1eb74d03": "b074b465f75ffeafb0f514b3ef7d5021444780dcaab9ad863e63cc46d3ffc79c",
+          "681c578c-24da-4995-af30-79dc3715956e": "3566e34a29e68f2c9850e30a694e856acaa0556e2fa49f4c07e44b9989e0790c"
+        },
+        "before": [
+          {
+            "id": "12be7f2d-94e7-455d-bd72-e1f1943f3f3a",
+            "enabled": false,
+            "provisioningStatus": "PENDING_UPDATE"
+          },
+          {
+            "id": "c1f90662-62ca-430c-ba7a-a3001ba6d3d2",
+            "enabled": false,
+            "provisioningStatus": "PENDING_UPDATE"
+          },
+          {
+            "id": "8c22e162-baa6-4917-ad28-ad44ac820c8a",
+            "enabled": false,
+            "provisioningStatus": "PENDING_UPDATE"
+          },
+          {
+            "id": "3ee026d8-1bf9-43e4-b73c-7ab7305f679f",
+            "enabled": false,
+            "provisioningStatus": "PENDING_UPDATE"
+          },
+          {
+            "id": "36417d7d-df1b-477d-b7e2-0d0ec915d34b",
+            "enabled": false,
+            "provisioningStatus": "PENDING_UPDATE"
+          },
+          {
+            "id": "04863aa2-eecb-4c62-8259-284bf2316f76",
+            "enabled": false,
+            "provisioningStatus": "PENDING_UPDATE"
+          },
+          {
+            "id": "6ab0e0e7-2704-4b91-abb9-9c2903cd4b4a",
+            "enabled": false,
+            "provisioningStatus": "PENDING_UPDATE"
+          },
+          {
+            "id": "7a32ed7f-3cbf-4b3a-b5f8-ebcef3b03ea1",
+            "enabled": false,
+            "provisioningStatus": "PENDING_UPDATE"
+          },
+          {
+            "id": "391c178c-8f0a-4dcb-8958-cbb3c20bd656",
+            "enabled": false,
+            "provisioningStatus": "PENDING_UPDATE"
+          },
+          {
+            "id": "3b6fa17c-64f5-4a49-bbdf-0b3a39037bc0",
+            "enabled": false,
+            "provisioningStatus": "PENDING_UPDATE"
+          },
+          {
+            "id": "ec8409ef-87bc-4a56-80b8-854d16f5a792",
+            "enabled": false,
+            "provisioningStatus": "PENDING_UPDATE"
+          },
+          {
+            "id": "dc37b42c-16f7-4200-9db7-6138724e6de3",
+            "enabled": false,
+            "provisioningStatus": "PENDING_UPDATE"
+          },
+          {
+            "id": "236a9861-79fa-406c-9502-908a1eb74d03",
+            "enabled": false,
+            "provisioningStatus": "PENDING_UPDATE"
+          },
+          {
+            "id": "681c578c-24da-4995-af30-79dc3715956e",
+            "enabled": false,
+            "provisioningStatus": "PENDING_UPDATE"
+          }
+        ],
+        "after": [
+          {
+            "id": "12be7f2d-94e7-455d-bd72-e1f1943f3f3a",
+            "enabled": true,
+            "provisioningStatus": "ACTIVE"
+          },
+          {
+            "id": "c1f90662-62ca-430c-ba7a-a3001ba6d3d2",
+            "enabled": true,
+            "provisioningStatus": "ACTIVE"
+          },
+          {
+            "id": "8c22e162-baa6-4917-ad28-ad44ac820c8a",
+            "enabled": true,
+            "provisioningStatus": "ACTIVE"
+          },
+          {
+            "id": "3ee026d8-1bf9-43e4-b73c-7ab7305f679f",
+            "enabled": true,
+            "provisioningStatus": "ACTIVE"
+          },
+          {
+            "id": "36417d7d-df1b-477d-b7e2-0d0ec915d34b",
+            "enabled": true,
+            "provisioningStatus": "ACTIVE"
+          },
+          {
+            "id": "04863aa2-eecb-4c62-8259-284bf2316f76",
+            "enabled": true,
+            "provisioningStatus": "ACTIVE"
+          },
+          {
+            "id": "6ab0e0e7-2704-4b91-abb9-9c2903cd4b4a",
+            "enabled": true,
+            "provisioningStatus": "ACTIVE"
+          },
+          {
+            "id": "7a32ed7f-3cbf-4b3a-b5f8-ebcef3b03ea1",
+            "enabled": true,
+            "provisioningStatus": "ACTIVE"
+          },
+          {
+            "id": "391c178c-8f0a-4dcb-8958-cbb3c20bd656",
+            "enabled": true,
+            "provisioningStatus": "ACTIVE"
+          },
+          {
+            "id": "3b6fa17c-64f5-4a49-bbdf-0b3a39037bc0",
+            "enabled": true,
+            "provisioningStatus": "ACTIVE"
+          },
+          {
+            "id": "ec8409ef-87bc-4a56-80b8-854d16f5a792",
+            "enabled": true,
+            "provisioningStatus": "ACTIVE"
+          },
+          {
+            "id": "dc37b42c-16f7-4200-9db7-6138724e6de3",
+            "enabled": true,
+            "provisioningStatus": "ACTIVE"
+          },
+          {
+            "id": "236a9861-79fa-406c-9502-908a1eb74d03",
+            "enabled": true,
+            "provisioningStatus": "ACTIVE"
+          },
+          {
+            "id": "681c578c-24da-4995-af30-79dc3715956e",
+            "enabled": true,
+            "provisioningStatus": "ACTIVE"
+          }
+        ],
+        "descriptorBefore": {
+          "id": "177b7fd4-0635-4d7a-94f1-886c81421552",
+          "phase": "pending"
+        },
+        "descriptorAfter": {
+          "id": "177b7fd4-0635-4d7a-94f1-886c81421552",
+          "phase": "applied",
+          "applied_revision": "1dce810cff4b5e878d913ba4e15016ac26d9f7f51b5166abf048a91ecfe3530c"
+        },
+        "uploads": [
+          {
+            "at": "2026-11-24T21:02:07.024+00:00",
+            "amphoraId": "95e63af5-b8b0-46a3-a1a2-62ef60bf3a68",
+            "configSHA256": "4a4e5e594479adca047934461703a8f7ec0269adab06285d2e71c0ac6228c3ce"
+          }
+        ],
+        "reloads": [
+          {
+            "at": "2026-11-24T21:02:07.024+00:00",
+            "amphoraId": "95e63af5-b8b0-46a3-a1a2-62ef60bf3a68"
+          }
+        ],
+        "workerStartedAt": "2026-11-24T21:02:06.956+00:00",
+        "workerFinishedAt": "2026-11-24T21:02:07.188+00:00",
+        "processActivations": [
+          {
+            "at": "2026-11-24T21:02:07.083+00:00",
+            "protocol": "HTTP",
+            "configSHA256": "4a4e5e594479adca047934461703a8f7ec0269adab06285d2e71c0ac6228c3ce"
+          }
+        ]
+      },
+      "postConvergence": {
+        "seconds": 43.29,
+        "traffic": [
+          {
+            "host": "gateway-listener-1.com",
+            "path": "/route",
+            "requestedAt": "2026-11-24T21:03:57.186+00:00",
+            "respondedAt": "2026-11-24T21:03:57.192+00:00",
+            "durationMs": 6.1,
+            "status": 200,
+            "pod": "infra-backend-v1-667754889f-gblw8",
+            "namespace": "gateway-conformance-infra",
+            "expectedBackend": "infra-backend-v1",
+            "passed": true,
+            "podReady": true,
+            "podImageID": "docker.io/library/import-2026-11-24@sha256:abd48b88affd1c16e8d60d06cdc661919a8980bba8fc9068f3d216d814268adb"
+          },
+          {
+            "host": "listener-set-http-routing-2-listener-2.com",
+            "path": "/listener-set-http-routing-2-route",
+            "requestedAt": "2026-11-24T21:03:57.192+00:00",
+            "respondedAt": "2026-11-24T21:03:57.205+00:00",
+            "durationMs": 13.2,
+            "status": 200,
+            "pod": "infra-backend-v2-5dc55c68cc-glkv2",
+            "namespace": "gateway-conformance-infra",
+            "expectedBackend": "infra-backend-v2",
+            "passed": true,
+            "podReady": true,
+            "podImageID": "docker.io/library/import-2026-11-24@sha256:abd48b88affd1c16e8d60d06cdc661919a8980bba8fc9068f3d216d814268adb"
+          }
+        ]
+      },
+      "patchedCandidate": {
+        "candidateAssertions": {
+          "PASS": 36
+        },
+        "caseDurationSeconds": 28.352,
+        "firstRequestToBatchActiveSeconds": 17.505
+      },
+      "upstreamReportSHA256": "6c77434ea0d85dbe951f3bd2aa651000fe989b070d1731d83e3223803e2906ad",
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "echo": {
+        "ociIndexDigest": "sha256:abd48b88affd1c16e8d60d06cdc661919a8980bba8fc9068f3d216d814268adb",
+        "platformManifestDigest": "sha256:fed223b186fbd83d50a4578d168c9e7d89341d8c1af616ebe0f62d53ab7451dc"
+      }
+    }
+  },
+  "firstExperimentalAttempt": {
+    "candidateAssertions": {
+      "FAIL": 2,
+      "PASS": 34
+    },
+    "caseDurationSeconds": 49.791,
+    "firstRequestToBatchActiveSeconds": 33.853,
+    "earliestTrafficAssertionDeadline": "2026-11-24T20:57:12.310477+00:00",
+    "httpReloadCount": 2,
+    "provedSingleActivationOf14": true,
+    "failedAssertions": [
+      {
+        "index": 0,
+        "request": "'gateway-listener-1.com/route'_should_go_to_infra-backend-v1",
+        "reference": "FAIL",
+        "candidate": "FAIL"
+      },
+      {
+        "index": 35,
+        "request": "'listener-set-http-routing-2-listener-2.com/listener-set-http-routing-2-route'_should_go_to_infra-backend-v2",
+        "reference": "PASS",
+        "candidate": "FAIL"
+      }
+    ],
+    "batchActiveAt": "2026-11-24T20:57:16.163+00:00",
+    "upstreamReportSHA256": "e0a323ece2b387ff1bcd4af19f8dbbe9a47a8bcf741cd3ebcc8dd29a6a5a02ab"
+  }
+}

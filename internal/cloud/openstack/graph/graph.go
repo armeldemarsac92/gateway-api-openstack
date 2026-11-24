@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/netip"
 	"slices"
 	"sort"
@@ -29,6 +30,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/apierrors"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia/amphora"
+	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/extensions/layer3/floatingips"
 )
@@ -59,6 +61,7 @@ type observedGatewayGraph struct {
 	deletion                 gatewayDeletionPlan
 	withdrawTLS              *graphMutation
 	adminObserved            map[string]bool
+	defaultPoolsObserved     bool
 	state                    cloud.GatewayState
 	addressAbsent            bool
 	deletionFrontendActive   bool
@@ -352,9 +355,40 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		}
 		return result, err
 	}
-	if spec.ValidateMutation != nil {
-		if err := spec.ValidateMutation(ctx); err != nil {
+	batch, err := p.preparePolicyActivationBatch(ctx, desired, actual, step, plan)
+	if errors.Is(err, errPolicyActivationSnapshotBusy) {
+		return result, nil
+	}
+	if err != nil {
+		return result, err
+	}
+	validateMutation := spec.ValidateMutation
+	if validateMutation != nil {
+		if err := validateMutation(ctx); err != nil {
 			return cloud.GatewayGraphResult{}, err
+		}
+	}
+	if batch != nil {
+		err := p.octavia.ActivatePolicies(ctx, batch.listenerID, batch.request)
+		switch {
+		case err == nil:
+			outcome := p.progressingOutcome("Waiting for Octavia L7 policy activation readback")
+			outcome.MutationSubmitted = true
+			result.Outcome = outcome
+			for _, index := range batch.routeIndices {
+				result.Routes[index].Result.Outcome = outcome
+			}
+			return result, nil
+		case gophercloud.ResponseCodeIs(err, http.StatusConflict):
+			return result, nil
+		case !gophercloud.ResponseCodeIs(err, http.StatusNotImplemented):
+			return result, err
+		}
+		// An explicit unsupported response did not submit a mutation.
+		if validateMutation != nil {
+			if err := validateMutation(ctx); err != nil {
+				return cloud.GatewayGraphResult{}, err
+			}
 		}
 	}
 	err = p.executeGraphMutation(ctx, desired, actual, step)
@@ -1345,6 +1379,7 @@ func (p *Provider) observeGatewayListenerInventory(ctx context.Context, desired 
 	}
 	actual.defaultHTTPResponseCodes = inventory.DefaultHTTPResponseCodes
 	actual.adminObserved = inventory.AdminStatesObserved
+	actual.defaultPoolsObserved = inventory.DefaultPoolsObserved
 	actual.frontendsObservedClosed = !slices.ContainsFunc(inventory.Items, func(listener listeners.Listener) bool {
 		return !actual.adminObserved[listener.ID] || listener.AdminStateUp
 	})
