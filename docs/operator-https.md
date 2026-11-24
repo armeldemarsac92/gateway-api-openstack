@@ -85,6 +85,8 @@ To authenticate both clients and upstreams, add the backend TLS policy component
 
 The controller watches ConfigMap metadata and reads CA contents directly after checking the Gateway reference. It publishes the CA as an immutable Barbican revision scoped to the Gateway. Octavia must have access to those CA revisions.
 
+Gateway API applies `spec.tls.frontend` to listeners with `protocol: HTTPS`. A `TLSRoute` attached to a `protocol: TLS` listener in `Terminate` mode uses the server certificate in the listener's `tls.certificateRefs`. [Gateway API v1.7.0 listener targeting](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/geps/gep-91/index.md#L49-L61)
+
 Put one PEM-encoded CA certificate in the ConfigMap's `ca.crt` key. Set the following fields under `Gateway.spec` to require the client certificate on every HTTPS port. Port 8443 uses its own CA.
 
 ```yaml
