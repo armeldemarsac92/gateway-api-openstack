@@ -111,7 +111,7 @@ func (r *Reconciler) attachment(ctx context.Context, route *transportRoute, gate
 			continue
 		}
 		if supported == nil {
-			supported, err = gatewaycontroller.SupportedListeners(gateway)
+			supported, err = gatewaycontroller.SupportedListenersForConfig(r.Config, gateway)
 			if err != nil {
 				return nil, model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: fmt.Sprintf("the Gateway must support the selected %s listener", r.protocol())}, nil
 			}

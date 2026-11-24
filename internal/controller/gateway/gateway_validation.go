@@ -80,10 +80,18 @@ func SupportedListeners(gateway *gatewayv1.Gateway) ([]*gatewayv1.Listener, erro
 
 // SupportedListenersForConfig also returns disabled HTTPS sections for withdrawal.
 func SupportedListenersForConfig(config controller.Config, gateway *gatewayv1.Gateway) ([]*gatewayv1.Listener, error) {
-	if gateway.Spec.Infrastructure != nil {
-		return nil, &gatewayValidationError{
-			message:       "spec.infrastructure is not supported",
-			gatewayReason: gatewayv1.GatewayReasonInvalidParameters,
+	if infrastructure := gateway.Spec.Infrastructure; infrastructure != nil {
+		if !config.GatewayInfrastructureMetadata {
+			return nil, &gatewayValidationError{
+				message:       "spec.infrastructure requires Gateway infrastructure metadata opt-in",
+				gatewayReason: gatewayv1.GatewayReasonInvalidParameters,
+			}
+		}
+		if infrastructure.ParametersRef != nil {
+			return nil, &gatewayValidationError{
+				message:       "spec.infrastructure.parametersRef is not supported",
+				gatewayReason: gatewayv1.GatewayReasonInvalidParameters,
+			}
 		}
 	}
 	if model.UnsupportedGatewayWideTLS(gateway.Spec.TLS) {
