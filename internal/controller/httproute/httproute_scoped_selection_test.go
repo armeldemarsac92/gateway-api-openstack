@@ -26,6 +26,7 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	gatewaycontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
 )
 
 func TestHTTPRouteScopedStatusSelection(t *testing.T) {
@@ -133,7 +134,7 @@ func TestHTTPRouteScopedSingletonRevalidatesNamespaceBeforeStatus(t *testing.T) 
 		if err != nil {
 			t.Fatal(err)
 		}
-		selection, _, err := r.selectRouteParents(ctx, f.route, parents, nil)
+		selection, _, err := r.selectRouteParents(ctx, f.route, parents, gatewaycontroller.ListenerSetProjection{})
 		if err != nil || len(selection.listeners()) != 1 {
 			t.Fatalf("initial selection for %s = %v, %v", gateway.Name, selection, err)
 		}

@@ -765,6 +765,31 @@ func (r *Reconciler) applyHTTPSListenerStatus(
 	preserveTransitionTimes(gateway.Status.Conditions, previous.Conditions)
 }
 
+// A rejected CA is a Kubernetes authorization result. Separately report
+// whether Octavia has confirmed the affected listener is closed.
+func (r *Reconciler) reportFrontendCAWithdrawal(gateway *gatewayv1.Gateway, issues map[gatewayv1.SectionName]httpsListenerStatusIssue, closedPorts []int) {
+	for i := range gateway.Status.Listeners {
+		status := &gateway.Status.Listeners[i]
+		issue, invalid := issues[status.Name]
+		if !invalid || issue.primary.reason != gatewayv1.ListenerReasonNoValidCACertificate && issue.primary.reason != gatewayv1.ListenerReasonUnsupportedValue {
+			continue
+		}
+		index := slices.IndexFunc(gateway.Spec.Listeners, func(listener gatewayv1.Listener) bool { return listener.Name == status.Name })
+		if index < 0 {
+			continue
+		}
+		listener := gateway.Spec.Listeners[index]
+		if listener.Protocol != gatewayv1.HTTPSProtocolType || model.FrontendClientValidation(gateway.Spec.TLS, listener.Port) == nil {
+			continue
+		}
+		programmed := meta.FindStatusCondition(status.Conditions, string(gatewayv1.ListenerConditionProgrammed))
+		if programmed != nil && !slices.Contains(closedPorts, int(listener.Port)) {
+			programmed.Reason = string(gatewayv1.ListenerReasonPending)
+			programmed.Message = "Waiting for Octavia to confirm the HTTPS listener is closed"
+		}
+	}
+}
+
 // The HTTPS overlay refines provider status. Keep transition times from the
 // persisted state when an intermediate condition was replaced in this pass.
 func preserveTransitionTimes(current, previous []metav1.Condition) {

@@ -74,6 +74,8 @@ type Reconciler struct {
 	Coordinator *graph.Coordinator
 	// APIReader performs safety-sensitive live reads.
 	APIReader client.Reader
+	// ListenerSetObserver reads live delegated attachment and certificate decisions.
+	ListenerSetObserver func(context.Context, client.Reader, *gatewayv1.Gateway) (gatewaycontroller.ListenerSetProjection, error)
 	// BackendTLSAvailable checks authenticated regional provider support.
 	BackendTLSAvailable func(context.Context) (bool, error)
 	// GRPCBackendTLSAvailable also checks enforcement of negotiated h2.
@@ -208,11 +210,11 @@ func (r *Reconciler) validateCachedRouteDecision(
 			return decision, nil
 		}
 	}
-	sets, err := gatewaycontroller.ObserveListenerSets(ctx, r.APIReader, r.Config, parent.gateway)
+	sets, err := r.observeListenerSets(ctx, r.APIReader, parent.gateway)
 	if err != nil {
 		return cachedRouteDecision{}, err
 	}
-	selection, _, err := r.selectRouteParents(ctx, route, parents, sets.Sections())
+	selection, _, err := r.selectRouteParents(ctx, route, parents, sets)
 	if err != nil {
 		return cachedRouteDecision{}, err
 	}

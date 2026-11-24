@@ -117,6 +117,42 @@ func TestBackendClientCertificateUsesItsOwnEnrollmentAndGrant(t *testing.T) {
 	check("", gatewayv1.GatewayReasonRefNotPermitted)
 }
 
+func TestListenerSetCertificateUsesOwnerBeforeReadingSecret(t *testing.T) {
+	resolver, gateway, listener, reader := resolverFixture(t)
+	gateway.Namespace = "application"
+	set := &gatewayv1.ListenerSet{ObjectMeta: metav1.ObjectMeta{Namespace: "certs"}}
+	writeMap(t, resolver.Path, rowJSON("uid-a", "rv/alpha", firstID))
+	check := func(reference string, reason gatewayv1.ListenerConditionReason, reads ...string) {
+		t.Helper()
+		reader.reads = nil
+		got, gotReason := resolver.ResolveListenerSet(t.Context(), gateway, set, listener)
+		if got != reference || gotReason != reason || !reflect.DeepEqual(reader.reads, reads) {
+			t.Fatalf("delegated resolution = %q, %q, %v; want %q, %q, %v", got, gotReason, reader.reads, reference, reason, reads)
+		}
+	}
+	want := "https://barbican.example:443/v1/secrets/" + firstID
+	check(want, "", "metadata certs/web")
+
+	set.Namespace = "delegates"
+	listener.TLS.CertificateRefs[0].Namespace = ptr.To(gatewayv1.Namespace("certs"))
+	grant := gatewayv1.ReferenceGrant{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "certs"},
+		Spec: gatewayv1.ReferenceGrantSpec{
+			From: []gatewayv1.ReferenceGrantFrom{{Group: gatewayv1.GroupName, Kind: "Gateway", Namespace: "delegates"}},
+			To:   []gatewayv1.ReferenceGrantTo{{Kind: "Secret", Name: ptr.To(gatewayv1.ObjectName("web"))}},
+		},
+	}
+	reader.grants = []gatewayv1.ReferenceGrant{grant}
+	check("", gatewayv1.ListenerReasonRefNotPermitted, "grants certs")
+	reader.grants[0].Spec.From[0].Kind = "ListenerSet"
+	reader.grants[0].Spec.From[0].Namespace = gatewayv1.Namespace(gateway.Namespace)
+	check("", gatewayv1.ListenerReasonRefNotPermitted, "grants certs")
+	reader.grants[0].Spec.From[0].Namespace = gatewayv1.Namespace(set.Namespace)
+	check(want, "", "grants certs", "metadata certs/web")
+	reader.grants = nil
+	check("", gatewayv1.ListenerReasonRefNotPermitted, "grants certs")
+}
+
 func TestCrossNamespaceGrantRevocationPrecedesMetadataRead(t *testing.T) {
 	resolver, gateway, listener, reader := resolverFixture(t)
 	gateway.Namespace = "application"
@@ -199,11 +235,11 @@ func TestBadMapAndUnsupportedTLSFailClosedBeforeMetadataRead(t *testing.T) {
 	listener.TLS.Options = map[gatewayv1.AnnotationKey]gatewayv1.AnnotationValue{"example.org/min-version": "1.3"}
 	expectResolution(t, resolver, gateway, listener, "", gatewayv1.ListenerReasonInvalidCertificateRef)
 	listener.TLS.Options = nil
-	gateway.Spec.TLS = &gatewayv1.GatewayTLSConfig{Frontend: &gatewayv1.FrontendTLSConfig{}}
-	expectResolution(t, resolver, gateway, listener, "", gatewayv1.ListenerReasonInvalidCertificateRef)
 	if len(reader.reads) != 0 {
 		t.Fatalf("unexpected reads: %v", reader.reads)
 	}
+	gateway.Spec.TLS = &gatewayv1.GatewayTLSConfig{Frontend: &gatewayv1.FrontendTLSConfig{}}
+	expectResolution(t, resolver, gateway, listener, firstID, "")
 }
 
 func TestCatalogEndpointForms(t *testing.T) {

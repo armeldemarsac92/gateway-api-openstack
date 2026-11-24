@@ -254,7 +254,7 @@ func (r *Reconciler) checkDiscoverySliceAssociation(ctx context.Context, gateway
 }
 
 func discoveryPorts(config controller.Config, gateway *gatewayv1.Gateway, primary *gatewayv1.Listener, observation cloud.GatewayResult) []corev1.ServicePort {
-	numbers := slices.Clone(observation.ScopedListenerReadyPorts)
+	numbers := slices.Concat(observation.ScopedListenerReadyPorts, observation.ScopedListenerServingPorts)
 	for _, listener := range gateway.Spec.Listeners {
 		port := int(listener.Port)
 		if slices.Contains(observation.ScopedListenerDeferredPorts, port) &&

@@ -179,7 +179,7 @@ func (*recordingProvider) ResolveTopology(_ context.Context, request cloud.Topol
 func newEnvtestGatewayReconciler(kubeClient client.Client, reader client.Reader, provider *recordingProvider, config controller.Config) *gatewaycontroller.Reconciler {
 	coordinator := &graph.Coordinator{}
 	gateway := &gatewaycontroller.Reconciler{Client: kubeClient, APIReader: reader, TopologyResolver: provider, Coordinator: coordinator, Config: config}
-	route := &httproutecontroller.Reconciler{Client: kubeClient, APIReader: reader, Coordinator: coordinator, Config: config}
+	route := &httproutecontroller.Reconciler{Client: kubeClient, APIReader: reader, Coordinator: coordinator, Config: config, ListenerSetObserver: gateway.ObserveListenerSets}
 	writer := &graph.Writer{Coordinator: coordinator, Gateway: gateway, Routes: route, Provider: provider}
 	gateway.Writer = writer
 	route.Writer = writer
@@ -204,7 +204,9 @@ func (p *recordingProvider) ReconcileGatewayGraph(ctx context.Context, spec clou
 			return result, err
 		}
 		for _, listener := range spec.Gateway.Spec.ScopedListeners {
-			result.Gateway.ScopedListenerReadyPorts = append(result.Gateway.ScopedListenerReadyPorts, listener.Port)
+			if listener.TLS == nil || listener.TLS.CertificateRef != "" {
+				result.Gateway.ScopedListenerReadyPorts = append(result.Gateway.ScopedListenerReadyPorts, listener.Port)
+			}
 		}
 	}
 	for _, route := range spec.Routes {

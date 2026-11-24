@@ -21,10 +21,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"slices"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
+	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/loadbalancers"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/extensions/layer3/floatingips"
@@ -493,6 +495,11 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 		plan = append(plan, restore...)
 	}
 	plan = append(plan, zeroWeightPoolEnsures...)
+	if len(plan) == 0 && scopedHTTP && desired.spec.Gateway.Disposition == cloud.GraphEnsure {
+		if step := actual.nextFrontendCAMutation(desired); step != nil {
+			plan = append(plan, *step)
+		}
+	}
 	if len(plan) != 0 {
 		result.Outcome = p.progressingOutcome(plan[0].message)
 	} else if result.Gateway.Outcome.State == cloud.OutcomeProgressing && desired.spec.Gateway.Disposition == cloud.GraphEnsure {
@@ -1018,6 +1025,10 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 			Name: name, Description: desired.identity.Description(roleListener), AdminStateUp: boolPointer(enabled),
 			DefaultTlsContainerRef: certificateRef, Tags: tags,
 		}
+		if step.scopedListener.TLS != nil && step.scopedListener.TLS.ClientValidation != nil {
+			opts.ClientAuthentication = listeners.ClientAuthenticationMandatory
+			opts.ClientCATLSContainerRef = actual.frontendCA[port].ref
+		}
 		if desired.protocol == cloud.ListenerProtocolTLSTerminate {
 			_, err = p.octavia.CreateTCPTLSListener(ctx, opts)
 			step.redactTLSError = true
@@ -1036,7 +1047,23 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 		if step.scopedListener.TLS != nil {
 			ref = step.scopedListener.TLS.CertificateRef
 		}
-		_, err = p.octavia.UpdateListener(ctx, listenerID, listeners.UpdateOpts{DefaultTlsContainerRef: &ref})
+		opts := listeners.UpdateOpts{DefaultTlsContainerRef: &ref}
+		if step.updateClientAuth {
+			err = p.octavia.SetListenerClientAuthentication(ctx, listenerID, opts, actual.frontendCA[step.scopedListener.Port].ref)
+		} else {
+			_, err = p.octavia.UpdateListener(ctx, listenerID, opts)
+		}
+	case graphPublishFrontendCA:
+		node := desired.spec.Gateway
+		if !node.BackendCAOwned {
+			if node.ClaimBackendCA == nil {
+				return errors.New("gateway CA ownership checkpoint is unavailable")
+			}
+			return node.ClaimBackendCA(ctx)
+		}
+		ca := step.scopedListener.TLS.ClientValidation
+		_, err = p.backendCA.Ensure(ctx, desired.spec.Identity.GatewayUID, ca.ConfigMapUID, ca.PEM)
+		return err
 	case graphUpdateListenerVirtualHosts:
 		err = p.octavia.SetListenerHTTPSVirtualHosts(ctx, listenerID, httpsVirtualHosts(step.scopedListener))
 	case graphClearListenerDefaultPool, graphSetListenerDefaultPool:
@@ -1061,7 +1088,20 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 	case graphEnableListener, graphDisableListener:
 		enabled := step.kind == graphEnableListener
 		step.redactTLSError = step.redactTLSError || desired.protocol == cloud.ListenerProtocolTLSTerminate
+		if step.withdrawClientCA && slices.ContainsFunc(actual.scopedListeners, func(listener listeners.Listener) bool {
+			return listener.ID == listenerID && listener.ProvisioningStatus == "ERROR" &&
+				actual.adminObserved[listener.ID] && !listener.AdminStateUp
+		}) {
+			// An accepted shutdown with an ERROR readback did not prove that
+			// Amphora removed the port. Do not retry the same failed update.
+			return p.deleteUnclosableFrontend(ctx, desired, actual, listenerID)
+		}
 		_, err = p.octavia.UpdateListener(ctx, listenerID, listeners.UpdateOpts{AdminStateUp: boolPointer(enabled)})
+		if step.withdrawClientCA && gophercloud.ResponseCodeIs(err, http.StatusBadRequest) {
+			// Octavia validates the attached CA even for an admin-down PUT.
+			// A listener DELETE can proceed without the old CA.
+			return p.deleteUnclosableFrontend(ctx, desired, actual, listenerID)
+		}
 	case graphEnableLoadBalancer, graphDisableLoadBalancer:
 		return p.setLoadBalancerAdminState(ctx, actual.state.LoadBalancerID, step.kind == graphEnableLoadBalancer)
 	case graphDeleteChild:

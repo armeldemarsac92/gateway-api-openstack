@@ -154,7 +154,7 @@ func (r *Reconciler) buildRouteValidationSnapshotFromInputs(
 		}
 	}
 	key := routeKey(snapshot.route)
-	selection, _, err := r.selectRouteParents(ctx, snapshot.route, snapshot.parents, inputs.input.ListenerSetSections)
+	selection, _, err := r.selectRouteParents(ctx, snapshot.route, snapshot.parents, inputs.admission.listenerSets)
 	if err != nil {
 		return routeValidationSnapshot{}, err
 	}
@@ -190,7 +190,7 @@ func (r *Reconciler) buildRouteValidationSnapshotFromInputs(
 			return routeValidationSnapshot{}, err
 		}
 	}
-	desired, diagnostics, err := r.buildRouteModelFromInputs(ctx, r.APIReader, snapshot.route, snapshot.gateway, listeners, inputs)
+	desired, diagnostics, err := r.buildRouteModelFromInputs(ctx, r.APIReader, snapshot.route, snapshot.gateway, selection, inputs)
 	if err != nil {
 		return snapshot, routeSnapshotReadError(purpose, err)
 	}

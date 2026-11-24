@@ -80,7 +80,7 @@ func validate(result *PolicyResult, spec gatewayv1.BackendTLSPolicySpec, configM
 		return
 	}
 	key := types.NamespacedName{Namespace: result.Key.Namespace, Name: string(ref.Name)}
-	ca, err := loadCA(key, configMaps[key])
+	ca, err := LoadConfigMapCA(key, configMaps[key])
 	if err != nil {
 		message := fmt.Sprintf("CA ConfigMap %s: %v", key, err)
 		result.reject(gatewayv1.BackendTLSPolicyReasonNoValidCACertificate, message)
@@ -116,7 +116,8 @@ func isPreciseHostname(hostname string) bool {
 	return true
 }
 
-func loadCA(key types.NamespacedName, configMap *corev1.ConfigMap) (CA, error) {
+// LoadConfigMapCA validates and normalizes the single core ConfigMap CA.
+func LoadConfigMapCA(key types.NamespacedName, configMap *corev1.ConfigMap) (CA, error) {
 	if configMap == nil || configMap.Namespace != key.Namespace || configMap.Name != key.Name ||
 		!configMap.DeletionTimestamp.IsZero() {
 		return CA{}, errors.New("is absent or unreadable")
