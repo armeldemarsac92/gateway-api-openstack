@@ -20,6 +20,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 
 	corev1 "k8s.io/api/core/v1"
@@ -40,10 +41,12 @@ import (
 )
 
 type listenerSetEntry struct {
-	listener          gatewayv1.Listener
-	rejection         gatewayv1.ListenerConditionReason
-	conflicted        bool
-	invalidRouteKinds bool
+	listener            gatewayv1.Listener
+	rejection           gatewayv1.ListenerConditionReason
+	conflicted          bool
+	invalidRouteKinds   bool
+	certificateResolved bool
+	referenceIssue      *httpsListenerIssue
 }
 
 type admittedListenerSet struct {
@@ -54,7 +57,10 @@ type admittedListenerSet struct {
 }
 
 type ListenerSetProjection struct {
-	sets []admittedListenerSet
+	sets           []admittedListenerSet
+	https          map[int]cloud.ListenerTLS
+	gatewayTLS     map[int]tlsResolution
+	isolationPorts []string
 }
 
 // ObserveListenerSets resolves admission and precedence from the same live
@@ -81,10 +87,11 @@ func ObserveListenerSets(ctx context.Context, reader client.Reader, config contr
 		return cmp.Or(a.CreationTimestamp.Compare(b.CreationTimestamp.Time), cmp.Compare(client.ObjectKeyFromObject(&a).String(), client.ObjectKeyFromObject(&b).String()))
 	})
 	listeners, validationErr := SupportedListenersForConfig(config, gateway)
-	plainHTTP := validationErr == nil && len(listeners) == len(gateway.Spec.Listeners) &&
-		len(listeners) != 0 && !slices.ContainsFunc(listeners, func(listener *gatewayv1.Listener) bool {
-		return listener.Protocol != gatewayv1.HTTPProtocolType
+	httpFamily := validationErr == nil && len(listeners) != 0 && !slices.ContainsFunc(listeners, func(listener *gatewayv1.Listener) bool {
+		return listenerFamily(listener) != gatewayv1.HTTPProtocolType
 	})
+	plainHTTP := httpFamily && !hasHTTPS(gateway) && len(listeners) == len(gateway.Spec.Listeners)
+	isolatedHTTPS := httpFamily && config.OperatorHTTPS && config.HTTPSListenerIsolation
 	winners := make(map[gatewayv1.PortNumber][]*gatewayv1.Listener)
 	for _, listener := range listeners {
 		winners[listener.Port] = append(winners[listener.Port], listener)
@@ -111,7 +118,7 @@ func ObserveListenerSets(ctx context.Context, reader client.Reader, config contr
 		}
 		if admitted.allowed {
 			for _, spec := range set.Spec.Listeners {
-				entry := projectListenerSetEntry(spec, plainHTTP, winners[spec.Port])
+				entry := projectListenerSetEntry(spec, plainHTTP, isolatedHTTPS, winners[spec.Port])
 				admitted.entries = append(admitted.entries, entry)
 				if entry.rejection == "" {
 					winners[spec.Port] = append(winners[spec.Port], &entry.listener)
@@ -125,28 +132,50 @@ func ObserveListenerSets(ctx context.Context, reader client.Reader, config contr
 
 // Sections returns the admitted HTTP listeners keyed by their owning ListenerSet.
 func (p ListenerSetProjection) Sections() map[types.NamespacedName][]gatewayv1.Listener {
-	sections := make(map[types.NamespacedName][]gatewayv1.Listener)
+	sections := make(map[types.NamespacedName][]gatewayv1.Listener, len(p.sets))
 	for _, set := range p.sets {
-		key := client.ObjectKeyFromObject(set.object)
-		// Keep the owner in the projection even if it has no winning section.
-		sections[key] = nil
-		for _, entry := range set.entries {
-			if entry.rejection == "" {
-				sections[key] = append(sections[key], entry.listener)
-			}
+		sections[client.ObjectKeyFromObject(set.object)] = set.sections()
+	}
+	return sections
+}
+
+// SectionsFor returns the admitted HTTP listeners for one ListenerSet.
+func (p ListenerSetProjection) SectionsFor(key types.NamespacedName) []gatewayv1.Listener {
+	for _, set := range p.sets {
+		if client.ObjectKeyFromObject(set.object) == key {
+			return set.sections()
+		}
+	}
+	return nil
+}
+
+func (set admittedListenerSet) sections() []gatewayv1.Listener {
+	var sections []gatewayv1.Listener
+	for _, entry := range set.entries {
+		if entry.rejection == "" && (entry.listener.Protocol != gatewayv1.HTTPSProtocolType || entry.certificateResolved) {
+			sections = append(sections, entry.listener)
 		}
 	}
 	return sections
 }
 
+// RejectsGatewayHTTPSSection reports serving restrictions on Gateway sections
+// sharing an HTTPS port with a ListenerSet.
+func (p ListenerSetProjection) RejectsGatewayHTTPSSection(listener *gatewayv1.Listener) bool {
+	return listener.Protocol == gatewayv1.HTTPSProtocolType && p.gatewayTLS[int(listener.Port)].issue != nil
+}
+
 func (p ListenerSetProjection) sameInputs(other ListenerSetProjection) bool {
-	return slices.EqualFunc(p.sets, other.sets, func(a, b admittedListenerSet) bool {
+	return equality.Semantic.DeepEqual(p.https, other.https) && maps.EqualFunc(p.gatewayTLS, other.gatewayTLS, func(a, b tlsResolution) bool {
+		return ptr.Equal(a.issue, b.issue) && ptr.Equal(a.resolvedRefs, b.resolvedRefs)
+	}) && slices.Equal(p.isolationPorts, other.isolationPorts) && slices.EqualFunc(p.sets, other.sets, func(a, b admittedListenerSet) bool {
 		return a.object.UID == b.object.UID && client.ObjectKeyFromObject(a.object) == client.ObjectKeyFromObject(b.object) &&
 			a.object.Generation == b.object.Generation && equality.Semantic.DeepEqual(a.object.Spec, b.object.Spec) &&
 			a.namespaceVersion == b.namespaceVersion && a.allowed == b.allowed &&
 			slices.EqualFunc(a.entries, b.entries, func(left, right listenerSetEntry) bool {
 				return left.rejection == right.rejection && left.conflicted == right.conflicted &&
-					left.invalidRouteKinds == right.invalidRouteKinds && equality.Semantic.DeepEqual(left.listener, right.listener)
+					left.invalidRouteKinds == right.invalidRouteKinds && left.certificateResolved == right.certificateResolved &&
+					ptr.Equal(left.referenceIssue, right.referenceIssue) && equality.Semantic.DeepEqual(left.listener, right.listener)
 			})
 	})
 }
@@ -161,12 +190,12 @@ func (p ListenerSetProjection) count() int32 {
 	return count
 }
 
-func projectListenerSetEntry(spec gatewayv1.ListenerEntry, plainHTTP bool, siblings []*gatewayv1.Listener) listenerSetEntry {
+func projectListenerSetEntry(spec gatewayv1.ListenerEntry, plainHTTP, isolatedHTTPS bool, siblings []*gatewayv1.Listener) listenerSetEntry {
 	listener := gatewayv1.Listener(spec)
 	entry := listenerSetEntry{listener: listener}
 	if listener.AllowedRoutes != nil && len(listener.AllowedRoutes.Kinds) != 0 {
 		for _, ref := range listener.AllowedRoutes.Kinds {
-			entry.invalidRouteKinds = entry.invalidRouteKinds || listener.Protocol != gatewayv1.HTTPProtocolType || !isRouteGroupKind(ref, model.HTTPRouteKind)
+			entry.invalidRouteKinds = entry.invalidRouteKinds || listenerFamily(&listener) != gatewayv1.HTTPProtocolType || !isRouteGroupKind(ref, model.HTTPRouteKind)
 		}
 	}
 	for _, sibling := range siblings {
@@ -179,12 +208,14 @@ func projectListenerSetEntry(spec gatewayv1.ListenerEntry, plainHTTP bool, sibli
 			return entry
 		}
 	}
+	supportsHTTP := plainHTTP && listener.Protocol == gatewayv1.HTTPProtocolType
+	supportsHTTPS := isolatedHTTPS && listener.Protocol == gatewayv1.HTTPSProtocolType
 	switch {
-	case !plainHTTP || listener.Protocol != gatewayv1.HTTPProtocolType:
+	case !supportsHTTP && !supportsHTTPS:
 		entry.rejection = gatewayv1.ListenerReasonUnsupportedProtocol
 	case listener.Port < 1 || listener.Port > 65535:
 		entry.rejection = gatewayv1.ListenerReasonPortUnavailable
-	case listener.TLS != nil || listener.Filters != nil && len(listener.Filters.Requests) != 0 || validateRouteNamespacePolicy(&listener) != nil:
+	case listener.Protocol == gatewayv1.HTTPProtocolType && listener.TLS != nil || listener.Filters != nil && len(listener.Filters.Requests) != 0 || validateRouteNamespacePolicy(&listener) != nil:
 		entry.rejection = gatewayv1.ListenerReasonUnsupportedValue
 	case entry.invalidRouteKinds && !listenerAllowsRouteKind(listener, model.HTTPRouteKind):
 		entry.rejection = gatewayv1.ListenerReasonInvalidRouteKinds
@@ -193,8 +224,13 @@ func projectListenerSetEntry(spec gatewayv1.ListenerEntry, plainHTTP bool, sibli
 		if err := amphora.ValidateHostname(host); host != "" && err != nil {
 			entry.rejection = gatewayv1.ListenerReasonUnsupportedValue
 		}
-		if len(siblings) != 0 && (!sharesPlainHTTPPort(&listener) || slices.ContainsFunc(siblings, func(sibling *gatewayv1.Listener) bool { return !sharesPlainHTTPPort(sibling) })) {
+		if listener.Protocol == gatewayv1.HTTPProtocolType && len(siblings) != 0 && (!sharesPlainHTTPPort(&listener) || slices.ContainsFunc(siblings, func(sibling *gatewayv1.Listener) bool { return !sharesPlainHTTPPort(sibling) })) {
 			entry.rejection = gatewayv1.ListenerReasonPortUnavailable
+		}
+	}
+	if entry.rejection == "" && listener.Protocol == gatewayv1.HTTPSProtocolType {
+		if issue := httpsProfileTLSIssue(&listener); issue != nil {
+			entry.rejection = issue.reason
 		}
 	}
 	if entry.rejection == "" && entry.invalidRouteKinds {
@@ -229,7 +265,7 @@ func (r *Reconciler) reportListenerSets(ctx context.Context, gateway *gatewayv1.
 	if class.Spec.ControllerName != r.Config.ControllerName || !class.DeletionTimestamp.IsZero() {
 		return errGatewayChanged
 	}
-	current, err := ObserveListenerSets(ctx, r.APIReader, r.Config, &liveGateway)
+	current, err := r.ObserveListenerSets(ctx, r.APIReader, &liveGateway)
 	if err != nil {
 		return err
 	}
@@ -281,7 +317,9 @@ func (r *Reconciler) reportListenerSets(ctx context.Context, gateway *gatewayv1.
 func (r *Reconciler) listenerSetEntryStatus(ctx context.Context, set *gatewayv1.ListenerSet, entry listenerSetEntry, result cloud.GatewayGraphResult) (gatewayv1.ListenerEntryStatus, error) {
 	listener := &entry.listener
 	status := gatewayv1.ListenerEntryStatus{Name: listener.Name}
-	if listener.Protocol == gatewayv1.HTTPProtocolType && listenerAllowsRouteKind(*listener, model.HTTPRouteKind) {
+	supportsHTTPRoute := listener.Protocol == gatewayv1.HTTPProtocolType ||
+		listener.Protocol == gatewayv1.HTTPSProtocolType && r.Config.OperatorHTTPS && r.Config.HTTPSListenerIsolation
+	if supportsHTTPRoute && listenerAllowsRouteKind(*listener, model.HTTPRouteKind) {
 		status.SupportedKinds = supportedRouteKinds(model.HTTPRouteKind)
 	}
 	setAcceptedListenerConditions(&status.Conditions, set.Generation)
@@ -291,10 +329,15 @@ func (r *Reconciler) listenerSetEntryStatus(ctx context.Context, set *gatewayv1.
 	if entry.conflicted {
 		controller.SetCondition(&status.Conditions, controller.Condition(string(gatewayv1.ListenerEntryConditionConflicted), metav1.ConditionTrue, string(entry.rejection), "A higher precedence listener owns this endpoint", set.Generation))
 	}
-	if entry.invalidRouteKinds {
-		controller.SetCondition(&status.Conditions, controller.Condition(string(gatewayv1.ListenerEntryConditionResolvedRefs), metav1.ConditionFalse, string(gatewayv1.ListenerEntryReasonInvalidRouteKinds), "The listener supports HTTPRoute on delegated HTTP listeners", set.Generation))
-	} else if listener.TLS != nil && entry.rejection != "" {
-		controller.SetCondition(&status.Conditions, controller.Condition(string(gatewayv1.ListenerEntryConditionResolvedRefs), metav1.ConditionUnknown, string(gatewayv1.ListenerReasonPending), "TLS reference resolution is unavailable for delegated listeners", set.Generation))
+	if issue := entry.referenceIssue; issue != nil {
+		controller.SetCondition(&status.Conditions, controller.Condition(string(gatewayv1.ListenerEntryConditionResolvedRefs), metav1.ConditionFalse, string(issue.reason), issue.message, set.Generation))
+	} else if entry.rejection == gatewayv1.ListenerReasonInvalidCertificateRef {
+		issue := certificateReferenceIssue(entry.rejection)
+		controller.SetCondition(&status.Conditions, controller.Condition(string(gatewayv1.ListenerEntryConditionResolvedRefs), metav1.ConditionFalse, string(issue.reason), issue.message, set.Generation))
+	} else if entry.invalidRouteKinds {
+		controller.SetCondition(&status.Conditions, controller.Condition(string(gatewayv1.ListenerEntryConditionResolvedRefs), metav1.ConditionFalse, string(gatewayv1.ListenerEntryReasonInvalidRouteKinds), "The listener supports HTTPRoute on delegated listeners", set.Generation))
+	} else if listener.Protocol == gatewayv1.HTTPSProtocolType && !entry.certificateResolved {
+		controller.SetCondition(&status.Conditions, controller.Condition(string(gatewayv1.ListenerEntryConditionResolvedRefs), metav1.ConditionUnknown, string(gatewayv1.ListenerReasonPending), "The listener does not yet have a resolved certificate reference", set.Generation))
 	}
 	programmed, reason := metav1.ConditionFalse, gatewayv1.ListenerReasonPending
 	if entry.rejection != "" {

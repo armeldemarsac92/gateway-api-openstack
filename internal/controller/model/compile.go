@@ -37,13 +37,13 @@ func Compile(input Input) (Gateway, error) {
 	if UnsupportedGatewayWideTLS(input.Gateway.Spec.TLS) {
 		result.Diagnostics = append(result.Diagnostics, Diagnostic{
 			Condition: string(gatewayv1.GatewayConditionAccepted), Reason: string(gatewayv1.GatewayReasonInvalidParameters),
-			Message: "Gateway-wide spec.tls supports only backend configuration",
+			Message: "Gateway-wide spec.tls requires frontend or backend configuration",
 		})
 	}
 	gatewayListeners := result.Listeners
 	setListeners := make(map[types.NamespacedName][]Listener, len(input.ListenerSetSections))
 	for key, sections := range input.ListenerSetSections {
-		compiled := compileListeners(sections, false)
+		compiled := compileListeners(sections, input.OperatorHTTPS)
 		for i := range compiled {
 			compiled[i].ListenerSet = key
 		}
@@ -98,10 +98,23 @@ func Compile(input Input) (Gateway, error) {
 	return result, nil
 }
 
-// UnsupportedGatewayWideTLS identifies the frontend and empty TLS shapes
-// outside this profile. Backend client identity is lowered at the pool boundary.
+// UnsupportedGatewayWideTLS rejects an empty Gateway TLS configuration.
 func UnsupportedGatewayWideTLS(tls *gatewayv1.GatewayTLSConfig) bool {
-	return tls != nil && (tls.Frontend != nil || tls.Backend == nil)
+	return tls != nil && tls.Frontend == nil && tls.Backend == nil
+}
+
+// FrontendClientValidation selects the configuration shared by all HTTPS
+// sections on a port. An override without validation replaces the default too.
+func FrontendClientValidation(tls *gatewayv1.GatewayTLSConfig, port gatewayv1.PortNumber) *gatewayv1.FrontendTLSValidation {
+	if tls == nil || tls.Frontend == nil {
+		return nil
+	}
+	for _, override := range tls.Frontend.PerPort {
+		if override.Port == port {
+			return override.TLS.Validation
+		}
+	}
+	return tls.Frontend.Default.Validation
 }
 
 func compileListeners(sections []gatewayv1.Listener, operatorHTTPS bool) []Listener {
