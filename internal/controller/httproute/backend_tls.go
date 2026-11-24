@@ -18,7 +18,6 @@ package httproute
 
 import (
 	"context"
-	"slices"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -105,11 +104,7 @@ func (inputs *routeModelInputs) backendTLSValidation(backend model.BackendGroup,
 		inputs.backendTLSAvailability[backendTLSRequirements{requireH2: requireH2, requireSAN: len(winner.Validation.SubjectAltNames) != 0}] != backendTLSAvailable {
 		return &cloud.BackendTLSValidation{Denied: true}
 	}
-	return &cloud.BackendTLSValidation{
-		Hostname: winner.Validation.Hostname, SubjectAltNames: slices.Clone(winner.Validation.SubjectAltNames),
-		CAConfigMapUID: string(winner.Validation.CA.UID),
-		CADigest:       winner.Validation.CA.Digest, CAPEM: slices.Clone(winner.Validation.CA.PEM),
-	}
+	return winner.Validation.CloudValidation()
 }
 
 func routeBackendTLSAncestorSlot(route *gatewayv1.HTTPRoute, inputs *routeModelInputs) backendtls.AncestorSlot {

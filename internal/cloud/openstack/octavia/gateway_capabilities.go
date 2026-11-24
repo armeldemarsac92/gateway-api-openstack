@@ -45,6 +45,7 @@ const (
 	GatewayCapabilityTLSSNIPassthrough         = "tls_sni_passthrough_v1"
 	GatewayCapabilityTLSSNISuffix              = "tls_sni_suffix_v1"
 	GatewayCapabilityTCPTLSTermination         = "tcp_tls_termination_v1"
+	GatewayCapabilityTCPBackendTLSAuth         = "tcp_tls_backend_auth_v1"
 	GatewayCapabilityL7PolicyInitialRules      = "l7policy_initial_rules_v1"
 	GatewayCapabilityL7PolicyBatchActivation   = "l7policy_batch_activation_v1"
 )

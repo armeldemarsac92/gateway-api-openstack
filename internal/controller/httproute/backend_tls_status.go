@@ -33,6 +33,7 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
+	gatewaycontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
@@ -110,9 +111,6 @@ func (r *backendTLSPolicyStatusReconciler) observeAncestors(ctx context.Context,
 			}
 		}
 	}
-	if len(gateways) == 0 {
-		return nil, nil
-	}
 	peers := make(map[types.NamespacedName][]gatewayv1.HTTPRoute, len(gateways))
 	setParents := make(map[types.NamespacedName]types.NamespacedName)
 	for _, route := range routes {
@@ -149,7 +147,48 @@ func (r *backendTLSPolicyStatusReconciler) observeAncestors(ctx context.Context,
 			resolvedRefs: consumer.selection.ResolvedRefs,
 		}
 	}
+	if r.routes.Config.TCPTLSTermination {
+		gatewayObserver := gatewaycontroller.Reconciler{APIReader: r.routes.APIReader, Config: r.routes.Config}
+		consumers, err := gatewayObserver.ObserveTLSRouteBackendTLSPolicy(ctx, policy)
+		if err != nil {
+			return nil, err
+		}
+		capability := backendTLSUnknown
+		if !requireSAN && r.routes.TCPBackendTLSAvailable != nil {
+			for _, consumer := range consumers {
+				if consumer.Accepted.Status == metav1.ConditionTrue {
+					supported, err := r.routes.TCPBackendTLSAvailable(ctx)
+					if err == nil {
+						capability = backendTLSUnsupported
+						if supported {
+							capability = backendTLSAvailable
+						}
+					}
+					break
+				}
+			}
+		}
+		for key, consumer := range consumers {
+			conditions := backendTLSPolicyConditions{
+				accepted: capability.apply(consumer.Accepted, !requireSAN, requireSAN), resolvedRefs: consumer.ResolvedRefs,
+			}
+			// A policy must be enforceable by every profile consuming it
+			// before the single ancestor can report Accepted.
+			if prior, exists := ancestors[key]; exists {
+				conditions.accepted = leastSatisfiedBackendTLSCondition(prior.accepted, conditions.accepted)
+				conditions.resolvedRefs = leastSatisfiedBackendTLSCondition(prior.resolvedRefs, conditions.resolvedRefs)
+			}
+			ancestors[key] = conditions
+		}
+	}
 	return ancestors, nil
+}
+
+func leastSatisfiedBackendTLSCondition(first, second metav1.Condition) metav1.Condition {
+	if first.Status == metav1.ConditionFalse || second.Status == metav1.ConditionTrue {
+		return first
+	}
+	return second
 }
 
 type backendTLSConsumer struct {

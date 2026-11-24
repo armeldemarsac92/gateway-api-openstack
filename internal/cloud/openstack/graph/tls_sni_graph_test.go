@@ -261,7 +261,7 @@ func TestSNISuffixStagesReplacementBeforeRetiringProtectedSelector(t *testing.T)
 	oldNarrow.policy.Position = 2
 	if got := next(); got.kind != graphSNIMutation || got.sni.kind != sniClearMembers || !got.sniWithdrawal {
 		t.Fatalf("must withdraw the revoked members before allocation: %#v", got)
-	} else if err := provider.executeSNIMutation(t.Context(), actual, got.sni); err != nil {
+	} else if err := provider.executeSNIMutation(t.Context(), desired, actual, got.sni); err != nil {
 		t.Fatal(err)
 	}
 	oldNarrow.members = nil
@@ -269,7 +269,7 @@ func TestSNISuffixStagesReplacementBeforeRetiringProtectedSelector(t *testing.T)
 	if quota.sni.kind != sniCreatePool {
 		t.Fatalf("expected to stage a replacement for the now-empty selector: %#v", quota)
 	}
-	if err := provider.executeSNIMutation(t.Context(), actual, quota.sni); err == nil {
+	if err := provider.executeSNIMutation(t.Context(), desired, actual, quota.sni); err == nil {
 		t.Fatal("the fake Octavia project must reject the new pool")
 	}
 	if oldNarrow.forwardingHostname() != narrow.Hostname || len(oldNarrow.members) != 0 {
@@ -376,7 +376,7 @@ func TestSNISuffixWithdrawsFormerOwnerBeforeStagingSuccessor(t *testing.T) {
 	if quota.kind != graphSNIMutation || quota.sni.kind != sniCreatePool || quota.sni.target.key != successorTarget.key {
 		t.Fatalf("allocate the successor after observing the withdrawal: %#v", quota)
 	}
-	if err := provider.executeSNIMutation(t.Context(), actual, quota.sni); err == nil {
+	if err := provider.executeSNIMutation(t.Context(), desired, actual, quota.sni); err == nil {
 		t.Fatal("expected Octavia to reject the pool allocation")
 	}
 	if retry := next(cloud.OutcomeProgressing); retry.sni.kind != sniCreatePool || retry.sni.target.key != successorTarget.key ||

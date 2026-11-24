@@ -117,6 +117,11 @@ func retainedBackendCAs(spec cloud.GatewayGraphSpec, actual observedGatewayGraph
 			}
 		}
 	}
+	for _, fragment := range actual.sni {
+		if fragment.pool.CATLSContainerRef != "" {
+			attached[fragment.pool.CATLSContainerRef] = true
+		}
+	}
 	selectRevision := func(tls *cloud.BackendTLSValidation) {
 		if tls == nil || tls.Denied {
 			return
@@ -125,6 +130,9 @@ func retainedBackendCAs(spec cloud.GatewayGraphSpec, actual observedGatewayGraph
 		if ref := revision.Reference(); ref != "" {
 			keep[ref] = true
 		}
+	}
+	for _, route := range spec.Gateway.TLSSNIRoutes {
+		selectRevision(route.BackendTLS)
 	}
 	for _, node := range spec.Routes {
 		if node.Disposition == cloud.GraphEnsure {
