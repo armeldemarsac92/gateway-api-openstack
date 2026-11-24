@@ -2,6 +2,12 @@
 
 The controller admits delegated listeners according to the Gateway namespace policy, reports hostname and protocol conflicts and includes eligible delegated HTTP sections in the Gateway graph. The original tests use Gateway API v1.7.0 revision `e26d183dbbc1bb782b78addbd26faba03955c152`. [Registered case matrix](../matrix/features-and-cases.md)
 
+## Grouped policy activation
+
+The signed controller image at `0cde3dcd7e49` and the stable Octavia 19.0.1.dev40 wheel passed all 36 `ListenerSetHTTPRouting` checks on Standard and Experimental. Fourteen prepared policies activated in one POST and one HAProxy reload for the group. The first Experimental attempt passed 34 checks. Two requests expired before the grouped reload. The successful rerun used a tmpfs guest overlay and retained the upstream deadline, manifests and binaries. [Results and timestamps](l7-policy-activation/summary.json) · [Standard](l7-policy-activation/gateway-api-v1.7.0-standard.yaml) · [Experimental](l7-policy-activation/gateway-api-v1.7.0-experimental.yaml) · [First Experimental attempt](l7-policy-activation/gateway-api-v1.7.0-experimental-first-attempt.yaml)
+
+The manager ran from the extracted linux/amd64 OCI image and forwarded requests to Kubernetes echo pods through HAProxy. The local setup used Octavia REST, the Amphora worker and rendering code, SQLite and synchronous RPC delivery. A simulated Amphora peer loaded the real HAProxy process. These results cover this Extended case. [Operator settings](../../../operator-octavia-http-actions.md) · [Octavia provider](https://github.com/armeldemarsac92/octavia/pull/19)
+
 ## Admission and route lifecycle
 
 On `afcc7cdc9074119984058aa03949684ad4abca25`, all seven upstream status cases passed on both Standard and Experimental with Kubernetes 1.36.2 envtest and a recording OpenStack provider.

@@ -56,6 +56,14 @@ On a region running the Hibiscus Octavia API and workers, set `[api_settings] en
 
 For an HTTP or terminated HTTPS policy with two or more matching rules, the controller can create the disabled policy and its rules in one request. It reads the policy and each rule back before enabling traffic. If a create response is lost, the controller checks the listener inventory before submitting another create. Disabling the option returns new policies to individual rule creation. Policies already created with grouped rules retain their readback checks.
 
+## Activate prepared HTTP policies together
+
+The controller can enable two to 64 forwarding policies on one HTTP listener in a single Amphora refresh. Each policy must already have its hostname and path rules and a ready HTTP backend. The controller checks the listener's policy order, the pools and their members, and the current Kubernetes references before it submits the group. A concurrent change causes a fresh read.
+
+Apply Octavia migration `cc7a1218b24e`, upgrade the regional API and workers, and set `enabled_l7policy_batch_activation_providers = amphora` in `[api_settings]`. Workers must use the same database writer for the per-load-balancer render lock. When `GET /v2/lbaas/providers/amphora/gateway_capabilities` lists `l7policy_batch_activation_v1`, add `--octavia-l7policy-batch-activation` to the controller arguments.
+
+HTTP 204 acknowledges submission. Follow the provisioning status of the listener and the selected policies to confirm activation. If delivery is interrupted, Octavia can resume on redelivery of the same RPC or an identical activation request. Wait for pending activations to finish before withdrawing the capability.
+
 ## Observe a grant change
 
 For a route with a weight-3 Service in its own namespace and a weight-1 Service in another namespace, match requests to the same rule and distinguish replies by application identity.

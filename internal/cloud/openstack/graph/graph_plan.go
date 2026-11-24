@@ -218,7 +218,7 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 				ensureHold = initialL7RulesReadbackMessage
 			}
 		case node.Disposition == cloud.GraphEnsure:
-			routePlan, routeResult.State, err = buildRouteEnsurePlan(route, observed)
+			routePlan, routeResult.State, err = buildRouteEnsurePlanWithActivations(route, observed, p.l7PolicyBatchActivation)
 			if errors.Is(err, errInitialL7RulesUnverified) {
 				ensureHold = initialL7RulesReadbackMessage
 				holdPolicyOrder[port] = true
@@ -262,6 +262,16 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 			if handovers.drain[index] {
 				if steps, hold := httpMemberWithdrawal(observed); len(steps) != 0 || hold != "" {
 					routePlan, ensureHold = steps, hold
+				}
+			}
+			if len(routePlan) > 1 && routePlan[0].kind == routeMutationEnablePolicy {
+				blocked := slices.IndexFunc(routePlan, func(step routeMutation) bool {
+					return handovers.protected[step.id] || handovers.protected[step.parentID]
+				})
+				if blocked >= 0 {
+					// Keep the blocked step for the ordinary handover guard and
+					// discard everything after it in this activation prefix.
+					routePlan = routePlan[:blocked+1]
 				}
 			}
 			routePlan = slices.DeleteFunc(routePlan, func(step routeMutation) bool {
@@ -403,9 +413,9 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 				continue
 			case route.redirect && step.kind == routeMutationEnablePolicy && (holdRedirectEnable[redirectDomain] || holdPolicyOrder[port]):
 				routeResult.Outcome = p.progressingOutcome("Waiting for verified HTTP forwarding policies before enabling the redirect")
-			case groupedHTTP && stepIndex != 0:
-				// Only the first actionable change in this backend is eligible
-				// for global ordering. Later changes may depend on it.
+			case groupedHTTP && stepIndex != 0 && (routePlan[0].kind != routeMutationEnablePolicy || step.kind != routeMutationEnablePolicy):
+				// Prepared activations share the same proved backend. Otherwise
+				// a later change may depend on a readback of the first one.
 				continue
 			case !groupedHTTP && holdPolicyOrder[port] && (isHTTPPolicyPositionChange(step.kind) || step.kind == routeMutationEnablePolicy):
 				routeResult.Outcome = p.progressingOutcome("Waiting for the HTTPRoute policy order")

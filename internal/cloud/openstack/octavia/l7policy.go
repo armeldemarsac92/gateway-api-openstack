@@ -170,6 +170,7 @@ type L7PolicyObservation struct {
 	HTTPSListenerHostname       string
 	Target                      *L7PolicyTarget
 	ExtendedTargetFields        bool
+	ActivationOptions           string
 	TargetRequestFiltersPresent bool
 	RedirectRequest             *RequestRedirect
 	RedirectRequestPresent      bool
@@ -249,6 +250,8 @@ func readPolicyObservation(raw json.RawMessage) (L7PolicyObservation, error) {
 		// identifiable even when the endpoint cannot report a valid scope.
 		_ = json.Unmarshal(row.HTTPSListenerHostname, &observation.HTTPSListenerHostname)
 	}
+	observation.ActivationOptions = policyActivationOptions(row.HTTPSListenerHostname, row.Targets, row.FixedResponse,
+		row.RedirectRequest, row.RequestURLRewrite, row.RequestCORS, row.RequestHeaderOperations, row.ResponseHeaderOperations)
 	if row.AdminState != nil {
 		observation.Policy.AdminStateUp = *row.AdminState
 	}

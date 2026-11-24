@@ -57,6 +57,7 @@ type PoolBackendTLS struct {
 	RequireH2         bool
 	RequireH2Observed bool
 	EnabledObserved   bool
+	H2CObserved       bool
 	AdminObserved     bool
 }
 
@@ -74,7 +75,7 @@ func (s *Service) ListPoolInventory(ctx context.Context, opts pools.ListOpts) (P
 		var response struct {
 			Pools []struct {
 				pools.Pool
-				BackendH2C bool            `json:"backend_h2c"`
+				BackendH2C *bool           `json:"backend_h2c"`
 				Hostname   json.RawMessage `json:"backend_tls_hostname"`
 				CA         json.RawMessage `json:"ca_tls_container_ref"`
 				ClientRef  json.RawMessage `json:"tls_container_ref"`
@@ -93,7 +94,8 @@ func (s *Service) ListPoolInventory(ctx context.Context, opts pools.ListOpts) (P
 		for _, pool := range response.Pools {
 			tls := PoolBackendTLS{HostnameObserved: len(pool.Hostname) != 0, CAObserved: len(pool.CA) != 0,
 				ClientRefObserved: len(pool.ClientRef) != 0,
-				RequireH2Observed: pool.RequireH2 != nil, EnabledObserved: pool.Enabled != nil, AdminObserved: pool.Admin != nil}
+				RequireH2Observed: pool.RequireH2 != nil, EnabledObserved: pool.Enabled != nil, AdminObserved: pool.Admin != nil,
+				H2CObserved: pool.BackendH2C != nil}
 			tls.RequireH2 = pool.RequireH2 != nil && *pool.RequireH2
 			if tls.HostnameObserved && json.Unmarshal(pool.Hostname, &tls.Hostname) != nil ||
 				tls.CAObserved && json.Unmarshal(pool.CA, &pool.CATLSContainerRef) != nil ||
@@ -104,7 +106,7 @@ func (s *Service) ListPoolInventory(ctx context.Context, opts pools.ListOpts) (P
 			pool.AdminStateUp = pool.Admin != nil && *pool.Admin
 			inventory.BackendTLS[pool.ID] = tls
 			items = append(items, pool.Pool)
-			if pool.BackendH2C {
+			if pool.BackendH2C != nil && *pool.BackendH2C {
 				inventory.BackendH2C[pool.ID] = true
 			}
 		}
@@ -273,22 +275,34 @@ func (s *Service) ListMembers(ctx context.Context, poolID string, opts pools.Lis
 
 // ListCompleteMembers requires an explicit member collection on every page.
 func (s *Service) ListCompleteMembers(ctx context.Context, poolID string, opts pools.ListMembersOpts) ([]pools.Member, error) {
-	items, _, err := s.listCompleteMembers(ctx, poolID, opts, "")
+	items, _, err := s.listCompleteMembers(ctx, poolID, opts, "", nil)
 	return items, err
 }
 
 // ListMembersWithBackup reports the IDs whose backup flag is omitted or null.
 // The SDK's boolean alone cannot distinguish either case from explicit false.
 func (s *Service) ListMembersWithBackup(ctx context.Context, poolID string, opts pools.ListMembersOpts) ([]pools.Member, map[string]struct{}, error) {
-	return s.listCompleteMembers(ctx, poolID, opts, "backup")
+	return s.listCompleteMembers(ctx, poolID, opts, "backup", nil)
 }
 
 // ListMembersWithAdminState reports the IDs without an explicit administrative state.
 func (s *Service) ListMembersWithAdminState(ctx context.Context, poolID string, opts pools.ListMembersOpts) ([]pools.Member, map[string]struct{}, error) {
-	return s.listCompleteMembers(ctx, poolID, opts, "admin_state_up")
+	return s.listCompleteMembers(ctx, poolID, opts, "admin_state_up", nil)
 }
 
-func (s *Service) listCompleteMembers(ctx context.Context, poolID string, opts pools.ListMembersOpts, inspectFlag string) ([]pools.Member, map[string]struct{}, error) {
+// ListMembersForPolicyActivation proves the flags affecting member placement
+// and selection without changing the ordinary withdrawal checks.
+func (s *Service) ListMembersForPolicyActivation(ctx context.Context, poolID string, opts pools.ListMembersOpts, inspectAdmin bool) ([]pools.Member, map[string]struct{}, map[string]struct{}, error) {
+	var inspect string
+	if inspectAdmin {
+		inspect = "admin_state_up"
+	}
+	missingActivationFields := make(map[string]struct{})
+	items, missingAdmin, err := s.listCompleteMembers(ctx, poolID, opts, inspect, missingActivationFields)
+	return items, missingAdmin, missingActivationFields, err
+}
+
+func (s *Service) listCompleteMembers(ctx context.Context, poolID string, opts pools.ListMembersOpts, inspectFlag string, missingActivationFields map[string]struct{}) ([]pools.Member, map[string]struct{}, error) {
 	var items []pools.Member
 	var unreported map[string]struct{}
 	err := eachCollectionPage(ctx, pools.ListMembers(s.client, poolID, opts), func(result pagination.PageResult) pagination.Page {
@@ -302,7 +316,7 @@ func (s *Service) listCompleteMembers(ctx context.Context, poolID string, opts p
 			return missingCollection("members")
 		}
 		items = append(items, batch...)
-		if inspectFlag == "" {
+		if inspectFlag == "" && missingActivationFields == nil {
 			return nil
 		}
 		var response struct {
@@ -310,12 +324,19 @@ func (s *Service) listCompleteMembers(ctx context.Context, poolID string, opts p
 				ID           string `json:"id"`
 				Backup       *bool  `json:"backup"`
 				AdminStateUp *bool  `json:"admin_state_up"`
+				Weight       *int   `json:"weight"`
 			} `json:"members"`
 		}
 		if err := page.(pools.MemberPage).ExtractInto(&response); err != nil {
 			return fmt.Errorf("extract member %s flags: %w", inspectFlag, err)
 		}
 		for _, member := range response.Members {
+			if missingActivationFields != nil && (member.Backup == nil || member.AdminStateUp == nil || member.Weight == nil) {
+				missingActivationFields[member.ID] = struct{}{}
+			}
+			if inspectFlag == "" {
+				continue
+			}
 			reported := member.Backup != nil
 			if inspectFlag == "admin_state_up" {
 				reported = member.AdminStateUp != nil

@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-The ordinary and independent no-cache linux/amd64 builds of the Gateway backend client certificate revision produced the same manifest and executable. The published echo returned the expected client identity on both Gateway API channels. The local builder mounted an empty compiler cache separately for each build. [Build record](image.json) · [Backend authentication cases](provider/backend-tls-policy.md#gateway-client-certificate) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-7ac426fa239784dccab5a28851dd4d71094d7e04)
+The ordinary and independent no-cache linux/amd64 builds of the grouped L7 activation revision produced identical OCI manifests and executables. The extracted executable passed the 36 upstream ListenerSet HTTP assertions on both channels. The initial Experimental attempt reached 34 of 36. [Build record](image.json) · [Qualification](provider/listenerset-positive.md#grouped-policy-activation) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-0cde3dcd7e494e3d9986ff3c5650353e5f6a3def)
+
+The ordinary and independent no-cache linux/amd64 builds of the Gateway backend client certificate revision produced the same manifest and executable. The published echo returned the expected client identity on both Gateway API channels. The local builder mounted an empty compiler cache separately for each build. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-7ac426fa239784dccab5a28851dd4d71094d7e04/image.json) · [Backend authentication cases](provider/backend-tls-policy.md#gateway-client-certificate) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-7ac426fa239784dccab5a28851dd4d71094d7e04)
 
 The ordinary and no-cache linux/amd64 builds of the gRPC backend TLS revision produced the same OCI manifest and manager executable. The archived executable passed all three subtests of `BackendTLSPolicyGRPCRoute` on Standard and Experimental. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-51ad8cc6316f6aac929961f70866f88053896982/image.json) · [gRPC qualification](provider/backend-tls-policy.md#grpc-with-required-backend-http2) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-51ad8cc6316f6aac929961f70866f88053896982) · [Evidence pack](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-51ad8cc6316f6aac929961f70866f88053896982/backendtlspolicy-grpcroute-51ad8cc-evidence.tar.gz)
 
@@ -9,7 +11,7 @@ The ordinary and no-cache linux/amd64 builds produced the same OCI manifest. The
 On a linux/amd64 host, use a separate checkout of the recorded revision. The Dockerfile pins the Go 1.27.4 builder and distroless base by digest. Podman uses a fixed timestamp, and the build writes the full commit into the binary and the OCI revision label. The verification command exports gzip-compressed layers.
 
 ```sh
-revision=7ac426fa239784dccab5a28851dd4d71094d7e04
+revision=0cde3dcd7e494e3d9986ff3c5650353e5f6a3def
 test "$(git rev-parse HEAD)" = "$revision"
 image="localhost/hibiscus-controller:$revision"
 make container-build CONTAINER_TOOL=podman VERSION="$revision" IMAGE="$image"
