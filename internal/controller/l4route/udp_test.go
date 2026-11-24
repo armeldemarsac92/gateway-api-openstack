@@ -92,6 +92,7 @@ func udpRouteFixture() (*gatewayv1.Gateway, *gatewayv1.GatewayClass, *gatewayv1.
 
 func TestUDPRouteProgramsWeightedLocalNodePortPool(t *testing.T) {
 	gateway, class, route := udpRouteFixture()
+	gateway.Spec.Infrastructure = &gatewayv1.GatewayInfrastructure{Labels: map[gatewayv1.LabelKey]gatewayv1.LabelValue{"team": "edge"}}
 	workerA := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "worker-a"}, Spec: corev1.NodeSpec{ProviderID: "openstack:///worker-a"},
 		Status: corev1.NodeStatus{
 			Addresses:  []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "192.0.2.44"}},
@@ -114,6 +115,7 @@ func TestUDPRouteProgramsWeightedLocalNodePortPool(t *testing.T) {
 	disabledEndpoints.Endpoints[0].NodeName = &workerB.Name
 	route.Spec.Rules[0].BackendRefs = []gatewayv1.BackendRef{primaryRef, secondaryRef, disabledRef}
 	r := testReconciler(t, gateway, class, route, workerA, workerB, primary, primaryEndpoints, secondary, secondaryEndpoints, disabled, disabledEndpoints)
+	r.Config.GatewayInfrastructureMetadata = true
 	r.Protocol = gatewayv1.UDPProtocolType
 	identity := bindFixture(t, r, gateway, route, cloud.MemberModeNodePort)
 	want := []cloud.Member{
