@@ -52,6 +52,9 @@ type observedGatewayGraph struct {
 	httpsIsolationAvailable  bool
 	httpsIsolationPolicies   map[string]httpsPolicyInventory
 	httpsIsolationUnverified map[string]bool
+	httpsHostTransition      map[string]bool
+	httpsServingPorts        []int
+	httpsCleanupDeferred     bool
 	httpsIsolationMutation   *graphMutation
 	loadBalancer             *octavia.LoadBalancer
 	listener                 *listeners.Listener
@@ -127,6 +130,8 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	defer func() {
 		if retErr == nil {
 			result.Gateway.ScopedTLSClosedPorts = actual.closedDeniedHTTPSPorts(spec.Gateway.Spec)
+		} else {
+			result.Gateway.ScopedListenerServingPorts = nil
 		}
 		result.Gateway.AddressAbsent = actual.addressAbsent
 		result.Gateway.AddressActive = hasActiveGatewayAddress(spec.Gateway.Spec, actual)
@@ -282,7 +287,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		return p.reconcileHTTPWithdrawalWithoutAddress(ctx, desired, actual)
 	}
 	if spec.Gateway.Disposition == cloud.GraphWithdrawTLS {
-		return cloud.GatewayGraphResult{Gateway: cloud.GatewayResult{State: actual.state, Outcome: actual.outcome}, Outcome: actual.outcome}, nil
+		return p.pendingGraphResult(ctx, desired, actual), nil
 	}
 	addressSpec := &desired.spec.Gateway.Spec
 	replacing := spec.Gateway.Disposition == cloud.GraphDelete && actual.loadBalancer != nil
@@ -299,6 +304,13 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		}
 	}
 	if actual.outcome.State == cloud.OutcomeProgressing {
+		if len(actual.httpsServingPorts) != 0 && spec.ValidateMutation != nil {
+			// Busy Octavia can prove a serving subset without a write. Apply
+			// the same Kubernetes snapshot fence before publishing that proof.
+			if err := spec.ValidateMutation(ctx); err != nil {
+				return cloud.GatewayGraphResult{}, err
+			}
+		}
 		return p.pendingGraphResult(ctx, desired, actual), nil
 	}
 	if actual.protocol == cloud.ListenerProtocolUDP && actual.loadBalancer != nil {
@@ -428,6 +440,14 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 
 func (p *Provider) recordGraphMutationOutcome(result *cloud.GatewayGraphResult, step graphMutation) {
 	result.Outcome = p.progressingOutcome(step.message)
+	if step.kind == graphDisableLoadBalancer {
+		result.Gateway.ScopedListenerServingPorts = nil
+	}
+	if step.kind == graphDisableListener {
+		result.Gateway.ScopedListenerServingPorts = slices.DeleteFunc(result.Gateway.ScopedListenerServingPorts, func(port int) bool {
+			return port == step.scopedListener.Port
+		})
+	}
 	if step.kind == graphDisableListener && step.withdrawHTTPPolicy {
 		result.Gateway.Outcome = result.Outcome
 		result.Gateway.ScopedListenerReadyPorts = slices.DeleteFunc(result.Gateway.ScopedListenerReadyPorts, func(port int) bool {
@@ -692,6 +712,11 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 		return port < 1 || port > 65535
 	})) {
 		return invalid("targeted TLS withdrawal requires valid scoped HTTPS ports")
+	}
+	for port, hosts := range spec.Gateway.TLSWithdrawalPreviousHosts {
+		if len(hosts) == 0 || !slices.Contains(spec.Gateway.TLSWithdrawalPorts, port) {
+			return invalid("selective TLS withdrawal requires previously authorized hosts on a targeted HTTPS port")
+		}
 	}
 	if !rawTLS && spec.Gateway.TCPTLSCertificateRef != "" {
 		return invalid("TCP certificates require the TCP TLS termination profile")
@@ -1070,7 +1095,7 @@ func (actual observedGatewayGraph) httpFallbackReady(listener listeners.Listener
 }
 
 func observedGatewayResult(desired desiredGatewayGraph, actual observedGatewayGraph, pending cloud.Outcome) cloud.GatewayResult {
-	result := cloud.GatewayResult{State: actual.state, Outcome: pending}
+	result := cloud.GatewayResult{State: actual.state, Outcome: pending, ScopedListenerServingPorts: actual.verifiedHTTPSServingPorts()}
 	if actual.scoped {
 		if desired.spec.Gateway.Disposition == cloud.GraphEnsure {
 			if actual.protocol == cloud.ListenerProtocolHTTP {
@@ -1217,12 +1242,12 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 			}
 		}
 		if actual.scoped && actual.protocol == cloud.ListenerProtocolHTTP {
-			p.observeHTTPSIsolation(ctx, desired, &actual, inventory.DefaultPoolsObserved)
 			p.observeFrontendCAs(ctx, desired, &actual)
+			p.observeHTTPSIsolation(ctx, desired, &actual, inventory.DefaultPoolsObserved)
 			if observation.phase == loadBalancerPhaseActive {
 				p.planScopedHTTPSWithdrawal(desired, &actual)
 			}
-			if actual.withdrawTLS != nil || desired.spec.Gateway.Disposition == cloud.GraphWithdrawTLS {
+			if actual.withdrawTLS != nil || actual.httpsCleanupDeferred || desired.spec.Gateway.Disposition == cloud.GraphWithdrawTLS {
 				return actual, nil
 			}
 		}
@@ -1279,7 +1304,7 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 			if observation.phase == loadBalancerPhaseActive {
 				p.planScopedHTTPSWithdrawal(desired, &actual)
 			}
-			if actual.withdrawTLS != nil || actual.httpsIsolationMutation != nil {
+			if actual.withdrawTLS != nil || actual.httpsIsolationMutation != nil || actual.httpsCleanupDeferred {
 				return actual, nil
 			}
 		}

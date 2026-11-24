@@ -46,6 +46,9 @@ type GatewayGraphSpec struct {
 	// ValidateMutation rechecks the request-local authority after cloud reads
 	// and planning, immediately before the provider sends a mutation.
 	ValidateMutation func(context.Context) error `json:"-"`
+	// HTTPSPolicyAuthority supplies complete current route bindings for
+	// a scoped HTTP cleanup or TLS withdrawal.
+	HTTPSPolicyAuthority *GatewayGraphSpec `json:"-"`
 }
 
 // GatewayGraphNode describes the Gateway component. Spec is required for Ensure.
@@ -59,6 +62,9 @@ type GatewayGraphNode struct {
 	// TLSWithdrawalPorts restricts a known authorization change to these
 	// physical HTTPS ports. A nil list checks all TLS frontends.
 	TLSWithdrawalPorts []int `json:",omitempty"`
+	// TLSWithdrawalPreviousHosts is present only when a fresh snapshot confirms
+	// that a targeted port's authorization changed without changing its TLS material.
+	TLSWithdrawalPreviousHosts map[int][]string `json:",omitempty"`
 	// BackendClientCertificate applies only to HTTP-family pools selected by BackendTLSPolicy.
 	BackendClientCertificate BackendClientCertificate
 	// BackendCAOwned checkpoints ownership of both frontend and backend trust anchors.

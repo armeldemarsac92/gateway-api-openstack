@@ -100,12 +100,20 @@ func routeHasBackendTLSPolicy(route desiredRoute) bool {
 	})
 }
 
-// prepareBackendTLS classifies each owned pool before any ordinary ensure can
-// affect traffic. A quarantine step takes priority over dependencies such as
-// Floating IPs and security-group validation.
+// prepareBackendTLS runs before ordinary writes. Quarantine takes priority
+// over dependencies such as Floating IPs and security-group validation.
 func (p *Provider) prepareBackendTLS(ctx context.Context, desired *desiredGatewayGraph, actual observedGatewayGraph) *graphMutation {
+	if actual.loadBalancer == nil || actual.loadBalancer.ProvisioningStatus != "ACTIVE" {
+		return nil
+	}
+	return p.planBackendTLS(ctx, desired, actual)
+}
+
+// planBackendTLS classifies owned pools using readback alone, so it can also
+// verify a serving subset while another Octavia operation is pending.
+func (p *Provider) planBackendTLS(ctx context.Context, desired *desiredGatewayGraph, actual observedGatewayGraph) *graphMutation {
 	if actual.protocol != cloud.ListenerProtocolHTTP || desired.spec.Gateway.Disposition != cloud.GraphEnsure ||
-		actual.loadBalancer == nil || actual.loadBalancer.ProvisioningStatus != "ACTIVE" || len(actual.routes) != len(desired.routes) {
+		len(actual.routes) != len(desired.routes) {
 		return nil
 	}
 	parts := backendTLSParts(desired, actual.routes)

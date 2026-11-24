@@ -252,6 +252,7 @@ func (p *Provider) markGuardedHTTPListener(result *cloud.GatewayGraphResult, por
 	}
 	result.Gateway.Outcome = result.Outcome
 	result.Gateway.ScopedListenerReadyPorts = slices.DeleteFunc(result.Gateway.ScopedListenerReadyPorts, func(ready int) bool { return ready == port })
+	result.Gateway.ScopedListenerServingPorts = slices.DeleteFunc(result.Gateway.ScopedListenerServingPorts, func(serving int) bool { return serving == port })
 }
 
 func guardedHTTPListeners(desired desiredGatewayGraph, actual observedGatewayGraph, portByID map[string]int, predicate protectedHTTPPredicate) map[int]guardedHTTPListener {

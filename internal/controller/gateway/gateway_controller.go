@@ -305,7 +305,7 @@ func (r *Reconciler) reconcileGatewayGraph(
 		observation := graphResult.Gateway
 		// Explicit scoped readback still describes the serving listeners if
 		// another listener failed. A nil observation leaves discovery intact.
-		if err == nil || routeFailure || observation.AddressAbsent || len(observation.ScopedListenerDeferredPorts) != 0 ||
+		if err == nil || routeFailure || observation.AddressAbsent || len(observation.ScopedListenerDeferredPorts) != 0 || len(observation.ScopedListenerServingPorts) != 0 ||
 			scopedGatewayFailurePorts(r.Config, scope.gateway, policy.Category, observation) != nil {
 			defer func() {
 				retErr = errors.Join(retErr, r.reconcileGatewayDiscovery(ctx, scope.gateway, decision.listener, observation))
