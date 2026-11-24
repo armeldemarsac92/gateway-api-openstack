@@ -20,6 +20,7 @@ package controller_test
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -50,8 +51,10 @@ func testGatewayAddressRoutability(t *testing.T, c client.Client, cfg controller
 	if cfg.GatewayAddressRoutabilityEnabled() {
 		wantFeatures = []gatewayv1.SupportedFeature{{Name: gatewayv1.FeatureName(features.SupportGatewayAddressRoutability)}}
 	}
-	if len(class.Status.SupportedFeatures) != len(wantFeatures) ||
-		len(wantFeatures) != 0 && class.Status.SupportedFeatures[0] != wantFeatures[0] {
+	if cfg.GatewayInfrastructureMetadata {
+		wantFeatures = append(wantFeatures, gatewayv1.SupportedFeature{Name: gatewayv1.FeatureName(features.SupportGatewayInfrastructure)})
+	}
+	if !slices.Equal(class.Status.SupportedFeatures, wantFeatures) {
 		t.Fatalf("published GatewayClass features = %+v, want %+v", class.Status.SupportedFeatures, wantFeatures)
 	}
 	gateway := &gatewayv1.Gateway{

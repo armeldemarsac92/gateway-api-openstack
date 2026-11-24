@@ -264,11 +264,7 @@ func (r *Reconciler) handleGatewayProviderFailure(
 		policy.Message,
 		programmedGeneration,
 	)
-	var scopedReadyPorts []int
-	if policy.Category == cloud.ErrorCategoryResourceFailure && observation.Outcome.State == cloud.OutcomeProgressing &&
-		controller.GatewayListenerScope(r.Config, gateway) != "" {
-		scopedReadyPorts = observation.ScopedListenerReadyPorts
-	}
+	scopedReadyPorts := scopedGatewayFailurePorts(r.Config, gateway, policy.Category, observation)
 	if err := r.setGatewayListenerStatuses(
 		ctx,
 		gateway,
@@ -297,6 +293,14 @@ func (r *Reconciler) handleGatewayProviderFailure(
 		scope.patchCause = controller.SafeProviderReconcileError(policy, providerErr)
 	}
 	return controller.ProviderFailureResult(policy, providerErr, string(gateway.UID))
+}
+
+func scopedGatewayFailurePorts(config controller.Config, gateway *gatewayv1.Gateway, category cloud.ErrorCategory, observation cloud.GatewayResult) []int {
+	if category == cloud.ErrorCategoryResourceFailure && observation.Outcome.State == cloud.OutcomeProgressing &&
+		controller.GatewayListenerScope(config, gateway) != "" {
+		return observation.ScopedListenerReadyPorts
+	}
+	return nil
 }
 
 func (r *Reconciler) handleGatewayDeleteFailure(
@@ -779,8 +783,8 @@ func preserveProgrammedListeners(gateway *gatewayv1.Gateway, previous gatewayv1.
 		if !slices.Contains(ports, int(listener.Port)) {
 			continue
 		}
-		old := meta.FindStatusCondition(existingListenerConditionsFrom(previous.Listeners, listener.Name), string(gatewayv1.ListenerConditionProgrammed))
-		if old == nil || old.ObservedGeneration != gateway.Generation || old.Status != metav1.ConditionTrue {
+		old := programmedListenerAtGeneration(previous.Listeners, listener.Name, gateway.Generation)
+		if old == nil {
 			continue
 		}
 		for i := range gateway.Status.Listeners {
@@ -791,4 +795,12 @@ func preserveProgrammedListeners(gateway *gatewayv1.Gateway, previous gatewayv1.
 			}
 		}
 	}
+}
+
+func programmedListenerAtGeneration(statuses []gatewayv1.ListenerStatus, name gatewayv1.SectionName, generation int64) *metav1.Condition {
+	programmed := meta.FindStatusCondition(existingListenerConditionsFrom(statuses, name), string(gatewayv1.ListenerConditionProgrammed))
+	if programmed == nil || programmed.ObservedGeneration != generation || programmed.Status != metav1.ConditionTrue {
+		return nil
+	}
+	return programmed
 }

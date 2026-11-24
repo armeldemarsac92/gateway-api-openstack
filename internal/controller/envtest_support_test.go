@@ -52,12 +52,16 @@ type recordingProvider struct {
 	gatewaySpecs     []cloud.GatewaySpec
 	graphSpecs       []cloud.GatewayGraphSpec
 	gatewayStates    map[string]cloud.GatewayState
+	gatewayResults   map[string]cloud.GatewayResult
 	gatewayDeleteOut *cloud.Outcome
 	deletedGateways  []cloud.Identity
 }
 
 func (p *recordingProvider) EnsureGateway(_ context.Context, spec cloud.GatewaySpec) (cloud.GatewayResult, error) {
 	p.gatewaySpecs = append(p.gatewaySpecs, spec)
+	if result, overridden := p.gatewayResults[spec.Identity.GatewayUID]; overridden {
+		return result, nil
+	}
 	if spec.RequestedVIPAddresses != nil {
 		return p.ensureExperimentalGatewayAddress(spec), nil
 	}

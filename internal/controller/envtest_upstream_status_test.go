@@ -190,6 +190,9 @@ func testUpstreamGatewayStatus(t *testing.T, c client.Client, cfg controller.Con
 		}
 		tests.GatewayStaticAddresses.Run(t, s)
 	})
+	t.Run("GatewayInfrastructureMetadata", func(t *testing.T) {
+		testGatewayInfrastructure(t, c, provider, className)
+	})
 	t.Run("GatewayAddressRoutability", func(t *testing.T) {
 		testGatewayAddressRoutability(t, c, cfg, provider, className)
 	})
