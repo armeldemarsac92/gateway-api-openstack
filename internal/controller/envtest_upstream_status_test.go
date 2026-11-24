@@ -137,6 +137,21 @@ func testUpstreamGatewayStatus(t *testing.T, c client.Client, cfg controller.Con
 	}
 	config.SetupTimeoutConfig(&s.TimeoutConfig)
 	kubernetes.GWCMustHaveAcceptedConditionTrue(t, c, s.TimeoutConfig, className)
+	// The original suite creates these certificate fixtures before running cases.
+	t.Run(tests.GatewayInvalidFrontendClientCertificateValidation.ShortName, func(t *testing.T) {
+		secret := kubernetes.MustCreateSelfSignedCertSecret(t, suite.InfrastructureNamespace, "tls-validity-checks-certificate", []string{"*", "*.org", "*.wildcard.org"})
+		local, _, _ := kubernetes.MustCreateCACertConfigMap(t, suite.InfrastructureNamespace, "tls-validity-checks-ca-certificate")
+		remote, _, _ := kubernetes.MustCreateCACertConfigMap(t, suite.WebBackendNamespace, "web-backend-cm")
+		for _, obj := range []client.Object{secret, local, remote} {
+			if err := c.Create(t.Context(), obj); err != nil {
+				t.Fatal(err)
+			}
+		}
+		enrollEnvtestServingCertificate(t, cfg, certificateMap, secret)
+		tc := tests.GatewayInvalidFrontendClientCertificateValidation
+		s.RunTest = tc.ShortName
+		tc.Run(t, s)
+	})
 	// The v1.7.0 suite Applier strips this fixture's address while processing
 	// static address placeholders. Apply it directly to preserve the request.
 	// Envtest exercises Gateway status without the upstream workload wait.

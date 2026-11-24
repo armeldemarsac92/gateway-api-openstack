@@ -20,13 +20,16 @@ package controller_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"slices"
-	"strings"
 	"testing"
+	"time"
 
 	"github.com/gophercloud/gophercloud/v2"
 	corev1 "k8s.io/api/core/v1"
@@ -76,6 +79,26 @@ func enableUpstreamListenerSetHTTPS(t *testing.T, writer *graph.Writer, cfg cont
 	gateway.HTTPSListenerIsolationAvailable = provider.HTTPSListenerIsolationAvailable
 }
 
+// Envtest records the enrollment under a simulated Barbican identifier.
+func enrollEnvtestServingCertificate(t *testing.T, cfg controller.Config, certificateMap string, secret *corev1.Secret) {
+	t.Helper()
+	block, _ := pem.Decode(secret.Data[corev1.TLSCertKey])
+	if block == nil || block.Type != "CERTIFICATE" {
+		t.Fatal("upstream fixture has no serving certificate")
+	}
+	leaf, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := fmt.Appendf(nil, `{"version":1,"scope":{"cluster":%q,"gatewayClass":%q,"project":%q,"region":%q},"revisions":[{"namespace":%q,"name":%q,"uid":%q,"resourceVersion":%q,"barbicanSecretID":%q,"chainSHA256":[%q],"notBefore":%q,"notAfter":%q}]}`,
+		cfg.ClusterID, upstreamStatusGatewayClass, cfg.OpenStackProjectID, envtestCertificateRegion,
+		secret.Namespace, secret.Name, secret.UID, secret.ResourceVersion, envtestServingSecretID,
+		fmt.Sprintf("%x", sha256.Sum256(leaf.Raw)), leaf.NotBefore.Format(time.RFC3339), leaf.NotAfter.Format(time.RFC3339))
+	if err := os.WriteFile(certificateMap, snapshot, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func testUpstreamListenerSetReferenceGrant(t *testing.T, s *suite.ConformanceTestSuite, cfg controller.Config, provider *recordingProvider, certificateMap string) {
 	t.Helper()
 	// The published suite normally creates this Secret before the case runs.
@@ -83,14 +106,7 @@ func testUpstreamListenerSetReferenceGrant(t *testing.T, s *suite.ConformanceTes
 	if err := s.Client.Create(t.Context(), secret); err != nil {
 		t.Fatal(err)
 	}
-	// Envtest simulates Barbican. The actual controller still checks the
-	// Kubernetes grant, the Secret metadata, and the enrollment scope/revision.
-	snapshot := fmt.Appendf(nil, `{"version":1,"scope":{"cluster":%q,"gatewayClass":%q,"project":%q,"region":%q},"revisions":[{"namespace":%q,"name":%q,"uid":%q,"resourceVersion":%q,"barbicanSecretID":%q,"chainSHA256":[%q],"notBefore":"2020-01-01T00:00:00Z","notAfter":"2050-01-01T00:00:00Z"}]}`,
-		cfg.ClusterID, upstreamStatusGatewayClass, cfg.OpenStackProjectID, envtestCertificateRegion,
-		secret.Namespace, secret.Name, secret.UID, secret.ResourceVersion, envtestServingSecretID, strings.Repeat("a", 64))
-	if err := os.WriteFile(certificateMap, snapshot, 0o444); err != nil {
-		t.Fatal(err)
-	}
+	enrollEnvtestServingCertificate(t, cfg, certificateMap, secret)
 
 	upstream := tests.ListenerSetReferenceGrant
 	s.RunTest = upstream.ShortName

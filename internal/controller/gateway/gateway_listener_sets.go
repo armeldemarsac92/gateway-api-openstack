@@ -208,8 +208,10 @@ func projectListenerSetEntry(spec gatewayv1.ListenerEntry, plainHTTP, isolatedHT
 			return entry
 		}
 	}
+	supportsHTTP := plainHTTP && listener.Protocol == gatewayv1.HTTPProtocolType
+	supportsHTTPS := isolatedHTTPS && listener.Protocol == gatewayv1.HTTPSProtocolType
 	switch {
-	case !(plainHTTP && listener.Protocol == gatewayv1.HTTPProtocolType || isolatedHTTPS && listener.Protocol == gatewayv1.HTTPSProtocolType):
+	case !supportsHTTP && !supportsHTTPS:
 		entry.rejection = gatewayv1.ListenerReasonUnsupportedProtocol
 	case listener.Port < 1 || listener.Port > 65535:
 		entry.rejection = gatewayv1.ListenerReasonPortUnavailable
