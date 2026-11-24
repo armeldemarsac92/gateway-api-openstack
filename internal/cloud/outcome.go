@@ -100,6 +100,9 @@ type GatewayResult struct {
 	HTTPPolicyTransition bool
 	// ScopedListenerReadyPorts contains the individually programmed listener ports.
 	ScopedListenerReadyPorts []int
+	// ScopedTLSClosedPorts contains denied HTTPS ports with settled absence
+	// or a verified disabled listener. Accepting a withdrawal write is insufficient.
+	ScopedTLSClosedPorts []int
 	// ScopedListenerDeferredPorts still match their active frontends while
 	// route observations are deferred. Only previously programmed sections
 	// at the same generation can retain status. A nil list means the provider

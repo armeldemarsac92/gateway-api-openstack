@@ -55,11 +55,13 @@ type ClientConfig struct {
 	Microversion string
 	// RequirePoolTLS selects the minimum Octavia API version for CA-backed pool TLS.
 	RequirePoolTLS bool
-	CloudsYAMLPath string
-	CloudName      string
-	AllowInsecure  bool
-	APIQPS         float64
-	APIBurst       int
+	// RequireFrontendClientValidation selects the native client authentication API.
+	RequireFrontendClientValidation bool
+	CloudsYAMLPath                  string
+	CloudName                       string
+	AllowInsecure                   bool
+	APIQPS                          float64
+	APIBurst                        int
 	// RequestObserver receives bounded observations for requests made after
 	// service discovery. It is optional so standalone read-only commands do not
 	// register or emit controller metrics by default.
@@ -69,7 +71,7 @@ type ClientConfig struct {
 // Validate checks settings that must be safe before authentication starts.
 func (cfg ClientConfig) Validate() error {
 	minimumMinor := 5
-	if cfg.RequirePoolTLS {
+	if cfg.RequirePoolTLS || cfg.RequireFrontendClientValidation {
 		minimumMinor = 8
 	}
 	if err := validateMicroversion(cfg.Microversion, minimumMinor); err != nil {

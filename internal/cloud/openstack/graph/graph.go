@@ -48,6 +48,7 @@ type desiredGatewayGraph struct {
 type observedGatewayGraph struct {
 	defaultHTTPResponseCodes map[string]int
 	httpsVirtualHosts        map[string][]string
+	frontendCA               map[int]frontendCAObservation
 	httpsIsolationAvailable  bool
 	httpsIsolationPolicies   map[string]httpsPolicyInventory
 	httpsIsolationUnverified map[string]bool
@@ -84,6 +85,7 @@ const (
 	graphCreateListener
 	graphDisableListener
 	graphUpdateListenerCertificate
+	graphPublishFrontendCA
 	graphUpdateListenerVirtualHosts
 	graphSetListenerNotFound
 	graphClearListenerDefaultPool
@@ -110,6 +112,8 @@ type graphMutation struct {
 	sniWithdrawal      bool
 	sni                sniMutation
 	scopedListener     cloud.ScopedListener
+	updateClientAuth   bool
+	withdrawClientCA   bool
 	message            string
 }
 
@@ -121,6 +125,9 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	var addressBlocked bool
 	var actual observedGatewayGraph
 	defer func() {
+		if retErr == nil {
+			result.Gateway.ScopedTLSClosedPorts = actual.closedDeniedHTTPSPorts(spec.Gateway.Spec)
+		}
 		result.Gateway.AddressAbsent = actual.addressAbsent
 		result.Gateway.AddressActive = hasActiveGatewayAddress(spec.Gateway.Spec, actual)
 		result.Gateway.AddressActivityObserved = actual.addressAbsent || result.Gateway.AddressActive ||
@@ -159,7 +166,11 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		}
 		actual.outcome = p.progressingOutcome(step.message)
 		result := p.pendingGraphResult(ctx, desired, actual)
-		return result, errors.Join(err, p.executeGraphMutation(ctx, desired, actual, step))
+		mutationErr := p.executeGraphMutation(ctx, desired, actual, step)
+		if mutationErr == nil {
+			result.Outcome.MutationSubmitted = true
+		}
+		return result, errors.Join(err, mutationErr)
 	}
 	var incomplete *httpFilterInventoryError
 	errors.As(err, &incomplete)
@@ -423,6 +434,9 @@ func (p *Provider) recordGraphMutationOutcome(result *cloud.GatewayGraphResult, 
 			return port == step.scopedListener.Port
 		})
 	}
+	if step.kind == graphPublishFrontendCA {
+		result.Outcome.MutationSubmitted = true
+	}
 	if step.kind == graphRouteMutation && (step.backendKey != "" || step.route.kind == routeMutationClaimBackendCA || step.route.kind == routeMutationPublishBackendCA ||
 		step.route.kind == routeMutationSetBackendTLS || step.route.backendTLS != nil) {
 		result.Outcome.MutationSubmitted = true
@@ -673,6 +687,11 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 	if withdrawTLS && (!rawTLS && (spec.Gateway.Spec.ListenerProtocol != cloud.ListenerProtocolHTTP || spec.Gateway.Spec.ScopedListeners == nil) ||
 		len(spec.Routes) != 0 || !sameGatewayIdentity(spec.Identity, spec.Gateway.Spec.Identity)) {
 		return invalid("TLS withdrawal requires the Gateway's TLS binding and no route models")
+	}
+	if len(spec.Gateway.TLSWithdrawalPorts) != 0 && (!withdrawTLS || rawTLS || slices.ContainsFunc(spec.Gateway.TLSWithdrawalPorts, func(port int) bool {
+		return port < 1 || port > 65535
+	})) {
+		return invalid("targeted TLS withdrawal requires valid scoped HTTPS ports")
 	}
 	if !rawTLS && spec.Gateway.TCPTLSCertificateRef != "" {
 		return invalid("TCP certificates require the TCP TLS termination profile")
@@ -1199,6 +1218,7 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 		}
 		if actual.scoped && actual.protocol == cloud.ListenerProtocolHTTP {
 			p.observeHTTPSIsolation(ctx, desired, &actual, inventory.DefaultPoolsObserved)
+			p.observeFrontendCAs(ctx, desired, &actual)
 			if observation.phase == loadBalancerPhaseActive {
 				p.planScopedHTTPSWithdrawal(desired, &actual)
 			}

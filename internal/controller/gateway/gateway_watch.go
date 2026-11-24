@@ -20,10 +20,12 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -35,6 +37,7 @@ import (
 
 	configv1alpha1 "github.com/gateway-api-openstack/gateway-api-openstack/api/v1alpha1"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/certificates"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
@@ -136,6 +139,13 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 	if r.Config.OperatorHTTPS || r.Config.BackendClientCertificate {
 		gatewayController.Watches(&gatewayv1.ReferenceGrant{}, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForCertificateGrant))
 	}
+	if r.Config.FrontendClientValidation {
+		if err := manager.GetFieldIndexer().IndexField(context.Background(), &gatewayv1.Gateway{}, gatewayFrontendCAIndex, gatewayFrontendCAKeys); err != nil {
+			return err
+		}
+		// Watch only metadata. CA data is read directly after reference authorization.
+		gatewayController.WatchesMetadata(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForFrontendCA))
+	}
 	return gatewayController.
 		Watches(
 			&gatewayv1.GatewayClass{},
@@ -179,15 +189,29 @@ func (r *Reconciler) gatewayRequestsForParameters(ctx context.Context, object cl
 
 func (r *Reconciler) gatewayRequestsForCertificateGrant(ctx context.Context, object client.Object) []reconcile.Request {
 	grant, ok := object.(*gatewayv1.ReferenceGrant)
-	if !ok || !slices.ContainsFunc(grant.Spec.To, func(target gatewayv1.ReferenceGrantTo) bool {
+	if !ok {
+		return nil
+	}
+	permitsSecrets := slices.ContainsFunc(grant.Spec.To, func(target gatewayv1.ReferenceGrantTo) bool {
 		return target.Group == "" && target.Kind == "Secret"
-	}) {
+	})
+	permitsCA := r.Config.FrontendClientValidation && slices.ContainsFunc(grant.Spec.To, func(target gatewayv1.ReferenceGrantTo) bool {
+		return target.Group == "" && target.Kind == "ConfigMap"
+	})
+	if !permitsSecrets && !permitsCA {
 		return nil
 	}
 	keys := make(map[types.NamespacedName]struct{})
 	namespaces := make(map[gatewayv1.Namespace]bool)
 	for _, source := range grant.Spec.From {
-		if source.Group != gatewayv1.GroupName || source.Kind != "Gateway" || namespaces[source.Namespace] {
+		if source.Group != gatewayv1.GroupName {
+			continue
+		}
+		if source.Kind == "ListenerSet" && permitsSecrets && r.Config.OperatorHTTPS {
+			r.addGatewayRequestsForListenerSetGrant(ctx, string(source.Namespace), grant.Namespace, keys)
+			continue
+		}
+		if source.Kind != "Gateway" || namespaces[source.Namespace] {
 			continue
 		}
 		namespaces[source.Namespace] = true
@@ -198,11 +222,14 @@ func (r *Reconciler) gatewayRequestsForCertificateGrant(ctx context.Context, obj
 		}
 		for i := range gateways.Items {
 			gateway := &gateways.Items[i]
-			if ref := BackendClientCertificateRef(gateway); r.Config.BackendClientCertificate &&
+			if permitsCA && referencesFrontendCAGrant(gateway, grant) {
+				keys[client.ObjectKeyFromObject(gateway)] = struct{}{}
+			}
+			if ref := BackendClientCertificateRef(gateway); permitsSecrets && r.Config.BackendClientCertificate &&
 				ref != nil && ref.Namespace != nil && string(*ref.Namespace) == grant.Namespace {
 				keys[client.ObjectKeyFromObject(gateway)] = struct{}{}
 			}
-			if slices.ContainsFunc(gateway.Spec.Listeners, func(listener gatewayv1.Listener) bool {
+			if permitsSecrets && slices.ContainsFunc(gateway.Spec.Listeners, func(listener gatewayv1.Listener) bool {
 				return (listener.Protocol == gatewayv1.HTTPSProtocolType || terminatesTLS(&listener)) && listener.TLS != nil &&
 					slices.ContainsFunc(listener.TLS.CertificateRefs, func(ref gatewayv1.SecretObjectReference) bool {
 						return ref.Namespace != nil && string(*ref.Namespace) == grant.Namespace
@@ -213,6 +240,87 @@ func (r *Reconciler) gatewayRequestsForCertificateGrant(ctx context.Context, obj
 		}
 	}
 	return controller.SortedRequests(keys)
+}
+
+const gatewayFrontendCAIndex = "spec.frontendClientCA"
+
+func gatewayFrontendCAKeys(object client.Object) []string {
+	gateway := object.(*gatewayv1.Gateway)
+	var keys []string
+	addValidation := func(validation *gatewayv1.FrontendTLSValidation) {
+		if validation != nil && len(validation.CACertificateRefs) == 1 {
+			if key, ok := certificates.FrontendCAKey(gateway.Namespace, validation.CACertificateRefs[0]); ok {
+				keys = append(keys, key.String())
+			}
+		}
+	}
+	for _, listener := range gateway.Spec.Listeners {
+		if listener.Protocol == gatewayv1.HTTPSProtocolType {
+			addValidation(model.FrontendClientValidation(gateway.Spec.TLS, listener.Port))
+		}
+	}
+	// An admitted ListenerSet can introduce an HTTPS port that the Gateway
+	// does not declare. Index its possible CA dependencies on the Gateway.
+	if !model.GatewayDisallowsListenerSets(gateway) && gateway.Spec.TLS != nil && gateway.Spec.TLS.Frontend != nil {
+		frontend := gateway.Spec.TLS.Frontend
+		addValidation(frontend.Default.Validation)
+		for _, port := range frontend.PerPort {
+			addValidation(port.TLS.Validation)
+		}
+	}
+	slices.Sort(keys)
+	return slices.Compact(keys)
+}
+
+func referencesFrontendCAGrant(gateway *gatewayv1.Gateway, grant *gatewayv1.ReferenceGrant) bool {
+	for _, key := range gatewayFrontendCAKeys(gateway) {
+		namespace, name, _ := strings.Cut(key, "/")
+		if namespace == gateway.Namespace || namespace != grant.Namespace {
+			continue
+		}
+		if slices.ContainsFunc(grant.Spec.To, func(target gatewayv1.ReferenceGrantTo) bool {
+			return target.Group == "" && target.Kind == "ConfigMap" && (target.Name == nil || string(*target.Name) == name)
+		}) {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *Reconciler) gatewayRequestsForFrontendCA(ctx context.Context, object client.Object) []reconcile.Request {
+	var gateways gatewayv1.GatewayList
+	if err := r.List(ctx, &gateways, client.MatchingFields{gatewayFrontendCAIndex: client.ObjectKeyFromObject(object).String()}); err != nil {
+		log.FromContext(ctx).Error(err, "Could not list Gateways for frontend CA ConfigMap")
+		return nil
+	}
+	keys := make(map[types.NamespacedName]struct{}, len(gateways.Items))
+	for _, gateway := range gateways.Items {
+		keys[client.ObjectKeyFromObject(&gateway)] = struct{}{}
+	}
+	return controller.SortedRequests(keys)
+}
+
+func (r *Reconciler) addGatewayRequestsForListenerSetGrant(ctx context.Context, fromNamespace, toNamespace string, keys map[types.NamespacedName]struct{}) {
+	var sets gatewayv1.ListenerSetList
+	if err := r.List(ctx, &sets, client.InNamespace(fromNamespace)); err != nil {
+		if !meta.IsNoMatchError(err) {
+			log.FromContext(ctx).Error(err, "Could not list ListenerSets for certificate ReferenceGrant")
+		}
+		return
+	}
+	for i := range sets.Items {
+		set := &sets.Items[i]
+		if slices.ContainsFunc(set.Spec.Listeners, func(entry gatewayv1.ListenerEntry) bool {
+			return entry.Protocol == gatewayv1.HTTPSProtocolType && entry.TLS != nil &&
+				slices.ContainsFunc(entry.TLS.CertificateRefs, func(ref gatewayv1.SecretObjectReference) bool {
+					return ref.Namespace != nil && string(*ref.Namespace) == toNamespace
+				})
+		}) {
+			if key := model.ListenerSetParentKey(set); key.Name != "" {
+				keys[key] = struct{}{}
+			}
+		}
+	}
 }
 
 func gatewayRequestsForListenerSet(_ context.Context, object client.Object) []reconcile.Request {

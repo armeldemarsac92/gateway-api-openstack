@@ -213,6 +213,7 @@ func (w *Writer) ReconcileGraph(ctx context.Context, request Request) (cloud.Gat
 }
 
 func (w *Writer) finishFailedEnsure(ctx context.Context, request Request, gateway GatewayInput, result cloud.GatewayGraphResult, graphErr error) (cloud.GatewayGraphResult, error) {
+	var backendErr error
 	if request.Action == Ensure && gateway.Node.BackendCAOwned &&
 		cloud.NormalizeListenerProtocol(gateway.Node.Spec.ListenerProtocol) == cloud.ListenerProtocolHTTP {
 		request.Action = WithdrawBackendClientCertificate
@@ -221,11 +222,13 @@ func (w *Writer) finishFailedEnsure(ctx context.Context, request Request, gatewa
 		if err == nil {
 			_, err = w.withdrawBackendClientCertificate(ctx, request.Identity, input)
 		}
-		if err != nil {
-			graphErr = errors.Join(graphErr, err)
-		}
+		backendErr = err
 	}
-	return w.finishTLS(ctx, request.Identity, gateway, result, graphErr)
+	result, err := w.finishTLS(ctx, request.Identity, gateway, result, graphErr)
+	if backendErr != nil {
+		err = errors.Join(err, backendErr)
+	}
+	return result, err
 }
 
 func (w *Writer) withdrawBackendClientCertificate(ctx context.Context, identity cloud.Identity, input GatewayInput) (cloud.GatewayGraphResult, error) {
@@ -255,14 +258,23 @@ func (w *Writer) finishTLS(ctx context.Context, identity cloud.Identity, gateway
 	}
 	// Keep a change detected by the provider's mutation fence even if the
 	// certificate is authorized again by the time we observe withdrawal.
-	for cause := graphErr; cause != nil; cause = errors.Unwrap(cause) {
-		if previous, ok := cause.(*TLSAuthorizationChanged); ok {
-			changed = append(changed, previous.Ports...)
-			slices.Sort(changed)
-			changed = slices.Compact(changed)
-			graphErr = nil
-			break
+	var previous *TLSAuthorizationChanged
+	if errors.As(graphErr, &previous) {
+		changed = append(changed, previous.Ports...)
+		slices.Sort(changed)
+		changed = slices.Compact(changed)
+		// Keep unrelated failures when the error has multiple causes.
+		for cause := graphErr; cause != nil; cause = errors.Unwrap(cause) {
+			if cause == previous {
+				graphErr = nil
+				break
+			}
 		}
+	}
+	if (graphErr == nil || previous != nil) && len(changed) != 0 && input.Node.Spec.ListenerProtocol == cloud.ListenerProtocolHTTP {
+		// A request with a known authorization change does not imply that
+		// route policy ownership on unrelated HTTPS ports became unreadable.
+		input.Node.TLSWithdrawalPorts = changed
 	}
 	withdrawal, err := w.withdrawTLS(ctx, identity, input)
 	if err == nil && withdrawal.Gateway.ScopedListenerDeferredPorts != nil {
@@ -311,7 +323,7 @@ func changedTLSListeners(observed, current GatewayInput) []int {
 	var ports []int
 	for _, listener := range observed.Node.Spec.ScopedListeners {
 		current := listeners[listener.Port]
-		if listener.TLS != nil && (current.CertificateRef != listener.TLS.CertificateRef || !slices.Equal(current.VirtualHosts, listener.TLS.VirtualHosts)) {
+		if listener.TLS != nil && !listener.TLS.Equal(&current) {
 			ports = append(ports, listener.Port)
 		}
 	}

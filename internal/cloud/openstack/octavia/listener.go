@@ -149,6 +149,34 @@ func (s *Service) UpdateListener(ctx context.Context, id string, opts listeners.
 	return listeners.Update(ctx, s.client, id, opts).Extract()
 }
 
+type listenerClientAuthenticationOptions struct {
+	listeners.UpdateOpts
+	ref string
+}
+
+func (opts listenerClientAuthenticationOptions) ToListenerUpdateMap() (map[string]any, error) {
+	body, err := opts.UpdateOpts.ToListenerUpdateMap()
+	if err != nil {
+		return nil, err
+	}
+	fields := body["listener"].(map[string]any)
+	if opts.ref != "" {
+		fields["client_ca_tls_container_ref"] = opts.ref
+		fields["client_authentication"] = listeners.ClientAuthenticationMandatory
+	} else {
+		fields["client_ca_tls_container_ref"] = nil
+		fields["client_authentication"] = listeners.ClientAuthenticationNone
+	}
+	return body, nil
+}
+
+// SetListenerClientAuthentication updates the native mode and CA atomically.
+// Pass an empty reference only for an explicit removal on a closed listener.
+func (s *Service) SetListenerClientAuthentication(ctx context.Context, id string, opts listeners.UpdateOpts, ref string) error {
+	_, err := listeners.Update(ctx, s.client, id, listenerClientAuthenticationOptions{UpdateOpts: opts, ref: ref}).Extract()
+	return err
+}
+
 // DeleteListener deletes one listener.
 func (s *Service) DeleteListener(ctx context.Context, id string) error {
 	return listeners.Delete(ctx, s.client, id).ExtractErr()

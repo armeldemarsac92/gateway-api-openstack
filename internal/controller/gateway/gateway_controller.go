@@ -105,8 +105,8 @@ func (r *Reconciler) Reconcile(
 			result = ctrl.Result{}
 			retErr = errors.Join(retErr, scope.patchCause, err)
 		}
-		if retErr == nil && scope.patchCause == nil && !result.Requeue && scope.gateway.DeletionTimestamp.IsZero() &&
-			(usesHTTPSProfile(r.Config, scope.gateway) || r.Config.TLSRoutesEnabled() && hasTLSListener(scope.gateway) ||
+		if retErr == nil && (scope.patchCause == nil || scope.hasDelegatedHTTPS && result.RequeueAfter > 0) && !result.Requeue && scope.gateway.DeletionTimestamp.IsZero() &&
+			(scope.hasDelegatedHTTPS || usesHTTPSProfile(r.Config, scope.gateway) || r.Config.TLSRoutesEnabled() && hasTLSListener(scope.gateway) ||
 				r.Config.BackendClientCertificate && BackendClientCertificateRef(scope.gateway) != nil) &&
 			(result.RequeueAfter == 0 || result.RequeueAfter > httpsPollInterval) {
 			result.RequeueAfter = httpsPollInterval
@@ -156,7 +156,7 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, scope *gatewayScope) (
 		if BackendClientCertificateRef(scope.gateway) != nil && !r.Config.BackendTLSPolicy {
 			result, err := r.withdrawGatewayCertificates(ctx, scope.gateway)
 			if usesHTTPSProfile(r.Config, scope.gateway) {
-				r.applyHTTPSListenerStatus(scope.gateway, scope.original.Status, r.listenerTLSIssues(ctx, scope.gateway), nil, false)
+				r.applyHTTPSListenerStatus(scope.gateway, scope.original.Status, r.listenerTLSIssues(ctx, scope.gateway, ListenerSetProjection{}), nil, false)
 			}
 			return result, err
 		}
@@ -264,9 +264,16 @@ func (r *Reconciler) reconcileGatewayGraph(
 	scope *gatewayScope,
 	decision gatewayPhaseDecision,
 ) (ctrl.Result, error) {
-	sets, err := ObserveListenerSets(ctx, r.APIReader, r.Config, scope.gateway)
+	sets, err := r.ObserveListenerSets(ctx, r.APIReader, scope.gateway)
 	if err != nil {
 		return ctrl.Result{}, err
+	}
+	scope.hasDelegatedHTTPS = len(sets.https) != 0
+	if len(sets.isolationPorts) != 0 {
+		if err := r.checkpointListenerSetHTTPS(ctx, scope.gateway, sets); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{Requeue: true}, nil
 	}
 	graphResult, err := r.ensureGateway(ctx, scope.gateway)
 	if errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) {
@@ -279,18 +286,26 @@ func (r *Reconciler) reconcileGatewayGraph(
 		// Address readback is independent of listener and route readiness.
 		r.observeAddressAssignment(scope.gateway, graphResult.Gateway)
 	}
+	var changedTLS *graph.TLSAuthorizationChanged
 	if !model.GatewayDisallowsListenerSets(scope.gateway) && !errors.Is(err, errGatewayChanged) {
-		if err := r.reportListenerSets(ctx, scope.gateway, sets, graphResult); err != nil {
+		statusResult := graphResult
+		var authorizationChange *graph.TLSAuthorizationChanged
+		if errors.As(err, &authorizationChange) {
+			statusResult.Gateway.ScopedListenerReadyPorts = slices.DeleteFunc(slices.Clone(graphResult.Gateway.ScopedListenerReadyPorts), func(port int) bool {
+				return slices.Contains(authorizationChange.Ports, port)
+			})
+		}
+		if err := r.reportListenerSets(ctx, scope.gateway, sets, statusResult); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
-	var changedTLS *graph.TLSAuthorizationChanged
 	var tlsIssues map[gatewayv1.SectionName]httpsListenerStatusIssue
 	var keepGatewayProgrammed bool
 	if usesHTTPSProfile(r.Config, scope.gateway) {
-		tlsIssues = r.listenerTLSIssues(ctx, scope.gateway)
+		tlsIssues = r.listenerTLSIssues(ctx, scope.gateway, sets)
 		defer func() {
 			r.applyHTTPSListenerStatus(scope.gateway, scope.original.Status, tlsIssues, changedTLS, keepGatewayProgrammed)
+			r.reportFrontendCAWithdrawal(scope.gateway, tlsIssues, graphResult.Gateway.ScopedTLSClosedPorts)
 		}()
 	}
 	if terminatesTLS(decision.listener) {

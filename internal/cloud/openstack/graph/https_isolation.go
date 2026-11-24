@@ -112,6 +112,9 @@ func (p *Provider) observeHTTPSIsolation(ctx context.Context, desired desiredGat
 	}
 	actual.httpsIsolationAvailable = p.httpsListenerIsolation && p.verifyGatewayHTTPCapabilities(ctx, desired, *actual,
 		[]string{octavia.GatewayCapabilityHTTPSListenerIsolation}) == nil
+	if len(desired.spec.Gateway.TLSWithdrawalPorts) != 0 {
+		return
+	}
 	actual.httpsIsolationPolicies = make(map[string]httpsPolicyInventory)
 	actual.httpsIsolationUnverified = make(map[string]bool)
 	configured := scopedHTTPListeners(desired)
@@ -237,7 +240,7 @@ func (p *Provider) planHTTPSPolicyRetirement(ctx context.Context, desired desire
 			deletion: listenerDeletionStep(listener.ID), message: "Replacing the closed Octavia listener with isolated HTTPS"}
 		return
 	}
-	if listener.Protocol != terminatedHTTPS || !supportsSingleCertificate(listener) || listener.DefaultTlsContainerRef == "" {
+	if listener.Protocol != terminatedHTTPS || !singleServerCertificate(listener) || listener.ClientCRLContainerRef != "" || listener.DefaultTlsContainerRef == "" {
 		return
 	}
 	if spec.TLS == nil {

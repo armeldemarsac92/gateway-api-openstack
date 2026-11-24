@@ -56,11 +56,14 @@ type GatewayGraphNode struct {
 	// TCPTLSCertificateRef is the currently authorized certificate for the raw
 	// TCP termination profile. An empty reference requires the listener closed.
 	TCPTLSCertificateRef string `json:",omitempty"`
+	// TLSWithdrawalPorts restricts a known authorization change to these
+	// physical HTTPS ports. A nil list checks all TLS frontends.
+	TLSWithdrawalPorts []int `json:",omitempty"`
 	// BackendClientCertificate applies only to HTTP-family pools selected by BackendTLSPolicy.
 	BackendClientCertificate BackendClientCertificate
-	// BackendCAOwned persists across controller restarts and operator opt-out.
+	// BackendCAOwned checkpoints ownership of both frontend and backend trust anchors.
 	BackendCAOwned bool `json:",omitempty"`
-	// ClaimBackendCA checkpoints ownership before creating a Barbican revision.
+	// ClaimBackendCA checkpoints ownership before creating a Gateway CA revision.
 	ClaimBackendCA func(context.Context) error `json:"-"`
 }
 

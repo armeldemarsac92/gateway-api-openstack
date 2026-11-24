@@ -91,6 +91,7 @@ func TestControllerEnvtest(t *testing.T) {
 
 	config := testConfig()
 	config.GatewayAPIChannel = os.Getenv("GATEWAY_API_CHANNEL")
+	serverCertificateMap := filepath.Join(t.TempDir(), "listener-certificates.json")
 	// Status and binding indexes belong to one controller name. Keep the
 	// manager-driven watches separate from the manually stepped reconcilers.
 	startManager := func(t *testing.T, cfg controller.Config, provider *recordingProvider) ctrl.Manager {
@@ -108,7 +109,10 @@ func TestControllerEnvtest(t *testing.T) {
 			t.Fatalf("set up controller indexes: %v", err)
 		}
 		if provider != nil {
-			startGatewayStatusReconcilers(t, manager, cfg, provider)
+			writer := startGatewayStatusReconcilers(t, manager, cfg, provider)
+			if cfg.OperatorHTTPS {
+				enableUpstreamListenerSetHTTPS(t, writer, cfg, serverCertificateMap)
+			}
 		}
 		managerContext, stopManager := context.WithCancel(context.Background())
 		managerResult := make(chan error, 1)
@@ -141,6 +145,7 @@ func TestControllerEnvtest(t *testing.T) {
 	statusConfig := config
 	statusConfig.ControllerName = "status.example.com/gateway-api-openstack"
 	statusConfig.BackendTLSPolicy, statusConfig.BackendClientCertificate = true, true
+	statusConfig.OperatorHTTPS, statusConfig.HTTPSListenerIsolation, statusConfig.FrontendClientValidation = true, true, true
 	statusProvider := &recordingProvider{}
 	startManager(t, statusConfig, statusProvider)
 
@@ -186,7 +191,7 @@ func TestControllerEnvtest(t *testing.T) {
 	})
 	cacheClient := manager.GetClient()
 	t.Run("upstream Gateway status cases", func(t *testing.T) {
-		testUpstreamGatewayStatus(t, apiClient, statusConfig, statusProvider)
+		testUpstreamGatewayStatus(t, apiClient, statusConfig, statusProvider, serverCertificateMap)
 	})
 	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "controller-envtest"}}
 	if err := apiClient.Create(t.Context(), namespace); err != nil {

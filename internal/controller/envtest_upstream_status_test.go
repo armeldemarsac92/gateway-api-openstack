@@ -106,7 +106,7 @@ func startGatewayStatusReconcilers(t *testing.T, manager ctrl.Manager, cfg contr
 
 // These upstream cases exercise only the API server and controller watches.
 // Upstream profile setup also needs ready workloads and is run separately.
-func testUpstreamGatewayStatus(t *testing.T, c client.Client, cfg controller.Config, provider *recordingProvider) {
+func testUpstreamGatewayStatus(t *testing.T, c client.Client, cfg controller.Config, provider *recordingProvider, certificateMap string) {
 	t.Helper()
 	const className = upstreamStatusGatewayClass
 	parameters := envtestClassParameters(className)
@@ -208,6 +208,12 @@ func testUpstreamGatewayStatus(t *testing.T, c client.Client, cfg controller.Con
 		if err := c.Status().Update(t.Context(), pod); err != nil {
 			t.Fatal(err)
 		}
+		t.Run(tests.ListenerSetReferenceGrant.ShortName, func(t *testing.T) {
+			testUpstreamListenerSetReferenceGrant(t, s, cfg, provider, certificateMap)
+			t.Run("delegated frontend client validation", func(t *testing.T) {
+				testDelegatedFrontendClientValidation(t, c, cfg, provider)
+			})
+		})
 		for _, tc := range []suite.ConformanceTest{
 			tests.ListenerSetDefaultNotAllowed, tests.ListenerSetAllowedNamespaceNone, tests.ListenerSetAllowedNamespaceSame,
 			tests.ListenerSetAllowedNamespaceSelector, tests.ListenerSetHostnameConflict, tests.ListenerSetProtocolConflict,

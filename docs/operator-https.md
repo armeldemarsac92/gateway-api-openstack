@@ -18,6 +18,14 @@ Removing sections keeps the last HTTPS section isolated on its original port. Re
 
 For rollback, first drain and remove the enrolled Gateway with the enabled controller and regional capability. Check the Octavia listener and policy inventory before turning off the option. A previously enrolled frontend remains closed if the operator disables isolation or a readback cannot confirm its section set.
 
+### Delegate an HTTPS section to a ListenerSet
+
+Delegated HTTPS is available on the Gateway API v1.7.0 Standard and Experimental bundles when the operator HTTPS and regional Amphora listener-isolation options are enabled. Set the Gateway's `allowedListeners` to admit the ListenerSet namespace. Use one core Secret reference per terminating listener. On a shared port, the Gateway and the ListenerSets must resolve to the same enrolled Barbican certificate. HTTPRoutes select a delegated section by setting their parent kind to `ListenerSet` and using that ListenerSet's name, namespace and section name.
+
+The default certificate namespace is the ListenerSet namespace. For a cross-namespace Secret, create the ReferenceGrant in the Secret's namespace and set `spec.from.kind` to `ListenerSet` and `spec.from.namespace` to the ListenerSet namespace. Enrollment still uses the parent GatewayClass. A grant for a Gateway allows only the Gateway's own references.
+
+Removing a ListenerSet's grant reports `ResolvedRefs=False` with `RefNotPermitted` and withdraws that section and its HTTPRoutes from the HTTPS frontend. Independently authorized sections keep their authorization. A shared port can temporarily close while Octavia retires obsolete policies. Restore the grant to enroll the section again using the existing certificate map entry.
+
 ## Enable the mode
 
 The default controller has no Secret permissions. The optional component sets `GATEWAY_OPENSTACK_TLS_CERTIFICATE_MAP` and mounts a protected directory at `/etc/gateway-operator/certificates`. For a standalone installation, start your pinned-image overlay from [the HTTPS installation](../config/operator-https/kustomization.yaml). For Magnum, render [the five-object workload overlay](../integrations/magnum-capi-helm/workload-operator-https/kustomization.yaml) into the operator artifact and record its SHA-256 in the conductor configuration. The mapping ConfigMap and the per-Secret Role and RoleBinding belong to the workload operator. [Magnum installation](qualification/v1.7.0/magnum-operator.md)
@@ -68,6 +76,60 @@ kubectl -n openstack-gateway-system create configmap openstack-gateway-tls-revis
 ```
 
 The full ConfigMap directory is mounted read-only. After the kubelet projects a new map into the Pod, a subsequent HTTPS reconciliation reads it. Healthy and settled listeners check enrollment at least once per five-second polling interval, subject to work-queue and API latency. Kubelet projection, provider retries and listener provisioning also affect the time until a new connection sees the change. With multiple controller replicas, verify the expected map is available to each replica before a planned leadership change. [Kubernetes projected ConfigMap updates](https://kubernetes.io/docs/concepts/configuration/configmap/#mounted-configmaps-are-updated-automatically)
+
+## Require a client certificate
+
+Use the standalone or Magnum frontend validation overlay. Both include operator-provisioned HTTPS, add `--octavia-frontend-client-validation`, select Octavia API microversion 2.8 and grant read and watch access to core ConfigMaps. Custom overlays can select a later microversion. Continue using the regional Barbican project and the existing server certificate enrollment procedure. [Standalone overlay](../config/octavia-frontend-client-validation/kustomization.yaml) · [Magnum workload overlay](../integrations/magnum-capi-helm/workload-octavia-frontend-client-validation/kustomization.yaml)
+
+To authenticate both clients and upstreams, add the backend TLS policy component to the frontend validation overlay. Both components share one Octavia microversion argument. Set a higher regional microversion in the final deployment overlay if required. [Backend TLS policy component](../config/components/octavia-backend-tls-policy/kustomization.yaml)
+
+The controller watches ConfigMap metadata and reads CA contents directly after checking the Gateway reference. It publishes the CA as an immutable Barbican revision scoped to the Gateway. Octavia must have access to those CA revisions.
+
+Put one PEM-encoded CA certificate in the ConfigMap's `ca.crt` key. Set the following fields under `Gateway.spec` to require the client certificate on every HTTPS port. Port 8443 uses its own CA.
+
+```yaml
+tls:
+  frontend:
+    default:
+      validation:
+        mode: AllowValidOnly
+        caCertificateRefs:
+          - group: ""
+            kind: ConfigMap
+            name: workforce-ca
+    perPort:
+      - port: 8443
+        tls:
+          validation:
+            caCertificateRefs:
+              - group: ""
+                kind: ConfigMap
+                name: partner-ca
+                namespace: trust
+```
+
+The default mode is `AllowValidOnly`. A port override replaces the default, and every HTTPS section on the same port uses the same client trust. Plain HTTP ports are independent. For a cross-namespace CA, create a ReferenceGrant in the ConfigMap's namespace. In this example, the Gateway lives in `apps`.
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: ReferenceGrant
+metadata:
+  namespace: trust
+  name: apps-partner-ca
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      namespace: apps
+  to:
+    - group: ""
+      kind: ConfigMap
+      name: partner-ca
+```
+
+For an invalid CA reference, look for `ResolvedRefs=False`, `Accepted=False` with reason `NoValidCACertificate`, and `Programmed=False` on the affected listener. For a missing grant, `ResolvedRefs` reports `RefNotPermitted`. Requests for `AllowInsecureFallback` report `Accepted=False` with reason `UnsupportedValue` and keep the selected ports closed.
+
+Rotating a CA closes the affected port while Octavia changes and verifies its native client authentication settings. Removing the ConfigMap, revoking its ReferenceGrant, or disabling the controller option while strict validation is still requested closes the port. If Octavia rejects the administrative shutdown because the attached CA cannot be read, the controller removes the HTTPS listener after verifying its policy and rule ownership. The port remains withdrawn until authorization returns. `Programmed=False` with reason `Pending` indicates that the controller is still waiting for Octavia to confirm closure. Restore the authorized configuration to rebuild or reopen the affected listener. Check convergence by opening new HTTPS connections with a trusted client certificate, with no client certificate, and with a client certificate issued by a different CA. Only the first connection should complete. If you intentionally remove validation from a Gateway, Octavia clears the Gateway-owned CA on the closed listener before restoring ordinary HTTPS.
 
 ## Attach a tenant route
 

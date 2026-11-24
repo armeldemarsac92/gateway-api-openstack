@@ -359,7 +359,7 @@ func (r *Reconciler) validateRouteStatusOwnership(
 		if !slices.EqualFunc(plan.selection, current, func(previous, current routeParentSelection) bool {
 			if !controller.ParentRefsEqual(previous.parent.ref, route.Namespace, current.parent.ref, route.Namespace) ||
 				!slices.EqualFunc(previous.listeners, current.listeners, func(a, b *gatewayv1.Listener) bool {
-					return listenerSectionIdentity(*a) == listenerSectionIdentity(*b)
+					return listenerSectionIdentity(previous.section(a.Name), *a) == listenerSectionIdentity(current.section(b.Name), *b)
 				}) {
 				return false
 			}

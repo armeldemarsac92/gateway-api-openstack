@@ -82,10 +82,36 @@ type ScopedListener struct {
 // ListenerTLS requests a terminated HTTPS frontend. An empty CertificateRef
 // withdraws the frontend until an authorized reference becomes available.
 type ListenerTLS struct {
-	CertificateRef string
+	CertificateRef   string
+	ClientValidation *FrontendClientValidation
 	// VirtualHosts is the complete set of isolated HTTPS listener hostnames on
 	// this port. "*" denotes the hostname-unset section. Nil selects dedicated TLS.
 	VirtualHosts []string `json:",omitempty"`
+}
+
+// FrontendClientValidation identifies the normalized trust anchor on a strict
+// HTTPS port. The PEM is passed to Barbican and excluded from graph serialization.
+type FrontendClientValidation struct {
+	ConfigMapUID string
+	Digest       string
+	PEM          []byte `json:"-"`
+}
+
+// Equal compares the immutable identity and digest of the trust anchor.
+func (v *FrontendClientValidation) Equal(other *FrontendClientValidation) bool {
+	if v == nil || other == nil {
+		return v == other
+	}
+	return v.ConfigMapUID == other.ConfigMapUID && v.Digest == other.Digest
+}
+
+// Equal compares frontend authorization across independent observations.
+func (t *ListenerTLS) Equal(other *ListenerTLS) bool {
+	if t == nil || other == nil {
+		return t == other
+	}
+	return t.CertificateRef == other.CertificateRef && t.ClientValidation.Equal(other.ClientValidation) &&
+		slices.Equal(t.VirtualHosts, other.VirtualHosts)
 }
 
 // GatewayState is the provider-neutral result published to Gateway status and
