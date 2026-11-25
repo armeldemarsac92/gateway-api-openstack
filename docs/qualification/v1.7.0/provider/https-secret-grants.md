@@ -2,6 +2,8 @@
 
 With operator HTTPS enabled, tenants can inspect certificate authorization even when another listener claims the same port. Both conflicting listeners report `Accepted=False/PortUnavailable`, `Conflicted=True/ProtocolConflict` and `Programmed=False`. Each listener also reports whether the operator-approved Secret revision is authorized. A missing cross-namespace grant yields `ResolvedRefs=False/RefNotPermitted`. [Operator guide](../../../operator-https.md)
 
+With HTTPS listener isolation enabled, the manager ran the original `GatewaySecretMissingReferenceGrant` assertion on both release bundles. Both sections on port 443 reported `ResolvedRefs=False/RefNotPermitted` at the Gateway generation. They also reported `Accepted=False/UnsupportedValue` and `Programmed=False/Invalid` because their certificate references differed. [Signed manager, previous failure and per-listener conditions](shared-https-secret-grant-evidence/receipt.json)
+
 ## Registered Gateway API v1.7.0 cases
 
 | Upstream case | Standard | Experimental | Original assertion observed |
