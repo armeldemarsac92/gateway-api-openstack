@@ -46,9 +46,10 @@ func (s *Service) ListPools(ctx context.Context, opts pools.ListOpts) ([]pools.P
 
 // PoolInventory carries the provider extension separately from SDK pool types.
 type PoolInventory struct {
-	Items      []pools.Pool
-	BackendH2C map[string]bool
-	BackendTLS map[string]PoolBackendTLS
+	Items              []pools.Pool
+	BackendH2C         map[string]bool
+	BackendTLS         map[string]PoolBackendTLS
+	BackendRetryBudget map[string]PoolBackendRetryBudget
 }
 
 // PoolBackendTLS records which transport fields the API actually reported.
@@ -75,7 +76,8 @@ func (tls PoolBackendTLS) Complete() bool {
 // ListPoolInventory requires an explicit pool collection on every page and
 // reads backend transport alongside the stock fields.
 func (s *Service) ListPoolInventory(ctx context.Context, opts pools.ListOpts) (PoolInventory, error) {
-	inventory := PoolInventory{BackendH2C: make(map[string]bool), BackendTLS: make(map[string]PoolBackendTLS)}
+	inventory := PoolInventory{BackendH2C: make(map[string]bool), BackendTLS: make(map[string]PoolBackendTLS),
+		BackendRetryBudget: make(map[string]PoolBackendRetryBudget)}
 	query, err := opts.ToPoolListQuery()
 	if err != nil {
 		return inventory, fmt.Errorf("list pools: %w", err)
@@ -86,14 +88,15 @@ func (s *Service) ListPoolInventory(ctx context.Context, opts pools.ListOpts) (P
 			Links []gophercloud.Link `json:"pools_links"`
 			Pools []struct {
 				pools.Pool
-				BackendH2C      *bool           `json:"backend_h2c"`
-				Hostname        json.RawMessage `json:"backend_tls_hostname"`
-				SubjectAltNames json.RawMessage `json:"backend_tls_subject_alt_names"`
-				CA              json.RawMessage `json:"ca_tls_container_ref"`
-				ClientRef       json.RawMessage `json:"tls_container_ref"`
-				RequireH2       *bool           `json:"backend_tls_require_h2"`
-				Enabled         *bool           `json:"tls_enabled"`
-				Admin           *bool           `json:"admin_state_up"`
+				BackendRetryBudget json.RawMessage `json:"backend_retry_budget"`
+				BackendH2C         *bool           `json:"backend_h2c"`
+				Hostname           json.RawMessage `json:"backend_tls_hostname"`
+				SubjectAltNames    json.RawMessage `json:"backend_tls_subject_alt_names"`
+				CA                 json.RawMessage `json:"ca_tls_container_ref"`
+				ClientRef          json.RawMessage `json:"tls_container_ref"`
+				RequireH2          *bool           `json:"backend_tls_require_h2"`
+				Enabled            *bool           `json:"tls_enabled"`
+				Admin              *bool           `json:"admin_state_up"`
 			} `json:"pools"`
 		}
 		// Decode directly from the response. The SDK pager first decodes
@@ -126,6 +129,7 @@ func (s *Service) ListPoolInventory(ctx context.Context, opts pools.ListOpts) (P
 			pool.TLSEnabled = pool.Enabled != nil && *pool.Enabled
 			pool.AdminStateUp = pool.Admin != nil && *pool.Admin
 			inventory.BackendTLS[pool.ID] = tls
+			inventory.BackendRetryBudget[pool.ID] = decodeBackendRetryBudget(pool.BackendRetryBudget)
 			items = append(items, pool.Pool)
 			if pool.BackendH2C != nil && *pool.BackendH2C {
 				inventory.BackendH2C[pool.ID] = true
@@ -227,6 +231,7 @@ func missingCollection(field string) error {
 // CreatePoolOpts adds optional backend transport to a stock pool create request.
 type CreatePoolOpts struct {
 	pools.CreateOpts
+	BackendRetryBudget        *cloud.BackendRetryBudget
 	BackendH2C                bool
 	BackendTLSHostname        string
 	BackendTLSSubjectAltNames []cloud.BackendTLSSubjectAltName
@@ -239,6 +244,9 @@ func (opts CreatePoolOpts) ToPoolCreateMap() (map[string]any, error) {
 		return nil, err
 	}
 	pool := body["pool"].(map[string]any)
+	if opts.BackendRetryBudget != nil {
+		pool[backendRetryBudgetField] = opts.BackendRetryBudget
+	}
 	if opts.BackendH2C {
 		pool["backend_h2c"] = true
 	}
@@ -257,9 +265,10 @@ func (opts CreatePoolOpts) ToPoolCreateMap() (map[string]any, error) {
 // UpdatePoolOpts adds optional backend transport to a stock pool update request.
 type UpdatePoolOpts struct {
 	pools.UpdateOpts
-	BackendH2C        *bool
-	BackendTLS        *BackendTLSSettings
-	ClearTLSClientRef bool
+	BackendRetryBudget *BackendRetryBudgetUpdate
+	BackendH2C         *bool
+	BackendTLS         *BackendTLSSettings
+	ClearTLSClientRef  bool
 }
 
 // BackendTLSSettings changes hostname authentication, trust and client identity in one write.
@@ -281,6 +290,9 @@ func (opts UpdatePoolOpts) ToPoolUpdateMap() (map[string]any, error) {
 		return nil, err
 	}
 	pool := body["pool"].(map[string]any)
+	if update := opts.BackendRetryBudget; update != nil {
+		pool[backendRetryBudgetField] = update.Value
+	}
 	if opts.BackendH2C != nil {
 		pool["backend_h2c"] = *opts.BackendH2C
 	}

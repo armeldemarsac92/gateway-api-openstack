@@ -75,7 +75,10 @@ type Reconciler struct {
 	// APIReader performs safety-sensitive live reads.
 	APIReader client.Reader
 	// ListenerSetObserver reads live delegated attachment and certificate decisions.
-	ListenerSetObserver func(context.Context, client.Reader, *gatewayv1.Gateway) (gatewaycontroller.ListenerSetProjection, error)
+	ListenerSetObserver     func(context.Context, client.Reader, *gatewayv1.Gateway) (gatewaycontroller.ListenerSetProjection, error)
+	retryBudgetPolicyServed bool
+	// BackendRetryBudgetAvailable checks regional Amphora support for Service budgets.
+	BackendRetryBudgetAvailable func(context.Context) (bool, error)
 	// BackendTLSAvailable checks authenticated regional provider support.
 	BackendTLSAvailable func(context.Context) (bool, error)
 	// GRPCBackendTLSAvailable also checks enforcement of negotiated h2.
@@ -411,14 +414,16 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 			r.currentRouteProgrammedCondition(httpRoute, parent.ref) == nil ||
 			!r.currentBackendResolution(httpRoute, parent.ref, graphResult.backendDiagnostic) {
 			message := controller.ProviderProgressMessage(graphResult.Outcome, "Octavia resources for the HTTPRoute are still progressing")
-			status := pendingRouteStatus(message).withBackendDiagnostic(graphResult.backendDiagnostic).withBackendTLSAncestor(graphResult.backendTLSAncestorSlot)
+			status := pendingRouteStatus(message).withBackendDiagnostic(graphResult.backendDiagnostic).withBackendTLSAncestor(graphResult.backendTLSAncestorSlot).
+				withRetryBudgetAncestorLimit(graphResult.retryBudgetAncestorFull)
 			status.partiallyInvalid = graphResult.PartiallyInvalid
 			status.implementedRules = graphResult.ImplementedRules
 			scope.setStatuses([]parentStatusUpdate{{parent: parent.ref, status: status}})
 		}
 		return ctrl.Result{RequeueAfter: controller.ProviderProgressRequeueAfter(graphResult.Outcome, httpRoute.UID)}, nil
 	}
-	status := programmedRouteStatus().withBackendDiagnostic(graphResult.backendDiagnostic).withBackendTLSAncestor(graphResult.backendTLSAncestorSlot)
+	status := programmedRouteStatus().withBackendDiagnostic(graphResult.backendDiagnostic).withBackendTLSAncestor(graphResult.backendTLSAncestorSlot).
+		withRetryBudgetAncestorLimit(graphResult.retryBudgetAncestorFull)
 	status.partiallyInvalid = graphResult.PartiallyInvalid
 	status.implementedRules = graphResult.ImplementedRules
 	if status.programmed == metav1.ConditionTrue && status.partiallyInvalid != "" {

@@ -88,6 +88,7 @@ type observedRouteGraph struct {
 	pool                   *pools.Pool
 	backendH2C             bool
 	backendTLS             octavia.PoolBackendTLS
+	backendRetryBudget     octavia.PoolBackendRetryBudget
 	members                []pools.Member
 	memberBackupUnreported map[string]struct{}
 	memberAdminUnreported  map[string]struct{}
@@ -393,6 +394,7 @@ func (p *Provider) observeRouteGraphsFromPools(ctx context.Context, owners []rou
 		graph.pool = pool
 		graph.backendH2C = poolInventory.BackendH2C[pool.ID]
 		graph.backendTLS = poolInventory.BackendTLS[pool.ID]
+		graph.backendRetryBudget = poolInventory.BackendRetryBudget[pool.ID]
 		poolOwners[pool.ID] = poolRouteOwner{route: routeIndex, backend: role.backend}
 		if err := p.observeRoutePoolChildrenWithRole(ctx, owner, graph, role.backend); err != nil {
 			return nil, &cloud.GraphError{Identity: identity.Value(), Err: err}
@@ -851,6 +853,7 @@ type routeMutationKind uint8
 const (
 	routeMutationCreatePool routeMutationKind = iota
 	routeMutationUpdatePool
+	routeMutationSetBackendRetryBudget
 	routeMutationClaimBackendCA
 	routeMutationPublishBackendCA
 	routeMutationClearPoolMembers
@@ -896,6 +899,7 @@ type routeMutation struct {
 	poolAdmin                *bool
 	poolTags                 *[]string
 	backendTLS               *octavia.BackendTLSSettings
+	backendRetryBudget       *octavia.BackendRetryBudgetUpdate
 	clearTLSClientRef        bool
 	reenableH2CPool          bool
 	clearMemberBackup        bool
@@ -920,6 +924,8 @@ func (s routeMutation) message() string {
 		return "Created Octavia pool"
 	case routeMutationUpdatePool:
 		return "Updated Octavia pool"
+	case routeMutationSetBackendRetryBudget:
+		return "Updated Octavia Service retry budget"
 	case routeMutationClaimBackendCA:
 		return "Checkpointed Gateway ownership of backend CAs"
 	case routeMutationPublishBackendCA:
@@ -1020,6 +1026,13 @@ func buildRouteEnsurePlanWithActivations(desired desiredRoute, actual observedRo
 			}
 			return steps, state, nil
 		}
+		step, err := planBackendRetryBudget(desired, actual)
+		if step != nil {
+			return []routeMutation{*step}, state, nil
+		}
+		if err != nil {
+			return nil, state, err
+		}
 	case actual.pool == nil:
 		nonPolicyPlan = append(nonPolicyPlan, routeMutation{kind: routeMutationCreatePool})
 	default:
@@ -1047,6 +1060,13 @@ func buildRouteEnsurePlanWithActivations(desired desiredRoute, actual observedRo
 			if steps, hold := httpMemberWithdrawal(actual); len(steps) != 0 || hold != "" {
 				return steps, state, nil
 			}
+		}
+		step, err := planBackendRetryBudget(desired, actual)
+		if err != nil {
+			return nil, state, err
+		}
+		if step != nil {
+			return []routeMutation{*step}, state, nil
 		}
 		if desired.backendTLS.denies() {
 			break
@@ -1595,6 +1615,10 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 		if step.poolTags != nil {
 			opts.Tags = append(opts.Tags, (*step.poolTags)...)
 		}
+		var budget *cloud.BackendRetryBudget
+		if desired.backendRetryBudgetAvailable {
+			budget = desired.spec.BackendRetryBudget
+		}
 		var hostname string
 		var subjectAltNames []cloud.BackendTLSSubjectAltName
 		requireH2 := step.backendTLS != nil && step.backendTLS.RequireH2 != nil && *step.backendTLS.RequireH2
@@ -1611,6 +1635,7 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 			subjectAltNames = step.backendTLS.SubjectAltNames
 		}
 		_, err = p.octavia.CreatePool(ctx, octavia.CreatePoolOpts{CreateOpts: opts,
+			BackendRetryBudget: budget,
 			BackendH2C:         desired.spec.BackendH2C && desired.backendTLS.allowsMembers(),
 			BackendTLSHostname: hostname, BackendTLSSubjectAltNames: subjectAltNames, BackendTLSRequireH2: requireH2})
 	case routeMutationUpdatePool:
@@ -1623,6 +1648,8 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 			opts.Persistence = &pools.SessionPersistence{}
 		}
 		_, err = p.octavia.UpdatePool(ctx, step.id, octavia.UpdatePoolOpts{UpdateOpts: opts, BackendH2C: step.backendH2C})
+	case routeMutationSetBackendRetryBudget:
+		_, err = p.octavia.UpdatePool(ctx, step.id, octavia.UpdatePoolOpts{BackendRetryBudget: step.backendRetryBudget})
 	case routeMutationPublishBackendCA:
 		return p.publishBackendCA(ctx, desired.spec)
 	case routeMutationClearPoolMembers:

@@ -791,7 +791,7 @@ func (p *Provider) prepareNextGraphMutation(ctx context.Context, desired desired
 		seen[owner] = true
 		independentListener := blockedHTTPPolicy && first.listenerID != "" && sibling.listenerID != "" && first.listenerID != sibling.listenerID
 		switch sibling.route.kind {
-		case routeMutationCreatePool, routeMutationUpdatePool, routeMutationCreateMember, routeMutationUpdateMember:
+		case routeMutationCreatePool, routeMutationUpdatePool, routeMutationSetBackendRetryBudget, routeMutationCreateMember, routeMutationUpdateMember:
 		default:
 			if !independentListener || !isHTTPPolicyMutation(sibling.route.kind) {
 				continue

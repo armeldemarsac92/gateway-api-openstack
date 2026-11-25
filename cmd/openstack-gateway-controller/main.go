@@ -110,7 +110,7 @@ func run(ctx context.Context) error {
 	var frontendClientValidation bool
 	var httpRequestRedirect bool
 	var httpRequestURLRewrite bool
-	var httpRequestPolicy bool
+	var httpRequestPolicy, backendRetryBudget bool
 	var httpRequestMirror bool
 	var httpCORS bool
 	var gatewayInfrastructureMetadata, gatewayAddressRoutabilityCluster bool
@@ -138,6 +138,7 @@ func run(ctx context.Context) error {
 	flag.BoolVar(&initialL7Rules, "octavia-l7policy-initial-rules", false, "create disabled HTTP(S) policies with their initial rules when the regional Octavia provider advertises support")
 	flag.BoolVar(&httpsListenerIsolation, "octavia-https-listener-isolation", false, "isolate terminated HTTPS sections on a shared port using the regional Octavia capability (requires --tls-certificate-map)")
 	flag.BoolVar(&httpBackendRequestFilters, "octavia-http-backend-request-filters", false, "use the advertised Octavia capability for HTTP backendRef request filters (requires --octavia-weighted-http-targets)")
+	flag.BoolVar(&backendRetryBudget, "octavia-backend-retry-budget", false, "use the advertised Octavia Service retry budget capability with Experimental XBackendTrafficPolicy")
 	flag.BoolVar(&httpRequestPolicy, "octavia-http-request-policy", false, "use the advertised Octavia L7 HTTP request timeout and retry capability")
 	flag.BoolVar(&httpRequestMirror, "octavia-http-request-mirror", false, "use the advertised Octavia L7 HTTP request mirroring capability")
 	flag.BoolVar(&httpRequestURLRewrite, "octavia-request-url-rewrite", false, "use the advertised Octavia L7 request URL rewrite capability")
@@ -206,6 +207,7 @@ func run(ctx context.Context) error {
 		RequestHeaderModifier:         requestHeaderModifier,
 		ResponseHeaderModifier:        responseHeaderModifier,
 		BackendH2C:                    backendH2C,
+		BackendRetryBudget:            backendRetryBudget,
 		BackendTLSPolicy:              backendTLSPolicy,
 		OperatorHTTPS:                 certificateMap != "",
 		HTTPSListenerIsolation:        httpsListenerIsolation,
@@ -273,6 +275,7 @@ func run(ctx context.Context) error {
 		RequestHeaderModifier:  requestHeaderModifier,
 		ResponseHeaderModifier: responseHeaderModifier,
 		BackendH2C:             backendH2C,
+		BackendRetryBudget:     controllerConfig.BackendRetryBudgetEnabled(),
 		GRPCContentType:        grpcContentType,
 		TLSSNIPassthrough:      tlsSNIPassthrough,
 		TLSSNISuffix:           tlsSNISuffix,
@@ -325,16 +328,17 @@ func run(ctx context.Context) error {
 		}
 	}
 	routeReconciler := &httproute.Reconciler{
-		ListenerSetObserver:     gatewayReconciler.ObserveListenerSets,
-		BackendTLSAvailable:     openStackProvider.BackendTLSAvailable,
-		TCPBackendTLSAvailable:  openStackProvider.TCPBackendTLSAvailable,
-		GRPCBackendTLSAvailable: openStackProvider.GRPCBackendTLSAvailable,
-		BackendTLSSANAvailable:  openStackProvider.BackendTLSSANAvailable,
-		Client:                  manager.GetClient(),
-		Coordinator:             graphCoordinator,
-		APIReader:               manager.GetAPIReader(),
-		Recorder:                eventRecorder,
-		Config:                  controllerConfig,
+		ListenerSetObserver:         gatewayReconciler.ObserveListenerSets,
+		BackendTLSAvailable:         openStackProvider.BackendTLSAvailable,
+		BackendRetryBudgetAvailable: openStackProvider.BackendRetryBudgetAvailable,
+		TCPBackendTLSAvailable:      openStackProvider.TCPBackendTLSAvailable,
+		GRPCBackendTLSAvailable:     openStackProvider.GRPCBackendTLSAvailable,
+		BackendTLSSANAvailable:      openStackProvider.BackendTLSSANAvailable,
+		Client:                      manager.GetClient(),
+		Coordinator:                 graphCoordinator,
+		APIReader:                   manager.GetAPIReader(),
+		Recorder:                    eventRecorder,
+		Config:                      controllerConfig,
 	}
 	tcpReconciler := &l4route.Reconciler{
 		Protocol: gatewayv1.TCPProtocolType,

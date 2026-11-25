@@ -351,8 +351,9 @@ func (r *Reconciler) buildRouteModelWithReader(
 }
 
 type routeModelDiagnostics struct {
-	backend      model.Diagnostic
-	corsFallback bool
+	backend                 model.Diagnostic
+	corsFallback            bool
+	retryBudgetAncestorFull bool
 }
 
 func (r *Reconciler) buildRouteModelFromInputs(
@@ -404,7 +405,7 @@ func (r *Reconciler) buildRouteModelFromInputs(
 		ports[0], ports[index] = ports[index], ports[0]
 	}
 	var desired cloud.RouteSpec
-	var diagnostics routeModelDiagnostics
+	diagnostics := routeModelDiagnostics{retryBudgetAncestorFull: inputs.retryBudgetAncestorFull(rules)}
 	for i, port := range ports {
 		spec, portDiagnostics, err := r.buildRoutePortModel(ctx, reader, route, gateway, *portListeners[port], inputs, topology, portMatches[port], rules)
 		if err != nil {
@@ -473,6 +474,7 @@ func (r *Reconciler) buildRoutePortModel(
 		}
 		spec.Members = members
 		spec.BackendH2C = spec.BackendTLS == nil && backend.UsesH2C()
+		spec.BackendRetryBudget = inputs.backendRetryBudget(backend)
 		return spec, routeModelDiagnostics{}, nil
 	}
 	diagnostic, err := r.lowerHTTPBackends(ctx, reader, listener, &spec, inputs, matches, rules, topology.NodeAddressType)
@@ -751,10 +753,15 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 		invalidReference := invalid && !spec.GRPC && (key.kind == cloud.HTTPBackendKindXBackend || r.Config.WeightedHTTPTargets ||
 			result.diagnostic.Reason == string(gatewayv1.RouteReasonRefNotPermitted) ||
 			result.diagnostic.Reason == string(gatewayv1.RouteReasonBackendNotFound))
+		var budget *cloud.BackendRetryBudget
+		if !invalid && (tls == nil || !tls.Denied) {
+			budget = inputs.backendRetryBudget(backend)
+		}
 		spec.HTTPBackends = append(spec.HTTPBackends, cloud.HTTPBackend{
 			Kind: key.kind, Namespace: key.object.Namespace, Name: key.object.Name, Port: port,
 			Members: members, Unavailable: len(members) == 0, InvalidReference: invalidReference,
 			BackendH2C: !invalid && tls == nil && backend.UsesH2C(), BackendTLS: tls,
+			BackendRetryBudget: budget,
 		})
 	}
 	groups[key] = result

@@ -71,6 +71,8 @@ type Config struct {
 	BackendH2C bool
 	// BackendTLSPolicy enables Service port policy selection for HTTP forwarding.
 	BackendTLSPolicy bool
+	// BackendRetryBudget opts into Octavia budgets for Experimental Service policies.
+	BackendRetryBudget bool
 	// BackendClientCertificate enables the operator's separate backend client certificate map.
 	BackendClientCertificate bool
 	// OperatorHTTPS enables termination using operator-provisioned certificates.
@@ -114,6 +116,11 @@ func (c Config) GatewayAddressRoutabilityClusterEnabled() bool {
 // XBackendEnabled reports whether this installation uses the Experimental bundle.
 func (c Config) XBackendEnabled() bool {
 	return c.GatewayAPIChannel == features.FeatureChannelExperimental
+}
+
+// BackendRetryBudgetEnabled reports whether Service retry policies can be applied.
+func (c Config) BackendRetryBudgetEnabled() bool {
+	return c.BackendRetryBudget && c.GatewayAPIChannel == features.FeatureChannelExperimental
 }
 
 // TLSRoutesEnabled reports whether TLSRoute dependencies need to be watched.

@@ -42,6 +42,8 @@ import (
 // routeModelInputs keeps selection and lowering on the same request-local
 // observation. The graph source supplies the complete current route inventory.
 type routeModelInputs struct {
+	retryBudgetAncestor    *backendtls.GatewayAncestor
+	retryBudgets           map[types.NamespacedName]routeRetryBudget
 	gateway                *gatewayv1.Gateway
 	input                  model.Input
 	logical                model.Gateway
@@ -315,11 +317,22 @@ func (r *Reconciler) collectRouteModelInputsForSets(ctx context.Context, reader 
 		}
 		availability = r.discoverBackendTLSProfiles(ctx, routes, input.BackendTLSPolicies)
 	}
+	var retryBudgetAncestor *backendtls.GatewayAncestor
+	var retryBudgets map[types.NamespacedName]routeRetryBudget
+	if r.retryBudgetPolicyServed && r.Config.BackendRetryBudgetEnabled() {
+		retryBudgetAncestor = &backendtls.GatewayAncestor{Key: client.ObjectKeyFromObject(gateway), ControllerName: r.Config.ControllerName}
+		retryBudgets, err = collectBackendRetryBudgets(ctx, reader, input.Services, *retryBudgetAncestor)
+		if err != nil {
+			return nil, err
+		}
+	}
 	logical, err := model.Compile(input)
 	if err != nil {
 		return nil, fmt.Errorf("compile Gateway backend model: %w", err)
 	}
-	return &routeModelInputs{gateway: gateway, input: input, logical: logical, backendTLSAvailability: availability, backendTLSAncestor: ancestor}, nil
+	return &routeModelInputs{gateway: gateway, input: input, logical: logical,
+		backendTLSAvailability: availability, backendTLSAncestor: ancestor,
+		retryBudgetAncestor: retryBudgetAncestor, retryBudgets: retryBudgets}, nil
 }
 
 func (r *Reconciler) xBackendMemberMode(gateway *gatewayv1.Gateway) (cloud.MemberMode, error) {
@@ -355,6 +368,15 @@ func (inputs *routeModelInputs) validateBackends(ctx context.Context, reader cli
 	if inputs.input.BackendTLSPolicies != nil {
 		if err := graph.CollectBackendTLSInputs(ctx, reader, &current, inputs.backendTLSAncestor); err != nil {
 			return err
+		}
+	}
+	if inputs.retryBudgetAncestor != nil {
+		budgets, err := collectBackendRetryBudgets(ctx, reader, current.Services, *inputs.retryBudgetAncestor)
+		if err != nil {
+			return err
+		}
+		if !maps.Equal(inputs.retryBudgets, budgets) {
+			return errHTTPRouteChanged
 		}
 	}
 	if !equality.Semantic.DeepEqual(inputs.input.BackendTLSPolicies, current.BackendTLSPolicies) ||

@@ -71,6 +71,7 @@ type ProviderConfig struct {
 	// BackendCA can retire previously published revisions after opt-out.
 	BackendCA              *backendca.Store
 	BackendTLSPolicy       bool
+	BackendRetryBudget     bool
 	FixedHTTPResponses     bool
 	HTTPHeaderExact        bool
 	HTTPQueryParamExact    bool
@@ -102,6 +103,7 @@ type ProviderConfig struct {
 type Provider struct {
 	backendCA              *backendca.Store
 	backendTLSPolicy       bool
+	backendRetryBudget     bool
 	fixedHTTPResponses     bool
 	httpHeaderExact        bool
 	httpQueryParamExact    bool
@@ -146,6 +148,7 @@ func NewProvider(serviceClients ServiceClients, cfg ProviderConfig) *Provider {
 	return &Provider{
 		backendCA:              cfg.BackendCA,
 		backendTLSPolicy:       cfg.BackendTLSPolicy,
+		backendRetryBudget:     cfg.BackendRetryBudget,
 		fixedHTTPResponses:     cfg.FixedHTTPResponses || cfg.WeightedHTTPTargets,
 		httpHeaderExact:        cfg.HTTPHeaderExact,
 		httpQueryParamExact:    cfg.HTTPQueryParamExact,
@@ -223,6 +226,20 @@ func (p *Provider) HTTPSListenerIsolationAvailable(ctx context.Context) (bool, e
 		return false, nil
 	}
 	return p.amphoraCapabilityAvailable(ctx, octavia.GatewayCapabilityHTTPSListenerIsolation)
+}
+
+// BackendRetryBudgetAvailable reports whether Amphora accepts new Service budgets.
+func (p *Provider) BackendRetryBudgetAvailable(ctx context.Context) (bool, error) {
+	if !p.backendRetryBudget {
+		return false, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	available, err := p.amphoraCapabilityAvailable(ctx, octavia.GatewayCapabilityBackendRetryBudget)
+	if isNotFound(err) {
+		return false, nil
+	}
+	return available, err
 }
 
 func (p *Provider) amphoraCapabilityAvailable(ctx context.Context, capabilities ...string) (bool, error) {

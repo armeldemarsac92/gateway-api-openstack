@@ -145,6 +145,9 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 			if requested && request.HTTPRouteBackendTLSAncestorSlot != nil && *request.HTTPRouteBackendTLSAncestorSlot != snapshot.backendTLSAncestorSlot {
 				return graph.RouteInputs{}, errHTTPRouteChanged
 			}
+			if requested && request.HTTPRouteRetryBudgetAncestorFull != nil && *request.HTTPRouteRetryBudgetAncestorFull != snapshot.retryBudgetAncestorFull {
+				return graph.RouteInputs{}, errHTTPRouteChanged
+			}
 			node.Disposition, node.Spec = cloud.GraphEnsure, snapshot.desired
 			ensures = append(ensures, snapshot)
 		}
