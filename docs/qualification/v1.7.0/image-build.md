@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-The linux/amd64 controller issued permanent XBackend cookies to a local HTTP client. [Build record](image.json) · [Cookie observations](provider/xbackend-permanent-cookie-evidence/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-249f9436e527bb885818c0bf29924236e666c591)
+The linux/amd64 controller preserved weighted TLSRoute backend shares across grant and endpoint changes on a local Gateway. [Build record](image.json) · [TLS connections](provider/tlsroute-weighted-backends.md) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-d435da52da94ef7d55f2750567b4c83aa7dfe91b)
+
+The linux/amd64 controller issued permanent XBackend cookies to a local HTTP client. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-249f9436e527bb885818c0bf29924236e666c591/image.json) · [Cookie observations](provider/xbackend-permanent-cookie-evidence/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-249f9436e527bb885818c0bf29924236e666c591)
 
 The linux/amd64 controller applied Experimental XTelemetryPolicy sampling rates to local requests. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-470b62417e9e7e1536f642538f22084fc7fdb34c/image.json) · [Collector observations](provider/xtelemetry-sampling-evidence/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-470b62417e9e7e1536f642538f22084fc7fdb34c)
 

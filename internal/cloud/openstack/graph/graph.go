@@ -367,6 +367,12 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	if err := p.prepareSNIRouteBackendTLS(ctx, &desired, actual); err != nil {
 		return result, err
 	}
+	if err := p.prepareWeightedSNI(ctx, &desired, actual); err != nil {
+		return result, err
+	}
+	if result, handled, err := p.replayPendingSNIRejection(ctx, desired, actual); handled {
+		return result, err
+	}
 	p.isolateUnavailableSNISuffix(ctx, &desired, actual)
 	if actual.addressReadError != nil {
 		if usesDefaultPool(actual.protocol) {
@@ -402,7 +408,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		}
 	}
 	if actual.outcome.State == cloud.OutcomeProgressing {
-		if (len(actual.httpsServingPorts) != 0 || hasTCPRejectionTarget(desired) || hasUDPDropTarget(desired)) && spec.ValidateMutation != nil {
+		if (len(actual.httpsServingPorts) != 0 || hasTCPRejectionTarget(desired) || hasUDPDropTarget(desired) || hasWeightedSNI(desired, actual)) && spec.ValidateMutation != nil {
 			// Busy Octavia can prove a serving subset without a write. Apply
 			// the same Kubernetes snapshot fence before publishing that proof.
 			if err := spec.ValidateMutation(ctx); err != nil {
@@ -474,12 +480,12 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	}
 	p.reportRequestMirrorAvailability(desired, &result)
 	if len(plan) == 0 {
-		if (hasTCPRejectionTarget(desired) || hasTCPRejectionReadback(actual) || hasUDPDropTarget(desired) || hasUDPDropReadback(actual)) && spec.ValidateMutation != nil {
+		if (hasTCPRejectionTarget(desired) || hasTCPRejectionReadback(actual) || hasUDPDropTarget(desired) || hasUDPDropReadback(actual) || hasWeightedSNI(desired, actual)) && spec.ValidateMutation != nil {
 			if err := spec.ValidateMutation(ctx); err != nil {
 				return cloud.GatewayGraphResult{}, err
 			}
 		}
-		if isSNIProtocol(desired.protocol) && spec.Gateway.Disposition == cloud.GraphEnsure && result.Outcome.State == cloud.OutcomeReady {
+		if isSNIProtocol(desired.protocol) && spec.Gateway.Disposition == cloud.GraphEnsure && result.Gateway.Outcome.State == cloud.OutcomeReady {
 			if err := p.verifySNICapability(ctx, desired, actual); err != nil {
 				return p.withdrawUndiscoverableSNI(ctx, desired, actual, err)
 			}
@@ -549,8 +555,9 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 			}
 			return result, &cloud.GraphError{Identity: desired.routes[step.routeIndex].spec.Identity, Err: err}
 		}
-		if step.kind == graphSNIMutation && step.isRestrictiveSNI() {
-			// An unsuccessful denial write cannot establish forwarding.
+		if step.kind == graphSNIMutation && (step.isRestrictiveSNI() || step.sni.target.weighted()) ||
+			step.sniWithdrawal && hasWeightedSNI(desired, actual) {
+			// An unsuccessful write cannot establish forwarding.
 			// Unaffected siblings can retain an existing checkpoint.
 			deferReadySNIReadback(&result, result.Outcome)
 		}
@@ -726,7 +733,7 @@ func (p *Provider) validateGraphTrafficSecurity(ctx context.Context, desired des
 	spec := desired.spec.Gateway.Spec
 	if isSNIProtocol(desired.protocol) {
 		spec.ListenerProtocol = cloud.ListenerProtocolTCP
-		owners := sniRouteOwners(desired.sni)
+		owners := sniRouteOwners(slices.DeleteFunc(slices.Clone(desired.sni), func(target desiredSNIFragment) bool { return target.weightedBlocked }))
 		routes := make([]cloud.RouteSpec, 0, len(owners))
 		for _, owner := range owners {
 			target := owner.route
@@ -1442,7 +1449,8 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 		return actual, nil
 	}
 	udpUpdatePending := lb.ProvisioningStatus == "PENDING_UPDATE" && pendingUDPGraph(desired, actual.protocol)
-	if observation.phase == loadBalancerPhasePending && desired.spec.Gateway.Disposition != cloud.GraphEnsure && !udpUpdatePending {
+	sniUpdatePending := lb.ProvisioningStatus == "PENDING_UPDATE" && isSNIProtocol(desired.protocol)
+	if observation.phase == loadBalancerPhasePending && desired.spec.Gateway.Disposition != cloud.GraphEnsure && !udpUpdatePending && !sniUpdatePending {
 		return actual, nil
 	}
 	// Frontend authorization withdrawals use only LB and listener readbacks.
@@ -1465,6 +1473,9 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 		if rawTLS {
 			handled, err := p.observeRawTLSFrontend(ctx, desired, &actual, inventory, observation.phase == loadBalancerPhaseActive)
 			if handled || err != nil {
+				if sniUpdatePending && !errors.Is(err, cloud.ErrOwnershipConflict) {
+					return p.observeSNIGraph(ctx, desired, actual, inventory)
+				}
 				return actual, err
 			}
 		}
@@ -1495,6 +1506,9 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 	}
 	if actual.httpsIsolationMutation != nil {
 		return actual, nil
+	}
+	if sniUpdatePending && desired.spec.Gateway.Disposition == cloud.GraphDelete {
+		return p.observeSNIGraph(ctx, desired, actual, inventory)
 	}
 	addressSpec := desired.spec.Gateway.Spec
 	observeAddress := desired.spec.Gateway.Disposition == cloud.GraphEnsure ||

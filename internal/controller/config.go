@@ -82,7 +82,7 @@ type Config struct {
 	ClusterTrustBundles *backendtls.ClusterTrustBundles
 	// BackendRetryBudget opts into Octavia budgets for Experimental Service policies.
 	BackendRetryBudget bool
-	// TCPConnectionRejection opts into proportional active rejection on plain TCPRoute.
+	// TCPConnectionRejection opts into proportional rejection on TCPRoute and TLSRoute pools.
 	TCPConnectionRejection bool
 	// UDPPacketDrop opts eligible UDPRoute pools into proportional packet discard.
 	UDPPacketDrop bool

@@ -33,13 +33,13 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
-// TLSRouteBackendService identifies the backend reference of a supported TLSRoute.
+// TLSRouteBackendService identifies a TLSRoute's single active reference for BackendTLSPolicy.
 func TLSRouteBackendService(route *gatewayv1.TLSRoute) (types.NamespacedName, bool) {
 	if len(route.Spec.Rules) != 1 || len(route.Spec.Rules[0].BackendRefs) != 1 {
 		return types.NamespacedName{}, false
 	}
 	ref := route.Spec.Rules[0].BackendRefs[0]
-	if ptr.Deref(ref.Weight, 1) != 1 {
+	if ptr.Deref(ref.Weight, 1) <= 0 {
 		return types.NamespacedName{}, false
 	}
 	return model.BackendServiceReference(route.Namespace, ref.BackendObjectReference)
@@ -128,11 +128,11 @@ func (r *Reconciler) ObserveTLSRouteBackendTLSPolicy(ctx context.Context, policy
 			if !ok || !slices.Contains(targets, backend) {
 				continue
 			}
-			service, port, err := r.observeSNIService(ctx, entry)
+			service, port, diagnostic, err := r.observeSNIService(ctx, entry.route, entry.route.Spec.Rules[0].BackendRefs[0])
 			if err != nil {
 				return nil, err
 			}
-			if service == nil {
+			if diagnostic != nil {
 				continue
 			}
 			selection, err := observer.Observe(ctx, service, port, nil)
