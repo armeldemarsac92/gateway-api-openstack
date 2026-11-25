@@ -84,4 +84,6 @@ The policy applies to primary forwarding destinations with positive weight. The 
 
 Check `status.ancestors` for the consuming Gateway and the current policy generation. A Gateway needs a slot in this list before the controller can program affinity for it. Check the route's current `Programmed` condition and the ACTIVE Octavia pool's `session_persistence` for programming. Verify client affinity by replaying the cookie or header against more than one eligible endpoint.
 
+In the local Experimental qualification, a Service policy issued a signed header and pinned three HTTPRoute replays to the same Pod. After policy deletion, requests with and without the former header reached both Pods on the same pool. The witness route returned HTTP 200 throughout. The traffic run covered Header persistence for HTTPRoute in Endpoint mode. [Qualification receipt](qualification/v1.7.0/provider/service-session-persistence-evidence/receipt.json)
+
 On an update or removal of the policy, the controller can temporarily drain the affected pool while it verifies the new configuration. Remove `sessionPersistence` and verify the pool has cleared it before disabling the controller flag or rolling back the Octavia capability. [Named cookies, timeout and provider setup](reference/class-configuration.md#keep-a-session-on-one-selected-endpoint)
