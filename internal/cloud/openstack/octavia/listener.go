@@ -41,7 +41,21 @@ type ListenerInventory struct {
 	Items                    []listeners.Listener
 	DefaultPoolsObserved     bool
 	AdminStatesObserved      map[string]bool
+	ClientAuthFallback       map[string]ClientAuthFallback
 }
+
+const clientAuthFallbackField = "client_authentication_insecure_fallback"
+
+// ClientAuthFallback distinguishes historical omission from an explicit mode
+// and keeps an unreadable field from hiding the listener's identity.
+type ClientAuthFallback uint8
+
+const (
+	ClientAuthFallbackAbsent ClientAuthFallback = iota
+	ClientAuthFallbackDisabled
+	ClientAuthFallbackEnabled
+	ClientAuthFallbackUnreadable
+)
 
 func (s *Service) ListListenerInventory(ctx context.Context, opts listeners.ListOpts) (ListenerInventory, error) {
 	pages, err := listeners.List(s.client, opts).AllPages(ctx)
@@ -57,8 +71,9 @@ func (s *Service) ListListenerInventory(ctx context.Context, opts listeners.List
 			DefaultHTTPResponse *struct {
 				StatusCode int `json:"status_code"`
 			} `json:"default_http_response"`
-			DefaultPool  json.RawMessage `json:"default_pool_id"`
-			AdminStateUp *bool           `json:"admin_state_up"`
+			DefaultPool        json.RawMessage `json:"default_pool_id"`
+			AdminStateUp       *bool           `json:"admin_state_up"`
+			ClientAuthFallback json.RawMessage `json:"client_authentication_insecure_fallback"`
 		} `json:"listeners"`
 	}
 	if err := pages.(listeners.ListenerPage).ExtractInto(&response); err != nil {
@@ -72,6 +87,20 @@ func (s *Service) ListListenerInventory(ctx context.Context, opts listeners.List
 	for i, observed := range response.Listeners {
 		item := &inventory.Items[i]
 		*item = observed.Listener
+		if len(observed.ClientAuthFallback) != 0 {
+			if inventory.ClientAuthFallback == nil {
+				inventory.ClientAuthFallback = make(map[string]ClientAuthFallback)
+			}
+			state := ClientAuthFallbackUnreadable
+			var enabled *bool
+			if err := json.Unmarshal(observed.ClientAuthFallback, &enabled); err == nil && enabled != nil {
+				state = ClientAuthFallbackDisabled
+				if *enabled {
+					state = ClientAuthFallbackEnabled
+				}
+			}
+			inventory.ClientAuthFallback[item.ID] = state
+		}
 		if observed.SNICertificates != nil {
 			item.SniContainerRefs = *observed.SNICertificates
 			if inventory.SNICertificatesObserved == nil {
@@ -151,7 +180,8 @@ func (s *Service) UpdateListener(ctx context.Context, id string, opts listeners.
 
 type listenerClientAuthenticationOptions struct {
 	listeners.UpdateOpts
-	ref string
+	ref      string
+	fallback bool
 }
 
 func (opts listenerClientAuthenticationOptions) ToListenerUpdateMap() (map[string]any, error) {
@@ -167,13 +197,31 @@ func (opts listenerClientAuthenticationOptions) ToListenerUpdateMap() (map[strin
 		fields["client_ca_tls_container_ref"] = nil
 		fields["client_authentication"] = listeners.ClientAuthenticationNone
 	}
+	if opts.fallback {
+		fields[clientAuthFallbackField] = true
+	}
 	return body, nil
 }
 
 // SetListenerClientAuthentication updates the native mode and CA atomically.
 // Pass an empty reference only for an explicit removal on a closed listener.
-func (s *Service) SetListenerClientAuthentication(ctx context.Context, id string, opts listeners.UpdateOpts, ref string) error {
-	_, err := listeners.Update(ctx, s.client, id, listenerClientAuthenticationOptions{UpdateOpts: opts, ref: ref}).Extract()
+func (s *Service) SetListenerClientAuthentication(ctx context.Context, id string, opts listeners.UpdateOpts, ref string, fallback bool) error {
+	if fallback && ref == "" {
+		return fmt.Errorf("HTTPS client authentication fallback requires a client CA")
+	}
+	_, err := listeners.Update(ctx, s.client, id, listenerClientAuthenticationOptions{UpdateOpts: opts, ref: ref, fallback: fallback}).Extract()
+	return err
+}
+
+type disableClientAuthFallback struct{}
+
+func (disableClientAuthFallback) ToListenerUpdateMap() (map[string]any, error) {
+	return map[string]any{"listener": map[string]any{clientAuthFallbackField: false}}, nil
+}
+
+// DisableListenerClientAuthFallback restores the listener's native mode.
+func (s *Service) DisableListenerClientAuthFallback(ctx context.Context, id string) error {
+	_, err := listeners.Update(ctx, s.client, id, disableClientAuthFallback{}).Extract()
 	return err
 }
 
@@ -202,30 +250,40 @@ func (s *Service) CreateListenerWithNotFound(ctx context.Context, opts listeners
 	return listeners.Create(ctx, s.client, notFoundListenerOptions{opts}).Extract()
 }
 
-type isolatedHTTPSListenerOptions struct {
+type httpsListenerOptions struct {
 	listeners.CreateOptsBuilder
 	virtualHosts []string
+	fallback     bool
 }
 
-func (opts isolatedHTTPSListenerOptions) ToListenerCreateMap() (map[string]any, error) {
+func (opts httpsListenerOptions) ToListenerCreateMap() (map[string]any, error) {
 	body, err := opts.CreateOptsBuilder.ToListenerCreateMap()
-	if err == nil {
-		body["listener"].(map[string]any)["https_virtual_hosts"] = opts.virtualHosts
+	if err != nil {
+		return nil, err
 	}
-	return body, err
+	fields := body["listener"].(map[string]any)
+	if len(opts.virtualHosts) != 0 {
+		fields["https_virtual_hosts"] = opts.virtualHosts
+	}
+	if opts.fallback {
+		fields[clientAuthFallbackField] = true
+	}
+	return body, nil
 }
 
-// CreateIsolatedHTTPSListener creates the disabled TLS listener with its complete
-// set of virtual hosts in the same request as its certificate and ownership tags.
-func (s *Service) CreateIsolatedHTTPSListener(ctx context.Context, opts listeners.CreateOpts, hosts []string, notFound bool) (*listeners.Listener, error) {
-	if len(hosts) == 0 || opts.Protocol != listeners.ProtocolTerminatedHTTPS || opts.AdminStateUp == nil || *opts.AdminStateUp {
-		return nil, fmt.Errorf("isolated HTTPS listener requires virtual hosts and a disabled TERMINATED_HTTPS frontend")
+// CreateHTTPSListener installs the full TLS configuration on a disabled listener.
+func (s *Service) CreateHTTPSListener(ctx context.Context, opts listeners.CreateOpts, hosts []string, notFound, fallback bool) (*listeners.Listener, error) {
+	if opts.Protocol != listeners.ProtocolTerminatedHTTPS || opts.AdminStateUp == nil || *opts.AdminStateUp {
+		return nil, fmt.Errorf("HTTPS configuration requires a disabled TERMINATED_HTTPS frontend")
+	}
+	if fallback && (opts.ClientAuthentication != listeners.ClientAuthenticationMandatory || opts.ClientCATLSContainerRef == "" || opts.DefaultTlsContainerRef == "") {
+		return nil, fmt.Errorf("HTTPS client authentication fallback requires MANDATORY mode and both TLS certificate references")
 	}
 	var create listeners.CreateOptsBuilder = opts
 	if notFound {
 		create = notFoundListenerOptions{opts}
 	}
-	return listeners.Create(ctx, s.client, isolatedHTTPSListenerOptions{create, hosts}).Extract()
+	return listeners.Create(ctx, s.client, httpsListenerOptions{create, hosts, fallback}).Extract()
 }
 
 type httpsVirtualHosts []string
@@ -237,8 +295,8 @@ func (hosts httpsVirtualHosts) ToListenerUpdateMap() (map[string]any, error) {
 	return map[string]any{"listener": map[string]any{"https_virtual_hosts": []string(hosts)}}, nil
 }
 
-// SetListenerHTTPSVirtualHosts changes the section inventory on a disabled
-// listener after policies referring to removed names have been retired.
+// SetListenerHTTPSVirtualHosts updates the section inventory after policies
+// referring to removed names have been retired.
 func (s *Service) SetListenerHTTPSVirtualHosts(ctx context.Context, id string, hosts []string) error {
 	_, err := listeners.Update(ctx, s.client, id, httpsVirtualHosts(hosts)).Extract()
 	return err

@@ -84,6 +84,7 @@ func TestGatewayFrontendCAStatusAndCrossNamespaceRevocation(t *testing.T) {
 	reader := &frontendCAReader{Reader: kube}
 	ready := cloud.GatewayReadyResult(cloud.GatewayState{LoadBalancerID: "lb", VIPAddress: "192.0.2.10"})
 	ready.ScopedListenerReadyPorts = []int{80, 8443}
+	ready.FrontendFallbackUnavailablePorts = []int{9443}
 	provider := &recordingProvider{gatewayResult: &ready}
 	r := newTestReconciler(Reconciler{Client: kube, APIReader: reader, Config: cfg, Coordinator: &graph.Coordinator{},
 		Certificates: resolveHTTPSFunc(func(context.Context, *gatewayv1.Gateway, *gatewayv1.Listener) (string, gatewayv1.ListenerConditionReason) {
@@ -127,8 +128,9 @@ func TestGatewayFrontendCAStatusAndCrossNamespaceRevocation(t *testing.T) {
 	require.Nil(t, ports[0].TLS)
 	require.Empty(t, ports[1].TLS.CertificateRef)
 	require.Equal(t, "local-ca", ports[2].TLS.ClientValidation.ConfigMapUID)
-	require.Empty(t, ports[3].TLS.CertificateRef)
+	require.True(t, ports[3].TLS.ClientValidation.InsecureFallback)
 	require.Contains(t, condition("fallback", gatewayv1.ListenerConditionAccepted).Message, string(gatewayv1.AllowInsecureFallback))
+	require.Equal(t, string(gatewayv1.ListenerReasonUnsupportedValue), condition("fallback", gatewayv1.ListenerConditionAccepted).Reason)
 
 	require.NoError(t, kube.Get(t.Context(), client.ObjectKeyFromObject(grant), grant))
 	grant.Spec.To[0].Name = ptr.To(gatewayv1.ObjectName(ca.Name))
@@ -186,6 +188,48 @@ func TestGatewayFrontendCAStatusAndCrossNamespaceRevocation(t *testing.T) {
 	require.NoError(t, kube.Update(t.Context(), gw))
 	require.Empty(t, reconcile()[1].TLS.CertificateRef)
 	checkDenied(gatewayv1.ListenerReasonInvalidCACertificateKind)
+
+	fallbackCondition := string(gatewayv1.GatewayConditionInsecureFrontendValidationMode)
+	checkFallbackCondition := func() {
+		t.Helper()
+		mode := meta.FindStatusCondition(gw.Status.Conditions, fallbackCondition)
+		require.NotNil(t, mode)
+		require.Equal(t, metav1.ConditionTrue, mode.Status)
+		require.Equal(t, string(gatewayv1.GatewayReasonConfigurationChanged), mode.Reason)
+		require.Equal(t, gw.Generation, mode.ObservedGeneration)
+	}
+	checkFallbackCondition()
+
+	// Default and per-port modes share the same CA validation. A strict
+	// per-port override must not inherit the Gateway's fallback mode.
+	ready.FrontendFallbackUnavailablePorts = nil
+	ready.ScopedTLSClosedPorts = nil
+	ready.ScopedListenerReadyPorts = []int{80, 443, 8443, 9443}
+	frontend := gw.Spec.TLS.Frontend
+	frontend.Default.Validation.CACertificateRefs = []gatewayv1.ObjectReference{{Name: "local-ca", Kind: "ConfigMap"}}
+	frontend.Default.Validation.Mode = gatewayv1.AllowInsecureFallback
+	frontend.PerPort[1].TLS.Validation.Mode = gatewayv1.AllowValidOnly
+	require.NoError(t, kube.Update(t.Context(), gw))
+	ports = reconcile()
+	checkFallbackCondition()
+	require.True(t, ports[1].TLS.ClientValidation.InsecureFallback)
+	require.False(t, ports[2].TLS.ClientValidation.InsecureFallback)
+	require.False(t, ports[3].TLS.ClientValidation.InsecureFallback)
+	require.Equal(t, metav1.ConditionTrue, condition("default-https", gatewayv1.ListenerConditionProgrammed).Status)
+
+	frontend = gw.Spec.TLS.Frontend
+	frontend.Default.Validation.Mode = gatewayv1.AllowValidOnly
+	frontend.PerPort[1].TLS.Validation.Mode = gatewayv1.AllowInsecureFallback
+	require.NoError(t, kube.Update(t.Context(), gw))
+	ports = reconcile()
+	checkFallbackCondition()
+	require.False(t, ports[1].TLS.ClientValidation.InsecureFallback)
+	require.True(t, ports[3].TLS.ClientValidation.InsecureFallback)
+
+	gw.Spec.TLS.Frontend.PerPort[1].TLS.Validation.Mode = gatewayv1.AllowValidOnly
+	require.NoError(t, kube.Update(t.Context(), gw))
+	require.False(t, reconcile()[3].TLS.ClientValidation.InsecureFallback)
+	require.Nil(t, meta.FindStatusCondition(gw.Status.Conditions, fallbackCondition))
 }
 
 func frontendTestCA(t *testing.T) string {

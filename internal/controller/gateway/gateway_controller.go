@@ -98,8 +98,9 @@ func (r *Reconciler) Reconcile(
 		return ctrl.Result{}, err
 	}
 	defer func() {
-		if scope.managed && scope.gateway.DeletionTimestamp.IsZero() {
+		if !scope.skipPatch && scope.managed && scope.gateway.DeletionTimestamp.IsZero() {
 			r.setBackendClientCertificateStatus(ctx, scope.gateway)
+			setFrontendFallbackStatus(scope.gateway)
 		}
 		if err := r.patchGateway(ctx, scope); err != nil {
 			result = ctrl.Result{}
@@ -114,6 +115,11 @@ func (r *Reconciler) Reconcile(
 	}()
 
 	if !scope.gateway.DeletionTimestamp.IsZero() {
+		// Owner references also allow Kubernetes to collect discovery objects
+		// when the Gateway is removed. A discovery error must not hold up Octavia cleanup.
+		defer func() {
+			retErr = errors.Join(retErr, r.withdrawGatewayDiscovery(ctx, scope.gateway, true))
+		}()
 		return r.reconcileDelete(ctx, scope)
 	}
 	return r.reconcileNormal(ctx, scope)
@@ -131,8 +137,21 @@ func (r *Reconciler) reconcileDelete(ctx context.Context, scope *gatewayScope) (
 	return ctrl.Result{}, nil
 }
 
-func (r *Reconciler) reconcileNormal(ctx context.Context, scope *gatewayScope) (ctrl.Result, error) {
+func (r *Reconciler) reconcileNormal(ctx context.Context, scope *gatewayScope) (result ctrl.Result, retErr error) {
 	decision := r.decideGatewayPhase(scope)
+	if decision.phase == gatewayPhaseCleanupUnmanaged {
+		// Clean up the discovery name before releasing our last responsibility
+		// for a Gateway that has been handed off to another controller.
+		if err := r.withdrawGatewayDiscovery(ctx, scope.gateway, true); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+	switch decision.phase {
+	case gatewayPhaseUnsupportedVersion, gatewayPhaseInvalidBinding, gatewayPhaseInvalidSpec:
+		defer func() { retErr = errors.Join(retErr, r.withdrawGatewayDiscovery(ctx, scope.gateway, true)) }()
+	case gatewayPhaseReplaceGraph:
+		defer func() { retErr = errors.Join(retErr, r.withdrawGatewayDiscovery(ctx, scope.gateway, false)) }()
+	}
 	if scope.managed && !r.Config.GatewayAddressRoutabilityEnabled() {
 		meta.RemoveStatusCondition(&scope.gateway.Status.Conditions, string(gatewayv1.GatewayConditionAddressesAssigned))
 	}
@@ -156,9 +175,9 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, scope *gatewayScope) (
 		if BackendClientCertificateRef(scope.gateway) != nil && !r.Config.BackendTLSPolicy {
 			result, err := r.withdrawGatewayCertificates(ctx, scope.gateway)
 			if usesHTTPSProfile(r.Config, scope.gateway) {
-				r.applyHTTPSListenerStatus(scope.gateway, scope.original.Status, r.listenerTLSIssues(ctx, scope.gateway, ListenerSetProjection{}), nil, false)
+				r.applyHTTPSListenerStatus(scope.gateway, scope.original.Status, r.listenerTLSIssues(ctx, scope.gateway, ListenerSetProjection{}, nil), nil, false)
 			}
-			return result, err
+			return result, errors.Join(err, r.withdrawGatewayDiscovery(ctx, scope.gateway, false))
 		}
 		return r.reconcileGatewayGraph(ctx, scope, decision)
 	default:
@@ -256,6 +275,8 @@ func (r *Reconciler) reconcileGatewayBinding(
 		return ctrl.Result{}, err
 	}
 	log.FromContext(ctx).V(1).Info("Reconciled Gateway resource binding checkpoint")
+	// Publish status from the next read of the checkpointed Gateway.
+	scope.skipPatch = true
 	return ctrl.Result{Requeue: true}, nil
 }
 
@@ -263,7 +284,7 @@ func (r *Reconciler) reconcileGatewayGraph(
 	ctx context.Context,
 	scope *gatewayScope,
 	decision gatewayPhaseDecision,
-) (ctrl.Result, error) {
+) (result ctrl.Result, retErr error) {
 	sets, err := r.ObserveListenerSets(ctx, r.APIReader, scope.gateway)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -273,14 +294,32 @@ func (r *Reconciler) reconcileGatewayGraph(
 		if err := r.checkpointListenerSetHTTPS(ctx, scope.gateway, sets); err != nil {
 			return ctrl.Result{}, err
 		}
+		scope.skipPatch = true
 		return ctrl.Result{Requeue: true}, nil
 	}
 	graphResult, err := r.ensureGateway(ctx, scope.gateway)
 	if errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) {
-		return r.setGatewayUnsupportedVersion(ctx, scope)
+		result, versionErr := r.setGatewayUnsupportedVersion(ctx, scope)
+		return result, errors.Join(versionErr, r.withdrawGatewayDiscovery(ctx, scope.gateway, true))
 	}
 	var componentError *cloud.GraphError
 	routeFailure := errors.As(err, &componentError) && componentError.Identity.RouteUID != ""
+	policy, classified := controller.ProviderFailurePolicyFor(err)
+	if r.Config.GatewayInfrastructureMetadata && !errors.Is(err, errGatewayChanged) {
+		observation := graphResult.Gateway
+		// Explicit scoped readback still describes the serving listeners if
+		// another listener failed. A nil observation leaves discovery intact.
+		if err == nil || routeFailure || observation.AddressAbsent || len(observation.ScopedListenerDeferredPorts) != 0 || len(observation.ScopedListenerServingPorts) != 0 ||
+			scopedGatewayFailurePorts(r.Config, scope.gateway, policy.Category, observation) != nil {
+			defer func() {
+				retErr = errors.Join(retErr, r.reconcileGatewayDiscovery(ctx, scope.gateway, decision.listener, observation))
+			}()
+		} else {
+			defer func() {
+				retErr = errors.Join(retErr, r.checkPublishedDiscoveryService(ctx, scope.gateway))
+			}()
+		}
+	}
 	if r.Config.GatewayAddressRoutabilityEnabled() && !errors.Is(err, errGatewayChanged) && graphResult.Gateway.AddressIssue == "" &&
 		(err == nil || routeFailure || graphResult.Gateway.AddressAbsent) {
 		// Address readback is independent of listener and route readiness.
@@ -302,7 +341,7 @@ func (r *Reconciler) reconcileGatewayGraph(
 	var tlsIssues map[gatewayv1.SectionName]httpsListenerStatusIssue
 	var keepGatewayProgrammed bool
 	if usesHTTPSProfile(r.Config, scope.gateway) {
-		tlsIssues = r.listenerTLSIssues(ctx, scope.gateway, sets)
+		tlsIssues = r.listenerTLSIssues(ctx, scope.gateway, sets, graphResult.Gateway.FrontendFallbackUnavailablePorts)
 		defer func() {
 			r.applyHTTPSListenerStatus(scope.gateway, scope.original.Status, tlsIssues, changedTLS, keepGatewayProgrammed)
 			r.reportFrontendCAWithdrawal(scope.gateway, tlsIssues, graphResult.Gateway.ScopedTLSClosedPorts)
@@ -320,7 +359,6 @@ func (r *Reconciler) reconcileGatewayGraph(
 		if errors.As(err, &changedTLS) && err == changedTLS {
 			return ctrl.Result{RequeueAfter: time.Second}, nil
 		}
-		policy, classified := controller.ProviderFailurePolicyFor(err)
 		if errors.Is(err, errGatewayChanged) && !classified {
 			return ctrl.Result{}, err
 		}

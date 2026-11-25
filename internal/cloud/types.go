@@ -89,12 +89,13 @@ type ListenerTLS struct {
 	VirtualHosts []string `json:",omitempty"`
 }
 
-// FrontendClientValidation identifies the normalized trust anchor on a strict
-// HTTPS port. The PEM is passed to Barbican and excluded from graph serialization.
+// FrontendClientValidation identifies the trust anchor and validation mode on
+// an HTTPS port. The PEM is excluded from graph serialization.
 type FrontendClientValidation struct {
-	ConfigMapUID string
-	Digest       string
-	PEM          []byte `json:"-"`
+	ConfigMapUID     string
+	Digest           string
+	PEM              []byte `json:"-"`
+	InsecureFallback bool   `json:",omitempty"`
 }
 
 // Equal compares the immutable identity and digest of the trust anchor.
@@ -102,7 +103,8 @@ func (v *FrontendClientValidation) Equal(other *FrontendClientValidation) bool {
 	if v == nil || other == nil {
 		return v == other
 	}
-	return v.ConfigMapUID == other.ConfigMapUID && v.Digest == other.Digest
+	return v.ConfigMapUID == other.ConfigMapUID && v.Digest == other.Digest &&
+		v.InsecureFallback == other.InsecureFallback
 }
 
 // Equal compares frontend authorization across independent observations.

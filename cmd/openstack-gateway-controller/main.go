@@ -111,12 +111,14 @@ func run(ctx context.Context) error {
 	var httpRequestRedirect bool
 	var httpRequestURLRewrite bool
 	var httpCORS bool
+	var gatewayInfrastructureMetadata bool
 	var httpBackendRequestFilters bool
 	var exactHTTPHeaders, exactHTTPQueryParams, httpMethodMatch, requestHeaderModifier, responseHeaderModifier, backendH2C, tlsSNIPassthrough, tlsSNISuffix, tcpTLSTermination bool
 	zapOptions := zap.Options{Development: false}
 	zapOptions.BindFlags(flag.CommandLine)
 	flag.StringVar(&controllerName, "controller-name", envOr("GATEWAY_OPENSTACK_CONTROLLER_NAME", configv1alpha1.GroupName+"/gateway-api-openstack"), "Gateway API controllerName for this installation")
 	flag.StringVar(&gatewayAPIChannel, "gateway-api-channel", envOr("GATEWAY_OPENSTACK_GATEWAY_API_CHANNEL", "standard"), "Gateway API release channel: standard or experimental")
+	flag.BoolVar(&gatewayInfrastructureMetadata, "gateway-infrastructure-metadata", false, "publish discovered Octavia VIPs through headless Services with Gateway infrastructure metadata")
 	flag.BoolVar(&exactHTTPHeaders, "octavia-http-header-exact", false, "use the advertised Octavia exact HTTP header matching capability")
 	flag.BoolVar(&httpRequestRedirect, "octavia-http-request-redirect", false, "use the advertised Octavia capability for request-hostname preservation and redirect path modifiers")
 	flag.BoolVar(&exactHTTPQueryParams, "octavia-http-query-param-exact", false, "use the advertised Octavia exact HTTP query parameter matching capability (requires --octavia-fixed-http-responses)")
@@ -128,7 +130,7 @@ func run(ctx context.Context) error {
 	flag.BoolVar(&tlsSNISuffix, "octavia-tls-sni-suffix", false, "use the advertised Octavia wildcard SNI capability (requires --octavia-tls-sni-passthrough)")
 	flag.BoolVar(&backendTLSPolicy, "octavia-backend-tls-policy", false, "authenticate BackendTLSPolicy upstreams with the regional Octavia hostname capability and a Barbican CA (requires --octavia-microversion=2.8 or newer and regional h2 enforcement for GRPCRoute)")
 	flag.BoolVar(&l7PolicyBatchActivation, "octavia-l7policy-batch-activation", false, "enable prepared HTTP forwarding policies together when the regional Octavia provider advertises support")
-	flag.BoolVar(&frontendClientValidation, "octavia-frontend-client-validation", false, "require a trusted client certificate on configured HTTPS ports (requires --tls-certificate-map and Octavia microversion 2.8 or newer)")
+	flag.BoolVar(&frontendClientValidation, "octavia-frontend-client-validation", false, "validate client certificates on configured HTTPS ports (requires --tls-certificate-map and Octavia microversion 2.8 or newer)")
 	flag.BoolVar(&initialL7Rules, "octavia-l7policy-initial-rules", false, "create disabled HTTP(S) policies with their initial rules when the regional Octavia provider advertises support")
 	flag.BoolVar(&httpsListenerIsolation, "octavia-https-listener-isolation", false, "isolate terminated HTTPS sections on a shared port using the regional Octavia capability (requires --tls-certificate-map)")
 	flag.BoolVar(&httpBackendRequestFilters, "octavia-http-backend-request-filters", false, "use the advertised Octavia capability for HTTP backendRef request filters (requires --octavia-weighted-http-targets)")
@@ -179,29 +181,30 @@ func run(ctx context.Context) error {
 	}
 
 	controllerConfig := controller.Config{
-		ControllerName:          gatewayv1.GatewayController(controllerName),
-		ControllerVersion:       version,
-		GatewayAPIChannel:       gatewayAPIChannel,
-		HTTPHeaderExact:         exactHTTPHeaders,
-		HTTPQueryParamExact:     exactHTTPQueryParams,
-		HTTPRequestURLRewrite:   httpRequestURLRewrite,
-		HTTPCORS:                httpCORS,
-		BackendRequestFilters:   httpBackendRequestFilters,
-		HTTPRequestRedirect:     httpRequestRedirect,
-		HTTPMethodMatch:         httpMethodMatch,
-		FixedHTTPResponses:      fixedHTTPResponses,
-		WeightedHTTPTargets:     weightedTargets,
-		RequestHeaderModifier:   requestHeaderModifier,
-		ResponseHeaderModifier:  responseHeaderModifier,
-		BackendH2C:              backendH2C,
-		BackendTLSPolicy:        backendTLSPolicy,
-		OperatorHTTPS:           certificateMap != "",
-		HTTPSListenerIsolation:  httpsListenerIsolation,
-		TLSSNIPassthrough:       tlsSNIPassthrough,
-		TLSSNISuffix:            tlsSNISuffix,
-		TCPTLSTermination:       tcpTLSTermination,
-		ClusterID:               clusterID,
-		OpenStackResyncInterval: resyncInterval,
+		GatewayInfrastructureMetadata: gatewayInfrastructureMetadata,
+		ControllerName:                gatewayv1.GatewayController(controllerName),
+		ControllerVersion:             version,
+		GatewayAPIChannel:             gatewayAPIChannel,
+		HTTPHeaderExact:               exactHTTPHeaders,
+		HTTPQueryParamExact:           exactHTTPQueryParams,
+		HTTPRequestURLRewrite:         httpRequestURLRewrite,
+		HTTPCORS:                      httpCORS,
+		BackendRequestFilters:         httpBackendRequestFilters,
+		HTTPRequestRedirect:           httpRequestRedirect,
+		HTTPMethodMatch:               httpMethodMatch,
+		FixedHTTPResponses:            fixedHTTPResponses,
+		WeightedHTTPTargets:           weightedTargets,
+		RequestHeaderModifier:         requestHeaderModifier,
+		ResponseHeaderModifier:        responseHeaderModifier,
+		BackendH2C:                    backendH2C,
+		BackendTLSPolicy:              backendTLSPolicy,
+		OperatorHTTPS:                 certificateMap != "",
+		HTTPSListenerIsolation:        httpsListenerIsolation,
+		TLSSNIPassthrough:             tlsSNIPassthrough,
+		TLSSNISuffix:                  tlsSNISuffix,
+		TCPTLSTermination:             tcpTLSTermination,
+		ClusterID:                     clusterID,
+		OpenStackResyncInterval:       resyncInterval,
 
 		BackendClientCertificate: backendClientMap != "",
 		FrontendClientValidation: frontendClientValidation,

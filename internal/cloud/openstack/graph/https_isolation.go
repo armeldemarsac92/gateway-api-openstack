@@ -20,10 +20,12 @@ import (
 	"context"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	openstackidentity "github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/identity"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia/amphora"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
 )
@@ -112,15 +114,49 @@ func (p *Provider) observeHTTPSIsolation(ctx context.Context, desired desiredGat
 	}
 	actual.httpsIsolationAvailable = p.httpsListenerIsolation && p.verifyGatewayHTTPCapabilities(ctx, desired, *actual,
 		[]string{octavia.GatewayCapabilityHTTPSListenerIsolation}) == nil
-	if len(desired.spec.Gateway.TLSWithdrawalPorts) != 0 {
+	node := desired.spec.Gateway
+	if len(node.TLSWithdrawalPorts) != 0 && len(node.TLSWithdrawalPreviousHosts) == 0 {
 		return
 	}
+	policySource := desired
+	authority := desired.spec.HTTPSPolicyAuthority
+	verifiedCleanup, verifiedWithdrawal := false, false
+	if (node.Disposition == cloud.GraphPreserve || node.Disposition == cloud.GraphWithdrawTLS) &&
+		authority != nil && authority.Identity == desired.spec.Identity && authority.Gateway.Disposition == cloud.GraphEnsure {
+		if observed, err := p.buildDesiredGatewayGraph(*authority); err == nil {
+			policySource = observed
+			verifiedCleanup = node.Disposition == cloud.GraphPreserve
+			verifiedWithdrawal = node.Disposition == cloud.GraphWithdrawTLS && len(node.TLSWithdrawalPorts) == 0
+		}
+	}
+	if len(node.TLSWithdrawalPorts) != 0 && policySource.spec.Gateway.Disposition != cloud.GraphEnsure {
+		return
+	}
+	actual.httpsHostTransition = make(map[string]bool)
 	actual.httpsIsolationPolicies = make(map[string]httpsPolicyInventory)
 	actual.httpsIsolationUnverified = make(map[string]bool)
 	configured := scopedHTTPListeners(desired)
+	if verifiedCleanup {
+		configured = scopedHTTPListeners(policySource)
+		p.observeFrontendCAs(ctx, policySource, actual)
+	}
+	if node.Disposition == cloud.GraphWithdrawTLS && policySource.spec.Gateway.Disposition == cloud.GraphEnsure {
+		proofPorts := scopedHTTPListeners(policySource)
+		for port, spec := range configured {
+			if !spec.TLS.Equal(proofPorts[port].TLS) {
+				return
+			}
+		}
+	}
 	wanted := make(map[int]map[string][]httpsPolicyBinding)
-	for index, route := range desired.routes {
-		if desired.spec.Routes[index].Disposition != cloud.GraphEnsure {
+	var detaching []Identity
+	for index, route := range policySource.routes {
+		switch policySource.spec.Routes[index].Disposition {
+		case cloud.GraphDelete:
+			detaching = append(detaching, route.identity)
+			continue
+		case cloud.GraphEnsure:
+		default:
 			continue
 		}
 		add := func(part desiredRoute) {
@@ -140,8 +176,39 @@ func (p *Provider) observeHTTPSIsolation(ctx context.Context, desired desiredGat
 			add(part)
 		}
 	}
+	proveRoutes := sync.OnceValue(func() map[string]httpsLivePolicy {
+		pools, err := p.listGatewayPoolInventory(ctx, actual.loadBalancer)
+		if err != nil {
+			return nil
+		}
+		routes, err := p.observeRouteGraphsFromPools(ctx, policySource.routeOwners(), actual.loadBalancer, nil,
+			cloud.ListenerProtocolHTTP, actual.scopedListeners, pools, nil, actual.httpsIsolationPolicies)
+		if err != nil {
+			return nil
+		}
+		if node.Disposition == cloud.GraphEnsure {
+			actual.routes = routes
+		}
+		proof := *actual
+		proof.routes = routes
+		source := policySource
+		source.spec.Routes = slices.Clone(source.spec.Routes)
+		source.routes = slices.Clone(source.routes)
+		for index := range source.routes {
+			source.routes[index].httpParts = slices.Clone(source.routes[index].httpParts)
+		}
+		if p.planBackendTLS(ctx, &source, proof) != nil {
+			return nil
+		}
+		return liveHTTPSPolicies(source, proof)
+	})
 	for _, listener := range actual.scopedListeners {
-		spec := configured[listener.ProtocolPort]
+		port := listener.ProtocolPort
+		prior := node.TLSWithdrawalPreviousHosts[port]
+		if len(node.TLSWithdrawalPorts) != 0 && prior == nil {
+			continue
+		}
+		spec := configured[port]
 		isolated := actual.isHTTPSIsolated(listener)
 		hosts := httpsVirtualHosts(spec)
 		if !isolated && len(hosts) == 0 {
@@ -150,7 +217,10 @@ func (p *Provider) observeHTTPSIsolation(ctx context.Context, desired desiredGat
 		// Only explicit scoped authorization can reopen a listener. When
 		// its model is preserved, still require the native selector proof.
 		bindingsMatch := actual.httpsBindingMatches(listener, spec)
-		if desired.spec.Gateway.Disposition == cloud.GraphPreserve {
+		if verifiedCleanup || verifiedWithdrawal {
+			bindingsMatch = bindingsMatch && actual.httpsTLSMaterialMatches(listener, spec) &&
+				actual.httpFallbackReady(listener, desired.fixedHTTPResponses)
+		} else if node.Disposition == cloud.GraphPreserve {
 			bindingsMatch = actual.httpsIsolationAvailable && hasHTTPSIsolationEnrollment(listener) &&
 				len(actual.httpsVirtualHosts[listener.ID]) != 0
 		}
@@ -159,17 +229,60 @@ func (p *Provider) observeHTTPSIsolation(ctx context.Context, desired desiredGat
 		removeFrontend := spec.TLS == nil && enrolled
 		retire := desired.spec.Gateway.Disposition == cloud.GraphEnsure && actual.httpsIsolationAvailable &&
 			!bindingsMatch && (changeHosts || removeFrontend)
+		current := actual.httpsVirtualHosts[listener.ID]
+		if verifiedCleanup && actual.httpsTLSMaterialMatches(listener, spec) && httpsHostSubset(hosts, current) {
+			// This cleanup owns route resources. The Gateway writer owns
+			// contraction, including withdrawal of another route's policy.
+			actual.httpsCleanupDeferred = true
+			actual.outcome = p.progressingOutcome("Waiting for scoped HTTPS withdrawal before route cleanup")
+			return
+		}
 		if !bindingsMatch {
 			actual.httpsIsolationUnverified[listener.ID] = true
 		}
-		if !bindingsMatch && !retire || actual.loadBalancer.ProvisioningStatus != "ACTIVE" ||
-			!bindingsMatch && (!actual.adminObserved[listener.ID] || listener.AdminStateUp || listener.ProvisioningStatus != "ACTIVE") {
+		parentActive := actual.loadBalancer.ProvisioningStatus == "ACTIVE"
+		active := listener.AdminStateUp && listener.ProvisioningStatus == "ACTIVE"
+		liveChange := prior != nil || !bindingsMatch && (retire || verifiedCleanup || verifiedWithdrawal)
+		closed := actual.adminObserved[listener.ID] && !listener.AdminStateUp && listener.ProvisioningStatus == "ACTIVE"
+		expanding := retire && httpsHostSubset(current, hosts)
+		readDuringUpdate := node.Disposition == cloud.GraphEnsure && (bindingsMatch || expanding) && active &&
+			independentHTTPSHosts(hosts) && actual.loadBalancer.ProvisioningStatus == "PENDING_UPDATE"
+		inspectPolicies := bindingsMatch || liveChange || (retire && closed)
+		if !parentActive && !readDuringUpdate || !inspectPolicies {
 			continue
 		}
 		inventory := p.readHTTPSPolicyInventory(ctx, listener)
 		actual.httpsIsolationPolicies[listener.ID] = inventory
 		if !inventory.complete {
 			actual.httpsIsolationUnverified[listener.ID] = true
+			continue
+		}
+		hasDetaching := bindingsMatch && len(detaching) != 0 && slices.ContainsFunc(inventory.items, func(item octavia.L7PolicyObservation) bool {
+			role, ok := readRouteResourceRole(item.Policy.Tags, rolePolicyExact, rolePolicyPrefix)
+			return ok && slices.ContainsFunc(detaching, func(owner Identity) bool { return owner.MatchesRoute(item.Policy.Tags, role.raw) })
+		})
+		if defaultPoolsObserved && active && (parentActive || expanding && readDuringUpdate) &&
+			(liveChange || hasDetaching || verifiedWithdrawal) {
+			step, serving, safe := planLiveHTTPSHostTransition(desired, *actual, listener, spec, inventory,
+				proveRoutes, prior, hasDetaching, verifiedWithdrawal)
+			// Cleanup of a withdrawn backend may keep Octavia busy when its
+			// grant returns. Prove the active subset against the expanded
+			// authority, provided expansion requires no policy retirement.
+			if safe && (parentActive || step != nil && step.kind == graphUpdateListenerVirtualHosts) {
+				if serving {
+					actual.httpsServingPorts = append(actual.httpsServingPorts, port)
+				}
+				if parentActive {
+					actual.httpsHostTransition[listener.ID] = true
+					if actual.httpsIsolationMutation == nil {
+						actual.httpsIsolationMutation = step
+					}
+				}
+				continue
+			}
+			actual.httpsIsolationUnverified[listener.ID] = true
+		}
+		if !bindingsMatch && (!actual.adminObserved[listener.ID] || listener.AdminStateUp || listener.ProvisioningStatus != "ACTIVE") {
 			continue
 		}
 		if retire {
@@ -188,14 +301,178 @@ func (p *Provider) observeHTTPSIsolation(ctx context.Context, desired desiredGat
 			// A withdrawal-only snapshot has no route owners. A valid section
 			// name alone cannot show that the policy belongs to that section.
 			role, ok := readRouteResourceRole(item.Policy.Tags, rolePolicyExact, rolePolicyPrefix)
-			if !ok || !slices.ContainsFunc(wanted[listener.ProtocolPort][role.raw], func(binding httpsPolicyBinding) bool {
-				return binding.scope == hostname && binding.owner.MatchesRoute(item.Policy.Tags, role.raw)
-			}) {
+			if !ok || !httpsPolicyBindingMatches(wanted[port][role.raw], item, role.raw) {
 				actual.httpsIsolationUnverified[listener.ID] = true
 				break
 			}
 		}
 	}
+}
+
+func httpsPolicyBindingMatches(bindings []httpsPolicyBinding, item octavia.L7PolicyObservation, role string) bool {
+	return slices.ContainsFunc(bindings, func(binding httpsPolicyBinding) bool {
+		return binding.scope == item.HTTPSListenerHostname && binding.owner.MatchesRoute(item.Policy.Tags, role)
+	})
+}
+
+func httpsHostSubset(subset, hosts []string) bool {
+	return len(subset) != 0 && len(subset) < len(hosts) && !slices.ContainsFunc(subset, func(host string) bool {
+		return !slices.Contains(hosts, host)
+	})
+}
+
+// Native wildcard selectors match any valid DNS name ending in their suffix.
+func independentHTTPSHosts(hosts []string) bool {
+	for i, host := range hosts {
+		if amphora.ValidateSNIHostname(host) != nil || i > 0 && hosts[i-1] >= host {
+			return false
+		}
+		for _, peer := range hosts[:i] {
+			if amphora.SNISuffixCovers(peer, host) || amphora.SNISuffixCovers(host, peer) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+type httpsLivePolicy struct {
+	observed   observedRoutePolicy
+	owner      cloud.Identity
+	authorized bool
+	detaching  bool
+}
+
+// Reuse the normal policy model, including resolved weighted targets and
+// fixed responses, to prove which current actions may remain exposed.
+func liveHTTPSPolicies(desired desiredGatewayGraph, actual observedGatewayGraph) map[string]httpsLivePolicy {
+	if len(desired.routes) != len(actual.routes) {
+		return nil
+	}
+	parts, readback, owners := httpPlanningParts(desired, actual)
+	result := make(map[string]httpsLivePolicy)
+	for index, route := range parts.routes {
+		observed := readback.routes[index]
+		authorized := parts.spec.Routes[index].Disposition == cloud.GraphEnsure && route.redirectIssue == nil &&
+			route.backendTLS.allowsMembers() && !route.backendTransportNeedsWithdrawal(observed)
+		if authorized && route.unavailable && !route.fixedResponse {
+			withdrawal, hold := httpMemberWithdrawal(observed)
+			authorized = len(withdrawal) == 0 && hold == ""
+		}
+		for _, policy := range observed.policies {
+			record := httpsLivePolicy{observed: policy, owner: route.spec.Identity,
+				detaching: desired.spec.Routes[owners[index]].Disposition == cloud.GraphDelete}
+			if authorized {
+				listener := slices.IndexFunc(actual.scopedListeners, func(item listeners.Listener) bool {
+					return item.ID == policy.policy.ListenerID && item.ProtocolPort == scopedHTTPRoutePort(route)
+				})
+				record.authorized = listener >= 0 && slices.ContainsFunc(route.policies, func(wanted desiredPolicy) bool {
+					return isolatedPolicyMatches(route, observed, wanted, policy)
+				})
+			}
+			result[policy.policy.ID] = record
+		}
+	}
+	return result
+}
+
+// The native SNI/authority selector guards every policy. Registering a new
+// disjoint scope exposes only a 404 until the ordinary planner enables it.
+func planLiveHTTPSHostTransition(desired desiredGatewayGraph, actual observedGatewayGraph, listener listeners.Listener,
+	spec cloud.ScopedListener, inventory httpsPolicyInventory, proveRoutes func() map[string]httpsLivePolicy,
+	prior []string, hasDetaching, verifiedWithdrawal bool,
+) (*graphMutation, bool, bool) {
+	current, next := actual.httpsVirtualHosts[listener.ID], httpsVirtualHosts(spec)
+	if !actual.httpsIsolationAvailable || !hasHTTPSIsolationEnrollment(listener) ||
+		listener.Protocol != terminatedHTTPS || !actual.httpsTLSMaterialMatches(listener, spec) ||
+		!actual.httpFallbackReady(listener, desired.fixedHTTPResponses) {
+		return nil, false, false
+	}
+	settled := slices.Equal(current, next) && (hasDetaching || verifiedWithdrawal ||
+		prior != nil && independentHTTPSHosts(prior) && (httpsHostSubset(prior, current) || httpsHostSubset(current, prior)))
+	if prior != nil && !settled && !slices.Equal(prior, current) {
+		return nil, false, false
+	}
+	shrinking := httpsHostSubset(next, current)
+	expanding := httpsHostSubset(current, next)
+	if !shrinking && !expanding && !settled || !independentHTTPSHosts(current) || !independentHTTPSHosts(next) {
+		return nil, false, false
+	}
+	proof := proveRoutes()
+	if proof == nil {
+		return nil, false, false
+	}
+	var remove, activeRemoval string
+	serving := false
+	for _, item := range inventory.items {
+		host, policy := item.HTTPSListenerHostname, item.Policy
+		entry, known := proof[policy.ID]
+		if !known || item.AdminState == nil || entry.observed.initialRulesPartial ||
+			!observedForwardPolicySettled(entry.observed) || !slices.Contains(current, host) {
+			return nil, false, false
+		}
+		if slices.Contains(next, host) && !entry.detaching {
+			if policy.AdminStateUp {
+				if !entry.authorized {
+					return nil, false, false
+				}
+				serving = true
+			}
+			continue
+		}
+		if policy.AdminStateUp {
+			if desired.spec.Gateway.Disposition == cloud.GraphPreserve && !slices.ContainsFunc(desired.spec.Routes, func(node cloud.RouteGraphNode) bool {
+				return node.Disposition == cloud.GraphDelete && node.Spec.Identity == entry.owner
+			}) {
+				return nil, false, false
+			}
+			// The API can retire a single active policy per write.
+			if activeRemoval != "" {
+				return nil, false, false
+			}
+			activeRemoval = policy.ID
+		} else if remove == "" || policy.ID < remove {
+			remove = policy.ID
+		}
+	}
+	if desired.spec.Gateway.Disposition == cloud.GraphPreserve {
+		// The ordinary delete plan owns the detaching policy. It disables
+		// it before deleting its predicates or any referenced backends.
+		return nil, serving, true
+	}
+	if activeRemoval != "" {
+		remove = activeRemoval
+	}
+	if remove != "" {
+		return &graphMutation{kind: graphDeleteChild, listenerID: listener.ID, scopedListener: spec, redactTLSError: true,
+			deletion: gatewayDeletionStep{resource: gatewayDeletionL7Policy, resourceID: remove},
+			message:  "Withdrawing an unauthorized Octavia HTTPS hostname policy"}, serving, true
+	}
+	if settled || expanding && desired.spec.Gateway.Disposition != cloud.GraphEnsure {
+		return nil, serving, true
+	}
+	return &graphMutation{kind: graphUpdateListenerVirtualHosts, listenerID: listener.ID, scopedListener: spec, redactTLSError: true,
+		message: "Updating the disjoint hostname scopes of an active Octavia HTTPS listener"}, serving, true
+}
+
+func (p *Provider) readOwnedHTTPSPolicy(ctx context.Context, identity Identity, listenerID string, policy l7policies.L7Policy, role routeResourceRole) (observedRoutePolicy, bool) {
+	owner, owned := identity.RouteOwner(policy.Tags, role.raw)
+	if !owned || policy.ListenerID != listenerID || policy.ProjectID != p.projectID {
+		return observedRoutePolicy{}, false
+	}
+	observed, err := p.observeRoutePolicy(ctx, routeGraphOwner{identity: identity, recovery: &owner}, policy, listenerID, role)
+	if err != nil || observed.pending() {
+		return observedRoutePolicy{}, false
+	}
+	rules := make([]l7policies.Rule, 0, len(observed.rules))
+	for _, rule := range observed.rules {
+		if rule.rule.ProjectID != p.projectID {
+			return observedRoutePolicy{}, false
+		}
+		rules = append(rules, rule.rule)
+	}
+	err = crossCheckCompleteChildInventory("L7 policy", policy.ID, "rule", policy.Rules, rules, func(rule l7policies.Rule) string { return rule.ID })
+	return observed, err == nil
 }
 
 // Change the native hostname inventory only after retiring every proved
@@ -208,24 +485,10 @@ func (p *Provider) planHTTPSPolicyRetirement(ctx context.Context, desired desire
 	for _, item := range items {
 		policy := item.Policy
 		role, ok := readRouteResourceRole(policy.Tags, rolePolicyExact, rolePolicyPrefix)
-		owner, owned := desired.identity.RouteOwner(policy.Tags, role.raw)
-		if !ok || !owned || policy.ListenerID != listener.ID || policy.ProjectID != p.projectID ||
-			policy.ProvisioningStatus != "ACTIVE" && policy.ProvisioningStatus != "ERROR" {
+		if !ok || policy.ProvisioningStatus != "ACTIVE" && policy.ProvisioningStatus != "ERROR" {
 			continue
 		}
-		observed, err := p.observeRoutePolicy(ctx, routeGraphOwner{identity: desired.identity, recovery: &owner}, policy, listener.ID, role)
-		if err != nil || observed.pending() {
-			continue
-		}
-		rules := make([]l7policies.Rule, 0, len(observed.rules))
-		for _, rule := range observed.rules {
-			if rule.rule.ProjectID != p.projectID {
-				break
-			}
-			rules = append(rules, rule.rule)
-		}
-		if len(rules) != len(observed.rules) || crossCheckCompleteChildInventory("L7 policy", policy.ID, "rule", policy.Rules, rules,
-			func(rule l7policies.Rule) string { return rule.ID }) != nil {
+		if _, owned := p.readOwnedHTTPSPolicy(ctx, desired.identity, listener.ID, policy, role); !owned {
 			continue
 		}
 		actual.httpsIsolationMutation = &graphMutation{kind: graphDeleteChild, listenerID: listener.ID, scopedListener: spec, redactTLSError: true,
@@ -269,18 +532,23 @@ func (actual observedGatewayGraph) isolatedPoliciesReady(desired desiredGatewayG
 		}
 		for _, policy := range route.policies {
 			if !slices.ContainsFunc(observed.policies, func(current observedRoutePolicy) bool {
-				return current.role == policy.role && current.policy.ListenerID == listener.ID &&
-					current.httpsListenerHostname == policy.httpsListenerHostname && current.policy.AdminStateUp &&
-					slices.Equal(current.requestHeaderOperations, policy.requestHeaderOperations) &&
-					slices.Equal(current.responseHeaderOperations, policy.responseHeaderOperations) &&
-					(policy.requestCORS == nil && !current.hasRequestCORS() || policy.requestCORS != nil && requestCORSPolicy.settled(policy, current)) &&
-					(route.redirect && observedForwardPolicySettled(current) && desiredPolicyActionMatches(policy, current, "") &&
-						observedHTTPPredicateMatches(current, rulesFor(policy, route.hostnameRuleValue)) ||
-						!route.redirect && observedForwardPolicyMatches(route, observed, current))
+				return current.policy.ListenerID == listener.ID && current.policy.AdminStateUp &&
+					isolatedPolicyMatches(route, observed, policy, current)
 			}) {
 				return false
 			}
 		}
 	}
 	return true
+}
+
+func isolatedPolicyMatches(route desiredRoute, observed observedRouteGraph, policy desiredPolicy, current observedRoutePolicy) bool {
+	return current.role == policy.role && current.httpsListenerHostname == policy.httpsListenerHostname &&
+		slices.Equal(current.requestHeaderOperations, policy.requestHeaderOperations) &&
+		slices.Equal(current.responseHeaderOperations, policy.responseHeaderOperations) &&
+		(policy.requestURLRewrite == nil && !current.hasRequestURLRewrite() || policy.requestURLRewrite != nil && requestURLRewritePolicy.settled(policy, current)) &&
+		(policy.requestCORS == nil && !current.hasRequestCORS() || policy.requestCORS != nil && requestCORSPolicy.settled(policy, current)) &&
+		(route.redirect && observedForwardPolicySettled(current) && desiredPolicyActionMatches(policy, current, "") &&
+			observedHTTPPredicateMatches(current, rulesFor(policy, route.hostnameRuleValue)) ||
+			!route.redirect && observedForwardPolicyMatches(route, observed, current))
 }

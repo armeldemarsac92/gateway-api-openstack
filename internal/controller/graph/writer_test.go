@@ -107,6 +107,190 @@ func TestWriterKeepsGuardedHTTPPortsWhenTLSWithdrawalDoesNotObserveThem(t *testi
 	}
 }
 
+func TestWriterRequiresCurrentRouteAuthorityAfterScopedTLSChange(t *testing.T) {
+	request := writerRequest()
+	makeInput := func(certificate string, hosts ...string) GatewayInput {
+		return GatewayInput{Node: cloud.GatewayGraphNode{Disposition: cloud.GraphWithdrawTLS, Spec: cloud.GatewaySpec{
+			Identity: request.Identity, ListenerProtocol: cloud.ListenerProtocolHTTP, ScopedListeners: []cloud.ScopedListener{
+				{Port: 443, TLS: &cloud.ListenerTLS{CertificateRef: certificate, VirtualHosts: hosts}},
+			},
+		}}, Validate: func(context.Context) error { return nil }}
+	}
+	original := makeInput("shared-revision", "gateway.example.test", "set.example.test")
+	original.Node.Disposition = cloud.GraphEnsure
+	original.Object = &gatewayv1.Gateway{}
+	reduced := makeInput("shared-revision", "gateway.example.test")
+	for _, test := range []struct {
+		name      string
+		after     GatewayInput
+		withProof bool
+		readErr   bool
+		failFence bool
+	}{
+		{name: "one section revoked", after: reduced, withProof: true},
+		{name: "route read failed after revocation", after: reduced, readErr: true},
+		{name: "route validation failed on its second read", after: reduced, failFence: true},
+		{name: "an interrupted revocation already restored", after: original},
+		{name: "the server certificate has changed", after: makeInput("other-revision", "gateway.example.test")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			w := writerFixture()
+			live := reduced
+			original.ObserveTLS = func(context.Context) (GatewayInput, error) { return live, nil }
+			staleRoutes := errors.New("route snapshot changed")
+			fence := validateInputs(t.Context(), original, RouteInputs{Validate: func(context.Context) error { return staleRoutes }})
+			var changed *TLSAuthorizationChanged
+			if !errors.Is(fence, staleRoutes) || !errors.As(fence, &changed) {
+				t.Fatalf("the route validation must retain the observed TLS change, got %v", fence)
+			}
+			live = test.after
+			live.Node.Disposition = cloud.GraphWithdrawTLS
+			w.Gateway = gatewaySourceFunc(func(context.Context, Request) (GatewayInput, error) {
+				ensure := live
+				ensure.Node.Disposition = cloud.GraphEnsure
+				ensure.Object = original.Object
+				return ensure, nil
+			})
+			fences := 0
+			w.Routes = routeSourceFunc(func(context.Context, Request, *gatewayv1.Gateway) (RouteInputs, error) {
+				if test.readErr {
+					return RouteInputs{}, staleRoutes
+				}
+				return RouteInputs{Validate: func(context.Context) error {
+					fences++
+					if test.failFence && fences == 2 {
+						return staleRoutes
+					}
+					return nil
+				}}, nil
+			})
+			attempts := 0
+			w.Provider = graphProviderFunc(func(ctx context.Context, spec cloud.GatewayGraphSpec) (cloud.GatewayGraphResult, error) {
+				attempts++
+				if !slices.Equal(spec.Gateway.TLSWithdrawalPorts, []int{443}) ||
+					(spec.HTTPSPolicyAuthority != nil) != test.withProof ||
+					(slices.Equal(spec.Gateway.TLSWithdrawalPreviousHosts[443], []string{"gateway.example.test", "set.example.test"})) != test.withProof {
+					t.Errorf("unexpected scoped withdrawal authority: %#v", spec)
+				}
+				var serving []int
+				if spec.HTTPSPolicyAuthority != nil {
+					serving = []int{443}
+				}
+				return cloud.GatewayGraphResult{Outcome: cloud.ReadyOutcome(), Gateway: cloud.GatewayResult{
+					ScopedListenerServingPorts: serving,
+				}}, spec.ValidateMutation(ctx)
+			})
+			initial := cloud.GatewayGraphResult{Gateway: cloud.GatewayResult{
+				ScopedListenerReadyPorts: []int{443}, ScopedListenerDeferredPorts: []int{443}, ScopedListenerServingPorts: []int{443},
+			}}
+			result, err := w.finishTLS(t.Context(), request.Identity, original, initial, fence)
+			if len(result.Gateway.ScopedListenerReadyPorts) != 0 || len(result.Gateway.ScopedListenerDeferredPorts) != 0 ||
+				slices.Contains(result.Gateway.ScopedListenerServingPorts, 443) != test.withProof {
+				t.Fatalf("TLS withdrawal retained stale discovery or logical readiness: %+v", result.Gateway)
+			}
+			if attempts != 1 {
+				t.Fatalf("expected a single provider call, got %d", attempts)
+			}
+			if !errors.Is(err, staleRoutes) || !errors.As(err, &changed) {
+				t.Fatalf("the withdrawal lost one cause of the failed fence: %v", err)
+			}
+		})
+	}
+}
+
+func TestWriterUsesCompleteHTTPSBindingsWithoutChangingRouteCleanupScope(t *testing.T) {
+	request := writerRequest()
+	gatewayIdentity := request.Identity
+	request.Action, request.Route = DeleteRoute, &gatewayv1.HTTPRoute{}
+	request.Identity.RouteNamespace, request.Identity.RouteName, request.Identity.RouteUID = "default", "detached", "detached-uid"
+	sibling := request.Identity
+	sibling.RouteName, sibling.RouteUID = "sibling", "sibling-uid"
+	gateway := &gatewayv1.Gateway{}
+	detach := cloud.RouteGraphNode{Disposition: cloud.GraphDelete, Spec: cloud.RouteSpec{Identity: request.Identity}}
+	preserve := cloud.RouteGraphNode{Disposition: cloud.GraphPreserve, Spec: cloud.RouteSpec{Identity: sibling}}
+	ensure := preserve
+	ensure.Disposition = cloud.GraphEnsure
+
+	w := writerFixture()
+	validate := func(context.Context) error { return nil }
+	w.Gateway = gatewaySourceFunc(func(_ context.Context, req Request) (GatewayInput, error) {
+		spec := cloud.GatewaySpec{ListenerProtocol: cloud.ListenerProtocolHTTP, ScopedListeners: []cloud.ScopedListener{}}
+		disposition := cloud.GraphPreserve
+		if req.Action == Ensure {
+			if req.Identity != gatewayIdentity || req.Gateway != gateway || req.Route != nil {
+				t.Fatalf("cleanup used the wrong Gateway authority: %#v", req)
+			}
+			disposition = cloud.GraphEnsure
+			spec.ScopedListeners = []cloud.ScopedListener{{Port: 443, TLS: &cloud.ListenerTLS{
+				CertificateRef: "shared-revision", VirtualHosts: []string{"gateway.example.test", "set.example.test"},
+			}}}
+		}
+		return GatewayInput{Object: gateway, Node: cloud.GatewayGraphNode{Disposition: disposition, Spec: spec}, Validate: validate}, nil
+	})
+	w.Routes = routeSourceFunc(func(_ context.Context, req Request, _ *gatewayv1.Gateway) (RouteInputs, error) {
+		if req.Action == Ensure {
+			return RouteInputs{Nodes: []cloud.RouteGraphNode{detach, ensure}, Validate: validate}, nil
+		}
+		return RouteInputs{Nodes: []cloud.RouteGraphNode{detach, preserve}, Validate: validate}, nil
+	})
+	w.Provider = graphProviderFunc(func(ctx context.Context, spec cloud.GatewayGraphSpec) (cloud.GatewayGraphResult, error) {
+		if spec.Gateway.Disposition != cloud.GraphPreserve || len(spec.Routes) != 2 || spec.Routes[1].Disposition != cloud.GraphPreserve ||
+			spec.HTTPSPolicyAuthority == nil || spec.HTTPSPolicyAuthority.Routes[1].Disposition != cloud.GraphEnsure {
+			t.Fatalf("cleanup changed its mutation scope or lost the surviving authority: %#v", spec)
+		}
+		return cloud.GatewayGraphResult{Outcome: cloud.ReadyOutcome()}, spec.ValidateMutation(ctx)
+	})
+	if _, err := w.ReconcileGraph(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWriterRebuildsHTTPSBindingsAfterStaleRouteObservation(t *testing.T) {
+	request := writerRequest()
+	gateway := &gatewayv1.Gateway{}
+	listeners := []cloud.ScopedListener{{Port: 443, TLS: &cloud.ListenerTLS{
+		CertificateRef: "shared-revision", VirtualHosts: []string{"sibling.example.test"},
+	}}}
+	stale := errors.New("route projection changed")
+	validate := func(context.Context) error { return nil }
+	tls := GatewayInput{Node: cloud.GatewayGraphNode{Disposition: cloud.GraphWithdrawTLS,
+		Spec: cloud.GatewaySpec{ListenerProtocol: cloud.ListenerProtocolHTTP, ScopedListeners: listeners}}, Validate: validate}
+	input := GatewayInput{Object: gateway, ObserveTLS: func(context.Context) (GatewayInput, error) { return tls, nil }}
+	for _, test := range []struct {
+		name      string
+		routesErr error
+	}{
+		{name: "complete refresh"},
+		{name: "incomplete refresh", routesErr: stale},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			w := writerFixture()
+			w.Gateway = gatewaySourceFunc(func(_ context.Context, req Request) (GatewayInput, error) {
+				if req.Identity != request.Identity || req.Gateway != gateway || req.Route != nil {
+					t.Fatalf("invalid authority refresh: %#v", req)
+				}
+				live := tls
+				live.Node.Disposition = cloud.GraphEnsure
+				live.Object = gateway
+				return live, nil
+			})
+			w.Routes = routeSourceFunc(func(context.Context, Request, *gatewayv1.Gateway) (RouteInputs, error) {
+				return RouteInputs{Validate: validate}, test.routesErr
+			})
+			w.Provider = graphProviderFunc(func(ctx context.Context, spec cloud.GatewayGraphSpec) (cloud.GatewayGraphResult, error) {
+				if spec.Gateway.Disposition != cloud.GraphWithdrawTLS || len(spec.Routes) != 0 ||
+					(spec.HTTPSPolicyAuthority != nil) != (test.routesErr == nil) {
+					t.Fatalf("unexpected TLS withdrawal authority: %#v", spec)
+				}
+				return cloud.GatewayGraphResult{Outcome: cloud.ReadyOutcome()}, spec.ValidateMutation(ctx)
+			})
+			if _, err := w.finishTLS(t.Context(), request.Identity, input, cloud.GatewayGraphResult{}, stale); !errors.Is(err, stale) {
+				t.Fatalf("authorization refresh lost the triggering error: %v", err)
+			}
+		})
+	}
+}
+
 func TestBackendClientCertificateWithdrawalSurvivesFailedPolicyInventory(t *testing.T) {
 	w := writerFixture()
 	request := writerRequest()
