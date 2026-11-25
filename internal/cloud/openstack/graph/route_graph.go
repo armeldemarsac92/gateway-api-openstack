@@ -920,6 +920,7 @@ type routeMutation struct {
 	poolPersistence          *pools.SessionPersistence
 	poolCookieDeadline       *cloud.HTTPSessionCookieDeadline
 	clearPoolCookieDeadline  bool
+	clearPoolCookiePermanent bool
 	xBackendCookieFallback   bool
 	xBackendCookieDrain      bool
 	backendH2C               *bool
@@ -1744,6 +1745,9 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 			opts.Tags = append(opts.Tags, xBackendCookieTag)
 			if cookieDeadline = desired.sessionCookieDeadline; cookieDeadline != nil {
 				opts.Tags = append(opts.Tags, xBackendCookieDeadlineTag)
+				if cookieDeadline.Permanent {
+					opts.Tags = append(opts.Tags, xBackendCookiePermanentTag)
+				}
 			}
 		}
 		var budget *cloud.BackendRetryBudget
@@ -1791,7 +1795,7 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 	case routeMutationSetXBackendCookie:
 		opts := pools.UpdateOpts{Persistence: step.poolPersistence, Tags: step.poolTags, AdminStateUp: step.poolAdmin}
 		_, err = p.octavia.UpdatePool(ctx, step.id, octavia.UpdatePoolOpts{UpdateOpts: opts,
-			CookieDeadline: step.poolCookieDeadline, ClearCookieDeadline: step.clearPoolCookieDeadline})
+			CookieDeadline: step.poolCookieDeadline, ClearCookieDeadline: step.clearPoolCookieDeadline, ClearCookiePermanent: step.clearPoolCookiePermanent})
 	case routeMutationPublishBackendCA:
 		return p.publishBackendCA(ctx, desired.spec)
 	case routeMutationClearPoolMembers:

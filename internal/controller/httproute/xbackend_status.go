@@ -152,7 +152,7 @@ func (r *xBackendStatusReconciler) observeAncestors(ctx context.Context, key typ
 		}
 		if condition.Status == metav1.ConditionTrue && backend.Spec.SessionPersistence != nil {
 			condition.Status, condition.Reason, condition.Message = cookieCapability.apply(condition.Status, condition.Reason, condition.Message,
-				backend.Spec.SessionPersistence.AbsoluteTimeout != nil)
+				model.XBackendCookieRequirements(*backend.Spec.SessionPersistence))
 		}
 		ancestors[gatewayKey] = condition
 	}

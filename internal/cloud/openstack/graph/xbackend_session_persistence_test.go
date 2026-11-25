@@ -144,7 +144,7 @@ func TestXBackendCookieOctaviaPoolLifecycle(t *testing.T) {
 	actual.routes[0].httpParts[wanted.backendKey] = &active
 	require.NotNil(t, p.prepareXBackendCookies(t.Context(), &desired, actual))
 	require.Equal(t, cloud.SessionPersistenceDeadlineUnsupported, wanted.cookieSupportIssue())
-	available, err := p.XBackendCookieAvailable(t.Context(), false)
+	available, err := p.XBackendCookieAvailable(t.Context(), cloud.HTTPSessionCookieNamed)
 	require.NoError(t, err)
 	require.True(t, available)
 
@@ -163,6 +163,7 @@ func TestXBackendCookieOctaviaPoolLifecycle(t *testing.T) {
 	require.Equal(t, routeMutationClearPoolMembers, p.prepareXBackendCookies(t.Context(), &desired, actual).route.kind)
 	zero.members = nil
 	execute(converge(zero))
+	require.NotContains(t, string(writes[len(writes)-1]["session_persistence"]), "cookie_permanent")
 	bounded := observe()
 	require.Equal(t, wanted.sessionCookieDeadline, bounded.cookieDeadline.Value)
 	require.Equal(t, routeMutationCreateMember, converge(bounded).kind)
@@ -236,6 +237,135 @@ func TestXBackendCookieOctaviaPoolLifecycle(t *testing.T) {
 	require.Equal(t, "false", string(request["admin_state_up"]))
 	require.JSONEq(t, `{"type":"HTTP_COOKIE","cookie_name":"reports_renamed","cookie_absolute_timeout_ms":1234,"cookie_scope":"`+deadline.Scope+`"}`,
 		string(request["session_persistence"]))
+
+	// Opt in to Permanent on the same scope and require provider readback of the mode.
+	active = observe()
+	actual.routes[0].httpParts = map[string]*observedRouteGraph{wanted.backendKey: &active}
+	wanted.sessionCookieDeadline = &cloud.HTTPSessionCookieDeadline{TimeoutMS: 1500, Scope: deadline.Scope, Permanent: true}
+	require.NotNil(t, p.prepareXBackendCookies(t.Context(), &desired, actual))
+	require.Equal(t, cloud.SessionPersistencePermanentUnsupported, wanted.cookieSupportIssue())
+	capabilities = append(capabilities, octavia.GatewayCapabilityHTTPCookiePermanent)
+	require.Nil(t, p.prepareXBackendCookies(t.Context(), &desired, actual))
+	execute(converge(active))
+	permanent := observe()
+	require.Equal(t, wanted.sessionCookieDeadline, permanent.cookieDeadline.Value)
+	require.Contains(t, permanent.pool.Tags, xBackendCookiePermanentTag)
+	require.JSONEq(t, `{"type":"HTTP_COOKIE","cookie_name":"reports_renamed","cookie_absolute_timeout_ms":1500,"cookie_scope":"`+deadline.Scope+`","cookie_permanent":true}`,
+		string(writes[len(writes)-1]["session_persistence"]))
+
+	correct = pool["session_persistence"]
+	pool["session_persistence"] = json.RawMessage(`{"type":"HTTP_COOKIE","cookie_name":"reports_renamed","cookie_absolute_timeout_ms":1500,"cookie_scope":"` + deadline.Scope + `","cookie_permanent":"true"}`)
+	require.True(t, observe().cookieDeadline.Invalid)
+	pool["session_persistence"] = correct
+	actual.routes[0].httpParts[wanted.backendKey] = &permanent
+	capabilityResponse = http.StatusServiceUnavailable
+	require.Nil(t, p.prepareXBackendCookies(t.Context(), &desired, actual))
+	require.Equal(t, cloud.SessionPersistencePermanentUnverified, wanted.cookieSupportIssue())
+	capabilityResponse = http.StatusOK
+	require.Nil(t, p.prepareXBackendCookies(t.Context(), &desired, actual))
+	require.Equal(t, cloud.SessionPersistenceAvailable, wanted.cookieSupportIssue())
+
+	// Losing Permanent support still allows an explicit downgrade to a timed Session cookie.
+	capabilities = capabilities[:len(capabilities)-1]
+	wanted.sessionCookieDeadline = &cloud.HTTPSessionCookieDeadline{TimeoutMS: 1500, Scope: deadline.Scope}
+	require.Nil(t, p.prepareXBackendCookies(t.Context(), &desired, actual))
+	execute(converge(permanent))
+	require.JSONEq(t, `{"type":"HTTP_COOKIE","cookie_name":"reports_renamed","cookie_absolute_timeout_ms":1500,"cookie_scope":"`+deadline.Scope+`","cookie_permanent":false}`,
+		string(writes[len(writes)-1]["session_persistence"]))
+	require.NotContains(t, observe().pool.Tags, xBackendCookiePermanentTag)
+
+	// An older API can hide the mode while the ownership tag still exists.
+	pool["tags"] = permanent.pool.Tags
+	pool["session_persistence"] = json.RawMessage(`{"type":"HTTP_COOKIE","cookie_name":"reports_renamed","cookie_absolute_timeout_ms":1500,"cookie_scope":"` + deadline.Scope + `"}`)
+	legacy := observe()
+	actual.routes[0].httpParts[wanted.backendKey] = &legacy
+	legacyClear := p.prepareXBackendCookies(t.Context(), &desired, actual)
+	require.NotNil(t, legacyClear)
+	execute(legacyClear.route)
+	require.Equal(t, "null", string(writes[len(writes)-1]["session_persistence"]))
+	execute(converge(observe()))
+	require.JSONEq(t, `{"type":"HTTP_COOKIE","cookie_name":"reports_renamed","cookie_absolute_timeout_ms":1500,"cookie_scope":"`+deadline.Scope+`"}`,
+		string(writes[len(writes)-1]["session_persistence"]))
+
+	capabilities = append(capabilities, octavia.GatewayCapabilityHTTPCookiePermanent)
+	wanted.sessionCookieDeadline = &cloud.HTTPSessionCookieDeadline{Scope: deadline.Scope, Permanent: true}
+	actual.routes[0].httpParts = nil
+	require.Nil(t, p.prepareXBackendCookies(t.Context(), &desired, actual))
+	execute(converge(observedRouteGraph{}))
+	require.JSONEq(t, `{"type":"HTTP_COOKIE","cookie_name":"reports_renamed","cookie_absolute_timeout_ms":0,"cookie_scope":"`+deadline.Scope+`","cookie_permanent":true}`,
+		string(writes[len(writes)-1]["session_persistence"]))
+	permanent = observe()
+	require.Equal(t, wanted.sessionCookieDeadline, permanent.cookieDeadline.Value)
+
+	// Clearing both deadline fields also clears Permanent, using the old JSON contract.
+	capabilities = capabilities[:len(capabilities)-1]
+	wanted.sessionCookieDeadline = nil
+	actual.routes[0].httpParts = map[string]*observedRouteGraph{wanted.backendKey: &permanent}
+	require.Nil(t, p.prepareXBackendCookies(t.Context(), &desired, actual))
+	execute(converge(permanent))
+	require.JSONEq(t, `{"type":"HTTP_COOKIE","cookie_name":"reports_renamed","cookie_absolute_timeout_ms":null,"cookie_scope":null}`,
+		string(writes[len(writes)-1]["session_persistence"]))
+}
+
+func TestXBackendPermanentCookieWaitsForBothRoutesWithoutBlockingOtherPools(t *testing.T) {
+	desired, actual := weightedPlanFixture()
+	actual.loadBalancer.Provider, actual.loadBalancer.ProvisioningStatus = "amphora", "ACTIVE"
+	actual.listener.ProvisioningStatus = "ACTIVE"
+	wanted := &desired.routes[0].httpParts[1]
+	wanted.xBackend, wanted.sessionCookieName = true, "reports_session"
+	wanted.sessionCookieDeadline = &cloud.HTTPSessionCookieDeadline{TimeoutMS: 1500, Scope: strings.Repeat("a", 64), Permanent: true}
+	current := actual.routes[0].httpParts[wanted.backendKey]
+	current.backendTLS.AdminObserved = true
+	current.pool.Persistence = pools.SessionPersistence{Type: httpCookiePersistence, CookieName: wanted.sessionCookieName}
+	current.pool.Tags = append(current.pool.Tags, xBackendCookieTag, xBackendCookieDeadlineTag, xBackendCookiePermanentTag)
+	current.cookieDeadline.Value = wanted.sessionCookieDeadline
+
+	sibling := *wanted
+	sibling.backendKey = "sibling-reports"
+	sibling.spec.Identity.RouteName = "sibling"
+	sibling.policies = []desiredPolicy{{path: "/sibling"}}
+	desired.routes = append(desired.routes, desiredRoute{spec: sibling.spec, httpParts: []desiredRoute{sibling}})
+	desired.spec.Routes = append(desired.spec.Routes, cloud.RouteGraphNode{Disposition: cloud.GraphEnsure})
+	siblingPool := *current.pool
+	siblingPool.ID = "pool-sibling"
+	siblingObserved := observedRouteGraph{pool: &siblingPool, backendTLS: current.backendTLS}
+	actual.routes = append(actual.routes, observedRouteGraph{httpParts: map[string]*observedRouteGraph{sibling.backendKey: &siblingObserved}})
+
+	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "GET /lbaas/providers/amphora/gateway_capabilities", r.Method+" "+r.URL.Path)
+		safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": []string{
+			octavia.GatewayCapabilityHTTPCookieName, octavia.GatewayCapabilityHTTPCookieAbsoluteTimeout,
+			octavia.GatewayCapabilityHTTPCookiePermanent,
+		}})
+	}))
+	p := NewProvider(ServiceClients{LoadBalancer: client}, ProviderConfig{XBackendSessionPersistence: true})
+	require.Nil(t, p.prepareXBackendCookies(t.Context(), &desired, actual))
+	steps, result, err := p.buildGatewayGraphPlan(desired, actual)
+	require.NoError(t, err)
+	require.Len(t, result.Routes, 2)
+	for _, route := range result.Routes {
+		require.Equal(t, cloud.SessionPersistencePermanentReadbackUnverified, route.Result.BackendSessionPersistenceIssue)
+		require.Equal(t, cloud.OutcomeProgressing, route.Result.Outcome.State)
+	}
+	require.NotEmpty(t, steps)
+	require.Equal(t, routeMutationSetPolicyTarget, steps[0].route.kind)
+	policy := &actual.routes[0].httpParts[desired.routes[0].httpParts[2].backendKey].policies[0]
+	require.Equal(t, []octavia.WeightedHTTPTarget{policy.weightedTargets[0], fixedWeightedHTTPTarget(1)}, *steps[0].route.weightedTargets)
+	policy.weightedTargets = *steps[0].route.weightedTargets
+
+	step, err := planXBackendCookie(*wanted, *current)
+	require.ErrorIs(t, err, errXBackendCookiePermanentReadback)
+	require.Nil(t, step)
+	siblingObserved.cookieDeadline.Value = sibling.sessionCookieDeadline
+	require.Nil(t, p.prepareXBackendCookies(t.Context(), &desired, actual))
+	for _, route := range desired.routes {
+		require.Equal(t, cloud.SessionPersistenceAvailable, route.cookieSupportIssue())
+	}
+	steps, _, err = p.buildGatewayGraphPlan(desired, actual)
+	require.NoError(t, err)
+	require.NotEmpty(t, steps)
+	require.Equal(t, routeMutationSetPolicyTarget, steps[0].route.kind)
+	require.Equal(t, []octavia.WeightedHTTPTarget{policy.weightedTargets[0], {Weight: 1, PoolID: current.pool.ID}}, *steps[0].route.weightedTargets)
 }
 
 func TestXBackendCookieWeightedPolicyFollowsPoolReadback(t *testing.T) {
