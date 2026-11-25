@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-On both Gateway API channels, the controller applied the selected backend’s HTTP headers and binary gRPC metadata before the rule’s response modifier. [Build record](image.json) · [Controller, provider and traffic observations](provider/backend-response-header-evidence/receipt.json)
+On both Gateway API channels, the signed controller reported certificate permissions separately for two HTTPS sections on a shared port. [Build record](image.json) · [Per-listener status](provider/shared-https-secret-grant-evidence/receipt.json)
+
+On both Gateway API channels, the controller applied the selected backend’s HTTP headers and binary gRPC metadata before the rule’s response modifier. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-421558c9513aaaeaa8b0791939ad0005b96149c8/image.json) · [Controller, provider and traffic observations](provider/backend-response-header-evidence/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-421558c9513aaaeaa8b0791939ad0005b96149c8)
 
 With both Gateway API bundles on Kubernetes envtest, the signed linux/amd64 controller kept exact method and header matches ahead of a fallback redirect and restored the stock redirect after the specific route was removed. The local Octavia and Amphora setup used native HAProxy. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-76d28f67c8420eb281ea846670db4b50b2177d7b/image.json) · [HTTP requests and policy readback](provider/http-redirect-precedence-evidence/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-76d28f67c8420eb281ea846670db4b50b2177d7b)
 

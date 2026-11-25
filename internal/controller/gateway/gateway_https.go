@@ -213,10 +213,11 @@ func RequiresHTTPListenerScope(config controller.Config, gateway *gatewayv1.Gate
 }
 
 type tlsResolution struct {
-	err          error
-	tls          cloud.ListenerTLS
-	issue        *httpsListenerIssue
-	resolvedRefs *metav1.Condition
+	err              error
+	tls              cloud.ListenerTLS
+	issue            *httpsListenerIssue
+	resolvedRefs     *metav1.Condition
+	checkSectionRefs bool
 }
 
 func listenerHostname(listener *gatewayv1.Listener) string {
@@ -366,7 +367,10 @@ func (r *Reconciler) resolveGatewayServingCertificate(ctx context.Context, gatew
 	hosts := make([]string, 0, len(sections))
 	for _, listener := range sections {
 		if certificateSecret(gateway, listener) != target {
-			return tlsResolution{issue: &httpsListenerIssue{gatewayv1.ListenerConditionAccepted, gatewayv1.ListenerReasonUnsupportedValue, "HTTPS sections on a shared port require the same certificate Secret"}}
+			return tlsResolution{
+				issue:            &httpsListenerIssue{gatewayv1.ListenerConditionAccepted, gatewayv1.ListenerReasonUnsupportedValue, "HTTPS sections on a shared port require the same certificate Secret"},
+				checkSectionRefs: true,
+			}
 		}
 		hosts = append(hosts, HTTPVirtualHostname(listener))
 	}
@@ -607,16 +611,16 @@ func (r *Reconciler) listenerTLSIssues(ctx context.Context, gateway *gatewayv1.G
 		issue := httpsProfileIssue(r.Config, gateway, listener)
 		var resolvedRefs *metav1.Condition
 		if listener.Protocol == gatewayv1.HTTPSProtocolType {
+			resolution := resolutions[int(listener.Port)]
 			if issue == nil {
-				issue = resolutions[int(listener.Port)].issue
-				resolvedRefs = resolutions[int(listener.Port)].resolvedRefs
+				issue, resolvedRefs = resolution.issue, resolution.resolvedRefs
 			}
 			if issue == nil && slices.Contains(fallbackUnavailable, int(listener.Port)) {
 				issue = &httpsListenerIssue{gatewayv1.ListenerConditionAccepted, gatewayv1.ListenerReasonUnsupportedValue,
 					"Octavia frontend client certificate validation mode AllowInsecureFallback is unavailable in this region"}
 			}
-			if issue != nil && issue.condition == gatewayv1.ListenerConditionConflicted {
-				resolvedRefs = r.conflictedHTTPSReferenceCondition(ctx, gateway, listener)
+			if issue != nil && (issue.condition == gatewayv1.ListenerConditionConflicted || resolution.checkSectionRefs) {
+				resolvedRefs = r.httpsReferenceCondition(ctx, gateway, listener)
 			}
 		}
 		if issue != nil {
@@ -626,9 +630,9 @@ func (r *Reconciler) listenerTLSIssues(ctx context.Context, gateway *gatewayv1.G
 	return issues, nil
 }
 
-func (r *Reconciler) conflictedHTTPSReferenceCondition(ctx context.Context, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) *metav1.Condition {
-	// Keep the conflict as the reason this listener cannot program. Resolve
-	// its references independently for status, without using the provider ref.
+// httpsReferenceCondition checks a rejected listener's references independently
+// for status without resolving a provider certificate.
+func (r *Reconciler) httpsReferenceCondition(ctx context.Context, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) *metav1.Condition {
 	issue := httpRouteKindsIssue(r.Config, listener)
 	if issue == nil {
 		reason := gatewayv1.ListenerReasonInvalidCertificateRef
