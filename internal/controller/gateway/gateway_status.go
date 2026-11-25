@@ -625,7 +625,8 @@ func (r *Reconciler) attachedRoutes(ctx context.Context, gateway *gatewayv1.Gate
 					continue
 				}
 			}
-			if r.Config.BackendTLSPolicy && httpKind != "" && len(matching) != 0 {
+			if r.Config.BackendTLSPolicy && len(matching) != 0 &&
+				(httpKind != "" || terminatesTLS(matching[0])) {
 				programmed := meta.FindStatusCondition(parentStatus.Conditions, r.Config.Domain()+"/Programmed")
 				attached.backendTLSAncestorFull = attached.backendTLSAncestorFull || programmed != nil &&
 					programmed.ObservedGeneration == route.GetGeneration() && programmed.Status == metav1.ConditionFalse &&

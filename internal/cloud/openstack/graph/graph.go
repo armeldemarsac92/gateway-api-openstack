@@ -43,6 +43,8 @@ type desiredGatewayGraph struct {
 	routes              []desiredRoute
 	protocol            string
 	sni                 []desiredSNIFragment
+	sniHeldClosed       map[sniFragmentKey]bool
+	sniBlockedRoutes    map[string]bool
 }
 
 type observedGatewayGraph struct {
@@ -284,6 +286,9 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		result.Routes[step.routeIndex].Result.Outcome.MutationSubmitted = true
 		return result, nil
 	}
+	if err := p.prepareSNIRouteBackendTLS(ctx, &desired, actual); err != nil {
+		return result, err
+	}
 	if actual.addressReadError != nil {
 		if isSNIProtocol(desired.protocol) {
 			if actual.outcome.State == cloud.OutcomeProgressing {
@@ -461,7 +466,7 @@ func (p *Provider) recordGraphMutationOutcome(result *cloud.GatewayGraphResult, 
 			return port == step.scopedListener.Port
 		})
 	}
-	if step.kind == graphPublishFrontendCA || step.kind == graphDisableFrontendClientAuthFallback {
+	if step.kind == graphSNIMutation || step.kind == graphPublishFrontendCA || step.kind == graphDisableFrontendClientAuthFallback {
 		result.Outcome.MutationSubmitted = true
 	}
 	if step.kind == graphRouteMutation && (step.backendKey != "" || step.route.kind == routeMutationClaimBackendCA || step.route.kind == routeMutationPublishBackendCA ||
@@ -758,6 +763,9 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 			return route.Deny || sniCompareType(route.Hostname) == sniEndsWith
 		}) {
 			return invalid("TLS SNI suffix support is disabled")
+		}
+		if !rawTLS && slices.ContainsFunc(spec.Gateway.TLSSNIRoutes, func(route cloud.TLSSNIRoute) bool { return route.BackendTLS != nil }) {
+			return invalid("Backend TLS requires a TCP TLS termination profile")
 		}
 		targets, err := buildSNITargets(spec.Identity, spec.Gateway.TLSSNIRoutes)
 		if err != nil {

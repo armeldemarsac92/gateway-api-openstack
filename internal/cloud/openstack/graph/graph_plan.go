@@ -1142,7 +1142,7 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 		route.spec.Gateway.ListenerID = listenerID
 		return p.executeRouteMutation(ctx, route, step.route)
 	case graphSNIMutation:
-		err = p.executeSNIMutation(ctx, actual, step.sni)
+		err = p.executeSNIMutation(ctx, desired, actual, step.sni)
 	case graphEnableListener, graphDisableListener:
 		enabled := step.kind == graphEnableListener
 		step.redactTLSError = step.redactTLSError || desired.protocol == cloud.ListenerProtocolTLSTerminate

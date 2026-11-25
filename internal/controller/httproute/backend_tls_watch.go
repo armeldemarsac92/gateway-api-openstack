@@ -19,6 +19,7 @@ package httproute
 import (
 	"context"
 	"maps"
+	"slices"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -35,6 +36,7 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
+	gatewaycontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
@@ -162,17 +164,29 @@ func (r *Reconciler) setupBackendTLSPolicyStatusController(manager ctrl.Manager)
 		return append(r.policyRequestsForRoutes(ctx, r.enqueueHTTPRoutePeers(ctx, object), services),
 			grpc.policyRequestsForRoutes(ctx, grpc.enqueueHTTPRoutePeers(ctx, object), nil)...)
 	}
+	withTLSRoutes := func(mapEvent handler.MapFunc) handler.MapFunc {
+		if !r.Config.TCPTLSTermination {
+			return mapEvent
+		}
+		return func(ctx context.Context, object client.Object) []reconcile.Request {
+			return append(mapEvent(ctx, object), r.enqueuePoliciesForTLSRouteDependency(ctx, object)...)
+		}
+	}
 	setup := ctrl.NewControllerManagedBy(manager).
 		For(&gatewayv1.BackendTLSPolicy{}).
 		Watches(&gatewayv1.BackendTLSPolicy{}, handler.EnqueueRequestsFromMapFunc(r.enqueuePoliciesForSharedService), policySpec).
 		WatchesMetadata(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.enqueuePoliciesForConfigMap)).
 		Watches(&corev1.Service{}, handler.EnqueueRequestsFromMapFunc(r.enqueuePoliciesForService), builder.WithPredicates(controller.ServicePredicate())).
-		Watches(&gatewayv1.ReferenceGrant{}, handler.EnqueueRequestsFromMapFunc(policiesForRoutes(r.enqueueHTTPRoutesForReferenceGrant, grpc.enqueueHTTPRoutesForReferenceGrant)), policySpec).
+		Watches(&gatewayv1.ReferenceGrant{}, handler.EnqueueRequestsFromMapFunc(withTLSRoutes(policiesForRoutes(r.enqueueHTTPRoutesForReferenceGrant, grpc.enqueueHTTPRoutesForReferenceGrant))), policySpec).
 		Watches(&gatewayv1.HTTPRoute{}, handler.EnqueueRequestsFromMapFunc(policiesForPeer), routeState).
 		Watches(&gatewayv1.GRPCRoute{}, handler.EnqueueRequestsFromMapFunc(policiesForPeer), routeState).
-		Watches(&gatewayv1.Gateway{}, handler.EnqueueRequestsFromMapFunc(policiesForRoutes(r.enqueueHTTPRoutesForGateway, grpc.enqueueHTTPRoutesForGateway)), builder.WithPredicates(controller.GatewayForHTTPRoutePredicate(r.Config))).
-		Watches(&gatewayv1.GatewayClass{}, handler.EnqueueRequestsFromMapFunc(policiesForRoutes(r.enqueueHTTPRoutesForGatewayClass, grpc.enqueueHTTPRoutesForGatewayClass)), builder.WithPredicates(controller.GatewayClassForGatewayPredicate())).
-		Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(policiesForRoutes(r.enqueueHTTPRoutesForNamespace, grpc.enqueueHTTPRoutesForNamespace)), builder.WithPredicates(controller.NamespacePredicate()))
+		Watches(&gatewayv1.Gateway{}, handler.EnqueueRequestsFromMapFunc(withTLSRoutes(policiesForRoutes(r.enqueueHTTPRoutesForGateway, grpc.enqueueHTTPRoutesForGateway))), builder.WithPredicates(controller.GatewayForHTTPRoutePredicate(r.Config))).
+		Watches(&gatewayv1.GatewayClass{}, handler.EnqueueRequestsFromMapFunc(withTLSRoutes(policiesForRoutes(r.enqueueHTTPRoutesForGatewayClass, grpc.enqueueHTTPRoutesForGatewayClass))), builder.WithPredicates(controller.GatewayClassForGatewayPredicate())).
+		Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(withTLSRoutes(policiesForRoutes(r.enqueueHTTPRoutesForNamespace, grpc.enqueueHTTPRoutesForNamespace))), builder.WithPredicates(controller.NamespacePredicate()))
+	if r.Config.TCPTLSTermination {
+		setup.Watches(&gatewayv1.TLSRoute{}, handler.EnqueueRequestsFromMapFunc(r.enqueuePoliciesForTLSRouteDependency), policySpec)
+	}
+
 	served, err := controller.ListenerSetServed(manager.GetRESTMapper())
 	if err != nil {
 		return err
@@ -228,6 +242,61 @@ func (r *Reconciler) policyRequestsForRoutes(ctx context.Context, requests []rec
 		}
 	}
 	keys := map[types.NamespacedName]struct{}{}
+	for service := range services {
+		r.addPolicyRequests(ctx, keys, controller.IndexBackendTLSPolicyByService, service)
+	}
+	return controller.SortedRequests(keys)
+}
+
+// Candidate discovery can use cached routes. The status reconciler repeats
+// election and authorization against the live API before claiming ancestors.
+func (r *Reconciler) enqueuePoliciesForTLSRouteDependency(ctx context.Context, dependency client.Object) []reconcile.Request {
+	var routes gatewayv1.TLSRouteList
+	if err := r.List(ctx, &routes); err != nil {
+		return nil
+	}
+	keys := map[types.NamespacedName]struct{}{}
+	services := map[types.NamespacedName]struct{}{}
+	addRoute := func(route *gatewayv1.TLSRoute) {
+		if key, ok := gatewaycontroller.TLSRouteBackendService(route); ok {
+			services[key] = struct{}{}
+		}
+	}
+	parentKeys := func(route *gatewayv1.TLSRoute) []types.NamespacedName {
+		var keys []types.NamespacedName
+		for _, ref := range route.Spec.ParentRefs {
+			if controller.IsGatewayParentRef(ref) {
+				keys = append(keys, types.NamespacedName{Namespace: string(ptr.Deref(ref.Namespace, gatewayv1.Namespace(route.Namespace))), Name: string(ref.Name)})
+			}
+		}
+		return keys
+	}
+	for i := range routes.Items {
+		route := &routes.Items[i]
+		switch affected := dependency.(type) {
+		case *gatewayv1.TLSRoute:
+			if slices.ContainsFunc(parentKeys(route), func(key types.NamespacedName) bool { return slices.Contains(parentKeys(affected), key) }) {
+				addRoute(route)
+			}
+		case *gatewayv1.Gateway:
+			if slices.Contains(parentKeys(route), client.ObjectKeyFromObject(affected)) {
+				addRoute(route)
+			}
+		case *gatewayv1.ReferenceGrant:
+			if key, ok := gatewaycontroller.TLSRouteBackendService(route); ok && key.Namespace == affected.Namespace && route.Namespace != key.Namespace {
+				services[key] = struct{}{}
+			}
+		case *corev1.Namespace:
+			if route.Namespace == affected.Name {
+				addRoute(route)
+			}
+		case *gatewayv1.GatewayClass:
+			addRoute(route)
+		}
+	}
+	if route, ok := dependency.(*gatewayv1.TLSRoute); ok {
+		addRoute(route)
+	}
 	for service := range services {
 		r.addPolicyRequests(ctx, keys, controller.IndexBackendTLSPolicyByService, service)
 	}

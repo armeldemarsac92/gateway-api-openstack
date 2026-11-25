@@ -177,6 +177,7 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 	}
 	if snapshot.listener.Protocol == gatewayv1.TLSProtocolType {
 		if terminatesTLS(snapshot.listener) {
+			input.Node.SNIPoliciesObserved = r.Config.BackendTLSPolicy
 			input.Node.TCPTLSCertificateRef = r.resolveCertificate(ctx, snapshot.gateway, snapshot.listener).tls.CertificateRef
 		}
 		observed, err := r.observeSNIRoutes(ctx, snapshot)

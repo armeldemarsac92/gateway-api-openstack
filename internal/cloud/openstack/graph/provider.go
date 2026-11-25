@@ -195,6 +195,18 @@ func (p *Provider) backendTLSAvailable(ctx context.Context, requireH2, requireSA
 	return p.amphoraCapabilityAvailable(ctx, backendTLSCapabilities(requireH2, requireSAN)...)
 }
 
+// TCPBackendTLSAvailable checks authenticated backend TLS on terminating TCP listeners.
+func (p *Provider) TCPBackendTLSAvailable(ctx context.Context) (bool, error) {
+	if !p.backendTLSPolicy || !p.tcpTLSTermination || p.backendCA == nil {
+		return false, nil
+	}
+	return p.amphoraCapabilityAvailable(ctx, tcpBackendTLSCapabilities()...)
+}
+
+func tcpBackendTLSCapabilities() []string {
+	return []string{octavia.GatewayCapabilityTCPTLSTermination, octavia.GatewayCapabilityBackendTLSHostname, octavia.GatewayCapabilityTCPBackendTLSAuth}
+}
+
 // HTTPSListenerIsolationAvailable checks the configured region before the
 // Kubernetes controller accepts virtual HTTPS listeners sharing a port.
 func (p *Provider) HTTPSListenerIsolationAvailable(ctx context.Context) (bool, error) {

@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"slices"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -41,6 +42,14 @@ type Validation struct {
 	Hostname        string
 	SubjectAltNames []cloud.BackendTLSSubjectAltName
 	CA              CA
+}
+
+// CloudValidation carries the exact selected trust and identity to the provider.
+func (v *Validation) CloudValidation() *cloud.BackendTLSValidation {
+	return &cloud.BackendTLSValidation{
+		Hostname: v.Hostname, SubjectAltNames: slices.Clone(v.SubjectAltNames),
+		CAConfigMapUID: string(v.CA.UID), CADigest: v.CA.Digest, CAPEM: slices.Clone(v.CA.PEM),
+	}
 }
 
 // CA identifies the ConfigMap and the exact normalized trust payload.

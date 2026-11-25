@@ -56,6 +56,9 @@ type GatewayGraphNode struct {
 	Disposition  GraphDisposition
 	Spec         GatewaySpec
 	TLSSNIRoutes []TLSSNIRoute
+	// SNIPoliciesObserved permits replacement of a protected pool after an
+	// authorized inventory confirms that its hostname no longer needs TLS.
+	SNIPoliciesObserved bool `json:",omitempty"`
 	// TCPTLSCertificateRef is the currently authorized certificate for the raw
 	// TCP termination profile. An empty reference requires the listener closed.
 	TCPTLSCertificateRef string `json:",omitempty"`
@@ -83,13 +86,17 @@ type BackendClientCertificate struct {
 // TLSSNIRoute is one effective hostname and its authorized TCP destinations.
 type TLSSNIRoute struct {
 	// Deny selects an empty pool so the hostname cannot fall through to a broader suffix.
-	Deny                    bool `json:",omitempty"`
-	Identity                Identity
-	Hostname                string
-	ServiceUID              string
+	Deny       bool `json:",omitempty"`
+	Identity   Identity
+	Hostname   string
+	ServiceUID string
+	// ServicePort identifies the Service section independently of the selected
+	// SNI hostname, endpoints and their target port.
+	ServicePort             int `json:",omitempty"`
 	BackendSubnetID         string
 	BackendSecurityGroupIDs []string
 	Members                 []Member
+	BackendTLS              *BackendTLSValidation `json:",omitempty"`
 }
 
 // RouteGraphNode describes one exact route component. Spec.Identity is always

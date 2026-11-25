@@ -372,3 +372,95 @@ func TestBackendTLSAncestorCapacityPreservesRowsAndAllocatesOneReplacement(t *te
 	conditionOnly.Status.Ancestors = conditionOnly.Status.Ancestors[1:]
 	require.True(t, predicate.Update(event.UpdateEvent{ObjectOld: policy, ObjectNew: conditionOnly}))
 }
+
+func TestBackendTLSPolicyStatusCombinesHTTPAndTLSRouteAncestors(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	f.reconciler.Config.BackendTLSPolicy, f.reconciler.Config.TCPTLSTermination = true, true
+	f.reconciler.BackendTLSAvailable = func(context.Context) (bool, error) { return true, nil }
+	tcpSupported := false
+	f.reconciler.TCPBackendTLSAvailable = func(context.Context) (bool, error) { return tcpSupported, nil }
+	tlsGateway := &gatewayv1.Gateway{
+		ObjectMeta: metav1.ObjectMeta{Namespace: f.gateway.Namespace, Name: "tls", UID: "tls-gateway"},
+		Spec: gatewayv1.GatewaySpec{GatewayClassName: f.gateway.Spec.GatewayClassName, Listeners: []gatewayv1.Listener{{
+			Name: "terminate", Port: 8443, Protocol: gatewayv1.TLSProtocolType,
+			Hostname: ptr.To(gatewayv1.Hostname("tls.example.com")),
+			TLS:      &gatewayv1.ListenerTLSConfig{Mode: ptr.To(gatewayv1.TLSModeTerminate), CertificateRefs: []gatewayv1.SecretObjectReference{{Name: "frontend"}}},
+		}}},
+	}
+	tlsRoute := &gatewayv1.TLSRoute{
+		ObjectMeta: metav1.ObjectMeta{Namespace: tlsGateway.Namespace, Name: "tls", UID: "tls-route"},
+		Spec: gatewayv1.TLSRouteSpec{
+			CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{{Name: gatewayv1.ObjectName(tlsGateway.Name)}}},
+			Hostnames:       []gatewayv1.Hostname{"tls.example.com"},
+			Rules:           []gatewayv1.TLSRouteRule{{BackendRefs: []gatewayv1.BackendRef{f.route.Spec.Rules[0].BackendRefs[0].BackendRef}}},
+		},
+	}
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	cert := &x509.Certificate{SerialNumber: big.NewInt(1), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign}
+	der, err := x509.CreateCertificate(rand.Reader, cert, cert, public, private)
+	require.NoError(t, err)
+	ca := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: f.service.Namespace, Name: "shared-ca", UID: "shared-ca-uid"},
+		Data: map[string]string{"ca.crt": string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))}}
+	policy := &gatewayv1.BackendTLSPolicy{
+		ObjectMeta: metav1.ObjectMeta{Namespace: f.service.Namespace, Name: "shared-policy", UID: "shared-policy-uid", Generation: 1},
+		Spec: gatewayv1.BackendTLSPolicySpec{
+			TargetRefs: []gatewayv1.LocalPolicyTargetReferenceWithSectionName{{
+				LocalPolicyTargetReference: gatewayv1.LocalPolicyTargetReference{Kind: "Service", Name: gatewayv1.ObjectName(f.service.Name)},
+			}},
+			Validation: gatewayv1.BackendTLSPolicyValidation{
+				Hostname: "abc.example.com", CACertificateRefs: []gatewayv1.LocalObjectReference{{Kind: "ConfigMap", Name: gatewayv1.ObjectName(ca.Name)}},
+			},
+		},
+	}
+	f.create(t, tlsGateway, tlsRoute, ca, policy)
+	key := client.ObjectKeyFromObject(policy)
+	require.NoError(t, f.client.Get(t.Context(), key, policy))
+	foreign := gatewayv1.PolicyAncestorStatus{ControllerName: "foreign.example.com/controller", AncestorRef: gatewayv1.ParentReference{Name: "foreign"}}
+	policy.Status.Ancestors = []gatewayv1.PolicyAncestorStatus{foreign}
+	require.NoError(t, f.client.Status().Update(t.Context(), policy))
+	reconcile := func() map[gatewayv1.ObjectName][]metav1.Condition {
+		t.Helper()
+		status := backendTLSPolicyStatusReconciler{routes: f.reconciler}
+		_, err := status.Reconcile(t.Context(), ctrl.Request{NamespacedName: key})
+		require.NoError(t, err)
+		require.NoError(t, f.client.Get(t.Context(), key, policy))
+		require.Equal(t, foreign, policy.Status.Ancestors[0])
+		conditions := map[gatewayv1.ObjectName][]metav1.Condition{}
+		for _, ancestor := range policy.Status.Ancestors[1:] {
+			conditions[ancestor.AncestorRef.Name] = ancestor.Conditions
+		}
+		return conditions
+	}
+	httpName, tlsName := gatewayv1.ObjectName(f.gateway.Name), gatewayv1.ObjectName(tlsGateway.Name)
+	conditions := reconcile()
+	require.Len(t, conditions, 2)
+	require.True(t, meta.IsStatusConditionTrue(conditions[httpName], string(gatewayv1.PolicyConditionAccepted)))
+	require.True(t, meta.IsStatusConditionFalse(conditions[tlsName], string(gatewayv1.PolicyConditionAccepted)))
+	require.True(t, meta.IsStatusConditionTrue(conditions[tlsName], string(gatewayv1.BackendTLSPolicyConditionResolvedRefs)))
+
+	tcpSupported = true
+	conditions = reconcile()
+	require.True(t, meta.IsStatusConditionTrue(conditions[tlsName], string(gatewayv1.PolicyConditionAccepted)))
+	require.NoError(t, f.client.Get(t.Context(), client.ObjectKeyFromObject(tlsGateway), tlsGateway))
+	tlsGateway.Spec.TLS = &gatewayv1.GatewayTLSConfig{Backend: &gatewayv1.GatewayBackendTLS{
+		ClientCertificateRef: &gatewayv1.SecretObjectReference{Name: "client"},
+	}}
+	require.NoError(t, f.client.Update(t.Context(), tlsGateway))
+	conditions = reconcile()
+	rejected := meta.FindStatusCondition(conditions[tlsName], string(gatewayv1.PolicyConditionAccepted))
+	require.NotNil(t, rejected)
+	require.Equal(t, metav1.ConditionFalse, rejected.Status)
+	require.Equal(t, "BackendClientCertificateUnsupported", rejected.Reason)
+	require.True(t, meta.IsStatusConditionTrue(conditions[httpName], string(gatewayv1.PolicyConditionAccepted)))
+
+	tlsGateway.Spec.TLS = nil
+	require.NoError(t, f.client.Update(t.Context(), tlsGateway))
+	conditions = reconcile()
+	require.True(t, meta.IsStatusConditionTrue(conditions[tlsName], string(gatewayv1.PolicyConditionAccepted)))
+
+	require.NoError(t, f.client.Delete(t.Context(), tlsRoute))
+	conditions = reconcile()
+	require.Len(t, conditions, 1)
+	require.True(t, meta.IsStatusConditionTrue(conditions[httpName], string(gatewayv1.PolicyConditionAccepted)))
+}

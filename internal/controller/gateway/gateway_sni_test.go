@@ -18,6 +18,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"testing"
@@ -37,6 +38,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/classconfig"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
+	"github.com/stretchr/testify/require"
 
 	"k8s.io/utils/ptr"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -822,5 +824,129 @@ func TestTLSListenerModeStatus(t *testing.T) {
 		if len(listener.SupportedKinds) != 0 {
 			t.Fatalf("conflicting listener %s advertises route kinds %v", listener.Name, listener.SupportedKinds)
 		}
+	}
+}
+
+func TestTLSRouteBackendTLSPolicyUsesAuthorizedServiceSection(t *testing.T) {
+	cfg := testConfig()
+	cfg.TCPTLSTermination, cfg.BackendTLSPolicy, cfg.TLSSNIPassthrough = true, true, true
+	gateway := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "edge", Name: "gateway", UID: "gateway-uid"}}
+	listener := testSNIListener()
+	listener.TLS.Mode = ptr.To(gatewayv1.TLSModeTerminate)
+	snapshot := &gatewayMutationSnapshot{gateway: gateway, listener: &listener, topology: classconfig.Resolved{Topology: cloud.Topology{MemberMode: cloud.MemberModeEndpoint}}}
+	strict := testSNIRoute(gateway, "a-strict", "backend", "tls.example.com")
+	plain := testSNIRoute(gateway, "b-plain", "backend", "plain.example.com")
+	plain.Spec.Rules[0].BackendRefs[0].Port = ptr.To(gatewayv1.PortNumber(8444))
+	service, endpoints := testSNIBackend("backend", "service", "192.0.2.101")
+	service.Spec.Ports = append(service.Spec.Ports, corev1.ServicePort{Name: "plain", Port: 8444, Protocol: corev1.ProtocolTCP})
+	endpoints.Ports = append(endpoints.Ports, discoveryv1.EndpointPort{Name: ptr.To("plain"), Protocol: ptr.To(corev1.ProtocolTCP), Port: ptr.To(int32(8080))})
+	ca := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: service.Namespace, Name: "backend-ca", UID: "backend-ca-uid"},
+		Data: map[string]string{"ca.crt": frontendTestCA(t)}}
+	policy := &gatewayv1.BackendTLSPolicy{
+		ObjectMeta: metav1.ObjectMeta{Namespace: service.Namespace, Name: "require-tls", UID: "policy-uid", Generation: 1},
+		Spec: gatewayv1.BackendTLSPolicySpec{
+			TargetRefs: []gatewayv1.LocalPolicyTargetReferenceWithSectionName{{
+				LocalPolicyTargetReference: gatewayv1.LocalPolicyTargetReference{Kind: "Service", Name: gatewayv1.ObjectName(service.Name)},
+				SectionName:                ptr.To(gatewayv1.SectionName("tls")),
+			}},
+			Validation: gatewayv1.BackendTLSPolicyValidation{
+				Hostname: "abc.example.com", CACertificateRefs: []gatewayv1.LocalObjectReference{{Kind: "ConfigMap", Name: gatewayv1.ObjectName(ca.Name)}},
+			},
+		},
+	}
+	grant := &gatewayv1.ReferenceGrant{
+		ObjectMeta: metav1.ObjectMeta{Namespace: service.Namespace, Name: "service"},
+		Spec: gatewayv1.ReferenceGrantSpec{
+			From: []gatewayv1.ReferenceGrantFrom{{Group: gatewayv1.GroupName, Kind: "TLSRoute", Namespace: gatewayv1.Namespace(gateway.Namespace)}},
+			To:   []gatewayv1.ReferenceGrantTo{{Kind: "Service", Name: ptr.To(gatewayv1.ObjectName(service.Name))}},
+		},
+	}
+	kube := fake.NewClientBuilder().WithScheme(testScheme(t)).WithStatusSubresource(policy).WithObjects(strict, plain, service, endpoints, ca, policy, grant).Build()
+	r := &Reconciler{APIReader: kube, Config: cfg}
+	observe := func() sniRouteObservation {
+		t.Helper()
+		routes, err := r.observeSNIRoutes(t.Context(), snapshot)
+		require.NoError(t, err)
+		require.Len(t, routes, 2)
+		return routes
+	}
+
+	withoutSlot := observe()
+	require.Equal(t, gatewayv1.RouteReasonPending, withoutSlot[0].resolvedReason)
+	require.Empty(t, withoutSlot[0].targets)
+	require.NoError(t, kube.Get(t.Context(), client.ObjectKeyFromObject(policy), policy))
+	policy.Status.Ancestors = []gatewayv1.PolicyAncestorStatus{{
+		AncestorRef:    gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name), Namespace: ptr.To(gatewayv1.Namespace(gateway.Namespace))},
+		ControllerName: cfg.ControllerName,
+	}}
+	require.NoError(t, kube.Status().Update(t.Context(), policy))
+	withTLS := observe()
+	require.Equal(t, gatewayv1.RouteReasonResolvedRefs, withTLS[0].resolvedReason)
+	require.Len(t, withTLS[0].targets, 1)
+	require.Equal(t, "abc.example.com", withTLS[0].targets[0].BackendTLS.Hostname)
+	require.Equal(t, string(ca.UID), withTLS[0].targets[0].BackendTLS.CAConfigMapUID)
+	require.Equal(t, []cloud.Member{{Address: "192.0.2.101", Port: 9443}}, withTLS[0].targets[0].Members)
+	require.Nil(t, withTLS[1].targets[0].BackendTLS)
+
+	gateway.Spec.TLS = &gatewayv1.GatewayTLSConfig{Backend: &gatewayv1.GatewayBackendTLS{
+		ClientCertificateRef: &gatewayv1.SecretObjectReference{Name: "client"},
+	}}
+	gateway.Spec.Listeners = []gatewayv1.Listener{listener}
+	unsupportedIdentity := observe()
+	require.Empty(t, unsupportedIdentity[0].targets)
+	require.Equal(t, gatewayv1.RouteReasonUnsupportedProtocol, unsupportedIdentity[0].resolvedReason)
+	require.Equal(t, withTLS[1].targets, unsupportedIdentity[1].targets)
+	r.setBackendClientCertificateStatus(t.Context(), gateway)
+	require.Equal(t, tcpBackendClientCertificateReason,
+		meta.FindStatusCondition(gateway.Status.Conditions, string(gatewayv1.GatewayConditionResolvedRefs)).Reason)
+	gateway.Spec.TLS = nil
+	require.Equal(t, withTLS[0].targets, observe()[0].targets)
+
+	require.NoError(t, kube.Delete(t.Context(), ca))
+	withoutCA := observe()
+	require.Empty(t, withoutCA[0].targets)
+	require.Equal(t, withTLS[1].targets, withoutCA[1].targets)
+	listener.TLS.Mode = ptr.To(gatewayv1.TLSModePassthrough)
+	passthrough := observe()
+	require.Len(t, passthrough[0].targets, 1)
+	require.Nil(t, passthrough[0].targets[0].BackendTLS)
+
+	listener.TLS.Mode = ptr.To(gatewayv1.TLSModeTerminate)
+	require.NoError(t, kube.Delete(t.Context(), grant))
+	ungranted := observe()
+	require.Empty(t, ungranted[0].targets)
+	require.Empty(t, ungranted[1].targets)
+	require.Equal(t, gatewayv1.RouteReasonRefNotPermitted, ungranted[0].resolvedReason)
+}
+
+func TestTerminatingTLSRouteEndpointReadFailureDoesNotHidePeerRevocation(t *testing.T) {
+	cfg := testConfig()
+	cfg.TCPTLSTermination, cfg.BackendTLSPolicy = true, true
+	gateway := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "edge", Name: "gateway", UID: "gateway-uid"}}
+	listener := testSNIListener()
+	listener.TLS.Mode = ptr.To(gatewayv1.TLSModeTerminate)
+	snapshot := &gatewayMutationSnapshot{gateway: gateway, listener: &listener, topology: classconfig.Resolved{Topology: cloud.Topology{MemberMode: cloud.MemberModeEndpoint}}}
+	a := testSNIRoute(gateway, "a", "auth", "a.example.com")
+	b := testSNIRoute(gateway, "b", "edge", "b.example.com")
+	serviceA, endpointsA := testSNIBackend("auth", "service-a", "192.0.2.101")
+	serviceB, endpointsB := testSNIBackend("edge", "service-b", "192.0.2.102")
+	// The ReferenceGrant for A is gone. The destination Slice read for B fails independently.
+	kube := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(a, b, serviceA, serviceB, endpointsA, endpointsB).
+		WithInterceptorFuncs(interceptor.Funcs{List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+			if _, slices := list.(*discoveryv1.EndpointSliceList); slices && (&client.ListOptions{}).ApplyOptions(opts).Namespace == "edge" {
+				return errors.New("injected EndpointSlice read failure")
+			}
+			return c.List(ctx, list, opts...)
+		}}).Build()
+	r := &Reconciler{APIReader: kube, Config: cfg}
+	observation, err := r.observeSNIRoutes(t.Context(), snapshot)
+	require.NoError(t, err)
+	require.Len(t, observation, 2)
+	require.Equal(t, gatewayv1.RouteReasonRefNotPermitted, observation[0].resolvedReason)
+	require.Equal(t, gatewayv1.RouteReasonPending, observation[1].resolvedReason)
+	require.Len(t, observation.targets(), 2)
+	for _, target := range observation.targets() {
+		require.True(t, target.Deny)
+		require.Empty(t, target.Members)
 	}
 }
