@@ -62,9 +62,11 @@ The SHA-256 of the per-channel multiport archive is `349675ad8f059d8553f4ef94520
 
 Three other original cases passed through the same fixture with the Experimental bundle. `TCPRouteInvalidNonTCPListener` reported `Accepted=False/NotAllowedByListeners` and zero attached routes. `TCPRouteInvalidCrossNamespaceBackendRef` and `TCPRouteInvalidBackendRefNonexistent` reported `ResolvedRefs=False` with reasons `RefNotPermitted` and `BackendNotFound`, respectively. The run removed its six load balancers, six listeners and Kubernetes resources. The earlier Standard status qualification used a recording provider. [Standard status results](../kind-tcp.md)
 
-## Full GATEWAY-TCP Core profile attempts
+## Earlier full GATEWAY-TCP Core profile attempts
 
 Both attempts used the complete upstream base. All 23 upstream pods became Ready on each channel. The shared `same-namespace-with-https-listener` Gateway reported `Accepted=False/ListenersNotValid` and `Programmed=False/Invalid`. Its four HTTPS listeners share port 443 and each reported `Accepted=False/UnsupportedProtocol`. Both attempts reached the upstream 300-second readiness timeout during setup. **Zero case bodies ran on either channel.** Each attempt removed the three load balancers and three listeners created during setup, along with its Kubernetes resources and local VIPs.
+
+The subsequent paired local campaign used the published controller `9388be4580dd0` and the original shared HTTPS setup. [TCP Core results](tcp-core.md)
 
 The machine-readable record includes the per-channel case outcomes, capture hashes, independent grant checks and cloud inventory. The first Standard wrapper stopped before executing the suite. Its temporary capture files and pod routes were removed before the corrected wrapper ran. [Per-channel results](tcp-kind-results.json)
 

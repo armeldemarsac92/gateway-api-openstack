@@ -1,0 +1,842 @@
+{
+  "channels": {
+    "experimental": {
+      "adapter": {
+        "amphoraCPUsPerLoadBalancer": 2,
+        "caseTimeoutOverrides": {},
+        "l7Batch": "installed Octavia ApplyL7PolicyActivation task dispatched from captured local API RPC; installed Amphora driver and real HAProxy",
+        "nativeFixtureSHA256": "b218ecc66f8ba509a8de16389f68a7ee79e32fc4a6fca2f389630de3cca840d5",
+        "pendingStatusProjection": "one transaction updates pending rows of the owning LB",
+        "publication": "render and validate real HAProxy; check new PID socket; drain old workers separately"
+      },
+      "apiDiscovery": {
+        "backendtlspolicies.gateway.networking.k8s.io": {
+          "bundleVersion": "v1.7.0",
+          "channel": "experimental",
+          "servedVersions": [
+            "v1",
+            "v1alpha3"
+          ]
+        },
+        "gatewayclasses.gateway.networking.k8s.io": {
+          "bundleVersion": "v1.7.0",
+          "channel": "experimental",
+          "servedVersions": [
+            "v1",
+            "v1beta1"
+          ]
+        },
+        "gateways.gateway.networking.k8s.io": {
+          "bundleVersion": "v1.7.0",
+          "channel": "experimental",
+          "servedVersions": [
+            "v1",
+            "v1beta1"
+          ]
+        },
+        "grpcroutes.gateway.networking.k8s.io": {
+          "bundleVersion": "v1.7.0",
+          "channel": "experimental",
+          "servedVersions": [
+            "v1"
+          ]
+        },
+        "httproutes.gateway.networking.k8s.io": {
+          "bundleVersion": "v1.7.0",
+          "channel": "experimental",
+          "servedVersions": [
+            "v1",
+            "v1beta1"
+          ]
+        },
+        "listenersets.gateway.networking.k8s.io": {
+          "bundleVersion": "v1.7.0",
+          "channel": "experimental",
+          "servedVersions": [
+            "v1"
+          ]
+        },
+        "referencegrants.gateway.networking.k8s.io": {
+          "bundleVersion": "v1.7.0",
+          "channel": "experimental",
+          "servedVersions": [
+            "v1",
+            "v1beta1"
+          ]
+        },
+        "tcproutes.gateway.networking.k8s.io": {
+          "bundleVersion": "v1.7.0",
+          "channel": "experimental",
+          "servedVersions": [
+            "v1",
+            "v1alpha2"
+          ]
+        },
+        "tlsroutes.gateway.networking.k8s.io": {
+          "bundleVersion": "v1.7.0",
+          "channel": "experimental",
+          "servedVersions": [
+            "v1",
+            "v1alpha2",
+            "v1alpha3"
+          ]
+        },
+        "udproutes.gateway.networking.k8s.io": {
+          "bundleVersion": "v1.7.0",
+          "channel": "experimental",
+          "servedVersions": [
+            "v1",
+            "v1alpha2"
+          ]
+        },
+        "xbackends.gateway.networking.x-k8s.io": {
+          "bundleVersion": "v1.7.0",
+          "channel": "experimental",
+          "servedVersions": [
+            "v1alpha1"
+          ]
+        },
+        "xbackendtrafficpolicies.gateway.networking.x-k8s.io": {
+          "bundleVersion": "v1.7.0",
+          "channel": "experimental",
+          "servedVersions": [
+            "v1alpha1"
+          ]
+        },
+        "xmeshes.gateway.networking.x-k8s.io": {
+          "bundleVersion": "v1.7.0",
+          "channel": "experimental",
+          "servedVersions": [
+            "v1alpha1"
+          ]
+        },
+        "xtelemetrypolicies.gateway.networking.x-k8s.io": {
+          "bundleVersion": "v1.7.0",
+          "channel": "experimental",
+          "servedVersions": [
+            "v1alpha1"
+          ]
+        }
+      },
+      "cases": {
+        "GatewayClassObservedGenerationBump": {
+          "durationSeconds": 0.24,
+          "result": "Passed"
+        },
+        "GatewayInvalidRouteKind": {
+          "durationSeconds": 0.64,
+          "result": "Passed"
+        },
+        "GatewayInvalidTLSConfiguration": {
+          "durationSeconds": 1.17,
+          "result": "Passed"
+        },
+        "GatewayListenerUnsupportedProtocol": {
+          "durationSeconds": 2.93,
+          "result": "Passed"
+        },
+        "GatewayModifyListeners": {
+          "durationSeconds": 54.07,
+          "result": "Passed"
+        },
+        "GatewayNameMaximumLength": {
+          "durationSeconds": 2.32,
+          "result": "Passed"
+        },
+        "GatewayObservedGenerationBump": {
+          "durationSeconds": 8.95,
+          "result": "Passed"
+        },
+        "GatewayPreserveForeignConditions": {
+          "durationSeconds": 5.86,
+          "result": "Passed"
+        },
+        "GatewaySecretInvalidReferenceGrant": {
+          "durationSeconds": 0.9,
+          "result": "Passed"
+        },
+        "GatewaySecretMissingReferenceGrant": {
+          "durationSeconds": 0.72,
+          "result": "Passed"
+        },
+        "GatewaySecretReferenceGrantAllInNamespace": {
+          "durationSeconds": 10.83,
+          "result": "Passed"
+        },
+        "GatewaySecretReferenceGrantSpecific": {
+          "durationSeconds": 9.74,
+          "result": "Passed"
+        },
+        "TLSRouteHostnameIntersection": {
+          "durationSeconds": 56.49,
+          "result": "Passed"
+        },
+        "TLSRouteInvalidBackendRefNonexistent": {
+          "durationSeconds": 5.95,
+          "result": "Passed"
+        },
+        "TLSRouteInvalidBackendRefUnknownKind": {
+          "durationSeconds": 5.85,
+          "result": "Passed"
+        },
+        "TLSRouteInvalidNoMatchingListener": {
+          "durationSeconds": 14.32,
+          "result": "Passed"
+        },
+        "TLSRouteInvalidNoMatchingListenerHostname": {
+          "durationSeconds": 9.57,
+          "result": "Passed"
+        },
+        "TLSRouteInvalidReferenceGrant": {
+          "durationSeconds": 2.21,
+          "result": "Passed"
+        },
+        "TLSRouteListenerPassthroughSupportedKinds": {
+          "durationSeconds": 0.12,
+          "result": "Passed"
+        },
+        "TLSRouteListenerTerminateNotSupported": {
+          "durationSeconds": 0.12,
+          "result": "Passed"
+        },
+        "TLSRouteSimpleSameNamespace": {
+          "durationSeconds": 21.36,
+          "result": "Passed"
+        }
+      },
+      "clusterDeletionObserved": true,
+      "core": {
+        "result": "success",
+        "statistics": {
+          "Failed": 0,
+          "Passed": 21,
+          "Skipped": 0
+        }
+      },
+      "durationSeconds": 205.01,
+      "exit": 0,
+      "frontendSecretEnrollment": {
+        "barbicanPKCS12ReadbackVerified": true,
+        "exactUIDAndResourceVersionVerified": true,
+        "materialGeneratedByUnmodifiedUpstreamCLI": true,
+        "secrets": [
+          "gateway-conformance-infra/tls-validity-checks-certificate",
+          "gateway-conformance-web-backend/certificate"
+        ]
+      },
+      "gatewayClassSupportedFeatures": [
+        "GatewayAddressRoutability"
+      ],
+      "managerFlags": [
+        "--leader-elect=false",
+        "--metrics-bind-address=0",
+        "--health-probe-bind-address=0",
+        "--gateway-api-channel=experimental",
+        "--octavia-https-listener-isolation",
+        "--octavia-http-header-exact",
+        "--octavia-http-request-redirect",
+        "--octavia-request-header-modifier",
+        "--octavia-backend-h2c",
+        "--octavia-fixed-http-responses",
+        "--octavia-weighted-http-targets",
+        "--octavia-tls-sni-passthrough",
+        "--octavia-tls-sni-suffix",
+        "--octavia-l7policy-initial-rules",
+        "--octavia-l7policy-batch-activation",
+        "--octavia-microversion=2.8",
+        "--openstack-resync-interval=2s",
+        "--openstack-poll-interval=50ms",
+        "--openstack-api-qps=120",
+        "--openstack-api-burst=160",
+        "--openstack-operation-timeout=30s"
+      ],
+      "octaviaAdvertisedCapabilities": [
+        "fixed_http_responses_v1",
+        "weighted_http_targets_v1",
+        "request_header_operations_v1",
+        "http_request_redirect_v1",
+        "l7policy_initial_rules_v1",
+        "l7policy_batch_activation_v1",
+        "http_header_exact_v1",
+        "backend_h2c_v1",
+        "backend_tls_hostname_v1",
+        "tls_sni_passthrough_v1",
+        "tls_sni_suffix_v1",
+        "https_listener_isolation_v1"
+      ],
+      "originTraffic": {
+        "nativeHAProxyReloadCount": 61,
+        "nativeSNIComparisons": {
+          "gateway-conformance-infra/gateway-tlsroute": [
+            {
+              "comparison": "EQUAL_TO",
+              "configSHA256": "93fc6778a244afb56a1b02f8928fb362dfa6f8640e91afd907531ec85fde6d3f",
+              "type": "TLS_SNI",
+              "value": "abc.example.com"
+            }
+          ],
+          "gateway-conformance-infra/gw-tlsroute-empty-hostname-x-4": [
+            {
+              "comparison": "ENDS_WITH",
+              "configSHA256": "88fbc915d0d797a5fabd7ebea6388f9daba6074817f227480b19d78e9713ae06",
+              "type": "TLS_SNI",
+              "value": "*.com"
+            },
+            {
+              "comparison": "EQUAL_TO",
+              "configSHA256": "82c1afe840f676f30fbe96471b7d2d845086536861dfb942e1a77a02f0ab3e99",
+              "type": "TLS_SNI",
+              "value": "abc.example.com"
+            }
+          ],
+          "gateway-conformance-infra/gw-tlsroute-exact-hostname-x-1": [
+            {
+              "comparison": "EQUAL_TO",
+              "configSHA256": "2bc8085ebf11566b0c3b8a2517f91eec7fc4fe329f0eb7fee5fe25966ba6aa91",
+              "type": "TLS_SNI",
+              "value": "abc.example.com"
+            }
+          ],
+          "gateway-conformance-infra/gw-tlsroute-less-specific-wc-hostname-x-3": [
+            {
+              "comparison": "ENDS_WITH",
+              "configSHA256": "5a86faedf3e7bdf43a3c54cfe83cff6d485bc5528400ccd702a0bc33a582fb79",
+              "type": "TLS_SNI",
+              "value": "*.example.com"
+            },
+            {
+              "comparison": "EQUAL_TO",
+              "configSHA256": "551eaea7d8ea477017b2b5b4be6d783a2cb2f2c05ffcc72c31589cc1e6f82cf3",
+              "type": "TLS_SNI",
+              "value": "abc.example.com"
+            }
+          ],
+          "gateway-conformance-infra/gw-tlsroute-more-specific-wc-hostname-x-2": [
+            {
+              "comparison": "ENDS_WITH",
+              "configSHA256": "a935c2e4e0e8590f0a6debe265156ca0676a1ea0213682a5b9ec5db100541737",
+              "type": "TLS_SNI",
+              "value": "*.example.com"
+            },
+            {
+              "comparison": "EQUAL_TO",
+              "configSHA256": "5b5dd54a575f2f208b6327408c936310c79857df8adfcaf4c93db7ddacd8d717",
+              "type": "TLS_SNI",
+              "value": "abc.example.com"
+            }
+          ]
+        },
+        "passingTrafficAssertions": [
+          "TestConformance/TLSRouteHostnameIntersection/TLSRoutes_intersect_with_exact_listener_hostname",
+          "TestConformance/TLSRouteHostnameIntersection/TLSRoutes_intersect_with_exact_listener_hostname/TLS_request_not_matching_hostnames_intersection_should_not_reach_backend",
+          "TestConformance/TLSRouteHostnameIntersection/TLSRoutes_intersect_with_exact_listener_hostname/TLS_request_matching_exact_hostnames_intersection_should_reach_backend",
+          "TestConformance/TLSRouteHostnameIntersection/TLSRoutes_intersect_with_more_specific_wildcard_listener_hostname",
+          "TestConformance/TLSRouteHostnameIntersection/TLSRoutes_intersect_with_more_specific_wildcard_listener_hostname/TLS_request_not_matching_hostnames_intersection_should_not_reach_backend",
+          "TestConformance/TLSRouteHostnameIntersection/TLSRoutes_intersect_with_more_specific_wildcard_listener_hostname/TLS_request_matching_exact_hostnames_intersection_should_reach_backend",
+          "TestConformance/TLSRouteHostnameIntersection/TLSRoutes_intersect_with_more_specific_wildcard_listener_hostname/TLS_request_matching_wildcard_hostnames_intersection_should_reach_backend_2",
+          "TestConformance/TLSRouteHostnameIntersection/TLSRoutes_intersect_with_less_specific_wildcard_listener_hostname",
+          "TestConformance/TLSRouteHostnameIntersection/TLSRoutes_intersect_with_less_specific_wildcard_listener_hostname/TLS_request_not_matching_hostnames_intersection_should_not_reach_backend",
+          "TestConformance/TLSRouteHostnameIntersection/TLSRoutes_intersect_with_less_specific_wildcard_listener_hostname/TLS_request_matching_exact_hostnames_intersection_should_reach_backend",
+          "TestConformance/TLSRouteHostnameIntersection/TLSRoutes_intersect_with_less_specific_wildcard_listener_hostname/TLS_request_matching_wildcard_hostnames_intersection_should_reach_backend_2",
+          "TestConformance/TLSRouteHostnameIntersection/TLSRoutes_intersect_with_empty_listener_hostname",
+          "TestConformance/TLSRouteHostnameIntersection/TLSRoutes_intersect_with_empty_listener_hostname/TLS_request_not_matching_hostnames_intersection_should_not_reach_backend",
+          "TestConformance/TLSRouteHostnameIntersection/TLSRoutes_intersect_with_empty_listener_hostname/TLS_request_matching_exact_hostnames_intersection_should_reach_backend",
+          "TestConformance/TLSRouteHostnameIntersection/TLSRoutes_intersect_with_empty_listener_hostname/TLS_request_matching_wildcard_hostnames_intersection_should_reach_backend_2",
+          "TestConformance/TLSRouteSimpleSameNamespace/Simple_TLS_request_matching_TLSRoute_should_reach_infra-backend"
+        ]
+      },
+      "readyBasePodCountAfterRun": 23,
+      "releaseBundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "reportSHA256": "8845f82e5b34bf95a59ab49b0f19e6658cbf0fa2ce387d3dee177bdcfaf2a5c6",
+      "result": "passed",
+      "runningBaseWorkloadImageDigests": [
+        "sha256:abd48b88affd1c16e8d60d06cdc661919a8980bba8fc9068f3d216d814268adb",
+        "sha256:d74f70a15cacd20d264347de53f278c4035b2601a4a8322eb39b112d50f16f90"
+      ],
+      "runningManagerSHA256": "a0dd97f7b47818887591dfbdf1c414052b0b9e2aefb3a846628b7d33b45a713d",
+      "setupFailed": false,
+      "upstreamExit": 0,
+      "upstreamSelection": {
+        "eligibleCases": [
+          "GatewayClassObservedGenerationBump",
+          "GatewayInvalidRouteKind",
+          "GatewayInvalidTLSConfiguration",
+          "GatewayListenerUnsupportedProtocol",
+          "GatewayModifyListeners",
+          "GatewayNameMaximumLength",
+          "GatewayObservedGenerationBump",
+          "GatewayPreserveForeignConditions",
+          "GatewaySecretInvalidReferenceGrant",
+          "GatewaySecretMissingReferenceGrant",
+          "GatewaySecretReferenceGrantAllInNamespace",
+          "GatewaySecretReferenceGrantSpecific",
+          "TLSRouteHostnameIntersection",
+          "TLSRouteInvalidBackendRefNonexistent",
+          "TLSRouteInvalidBackendRefUnknownKind",
+          "TLSRouteInvalidNoMatchingListener",
+          "TLSRouteInvalidNoMatchingListenerHostname",
+          "TLSRouteInvalidReferenceGrant",
+          "TLSRouteListenerPassthroughSupportedKinds",
+          "TLSRouteListenerTerminateNotSupported",
+          "TLSRouteSimpleSameNamespace"
+        ],
+        "globalGoTestTimeoutDisabled": true,
+        "profile": "GATEWAY-TLS",
+        "skippedTestsArgument": null,
+        "supportedFeatures": [
+          "Gateway",
+          "ReferenceGrant",
+          "TLSRoute"
+        ]
+      }
+    },
+    "standard": {
+      "adapter": {
+        "amphoraCPUsPerLoadBalancer": 2,
+        "caseTimeoutOverrides": {},
+        "l7Batch": "installed Octavia ApplyL7PolicyActivation task dispatched from captured local API RPC; installed Amphora driver and real HAProxy",
+        "nativeFixtureSHA256": "b218ecc66f8ba509a8de16389f68a7ee79e32fc4a6fca2f389630de3cca840d5",
+        "pendingStatusProjection": "one transaction updates pending rows of the owning LB",
+        "publication": "render and validate real HAProxy; check new PID socket; drain old workers separately"
+      },
+      "apiDiscovery": {
+        "backendtlspolicies.gateway.networking.k8s.io": {
+          "bundleVersion": "v1.7.0",
+          "channel": "standard",
+          "servedVersions": [
+            "v1"
+          ]
+        },
+        "gatewayclasses.gateway.networking.k8s.io": {
+          "bundleVersion": "v1.7.0",
+          "channel": "standard",
+          "servedVersions": [
+            "v1",
+            "v1beta1"
+          ]
+        },
+        "gateways.gateway.networking.k8s.io": {
+          "bundleVersion": "v1.7.0",
+          "channel": "standard",
+          "servedVersions": [
+            "v1",
+            "v1beta1"
+          ]
+        },
+        "grpcroutes.gateway.networking.k8s.io": {
+          "bundleVersion": "v1.7.0",
+          "channel": "standard",
+          "servedVersions": [
+            "v1"
+          ]
+        },
+        "httproutes.gateway.networking.k8s.io": {
+          "bundleVersion": "v1.7.0",
+          "channel": "standard",
+          "servedVersions": [
+            "v1",
+            "v1beta1"
+          ]
+        },
+        "listenersets.gateway.networking.k8s.io": {
+          "bundleVersion": "v1.7.0",
+          "channel": "standard",
+          "servedVersions": [
+            "v1"
+          ]
+        },
+        "referencegrants.gateway.networking.k8s.io": {
+          "bundleVersion": "v1.7.0",
+          "channel": "standard",
+          "servedVersions": [
+            "v1",
+            "v1beta1"
+          ]
+        },
+        "tcproutes.gateway.networking.k8s.io": {
+          "bundleVersion": "v1.7.0",
+          "channel": "standard",
+          "servedVersions": [
+            "v1"
+          ]
+        },
+        "tlsroutes.gateway.networking.k8s.io": {
+          "bundleVersion": "v1.7.0",
+          "channel": "standard",
+          "servedVersions": [
+            "v1"
+          ]
+        },
+        "udproutes.gateway.networking.k8s.io": {
+          "bundleVersion": "v1.7.0",
+          "channel": "standard",
+          "servedVersions": [
+            "v1"
+          ]
+        }
+      },
+      "cases": {
+        "GatewayClassObservedGenerationBump": {
+          "durationSeconds": 0.27,
+          "result": "Passed"
+        },
+        "GatewayInvalidRouteKind": {
+          "durationSeconds": 2.91,
+          "result": "Passed"
+        },
+        "GatewayInvalidTLSConfiguration": {
+          "durationSeconds": 1.47,
+          "result": "Passed"
+        },
+        "GatewayListenerUnsupportedProtocol": {
+          "durationSeconds": 1.64,
+          "result": "Passed"
+        },
+        "GatewayModifyListeners": {
+          "durationSeconds": 49.15,
+          "result": "Passed"
+        },
+        "GatewayNameMaximumLength": {
+          "durationSeconds": 6.74,
+          "result": "Passed"
+        },
+        "GatewayObservedGenerationBump": {
+          "durationSeconds": 15.33,
+          "result": "Passed"
+        },
+        "GatewayPreserveForeignConditions": {
+          "durationSeconds": 5.97,
+          "result": "Passed"
+        },
+        "GatewaySecretInvalidReferenceGrant": {
+          "durationSeconds": 15.17,
+          "result": "Passed"
+        },
+        "GatewaySecretMissingReferenceGrant": {
+          "durationSeconds": 7.63,
+          "result": "Passed"
+        },
+        "GatewaySecretReferenceGrantAllInNamespace": {
+          "durationSeconds": 12.84,
+          "result": "Passed"
+        },
+        "GatewaySecretReferenceGrantSpecific": {
+          "durationSeconds": 20.15,
+          "result": "Passed"
+        },
+        "TLSRouteHostnameIntersection": {
+          "durationSeconds": 48.57,
+          "result": "Passed"
+        },
+        "TLSRouteInvalidBackendRefNonexistent": {
+          "durationSeconds": 5.65,
+          "result": "Passed"
+        },
+        "TLSRouteInvalidBackendRefUnknownKind": {
+          "durationSeconds": 5.55,
+          "result": "Passed"
+        },
+        "TLSRouteInvalidNoMatchingListener": {
+          "durationSeconds": 14.62,
+          "result": "Passed"
+        },
+        "TLSRouteInvalidNoMatchingListenerHostname": {
+          "durationSeconds": 8.9,
+          "result": "Passed"
+        },
+        "TLSRouteInvalidReferenceGrant": {
+          "durationSeconds": 5.14,
+          "result": "Passed"
+        },
+        "TLSRouteListenerPassthroughSupportedKinds": {
+          "durationSeconds": 0.22,
+          "result": "Passed"
+        },
+        "TLSRouteListenerTerminateNotSupported": {
+          "durationSeconds": 0.13,
+          "result": "Passed"
+        },
+        "TLSRouteSimpleSameNamespace": {
+          "durationSeconds": 21.25,
+          "result": "Passed"
+        }
+      },
+      "clusterDeletionObserved": true,
+      "core": {
+        "result": "success",
+        "statistics": {
+          "Failed": 0,
+          "Passed": 21,
+          "Skipped": 0
+        }
+      },
+      "durationSeconds": 217.82,
+      "exit": 0,
+      "frontendSecretEnrollment": {
+        "barbicanPKCS12ReadbackVerified": true,
+        "exactUIDAndResourceVersionVerified": true,
+        "materialGeneratedByUnmodifiedUpstreamCLI": true,
+        "secrets": [
+          "gateway-conformance-infra/tls-validity-checks-certificate",
+          "gateway-conformance-web-backend/certificate"
+        ]
+      },
+      "gatewayClassSupportedFeatures": [],
+      "managerFlags": [
+        "--leader-elect=false",
+        "--metrics-bind-address=0",
+        "--health-probe-bind-address=0",
+        "--gateway-api-channel=standard",
+        "--octavia-https-listener-isolation",
+        "--octavia-http-header-exact",
+        "--octavia-http-request-redirect",
+        "--octavia-request-header-modifier",
+        "--octavia-backend-h2c",
+        "--octavia-fixed-http-responses",
+        "--octavia-weighted-http-targets",
+        "--octavia-tls-sni-passthrough",
+        "--octavia-tls-sni-suffix",
+        "--octavia-l7policy-initial-rules",
+        "--octavia-l7policy-batch-activation",
+        "--octavia-microversion=2.8",
+        "--openstack-resync-interval=2s",
+        "--openstack-poll-interval=50ms",
+        "--openstack-api-qps=120",
+        "--openstack-api-burst=160",
+        "--openstack-operation-timeout=30s"
+      ],
+      "octaviaAdvertisedCapabilities": [
+        "fixed_http_responses_v1",
+        "weighted_http_targets_v1",
+        "request_header_operations_v1",
+        "http_request_redirect_v1",
+        "l7policy_initial_rules_v1",
+        "l7policy_batch_activation_v1",
+        "http_header_exact_v1",
+        "backend_h2c_v1",
+        "backend_tls_hostname_v1",
+        "tls_sni_passthrough_v1",
+        "tls_sni_suffix_v1",
+        "https_listener_isolation_v1"
+      ],
+      "originTraffic": {
+        "nativeHAProxyReloadCount": 62,
+        "nativeSNIComparisons": {
+          "gateway-conformance-infra/gateway-tlsroute": [
+            {
+              "comparison": "EQUAL_TO",
+              "configSHA256": "dad511a97c6a86b65ddb5d3373b8c2eb060e2e7725650b5dea3bbb6315b0e1d8",
+              "type": "TLS_SNI",
+              "value": "abc.example.com"
+            }
+          ],
+          "gateway-conformance-infra/gw-tlsroute-empty-hostname-x-4": [
+            {
+              "comparison": "ENDS_WITH",
+              "configSHA256": "969928a70a6c6f370a9370634f30df013dadbb36ceb344d9e15302d5f3d517b4",
+              "type": "TLS_SNI",
+              "value": "*.com"
+            },
+            {
+              "comparison": "EQUAL_TO",
+              "configSHA256": "7bb39e7e51187bdb08bc75ed048e417c4454860e942c0596e810c260b02c0dd3",
+              "type": "TLS_SNI",
+              "value": "abc.example.com"
+            }
+          ],
+          "gateway-conformance-infra/gw-tlsroute-exact-hostname-x-1": [
+            {
+              "comparison": "EQUAL_TO",
+              "configSHA256": "cabf7b01fd328dad55716e7ec1d4c6849d278fdeaa319963f34b1ee7cc3b0062",
+              "type": "TLS_SNI",
+              "value": "abc.example.com"
+            }
+          ],
+          "gateway-conformance-infra/gw-tlsroute-less-specific-wc-hostname-x-3": [
+            {
+              "comparison": "ENDS_WITH",
+              "configSHA256": "a548dd6a60e852e51dcaaaedc7c13f2e7086b620e032d5f16a874534a746a49c",
+              "type": "TLS_SNI",
+              "value": "*.example.com"
+            },
+            {
+              "comparison": "EQUAL_TO",
+              "configSHA256": "7144a613936a017ff0e89240f77276c74589a528e8a5ffec1fa556b8b83ae9df",
+              "type": "TLS_SNI",
+              "value": "abc.example.com"
+            }
+          ],
+          "gateway-conformance-infra/gw-tlsroute-more-specific-wc-hostname-x-2": [
+            {
+              "comparison": "ENDS_WITH",
+              "configSHA256": "85b7958b4d6bb3dedd3a37f01aa161b76c93e5067142f1dc5037252ee7514810",
+              "type": "TLS_SNI",
+              "value": "*.example.com"
+            },
+            {
+              "comparison": "EQUAL_TO",
+              "configSHA256": "fadeeec44984aba15aec32ab0b8fb750cf48949b08adefc87ac7406d912dc9c7",
+              "type": "TLS_SNI",
+              "value": "abc.example.com"
+            }
+          ]
+        },
+        "passingTrafficAssertions": [
+          "TestConformance/TLSRouteHostnameIntersection/TLSRoutes_intersect_with_exact_listener_hostname",
+          "TestConformance/TLSRouteHostnameIntersection/TLSRoutes_intersect_with_exact_listener_hostname/TLS_request_not_matching_hostnames_intersection_should_not_reach_backend",
+          "TestConformance/TLSRouteHostnameIntersection/TLSRoutes_intersect_with_exact_listener_hostname/TLS_request_matching_exact_hostnames_intersection_should_reach_backend",
+          "TestConformance/TLSRouteHostnameIntersection/TLSRoutes_intersect_with_more_specific_wildcard_listener_hostname",
+          "TestConformance/TLSRouteHostnameIntersection/TLSRoutes_intersect_with_more_specific_wildcard_listener_hostname/TLS_request_not_matching_hostnames_intersection_should_not_reach_backend",
+          "TestConformance/TLSRouteHostnameIntersection/TLSRoutes_intersect_with_more_specific_wildcard_listener_hostname/TLS_request_matching_exact_hostnames_intersection_should_reach_backend",
+          "TestConformance/TLSRouteHostnameIntersection/TLSRoutes_intersect_with_more_specific_wildcard_listener_hostname/TLS_request_matching_wildcard_hostnames_intersection_should_reach_backend_2",
+          "TestConformance/TLSRouteHostnameIntersection/TLSRoutes_intersect_with_less_specific_wildcard_listener_hostname",
+          "TestConformance/TLSRouteHostnameIntersection/TLSRoutes_intersect_with_less_specific_wildcard_listener_hostname/TLS_request_not_matching_hostnames_intersection_should_not_reach_backend",
+          "TestConformance/TLSRouteHostnameIntersection/TLSRoutes_intersect_with_less_specific_wildcard_listener_hostname/TLS_request_matching_wildcard_hostnames_intersection_should_reach_backend_2",
+          "TestConformance/TLSRouteHostnameIntersection/TLSRoutes_intersect_with_less_specific_wildcard_listener_hostname/TLS_request_matching_exact_hostnames_intersection_should_reach_backend",
+          "TestConformance/TLSRouteHostnameIntersection/TLSRoutes_intersect_with_empty_listener_hostname",
+          "TestConformance/TLSRouteHostnameIntersection/TLSRoutes_intersect_with_empty_listener_hostname/TLS_request_not_matching_hostnames_intersection_should_not_reach_backend",
+          "TestConformance/TLSRouteHostnameIntersection/TLSRoutes_intersect_with_empty_listener_hostname/TLS_request_matching_exact_hostnames_intersection_should_reach_backend",
+          "TestConformance/TLSRouteHostnameIntersection/TLSRoutes_intersect_with_empty_listener_hostname/TLS_request_matching_wildcard_hostnames_intersection_should_reach_backend_2",
+          "TestConformance/TLSRouteSimpleSameNamespace/Simple_TLS_request_matching_TLSRoute_should_reach_infra-backend"
+        ]
+      },
+      "readyBasePodCountAfterRun": 23,
+      "releaseBundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "reportSHA256": "2c6e63c988411cd10988fd1de2407b1a25f86ad6bf73b77df8231ef5d75bde10",
+      "result": "passed",
+      "runningBaseWorkloadImageDigests": [
+        "sha256:abd48b88affd1c16e8d60d06cdc661919a8980bba8fc9068f3d216d814268adb",
+        "sha256:d74f70a15cacd20d264347de53f278c4035b2601a4a8322eb39b112d50f16f90"
+      ],
+      "runningManagerSHA256": "a0dd97f7b47818887591dfbdf1c414052b0b9e2aefb3a846628b7d33b45a713d",
+      "setupFailed": false,
+      "upstreamExit": 0,
+      "upstreamSelection": {
+        "eligibleCases": [
+          "GatewayClassObservedGenerationBump",
+          "GatewayInvalidRouteKind",
+          "GatewayInvalidTLSConfiguration",
+          "GatewayListenerUnsupportedProtocol",
+          "GatewayModifyListeners",
+          "GatewayNameMaximumLength",
+          "GatewayObservedGenerationBump",
+          "GatewayPreserveForeignConditions",
+          "GatewaySecretInvalidReferenceGrant",
+          "GatewaySecretMissingReferenceGrant",
+          "GatewaySecretReferenceGrantAllInNamespace",
+          "GatewaySecretReferenceGrantSpecific",
+          "TLSRouteHostnameIntersection",
+          "TLSRouteInvalidBackendRefNonexistent",
+          "TLSRouteInvalidBackendRefUnknownKind",
+          "TLSRouteInvalidNoMatchingListener",
+          "TLSRouteInvalidNoMatchingListenerHostname",
+          "TLSRouteInvalidReferenceGrant",
+          "TLSRouteListenerPassthroughSupportedKinds",
+          "TLSRouteListenerTerminateNotSupported",
+          "TLSRouteSimpleSameNamespace"
+        ],
+        "globalGoTestTimeoutDisabled": true,
+        "profile": "GATEWAY-TLS",
+        "skippedTestsArgument": null,
+        "supportedFeatures": [
+          "Gateway",
+          "ReferenceGrant",
+          "TLSRoute"
+        ]
+      }
+    }
+  },
+  "disposableGuestPowerDownObserved": true,
+  "launcherExitByChannel": {
+    "experimental": 0,
+    "standard": 0
+  },
+  "pinnedInputs": {
+    "controller": {
+      "configDigest": "sha256:36966321b127941690bd3e09ebb19a1827677c44d42dc94a1c23cc6f00bdb85b",
+      "entrypoint": "/openstack-gateway-controller",
+      "managerSHA256": "a0dd97f7b47818887591dfbdf1c414052b0b9e2aefb3a846628b7d33b45a713d",
+      "manifestDigest": "sha256:ece9bf11d672ffe1af201d394ddd24a47debc5ff3bc4d0eb04fc461a53b0e11e",
+      "normalAndNoCacheBuildsMatch": true,
+      "ociArchiveSHA256": "5f5a780973a57b4aea7d0575eeb1a26aee2a27ccfe520f44f0bb0544b4180aa9",
+      "platform": "linux/amd64",
+      "repository": "ghcr.io/armeldemarsac92/gateway-api-openstack",
+      "sourceLabel": "https://github.com/armeldemarsac92/gateway-api-openstack",
+      "sourceRevision": "9388be4580dd0fac002e160c3433d65cf1665a86",
+      "tree": "c8381f3425b8a321c6f22f342c08c9e06588d01a",
+      "user": "65532:65532"
+    },
+    "haproxy": {
+      "luaSHA256": "7427a714f36548c20f426d28ee45938e05854c08e4cf6b38fb52680a70a2f6d1",
+      "sha256": "57ce7ace05aa5a094ac71726dcce65e89971d521c3528de1c6c198a3918132e8"
+    },
+    "mode": "released",
+    "octavia": {
+      "source": "041a2becdc07fd5c6c3ab7da56cb858e332589a5",
+      "tree": "11dcf653dc0e7d4642256ac90618d8bc99670ffa",
+      "wheelSHA256": "7aa42f2d6c0b120cf982c24bff415175b3c9324b0a136d74c3d43318dea9dbfb"
+    },
+    "octaviaLib": {
+      "source": "eb4c646b59758334629feb99d517f938c8af3712",
+      "tree": "d82d52461368d70ceb4436388d7403081702234a",
+      "wheelSHA256": "a184a491c44d654317c6d1ae3225e3bed73f1eb8632132291ce01953e28dfa5d"
+    },
+    "providerDifferencesFromU7": {
+      "haproxy": {
+        "candidate": "57ce7ace05aa5a094ac71726dcce65e89971d521c3528de1c6c198a3918132e8",
+        "isolatedBaseline": "0780ee4508f3195aeb3b0af160f70be010addbc5283bfaf38fe747dd8e853fde"
+      },
+      "octavia": {
+        "candidate": "041a2becdc07fd5c6c3ab7da56cb858e332589a5",
+        "isolatedBaseline": "bb8bf986b57ad0acef3f29676e4ae436fbdd30f7"
+      }
+    },
+    "registryPublication": {
+      "anonymousTagAndDigestMatch": true,
+      "image": "ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:ece9bf11d672ffe1af201d394ddd24a47debc5ff3bc4d0eb04fc461a53b0e11e",
+      "main": "f3988ce5853f02749a0d3fe788780db556868d40",
+      "mainCI": {
+        "conclusion": "success",
+        "headSha": "f3988ce5853f02749a0d3fe788780db556868d40",
+        "status": "completed",
+        "url": "https://github.com/armeldemarsac92/gateway-api-openstack/actions/runs/45668668232"
+      },
+      "packaging": "1b2aa7a1e9af3c4a3b6114465654ee643a26a2ac",
+      "publisher": {
+        "conclusion": "success",
+        "headSha": "1b2aa7a1e9af3c4a3b6114465654ee643a26a2ac",
+        "status": "completed",
+        "url": "https://github.com/armeldemarsac92/gateway-api-openstack/actions/runs/45668726444"
+      },
+      "source": "9388be4580dd0fac002e160c3433d65cf1665a86",
+      "tag": "hibiscus-dev-9388be4580dd0fac002e160c3433d65cf1665a86"
+    }
+  },
+  "profile": "GATEWAY-TLS",
+  "runtimeInputs": {
+    "HAProxy": {
+      "sha256": "57ce7ace05aa5a094ac71726dcce65e89971d521c3528de1c6c198a3918132e8",
+      "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1"
+    },
+    "controllerRevision": "9388be4580dd0fac002e160c3433d65cf1665a86",
+    "echoArchiveV01SHA256": "b7675809fd2cc0b9fb9273f1b0c85c422bc3c12361d66b99b83173ddb2d3c9b7",
+    "echoArchiveV02SHA256": "60951109f49e2cffe3a41de08d09be7e6d454cfb09268625447de002b16a069d",
+    "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+    "kindAPIRelaySHA256": "b2fce2863ae5c2857e5e26628a566cbf0806cfde1623f2f005f9584c6d1d3054",
+    "kindWireSHA256": "99ad2c29a0aefdf3d39729d8d4f41b60fc7618257bd7519d17cb313b4ac29d45",
+    "octavia": {
+      "filesVerified": 672,
+      "revision": "041a2becdc07fd5c6c3ab7da56cb858e332589a5",
+      "sha256": "7aa42f2d6c0b120cf982c24bff415175b3c9324b0a136d74c3d43318dea9dbfb",
+      "version": "19.0.1.dev93"
+    },
+    "octaviaLib": {
+      "filesVerified": 24,
+      "revision": "eb4c646b59758334629feb99d517f938c8af3712",
+      "sha256": "a184a491c44d654317c6d1ae3225e3bed73f1eb8632132291ce01953e28dfa5d",
+      "version": "3.12.1.dev21"
+    },
+    "unmodifiedUpstreamConformanceExecutableSHA256": "02f22a3712b9a8af7d1515d81d1d2efdac2ddc302bda343ad7eea19ca8a9653e",
+    "upstreamBaseManifestsSHA256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352"
+  }
+}
