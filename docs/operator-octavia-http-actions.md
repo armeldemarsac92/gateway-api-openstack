@@ -86,6 +86,14 @@ Apply Octavia migration `cc7a1218b24e`, upgrade the regional API and workers, an
 
 HTTP 204 acknowledges submission. Follow the provisioning status of the listener and the selected policies to confirm activation. If delivery is interrupted, Octavia can resume on redelivery of the same RPC or an identical activation request. Wait for pending activations to finish before withdrawing the capability.
 
+## Remove a retiring route policy and its rules together
+
+Upgrade the regional Octavia API and Amphora workers to builds that support conditional L7 policy removal. Set `enabled_l7policy_conditional_removal_providers = amphora` in Octavia's `[api_settings]`. Once the effective provider advertises `l7policy_conditional_removal_v1` on the controller's regional load-balancer endpoint, add `--octavia-l7policy-conditional-removal` to the controller arguments. The option defaults to off and is independent of grouped creation and activation.
+
+For a retiring route binding on an HTTP or terminated HTTPS listener, the controller first observes the policy disabled and settled. It compares the full policy and rule snapshot with the owned inventory and rechecks the Kubernetes binding before submitting that revision. Octavia accepts the request with HTTP 202 and applies the removal and quota release together. The controller confirms policy absence through the normal inventory on a later reconcile before completing cleanup. A conflict or an interrupted request is followed by fresh inventory reads.
+
+The controller uses individual rule deletion with the option off or if the regional provider explicitly lacks the capability. Wait for in-flight removals to settle before rolling back the regional API or workers.
+
 ## Observe a grant change
 
 For a route with a weight-3 Service in its own namespace and a weight-1 Service in another namespace, match requests to the same rule and distinguish replies by application identity.

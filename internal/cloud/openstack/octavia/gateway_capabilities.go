@@ -69,6 +69,8 @@ const (
 	GatewayCapabilityL7PolicyBatchActivation   = "l7policy_batch_activation_v1"
 )
 
+const GatewayCapabilityL7PolicyConditionalRemoval = "l7policy_conditional_removal_v1"
+
 const GatewayCapabilityTLSSNIPassthroughWeightedPools = "tls_sni_passthrough_weighted_pools_v1"
 
 // MissingGatewayCapability reports an explicit negative capability discovery.

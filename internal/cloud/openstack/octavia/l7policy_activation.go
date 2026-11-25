@@ -33,7 +33,7 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/pools"
 )
 
-type PolicyActivationSnapshot struct {
+type PolicySnapshot struct {
 	Revision string
 	Policy   L7PolicyObservation
 	Rules    []RuleObservation
@@ -57,7 +57,7 @@ type PolicyActivationGraph struct {
 	LoadBalancer *LoadBalancer
 	Listener     *PolicyActivationListener
 	Pools        []PolicyActivationPoolInventory
-	Policies     []PolicyActivationSnapshot
+	Policies     []PolicySnapshot
 }
 
 type PolicyActivationListener struct {
@@ -116,38 +116,46 @@ func (s *Service) ObservePolicyActivation(ctx context.Context, listenerID string
 		return PolicyActivationGraph{}, fmt.Errorf("read Octavia L7 policy activation snapshot: %w", err)
 	}
 	wire := response.Activation
-	if !validActivationRevision(wire.Revision) || wire.LoadBalancer == nil || wire.Listener == nil ||
+	if !validPolicyRevision(wire.Revision) || wire.LoadBalancer == nil || wire.Listener == nil ||
 		wire.Pools == nil || wire.Policies == nil {
 		return PolicyActivationGraph{}, cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady,
 			errors.New("incomplete graph in Octavia L7 policy activation snapshot"))
 	}
 	snapshot := PolicyActivationGraph{
 		Revision: wire.Revision, LoadBalancer: wire.LoadBalancer, Listener: wire.Listener,
-		Pools: wire.Pools, Policies: make([]PolicyActivationSnapshot, 0, len(wire.Policies)),
+		Pools: wire.Pools, Policies: make([]PolicySnapshot, 0, len(wire.Policies)),
 	}
 	for _, item := range wire.Policies {
-		if !validActivationRevision(item.Revision) {
-			return PolicyActivationGraph{}, cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady,
-				errors.New("invalid policy revision in Octavia L7 policy activation snapshot"))
-		}
-		policy, err := readPolicyObservation(item.Policy)
+		row, err := readPolicySnapshot(item.Revision, item.Policy)
 		if err != nil {
-			return PolicyActivationGraph{}, cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady,
-				fmt.Errorf("read Octavia L7 policy activation snapshot: %w", err))
+			return PolicyActivationGraph{}, err
 		}
-		var row struct {
-			Rules []RuleObservation `json:"rules"`
-		}
-		if err := json.Unmarshal(item.Policy, &row); err != nil || row.Rules == nil {
-			return PolicyActivationGraph{}, cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady,
-				errors.New("incomplete rules in Octavia L7 policy activation snapshot"))
-		}
-		snapshot.Policies = append(snapshot.Policies, PolicyActivationSnapshot{Revision: item.Revision, Policy: policy, Rules: row.Rules})
+		snapshot.Policies = append(snapshot.Policies, row)
 	}
 	return snapshot, nil
 }
 
-func validActivationRevision(value string) bool {
+func readPolicySnapshot(revision string, raw json.RawMessage) (PolicySnapshot, error) {
+	if !validPolicyRevision(revision) {
+		return PolicySnapshot{}, cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady,
+			errors.New("invalid revision in Octavia L7 policy snapshot"))
+	}
+	policy, err := readPolicyObservation(raw)
+	if err != nil {
+		return PolicySnapshot{}, cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady,
+			fmt.Errorf("read Octavia L7 policy snapshot: %w", err))
+	}
+	var row struct {
+		Rules []RuleObservation `json:"rules"`
+	}
+	if err := json.Unmarshal(raw, &row); err != nil || row.Rules == nil {
+		return PolicySnapshot{}, cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady,
+			errors.New("incomplete rules in Octavia L7 policy snapshot"))
+	}
+	return PolicySnapshot{Revision: revision, Policy: policy, Rules: row.Rules}, nil
+}
+
+func validPolicyRevision(value string) bool {
 	if len(value) != sha256.Size*2 {
 		return false
 	}

@@ -521,10 +521,34 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	if err != nil {
 		return result, err
 	}
+	removalRevision, err := p.preparePolicyRemoval(ctx, desired, actual, step)
+	if err != nil {
+		return result, err
+	}
 	validateMutation := spec.ValidateMutation
 	if validateMutation != nil {
 		if err := validateMutation(ctx); err != nil {
 			return cloud.GatewayGraphResult{}, err
+		}
+	}
+	if removalRevision != "" {
+		err := p.octavia.RemovePolicyRevision(ctx, step.route.parentID, removalRevision)
+		switch {
+		case err == nil:
+			outcome := p.progressingOutcome("Waiting for Octavia L7 policy removal readback")
+			outcome.MutationSubmitted = true
+			result.Outcome = outcome
+			result.Routes[step.routeIndex].Result.Outcome = outcome
+			return result, nil
+		case isNotFound(err), gophercloud.ResponseCodeIs(err, http.StatusConflict):
+			return result, nil
+		case !gophercloud.ResponseCodeIs(err, http.StatusNotImplemented):
+			return result, &cloud.GraphError{Identity: desired.routes[step.routeIndex].spec.Identity, Err: err}
+		}
+		if validateMutation != nil {
+			if err := validateMutation(ctx); err != nil {
+				return cloud.GatewayGraphResult{}, err
+			}
 		}
 	}
 	if batch != nil {

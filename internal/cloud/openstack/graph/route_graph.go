@@ -585,11 +585,14 @@ func (p *Provider) observeListenerPolicies(ctx context.Context, inventory *route
 	for _, ref := range listener.L7Policies {
 		refs = append(refs, octavia.L7PolicyObservation{Policy: l7policies.L7Policy{ID: ref.ID}})
 	}
-	if strictInventory {
+	requiresAbsenceProof := slices.ContainsFunc(inventory.owners, func(owner routeGraphOwner) bool { return owner.requiresPolicyAbsenceProof })
+	// A stock 204 has no list body. During cleanup only a populated parent
+	// inventory, including an explicit empty array, can corroborate it.
+	if strictInventory || !complete && requiresAbsenceProof {
 		if err := crossCheckCompleteChildInventory("listener", listener.ID, "L7 policy", refs, items, policyID); err != nil {
 			return inventoryError(err)
 		}
-	} else if otherCleanup || slices.ContainsFunc(inventory.owners, func(owner routeGraphOwner) bool { return owner.requiresPolicyAbsenceProof }) {
+	} else if otherCleanup || requiresAbsenceProof {
 		if err := crossCheckChildInventory("listener", listener.ID, "L7 policy", refs, items, policyID); err != nil {
 			return err
 		}
