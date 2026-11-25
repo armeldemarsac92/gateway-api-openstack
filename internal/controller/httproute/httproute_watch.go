@@ -226,6 +226,11 @@ func (r *Reconciler) enqueueHTTPRoutesForNode(ctx context.Context, object client
 		if !managed {
 			continue
 		}
+		if r.Config.RouteExternalAuthEnabled() {
+			for _, rule := range route.Spec.Rules {
+				backends = append(backends, model.HTTPRouteExternalAuthReferences(rule)...)
+			}
+		}
 		for _, backend := range backends {
 			serviceKey, supported := model.BackendServiceReference(route.Namespace, backend)
 			if !supported {
@@ -340,9 +345,11 @@ func (r *Reconciler) setupRouteController(manager ctrl.Manager, object client.Ob
 	if r.retryBudgetPolicyServed && (r.Config.BackendRetryBudgetEnabled() || r.Config.XBackendSessionPersistenceEnabled()) {
 		setup.Watches(&gatewayx.XBackendTrafficPolicy{}, handler.EnqueueRequestsFromMapFunc(r.enqueueRoutesForRetryBudget), builder.WithPredicates(r.retryBudgetRoutePredicate()))
 	}
+	if r.Config.BackendTLSPolicy || r.Config.RouteExternalAuthEnabled() && r.kind() == model.HTTPRouteKind {
+		setup.Watches(&gatewayv1.BackendTLSPolicy{}, handler.EnqueueRequestsFromMapFunc(r.enqueueRoutesForBackendTLSPolicy), builder.WithPredicates(r.backendTLSRoutePredicate()))
+	}
 	if r.Config.BackendTLSPolicy {
-		setup.Watches(&gatewayv1.BackendTLSPolicy{}, handler.EnqueueRequestsFromMapFunc(r.enqueueRoutesForBackendTLSPolicy), builder.WithPredicates(r.backendTLSRoutePredicate())).
-			WatchesMetadata(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.enqueueRoutesForBackendTLSCA))
+		setup.WatchesMetadata(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.enqueueRoutesForBackendTLSCA))
 		if watch := r.Config.ClusterTrustBundles.Watch(r.enqueueRoutesForBackendTLSCA); watch != nil {
 			setup.WatchesRawSource(watch)
 		}

@@ -123,3 +123,23 @@ Keep the patched workers, API and operator flags while withdrawing routes and Ga
 ## HTTP request mirroring
 
 Enable the `octavia-http-request-mirror` controller component after the regional Amphora capability is available. [Enablement, packages and recorded request copies](qualification/v1.7.0/provider/http-request-mirror.md)
+
+## HTTPRoute external authorization
+
+Enable `--octavia-http-route-external-auth` with `--gateway-api-channel=experimental` and
+`--octavia-fixed-http-responses`. The regional Amphora provider must advertise
+`l7policy_http_external_auth_v1` to program the filter. The HTTPRoute rule
+must use an HTTP authorization Service and omit request body forwarding.
+An authorization response of HTTP 200 allows the request to reach the origin.
+The rule can specify an authorization path prefix and request and response header allowlists.
+
+Use ExternalAuth as the only filter on the rule, with unfiltered Service
+backendRefs. More than one origin backend also requires
+`--octavia-weighted-http-targets`. The authorization Service uses cleartext HTTP.
+Grant a cross-namespace authorization Service reference from the HTTPRoute's
+namespace with `from.kind: HTTPRoute` in a ReferenceGrant in the Service namespace.
+
+If that grant is withdrawn, `ResolvedRefs` becomes `False` with reason
+`RefNotPermitted`. Requests matching the protected rule get a local error.
+An authorization Service with no ready members also closes that rule. Unfiltered
+sibling rules continue forwarding using their usual match precedence.

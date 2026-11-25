@@ -72,6 +72,8 @@ type Request struct {
 	HTTPRouteCORSFallback *bool
 	// HTTPRouteDroppedInlineRules binds rejection of inline rules to the same transport observation.
 	HTTPRouteDroppedInlineRules *string
+	// HTTPRouteAllRulesRejected binds a fully rejected route status to its fixed responses.
+	HTTPRouteAllRulesRejected *string
 	// HTTPRouteBackendTLSAncestorSlot binds route status to the writer's slot observation.
 	HTTPRouteBackendTLSAncestorSlot *backendtls.AncestorSlot
 	// HTTPRouteUsesXBackendClientTLS binds deferred status to the observed TLS mode.

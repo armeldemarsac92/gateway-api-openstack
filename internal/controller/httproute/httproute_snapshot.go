@@ -87,6 +87,7 @@ type routeValidationSnapshot struct {
 	backendDiagnostic       model.Diagnostic
 	corsFallback            bool
 	droppedInlineRules      string
+	allRulesRejected        string
 	backendTLSAncestorSlot  backendtls.AncestorSlot
 	retryBudgetAncestorFull bool
 	gatewayReadyForBinding  bool
@@ -202,6 +203,7 @@ func (r *Reconciler) buildRouteValidationSnapshotFromInputs(
 	snapshot.backendDiagnostic = diagnostics.backend
 	snapshot.corsFallback = diagnostics.corsFallback
 	snapshot.droppedInlineRules = diagnostics.droppedInlineRules
+	snapshot.allRulesRejected = diagnostics.allRulesRejected
 	snapshot.retryBudgetAncestorFull = diagnostics.retryBudgetAncestorFull
 	snapshot.backendTLSAncestorSlot = diagnostics.backendTLSAncestorSlot
 

@@ -43,6 +43,9 @@ type Input struct {
 	HTTPRequestURLRewrite  bool
 	HTTPRequestPolicy      bool
 	HTTPRequestMirror      bool
+	RouteExternalAuth      bool
+	CheckRouteExternalAuth bool
+	WeightedHTTPTargets    bool
 	HTTPCORS               bool
 	BackendRequestFilters  bool
 	BackendResponseHeaders bool
@@ -148,6 +151,8 @@ type Rule struct {
 	RequestPolicy            *cloud.HTTPRequestPolicy
 	RequestMirrors           []RequestMirror
 	CORS                     *cloud.HTTPCORS
+	ExternalAuth             *HTTPExternalAuth
+	ExternalAuthDiagnostic   *Diagnostic
 	Diagnostics              []Diagnostic
 }
 

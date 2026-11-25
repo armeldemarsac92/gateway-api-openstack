@@ -59,7 +59,7 @@ func TestHTTPRouteProviderFailurePreservesProviderAndStatusErrors(t *testing.T) 
 	providerErr := cloud.NewProviderError(cloud.ErrorCategoryRetryableService, errors.New("token=secret-token"))
 
 	scope := &httpRouteScope{route: route}
-	_, reconcileErr := reconciler.handleRouteProviderFailure(scope, parent, true, model.Diagnostic{}, providerErr, "EnsureHTTPRoute")
+	_, reconcileErr := reconciler.handleRouteProviderFailure(scope, parent, true, model.Diagnostic{}, "", providerErr, "EnsureHTTPRoute")
 	patchErr := reconciler.patchHTTPRoute(context.Background(), scope)
 	err := errors.Join(reconcileErr, scope.patchCause, patchErr)
 	if !errors.Is(err, providerErr) || !errors.Is(err, statusErr) {
@@ -105,7 +105,7 @@ func TestHTTPRouteProviderFailureObservedGeneration(t *testing.T) {
 			providerErr := cloud.NewProviderError(test.category, errors.New("provider failure"))
 
 			scope := &httpRouteScope{route: route}
-			_, _ = reconciler.handleRouteProviderFailure(scope, parent, true, model.Diagnostic{}, providerErr, "EnsureHTTPRoute")
+			_, _ = reconciler.handleRouteProviderFailure(scope, parent, true, model.Diagnostic{}, "", providerErr, "EnsureHTTPRoute")
 			if err := reconciler.patchHTTPRoute(context.Background(), scope); err != nil {
 				t.Fatalf("patchHTTPRoute() error = %v", err)
 			}
@@ -150,7 +150,7 @@ func TestHTTPRouteFailureBeforeBackendEvaluationPreservesResolvedGeneration(t *t
 	providerErr := cloud.NewProviderError(cloud.ErrorCategoryRateLimit, errors.New("rate limited"))
 
 	scope := &httpRouteScope{route: route}
-	_, _ = reconciler.handleRouteProviderFailure(scope, parent, false, model.Diagnostic{}, providerErr, "DeleteHTTPRoute")
+	_, _ = reconciler.handleRouteProviderFailure(scope, parent, false, model.Diagnostic{}, "", providerErr, "DeleteHTTPRoute")
 	if err := reconciler.patchHTTPRoute(context.Background(), scope); err != nil {
 		t.Fatalf("patchHTTPRoute() error = %v", err)
 	}

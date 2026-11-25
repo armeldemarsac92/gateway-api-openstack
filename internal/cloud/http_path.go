@@ -17,9 +17,17 @@ limitations under the License.
 package cloud
 
 import (
+	"regexp"
 	"strings"
 	"unicode/utf8"
 )
+
+var externalAuthPath = regexp.MustCompile("^(?:[-A-Za-z0-9/._~!$&'()*+,;=:@]|%[0-9a-fA-F]{2})+$")
+
+// ValidExternalAuthPathPrefix accepts the optional prefix sent to the HTTP authorization service.
+func ValidExternalAuthPathPrefix(value string) bool {
+	return value == "" || len(value) <= 1024 && strings.HasPrefix(value, "/") && externalAuthPath.MatchString(value)
+}
 
 // ValidHTTPPathReplacement checks the length and encoding of a redirect or
 // rewrite replacement. Octavia encodes literal characters for the data plane.

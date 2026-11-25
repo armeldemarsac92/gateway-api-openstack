@@ -544,6 +544,7 @@ func (actual observedGatewayGraph) isolatedPoliciesReady(desired desiredGatewayG
 
 func isolatedPolicyMatches(route desiredRoute, observed observedRouteGraph, policy desiredPolicy, current observedRoutePolicy) bool {
 	return current.role == policy.role && current.httpsListenerHostname == policy.httpsListenerHostname &&
+		policy.externalAuthMatches(current) &&
 		slices.Equal(current.requestHeaderOperations, policy.requestHeaderOperations) &&
 		slices.Equal(current.responseHeaderOperations, policy.responseHeaderOperations) &&
 		(policy.requestURLRewrite == nil && !current.hasRequestURLRewrite() || policy.requestURLRewrite != nil && requestURLRewritePolicy.settled(policy, current)) &&

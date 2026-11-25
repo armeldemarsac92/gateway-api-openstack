@@ -101,6 +101,8 @@ type Reconciler struct {
 	XBackendTLSAvailable func(context.Context, bool, bool) (bool, error)
 	// BackendH2CAvailable checks regional support for an XBackend using h2c.
 	BackendH2CAvailable func(context.Context) (bool, error)
+	// RouteExternalAuthAvailable checks regional HTTP L7 policy authorization support.
+	RouteExternalAuthAvailable func(context.Context) (bool, error)
 	// XBackendClientCertificates resolves identities from the operator's XBackend enrollment.
 	XBackendClientCertificates graph.XBackendClientCertificateResolver
 	// TCPBackendTLSAvailable checks authenticated TLS for terminating TLSRoutes.
@@ -359,7 +361,7 @@ func (r *Reconciler) reconcileSelectedRoute(
 		if errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) {
 			return r.setRouteUnsupportedVersion(ctx, scope)
 		}
-		return r.handleRouteProviderFailure(scope, parent.ref, false, model.Diagnostic{}, err, "DeleteHTTPRoute")
+		return r.handleRouteProviderFailure(scope, parent.ref, false, model.Diagnostic{}, "", err, "DeleteHTTPRoute")
 	}
 	if detachResult.RequeueAfter > 0 {
 		status := pendingRouteStatus("OpenStack resources for the previous Gateway are being removed")
@@ -402,7 +404,7 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 		if errors.Is(err, errHTTPRouteChanged) || errors.Is(err, backendtls.ErrClusterTrustBundleUnavailable) {
 			return ctrl.Result{}, err
 		}
-		return r.handleRouteProviderFailure(scope, parent.ref, true, graphResult.backendDiagnostic, err, "EnsureHTTPRoute")
+		return r.handleRouteProviderFailure(scope, parent.ref, true, graphResult.backendDiagnostic, graphResult.allRulesRejected, err, "EnsureHTTPRoute")
 	}
 	switch graphResult.bindingState {
 	case routeBindingPersisted:
@@ -414,7 +416,7 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 				return ctrl.Result{}, err
 			}
 		}
-		scope.setStatuses([]parentStatusUpdate{{parent: parent.ref, status: status}})
+		scope.setStatuses([]parentStatusUpdate{{parent: parent.ref, status: status.withAllRulesRejected(graphResult.allRulesRejected)}})
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	case routeBindingReady:
 		// The graph writer returned a validated cloud outcome.
@@ -471,7 +473,7 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 			}
 		}
 		if graphResult.usesXBackendClientTLS || !graphResult.ObservationDeferred || !xBackendRevisionCurrent || !serviceRevisionCurrent || graphResult.retryBudgetAncestorFull ||
-			graphResult.droppedInlineRules != "" ||
+			graphResult.droppedInlineRules != "" || graphResult.allRulesRejected != "" ||
 			graphResult.backendTLSAncestorSlot != backendtls.AncestorSlotHeld ||
 			graphResult.BackendSessionPersistenceIssue >= cloud.SessionPersistenceUnverified ||
 			r.currentRouteProgrammedCondition(httpRoute, parent.ref) == nil ||
@@ -481,7 +483,7 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 				withRetryBudgetAncestorLimit(graphResult.retryBudgetAncestorFull).withBackendPersistenceIssue(graphResult.BackendSessionPersistenceIssue, !serviceRevisionCurrent || serviceRevision != nil && *serviceRevision != "")
 			status.partiallyInvalid = graphResult.PartiallyInvalid
 			status.implementedRules = graphResult.ImplementedRules
-			scope.setStatuses([]parentStatusUpdate{{parent: parent.ref, status: status}})
+			scope.setStatuses([]parentStatusUpdate{{parent: parent.ref, status: status.withAllRulesRejected(graphResult.allRulesRejected)}})
 		}
 		return ctrl.Result{RequeueAfter: controller.ProviderProgressRequeueAfter(graphResult.Outcome, httpRoute.UID)}, nil
 	}
@@ -492,7 +494,7 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 	if status.programmed == metav1.ConditionTrue && status.partiallyInvalid != "" {
 		status.programmedMessage = "Octavia configuration for the supported rules is active"
 	}
-	scope.setStatuses([]parentStatusUpdate{{parent: parent.ref, status: status}})
+	scope.setStatuses([]parentStatusUpdate{{parent: parent.ref, status: status.withAllRulesRejected(graphResult.allRulesRejected)}})
 	scope.statusPlan.persistenceRevision = graphResult.persistenceRevision
 	scope.statusPlan.servicePersistenceRevision = graphResult.servicePersistenceRevision
 	scope.statusPlan.xBackendTransportRevision = graphResult.xBackendTransportRevision

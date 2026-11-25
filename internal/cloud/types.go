@@ -84,7 +84,8 @@ type ListenerRequestFilterSection struct {
 	Requests []ListenerExternalAuth
 }
 
-// ListenerExternalAuth references a backend authorized from the Gateway.
+// ListenerExternalAuth describes an HTTP authorization Service resolved from
+// the referring Gateway or HTTPRoute.
 type ListenerExternalAuth struct {
 	ServiceUID             string
 	ServicePort            int
@@ -259,6 +260,7 @@ type HTTPPathMatch struct {
 	URLRewrite               *HTTPURLRewrite       `json:",omitempty"`
 	RequestPolicy            *HTTPRequestPolicy    `json:",omitempty"`
 	RequestMirrors           []HTTPMirrorTarget    `json:",omitempty"`
+	ExternalAuth             *ListenerExternalAuth `json:",omitempty"`
 	CORS                     *HTTPCORS             `json:",omitempty"`
 	ResponseHeaderOperations []HTTPHeaderOperation `json:",omitempty"`
 }

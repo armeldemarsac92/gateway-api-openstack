@@ -60,6 +60,8 @@ type observedGatewayGraph struct {
 	pendingListenerFilterCapability  map[int]bool
 	recoveringListenerFilterSections map[int][]string
 	listenerFilterMutation           *graphMutation
+	routeAuthPools                   map[string]string
+	routeAuthPoolMutation            *graphMutation
 	httpPools                        *listenerFilterPoolInventory
 
 	defaultHTTPResponseCodes map[string]int
@@ -445,7 +447,15 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 			return result, err
 		}
 	}
-	plan = p.protectRequestRedirectTraffic(ctx, desired, actual, plan, &result)
+	if actual.routeAuthPoolMutation != nil && !isHTTPListenerWithdrawal(plan) {
+		step := *actual.routeAuthPoolMutation
+		plan = []graphMutation{step}
+		result.Outcome = p.progressingOutcome(step.message)
+	}
+	plan = p.protectRouteAuthTraffic(ctx, desired, actual, plan, &result)
+	if !isHTTPListenerWithdrawal(plan) {
+		plan = p.protectRequestRedirectTraffic(ctx, desired, actual, plan, &result)
+	}
 	if !isHTTPListenerWithdrawal(plan) {
 		plan = p.protectRequestURLRewriteTraffic(ctx, desired, actual, plan, &result)
 	}
@@ -684,7 +694,10 @@ func (p *Provider) reconcileHTTPWithdrawalWithoutAddress(ctx context.Context, de
 	}
 	p.reportUnavailableHTTPRequestPolicies(unavailable, &result)
 	result.Gateway.Outcome = p.progressingOutcome("Waiting to observe the Gateway Floating IP inventory")
-	plan = p.protectRequestRedirectTraffic(ctx, desired, actual, plan, &result)
+	plan = p.protectRouteAuthTraffic(ctx, desired, actual, plan, &result)
+	if !isHTTPListenerWithdrawal(plan) {
+		plan = p.protectRequestRedirectTraffic(ctx, desired, actual, plan, &result)
+	}
 	if !isHTTPListenerWithdrawal(plan) {
 		plan = p.protectRequestURLRewriteTraffic(ctx, desired, actual, plan, &result)
 	}
@@ -843,6 +856,18 @@ func (p *Provider) validateGraphTrafficSecurity(ctx context.Context, desired des
 			routes = append(routes, route.spec)
 		}
 		for _, backend := range route.httpParts {
+			port := httpURLPolicyRoutePort(desired, backend)
+			seenAuth := make(map[string]bool)
+			for _, policy := range backend.policies {
+				if auth := policy.externalAuth; auth != nil && !deniedPorts[port] {
+					name := listenerAuthPoolName(port, *auth)
+					if !seenAuth[name] {
+						routes = append(routes, cloud.RouteSpec{Identity: route.spec.Identity, Members: auth.Members, MemberSubnetID: auth.MemberSubnetID,
+							BackendSecurityGroupIDs: auth.BackendSecurityGroups, ScopedListenerPorts: []int{port}})
+						seenAuth[name] = true
+					}
+				}
+			}
 			if !deniedPorts[scopedHTTPRoutePort(backend)] && !backend.backendTLS.denies() &&
 				!backend.unavailable && !backend.redirect && !backend.fixedResponse && backend.weightedTargets == nil {
 				routes = append(routes, backend.spec)
@@ -1437,6 +1462,9 @@ func (d desiredGatewayGraph) routeOwners() []routeGraphOwner {
 		owners[index].expectsHTTPParts = len(route.httpParts) != 0
 		recordHTTPFilterPorts := func(part desiredRoute) {
 			port := httpURLPolicyRoutePort(d, part)
+			if slices.ContainsFunc(part.policies, routeExternalAuthPolicy.required) && !slices.Contains(owners[index].routeExternalAuthPorts, port) {
+				owners[index].routeExternalAuthPorts = append(owners[index].routeExternalAuthPorts, port)
+			}
 			if slices.ContainsFunc(part.policies, requestCORSPolicy.required) && !slices.Contains(owners[index].requestCORSPorts, port) {
 				owners[index].requestCORSPorts = append(owners[index].requestCORSPorts, port)
 			}
@@ -1547,7 +1575,7 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 			}
 		}
 		if actual.scoped && actual.protocol == cloud.ListenerProtocolHTTP {
-			if desired.spec.Gateway.Disposition == cloud.GraphEnsure && actual.hasListenerFilterConfig(desired) &&
+			if desired.spec.Gateway.Disposition == cloud.GraphEnsure && (actual.hasListenerFilterConfig(desired) || len(desired.routeAuthorizers()) != 0) &&
 				observation.phase == loadBalancerPhaseActive {
 				if err := p.observeListenerFilterGraph(ctx, desired, &actual); err != nil {
 					return actual, err
@@ -1714,7 +1742,14 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 			return actual, nil
 		}
 	}
-	actual.routes, err = p.observeRouteGraphs(ctx, owners, lb, actual.listener, actual.protocol)
+	if actual.protocol == cloud.ListenerProtocolHTTP {
+		if err := p.observeListenerFilterGraph(ctx, desired, &actual); err != nil {
+			return actual, err
+		}
+		actual.routes, err = p.observeRouteGraphsFromPools(ctx, owners, actual.httpPools.loadBalancer, actual.listener, actual.protocol, nil, actual.httpPools.routes, nil, actual.httpsIsolationPolicies)
+	} else {
+		actual.routes, err = p.observeRouteGraphs(ctx, owners, lb, actual.listener, actual.protocol)
+	}
 	if err != nil {
 		return actual, err
 	}
