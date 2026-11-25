@@ -188,6 +188,11 @@ func TestTelemetryPolicyGrantRevocationAndRecoveryFencesCollector(t *testing.T) 
 	policy := telemetryTestPolicy("collector", 10)
 	policy.Spec.Tracing = gatewayx.TracingConfig{
 		Mode: gatewayx.TracingModeEnabled, ServiceName: "edge.apps", SpanName: "Edge request",
+		Attributes: []gatewayx.Attribute{
+			{Name: "tenant", SourceType: gatewayx.AttributeSourceHeader, HeaderName: "X-Test-Tenant"},
+			{Name: "code", SourceType: gatewayx.AttributeSourceAttribute, AttributeKey: "http.response.status_code"},
+			{Name: "environment", SourceType: gatewayx.AttributeSourceLiteral, LiteralValue: "test"},
+		},
 		SamplingRate: &gatewayv1.Fraction{Numerator: 25},
 		ParentBasedSampling: gatewayx.ParentBasedSampling{
 			Mode: gatewayx.ParentBasedSamplingModeEnabled, SamplingRate: &gatewayv1.Fraction{Numerator: 1, Denominator: ptr.To(int32(2))},
@@ -231,6 +236,11 @@ func TestTelemetryPolicyGrantRevocationAndRecoveryFencesCollector(t *testing.T) 
 	require.Equal(t, []cloud.Member{{Address: "192.0.2.12", Port: 9443}}, calls[1].Members)
 	require.Equal(t, "edge.apps", calls[1].ServiceName)
 	require.Equal(t, "Edge request", calls[1].SpanName)
+	require.Equal(t, []cloud.TelemetryAttribute{
+		{Name: "code", SourceType: "Attribute", AttributeKey: "http.response.status_code"},
+		{Name: "environment", SourceType: "Literal", LiteralValue: "test"},
+		{Name: "tenant", SourceType: "Header", HeaderName: "x-test-tenant"},
+	}, calls[1].Attributes)
 	require.Equal(t, []cloud.TelemetryListener{{Port: 80, Protocol: "HTTP"}}, calls[1].Listeners)
 
 	beforeProviderValidation = func() { require.NoError(t, c.Delete(t.Context(), grant)) }

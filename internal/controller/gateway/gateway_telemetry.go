@@ -156,10 +156,13 @@ func (r *Reconciler) observeGatewayTelemetry(ctx context.Context, gateway *gatew
 		return observation, nil
 	}
 	sampling, valid := telemetrySampling(tracing)
+	attributes, validAttributes := telemetryAttributes(tracing.Attributes)
 	if !valid {
 		observation.rejected = telemetryIssue{"UnsupportedValue", "Invalid tracing sampling fraction or parent-based sampling configuration"}
-	} else if len(tracing.Attributes) != 0 || len(tracing.Provider.Headers) != 0 {
-		observation.rejected = telemetryIssue{"UnsupportedValue", "Octavia tracing does not support custom attributes or provider headers"}
+	} else if !validAttributes {
+		observation.rejected = telemetryIssue{"UnsupportedValue", "The tracing policy contains an unsupported span attribute"}
+	} else if len(tracing.Provider.Headers) != 0 {
+		observation.rejected = telemetryIssue{"UnsupportedValue", "Octavia tracing does not support custom provider headers"}
 	}
 	if (tracing.ServiceName != "" && (len(tracing.ServiceName) > 253 || !telemetryServiceName.MatchString(tracing.ServiceName))) ||
 		(tracing.SpanName != "" && (len(tracing.SpanName) > 256 || !telemetrySpanName.MatchString(tracing.SpanName))) {
@@ -180,6 +183,7 @@ func (r *Reconciler) observeGatewayTelemetry(ctx context.Context, gateway *gatew
 	observation.pending = pending
 	if err == nil && observation.unresolved.reason == "" && observation.rejected.reason == "" && desired != nil {
 		desired.Sampling = sampling
+		desired.Attributes = attributes
 		sets, err := r.ObserveListenerSets(ctx, r.APIReader, gateway)
 		if err != nil {
 			return observation, err
@@ -196,6 +200,15 @@ func (r *Reconciler) observeGatewayTelemetry(ctx context.Context, gateway *gatew
 		}
 	}
 	return observation, err
+}
+
+func telemetryAttributes(attrs []gatewayx.Attribute) ([]cloud.TelemetryAttribute, bool) {
+	values := make([]cloud.TelemetryAttribute, 0, len(attrs))
+	for _, a := range attrs {
+		values = append(values, cloud.TelemetryAttribute{Name: string(a.Name), SourceType: string(a.SourceType),
+			LiteralValue: a.LiteralValue, HeaderName: string(a.HeaderName), AttributeKey: a.AttributeKey})
+	}
+	return cloud.CanonicalTelemetryAttributes(values)
 }
 
 func telemetrySampling(tracing gatewayx.TracingConfig) (*cloud.TelemetrySampling, bool) {

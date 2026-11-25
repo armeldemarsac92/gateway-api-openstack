@@ -39,6 +39,7 @@ import (
 
 const (
 	telemetryListenerTag    = "gw-api-listener-otlp-v1"
+	telemetryAttributesTag  = "gw-api-listener-otlp-attributes-v1"
 	telemetryPoolTag        = "gw-api-otlp-collector-pool-v1"
 	telemetryPoolNamePrefix = "gateway-api-otlp-collector-"
 	telemetryExportPoolTag  = "gw-api-listener-otlp-pool-"
@@ -282,6 +283,11 @@ func (p *Provider) updateListenerTelemetry(ctx context.Context, graph telemetryG
 		if !slices.Contains(tags, telemetryListenerTag) {
 			tags = append(tags, telemetryListenerTag)
 		}
+		if value != nil && len(value.Attributes) > 0 && !slices.Contains(tags, telemetryAttributesTag) {
+			// Keep this until exporter withdrawal is acknowledged. After a failed
+			// reload, the public profile can be narrower than the running one.
+			tags = append(tags, telemetryAttributesTag)
+		}
 		recorded := value
 		if recorded == nil {
 			recorded = graph.tracing[frontend.ID].Value
@@ -321,8 +327,28 @@ func (p *Provider) telemetryWithdrawal(ctx context.Context, graph telemetryGraph
 			continue
 		}
 		cleared := current.Value == nil
-		if !graph.ownsExport(*frontend, current.Value) || !cleared && retain != nil && retain(*frontend, current.Value) {
+		if !graph.ownsExport(*frontend, current.Value) {
 			continue
+		}
+		var reduced *octavia.ListenerOTLPTracing
+		if !cleared && retain != nil && retain(*frontend, current.Value) {
+			if graph.loadBalancer.ProvisioningStatus != "ERROR" {
+				continue
+			}
+			if current.Status == "PENDING_UPDATE" {
+				waiting = true
+				continue
+			}
+			wanted := graph.spec.Gateway.Telemetry.Attributes
+			if slices.ContainsFunc(current.Value.Attributes, func(a cloud.TelemetryAttribute) bool { return !slices.Contains(wanted, a) }) {
+				// Octavia accepts the current profile minus all attributes while the
+				// balancer is in ERROR. Additions wait for ordinary reconciliation.
+				profile := *current.Value
+				profile.Attributes = nil
+				reduced = &profile
+			} else if current.Status != "ERROR" || len(current.Value.Attributes) != 0 || !slices.Contains(frontend.Tags, telemetryAttributesTag) {
+				continue
+			}
 		}
 		writable := frontend.ProvisioningStatus == "ACTIVE" || frontend.ProvisioningStatus == "ERROR"
 		if !writable || cleared && present && (!current.Readable || current.StatusMalformed) {
@@ -350,10 +376,10 @@ func (p *Provider) telemetryWithdrawal(ctx context.Context, graph telemetryGraph
 			}
 		}
 		if graph.loadBalancer.ProvisioningStatus == "ERROR" {
-			// Octavia permits only the explicit clear in this state. Its worker
-			// keeps both the ownership tags and the collector reservation.
+			// A withdrawal on an ERROR balancer must omit tags. The worker
+			// retains the ownership tags and the collector reservation.
 			result, err := p.applyTelemetryMutation(ctx, graph, "Retrying withdrawal on a failed Octavia load balancer", func() error {
-				return p.octavia.SetListenerOTLPTracing(ctx, frontend.ID, nil, nil)
+				return p.octavia.SetListenerOTLPTracing(ctx, frontend.ID, reduced, nil)
 			})
 			result.Outcome.RequeueAfter = telemetryRetryInterval
 			result.Gateway.Outcome.RequeueAfter = telemetryRetryInterval
@@ -365,7 +391,7 @@ func (p *Provider) telemetryWithdrawal(ctx context.Context, graph telemetryGraph
 	if acknowledged != nil {
 		result, err := p.applyTelemetryMutation(ctx, graph, "Releasing the acknowledged listener exporter", func() error {
 			tags := slices.DeleteFunc(slices.Clone(acknowledged.Tags), func(tag string) bool {
-				return tag == telemetryListenerTag || strings.HasPrefix(tag, telemetryExportPoolTag) || strings.HasPrefix(tag, telemetryRetryTag)
+				return tag == telemetryListenerTag || tag == telemetryAttributesTag || strings.HasPrefix(tag, telemetryExportPoolTag) || strings.HasPrefix(tag, telemetryRetryTag)
 			})
 			_, err := p.octavia.UpdateListener(ctx, acknowledged.ID, listeners.UpdateOpts{Tags: &tags})
 			return err
@@ -430,6 +456,9 @@ func (p *Provider) verifyTelemetryCapabilities(ctx context.Context, provider str
 	required := []string{octavia.GatewayCapabilityListenerOTLPTracing}
 	if wanted != nil && wanted.Sampling != nil {
 		required = append(required, octavia.GatewayCapabilityListenerOTLPSampling)
+	}
+	if wanted != nil && len(wanted.Attributes) > 0 {
+		required = append(required, octavia.GatewayCapabilityListenerOTLPSpanAttributes)
 	}
 	var missingTrust bool
 	if wanted != nil && wanted.BackendTLS != nil {
@@ -499,7 +528,8 @@ func (p *Provider) convergeGatewayTelemetry(ctx context.Context, graph telemetry
 		}
 		return p.convergeTelemetryPool(ctx, graph, wanted, name, pool, tlsMatches, nextMember)
 	}
-	wire := octavia.ListenerOTLPTracing{CollectorPoolID: pool.pool.ID, ServiceName: wanted.ServiceName, SpanName: wanted.SpanName, Sampling: wanted.Sampling}
+	wire := octavia.ListenerOTLPTracing{CollectorPoolID: pool.pool.ID, ServiceName: wanted.ServiceName, SpanName: wanted.SpanName,
+		Sampling: wanted.Sampling, Attributes: wanted.Attributes}
 	observed := 0
 	var retryAfter time.Duration
 	for _, frontend := range graph.listeners {
