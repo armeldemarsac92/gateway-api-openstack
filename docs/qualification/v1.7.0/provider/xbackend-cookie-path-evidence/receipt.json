@@ -1,0 +1,1093 @@
+{
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "capability": "http_cookie_path_v1",
+  "controller": "52eae75209ad7bf2b2cbc1fbecf203f23f0e463a",
+  "image": "sha256:672b4989121bec286a3b992d194392e10fc7d212feebaf60e54a563bd7b4c823",
+  "octavia": "3d73d50eb78d89402cc5c828d9e54aefaf5b83cd",
+  "octaviaWheelSHA256": "790cddf740a8ca7c996c7ea17142391672353e9b6687404e96c9790c092adb4b",
+  "octaviaLib": "542a56dcbec8713f168230a98ed2d11333f59b7f",
+  "HAProxySHA256": "20d64a505a669a1066d5cb06b78e407d3c2ec15029923d3165e0c1db8cc41287",
+  "previous": {
+    "source": "d435da52da94ef7d55f2750567b4c83aa7dfe91b",
+    "accepted": [
+      {
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "name": "cookie-http",
+          "namespace": "cookie-qualification"
+        },
+        "conditions": [
+          {
+            "type": "Accepted",
+            "status": "False",
+            "reason": "UnsupportedValue",
+            "observedGeneration": 1,
+            "lastTransitionTime": "2026-11-25T10:36:32Z"
+          }
+        ]
+      }
+    ],
+    "httpStatus": 503
+  },
+  "environment": "Local kind and Kubernetes ServiceAccount, controller from the qualified OCI image, native Octavia API, pool update worker, Amphora renderer, HAProxy and two Pods. Cloud identity, network inventory, general provisioning and the Amphora agent transport were simulated.",
+  "channels": {
+    "standard": {
+      "xBackendCRD": {
+        "installed": false,
+        "discovered": false
+      },
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "ordinaryService200WithoutCookie": 3,
+      "phases": [],
+      "fixtureSHA256": {
+        "scenario.py": "ac2171a85a8aefedddcd12a053e91961e049e2cf5b6a3d1594aeb250bbeabef3",
+        "cookie_fixture.py": "25b40b2111f55a72691c83a44fb92dbb899a08aa5dfac81761df5f1642afba06",
+        "gateway_fixture.py": "0c02b69f75c858e0020bd1eb7446d3003b6076a77f870f6a6fc206fde7f933ca",
+        "template/native_cloud.py": "a752e4dd4d8d2ead134d3df873597a5bfbc9cbbf4df85b13176e040a9e04ba9c"
+      }
+    },
+    "experimental": {
+      "xBackendCRD": {
+        "installed": true,
+        "discovered": true,
+        "servedVersions": [
+          "v1alpha1"
+        ]
+      },
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "ordinaryService200WithoutCookie": 3,
+      "phases": [
+        {
+          "phase": "initial-root",
+          "spec": {
+            "cookie": {
+              "lifetimeType": "Session",
+              "name": "fixture_session",
+              "path": "/"
+            },
+            "type": "Cookie"
+          },
+          "conditions": [
+            {
+              "target": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "cookie-http",
+                "namespace": "cookie-qualification"
+              },
+              "conditions": [
+                {
+                  "type": "Accepted",
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 1,
+                  "lastTransitionTime": "2026-11-25T11:04:49Z"
+                }
+              ]
+            }
+          ],
+          "pools": {
+            "reports": {
+              "path": "/",
+              "members": 2,
+              "routeWeight": 1,
+              "conditions": [
+                {
+                  "target": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "name": "cookie-http"
+                  },
+                  "conditions": [
+                    {
+                      "type": "Accepted",
+                      "status": "True",
+                      "reason": "Accepted",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:04:56Z"
+                    },
+                    {
+                      "type": "ResolvedRefs",
+                      "status": "True",
+                      "reason": "ResolvedRefs",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:04:56Z"
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/Programmed",
+                      "status": "True",
+                      "reason": "Programmed",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:05:11Z"
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/XBackendCookieConfiguration",
+                      "status": "True",
+                      "reason": "Observed",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:05:11Z"
+                    }
+                  ]
+                }
+              ]
+            },
+            "daily": {
+              "path": "/",
+              "members": 2,
+              "routeWeight": 1,
+              "conditions": [
+                {
+                  "target": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "name": "cookie-http"
+                  },
+                  "conditions": [
+                    {
+                      "type": "Accepted",
+                      "status": "True",
+                      "reason": "Accepted",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:04:58Z"
+                    },
+                    {
+                      "type": "ResolvedRefs",
+                      "status": "True",
+                      "reason": "ResolvedRefs",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:04:58Z"
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/Programmed",
+                      "status": "True",
+                      "reason": "Programmed",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:05:12Z"
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/XBackendCookieConfiguration",
+                      "status": "True",
+                      "reason": "Observed",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:05:12Z"
+                    }
+                  ]
+                }
+              ]
+            },
+            "neighbor": {
+              "path": "/",
+              "members": 2,
+              "routeWeight": 1,
+              "conditions": [
+                {
+                  "target": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "name": "cookie-http"
+                  },
+                  "conditions": [
+                    {
+                      "type": "Accepted",
+                      "status": "True",
+                      "reason": "Accepted",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:05:00Z"
+                    },
+                    {
+                      "type": "ResolvedRefs",
+                      "status": "True",
+                      "reason": "ResolvedRefs",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:05:00Z"
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/Programmed",
+                      "status": "True",
+                      "reason": "Programmed",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:05:13Z"
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/XBackendCookieConfiguration",
+                      "status": "True",
+                      "reason": "Observed",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:05:13Z"
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "requests": {
+            "issued": {
+              "request": "/reports",
+              "status": 200,
+              "pod": "pod-a",
+              "sentSessionCookie": false,
+              "issuedPaths": [
+                "/"
+              ],
+              "issuedMaxAgeSeconds": null
+            },
+            "exact": {
+              "request": "/reports",
+              "status": 200,
+              "pod": "pod-a",
+              "sentSessionCookie": true,
+              "issuedPaths": [],
+              "issuedMaxAgeSeconds": null
+            },
+            "descendant": {
+              "request": "/reports/daily",
+              "status": 200,
+              "pod": "pod-a",
+              "sentSessionCookie": true,
+              "issuedPaths": [],
+              "issuedMaxAgeSeconds": null
+            },
+            "neighbor": {
+              "request": "/reporting",
+              "status": 200,
+              "pod": "pod-a",
+              "sentSessionCookie": true,
+              "issuedPaths": [],
+              "issuedMaxAgeSeconds": null
+            }
+          }
+        },
+        {
+          "phase": "native-scoped",
+          "spec": {
+            "cookie": {
+              "lifetimeType": "Session",
+              "name": "fixture_session",
+              "path": "/reports"
+            },
+            "type": "Cookie"
+          },
+          "conditions": [
+            {
+              "target": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "cookie-http",
+                "namespace": "cookie-qualification"
+              },
+              "conditions": [
+                {
+                  "type": "Accepted",
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 2,
+                  "lastTransitionTime": "2026-11-25T11:04:49Z"
+                }
+              ]
+            }
+          ],
+          "pools": {
+            "reports": {
+              "path": "/reports",
+              "members": 2,
+              "routeWeight": 1,
+              "conditions": [
+                {
+                  "target": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "name": "cookie-http"
+                  },
+                  "conditions": [
+                    {
+                      "type": "Accepted",
+                      "status": "True",
+                      "reason": "Accepted",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:04:56Z"
+                    },
+                    {
+                      "type": "ResolvedRefs",
+                      "status": "True",
+                      "reason": "ResolvedRefs",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:05:30Z"
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/Programmed",
+                      "status": "True",
+                      "reason": "Programmed",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:05:33Z"
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/XBackendCookieConfiguration",
+                      "status": "True",
+                      "reason": "Observed",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:05:33Z"
+                    }
+                  ]
+                }
+              ]
+            },
+            "daily": {
+              "path": "/reports",
+              "members": 2,
+              "routeWeight": 1,
+              "conditions": [
+                {
+                  "target": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "name": "cookie-http"
+                  },
+                  "conditions": [
+                    {
+                      "type": "Accepted",
+                      "status": "True",
+                      "reason": "Accepted",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:04:58Z"
+                    },
+                    {
+                      "type": "ResolvedRefs",
+                      "status": "True",
+                      "reason": "ResolvedRefs",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:05:31Z"
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/Programmed",
+                      "status": "True",
+                      "reason": "Programmed",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:05:31Z"
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/XBackendCookieConfiguration",
+                      "status": "True",
+                      "reason": "Observed",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:05:31Z"
+                    }
+                  ]
+                }
+              ]
+            },
+            "neighbor": {
+              "path": "/reports",
+              "members": 2,
+              "routeWeight": 1,
+              "conditions": [
+                {
+                  "target": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "name": "cookie-http"
+                  },
+                  "conditions": [
+                    {
+                      "type": "Accepted",
+                      "status": "True",
+                      "reason": "Accepted",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:05:00Z"
+                    },
+                    {
+                      "type": "ResolvedRefs",
+                      "status": "True",
+                      "reason": "ResolvedRefs",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:05:32Z"
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/Programmed",
+                      "status": "True",
+                      "reason": "Programmed",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:05:32Z"
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/XBackendCookieConfiguration",
+                      "status": "True",
+                      "reason": "Observed",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:05:32Z"
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "requests": {
+            "issued": {
+              "request": "/reports",
+              "status": 200,
+              "pod": "pod-a",
+              "sentSessionCookie": false,
+              "issuedPaths": [
+                "/reports"
+              ],
+              "issuedMaxAgeSeconds": null
+            },
+            "exact": {
+              "request": "/reports",
+              "status": 200,
+              "pod": "pod-a",
+              "sentSessionCookie": true,
+              "issuedPaths": [],
+              "issuedMaxAgeSeconds": null
+            },
+            "descendant": {
+              "request": "/reports/daily",
+              "status": 200,
+              "pod": "pod-a",
+              "sentSessionCookie": true,
+              "issuedPaths": [],
+              "issuedMaxAgeSeconds": null
+            },
+            "neighbor": {
+              "request": "/reporting",
+              "status": 200,
+              "pod": "pod-a",
+              "sentSessionCookie": false,
+              "issuedPaths": [
+                "/reports"
+              ],
+              "issuedMaxAgeSeconds": null
+            }
+          }
+        },
+        {
+          "phase": "timed-scoped",
+          "spec": {
+            "absoluteTimeout": "5m",
+            "cookie": {
+              "lifetimeType": "Session",
+              "name": "fixture_session",
+              "path": "/reports"
+            },
+            "type": "Cookie"
+          },
+          "conditions": [
+            {
+              "target": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "cookie-http",
+                "namespace": "cookie-qualification"
+              },
+              "conditions": [
+                {
+                  "type": "Accepted",
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 3,
+                  "lastTransitionTime": "2026-11-25T11:04:49Z"
+                }
+              ]
+            }
+          ],
+          "pools": {
+            "reports": {
+              "path": "/reports",
+              "members": 2,
+              "routeWeight": 1,
+              "conditions": [
+                {
+                  "target": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "name": "cookie-http"
+                  },
+                  "conditions": [
+                    {
+                      "type": "Accepted",
+                      "status": "True",
+                      "reason": "Accepted",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:04:56Z"
+                    },
+                    {
+                      "type": "ResolvedRefs",
+                      "status": "True",
+                      "reason": "ResolvedRefs",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:05:51Z"
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/Programmed",
+                      "status": "True",
+                      "reason": "Programmed",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:05:51Z"
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/XBackendCookieConfiguration",
+                      "status": "True",
+                      "reason": "Observed",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:05:51Z"
+                    }
+                  ]
+                }
+              ]
+            },
+            "daily": {
+              "path": "/reports",
+              "members": 2,
+              "routeWeight": 1,
+              "conditions": [
+                {
+                  "target": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "name": "cookie-http"
+                  },
+                  "conditions": [
+                    {
+                      "type": "Accepted",
+                      "status": "True",
+                      "reason": "Accepted",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:04:58Z"
+                    },
+                    {
+                      "type": "ResolvedRefs",
+                      "status": "True",
+                      "reason": "ResolvedRefs",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:05:49Z"
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/Programmed",
+                      "status": "True",
+                      "reason": "Programmed",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:05:49Z"
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/XBackendCookieConfiguration",
+                      "status": "True",
+                      "reason": "Observed",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:05:49Z"
+                    }
+                  ]
+                }
+              ]
+            },
+            "neighbor": {
+              "path": "/reports",
+              "members": 2,
+              "routeWeight": 1,
+              "conditions": [
+                {
+                  "target": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "name": "cookie-http"
+                  },
+                  "conditions": [
+                    {
+                      "type": "Accepted",
+                      "status": "True",
+                      "reason": "Accepted",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:05:00Z"
+                    },
+                    {
+                      "type": "ResolvedRefs",
+                      "status": "True",
+                      "reason": "ResolvedRefs",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:05:50Z"
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/Programmed",
+                      "status": "True",
+                      "reason": "Programmed",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:05:50Z"
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/XBackendCookieConfiguration",
+                      "status": "True",
+                      "reason": "Observed",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:05:50Z"
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "requests": {
+            "issued": {
+              "request": "/reports",
+              "status": 200,
+              "pod": "pod-a",
+              "sentSessionCookie": false,
+              "issuedPaths": [
+                "/reports"
+              ],
+              "issuedMaxAgeSeconds": null
+            },
+            "exact": {
+              "request": "/reports",
+              "status": 200,
+              "pod": "pod-a",
+              "sentSessionCookie": true,
+              "issuedPaths": [],
+              "issuedMaxAgeSeconds": null
+            },
+            "descendant": {
+              "request": "/reports/daily",
+              "status": 200,
+              "pod": "pod-a",
+              "sentSessionCookie": true,
+              "issuedPaths": [],
+              "issuedMaxAgeSeconds": null
+            },
+            "neighbor": {
+              "request": "/reporting",
+              "status": 200,
+              "pod": "pod-a",
+              "sentSessionCookie": false,
+              "issuedPaths": [
+                "/reports"
+              ],
+              "issuedMaxAgeSeconds": null
+            }
+          }
+        },
+        {
+          "phase": "permanent-scoped",
+          "spec": {
+            "absoluteTimeout": "5m",
+            "cookie": {
+              "lifetimeType": "Permanent",
+              "name": "fixture_session",
+              "path": "/reports"
+            },
+            "type": "Cookie"
+          },
+          "conditions": [
+            {
+              "target": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "cookie-http",
+                "namespace": "cookie-qualification"
+              },
+              "conditions": [
+                {
+                  "type": "Accepted",
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 4,
+                  "lastTransitionTime": "2026-11-25T11:04:49Z"
+                }
+              ]
+            }
+          ],
+          "pools": {
+            "reports": {
+              "path": "/reports",
+              "members": 2,
+              "routeWeight": 1,
+              "conditions": [
+                {
+                  "target": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "name": "cookie-http"
+                  },
+                  "conditions": [
+                    {
+                      "type": "Accepted",
+                      "status": "True",
+                      "reason": "Accepted",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:04:56Z"
+                    },
+                    {
+                      "type": "ResolvedRefs",
+                      "status": "True",
+                      "reason": "ResolvedRefs",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:05:51Z"
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/Programmed",
+                      "status": "True",
+                      "reason": "Programmed",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:06:10Z"
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/XBackendCookieConfiguration",
+                      "status": "True",
+                      "reason": "Observed",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:06:10Z"
+                    }
+                  ]
+                }
+              ]
+            },
+            "daily": {
+              "path": "/reports",
+              "members": 2,
+              "routeWeight": 1,
+              "conditions": [
+                {
+                  "target": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "name": "cookie-http"
+                  },
+                  "conditions": [
+                    {
+                      "type": "Accepted",
+                      "status": "True",
+                      "reason": "Accepted",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:04:58Z"
+                    },
+                    {
+                      "type": "ResolvedRefs",
+                      "status": "True",
+                      "reason": "ResolvedRefs",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:06:08Z"
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/Programmed",
+                      "status": "True",
+                      "reason": "Programmed",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:06:08Z"
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/XBackendCookieConfiguration",
+                      "status": "True",
+                      "reason": "Observed",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:06:08Z"
+                    }
+                  ]
+                }
+              ]
+            },
+            "neighbor": {
+              "path": "/reports",
+              "members": 2,
+              "routeWeight": 1,
+              "conditions": [
+                {
+                  "target": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "name": "cookie-http"
+                  },
+                  "conditions": [
+                    {
+                      "type": "Accepted",
+                      "status": "True",
+                      "reason": "Accepted",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:05:00Z"
+                    },
+                    {
+                      "type": "ResolvedRefs",
+                      "status": "True",
+                      "reason": "ResolvedRefs",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:06:09Z"
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/Programmed",
+                      "status": "True",
+                      "reason": "Programmed",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:06:09Z"
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/XBackendCookieConfiguration",
+                      "status": "True",
+                      "reason": "Observed",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:06:09Z"
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "requests": {
+            "issued": {
+              "request": "/reports",
+              "status": 200,
+              "pod": "pod-a",
+              "sentSessionCookie": false,
+              "issuedPaths": [
+                "/reports"
+              ],
+              "issuedMaxAgeSeconds": 300
+            },
+            "exact": {
+              "request": "/reports",
+              "status": 200,
+              "pod": "pod-a",
+              "sentSessionCookie": true,
+              "issuedPaths": [],
+              "issuedMaxAgeSeconds": null
+            },
+            "descendant": {
+              "request": "/reports/daily",
+              "status": 200,
+              "pod": "pod-a",
+              "sentSessionCookie": true,
+              "issuedPaths": [],
+              "issuedMaxAgeSeconds": null
+            },
+            "neighbor": {
+              "request": "/reporting",
+              "status": 200,
+              "pod": "pod-a",
+              "sentSessionCookie": false,
+              "issuedPaths": [
+                "/reports"
+              ],
+              "issuedMaxAgeSeconds": 300
+            }
+          }
+        },
+        {
+          "phase": "native-root",
+          "spec": {
+            "cookie": {
+              "lifetimeType": "Session",
+              "name": "fixture_session",
+              "path": "/"
+            },
+            "type": "Cookie"
+          },
+          "conditions": [
+            {
+              "target": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "cookie-http",
+                "namespace": "cookie-qualification"
+              },
+              "conditions": [
+                {
+                  "type": "Accepted",
+                  "status": "True",
+                  "reason": "Accepted",
+                  "observedGeneration": 5,
+                  "lastTransitionTime": "2026-11-25T11:04:49Z"
+                }
+              ]
+            }
+          ],
+          "pools": {
+            "reports": {
+              "path": "/",
+              "members": 2,
+              "routeWeight": 1,
+              "conditions": [
+                {
+                  "target": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "name": "cookie-http"
+                  },
+                  "conditions": [
+                    {
+                      "type": "Accepted",
+                      "status": "True",
+                      "reason": "Accepted",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:04:56Z"
+                    },
+                    {
+                      "type": "ResolvedRefs",
+                      "status": "True",
+                      "reason": "ResolvedRefs",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:06:42Z"
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/Programmed",
+                      "status": "True",
+                      "reason": "Programmed",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:06:42Z"
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/XBackendCookieConfiguration",
+                      "status": "True",
+                      "reason": "Observed",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:06:42Z"
+                    }
+                  ]
+                }
+              ]
+            },
+            "daily": {
+              "path": "/",
+              "members": 2,
+              "routeWeight": 1,
+              "conditions": [
+                {
+                  "target": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "name": "cookie-http"
+                  },
+                  "conditions": [
+                    {
+                      "type": "Accepted",
+                      "status": "True",
+                      "reason": "Accepted",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:04:58Z"
+                    },
+                    {
+                      "type": "ResolvedRefs",
+                      "status": "True",
+                      "reason": "ResolvedRefs",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:06:23Z"
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/Programmed",
+                      "status": "True",
+                      "reason": "Programmed",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:06:23Z"
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/XBackendCookieConfiguration",
+                      "status": "True",
+                      "reason": "Observed",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:06:23Z"
+                    }
+                  ]
+                }
+              ]
+            },
+            "neighbor": {
+              "path": "/",
+              "members": 2,
+              "routeWeight": 1,
+              "conditions": [
+                {
+                  "target": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "name": "cookie-http"
+                  },
+                  "conditions": [
+                    {
+                      "type": "Accepted",
+                      "status": "True",
+                      "reason": "Accepted",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:05:00Z"
+                    },
+                    {
+                      "type": "ResolvedRefs",
+                      "status": "True",
+                      "reason": "ResolvedRefs",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:06:36Z"
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/Programmed",
+                      "status": "True",
+                      "reason": "Programmed",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:06:36Z"
+                    },
+                    {
+                      "type": "gateway-api-openstack.github.io/XBackendCookieConfiguration",
+                      "status": "True",
+                      "reason": "Observed",
+                      "observedGeneration": 1,
+                      "lastTransitionTime": "2026-11-25T11:06:36Z"
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "requests": {
+            "issued": {
+              "request": "/reports",
+              "status": 200,
+              "pod": "pod-a",
+              "sentSessionCookie": false,
+              "issuedPaths": [
+                "/"
+              ],
+              "issuedMaxAgeSeconds": null
+            },
+            "exact": {
+              "request": "/reports",
+              "status": 200,
+              "pod": "pod-a",
+              "sentSessionCookie": true,
+              "issuedPaths": [],
+              "issuedMaxAgeSeconds": null
+            },
+            "descendant": {
+              "request": "/reports/daily",
+              "status": 200,
+              "pod": "pod-a",
+              "sentSessionCookie": true,
+              "issuedPaths": [],
+              "issuedMaxAgeSeconds": null
+            },
+            "neighbor": {
+              "request": "/reporting",
+              "status": 200,
+              "pod": "pod-a",
+              "sentSessionCookie": true,
+              "issuedPaths": [],
+              "issuedMaxAgeSeconds": null
+            }
+          }
+        }
+      ],
+      "fixtureSHA256": {
+        "scenario.py": "ac2171a85a8aefedddcd12a053e91961e049e2cf5b6a3d1594aeb250bbeabef3",
+        "cookie_fixture.py": "804ad5a1ac68fae782dc61eb75d0e20391530d50d2a41c8707dab8971adb23ea",
+        "gateway_fixture.py": "0c02b69f75c858e0020bd1eb7446d3003b6076a77f870f6a6fc206fde7f933ca",
+        "template/native_cloud.py": "a752e4dd4d8d2ead134d3df873597a5bfbc9cbbf4df85b13176e040a9e04ba9c"
+      },
+      "rootToCustom": {
+        "originalPod": "pod-a",
+        "neighborRequests": 8,
+        "neighborPods": {
+          "pod-a": 4,
+          "pod-b": 4
+        },
+        "requestsSendingOldRoot": 8,
+        "scopedPod": "pod-a",
+        "affinityPaths": [
+          "/reports/daily",
+          "/reports"
+        ],
+        "scopedVisitsWithBothCookies": 2
+      }
+    }
+  }
+}
