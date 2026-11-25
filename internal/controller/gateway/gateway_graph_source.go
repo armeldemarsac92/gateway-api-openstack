@@ -46,8 +46,8 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 	if request.Action == graph.WithdrawTLS {
 		return r.observeGatewayTLSWithdrawal(ctx, request)
 	}
-	if request.Action == graph.WithdrawBackendClientCertificate {
-		return r.observeBackendClientCertificateWithdrawal(ctx, request.Gateway, request.Identity)
+	if request.Action == graph.WithdrawBackendClientCertificate || request.Action == graph.WithdrawXBackendClientCertificates {
+		return r.observeBackendClientCertificateWithdrawal(ctx, request.Gateway, request.Identity, request.Action == graph.WithdrawXBackendClientCertificates)
 	}
 	if request.Action == graph.ReconcileTelemetry {
 		return r.observeTelemetryGraph(ctx, request)

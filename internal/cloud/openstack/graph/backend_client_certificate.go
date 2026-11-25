@@ -64,6 +64,11 @@ func (p *Provider) withdrawBackendClientCertificate(ctx context.Context, spec cl
 	if observed.phase != loadBalancerPhaseActive {
 		return result(observed.outcome), nil
 	}
+	targets, err := p.xBackendClientWithdrawalOwners(ctx, spec, identity, lb)
+	if err != nil {
+		return cloud.GatewayGraphResult{}, err
+	}
+	xBackendOnly := spec.Gateway.XBackendClientWithdrawals != nil
 	inventory, err := p.listGatewayPoolInventory(ctx, lb)
 	if err != nil {
 		return cloud.GatewayGraphResult{}, err
@@ -89,10 +94,18 @@ func (p *Provider) withdrawBackendClientCertificate(ctx context.Context, spec cl
 	var pending bool
 	for i, pool := range inventory.Items {
 		tls := inventory.BackendTLS[pool.ID]
-		if !slices.Contains(pool.Tags, backendTLSManagedTag) || !staleBackendClientCertificate(pool, tls, spec.Gateway.BackendClientCertificate) {
+		if !slices.Contains(pool.Tags, backendTLSManagedTag) {
 			continue
 		}
 		role, validRole := readRouteResourceRole(pool.Tags, rolePool)
+		if xBackendOnly {
+			if !slices.Contains(pool.Tags, xBackendTLSClientTag) || slices.Contains(pool.Tags, backendTLSClientTag) ||
+				!slices.ContainsFunc(targets[role.backend], func(owner Identity) bool { return owner.MatchesRoute(pool.Tags, role.raw) }) {
+				continue
+			}
+		} else if !staleBackendClientCertificate(pool, tls, spec.Gateway.BackendClientCertificate) {
+			continue
+		}
 		proof, owned := identity.RouteOwner(pool.Tags, role.raw)
 		if !validRole || !owned || pool.ProjectID != p.projectID || validateBoundPoolParent(pool, lb.ID, cloud.ListenerProtocolHTTP) != nil ||
 			i > 0 && inventory.Items[i-1].ID == pool.ID || i+1 < len(inventory.Items) && inventory.Items[i+1].ID == pool.ID {
@@ -100,7 +113,7 @@ func (p *Provider) withdrawBackendClientCertificate(ctx context.Context, spec cl
 			continue
 		}
 		actual := observedRouteGraph{pool: &pool, backendTLS: tls}
-		if step := plan.withdrawal(true, false, actual); step != nil && step.poolAdmin != nil {
+		if step := plan.withdrawal(true, xBackendOnly, actual); step != nil && step.poolAdmin != nil {
 			if !step.retry {
 				return apply(step)
 			}
@@ -130,7 +143,7 @@ func (p *Provider) withdrawBackendClientCertificate(ctx context.Context, spec cl
 	}
 	if pending {
 		for _, pool := range closed {
-			if step := plan.withdrawal(true, false, pool.graph); step != nil && step.retry {
+			if step := plan.withdrawal(true, xBackendOnly, pool.graph); step != nil && step.retry {
 				return apply(step)
 			}
 		}
@@ -144,7 +157,49 @@ func (p *Provider) withdrawBackendClientCertificate(ctx context.Context, spec cl
 	return result(cloud.ReadyOutcome()), nil
 }
 
+func (p *Provider) xBackendClientWithdrawalOwners(ctx context.Context, spec cloud.GatewayGraphSpec, gateway Identity, lb *octavia.LoadBalancer) (map[string][]Identity, error) {
+	if len(spec.Gateway.XBackendClientWithdrawals) == 0 {
+		return nil, nil
+	}
+	var ports []int
+	if spec.Gateway.Spec.ScopedListeners != nil {
+		inventory, _, err := p.listGatewayListeners(ctx, lb)
+		if err != nil {
+			return nil, err
+		}
+		for _, listener := range inventory.Items {
+			if err := p.validateGatewayDeletionListener(gateway, listener, lb.ID); err != nil {
+				return nil, err
+			}
+			ports = append(ports, listener.ProtocolPort)
+		}
+	}
+	owners := make(map[string][]Identity)
+	for _, target := range spec.Gateway.XBackendClientWithdrawals {
+		parent := target.Route
+		parent.RouteNamespace, parent.RouteName, parent.RouteUID = "", "", ""
+		if parent != spec.Identity || cloud.ValidateRouteIdentity(target.Route) != nil || target.BackendName == "" {
+			return nil, fmt.Errorf("%w: invalid XBackend client certificate withdrawal target", cloud.ErrOwnershipConflict)
+		}
+		owner, err := p.identity(target.Route)
+		if err != nil {
+			return nil, err
+		}
+		key := openstackidentity.HTTPBackendPoolKey(cloud.HTTPBackend{Kind: cloud.HTTPBackendKindXBackend,
+			Namespace: target.Route.RouteNamespace, Name: target.BackendName})
+		owners[key] = append(owners[key], owner)
+		for _, port := range ports {
+			scoped := scopeHTTPKey(cloud.RouteSpec{ScopeHTTPResources: true, ScopedListenerPorts: []int{port}}, key)
+			owners[scoped] = append(owners[scoped], owner)
+		}
+	}
+	return owners, nil
+}
+
 func staleBackendClientCertificate(pool pools.Pool, tls octavia.PoolBackendTLS, authorized cloud.BackendClientCertificate) bool {
+	if slices.Contains(pool.Tags, xBackendTLSClientTag) {
+		return false
+	}
 	if !tls.ClientRefObserved {
 		return slices.Contains(pool.Tags, backendTLSClientTag)
 	}

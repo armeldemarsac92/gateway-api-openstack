@@ -149,7 +149,7 @@ func xBackendTLSProviderDiagnostic(availability backendTLSAvailability, requirem
 func (a backendTLSAvailability) applyXBackend(condition metav1.Condition, requireSAN bool) metav1.Condition {
 	condition = a.apply(condition, true, requireSAN)
 	if condition.Reason == "UnsupportedProvider" {
-		condition.Message = "XBackend ServerOnly requires Octavia API microversion 2.24 or newer and regional backend TLS support"
+		condition.Message = "Authenticated XBackends require Octavia API microversion 2.24 or newer and regional backend TLS support"
 		if requireSAN {
 			condition.Message += " for explicit subjectAltNames"
 		}
