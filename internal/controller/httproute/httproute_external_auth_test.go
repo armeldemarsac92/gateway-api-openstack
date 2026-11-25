@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -146,7 +147,7 @@ func TestHTTPRouteExternalAuthRejectsUnsupportedCompositionAndRegion(t *testing.
 			}
 			f.create(t, policy)
 			assertRouteRequests(t, f.reconciler.enqueueRoutesForBackendTLSPolicy(t.Context(), policy), f.route)
-		}, "backend TLS is unsupported"},
+		}, "requires --octavia-backend-tls-policy"},
 		{"unenrolled region", func(_ *testing.T, f *routeModelInputFixture) {
 			f.reconciler.RouteExternalAuthAvailable = func(context.Context, cloud.ListenerExternalAuth, bool) (bool, error) { return false, nil }
 		}, "does not advertise"},
@@ -449,6 +450,96 @@ func TestHTTPRouteGRPCExternalAuthUsesBackendTLSPolicyAndFencesChanges(t *testin
 	require.Equal(t, "/private", spec.FixedHTTPRules[0].Matches[0].PathValue)
 	require.Len(t, spec.HTTPBackends, 1)
 	require.Equal(t, "/", spec.HTTPBackends[0].Matches[0].PathValue)
+}
+
+func TestHTTPRouteHTTPExternalAuthRequiresVerifiedBackendTLSPolicy(t *testing.T) {
+	f, grant, _ := externalAuthFixture(t)
+	f.reconciler.Config.BackendTLSPolicy = true
+	var service corev1.Service
+	require.NoError(t, f.client.Get(t.Context(), client.ObjectKey{Namespace: "auth", Name: "authorize"}, &service))
+	service.Spec.Ports[0].AppProtocol = ptr.To("https")
+	require.NoError(t, f.client.Update(t.Context(), &service))
+
+	policy := &gatewayv1.BackendTLSPolicy{
+		ObjectMeta: metav1.ObjectMeta{Namespace: service.Namespace, Name: "authorize-tls", UID: "auth-policy-uid"},
+		Spec: gatewayv1.BackendTLSPolicySpec{
+			TargetRefs: []gatewayv1.LocalPolicyTargetReferenceWithSectionName{{
+				LocalPolicyTargetReference: gatewayv1.LocalPolicyTargetReference{Kind: "Service", Name: gatewayv1.ObjectName(service.Name)},
+			}},
+			Validation: gatewayv1.BackendTLSPolicyValidation{Hostname: "authorize.example.test", WellKnownCACertificates: ptr.To(gatewayv1.WellKnownCACertificatesSystem)},
+		},
+	}
+	f.create(t, policy)
+	assertRouteRequests(t, f.reconciler.enqueueRoutesForBackendTLSPolicy(t.Context(), policy), f.route)
+	f.route.Spec.Rules[1].Filters[0].ExternalAuth.ForwardBody = &gatewayv1.ForwardBodyConfig{MaxSize: 512}
+	require.NoError(t, f.client.Update(t.Context(), f.route))
+
+	assertRejected := func() {
+		t.Helper()
+		spec := f.observe(t).Nodes[0].Spec
+		require.Len(t, spec.FixedHTTPRules, 1)
+		require.Equal(t, "/private", spec.FixedHTTPRules[0].Matches[0].PathValue)
+		require.Len(t, spec.HTTPBackends[0].Matches, 1)
+		require.Equal(t, "/", spec.HTTPBackends[0].Matches[0].PathValue)
+	}
+	assertRejected() // The policy has no ancestor slot yet.
+
+	regionalTLS := false
+	f.reconciler.RouteExternalAuthAvailable = func(_ context.Context, auth cloud.ListenerExternalAuth, weighted bool) (bool, error) {
+		require.False(t, weighted)
+		require.Empty(t, auth.Protocol)
+		require.NotNil(t, auth.BackendTLS)
+		require.False(t, auth.BackendTLS.RequireH2)
+		require.Equal(t, "authorize.example.test", auth.BackendTLS.Hostname)
+		require.Equal(t, cloud.BackendTLSTrustSystem, auth.BackendTLS.Trust)
+		return regionalTLS, nil
+	}
+	policyStatus := &backendTLSPolicyStatusReconciler{routes: f.reconciler}
+	reconcilePolicy := func() []metav1.Condition {
+		t.Helper()
+		key := client.ObjectKeyFromObject(policy)
+		_, err := policyStatus.Reconcile(t.Context(), ctrl.Request{NamespacedName: key})
+		require.NoError(t, err)
+		require.NoError(t, f.client.Get(t.Context(), key, policy))
+		require.Len(t, policy.Status.Ancestors, 1)
+		return policy.Status.Ancestors[0].Conditions
+	}
+	require.True(t, meta.IsStatusConditionFalse(reconcilePolicy(), string(gatewayv1.PolicyConditionAccepted)))
+	assertRejected()
+
+	regionalTLS = true
+	require.True(t, meta.IsStatusConditionTrue(reconcilePolicy(), string(gatewayv1.PolicyConditionAccepted)))
+	snapshot := f.observe(t)
+	spec := snapshot.Nodes[0].Spec
+	require.Empty(t, spec.FixedHTTPRules)
+	index := slices.IndexFunc(spec.HTTPBackends[0].Matches, func(match cloud.HTTPPathMatch) bool { return match.PathValue == "/private" })
+	require.GreaterOrEqual(t, index, 0)
+	auth := spec.HTTPBackends[0].Matches[index].ExternalAuth
+	require.NotNil(t, auth.BackendTLS)
+	require.Equal(t, int32(512), auth.ForwardBodyMaxSize)
+	require.Equal(t, "/check", auth.PathPrefix)
+	require.NoError(t, snapshot.Validate(t.Context()))
+
+	policy.Spec.Validation.Hostname = "*"
+	require.NoError(t, f.client.Update(t.Context(), policy))
+	require.ErrorIs(t, snapshot.Validate(t.Context()), errHTTPRouteChanged)
+	assertRejected()
+	require.NoError(t, f.client.Delete(t.Context(), policy))
+	assertRejected() // An HTTPS Service still prohibits cleartext after policy removal.
+
+	service.Spec.Ports[0].AppProtocol = ptr.To("http")
+	require.NoError(t, f.client.Update(t.Context(), &service))
+	f.reconciler.RouteExternalAuthAvailable = func(_ context.Context, auth cloud.ListenerExternalAuth, _ bool) (bool, error) {
+		require.Nil(t, auth.BackendTLS)
+		return true, nil
+	}
+	require.Empty(t, f.observe(t).Nodes[0].Spec.FixedHTTPRules)
+
+	require.NoError(t, f.client.Delete(t.Context(), grant))
+	assertRejected()
+	status := routeReconcileStatus{}
+	require.NoError(t, f.reconciler.resolveRouteReferences(t.Context(), f.route, f.gateway, &status))
+	require.Equal(t, string(gatewayv1.RouteReasonRefNotPermitted), status.resolvedReason)
 }
 
 func externalAuthFixture(t *testing.T) (*routeModelInputFixture, *gatewayv1.ReferenceGrant, *discoveryv1.EndpointSlice) {

@@ -122,8 +122,21 @@ Enable the `octavia-http-request-mirror` controller component after the regional
 
 Enable `--octavia-http-route-external-auth` with `--gateway-api-channel=experimental` and
 `--octavia-fixed-http-responses`. The regional Amphora provider must advertise
-`l7policy_http_external_auth_v1` to program the filter. This flag uses a
-cleartext HTTP authorization Service.
+`l7policy_http_external_auth_v1` to program the filter. To connect over
+TLS, enable `--octavia-backend-tls-policy` and target the authorization
+Service or its port with a BackendTLSPolicy. Configure the policy's
+validation hostname and trust. Use `appProtocol: https` on the Service
+port when it requires TLS. The protected rule then stays closed if the
+policy is removed.
+
+For HTTP authorization over TLS, enroll Amphora in
+`[api_settings] enabled_l7policy_http_external_auth_tls_providers`. The
+provider must advertise `l7policy_http_external_auth_tls_v1` alongside
+HTTP authorization and backend TLS hostname validation. Amphora sends
+the authorization request using HTTP/1.1 and checks the peer against the
+policy. Regional support determines the available trust sources, SANs
+and Gateway client identity. [Backend TLS policy setup](operator-octavia-backend-tls-policy.md)
+
 An authorization response of HTTP 200 allows the request to reach the origin.
 The rule can specify an authorization path prefix and request and response header allowlists.
 

@@ -34,6 +34,8 @@ import (
 )
 
 const routeExternalAuthTag = "gw-api-route-http-external-auth-v1"
+const httpAuthTLSPoolTag = "gw-api-http-auth-tls-pool-v1"
+const httpAuthTLSPoolNamePrefix = "gateway-api-http-auth-tls-"
 const grpcAuthPoolTag = "gw-api-grpc-auth-pool-v1"
 const grpcAuthPoolNamePrefix = "gateway-api-grpc-auth-"
 const grpcAuthWithdrawalTag = "gw-api-grpc-auth-withdrawal-v1"
@@ -75,10 +77,7 @@ func (p *Provider) routeAuthorizerEnabled(auth cloud.ListenerExternalAuth) bool 
 }
 
 func routeAuthorizerCapabilities(auth cloud.ListenerExternalAuth, weighted bool) []string {
-	required := []string{octavia.GatewayCapabilityPolicyExternalAuth, octavia.GatewayCapabilityFixedHTTPResponses}
-	if auth.Protocol == cloud.ExternalAuthProtocolGRPC {
-		required = grpcAuthorizerCapabilities(auth.BackendTLS)
-	}
+	required := routeAuthorizerTransportCapabilities(auth)
 	if auth.ForwardBodyMaxSize > 0 {
 		required = append(required, octavia.GatewayCapabilityPolicyExternalAuthForwardBody)
 	}
@@ -88,12 +87,23 @@ func routeAuthorizerCapabilities(auth cloud.ListenerExternalAuth, weighted bool)
 	return required
 }
 
-func grpcAuthorizerCapabilities(tls *cloud.BackendTLSValidation) []string {
-	required := []string{octavia.GatewayCapabilityPolicyExternalAuthGRPC, octavia.GatewayCapabilityFixedHTTPResponses}
-	if tls == nil {
-		return append(required, octavia.GatewayCapabilityBackendH2C)
+func routeAuthorizerTransportCapabilities(auth cloud.ListenerExternalAuth) []string {
+	required := []string{octavia.GatewayCapabilityPolicyExternalAuth, octavia.GatewayCapabilityFixedHTTPResponses}
+	requireH2 := auth.Protocol == cloud.ExternalAuthProtocolGRPC
+	if requireH2 {
+		required[0] = octavia.GatewayCapabilityPolicyExternalAuthGRPC
 	}
-	required = append(required, backendTLSCapabilities(true, len(tls.SubjectAltNames) != 0)...)
+	tls := auth.BackendTLS
+	if tls == nil {
+		if requireH2 {
+			required = append(required, octavia.GatewayCapabilityBackendH2C)
+		}
+		return required
+	}
+	if !requireH2 {
+		required = append(required, octavia.GatewayCapabilityPolicyExternalAuthTLS)
+	}
+	required = append(required, backendTLSCapabilities(requireH2, len(tls.SubjectAltNames) != 0)...)
 	if tls.Trust == cloud.BackendTLSTrustSystem {
 		required = append(required, octavia.GatewayCapabilityBackendTLSSystemCA)
 	}
@@ -101,8 +111,12 @@ func grpcAuthorizerCapabilities(tls *cloud.BackendTLSValidation) []string {
 }
 
 func routeAuthorizerPoolName(port int, auth cloud.ListenerExternalAuth, certificate string) string {
+	prefix := grpcAuthPoolNamePrefix
 	if auth.Protocol != cloud.ExternalAuthProtocolGRPC {
-		return listenerAuthPoolName(port, auth)
+		if auth.BackendTLS == nil {
+			return listenerAuthPoolName(port, auth)
+		}
+		prefix = httpAuthTLSPoolNamePrefix
 	}
 	key := fmt.Appendf(nil, "%d:%s:%d", port, auth.ServiceUID, auth.ServicePort)
 	if tls := auth.BackendTLS; tls != nil {
@@ -112,12 +126,15 @@ func routeAuthorizerPoolName(port int, auth cloud.ListenerExternalAuth, certific
 		}
 	}
 	digest := sha256.Sum256(key)
-	return fmt.Sprintf("%s%x", grpcAuthPoolNamePrefix, digest[:16])
+	return fmt.Sprintf("%s%x", prefix, digest[:16])
 }
 
-func routeAuthorizerPoolTag(protocol string) string {
-	if protocol == cloud.ExternalAuthProtocolGRPC {
+func routeAuthorizerPoolTag(auth cloud.ListenerExternalAuth) string {
+	if auth.Protocol == cloud.ExternalAuthProtocolGRPC {
 		return grpcAuthPoolTag
+	}
+	if auth.BackendTLS != nil {
+		return httpAuthTLSPoolTag
 	}
 	return listenerAuthPoolTag
 }
@@ -127,7 +144,7 @@ func validateRouteAuthorizer(auth cloud.ListenerExternalAuth) error {
 		return errors.New("HTTPRoute authorization request body limit is outside the supported protocol range")
 	}
 	if auth.Protocol == cloud.ExternalAuthProtocolGRPC && (auth.PathPrefix != "" || len(auth.AllowedResponseHeaders) != 0) ||
-		auth.BackendTLS != nil && (auth.Protocol != cloud.ExternalAuthProtocolGRPC || !auth.BackendTLS.RequireH2 || auth.BackendTLS.Denied || !validBackendTLS(auth.BackendTLS)) {
+		auth.BackendTLS != nil && (auth.BackendTLS.RequireH2 != (auth.Protocol == cloud.ExternalAuthProtocolGRPC) || auth.BackendTLS.Denied || !validBackendTLS(auth.BackendTLS)) {
 		return errors.New("invalid HTTPRoute authorization protocol or transport")
 	}
 	if auth.ServiceUID == "" || auth.MemberSubnetID == "" || auth.ServicePort < 1 || auth.ServicePort > 65535 ||
@@ -211,8 +228,8 @@ func (p *Provider) planRouteAuthPools(ctx context.Context, desired desiredGatewa
 		auth := wanted[name]
 		var ready bool
 		var step *graphMutation
-		if auth.Protocol == cloud.ExternalAuthProtocolGRPC {
-			ready, step = p.planGRPCAuthorizerPool(ctx, desired, *actual, auth, name, pool, canRemove)
+		if auth.Protocol == cloud.ExternalAuthProtocolGRPC || auth.BackendTLS != nil {
+			ready, step = p.planProtectedAuthorizerPool(ctx, desired, *actual, auth, name, pool, canRemove)
 		} else {
 			ready, step = listenerAuthPoolPlan(*auth, name, pool, canRemove)
 		}
@@ -224,23 +241,24 @@ func (p *Provider) planRouteAuthPools(ctx context.Context, desired desiredGatewa
 	}
 }
 
-func (p *Provider) planGRPCAuthorizerPool(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, auth *cloud.ListenerExternalAuth,
+func (p *Provider) planProtectedAuthorizerPool(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, auth *cloud.ListenerExternalAuth,
 	name string, pool observedAuthPool, canRemove bool) (bool, *graphMutation) {
 	tls := auth.BackendTLS
+	httpTLS := tls != nil && !tls.RequireH2
 	client := desired.spec.Gateway.BackendClientCertificate
-	if !p.routeExternalAuthGRPC || tls != nil && (!p.backendTLSPolicy || !p.poolALPN || client.Denied) ||
-		p.verifyGatewayHTTPURLCapabilities(ctx, desired, actual, grpcAuthorizerCapabilities(tls)) != nil {
+	if !p.routeAuthorizerTransportEnabled(*auth) || tls != nil && client.Denied ||
+		p.verifyGatewayHTTPURLCapabilities(ctx, desired, actual, routeAuthorizerTransportCapabilities(*auth)) != nil {
 		return false, nil
 	}
 
-	change := listenerFilterMutation{grpcAuth: auth}
+	change := listenerFilterMutation{protectedAuth: auth}
 	if tls != nil && (tls.Trust == cloud.BackendTLSTrustReference || client.Reference != "") && !desired.spec.Gateway.BackendCAOwned {
 		if desired.spec.Gateway.ClaimBackendCA == nil {
 			return false, nil
 		}
 		change.claimCA = true
 		return false, &graphMutation{kind: graphListenerFiltersMutation, listenerFilters: change,
-			message: "Reserving ownership of the gRPC authorizer trust or client identity"}
+			message: "Reserving ownership of ExternalAuth trust or client identity"}
 	}
 	if tls != nil && tls.Trust == cloud.BackendTLSTrustReference {
 		if p.backendCA == nil {
@@ -253,7 +271,7 @@ func (p *Provider) planGRPCAuthorizerPool(ctx context.Context, desired desiredGa
 		if revision.Reference() == "" {
 			change.publishCA = true
 			return false, &graphMutation{kind: graphListenerFiltersMutation, listenerFilters: change,
-				message: "Publishing the gRPC authorizer CA to Barbican"}
+				message: "Publishing the ExternalAuth CA to Barbican"}
 		}
 		if revision.Digest() != tls.CADigest {
 			return false, nil
@@ -262,28 +280,41 @@ func (p *Provider) planGRPCAuthorizerPool(ctx context.Context, desired desiredGa
 	}
 
 	if pool.pool.ID != "" {
+		canRemove = canRemove && (!httpTLS || pool.pool.Listeners != nil && len(pool.pool.Listeners) == 0)
 		if pool.pool.ProvisioningStatus == "ACTIVE" && !pool.admin || strings.HasPrefix(pool.pool.ProvisioningStatus, "PENDING_") {
 			return false, nil
 		}
-		if pool.pool.ProvisioningStatus == "ERROR" || !grpcAuthorizerTransportMatches(pool, tls, change.caReference, client.Reference) {
+		if pool.pool.ProvisioningStatus == "ERROR" || !protectedAuthorizerTransportMatches(pool, tls, change.caReference, client.Reference) {
 			if canRemove {
 				return false, listenerAuthPoolRemoval(pool)
 			}
 			return false, nil
 		}
-		if tls != nil && tls.Trust == cloud.BackendTLSTrustSystem && !pool.tls.SystemCAApplied() {
-			return false, nil
+		if tls != nil && tls.Trust == cloud.BackendTLSTrustSystem {
+			switch {
+			case httpTLS && !pool.pool.AdminStateUp:
+				// Octavia only attests enabled pools. Empty and detach this
+				// pool before enabling it to obtain a fresh attestation.
+				if !canRemove || pool.pool.ProvisioningStatus != "ACTIVE" {
+					return false, nil
+				}
+				if len(pool.members) != 0 {
+					return false, listenerAuthPoolRemoval(pool)
+				}
+			case !pool.tls.SystemCAApplied():
+				return false, nil
+			}
 		}
 	}
 	ready, step := listenerAuthPoolPlan(*auth, name, pool, canRemove)
 	if step != nil && step.kind == graphListenerFiltersMutation {
-		step.listenerFilters.grpcAuth = auth
+		step.listenerFilters.protectedAuth = auth
 		step.listenerFilters.caReference = change.caReference
 	}
 	return ready, step
 }
 
-func grpcAuthorizerTransportMatches(observed observedAuthPool, tls *cloud.BackendTLSValidation, caRef, clientRef string) bool {
+func protectedAuthorizerTransportMatches(observed observedAuthPool, tls *cloud.BackendTLSValidation, caRef, clientRef string) bool {
 	pool, current := observed.pool, observed.tls
 	if pool.Protocol != cloud.ListenerProtocolHTTP || !current.EnabledObserved {
 		return false
@@ -295,29 +326,40 @@ func grpcAuthorizerTransportMatches(observed observedAuthPool, tls *cloud.Backen
 	if tls.Trust == cloud.BackendTLSTrustSystem {
 		trustMatches = configuredSystemCA(pool, current) && slices.Contains(pool.Tags, backendTLSSystemCATag)
 	}
+	protocolMatches := current.RequireH2Observed && current.RequireH2 && current.ALPNObserved &&
+		slices.Equal(pool.ALPNProtocols, []string{xBackendHTTP2ALPN})
+	if !tls.RequireH2 {
+		// Octavia can persist its default ALPN list. The dedicated
+		// authorizer role limits the actual TLS exchange to HTTP/1.1.
+		protocolMatches = current.H2CObserved && current.RequireH2Observed && !current.RequireH2 && current.ALPNObserved &&
+			(len(pool.ALPNProtocols) == 0 || slices.Contains(pool.ALPNProtocols, "http/1.1")) &&
+			slices.Contains(pool.Tags, httpAuthTLSPoolTag) && slices.Contains(pool.Tags, backendTLSManagedTag)
+	}
 	return trustMatches && current.Complete() && pool.TLSEnabled && !observed.h2c && current.Hostname == tls.Hostname &&
-		current.RequireH2Observed && current.RequireH2 && current.ALPNObserved && slices.Equal(pool.ALPNProtocols, []string{xBackendHTTP2ALPN}) &&
+		protocolMatches &&
 		pool.TLSContainerRef == clientRef && slices.Contains(pool.Tags, backendTLSClientTag) == (clientRef != "") &&
 		pool.CRLContainerRef == "" && slices.Contains(pool.Tags, backendTLSRevisionTag(tls)) &&
 		!differentBackendTLSRevision(pool.Tags, backendTLSRevisionTag(tls)) &&
 		backendTLSSubjectAltNamesMatch(tls.SubjectAltNames, observedRouteGraph{pool: &pool, backendTLS: current})
 }
 
-func grpcAuthorizerPoolCreate(opts pools.CreateOpts, tls *cloud.BackendTLSValidation, caRef, clientRef string) octavia.CreatePoolOpts {
+func protectedAuthorizerPoolCreate(opts pools.CreateOpts, tls *cloud.BackendTLSValidation, caRef, clientRef string) octavia.CreatePoolOpts {
 	if tls == nil {
 		return octavia.CreatePoolOpts{CreateOpts: opts, BackendH2C: true}
 	}
 	opts.TLSEnabled = true
 	opts.CATLSContainerRef = caRef
 	opts.TLSContainerRef = clientRef
-	opts.ALPNProtocols = []string{xBackendHTTP2ALPN}
+	if tls.RequireH2 {
+		opts.ALPNProtocols = []string{xBackendHTTP2ALPN}
+	}
 	systemCA := tls.Trust == cloud.BackendTLSTrustSystem
 	opts.Tags = backendTLSTags(opts.Tags, true, backendTLSRevisionTag(tls), clientRef != "", len(tls.SubjectAltNames) != 0)
 	if systemCA {
 		opts.Tags = append(opts.Tags, backendTLSSystemCATag)
 	}
 	return octavia.CreatePoolOpts{CreateOpts: opts, BackendTLSHostname: tls.Hostname, BackendTLSSubjectAltNames: tls.SubjectAltNames,
-		BackendTLSRequireH2: true, BackendTLSSystemCA: systemCA}
+		BackendTLSRequireH2: tls.RequireH2, BackendTLSSystemCA: systemCA}
 }
 
 func (actual *observedGatewayGraph) authListeners() []listeners.Listener {
@@ -368,11 +410,11 @@ func (p *Provider) observeRouteAuthReferences(ctx context.Context, desired desir
 				if refs[id] == nil {
 					refs[id] = make(map[string]string)
 				}
-				tag := routeAuthorizerPoolTag(row.ExternalAuth.Protocol)
-				if previous := refs[id][listener.ID]; previous != "" && previous != tag {
+				protocol := row.ExternalAuth.Protocol
+				if previous, found := refs[id][listener.ID]; found && previous != protocol {
 					return nil, fmt.Errorf("%w: HTTPRoute authorization protocols share a pool", cloud.ErrOwnershipConflict)
 				}
-				refs[id][listener.ID] = tag
+				refs[id][listener.ID] = protocol
 			}
 		}
 	}
