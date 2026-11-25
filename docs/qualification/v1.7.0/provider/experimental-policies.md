@@ -8,7 +8,7 @@ At controller revision `ce6f51797fb7`, the genuine v1.7.0 Experimental bundle ad
 | XMesh | The running manager's controller name | `Accepted=Unknown/Pending` |
 | XTelemetryPolicy | The managed Gateway with tracing disabled | No policy status |
 
-Two explicitly requested Gateway reconciliations produced identical desired graphs before and after admission. That snapshot recorded API admission only. The targeted retry budget and XMesh trials below include manager reconciliation and traffic. Collector exports remain outside this evidence. [Retry budget API](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/apisx/v1alpha1/xbackendtrafficpolicy_types.go#L61-L125) · [XMesh status](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/apisx/v1alpha1/xmesh_types.go#L56-L126) · [Telemetry targets](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/apisx/v1alpha1/xtelemetrypolicy_types.go#L90-L155)
+Two explicitly requested Gateway reconciliations produced identical desired graphs before and after admission. That snapshot recorded API admission only. Later trials below record Service retry budgets, XMesh readiness and trace export to a collector Pod. [Retry budget API](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/apisx/v1alpha1/xbackendtrafficpolicy_types.go#L61-L125) · [XMesh status](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/apisx/v1alpha1/xmesh_types.go#L56-L126) · [Telemetry targets](https://github.com/kubernetes-sigs/gateway-api/blob/e26d183dbbc1bb782b78addbd26faba03955c152/apisx/v1alpha1/xtelemetrypolicy_types.go#L90-L155)
 
 The source archive includes the observer patch, the original-log checksum and the command for running it against the pinned release and envtest assets. The earlier XBackend EndpointSelector observation records the fourth Experimental kind. [Reproduction files](stock-tcp.md#reproduce-the-multiple-listener-probes) · [XBackend and its HTTPRoute](xbackend-endpoint-selector.md)
 
@@ -30,3 +30,15 @@ The controller ran from its reproducible release image on Kubernetes v1.36.4 wit
 | CNI Pods updated with literal ambient settings | True / Accepted | True / Programmed | 16 |
 
 The XMesh kept its UID and generation across all six observations. Editing the ConfigMap preserved the CNI Pod UIDs and the DaemonSet generation. The controller restored the original 16 features after both CNI Pods rolled out with the explicit settings. The upstream HTTP path rewrite and gRPC request-header modification cases both passed on the waypoint. The Gateway API v1.7.0 registry has no dedicated XMesh status case. [Conditions, CNI settings and image digests](xmesh-status.json)
+
+## Gateway request tracing
+
+An Experimental XTelemetryPolicy targeted one of two Gateways. Its collector ran as a Pod in a separate namespace and a ReferenceGrant authorized its Service. On the target Gateway, the application received the child span ID and the collector recorded the same ID, the supplied parent, the configured service and span names, and HTTP 200.
+
+| Grant for the collector Service | Selected policy ancestor | Request span observed | Both applications |
+|---|---|---|---|
+| Present | `Accepted=True`, `ResolvedRefs=True` | Matching SERVER span | HTTP 200 |
+| Withdrawn | `Accepted=True`, `ResolvedRefs=False/RefNotPermitted` | Zero matching spans during four seconds. The original request context reached the application. | HTTP 200 |
+| Restored | `Accepted=True`, `ResolvedRefs=True` | Matching SERVER span | HTTP 200 |
+
+The independent Gateway retained the original context and emitted zero matching spans in each four-second observation window. Standard had no policy CRD and both applications received HTTP 200 with the original context. The local setup used kind, the Octavia listener TaskFlow, Amphora’s renderer, HAProxy and OpenTelemetry Collector. OpenStack infrastructure and Amphora agent transport used fixtures. Regional deployment and Gateway-to-collector TLS remain separate qualifications. [Configuration](../../../operator-octavia-telemetry.md) · [Traffic, policy conditions and package digests](gateway-telemetry-evidence/receipt.json)
