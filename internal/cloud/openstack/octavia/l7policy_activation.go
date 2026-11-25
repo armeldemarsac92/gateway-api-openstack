@@ -25,6 +25,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
+	"slices"
+	"strings"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gophercloud/gophercloud/v2"
@@ -50,6 +53,27 @@ type PolicyActivationBatch struct {
 	ExpectedGraphRevision string                     `json:"expected_graph_revision"`
 	ExpectedOrder         []string                   `json:"expected_order"`
 	Policies              []PolicyActivationRevision `json:"policies"`
+}
+
+const GatewayCapabilityGRPCAuthTransition = "l7policy_grpc_auth_transition_v1"
+
+type GRPCAuthTransitionRule struct {
+	ID   string   `json:"id"`
+	Tags []string `json:"tags"`
+}
+
+type GRPCAuthTransitionPolicy struct {
+	PolicyActivationRevision
+	Tags         []string                 `json:"tags"`
+	Rules        []GRPCAuthTransitionRule `json:"rules"`
+	Origin       string                   `json:"redirect_pool_id,omitempty"`
+	ExternalAuth *PolicyExternalAuth      `json:"external_auth,omitempty"`
+}
+
+type GRPCAuthTransitionBatch struct {
+	ExpectedGraphRevision string                     `json:"expected_graph_revision"`
+	ExpectedOrder         []string                   `json:"expected_order"`
+	Policies              []GRPCAuthTransitionPolicy `json:"policies"`
 }
 
 type PolicyActivationGraph struct {
@@ -81,6 +105,24 @@ type PolicyActivationPool struct {
 	BackendTLSHost   string            `json:"backend_tls_hostname"`
 	BackendRequireH2 bool              `json:"backend_tls_require_h2"`
 	HealthMonitor    *monitors.Monitor `json:"healthmonitor"`
+	BackendSystemCA  json.RawMessage   `json:"backend_tls_system_ca"`
+	BackendCADigest  json.RawMessage   `json:"backend_tls_system_ca_sha256"`
+	BackendSANs      json.RawMessage   `json:"backend_tls_subject_alt_names"`
+}
+
+func (row *PolicyActivationPool) MatchesBackendTLSVerification(proven PoolBackendTLS) bool {
+	var current PoolBackendTLS
+	current.observeSystemCA(row.BackendSystemCA, row.BackendCADigest)
+	if current.SystemCAInvalid || proven.SystemCAInvalid || current.SystemCA != proven.SystemCA ||
+		current.SystemCAObserved != proven.SystemCAObserved || current.SystemCADigestObserved != proven.SystemCADigestObserved ||
+		current.SystemCASHA256 != proven.SystemCASHA256 || proven.SubjectAltNamesInvalid {
+		return false
+	}
+	if row.BackendSANs == nil {
+		return !proven.SubjectAltNamesObserved
+	}
+	names, err := decodeBackendTLSSubjectAltNames(row.BackendSANs)
+	return err == nil && proven.SubjectAltNamesObserved && slices.Equal(names, proven.SubjectAltNames)
 }
 
 type PolicyActivationMember struct {
@@ -99,6 +141,55 @@ func (row *PolicyActivationMember) UnmarshalJSON(data []byte) error {
 }
 
 func (s *Service) ObservePolicyActivation(ctx context.Context, listenerID string) (PolicyActivationGraph, error) {
+	return s.observePolicyActivation(ctx, s.client.ServiceURL("lbaas", "listeners", listenerID, "l7policy_activation"))
+}
+
+type GRPCAuthRecovery struct {
+	OperationID string `json:"operation_id"`
+}
+
+func (s *Service) ObserveGRPCAuthRecovery(ctx context.Context, listenerID string) (GRPCAuthRecovery, error) {
+	var recovery GRPCAuthRecovery
+	endpoint := s.client.ServiceURL("lbaas", "listeners", listenerID, "l7policy_grpc_auth_transition", "recovery")
+	if _, err := s.client.Get(ctx, endpoint, &recovery, nil); err != nil {
+		return GRPCAuthRecovery{}, fmt.Errorf("observe Octavia gRPC authorization recovery: %w", err)
+	}
+	if recovery.OperationID == "" {
+		return GRPCAuthRecovery{}, errors.New("Octavia gRPC authorization recovery omitted the operation ID")
+	}
+	return recovery, nil
+}
+
+func (s *Service) RecoverGRPCAuth(ctx context.Context, listenerID string, recovery GRPCAuthRecovery) error {
+	endpoint := s.client.ServiceURL("lbaas", "listeners", listenerID, "l7policy_grpc_auth_transition", "recovery")
+	_, err := s.client.Post(ctx, endpoint, recovery, nil, &gophercloud.RequestOpts{OkCodes: []int{http.StatusNoContent}})
+	if err != nil {
+		return fmt.Errorf("recover Octavia gRPC authorization transition: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) ObserveGRPCAuthTransition(ctx context.Context, listenerID string, destinations []string) (PolicyActivationGraph, error) {
+	endpoint := s.client.ServiceURL("lbaas", "listeners", listenerID, "l7policy_grpc_auth_transition")
+	if len(destinations) != 0 {
+		endpoint += "?" + url.Values{"pool_ids": {strings.Join(destinations, ",")}}.Encode()
+	}
+	return s.observePolicyActivation(ctx, endpoint)
+}
+
+func (s *Service) TransitionGRPCAuth(ctx context.Context, listenerID string, batch GRPCAuthTransitionBatch) error {
+	body := struct {
+		Transition GRPCAuthTransitionBatch `json:"l7policy_grpc_auth_transition"`
+	}{Transition: batch}
+	endpoint := s.client.ServiceURL("lbaas", "listeners", listenerID, "l7policy_grpc_auth_transition")
+	_, err := s.client.Post(ctx, endpoint, body, nil, &gophercloud.RequestOpts{OkCodes: []int{http.StatusNoContent}})
+	if err != nil {
+		return fmt.Errorf("switch Octavia L7 policy gRPC authorization: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) observePolicyActivation(ctx context.Context, endpoint string) (PolicyActivationGraph, error) {
 	var response struct {
 		Activation struct {
 			Revision     string                          `json:"graph_revision"`
@@ -111,7 +202,6 @@ func (s *Service) ObservePolicyActivation(ctx context.Context, listenerID string
 			} `json:"policies"`
 		} `json:"l7policy_activation"`
 	}
-	endpoint := s.client.ServiceURL("lbaas", "listeners", listenerID, "l7policy_activation")
 	if _, err := s.client.Get(ctx, endpoint, &response, nil); err != nil {
 		return PolicyActivationGraph{}, fmt.Errorf("read Octavia L7 policy activation snapshot: %w", err)
 	}

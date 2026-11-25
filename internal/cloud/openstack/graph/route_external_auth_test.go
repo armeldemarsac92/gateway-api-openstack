@@ -149,6 +149,29 @@ func TestRouteExternalAuthOptOutStagesLocalResponseWithListenerClosed(t *testing
 	require.Equal(t, []graphMutation{create}, filter())
 }
 
+func TestGRPCAuthTransitionPreservesOperatorTags(t *testing.T) {
+	identity := safetyTestIdentity(t)
+	match := openstackidentity.HTTPMatchKey("", cloud.PathMatchExact, "/protected", "")
+	backend := openstackidentity.HTTPFragmentRole(rolePolicyExact, openstackidentity.HTTPBackendKey("app", "origin", 80), match)
+	fixed := openstackidentity.HTTPFragmentRole(rolePolicyExact, openstackidentity.HTTPFixedRuleKey(1), match)
+	tags := append(safetyRouteTags(t, identity, backend), "team-payments")
+
+	withdrawn, ok := transitionRouteTags(identity, tags, backend, fixed)
+	require.True(t, ok)
+	require.True(t, identity.MatchesRoute(withdrawn, fixed))
+	require.Contains(t, withdrawn, "team-payments")
+	restored, ok := transitionRouteTags(identity, withdrawn, fixed, backend)
+	require.True(t, ok)
+	require.ElementsMatch(t, tags, restored)
+
+	other := identity.Value()
+	other.RouteUID += "-other"
+	foreign, err := NewIdentity(other)
+	require.NoError(t, err)
+	_, ok = transitionRouteTags(identity, safetyRouteTags(t, foreign, backend), backend, fixed)
+	require.False(t, ok)
+}
+
 func TestGRPCAuthorizerWithdrawalOnSharedListener(t *testing.T) {
 	for _, test := range []struct {
 		name      string

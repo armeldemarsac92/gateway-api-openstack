@@ -148,3 +148,17 @@ If that grant is withdrawn, `ResolvedRefs` becomes `False` with reason
 `RefNotPermitted`. Requests matching the protected rule get a local error.
 An authorization Service with no ready members also closes that rule. Unfiltered
 sibling rules continue forwarding using their usual match precedence.
+
+For multiple gRPC-protected rules on a shared HTTP listener, enable
+`enabled_l7policy_grpc_auth_transition_providers` on the upgraded Octavia
+API and workers. The provider advertises `l7policy_grpc_auth_transition_v1`.
+When a grant is withdrawn, the controller checks the complete policy order,
+ownership and matching rules. It can switch the affected rules to HTTP 500
+together while the other paths keep serving. After the grant returns, it
+checks the origin and authorization pools and their members before it
+restores forwarding. A conflicting update prompts the controller to read the
+listener again. If a worker stops during the update, recovery reinstates
+the protective response. A fresh reconciliation checks current Kubernetes
+references before it restores access. If the provider cannot confirm that
+revoked access is blocked, the controller or worker can close the listener
+until that restriction is in place.

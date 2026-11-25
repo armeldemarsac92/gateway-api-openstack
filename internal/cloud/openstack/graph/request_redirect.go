@@ -79,6 +79,10 @@ func (p *Provider) protectHTTPURLPolicyTraffic(ctx context.Context, desired desi
 	requiresWithdrawal := make(map[string]bool)
 	installedOn := make(map[string]string)
 	var grpcWithdrawal *graphMutation
+	var grpcTransition *grpcAuthTransitionPlan
+	grpcWaiting := make(map[string]bool)
+	grpcWaitingPorts := make(map[int]bool)
+	var grpcPreparation *graphMutation
 	for _, listener := range frontends {
 		state, relevant := states[listener.ProtocolPort]
 		if !relevant {
@@ -118,13 +122,26 @@ func (p *Provider) protectHTTPURLPolicyTraffic(ctx context.Context, desired desi
 		if available && !state.unsettled && !retryClosure {
 			continue
 		}
-		if available && predicate.capability == octavia.GatewayCapabilityPolicyExternalAuthGRPC &&
-			!state.unsettledDesired && !isHTTPListenerWithdrawal(plan) {
-			if step, ok := p.planGRPCAuthorizerWithdrawal(desired, actual, listener, state); ok {
-				if grpcWithdrawal == nil {
-					grpcWithdrawal = &step
+		if available && predicate.capability == octavia.GatewayCapabilityPolicyExternalAuthGRPC && !isHTTPListenerWithdrawal(plan) {
+			if batch, ok := p.planGRPCAuthTransition(ctx, desired, actual, listener, state); ok {
+				if batch.request.ExpectedGraphRevision == "" {
+					grpcWaiting[listener.ID] = true
+					grpcWaitingPorts[listener.ProtocolPort] = true
+					if grpcPreparation == nil {
+						grpcPreparation = batch.prepare
+					}
+				} else if grpcTransition == nil {
+					grpcTransition = batch
 				}
 				continue
+			}
+			if !state.unsettledDesired {
+				if step, ok := p.planGRPCAuthorizerWithdrawal(desired, actual, listener, state); ok {
+					if grpcWithdrawal == nil {
+						grpcWithdrawal = &step
+					}
+					continue
+				}
 			}
 		}
 		reason := "Waiting for verified Octavia " + predicate.label + " policies on this listener"
@@ -146,7 +163,20 @@ func (p *Provider) protectHTTPURLPolicyTraffic(ctx context.Context, desired desi
 	if grpcWithdrawal != nil {
 		return []graphMutation{*grpcWithdrawal}
 	}
+	if grpcTransition != nil {
+		return []graphMutation{{kind: graphGRPCAuthTransition, listenerID: grpcTransition.listener.ID,
+			withdrawHTTPPolicy: grpcTransition.withdraws, grpcAuthTransition: grpcTransition}}
+	}
+	if grpcPreparation != nil {
+		return []graphMutation{*grpcPreparation}
+	}
+	if len(grpcWaiting) != 0 && actual.routeAuthPoolMutation != nil {
+		return []graphMutation{*actual.routeAuthPoolMutation}
+	}
 	return slices.DeleteFunc(plan, func(step graphMutation) bool {
+		if len(grpcWaiting) != 0 && !independentOfWaitingGRPCAuth(desired, step, grpcWaiting, grpcWaitingPorts) {
+			return true
+		}
 		listenerID := step.listenerID
 		if listenerID == "" && !actual.scoped && actual.listener != nil {
 			listenerID = actual.listener.ID

@@ -62,6 +62,7 @@ type observedGatewayGraph struct {
 	listenerFilterMutation           *graphMutation
 	routeAuthPools                   map[string]string
 	routeAuthPoolMutation            *graphMutation
+	grpcAuthRecovery                 *grpcAuthRecovery
 	httpPools                        *listenerFilterPoolInventory
 
 	defaultHTTPResponseCodes map[string]int
@@ -123,10 +124,12 @@ const (
 	graphDeleteLoadBalancer
 	graphSNIMutation
 	graphListenerFiltersMutation
+	graphGRPCAuthTransition
 )
 
 type graphMutation struct {
-	listenerFilters listenerFilterMutation
+	listenerFilters    listenerFilterMutation
+	grpcAuthTransition *grpcAuthTransitionPlan
 
 	kind               graphMutationKind
 	routeIndex         int
@@ -349,6 +352,9 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	if result, handled, err := p.replayPendingTCPRejection(ctx, desired, actual); handled {
 		return result, err
 	}
+	if actual.grpcAuthRecovery != nil {
+		return p.resumeGRPCAuthCompensation(ctx, desired, actual)
+	}
 	p.gateRequestMirrors(ctx, &desired, actual)
 	if actual.loadBalancer != nil && actual.loadBalancer.ProvisioningStatus == "ACTIVE" {
 		if step, needed := nextRequestMirrorWithdrawal(desired, actual); needed {
@@ -516,6 +522,35 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 			}
 		}
 		return p.retireUnusedBackendCA(ctx, desired.spec, actual, result)
+	}
+	if batch := plan[0].grpcAuthTransition; batch != nil {
+		validateMutation := spec.ValidateMutation
+		if validateMutation != nil {
+			if err := validateMutation(ctx); err != nil {
+				return cloud.GatewayGraphResult{}, err
+			}
+		}
+		err := p.octavia.TransitionGRPCAuth(ctx, batch.listener.ID, batch.request)
+		if !batch.withdraws && gophercloud.ResponseCodeIs(err, http.StatusConflict) {
+			result.Outcome = p.progressingOutcome("Reobserving Octavia after a gRPC authorization restoration conflict")
+			return result, nil
+		}
+		if err != nil {
+			if validateMutation != nil {
+				if validationErr := validateMutation(ctx); validationErr != nil {
+					return result, errors.Join(err, validationErr)
+				}
+			}
+			close := closeGuardedHTTPListener(batch.listener, "Closing the listener after the gRPC authorization transition could not be verified")
+			if closeErr := p.executeGraphMutation(ctx, desired, actual, close); closeErr != nil {
+				return result, errors.Join(err, closeErr)
+			}
+			p.recordGraphMutationOutcome(&result, close)
+			return result, nil
+		}
+		result.Outcome = p.progressingOutcome("Waiting for Octavia gRPC authorization transition readback")
+		result.Outcome.MutationSubmitted = true
+		return result, nil
 	}
 	step, prepared, err := p.prepareNextGraphMutation(ctx, desired, actual, plan, &result)
 	if !prepared {
@@ -1525,9 +1560,9 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 	if !desired.identity.MatchesGateway(lb.Tags, roleLoadBalancer) {
 		return actual, fmt.Errorf("%w: load balancer %s has an incomplete or stale identity", cloud.ErrOwnershipConflict, lb.ID)
 	}
-	observation, err := p.observeLoadBalancerOnce(ctx, lb.ID)
-	if err != nil {
-		return actual, err
+	observation, observationErr := p.observeLoadBalancerOnce(ctx, lb.ID)
+	if observationErr != nil && observation.phase != loadBalancerPhaseError {
+		return actual, observationErr
 	}
 	if observation.loadBalancer != nil {
 		observed := observation.loadBalancer
@@ -1552,6 +1587,18 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 	actual.loadBalancer = observation.loadBalancer
 	lb = actual.loadBalancer
 	actual.state = cloud.GatewayState{LoadBalancerID: lb.ID, VIPPortID: lb.VipPortID, VIPAddress: lb.VipAddress}
+	if p.routeExternalAuthGRPC && lb.Provider == "amphora" && desired.protocol == cloud.ListenerProtocolHTTP &&
+		(lb.ProvisioningStatus == "PENDING_UPDATE" || observation.phase == loadBalancerPhaseError) {
+		if err := p.observePendingGRPCAuth(ctx, desired, &actual); err != nil {
+			return actual, err
+		}
+		if actual.grpcAuthRecovery != nil {
+			return actual, nil
+		}
+	}
+	if observationErr != nil {
+		return actual, observationErr
+	}
 	if withdrawAddress {
 		return actual, nil
 	}
