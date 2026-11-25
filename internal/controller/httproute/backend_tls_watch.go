@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
@@ -163,12 +164,16 @@ func (r *Reconciler) setupBackendTLSPolicyStatusController(manager ctrl.Manager)
 		return append(r.policyRequestsForRoutes(ctx, r.enqueueHTTPRoutePeers(ctx, object), services),
 			grpc.policyRequestsForRoutes(ctx, grpc.enqueueHTTPRoutePeers(ctx, object), nil)...)
 	}
-	withTLSRoutes := func(mapEvent handler.MapFunc) handler.MapFunc {
-		if !r.Config.TCPTLSTermination {
-			return mapEvent
-		}
+	withAdditionalBackends := func(mapEvent handler.MapFunc) handler.MapFunc {
 		return func(ctx context.Context, object client.Object) []reconcile.Request {
-			return append(mapEvent(ctx, object), r.enqueuePoliciesForTLSRouteDependency(ctx, object)...)
+			requests := mapEvent(ctx, object)
+			if r.Config.TCPTLSTermination {
+				requests = append(requests, r.enqueuePoliciesForTLSRouteDependency(ctx, object)...)
+			}
+			if r.Config.TelemetryPolicyEnabled() {
+				requests = append(requests, r.enqueuePoliciesForTelemetryDependency(ctx, object)...)
+			}
+			return requests
 		}
 	}
 	setup := ctrl.NewControllerManagedBy(manager).
@@ -176,14 +181,17 @@ func (r *Reconciler) setupBackendTLSPolicyStatusController(manager ctrl.Manager)
 		Watches(&gatewayv1.BackendTLSPolicy{}, handler.EnqueueRequestsFromMapFunc(r.enqueuePoliciesForSharedService), policySpec).
 		WatchesMetadata(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.enqueuePoliciesForCA)).
 		Watches(&corev1.Service{}, handler.EnqueueRequestsFromMapFunc(r.enqueuePoliciesForService), builder.WithPredicates(controller.ServicePredicate())).
-		Watches(&gatewayv1.ReferenceGrant{}, handler.EnqueueRequestsFromMapFunc(withTLSRoutes(policiesForRoutes(r.enqueueHTTPRoutesForReferenceGrant, grpc.enqueueHTTPRoutesForReferenceGrant))), policySpec).
+		Watches(&gatewayv1.ReferenceGrant{}, handler.EnqueueRequestsFromMapFunc(withAdditionalBackends(policiesForRoutes(r.enqueueHTTPRoutesForReferenceGrant, grpc.enqueueHTTPRoutesForReferenceGrant))), policySpec).
 		Watches(&gatewayv1.HTTPRoute{}, handler.EnqueueRequestsFromMapFunc(policiesForPeer), routeState).
 		Watches(&gatewayv1.GRPCRoute{}, handler.EnqueueRequestsFromMapFunc(policiesForPeer), routeState).
-		Watches(&gatewayv1.Gateway{}, handler.EnqueueRequestsFromMapFunc(withTLSRoutes(policiesForRoutes(r.enqueueHTTPRoutesForGateway, grpc.enqueueHTTPRoutesForGateway))), builder.WithPredicates(controller.GatewayForHTTPRoutePredicate(r.Config))).
-		Watches(&gatewayv1.GatewayClass{}, handler.EnqueueRequestsFromMapFunc(withTLSRoutes(policiesForRoutes(r.enqueueHTTPRoutesForGatewayClass, grpc.enqueueHTTPRoutesForGatewayClass))), builder.WithPredicates(controller.GatewayClassForGatewayPredicate())).
-		Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(withTLSRoutes(policiesForRoutes(r.enqueueHTTPRoutesForNamespace, grpc.enqueueHTTPRoutesForNamespace))), builder.WithPredicates(controller.NamespacePredicate()))
+		Watches(&gatewayv1.Gateway{}, handler.EnqueueRequestsFromMapFunc(withAdditionalBackends(policiesForRoutes(r.enqueueHTTPRoutesForGateway, grpc.enqueueHTTPRoutesForGateway))), builder.WithPredicates(controller.GatewayForHTTPRoutePredicate(r.Config))).
+		Watches(&gatewayv1.GatewayClass{}, handler.EnqueueRequestsFromMapFunc(withAdditionalBackends(policiesForRoutes(r.enqueueHTTPRoutesForGatewayClass, grpc.enqueueHTTPRoutesForGatewayClass))), builder.WithPredicates(controller.GatewayClassForGatewayPredicate())).
+		Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(withAdditionalBackends(policiesForRoutes(r.enqueueHTTPRoutesForNamespace, grpc.enqueueHTTPRoutesForNamespace))), builder.WithPredicates(controller.NamespacePredicate()))
 	if r.Config.TCPTLSTermination {
 		setup.Watches(&gatewayv1.TLSRoute{}, handler.EnqueueRequestsFromMapFunc(r.enqueuePoliciesForTLSRouteDependency), policySpec)
+	}
+	if r.Config.TelemetryPolicyEnabled() {
+		setup.Watches(&gatewayx.XTelemetryPolicy{}, handler.EnqueueRequestsFromMapFunc(r.enqueuePoliciesForTelemetryDependency), policySpec)
 	}
 
 	served, err := controller.ListenerSetServed(manager.GetRESTMapper())
@@ -301,6 +309,56 @@ func (r *Reconciler) enqueuePoliciesForTLSRouteDependency(ctx context.Context, d
 	}
 	for service := range services {
 		r.addPolicyRequests(ctx, keys, controller.IndexBackendTLSPolicyByService, service)
+	}
+	return controller.SortedRequests(keys)
+}
+
+// Refresh old and new collector Services when policy election changes.
+func (r *Reconciler) enqueuePoliciesForTelemetryDependency(ctx context.Context, object client.Object) []reconcile.Request {
+	var policies gatewayx.XTelemetryPolicyList
+	if err := r.List(ctx, &policies); err != nil {
+		log.FromContext(ctx).Error(err, "Could not list telemetry policies for backend TLS")
+		return nil
+	}
+	if policy, ok := object.(*gatewayx.XTelemetryPolicy); ok {
+		policies.Items = append(policies.Items, *policy)
+	}
+	keys := map[types.NamespacedName]struct{}{}
+	for i := range policies.Items {
+		policy := &policies.Items[i]
+		ref, valid := model.BackendServiceReference(policy.Namespace, policy.Spec.Tracing.Provider.BackendRef)
+		if policy.Spec.Tracing.Mode != gatewayx.TracingModeEnabled || !valid || ref.Name == "" {
+			continue
+		}
+		targets := func(matches func(gatewayv1.ObjectName) bool) bool {
+			return slices.ContainsFunc(policy.Spec.TargetRefs, func(target gatewayv1.LocalObjectReference) bool {
+				return target.Group == gatewayv1.GroupName && target.Kind == "Gateway" && matches(target.Name)
+			})
+		}
+		affected := false
+		switch dependency := object.(type) {
+		case *gatewayx.XTelemetryPolicy:
+			affected = policy.Namespace == dependency.Namespace && targets(func(name gatewayv1.ObjectName) bool {
+				return slices.ContainsFunc(dependency.Spec.TargetRefs, func(target gatewayv1.LocalObjectReference) bool {
+					return target.Group == gatewayv1.GroupName && target.Kind == "Gateway" && target.Name == name
+				})
+			})
+		case *gatewayv1.Gateway:
+			affected = policy.Namespace == dependency.Namespace && targets(func(name gatewayv1.ObjectName) bool { return string(name) == dependency.Name })
+		case *gatewayv1.GatewayClass:
+			affected = targets(func(name gatewayv1.ObjectName) bool {
+				var gateway gatewayv1.Gateway
+				err := r.Get(ctx, client.ObjectKey{Namespace: policy.Namespace, Name: string(name)}, &gateway)
+				return err == nil && string(gateway.Spec.GatewayClassName) == dependency.Name
+			})
+		case *gatewayv1.ReferenceGrant:
+			affected = ref.Namespace == dependency.Namespace && ref.Namespace != policy.Namespace
+		case *corev1.Namespace:
+			affected = ref.Namespace == dependency.Name || policy.Namespace == dependency.Name
+		}
+		if affected {
+			r.addPolicyRequests(ctx, keys, controller.IndexBackendTLSPolicyByService, ref)
+		}
 	}
 	return controller.SortedRequests(keys)
 }

@@ -117,6 +117,11 @@ func BackendReferenceAllowed(namespace string, target types.NamespacedName, gran
 
 // BackendReferenceAllowedFor checks the exact source kind, namespace and Service target.
 func BackendReferenceAllowedFor(kind gatewayv1.Kind, namespace string, target types.NamespacedName, grants []gatewayv1.ReferenceGrant) bool {
+	return BackendReferenceAllowedForGroup(gatewayv1.GroupName, kind, namespace, target, grants)
+}
+
+// BackendReferenceAllowedForGroup also accepts sources in the Experimental API group.
+func BackendReferenceAllowedForGroup(group gatewayv1.Group, kind gatewayv1.Kind, namespace string, target types.NamespacedName, grants []gatewayv1.ReferenceGrant) bool {
 	if namespace == target.Namespace {
 		return true
 	}
@@ -125,7 +130,7 @@ func BackendReferenceAllowedFor(kind gatewayv1.Kind, namespace string, target ty
 			continue
 		}
 		fromAllowed := slices.ContainsFunc(grant.Spec.From, func(from gatewayv1.ReferenceGrantFrom) bool {
-			return from.Group == gatewayv1.GroupName && from.Kind == kind && string(from.Namespace) == namespace
+			return from.Group == group && from.Kind == kind && string(from.Namespace) == namespace
 		})
 		if !fromAllowed {
 			continue

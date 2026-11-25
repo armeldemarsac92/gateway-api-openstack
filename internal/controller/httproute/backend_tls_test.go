@@ -38,6 +38,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
+	"sigs.k8s.io/gateway-api/pkg/features"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
@@ -463,4 +465,80 @@ func TestBackendTLSPolicyStatusCombinesHTTPAndTLSRouteAncestors(t *testing.T) {
 	conditions = reconcile()
 	require.Len(t, conditions, 1)
 	require.True(t, meta.IsStatusConditionTrue(conditions[httpName], string(gatewayv1.PolicyConditionAccepted)))
+}
+
+func TestTelemetryCollectorUsesSharedBackendTLSPolicyAncestors(t *testing.T) {
+	cfg := testConfig()
+	cfg.BackendTLSPolicy = true
+	cfg.TelemetryPolicy = true
+	cfg.GatewayAPIChannel = features.FeatureChannelExperimental
+	class, gateway, _, service, endpoints := endpointRouteFixture(t)
+	scheme := testScheme(t)
+	require.NoError(t, gatewayx.Install(scheme))
+	kube := indexedFakeClientBuilder(scheme, cfg).WithStatusSubresource(&gatewayv1.BackendTLSPolicy{}).
+		WithObjects(class, gateway, service, endpoints).Build()
+	r := &Reconciler{Client: kube, APIReader: kube, Config: cfg,
+		TelemetryBackendTLSAvailable: func(context.Context, bool) (bool, error) { return true, nil }}
+	tracing := &gatewayx.XTelemetryPolicy{
+		ObjectMeta: metav1.ObjectMeta{Namespace: gateway.Namespace, Name: "trace", UID: "trace"}, Spec: gatewayx.TelemetryPolicySpec{
+			TargetRefs: []gatewayv1.LocalObjectReference{{Group: gatewayv1.GroupName, Kind: "Gateway", Name: gatewayv1.ObjectName(gateway.Name)}},
+			Tracing: gatewayx.TracingConfig{Mode: gatewayx.TracingModeEnabled, Provider: gatewayx.TracingProvider{
+				BackendRef: gatewayv1.BackendObjectReference{Name: gatewayv1.ObjectName(service.Name), Port: ptr.To(gatewayv1.PortNumber(service.Spec.Ports[0].Port))},
+			}},
+		},
+	}
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	cert := &x509.Certificate{SerialNumber: big.NewInt(1), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign}
+	der, err := x509.CreateCertificate(rand.Reader, cert, cert, public, private)
+	require.NoError(t, err)
+	ca := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: service.Namespace, Name: "collector-ca", UID: "collector-ca"},
+		Data: map[string]string{"ca.crt": string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))}}
+	policy := &gatewayv1.BackendTLSPolicy{
+		ObjectMeta: metav1.ObjectMeta{Namespace: service.Namespace, Name: "collector-tls", UID: "collector-tls", Generation: 3},
+		Spec: gatewayv1.BackendTLSPolicySpec{
+			TargetRefs: []gatewayv1.LocalPolicyTargetReferenceWithSectionName{{
+				LocalPolicyTargetReference: gatewayv1.LocalPolicyTargetReference{Kind: "Service", Name: gatewayv1.ObjectName(service.Name)},
+			}},
+			Validation: gatewayv1.BackendTLSPolicyValidation{
+				Hostname: "collector.example.test", CACertificateRefs: []gatewayv1.LocalObjectReference{{Kind: "ConfigMap", Name: gatewayv1.ObjectName(ca.Name)}},
+			},
+		},
+	}
+	for _, object := range []client.Object{tracing, ca, policy} {
+		require.NoError(t, kube.Create(t.Context(), object))
+	}
+	for i := range backendtls.MaxAncestors {
+		policy.Status.Ancestors = append(policy.Status.Ancestors, gatewayv1.PolicyAncestorStatus{
+			ControllerName: "foreign.example.com/controller", AncestorRef: gatewayv1.ParentReference{Name: gatewayv1.ObjectName(fmt.Sprintf("foreign-%d", i))},
+		})
+	}
+	require.NoError(t, kube.Status().Update(t.Context(), policy))
+	key := client.ObjectKeyFromObject(policy)
+	status := backendTLSPolicyStatusReconciler{routes: r}
+	reconcile := func() {
+		t.Helper()
+		_, err := status.Reconcile(t.Context(), ctrl.Request{NamespacedName: key})
+		require.NoError(t, err)
+		require.NoError(t, kube.Get(t.Context(), key, policy))
+	}
+	ancestor := backendtls.GatewayAncestor{ControllerName: r.Config.ControllerName, Key: client.ObjectKeyFromObject(gateway)}
+	foreign := slices.Clone(policy.Status.Ancestors)
+	reconcile()
+	require.Equal(t, foreign, policy.Status.Ancestors)
+	require.False(t, ancestor.AcceptsCurrentPolicy(policy))
+
+	foreign = foreign[:len(foreign)-1]
+	policy.Status.Ancestors = slices.Clone(foreign)
+	require.NoError(t, kube.Status().Update(t.Context(), policy))
+	reconcile()
+	require.Equal(t, foreign, policy.Status.Ancestors[:len(foreign)])
+	require.True(t, ancestor.AcceptsCurrentPolicy(policy))
+	oldStatus := policy.DeepCopy()
+	oldStatus.Generation++
+	require.False(t, ancestor.AcceptsCurrentPolicy(oldStatus), "a prior generation cannot authorize an exporter")
+
+	require.NoError(t, kube.Delete(t.Context(), tracing))
+	reconcile()
+	require.Equal(t, foreign, policy.Status.Ancestors)
 }

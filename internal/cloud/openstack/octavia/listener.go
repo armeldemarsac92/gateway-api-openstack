@@ -35,6 +35,7 @@ func (s *Service) ListListeners(ctx context.Context, opts listeners.ListOpts) ([
 // been disabled and detached. Both zero values otherwise accept missing JSON.
 type ListenerInventory struct {
 	RequestFilters           map[string]ListenerRequestFilterObservation
+	OTLPTracing              map[string]ListenerOTLPTracingObservation
 	DefaultHTTPResponseCodes map[string]int
 	HTTPSVirtualHosts        map[string][]string
 	TCPTLSTermination        map[string]bool

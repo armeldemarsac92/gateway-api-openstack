@@ -134,6 +134,9 @@ func retainedBackendCAs(spec cloud.GatewayGraphSpec, actual observedGatewayGraph
 	for _, route := range spec.Gateway.TLSSNIRoutes {
 		selectRevision(route.BackendTLS)
 	}
+	if spec.Gateway.Telemetry != nil {
+		selectRevision(spec.Gateway.Telemetry.BackendTLS)
+	}
 	for _, node := range spec.Routes {
 		if node.Disposition == cloud.GraphEnsure {
 			for spec := range node.Spec.HTTPPortSpecs() {
