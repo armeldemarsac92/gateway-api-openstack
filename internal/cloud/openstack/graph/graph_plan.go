@@ -103,6 +103,20 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 	var staging, fixedStaging, fixedTargetWithdrawals []graphMutation
 	var weightedWithdrawals, targetRetries, closedListenerTargets []graphMutation
 	queueTargetWithdrawal := func(step graphMutation, observed observedRouteGraph, fresh *[]graphMutation) {
+		if desired.httpRequestPolicies == httpRequestPolicyUnverified && step.route.weightedTargets != nil {
+			// A target PUT retaining the timed policy can require the very
+			// capability we could not read. Close only this predicate.
+			for _, policy := range observed.policies {
+				if policy.policy.ID == step.route.id && policy.hasHTTPRequestPolicy() {
+					if !observedPolicyDisabled(policy) {
+						step.route = routeMutation{kind: routeMutationDisablePolicy, id: step.route.id, withdrawHTTPPolicy: true}
+						step.message = step.route.message()
+						*fresh = append(*fresh, step)
+					}
+					return
+				}
+			}
+		}
 		listener := actual.policyListener(observed, step.route.id)
 		switch {
 		case listener != nil && actual.adminObserved[listener.ID] && !listener.AdminStateUp && listener.ProvisioningStatus == "ACTIVE":
@@ -226,6 +240,8 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 				ensureHold = initialL7RulesReadbackMessage
 				holdPolicyOrder[port] = true
 				canRestoreTraffic = false
+			} else if errors.Is(err, errHTTPRequestPolicyUnverified) {
+				ensureHold = err.Error()
 			} else if err != nil {
 				return nil, result, &cloud.GraphError{Identity: route.spec.Identity, Err: err}
 			}
@@ -359,6 +375,13 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 				canRestoreTraffic = false
 			}
 		}
+		if desired.httpRequestPolicies == httpRequestPolicyUnavailable && node.Disposition == cloud.GraphEnsure && !relocating && frontendReady {
+			policyListenerID := listenerID
+			if !scopedHTTP && actual.listener != nil {
+				policyListenerID = actual.listener.ID
+			}
+			routeResult.ImplementedRules = hasProgrammedHTTPRule(route, observed, policyListenerID)
+		}
 		if groupedHTTP && p.initialL7Rules && !staleMemberWithdrawal && ensureHold == "" {
 			// Keep the normal backend order while a stale member needs to
 			// be removed, even if a pool update must precede its deletion.
@@ -444,6 +467,13 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 		}
 	}
 	result.Routes = routeResults
+	if desired.httpRequestPolicies == httpRequestPolicyUnavailable {
+		if step, ok := nextHTTPRequestPolicyWithdrawal(desired, actual); ok {
+			result.Outcome = p.progressingOutcome(step.message)
+			result.Routes[step.routeIndex].Result.Outcome = result.Outcome
+			return []graphMutation{step}, result, nil
+		}
+	}
 	// A failed teardown for one route must never leave another revoked route
 	// forwarding. Close all actionable policies, including fresh disables ahead
 	// of retries for previously failed disables, before touching descendants.

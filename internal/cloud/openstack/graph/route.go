@@ -68,6 +68,7 @@ type desiredPolicy struct {
 	requestHeaderOperations  []cloud.HTTPHeaderOperation
 	responseHeaderOperations []cloud.HTTPHeaderOperation
 	requestURLRewrite        *octavia.RequestURLRewrite
+	requestPolicy            *cloud.HTTPRequestPolicy
 	requestCORS              *cloud.HTTPCORS
 	targetRequestFilters     []octavia.WeightedHTTPTarget
 	localRewriteFallback     bool
@@ -495,7 +496,20 @@ func (p *Provider) buildHTTPMatchPolicies(r *desiredRoute, matches []cloud.HTTPP
 				}
 			}
 		}
+		requestPolicy := match.RequestPolicy
+		if requestPolicy != nil {
+			if !p.httpRequestPolicy || r.spec.GRPC || r.redirect {
+				return errors.New("HTTP request policy requires --octavia-http-request-policy on a forwarding HTTPRoute")
+			}
+			if err := requestPolicy.Validate(); err != nil {
+				return err
+			}
+			if r.fixedResponse {
+				requestPolicy = nil
+			}
+		}
 		for _, policy := range policies {
+			policy.requestPolicy = requestPolicy
 			policy.requestCORS = match.CORS
 			policy.targetRequestFilters = targetFilters
 			policy.backendKey, policy.matchKey = r.backendKey, matchKey

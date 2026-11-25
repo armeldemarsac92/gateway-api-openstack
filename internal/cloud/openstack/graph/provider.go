@@ -76,6 +76,7 @@ type ProviderConfig struct {
 	HTTPQueryParamExact    bool
 	HTTPRequestRedirect    bool
 	HTTPRequestURLRewrite  bool
+	HTTPRequestPolicy      bool
 	HTTPCORS               bool
 	BackendRequestFilters  bool
 	HTTPMethodMatch        bool
@@ -104,6 +105,7 @@ type Provider struct {
 	httpQueryParamExact    bool
 	httpRequestRedirect    bool
 	httpRequestURLRewrite  bool
+	httpRequestPolicy      bool
 	httpCORS               bool
 	backendRequestFilters  bool
 	httpMethodMatch        bool
@@ -144,6 +146,7 @@ func NewProvider(serviceClients ServiceClients, cfg ProviderConfig) *Provider {
 		httpHeaderExact:        cfg.HTTPHeaderExact,
 		httpQueryParamExact:    cfg.HTTPQueryParamExact,
 		httpRequestURLRewrite:  cfg.HTTPRequestURLRewrite,
+		httpRequestPolicy:      cfg.HTTPRequestPolicy,
 		httpCORS:               cfg.HTTPCORS,
 		backendRequestFilters:  cfg.BackendRequestFilters,
 		httpRequestRedirect:    cfg.HTTPRequestRedirect,

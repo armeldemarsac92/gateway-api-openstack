@@ -412,11 +412,18 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 			!r.currentBackendResolution(httpRoute, parent.ref, graphResult.backendDiagnostic) {
 			message := controller.ProviderProgressMessage(graphResult.Outcome, "Octavia resources for the HTTPRoute are still progressing")
 			status := pendingRouteStatus(message).withBackendDiagnostic(graphResult.backendDiagnostic).withBackendTLSAncestor(graphResult.backendTLSAncestorSlot)
+			status.partiallyInvalid = graphResult.PartiallyInvalid
+			status.implementedRules = graphResult.ImplementedRules
 			scope.setStatuses([]parentStatusUpdate{{parent: parent.ref, status: status}})
 		}
 		return ctrl.Result{RequeueAfter: controller.ProviderProgressRequeueAfter(graphResult.Outcome, httpRoute.UID)}, nil
 	}
 	status := programmedRouteStatus().withBackendDiagnostic(graphResult.backendDiagnostic).withBackendTLSAncestor(graphResult.backendTLSAncestorSlot)
+	status.partiallyInvalid = graphResult.PartiallyInvalid
+	status.implementedRules = graphResult.ImplementedRules
+	if status.programmed == metav1.ConditionTrue && status.partiallyInvalid != "" {
+		status.programmedMessage = "Octavia configuration for the supported rules is active"
+	}
 	scope.setStatuses([]parentStatusUpdate{{parent: parent.ref, status: status}})
 	log.FromContext(ctx).V(1).Info("Programmed HTTPRoute", "gateway", client.ObjectKeyFromObject(parent.gateway))
 	return ctrl.Result{RequeueAfter: controller.OpenStackResyncAfter(r.Config.OpenStackResyncInterval, httpRoute.UID)}, nil

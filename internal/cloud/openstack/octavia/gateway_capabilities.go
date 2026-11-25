@@ -27,6 +27,7 @@ import (
 const (
 	GatewayCapabilityHTTPHeaderExact           = "http_header_exact_v1"
 	GatewayCapabilityHTTPQueryParamExact       = "http_query_param_exact_v1"
+	GatewayCapabilityHTTPRequestPolicy         = "http_request_policy_v1"
 	GatewayCapabilityRequestURLRewrite         = "request_url_rewrite_v1"
 	GatewayCapabilityRequestCORS               = "request_cors_v1"
 	GatewayCapabilityHTTPRequestRedirect       = "http_request_redirect_v1"

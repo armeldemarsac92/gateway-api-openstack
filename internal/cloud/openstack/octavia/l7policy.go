@@ -171,6 +171,9 @@ type L7PolicyObservation struct {
 	Target                      *L7PolicyTarget
 	ExtendedTargetFields        bool
 	ActivationOptions           string
+	HTTPRequestPolicy           *cloud.HTTPRequestPolicy
+	HTTPRequestPolicyReported   bool
+	HTTPRequestPolicyPresent    bool
 	TargetRequestFiltersPresent bool
 	RedirectRequest             *RequestRedirect
 	RedirectRequestPresent      bool
@@ -234,6 +237,7 @@ func readPolicyObservation(raw json.RawMessage) (L7PolicyObservation, error) {
 		FixedResponse            json.RawMessage `json:"fixed_response"`
 		RedirectRequest          json.RawMessage `json:"redirect_request"`
 		RequestURLRewrite        json.RawMessage `json:"request_url_rewrite"`
+		HTTPRequestPolicy        json.RawMessage `json:"http_request_policy"`
 		RequestCORS              json.RawMessage `json:"request_cors"`
 		RequestHeaderOperations  json.RawMessage `json:"request_header_operations"`
 		ResponseHeaderOperations json.RawMessage `json:"response_header_operations"`
@@ -251,7 +255,7 @@ func readPolicyObservation(raw json.RawMessage) (L7PolicyObservation, error) {
 		_ = json.Unmarshal(row.HTTPSListenerHostname, &observation.HTTPSListenerHostname)
 	}
 	observation.ActivationOptions = policyActivationOptions(row.HTTPSListenerHostname, row.Targets, row.FixedResponse,
-		row.RedirectRequest, row.RequestURLRewrite, row.RequestCORS, row.RequestHeaderOperations, row.ResponseHeaderOperations)
+		row.RedirectRequest, row.RequestURLRewrite, row.RequestCORS, row.RequestHeaderOperations, row.ResponseHeaderOperations, row.HTTPRequestPolicy)
 	if row.AdminState != nil {
 		observation.Policy.AdminStateUp = *row.AdminState
 	}
@@ -288,6 +292,11 @@ func readPolicyObservation(raw json.RawMessage) (L7PolicyObservation, error) {
 	if observation.RequestURLRewriteReported && string(row.RequestURLRewrite) != "null" {
 		observation.RequestURLRewritePresent = true
 		observation.RequestURLRewrite = readRequestURLRewrite(row.RequestURLRewrite)
+	}
+	observation.HTTPRequestPolicyReported = row.HTTPRequestPolicy != nil
+	observation.HTTPRequestPolicyPresent = observation.HTTPRequestPolicyReported && string(row.HTTPRequestPolicy) != "null"
+	if observation.HTTPRequestPolicyPresent {
+		observation.HTTPRequestPolicy = readHTTPRequestPolicy(row.HTTPRequestPolicy)
 	}
 	observation.RequestCORSReported = row.RequestCORS != nil
 	if observation.RequestCORSReported && string(row.RequestCORS) != "null" {
@@ -367,6 +376,7 @@ type PolicyCreateOpts struct {
 	RequestURLRewrite        *RequestURLRewrite
 	InitialRules             []l7policies.CreateRuleOpts
 	RequestCORS              *cloud.HTTPCORS
+	HTTPRequestPolicy        *cloud.HTTPRequestPolicy
 }
 
 func (opts PolicyCreateOpts) ToL7PolicyCreateMap() (map[string]any, error) {
@@ -422,6 +432,14 @@ func (opts PolicyCreateOpts) ToL7PolicyCreateMap() (map[string]any, error) {
 			return nil, fmt.Errorf("request URL rewrite requires a valid forwarding action")
 		}
 		policy[requestURLRewriteField] = opts.RequestURLRewrite
+	}
+	if opts.HTTPRequestPolicy != nil {
+		if !forwardsToPools(string(opts.Action)) {
+			return nil, fmt.Errorf("%s requires a forwarding action", httpRequestPolicyField)
+		}
+		if err := (HTTPRequestPolicyUpdate{Value: opts.HTTPRequestPolicy}).write(body); err != nil {
+			return nil, err
+		}
 	}
 	if opts.RequestCORS != nil {
 		if err := opts.RequestCORS.Validate(); err != nil {

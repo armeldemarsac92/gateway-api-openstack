@@ -265,6 +265,8 @@ type auditCandidate struct {
 	requestRedirect        *octavia.RequestRedirect
 	requestRedirectPresent bool
 	requestRedirectValid   bool
+	requestPolicyPresent   bool
+	requestPolicyValid     bool
 	urlRewrite             *octavia.RequestURLRewrite
 	urlRewritePresent      bool
 	urlRewriteValid        bool
@@ -469,6 +471,8 @@ func (p *Scanner) collectAuditPolicies(
 		candidate.requestRedirect = observation.RedirectRequest
 		candidate.requestRedirectPresent = observation.RedirectRequestPresent
 		candidate.requestRedirectValid = observation.HasValidRequestRedirect()
+		candidate.requestPolicyPresent = observation.HTTPRequestPolicyPresent
+		candidate.requestPolicyValid = observation.HasValidHTTPRequestPolicy()
 		candidate.urlRewrite = observation.RequestURLRewrite
 		candidate.urlRewritePresent = observation.RequestURLRewritePresent
 		candidate.urlRewriteValid = observation.HasValidRequestURLRewrite()

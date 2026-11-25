@@ -197,6 +197,9 @@ func resolveWeightedHTTPPart(part desiredRoute, route desiredRoute, observed obs
 	}
 	for i := range part.policies {
 		policy := &part.policies[i]
+		if allLocal {
+			policy.requestPolicy = nil
+		}
 		if allLocal && policy.requestURLRewrite != nil {
 			policy.localRewriteFallback = true
 			policy.requestURLRewrite = nil
@@ -442,6 +445,16 @@ func weightedTargetWithdrawals(desired desiredRoute, observed observedRouteGraph
 		if !found || policy.pending() {
 			continue
 		}
+		wantedIndex := -1
+		if policy.hasHTTPRequestPolicy() {
+			wantedIndex = slices.IndexFunc(desired.policies, func(wanted desiredPolicy) bool { return wanted.role == policy.role })
+			if wantedIndex < 0 || desired.policies[wantedIndex].requestPolicy == nil && !policy.requestPolicyReported {
+				// Other writes can be refused after regional withdrawal.
+				// Retire only this owned action.
+				steps = append(steps, obsoleteWeightedFilterPolicyStep(policy))
+				continue
+			}
+		}
 		if policy.hasBackendRequestFilters() && !slices.ContainsFunc(desired.policies, func(wanted desiredPolicy) bool {
 			return wanted.role == policy.role && backendRequestFiltersPolicy.required(wanted)
 		}) {
@@ -497,7 +510,8 @@ func weightedTargetWithdrawals(desired desiredRoute, observed observedRouteGraph
 			withdrawn = policy.weightedTargets
 		}
 		if withdrawn != nil {
-			if policy.backendRequestFiltersTagged && !hasWeightedTargetRequestFilters(policy.weightedTargets) {
+			if policy.hasHTTPRequestPolicy() && !policy.requestPolicyReported ||
+				policy.backendRequestFiltersTagged && !hasWeightedTargetRequestFilters(policy.weightedTargets) {
 				// A grant changed, but the API cannot prove what else would
 				// be written by replaying the remaining target slots.
 				steps = append(steps, obsoleteWeightedFilterPolicyStep(policy))
@@ -516,8 +530,12 @@ func weightedTargetWithdrawals(desired desiredRoute, observed observedRouteGraph
 				}
 				continue
 			}
-			steps = append(steps, routeMutation{kind: routeMutationSetPolicyTarget, id: policy.policy.ID, weightedTargets: &withdrawn,
-				policyTags: backendRequestFilterTags(withdrawn, policy, nil), retry: retry, withdrawHTTPPolicy: true})
+			step := routeMutation{kind: routeMutationSetPolicyTarget, id: policy.policy.ID, weightedTargets: &withdrawn,
+				policyTags: backendRequestFilterTags(withdrawn, policy, nil), retry: retry, withdrawHTTPPolicy: true}
+			if policy.hasHTTPRequestPolicy() && desired.policies[wantedIndex].requestPolicy == nil {
+				step.clearHTTPRequestPolicy(policy)
+			}
+			steps = append(steps, step)
 		}
 	}
 	return steps
@@ -547,10 +565,14 @@ func localOnlyURLRewriteWithdrawal(desired desiredRoute, observed observedRouteP
 		}
 		patch := policyURLRewritePatch(nil, observed)
 		patch.KeepPolicyState = true
-		return routeMutation{kind: routeMutationSetPolicyTarget, id: observed.policy.ID, weightedTargets: &wanted.weightedPlan.targets,
+		step := routeMutation{kind: routeMutationSetPolicyTarget, id: observed.policy.ID, weightedTargets: &wanted.weightedPlan.targets,
 			requestURLRewriteUpdate: patch, requestHeaderOperations: policyHeaderPatch(nil, observed.requestHeaderOperations, false),
 			policyTags:         backendRequestFilterTags(wanted.weightedPlan.targets, observed, patch),
-			withdrawHTTPPolicy: true, retry: observed.policy.ProvisioningStatus == "ERROR"}, true
+			withdrawHTTPPolicy: true, retry: observed.policy.ProvisioningStatus == "ERROR"}
+		if observed.hasHTTPRequestPolicy() {
+			step.clearHTTPRequestPolicy(observed)
+		}
+		return step, true
 	}
 	return routeMutation{}, false
 }

@@ -17,6 +17,7 @@ limitations under the License.
 package octavia
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -168,20 +169,22 @@ func (s *Service) ActivatePolicies(ctx context.Context, listenerID string, batch
 
 // policyActivationOptions captures modifiers which can change how a policy
 // routes requests independently of the action and the rule list.
-func policyActivationOptions(hostname, targets, fixed, redirect, rewrite, cors, request, response json.RawMessage) string {
+func policyActivationOptions(hostname, targets, fixed, redirect, rewrite, cors, request, response, requestPolicy json.RawMessage) string {
 	var options = map[string]any{}
 	for _, option := range []struct {
 		name  string
 		value json.RawMessage
 	}{
 		{"hostname", hostname}, {"targets", targets}, {"fixed_response", fixed}, {"redirect_request", redirect},
-		{"request_url_rewrite", rewrite}, {"request_cors", cors}, {"request_headers", request}, {"response_headers", response},
+		{"request_url_rewrite", rewrite}, {"request_cors", cors}, {"request_headers", request}, {"response_headers", response}, {httpRequestPolicyField, requestPolicy},
 	} {
 		if len(option.value) == 0 {
 			continue
 		}
 		var value any
-		if err := json.Unmarshal(option.value, &value); err != nil {
+		decoder := json.NewDecoder(bytes.NewReader(option.value))
+		decoder.UseNumber()
+		if err := decoder.Decode(&value); err != nil {
 			options[option.name] = string(option.value)
 			continue
 		}
