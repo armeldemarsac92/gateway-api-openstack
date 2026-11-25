@@ -40,6 +40,7 @@ import (
 const (
 	telemetryListenerTag    = "gw-api-listener-otlp-v1"
 	telemetryAttributesTag  = "gw-api-listener-otlp-attributes-v1"
+	telemetryHeadersTag     = "gw-api-listener-otlp-export-headers-v1"
 	telemetryPoolTag        = "gw-api-otlp-collector-pool-v1"
 	telemetryPoolNamePrefix = "gateway-api-otlp-collector-"
 	telemetryExportPoolTag  = "gw-api-listener-otlp-pool-"
@@ -291,6 +292,9 @@ func (p *Provider) updateListenerTelemetry(ctx context.Context, graph telemetryG
 		if !slices.Contains(tags, telemetryListenerTag) {
 			tags = append(tags, telemetryListenerTag)
 		}
+		if value != nil && len(value.Headers) > 0 && !slices.Contains(tags, telemetryHeadersTag) {
+			tags = append(tags, telemetryHeadersTag)
+		}
 		if value != nil && len(value.Attributes) > 0 && !slices.Contains(tags, telemetryAttributesTag) {
 			// Keep this until exporter withdrawal is acknowledged. After a failed
 			// reload, the public profile can be narrower than the running one.
@@ -339,7 +343,7 @@ func (p *Provider) telemetryWithdrawal(ctx context.Context, graph telemetryGraph
 			continue
 		}
 		var reduced *octavia.ListenerOTLPTracing
-		if !cleared && retain != nil && retain(*frontend, current.Value) {
+		if !cleared && !current.HeadersMalformed && retain != nil && retain(*frontend, current.Value) {
 			if graph.loadBalancer.ProvisioningStatus != "ERROR" {
 				continue
 			}
@@ -347,14 +351,26 @@ func (p *Provider) telemetryWithdrawal(ctx context.Context, graph telemetryGraph
 				waiting = true
 				continue
 			}
-			wanted := graph.spec.Gateway.Telemetry.Attributes
-			if slices.ContainsFunc(current.Value.Attributes, func(a cloud.TelemetryAttribute) bool { return !slices.Contains(wanted, a) }) {
+			wanted := graph.spec.Gateway.Telemetry
+			staleHeaders := current.HeadersSHA256 != "" && current.HeadersSHA256 != wanted.Headers.Digest()
+			failedHeaderPublication := current.Status == "ERROR" &&
+				(current.HeadersSHA256 != "" || slices.Contains(frontend.Tags, telemetryHeadersTag))
+			switch {
+			case staleHeaders || failedHeaderPublication:
+				// A failed balancer permits clearing the entire owned exporter.
+				// The running worker can still have the previous header values.
+			case slices.ContainsFunc(current.Value.Attributes, func(a cloud.TelemetryAttribute) bool {
+				return !slices.Contains(wanted.Attributes, a)
+			}):
 				// Octavia accepts the current profile minus all attributes while the
 				// balancer is in ERROR. Additions wait for ordinary reconciliation.
 				profile := *current.Value
 				profile.Attributes = nil
+				if current.HeadersSHA256 != "" {
+					profile.Headers = wanted.Headers
+				}
 				reduced = &profile
-			} else if current.Status != "ERROR" || len(current.Value.Attributes) != 0 || !slices.Contains(frontend.Tags, telemetryAttributesTag) {
+			case current.Status != "ERROR" || len(current.Value.Attributes) != 0 || !slices.Contains(frontend.Tags, telemetryAttributesTag):
 				continue
 			}
 		}
@@ -399,7 +415,7 @@ func (p *Provider) telemetryWithdrawal(ctx context.Context, graph telemetryGraph
 	if acknowledged != nil {
 		result, err := p.applyTelemetryMutation(ctx, graph, "Releasing the acknowledged listener exporter", func() error {
 			tags := slices.DeleteFunc(slices.Clone(acknowledged.Tags), func(tag string) bool {
-				return tag == telemetryListenerTag || tag == telemetryAttributesTag || strings.HasPrefix(tag, telemetryExportPoolTag) || strings.HasPrefix(tag, telemetryRetryTag)
+				return tag == telemetryListenerTag || tag == telemetryAttributesTag || tag == telemetryHeadersTag || strings.HasPrefix(tag, telemetryExportPoolTag) || strings.HasPrefix(tag, telemetryRetryTag)
 			})
 			_, err := p.octavia.UpdateListener(ctx, acknowledged.ID, listeners.UpdateOpts{Tags: &tags})
 			return err
@@ -466,6 +482,9 @@ func (p *Provider) verifyTelemetryCapabilities(ctx context.Context, provider str
 	required := []string{octavia.GatewayCapabilityListenerOTLPTracing}
 	if wanted != nil && wanted.Sampling != nil {
 		required = append(required, octavia.GatewayCapabilityListenerOTLPSampling)
+	}
+	if wanted != nil && len(wanted.Headers) > 0 {
+		required = append(required, octavia.GatewayCapabilityListenerOTLPExportHeaders)
 	}
 	if wanted != nil && len(wanted.Attributes) > 0 {
 		required = append(required, octavia.GatewayCapabilityListenerOTLPSpanAttributes)
@@ -558,7 +577,10 @@ func (p *Provider) convergeGatewayTelemetry(ctx context.Context, graph telemetry
 		return p.telemetryPending("Waiting to verify the listener inventory before programming tracing"), nil
 	}
 	wire := octavia.ListenerOTLPTracing{CollectorPoolID: pool.pool.ID, ServiceName: wanted.ServiceName, SpanName: wanted.SpanName,
-		Sampling: wanted.Sampling, Attributes: wanted.Attributes}
+		Sampling: wanted.Sampling, Attributes: wanted.Attributes, Headers: wanted.Headers}
+	expected := wire
+	expected.Headers = nil
+	digest := wanted.Headers.Digest()
 	observed := 0
 	var retryAfter time.Duration
 	for _, frontend := range graph.listeners {
@@ -574,7 +596,7 @@ func (p *Provider) convergeGatewayTelemetry(ctx context.Context, graph telemetry
 			continue
 		}
 		canWrite := frontend.ProvisioningStatus == "ACTIVE" || frontend.ProvisioningStatus == "ERROR"
-		if !reflect.DeepEqual(current.Value, &wire) {
+		if !reflect.DeepEqual(current.Value, &expected) || current.HeadersSHA256 != digest {
 			if !canWrite {
 				continue
 			}

@@ -97,6 +97,22 @@ func ClassifyOctaviaMutation(err error) error {
 	return err
 }
 
+// RedactOctaviaMutation preserves the retry category without exposing the
+// response body, which can contain submitted header values or TLS references.
+func RedactOctaviaMutation(err error, operation string) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, context.Canceled) {
+		return context.Canceled
+	}
+	category, known := cloud.ErrorCategoryOf(Classify(ClassifyOctaviaMutation(err)))
+	if !known {
+		category = cloud.ErrorCategoryResourceFailure
+	}
+	return cloud.NewProviderError(category, errors.New(operation))
+}
+
 // IsOctaviaVIPAddressConflict identifies an allocation conflict for the
 // requested Amphora VIP. Octavia also wraps Neutron quota errors in this fault.
 func IsOctaviaVIPAddressConflict(err error, requested string) bool {

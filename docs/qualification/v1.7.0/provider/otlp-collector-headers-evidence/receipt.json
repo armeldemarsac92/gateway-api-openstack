@@ -1,0 +1,355 @@
+{
+  "contract": "Experimental XTelemetryPolicy.spec.tracing.provider.headers",
+  "upstreamRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "controller": {
+    "repository": "ghcr.io/armeldemarsac92/gateway-api-openstack",
+    "sourceRevision": "b2d3e2179102a6a5015663427c019b9ba55a5579",
+    "sourceLabel": "https://github.com/armeldemarsac92/gateway-api-openstack",
+    "manifestDigest": "sha256:7d0c5660a923ddd638348ef7472f99780f654905c8d8b770620447e2759f83aa",
+    "configDigest": "sha256:7c9b27c5e3595e4284cb0ce7935b76a53da09303cd83186c293b7b671c5c24b3",
+    "platform": "linux/amd64",
+    "entrypoint": "/openstack-gateway-controller",
+    "user": "65532:65532",
+    "ociArchiveSHA256": "6709027128ca3de2bb09556e78387f80e95d780d7c911ef9d66d722bc7084da1",
+    "managerSHA256": "d44081d174b06a66d9d3f90cb6c0c94624b542796918fe81b09efb4970f86863",
+    "normalAndNoCacheBuildsMatch": true
+  },
+  "octavia": {
+    "source": "0c4bdf40d7d2d11cedb2e60d4989a24d3df649d8",
+    "version": "19.0.1.dev89",
+    "wheelSHA256": "c151db2316f1a53bf225a81e393081281f32251aefb3a60f28e754ecfeedf864",
+    "release": "https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-otlp-collector-request-headers-0c4bdf40d7d2"
+  },
+  "octaviaLib": {
+    "source": "eb4c646b59758334629feb99d517f938c8af3712",
+    "wheel": {
+      "name": "octavia_lib-3.12.1.dev21-py3-none-any.whl",
+      "sha256": "a184a491c44d654317c6d1ae3225e3bed73f1eb8632132291ce01953e28dfa5d"
+    }
+  },
+  "channels": {
+    "standard": {
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "kindNodeImage": "localhost/hibiscus-kind-node:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67@sha256:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67",
+      "haproxyVersion": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1",
+      "fixtureScenarioSHA256": "93a742053d9695e9d25f65eba51425d9365c2983786e8cbffb8a0d96c4773eb6",
+      "haproxySHA256": "0780ee4508f3195aeb3b0af160f70be010addbc5283bfaf38fe747dd8e853fde",
+      "luaSHA256": "7427a714f36548c20f426d28ee45938e05854c08e4cf6b38fb52680a70a2f6d1",
+      "collector": {
+        "version": "otelcol version 0.165.0",
+        "sha256": "14e254a6a0880d9b6f94487658e49fc9f3b0e14c62e82253be78da08e8c1ddd8"
+      },
+      "policyDiscovery": {
+        "installed": false,
+        "discovered": false
+      },
+      "regionalCapability": false,
+      "managerLogHasNoHeaderValue": true,
+      "nativeHAProxyReloads": 4,
+      "localChecks": [
+        "kind, Kubernetes Gateway API resources, real application and Collector Pods",
+        "Octavia REST, database, HAProxy Amphora driver and agent publication",
+        "HTTP VIP, OTLP/HTTPS exporter request metadata, header rotation and grant withdrawal/recovery"
+      ],
+      "simulated": [
+        "Local single Amphora inventory, process control, and agent transport",
+        "Keystone, Neutron, some provider provisioning, namespace tunnel",
+        "Synthetic regional trust and signed DIB Lua staged in a private mount",
+        "Local callback publishes pool/member writes. Native listener TaskFlow dispatches to installed driver."
+      ],
+      "unverified": [
+        "Regional deployment, packaged Amphora VM, full Gateway API conformance"
+      ],
+      "phases": {
+        "standard-forwarding": {
+          "gatewayUID": "a8eabebc-ff17-40bb-a439-4ec3ad07abda",
+          "witnessGatewayUID": "ef7df609-ee4a-4c0b-8111-4fd0ff2ac78f",
+          "gatewayConditions": {
+            "gateway": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed"
+            },
+            "listener": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            },
+            "route": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          },
+          "listenerID": "4ebd0657-838d-42b2-8b6a-457bc684c607",
+          "witnessListenerID": "e409a677-7d3f-4578-adea-2525be6a2a84",
+          "exporterEnabled": false,
+          "witnessExporterEnabled": false,
+          "headerReadback": {
+            "headersSHA256": null,
+            "restShowAndListDigestOnly": true,
+            "configurationContainsExpectedHeader": false
+          },
+          "forwarding": {
+            "http200": 2,
+            "exportHeaderAbsent": true,
+            "traceContextUnchanged": true
+          }
+        }
+      }
+    },
+    "experimental": {
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "kindNodeImage": "localhost/hibiscus-kind-node:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67@sha256:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67",
+      "haproxyVersion": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1",
+      "fixtureScenarioSHA256": "93a742053d9695e9d25f65eba51425d9365c2983786e8cbffb8a0d96c4773eb6",
+      "haproxySHA256": "0780ee4508f3195aeb3b0af160f70be010addbc5283bfaf38fe747dd8e853fde",
+      "luaSHA256": "7427a714f36548c20f426d28ee45938e05854c08e4cf6b38fb52680a70a2f6d1",
+      "collector": {
+        "version": "otelcol version 0.165.0",
+        "sha256": "14e254a6a0880d9b6f94487658e49fc9f3b0e14c62e82253be78da08e8c1ddd8"
+      },
+      "policyDiscovery": {
+        "installed": true,
+        "discovered": true,
+        "bundleVersion": "v1.7.0",
+        "channel": "experimental"
+      },
+      "regionalCapability": true,
+      "managerLogHasNoHeaderValue": true,
+      "nativeHAProxyReloads": 21,
+      "localChecks": [
+        "kind, Kubernetes Gateway API resources, real application and Collector Pods",
+        "Octavia REST, database, HAProxy Amphora driver and agent publication",
+        "HTTP VIP, OTLP/HTTPS exporter request metadata, header rotation and grant withdrawal/recovery"
+      ],
+      "simulated": [
+        "Local single Amphora inventory, process control, and agent transport",
+        "Keystone, Neutron, some provider provisioning, namespace tunnel",
+        "Synthetic regional trust and signed DIB Lua staged in a private mount",
+        "Local callback publishes pool/member writes. Native listener TaskFlow dispatches to installed driver."
+      ],
+      "unverified": [
+        "Regional deployment, packaged Amphora VM, full Gateway API conformance"
+      ],
+      "phases": {
+        "header-attached": {
+          "gatewayUID": "19c5f65a-a218-4c61-96ea-b3331f37454f",
+          "witnessGatewayUID": "f2755e94-cc66-4089-8170-262a7c80579b",
+          "gatewayConditions": {
+            "gateway": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed",
+              "AddressesAssigned": "True/AddressesAssigned"
+            },
+            "listener": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            },
+            "route": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          },
+          "listenerID": "3d2fd353-f9d6-40c7-943f-52da8e7f262a",
+          "witnessListenerID": "f125dd5e-081b-4e57-a526-82696cfe86f7",
+          "exporterEnabled": true,
+          "witnessExporterEnabled": false,
+          "headerReadback": {
+            "headersSHA256": "06a2f4a8bf08b704ac513f2563716078b051a0807be676c04706be95356c7b1a",
+            "restShowAndListDigestOnly": true,
+            "configurationContainsExpectedHeader": true,
+            "agentConfigurationRedacted": true
+          },
+          "policy": {
+            "generation": 1,
+            "uid": "9dfd1c86-94d9-4988-8e9b-132e7607993b",
+            "currentAncestorConditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs"
+            }
+          },
+          "agentConfigurationSHA256": "9aeabc70c2a471adc5338e28140ff4d81166f51c526d135180f9113bdb86b13c",
+          "collector": {
+            "verifiedTLS": true,
+            "headerDigestMatched": true,
+            "matchingSpans": 1,
+            "spanID": "86f455151492004e",
+            "traceID": "f2587ea68d74423a8ecc5408fca9c7cb"
+          },
+          "forwarding": {
+            "applicationHTTP200": 1,
+            "witnessHTTP200": 1,
+            "exportHeaderAbsent": true
+          }
+        },
+        "header-rotated": {
+          "gatewayUID": "19c5f65a-a218-4c61-96ea-b3331f37454f",
+          "witnessGatewayUID": "f2755e94-cc66-4089-8170-262a7c80579b",
+          "gatewayConditions": {
+            "gateway": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed",
+              "AddressesAssigned": "True/AddressesAssigned"
+            },
+            "listener": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            },
+            "route": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          },
+          "listenerID": "3d2fd353-f9d6-40c7-943f-52da8e7f262a",
+          "witnessListenerID": "f125dd5e-081b-4e57-a526-82696cfe86f7",
+          "exporterEnabled": true,
+          "witnessExporterEnabled": false,
+          "headerReadback": {
+            "headersSHA256": "ad65a119d4f4f6e7a3e0036f7a9b1ac6f02b586245694b0af45454cabdfbf370",
+            "restShowAndListDigestOnly": true,
+            "configurationContainsExpectedHeader": true,
+            "agentConfigurationRedacted": true
+          },
+          "policy": {
+            "generation": 2,
+            "uid": "9dfd1c86-94d9-4988-8e9b-132e7607993b",
+            "currentAncestorConditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs"
+            }
+          },
+          "agentConfigurationSHA256": "47d863d81d680279bd0da5f3442fc3669f5fae95265d27ccc4821947b02a8d0c",
+          "collector": {
+            "verifiedTLS": true,
+            "headerDigestMatched": true,
+            "matchingSpans": 1,
+            "spanID": "74484627c7856a94",
+            "traceID": "3aba2185aa8f45de92bb139ef8b95fbc"
+          },
+          "forwarding": {
+            "applicationHTTP200": 1,
+            "witnessHTTP200": 1,
+            "exportHeaderAbsent": true
+          }
+        },
+        "grant-withdrawn": {
+          "gatewayUID": "19c5f65a-a218-4c61-96ea-b3331f37454f",
+          "witnessGatewayUID": "f2755e94-cc66-4089-8170-262a7c80579b",
+          "gatewayConditions": {
+            "gateway": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed",
+              "AddressesAssigned": "True/AddressesAssigned"
+            },
+            "listener": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            },
+            "route": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          },
+          "listenerID": "3d2fd353-f9d6-40c7-943f-52da8e7f262a",
+          "witnessListenerID": "f125dd5e-081b-4e57-a526-82696cfe86f7",
+          "exporterEnabled": false,
+          "witnessExporterEnabled": false,
+          "headerReadback": {
+            "headersSHA256": null,
+            "restShowAndListDigestOnly": true,
+            "configurationContainsExpectedHeader": false
+          },
+          "acknowledgedClear": {
+            "afterRotation": true,
+            "headersAbsentAtClear": true,
+            "headersAbsentAfterPoolRetirement": true,
+            "listenerClearMethod": "PUT",
+            "exporterExplicitlyNull": true,
+            "finalConfigurationSHA256": "3e72b27a80d46b233f49ab729480948f6eb2947a97f67b5cee4d60f005125d70"
+          },
+          "policy": {
+            "generation": 2,
+            "uid": "9dfd1c86-94d9-4988-8e9b-132e7607993b",
+            "currentAncestorConditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "False/RefNotPermitted"
+            }
+          },
+          "agentConfigurationSHA256": "be4292d05f7f2533c42ce3a5a3f181c39706efdd046f58c59359a70dea50f10f",
+          "forwarding": {
+            "http200": 20,
+            "exportHeaderAbsent": true,
+            "traceContextUnchanged": true
+          },
+          "matchingCollectorSpans": 0,
+          "observationSeconds": 6.608,
+          "collectorHealthy": true,
+          "retiredPoolAbsent": true
+        },
+        "grant-restored": {
+          "gatewayUID": "19c5f65a-a218-4c61-96ea-b3331f37454f",
+          "witnessGatewayUID": "f2755e94-cc66-4089-8170-262a7c80579b",
+          "gatewayConditions": {
+            "gateway": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed",
+              "AddressesAssigned": "True/AddressesAssigned"
+            },
+            "listener": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            },
+            "route": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          },
+          "listenerID": "3d2fd353-f9d6-40c7-943f-52da8e7f262a",
+          "witnessListenerID": "f125dd5e-081b-4e57-a526-82696cfe86f7",
+          "exporterEnabled": true,
+          "witnessExporterEnabled": false,
+          "headerReadback": {
+            "headersSHA256": "ad65a119d4f4f6e7a3e0036f7a9b1ac6f02b586245694b0af45454cabdfbf370",
+            "restShowAndListDigestOnly": true,
+            "configurationContainsExpectedHeader": true,
+            "agentConfigurationRedacted": true
+          },
+          "policy": {
+            "generation": 2,
+            "uid": "9dfd1c86-94d9-4988-8e9b-132e7607993b",
+            "currentAncestorConditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs"
+            }
+          },
+          "agentConfigurationSHA256": "50759d0601b5ca58a40e527fbfcdf430f0bd2a2d9525059ea36e57224dc48c3c",
+          "collector": {
+            "verifiedTLS": true,
+            "headerDigestMatched": true,
+            "matchingSpans": 1,
+            "spanID": "af210fcdcff61eb4",
+            "traceID": "d70b6650c3794ca796e0d22b9dd4bf46"
+          },
+          "forwarding": {
+            "applicationHTTP200": 1,
+            "witnessHTTP200": 1,
+            "exportHeaderAbsent": true
+          }
+        }
+      }
+    }
+  }
+}

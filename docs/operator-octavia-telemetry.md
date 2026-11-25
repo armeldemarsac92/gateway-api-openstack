@@ -47,7 +47,7 @@ spec:
 
 Inspect the policy’s `status.ancestors` entry for the target Gateway. It reports acceptance and whether the collector reference is permitted and resolved. The Octavia listener exposes its own `otlp_tracing_status`. `PENDING_UPDATE` means Amphora has yet to finish programming the exporter. `ACTIVE` records successful configuration publication and TLS preparation. To check delivery, look for the request’s trace ID in the collector. A collector TLS preparation failure sets the exporter to `ERROR` while the application listener continues serving. [Provider API](https://github.com/armeldemarsac92/octavia/blob/5edd5b1402fd22de33a13fc84d6cc0ab9f38b593/api-ref/source/parameters.yaml#L2074)
 
-The collector uses HTTP/1.1. The default sampling rate is 100%. It supports a service name, span name and W3C trace context. A collector with an applicable `BackendTLSPolicy` also requires the controller’s backend TLS option and the corresponding regional support. Custom exporter headers remain open. [Backend TLS setup](operator-octavia-backend-tls-policy.md)
+The collector uses HTTP/1.1. The default sampling rate is 100%. It supports a service name, span name and W3C trace context. A collector with an applicable `BackendTLSPolicy` also requires the controller’s backend TLS option and the corresponding regional support. Amphora can also set headers on collector requests when the region advertises `listener_otlp_export_headers_v1`. [Backend TLS setup](operator-octavia-backend-tls-policy.md)
 
 ## Authenticate the collector with Amphora system trust
 
@@ -77,6 +77,27 @@ The collector receives OTLP over HTTPS with HTTP/1.1. Octavia verifies the chain
 The controller creates an isolated collector pool and waits for its `backend_tls_system_ca_sha256` before adding members or attaching it to a listener. A regional digest change invalidates prior pool attestations. If a worker cannot prepare the pinned bundle during a render, Octavia closes the exporter backend and the controller withdraws the exporter when its proof is absent. Removing the collector's `ReferenceGrant` also withdraws the exporter. Check `otlp_tracing: null` with `otlp_tracing_status: ACTIVE` for acknowledged withdrawal. Application listeners continue serving during these operations. During an upgrade, an older worker may advertise regional System CA support for application pools while leaving the isolated collector digest empty. Tracing stays pending until the compatible worker attests the pool. Verify span delivery at the collector after all relevant listeners acknowledge the configuration.
 
 On local Experimental kind, the controller read the System CA digest on the empty collector pool before adding its first member. HAProxy loaded the same bundle, sent SNI and verified the collector hostname. The Collector decoded one span matching the application trace. Removing the cross-namespace ReferenceGrant cleared the exporter and retired the pool. Both HTTP routes returned 200 in all 20 settled probes, with zero matching collector spans over 6.618 seconds. The Collector accepted a direct HTTPS health span. Recreating the grant produced a newly attested pool and one matching span on the first measured application request. Standard returned 2 HTTP 200 responses with the incoming trace context intact and omitted the XTelemetryPolicy CRD. The run used wire HTTP and OTLP/HTTPS with a simulated Amphora agent transport and cloud provisioning. [Local qualification](qualification/v1.7.0/provider/collector-system-tls-evidence/receipt.json) · [Octavia packages](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-otlp-collector-system-trust-31e1fcaeb920) · [octavia-lib package](https://github.com/armeldemarsac92/octavia-lib/releases/tag/hibiscus-http-header-persistence-eb4c646b5975)
+
+## Set headers on collector requests
+
+Enroll Amphora under `[api_settings] enabled_listener_otlp_export_headers_providers` and check that the region advertises `listener_otlp_export_headers_v1`. Set `spec.tracing.provider.headers` on the Experimental policy. For example, a collector can use the following label to select a dataset.
+
+```yaml
+provider:
+  backendRef:
+    name: otelcol
+    namespace: observability
+    port: 4318
+  headers:
+    - name: X-Trace-Dataset
+      value: gateway
+```
+
+The collector receives these field values on OTLP export requests. Application requests and spans keep their own headers and attributes. Removing the list clears the fields from the exporter. The Octavia listener reports a SHA-256 digest for configured headers. Kubernetes holds the literal values in the policy specification. The collector transport follows the Service’s backend TLS policy. [Collector TLS setup](#authenticate-the-collector-with-amphora-system-trust)
+
+A policy can list up to 16 headers. Each name can be up to 256 bytes and each printable ASCII value up to 4,096 bytes. If names differ only by case, the first entry supplies the value. The exporter reserves `Host`, `Connection`, `Content-Length`, `Content-Type`, `Content-Encoding`, `Transfer-Encoding`, `TE`, `Trailer`, `Upgrade`, `Proxy-Connection`, `Keep-Alive` and `Expect` for its HTTP transport.
+
+On local Experimental kind, the Collector received the configured header on a correlated application span, then the replacement value after rotation. The application and a second Gateway's witness route kept serving HTTP without receiving the export header. After removal of the collector ReferenceGrant, the exporter stopped and both routes served 20 HTTP 200 probes with zero matching spans over 6.608 seconds. Restoring the grant restored the rotated header. The Standard cluster served both routes and omitted the telemetry policy CRD. [Conditions and observed traffic](qualification/v1.7.0/provider/otlp-collector-headers-evidence/receipt.json) · [Octavia packages](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-otlp-collector-request-headers-0c4bdf40d7d2)
 
 ## Add attributes to request spans
 
