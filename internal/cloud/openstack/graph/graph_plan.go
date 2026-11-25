@@ -257,7 +257,7 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 			} else if errors.Is(err, errRequestMirrorsUnverified) {
 				ensureHold = err.Error()
 			} else if errors.Is(err, errXBackendCookieUnavailable) || errors.Is(err, errXBackendCookieDeadlineUnavailable) || errors.Is(err, errXBackendCookieUnverified) ||
-				errors.Is(err, errXBackendCookiePermanentUnavailable) || errors.Is(err, errXBackendCookiePermanentReadback) {
+				errors.Is(err, errXBackendCookiePermanentUnavailable) || errors.Is(err, errXBackendCookiePermanentReadback) || errors.Is(err, errXBackendCookiePathUnavailable) {
 				ensureHold = err.Error()
 			} else if errors.Is(err, errBackendRetryBudgetAncestor) || errors.Is(err, errBackendRetryBudgetCapability) || errors.Is(err, errBackendRetryBudgetReadback) {
 				ensureHold = err.Error()

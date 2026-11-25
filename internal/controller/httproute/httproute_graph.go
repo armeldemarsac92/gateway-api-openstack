@@ -47,6 +47,7 @@ type routeGraphResult struct {
 	rejectedSections        []model.ListenerSection
 	backendObserved         bool
 	usesXBackendClientTLS   bool
+	xBackendCookieRevision  *string
 	backendDiagnostic       model.Diagnostic
 	corsFallback            bool
 	backendTLSAncestorSlot  backendtls.AncestorSlot
@@ -98,6 +99,7 @@ func (r *Reconciler) ensureRouteGraph(
 		HTTPRouteRejectedSections:        &prepared.rejectedSections,
 		HTTPRouteRetryBudgetAncestorFull: &prepared.retryBudgetAncestorFull,
 		HTTPRouteUsesXBackendClientTLS:   &prepared.usesXBackendClientTLS,
+		HTTPRouteXBackendCookieRevision:  prepared.xBackendCookieRevision,
 	}
 	if r.Config.BackendTLSPolicy {
 		request.HTTPRouteBackendTLSAncestorSlot = &prepared.backendTLSAncestorSlot
@@ -166,6 +168,11 @@ func (r *Reconciler) prepareRouteGraphBinding(ctx context.Context, route *gatewa
 	}
 	if snapshot.backends != nil {
 		prepared.usesXBackendClientTLS = snapshot.backends.routeUsesXBackendClientTLS(route)
+		if r.Config.XBackendEnabled() && r.Config.XBackendSessionPersistence &&
+			model.HTTPProfileRouteKind(route) == model.HTTPRouteKind && len(model.LocalXBackendReferences(route)) != 0 {
+			revision := xBackendCookieRevision(route, snapshot.backends.input.XBackends)
+			prepared.xBackendCookieRevision = &revision
+		}
 	}
 	if err != nil {
 		return prepared, err

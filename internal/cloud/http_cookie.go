@@ -35,9 +35,10 @@ type HTTPSessionCookieDeadline struct {
 type HTTPSessionCookieRequirements uint8
 
 const (
-	HTTPSessionCookieNamed HTTPSessionCookieRequirements = iota
-	HTTPSessionCookieTimed
-	HTTPSessionCookiePermanent
+	HTTPSessionCookieNamed     HTTPSessionCookieRequirements = 0
+	HTTPSessionCookieTimed     HTTPSessionCookieRequirements = 1 << 0
+	HTTPSessionCookiePermanent HTTPSessionCookieRequirements = 1 << 1
+	HTTPSessionCookiePath      HTTPSessionCookieRequirements = 1 << 2
 )
 
 func (deadline *HTTPSessionCookieDeadline) Requirements() HTTPSessionCookieRequirements {
@@ -49,6 +50,14 @@ func (deadline *HTTPSessionCookieDeadline) Requirements() HTTPSessionCookieRequi
 	default:
 		return HTTPSessionCookieTimed
 	}
+}
+
+// WithPath adds the regional requirement for a custom cookie path.
+func (requirements HTTPSessionCookieRequirements) WithPath(path *string) HTTPSessionCookieRequirements {
+	if path != nil && *path != "/" {
+		return requirements | HTTPSessionCookiePath
+	}
+	return requirements
 }
 
 func (deadline HTTPSessionCookieDeadline) Valid() bool {
@@ -63,4 +72,18 @@ func ValidHTTPSessionCookieName(name string) bool {
 	return httpSessionCookieToken.MatchString(name) &&
 		!strings.HasPrefix(lower, "__host-") && !strings.HasPrefix(lower, "__secure-") &&
 		!strings.HasPrefix(lower, "__http-")
+}
+
+// ValidHTTPSessionCookiePath checks the RFC 6265 path-value byte grammar
+// and the Octavia length limit. An explicit empty value is valid.
+func ValidHTTPSessionCookiePath(path string) bool {
+	if len(path) > 1024 {
+		return false
+	}
+	for i := 0; i < len(path); i++ {
+		if b := path[i]; b < 0x20 || b > 0x7e || b == ';' {
+			return false
+		}
+	}
+	return true
 }

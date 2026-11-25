@@ -427,7 +427,17 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 				Reason: string(gatewayv1.RouteReasonUnsupportedProtocol), Message: graphResult.UnsupportedBackendProtocol,
 			}
 		}
-		if graphResult.usesXBackendClientTLS || !graphResult.ObservationDeferred || graphResult.backendTLSAncestorSlot != backendtls.AncestorSlotHeld ||
+		cookieRevisionCurrent := true
+		if graphResult.ObservationDeferred && graphResult.xBackendCookieRevision != nil {
+			revision, err := r.liveXBackendCookieRevision(ctx, httpRoute)
+			cookieRevisionCurrent = err == nil && revision == *graphResult.xBackendCookieRevision &&
+				r.currentXBackendCookieRevision(httpRoute, parent.ref, revision)
+			if !cookieRevisionCurrent {
+				graphResult.BackendSessionPersistenceIssue = max(graphResult.BackendSessionPersistenceIssue, cloud.SessionPersistencePathReadbackUnverified)
+			}
+		}
+		if graphResult.usesXBackendClientTLS || !graphResult.ObservationDeferred || !cookieRevisionCurrent ||
+			graphResult.backendTLSAncestorSlot != backendtls.AncestorSlotHeld ||
 			graphResult.BackendSessionPersistenceIssue >= cloud.SessionPersistenceUnverified ||
 			r.currentRouteProgrammedCondition(httpRoute, parent.ref) == nil ||
 			!r.currentBackendResolution(httpRoute, parent.ref, graphResult.backendDiagnostic) {
@@ -448,6 +458,7 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 		status.programmedMessage = "Octavia configuration for the supported rules is active"
 	}
 	scope.setStatuses([]parentStatusUpdate{{parent: parent.ref, status: status}})
+	scope.statusPlan.xBackendCookieRevision = graphResult.xBackendCookieRevision
 	log.FromContext(ctx).V(1).Info("Programmed HTTPRoute", "gateway", client.ObjectKeyFromObject(parent.gateway))
 	return ctrl.Result{RequeueAfter: resyncAfter}, nil
 }

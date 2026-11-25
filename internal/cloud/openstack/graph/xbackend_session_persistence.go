@@ -21,7 +21,6 @@ import (
 	"errors"
 	"maps"
 	"slices"
-	"sync"
 	"time"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
@@ -32,6 +31,7 @@ import (
 const (
 	httpCookiePersistence      = "HTTP_COOKIE"
 	xBackendCookieTag          = "gateway-api-openstack.xbackend-session-cookie=v1"
+	xBackendCookiePathTag      = "gateway-api-openstack.xbackend-session-cookie-path=v1"
 	xBackendCookieDeadlineTag  = "gateway-api-openstack.xbackend-session-cookie-absolute-timeout=v1"
 	xBackendCookiePermanentTag = "gateway-api-openstack.xbackend-session-cookie-permanent=v1"
 )
@@ -46,6 +46,7 @@ const (
 )
 
 var (
+	errXBackendCookiePathUnavailable      = errors.New("regional Octavia provider does not advertise all capabilities required for XBackend custom cookie paths, including http_cookie_path_v1")
 	errXBackendCookieUnavailable          = errors.New("regional Octavia provider does not advertise http_cookie_name_v1")
 	errXBackendCookieDeadlineUnavailable  = errors.New("regional Octavia provider does not advertise both http_cookie_name_v1 and http_cookie_absolute_timeout_v1")
 	errXBackendCookiePermanentUnavailable = errors.New("regional Octavia provider does not advertise all capabilities required by a Permanent cookie")
@@ -66,11 +67,14 @@ func (p *Provider) discoverXBackendCookie(ctx context.Context, provider string, 
 	discovery, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	required := []string{octavia.GatewayCapabilityHTTPCookieName}
-	if requirements >= cloud.HTTPSessionCookieTimed {
+	if requirements&(cloud.HTTPSessionCookieTimed|cloud.HTTPSessionCookiePermanent) != 0 {
 		required = append(required, octavia.GatewayCapabilityHTTPCookieAbsoluteTimeout)
 	}
-	if requirements == cloud.HTTPSessionCookiePermanent {
+	if requirements&cloud.HTTPSessionCookiePermanent != 0 {
 		required = append(required, octavia.GatewayCapabilityHTTPCookiePermanent)
+	}
+	if requirements&cloud.HTTPSessionCookiePath != 0 {
+		required = append(required, octavia.GatewayCapabilityHTTPCookiePath)
 	}
 	err := p.octavia.VerifyGatewayCapabilities(discovery, provider, required...)
 	var missing *octavia.MissingGatewayCapability
@@ -87,22 +91,24 @@ func (p *Provider) prepareXBackendCookies(ctx context.Context, desired *desiredG
 		desired.spec.Gateway.Disposition != cloud.GraphEnsure || len(desired.routes) != len(actual.routes) {
 		return nil
 	}
-	capability := func(requirements cloud.HTTPSessionCookieRequirements) func() xBackendCookieCapability {
-		return sync.OnceValue(func() xBackendCookieCapability {
-			available, err := p.discoverXBackendCookie(ctx, actual.loadBalancer.Provider, requirements)
-			switch {
-			case err != nil:
-				return xBackendCookieUnverified
-			case available:
-				return xBackendCookieAvailable
-			default:
-				return xBackendCookieUnavailable
-			}
-		})
+	capabilities := make(map[cloud.HTTPSessionCookieRequirements]xBackendCookieCapability)
+	capability := func(requirements cloud.HTTPSessionCookieRequirements) xBackendCookieCapability {
+		if seen, ok := capabilities[requirements]; ok {
+			return seen
+		}
+		available, err := p.discoverXBackendCookie(ctx, actual.loadBalancer.Provider, requirements)
+		var observation xBackendCookieCapability
+		switch {
+		case err != nil:
+			observation = xBackendCookieUnverified
+		case available:
+			observation = xBackendCookieAvailable
+		default:
+			observation = xBackendCookieUnavailable
+		}
+		capabilities[requirements] = observation
+		return observation
 	}
-	named := capability(cloud.HTTPSessionCookieNamed)
-	timed := capability(cloud.HTTPSessionCookieTimed)
-	permanent := capability(cloud.HTTPSessionCookiePermanent)
 	permanentPools := make(map[string][]*desiredRoute)
 	var withdrawal *graphMutation
 	for i := range desired.routes {
@@ -115,30 +121,38 @@ func (p *Provider) prepareXBackendCookies(ctx context.Context, desired *desiredG
 			part := &desired.routes[i].httpParts[j]
 			targets[part.backendKey] = true
 			current := actual.routes[i].httpParts[part.backendKey]
+			part.cookieReadbackPending, part.cookiePathReadbackPending = false, false
+			if part.sessionCookieName != "" {
+				part.sessionCookieCapability = capability(part.sessionCookieDeadline.Requirements().WithPath(part.sessionCookiePath))
+			}
 			switch {
-			case part.sessionCookieDeadline != nil:
+			case part.sessionCookiePath != nil:
+				part.cookiePathReadbackPending = current == nil || !part.activeCookieMatches(*current)
+			case part.xBackend && current != nil && current.pool != nil:
+				part.cookiePathReadbackPending = !part.cookiePathMatches(*current) || slices.Contains(current.pool.Tags, xBackendCookiePathTag)
+			}
+			if part.sessionCookieDeadline != nil {
 				if part.sessionCookieDeadline.Permanent {
-					part.sessionCookieCapability = permanent()
-					part.cookieReadbackPending = current == nil || !part.permanentCookieConfirmed(*current)
+					part.cookieReadbackPending = part.cookiePathReadbackPending || current == nil ||
+						!part.activeCookieMatches(*current) || !part.cookieDeadlineMatches(*current)
 					if len(part.policies) != 0 || demand[part.backendKey] > 0 {
 						scope := part.sessionCookieDeadline.Scope
 						permanentPools[scope] = append(permanentPools[scope], part)
 					}
 				} else {
-					part.sessionCookieCapability = timed()
 					if current != nil && current.pool != nil {
 						part.cookieReadbackPending = current.pool.ProvisioningStatus != "ACTIVE" || !part.cookieDeadlineMatches(*current) ||
 							current.pool.Persistence != (pools.SessionPersistence{Type: httpCookiePersistence, CookieName: part.sessionCookieName})
 					}
 				}
-			case part.sessionCookieName != "":
-				part.sessionCookieCapability = named()
 			}
 			if current == nil || withdrawal != nil || actual.loadBalancer.ProvisioningStatus != "ACTIVE" {
 				continue
 			}
 			if step, _ := planXBackendCookie(*part, *current); step != nil &&
-				(step.kind == routeMutationClearPoolMembers || step.poolPersistence != nil && *step.poolPersistence == (pools.SessionPersistence{})) {
+				(step.kind == routeMutationClearPoolMembers ||
+					step.poolPersistence != nil && *step.poolPersistence == (pools.SessionPersistence{}) &&
+						(!step.retry || current.pool.AdminStateUp && len(current.members) != 0)) {
 				withdrawal = &graphMutation{kind: graphRouteMutation, routeIndex: i, backendKey: part.backendKey,
 					route: *step, withdrawHTTPPolicy: true, message: step.message()}
 			}
@@ -171,15 +185,15 @@ func (p *Provider) prepareXBackendCookies(ctx context.Context, desired *desiredG
 	return withdrawal
 }
 
-func (route desiredRoute) permanentCookieConfirmed(observed observedRouteGraph) bool {
+func (route desiredRoute) activeCookieMatches(observed observedRouteGraph) bool {
 	pool := observed.pool
 	return pool != nil && pool.Protocol == cloud.ListenerProtocolHTTP && pool.ProvisioningStatus == "ACTIVE" &&
-		observed.backendTLS.AdminObserved && route.cookieDeadlineMatches(observed) &&
+		observed.backendTLS.AdminObserved && route.cookiePathMatches(observed) &&
 		pool.Persistence == (pools.SessionPersistence{Type: httpCookiePersistence, CookieName: route.sessionCookieName})
 }
 
 func isXBackendCookieTag(tag string) bool {
-	return tag == xBackendCookieTag || tag == xBackendCookieDeadlineTag || tag == xBackendCookiePermanentTag
+	return tag == xBackendCookieTag || tag == xBackendCookiePathTag || tag == xBackendCookieDeadlineTag || tag == xBackendCookiePermanentTag
 }
 
 func planXBackendCookie(desired desiredRoute, observed observedRouteGraph) (*routeMutation, error) {
@@ -192,17 +206,20 @@ func planXBackendCookie(desired desiredRoute, observed observedRouteGraph) (*rou
 	}
 	pool := observed.pool
 	managed := pool != nil && slices.Contains(pool.Tags, xBackendCookieTag)
+	pathManaged := pool != nil && slices.Contains(pool.Tags, xBackendCookiePathTag)
 	timed := pool != nil && slices.Contains(pool.Tags, xBackendCookieDeadlineTag)
 	permanent := pool != nil && slices.Contains(pool.Tags, xBackendCookiePermanentTag)
 	needsCookie := desired.sessionCookieName != ""
+	needsPath := desired.sessionCookiePath != nil
 	needsDeadline := desired.sessionCookieDeadline != nil
 	needsPermanent := needsDeadline && desired.sessionCookieDeadline.Permanent
 	observedPermanent := observed.cookieDeadline.Value != nil && observed.cookieDeadline.Value.Permanent
 	issue := xBackendCookieIssue(desired)
+	pathMatches := desired.cookiePathMatches(observed)
 	switch {
 	case pool == nil:
 		return nil, issue
-	case !needsCookie && !managed && !timed && !permanent && !observedPermanent:
+	case !needsCookie && !managed && !pathManaged && pathMatches && !timed && !permanent && !observedPermanent:
 		return nil, nil
 	case pool.Protocol != cloud.ListenerProtocolHTTP:
 		return nil, errXBackendCookieUnverified
@@ -214,7 +231,11 @@ func planXBackendCookie(desired desiredRoute, observed observedRouteGraph) (*rou
 		// locked. A downgrade must stop rendering the failed mode first.
 		step := &routeMutation{kind: routeMutationSetXBackendCookie, id: pool.ID,
 			poolAdmin: boolPointer(pool.AdminStateUp), retry: true}
-		if !needsPermanent && (permanent || observedPermanent) {
+		switch {
+		case !pathMatches || pathManaged != needsPath || needsPath && issue != nil:
+			// Do not recover an ERROR pool with the old path still serving.
+			step.poolPersistence = &pools.SessionPersistence{}
+		case !needsPermanent && (permanent || observedPermanent):
 			if needsDeadline && observedPermanent && issue == nil {
 				// A partial update preserves the current name, deadline
 				// and scope while withdrawing the incompatible mode.
@@ -223,20 +244,26 @@ func planXBackendCookie(desired desiredRoute, observed observedRouteGraph) (*rou
 				step.poolPersistence = &pools.SessionPersistence{}
 			}
 			tags := slices.DeleteFunc(slices.Clone(pool.Tags), func(tag string) bool { return tag == xBackendCookiePermanentTag })
-			if len(observed.members) != 0 {
-				// The Amphora closed-pool marker retains the predicate
-				// without forwarding to members before a drain is possible.
-				step.poolAdmin = boolPointer(false)
-				if !slices.Contains(tags, backendTLSManagedTag) {
-					tags = append(tags, backendTLSManagedTag)
-				}
+			step.poolTags = &tags
+		}
+		if len(observed.members) != 0 && (step.poolPersistence != nil || step.clearPoolCookiePermanent) {
+			// The Amphora closed-pool marker retains the predicate
+			// without forwarding to members before a drain is possible.
+			step.poolAdmin = boolPointer(false)
+			tags := slices.Clone(pool.Tags)
+			if step.poolTags != nil {
+				tags = *step.poolTags
+			}
+			if !slices.Contains(tags, backendTLSManagedTag) {
+				tags = append(tags, backendTLSManagedTag)
 			}
 			step.poolTags = &tags
 		}
 		return step, nil
 	case pool.ProvisioningStatus != "ACTIVE":
 		return nil, errXBackendCookieUnverified
-	case issue == nil && pool.Persistence == wanted && managed == needsCookie && timed == needsDeadline && permanent == needsPermanent &&
+	case issue == nil && pool.Persistence == wanted && managed == needsCookie && pathManaged == needsPath &&
+		timed == needsDeadline && permanent == needsPermanent && pathMatches &&
 		desired.cookieDeadlineMatches(observed) && observed.backendTLS.AdminObserved:
 		if needsPermanent && desired.cookieReadbackPending {
 			return nil, errXBackendCookiePermanentReadback
@@ -252,9 +279,14 @@ func planXBackendCookie(desired desiredRoute, observed observedRouteGraph) (*rou
 		return nil, errXBackendCookieUnverified
 	}
 	step := routeMutation{kind: routeMutationSetXBackendCookie, id: pool.ID}
-	hasPersistence := pool.Persistence != (pools.SessionPersistence{}) || observed.cookieDeadline.Value != nil || observed.cookieDeadline.Invalid
+	hasPersistence := pool.Persistence != (pools.SessionPersistence{}) || observed.cookieDeadline.Value != nil || observed.cookieDeadline.Invalid ||
+		observed.cookiePath.Value != nil || observed.cookiePath.Invalid
 	restoreTimedSession := needsDeadline && !needsPermanent
 	switch {
+	case issue == nil && hasPersistence && needsCookie && !needsPath && (pathManaged || !pathMatches):
+		// A same-type update without cookie_path keeps the old value. Clear
+		// through the stock API before restoring the default-path cookie.
+		step.poolPersistence = &pools.SessionPersistence{}
 	case issue == nil && hasPersistence && (needsCookie && !needsDeadline && (timed || permanent || !desired.cookieDeadlineMatches(observed)) ||
 		restoreTimedSession && permanent && !observedPermanent):
 		// Tags can survive an API rollback. Clear persistence through the
@@ -263,11 +295,15 @@ func planXBackendCookie(desired desiredRoute, observed observedRouteGraph) (*rou
 	case issue == nil:
 		step.poolPersistence = &wanted
 		step.poolCookieDeadline = desired.sessionCookieDeadline
+		step.poolCookiePath = desired.sessionCookiePath
 		step.clearPoolCookiePermanent = restoreTimedSession && observedPermanent
-		if managed != needsCookie || timed != needsDeadline || permanent != needsPermanent {
+		if managed != needsCookie || pathManaged != needsPath || timed != needsDeadline || permanent != needsPermanent {
 			tags := slices.DeleteFunc(slices.Clone(pool.Tags), isXBackendCookieTag)
 			if needsCookie {
 				tags = append(tags, xBackendCookieTag)
+			}
+			if needsPath {
+				tags = append(tags, xBackendCookiePathTag)
 			}
 			if needsDeadline {
 				tags = append(tags, xBackendCookieDeadlineTag)
@@ -289,16 +325,30 @@ func planXBackendCookie(desired desiredRoute, observed observedRouteGraph) (*rou
 
 func xBackendCookieIssue(route desiredRoute) error {
 	switch route.cookieCapabilityIssue() {
+	case cloud.SessionPersistencePathUnsupported:
+		return errXBackendCookiePathUnavailable
 	case cloud.SessionPersistenceUnsupported:
 		return errXBackendCookieUnavailable
 	case cloud.SessionPersistenceDeadlineUnsupported:
 		return errXBackendCookieDeadlineUnavailable
 	case cloud.SessionPersistencePermanentUnsupported:
 		return errXBackendCookiePermanentUnavailable
-	case cloud.SessionPersistenceNotObserved, cloud.SessionPersistenceUnverified, cloud.SessionPersistenceDeadlineUnverified, cloud.SessionPersistencePermanentUnverified:
+	case cloud.SessionPersistenceNotObserved, cloud.SessionPersistenceUnverified, cloud.SessionPersistenceDeadlineUnverified,
+		cloud.SessionPersistencePermanentUnverified, cloud.SessionPersistencePathUnverified:
 		return errXBackendCookieUnverified
 	}
 	return nil
+}
+
+func (route desiredRoute) cookiePathMatches(observed observedRouteGraph) bool {
+	if observed.cookiePath.Invalid {
+		return false
+	}
+	want, have := route.sessionCookiePath, observed.cookiePath.Value
+	if want == nil {
+		return have == nil || *have == "/"
+	}
+	return have != nil && *want == *have
 }
 
 func (route desiredRoute) cookieDeadlineMatches(observed observedRouteGraph) bool {
@@ -314,7 +364,7 @@ func (route desiredRoute) cookieDeadlineMatches(observed observedRouteGraph) boo
 
 func (route desiredRoute) cookieCapabilityIssue() cloud.SessionPersistenceIssue {
 	if route.sessionCookieName != "" {
-		requirements := route.sessionCookieDeadline.Requirements()
+		requirements := route.sessionCookieDeadline.Requirements().WithPath(route.sessionCookiePath)
 		switch route.sessionCookieCapability {
 		case xBackendCookieUnavailable:
 			return requirements.DiscoveryIssue(false, nil)
@@ -329,6 +379,9 @@ func (route desiredRoute) cookieCapabilityIssue() cloud.SessionPersistenceIssue 
 
 func (route desiredRoute) cookieSupportIssue() cloud.SessionPersistenceIssue {
 	issue := route.cookieCapabilityIssue()
+	if route.cookiePathReadbackPending && issue == cloud.SessionPersistenceAvailable {
+		issue = cloud.SessionPersistencePathReadbackUnverified
+	}
 	if route.cookieReadbackPending && issue == cloud.SessionPersistenceAvailable {
 		if route.sessionCookieDeadline.Requirements() == cloud.HTTPSessionCookiePermanent {
 			issue = cloud.SessionPersistencePermanentReadbackUnverified

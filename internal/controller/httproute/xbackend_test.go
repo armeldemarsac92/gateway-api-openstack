@@ -30,6 +30,7 @@ import (
 	"net/netip"
 	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -383,7 +384,7 @@ func TestXBackendAndSameNamedServiceKeepSeparateWeightedTargets(t *testing.T) {
 	before := f.observe(t)
 	spec := before.Nodes[0].Spec
 	if len(spec.HTTPBackends) != 2 || spec.HTTPBackends[0].Kind != "" || spec.HTTPBackends[1].Kind != cloud.HTTPBackendKindXBackend ||
-		spec.HTTPBackends[0].SessionCookieName != "" || spec.HTTPBackends[1].SessionCookieName != "reports_session" ||
+		spec.HTTPBackends[0].SessionCookieName != "" || spec.HTTPBackends[1].SessionCookieName != "reports_session" || spec.HTTPBackends[1].SessionCookiePath != nil ||
 		identity.HTTPBackendPoolKey(spec.HTTPBackends[0]) == identity.HTTPBackendPoolKey(spec.HTTPBackends[1]) ||
 		!reflect.DeepEqual(spec.HTTPBackends[1].Members, []cloud.Member{{Address: pod.Status.PodIP, Port: int(backend.Spec.Port.Number)}}) {
 		t.Fatalf("expected two distinct pools, got %+v", spec.HTTPBackends)
@@ -436,7 +437,7 @@ func TestXBackendCookieNameAndCurrentGenerationStatus(t *testing.T) {
 			}},
 			Protocol: ptr.To(gatewayx.BackendProtocolHTTP11),
 			SessionPersistence: &gatewayv1.SessionPersistence{
-				Cookie:          &gatewayv1.CookieConfig{LifetimeType: ptr.To(gatewayv1.PermanentCookieLifetimeType)},
+				Cookie:          &gatewayv1.CookieConfig{LifetimeType: ptr.To(gatewayv1.PermanentCookieLifetimeType), Path: ptr.To("/reports")},
 				AbsoluteTimeout: ptr.To(gatewayv1.Duration("1s500ms")),
 			},
 		},
@@ -445,6 +446,7 @@ func TestXBackendCookieNameAndCurrentGenerationStatus(t *testing.T) {
 	other.Name, other.UID = "other", "other-opaque-uid"
 	other.Spec.SessionPersistence.AbsoluteTimeout = ptr.To(gatewayv1.Duration("0s"))
 	other.Spec.SessionPersistence.Cookie.LifetimeType = nil
+	other.Spec.SessionPersistence.Cookie.Path = ptr.To("/")
 	other.Spec.SessionPersistence.Cookie.Name = ptr.To(gatewayv1.CookieName("other_session"))
 	f.create(t, backend, other)
 	makeRule := func(path string, backend *gatewayx.XBackend) gatewayv1.HTTPRouteRule {
@@ -467,11 +469,13 @@ func TestXBackendCookieNameAndCurrentGenerationStatus(t *testing.T) {
 			require.True(t, cloud.ValidHTTPSessionCookieName(pool.SessionCookieName))
 			if pool.Name == backend.Name {
 				cookieNames = append(cookieNames, pool.SessionCookieName)
+				require.Equal(t, ptr.To("/reports"), pool.SessionCookiePath)
 				require.Equal(t, &cloud.HTTPSessionCookieDeadline{
 					TimeoutMS: 1500, Scope: fmt.Sprintf("%x", sha256.Sum256([]byte(backend.UID))), Permanent: true,
 				}, pool.SessionCookieDeadline)
 			} else {
 				otherName = pool.SessionCookieName
+				require.Nil(t, pool.SessionCookiePath)
 				require.Equal(t, &cloud.HTTPSessionCookieDeadline{
 					TimeoutMS: 0, Scope: fmt.Sprintf("%x", sha256.Sum256([]byte(other.UID))),
 				}, pool.SessionCookieDeadline)
@@ -479,24 +483,27 @@ func TestXBackendCookieNameAndCurrentGenerationStatus(t *testing.T) {
 		}
 	}
 	require.Len(t, cookieNames, 2)
+	require.Equal(t, fmt.Sprintf("xbackend-%x", sha256.Sum256([]byte(backend.UID))), cookieNames[0])
 	require.Equal(t, cookieNames[0], cookieNames[1])
 	require.NotEmpty(t, otherName)
 	require.Equal(t, "other_session", otherName)
 	require.NotEqual(t, cookieNames[0], otherName)
 
 	for _, phase := range []struct {
-		issue     cloud.SessionPersistenceIssue
-		condition metav1.ConditionStatus
-		reason    string
-		err       error
+		issue    cloud.SessionPersistenceIssue
+		accepted metav1.ConditionStatus
+		resolved metav1.ConditionStatus
+		reason   string
+		err      error
 	}{
-		{cloud.SessionPersistencePermanentUnsupported, metav1.ConditionFalse, "UnsupportedValue", nil},
-		{cloud.SessionPersistencePermanentUnverified, metav1.ConditionUnknown, "Pending", errors.New("API timed out")},
-		{cloud.SessionPersistenceAvailable, metav1.ConditionTrue, "", nil},
+		{cloud.SessionPersistencePathUnsupported, metav1.ConditionFalse, metav1.ConditionFalse, "UnsupportedValue", nil},
+		{cloud.SessionPersistencePathUnverified, metav1.ConditionUnknown, metav1.ConditionUnknown, "Pending", errors.New("API timed out")},
+		{cloud.SessionPersistencePathReadbackUnverified, metav1.ConditionTrue, metav1.ConditionUnknown, "Pending", nil},
+		{cloud.SessionPersistenceAvailable, metav1.ConditionTrue, metav1.ConditionTrue, "", nil},
 	} {
 		f.reconciler.XBackendCookieAvailable = func(_ context.Context, requirements cloud.HTTPSessionCookieRequirements) (bool, error) {
-			require.Equal(t, cloud.HTTPSessionCookiePermanent, requirements)
-			return phase.issue == cloud.SessionPersistenceAvailable, phase.err
+			require.Equal(t, cloud.HTTPSessionCookiePermanent|cloud.HTTPSessionCookiePath, requirements)
+			return phase.accepted == metav1.ConditionTrue, phase.err
 		}
 		backendKey := client.ObjectKeyFromObject(backend)
 		_, err := (&xBackendStatusReconciler{routes: f.reconciler}).Reconcile(t.Context(), ctrl.Request{NamespacedName: backendKey})
@@ -506,13 +513,15 @@ func TestXBackendCookieNameAndCurrentGenerationStatus(t *testing.T) {
 		condition := meta.FindStatusCondition(backend.Status.Ancestors[0].Conditions, "Accepted")
 		require.NotNil(t, condition)
 		require.Equal(t, backend.Generation, condition.ObservedGeneration)
-		require.Equal(t, phase.condition, condition.Status)
+		require.Equal(t, phase.accepted, condition.Status)
 		provider := &recordingProvider{}
 		if phase.issue != cloud.SessionPersistenceAvailable {
 			result := cloud.RouteProgressingResult("Waiting for Octavia cookie support", time.Second)
 			result.BackendSessionPersistenceIssue = phase.issue
 			provider.routeResult = &result
-			require.Equal(t, phase.reason, condition.Reason)
+			if phase.accepted != metav1.ConditionTrue {
+				require.Equal(t, phase.reason, condition.Reason)
+			}
 		}
 		r := newTestReconciler(*f.reconciler, provider)
 		key := client.ObjectKeyFromObject(f.route)
@@ -523,25 +532,76 @@ func TestXBackendCookieNameAndCurrentGenerationStatus(t *testing.T) {
 		resolved := meta.FindStatusCondition(f.route.Status.Parents[0].Conditions, string(gatewayv1.RouteConditionResolvedRefs))
 		require.NotNil(t, resolved)
 		require.Equal(t, f.route.Generation, resolved.ObservedGeneration)
-		require.Equal(t, phase.condition, resolved.Status)
+		require.Equal(t, phase.resolved, resolved.Status)
+		require.Equal(t, phase.issue == cloud.SessionPersistenceAvailable,
+			meta.IsStatusConditionTrue(f.route.Status.Parents[0].Conditions, r.Config.Domain()+"/Programmed"))
 		if phase.reason != "" {
 			require.Equal(t, phase.reason, resolved.Reason)
 		}
 	}
 
-	// A sibling Octavia update can skip the pool and capability inventory.
-	// Keep the proved status for this generation until a check can run.
+	provider := &xBackendCookieStatusTestProvider{}
+	r := newTestReconciler(*f.reconciler, provider)
+	reconcile := func(route *gatewayv1.HTTPRoute, programmed bool) []metav1.Condition {
+		t.Helper()
+		key, generation := client.ObjectKeyFromObject(route), route.Generation
+		_, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: key})
+		require.NoError(t, err)
+		require.NoError(t, f.client.Get(t.Context(), key, route))
+		require.Equal(t, generation, route.Generation)
+		require.Len(t, route.Status.Parents, 1)
+		conditions := route.Status.Parents[0].Conditions
+		require.Equal(t, programmed, meta.IsStatusConditionTrue(conditions, r.Config.Domain()+"/Programmed"))
+		return conditions
+	}
+	reconcile(f.route, true)
+	reconcile(sibling, true)
 	deferred := cloud.RouteProgressingResult("Octavia load balancer is PENDING_UPDATE", time.Second)
 	deferred.ObservationDeferred = true
 	deferred.BackendSessionPersistenceIssue = cloud.SessionPersistenceNotObserved
-	r := newTestReconciler(*f.reconciler, &recordingProvider{routeResult: &deferred})
-	key := client.ObjectKeyFromObject(f.route)
-	_, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: key})
-	require.NoError(t, err)
-	require.NoError(t, f.client.Get(t.Context(), key, f.route))
-	conditions := f.route.Status.Parents[0].Conditions
-	require.True(t, meta.IsStatusConditionTrue(conditions, string(gatewayv1.RouteConditionResolvedRefs)))
-	require.True(t, meta.IsStatusConditionTrue(conditions, r.Config.Domain()+"/Programmed"))
+	provider.routeResult = &deferred
+	reconcile(f.route, true)
+	reconcile(sibling, true)
+
+	// A Kubernetes spec change can arrive while the provider is still busy,
+	// even after the controller assembled the graph from the previous revision.
+	provider.beforeGraph = func() {
+		backend.Generation++
+		backend.Spec.SessionPersistence.Cookie.Path = ptr.To("/")
+		require.NoError(t, f.client.Update(t.Context(), backend))
+	}
+	for _, route := range []*gatewayv1.HTTPRoute{f.route, sibling} {
+		conditions := reconcile(route, false)
+		require.True(t, meta.IsStatusConditionPresentAndEqual(conditions, string(gatewayv1.RouteConditionResolvedRefs), metav1.ConditionUnknown))
+	}
+	provider.routeSpecs = nil
+	provider.routeResult = nil
+	reconcile(f.route, true)
+	reconcile(sibling, true)
+	require.NotEmpty(t, provider.routeSpecs)
+	for _, spec := range provider.routeSpecs {
+		for _, pool := range spec.HTTPBackends {
+			require.Nil(t, pool.SessionCookiePath)
+		}
+	}
+
+	// An unrelated busy update can now reuse the newly confirmed default.
+	provider.routeResult = &deferred
+	reconcile(f.route, true)
+	reconcile(sibling, true)
+}
+
+type xBackendCookieStatusTestProvider struct {
+	recordingProvider
+	beforeGraph func()
+}
+
+func (p *xBackendCookieStatusTestProvider) ReconcileGatewayGraph(ctx context.Context, spec cloud.GatewayGraphSpec) (cloud.GatewayGraphResult, error) {
+	if hook := p.beforeGraph; hook != nil {
+		p.beforeGraph = nil
+		hook()
+	}
+	return p.recordingProvider.ReconcileGatewayGraph(ctx, spec)
 }
 
 func TestXBackendCookieRejectsUnsupportedContract(t *testing.T) {
@@ -562,6 +622,21 @@ func TestXBackendCookieRejectsUnsupportedContract(t *testing.T) {
 	permanent.SessionPersistence.Cookie.LifetimeType = ptr.To(gatewayv1.PermanentCookieLifetimeType)
 	permanent.SessionPersistence.AbsoluteTimeout = ptr.To(gatewayv1.Duration("0s"))
 	require.Nil(t, model.ValidateXBackend(*permanent, profile))
+	for _, cookie := range []struct {
+		spec  *gatewayx.BackendSpec
+		path  string
+		extra cloud.HTTPSessionCookieRequirements
+	}{
+		{&backend, "/", cloud.HTTPSessionCookieNamed},
+		{&backend, "/reports", cloud.HTTPSessionCookiePath},
+		{timed, "", cloud.HTTPSessionCookieTimed | cloud.HTTPSessionCookiePath},
+		{permanent, strings.Repeat("~", 1024), cloud.HTTPSessionCookiePermanent | cloud.HTTPSessionCookiePath},
+	} {
+		spec := cookie.spec.DeepCopy()
+		spec.SessionPersistence.Cookie.Path = ptr.To(cookie.path)
+		require.Nil(t, model.ValidateXBackend(*spec, profile))
+		require.Equal(t, cookie.extra, model.XBackendCookieRequirements(*spec.SessionPersistence))
+	}
 	missingUID := &gatewayx.XBackend{Spec: *timed}
 	require.Equal(t, metav1.ConditionFalse, xBackendAcceptedCondition(missingUID, profile).Status)
 	observation := model.XBackendObservation{Spec: *timed}
@@ -585,8 +660,17 @@ func TestXBackendCookieRejectsUnsupportedContract(t *testing.T) {
 		{"unknown cookie lifetime", func(b *gatewayx.BackendSpec, _ *model.XBackendProfile) {
 			b.SessionPersistence.Cookie.LifetimeType = ptr.To(gatewayv1.CookieLifetimeType("Unknown"))
 		}},
-		{"path", func(b *gatewayx.BackendSpec, _ *model.XBackendProfile) {
-			b.SessionPersistence.Cookie.Path = ptr.To("/reports")
+		{"path with cookie attribute separator", func(b *gatewayx.BackendSpec, _ *model.XBackendProfile) {
+			b.SessionPersistence.Cookie.Path = ptr.To("/reports;admin")
+		}},
+		{"path with non-ASCII byte", func(b *gatewayx.BackendSpec, _ *model.XBackendProfile) {
+			b.SessionPersistence.Cookie.Path = ptr.To("/café")
+		}},
+		{"path with control character", func(b *gatewayx.BackendSpec, _ *model.XBackendProfile) {
+			b.SessionPersistence.Cookie.Path = ptr.To("/line\n")
+		}},
+		{"path exceeding the provider limit", func(b *gatewayx.BackendSpec, _ *model.XBackendProfile) {
+			b.SessionPersistence.Cookie.Path = ptr.To(strings.Repeat("x", 1025))
 		}},
 		{"reserved cookie name", func(b *gatewayx.BackendSpec, _ *model.XBackendProfile) {
 			b.SessionPersistence.Cookie.Name = ptr.To(gatewayv1.CookieName("__HoSt-reports"))

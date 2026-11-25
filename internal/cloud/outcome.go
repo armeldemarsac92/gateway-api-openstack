@@ -164,14 +164,20 @@ const (
 	SessionPersistenceDeadlineReadbackUnverified
 	SessionPersistencePermanentUnverified
 	SessionPersistencePermanentReadbackUnverified
+	SessionPersistencePathUnverified
+	SessionPersistencePathReadbackUnverified
 	SessionPersistenceUnsupported
 	SessionPersistenceDeadlineUnsupported
 	SessionPersistencePermanentUnsupported
+	SessionPersistencePathUnsupported
 )
 
 func (requirements HTTPSessionCookieRequirements) DiscoveryIssue(available bool, err error) SessionPersistenceIssue {
 	switch {
 	case err != nil:
+		if requirements&HTTPSessionCookiePath != 0 {
+			return SessionPersistencePathUnverified
+		}
 		switch requirements {
 		case HTTPSessionCookiePermanent:
 			return SessionPersistencePermanentUnverified
@@ -181,6 +187,9 @@ func (requirements HTTPSessionCookieRequirements) DiscoveryIssue(available bool,
 			return SessionPersistenceUnverified
 		}
 	case !available:
+		if requirements&HTTPSessionCookiePath != 0 {
+			return SessionPersistencePathUnsupported
+		}
 		switch requirements {
 		case HTTPSessionCookiePermanent:
 			return SessionPersistencePermanentUnsupported
