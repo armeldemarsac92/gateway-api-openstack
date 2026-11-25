@@ -193,6 +193,12 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		return result, err
 	}
 	actual, err = p.observeGatewayGraph(ctx, desired)
+	if spec.Gateway.Disposition == cloud.GraphWithdrawListenerFilters {
+		if err != nil {
+			return result, err
+		}
+		return p.withdrawListenerFilters(ctx, desired, actual)
+	}
 	if err == nil && spec.Gateway.AddressWithdrawalOnly() {
 		addressIssue = "No Gateway address request could be assigned"
 		result, addressBlocked, err = p.withdrawUnassignedGatewayAddress(ctx, spec, actual, addressIssue)
@@ -833,6 +839,12 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 	if spec.Identity.RouteUID != "" || spec.Identity.RouteName != "" || spec.Identity.RouteNamespace != "" {
 		return invalid("Gateway graph identity must not contain route fields")
 	}
+	if spec.Gateway.Disposition == cloud.GraphWithdrawListenerFilters {
+		if err := validateListenerFilterWithdrawal(spec); err != nil {
+			return invalid(err.Error())
+		}
+		return desiredGatewayGraph{spec: spec, identity: identity, protocol: cloud.ListenerProtocolHTTP}, nil
+	}
 	withdrawTLS := spec.Gateway.Disposition == cloud.GraphWithdrawTLS
 	if !validGraphDisposition(spec.Gateway.Disposition) && !withdrawTLS {
 		return invalid("Gateway graph disposition is invalid")
@@ -1328,6 +1340,7 @@ func (d desiredGatewayGraph) routeOwners() []routeGraphOwner {
 func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatewayGraph) (observedGatewayGraph, error) {
 	actual := observedGatewayGraph{outcome: cloud.ReadyOutcome(), protocol: desired.protocol, scoped: desired.spec.Gateway.Spec.ScopedListeners != nil}
 	withdrawAddress := desired.spec.Gateway.AddressWithdrawalOnly()
+	withdrawFilters := desired.spec.Gateway.Disposition == cloud.GraphWithdrawListenerFilters
 	lb, err := p.findGatewayLoadBalancer(ctx, desired.identity)
 	if err != nil {
 		return actual, err
@@ -1337,7 +1350,7 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 			actual.addressAbsent = true
 			return actual, nil
 		}
-		if desired.spec.Gateway.Disposition == cloud.GraphWithdrawTLS {
+		if desired.spec.Gateway.Disposition == cloud.GraphWithdrawTLS || withdrawFilters {
 			return actual, nil
 		}
 		if cloud.IsTCPTLSListenerProtocol(desired.protocol) && desired.spec.Gateway.Disposition == cloud.GraphEnsure &&
@@ -1368,7 +1381,7 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 			actual.addressAbsent = true
 			return actual, nil
 		}
-		if desired.spec.Gateway.Disposition == cloud.GraphWithdrawTLS {
+		if desired.spec.Gateway.Disposition == cloud.GraphWithdrawTLS || withdrawFilters {
 			return actual, nil
 		}
 		return p.observeAbsentGateway(ctx, desired)
@@ -1383,8 +1396,15 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 	if observation.phase == loadBalancerPhasePending && desired.spec.Gateway.Disposition != cloud.GraphEnsure {
 		return actual, nil
 	}
-	// TLS authorization is decided using only public LB/frontend readbacks.
-	// In particular, an unrelated pool or Neutron failure cannot hold it.
+	// Frontend authorization withdrawals use only LB and listener readbacks.
+	// An unrelated pool or Neutron failure cannot hold them.
+	if withdrawFilters {
+		if lb.Provider != "amphora" || slices.Contains(lb.Tags, sniProfileTag) || slices.Contains(lb.Tags, tcpTLSProfileTag) {
+			return actual, fmt.Errorf("%w: listener filter withdrawal requires the Gateway's HTTP load balancer", cloud.ErrOwnershipConflict)
+		}
+		_, err := p.observeGatewayListenerInventory(ctx, desired, &actual)
+		return actual, err
+	}
 	var inventory octavia.ListenerInventory
 	rawTLS := cloud.IsTCPTLSListenerProtocol(desired.protocol)
 	listed := actual.protocol == cloud.ListenerProtocolHTTP || rawTLS || desired.spec.Gateway.Disposition == cloud.GraphDelete

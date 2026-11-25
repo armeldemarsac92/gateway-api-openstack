@@ -40,7 +40,9 @@ func (r *Reconciler) ObserveListenerSets(ctx context.Context, reader client.Read
 	if err != nil {
 		return ListenerSetProjection{}, err
 	}
-	r.resolveListenerSetHTTPS(ctx, gateway, &projection)
+	if err := r.resolveListenerSetHTTPS(ctx, gateway, &projection); err != nil {
+		return ListenerSetProjection{}, err
+	}
 	return projection, nil
 }
 
@@ -48,9 +50,9 @@ type listenerSetCertificateReferenceResolver interface {
 	ListenerSetReferenceStatus(context.Context, *gatewayv1.Gateway, *gatewayv1.ListenerSet, *gatewayv1.Listener) gatewayv1.ListenerConditionReason
 }
 
-func (r *Reconciler) resolveListenerSetHTTPS(ctx context.Context, gateway *gatewayv1.Gateway, projection *ListenerSetProjection) {
+func (r *Reconciler) resolveListenerSetHTTPS(ctx context.Context, gateway *gatewayv1.Gateway, projection *ListenerSetProjection) error {
 	if len(projection.sets) == 0 {
-		return
+		return nil
 	}
 	primary := httpsSections(httpsProfileListeners(r.Config, gateway))
 	enrolled := strings.Split(gateway.Annotations[r.Config.GatewayHTTPSIsolatedPortsAnnotation()], ",")
@@ -79,6 +81,9 @@ func (r *Reconciler) resolveListenerSetHTTPS(ctx context.Context, gateway *gatew
 			validation, observed := clientValidation[port]
 			if !observed {
 				validation = r.resolveFrontendClientValidation(ctx, gateway, entry.listener.Port)
+				if validation.err != nil {
+					return validation.err
+				}
 				clientValidation[port] = validation
 				// Record the HTTPS port even when it has no authorized hosts.
 				projection.https[port] = cloud.ListenerTLS{}
@@ -140,6 +145,7 @@ func (r *Reconciler) resolveListenerSetHTTPS(ctx context.Context, gateway *gatew
 	}
 	slices.Sort(projection.isolationPorts)
 	projection.isolationPorts = slices.Compact(projection.isolationPorts)
+	return nil
 }
 
 func (e *listenerSetEntry) observeCertificateReference(ctx context.Context, gateway *gatewayv1.Gateway, set *gatewayv1.ListenerSet, resolver listenerSetCertificateResolver) string {

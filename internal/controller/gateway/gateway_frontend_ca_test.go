@@ -26,6 +26,7 @@ import (
 	"math/big"
 	"slices"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -34,8 +35,11 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	"sigs.k8s.io/gateway-api/pkg/features"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/stretchr/testify/require"
 )
@@ -230,6 +234,78 @@ func TestGatewayFrontendCAStatusAndCrossNamespaceRevocation(t *testing.T) {
 	require.NoError(t, kube.Update(t.Context(), gw))
 	require.False(t, reconcile()[3].TLS.ClientValidation.InsecureFallback)
 	require.Nil(t, meta.FindStatusCondition(gw.Status.Conditions, fallbackCondition))
+}
+
+func TestGatewayReportsHTTPSClosureAndFilterDenialDuringTrustBundleFailure(t *testing.T) {
+	cfg := testConfig()
+	cfg.OperatorHTTPS, cfg.FrontendClientValidation, cfg.GatewayListenerFilters = true, true, true
+	cfg.GatewayAPIChannel = features.FeatureChannelExperimental
+	gw := programmedTestGateway(cfg)
+	protected := testHTTPSListener("protected", 443)
+	protected.Filters = &gatewayv1.ListenerFilters{Requests: []gatewayv1.ListenerFilter{{
+		Type: gatewayv1.ListenerFilterExternalAuth,
+		ExternalAuth: &gatewayv1.HTTPExternalAuthFilter{
+			ExternalAuthProtocol: gatewayv1.HTTPRouteExternalAuthHTTPProtocol,
+			BackendRef: gatewayv1.BackendObjectReference{
+				Name: "auth", Namespace: ptr.To(gatewayv1.Namespace("security")), Port: ptr.To(gatewayv1.PortNumber(8080)),
+			},
+		},
+	}}}
+	gw.Spec.Listeners = append(gw.Spec.Listeners, protected)
+	gw.Spec.TLS = &gatewayv1.GatewayTLSConfig{Frontend: &gatewayv1.FrontendTLSConfig{
+		Default: gatewayv1.TLSConfig{Validation: &gatewayv1.FrontendTLSValidation{
+			CACertificateRefs: []gatewayv1.ObjectReference{{Name: "missing-client-ca", Kind: "ConfigMap"}},
+		}},
+	}}
+	gw.Annotations[cfg.GatewayListenerProtocolAnnotation()] = string(gatewayv1.HTTPProtocolType)
+	completeGatewayTopologyFixture(cfg, gw)
+	controller.SetGatewayListenerScope(cfg, gw, gatewayv1.HTTPProtocolType)
+	class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "openstack"}, Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName}}
+	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gw, class).WithObjects(gw, class).Build()
+	closed := false
+	var withdrawals []cloud.GraphDisposition
+	provider := httpsGraphProvider(func(ctx context.Context, spec cloud.GatewayGraphSpec) (cloud.GatewayGraphResult, error) {
+		withdrawals = append(withdrawals, spec.Gateway.Disposition)
+		require.NoError(t, spec.ValidateMutation(ctx))
+		require.Empty(t, spec.Routes)
+		switch spec.Gateway.Disposition {
+		case cloud.GraphWithdrawListenerFilters:
+			require.Equal(t, map[int][]cloud.ListenerRequestFilterSection{443: {{Hostname: "*", Reject: true}}}, spec.Gateway.Spec.RequestFilterSections)
+		case cloud.GraphWithdrawTLS:
+			require.Equal(t, []int{443}, spec.Gateway.TLSWithdrawalPorts)
+			if !closed {
+				return cloud.GatewayGraphResult{Outcome: cloud.ProgressingOutcome("Closing the HTTPS listener", time.Second)}, nil
+			}
+			return cloud.GatewayGraphResult{Outcome: cloud.ReadyOutcome(), Gateway: cloud.GatewayResult{ScopedTLSClosedPorts: []int{443}}}, nil
+		default:
+			t.Fatalf("unexpected graph disposition %s", spec.Gateway.Disposition)
+		}
+		return cloud.GatewayGraphResult{Outcome: cloud.ReadyOutcome()}, nil
+	})
+	r := newTestReconciler(Reconciler{Client: kube, APIReader: kube, Config: cfg, Coordinator: &graph.Coordinator{},
+		Certificates: resolveHTTPSFunc(func(context.Context, *gatewayv1.Gateway, *gatewayv1.Listener) (string, gatewayv1.ListenerConditionReason) {
+			return "server-certificate", ""
+		})}, provider)
+	r.Writer.(*graph.Writer).Routes = failingHTTPSRouteSource{backendtls.ErrClusterTrustBundleUnavailable}
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(gw)}
+	for _, reason := range []gatewayv1.ListenerConditionReason{gatewayv1.ListenerReasonPending, gatewayv1.ListenerReasonInvalid} {
+		withdrawals = nil
+		_, err := r.Reconcile(t.Context(), request)
+		require.ErrorIs(t, err, backendtls.ErrClusterTrustBundleUnavailable)
+		require.Equal(t, []cloud.GraphDisposition{cloud.GraphWithdrawListenerFilters, cloud.GraphWithdrawTLS}, withdrawals)
+		require.NoError(t, kube.Get(t.Context(), request.NamespacedName, gw))
+		conditions := existingListenerConditions(gw, protected.Name)
+		programmed := meta.FindStatusCondition(conditions, string(gatewayv1.ListenerConditionProgrammed))
+		require.NotNil(t, programmed)
+		require.Equal(t, metav1.ConditionFalse, programmed.Status)
+		require.Equal(t, string(reason), programmed.Reason)
+		refs := meta.FindStatusCondition(conditions, string(gatewayv1.ListenerConditionResolvedRefs))
+		require.NotNil(t, refs)
+		require.Equal(t, metav1.ConditionFalse, refs.Status)
+		require.Equal(t, string(gatewayv1.ListenerReasonRefNotPermitted), refs.Reason)
+		require.Contains(t, refs.Message, "filters.requests[0]")
+		closed = true
+	}
 }
 
 func frontendTestCA(t *testing.T) string {

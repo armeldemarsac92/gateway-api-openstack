@@ -35,6 +35,9 @@ const (
 	// GraphWithdrawBackendClientCertificate restricts owned HTTP pools carrying
 	// stale client identities without requiring a complete route graph.
 	GraphWithdrawBackendClientCertificate GraphDisposition = "WithdrawBackendClientCertificate"
+	// GraphWithdrawListenerFilters applies confirmed section rejections on
+	// existing HTTP-family frontends without changing any backend resources.
+	GraphWithdrawListenerFilters GraphDisposition = "WithdrawListenerFilters"
 )
 
 // GatewayGraphSpec contains the complete authority and desired graph for one

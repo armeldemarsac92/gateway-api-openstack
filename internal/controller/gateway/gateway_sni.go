@@ -194,7 +194,7 @@ func (r *Reconciler) observeSNIRoutes(ctx context.Context, snapshot *gatewayMuta
 	mixed := snapshot.listener != nil && mixedTLSBinding(r.Config, snapshot.gateway, snapshot.listener.Port)
 	var tls *graph.BackendTLSObserver
 	if snapshot.listener != nil {
-		tls = graph.NewBackendTLSObserver(r.APIReader)
+		tls = graph.NewBackendTLSObserver(r.APIReader, r.Config.ClusterTrustBundles)
 	}
 	owners := observation.hostnameOwners()
 	for i := range observation {
@@ -468,6 +468,9 @@ func (r *Reconciler) resolveSNIBackend(ctx context.Context, snapshot *gatewayMut
 			Key: client.ObjectKeyFromObject(snapshot.gateway), ControllerName: r.Config.ControllerName,
 		}
 		selection, err := tls.Observe(ctx, service, port, ancestor)
+		if errors.Is(err, backendtls.ErrClusterTrustBundleUnavailable) {
+			return err
+		}
 		if err != nil {
 			return sniBackendReadPending(ctx, entry, "Waiting for a live BackendTLSPolicy inventory")
 		}

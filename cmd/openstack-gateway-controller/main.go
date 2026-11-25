@@ -48,6 +48,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/backendca"
 	openstackobservability "github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/observability"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/certificates"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gatewayclass"
@@ -107,7 +108,7 @@ func run(ctx context.Context) error {
 		apiBurst           int
 	)
 	var httpsListenerIsolation, initialL7Rules, l7PolicyBatchActivation bool
-	var frontendClientValidation bool
+	var frontendClientValidation, clusterTrustBundles bool
 	var httpRequestRedirect bool
 	var httpRequestURLRewrite bool
 	var httpRequestPolicy bool
@@ -134,6 +135,7 @@ func run(ctx context.Context) error {
 	flag.BoolVar(&tlsSNISuffix, "octavia-tls-sni-suffix", false, "use the advertised Octavia wildcard SNI capability (requires --octavia-tls-sni-passthrough)")
 	flag.BoolVar(&backendTLSPolicy, "octavia-backend-tls-policy", false, "authenticate BackendTLSPolicy upstreams with the regional Octavia hostname capability and a Barbican CA (requires --octavia-microversion=2.8 or newer and regional h2 enforcement for GRPCRoute)")
 	flag.BoolVar(&l7PolicyBatchActivation, "octavia-l7policy-batch-activation", false, "enable prepared HTTP forwarding policies together when the regional Octavia provider advertises support")
+	flag.BoolVar(&clusterTrustBundles, "gateway-api-cluster-trust-bundle", false, "allow named Kubernetes ClusterTrustBundle references in HTTPS frontend validation and Service BackendTLSPolicy")
 	flag.BoolVar(&frontendClientValidation, "octavia-frontend-client-validation", false, "validate client certificates on configured HTTPS ports (requires --tls-certificate-map and Octavia microversion 2.8 or newer)")
 	flag.BoolVar(&initialL7Rules, "octavia-l7policy-initial-rules", false, "create disabled HTTP(S) policies with their initial rules when the regional Octavia provider advertises support")
 	flag.BoolVar(&httpsListenerIsolation, "octavia-https-listener-isolation", false, "isolate terminated HTTPS sections on a shared port using the regional Octavia capability (requires --tls-certificate-map)")
@@ -249,6 +251,16 @@ func run(ctx context.Context) error {
 	})
 	if err != nil {
 		return fmt.Errorf("create controller manager: %w", err)
+	}
+	if clusterTrustBundles && (frontendClientValidation || backendTLSPolicy) {
+		bundles, err := backendtls.NewClusterTrustBundles(restConfig, manager.GetHTTPClient())
+		if err != nil {
+			return fmt.Errorf("create ClusterTrustBundle clients: %w", err)
+		}
+		if err := manager.Add(bundles); err != nil {
+			return fmt.Errorf("register ClusterTrustBundle observer: %w", err)
+		}
+		controllerConfig.ClusterTrustBundles = bundles
 	}
 	if err := configureOpenStackRequestMetrics(&openStackClientConfig, controllermetrics.Registry); err != nil {
 		return err

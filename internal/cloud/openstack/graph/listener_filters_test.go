@@ -17,6 +17,9 @@ limitations under the License.
 package graph
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"testing"
 
@@ -102,6 +105,87 @@ func TestListenerFiltersCloseBeforeReprogrammingAndUseOrderedPools(t *testing.T)
 	require.Equal(t, graphDisableListener, actual.listenerFilterMutation.kind)
 	require.True(t, actual.pendingListenerFilterCapability[80])
 	require.Empty(t, actual.unavailableListenerFilters)
+}
+
+func TestListenerFilterWithdrawalOnlyClosesAndReplacesDeniedSection(t *testing.T) {
+	id := safetyTestIdentity(t)
+	spec := completeGraphSpec(id)
+	spec.Routes = nil
+	spec.Gateway.Disposition = cloud.GraphWithdrawListenerFilters
+	spec.Gateway.Spec.ListenerProtocol = cloud.ListenerProtocolHTTP
+	spec.Gateway.Spec.ScopedListeners = []cloud.ScopedListener{}
+	spec.Gateway.Spec.RequestFilterSections = map[int][]cloud.ListenerRequestFilterSection{
+		80: {{Hostname: "protected.example.test", Reject: true}},
+	}
+	lb := gatewayTransitionLoadBalancer(safetyGatewayTags(t, id, roleLoadBalancer), "ACTIVE")
+	lb["listeners"] = []map[string]string{{"id": "filtered"}, {"id": "sibling"}}
+	lb["pools"] = []map[string]string{{"id": "backend-tls-pool"}}
+	newListener := func(name string, port int) map[string]any {
+		return map[string]any{
+			"id": name, "project_id": "project-a", "protocol": "HTTP", "protocol_port": port,
+			"admin_state_up": true, "provisioning_status": "ACTIVE", "default_pool_id": nil,
+			"loadbalancers": []map[string]string{{"id": "load-balancer-1"}}, "l7policies": []any{},
+			"tags": append(safetyGatewayTags(t, id, roleListener), scopedPortTag("HTTP", port)),
+		}
+	}
+	filtered, sibling := newListener("filtered", 80), newListener("sibling", 81)
+	ordinary := octavia.ListenerRequestFilterSection{Hostname: "*", Requests: []octavia.ListenerRequestFilter{
+		{Type: "ExternalAuth", HTTP: octavia.ListenerHTTPExternalAuth{PoolID: "retained-authorizer", PathPrefix: "/check"}},
+	}}
+	filtered["request_filter_sections"] = []octavia.ListenerRequestFilterSection{
+		ordinary, {Hostname: "protected.example.test", Requests: []octavia.ListenerRequestFilter{
+			{Type: "ExternalAuth", HTTP: octavia.ListenerHTTPExternalAuth{PoolID: "revoked-authorizer"}},
+		}},
+	}
+	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /lbaas/loadbalancers":
+			safetyWriteJSON(t, w, map[string]any{"loadbalancers": []any{lb}})
+		case "GET /lbaas/loadbalancers/load-balancer-1":
+			safetyWriteJSON(t, w, map[string]any{"loadbalancer": lb})
+		case "GET /lbaas/listeners":
+			safetyWriteJSON(t, w, map[string]any{"listeners": []any{filtered, sibling}})
+		case "GET /lbaas/providers/amphora/gateway_capabilities":
+			safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": []string{octavia.GatewayCapabilityListenerRequestFilters}})
+		case "PUT /lbaas/listeners/filtered":
+			var body struct {
+				Listener map[string]json.RawMessage
+			}
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			require.Len(t, body.Listener, 1)
+			if filtered["admin_state_up"] == true {
+				require.JSONEq(t, "false", string(body.Listener["admin_state_up"]))
+				filtered["admin_state_up"] = false
+			} else {
+				var sections []octavia.ListenerRequestFilterSection
+				require.NoError(t, json.Unmarshal(body.Listener["request_filter_sections"], &sections))
+				require.Equal(t, []octavia.ListenerRequestFilterSection{ordinary, {Hostname: "protected.example.test", Reject: true}}, sections)
+				filtered["request_filter_sections"] = sections
+			}
+			safetyWriteJSON(t, w, map[string]any{"listener": filtered})
+		default:
+			t.Fatalf("withdrawal touched an unrelated resource: %s %s", r.Method, r.URL)
+		}
+	}))
+	provider := newTestProvider(t, ServiceClients{LoadBalancer: client, ProjectID: "project-a"}, ProviderConfig{})
+	stale := errors.New("listener filter authority changed")
+	spec.ValidateMutation = func(context.Context) error { return stale }
+	_, err := provider.ReconcileGatewayGraph(t.Context(), spec)
+	require.ErrorIs(t, err, stale)
+	require.Equal(t, true, filtered["admin_state_up"])
+
+	spec.ValidateMutation = func(context.Context) error { return nil }
+	for range 2 {
+		result, err := provider.ReconcileGatewayGraph(t.Context(), spec)
+		require.NoError(t, err)
+		require.True(t, result.Outcome.MutationSubmitted)
+	}
+	result, err := provider.ReconcileGatewayGraph(t.Context(), spec)
+	require.NoError(t, err)
+	require.Equal(t, cloud.OutcomeReady, result.Outcome.State)
+	require.False(t, result.Outcome.MutationSubmitted)
+	require.Equal(t, false, filtered["admin_state_up"])
+	require.Equal(t, true, sibling["admin_state_up"])
 }
 
 func TestListenerFiltersPreservedDuringRouteDetach(t *testing.T) {

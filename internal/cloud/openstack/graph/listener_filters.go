@@ -27,6 +27,7 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia/amphora"
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/pools"
@@ -269,6 +270,105 @@ func (p *Provider) observeListenerFilterGraph(ctx context.Context, desired desir
 
 func isListenerAuthPool(pool pools.Pool) bool {
 	return slices.Contains(pool.Tags, listenerAuthPoolTag)
+}
+
+func validateListenerFilterWithdrawal(spec cloud.GatewayGraphSpec) error {
+	gateway := spec.Gateway.Spec
+	if spec.ValidateMutation == nil || len(spec.Routes) != 0 || spec.HTTPSPolicyAuthority != nil ||
+		spec.Identity != gateway.Identity || gateway.ListenerProtocol != cloud.ListenerProtocolHTTP ||
+		gateway.ScopedListeners == nil || gateway.ListenerPort < 1 || gateway.ListenerPort > 65535 ||
+		len(gateway.RequestFilterSections) == 0 {
+		return errors.New("listener filter withdrawal requires a scoped HTTP Gateway binding and confirmed rejections")
+	}
+	for port, sections := range gateway.RequestFilterSections {
+		if port < 1 || port > 65535 || len(sections) == 0 {
+			return errors.New("listener filter withdrawal requires a valid port for each rejection")
+		}
+		hosts := make(map[string]bool, len(sections))
+		for _, section := range sections {
+			if !section.Reject || len(section.Requests) != 0 || hosts[section.Hostname] ||
+				section.Hostname != "*" && amphora.ValidateHostname(section.Hostname) != nil {
+				return errors.New("listener filter withdrawal requires distinct rejected hostnames")
+			}
+			hosts[section.Hostname] = true
+		}
+	}
+	return nil
+}
+
+func (p *Provider) withdrawListenerFilters(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph) (cloud.GatewayGraphResult, error) {
+	result := cloud.GatewayGraphResult{Outcome: actual.outcome, Gateway: cloud.GatewayResult{Outcome: actual.outcome}}
+	if actual.loadBalancer == nil || actual.loadBalancer.ProvisioningStatus != "ACTIVE" {
+		return result, nil
+	}
+	step, pending := planListenerFilterWithdrawal(desired.spec.Gateway.Spec.RequestFilterSections, actual)
+	if pending {
+		result.Outcome = p.progressingOutcome("Waiting to confirm Octavia listener filter withdrawal")
+		result.Gateway.Outcome = result.Outcome
+	}
+	if step == nil {
+		return result, nil
+	}
+	if step.kind == graphListenerFiltersMutation {
+		// A provider without filter support must keep the frontend closed.
+		err := p.octavia.VerifyGatewayCapabilities(ctx, actual.loadBalancer.Provider, octavia.GatewayCapabilityListenerRequestFilters)
+		if err != nil {
+			return result, err
+		}
+	}
+	if err := desired.spec.ValidateMutation(ctx); err != nil {
+		return result, err
+	}
+	result.Outcome = p.progressingOutcome(step.message)
+	err := p.executeGraphMutation(ctx, desired, actual, *step)
+	result.Outcome.MutationSubmitted = err == nil
+	result.Gateway.Outcome = result.Outcome
+	return result, err
+}
+
+func planListenerFilterWithdrawal(rejections map[int][]cloud.ListenerRequestFilterSection, actual observedGatewayGraph) (*graphMutation, bool) {
+	var update *graphMutation
+	var pending bool
+	for _, listener := range actual.scopedListeners {
+		sections := rejections[listener.ProtocolPort]
+		if len(sections) == 0 {
+			continue
+		}
+		current, present := actual.requestFilters[listener.ID]
+		readable := !present || current.Readable
+		var wanted []octavia.ListenerRequestFilterSection
+		if readable {
+			wanted = slices.Clone(current.Sections)
+			for _, denied := range sections {
+				rejection := octavia.ListenerRequestFilterSection{Hostname: denied.Hostname, Reject: true}
+				index := slices.IndexFunc(wanted, func(section octavia.ListenerRequestFilterSection) bool {
+					return section.Hostname == denied.Hostname
+				})
+				if index < 0 {
+					wanted = append(wanted, rejection)
+				} else {
+					wanted[index] = rejection
+				}
+			}
+			if listener.ProvisioningStatus == "ACTIVE" && listenerFilterSectionsMatch(wanted, current, present) {
+				continue
+			}
+		}
+		pending = true
+		if listener.ProvisioningStatus != "ACTIVE" && listener.ProvisioningStatus != "ERROR" {
+			continue
+		}
+		if listener.AdminStateUp || !actual.adminObserved[listener.ID] || listener.ProvisioningStatus == "ERROR" {
+			step := closeGuardedHTTPListener(listener, "Disabling Octavia listener before withdrawing pre-routing authorization")
+			return &step, true
+		}
+		if readable && update == nil {
+			update = &graphMutation{kind: graphListenerFiltersMutation, listenerID: listener.ID,
+				listenerFilters: listenerFilterMutation{sections: wanted}, scopedListener: cloud.ScopedListener{Port: listener.ProtocolPort},
+				message: "Withdrawing Octavia pre-routing authorization"}
+		}
+	}
+	return update, pending
 }
 
 func (p *Provider) planListenerFilters(ctx context.Context, desired desiredGatewayGraph, actual *observedGatewayGraph, owned map[string]observedAuthPool) {

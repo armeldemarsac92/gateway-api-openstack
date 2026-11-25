@@ -124,6 +124,55 @@ func (r *Reconciler) observeListenerFilters(ctx context.Context, gateway *gatewa
 	return result, nil
 }
 
+// Keep only denials backed by a successful authorization read. Pending
+// lookups and ready sibling configurations grant no independent write authority.
+func (observation listenerFilterObservation) confirmedRejections(listeners []*gatewayv1.Listener) listenerFilterObservation {
+	rejected := listenerFilterObservation{
+		ports:  make(map[int][]cloud.ListenerRequestFilterSection),
+		issues: make(map[gatewayv1.SectionName]httpsListenerIssue),
+	}
+	for _, listener := range listeners {
+		issue, found := observation.issues[listener.Name]
+		if !found || issue.reason == gatewayv1.ListenerReasonPending {
+			continue
+		}
+		port := int(listener.Port)
+		rejected.ports[port] = append(rejected.ports[port], cloud.ListenerRequestFilterSection{
+			Hostname: HTTPVirtualHostname(listener), Reject: true,
+		})
+		rejected.issues[listener.Name] = issue
+	}
+	return rejected
+}
+
+func (r *Reconciler) listenerFilterWithdrawalInput(ctx context.Context, snapshot *gatewayMutationSnapshot, spec cloud.GatewaySpec) (graph.GatewayInput, error) {
+	observe := func(ctx context.Context) (listenerFilterObservation, error) {
+		// ListenerSets do not supply authorized filter sections. Read only the
+		// Gateway's own filter denials, independently of TLS and route assembly.
+		filters, err := r.observeListenerFilters(ctx, snapshot.gateway, snapshot.listeners, ListenerSetProjection{}, snapshot.topology)
+		return filters.confirmedRejections(snapshot.listeners), err
+	}
+	rejected, err := observe(ctx)
+	if err != nil || len(rejected.ports) == 0 {
+		return graph.GatewayInput{}, err
+	}
+	spec.RequestFilterSections = rejected.ports
+	return graph.GatewayInput{
+		Object: snapshot.gateway,
+		Node:   cloud.GatewayGraphNode{Disposition: cloud.GraphWithdrawListenerFilters, Spec: spec},
+		Validate: func(ctx context.Context) error {
+			current, err := observe(ctx)
+			if err != nil {
+				return err
+			}
+			if !reflect.DeepEqual(current.ports, rejected.ports) {
+				return errGatewayChanged
+			}
+			return r.sealGatewayMutationSnapshot(ctx, snapshot)
+		},
+	}, nil
+}
+
 func (r *Reconciler) resolveListenerFilterRequests(ctx context.Context, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, topology classconfig.Resolved) ([]cloud.ListenerExternalAuth, *httpsListenerIssue, error) {
 	if len(listener.Filters.Requests) > maxListenerRequestFilters {
 		return nil, &httpsListenerIssue{gatewayv1.ListenerConditionAccepted, invalidListenerFilter, "filters.requests must contain at most 16 entries"}, nil
@@ -295,20 +344,15 @@ func validAuthHeaders(headers []string) bool {
 	})
 }
 
-func (r *Reconciler) applyListenerFilterStatus(gateway *gatewayv1.Gateway, previous gatewayv1.GatewayStatus, filters listenerFilterObservation, result cloud.GatewayResult) {
+func (r *Reconciler) applyListenerFilterStatus(gateway *gatewayv1.Gateway, previous gatewayv1.GatewayStatus, filters listenerFilterObservation, result cloud.GatewayResult, tlsChanged *graph.TLSAuthorizationChanged) {
 	invalid, pending := false, false
-	for i := range gateway.Status.Listeners {
-		status := &gateway.Status.Listeners[i]
-		listenerIndex := slices.IndexFunc(gateway.Spec.Listeners, func(listener gatewayv1.Listener) bool { return listener.Name == status.Name })
-		if listenerIndex < 0 {
-			continue
-		}
-		listener := &gateway.Spec.Listeners[listenerIndex]
+	for i := range gateway.Spec.Listeners {
+		listener := &gateway.Spec.Listeners[i]
 		if !listenerHasRequestFilters(listener) {
 			continue
 		}
 		port := int(listener.Port)
-		issue, found := filters.issues[status.Name]
+		issue, found := filters.issues[listener.Name]
 		if !found && slices.Contains(result.ListenerFilterUnavailablePorts, port) {
 			issue = httpsListenerIssue{gatewayv1.ListenerConditionAccepted, gatewayv1.ListenerReasonUnsupportedValue, "Octavia does not provide listener_request_filters_v1"}
 			found = true
@@ -317,10 +361,6 @@ func (r *Reconciler) applyListenerFilterStatus(gateway *gatewayv1.Gateway, previ
 		programmedReason := gatewayv1.ListenerReasonPending
 		switch {
 		case found:
-			controller.SetCondition(&status.Conditions, controller.Condition(string(issue.condition), metav1.ConditionFalse, string(issue.reason), issue.message, gateway.Generation))
-			if issue.reason == invalidListenerFilterRef && strings.Contains(issue.message, "ExtensionRef") {
-				controller.SetCondition(&status.Conditions, controller.Condition(string(gatewayv1.ListenerConditionAccepted), metav1.ConditionFalse, string(gatewayv1.ListenerReasonUnsupportedValue), issue.message, gateway.Generation))
-			}
 			message = issue.message
 			if issue.reason != gatewayv1.ListenerReasonPending {
 				programmedReason = gatewayv1.ListenerReasonInvalid
@@ -328,17 +368,36 @@ func (r *Reconciler) applyListenerFilterStatus(gateway *gatewayv1.Gateway, previ
 		case slices.Contains(result.ListenerFilterCapabilityPendingPorts, port):
 			message = "Waiting to discover Octavia listener request filter support"
 		default:
-			if index, unavailable := filters.unavailable[status.Name]; unavailable {
+			if index, unavailable := filters.unavailable[listener.Name]; unavailable {
 				message = fmt.Sprintf("filters.requests[%d]: ExternalAuth backend has no ready members", index)
 			} else if slices.Contains(result.ListenerFilterRecoveringSections[port], HTTPVirtualHostname(listener)) {
 				message = "Waiting for the Octavia listener authorization backend"
 			}
 		}
-		if message != "" {
-			controller.SetCondition(&status.Conditions, controller.Condition(string(gatewayv1.ListenerConditionProgrammed), metav1.ConditionFalse, string(programmedReason), message, gateway.Generation))
-			invalid = invalid || programmedReason == gatewayv1.ListenerReasonInvalid
-			pending = pending || programmedReason == gatewayv1.ListenerReasonPending
+		if message == "" {
+			continue
 		}
+		index := slices.IndexFunc(gateway.Status.Listeners, func(status gatewayv1.ListenerStatus) bool { return status.Name == listener.Name })
+		if index < 0 {
+			index = len(gateway.Status.Listeners)
+			gateway.Status.Listeners = append(gateway.Status.Listeners, gatewayv1.ListenerStatus{Name: listener.Name})
+		}
+		status := &gateway.Status.Listeners[index]
+		if found {
+			controller.SetCondition(&status.Conditions, controller.Condition(string(issue.condition), metav1.ConditionFalse, string(issue.reason), issue.message, gateway.Generation))
+			if issue.reason == invalidListenerFilterRef && strings.Contains(issue.message, "ExtensionRef") {
+				controller.SetCondition(&status.Conditions, controller.Condition(string(gatewayv1.ListenerConditionAccepted), metav1.ConditionFalse, string(gatewayv1.ListenerReasonUnsupportedValue), issue.message, gateway.Generation))
+			}
+		}
+		programmed := meta.FindStatusCondition(status.Conditions, string(gatewayv1.ListenerConditionProgrammed))
+		waitingForTLS := tlsChanged != nil && slices.Contains(tlsChanged.Ports, port) && programmed != nil &&
+			programmed.ObservedGeneration == gateway.Generation && programmed.Status == metav1.ConditionFalse &&
+			programmed.Reason == string(gatewayv1.ListenerReasonPending)
+		if !waitingForTLS {
+			controller.SetCondition(&status.Conditions, controller.Condition(string(gatewayv1.ListenerConditionProgrammed), metav1.ConditionFalse, string(programmedReason), message, gateway.Generation))
+		}
+		invalid = invalid || programmedReason == gatewayv1.ListenerReasonInvalid
+		pending = pending || programmedReason == gatewayv1.ListenerReasonPending
 		preserveTransitionTimes(status.Conditions, existingListenerConditionsFrom(previous.Listeners, listener.Name))
 	}
 	if (invalid || pending) && !r.addressRejectionPreventsProgramming(gateway) {

@@ -157,7 +157,7 @@ func (c keyManager) verify(ctx context.Context, candidate secrets.Secret, expect
 		return Revision{}, safeError("read Barbican backend CA payload", result.Err)
 	}
 	defer func() { _ = result.Body.Close() }()
-	body, err := io.ReadAll(io.LimitReader(result.Body, maxPEMBytes+1))
+	body, err := io.ReadAll(io.LimitReader(result.Body, cloud.MaxCAPEMBytes+1))
 	if err != nil {
 		return Revision{}, safeError("read Barbican backend CA payload", err)
 	}

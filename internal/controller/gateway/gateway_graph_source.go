@@ -185,6 +185,15 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 		return input, err
 	}
 	input.Node.Spec.RequestFilterSections = filters.ports
+	if input.Node.Spec.ListenerProtocol == cloud.ListenerProtocolHTTP && input.Node.Spec.ScopedListeners != nil && len(filters.ports) != 0 {
+		spec := cloud.GatewaySpec{
+			Identity: input.Node.Spec.Identity, ListenerProtocol: cloud.ListenerProtocolHTTP,
+			ListenerPort: input.Node.Spec.ListenerPort, ScopedListeners: []cloud.ScopedListener{},
+		}
+		input.ObserveListenerFilterWithdrawal = func(ctx context.Context) (graph.GatewayInput, error) {
+			return r.listenerFilterWithdrawalInput(ctx, snapshot, spec)
+		}
+	}
 	if (r.Config.BackendTLSPolicy || r.Config.FrontendClientValidation) && !input.Node.BackendCAOwned {
 		input.Node.ClaimBackendCA = func(ctx context.Context) error {
 			desired := snapshot.gateway.DeepCopy()
@@ -267,7 +276,9 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 		if err := r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
 			return input, err
 		}
-		r.addTLSGraphInput(ctx, snapshot, sets, &input)
+		if err := r.addTLSGraphInput(ctx, snapshot, sets, &input); err != nil {
+			return input, err
+		}
 	}
 	return input, nil
 }

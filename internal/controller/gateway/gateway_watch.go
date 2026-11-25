@@ -136,6 +136,9 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 		gatewayController.Watches(&gatewayv1.BackendTLSPolicy{}, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForSNIDependency))
 	}
 	if r.Config.TCPTLSTermination && r.Config.BackendTLSPolicy {
+		if watch := r.Config.ClusterTrustBundles.Watch(r.gatewayRequestsForSNIBackendCA); watch != nil {
+			gatewayController.WatchesRawSource(watch)
+		}
 		gatewayController.WatchesMetadata(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForSNIBackendCA))
 	}
 
@@ -159,6 +162,9 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 	if r.Config.FrontendClientValidation {
 		if err := manager.GetFieldIndexer().IndexField(context.Background(), &gatewayv1.Gateway{}, gatewayFrontendCAIndex, gatewayFrontendCAKeys); err != nil {
 			return err
+		}
+		if watch := r.Config.ClusterTrustBundles.Watch(r.gatewayRequestsForFrontendCA); watch != nil {
+			gatewayController.WatchesRawSource(watch)
 		}
 		// Watch only metadata. CA data is read directly after reference authorization.
 		gatewayController.WatchesMetadata(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForFrontendCA))
@@ -314,8 +320,8 @@ func gatewayFrontendCAKeys(object client.Object) []string {
 
 func referencesFrontendCAGrant(gateway *gatewayv1.Gateway, grant *gatewayv1.ReferenceGrant) bool {
 	for _, key := range gatewayFrontendCAKeys(gateway) {
-		namespace, name, _ := strings.Cut(key, "/")
-		if namespace == gateway.Namespace || namespace != grant.Namespace {
+		namespace, name, namespaced := strings.Cut(key, "/")
+		if !namespaced || namespace == gateway.Namespace || namespace != grant.Namespace {
 			continue
 		}
 		if slices.ContainsFunc(grant.Spec.To, func(target gatewayv1.ReferenceGrantTo) bool {
@@ -330,7 +336,7 @@ func referencesFrontendCAGrant(gateway *gatewayv1.Gateway, grant *gatewayv1.Refe
 func (r *Reconciler) gatewayRequestsForFrontendCA(ctx context.Context, object client.Object) []reconcile.Request {
 	var gateways gatewayv1.GatewayList
 	if err := r.List(ctx, &gateways, client.MatchingFields{gatewayFrontendCAIndex: client.ObjectKeyFromObject(object).String()}); err != nil {
-		log.FromContext(ctx).Error(err, "Could not list Gateways for frontend CA ConfigMap")
+		log.FromContext(ctx).Error(err, "Could not list Gateways for frontend CA")
 		return nil
 	}
 	keys := make(map[types.NamespacedName]struct{}, len(gateways.Items))

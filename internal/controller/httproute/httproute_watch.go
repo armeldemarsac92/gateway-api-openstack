@@ -296,7 +296,10 @@ func (r *Reconciler) setupRouteController(manager ctrl.Manager, object client.Ob
 	}
 	if r.Config.BackendTLSPolicy {
 		setup.Watches(&gatewayv1.BackendTLSPolicy{}, handler.EnqueueRequestsFromMapFunc(r.enqueueRoutesForBackendTLSPolicy), builder.WithPredicates(r.backendTLSRoutePredicate())).
-			WatchesMetadata(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.enqueueRoutesForBackendTLSConfigMap))
+			WatchesMetadata(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.enqueueRoutesForBackendTLSCA))
+		if watch := r.Config.ClusterTrustBundles.Watch(r.enqueueRoutesForBackendTLSCA); watch != nil {
+			setup.WatchesRawSource(watch)
+		}
 	}
 	return setup.
 		Watches(&gatewayv1.Gateway{}, handler.EnqueueRequestsFromMapFunc(r.enqueueHTTPRoutesForGateway), builder.WithPredicates(controller.GatewayForHTTPRoutePredicate(r.Config))).

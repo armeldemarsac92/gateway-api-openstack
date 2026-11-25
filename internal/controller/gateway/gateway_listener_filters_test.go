@@ -89,7 +89,7 @@ func TestListenerFiltersResolveGatewayGrantAndKeepDeclaredOrder(t *testing.T) {
 	got, err = r.observeListenerFilters(t.Context(), gateway, listeners, ListenerSetProjection{}, topology)
 	require.NoError(t, err)
 	require.True(t, got.ports[80][1].Reject)
-	r.applyListenerFilterStatus(gateway, gatewayv1.GatewayStatus{}, got, cloud.GatewayResult{})
+	r.applyListenerFilterStatus(gateway, gatewayv1.GatewayStatus{}, got, cloud.GatewayResult{}, nil)
 	condition := meta.FindStatusCondition(gateway.Status.Listeners[0].Conditions, string(gatewayv1.ListenerConditionResolvedRefs))
 	require.NotNil(t, condition)
 	require.Equal(t, string(gatewayv1.ListenerReasonRefNotPermitted), condition.Reason)
@@ -121,7 +121,7 @@ func TestListenerFiltersRejectUnknownExtensionOnHTTPS(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, got.ports[443][0].Reject)
 	gateway.Status.Listeners = []gatewayv1.ListenerStatus{{Name: "secured"}}
-	r.applyListenerFilterStatus(gateway, gatewayv1.GatewayStatus{}, got, cloud.GatewayResult{})
+	r.applyListenerFilterStatus(gateway, gatewayv1.GatewayStatus{}, got, cloud.GatewayResult{}, nil)
 	conditions := gateway.Status.Listeners[0].Conditions
 	index := slices.IndexFunc(conditions, func(condition metav1.Condition) bool {
 		return condition.Type == string(gatewayv1.ListenerConditionAccepted)
@@ -177,7 +177,7 @@ func TestListenerFiltersAggregateProgrammedAndKeepTransitionTimes(t *testing.T) 
 				gateway.Status.Listeners = append(gateway.Status.Listeners, status)
 			}
 
-			r.applyListenerFilterStatus(gateway, previous, listenerFilterObservation{}, tc.provider)
+			r.applyListenerFilterStatus(gateway, previous, listenerFilterObservation{}, tc.provider, nil)
 
 			condition := meta.FindStatusCondition(gateway.Status.Conditions, programmed)
 			require.Equal(t, metav1.ConditionFalse, condition.Status)
