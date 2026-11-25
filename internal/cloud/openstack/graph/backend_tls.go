@@ -385,7 +385,8 @@ func (plan backendTLSPlan) xBackendWithdrawal(observed observedRouteGraph, wants
 	if plan.stagesSystemCA() && len(observed.members) == 0 && pool.ProvisioningStatus == "ACTIVE" {
 		return nil
 	}
-	if hasUnclearedSystemCA(*pool, observed.backendTLS) || wantsClientCertificate || pool.TLSContainerRef != "" || slices.Contains(pool.Tags, xBackendTLSClientTag) ||
+	if hasUnclearedSystemCA(*pool, observed.backendTLS) || wantsClientCertificate && len(observed.members) != 0 ||
+		pool.TLSContainerRef != "" || slices.Contains(pool.Tags, xBackendTLSClientTag) ||
 		observed.backendTLS.RequireH2 || slices.Contains(pool.Tags, backendTLSManagedTag) && slices.Contains(pool.ALPNProtocols, xBackendHTTP2ALPN) {
 		// Close before draining a client identity or reloading an enrolled
 		// HTTP/2 pool. The authenticated renderer keeps the match reserved.
@@ -395,6 +396,7 @@ func (plan backendTLSPlan) xBackendWithdrawal(observed observedRouteGraph, wants
 	case "ACTIVE":
 		// Stock Octavia drops policies targeting disabled pools. Drain
 		// while the match still selects this pool, before any TLS staging.
+		// An empty plaintext fallback stays enabled until TLS can be staged.
 		if len(observed.members) != 0 {
 			return &routeMutation{kind: routeMutationClearPoolMembers, id: pool.ID}
 		}
@@ -644,7 +646,7 @@ func (plan backendTLSPlan) poolMutation(desired desiredRoute, observed observedR
 			return nil
 		case pool == nil:
 			// An enabled empty pool preserves the policy on stock Amphora.
-			return &routeMutation{kind: routeMutationCreatePool}
+			return &routeMutation{kind: routeMutationCreatePool, persistenceFallback: desired.authenticatedH2Cookie()}
 		case pool.ProvisioningStatus == "ACTIVE" && observed.backendTLS.AdminObserved &&
 			!pool.AdminStateUp && len(observed.members) == 0 &&
 			xBackendPoolWithoutTLS(*pool, observed.backendTLS):

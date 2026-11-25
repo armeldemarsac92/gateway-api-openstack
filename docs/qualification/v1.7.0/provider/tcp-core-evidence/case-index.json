@@ -1,0 +1,166 @@
+{
+  "allCases": [
+    "GatewayClassObservedGenerationBump",
+    "GatewayInvalidRouteKind",
+    "GatewayInvalidTLSConfiguration",
+    "GatewayListenerUnsupportedProtocol",
+    "GatewayModifyListeners",
+    "GatewayNameMaximumLength",
+    "GatewayObservedGenerationBump",
+    "GatewayPreserveForeignConditions",
+    "GatewaySecretInvalidReferenceGrant",
+    "GatewaySecretMissingReferenceGrant",
+    "GatewaySecretReferenceGrantAllInNamespace",
+    "GatewaySecretReferenceGrantSpecific",
+    "TCPRouteInvalidBackendRefNonexistent",
+    "TCPRouteInvalidCrossNamespaceBackendRef",
+    "TCPRouteInvalidNonTCPListener",
+    "TCPRouteMultipleRoutesAttachment",
+    "TCPRouteParentRefAttachAll",
+    "TCPRouteParentRefPortAndSectionName",
+    "TCPRouteReferenceGrant",
+    "TCPRouteWeightedRouting"
+  ],
+  "caseSources": {
+    "GatewayClassObservedGenerationBump": {
+      "features": [
+        "Gateway"
+      ],
+      "source": "gatewayclass-observed-generation-bump.go"
+    },
+    "GatewayInvalidRouteKind": {
+      "features": [
+        "Gateway"
+      ],
+      "source": "gateway-invalid-route-kind.go"
+    },
+    "GatewayInvalidTLSConfiguration": {
+      "features": [
+        "Gateway"
+      ],
+      "source": "gateway-invalid-tls-configuration.go"
+    },
+    "GatewayListenerUnsupportedProtocol": {
+      "features": [
+        "Gateway"
+      ],
+      "source": "gateway-invalid-listeners-unsupported-protocol.go"
+    },
+    "GatewayModifyListeners": {
+      "features": [
+        "Gateway"
+      ],
+      "source": "gateway-modify-listeners.go"
+    },
+    "GatewayNameMaximumLength": {
+      "features": [
+        "Gateway"
+      ],
+      "source": "gateway-name-maximum-length.go"
+    },
+    "GatewayObservedGenerationBump": {
+      "features": [
+        "Gateway"
+      ],
+      "source": "gateway-observed-generation-bump.go"
+    },
+    "GatewayPreserveForeignConditions": {
+      "features": [
+        "Gateway"
+      ],
+      "source": "gateway-preserve-foreign-conditions.go"
+    },
+    "GatewaySecretInvalidReferenceGrant": {
+      "features": [
+        "Gateway",
+        "ReferenceGrant"
+      ],
+      "source": "gateway-secret-invalid-reference-grant.go"
+    },
+    "GatewaySecretMissingReferenceGrant": {
+      "features": [
+        "Gateway",
+        "ReferenceGrant"
+      ],
+      "source": "gateway-secret-missing-reference-grant.go"
+    },
+    "GatewaySecretReferenceGrantAllInNamespace": {
+      "features": [
+        "Gateway",
+        "ReferenceGrant"
+      ],
+      "source": "gateway-secret-reference-grant-all-in-namespace.go"
+    },
+    "GatewaySecretReferenceGrantSpecific": {
+      "features": [
+        "Gateway",
+        "ReferenceGrant"
+      ],
+      "source": "gateway-secret-reference-grant-specific.go"
+    },
+    "TCPRouteInvalidBackendRefNonexistent": {
+      "features": [
+        "Gateway",
+        "TCPRoute"
+      ],
+      "source": "tcproute-invalid-backendref-nonexistent.go"
+    },
+    "TCPRouteInvalidCrossNamespaceBackendRef": {
+      "features": [
+        "Gateway",
+        "ReferenceGrant",
+        "TCPRoute"
+      ],
+      "source": "tcproute-invalid-cross-namespace-backend-ref.go"
+    },
+    "TCPRouteInvalidNonTCPListener": {
+      "features": [
+        "Gateway",
+        "TCPRoute"
+      ],
+      "source": "tcproute-invalid-non-tcp-listener.go"
+    },
+    "TCPRouteMultipleRoutesAttachment": {
+      "features": [
+        "Gateway",
+        "TCPRoute"
+      ],
+      "source": "tcproute-multiple-routes-attachment.go"
+    },
+    "TCPRouteParentRefAttachAll": {
+      "features": [
+        "Gateway",
+        "TCPRoute"
+      ],
+      "source": "tcproute-parentref-attach-all.go"
+    },
+    "TCPRouteParentRefPortAndSectionName": {
+      "features": [
+        "Gateway",
+        "TCPRoute"
+      ],
+      "source": "tcproute-parentref-port-and-section-name.go"
+    },
+    "TCPRouteReferenceGrant": {
+      "features": [
+        "Gateway",
+        "ReferenceGrant",
+        "TCPRoute"
+      ],
+      "source": "tcproute-reference-grant.go"
+    },
+    "TCPRouteWeightedRouting": {
+      "features": [
+        "Gateway",
+        "TCPRoute"
+      ],
+      "source": "tcproute-weighted-routing.go"
+    }
+  },
+  "coreFeatures": [
+    "Gateway",
+    "ReferenceGrant",
+    "TCPRoute"
+  ],
+  "profile": "GATEWAY-TCP"
+}

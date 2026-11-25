@@ -65,6 +65,10 @@ func (p *Provider) XBackendCookieAvailable(ctx context.Context, requirements clo
 }
 
 func (p *Provider) discoverPoolSessionCookie(ctx context.Context, provider string, requirements cloud.HTTPSessionCookieRequirements) (bool, error) {
+	return p.discoverPoolSessionPersistence(ctx, provider, poolSessionCookieCapabilities(requirements)...)
+}
+
+func poolSessionCookieCapabilities(requirements cloud.HTTPSessionCookieRequirements) []string {
 	required := []string{octavia.GatewayCapabilityHTTPCookieName}
 	if requirements&(cloud.HTTPSessionCookieTimed|cloud.HTTPSessionCookiePermanent) != 0 {
 		required = append(required, octavia.GatewayCapabilityHTTPCookieAbsoluteTimeout)
@@ -75,7 +79,7 @@ func (p *Provider) discoverPoolSessionCookie(ctx context.Context, provider strin
 	if requirements&cloud.HTTPSessionCookiePath != 0 {
 		required = append(required, octavia.GatewayCapabilityHTTPCookiePath)
 	}
-	return p.discoverPoolSessionPersistence(ctx, provider, required...)
+	return required
 }
 
 func (p *Provider) discoverPoolSessionPersistence(ctx context.Context, provider string, required ...string) (bool, error) {
@@ -255,6 +259,10 @@ func isXBackendCookieTag(tag string) bool {
 	return tag == xBackendCookieTag || tag == xBackendCookiePathTag || tag == xBackendCookieDeadlineTag || tag == xBackendCookiePermanentTag
 }
 
+func (route desiredRoute) authenticatedH2Cookie() bool {
+	return route.xBackend && route.requiresBackendTLSH2() && route.sessionCookieName != ""
+}
+
 func planXBackendCookie(desired desiredRoute, observed observedRouteGraph) (*routeMutation, error) {
 	if !desired.managesSessionPersistence(observed) {
 		return nil, nil
@@ -278,6 +286,11 @@ func planXBackendCookie(desired desiredRoute, observed observedRouteGraph) (*rou
 	switch {
 	case pool == nil:
 		return nil, issue
+	case desired.authenticatedH2Cookie() && issue == nil &&
+		desired.backendTLS.phase != backendTLSVerified && !desired.backendTLS.stagesSystemCA():
+		// Let TLS stage the transport on a closed pool before changing its
+		// cookie. TLS cannot reopen it until this plan confirms persistence.
+		return nil, nil
 	case !needsCookie && !managed && !pathManaged && pathMatches && !timed && !permanent && !observedPermanent:
 		return nil, nil
 	case pool.Protocol != cloud.ListenerProtocolHTTP:
