@@ -71,6 +71,8 @@ Phase 5 includes the logical HTTP model, shared backend input collection, refere
 See the [compatibility record](docs/providers/compatibility.md) for completed checks and outstanding evidence.
 Development results do not establish general OpenStack support or Gateway API conformance.
 
+The signed Hibiscus controller passed all 40 upstream GATEWAY-HTTP Core cases on each v1.7.0 channel in separate local kind and Amphora fixtures. The deployed Hibiscus runs are pending. [Local reports and input pins](docs/qualification/v1.7.0/provider/unified-http-core-598db990b3ba/README.md) · [Regional ledger](docs/qualification/v1.7.0/live-runs.md)
+
 The [upstream roadmap](ROADMAP.md) targets complete GATEWAY-HTTP Core support and all declared Extended features. The [Hibiscus plan](docs/superpowers/plans/2026-11-20-hibiscus.md) extends the target to the full v1.7.0 release.
 The controller and public Octavia extensions are developed and exercised together where a Gateway API feature needs provider support.
 The [feasibility assessment](docs/design/conformance-feasibility.md) records the API blockers for individual features.
