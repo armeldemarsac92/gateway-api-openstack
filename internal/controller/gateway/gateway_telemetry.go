@@ -155,11 +155,11 @@ func (r *Reconciler) observeGatewayTelemetry(ctx context.Context, gateway *gatew
 		observation.pending = "Waiting for a usable Gateway listener binding"
 		return observation, nil
 	}
-	if (tracing.SamplingRate != nil && !telemetryFullSampling(tracing.SamplingRate)) ||
-		(tracing.ParentBasedSampling.Mode != "" && tracing.ParentBasedSampling.Mode != gatewayx.ParentBasedSamplingModeImplementationDefault &&
-			tracing.ParentBasedSampling.Mode != gatewayx.ParentBasedSamplingModeDisabled) ||
-		tracing.ParentBasedSampling.SamplingRate != nil || len(tracing.Attributes) != 0 || len(tracing.Provider.Headers) != 0 {
-		observation.rejected = telemetryIssue{"UnsupportedValue", "This Octavia tracing mode requires 100% sampling and does not support parent-based sampling, custom attributes or provider headers"}
+	sampling, valid := telemetrySampling(tracing)
+	if !valid {
+		observation.rejected = telemetryIssue{"UnsupportedValue", "Invalid tracing sampling fraction or parent-based sampling configuration"}
+	} else if len(tracing.Attributes) != 0 || len(tracing.Provider.Headers) != 0 {
+		observation.rejected = telemetryIssue{"UnsupportedValue", "Octavia tracing does not support custom attributes or provider headers"}
 	}
 	if (tracing.ServiceName != "" && (len(tracing.ServiceName) > 253 || !telemetryServiceName.MatchString(tracing.ServiceName))) ||
 		(tracing.SpanName != "" && (len(tracing.SpanName) > 256 || !telemetrySpanName.MatchString(tracing.SpanName))) {
@@ -179,6 +179,7 @@ func (r *Reconciler) observeGatewayTelemetry(ctx context.Context, gateway *gatew
 	}
 	observation.pending = pending
 	if err == nil && observation.unresolved.reason == "" && observation.rejected.reason == "" && desired != nil {
+		desired.Sampling = sampling
 		sets, err := r.ObserveListenerSets(ctx, r.APIReader, gateway)
 		if err != nil {
 			return observation, err
@@ -197,8 +198,36 @@ func (r *Reconciler) observeGatewayTelemetry(ctx context.Context, gateway *gatew
 	return observation, err
 }
 
-func telemetryFullSampling(fraction *gatewayv1.Fraction) bool {
-	return fraction.Numerator > 0 && fraction.Numerator == ptr.Deref(fraction.Denominator, 100)
+func telemetrySampling(tracing gatewayx.TracingConfig) (*cloud.TelemetrySampling, bool) {
+	rate := func(fraction *gatewayv1.Fraction) cloud.TelemetryRate {
+		if fraction == nil {
+			return cloud.TelemetryRate{Numerator: 1, Denominator: 1}
+		}
+		return cloud.TelemetryRate{Numerator: fraction.Numerator, Denominator: ptr.Deref(fraction.Denominator, 100)}
+	}
+	base := rate(tracing.SamplingRate)
+	if !base.Valid() {
+		return nil, false
+	}
+	parent := tracing.ParentBasedSampling
+	switch parent.Mode {
+	case gatewayx.ParentBasedSamplingModeEnabled:
+		governor := rate(parent.SamplingRate)
+		if !governor.Valid() {
+			return nil, false
+		}
+		return &cloud.TelemetrySampling{Base: base, Parent: &governor}, true
+	case "", gatewayx.ParentBasedSamplingModeImplementationDefault, gatewayx.ParentBasedSamplingModeDisabled:
+		if parent.SamplingRate != nil {
+			return nil, false
+		}
+		if base.Numerator == base.Denominator {
+			return nil, true
+		}
+		return &cloud.TelemetrySampling{Base: base}, true
+	default:
+		return nil, false
+	}
 }
 
 func (r *Reconciler) telemetryListeners(snapshot *gatewayMutationSnapshot, sets ListenerSetProjection) []cloud.TelemetryListener {

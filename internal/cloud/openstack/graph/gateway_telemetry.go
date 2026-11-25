@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -345,7 +346,7 @@ func (p *Provider) planGatewayTelemetry(ctx context.Context, graph telemetryGrap
 	}
 	possible := owned[telemetryPoolName(wanted, graph.spec.Gateway.BackendClientCertificate.Reference)].pool.ID
 	if result, changed, err := p.telemetryWithdrawal(ctx, graph, func(listener listeners.Listener, current *octavia.ListenerOTLPTracing) bool {
-		return telemetryListenerWanted(listener, wanted) && current.CollectorPoolID == possible
+		return graph.tracing[listener.ID].Readable && telemetryListenerWanted(listener, wanted) && current.CollectorPoolID == possible
 	}); changed {
 		return result, err
 	}
@@ -361,6 +362,9 @@ func (p *Provider) planGatewayTelemetry(ctx context.Context, graph telemetryGrap
 
 func (p *Provider) verifyTelemetryCapabilities(ctx context.Context, provider string, gateway cloud.GatewayGraphNode, wanted *cloud.GatewayTelemetry) (string, bool, error) {
 	required := []string{octavia.GatewayCapabilityListenerOTLPTracing}
+	if wanted != nil && wanted.Sampling != nil {
+		required = append(required, octavia.GatewayCapabilityListenerOTLPSampling)
+	}
 	var missingTrust bool
 	if wanted != nil && wanted.BackendTLS != nil {
 		tls := wanted.BackendTLS
@@ -429,7 +433,7 @@ func (p *Provider) convergeGatewayTelemetry(ctx context.Context, graph telemetry
 		}
 		return p.convergeTelemetryPool(ctx, graph, wanted, name, pool, tlsMatches, nextMember)
 	}
-	wire := octavia.ListenerOTLPTracing{CollectorPoolID: pool.pool.ID, ServiceName: wanted.ServiceName, SpanName: wanted.SpanName}
+	wire := octavia.ListenerOTLPTracing{CollectorPoolID: pool.pool.ID, ServiceName: wanted.ServiceName, SpanName: wanted.SpanName, Sampling: wanted.Sampling}
 	observed := 0
 	var retryAfter time.Duration
 	for _, frontend := range graph.listeners {
@@ -445,7 +449,7 @@ func (p *Provider) convergeGatewayTelemetry(ctx context.Context, graph telemetry
 			continue
 		}
 		canWrite := frontend.ProvisioningStatus == "ACTIVE" || frontend.ProvisioningStatus == "ERROR"
-		if current.Value == nil || *current.Value != wire {
+		if !reflect.DeepEqual(current.Value, &wire) {
 			if !canWrite {
 				continue
 			}

@@ -22,17 +22,22 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/google/uuid"
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
 )
 
-const GatewayCapabilityListenerOTLPTracing = "listener_otlp_tracing_v1"
+const (
+	GatewayCapabilityListenerOTLPTracing  = "listener_otlp_tracing_v1"
+	GatewayCapabilityListenerOTLPSampling = "listener_otlp_sampling_v1"
+)
 
 type ListenerOTLPTracing struct {
-	CollectorPoolID string `json:"collector_pool_id"`
-	ServiceName     string `json:"service_name"`
-	SpanName        string `json:"span_name"`
+	CollectorPoolID string                   `json:"collector_pool_id"`
+	ServiceName     string                   `json:"service_name"`
+	SpanName        string                   `json:"span_name"`
+	Sampling        *cloud.TelemetrySampling `json:"sampling,omitempty"`
 }
 
 type ListenerOTLPTracingObservation struct {
@@ -51,19 +56,46 @@ func decodeListenerOTLPTracing(raw, status json.RawMessage) ListenerOTLPTracingO
 	if len(raw) == 0 {
 		return observed
 	}
-	var value *ListenerOTLPTracing
+	// Decode sampling separately so an unreadable rate cannot hide the
+	// collector identity needed to withdraw an owned export.
+	var wire *struct {
+		ListenerOTLPTracing
+		RawSampling json.RawMessage `json:"sampling"`
+	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&value); err != nil {
+	if err := decoder.Decode(&wire); err != nil {
 		return observed
 	}
-	if value != nil {
+	if wire != nil {
+		value := &wire.ListenerOTLPTracing
 		id, err := uuid.Parse(value.CollectorPoolID)
 		if err != nil || id == uuid.Nil || value.ServiceName == "" || value.SpanName == "" {
 			return observed
 		}
+		observed.Value = value
+		if len(wire.RawSampling) != 0 {
+			var sampling struct {
+				Base   cloud.TelemetryRate `json:"base"`
+				Parent json.RawMessage     `json:"parent"`
+			}
+			decoder := json.NewDecoder(bytes.NewReader(wire.RawSampling))
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&sampling); err != nil || !sampling.Base.Valid() {
+				return observed
+			}
+			decoded := &cloud.TelemetrySampling{Base: sampling.Base}
+			if len(sampling.Parent) != 0 {
+				var parent cloud.TelemetryRate
+				if err := json.Unmarshal(sampling.Parent, &parent); err != nil {
+					return observed
+				}
+				decoded.Parent = &parent
+			}
+			value.Sampling = decoded
+		}
 	}
-	observed.Value, observed.Readable = value, true
+	observed.Readable = true
 	return observed
 }
 

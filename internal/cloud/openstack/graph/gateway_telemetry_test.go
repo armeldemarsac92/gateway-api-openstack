@@ -60,6 +60,7 @@ func TestTelemetryGatewayReconcileUpdatesOnlyTraceExportsAndOwnedCollector(t *te
 	var pool, member map[string]any
 	var calls []string
 	capable := true
+	samplingCapable := false
 	exporterState := "ACTIVE"
 	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		request := r.Method + " " + r.URL.Path
@@ -77,6 +78,9 @@ func TestTelemetryGatewayReconcileUpdatesOnlyTraceExportsAndOwnedCollector(t *te
 			capabilities := []string{}
 			if capable {
 				capabilities = append(capabilities, octavia.GatewayCapabilityListenerOTLPTracing)
+			}
+			if samplingCapable {
+				capabilities = append(capabilities, octavia.GatewayCapabilityListenerOTLPSampling)
 			}
 			safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": capabilities})
 		case "GET /lbaas/pools":
@@ -118,8 +122,10 @@ func TestTelemetryGatewayReconcileUpdatesOnlyTraceExportsAndOwnedCollector(t *te
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 			require.Len(t, body.Listener, 2)
 			require.Contains(t, body.Listener, "otlp_tracing")
-			if spec.Gateway.Telemetry == nil || !capable {
+			if spec.Gateway.Telemetry == nil || !capable || spec.Gateway.Telemetry.Sampling != nil && !samplingCapable {
 				require.JSONEq(t, "null", string(body.Listener["otlp_tracing"]))
+			} else if spec.Gateway.Telemetry.Sampling != nil {
+				require.JSONEq(t, `{"collector_pool_id":"975c99aa-e26a-4818-8391-b704f0712d1f","service_name":"apps/edge","span_name":"gateway.request","sampling":{"base":{"numerator":0,"denominator":100},"parent":{"numerator":1,"denominator":1}}}`, string(body.Listener["otlp_tracing"]))
 			} else {
 				require.JSONEq(t, `{"collector_pool_id":"975c99aa-e26a-4818-8391-b704f0712d1f","service_name":"apps/edge","span_name":"gateway.request"}`, string(body.Listener["otlp_tracing"]))
 			}
@@ -161,6 +167,18 @@ func TestTelemetryGatewayReconcileUpdatesOnlyTraceExportsAndOwnedCollector(t *te
 	require.Equal(t, true, frontends["https"]["admin_state_up"])
 	require.NotContains(t, frontends["tcp"], "otlp_tracing")
 
+	sampling := &cloud.TelemetrySampling{Base: cloud.TelemetryRate{Denominator: 100}, Parent: &cloud.TelemetryRate{Numerator: 1, Denominator: 1}}
+	samplingCapable = true
+	for _, desired := range []*cloud.TelemetrySampling{sampling, nil} {
+		spec.Gateway.Telemetry.Sampling = desired
+		calls = nil
+		for range 2 {
+			require.True(t, run().Outcome.MutationSubmitted)
+		}
+		require.Equal(t, cloud.OutcomeReady, run().Outcome.State)
+		require.Equal(t, []string{"PUT /lbaas/listeners/http", "PUT /lbaas/listeners/https"}, calls)
+	}
+
 	calls = nil
 	frontends["http"]["otlp_tracing_status"] = "PENDING_UPDATE"
 	require.Equal(t, cloud.OutcomeProgressing, run().Outcome.State)
@@ -190,6 +208,8 @@ func TestTelemetryGatewayReconcileUpdatesOnlyTraceExportsAndOwnedCollector(t *te
 	frontends["tcp"]["default_pool_id"] = map[string]string{"unreadable": poolID}
 	frontends["tcp"]["otlp_tracing"] = map[string]any{"collector_pool_id": poolID,
 		"service_name": "operator.shared", "span_name": "foreign neighbor"}
+	frontends["http"]["otlp_tracing"] = map[string]any{"collector_pool_id": poolID,
+		"service_name": "apps/edge", "span_name": "gateway.request", "sampling": map[string]any{"base": map[string]int{"denominator": 100}}}
 	capable = false
 	calls = nil
 	require.True(t, run().Outcome.MutationSubmitted)
@@ -213,6 +233,14 @@ func TestTelemetryGatewayReconcileUpdatesOnlyTraceExportsAndOwnedCollector(t *te
 	require.True(t, settled.TelemetryCapabilityUnavailable)
 	require.Equal(t, []string{"PUT /lbaas/listeners/http",
 		"DELETE /lbaas/pools/" + poolID + "/members/collector", "DELETE /lbaas/pools/" + poolID}, calls)
+
+	capable, samplingCapable = true, false
+	spec.Gateway.Telemetry.Sampling = sampling
+	calls = nil
+	settled = run()
+	require.Contains(t, settled.TelemetryUnsupported, octavia.GatewayCapabilityListenerOTLPSampling)
+	require.False(t, settled.TelemetryCapabilityUnavailable, "the v1 tracing capability can still report the policy's ancestor")
+	require.Empty(t, calls, "a regional v1 provider must not receive the sampling object")
 }
 
 func TestTelemetryCollectorTLSUsesExplicitHTTP11(t *testing.T) {
