@@ -173,7 +173,7 @@ func (r *Reconciler) resolveListenerFilterRequests(ctx context.Context, gateway 
 	}
 	requests := make([]cloud.ListenerExternalAuth, 0, len(listener.Filters.Requests))
 	for index, filter := range listener.Filters.Requests {
-		auth, issue, err := r.resolveListenerFilter(ctx, gateway, filter, topology)
+		auth, issue, err := r.resolveListenerFilter(ctx, gateway, listener.Protocol, filter, topology)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil, nil, ctx.Err()
@@ -199,12 +199,12 @@ func GatewayOwnsListenerRequestFilters(config controller.Config, listener *gatew
 		return false
 	}
 	return !slices.ContainsFunc(listener.Filters.Requests, func(filter gatewayv1.ListenerFilter) bool {
-		_, issue := normalizeListenerFilter(filter)
+		_, issue := normalizeListenerFilter(listener.Protocol, filter)
 		return issue != nil
 	})
 }
 
-func normalizeListenerFilter(filter gatewayv1.ListenerFilter) (*model.HTTPExternalAuth, *httpsListenerIssue) {
+func normalizeListenerFilter(protocol gatewayv1.ProtocolType, filter gatewayv1.ListenerFilter) (*model.HTTPExternalAuth, *httpsListenerIssue) {
 	invalid := func(message string) (*model.HTTPExternalAuth, *httpsListenerIssue) {
 		return nil, &httpsListenerIssue{gatewayv1.ListenerConditionAccepted, invalidListenerFilter, message}
 	}
@@ -225,6 +225,10 @@ func normalizeListenerFilter(filter gatewayv1.ListenerFilter) (*model.HTTPExtern
 	}
 	auth, diagnostic := model.NormalizeHTTPExternalAuth(filter.ExternalAuth)
 	if diagnostic == nil {
+		if auth.Config.ForwardBodyMaxSize > 0 && protocol != gatewayv1.HTTPProtocolType {
+			return nil, &httpsListenerIssue{gatewayv1.ListenerConditionAccepted, gatewayv1.ListenerReasonUnsupportedValue,
+				"ExternalAuth request body forwarding requires an HTTP listener"}
+		}
 		return auth, nil
 	}
 	switch diagnostic.Condition {
@@ -238,8 +242,8 @@ func normalizeListenerFilter(filter gatewayv1.ListenerFilter) (*model.HTTPExtern
 	return nil, &httpsListenerIssue{gatewayv1.ListenerConditionAccepted, gatewayv1.ListenerReasonUnsupportedValue, diagnostic.Message}
 }
 
-func (r *Reconciler) resolveListenerFilter(ctx context.Context, gateway *gatewayv1.Gateway, filter gatewayv1.ListenerFilter, topology classconfig.Resolved) (cloud.ListenerExternalAuth, *httpsListenerIssue, error) {
-	auth, issue := normalizeListenerFilter(filter)
+func (r *Reconciler) resolveListenerFilter(ctx context.Context, gateway *gatewayv1.Gateway, protocol gatewayv1.ProtocolType, filter gatewayv1.ListenerFilter, topology classconfig.Resolved) (cloud.ListenerExternalAuth, *httpsListenerIssue, error) {
+	auth, issue := normalizeListenerFilter(protocol, filter)
 	if issue != nil {
 		return cloud.ListenerExternalAuth{}, issue, nil
 	}
@@ -269,6 +273,11 @@ func (r *Reconciler) applyListenerFilterStatus(gateway *gatewayv1.Gateway, previ
 		issue, found := filters.issues[listener.Name]
 		if !found && slices.Contains(result.ListenerFilterUnavailablePorts, port) {
 			issue = httpsListenerIssue{gatewayv1.ListenerConditionAccepted, gatewayv1.ListenerReasonUnsupportedValue, "Octavia does not provide listener_request_filters_v1"}
+			found = true
+		}
+		if !found && slices.Contains(result.ListenerFilterBodyUnavailableSections[port], HTTPVirtualHostname(listener)) {
+			issue = httpsListenerIssue{gatewayv1.ListenerConditionAccepted, gatewayv1.ListenerReasonUnsupportedValue,
+				"Octavia listener ExternalAuth body forwarding is unavailable at the requested size"}
 			found = true
 		}
 		var message string

@@ -53,6 +53,29 @@ spec:
 
 The local traffic qualification covers HTTP Gateway listeners, bodyless HTTP authorization to a core Service and HTTPRoute forwarding. It uses an IPv4 Endpoint member, one HTTP auth stage and two exact hostnames on a shared port.
 
+## Forward the request body
+
+On an Experimental `HTTP` listener, set `externalAuth.forwardBody.maxSize` to
+the largest request body that the HTTP authorizer should receive, in bytes. For
+example, `forwardBody: {maxSize: 32768}` allows up to 32 KiB. Omit the setting
+or use zero for a bodyless check.
+
+After qualifying the Amphora fleet for HTTP body forwarding, add
+`enabled_listener_external_auth_forward_body_providers = amphora` to Octavia's
+`[api_settings]`. Regional discovery must advertise
+`listener_http_external_auth_forward_body_v1` and a
+`l7policy_external_auth_max_body_bytes` value at least as large as the listener
+setting. Octavia uses the same per-process buffer budget and published maximum
+for listeners and route policies. The listener capability has its own regional
+opt-in. The controller uses the existing Experimental listener filter flag.
+
+An oversized request receives HTTP 413 before the affected check. If matching
+listener and HTTPRoute filters both forward the body, the listener checks run
+before route selection. Each check receives the complete body and successful
+requests reach the origin once. If the region cannot honor a listener's
+configured maximum, the controller programs a rejection for that hostname
+and reports `Accepted=False/UnsupportedValue` for its listener section.
+
 ## Check a grant change
 
 Read the Gateway's listener conditions and test both hostnames. The local fixture produced the following settled results.

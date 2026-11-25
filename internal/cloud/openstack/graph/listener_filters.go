@@ -237,6 +237,7 @@ func desiredListenerFilterSections(port int, sections []cloud.ListenerRequestFil
 			configured.Requests = append(configured.Requests, octavia.ListenerRequestFilter{
 				Type: "ExternalAuth",
 				HTTP: octavia.ListenerHTTPExternalAuth{PoolID: pool.pool.ID, PathPrefix: auth.PathPrefix,
+					ForwardBodyMaxSize:    auth.ForwardBodyMaxSize,
 					AllowedRequestHeaders: auth.AllowedRequestHeaders, AllowedResponseHeaders: auth.AllowedResponseHeaders},
 			})
 		}
@@ -255,6 +256,7 @@ func listenerFilterSectionsMatch(desired []octavia.ListenerRequestFilterSection,
 	return slices.EqualFunc(desired, actual.Sections, func(a, b octavia.ListenerRequestFilterSection) bool {
 		return a.Hostname == b.Hostname && a.Reject == b.Reject && slices.EqualFunc(a.Requests, b.Requests, func(x, y octavia.ListenerRequestFilter) bool {
 			return x.Type == y.Type && x.HTTP.PoolID == y.HTTP.PoolID && x.HTTP.PathPrefix == y.HTTP.PathPrefix &&
+				x.HTTP.ForwardBodyMaxSize == y.HTTP.ForwardBodyMaxSize &&
 				slices.Equal(x.HTTP.AllowedRequestHeaders, y.HTTP.AllowedRequestHeaders) &&
 				slices.Equal(x.HTTP.AllowedResponseHeaders, y.HTTP.AllowedResponseHeaders)
 		})
@@ -442,10 +444,11 @@ func (p *Provider) planListenerFilters(ctx context.Context, desired desiredGatew
 	actual.unverifiedListenerFilters = make(map[int]bool)
 	actual.recoveringListenerFilterSections = make(map[int][]string)
 	actual.unavailableListenerFilters = make(map[int]bool)
+	actual.unavailableListenerBodySections = make(map[int][]string)
 	actual.pendingListenerFilterCapability = make(map[int]bool)
 	capable := true
 	if len(configured) != 0 {
-		err := p.octavia.VerifyGatewayCapabilities(ctx, actual.loadBalancer.Provider, octavia.GatewayCapabilityListenerRequestFilters)
+		limit, err := p.octavia.ListenerRequestFilterBodyLimit(ctx, actual.loadBalancer.Provider)
 		capable = err == nil
 		var missing *octavia.MissingGatewayCapability
 		for port := range configured {
@@ -454,6 +457,9 @@ func (p *Provider) planListenerFilters(ctx context.Context, desired desiredGatew
 			} else if err != nil {
 				actual.pendingListenerFilterCapability[port] = true
 			}
+		}
+		if capable {
+			configured = actual.guardUnavailableListenerBodies(configured, limit)
 		}
 	}
 	desiredPools, referencedPools := make(map[string]bool), make(map[string]bool)
@@ -550,6 +556,28 @@ func (p *Provider) planListenerFilters(ctx context.Context, desired desiredGatew
 			return
 		}
 	}
+}
+
+func (actual *observedGatewayGraph) guardUnavailableListenerBodies(configured map[int][]cloud.ListenerRequestFilterSection, limit int32) map[int][]cloud.ListenerRequestFilterSection {
+	guarded := make(map[int][]cloud.ListenerRequestFilterSection, len(configured))
+	for port, sections := range configured {
+		guarded[port] = slices.Clone(sections)
+		for index, section := range sections {
+			if slices.ContainsFunc(section.Requests, func(auth cloud.ListenerExternalAuth) bool {
+				return auth.ForwardBodyMaxSize > limit
+			}) {
+				guarded[port][index] = cloud.ListenerRequestFilterSection{Hostname: section.Hostname, Reject: true}
+				actual.unavailableListenerBodySections[port] = append(actual.unavailableListenerBodySections[port], section.Hostname)
+			}
+		}
+	}
+	return guarded
+}
+
+func (actual observedGatewayGraph) listenerFilterCanUseAuthorizers(port int, section cloud.ListenerRequestFilterSection) bool {
+	// A section rejected during capability discovery has no authorizer to
+	// reach. Authorizers undergoing pool recovery still need validation.
+	return !section.Reject && !slices.Contains(actual.unavailableListenerBodySections[port], section.Hostname)
 }
 
 func (p *Provider) executeListenerFilterMutation(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, step graphMutation) error {

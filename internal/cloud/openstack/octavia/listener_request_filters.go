@@ -20,11 +20,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"slices"
 
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
 )
 
 const GatewayCapabilityListenerRequestFilters = "listener_request_filters_v1"
+const GatewayCapabilityListenerExternalAuthForwardBody = "listener_http_external_auth_forward_body_v1"
 
 type ListenerRequestFilterSection struct {
 	Hostname string                  `json:"hostname"`
@@ -40,8 +42,30 @@ type ListenerRequestFilter struct {
 type ListenerHTTPExternalAuth struct {
 	PoolID                 string   `json:"pool_id"`
 	PathPrefix             string   `json:"path_prefix,omitempty"`
+	ForwardBodyMaxSize     int32    `json:"forward_body_max_size,omitempty"`
 	AllowedRequestHeaders  []string `json:"allowed_request_headers,omitempty"`
 	AllowedResponseHeaders []string `json:"allowed_response_headers,omitempty"`
+}
+
+// ListenerRequestFilterBodyLimit verifies the base listener capability and
+// returns zero when the provider has no usable listener body profile.
+func (s *Service) ListenerRequestFilterBodyLimit(ctx context.Context, provider string) (int32, error) {
+	response, err := s.providerGatewayCapabilities(ctx, provider)
+	if err != nil {
+		return 0, err
+	}
+	if !slices.Contains(response.Capabilities, GatewayCapabilityListenerRequestFilters) {
+		return 0, &MissingGatewayCapability{Provider: provider, Capability: GatewayCapabilityListenerRequestFilters}
+	}
+	if !slices.Contains(response.Capabilities, GatewayCapabilityListenerExternalAuthForwardBody) {
+		return 0, nil
+	}
+	limit, err := response.authBodyLimit()
+	if err != nil {
+		// The optional body profile is unusable. Keep bodyless listeners working.
+		return 0, nil
+	}
+	return limit, nil
 }
 
 type ListenerRequestFilterObservation struct {
