@@ -29,8 +29,8 @@ import (
 )
 
 var (
-	errTCPRejectionUnavailable = errors.New("Waiting for regional Octavia TCP connection rejection support")
-	errTCPRejectionReadback    = errors.New("Waiting for complete Octavia TCP connection rejection readback")
+	errTCPRejectionUnavailable = errors.New("waiting for regional Octavia TCP connection rejection support")
+	errTCPRejectionReadback    = errors.New("waiting for complete Octavia TCP connection rejection readback")
 )
 
 func (p *Provider) observeTCPConnectionRejectionCapability(ctx context.Context, desired *desiredGatewayGraph, actual observedGatewayGraph) {
