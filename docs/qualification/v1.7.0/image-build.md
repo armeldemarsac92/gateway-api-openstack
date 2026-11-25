@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-An Experimental HTTPRoute authorized one rule and continued serving the public sibling while the protected rule's grant was removed and restored. [Build record](image.json) · [Both channels](provider/http-route-external-auth/README.md)
+An Experimental EndpointSelector XBackend kept its named Cookie over authenticated HTTP/2. With two server-authenticated endpoints, each received six replays of its own Cookie. A separate origin verified the enrolled client certificate on three mutual TLS replays. [Build record](image.json) · [Traffic and TLS checks](provider/xbackend-cookie-authenticated-http2/receipt.json)
+
+An Experimental HTTPRoute authorized one rule and continued serving the public sibling while the protected rule's grant was removed and restored. [Both channels](provider/http-route-external-auth/README.md)
 
 Cookie affinity on an Experimental h2c EndpointSelector XBackend kept requests on one HTTP/2 endpoint until persistence was removed. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-80010b8ad4502b335351582273cff8200d8f5de7/image.json) · [Both channels](provider/xbackend-cookie-h2c/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-80010b8ad4502b335351582273cff8200d8f5de7)
 
