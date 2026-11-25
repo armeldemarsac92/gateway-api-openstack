@@ -8,5 +8,6 @@
   "entrypoint": "/openstack-gateway-controller",
   "user": "65532:65532",
   "ociArchiveSHA256": "d8e04d02c80fb5b36ca4047ae7e0a667314926f427e1480580fd1c17aae00837",
-  "managerSHA256": "347148ef43436a6a5f1df712b73f43970915665b03000186e7c038d925272038"
+  "managerSHA256": "347148ef43436a6a5f1df712b73f43970915665b03000186e7c038d925272038",
+  "normalAndNoCacheBuildsMatch": true
 }
