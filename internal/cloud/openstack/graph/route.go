@@ -69,6 +69,8 @@ type desiredPolicy struct {
 	responseHeaderOperations []cloud.HTTPHeaderOperation
 	requestURLRewrite        *octavia.RequestURLRewrite
 	requestPolicy            *cloud.HTTPRequestPolicy
+	requestMirrors           []desiredHTTPMirror
+	resolvedRequestMirrors   []octavia.HTTPRequestMirror
 	requestCORS              *cloud.HTTPCORS
 	targetRequestFilters     []octavia.WeightedHTTPTarget
 	localRewriteFallback     bool
@@ -104,6 +106,7 @@ type desiredRoute struct {
 	policies               []desiredPolicy
 	hostnameRuleValue      string
 	httpParts              []desiredRoute
+	mirrorAvailability     requestMirrorAvailability
 	backendKey             string
 	unavailable            bool
 	redirect               bool
@@ -113,6 +116,7 @@ type desiredRoute struct {
 	weightedTargets        []desiredHTTPWeightedTarget
 	targetsPending         bool
 	zeroWeightOnly         bool
+	mirrorOnly             bool
 	grpcFailurePoolID      string
 	weightedAuthorizations map[string]map[string]int
 	backendTLS             backendTLSPlan
@@ -355,6 +359,10 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 	if err != nil {
 		return desiredRoute{}, err
 	}
+	mirrorsUsed := make(map[int]bool)
+	if err := collectHTTPMirrorPools(spec, mirrorsUsed); err != nil {
+		return invalid(err)
+	}
 	backendKeys := make(map[string]bool, len(spec.HTTPBackends))
 	for index, backend := range spec.HTTPBackends {
 		fixedResponse := p.fixedHTTPResponses && backend.InvalidReference
@@ -363,7 +371,7 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 		deniedTLS := backend.BackendTLS != nil && backend.BackendTLS.Denied
 		if strings.TrimSpace(backend.Namespace) == "" || strings.TrimSpace(backend.Name) == "" ||
 			(backend.Kind != "" && backend.Kind != cloud.HTTPBackendKindXBackend) || !validPort ||
-			len(backend.Matches) == 0 && !targetsUsed[index] || unavailable && !deniedTLS && len(backend.Members) != 0 {
+			len(backend.Matches) == 0 && !targetsUsed[index] && !mirrorsUsed[index] || unavailable && !deniedTLS && len(backend.Members) != 0 {
 			return invalid(errors.New("each HTTP backend requires a supported reference and a match or weighted reference, and an unavailable backend must have no members"))
 		}
 		key := scopeHTTPKey(spec, openstackidentity.HTTPBackendPoolKey(backend))
@@ -384,7 +392,7 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 				return invalid(err)
 			}
 		}
-		if err := p.buildHTTPMatchPolicies(&part, backend.Matches); err != nil {
+		if err := p.buildHTTPMatchPolicies(&part, backend.Matches, spec.HTTPBackends); err != nil {
 			return invalid(err)
 		}
 		route.httpParts = append(route.httpParts, part)
@@ -423,7 +431,7 @@ func (p *Provider) buildDesiredFixedHTTPParts(spec cloud.RouteSpec) ([]desiredRo
 			return nil, err
 		}
 		part.fixedResponse = true
-		if err := p.buildHTTPMatchPolicies(&part, rule.Matches); err != nil {
+		if err := p.buildHTTPMatchPolicies(&part, rule.Matches, spec.HTTPBackends); err != nil {
 			return invalid(err)
 		}
 		parts = append(parts, part)
@@ -431,7 +439,7 @@ func (p *Provider) buildDesiredFixedHTTPParts(spec cloud.RouteSpec) ([]desiredRo
 	return parts, nil
 }
 
-func (p *Provider) buildHTTPMatchPolicies(r *desiredRoute, matches []cloud.HTTPPathMatch) error {
+func (p *Provider) buildHTTPMatchPolicies(r *desiredRoute, matches []cloud.HTTPPathMatch, backends []cloud.HTTPBackend) error {
 	matchKeys := make(map[string]bool, len(matches))
 	for _, match := range matches {
 		match, err := p.normalizeHTTPMatch(match)
@@ -455,7 +463,7 @@ func (p *Provider) buildHTTPMatchPolicies(r *desiredRoute, matches []cloud.HTTPP
 		if len(operations) != 0 && !p.requestHeaderModifier {
 			return errors.New("request header operations require controller opt-in for Octavia")
 		}
-		if r.fixedResponse {
+		if r.fixedResponse && len(match.RequestMirrors) == 0 {
 			operations = nil
 		}
 		responseOperations, err := cloud.NormalizeHTTPResponseHeaderOperations(match.ResponseHeaderOperations)
@@ -472,8 +480,7 @@ func (p *Provider) buildHTTPMatchPolicies(r *desiredRoute, matches []cloud.HTTPP
 		if rewrite != nil && (!p.httpRequestURLRewrite || r.spec.GRPC || r.redirect) {
 			return errors.New("forwarding URL rewrites require --octavia-request-url-rewrite on an HTTPRoute")
 		}
-		if r.fixedResponse {
-			// No request is forwarded when a backend is invalid.
+		if r.fixedResponse && len(match.RequestMirrors) == 0 {
 			rewrite = nil
 		}
 		targetFilters, err := compileWeightedTargetRequestFilters(match, r.weightedTargets)
@@ -508,7 +515,14 @@ func (p *Provider) buildHTTPMatchPolicies(r *desiredRoute, matches []cloud.HTTPP
 				requestPolicy = nil
 			}
 		}
+		mirrorSpec := r.spec
+		mirrorSpec.HTTPBackends = backends
+		mirrors, err := p.compileHTTPMirrors(mirrorSpec, match.RequestMirrors)
+		if err != nil {
+			return err
+		}
 		for _, policy := range policies {
+			policy.requestMirrors = mirrors
 			policy.requestPolicy = requestPolicy
 			policy.requestCORS = match.CORS
 			policy.targetRequestFilters = targetFilters

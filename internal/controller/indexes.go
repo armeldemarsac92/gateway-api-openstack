@@ -405,8 +405,8 @@ func statusGatewayKeys(config Config, routeNamespace string, parents []gatewayv1
 func backendServiceKeys(route *gatewayv1.HTTPRoute) []string {
 	keys := make(map[string]struct{})
 	for _, rule := range route.Spec.Rules {
-		for _, backend := range rule.BackendRefs {
-			key, supported := model.BackendServiceReference(route.Namespace, backend.BackendObjectReference)
+		for _, backend := range model.HTTPServiceBackendReferences(rule, true) {
+			key, supported := model.BackendServiceReference(route.Namespace, backend)
 			if supported && key.Namespace != "" && key.Name != "" {
 				keys[ObjectKeyString(key)] = struct{}{}
 			}
@@ -422,8 +422,8 @@ func backendNamespaceKeys(object client.Object) []string {
 	}
 	keys := make(map[string]struct{})
 	for _, rule := range route.Spec.Rules {
-		for _, backend := range rule.BackendRefs {
-			key, supported := model.BackendServiceReference(route.Namespace, backend.BackendObjectReference)
+		for _, backend := range model.HTTPServiceBackendReferences(rule, true) {
+			key, supported := model.BackendServiceReference(route.Namespace, backend)
 			if supported && key.Namespace != "" && key.Name != "" && key.Namespace != route.Namespace {
 				keys[key.Namespace] = struct{}{}
 			}
@@ -439,10 +439,8 @@ func isCoreServiceBackend(backend gatewayv1.BackendObjectReference) bool {
 
 func hasCoreServiceBackend(route *gatewayv1.HTTPRoute) bool {
 	for _, rule := range route.Spec.Rules {
-		for _, backend := range rule.BackendRefs {
-			if isCoreServiceBackend(backend.BackendObjectReference) {
-				return true
-			}
+		if slices.ContainsFunc(model.HTTPServiceBackendReferences(rule, true), isCoreServiceBackend) {
+			return true
 		}
 	}
 	return false

@@ -279,6 +279,12 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		p.recordGraphMutationOutcome(&result, *step)
 		return result, nil
 	}
+	p.gateRequestMirrors(ctx, &desired, actual)
+	if actual.loadBalancer != nil && actual.loadBalancer.ProvisioningStatus == "ACTIVE" {
+		if step, needed := nextRequestMirrorWithdrawal(desired, actual); needed {
+			return p.reconcileRequestMirrorWithdrawal(ctx, desired, actual, step)
+		}
+	}
 	if step := p.prepareBackendTLS(ctx, &desired, actual); step != nil {
 		if validate := spec.ValidateMutation; validate != nil {
 			if err := validate(ctx); err != nil {
@@ -399,6 +405,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 			return result, err
 		}
 	}
+	p.reportRequestMirrorAvailability(desired, &result)
 	if len(plan) == 0 {
 		if isSNIProtocol(desired.protocol) && spec.Gateway.Disposition == cloud.GraphEnsure && result.Outcome.State == cloud.OutcomeReady {
 			if err := p.verifySNICapability(ctx, desired, actual); err != nil {

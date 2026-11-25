@@ -187,7 +187,8 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 			}
 		}
 		// A preserved fragment cannot authorize reopening its parent.
-		if node.Disposition == cloud.GraphPreserve && (observed.pool != nil || len(observed.policies) != 0) {
+		if node.Disposition == cloud.GraphPreserve && !desired.routes[index].mirrorOnly &&
+			(observed.pool != nil || len(observed.policies) != 0) {
 			canRestoreTraffic = false
 		}
 	}
@@ -199,6 +200,7 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 		routeResult := cloud.RouteReadyResult(routeStateFromObservation(observed))
 		var routePlan []routeMutation
 		var backendIssue, ensureHold string
+		optionalPool := route.zeroWeightOnly || route.mirrorOnly
 		withdrawBackendTransport := route.backendTransportNeedsWithdrawal(observed)
 		node := desired.spec.Routes[index]
 		port := scopedHTTPRoutePort(route)
@@ -250,6 +252,8 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 				canRestoreTraffic = false
 			} else if errors.Is(err, errHTTPRequestPolicyUnverified) {
 				ensureHold = err.Error()
+			} else if errors.Is(err, errRequestMirrorsUnverified) {
+				ensureHold = err.Error()
 			} else if err != nil {
 				return nil, result, &cloud.GraphError{Identity: route.spec.Identity, Err: err}
 			}
@@ -276,7 +280,7 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 				routePlan = nil
 			} else if backendIssue := observed.backendProvisioningIssue(route.unavailable && len(observed.members) != 0, scopedHTTP || route.backendKey != ""); !route.fixedResponse && backendIssue != "" {
 				ensureHold = backendIssue
-				canRestoreTraffic = canRestoreTraffic && route.zeroWeightOnly
+				canRestoreTraffic = canRestoreTraffic && optionalPool
 				// A blocked earlier route can leave an empty slot in the policy
 				// order. Octavia would clamp a subsequent insert to the end.
 				holdPolicyOrder[port] = holdPolicyOrder[port] || !policyPositionsMatch(route.policies, observed.policies)
@@ -379,7 +383,7 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 		}
 		if ensureHold != "" {
 			routeResult.Outcome = p.progressingOutcome(ensureHold)
-			if groupedHTTP && (route.unavailable && !route.zeroWeightOnly || handovers.drain[index]) {
+			if groupedHTTP && (route.unavailable && !optionalPool || handovers.drain[index]) {
 				canRestoreTraffic = false
 			}
 		}
@@ -463,7 +467,7 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 			case groupedHTTP && (step.kind == routeMutationCreatePolicy && step.policy.position > policyCount[port]+1 ||
 				step.kind == routeMutationMovePolicy && step.policy.position > policyCount[port]):
 				routeResult.Outcome = p.progressingOutcome("Waiting for the HTTPRoute policy order")
-			case route.zeroWeightOnly:
+			case optionalPool:
 				zeroWeightPoolEnsures = append(zeroWeightPoolEnsures, mutation)
 			default:
 				ensures = append(ensures, mutation)
@@ -769,7 +773,7 @@ func (p *Provider) prepareNextGraphMutation(ctx context.Context, desired desired
 	blockedHTTPPolicy := blocked.capability == octavia.GatewayCapabilityHTTPHeaderExact || blocked.capability == octavia.GatewayCapabilityHTTPMethodMatch ||
 		blocked.capability == octavia.GatewayCapabilityHTTPQueryParamExact || blocked.capability == octavia.GatewayCapabilityHTTPRequestRedirect ||
 		blocked.capability == octavia.GatewayCapabilityRequestURLRewrite || blocked.capability == octavia.GatewayCapabilityRequestCORS ||
-		blocked.capability == octavia.GatewayCapabilityTargetRequestFilters ||
+		blocked.capability == octavia.GatewayCapabilityTargetRequestFilters || blocked.capability == octavia.GatewayCapabilityHTTPRequestMirror ||
 		blocked.capability == octavia.GatewayCapabilityRequestHeaderOperations && rewritePolicyWriteRequiresCapability(graphRoutePart(desired, first), first.route) ||
 		blocked.capability == octavia.GatewayCapabilityResponseHeaderOperations || blocked.capability == octavia.GatewayCapabilityGRPCContentType
 	result.Outcome = result.Routes[first.routeIndex].Result.Outcome
@@ -850,6 +854,9 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 	case graphRouteMutation:
 		part := graphRoutePart(desired, step)
 		fixed = fixed && routeNeedsHTTPCapability(part, step.route)
+		if requestMirrorWriteRequiresCapability(step.route) {
+			required = append(required, octavia.GatewayCapabilityHTTPRequestMirror)
+		}
 		if redirectPolicyWriteRequiresCapability(part, step.route) {
 			required = append(required, octavia.GatewayCapabilityHTTPRequestRedirect)
 		}
@@ -905,10 +912,17 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 	withdrawTarget := step.kind == graphRouteMutation && step.withdrawHTTPPolicy && step.route.kind == routeMutationSetPolicyTarget
 	verify := p.verifyGatewayHTTPCapabilities
 	if slices.Contains(required, octavia.GatewayCapabilityHTTPRequestRedirect) || slices.Contains(required, octavia.GatewayCapabilityRequestURLRewrite) ||
-		slices.Contains(required, octavia.GatewayCapabilityTargetRequestFilters) || slices.Contains(required, octavia.GatewayCapabilityRequestCORS) {
+		slices.Contains(required, octavia.GatewayCapabilityTargetRequestFilters) || slices.Contains(required, octavia.GatewayCapabilityRequestCORS) ||
+		slices.Contains(required, octavia.GatewayCapabilityHTTPRequestMirror) {
 		verify = p.verifyGatewayHTTPURLCapabilities
 	}
 	err := verify(ctx, desired, actual, required)
+	if err != nil && requestMirrorWriteRequiresCapability(step.route) {
+		var missingMirror *octavia.MissingGatewayCapability
+		if !errors.As(err, &missingMirror) || missingMirror.Capability == octavia.GatewayCapabilityHTTPRequestMirror {
+			return step, &unavailableRouteCapability{error: err, capability: octavia.GatewayCapabilityHTTPRequestMirror}
+		}
+	}
 	var missingResponseHeaders *octavia.MissingGatewayCapability
 	if withdrawTarget && len(step.route.responseHeaderOperations) != 0 &&
 		errors.As(err, &missingResponseHeaders) && missingResponseHeaders.Capability == octavia.GatewayCapabilityResponseHeaderOperations {

@@ -91,3 +91,7 @@ If the region stops advertising an action during a target withdrawal, the contro
 Keep the patched workers, API and operator flags while withdrawing routes and Gateways that use the extension. Wait for their owned policies and listener defaults to clear and confirm cleanup against the public Octavia inventory before rolling back the workload manifest. The operator can then withdraw admission for the driver. Coordinate any database or package rollback separately under the cloud's upgrade procedure.
 
 [Upstream deadline and retry results on both channels](qualification/v1.7.0/provider/http-request-policy.md)
+
+## HTTP request mirroring
+
+Enable the `octavia-http-request-mirror` controller component after the regional Amphora capability is available. [Enablement, packages and recorded request copies](qualification/v1.7.0/provider/http-request-mirror.md)

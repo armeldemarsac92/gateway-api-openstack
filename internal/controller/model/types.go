@@ -41,6 +41,7 @@ type Input struct {
 	HTTPRequestRedirect    bool
 	HTTPRequestURLRewrite  bool
 	HTTPRequestPolicy      bool
+	HTTPRequestMirror      bool
 	HTTPCORS               bool
 	BackendRequestFilters  bool
 	BackendH2C             bool
@@ -134,6 +135,7 @@ type Rule struct {
 	ResponseHeaderOperations []cloud.HTTPHeaderOperation
 	URLRewrite               *cloud.HTTPURLRewrite
 	RequestPolicy            *cloud.HTTPRequestPolicy
+	RequestMirrors           []RequestMirror
 	CORS                     *cloud.HTTPCORS
 	Diagnostics              []Diagnostic
 }
