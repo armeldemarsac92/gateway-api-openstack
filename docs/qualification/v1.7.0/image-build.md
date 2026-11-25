@@ -1,6 +1,6 @@
 # Reproduce the Hibiscus development image
 
-The linux/amd64 controller presented an operator-enrolled client certificate to an Experimental EndpointSelector origin and withdrew it when the Secret's ReferenceGrant was removed. [Build record](image.json) · [Mutual TLS traffic](provider/xbackend-client-tls-evidence/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-b5e9dc2ecfdf5a595751a43920f425fe87707212)
+The linux/amd64 controller configured Amphora to present an operator-enrolled client certificate to an Experimental EndpointSelector origin and to close the pool when its Secret grant was withdrawn. [Build record](image.json) · [Mutual TLS traffic](provider/xbackend-client-tls-evidence/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-6b0869de7f8bd3c5db942906aaa2c02ae766e44d)
 
 The linux/amd64 controller preserved a 3:1 TCPRoute split through changes to backend authorization and endpoint readiness on a local kind Gateway. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-85dd1a6b3aaf2ebfeb515f3a88fb0cdae0c38806/image.json) · [TCP traffic](provider/tcproute-connection-rejection-evidence/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-85dd1a6b3aaf2ebfeb515f3a88fb0cdae0c38806)
 
