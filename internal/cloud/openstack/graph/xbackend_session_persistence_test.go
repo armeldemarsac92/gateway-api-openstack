@@ -30,6 +30,137 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestXBackendAuthenticatedH2CookieGatesPoolMutations(t *testing.T) {
+	for _, mode := range []struct{ name, clientRef string }{
+		{name: "ServerOnly"},
+		{name: "ClientAndServer", clientRef: "https://barbican.example/v1/secrets/reports-client"},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			testXBackendAuthenticatedH2CookieGatesPoolMutations(t, mode.clientRef)
+		})
+	}
+}
+
+func testXBackendAuthenticatedH2CookieGatesPoolMutations(t *testing.T, clientRef string) {
+	t.Helper()
+	var request struct{ Pool map[string]any }
+	var advertised []string
+	p := &Provider{octavia: octavia.NewService(safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/lbaas/providers/amphora/gateway_capabilities" {
+			safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": advertised})
+			return
+		}
+		require.Equal(t, "POST /lbaas/pools", r.Method+" "+r.URL.Path)
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+		w.WriteHeader(http.StatusCreated)
+		safetyWriteJSON(t, w, map[string]any{"pool": map[string]any{"id": "reports"}})
+	})))}
+	spec := completeGraphSpec(safetyTestIdentity(t)).Routes[0].Spec
+	p.projectID = spec.Identity.OpenStackProjectID
+	spec.Hostname, spec.PathType, spec.PathValue, spec.Members = "", "", "", nil
+	spec.MemberMode = cloud.MemberModeEndpoint
+	tls := newGraphBackendTLS(t)
+	tls.RequireH2 = true
+	spec.HTTPBackends = []cloud.HTTPBackend{{
+		Kind: cloud.HTTPBackendKindXBackend, Namespace: "apps", Name: "reports", Port: 8443,
+		SessionCookieName: "reports_session", BackendTLS: tls, XBackendClientCertificateReference: clientRef,
+		Members: []cloud.Member{{Address: "192.0.2.20", Port: 8443}},
+		Matches: []cloud.HTTPPathMatch{{PathType: cloud.PathMatchExact, PathValue: "/reports"}},
+	}}
+	route, err := p.buildDesiredRoute(spec)
+	require.NoError(t, err)
+	part := route.httpParts[0]
+	part.sessionCookieCapability = xBackendCookieAvailable
+	settings := octavia.BackendTLSSettings{Hostname: tls.Hostname, CAReference: "https://barbican.example/v1/secrets/reports-ca",
+		ClientCertificateReference: clientRef, RequireH2: new(true)}
+	converge := func(observed observedRouteGraph) []routeMutation {
+		t.Helper()
+		steps, _, err := buildRouteEnsurePlan(part, observed)
+		require.NoError(t, err)
+		return steps
+	}
+	create := func() {
+		t.Helper()
+		request.Pool = nil
+		step := converge(observedRouteGraph{})[0]
+		require.Equal(t, routeMutationCreatePool, step.kind)
+		require.NoError(t, p.executeRouteMutation(t.Context(), part, step))
+	}
+
+	part.backendTLS.phase = backendTLSBlocked
+	create()
+	require.Equal(t, true, request.Pool["admin_state_up"])
+	require.NotContains(t, request.Pool, "session_persistence")
+	require.NotContains(t, request.Pool, "tls_enabled")
+
+	part.backendTLS = backendTLSPlan{phase: backendTLSConfigure, settings: settings}
+	part.sessionCookieCapability = xBackendCookieUnavailable
+	create()
+	require.NotContains(t, request.Pool, "session_persistence")
+	require.NotContains(t, request.Pool, "tls_enabled")
+
+	part.sessionCookieCapability = xBackendCookieAvailable
+	create()
+	require.Equal(t, false, request.Pool["admin_state_up"])
+	require.Equal(t, true, request.Pool["backend_tls_require_h2"])
+	require.Equal(t, []any{"h2"}, request.Pool["alpn_protocols"])
+	require.Equal(t, settings.Hostname, request.Pool["backend_tls_hostname"])
+	require.Equal(t, settings.CAReference, request.Pool["ca_tls_container_ref"])
+	require.Equal(t, map[string]any{"type": "HTTP_COOKIE", "cookie_name": "reports_session"}, request.Pool["session_persistence"])
+	if clientRef == "" {
+		require.NotContains(t, request.Pool, "tls_container_ref")
+	} else {
+		require.Equal(t, clientRef, request.Pool["tls_container_ref"])
+	}
+
+	// An established pool might confirm TLS and persistence on different reads.
+	observed := observedRouteGraph{pool: &pools.Pool{ID: "reports", Protocol: "HTTP", ProvisioningStatus: "ACTIVE",
+		TLSEnabled: true, ALPNProtocols: []string{"h2"}, Tags: []string{backendTLSManagedTag, backendTLSRevisionTag(tls)}},
+		backendTLS: octavia.PoolBackendTLS{AdminObserved: true}}
+	part.backendTLS.phase = backendTLSVerified
+	part.sessionCookieCapability = xBackendCookieUnavailable
+	for _, hostname := range []string{"", "reports.example.test"} {
+		part.policies[0].httpsListenerHostname = hostname
+		steps := converge(observed)
+		require.Len(t, steps, 1)
+		require.Equal(t, routeMutationCreatePolicy, steps[0].kind)
+		require.Equal(t, observed.pool.ID, steps[0].parentID)
+		require.Equal(t, hostname, steps[0].policy.httpsListenerHostname)
+	}
+	part.policies[0].httpsListenerHostname = ""
+	part.sessionCookieCapability = xBackendCookieAvailable
+	part.backendTLS.phase = backendTLSBlocked
+	require.Equal(t, routeMutationCreatePolicy, converge(observed)[0].kind)
+	part.backendTLS.phase = backendTLSVerified
+	steps := converge(observed)
+	require.Equal(t, routeMutationSetXBackendPersistence, steps[0].kind)
+	require.Nil(t, steps[0].poolAdmin)
+	observed.pool.Persistence = *steps[0].poolPersistence
+	observed.pool.Tags = *steps[0].poolTags
+	step := converge(observed)[0]
+	require.Equal(t, routeMutationSetBackendTLS, step.kind)
+	require.Equal(t, new(true), step.poolAdmin)
+
+	// The cookie capability can disappear between planning and reopening.
+	route.httpParts[0] = part
+	graph := desiredGatewayGraph{protocol: cloud.ListenerProtocolHTTP, routes: []desiredRoute{route, {}}}
+	actual := observedGatewayGraph{loadBalancer: safetyObservedLoadBalancer()}
+	actual.loadBalancer.Provider = "amphora"
+	activation := graphMutation{kind: graphRouteMutation, backendKey: part.backendKey, route: step}
+	sibling := graphMutation{kind: graphRouteMutation, routeIndex: 1, route: routeMutation{kind: routeMutationCreateMember}}
+	result := cloud.GatewayGraphResult{Routes: make([]cloud.RouteGraphResult, 2)}
+	advertised = []string{octavia.GatewayCapabilityBackendTLSHostname, octavia.GatewayCapabilityBackendTLSH2ALPN}
+	next, ok, err := p.prepareNextGraphMutation(t.Context(), graph, actual, []graphMutation{activation, sibling}, &result)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, sibling, next)
+	advertised = append(advertised, octavia.GatewayCapabilityHTTPCookieName)
+	next, ok, err = p.prepareNextGraphMutation(t.Context(), graph, actual, []graphMutation{activation, sibling}, &result)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, activation, next)
+}
+
 func TestXBackendCookieOctaviaPoolLifecycle(t *testing.T) {
 	t.Run("HTTP11", func(t *testing.T) { testXBackendCookieOctaviaPoolLifecycle(t, false) })
 	t.Run("H2C", func(t *testing.T) { testXBackendCookieOctaviaPoolLifecycle(t, true) })

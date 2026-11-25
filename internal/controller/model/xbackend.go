@@ -245,7 +245,7 @@ func ValidateXBackend(spec gatewayx.BackendSpec, profile XBackendProfile) *Diagn
 	}
 	protocol := ptr.Deref(spec.Protocol, "")
 	if persistence := spec.SessionPersistence; persistence != nil {
-		if diagnostic := validateXBackendSessionPersistence(spec.Type, protocol, *persistence, profile); diagnostic != nil {
+		if diagnostic := validateXBackendSessionPersistence(spec.Type, *persistence, profile); diagnostic != nil {
 			return diagnostic
 		}
 	}
@@ -293,7 +293,7 @@ func ValidateXBackend(spec gatewayx.BackendSpec, profile XBackendProfile) *Diagn
 	return backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, fmt.Sprintf("XBackend protocol %q is unsupported by the configured HTTP backend profile", protocol))
 }
 
-func validateXBackendSessionPersistence(kind gatewayx.BackendType, protocol gatewayx.BackendProtocol, persistence gatewayv1.SessionPersistence, profile XBackendProfile) *Diagnostic {
+func validateXBackendSessionPersistence(kind gatewayx.BackendType, persistence gatewayv1.SessionPersistence, profile XBackendProfile) *Diagnostic {
 	const unsupported = gatewayv1.RouteReasonUnsupportedValue
 	switch {
 	case !profile.SessionPersistence:
@@ -301,17 +301,7 @@ func validateXBackendSessionPersistence(kind gatewayx.BackendType, protocol gate
 	case kind != gatewayx.BackendTypeEndpointSelector:
 		return backendDiagnostic(unsupported, "XBackend sessionPersistence requires EndpointSelector")
 	}
-	if diagnostic := validateSessionPersistence(persistence, "XBackend"); diagnostic != nil {
-		return diagnostic
-	}
-	if !IsHeaderSessionPersistence(persistence) {
-		switch protocol {
-		case "", gatewayx.BackendProtocolHTTP, gatewayx.BackendProtocolHTTP11, gatewayx.BackendProtocolH2C:
-		default:
-			return backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "XBackend Cookie sessionPersistence requires HTTP, HTTP11 or H2C")
-		}
-	}
-	return nil
+	return validateSessionPersistence(persistence, "XBackend")
 }
 
 func validateSessionPersistence(persistence gatewayv1.SessionPersistence, subject string) *Diagnostic {

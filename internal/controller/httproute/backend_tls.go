@@ -126,7 +126,7 @@ func (inputs *routeModelInputs) backendTLSValidation(backend model.BackendGroup,
 			tls.RequireH2 = backend.XBackendRequiresH2
 			return tls
 		}
-		return &cloud.BackendTLSValidation{Denied: true}
+		return &cloud.BackendTLSValidation{Denied: true, RequireH2: backend.XBackendRequiresH2}
 	}
 	winner := backend.BackendTLS.Winner
 	if winner == nil {

@@ -1396,6 +1396,17 @@ func TestXBackendMutualTLSRotatesAndClearsOnlyAfterClosing(t *testing.T) {
 	require.Equal(t, routeMutationCreatePool, create.kind)
 	require.Contains(t, *create.poolTags, xBackendTLSClientTag)
 	require.NotContains(t, *create.poolTags, backendTLSClientTag)
+	plain := observedRouteGraph{pool: &pools.Pool{ID: "fallback", Protocol: "HTTP", ProvisioningStatus: "ACTIVE", AdminStateUp: true},
+		backendTLS: octavia.PoolBackendTLS{AdminObserved: true, EnabledObserved: true, CAObserved: true, ClientRefObserved: true}}
+	enrollment := cloud.BackendClientCertificate{Reference: rotated}
+	plainPart := backendTLSPart{desired: &desired, observed: plain, clientCertificate: enrollment}
+	require.Nil(t, firstBackendTLSWithdrawal([]backendTLSPart{plainPart}, backendTLSPart.preflight))
+	blocked := p.observeBackendTLS(t.Context(), desired, plain, func(bool, bool) bool { return false }, true, enrollment)
+	require.Equal(t, backendTLSBlocked, blocked.phase)
+	require.Nil(t, firstBackendTLSWithdrawal([]backendTLSPart{plainPart}, func(backendTLSPart) backendTLSPlan { return blocked }))
+	require.Nil(t, blocked.poolMutation(desired, plain))
+	require.Equal(t, new(false), configured.poolMutation(desired, plain).poolAdmin)
+
 	pool := &pools.Pool{ID: "xbackend", ProvisioningStatus: "ACTIVE", TLSEnabled: true, AdminStateUp: true,
 		CATLSContainerRef: ca.Reference(), TLSContainerRef: first, ALPNProtocols: []string{xBackendServerALPN}, Tags: *create.poolTags}
 	observed := observedRouteGraph{pool: pool, members: []pools.Member{{ID: "current"}}, backendTLS: octavia.PoolBackendTLS{
