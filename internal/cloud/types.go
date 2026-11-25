@@ -94,7 +94,7 @@ const MaxGRPCExternalAuthBodySize = math.MaxInt32 - (1 << 20)
 // ListenerExternalAuth describes an authorization Service resolved from
 // the referring Gateway or HTTPRoute.
 type ListenerExternalAuth struct {
-	// Protocol is empty for HTTP. Only HTTPRoute rules can select GRPC.
+	// Protocol is empty for HTTP and set to GRPC for Envoy authorization checks.
 	Protocol               string
 	BackendTLS             *BackendTLSValidation
 	ServiceUID             string

@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-An Experimental HTTPRoute rule can use verified TLS to its HTTP authorizer. [Build record](image.json) · [Local trial](provider/gateway-http-route-http-authorizer-tls/README.md)
+The linux/amd64 image built from a signed controller commit ran the Standard admission control and the Experimental listener trials. [Build record](image.json) · [Local trials](provider/gateway-listener-authorizer-transports/README.md)
+
+An Experimental HTTPRoute rule can use verified TLS to its HTTP authorizer. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-a93b18166c27837a5c3cfdb7aac34ec9522b86be/image.json) · [Local trial](provider/gateway-http-route-http-authorizer-tls/README.md)
 
 Experimental Gateway listeners can forward a bounded request body to an HTTP authorization Service from HTTP and terminated HTTPS listeners. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-13627489822adf0aa9b182739a9ab7ff124d594a/image.json) · [Body limits, grant changes and shared port](provider/gateway-listener-external-auth-forward-body/README.md)
 

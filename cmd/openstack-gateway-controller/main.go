@@ -422,6 +422,7 @@ func run(ctx context.Context) error {
 		BackendH2CAvailable:                openStackProvider.BackendH2CAvailable,
 		BackendClientCertificateForGateway: gatewayReconciler.BackendClientCertificateForGateway,
 		RouteExternalAuthAvailable:         openStackProvider.RouteExternalAuthAvailable,
+		ListenerExternalAuthTLSAvailable:   openStackProvider.ListenerExternalAuthTLSAvailable,
 		Client:                             manager.GetClient(),
 		Coordinator:                        graphCoordinator,
 		APIReader:                          manager.GetAPIReader(),

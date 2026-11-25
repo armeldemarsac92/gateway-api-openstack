@@ -140,6 +140,12 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 		}
 		gatewayController.Watches(&corev1.Node{}, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForListenerFilterDependency),
 			builder.WithPredicates(controller.NodePredicate("")))
+		if r.Config.BackendTLSPolicy {
+			if watch := r.Config.ClusterTrustBundles.Watch(r.gatewayRequestsForListenerAuthCA); watch != nil {
+				gatewayController.WatchesRawSource(watch)
+			}
+			gatewayController.WatchesMetadata(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForListenerAuthCA))
+		}
 	}
 	if r.Config.TelemetryPolicyEnabled() {
 		gatewayController.Watches(&gatewayx.XTelemetryPolicy{}, handler.EnqueueRequestsFromMapFunc(gatewayRequestsForTelemetryPolicy),

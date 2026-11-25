@@ -136,8 +136,8 @@ func (o *BackendTLSObserver) Observe(ctx context.Context, service *corev1.Servic
 	return o.observe(ctx, service, port, ancestor, false)
 }
 
-// ObserveWeightedService keeps unavailable CA observations scoped to each Service.
-func (o *BackendTLSObserver) ObserveWeightedService(ctx context.Context, service *corev1.Service, port *corev1.ServicePort, ancestor *backendtls.GatewayAncestor) (backendtls.Selection, error) {
+// ObserveWithPendingCA keeps unavailable CA observations scoped to each Service.
+func (o *BackendTLSObserver) ObserveWithPendingCA(ctx context.Context, service *corev1.Service, port *corev1.ServicePort, ancestor *backendtls.GatewayAncestor) (backendtls.Selection, error) {
 	return o.observe(ctx, service, port, ancestor, true)
 }
 

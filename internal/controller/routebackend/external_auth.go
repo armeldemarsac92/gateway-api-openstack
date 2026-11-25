@@ -23,35 +23,78 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/classconfig"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
-// ResolveHTTPExternalAuth authorizes the source before reading the Service and
-// its transport dependencies. Listener filters retain their cleartext HTTP transport.
-func ResolveHTTPExternalAuth(ctx context.Context, reader client.Reader, kind gatewayv1.Kind, namespace string, filter model.HTTPExternalAuth, topology classconfig.Resolved) (cloud.ListenerExternalAuth, *model.Diagnostic, error) {
+// ObserveExternalAuthTransport resolves trust only after the source may use the Service.
+func ObserveExternalAuthTransport(ctx context.Context, reader client.Reader, tlsObserver *graph.BackendTLSObserver,
+	ancestor *backendtls.GatewayAncestor, kind gatewayv1.Kind, namespace string, filter model.HTTPExternalAuth) (cloud.ListenerExternalAuth, *corev1.Service, *corev1.ServicePort, *model.Diagnostic, error) {
 	auth := filter.Config
 	service, port, diagnostic, err := ObserveExternalAuthService(ctx, reader, kind, namespace, filter)
 	if diagnostic != nil || err != nil {
-		return auth, diagnostic, err
+		return auth, nil, nil, diagnostic, err
 	}
-	if _, issue := model.ResolveServicePort(service, filter.BackendRef.Port, false); issue != nil {
-		return auth, externalAuthReferenceIssue(gatewayv1.RouteConditionReason(issue.Reason), issue.Message), nil
+	if ancestor == nil {
+		required, err := tlsObserver.HasPolicy(ctx, service, port)
+		if err != nil {
+			return auth, nil, nil, nil, err
+		}
+		if required {
+			return auth, nil, nil, &model.Diagnostic{Condition: string(gatewayv1.RouteConditionAccepted), Reason: string(gatewayv1.RouteReasonUnsupportedValue),
+				Message: "ExternalAuth backend TLS requires --octavia-backend-tls-policy", Scope: model.ScopeRule}, nil
+		}
+	} else {
+		selection, err := tlsObserver.ObserveWithPendingCA(ctx, service, port, ancestor)
+		if err != nil {
+			return auth, nil, nil, nil, err
+		}
+		if winner := selection.Winner; winner != nil {
+			if winner.Validation == nil {
+				if winner.ResolvedRefs.Status == metav1.ConditionUnknown {
+					return auth, nil, nil, externalAuthReferenceIssue(gatewayv1.RouteReasonPending, winner.ResolvedRefs.Message), nil
+				}
+				if kind == "Gateway" {
+					return auth, nil, nil, externalAuthReferenceIssue("Invalid", winner.Accepted.Message), nil
+				}
+			}
+			if winner.Validation == nil || winner.AncestorSlot != backendtls.AncestorSlotHeld {
+				return auth, nil, nil, externalAuthReferenceIssue(gatewayv1.RouteReasonPending, "Waiting for an authorized ExternalAuth BackendTLSPolicy"), nil
+			}
+			auth.BackendTLS = winner.Validation.CloudValidation()
+			auth.BackendTLS.RequireH2 = auth.Protocol == cloud.ExternalAuthProtocolGRPC
+		}
 	}
-	requiresTLS, err := graph.NewBackendTLSObserver(reader, nil).HasPolicy(ctx, service, port)
-	if err != nil {
-		return auth, nil, err
+	return auth, service, port, ExternalAuthTransportDiagnostic(service, port, filter, auth.BackendTLS != nil), nil
+}
+
+// ExternalAuthTransportDiagnostic checks whether the Service port permits the selected transport.
+func ExternalAuthTransportDiagnostic(service *corev1.Service, port *corev1.ServicePort, filter model.HTTPExternalAuth, secured bool) *model.Diagnostic {
+	var issue *model.Diagnostic
+	if filter.Config.Protocol == cloud.ExternalAuthProtocolGRPC {
+		if port.AppProtocol != nil && model.CheckGRPCBackendProtocol(port, secured) != nil {
+			issue = &model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedProtocol),
+				Message: "The gRPC ExternalAuth Service appProtocol conflicts with its required transport"}
+		}
+	} else if ptr.Deref(port.AppProtocol, "") == "kubernetes.io/ws" {
+		issue = &model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedProtocol),
+			Message: "The HTTP ExternalAuth Service must accept authorization requests without a WebSocket upgrade"}
+	} else {
+		_, issue = model.ResolveServicePortForBackendTLS(service, filter.BackendRef.Port, false, secured)
 	}
-	if requiresTLS {
-		return auth, &model.Diagnostic{Condition: string(gatewayv1.RouteConditionAccepted), Reason: string(gatewayv1.RouteReasonUnsupportedValue),
-			Message: "ExternalAuth backend TLS is unsupported", Scope: model.ScopeRule}, nil
+	if issue != nil {
+		return &model.Diagnostic{Condition: string(gatewayv1.RouteConditionResolvedRefs),
+			Reason: issue.Reason, Message: issue.Message, Scope: model.ScopeRule}
 	}
-	return ResolveExternalAuthMembers(ctx, reader, service, port, auth, topology)
+	return nil
 }
 
 // ResolveExternalAuthMembers uses an already authorized Service and TCP port.

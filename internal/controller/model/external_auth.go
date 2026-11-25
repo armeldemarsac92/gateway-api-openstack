@@ -33,9 +33,10 @@ type HTTPExternalAuth struct {
 	Weighted   bool
 }
 
-// NormalizeHTTPExternalAuth validates the HTTP listener filter.
-func NormalizeHTTPExternalAuth(filter *gatewayv1.HTTPExternalAuthFilter) (*HTTPExternalAuth, *Diagnostic) {
-	return normalizeExternalAuth(filter, false)
+// NormalizeListenerExternalAuth validates the listener's selected authorization protocol.
+func NormalizeListenerExternalAuth(filter *gatewayv1.HTTPExternalAuthFilter) (*HTTPExternalAuth, *Diagnostic) {
+	grpc := filter != nil && filter.ExternalAuthProtocol == gatewayv1.HTTPRouteExternalAuthGRPCProtocol
+	return normalizeExternalAuth(filter, grpc)
 }
 
 func normalizeExternalAuth(filter *gatewayv1.HTTPExternalAuthFilter, grpc bool) (*HTTPExternalAuth, *Diagnostic) {
