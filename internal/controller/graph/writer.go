@@ -128,7 +128,8 @@ type RouteSource interface {
 	ObserveRouteGraph(context.Context, Request, *gatewayv1.Gateway) (RouteInputs, error)
 }
 
-// XBackendClientWithdrawalSource observes only attached routes and their XBackend identities.
+// XBackendClientWithdrawalSource observes attached routes and their XBackend identities.
+// Returned targets remain confirmed when another XBackend observation fails.
 type XBackendClientWithdrawalSource interface {
 	ObserveXBackendClientWithdrawals(context.Context, cloud.Identity, *gatewayv1.Gateway) ([]cloud.XBackendClientWithdrawal, error)
 }
@@ -375,37 +376,33 @@ func (w *Writer) withdrawXBackendClientCertificates(ctx context.Context, request
 	}
 	identity := request.Identity
 	identity.RouteNamespace, identity.RouteName, identity.RouteUID = "", "", ""
-	targets, err := source.ObserveXBackendClientWithdrawals(ctx, identity, request.Gateway)
-	if err != nil {
-		return cloud.GatewayGraphResult{}, err
-	}
+	targets, observeErr := source.ObserveXBackendClientWithdrawals(ctx, identity, request.Gateway)
 	if len(targets) == 0 {
-		return cloud.GatewayGraphResult{Outcome: cloud.ReadyOutcome()}, nil
+		return cloud.GatewayGraphResult{Outcome: cloud.ReadyOutcome()}, observeErr
 	}
 	request.Action, request.Identity = WithdrawXBackendClientCertificates, identity
 	input, err := w.Gateway.ObserveGatewayGraph(ctx, request)
 	if err != nil {
-		return cloud.GatewayGraphResult{}, err
+		return cloud.GatewayGraphResult{}, errors.Join(observeErr, err)
 	}
 	input.Node.XBackendClientWithdrawals = targets
 	validate := input.Validate
 	if validate == nil {
-		return cloud.GatewayGraphResult{}, errors.New("XBackend client certificate withdrawal requires Gateway authority")
+		return cloud.GatewayGraphResult{}, errors.Join(observeErr, errors.New("XBackend client certificate withdrawal requires Gateway authority"))
 	}
 	input.Validate = func(ctx context.Context) error {
 		if err := validate(ctx); err != nil {
 			return err
 		}
 		current, err := source.ObserveXBackendClientWithdrawals(ctx, identity, request.Gateway)
-		if err != nil {
-			return err
-		}
 		if !slices.Equal(targets, current) {
-			return errors.New("XBackend client certificate withdrawal authority changed")
+			return errors.Join(errors.New("XBackend client certificate withdrawal authority changed"), err)
 		}
+		observeErr = errors.Join(observeErr, err)
 		return nil
 	}
-	return w.withdrawBackendClientCertificate(ctx, identity, input)
+	result, err := w.withdrawBackendClientCertificate(ctx, identity, input)
+	return result, errors.Join(observeErr, err)
 }
 
 func (w *Writer) withdrawListenerFilters(ctx context.Context, identity cloud.Identity, observe func(context.Context) (GatewayInput, error)) error {

@@ -19,6 +19,8 @@ package httproute
 import (
 	"cmp"
 	"context"
+	"errors"
+	"fmt"
 	"slices"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -45,6 +47,7 @@ func (r *Reconciler) ObserveXBackendClientWithdrawals(ctx context.Context, ident
 	}
 	denials := make(map[types.NamespacedName]bool)
 	var targets []cloud.XBackendClientWithdrawal
+	var readErrors error
 	for i := range routes {
 		route := &routes[i]
 		if !route.DeletionTimestamp.IsZero() || !controller.RouteClaimsGateway(r.Config, route, identity) ||
@@ -60,9 +63,11 @@ func (r *Reconciler) ObserveXBackendClientWithdrawals(ctx context.Context, ident
 		for _, key := range slices.Compact(keys) {
 			denied, checked := denials[key]
 			if !checked {
-				denied, err = r.xBackendClientIdentityDenied(ctx, gateway.Spec.GatewayClassName, key)
-				if err != nil {
-					return nil, err
+				var readErr error
+				denied, readErr = r.xBackendClientIdentityDenied(ctx, gateway.Spec.GatewayClassName, key)
+				if readErr != nil {
+					readErrors = errors.Join(readErrors, fmt.Errorf("observe XBackend %s client identity: %w", key, readErr))
+					denied = false
 				}
 				denials[key] = denied
 			}
@@ -71,11 +76,14 @@ func (r *Reconciler) ObserveXBackendClientWithdrawals(ctx context.Context, ident
 			}
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	slices.SortFunc(targets, func(a, b cloud.XBackendClientWithdrawal) int {
 		return cmp.Or(cmp.Compare(a.Route.RouteNamespace, b.Route.RouteNamespace), cmp.Compare(a.Route.RouteName, b.Route.RouteName),
 			cmp.Compare(a.Route.RouteUID, b.Route.RouteUID), cmp.Compare(a.BackendName, b.BackendName))
 	})
-	return targets, nil
+	return targets, readErrors
 }
 
 func (r *Reconciler) xBackendClientIdentityDenied(ctx context.Context, class gatewayv1.ObjectName, key types.NamespacedName) (bool, error) {

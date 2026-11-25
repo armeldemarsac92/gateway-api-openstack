@@ -328,13 +328,20 @@ func TestBackendTLSScalarQuarantinesBeforePublishingAndReopening(t *testing.T) {
 			service := maps.Clone(thirdParty)
 			service["id"] = "service-pool"
 			service["tags"] = append(safetyRouteTags(t, id, httpResourceRole(rolePool, lane, "")), backendTLSManagedTag, backendTLSClientTag)
-			lb["pools"] = []map[string]string{{"id": "pool-1"}, {"id": "service-pool"}, {"id": "third-party-pool"}, {"id": "xbackend-pool"}}
-			reads["/lbaas/pools"] = map[string]any{"pools": []any{pool, service, thirdParty, xBackend}}
+			unreadable := maps.Clone(xBackend)
+			unreadable["id"] = "unreadable-pool"
+			lb["pools"] = []map[string]string{{"id": "pool-1"}, {"id": "service-pool"}, {"id": "third-party-pool"}, {"id": "xbackend-pool"}, {"id": "unreadable-pool"}}
+			reads["/lbaas/pools"] = map[string]any{"pools": []any{pool, service, thirdParty, xBackend, unreadable}}
 			otherOwner := id.Value()
 			otherOwner.RouteUID = "another-route"
 			otherID, err := NewIdentity(otherOwner)
 			require.NoError(t, err)
-			scopedLane := scopeHTTPKey(cloud.RouteSpec{ScopeHTTPResources: true, ScopedListenerPorts: []int{80}}, xBackendLane)
+			scope := cloud.RouteSpec{ScopeHTTPResources: true, ScopedListenerPorts: []int{80}}
+			scopedLane := scopeHTTPKey(scope, xBackendLane)
+			unreadableLane := scopeHTTPKey(scope, openstackidentity.HTTPBackendPoolKey(cloud.HTTPBackend{
+				Kind: cloud.HTTPBackendKindXBackend, Namespace: id.Value().RouteNamespace, Name: "zz-unreadable",
+			}))
+			unreadable["tags"] = append(safetyRouteTags(t, id, httpResourceRole(rolePool, unreadableLane, "")), backendTLSManagedTag, xBackendTLSClientTag)
 			xBackend["tags"] = append(safetyRouteTags(t, otherID, httpResourceRole(rolePool, scopedLane, "")), backendTLSManagedTag, xBackendTLSClientTag)
 			pool["tags"] = append(safetyRouteTags(t, id, httpResourceRole(rolePool, scopedLane, "")), backendTLSManagedTag, xBackendTLSClientTag)
 			pool["admin_state_up"], pool["tls_container_ref"] = true, newClient
@@ -356,7 +363,7 @@ func TestBackendTLSScalarQuarantinesBeforePublishingAndReopening(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, cloud.OutcomeReady, result.Outcome.State)
 			require.Empty(t, writes)
-			for _, untouched := range []map[string]any{service, thirdParty, xBackend} {
+			for _, untouched := range []map[string]any{service, thirdParty, xBackend, unreadable} {
 				require.Equal(t, true, untouched["admin_state_up"])
 				require.Equal(t, newClient, untouched["tls_container_ref"])
 			}

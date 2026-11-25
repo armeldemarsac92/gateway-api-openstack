@@ -759,6 +759,32 @@ func TestXBackendServerOnlyExternalHostnameUsesItsOwnValidation(t *testing.T) {
 			_, _ = active.Reconcile(t.Context(), request)
 			require.NoError(t, provider.fenceErr)
 			require.Equal(t, []cloud.XBackendClientWithdrawal{{Route: controller.RouteIdentity(r.Config, f.gateway, f.route), BackendName: backend.Name}}, provider.withdrawals)
+
+			t.Run("unreadable XBackend leaves its own pool untouched", func(t *testing.T) {
+				require.NoError(t, f.client.Get(t.Context(), key, f.route))
+				other := addExternalHostnameRule(t, f, f.route, "zz-unreadable")
+				require.NoError(t, f.client.Update(t.Context(), f.route))
+				defer func() {
+					require.NoError(t, f.client.Get(t.Context(), key, f.route))
+					f.route.Spec.Rules = f.route.Spec.Rules[:len(f.route.Spec.Rules)-1]
+					require.NoError(t, f.client.Update(t.Context(), f.route))
+				}()
+				readErr := errors.New("second XBackend is temporarily unreadable")
+				value.APIReader = unavailableXBackend{Reader: value.APIReader, key: client.ObjectKeyFromObject(other), err: readErr}
+				provider := &xBackendWithdrawalTestProvider{beforeFence: func() { clientIdentity = first }}
+				active := newTestReconciler(value, provider)
+				_, err := active.Reconcile(t.Context(), request)
+				require.ErrorIs(t, err, readErr)
+				require.ErrorContains(t, provider.fenceErr, "withdrawal authority changed")
+				require.Empty(t, provider.withdrawals)
+
+				provider.beforeFence = nil
+				clientIdentity = ""
+				_, err = active.Reconcile(t.Context(), request)
+				require.ErrorIs(t, err, readErr)
+				require.NoError(t, provider.fenceErr)
+				require.Equal(t, []cloud.XBackendClientWithdrawal{{Route: controller.RouteIdentity(r.Config, f.gateway, f.route), BackendName: backend.Name}}, provider.withdrawals)
+			})
 		})
 		require.ErrorIs(t, firstObservation.Validate(t.Context()), errHTTPRouteChanged)
 		withdrawn := f.observe(t).Nodes[0].Spec.HTTPBackends
@@ -811,6 +837,19 @@ func (r unavailableServicePolicies) List(ctx context.Context, list client.Object
 		return errors.New("Service policy inventory unavailable")
 	}
 	return r.Reader.List(ctx, list, opts...)
+}
+
+type unavailableXBackend struct {
+	client.Reader
+	key client.ObjectKey
+	err error
+}
+
+func (r unavailableXBackend) Get(ctx context.Context, key client.ObjectKey, object client.Object, opts ...client.GetOption) error {
+	if _, ok := object.(*gatewayx.XBackend); ok && key == r.key {
+		return r.err
+	}
+	return r.Reader.Get(ctx, key, object, opts...)
 }
 
 type xBackendWithdrawalTestProvider struct {
