@@ -89,6 +89,7 @@ type observedRouteGraph struct {
 	backendH2C             bool
 	backendTLS             octavia.PoolBackendTLS
 	backendRetryBudget     octavia.PoolBackendRetryBudget
+	tcpRejection           octavia.PoolTCPConnectionRejection
 	members                []pools.Member
 	memberBackupUnreported map[string]struct{}
 	memberAdminUnreported  map[string]struct{}
@@ -400,6 +401,7 @@ func (p *Provider) observeRouteGraphsFromPools(ctx context.Context, owners []rou
 		graph.backendH2C = poolInventory.BackendH2C[pool.ID]
 		graph.backendTLS = poolInventory.BackendTLS[pool.ID]
 		graph.backendRetryBudget = poolInventory.BackendRetryBudget[pool.ID]
+		graph.tcpRejection = poolInventory.TCPConnectionRejection[pool.ID]
 		poolOwners[pool.ID] = poolRouteOwner{route: routeIndex, backend: role.backend}
 		if err := p.observeRoutePoolChildrenWithRole(ctx, owner, graph, role.backend); err != nil {
 			return nil, &cloud.GraphError{Identity: identity.Value(), Err: err}
@@ -734,6 +736,8 @@ func (p *Provider) observeRoutePoolChildrenWithRole(ctx context.Context, owner r
 	strictChildren := backend != "" || owner.expectsBackendTLS || hasObservedBackendTLS(*graph.pool, graph.backendTLS)
 	opts := pools.ListMembersOpts{ProjectID: p.projectID}
 	switch {
+	case graph.pool.Protocol == cloud.ListenerProtocolTCP && graph.tcpRejection.Present:
+		graph.members, graph.memberBackupUnreported, graph.memberBatchUnreported, err = p.octavia.ListMembersForTCPRejection(ctx, graph.pool.ID, opts)
 	case graph.pool.Protocol == cloud.ListenerProtocolTCP:
 		graph.members, graph.memberBackupUnreported, err = p.octavia.ListMembersWithBackup(ctx, graph.pool.ID, opts)
 	case p.l7PolicyBatchActivation && graph.pool.Protocol == cloud.ListenerProtocolHTTP:
@@ -863,6 +867,7 @@ const (
 	routeMutationClaimBackendCA
 	routeMutationPublishBackendCA
 	routeMutationClearPoolMembers
+	routeMutationReplaceTCPMembers
 	routeMutationSetBackendTLS
 	routeMutationDeleteMember
 	routeMutationDisableMember
@@ -896,6 +901,7 @@ type routeMutation struct {
 	parentID                 string
 	member                   cloud.Member
 	memberTags               *[]string
+	tcpMembers               []pools.BatchUpdateMemberOpts
 	policy                   desiredPolicy
 	initialRules             []l7policies.CreateRuleOpts
 	rule                     desiredRule
@@ -950,6 +956,8 @@ func (s routeMutation) message() string {
 			return "Withdrawing Octavia XBackend members before changing session persistence"
 		}
 		return "Withdrawing Octavia backend members until TLS authorization is verified"
+	case routeMutationReplaceTCPMembers:
+		return "Updating Octavia TCP members and connection rejection together"
 	case routeMutationSetBackendTLS:
 		return "Updating authenticated TLS on the Octavia pool"
 	case routeMutationDisableMember:
@@ -1019,6 +1027,9 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 }
 
 func buildRouteEnsurePlanWithActivations(desired desiredRoute, actual observedRouteGraph, batchActivations bool) ([]routeMutation, cloud.RouteState, error) {
+	if desired.tcpRejectionUnavailable {
+		return nil, routeStateFromObservation(actual), errTCPRejectionUnavailable
+	}
 	step, err := planXBackendCookie(desired, actual)
 	switch {
 	case step != nil:
@@ -1148,68 +1159,79 @@ func buildRouteEnsureBackendPlan(desired desiredRoute, actual observedRouteGraph
 			})
 		}
 
-		desiredMembers := make(map[string]cloud.Member, len(desired.members))
-		for _, member := range desired.members {
-			desiredMembers[memberKey(member.Address, member.Port)] = member
-		}
-		weightTag := desired.nodePortWeightTag()
-		for _, member := range actual.members {
-			// The ordinary Endpoint path can retain disabled members. An
-			// external pool must drop records withdrawn by DNS.
-			if desired.unavailable && !desired.routedExternal {
-				continue
+		if tcpRejectionBatchRequired(desired, actual) {
+			batch, memberIDs, err := planTCPMembersAndRejection(desired, actual)
+			if err != nil {
+				return nil, state, err
 			}
-			key := memberKey(member.Address, member.ProtocolPort)
-			wanted, exists := desiredMembers[key]
-			retry := desired.backendKey != "" && member.ProvisioningStatus == "ERROR"
-			if !exists || member.SubnetID != desired.spec.MemberSubnetID {
-				kind := routeMutationDeleteMember
-				if retry {
-					kind = routeMutationDisableMember
+			state.MemberIDs = memberIDs
+			if batch != nil {
+				nonPolicyPlan = append(nonPolicyPlan, *batch)
+			}
+		} else {
+			desiredMembers := make(map[string]cloud.Member, len(desired.members))
+			for _, member := range desired.members {
+				desiredMembers[memberKey(member.Address, member.Port)] = member
+			}
+			weightTag := desired.nodePortWeightTag()
+			for _, member := range actual.members {
+				// The ordinary Endpoint path can retain disabled members. An
+				// external pool must drop records withdrawn by DNS.
+				if desired.unavailable && !desired.routedExternal {
+					continue
 				}
-				nonPolicyPlan = append(nonPolicyPlan, routeMutation{kind: kind, id: member.ID, parentID: pool.ID, retry: retry})
-				continue
-			}
-			state.MemberIDs = append(state.MemberIDs, member.ID)
-			delete(desiredMembers, key)
-			weight := desired.memberWeight(wanted)
-			var tags *[]string
-			if weightTag != "" {
-				// Change the marker and the weight together so a restart or a
-				// partial activation can only normalize members we took over.
-				managed := slices.Contains(member.Tags, weightTag)
-				switch {
-				case wanted.Weight > 0 && !managed:
-					tags = new(append(slices.Clone(member.Tags), weightTag))
-				case wanted.Weight == 0 && managed:
-					tags = new(slices.DeleteFunc(slices.Clone(member.Tags), func(tag string) bool { return tag == weightTag }))
+				key := memberKey(member.Address, member.ProtocolPort)
+				wanted, exists := desiredMembers[key]
+				retry := desired.backendKey != "" && member.ProvisioningStatus == "ERROR"
+				if !exists || member.SubnetID != desired.spec.MemberSubnetID {
+					kind := routeMutationDeleteMember
+					if retry {
+						kind = routeMutationDisableMember
+					}
+					nonPolicyPlan = append(nonPolicyPlan, routeMutation{kind: kind, id: member.ID, parentID: pool.ID, retry: retry})
+					continue
+				}
+				state.MemberIDs = append(state.MemberIDs, member.ID)
+				delete(desiredMembers, key)
+				weight := desired.memberWeight(wanted)
+				var tags *[]string
+				if weightTag != "" {
+					// Change the marker and the weight together so a restart or a
+					// partial activation can only normalize members we took over.
+					managed := slices.Contains(member.Tags, weightTag)
+					switch {
+					case wanted.Weight > 0 && !managed:
+						tags = new(append(slices.Clone(member.Tags), weightTag))
+					case wanted.Weight == 0 && managed:
+						tags = new(slices.DeleteFunc(slices.Clone(member.Tags), func(tag string) bool { return tag == weightTag }))
+					}
+				}
+				// HAProxy excludes backup members while any regular member is up.
+				weightedTCP := desired.protocol() == cloud.ListenerProtocolTCP && wanted.Weight > 0 && !wanted.Draining
+				if _, unreported := actual.memberBackupUnreported[member.ID]; weightedTCP && unreported {
+					return nil, cloud.RouteState{}, errWeightedTCPBackupUnknown
+				}
+				clearBackup := weightedTCP && member.Backup
+				if _, unreported := actual.memberAdminUnreported[member.ID]; unreported || !member.AdminStateUp || retry || tags != nil || weight != nil && member.Weight != *weight || clearBackup {
+					nonPolicyPlan = append(nonPolicyPlan, routeMutation{
+						kind:              routeMutationUpdateMember,
+						id:                member.ID,
+						parentID:          pool.ID,
+						member:            wanted,
+						memberTags:        tags,
+						retry:             retry,
+						clearMemberBackup: clearBackup,
+					})
 				}
 			}
-			// HAProxy excludes backup members while any regular member is up.
-			weightedTCP := desired.protocol() == cloud.ListenerProtocolTCP && wanted.Weight > 0 && !wanted.Draining
-			if _, unreported := actual.memberBackupUnreported[member.ID]; weightedTCP && unreported {
-				return nil, cloud.RouteState{}, errWeightedTCPBackupUnknown
+			missingMemberKeys := make([]string, 0, len(desiredMembers))
+			for key := range desiredMembers {
+				missingMemberKeys = append(missingMemberKeys, key)
 			}
-			clearBackup := weightedTCP && member.Backup
-			if _, unreported := actual.memberAdminUnreported[member.ID]; unreported || !member.AdminStateUp || retry || tags != nil || weight != nil && member.Weight != *weight || clearBackup {
-				nonPolicyPlan = append(nonPolicyPlan, routeMutation{
-					kind:              routeMutationUpdateMember,
-					id:                member.ID,
-					parentID:          pool.ID,
-					member:            wanted,
-					memberTags:        tags,
-					retry:             retry,
-					clearMemberBackup: clearBackup,
-				})
+			sort.Strings(missingMemberKeys)
+			for _, key := range missingMemberKeys {
+				nonPolicyPlan = append(nonPolicyPlan, routeMutation{kind: routeMutationCreateMember, parentID: pool.ID, member: desiredMembers[key]})
 			}
-		}
-		missingMemberKeys := make([]string, 0, len(desiredMembers))
-		for key := range desiredMembers {
-			missingMemberKeys = append(missingMemberKeys, key)
-		}
-		sort.Strings(missingMemberKeys)
-		for _, key := range missingMemberKeys {
-			nonPolicyPlan = append(nonPolicyPlan, routeMutation{kind: routeMutationCreateMember, parentID: pool.ID, member: desiredMembers[key]})
 		}
 
 		switch {
@@ -1741,6 +1763,8 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 		return p.publishBackendCA(ctx, desired.spec)
 	case routeMutationClearPoolMembers:
 		err = p.octavia.ClearMembers(ctx, step.id)
+	case routeMutationReplaceTCPMembers:
+		err = p.octavia.ReplaceTCPMembersAndRejection(ctx, step.id, step.tcpMembers, desired.spec.TCPConnectionRejection)
 	case routeMutationSetBackendTLS:
 		opts := pools.UpdateOpts{AdminStateUp: step.poolAdmin, Tags: step.poolTags, ALPNProtocols: step.poolALPNProtocols}
 		_, err = p.octavia.UpdatePool(ctx, step.id, octavia.UpdatePoolOpts{UpdateOpts: opts, BackendH2C: step.backendH2C, BackendTLS: step.backendTLS,

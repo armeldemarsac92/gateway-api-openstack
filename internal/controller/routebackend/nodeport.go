@@ -62,7 +62,9 @@ func ReadyBackendNodes(service *corev1.Service, servicePort *corev1.ServicePort,
 		}
 	}
 	if !readyEndpoint {
-		return nil, pending("backend Service %s has no ready endpoints", service.Name)
+		diagnostic := pending("backend Service %s has no ready endpoints", service.Name)
+		diagnostic.NoReadyEndpoints = true
+		return nil, diagnostic
 	}
 	if service.Spec.ExternalTrafficPolicy == corev1.ServiceExternalTrafficPolicyLocal && len(localNodes) == 0 {
 		return nil, pending("backend Service %s uses externalTrafficPolicy Local but ready endpoints do not identify their Nodes", service.Name)
