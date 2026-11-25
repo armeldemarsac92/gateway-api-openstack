@@ -111,6 +111,7 @@ type desiredRoute struct {
 	unavailable                 bool
 	routedExternal              bool
 	xBackend                    bool
+	xBackendPlaintext           bool
 	redirect                    bool
 	redirectMatches             []cloud.HTTPPathMatch
 	redirectIssue               error
@@ -408,6 +409,7 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 		}
 		part.fixedResponse = fixedResponse
 		part.xBackend = xBackend
+		part.xBackendPlaintext = xBackend && !backend.InvalidReference && backend.BackendTLS == nil
 		for _, role := range []string{rolePool, roleMember, roleMonitor} {
 			if _, err := part.identity.RouteTags(part.httpRole(role, "")); err != nil {
 				return invalid(err)

@@ -121,6 +121,14 @@ func hasBackendTLSSettings(pool pools.Pool, tls octavia.PoolBackendTLS) bool {
 		pool.TLSContainerRef != "" || pool.CRLContainerRef != "" || hasUnclearedBackendTLSSubjectAltNames(pool, tls)
 }
 
+func xBackendPoolWithoutTLS(pool pools.Pool, tls octavia.PoolBackendTLS) bool {
+	return tls.AdminObserved && tls.EnabledObserved && tls.CAObserved && tls.ClientRefObserved &&
+		!hasBackendTLSSettings(pool, tls) && len(pool.ALPNProtocols) == 0 &&
+		!slices.ContainsFunc(pool.Tags, func(tag string) bool {
+			return tag == backendTLSClientTag || tag == backendTLSSANTag || strings.HasPrefix(tag, backendTLSRevisionTagPrefix)
+		})
+}
+
 func routeHasBackendTLSPolicy(route desiredRoute) bool {
 	return route.spec.BackendTLS != nil || slices.ContainsFunc(route.httpParts, func(part desiredRoute) bool {
 		return part.spec.BackendTLS != nil
@@ -275,9 +283,19 @@ func firstBackendTLSWithdrawal(parts []backendTLSPart, plan func(backendTLSPart)
 			continue
 		}
 		protect := part.desired == nil || part.desired.spec.BackendTLS != nil
-		requiresClosedPool := part.desired != nil && protect && (part.desired.xBackend || part.desired.spec.GRPC ||
+		requiresClosedPool := part.desired != nil && protect && (part.desired.spec.GRPC ||
 			part.desired.spec.BackendTLS != nil && len(part.desired.spec.BackendTLS.SubjectAltNames) != 0)
-		step := plan(part).withdrawal(protect, requiresClosedPool, part.observed)
+		tlsPlan := plan(part)
+		var step *routeMutation
+		if part.desired != nil && part.desired.xBackend && !part.retiring {
+			// Stock Octavia drops policies targeting disabled pools. Drain
+			// while the match still selects this pool, before any TLS staging.
+			if pool := part.observed.pool; !tlsPlan.allowsMembers() && pool != nil && pool.ProvisioningStatus == "ACTIVE" && len(part.observed.members) > 0 {
+				step = &routeMutation{kind: routeMutationClearPoolMembers, id: pool.ID}
+			}
+		} else {
+			step = tlsPlan.withdrawal(protect, requiresClosedPool, part.observed)
+		}
 		// An unsupported protected pool can block member drains anywhere on
 		// the load balancer. Disable unsafe protected pools first.
 		if step != nil && (first == nil || first.route.retry && !step.retry ||
@@ -300,6 +318,11 @@ func (p *Provider) observeBackendTLS(ctx context.Context, desired desiredRoute, 
 	if tls == nil {
 		if pool == nil || !hasObservedBackendTLS(*pool, observed.backendTLS) {
 			return backendTLSPlan{}
+		}
+		if desired.xBackendPlaintext && slices.Contains(pool.Tags, backendTLSManagedTag) && xBackendPoolWithoutTLS(*pool, observed.backendTLS) {
+			// A live mode None can release a temporary quarantine even on
+			// stock Octavia. Actual TLS enrollment still needs the TLS gate.
+			return backendTLSPlan{phase: backendTLSRelease}
 		}
 		// Only a current, enabled snapshot may release a protection installed
 		// by this controller. An unmarked TLS pool may be externally managed.
@@ -445,6 +468,23 @@ func (plan backendTLSPlan) poolMutation(desired desiredRoute, observed observedR
 		return &routeMutation{kind: routeMutationClaimBackendCA}
 	}
 	pool := observed.pool
+	if desired.xBackend && plan.denies() {
+		switch {
+		case desired.fixedResponse:
+			return nil
+		case pool == nil:
+			// An enabled empty pool preserves the policy on stock Amphora.
+			return &routeMutation{kind: routeMutationCreatePool}
+		case pool.ProvisioningStatus == "ACTIVE" && observed.backendTLS.AdminObserved &&
+			!pool.AdminStateUp && len(observed.members) == 0 &&
+			(xBackendPoolWithoutTLS(*pool, observed.backendTLS) || !observed.backendTLS.HostnameObserved):
+			// Regional Amphora renders disabled authenticated pools as closed
+			// targets. A stock API needs the empty target enabled.
+			return &routeMutation{kind: routeMutationSetBackendTLS, id: pool.ID, poolAdmin: boolPointer(true)}
+		default:
+			return nil
+		}
+	}
 	managedTags := []string{backendTLSManagedTag}
 	if plan.phase == backendTLSPublish {
 		if pool != nil && pool.ProvisioningStatus == "ACTIVE" && !slices.Contains(pool.Tags, backendTLSManagedTag) {
@@ -499,6 +539,19 @@ func (plan backendTLSPlan) poolMutation(desired desiredRoute, observed observedR
 		}
 		return &step
 	}
+	if desired.xBackend && plan.phase == backendTLSConfigure && pool.AdminStateUp {
+		if len(observed.members) != 0 {
+			return nil
+		}
+		// Capabilities and the CA were verified before closing the drained
+		// pool. Enroll the marker in the same write so the regional renderer
+		// keeps its predicate active until TLS is read back.
+		step.poolAdmin = boolPointer(false)
+		if !slices.Contains(pool.Tags, backendTLSManagedTag) {
+			step.poolTags = new(append(slices.Clone(pool.Tags), backendTLSManagedTag))
+		}
+		return &step
+	}
 	if desired.spec.BackendTLS != nil && !slices.Contains(pool.Tags, backendTLSManagedTag) {
 		step.poolTags = new(append(slices.Clone(pool.Tags), backendTLSManagedTag))
 	}
@@ -514,7 +567,7 @@ func (plan backendTLSPlan) poolMutation(desired desiredRoute, observed observedR
 	}
 	switch {
 	case plan.phase == backendTLSConfigure:
-		if len(observed.members) != 0 || pool.AdminStateUp && (desired.xBackend || plan.settings.ClientCertificateReference != "" || plan.settings.SubjectAltNames != nil) {
+		if len(observed.members) != 0 || pool.AdminStateUp && (plan.settings.ClientCertificateReference != "" || plan.settings.SubjectAltNames != nil) {
 			return nil
 		}
 		step.backendTLS = &plan.settings

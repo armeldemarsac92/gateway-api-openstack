@@ -39,6 +39,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -51,6 +52,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/identity"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
@@ -422,9 +424,10 @@ func TestXBackendServerOnlyExternalHostnameUsesItsOwnValidation(t *testing.T) {
 	r.Config.BackendTLSPolicy = true
 	r.BackendTLSAvailable = func(context.Context) (bool, error) { return true, nil }
 	sanAvailable := true
+	var sanErr error
 	r.BackendTLSSANAvailable = func(_ context.Context, requireH2 bool) (bool, error) {
 		require.False(t, requireH2)
-		return sanAvailable, nil
+		return sanAvailable, sanErr
 	}
 	backend := addExternalHostnameRule(t, f, f.route, f.service.Name)
 	const identityName = "identity.remote.example.test"
@@ -491,13 +494,40 @@ func TestXBackendServerOnlyExternalHostnameUsesItsOwnValidation(t *testing.T) {
 		require.Empty(t, targets[1].Members)
 		require.Equal(t, 1, lookups)
 	}
+	checkStatus := func(want metav1.ConditionStatus, reason string) {
+		t.Helper()
+		waiting := pendingRouteStatus("Waiting for test listener")
+		require.NoError(t, r.resolveRouteReferences(t.Context(), f.route, f.gateway, &waiting))
+		require.Equal(t, want, waiting.resolved)
+		require.Equal(t, reason, waiting.resolvedReason)
+
+		active := newTestReconciler(*r, &recordingProvider{})
+		request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(f.route)}
+		_, err := active.Reconcile(t.Context(), request)
+		require.NoError(t, err)
+		var current gatewayv1.HTTPRoute
+		require.NoError(t, f.client.Get(t.Context(), request.NamespacedName, &current))
+		require.Len(t, current.Status.Parents, 1)
+		condition := meta.FindStatusCondition(current.Status.Parents[0].Conditions, string(gatewayv1.RouteConditionResolvedRefs))
+		require.NotNil(t, condition)
+		require.Equal(t, want, condition.Status)
+		require.Equal(t, reason, condition.Reason)
+		require.Equal(t, waiting.resolvedMessage, condition.Message)
+		require.Equal(t, current.Generation, condition.ObservedGeneration)
+	}
+	sanErr = errors.New("regional capability discovery incomplete")
+	assertClosed()
+	checkStatus(metav1.ConditionUnknown, string(gatewayv1.RouteReasonPending))
+	sanErr = nil
 	sanAvailable = false
 	assertClosed()
+	checkStatus(metav1.ConditionFalse, "UnsupportedProvider")
 	sanAvailable = true
 
 	require.NoError(t, f.client.Delete(t.Context(), ca))
 	require.ErrorIs(t, before.Validate(t.Context()), errHTTPRouteChanged)
 	assertClosed()
+	checkStatus(metav1.ConditionFalse, string(gatewayv1.BackendTLSPolicyReasonInvalidCACertificateRef))
 	ca.ResourceVersion, ca.UID = "", "restored-ca-uid"
 	f.create(t, ca)
 	targets = f.observe(t).Nodes[0].Spec.HTTPBackends
@@ -505,6 +535,16 @@ func TestXBackendServerOnlyExternalHostnameUsesItsOwnValidation(t *testing.T) {
 	require.Equal(t, external.Members, targets[1].Members)
 	require.Equal(t, string(ca.UID), targets[1].BackendTLS.CAConfigMapUID)
 	require.Equal(t, 2, lookups)
+
+	// The native bundle reader is initialized but has not yet discovered
+	// the API. Inline trust remains pending until discovery can complete.
+	r.Config.ClusterTrustBundles, err = backendtls.NewClusterTrustBundles(&rest.Config{Host: "http://127.0.0.1"}, nil)
+	require.NoError(t, err)
+	backend.Spec.TLS.Validation.CACertificateRefs = []gatewayv1.LocalObjectReference{{
+		Group: "certificates.k8s.io", Kind: "ClusterTrustBundle", Name: "external-bundle",
+	}}
+	require.NoError(t, f.client.Update(t.Context(), backend))
+	checkStatus(metav1.ConditionUnknown, string(gatewayv1.RouteReasonPending))
 }
 
 func TestXBackendAncestorLimitKeepsForeignStatusDuringDetach(t *testing.T) {

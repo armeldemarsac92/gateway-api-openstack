@@ -22,6 +22,7 @@ import (
 	"slices"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -83,16 +84,18 @@ func (o *BackendTLSObserver) CollectServiceInputs(ctx context.Context, input *mo
 
 // BackendTLSObserver shares a live policy and CA inventory across resolved Service ports.
 type BackendTLSObserver struct {
-	reader   client.Reader
-	policies map[string][]gatewayv1.BackendTLSPolicy
-	bundles  *backendtls.ClusterTrustBundles
-	cas      backendtls.CAInputs
+	reader               client.Reader
+	policies             map[string][]gatewayv1.BackendTLSPolicy
+	bundles              *backendtls.ClusterTrustBundles
+	cas                  backendtls.CAInputs
+	configMapUnavailable map[types.NamespacedName]bool
 }
 
 func NewBackendTLSObserver(reader client.Reader, bundles *backendtls.ClusterTrustBundles) *BackendTLSObserver {
 	observer := &BackendTLSObserver{
 		reader: reader, bundles: bundles, policies: map[string][]gatewayv1.BackendTLSPolicy{},
-		cas: backendtls.CAInputs{ConfigMaps: map[types.NamespacedName]*corev1.ConfigMap{}},
+		cas:                  backendtls.CAInputs{ConfigMaps: map[types.NamespacedName]*corev1.ConfigMap{}},
+		configMapUnavailable: make(map[types.NamespacedName]bool),
 	}
 	if bundles != nil {
 		observer.cas.ClusterTrustBundles = make(map[string]backendtls.CAObservation)
@@ -174,6 +177,9 @@ func (o *BackendTLSObserver) ObserveValidation(ctx context.Context, namespace st
 		if err := o.observeCA(ctx, key); err != nil {
 			return backendtls.ValidationResult{}, err
 		}
+		if o.configMapUnavailable[key] {
+			return backendtls.ValidationResult{Pending: true, Reason: "Pending", Message: fmt.Sprintf("Waiting to read the referenced CA ConfigMap %s", key)}, nil
+		}
 	}
 	return backendtls.EvaluateValidation(namespace, validation, o.cas), nil
 }
@@ -201,6 +207,9 @@ func (o *BackendTLSObserver) observeCA(ctx context.Context, key types.Namespaced
 		// A known TLS requirement still governs this backend when its CA
 		// cannot be read. Watches and resyncs can restore it independently.
 		o.cas.ConfigMaps[key] = nil
+		if !apierrors.IsNotFound(err) {
+			o.configMapUnavailable[key] = true
+		}
 	} else {
 		o.cas.ConfigMaps[key] = &configMap
 	}

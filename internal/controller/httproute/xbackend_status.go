@@ -117,7 +117,7 @@ func (r *xBackendStatusReconciler) observeAncestors(ctx context.Context, key typ
 			return nil, err
 		}
 		condition := xBackendAcceptedCondition(backend, profile)
-		if condition.Status == metav1.ConditionTrue && model.XBackendRequiresTLS(backend.Spec) {
+		if condition.Status != metav1.ConditionFalse && model.XBackendRequiresTLS(backend.Spec) {
 			validation, err := tlsObserver.ObserveValidation(ctx, backend.Namespace, *backend.Spec.TLS.Validation)
 			if err != nil {
 				return nil, err
@@ -129,7 +129,11 @@ func (r *xBackendStatusReconciler) observeAncestors(ctx context.Context, key typ
 				condition.Status, condition.Reason, condition.Message = metav1.ConditionFalse, string(validation.Reason), validation.Message
 			default:
 				requirements := xBackendTLSRequirements(validation.Validation)
-				condition = r.routes.backendTLSAvailability(ctx, requirements).apply(condition, true, requirements.requireSAN)
+				availability := r.routes.backendTLSAvailability(ctx, requirements)
+				if availability != backendTLSAvailable || condition.Status == metav1.ConditionTrue {
+					condition.Status = metav1.ConditionTrue
+					condition = availability.apply(condition, true, requirements.requireSAN)
+				}
 			}
 		}
 		ancestors[gatewayKey] = condition

@@ -765,12 +765,13 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 		// their target list and do not need placeholder pools.
 		// A gRPC client maps the empty pool's HTTP 503 to UNAVAILABLE.
 		// The HTTP fixed 500 response would instead map to UNKNOWN.
-		invalidReference := invalid && !spec.GRPC && !(backend.XBackendTLSRequired && tls.Denied) && (key.kind == cloud.HTTPBackendKindXBackend || r.Config.WeightedHTTPTargets ||
-			result.diagnostic.Reason == string(gatewayv1.RouteReasonRefNotPermitted) ||
-			result.diagnostic.Reason == string(gatewayv1.RouteReasonBackendNotFound))
+		invalidReference := invalid && !spec.GRPC && result.diagnostic.Reason != string(gatewayv1.RouteReasonPending) &&
+			(key.kind == cloud.HTTPBackendKindXBackend || r.Config.WeightedHTTPTargets ||
+				result.diagnostic.Reason == string(gatewayv1.RouteReasonRefNotPermitted) ||
+				result.diagnostic.Reason == string(gatewayv1.RouteReasonBackendNotFound))
 		spec.HTTPBackends = append(spec.HTTPBackends, cloud.HTTPBackend{
 			Kind: key.kind, Namespace: key.object.Namespace, Name: key.object.Name, Port: port,
-			RoutedExternal: backend.XBackendRoutedExternal,
+			RoutedExternal: backend.XBackendRoutedExternal && !invalidReference,
 			Members:        members, Unavailable: len(members) == 0, InvalidReference: invalidReference,
 			BackendH2C: !invalid && tls == nil && backend.UsesH2C(), BackendTLS: tls,
 		})
@@ -793,7 +794,9 @@ func appendHTTPPathMatch(matches []cloud.HTTPPathMatch, match cloud.HTTPPathMatc
 
 func preferredBackendDiagnostic(current, next model.Diagnostic) model.Diagnostic {
 	// Prefer an authorization failure when several references cannot resolve.
-	if current.Reason == "" || current.Reason != string(gatewayv1.RouteReasonRefNotPermitted) && next.Reason == string(gatewayv1.RouteReasonRefNotPermitted) {
+	pending := string(gatewayv1.RouteReasonPending)
+	if current.Reason == "" || current.Reason == pending && next.Reason != "" && next.Reason != pending ||
+		current.Reason != string(gatewayv1.RouteReasonRefNotPermitted) && next.Reason == string(gatewayv1.RouteReasonRefNotPermitted) {
 		return next
 	}
 	return current

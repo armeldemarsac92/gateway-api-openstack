@@ -26,6 +26,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -140,54 +141,64 @@ func CollectXBackendInputs(ctx context.Context, reader client.Reader, input *mod
 	for _, key := range slices.SortedFunc(maps.Keys(keys), func(a, b types.NamespacedName) int {
 		return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
 	}) {
-		backend, err := ReadXBackend(ctx, reader, key)
+		observation, err := tlsObserver.ObserveXBackendReference(ctx, key, input.XBackendProfile)
 		if err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			// Quarantine an existing pool when the live object cannot be
-			// read. Its previous plaintext or TLS settings may no longer apply.
-			input.XBackends = append(input.XBackends, model.XBackendObservation{Key: key,
-				ReadIssue: &model.Diagnostic{Reason: "BackendUnavailable", Message: fmt.Sprintf("XBackend %s could not be read", key)}})
+			return err
+		}
+		if observation == nil {
 			continue
 		}
-		if backend == nil {
-			continue
-		}
-		observation := model.XBackendObservation{Key: key, UID: backend.UID, Generation: backend.Generation, Spec: backend.Spec}
-		supported := model.ValidateXBackend(backend.Spec, input.XBackendProfile) == nil
-		if supported && model.XBackendRequiresTLS(backend.Spec) {
-			observation.TLS, err = tlsObserver.ObserveValidation(ctx, key.Namespace, *backend.Spec.TLS.Validation)
-			if err != nil {
-				return err
-			}
-			supported = observation.TLS.Validation != nil
-		}
-		if supported && backend.Spec.Type == gatewayx.BackendTypeEndpointSelector {
-			selector := make(client.MatchingLabels, len(backend.Spec.EndpointSelector.MatchLabels))
-			for label, value := range backend.Spec.EndpointSelector.MatchLabels {
+		spec := observation.Spec
+		if spec.Type == gatewayx.BackendTypeEndpointSelector && model.CheckXBackendObservation(key, observation, input.XBackendProfile) == nil {
+			selector := make(client.MatchingLabels, len(spec.EndpointSelector.MatchLabels))
+			for label, value := range spec.EndpointSelector.MatchLabels {
 				selector[string(label)] = string(value)
 			}
 			var pods corev1.PodList
 			err := reader.List(ctx, &pods, client.InNamespace(key.Namespace), selector)
 			switch {
 			case err == nil && pods.Continue == "":
+				backend := &gatewayx.XBackend{ObjectMeta: metav1.ObjectMeta{Namespace: key.Namespace}, Spec: spec}
 				observation.Endpoints = model.ResolveXBackendEndpoints(backend, pods.Items)
-			case model.XBackendRequiresTLS(backend.Spec) && ctx.Err() == nil:
-				observation.ReadIssue = &model.Diagnostic{Reason: "BackendUnavailable", Message: fmt.Sprintf("XBackend %s Pod endpoints could not be read completely", key)}
+			case model.XBackendRequiresTLS(spec) && ctx.Err() == nil:
+				observation.ReadIssue = &model.Diagnostic{Reason: string(gatewayv1.RouteReasonPending), Message: fmt.Sprintf("XBackend %s Pod endpoints could not be read completely", key)}
 			case err != nil:
 				return fmt.Errorf("list Pods for XBackend %s: %w", key, err)
 			default:
 				return fmt.Errorf("incomplete Pod list for XBackend %s", key)
 			}
 		}
-		input.XBackends = append(input.XBackends, observation)
+		input.XBackends = append(input.XBackends, *observation)
 	}
 	return nil
 }
 
-// ReadXBackend distinguishes a missing or terminating backend from a failed read.
-func ReadXBackend(ctx context.Context, reader client.Reader, key types.NamespacedName) (*gatewayx.XBackend, error) {
+// ObserveXBackendReference reads an authorized XBackend and its CA without
+// depending on backend members or a provisioned listener.
+func (o *BackendTLSObserver) ObserveXBackendReference(ctx context.Context, key types.NamespacedName, profile model.XBackendProfile) (*model.XBackendObservation, error) {
+	backend, err := readXBackend(ctx, o.reader, key)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		// The previous transport is no longer authoritative. Keep this
+		// pool empty until the live XBackend can be read again.
+		return &model.XBackendObservation{Key: key, ReadIssue: &model.Diagnostic{
+			Reason: string(gatewayv1.RouteReasonPending), Message: fmt.Sprintf("XBackend %s could not be read", key),
+		}}, nil
+	}
+	if backend == nil {
+		return nil, nil
+	}
+	observation := &model.XBackendObservation{Key: key, UID: backend.UID, Generation: backend.Generation, Spec: backend.Spec}
+	if model.ValidateXBackend(backend.Spec, profile) == nil && model.XBackendRequiresTLS(backend.Spec) {
+		observation.TLS, err = o.ObserveValidation(ctx, key.Namespace, *backend.Spec.TLS.Validation)
+	}
+	return observation, err
+}
+
+// readXBackend distinguishes a missing or terminating backend from a failed read.
+func readXBackend(ctx context.Context, reader client.Reader, key types.NamespacedName) (*gatewayx.XBackend, error) {
 	var backend gatewayx.XBackend
 	if err := reader.Get(ctx, key, &backend); err != nil {
 		if apierrors.IsNotFound(err) {

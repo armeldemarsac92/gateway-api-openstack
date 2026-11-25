@@ -377,7 +377,11 @@ func pendingRouteStatus(message string) routeReconcileStatus {
 }
 
 func (s routeReconcileStatus) withBackendDiagnostic(diagnostic model.Diagnostic) routeReconcileStatus {
-	if diagnostic.Reason != "" {
+	if diagnostic.Reason == string(gatewayv1.RouteReasonPending) {
+		if s.resolved != metav1.ConditionFalse {
+			s.resolved, s.resolvedReason, s.resolvedMessage = metav1.ConditionUnknown, diagnostic.Reason, diagnostic.Message
+		}
+	} else if diagnostic.Reason != "" {
 		s.resolved = metav1.ConditionFalse
 		s.resolvedReason = diagnostic.Reason
 		s.resolvedMessage = diagnostic.Message
@@ -475,6 +479,7 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 	}
 	grpc := model.HTTPProfileRouteKind(route) == model.GRPCRouteKind
 	input := model.Input{Routes: []gatewayv1.HTTPRoute{*route}, BackendH2C: r.Config.BackendH2C}
+	tlsObserver := graph.NewBackendTLSObserver(r.routePatchReader(), r.Config.ClusterTrustBundles)
 	if grpc {
 		for _, grants := range grantsByNamespace {
 			input.ReferenceGrants = append(input.ReferenceGrants, grants...)
@@ -486,14 +491,6 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 				*status = status.withBackendDiagnostic(model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: "backendRef.port must be omitted for XBackend"})
 				continue
 			}
-			object, err := graph.ReadXBackend(ctx, r.routePatchReader(), key)
-			if err != nil {
-				return err
-			}
-			var spec *gatewayx.BackendSpec
-			if object != nil {
-				spec = &object.Spec
-			}
 			profile, err := r.xBackendProfile(gateway)
 			if err != nil {
 				return err
@@ -503,10 +500,23 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 				// Check the spec and class now while topology is pending.
 				profile.MemberMode = cloud.MemberModeEndpoint
 			}
-			if diagnostic := model.CheckXBackendTarget(key, spec, profile); diagnostic != nil {
+			observation, err := tlsObserver.ObserveXBackendReference(ctx, key, profile)
+			if err != nil {
+				return err
+			}
+			if diagnostic := model.CheckXBackendObservation(key, observation, profile); diagnostic != nil {
 				*status = status.withBackendDiagnostic(*diagnostic)
-			} else if pending && spec.Type == gatewayx.BackendTypeExternalHostname && status.resolved == metav1.ConditionTrue {
-				status.resolved, status.resolvedReason, status.resolvedMessage = metav1.ConditionUnknown, "Pending", "Gateway member mode is pending"
+				continue
+			}
+			if validation := observation.TLS.Validation; validation != nil {
+				requirements := xBackendTLSRequirements(validation)
+				if diagnostic := xBackendTLSProviderDiagnostic(r.backendTLSAvailability(ctx, requirements), requirements); diagnostic.Reason != "" {
+					*status = status.withBackendDiagnostic(diagnostic)
+					continue
+				}
+			}
+			if pending && (observation.TLS.Validation != nil || observation.Spec.Type == gatewayx.BackendTypeExternalHostname) {
+				*status = status.withBackendDiagnostic(model.Diagnostic{Reason: string(gatewayv1.RouteReasonPending), Message: "Gateway member mode is pending"})
 			}
 			continue
 		}

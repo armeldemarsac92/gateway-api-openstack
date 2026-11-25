@@ -130,8 +130,12 @@ func (inputs *routeModelInputs) xBackendTLSDiagnostic(backend model.BackendGroup
 		return *backend.Diagnostic
 	}
 	requirements := xBackendTLSRequirements(backend.XBackendTLS)
-	condition := inputs.backendTLSAvailability[requirements].apply(metav1.Condition{Status: metav1.ConditionTrue}, true, requirements.requireSAN)
-	return model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: condition.Message}
+	return xBackendTLSProviderDiagnostic(inputs.backendTLSAvailability[requirements], requirements)
+}
+
+func xBackendTLSProviderDiagnostic(availability backendTLSAvailability, requirements backendTLSRequirements) model.Diagnostic {
+	condition := availability.apply(metav1.Condition{Status: metav1.ConditionTrue}, true, requirements.requireSAN)
+	return model.Diagnostic{Reason: condition.Reason, Message: condition.Message}
 }
 
 func routeBackendTLSAncestorSlot(route *gatewayv1.HTTPRoute, inputs *routeModelInputs) backendtls.AncestorSlot {

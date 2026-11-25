@@ -113,30 +113,19 @@ func resolveXBackend(route *gatewayv1.HTTPRoute, group BackendGroup, key types.N
 			break
 		}
 	}
-	var spec *gatewayx.BackendSpec
 	if backend != nil {
-		spec = &backend.Spec
-		group.XBackendTLSRequired = XBackendRequiresTLS(*spec) || backend.ReadIssue != nil
-		if spec.Port.Number >= 1 && spec.Port.Number <= 65535 {
-			group.XBackendPort = int(spec.Port.Number)
-		}
-		if backend.ReadIssue != nil {
-			group.Diagnostic = backend.ReadIssue
-			return group
+		group.XBackendTLSRequired = XBackendRequiresTLS(backend.Spec) || backend.ReadIssue != nil
+		if backend.Spec.Port.Number >= 1 && backend.Spec.Port.Number <= 65535 {
+			group.XBackendPort = int(backend.Spec.Port.Number)
 		}
 	}
-	if diagnostic := CheckXBackendTarget(key, spec, input.XBackendProfile); diagnostic != nil {
+	if diagnostic := CheckXBackendObservation(key, backend, input.XBackendProfile); diagnostic != nil {
 		group.Diagnostic = diagnostic
 		return group
 	}
+	spec := &backend.Spec
 	group.XBackendRoutedExternal = spec.Type == gatewayx.BackendTypeExternalHostname
-	if group.XBackendTLSRequired {
-		group.XBackendTLS = backend.TLS.Validation
-		if group.XBackendTLS == nil {
-			group.Diagnostic = xBackendTLSReferenceDiagnostic(backend.TLS)
-			return group
-		}
-	}
+	group.XBackendTLS = backend.TLS.Validation
 	group.State = BackendResolved
 	group.XBackendUsesH2C = ptr.Deref(spec.Protocol, "") == gatewayx.BackendProtocolH2C
 	group.Endpoints = backend.Endpoints
@@ -146,7 +135,7 @@ func resolveXBackend(route *gatewayv1.HTTPRoute, group BackendGroup, key types.N
 func xBackendTLSReferenceDiagnostic(tls backendtls.ValidationResult) *Diagnostic {
 	switch {
 	case tls.Pending:
-		return backendDiagnostic(gatewayv1.RouteConditionReason(gatewayv1.BackendTLSPolicyReasonInvalidCACertificateRef), tls.Message)
+		return backendDiagnostic(gatewayv1.RouteReasonPending, tls.Message)
 	case tls.RefReason != "":
 		return backendDiagnostic(gatewayv1.RouteConditionReason(tls.RefReason), tls.Message)
 	case tls.Message != "":
@@ -156,12 +145,22 @@ func xBackendTLSReferenceDiagnostic(tls backendtls.ValidationResult) *Diagnostic
 	}
 }
 
-// CheckXBackendTarget resolves an already authorized XBackend object reference.
-func CheckXBackendTarget(key types.NamespacedName, spec *gatewayx.BackendSpec, profile XBackendProfile) *Diagnostic {
-	if spec == nil {
+// CheckXBackendObservation resolves an already authorized XBackend reference
+// using its live configuration and trust dependencies.
+func CheckXBackendObservation(key types.NamespacedName, backend *XBackendObservation, profile XBackendProfile) *Diagnostic {
+	if backend == nil {
 		return backendDiagnostic(gatewayv1.RouteReasonBackendNotFound, fmt.Sprintf("XBackend %s was not found", key))
 	}
-	return ValidateXBackend(*spec, profile)
+	if backend.ReadIssue != nil {
+		return backend.ReadIssue
+	}
+	if diagnostic := ValidateXBackend(backend.Spec, profile); diagnostic != nil {
+		return diagnostic
+	}
+	if XBackendRequiresTLS(backend.Spec) && backend.TLS.Validation == nil {
+		return xBackendTLSReferenceDiagnostic(backend.TLS)
+	}
+	return nil
 }
 
 // ValidateXBackend defines the XBackend configuration supported by the HTTPRoute profile.
