@@ -1,0 +1,2673 @@
+{
+  "contract": "HTTPRoute and GRPCRoute response modifiers on individual weighted backend references",
+  "controller": {
+    "repository": "ghcr.io/armeldemarsac92/gateway-api-openstack",
+    "sourceRevision": "421558c9513aaaeaa8b0791939ad0005b96149c8",
+    "sourceLabel": "https://github.com/armeldemarsac92/gateway-api-openstack",
+    "manifestDigest": "sha256:4b6757d25821bf97f33bfa94e7715a64a154249faa4f2b6eb24be5d6bcf6aa04",
+    "configDigest": "sha256:24b55b2266663c461ec4446584056ebf15b1fe3531309565f8d282fda60fd27e",
+    "platform": "linux/amd64",
+    "entrypoint": "/openstack-gateway-controller",
+    "user": "65532:65532",
+    "ociArchiveSHA256": "08cd5f2a4d5468aebb407452a4d3cbd3a1972dc20dc50f67a99674aa86c05e52",
+    "managerSHA256": "8c0371c1c358fa835911fd0e3e3c73737c804fcc364ee2fa75c89e5faef20d79",
+    "normalAndNoCacheBuildsMatch": true
+  },
+  "upstreamRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "provider": {
+    "installedPackages": {
+      "octavia": {
+        "revision": "bb8bf986b57ad0acef3f29676e4ae436fbdd30f7",
+        "tree": "b116f1dd6265e3a2814d3f3eeaa4d8085e3dbfc5",
+        "wheelSHA256": "9dd6335d82c76656d54a2dc792f260030b7e4342118f38fd9e009181894b74c0",
+        "version": "19.0.1.dev92"
+      },
+      "octaviaLib": {
+        "revision": "eb4c646b59758334629feb99d517f938c8af3712",
+        "tree": "d82d52461368d70ceb4436388d7403081702234a",
+        "wheelSHA256": "a184a491c44d654317c6d1ae3225e3bed73f1eb8632132291ce01953e28dfa5d",
+        "version": "3.12.1.dev21"
+      }
+    },
+    "haproxySHA256": "57ce7ace05aa5a094ac71726dcce65e89971d521c3528de1c6c198a3918132e8",
+    "counts": {
+      "http": {
+        "sibling": 76,
+        "selected": 20
+      },
+      "grpc": {
+        "sibling": 71,
+        "selected": 25
+      }
+    },
+    "unavailablePoolResponse": {
+      "status": 503,
+      "xPicked": [
+        "rule"
+      ]
+    }
+  },
+  "channels": {
+    "standard": {
+      "kubernetesVersion": "v1.36.2",
+      "gatewayCRDs": {
+        "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+        "installedSchemaSHA256": {
+          "grpcroutes.gateway.networking.k8s.io": {
+            "v1": "13979026df5e01d60a2f77d2b4c68911a61874b41fe084f0398e9b185fa4c6e3"
+          },
+          "referencegrants.gateway.networking.k8s.io": {
+            "v1": "774b729bb924e0d8698a7c2473505b042e2e5265d970fbd3cd272f23bd610def",
+            "v1beta1": "774b729bb924e0d8698a7c2473505b042e2e5265d970fbd3cd272f23bd610def"
+          }
+        },
+        "httpRouteV1SchemaSHA256": "e81367d0d592831956921a7fb9151e98e88276d277b639812cc5e7937d38069c"
+      },
+      "controllerFlags": [
+        "--octavia-backend-h2c",
+        "--octavia-fixed-http-responses",
+        "--octavia-grpc-content-type",
+        "--octavia-weighted-http-targets",
+        "--octavia-response-header-modifier",
+        "--octavia-microversion=2.30"
+      ],
+      "octavia": {
+        "revision": "bb8bf986b57ad0acef3f29676e4ae436fbdd30f7",
+        "version": "19.0.1.dev92",
+        "sha256": "9dd6335d82c76656d54a2dc792f260030b7e4342118f38fd9e009181894b74c0",
+        "filesVerified": 670
+      },
+      "octaviaLib": {
+        "revision": "eb4c646b59758334629feb99d517f938c8af3712",
+        "version": "3.12.1.dev21",
+        "sha256": "a184a491c44d654317c6d1ae3225e3bed73f1eb8632132291ce01953e28dfa5d",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1",
+        "sha256": "57ce7ace05aa5a094ac71726dcce65e89971d521c3528de1c6c198a3918132e8"
+      },
+      "grpcio": "1.83.0",
+      "cloudBoundary": "Dedicated local Kubernetes envtest API and etcd, installed Octavia WSGI and SQL, Amphora renderer and live HAProxy. Keystone, Neutron, Octavia RPC completion and Amphora agent transport use fixtures.",
+      "trafficBoundary": "Native HTTP/1.1 and grpcio h2c through separate listeners. Two selectorless Services and fixture EndpointSlices supply real host-local HTTP and grpcio origins. Traffic is measured after each phase converges. The regional control plane and production are outside this qualification.",
+      "acceptance": {
+        "requestsPerProtocolPerPhase": 192,
+        "weights": [
+          3,
+          1
+        ],
+        "minorityShareBounds": [
+          0.12,
+          0.38
+        ],
+        "revokedTargetRequests": 0,
+        "revokedStatuses": {
+          "http": 500,
+          "grpc": "UNAVAILABLE (HTTP 503)"
+        }
+      },
+      "octaviaAPIVersion": "v2.30",
+      "verifiedAmphoraCapabilities": [
+        "backend_h2c_v1",
+        "fixed_http_responses_v1",
+        "grpc_binary_response_metadata_v1",
+        "grpc_content_type_v1",
+        "response_header_operations_v1",
+        "weighted_http_target_response_headers_v1",
+        "weighted_http_targets_v1"
+      ],
+      "rawReceiptSHA256": "8c7f2f634c33b44e2f1b2351c04cea1665aabc504913595157f81e126906f32b",
+      "phases": {
+        "configured": {
+          "referenceGrant": {
+            "uid": "ba497cdd-e1ae-423e-abfb-dbfa5ed8bed7",
+            "generation": 1,
+            "spec": {
+              "from": [
+                {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "HTTPRoute",
+                  "namespace": "backend-response"
+                },
+                {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "GRPCRoute",
+                  "namespace": "backend-response"
+                }
+              ],
+              "to": [
+                {
+                  "group": "",
+                  "kind": "Service",
+                  "name": "selected"
+                }
+              ]
+            }
+          },
+          "routes": {
+            "HTTPRoute": {
+              "uid": "32dcd6fc-4d12-41c0-928f-28a88bedda3a",
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "listener": {
+                "name": "http",
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                }
+              },
+              "rule": {
+                "backendRefs": [
+                  {
+                    "group": "",
+                    "kind": "Service",
+                    "name": "sibling",
+                    "port": 8080,
+                    "weight": 3
+                  },
+                  {
+                    "filters": [
+                      {
+                        "responseHeaderModifier": {
+                          "remove": [
+                            "x-remove"
+                          ],
+                          "set": [
+                            {
+                              "name": "x-picked",
+                              "value": "selected"
+                            }
+                          ]
+                        },
+                        "type": "ResponseHeaderModifier"
+                      }
+                    ],
+                    "group": "",
+                    "kind": "Service",
+                    "name": "selected",
+                    "namespace": "backend-response-peer",
+                    "port": 8080,
+                    "weight": 1
+                  }
+                ],
+                "filters": [
+                  {
+                    "responseHeaderModifier": {
+                      "add": [
+                        {
+                          "name": "x-picked",
+                          "value": "rule"
+                        }
+                      ]
+                    },
+                    "type": "ResponseHeaderModifier"
+                  }
+                ],
+                "matches": [
+                  {
+                    "path": {
+                      "type": "Exact",
+                      "value": "/selected"
+                    }
+                  }
+                ]
+              }
+            },
+            "GRPCRoute": {
+              "uid": "a2549011-3f00-4df2-9b7d-624e3867a149",
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "listener": {
+                "name": "grpc",
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                }
+              },
+              "rule": {
+                "backendRefs": [
+                  {
+                    "group": "",
+                    "kind": "Service",
+                    "name": "sibling",
+                    "port": 8081,
+                    "weight": 3
+                  },
+                  {
+                    "filters": [
+                      {
+                        "responseHeaderModifier": {
+                          "remove": [
+                            "x-remove"
+                          ],
+                          "set": [
+                            {
+                              "name": "picked-bin",
+                              "value": "YQ, Yg=="
+                            }
+                          ]
+                        },
+                        "type": "ResponseHeaderModifier"
+                      }
+                    ],
+                    "group": "",
+                    "kind": "Service",
+                    "name": "selected",
+                    "namespace": "backend-response-peer",
+                    "port": 8081,
+                    "weight": 1
+                  }
+                ],
+                "filters": [
+                  {
+                    "responseHeaderModifier": {
+                      "add": [
+                        {
+                          "name": "picked-bin",
+                          "value": "Yw=="
+                        }
+                      ]
+                    },
+                    "type": "ResponseHeaderModifier"
+                  }
+                ],
+                "matches": [
+                  {
+                    "method": {
+                      "method": "Selected",
+                      "service": "example.Headers",
+                      "type": "Exact"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "traffic": {
+            "http": {
+              "distribution": {
+                "sibling": 153,
+                "selected": 39,
+                "local-response": 0
+              },
+              "originCalls": {
+                "sibling": 153,
+                "selected": 39
+              },
+              "responses": [
+                {
+                  "origin": "selected",
+                  "status": "200",
+                  "details": "",
+                  "picked": [
+                    "selected",
+                    "rule"
+                  ],
+                  "xRemove": [],
+                  "count": 39
+                },
+                {
+                  "origin": "sibling",
+                  "status": "200",
+                  "details": "",
+                  "picked": [
+                    "origin",
+                    "rule"
+                  ],
+                  "xRemove": [
+                    "origin"
+                  ],
+                  "count": 153
+                }
+              ]
+            },
+            "grpc": {
+              "distribution": {
+                "sibling": 146,
+                "selected": 46,
+                "local-response": 0
+              },
+              "originCalls": {
+                "sibling": 146,
+                "selected": 46
+              },
+              "responses": [
+                {
+                  "origin": "selected",
+                  "status": "OK",
+                  "details": "",
+                  "picked": [
+                    "YQ==",
+                    "Yg==",
+                    "Yw=="
+                  ],
+                  "xRemove": [],
+                  "count": 46
+                },
+                {
+                  "origin": "sibling",
+                  "status": "OK",
+                  "details": "",
+                  "picked": [
+                    "b3JpZ2lu",
+                    "Yw=="
+                  ],
+                  "xRemove": [
+                    "origin"
+                  ],
+                  "count": 146
+                }
+              ]
+            }
+          },
+          "provider": {
+            "policies": {
+              "http": {
+                "action": "WEIGHTED_TARGETS",
+                "ruleOperations": [
+                  {
+                    "operation": "ADD",
+                    "name": "x-picked",
+                    "value": "rule"
+                  }
+                ],
+                "targets": [
+                  {
+                    "weight": 3,
+                    "origin": "sibling",
+                    "fixedStatus": null,
+                    "operations": []
+                  },
+                  {
+                    "weight": 1,
+                    "origin": "selected",
+                    "fixedStatus": null,
+                    "operations": [
+                      {
+                        "operation": "SET",
+                        "name": "x-picked",
+                        "value": "selected"
+                      },
+                      {
+                        "operation": "REMOVE",
+                        "name": "x-remove"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "grpc": {
+                "action": "WEIGHTED_TARGETS",
+                "ruleOperations": [
+                  {
+                    "operation": "ADD",
+                    "name": "picked-bin",
+                    "value": "Yw=="
+                  }
+                ],
+                "targets": [
+                  {
+                    "weight": 3,
+                    "origin": "sibling",
+                    "fixedStatus": null,
+                    "operations": []
+                  },
+                  {
+                    "weight": 1,
+                    "origin": "selected",
+                    "fixedStatus": null,
+                    "operations": [
+                      {
+                        "operation": "SET",
+                        "name": "picked-bin",
+                        "value": "YQ, Yg=="
+                      },
+                      {
+                        "operation": "REMOVE",
+                        "name": "x-remove"
+                      }
+                    ]
+                  }
+                ]
+              }
+            },
+            "activeHAProxyConfigSHA256": "1961229dbf15e907e34bd9113134c7cc11eb3bb90e193f95de73c4537e96deea",
+            "HAProxyReloads": 6
+          }
+        },
+        "grant-revoked": {
+          "referenceGrant": {
+            "deletedUID": "ba497cdd-e1ae-423e-abfb-dbfa5ed8bed7"
+          },
+          "routes": {
+            "HTTPRoute": {
+              "uid": "32dcd6fc-4d12-41c0-928f-28a88bedda3a",
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "False/RefNotPermitted",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "listener": {
+                "name": "http",
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                }
+              },
+              "rule": {
+                "backendRefs": [
+                  {
+                    "group": "",
+                    "kind": "Service",
+                    "name": "sibling",
+                    "port": 8080,
+                    "weight": 3
+                  },
+                  {
+                    "filters": [
+                      {
+                        "responseHeaderModifier": {
+                          "remove": [
+                            "x-remove"
+                          ],
+                          "set": [
+                            {
+                              "name": "x-picked",
+                              "value": "selected"
+                            }
+                          ]
+                        },
+                        "type": "ResponseHeaderModifier"
+                      }
+                    ],
+                    "group": "",
+                    "kind": "Service",
+                    "name": "selected",
+                    "namespace": "backend-response-peer",
+                    "port": 8080,
+                    "weight": 1
+                  }
+                ],
+                "filters": [
+                  {
+                    "responseHeaderModifier": {
+                      "add": [
+                        {
+                          "name": "x-picked",
+                          "value": "rule"
+                        }
+                      ]
+                    },
+                    "type": "ResponseHeaderModifier"
+                  }
+                ],
+                "matches": [
+                  {
+                    "path": {
+                      "type": "Exact",
+                      "value": "/selected"
+                    }
+                  }
+                ]
+              }
+            },
+            "GRPCRoute": {
+              "uid": "a2549011-3f00-4df2-9b7d-624e3867a149",
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "False/RefNotPermitted",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "listener": {
+                "name": "grpc",
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                }
+              },
+              "rule": {
+                "backendRefs": [
+                  {
+                    "group": "",
+                    "kind": "Service",
+                    "name": "sibling",
+                    "port": 8081,
+                    "weight": 3
+                  },
+                  {
+                    "filters": [
+                      {
+                        "responseHeaderModifier": {
+                          "remove": [
+                            "x-remove"
+                          ],
+                          "set": [
+                            {
+                              "name": "picked-bin",
+                              "value": "YQ, Yg=="
+                            }
+                          ]
+                        },
+                        "type": "ResponseHeaderModifier"
+                      }
+                    ],
+                    "group": "",
+                    "kind": "Service",
+                    "name": "selected",
+                    "namespace": "backend-response-peer",
+                    "port": 8081,
+                    "weight": 1
+                  }
+                ],
+                "filters": [
+                  {
+                    "responseHeaderModifier": {
+                      "add": [
+                        {
+                          "name": "picked-bin",
+                          "value": "Yw=="
+                        }
+                      ]
+                    },
+                    "type": "ResponseHeaderModifier"
+                  }
+                ],
+                "matches": [
+                  {
+                    "method": {
+                      "method": "Selected",
+                      "service": "example.Headers",
+                      "type": "Exact"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "traffic": {
+            "http": {
+              "distribution": {
+                "sibling": 140,
+                "selected": 0,
+                "local-response": 52
+              },
+              "originCalls": {
+                "sibling": 140,
+                "selected": 0
+              },
+              "responses": [
+                {
+                  "origin": "local-response",
+                  "status": "500",
+                  "details": "",
+                  "picked": [
+                    "rule"
+                  ],
+                  "xRemove": [],
+                  "count": 52
+                },
+                {
+                  "origin": "sibling",
+                  "status": "200",
+                  "details": "",
+                  "picked": [
+                    "origin",
+                    "rule"
+                  ],
+                  "xRemove": [
+                    "origin"
+                  ],
+                  "count": 140
+                }
+              ]
+            },
+            "grpc": {
+              "distribution": {
+                "sibling": 150,
+                "selected": 0,
+                "local-response": 42
+              },
+              "originCalls": {
+                "sibling": 150,
+                "selected": 0
+              },
+              "responses": [
+                {
+                  "origin": "local-response",
+                  "status": "UNAVAILABLE",
+                  "details": "Received http2 header with status: 503",
+                  "picked": [],
+                  "xRemove": [],
+                  "count": 42
+                },
+                {
+                  "origin": "sibling",
+                  "status": "OK",
+                  "details": "",
+                  "picked": [
+                    "b3JpZ2lu",
+                    "Yw=="
+                  ],
+                  "xRemove": [
+                    "origin"
+                  ],
+                  "count": 150
+                }
+              ]
+            }
+          },
+          "provider": {
+            "policies": {
+              "http": {
+                "action": "WEIGHTED_TARGETS",
+                "ruleOperations": [
+                  {
+                    "operation": "ADD",
+                    "name": "x-picked",
+                    "value": "rule"
+                  }
+                ],
+                "targets": [
+                  {
+                    "weight": 3,
+                    "origin": "sibling",
+                    "fixedStatus": null,
+                    "operations": []
+                  },
+                  {
+                    "weight": 1,
+                    "origin": "local-response",
+                    "fixedStatus": 500,
+                    "operations": []
+                  }
+                ]
+              },
+              "grpc": {
+                "action": "WEIGHTED_TARGETS",
+                "ruleOperations": [
+                  {
+                    "operation": "ADD",
+                    "name": "picked-bin",
+                    "value": "Yw=="
+                  }
+                ],
+                "targets": [
+                  {
+                    "weight": 3,
+                    "origin": "sibling",
+                    "fixedStatus": null,
+                    "operations": []
+                  },
+                  {
+                    "weight": 1,
+                    "origin": "local-response",
+                    "fixedStatus": null,
+                    "operations": []
+                  }
+                ]
+              }
+            },
+            "activeHAProxyConfigSHA256": "de7fc9b64f26d0e98d53d909272a925243bdedd8c83a577bef8ac2a373536c0d",
+            "HAProxyReloads": 10
+          },
+          "grpcLocalHTTP2Headers": {
+            "attempts": 4,
+            "status": "HTTP/2 503",
+            "metadata": {
+              "picked-bin": [
+                "Yw=="
+              ]
+            },
+            "selectedOriginCalls": 0
+          }
+        },
+        "grant-restored": {
+          "referenceGrant": {
+            "uid": "56c05518-8354-421b-a5cf-dbb396b4c563",
+            "generation": 1,
+            "spec": {
+              "from": [
+                {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "HTTPRoute",
+                  "namespace": "backend-response"
+                },
+                {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "GRPCRoute",
+                  "namespace": "backend-response"
+                }
+              ],
+              "to": [
+                {
+                  "group": "",
+                  "kind": "Service",
+                  "name": "selected"
+                }
+              ]
+            }
+          },
+          "routes": {
+            "HTTPRoute": {
+              "uid": "32dcd6fc-4d12-41c0-928f-28a88bedda3a",
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "listener": {
+                "name": "http",
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                }
+              },
+              "rule": {
+                "backendRefs": [
+                  {
+                    "group": "",
+                    "kind": "Service",
+                    "name": "sibling",
+                    "port": 8080,
+                    "weight": 3
+                  },
+                  {
+                    "filters": [
+                      {
+                        "responseHeaderModifier": {
+                          "remove": [
+                            "x-remove"
+                          ],
+                          "set": [
+                            {
+                              "name": "x-picked",
+                              "value": "selected"
+                            }
+                          ]
+                        },
+                        "type": "ResponseHeaderModifier"
+                      }
+                    ],
+                    "group": "",
+                    "kind": "Service",
+                    "name": "selected",
+                    "namespace": "backend-response-peer",
+                    "port": 8080,
+                    "weight": 1
+                  }
+                ],
+                "filters": [
+                  {
+                    "responseHeaderModifier": {
+                      "add": [
+                        {
+                          "name": "x-picked",
+                          "value": "rule"
+                        }
+                      ]
+                    },
+                    "type": "ResponseHeaderModifier"
+                  }
+                ],
+                "matches": [
+                  {
+                    "path": {
+                      "type": "Exact",
+                      "value": "/selected"
+                    }
+                  }
+                ]
+              }
+            },
+            "GRPCRoute": {
+              "uid": "a2549011-3f00-4df2-9b7d-624e3867a149",
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "listener": {
+                "name": "grpc",
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                }
+              },
+              "rule": {
+                "backendRefs": [
+                  {
+                    "group": "",
+                    "kind": "Service",
+                    "name": "sibling",
+                    "port": 8081,
+                    "weight": 3
+                  },
+                  {
+                    "filters": [
+                      {
+                        "responseHeaderModifier": {
+                          "remove": [
+                            "x-remove"
+                          ],
+                          "set": [
+                            {
+                              "name": "picked-bin",
+                              "value": "YQ, Yg=="
+                            }
+                          ]
+                        },
+                        "type": "ResponseHeaderModifier"
+                      }
+                    ],
+                    "group": "",
+                    "kind": "Service",
+                    "name": "selected",
+                    "namespace": "backend-response-peer",
+                    "port": 8081,
+                    "weight": 1
+                  }
+                ],
+                "filters": [
+                  {
+                    "responseHeaderModifier": {
+                      "add": [
+                        {
+                          "name": "picked-bin",
+                          "value": "Yw=="
+                        }
+                      ]
+                    },
+                    "type": "ResponseHeaderModifier"
+                  }
+                ],
+                "matches": [
+                  {
+                    "method": {
+                      "method": "Selected",
+                      "service": "example.Headers",
+                      "type": "Exact"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "traffic": {
+            "http": {
+              "distribution": {
+                "sibling": 145,
+                "selected": 47,
+                "local-response": 0
+              },
+              "originCalls": {
+                "sibling": 145,
+                "selected": 47
+              },
+              "responses": [
+                {
+                  "origin": "selected",
+                  "status": "200",
+                  "details": "",
+                  "picked": [
+                    "selected",
+                    "rule"
+                  ],
+                  "xRemove": [],
+                  "count": 47
+                },
+                {
+                  "origin": "sibling",
+                  "status": "200",
+                  "details": "",
+                  "picked": [
+                    "origin",
+                    "rule"
+                  ],
+                  "xRemove": [
+                    "origin"
+                  ],
+                  "count": 145
+                }
+              ]
+            },
+            "grpc": {
+              "distribution": {
+                "sibling": 137,
+                "selected": 55,
+                "local-response": 0
+              },
+              "originCalls": {
+                "sibling": 137,
+                "selected": 55
+              },
+              "responses": [
+                {
+                  "origin": "selected",
+                  "status": "OK",
+                  "details": "",
+                  "picked": [
+                    "YQ==",
+                    "Yg==",
+                    "Yw=="
+                  ],
+                  "xRemove": [],
+                  "count": 55
+                },
+                {
+                  "origin": "sibling",
+                  "status": "OK",
+                  "details": "",
+                  "picked": [
+                    "b3JpZ2lu",
+                    "Yw=="
+                  ],
+                  "xRemove": [
+                    "origin"
+                  ],
+                  "count": 137
+                }
+              ]
+            }
+          },
+          "provider": {
+            "policies": {
+              "http": {
+                "action": "WEIGHTED_TARGETS",
+                "ruleOperations": [
+                  {
+                    "operation": "ADD",
+                    "name": "x-picked",
+                    "value": "rule"
+                  }
+                ],
+                "targets": [
+                  {
+                    "weight": 3,
+                    "origin": "sibling",
+                    "fixedStatus": null,
+                    "operations": []
+                  },
+                  {
+                    "weight": 1,
+                    "origin": "selected",
+                    "fixedStatus": null,
+                    "operations": [
+                      {
+                        "operation": "SET",
+                        "name": "x-picked",
+                        "value": "selected"
+                      },
+                      {
+                        "operation": "REMOVE",
+                        "name": "x-remove"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "grpc": {
+                "action": "WEIGHTED_TARGETS",
+                "ruleOperations": [
+                  {
+                    "operation": "ADD",
+                    "name": "picked-bin",
+                    "value": "Yw=="
+                  }
+                ],
+                "targets": [
+                  {
+                    "weight": 3,
+                    "origin": "sibling",
+                    "fixedStatus": null,
+                    "operations": []
+                  },
+                  {
+                    "weight": 1,
+                    "origin": "selected",
+                    "fixedStatus": null,
+                    "operations": [
+                      {
+                        "operation": "SET",
+                        "name": "picked-bin",
+                        "value": "YQ, Yg=="
+                      },
+                      {
+                        "operation": "REMOVE",
+                        "name": "x-remove"
+                      }
+                    ]
+                  }
+                ]
+              }
+            },
+            "activeHAProxyConfigSHA256": "6139f6908325d9f11123de5a8cb6c95b43f3cb3e8cc0a73c86e527a31b348348",
+            "HAProxyReloads": 14
+          }
+        },
+        "backend-filter-removed": {
+          "referenceGrant": {
+            "uid": "56c05518-8354-421b-a5cf-dbb396b4c563",
+            "generation": 1,
+            "spec": {
+              "from": [
+                {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "HTTPRoute",
+                  "namespace": "backend-response"
+                },
+                {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "GRPCRoute",
+                  "namespace": "backend-response"
+                }
+              ],
+              "to": [
+                {
+                  "group": "",
+                  "kind": "Service",
+                  "name": "selected"
+                }
+              ]
+            }
+          },
+          "routes": {
+            "HTTPRoute": {
+              "uid": "32dcd6fc-4d12-41c0-928f-28a88bedda3a",
+              "generation": 2,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "listener": {
+                "name": "http",
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                }
+              },
+              "rule": {
+                "backendRefs": [
+                  {
+                    "group": "",
+                    "kind": "Service",
+                    "name": "sibling",
+                    "port": 8080,
+                    "weight": 3
+                  },
+                  {
+                    "group": "",
+                    "kind": "Service",
+                    "name": "selected",
+                    "namespace": "backend-response-peer",
+                    "port": 8080,
+                    "weight": 1
+                  }
+                ],
+                "filters": [
+                  {
+                    "responseHeaderModifier": {
+                      "add": [
+                        {
+                          "name": "x-picked",
+                          "value": "rule"
+                        }
+                      ]
+                    },
+                    "type": "ResponseHeaderModifier"
+                  }
+                ],
+                "matches": [
+                  {
+                    "path": {
+                      "type": "Exact",
+                      "value": "/selected"
+                    }
+                  }
+                ]
+              }
+            },
+            "GRPCRoute": {
+              "uid": "a2549011-3f00-4df2-9b7d-624e3867a149",
+              "generation": 2,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "listener": {
+                "name": "grpc",
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                }
+              },
+              "rule": {
+                "backendRefs": [
+                  {
+                    "group": "",
+                    "kind": "Service",
+                    "name": "sibling",
+                    "port": 8081,
+                    "weight": 3
+                  },
+                  {
+                    "group": "",
+                    "kind": "Service",
+                    "name": "selected",
+                    "namespace": "backend-response-peer",
+                    "port": 8081,
+                    "weight": 1
+                  }
+                ],
+                "filters": [
+                  {
+                    "responseHeaderModifier": {
+                      "add": [
+                        {
+                          "name": "picked-bin",
+                          "value": "Yw=="
+                        }
+                      ]
+                    },
+                    "type": "ResponseHeaderModifier"
+                  }
+                ],
+                "matches": [
+                  {
+                    "method": {
+                      "method": "Selected",
+                      "service": "example.Headers",
+                      "type": "Exact"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "traffic": {
+            "http": {
+              "distribution": {
+                "sibling": 157,
+                "selected": 35,
+                "local-response": 0
+              },
+              "originCalls": {
+                "sibling": 157,
+                "selected": 35
+              },
+              "responses": [
+                {
+                  "origin": "selected",
+                  "status": "200",
+                  "details": "",
+                  "picked": [
+                    "origin",
+                    "rule"
+                  ],
+                  "xRemove": [
+                    "origin"
+                  ],
+                  "count": 35
+                },
+                {
+                  "origin": "sibling",
+                  "status": "200",
+                  "details": "",
+                  "picked": [
+                    "origin",
+                    "rule"
+                  ],
+                  "xRemove": [
+                    "origin"
+                  ],
+                  "count": 157
+                }
+              ]
+            },
+            "grpc": {
+              "distribution": {
+                "sibling": 147,
+                "selected": 45,
+                "local-response": 0
+              },
+              "originCalls": {
+                "sibling": 147,
+                "selected": 45
+              },
+              "responses": [
+                {
+                  "origin": "selected",
+                  "status": "OK",
+                  "details": "",
+                  "picked": [
+                    "b3JpZ2lu",
+                    "Yw=="
+                  ],
+                  "xRemove": [
+                    "origin"
+                  ],
+                  "count": 45
+                },
+                {
+                  "origin": "sibling",
+                  "status": "OK",
+                  "details": "",
+                  "picked": [
+                    "b3JpZ2lu",
+                    "Yw=="
+                  ],
+                  "xRemove": [
+                    "origin"
+                  ],
+                  "count": 147
+                }
+              ]
+            }
+          },
+          "provider": {
+            "policies": {
+              "http": {
+                "action": "WEIGHTED_TARGETS",
+                "ruleOperations": [
+                  {
+                    "operation": "ADD",
+                    "name": "x-picked",
+                    "value": "rule"
+                  }
+                ],
+                "targets": [
+                  {
+                    "weight": 3,
+                    "origin": "sibling",
+                    "fixedStatus": null,
+                    "operations": []
+                  },
+                  {
+                    "weight": 1,
+                    "origin": "selected",
+                    "fixedStatus": null,
+                    "operations": []
+                  }
+                ]
+              },
+              "grpc": {
+                "action": "WEIGHTED_TARGETS",
+                "ruleOperations": [
+                  {
+                    "operation": "ADD",
+                    "name": "picked-bin",
+                    "value": "Yw=="
+                  }
+                ],
+                "targets": [
+                  {
+                    "weight": 3,
+                    "origin": "sibling",
+                    "fixedStatus": null,
+                    "operations": []
+                  },
+                  {
+                    "weight": 1,
+                    "origin": "selected",
+                    "fixedStatus": null,
+                    "operations": []
+                  }
+                ]
+              }
+            },
+            "activeHAProxyConfigSHA256": "e37ad08dc865b4109dd1b6e1b3a435bda553151fe4b775cbe953636dc50ec8d1",
+            "HAProxyReloads": 18
+          }
+        }
+      }
+    },
+    "experimental": {
+      "kubernetesVersion": "v1.36.2",
+      "gatewayCRDs": {
+        "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+        "installedSchemaSHA256": {
+          "grpcroutes.gateway.networking.k8s.io": {
+            "v1": "eac8eb2e2149022ff3b187d9658ad7a9fead312093cb9501ded1a2f8ba886fc2"
+          },
+          "referencegrants.gateway.networking.k8s.io": {
+            "v1": "774b729bb924e0d8698a7c2473505b042e2e5265d970fbd3cd272f23bd610def",
+            "v1beta1": "774b729bb924e0d8698a7c2473505b042e2e5265d970fbd3cd272f23bd610def"
+          }
+        },
+        "httpRouteV1SchemaSHA256": "546462fb2d792a243be2858584b265581dedacf674ae97bfce7d6e40dd1d4e1d"
+      },
+      "controllerFlags": [
+        "--octavia-backend-h2c",
+        "--octavia-fixed-http-responses",
+        "--octavia-grpc-content-type",
+        "--octavia-weighted-http-targets",
+        "--octavia-response-header-modifier",
+        "--octavia-microversion=2.30"
+      ],
+      "octavia": {
+        "revision": "bb8bf986b57ad0acef3f29676e4ae436fbdd30f7",
+        "version": "19.0.1.dev92",
+        "sha256": "9dd6335d82c76656d54a2dc792f260030b7e4342118f38fd9e009181894b74c0",
+        "filesVerified": 670
+      },
+      "octaviaLib": {
+        "revision": "eb4c646b59758334629feb99d517f938c8af3712",
+        "version": "3.12.1.dev21",
+        "sha256": "a184a491c44d654317c6d1ae3225e3bed73f1eb8632132291ce01953e28dfa5d",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1",
+        "sha256": "57ce7ace05aa5a094ac71726dcce65e89971d521c3528de1c6c198a3918132e8"
+      },
+      "grpcio": "1.83.0",
+      "cloudBoundary": "Dedicated local Kubernetes envtest API and etcd, installed Octavia WSGI and SQL, Amphora renderer and live HAProxy. Keystone, Neutron, Octavia RPC completion and Amphora agent transport use fixtures.",
+      "trafficBoundary": "Native HTTP/1.1 and grpcio h2c through separate listeners. Two selectorless Services and fixture EndpointSlices supply real host-local HTTP and grpcio origins. Traffic is measured after each phase converges. The regional control plane and production are outside this qualification.",
+      "acceptance": {
+        "requestsPerProtocolPerPhase": 192,
+        "weights": [
+          3,
+          1
+        ],
+        "minorityShareBounds": [
+          0.12,
+          0.38
+        ],
+        "revokedTargetRequests": 0,
+        "revokedStatuses": {
+          "http": 500,
+          "grpc": "UNAVAILABLE (HTTP 503)"
+        }
+      },
+      "octaviaAPIVersion": "v2.30",
+      "verifiedAmphoraCapabilities": [
+        "backend_h2c_v1",
+        "fixed_http_responses_v1",
+        "grpc_binary_response_metadata_v1",
+        "grpc_content_type_v1",
+        "response_header_operations_v1",
+        "weighted_http_target_response_headers_v1",
+        "weighted_http_targets_v1"
+      ],
+      "rawReceiptSHA256": "fb2b0daa94e119f11c53c1aea31546cb13238b93ef8b2b70cfae7951e26a2ddf",
+      "phases": {
+        "configured": {
+          "referenceGrant": {
+            "uid": "b6d05823-7073-4dd5-8c7c-931841d1b921",
+            "generation": 1,
+            "spec": {
+              "from": [
+                {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "HTTPRoute",
+                  "namespace": "backend-response"
+                },
+                {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "GRPCRoute",
+                  "namespace": "backend-response"
+                }
+              ],
+              "to": [
+                {
+                  "group": "",
+                  "kind": "Service",
+                  "name": "selected"
+                }
+              ]
+            }
+          },
+          "routes": {
+            "HTTPRoute": {
+              "uid": "80fff9a6-fbde-4ed2-9f98-d3235ce25198",
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "listener": {
+                "name": "http",
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                }
+              },
+              "rule": {
+                "backendRefs": [
+                  {
+                    "group": "",
+                    "kind": "Service",
+                    "name": "sibling",
+                    "port": 8080,
+                    "weight": 3
+                  },
+                  {
+                    "filters": [
+                      {
+                        "responseHeaderModifier": {
+                          "remove": [
+                            "x-remove"
+                          ],
+                          "set": [
+                            {
+                              "name": "x-picked",
+                              "value": "selected"
+                            }
+                          ]
+                        },
+                        "type": "ResponseHeaderModifier"
+                      }
+                    ],
+                    "group": "",
+                    "kind": "Service",
+                    "name": "selected",
+                    "namespace": "backend-response-peer",
+                    "port": 8080,
+                    "weight": 1
+                  }
+                ],
+                "filters": [
+                  {
+                    "responseHeaderModifier": {
+                      "add": [
+                        {
+                          "name": "x-picked",
+                          "value": "rule"
+                        }
+                      ]
+                    },
+                    "type": "ResponseHeaderModifier"
+                  }
+                ],
+                "matches": [
+                  {
+                    "path": {
+                      "type": "Exact",
+                      "value": "/selected"
+                    }
+                  }
+                ]
+              }
+            },
+            "GRPCRoute": {
+              "uid": "9d84845d-1e2b-4b11-8276-645e4f56cb57",
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "listener": {
+                "name": "grpc",
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                }
+              },
+              "rule": {
+                "backendRefs": [
+                  {
+                    "group": "",
+                    "kind": "Service",
+                    "name": "sibling",
+                    "port": 8081,
+                    "weight": 3
+                  },
+                  {
+                    "filters": [
+                      {
+                        "responseHeaderModifier": {
+                          "remove": [
+                            "x-remove"
+                          ],
+                          "set": [
+                            {
+                              "name": "picked-bin",
+                              "value": "YQ, Yg=="
+                            }
+                          ]
+                        },
+                        "type": "ResponseHeaderModifier"
+                      }
+                    ],
+                    "group": "",
+                    "kind": "Service",
+                    "name": "selected",
+                    "namespace": "backend-response-peer",
+                    "port": 8081,
+                    "weight": 1
+                  }
+                ],
+                "filters": [
+                  {
+                    "responseHeaderModifier": {
+                      "add": [
+                        {
+                          "name": "picked-bin",
+                          "value": "Yw=="
+                        }
+                      ]
+                    },
+                    "type": "ResponseHeaderModifier"
+                  }
+                ],
+                "matches": [
+                  {
+                    "method": {
+                      "method": "Selected",
+                      "service": "example.Headers",
+                      "type": "Exact"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "traffic": {
+            "http": {
+              "distribution": {
+                "sibling": 139,
+                "selected": 53,
+                "local-response": 0
+              },
+              "originCalls": {
+                "sibling": 139,
+                "selected": 53
+              },
+              "responses": [
+                {
+                  "origin": "selected",
+                  "status": "200",
+                  "details": "",
+                  "picked": [
+                    "selected",
+                    "rule"
+                  ],
+                  "xRemove": [],
+                  "count": 53
+                },
+                {
+                  "origin": "sibling",
+                  "status": "200",
+                  "details": "",
+                  "picked": [
+                    "origin",
+                    "rule"
+                  ],
+                  "xRemove": [
+                    "origin"
+                  ],
+                  "count": 139
+                }
+              ]
+            },
+            "grpc": {
+              "distribution": {
+                "sibling": 146,
+                "selected": 46,
+                "local-response": 0
+              },
+              "originCalls": {
+                "sibling": 146,
+                "selected": 46
+              },
+              "responses": [
+                {
+                  "origin": "selected",
+                  "status": "OK",
+                  "details": "",
+                  "picked": [
+                    "YQ==",
+                    "Yg==",
+                    "Yw=="
+                  ],
+                  "xRemove": [],
+                  "count": 46
+                },
+                {
+                  "origin": "sibling",
+                  "status": "OK",
+                  "details": "",
+                  "picked": [
+                    "b3JpZ2lu",
+                    "Yw=="
+                  ],
+                  "xRemove": [
+                    "origin"
+                  ],
+                  "count": 146
+                }
+              ]
+            }
+          },
+          "provider": {
+            "policies": {
+              "http": {
+                "action": "WEIGHTED_TARGETS",
+                "ruleOperations": [
+                  {
+                    "operation": "ADD",
+                    "name": "x-picked",
+                    "value": "rule"
+                  }
+                ],
+                "targets": [
+                  {
+                    "weight": 3,
+                    "origin": "sibling",
+                    "fixedStatus": null,
+                    "operations": []
+                  },
+                  {
+                    "weight": 1,
+                    "origin": "selected",
+                    "fixedStatus": null,
+                    "operations": [
+                      {
+                        "operation": "SET",
+                        "name": "x-picked",
+                        "value": "selected"
+                      },
+                      {
+                        "operation": "REMOVE",
+                        "name": "x-remove"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "grpc": {
+                "action": "WEIGHTED_TARGETS",
+                "ruleOperations": [
+                  {
+                    "operation": "ADD",
+                    "name": "picked-bin",
+                    "value": "Yw=="
+                  }
+                ],
+                "targets": [
+                  {
+                    "weight": 3,
+                    "origin": "sibling",
+                    "fixedStatus": null,
+                    "operations": []
+                  },
+                  {
+                    "weight": 1,
+                    "origin": "selected",
+                    "fixedStatus": null,
+                    "operations": [
+                      {
+                        "operation": "SET",
+                        "name": "picked-bin",
+                        "value": "YQ, Yg=="
+                      },
+                      {
+                        "operation": "REMOVE",
+                        "name": "x-remove"
+                      }
+                    ]
+                  }
+                ]
+              }
+            },
+            "activeHAProxyConfigSHA256": "0e4e89bc77c8436c40294647b159d8dc7283e7798915c8c16f83c759ccdc71f7",
+            "HAProxyReloads": 6
+          }
+        },
+        "grant-revoked": {
+          "referenceGrant": {
+            "deletedUID": "b6d05823-7073-4dd5-8c7c-931841d1b921"
+          },
+          "routes": {
+            "HTTPRoute": {
+              "uid": "80fff9a6-fbde-4ed2-9f98-d3235ce25198",
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "False/RefNotPermitted",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "listener": {
+                "name": "http",
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                }
+              },
+              "rule": {
+                "backendRefs": [
+                  {
+                    "group": "",
+                    "kind": "Service",
+                    "name": "sibling",
+                    "port": 8080,
+                    "weight": 3
+                  },
+                  {
+                    "filters": [
+                      {
+                        "responseHeaderModifier": {
+                          "remove": [
+                            "x-remove"
+                          ],
+                          "set": [
+                            {
+                              "name": "x-picked",
+                              "value": "selected"
+                            }
+                          ]
+                        },
+                        "type": "ResponseHeaderModifier"
+                      }
+                    ],
+                    "group": "",
+                    "kind": "Service",
+                    "name": "selected",
+                    "namespace": "backend-response-peer",
+                    "port": 8080,
+                    "weight": 1
+                  }
+                ],
+                "filters": [
+                  {
+                    "responseHeaderModifier": {
+                      "add": [
+                        {
+                          "name": "x-picked",
+                          "value": "rule"
+                        }
+                      ]
+                    },
+                    "type": "ResponseHeaderModifier"
+                  }
+                ],
+                "matches": [
+                  {
+                    "path": {
+                      "type": "Exact",
+                      "value": "/selected"
+                    }
+                  }
+                ]
+              }
+            },
+            "GRPCRoute": {
+              "uid": "9d84845d-1e2b-4b11-8276-645e4f56cb57",
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "False/RefNotPermitted",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "listener": {
+                "name": "grpc",
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                }
+              },
+              "rule": {
+                "backendRefs": [
+                  {
+                    "group": "",
+                    "kind": "Service",
+                    "name": "sibling",
+                    "port": 8081,
+                    "weight": 3
+                  },
+                  {
+                    "filters": [
+                      {
+                        "responseHeaderModifier": {
+                          "remove": [
+                            "x-remove"
+                          ],
+                          "set": [
+                            {
+                              "name": "picked-bin",
+                              "value": "YQ, Yg=="
+                            }
+                          ]
+                        },
+                        "type": "ResponseHeaderModifier"
+                      }
+                    ],
+                    "group": "",
+                    "kind": "Service",
+                    "name": "selected",
+                    "namespace": "backend-response-peer",
+                    "port": 8081,
+                    "weight": 1
+                  }
+                ],
+                "filters": [
+                  {
+                    "responseHeaderModifier": {
+                      "add": [
+                        {
+                          "name": "picked-bin",
+                          "value": "Yw=="
+                        }
+                      ]
+                    },
+                    "type": "ResponseHeaderModifier"
+                  }
+                ],
+                "matches": [
+                  {
+                    "method": {
+                      "method": "Selected",
+                      "service": "example.Headers",
+                      "type": "Exact"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "traffic": {
+            "http": {
+              "distribution": {
+                "sibling": 148,
+                "selected": 0,
+                "local-response": 44
+              },
+              "originCalls": {
+                "sibling": 148,
+                "selected": 0
+              },
+              "responses": [
+                {
+                  "origin": "local-response",
+                  "status": "500",
+                  "details": "",
+                  "picked": [
+                    "rule"
+                  ],
+                  "xRemove": [],
+                  "count": 44
+                },
+                {
+                  "origin": "sibling",
+                  "status": "200",
+                  "details": "",
+                  "picked": [
+                    "origin",
+                    "rule"
+                  ],
+                  "xRemove": [
+                    "origin"
+                  ],
+                  "count": 148
+                }
+              ]
+            },
+            "grpc": {
+              "distribution": {
+                "sibling": 141,
+                "selected": 0,
+                "local-response": 51
+              },
+              "originCalls": {
+                "sibling": 141,
+                "selected": 0
+              },
+              "responses": [
+                {
+                  "origin": "local-response",
+                  "status": "UNAVAILABLE",
+                  "details": "Received http2 header with status: 503",
+                  "picked": [],
+                  "xRemove": [],
+                  "count": 51
+                },
+                {
+                  "origin": "sibling",
+                  "status": "OK",
+                  "details": "",
+                  "picked": [
+                    "b3JpZ2lu",
+                    "Yw=="
+                  ],
+                  "xRemove": [
+                    "origin"
+                  ],
+                  "count": 141
+                }
+              ]
+            }
+          },
+          "provider": {
+            "policies": {
+              "http": {
+                "action": "WEIGHTED_TARGETS",
+                "ruleOperations": [
+                  {
+                    "operation": "ADD",
+                    "name": "x-picked",
+                    "value": "rule"
+                  }
+                ],
+                "targets": [
+                  {
+                    "weight": 3,
+                    "origin": "sibling",
+                    "fixedStatus": null,
+                    "operations": []
+                  },
+                  {
+                    "weight": 1,
+                    "origin": "local-response",
+                    "fixedStatus": 500,
+                    "operations": []
+                  }
+                ]
+              },
+              "grpc": {
+                "action": "WEIGHTED_TARGETS",
+                "ruleOperations": [
+                  {
+                    "operation": "ADD",
+                    "name": "picked-bin",
+                    "value": "Yw=="
+                  }
+                ],
+                "targets": [
+                  {
+                    "weight": 3,
+                    "origin": "sibling",
+                    "fixedStatus": null,
+                    "operations": []
+                  },
+                  {
+                    "weight": 1,
+                    "origin": "local-response",
+                    "fixedStatus": null,
+                    "operations": []
+                  }
+                ]
+              }
+            },
+            "activeHAProxyConfigSHA256": "dd1a9648893402960ae677160d8c2d354adb4fae297c55be7ad5325e9ad331d2",
+            "HAProxyReloads": 10
+          },
+          "grpcLocalHTTP2Headers": {
+            "attempts": 3,
+            "status": "HTTP/2 503",
+            "metadata": {
+              "picked-bin": [
+                "Yw=="
+              ]
+            },
+            "selectedOriginCalls": 0
+          }
+        },
+        "grant-restored": {
+          "referenceGrant": {
+            "uid": "416e91aa-8e9b-48ef-b147-0a45622920a2",
+            "generation": 1,
+            "spec": {
+              "from": [
+                {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "HTTPRoute",
+                  "namespace": "backend-response"
+                },
+                {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "GRPCRoute",
+                  "namespace": "backend-response"
+                }
+              ],
+              "to": [
+                {
+                  "group": "",
+                  "kind": "Service",
+                  "name": "selected"
+                }
+              ]
+            }
+          },
+          "routes": {
+            "HTTPRoute": {
+              "uid": "80fff9a6-fbde-4ed2-9f98-d3235ce25198",
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "listener": {
+                "name": "http",
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                }
+              },
+              "rule": {
+                "backendRefs": [
+                  {
+                    "group": "",
+                    "kind": "Service",
+                    "name": "sibling",
+                    "port": 8080,
+                    "weight": 3
+                  },
+                  {
+                    "filters": [
+                      {
+                        "responseHeaderModifier": {
+                          "remove": [
+                            "x-remove"
+                          ],
+                          "set": [
+                            {
+                              "name": "x-picked",
+                              "value": "selected"
+                            }
+                          ]
+                        },
+                        "type": "ResponseHeaderModifier"
+                      }
+                    ],
+                    "group": "",
+                    "kind": "Service",
+                    "name": "selected",
+                    "namespace": "backend-response-peer",
+                    "port": 8080,
+                    "weight": 1
+                  }
+                ],
+                "filters": [
+                  {
+                    "responseHeaderModifier": {
+                      "add": [
+                        {
+                          "name": "x-picked",
+                          "value": "rule"
+                        }
+                      ]
+                    },
+                    "type": "ResponseHeaderModifier"
+                  }
+                ],
+                "matches": [
+                  {
+                    "path": {
+                      "type": "Exact",
+                      "value": "/selected"
+                    }
+                  }
+                ]
+              }
+            },
+            "GRPCRoute": {
+              "uid": "9d84845d-1e2b-4b11-8276-645e4f56cb57",
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "listener": {
+                "name": "grpc",
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                }
+              },
+              "rule": {
+                "backendRefs": [
+                  {
+                    "group": "",
+                    "kind": "Service",
+                    "name": "sibling",
+                    "port": 8081,
+                    "weight": 3
+                  },
+                  {
+                    "filters": [
+                      {
+                        "responseHeaderModifier": {
+                          "remove": [
+                            "x-remove"
+                          ],
+                          "set": [
+                            {
+                              "name": "picked-bin",
+                              "value": "YQ, Yg=="
+                            }
+                          ]
+                        },
+                        "type": "ResponseHeaderModifier"
+                      }
+                    ],
+                    "group": "",
+                    "kind": "Service",
+                    "name": "selected",
+                    "namespace": "backend-response-peer",
+                    "port": 8081,
+                    "weight": 1
+                  }
+                ],
+                "filters": [
+                  {
+                    "responseHeaderModifier": {
+                      "add": [
+                        {
+                          "name": "picked-bin",
+                          "value": "Yw=="
+                        }
+                      ]
+                    },
+                    "type": "ResponseHeaderModifier"
+                  }
+                ],
+                "matches": [
+                  {
+                    "method": {
+                      "method": "Selected",
+                      "service": "example.Headers",
+                      "type": "Exact"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "traffic": {
+            "http": {
+              "distribution": {
+                "sibling": 142,
+                "selected": 50,
+                "local-response": 0
+              },
+              "originCalls": {
+                "sibling": 142,
+                "selected": 50
+              },
+              "responses": [
+                {
+                  "origin": "selected",
+                  "status": "200",
+                  "details": "",
+                  "picked": [
+                    "selected",
+                    "rule"
+                  ],
+                  "xRemove": [],
+                  "count": 50
+                },
+                {
+                  "origin": "sibling",
+                  "status": "200",
+                  "details": "",
+                  "picked": [
+                    "origin",
+                    "rule"
+                  ],
+                  "xRemove": [
+                    "origin"
+                  ],
+                  "count": 142
+                }
+              ]
+            },
+            "grpc": {
+              "distribution": {
+                "sibling": 142,
+                "selected": 50,
+                "local-response": 0
+              },
+              "originCalls": {
+                "sibling": 142,
+                "selected": 50
+              },
+              "responses": [
+                {
+                  "origin": "selected",
+                  "status": "OK",
+                  "details": "",
+                  "picked": [
+                    "YQ==",
+                    "Yg==",
+                    "Yw=="
+                  ],
+                  "xRemove": [],
+                  "count": 50
+                },
+                {
+                  "origin": "sibling",
+                  "status": "OK",
+                  "details": "",
+                  "picked": [
+                    "b3JpZ2lu",
+                    "Yw=="
+                  ],
+                  "xRemove": [
+                    "origin"
+                  ],
+                  "count": 142
+                }
+              ]
+            }
+          },
+          "provider": {
+            "policies": {
+              "http": {
+                "action": "WEIGHTED_TARGETS",
+                "ruleOperations": [
+                  {
+                    "operation": "ADD",
+                    "name": "x-picked",
+                    "value": "rule"
+                  }
+                ],
+                "targets": [
+                  {
+                    "weight": 3,
+                    "origin": "sibling",
+                    "fixedStatus": null,
+                    "operations": []
+                  },
+                  {
+                    "weight": 1,
+                    "origin": "selected",
+                    "fixedStatus": null,
+                    "operations": [
+                      {
+                        "operation": "SET",
+                        "name": "x-picked",
+                        "value": "selected"
+                      },
+                      {
+                        "operation": "REMOVE",
+                        "name": "x-remove"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "grpc": {
+                "action": "WEIGHTED_TARGETS",
+                "ruleOperations": [
+                  {
+                    "operation": "ADD",
+                    "name": "picked-bin",
+                    "value": "Yw=="
+                  }
+                ],
+                "targets": [
+                  {
+                    "weight": 3,
+                    "origin": "sibling",
+                    "fixedStatus": null,
+                    "operations": []
+                  },
+                  {
+                    "weight": 1,
+                    "origin": "selected",
+                    "fixedStatus": null,
+                    "operations": [
+                      {
+                        "operation": "SET",
+                        "name": "picked-bin",
+                        "value": "YQ, Yg=="
+                      },
+                      {
+                        "operation": "REMOVE",
+                        "name": "x-remove"
+                      }
+                    ]
+                  }
+                ]
+              }
+            },
+            "activeHAProxyConfigSHA256": "92f6e7af7039fcec299201f3da6d27be9fabac2a7a198c3fa7d03b23ae7cef78",
+            "HAProxyReloads": 14
+          }
+        },
+        "backend-filter-removed": {
+          "referenceGrant": {
+            "uid": "416e91aa-8e9b-48ef-b147-0a45622920a2",
+            "generation": 1,
+            "spec": {
+              "from": [
+                {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "HTTPRoute",
+                  "namespace": "backend-response"
+                },
+                {
+                  "group": "gateway.networking.k8s.io",
+                  "kind": "GRPCRoute",
+                  "namespace": "backend-response"
+                }
+              ],
+              "to": [
+                {
+                  "group": "",
+                  "kind": "Service",
+                  "name": "selected"
+                }
+              ]
+            }
+          },
+          "routes": {
+            "HTTPRoute": {
+              "uid": "80fff9a6-fbde-4ed2-9f98-d3235ce25198",
+              "generation": 2,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "listener": {
+                "name": "http",
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                }
+              },
+              "rule": {
+                "backendRefs": [
+                  {
+                    "group": "",
+                    "kind": "Service",
+                    "name": "sibling",
+                    "port": 8080,
+                    "weight": 3
+                  },
+                  {
+                    "group": "",
+                    "kind": "Service",
+                    "name": "selected",
+                    "namespace": "backend-response-peer",
+                    "port": 8080,
+                    "weight": 1
+                  }
+                ],
+                "filters": [
+                  {
+                    "responseHeaderModifier": {
+                      "add": [
+                        {
+                          "name": "x-picked",
+                          "value": "rule"
+                        }
+                      ]
+                    },
+                    "type": "ResponseHeaderModifier"
+                  }
+                ],
+                "matches": [
+                  {
+                    "path": {
+                      "type": "Exact",
+                      "value": "/selected"
+                    }
+                  }
+                ]
+              }
+            },
+            "GRPCRoute": {
+              "uid": "9d84845d-1e2b-4b11-8276-645e4f56cb57",
+              "generation": 2,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "listener": {
+                "name": "grpc",
+                "attachedRoutes": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "ResolvedRefs": "True/ResolvedRefs",
+                  "Conflicted": "False/NoConflicts",
+                  "Programmed": "True/Programmed"
+                }
+              },
+              "rule": {
+                "backendRefs": [
+                  {
+                    "group": "",
+                    "kind": "Service",
+                    "name": "sibling",
+                    "port": 8081,
+                    "weight": 3
+                  },
+                  {
+                    "group": "",
+                    "kind": "Service",
+                    "name": "selected",
+                    "namespace": "backend-response-peer",
+                    "port": 8081,
+                    "weight": 1
+                  }
+                ],
+                "filters": [
+                  {
+                    "responseHeaderModifier": {
+                      "add": [
+                        {
+                          "name": "picked-bin",
+                          "value": "Yw=="
+                        }
+                      ]
+                    },
+                    "type": "ResponseHeaderModifier"
+                  }
+                ],
+                "matches": [
+                  {
+                    "method": {
+                      "method": "Selected",
+                      "service": "example.Headers",
+                      "type": "Exact"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "traffic": {
+            "http": {
+              "distribution": {
+                "sibling": 139,
+                "selected": 53,
+                "local-response": 0
+              },
+              "originCalls": {
+                "sibling": 139,
+                "selected": 53
+              },
+              "responses": [
+                {
+                  "origin": "selected",
+                  "status": "200",
+                  "details": "",
+                  "picked": [
+                    "origin",
+                    "rule"
+                  ],
+                  "xRemove": [
+                    "origin"
+                  ],
+                  "count": 53
+                },
+                {
+                  "origin": "sibling",
+                  "status": "200",
+                  "details": "",
+                  "picked": [
+                    "origin",
+                    "rule"
+                  ],
+                  "xRemove": [
+                    "origin"
+                  ],
+                  "count": 139
+                }
+              ]
+            },
+            "grpc": {
+              "distribution": {
+                "sibling": 143,
+                "selected": 49,
+                "local-response": 0
+              },
+              "originCalls": {
+                "sibling": 143,
+                "selected": 49
+              },
+              "responses": [
+                {
+                  "origin": "selected",
+                  "status": "OK",
+                  "details": "",
+                  "picked": [
+                    "b3JpZ2lu",
+                    "Yw=="
+                  ],
+                  "xRemove": [
+                    "origin"
+                  ],
+                  "count": 49
+                },
+                {
+                  "origin": "sibling",
+                  "status": "OK",
+                  "details": "",
+                  "picked": [
+                    "b3JpZ2lu",
+                    "Yw=="
+                  ],
+                  "xRemove": [
+                    "origin"
+                  ],
+                  "count": 143
+                }
+              ]
+            }
+          },
+          "provider": {
+            "policies": {
+              "http": {
+                "action": "WEIGHTED_TARGETS",
+                "ruleOperations": [
+                  {
+                    "operation": "ADD",
+                    "name": "x-picked",
+                    "value": "rule"
+                  }
+                ],
+                "targets": [
+                  {
+                    "weight": 3,
+                    "origin": "sibling",
+                    "fixedStatus": null,
+                    "operations": []
+                  },
+                  {
+                    "weight": 1,
+                    "origin": "selected",
+                    "fixedStatus": null,
+                    "operations": []
+                  }
+                ]
+              },
+              "grpc": {
+                "action": "WEIGHTED_TARGETS",
+                "ruleOperations": [
+                  {
+                    "operation": "ADD",
+                    "name": "picked-bin",
+                    "value": "Yw=="
+                  }
+                ],
+                "targets": [
+                  {
+                    "weight": 3,
+                    "origin": "sibling",
+                    "fixedStatus": null,
+                    "operations": []
+                  },
+                  {
+                    "weight": 1,
+                    "origin": "selected",
+                    "fixedStatus": null,
+                    "operations": []
+                  }
+                ]
+              }
+            },
+            "activeHAProxyConfigSHA256": "6adc861abeb7749f741e7403371faafcfc2940c109ddf4eac8e6bfae0b0f31fd",
+            "HAProxyReloads": 18
+          }
+        }
+      }
+    }
+  },
+  "providerRelease": "https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-backend-response-headers-bb8bf986b57a"
+}

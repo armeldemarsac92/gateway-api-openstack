@@ -247,6 +247,8 @@ With the v1.7.0 Experimental bundle and `--gateway-api-channel=experimental`, an
 
 Check `DefaultGateway=True` on the Gateway and the conditions in `status.parents` on the route. The API can report up to 32 parent entries across all controllers. Each listener counts its admitted routes even when a parent entry cannot fit. Changing a Gateway's scope to `None` withdraws its implicit attachment. Changing the route's setting to `None` withdraws all its implicit attachments. Explicit parents continue to use the listener selection in `spec.parentRefs`.
 
+On two local VIPs, disabling default attachment on one Gateway withdrew its HTTP policy while the other VIP continued serving. Changing listener namespace admission and restoring it moved traffic independently on that Gateway. [Experimental HTTP and TCP results and Standard comparison](qualification/v1.7.0/provider/default-gateways/receipt.json)
+
 ### Serve HTTP on two ports of one Gateway
 
 Use only plain HTTP listeners on a Gateway with several HTTP sections. Give each listener a distinct name. Ensure the frontend network and any referenced security groups admit both ports. The controller manages no rules in referenced groups.

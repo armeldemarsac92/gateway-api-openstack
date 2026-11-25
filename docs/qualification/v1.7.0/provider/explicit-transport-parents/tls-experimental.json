@@ -1,0 +1,616 @@
+{
+  "channel": "experimental",
+  "gatewayAPI": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "releaseBundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+  "defaultGatewayDiscovery": "disabled-by-explicit-None",
+  "controller": {
+    "configDigest": "sha256:6638474d89628153b9c494e1cb3beb7133156facf251d6068e5bd3f8c4493545",
+    "entrypoint": "/openstack-gateway-controller",
+    "localCandidateTree": "e5d719dc6895e3a3a16c98cdabb0050dc5241b17",
+    "managerSHA256": "c8d709955bcc72fdd3f7ce4352546f68ad8bb0fd8966592d9c33ae1b651272d7",
+    "manifestDigest": "sha256:0a3c030ec4f71e617a4b2b9f708eb5cb377e6ee6539fdd5a1eb7bade5d7706f6",
+    "matchesLocalTree": false,
+    "normalAndNoCacheBuildsMatch": true,
+    "ociArchiveSHA256": "968d2d67b475bcaf63791d7ac43ddf7dbab8a36ecd3c4b186c1eaaa7fc8e4c04",
+    "platform": "linux/amd64",
+    "repository": "ghcr.io/armeldemarsac92/gateway-api-openstack",
+    "sourceLabel": "https://github.com/armeldemarsac92/gateway-api-openstack",
+    "sourceRevision": "555f5f4e0557b83f55e24eb134f6edde7dc1f9cb",
+    "tree": "60c3cef8b71ffb9be08a859b13d6d82b00142050",
+    "user": "65532:65532"
+  },
+  "runningManagerSHA256": "c8d709955bcc72fdd3f7ce4352546f68ad8bb0fd8966592d9c33ae1b651272d7",
+  "scope": "disposable Kind Kubernetes, local Octavia WSGI/SQLite, real HAProxy and TCP/TLS to an echo Pod",
+  "origin": {
+    "address": "198.51.100.5",
+    "certificateSHA256": "5bf442403d70db8ea1043f772478f8444755f3352931dc4842917a743f124dcf",
+    "imageID": "docker.io/library/import-2026-11-25@sha256:abd48b88affd1c16e8d60d06cdc661919a8980bba8fc9068f3d216d814268adb",
+    "namespace": "gateway-conformance-infra",
+    "pod": "tcp-backend-6fbfc875c7-8flsl",
+    "service": "tcp-backend"
+  },
+  "kindNodeImage": "localhost/hibiscus-kind-node:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67@sha256:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67",
+  "cleanedUp": true,
+  "upstreamUnchanged": true,
+  "phases": [
+    {
+      "phase": "both-explicit-parents",
+      "route": {
+        "generation": 1,
+        "hostnames": [
+          "abc.example.com"
+        ],
+        "parentRefs": [
+          {
+            "group": "gateway.networking.k8s.io",
+            "kind": "Gateway",
+            "name": "tls-keep",
+            "sectionName": "wire"
+          },
+          {
+            "group": "gateway.networking.k8s.io",
+            "kind": "Gateway",
+            "name": "tls-withdraw",
+            "sectionName": "wire"
+          }
+        ],
+        "parents": [
+          {
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            },
+            "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+            "reference": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "name": "tls-keep",
+              "sectionName": "wire"
+            }
+          },
+          {
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            },
+            "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+            "reference": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "name": "tls-withdraw",
+              "sectionName": "wire"
+            }
+          }
+        ],
+        "useDefaultGateways": "None"
+      },
+      "gateways": {
+        "tls-keep": {
+          "addresses": [
+            "192.0.2.30"
+          ],
+          "attachedRoutes": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "AddressesAssigned": "True/AddressesAssigned",
+            "Programmed": "True/Programmed"
+          },
+          "defaultScope": "None",
+          "generation": 1,
+          "listenerConditions": {
+            "Accepted": "True/Accepted",
+            "Conflicted": "False/NoConflicts",
+            "Programmed": "True/Programmed",
+            "ResolvedRefs": "True/ResolvedRefs"
+          }
+        },
+        "tls-withdraw": {
+          "addresses": [
+            "192.0.2.31"
+          ],
+          "attachedRoutes": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "AddressesAssigned": "True/AddressesAssigned",
+            "Programmed": "True/Programmed"
+          },
+          "defaultScope": "None",
+          "generation": 1,
+          "listenerConditions": {
+            "Accepted": "True/Accepted",
+            "Conflicted": "False/NoConflicts",
+            "Programmed": "True/Programmed",
+            "ResolvedRefs": "True/ResolvedRefs"
+          }
+        }
+      },
+      "vips": {
+        "tls-keep": "192.0.2.30",
+        "tls-withdraw": "192.0.2.31"
+      },
+      "provider": {
+        "tls-keep": {
+          "gateway": "gateway-conformance-infra/tls-keep",
+          "gatewayUID": "c21fdd4eb82b7a15",
+          "listeners": [
+            {
+              "defaultPool": null,
+              "enabled": true,
+              "id": "75632778f885dcc1",
+              "policies": [
+                {
+                  "action": "REDIRECT_TO_POOL",
+                  "enabled": true,
+                  "id": "5142bef4492b176b",
+                  "position": 1,
+                  "redirectPool": "fd3dc11396c57919",
+                  "route": "shared-tls",
+                  "rules": [
+                    {
+                      "comparison": "EQUAL_TO",
+                      "enabled": true,
+                      "invert": false,
+                      "key": null,
+                      "type": "TLS_SNI",
+                      "value": "abc.example.com"
+                    }
+                  ],
+                  "status": "ACTIVE",
+                  "targetPools": []
+                }
+              ],
+              "port": 443,
+              "protocol": "TCP",
+              "status": "ACTIVE"
+            }
+          ],
+          "loadBalancer": "53036b94fbe28825",
+          "pools": [
+            {
+              "id": "fd3dc11396c57919",
+              "members": [
+                {
+                  "enabled": true,
+                  "id": "e5bc7a3463b7a759",
+                  "port": 8443,
+                  "status": "ACTIVE",
+                  "weight": 1
+                }
+              ],
+              "protocol": "TCP",
+              "route": "shared-tls",
+              "status": "ACTIVE"
+            }
+          ],
+          "status": "ACTIVE",
+          "vip": "192.0.2.30"
+        },
+        "tls-withdraw": {
+          "gateway": "gateway-conformance-infra/tls-withdraw",
+          "gatewayUID": "4743a444ce0bcb2d",
+          "listeners": [
+            {
+              "defaultPool": null,
+              "enabled": true,
+              "id": "7357b5f8bca8a81e",
+              "policies": [
+                {
+                  "action": "REDIRECT_TO_POOL",
+                  "enabled": true,
+                  "id": "0de5e83fafc8295d",
+                  "position": 1,
+                  "redirectPool": "14568d9ee5c97fdf",
+                  "route": "shared-tls",
+                  "rules": [
+                    {
+                      "comparison": "EQUAL_TO",
+                      "enabled": true,
+                      "invert": false,
+                      "key": null,
+                      "type": "TLS_SNI",
+                      "value": "abc.example.com"
+                    }
+                  ],
+                  "status": "ACTIVE",
+                  "targetPools": []
+                }
+              ],
+              "port": 443,
+              "protocol": "TCP",
+              "status": "ACTIVE"
+            }
+          ],
+          "loadBalancer": "0f126bdb8652b767",
+          "pools": [
+            {
+              "id": "14568d9ee5c97fdf",
+              "members": [
+                {
+                  "enabled": true,
+                  "id": "4c4dad64e5cbdb44",
+                  "port": 8443,
+                  "status": "ACTIVE",
+                  "weight": 1
+                }
+              ],
+              "protocol": "TCP",
+              "route": "shared-tls",
+              "status": "ACTIVE"
+            }
+          ],
+          "status": "ACTIVE",
+          "vip": "192.0.2.31"
+        }
+      },
+      "clients": {
+        "tls-keep": {
+          "probes": [
+            {
+              "backendSNI": "abc.example.com",
+              "backendTLS": true,
+              "certificateSHA256": "5bf442403d70db8ea1043f772478f8444755f3352931dc4842917a743f124dcf",
+              "namespace": "gateway-conformance-infra",
+              "outcome": "tls-echo",
+              "pod": "tcp-backend-6fbfc875c7-8flsl",
+              "port": 443,
+              "sni": "abc.example.com",
+              "tlsVersion": "TLSv1.3",
+              "vip": "192.0.2.30"
+            },
+            {
+              "backendSNI": "abc.example.com",
+              "backendTLS": true,
+              "certificateSHA256": "5bf442403d70db8ea1043f772478f8444755f3352931dc4842917a743f124dcf",
+              "namespace": "gateway-conformance-infra",
+              "outcome": "tls-echo",
+              "pod": "tcp-backend-6fbfc875c7-8flsl",
+              "port": 443,
+              "sni": "abc.example.com",
+              "tlsVersion": "TLSv1.3",
+              "vip": "192.0.2.30"
+            },
+            {
+              "backendSNI": "abc.example.com",
+              "backendTLS": true,
+              "certificateSHA256": "5bf442403d70db8ea1043f772478f8444755f3352931dc4842917a743f124dcf",
+              "namespace": "gateway-conformance-infra",
+              "outcome": "tls-echo",
+              "pod": "tcp-backend-6fbfc875c7-8flsl",
+              "port": 443,
+              "sni": "abc.example.com",
+              "tlsVersion": "TLSv1.3",
+              "vip": "192.0.2.30"
+            },
+            {
+              "outcome": "closed-during-handshake",
+              "port": 443,
+              "sni": "unmatched.example.com",
+              "vip": "192.0.2.30"
+            },
+            {
+              "outcome": "closed-during-handshake",
+              "port": 443,
+              "sni": "abc.outside.test",
+              "vip": "192.0.2.30"
+            }
+          ],
+          "outcomes": {
+            "tls-echo": 3,
+            "closed-during-handshake": 2
+          }
+        },
+        "tls-withdraw": {
+          "probes": [
+            {
+              "backendSNI": "abc.example.com",
+              "backendTLS": true,
+              "certificateSHA256": "5bf442403d70db8ea1043f772478f8444755f3352931dc4842917a743f124dcf",
+              "namespace": "gateway-conformance-infra",
+              "outcome": "tls-echo",
+              "pod": "tcp-backend-6fbfc875c7-8flsl",
+              "port": 443,
+              "sni": "abc.example.com",
+              "tlsVersion": "TLSv1.3",
+              "vip": "192.0.2.31"
+            },
+            {
+              "backendSNI": "abc.example.com",
+              "backendTLS": true,
+              "certificateSHA256": "5bf442403d70db8ea1043f772478f8444755f3352931dc4842917a743f124dcf",
+              "namespace": "gateway-conformance-infra",
+              "outcome": "tls-echo",
+              "pod": "tcp-backend-6fbfc875c7-8flsl",
+              "port": 443,
+              "sni": "abc.example.com",
+              "tlsVersion": "TLSv1.3",
+              "vip": "192.0.2.31"
+            },
+            {
+              "backendSNI": "abc.example.com",
+              "backendTLS": true,
+              "certificateSHA256": "5bf442403d70db8ea1043f772478f8444755f3352931dc4842917a743f124dcf",
+              "namespace": "gateway-conformance-infra",
+              "outcome": "tls-echo",
+              "pod": "tcp-backend-6fbfc875c7-8flsl",
+              "port": 443,
+              "sni": "abc.example.com",
+              "tlsVersion": "TLSv1.3",
+              "vip": "192.0.2.31"
+            },
+            {
+              "outcome": "closed-during-handshake",
+              "port": 443,
+              "sni": "unmatched.example.com",
+              "vip": "192.0.2.31"
+            },
+            {
+              "outcome": "closed-during-handshake",
+              "port": 443,
+              "sni": "abc.outside.test",
+              "vip": "192.0.2.31"
+            }
+          ],
+          "outcomes": {
+            "tls-echo": 3,
+            "closed-during-handshake": 2
+          }
+        }
+      }
+    },
+    {
+      "phase": "second-parent-removed",
+      "route": {
+        "generation": 2,
+        "hostnames": [
+          "abc.example.com"
+        ],
+        "parentRefs": [
+          {
+            "group": "gateway.networking.k8s.io",
+            "kind": "Gateway",
+            "name": "tls-keep",
+            "sectionName": "wire"
+          }
+        ],
+        "parents": [
+          {
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            },
+            "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+            "reference": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "name": "tls-keep",
+              "sectionName": "wire"
+            }
+          }
+        ],
+        "useDefaultGateways": "None"
+      },
+      "gateways": {
+        "tls-keep": {
+          "addresses": [
+            "192.0.2.30"
+          ],
+          "attachedRoutes": 1,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "AddressesAssigned": "True/AddressesAssigned",
+            "Programmed": "True/Programmed"
+          },
+          "defaultScope": "None",
+          "generation": 1,
+          "listenerConditions": {
+            "Accepted": "True/Accepted",
+            "Conflicted": "False/NoConflicts",
+            "Programmed": "True/Programmed",
+            "ResolvedRefs": "True/ResolvedRefs"
+          }
+        },
+        "tls-withdraw": {
+          "addresses": [
+            "192.0.2.31"
+          ],
+          "attachedRoutes": 0,
+          "conditions": {
+            "Accepted": "True/Accepted",
+            "AddressesAssigned": "True/AddressesAssigned",
+            "Programmed": "False/NoResources"
+          },
+          "defaultScope": "None",
+          "generation": 1,
+          "listenerConditions": {
+            "Accepted": "True/Accepted",
+            "Conflicted": "False/NoConflicts",
+            "Programmed": "False/Pending",
+            "ResolvedRefs": "True/ResolvedRefs"
+          }
+        }
+      },
+      "vips": {
+        "tls-keep": "192.0.2.30",
+        "tls-withdraw": "192.0.2.31"
+      },
+      "provider": {
+        "tls-keep": {
+          "gateway": "gateway-conformance-infra/tls-keep",
+          "gatewayUID": "c21fdd4eb82b7a15",
+          "listeners": [
+            {
+              "defaultPool": null,
+              "enabled": true,
+              "id": "75632778f885dcc1",
+              "policies": [
+                {
+                  "action": "REDIRECT_TO_POOL",
+                  "enabled": true,
+                  "id": "5142bef4492b176b",
+                  "position": 1,
+                  "redirectPool": "fd3dc11396c57919",
+                  "route": "shared-tls",
+                  "rules": [
+                    {
+                      "comparison": "EQUAL_TO",
+                      "enabled": true,
+                      "invert": false,
+                      "key": null,
+                      "type": "TLS_SNI",
+                      "value": "abc.example.com"
+                    }
+                  ],
+                  "status": "ACTIVE",
+                  "targetPools": []
+                }
+              ],
+              "port": 443,
+              "protocol": "TCP",
+              "status": "ACTIVE"
+            }
+          ],
+          "loadBalancer": "53036b94fbe28825",
+          "pools": [
+            {
+              "id": "fd3dc11396c57919",
+              "members": [
+                {
+                  "enabled": true,
+                  "id": "e5bc7a3463b7a759",
+                  "port": 8443,
+                  "status": "ACTIVE",
+                  "weight": 1
+                }
+              ],
+              "protocol": "TCP",
+              "route": "shared-tls",
+              "status": "ACTIVE"
+            }
+          ],
+          "status": "ACTIVE",
+          "vip": "192.0.2.30"
+        },
+        "tls-withdraw": {
+          "gateway": "gateway-conformance-infra/tls-withdraw",
+          "gatewayUID": "4743a444ce0bcb2d",
+          "listeners": [
+            {
+              "defaultPool": null,
+              "enabled": true,
+              "id": "7357b5f8bca8a81e",
+              "policies": [],
+              "port": 443,
+              "protocol": "TCP",
+              "status": "ACTIVE"
+            }
+          ],
+          "loadBalancer": "0f126bdb8652b767",
+          "pools": [],
+          "status": "ACTIVE",
+          "vip": "192.0.2.31"
+        }
+      },
+      "clients": {
+        "tls-keep": {
+          "probes": [
+            {
+              "backendSNI": "abc.example.com",
+              "backendTLS": true,
+              "certificateSHA256": "5bf442403d70db8ea1043f772478f8444755f3352931dc4842917a743f124dcf",
+              "namespace": "gateway-conformance-infra",
+              "outcome": "tls-echo",
+              "pod": "tcp-backend-6fbfc875c7-8flsl",
+              "port": 443,
+              "sni": "abc.example.com",
+              "tlsVersion": "TLSv1.3",
+              "vip": "192.0.2.30"
+            },
+            {
+              "backendSNI": "abc.example.com",
+              "backendTLS": true,
+              "certificateSHA256": "5bf442403d70db8ea1043f772478f8444755f3352931dc4842917a743f124dcf",
+              "namespace": "gateway-conformance-infra",
+              "outcome": "tls-echo",
+              "pod": "tcp-backend-6fbfc875c7-8flsl",
+              "port": 443,
+              "sni": "abc.example.com",
+              "tlsVersion": "TLSv1.3",
+              "vip": "192.0.2.30"
+            },
+            {
+              "backendSNI": "abc.example.com",
+              "backendTLS": true,
+              "certificateSHA256": "5bf442403d70db8ea1043f772478f8444755f3352931dc4842917a743f124dcf",
+              "namespace": "gateway-conformance-infra",
+              "outcome": "tls-echo",
+              "pod": "tcp-backend-6fbfc875c7-8flsl",
+              "port": 443,
+              "sni": "abc.example.com",
+              "tlsVersion": "TLSv1.3",
+              "vip": "192.0.2.30"
+            },
+            {
+              "outcome": "closed-during-handshake",
+              "port": 443,
+              "sni": "unmatched.example.com",
+              "vip": "192.0.2.30"
+            },
+            {
+              "outcome": "closed-during-handshake",
+              "port": 443,
+              "sni": "abc.outside.test",
+              "vip": "192.0.2.30"
+            }
+          ],
+          "outcomes": {
+            "tls-echo": 3,
+            "closed-during-handshake": 2
+          }
+        },
+        "tls-withdraw": {
+          "probes": [
+            {
+              "outcome": "closed-during-handshake",
+              "port": 443,
+              "sni": "abc.example.com",
+              "vip": "192.0.2.31"
+            },
+            {
+              "outcome": "closed-during-handshake",
+              "port": 443,
+              "sni": "abc.example.com",
+              "vip": "192.0.2.31"
+            },
+            {
+              "outcome": "closed-during-handshake",
+              "port": 443,
+              "sni": "abc.example.com",
+              "vip": "192.0.2.31"
+            },
+            {
+              "outcome": "closed-during-handshake",
+              "port": 443,
+              "sni": "unmatched.example.com",
+              "vip": "192.0.2.31"
+            },
+            {
+              "outcome": "closed-during-handshake",
+              "port": 443,
+              "sni": "abc.outside.test",
+              "vip": "192.0.2.31"
+            }
+          ],
+          "outcomes": {
+            "closed-during-handshake": 5
+          }
+        }
+      }
+    }
+  ]
+}
