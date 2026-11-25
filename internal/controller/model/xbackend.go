@@ -32,6 +32,7 @@ import (
 	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 )
 
 const XBackendKind = "XBackend"
@@ -40,6 +41,7 @@ const XBackendKind = "XBackend"
 type XBackendProfile struct {
 	MemberMode        cloud.MemberMode
 	H2C               bool
+	ServerTLS         bool
 	ExternalHostname  bool
 	ServiceDNSDomains []string
 }
@@ -52,6 +54,21 @@ type XBackendObservation struct {
 	Generation int64
 	Spec       gatewayx.BackendSpec
 	Endpoints  []Endpoint
+	TLS        backendtls.ValidationResult
+	ReadIssue  *Diagnostic
+}
+
+// XBackendTLSCAKey identifies the trust input of an XBackend using ServerOnly.
+func XBackendTLSCAKey(backend *gatewayx.XBackend, bundlesEnabled bool) (types.NamespacedName, bool) {
+	tls := backend.Spec.TLS
+	if tls == nil || tls.Mode != gatewayx.BackendTLSModeServerOnly || tls.Validation == nil {
+		return types.NamespacedName{}, false
+	}
+	return backendtls.ValidationCAKey(backend.Namespace, *tls.Validation, bundlesEnabled)
+}
+
+func XBackendRequiresTLS(spec gatewayx.BackendSpec) bool {
+	return spec.TLS != nil && spec.TLS.Mode != gatewayx.BackendTLSModeNone
 }
 
 func XBackendReference(namespace string, reference gatewayv1.BackendObjectReference) (types.NamespacedName, bool) {
@@ -99,17 +116,44 @@ func resolveXBackend(route *gatewayv1.HTTPRoute, group BackendGroup, key types.N
 	var spec *gatewayx.BackendSpec
 	if backend != nil {
 		spec = &backend.Spec
+		group.XBackendTLSRequired = XBackendRequiresTLS(*spec) || backend.ReadIssue != nil
+		if spec.Port.Number >= 1 && spec.Port.Number <= 65535 {
+			group.XBackendPort = int(spec.Port.Number)
+		}
+		if backend.ReadIssue != nil {
+			group.Diagnostic = backend.ReadIssue
+			return group
+		}
 	}
 	if diagnostic := CheckXBackendTarget(key, spec, input.XBackendProfile); diagnostic != nil {
 		group.Diagnostic = diagnostic
 		return group
 	}
+	group.XBackendRoutedExternal = spec.Type == gatewayx.BackendTypeExternalHostname
+	if group.XBackendTLSRequired {
+		group.XBackendTLS = backend.TLS.Validation
+		if group.XBackendTLS == nil {
+			group.Diagnostic = xBackendTLSReferenceDiagnostic(backend.TLS)
+			return group
+		}
+	}
 	group.State = BackendResolved
-	group.XBackendPort = int(backend.Spec.Port.Number)
-	group.XBackendUsesH2C = ptr.Deref(backend.Spec.Protocol, "") == gatewayx.BackendProtocolH2C
-	group.XBackendRoutedExternal = backend.Spec.Type == gatewayx.BackendTypeExternalHostname
+	group.XBackendUsesH2C = ptr.Deref(spec.Protocol, "") == gatewayx.BackendProtocolH2C
 	group.Endpoints = backend.Endpoints
 	return group
+}
+
+func xBackendTLSReferenceDiagnostic(tls backendtls.ValidationResult) *Diagnostic {
+	switch {
+	case tls.Pending:
+		return backendDiagnostic(gatewayv1.RouteConditionReason(gatewayv1.BackendTLSPolicyReasonInvalidCACertificateRef), tls.Message)
+	case tls.RefReason != "":
+		return backendDiagnostic(gatewayv1.RouteConditionReason(tls.RefReason), tls.Message)
+	case tls.Message != "":
+		return backendDiagnostic(gatewayv1.RouteReasonUnsupportedValue, tls.Message)
+	default:
+		return backendDiagnostic(gatewayv1.RouteReasonUnsupportedValue, "XBackend TLS validation could not be resolved")
+	}
 }
 
 // CheckXBackendTarget resolves an already authorized XBackend object reference.
@@ -130,8 +174,6 @@ func ValidateXBackend(spec gatewayx.BackendSpec, profile XBackendProfile) *Diagn
 		return backendDiagnostic(unsupported, "XBackend must specify a port between 1 and 65535")
 	case spec.SessionPersistence != nil:
 		return backendDiagnostic(unsupported, "XBackend sessionPersistence is unsupported")
-	case spec.TLS != nil && (spec.TLS.Mode != gatewayx.BackendTLSModeNone || spec.TLS.ClientCertificateRef != nil || spec.TLS.Validation != nil):
-		return backendDiagnostic(unsupported, "XBackend TLS is supported only with mode None")
 	}
 	switch spec.Type {
 	case gatewayx.BackendTypeEndpointSelector:
@@ -157,6 +199,26 @@ func ValidateXBackend(spec gatewayx.BackendSpec, profile XBackendProfile) *Diagn
 		return backendDiagnostic(unsupported, "XBackend type is unsupported")
 	}
 	protocol := ptr.Deref(spec.Protocol, "")
+	if tls := spec.TLS; tls != nil {
+		switch tls.Mode {
+		case gatewayx.BackendTLSModeNone:
+			if tls.Validation != nil || tls.ClientCertificateRef != nil {
+				return backendDiagnostic(unsupported, "XBackend TLS mode None does not accept validation or a client certificate")
+			}
+		case gatewayx.BackendTLSModeServerOnly:
+			if !profile.ServerTLS {
+				return backendDiagnostic(unsupported, "XBackend TLS mode ServerOnly requires the controller's backend TLS opt-in")
+			}
+			if tls.Validation == nil || !backendtls.IsPreciseHostname(string(tls.Validation.Hostname)) || tls.ClientCertificateRef != nil {
+				return backendDiagnostic(unsupported, "XBackend TLS mode ServerOnly requires validation.hostname to be a precise DNS hostname and no client certificate reference")
+			}
+			if protocol != "" && protocol != gatewayx.BackendProtocolHTTP && protocol != gatewayx.BackendProtocolHTTP11 {
+				return backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "XBackend TLS mode ServerOnly supports HTTP and HTTP11")
+			}
+		default:
+			return backendDiagnostic(unsupported, fmt.Sprintf("XBackend TLS mode %q is unsupported", tls.Mode))
+		}
+	}
 	switch protocol {
 	case "", gatewayx.BackendProtocolHTTP, gatewayx.BackendProtocolHTTP11:
 		return nil

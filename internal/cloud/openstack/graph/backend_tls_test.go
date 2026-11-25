@@ -979,6 +979,95 @@ func TestBackendTLSWeightedDenialPreservesHealthyShare(t *testing.T) {
 	}
 }
 
+func TestXBackendServerOnlyClosesItsPoolBeforeConfiguringAndWithdrawingTrust(t *testing.T) {
+	spec := completeGraphSpec(safetyTestIdentity(t))
+	route := &spec.Routes[0].Spec
+	spec.Gateway.BackendClientCertificate.Reference = "https://barbican.example/v1/secrets/service-client"
+	spec.Gateway.Spec.ListenerProtocol, route.GatewayRequirements.ListenerProtocol = cloud.ListenerProtocolHTTP, cloud.ListenerProtocolHTTP
+	route.MemberMode = cloud.MemberModeEndpoint
+	route.BackendTLSObserved = true
+	route.Hostname, route.PathType, route.PathValue, route.Members = "", "", "", nil
+	tls := newGraphBackendTLS(t)
+	route.HTTPBackends = []cloud.HTTPBackend{
+		{Namespace: "apps", Name: "backend", Port: 8443, BackendTLS: tls,
+			Matches: []cloud.HTTPPathMatch{{PathType: cloud.PathMatchExact, PathValue: "/service"}}},
+		{Kind: cloud.HTTPBackendKindXBackend, Namespace: "apps", Name: "backend", Port: 8443, BackendTLS: tls, RoutedExternal: true,
+			Matches: []cloud.HTTPPathMatch{{PathType: cloud.PathMatchExact, PathValue: "/external", Precedence: 1}}},
+	}
+	p := &Provider{projectID: spec.Gateway.Spec.Identity.OpenStackProjectID}
+	desired, err := p.buildDesiredRoute(*route)
+	require.NoError(t, err)
+	serviceKey := openstackidentity.HTTPBackendPoolKey(route.HTTPBackends[0])
+	externalKey := openstackidentity.HTTPBackendPoolKey(route.HTTPBackends[1])
+	externalIndex := slices.IndexFunc(desired.httpParts, func(part desiredRoute) bool { return part.backendKey == externalKey })
+	require.NotEqual(t, -1, externalIndex)
+	external := &desired.httpParts[externalIndex]
+	require.NotEqual(t, serviceKey, externalKey)
+	observed := observedRouteGraph{httpParts: map[string]*observedRouteGraph{external.backendKey: {
+		pool:    &pools.Pool{ID: "external", ProvisioningStatus: "ACTIVE", AdminStateUp: true},
+		members: []pools.Member{{ID: "previous", Address: "198.51.100.20", ProtocolPort: 8443}},
+	}}}
+	graph := desiredGatewayGraph{spec: spec, routes: []desiredRoute{desired}}
+	parts := backendTLSParts(&graph, []observedRouteGraph{observed})
+	require.Len(t, parts, 2)
+	for _, part := range parts {
+		if part.key == externalKey {
+			require.Empty(t, part.clientCertificate)
+		} else {
+			require.Equal(t, serviceKey, part.key)
+			require.Equal(t, spec.Gateway.BackendClientCertificate, part.clientCertificate)
+		}
+	}
+	quarantine := func() *graphMutation {
+		return firstBackendTLSWithdrawal(backendTLSParts(&graph, []observedRouteGraph{observed}), func(part backendTLSPart) backendTLSPlan {
+			return part.preflight()
+		})
+	}
+
+	// Switching an existing plaintext destination to ServerOnly closes and
+	// drains this pool before changing its transport or trust.
+	step := quarantine()
+	require.NotNil(t, step)
+	require.Equal(t, external.backendKey, step.backendKey)
+	require.Equal(t, new(false), step.route.poolAdmin)
+	actual := observed.httpParts[external.backendKey]
+	actual.pool.AdminStateUp, actual.backendTLS.AdminObserved = false, true
+	actual.pool.Tags = *step.route.poolTags
+	step = quarantine()
+	require.NotNil(t, step)
+	require.Equal(t, external.backendKey, step.backendKey)
+	require.Equal(t, routeMutationClearPoolMembers, step.route.kind)
+
+	var request struct{ Pool map[string]any }
+	p.octavia = octavia.NewService(safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "/lbaas/pools", r.URL.Path)
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"pool":{}}`))
+	})))
+	plan := backendTLSPlan{phase: backendTLSConfigure, settings: octavia.BackendTLSSettings{
+		Hostname: tls.Hostname, CAReference: "https://barbican.example/v1/secrets/backend-ca",
+	}}
+	create := plan.poolMutation(*external, observedRouteGraph{})
+	require.NotNil(t, create)
+	require.NoError(t, p.executeRouteMutation(t.Context(), *external, *create))
+	require.Equal(t, false, request.Pool["admin_state_up"])
+	require.Equal(t, true, request.Pool["tls_enabled"])
+	require.Equal(t, []any{"http/1.1"}, request.Pool["alpn_protocols"])
+	require.Equal(t, tls.Hostname, request.Pool["backend_tls_hostname"])
+	require.Equal(t, plan.settings.CAReference, request.Pool["ca_tls_container_ref"])
+	require.NotContains(t, request.Pool, "tls_container_ref")
+
+	actual.pool.AdminStateUp, actual.pool.TLSEnabled = true, true
+	actual.pool.CATLSContainerRef = plan.settings.CAReference
+	graph.routes[0].httpParts[externalIndex].spec.BackendTLS = &cloud.BackendTLSValidation{Denied: true}
+	step = quarantine()
+	require.NotNil(t, step)
+	require.Equal(t, external.backendKey, step.backendKey)
+	require.Equal(t, new(false), step.route.poolAdmin)
+}
+
 func TestBackendTLSRestartHoldsPoolRepresentationWithoutPolicyObservation(t *testing.T) {
 	for _, grouped := range []bool{false, true} {
 		t.Run(fmt.Sprintf("grouped-replacement-%t", grouped), func(t *testing.T) {

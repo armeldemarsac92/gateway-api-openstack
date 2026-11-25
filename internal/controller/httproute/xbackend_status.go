@@ -34,6 +34,7 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
@@ -61,11 +62,15 @@ func (r *xBackendStatusReconciler) Reconcile(ctx context.Context, request ctrl.R
 		}
 	}
 	base := backend.DeepCopy()
+	result := ctrl.Result{}
+	if len(ancestors) > 0 && r.routes.Config.BackendTLSPolicy && model.XBackendRequiresTLS(backend.Spec) {
+		result.RequeueAfter = controller.OpenStackResyncAfter(r.routes.Config.OpenStackResyncInterval, backend.UID)
+	}
 	backend.Status.Ancestors = mergeXBackendAncestors(backend, r.routes.Config.ControllerName, ancestors)
 	if equality.Semantic.DeepEqual(base.Status, backend.Status) {
-		return ctrl.Result{}, nil
+		return result, nil
 	}
-	return ctrl.Result{}, client.IgnoreNotFound(r.routes.Status().Patch(ctx, backend, controller.OptimisticMergeFrom(base)))
+	return result, client.IgnoreNotFound(r.routes.Status().Patch(ctx, backend, controller.OptimisticMergeFrom(base)))
 }
 
 func (r *xBackendStatusReconciler) observeAncestors(ctx context.Context, key types.NamespacedName, backend *gatewayx.XBackend) (map[types.NamespacedName]metav1.Condition, error) {
@@ -98,6 +103,7 @@ func (r *xBackendStatusReconciler) observeAncestors(ctx context.Context, key typ
 		}
 	}
 	ancestors := make(map[types.NamespacedName]metav1.Condition, len(byGateway))
+	tlsObserver := graph.NewBackendTLSObserver(r.routes.APIReader, r.routes.Config.ClusterTrustBundles)
 	for gatewayKey, gateway := range byGateway {
 		attached, err := r.hasAttachedConsumer(ctx, gateway, key)
 		if err != nil {
@@ -110,7 +116,23 @@ func (r *xBackendStatusReconciler) observeAncestors(ctx context.Context, key typ
 		if err != nil {
 			return nil, err
 		}
-		ancestors[gatewayKey] = xBackendAcceptedCondition(backend, profile)
+		condition := xBackendAcceptedCondition(backend, profile)
+		if condition.Status == metav1.ConditionTrue && model.XBackendRequiresTLS(backend.Spec) {
+			validation, err := tlsObserver.ObserveValidation(ctx, backend.Namespace, *backend.Spec.TLS.Validation)
+			if err != nil {
+				return nil, err
+			}
+			switch {
+			case validation.Pending:
+				condition.Status, condition.Reason, condition.Message = metav1.ConditionUnknown, string(validation.Reason), validation.Message
+			case validation.Validation == nil:
+				condition.Status, condition.Reason, condition.Message = metav1.ConditionFalse, string(validation.Reason), validation.Message
+			default:
+				requirements := xBackendTLSRequirements(validation.Validation)
+				condition = r.routes.backendTLSAvailability(ctx, requirements).apply(condition, true, requirements.requireSAN)
+			}
+		}
+		ancestors[gatewayKey] = condition
 	}
 	return ancestors, nil
 }

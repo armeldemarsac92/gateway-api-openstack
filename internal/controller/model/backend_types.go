@@ -73,6 +73,8 @@ type BackendGroup struct {
 	BackendTLS      backendtls.Selection
 
 	XBackendRoutedExternal bool
+	XBackendTLSRequired    bool
+	XBackendTLS            *backendtls.Validation `json:"-"`
 
 	FilterDiagnostic        *Diagnostic
 	RequestHeaderOperations []cloud.HTTPHeaderOperation

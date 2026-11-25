@@ -340,7 +340,15 @@ func TestControllerEnvtest(t *testing.T) {
 	})
 	if config.XBackendEnabled() {
 		t.Run("Experimental XBackend selects live Pod members", func(t *testing.T) {
-			testXBackendEndpointSelector(t, apiClient, statusConfig, statusProvider)
+			xBackendConfig := statusConfig
+			xBackendConfig.ControllerName = "xbackend.example.com/gateway-api-openstack"
+			xBackendConfig.OpenStackResyncInterval = 5 * time.Minute
+			if enableBundles {
+				xBackendConfig.ClusterTrustBundles = newBundles(t, restConfig)
+			}
+			provider := &recordingProvider{}
+			startManager(t, xBackendConfig, provider)
+			testXBackendEndpointSelector(t, apiClient, xBackendConfig, provider)
 		})
 	}
 	t.Run("HTTPRoute Service ReferenceGrant lifecycle", func(t *testing.T) {

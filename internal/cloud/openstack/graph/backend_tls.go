@@ -34,6 +34,7 @@ import (
 const backendTLSManagedTag = "gateway-api-openstack.backend-tls=v1"
 const backendTLSRevisionTagPrefix = "gateway-api-openstack.backend-tls-ca="
 const backendTLSClientTag = "gateway-api-openstack.backend-tls-client=v1"
+const xBackendServerALPN = "http/1.1"
 
 // backendTLSSANTag also identifies pools that previously used explicit SANs.
 const backendTLSSANTag = "gateway-api-openstack.backend-tls-san=v1"
@@ -81,6 +82,13 @@ func hasObservedBackendTLS(pool pools.Pool, tls octavia.PoolBackendTLS) bool {
 
 func backendTLSReadbackComplete(desired desiredRoute, observed observedRouteGraph) bool {
 	return observed.backendTLS.Complete() && (!desired.spec.GRPC || observed.backendTLS.RequireH2Observed)
+}
+
+func backendTLSProtocolMatches(desired desiredRoute, observed observedRouteGraph) bool {
+	if desired.xBackend {
+		return !observed.backendTLS.RequireH2 && slices.Equal(observed.pool.ALPNProtocols, []string{xBackendServerALPN})
+	}
+	return !desired.spec.GRPC || observed.backendTLS.RequireH2
 }
 
 func backendTLSCapabilities(requireH2, requireSAN bool) []string {
@@ -192,8 +200,14 @@ func backendTLSParts(desired *desiredGatewayGraph, routes []observedRouteGraph) 
 		add := func(part *desiredRoute, key string, actualPart observedRouteGraph) {
 			if part == nil && hasPolicy && actualPart.pool != nil || part != nil && part.spec.BackendTLS != nil ||
 				actualPart.pool != nil && hasObservedBackendTLS(*actualPart.pool, actualPart.backendTLS) {
+				clientCertificate := desired.spec.Gateway.BackendClientCertificate
+				if part != nil && part.xBackend {
+					// XBackend ServerOnly does not present a Gateway-wide
+					// client identity used by BackendTLSPolicy on Services.
+					clientCertificate = cloud.BackendClientCertificate{}
+				}
 				parts = append(parts, backendTLSPart{index: index, key: key, desired: part, observed: actualPart,
-					retiring: retiring, clientCertificate: desired.spec.Gateway.BackendClientCertificate})
+					retiring: retiring, clientCertificate: clientCertificate})
 			}
 		}
 		if !retiring && (len(route.httpParts) == 0 || len(route.policies) != 0) {
@@ -245,7 +259,7 @@ func (part backendTLSPart) preflight() backendTLSPlan {
 	observed := part.observed.backendTLS
 	if pool.ProvisioningStatus != "ACTIVE" || !pool.AdminStateUp && len(part.observed.members) != 0 ||
 		!validBackendTLS(tls) || !backendTLSReadbackComplete(*part.desired, part.observed) || observed.Hostname != tls.Hostname ||
-		!backendTLSSubjectAltNamesMatch(tls.SubjectAltNames, part.observed) || part.desired.spec.GRPC && !observed.RequireH2 ||
+		!backendTLSSubjectAltNamesMatch(tls.SubjectAltNames, part.observed) || !backendTLSProtocolMatches(*part.desired, part.observed) ||
 		!pool.TLSEnabled || pool.CATLSContainerRef == "" || part.observed.backendH2C || part.desired.spec.BackendH2C ||
 		pool.TLSContainerRef != part.clientCertificate.Reference || pool.CRLContainerRef != "" || differentBackendTLSRevision(pool.Tags, backendTLSRevisionTag(tls)) {
 		return backendTLSPlan{phase: backendTLSConfigure}
@@ -261,7 +275,7 @@ func firstBackendTLSWithdrawal(parts []backendTLSPart, plan func(backendTLSPart)
 			continue
 		}
 		protect := part.desired == nil || part.desired.spec.BackendTLS != nil
-		requiresClosedPool := part.desired != nil && protect && (part.desired.spec.GRPC ||
+		requiresClosedPool := part.desired != nil && protect && (part.desired.xBackend || part.desired.spec.GRPC ||
 			part.desired.spec.BackendTLS != nil && len(part.desired.spec.BackendTLS.SubjectAltNames) != 0)
 		step := plan(part).withdrawal(protect, requiresClosedPool, part.observed)
 		// An unsupported protected pool can block member drains anywhere on
@@ -343,9 +357,11 @@ func (p *Provider) observeBackendTLS(ctx context.Context, desired desiredRoute, 
 	}
 	if desired.spec.GRPC {
 		settings.RequireH2 = boolPointer(true)
+	} else if desired.xBackend && observed.backendTLS.RequireH2 {
+		settings.RequireH2 = boolPointer(false)
 	}
 	if pool == nil || pool.ProvisioningStatus != "ACTIVE" || !pool.TLSEnabled || observed.backendTLS.Hostname != settings.Hostname ||
-		!backendTLSSubjectAltNamesMatch(tls.SubjectAltNames, observed) || preferred != settings.CAReference || observed.backendH2C || desired.spec.GRPC && !observed.backendTLS.RequireH2 ||
+		!backendTLSSubjectAltNamesMatch(tls.SubjectAltNames, observed) || preferred != settings.CAReference || observed.backendH2C || !backendTLSProtocolMatches(desired, observed) ||
 		pool.TLSContainerRef != settings.ClientCertificateReference || pool.CRLContainerRef != "" {
 		return backendTLSPlan{phase: backendTLSConfigure, settings: settings}
 	}
@@ -454,13 +470,16 @@ func (plan backendTLSPlan) poolMutation(desired desiredRoute, observed observedR
 			return nil
 		}
 		switch {
-		case hasBackendTLSSettings(*pool, observed.backendTLS):
+		case hasBackendTLSSettings(*pool, observed.backendTLS) || desired.xBackend && len(pool.ALPNProtocols) > 0:
 			// The regional API requires an independent disabled read before
 			// clearing hostname authentication and prohibits doing both in a PUT.
 			if pool.AdminStateUp {
 				step.poolAdmin = boolPointer(false)
 			} else {
 				step.backendTLS = &octavia.BackendTLSSettings{}
+				if desired.xBackend && len(pool.ALPNProtocols) > 0 {
+					step.poolALPNProtocols = new([]string{})
+				}
 				if hasUnclearedBackendTLSSubjectAltNames(*pool, observed.backendTLS) {
 					step.backendTLS.SubjectAltNames = []cloud.BackendTLSSubjectAltName{}
 					if !slices.Contains(pool.Tags, backendTLSSANTag) {
@@ -495,10 +514,13 @@ func (plan backendTLSPlan) poolMutation(desired desiredRoute, observed observedR
 	}
 	switch {
 	case plan.phase == backendTLSConfigure:
-		if len(observed.members) != 0 || pool.AdminStateUp && (plan.settings.ClientCertificateReference != "" || plan.settings.SubjectAltNames != nil) {
+		if len(observed.members) != 0 || pool.AdminStateUp && (desired.xBackend || plan.settings.ClientCertificateReference != "" || plan.settings.SubjectAltNames != nil) {
 			return nil
 		}
 		step.backendTLS = &plan.settings
+		if desired.xBackend {
+			step.poolALPNProtocols = new([]string{xBackendServerALPN})
+		}
 		if observed.backendH2C {
 			step.backendH2C = boolPointer(false)
 		}

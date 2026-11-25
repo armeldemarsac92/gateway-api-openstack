@@ -69,22 +69,29 @@ func (r *Reconciler) backendTLSAvailability(ctx context.Context, requirements ba
 
 // discoverBackendTLSProfiles probes ordinary and explicit SAN policies
 // separately, including when HTTP and gRPC share a graph.
-func (r *Reconciler) discoverBackendTLSProfiles(ctx context.Context, routes []gatewayv1.HTTPRoute, selections map[model.ServicePortKey]backendtls.Selection) map[backendTLSRequirements]backendTLSAvailability {
+func (r *Reconciler) discoverBackendTLSProfiles(ctx context.Context, routes []gatewayv1.HTTPRoute, input model.Input) map[backendTLSRequirements]backendTLSAvailability {
 	modes := make(map[bool]struct{}, 2)
-	for _, selection := range selections {
+	for _, selection := range input.BackendTLSPolicies {
 		winner := selection.Winner
 		if winner != nil && winner.Validation != nil && winner.AncestorSlot == backendtls.AncestorSlotHeld {
 			modes[len(winner.Validation.SubjectAltNames) != 0] = struct{}{}
 		}
 	}
 	availability := make(map[backendTLSRequirements]backendTLSAvailability, 4)
+	check := func(requirements backendTLSRequirements) {
+		if _, checked := availability[requirements]; !checked {
+			availability[requirements] = r.backendTLSAvailability(ctx, requirements)
+		}
+	}
 	for i := range routes {
 		requireH2 := model.HTTPProfileRouteKind(&routes[i]) == model.GRPCRouteKind
 		for requireSAN := range modes {
-			requirements := backendTLSRequirements{requireH2: requireH2, requireSAN: requireSAN}
-			if _, checked := availability[requirements]; !checked {
-				availability[requirements] = r.backendTLSAvailability(ctx, requirements)
-			}
+			check(backendTLSRequirements{requireH2: requireH2, requireSAN: requireSAN})
+		}
+	}
+	for _, backend := range input.XBackends {
+		if validation := backend.TLS.Validation; validation != nil && backend.ReadIssue == nil {
+			check(xBackendTLSRequirements(validation))
 		}
 	}
 	return availability
@@ -95,6 +102,13 @@ func supportsBackendTLS(backend model.BackendGroup) bool {
 }
 
 func (inputs *routeModelInputs) backendTLSValidation(backend model.BackendGroup, requireH2 bool) *cloud.BackendTLSValidation {
+	if backend.XBackendTLSRequired {
+		if validation := backend.XBackendTLS; validation != nil && supportsBackendTLS(backend) && !requireH2 &&
+			inputs.backendTLSAvailability[xBackendTLSRequirements(validation)] == backendTLSAvailable {
+			return validation.CloudValidation()
+		}
+		return &cloud.BackendTLSValidation{Denied: true}
+	}
 	winner := backend.BackendTLS.Winner
 	if winner == nil {
 		return nil
@@ -105,6 +119,19 @@ func (inputs *routeModelInputs) backendTLSValidation(backend model.BackendGroup,
 		return &cloud.BackendTLSValidation{Denied: true}
 	}
 	return winner.Validation.CloudValidation()
+}
+
+func xBackendTLSRequirements(validation *backendtls.Validation) backendTLSRequirements {
+	return backendTLSRequirements{requireSAN: len(validation.SubjectAltNames) != 0}
+}
+
+func (inputs *routeModelInputs) xBackendTLSDiagnostic(backend model.BackendGroup) model.Diagnostic {
+	if backend.Diagnostic != nil {
+		return *backend.Diagnostic
+	}
+	requirements := xBackendTLSRequirements(backend.XBackendTLS)
+	condition := inputs.backendTLSAvailability[requirements].apply(metav1.Condition{Status: metav1.ConditionTrue}, true, requirements.requireSAN)
+	return model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: condition.Message}
 }
 
 func routeBackendTLSAncestorSlot(route *gatewayv1.HTTPRoute, inputs *routeModelInputs) backendtls.AncestorSlot {

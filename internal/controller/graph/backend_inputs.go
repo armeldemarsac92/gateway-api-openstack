@@ -120,7 +120,7 @@ func CollectBackendInputsWithNamespaces(ctx context.Context, reader client.Reade
 
 // CollectXBackendInputs reads local XBackend references and the matching Pods
 // needed to lower them. A foreign reference never reaches the API reader.
-func CollectXBackendInputs(ctx context.Context, reader client.Reader, input *model.Input) error {
+func CollectXBackendInputs(ctx context.Context, reader client.Reader, input *model.Input, tlsObserver *BackendTLSObserver) error {
 	if !input.EnableXBackend {
 		return nil
 	}
@@ -142,25 +142,44 @@ func CollectXBackendInputs(ctx context.Context, reader client.Reader, input *mod
 	}) {
 		backend, err := ReadXBackend(ctx, reader, key)
 		if err != nil {
-			return err
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			// Quarantine an existing pool when the live object cannot be
+			// read. Its previous plaintext or TLS settings may no longer apply.
+			input.XBackends = append(input.XBackends, model.XBackendObservation{Key: key,
+				ReadIssue: &model.Diagnostic{Reason: "BackendUnavailable", Message: fmt.Sprintf("XBackend %s could not be read", key)}})
+			continue
 		}
 		if backend == nil {
 			continue
 		}
 		observation := model.XBackendObservation{Key: key, UID: backend.UID, Generation: backend.Generation, Spec: backend.Spec}
-		if backend.Spec.Type == gatewayx.BackendTypeEndpointSelector && model.ValidateXBackend(backend.Spec, input.XBackendProfile) == nil {
+		supported := model.ValidateXBackend(backend.Spec, input.XBackendProfile) == nil
+		if supported && model.XBackendRequiresTLS(backend.Spec) {
+			observation.TLS, err = tlsObserver.ObserveValidation(ctx, key.Namespace, *backend.Spec.TLS.Validation)
+			if err != nil {
+				return err
+			}
+			supported = observation.TLS.Validation != nil
+		}
+		if supported && backend.Spec.Type == gatewayx.BackendTypeEndpointSelector {
 			selector := make(client.MatchingLabels, len(backend.Spec.EndpointSelector.MatchLabels))
 			for label, value := range backend.Spec.EndpointSelector.MatchLabels {
 				selector[string(label)] = string(value)
 			}
 			var pods corev1.PodList
-			if err := reader.List(ctx, &pods, client.InNamespace(key.Namespace), selector); err != nil {
+			err := reader.List(ctx, &pods, client.InNamespace(key.Namespace), selector)
+			switch {
+			case err == nil && pods.Continue == "":
+				observation.Endpoints = model.ResolveXBackendEndpoints(backend, pods.Items)
+			case model.XBackendRequiresTLS(backend.Spec) && ctx.Err() == nil:
+				observation.ReadIssue = &model.Diagnostic{Reason: "BackendUnavailable", Message: fmt.Sprintf("XBackend %s Pod endpoints could not be read completely", key)}
+			case err != nil:
 				return fmt.Errorf("list Pods for XBackend %s: %w", key, err)
-			}
-			if pods.Continue != "" {
+			default:
 				return fmt.Errorf("incomplete Pod list for XBackend %s", key)
 			}
-			observation.Endpoints = model.ResolveXBackendEndpoints(backend, pods.Items)
 		}
 		input.XBackends = append(input.XBackends, observation)
 	}

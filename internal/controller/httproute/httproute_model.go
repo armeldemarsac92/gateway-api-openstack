@@ -733,6 +733,8 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 	tls := inputs.backendTLSValidation(backend, spec.GRPC)
 	if !observed {
 		switch {
+		case backend.XBackendTLSRequired && tls.Denied:
+			result.diagnostic = inputs.xBackendTLSDiagnostic(backend)
 		case backend.Diagnostic != nil && spec.GRPC:
 			result.diagnostic = *backend.Diagnostic
 		case tls == nil || !tls.Denied:
@@ -763,7 +765,7 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 		// their target list and do not need placeholder pools.
 		// A gRPC client maps the empty pool's HTTP 503 to UNAVAILABLE.
 		// The HTTP fixed 500 response would instead map to UNKNOWN.
-		invalidReference := invalid && !spec.GRPC && (key.kind == cloud.HTTPBackendKindXBackend || r.Config.WeightedHTTPTargets ||
+		invalidReference := invalid && !spec.GRPC && !(backend.XBackendTLSRequired && tls.Denied) && (key.kind == cloud.HTTPBackendKindXBackend || r.Config.WeightedHTTPTargets ||
 			result.diagnostic.Reason == string(gatewayv1.RouteReasonRefNotPermitted) ||
 			result.diagnostic.Reason == string(gatewayv1.RouteReasonBackendNotFound))
 		spec.HTTPBackends = append(spec.HTTPBackends, cloud.HTTPBackend{

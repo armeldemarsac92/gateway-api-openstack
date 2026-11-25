@@ -166,7 +166,7 @@ func (r *Reconciler) resolveExternalHostnameMembers(ctx context.Context, inputs 
 		for part := range snapshot.desired.HTTPPortSpecs() {
 			for i := range part.HTTPBackends {
 				backend := &part.HTTPBackends[i]
-				if !backend.RoutedExternal {
+				if !backend.RoutedExternal || backend.BackendTLS != nil && backend.BackendTLS.Denied {
 					continue
 				}
 				key := types.NamespacedName{Namespace: backend.Namespace, Name: backend.Name}

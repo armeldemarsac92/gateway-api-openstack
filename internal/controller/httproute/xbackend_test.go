@@ -18,8 +18,13 @@ package httproute
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"fmt"
+	"math/big"
 	"net"
 	"net/netip"
 	"reflect"
@@ -28,6 +33,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -408,6 +414,97 @@ func TestXBackendAndSameNamedServiceKeepSeparateWeightedTargets(t *testing.T) {
 		f.reader.counts["XBackend"] != 0 || f.reader.counts["Pod"] != 0 || f.reader.counts["ReferenceGrant"] != 0 {
 		t.Fatalf("foreign XBackend changed the authorized Service or caused reads: graph %+v, reads %v", spec, f.reader.counts)
 	}
+}
+
+func TestXBackendServerOnlyExternalHostnameUsesItsOwnValidation(t *testing.T) {
+	f := newExternalHostnameFixture(t)
+	r := f.reconciler
+	r.Config.BackendTLSPolicy = true
+	r.BackendTLSAvailable = func(context.Context) (bool, error) { return true, nil }
+	sanAvailable := true
+	r.BackendTLSSANAvailable = func(_ context.Context, requireH2 bool) (bool, error) {
+		require.False(t, requireH2)
+		return sanAvailable, nil
+	}
+	backend := addExternalHostnameRule(t, f, f.route, f.service.Name)
+	const identityName = "identity.remote.example.test"
+	backend.Spec.Port.Number = gatewayx.PortNumber(f.service.Spec.Ports[0].Port)
+	backend.Spec.TLS = &gatewayx.BackendTLS{Mode: gatewayx.BackendTLSModeServerOnly, Validation: &gatewayv1.BackendTLSPolicyValidation{
+		Hostname: identityName, CACertificateRefs: []gatewayv1.LocalObjectReference{{Kind: "ConfigMap", Name: "external-ca"}},
+		SubjectAltNames: []gatewayv1.SubjectAltName{{Type: "URI", URI: "spiffe://example.test/backend"}},
+	}}
+	require.NoError(t, f.client.Update(t.Context(), backend))
+	require.NoError(t, f.client.Update(t.Context(), f.route))
+	policy := &gatewayv1.BackendTLSPolicy{
+		ObjectMeta: metav1.ObjectMeta{Namespace: f.service.Namespace, Name: f.service.Name, UID: "service-policy"},
+		Spec: gatewayv1.BackendTLSPolicySpec{
+			TargetRefs: []gatewayv1.LocalPolicyTargetReferenceWithSectionName{{
+				LocalPolicyTargetReference: gatewayv1.LocalPolicyTargetReference{Kind: "Service", Name: gatewayv1.ObjectName(f.service.Name)},
+			}},
+			Validation: gatewayv1.BackendTLSPolicyValidation{Hostname: "service.example.test",
+				CACertificateRefs: []gatewayv1.LocalObjectReference{{Kind: "ConfigMap", Name: "service-ca"}}},
+		},
+	}
+	f.create(t, policy)
+	policy.Status.Ancestors = []gatewayv1.PolicyAncestorStatus{{
+		ControllerName: r.Config.ControllerName, AncestorRef: gatewayAncestorRef(client.ObjectKeyFromObject(f.gateway)),
+	}}
+	require.NoError(t, f.client.Status().Update(t.Context(), policy))
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	template := &x509.Certificate{SerialNumber: big.NewInt(1), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, public, private)
+	require.NoError(t, err)
+	ca := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: backend.Namespace, Name: "external-ca", UID: "external-ca-uid"},
+		Data: map[string]string{"ca.crt": string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))}}
+	serviceCA := ca.DeepCopy()
+	serviceCA.Name, serviceCA.UID = "service-ca", "service-ca-uid"
+	f.create(t, ca, serviceCA)
+
+	lookups := 0
+	r.ExternalHostnames.lookup = func(_ context.Context, family, hostname string) ([]netip.Addr, error) {
+		lookups++
+		if family != "ip4" || hostname != string(backend.Spec.ExternalHostname.Hostname)+"." {
+			t.Errorf("expected the DNS destination independently of TLS identity, got %q %q", family, hostname)
+		}
+		return []netip.Addr{netip.MustParseAddr("198.51.100.15")}, nil
+	}
+	before := f.observe(t)
+	require.NoError(t, before.Validate(t.Context()))
+	targets := before.Nodes[0].Spec.HTTPBackends
+	require.Len(t, targets, 2)
+	service, external := targets[0], targets[1]
+	require.NotEqual(t, identity.HTTPBackendPoolKey(service), identity.HTTPBackendPoolKey(external))
+	require.Equal(t, "service.example.test", service.BackendTLS.Hostname)
+	require.Equal(t, string(serviceCA.UID), service.BackendTLS.CAConfigMapUID)
+	require.Equal(t, identityName, external.BackendTLS.Hostname)
+	require.Equal(t, string(ca.UID), external.BackendTLS.CAConfigMapUID)
+	require.Equal(t, []cloud.BackendTLSSubjectAltName{{Type: "URI", URI: "spiffe://example.test/backend"}}, external.BackendTLS.SubjectAltNames)
+	require.Equal(t, []cloud.Member{{Address: "198.51.100.15", Port: int(backend.Spec.Port.Number)}}, external.Members)
+
+	assertClosed := func() {
+		t.Helper()
+		targets := f.observe(t).Nodes[0].Spec.HTTPBackends
+		require.Equal(t, service, targets[0])
+		require.Equal(t, identity.HTTPBackendPoolKey(external), identity.HTTPBackendPoolKey(targets[1]))
+		require.Equal(t, &cloud.BackendTLSValidation{Denied: true}, targets[1].BackendTLS)
+		require.Empty(t, targets[1].Members)
+		require.Equal(t, 1, lookups)
+	}
+	sanAvailable = false
+	assertClosed()
+	sanAvailable = true
+
+	require.NoError(t, f.client.Delete(t.Context(), ca))
+	require.ErrorIs(t, before.Validate(t.Context()), errHTTPRouteChanged)
+	assertClosed()
+	ca.ResourceVersion, ca.UID = "", "restored-ca-uid"
+	f.create(t, ca)
+	targets = f.observe(t).Nodes[0].Spec.HTTPBackends
+	require.Equal(t, service, targets[0])
+	require.Equal(t, external.Members, targets[1].Members)
+	require.Equal(t, string(ca.UID), targets[1].BackendTLS.CAConfigMapUID)
+	require.Equal(t, 2, lookups)
 }
 
 func TestXBackendAncestorLimitKeepsForeignStatusDuringDetach(t *testing.T) {

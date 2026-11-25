@@ -63,34 +63,59 @@ type CA struct {
 
 const caKey = "ca.crt"
 
+// ValidationResult is the resolved trust and identity, or the diagnostic
+// shared by policy status and resources with inline backend TLS validation.
+type ValidationResult struct {
+	Validation *Validation
+	Reason     gatewayv1.PolicyConditionReason
+	RefReason  gatewayv1.PolicyConditionReason
+	Message    string
+	Pending    bool
+}
+
 func validate(result *PolicyResult, spec gatewayv1.BackendTLSPolicySpec, inputs CAInputs) {
-	policy := spec.Validation
+	validation := EvaluateValidation(result.Key.Namespace, spec.Validation, inputs)
+	switch {
+	case validation.Pending:
+		for _, condition := range []*metav1.Condition{&result.Accepted, &result.ResolvedRefs} {
+			condition.Status = metav1.ConditionUnknown
+			condition.Reason = string(validation.Reason)
+			condition.Message = validation.Message
+		}
+	case validation.Validation == nil:
+		if validation.RefReason != "" {
+			result.rejectRef(validation.RefReason, validation.Message)
+		}
+		result.reject(validation.Reason, validation.Message)
+	case len(spec.Options) > 0:
+		result.reject(gatewayv1.PolicyReasonInvalid, "BackendTLSPolicy TLS options are unsupported")
+	default:
+		result.Validation = validation.Validation
+	}
+}
+
+// EvaluateValidation resolves the CA and certificate identity from live input snapshots.
+func EvaluateValidation(namespace string, policy gatewayv1.BackendTLSPolicyValidation, inputs CAInputs) ValidationResult {
+	invalid := func(message string, refReason gatewayv1.PolicyConditionReason) ValidationResult {
+		return ValidationResult{Reason: gatewayv1.PolicyReasonInvalid, RefReason: refReason, Message: message}
+	}
 	switch {
 	case policy.WellKnownCACertificates != nil:
-		message := "Well-known CA certificate sets are unsupported"
 		if len(policy.CACertificateRefs) > 0 {
-			message = "Specify either caCertificateRefs or wellKnownCACertificates"
-			result.rejectRef(gatewayv1.BackendTLSPolicyReasonInvalidCACertificateRef, message)
+			return invalid("Specify either caCertificateRefs or wellKnownCACertificates", gatewayv1.BackendTLSPolicyReasonInvalidCACertificateRef)
 		}
-		result.reject(gatewayv1.PolicyReasonInvalid, message)
-		return
+		return invalid("Well-known CA certificate sets are unsupported", "")
 	case len(policy.CACertificateRefs) == 0:
-		message := "A CA certificate reference is required"
-		result.reject(gatewayv1.PolicyReasonInvalid, message)
-		result.rejectRef(gatewayv1.BackendTLSPolicyReasonInvalidCACertificateRef, message)
-		return
+		return invalid("A CA certificate reference is required", gatewayv1.BackendTLSPolicyReasonInvalidCACertificateRef)
 	case len(policy.CACertificateRefs) > 1:
-		message := "BackendTLSPolicy supports a single CA certificate reference"
-		result.reject(gatewayv1.PolicyReasonInvalid, message)
-		result.rejectRef("UnsupportedCACertificateRefs", message)
-		return
+		return invalid("Backend TLS supports a single CA certificate reference", "UnsupportedCACertificateRefs")
 	}
 
 	ref := policy.CACertificateRefs[0]
 	var observation CAObservation
 	switch {
 	case ref.Group == "" && ref.Kind == "ConfigMap":
-		key := types.NamespacedName{Namespace: result.Key.Namespace, Name: string(ref.Name)}
+		key := types.NamespacedName{Namespace: namespace, Name: string(ref.Name)}
 		observation.CA, observation.Invalid = LoadConfigMapCA(key, inputs.ConfigMaps[key])
 		if observation.Invalid != nil {
 			observation.Invalid = fmt.Errorf("CA ConfigMap %s: %w", key, observation.Invalid)
@@ -99,57 +124,46 @@ func validate(result *PolicyResult, spec gatewayv1.BackendTLSPolicySpec, inputs 
 		observation = inputs.ClusterTrustBundles[string(ref.Name)]
 		if !ValidClusterTrustBundleName(string(ref.Name)) {
 			observation.Invalid = errors.New("name is invalid")
+		} else if observation.Unavailable == nil && observation.Invalid == nil && observation.CA.UID == "" {
+			observation.Invalid = errors.New("has no live cluster-scoped revision")
 		}
 		if observation.Invalid != nil {
 			observation.Invalid = fmt.Errorf("CA ClusterTrustBundle %q: %w", ref.Name, observation.Invalid)
 		}
 	default:
-		message := fmt.Sprintf("CA reference %q has unsupported group %q and kind %q", ref.Name, ref.Group, ref.Kind)
-		result.reject(gatewayv1.BackendTLSPolicyReasonNoValidCACertificate, message)
-		result.rejectRef(gatewayv1.BackendTLSPolicyReasonInvalidKind, message)
-		return
+		return ValidationResult{Reason: gatewayv1.BackendTLSPolicyReasonNoValidCACertificate, RefReason: gatewayv1.BackendTLSPolicyReasonInvalidKind,
+			Message: fmt.Sprintf("CA reference %q has unsupported group %q and kind %q", ref.Name, ref.Group, ref.Kind)}
 	}
 	if observation.Unavailable != nil {
-		for _, condition := range []*metav1.Condition{&result.Accepted, &result.ResolvedRefs} {
-			condition.Status = metav1.ConditionUnknown
-			condition.Reason = "Pending"
-			condition.Message = "Waiting to read the referenced ClusterTrustBundle"
-		}
-		return
+		return ValidationResult{Reason: "Pending", Pending: true, Message: fmt.Sprintf("Waiting to read the referenced ClusterTrustBundle %q", ref.Name)}
 	}
 	if observation.Invalid != nil {
-		result.reject(gatewayv1.BackendTLSPolicyReasonNoValidCACertificate, observation.Invalid.Error())
 		reason := gatewayv1.BackendTLSPolicyReasonInvalidCACertificateRef
 		if errors.Is(observation.Invalid, ErrCABundleTooLarge) {
 			reason = gatewayv1.PolicyConditionReason(CABundleTooLargeReason)
 		}
-		result.rejectRef(reason, observation.Invalid.Error())
-		return
+		return ValidationResult{Reason: gatewayv1.BackendTLSPolicyReasonNoValidCACertificate, RefReason: reason, Message: observation.Invalid.Error()}
 	}
 
 	hostname := string(policy.Hostname)
-	switch {
-	case !isPreciseHostname(hostname):
-		result.reject(gatewayv1.PolicyReasonInvalid, "Backend TLS hostname must be a precise DNS hostname")
-	case len(spec.Options) > 0:
-		result.reject(gatewayv1.PolicyReasonInvalid, "BackendTLSPolicy TLS options are unsupported")
-	default:
-		names := make([]cloud.BackendTLSSubjectAltName, 0, len(policy.SubjectAltNames))
-		for _, name := range policy.SubjectAltNames {
-			names = append(names, cloud.BackendTLSSubjectAltName{
-				Type: string(name.Type), Hostname: string(name.Hostname), URI: string(name.URI),
-			})
-		}
-		names, err := amphora.NormalizeBackendTLSSubjectAltNames(names)
-		if err != nil {
-			result.reject(gatewayv1.PolicyReasonInvalid, err.Error())
-			return
-		}
-		result.Validation = &Validation{Hostname: hostname, CA: observation.CA, SubjectAltNames: names}
+	if !IsPreciseHostname(hostname) {
+		return invalid("Backend TLS hostname must be a precise DNS hostname", "")
 	}
+	names := make([]cloud.BackendTLSSubjectAltName, 0, len(policy.SubjectAltNames))
+	for _, name := range policy.SubjectAltNames {
+		names = append(names, cloud.BackendTLSSubjectAltName{
+			Type: string(name.Type), Hostname: string(name.Hostname), URI: string(name.URI),
+		})
+	}
+	names, err := amphora.NormalizeBackendTLSSubjectAltNames(names)
+	if err != nil {
+		return invalid(err.Error(), "")
+	}
+	return ValidationResult{Validation: &Validation{Hostname: hostname, CA: observation.CA, SubjectAltNames: names}}
 }
 
-func isPreciseHostname(hostname string) bool {
+// IsPreciseHostname reports whether hostname can be used for backend TLS SNI.
+func IsPreciseHostname(hostname string) bool {
 	if len(validation.IsDNS1123Subdomain(hostname)) > 0 {
 		return false
 	}

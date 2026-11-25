@@ -110,6 +110,7 @@ type desiredRoute struct {
 	backendKey                  string
 	unavailable                 bool
 	routedExternal              bool
+	xBackend                    bool
 	redirect                    bool
 	redirectMatches             []cloud.HTTPPathMatch
 	redirectIssue               error
@@ -375,16 +376,21 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 	for index, backend := range spec.HTTPBackends {
 		fixedResponse := p.fixedHTTPResponses && backend.InvalidReference
 		unavailable := backend.Unavailable || fixedResponse
-		validPort := backend.Port >= 1 && backend.Port <= 65535 || backend.Kind == cloud.HTTPBackendKindXBackend && backend.InvalidReference && backend.Port == 0
 		deniedTLS := backend.BackendTLS != nil && backend.BackendTLS.Denied
+		xBackend := backend.Kind == cloud.HTTPBackendKindXBackend
+		validPort := backend.Port >= 1 && backend.Port <= 65535 || xBackend && (backend.InvalidReference || deniedTLS) && backend.Port == 0
 		if strings.TrimSpace(backend.Namespace) == "" || strings.TrimSpace(backend.Name) == "" ||
 			(backend.Kind != "" && backend.Kind != cloud.HTTPBackendKindXBackend) || !validPort ||
 			len(backend.Matches) == 0 && !targetsUsed[index] && !mirrorsUsed[index] || unavailable && !deniedTLS && len(backend.Members) != 0 {
 			return invalid(errors.New("each HTTP backend requires a supported reference and a match or weighted reference, and an unavailable backend must have no members"))
 		}
-		if backend.RoutedExternal && (backend.Kind != cloud.HTTPBackendKindXBackend || spec.GRPC || spec.MemberMode != cloud.MemberModeEndpoint ||
-			len(spec.BackendSecurityGroupIDs) != 0 || backend.BackendH2C || backend.BackendTLS != nil || backend.BackendRetryBudget != nil || backend.InvalidReference) {
+		if backend.RoutedExternal && (!xBackend || spec.GRPC || spec.MemberMode != cloud.MemberModeEndpoint ||
+			len(spec.BackendSecurityGroupIDs) != 0 || backend.BackendH2C || backend.BackendRetryBudget != nil || backend.InvalidReference) {
 			return invalid(errors.New("routed external members require an unmanaged HTTP XBackend pool"))
+		}
+		if xBackend && backend.BackendTLS != nil && !deniedTLS &&
+			(spec.GRPC || spec.MemberMode != cloud.MemberModeEndpoint || len(spec.BackendSecurityGroupIDs) != 0 || backend.BackendH2C) {
+			return invalid(errors.New("authenticated XBackends require an unmanaged HTTP endpoint pool"))
 		}
 		key := scopeHTTPKey(spec, openstackidentity.HTTPBackendPoolKey(backend))
 		if backendKeys[key] {
@@ -401,6 +407,7 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 			return desiredRoute{}, err
 		}
 		part.fixedResponse = fixedResponse
+		part.xBackend = xBackend
 		for _, role := range []string{rolePool, roleMember, roleMonitor} {
 			if _, err := part.identity.RouteTags(part.httpRole(role, "")); err != nil {
 				return invalid(err)
