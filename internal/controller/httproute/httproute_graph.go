@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"slices"
 
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
@@ -45,6 +46,7 @@ type routeGraphResult struct {
 	selection               routeSelection
 	rejectedSections        []model.ListenerSection
 	backendObserved         bool
+	usesXBackendClientTLS   bool
 	backendDiagnostic       model.Diagnostic
 	corsFallback            bool
 	backendTLSAncestorSlot  backendtls.AncestorSlot
@@ -76,10 +78,18 @@ func (r *Reconciler) ensureRouteGraph(
 		return routeGraphResult{}, fmt.Errorf("gateway graph writer is required")
 	}
 	prepared, err := r.prepareRouteGraphBinding(ctx, expectedRoute, expectedGateway)
+	expectedIdentity := controller.RouteIdentity(r.Config, expectedGateway, expectedRoute)
+	if err != nil && r.Config.XBackendEnabled() && controllerutil.ContainsFinalizer(expectedGateway, r.Config.BackendCAFinalizer()) {
+		_, withdrawErr := r.Writer.ReconcileGraph(ctx, graph.Request{
+			Identity: expectedIdentity, Action: graph.WithdrawXBackendClientCertificates, Gateway: expectedGateway,
+		})
+		if withdrawErr != nil {
+			err = errors.Join(err, withdrawErr)
+		}
+	}
 	if err != nil || prepared.bindingState != routeBindingReady {
 		return prepared, err
 	}
-	expectedIdentity := controller.RouteIdentity(r.Config, expectedGateway, expectedRoute)
 	request := graph.Request{
 		Identity: expectedIdentity,
 		Action:   graph.Ensure, Gateway: expectedGateway, Route: expectedRoute,
@@ -87,6 +97,7 @@ func (r *Reconciler) ensureRouteGraph(
 		HTTPRouteCORSFallback:            &prepared.corsFallback,
 		HTTPRouteRejectedSections:        &prepared.rejectedSections,
 		HTTPRouteRetryBudgetAncestorFull: &prepared.retryBudgetAncestorFull,
+		HTTPRouteUsesXBackendClientTLS:   &prepared.usesXBackendClientTLS,
 	}
 	if r.Config.BackendTLSPolicy {
 		request.HTTPRouteBackendTLSAncestorSlot = &prepared.backendTLSAncestorSlot
@@ -152,6 +163,9 @@ func (r *Reconciler) prepareRouteGraphBinding(ctx context.Context, route *gatewa
 		corsFallback:            snapshot.corsFallback,
 		backendTLSAncestorSlot:  snapshot.backendTLSAncestorSlot,
 		retryBudgetAncestorFull: snapshot.retryBudgetAncestorFull,
+	}
+	if snapshot.backends != nil {
+		prepared.usesXBackendClientTLS = snapshot.backends.routeUsesXBackendClientTLS(route)
 	}
 	if err != nil {
 		return prepared, err

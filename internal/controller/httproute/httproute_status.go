@@ -501,7 +501,7 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 				// Check the spec and class now while topology is pending.
 				profile.MemberMode = cloud.MemberModeEndpoint
 			}
-			observation, err := tlsObserver.ObserveXBackendReference(ctx, key, profile)
+			observation, err := tlsObserver.ObserveXBackendReference(ctx, key, profile, gateway.Spec.GatewayClassName, r.XBackendClientCertificates)
 			if err != nil {
 				return err
 			}

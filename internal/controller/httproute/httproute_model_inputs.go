@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
@@ -50,6 +51,18 @@ type routeModelInputs struct {
 	backendTLSAncestor     *backendtls.GatewayAncestor
 	clusterTrustBundles    *backendtls.ClusterTrustBundles
 	admission              routeGraphAdmission
+
+	xBackendClientCertificates graph.XBackendClientCertificateResolver
+}
+
+func (inputs *routeModelInputs) routeUsesXBackendClientTLS(route *gatewayv1.HTTPRoute) bool {
+	if model.HTTPProfileRouteKind(route) != model.HTTPRouteKind {
+		return false
+	}
+	refs := model.LocalXBackendReferences(route)
+	return slices.ContainsFunc(inputs.input.XBackends, func(backend model.XBackendObservation) bool {
+		return backend.Spec.TLS != nil && backend.Spec.TLS.Mode == gatewayx.BackendTLSModeClientAndServer && slices.Contains(refs, backend.Key)
+	})
 }
 
 type routeGraphAdmission struct {
@@ -314,7 +327,7 @@ func (r *Reconciler) collectRouteForwardingInputs(ctx context.Context, reader cl
 			return nil, err
 		}
 		input.XBackendProfile = profile
-		if err := graph.CollectXBackendInputs(ctx, reader, &input, tlsObserver); err != nil {
+		if err := graph.CollectXBackendInputs(ctx, reader, &input, tlsObserver, r.XBackendClientCertificates); err != nil {
 			return nil, err
 		}
 	}
@@ -354,6 +367,7 @@ func (r *Reconciler) collectRouteForwardingInputs(ctx context.Context, reader cl
 	return &routeModelInputs{
 		gateway: gateway, input: input, logical: logical,
 		backendTLSAncestor: ancestor, clusterTrustBundles: r.Config.ClusterTrustBundles,
+		xBackendClientCertificates: r.XBackendClientCertificates,
 	}, nil
 }
 
@@ -361,6 +375,7 @@ func (r *Reconciler) xBackendProfile(gateway *gatewayv1.Gateway) (model.XBackend
 	profile := model.XBackendProfile{
 		H2C:                r.Config.BackendH2C,
 		ServerTLS:          r.Config.BackendTLSPolicy,
+		ClientTLS:          r.Config.XBackendClientCertificate,
 		ExternalHostname:   r.Config.RoutedXBackendEnabled(gateway.Spec.GatewayClassName),
 		SessionPersistence: r.Config.XBackendSessionPersistenceEnabled(),
 		ServiceDNSDomains:  r.Config.XBackendServiceDNSDomains,
@@ -381,7 +396,7 @@ func (inputs *routeModelInputs) validateBackends(ctx context.Context, reader cli
 	current.EnableXBackend = inputs.input.EnableXBackend
 	current.XBackendProfile = inputs.input.XBackendProfile
 	tlsObserver := graph.NewBackendTLSObserver(reader, inputs.clusterTrustBundles)
-	if err := graph.CollectXBackendInputs(ctx, reader, &current, tlsObserver); err != nil {
+	if err := graph.CollectXBackendInputs(ctx, reader, &current, tlsObserver, inputs.xBackendClientCertificates); err != nil {
 		return err
 	}
 	for _, route := range inputs.input.Routes {

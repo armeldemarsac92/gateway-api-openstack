@@ -77,6 +77,8 @@ type BackendGroup struct {
 	XBackendTLSRequired    bool
 	XBackendTLS            *backendtls.Validation `json:"-"`
 
+	XBackendClientCertificateReference string `json:"-"`
+
 	FilterDiagnostic        *Diagnostic
 	RequestHeaderOperations []cloud.HTTPHeaderOperation
 	URLRewrite              *cloud.HTTPURLRewrite
