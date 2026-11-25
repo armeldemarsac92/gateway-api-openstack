@@ -231,8 +231,11 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		return result, errors.Join(err, mutationErr)
 	}
 	var incomplete *httpFilterInventoryError
-	errors.As(err, &incomplete)
-	if listener := p.httpFilterListenerWithInventoryError(actual, incomplete); listener != nil {
+	var filterListener *listeners.Listener
+	if errors.As(err, &incomplete) {
+		filterListener = p.ownedHTTPFilterListener(actual, incomplete.listenerID)
+	}
+	if listener := filterListener; listener != nil {
 		message := "Waiting for complete Octavia " + incomplete.filter + " inventory"
 		affectedPort := listener.ProtocolPort
 		if !actual.scoped && affectedPort == 0 {
@@ -453,6 +456,9 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		plan = p.protectBackendRequestFilterTraffic(ctx, desired, actual, plan, &result)
 	}
 	if !isHTTPListenerWithdrawal(plan) {
+		plan = p.protectBackendResponseHeaderTraffic(ctx, desired, actual, plan, &result)
+	}
+	if !isHTTPListenerWithdrawal(plan) {
 		plan = p.protectCORSTraffic(ctx, desired, actual, plan, &result)
 	}
 	if !isHTTPListenerWithdrawal(plan) {
@@ -663,6 +669,9 @@ func (p *Provider) reconcileHTTPWithdrawalWithoutAddress(ctx context.Context, de
 	}
 	if !isHTTPListenerWithdrawal(plan) {
 		plan = p.protectCORSTraffic(ctx, desired, actual, plan, &result)
+	}
+	if !isHTTPListenerWithdrawal(plan) {
+		plan = p.protectBackendResponseHeaderTraffic(ctx, desired, actual, plan, &result)
 	}
 	var confirmedClosed bool
 	if !isHTTPListenerWithdrawal(plan) {
@@ -1402,17 +1411,18 @@ func (d desiredGatewayGraph) routeOwners() []routeGraphOwner {
 	for index, route := range d.routes {
 		owners[index].identity = route.identity
 		owners[index].expectsHTTPParts = len(route.httpParts) != 0
-		addCORSPort := func(part desiredRoute) {
-			if slices.ContainsFunc(part.policies, requestCORSPolicy.required) {
-				port := httpURLPolicyRoutePort(d, part)
-				if !slices.Contains(owners[index].requestCORSPorts, port) {
-					owners[index].requestCORSPorts = append(owners[index].requestCORSPorts, port)
-				}
+		recordHTTPFilterPorts := func(part desiredRoute) {
+			port := httpURLPolicyRoutePort(d, part)
+			if slices.ContainsFunc(part.policies, requestCORSPolicy.required) && !slices.Contains(owners[index].requestCORSPorts, port) {
+				owners[index].requestCORSPorts = append(owners[index].requestCORSPorts, port)
+			}
+			if slices.ContainsFunc(part.policies, backendResponseHeadersPolicy.required) && !slices.Contains(owners[index].backendResponseHeaderPorts, port) {
+				owners[index].backendResponseHeaderPorts = append(owners[index].backendResponseHeaderPorts, port)
 			}
 		}
-		addCORSPort(route)
+		recordHTTPFilterPorts(route)
 		for _, part := range route.httpParts {
-			addCORSPort(part)
+			recordHTTPFilterPorts(part)
 		}
 		owners[index].requiresHTTPHostIsolation = len(d.spec.Gateway.Spec.HTTPListenerHostnames) != 0
 		owners[index].expectsBackendTLS = routeHasBackendTLSPolicy(route)

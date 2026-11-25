@@ -73,7 +73,7 @@ type desiredPolicy struct {
 	requestMirrors           []desiredHTTPMirror
 	resolvedRequestMirrors   []octavia.HTTPRequestMirror
 	requestCORS              *cloud.HTTPCORS
-	targetRequestFilters     []octavia.WeightedHTTPTarget
+	targetFilters            []octavia.WeightedHTTPTarget
 	localRewriteFallback     bool
 	method                   string
 	headers                  []cloud.HTTPHeaderMatch
@@ -600,7 +600,7 @@ func (p *Provider) buildHTTPMatchPolicies(r *desiredRoute, matches []cloud.HTTPP
 		if r.fixedResponse && len(match.RequestMirrors) == 0 {
 			rewrite = nil
 		}
-		targetFilters, err := compileWeightedTargetRequestFilters(match, r.weightedTargets)
+		targetFilters, err := compileWeightedTargetFilters(match, r.weightedTargets)
 		if err != nil {
 			return err
 		}
@@ -608,7 +608,13 @@ func (p *Provider) buildHTTPMatchPolicies(r *desiredRoute, matches []cloud.HTTPP
 			if err := cloud.ValidateGRPCRequestMetadata(operations); err != nil {
 				return err
 			}
+			if err := cloud.ValidateGRPCResponseMetadata(responseOperations); err != nil {
+				return err
+			}
 			for _, target := range targetFilters {
+				if err := cloud.ValidateGRPCResponseMetadata(target.ResponseHeaderOperations); err != nil {
+					return err
+				}
 				if err := cloud.ValidateGRPCRequestMetadata(target.RequestHeaderOperations); err != nil {
 					return err
 				}
@@ -625,7 +631,7 @@ func (p *Provider) buildHTTPMatchPolicies(r *desiredRoute, matches []cloud.HTTPP
 				return err
 			}
 			for _, target := range targetFilters {
-				if err := cloud.ValidateHTTPCORSComposition(target.RequestHeaderOperations, nil); err != nil {
+				if err := cloud.ValidateHTTPCORSComposition(target.RequestHeaderOperations, target.ResponseHeaderOperations); err != nil {
 					return err
 				}
 			}
@@ -652,7 +658,7 @@ func (p *Provider) buildHTTPMatchPolicies(r *desiredRoute, matches []cloud.HTTPP
 			policy.requestMirrors = mirrors
 			policy.requestPolicy = requestPolicy
 			policy.requestCORS = match.CORS
-			policy.targetRequestFilters = targetFilters
+			policy.targetFilters = targetFilters
 			policy.backendKey, policy.matchKey = r.backendKey, matchKey
 			policy.httpsListenerHostname = scope
 			policy.httpListenerHostname, policy.hostname = match.HTTPListenerHostname, match.Hostname
@@ -666,7 +672,8 @@ func (p *Provider) buildHTTPMatchPolicies(r *desiredRoute, matches []cloud.HTTPP
 				// The native predicate identifies policies whose binary
 				// metadata must be sent as repeated fields.
 				if p.grpcContentType || hasGRPCBinaryMetadataList(operations) ||
-					hasGRPCBinaryMetadataList(responseOperations) || hasGRPCBinaryTargetMetadata(targetFilters) {
+					hasGRPCBinaryMetadataList(responseOperations) || hasGRPCBinaryTargetRequestMetadata(targetFilters) ||
+					hasGRPCBinaryTargetResponseMetadata(targetFilters) {
 					policy.grpcContentTypeRule = grpcContentTypeRuleType
 				}
 			}

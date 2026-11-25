@@ -97,18 +97,18 @@ var (
 			if policy.weighted {
 				required = append(required, octavia.GatewayCapabilityWeightedHTTPTargets, octavia.GatewayCapabilityFixedHTTPResponses)
 			}
-			if policy.targetRequestFilters != nil {
+			if hasWeightedTargetRequestFilters(policy.weightedFilterTargets()) {
 				required = append(required, octavia.GatewayCapabilityTargetRequestFilters)
 			}
 			return required
 		},
 		required: func(policy desiredPolicy) bool {
 			return policy.grpcContentTypeRule == grpcContentTypeRuleType &&
-				(hasGRPCBinaryMetadataList(policy.requestHeaderOperations) || hasGRPCBinaryTargetMetadata(policy.targetRequestFilters))
+				(hasGRPCBinaryMetadataList(policy.requestHeaderOperations) || hasGRPCBinaryTargetRequestMetadata(policy.weightedFilterTargets()))
 		},
 		observed: func(policy observedRoutePolicy) bool {
 			return !observedPolicyDisabled(policy) && policy.hasNativeGRPCContentType() &&
-				(hasGRPCBinaryMetadataList(policy.requestHeaderOperations) || hasGRPCBinaryTargetMetadata(policy.weightedTargets))
+				(hasGRPCBinaryMetadataList(policy.requestHeaderOperations) || hasGRPCBinaryTargetRequestMetadata(policy.weightedTargets))
 		},
 		settled: func(wanted desiredPolicy, observed observedRoutePolicy) bool {
 			return slices.Equal(wanted.requestHeaderOperations, observed.requestHeaderOperations) &&
@@ -129,9 +129,15 @@ func hasGRPCBinaryMetadataList(operations []cloud.HTTPHeaderOperation) bool {
 	})
 }
 
-func hasGRPCBinaryTargetMetadata(targets []octavia.WeightedHTTPTarget) bool {
+func hasGRPCBinaryTargetRequestMetadata(targets []octavia.WeightedHTTPTarget) bool {
 	return slices.ContainsFunc(targets, func(target octavia.WeightedHTTPTarget) bool {
 		return hasGRPCBinaryMetadataList(target.RequestHeaderOperations)
+	})
+}
+
+func hasGRPCBinaryTargetResponseMetadata(targets []octavia.WeightedHTTPTarget) bool {
+	return slices.ContainsFunc(targets, func(target octavia.WeightedHTTPTarget) bool {
+		return hasGRPCBinaryMetadataList(target.ResponseHeaderOperations)
 	})
 }
 

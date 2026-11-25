@@ -678,6 +678,56 @@ func TestURLRewriteHostFilterOrderAndEmptyRewrite(t *testing.T) {
 	}
 }
 
+func TestHTTPBackendResponseHeadersUseSelectedOccurrence(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	f.reconciler.Config.WeightedHTTPTargets = true
+	backend := f.route.Spec.Rules[0].BackendRefs[0]
+	filtered := *backend.DeepCopy()
+	filtered.Filters = []gatewayv1.HTTPRouteFilter{{
+		Type:                   gatewayv1.HTTPRouteFilterResponseHeaderModifier,
+		ResponseHeaderModifier: &gatewayv1.HTTPHeaderFilter{Set: []gatewayv1.HTTPHeader{{Name: "Backend", Value: "selected"}}},
+	}}
+	invalid := *filtered.DeepCopy()
+	invalid.Name = "missing"
+	f.route.Spec.Rules = []gatewayv1.HTTPRouteRule{{BackendRefs: []gatewayv1.HTTPBackendRef{backend, filtered, invalid}}}
+	build := func() (cloud.RouteSpec, error) {
+		return f.reconciler.buildRouteModelWithReader(t.Context(), f.reader, f.route, f.gateway)
+	}
+	if _, err := build(); err == nil || !strings.Contains(err.Error(), "--octavia-response-header-modifier") {
+		t.Fatalf("want the response header opt-in diagnostic, got %v", err)
+	}
+	f.reconciler.Config.ResponseHeaderModifier = true
+	f.reconciler.Config.WeightedHTTPTargets = false
+	if _, err := build(); err == nil {
+		t.Fatal("backend ResponseHeaderModifier requires weighted targets")
+	}
+	f.reconciler.Config.WeightedHTTPTargets = true
+	spec, err := build()
+	if err != nil || len(spec.HTTPBackends) != 1 || len(spec.WeightedHTTPRules) != 1 {
+		t.Fatalf("want one shared pool and a weighted response policy: %+v, %v", spec, err)
+	}
+	targets := spec.WeightedHTTPRules[0].Targets
+	if len(targets) != 3 || targets[0].BackendIndex == nil || !ptr.Equal(targets[0].BackendIndex, targets[1].BackendIndex) || targets[2].BackendIndex != nil {
+		t.Fatalf("target occurrences lost their forwarding or failure shares: %+v", targets)
+	}
+	want := []cloud.HTTPHeaderOperation{{Name: "backend", Operation: cloud.HTTPHeaderSet, Value: "selected"}}
+	if len(targets[0].ResponseHeaderOperations) != 0 || !slices.Equal(targets[1].ResponseHeaderOperations, want) ||
+		len(targets[2].ResponseHeaderOperations) != 0 || len(spec.WeightedHTTPRules[0].Matches[0].ResponseHeaderOperations) != 0 {
+		t.Fatalf("response operations must be scoped to the selected occurrence: %+v", spec.WeightedHTTPRules[0])
+	}
+	f.route.Spec.Rules[0].BackendRefs = []gatewayv1.HTTPBackendRef{filtered}
+	spec, err = build()
+	if err != nil || len(spec.WeightedHTTPRules) != 1 || len(spec.WeightedHTTPRules[0].Targets) != 1 {
+		t.Fatalf("the sole filtered backend still requires a weighted target: %+v, %v", spec, err)
+	}
+	f.reconciler.Config.HTTPCORS = true
+	f.route.Spec.Rules[0].Filters = []gatewayv1.HTTPRouteFilter{{Type: gatewayv1.HTTPRouteFilterCORS, CORS: &gatewayv1.HTTPCORSFilter{}}}
+	f.route.Spec.Rules[0].BackendRefs[0].Filters[0].ResponseHeaderModifier.Remove = []string{"Vary"}
+	if _, err := build(); err == nil || statusForRouteBuildError(err).acceptedReason != string(gatewayv1.RouteReasonIncompatibleFilters) {
+		t.Fatalf("a target response modifier cannot remove Vary from a CORS rule: %v", err)
+	}
+}
+
 func TestHTTPBackendRequestFiltersPreserveTargetOccurrences(t *testing.T) {
 	f := newRouteModelInputFixture(t)
 	f.reconciler.Config.WeightedHTTPTargets = true

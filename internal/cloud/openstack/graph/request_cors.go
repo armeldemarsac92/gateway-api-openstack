@@ -38,8 +38,11 @@ var requestCORSPolicy = protectedHTTPPredicate{
 		if policy.requestURLRewrite != nil {
 			required = append(required, octavia.GatewayCapabilityRequestURLRewrite)
 		}
-		if len(policy.targetRequestFilters) != 0 {
+		if hasWeightedTargetRequestFilters(policy.weightedFilterTargets()) {
 			required = append(required, octavia.GatewayCapabilityTargetRequestFilters)
+		}
+		if hasWeightedTargetResponseHeaders(policy.weightedFilterTargets()) {
+			required = append(required, octavia.GatewayCapabilityTargetResponseHeaders)
 		}
 		if len(policy.requestHeaderOperations) != 0 {
 			required = append(required, octavia.GatewayCapabilityRequestHeaderOperations)

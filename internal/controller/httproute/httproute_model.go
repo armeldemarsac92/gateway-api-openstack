@@ -228,12 +228,12 @@ func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, kind gatewa
 				return routeActionError(diagnostic)
 			}
 			backend.Filters = model.WithoutRequestMirrorFilters(backend.Filters)
-			operations, _, diagnostic := model.NormalizeHTTPBackendRequestFilters(rule, backend, kind, r.Config.BackendRequestFilters, request, rewrite)
+			requestOperations, responseOperations, _, diagnostic := model.NormalizeHTTPBackendFilters(rule, backend, kind, r.Config.BackendRequestFilters, r.Config.ResponseHeaderModifier, request, rewrite)
 			if diagnostic != nil && diagnostic.Condition != string(gatewayv1.RouteConditionResolvedRefs) {
 				return routeActionError(diagnostic)
 			}
 			if cors != nil {
-				if diagnostic := model.ValidateCORSHeaderComposition(operations, nil); diagnostic != nil {
+				if diagnostic := model.ValidateCORSHeaderComposition(requestOperations, responseOperations); diagnostic != nil {
 					return routeActionError(diagnostic)
 				}
 			}
@@ -251,7 +251,7 @@ func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, kind gatewa
 		return newRouteBuildError(routeErrorUnsupported, "backendRef RequestMirror requires --octavia-http-request-mirror and --octavia-weighted-http-targets")
 	}
 	if len(backend.Filters) != 0 {
-		_, _, diagnostic := model.NormalizeHTTPBackendRequestFilters(rule, backend, kind, false, nil, nil)
+		_, _, _, diagnostic := model.NormalizeHTTPBackendFilters(rule, backend, kind, false, false, nil, nil)
 		if diagnostic != nil && (grpc || diagnostic.Scope == model.ScopeRoute ||
 			slices.ContainsFunc(backend.Filters, func(filter gatewayv1.HTTPRouteFilter) bool { return filter.Type == gatewayv1.HTTPRouteFilterCORS })) {
 			return routeActionError(diagnostic)
@@ -567,7 +567,8 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 		}
 		direct := !zeroOnly && (rule.CORS == nil || !r.Config.WeightedHTTPTargets) && len(rule.Backends) == 1 &&
 			hasHTTPBackendKey(rule.Backends[0]) && rule.Backends[0].FilterDiagnostic == nil &&
-			len(rule.Backends[0].RequestHeaderOperations) == 0 && rule.Backends[0].URLRewrite == nil &&
+			len(rule.Backends[0].RequestHeaderOperations) == 0 && len(rule.Backends[0].ResponseHeaderOperations) == 0 &&
+			rule.Backends[0].URLRewrite == nil &&
 			len(rule.Backends[0].RequestMirrors) == 0
 		weighted := cloud.HTTPWeightedRule{RuleIndex: rule.Index}
 		for _, backend := range rule.Backends {
@@ -604,6 +605,7 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 				target := cloud.HTTPWeightedTarget{BackendIndex: index, Weight: int(backend.Weight)}
 				if index != nil && backend.Weight > 0 {
 					target.RequestHeaderOperations = backend.RequestHeaderOperations
+					target.ResponseHeaderOperations = backend.ResponseHeaderOperations
 					target.URLRewrite = backend.URLRewrite
 				}
 				mirrorBackendGroups := groups

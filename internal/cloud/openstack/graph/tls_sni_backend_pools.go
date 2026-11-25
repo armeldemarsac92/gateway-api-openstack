@@ -146,7 +146,7 @@ func (fragment *observedSNIFragment) observeBackendTargets(row octavia.L7PolicyO
 	fragment.targetsUnverified = row.Policy.Action != string(octavia.ActionWeightedTargets) ||
 		len(row.WeightedTCPPolicyTargets) == 0 || row.Target == nil || row.Target.FixedResponse != nil ||
 		string(row.PoolReference) != "null" || row.HTTPSListenerHostnamePresent || row.RedirectOptionsPresent || hasHTTPOnlySNIOptions(row) ||
-		row.TargetRequestFiltersPresent || row.TargetMirrorsPresent || row.RequestMirrorsErr != nil || len(row.RequestMirrors) != 0
+		row.TargetRequestFiltersPresent || row.TargetResponseHeadersPresent || row.TargetMirrorsPresent || row.RequestMirrorsErr != nil || len(row.RequestMirrors) != 0
 	for slot, target := range row.WeightedTCPPolicyTargets {
 		leaf := fragment.backendPools[slot]
 		if leaf == nil || target.PoolID != leaf.pool.ID {

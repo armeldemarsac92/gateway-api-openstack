@@ -420,6 +420,28 @@ func TestWeightedTargetRequestFiltersWireAndInventory(t *testing.T) {
 	}
 }
 
+func TestWeightedTargetResponseHeadersKeepOccurrence(t *testing.T) {
+	const vector = `[{"weight":3,"pool_id":"shared"},{"weight":1,"pool_id":"shared","response_header_operations":[{"name":"x-picked","operation":"SET","value":"yes"}]},{"weight":1,"fixed_response":{"status_code":500}}]`
+	var targets []WeightedHTTPTarget
+	if err := json.Unmarshal([]byte(vector), &targets); err != nil {
+		t.Fatal(err)
+	}
+	wire, err := json.Marshal(targets)
+	if err != nil || string(wire) != vector {
+		t.Fatalf("response modifier changed during round trip: %s, %v", wire, err)
+	}
+	for _, invalid := range []string{
+		`{"weight":1,"fixed_response":{"status_code":500},"response_header_operations":[]}`,
+		`{"weight":1,"pool_id":"shared","response_header_operations":[{"name":"content-length","operation":"REMOVE"}]}`,
+	} {
+		row := `{"id":"p","action":"WEIGHTED_TARGETS","targets":[` + invalid + `,{"weight":1,"pool_id":"other"}]}`
+		observation, err := readPolicyObservation(json.RawMessage(row))
+		if err != nil || observation.Target != nil || !observation.TargetResponseHeadersPresent || !slices.Contains(observation.PoolIDs, "other") {
+			t.Fatalf("invalid target or its sibling was misread: %+v, %v", observation, err)
+		}
+	}
+}
+
 func TestMixedTCPPolicyListPreservesExplicitModes(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/lbaas/l7policies" {

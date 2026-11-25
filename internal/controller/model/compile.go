@@ -248,8 +248,8 @@ func compileRoute(route *gatewayv1.HTTPRoute, input Input) Route {
 			ResolveRequestMirrorBackends(route, mirrors, input)
 			compiled.Backends[i].RequestMirrors = mirrors
 			backend.Filters = WithoutRequestMirrorFilters(backend.Filters)
-			request, rewrite, diagnostic := NormalizeHTTPBackendRequestFilters(rule, backend,
-				kind, input.BackendRequestFilters,
+			request, response, rewrite, diagnostic := NormalizeHTTPBackendFilters(rule, backend,
+				kind, input.BackendRequestFilters, input.BackendResponseHeaders,
 				compiled.RequestHeaderOperations, compiled.URLRewrite)
 			if diagnostic != nil {
 				if diagnostic.Condition == string(gatewayv1.RouteConditionResolvedRefs) {
@@ -261,12 +261,13 @@ func compileRoute(route *gatewayv1.HTTPRoute, input Input) Route {
 				continue
 			}
 			if compiled.CORS != nil {
-				if diagnostic := ValidateCORSHeaderComposition(request, nil); diagnostic != nil {
+				if diagnostic := ValidateCORSHeaderComposition(request, response); diagnostic != nil {
 					compiled.Diagnostics = append(compiled.Diagnostics, *diagnostic)
 					continue
 				}
 			}
 			compiled.Backends[i].RequestHeaderOperations = request
+			compiled.Backends[i].ResponseHeaderOperations = response
 			compiled.Backends[i].URLRewrite = rewrite
 		}
 		matches := rule.Matches
