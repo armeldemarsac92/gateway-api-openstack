@@ -123,6 +123,7 @@ func run(ctx context.Context) error {
 	var httpRequestPolicy, backendRetryBudget, telemetryPolicy bool
 	var tcpConnectionRejection, udpPacketDrop bool
 	var xBackendSessionPersistence bool
+	var routeSessionPersistence bool
 	var httpRequestMirror bool
 	var httpCORS, listenerFilters bool
 	var gatewayInfrastructureMetadata, gatewayAddressRoutabilityCluster bool
@@ -159,6 +160,7 @@ func run(ctx context.Context) error {
 	flag.BoolVar(&tcpConnectionRejection, "octavia-tcp-connection-rejection", false, "actively reject unavailable TCPRoute and TLSRoute backend shares with the regional Octavia capability")
 	flag.BoolVar(&udpPacketDrop, "octavia-udp-packet-drop", false, "discard unavailable UDPRoute backend shares on supported Amphora IPv4 Endpoint listeners")
 	flag.BoolVar(&xBackendSessionPersistence, "octavia-xbackend-session-persistence", false, "use regional Octavia capabilities for Experimental XBackend and Service policy session cookies or HTTP headers with optional absolute timeout")
+	flag.BoolVar(&routeSessionPersistence, "experimental-route-session-persistence", false, "use regional Octavia capabilities for Experimental HTTPRoute and GRPCRoute rule session persistence")
 	flag.BoolVar(&telemetryPolicy, "octavia-telemetry-policy", false, "serve Experimental XTelemetryPolicy via the regional Octavia listener_otlp_tracing_v1 capability")
 	flag.Func("xbackend-external-hostname-class", "GatewayClass that permits routed ExternalHostname HTTP backends (repeatable)", func(class string) error {
 		xBackendExternalHostnameClasses = append(xBackendExternalHostnameClasses, class)
@@ -259,6 +261,7 @@ func run(ctx context.Context) error {
 		TCPConnectionRejection:        tcpConnectionRejection,
 		UDPPacketDrop:                 udpPacketDrop,
 		XBackendSessionPersistence:    xBackendSessionPersistence,
+		RouteSessionPersistence:       routeSessionPersistence,
 		TelemetryPolicy:               telemetryPolicy,
 		BackendTLSPolicy:              backendTLSPolicy,
 		OperatorHTTPS:                 certificateMap != "",
@@ -346,6 +349,7 @@ func run(ctx context.Context) error {
 		PollInterval:           pollInterval,
 
 		XBackendSessionPersistence: controllerConfig.XBackendSessionPersistenceEnabled(),
+		RouteSessionPersistence:    controllerConfig.RouteSessionPersistenceEnabled(),
 
 		HTTPSListenerIsolation:  httpsListenerIsolation,
 		InitialL7Rules:          initialL7Rules,

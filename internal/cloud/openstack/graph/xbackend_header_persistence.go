@@ -34,11 +34,14 @@ var errXBackendHeaderPersistence = errors.New("waiting for Octavia HTTP header p
 
 // XBackendHeaderAvailable discovers support on the regional Amphora endpoint.
 func (p *Provider) XBackendHeaderAvailable(ctx context.Context) (bool, error) {
-	return p.discoverXBackendHeader(ctx, "amphora")
+	if !p.xBackendSessionPersistence {
+		return false, nil
+	}
+	return p.discoverPoolSessionHeader(ctx, "amphora")
 }
 
-func (p *Provider) discoverXBackendHeader(ctx context.Context, provider string) (bool, error) {
-	return p.discoverXBackendPersistence(ctx, provider, octavia.GatewayCapabilityHTTPHeaderPersistence)
+func (p *Provider) discoverPoolSessionHeader(ctx context.Context, provider string) (bool, error) {
+	return p.discoverPoolSessionPersistence(ctx, provider, octavia.GatewayCapabilityHTTPHeaderPersistence)
 }
 
 func (route desiredRoute) sessionPersistenceIssue() cloud.SessionPersistenceIssue {

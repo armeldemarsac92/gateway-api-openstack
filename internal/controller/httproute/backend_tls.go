@@ -178,23 +178,15 @@ func (a backendTLSAvailability) applyXBackend(condition metav1.Condition, requir
 	return condition
 }
 
-func routeBackendTLSAncestorSlot(route *gatewayv1.HTTPRoute, inputs *routeModelInputs) backendtls.AncestorSlot {
+func routeBackendTLSAncestorSlot(rules []model.Rule) backendtls.AncestorSlot {
 	var slot backendtls.AncestorSlot
-	if inputs.backendTLSAncestor == nil {
-		return slot
-	}
-	for _, compiled := range inputs.logical.Routes {
-		if compiled.Source.UID != route.UID || compiled.Source.Namespace != route.Namespace || compiled.Source.Name != route.Name {
+	for _, rule := range rules {
+		if rule.Redirect != nil {
 			continue
 		}
-		for _, rule := range compiled.Rules {
-			if rule.Redirect != nil {
-				continue
-			}
-			for _, backend := range rule.Backends {
-				if winner := backend.BackendTLS.Winner; backend.Weight > 0 && winner != nil {
-					slot = max(slot, winner.AncestorSlot)
-				}
+		for _, backend := range rule.Backends {
+			if winner := backend.BackendTLS.Winner; backend.Weight > 0 && winner != nil {
+				slot = max(slot, winner.AncestorSlot)
 			}
 		}
 	}

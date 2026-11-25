@@ -312,9 +312,17 @@ func (r *Reconciler) collectRouteForwardingInputs(ctx context.Context, reader cl
 		return nil, errors.New("backend client certificates on a Gateway require BackendTLSPolicy observation")
 	}
 	routes = slices.Clone(routes)
+	var originalRulePositions map[types.UID][]int
 	for i := range routes {
-		if rules, dropped := r.projectedHTTPFilterRules(&routes[i]); dropped != "" {
+		if !r.hasProjectableRules(&routes[i]) {
+			continue
+		}
+		if rules, positions, dropped, _ := r.admittedHTTPRouteRules(&routes[i]); dropped != "" {
 			routes[i].Spec.Rules = rules
+			if originalRulePositions == nil {
+				originalRulePositions = make(map[types.UID][]int)
+			}
+			originalRulePositions[routes[i].UID] = positions
 		}
 	}
 	input, err := graph.CollectBackendInputsWithNamespaces(ctx, reader, gateway, routes, namespaces)
@@ -333,6 +341,8 @@ func (r *Reconciler) collectRouteForwardingInputs(ctx context.Context, reader cl
 	input.BackendRequestFilters = r.Config.BackendRequestFilters && r.Config.WeightedHTTPTargets
 	input.BackendResponseHeaders = r.Config.ResponseHeaderModifier && r.Config.WeightedHTTPTargets
 	input.BackendH2C = r.Config.BackendH2C
+	input.RouteSessionPersistence = r.Config.RouteSessionPersistenceEnabled()
+	input.OriginalRulePositions = originalRulePositions
 	tlsObserver := graph.NewBackendTLSObserver(reader, r.Config.ClusterTrustBundles)
 	input.EnableXBackend = r.Config.XBackendEnabled()
 	if input.EnableXBackend {

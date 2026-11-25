@@ -98,6 +98,7 @@ type ProviderConfig struct {
 	PollInterval           time.Duration
 
 	XBackendSessionPersistence bool
+	RouteSessionPersistence    bool
 
 	HTTPSListenerIsolation  bool
 	InitialL7Rules          bool
@@ -142,6 +143,7 @@ type Provider struct {
 	pollInterval           time.Duration
 
 	xBackendSessionPersistence bool
+	routeSessionPersistence    bool
 
 	httpsListenerIsolation  bool
 	initialL7Rules          bool
@@ -192,6 +194,7 @@ func NewProvider(serviceClients ServiceClients, cfg ProviderConfig) *Provider {
 		pollInterval:           cfg.PollInterval,
 
 		xBackendSessionPersistence: cfg.XBackendSessionPersistence,
+		routeSessionPersistence:    cfg.RouteSessionPersistence,
 
 		httpsListenerIsolation:  cfg.HTTPSListenerIsolation,
 		initialL7Rules:          cfg.InitialL7Rules,

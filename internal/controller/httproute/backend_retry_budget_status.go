@@ -138,15 +138,25 @@ func (r *backendRetryBudgetStatusReconciler) observeRetryPolicy(ctx context.Cont
 		}
 		conditions := make([]metav1.Condition, 0, len(consumers))
 		for key, consumer := range consumers {
-			used[key] = true
 			target := targets[key]
+			if persistence != nil && consumer.inlinePrimary && !consumer.httpPrimary && !consumer.grpcPrimary {
+				// Inline persistence replaces this policy's affinity, while a
+				// separately configured retry budget still uses the Service.
+				if policy.Spec.RetryConstraint == nil {
+					continue
+				}
+				target.persistence = metav1.Condition{}
+			}
+			used[key] = true
 			if target.persistence.Status == metav1.ConditionTrue {
 				target.persistence = r.servicePersistenceConsumerCondition(policy, target.persistence, gateway, consumer, persistence)
 			}
 			conditions = append(conditions, target.condition(policy))
 		}
-		key := retryPolicyAncestor{group: gatewayv1.GroupName, kind: "Gateway", namespace: gateway.Namespace, name: gateway.Name}
-		status[key] = retryPolicyGatewayCondition(policy, conditions)
+		if len(conditions) != 0 {
+			key := retryPolicyAncestor{group: gatewayv1.GroupName, kind: "Gateway", namespace: gateway.Namespace, name: gateway.Name}
+			status[key] = retryPolicyGatewayCondition(policy, conditions)
+		}
 	}
 	for key, target := range targets {
 		condition := target.condition(policy)
@@ -246,8 +256,9 @@ func (r *backendRetryBudgetStatusReconciler) servicePersistenceCondition(policy 
 }
 
 type retryPolicyConsumer struct {
-	httpPrimary bool
-	grpcPrimary bool
+	httpPrimary   bool
+	grpcPrimary   bool
+	inlinePrimary bool
 }
 
 func (r *backendRetryBudgetStatusReconciler) servicePersistenceConsumerCondition(policy *gatewayx.XBackendTrafficPolicy, accepted metav1.Condition, gateway *gatewayv1.Gateway, consumer retryPolicyConsumer, persistence *gatewayv1.SessionPersistence) metav1.Condition {
@@ -343,6 +354,12 @@ func (r *backendRetryBudgetStatusReconciler) retryPolicyConsumers(ctx context.Co
 		return nil, err
 	}
 	inputs.admission = admission
+	var mode cloud.MemberMode
+	if controller.HasGatewayTopologyBinding(r.routes.Config, gateway) && r.routes.Config.RouteSessionPersistenceEnabled() {
+		if topology, err := controller.StoredGatewayTopology(r.routes.Config, gateway); err == nil {
+			mode = topology.Topology.MemberMode
+		}
+	}
 	consumers := make(map[types.NamespacedName]retryPolicyConsumer)
 	for i := range candidates {
 		route := &candidates[i]
@@ -354,14 +371,15 @@ func (r *backendRetryBudgetStatusReconciler) retryPolicyConsumers(ctx context.Co
 			}
 			return nil, err
 		}
+		matches, rules, _ = r.routes.excludeIncompatibleInlineRules(route, inputs, matches, rules, mode)
 		for backend := range activeRetryBudgetBackends(matches, rules, retryBudgetTransportSelectable) {
 			if _, targeted := targets[backend.Service]; targeted {
-				if _, present := consumers[backend.Service]; !present {
-					consumers[backend.Service] = retryPolicyConsumer{}
-				}
+				consumer := consumers[backend.Service]
+				consumer.inlinePrimary = consumer.inlinePrimary || backend.RouteSessionPersistence != nil
+				consumers[backend.Service] = consumer
 			}
 		}
-		for backend := range activeServiceBackends(matches, rules, retryBudgetTransportSelectable, false) {
+		for backend := range activeServicePersistenceBackends(matches, rules, retryBudgetTransportSelectable) {
 			if _, targeted := targets[backend.Service]; targeted {
 				consumer := consumers[backend.Service]
 				if model.HTTPProfileRouteKind(route) == model.GRPCRouteKind {

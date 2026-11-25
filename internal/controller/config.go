@@ -116,6 +116,8 @@ type Config struct {
 	XBackendServiceDNSDomains []string
 	// XBackendSessionPersistence enables HTTP pool session persistence for XBackend and Service policies.
 	XBackendSessionPersistence bool
+	// RouteSessionPersistence enables inline session persistence on HTTPRoute and GRPCRoute rules.
+	RouteSessionPersistence bool
 	// XBackendClientCertificate enables the operator's separate XBackend client identity map.
 	XBackendClientCertificate bool
 	// ControllerVersion is recorded as trace metadata on cloud resources.
@@ -149,6 +151,10 @@ func (c Config) XBackendEnabled() bool {
 
 func (c Config) XBackendSessionPersistenceEnabled() bool {
 	return c.XBackendEnabled() && c.XBackendSessionPersistence
+}
+
+func (c Config) RouteSessionPersistenceEnabled() bool {
+	return c.RouteSessionPersistence && c.GatewayAPIChannel == features.FeatureChannelExperimental
 }
 
 func (c Config) RoutedXBackendEnabled(class gatewayv1.ObjectName) bool {
@@ -200,6 +206,9 @@ func (c Config) TLSRoutesEnabled() bool {
 
 // Validate rejects configuration that could make ownership ambiguous.
 func (c Config) Validate() error {
+	if c.RouteSessionPersistence && !c.RouteSessionPersistenceEnabled() {
+		return fmt.Errorf("--experimental-route-session-persistence requires --gateway-api-channel=experimental")
+	}
 	if c.XBackendSessionPersistence && !c.XBackendEnabled() {
 		return fmt.Errorf("--octavia-xbackend-session-persistence requires --gateway-api-channel=experimental")
 	}

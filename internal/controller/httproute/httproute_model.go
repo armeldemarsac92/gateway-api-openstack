@@ -86,7 +86,7 @@ func (r *Reconciler) validateRouteStructure(route *gatewayv1.HTTPRoute) ([]gatew
 	if len(route.Spec.Rules) == 0 {
 		return nil, newRouteBuildError(routeErrorUnsupported, "at least one HTTPRoute rule is required")
 	}
-	rules, _, err := r.admittedHTTPRouteRules(route)
+	rules, _, _, err := r.admittedHTTPRouteRules(route)
 	if err != nil {
 		return nil, err
 	}
@@ -99,49 +99,51 @@ func (r *Reconciler) validateRouteStructure(route *gatewayv1.HTTPRoute) ([]gatew
 	return references, nil
 }
 
-// admittedHTTPRouteRules drops invalid rules when a route with request filters also
-// contains valid rules. Keep the published object available for status and
-// create a projection with only admitted rules for backend reads and writes.
-func (r *Reconciler) admittedHTTPRouteRules(route *gatewayv1.HTTPRoute) ([]gatewayv1.HTTPRouteRule, string, error) {
+// admittedHTTPRouteRules retains valid siblings of rules with unsupported
+// request filters or inline persistence. Return their original positions.
+func (r *Reconciler) admittedHTTPRouteRules(route *gatewayv1.HTTPRoute) ([]gatewayv1.HTTPRouteRule, []int, string, error) {
 	kind := model.HTTPProfileRouteKind(route)
 	grpc := kind == model.GRPCRouteKind
 	partial := !grpc && hasProjectableHTTPFilters(route)
 	var first error
 	var dropped []string
 	var valid []gatewayv1.HTTPRouteRule
+	var positions []int
 	for index, rule := range route.Spec.Rules {
 		if _, diagnostic := model.NormalizeHTTPRequestPolicy(rule, !grpc && r.Config.HTTPRequestPolicy); diagnostic != nil {
-			return nil, "", newRouteBuildError(routeErrorUnsupported, "%s", diagnostic.Message)
+			return nil, nil, "", newRouteBuildError(routeErrorUnsupported, "%s", diagnostic.Message)
 		}
-		err := r.validateRouteRule(rule, kind)
+		persistence := model.ValidateRouteSessionPersistence(rule, kind, r.Config.RouteSessionPersistenceEnabled())
+		err := routeActionError(persistence)
+		if err == nil {
+			err = r.validateRouteRule(rule, kind)
+		}
 		if err == nil {
 			valid = append(valid, rule)
+			positions = append(positions, index)
 			continue
 		}
+		partialPersistence := persistence != nil && r.Config.RouteSessionPersistenceEnabled()
 		var buildError *routeBuildError
-		if !partial || errors.As(err, &buildError) && buildError.kind == routeErrorUnknownFilter ||
+		if !partialPersistence && (!partial || errors.As(err, &buildError) && buildError.kind == routeErrorUnknownFilter ||
 			!r.Config.FixedHTTPResponses && !r.Config.WeightedHTTPTargets &&
 				slices.ContainsFunc(rule.BackendRefs, func(backend gatewayv1.HTTPBackendRef) bool {
 					return model.UnresolvedHTTPBackendExtension(backend) != nil
-				}) {
-			return nil, "", err
+				})) {
+			return nil, nil, "", err
 		}
 		if first == nil {
 			first = err
 		}
-		ruleName := strconv.Itoa(index + 1)
-		if rule.Name != nil {
-			ruleName = string(*rule.Name)
-		}
-		dropped = append(dropped, fmt.Sprintf("%s (%v)", ruleName, err))
+		dropped = append(dropped, droppedRule(rule, index, err.Error()))
 	}
 	if len(dropped) == 0 {
-		return route.Spec.Rules, "", nil
+		return route.Spec.Rules, nil, "", nil
 	}
 	if len(valid) == 0 {
-		return nil, "", first
+		return nil, nil, "", first
 	}
-	return valid, "Dropped Rule " + strings.Join(dropped, ", "), nil
+	return valid, positions, "Dropped Rule " + strings.Join(dropped, ", "), nil
 }
 
 func hasProjectableHTTPFilters(route *gatewayv1.HTTPRoute) bool {
@@ -155,15 +157,37 @@ func hasProjectableHTTPFilters(route *gatewayv1.HTTPRoute) bool {
 }
 
 func (r *Reconciler) projectedHTTPFilterRules(route *gatewayv1.HTTPRoute) ([]gatewayv1.HTTPRouteRule, string) {
-	if hasProjectableHTTPFilters(route) {
-		if valid, dropped, _ := r.admittedHTTPRouteRules(route); dropped != "" {
+	if r.hasProjectableRules(route) {
+		if valid, _, dropped, _ := r.admittedHTTPRouteRules(route); dropped != "" {
 			return valid, dropped
 		}
 	}
 	return route.Spec.Rules, ""
 }
 
+func (r *Reconciler) hasProjectableRules(route *gatewayv1.HTTPRoute) bool {
+	return hasProjectableHTTPFilters(route) || r.hasInlinePersistence(route)
+}
+
+func (r *Reconciler) hasInlinePersistence(route *gatewayv1.HTTPRoute) bool {
+	return r.Config.RouteSessionPersistenceEnabled() && slices.ContainsFunc(route.Spec.Rules, func(rule gatewayv1.HTTPRouteRule) bool {
+		return model.RouteRulePersistence(rule) != nil
+	})
+}
+
+func droppedRule(rule gatewayv1.HTTPRouteRule, position int, message string) string {
+	name := strconv.Itoa(position + 1)
+	if rule.Name != nil {
+		name = string(*rule.Name)
+	}
+	return fmt.Sprintf("%s (%s)", name, message)
+}
+
 func (r *Reconciler) usesHTTPBackendGroups(route *gatewayv1.HTTPRoute) bool {
+	// A valid sibling must keep its ordinary pool when another rule drops out.
+	if r.hasInlinePersistence(route) {
+		return true
+	}
 	rules, _ := r.projectedHTTPFilterRules(route)
 	if r.Config.FixedHTTPResponses || r.Config.WeightedHTTPTargets || len(rules) > 1 {
 		return true
@@ -202,9 +226,6 @@ func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, kind gatewa
 	exactHeaders := r.Config.HTTPHeaderExact
 	exactQueryParams := r.Config.HTTPQueryParamExact && r.Config.FixedHTTPResponses && !grpc
 	methodMatch := r.Config.HTTPMethodMatch && !grpc
-	if rule.SessionPersistence != nil { //nolint:staticcheck // The release still serves this deprecated Experimental field.
-		return newRouteBuildError(routeErrorUnsupported, "session persistence is not supported")
-	}
 	if len(rule.Filters) != 0 || !fixedResponses && !weightedTargets {
 		if err := r.compileRouteAction(rule, kind); err != nil {
 			return err
@@ -357,6 +378,8 @@ type routeModelDiagnostics struct {
 	backend                 model.Diagnostic
 	corsFallback            bool
 	retryBudgetAncestorFull bool
+	droppedInlineRules      string
+	backendTLSAncestorSlot  backendtls.AncestorSlot
 }
 
 func (r *Reconciler) buildRouteModelFromInputs(
@@ -374,6 +397,10 @@ func (r *Reconciler) buildRouteModelFromInputs(
 	topology, err := controller.StoredGatewayTopology(r.Config, gateway)
 	if err != nil {
 		return cloud.RouteSpec{}, routeModelDiagnostics{}, err
+	}
+	matches, rules, dropped := r.excludeIncompatibleInlineRules(route, inputs, matches, rules, topology.Topology.MemberMode)
+	if len(rules) == 0 && dropped != "" {
+		return cloud.RouteSpec{}, routeModelDiagnostics{}, newRouteBuildError(routeErrorUnsupported, "%s", dropped)
 	}
 	admitted, err := gatewaycontroller.HTTPRouteListeners(r.Config, gateway)
 	if err != nil {
@@ -405,7 +432,11 @@ func (r *Reconciler) buildRouteModelFromInputs(
 		ports[0], ports[index] = ports[index], ports[0]
 	}
 	var desired cloud.RouteSpec
-	diagnostics := routeModelDiagnostics{retryBudgetAncestorFull: inputs.retryBudgetAncestorFull(matches, rules, model.HTTPProfileRouteKind(route) == model.GRPCRouteKind)}
+	diagnostics := routeModelDiagnostics{
+		droppedInlineRules:      dropped,
+		backendTLSAncestorSlot:  routeBackendTLSAncestorSlot(rules),
+		retryBudgetAncestorFull: inputs.retryBudgetAncestorFull(matches, rules, model.HTTPProfileRouteKind(route) == model.GRPCRouteKind),
+	}
 	for i, port := range ports {
 		spec, portDiagnostics, err := r.buildRoutePortModel(ctx, reader, route, gateway, *portListeners[port], inputs, topology, portMatches[port], rules)
 		if err != nil {
@@ -421,6 +452,44 @@ func (r *Reconciler) buildRouteModelFromInputs(
 		}
 	}
 	return desired, diagnostics, nil
+}
+
+func (r *Reconciler) excludeIncompatibleInlineRules(route *gatewayv1.HTTPRoute, inputs *routeModelInputs, matches []routeLoweredMatch, rules []model.Rule, mode cloud.MemberMode) ([]routeLoweredMatch, []model.Rule, string) {
+	if !r.hasInlinePersistence(route) {
+		return matches, rules, ""
+	}
+	var dropped []string
+	admitted := make(map[int]int)
+	var retained []model.Rule
+	for _, rule := range rules {
+		reject := slices.ContainsFunc(rule.Backends, func(backend model.BackendGroup) bool {
+			return backend.RouteSessionPersistence != nil && backend.Diagnostic == nil && backend.FilterDiagnostic == nil &&
+				backend.Weight > 0 && (mode != "" && mode != cloud.MemberModeEndpoint || backend.BackendTLS.Winner != nil)
+		})
+		if reject {
+			position := rule.Index
+			if original := inputs.input.OriginalRulePositions[route.UID]; len(original) > position {
+				position = original[position]
+			}
+			dropped = append(dropped, droppedRule(route.Spec.Rules[position], position,
+				"rule sessionPersistence requires an Endpoint member pool with a cleartext HTTP or h2c backend"))
+			continue
+		}
+		admitted[rule.Index] = len(retained)
+		rule.Index = len(retained)
+		retained = append(retained, rule)
+	}
+	if len(dropped) == 0 {
+		return matches, rules, ""
+	}
+	projection := make([]routeLoweredMatch, 0, len(matches))
+	for _, match := range matches {
+		if index, ok := admitted[match.RuleIndex]; ok {
+			match.RuleIndex = index
+			projection = append(projection, match)
+		}
+	}
+	return projection, retained, "Dropped Rule " + strings.Join(dropped, ", ")
 }
 
 func (r *Reconciler) buildRoutePortModel(
@@ -522,6 +591,15 @@ type backendKey struct {
 	kind   cloud.HTTPBackendKind
 	object types.NamespacedName
 	port   int
+	rule   string
+}
+
+func servicePoolKey(backend model.BackendGroup) backendKey {
+	key := backendKey{object: backend.Service, port: int(ptr.Deref(backend.Reference.Port, 0))}
+	if backend.RouteSessionPersistence != nil {
+		key.rule = backend.RouteSessionPersistence.Rule
+	}
+	return key
 }
 
 type httpBackendResolution struct {
@@ -675,8 +753,7 @@ func (inputs *routeModelInputs) attachHTTPBackendRetryBudgets(spec *cloud.RouteS
 		return
 	}
 	for backend := range activeRetryBudgetBackends(matches, rules, inputs.retryBudgetTransportUsable(spec.GRPC)) {
-		key := backendKey{object: backend.Service, port: int(ptr.Deref(backend.Reference.Port, 0))}
-		resolved := groups[key]
+		resolved := groups[servicePoolKey(backend)]
 		if resolved.index == nil || resolved.diagnostic.Reason != "" {
 			continue
 		}
@@ -690,8 +767,8 @@ func (inputs *routeModelInputs) attachHTTPServicePersistence(spec *cloud.RouteSp
 		return false
 	}
 	full := false
-	for backend := range activeServiceBackends(matches, rules, inputs.retryBudgetTransportUsable(spec.GRPC), false) {
-		resolved := groups[backendKey{object: backend.Service, port: int(ptr.Deref(backend.Reference.Port, 0))}]
+	for backend := range activeServicePersistenceBackends(matches, rules, inputs.retryBudgetTransportUsable(spec.GRPC)) {
+		resolved := groups[servicePoolKey(backend)]
 		if resolved.index == nil || resolved.diagnostic.Reason != "" {
 			continue
 		}
@@ -765,7 +842,7 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 		}
 		return nil, model.Diagnostic{Reason: string(gatewayv1.RouteReasonBackendNotFound), Message: "backendRef does not identify a Service port"}, nil
 	}
-	key := backendKey{object: backend.Service, port: int(ptr.Deref(backend.Reference.Port, 0))}
+	key := servicePoolKey(backend)
 	port := key.port
 	if backend.XBackend.Name != "" {
 		key = backendKey{kind: cloud.HTTPBackendKindXBackend, object: backend.XBackend}
@@ -819,14 +896,25 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 			(key.kind == cloud.HTTPBackendKindXBackend || r.Config.WeightedHTTPTargets ||
 				result.diagnostic.Reason == string(gatewayv1.RouteReasonRefNotPermitted) ||
 				result.diagnostic.Reason == string(gatewayv1.RouteReasonBackendNotFound))
+		var persistence *cloud.ServiceSessionPersistence
+		var persistenceServiceUID string
+		if key.rule != "" {
+			persistenceServiceUID = string(backend.ServiceUID)
+		}
+		if !invalid && tls == nil && backend.Weight > 0 && backend.RouteSessionPersistence != nil {
+			persistence = backend.RouteSessionPersistence.Settings
+		}
 		spec.HTTPBackends = append(spec.HTTPBackends, cloud.HTTPBackend{
 			Kind: key.kind, Namespace: key.object.Namespace, Name: key.object.Name, Port: port,
-			RoutedExternal:        backend.XBackendRoutedExternal && !invalidReference,
-			SessionCookieName:     backend.XBackendCookieName,
-			SessionCookiePath:     backend.XBackendCookiePath,
-			SessionCookieDeadline: backend.XBackendCookieDeadline,
-			SessionHeader:         backend.XBackendSessionHeader,
-			Members:               members, Unavailable: len(members) == 0, InvalidReference: invalidReference,
+			SessionPersistenceRule:       key.rule,
+			SessionPersistenceServiceUID: persistenceServiceUID,
+			ServiceSessionPersistence:    persistence,
+			RoutedExternal:               backend.XBackendRoutedExternal && !invalidReference,
+			SessionCookieName:            backend.XBackendCookieName,
+			SessionCookiePath:            backend.XBackendCookiePath,
+			SessionCookieDeadline:        backend.XBackendCookieDeadline,
+			SessionHeader:                backend.XBackendSessionHeader,
+			Members:                      members, Unavailable: len(members) == 0, InvalidReference: invalidReference,
 			BackendH2C: !invalid && tls == nil && backend.UsesH2C(), BackendH2CPending: h2cPending, BackendTLS: tls,
 			XBackendClientCertificateReference: clientCertificate,
 		})

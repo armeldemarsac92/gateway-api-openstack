@@ -70,6 +70,8 @@ type Request struct {
 	HTTPRouteBackendDiagnostic *model.Diagnostic
 	// HTTPRouteCORSFallback binds partial rule status to the same observation.
 	HTTPRouteCORSFallback *bool
+	// HTTPRouteDroppedInlineRules binds rejection of inline rules to the same transport observation.
+	HTTPRouteDroppedInlineRules *string
 	// HTTPRouteBackendTLSAncestorSlot binds route status to the writer's slot observation.
 	HTTPRouteBackendTLSAncestorSlot *backendtls.AncestorSlot
 	// HTTPRouteUsesXBackendClientTLS binds deferred status to the observed TLS mode.

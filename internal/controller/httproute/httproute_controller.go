@@ -464,6 +464,7 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 			}
 		}
 		if graphResult.usesXBackendClientTLS || !graphResult.ObservationDeferred || !xBackendRevisionCurrent || !serviceRevisionCurrent || graphResult.retryBudgetAncestorFull ||
+			graphResult.droppedInlineRules != "" ||
 			graphResult.backendTLSAncestorSlot != backendtls.AncestorSlotHeld ||
 			graphResult.BackendSessionPersistenceIssue >= cloud.SessionPersistenceUnverified ||
 			r.currentRouteProgrammedCondition(httpRoute, parent.ref) == nil ||
