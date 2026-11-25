@@ -1,0 +1,39 @@
+{
+  "channel": "standard",
+  "scope": "signed",
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+  "kubernetesVersion": "v1.36.2",
+  "schema": {
+    "servesExternalAuth": false,
+    "sha256": "e81367d0d592831956921a7fb9151e98e88276d277b639812cc5e7937d38069c",
+    "servesForwardBody": false,
+    "rejectedForwardBodyRouteOnServerDryRun": true,
+    "acceptedPublicRoute": true
+  },
+  "controller": {
+    "sourceRevision": "13a6870cb63abafa131527b7b1b67048d962cd57",
+    "managerSHA256": "503fb37ac7f738c3e1fe55853423472bff8966c67c0fd44ca6a203e9c7dcb3f1",
+    "manifestDigest": "sha256:3c4eb3b1be49b95133f447be47b107a56730d3046b1dd995895108bf5e5f713b",
+    "ociArchiveSHA256": "70ac3cde8b42981aac14c41edfea4ae75b092ae2e01e47a282310478bb98b24d"
+  },
+  "octavia": {
+    "revision": "e62a57c49177d6f3bc3e2434c1897d2bf7d66543",
+    "version": "19.0.1.dev99",
+    "sha256": "33cc7ef8de6f0372e711ce4a7b1f23bf6a8b07a34c30808b7ff442e9b4c82f90",
+    "filesVerified": 673
+  },
+  "octaviaLib": {
+    "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+    "version": "3.12.1.dev22",
+    "sha256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882",
+    "filesVerified": 24
+  },
+  "HAProxy": {
+    "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1",
+    "sha256": "dd6589aa8976a37646e8b5649862c0dc4c92d3439a6e9591fe24249fdcfe535f",
+    "nativeExternalAuth": true
+  },
+  "passed": true,
+  "case": "HTTPRoute ExternalAuth.forwardBody"
+}

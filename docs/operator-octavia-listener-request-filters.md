@@ -89,7 +89,7 @@ shared port, the HTTP authority must also select the same section before
 any check runs. A port enrolled in shared-listener isolation keeps that check when just one
 section remains. A dedicated port outside shared-listener isolation preserves
 the HTTP authority for the authorizer and the route. The native HAProxy fixture covers uploads over
-HTTP/1.1 and negotiated HTTP/2 on a shared TLS port.
+HTTP/1.1 and negotiated HTTP/2 on a shared TLS port. [Gateway and native HAProxy results](qualification/v1.7.0/provider/gateway-listener-external-auth-forward-body/README.md)
 
 ## Check a grant change
 
