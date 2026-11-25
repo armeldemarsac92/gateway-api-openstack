@@ -1370,7 +1370,9 @@ func buildRouteEnsureBackendPlan(desired desiredRoute, actual observedRouteGraph
 			}
 		}
 		if enableCookiePool {
-			nonPolicyPlan = append(nonPolicyPlan, routeMutation{kind: routeMutationUpdatePool, id: pool.ID, poolAdmin: boolPointer(true)})
+			nonPolicyPlan = append(nonPolicyPlan, routeMutation{
+				kind: routeMutationUpdatePool, id: pool.ID, poolAdmin: boolPointer(true), reenableH2CPool: actual.backendH2C,
+			})
 		}
 	}
 

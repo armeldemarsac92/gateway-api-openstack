@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-An Experimental HTTPRoute and a TCPRoute each used two default Gateways. The Standard control exercised an explicit Gateway parent. [Build record](image.json) · [Both channels](provider/default-gateways/receipt.json)
+Cookie affinity on an Experimental h2c EndpointSelector XBackend kept requests on one HTTP/2 endpoint until persistence was removed. [Build record](image.json) · [Both channels](provider/xbackend-cookie-h2c/receipt.json)
+
+An Experimental HTTPRoute and a TCPRoute each used two default Gateways. The Standard control exercised an explicit Gateway parent. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-9388be4580dd0fac002e160c3433d65cf1665a86/image.json) · [Both channels](provider/default-gateways/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-9388be4580dd0fac002e160c3433d65cf1665a86)
 
 A retiring HTTP policy and its two rules were removed in one worker transaction while the other route continued serving. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-aff86b828a53163d34dd5cab90334768b5f43408/image.json) · [Both channel results](provider/conditional-l7-removal/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-aff86b828a53163d34dd5cab90334768b5f43408)
 

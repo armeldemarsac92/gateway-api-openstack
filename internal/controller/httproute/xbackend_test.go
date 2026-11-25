@@ -453,21 +453,29 @@ func TestXBackendAndSameNamedServiceKeepSeparateWeightedTargets(t *testing.T) {
 	t.Run("Cookie", func(t *testing.T) {
 		testWeightedXBackendPersistence(t, &gatewayv1.SessionPersistence{Cookie: &gatewayv1.CookieConfig{
 			Name: ptr.To(gatewayv1.CookieName("reports_session")), Path: ptr.To("/"),
-		}})
+		}}, nil)
+	})
+	t.Run("Cookie over h2c", func(t *testing.T) {
+		testWeightedXBackendPersistence(t, &gatewayv1.SessionPersistence{Cookie: &gatewayv1.CookieConfig{
+			Name: ptr.To(gatewayv1.CookieName("reports_session")), Path: ptr.To("/"),
+		}}, ptr.To(gatewayx.BackendProtocolH2C))
 	})
 	t.Run("Header", func(t *testing.T) {
 		testWeightedXBackendPersistence(t, &gatewayv1.SessionPersistence{
 			Type: ptr.To(gatewayv1.HeaderBasedSessionPersistence), Header: &gatewayv1.HeaderConfig{Name: "X-Reports-Session"},
 			AbsoluteTimeout: ptr.To(gatewayv1.Duration("2s")),
-		})
+		}, nil)
 	})
 }
 
-func testWeightedXBackendPersistence(t *testing.T, persistence *gatewayv1.SessionPersistence) {
+func testWeightedXBackendPersistence(t *testing.T, persistence *gatewayv1.SessionPersistence, protocol *gatewayx.BackendProtocol) {
 	t.Helper()
 	f := newRouteModelInputFixture(t)
 	f.reconciler.Config.GatewayAPIChannel = "experimental"
 	f.reconciler.Config.XBackendSessionPersistence = true
+	h2c := ptr.Deref(protocol, "") == gatewayx.BackendProtocolH2C
+	f.reconciler.Config.BackendH2C = h2c
+	f.reconciler.BackendH2CAvailable = func(context.Context) (bool, error) { return true, nil }
 	f.reconciler.Config.FixedHTTPResponses, f.reconciler.Config.WeightedHTTPTargets = true, true
 	if err := gatewayx.Install(f.client.Scheme()); err != nil {
 		t.Fatal(err)
@@ -478,6 +486,7 @@ func testWeightedXBackendPersistence(t *testing.T, persistence *gatewayv1.Sessio
 			Type:               gatewayx.BackendTypeEndpointSelector,
 			Port:               gatewayx.BackendPort{Number: gatewayx.PortNumber(f.service.Spec.Ports[0].Port)},
 			SessionPersistence: persistence,
+			Protocol:           protocol,
 			EndpointSelector: &gatewayx.EndpointSelectorBackend{LabelSelector: gatewayx.LabelSelector{
 				MatchLabels: map[gatewayv1.LabelKey]gatewayv1.LabelValue{"app": "direct"},
 			}},
@@ -510,6 +519,7 @@ func testWeightedXBackendPersistence(t *testing.T, persistence *gatewayv1.Sessio
 		!reflect.DeepEqual(spec.HTTPBackends[1].Members, []cloud.Member{{Address: pod.Status.PodIP, Port: int(backend.Spec.Port.Number)}}) {
 		t.Fatalf("expected two distinct pools, got %+v", spec.HTTPBackends)
 	}
+	require.Equal(t, h2c, spec.HTTPBackends[1].BackendH2C)
 	if model.IsHeaderSessionPersistence(*persistence) {
 		require.Empty(t, spec.HTTPBackends[1].SessionCookieName)
 		require.Equal(t, &cloud.HTTPSessionHeaderPersistence{Name: "x-reports-session", TimeoutMS: ptr.To(int64(2000))}, spec.HTTPBackends[1].SessionHeader)
@@ -534,6 +544,9 @@ func testWeightedXBackendPersistence(t *testing.T, persistence *gatewayv1.Sessio
 	want := []cloud.HTTPWeightedTarget{{BackendIndex: ptr.To(0), Weight: 3}, {BackendIndex: ptr.To(1), Weight: 7}}
 	if len(spec.WeightedHTTPRules) != 1 || !reflect.DeepEqual(spec.WeightedHTTPRules[0].Targets, want) {
 		t.Fatalf("expected weighted targets %+v, got %+v", want, spec.WeightedHTTPRules)
+	}
+	if h2c && !model.IsHeaderSessionPersistence(*persistence) {
+		testXBackendCookieH2CCapabilities(t, f)
 	}
 	inputs, err := f.reconciler.collectRouteModelInputs(t.Context(), f.reader, f.gateway, []gatewayv1.HTTPRoute{*f.route}, nil)
 	if err != nil {
@@ -563,6 +576,37 @@ func testWeightedXBackendPersistence(t *testing.T, persistence *gatewayv1.Sessio
 		!reflect.DeepEqual(spec.WeightedHTTPRules[0].Targets, []cloud.HTTPWeightedTarget{{BackendIndex: ptr.To(0), Weight: 3}, {Weight: 7}}) ||
 		f.reader.counts["XBackend"] != 0 || f.reader.counts["Pod"] != 0 || f.reader.counts["ReferenceGrant"] != 0 {
 		t.Fatalf("foreign XBackend changed the authorized Service or caused reads: graph %+v, reads %v", spec, f.reader.counts)
+	}
+}
+
+func testXBackendCookieH2CCapabilities(t *testing.T, f *routeModelInputFixture) {
+	t.Helper()
+	r := f.reconciler
+	for _, phase := range []struct {
+		name   string
+		h2c    bool
+		cookie bool
+		reason gatewayv1.RouteConditionReason
+	}{
+		{"h2c unavailable", false, true, gatewayv1.RouteReasonUnsupportedProtocol},
+		{"cookie unavailable", true, false, gatewayv1.RouteReasonUnsupportedValue},
+		{"both available", true, true, gatewayv1.RouteReasonResolvedRefs},
+	} {
+		t.Run(phase.name, func(t *testing.T) {
+			r.BackendH2CAvailable = func(context.Context) (bool, error) { return phase.h2c, nil }
+			r.XBackendCookieAvailable = func(_ context.Context, requirements cloud.HTTPSessionCookieRequirements) (bool, error) {
+				require.Equal(t, cloud.HTTPSessionCookieNamed, requirements)
+				return phase.cookie, nil
+			}
+			want := metav1.ConditionTrue
+			if !phase.h2c || !phase.cookie {
+				want = metav1.ConditionFalse
+			}
+			status := programmedRouteStatus()
+			require.NoError(t, r.resolveRouteReferences(t.Context(), f.route, f.gateway, &status))
+			require.Equal(t, want, status.resolved)
+			require.Equal(t, string(phase.reason), status.resolvedReason)
+		})
 	}
 }
 
@@ -789,7 +833,10 @@ func TestXBackendCookieRejectsUnsupportedContract(t *testing.T) {
 		name string
 		edit func(*gatewayx.BackendSpec, *model.XBackendProfile)
 	}{
-		{"disabled", func(_ *gatewayx.BackendSpec, p *model.XBackendProfile) { p.SessionPersistence = false }},
+		{"cookie disabled", func(b *gatewayx.BackendSpec, p *model.XBackendProfile) {
+			b.Protocol = ptr.To(gatewayx.BackendProtocolH2C)
+			p.SessionPersistence = false
+		}},
 		{"header", func(b *gatewayx.BackendSpec, _ *model.XBackendProfile) {
 			b.SessionPersistence.Type = ptr.To(gatewayv1.HeaderBasedSessionPersistence)
 		}},
@@ -820,8 +867,14 @@ func TestXBackendCookieRejectsUnsupportedContract(t *testing.T) {
 		{"unsafe cookie name", func(b *gatewayx.BackendSpec, _ *model.XBackendProfile) {
 			b.SessionPersistence.Cookie.Name = ptr.To(gatewayv1.CookieName("invalid;name"))
 		}},
-		{"h2c", func(b *gatewayx.BackendSpec, _ *model.XBackendProfile) {
+		{"h2c disabled", func(b *gatewayx.BackendSpec, p *model.XBackendProfile) {
 			b.Protocol = ptr.To(gatewayx.BackendProtocolH2C)
+			p.H2C = false
+		}},
+		{"HTTP2 with TLS", func(b *gatewayx.BackendSpec, p *model.XBackendProfile) {
+			b.Protocol = ptr.To(gatewayx.BackendProtocolHTTP2)
+			b.TLS = &gatewayx.BackendTLS{Mode: gatewayx.BackendTLSModeServerOnly, Validation: &gatewayv1.BackendTLSPolicyValidation{Hostname: "reports.example.test"}}
+			p.ServerTLS = true
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
