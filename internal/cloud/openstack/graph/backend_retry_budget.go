@@ -26,9 +26,14 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
 )
 
-// Discovery failure preserves configured budgets and allows ordinary HTTP
-// reconciliation to continue. An explicit withdrawal never requires the
-// advertised capability for new writes.
+var (
+	errBackendRetryBudgetAncestor   = errors.New("waiting for the Gateway ancestor of the Service retry budget")
+	errBackendRetryBudgetCapability = errors.New("waiting for Octavia Service retry budget capability")
+	errBackendRetryBudgetReadback   = errors.New("waiting for a valid Octavia Service retry budget readback")
+)
+
+// Discovery failure preserves the observed budget and holds only a pool
+// whose requested budget cannot be verified. Withdrawals need no discovery.
 func (p *Provider) observeBackendRetryBudgetCapability(ctx context.Context, desired *desiredGatewayGraph, actual observedGatewayGraph) {
 	if !p.backendRetryBudget || actual.loadBalancer == nil || desired.protocol != cloud.ListenerProtocolHTTP {
 		return
@@ -58,17 +63,29 @@ func (p *Provider) observeBackendRetryBudgetCapability(ctx context.Context, desi
 }
 
 func planBackendRetryBudget(desired desiredRoute, observed observedRouteGraph) (*routeMutation, error) {
-	if observed.pool == nil || observed.pool.Protocol != cloud.ListenerProtocolHTTP {
-		return nil, nil
+	if desired.spec.BackendRetryBudgetPending {
+		return nil, errBackendRetryBudgetAncestor
 	}
 	wanted := desired.spec.BackendRetryBudget
+	if observed.pool == nil {
+		if wanted != nil && !desired.backendRetryBudgetAvailable {
+			return nil, errBackendRetryBudgetCapability
+		}
+		return nil, nil
+	}
+	if observed.pool.Protocol != cloud.ListenerProtocolHTTP {
+		return nil, nil
+	}
 	current := observed.backendRetryBudget
 	if wanted != nil {
-		if !desired.backendRetryBudgetAvailable || current.Value != nil && *current.Value == *wanted {
+		switch {
+		case current.Value != nil && *current.Value == *wanted:
+			// Readback proves that Octavia already has this Service budget.
 			return nil, nil
-		}
-		if current.Present && current.Value == nil {
-			return nil, cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady, errors.New("invalid Octavia backend retry budget readback"))
+		case current.Present && current.Value == nil:
+			return nil, errBackendRetryBudgetReadback
+		case !desired.backendRetryBudgetAvailable:
+			return nil, errBackendRetryBudgetCapability
 		}
 	} else if !current.Present {
 		return nil, nil

@@ -387,6 +387,7 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 		partSpec.HTTPBackends, partSpec.HTTPRedirects, partSpec.FixedHTTPRules, partSpec.WeightedHTTPRules, partSpec.Members = nil, nil, nil, nil, backend.Members
 		partSpec.BackendH2C, partSpec.BackendTLS = backend.BackendH2C, backend.BackendTLS
 		partSpec.BackendRetryBudget = backend.BackendRetryBudget
+		partSpec.BackendRetryBudgetPending = backend.BackendRetryBudgetPending
 		part, err := p.buildDesiredRoutePart(partSpec, key, unavailable)
 		if err != nil {
 			return desiredRoute{}, err

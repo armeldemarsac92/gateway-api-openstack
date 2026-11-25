@@ -256,7 +256,7 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 	if r.Writer == nil {
 		return errors.New("gateway graph writer is required")
 	}
-	if err := r.discoverBackendRetryPolicy(manager); err != nil {
+	if err := r.discoverBackendRetryPolicy(manager.GetRESTMapper()); err != nil {
 		return err
 	}
 	if err := r.setupRouteController(manager, &gatewayv1.HTTPRoute{}, "httproute"); err != nil {

@@ -23,6 +23,9 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
+	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
+
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/pools"
 	"github.com/stretchr/testify/require"
 
@@ -102,7 +105,7 @@ func TestOctaviaServiceRetryBudgetPoolLifecycle(t *testing.T) {
 	original := currentBudget
 	currentBudget = `{"service_uid":"api-uid"}`
 	step, err = planBackendRetryBudget(wanted, observe())
-	require.ErrorContains(t, err, "invalid Octavia backend retry budget readback")
+	require.ErrorIs(t, err, errBackendRetryBudgetReadback)
 	require.Nil(t, step)
 	currentBudget = original
 
@@ -116,4 +119,84 @@ func TestOctaviaServiceRetryBudgetPoolLifecycle(t *testing.T) {
 	step, err = planBackendRetryBudget(wanted, observe())
 	require.NoError(t, err)
 	require.Nil(t, step)
+}
+
+func TestOctaviaServiceRetryBudgetHoldsOnlyAffectedFragment(t *testing.T) {
+	identity := safetyTestIdentity(t)
+	siblingValue := identity.Value()
+	siblingValue.RouteUID, siblingValue.RouteName = "sibling-uid", "sibling"
+	sibling, err := NewIdentity(siblingValue)
+	require.NoError(t, err)
+	revokedValue := identity.Value()
+	revokedValue.RouteUID, revokedValue.RouteName = "revoked-uid", "revoked"
+	revoked, err := NewIdentity(revokedValue)
+	require.NoError(t, err)
+
+	provider := &Provider{projectID: identity.Value().OpenStackProjectID}
+	spec := completeGraphSpec(identity)
+	spec.Gateway.Spec.ExternalNetworkID = ""
+	spec.Routes[0].Spec.GatewayRequirements.ExternalNetworkID = ""
+	budget := cloud.BackendRetryBudget{ServiceUID: "service-b", BudgetPercent: 20, BudgetIntervalMS: 10000, MinRetryCount: 10, MinRetryIntervalMS: 1000}
+	spec.Routes[0].Spec.BackendRetryBudget = &budget
+	siblingSpec := spec.Routes[0].Spec
+	siblingSpec.Identity, siblingSpec.PathValue, siblingSpec.BackendRetryBudget = sibling.Value(), "/sibling", nil
+	siblingSpec.Precedence = 1
+	revokedSpec := cloud.RouteSpec{Identity: revoked.Value()}
+	spec.Routes = append(spec.Routes, cloud.RouteGraphNode{Disposition: cloud.GraphEnsure, Spec: siblingSpec},
+		cloud.RouteGraphNode{Disposition: cloud.GraphDelete, Spec: revokedSpec})
+	desired, err := provider.buildDesiredGatewayGraph(spec)
+	require.NoError(t, err)
+	actual := observedGatewayGraph{
+		loadBalancer: safetyObservedLoadBalancer(),
+		listener:     &listeners.Listener{ID: "listener-1", Protocol: "HTTP", ProtocolPort: 80, AdminStateUp: true, ProvisioningStatus: "ACTIVE"},
+		protocol:     cloud.ListenerProtocolHTTP,
+		state:        cloud.GatewayState{LoadBalancerID: "load-balancer-1", ListenerID: "listener-1"},
+		routes: []observedRouteGraph{{}, {}, {policies: []observedRoutePolicy{{
+			policy: l7policies.L7Policy{ID: "revoked-policy", ListenerID: "listener-1", AdminStateUp: true, ProvisioningStatus: "ACTIVE"},
+		}}}},
+	}
+	actual.loadBalancer.AdminStateUp, actual.loadBalancer.ProvisioningStatus = true, "ACTIVE"
+	priorBudget := budget
+	priorBudget.ServiceUID = "service-a"
+	priorPool := &pools.Pool{ID: "route-pool", Protocol: "HTTP", LBMethod: "ROUND_ROBIN", AdminStateUp: true, ProvisioningStatus: "ACTIVE"}
+	for _, test := range []struct {
+		name     string
+		observed observedRouteGraph
+		hold     error
+	}{
+		{name: "reused pool still belongs to Service A", observed: observedRouteGraph{pool: priorPool,
+			backendRetryBudget: octavia.PoolBackendRetryBudget{Present: true, Value: &priorBudget}}, hold: errBackendRetryBudgetCapability},
+		{name: "provider budget is malformed", observed: observedRouteGraph{pool: priorPool,
+			backendRetryBudget: octavia.PoolBackendRetryBudget{Present: true}}, hold: errBackendRetryBudgetReadback},
+		{name: "new pool requires the capability", hold: errBackendRetryBudgetCapability},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			route := desired.routes[0]
+			actual.routes[0] = test.observed
+			steps, _, err := buildRouteEnsurePlan(route, test.observed)
+			require.ErrorIs(t, err, test.hold)
+			require.Empty(t, steps)
+
+			plan, result, err := provider.buildGatewayGraphPlan(desired, actual)
+			require.NoError(t, err)
+			require.NotEmpty(t, plan)
+			require.Equal(t, routeMutationDisablePolicy, plan[0].route.kind)
+			require.Equal(t, "revoked-policy", plan[0].route.id)
+			require.Equal(t, test.hold.Error(), result.Routes[0].Result.Outcome.Message)
+
+			withoutRevocation := actual
+			withoutRevocation.routes = append([]observedRouteGraph(nil), actual.routes...)
+			withoutRevocation.routes[2] = observedRouteGraph{}
+			plan, _, err = provider.buildGatewayGraphPlan(desired, withoutRevocation)
+			require.NoError(t, err)
+			require.NotEmpty(t, plan)
+			require.Equal(t, 1, plan[0].routeIndex)
+			require.Equal(t, routeMutationCreatePool, plan[0].route.kind)
+		})
+	}
+	verified := observedRouteGraph{pool: priorPool, backendRetryBudget: octavia.PoolBackendRetryBudget{Present: true, Value: &budget}}
+	steps, _, err := buildRouteEnsurePlan(desired.routes[0], verified)
+	require.NoError(t, err)
+	require.NotEmpty(t, steps)
+	require.Equal(t, routeMutationCreateMember, steps[0].kind)
 }

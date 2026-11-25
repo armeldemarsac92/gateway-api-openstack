@@ -281,7 +281,8 @@ const (
 // Unavailable marks an unusable target. Its matches retain their position and
 // its pool must contain no members.
 type HTTPBackend struct {
-	BackendRetryBudget *BackendRetryBudget `json:",omitempty"`
+	BackendRetryBudget        *BackendRetryBudget `json:",omitempty"`
+	BackendRetryBudgetPending bool                `json:",omitempty"`
 	// InvalidReference distinguishes an unresolved reference from a valid backend without endpoints.
 	InvalidReference bool                  `json:",omitempty"`
 	BackendH2C       bool                  `json:",omitempty"`
@@ -339,10 +340,12 @@ type HTTPWeightedRule struct {
 
 // RouteSpec describes the traffic configuration owned by one route.
 type RouteSpec struct {
-	BackendRetryBudget  *BackendRetryBudget `json:",omitempty"`
-	Identity            Identity
-	Gateway             GatewayState
-	GatewayRequirements GatewayRequirements
+	BackendRetryBudget *BackendRetryBudget `json:",omitempty"`
+	// BackendRetryBudgetPending waits for a reservable Gateway ancestor.
+	BackendRetryBudgetPending bool `json:",omitempty"`
+	Identity                  Identity
+	Gateway                   GatewayState
+	GatewayRequirements       GatewayRequirements
 	// BackendTLSObserved records a current policy inventory for this route.
 	// Only such an observation can release a previously protected backend.
 	BackendTLSObserved bool `json:"-"`

@@ -1001,8 +1001,21 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 }
 
 func buildRouteEnsurePlanWithActivations(desired desiredRoute, actual observedRouteGraph, batchActivations bool) ([]routeMutation, cloud.RouteState, error) {
+	budgetStep, budgetErr := planBackendRetryBudget(desired, actual)
 	if step := desired.backendTLS.poolMutation(desired, actual); step != nil {
-		return []routeMutation{*step}, routeStateFromObservation(actual), nil
+		state := routeStateFromObservation(actual)
+		switch {
+		case step.kind == routeMutationCreatePool && budgetErr != nil:
+			return nil, state, budgetErr
+		case step.poolAdmin != nil && *step.poolAdmin && desired.backendTLS.allowsMembers():
+			if budgetErr != nil {
+				return nil, state, budgetErr
+			}
+			if budgetStep != nil {
+				return []routeMutation{*budgetStep}, state, nil
+			}
+		}
+		return []routeMutation{*step}, state, nil
 	}
 	if !desired.backendTLS.allowsMembers() && !desired.backendTLS.denies() {
 		return nil, routeStateFromObservation(actual), nil
@@ -1026,14 +1039,16 @@ func buildRouteEnsurePlanWithActivations(desired desiredRoute, actual observedRo
 			}
 			return steps, state, nil
 		}
-		step, err := planBackendRetryBudget(desired, actual)
-		if step != nil {
-			return []routeMutation{*step}, state, nil
+		if budgetStep != nil {
+			return []routeMutation{*budgetStep}, state, nil
 		}
-		if err != nil {
-			return nil, state, err
+		if budgetErr != nil {
+			return nil, state, budgetErr
 		}
 	case actual.pool == nil:
+		if budgetErr != nil {
+			return nil, state, budgetErr
+		}
 		nonPolicyPlan = append(nonPolicyPlan, routeMutation{kind: routeMutationCreatePool})
 	default:
 		pool := actual.pool
@@ -1061,12 +1076,11 @@ func buildRouteEnsurePlanWithActivations(desired desiredRoute, actual observedRo
 				return steps, state, nil
 			}
 		}
-		step, err := planBackendRetryBudget(desired, actual)
-		if err != nil {
-			return nil, state, err
+		if budgetErr != nil {
+			return nil, routeStateFromObservation(actual), budgetErr
 		}
-		if step != nil {
-			return []routeMutation{*step}, state, nil
+		if budgetStep != nil {
+			return []routeMutation{*budgetStep}, state, nil
 		}
 		if desired.backendTLS.denies() {
 			break

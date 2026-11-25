@@ -67,6 +67,7 @@ func (a routeGraphAdmission) profileRejectedParent(key routeObjectKey) bool {
 }
 
 type routeGraphCandidate struct {
+	listeners              map[model.ListenerSection]*gatewayv1.Listener
 	routeUID, namespaceUID types.UID
 	sections               []sectionIdentity
 }
@@ -151,7 +152,8 @@ func (r *Reconciler) observeRouteGraphAdmission(ctx context.Context, gateway *ga
 		route := candidate.route
 		key := routeKey(route)
 		var sections []sectionIdentity
-		for section, listener := range candidate.selection.withoutProfileConflicts(admission.rejectedSections[key]).sections() {
+		listeners := candidate.selection.withoutProfileConflicts(admission.rejectedSections[key]).sections()
+		for section, listener := range listeners {
 			sections = append(sections, listenerSectionIdentity(section, *listener))
 		}
 		if len(sections) == 0 {
@@ -161,7 +163,7 @@ func (r *Reconciler) observeRouteGraphAdmission(ctx context.Context, gateway *ga
 			return cmp.Or(cmp.Compare(a.section.ListenerSet.Namespace, b.section.ListenerSet.Namespace),
 				cmp.Compare(a.section.ListenerSet.Name, b.section.ListenerSet.Name), cmp.Compare(a.section.Name, b.section.Name))
 		})
-		admission.eligible[key] = routeGraphCandidate{routeUID: route.UID, sections: sections, namespaceUID: candidate.namespace}
+		admission.eligible[key] = routeGraphCandidate{listeners: listeners, routeUID: route.UID, sections: sections, namespaceUID: candidate.namespace}
 		if controller.RouteClaimsGateway(r.Config, route, identity) || requested != nil && route.UID == requested.UID && routeKey(route) == routeKey(requested) {
 			admission.active = append(admission.active, *route)
 		}
@@ -260,6 +262,26 @@ func (r *Reconciler) collectRouteModelInputs(ctx context.Context, reader client.
 }
 
 func (r *Reconciler) collectRouteModelInputsForSets(ctx context.Context, reader client.Reader, gateway *gatewayv1.Gateway, routes []gatewayv1.HTTPRoute, namespaces []corev1.Namespace, sets gatewaycontroller.ListenerSetProjection) (*routeModelInputs, error) {
+	inputs, err := r.collectRouteForwardingInputs(ctx, reader, gateway, routes, namespaces, sets)
+	if err != nil {
+		return nil, err
+	}
+	if inputs.backendTLSAncestor != nil {
+		inputs.backendTLSAvailability = r.discoverBackendTLSProfiles(ctx, routes, inputs.input.BackendTLSPolicies)
+	}
+	if r.retryBudgetPolicyServed && r.Config.BackendRetryBudgetEnabled() {
+		inputs.retryBudgetAncestor = &backendtls.GatewayAncestor{Key: client.ObjectKeyFromObject(gateway), ControllerName: r.Config.ControllerName}
+		inputs.retryBudgets, err = collectBackendRetryBudgets(ctx, reader, inputs.input.Services, *inputs.retryBudgetAncestor)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return inputs, nil
+}
+
+// collectRouteForwardingInputs compiles the same admitted routes, transport
+// references and selected Service ports for planning and policy status.
+func (r *Reconciler) collectRouteForwardingInputs(ctx context.Context, reader client.Reader, gateway *gatewayv1.Gateway, routes []gatewayv1.HTTPRoute, namespaces []corev1.Namespace, sets gatewaycontroller.ListenerSetProjection) (*routeModelInputs, error) {
 	if !r.Config.BackendTLSPolicy && gatewaycontroller.BackendClientCertificateRef(gateway) != nil {
 		return nil, errors.New("backend client certificates on a Gateway require BackendTLSPolicy observation")
 	}
@@ -308,21 +330,10 @@ func (r *Reconciler) collectRouteModelInputsForSets(ctx context.Context, reader 
 			}
 		}
 	}
-	var availability map[backendTLSRequirements]backendTLSAvailability
 	var ancestor *backendtls.GatewayAncestor
 	if r.Config.BackendTLSPolicy {
 		ancestor = &backendtls.GatewayAncestor{Key: client.ObjectKeyFromObject(gateway), ControllerName: r.Config.ControllerName}
 		if err := graph.CollectBackendTLSInputs(ctx, reader, &input, ancestor); err != nil {
-			return nil, err
-		}
-		availability = r.discoverBackendTLSProfiles(ctx, routes, input.BackendTLSPolicies)
-	}
-	var retryBudgetAncestor *backendtls.GatewayAncestor
-	var retryBudgets map[types.NamespacedName]routeRetryBudget
-	if r.retryBudgetPolicyServed && r.Config.BackendRetryBudgetEnabled() {
-		retryBudgetAncestor = &backendtls.GatewayAncestor{Key: client.ObjectKeyFromObject(gateway), ControllerName: r.Config.ControllerName}
-		retryBudgets, err = collectBackendRetryBudgets(ctx, reader, input.Services, *retryBudgetAncestor)
-		if err != nil {
 			return nil, err
 		}
 	}
@@ -330,9 +341,7 @@ func (r *Reconciler) collectRouteModelInputsForSets(ctx context.Context, reader 
 	if err != nil {
 		return nil, fmt.Errorf("compile Gateway backend model: %w", err)
 	}
-	return &routeModelInputs{gateway: gateway, input: input, logical: logical,
-		backendTLSAvailability: availability, backendTLSAncestor: ancestor,
-		retryBudgetAncestor: retryBudgetAncestor, retryBudgets: retryBudgets}, nil
+	return &routeModelInputs{gateway: gateway, input: input, logical: logical, backendTLSAncestor: ancestor}, nil
 }
 
 func (r *Reconciler) xBackendMemberMode(gateway *gatewayv1.Gateway) (cloud.MemberMode, error) {

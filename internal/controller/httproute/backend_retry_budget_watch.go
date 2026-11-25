@@ -41,13 +41,13 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
-func (r *Reconciler) discoverBackendRetryPolicy(manager ctrl.Manager) error {
+func (r *Reconciler) discoverBackendRetryPolicy(mapper meta.RESTMapper) error {
 	if !r.Config.XBackendEnabled() {
 		return nil
 	}
 	kind := schema.GroupKind{Group: gatewayx.GroupVersion.Group, Kind: "XBackendTrafficPolicy"}
-	_, err := manager.GetRESTMapper().RESTMapping(kind, gatewayx.GroupVersion.Version)
-	if meta.IsNoMatchError(err) {
+	_, err := mapper.RESTMapping(kind, gatewayx.GroupVersion.Version)
+	if meta.IsNoMatchError(err) && !r.Config.BackendRetryBudgetEnabled() {
 		return nil
 	}
 	if err != nil {
@@ -71,35 +71,56 @@ func (r *Reconciler) enqueueRoutesForRetryBudget(ctx context.Context, object cli
 	return controller.SortedRequests(keys)
 }
 
-func (r *Reconciler) retryBudgetRoutePredicate() predicate.Predicate {
-	gateways := func(policy *gatewayx.XBackendTrafficPolicy) map[types.NamespacedName]bool {
-		keys := make(map[types.NamespacedName]bool)
-		for _, entry := range policy.Status.Ancestors {
-			if key := backendtls.GatewayAncestorKey(entry.AncestorRef, policy.Namespace); key.Name != "" && entry.ControllerName == r.Config.ControllerName {
-				keys[key] = true
-			}
+func (r *Reconciler) retryBudgetGatewayAncestors(policy *gatewayx.XBackendTrafficPolicy) map[types.NamespacedName]bool {
+	keys := make(map[types.NamespacedName]bool)
+	for _, entry := range policy.Status.Ancestors {
+		if key := backendtls.GatewayAncestorKey(entry.AncestorRef, policy.Namespace); key.Name != "" && entry.ControllerName == r.Config.ControllerName {
+			keys[key] = true
 		}
-		return keys
 	}
+	return keys
+}
+
+func (r *Reconciler) retryBudgetRoutePredicate() predicate.Predicate {
 	return predicate.Or(controller.GenerationOrDeletionChangedPredicate(), predicate.Funcs{UpdateFunc: func(e event.UpdateEvent) bool {
 		before := e.ObjectOld.(*gatewayx.XBackendTrafficPolicy)
 		after := e.ObjectNew.(*gatewayx.XBackendTrafficPolicy)
 		return (len(before.Status.Ancestors) >= backendtls.MaxAncestors) != (len(after.Status.Ancestors) >= backendtls.MaxAncestors) ||
-			!maps.Equal(gateways(before), gateways(after))
+			!maps.Equal(r.retryBudgetGatewayAncestors(before), r.retryBudgetGatewayAncestors(after))
+	}})
+}
+
+func (r *Reconciler) retryBudgetStatusPredicate() predicate.Predicate {
+	return predicate.Or(controller.GenerationOrDeletionChangedPredicate(), predicate.Funcs{UpdateFunc: func(e event.UpdateEvent) bool {
+		before := e.ObjectOld.(*gatewayx.XBackendTrafficPolicy)
+		after := e.ObjectNew.(*gatewayx.XBackendTrafficPolicy)
+		if len(before.Status.Ancestors) >= backendtls.MaxAncestors && len(after.Status.Ancestors) < backendtls.MaxAncestors {
+			return true
+		}
+		current := r.retryBudgetGatewayAncestors(after)
+		for key := range r.retryBudgetGatewayAncestors(before) {
+			if !current[key] {
+				return true
+			}
+		}
+		return false
 	}})
 }
 
 func (r *Reconciler) setupBackendRetryBudgetStatus(manager ctrl.Manager) error {
 	spec := builder.WithPredicates(controller.GenerationOrDeletionChangedPredicate())
 	route := builder.WithPredicates(controller.HTTPRouteReconcilePredicate(r.Config))
-	return ctrl.NewControllerManagedBy(manager).
-		For(&gatewayx.XBackendTrafficPolicy{}, spec).
+	setup := ctrl.NewControllerManagedBy(manager).
+		For(&gatewayx.XBackendTrafficPolicy{}, builder.WithPredicates(r.retryBudgetStatusPredicate())).
 		Watches(&gatewayx.XBackendTrafficPolicy{}, handler.EnqueueRequestsFromMapFunc(r.enqueueRetryPoliciesForDependency), spec).
 		Watches(&corev1.Service{}, handler.EnqueueRequestsFromMapFunc(r.enqueueRetryPoliciesForDependency), builder.WithPredicates(controller.ServicePredicate())).
 		Watches(&gatewayv1.ReferenceGrant{}, handler.EnqueueRequestsFromMapFunc(r.enqueueRetryPoliciesForDependency), spec).
 		Watches(&gatewayv1.HTTPRoute{}, handler.EnqueueRequestsFromMapFunc(r.enqueueRetryPoliciesForDependency), route).
-		Watches(&gatewayv1.GRPCRoute{}, handler.EnqueueRequestsFromMapFunc(r.enqueueRetryPoliciesForDependency), route).
-		Named("xbackendtrafficpolicy-retry-status").
+		Watches(&gatewayv1.GRPCRoute{}, handler.EnqueueRequestsFromMapFunc(r.enqueueRetryPoliciesForDependency), route)
+	if r.Config.BackendTLSPolicy {
+		setup.Watches(&gatewayv1.BackendTLSPolicy{}, handler.EnqueueRequestsFromMapFunc(r.enqueueRetryPoliciesForDependency), spec)
+	}
+	return setup.Named("xbackendtrafficpolicy-retry-status").
 		Complete(&backendRetryBudgetStatusReconciler{routes: r})
 }
 
@@ -117,6 +138,10 @@ func (r *Reconciler) enqueueRetryPoliciesForDependency(ctx context.Context, obje
 			if ref.Group == "" && ref.Kind == "Service" {
 				add(item.Namespace, string(ref.Name))
 			}
+		}
+	case *gatewayv1.BackendTLSPolicy:
+		for _, key := range backendtls.ServiceKeys(item) {
+			add(key.Namespace, key.Name)
 		}
 	case *corev1.Service:
 		add(item.Namespace, item.Name)

@@ -38,7 +38,6 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
-	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
@@ -112,13 +111,22 @@ func (r *backendRetryBudgetStatusReconciler) observeRetryPolicy(ctx context.Cont
 	if len(targets) == 0 {
 		return status, nil
 	}
-	gateways, err := r.retryPolicyGateways(ctx, targets)
+	routes, err := r.routes.listLiveHTTPFamilyRoutes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	gateways, err := r.retryPolicyGateways(ctx, routes, targets)
 	if err != nil {
 		return nil, err
 	}
 	used := make(map[types.NamespacedName]bool)
+	setParents := make(map[types.NamespacedName]types.NamespacedName)
 	for _, gateway := range gateways {
-		consumers, err := r.retryPolicyConsumers(ctx, gateway, targets)
+		peers, err := r.routes.filterGatewayGraphRoutes(ctx, routes, controller.GatewayIdentity(r.routes.Config, gateway), setParents)
+		if err != nil {
+			return nil, err
+		}
+		consumers, err := r.retryPolicyConsumers(ctx, gateway, peers, targets)
 		if err != nil {
 			return nil, err
 		}
@@ -196,27 +204,21 @@ func retryPolicyGatewayCondition(policy *gatewayx.XBackendTrafficPolicy, conditi
 	return last
 }
 
-func (r *backendRetryBudgetStatusReconciler) retryPolicyGateways(ctx context.Context, targets map[types.NamespacedName]metav1.Condition) (map[types.NamespacedName]*gatewayv1.Gateway, error) {
+func (r *backendRetryBudgetStatusReconciler) retryPolicyGateways(ctx context.Context, candidates []gatewayv1.HTTPRoute, targets map[types.NamespacedName]metav1.Condition) (map[types.NamespacedName]*gatewayv1.Gateway, error) {
 	result := make(map[types.NamespacedName]*gatewayv1.Gateway)
-	for _, kind := range []gatewayv1.Kind{model.HTTPRouteKind, model.GRPCRouteKind} {
-		routes := r.routes.forRouteKind(kind)
-		items, err := routes.listLiveRoutes(ctx)
+	for i := range candidates {
+		route := &candidates[i]
+		if !route.DeletionTimestamp.IsZero() || !routeUsesRetryPolicyTarget(route, targets) {
+			continue
+		}
+		routes := r.routes.forRouteKind(model.HTTPProfileRouteKind(route))
+		parents, err := routes.managedParentsWithReader(ctx, routes.APIReader, route)
 		if err != nil {
 			return nil, err
 		}
-		for i := range items {
-			route := &items[i]
-			if !route.DeletionTimestamp.IsZero() || !routeUsesRetryPolicyTarget(route, targets) {
-				continue
-			}
-			parents, err := routes.managedParentsWithReader(ctx, routes.APIReader, route)
-			if err != nil {
-				return nil, err
-			}
-			for _, group := range groupManagedRouteParents(parents) {
-				if managedParentsSupportInstalledVersion(group.parents) {
-					result[client.ObjectKeyFromObject(group.gateway)] = group.gateway
-				}
+		for _, group := range groupManagedRouteParents(parents) {
+			if managedParentsSupportInstalledVersion(group.parents) {
+				result[client.ObjectKeyFromObject(group.gateway)] = group.gateway
 			}
 		}
 	}
@@ -232,11 +234,7 @@ func routeUsesRetryPolicyTarget(route *gatewayv1.HTTPRoute, targets map[types.Na
 	return false
 }
 
-func (r *backendRetryBudgetStatusReconciler) retryPolicyConsumers(ctx context.Context, gateway *gatewayv1.Gateway, targets map[types.NamespacedName]metav1.Condition) (map[types.NamespacedName]bool, error) {
-	routes, err := r.routes.liveGraphRoutes(ctx, controller.GatewayIdentity(r.routes.Config, gateway))
-	if err != nil {
-		return nil, err
-	}
+func (r *backendRetryBudgetStatusReconciler) retryPolicyConsumers(ctx context.Context, gateway *gatewayv1.Gateway, routes []gatewayv1.HTTPRoute, targets map[types.NamespacedName]metav1.Condition) (map[types.NamespacedName]bool, error) {
 	admission, err := r.routes.observeRouteGraphAdmission(ctx, gateway, routes, nil)
 	if err != nil {
 		return nil, err
@@ -247,19 +245,28 @@ func (r *backendRetryBudgetStatusReconciler) retryPolicyConsumers(ctx context.Co
 			candidates = append(candidates, route)
 		}
 	}
-	input, err := graph.CollectBackendInputsWithNamespaces(ctx, r.routes.APIReader, gateway, candidates, admission.namespaces)
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+	inputs, err := r.routes.collectRouteForwardingInputs(ctx, r.routes.APIReader, gateway, candidates, admission.namespaces, admission.listenerSets)
 	if err != nil {
 		return nil, err
 	}
-	input.BackendH2C = r.routes.Config.BackendH2C
+	inputs.admission = admission
 	consumers := make(map[types.NamespacedName]bool)
 	for i := range candidates {
 		route := &candidates[i]
-		for _, rule := range route.Spec.Rules {
-			for _, backend := range model.ResolveBackendsAndMirrors(route, rule, input) {
-				if _, targeted := targets[backend.Service]; targeted && backend.Diagnostic == nil && backend.Weight > 0 {
-					consumers[backend.Service] = true
-				}
+		matches, rules, err := r.routes.lowerableRouteRules(route, inputs, admission.eligible[routeKey(route)].listeners)
+		if err != nil {
+			var rejected *routeBuildError
+			if errors.As(err, &rejected) {
+				continue
+			}
+			return nil, err
+		}
+		for backend := range activeRetryBudgetBackends(matches, rules, retryBudgetTransportSelectable) {
+			if _, targeted := targets[backend.Service]; targeted {
+				consumers[backend.Service] = true
 			}
 		}
 	}
@@ -267,7 +274,7 @@ func (r *backendRetryBudgetStatusReconciler) retryPolicyConsumers(ctx context.Co
 }
 
 func mergeRetryPolicyAncestors(policy *gatewayx.XBackendTrafficPolicy, name gatewayv1.GatewayController, desired map[retryPolicyAncestor]metav1.Condition) []gatewayv1.PolicyAncestorStatus {
-	var result []gatewayv1.PolicyAncestorStatus
+	result := make([]gatewayv1.PolicyAncestorStatus, 0, len(policy.Status.Ancestors))
 	remaining := maps.Clone(desired)
 	for _, entry := range policy.Status.Ancestors {
 		if entry.ControllerName != name {
@@ -282,7 +289,9 @@ func mergeRetryPolicyAncestors(policy *gatewayx.XBackendTrafficPolicy, name gate
 		if condition, keep := remaining[key]; keep {
 			entry.AncestorRef = key.reference()
 			entry.Conditions = slices.Clone(entry.Conditions)
-			meta.SetStatusCondition(&entry.Conditions, condition)
+			if current := meta.FindStatusCondition(entry.Conditions, condition.Type); current == nil || current.ObservedGeneration <= condition.ObservedGeneration {
+				meta.SetStatusCondition(&entry.Conditions, condition)
+			}
 			result = append(result, entry)
 			delete(remaining, key)
 		}

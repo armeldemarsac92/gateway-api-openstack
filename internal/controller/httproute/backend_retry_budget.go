@@ -20,6 +20,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"iter"
 	"slices"
 	"time"
 
@@ -122,11 +123,15 @@ func collectBackendRetryBudgets(ctx context.Context, reader client.Reader, servi
 	return budgets, nil
 }
 
-func (inputs *routeModelInputs) backendRetryBudget(backend model.BackendGroup) *cloud.BackendRetryBudget {
-	if entry, found := inputs.retryBudgetForBackend(backend); found && entry.slot == backendtls.AncestorSlotHeld {
-		return &entry.budget
+func (inputs *routeModelInputs) backendRetryBudget(backend model.BackendGroup) (*cloud.BackendRetryBudget, bool) {
+	entry, found := inputs.retryBudgetForBackend(backend)
+	if !found {
+		return nil, false
 	}
-	return nil
+	if entry.slot == backendtls.AncestorSlotHeld {
+		return &entry.budget, false
+	}
+	return nil, entry.slot == backendtls.AncestorSlotPending
 }
 
 func (inputs *routeModelInputs) retryBudgetForBackend(backend model.BackendGroup) (routeRetryBudget, bool) {
@@ -134,16 +139,70 @@ func (inputs *routeModelInputs) retryBudgetForBackend(backend model.BackendGroup
 	return entry, found && backend.Diagnostic == nil && entry.budget.ServiceUID == string(backend.ServiceUID)
 }
 
-func (inputs *routeModelInputs) retryBudgetAncestorFull(rules []model.Rule) bool {
-	full := func(backend model.BackendGroup) bool {
-		entry, found := inputs.retryBudgetForBackend(backend)
-		return found && entry.slot == backendtls.AncestorSlotFull
+func (inputs *routeModelInputs) retryBudgetAncestorFull(matches []routeLoweredMatch, rules []model.Rule, requireH2 bool) bool {
+	if len(inputs.retryBudgets) == 0 {
+		return false
 	}
-	for _, rule := range rules {
-		if slices.ContainsFunc(rule.Backends, func(backend model.BackendGroup) bool { return backend.Weight > 0 && full(backend) }) ||
-			slices.ContainsFunc(rule.RequestMirrors, func(mirror model.RequestMirror) bool { return mirror.Numerator > 0 && full(mirror.Backend) }) {
+	for backend := range activeRetryBudgetBackends(matches, rules, inputs.retryBudgetTransportUsable(requireH2)) {
+		if entry, found := inputs.retryBudgetForBackend(backend); found && entry.slot == backendtls.AncestorSlotFull {
 			return true
 		}
 	}
 	return false
+}
+
+func (inputs *routeModelInputs) retryBudgetTransportUsable(requireH2 bool) func(model.BackendGroup) bool {
+	return func(backend model.BackendGroup) bool {
+		tls := inputs.backendTLSValidation(backend, requireH2)
+		return tls == nil || !tls.Denied
+	}
+}
+
+func retryBudgetTransportSelectable(backend model.BackendGroup) bool {
+	// Reserve retry-policy ancestry without waiting for TLS-policy ancestry
+	// or provider capability, which have their own reconciliation.
+	winner := backend.BackendTLS.Winner
+	return winner == nil || winner.Validation != nil && supportsBackendTLS(backend)
+}
+
+// activeRetryBudgetBackends visits Service references that can receive traffic
+// from the admitted matches, including both levels of sampled mirrors.
+func activeRetryBudgetBackends(matches []routeLoweredMatch, rules []model.Rule, transportUsable func(model.BackendGroup) bool) iter.Seq[model.BackendGroup] {
+	return func(yield func(model.BackendGroup) bool) {
+		emit := func(backend model.BackendGroup) bool {
+			return backend.Service.Name == "" || yield(backend)
+		}
+		mirrors := func(refs []model.RequestMirror) bool {
+			for _, mirror := range refs {
+				if backend := mirror.Backend; mirror.Numerator > 0 && mirror.Denominator > 0 &&
+					backend.Diagnostic == nil && transportUsable(backend) && !emit(backend) {
+					return false
+				}
+			}
+			return true
+		}
+		seen := make([]bool, len(rules))
+		for _, match := range matches {
+			index := match.RuleIndex
+			if seen[index] {
+				continue
+			}
+			seen[index] = true
+			rule := rules[index]
+			if rule.Redirect != nil || len(rule.Backends) == 0 {
+				continue
+			}
+			if !mirrors(rule.RequestMirrors) {
+				return
+			}
+			for _, backend := range rule.Backends {
+				if backend.Weight <= 0 || backend.Diagnostic != nil || backend.FilterDiagnostic != nil || !transportUsable(backend) {
+					continue
+				}
+				if !emit(backend) || !mirrors(backend.RequestMirrors) {
+					return
+				}
+			}
+		}
+	}
 }

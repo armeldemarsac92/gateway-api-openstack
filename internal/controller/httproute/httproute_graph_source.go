@@ -194,6 +194,14 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 }
 
 func (r *Reconciler) liveGraphRoutes(ctx context.Context, identity cloud.Identity) ([]gatewayv1.HTTPRoute, error) {
+	routes, err := r.listLiveHTTPFamilyRoutes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return r.filterGatewayGraphRoutes(ctx, routes, identity, make(map[types.NamespacedName]types.NamespacedName))
+}
+
+func (r *Reconciler) listLiveHTTPFamilyRoutes(ctx context.Context) ([]gatewayv1.HTTPRoute, error) {
 	http, err := r.forRouteKind(model.HTTPRouteKind).listLiveRoutes(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list HTTPRoute graph fragments: %w", err)
@@ -202,10 +210,13 @@ func (r *Reconciler) liveGraphRoutes(ctx context.Context, identity cloud.Identit
 	if err != nil {
 		return nil, fmt.Errorf("list GRPCRoute graph fragments: %w", err)
 	}
-	setParents := make(map[types.NamespacedName]types.NamespacedName)
+	return slices.Concat(http, grpc), nil
+}
+
+func (r *Reconciler) filterGatewayGraphRoutes(ctx context.Context, routes []gatewayv1.HTTPRoute, identity cloud.Identity, setParents map[types.NamespacedName]types.NamespacedName) ([]gatewayv1.HTTPRoute, error) {
 	gatewayKey := types.NamespacedName{Namespace: identity.GatewayNamespace, Name: identity.GatewayName}
 	result := make([]gatewayv1.HTTPRoute, 0)
-	for _, route := range slices.Concat(http, grpc) {
+	for _, route := range routes {
 		if controller.RouteClaimsGateway(r.Config, &route, identity) {
 			result = append(result, route)
 			continue

@@ -18,20 +18,33 @@ package httproute
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/x509"
+	"encoding/json"
+	"encoding/pem"
+	"math/big"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 	gatewayconsts "sigs.k8s.io/gateway-api/pkg/consts"
 	"sigs.k8s.io/gateway-api/pkg/features"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
 func TestServiceRetryBudgetUsesLivePolicyWinner(t *testing.T) {
@@ -62,10 +75,18 @@ func TestServiceRetryBudgetUsesLivePolicyWinner(t *testing.T) {
 	newer.Name, newer.UID = "second", "policy-second"
 	newer.Spec.RetryConstraint.Budget = &gatewayx.BudgetDetails{Percent: ptr.To(0), Interval: ptr.To(gatewayx.Duration("1s500ms"))}
 	newer.Spec.RetryConstraint.MinRetryRate = &gatewayx.RequestRate{Count: ptr.To(3), Interval: ptr.To(gatewayx.Duration("500ms"))}
-	retryPolicyStatusForGateway(f, older)
-	retryPolicyStatusForGateway(f, newer)
 	f.create(t, newer, older)
 	require.ErrorIs(t, before.Validate(t.Context()), errHTTPRouteChanged)
+	pending := f.observe(t)
+	for _, backend := range pending.Nodes[0].Spec.HTTPBackends {
+		require.True(t, backend.BackendRetryBudgetPending)
+		require.Nil(t, backend.BackendRetryBudget)
+	}
+	for _, policy := range []*gatewayx.XBackendTrafficPolicy{older, newer} {
+		retryPolicyStatusForGateway(f, policy)
+		require.NoError(t, f.client.Update(t.Context(), policy))
+	}
+	require.ErrorIs(t, pending.Validate(t.Context()), errHTTPRouteChanged)
 
 	observed := f.observe(t)
 	require.Len(t, observed.Nodes, 1)
@@ -97,6 +118,7 @@ func TestServiceRetryBudgetUsesLivePolicyWinner(t *testing.T) {
 func TestServiceRetryBudgetRequiresAuthorizedBackend(t *testing.T) {
 	f := newRouteModelInputFixture(t)
 	enableRetryBudgetTest(t, f)
+	f.reconciler.BackendRetryBudgetAvailable = func(context.Context) (bool, error) { return true, nil }
 
 	remote, endpoints := f.service.DeepCopy(), f.endpoints.DeepCopy()
 	remote.Namespace, remote.UID, remote.ResourceVersion = "shared", types.UID("remote-uid"), ""
@@ -144,6 +166,17 @@ func TestServiceRetryBudgetRequiresAuthorizedBackend(t *testing.T) {
 	for _, backend := range f.observe(t).Nodes[0].Spec.HTTPBackends {
 		require.Nil(t, backend.BackendRetryBudget)
 	}
+	status := &backendRetryBudgetStatusReconciler{routes: f.reconciler}
+	desired, err := status.observeRetryPolicy(t.Context(), policy)
+	require.NoError(t, err)
+	require.Empty(t, desired)
+	updated := policy.DeepCopy()
+	updated.Status.Ancestors = mergeRetryPolicyAncestors(policy, f.reconciler.Config.ControllerName, desired)
+	patch, err := controller.OptimisticMergeFrom(policy).Data(updated)
+	require.NoError(t, err)
+	var body map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(patch, &body))
+	require.JSONEq(t, `{"ancestors":[]}`, string(body["status"]))
 }
 
 func enableRetryBudgetTest(t *testing.T, f *routeModelInputFixture) {
@@ -169,4 +202,113 @@ func retryPolicyStatusForGateway(f *routeModelInputFixture, policy *gatewayx.XBa
 	policy.Status.Ancestors = []gatewayv1.PolicyAncestorStatus{{
 		AncestorRef: gatewayAncestorRef(client.ObjectKeyFromObject(f.gateway)), ControllerName: f.reconciler.Config.ControllerName,
 	}}
+}
+
+func TestServiceRetryBudgetReservesAncestorForAuthenticatedBackends(t *testing.T) {
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	cert := &x509.Certificate{SerialNumber: big.NewInt(1), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign}
+	der, err := x509.CreateCertificate(rand.Reader, cert, cert, public, private)
+	require.NoError(t, err)
+	certificate := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
+
+	for _, kind := range []gatewayv1.Kind{model.HTTPRouteKind, model.GRPCRouteKind} {
+		t.Run(string(kind), func(t *testing.T) {
+			f := newRouteModelInputFixture(t)
+			enableRetryBudgetTest(t, f)
+			f.reconciler.Config.BackendTLSPolicy = true
+			f.reconciler.BackendRetryBudgetAvailable = func(context.Context) (bool, error) { return true, nil }
+			if kind == model.HTTPRouteKind {
+				f.service.Spec.Ports[0].AppProtocol = ptr.To("https")
+			} else {
+				f.reconciler.Config.BackendH2C, f.reconciler.Config.FixedHTTPResponses = true, true
+				require.NoError(t, f.client.Delete(t.Context(), f.route))
+				rule := grpcRule(gatewayv1.ObjectName(f.service.Name))
+				rule.BackendRefs[0].Port = ptr.To(gatewayv1.PortNumber(f.service.Spec.Ports[0].Port))
+				f.create(t, &gatewayv1.GRPCRoute{
+					ObjectMeta: metav1.ObjectMeta{Namespace: f.route.Namespace, Name: "grpc", UID: "grpc-uid"},
+					Spec: gatewayv1.GRPCRouteSpec{
+						CommonRouteSpec: f.route.Spec.CommonRouteSpec, Rules: []gatewayv1.GRPCRouteRule{rule},
+					},
+				})
+			}
+			require.NoError(t, f.client.Update(t.Context(), f.service))
+			target := gatewayv1.LocalPolicyTargetReference{Kind: "Service", Name: gatewayv1.ObjectName(f.service.Name)}
+			ca := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: f.service.Namespace, Name: "ca", UID: "ca-uid"},
+				Data: map[string]string{"ca.crt": certificate}}
+			tls := &gatewayv1.BackendTLSPolicy{
+				ObjectMeta: metav1.ObjectMeta{Namespace: f.service.Namespace, Name: "tls", UID: "tls-policy-uid"},
+				Spec: gatewayv1.BackendTLSPolicySpec{
+					TargetRefs: []gatewayv1.LocalPolicyTargetReferenceWithSectionName{{LocalPolicyTargetReference: target}},
+					Validation: gatewayv1.BackendTLSPolicyValidation{
+						Hostname: "backend.example.test", CACertificateRefs: []gatewayv1.LocalObjectReference{{Kind: "ConfigMap", Name: "ca"}},
+					},
+				},
+			}
+			retry := &gatewayx.XBackendTrafficPolicy{
+				ObjectMeta: metav1.ObjectMeta{Namespace: f.service.Namespace, Name: "budget", UID: "budget-policy-uid"},
+				Spec:       gatewayx.BackendTrafficPolicySpec{TargetRefs: []gatewayx.LocalPolicyTargetReference{target}, RetryConstraint: &gatewayx.RetryConstraint{}},
+			}
+			f.create(t, ca, tls, retry)
+			status := &backendRetryBudgetStatusReconciler{routes: f.reconciler}
+			desired, err := status.observeRetryPolicy(t.Context(), retry)
+			require.NoError(t, err)
+			key := retryPolicyAncestor{group: gatewayv1.GroupName, kind: "Gateway", namespace: f.gateway.Namespace, name: f.gateway.Name}
+			require.Equal(t, metav1.ConditionTrue, desired[key].Status)
+		})
+	}
+}
+
+func TestServiceRetryBudgetVisitsAdmittedAndSampledBackends(t *testing.T) {
+	backend := func(name string, weight int32) model.BackendGroup {
+		return model.BackendGroup{Service: types.NamespacedName{Namespace: "app", Name: name}, ServiceUID: types.UID(name), Weight: weight}
+	}
+	mirror := func(name string, numerator int32) model.RequestMirror {
+		return model.RequestMirror{Backend: backend(name, 1), Numerator: numerator, Denominator: 100}
+	}
+	primary := backend("primary", 1)
+	primary.RequestMirrors = []model.RequestMirror{mirror("target-copy", 100)}
+	inactive := backend("inactive-target", 0)
+	inactive.RequestMirrors = []model.RequestMirror{mirror("inactive-target-copy", 100)}
+	rules := []model.Rule{
+		{Backends: []model.BackendGroup{primary, inactive}, RequestMirrors: []model.RequestMirror{mirror("rule-copy", 50), mirror("unsampled", 0)}},
+		{Backends: []model.BackendGroup{backend("unmatched-rule", 1)}},
+	}
+	matches := []routeLoweredMatch{{RouteMatch: model.RouteMatch{RuleIndex: 0}}}
+	var names []string
+	for observed := range activeRetryBudgetBackends(matches, rules, retryBudgetTransportSelectable) {
+		names = append(names, observed.Service.Name)
+	}
+	require.ElementsMatch(t, []string{"primary", "rule-copy", "target-copy"}, names)
+	inputs := routeModelInputs{retryBudgets: map[types.NamespacedName]routeRetryBudget{
+		{Namespace: "app", Name: "target-copy"}: {budget: cloud.BackendRetryBudget{ServiceUID: "target-copy"}, slot: backendtls.AncestorSlotFull},
+	}}
+	require.True(t, inputs.retryBudgetAncestorFull(matches, rules, false))
+}
+
+func TestServiceRetryBudgetStatusWakesWhenForeignSlotIsReleased(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	before := &gatewayx.XBackendTrafficPolicy{}
+	for range backendtls.MaxAncestors {
+		before.Status.Ancestors = append(before.Status.Ancestors, gatewayv1.PolicyAncestorStatus{ControllerName: "other.example.com/gateway"})
+	}
+	after := before.DeepCopy()
+	predicate := f.reconciler.retryBudgetStatusPredicate()
+	require.False(t, predicate.Update(event.UpdateEvent{ObjectOld: before, ObjectNew: after}))
+	after.Status.Ancestors = after.Status.Ancestors[1:]
+	require.True(t, predicate.Update(event.UpdateEvent{ObjectOld: before, ObjectNew: after}))
+}
+
+func TestServiceRetryBudgetDiscoveryRequiresExplicitOptIn(t *testing.T) {
+	r := Reconciler{}
+	version := schema.GroupVersion{Group: gatewayx.GroupVersion.Group, Version: gatewayx.GroupVersion.Version}
+	mapper := meta.NewDefaultRESTMapper([]schema.GroupVersion{version})
+	require.NoError(t, r.discoverBackendRetryPolicy(mapper))
+	r.Config.GatewayAPIChannel = features.FeatureChannelExperimental
+	require.NoError(t, r.discoverBackendRetryPolicy(mapper))
+	r.Config.BackendRetryBudget = true
+	require.ErrorContains(t, r.discoverBackendRetryPolicy(mapper), "discover XBackendTrafficPolicy")
+	mapper.Add(version.WithKind("XBackendTrafficPolicy"), meta.RESTScopeNamespace)
+	require.NoError(t, r.discoverBackendRetryPolicy(mapper))
+	require.True(t, r.retryBudgetPolicyServed)
 }
