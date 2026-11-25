@@ -1,0 +1,120 @@
+{
+  "resource": "XMesh",
+  "channel": "Experimental",
+  "gatewayAPI": "v1.7.0",
+  "kubernetes": "v1.36.4",
+  "istio": "1.31.0",
+  "scope": "Disposable kind cluster, official Istio ambient pilot, CNI and ztunnel, fixture OpenStack API.",
+  "sourceRevision": "e17815371f20f5b687db40904e27e0b988be705e",
+  "sourceTree": "41de462feb695d861b7acdcf155c7fa7e5b2a862",
+  "manager": {
+    "executableSHA256": "sha256:3f5af7922f8cc5a36ef48e390018a42e732c80a9b987a59d7bfeccf7556cb487",
+    "testImageIndex": "sha256:9c96bcb5bec0b8952301ca1670576b760b678c6ec204b9a5fb7c5c19493b61d8",
+    "testImageManifest": "sha256:f61a643a68c8e6601bb41478effa41cd4a45b6f425619243fbe92761f3edf881",
+    "readyReplicas": 2
+  },
+  "istioImages": {
+    "istiod": "docker.io/istio/pilot@sha256:17b581d9d75a1ab319d2816230626f06d65b48e3e798f98e3092a031843b3fe0",
+    "istio-cni-node": "docker.io/istio/install-cni@sha256:fe7081ed2605166fef573a7987f183e91fd45c2a302f90998c879ca20112426e",
+    "ztunnel": "docker.io/istio/ztunnel@sha256:efa1115b58acd969bf876dfcee27751714e3ae317b2518e1a1d61f3ef037587e"
+  },
+  "sameXMeshUID": true,
+  "states": {
+    "initial": {
+      "generation": 1,
+      "resourceVersion": "1081",
+      "conditions": [
+        {
+          "type": "Accepted",
+          "status": "True",
+          "reason": "Accepted",
+          "observedGeneration": 1
+        },
+        {
+          "type": "Programmed",
+          "status": "True",
+          "reason": "Programmed",
+          "observedGeneration": 1
+        }
+      ],
+      "supportedFeatures": [
+        "GRPCRoute",
+        "HTTPRoute",
+        "HTTPRoute303RedirectStatusCode",
+        "HTTPRoute307RedirectStatusCode",
+        "HTTPRoute308RedirectStatusCode",
+        "HTTPRouteParentRefPort",
+        "HTTPRouteResponseHeaderModification",
+        "Mesh",
+        "MeshClusterIPMatching",
+        "MeshHTTPRouteBackendRequestHeaderModification",
+        "MeshHTTPRouteNamedRouteRule",
+        "MeshHTTPRouteQueryParamMatching",
+        "MeshHTTPRouteRedirectPath",
+        "MeshHTTPRouteRedirectPort",
+        "MeshHTTPRouteRewritePath",
+        "MeshHTTPRouteSchemeRedirect"
+      ]
+    },
+    "paused": {
+      "generation": 1,
+      "resourceVersion": "1172",
+      "conditions": [
+        {
+          "type": "Accepted",
+          "status": "True",
+          "reason": "Accepted",
+          "observedGeneration": 1
+        },
+        {
+          "type": "Programmed",
+          "status": "Unknown",
+          "reason": "Pending",
+          "observedGeneration": 1
+        }
+      ],
+      "supportedFeatures": []
+    },
+    "restored": {
+      "generation": 1,
+      "resourceVersion": "1227",
+      "conditions": [
+        {
+          "type": "Accepted",
+          "status": "True",
+          "reason": "Accepted",
+          "observedGeneration": 1
+        },
+        {
+          "type": "Programmed",
+          "status": "True",
+          "reason": "Programmed",
+          "observedGeneration": 1
+        }
+      ],
+      "supportedFeatures": [
+        "GRPCRoute",
+        "HTTPRoute",
+        "HTTPRoute303RedirectStatusCode",
+        "HTTPRoute307RedirectStatusCode",
+        "HTTPRoute308RedirectStatusCode",
+        "HTTPRouteParentRefPort",
+        "HTTPRouteResponseHeaderModification",
+        "Mesh",
+        "MeshClusterIPMatching",
+        "MeshHTTPRouteBackendRequestHeaderModification",
+        "MeshHTTPRouteNamedRouteRule",
+        "MeshHTTPRouteQueryParamMatching",
+        "MeshHTTPRouteRedirectPath",
+        "MeshHTTPRouteRedirectPort",
+        "MeshHTTPRouteRewritePath",
+        "MeshHTTPRouteSchemeRedirect"
+      ]
+    }
+  },
+  "meshTrafficCases": [
+    "MeshGRPCRouteRequestHeaderModifier",
+    "MeshHTTPRouteRewritePath"
+  ],
+  "registeredXMeshCases": 0
+}
