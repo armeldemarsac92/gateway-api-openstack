@@ -25,6 +25,7 @@ import (
 	"slices"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/apierrors"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
@@ -1271,20 +1272,10 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 		return fmt.Errorf("unsupported graph mutation %d", step.kind)
 	}
 	if err != nil {
-		err = classifyOctaviaMutationError(err)
 		if step.redactTLSError {
-			// Octavia faults may echo Barbican references. Surface the
-			// classification without publishing the provider's raw body.
-			if errors.Is(err, context.Canceled) {
-				return context.Canceled
-			}
-			category, ok := cloud.ErrorCategoryOf(classifyOpenStackError(err))
-			if !ok {
-				category = cloud.ErrorCategoryResourceFailure
-			}
-			return cloud.NewProviderError(category, errors.New(step.message))
+			return apierrors.RedactOctaviaMutation(err, step.message)
 		}
-		return fmt.Errorf("reconcile Gateway graph: %w", err)
+		return fmt.Errorf("reconcile Gateway graph: %w", classifyOctaviaMutationError(err))
 	}
 	return nil
 }

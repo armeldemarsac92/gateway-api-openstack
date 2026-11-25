@@ -47,7 +47,7 @@ spec:
 
 Inspect the policy’s `status.ancestors` entry for the target Gateway. It reports acceptance and whether the collector reference is permitted and resolved. The Octavia listener exposes its own `otlp_tracing_status`. `PENDING_UPDATE` means Amphora has yet to finish programming the exporter. `ACTIVE` records successful configuration publication and TLS preparation. To check delivery, look for the request’s trace ID in the collector. A collector TLS preparation failure sets the exporter to `ERROR` while the application listener continues serving. [Provider API](https://github.com/armeldemarsac92/octavia/blob/5edd5b1402fd22de33a13fc84d6cc0ab9f38b593/api-ref/source/parameters.yaml#L2074)
 
-The collector uses HTTP/1.1. The default sampling rate is 100%. It supports a service name, span name and W3C trace context. A collector with an applicable `BackendTLSPolicy` also requires the controller’s backend TLS option and the corresponding regional support. Custom exporter headers remain open. [Backend TLS setup](operator-octavia-backend-tls-policy.md)
+The collector uses HTTP/1.1. The default sampling rate is 100%. It supports a service name, span name and W3C trace context. A collector with an applicable `BackendTLSPolicy` also requires the controller’s backend TLS option and the corresponding regional support. Amphora can also set headers on collector requests when the region advertises `listener_otlp_export_headers_v1`. [Backend TLS setup](operator-octavia-backend-tls-policy.md)
 
 ## Authenticate the collector with Amphora system trust
 
@@ -75,6 +75,25 @@ spec:
 The collector receives OTLP over HTTPS with HTTP/1.1. Octavia verifies the chain against the attested Amphora bundle. The Kubernetes controller uses Barbican CA secrets for policies with `caCertificateRefs`. A configured Gateway client certificate still applies to the collector and must be authorized for mTLS.
 
 The controller creates an isolated collector pool and waits for its `backend_tls_system_ca_sha256` before adding members or attaching it to a listener. A regional digest change invalidates prior pool attestations. If a worker cannot prepare the pinned bundle during a render, Octavia closes the exporter backend and the controller withdraws the exporter when its proof is absent. Removing the collector's `ReferenceGrant` also withdraws the exporter. Check `otlp_tracing: null` with `otlp_tracing_status: ACTIVE` for acknowledged withdrawal. Application listeners continue serving during these operations. During an upgrade, an older worker may advertise regional System CA support for application pools while leaving the isolated collector digest empty. Tracing stays pending until the compatible worker attests the pool. Verify span delivery at the collector after all relevant listeners acknowledge the configuration.
+
+## Set headers on collector requests
+
+Enroll Amphora under `[api_settings] enabled_listener_otlp_export_headers_providers` and check that the region advertises `listener_otlp_export_headers_v1`. Set `spec.tracing.provider.headers` on the Experimental policy. For example, a collector can use the following label to select a dataset.
+
+```yaml
+provider:
+  backendRef:
+    name: otelcol
+    namespace: observability
+    port: 4318
+  headers:
+    - name: X-Trace-Dataset
+      value: gateway
+```
+
+The collector receives these field values on OTLP export requests. Application requests and spans keep their own headers and attributes. Removing the list clears the fields from the exporter. The Octavia listener reports a SHA-256 digest for configured headers. Kubernetes holds the literal values in the policy specification. The collector transport follows the Service’s backend TLS policy. [Collector TLS setup](#authenticate-the-collector-with-amphora-system-trust)
+
+A policy can list up to 16 headers. Each name can be up to 256 bytes and each printable ASCII value up to 4,096 bytes. If names differ only by case, the first entry supplies the value. The exporter reserves `Host`, `Connection`, `Content-Length`, `Content-Type`, `Content-Encoding`, `Transfer-Encoding`, `TE`, `Trailer`, `Upgrade`, `Proxy-Connection`, `Keep-Alive` and `Expect` for its HTTP transport.
 
 ## Add attributes to request spans
 

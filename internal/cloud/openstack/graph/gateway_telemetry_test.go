@@ -64,6 +64,7 @@ func TestTelemetryGatewayReconcileUpdatesOnlyTraceExportsAndOwnedCollector(t *te
 	capable := true
 	samplingCapable := false
 	attributesCapable := false
+	headersCapable := false
 	systemTLSCapable := false
 	exporterState := "ACTIVE"
 	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -86,6 +87,9 @@ func TestTelemetryGatewayReconcileUpdatesOnlyTraceExportsAndOwnedCollector(t *te
 			}
 			if samplingCapable {
 				capabilities = append(capabilities, octavia.GatewayCapabilityListenerOTLPSampling)
+			}
+			if headersCapable {
+				capabilities = append(capabilities, octavia.GatewayCapabilityListenerOTLPExportHeaders)
 			}
 			if attributesCapable {
 				capabilities = append(capabilities, octavia.GatewayCapabilityListenerOTLPSpanAttributes)
@@ -186,6 +190,18 @@ func TestTelemetryGatewayReconcileUpdatesOnlyTraceExportsAndOwnedCollector(t *te
 				require.JSONEq(t, "null", string(body.Listener["otlp_tracing"]))
 			} else if spec.Gateway.Telemetry.Sampling != nil {
 				require.JSONEq(t, `{"collector_pool_id":"975c99aa-e26a-4818-8391-b704f0712d1f","service_name":"apps/edge","span_name":"gateway.request","sampling":{"base":{"numerator":0,"denominator":100},"parent":{"numerator":1,"denominator":1}}}`, string(body.Listener["otlp_tracing"]))
+			} else if len(spec.Gateway.Telemetry.Headers) > 0 {
+				var applied map[string]json.RawMessage
+				require.NoError(t, json.Unmarshal(body.Listener["otlp_tracing"], &applied))
+				var headers cloud.TelemetryExporterHeaders
+				require.NoError(t, json.Unmarshal(applied["headers"], &headers))
+				require.Equal(t, spec.Gateway.Telemetry.Headers, headers)
+				delete(applied, "headers")
+				encoded, err := json.Marshal(headers.Digest())
+				require.NoError(t, err)
+				applied["headers_sha256"] = encoded
+				body.Listener["otlp_tracing"], err = json.Marshal(applied)
+				require.NoError(t, err)
 			} else if len(spec.Gateway.Telemetry.Attributes) > 0 {
 				require.JSONEq(t, `{"collector_pool_id":"975c99aa-e26a-4818-8391-b704f0712d1f","service_name":"apps/edge","span_name":"gateway.request","attributes":[{"name":"build","source_type":"Literal","literal_value":"blue"}]}`, string(body.Listener["otlp_tracing"]))
 			} else {
@@ -436,6 +452,10 @@ func TestTelemetryGatewayReconcileUpdatesOnlyTraceExportsAndOwnedCollector(t *te
 	require.Empty(t, calls, "a regional v1 provider must not receive the sampling object")
 
 	spec.Gateway.Telemetry.Sampling = nil
+	spec.Gateway.Telemetry.Headers = cloud.TelemetryExporterHeaders{{Name: "x-label", Value: "blue"}}
+	require.Contains(t, run().TelemetryUnsupported, octavia.GatewayCapabilityListenerOTLPExportHeaders)
+	require.Empty(t, calls)
+	spec.Gateway.Telemetry.Headers = nil
 	spec.Gateway.Telemetry.Attributes = []cloud.TelemetryAttribute{{Name: "build", SourceType: "Literal", LiteralValue: "blue"}}
 	settled = run()
 	require.Contains(t, settled.TelemetryUnsupported, octavia.GatewayCapabilityListenerOTLPSpanAttributes)
@@ -450,6 +470,51 @@ func TestTelemetryGatewayReconcileUpdatesOnlyTraceExportsAndOwnedCollector(t *te
 	require.Equal(t, []string{"POST /lbaas/pools", "POST /lbaas/pools/" + poolID + "/members", "PUT /lbaas/listeners/http"}, calls)
 	require.False(t, run().Outcome.MutationSubmitted)
 	require.Equal(t, foreign, frontends["https"]["otlp_tracing"])
+
+	// The foreign HTTPS exporter keeps this Gateway progressing. The owned
+	// HTTP exporter should converge after each rotation.
+	checkHeaders := func() {
+		t.Helper()
+		raw := frontends["http"]["otlp_tracing"].(json.RawMessage)
+		var observed struct {
+			Digest  string          `json:"headers_sha256"`
+			Headers json.RawMessage `json:"headers"`
+		}
+		require.NoError(t, json.Unmarshal(raw, &observed))
+		require.Nil(t, observed.Headers)
+		require.Equal(t, spec.Gateway.Telemetry.Headers.Digest(), observed.Digest)
+		require.False(t, run().Outcome.MutationSubmitted)
+		require.Equal(t, foreign, frontends["https"]["otlp_tracing"])
+	}
+
+	spec.Gateway.Telemetry.Headers = cloud.TelemetryExporterHeaders{{Name: "x-label", Value: "blue"}}
+	headersCapable = true
+	require.True(t, run().Outcome.MutationSubmitted)
+	checkHeaders()
+	spec.Gateway.Telemetry.Headers[0].Value = "green"
+	exporterState = "ERROR"
+	require.True(t, run().Outcome.MutationSubmitted)
+	var staged struct {
+		Digest string `json:"headers_sha256"`
+	}
+	require.NoError(t, json.Unmarshal(frontends["http"]["otlp_tracing"].(json.RawMessage), &staged))
+	require.Equal(t, spec.Gateway.Telemetry.Headers.Digest(), staged.Digest)
+
+	lb["provisioning_status"] = "ERROR"
+	exporterState = "PENDING_UPDATE"
+	require.True(t, run().Outcome.MutationSubmitted, "failed rotation can leave the old value in the running exporter")
+	require.JSONEq(t, "null", string(frontends["http"]["otlp_tracing"].(json.RawMessage)))
+	lb["provisioning_status"] = "ACTIVE"
+	require.False(t, run().Outcome.MutationSubmitted, "wait for the worker to acknowledge withdrawal")
+	require.Equal(t, foreign, frontends["https"]["otlp_tracing"])
+	exporterState = "ACTIVE"
+	frontends["http"]["otlp_tracing_status"] = exporterState
+	require.True(t, run().Outcome.MutationSubmitted) // Drop the acknowledged reservation.
+	require.True(t, run().Outcome.MutationSubmitted) // Install the desired headers.
+	checkHeaders()
+	spec.Gateway.Telemetry.Headers = nil
+	require.True(t, run().Outcome.MutationSubmitted)
+	checkHeaders()
 
 	spec.Gateway.Telemetry.Attributes = nil
 	lb["provisioning_status"] = "ERROR"
