@@ -110,6 +110,8 @@ type Config struct {
 	XBackendExternalHostnameCIDRs []netip.Prefix
 	// XBackendServiceDNSDomains names additional Kubernetes Service DNS suffixes.
 	XBackendServiceDNSDomains []string
+	// XBackendSessionPersistence enables per-XBackend HTTP session cookies.
+	XBackendSessionPersistence bool
 	// ControllerVersion is recorded as trace metadata on cloud resources.
 	ControllerVersion string
 	// OpenStackProjectID is the authenticated project used in ownership checks.
@@ -137,6 +139,10 @@ func (c Config) GatewayListenerFiltersEnabled() bool {
 // XBackendEnabled reports whether this installation uses the Experimental bundle.
 func (c Config) XBackendEnabled() bool {
 	return c.GatewayAPIChannel == features.FeatureChannelExperimental
+}
+
+func (c Config) XBackendSessionPersistenceEnabled() bool {
+	return c.XBackendEnabled() && c.XBackendSessionPersistence
 }
 
 func (c Config) RoutedXBackendEnabled(class gatewayv1.ObjectName) bool {
@@ -188,6 +194,9 @@ func (c Config) TLSRoutesEnabled() bool {
 
 // Validate rejects configuration that could make ownership ambiguous.
 func (c Config) Validate() error {
+	if c.XBackendSessionPersistence && !c.XBackendEnabled() {
+		return fmt.Errorf("--octavia-xbackend-session-persistence requires --gateway-api-channel=experimental")
+	}
 	if c.ClusterGatewayAddresses && !c.GatewayAddressRoutabilityClusterEnabled() {
 		return fmt.Errorf("--gateway-address-routability-cluster requires --gateway-api-channel=experimental and --gateway-infrastructure-metadata")
 	}

@@ -198,6 +198,7 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 			observed = actual.routes[index]
 		}
 		routeResult := cloud.RouteReadyResult(routeStateFromObservation(observed))
+		routeResult.BackendSessionPersistenceIssue = route.cookieSupportIssue()
 		var routePlan []routeMutation
 		var backendIssue, ensureHold string
 		optionalPool := route.zeroWeightOnly || route.mirrorOnly
@@ -253,6 +254,8 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 			} else if errors.Is(err, errHTTPRequestPolicyUnverified) {
 				ensureHold = err.Error()
 			} else if errors.Is(err, errRequestMirrorsUnverified) {
+				ensureHold = err.Error()
+			} else if errors.Is(err, errXBackendCookieUnavailable) || errors.Is(err, errXBackendCookieUnverified) {
 				ensureHold = err.Error()
 			} else if errors.Is(err, errBackendRetryBudgetAncestor) || errors.Is(err, errBackendRetryBudgetCapability) || errors.Is(err, errBackendRetryBudgetReadback) {
 				ensureHold = err.Error()

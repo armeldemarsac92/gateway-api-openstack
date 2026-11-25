@@ -143,6 +143,8 @@ type RouteResult struct {
 	ObservationDeferred bool
 	// UnsupportedBackendProtocol is populated when the provider explicitly lacks a requested transport.
 	UnsupportedBackendProtocol string
+	// BackendSessionPersistenceIssue reports regional availability for an XBackend's requested session cookie.
+	BackendSessionPersistenceIssue SessionPersistenceIssue
 	// UnsupportedMatch reports an incompatible match without discarding other programmed rules.
 	UnsupportedMatch string
 	// PartiallyInvalid explains why some rules were excluded from this graph.
@@ -150,6 +152,14 @@ type RouteResult struct {
 	// ImplementedRules confirms an active retained rule during partial convergence.
 	ImplementedRules bool
 }
+
+type SessionPersistenceIssue uint8
+
+const (
+	SessionPersistenceAvailable SessionPersistenceIssue = iota
+	SessionPersistenceUnverified
+	SessionPersistenceUnsupported
+)
 
 // RouteReadyResult returns a converged HTTPRoute result.
 func RouteReadyResult(state RouteState) RouteResult {

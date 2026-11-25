@@ -120,6 +120,7 @@ func run(ctx context.Context) error {
 	var httpRequestRedirect bool
 	var httpRequestURLRewrite bool
 	var httpRequestPolicy, backendRetryBudget, telemetryPolicy bool
+	var xBackendSessionPersistence bool
 	var httpRequestMirror bool
 	var httpCORS, listenerFilters bool
 	var gatewayInfrastructureMetadata, gatewayAddressRoutabilityCluster bool
@@ -153,6 +154,7 @@ func run(ctx context.Context) error {
 	flag.BoolVar(&httpsListenerIsolation, "octavia-https-listener-isolation", false, "isolate terminated HTTPS sections on a shared port using the regional Octavia capability (requires --tls-certificate-map)")
 	flag.BoolVar(&httpBackendRequestFilters, "octavia-http-backend-request-filters", false, "use the advertised Octavia capability for HTTP backendRef request filters (requires --octavia-weighted-http-targets)")
 	flag.BoolVar(&backendRetryBudget, "octavia-backend-retry-budget", false, "use the advertised Octavia Service retry budget capability with Experimental XBackendTrafficPolicy")
+	flag.BoolVar(&xBackendSessionPersistence, "octavia-xbackend-session-persistence", false, "use the regional Octavia http_cookie_name_v1 capability for Experimental XBackend session cookies")
 	flag.BoolVar(&telemetryPolicy, "octavia-telemetry-policy", false, "serve Experimental XTelemetryPolicy via the regional Octavia listener_otlp_tracing_v1 capability")
 	flag.Func("xbackend-external-hostname-class", "GatewayClass that permits routed ExternalHostname HTTP backends (repeatable)", func(class string) error {
 		xBackendExternalHostnameClasses = append(xBackendExternalHostnameClasses, class)
@@ -249,6 +251,7 @@ func run(ctx context.Context) error {
 		ResponseHeaderModifier:        responseHeaderModifier,
 		BackendH2C:                    backendH2C,
 		BackendRetryBudget:            backendRetryBudget,
+		XBackendSessionPersistence:    xBackendSessionPersistence,
 		TelemetryPolicy:               telemetryPolicy,
 		BackendTLSPolicy:              backendTLSPolicy,
 		OperatorHTTPS:                 certificateMap != "",
@@ -332,6 +335,8 @@ func run(ctx context.Context) error {
 		OperationTimeout:       operationTimeout,
 		PollInterval:           pollInterval,
 
+		XBackendSessionPersistence: controllerConfig.XBackendSessionPersistenceEnabled(),
+
 		HTTPSListenerIsolation:  httpsListenerIsolation,
 		InitialL7Rules:          initialL7Rules,
 		L7PolicyBatchActivation: l7PolicyBatchActivation,
@@ -380,6 +385,7 @@ func run(ctx context.Context) error {
 		BackendTLSAvailable:          openStackProvider.BackendTLSAvailable,
 		TelemetryBackendTLSAvailable: openStackProvider.TelemetryBackendTLSAvailable,
 		BackendRetryBudgetAvailable:  openStackProvider.BackendRetryBudgetAvailable,
+		XBackendCookieAvailable:      openStackProvider.XBackendCookieAvailable,
 		TCPBackendTLSAvailable:       openStackProvider.TCPBackendTLSAvailable,
 		GRPCBackendTLSAvailable:      openStackProvider.GRPCBackendTLSAvailable,
 		BackendTLSSANAvailable:       openStackProvider.BackendTLSSANAvailable,

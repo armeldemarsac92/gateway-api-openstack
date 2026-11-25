@@ -94,6 +94,8 @@ type ProviderConfig struct {
 	OperationTimeout       time.Duration
 	PollInterval           time.Duration
 
+	XBackendSessionPersistence bool
+
 	HTTPSListenerIsolation  bool
 	InitialL7Rules          bool
 	L7PolicyBatchActivation bool
@@ -130,6 +132,8 @@ type Provider struct {
 	topology               *topology.Resolver
 	operationTimeout       time.Duration
 	pollInterval           time.Duration
+
+	xBackendSessionPersistence bool
 
 	httpsListenerIsolation  bool
 	initialL7Rules          bool
@@ -175,6 +179,8 @@ func NewProvider(serviceClients ServiceClients, cfg ProviderConfig) *Provider {
 		topology:               topology.NewResolver(serviceClients, cfg.OperationTimeout),
 		operationTimeout:       cfg.OperationTimeout,
 		pollInterval:           cfg.PollInterval,
+
+		xBackendSessionPersistence: cfg.XBackendSessionPersistence,
 
 		httpsListenerIsolation:  cfg.HTTPSListenerIsolation,
 		initialL7Rules:          cfg.InitialL7Rules,

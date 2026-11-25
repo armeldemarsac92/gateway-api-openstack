@@ -59,9 +59,10 @@ import (
 
 func newExternalHostnameFixture(t *testing.T) *routeModelInputFixture {
 	t.Helper()
-	f := newRouteModelInputFixture(t)
+	configuration := testConfig()
+	configuration.GatewayAPIChannel = "experimental"
+	f := newRouteModelInputFixtureWithConfig(t, configuration)
 	cfg := &f.reconciler.Config
-	cfg.GatewayAPIChannel = "experimental"
 	cfg.XBackendExternalHostnameClasses = []string{string(f.gateway.Spec.GatewayClassName)}
 	cfg.XBackendExternalHostnameCIDRs = []netip.Prefix{netip.MustParsePrefix("198.51.100.0/24")}
 	for _, name := range cfg.GatewayAPICRDNames() {
@@ -76,9 +77,6 @@ func newExternalHostnameFixture(t *testing.T) *routeModelInputFixture {
 				t.Fatal(err)
 			}
 		}
-	}
-	if err := gatewayx.Install(f.client.Scheme()); err != nil {
-		t.Fatal(err)
 	}
 	f.reconciler.ExternalHostnames = &ExternalHostnameCache{}
 	return f
@@ -343,6 +341,7 @@ func TestXBackendExternalHostnameReferencesUseActualGatewayMode(t *testing.T) {
 func TestXBackendAndSameNamedServiceKeepSeparateWeightedTargets(t *testing.T) {
 	f := newRouteModelInputFixture(t)
 	f.reconciler.Config.GatewayAPIChannel = "experimental"
+	f.reconciler.Config.XBackendSessionPersistence = true
 	f.reconciler.Config.FixedHTTPResponses, f.reconciler.Config.WeightedHTTPTargets = true, true
 	if err := gatewayx.Install(f.client.Scheme()); err != nil {
 		t.Fatal(err)
@@ -352,6 +351,9 @@ func TestXBackendAndSameNamedServiceKeepSeparateWeightedTargets(t *testing.T) {
 		Spec: gatewayx.BackendSpec{
 			Type: gatewayx.BackendTypeEndpointSelector,
 			Port: gatewayx.BackendPort{Number: gatewayx.PortNumber(f.service.Spec.Ports[0].Port)},
+			SessionPersistence: &gatewayv1.SessionPersistence{Cookie: &gatewayv1.CookieConfig{
+				Name: ptr.To(gatewayv1.CookieName("reports_session")), Path: ptr.To("/"),
+			}},
 			EndpointSelector: &gatewayx.EndpointSelectorBackend{LabelSelector: gatewayx.LabelSelector{
 				MatchLabels: map[gatewayv1.LabelKey]gatewayv1.LabelValue{"app": "direct"},
 			}},
@@ -379,6 +381,7 @@ func TestXBackendAndSameNamedServiceKeepSeparateWeightedTargets(t *testing.T) {
 	before := f.observe(t)
 	spec := before.Nodes[0].Spec
 	if len(spec.HTTPBackends) != 2 || spec.HTTPBackends[0].Kind != "" || spec.HTTPBackends[1].Kind != cloud.HTTPBackendKindXBackend ||
+		spec.HTTPBackends[0].SessionCookieName != "" || spec.HTTPBackends[1].SessionCookieName != "reports_session" ||
 		identity.HTTPBackendPoolKey(spec.HTTPBackends[0]) == identity.HTTPBackendPoolKey(spec.HTTPBackends[1]) ||
 		!reflect.DeepEqual(spec.HTTPBackends[1].Members, []cloud.Member{{Address: pod.Status.PodIP, Port: int(backend.Spec.Port.Number)}}) {
 		t.Fatalf("expected two distinct pools, got %+v", spec.HTTPBackends)
@@ -415,6 +418,143 @@ func TestXBackendAndSameNamedServiceKeepSeparateWeightedTargets(t *testing.T) {
 		!reflect.DeepEqual(spec.WeightedHTTPRules[0].Targets, []cloud.HTTPWeightedTarget{{BackendIndex: ptr.To(0), Weight: 3}, {Weight: 7}}) ||
 		f.reader.counts["XBackend"] != 0 || f.reader.counts["Pod"] != 0 || f.reader.counts["ReferenceGrant"] != 0 {
 		t.Fatalf("foreign XBackend changed the authorized Service or caused reads: graph %+v, reads %v", spec, f.reader.counts)
+	}
+}
+
+func TestXBackendCookieNameAndCurrentGenerationStatus(t *testing.T) {
+	f := newExternalHostnameFixture(t)
+	f.reconciler.Config.XBackendSessionPersistence = true
+	backend := &gatewayx.XBackend{
+		ObjectMeta: metav1.ObjectMeta{Namespace: f.route.Namespace, Name: "reports", UID: "reports-uid", Generation: 4},
+		Spec: gatewayx.BackendSpec{
+			Type: gatewayx.BackendTypeEndpointSelector, Port: gatewayx.BackendPort{Number: 8081},
+			EndpointSelector: &gatewayx.EndpointSelectorBackend{LabelSelector: gatewayx.LabelSelector{
+				MatchLabels: map[gatewayv1.LabelKey]gatewayv1.LabelValue{"app": "reports"},
+			}},
+			Protocol:           ptr.To(gatewayx.BackendProtocolHTTP11),
+			SessionPersistence: &gatewayv1.SessionPersistence{Cookie: &gatewayv1.CookieConfig{}},
+		},
+	}
+	other := backend.DeepCopy()
+	other.Name, other.UID = "other", "other-uid"
+	f.create(t, backend, other)
+	makeRule := func(path string, backend *gatewayx.XBackend) gatewayv1.HTTPRouteRule {
+		rule := pathBackendRule(path, gatewayv1.PathMatchExact, gatewayv1.ObjectName(backend.Name))
+		ref := &rule.BackendRefs[0]
+		ref.Group, ref.Kind, ref.Port = ptr.To(gatewayv1.Group(gatewayx.GroupName)), ptr.To(gatewayv1.Kind(model.XBackendKind)), nil
+		return rule
+	}
+	f.route.Spec.Rules = []gatewayv1.HTTPRouteRule{makeRule("/reports", backend)}
+	require.NoError(t, f.client.Update(t.Context(), f.route))
+	sibling := f.candidate("sibling")
+	sibling.Spec.Rules = []gatewayv1.HTTPRouteRule{makeRule("/sibling", backend), makeRule("/other", other)}
+	require.NoError(t, f.reconciler.applyRouteBinding(sibling, f.gateway))
+	f.create(t, sibling)
+	input := f.observe(t)
+	var cookieNames []string
+	var otherName string
+	for _, node := range input.Nodes {
+		for _, pool := range node.Spec.HTTPBackends {
+			require.True(t, cloud.ValidHTTPSessionCookieName(pool.SessionCookieName))
+			if pool.Name == backend.Name {
+				cookieNames = append(cookieNames, pool.SessionCookieName)
+			} else {
+				otherName = pool.SessionCookieName
+			}
+		}
+	}
+	require.Len(t, cookieNames, 2)
+	require.Equal(t, cookieNames[0], cookieNames[1])
+	require.NotEmpty(t, otherName)
+	require.NotEqual(t, cookieNames[0], otherName)
+
+	for _, phase := range []struct {
+		issue     cloud.SessionPersistenceIssue
+		condition metav1.ConditionStatus
+		reason    string
+		err       error
+	}{
+		{cloud.SessionPersistenceUnsupported, metav1.ConditionFalse, "UnsupportedValue", nil},
+		{cloud.SessionPersistenceUnverified, metav1.ConditionUnknown, "Pending", errors.New("API timed out")},
+		{cloud.SessionPersistenceAvailable, metav1.ConditionTrue, "", nil},
+	} {
+		f.reconciler.XBackendCookieAvailable = func(context.Context) (bool, error) {
+			return phase.issue == cloud.SessionPersistenceAvailable, phase.err
+		}
+		backendKey := client.ObjectKeyFromObject(backend)
+		_, err := (&xBackendStatusReconciler{routes: f.reconciler}).Reconcile(t.Context(), ctrl.Request{NamespacedName: backendKey})
+		require.NoError(t, err)
+		require.NoError(t, f.client.Get(t.Context(), backendKey, backend))
+		require.Len(t, backend.Status.Ancestors, 1)
+		condition := meta.FindStatusCondition(backend.Status.Ancestors[0].Conditions, "Accepted")
+		require.NotNil(t, condition)
+		require.Equal(t, backend.Generation, condition.ObservedGeneration)
+		require.Equal(t, phase.condition, condition.Status)
+		provider := &recordingProvider{}
+		if phase.issue != cloud.SessionPersistenceAvailable {
+			result := cloud.RouteProgressingResult("Waiting for Octavia cookie support", time.Second)
+			result.BackendSessionPersistenceIssue = phase.issue
+			provider.routeResult = &result
+			require.Equal(t, phase.reason, condition.Reason)
+		}
+		r := newTestReconciler(*f.reconciler, provider)
+		key := client.ObjectKeyFromObject(f.route)
+		_, err = r.Reconcile(t.Context(), ctrl.Request{NamespacedName: key})
+		require.NoError(t, err)
+		require.NoError(t, f.client.Get(t.Context(), key, f.route))
+		require.Len(t, f.route.Status.Parents, 1)
+		resolved := meta.FindStatusCondition(f.route.Status.Parents[0].Conditions, string(gatewayv1.RouteConditionResolvedRefs))
+		require.NotNil(t, resolved)
+		require.Equal(t, f.route.Generation, resolved.ObservedGeneration)
+		require.Equal(t, phase.condition, resolved.Status)
+		if phase.reason != "" {
+			require.Equal(t, phase.reason, resolved.Reason)
+		}
+	}
+}
+
+func TestXBackendCookieRejectsUnsupportedContract(t *testing.T) {
+	profile := model.XBackendProfile{MemberMode: cloud.MemberModeEndpoint, SessionPersistence: true, H2C: true}
+	backend := gatewayx.BackendSpec{
+		Type: gatewayx.BackendTypeEndpointSelector, Port: gatewayx.BackendPort{Number: 8081},
+		EndpointSelector: &gatewayx.EndpointSelectorBackend{LabelSelector: gatewayx.LabelSelector{
+			MatchLabels: map[gatewayv1.LabelKey]gatewayv1.LabelValue{"app": "reports"},
+		}},
+		SessionPersistence: &gatewayv1.SessionPersistence{Cookie: &gatewayv1.CookieConfig{}},
+	}
+	require.Nil(t, model.ValidateXBackend(backend, profile))
+	for _, tc := range []struct {
+		name string
+		edit func(*gatewayx.BackendSpec, *model.XBackendProfile)
+	}{
+		{"disabled", func(_ *gatewayx.BackendSpec, p *model.XBackendProfile) { p.SessionPersistence = false }},
+		{"header", func(b *gatewayx.BackendSpec, _ *model.XBackendProfile) {
+			b.SessionPersistence.Type = ptr.To(gatewayv1.HeaderBasedSessionPersistence)
+		}},
+		{"absolute timeout", func(b *gatewayx.BackendSpec, _ *model.XBackendProfile) {
+			b.SessionPersistence.AbsoluteTimeout = ptr.To(gatewayv1.Duration("10s"))
+		}},
+		{"permanent cookie", func(b *gatewayx.BackendSpec, _ *model.XBackendProfile) {
+			b.SessionPersistence.Cookie.LifetimeType = ptr.To(gatewayv1.PermanentCookieLifetimeType)
+		}},
+		{"path", func(b *gatewayx.BackendSpec, _ *model.XBackendProfile) {
+			b.SessionPersistence.Cookie.Path = ptr.To("/reports")
+		}},
+		{"reserved cookie name", func(b *gatewayx.BackendSpec, _ *model.XBackendProfile) {
+			b.SessionPersistence.Cookie.Name = ptr.To(gatewayv1.CookieName("__HoSt-reports"))
+		}},
+		{"unsafe cookie name", func(b *gatewayx.BackendSpec, _ *model.XBackendProfile) {
+			b.SessionPersistence.Cookie.Name = ptr.To(gatewayv1.CookieName("invalid;name"))
+		}},
+		{"h2c", func(b *gatewayx.BackendSpec, _ *model.XBackendProfile) {
+			b.Protocol = ptr.To(gatewayx.BackendProtocolH2C)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			spec, profile := backend.DeepCopy(), profile
+			tc.edit(spec, &profile)
+			require.NotNil(t, model.ValidateXBackend(*spec, profile))
+		})
 	}
 }
 
