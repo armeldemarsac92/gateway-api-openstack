@@ -53,6 +53,13 @@ type PoolInventory struct {
 	BackendRetryBudget     map[string]PoolBackendRetryBudget
 	TCPConnectionRejection map[string]PoolTCPConnectionRejection
 	UDPPacketDrop          map[string]PoolUDPPacketDrop
+	CookieDeadline         map[string]PoolCookieDeadline
+}
+
+// PoolCookieDeadline preserves an explicit zero and an invalid readback.
+type PoolCookieDeadline struct {
+	Value   *cloud.HTTPSessionCookieDeadline
+	Invalid bool
 }
 
 // PoolBackendTLS records which transport fields the API actually reported.
@@ -82,7 +89,7 @@ func (tls PoolBackendTLS) Complete() bool {
 func (s *Service) ListPoolInventory(ctx context.Context, opts pools.ListOpts) (PoolInventory, error) {
 	inventory := PoolInventory{BackendH2C: make(map[string]bool), BackendTLS: make(map[string]PoolBackendTLS),
 		BackendRetryBudget: make(map[string]PoolBackendRetryBudget), TCPConnectionRejection: make(map[string]PoolTCPConnectionRejection),
-		UDPPacketDrop: make(map[string]PoolUDPPacketDrop)}
+		UDPPacketDrop: make(map[string]PoolUDPPacketDrop), CookieDeadline: make(map[string]PoolCookieDeadline)}
 	query, err := opts.ToPoolListQuery()
 	if err != nil {
 		return inventory, fmt.Errorf("list pools: %w", err)
@@ -93,6 +100,7 @@ func (s *Service) ListPoolInventory(ctx context.Context, opts pools.ListOpts) (P
 			Links []gophercloud.Link `json:"pools_links"`
 			Pools []struct {
 				pools.Pool
+				SessionPersistence     json.RawMessage `json:"session_persistence"`
 				BackendRetryBudget     json.RawMessage `json:"backend_retry_budget"`
 				TCPConnectionRejection json.RawMessage `json:"tcp_connection_rejection"`
 				UDPPacketDrop          json.RawMessage `json:"udp_packet_drop"`
@@ -140,6 +148,12 @@ func (s *Service) ListPoolInventory(ctx context.Context, opts pools.ListOpts) (P
 			pool.TLSEnabled = pool.Enabled != nil && *pool.Enabled
 			pool.AdminStateUp = pool.Admin != nil && *pool.Admin
 			inventory.BackendTLS[pool.ID] = tls
+			persistence, deadline, err := decodePoolCookieDeadline(pool.SessionPersistence)
+			if err != nil {
+				return inventory, fmt.Errorf("decode Octavia pool session persistence: %w", err)
+			}
+			pool.Persistence = persistence
+			inventory.CookieDeadline[pool.ID] = deadline
 			inventory.BackendRetryBudget[pool.ID] = decodeBackendRetryBudget(pool.BackendRetryBudget)
 			rejection := decodeTCPConnectionRejection(pool.TCPConnectionRejection)
 			drop := decodeUDPPacketDrop(pool.UDPPacketDrop)
@@ -166,6 +180,34 @@ func (s *Service) ListPoolInventory(ctx context.Context, opts pools.ListOpts) (P
 	}
 	inventory.Items = items
 	return inventory, nil
+}
+
+func decodePoolCookieDeadline(raw json.RawMessage) (pools.SessionPersistence, PoolCookieDeadline, error) {
+	var persistence struct {
+		pools.SessionPersistence
+		Timeout json.RawMessage `json:"cookie_absolute_timeout_ms"`
+		Scope   json.RawMessage `json:"cookie_scope"`
+	}
+	if len(raw) == 0 {
+		return persistence.SessionPersistence, PoolCookieDeadline{}, nil
+	}
+	if err := json.Unmarshal(raw, &persistence); err != nil {
+		return persistence.SessionPersistence, PoolCookieDeadline{}, err
+	}
+	if len(persistence.Timeout) == 0 && len(persistence.Scope) == 0 ||
+		bytes.Equal(persistence.Timeout, []byte("null")) && bytes.Equal(persistence.Scope, []byte("null")) {
+		return persistence.SessionPersistence, PoolCookieDeadline{}, nil
+	}
+	var timeout *int64
+	var scope string
+	if json.Unmarshal(persistence.Timeout, &timeout) != nil || timeout == nil || json.Unmarshal(persistence.Scope, &scope) != nil {
+		return persistence.SessionPersistence, PoolCookieDeadline{Invalid: true}, nil
+	}
+	deadline := cloud.HTTPSessionCookieDeadline{TimeoutMS: *timeout, Scope: scope}
+	if !deadline.Valid() {
+		return persistence.SessionPersistence, PoolCookieDeadline{Invalid: true}, nil
+	}
+	return persistence.SessionPersistence, PoolCookieDeadline{Value: &deadline}, nil
 }
 
 func decodeBackendTLSSubjectAltNames(raw json.RawMessage) ([]cloud.BackendTLSSubjectAltName, error) {
@@ -255,6 +297,7 @@ func missingCollection(field string) error {
 // CreatePoolOpts adds optional backend transport to a stock pool create request.
 type CreatePoolOpts struct {
 	pools.CreateOpts
+	CookieDeadline            *cloud.HTTPSessionCookieDeadline
 	BackendRetryBudget        *cloud.BackendRetryBudget
 	BackendH2C                bool
 	BackendTLSHostname        string
@@ -268,6 +311,12 @@ func (opts CreatePoolOpts) ToPoolCreateMap() (map[string]any, error) {
 		return nil, err
 	}
 	pool := body["pool"].(map[string]any)
+	if opts.CookieDeadline != nil {
+		pool["session_persistence"], err = cookieDeadlinePersistence(opts.Persistence, opts.CookieDeadline)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if opts.BackendRetryBudget != nil {
 		pool[backendRetryBudgetField] = opts.BackendRetryBudget
 	}
@@ -289,10 +338,12 @@ func (opts CreatePoolOpts) ToPoolCreateMap() (map[string]any, error) {
 // UpdatePoolOpts adds optional backend transport to a stock pool update request.
 type UpdatePoolOpts struct {
 	pools.UpdateOpts
-	BackendRetryBudget *BackendRetryBudgetUpdate
-	BackendH2C         *bool
-	BackendTLS         *BackendTLSSettings
-	ClearTLSClientRef  bool
+	CookieDeadline      *cloud.HTTPSessionCookieDeadline
+	ClearCookieDeadline bool
+	BackendRetryBudget  *BackendRetryBudgetUpdate
+	BackendH2C          *bool
+	BackendTLS          *BackendTLSSettings
+	ClearTLSClientRef   bool
 }
 
 // BackendTLSSettings changes hostname authentication, trust and client identity in one write.
@@ -314,6 +365,12 @@ func (opts UpdatePoolOpts) ToPoolUpdateMap() (map[string]any, error) {
 		return nil, err
 	}
 	pool := body["pool"].(map[string]any)
+	if opts.CookieDeadline != nil || opts.ClearCookieDeadline {
+		pool["session_persistence"], err = cookieDeadlinePersistence(opts.Persistence, opts.CookieDeadline)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if update := opts.BackendRetryBudget; update != nil {
 		pool[backendRetryBudgetField] = update.Value
 	}
@@ -341,6 +398,24 @@ func (opts UpdatePoolOpts) ToPoolUpdateMap() (map[string]any, error) {
 		pool["tls_container_ref"] = nil
 	}
 	return body, nil
+}
+
+func cookieDeadlinePersistence(persistence *pools.SessionPersistence, deadline *cloud.HTTPSessionCookieDeadline) (map[string]any, error) {
+	if persistence == nil || persistence.Type != "HTTP_COOKIE" || !cloud.ValidHTTPSessionCookieName(persistence.CookieName) ||
+		deadline != nil && !deadline.Valid() {
+		return nil, fmt.Errorf("absolute timeout requires a named HTTP cookie and a valid deadline when set")
+	}
+	fields := map[string]any{
+		"type":                       persistence.Type,
+		"cookie_name":                persistence.CookieName,
+		"cookie_absolute_timeout_ms": nil,
+		"cookie_scope":               nil,
+	}
+	if deadline != nil {
+		fields["cookie_absolute_timeout_ms"] = deadline.TimeoutMS
+		fields["cookie_scope"] = deadline.Scope
+	}
+	return fields, nil
 }
 
 // PlaintextTCPPoolOpts requests a TCP pool without backend re-encryption.

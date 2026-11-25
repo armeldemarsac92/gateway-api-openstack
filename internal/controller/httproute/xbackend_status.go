@@ -151,7 +151,8 @@ func (r *xBackendStatusReconciler) observeAncestors(ctx context.Context, key typ
 			}
 		}
 		if condition.Status == metav1.ConditionTrue && backend.Spec.SessionPersistence != nil {
-			condition.Status, condition.Reason, condition.Message = cookieCapability.apply(condition.Status, condition.Reason, condition.Message)
+			condition.Status, condition.Reason, condition.Message = cookieCapability.apply(condition.Status, condition.Reason, condition.Message,
+				backend.Spec.SessionPersistence.AbsoluteTimeout != nil)
 		}
 		ancestors[gatewayKey] = condition
 	}
@@ -188,6 +189,8 @@ func xBackendAcceptedCondition(backend *gatewayx.XBackend, profile model.XBacken
 	}
 	if diagnostic := model.ValidateXBackend(backend.Spec, profile); diagnostic != nil {
 		condition.Status, condition.Reason, condition.Message = metav1.ConditionFalse, diagnostic.Reason, diagnostic.Message
+	} else if persistence := backend.Spec.SessionPersistence; persistence != nil && persistence.AbsoluteTimeout != nil && backend.UID == "" {
+		condition.Status, condition.Reason, condition.Message = metav1.ConditionFalse, string(gatewayv1.RouteReasonUnsupportedValue), "XBackend session cookie absoluteTimeout needs an observed XBackend UID"
 	} else if pending {
 		condition.Status, condition.Reason, condition.Message = metav1.ConditionUnknown, "Pending", "Gateway member mode is pending"
 	}
