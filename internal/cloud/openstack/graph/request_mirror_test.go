@@ -32,6 +32,39 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
 )
 
+func TestActiveRequestMirrorsAccountForPoolListenerReferences(t *testing.T) {
+	listener := pools.ListenerID{ID: "ingress"}
+	route := observedRouteGraph{
+		policies: []observedRoutePolicy{{
+			policy: l7policies.L7Policy{ID: "policy", ListenerID: listener.ID, Position: 1, AdminStateUp: true},
+			rules:  []observedRouteRule{{}},
+			requestMirrors: []octavia.HTTPRequestMirror{
+				{PoolID: "route-copy", Numerator: 1, Denominator: 1},
+				{PoolID: "zero-copy", Numerator: 0, Denominator: 100},
+			},
+			weightedTargets: []octavia.WeightedHTTPTarget{{
+				PoolID: "primary", Weight: 1,
+				RequestMirrors: []octavia.HTTPRequestMirror{
+					{PoolID: "backend-copy", Numerator: 1, Denominator: 4},
+				},
+			}},
+		}},
+	}
+	for _, id := range []string{"primary", "route-copy", "backend-copy", "zero-copy"} {
+		refs := []pools.ListenerID{listener}
+		if id == "zero-copy" {
+			refs = []pools.ListenerID{}
+		}
+		route.part(id).pool = &pools.Pool{ID: id, Protocol: cloud.ListenerProtocolHTTP, Listeners: refs}
+	}
+	require.NoError(t, validateScopedHTTPRouteRelationships([]observedRouteGraph{route}))
+
+	route.policies[0].requestMirrors = nil
+	require.ErrorIs(t, validateScopedHTTPRouteRelationships([]observedRouteGraph{route}), cloud.ErrDependencyNotReady)
+	route.part("route-copy").pool.Listeners = []pools.ListenerID{}
+	require.NoError(t, validateScopedHTTPRouteRelationships([]observedRouteGraph{route}))
+}
+
 func TestRequestMirrorWithdrawalPreservesPrimaryAndOtherFilters(t *testing.T) {
 	stable := desiredHTTPMirror{backendKey: "allowed", numerator: 2, denominator: 7, phase: cloud.HTTPMirrorAfterHeaders}
 	revoked := octavia.HTTPRequestMirror{PoolID: "d3b2b6ee-3469-48a1-b60f-6c59a66b1c82", Numerator: 1, Denominator: 1, Phase: cloud.HTTPMirrorBeforeTransforms}
