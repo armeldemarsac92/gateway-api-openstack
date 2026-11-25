@@ -1,0 +1,1484 @@
+{
+  "gatewayAPI": {
+    "version": "v1.7.0",
+    "source": "e26d183dbbc1bb782b78addbd26faba03955c152"
+  },
+  "controller": {
+    "source": "0e4998b0a4ed1edb0000cf723e2480a5c80a74c7",
+    "manifest": "sha256:ba419eb352d9030dacd979150fae97da351e866a7e7d2e2fb34b488b7eaf3c58",
+    "managerSHA256": "f428fd5c7ca75ee5f8cf74a9b3793431ac14057c867aa36bbc992559df498a30"
+  },
+  "octavia": {
+    "source": "3ea393a1a5f4ecf476190635fd5a701e7eb0dd5b",
+    "wheel": "octavia-19.0.1.dev77-py3-none-any.whl",
+    "sha256": "ac13628ecd6e4be7be9df1a50ad850bda7f5e6ba1e652dba12686d821b44aeeb"
+  },
+  "octaviaLib": {
+    "revision": "542a56dcbec8713f168230a98ed2d11333f59b7f",
+    "sha256": "2514ccf71a882bf41aa945681243cd13bd47cd0b040cb63dfb77669e0093cd3d"
+  },
+  "profile": {
+    "option": "enabled_tls_sni_weighted_pool_providers",
+    "capability": "tls_sni_weighted_pools_v1",
+    "tcpTLSTermination": true,
+    "backendTLSPolicy": true,
+    "tcpConnectionRejection": true
+  },
+  "case": {
+    "route": "weighted",
+    "frontend": "weighted.example.test",
+    "configuredWeights": {
+      "primary": 3,
+      "minority": 1
+    },
+    "connectionsPerPhase": 512,
+    "siblingConnectionsPerPhase": 40,
+    "minorityExpected": 128,
+    "tolerance": 43,
+    "backendCertificateRotation": "The test server rotates TLS session-ticket keys with its certificate. Each rotated leaf is independently verified on a fresh direct connection to the Pod."
+  },
+  "baseline": {
+    "controller": "d435da52da94ef7d55f2750567b4c83aa7dfe91b",
+    "octavia": "0a0c55cbc7c390ffe7bf8084b79517c4b7c74a89",
+    "conditions": {
+      "Accepted": {
+        "observedGeneration": 1,
+        "reason": "Accepted",
+        "status": "True"
+      },
+      "ResolvedRefs": {
+        "observedGeneration": 1,
+        "reason": "UnsupportedProtocol",
+        "status": "False"
+      },
+      "gateway-api-openstack.github.io/Programmed": {
+        "observedGeneration": 1,
+        "reason": "UnsupportedProtocol",
+        "status": "False"
+      }
+    },
+    "counts": {
+      "closed": 32
+    },
+    "sibling": {
+      "sibling": 40
+    }
+  },
+  "channels": {
+    "standard": {
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "kubernetes": "v1.36.4",
+      "frontendCertificateSHA256": "b0ba909f9f04590748653e80b25c31297f0851bc4782f7c6fb720edb84dfc3e2",
+      "backendCASHA256": {
+        "minority": "51a3ebf86a367b346b0da3f0753d7fd59330a65e2a68d097013e4f33ddd57239",
+        "primary": "5fec1bf9a5454b7c1863187a54bb1121a3ec18bd75b0e52ca770ec7dad4a3060",
+        "sibling": "5fec1bf9a5454b7c1863187a54bb1121a3ec18bd75b0e52ca770ec7dad4a3060"
+      },
+      "expectedBackendHostnames": {
+        "minority": "minority.upstream.test",
+        "primary": "primary.upstream.test",
+        "sibling": "sibling.upstream.test"
+      },
+      "routeSpecSHA256": "1c0b32b04999cbcf0a739ef121aab71ccaff8e8d5982fa44f9edace9e5aa8d52",
+      "routeGeneration": 1,
+      "routeUID": "93e80f33-a629-490a-b0d5-f8a75bce02c1",
+      "phases": [
+        {
+          "phase": "healthy",
+          "primary": 364,
+          "minority": 148,
+          "closed": 0,
+          "sibling": 40,
+          "routeConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "policyConditions": {
+            "minority": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              }
+            },
+            "primary": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              }
+            },
+            "sibling": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              }
+            }
+          },
+          "poolReadback": [
+            {
+              "weight": 3,
+              "up": true,
+              "tls": true,
+              "dns": "primary.upstream.test",
+              "ca": [
+                "5fec1bf9a5454b7c1863187a54bb1121a3ec18bd75b0e52ca770ec7dad4a3060"
+              ],
+              "service": "primary",
+              "readyMembers": 1
+            },
+            {
+              "weight": 1,
+              "up": true,
+              "tls": true,
+              "dns": "minority.upstream.test",
+              "ca": [
+                "51a3ebf86a367b346b0da3f0753d7fd59330a65e2a68d097013e4f33ddd57239"
+              ],
+              "service": "minority",
+              "readyMembers": 1
+            }
+          ],
+          "podCountChanges": {
+            "minority": {
+              "echo": 148,
+              "resumed": 141,
+              "tcp": 148,
+              "tls": 148
+            },
+            "primary": {
+              "echo": 364,
+              "resumed": 355,
+              "tcp": 364,
+              "tls": 364
+            },
+            "sibling": {
+              "echo": 40,
+              "resumed": 39,
+              "tcp": 40,
+              "tls": 40
+            }
+          },
+          "renderedConfigurationSHA256": "8b99e9e2f51bec62e2fd63499b7edaee58512ede1075216583145cf929580628",
+          "freshDirectHandshake": {
+            "originalTrustVerified": true,
+            "presentedLeafSHA256": "60eb9f9c4f924ccdacddf0d2361f6e30398c7ffe30f48343b495599488cbcfcf"
+          }
+        },
+        {
+          "phase": "wrong-name",
+          "primary": 404,
+          "minority": 0,
+          "closed": 108,
+          "sibling": 40,
+          "routeConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "policyConditions": {
+            "minority": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              }
+            },
+            "primary": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              }
+            },
+            "sibling": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              }
+            }
+          },
+          "poolReadback": [
+            {
+              "weight": 3,
+              "up": true,
+              "tls": true,
+              "dns": "primary.upstream.test",
+              "ca": [
+                "5fec1bf9a5454b7c1863187a54bb1121a3ec18bd75b0e52ca770ec7dad4a3060"
+              ],
+              "service": "primary",
+              "readyMembers": 1
+            },
+            {
+              "weight": 1,
+              "up": true,
+              "tls": true,
+              "dns": "minority.upstream.test",
+              "ca": [
+                "51a3ebf86a367b346b0da3f0753d7fd59330a65e2a68d097013e4f33ddd57239"
+              ],
+              "service": "minority",
+              "readyMembers": 1
+            }
+          ],
+          "podCountChanges": {
+            "minority": {
+              "echo": 0,
+              "resumed": 0,
+              "tcp": 432,
+              "tls": 0
+            },
+            "primary": {
+              "echo": 404,
+              "resumed": 404,
+              "tcp": 404,
+              "tls": 404
+            },
+            "sibling": {
+              "echo": 40,
+              "resumed": 40,
+              "tcp": 40,
+              "tls": 40
+            }
+          },
+          "renderedConfigurationSHA256": "8b99e9e2f51bec62e2fd63499b7edaee58512ede1075216583145cf929580628",
+          "minorityLeafSHA256": "c47983a45a6e07053f3c7c39200c6306dee15b340d092f859db8af492ba8923d",
+          "freshDirectHandshake": {
+            "originalTrustVerified": false,
+            "presentedLeafSHA256": "c47983a45a6e07053f3c7c39200c6306dee15b340d092f859db8af492ba8923d",
+            "verifyCode": 62
+          }
+        },
+        {
+          "phase": "wrong-ca",
+          "primary": 374,
+          "minority": 0,
+          "closed": 138,
+          "sibling": 40,
+          "routeConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "policyConditions": {
+            "minority": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              }
+            },
+            "primary": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              }
+            },
+            "sibling": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              }
+            }
+          },
+          "poolReadback": [
+            {
+              "weight": 3,
+              "up": true,
+              "tls": true,
+              "dns": "primary.upstream.test",
+              "ca": [
+                "5fec1bf9a5454b7c1863187a54bb1121a3ec18bd75b0e52ca770ec7dad4a3060"
+              ],
+              "service": "primary",
+              "readyMembers": 1
+            },
+            {
+              "weight": 1,
+              "up": true,
+              "tls": true,
+              "dns": "minority.upstream.test",
+              "ca": [
+                "51a3ebf86a367b346b0da3f0753d7fd59330a65e2a68d097013e4f33ddd57239"
+              ],
+              "service": "minority",
+              "readyMembers": 1
+            }
+          ],
+          "podCountChanges": {
+            "minority": {
+              "echo": 0,
+              "resumed": 0,
+              "tcp": 552,
+              "tls": 0
+            },
+            "primary": {
+              "echo": 374,
+              "resumed": 374,
+              "tcp": 374,
+              "tls": 374
+            },
+            "sibling": {
+              "echo": 40,
+              "resumed": 40,
+              "tcp": 40,
+              "tls": 40
+            }
+          },
+          "renderedConfigurationSHA256": "8b99e9e2f51bec62e2fd63499b7edaee58512ede1075216583145cf929580628",
+          "minorityLeafSHA256": "eee04677455893966cffa79d26d7c04d479c5ded0da4e76983a8c04ed6f69568",
+          "freshDirectHandshake": {
+            "originalTrustVerified": false,
+            "presentedLeafSHA256": "eee04677455893966cffa79d26d7c04d479c5ded0da4e76983a8c04ed6f69568",
+            "verifyCode": 20
+          }
+        },
+        {
+          "phase": "restored",
+          "primary": 382,
+          "minority": 130,
+          "closed": 0,
+          "sibling": 40,
+          "routeConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "policyConditions": {
+            "minority": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              }
+            },
+            "primary": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              }
+            },
+            "sibling": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              }
+            }
+          },
+          "poolReadback": [
+            {
+              "weight": 3,
+              "up": true,
+              "tls": true,
+              "dns": "primary.upstream.test",
+              "ca": [
+                "5fec1bf9a5454b7c1863187a54bb1121a3ec18bd75b0e52ca770ec7dad4a3060"
+              ],
+              "service": "primary",
+              "readyMembers": 1
+            },
+            {
+              "weight": 1,
+              "up": true,
+              "tls": true,
+              "dns": "minority.upstream.test",
+              "ca": [
+                "51a3ebf86a367b346b0da3f0753d7fd59330a65e2a68d097013e4f33ddd57239"
+              ],
+              "service": "minority",
+              "readyMembers": 1
+            }
+          ],
+          "podCountChanges": {
+            "minority": {
+              "echo": 130,
+              "resumed": 121,
+              "tcp": 130,
+              "tls": 130
+            },
+            "primary": {
+              "echo": 382,
+              "resumed": 382,
+              "tcp": 382,
+              "tls": 382
+            },
+            "sibling": {
+              "echo": 40,
+              "resumed": 40,
+              "tcp": 40,
+              "tls": 40
+            }
+          },
+          "renderedConfigurationSHA256": "8b99e9e2f51bec62e2fd63499b7edaee58512ede1075216583145cf929580628",
+          "minorityLeafSHA256": "60eb9f9c4f924ccdacddf0d2361f6e30398c7ffe30f48343b495599488cbcfcf",
+          "freshDirectHandshake": {
+            "originalTrustVerified": true,
+            "presentedLeafSHA256": "60eb9f9c4f924ccdacddf0d2361f6e30398c7ffe30f48343b495599488cbcfcf"
+          }
+        },
+        {
+          "phase": "grant-withdrawn",
+          "primary": 392,
+          "minority": 0,
+          "closed": 120,
+          "sibling": 40,
+          "routeConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "RefNotPermitted",
+              "status": "False"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "policyConditions": {
+            "minority": {},
+            "primary": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              }
+            },
+            "sibling": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              }
+            }
+          },
+          "poolReadback": [
+            {
+              "weight": 3,
+              "up": true,
+              "tls": true,
+              "dns": "primary.upstream.test",
+              "ca": [
+                "5fec1bf9a5454b7c1863187a54bb1121a3ec18bd75b0e52ca770ec7dad4a3060"
+              ],
+              "service": "primary",
+              "readyMembers": 1
+            },
+            {
+              "weight": 1,
+              "up": false,
+              "tls": false,
+              "dns": null,
+              "ca": [],
+              "service": null,
+              "readyMembers": 0
+            }
+          ],
+          "podCountChanges": {
+            "minority": {
+              "echo": 0,
+              "resumed": 0,
+              "tcp": 0,
+              "tls": 0
+            },
+            "primary": {
+              "echo": 392,
+              "resumed": 377,
+              "tcp": 392,
+              "tls": 392
+            },
+            "sibling": {
+              "echo": 40,
+              "resumed": 39,
+              "tcp": 40,
+              "tls": 40
+            }
+          },
+          "renderedConfigurationSHA256": "9fcb31a196a300de73e4f6f36c9991a5a4ea589debf9f031e95a13d59b7251a8"
+        },
+        {
+          "phase": "grant-restored",
+          "primary": 379,
+          "minority": 133,
+          "closed": 0,
+          "sibling": 40,
+          "routeConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "policyConditions": {
+            "minority": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              }
+            },
+            "primary": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              }
+            },
+            "sibling": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              }
+            }
+          },
+          "poolReadback": [
+            {
+              "weight": 3,
+              "up": true,
+              "tls": true,
+              "dns": "primary.upstream.test",
+              "ca": [
+                "5fec1bf9a5454b7c1863187a54bb1121a3ec18bd75b0e52ca770ec7dad4a3060"
+              ],
+              "service": "primary",
+              "readyMembers": 1
+            },
+            {
+              "weight": 1,
+              "up": true,
+              "tls": true,
+              "dns": "minority.upstream.test",
+              "ca": [
+                "51a3ebf86a367b346b0da3f0753d7fd59330a65e2a68d097013e4f33ddd57239"
+              ],
+              "service": "minority",
+              "readyMembers": 1
+            }
+          ],
+          "podCountChanges": {
+            "minority": {
+              "echo": 133,
+              "resumed": 126,
+              "tcp": 133,
+              "tls": 133
+            },
+            "primary": {
+              "echo": 379,
+              "resumed": 370,
+              "tcp": 379,
+              "tls": 379
+            },
+            "sibling": {
+              "echo": 40,
+              "resumed": 39,
+              "tcp": 40,
+              "tls": 40
+            }
+          },
+          "renderedConfigurationSHA256": "1284b6309313aaea349ea2fe55f8dc032370f4d1002afef5634429a55ea16ae8"
+        }
+      ],
+      "cleanup": {
+        "l7policies": 0,
+        "listeners": 0,
+        "loadbalancers": 0,
+        "pools": 0
+      }
+    },
+    "experimental": {
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "kubernetes": "v1.36.4",
+      "frontendCertificateSHA256": "1a8346ba613d19c0a4167c17fe0dae4cecfd5ccc8f38c7de4cf213a1d499b495",
+      "backendCASHA256": {
+        "minority": "f4ccc0dfacfee97dd1de6d23a16aad553a83a66bc703ededbd370d23a6e99bfd",
+        "primary": "839c4d06622b1fc4b1491c2c7c12ce992a0b3ba894c5b68ad6b4e5d6751e9925",
+        "sibling": "839c4d06622b1fc4b1491c2c7c12ce992a0b3ba894c5b68ad6b4e5d6751e9925"
+      },
+      "expectedBackendHostnames": {
+        "minority": "minority.upstream.test",
+        "primary": "primary.upstream.test",
+        "sibling": "sibling.upstream.test"
+      },
+      "routeSpecSHA256": "1c0b32b04999cbcf0a739ef121aab71ccaff8e8d5982fa44f9edace9e5aa8d52",
+      "routeGeneration": 1,
+      "routeUID": "13916b79-d923-45a1-81a2-754c5d5d6420",
+      "phases": [
+        {
+          "phase": "healthy",
+          "primary": 390,
+          "minority": 122,
+          "closed": 0,
+          "sibling": 40,
+          "routeConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "policyConditions": {
+            "minority": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              }
+            },
+            "primary": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              }
+            },
+            "sibling": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              }
+            }
+          },
+          "poolReadback": [
+            {
+              "weight": 3,
+              "up": true,
+              "tls": true,
+              "dns": "primary.upstream.test",
+              "ca": [
+                "839c4d06622b1fc4b1491c2c7c12ce992a0b3ba894c5b68ad6b4e5d6751e9925"
+              ],
+              "service": "primary",
+              "readyMembers": 1
+            },
+            {
+              "weight": 1,
+              "up": true,
+              "tls": true,
+              "dns": "minority.upstream.test",
+              "ca": [
+                "f4ccc0dfacfee97dd1de6d23a16aad553a83a66bc703ededbd370d23a6e99bfd"
+              ],
+              "service": "minority",
+              "readyMembers": 1
+            }
+          ],
+          "podCountChanges": {
+            "minority": {
+              "echo": 122,
+              "resumed": 119,
+              "tcp": 122,
+              "tls": 122
+            },
+            "primary": {
+              "echo": 390,
+              "resumed": 387,
+              "tcp": 390,
+              "tls": 390
+            },
+            "sibling": {
+              "echo": 40,
+              "resumed": 39,
+              "tcp": 40,
+              "tls": 40
+            }
+          },
+          "renderedConfigurationSHA256": "e1a5a2945af0d032e51d435335784146a75cab4a7098708437a1a828e026c400",
+          "freshDirectHandshake": {
+            "originalTrustVerified": true,
+            "presentedLeafSHA256": "bcb0be440d590e5e926094b898c361a0af682729006a8cb1b4dfcc47d98ed240"
+          }
+        },
+        {
+          "phase": "wrong-name",
+          "primary": 383,
+          "minority": 0,
+          "closed": 129,
+          "sibling": 40,
+          "routeConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "policyConditions": {
+            "minority": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              }
+            },
+            "primary": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              }
+            },
+            "sibling": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              }
+            }
+          },
+          "poolReadback": [
+            {
+              "weight": 3,
+              "up": true,
+              "tls": true,
+              "dns": "primary.upstream.test",
+              "ca": [
+                "839c4d06622b1fc4b1491c2c7c12ce992a0b3ba894c5b68ad6b4e5d6751e9925"
+              ],
+              "service": "primary",
+              "readyMembers": 1
+            },
+            {
+              "weight": 1,
+              "up": true,
+              "tls": true,
+              "dns": "minority.upstream.test",
+              "ca": [
+                "f4ccc0dfacfee97dd1de6d23a16aad553a83a66bc703ededbd370d23a6e99bfd"
+              ],
+              "service": "minority",
+              "readyMembers": 1
+            }
+          ],
+          "podCountChanges": {
+            "minority": {
+              "echo": 0,
+              "resumed": 0,
+              "tcp": 516,
+              "tls": 0
+            },
+            "primary": {
+              "echo": 383,
+              "resumed": 383,
+              "tcp": 383,
+              "tls": 383
+            },
+            "sibling": {
+              "echo": 40,
+              "resumed": 40,
+              "tcp": 40,
+              "tls": 40
+            }
+          },
+          "renderedConfigurationSHA256": "e1a5a2945af0d032e51d435335784146a75cab4a7098708437a1a828e026c400",
+          "minorityLeafSHA256": "25215f2348d2ccfd916a701eec2a344844206dbe729b76efa710978f3af9b1c2",
+          "freshDirectHandshake": {
+            "originalTrustVerified": false,
+            "presentedLeafSHA256": "25215f2348d2ccfd916a701eec2a344844206dbe729b76efa710978f3af9b1c2",
+            "verifyCode": 62
+          }
+        },
+        {
+          "phase": "wrong-ca",
+          "primary": 394,
+          "minority": 0,
+          "closed": 118,
+          "sibling": 40,
+          "routeConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "policyConditions": {
+            "minority": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              }
+            },
+            "primary": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              }
+            },
+            "sibling": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              }
+            }
+          },
+          "poolReadback": [
+            {
+              "weight": 3,
+              "up": true,
+              "tls": true,
+              "dns": "primary.upstream.test",
+              "ca": [
+                "839c4d06622b1fc4b1491c2c7c12ce992a0b3ba894c5b68ad6b4e5d6751e9925"
+              ],
+              "service": "primary",
+              "readyMembers": 1
+            },
+            {
+              "weight": 1,
+              "up": true,
+              "tls": true,
+              "dns": "minority.upstream.test",
+              "ca": [
+                "f4ccc0dfacfee97dd1de6d23a16aad553a83a66bc703ededbd370d23a6e99bfd"
+              ],
+              "service": "minority",
+              "readyMembers": 1
+            }
+          ],
+          "podCountChanges": {
+            "minority": {
+              "echo": 0,
+              "resumed": 0,
+              "tcp": 472,
+              "tls": 0
+            },
+            "primary": {
+              "echo": 394,
+              "resumed": 394,
+              "tcp": 394,
+              "tls": 394
+            },
+            "sibling": {
+              "echo": 40,
+              "resumed": 40,
+              "tcp": 40,
+              "tls": 40
+            }
+          },
+          "renderedConfigurationSHA256": "e1a5a2945af0d032e51d435335784146a75cab4a7098708437a1a828e026c400",
+          "minorityLeafSHA256": "79f4226c90b6665b7f02b961782ca2b8a6aea161ff12b589057b070ef2e0b2b6",
+          "freshDirectHandshake": {
+            "originalTrustVerified": false,
+            "presentedLeafSHA256": "79f4226c90b6665b7f02b961782ca2b8a6aea161ff12b589057b070ef2e0b2b6",
+            "verifyCode": 20
+          }
+        },
+        {
+          "phase": "restored",
+          "primary": 379,
+          "minority": 133,
+          "closed": 0,
+          "sibling": 40,
+          "routeConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "policyConditions": {
+            "minority": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              }
+            },
+            "primary": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              }
+            },
+            "sibling": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              }
+            }
+          },
+          "poolReadback": [
+            {
+              "weight": 3,
+              "up": true,
+              "tls": true,
+              "dns": "primary.upstream.test",
+              "ca": [
+                "839c4d06622b1fc4b1491c2c7c12ce992a0b3ba894c5b68ad6b4e5d6751e9925"
+              ],
+              "service": "primary",
+              "readyMembers": 1
+            },
+            {
+              "weight": 1,
+              "up": true,
+              "tls": true,
+              "dns": "minority.upstream.test",
+              "ca": [
+                "f4ccc0dfacfee97dd1de6d23a16aad553a83a66bc703ededbd370d23a6e99bfd"
+              ],
+              "service": "minority",
+              "readyMembers": 1
+            }
+          ],
+          "podCountChanges": {
+            "minority": {
+              "echo": 133,
+              "resumed": 124,
+              "tcp": 133,
+              "tls": 133
+            },
+            "primary": {
+              "echo": 379,
+              "resumed": 379,
+              "tcp": 379,
+              "tls": 379
+            },
+            "sibling": {
+              "echo": 40,
+              "resumed": 40,
+              "tcp": 40,
+              "tls": 40
+            }
+          },
+          "renderedConfigurationSHA256": "e1a5a2945af0d032e51d435335784146a75cab4a7098708437a1a828e026c400",
+          "minorityLeafSHA256": "bcb0be440d590e5e926094b898c361a0af682729006a8cb1b4dfcc47d98ed240",
+          "freshDirectHandshake": {
+            "originalTrustVerified": true,
+            "presentedLeafSHA256": "bcb0be440d590e5e926094b898c361a0af682729006a8cb1b4dfcc47d98ed240"
+          }
+        },
+        {
+          "phase": "grant-withdrawn",
+          "primary": 388,
+          "minority": 0,
+          "closed": 124,
+          "sibling": 40,
+          "routeConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "RefNotPermitted",
+              "status": "False"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "policyConditions": {
+            "minority": {},
+            "primary": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              }
+            },
+            "sibling": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              }
+            }
+          },
+          "poolReadback": [
+            {
+              "weight": 3,
+              "up": true,
+              "tls": true,
+              "dns": "primary.upstream.test",
+              "ca": [
+                "839c4d06622b1fc4b1491c2c7c12ce992a0b3ba894c5b68ad6b4e5d6751e9925"
+              ],
+              "service": "primary",
+              "readyMembers": 1
+            },
+            {
+              "weight": 1,
+              "up": false,
+              "tls": false,
+              "dns": null,
+              "ca": [],
+              "service": null,
+              "readyMembers": 0
+            }
+          ],
+          "podCountChanges": {
+            "minority": {
+              "echo": 0,
+              "resumed": 0,
+              "tcp": 0,
+              "tls": 0
+            },
+            "primary": {
+              "echo": 388,
+              "resumed": 374,
+              "tcp": 388,
+              "tls": 388
+            },
+            "sibling": {
+              "echo": 40,
+              "resumed": 39,
+              "tcp": 40,
+              "tls": 40
+            }
+          },
+          "renderedConfigurationSHA256": "72e14a4ca3c5da09acf5935dc4e5631775d1f451944f8237af9324445b29c966"
+        },
+        {
+          "phase": "grant-restored",
+          "primary": 381,
+          "minority": 131,
+          "closed": 0,
+          "sibling": 40,
+          "routeConditions": {
+            "Accepted": {
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True"
+            },
+            "ResolvedRefs": {
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/ForwardingTarget": {
+              "observedGeneration": 1,
+              "reason": "Observed",
+              "status": "True"
+            },
+            "gateway-api-openstack.github.io/Programmed": {
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True"
+            }
+          },
+          "policyConditions": {
+            "minority": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              }
+            },
+            "primary": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              }
+            },
+            "sibling": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              }
+            }
+          },
+          "poolReadback": [
+            {
+              "weight": 3,
+              "up": true,
+              "tls": true,
+              "dns": "primary.upstream.test",
+              "ca": [
+                "839c4d06622b1fc4b1491c2c7c12ce992a0b3ba894c5b68ad6b4e5d6751e9925"
+              ],
+              "service": "primary",
+              "readyMembers": 1
+            },
+            {
+              "weight": 1,
+              "up": true,
+              "tls": true,
+              "dns": "minority.upstream.test",
+              "ca": [
+                "f4ccc0dfacfee97dd1de6d23a16aad553a83a66bc703ededbd370d23a6e99bfd"
+              ],
+              "service": "minority",
+              "readyMembers": 1
+            }
+          ],
+          "podCountChanges": {
+            "minority": {
+              "echo": 131,
+              "resumed": 128,
+              "tcp": 131,
+              "tls": 131
+            },
+            "primary": {
+              "echo": 381,
+              "resumed": 368,
+              "tcp": 381,
+              "tls": 381
+            },
+            "sibling": {
+              "echo": 40,
+              "resumed": 39,
+              "tcp": 40,
+              "tls": 40
+            }
+          },
+          "renderedConfigurationSHA256": "3e9d24691a2e284f14da72ff4ff352dd06ccb30357b17536ae85db964c1a65d1"
+        }
+      ],
+      "cleanup": {
+        "l7policies": 0,
+        "listeners": 0,
+        "loadbalancers": 0,
+        "pools": 0
+      }
+    }
+  },
+  "environment": "Local kind, the published controller image executable, native Octavia REST and database, Barbican REST, Amphora renderer, HAProxy and TLS echo Pods. Identity, Neutron inventory and provisioning, RPC and Amphora agent transport are simulated.",
+  "haproxySHA256": "20d64a505a669a1066d5cb06b78e407d3c2ec15029923d3165e0c1db8cc41287",
+  "testBackendSHA256": "8233297398ef80cd992b2aba5577bfb1c77ebeb232e0eff49a1c42ba1ef595ef"
+}

@@ -244,6 +244,11 @@ func TestGatewayReportsTerminatingTLSRouteBackendTLSAncestorLimit(t *testing.T) 
 	require.Equal(t, backendtls.AncestorLimitReason, full.Reason)
 	require.NoError(t, kube.Get(t.Context(), client.ObjectKeyFromObject(route), route))
 	route.Status.Parents[0].Conditions[1].Status = metav1.ConditionTrue
+	meta.SetStatusCondition(&route.Status.Parents[0].Conditions,
+		controller.Condition(string(gatewayv1.RouteConditionResolvedRefs), metav1.ConditionFalse, backendtls.AncestorLimitReason, backendtls.AncestorLimitMessage, route.Generation))
+	require.NoError(t, kube.Status().Update(t.Context(), route))
+	require.NotNil(t, status(), "a weighted route can program healthy shares while one policy has no slot")
+	meta.RemoveStatusCondition(&route.Status.Parents[0].Conditions, string(gatewayv1.RouteConditionResolvedRefs))
 	require.NoError(t, kube.Status().Update(t.Context(), route))
 	require.Nil(t, status())
 }

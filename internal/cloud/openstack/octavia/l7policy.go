@@ -17,6 +17,7 @@ limitations under the License.
 package octavia
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -161,6 +162,36 @@ func (target *WeightedHTTPTarget) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// WeightedTCPPolicyTarget allocates a positive share of new connections to one pool.
+type WeightedTCPPolicyTarget struct {
+	PoolID string `json:"pool_id"`
+	Weight int    `json:"weight"`
+}
+
+func validWeightedTCPPolicyTargets(targets []WeightedTCPPolicyTarget) bool {
+	if len(targets) == 0 || len(targets) > 16 {
+		return false
+	}
+	seen := make(map[string]bool, len(targets))
+	for _, target := range targets {
+		if strings.TrimSpace(target.PoolID) == "" || target.Weight < 1 || target.Weight > 1_000_000 || seen[target.PoolID] {
+			return false
+		}
+		seen[target.PoolID] = true
+	}
+	return true
+}
+
+func readWeightedTCPPolicyTargets(raw json.RawMessage) []WeightedTCPPolicyTarget {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	var targets []WeightedTCPPolicyTarget
+	if decoder.Decode(&targets) != nil || !validWeightedTCPPolicyTargets(targets) {
+		return nil
+	}
+	return targets
+}
+
 // L7PolicyTarget preserves the distinctions between null, absent and concrete
 // response fields which are lost in the upstream SDK's policy type.
 type L7PolicyTarget struct {
@@ -178,35 +209,38 @@ func (target L7PolicyTarget) IsFixedServerError() bool {
 // L7PolicyObservation keeps readable pool references even when another field
 // prevents the entire target from decoding.
 type L7PolicyObservation struct {
-	Policy                      l7policies.L7Policy
-	HTTPSListenerHostname       string
-	Target                      *L7PolicyTarget
-	ExtendedTargetFields        bool
-	TCPTLSPassthrough           *bool
-	ActivationOptions           string
-	HTTPRequestPolicy           *cloud.HTTPRequestPolicy
-	HTTPRequestPolicyReported   bool
-	HTTPRequestPolicyPresent    bool
-	TargetRequestFiltersPresent bool
-	RequestMirrors              []HTTPRequestMirror
-	RequestMirrorsReported      bool
-	RequestMirrorsErr           error
-	TargetMirrorsPresent        bool
-	RedirectRequest             *RequestRedirect
-	RedirectRequestPresent      bool
-	RequestURLRewrite           *RequestURLRewrite
-	RequestURLRewriteReported   bool
-	RequestCORS                 *cloud.HTTPCORS
-	RequestCORSPresent          bool
-	RequestCORSReported         bool
-	RequestURLRewritePresent    bool
-	PoolIDs                     []string
-	PoolReference               json.RawMessage
-	AdminState                  *bool
-	RequestHeaderOperations     []cloud.HTTPHeaderOperation
-	RequestHeaderOperationsErr  error
-	ResponseHeaderOperations    []cloud.HTTPHeaderOperation
-	ResponseHeaderOperationsErr error
+	Policy                       l7policies.L7Policy
+	HTTPSListenerHostname        string
+	Target                       *L7PolicyTarget
+	ExtendedTargetFields         bool
+	RedirectOptionsPresent       bool
+	HTTPSListenerHostnamePresent bool
+	WeightedTCPPolicyTargets     []WeightedTCPPolicyTarget
+	TCPTLSPassthrough            *bool
+	ActivationOptions            string
+	HTTPRequestPolicy            *cloud.HTTPRequestPolicy
+	HTTPRequestPolicyReported    bool
+	HTTPRequestPolicyPresent     bool
+	TargetRequestFiltersPresent  bool
+	RequestMirrors               []HTTPRequestMirror
+	RequestMirrorsReported       bool
+	RequestMirrorsErr            error
+	TargetMirrorsPresent         bool
+	RedirectRequest              *RequestRedirect
+	RedirectRequestPresent       bool
+	RequestURLRewrite            *RequestURLRewrite
+	RequestURLRewriteReported    bool
+	RequestCORS                  *cloud.HTTPCORS
+	RequestCORSPresent           bool
+	RequestCORSReported          bool
+	RequestURLRewritePresent     bool
+	PoolIDs                      []string
+	PoolReference                json.RawMessage
+	AdminState                   *bool
+	RequestHeaderOperations      []cloud.HTTPHeaderOperation
+	RequestHeaderOperationsErr   error
+	ResponseHeaderOperations     []cloud.HTTPHeaderOperation
+	ResponseHeaderOperationsErr  error
 }
 
 // ListPolicyObservations retains every policy row across explicit API pages.
@@ -250,6 +284,9 @@ func readPolicyObservation(raw json.RawMessage) (L7PolicyObservation, error) {
 		HTTPSListenerHostname    json.RawMessage `json:"https_listener_hostname"`
 		AdminState               *bool           `json:"admin_state_up"`
 		PoolReference            json.RawMessage `json:"redirect_pool_id"`
+		RedirectURL              json.RawMessage `json:"redirect_url"`
+		RedirectPrefix           json.RawMessage `json:"redirect_prefix"`
+		RedirectHTTPCode         json.RawMessage `json:"redirect_http_code"`
 		TCPTLSPassthrough        json.RawMessage `json:"tcp_tls_passthrough"`
 		Targets                  json.RawMessage `json:"targets"`
 		FixedResponse            json.RawMessage `json:"fixed_response"`
@@ -268,6 +305,21 @@ func readPolicyObservation(raw json.RawMessage) (L7PolicyObservation, error) {
 		return L7PolicyObservation{}, fmt.Errorf("L7 policy row does not report an ID")
 	}
 	observation := L7PolicyObservation{Policy: row.L7Policy, PoolReference: row.PoolReference, AdminState: row.AdminState}
+	for _, field := range []struct {
+		raw         json.RawMessage
+		destination any
+	}{
+		{row.RedirectURL, &observation.Policy.RedirectURL}, {row.RedirectPrefix, &observation.Policy.RedirectPrefix},
+		{row.RedirectHTTPCode, &observation.Policy.RedirectHttpCode},
+	} {
+		if hasJSONValue(field.raw) {
+			observation.RedirectOptionsPresent = true
+			if err := json.Unmarshal(field.raw, field.destination); err != nil {
+				return L7PolicyObservation{}, fmt.Errorf("extract L7 policy redirect options: %w", err)
+			}
+		}
+	}
+	observation.HTTPSListenerHostnamePresent = hasJSONValue(row.HTTPSListenerHostname)
 	switch string(row.TCPTLSPassthrough) {
 	case "false":
 		observation.TCPTLSPassthrough = new(false)
@@ -293,6 +345,9 @@ func readPolicyObservation(raw json.RawMessage) (L7PolicyObservation, error) {
 		var slots []json.RawMessage
 		err := json.Unmarshal(row.Targets, &slots)
 		observation.ExtendedTargetFields = err != nil || len(slots) > 0
+		if row.Action == string(ActionWeightedTargets) {
+			observation.WeightedTCPPolicyTargets = readWeightedTCPPolicyTargets(row.Targets)
+		}
 		for _, rawSlot := range slots {
 			var slot map[string]json.RawMessage
 			if json.Unmarshal(rawSlot, &slot) != nil {
@@ -415,6 +470,7 @@ type PolicyCreateOpts struct {
 	RequestHeaderOperations  []cloud.HTTPHeaderOperation
 	ResponseHeaderOperations []cloud.HTTPHeaderOperation
 	WeightedTargets          []WeightedHTTPTarget
+	WeightedTCPPolicyTargets []WeightedTCPPolicyTarget
 	FixedServerError         bool
 	RedirectRequest          *RequestRedirect
 	RequestURLRewrite        *RequestURLRewrite
@@ -426,6 +482,16 @@ type PolicyCreateOpts struct {
 
 func (opts PolicyCreateOpts) ToL7PolicyCreateMap() (map[string]any, error) {
 	switch {
+	case opts.WeightedTCPPolicyTargets != nil:
+		if !validWeightedTCPPolicyTargets(opts.WeightedTCPPolicyTargets) ||
+			opts.AdminStateUp == nil || *opts.AdminStateUp || opts.TCPTLSPassthrough != nil && *opts.TCPTLSPassthrough ||
+			opts.FixedServerError || opts.WeightedTargets != nil || opts.RedirectRequest != nil ||
+			opts.RedirectPoolID != "" || opts.RedirectURL != "" || opts.RedirectPrefix != "" ||
+			opts.HTTPSListenerHostname != "" || len(opts.RequestHeaderOperations) != 0 || len(opts.ResponseHeaderOperations) != 0 ||
+			opts.RequestURLRewrite != nil || opts.RequestCORS != nil || opts.HTTPRequestPolicy != nil || opts.RequestMirrors != nil {
+			return nil, fmt.Errorf("invalid weighted TCP policy")
+		}
+		opts.Action = ActionWeightedTargets
 	case opts.RedirectRequest != nil:
 		if opts.FixedServerError || opts.WeightedTargets != nil || opts.RedirectPoolID != "" || opts.RedirectURL != "" || opts.RedirectPrefix != "" {
 			return nil, fmt.Errorf("request redirect cannot be combined with another L7 target")
@@ -447,7 +513,7 @@ func (opts PolicyCreateOpts) ToL7PolicyCreateMap() (map[string]any, error) {
 	}
 	policy := body["l7policy"].(map[string]any)
 	if opts.TCPTLSPassthrough != nil {
-		if opts.Action != l7policies.ActionRedirectToPool || opts.RedirectPoolID == "" || opts.AdminStateUp == nil || *opts.AdminStateUp {
+		if opts.WeightedTCPPolicyTargets == nil && (opts.Action != l7policies.ActionRedirectToPool || opts.RedirectPoolID == "" || opts.AdminStateUp == nil || *opts.AdminStateUp) {
 			return nil, fmt.Errorf("TCP TLS policy mode requires a disabled redirect-to-pool policy")
 		}
 		policy["tcp_tls_passthrough"] = *opts.TCPTLSPassthrough
@@ -473,6 +539,8 @@ func (opts PolicyCreateOpts) ToL7PolicyCreateMap() (map[string]any, error) {
 	}
 	if opts.FixedServerError {
 		setPolicyFixedServerError(body)
+	} else if opts.WeightedTCPPolicyTargets != nil {
+		policy["targets"] = opts.WeightedTCPPolicyTargets
 	} else if opts.WeightedTargets != nil {
 		policy["targets"] = opts.WeightedTargets
 	} else if opts.RedirectRequest != nil {
@@ -562,11 +630,36 @@ func (s *Service) ListCompleteRules(ctx context.Context, policyID string, opts l
 	}, "rules", l7policies.ExtractRules)
 }
 
+func hasJSONValue(raw json.RawMessage) bool {
+	return len(raw) != 0 && string(raw) != "null"
+}
+
 // RuleObservation preserves the flags needed to confirm each redirect rule.
 type RuleObservation struct {
 	l7policies.Rule
-	AdminState *bool `json:"admin_state_up"`
-	Inverted   *bool `json:"invert"`
+	AdminState *bool           `json:"admin_state_up"`
+	Inverted   *bool           `json:"invert"`
+	KeyValue   json.RawMessage `json:"key"`
+}
+
+// HasKey reports whether an L7 rule explicitly includes a match key.
+func (rule RuleObservation) HasKey() bool {
+	return hasJSONValue(rule.KeyValue)
+}
+
+func (rule *RuleObservation) UnmarshalJSON(data []byte) error {
+	type wireRule RuleObservation
+	var observed wireRule
+	if err := json.Unmarshal(data, &observed); err != nil {
+		return err
+	}
+	if hasJSONValue(observed.KeyValue) {
+		if err := json.Unmarshal(observed.KeyValue, &observed.Key); err != nil {
+			return fmt.Errorf("extract L7 rule match key: %w", err)
+		}
+	}
+	*rule = RuleObservation(observed)
+	return nil
 }
 
 func (s *Service) ObserveRules(ctx context.Context, policyID string, opts l7policies.ListRulesOpts) ([]RuleObservation, error) {

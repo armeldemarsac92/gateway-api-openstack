@@ -69,7 +69,7 @@ func (target desiredSNIFragment) weighted() bool {
 }
 
 func (fragment *observedSNIFragment) weighted() bool {
-	return slices.Contains(fragment.pool.Tags, sniWeightedPoolTag) || fragment.tcpRejection.Invalid || fragment.tcpRejection.Value != nil
+	return fragment.pool != nil && (slices.Contains(fragment.pool.Tags, sniWeightedPoolTag) || fragment.tcpRejection.Invalid || fragment.tcpRejection.Value != nil)
 }
 
 func (fragment *observedSNIFragment) hasUnverifiedSNIWeights(target desiredSNIFragment) bool {
@@ -105,7 +105,7 @@ func (p *Provider) prepareWeightedSNI(ctx context.Context, desired *desiredGatew
 	for i := range desired.sni {
 		target := &desired.sni[i]
 		fragment := actual.sni[target.key]
-		if !target.weighted() && (fragment == nil || !fragment.membersUnverified) {
+		if target.usesBackendPools() || !target.weighted() && (fragment == nil || !fragment.membersUnverified) {
 			continue
 		}
 		target.weightedBlocked = target.route.TCPConnectionRejection != nil && !available ||
@@ -136,7 +136,7 @@ func (p *Provider) prepareWeightedSNI(ctx context.Context, desired *desiredGatew
 func withdrawWeightedSNI(desired desiredGatewayGraph, actual observedGatewayGraph, keys []sniFragmentKey, wanted map[sniFragmentKey]desiredSNIFragment, byHostname map[string]desiredSNIFragment) (graphMutation, string, bool) {
 	for _, key := range keys {
 		fragment := actual.sni[key]
-		if desired.sniHeldClosed[key] || desired.sniPaused[key] || fragment.policy == nil ||
+		if fragment.backendPools != nil || desired.sniHeldClosed[key] || desired.sniPaused[key] || fragment.policy == nil ||
 			!fragment.policy.AdminStateUp && fragment.policy.ProvisioningStatus == "ACTIVE" {
 			continue
 		}
@@ -167,11 +167,11 @@ func withdrawWeightedSNI(desired desiredGatewayGraph, actual observedGatewayGrap
 }
 
 func hasWeightedSNI(desired desiredGatewayGraph, actual observedGatewayGraph) bool {
-	if slices.ContainsFunc(desired.sni, desiredSNIFragment.weighted) {
+	if slices.ContainsFunc(desired.sni, func(target desiredSNIFragment) bool { return target.weighted() || target.usesBackendPools() }) {
 		return true
 	}
 	for _, fragment := range actual.sni {
-		if fragment.weighted() {
+		if fragment.weighted() || fragment.backendPools != nil {
 			return true
 		}
 	}
@@ -194,8 +194,9 @@ func suspendWeightedSNI(fragment *observedSNIFragment) graphMutation {
 func restoreGuardedSNIFallback(desired desiredGatewayGraph, actual observedGatewayGraph) (graphMutation, bool) {
 	verified := func(target desiredSNIFragment) bool {
 		fragment := actual.sni[target.key]
-		return fragment != nil && len(fragment.members) == len(target.route.Members) && fragment.matches(target) &&
-			fragment.hasActiveSelector(target.route.Hostname)
+		return fragment != nil && fragment.matches(target) && fragment.hasActiveSelector(target.route.Hostname) &&
+			(target.usesBackendPools() && fragment.backendPoolsConverged(target) ||
+				!target.usesBackendPools() && len(fragment.members) == len(target.route.Members))
 	}
 	guards := make(map[string]bool)
 	for _, target := range desired.sni {
@@ -211,7 +212,7 @@ func restoreGuardedSNIFallback(desired desiredGatewayGraph, actual observedGatew
 		for host := range guards {
 			activeGuard = activeGuard || amphora.SNISuffixCovers(fallback.route.Hostname, host)
 		}
-		if !activeGuard || fallback.route.Deny || actual.sni[fallback.key] == nil || !actual.sni[fallback.key].matches(fallback) ||
+		if !activeGuard || desired.sniPaused[fallback.key] || fallback.route.Deny || actual.sni[fallback.key] == nil || !actual.sni[fallback.key].matches(fallback) ||
 			slices.ContainsFunc(desired.sni, func(target desiredSNIFragment) bool {
 				host := target.route.Hostname
 				return amphora.SNISuffixCovers(fallback.route.Hostname, host) && !guards[host] && !verified(target)
@@ -252,7 +253,7 @@ func (p *Provider) replaceSNITCPMembers(ctx context.Context, step sniMutation, t
 }
 
 func (fragment *observedSNIFragment) stagedSNIRejectionMembers() []pools.BatchUpdateMemberOpts {
-	if !slices.Contains(fragment.pool.Tags, sniWeightedPoolTag) || !fragment.detached() || fragment.membersUnverified ||
+	if fragment.pool == nil || !slices.Contains(fragment.pool.Tags, sniWeightedPoolTag) || !fragment.detached() || fragment.membersUnverified ||
 		fragment.pool.ProvisioningStatus != "PENDING_UPDATE" || fragment.protectedBackendTLS() ||
 		!fragment.tcpRejection.Present || fragment.tcpRejection.Invalid || fragment.tcpRejection.Value == nil {
 		return nil

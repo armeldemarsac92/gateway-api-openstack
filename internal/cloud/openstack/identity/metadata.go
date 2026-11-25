@@ -22,6 +22,8 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
@@ -67,6 +69,45 @@ const (
 func ValidSNITarget(encoded string) bool {
 	digest, err := base64.RawURLEncoding.DecodeString(encoded)
 	return err == nil && len(digest) == sha256.Size*2 && strings.Trim(string(digest), "0123456789abcdef") == ""
+}
+
+// SNIWeightedPoolsTag marks a terminating weighted SNI graph resource.
+var SNIWeightedPoolsTag = Tag("sni-weighted-pools", "v1")
+
+const MaxSNIBackendPools = 16
+
+func SNIPoolSlotTag(slot int) string {
+	return Tag("sni-slot", strconv.Itoa(slot))
+}
+
+// SNIPoolSlot reads the position on a weighted backend pool or member.
+func SNIPoolSlot(tags []string) (int, bool) {
+	if !slices.Contains(tags, SNIWeightedPoolsTag) {
+		return 0, false
+	}
+	var encoded string
+	for _, tag := range tags {
+		name, value, ok := ParseTag(tag)
+		if ok && name == "sni-slot" {
+			if value == "" || encoded != "" {
+				return 0, false
+			}
+			encoded = value
+		}
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil {
+		return 0, false
+	}
+	slot, err := strconv.Atoi(string(decoded))
+	return slot, err == nil && slot >= 0 && slot < MaxSNIBackendPools && slices.Contains(tags, SNIPoolSlotTag(slot))
+}
+
+func HasSNIPoolSlot(tags []string) bool {
+	return slices.ContainsFunc(tags, func(tag string) bool {
+		name, _, ok := ParseTag(tag)
+		return ok && name == "sni-slot"
+	})
 }
 
 // Identity encodes the shared immutable ownership tuple into Octavia tags and

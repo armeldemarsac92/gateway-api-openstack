@@ -445,3 +445,42 @@ func TestMixedTCPPolicyListPreservesExplicitModes(t *testing.T) {
 		t.Fatalf("explicit false, true and missing policy modes must remain distinct: %#v", policies)
 	}
 }
+
+func TestWeightedTCPPolicyReportsExplicitHTTPOptions(t *testing.T) {
+	for _, test := range []struct {
+		extra                 string
+		redirect, virtualHost bool
+	}{
+		{`"redirect_http_code":null,"redirect_url":null`, false, false},
+		{`"redirect_http_code":0`, true, false},
+		{`"redirect_url":""`, true, false},
+		{`"redirect_prefix":""`, true, false},
+		{`"https_listener_hostname":""`, false, true},
+	} {
+		row, err := readPolicyObservation([]byte(`{"id":"weighted","action":"WEIGHTED_TARGETS","admin_state_up":true,"redirect_pool_id":null,"targets":[{"pool_id":"pool","weight":1}],` + test.extra + `}`))
+		if err != nil || row.RedirectOptionsPresent != test.redirect || row.HTTPSListenerHostnamePresent != test.virtualHost {
+			t.Fatalf("unexpected option proof for %s: %+v, %v", test.extra, row, err)
+		}
+	}
+}
+
+func TestRuleObservationPreservesNullAndExplicitKey(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, err := w.Write([]byte(`{"rules":[{"id":"null","type":"TLS_SNI","key":null},{"id":"empty","type":"TLS_SNI","key":""},{"id":"header","type":"HEADER","key":"X-Test"}]}`))
+		if err != nil {
+			t.Error(err)
+		}
+	})
+	service := NewService(&gophercloud.ServiceClient{
+		ProviderClient: &gophercloud.ProviderClient{HTTPClient: http.Client{Transport: loadBalancerTestTransport{handler}}},
+		Endpoint:       "http://octavia.test/",
+	})
+	rules, err := service.ObserveRules(t.Context(), "policy", l7policies.ListRulesOpts{})
+	if err != nil || len(rules) != 3 {
+		t.Fatalf("read three rules: %v, %v", rules, err)
+	}
+	if rules[0].HasKey() || !rules[1].HasKey() || !rules[2].HasKey() || rules[2].Key != "X-Test" {
+		t.Fatalf("rule keys were lost: %v", rules)
+	}
+}

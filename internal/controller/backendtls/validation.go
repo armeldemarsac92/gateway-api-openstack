@@ -116,6 +116,9 @@ func EvaluateValidation(namespace string, policy gatewayv1.BackendTLSPolicyValid
 	switch {
 	case ref.Group == "" && ref.Kind == "ConfigMap":
 		key := types.NamespacedName{Namespace: namespace, Name: string(ref.Name)}
+		if inputs.UnreadableConfigMaps[key] {
+			return ValidationResult{Reason: "Pending", Pending: true, Message: fmt.Sprintf("Waiting to read the referenced CA ConfigMap %s", key)}
+		}
 		observation.CA, observation.Invalid = LoadConfigMapCA(key, inputs.ConfigMaps[key])
 		if observation.Invalid != nil {
 			observation.Invalid = fmt.Errorf("CA ConfigMap %s: %w", key, observation.Invalid)

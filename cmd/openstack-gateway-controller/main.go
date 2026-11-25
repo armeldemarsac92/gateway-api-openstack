@@ -392,20 +392,21 @@ func run(ctx context.Context) error {
 		}
 	}
 	routeReconciler := &httproute.Reconciler{
-		ListenerSetObserver:          gatewayReconciler.ObserveListenerSets,
-		BackendTLSAvailable:          openStackProvider.BackendTLSAvailable,
-		TelemetryBackendTLSAvailable: openStackProvider.TelemetryBackendTLSAvailable,
-		BackendRetryBudgetAvailable:  openStackProvider.BackendRetryBudgetAvailable,
-		XBackendCookieAvailable:      openStackProvider.XBackendCookieAvailable,
-		TCPBackendTLSAvailable:       openStackProvider.TCPBackendTLSAvailable,
-		GRPCBackendTLSAvailable:      openStackProvider.GRPCBackendTLSAvailable,
-		BackendTLSSANAvailable:       openStackProvider.BackendTLSSANAvailable,
-		XBackendTLSAvailable:         openStackProvider.XBackendTLSAvailable,
-		Client:                       manager.GetClient(),
-		Coordinator:                  graphCoordinator,
-		APIReader:                    manager.GetAPIReader(),
-		Recorder:                     eventRecorder,
-		Config:                       controllerConfig,
+		ListenerSetObserver:            gatewayReconciler.ObserveListenerSets,
+		BackendTLSAvailable:            openStackProvider.BackendTLSAvailable,
+		TelemetryBackendTLSAvailable:   openStackProvider.TelemetryBackendTLSAvailable,
+		BackendRetryBudgetAvailable:    openStackProvider.BackendRetryBudgetAvailable,
+		XBackendCookieAvailable:        openStackProvider.XBackendCookieAvailable,
+		TCPBackendTLSAvailable:         openStackProvider.TCPBackendTLSAvailable,
+		TCPWeightedBackendTLSAvailable: openStackProvider.TCPWeightedBackendTLSAvailable,
+		GRPCBackendTLSAvailable:        openStackProvider.GRPCBackendTLSAvailable,
+		BackendTLSSANAvailable:         openStackProvider.BackendTLSSANAvailable,
+		XBackendTLSAvailable:           openStackProvider.XBackendTLSAvailable,
+		Client:                         manager.GetClient(),
+		Coordinator:                    graphCoordinator,
+		APIReader:                      manager.GetAPIReader(),
+		Recorder:                       eventRecorder,
+		Config:                         controllerConfig,
 	}
 	if controllerConfig.XBackendClientCertificate {
 		routeReconciler.XBackendClientCertificates = resolver

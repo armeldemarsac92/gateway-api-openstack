@@ -123,6 +123,11 @@ func TestWeightedSNIRouteGrantWithdrawalAndRestore(t *testing.T) {
 	require.Zero(t, target.ServicePort)
 	require.Nil(t, target.TCPConnectionRejection)
 	require.Equal(t, []cloud.TLSBackendService{{UID: "canary", Port: 8443}, {UID: "stable", Port: 8443}}, target.BackendServices)
+	require.Len(t, target.BackendServiceMembers, 2)
+	require.Equal(t, "stable", target.BackendServiceMembers[0].ServiceUID)
+	require.Equal(t, []cloud.Member{{Address: "192.0.2.101", Port: 9443}, {Address: "192.0.2.102", Port: 9443}}, target.BackendServiceMembers[0].Members)
+	require.Equal(t, "canary", target.BackendServiceMembers[1].ServiceUID)
+	require.Equal(t, []cloud.Member{{Address: "192.0.2.201", Port: 9443}}, target.BackendServiceMembers[1].Members)
 	require.Equal(t, []cloud.Member{
 		{Address: "192.0.2.101", Port: 9443, Weight: 3},
 		{Address: "192.0.2.102", Port: 9443, Weight: 3},
@@ -145,6 +150,7 @@ func TestWeightedSNIRouteGrantWithdrawalAndRestore(t *testing.T) {
 	partial := revoked[0].targets[0]
 	require.Equal(t, &cloud.TCPConnectionRejection{RejectWeight: 1, TotalWeight: 4}, partial.TCPConnectionRejection)
 	require.Equal(t, []cloud.TLSBackendService{{UID: "stable", Port: 8443}}, partial.BackendServices)
+	require.Equal(t, target.BackendServiceMembers[:1], partial.BackendServiceMembers)
 	require.Equal(t, []cloud.Member{
 		{Address: "192.0.2.101", Port: 9443, Weight: 1},
 		{Address: "192.0.2.102", Port: 9443, Weight: 1},
@@ -184,7 +190,7 @@ func TestWeightedSNIRouteAvailability(t *testing.T) {
 		{name: "missing zero weight Service", primaryWeight: 3, omitService: true, wantReason: gatewayv1.RouteReasonBackendNotFound, wantMembers: true},
 		{name: "all weights zero", wantReason: gatewayv1.RouteReasonResolvedRefs},
 		{name: "all traffic points to an empty Service", otherWeight: 1, wantReason: gatewayv1.RouteReasonResolvedRefs},
-		{name: "backend authentication required", otherWeight: 1, primaryWeight: 3, policyRequired: true, wantReason: gatewayv1.RouteReasonUnsupportedProtocol},
+		{name: "invalid backend authentication policy", otherWeight: 1, primaryWeight: 3, policyRequired: true, wantReason: "InvalidBackendTLSPolicy"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := testConfig()
@@ -237,4 +243,185 @@ func TestWeightedSNIRouteAvailability(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWeightedTerminatingSNIRouteResolvesEachBackendTLSIdentity(t *testing.T) {
+	cfg := testConfig()
+	cfg.TCPTLSTermination, cfg.BackendTLSPolicy, cfg.TCPConnectionRejection = true, true, true
+	gateway := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "edge", Name: "gateway", UID: "gateway"}}
+	listener := testSNIListener()
+	listener.TLS.Mode = ptr.To(gatewayv1.TLSModeTerminate)
+	snapshot := &gatewayMutationSnapshot{gateway: gateway, listener: &listener}
+	route := testSNIRoute(gateway, "release", gateway.Namespace, "release.example.test")
+	stable, stableEndpoints := testSNIBackend(gateway.Namespace, "stable", "192.0.2.101")
+	canary, canaryEndpoints := testSNIBackend("partner", "canary", "192.0.2.201")
+	plain := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: gateway.Namespace, Name: "plain", UID: "plain"}, Spec: stable.Spec}
+	plainEndpoints := stableEndpoints.DeepCopy()
+	plainEndpoints.Name = "plain-1"
+	plainEndpoints.Labels[discoveryv1.LabelServiceName] = plain.Name
+	plainEndpoints.OwnerReferences = []metav1.OwnerReference{*metav1.NewControllerRef(plain, corev1.SchemeGroupVersion.WithKind("Service"))}
+	plainEndpoints.Endpoints[0].Addresses[0] = "192.0.2.103"
+	stableRef := route.Spec.Rules[0].BackendRefs[0]
+	stableRef.Weight = ptr.To(int32(3))
+	canaryRef := stableRef
+	canaryRef.Namespace, canaryRef.Weight = ptr.To(gatewayv1.Namespace(canary.Namespace)), ptr.To(int32(2))
+	duplicate := canaryRef
+	duplicate.Weight = ptr.To(int32(1))
+	zero := stableRef
+	zero.Weight = ptr.To(int32(0))
+	plainRef := stableRef
+	plainRef.Name, plainRef.Weight = gatewayv1.ObjectName(plain.Name), nil
+	route.Spec.Rules[0].BackendRefs = []gatewayv1.BackendRef{stableRef, canaryRef, duplicate, zero, plainRef}
+	policyFor := func(service *corev1.Service, hostname gatewayv1.PreciseHostname) (*gatewayv1.BackendTLSPolicy, *corev1.ConfigMap) {
+		ca := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: service.Namespace, Name: "backend-ca", UID: service.UID + "-ca"},
+			Data: map[string]string{"ca.crt": frontendTestCA(t)}}
+		policy := &gatewayv1.BackendTLSPolicy{
+			ObjectMeta: metav1.ObjectMeta{Namespace: service.Namespace, Name: "require-tls", UID: service.UID + "-policy"},
+			Spec: gatewayv1.BackendTLSPolicySpec{
+				TargetRefs: []gatewayv1.LocalPolicyTargetReferenceWithSectionName{{
+					LocalPolicyTargetReference: gatewayv1.LocalPolicyTargetReference{Kind: "Service", Name: gatewayv1.ObjectName(service.Name)},
+				}},
+				Validation: gatewayv1.BackendTLSPolicyValidation{
+					Hostname: hostname, CACertificateRefs: []gatewayv1.LocalObjectReference{{Kind: "ConfigMap", Name: gatewayv1.ObjectName(ca.Name)}},
+				},
+			},
+			Status: gatewayv1.PolicyStatus{Ancestors: []gatewayv1.PolicyAncestorStatus{{
+				ControllerName: cfg.ControllerName,
+				AncestorRef:    gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name), Namespace: ptr.To(gatewayv1.Namespace(gateway.Namespace))},
+			}}},
+		}
+		return policy, ca
+	}
+	stablePolicy, stableCA := policyFor(stable, "stable.example.test")
+	canaryPolicy, canaryCA := policyFor(canary, "canary.example.test")
+	grant := &gatewayv1.ReferenceGrant{
+		ObjectMeta: metav1.ObjectMeta{Namespace: canary.Namespace, Name: "canary"},
+		Spec: gatewayv1.ReferenceGrantSpec{
+			From: []gatewayv1.ReferenceGrantFrom{{Group: gatewayv1.GroupName, Kind: tlsRouteKind, Namespace: gatewayv1.Namespace(route.Namespace)}},
+			To:   []gatewayv1.ReferenceGrantTo{{Kind: "Service", Name: ptr.To(gatewayv1.ObjectName(canary.Name))}},
+		},
+	}
+	caUnreadable, grantRevoked := false, false
+	kube := fake.NewClientBuilder().WithScheme(testScheme(t)).WithStatusSubresource(canaryPolicy).WithObjects(route,
+		stable, stableEndpoints, stablePolicy, stableCA, canary, canaryEndpoints, canaryPolicy, canaryCA, plain, plainEndpoints, grant).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, object client.Object, opts ...client.GetOption) error {
+				if _, ok := object.(*corev1.Service); ok && key == client.ObjectKeyFromObject(canary) && grantRevoked {
+					t.Error("read the canary Service after grant revocation")
+				}
+				if _, ok := object.(*corev1.ConfigMap); ok && key == client.ObjectKeyFromObject(canaryCA) && caUnreadable {
+					return errors.New("CA ConfigMap API unavailable")
+				}
+				return c.Get(ctx, key, object, opts...)
+			},
+			List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+				if _, ok := list.(*discoveryv1.EndpointSliceList); ok && (&client.ListOptions{}).ApplyOptions(opts).Namespace == canary.Namespace && grantRevoked {
+					t.Error("read canary EndpointSlices after grant revocation")
+				}
+				return c.List(ctx, list, opts...)
+			},
+		}).Build()
+	r := &Reconciler{Client: kube, APIReader: kube, Config: cfg}
+	observe := func(reason gatewayv1.RouteConditionReason) []cloud.TLSSNIBackendPool {
+		t.Helper()
+		observation, err := r.observeSNIRoutes(t.Context(), snapshot)
+		require.NoError(t, err)
+		require.Len(t, observation, 1)
+		require.Equal(t, reason, observation[0].resolvedReason)
+		require.Len(t, observation[0].targets, 1)
+		target := observation[0].targets[0]
+		require.Empty(t, target.ServiceUID)
+		require.Empty(t, target.BackendServices)
+		require.Empty(t, target.Members)
+		require.Nil(t, target.BackendTLS)
+		require.Nil(t, target.TCPConnectionRejection)
+		require.Len(t, target.BackendPools, 4)
+		return target.BackendPools
+	}
+	require.Len(t, r.gatewayRequestsForSNIDependency(t.Context(), canaryPolicy), 1)
+	healthy := observe(gatewayv1.RouteReasonResolvedRefs)
+	require.Equal(t, cloud.TLSSNIBackendPool{Weight: 1, ServiceUID: "plain", ServicePort: 8443, Members: []cloud.Member{{Address: "192.0.2.103", Port: 9443}}}, healthy[3])
+	require.Equal(t, "stable.example.test", healthy[0].BackendTLS.Hostname)
+	require.Equal(t, "canary.example.test", healthy[1].BackendTLS.Hostname)
+	require.NotEqual(t, healthy[0].BackendTLS.CADigest, healthy[1].BackendTLS.CADigest)
+	require.Equal(t, string(stableCA.UID), healthy[0].BackendTLS.CAConfigMapUID)
+	require.Equal(t, string(canaryCA.UID), healthy[1].BackendTLS.CAConfigMapUID)
+	require.Equal(t, []cloud.Member{{Address: "192.0.2.101", Port: 9443}}, healthy[0].Members)
+	require.Equal(t, []cloud.Member{{Address: "192.0.2.201", Port: 9443}}, healthy[1].Members)
+	require.Equal(t, 3, healthy[0].Weight)
+	require.Equal(t, 2, healthy[1].Weight)
+	duplicatePool := healthy[1]
+	duplicatePool.Weight = 1
+	require.Equal(t, duplicatePool, healthy[2])
+	denied := []cloud.TLSSNIBackendPool{healthy[0], {Weight: 2}, {Weight: 1}, healthy[3]}
+
+	require.NoError(t, kube.Get(t.Context(), client.ObjectKeyFromObject(canaryPolicy), canaryPolicy))
+	ancestors := canaryPolicy.Status.Ancestors
+	canaryPolicy.Status.Ancestors = nil
+	require.NoError(t, kube.Status().Update(t.Context(), canaryPolicy))
+	require.Equal(t, denied, observe(gatewayv1.RouteReasonPending))
+	canaryPolicy.Status.Ancestors = ancestors
+	require.NoError(t, kube.Status().Update(t.Context(), canaryPolicy))
+	caUnreadable = true
+	require.Equal(t, denied, observe(gatewayv1.RouteReasonPending))
+	caUnreadable = false
+	require.NoError(t, kube.Delete(t.Context(), canaryCA))
+	require.Equal(t, denied, observe("InvalidBackendTLSPolicy"))
+	canaryCA.ResourceVersion = ""
+	require.NoError(t, kube.Create(t.Context(), canaryCA))
+	require.NoError(t, kube.Delete(t.Context(), canaryEndpoints))
+	require.Equal(t, denied, observe(gatewayv1.RouteReasonResolvedRefs))
+	canaryEndpoints.ResourceVersion = ""
+	require.NoError(t, kube.Create(t.Context(), canaryEndpoints))
+	require.NoError(t, kube.Delete(t.Context(), grant))
+	grantRevoked = true
+	require.Equal(t, denied, observe(gatewayv1.RouteReasonRefNotPermitted))
+	r.Config.TCPConnectionRejection = false
+	closed, err := r.observeSNIRoutes(t.Context(), snapshot)
+	require.NoError(t, err)
+	require.Empty(t, closed[0].targets)
+	require.Len(t, closed[0].denied, 1)
+	r.Config.TCPConnectionRejection = true
+	grantRevoked = false
+	grant.ResourceVersion = ""
+	require.NoError(t, kube.Create(t.Context(), grant))
+	require.Equal(t, healthy, observe(gatewayv1.RouteReasonResolvedRefs))
+
+	r.Config.TLSSNIPassthrough, r.Config.TCPTLSMixedMode = true, true
+	listener.Hostname = ptr.To(gatewayv1.Hostname("*.example.test"))
+	passthrough := testSNIListener()
+	passthrough.Name = "pass"
+	passthrough.Hostname = ptr.To(gatewayv1.Hostname("passthrough.example.test"))
+	gateway.Spec.Listeners = []gatewayv1.Listener{passthrough, listener}
+	snapshot.listeners, err = SupportedListenersForConfig(r.Config, gateway)
+	require.NoError(t, err)
+	snapshot.listener = snapshot.listeners[0]
+	mixed, err := r.observeSNIRoutes(t.Context(), snapshot)
+	require.NoError(t, err)
+	require.Len(t, mixed.targets(), 1)
+	require.False(t, mixed.targets()[0].Passthrough)
+	require.Equal(t, healthy, mixed.targets()[0].BackendPools)
+
+	require.NoError(t, kube.Get(t.Context(), client.ObjectKeyFromObject(route), route))
+	route.Spec.Rules[0].BackendRefs = []gatewayv1.BackendRef{stableRef}
+	require.NoError(t, kube.Update(t.Context(), route))
+	native, err := r.observeSNIRoutes(t.Context(), snapshot)
+	require.NoError(t, err)
+	require.Len(t, native.targets(), 1)
+	require.Equal(t, healthy[0].BackendTLS, native.targets()[0].BackendTLS)
+
+	canaryRef.Weight = ptr.To(int32(0))
+	route.Spec.Rules[0].BackendRefs = append(route.Spec.Rules[0].BackendRefs, canaryRef)
+	require.NoError(t, kube.Update(t.Context(), route))
+	withZero, err := r.observeSNIRoutes(t.Context(), snapshot)
+	require.NoError(t, err)
+	require.Equal(t, gatewayv1.RouteReasonResolvedRefs, withZero.parentResults()[0].resolvedReason)
+	require.Equal(t, native.targets(), withZero.targets())
+
+	require.NoError(t, kube.Delete(t.Context(), grant))
+	grantRevoked = true
+	withoutZeroGrant, err := r.observeSNIRoutes(t.Context(), snapshot)
+	require.NoError(t, err)
+	require.Equal(t, gatewayv1.RouteReasonRefNotPermitted, withoutZeroGrant.parentResults()[0].resolvedReason)
+	require.Equal(t, native.targets(), withoutZeroGrant.targets())
 }

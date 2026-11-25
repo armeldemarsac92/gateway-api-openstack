@@ -92,6 +92,11 @@ func (p *Provider) TCPBackendTLSAvailable(ctx context.Context) (bool, error) {
 	return p.graph.TCPBackendTLSAvailable(ctx)
 }
 
+// TCPWeightedBackendTLSAvailable discovers independent authenticated pools for TLSRoute termination.
+func (p *Provider) TCPWeightedBackendTLSAvailable(ctx context.Context) (bool, error) {
+	return p.graph.TCPWeightedBackendTLSAvailable(ctx)
+}
+
 // BackendTLSSANAvailable discovers explicit SAN authentication for HTTP or gRPC.
 func (p *Provider) BackendTLSSANAvailable(ctx context.Context, requireH2 bool) (bool, error) {
 	return p.graph.BackendTLSSANAvailable(ctx, requireH2)

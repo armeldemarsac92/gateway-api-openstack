@@ -133,6 +133,15 @@ func (o *BackendTLSObserver) HasPolicy(ctx context.Context, service *corev1.Serv
 
 // Observe requires the caller to authorize the Service reference first.
 func (o *BackendTLSObserver) Observe(ctx context.Context, service *corev1.Service, port *corev1.ServicePort, ancestor *backendtls.GatewayAncestor) (backendtls.Selection, error) {
+	return o.observe(ctx, service, port, ancestor, false)
+}
+
+// ObserveWeightedService keeps unavailable CA observations scoped to each Service.
+func (o *BackendTLSObserver) ObserveWeightedService(ctx context.Context, service *corev1.Service, port *corev1.ServicePort, ancestor *backendtls.GatewayAncestor) (backendtls.Selection, error) {
+	return o.observe(ctx, service, port, ancestor, true)
+}
+
+func (o *BackendTLSObserver) observe(ctx context.Context, service *corev1.Service, port *corev1.ServicePort, ancestor *backendtls.GatewayAncestor, allowPendingCA bool) (backendtls.Selection, error) {
 	items, err := o.policiesInNamespace(ctx, service.Namespace)
 	if err != nil {
 		return backendtls.Selection{}, err
@@ -149,7 +158,11 @@ func (o *BackendTLSObserver) Observe(ctx context.Context, service *corev1.Servic
 			}
 		}
 	}
-	selection := backendtls.Evaluate(service, port, items, o.cas)
+	inputs := o.cas
+	if allowPendingCA {
+		inputs.UnreadableConfigMaps = o.configMapUnavailable
+	}
+	selection := backendtls.Evaluate(service, port, items, inputs)
 	if selection.Winner == nil {
 		return selection, nil
 	}
@@ -158,7 +171,7 @@ func (o *BackendTLSObserver) Observe(ctx context.Context, service *corev1.Servic
 		if policy.Name != selection.Winner.Key.Name {
 			continue
 		}
-		if key, ok := backendtls.CAKey(policy, o.bundles != nil); ok && key.Namespace == "" {
+		if key, ok := backendtls.CAKey(policy, o.bundles != nil); ok && key.Namespace == "" && !allowPendingCA {
 			if err := o.cas.ClusterTrustBundles[key.Name].Unavailable; err != nil {
 				return backendtls.Selection{}, err
 			}
