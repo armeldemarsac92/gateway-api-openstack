@@ -50,6 +50,17 @@ type HTTPHeaderOperation struct {
 
 var httpHeaderName = regexp.MustCompile(`^[!#$%&'*+\-.^_\x60|~0-9A-Za-z]{1,256}$`)
 
+// MaxExactHTTPHeaderNameLength is the Gateway API limit in bytes for ASCII field names.
+const MaxExactHTTPHeaderNameLength = 256
+
+// ValidateHTTPHeaderMatchName checks the ASCII field-name syntax before case normalization.
+func ValidateHTTPHeaderMatchName(name string) error {
+	if !httpHeaderName.MatchString(name) {
+		return errors.New("an exact HTTP header match requires a valid ASCII field name of at most 256 bytes")
+	}
+	return nil
+}
+
 var grpcMetadataName = regexp.MustCompile(`^[a-z0-9_.-]+$`)
 
 // ValidGRPCMetadataName checks the lowercase alphabet accepted by gRPC.
@@ -124,7 +135,7 @@ type HTTPHeaderMatch struct {
 
 // NormalizeHTTPHeaderMatches validates the Amphora HTTP field limits and
 // canonicalizes the conjunction independently of declaration order.
-func NormalizeHTTPHeaderMatches(headers []HTTPHeaderMatch) ([]HTTPHeaderMatch, error) {
+func NormalizeHTTPHeaderMatches(headers []HTTPHeaderMatch, allowName256 bool) ([]HTTPHeaderMatch, error) {
 	if len(headers) == 0 {
 		return nil, nil
 	}
@@ -134,8 +145,11 @@ func NormalizeHTTPHeaderMatches(headers []HTTPHeaderMatch) ([]HTTPHeaderMatch, e
 	normalized := make([]HTTPHeaderMatch, 0, len(headers))
 	seen := make(map[string]bool, len(headers))
 	for _, header := range headers {
-		if !httpHeaderName.MatchString(header.Name) || len(header.Name) > 255 {
-			return nil, errors.New("an exact HTTP header match requires a valid field name of at most 255 bytes on Amphora")
+		if err := ValidateHTTPHeaderMatchName(header.Name); err != nil {
+			return nil, err
+		}
+		if len(header.Name) == MaxExactHTTPHeaderNameLength && !allowName256 {
+			return nil, errors.New("an exact HTTP header match supports names up to 255 bytes without --octavia-http-header-name-256")
 		}
 		header.Name = strings.ToLower(header.Name)
 		if seen[header.Name] {

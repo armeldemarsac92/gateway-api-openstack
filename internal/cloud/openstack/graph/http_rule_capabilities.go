@@ -34,12 +34,35 @@ type httpRuleCapabilities uint8
 const (
 	longHostnameCapability httpRuleCapabilities = 1 << iota
 	literalPathCapability
+	headerName256Capability
 )
 
-func requiredHTTPRuleCapability(kind l7policies.RuleType, compare l7policies.CompareType, value string) httpRuleCapabilities {
+type httpRuleFeature struct {
+	bit          httpRuleCapabilities
+	enabled      bool
+	capabilities []string
+	optOut       string
+}
+
+func (p *Provider) httpRuleFeatures() []httpRuleFeature {
+	return []httpRuleFeature{
+		{longHostnameCapability, p.longHTTPHostnames, []string{octavia.GatewayCapabilityHTTPLongHostname}, "Controller opt-in for long Octavia HTTP hostname rules is disabled"},
+		{literalPathCapability, p.literalHTTPPaths, []string{octavia.GatewayCapabilityHTTPLiteralPath}, "Controller opt-in for Octavia literal HTTP path rules is disabled"},
+		{headerName256Capability, p.httpHeaderName256Enabled(), []string{octavia.GatewayCapabilityHTTPHeaderName256, octavia.GatewayCapabilityHTTPHeaderExact},
+			"Controller opt-in for 256-byte Octavia HTTP header names requires --octavia-http-header-exact and --octavia-http-header-name-256"},
+	}
+}
+
+func (p *Provider) httpHeaderName256Enabled() bool {
+	return p.httpHeaderExact && p.httpHeaderName256
+}
+
+func requiredHTTPRuleCapability(kind l7policies.RuleType, compare l7policies.CompareType, key, value string) httpRuleCapabilities {
 	switch {
 	case kind == octavia.RuleTypeHTTPPathLiteral:
 		return literalPathCapability
+	case kind == httpHeaderExactRuleType && len(key) >= cloud.MaxExactHTTPHeaderNameLength:
+		return headerName256Capability
 	case kind == l7policies.TypeHostName && compare == l7policies.CompareTypeRegex && amphora.IsLongHostnameRuleValue(value):
 		return longHostnameCapability
 	default:
@@ -50,15 +73,29 @@ func requiredHTTPRuleCapability(kind l7policies.RuleType, compare l7policies.Com
 func desiredHTTPRuleCapabilities(policy desiredPolicy, scalarHostname string) httpRuleCapabilities {
 	var required httpRuleCapabilities
 	for _, rule := range rulesFor(policy, scalarHostname) {
-		required |= requiredHTTPRuleCapability(rule.ruleType, rule.compareType, rule.value)
+		required |= requiredHTTPRuleCapability(rule.ruleType, rule.compareType, rule.key, rule.value)
 	}
 	return required
+}
+
+func (step routeMutation) requiresHTTPHeaderName256(route desiredRoute) bool {
+	switch step.kind {
+	case routeMutationCreateRule, routeMutationUpdateRule:
+		rule := step.rule
+		return requiredHTTPRuleCapability(rule.ruleType, rule.compareType, rule.key, rule.value) == headerName256Capability
+	case routeMutationCreatePolicy:
+		return desiredHTTPRuleCapabilities(step.policy, route.hostnameRuleValue)&headerName256Capability != 0
+	case routeMutationEnablePolicy:
+		return step.httpRuleCapabilities&headerName256Capability != 0
+	default:
+		return false
+	}
 }
 
 func observedHTTPRuleCapabilities(policy observedRoutePolicy) httpRuleCapabilities {
 	var required httpRuleCapabilities
 	for _, rule := range policy.rules {
-		required |= requiredHTTPRuleCapability(l7policies.RuleType(rule.rule.RuleType), l7policies.CompareType(rule.rule.CompareType), rule.rule.Value)
+		required |= requiredHTTPRuleCapability(l7policies.RuleType(rule.rule.RuleType), l7policies.CompareType(rule.rule.CompareType), rule.rule.Key, rule.rule.Value)
 	}
 	return required
 }
@@ -141,31 +178,28 @@ func (p *Provider) protectHTTPRuleCapabilities(ctx context.Context, desired desi
 	for _, dependency := range dependencies {
 		required |= dependency
 	}
+	features := p.httpRuleFeatures()
 	var advertised []string
-	if required&longHostnameCapability != 0 && p.longHTTPHostnames || required&literalPathCapability != 0 && p.literalHTTPPaths {
+	if slices.ContainsFunc(features, func(feature httpRuleFeature) bool { return required&feature.bit != 0 && feature.enabled }) {
 		advertised = p.discoverHTTPRuleCapabilities(ctx, desired, actual)
 	}
 	var unavailable httpRuleCapabilities
 	reasons := make(map[httpRuleCapabilities]string)
-	for _, feature := range []struct {
-		bit        httpRuleCapabilities
-		enabled    bool
-		capability string
-		optOut     string
-	}{
-		{longHostnameCapability, p.longHTTPHostnames, octavia.GatewayCapabilityHTTPLongHostname, "Controller opt-in for long Octavia HTTP hostname rules is disabled"},
-		{literalPathCapability, p.literalHTTPPaths, octavia.GatewayCapabilityHTTPLiteralPath, "Controller opt-in for Octavia literal HTTP path rules is disabled"},
-	} {
+	for _, feature := range features {
 		if required&feature.bit == 0 {
 			continue
 		}
-		switch {
-		case !feature.enabled:
+		if !feature.enabled {
 			unavailable |= feature.bit
 			reasons[feature.bit] = feature.optOut
-		case !slices.Contains(advertised, feature.capability):
-			unavailable |= feature.bit
-			reasons[feature.bit] = "Waiting for Octavia to advertise " + feature.capability
+			continue
+		}
+		for _, capability := range feature.capabilities {
+			if !slices.Contains(advertised, capability) {
+				unavailable |= feature.bit
+				reasons[feature.bit] = "Waiting for Octavia to advertise " + capability
+				break
+			}
 		}
 	}
 	// ERROR does not prove the previous close reached Amphora. Retry it
@@ -183,9 +217,9 @@ func (p *Provider) protectHTTPRuleCapabilities(ctx context.Context, desired desi
 		if blocked != 0 {
 			blockedPorts[port] = blocked
 			var messages []string
-			for _, bit := range []httpRuleCapabilities{longHostnameCapability, literalPathCapability} {
-				if blocked&bit != 0 {
-					messages = append(messages, reasons[bit])
+			for _, feature := range features {
+				if blocked&feature.bit != 0 {
+					messages = append(messages, reasons[feature.bit])
 				}
 			}
 			portReasons[port] = strings.Join(messages, ". ")

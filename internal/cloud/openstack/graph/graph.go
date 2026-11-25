@@ -616,7 +616,12 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		case !gophercloud.ResponseCodeIs(err, http.StatusNotImplemented):
 			return result, err
 		}
-		// An explicit unsupported response did not submit a mutation.
+		if err := p.verifyPolicyActivationFallback(ctx, actual, batch); err != nil {
+			if errors.Is(err, errPolicyActivationSnapshotBusy) {
+				return result, nil
+			}
+			return result, err
+		}
 		if validateMutation != nil {
 			if err := validateMutation(ctx); err != nil {
 				return cloud.GatewayGraphResult{}, err

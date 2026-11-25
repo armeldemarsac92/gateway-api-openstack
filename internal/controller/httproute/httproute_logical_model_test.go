@@ -192,13 +192,15 @@ func TestLogicalModelCannotEnableUnmappedNodePortBehavior(t *testing.T) {
 
 func TestExactHTTPHeadersLowerDistinctAlternativesAtTheirRank(t *testing.T) {
 	cfg := testConfig()
-	cfg.HTTPHeaderExact = true
+	cfg.HTTPHeaderExact, cfg.HTTPHeaderName256 = true, true
+	longName := strings.Repeat("X", 256)
+	legacyName := "Y" + strings.Repeat("x", 254)
 	_, gateway := providerRouteParentObjects(cfg)
 	route := mapperTestHTTPRoute(gateway.Namespace, "api", gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name)}, "backend")
 	route.UID = "route-uid"
 	route.Spec.Rules[0].Matches = []gatewayv1.HTTPRouteMatch{
-		{Headers: []gatewayv1.HTTPHeaderMatch{{Name: "X-Version", Value: "One, Two"}}},
-		{Headers: []gatewayv1.HTTPHeaderMatch{{Name: "X-Version", Value: "Three"}, {Name: "x-version", Type: ptr.To(gatewayv1.HeaderMatchRegularExpression), Value: "ignored"}, {Name: "color", Value: "orange"}}},
+		{Headers: []gatewayv1.HTTPHeaderMatch{{Name: gatewayv1.HTTPHeaderName(legacyName), Value: "One, Two"}}},
+		{Headers: []gatewayv1.HTTPHeaderMatch{{Name: gatewayv1.HTTPHeaderName(longName), Value: "Three"}, {Name: gatewayv1.HTTPHeaderName(strings.ToLower(longName)), Type: ptr.To(gatewayv1.HeaderMatchRegularExpression), Value: "ignored"}, {Name: "color", Value: "orange"}}},
 		{Path: &gatewayv1.HTTPPathMatch{Type: ptr.To(gatewayv1.PathMatchExact), Value: ptr.To("/explicit")}},
 	}
 	service, endpoints, node := validNodePortBackend(gateway.Namespace, "backend")
@@ -213,33 +215,47 @@ func TestExactHTTPHeadersLowerDistinctAlternativesAtTheirRank(t *testing.T) {
 	}
 	matches := desired.HTTPBackends[0].Matches
 	if matches[0].PathType != cloud.PathMatchExact || matches[0].Precedence != 0 ||
-		matches[1].Precedence != 1 || !slices.Equal(matches[1].Headers, []cloud.HTTPHeaderMatch{{Name: "color", Value: "orange"}, {Name: "x-version", Value: "Three"}}) ||
-		matches[2].Precedence != 2 || !slices.Equal(matches[2].Headers, []cloud.HTTPHeaderMatch{{Name: "x-version", Value: "One, Two"}}) {
+		matches[1].Precedence != 1 || !slices.Equal(matches[1].Headers, []cloud.HTTPHeaderMatch{{Name: "color", Value: "orange"}, {Name: strings.ToLower(longName), Value: "Three"}}) ||
+		matches[2].Precedence != 2 || !slices.Equal(matches[2].Headers, []cloud.HTTPHeaderMatch{{Name: strings.ToLower(legacyName), Value: "One, Two"}}) {
 		t.Fatalf("incorrect effective predicates or precedence: %#v", matches)
 	}
 }
 
 func TestExactHTTPHeadersRejectUnsupportedPredicates(t *testing.T) {
+	header := func(name string) gatewayv1.HTTPRouteMatch {
+		return gatewayv1.HTTPRouteMatch{Headers: []gatewayv1.HTTPHeaderMatch{{Name: gatewayv1.HTTPHeaderName(name), Value: "one"}}}
+	}
 	for _, test := range []struct {
-		name  string
-		optIn bool
-		match gatewayv1.HTTPRouteMatch
-		want  string
+		name    string
+		optIn   bool
+		name256 bool
+		match   gatewayv1.HTTPRouteMatch
+		want    string
 	}{
 		{name: "disabled", match: gatewayv1.HTTPRouteMatch{Headers: []gatewayv1.HTTPHeaderMatch{{Name: "version", Value: "one"}}}, want: "--octavia-http-header-exact"},
 		{name: "regex", optIn: true, match: gatewayv1.HTTPRouteMatch{Headers: []gatewayv1.HTTPHeaderMatch{{Name: "version", Type: ptr.To(gatewayv1.HeaderMatchRegularExpression), Value: "one"}}}, want: "RegularExpression"},
 		{name: "method", optIn: true, match: gatewayv1.HTTPRouteMatch{Method: ptr.To(gatewayv1.HTTPMethodGet)}, want: "method"},
 		{name: "query", optIn: true, match: gatewayv1.HTTPRouteMatch{QueryParams: []gatewayv1.HTTPQueryParamMatch{{Name: "version", Value: "one"}}}, want: "query parameter"},
-		{name: "name beyond HAProxy limit", optIn: true, match: gatewayv1.HTTPRouteMatch{Headers: []gatewayv1.HTTPHeaderMatch{{Name: gatewayv1.HTTPHeaderName(strings.Repeat("x", 256)), Value: "one"}}}, want: "255 bytes"},
+		{name: "legacy name at 255", optIn: true, match: header(strings.Repeat("x", 255))},
+		{name: "256 without extension", optIn: true, match: header(strings.Repeat("x", 256)), want: "--octavia-http-header-name-256"},
+		{name: "256 without exact matching", name256: true, match: header(strings.Repeat("x", 256)), want: "--octavia-http-header-exact"},
+		{name: "name beyond API limit", optIn: true, name256: true, match: header(strings.Repeat("x", 257)), want: "256 bytes"},
+		{name: "non-ASCII field name", optIn: true, name256: true, match: header(strings.Repeat("x", 253) + "K"), want: "ASCII"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			cfg := testConfig()
-			cfg.HTTPHeaderExact = test.optIn
+			cfg.HTTPHeaderExact, cfg.HTTPHeaderName256 = test.optIn, test.name256
 			_, gateway := providerRouteParentObjects(cfg)
 			route := mapperTestHTTPRoute(gateway.Namespace, "api", gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name)}, "backend")
 			route.Spec.Rules[0].Matches = []gatewayv1.HTTPRouteMatch{test.match}
 			r := &Reconciler{Config: cfg}
 			_, err := r.validateRouteStructure(route)
+			if test.want == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
 			var rejected *routeBuildError
 			if !errors.As(err, &rejected) || rejected.kind != routeErrorUnsupported || !strings.Contains(rejected.message, test.want) {
 				t.Fatalf("expected UnsupportedValue mentioning %q, got %v", test.want, err)
@@ -309,7 +325,7 @@ func TestHTTPMethodAndQueryValidationAreIndependent(t *testing.T) {
 		{method: "get", want: "unknown HTTP method"},
 		{method: gatewayv1.HTTPMethodGet, query: []gatewayv1.HTTPQueryParamMatch{{Name: "q", Value: "one"}}, want: "query parameter"},
 	} {
-		_, _, err := supportedMatch(gatewayv1.HTTPRouteMatch{Method: &test.method, QueryParams: test.query}, false, true, false, false)
+		_, _, err := supportedMatch(gatewayv1.HTTPRouteMatch{Method: &test.method, QueryParams: test.query}, routeMatchCapabilities{methodMatch: true})
 		var rejected *routeBuildError
 		if !errors.As(err, &rejected) || rejected.kind != routeErrorUnsupported || !strings.Contains(rejected.message, test.want) {
 			t.Fatalf("match = %#v, expected UnsupportedValue mentioning %q, got %v", test, test.want, err)
@@ -377,7 +393,7 @@ func TestExactHTTPQueryParameterLimits(t *testing.T) {
 		{name: "q", want: "1–1024"},
 	} {
 		match := gatewayv1.HTTPRouteMatch{QueryParams: []gatewayv1.HTTPQueryParamMatch{{Name: gatewayv1.HTTPHeaderName(test.name), Value: test.value}}}
-		_, _, err := supportedMatch(match, false, false, true, false)
+		_, _, err := supportedMatch(match, routeMatchCapabilities{exactQueryParams: true})
 		if test.want == "" {
 			if err != nil {
 				t.Fatalf("legal maximum query name and value: %v", err)

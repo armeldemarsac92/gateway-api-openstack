@@ -29,6 +29,7 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia/amphora"
 )
 
 const batchActivationEndpoint = "/lbaas/listeners/listener-1/l7policy_activation"
@@ -155,6 +156,89 @@ func TestReconcileGatewayGraphBatchesPathsAndExactHeaderWithoutHostname(t *testi
 	})
 }
 
+func TestReconcileGatewayGraphRequires256ByteHeaderCapabilityForBatch(t *testing.T) {
+	matches := []cloud.HTTPPathMatch{
+		{PathType: cloud.PathMatchExact, PathValue: "/fallback"},
+		{PathType: cloud.PathMatchExact, PathValue: "/api", Precedence: 1,
+			Headers: []cloud.HTTPHeaderMatch{{Name: strings.Repeat("x", 256), Value: "two"}}},
+	}
+	t.Run("advertised", func(t *testing.T) {
+		f := prepareHTTPPolicies(t, true, matches...)
+		result, err := f.provider.ReconcileGatewayGraph(t.Context(), f.spec)
+		if err != nil || !result.Outcome.MutationSubmitted || len(f.batch.Policies) != 2 ||
+			!slices.Equal(f.requests.mutationPaths(), []string{batchActivationEndpoint}) {
+			t.Fatalf("activation: outcome %v, error %v, writes %v", result.Outcome, err, f.requests.mutationPaths())
+		}
+	})
+	t.Run("withdrawn", func(t *testing.T) {
+		f := prepareHTTPPolicies(t, true, matches...)
+		f.headerName256 = false
+		result, err := f.provider.ReconcileGatewayGraph(t.Context(), f.spec)
+		if err != nil || !result.Gateway.HTTPPolicyTransition ||
+			!strings.Contains(result.Routes[0].Result.Outcome.Message, octavia.GatewayCapabilityHTTPHeaderName256) ||
+			!slices.Equal(f.requests.mutationPaths(), []string{"/lbaas/listeners/listener-1"}) {
+			t.Fatalf("withdrawal: outcome %v, error %v, writes %v", result.Outcome, err, f.requests.mutationPaths())
+		}
+	})
+}
+
+func TestReconcileGatewayGraphRechecksHeaderCapabilitiesAfterBatchUnsupported(t *testing.T) {
+	matches := []cloud.HTTPPathMatch{
+		{PathType: cloud.PathMatchExact, PathValue: "/fallback"},
+		{PathType: cloud.PathMatchExact, PathValue: "/api", Precedence: 1,
+			Headers: []cloud.HTTPHeaderMatch{{Name: strings.Repeat("x", 256), Value: "two"}}},
+	}
+	for _, test := range []struct {
+		name   string
+		method string
+		revoke func(*preparedHTTPPolicyFixture)
+	}{
+		{name: "snapshot unsupported", method: http.MethodGet},
+		{name: "batch unsupported", method: http.MethodPost},
+		{name: "exact matching withdrawn at snapshot", method: http.MethodGet, revoke: func(f *preparedHTTPPolicyFixture) { f.exactHeaders = false }},
+		{name: "256-byte names withdrawn at batch", method: http.MethodPost, revoke: func(f *preparedHTTPPolicyFixture) { f.headerName256 = false }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := prepareHTTPPolicies(t, true, matches...)
+			f.unsupportedActivation = func() {
+				if test.revoke != nil {
+					test.revoke(f)
+				}
+			}
+			if test.method == http.MethodGet {
+				f.getStatus = http.StatusNotImplemented
+			} else {
+				f.postStatus = http.StatusNotImplemented
+			}
+			result, err := f.provider.ReconcileGatewayGraph(t.Context(), f.spec)
+			want := []string{}
+			if test.method == http.MethodPost {
+				want = append(want, batchActivationEndpoint)
+			}
+			if test.revoke == nil {
+				want = append(want, "/lbaas/l7policies/policy-1")
+			}
+			if err != nil || result.Outcome.State != cloud.OutcomeProgressing || !slices.Equal(f.requests.mutationPaths(), want) {
+				t.Fatalf("batch fallback: outcome %v, error %v, writes %v, want %v", result.Outcome, err, f.requests.mutationPaths(), want)
+			}
+		})
+	}
+}
+
+func TestReconcileGatewayGraphRechecksLiteralPathCapabilityAfterBatchUnsupported(t *testing.T) {
+	f := prepareHTTPPolicies(t, true,
+		cloud.HTTPPathMatch{PathType: cloud.PathMatchExact, PathValue: "/fallback"},
+		cloud.HTTPPathMatch{PathType: cloud.PathMatchExact, PathValue: "/o'clock", Precedence: 1},
+	)
+	f.postStatus = http.StatusNotImplemented
+	f.unsupportedActivation = func() { f.literalPaths = false }
+	result, err := f.provider.ReconcileGatewayGraph(t.Context(), f.spec)
+	if err != nil || result.Outcome.State != cloud.OutcomeProgressing ||
+		!slices.Equal(f.requests.mutationPaths(), []string{batchActivationEndpoint}) {
+		t.Fatalf("literal path withdrawal: outcome %v, error %v, writes %v", result.Outcome, err, f.requests.mutationPaths())
+	}
+}
+
 func TestReconcileGatewayGraphHoldsL7ActivationAfterGraphDrift(t *testing.T) {
 	for _, name := range []string{"reassigned listener", "updated member", "missing member flags"} {
 		t.Run(name, func(t *testing.T) {
@@ -204,19 +288,28 @@ func TestReconcileGatewayGraphReobservesL7ActivationAfterConflict(t *testing.T) 
 }
 
 func TestReconcileGatewayGraphFencesL7ActivationWhenGrantChanges(t *testing.T) {
-	f := preparedHTTPPolicies(t)
-	errGrantRevoked := errors.New("the ReferenceGrant changed")
-	f.spec.ValidateMutation = func(_ context.Context) error {
-		if f.requests.count(http.MethodGet, batchActivationEndpoint) == 1 {
-			return errGrantRevoked
-		}
-		return nil
-	}
-	if _, err := f.provider.ReconcileGatewayGraph(t.Context(), f.spec); !errors.Is(err, errGrantRevoked) {
-		t.Fatalf("grant revalidation = %v", err)
-	}
-	if writes := f.requests.mutationPaths(); len(writes) != 0 {
-		t.Fatalf("activation crossed the grant fence: %v", writes)
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		t.Run(method, func(t *testing.T) {
+			f := preparedHTTPPolicies(t)
+			want := []string{}
+			if method == http.MethodPost {
+				f.postStatus = http.StatusNotImplemented
+				want = append(want, batchActivationEndpoint)
+			}
+			errGrantRevoked := errors.New("the ReferenceGrant changed")
+			f.spec.ValidateMutation = func(_ context.Context) error {
+				if f.requests.count(method, batchActivationEndpoint) == 1 {
+					return errGrantRevoked
+				}
+				return nil
+			}
+			if _, err := f.provider.ReconcileGatewayGraph(t.Context(), f.spec); !errors.Is(err, errGrantRevoked) {
+				t.Fatalf("grant revalidation = %v", err)
+			}
+			if writes := f.requests.mutationPaths(); !slices.Equal(writes, want) {
+				t.Fatalf("activation crossed the grant fence: %v, want %v", writes, want)
+			}
+		})
 	}
 }
 
@@ -288,7 +381,10 @@ type preparedHTTPPolicyFixture struct {
 	batch                  octavia.PolicyActivationBatch
 	advertised             bool
 	exactHeaders           bool
+	headerName256          bool
+	literalPaths           bool
 	withdrawAfterDiscovery bool
+	unsupportedActivation  func()
 	discoveryStatus        int
 	getStatus              int
 	postStatus             int
@@ -330,6 +426,15 @@ func prepareHTTPPolicies(t *testing.T, sharedBackend bool, matches ...cloud.HTTP
 		if len(matches) != 0 {
 			route.HTTPBackends[0].Matches = matches
 			f.exactHeaders = slices.ContainsFunc(matches, func(match cloud.HTTPPathMatch) bool { return len(match.Headers) != 0 })
+			f.literalPaths = slices.ContainsFunc(matches, func(match cloud.HTTPPathMatch) bool {
+				values, err := amphora.PathRuleValues(match.PathValue, match.PathType == cloud.PathMatchPrefix, true)
+				return err == nil && values.Literal != ""
+			})
+			f.headerName256 = slices.ContainsFunc(matches, func(match cloud.HTTPPathMatch) bool {
+				return slices.ContainsFunc(match.Headers, func(header cloud.HTTPHeaderMatch) bool {
+					return len(header.Name) == cloud.MaxExactHTTPHeaderNameLength
+				})
+			})
 		}
 		route.Hostname, route.PathType, route.PathValue, route.Members = "", "", "", nil
 	}
@@ -389,12 +494,21 @@ func prepareHTTPPolicies(t *testing.T, sharedBackend bool, matches ...cloud.HTTP
 			if f.exactHeaders {
 				capabilities = append(capabilities, octavia.GatewayCapabilityHTTPHeaderExact)
 			}
+			if f.headerName256 {
+				capabilities = append(capabilities, octavia.GatewayCapabilityHTTPHeaderName256)
+			}
+			if f.literalPaths {
+				capabilities = append(capabilities, octavia.GatewayCapabilityHTTPLiteralPath)
+			}
 			if f.withdrawAfterDiscovery {
 				f.exactHeaders, f.advertised = false, false
 			}
 			safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": capabilities})
 		case r.Method == http.MethodGet && path == batchActivationEndpoint:
 			if f.getStatus != http.StatusOK {
+				if f.getStatus == http.StatusNotImplemented && f.unsupportedActivation != nil {
+					f.unsupportedActivation()
+				}
 				w.WriteHeader(f.getStatus)
 				return
 			}
@@ -446,6 +560,9 @@ func prepareHTTPPolicies(t *testing.T, sharedBackend bool, matches ...cloud.HTTP
 					enable(item.ID)
 				}
 			}
+			if f.postStatus == http.StatusNotImplemented && f.unsupportedActivation != nil {
+				f.unsupportedActivation()
+			}
 			w.WriteHeader(f.postStatus)
 		case r.Method == http.MethodPut && path == "/lbaas/listeners/listener-1":
 			var body struct{ Listener map[string]any }
@@ -464,6 +581,8 @@ func prepareHTTPPolicies(t *testing.T, sharedBackend bool, matches ...cloud.HTTP
 	}), &f.requests)
 	f.provider.l7PolicyBatchActivation = true
 	f.provider.httpHeaderExact = f.exactHeaders
+	f.provider.httpHeaderName256 = f.headerName256
+	f.provider.literalHTTPPaths = f.literalPaths
 	desired, err := f.provider.buildDesiredGatewayGraph(f.spec)
 	if err != nil {
 		t.Fatal(err)

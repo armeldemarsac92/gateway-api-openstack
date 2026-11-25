@@ -1049,6 +1049,7 @@ type routeMutation struct {
 	externalAuthUpdate       *octavia.PolicyExternalAuthUpdate
 	policyTags               []string
 	requiresExactHeaders     bool
+	httpRuleCapabilities     httpRuleCapabilities
 	requiresExactQueryParams bool
 	requiresHTTPMethod       bool
 	probeBeforeGRPCMigration bool
@@ -1470,6 +1471,7 @@ func buildRouteEnsurePolicyPlan(desired desiredRoute, policies []observedRoutePo
 					requestHeaderOperations:  wantedPolicy.requestHeaderOperations,
 					responseHeaderOperations: wantedPolicy.responseHeaderOperations,
 					requiresExactHeaders:     len(wantedPolicy.headers) != 0,
+					httpRuleCapabilities:     desiredHTTPRuleCapabilities(wantedPolicy, desired.hostnameRuleValue),
 					requiresExactQueryParams: wantedPolicy.requiresExactQueryParams(), requiresHTTPMethod: wantedPolicy.method != ""})
 				if !batchActivations || !policy.initialRules {
 					return plan, state, nil
@@ -1757,7 +1759,10 @@ func buildRoutePolicyPlan(
 			replacingLiteralPath := rule.RuleType == string(octavia.RuleTypeHTTPPathLiteral) && wantedRule.ruleType != octavia.RuleTypeHTTPPathLiteral
 			unexpectedKey := rule.Key != "" && (wantedRule.ruleType == httpMethodRuleType ||
 				wantedRule.ruleType == octavia.RuleTypeHTTPPathLiteral || observedPolicy.initialRules && wantedRule.key == "")
-			if replacingNativeMedia || replacingLiteralPath || unexpectedKey {
+			retiringExtendedHeaderName := rule.RuleType == string(httpHeaderExactRuleType) &&
+				len(rule.Key) >= cloud.MaxExactHTTPHeaderNameLength &&
+				(wantedRule.ruleType != httpHeaderExactRuleType || len(wantedRule.key) < cloud.MaxExactHTTPHeaderNameLength)
+			if replacingNativeMedia || replacingLiteralPath || retiringExtendedHeaderName || unexpectedKey {
 				// Octavia permits deletion after regional withdrawal. A PUT that
 				// changes the rule type still requires enrollment.
 				grpcContentTypeChanged = grpcContentTypeChanged || replacingNativeMedia
