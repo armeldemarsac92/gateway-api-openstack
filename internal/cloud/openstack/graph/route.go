@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"slices"
 	"sort"
 	"strings"
 
@@ -126,6 +127,7 @@ type desiredRoute struct {
 	weightedAuthorizations      map[string]map[string]int
 	backendTLS                  backendTLSPlan
 	backendRetryBudgetAvailable bool
+	tcpRejectionUnavailable     bool
 }
 
 func (r desiredRoute) protocol() string {
@@ -237,7 +239,17 @@ func (p *Provider) buildDesiredRoutePart(spec cloud.RouteSpec, backendKey string
 		unavailable, spec.Members = true, nil
 		spec.BackendH2C = false
 	}
-	if len(spec.Members) == 0 && spec.MemberMode != cloud.MemberModeEndpoint && !unavailable {
+	protocol := cloud.NormalizeListenerProtocol(spec.GatewayRequirements.ListenerProtocol)
+	fraction := spec.TCPConnectionRejection
+	if fraction != nil {
+		canForward := slices.ContainsFunc(spec.Members, func(member cloud.Member) bool { return !member.Draining })
+		full := fraction.RejectWeight == fraction.TotalWeight
+		if protocol != cloud.ListenerProtocolTCP || !fraction.Valid() || fraction.RejectWeight == 0 ||
+			full && len(spec.Members) != 0 || !full && !canForward {
+			return invalid(errors.New("TCP connection rejection requires a positive TCP share and its complete real-member set"))
+		}
+	}
+	if len(spec.Members) == 0 && spec.MemberMode != cloud.MemberModeEndpoint && !unavailable && fraction == nil {
 		return invalid(errors.New("at least one ready backend member is required"))
 	}
 	if routedExternal {
@@ -247,7 +259,6 @@ func (p *Provider) buildDesiredRoutePart(spec cloud.RouteSpec, backendKey string
 	}
 	var policies []desiredPolicy
 	var hostnameRuleValue string
-	protocol := cloud.NormalizeListenerProtocol(spec.GatewayRequirements.ListenerProtocol)
 	if spec.BackendRetryBudget != nil && (protocol != cloud.ListenerProtocolHTTP || !spec.BackendRetryBudget.Valid()) {
 		return invalid(errors.New("backend retry budgets require a valid Service budget on an HTTP pool"))
 	}
@@ -359,6 +370,7 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 		return desiredRoute{}, cloud.NewProviderError(cloud.ErrorCategoryTerminalValidation, err)
 	}
 	if cloud.NormalizeListenerProtocol(spec.GatewayRequirements.ListenerProtocol) != cloud.ListenerProtocolHTTP ||
+		spec.TCPConnectionRejection != nil ||
 		spec.Hostname != "" || spec.PathType != "" || spec.PathValue != "" || len(spec.Members) != 0 || spec.BackendH2C || spec.BackendTLS != nil {
 		return invalid(errors.New("HTTP backend groups require HTTP routing without scalar matches or members"))
 	}

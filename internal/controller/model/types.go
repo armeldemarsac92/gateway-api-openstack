@@ -88,6 +88,8 @@ type Diagnostic struct {
 	Reason    string
 	Message   string
 	Scope     DiagnosticScope
+	// NoReadyEndpoints identifies a complete endpoint observation with no ready backend.
+	NoReadyEndpoints bool
 }
 
 func (d *Diagnostic) Error() string { return d.Message }

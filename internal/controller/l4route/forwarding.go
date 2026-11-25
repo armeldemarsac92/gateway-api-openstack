@@ -170,10 +170,10 @@ func (r *Reconciler) hasPreviousObservedBackendTarget(route *transportRoute, tar
 	return false
 }
 
-func (r *Reconciler) planVersionSkew(ctx context.Context, route *transportRoute, plan *routePlan, backends []serviceBackend, bound bool) error {
+func (r *Reconciler) planVersionSkew(ctx context.Context, route *transportRoute, plan *routePlan, backends []serviceBackend, rejectWeight int, bound bool) error {
 	if bound {
-		confirmed, err := r.hasConfirmedForwarding(ctx, route, plan, backends)
-		if err != nil {
+		confirmed, err := r.hasConfirmedForwarding(ctx, route, plan, backends, rejectWeight)
+		if err != nil && rejectWeight == 0 {
 			return err
 		}
 		plan.detach = !confirmed
@@ -185,7 +185,7 @@ func (r *Reconciler) planVersionSkew(ctx context.Context, route *transportRoute,
 	return nil
 }
 
-func (r *Reconciler) hasConfirmedForwarding(ctx context.Context, route *transportRoute, plan *routePlan, backends []serviceBackend) (bool, error) {
+func (r *Reconciler) hasConfirmedForwarding(ctx context.Context, route *transportRoute, plan *routePlan, backends []serviceBackend, rejectWeight int) (bool, error) {
 	parent := plan.parents[0]
 	confirmed := r.currentParentCondition(route, parent.ref, r.forwardingTargetType())
 	if confirmed == nil || confirmed.Status != metav1.ConditionTrue || !r.retainProgrammedCondition(route, plan) ||
@@ -196,7 +196,7 @@ func (r *Reconciler) hasConfirmedForwarding(ctx context.Context, route *transpor
 	if err != nil || !ready {
 		return false, err
 	}
-	_, target, diagnostic, err := r.routeSpec(ctx, route, parent.gateway, parent.listeners[0], backends, topology, plan.listenerPorts...)
+	_, target, diagnostic, err := r.buildRouteSpec(ctx, route, parent.gateway, parent.listeners[0], backends, rejectWeight, topology, plan.listenerPorts...)
 	if err != nil || diagnostic != nil {
 		return false, err
 	}

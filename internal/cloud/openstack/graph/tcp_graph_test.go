@@ -44,16 +44,22 @@ const (
 )
 
 type tcpGraphFixture struct {
-	t                      *testing.T
-	spec                   cloud.GatewayGraphSpec
-	inventory              map[string]map[string]any
-	writes                 []string
-	loseNextListenerUpdate bool
-	loseNextListenerCreate bool
-	hiddenChild            string
-	unreferencedChild      string
-	extraListedMembers     []map[string]any
-	rejectMonitorDelay     float64
+	t                       *testing.T
+	spec                    cloud.GatewayGraphSpec
+	inventory               map[string]map[string]any
+	writes                  []string
+	loseNextListenerUpdate  bool
+	loseNextListenerCreate  bool
+	hiddenChild             string
+	unreferencedChild       string
+	extraListedMembers      []map[string]any
+	rejectMonitorDelay      float64
+	tcpRejectionAPI         bool
+	tcpRejectionAdvertised  bool
+	tcpRejectionRejectCode  int
+	tcpRejectionRemovePool  bool
+	tcpRejectionNetworkDown bool
+	tcpRejectionWrites      []map[string]json.RawMessage
 }
 
 func newTCPGraphFixture(t *testing.T) *tcpGraphFixture {
@@ -108,8 +114,24 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 		f.t.Errorf("unexpected Octavia request %s %s", req.Method, req.URL.RequestURI())
 		http.Error(w, "unexpected request", http.StatusBadRequest)
 	}
+	if f.tcpRejectionNetworkDown && (resource == "/v2.0/floatingips" || strings.HasPrefix(resource, "/v2.0/security-groups/")) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		return
+	}
 	if resource == "/v2.0/floatingips" && req.Method == http.MethodGet {
 		safetyWriteJSON(f.t, w, map[string]any{"floatingips": []any{}})
+		return
+	}
+	if f.tcpRejectionAPI && req.Method == http.MethodGet && resource == "/v2/lbaas/providers/amphora/gateway_capabilities" {
+		capabilities := []string{}
+		if f.tcpRejectionAdvertised {
+			capabilities = append(capabilities, "tcp_connection_rejection_v1")
+		}
+		safetyWriteJSON(f.t, w, map[string]any{"gateway_capabilities": capabilities})
+		return
+	}
+	if f.tcpRejectionAPI && req.Method == http.MethodPut && resource == memberCollection {
+		f.serveTCPRejectionBatch(w, req)
 		return
 	}
 	if resource == "/v2/lbaas/l7policies" && req.Method == http.MethodGet && f.inventory[tcpListener]["protocol"] == "HTTP" {
@@ -136,6 +158,13 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 				}
 				items := []map[string]any{}
 				for _, child := range f.children(listPath) {
+					if f.tcpRejectionAPI && listPath == tcpPools {
+						refs := []map[string]any{}
+						for _, member := range f.children(tcpPools + "/" + child["id"].(string) + "/members") {
+							refs = append(refs, map[string]any{"id": member["id"]})
+						}
+						child["members"] = refs
+					}
 					if listPath+"/"+child["id"].(string) != f.hiddenChild &&
 						(listPath != tcpMonitors || child["pool_id"] == kind.parentID) {
 						items = append(items, child)
@@ -222,6 +251,9 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 				data["default_pool_id"] = nil
 			case tcpPools:
 				data["listeners"] = []map[string]any{}
+				if f.tcpRejectionAPI {
+					data["tcp_connection_rejection"] = nil
+				}
 			case memberCollection:
 				data["backup"] = false
 				if _, explicit := data["weight"]; !explicit {
@@ -328,8 +360,12 @@ func (f *tcpGraphFixture) poolReady(id string) bool {
 	}
 	poolPath := tcpPools + "/" + id
 	monitorRequired := f.spec.Routes[routeIndex].Spec.HealthMonitor != (cloud.HealthMonitorConfig{})
+	canServe := f.inventory[poolPath+"/members/member"]["provisioning_status"] == "ACTIVE"
+	if fraction, ok := f.inventory[poolPath]["tcp_connection_rejection"].(map[string]any); ok {
+		canServe = canServe || fraction["reject_weight"] == fraction["total_weight"]
+	}
 	return f.inventory[poolPath]["provisioning_status"] == "ACTIVE" &&
-		f.inventory[poolPath+"/members/member"]["provisioning_status"] == "ACTIVE" &&
+		canServe &&
 		(!monitorRequired || f.inventory[monitorPath]["provisioning_status"] == "ACTIVE")
 }
 

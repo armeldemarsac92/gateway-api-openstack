@@ -327,6 +327,13 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		p.recordGraphMutationOutcome(&result, *step)
 		return result, nil
 	}
+	p.observeTCPConnectionRejectionCapability(ctx, &desired, actual)
+	if result, handled, err := p.reconcileServingTCPRejection(ctx, desired, actual); handled {
+		return result, err
+	}
+	if result, handled, err := p.replayPendingTCPRejection(ctx, desired, actual); handled {
+		return result, err
+	}
 	p.gateRequestMirrors(ctx, &desired, actual)
 	if actual.loadBalancer != nil && actual.loadBalancer.ProvisioningStatus == "ACTIVE" {
 		if step, needed := nextRequestMirrorWithdrawal(desired, actual); needed {
@@ -358,6 +365,9 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	}
 	p.isolateUnavailableSNISuffix(ctx, &desired, actual)
 	if actual.addressReadError != nil {
+		if actual.protocol == cloud.ListenerProtocolTCP {
+			return result, actual.addressReadError
+		}
 		if isSNIProtocol(desired.protocol) {
 			if actual.outcome.State == cloud.OutcomeProgressing {
 				return p.pendingGraphResult(ctx, desired, actual), nil
@@ -388,7 +398,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		}
 	}
 	if actual.outcome.State == cloud.OutcomeProgressing {
-		if len(actual.httpsServingPorts) != 0 && spec.ValidateMutation != nil {
+		if (len(actual.httpsServingPorts) != 0 || hasTCPRejectionTarget(desired)) && spec.ValidateMutation != nil {
 			// Busy Octavia can prove a serving subset without a write. Apply
 			// the same Kubernetes snapshot fence before publishing that proof.
 			if err := spec.ValidateMutation(ctx); err != nil {
@@ -460,6 +470,11 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	}
 	p.reportRequestMirrorAvailability(desired, &result)
 	if len(plan) == 0 {
+		if (hasTCPRejectionTarget(desired) || hasTCPRejectionReadback(actual)) && spec.ValidateMutation != nil {
+			if err := spec.ValidateMutation(ctx); err != nil {
+				return cloud.GatewayGraphResult{}, err
+			}
+		}
 		if isSNIProtocol(desired.protocol) && spec.Gateway.Disposition == cloud.GraphEnsure && result.Outcome.State == cloud.OutcomeReady {
 			if err := p.verifySNICapability(ctx, desired, actual); err != nil {
 				return p.withdrawUndiscoverableSNI(ctx, desired, actual, err)
@@ -521,6 +536,13 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	}
 	if err != nil {
 		if step.kind == graphRouteMutation {
+			if step.route.kind == routeMutationReplaceTCPMembers {
+				withdrawn, withdrawalErr := p.withdrawAfterRejectedTCPBatch(ctx, desired, step.routeIndex, &result, err)
+				if withdrawn {
+					return result, withdrawalErr
+				}
+				err = errors.Join(err, withdrawalErr)
+			}
 			return result, &cloud.GraphError{Identity: desired.routes[step.routeIndex].spec.Identity, Err: err}
 		}
 		if step.kind == graphSNIMutation && step.isRestrictiveSNI() {
@@ -1464,10 +1486,10 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 	}
 	actual.floatingIP, err = p.findGatewayFloatingIP(ctx, desired.identity, lb.VipPortID, lb.VipAddress)
 	if err != nil {
-		canWithdraw := isSNIProtocol(desired.protocol) || desired.protocol == cloud.ListenerProtocolHTTP
-		observeSNIPending := isSNIProtocol(desired.protocol) && lb.ProvisioningStatus == "PENDING_UPDATE"
+		canWithdraw := isSNIProtocol(desired.protocol) || desired.protocol == cloud.ListenerProtocolHTTP || desired.protocol == cloud.ListenerProtocolTCP
+		observePending := (isSNIProtocol(desired.protocol) || desired.protocol == cloud.ListenerProtocolTCP) && lb.ProvisioningStatus == "PENDING_UPDATE"
 		if !canWithdraw || desired.spec.Gateway.Disposition != cloud.GraphEnsure ||
-			observation.phase != loadBalancerPhaseActive && !observeSNIPending || ctx.Err() != nil || errors.Is(err, cloud.ErrOwnershipConflict) {
+			observation.phase != loadBalancerPhaseActive && !observePending || ctx.Err() != nil || errors.Is(err, cloud.ErrOwnershipConflict) {
 			return actual, err
 		}
 		// Still prove the Octavia graph so an in-place withdrawal can close
