@@ -12,6 +12,8 @@ All fourteen profile and channel combinations are **UNRUN**. A designated dispos
 | MESH-HTTP | UNRUN | UNRUN |
 | MESH-GRPC | UNRUN | UNRUN |
 
+The signed controller passed all 40 GATEWAY-HTTP Core cases on each channel in separate disposable local kind and Amphora fixtures. Both regional HTTP runs are still UNRUN. [Local Core report and scope](provider/unified-http-core-598db990b3ba/README.md)
+
 The scoped TCP cases ran in a local kind fixture using Octavia’s public API, the stock worker renderer and HAProxy. The full local GATEWAY-TCP Core attempts stopped during the upstream shared HTTPS setup. [Local TCP reports](provider/tcp-upstream.md)
 
 Both mesh Core profiles also ran on ordinary local Kubernetes Services without an enrolled dataplane. The upstream reports record the assertions that failed and the traffic that reached the echo pods. [Local mesh reports](provider/stock-mesh.md)
