@@ -367,9 +367,20 @@ type HTTPWeightedRule struct {
 	Targets   []HTTPWeightedTarget
 }
 
+// TCPConnectionRejection reserves a share of new connections for active rejection.
+type TCPConnectionRejection struct {
+	RejectWeight int `json:"reject_weight"`
+	TotalWeight  int `json:"total_weight"`
+}
+
+func (r TCPConnectionRejection) Valid() bool {
+	return r.TotalWeight > 0 && r.TotalWeight <= 16_000_000 && r.RejectWeight >= 0 && r.RejectWeight <= r.TotalWeight
+}
+
 // RouteSpec describes the traffic configuration owned by one route.
 type RouteSpec struct {
-	BackendRetryBudget *BackendRetryBudget `json:",omitempty"`
+	TCPConnectionRejection *TCPConnectionRejection `json:",omitempty"`
+	BackendRetryBudget     *BackendRetryBudget     `json:",omitempty"`
 	// BackendRetryBudgetPending waits for a reservable Gateway ancestor.
 	BackendRetryBudgetPending bool `json:",omitempty"`
 	Identity                  Identity

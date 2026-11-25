@@ -82,6 +82,8 @@ type Config struct {
 	ClusterTrustBundles *backendtls.ClusterTrustBundles
 	// BackendRetryBudget opts into Octavia budgets for Experimental Service policies.
 	BackendRetryBudget bool
+	// TCPConnectionRejection opts into proportional active rejection on plain TCPRoute.
+	TCPConnectionRejection bool
 	// TelemetryPolicy enables Experimental Gateway tracing on a capable Octavia provider.
 	TelemetryPolicy bool
 	// BackendClientCertificate enables the operator's separate backend client certificate map.
