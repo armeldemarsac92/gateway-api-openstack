@@ -200,7 +200,7 @@ func TestInitialL7RulesRequireExplicitCapabilityOnScopedHTTPS(t *testing.T) {
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			var probes, inventories, posts int
-			batch := scenario.enabled && scenario.advertised && !scenario.singleRule
+			batch := scenario.enabled && scenario.advertised
 			wantAction := "REDIRECT_PREFIX"
 			if scenario.requestRedirect {
 				wantAction = "REDIRECT_REQUEST"
@@ -233,7 +233,7 @@ func TestInitialL7RulesRequireExplicitCapabilityOnScopedHTTPS(t *testing.T) {
 						t.Fatal(err)
 					}
 					nested, hasRules := body.Policy["rules"].([]any)
-					if hasRules != batch || batch && len(nested) < 2 || body.Policy["admin_state_up"] != false ||
+					if hasRules != batch || batch && (len(nested) == 0 || (len(nested) == 1) != scenario.singleRule) || body.Policy["admin_state_up"] != false ||
 						body.Policy["listener_id"] != "https-listener" || body.Policy["action"] != wantAction ||
 						body.Policy["position"] != float64(1) {
 						t.Fatalf("redirect request = %v", body.Policy)
@@ -292,7 +292,7 @@ func TestInitialL7RulesRequireExplicitCapabilityOnScopedHTTPS(t *testing.T) {
 				t.Fatal(err)
 			}
 			wantProbes := 0
-			if scenario.enabled && !scenario.singleRule {
+			if scenario.enabled {
 				wantProbes++
 			}
 			if scenario.requestRedirect {

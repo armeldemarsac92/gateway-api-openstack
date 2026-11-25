@@ -119,6 +119,42 @@ func TestReconcileGatewayGraphBatchesTwoPreparedL7PoliciesOnOneBackend(t *testin
 	}
 }
 
+func TestReconcileGatewayGraphBatchesPathsAndExactHeaderWithoutHostname(t *testing.T) {
+	matches := []cloud.HTTPPathMatch{
+		{PathType: cloud.PathMatchExact, PathValue: "/fallback"},
+		{PathType: cloud.PathMatchExact, PathValue: "/api", Precedence: 1, Headers: []cloud.HTTPHeaderMatch{{Name: "version", Value: "two"}}},
+	}
+	f := prepareHTTPPolicies(t, true, matches...)
+	result, err := f.provider.ReconcileGatewayGraph(t.Context(), f.spec)
+	if err != nil || !result.Outcome.MutationSubmitted || len(f.batch.Policies) != 2 || !slices.Equal(f.requests.mutationPaths(), []string{batchActivationEndpoint}) {
+		t.Fatalf("activation without a hostname: outcome %v, error %v, writes %v", result.Outcome, err, f.requests.mutationPaths())
+	}
+	result, err = f.provider.ReconcileGatewayGraph(t.Context(), f.spec)
+	if err != nil || result.Outcome.State != cloud.OutcomeReady {
+		t.Fatalf("activation readback: outcome %v, error %v", result.Outcome, err)
+	}
+	t.Run("exact header capability unavailable", func(t *testing.T) {
+		f := prepareHTTPPolicies(t, true, matches...)
+		f.exactHeaders = false
+		result, err := f.provider.ReconcileGatewayGraph(t.Context(), f.spec)
+		if err != nil || result.Outcome.State != cloud.OutcomeProgressing || !slices.Equal(f.requests.mutationPaths(), []string{"/lbaas/listeners/listener-1"}) {
+			t.Fatalf("missing exact header capability: outcome %v, error %v, writes %v", result.Outcome, err, f.requests.mutationPaths())
+		}
+	})
+	t.Run("regional capabilities withdrawn after listener check", func(t *testing.T) {
+		f := prepareHTTPPolicies(t, true, matches...)
+		f.withdrawAfterDiscovery = true
+		result, err := f.provider.ReconcileGatewayGraph(t.Context(), f.spec)
+		if err != nil || result.Outcome.State != cloud.OutcomeProgressing || len(f.requests.mutationPaths()) != 0 {
+			t.Fatalf("withdrawal during activation: outcome %v, error %v, writes %v", result.Outcome, err, f.requests.mutationPaths())
+		}
+		_, err = f.provider.ReconcileGatewayGraph(t.Context(), f.spec)
+		if err != nil || !slices.Equal(f.requests.mutationPaths(), []string{"/lbaas/listeners/listener-1"}) {
+			t.Fatalf("listener withdrawal: error %v, writes %v", err, f.requests.mutationPaths())
+		}
+	})
+}
+
 func TestReconcileGatewayGraphHoldsL7ActivationAfterGraphDrift(t *testing.T) {
 	for _, name := range []string{"reassigned listener", "updated member", "missing member flags"} {
 		t.Run(name, func(t *testing.T) {
@@ -246,17 +282,19 @@ func assertSinglePolicyActivation(t *testing.T, f *preparedHTTPPolicyFixture) {
 }
 
 type preparedHTTPPolicyFixture struct {
-	spec            cloud.GatewayGraphSpec
-	provider        *Provider
-	requests        gatewayTransitionRequests
-	batch           octavia.PolicyActivationBatch
-	advertised      bool
-	discoveryStatus int
-	getStatus       int
-	postStatus      int
-	revisionSalt    int
-	changeSnapshot  func([]map[string]any) []map[string]any
-	changeGraph     func(map[string]any)
+	spec                   cloud.GatewayGraphSpec
+	provider               *Provider
+	requests               gatewayTransitionRequests
+	batch                  octavia.PolicyActivationBatch
+	advertised             bool
+	exactHeaders           bool
+	withdrawAfterDiscovery bool
+	discoveryStatus        int
+	getStatus              int
+	postStatus             int
+	revisionSalt           int
+	changeSnapshot         func([]map[string]any) []map[string]any
+	changeGraph            func(map[string]any)
 }
 
 func (f *preparedHTTPPolicyFixture) revision(id string) string {
@@ -268,7 +306,7 @@ func preparedHTTPPolicies(t *testing.T) *preparedHTTPPolicyFixture {
 	return prepareHTTPPolicies(t, false)
 }
 
-func prepareHTTPPolicies(t *testing.T, sharedBackend bool) *preparedHTTPPolicyFixture {
+func prepareHTTPPolicies(t *testing.T, sharedBackend bool, matches ...cloud.HTTPPathMatch) *preparedHTTPPolicyFixture {
 	t.Helper()
 	id := safetyTestIdentity(t)
 	f := &preparedHTTPPolicyFixture{spec: completeGraphSpec(id), advertised: true, getStatus: http.StatusOK, postStatus: http.StatusNoContent}
@@ -288,6 +326,10 @@ func prepareHTTPPolicies(t *testing.T, sharedBackend bool) *preparedHTTPPolicyFi
 		if sharedBackend {
 			route.HTTPBackends[0].Matches = append(route.HTTPBackends[0].Matches,
 				cloud.HTTPPathMatch{Hostname: route.Hostname, PathType: route.PathType, PathValue: "/api-2", Precedence: 1})
+		}
+		if len(matches) != 0 {
+			route.HTTPBackends[0].Matches = matches
+			f.exactHeaders = slices.ContainsFunc(matches, func(match cloud.HTTPPathMatch) bool { return len(match.Headers) != 0 })
 		}
 		route.Hostname, route.PathType, route.PathValue, route.Members = "", "", "", nil
 	}
@@ -344,6 +386,12 @@ func prepareHTTPPolicies(t *testing.T, sharedBackend bool) *preparedHTTPPolicyFi
 			if f.advertised {
 				capabilities = append(capabilities, octavia.GatewayCapabilityL7PolicyBatchActivation)
 			}
+			if f.exactHeaders {
+				capabilities = append(capabilities, octavia.GatewayCapabilityHTTPHeaderExact)
+			}
+			if f.withdrawAfterDiscovery {
+				f.exactHeaders, f.advertised = false, false
+			}
 			safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": capabilities})
 		case r.Method == http.MethodGet && path == batchActivationEndpoint:
 			if f.getStatus != http.StatusOK {
@@ -399,6 +447,13 @@ func prepareHTTPPolicies(t *testing.T, sharedBackend bool) *preparedHTTPPolicyFi
 				}
 			}
 			w.WriteHeader(f.postStatus)
+		case r.Method == http.MethodPut && path == "/lbaas/listeners/listener-1":
+			var body struct{ Listener map[string]any }
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Listener["admin_state_up"] != false {
+				t.Fatalf("expected listener withdrawal, got %v, %v", body, err)
+			}
+			listener["admin_state_up"] = false
+			safetyWriteJSON(t, w, map[string]any{"listener": listener})
 		case r.Method == http.MethodPut && strings.HasPrefix(path, "/lbaas/l7policies/"):
 			id := strings.TrimPrefix(path, "/lbaas/l7policies/")
 			enable(id)
@@ -408,6 +463,7 @@ func prepareHTTPPolicies(t *testing.T, sharedBackend bool) *preparedHTTPPolicyFi
 		}
 	}), &f.requests)
 	f.provider.l7PolicyBatchActivation = true
+	f.provider.httpHeaderExact = f.exactHeaders
 	desired, err := f.provider.buildDesiredGatewayGraph(f.spec)
 	if err != nil {
 		t.Fatal(err)
@@ -442,7 +498,7 @@ func prepareHTTPPolicies(t *testing.T, sharedBackend bool) *preparedHTTPPolicyFi
 				ruleID := fmt.Sprintf("rule-%d-%d", wanted.position, j+1)
 				rules[policyID] = append(rules[policyID], map[string]any{
 					"id": ruleID, "project_id": "project-a", "type": rule.ruleType, "compare_type": rule.compareType,
-					"value": rule.value, "invert": rule.invert, "admin_state_up": true, "provisioning_status": "ACTIVE",
+					"key": rule.key, "value": rule.value, "invert": rule.invert, "admin_state_up": true, "provisioning_status": "ACTIVE",
 					"tags": safetyRouteTags(t, part.identity, rule.role),
 				})
 				ruleRefs = append(ruleRefs, map[string]string{"id": ruleID})

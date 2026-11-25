@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-Weighted Experimental route rules retained per-Service endpoint affinity through a ReferenceGrant change. [Build record](image.json) · [HTTP and gRPC receipts](provider/weighted-route-session-affinity/receipt.json)
+The controller can activate prepared path matches on a shared HTTP listener and check their rule predicates. [Build record](image.json) · [Standard qualification](provider/initial-http-predicates/receipt.json)
+
+Weighted Experimental route rules retained per-Service endpoint affinity through a ReferenceGrant change. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-d0cbbc961e58ced3e5c4df01ab33fd9b6d4c7d6a/image.json) · [HTTP and gRPC receipts](provider/weighted-route-session-affinity/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-d0cbbc961e58ced3e5c4df01ab33fd9b6d4c7d6a)
 
 Experimental route rules with one Service reused an endpoint with an HTTP cookie or an HTTP or gRPC header. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-59871699725eddd20a4def4096f9f03c926c85a7/image.json) · [Local session and lifecycle results](provider/route-rule-session-persistence/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-59871699725eddd20a4def4096f9f03c926c85a7)
 
