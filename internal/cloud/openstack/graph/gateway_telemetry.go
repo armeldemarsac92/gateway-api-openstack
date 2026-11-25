@@ -24,7 +24,9 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	openstackidentity "github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/identity"
@@ -38,12 +40,26 @@ const (
 	telemetryListenerTag    = "gw-api-listener-otlp-v1"
 	telemetryPoolTag        = "gw-api-otlp-collector-pool-v1"
 	telemetryPoolNamePrefix = "gateway-api-otlp-collector-"
+	telemetryExportPoolTag  = "gw-api-listener-otlp-pool-"
+	telemetryRetryTag       = "gw-api-listener-otlp-retry-"
+	telemetryRetryInterval  = 15 * time.Second
+	telemetryALPN           = "http/1.1"
 )
 
 type telemetryPool struct {
 	observedAuthPool
 	tls octavia.PoolBackendTLS
 	h2c bool
+}
+
+// TelemetryBackendTLSAvailable checks the public contract used by the
+// collector when reporting its BackendTLSPolicy ancestor.
+func (p *Provider) TelemetryBackendTLSAvailable(ctx context.Context, requireSAN bool) (bool, error) {
+	if !p.backendTLSPolicy || p.backendCA == nil {
+		return false, nil
+	}
+	required := append([]string{octavia.GatewayCapabilityListenerOTLPTracing}, backendTLSCapabilities(false, requireSAN)...)
+	return p.amphoraCapabilityAvailable(ctx, required...)
 }
 
 func telemetryPoolName(wanted *cloud.GatewayTelemetry, clientCertificate string) string {
@@ -91,8 +107,7 @@ func omitTelemetryPoolsFromRoutes(lb *octavia.LoadBalancer, inventory []pools.Po
 			continue
 		}
 		if len(expected) != 8 || !openstackidentity.HasAllTags(pool.Tags, expected) || pool.ProjectID != lb.ProjectID || hasRouteOwnership(pool.Tags) ||
-			validateBoundPoolParent(pool, lb.ID, cloud.ListenerProtocolHTTP) != nil || ids[pool.ID] ||
-			!strings.HasPrefix(pool.Name, telemetryPoolNamePrefix) {
+			validateBoundPoolParent(pool, lb.ID, cloud.ListenerProtocolHTTP) != nil || ids[pool.ID] {
 			return nil, nil, fmt.Errorf("%w: invalid Octavia collector pool ownership", cloud.ErrOwnershipConflict)
 		}
 		ids[pool.ID] = true
@@ -118,6 +133,8 @@ type telemetryGraph struct {
 	listeners    []listeners.Listener
 	tracing      map[string]octavia.ListenerOTLPTracingObservation
 	refs         map[string]bool
+	poolProof    map[string]bool
+	listedPools  map[string]bool
 	unverified   bool
 }
 
@@ -137,6 +154,13 @@ func (p *Provider) reconcileGatewayTelemetry(ctx context.Context, spec cloud.Gat
 		return ready, err
 	}
 	if discovered == nil {
+		if spec.Gateway.TelemetryPolicyPresent {
+			var err error
+			ready.TelemetryUnsupported, ready.TelemetryCapabilityUnavailable, err = p.verifyTelemetryCapabilities(ctx, "amphora", spec.Gateway, wanted)
+			if err != nil || ready.TelemetryUnsupported != "" {
+				return ready, err
+			}
+		}
 		if wanted != nil {
 			return p.telemetryPending("Waiting for the Gateway load balancer"), nil
 		}
@@ -157,36 +181,65 @@ func (p *Provider) reconcileGatewayTelemetry(ctx context.Context, spec cloud.Gat
 	if balance.phase != loadBalancerPhaseActive {
 		return telemetryResult(balance.outcome), nil
 	}
-	inventory, _, err := p.listGatewayListeners(ctx, lb)
-	if err != nil {
+	inventory, err := p.octavia.ListTelemetryListenerInventory(ctx, listeners.ListOpts{LoadbalancerID: lb.ID, ProjectID: p.projectID})
+	if err != nil && len(inventory.Items) == 0 {
 		return ready, err
 	}
-	if err := crossCheckCompleteChildInventory("load balancer", lb.ID, "listener", lb.Listeners, inventory.Items, func(listener listeners.Listener) string { return listener.ID }); err != nil {
-		return ready, err
-	}
-	graph := telemetryGraph{identity: identity, spec: spec, loadBalancer: lb, tracing: inventory.OTLPTracing, refs: map[string]bool{}}
+	graph := telemetryGraph{identity: identity, spec: spec, loadBalancer: lb, tracing: inventory.OTLPTracing,
+		refs: map[string]bool{}, poolProof: map[string]bool{}, listedPools: map[string]bool{}}
+	graph.unverified = err != nil || !inventory.DefaultPoolsObserved ||
+		crossCheckCompleteChildInventory("load balancer", lb.ID, "listener", lb.Listeners, inventory.Items, func(listener listeners.Listener) string { return listener.ID }) != nil
+	counts := make(map[string]int, len(inventory.Items))
 	for _, listener := range inventory.Items {
-		if !eligibleTelemetryListener(listener.Protocol) {
-			continue
-		}
-		if listener.ProjectID != p.projectID || len(listener.Loadbalancers) != 1 ||
-			listener.Loadbalancers[0].ID != lb.ID || !identity.MatchesGateway(listener.Tags, roleListener) {
-			return ready, fmt.Errorf("%w: listener tracing could not prove listener %s", cloud.ErrOwnershipConflict, listener.ID)
-		}
-		graph.listeners = append(graph.listeners, listener)
-		if current := graph.tracing[listener.ID]; current.Value != nil {
+		counts[listener.ID]++
+	}
+	for _, listener := range inventory.Items {
+		current, present := graph.tracing[listener.ID]
+		if current.Value != nil {
 			graph.refs[current.Value.CollectorPoolID] = true
 		}
-		graph.unverified = graph.unverified || unknownTelemetryReadback(listener, graph.tracing)
+		unknownStatus := current.Status != "" && current.Status != "ACTIVE" && current.Status != "ERROR"
+		graph.unverified = graph.unverified || present && (!current.Readable || current.StatusMalformed || unknownStatus)
+		if !eligibleTelemetryListener(listener.Protocol) {
+			graph.unverified = graph.unverified || listener.Protocol == "" || current.Value != nil
+			continue
+		}
+		if listener.ID == "" || counts[listener.ID] != 1 || listener.ProjectID != p.projectID || len(listener.Loadbalancers) != 1 ||
+			listener.Loadbalancers[0].ID != lb.ID || !identity.MatchesGateway(listener.Tags, roleListener) || hasRouteOwnership(listener.Tags) {
+			graph.unverified = true
+			continue
+		}
+		graph.listeners = append(graph.listeners, listener)
+		if listener.DefaultPoolID != "" {
+			graph.refs[listener.DefaultPoolID] = true
+		}
 	}
 	slices.SortFunc(graph.listeners, func(a, b listeners.Listener) int { return cmp.Compare(a.ID, b.ID) })
-	return p.planGatewayTelemetry(ctx, graph, wanted)
+	owned, poolErr := p.observeTelemetryPools(ctx, &graph)
+	return p.planGatewayTelemetry(ctx, graph, wanted, owned, poolErr)
 }
 
-func unknownTelemetryReadback(listener listeners.Listener, observations map[string]octavia.ListenerOTLPTracingObservation) bool {
-	current, present := observations[listener.ID]
-	return present && !current.Readable ||
-		(current.Value != nil || slices.Contains(listener.Tags, telemetryListenerTag)) && listener.ProvisioningStatus != "ACTIVE"
+func (graph telemetryGraph) ownsExport(frontend listeners.Listener, config *octavia.ListenerOTLPTracing) bool {
+	if config == nil || !slices.Contains(frontend.Tags, telemetryListenerTag) {
+		return false
+	}
+	// Previous controllers supplied the general marker and an owned pool.
+	// New writes also name the pool in the listener tags, allowing withdrawal
+	// when the pool inventory is unavailable. A proven foreign pool wins.
+	var recorded string
+	for _, tag := range frontend.Tags {
+		if poolID, found := strings.CutPrefix(tag, telemetryExportPoolTag); found {
+			if recorded != "" || poolID == "" {
+				return false
+			}
+			recorded = poolID
+		}
+	}
+	if recorded == "" {
+		return graph.poolProof[config.CollectorPoolID]
+	}
+	return recorded == config.CollectorPoolID &&
+		(graph.poolProof[recorded] || !graph.listedPools[recorded])
 }
 
 func telemetryResult(outcome cloud.Outcome) cloud.GatewayGraphResult {
@@ -207,28 +260,54 @@ func (p *Provider) applyTelemetryMutation(ctx context.Context, graph telemetryGr
 	return result, classifyOctaviaMutationError(err)
 }
 
-func (p *Provider) updateListenerTelemetry(ctx context.Context, graph telemetryGraph, frontend listeners.Listener, value *octavia.ListenerOTLPTracing) (cloud.GatewayGraphResult, error) {
+func (p *Provider) updateListenerTelemetry(ctx context.Context, graph telemetryGraph, frontend listeners.Listener, value *octavia.ListenerOTLPTracing, retry bool) (cloud.GatewayGraphResult, error) {
 	return p.applyTelemetryMutation(ctx, graph, "Waiting for Octavia listener tracing readback", func() error {
-		tags := slices.Clone(frontend.Tags)
+		tags := slices.DeleteFunc(slices.Clone(frontend.Tags), func(tag string) bool {
+			return strings.HasPrefix(tag, telemetryExportPoolTag) || strings.HasPrefix(tag, telemetryRetryTag)
+		})
 		if !slices.Contains(tags, telemetryListenerTag) {
 			tags = append(tags, telemetryListenerTag)
 		}
+		recorded := value
+		if recorded == nil {
+			recorded = graph.tracing[frontend.ID].Value
+		}
+		if recorded != nil {
+			tags = append(tags, telemetryExportPoolTag+recorded.CollectorPoolID)
+		}
+		if retry {
+			tags = append(tags, telemetryRetryTag+strconv.FormatInt(time.Now().Add(telemetryRetryInterval).Unix(), 10))
+		}
 		return p.octavia.SetListenerOTLPTracing(ctx, frontend.ID, value, tags)
 	})
+}
+
+func telemetryRetryRemaining(tags []string, now time.Time) time.Duration {
+	for _, tag := range tags {
+		if raw, found := strings.CutPrefix(tag, telemetryRetryTag); found {
+			until, err := strconv.ParseInt(raw, 10, 64)
+			wait := time.Unix(until, 0).Sub(now)
+			if err == nil && wait > 0 && wait <= telemetryRetryInterval {
+				return wait
+			}
+		}
+	}
+	return 0
 }
 
 func (p *Provider) telemetryWithdrawal(ctx context.Context, graph telemetryGraph, retain func(listeners.Listener, *octavia.ListenerOTLPTracing) bool) (cloud.GatewayGraphResult, bool, error) {
 	waiting := false
 	for _, frontend := range graph.listeners {
 		current := graph.tracing[frontend.ID]
-		if current.Value == nil && !unknownTelemetryReadback(frontend, graph.tracing) || retain != nil && retain(frontend, current.Value) {
+		if current.Value == nil || !graph.ownsExport(frontend, current.Value) ||
+			retain != nil && retain(frontend, current.Value) {
 			continue
 		}
 		if frontend.ProvisioningStatus != "ACTIVE" && frontend.ProvisioningStatus != "ERROR" {
 			waiting = true
 			continue
 		}
-		result, err := p.updateListenerTelemetry(ctx, graph, frontend, nil)
+		result, err := p.updateListenerTelemetry(ctx, graph, frontend, nil, false)
 		return result, true, err
 	}
 	if waiting {
@@ -237,57 +316,73 @@ func (p *Provider) telemetryWithdrawal(ctx context.Context, graph telemetryGraph
 	return cloud.GatewayGraphResult{}, false, nil
 }
 
-func (p *Provider) planGatewayTelemetry(ctx context.Context, graph telemetryGraph, wanted *cloud.GatewayTelemetry) (cloud.GatewayGraphResult, error) {
+func (p *Provider) planGatewayTelemetry(ctx context.Context, graph telemetryGraph, wanted *cloud.GatewayTelemetry, owned map[string]telemetryPool, poolErr error) (result cloud.GatewayGraphResult, retErr error) {
 	var unsupported string
 	var dependencyErr error
-	if wanted != nil {
-		var required = []string{octavia.GatewayCapabilityListenerOTLPTracing}
-		if tls := wanted.BackendTLS; tls != nil {
-			if !p.backendTLSPolicy || p.backendCA == nil || !validBackendTLS(tls) || graph.spec.Gateway.BackendClientCertificate.Denied || !graph.spec.Gateway.BackendCAOwned {
-				unsupported = "The collector requires authenticated TLS and an authorized Gateway CA store"
-			}
-			required = append(required, backendTLSCapabilities(false, len(tls.SubjectAltNames) != 0)...)
-		}
-		if unsupported == "" {
-			err := p.octavia.VerifyGatewayCapabilities(ctx, graph.loadBalancer.Provider, required...)
-			var missing *octavia.MissingGatewayCapability
-			switch {
-			case errors.As(err, &missing):
-				unsupported = "Regional Octavia does not advertise " + missing.Capability
-			case gophercloud.ResponseCodeIs(err, http.StatusNotFound):
-				unsupported = "Regional Octavia does not advertise listener tracing"
-			case err != nil:
-				dependencyErr = err
-			}
-		}
+	unavailable := false
+	defer func() {
+		result.TelemetryUnsupported = unsupported
+		result.TelemetryCapabilityUnavailable = unavailable
+	}()
+	if wanted != nil || graph.spec.Gateway.TelemetryPolicyPresent {
+		unsupported, unavailable, dependencyErr = p.verifyTelemetryCapabilities(ctx, graph.loadBalancer.Provider, graph.spec.Gateway, wanted)
 	}
-	if unsupported != "" || dependencyErr != nil {
-		wanted = nil
-	}
-	if wanted == nil {
+	if wanted == nil || unsupported != "" || dependencyErr != nil || poolErr != nil {
 		if result, changed, err := p.telemetryWithdrawal(ctx, graph, nil); changed {
 			return result, err
 		}
+		if poolErr != nil {
+			return cloud.GatewayGraphResult{}, poolErr
+		}
+		owned, err := p.observeTelemetryPoolChildren(ctx, graph, owned)
+		if err != nil {
+			return cloud.GatewayGraphResult{}, err
+		}
+		if result, changed, err := p.retireTelemetryPools(ctx, graph, owned, ""); changed {
+			return result, err
+		}
+		return telemetryResult(cloud.ReadyOutcome()), dependencyErr
 	}
-
-	owned, err := p.observeTelemetryPools(ctx, graph)
+	possible := owned[telemetryPoolName(wanted, graph.spec.Gateway.BackendClientCertificate.Reference)].pool.ID
+	if result, changed, err := p.telemetryWithdrawal(ctx, graph, func(listener listeners.Listener, current *octavia.ListenerOTLPTracing) bool {
+		return telemetryListenerWanted(listener, wanted) && current.CollectorPoolID == possible
+	}); changed {
+		return result, err
+	}
+	owned, err := p.observeTelemetryPoolChildren(ctx, graph, owned)
 	if err != nil {
 		if result, changed, withdrawalErr := p.telemetryWithdrawal(ctx, graph, nil); changed {
 			return result, withdrawalErr
 		}
 		return cloud.GatewayGraphResult{}, err
 	}
-	ready := telemetryResult(cloud.ReadyOutcome())
-	ready.TelemetryUnsupported = unsupported
-	if wanted == nil {
-		result, changed, err := p.retireTelemetryPools(ctx, graph, owned, "")
-		if changed {
-			result.TelemetryUnsupported = unsupported
-			return result, err
-		}
-		return ready, dependencyErr
-	}
 	return p.convergeGatewayTelemetry(ctx, graph, owned, wanted)
+}
+
+func (p *Provider) verifyTelemetryCapabilities(ctx context.Context, provider string, gateway cloud.GatewayGraphNode, wanted *cloud.GatewayTelemetry) (string, bool, error) {
+	required := []string{octavia.GatewayCapabilityListenerOTLPTracing}
+	var missingTrust bool
+	if wanted != nil && wanted.BackendTLS != nil {
+		tls := wanted.BackendTLS
+		missingTrust = !p.backendTLSPolicy || p.backendCA == nil || !validBackendTLS(tls) || gateway.BackendClientCertificate.Denied || !gateway.BackendCAOwned
+		if !missingTrust {
+			required = append(required, backendTLSCapabilities(false, len(tls.SubjectAltNames) != 0)...)
+		}
+	}
+	err := p.octavia.VerifyGatewayCapabilities(ctx, provider, required...)
+	var missing *octavia.MissingGatewayCapability
+	switch {
+	case errors.As(err, &missing):
+		return "Regional Octavia does not advertise " + missing.Capability, missing.Capability == octavia.GatewayCapabilityListenerOTLPTracing, nil
+	case gophercloud.ResponseCodeIs(err, http.StatusNotFound):
+		return "Regional Octavia does not advertise listener tracing", true, nil
+	case err != nil:
+		return "", false, err
+	case missingTrust:
+		return "The collector requires authenticated TLS and an authorized Gateway CA store", false, nil
+	default:
+		return "", false, nil
+	}
 }
 
 func (p *Provider) convergeGatewayTelemetry(ctx context.Context, graph telemetryGraph, owned map[string]telemetryPool, wanted *cloud.GatewayTelemetry) (cloud.GatewayGraphResult, error) {
@@ -313,7 +408,7 @@ func (p *Provider) convergeGatewayTelemetry(ctx context.Context, graph telemetry
 	active = active && !waiting && nextMember == nil
 	retain := func(listener listeners.Listener, current *octavia.ListenerOTLPTracing) bool {
 		return active && securityErr == nil && telemetryListenerWanted(listener, wanted) && current != nil &&
-			current.CollectorPoolID == pool.pool.ID && !unknownTelemetryReadback(listener, graph.tracing)
+			current.CollectorPoolID == pool.pool.ID
 	}
 	if result, changed, err := p.telemetryWithdrawal(ctx, graph, retain); changed {
 		return result, err
@@ -336,20 +431,47 @@ func (p *Provider) convergeGatewayTelemetry(ctx context.Context, graph telemetry
 	}
 	wire := octavia.ListenerOTLPTracing{CollectorPoolID: pool.pool.ID, ServiceName: wanted.ServiceName, SpanName: wanted.SpanName}
 	observed := 0
+	var retryAfter time.Duration
 	for _, frontend := range graph.listeners {
-		if !telemetryListenerWanted(frontend, wanted) || frontend.ProvisioningStatus != "ACTIVE" {
+		if !telemetryListenerWanted(frontend, wanted) {
 			continue
 		}
-		current := graph.tracing[frontend.ID]
-		if current.Value == nil || *current.Value != wire {
-			return p.updateListenerTelemetry(ctx, graph, frontend, &wire)
+		current, present := graph.tracing[frontend.ID]
+		if present && (!current.Readable || current.StatusMalformed) || current.Status == "PENDING_UPDATE" ||
+			current.Value != nil && !graph.ownsExport(frontend, current.Value) {
+			continue
 		}
-		observed++
+		if current.Status != "ACTIVE" && current.Status != "ERROR" && (current.Value != nil || current.Status != "") {
+			continue
+		}
+		canWrite := frontend.ProvisioningStatus == "ACTIVE" || frontend.ProvisioningStatus == "ERROR"
+		if current.Value == nil || *current.Value != wire {
+			if !canWrite {
+				continue
+			}
+			return p.updateListenerTelemetry(ctx, graph, frontend, &wire, false)
+		}
+		switch current.Status {
+		case "ACTIVE":
+			observed++
+		case "ERROR":
+			wait := telemetryRetryRemaining(frontend.Tags, time.Now())
+			if wait == 0 && canWrite {
+				return p.updateListenerTelemetry(ctx, graph, frontend, &wire, true)
+			}
+			if wait > 0 && (retryAfter == 0 || wait < retryAfter) {
+				retryAfter = wait
+			}
+		}
 	}
+	if retryAfter > 0 {
+		return telemetryResult(cloud.ProgressingOutcome("Waiting to retry the Octavia listener exporter", retryAfter)), nil
+	}
+
 	if result, changed, err := p.retireTelemetryPools(ctx, graph, owned, name); changed {
 		return result, err
 	}
-	if observed != len(wanted.Listeners) {
+	if graph.unverified || observed != len(wanted.Listeners) {
 		return p.telemetryPending("Waiting for all HTTP listeners to confirm tracing"), nil
 	}
 	return telemetryResult(cloud.ReadyOutcome()), nil
@@ -375,6 +497,7 @@ func telemetryPoolTLSMatches(pool telemetryPool, wanted *cloud.BackendTLSValidat
 		return !hasBackendTLSSettings(pool.pool, pool.tls) && !hasObservedBackendTLS(pool.pool, pool.tls)
 	}
 	return pool.tls.Complete() && pool.pool.TLSEnabled && pool.tls.Hostname == wanted.Hostname &&
+		slices.Equal(pool.pool.ALPNProtocols, []string{telemetryALPN}) &&
 		verifiedRef != "" && pool.pool.CATLSContainerRef == verifiedRef && pool.pool.TLSContainerRef == certificate && pool.pool.CRLContainerRef == "" &&
 		!pool.tls.RequireH2 && slices.Contains(pool.pool.Tags, backendTLSRevisionTag(wanted)) &&
 		!differentBackendTLSRevision(pool.pool.Tags, backendTLSRevisionTag(wanted)) &&
@@ -403,6 +526,7 @@ func (p *Provider) createTelemetryPool(ctx context.Context, graph telemetryGraph
 			})
 		}
 		request.TLSEnabled = true
+		request.ALPNProtocols = []string{telemetryALPN}
 		request.CATLSContainerRef = revision.Reference()
 		request.TLSContainerRef = graph.spec.Gateway.BackendClientCertificate.Reference
 		request.BackendTLSHostname = tls.Hostname
@@ -434,41 +558,58 @@ func (p *Provider) changeTelemetryMember(ctx context.Context, graph telemetryGra
 	})
 }
 
-func (p *Provider) observeTelemetryPools(ctx context.Context, graph telemetryGraph) (map[string]telemetryPool, error) {
-	inventory, err := p.listGatewayPoolInventory(ctx, graph.loadBalancer)
+func (p *Provider) observeTelemetryPools(ctx context.Context, graph *telemetryGraph) (map[string]telemetryPool, error) {
+	lb := graph.loadBalancer
+	inventory, err := p.octavia.ListPoolInventory(ctx, pools.ListOpts{LoadbalancerID: lb.ID, ProjectID: p.projectID})
 	if err != nil {
 		return nil, err
+	}
+	inventoryErr := crossCheckCompleteChildInventory("load balancer", lb.ID, "pool", lb.Pools, inventory.Items, func(pool pools.Pool) string { return pool.ID })
+	counts := make(map[string]int, len(inventory.Items))
+	for _, pool := range inventory.Items {
+		graph.listedPools[pool.ID] = true
+		counts[pool.ID]++
 	}
 	result := map[string]telemetryPool{}
 	for _, pool := range inventory.Items {
 		if !isTelemetryPool(pool) {
 			continue
 		}
-		if err := p.validatePoolParent(pool, graph.loadBalancer.ID, rolePool, graph.identity); err != nil {
-			return nil, err
+		if counts[pool.ID] != 1 || !graph.identity.MatchesGateway(pool.Tags, rolePool) || pool.ProjectID != p.projectID ||
+			hasRouteOwnership(pool.Tags) || validateBoundPoolParent(pool, lb.ID, cloud.ListenerProtocolHTTP) != nil {
+			inventoryErr = errors.Join(inventoryErr, fmt.Errorf("%w: invalid Octavia collector pool ownership", cloud.ErrOwnershipConflict))
+			continue
 		}
-		if pool.ProjectID != p.projectID || !strings.HasPrefix(pool.Name, telemetryPoolNamePrefix) || hasRouteOwnership(pool.Tags) ||
-			result[pool.Name].pool.ID != "" || pool.MonitorID != "" || validateBoundPoolParent(pool, graph.loadBalancer.ID, cloud.ListenerProtocolHTTP) != nil {
-			return nil, fmt.Errorf("%w: invalid Octavia collector pool inventory", cloud.ErrOwnershipConflict)
-		}
-		if slices.ContainsFunc(graph.listeners, func(frontend listeners.Listener) bool { return frontend.DefaultPoolID == pool.ID }) {
-			return nil, fmt.Errorf("%w: the Octavia collector pool is a listener default", cloud.ErrOwnershipConflict)
+		graph.poolProof[pool.ID] = true
+		if result[pool.Name].pool.ID != "" || pool.MonitorID != "" ||
+			slices.ContainsFunc(graph.listeners, func(frontend listeners.Listener) bool { return frontend.DefaultPoolID == pool.ID }) {
+			inventoryErr = errors.Join(inventoryErr, fmt.Errorf("%w: invalid Octavia collector pool attachments", cloud.ErrOwnershipConflict))
+			continue
 		}
 		for _, ref := range pool.Listeners {
+			graph.refs[pool.ID] = true
 			observation := graph.tracing[ref.ID]
 			if observation.Value == nil || observation.Value.CollectorPoolID != pool.ID {
-				return nil, fmt.Errorf("%w: the Octavia collector pool has an unproven listener reference", cloud.ErrOwnershipConflict)
+				graph.unverified = true
 			}
 		}
-		members, err := p.observeAuxiliaryHTTPPoolMembers(ctx, graph.identity, pool, telemetryPoolTag)
+		tls := inventory.BackendTLS[pool.ID]
+		result[pool.Name] = telemetryPool{observedAuthPool: observedAuthPool{pool: pool, admin: tls.AdminObserved},
+			tls: tls, h2c: inventory.BackendH2C[pool.ID]}
+	}
+	return result, inventoryErr
+}
+
+func (p *Provider) observeTelemetryPoolChildren(ctx context.Context, graph telemetryGraph, owned map[string]telemetryPool) (map[string]telemetryPool, error) {
+	for name, observation := range owned {
+		members, err := p.observeAuxiliaryHTTPPoolMembers(ctx, graph.identity, observation.pool, telemetryPoolTag)
 		if err != nil {
 			return nil, err
 		}
-		tls := inventory.BackendTLS[pool.ID]
-		result[pool.Name] = telemetryPool{observedAuthPool: observedAuthPool{pool: pool, members: members, admin: tls.AdminObserved},
-			tls: tls, h2c: inventory.BackendH2C[pool.ID]}
+		observation.members = members
+		owned[name] = observation
 	}
-	return result, nil
+	return owned, nil
 }
 
 func (p *Provider) retireTelemetryPools(ctx context.Context, graph telemetryGraph, owned map[string]telemetryPool, keep string) (cloud.GatewayGraphResult, bool, error) {
@@ -481,7 +622,7 @@ func (p *Provider) retireTelemetryPools(ctx context.Context, graph telemetryGrap
 	slices.Sort(names)
 	for _, name := range names {
 		pool := owned[name]
-		if graph.unverified || graph.refs[pool.pool.ID] || len(pool.pool.Listeners) != 0 {
+		if graph.unverified || graph.refs[pool.pool.ID] || pool.pool.Listeners == nil || len(pool.pool.Listeners) != 0 {
 			continue
 		}
 		if step := listenerAuthPoolRemoval(pool.observedAuthPool); step != nil {

@@ -72,7 +72,6 @@ func (s *Service) ListListenerInventory(ctx context.Context, opts listeners.List
 			TCPTLSMixedMode     json.RawMessage `json:"tcp_tls_mixed_mode"`
 			SNICertificates     *[]string       `json:"sni_container_refs"`
 			RequestFilters      json.RawMessage `json:"request_filter_sections"`
-			OTLPTracing         json.RawMessage `json:"otlp_tracing"`
 			VirtualHosts        json.RawMessage `json:"https_virtual_hosts"`
 			DefaultHTTPResponse *struct {
 				StatusCode int `json:"status_code"`
@@ -133,12 +132,6 @@ func (s *Service) ListListenerInventory(ctx context.Context, opts listeners.List
 				inventory.RequestFilters = make(map[string]ListenerRequestFilterObservation)
 			}
 			inventory.RequestFilters[item.ID] = decodeListenerRequestFilters(observed.RequestFilters)
-		}
-		if observed.OTLPTracing != nil {
-			if inventory.OTLPTracing == nil {
-				inventory.OTLPTracing = make(map[string]ListenerOTLPTracingObservation)
-			}
-			inventory.OTLPTracing[item.ID] = decodeListenerOTLPTracing(observed.OTLPTracing)
 		}
 		if observed.VirtualHosts != nil {
 			if inventory.HTTPSVirtualHosts == nil {

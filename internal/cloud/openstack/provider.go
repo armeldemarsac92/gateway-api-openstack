@@ -67,6 +67,11 @@ func (p *Provider) BackendTLSAvailable(ctx context.Context) (bool, error) {
 	return p.graph.BackendTLSAvailable(ctx)
 }
 
+// TelemetryBackendTLSAvailable discovers authenticated HTTP/1.1 collector support.
+func (p *Provider) TelemetryBackendTLSAvailable(ctx context.Context, requireSAN bool) (bool, error) {
+	return p.graph.TelemetryBackendTLSAvailable(ctx, requireSAN)
+}
+
 // TCPBackendTLSAvailable discovers authenticated backend TLS for TLSRoute termination.
 func (p *Provider) TCPBackendTLSAvailable(ctx context.Context) (bool, error) {
 	return p.graph.TCPBackendTLSAvailable(ctx)

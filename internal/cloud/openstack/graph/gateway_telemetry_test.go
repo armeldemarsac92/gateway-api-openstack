@@ -24,7 +24,9 @@ import (
 	"testing"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/backendca"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
+	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/pools"
 	"github.com/stretchr/testify/require"
 )
 
@@ -58,6 +60,7 @@ func TestTelemetryGatewayReconcileUpdatesOnlyTraceExportsAndOwnedCollector(t *te
 	var pool, member map[string]any
 	var calls []string
 	capable := true
+	exporterState := "ACTIVE"
 	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		request := r.Method + " " + r.URL.Path
 		if r.Method != http.MethodGet {
@@ -123,6 +126,7 @@ func TestTelemetryGatewayReconcileUpdatesOnlyTraceExportsAndOwnedCollector(t *te
 			listener := frontends[r.URL.Path[len("/lbaas/listeners/"):]]
 			listener["otlp_tracing"] = body.Listener["otlp_tracing"]
 			listener["tags"] = body.Listener["tags"]
+			listener["otlp_tracing_status"] = exporterState
 			w.WriteHeader(http.StatusAccepted)
 			safetyWriteJSON(t, w, map[string]any{"listener": listener})
 		case "DELETE /lbaas/pools/" + poolID + "/members/collector":
@@ -157,14 +161,92 @@ func TestTelemetryGatewayReconcileUpdatesOnlyTraceExportsAndOwnedCollector(t *te
 	require.Equal(t, true, frontends["https"]["admin_state_up"])
 	require.NotContains(t, frontends["tcp"], "otlp_tracing")
 
+	calls = nil
+	frontends["http"]["otlp_tracing_status"] = "PENDING_UPDATE"
+	require.Equal(t, cloud.OutcomeProgressing, run().Outcome.State)
+	delete(frontends["http"], "otlp_tracing_status")
+	require.Equal(t, cloud.OutcomeProgressing, run().Outcome.State)
+	require.Empty(t, calls)
+
+	exporterState = "ERROR"
+	frontends["http"]["otlp_tracing_status"] = exporterState
+	require.True(t, run().Outcome.MutationSubmitted, "an identical export is reprogrammed after an exporter error")
+	retry := run()
+	require.Equal(t, cloud.OutcomeProgressing, retry.Outcome.State)
+	require.False(t, retry.Outcome.MutationSubmitted)
+	require.Greater(t, retry.Outcome.RequeueAfter, provider.pollInterval)
+	require.Equal(t, []string{"PUT /lbaas/listeners/http"}, calls)
+	exporterState = "ACTIVE"
+	frontends["http"]["otlp_tracing_status"] = exporterState
+	frontends["http"]["provisioning_status"] = "ERROR"
+	require.Equal(t, cloud.OutcomeReady, run().Outcome.State, "export readiness is independent of the application listener")
+	frontends["http"]["provisioning_status"] = "ACTIVE"
+
+	foreign := map[string]any{"collector_pool_id": "fab28eae-2876-4dbe-a51a-bc4520788de3",
+		"service_name": "operator.collector", "span_name": "foreign"}
+	frontends["https"]["otlp_tracing"] = foreign
+	frontends["tcp"]["protocol"] = "HTTP"
+	frontends["tcp"]["tags"] = []string{"unknown-owner"}
+	frontends["tcp"]["default_pool_id"] = map[string]string{"unreadable": poolID}
+	frontends["tcp"]["otlp_tracing"] = map[string]any{"collector_pool_id": poolID,
+		"service_name": "operator.shared", "span_name": "foreign neighbor"}
 	capable = false
 	calls = nil
-	for range 4 {
+	require.True(t, run().Outcome.MutationSubmitted)
+	require.Equal(t, []string{"PUT /lbaas/listeners/http"}, calls)
+	require.Equal(t, cloud.OutcomeProgressing, run().Outcome.State)
+	require.Equal(t, foreign, frontends["https"]["otlp_tracing"])
+	require.Equal(t, []string{"PUT /lbaas/listeners/http"}, calls)
+
+	frontends["tcp"]["protocol"] = "TCP"
+	frontends["tcp"]["default_pool_id"] = nil
+	delete(frontends["tcp"], "otlp_tracing")
+	frontends["http"]["otlp_tracing_status"] = "PENDING_UPDATE"
+	require.Equal(t, cloud.OutcomeProgressing, run().Outcome.State, "a pending null is insufficient to delete the pool")
+	frontends["http"]["otlp_tracing_status"] = "ACTIVE"
+	for range 2 {
 		require.True(t, run().Outcome.MutationSubmitted)
 	}
 	settled := run()
 	require.Equal(t, cloud.OutcomeReady, settled.Outcome.State)
 	require.Contains(t, settled.TelemetryUnsupported, octavia.GatewayCapabilityListenerOTLPTracing)
-	require.Equal(t, []string{"PUT /lbaas/listeners/http", "PUT /lbaas/listeners/https",
+	require.True(t, settled.TelemetryCapabilityUnavailable)
+	require.Equal(t, []string{"PUT /lbaas/listeners/http",
 		"DELETE /lbaas/pools/" + poolID + "/members/collector", "DELETE /lbaas/pools/" + poolID}, calls)
+}
+
+func TestTelemetryCollectorTLSUsesExplicitHTTP11(t *testing.T) {
+	identity := safetyTestIdentity(t)
+	wanted := &cloud.GatewayTelemetry{ServiceUID: "collector", ServicePort: 4318, BackendTLS: newGraphBackendTLS(t)}
+	var sent struct{ Pool pools.Pool }
+	var writes []string
+	handle := http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		require.Equal(t, http.MethodPost, request.Method)
+		require.Equal(t, "/octavia/v2.0/lbaas/pools", request.URL.Path)
+		require.NoError(t, json.NewDecoder(request.Body).Decode(&sent))
+		w.WriteHeader(http.StatusCreated)
+		safetyWriteJSON(t, w, map[string]any{"pool": map[string]string{"id": "collector"}})
+	})
+	clients := scalarBackendTLSClients(t, identity.Value().OpenStackProjectID, handle, &writes)
+	provider := newTestProvider(t, clients, ProviderConfig{BackendTLSPolicy: true, BackendCA: backendca.New(identity.Value().ClusterID, clients)})
+	graph := telemetryGraph{identity: identity, loadBalancer: &octavia.LoadBalancer{}, spec: cloud.GatewayGraphSpec{
+		Identity: identity.Value(), ValidateMutation: func(context.Context) error { return nil },
+	}}
+	graph.loadBalancer.ID = "gateway"
+	for range 2 {
+		result, err := provider.createTelemetryPool(t.Context(), graph, "collector", wanted)
+		require.NoError(t, err)
+		require.True(t, result.Outcome.MutationSubmitted)
+	}
+	require.Equal(t, []string{"http/1.1"}, sent.Pool.ALPNProtocols)
+	require.True(t, sent.Pool.TLSEnabled)
+	require.NotEmpty(t, sent.Pool.CATLSContainerRef)
+	tls := octavia.PoolBackendTLS{Hostname: wanted.BackendTLS.Hostname, HostnameObserved: true, CAObserved: true,
+		ClientRefObserved: true, EnabledObserved: true, AdminObserved: true}
+	pool := telemetryPool{observedAuthPool: observedAuthPool{pool: sent.Pool}, tls: tls}
+	require.True(t, telemetryPoolTLSMatches(pool, wanted.BackendTLS, sent.Pool.CATLSContainerRef, ""))
+	pool.pool.ALPNProtocols = nil
+	require.False(t, telemetryPoolTLSMatches(pool, wanted.BackendTLS, sent.Pool.CATLSContainerRef, ""))
+	pool.pool.ALPNProtocols = []string{"h2", "http/1.1"}
+	require.False(t, telemetryPoolTLSMatches(pool, wanted.BackendTLS, sent.Pool.CATLSContainerRef, ""))
 }

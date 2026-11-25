@@ -26,6 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
@@ -61,12 +62,19 @@ func TestTelemetryPolicyPrecedenceAndStatus(t *testing.T) {
 	old := telemetryTestPolicy("b", 10)
 	equalTime := telemetryTestPolicy("a", 10)
 	young := telemetryTestPolicy("first-lexically", 20)
+	young.Spec.Tracing.Mode = gatewayx.TracingModeEnabled
+	invalid := telemetryTestPolicy("invalid-kind", 25)
+	invalid.Spec.Tracing = gatewayx.TracingConfig{Mode: gatewayx.TracingModeEnabled,
+		Provider: gatewayx.TracingProvider{BackendRef: gatewayv1.BackendObjectReference{Kind: ptr.To(gatewayv1.Kind("Secret")), Name: "collector"}}}
+	denied := telemetryTestPolicy("no-grant", 30)
+	denied.Spec.Tracing = gatewayx.TracingConfig{Mode: gatewayx.TracingModeEnabled,
+		Provider: gatewayx.TracingProvider{BackendRef: gatewayv1.BackendObjectReference{Namespace: ptr.To(gatewayv1.Namespace("collector")), Name: "collector"}}}
 	foreign := gatewayv1.PolicyAncestorStatus{
 		AncestorRef: gatewayv1.ParentReference{Name: "foreign-gateway"}, ControllerName: "other.example/gateway",
 		Conditions: []metav1.Condition{controller.Condition("Accepted", metav1.ConditionTrue, "Accepted", "Managed by other controller", 1)},
 	}
 	young.Status.Ancestors = []gatewayv1.PolicyAncestorStatus{foreign}
-	c := indexedFakeClientBuilder(testScheme(t), cfg).WithObjects(old, equalTime, young).
+	c := indexedFakeClientBuilder(testScheme(t), cfg).WithObjects(old, equalTime, young, invalid, denied).
 		WithStatusSubresource(&gatewayx.XTelemetryPolicy{}).Build()
 	r := &Reconciler{Config: cfg, Client: c, APIReader: c}
 	report := func(winner string) {
@@ -115,6 +123,30 @@ func TestTelemetryPolicyPrecedenceAndStatus(t *testing.T) {
 	require.NoError(t, c.Get(t.Context(), client.ObjectKeyFromObject(old), old))
 	require.Len(t, old.Status.Ancestors, 16)
 	require.Equal(t, foreign.ControllerName, old.Status.Ancestors[15].ControllerName)
+
+	for _, tc := range []struct {
+		policy *gatewayx.XTelemetryPolicy
+		reason string
+	}{{young, "BackendNotFound"}, {invalid, "InvalidKind"}, {denied, "RefNotPermitted"}} {
+		require.NoError(t, c.Get(t.Context(), client.ObjectKeyFromObject(tc.policy), tc.policy))
+		entry := tc.policy.Status.Ancestors[len(tc.policy.Status.Ancestors)-1]
+		require.Equal(t, "Conflicted", meta.FindStatusCondition(entry.Conditions, "Accepted").Reason)
+		resolved := meta.FindStatusCondition(entry.Conditions, "ResolvedRefs")
+		require.Equal(t, tc.reason, resolved.Reason)
+		require.Equal(t, tc.policy.Generation, resolved.ObservedGeneration)
+	}
+	observed, err := r.observeGatewayTelemetry(t.Context(), gateway, true, &gatewayMutationSnapshot{gateway: gateway})
+	require.NoError(t, err)
+	require.NoError(t, r.reportTelemetryPolicies(t.Context(), gateway, observed, cloud.GatewayGraphResult{
+		Outcome: cloud.ReadyOutcome(), TelemetryCapabilityUnavailable: true,
+	}, nil))
+	require.NoError(t, c.Get(t.Context(), client.ObjectKeyFromObject(young), young))
+	require.Equal(t, []gatewayv1.PolicyAncestorStatus{foreign}, young.Status.Ancestors)
+	report("b")
+	r.Config.TelemetryPolicy = false
+	require.NoError(t, r.reportTelemetryWithoutBinding(t.Context(), client.ObjectKeyFromObject(gateway)))
+	require.NoError(t, c.Get(t.Context(), client.ObjectKeyFromObject(young), young))
+	require.Equal(t, []gatewayv1.PolicyAncestorStatus{foreign}, young.Status.Ancestors)
 }
 
 func TestTelemetryPolicyGrantRevocationAndRecoveryFencesCollector(t *testing.T) {
@@ -206,4 +238,15 @@ func TestTelemetryPolicyGrantRevocationAndRecoveryFencesCollector(t *testing.T) 
 	require.Nil(t, calls[4])
 	require.NoError(t, c.Get(t.Context(), client.ObjectKeyFromObject(policy), policy))
 	require.Equal(t, "UnsupportedValue", meta.FindStatusCondition(policy.Status.Ancestors[0].Conditions, "Accepted").Reason)
+
+	// Removing the last policy while the checkpoint lacks the Barbican
+	// finalizer still reaches the provider's withdrawal path.
+	r.Config.BackendTLSPolicy = true
+	require.NoError(t, c.Delete(t.Context(), policy))
+	scope, _, err := r.newGatewayScope(t.Context(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(gateway)})
+	require.NoError(t, err)
+	_, err = r.reconcileGatewayTelemetry(t.Context(), scope, false)
+	require.NoError(t, err)
+	require.Len(t, calls, 6)
+	require.Nil(t, calls[5])
 }

@@ -32,6 +32,7 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/discovery"
@@ -352,17 +353,18 @@ func run(ctx context.Context) error {
 		}
 	}
 	routeReconciler := &httproute.Reconciler{
-		ListenerSetObserver:         gatewayReconciler.ObserveListenerSets,
-		BackendTLSAvailable:         openStackProvider.BackendTLSAvailable,
-		BackendRetryBudgetAvailable: openStackProvider.BackendRetryBudgetAvailable,
-		TCPBackendTLSAvailable:      openStackProvider.TCPBackendTLSAvailable,
-		GRPCBackendTLSAvailable:     openStackProvider.GRPCBackendTLSAvailable,
-		BackendTLSSANAvailable:      openStackProvider.BackendTLSSANAvailable,
-		Client:                      manager.GetClient(),
-		Coordinator:                 graphCoordinator,
-		APIReader:                   manager.GetAPIReader(),
-		Recorder:                    eventRecorder,
-		Config:                      controllerConfig,
+		ListenerSetObserver:          gatewayReconciler.ObserveListenerSets,
+		BackendTLSAvailable:          openStackProvider.BackendTLSAvailable,
+		TelemetryBackendTLSAvailable: openStackProvider.TelemetryBackendTLSAvailable,
+		BackendRetryBudgetAvailable:  openStackProvider.BackendRetryBudgetAvailable,
+		TCPBackendTLSAvailable:       openStackProvider.TCPBackendTLSAvailable,
+		GRPCBackendTLSAvailable:      openStackProvider.GRPCBackendTLSAvailable,
+		BackendTLSSANAvailable:       openStackProvider.BackendTLSSANAvailable,
+		Client:                       manager.GetClient(),
+		Coordinator:                  graphCoordinator,
+		APIReader:                    manager.GetAPIReader(),
+		Recorder:                     eventRecorder,
+		Config:                       controllerConfig,
 	}
 	tcpReconciler := &l4route.Reconciler{
 		Protocol: gatewayv1.TCPProtocolType,
@@ -441,6 +443,11 @@ func newControllerScheme(cfg controller.Config, istioAmbientXMesh bool) *runtime
 	utilruntime.Must(configv1alpha1.AddToScheme(scheme))
 	if cfg.XBackendEnabled() {
 		utilruntime.Must(gatewayx.Install(scheme))
+	} else {
+		// A former Experimental binding can withdraw policies when the
+		// Kubernetes API still serves the CRD after switching channels.
+		version := schema.GroupVersion{Group: gatewayx.GroupVersion.Group, Version: gatewayx.GroupVersion.Version}
+		scheme.AddKnownTypes(version, &gatewayx.XTelemetryPolicy{}, &gatewayx.XTelemetryPolicyList{})
 	}
 	if istioAmbientXMesh {
 		utilruntime.Must(appsv1.AddToScheme(scheme))

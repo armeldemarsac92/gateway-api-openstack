@@ -31,6 +31,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -59,6 +60,13 @@ type telemetryIssue struct {
 	reason, message string
 }
 
+type telemetryReference struct {
+	service *corev1.Service
+	port    *corev1.ServicePort
+	issue   telemetryIssue
+	err     error
+}
+
 type gatewayTelemetryObservation struct {
 	policies             []gatewayx.XTelemetryPolicy
 	winner               *gatewayx.XTelemetryPolicy
@@ -66,6 +74,8 @@ type gatewayTelemetryObservation struct {
 	rejected, unresolved telemetryIssue
 	pending              string
 	referencesPending    bool
+	references           map[string]telemetryReference
+	backendTLS           backendtls.Selection
 }
 
 func telemetryTargets(policy *gatewayx.XTelemetryPolicy, gateway *gatewayv1.Gateway) bool {
@@ -95,22 +105,32 @@ func telemetryPrecedence(a, b gatewayx.XTelemetryPolicy) int {
 }
 
 func (r *Reconciler) observeGatewayTelemetry(ctx context.Context, gateway *gatewayv1.Gateway, managed bool, snapshot *gatewayMutationSnapshot) (observation gatewayTelemetryObservation, err error) {
-	if !r.Config.TelemetryPolicyEnabled() {
+	enabled := r.Config.TelemetryPolicyEnabled()
+	if !enabled && !r.Config.XBackendEnabled() && gateway.Annotations[r.Config.GatewayTelemetryAnnotation()] != "v1" {
 		return observation, nil
 	}
 	observation.policies, err = r.listTelemetryPolicies(ctx, r.APIReader, gateway.Namespace)
 	if err != nil {
+		if !enabled && (meta.IsNoMatchError(err) || runtime.IsNotRegisteredError(err) || apierrors.IsNotFound(err) || apierrors.IsForbidden(err)) {
+			return observation, nil
+		}
 		return observation, err
 	}
 	slices.SortFunc(observation.policies, telemetryPrecedence)
-	if !managed {
+	if !managed || !enabled {
 		return observation, nil
 	}
+	observation.references = make(map[string]telemetryReference)
 	for i := range observation.policies {
 		policy := &observation.policies[i]
-		if telemetryTargets(policy, gateway) {
+		if !telemetryTargets(policy, gateway) {
+			continue
+		}
+		if observation.winner == nil {
 			observation.winner = policy
-			break
+		}
+		if policy.Spec.Tracing.Mode == gatewayx.TracingModeEnabled {
+			observation.references[policy.Name] = r.resolveTelemetryReference(ctx, policy)
 		}
 	}
 	if observation.winner == nil {
@@ -133,7 +153,6 @@ func (r *Reconciler) observeGatewayTelemetry(ctx context.Context, gateway *gatew
 	}
 	if snapshot == nil {
 		observation.pending = "Waiting for a usable Gateway listener binding"
-		observation.referencesPending = true
 		return observation, nil
 	}
 	if (tracing.SamplingRate != nil && !telemetryFullSampling(tracing.SamplingRate)) ||
@@ -147,9 +166,15 @@ func (r *Reconciler) observeGatewayTelemetry(ctx context.Context, gateway *gatew
 		observation.rejected = telemetryIssue{"UnsupportedValue", "The serviceName or spanName has an unsupported form"}
 	}
 	// Resolve the collector reference even if an independent option was rejected.
-	desired, unresolved, rejected, pending, err := r.resolveTelemetryCollector(ctx, snapshot, observation.winner)
-	observation.unresolved = unresolved
+	reference := observation.references[observation.winner.Name]
+	observation.unresolved = reference.issue
+	if reference.err != nil || reference.issue.reason != "" {
+		return observation, reference.err
+	}
+	var backendTLS backendtls.Selection
+	desired, rejected, pending, err := r.resolveTelemetryCollector(ctx, snapshot, observation.winner, reference, &backendTLS)
 	if observation.rejected.reason == "" {
+		observation.backendTLS = backendTLS
 		observation.rejected = rejected
 	}
 	observation.pending = pending
@@ -164,10 +189,8 @@ func (r *Reconciler) observeGatewayTelemetry(ctx context.Context, gateway *gatew
 		} else if len(desired.Members) == 0 {
 			observation.pending = "Waiting for ready Octavia collector members"
 		} else if slot == backendtls.AncestorSlotPending {
-			// Multiple Gateways can target the same policy and share its
-			// sixteen status slots. Claim a slot before exposing telemetry.
 			observation.pending = "Waiting for this Gateway to claim a policy ancestor slot"
-		} else {
+		} else if observation.pending == "" {
 			observation.desired = desired
 		}
 	}
@@ -212,64 +235,80 @@ func (r *Reconciler) telemetryListeners(snapshot *gatewayMutationSnapshot, sets 
 	return listeners
 }
 
-func (r *Reconciler) resolveTelemetryCollector(ctx context.Context, snapshot *gatewayMutationSnapshot, policy *gatewayx.XTelemetryPolicy) (
-	desired *cloud.GatewayTelemetry, unresolved, rejected telemetryIssue, pending string, err error,
-) {
-	tracing := policy.Spec.Tracing
-	ref := tracing.Provider.BackendRef
+func (r *Reconciler) resolveTelemetryReference(ctx context.Context, policy *gatewayx.XTelemetryPolicy) telemetryReference {
+	ref := policy.Spec.Tracing.Provider.BackendRef
 	key, serviceRef := model.BackendServiceReference(policy.Namespace, ref)
 	if !serviceRef {
-		unresolved = telemetryIssue{"InvalidKind", "The tracing backendRef must refer to a core Service"}
-		return
+		return telemetryReference{issue: telemetryIssue{"InvalidKind", "The tracing backendRef must refer to a core Service"}}
+	}
+	if key.Name == "" {
+		return telemetryReference{issue: telemetryIssue{"BackendNotFound", "The collector Service reference is absent"}}
 	}
 	if key.Namespace != policy.Namespace {
-		grants, readErr := graph.ListBackendReferenceGrants(ctx, r.APIReader, key.Namespace)
-		if readErr != nil {
-			err = readErr
-			return
+		grants, err := graph.ListBackendReferenceGrants(ctx, r.APIReader, key.Namespace)
+		if err != nil {
+			return telemetryReference{err: err}
 		}
 		if !model.BackendReferenceAllowedForGroup(gatewayv1.Group(gatewayx.GroupVersion.Group), "XTelemetryPolicy", policy.Namespace, key, grants) {
-			unresolved = telemetryIssue{"RefNotPermitted", "No ReferenceGrant authorizes this XTelemetryPolicy to use the collector Service"}
-			return
+			return telemetryReference{issue: telemetryIssue{"RefNotPermitted", "No ReferenceGrant authorizes this XTelemetryPolicy to use the collector Service"}}
 		}
 	}
 	var service corev1.Service
-	if err = r.APIReader.Get(ctx, key, &service); err != nil {
+	if err := r.APIReader.Get(ctx, key, &service); err != nil {
 		if apierrors.IsNotFound(err) {
-			err = nil
-			unresolved = telemetryIssue{"BackendNotFound", "The collector Service was not found"}
+			return telemetryReference{issue: telemetryIssue{"BackendNotFound", "The collector Service was not found"}}
 		}
-		return
+		return telemetryReference{err: err}
 	}
 	if !service.DeletionTimestamp.IsZero() || service.UID == "" {
-		unresolved = telemetryIssue{"BackendNotFound", "The collector Service has no live identity"}
-		return
+		return telemetryReference{issue: telemetryIssue{"BackendNotFound", "The collector Service has no live identity"}}
 	}
 	port, diagnostic := model.ResolveTCPServicePort(&service, ref.Port)
 	if diagnostic != nil {
-		unresolved = telemetryIssue{"BackendNotFound", diagnostic.Message}
-		return
+		return telemetryReference{issue: telemetryIssue{"BackendNotFound", diagnostic.Message}}
 	}
+	return telemetryReference{service: &service, port: port}
+}
+
+func (r *Reconciler) resolveTelemetryCollector(ctx context.Context, snapshot *gatewayMutationSnapshot, policy *gatewayx.XTelemetryPolicy,
+	reference telemetryReference, backendTLS *backendtls.Selection) (
+	desired *cloud.GatewayTelemetry, rejected telemetryIssue, pending string, err error,
+) {
+	tracing := policy.Spec.Tracing
+	ref := tracing.Provider.BackendRef
+	service, port := reference.service, reference.port
 
 	var transport *cloud.BackendTLSValidation
 	observer := graph.NewBackendTLSObserver(r.APIReader, r.Config.ClusterTrustBundles)
 	if r.Config.BackendTLSPolicy {
 		ancestor := &backendtls.GatewayAncestor{Key: client.ObjectKeyFromObject(snapshot.gateway), ControllerName: r.Config.ControllerName}
-		selection, readErr := observer.Observe(ctx, &service, port, ancestor)
+		selection, readErr := observer.Observe(ctx, service, port, ancestor)
 		if readErr != nil {
 			err = readErr
 			return
 		}
+		*backendTLS = selection
 		if selection.Winner != nil {
 			if selection.Winner.Validation == nil || selection.Winner.AncestorSlot == backendtls.AncestorSlotFull {
 				rejected = telemetryIssue{"UnsupportedValue", "The collector requires an applicable, verifiable BackendTLSPolicy"}
 				return
 			}
 			transport = selection.Winner.Validation.CloudValidation()
+			var live gatewayv1.BackendTLSPolicy
+			if err = r.APIReader.Get(ctx, selection.Winner.Key, &live); err != nil {
+				return
+			}
+			if live.UID != selection.Winner.UID || live.Generation != selection.Winner.Generation || !live.DeletionTimestamp.IsZero() {
+				err = errGatewayChanged
+				return
+			}
+			if !ancestor.AcceptsCurrentPolicy(&live) {
+				pending = "Waiting for the BackendTLSPolicy to accept the Gateway at its current generation"
+			}
 		}
 	} else {
 		var requiresTLS bool
-		requiresTLS, err = observer.HasPolicy(ctx, &service, port)
+		requiresTLS, err = observer.HasPolicy(ctx, service, port)
 		if err != nil {
 			return
 		}
@@ -278,7 +317,7 @@ func (r *Reconciler) resolveTelemetryCollector(ctx context.Context, snapshot *ga
 			return
 		}
 	}
-	if _, diagnostic := model.ResolveServicePortForBackendTLS(&service, ref.Port, false, transport != nil); diagnostic != nil {
+	if _, diagnostic := model.ResolveServicePortForBackendTLS(service, ref.Port, false, transport != nil); diagnostic != nil {
 		rejected = telemetryIssue{"UnsupportedValue", diagnostic.Message}
 		return
 	}
@@ -286,7 +325,7 @@ func (r *Reconciler) resolveTelemetryCollector(ctx context.Context, snapshot *ga
 		rejected = telemetryIssue{"UnsupportedValue", "The collector Service must speak OTLP over HTTP/1.1"}
 		return
 	}
-	members, diagnostic, readErr := routebackend.TransportMembers(ctx, r.APIReader, &service, ref.Port, corev1.ProtocolTCP, snapshot.topology, nil, false)
+	members, diagnostic, readErr := routebackend.TransportMembers(ctx, r.APIReader, service, ref.Port, corev1.ProtocolTCP, snapshot.topology, nil, false)
 	if readErr != nil {
 		err = readErr
 		return
@@ -370,9 +409,10 @@ func (r *Reconciler) observeTelemetryGraph(ctx context.Context, request graph.Re
 		return graph.GatewayInput{}, err
 	}
 	input := graph.GatewayInput{Object: gateway, Node: cloud.GatewayGraphNode{
-		Disposition:    cloud.GraphReconcileTelemetry,
-		Telemetry:      observed.desired,
-		BackendCAOwned: controllerutil.ContainsFinalizer(gateway, r.Config.BackendCAFinalizer()),
+		Disposition:            cloud.GraphReconcileTelemetry,
+		Telemetry:              observed.desired,
+		TelemetryPolicyPresent: observed.winner != nil,
+		BackendCAOwned:         controllerutil.ContainsFinalizer(gateway, r.Config.BackendCAFinalizer()),
 	}}
 	if observed.desired != nil {
 		input.Node.Spec.Identity = request.Identity
@@ -442,7 +482,7 @@ func (r *Reconciler) reportTelemetryPolicies(ctx context.Context, gateway *gatew
 				backendtls.GatewayAncestorKey(entry.AncestorRef, policy.Namespace) == ancestor.Key
 		}
 		index := slices.IndexFunc(updated.Status.Ancestors, matching)
-		if observed.winner == nil || !telemetryTargets(policy, gateway) {
+		if result.TelemetryCapabilityUnavailable || observed.winner == nil || !telemetryTargets(policy, gateway) {
 			updated.Status.Ancestors = slices.DeleteFunc(updated.Status.Ancestors, matching)
 		} else {
 			entry := gatewayv1.PolicyAncestorStatus{
@@ -475,8 +515,6 @@ func applyTelemetryConditions(entry *gatewayv1.PolicyAncestorStatus, policy *gat
 	case observed.winner.Name != policy.Name:
 		acceptedStatus = metav1.ConditionFalse
 		accepted = telemetryIssue{"Conflicted", "An older or lexically earlier XTelemetryPolicy has precedence for this Gateway"}
-		resolvedStatus = metav1.ConditionUnknown
-		resolved = telemetryIssue{"Pending", "References are evaluated for the effective Gateway policy"}
 	case observed.unresolved.reason != "":
 		resolvedStatus, resolved = metav1.ConditionFalse, observed.unresolved
 		if observed.rejected.reason != "" {
@@ -493,6 +531,11 @@ func applyTelemetryConditions(entry *gatewayv1.PolicyAncestorStatus, policy *gat
 		}
 	case providerErr != nil || result.Outcome.State != cloud.OutcomeReady:
 		acceptedStatus, accepted = metav1.ConditionFalse, telemetryIssue{"Pending", "Waiting for verified Octavia listener tracing configuration"}
+	}
+	if reference := observed.references[policy.Name]; reference.issue.reason != "" {
+		resolvedStatus, resolved = metav1.ConditionFalse, reference.issue
+	} else if reference.err != nil {
+		resolvedStatus, resolved = metav1.ConditionUnknown, telemetryIssue{"Pending", "Waiting for a live inventory of collector references"}
 	}
 	meta.SetStatusCondition(&entry.Conditions, controller.Condition("Accepted", acceptedStatus, accepted.reason, accepted.message, policy.Generation))
 	meta.SetStatusCondition(&entry.Conditions, controller.Condition("ResolvedRefs", resolvedStatus, resolved.reason, resolved.message, policy.Generation))
@@ -522,23 +565,25 @@ func (r *Reconciler) reconcileGatewayTelemetry(ctx context.Context, scope *gatew
 		return 0, r.reportTelemetryWithoutBinding(ctx, client.ObjectKeyFromObject(gateway))
 	}
 	if !marked && !r.Config.TelemetryPolicyEnabled() {
-		return 0, nil
+		return 0, r.reportTelemetryWithoutBinding(ctx, client.ObjectKeyFromObject(gateway))
 	}
 	claimCA := !withdraw && r.Config.TelemetryPolicyEnabled() && r.Config.BackendTLSPolicy &&
 		!controllerutil.ContainsFinalizer(gateway, r.Config.BackendCAFinalizer())
 	if !marked || claimCA {
 		policies, err := r.listTelemetryPolicies(ctx, r.APIReader, gateway.Namespace)
-		if err != nil {
+		hasTarget := slices.ContainsFunc(policies, func(policy gatewayx.XTelemetryPolicy) bool { return telemetryTargets(&policy, gateway) })
+		if err == nil && hasTarget {
+			if err := r.markGatewayTelemetry(ctx, scope, claimCA); err != nil {
+				return 0, err
+			}
+			gateway = scope.gateway
+		} else if !marked {
 			return 0, err
 		}
-		if !slices.ContainsFunc(policies, func(policy gatewayx.XTelemetryPolicy) bool { return telemetryTargets(&policy, gateway) }) {
-			return 0, nil
-		}
-		if err := r.markGatewayTelemetry(ctx, scope, claimCA); err != nil {
-			return 0, err
-		}
-		gateway = scope.gateway
+		// An existing checkpoint still authorizes withdrawal after an API
+		// read failure or deletion of the last policy.
 	}
+
 	result, err := r.Writer.ReconcileGraph(ctx, graph.Request{Action: graph.ReconcileTelemetry, Gateway: gateway,
 		Identity: controller.StoredGatewayIdentity(r.Config, gateway), WithdrawTelemetry: withdraw})
 	if err != nil {
@@ -565,7 +610,7 @@ func (r *Reconciler) telemetryOwnsAncestor(ctx context.Context, gateway *gateway
 }
 
 func (r *Reconciler) reportTelemetryWithoutBinding(ctx context.Context, key client.ObjectKey) error {
-	if !r.Config.TelemetryPolicyEnabled() {
+	if !r.Config.XBackendEnabled() {
 		return nil
 	}
 	var gateway gatewayv1.Gateway

@@ -81,8 +81,9 @@ type GatewayGraphNode struct {
 	// BackendCAOwned checkpoints ownership of both frontend and backend trust anchors.
 	BackendCAOwned bool `json:",omitempty"`
 	// ClaimBackendCA checkpoints ownership before creating a Gateway CA revision.
-	ClaimBackendCA func(context.Context) error `json:"-"`
-	Telemetry      *GatewayTelemetry           `json:",omitempty"`
+	ClaimBackendCA         func(context.Context) error `json:"-"`
+	TelemetryPolicyPresent bool                        `json:",omitempty"`
+	Telemetry              *GatewayTelemetry           `json:",omitempty"`
 }
 
 // GatewayTelemetry describes the collector and eligible physical listeners for a Gateway.
@@ -153,10 +154,11 @@ type RouteGraphNode struct {
 
 // GatewayGraphResult separates whole-graph scheduling from component status.
 type GatewayGraphResult struct {
-	Outcome              Outcome
-	Gateway              GatewayResult
-	Routes               []RouteGraphResult
-	TelemetryUnsupported string
+	Outcome                        Outcome
+	Gateway                        GatewayResult
+	Routes                         []RouteGraphResult
+	TelemetryUnsupported           string
+	TelemetryCapabilityUnavailable bool
 }
 
 // RouteGraphResult identifies a route result without relying on input ordering.
