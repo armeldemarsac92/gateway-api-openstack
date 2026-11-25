@@ -1,0 +1,1370 @@
+{
+  "subject": "Fresh TLS connections to weighted Services through an Amphora SNI listener",
+  "scope": "Local kind Kubernetes API and Pods, the signed controller extracted from OCI, the public Octavia API, native TaskFlow member batches, Amphora rendering, and a local HAProxy. The fixture supplies Keystone, Neutron, cloud inventory, ordinary provisioning, RPC delivery and the Amphora agent transport.",
+  "registeredUpstreamCase": false,
+  "controller": {
+    "source": "d435da52da94ef7d55f2750567b4c83aa7dfe91b",
+    "parents": [
+      "dbe74ca9e41ddf66f101d02b77bcbb3aa39427de"
+    ],
+    "tree": "8c3b9c7b85204eb7582f654e23e9e1bfd7cb43fe",
+    "signatureVerified": true,
+    "platform": "linux/amd64",
+    "manifestDigest": "sha256:1fb871a27e719d1e126debc01ea4b893368a66c77a435d611fb2a7e7b29dc515",
+    "ociArchiveSHA256": "858471c915cf2981aab54c82140e93b031e5a87fe7595d573079fb7a2c033357",
+    "managerSHA256": "624e46e496428802b7f2109b68080181026ca3eb444583ccd76b819982d38e6e",
+    "normalAndNoCacheBuildsMatch": true
+  },
+  "providers": {
+    "octavia": {
+      "url": "https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-xbackend-cookie-permanent-0a0c55cbc7c3",
+      "source": "0a0c55cbc7c390ffe7bf8084b79517c4b7c74a89",
+      "wheel": "octavia-19.0.1.dev76-py3-none-any.whl",
+      "wheelSHA256": "7816656e8d93321f70d5be4a702b71e6b16ddaa2226ffb28bcfd679478ea257d"
+    },
+    "octaviaLib": {
+      "url": "https://github.com/armeldemarsac92/octavia-lib/releases/tag/hibiscus-listener-otlp-tracing-542a56dcbec8",
+      "source": "542a56dcbec8713f168230a98ed2d11333f59b7f",
+      "wheel": "octavia_lib-3.12.1.dev19-py3-none-any.whl",
+      "wheelSHA256": "2514ccf71a882bf41aa945681243cd13bd47cd0b040cb63dfb77669e0093cd3d"
+    }
+  },
+  "channels": {
+    "standard": {
+      "startedAt": "2026-11-25T09:25:06.799+00:00",
+      "finishedAt": "2026-11-25T09:30:27.768+00:00",
+      "gatewayAPI": {
+        "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+        "channel": "standard",
+        "revision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+        "version": "v1.7.0"
+      },
+      "kubernetes": "v1.36.4",
+      "haproxy": {
+        "sha256": "20d64a505a669a1066d5cb06b78e407d3c2ec15029923d3165e0c1db8cc41287",
+        "version": "HAProxy version 3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1 2026/03/19 - https://haproxy.org/"
+      },
+      "routeIdentity": {
+        "sibling": {
+          "generation": 1,
+          "spec": {
+            "hostnames": [
+              "sibling.example.test"
+            ],
+            "parentRefs": [
+              {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "weighted",
+                "sectionName": "passthrough"
+              }
+            ],
+            "rules": [
+              {
+                "backendRefs": [
+                  {
+                    "group": "",
+                    "kind": "Service",
+                    "name": "sibling",
+                    "port": 3000,
+                    "weight": 1
+                  }
+                ]
+              }
+            ]
+          },
+          "specSHA256": "bfd5a521ea64d5ee7bd4f9e8d11e5a2fa04fb851af221b40ea076c334ee2a056",
+          "uid": "02d9a4b1-ab8d-4836-b545-f9625de6c6a8"
+        },
+        "weighted": {
+          "generation": 1,
+          "spec": {
+            "hostnames": [
+              "weighted.example.test"
+            ],
+            "parentRefs": [
+              {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "weighted",
+                "sectionName": "passthrough"
+              }
+            ],
+            "rules": [
+              {
+                "backendRefs": [
+                  {
+                    "group": "",
+                    "kind": "Service",
+                    "name": "primary",
+                    "port": 3000,
+                    "weight": 3
+                  },
+                  {
+                    "group": "",
+                    "kind": "Service",
+                    "name": "minority",
+                    "namespace": "tls-share-foreign",
+                    "port": 3000,
+                    "weight": 1
+                  }
+                ]
+              }
+            ]
+          },
+          "specSHA256": "1db17790c389eaf29d91da998ae1e35126f49c3fe70a7f92abb3c9602c3d4cb3",
+          "uid": "94609de5-d754-45b9-a075-c40180ba611f"
+        }
+      },
+      "backendLeafSHA256": {
+        "minority": "84c23bf8df38915181f1ac40e8e3e520111a5ddff62028e0f52d88a1dd8ac0a9",
+        "primary": "e6fcdfa80d5891df7af77d013d3618f7d0d82b2aedb3159f5811927b76073ce2",
+        "sibling": "b78a55272d2301b36028099cb3c2a451d058cc1a129d1acda5e6af7591d9cfba"
+      },
+      "oracle": {
+        "expectedCounts": [
+          600,
+          200
+        ],
+        "freshSiblingTLSConnectionsPerPhase": 80,
+        "freshWeightedTLSConnectionsPerPhase": 800,
+        "tolerance": 45,
+        "withdrawnBackendTCPAccepts": 0
+      },
+      "controllerProfiles": {
+        "sniOnly": {
+          "arguments": [
+            "--leader-elect=false",
+            "--metrics-bind-address=0",
+            "--health-probe-bind-address=0",
+            "--gateway-api-channel=standard",
+            "--octavia-microversion=2.8",
+            "--octavia-tls-sni-passthrough",
+            "--openstack-resync-interval=2s",
+            "--openstack-poll-interval=50ms",
+            "--openstack-api-qps=120",
+            "--openstack-api-burst=160",
+            "--openstack-operation-timeout=30s"
+          ],
+          "regionCapabilities": [
+            "tls_sni_passthrough_v1"
+          ],
+          "regionRejectionProviders": []
+        },
+        "withRejection": {
+          "arguments": [
+            "--leader-elect=false",
+            "--metrics-bind-address=0",
+            "--health-probe-bind-address=0",
+            "--gateway-api-channel=standard",
+            "--octavia-microversion=2.8",
+            "--octavia-tls-sni-passthrough",
+            "--openstack-resync-interval=2s",
+            "--openstack-poll-interval=50ms",
+            "--openstack-api-qps=120",
+            "--openstack-api-burst=160",
+            "--openstack-operation-timeout=30s",
+            "--octavia-tcp-connection-rejection"
+          ],
+          "regionCapabilities": [
+            "tcp_connection_rejection_v1",
+            "tls_sni_passthrough_v1"
+          ],
+          "regionRejectionProviders": [
+            "amphora"
+          ]
+        }
+      },
+      "baselineExistingLoadBalancers": 0,
+      "rawReceiptSHA256": "9782f3122b6dcb54a6ccd29ccad3e3f409e81cada721759cb9f29556bcce693e",
+      "providerBatches": [
+        {
+          "dispatch": "apply_tcp_member_batch",
+          "pool": "c3ccf5a0-89e8-411a-b58f-76290f0f11a1",
+          "rejection": {
+            "reject_weight": 1,
+            "total_weight": 4
+          },
+          "memberWeights": [
+            1
+          ],
+          "agentUploads": 1,
+          "agentReloads": 1,
+          "loadedConfigSHA256": "79e49bb7c0342f4cc7c92f7083fa3528b2880751685863d16d3390ea611f85f6"
+        },
+        {
+          "dispatch": "apply_tcp_member_batch",
+          "pool": "9c7f1968-2bc7-47eb-a07b-56e2837a9986",
+          "rejection": {
+            "reject_weight": 1,
+            "total_weight": 4
+          },
+          "memberWeights": [
+            1
+          ],
+          "agentUploads": 1,
+          "agentReloads": 1,
+          "loadedConfigSHA256": "79e49bb7c0342f4cc7c92f7083fa3528b2880751685863d16d3390ea611f85f6"
+        }
+      ],
+      "phases": {
+        "baseline": {
+          "observedAt": "2026-11-25T09:26:24.279+00:00",
+          "controllerProfile": "sniOnly",
+          "listener": "2951072d-529f-4745-a8eb-6b4f4db9f25e",
+          "attachedRoutes": 2,
+          "conditions": {
+            "sibling": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/ForwardingTarget": {
+                "observedGeneration": 1,
+                "reason": "Observed",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/Programmed": {
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True"
+              }
+            },
+            "weighted": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/ForwardingTarget": {
+                "observedGeneration": 1,
+                "reason": "Observed",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/Programmed": {
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True"
+              }
+            }
+          },
+          "newConnections": {
+            "minority": 200,
+            "primary": 600
+          },
+          "siblingConnections": {
+            "sibling": 80
+          },
+          "backendAccepts": {
+            "minority": {
+              "tcp": 200,
+              "tls": 200
+            },
+            "primary": {
+              "tcp": 600,
+              "tls": 600
+            },
+            "sibling": {
+              "tcp": 80,
+              "tls": 80
+            }
+          },
+          "unmatched": "rejected",
+          "sampleSHA256": "16f6637c32ccfb079c8fc6bd935fc7f616f45ec3277c9e024d2e7290e268088f",
+          "activeHAProxySHA256": "aa718c5c63235eca39fea7d970f4858cc13acea43ed36e414aeb18e3f6638d54",
+          "sni": {
+            "sibling.example.test": {
+              "policy": "5b031cc4-4eed-4a44-9286-294754412c27",
+              "rule": "e148e0d2-9d3f-4b8e-a357-acbd91a53945",
+              "pool": "8c3b5f85-d156-4f54-a7bb-c6d32a05184f",
+              "rejection": null,
+              "memberWeights": [
+                1
+              ]
+            },
+            "weighted.example.test": {
+              "policy": "293bfe26-86b3-425f-873d-c72b7a09a027",
+              "rule": "b50877c4-6b24-4fa4-9b38-7ced834b8524",
+              "pool": "2a6611e4-f04f-4d21-a2ce-23c4be9667d4",
+              "rejection": null,
+              "memberWeights": [
+                1,
+                3
+              ]
+            }
+          }
+        },
+        "grant-withdrawn": {
+          "observedAt": "2026-11-25T09:27:10.438+00:00",
+          "controllerProfile": "withRejection",
+          "listener": "2951072d-529f-4745-a8eb-6b4f4db9f25e",
+          "attachedRoutes": 2,
+          "conditions": {
+            "sibling": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/ForwardingTarget": {
+                "observedGeneration": 1,
+                "reason": "Observed",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/Programmed": {
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True"
+              }
+            },
+            "weighted": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "RefNotPermitted",
+                "status": "False"
+              },
+              "gateway-api-openstack.github.io/ForwardingTarget": {
+                "observedGeneration": 1,
+                "reason": "Observed",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/Programmed": {
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True"
+              }
+            }
+          },
+          "newConnections": {
+            "primary": 609,
+            "rejected": 191
+          },
+          "siblingConnections": {
+            "sibling": 80
+          },
+          "backendAccepts": {
+            "minority": {
+              "tcp": 0,
+              "tls": 0
+            },
+            "primary": {
+              "tcp": 609,
+              "tls": 609
+            },
+            "sibling": {
+              "tcp": 80,
+              "tls": 80
+            }
+          },
+          "unmatched": "rejected",
+          "sampleSHA256": "7a09ecb7f0413c2f398060a087a940187b4b6ad660f2338080609d75463ce6af",
+          "activeHAProxySHA256": "7de646bcccf8ec3bd114e795e363939352a600496057c7a60d03b7a2dab380e0",
+          "sni": {
+            "sibling.example.test": {
+              "policy": "5b031cc4-4eed-4a44-9286-294754412c27",
+              "rule": "e148e0d2-9d3f-4b8e-a357-acbd91a53945",
+              "pool": "8c3b5f85-d156-4f54-a7bb-c6d32a05184f",
+              "rejection": null,
+              "memberWeights": [
+                1
+              ]
+            },
+            "weighted.example.test": {
+              "policy": "35001414-b7f9-48db-91fa-7879658d697e",
+              "rule": "dbe93aae-a0d3-4445-b2cf-160d2d0791b0",
+              "pool": "c3ccf5a0-89e8-411a-b58f-76290f0f11a1",
+              "rejection": {
+                "reject_weight": 1,
+                "total_weight": 4
+              },
+              "memberWeights": [
+                1
+              ]
+            }
+          },
+          "directMinorityConfirmed": true
+        },
+        "grant-restored": {
+          "observedAt": "2026-11-25T09:28:07.448+00:00",
+          "controllerProfile": "withRejection",
+          "listener": "2951072d-529f-4745-a8eb-6b4f4db9f25e",
+          "attachedRoutes": 2,
+          "conditions": {
+            "sibling": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/ForwardingTarget": {
+                "observedGeneration": 1,
+                "reason": "Observed",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/Programmed": {
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True"
+              }
+            },
+            "weighted": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/ForwardingTarget": {
+                "observedGeneration": 1,
+                "reason": "Observed",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/Programmed": {
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True"
+              }
+            }
+          },
+          "newConnections": {
+            "minority": 200,
+            "primary": 600
+          },
+          "siblingConnections": {
+            "sibling": 80
+          },
+          "backendAccepts": {
+            "minority": {
+              "tcp": 200,
+              "tls": 200
+            },
+            "primary": {
+              "tcp": 600,
+              "tls": 600
+            },
+            "sibling": {
+              "tcp": 80,
+              "tls": 80
+            }
+          },
+          "unmatched": "rejected",
+          "sampleSHA256": "16f6637c32ccfb079c8fc6bd935fc7f616f45ec3277c9e024d2e7290e268088f",
+          "activeHAProxySHA256": "46451d12f46a5d595b70f19abedb321a1ae7ec7a00b6591bc1f9cb2403c1473d",
+          "sni": {
+            "sibling.example.test": {
+              "policy": "5b031cc4-4eed-4a44-9286-294754412c27",
+              "rule": "e148e0d2-9d3f-4b8e-a357-acbd91a53945",
+              "pool": "8c3b5f85-d156-4f54-a7bb-c6d32a05184f",
+              "rejection": null,
+              "memberWeights": [
+                1
+              ]
+            },
+            "weighted.example.test": {
+              "policy": "a68d1395-0fab-424d-af09-550942f78d22",
+              "rule": "ad83a631-4c75-44a3-8f01-a25d2accad08",
+              "pool": "6cb1214b-b2b6-4dc1-afd0-da94abd901ba",
+              "rejection": null,
+              "memberWeights": [
+                1,
+                3
+              ]
+            }
+          }
+        },
+        "endpoints-withdrawn": {
+          "observedAt": "2026-11-25T09:28:53.758+00:00",
+          "controllerProfile": "withRejection",
+          "listener": "2951072d-529f-4745-a8eb-6b4f4db9f25e",
+          "attachedRoutes": 2,
+          "conditions": {
+            "sibling": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/ForwardingTarget": {
+                "observedGeneration": 1,
+                "reason": "Observed",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/Programmed": {
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True"
+              }
+            },
+            "weighted": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/ForwardingTarget": {
+                "observedGeneration": 1,
+                "reason": "Observed",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/Programmed": {
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True"
+              }
+            }
+          },
+          "newConnections": {
+            "primary": 598,
+            "rejected": 202
+          },
+          "siblingConnections": {
+            "sibling": 80
+          },
+          "backendAccepts": {
+            "minority": {
+              "tcp": 0,
+              "tls": 0
+            },
+            "primary": {
+              "tcp": 598,
+              "tls": 598
+            },
+            "sibling": {
+              "tcp": 80,
+              "tls": 80
+            }
+          },
+          "unmatched": "rejected",
+          "sampleSHA256": "c36ac57be09e8edb36dd73c28d31f4f35df72ca7f3eb47e00d0b8e5051c509bb",
+          "activeHAProxySHA256": "8940574707138e00c53bcce1f1ce249bfe4447bb1fa5821626b70eb3eb8c8266",
+          "sni": {
+            "sibling.example.test": {
+              "policy": "5b031cc4-4eed-4a44-9286-294754412c27",
+              "rule": "e148e0d2-9d3f-4b8e-a357-acbd91a53945",
+              "pool": "8c3b5f85-d156-4f54-a7bb-c6d32a05184f",
+              "rejection": null,
+              "memberWeights": [
+                1
+              ]
+            },
+            "weighted.example.test": {
+              "policy": "19d898e1-c7eb-4fdd-95bc-9f5541791f24",
+              "rule": "1b3648ca-e317-46f8-8939-54b9731d8423",
+              "pool": "9c7f1968-2bc7-47eb-a07b-56e2837a9986",
+              "rejection": {
+                "reject_weight": 1,
+                "total_weight": 4
+              },
+              "memberWeights": [
+                1
+              ]
+            }
+          },
+          "directMinorityConfirmed": true
+        },
+        "endpoints-restored": {
+          "observedAt": "2026-11-25T09:29:50.313+00:00",
+          "controllerProfile": "withRejection",
+          "listener": "2951072d-529f-4745-a8eb-6b4f4db9f25e",
+          "attachedRoutes": 2,
+          "conditions": {
+            "sibling": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/ForwardingTarget": {
+                "observedGeneration": 1,
+                "reason": "Observed",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/Programmed": {
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True"
+              }
+            },
+            "weighted": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/ForwardingTarget": {
+                "observedGeneration": 1,
+                "reason": "Observed",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/Programmed": {
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True"
+              }
+            }
+          },
+          "newConnections": {
+            "minority": 200,
+            "primary": 600
+          },
+          "siblingConnections": {
+            "sibling": 80
+          },
+          "backendAccepts": {
+            "minority": {
+              "tcp": 200,
+              "tls": 200
+            },
+            "primary": {
+              "tcp": 600,
+              "tls": 600
+            },
+            "sibling": {
+              "tcp": 80,
+              "tls": 80
+            }
+          },
+          "unmatched": "rejected",
+          "sampleSHA256": "16f6637c32ccfb079c8fc6bd935fc7f616f45ec3277c9e024d2e7290e268088f",
+          "activeHAProxySHA256": "09a9457416f76898d304b9fb1f3a693addeba6bf9ee4d00e8d3ffc33f067afe1",
+          "sni": {
+            "sibling.example.test": {
+              "policy": "5b031cc4-4eed-4a44-9286-294754412c27",
+              "rule": "e148e0d2-9d3f-4b8e-a357-acbd91a53945",
+              "pool": "8c3b5f85-d156-4f54-a7bb-c6d32a05184f",
+              "rejection": null,
+              "memberWeights": [
+                1
+              ]
+            },
+            "weighted.example.test": {
+              "policy": "dc59dcef-b55d-4adf-bd9f-0d3223a0e298",
+              "rule": "d2f1b21e-135e-4c62-a834-a7a7cf0b9bbb",
+              "pool": "1bf38c87-8d6d-4d4e-b638-0ee47cad6b8f",
+              "rejection": null,
+              "memberWeights": [
+                1,
+                3
+              ]
+            }
+          }
+        }
+      }
+    },
+    "experimental": {
+      "startedAt": "2026-11-25T09:31:22.630+00:00",
+      "finishedAt": "2026-11-25T09:36:39.300+00:00",
+      "gatewayAPI": {
+        "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+        "channel": "experimental",
+        "revision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+        "version": "v1.7.0"
+      },
+      "kubernetes": "v1.36.4",
+      "haproxy": {
+        "sha256": "20d64a505a669a1066d5cb06b78e407d3c2ec15029923d3165e0c1db8cc41287",
+        "version": "HAProxy version 3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1 2026/03/19 - https://haproxy.org/"
+      },
+      "routeIdentity": {
+        "sibling": {
+          "generation": 1,
+          "spec": {
+            "hostnames": [
+              "sibling.example.test"
+            ],
+            "parentRefs": [
+              {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "weighted",
+                "sectionName": "passthrough"
+              }
+            ],
+            "rules": [
+              {
+                "backendRefs": [
+                  {
+                    "group": "",
+                    "kind": "Service",
+                    "name": "sibling",
+                    "port": 3000,
+                    "weight": 1
+                  }
+                ]
+              }
+            ]
+          },
+          "specSHA256": "bfd5a521ea64d5ee7bd4f9e8d11e5a2fa04fb851af221b40ea076c334ee2a056",
+          "uid": "7c0a3304-4c47-4f3e-a22f-bfb1e6d1f8fb"
+        },
+        "weighted": {
+          "generation": 1,
+          "spec": {
+            "hostnames": [
+              "weighted.example.test"
+            ],
+            "parentRefs": [
+              {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "name": "weighted",
+                "sectionName": "passthrough"
+              }
+            ],
+            "rules": [
+              {
+                "backendRefs": [
+                  {
+                    "group": "",
+                    "kind": "Service",
+                    "name": "primary",
+                    "port": 3000,
+                    "weight": 3
+                  },
+                  {
+                    "group": "",
+                    "kind": "Service",
+                    "name": "minority",
+                    "namespace": "tls-share-foreign",
+                    "port": 3000,
+                    "weight": 1
+                  }
+                ]
+              }
+            ]
+          },
+          "specSHA256": "1db17790c389eaf29d91da998ae1e35126f49c3fe70a7f92abb3c9602c3d4cb3",
+          "uid": "753a6691-271d-4dcb-a772-3fa4c7bcc633"
+        }
+      },
+      "backendLeafSHA256": {
+        "minority": "fdba3b988d468683a93e535edd1f88db4de0bcb10b4117ff789312f926cc1896",
+        "primary": "52619d675dfaee5bb219ebc5a5da949cf894fed529907d4bba45fcbeae622228",
+        "sibling": "8e8528551e5edafba79c0c874a393e95fb8eb2ec5d7c58be71b1a72c2779c102"
+      },
+      "oracle": {
+        "expectedCounts": [
+          600,
+          200
+        ],
+        "freshSiblingTLSConnectionsPerPhase": 80,
+        "freshWeightedTLSConnectionsPerPhase": 800,
+        "tolerance": 45,
+        "withdrawnBackendTCPAccepts": 0
+      },
+      "controllerProfiles": {
+        "withRejection": {
+          "arguments": [
+            "--leader-elect=false",
+            "--metrics-bind-address=0",
+            "--health-probe-bind-address=0",
+            "--gateway-api-channel=experimental",
+            "--octavia-microversion=2.8",
+            "--octavia-tls-sni-passthrough",
+            "--openstack-resync-interval=2s",
+            "--openstack-poll-interval=50ms",
+            "--openstack-api-qps=120",
+            "--openstack-api-burst=160",
+            "--openstack-operation-timeout=30s",
+            "--octavia-tcp-connection-rejection"
+          ],
+          "regionCapabilities": [
+            "tcp_connection_rejection_v1",
+            "tls_sni_passthrough_v1"
+          ],
+          "regionRejectionProviders": [
+            "amphora"
+          ]
+        }
+      },
+      "rawReceiptSHA256": "c9b3c938a84b864d203426d30ee5b7e7fe81310dfc9ebc7e8ff63255bccdb809",
+      "providerBatches": [
+        {
+          "dispatch": "apply_tcp_member_batch",
+          "pool": "0c298ce9-9e66-442a-a2d8-99d222cbf89d",
+          "rejection": {
+            "reject_weight": 1,
+            "total_weight": 4
+          },
+          "memberWeights": [
+            1
+          ],
+          "agentUploads": 1,
+          "agentReloads": 1,
+          "loadedConfigSHA256": "daeeab6ca886cce56e5fad65dcbc3fd51ed4dfc9c8d40ccc2cf5cb43393abe87"
+        },
+        {
+          "dispatch": "apply_tcp_member_batch",
+          "pool": "1e716889-4d5f-48e1-87fe-34ff369f4ef2",
+          "rejection": {
+            "reject_weight": 1,
+            "total_weight": 4
+          },
+          "memberWeights": [
+            1
+          ],
+          "agentUploads": 1,
+          "agentReloads": 1,
+          "loadedConfigSHA256": "daeeab6ca886cce56e5fad65dcbc3fd51ed4dfc9c8d40ccc2cf5cb43393abe87"
+        }
+      ],
+      "phases": {
+        "baseline": {
+          "observedAt": "2026-11-25T09:32:41.196+00:00",
+          "controllerProfile": "withRejection",
+          "listener": "7ad62da6-806a-483d-9f04-83f773c8f38b",
+          "attachedRoutes": 2,
+          "conditions": {
+            "sibling": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/ForwardingTarget": {
+                "observedGeneration": 1,
+                "reason": "Observed",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/Programmed": {
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True"
+              }
+            },
+            "weighted": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/ForwardingTarget": {
+                "observedGeneration": 1,
+                "reason": "Observed",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/Programmed": {
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True"
+              }
+            }
+          },
+          "newConnections": {
+            "minority": 200,
+            "primary": 600
+          },
+          "siblingConnections": {
+            "sibling": 80
+          },
+          "backendAccepts": {
+            "minority": {
+              "tcp": 200,
+              "tls": 200
+            },
+            "primary": {
+              "tcp": 600,
+              "tls": 600
+            },
+            "sibling": {
+              "tcp": 80,
+              "tls": 80
+            }
+          },
+          "unmatched": "rejected",
+          "sampleSHA256": "6e0dc6203bf0f0baf16c19a036a21825f00dc9ebfc5541d08ac5279043d2db9c",
+          "activeHAProxySHA256": "8e8ddb436b2b5f16fe69752ff7b1643289d93dd9f340645c82b8d7f77fd8b4ae",
+          "sni": {
+            "sibling.example.test": {
+              "policy": "4928ae56-8c7f-4108-84d3-c4078951ec8c",
+              "rule": "937845da-2b78-436e-be4e-1b13dd4de197",
+              "pool": "a7139c86-632f-4fa7-97b8-0e67d5ba08b4",
+              "rejection": null,
+              "memberWeights": [
+                1
+              ]
+            },
+            "weighted.example.test": {
+              "policy": "dc2e91d8-26af-4298-a2f3-7634416e64c9",
+              "rule": "adf5f734-fdb2-43af-8e23-4ec63937c407",
+              "pool": "b2973f19-f99a-4228-b9ff-289b4bbc847b",
+              "rejection": null,
+              "memberWeights": [
+                1,
+                3
+              ]
+            }
+          }
+        },
+        "grant-withdrawn": {
+          "observedAt": "2026-11-25T09:33:25.546+00:00",
+          "controllerProfile": "withRejection",
+          "listener": "7ad62da6-806a-483d-9f04-83f773c8f38b",
+          "attachedRoutes": 2,
+          "conditions": {
+            "sibling": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/ForwardingTarget": {
+                "observedGeneration": 1,
+                "reason": "Observed",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/Programmed": {
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True"
+              }
+            },
+            "weighted": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "RefNotPermitted",
+                "status": "False"
+              },
+              "gateway-api-openstack.github.io/ForwardingTarget": {
+                "observedGeneration": 1,
+                "reason": "Observed",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/Programmed": {
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True"
+              }
+            }
+          },
+          "newConnections": {
+            "primary": 583,
+            "rejected": 217
+          },
+          "siblingConnections": {
+            "sibling": 80
+          },
+          "backendAccepts": {
+            "minority": {
+              "tcp": 0,
+              "tls": 0
+            },
+            "primary": {
+              "tcp": 583,
+              "tls": 583
+            },
+            "sibling": {
+              "tcp": 80,
+              "tls": 80
+            }
+          },
+          "unmatched": "rejected",
+          "sampleSHA256": "407703ff0ed5fc138f25b062768bd69bcaa9167c530a6e7344aa0d58b04fb64e",
+          "activeHAProxySHA256": "c7c9dcf66787d43c33d38dd1a3edfdffab5f69763f5f1753f73485c466568fa2",
+          "sni": {
+            "sibling.example.test": {
+              "policy": "4928ae56-8c7f-4108-84d3-c4078951ec8c",
+              "rule": "937845da-2b78-436e-be4e-1b13dd4de197",
+              "pool": "a7139c86-632f-4fa7-97b8-0e67d5ba08b4",
+              "rejection": null,
+              "memberWeights": [
+                1
+              ]
+            },
+            "weighted.example.test": {
+              "policy": "1ed42e0e-398d-450d-a3f0-0d65822004a2",
+              "rule": "9067db96-f60c-4c01-a3d4-17772462f292",
+              "pool": "0c298ce9-9e66-442a-a2d8-99d222cbf89d",
+              "rejection": {
+                "reject_weight": 1,
+                "total_weight": 4
+              },
+              "memberWeights": [
+                1
+              ]
+            }
+          },
+          "directMinorityConfirmed": true
+        },
+        "grant-restored": {
+          "observedAt": "2026-11-25T09:34:22.002+00:00",
+          "controllerProfile": "withRejection",
+          "listener": "7ad62da6-806a-483d-9f04-83f773c8f38b",
+          "attachedRoutes": 2,
+          "conditions": {
+            "sibling": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/ForwardingTarget": {
+                "observedGeneration": 1,
+                "reason": "Observed",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/Programmed": {
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True"
+              }
+            },
+            "weighted": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/ForwardingTarget": {
+                "observedGeneration": 1,
+                "reason": "Observed",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/Programmed": {
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True"
+              }
+            }
+          },
+          "newConnections": {
+            "minority": 200,
+            "primary": 600
+          },
+          "siblingConnections": {
+            "sibling": 80
+          },
+          "backendAccepts": {
+            "minority": {
+              "tcp": 200,
+              "tls": 200
+            },
+            "primary": {
+              "tcp": 600,
+              "tls": 600
+            },
+            "sibling": {
+              "tcp": 80,
+              "tls": 80
+            }
+          },
+          "unmatched": "rejected",
+          "sampleSHA256": "6e0dc6203bf0f0baf16c19a036a21825f00dc9ebfc5541d08ac5279043d2db9c",
+          "activeHAProxySHA256": "6a4e542e08c36ba51efea9ccd9e83b65ec1ba32edbf7291ac487ae2365d70ba3",
+          "sni": {
+            "sibling.example.test": {
+              "policy": "4928ae56-8c7f-4108-84d3-c4078951ec8c",
+              "rule": "937845da-2b78-436e-be4e-1b13dd4de197",
+              "pool": "a7139c86-632f-4fa7-97b8-0e67d5ba08b4",
+              "rejection": null,
+              "memberWeights": [
+                1
+              ]
+            },
+            "weighted.example.test": {
+              "policy": "8b189d32-88be-4ff5-9a3c-b633b32589a6",
+              "rule": "7c51f79a-dc13-49b3-8a59-6c66500ca094",
+              "pool": "dd4b772a-45b6-4788-ad24-4dbaaa76f57e",
+              "rejection": null,
+              "memberWeights": [
+                1,
+                3
+              ]
+            }
+          }
+        },
+        "endpoints-withdrawn": {
+          "observedAt": "2026-11-25T09:35:07.684+00:00",
+          "controllerProfile": "withRejection",
+          "listener": "7ad62da6-806a-483d-9f04-83f773c8f38b",
+          "attachedRoutes": 2,
+          "conditions": {
+            "sibling": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/ForwardingTarget": {
+                "observedGeneration": 1,
+                "reason": "Observed",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/Programmed": {
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True"
+              }
+            },
+            "weighted": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/ForwardingTarget": {
+                "observedGeneration": 1,
+                "reason": "Observed",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/Programmed": {
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True"
+              }
+            }
+          },
+          "newConnections": {
+            "primary": 607,
+            "rejected": 193
+          },
+          "siblingConnections": {
+            "sibling": 80
+          },
+          "backendAccepts": {
+            "minority": {
+              "tcp": 0,
+              "tls": 0
+            },
+            "primary": {
+              "tcp": 607,
+              "tls": 607
+            },
+            "sibling": {
+              "tcp": 80,
+              "tls": 80
+            }
+          },
+          "unmatched": "rejected",
+          "sampleSHA256": "74ce766c4b424f8581a0074575cf5568d73faa905343bf4756ffabc1dbc81876",
+          "activeHAProxySHA256": "f8d0a964edd5c4be15c3c7bfb80156a4e48f23d72438278a7172a8f8f498ca7c",
+          "sni": {
+            "sibling.example.test": {
+              "policy": "4928ae56-8c7f-4108-84d3-c4078951ec8c",
+              "rule": "937845da-2b78-436e-be4e-1b13dd4de197",
+              "pool": "a7139c86-632f-4fa7-97b8-0e67d5ba08b4",
+              "rejection": null,
+              "memberWeights": [
+                1
+              ]
+            },
+            "weighted.example.test": {
+              "policy": "adc619eb-9f95-4d0b-b66f-cd1246aa7678",
+              "rule": "63f9ccca-6111-463e-a164-6af2cd3e07f5",
+              "pool": "1e716889-4d5f-48e1-87fe-34ff369f4ef2",
+              "rejection": {
+                "reject_weight": 1,
+                "total_weight": 4
+              },
+              "memberWeights": [
+                1
+              ]
+            }
+          },
+          "directMinorityConfirmed": true
+        },
+        "endpoints-restored": {
+          "observedAt": "2026-11-25T09:36:03.433+00:00",
+          "controllerProfile": "withRejection",
+          "listener": "7ad62da6-806a-483d-9f04-83f773c8f38b",
+          "attachedRoutes": 2,
+          "conditions": {
+            "sibling": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/ForwardingTarget": {
+                "observedGeneration": 1,
+                "reason": "Observed",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/Programmed": {
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True"
+              }
+            },
+            "weighted": {
+              "Accepted": {
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "status": "True"
+              },
+              "ResolvedRefs": {
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/ForwardingTarget": {
+                "observedGeneration": 1,
+                "reason": "Observed",
+                "status": "True"
+              },
+              "gateway-api-openstack.github.io/Programmed": {
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "status": "True"
+              }
+            }
+          },
+          "newConnections": {
+            "minority": 200,
+            "primary": 600
+          },
+          "siblingConnections": {
+            "sibling": 80
+          },
+          "backendAccepts": {
+            "minority": {
+              "tcp": 200,
+              "tls": 200
+            },
+            "primary": {
+              "tcp": 600,
+              "tls": 600
+            },
+            "sibling": {
+              "tcp": 80,
+              "tls": 80
+            }
+          },
+          "unmatched": "rejected",
+          "sampleSHA256": "6e0dc6203bf0f0baf16c19a036a21825f00dc9ebfc5541d08ac5279043d2db9c",
+          "activeHAProxySHA256": "9740272362ea08508ba7b8e1ec36f9ad278e89b9df9ac41bf354981817b5ed2e",
+          "sni": {
+            "sibling.example.test": {
+              "policy": "4928ae56-8c7f-4108-84d3-c4078951ec8c",
+              "rule": "937845da-2b78-436e-be4e-1b13dd4de197",
+              "pool": "a7139c86-632f-4fa7-97b8-0e67d5ba08b4",
+              "rejection": null,
+              "memberWeights": [
+                1
+              ]
+            },
+            "weighted.example.test": {
+              "policy": "197cc018-bb71-47c2-a00f-23abaa186c09",
+              "rule": "c9c41711-b4f6-4fe3-a8a0-866d1a4b4906",
+              "pool": "71247bea-c597-40fa-865d-47314387729d",
+              "rejection": null,
+              "memberWeights": [
+                1,
+                3
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "providerOnlyDetachedBatchReplay": [
+    {
+      "explicitSubnet": false,
+      "poolDetached": true,
+      "readbackReconstructedOriginalPayload": true,
+      "samePendingJobAfterRegionalOptOut": true
+    },
+    {
+      "explicitSubnet": true,
+      "poolDetached": true,
+      "readbackReconstructedOriginalPayload": true,
+      "samePendingJobAfterRegionalOptOut": true
+    }
+  ]
+}

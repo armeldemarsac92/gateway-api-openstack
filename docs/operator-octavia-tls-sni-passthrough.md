@@ -42,7 +42,7 @@ Set `spec.rules[0].backendRefs[].weight` to split new connections. For example, 
 
 To preserve the split when a Service loses its grant or its last ready endpoint, enable `enabled_tcp_connection_rejection_providers = amphora` in Octavia's `[api_settings]` and `--octavia-tcp-connection-rejection` on the controller. The region must advertise `tcp_connection_rejection_v1` in addition to the SNI capability. With that support, losing the backend of weight 1 rejects roughly one quarter of new connections. The other Service continues serving its share. Restoring the grant or the endpoints restores the split. Without proportional rejection, the controller withdraws forwarding for the affected name. [Regional Octavia build](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-xbackend-cookie-permanent-0a0c55cbc7c3) · [Connection rejection](operator-octavia-tcp-connection-rejection.md)
 
-On a terminating listener, multiple Services can receive plaintext TCP from Amphora. Backend re-encryption with a `BackendTLSPolicy` currently requires a rule with a single backend reference.
+On a terminating listener, multiple Services can receive plaintext TCP from Amphora. Backend re-encryption with a `BackendTLSPolicy` currently requires a rule with a single backend reference. [Local results on both channels](qualification/v1.7.0/provider/tlsroute-weighted-backends.md)
 
 ## Serve a wildcard TLS name
 
