@@ -100,7 +100,10 @@ func (p *Provider) withdrawBackendClientCertificate(ctx context.Context, spec cl
 		role, validRole := readRouteResourceRole(pool.Tags, rolePool)
 		if xBackendOnly {
 			if !slices.Contains(pool.Tags, xBackendTLSClientTag) || slices.Contains(pool.Tags, backendTLSClientTag) ||
-				!slices.ContainsFunc(targets[role.backend], func(owner Identity) bool { return owner.MatchesRoute(pool.Tags, role.raw) }) {
+				!slices.ContainsFunc(targets[role.backend], func(target xBackendClientPoolOwner) bool {
+					return target.owner.MatchesRoute(pool.Tags, role.raw) && (target.authorizedReference == "" ||
+						!tls.ClientRefObserved || pool.TLSContainerRef != target.authorizedReference || pool.ProvisioningStatus != "ACTIVE")
+				}) {
 				continue
 			}
 		} else if !staleBackendClientCertificate(pool, tls, spec.Gateway.BackendClientCertificate) {
@@ -157,7 +160,12 @@ func (p *Provider) withdrawBackendClientCertificate(ctx context.Context, spec cl
 	return result(cloud.ReadyOutcome()), nil
 }
 
-func (p *Provider) xBackendClientWithdrawalOwners(ctx context.Context, spec cloud.GatewayGraphSpec, gateway Identity, lb *octavia.LoadBalancer) (map[string][]Identity, error) {
+type xBackendClientPoolOwner struct {
+	owner               Identity
+	authorizedReference string
+}
+
+func (p *Provider) xBackendClientWithdrawalOwners(ctx context.Context, spec cloud.GatewayGraphSpec, gateway Identity, lb *octavia.LoadBalancer) (map[string][]xBackendClientPoolOwner, error) {
 	if len(spec.Gateway.XBackendClientWithdrawals) == 0 {
 		return nil, nil
 	}
@@ -174,7 +182,7 @@ func (p *Provider) xBackendClientWithdrawalOwners(ctx context.Context, spec clou
 			ports = append(ports, listener.ProtocolPort)
 		}
 	}
-	owners := make(map[string][]Identity)
+	owners := make(map[string][]xBackendClientPoolOwner)
 	for _, target := range spec.Gateway.XBackendClientWithdrawals {
 		parent := target.Route
 		parent.RouteNamespace, parent.RouteName, parent.RouteUID = "", "", ""
@@ -187,10 +195,11 @@ func (p *Provider) xBackendClientWithdrawalOwners(ctx context.Context, spec clou
 		}
 		key := openstackidentity.HTTPBackendPoolKey(cloud.HTTPBackend{Kind: cloud.HTTPBackendKindXBackend,
 			Namespace: target.Route.RouteNamespace, Name: target.BackendName})
-		owners[key] = append(owners[key], owner)
+		targetOwner := xBackendClientPoolOwner{owner: owner, authorizedReference: target.AuthorizedReference}
+		owners[key] = append(owners[key], targetOwner)
 		for _, port := range ports {
 			scoped := scopeHTTPKey(cloud.RouteSpec{ScopeHTTPResources: true, ScopedListenerPorts: []int{port}}, key)
-			owners[scoped] = append(owners[scoped], owner)
+			owners[scoped] = append(owners[scoped], targetOwner)
 		}
 	}
 	return owners, nil

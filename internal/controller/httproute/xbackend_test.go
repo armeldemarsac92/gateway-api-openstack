@@ -760,6 +760,24 @@ func TestXBackendServerOnlyExternalHostnameUsesItsOwnValidation(t *testing.T) {
 			require.NoError(t, provider.fenceErr)
 			require.Equal(t, []cloud.XBackendClientWithdrawal{{Route: controller.RouteIdentity(r.Config, f.gateway, f.route), BackendName: backend.Name}}, provider.withdrawals)
 
+			t.Run("rotation observes the authorized certificate during the list failure", func(t *testing.T) {
+				clientIdentity = rotated
+				defer func() { clientIdentity = "" }()
+				provider.withdrawals = nil
+				_, err := active.Reconcile(t.Context(), request)
+				require.Error(t, err)
+				require.NoError(t, provider.fenceErr)
+				require.Equal(t, []cloud.XBackendClientWithdrawal{{Route: controller.RouteIdentity(r.Config, f.gateway, f.route),
+					BackendName: backend.Name, AuthorizedReference: rotated}}, provider.withdrawals)
+
+				provider.withdrawals = nil
+				provider.beforeFence = func() { clientIdentity = first }
+				defer func() { provider.beforeFence = nil }()
+				_, _ = active.Reconcile(t.Context(), request)
+				require.ErrorContains(t, provider.fenceErr, "withdrawal authority changed")
+				require.Empty(t, provider.withdrawals)
+			})
+
 			t.Run("unreadable XBackend leaves its own pool untouched", func(t *testing.T) {
 				require.NoError(t, f.client.Get(t.Context(), key, f.route))
 				other := addExternalHostnameRule(t, f, f.route, "zz-unreadable")

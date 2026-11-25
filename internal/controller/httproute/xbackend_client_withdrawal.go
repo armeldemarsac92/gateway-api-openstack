@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"slices"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -45,7 +44,11 @@ func (r *Reconciler) ObserveXBackendClientWithdrawals(ctx context.Context, ident
 	if err != nil {
 		return nil, err
 	}
-	denials := make(map[types.NamespacedName]bool)
+	type observation struct {
+		reference string
+		known     bool
+	}
+	observed := make(map[types.NamespacedName]observation)
 	var targets []cloud.XBackendClientWithdrawal
 	var readErrors error
 	for i := range routes {
@@ -61,18 +64,19 @@ func (r *Reconciler) ObserveXBackendClientWithdrawals(ctx context.Context, ident
 		keys := model.LocalXBackendReferences(route)
 		slices.SortFunc(keys, func(a, b types.NamespacedName) int { return cmp.Compare(a.Name, b.Name) })
 		for _, key := range slices.Compact(keys) {
-			denied, checked := denials[key]
+			certificate, checked := observed[key]
 			if !checked {
-				var readErr error
-				denied, readErr = r.xBackendClientIdentityDenied(ctx, gateway.Spec.GatewayClassName, key)
+				reference, readErr := r.xBackendClientReference(ctx, gateway.Spec.GatewayClassName, key)
 				if readErr != nil {
 					readErrors = errors.Join(readErrors, fmt.Errorf("observe XBackend %s client identity: %w", key, readErr))
-					denied = false
 				}
-				denials[key] = denied
+				certificate = observation{reference: reference, known: readErr == nil}
+				observed[key] = certificate
 			}
-			if denied {
-				targets = append(targets, cloud.XBackendClientWithdrawal{Route: binding.Identity, BackendName: key.Name})
+			if certificate.known {
+				targets = append(targets, cloud.XBackendClientWithdrawal{
+					Route: binding.Identity, BackendName: key.Name, AuthorizedReference: certificate.reference,
+				})
 			}
 		}
 	}
@@ -86,15 +90,18 @@ func (r *Reconciler) ObserveXBackendClientWithdrawals(ctx context.Context, ident
 	return targets, readErrors
 }
 
-func (r *Reconciler) xBackendClientIdentityDenied(ctx context.Context, class gatewayv1.ObjectName, key types.NamespacedName) (bool, error) {
+func (r *Reconciler) xBackendClientReference(ctx context.Context, class gatewayv1.ObjectName, key types.NamespacedName) (string, error) {
 	var backend gatewayx.XBackend
 	if err := r.APIReader.Get(ctx, key, &backend); err != nil {
-		return apierrors.IsNotFound(err), client.IgnoreNotFound(err)
+		return "", client.IgnoreNotFound(err)
 	}
 	if !backend.DeletionTimestamp.IsZero() || backend.Spec.TLS == nil || backend.Spec.TLS.Mode != gatewayx.BackendTLSModeClientAndServer ||
 		!r.Config.XBackendClientCertificate || r.XBackendClientCertificates == nil {
-		return true, nil
+		return "", nil
 	}
 	reference, reason, _ := r.XBackendClientCertificates.ResolveXBackendClientCertificate(ctx, class, &backend)
-	return reference == "" || reason != "", ctx.Err()
+	if reason != "" {
+		return "", ctx.Err()
+	}
+	return reference, ctx.Err()
 }

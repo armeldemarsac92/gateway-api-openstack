@@ -322,7 +322,7 @@ func TestBackendTLSScalarQuarantinesBeforePublishingAndReopening(t *testing.T) {
 		require.Equal(t, true, xBackend["admin_state_up"])
 		require.Equal(t, newClient, xBackend["tls_container_ref"])
 
-		t.Run("only the denied XBackend holder is withdrawn", func(t *testing.T) {
+		t.Run("only the XBackend holder with stale credentials is withdrawn", func(t *testing.T) {
 			// Use the existing member and monitor inventory for the XBackend
 			// holder. Keep the same-named Service and a foreign pool active.
 			service := maps.Clone(thirdParty)
@@ -351,18 +351,30 @@ func TestBackendTLSScalarQuarantinesBeforePublishingAndReopening(t *testing.T) {
 			spec.Gateway.BackendClientCertificate = cloud.BackendClientCertificate{}
 			spec.Gateway.Spec.ScopedListeners = []cloud.ScopedListener{}
 			spec.Gateway.XBackendClientWithdrawals = []cloud.XBackendClientWithdrawal{{Route: id.Value(), BackendName: "weighted"}}
-			for _, expected := range []string{"disable", "drain", "forget-client"} {
-				writes = nil
-				result, err := provider.ReconcileGatewayGraph(t.Context(), spec)
-				require.NoError(t, err)
-				require.True(t, result.Outcome.MutationSubmitted)
-				require.Equal(t, []string{expected}, writes)
-			}
+			spec.Gateway.XBackendClientWithdrawals[0].AuthorizedReference = newClient
 			writes = nil
 			result, err := provider.ReconcileGatewayGraph(t.Context(), spec)
 			require.NoError(t, err)
 			require.Equal(t, cloud.OutcomeReady, result.Outcome.State)
 			require.Empty(t, writes)
+
+			for _, authorized := range []string{oldClient, ""} {
+				pool["admin_state_up"], pool["tls_container_ref"] = true, newClient
+				memberIDs = []map[string]string{{"id": "member-1"}}
+				spec.Gateway.XBackendClientWithdrawals[0].AuthorizedReference = authorized
+				for _, expected := range []string{"disable", "drain", "forget-client"} {
+					writes = nil
+					result, err := provider.ReconcileGatewayGraph(t.Context(), spec)
+					require.NoError(t, err)
+					require.True(t, result.Outcome.MutationSubmitted)
+					require.Equal(t, []string{expected}, writes)
+				}
+				writes = nil
+				result, err := provider.ReconcileGatewayGraph(t.Context(), spec)
+				require.NoError(t, err)
+				require.Equal(t, cloud.OutcomeReady, result.Outcome.State)
+				require.Empty(t, writes)
+			}
 			for _, untouched := range []map[string]any{service, thirdParty, xBackend, unreadable} {
 				require.Equal(t, true, untouched["admin_state_up"])
 				require.Equal(t, newClient, untouched["tls_container_ref"])

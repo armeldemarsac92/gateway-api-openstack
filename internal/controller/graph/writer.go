@@ -44,7 +44,7 @@ const (
 	WithdrawTLS Action = "WithdrawTLS"
 	// WithdrawBackendClientCertificate closes owned pools with stale identities.
 	WithdrawBackendClientCertificate Action = "WithdrawBackendClientCertificate"
-	// WithdrawXBackendClientCertificates closes pools with denied XBackend identities.
+	// WithdrawXBackendClientCertificates closes pools with stale XBackend identities.
 	WithdrawXBackendClientCertificates Action = "WithdrawXBackendClientCertificates"
 	// ReconcileTelemetry updates only the listener exporter and its collector backend.
 	ReconcileTelemetry Action = "ReconcileTelemetry"
