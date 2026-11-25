@@ -280,6 +280,7 @@ const HTTPBackendKindXBackend HTTPBackendKind = "gateway.networking.x-k8s.io/XBa
 // configured. Denied keeps
 // the backend's HTTP matches and weight while withholding all forwarding.
 type BackendTLSValidation struct {
+	Trust           BackendTLSTrust `json:",omitempty"`
 	Hostname        string
 	SubjectAltNames []BackendTLSSubjectAltName `json:",omitempty"`
 	CAConfigMapUID  string                     // UID of the ConfigMap or ClusterTrustBundle
@@ -289,6 +290,14 @@ type BackendTLSValidation struct {
 	// RequireH2 requires negotiated HTTP/2 on an authenticated HTTP XBackend.
 	RequireH2 bool `json:",omitempty"`
 }
+
+// BackendTLSTrust distinguishes a referenced CA from the Amphora system store.
+type BackendTLSTrust string
+
+const (
+	BackendTLSTrustReference BackendTLSTrust = ""
+	BackendTLSTrustSystem    BackendTLSTrust = "System"
+)
 
 // BackendTLSSubjectAltName is one typed certificate identity in Octavia's API.
 type BackendTLSSubjectAltName struct {

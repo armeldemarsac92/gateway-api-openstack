@@ -32,6 +32,7 @@ import (
 )
 
 const backendTLSManagedTag = "gateway-api-openstack.backend-tls=v1"
+const backendTLSSystemCATag = "gateway-api-openstack.backend-tls-system-ca=v1"
 const backendTLSRevisionTagPrefix = "gateway-api-openstack.backend-tls-ca="
 const backendTLSClientTag = "gateway-api-openstack.backend-tls-client=v1"
 const xBackendTLSClientTag = "gateway-api-openstack.xbackend-tls-client=v1"
@@ -52,6 +53,7 @@ const (
 	backendTLSClaim
 	backendTLSPublish
 	backendTLSConfigure
+	backendTLSAwaitSystemCA
 	backendTLSVerified
 	backendTLSRelease
 )
@@ -61,6 +63,7 @@ type backendTLSPlan struct {
 	settings               octavia.BackendTLSSettings
 	issue                  string
 	clearClientCertificate bool
+	retainServingOnly      bool
 }
 
 type backendTLSPart struct {
@@ -80,8 +83,12 @@ func (plan backendTLSPlan) allowsMembers() bool {
 	return plan.phase == backendTLSUnmanaged || plan.phase == backendTLSVerified
 }
 
+func (plan backendTLSPlan) stagesSystemCA() bool {
+	return plan.phase == backendTLSAwaitSystemCA
+}
+
 func hasObservedBackendTLS(pool pools.Pool, tls octavia.PoolBackendTLS) bool {
-	return slices.Contains(pool.Tags, backendTLSManagedTag) || tls.Hostname != "" || tls.RequireH2 || hasUnclearedBackendTLSSubjectAltNames(pool, tls)
+	return slices.Contains(pool.Tags, backendTLSManagedTag) || tls.Hostname != "" || tls.RequireH2 || hasUnclearedSystemCA(pool, tls) || hasUnclearedBackendTLSSubjectAltNames(pool, tls)
 }
 
 func (r desiredRoute) requiresBackendTLSH2() bool {
@@ -137,9 +144,18 @@ func backendTLSSubjectAltNamesMatch(names []cloud.BackendTLSSubjectAltName, obse
 	return !observed.backendTLS.SubjectAltNamesInvalid && slices.Equal(names, observed.backendTLS.SubjectAltNames)
 }
 
+func hasUnclearedSystemCA(pool pools.Pool, tls octavia.PoolBackendTLS) bool {
+	return tls.SystemCA || tls.SystemCAInvalid || tls.SystemCASHA256 != "" ||
+		slices.Contains(pool.Tags, backendTLSSystemCATag) && (!tls.SystemCAObserved || !tls.SystemCADigestObserved)
+}
+
+func configuredSystemCA(pool pools.Pool, tls octavia.PoolBackendTLS) bool {
+	return tls.SystemCAObserved && tls.SystemCA && pool.CATLSContainerRef == "" && pool.CRLContainerRef == ""
+}
+
 func hasBackendTLSSettings(pool pools.Pool, tls octavia.PoolBackendTLS) bool {
 	return tls.Hostname != "" || tls.RequireH2 || pool.TLSEnabled || pool.CATLSContainerRef != "" ||
-		pool.TLSContainerRef != "" || pool.CRLContainerRef != "" || hasUnclearedBackendTLSSubjectAltNames(pool, tls)
+		pool.TLSContainerRef != "" || pool.CRLContainerRef != "" || hasUnclearedSystemCA(pool, tls) || hasUnclearedBackendTLSSubjectAltNames(pool, tls)
 }
 
 func xBackendPoolWithoutTLS(pool pools.Pool, tls octavia.PoolBackendTLS) bool {
@@ -185,14 +201,18 @@ func (p *Provider) planBackendTLS(ctx context.Context, desired *desiredGatewayGr
 	if early != nil && !early.route.retry {
 		return early
 	}
-	type requirements struct{ requireH2, requireSAN bool }
-	capabilities := make(map[requirements]bool, 4)
-	capable := func(requireH2, requireSAN bool) bool {
-		key := requirements{requireH2: requireH2, requireSAN: requireSAN}
+	type requirements struct{ requireH2, requireSAN, systemCA bool }
+	capabilities := make(map[requirements]bool)
+	capable := func(requireH2, requireSAN, systemCA bool) bool {
+		key := requirements{requireH2: requireH2, requireSAN: requireSAN, systemCA: systemCA}
 		supported, checked := capabilities[key]
 		if !checked {
-			supported = p.backendTLSPolicy && p.backendCA != nil &&
-				p.verifyGatewayHTTPCapabilities(ctx, *desired, actual, backendTLSCapabilities(requireH2, requireSAN)) == nil
+			required := backendTLSCapabilities(requireH2, requireSAN)
+			if systemCA {
+				required = append(required, octavia.GatewayCapabilityBackendTLSSystemCA)
+			}
+			supported = p.backendTLSPolicy &&
+				p.verifyGatewayHTTPCapabilities(ctx, *desired, actual, required) == nil
 			capabilities[key] = supported
 		}
 		return supported
@@ -206,7 +226,8 @@ func (p *Provider) planBackendTLS(ctx context.Context, desired *desiredGatewayGr
 			// Keep the old pool and its durable marker until a live policy
 			// inventory authorizes the replacement representation.
 			if pool := part.observed.pool; pool != nil && hasObservedBackendTLS(*pool, part.observed.backendTLS) &&
-				(!desired.routes[part.index].spec.BackendTLSObserved || !capable(false, false)) {
+				(!desired.routes[part.index].spec.BackendTLSObserved || !capable(false, false, false) ||
+					pool.CATLSContainerRef != "" && p.backendCA == nil) {
 				desired.spec.Routes[part.index].Disposition = cloud.GraphPreserve
 				desired.routes[part.index].backendTLS = backendTLSPlan{phase: backendTLSBlocked, issue: "Waiting for a current backend TLS policy inventory before replacing the route pools"}
 			}
@@ -216,7 +237,14 @@ func (p *Provider) planBackendTLS(ctx context.Context, desired *desiredGatewayGr
 			part.desired.backendTLS = backendTLSPlan{phase: backendTLSBlocked, issue: "Waiting for the authorized HTTP listener"}
 			return part.desired.backendTLS
 		}
-		part.desired.backendTLS = p.observeBackendTLS(ctx, *part.desired, part.observed, capable, desired.spec.Gateway.BackendCAOwned, part.clientCertificate)
+		systemCA := part.desired.spec.BackendTLS != nil && part.desired.spec.BackendTLS.Trust == cloud.BackendTLSTrustSystem
+		part.desired.backendTLS = p.observeBackendTLS(ctx, *part.desired, part.observed, func(requireH2, requireSAN bool) bool {
+			if part.desired.spec.BackendTLS == nil && part.observed.pool != nil &&
+				part.observed.pool.CATLSContainerRef != "" && p.backendCA == nil {
+				return false
+			}
+			return capable(requireH2, requireSAN, systemCA)
+		}, desired.spec.Gateway.BackendCAOwned, part.clientCertificate)
 		return part.desired.backendTLS
 	})
 	if step != nil && (!step.route.retry || early == nil) {
@@ -298,8 +326,15 @@ func (part backendTLSPart) preflight() backendTLSPlan {
 	if pool.ProvisioningStatus != "ACTIVE" || !pool.AdminStateUp && len(part.observed.members) != 0 ||
 		!validBackendTLS(tls) || !backendTLSReadbackComplete(*part.desired, part.observed) || observed.Hostname != tls.Hostname ||
 		!backendTLSSubjectAltNamesMatch(tls.SubjectAltNames, part.observed) || !backendTLSProtocolMatches(*part.desired, part.observed) ||
-		!pool.TLSEnabled || pool.CATLSContainerRef == "" || part.observed.backendH2C || part.desired.spec.BackendH2C ||
+		!pool.TLSEnabled || part.observed.backendH2C || part.desired.spec.BackendH2C ||
 		pool.TLSContainerRef != part.clientCertificate.Reference || pool.CRLContainerRef != "" || differentBackendTLSRevision(pool.Tags, backendTLSRevisionTag(tls)) {
+		return backendTLSPlan{phase: backendTLSConfigure}
+	}
+	if tls.Trust == cloud.BackendTLSTrustSystem {
+		if !configuredSystemCA(*pool, observed) || !observed.SystemCAApplied() && len(part.observed.members) != 0 {
+			return backendTLSPlan{phase: backendTLSConfigure}
+		}
+	} else if pool.CATLSContainerRef == "" || hasUnclearedSystemCA(*pool, observed) {
 		return backendTLSPlan{phase: backendTLSConfigure}
 	}
 	return backendTLSPlan{}
@@ -314,7 +349,8 @@ func firstBackendTLSWithdrawal(parts []backendTLSPart, plan func(backendTLSPart)
 		}
 		protect := part.desired == nil || part.desired.spec.BackendTLS != nil
 		requiresClosedPool := part.desired != nil && protect && (part.desired.spec.GRPC ||
-			part.desired.spec.BackendTLS != nil && len(part.desired.spec.BackendTLS.SubjectAltNames) != 0)
+			part.desired.spec.BackendTLS != nil && (len(part.desired.spec.BackendTLS.SubjectAltNames) != 0 ||
+				part.desired.spec.BackendTLS.Trust == cloud.BackendTLSTrustSystem))
 		tlsPlan := plan(part)
 		var step *routeMutation
 		if part.desired != nil && part.desired.xBackend && !part.retiring {
@@ -346,7 +382,10 @@ func (plan backendTLSPlan) xBackendWithdrawal(observed observedRouteGraph, wants
 	if pool == nil || plan.allowsMembers() {
 		return nil
 	}
-	if wantsClientCertificate || pool.TLSContainerRef != "" || slices.Contains(pool.Tags, xBackendTLSClientTag) ||
+	if plan.stagesSystemCA() && len(observed.members) == 0 && pool.ProvisioningStatus == "ACTIVE" {
+		return nil
+	}
+	if hasUnclearedSystemCA(*pool, observed.backendTLS) || wantsClientCertificate || pool.TLSContainerRef != "" || slices.Contains(pool.Tags, xBackendTLSClientTag) ||
 		observed.backendTLS.RequireH2 || slices.Contains(pool.Tags, backendTLSManagedTag) && slices.Contains(pool.ALPNProtocols, xBackendHTTP2ALPN) {
 		// Close before draining a client identity or reloading an enrolled
 		// HTTP/2 pool. The authenticated renderer keeps the match reserved.
@@ -397,7 +436,7 @@ func (p *Provider) observeBackendTLS(ctx context.Context, desired desiredRoute, 
 		if !desired.spec.BackendTLSObserved || !slices.Contains(pool.Tags, backendTLSManagedTag) || !capable(false, false) {
 			return blocked("Waiting for an authorized BackendTLSPolicy snapshot")
 		}
-		if !backendTLSReadbackComplete(desired, observed) ||
+		if !backendTLSReadbackComplete(desired, observed) || !systemCAModeReadbackComplete(*pool, observed.backendTLS) ||
 			desired.xBackend && slices.Contains(pool.Tags, xBackendTLSClientTag) && !observed.backendTLS.ALPNObserved {
 			return blocked("Waiting for complete Octavia backend TLS readback")
 		}
@@ -414,12 +453,16 @@ func (p *Provider) observeBackendTLS(ctx context.Context, desired desiredRoute, 
 		return backendTLSPlan{phase: backendTLSBlocked, issue: "Waiting for an authorized Gateway backend client certificate", clearClientCertificate: true}
 	}
 	if !validBackendTLS(tls) || desired.spec.BackendH2C {
-		return blocked("Backend TLS requires a valid CA and DNS hostname on an HTTP backend")
+		return blocked("Backend TLS requires valid trust and a DNS hostname")
 	}
+	systemCA := tls.Trust == cloud.BackendTLSTrustSystem
 	if desired.xBackend && !p.poolALPN {
 		return blocked("Authenticated XBackends require Octavia API microversion 2.24 or newer")
 	}
 	if !capable(desired.requiresBackendTLSH2(), len(tls.SubjectAltNames) != 0) {
+		if systemCA {
+			return blocked("Waiting for Octavia to advertise system CA trust for the selected backend protocol")
+		}
 		if len(tls.SubjectAltNames) != 0 {
 			return blocked("Waiting for Octavia to advertise explicit backend TLS subjectAltNames for the selected protocol")
 		}
@@ -428,26 +471,38 @@ func (p *Provider) observeBackendTLS(ctx context.Context, desired desiredRoute, 
 		}
 		return blocked("Waiting for Octavia to advertise authenticated backend TLS")
 	}
-	if pool != nil && !backendTLSReadbackComplete(desired, observed) {
+	if pool != nil && (!backendTLSReadbackComplete(desired, observed) ||
+		!systemCAModeReadbackComplete(*pool, observed.backendTLS)) {
 		return blocked("Waiting for complete Octavia backend TLS readback")
 	}
-	if !ownsCA {
-		return backendTLSPlan{phase: backendTLSClaim}
-	}
+	settings := octavia.BackendTLSSettings{Hostname: tls.Hostname, ClientCertificateReference: clientCertificate.Reference}
 	var preferred string
 	if pool != nil {
 		preferred = pool.CATLSContainerRef
 	}
-	revision, err := p.backendCA.Find(ctx, desired.spec.Identity.GatewayUID, tls.CAConfigMapUID, tls.CADigest, preferred)
-	switch {
-	case err != nil:
-		return blocked("Waiting to verify the backend CA in Barbican")
-	case revision.Reference() == "":
-		return backendTLSPlan{phase: backendTLSPublish}
-	case revision.Digest() != tls.CADigest:
-		return blocked("Waiting for the authorized backend CA revision")
+	if systemCA {
+		settings.SystemCA = boolPointer(true)
+	} else {
+		if p.backendCA == nil {
+			return blocked("Waiting for a regional Barbican CA store")
+		}
+		if !ownsCA {
+			return backendTLSPlan{phase: backendTLSClaim}
+		}
+		revision, err := p.backendCA.Find(ctx, desired.spec.Identity.GatewayUID, tls.CAConfigMapUID, tls.CADigest, preferred)
+		switch {
+		case err != nil:
+			return blocked("Waiting to verify the backend CA in Barbican")
+		case revision.Reference() == "":
+			return backendTLSPlan{phase: backendTLSPublish}
+		case revision.Digest() != tls.CADigest:
+			return blocked("Waiting for the authorized backend CA revision")
+		}
+		settings.CAReference = revision.Reference()
+		if pool != nil && hasUnclearedSystemCA(*pool, observed.backendTLS) {
+			settings.SystemCA = boolPointer(false)
+		}
 	}
-	settings := octavia.BackendTLSSettings{Hostname: tls.Hostname, CAReference: revision.Reference(), ClientCertificateReference: clientCertificate.Reference}
 	switch {
 	case len(tls.SubjectAltNames) != 0:
 		settings.SubjectAltNames = tls.SubjectAltNames
@@ -461,20 +516,43 @@ func (p *Provider) observeBackendTLS(ctx context.Context, desired desiredRoute, 
 	}
 	if pool == nil || pool.ProvisioningStatus != "ACTIVE" || !pool.TLSEnabled || observed.backendTLS.Hostname != settings.Hostname ||
 		!backendTLSSubjectAltNamesMatch(tls.SubjectAltNames, observed) || preferred != settings.CAReference || observed.backendH2C || !backendTLSProtocolMatches(desired, observed) ||
-		pool.TLSContainerRef != settings.ClientCertificateReference || pool.CRLContainerRef != "" {
+		pool.TLSContainerRef != settings.ClientCertificateReference || pool.CRLContainerRef != "" ||
+		systemCA && !configuredSystemCA(*pool, observed.backendTLS) ||
+		!systemCA && hasUnclearedSystemCA(*pool, observed.backendTLS) ||
+		differentBackendTLSRevision(pool.Tags, backendTLSRevisionTag(tls)) {
 		return backendTLSPlan{phase: backendTLSConfigure, settings: settings}
+	}
+	if systemCA && (!pool.AdminStateUp || !observed.backendTLS.SystemCAApplied()) {
+		return backendTLSPlan{phase: backendTLSAwaitSystemCA, settings: settings,
+			issue: "Waiting for Octavia to verify the applied Amphora system CA bundle"}
 	}
 	return backendTLSPlan{phase: backendTLSVerified, settings: settings}
 }
 
+func systemCAModeReadbackComplete(pool pools.Pool, tls octavia.PoolBackendTLS) bool {
+	return !slices.Contains(pool.Tags, backendTLSSystemCATag) || tls.SystemCAObserved && tls.SystemCADigestObserved
+}
+
 func validBackendTLS(tls *cloud.BackendTLSValidation) bool {
-	digest := sha256.Sum256(tls.CAPEM)
 	names, err := amphora.NormalizeBackendTLSSubjectAltNames(tls.SubjectAltNames)
-	return err == nil && slices.Equal(tls.SubjectAltNames, names) && tls.CAConfigMapUID != "" && len(tls.CAPEM) != 0 && hex.EncodeToString(digest[:]) == tls.CADigest &&
-		amphora.ValidateExactHostname(tls.Hostname) == nil
+	if err != nil || !slices.Equal(tls.SubjectAltNames, names) || amphora.ValidateExactHostname(tls.Hostname) != nil {
+		return false
+	}
+	switch tls.Trust {
+	case cloud.BackendTLSTrustSystem:
+		return tls.CAConfigMapUID == "" && tls.CADigest == "" && len(tls.CAPEM) == 0
+	case cloud.BackendTLSTrustReference:
+		digest := sha256.Sum256(tls.CAPEM)
+		return tls.CAConfigMapUID != "" && len(tls.CAPEM) != 0 && hex.EncodeToString(digest[:]) == tls.CADigest
+	default:
+		return false
+	}
 }
 
 func backendTLSRevisionTag(tls *cloud.BackendTLSValidation) string {
+	if tls.Trust == cloud.BackendTLSTrustSystem {
+		return backendTLSRevisionTagPrefix + "system"
+	}
 	digest := sha256.Sum256([]byte(tls.CAConfigMapUID + "\x00" + tls.CADigest))
 	return backendTLSRevisionTagPrefix + hex.EncodeToString(digest[:])
 }
@@ -487,7 +565,8 @@ func differentBackendTLSRevision(tags []string, expected string) bool {
 
 func backendTLSTags(tags []string, managed bool, revision string, clientCertificate, trackSAN bool) []string {
 	tags = slices.DeleteFunc(slices.Clone(tags), func(tag string) bool {
-		return tag == backendTLSManagedTag || tag == backendTLSClientTag || tag == xBackendTLSClientTag || strings.HasPrefix(tag, backendTLSRevisionTagPrefix)
+		return tag == backendTLSManagedTag || tag == backendTLSClientTag || tag == xBackendTLSClientTag ||
+			!managed && tag == backendTLSSystemCATag || strings.HasPrefix(tag, backendTLSRevisionTagPrefix)
 	})
 	if managed {
 		tags = append(tags, backendTLSManagedTag)
@@ -507,6 +586,9 @@ func backendTLSTags(tags []string, managed bool, revision string, clientCertific
 func (plan backendTLSPlan) poolTags(desired desiredRoute, tags []string) []string {
 	clientCertificate := plan.settings.ClientCertificateReference != ""
 	tags = backendTLSTags(tags, true, backendTLSRevisionTag(desired.spec.BackendTLS), clientCertificate && !desired.xBackend, plan.settings.SubjectAltNames != nil)
+	if desired.spec.BackendTLS.Trust == cloud.BackendTLSTrustSystem && !slices.Contains(tags, backendTLSSystemCATag) {
+		tags = append(tags, backendTLSSystemCATag)
+	}
 	if clientCertificate && desired.xBackend {
 		tags = append(tags, xBackendTLSClientTag)
 	}
@@ -516,6 +598,9 @@ func (plan backendTLSPlan) poolTags(desired desiredRoute, tags []string) []strin
 func (plan backendTLSPlan) withdrawal(protect, requiresClosedPool bool, observed observedRouteGraph) *routeMutation {
 	pool := observed.pool
 	if pool == nil || plan.allowsMembers() || pool.ProvisioningStatus != "ACTIVE" && pool.ProvisioningStatus != "ERROR" {
+		return nil
+	}
+	if plan.stagesSystemCA() && len(observed.members) == 0 && pool.ProvisioningStatus == "ACTIVE" {
 		return nil
 	}
 	managed := slices.Contains(pool.Tags, backendTLSManagedTag)
@@ -546,7 +631,7 @@ func (plan backendTLSPlan) withdrawal(protect, requiresClosedPool bool, observed
 }
 
 func (plan backendTLSPlan) poolMutation(desired desiredRoute, observed observedRouteGraph) *routeMutation {
-	if plan.phase == backendTLSUnmanaged {
+	if plan.phase == backendTLSUnmanaged || plan.stagesSystemCA() && desired.zeroWeightOnly {
 		return nil
 	}
 	if plan.phase == backendTLSClaim {
@@ -611,6 +696,9 @@ func (plan backendTLSPlan) poolMutation(desired desiredRoute, observed observedR
 						step.poolTags = new(append(slices.Clone(pool.Tags), backendTLSSANTag))
 					}
 				}
+				if hasUnclearedSystemCA(*pool, observed.backendTLS) {
+					step.backendTLS.SystemCA = boolPointer(false)
+				}
 				if observed.backendTLS.RequireH2 {
 					step.backendTLS.RequireH2 = boolPointer(false)
 				}
@@ -640,19 +728,35 @@ func (plan backendTLSPlan) poolMutation(desired desiredRoute, observed observedR
 	if desired.spec.BackendTLS != nil && !slices.Contains(pool.Tags, backendTLSManagedTag) {
 		step.poolTags = new(append(slices.Clone(pool.Tags), backendTLSManagedTag))
 	}
-	if plan.phase == backendTLSConfigure || plan.phase == backendTLSVerified {
+	if plan.phase == backendTLSConfigure || plan.stagesSystemCA() || plan.phase == backendTLSVerified {
 		revision := backendTLSRevisionTag(desired.spec.BackendTLS)
 		clientCertificate := plan.settings.ClientCertificateReference != ""
 		trackSAN := plan.settings.SubjectAltNames != nil
+		clearedSystem := plan.phase == backendTLSVerified && desired.spec.BackendTLS.Trust != cloud.BackendTLSTrustSystem &&
+			slices.Contains(pool.Tags, backendTLSSystemCATag) && !hasUnclearedSystemCA(*pool, observed.backendTLS)
 		if step.poolTags != nil || !slices.Contains(pool.Tags, revision) || differentBackendTLSRevision(pool.Tags, revision) ||
 			slices.Contains(pool.Tags, backendTLSClientTag) != (clientCertificate && !desired.xBackend) ||
-			slices.Contains(pool.Tags, xBackendTLSClientTag) != (clientCertificate && desired.xBackend) || trackSAN && !slices.Contains(pool.Tags, backendTLSSANTag) {
-			step.poolTags = new(plan.poolTags(desired, pool.Tags))
+			slices.Contains(pool.Tags, xBackendTLSClientTag) != (clientCertificate && desired.xBackend) ||
+			desired.spec.BackendTLS.Trust == cloud.BackendTLSTrustSystem && !slices.Contains(pool.Tags, backendTLSSystemCATag) ||
+			clearedSystem || trackSAN && !slices.Contains(pool.Tags, backendTLSSANTag) {
+			tags := plan.poolTags(desired, pool.Tags)
+			if clearedSystem {
+				tags = slices.DeleteFunc(tags, func(tag string) bool { return tag == backendTLSSystemCATag })
+			}
+			step.poolTags = &tags
 		}
 	}
 	switch {
 	case plan.phase == backendTLSConfigure:
-		if len(observed.members) != 0 || pool.AdminStateUp && (plan.settings.ClientCertificateReference != "" || plan.settings.SubjectAltNames != nil) {
+		if len(observed.members) != 0 {
+			return nil
+		}
+		if pool.AdminStateUp && plan.settings.SystemCA != nil {
+			step.poolTags = nil
+			step.poolAdmin = boolPointer(false)
+			return &step
+		}
+		if pool.AdminStateUp && (plan.settings.ClientCertificateReference != "" || plan.settings.SubjectAltNames != nil) {
 			return nil
 		}
 		step.backendTLS = &plan.settings
@@ -662,6 +766,8 @@ func (plan backendTLSPlan) poolMutation(desired desiredRoute, observed observedR
 		if observed.backendH2C {
 			step.backendH2C = boolPointer(false)
 		}
+	case plan.stagesSystemCA() && !pool.AdminStateUp && len(observed.members) == 0:
+		step.poolAdmin = boolPointer(true)
 	case plan.phase == backendTLSVerified && !pool.AdminStateUp:
 		step.poolAdmin = boolPointer(true)
 		if desired.requiresBackendTLSH2() || len(plan.settings.SubjectAltNames) != 0 {

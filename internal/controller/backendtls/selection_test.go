@@ -230,9 +230,9 @@ func TestEvaluateUnsupportedTLSValidation(t *testing.T) {
 		change     func(*gatewayv1.BackendTLSPolicyValidation)
 		diagnostic string
 	}{
-		{"system trust", func(v *gatewayv1.BackendTLSPolicyValidation) {
+		{"unknown CA set", func(v *gatewayv1.BackendTLSPolicyValidation) {
 			v.CACertificateRefs = nil
-			v.WellKnownCACertificates = ptr.To(gatewayv1.WellKnownCACertificatesSystem)
+			v.WellKnownCACertificates = ptr.To(gatewayv1.WellKnownCACertificatesType("example.com/Private"))
 		}, "Well-known"},
 		{"IP SAN", func(v *gatewayv1.BackendTLSPolicyValidation) {
 			v.SubjectAltNames = []gatewayv1.SubjectAltName{{Type: gatewayv1.HostnameSubjectAltNameType, Hostname: "192.0.2.1"}}
@@ -260,6 +260,18 @@ func TestEvaluateUnsupportedTLSValidation(t *testing.T) {
 			requireCondition(t, result.Winner.ResolvedRefs, metav1.ConditionTrue, gatewayv1.BackendTLSPolicyReasonResolvedRefs)
 		})
 	}
+}
+
+func TestEvaluateConflictingBackendTLSCAModes(t *testing.T) {
+	service := testService()
+	policy := testPolicy("policy", "")
+	policy.Spec.Validation.WellKnownCACertificates = ptr.To(gatewayv1.WellKnownCACertificatesSystem)
+	result := Evaluate(service, &service.Spec.Ports[0], []gatewayv1.BackendTLSPolicy{policy}, CAInputs{})
+	require.NotNil(t, result.Winner)
+	require.Nil(t, result.Winner.Validation)
+	requireCondition(t, result.Winner.Accepted, metav1.ConditionFalse, gatewayv1.PolicyReasonInvalid)
+	requireCondition(t, result.Winner.ResolvedRefs, metav1.ConditionFalse, gatewayv1.BackendTLSPolicyReasonInvalidCACertificateRef)
+	require.Contains(t, result.Winner.Accepted.Message, "Specify either")
 }
 
 func TestEvaluateBackendTLSSubjectAltNames(t *testing.T) {

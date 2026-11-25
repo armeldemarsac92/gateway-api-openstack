@@ -434,7 +434,7 @@ func (p *Provider) verifyTelemetryCapabilities(ctx context.Context, provider str
 	var missingTrust bool
 	if wanted != nil && wanted.BackendTLS != nil {
 		tls := wanted.BackendTLS
-		missingTrust = !p.backendTLSPolicy || p.backendCA == nil || !validBackendTLS(tls) || gateway.BackendClientCertificate.Denied || !gateway.BackendCAOwned
+		missingTrust = tls.Trust != cloud.BackendTLSTrustReference || !p.backendTLSPolicy || p.backendCA == nil || !validBackendTLS(tls) || gateway.BackendClientCertificate.Denied || !gateway.BackendCAOwned
 		if !missingTrust {
 			required = append(required, backendTLSCapabilities(false, len(tls.SubjectAltNames) != 0)...)
 		}

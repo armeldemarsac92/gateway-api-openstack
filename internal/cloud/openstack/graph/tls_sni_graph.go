@@ -692,7 +692,7 @@ func readySNIRoutes(desired desiredGatewayGraph, actual observedGatewayGraph) ma
 func (fragment *observedSNIFragment) ready(target desiredSNIFragment) bool {
 	return fragment.policy != nil && fragment.policy.AdminStateUp && fragment.rule != nil && fragment.matches(target) &&
 		(target.usesBackendPools() && fragment.backendPoolsReady(target) ||
-			!target.usesBackendPools() && fragment.pool != nil && fragment.pool.AdminStateUp && len(fragment.members) == len(target.route.Members))
+			!target.usesBackendPools() && !target.backendTLS.stagesSystemCA() && fragment.pool != nil && fragment.pool.AdminStateUp && len(fragment.members) == len(target.route.Members))
 }
 
 func sniDeletionStep(fragment *observedSNIFragment) graphMutation {
@@ -867,8 +867,9 @@ func (p *Provider) buildSNIGraphPlan(desired desiredGatewayGraph, actual observe
 		fragment := actual.sni[key]
 		target := byHostname[fragment.forwardingHostname()]
 		retiring := slices.Contains(retire, key)
+		current := wanted[key]
 		closing := cloud.IsTCPTLSListenerProtocol(desired.protocol) &&
-			(desired.sniHeldClosed[key] || retiring && (fragment.protectedBackendTLS() || target.route.BackendTLS != nil))
+			(current.backendTLS.stagesSystemCA() && (len(fragment.members) != 0 || fragment.membersUnverified) || desired.sniHeldClosed[key] || retiring && (fragment.protectedBackendTLS() || target.route.BackendTLS != nil))
 		if closing && !fragment.closedBackendPool() {
 			if leaf := fragment.firstOpenPool(); leaf != nil {
 				return plan(sniDisablePoolStep(leaf))
@@ -1005,6 +1006,10 @@ func (p *Provider) buildSNIGraphPlan(desired desiredGatewayGraph, actual observe
 	}
 	if slices.ContainsFunc(desired.sni, func(target desiredSNIFragment) bool { return target.weightedBlocked }) {
 		result.Outcome = p.progressingOutcome("Waiting for verified Octavia weighted TLS SNI backends")
+	} else if slices.ContainsFunc(desired.sni, func(target desiredSNIFragment) bool {
+		return target.backendTLS.stagesSystemCA() || slices.ContainsFunc(target.backendPoolPlans, backendTLSPlan.stagesSystemCA)
+	}) {
+		result.Outcome = p.progressingOutcome("Waiting for Octavia to verify the applied Amphora system CA bundle")
 	}
 	return nil, result, nil
 }
@@ -1105,9 +1110,13 @@ func nextSNIFragmentMutation(target desiredSNIFragment, fragment *observedSNIFra
 		mutation.kind = sniPublishBackendCA
 	case fragment == nil:
 		mutation.kind = sniCreatePool
-	case target.route.TCPConnectionRejection != nil && !sameSNIRejection(fragment.tcpRejection.Value, target.route.TCPConnectionRejection):
+	case !target.backendTLS.stagesSystemCA() && target.route.TCPConnectionRejection != nil && !sameSNIRejection(fragment.tcpRejection.Value, target.route.TCPConnectionRejection):
 		mutation.kind, mutation.parentID = sniReplaceTCPMembers, fragment.pool.ID
-	case len(fragment.members) != len(target.route.Members):
+	case target.backendTLS.stagesSystemCA() && fragment.membersUnverified:
+		return graphMutation{}, false
+	case target.backendTLS.stagesSystemCA() && len(fragment.members) != 0:
+		mutation.kind, mutation.parentID = sniClearMembers, fragment.pool.ID
+	case !target.backendTLS.stagesSystemCA() && len(fragment.members) != len(target.route.Members):
 		mutation.kind, mutation.parentID = sniCreateMember, fragment.pool.ID
 		for _, member := range target.route.Members {
 			if !slices.ContainsFunc(fragment.members, func(m pools.Member) bool { return m.Address == member.Address && m.ProtocolPort == member.Port }) {
@@ -1126,7 +1135,8 @@ func nextSNIFragmentMutation(target desiredSNIFragment, fragment *observedSNIFra
 	default:
 		return graphMutation{}, false
 	}
-	return graphMutation{kind: graphSNIMutation, sni: mutation, redactTLSError: target.route.BackendTLS != nil, message: "Converging the TLS SNI route"}, true
+	return graphMutation{kind: graphSNIMutation, sni: mutation, sniWithdrawal: mutation.kind == sniClearMembers,
+		redactTLSError: target.route.BackendTLS != nil, message: "Converging the TLS SNI route"}, true
 }
 
 type sniMutationKind uint8
@@ -1192,6 +1202,9 @@ func (p *Provider) executeSNIMutation(ctx context.Context, desired desiredGatewa
 		}
 		if tls := step.target.route.BackendTLS; tls != nil {
 			opts.Tags = backendTLSTags(opts.Tags, true, backendTLSRevisionTag(tls), false, false)
+			if tls.Trust == cloud.BackendTLSTrustSystem {
+				opts.Tags = append(opts.Tags, backendTLSSystemCATag)
+			}
 		}
 		if step.target.route.BackendTLS != nil || step.poolSlot != nil && step.target.route.ServiceUID != "" {
 			opts.Tags = append(opts.Tags, sniBackendServiceTag(step.target.route))
@@ -1204,7 +1217,7 @@ func (p *Provider) executeSNIMutation(ctx context.Context, desired desiredGatewa
 			opts.AdminStateUp = boolPointer(false)
 			opts.TLSEnabled = true
 			opts.CATLSContainerRef = step.target.backendTLS.settings.CAReference
-			builder = octavia.CreatePoolOpts{CreateOpts: opts, BackendTLSHostname: tls.Hostname}
+			builder = octavia.CreatePoolOpts{CreateOpts: opts, BackendTLSHostname: tls.Hostname, BackendTLSSystemCA: tls.Trust == cloud.BackendTLSTrustSystem}
 		} else if cloud.IsTCPTLSListenerProtocol(actual.protocol) {
 			builder = octavia.PlaintextTCPPoolOpts{CreateOpts: opts}
 		}

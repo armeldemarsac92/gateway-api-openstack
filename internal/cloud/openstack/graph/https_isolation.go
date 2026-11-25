@@ -353,7 +353,8 @@ func liveHTTPSPolicies(desired desiredGatewayGraph, actual observedGatewayGraph)
 	for index, route := range parts.routes {
 		observed := readback.routes[index]
 		authorized := parts.spec.Routes[index].Disposition == cloud.GraphEnsure && route.redirectIssue == nil &&
-			route.backendTLS.allowsMembers() && !route.backendTransportNeedsWithdrawal(observed)
+			(route.backendTLS.allowsMembers() || route.backendTLS.stagesSystemCA() && len(observed.members) == 0) &&
+			!route.backendTransportNeedsWithdrawal(observed)
 		if authorized && route.unavailable && !route.fixedResponse {
 			withdrawal, hold := httpMemberWithdrawal(observed)
 			authorized = len(withdrawal) == 0 && hold == ""

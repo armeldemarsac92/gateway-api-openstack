@@ -322,6 +322,10 @@ func (r *Reconciler) resolveTelemetryCollector(ctx context.Context, snapshot *ga
 				rejected = telemetryIssue{"UnsupportedValue", "The collector requires an applicable, verifiable BackendTLSPolicy"}
 				return
 			}
+			if selection.Winner.Validation.Trust == cloud.BackendTLSTrustSystem {
+				rejected = telemetryIssue{"UnsupportedValue", "The collector backend TLS profile requires an explicit CA reference"}
+				return
+			}
 			transport = selection.Winner.Validation.CloudValidation()
 			var live gatewayv1.BackendTLSPolicy
 			if err = r.APIReader.Get(ctx, selection.Winner.Key, &live); err != nil {

@@ -18,6 +18,7 @@ package octavia
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/gophercloud/gophercloud/v2"
@@ -106,5 +107,54 @@ func TestPoolInventoryRequiresExplicitTLSReadback(t *testing.T) {
 		if tls := inventory.BackendTLS[id]; !tls.SubjectAltNamesObserved || !tls.SubjectAltNamesInvalid || len(tls.SubjectAltNames) != 0 {
 			t.Errorf("pool %q should have unusable SAN readback: %+v", id, tls)
 		}
+	}
+}
+
+func TestPoolSystemCAFields(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"pools":[
+			{"id":"legacy"},
+			{"id":"empty","backend_tls_system_ca":true,"backend_tls_system_ca_sha256":null},
+			{"id":"applied","backend_tls_system_ca":true,"backend_tls_system_ca_sha256":"` + strings.Repeat("a", 64) + `"},
+			{"id":"malformed","backend_tls_system_ca":true,"backend_tls_system_ca_sha256":"` + strings.Repeat("A", 64) + `"},
+			{"id":"wrong-mode","backend_tls_system_ca":"true","backend_tls_system_ca_sha256":"` + strings.Repeat("a", 64) + `"},
+			{"id":"cleared","backend_tls_system_ca":false,"backend_tls_system_ca_sha256":null}
+		]}`))
+	})
+	service := NewService(&gophercloud.ServiceClient{
+		ProviderClient: &gophercloud.ProviderClient{HTTPClient: http.Client{Transport: loadBalancerTestTransport{handler}}},
+		Endpoint:       "http://octavia.test/",
+	})
+	list, err := service.ListPoolInventory(t.Context(), pools.ListOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, obs := range list.Items {
+		tls := list.BackendTLS[obs.ID]
+		if tls.SystemCAApplied() != (obs.ID == "applied") {
+			t.Errorf("incorrect proof classification for %s", obs.ID)
+		}
+	}
+	if list.BackendTLS["legacy"].SystemCAObserved || !list.BackendTLS["cleared"].SystemCAObserved || !list.BackendTLS["cleared"].SystemCADigestObserved {
+		t.Fatal("legacy fields and an explicit clear must be distinguishable")
+	}
+	create := CreatePoolOpts{CreateOpts: pools.CreateOpts{Protocol: pools.ProtocolHTTP, LBMethod: pools.LBMethodRoundRobin, LoadbalancerID: "lb"},
+		BackendTLSHostname: "backend.example.test", BackendTLSSystemCA: true}
+	body, err := create.ToPoolCreateMap()
+	if err != nil || body["pool"].(map[string]any)["backend_tls_system_ca"] != true {
+		t.Fatalf("create did not send system trust: %v, %v", body, err)
+	}
+	update := UpdatePoolOpts{BackendTLS: &BackendTLSSettings{Hostname: "backend.example.test", SystemCA: new(true)}}
+	body, err = update.ToPoolUpdateMap()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire := body["pool"].(map[string]any)
+	if ref, found := wire["ca_tls_container_ref"]; !found || ref != nil || wire["backend_tls_system_ca"] != true {
+		t.Fatalf("system trust must explicitly remove the CA reference: %v", wire)
+	}
+	if _, found := wire["backend_tls_system_ca_sha256"]; found {
+		t.Fatalf("update sent a read only digest: %v", wire)
 	}
 }

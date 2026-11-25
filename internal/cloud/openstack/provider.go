@@ -87,6 +87,16 @@ func (p *Provider) TelemetryBackendTLSAvailable(ctx context.Context, requireSAN 
 	return p.graph.TelemetryBackendTLSAvailable(ctx, requireSAN)
 }
 
+// BackendTLSSystemCAAvailable discovers system trust for the selected HTTP profile.
+func (p *Provider) BackendTLSSystemCAAvailable(ctx context.Context, requireH2, requireSAN, xBackend bool) (bool, error) {
+	return p.graph.BackendTLSSystemCAAvailable(ctx, requireH2, requireSAN, xBackend)
+}
+
+// TCPBackendTLSSystemCAAvailable discovers system trust for terminating TLSRoutes.
+func (p *Provider) TCPBackendTLSSystemCAAvailable(ctx context.Context, weighted bool) (bool, error) {
+	return p.graph.TCPBackendTLSSystemCAAvailable(ctx, weighted)
+}
+
 // TCPBackendTLSAvailable discovers authenticated backend TLS for TLSRoute termination.
 func (p *Provider) TCPBackendTLSAvailable(ctx context.Context) (bool, error) {
 	return p.graph.TCPBackendTLSAvailable(ctx)

@@ -31,6 +31,48 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestTLSRouteSystemCAActivatesEmptySelectorBeforeMember(t *testing.T) {
+	id := safetyTestIdentity(t)
+	route := cloud.TLSSNIRoute{Identity: id.Value(), Hostname: "tls.example.test",
+		ServiceUID: "service", ServicePort: 8443, Members: []cloud.Member{{Address: "192.0.2.10", Port: 8443}},
+		BackendTLS: &cloud.BackendTLSValidation{Trust: cloud.BackendTLSTrustSystem, Hostname: "backend.example.test"}}
+	targets, err := buildSNITargets(id.Value(), []cloud.TLSSNIRoute{route})
+	require.NoError(t, err)
+	target := targets[0]
+	fragment := activeSNIFragment(target, "system")
+	fragment.pool.Tags = []string{backendTLSManagedTag, backendTLSSystemCATag, backendTLSRevisionTag(route.BackendTLS), sniBackendServiceTag(route)}
+	fragment.pool.TLSEnabled, fragment.pool.AdminStateUp = true, false
+	fragment.policy.AdminStateUp = false
+	fragment.members = nil
+	fragment.backendTLS = octavia.PoolBackendTLS{Hostname: route.BackendTLS.Hostname, HostnameObserved: true,
+		AdminObserved: true, EnabledObserved: true, CAObserved: true, ClientRefObserved: true,
+		SystemCA: true, SystemCAObserved: true, SystemCADigestObserved: true}
+	p := &Provider{}
+	next := func() (graphMutation, bool) {
+		t.Helper()
+		desired := desiredRoute{spec: cloud.RouteSpec{BackendTLS: route.BackendTLS}}
+		actual := observedRouteGraph{pool: fragment.pool, backendTLS: fragment.backendTLS, members: fragment.members}
+		target.backendTLS = p.observeBackendTLS(t.Context(), desired, actual, func(bool, bool) bool { return true }, false, cloud.BackendClientCertificate{})
+		require.True(t, fragment.matches(target))
+		require.False(t, fragment.ready(target))
+		return nextSNIFragmentMutation(target, fragment)
+	}
+	step, ok := next()
+	require.True(t, ok)
+	require.Equal(t, sniEnableBackendTLSPool, step.sni.kind)
+	fragment.pool.AdminStateUp = true
+	step, ok = next()
+	require.True(t, ok)
+	require.Equal(t, sniEnablePolicy, step.sni.kind)
+	fragment.policy.AdminStateUp = true
+	_, ok = next()
+	require.False(t, ok)
+	fragment.backendTLS.SystemCASHA256 = strings.Repeat("a", 64)
+	step, ok = next()
+	require.True(t, ok)
+	require.Equal(t, sniCreateMember, step.sni.kind)
+}
+
 func TestTLSRouteBackendTLSStagesNativeAuthenticationBeforeActivation(t *testing.T) {
 	id := safetyTestIdentity(t)
 	spec := completeGraphSpec(id)
