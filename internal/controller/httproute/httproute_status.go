@@ -39,6 +39,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/routebackend"
 )
 
 type routeReconcileStatus struct {
@@ -501,7 +502,7 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 			}
 			auth, diagnostic := model.NormalizeHTTPRouteExternalAuth(rule, r.Config.RouteExternalAuthEnabled(), r.Config.RouteExternalAuthGRPCEnabled(), r.Config.WeightedHTTPTargets)
 			if diagnostic == nil {
-				_, _, _, diagnostic, err = resolveRouteExternalAuthTransport(ctx, r.routePatchReader(), tlsObserver, ancestor, route.Namespace, *auth)
+				_, _, _, diagnostic, err = routebackend.ObserveExternalAuthTransport(ctx, r.routePatchReader(), tlsObserver, ancestor, model.HTTPRouteKind, route.Namespace, *auth)
 				if err != nil {
 					return err
 				}

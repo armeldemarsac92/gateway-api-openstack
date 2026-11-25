@@ -37,6 +37,7 @@ import (
 	gatewaycontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/routebackend"
 )
 
 type backendTLSPolicyStatusReconciler struct {
@@ -222,7 +223,45 @@ func (r *backendTLSPolicyStatusReconciler) observeAncestors(ctx context.Context,
 			})
 		}
 	}
+	if r.routes.Config.GatewayListenerFiltersEnabled() {
+		observer := gatewaycontroller.Reconciler{APIReader: r.routes.APIReader, Config: r.routes.Config}
+		consumers, err := observer.ObserveListenerBackendTLSPolicy(ctx, policy)
+		if err != nil {
+			return nil, err
+		}
+		capabilities := make(map[string]backendTLSAvailability)
+		for key, profiles := range consumers {
+			for _, consumer := range profiles {
+				capability, checked := capabilities[consumer.Protocol]
+				if !checked && consumer.Compatible && consumer.Result.Accepted.Status == metav1.ConditionTrue {
+					capability = r.listenerAuthorizerTLSAvailability(ctx, consumer)
+					capabilities[consumer.Protocol] = capability
+				}
+				mergeBackendTLSConsumer(ancestors, key, backendTLSPolicyConditions{
+					accepted:     capability.apply(consumer.Result.Accepted, consumer.Compatible, requireSAN, systemCA),
+					resolvedRefs: consumer.Result.ResolvedRefs,
+				})
+			}
+		}
+	}
 	return ancestors, nil
+}
+
+func (r *backendTLSPolicyStatusReconciler) listenerAuthorizerTLSAvailability(ctx context.Context, consumer gatewaycontroller.ListenerBackendTLSPolicyConsumer) backendTLSAvailability {
+	probe := r.routes.ListenerExternalAuthTLSAvailable
+	if probe == nil || consumer.Result.Validation == nil {
+		return backendTLSUnknown
+	}
+	auth := cloud.ListenerExternalAuth{Protocol: consumer.Protocol, BackendTLS: consumer.Result.Validation.CloudValidation()}
+	auth.BackendTLS.RequireH2 = auth.Protocol == cloud.ExternalAuthProtocolGRPC
+	supported, err := probe(ctx, auth)
+	if err != nil {
+		return backendTLSUnknown
+	}
+	if supported {
+		return backendTLSAvailable
+	}
+	return backendTLSUnsupported
 }
 
 func (r *backendTLSPolicyStatusReconciler) tcpBackendTLSAvailability(ctx context.Context, weighted, systemCA bool) backendTLSAvailability {
@@ -367,14 +406,14 @@ func (r *backendTLSPolicyStatusReconciler) observeGatewayConsumer(ctx context.Co
 					model.BackendReferenceAllowedFor(model.HTTPRouteKind, route.Namespace, key, input.ReferenceGrants) {
 					port, diagnostic := model.ResolveTCPServicePort(service, auth.BackendRef.Port)
 					if diagnostic == nil {
-						selection, err := tlsObserver.Observe(ctx, service, port, nil)
+						selection, err := tlsObserver.ObserveWithPendingCA(ctx, service, port, nil)
 						if err != nil {
 							return backendTLSConsumer{}, err
 						}
 						for _, selection := range selection.Policies {
 							if selection.UID == policy.UID && selection.Generation == policy.Generation {
 								profile := backendTLSConsumerProfile{authorizer: true, requireH2: auth.Config.Protocol == cloud.ExternalAuthProtocolGRPC}
-								result.add(selection, profile, externalAuthTransportDiagnostic(service, port, *auth, true) == nil)
+								result.add(selection, profile, routebackend.ExternalAuthTransportDiagnostic(service, port, *auth, true) == nil)
 							}
 						}
 					}

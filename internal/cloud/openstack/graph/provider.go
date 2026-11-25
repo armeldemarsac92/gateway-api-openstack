@@ -260,6 +260,15 @@ func (p *Provider) routeAuthorizerTransportEnabled(auth cloud.ListenerExternalAu
 		(!tls.RequireH2 || p.poolALPN) && (tls.Trust != cloud.BackendTLSTrustReference || p.backendCA != nil))
 }
 
+// ListenerExternalAuthTLSAvailable checks the native listener authorizer's verified transport.
+func (p *Provider) ListenerExternalAuthTLSAvailable(ctx context.Context, auth cloud.ListenerExternalAuth) (bool, error) {
+	if auth.BackendTLS == nil || !p.listenerAuthorizerTransportEnabled(auth) {
+		return false, nil
+	}
+	capabilities := append([]string{octavia.GatewayCapabilityListenerRequestFilters}, listenerAuthorizerCapabilities(auth)...)
+	return p.amphoraCapabilityAvailable(ctx, capabilities...)
+}
+
 func (p *Provider) backendTLSAvailable(ctx context.Context, requireH2, requireSAN bool) (bool, error) {
 	if !p.backendTLSPolicy || p.backendCA == nil {
 		return false, nil

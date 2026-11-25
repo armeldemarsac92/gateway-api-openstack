@@ -225,7 +225,7 @@ func (r *Reconciler) observeSNIBackendTLSPolicy(ctx context.Context, parent *gat
 	var observed backendtls.PolicyResult
 	observe := observer.Observe
 	if len(route.Spec.Rules[0].BackendRefs) > 1 {
-		observe = observer.ObserveWeightedService
+		observe = observer.ObserveWithPendingCA
 	}
 	for key, ref := range TLSRouteBackendServiceRefs(route) {
 		if !slices.Contains(targets, key) {

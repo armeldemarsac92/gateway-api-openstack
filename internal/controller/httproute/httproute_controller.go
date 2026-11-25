@@ -105,6 +105,8 @@ type Reconciler struct {
 	BackendClientCertificateForGateway func(context.Context, *gatewayv1.Gateway) cloud.BackendClientCertificate
 	// RouteExternalAuthAvailable checks the capabilities needed by the selected rule.
 	RouteExternalAuthAvailable func(context.Context, cloud.ListenerExternalAuth, bool) (bool, error)
+	// ListenerExternalAuthTLSAvailable checks regional TLS transport for native listener authorizers.
+	ListenerExternalAuthTLSAvailable func(context.Context, cloud.ListenerExternalAuth) (bool, error)
 	// XBackendClientCertificates resolves identities from the operator's XBackend enrollment.
 	XBackendClientCertificates graph.XBackendClientCertificateResolver
 	// TCPBackendTLSAvailable checks authenticated TLS for terminating TLSRoutes.

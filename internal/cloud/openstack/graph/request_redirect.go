@@ -239,13 +239,17 @@ func (p *Provider) verifyGatewayHTTPURLCapabilities(ctx context.Context, desired
 }
 
 func (p *Provider) verifyGatewayHTTPURLRequirements(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, required []string, bodySize int32) error {
+	discovery, cancel := boundedGatewayCapabilityDiscovery(ctx)
+	defer cancel()
+	return p.verifyGatewayHTTPRequirements(discovery, desired, actual, required, bodySize)
+}
+
+func boundedGatewayCapabilityDiscovery(ctx context.Context) (context.Context, context.CancelFunc) {
 	// Discovery may stop responding during an outage. Preserve time in the
 	// parent context to validate and submit a restrictive listener update.
 	budget := 3 * time.Second
 	if deadline, ok := ctx.Deadline(); ok {
 		budget = min(budget, time.Until(deadline)/3)
 	}
-	discovery, cancel := context.WithTimeout(ctx, budget)
-	defer cancel()
-	return p.verifyGatewayHTTPRequirements(discovery, desired, actual, required, bodySize)
+	return context.WithTimeout(ctx, budget)
 }

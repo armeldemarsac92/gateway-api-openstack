@@ -54,17 +54,18 @@ type desiredGatewayGraph struct {
 }
 
 type observedGatewayGraph struct {
-	requestFilters                   map[string]octavia.ListenerRequestFilterObservation
-	unverifiedListenerFilters        map[int]bool
-	unavailableListenerFilters       map[int]bool
-	unavailableListenerBodySections  map[int][]string
-	pendingListenerFilterCapability  map[int]bool
-	recoveringListenerFilterSections map[int][]string
-	listenerFilterMutation           *graphMutation
-	routeAuthPools                   map[string]string
-	routeAuthPoolMutation            *graphMutation
-	grpcAuthRecovery                 *grpcAuthRecovery
-	httpPools                        *listenerFilterPoolInventory
+	requestFilters                       map[string]octavia.ListenerRequestFilterObservation
+	unverifiedListenerFilters            map[int]bool
+	unavailableListenerFilters           map[int]bool
+	unavailableListenerBodySections      map[int][]string
+	unavailableListenerTransportSections map[int][]string
+	pendingListenerFilterCapability      map[int]bool
+	recoveringListenerFilterSections     map[int][]string
+	listenerFilterMutation               *graphMutation
+	routeAuthPools                       map[string]string
+	routeAuthPoolMutation                *graphMutation
+	grpcAuthRecovery                     *grpcAuthRecovery
+	httpPools                            *listenerFilterPoolInventory
 
 	defaultHTTPResponseCodes map[string]int
 	httpsVirtualHosts        map[string][]string
@@ -164,6 +165,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		}
 		slices.Sort(result.Gateway.ListenerFilterUnavailablePorts)
 		result.Gateway.ListenerFilterBodyUnavailableSections = actual.unavailableListenerBodySections
+		result.Gateway.ListenerFilterTransportUnavailableSections = actual.unavailableListenerTransportSections
 		for port := range actual.pendingListenerFilterCapability {
 			result.Gateway.ListenerFilterCapabilityPendingPorts = append(result.Gateway.ListenerFilterCapabilityPendingPorts, port)
 		}

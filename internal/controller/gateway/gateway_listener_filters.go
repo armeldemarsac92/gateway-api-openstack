@@ -18,7 +18,9 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"iter"
 	"reflect"
 	"slices"
 	"strings"
@@ -35,6 +37,7 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/classconfig"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
@@ -58,6 +61,7 @@ func hasHTTPFamilyListenerFilters(gateway *gatewayv1.Gateway) bool {
 }
 
 type listenerFilterObservation struct {
+	unconfirmed map[gatewayv1.SectionName]bool
 	unavailable map[gatewayv1.SectionName]int
 	ports       map[int][]cloud.ListenerRequestFilterSection
 	issues      map[gatewayv1.SectionName]httpsListenerIssue
@@ -76,6 +80,11 @@ func (r *Reconciler) observeListenerFilters(ctx context.Context, gateway *gatewa
 			result.ports[int(listener.Port)] = nil
 		}
 	}
+	tlsObserver := graph.NewBackendTLSObserver(r.APIReader, r.Config.ClusterTrustBundles)
+	var ancestor *backendtls.GatewayAncestor
+	if r.Config.BackendTLSPolicy {
+		ancestor = &backendtls.GatewayAncestor{Key: client.ObjectKeyFromObject(gateway), ControllerName: r.Config.ControllerName}
+	}
 	for _, listener := range listeners {
 		port := int(listener.Port)
 		if _, filtered := result.ports[port]; !filtered || usesHTTPSProfile(r.Config, gateway) && httpsProfileIssue(r.Config, gateway, listener) != nil {
@@ -83,9 +92,15 @@ func (r *Reconciler) observeListenerFilters(ctx context.Context, gateway *gatewa
 		}
 		section := cloud.ListenerRequestFilterSection{Hostname: HTTPVirtualHostname(listener)}
 		if listenerHasRequestFilters(listener) {
-			requests, issue, err := r.resolveListenerFilterRequests(ctx, gateway, listener, topology)
+			requests, issue, err := r.resolveListenerFilterRequests(ctx, gateway, listener, topology, tlsObserver, ancestor)
+			if ctx.Err() != nil {
+				return listenerFilterObservation{}, ctx.Err()
+			}
 			if err != nil {
-				return listenerFilterObservation{}, err
+				if result.unconfirmed == nil {
+					result.unconfirmed = make(map[gatewayv1.SectionName]bool)
+				}
+				result.unconfirmed[listener.Name] = true
 			}
 			section.Requests = requests
 			if missing := slices.IndexFunc(requests, func(auth cloud.ListenerExternalAuth) bool { return len(auth.Members) == 0 }); missing >= 0 {
@@ -118,8 +133,8 @@ func (r *Reconciler) observeListenerFilters(ctx context.Context, gateway *gatewa
 	return result, nil
 }
 
-// Keep only denials backed by a successful authorization read. Pending
-// lookups and ready sibling configurations grant no independent write authority.
+// Keep denials backed by a successful authorization read. A live TLS policy
+// with pending CA validation still requires us to withdraw authorization.
 func (observation listenerFilterObservation) confirmedRejections(listeners []*gatewayv1.Listener) listenerFilterObservation {
 	rejected := listenerFilterObservation{
 		ports:  make(map[int][]cloud.ListenerRequestFilterSection),
@@ -127,7 +142,7 @@ func (observation listenerFilterObservation) confirmedRejections(listeners []*ga
 	}
 	for _, listener := range listeners {
 		issue, found := observation.issues[listener.Name]
-		if !found || issue.reason == gatewayv1.ListenerReasonPending {
+		if !found || observation.unconfirmed[listener.Name] {
 			continue
 		}
 		port := int(listener.Port)
@@ -167,23 +182,20 @@ func (r *Reconciler) listenerFilterWithdrawalInput(ctx context.Context, snapshot
 	}, nil
 }
 
-func (r *Reconciler) resolveListenerFilterRequests(ctx context.Context, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, topology classconfig.Resolved) ([]cloud.ListenerExternalAuth, *httpsListenerIssue, error) {
+func (r *Reconciler) resolveListenerFilterRequests(ctx context.Context, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, topology classconfig.Resolved, tlsObserver *graph.BackendTLSObserver, ancestor *backendtls.GatewayAncestor) ([]cloud.ListenerExternalAuth, *httpsListenerIssue, error) {
 	if len(listener.Filters.Requests) > maxListenerRequestFilters {
 		return nil, &httpsListenerIssue{gatewayv1.ListenerConditionAccepted, invalidListenerFilter, "filters.requests must contain at most 16 entries"}, nil
 	}
 	requests := make([]cloud.ListenerExternalAuth, 0, len(listener.Filters.Requests))
 	for index, filter := range listener.Filters.Requests {
-		auth, issue, err := r.resolveListenerFilter(ctx, gateway, filter, topology)
+		auth, issue, err := r.resolveListenerFilter(ctx, gateway, filter, topology, tlsObserver, ancestor)
 		if err != nil {
-			if ctx.Err() != nil {
-				return nil, nil, ctx.Err()
-			}
 			// A partial authorization inventory cannot keep a stale backend in use.
 			issue = &httpsListenerIssue{gatewayv1.ListenerConditionResolvedRefs, gatewayv1.ListenerReasonPending, "Waiting to read the ExternalAuth backend configuration"}
 		}
 		if issue != nil {
 			issue.message = fmt.Sprintf("filters.requests[%d]: %s", index, issue.message)
-			return nil, issue, nil
+			return nil, issue, err
 		}
 		requests = append(requests, auth)
 	}
@@ -223,7 +235,7 @@ func normalizeListenerFilter(filter gatewayv1.ListenerFilter) (*model.HTTPExtern
 		return nil, &httpsListenerIssue{gatewayv1.ListenerConditionAccepted, gatewayv1.ListenerReasonUnsupportedValue,
 			fmt.Sprintf("Listener filter type %q is unsupported", filter.Type)}
 	}
-	auth, diagnostic := model.NormalizeHTTPExternalAuth(filter.ExternalAuth)
+	auth, diagnostic := model.NormalizeListenerExternalAuth(filter.ExternalAuth)
 	if diagnostic == nil {
 		return auth, nil
 	}
@@ -238,18 +250,21 @@ func normalizeListenerFilter(filter gatewayv1.ListenerFilter) (*model.HTTPExtern
 	return nil, &httpsListenerIssue{gatewayv1.ListenerConditionAccepted, gatewayv1.ListenerReasonUnsupportedValue, diagnostic.Message}
 }
 
-func (r *Reconciler) resolveListenerFilter(ctx context.Context, gateway *gatewayv1.Gateway, filter gatewayv1.ListenerFilter, topology classconfig.Resolved) (cloud.ListenerExternalAuth, *httpsListenerIssue, error) {
+func (r *Reconciler) resolveListenerFilter(ctx context.Context, gateway *gatewayv1.Gateway, filter gatewayv1.ListenerFilter, topology classconfig.Resolved, tlsObserver *graph.BackendTLSObserver, ancestor *backendtls.GatewayAncestor) (cloud.ListenerExternalAuth, *httpsListenerIssue, error) {
 	auth, issue := normalizeListenerFilter(filter)
 	if issue != nil {
 		return cloud.ListenerExternalAuth{}, issue, nil
 	}
-	resolved, diagnostic, err := routebackend.ResolveHTTPExternalAuth(ctx, r.APIReader, "Gateway", gateway.Namespace, *auth, topology)
+	resolved, service, port, diagnostic, err := routebackend.ObserveExternalAuthTransport(ctx, r.APIReader, tlsObserver, ancestor, "Gateway", gateway.Namespace, *auth)
+	if diagnostic == nil && err == nil {
+		resolved, diagnostic, err = routebackend.ResolveExternalAuthMembers(ctx, r.APIReader, service, port, resolved, topology)
+	}
 	if diagnostic == nil {
 		return resolved, nil, err
 	}
 	condition, reason := gatewayv1.ListenerConditionResolvedRefs, invalidListenerFilterRef
 	switch diagnostic.Reason {
-	case string(gatewayv1.RouteReasonBackendNotFound), string(gatewayv1.RouteReasonRefNotPermitted):
+	case string(gatewayv1.RouteReasonBackendNotFound), string(gatewayv1.RouteReasonRefNotPermitted), string(gatewayv1.RouteReasonPending):
 		reason = gatewayv1.ListenerConditionReason(diagnostic.Reason)
 	}
 	if diagnostic.Condition == string(gatewayv1.RouteConditionAccepted) {
@@ -269,6 +284,11 @@ func (r *Reconciler) applyListenerFilterStatus(gateway *gatewayv1.Gateway, previ
 		issue, found := filters.issues[listener.Name]
 		if !found && slices.Contains(result.ListenerFilterUnavailablePorts, port) {
 			issue = httpsListenerIssue{gatewayv1.ListenerConditionAccepted, gatewayv1.ListenerReasonUnsupportedValue, "Octavia does not provide listener_request_filters_v1"}
+			found = true
+		}
+		if !found && slices.Contains(result.ListenerFilterTransportUnavailableSections[port], HTTPVirtualHostname(listener)) {
+			issue = httpsListenerIssue{gatewayv1.ListenerConditionAccepted, gatewayv1.ListenerReasonUnsupportedValue,
+				"Octavia listener ExternalAuth backend transport is unavailable"}
 			found = true
 		}
 		if !found && slices.Contains(result.ListenerFilterBodyUnavailableSections[port], HTTPVirtualHostname(listener)) {
@@ -303,7 +323,11 @@ func (r *Reconciler) applyListenerFilterStatus(gateway *gatewayv1.Gateway, previ
 		}
 		status := &gateway.Status.Listeners[index]
 		if found {
-			controller.SetCondition(&status.Conditions, controller.Condition(string(issue.condition), metav1.ConditionFalse, string(issue.reason), issue.message, gateway.Generation))
+			conditionStatus := metav1.ConditionFalse
+			if issue.reason == gatewayv1.ListenerReasonPending {
+				conditionStatus = metav1.ConditionUnknown
+			}
+			controller.SetCondition(&status.Conditions, controller.Condition(string(issue.condition), conditionStatus, string(issue.reason), issue.message, gateway.Generation))
 			if issue.reason == invalidListenerFilterRef && strings.Contains(issue.message, "ExtensionRef") {
 				controller.SetCondition(&status.Conditions, controller.Condition(string(gatewayv1.ListenerConditionAccepted), metav1.ConditionFalse, string(gatewayv1.ListenerReasonUnsupportedValue), issue.message, gateway.Generation))
 			}
@@ -344,15 +368,9 @@ func (r *Reconciler) validateListenerFilterInputs(ctx context.Context, snapshot 
 	return nil
 }
 
-func (r *Reconciler) gatewayRequestsForListenerFilterDependency(ctx context.Context, dependency client.Object) []reconcile.Request {
-	var gateways gatewayv1.GatewayList
-	if err := r.List(ctx, &gateways); err != nil {
-		log.FromContext(ctx).Error(err, "Could not list Gateways for listener filter dependency")
-		return nil
-	}
-	requests := make(map[types.NamespacedName]struct{})
-	for i := range gateways.Items {
-		gateway := &gateways.Items[i]
+// ListenerExternalAuthReferences enumerates native authorization dependencies.
+func ListenerExternalAuthReferences(gateway *gatewayv1.Gateway) iter.Seq[types.NamespacedName] {
+	return func(yield func(types.NamespacedName) bool) {
 		for _, listener := range gateway.Spec.Listeners {
 			if !listenerHasRequestFilters(&listener) {
 				continue
@@ -361,9 +379,137 @@ func (r *Reconciler) gatewayRequestsForListenerFilterDependency(ctx context.Cont
 				if filter.Type != gatewayv1.ListenerFilterExternalAuth || filter.ExternalAuth == nil {
 					continue
 				}
-				if key, valid := model.BackendServiceReference(gateway.Namespace, filter.ExternalAuth.BackendRef); valid && listenerAuthDependsOn(key, dependency) {
-					requests[client.ObjectKeyFromObject(gateway)] = struct{}{}
+				key, valid := model.BackendServiceReference(gateway.Namespace, filter.ExternalAuth.BackendRef)
+				if valid && !yield(key) {
+					return
 				}
+			}
+		}
+	}
+}
+
+type ListenerBackendTLSPolicyConsumer struct {
+	Result     backendtls.PolicyResult
+	Protocol   string
+	Compatible bool
+}
+
+// ObserveListenerBackendTLSPolicy supplies native listener consumers to the
+// shared BackendTLSPolicy status reconciler, including before a pool is ready.
+func (r *Reconciler) ObserveListenerBackendTLSPolicy(ctx context.Context, policy *gatewayv1.BackendTLSPolicy) (map[types.NamespacedName][]ListenerBackendTLSPolicyConsumer, error) {
+	targets := backendtls.ServiceKeys(policy)
+	if !r.Config.GatewayListenerFiltersEnabled() || !r.Config.BackendTLSPolicy || len(targets) == 0 {
+		return nil, nil
+	}
+	var gateways gatewayv1.GatewayList
+	if err := r.APIReader.List(ctx, &gateways); err != nil {
+		return nil, err
+	}
+	if gateways.Continue != "" {
+		return nil, errors.New("incomplete Gateway list for listener ExternalAuth policy")
+	}
+	observer := graph.NewBackendTLSObserver(r.APIReader, r.Config.ClusterTrustBundles)
+	consumers := make(map[types.NamespacedName][]ListenerBackendTLSPolicyConsumer)
+	for i := range gateways.Items {
+		gateway := &gateways.Items[i]
+		candidate := false
+		for key := range ListenerExternalAuthReferences(gateway) {
+			if slices.Contains(targets, key) {
+				candidate = true
+				break
+			}
+		}
+		if !candidate || !gateway.DeletionTimestamp.IsZero() {
+			continue
+		}
+		listeners, err := SupportedListenersForConfig(r.Config, gateway)
+		if err != nil {
+			continue
+		}
+		var class gatewayv1.GatewayClass
+		if err := r.APIReader.Get(ctx, client.ObjectKey{Name: string(gateway.Spec.GatewayClassName)}, &class); err != nil {
+			if err := client.IgnoreNotFound(err); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		if class.Spec.ControllerName != r.Config.ControllerName || !class.DeletionTimestamp.IsZero() ||
+			!controller.GatewayClassSupportsInstalledVersion(&class) {
+			continue
+		}
+		for _, listener := range listeners {
+			if !GatewayOwnsListenerRequestFilters(r.Config, listener) ||
+				usesHTTPSProfile(r.Config, gateway) && httpsProfileIssue(r.Config, gateway, listener) != nil {
+				continue
+			}
+			for _, filter := range listener.Filters.Requests {
+				auth, _ := normalizeListenerFilter(filter)
+				key, _ := model.BackendServiceReference(gateway.Namespace, auth.BackendRef)
+				if !slices.Contains(targets, key) {
+					continue
+				}
+				service, port, issue, err := routebackend.ObserveExternalAuthService(ctx, r.APIReader, "Gateway", gateway.Namespace, *auth)
+				if err != nil {
+					return nil, err
+				}
+				if issue != nil || !backendtls.AppliesToServicePort(policy, service, port) {
+					continue
+				}
+				selection, err := observer.ObserveWithPendingCA(ctx, service, port, nil)
+				if err != nil {
+					return nil, err
+				}
+				for _, result := range selection.Policies {
+					if result.UID == policy.UID && result.Generation == policy.Generation {
+						compatible := routebackend.ExternalAuthTransportDiagnostic(service, port, *auth, true) == nil
+						key := client.ObjectKeyFromObject(gateway)
+						consumers[key] = append(consumers[key], ListenerBackendTLSPolicyConsumer{result, auth.Config.Protocol, compatible})
+					}
+				}
+			}
+		}
+	}
+	return consumers, nil
+}
+
+func (r *Reconciler) gatewayRequestsForListenerAuthCA(ctx context.Context, object client.Object) []reconcile.Request {
+	key := client.ObjectKeyFromObject(object)
+	var policies gatewayv1.BackendTLSPolicyList
+	if err := r.List(ctx, &policies, client.InNamespace(key.Namespace), client.MatchingFields{
+		controller.IndexBackendTLSPolicyByCA: controller.ObjectKeyString(key),
+	}); err != nil {
+		log.FromContext(ctx).Error(err, "Could not list BackendTLSPolicies for listener authorizer CA", "ca", key)
+		return nil
+	}
+	targets := make(map[types.NamespacedName]bool)
+	for i := range policies.Items {
+		for _, target := range backendtls.ServiceKeys(&policies.Items[i]) {
+			targets[target] = true
+		}
+	}
+	if len(targets) == 0 {
+		return nil
+	}
+	return r.gatewaysWithListenerAuthDependency(ctx, func(key types.NamespacedName) bool { return targets[key] })
+}
+
+func (r *Reconciler) gatewayRequestsForListenerFilterDependency(ctx context.Context, dependency client.Object) []reconcile.Request {
+	return r.gatewaysWithListenerAuthDependency(ctx, func(key types.NamespacedName) bool { return listenerAuthDependsOn(key, dependency) })
+}
+
+func (r *Reconciler) gatewaysWithListenerAuthDependency(ctx context.Context, matches func(types.NamespacedName) bool) []reconcile.Request {
+	var gateways gatewayv1.GatewayList
+	if err := r.List(ctx, &gateways); err != nil {
+		log.FromContext(ctx).Error(err, "Could not list Gateways for listener filter dependency")
+		return nil
+	}
+	requests := make(map[types.NamespacedName]struct{})
+	for i := range gateways.Items {
+		gateway := &gateways.Items[i]
+		for service := range ListenerExternalAuthReferences(gateway) {
+			if matches(service) {
+				requests[client.ObjectKeyFromObject(gateway)] = struct{}{}
+				break
 			}
 		}
 	}

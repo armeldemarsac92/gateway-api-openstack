@@ -143,6 +143,13 @@ func retainedBackendCAs(spec cloud.GatewayGraphSpec, actual observedGatewayGraph
 			keep[ref] = true
 		}
 	}
+	for _, sections := range spec.Gateway.Spec.RequestFilterSections {
+		for _, section := range sections {
+			for _, auth := range section.Requests {
+				selectRevision(auth.BackendTLS)
+			}
+		}
+	}
 	for _, route := range spec.Gateway.TLSSNIRoutes {
 		selectRevision(route.BackendTLS)
 		for _, backend := range route.BackendPools {

@@ -268,7 +268,7 @@ func (r *Reconciler) observeWeightedSNIBackend(ctx context.Context, snapshot *ga
 	var validation *cloud.BackendTLSValidation
 	if authenticate {
 		ancestor := &backendtls.GatewayAncestor{Key: client.ObjectKeyFromObject(snapshot.gateway), ControllerName: r.Config.ControllerName}
-		selection, err := tls.ObserveWeightedService(ctx, service, port, ancestor)
+		selection, err := tls.ObserveWithPendingCA(ctx, service, port, ancestor)
 		if err != nil {
 			return pool, false, &model.Diagnostic{Reason: "Pending", Message: "Waiting for a live BackendTLSPolicy inventory"}
 		}

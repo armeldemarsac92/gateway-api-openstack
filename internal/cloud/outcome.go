@@ -112,6 +112,8 @@ type GatewayResult struct {
 	ListenerFilterUnavailablePorts []int
 	// ListenerFilterBodyUnavailableSections exceed the regional body capability or limit.
 	ListenerFilterBodyUnavailableSections map[int][]string
+	// ListenerFilterTransportUnavailableSections require an unavailable authorizer transport.
+	ListenerFilterTransportUnavailableSections map[int][]string
 	// ListenerFilterCapabilityPendingPorts are waiting for a usable discovery response.
 	ListenerFilterCapabilityPendingPorts []int
 	// ListenerFilterRecoveringSections are guarded locally while their backends converge.

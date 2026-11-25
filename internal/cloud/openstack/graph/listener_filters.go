@@ -65,9 +65,16 @@ func (p *Provider) observeListenerAuthPools(ctx context.Context, desired desired
 	owned := make(map[string]observedAuthPool)
 	poolsByID := make(map[string]pools.Pool)
 	var routeRefs map[string]map[string]string
+	listenerRefs := make(map[string]map[string]string, len(actual.requestFilters))
+	for id, observation := range actual.requestFilters {
+		if observation.Readable {
+			listenerRefs[id] = listenerAuthPoolReferences(observation.Sections)
+		}
+	}
 	if len(desired.routeAuthorizers()) != 0 || slices.ContainsFunc(inventory.Items, func(pool pools.Pool) bool {
 		return isProtectedAuthPool(pool) || isListenerAuthPool(pool) && (p.routeExternalAuth || slices.ContainsFunc(pool.Listeners, func(parent pools.ListenerID) bool {
-			return !listenerAuthPoolIDs(actual.requestFilters[parent.ID].Sections)[pool.ID]
+			_, bound := listenerRefs[parent.ID][pool.ID]
+			return !bound
 		}))
 	}) {
 		var err error
@@ -99,9 +106,12 @@ func (p *Provider) observeListenerAuthPools(ctx context.Context, desired desired
 			return nil, fmt.Errorf("%w: invalid authorization pool inventory", cloud.ErrOwnershipConflict)
 		}
 		for _, parent := range pool.Listeners {
-			listenerReference := listenerAuthPoolIDs(actual.requestFilters[parent.ID].Sections)[pool.ID]
+			listenerProtocol, listenerReference := listenerRefs[parent.ID][pool.ID]
 			protocol, routeReference := routeRefs[pool.ID][parent.ID]
-			if listenerReference && tag != listenerAuthPoolTag || !listenerReference && (!routeReference || !authorizationPoolProtocolMatches(pool, protocol)) {
+			if !listenerReference && !routeReference ||
+				listenerReference && !authorizationPoolProtocolMatches(pool, listenerProtocol) ||
+				listenerReference && len(routeRefs[pool.ID]) != 0 && tag != listenerAuthPoolTag ||
+				routeReference && !authorizationPoolProtocolMatches(pool, protocol) {
 				return nil, fmt.Errorf("%w: authorization pool has an unproven listener reference", cloud.ErrOwnershipConflict)
 			}
 		}
@@ -120,6 +130,14 @@ func (p *Provider) observeListenerAuthPools(ctx context.Context, desired desired
 		for listenerID, protocol := range parents {
 			if !authorizationPoolProtocolMatches(pool, protocol) || !slices.Contains(pool.Listeners, pools.ListenerID{ID: listenerID}) {
 				return nil, fmt.Errorf("%w: HTTPRoute authorization pool omits its listener", cloud.ErrOwnershipConflict)
+			}
+		}
+	}
+	for listenerID, refs := range listenerRefs {
+		for id, protocol := range refs {
+			pool := poolsByID[id]
+			if !authorizationPoolProtocolMatches(pool, protocol) || !slices.Contains(pool.Listeners, pools.ListenerID{ID: listenerID}) {
+				return nil, fmt.Errorf("%w: listener authorization references an unproven pool binding", cloud.ErrOwnershipConflict)
 			}
 		}
 	}
@@ -146,14 +164,18 @@ func (p *Provider) observeAuxiliaryHTTPPoolMembers(ctx context.Context, identity
 	return members, nil
 }
 
-func listenerAuthPoolIDs(sections []octavia.ListenerRequestFilterSection) map[string]bool {
-	ids := make(map[string]bool)
+func listenerAuthPoolReferences(sections []octavia.ListenerRequestFilterSection) map[string]string {
+	references := make(map[string]string)
 	for _, section := range sections {
 		for _, request := range section.Requests {
-			ids[request.HTTP.PoolID] = true
+			id, protocol := request.AuthorizationPool()
+			if previous, found := references[id]; found && previous != protocol {
+				protocol = "invalid"
+			}
+			references[id] = protocol
 		}
 	}
-	return ids
+	return references
 }
 
 func listenerAuthMemberPlan(auth cloud.ListenerExternalAuth, pool observedAuthPool) (waiting bool, change *graphMutation) {
@@ -214,17 +236,25 @@ func listenerAuthPoolPlan(auth cloud.ListenerExternalAuth, name string, pool obs
 	return !waiting && step == nil, step
 }
 
-func desiredListenerFilterSections(port int, sections []cloud.ListenerRequestFilterSection, owned map[string]observedAuthPool, referenced map[string]bool, allReferencesObserved bool) ([]octavia.ListenerRequestFilterSection, []string, *graphMutation) {
+func (p *Provider) desiredListenerFilterSections(ctx context.Context, desired desiredGatewayGraph, port int, sections []cloud.ListenerRequestFilterSection, owned map[string]observedAuthPool, referenced map[string]bool, allReferencesObserved bool) ([]octavia.ListenerRequestFilterSection, []string, *graphMutation) {
 	result := make([]octavia.ListenerRequestFilterSection, 0, len(sections))
 	var recovering []string
 	var next *graphMutation
 	for _, section := range sections {
 		configured := octavia.ListenerRequestFilterSection{Hostname: section.Hostname, Reject: section.Reject}
 		for _, auth := range section.Requests {
-			name := listenerAuthPoolName(port, auth)
+			name := authorizerPoolName(port, auth, desired.spec.Gateway.BackendClientCertificate.Reference, true)
 			pool := owned[name]
 			canRemove := allReferencesObserved && !referenced[pool.pool.ID] && len(pool.pool.Listeners) == 0
-			ready, step := listenerAuthPoolPlan(auth, name, pool, canRemove)
+			var ready bool
+			var step *graphMutation
+			if auth.Protocol == cloud.ExternalAuthProtocolGRPC || auth.BackendTLS != nil {
+				if len(auth.Members) != 0 {
+					ready, step = p.planVerifiedAuthorizerPool(ctx, desired, &auth, name, pool, canRemove)
+				}
+			} else {
+				ready, step = listenerAuthPoolPlan(auth, name, pool, canRemove)
+			}
 			if !ready {
 				configured.Reject, configured.Requests = true, nil
 				recovering = append(recovering, section.Hostname)
@@ -233,12 +263,16 @@ func desiredListenerFilterSections(port int, sections []cloud.ListenerRequestFil
 				}
 				break
 			}
-			configured.Requests = append(configured.Requests, octavia.ListenerRequestFilter{
-				Type: "ExternalAuth",
-				HTTP: octavia.ListenerHTTPExternalAuth{PoolID: pool.pool.ID, PathPrefix: auth.PathPrefix,
-					ForwardBodyMaxSize:    auth.ForwardBodyMaxSize,
-					AllowedRequestHeaders: auth.AllowedRequestHeaders, AllowedResponseHeaders: auth.AllowedResponseHeaders},
-			})
+			request := octavia.ListenerRequestFilter{Type: "ExternalAuth"}
+			if auth.Protocol == cloud.ExternalAuthProtocolGRPC {
+				request.GRPC = &octavia.ListenerGRPCExternalAuth{PoolID: pool.pool.ID,
+					AllowedRequestHeaders: auth.AllowedRequestHeaders, ForwardBodyMaxSize: auth.ForwardBodyMaxSize}
+			} else {
+				request.HTTP = &octavia.ListenerHTTPExternalAuth{PoolID: pool.pool.ID, PathPrefix: auth.PathPrefix,
+					ForwardBodyMaxSize: auth.ForwardBodyMaxSize, AllowedRequestHeaders: auth.AllowedRequestHeaders,
+					AllowedResponseHeaders: auth.AllowedResponseHeaders}
+			}
+			configured.Requests = append(configured.Requests, request)
 		}
 		result = append(result, configured)
 	}
@@ -254,7 +288,14 @@ func listenerFilterSectionsMatch(desired []octavia.ListenerRequestFilterSection,
 	}
 	return slices.EqualFunc(desired, actual.Sections, func(a, b octavia.ListenerRequestFilterSection) bool {
 		return a.Hostname == b.Hostname && a.Reject == b.Reject && slices.EqualFunc(a.Requests, b.Requests, func(x, y octavia.ListenerRequestFilter) bool {
-			return x.Type == y.Type && x.HTTP.PoolID == y.HTTP.PoolID && x.HTTP.PathPrefix == y.HTTP.PathPrefix &&
+			if x.Type != y.Type {
+				return false
+			}
+			if x.GRPC != nil && y.GRPC != nil {
+				return x.GRPC.PoolID == y.GRPC.PoolID && x.GRPC.ForwardBodyMaxSize == y.GRPC.ForwardBodyMaxSize &&
+					slices.Equal(x.GRPC.AllowedRequestHeaders, y.GRPC.AllowedRequestHeaders)
+			}
+			return x.HTTP != nil && y.HTTP != nil && x.HTTP.PoolID == y.HTTP.PoolID && x.HTTP.PathPrefix == y.HTTP.PathPrefix &&
 				x.HTTP.ForwardBodyMaxSize == y.HTTP.ForwardBodyMaxSize &&
 				slices.Equal(x.HTTP.AllowedRequestHeaders, y.HTTP.AllowedRequestHeaders) &&
 				slices.Equal(x.HTTP.AllowedResponseHeaders, y.HTTP.AllowedResponseHeaders)
@@ -479,11 +520,14 @@ func (p *Provider) planListenerFilters(ctx context.Context, desired desiredGatew
 	actual.recoveringListenerFilterSections = make(map[int][]string)
 	actual.unavailableListenerFilters = make(map[int]bool)
 	actual.unavailableListenerBodySections = make(map[int][]string)
+	actual.unavailableListenerTransportSections = make(map[int][]string)
 	actual.pendingListenerFilterCapability = make(map[int]bool)
 	ports := scopedHTTPListeners(desired)
 	capable := true
 	if len(configured) != 0 {
-		limits, err := p.octavia.ListenerRequestFilterBodyLimits(ctx, actual.loadBalancer.Provider)
+		discovery, cancel := boundedGatewayCapabilityDiscovery(ctx)
+		limits, err := p.octavia.ListenerRequestFilterBodyLimits(discovery, actual.loadBalancer.Provider)
+		cancel()
 		capable = err == nil
 		var missing *octavia.MissingGatewayCapability
 		for port := range configured {
@@ -495,6 +539,7 @@ func (p *Provider) planListenerFilters(ctx context.Context, desired desiredGatew
 		}
 		if capable {
 			configured = actual.guardUnavailableListenerBodies(configured, ports, limits)
+			p.rejectUnavailableListenerTransports(configured, actual, limits.Capabilities)
 		}
 	}
 	desiredPools, referencedPools := make(map[string]bool), make(map[string]bool)
@@ -504,7 +549,7 @@ func (p *Provider) planListenerFilters(ctx context.Context, desired desiredGatew
 	for port, sections := range configured {
 		for _, section := range sections {
 			for _, auth := range section.Requests {
-				desiredPools[listenerAuthPoolName(port, auth)] = true
+				desiredPools[authorizerPoolName(port, auth, desired.spec.Gateway.BackendClientCertificate.Reference, true)] = true
 			}
 		}
 	}
@@ -516,7 +561,7 @@ func (p *Provider) planListenerFilters(ctx context.Context, desired desiredGatew
 		if present && !current.Readable {
 			allReferencesObserved = false
 		}
-		for id := range listenerAuthPoolIDs(current.Sections) {
+		for id := range listenerAuthPoolReferences(current.Sections) {
 			referencedPools[id] = true
 		}
 	}
@@ -540,7 +585,7 @@ func (p *Provider) planListenerFilters(ctx context.Context, desired desiredGatew
 		var recovering []string
 		var step *graphMutation
 		if canConfigure {
-			wanted, recovering, step = desiredListenerFilterSections(port, sections, owned, referencedPools, allReferencesObserved)
+			wanted, recovering, step = p.desiredListenerFilterSections(ctx, desired, port, sections, owned, referencedPools, allReferencesObserved)
 			if len(recovering) != 0 {
 				actual.recoveringListenerFilterSections[port] = recovering
 			}
@@ -608,7 +653,8 @@ func (actual *observedGatewayGraph) guardUnavailableListenerBodies(configured ma
 		guarded[port] = slices.Clone(sections)
 		for index, section := range sections {
 			if slices.ContainsFunc(section.Requests, func(auth cloud.ListenerExternalAuth) bool {
-				return auth.ForwardBodyMaxSize > limit
+				return auth.ForwardBodyMaxSize < 0 || auth.ForwardBodyMaxSize > limit ||
+					auth.Protocol == cloud.ExternalAuthProtocolGRPC && auth.ForwardBodyMaxSize > cloud.MaxGRPCExternalAuthBodySize
 			}) {
 				guarded[port][index] = cloud.ListenerRequestFilterSection{Hostname: section.Hostname, Reject: true}
 				actual.unavailableListenerBodySections[port] = append(actual.unavailableListenerBodySections[port], section.Hostname)
@@ -618,10 +664,47 @@ func (actual *observedGatewayGraph) guardUnavailableListenerBodies(configured ma
 	return guarded
 }
 
+func listenerAuthorizerCapabilities(auth cloud.ListenerExternalAuth) []string {
+	var required []string
+	switch {
+	case auth.Protocol == cloud.ExternalAuthProtocolGRPC:
+		required = append(required, octavia.GatewayCapabilityListenerExternalAuthGRPC)
+	case auth.BackendTLS != nil:
+		required = append(required, octavia.GatewayCapabilityListenerExternalAuthTLS)
+	}
+	return append(required, authorizerBackendCapabilities(auth)...)
+}
+
+func (p *Provider) listenerAuthorizerTransportEnabled(auth cloud.ListenerExternalAuth) bool {
+	if auth.Protocol != "" && auth.Protocol != cloud.ExternalAuthProtocolGRPC {
+		return false
+	}
+	tls := auth.BackendTLS
+	return tls == nil || p.backendTLSPolicy && !tls.Denied && validBackendTLS(tls) &&
+		tls.RequireH2 == (auth.Protocol == cloud.ExternalAuthProtocolGRPC) && (!tls.RequireH2 || p.poolALPN) &&
+		(tls.Trust != cloud.BackendTLSTrustReference || p.backendCA != nil)
+}
+
+func (p *Provider) rejectUnavailableListenerTransports(configured map[int][]cloud.ListenerRequestFilterSection, actual *observedGatewayGraph, capabilities []string) {
+	for port, sections := range configured { // The body guard already copied these sections.
+		for i, section := range sections {
+			if slices.ContainsFunc(section.Requests, func(auth cloud.ListenerExternalAuth) bool {
+				return !p.listenerAuthorizerTransportEnabled(auth) || slices.ContainsFunc(listenerAuthorizerCapabilities(auth), func(required string) bool {
+					return !slices.Contains(capabilities, required)
+				})
+			}) {
+				configured[port][i] = cloud.ListenerRequestFilterSection{Hostname: section.Hostname, Reject: true}
+				actual.unavailableListenerTransportSections[port] = append(actual.unavailableListenerTransportSections[port], section.Hostname)
+			}
+		}
+	}
+}
+
 func (actual observedGatewayGraph) listenerFilterCanUseAuthorizers(port int, section cloud.ListenerRequestFilterSection) bool {
 	// A section rejected during capability discovery has no authorizer to
 	// reach. Authorizers undergoing pool recovery still need validation.
-	return !section.Reject && !slices.Contains(actual.unavailableListenerBodySections[port], section.Hostname)
+	return !section.Reject && !slices.Contains(actual.unavailableListenerBodySections[port], section.Hostname) &&
+		!slices.Contains(actual.unavailableListenerTransportSections[port], section.Hostname)
 }
 
 func (p *Provider) executeListenerFilterMutation(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, step graphMutation) error {
