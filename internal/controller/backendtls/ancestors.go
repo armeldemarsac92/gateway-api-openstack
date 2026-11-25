@@ -17,6 +17,8 @@ limitations under the License.
 package backendtls
 
 import (
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -45,6 +47,21 @@ type GatewayAncestor struct {
 
 func (a GatewayAncestor) Slot(policy *gatewayv1.BackendTLSPolicy) AncestorSlot {
 	return a.SlotFor(policy.Namespace, policy.Status.Ancestors)
+}
+
+// AcceptsCurrentPolicy verifies both reasons supplied by the sole policy
+// status reconciler for this Gateway and policy generation.
+func (a GatewayAncestor) AcceptsCurrentPolicy(policy *gatewayv1.BackendTLSPolicy) bool {
+	for _, entry := range policy.Status.Ancestors {
+		if entry.ControllerName != a.ControllerName || GatewayAncestorKey(entry.AncestorRef, policy.Namespace) != a.Key {
+			continue
+		}
+		accepted := meta.FindStatusCondition(entry.Conditions, string(gatewayv1.PolicyConditionAccepted))
+		resolved := meta.FindStatusCondition(entry.Conditions, string(gatewayv1.BackendTLSPolicyConditionResolvedRefs))
+		return accepted != nil && accepted.Status == metav1.ConditionTrue && accepted.ObservedGeneration == policy.Generation &&
+			resolved != nil && resolved.Status == metav1.ConditionTrue && resolved.ObservedGeneration == policy.Generation
+	}
+	return false
 }
 
 // SlotFor checks the shared PolicyStatus capacity for an exact Gateway entry.

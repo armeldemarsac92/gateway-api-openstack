@@ -78,26 +78,34 @@ func (p *Provider) observeListenerAuthPools(ctx context.Context, desired desired
 				return nil, fmt.Errorf("%w: listener authorization pool has an unproven listener reference", cloud.ErrOwnershipConflict)
 			}
 		}
-		members, missingAdmin, err := p.octavia.ListMembersWithAdminState(ctx, pool.ID, pools.ListMembersOpts{ProjectID: p.projectID})
+		members, err := p.observeAuxiliaryHTTPPoolMembers(ctx, desired.identity, pool, listenerAuthPoolTag)
 		if err != nil {
 			return nil, err
-		}
-		if len(missingAdmin) != 0 {
-			return nil, fmt.Errorf("listener authorization pool member admin state is incomplete")
-		}
-		if err := crossCheckCompleteChildInventory("listener authorization pool", pool.ID, "member", pool.Members, members, func(member pools.Member) string { return member.ID }); err != nil {
-			return nil, err
-		}
-		for _, member := range members {
-			if member.ProjectID != p.projectID || member.PoolID != "" && member.PoolID != pool.ID ||
-				!desired.identity.MatchesGateway(member.Tags, roleMember) || !slices.Contains(member.Tags, listenerAuthPoolTag) {
-				return nil, fmt.Errorf("%w: listener authorization pool contains an unproven member", cloud.ErrOwnershipConflict)
-			}
 		}
 		owned[pool.Name] = observedAuthPool{pool: pool, members: members, admin: inventory.BackendTLS[pool.ID].AdminObserved}
 		ids[pool.ID] = true
 	}
 	return owned, nil
+}
+
+func (p *Provider) observeAuxiliaryHTTPPoolMembers(ctx context.Context, identity Identity, pool pools.Pool, tag string) ([]pools.Member, error) {
+	members, missingAdmin, err := p.octavia.ListMembersWithAdminState(ctx, pool.ID, pools.ListMembersOpts{ProjectID: p.projectID})
+	if err != nil {
+		return nil, err
+	}
+	if len(missingAdmin) != 0 {
+		return nil, fmt.Errorf("auxiliary pool member admin state is incomplete")
+	}
+	if err := crossCheckCompleteChildInventory("Gateway auxiliary pool", pool.ID, "member", pool.Members, members, func(member pools.Member) string { return member.ID }); err != nil {
+		return nil, err
+	}
+	for _, member := range members {
+		if member.ProjectID != p.projectID || member.PoolID != "" && member.PoolID != pool.ID ||
+			!identity.MatchesGateway(member.Tags, roleMember) || !slices.Contains(member.Tags, tag) {
+			return nil, fmt.Errorf("%w: Gateway auxiliary pool contains an unproven member", cloud.ErrOwnershipConflict)
+		}
+	}
+	return members, nil
 }
 
 func listenerAuthPoolIDs(sections []octavia.ListenerRequestFilterSection) map[string]bool {

@@ -49,6 +49,9 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 	if request.Action == graph.WithdrawBackendClientCertificate {
 		return r.observeBackendClientCertificateWithdrawal(ctx, request.Gateway, request.Identity)
 	}
+	if request.Action == graph.ReconcileTelemetry {
+		return r.observeTelemetryGraph(ctx, request)
+	}
 	if request.Action == graph.DeleteGateway {
 		snapshot, err := r.observeGatewayCleanupSnapshot(ctx, request.Gateway)
 		if err != nil {
@@ -160,6 +163,15 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 		return input, nil
 	}
 	input.Node.BackendCAOwned = controllerutil.ContainsFinalizer(snapshot.gateway, r.Config.BackendCAFinalizer())
+	// A selected collector CA can exist before its dedicated pool. Keep this
+	// revision visible to ordinary graph retirement even between writer calls.
+	if input.Node.BackendCAOwned && r.Config.BackendTLSPolicy &&
+		snapshot.gateway.Annotations[r.Config.GatewayTelemetryAnnotation()] == "v1" {
+		observation, err := r.observeGatewayTelemetry(ctx, snapshot.gateway, true, snapshot)
+		if err == nil && observation.desired != nil && observation.desired.BackendTLS != nil {
+			input.Node.Telemetry = &cloud.GatewayTelemetry{BackendTLS: observation.desired.BackendTLS}
+		}
+	}
 	backendIdentity, _, _ := r.observeBackendClientCertificate(ctx, snapshot.gateway)
 	input.Node.BackendClientCertificate = backendIdentity
 	sets, err := r.ObserveListenerSets(ctx, r.APIReader, snapshot.gateway)

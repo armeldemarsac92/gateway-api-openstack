@@ -182,9 +182,10 @@ func (r GatewayRequirements) Equal(other GatewayRequirements) bool {
 }
 
 const (
-	ListenerProtocolHTTP = "HTTP"
-	ListenerProtocolTCP  = "TCP"
-	ListenerProtocolUDP  = "UDP"
+	ListenerProtocolHTTP            = "HTTP"
+	ListenerProtocolTerminatedHTTPS = "TERMINATED_HTTPS"
+	ListenerProtocolTCP             = "TCP"
+	ListenerProtocolUDP             = "UDP"
 	// ListenerProtocolTLSSNI describes a native TCP listener with no default.
 	ListenerProtocolTLSSNI = "TLS"
 	// ListenerProtocolTLSTerminate identifies the immutable TCP termination profile.
