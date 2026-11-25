@@ -56,12 +56,20 @@ type telemetryPool struct {
 
 // TelemetryBackendTLSAvailable checks the public contract used by the
 // collector when reporting its BackendTLSPolicy ancestor.
-func (p *Provider) TelemetryBackendTLSAvailable(ctx context.Context, requireSAN bool) (bool, error) {
-	if !p.backendTLSPolicy || p.backendCA == nil {
+func (p *Provider) TelemetryBackendTLSAvailable(ctx context.Context, requireSAN, systemCA bool) (bool, error) {
+	if !p.backendTLSPolicy || !systemCA && p.backendCA == nil {
 		return false, nil
 	}
-	required := append([]string{octavia.GatewayCapabilityListenerOTLPTracing}, backendTLSCapabilities(false, requireSAN)...)
-	return p.amphoraCapabilityAvailable(ctx, required...)
+	required := []string{octavia.GatewayCapabilityListenerOTLPTracing}
+	return p.amphoraCapabilityAvailable(ctx, append(required, telemetryBackendTLSCapabilities(requireSAN, systemCA)...)...)
+}
+
+func telemetryBackendTLSCapabilities(requireSAN, systemCA bool) []string {
+	required := backendTLSCapabilities(false, requireSAN)
+	if systemCA {
+		required = append(required, octavia.GatewayCapabilityBackendTLSSystemCA)
+	}
+	return required
 }
 
 func telemetryPoolName(wanted *cloud.GatewayTelemetry, clientCertificate string) string {
@@ -418,9 +426,11 @@ func (p *Provider) planGatewayTelemetry(ctx context.Context, graph telemetryGrap
 	eligible := wanted != nil && unsupported == "" && dependencyErr == nil && poolErr == nil
 	var retain func(listeners.Listener, *octavia.ListenerOTLPTracing) bool
 	if eligible {
-		possible := owned[telemetryPoolName(wanted, graph.spec.Gateway.BackendClientCertificate.Reference)].pool.ID
+		certificate := graph.spec.Gateway.BackendClientCertificate.Reference
+		possible := owned[telemetryPoolName(wanted, certificate)]
 		retain = func(listener listeners.Listener, current *octavia.ListenerOTLPTracing) bool {
-			return graph.tracing[listener.ID].Readable && telemetryListenerWanted(listener, wanted) && current.CollectorPoolID == possible
+			return graph.tracing[listener.ID].Readable && telemetryListenerWanted(listener, wanted) && current.CollectorPoolID == possible.pool.ID &&
+				(!telemetryUsesSystemCA(wanted) || telemetryPoolTLSMatches(possible, wanted.BackendTLS, "", certificate))
 		}
 	}
 	if result, changed, err := p.telemetryWithdrawal(ctx, graph, retain); changed {
@@ -460,12 +470,17 @@ func (p *Provider) verifyTelemetryCapabilities(ctx context.Context, provider str
 	if wanted != nil && len(wanted.Attributes) > 0 {
 		required = append(required, octavia.GatewayCapabilityListenerOTLPSpanAttributes)
 	}
-	var missingTrust bool
+	var missingTrust string
 	if wanted != nil && wanted.BackendTLS != nil {
 		tls := wanted.BackendTLS
-		missingTrust = tls.Trust != cloud.BackendTLSTrustReference || !p.backendTLSPolicy || p.backendCA == nil || !validBackendTLS(tls) || gateway.BackendClientCertificate.Denied || !gateway.BackendCAOwned
-		if !missingTrust {
-			required = append(required, backendTLSCapabilities(false, len(tls.SubjectAltNames) != 0)...)
+		systemCA := telemetryUsesSystemCA(wanted)
+		switch {
+		case !p.backendTLSPolicy || tls.Denied || !validBackendTLS(tls) || gateway.BackendClientCertificate.Denied:
+			missingTrust = "The collector requires an authorized backend TLS profile"
+		case !systemCA && (p.backendCA == nil || !gateway.BackendCAOwned && gateway.ClaimBackendCA == nil):
+			missingTrust = "The collector requires an authorized Gateway CA store"
+		default:
+			required = append(required, telemetryBackendTLSCapabilities(len(tls.SubjectAltNames) != 0, systemCA)...)
 		}
 	}
 	err := p.octavia.VerifyGatewayCapabilities(ctx, provider, required...)
@@ -477,11 +492,15 @@ func (p *Provider) verifyTelemetryCapabilities(ctx context.Context, provider str
 		return "Regional Octavia does not advertise listener tracing", true, nil
 	case err != nil:
 		return "", false, err
-	case missingTrust:
-		return "The collector requires authenticated TLS and an authorized Gateway CA store", false, nil
+	case missingTrust != "":
+		return missingTrust, false, nil
 	default:
 		return "", false, nil
 	}
+}
+
+func telemetryUsesSystemCA(wanted *cloud.GatewayTelemetry) bool {
+	return wanted.BackendTLS != nil && wanted.BackendTLS.Trust == cloud.BackendTLSTrustSystem
 }
 
 func (p *Provider) convergeGatewayTelemetry(ctx context.Context, graph telemetryGraph, owned map[string]telemetryPool, wanted *cloud.GatewayTelemetry) (cloud.GatewayGraphResult, error) {
@@ -492,7 +511,7 @@ func (p *Provider) convergeGatewayTelemetry(ctx context.Context, graph telemetry
 	securityErr := p.topology.ValidateGatewaySecurity(ctx, cloud.GatewaySpec{}, []cloud.RouteSpec{backend})
 	var verifiedRef string
 	var trustErr error
-	if tls := wanted.BackendTLS; tls != nil && pool.pool.ID != "" {
+	if tls := wanted.BackendTLS; tls != nil && tls.Trust == cloud.BackendTLSTrustReference && pool.pool.ID != "" && graph.spec.Gateway.BackendCAOwned {
 		revision, err := p.backendCA.Find(ctx, graph.spec.Identity.GatewayUID, tls.CAConfigMapUID, tls.CADigest, pool.pool.CATLSContainerRef)
 		if err != nil {
 			trustErr = err
@@ -522,11 +541,21 @@ func (p *Provider) convergeGatewayTelemetry(ctx context.Context, graph telemetry
 		return p.telemetryPending("Waiting for an Octavia HTTP listener"), nil
 	}
 
+	if tls := wanted.BackendTLS; tls != nil && tls.Trust == cloud.BackendTLSTrustReference && !graph.spec.Gateway.BackendCAOwned {
+		return p.applyTelemetryMutation(ctx, graph, "Reserving ownership of the collector trust anchor", func() error {
+			return graph.spec.Gateway.ClaimBackendCA(ctx)
+		})
+	}
 	if !active {
 		if result, changed, err := p.retireTelemetryPools(ctx, graph, owned, name); changed {
 			return result, err
 		}
 		return p.convergeTelemetryPool(ctx, graph, wanted, name, pool, tlsMatches, nextMember)
+	}
+	// A pending neighbor can leave the inventory incomplete even when
+	// this pool and its existing exporters are independently verified.
+	if telemetryUsesSystemCA(wanted) && graph.unverified {
+		return p.telemetryPending("Waiting to verify the listener inventory before programming tracing"), nil
 	}
 	wire := octavia.ListenerOTLPTracing{CollectorPoolID: pool.pool.ID, ServiceName: wanted.ServiceName, SpanName: wanted.SpanName,
 		Sampling: wanted.Sampling, Attributes: wanted.Attributes}
@@ -581,12 +610,28 @@ func (p *Provider) convergeTelemetryPool(ctx context.Context, graph telemetryGra
 	if pool.pool.ID == "" {
 		return p.createTelemetryPool(ctx, graph, name, wanted)
 	}
-	if pool.pool.ProvisioningStatus == "ERROR" || pool.pool.ProvisioningStatus == "ACTIVE" &&
-		(!pool.admin || !pool.pool.AdminStateUp || pool.h2c || !tlsMatches) {
+	status := pool.pool.ProvisioningStatus
+	waitingForAttestation := status == "ERROR" || status == "ACTIVE" && !tlsMatches
+	if telemetryUsesSystemCA(wanted) && waitingForAttestation && pool.pool.AdminStateUp && len(pool.members) == 0 && telemetryPoolTLSConfigured(pool, wanted.BackendTLS, "", graph.spec.Gateway.BackendClientCertificate.Reference) {
+		// The worker can mark this empty pool ERROR when a peer's bundle
+		// diverges. Retry the same profile without reallocating the pool.
+		if wait := telemetryRetryRemaining(pool.pool.Tags, time.Now()); wait > 0 {
+			return telemetryResult(cloud.ProgressingOutcome("Waiting for Octavia to attest the collector system CA", wait)), nil
+		}
+		if graph.unverified || graph.refs[pool.pool.ID] || pool.pool.Listeners == nil {
+			return p.telemetryPending("Waiting for Octavia to attest the collector system CA"), nil
+		}
+		return p.applyTelemetryMutation(ctx, graph, "Retrying the Octavia collector system CA attestation", func() error {
+			tags := withTelemetryRetryTag(pool.pool.Tags)
+			_, err := p.octavia.UpdatePool(ctx, pool.pool.ID, pools.UpdateOpts{Tags: &tags})
+			return err
+		})
+	}
+	if status == "ERROR" || status == "ACTIVE" && (!pool.admin || !pool.pool.AdminStateUp || pool.h2c || !tlsMatches) {
 		if result, changed, err := p.retireTelemetryPools(ctx, graph, map[string]telemetryPool{name: pool}, ""); changed {
 			return result, err
 		}
-	} else if pool.pool.ProvisioningStatus == "ACTIVE" && nextMember != nil && !graph.unverified && !graph.refs[pool.pool.ID] {
+	} else if status == "ACTIVE" && nextMember != nil && !graph.unverified && !graph.refs[pool.pool.ID] {
 		return p.changeTelemetryMember(ctx, graph, nextMember)
 	}
 	return p.telemetryPending("Waiting for the Octavia collector pool"), nil
@@ -596,12 +641,27 @@ func telemetryPoolTLSMatches(pool telemetryPool, wanted *cloud.BackendTLSValidat
 	if wanted == nil {
 		return !hasBackendTLSSettings(pool.pool, pool.tls) && !hasObservedBackendTLS(pool.pool, pool.tls)
 	}
-	return pool.tls.Complete() && pool.pool.TLSEnabled && pool.tls.Hostname == wanted.Hostname &&
+	return telemetryPoolTLSConfigured(pool, wanted, verifiedRef, certificate) &&
+		(wanted.Trust != cloud.BackendTLSTrustSystem || pool.tls.SystemCAApplied())
+}
+
+func telemetryPoolTLSConfigured(pool telemetryPool, wanted *cloud.BackendTLSValidation, verifiedRef, certificate string) bool {
+	trustMatches := verifiedRef != "" && pool.pool.CATLSContainerRef == verifiedRef && !hasUnclearedSystemCA(pool.pool, pool.tls)
+	if wanted.Trust == cloud.BackendTLSTrustSystem {
+		trustMatches = configuredSystemCA(pool.pool, pool.tls) && slices.Contains(pool.pool.Tags, backendTLSSystemCATag) &&
+			pool.tls.H2CObserved && pool.tls.RequireH2Observed && pool.tls.ALPNObserved
+	}
+	return trustMatches && pool.tls.Complete() && pool.pool.TLSEnabled && !pool.h2c && pool.tls.Hostname == wanted.Hostname &&
 		slices.Equal(pool.pool.ALPNProtocols, []string{telemetryALPN}) &&
-		verifiedRef != "" && pool.pool.CATLSContainerRef == verifiedRef && pool.pool.TLSContainerRef == certificate && pool.pool.CRLContainerRef == "" &&
+		pool.pool.TLSContainerRef == certificate && pool.pool.CRLContainerRef == "" &&
 		!pool.tls.RequireH2 && slices.Contains(pool.pool.Tags, backendTLSRevisionTag(wanted)) &&
 		!differentBackendTLSRevision(pool.pool.Tags, backendTLSRevisionTag(wanted)) &&
 		backendTLSSubjectAltNamesMatch(wanted.SubjectAltNames, observedRouteGraph{pool: &pool.pool, backendTLS: pool.tls})
+}
+
+func withTelemetryRetryTag(tags []string) []string {
+	tags = slices.DeleteFunc(slices.Clone(tags), func(tag string) bool { return strings.HasPrefix(tag, telemetryRetryTag) })
+	return append(tags, telemetryRetryTag+strconv.FormatInt(time.Now().Add(telemetryRetryInterval).Unix(), 10))
 }
 
 func (p *Provider) createTelemetryPool(ctx context.Context, graph telemetryGraph, name string, wanted *cloud.GatewayTelemetry) (cloud.GatewayGraphResult, error) {
@@ -614,20 +674,25 @@ func (p *Provider) createTelemetryPool(ctx context.Context, graph telemetryGraph
 		LBMethod: pools.LBMethodRoundRobin, AdminStateUp: boolPointer(true), Tags: append(tags, telemetryPoolTag),
 	}}
 	if tls := wanted.BackendTLS; tls != nil {
-		uid := graph.spec.Identity.GatewayUID
-		revision, err := p.backendCA.Find(ctx, uid, tls.CAConfigMapUID, tls.CADigest, "")
-		if err != nil {
-			return cloud.GatewayGraphResult{}, err
-		}
-		if revision.Reference() == "" {
-			return p.applyTelemetryMutation(ctx, graph, "Publishing the collector trust anchor to Barbican", func() error {
-				_, err := p.backendCA.Ensure(ctx, uid, tls.CAConfigMapUID, tls.CAPEM)
-				return err
-			})
+		if tls.Trust == cloud.BackendTLSTrustReference {
+			uid := graph.spec.Identity.GatewayUID
+			revision, err := p.backendCA.Find(ctx, uid, tls.CAConfigMapUID, tls.CADigest, "")
+			if err != nil {
+				return cloud.GatewayGraphResult{}, err
+			}
+			if revision.Reference() == "" {
+				return p.applyTelemetryMutation(ctx, graph, "Publishing the collector trust anchor to Barbican", func() error {
+					_, err := p.backendCA.Ensure(ctx, uid, tls.CAConfigMapUID, tls.CAPEM)
+					return err
+				})
+			}
+			request.CATLSContainerRef = revision.Reference()
+		} else {
+			request.BackendTLSSystemCA = true
+			request.Tags = withTelemetryRetryTag(append(request.Tags, backendTLSSystemCATag))
 		}
 		request.TLSEnabled = true
 		request.ALPNProtocols = []string{telemetryALPN}
-		request.CATLSContainerRef = revision.Reference()
 		request.TLSContainerRef = graph.spec.Gateway.BackendClientCertificate.Reference
 		request.BackendTLSHostname = tls.Hostname
 		request.BackendTLSSubjectAltNames = tls.SubjectAltNames

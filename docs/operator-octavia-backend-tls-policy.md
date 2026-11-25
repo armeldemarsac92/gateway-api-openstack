@@ -6,7 +6,7 @@ An application can require the Gateway to encrypt its connection to a Service an
 
 1. Build the Amphora image with the strict DNS HAProxy executable and install the matching Amphora agent. Upgrade the Octavia database, octavia-lib, API and workers. Verify that each active and standby Amphora can run the configured binary. [Amphora image build instructions](https://github.com/armeldemarsac92/octavia/blob/ba89a2d6237aa1a1b754ad7234899c12de39a4d2/elements/haproxy-octavia/README.rst) · [Matching Hibiscus packages](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-backend-tls-hostname-ba89a2d6237a)
 2. Set `enabled_backend_tls_hostname_providers = amphora` in Octavia's `[api_settings]`. Using the controller's regional catalog and project, check that `GET /v2/lbaas/providers/amphora/gateway_capabilities` includes `backend_tls_hostname_v1`.
-3. Supply a stable cluster ID and a dedicated project-scoped identity with permission to publish, verify and retire its CA revisions in regional Barbican. The Octavia service identity needs access to each configured CA through its normal certificate manager.
+3. For policies with `caCertificateRefs`, supply a stable cluster ID and a dedicated project-scoped identity with permission to publish, verify and retire its CA revisions in regional Barbican. The Octavia service identity needs access to each configured CA through its normal certificate manager.
 4. For a standalone installation render `config/octavia-backend-tls-policy`. For the Magnum workload addon render `integrations/magnum-capi-helm/workload-octavia-backend-tls-policy`. Each overlay sets `--octavia-backend-tls-policy` and Octavia microversion 2.8, and grants access to `BackendTLSPolicy`, its status and ConfigMaps. The controller watches ConfigMap metadata and reads the referenced CA after verifying the authorized Service port. If the installation also uses the Experimental release bundle, include the existing Experimental component. [Magnum operator procedure](qualification/v1.7.0/magnum-operator.md)
 
 For GRPCRoute, enable the existing gRPC profile and install the provider and Amphora builds that enforce negotiated HTTP/2. Set `enabled_backend_tls_h2_alpn_providers = amphora` alongside the hostname setting, then verify that the regional capability response includes `backend_tls_h2_alpn_v1` and `backend_tls_hostname_v1`. The controller requests `backend_tls_require_h2: true` and checks it alongside the configured hostname and CA on the owned pool before enabling it or enrolling members. Amphora closes backend TLS connections that do not negotiate `h2`. Missing capability, missing readback or invalid trust keeps the affected backend unavailable. The Service port may omit `appProtocol` or declare `https`. A port declaring `kubernetes.io/h2c` cannot use this policy.
@@ -67,7 +67,25 @@ In a region that lacks SAN support, the affected pool stays closed and the polic
 
 A Service owner can set `validation.wellKnownCACertificates` to `System` together with `validation.hostname`. The selected trust roots come from the operator’s Amphora image.
 
-Install the matching Octavia API, worker, Amphora agent and octavia-lib packages and run the database upgrade. Enable `--octavia-backend-tls-policy` on the controller. In Octavia’s `[api_settings]`, enroll `amphora` in `enabled_backend_tls_hostname_providers` and `enabled_backend_tls_system_ca_providers`. Configure the absolute PEM path in `[haproxy_amphora] backend_tls_system_ca_path` and its SHA-256 in `backend_tls_system_ca_sha256`. Every serving Amphora needs that bundle. Verify that the region advertises `backend_tls_system_ca_v1`. [Octavia packages](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-backend-tls-system-ca-372effbead21) · [octavia-lib packages](https://github.com/armeldemarsac92/octavia-lib/releases/tag/hibiscus-backend-tls-system-ca-71f0c094860a)
+Install the matching Octavia API, worker, Amphora agent and octavia-lib packages, then run the database upgrade. Enable `--octavia-backend-tls-policy` on the controller. [Octavia packages](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-backend-tls-system-ca-372effbead21) · [octavia-lib packages](https://github.com/armeldemarsac92/octavia-lib/releases/tag/hibiscus-backend-tls-system-ca-71f0c094860a)
+
+### Configure the Amphora system CA bundle
+
+Set these options on the regional Octavia API and workers. Install the matching strict backend TLS HAProxy build and agent in the Amphora image.
+
+```ini
+[api_settings]
+enabled_backend_tls_hostname_providers = amphora
+enabled_backend_tls_system_ca_providers = amphora
+
+[haproxy_amphora]
+backend_tls_system_ca_path = /etc/ssl/certs/ca-certificates.crt
+backend_tls_system_ca_sha256 = <lowercase SHA-256 of the exact PEM file>
+```
+
+Install the same readable PEM CA bundle at that absolute path on every eligible Amphora, including standby and replacement images. Compute the SHA-256 from the exact bytes at that path. Confirm that the regional capability endpoint advertises `backend_tls_hostname_v1` and `backend_tls_system_ca_v1`, then check the pool's `backend_tls_system_ca_sha256` after a reload. Octavia reports the digest only after the current HAProxy topology acknowledges the configuration. Updating the profile requires the API and workers to use the new digest and a reconciliation to install the new bundle on the affected load balancers. [Amphora system trust configuration](https://github.com/armeldemarsac92/octavia/blob/7a105668b87e4e1c9be8915ec3929cb827c1f949/doc/source/admin/providers/amphora.rst#system-trust-for-authenticated-tls-backends)
+
+The OTLP collector requires a worker that can attest the isolated collector pool before attaching an exporter. Use the additional tracing settings and check the listener publication status for this path. [Authenticate the OTLP collector](operator-octavia-telemetry.md#authenticate-the-collector-with-amphora-system-trust)
 
 ```yaml
 apiVersion: gateway.networking.k8s.io/v1

@@ -185,10 +185,8 @@ func (r *backendTLSPolicyStatusReconciler) observeAncestors(ctx context.Context,
 			return nil, err
 		}
 		capability := backendTLSUnknown
-		if systemCA {
-			capability = backendTLSUnsupported
-		} else if len(consumers) != 0 && r.routes.TelemetryBackendTLSAvailable != nil {
-			supported, err := r.routes.TelemetryBackendTLSAvailable(ctx, requireSAN)
+		if len(consumers) != 0 && r.routes.TelemetryBackendTLSAvailable != nil {
+			supported, err := r.routes.TelemetryBackendTLSAvailable(ctx, requireSAN, systemCA)
 			if err == nil {
 				capability = backendTLSUnsupported
 				if supported {
