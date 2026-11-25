@@ -49,18 +49,19 @@ const (
 )
 
 type routeStatusPlan struct {
-	kind                routeStatusPlanKind
-	updates             []parentStatusUpdate
-	droppedRules        string
-	corsFallback        bool
-	policy              controller.ProviderFailurePolicy
-	referencesEvaluated bool
-	validateOwnership   bool
-	selection           routeSelection
-	profileObserved     bool
-	rejectedSections    []model.ListenerSection
-	gateway             *gatewayv1.Gateway
-	cleanupIdentity     cloud.Identity
+	kind                   routeStatusPlanKind
+	updates                []parentStatusUpdate
+	droppedRules           string
+	corsFallback           bool
+	policy                 controller.ProviderFailurePolicy
+	referencesEvaluated    bool
+	validateOwnership      bool
+	selection              routeSelection
+	profileObserved        bool
+	rejectedSections       []model.ListenerSection
+	gateway                *gatewayv1.Gateway
+	cleanupIdentity        cloud.Identity
+	xBackendCookieRevision *string
 }
 
 type routeProviderWarning struct {
@@ -196,6 +197,15 @@ func (r *Reconciler) patchHTTPRouteStatus(
 		if plan.validateOwnership {
 			if err := r.validateRouteStatusOwnership(ctx, current, plan); err != nil {
 				return err
+			}
+		}
+		if plan.xBackendCookieRevision != nil {
+			revision, err := r.liveXBackendCookieRevision(ctx, current)
+			if err != nil {
+				return err
+			}
+			if revision != *plan.xBackendCookieRevision {
+				return errHTTPRouteChanged
 			}
 		}
 		currentPlan := *plan
@@ -497,6 +507,16 @@ func (p *routeStatusPlan) updateParentStatuses(config controller.Config, route *
 		}
 		controller.SetCondition(&parentStatus.Conditions, controller.Condition(string(gatewayv1.RouteConditionResolvedRefs), update.status.resolved, update.status.resolvedReason, update.status.resolvedMessage, resolvedGeneration))
 		controller.SetCondition(&parentStatus.Conditions, controller.Condition(config.Domain()+"/Programmed", update.status.programmed, update.status.programmedReason, update.status.programmedMessage, programmedGeneration))
+		cookieConditionType := config.Domain() + xBackendCookieRevisionCondition
+		switch {
+		case update.status.programmed != metav1.ConditionTrue:
+			meta.RemoveStatusCondition(&parentStatus.Conditions, cookieConditionType)
+		case p.xBackendCookieRevision != nil && *p.xBackendCookieRevision != "":
+			controller.SetCondition(&parentStatus.Conditions, controller.Condition(cookieConditionType, metav1.ConditionTrue,
+				"Observed", *p.xBackendCookieRevision, route.Generation))
+		case p.xBackendCookieRevision != nil:
+			meta.RemoveStatusCondition(&parentStatus.Conditions, cookieConditionType)
+		}
 		if existing >= 0 {
 			parents[existing] = parentStatus
 		} else {

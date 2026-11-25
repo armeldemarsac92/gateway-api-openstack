@@ -18,37 +18,40 @@ package httproute
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
-	"sync"
+	"fmt"
+	"slices"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 )
 
 type xBackendCookieAvailability func(cloud.HTTPSessionCookieRequirements) (bool, error)
 
 func (r *Reconciler) xBackendCookieCapability(ctx context.Context) xBackendCookieAvailability {
-	discover := func(requirements cloud.HTTPSessionCookieRequirements) func() (bool, error) {
-		return sync.OnceValues(func() (bool, error) {
-			if r.XBackendCookieAvailable == nil {
-				return false, errXBackendCookieDiscovery
-			}
-			return r.XBackendCookieAvailable(ctx, requirements)
-		})
+	type observation struct {
+		available bool
+		err       error
 	}
-	named := discover(cloud.HTTPSessionCookieNamed)
-	timed := discover(cloud.HTTPSessionCookieTimed)
-	permanent := discover(cloud.HTTPSessionCookiePermanent)
+	observations := make(map[cloud.HTTPSessionCookieRequirements]observation)
 	return func(requirements cloud.HTTPSessionCookieRequirements) (bool, error) {
-		switch requirements {
-		case cloud.HTTPSessionCookiePermanent:
-			return permanent()
-		case cloud.HTTPSessionCookieTimed:
-			return timed()
-		default:
-			return named()
+		if r.XBackendCookieAvailable == nil {
+			return false, errXBackendCookieDiscovery
 		}
+		if seen, ok := observations[requirements]; ok {
+			return seen.available, seen.err
+		}
+		available, err := r.XBackendCookieAvailable(ctx, requirements)
+		observations[requirements] = observation{available, err}
+		return available, err
 	}
 }
 
@@ -71,6 +74,12 @@ func xBackendCookieCondition(status metav1.ConditionStatus, reason, message stri
 		return metav1.ConditionUnknown, "Pending", "Regional Octavia support for XBackend Permanent cookies could not be verified"
 	case cloud.SessionPersistencePermanentReadbackUnverified:
 		return metav1.ConditionUnknown, "Pending", "Octavia has not confirmed the requested Permanent cookie settings on all pools for this XBackend"
+	case cloud.SessionPersistencePathUnverified:
+		return metav1.ConditionUnknown, "Pending", "Regional Octavia support for the XBackend HTTP session cookie path could not be verified"
+	case cloud.SessionPersistencePathReadbackUnverified:
+		return metav1.ConditionUnknown, "Pending", "Octavia has not confirmed the requested XBackend HTTP session cookie path"
+	case cloud.SessionPersistencePathUnsupported:
+		return metav1.ConditionFalse, string(gatewayv1.RouteReasonUnsupportedValue), "XBackend custom cookie paths require http_cookie_path_v1 in addition to the regional Octavia capabilities for the requested cookie lifetime"
 	case cloud.SessionPersistenceUnsupported:
 		return metav1.ConditionFalse, string(gatewayv1.RouteReasonUnsupportedValue), "The regional Octavia provider does not advertise http_cookie_name_v1"
 	case cloud.SessionPersistenceDeadlineUnsupported:
@@ -87,4 +96,75 @@ func (s routeReconcileStatus) withXBackendCookieIssue(issue cloud.SessionPersist
 		s.resolved, s.resolvedReason, s.resolvedMessage = xBackendCookieCondition(s.resolved, s.resolvedReason, s.resolvedMessage, issue)
 	}
 	return s
+}
+
+const xBackendCookieRevisionCondition = "/XBackendCookieConfiguration"
+
+// A Route's generation does not include edits to the XBackends it references.
+// Bind deferred Octavia readback to the backend revisions confirmed on that parent.
+func xBackendCookieRevision(route *gatewayv1.HTTPRoute, observations []model.XBackendObservation) string {
+	digest := sha256.New()
+	seen := make(map[types.NamespacedName]bool)
+	for _, key := range model.LocalXBackendReferences(route) {
+		if seen[key] {
+			continue
+		}
+		index := slices.IndexFunc(observations, func(observation model.XBackendObservation) bool { return observation.Key == key })
+		if index < 0 {
+			continue
+		}
+		backend := observations[index]
+		if backend.Spec.SessionPersistence == nil {
+			continue
+		}
+		seen[key] = true
+		path := "/"
+		if cookie := backend.Spec.SessionPersistence.Cookie; cookie != nil && cookie.Path != nil {
+			path = *cookie.Path
+		}
+		_, _ = fmt.Fprintf(digest, "%q %q %q %d %q\n", key.Namespace, key.Name, backend.UID, backend.Generation, path)
+	}
+	if len(seen) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%x", digest.Sum(nil))
+}
+
+func (r *Reconciler) currentXBackendCookieRevision(route *gatewayv1.HTTPRoute, parentRef gatewayv1.ParentReference, revision string) bool {
+	for _, parent := range route.Status.Parents {
+		if parent.ControllerName != r.Config.ControllerName ||
+			!controller.ParentRefsEqual(parent.ParentRef, route.Namespace, parentRef, route.Namespace) {
+			continue
+		}
+		proof := meta.FindStatusCondition(parent.Conditions, r.Config.Domain()+xBackendCookieRevisionCondition)
+		if proof != nil {
+			return proof.Status == metav1.ConditionTrue && proof.ObservedGeneration == route.Generation && proof.Message == revision
+		}
+		break
+	}
+	return revision == ""
+}
+
+func (r *Reconciler) liveXBackendCookieRevision(ctx context.Context, route *gatewayv1.HTTPRoute) (string, error) {
+	var observations []model.XBackendObservation
+	seen := make(map[types.NamespacedName]bool)
+	for _, key := range model.LocalXBackendReferences(route) {
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		var backend gatewayx.XBackend
+		if err := r.routePatchReader().Get(ctx, key, &backend); err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			return "", fmt.Errorf("read XBackend %s for cookie status: %w", key, err)
+		}
+		if backend.DeletionTimestamp.IsZero() {
+			observations = append(observations, model.XBackendObservation{
+				Key: key, UID: backend.UID, Generation: backend.Generation, Spec: backend.Spec,
+			})
+		}
+	}
+	return xBackendCookieRevision(route, observations), nil
 }
