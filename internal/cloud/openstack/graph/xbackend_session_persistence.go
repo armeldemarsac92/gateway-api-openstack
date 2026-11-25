@@ -197,23 +197,43 @@ func planXBackendCookie(desired desiredRoute, observed observedRouteGraph) (*rou
 	needsCookie := desired.sessionCookieName != ""
 	needsDeadline := desired.sessionCookieDeadline != nil
 	needsPermanent := needsDeadline && desired.sessionCookieDeadline.Permanent
+	observedPermanent := observed.cookieDeadline.Value != nil && observed.cookieDeadline.Value.Permanent
 	issue := xBackendCookieIssue(desired)
 	switch {
 	case pool == nil:
 		return nil, issue
-	case !needsCookie && !managed && !timed && !permanent:
+	case !needsCookie && !managed && !timed && !permanent && !observedPermanent:
 		return nil, nil
 	case pool.Protocol != cloud.ListenerProtocolHTTP:
 		return nil, errXBackendCookieUnverified
 	case pool.ProvisioningStatus == "ERROR":
-		if observed.backendTLS.AdminObserved {
-			// Octavia locks member writes on ERROR pools but permits a
-			// pool PUT. Keep the current admin state and predicate. Verify
-			// the pool and any pending cookie change after it is ACTIVE.
-			return &routeMutation{kind: routeMutationSetXBackendCookie, id: pool.ID,
-				poolAdmin: boolPointer(pool.AdminStateUp), retry: true}, nil
+		if !observed.backendTLS.AdminObserved {
+			return nil, errXBackendCookieUnverified
 		}
-		return nil, errXBackendCookieUnverified
+		// Pool PUT can recover an ERROR pool even when member changes are
+		// locked. A downgrade must stop rendering the failed mode first.
+		step := &routeMutation{kind: routeMutationSetXBackendCookie, id: pool.ID,
+			poolAdmin: boolPointer(pool.AdminStateUp), retry: true}
+		if !needsPermanent && (permanent || observedPermanent) {
+			if needsDeadline && observedPermanent && issue == nil {
+				// A partial update preserves the current name, deadline
+				// and scope while withdrawing the incompatible mode.
+				step.clearPoolCookiePermanent = true
+			} else {
+				step.poolPersistence = &pools.SessionPersistence{}
+			}
+			tags := slices.DeleteFunc(slices.Clone(pool.Tags), func(tag string) bool { return tag == xBackendCookiePermanentTag })
+			if len(observed.members) != 0 {
+				// The Amphora closed-pool marker retains the predicate
+				// without forwarding to members before a drain is possible.
+				step.poolAdmin = boolPointer(false)
+				if !slices.Contains(tags, backendTLSManagedTag) {
+					tags = append(tags, backendTLSManagedTag)
+				}
+			}
+			step.poolTags = &tags
+		}
+		return step, nil
 	case pool.ProvisioningStatus != "ACTIVE":
 		return nil, errXBackendCookieUnverified
 	case issue == nil && pool.Persistence == wanted && managed == needsCookie && timed == needsDeadline && permanent == needsPermanent &&
@@ -234,17 +254,15 @@ func planXBackendCookie(desired desiredRoute, observed observedRouteGraph) (*rou
 	step := routeMutation{kind: routeMutationSetXBackendCookie, id: pool.ID}
 	hasPersistence := pool.Persistence != (pools.SessionPersistence{}) || observed.cookieDeadline.Value != nil || observed.cookieDeadline.Invalid
 	restoreTimedSession := needsDeadline && !needsPermanent
-	observedPermanent := observed.cookieDeadline.Value != nil && observed.cookieDeadline.Value.Permanent
 	switch {
-	case issue == nil && restoreTimedSession && permanent && !observedPermanent && hasPersistence:
-		// The ownership tag can survive an API rollback. Without positive
-		// readback of Permanent, clear through the stock API before restoring
-		// the timed Session cookie.
+	case issue == nil && hasPersistence && (needsCookie && !needsDeadline && (timed || permanent || !desired.cookieDeadlineMatches(observed)) ||
+		restoreTimedSession && permanent && !observedPermanent):
+		// Tags can survive an API rollback. Clear persistence through the
+		// stock API, then restore the requested Session without unknown fields.
 		step.poolPersistence = &pools.SessionPersistence{}
 	case issue == nil:
 		step.poolPersistence = &wanted
 		step.poolCookieDeadline = desired.sessionCookieDeadline
-		step.clearPoolCookieDeadline = needsCookie && !needsDeadline && (timed || permanent || !desired.cookieDeadlineMatches(observed))
 		step.clearPoolCookiePermanent = restoreTimedSession && observedPermanent
 		if managed != needsCookie || timed != needsDeadline || permanent != needsPermanent {
 			tags := slices.DeleteFunc(slices.Clone(pool.Tags), isXBackendCookieTag)

@@ -919,7 +919,6 @@ type routeMutation struct {
 	clearPoolPersistence     bool
 	poolPersistence          *pools.SessionPersistence
 	poolCookieDeadline       *cloud.HTTPSessionCookieDeadline
-	clearPoolCookieDeadline  bool
 	clearPoolCookiePermanent bool
 	xBackendCookieFallback   bool
 	xBackendCookieDrain      bool
@@ -1058,6 +1057,17 @@ func buildRouteEnsurePlanWithActivations(desired desiredRoute, actual observedRo
 		return []routeMutation{*step}, routeStateFromObservation(actual), nil
 	case err == nil:
 		return buildRouteEnsureBackendPlan(desired, actual, batchActivations)
+	case errors.Is(err, errXBackendCookiePermanentReadback):
+		// The sibling ACK gates admission. Existing members still need to
+		// leave as their endpoint eligibility changes.
+		steps, state, _ := buildRouteEnsureBackendPlan(desired, actual, batchActivations)
+		steps = slices.DeleteFunc(steps, func(step routeMutation) bool {
+			return step.kind != routeMutationDeleteMember && step.kind != routeMutationDisableMember && step.kind != routeMutationClearPoolMembers
+		})
+		if len(steps) != 0 {
+			return steps, state, nil
+		}
+		return nil, state, err
 	case !desired.cookieFallback(actual):
 		return nil, routeStateFromObservation(actual), err
 	case actual.pool == nil:
@@ -1795,7 +1805,7 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 	case routeMutationSetXBackendCookie:
 		opts := pools.UpdateOpts{Persistence: step.poolPersistence, Tags: step.poolTags, AdminStateUp: step.poolAdmin}
 		_, err = p.octavia.UpdatePool(ctx, step.id, octavia.UpdatePoolOpts{UpdateOpts: opts,
-			CookieDeadline: step.poolCookieDeadline, ClearCookieDeadline: step.clearPoolCookieDeadline, ClearCookiePermanent: step.clearPoolCookiePermanent})
+			CookieDeadline: step.poolCookieDeadline, ClearCookiePermanent: step.clearPoolCookiePermanent})
 	case routeMutationPublishBackendCA:
 		return p.publishBackendCA(ctx, desired.spec)
 	case routeMutationClearPoolMembers:

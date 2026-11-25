@@ -185,15 +185,19 @@ func TestXBackendCookieOctaviaPoolLifecycle(t *testing.T) {
 	}
 	pool["session_persistence"] = correct
 
-	// Clearing the deadline must send explicit nulls while retaining the name.
+	// An API rollback leaves the ownership tags but omits the deadline fields.
+	// Use only the stock persistence clear and restore the name separately.
 	deadline := wanted.sessionCookieDeadline
 	wanted.sessionCookieDeadline = nil
 	bounded.members = persisted.members
 	require.Equal(t, routeMutationClearPoolMembers, converge(bounded).kind)
-	bounded.members = nil
-	execute(converge(bounded))
-	require.JSONEq(t, `{"type":"HTTP_COOKIE","cookie_name":"reports_renamed","cookie_absolute_timeout_ms":null,"cookie_scope":null}`,
-		string(writes[len(writes)-1]["session_persistence"]))
+	pool["session_persistence"] = json.RawMessage(`{"type":"HTTP_COOKIE","cookie_name":"reports_renamed"}`)
+	legacyNamed := observe()
+	require.Nil(t, legacyNamed.cookieDeadline.Value)
+	execute(converge(legacyNamed))
+	require.Equal(t, "null", string(writes[len(writes)-1]["session_persistence"]))
+	execute(converge(observe()))
+	require.JSONEq(t, `{"type":"HTTP_COOKIE","cookie_name":"reports_renamed"}`, string(writes[len(writes)-1]["session_persistence"]))
 	active = observe()
 	require.Nil(t, active.cookieDeadline.Value)
 	require.NotContains(t, active.pool.Tags, xBackendCookieDeadlineTag)
@@ -297,14 +301,18 @@ func TestXBackendCookieOctaviaPoolLifecycle(t *testing.T) {
 	permanent = observe()
 	require.Equal(t, wanted.sessionCookieDeadline, permanent.cookieDeadline.Value)
 
-	// Clearing both deadline fields also clears Permanent, using the old JSON contract.
-	capabilities = capabilities[:len(capabilities)-1]
+	// A name-only API also accepts this withdrawal from a Permanent cookie.
+	capabilities = []string{octavia.GatewayCapabilityHTTPCookieName}
 	wanted.sessionCookieDeadline = nil
-	actual.routes[0].httpParts = map[string]*observedRouteGraph{wanted.backendKey: &permanent}
-	require.Nil(t, p.prepareXBackendCookies(t.Context(), &desired, actual))
-	execute(converge(permanent))
-	require.JSONEq(t, `{"type":"HTTP_COOKIE","cookie_name":"reports_renamed","cookie_absolute_timeout_ms":null,"cookie_scope":null}`,
-		string(writes[len(writes)-1]["session_persistence"]))
+	pool["session_persistence"] = json.RawMessage(`{"type":"HTTP_COOKIE","cookie_name":"reports_renamed"}`)
+	legacyNamed = observe()
+	actual.routes[0].httpParts = map[string]*observedRouteGraph{wanted.backendKey: &legacyNamed}
+	clear := p.prepareXBackendCookies(t.Context(), &desired, actual)
+	require.NotNil(t, clear)
+	execute(clear.route)
+	require.Equal(t, "null", string(writes[len(writes)-1]["session_persistence"]))
+	execute(converge(observe()))
+	require.JSONEq(t, `{"type":"HTTP_COOKIE","cookie_name":"reports_renamed"}`, string(writes[len(writes)-1]["session_persistence"]))
 }
 
 func TestXBackendPermanentCookieWaitsForBothRoutesWithoutBlockingOtherPools(t *testing.T) {
@@ -366,6 +374,75 @@ func TestXBackendPermanentCookieWaitsForBothRoutesWithoutBlockingOtherPools(t *t
 	require.NotEmpty(t, steps)
 	require.Equal(t, routeMutationSetPolicyTarget, steps[0].route.kind)
 	require.Equal(t, []octavia.WeightedHTTPTarget{policy.weightedTargets[0], {Weight: 1, PoolID: current.pool.ID}}, *steps[0].route.weightedTargets)
+}
+
+func TestXBackendPermanentCookiePeerACKStillWithdrawsStaleDirectMembers(t *testing.T) {
+	wanted, current := convergedRoutePlanFixture()
+	wanted.xBackend, wanted.sessionCookieName = true, "reports_session"
+	wanted.sessionCookieCapability, wanted.cookieReadbackPending = xBackendCookieAvailable, true
+	wanted.sessionCookieDeadline = &cloud.HTTPSessionCookieDeadline{TimeoutMS: 1500, Scope: strings.Repeat("a", 64), Permanent: true}
+	wanted.members[0].Address = "10.0.0.11"
+	current.backendTLS.AdminObserved = true
+	current.pool.ProvisioningStatus, current.members[0].ProvisioningStatus = "ACTIVE", "ACTIVE"
+	current.pool.Persistence = pools.SessionPersistence{Type: httpCookiePersistence, CookieName: wanted.sessionCookieName}
+	current.pool.Tags = []string{xBackendCookieTag, xBackendCookieDeadlineTag, xBackendCookiePermanentTag}
+	current.cookieDeadline.Value = wanted.sessionCookieDeadline
+
+	steps, _, err := buildRouteEnsurePlan(wanted, current)
+	require.NoError(t, err)
+	require.Len(t, steps, 1)
+	require.Equal(t, routeMutationDeleteMember, steps[0].kind)
+	require.Equal(t, current.members[0].ID, steps[0].id)
+	current.members = nil
+	steps, _, err = buildRouteEnsurePlan(wanted, current)
+	require.ErrorIs(t, err, errXBackendCookiePermanentReadback)
+	require.Empty(t, steps)
+}
+
+func TestXBackendPermanentCookieErrorWithdrawsModeBeforeDrainingMembers(t *testing.T) {
+	wanted, current := convergedRoutePlanFixture()
+	wanted.xBackend, wanted.xBackendPlaintext, wanted.sessionCookieName = true, true, "reports_session"
+	wanted.sessionCookieCapability = xBackendCookieAvailable
+	wanted.sessionCookieDeadline = &cloud.HTTPSessionCookieDeadline{TimeoutMS: 1500, Scope: strings.Repeat("a", 64)}
+	permanent := *wanted.sessionCookieDeadline
+	permanent.Permanent = true
+	current.cookieDeadline.Value = &permanent
+	current.pool.ProvisioningStatus = "ERROR"
+	current.pool.Persistence = pools.SessionPersistence{Type: httpCookiePersistence, CookieName: wanted.sessionCookieName}
+	current.pool.Tags = []string{xBackendCookieTag, xBackendCookieDeadlineTag, xBackendCookiePermanentTag}
+	current.backendTLS.AdminObserved = true
+
+	for _, test := range []struct {
+		name        string
+		edit        func(*desiredRoute)
+		persistence any
+	}{
+		{name: "timed Session", persistence: map[string]any{"cookie_permanent": false}},
+		{name: "remove persistence", edit: func(route *desiredRoute) {
+			route.sessionCookieName, route.sessionCookieDeadline = "", nil
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			route := wanted
+			if test.edit != nil {
+				test.edit(&route)
+			}
+			step, err := planXBackendCookie(route, current)
+			require.NoError(t, err)
+			require.NotNil(t, step)
+			require.True(t, step.retry)
+			opts := octavia.UpdatePoolOpts{UpdateOpts: pools.UpdateOpts{AdminStateUp: step.poolAdmin, Tags: step.poolTags, Persistence: step.poolPersistence},
+				ClearCookiePermanent: step.clearPoolCookiePermanent}
+			out, err := opts.ToPoolUpdateMap()
+			require.NoError(t, err)
+			fields := out["pool"].(map[string]any)
+			require.Equal(t, test.persistence, fields["session_persistence"])
+			require.Contains(t, fields, "session_persistence")
+			require.Equal(t, false, fields["admin_state_up"])
+			require.Contains(t, *step.poolTags, backendTLSManagedTag)
+			require.NotContains(t, *step.poolTags, xBackendCookiePermanentTag)
+		})
+	}
 }
 
 func TestXBackendCookieWeightedPolicyFollowsPoolReadback(t *testing.T) {
