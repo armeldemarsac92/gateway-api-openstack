@@ -331,6 +331,7 @@ func (r *Reconciler) collectRouteForwardingInputs(ctx context.Context, reader cl
 	input.HTTPRequestMirror = r.Config.HTTPRequestMirror
 	input.HTTPCORS = r.Config.HTTPCORS
 	input.BackendRequestFilters = r.Config.BackendRequestFilters && r.Config.WeightedHTTPTargets
+	input.BackendResponseHeaders = r.Config.ResponseHeaderModifier && r.Config.WeightedHTTPTargets
 	input.BackendH2C = r.Config.BackendH2C
 	tlsObserver := graph.NewBackendTLSObserver(reader, r.Config.ClusterTrustBundles)
 	input.EnableXBackend = r.Config.XBackendEnabled()

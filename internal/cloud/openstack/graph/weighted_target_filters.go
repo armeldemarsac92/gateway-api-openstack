@@ -27,10 +27,10 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
 )
 
-func compileWeightedTargetRequestFilters(match cloud.HTTPPathMatch, targets []desiredHTTPWeightedTarget) ([]octavia.WeightedHTTPTarget, error) {
+func compileWeightedTargetFilters(match cloud.HTTPPathMatch, targets []desiredHTTPWeightedTarget) ([]octavia.WeightedHTTPTarget, error) {
 	var filters []octavia.WeightedHTTPTarget
 	for i, target := range targets {
-		if len(target.requestHeaderOperations) == 0 && target.requestURLRewrite == nil {
+		if len(target.requestHeaderOperations) == 0 && len(target.responseHeaderOperations) == 0 && target.requestURLRewrite == nil {
 			continue
 		}
 		headers, err := cloud.NormalizeHTTPHeaderOperations(target.requestHeaderOperations)
@@ -46,12 +46,25 @@ func compileWeightedTargetRequestFilters(match cloud.HTTPPathMatch, targets []de
 		if err != nil {
 			return nil, err
 		}
+		response, err := cloud.NormalizeHTTPResponseHeaderOperations(target.responseHeaderOperations)
+		if err != nil {
+			return nil, err
+		}
 		if filters == nil {
 			filters = make([]octavia.WeightedHTTPTarget, len(targets))
 		}
-		filters[i] = octavia.WeightedHTTPTarget{RequestHeaderOperations: headers, RequestURLRewrite: rewrite}
+		filters[i] = octavia.WeightedHTTPTarget{RequestHeaderOperations: headers, ResponseHeaderOperations: response, RequestURLRewrite: rewrite}
 	}
 	return filters, nil
+}
+
+// weightedFilterTargets retains declared filters until the effective target
+// vector is known. Ineligible slots no longer require their own capabilities.
+func (policy desiredPolicy) weightedFilterTargets() []octavia.WeightedHTTPTarget {
+	if policy.weightedPlan != nil && !policy.weightedPlan.pending {
+		return policy.weightedPlan.targets
+	}
+	return policy.targetFilters
 }
 
 func hasWeightedTargetRequestFilters(targets []octavia.WeightedHTTPTarget) bool {
@@ -61,8 +74,10 @@ func hasWeightedTargetRequestFilters(targets []octavia.WeightedHTTPTarget) bool 
 var backendRequestFiltersPolicy = protectedHTTPPredicate{
 	capability: octavia.GatewayCapabilityTargetRequestFilters,
 	label:      "backend request filter",
-	required:   func(policy desiredPolicy) bool { return policy.targetRequestFilters != nil },
-	observed:   observedRoutePolicy.hasBackendRequestFilters,
+	required: func(policy desiredPolicy) bool {
+		return hasWeightedTargetRequestFilters(policy.weightedFilterTargets())
+	},
+	observed: observedRoutePolicy.hasBackendRequestFilters,
 	settled: func(wanted desiredPolicy, observed observedRoutePolicy) bool {
 		return observed.backendRequestFiltersTagged && wanted.weightedPlan != nil && !wanted.weightedPlan.pending &&
 			slices.EqualFunc(wanted.weightedPlan.targets, observed.weightedTargets, weightedTargetsEqual) &&
@@ -100,15 +115,76 @@ func (policy observedRoutePolicy) hasBackendRequestFilters() bool {
 	return policy.backendRequestFiltersTagged || hasWeightedTargetRequestFilters(policy.weightedTargets)
 }
 
-func backendRequestFilterTags(targets []octavia.WeightedHTTPTarget, observed observedRoutePolicy, rewrite *octavia.RequestURLRewriteUpdate) []string {
-	if observed.backendRequestFiltersTagged || !hasWeightedTargetRequestFilters(targets) {
+func hasWeightedTargetResponseHeaders(targets []octavia.WeightedHTTPTarget) bool {
+	return slices.ContainsFunc(targets, func(target octavia.WeightedHTTPTarget) bool {
+		return len(target.ResponseHeaderOperations) != 0
+	})
+}
+
+var backendResponseHeadersPolicy = protectedHTTPPredicate{
+	capability: octavia.GatewayCapabilityTargetResponseHeaders,
+	label:      "backend response header modification",
+	required: func(policy desiredPolicy) bool {
+		return hasWeightedTargetResponseHeaders(policy.weightedFilterTargets())
+	},
+	observed: observedRoutePolicy.hasBackendResponseHeaders,
+	settled: func(wanted desiredPolicy, observed observedRoutePolicy) bool {
+		return observed.backendResponseHeadersTagged && wanted.weightedPlan != nil && !wanted.weightedPlan.pending &&
+			slices.EqualFunc(wanted.weightedPlan.targets, observed.weightedTargets, weightedTargetsEqual) &&
+			slices.Equal(wanted.responseHeaderOperations, observed.responseHeaderOperations)
+	},
+	additionalCapabilities: func(policy desiredPolicy) []string {
+		required := []string{octavia.GatewayCapabilityWeightedHTTPTargets, octavia.GatewayCapabilityFixedHTTPResponses,
+			octavia.GatewayCapabilityResponseHeaderOperations}
+		if policy.grpcContentTypeRule == grpcContentTypeRuleType {
+			required = append(required, octavia.GatewayCapabilityGRPCContentType)
+			if hasGRPCBinaryTargetResponseMetadata(policy.weightedFilterTargets()) {
+				required = append(required, octavia.GatewayCapabilityGRPCBinaryMetadata)
+			}
+		}
+		return required
+	},
+}
+
+func (p *Provider) protectBackendResponseHeaderTraffic(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, plan []graphMutation, result *cloud.GatewayGraphResult) []graphMutation {
+	return p.protectHTTPURLPolicyTraffic(ctx, desired, actual, plan, result, backendResponseHeadersPolicy, p.responseHeaderModifier && p.weightedHTTPTargets, backendResponseHeaderWriteRequiresCapability)
+}
+
+func backendResponseHeaderWriteRequiresCapability(_ desiredRoute, step routeMutation) bool {
+	if !isHTTPPolicyMutation(step.kind) || httpURLPolicyCleanup(step.kind) {
+		return false
+	}
+	if step.weightedTargets != nil {
+		return hasWeightedTargetResponseHeaders(*step.weightedTargets)
+	}
+	return backendResponseHeadersPolicy.required(step.policy)
+}
+
+func (policy observedRoutePolicy) hasBackendResponseHeaders() bool {
+	return policy.backendResponseHeadersTagged || hasWeightedTargetResponseHeaders(policy.weightedTargets)
+}
+
+func weightedTargetFilterTags(targets []octavia.WeightedHTTPTarget, observed observedRoutePolicy, rewrite *octavia.RequestURLRewriteUpdate) []string {
+	var add []string
+	if !observed.backendRequestFiltersTagged && hasWeightedTargetRequestFilters(targets) {
+		add = append(add, openstackidentity.BackendRequestFiltersPolicyTag)
+	}
+	if !observed.backendResponseHeadersTagged && hasWeightedTargetResponseHeaders(targets) {
+		add = append(add, openstackidentity.BackendResponseHeadersPolicyTag)
+	}
+	if len(add) == 0 {
 		return nil
 	}
-	tags := slices.Clone(observed.policy.Tags)
+	tags := observed.policy.Tags
 	if rewrite != nil {
-		tags = slices.Clone(rewrite.Tags)
+		tags = rewrite.Tags
 	}
-	return append(tags, openstackidentity.BackendRequestFiltersPolicyTag)
+	return append(slices.Clone(tags), add...)
+}
+
+func incompleteBackendResponseHeaderInventory(listenerID, policyID string, cause error) error {
+	return cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady,
+		&httpFilterInventoryError{listenerID: listenerID, policyID: policyID, filter: "backend response header", cause: cause})
 }
 
 type httpFilterInventoryError struct {
@@ -126,19 +202,19 @@ func (err *httpFilterInventoryError) Error() string {
 	return fmt.Sprintf("L7 policy %s has incomplete or malformed Octavia %s inventory", err.policyID, err.filter)
 }
 
-func (p *Provider) httpFilterListenerWithInventoryError(actual observedGatewayGraph, incomplete *httpFilterInventoryError) *listeners.Listener {
-	if incomplete == nil || actual.loadBalancer == nil || actual.loadBalancer.ProvisioningStatus != "ACTIVE" {
+func (p *Provider) ownedHTTPFilterListener(actual observedGatewayGraph, listenerID string) *listeners.Listener {
+	if listenerID == "" || actual.loadBalancer == nil || actual.loadBalancer.ProvisioningStatus != "ACTIVE" {
 		return nil
 	}
 	listener := actual.listener
 	if actual.scoped {
-		i := slices.IndexFunc(actual.scopedListeners, func(listener listeners.Listener) bool { return listener.ID == incomplete.listenerID })
+		i := slices.IndexFunc(actual.scopedListeners, func(listener listeners.Listener) bool { return listener.ID == listenerID })
 		if i == -1 {
 			return nil
 		}
 		listener = &actual.scopedListeners[i]
 	}
-	if listener == nil || listener.ID != incomplete.listenerID || listener.ProjectID != p.projectID ||
+	if listener == nil || listener.ID != listenerID || listener.ProjectID != p.projectID ||
 		len(listener.Loadbalancers) != 1 || listener.Loadbalancers[0].ID != actual.loadBalancer.ID ||
 		listener.Protocol != cloud.ListenerProtocolHTTP && listener.Protocol != terminatedHTTPS {
 		return nil
@@ -149,5 +225,6 @@ func (p *Provider) httpFilterListenerWithInventoryError(actual observedGatewayGr
 func requestTransformListenerNeedsRecovery(desired desiredGatewayGraph, actual observedGatewayGraph, listener listeners.Listener) bool {
 	return rewriteListenerNeedsRecovery(desired, actual, listener) ||
 		requestPolicyListenerNeedsRecovery(desired, actual, listener, backendRequestFiltersPolicy) ||
+		requestPolicyListenerNeedsRecovery(desired, actual, listener, backendResponseHeadersPolicy) ||
 		requestPolicyListenerNeedsRecovery(desired, actual, listener, requestCORSPolicy)
 }

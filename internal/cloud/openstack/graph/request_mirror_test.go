@@ -347,6 +347,93 @@ func TestLastBackendRequestMirrorClearsInPlaceWithExplicitReadback(t *testing.T)
 	require.Equal(t, routeMutationDisablePolicy, unverified.kind)
 }
 
+func TestMirrorTargetWithdrawalClosesListenerWhenResponseHeadersAreUnverified(t *testing.T) {
+	for _, test := range []struct {
+		name                string
+		visible, capability bool
+		wantWrite           string
+	}{
+		{name: "missing readback", capability: true, wantWrite: "/lbaas/listeners/listener-1"},
+		{name: "capability withdrawn", visible: true, wantWrite: "/lbaas/listeners/listener-1"},
+		{name: "verified response headers", visible: true, capability: true, wantWrite: "/lbaas/l7policies/policy-1"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			desired, actual := weightedPlanFixture()
+			desired.protocol, actual.protocol = cloud.ListenerProtocolHTTP, cloud.ListenerProtocolHTTP
+			actual.loadBalancer.Provider, actual.loadBalancer.ProvisioningStatus = "amphora", "ACTIVE"
+			actual.listener.ProjectID, actual.listener.Protocol, actual.listener.ProtocolPort = "project-a", cloud.ListenerProtocolHTTP, 80
+			actual.listener.ProvisioningStatus, actual.listener.AdminStateUp = "ACTIVE", true
+			actual.listener.Loadbalancers = []listeners.LoadBalancerID{{ID: actual.loadBalancer.ID}}
+			actual.adminObserved = map[string]bool{actual.listener.ID: true}
+			desired.spec.Gateway.Spec.ListenerPort = 80
+
+			part := &desired.routes[0].httpParts[2]
+			headers := []cloud.HTTPHeaderOperation{{Name: "x-response", Operation: cloud.HTTPHeaderSet, Value: "primary"}}
+			part.weightedTargets[0].responseHeaderOperations = headers
+			filters, err := compileWeightedTargetFilters(cloud.HTTPPathMatch{}, part.weightedTargets)
+			require.NoError(t, err)
+			part.policies[0].targetFilters = filters
+			policy := &actual.routes[0].httpParts[part.backendKey].policies[0]
+			policy.policy.ID = "policy-1"
+			policy.adminObserved, policy.requestMirrorsReported = true, true
+			policy.requestMirrorsTagged, policy.backendResponseHeadersTagged = true, true
+			policy.weightedTargets[0].RequestMirrors = []octavia.HTTPRequestMirror{
+				{PoolID: "revoked", Numerator: 1, Denominator: 1, Phase: cloud.HTTPMirrorAfterRewrite},
+			}
+			if test.visible {
+				policy.weightedTargets[0].ResponseHeaderOperations = headers
+			}
+
+			capabilities := []string{octavia.GatewayCapabilityWeightedHTTPTargets, octavia.GatewayCapabilityFixedHTTPResponses,
+				octavia.GatewayCapabilityResponseHeaderOperations}
+			if test.capability {
+				capabilities = append(capabilities, octavia.GatewayCapabilityTargetResponseHeaders)
+			}
+			var writes []string
+			p := completeGraphProvider(t, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if req.Method == http.MethodGet && req.URL.Path == "/lbaas/providers/amphora/gateway_capabilities" {
+					safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": capabilities})
+					return
+				}
+				writes = append(writes, req.URL.Path)
+				if req.Method != http.MethodPut {
+					t.Errorf("unexpected method: %s", req.Method)
+				}
+				if req.URL.Path == "/lbaas/listeners/listener-1" {
+					var body struct {
+						Listener struct {
+							AdminStateUp *bool `json:"admin_state_up"`
+						} `json:"listener"`
+					}
+					if json.NewDecoder(req.Body).Decode(&body) != nil || body.Listener.AdminStateUp == nil || *body.Listener.AdminStateUp {
+						t.Errorf("expected administrative closure: %+v", body)
+					}
+					safetyWriteJSON(t, w, map[string]any{"listener": actual.listener})
+					return
+				}
+				if req.URL.Path == "/lbaas/l7policies/policy-1" {
+					var body struct {
+						Policy struct {
+							Targets []octavia.WeightedHTTPTarget `json:"targets"`
+						} `json:"l7policy"`
+					}
+					if json.NewDecoder(req.Body).Decode(&body) != nil || len(body.Policy.Targets) != 2 ||
+						!slices.Equal(body.Policy.Targets[0].ResponseHeaderOperations, headers) || len(body.Policy.Targets[0].RequestMirrors) != 0 {
+						t.Errorf("in-place withdrawal must retain verified response operations: %+v", body)
+					}
+				}
+				safetyWriteJSON(t, w, map[string]any{"l7policy": policy.policy})
+			}), &gatewayTransitionRequests{})
+			p.responseHeaderModifier, p.weightedHTTPTargets = true, true
+			step, needed := nextRequestMirrorWithdrawal(desired, actual)
+			require.True(t, needed)
+			_, err = p.reconcileRequestMirrorWithdrawal(t.Context(), desired, actual, step)
+			require.NoError(t, err)
+			require.Equal(t, []string{test.wantWrite}, writes)
+		})
+	}
+}
+
 func TestMirrorOnlyPoolDoesNotBlockListenerRestoration(t *testing.T) {
 	for _, test := range []struct {
 		name         string

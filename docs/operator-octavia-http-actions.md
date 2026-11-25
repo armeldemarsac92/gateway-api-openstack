@@ -28,6 +28,14 @@ A rule and a backend reference cannot both rewrite the request path or both rewr
 
 The affected physical listener stays closed while Octavia's regional capability or the applied target filters cannot be verified. Remove or replace the filters and verify recovery before rolling back the provider.
 
+## Enable response header modifiers on backend references
+
+Enable `--octavia-response-header-modifier` and `--octavia-weighted-http-targets` on the controller. Enroll Amphora in `enabled_weighted_target_response_header_providers` alongside the response-header and weighted-target provider settings in Octavia's `[api_settings]`. Verify `weighted_http_target_response_headers_v1` on the effective regional provider. Response modifiers on their own require no backend request filter opt-in.
+
+Add `type: ResponseHeaderModifier` under the selected HTTPRoute or GRPCRoute `backendRef.filters`. A single filtered backend also uses a weighted policy. Octavia applies the selected backend's operations before the rule's response operations. References to the same Service can carry different modifiers. A weight-zero or unresolved reference contributes no target response operations. CORS-owned response headers and gRPC transport and status metadata remain reserved. For comma-separated binary gRPC response metadata, the native gRPC Content-Type predicate and `grpc_binary_response_metadata_v1` are required.
+
+The controller keeps the affected physical listener closed while it cannot verify the regional capability or the applied target operations. Check the route's `Programmed` condition and the policy's `targets[].response_header_operations` before retiring the extension.
+
 ## Enable rule-level CORS
 
 Set `enabled_request_cors_providers = amphora` in Octavia's `[api_settings]` after installing the CORS migration, API, octavia-lib, workers and Amphora images with HAProxy 2.2 or newer. Verify that the effective provider advertises `request_cors_v1` on the controller's regional endpoint. Add `--octavia-request-cors` to the controller arguments. The flag defaults to off.

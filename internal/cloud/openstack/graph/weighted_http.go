@@ -33,11 +33,12 @@ const maxHTTPTargetWeight = 1_000_000
 var grpcFailurePoolKey = openstackidentity.HTTPBackendKey("", "grpc-unavailable", 0)
 
 type desiredHTTPWeightedTarget struct {
-	backendKey              string
-	weight                  int
-	requestHeaderOperations []cloud.HTTPHeaderOperation
-	requestURLRewrite       *cloud.HTTPURLRewrite
-	requestMirrors          []desiredHTTPMirror
+	backendKey               string
+	weight                   int
+	requestHeaderOperations  []cloud.HTTPHeaderOperation
+	responseHeaderOperations []cloud.HTTPHeaderOperation
+	requestURLRewrite        *cloud.HTTPURLRewrite
+	requestMirrors           []desiredHTTPMirror
 }
 
 type weightedHTTPPolicyPlan struct {
@@ -88,6 +89,12 @@ func (p *Provider) buildDesiredWeightedHTTPParts(spec cloud.RouteSpec) ([]desire
 					return invalid(errors.New("GRPCRoute backendRef request filters support only request header operations"))
 				}
 				wanted.requestHeaderOperations, wanted.requestURLRewrite = target.RequestHeaderOperations, target.URLRewrite
+			}
+			if len(target.ResponseHeaderOperations) != 0 {
+				if !p.responseHeaderModifier || target.BackendIndex == nil || target.Weight == 0 {
+					return invalid(errors.New("HTTP backend response headers require opt-in and a positive forwarding target"))
+				}
+				wanted.responseHeaderOperations = target.ResponseHeaderOperations
 			}
 			if len(target.RequestMirrors) != 0 {
 				if target.BackendIndex == nil || target.Weight == 0 {
@@ -149,7 +156,7 @@ func fixedWeightedHTTPTarget(weight int) octavia.WeightedHTTPTarget {
 func weightedTargetsEqual(a, b octavia.WeightedHTTPTarget) bool {
 	return a.Weight == b.Weight && a.PoolID == b.PoolID &&
 		slices.Equal(a.RequestHeaderOperations, b.RequestHeaderOperations) && a.RequestURLRewrite.Equal(b.RequestURLRewrite) &&
-		slices.Equal(a.RequestMirrors, b.RequestMirrors) &&
+		slices.Equal(a.ResponseHeaderOperations, b.ResponseHeaderOperations) && slices.Equal(a.RequestMirrors, b.RequestMirrors) &&
 		(a.FixedResponse == nil && b.FixedResponse == nil ||
 			a.FixedResponse != nil && b.FixedResponse != nil && *a.FixedResponse == *b.FixedResponse)
 }
@@ -246,14 +253,12 @@ func resolveWeightedHTTPPart(part desiredRoute, route desiredRoute, observed obs
 				} else {
 					resolved = fixedWeightedHTTPTarget(target.weight)
 				}
-			} else if policy.targetRequestFilters != nil {
-				filters := policy.targetRequestFilters[i]
+			} else if target.backendKey != grpcFailurePoolKey && policy.targetFilters != nil {
+				filters := policy.targetFilters[i]
 				resolved.RequestHeaderOperations, resolved.RequestURLRewrite = filters.RequestHeaderOperations, filters.RequestURLRewrite
+				resolved.ResponseHeaderOperations = filters.ResponseHeaderOperations
 			}
 			plan.targets = append(plan.targets, resolved)
-		}
-		if !plan.pending && !hasWeightedTargetRequestFilters(plan.targets) {
-			policy.targetRequestFilters = nil
 		}
 		policy.weightedPlan = plan
 		part.targetsPending = part.targetsPending || plan.pending
@@ -504,9 +509,13 @@ func weightedTargetWithdrawals(desired desiredRoute, observed observedRouteGraph
 				continue
 			}
 		}
-		if policy.hasBackendRequestFilters() && !slices.ContainsFunc(desired.policies, func(wanted desiredPolicy) bool {
-			return wanted.role == policy.role && backendRequestFiltersPolicy.required(wanted)
-		}) {
+		keepsFilter := func(predicate protectedHTTPPredicate) bool {
+			return slices.ContainsFunc(desired.policies, func(wanted desiredPolicy) bool {
+				return wanted.role == policy.role && predicate.required(wanted)
+			})
+		}
+		if policy.hasBackendRequestFilters() && !keepsFilter(backendRequestFiltersPolicy) ||
+			policy.hasBackendResponseHeaders() && !keepsFilter(backendResponseHeadersPolicy) {
 			// A legacy API can preserve hidden transformations on a target PUT.
 			// Delete the old policy with its marker intact, before waiting for
 			// new pools, and build a fresh policy from the complete vector.
@@ -542,6 +551,7 @@ func weightedTargetWithdrawals(desired desiredRoute, observed observedRouteGraph
 			}
 			if authorized {
 				withdrawn[i].Weight = 0
+				withdrawn[i].ResponseHeaderOperations = nil
 				if desired.spec.GRPC {
 					withdrawn[i].RequestHeaderOperations = nil
 				}
@@ -563,7 +573,8 @@ func weightedTargetWithdrawals(desired desiredRoute, observed observedRouteGraph
 		}
 		if withdrawn != nil {
 			if policy.hasHTTPRequestPolicy() && !policy.requestPolicyReported || policy.retryBackoffReadbackMissing() ||
-				policy.backendRequestFiltersTagged && !hasWeightedTargetRequestFilters(policy.weightedTargets) {
+				policy.backendRequestFiltersTagged && !hasWeightedTargetRequestFilters(policy.weightedTargets) ||
+				policy.backendResponseHeadersTagged && !hasWeightedTargetResponseHeaders(policy.weightedTargets) {
 				// A grant changed, but the API cannot prove what else would
 				// be written by replaying the remaining target slots.
 				steps = append(steps, obsoleteWeightedFilterPolicyStep(policy))
@@ -583,7 +594,7 @@ func weightedTargetWithdrawals(desired desiredRoute, observed observedRouteGraph
 				continue
 			}
 			step := routeMutation{kind: routeMutationSetPolicyTarget, id: policy.policy.ID, weightedTargets: &withdrawn,
-				policyTags: backendRequestFilterTags(withdrawn, policy, nil), retry: retry, withdrawHTTPPolicy: true}
+				policyTags: weightedTargetFilterTags(withdrawn, policy, nil), retry: retry, withdrawHTTPPolicy: true}
 			if policy.hasNativeGRPCContentType() {
 				step.policy.grpcContentTypeRule = grpcContentTypeRuleType
 			}
@@ -622,7 +633,7 @@ func localOnlyURLRewriteWithdrawal(desired desiredRoute, observed observedRouteP
 		patch.KeepPolicyState = true
 		step := routeMutation{kind: routeMutationSetPolicyTarget, id: observed.policy.ID, weightedTargets: &wanted.weightedPlan.targets,
 			requestURLRewriteUpdate: patch, requestHeaderOperations: policyHeaderPatch(nil, observed.requestHeaderOperations, false),
-			policyTags:         backendRequestFilterTags(wanted.weightedPlan.targets, observed, patch),
+			policyTags:         weightedTargetFilterTags(wanted.weightedPlan.targets, observed, patch),
 			withdrawHTTPPolicy: true, retry: observed.policy.ProvisioningStatus == "ERROR"}
 		if observed.hasHTTPRequestPolicy() {
 			step.clearHTTPRequestPolicy(observed)

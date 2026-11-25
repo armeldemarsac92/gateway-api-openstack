@@ -55,12 +55,13 @@ type FixedHTTPResponse struct {
 
 // WeightedHTTPTarget is one ordered destination on an Octavia L7 policy.
 type WeightedHTTPTarget struct {
-	Weight                  int
-	PoolID                  string
-	FixedResponse           *FixedHTTPResponse
-	RequestHeaderOperations []cloud.HTTPHeaderOperation
-	RequestURLRewrite       *RequestURLRewrite
-	RequestMirrors          []HTTPRequestMirror
+	Weight                   int
+	PoolID                   string
+	FixedResponse            *FixedHTTPResponse
+	RequestHeaderOperations  []cloud.HTTPHeaderOperation
+	ResponseHeaderOperations []cloud.HTTPHeaderOperation
+	RequestURLRewrite        *RequestURLRewrite
+	RequestMirrors           []HTTPRequestMirror
 }
 
 func (target WeightedHTTPTarget) HasRequestFilters() bool {
@@ -73,6 +74,7 @@ func (target WeightedHTTPTarget) MarshalJSON() ([]byte, error) {
 		PoolID        string              `json:"pool_id,omitempty"`
 		FixedResponse *FixedHTTPResponse  `json:"fixed_response,omitempty"`
 		Operations    []map[string]any    `json:"request_header_operations,omitempty"`
+		Responses     []map[string]any    `json:"response_header_operations,omitempty"`
 		Rewrite       *RequestURLRewrite  `json:"request_url_rewrite,omitempty"`
 		Mirrors       []HTTPRequestMirror `json:"request_mirrors,omitempty"`
 	}{Weight: target.Weight}
@@ -86,16 +88,23 @@ func (target WeightedHTTPTarget) MarshalJSON() ([]byte, error) {
 		if len(target.RequestHeaderOperations) != 0 {
 			fields.Operations = headerOperationEntries(target.RequestHeaderOperations)
 		}
+		if len(target.ResponseHeaderOperations) != 0 {
+			operations, err := cloud.NormalizeHTTPResponseHeaderOperations(target.ResponseHeaderOperations)
+			if err != nil {
+				return nil, err
+			}
+			fields.Responses = headerOperationEntries(operations)
+		}
 		if target.RequestURLRewrite != nil {
 			if !target.RequestURLRewrite.Valid() {
 				return nil, fmt.Errorf("invalid weighted policy target URL rewrite")
 			}
 			fields.Rewrite = target.RequestURLRewrite
 		}
-	case target.PoolID == "" && target.FixedResponse != nil && !target.HasRequestFilters() && len(target.RequestMirrors) == 0:
+	case target.PoolID == "" && target.FixedResponse != nil && !target.HasRequestFilters() && len(target.ResponseHeaderOperations) == 0 && len(target.RequestMirrors) == 0:
 		fields.FixedResponse = target.FixedResponse
 	default:
-		return nil, fmt.Errorf("weighted policy target must select one destination and can only filter requests forwarded to a pool")
+		return nil, fmt.Errorf("weighted policy target must select one destination and can only apply filters on a pool")
 	}
 	return json.Marshal(fields)
 }
@@ -133,6 +142,14 @@ func (target *WeightedHTTPTarget) UnmarshalJSON(data []byte) error {
 			}
 			decoded.RequestHeaderOperations = operations
 			delete(fields, requestHeaderOperationsField)
+		}
+		if raw, ok := fields[responseHeaderOperationsField]; ok {
+			operations, err := readPolicyHeaderOperations(raw, responseHeaderOperationsField)
+			if err != nil {
+				return err
+			}
+			decoded.ResponseHeaderOperations = operations
+			delete(fields, responseHeaderOperationsField)
 		}
 		if raw, ok := fields[requestURLRewriteField]; ok {
 			decoded.RequestURLRewrite = readRequestURLRewrite(raw)
@@ -222,6 +239,7 @@ type L7PolicyObservation struct {
 	HTTPRequestPolicyReported    bool
 	HTTPRequestPolicyPresent     bool
 	TargetRequestFiltersPresent  bool
+	TargetResponseHeadersPresent bool
 	RequestMirrors               []HTTPRequestMirror
 	RequestMirrorsReported       bool
 	RequestMirrorsErr            error
@@ -355,6 +373,7 @@ func readPolicyObservation(raw json.RawMessage) (L7PolicyObservation, error) {
 			}
 			observation.TargetRequestFiltersPresent = observation.TargetRequestFiltersPresent ||
 				slot[requestHeaderOperationsField] != nil || slot[requestURLRewriteField] != nil
+			observation.TargetResponseHeadersPresent = observation.TargetResponseHeadersPresent || slot[responseHeaderOperationsField] != nil
 			if raw := slot[requestMirrorsField]; len(raw) != 0 && string(raw) != "null" && string(raw) != "[]" {
 				observation.TargetMirrorsPresent = true
 			}

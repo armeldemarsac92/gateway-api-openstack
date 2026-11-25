@@ -296,6 +296,7 @@ func routeHasIndependentMirrorlessPolicies(route desiredRoute) bool {
 }
 
 func (p *Provider) reconcileRequestMirrorWithdrawal(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, step graphMutation) (cloud.GatewayGraphResult, error) {
+	step, isolated := p.protectMirrorWithdrawalTargetResponses(ctx, desired, actual, step)
 	validate := desired.spec.ValidateMutation
 	if validate != nil {
 		if err := validate(ctx); err != nil {
@@ -303,9 +304,13 @@ func (p *Provider) reconcileRequestMirrorWithdrawal(ctx context.Context, desired
 		}
 	}
 	actual.outcome = p.progressingOutcome(step.message)
+	if step.kind == graphDisableListener {
+		actual.listenerFilterMutation = &step
+	}
 	result := p.pendingGraphResult(ctx, desired, actual)
+	result.Gateway.HTTPPolicyTransition = isolated
 	err := p.executeGraphMutation(ctx, desired, actual, step)
-	if err != nil && step.route.kind == routeMutationSetRequestMirrors && !gophercloud.ResponseCodeIs(err, http.StatusConflict) && ctx.Err() == nil {
+	if err != nil && step.kind == graphRouteMutation && step.route.kind == routeMutationSetRequestMirrors && !gophercloud.ResponseCodeIs(err, http.StatusConflict) && ctx.Err() == nil {
 		// When Octavia rejects an in-place withdrawal, close only that owned
 		// policy. Its previous generation may still be serving the copy.
 		if validate != nil {
@@ -323,6 +328,71 @@ func (p *Provider) reconcileRequestMirrorWithdrawal(ctx context.Context, desired
 	result.Routes[step.routeIndex].Result.ObservationDeferred = false
 	result.Routes[step.routeIndex].Result.Outcome.MutationSubmitted = true
 	return result, nil
+}
+
+// Octavia replaces every field in a target slot on PUT. The urgent mirror
+// withdrawal may replay the vector only if its response filters are verified.
+func (p *Provider) protectMirrorWithdrawalTargetResponses(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, step graphMutation) (graphMutation, bool) {
+	if step.route.weightedTargets == nil {
+		return step, false
+	}
+	inventory := actual.routes[step.routeIndex]
+	current := inventory.httpParts[step.backendKey]
+	if current == nil {
+		return step, false
+	}
+	i := slices.IndexFunc(current.policies, func(policy observedRoutePolicy) bool { return policy.policy.ID == step.route.id })
+	if i < 0 {
+		return step, false
+	}
+	observed := current.policies[i]
+	route := desired.routes[step.routeIndex]
+	part := graphRoutePart(desired, step)
+	wantedIndex := slices.IndexFunc(part.policies, func(policy desiredPolicy) bool { return policy.role == observed.role })
+	if !observed.hasBackendResponseHeaders() &&
+		(wantedIndex < 0 || !backendResponseHeadersPolicy.required(part.policies[wantedIndex])) {
+		return step, false
+	}
+	if wantedIndex >= 0 && part.weightedTargets != nil && p.responseHeaderModifier && p.weightedHTTPTargets {
+		part.grpcFailurePoolID = observedGRPCFailurePoolID(route, inventory)
+		part = resolveWeightedHTTPPart(part, route, inventory, servingWeightedListenerID(actual, part))
+		wanted := part.policies[wantedIndex]
+		if mirrorWithdrawalResponseHeadersMatch(wanted, observed) {
+			required := append([]string{octavia.GatewayCapabilityTargetResponseHeaders}, backendResponseHeadersPolicy.additionalCapabilities(wanted)...)
+			if p.verifyGatewayHTTPURLCapabilities(ctx, desired, actual, required) == nil {
+				return step, false
+			}
+		}
+	}
+
+	reason := "Waiting for verified Octavia backend response headers while withdrawing request mirrors"
+	if listener := p.ownedHTTPFilterListener(actual, step.listenerID); listener != nil &&
+		(listener.ProvisioningStatus == "ERROR" || listener.ProvisioningStatus == "ACTIVE" && (listener.AdminStateUp || !actual.adminObserved[listener.ID])) {
+		closeListener := closeGuardedHTTPListener(*listener, reason)
+		closeListener.routeIndex = step.routeIndex
+		return closeListener, true
+	}
+	// Remove the disabled policy through the same ownership path used for
+	// unverified mirrors. Normal planning reconstructs and verifies its slots
+	// before opening the listener again.
+	kind := routeMutationDisablePolicy
+	if observedPolicyDisabled(observed) {
+		kind = routeMutationDeletePolicy
+	}
+	step.route = routeMutation{kind: kind, id: observed.policy.ID, retry: true, withdrawHTTPPolicy: true}
+	step.message = reason
+	return step, true
+}
+
+func mirrorWithdrawalResponseHeadersMatch(wanted desiredPolicy, observed observedRoutePolicy) bool {
+	return backendResponseHeadersPolicy.required(wanted) && observed.backendResponseHeadersTagged &&
+		wanted.weightedPlan != nil && !wanted.weightedPlan.pending &&
+		slices.Equal(wanted.responseHeaderOperations, observed.responseHeaderOperations) &&
+		(wanted.grpcContentTypeRule != grpcContentTypeRuleType || observed.hasNativeGRPCContentType()) &&
+		slices.EqualFunc(wanted.weightedPlan.targets, observed.weightedTargets, func(expected, actual octavia.WeightedHTTPTarget) bool {
+			expected.RequestMirrors, actual.RequestMirrors = nil, nil
+			return weightedTargetsEqual(expected, actual)
+		})
 }
 
 // Withdraws revoked occurrences before changing the primary target, general
