@@ -393,5 +393,250 @@
       },
       "rawReceiptSHA256": "eed3c86986ef1e2acfb54827c5f3d47cfe03ec826a58a2a8c14970988eda665e"
     }
+  },
+  "standardMixedRedirects": {
+    "sourceRevision": "76d28f67c8420eb281ea846670db4b50b2177d7b",
+    "channel": "standard",
+    "kubernetesVersion": "v1.36.2",
+    "rawReceiptSHA256": "e305102be616b7bdf9c80953bc706ab369198276557f607f09074a15415c97aa",
+    "previouslyConvertedPrefix": "/app",
+    "lowerPriorityStock": "GET /",
+    "higherPriorityForward": "GET /app/private",
+    "phases": {
+      "overlap": {
+        "gatewayConditions": {
+          "Accepted": "True/Accepted",
+          "Programmed": "True/Programmed"
+        },
+        "attachedRoutes": 3,
+        "routeStatus": {
+          "fallback": {
+            "uid": "b88fc8a7-45c5-468f-86d0-808e2895c33e",
+            "generation": 1,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          },
+          "specific": {
+            "uid": "f112bd70-7fe0-422a-98bc-6a07f76c0630",
+            "generation": 1,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          },
+          "root-get": {
+            "uid": "beea2aa3-247a-4a09-8445-2122e6d7e4e6",
+            "generation": 1,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          }
+        },
+        "redirects": [
+          {
+            "position": 3,
+            "action": "REDIRECT_REQUEST",
+            "code": 301,
+            "rules": [
+              {
+                "type": "PATH",
+                "compare_type": "REGEX",
+                "value": "^/app($|/)",
+                "invert": false
+              },
+              {
+                "type": "HOST_NAME",
+                "compare_type": "REGEX",
+                "value": "^source\\.example\\.test(:[0-9]+)?$",
+                "invert": false
+              }
+            ]
+          },
+          {
+            "position": 4,
+            "action": "REDIRECT_PREFIX",
+            "code": 302,
+            "rules": [
+              {
+                "type": "HOST_NAME",
+                "compare_type": "REGEX",
+                "value": "^source\\.example\\.test(:[0-9]+)?$",
+                "invert": false
+              },
+              {
+                "type": "HTTP_METHOD",
+                "compare_type": "EQUAL_TO",
+                "value": "GET",
+                "invert": false
+              },
+              {
+                "type": "PATH",
+                "compare_type": "EQUAL_TO",
+                "value": "/app/private",
+                "invert": true
+              },
+              {
+                "type": "PATH",
+                "compare_type": "EQUAL_TO",
+                "value": "/health",
+                "invert": true
+              }
+            ]
+          }
+        ],
+        "traffic": [
+          {
+            "method": "GET",
+            "path": "/app/private?n=1",
+            "version": null,
+            "status": 200,
+            "location": null,
+            "origin": true
+          },
+          {
+            "method": "GET",
+            "path": "/app/other?n=2",
+            "version": null,
+            "status": 301,
+            "location": "https://moved.example.test:8443/app/other?n=2",
+            "origin": false
+          },
+          {
+            "method": "GET",
+            "path": "/else?n=3",
+            "version": null,
+            "status": 302,
+            "location": "https://root.example.test:9443/else?n=3",
+            "origin": false
+          },
+          {
+            "method": "POST",
+            "path": "/app/other?n=4",
+            "version": null,
+            "status": 301,
+            "location": "https://moved.example.test:8443/app/other?n=4",
+            "origin": false
+          }
+        ]
+      },
+      "higherPriorityRemoved": {
+        "gatewayConditions": {
+          "Accepted": "True/Accepted",
+          "Programmed": "True/Programmed"
+        },
+        "attachedRoutes": 2,
+        "routeStatus": {
+          "fallback": {
+            "uid": "b88fc8a7-45c5-468f-86d0-808e2895c33e",
+            "generation": 1,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          },
+          "root-get": {
+            "uid": "beea2aa3-247a-4a09-8445-2122e6d7e4e6",
+            "generation": 1,
+            "conditions": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            }
+          }
+        },
+        "redirects": [
+          {
+            "position": 2,
+            "action": "REDIRECT_PREFIX",
+            "code": 301,
+            "rules": [
+              {
+                "type": "PATH",
+                "compare_type": "REGEX",
+                "value": "^/app($|/)",
+                "invert": false
+              },
+              {
+                "type": "HOST_NAME",
+                "compare_type": "REGEX",
+                "value": "^source\\.example\\.test(:[0-9]+)?$",
+                "invert": false
+              }
+            ]
+          },
+          {
+            "position": 3,
+            "action": "REDIRECT_PREFIX",
+            "code": 302,
+            "rules": [
+              {
+                "type": "HOST_NAME",
+                "compare_type": "REGEX",
+                "value": "^source\\.example\\.test(:[0-9]+)?$",
+                "invert": false
+              },
+              {
+                "type": "HTTP_METHOD",
+                "compare_type": "EQUAL_TO",
+                "value": "GET",
+                "invert": false
+              },
+              {
+                "type": "PATH",
+                "compare_type": "EQUAL_TO",
+                "value": "/health",
+                "invert": true
+              }
+            ]
+          }
+        ],
+        "traffic": [
+          {
+            "method": "GET",
+            "path": "/app/private?n=1",
+            "version": null,
+            "status": 301,
+            "location": "https://moved.example.test:8443/app/private?n=1",
+            "origin": false
+          },
+          {
+            "method": "GET",
+            "path": "/app/other?n=2",
+            "version": null,
+            "status": 301,
+            "location": "https://moved.example.test:8443/app/other?n=2",
+            "origin": false
+          },
+          {
+            "method": "GET",
+            "path": "/else?n=3",
+            "version": null,
+            "status": 302,
+            "location": "https://root.example.test:9443/else?n=3",
+            "origin": false
+          },
+          {
+            "method": "POST",
+            "path": "/app/other?n=4",
+            "version": null,
+            "status": 301,
+            "location": "https://moved.example.test:8443/app/other?n=4",
+            "origin": false
+          }
+        ]
+      }
+    },
+    "amphoraGuardObservedInNativeRender": true,
+    "nativeConfigurationSHA256": "2fc68644748b97651049df87e6656e8deb7342c94470ef31c326d8cad3a0e3ad",
+    "nativeHAProxySHA256": "57ce7ace05aa5a094ac71726dcce65e89971d521c3528de1c6c198a3918132e8",
+    "octaviaSource": "31a05857f3b3a29fe43bbf77c2a1ca89c074912d",
+    "scope": "Kubernetes envtest API server and etcd, fixture-managed EndpointSlice, installed Octavia WSGI and DB, Amphora renderer, native HAProxy and HTTP origin. Keystone, Neutron, RPC and agent transport supplied locally."
   }
 }
