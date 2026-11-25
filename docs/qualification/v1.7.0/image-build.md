@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-The linux/amd64 controller applied Experimental XTelemetryPolicy sampling rates to local requests. [Build record](image.json) · [Collector observations](provider/xtelemetry-sampling-evidence/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-470b62417e9e7e1536f642538f22084fc7fdb34c)
+The linux/amd64 controller issued permanent XBackend cookies to a local HTTP client. [Build record](image.json) · [Cookie observations](provider/xbackend-permanent-cookie-evidence/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-249f9436e527bb885818c0bf29924236e666c591)
+
+The linux/amd64 controller applied Experimental XTelemetryPolicy sampling rates to local requests. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-470b62417e9e7e1536f642538f22084fc7fdb34c/image.json) · [Collector observations](provider/xtelemetry-sampling-evidence/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-470b62417e9e7e1536f642538f22084fc7fdb34c)
 
 The linux/amd64 controller enforced an absolute session-cookie timeout across routes to an Experimental XBackend. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-40121968c76c59bce4fefaa1d2585094a3acbbd4/image.json) · [Cookie traffic](provider/xbackend-cookie-deadline-evidence/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-40121968c76c59bce4fefaa1d2585094a3acbbd4)
 
