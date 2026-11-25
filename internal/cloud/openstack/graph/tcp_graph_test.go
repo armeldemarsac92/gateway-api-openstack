@@ -56,7 +56,9 @@ type tcpGraphFixture struct {
 	rejectMonitorDelay      float64
 	tcpRejectionAPI         bool
 	tcpRejectionAdvertised  bool
-	tcpRejectionRejectWrite bool
+	tcpRejectionRejectCode  int
+	tcpRejectionRemovePool  bool
+	tcpRejectionNetworkDown bool
 	tcpRejectionWrites      []map[string]json.RawMessage
 }
 
@@ -111,6 +113,10 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 	reject := func() {
 		f.t.Errorf("unexpected Octavia request %s %s", req.Method, req.URL.RequestURI())
 		http.Error(w, "unexpected request", http.StatusBadRequest)
+	}
+	if f.tcpRejectionNetworkDown && (resource == "/v2.0/floatingips" || strings.HasPrefix(resource, "/v2.0/security-groups/")) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		return
 	}
 	if resource == "/v2.0/floatingips" && req.Method == http.MethodGet {
 		safetyWriteJSON(f.t, w, map[string]any{"floatingips": []any{}})

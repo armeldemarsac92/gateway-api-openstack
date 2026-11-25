@@ -175,7 +175,7 @@ func (p *Provider) observeScopedListenerGraph(
 			actual.outcome = outcome
 		}
 	}
-	if actual.outcome.State == cloud.OutcomeProgressing {
+	if actual.outcome.State == cloud.OutcomeProgressing && (parentPending || !canReconcileTCPRejection(desired, actual)) {
 		return actual, nil
 	}
 	if actual.loadBalancer.Pools == nil {
@@ -487,12 +487,6 @@ func (p *Provider) buildScopedListenerGraphPlan(desired desiredGatewayGraph, act
 					default:
 						routeResult.Outcome = p.progressingOutcome("Waiting for the previous route to detach")
 					}
-				}
-			}
-			if eligibleTCPRejectionLiveUpdate(steps, issue) {
-				for _, port := range route.spec.ScopedListenerPorts {
-					listener := found[port]
-					keepEdge[port] = listener.DefaultPoolID == observed.pool.ID && listener.ProvisioningStatus == "ACTIVE"
 				}
 			}
 			if routeResult.Outcome.State == cloud.OutcomeReady && !gatewayReady &&

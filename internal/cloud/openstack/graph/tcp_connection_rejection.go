@@ -62,38 +62,50 @@ func tcpRejectionBatchRequired(desired desiredRoute, observed observedRouteGraph
 }
 
 func planTCPMembersAndRejection(desired desiredRoute, observed observedRouteGraph) (*routeMutation, []string, error) {
+	step, ids, changed, err := tcpMembersAndRejection(desired, observed, false)
+	if !changed || err != nil {
+		return nil, ids, err
+	}
+	return &step, ids, nil
+}
+
+// A pending batch can still hold old rows marked for deletion. Their
+// destinations do not form part of the persisted replacement payload.
+func tcpMembersAndRejection(desired desiredRoute, observed observedRouteGraph, pending bool) (routeMutation, []string, bool, error) {
 	if !observed.tcpRejection.Present || observed.tcpRejection.Invalid || len(observed.memberBatchUnreported) != 0 {
-		return nil, nil, errTCPRejectionReadback
+		return routeMutation{}, nil, false, errTCPRejectionReadback
 	}
 	if err := crossCheckCompleteChildInventory("pool", observed.pool.ID, "member", observed.pool.Members, observed.members, func(member pools.Member) string { return member.ID }); err != nil {
-		return nil, nil, errors.Join(errTCPRejectionReadback, err)
+		return routeMutation{}, nil, false, errors.Join(errTCPRejectionReadback, err)
 	}
 	byAddress := make(map[string]pools.Member, len(observed.members))
 	for _, member := range observed.members {
+		if pending && member.ProvisioningStatus == "PENDING_DELETE" {
+			continue
+		}
 		byAddress[memberKey(member.Address, member.ProtocolPort)] = member
 	}
 	current, wanted := observed.tcpRejection.Value, desired.spec.TCPConnectionRejection
 	changed := (current == nil) != (wanted == nil) || current != nil && wanted != nil && *current != *wanted ||
-		len(observed.members) != len(desired.members)
+		len(byAddress) != len(desired.members)
 	members := make([]pools.BatchUpdateMemberOpts, 0, len(desired.members))
 	var memberIDs []string
 	for _, member := range desired.members {
 		existing, matched := byAddress[memberKey(member.Address, member.Port)]
 		opts, err := tcpRejectionBatchMember(desired, member, existing)
 		if err != nil {
-			return nil, nil, err
+			return routeMutation{}, nil, false, err
 		}
 		members = append(members, opts)
 		if matched {
 			memberIDs = append(memberIDs, existing.ID)
 		}
+		tags := slices.Clone(existing.Tags)
+		slices.Sort(tags)
 		changed = changed || !matched || existing.SubnetID != *opts.SubnetID || !existing.AdminStateUp ||
-			existing.Weight != *opts.Weight || existing.Backup != *opts.Backup || !slices.Equal(existing.Tags, opts.Tags)
+			existing.Weight != *opts.Weight || existing.Backup != *opts.Backup || !slices.Equal(tags, opts.Tags)
 	}
-	if !changed {
-		return nil, memberIDs, nil
-	}
-	return &routeMutation{kind: routeMutationReplaceTCPMembers, id: observed.pool.ID, tcpMembers: members}, memberIDs, nil
+	return routeMutation{kind: routeMutationReplaceTCPMembers, id: observed.pool.ID, tcpMembers: members}, memberIDs, changed, nil
 }
 
 func tcpRejectionBatchMember(desired desiredRoute, member cloud.Member, existing pools.Member) (pools.BatchUpdateMemberOpts, error) {
@@ -138,11 +150,8 @@ func tcpRejectionBatchMember(desired desiredRoute, member cloud.Member, existing
 			opts.Weight = new(1)
 		}
 	}
+	slices.Sort(opts.Tags)
 	return opts, nil
-}
-
-func eligibleTCPRejectionLiveUpdate(changes []routeMutation, provisioningIssue string) bool {
-	return provisioningIssue == "" && len(changes) == 1 && changes[0].kind == routeMutationReplaceTCPMembers
 }
 
 func tcpRejectionProvisioningPending(route desiredRoute, observed observedRouteGraph) string {
@@ -162,43 +171,65 @@ func defaultPoolCanServe(route desiredRoute) bool {
 // Reprove the owned default before withdrawing it. An ambiguous response
 // follows ordinary re-observation because Octavia may have accepted the write.
 func (p *Provider) withdrawAfterRejectedTCPBatch(ctx context.Context, desired desiredGatewayGraph, index int, result *cloud.GatewayGraphResult, failure error) (bool, error) {
-	if !slices.ContainsFunc([]int{http.StatusBadRequest, http.StatusForbidden, http.StatusMethodNotAllowed,
-		http.StatusUnprocessableEntity, http.StatusNotImplemented}, func(code int) bool { return gophercloud.ResponseCodeIs(failure, code) }) {
+	if !slices.ContainsFunc([]int{http.StatusBadRequest, http.StatusForbidden, http.StatusNotFound, http.StatusMethodNotAllowed,
+		http.StatusRequestEntityTooLarge, http.StatusUnprocessableEntity, http.StatusNotImplemented}, func(code int) bool { return gophercloud.ResponseCodeIs(failure, code) }) {
 		return false, nil
 	}
 	actual, err := p.observeGatewayGraph(ctx, desired)
-	if err != nil || actual.outcome.State != cloud.OutcomeReady || index >= len(actual.routes) || actual.routes[index].pool == nil {
+	if err != nil || actual.loadBalancer != nil && actual.loadBalancer.ProvisioningStatus != "ACTIVE" {
 		return false, err
 	}
-	if actual.routes[index].backendProvisioningIssue(true, true) != "" {
+	if actual.loadBalancer == nil || index < len(actual.routes) && actual.routes[index].pool == nil {
+		// An independently observed disappearance can be handled by normal
+		// graph staging. A 404 on an existing pool may identify its subnet.
+		return isNotFound(failure), nil
+	}
+	if index >= len(actual.routes) {
 		return false, nil
 	}
-	step := clearListenerDefaultPool(cloud.ListenerProtocolTCP)
-	frontends := actual.scopedListeners
-	if actual.listener != nil {
-		frontends = []listeners.Listener{*actual.listener}
+	route := actual.routes[index]
+	if route.pool.ProvisioningStatus != "ERROR" && route.backendProvisioningIssue(true, true) != "" {
+		return false, nil
 	}
-	poolID := actual.routes[index].pool.ID
-	for _, listener := range frontends {
+	frontends := tcpRejectionPoolListeners(actual, route.pool.ID)
+	listener := slices.IndexFunc(frontends, func(listener listeners.Listener) bool {
+		return listener.ProvisioningStatus == "ACTIVE" || listener.ProvisioningStatus == "ERROR"
+	})
+	if listener == -1 {
+		return false, nil
+	}
+	return true, p.withdrawTCPRejectionDefault(ctx, desired, actual, index, frontends[listener].ID, result)
+}
+
+func tcpRejectionPoolListeners(actual observedGatewayGraph, poolID string) []listeners.Listener {
+	if actual.listener != nil && actual.listener.DefaultPoolID == poolID {
+		return []listeners.Listener{*actual.listener}
+	}
+	var listenersForPool []listeners.Listener
+	for _, listener := range actual.scopedListeners {
 		if listener.DefaultPoolID == poolID {
-			step.listenerID = listener.ID
-			break
+			listenersForPool = append(listenersForPool, listener)
 		}
 	}
-	if step.listenerID == "" {
-		return false, nil
-	}
+	return listenersForPool
+}
+
+func (p *Provider) withdrawTCPRejectionDefault(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, index int, listenerID string, result *cloud.GatewayGraphResult) error {
+	step := clearListenerDefaultPool(cloud.ListenerProtocolTCP)
+	step.listenerID = listenerID
 	if validate := desired.spec.ValidateMutation; validate != nil {
 		if err := validate(ctx); err != nil {
-			return false, err
+			return err
 		}
 	}
-	if err := p.executeGraphMutation(ctx, desired, actual, step); err != nil {
-		return false, err
+	err := p.executeGraphMutation(ctx, desired, actual, step)
+	if err != nil && !isNotFound(err) {
+		return err
 	}
 	outcome := p.progressingOutcome(step.message)
-	outcome.MutationSubmitted = true
+	outcome.MutationSubmitted = err == nil
 	result.Outcome = outcome
 	result.Routes[index].Result.Outcome = outcome
-	return true, nil
+	result.Routes[index].Result.ObservationDeferred = false
+	return nil
 }

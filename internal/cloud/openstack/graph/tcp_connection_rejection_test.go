@@ -18,11 +18,13 @@ package graph
 
 import (
 	"encoding/json"
+	"maps"
 	"net/http"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 )
@@ -42,8 +44,31 @@ func (f *tcpGraphFixture) serveTCPRejectionBatch(w http.ResponseWriter, request 
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	if rejection != nil && (!f.tcpRejectionAdvertised || f.tcpRejectionRejectWrite) {
+	if f.tcpRejectionRejectCode != 0 {
+		if f.tcpRejectionRemovePool {
+			for _, member := range f.children(request.URL.Path) {
+				delete(f.inventory, request.URL.Path+"/"+member["id"].(string))
+			}
+			delete(f.inventory, strings.TrimSuffix(request.URL.Path, "/members"))
+			delete(f.inventory, tcpMonitor)
+			f.inventory[tcpListener]["default_pool_id"] = nil
+		}
+		w.WriteHeader(f.tcpRejectionRejectCode)
+		return
+	}
+	if rejection != nil && !f.tcpRejectionAdvertised {
 		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	if f.inventory[tcpLB]["provisioning_status"] == "PENDING_UPDATE" {
+		previous := f.tcpRejectionWrites[len(f.tcpRejectionWrites)-1]
+		f.writes = append(f.writes, "PUT "+request.URL.Path)
+		if string(fields["members"]) != string(previous["members"]) || string(fields["tcp_connection_rejection"]) != string(previous["tcp_connection_rejection"]) {
+			w.WriteHeader(http.StatusConflict)
+		} else {
+			f.tcpRejectionWrites = append(f.tcpRejectionWrites, fields)
+			w.WriteHeader(http.StatusAccepted)
+		}
 		return
 	}
 	f.writes = append(f.writes, "PUT "+request.URL.Path)
@@ -148,7 +173,7 @@ func TestTCPConnectionRejectionReplacesACompleteServingBatch(t *testing.T) {
 }
 
 func TestTCPConnectionRejectionWithdrawsAnUnprovableDefault(t *testing.T) {
-	for _, missing := range []string{"capability", "controller opt-in", "pool field", "member inventory", "successful batch"} {
+	for _, missing := range []string{"capability", "controller opt-in", "pool field", "member inventory", "successful batch", "batch subnet", "batch request limit"} {
 		t.Run(missing, func(t *testing.T) {
 			f := newTCPGraphFixture(t)
 			f.tcpRejectionAPI, f.tcpRejectionAdvertised = true, true
@@ -164,7 +189,11 @@ func TestTCPConnectionRejectionWithdrawsAnUnprovableDefault(t *testing.T) {
 			case "member inventory":
 				delete(f.inventory[tcpMember], "weight")
 			case "successful batch":
-				f.tcpRejectionRejectWrite = true
+				f.tcpRejectionRejectCode = http.StatusBadRequest
+			case "batch subnet":
+				f.tcpRejectionRejectCode = http.StatusNotFound
+			case "batch request limit":
+				f.tcpRejectionRejectCode = http.StatusRequestEntityTooLarge
 			}
 			before := len(f.writes)
 			f.spec.Routes[0].Spec.TCPConnectionRejection = &cloud.TCPConnectionRejection{RejectWeight: 1, TotalWeight: 4}
@@ -174,6 +203,147 @@ func TestTCPConnectionRejectionWithdrawsAnUnprovableDefault(t *testing.T) {
 				t.Fatalf("unprovable target = %+v, writes %v", result, f.writes[before:])
 			}
 		})
+	}
+}
+
+func TestTCPConnectionRejectionPrioritizesServingRevocation(t *testing.T) {
+	f := newTCPGraphFixture(t)
+	f.tcpRejectionAPI, f.tcpRejectionAdvertised = true, true
+	anchor := f.spec.Gateway.Spec.ListenerPort
+	f.spec.Gateway.Spec.ScopedListeners = []cloud.ScopedListener{{Name: "affected", Port: anchor}, {Name: "independent", Port: 9311}}
+	first := &f.spec.Routes[0]
+	first.Spec.ScopedListenerPorts = []int{anchor}
+	independent := *first
+	independent.Spec.Identity.RouteName, independent.Spec.Identity.RouteUID = "independent", "independent-uid"
+	independent.Spec.Precedence++
+	independent.Spec.ScopedListenerPorts = []int{9311}
+	f.spec.Routes = append(f.spec.Routes, independent)
+	provider := f.rejectionProvider(true)
+	f.settleTransportGraph(provider)
+	f.spec.Gateway.Spec.ScopedListeners = append(f.spec.Gateway.Spec.ScopedListeners, cloud.ScopedListener{Name: "new", Port: 9312})
+	f.spec.Routes[1].Spec.BackendSecurityGroupIDs = []string{"96d7a899-4f5d-4cf5-9842-5cc66ad91575"}
+	f.tcpRejectionNetworkDown = true
+	first = &f.spec.Routes[0]
+	first.Spec.TCPConnectionRejection = &cloud.TCPConnectionRejection{RejectWeight: 1, TotalWeight: 4}
+	before := len(f.writes)
+	f.reconcile(provider)
+	if !slices.Equal(f.writes[before:], []string{"PUT " + tcpMembers}) ||
+		f.inventory[tcpListener]["default_pool_id"] != "pool" ||
+		f.inventory[tcpListener+"-9311"]["default_pool_id"] != "pool-secondary" {
+		t.Fatalf("a sibling dependency or new listener delayed the revocation: writes %v", f.writes[before:])
+	}
+
+	f.inventory[tcpPool]["provisioning_status"] = "ACTIVE"
+	first.Spec.TCPConnectionRejection.RejectWeight = 2
+	first.Spec.BackendSecurityGroupIDs = []string{"96d7a899-4f5d-4cf5-9842-5cc66ad91575"}
+	before = len(f.writes)
+	result := f.reconcile(provider)
+	if !slices.Equal(f.writes[before:], []string{"PUT " + tcpListener}) ||
+		f.inventory[tcpListener]["default_pool_id"] != nil ||
+		f.inventory[tcpListener+"-9311"]["default_pool_id"] != "pool-secondary" ||
+		result.Routes[0].Result.Outcome.State == cloud.OutcomeReady {
+		t.Fatalf("uncertain affected dependency did not close only the affected default: %+v, writes %v", result, f.writes[before:])
+	}
+}
+
+func TestTCPConnectionRejectionReobservesAnActuallyMissingPool(t *testing.T) {
+	f := newTCPGraphFixture(t)
+	f.tcpRejectionAPI, f.tcpRejectionAdvertised = true, true
+	provider := f.rejectionProvider(true)
+	f.settleTransportGraph(provider)
+	f.spec.Routes[0].Spec.TCPConnectionRejection = &cloud.TCPConnectionRejection{RejectWeight: 1, TotalWeight: 4}
+	f.tcpRejectionRejectCode, f.tcpRejectionRemovePool = http.StatusNotFound, true
+	before := len(f.writes)
+	result := f.reconcile(provider)
+	if len(f.writes) != before || f.inventory[tcpPool] != nil || result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing {
+		t.Fatalf("pool disappearance was not handled by fresh observation: %+v, writes %v", result, f.writes[before:])
+	}
+	f.tcpRejectionRejectCode, f.tcpRejectionRemovePool = 0, false
+	f.reconcile(provider)
+	if !slices.Equal(f.writes[before:], []string{"POST " + tcpPools}) {
+		t.Fatalf("missing pool did not return to ordinary staging: writes %v", f.writes[before:])
+	}
+}
+
+func TestTCPConnectionRejectionReplaysOnlyAnExactAgedPendingBatch(t *testing.T) {
+	for _, clear := range []bool{false, true} {
+		t.Run(strconv.FormatBool(clear), func(t *testing.T) {
+			f := newTCPGraphFixture(t)
+			f.tcpRejectionAPI, f.tcpRejectionAdvertised = true, true
+			provider := f.rejectionProvider(true)
+			f.settleTransportGraph(provider)
+			route := &f.spec.Routes[0].Spec
+			route.TCPConnectionRejection = &cloud.TCPConnectionRejection{RejectWeight: 1, TotalWeight: 4}
+			f.reconcile(provider)
+			if clear {
+				f.inventory[tcpPool]["provisioning_status"] = "ACTIVE"
+				route.TCPConnectionRejection = nil
+				f.reconcile(provider)
+			}
+			// The persisted manifest contains a staged member and can still
+			// expose an obsolete row that the worker has not deleted.
+			member := f.inventory[tcpMember]
+			member["provisioning_status"] = "PENDING_UPDATE"
+			old := maps.Clone(member)
+			old["id"], old["address"], old["provisioning_status"] = "retired", "192.0.2.99", "PENDING_DELETE"
+			f.inventory[tcpMembers+"/retired"] = old
+			f.inventory[tcpLB]["provisioning_status"] = "PENDING_UPDATE"
+			f.inventory[tcpListener]["provisioning_status"] = "PENDING_UPDATE"
+			pool := f.inventory[tcpPool]
+			pool["updated_at"] = time.Now().UTC().Format(time.RFC3339Nano)
+			before := len(f.writes)
+			if result := f.reconcile(provider); len(f.writes) != before || result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing {
+				t.Fatalf("ordinary pending was retried immediately: %+v, writes %v", result, f.writes[before:])
+			}
+			pool["updated_at"] = time.Now().Add(-time.Minute).UTC().Format(time.RFC3339Nano)
+			route.Members[0].Port++
+			if result := f.reconcile(provider); len(f.writes) != before || result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing {
+				t.Fatalf("different desired payload was replayed: %+v, writes %v", result, f.writes[before:])
+			}
+			route.Members[0].Port--
+			acceptedBefore := len(f.tcpRejectionWrites)
+			result := f.reconcile(provider)
+			if !slices.Equal(f.writes[before:], []string{"PUT " + tcpMembers}) ||
+				len(f.tcpRejectionWrites) != acceptedBefore+1 ||
+				result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing ||
+				result.Routes[0].Result.ObservationDeferred || result.Outcome.RequeueAfter < tcpReplayInterval {
+				t.Fatalf("aged batch was not replayed exactly or certified too early: %+v, writes %v", result, f.writes[before:])
+			}
+			f.reconcile(provider)
+			if len(f.writes) != before+1 {
+				t.Fatalf("repeated event skipped replay backoff: writes %v", f.writes[before:])
+			}
+		})
+	}
+}
+
+func TestTCPConnectionRejectionRecoversFailedActiveLoadBalancer(t *testing.T) {
+	f := newTCPGraphFixture(t)
+	f.tcpRejectionAPI, f.tcpRejectionAdvertised = true, true
+	provider := f.rejectionProvider(true)
+	f.settleTransportGraph(provider)
+	route := &f.spec.Routes[0].Spec
+	route.TCPConnectionRejection = &cloud.TCPConnectionRejection{RejectWeight: 1, TotalWeight: 4}
+	f.reconcile(provider)
+	pool := f.inventory[tcpPool]
+	pool["provisioning_status"] = "ERROR"
+	f.inventory[tcpListener]["provisioning_status"] = "ERROR"
+	old := maps.Clone(f.inventory[tcpMember])
+	old["id"], old["address"], old["provisioning_status"] = "retired", "192.0.2.99", "PENDING_DELETE"
+	f.inventory[tcpMembers+"/retired"] = old
+	route.TCPConnectionRejection = nil
+	f.tcpRejectionAdvertised = false
+	before := len(f.writes)
+	provider = f.rejectionProvider(false)
+	result := f.reconcile(provider)
+	if !slices.Equal(f.writes[before:], []string{"PUT " + tcpMembers}) ||
+		string(f.tcpRejectionWrites[len(f.tcpRejectionWrites)-1]["tcp_connection_rejection"]) != "null" ||
+		result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing || f.inventory[tcpListener]["default_pool_id"] != "pool" {
+		t.Fatalf("failed batch did not recover with the current clear target: %+v, writes %v", result, f.writes[before:])
+	}
+	pool["provisioning_status"], f.inventory[tcpListener]["provisioning_status"] = "ACTIVE", "ACTIVE"
+	if result := f.reconcile(provider); result.Routes[0].Result.Outcome.State != cloud.OutcomeReady {
+		t.Fatalf("recovery did not settle with confirmed readback: %+v", result)
 	}
 }
 

@@ -157,7 +157,7 @@ func (r *Reconciler) authorizedBackends(ctx context.Context, route *transportRou
 }
 
 // backendServices validates authorized references and returns the Services that carry traffic.
-func (r *Reconciler) backendServices(ctx context.Context, refs []serviceReference, inactiveMode cloud.MemberMode) ([]serviceBackend, backendRejections, error) {
+func (r *Reconciler) backendServices(ctx context.Context, refs []serviceReference, inactiveMode, activeMode cloud.MemberMode) ([]serviceBackend, backendRejections, error) {
 	collect := r.tcpConnectionRejectionEnabled()
 	services := make(map[client.ObjectKey]*corev1.Service, len(refs))
 	readErrors := make(map[client.ObjectKey]error)
@@ -188,8 +188,12 @@ func (r *Reconciler) backendServices(ctx context.Context, refs []serviceReferenc
 			rejections.services = append(rejections.services, revisionOf(service))
 		}
 		port, diagnostic := model.ResolveTransportServicePort(service, ref.port, corev1.Protocol(r.protocol()))
-		if diagnostic == nil && ref.weight == 0 {
-			switch inactiveMode {
+		if diagnostic == nil {
+			mode := inactiveMode
+			if ref.weight != 0 {
+				mode = activeMode
+			}
+			switch mode {
 			case cloud.MemberModeEndpoint:
 				diagnostic = routebackend.ValidateEndpointService(service)
 			case cloud.MemberModeNodePort:

@@ -132,6 +132,26 @@ func TestTCPConnectionRejectionDistinguishesUnavailableBackends(t *testing.T) {
 				t.Fatalf("one empty backend and one disabled bad ref = %+v, %v", plan, err)
 			}
 
+			if mode == cloud.MemberModeNodePort {
+				empty.Spec.Type = corev1.ServiceTypeClusterIP
+				empty.Spec.Ports[0].NodePort = 0
+				if err := r.Update(t.Context(), empty); err != nil {
+					t.Fatal(err)
+				}
+				plan, err = r.planRoute(t.Context(), viewRoute(route), id, true)
+				if err != nil || plan.desired == nil || plan.detach || plan.desired.TCPConnectionRejection == nil ||
+					*plan.desired.TCPConnectionRejection != (cloud.TCPConnectionRejection{RejectWeight: 1, TotalWeight: 4}) ||
+					len(plan.desired.Members) != 1 || plan.resolved.Reason != "UnsupportedValue" {
+					t.Fatalf("incompatible Service must contribute only its own weight: %+v, %v", plan, err)
+				}
+				r.Config.TCPConnectionRejection = false
+				legacy, err := r.planRoute(t.Context(), viewRoute(route), id, true)
+				if err != nil || legacy.desired != nil || !legacy.detach {
+					t.Fatalf("stock fallback for an incompatible Service: %+v, %v", legacy, err)
+				}
+				r.Config.TCPConnectionRejection = true
+			}
+
 			if err := r.Delete(t.Context(), endpoints); err != nil {
 				t.Fatal(err)
 			}

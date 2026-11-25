@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/pools"
@@ -91,6 +92,7 @@ func (s *Service) ListPoolInventory(ctx context.Context, opts pools.ListOpts) (P
 				pools.Pool
 				BackendRetryBudget     json.RawMessage `json:"backend_retry_budget"`
 				TCPConnectionRejection json.RawMessage `json:"tcp_connection_rejection"`
+				UpdatedAt              json.RawMessage `json:"updated_at"`
 				BackendH2C             *bool           `json:"backend_h2c"`
 				Hostname               json.RawMessage `json:"backend_tls_hostname"`
 				SubjectAltNames        json.RawMessage `json:"backend_tls_subject_alt_names"`
@@ -132,7 +134,16 @@ func (s *Service) ListPoolInventory(ctx context.Context, opts pools.ListOpts) (P
 			pool.AdminStateUp = pool.Admin != nil && *pool.Admin
 			inventory.BackendTLS[pool.ID] = tls
 			inventory.BackendRetryBudget[pool.ID] = decodeBackendRetryBudget(pool.BackendRetryBudget)
-			inventory.TCPConnectionRejection[pool.ID] = decodeTCPConnectionRejection(pool.TCPConnectionRejection)
+			rejection := decodeTCPConnectionRejection(pool.TCPConnectionRejection)
+			if rejection.Present {
+				var timestamp gophercloud.JSONRFC3339NoZ
+				if json.Unmarshal(pool.UpdatedAt, &timestamp) == nil {
+					rejection.UpdatedAt = time.Time(timestamp)
+				} else {
+					_ = json.Unmarshal(pool.UpdatedAt, &rejection.UpdatedAt)
+				}
+			}
+			inventory.TCPConnectionRejection[pool.ID] = rejection
 			items = append(items, pool.Pool)
 			if pool.BackendH2C != nil && *pool.BackendH2C {
 				inventory.BackendH2C[pool.ID] = true

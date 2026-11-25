@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
@@ -108,6 +109,8 @@ type Provider struct {
 	backendTLSPolicy       bool
 	backendRetryBudget     bool
 	tcpConnectionRejection bool
+	tcpReplayMu            sync.Mutex
+	tcpReplayAfter         map[string]time.Time
 	fixedHTTPResponses     bool
 	httpHeaderExact        bool
 	httpQueryParamExact    bool

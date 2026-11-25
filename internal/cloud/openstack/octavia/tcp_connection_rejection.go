@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gophercloud/gophercloud/v2"
@@ -30,9 +31,10 @@ const tcpConnectionRejectionField = "tcp_connection_rejection"
 
 // PoolTCPConnectionRejection distinguishes stock omission, explicit null and invalid readback.
 type PoolTCPConnectionRejection struct {
-	Present bool
-	Invalid bool
-	Value   *cloud.TCPConnectionRejection
+	Present   bool
+	Invalid   bool
+	Value     *cloud.TCPConnectionRejection
+	UpdatedAt time.Time
 }
 
 func decodeTCPConnectionRejection(raw json.RawMessage) PoolTCPConnectionRejection {

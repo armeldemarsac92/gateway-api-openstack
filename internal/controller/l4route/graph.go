@@ -294,7 +294,11 @@ func (r *Reconciler) observeRouteBackend(ctx context.Context, route *transportRo
 	if err != nil || auth.active != nil && auth.rejectWeight == 0 || auth.active != nil && !r.tcpConnectionRejectionEnabled() {
 		return nil, "", revisions, err
 	}
-	services, invalid, err := r.backendServices(ctx, refs, "")
+	var mode cloud.MemberMode
+	if r.tcpConnectionRejectionEnabled() {
+		mode = topology.Topology.MemberMode
+	}
+	services, invalid, err := r.backendServices(ctx, refs, "", mode)
 	if err != nil || invalid.active != nil && !r.tcpConnectionRejectionEnabled() {
 		return nil, "", revisions, err
 	}

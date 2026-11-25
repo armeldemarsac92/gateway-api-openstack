@@ -328,6 +328,12 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		return result, nil
 	}
 	p.observeTCPConnectionRejectionCapability(ctx, &desired, actual)
+	if result, handled, err := p.reconcileServingTCPRejection(ctx, desired, actual); handled {
+		return result, err
+	}
+	if result, handled, err := p.replayPendingTCPRejection(ctx, desired, actual); handled {
+		return result, err
+	}
 	p.gateRequestMirrors(ctx, &desired, actual)
 	if actual.loadBalancer != nil && actual.loadBalancer.ProvisioningStatus == "ACTIVE" {
 		if step, needed := nextRequestMirrorWithdrawal(desired, actual); needed {
@@ -359,6 +365,9 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	}
 	p.isolateUnavailableSNISuffix(ctx, &desired, actual)
 	if actual.addressReadError != nil {
+		if actual.protocol == cloud.ListenerProtocolTCP {
+			return result, actual.addressReadError
+		}
 		if isSNIProtocol(desired.protocol) {
 			if actual.outcome.State == cloud.OutcomeProgressing {
 				return p.pendingGraphResult(ctx, desired, actual), nil
@@ -530,7 +539,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 			if step.route.kind == routeMutationReplaceTCPMembers {
 				withdrawn, withdrawalErr := p.withdrawAfterRejectedTCPBatch(ctx, desired, step.routeIndex, &result, err)
 				if withdrawn {
-					return result, nil
+					return result, withdrawalErr
 				}
 				err = errors.Join(err, withdrawalErr)
 			}
@@ -1477,10 +1486,10 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 	}
 	actual.floatingIP, err = p.findGatewayFloatingIP(ctx, desired.identity, lb.VipPortID, lb.VipAddress)
 	if err != nil {
-		canWithdraw := isSNIProtocol(desired.protocol) || desired.protocol == cloud.ListenerProtocolHTTP
-		observeSNIPending := isSNIProtocol(desired.protocol) && lb.ProvisioningStatus == "PENDING_UPDATE"
+		canWithdraw := isSNIProtocol(desired.protocol) || desired.protocol == cloud.ListenerProtocolHTTP || desired.protocol == cloud.ListenerProtocolTCP
+		observePending := (isSNIProtocol(desired.protocol) || desired.protocol == cloud.ListenerProtocolTCP) && lb.ProvisioningStatus == "PENDING_UPDATE"
 		if !canWithdraw || desired.spec.Gateway.Disposition != cloud.GraphEnsure ||
-			observation.phase != loadBalancerPhaseActive && !observeSNIPending || ctx.Err() != nil || errors.Is(err, cloud.ErrOwnershipConflict) {
+			observation.phase != loadBalancerPhaseActive && !observePending || ctx.Err() != nil || errors.Is(err, cloud.ErrOwnershipConflict) {
 			return actual, err
 		}
 		// Still prove the Octavia graph so an in-place withdrawal can close

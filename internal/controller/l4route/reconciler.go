@@ -196,22 +196,27 @@ func (r *Reconciler) planRoute(ctx context.Context, route *transportRoute, bindi
 	// Validate disabled Services in the Gateway's member mode without reading
 	// their destinations. Before a topology is bound, keep the Endpoint checks
 	// used for multiple references.
-	var inactiveMode cloud.MemberMode
+	var inactiveMode, activeMode cloud.MemberMode
 	if len(route.backendRefs) > 1 {
 		inactiveMode = cloud.MemberModeEndpoint
-		if controller.HasGatewayTopologyBinding(r.Config, parent.gateway) {
-			topology, err := controller.StoredGatewayTopology(r.Config, parent.gateway)
-			if err != nil {
-				if collect {
-					plan.holdUnreadBackends(route, authRejections.active, bound, err)
-					return plan, nil
-				}
-				return routePlan{}, err
+	}
+	if (inactiveMode != "" || r.tcpConnectionRejectionEnabled()) && controller.HasGatewayTopologyBinding(r.Config, parent.gateway) {
+		topology, err := controller.StoredGatewayTopology(r.Config, parent.gateway)
+		if err != nil {
+			if collect {
+				plan.holdUnreadBackends(route, authRejections.active, bound, err)
+				return plan, nil
 			}
+			return routePlan{}, err
+		}
+		if inactiveMode != "" {
 			inactiveMode = topology.Topology.MemberMode
 		}
+		if r.tcpConnectionRejectionEnabled() {
+			activeMode = topology.Topology.MemberMode
+		}
 	}
-	backends, serviceRejections, err := r.backendServices(ctx, refs, inactiveMode)
+	backends, serviceRejections, err := r.backendServices(ctx, refs, inactiveMode, activeMode)
 	if err != nil {
 		return routePlan{}, err
 	}

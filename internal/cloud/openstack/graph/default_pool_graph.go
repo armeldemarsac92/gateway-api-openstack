@@ -281,8 +281,7 @@ func (p *Provider) buildDefaultPoolGraphPlan(desired desiredGatewayGraph, actual
 			routeResult.State = state
 			issue := observed.backendProvisioningIssue(false, true)
 			backendReady := observed.pool != nil && issue == "" && canServe && len(steps) == 0
-			liveBatch := !listenerFailed && eligibleTCPRejectionLiveUpdate(steps, issue)
-			detach = detach || index == defaultOwner && !backendReady && !liveBatch
+			detach = detach || index == defaultOwner && !backendReady
 			switch {
 			case issue != "":
 				routeResult.Outcome = p.progressingOutcome(issue)
