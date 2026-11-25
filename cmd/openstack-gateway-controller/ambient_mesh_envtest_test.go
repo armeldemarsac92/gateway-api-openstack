@@ -244,10 +244,11 @@ func TestAmbientMeshEnvtest(t *testing.T) {
 	}
 	markRolledOut()
 
-	create(&corev1.ConfigMap{
+	cniConfig := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{Name: "istio-cni-config", Namespace: "istio-system"},
-		Data:       map[string]string{"AMBIENT_ENABLED": "true", "AMBIENT_IPV6": "false"},
-	})
+		Data:       map[string]string{"AMBIENT_ENABLED": "false", "AMBIENT_IPV6": "false"},
+	}
+	create(cniConfig)
 	createDaemonSet := func(name string, container corev1.Container) *appsv1.DaemonSet {
 		t.Helper()
 		labels := map[string]string{"app": name}
@@ -287,6 +288,22 @@ func TestAmbientMeshEnvtest(t *testing.T) {
 	})
 	markDaemonSetRolledOut(ztunnel)
 	acceptClass()
+	awaitStatus(primary, metav1.ConditionTrue, "Accepted", metav1.ConditionUnknown, 0, "istio-cni-node rollout")
+	markDaemonSetRolledOut(cni)
+	awaitStatus(primary, metav1.ConditionTrue, "Accepted", metav1.ConditionUnknown, 0, "ambient IPv4 settings")
+
+	// Changing envFrom data does not update the environment of running CNI Pods.
+	cniConfig.Data["AMBIENT_ENABLED"] = "true"
+	update(cniConfig)
+	primary.Spec.Description = ptr.To("Observe the existing CNI rollout after its ConfigMap changed")
+	update(primary)
+	awaitStatus(primary, metav1.ConditionTrue, "Accepted", metav1.ConditionUnknown, 0, "ambient IPv4 settings")
+
+	cni.Spec.Template.Spec.Containers[0].Env = []corev1.EnvVar{
+		{Name: "AMBIENT_ENABLED", Value: "true"},
+		{Name: "AMBIENT_IPV6", Value: "false"},
+	}
+	update(cni)
 	awaitStatus(primary, metav1.ConditionTrue, "Accepted", metav1.ConditionUnknown, 0, "istio-cni-node rollout")
 	markDaemonSetRolledOut(cni)
 	awaitStatus(primary, metav1.ConditionTrue, "Accepted", metav1.ConditionTrue, stockFeatureCount)

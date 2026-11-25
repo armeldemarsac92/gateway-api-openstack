@@ -38,7 +38,7 @@ rtk kubectl kustomize integrations/magnum-capi-helm/workload-istio-ambient-xmesh
 rtk sha256sum gateway-controller.yaml
 ```
 
-With kubectl v1.33.13 and Kustomize v5.6.0, the supplied overlay renders to SHA-256 `1877b45c05199680fabb0f1d19273167af44aaadc2735d0efd4dbab5f0c115e3`. Recompute it for locally modified artifacts.
+With kubectl v1.33.13 and Kustomize v5.6.0, the supplied overlay renders to SHA-256 `80eae0ad28037162cb853fe1a64486ee13c9655756fff66788439bf506f0a739`. Recompute it for locally modified artifacts.
 
 The controller looks for `XMesh/hibiscus-istio-ambient` at startup and creates it if the name is free. To choose another name, add `--istio-ambient-xmesh-name=<name>` to the controller Deployment arguments. An existing XMesh keeps its spec. A resource using another identity is left to its controller, including at the configured name.
 
@@ -49,6 +49,8 @@ rtk kubectl --kubeconfig "$kubeconfig" --context "$context" get xmesh hibiscus-i
 The XMesh controller identity is `gateway-api-openstack.github.io/istio-ambient`. Every XMesh selecting it is reconciled. `Accepted=True` at the XMesh's generation means the reporting configuration was accepted. This integration has no XMesh parameters, so setting `spec.parametersRef` produces `Accepted=False` with reason `InvalidParameters`.
 
 `Programmed=True` and the 16 sorted `supportedFeatures` require current-generation acceptance of `GatewayClass/istio-waypoint` under `istio.io/mesh-controller`. The controller also checks the pinned modules and current rollouts of `istio-system/istiod`, `istio-cni-node` and `ztunnel`, with the expected ambient, waypoint, Gateway API and IPv4 settings. It rechecks these workloads every ten seconds and withdraws the capabilities with `Programmed=Unknown` if a required observation is missing. The two pinned pilot images advertise the same set. The consumer pilot extension supports the limited cross-namespace response header behavior described above.
+
+The module sets `AMBIENT_ENABLED=true` and `AMBIENT_IPV6=false` directly in the CNI Pod template. Existing Pods keep their startup environment when a ConfigMap changes. For an installation that still reads these two values from a ConfigMap, rerun the module's install command with the same options. XMesh waits for the updated DaemonSet to finish rolling out before advertising features.
 
 `Programmed` reports the observed cluster prerequisites. Verify enrollment, Service-parent Route conditions and traffic separately for each Service. [Observed XMesh conditions during istiod shutdown and recovery](../../docs/qualification/v1.7.0/provider/experimental-policies.md#xmesh-readiness-on-istio-ambient)
 

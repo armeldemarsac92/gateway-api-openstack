@@ -37,8 +37,8 @@ import (
 )
 
 const (
-	ControllerName gatewayv1.GatewayController = "gateway-api-openstack.github.io/istio-ambient"
-	DefaultName                                = "hibiscus-istio-ambient"
+	ControllerName = gatewayv1.GatewayController("gateway-api-openstack.github.io/istio-ambient")
+	DefaultName    = "hibiscus-istio-ambient"
 
 	istioObservationInterval = 10 * time.Second
 )
@@ -157,8 +157,7 @@ func (r *reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	if mesh.Spec.ParametersRef != nil || observationErr != nil {
 		return ctrl.Result{}, observationErr
 	}
-	// Recheck the named Istio workload dependencies without watching all
-	// Deployments, DaemonSets and ConfigMaps in the cluster.
+	// Recheck the named workloads without watching every Deployment and DaemonSet.
 	return ctrl.Result{RequeueAfter: istioObservationInterval}, nil
 }
 

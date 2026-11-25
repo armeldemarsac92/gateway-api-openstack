@@ -38,7 +38,6 @@ const (
 	consumerPilot = "ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:fdb9d02e2b427f81d2763fce329361ac32432080cc14b7115315bed4508bbcc5"
 	cniImage      = "docker.io/istio/install-cni@sha256:fe7081ed2605166fef573a7987f183e91fd45c2a302f90998c879ca20112426e"
 	ztunnelImage  = "docker.io/istio/ztunnel@sha256:efa1115b58acd969bf876dfcee27751714e3ae317b2518e1a1d61f3ef037587e"
-	cniConfigName = "istio-cni-config"
 )
 
 func (r *reconciler) observeIstio(ctx context.Context) (ready bool, detail string, err error) {
@@ -70,9 +69,10 @@ func (r *reconciler) observeIstio(ctx context.Context) (ready bool, detail strin
 	if cni == nil || err != nil {
 		return false, "waiting for the qualified istio-system/istio-cni-node rollout", err
 	}
-	configured, err := r.cniConfigured(ctx, cni)
-	if !configured || err != nil {
-		return false, "waiting for ambient IPv4 settings in istio-system/istio-cni-node", err
+	// Kubelet snapshots envFrom at Pod startup. The pinned module places both
+	// values directly in the Pod template, so a completed rollout proves them.
+	if envValue(cni.Env, "AMBIENT_ENABLED", "") != "true" || envValue(cni.Env, "AMBIENT_IPV6", "") != "false" {
+		return false, "waiting for ambient IPv4 settings in istio-system/istio-cni-node", nil
 	}
 
 	ztunnel, err := r.observeDaemonSet(ctx, "ztunnel", "istio-proxy", ztunnelImage)
@@ -135,23 +135,6 @@ func pilotConfigured(pilot *corev1.Container) bool {
 		envValue(pilot.Env, "PILOT_ENABLE_GATEWAY_API_STATUS", "true") == "true" &&
 		envValue(pilot.Env, "PILOT_ENABLE_GATEWAY_API_DEPLOYMENT_CONTROLLER", "true") == "true" &&
 		envValue(pilot.Env, "PILOT_ENABLE_GATEWAY_API_GATEWAYCLASS_CONTROLLER", "true") == "false"
-}
-
-func (r *reconciler) cniConfigured(ctx context.Context, container *corev1.Container) (bool, error) {
-	if len(container.EnvFrom) != 1 {
-		return false, nil
-	}
-	source := container.EnvFrom[0]
-	if source.Prefix != "" || source.ConfigMapRef == nil || source.ConfigMapRef.Name != cniConfigName {
-		return false, nil
-	}
-	var config corev1.ConfigMap
-	if err := r.apiReader.Get(ctx, client.ObjectKey{Namespace: istioNamespace, Name: cniConfigName}, &config); err != nil {
-		return false, client.IgnoreNotFound(err)
-	}
-	return config.DeletionTimestamp.IsZero() &&
-		envValue(container.Env, "AMBIENT_ENABLED", config.Data["AMBIENT_ENABLED"]) == "true" &&
-		envValue(container.Env, "AMBIENT_IPV6", config.Data["AMBIENT_IPV6"]) == "false", nil
 }
 
 func envValue(env []corev1.EnvVar, name, fallback string) string {

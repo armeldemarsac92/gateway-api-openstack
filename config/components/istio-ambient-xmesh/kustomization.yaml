@@ -66,10 +66,3 @@ patches:
           resources: ["daemonsets"]
           resourceNames: ["istio-cni-node", "ztunnel"]
           verbs: ["get"]
-      - op: add
-        path: /rules/-
-        value:
-          apiGroups: [""]
-          resources: ["configmaps"]
-          resourceNames: ["istio-cni-config"]
-          verbs: ["get"]
