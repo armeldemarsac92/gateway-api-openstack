@@ -489,12 +489,12 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 			}
 		}
 	}
-	if r.Config.RouteExternalAuthEnabled() {
+	if r.Config.RouteExternalAuthEnabled() || r.Config.RouteExternalAuthGRPCEnabled() {
 		for _, rule := range rules {
 			if !model.HasHTTPRouteExternalAuth(rule) {
 				continue
 			}
-			auth, diagnostic := model.NormalizeHTTPRouteExternalAuth(rule, true, r.Config.WeightedHTTPTargets)
+			auth, diagnostic := model.NormalizeHTTPRouteExternalAuth(rule, r.Config.RouteExternalAuthEnabled(), r.Config.RouteExternalAuthGRPCEnabled(), r.Config.WeightedHTTPTargets)
 			if diagnostic == nil {
 				_, _, diagnostic, err = routebackend.ObserveHTTPExternalAuthService(ctx, r.routePatchReader(), model.HTTPRouteKind, route.Namespace, *auth)
 				if err != nil {

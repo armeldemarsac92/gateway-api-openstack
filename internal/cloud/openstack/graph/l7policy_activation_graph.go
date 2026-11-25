@@ -90,12 +90,16 @@ func activationDestinationsMatch(snapshot []octavia.PolicyActivationPoolInventor
 
 func activationPoolMatches(current *octavia.PolicyActivationPool, proven *pools.Pool) bool {
 	persistence := string(current.Persistence)
+	return activationPoolCoreMatches(current, proven) && current.TLSEnabled != nil && !*current.TLSEnabled &&
+		current.BackendH2C != nil && !*current.BackendH2C && current.BackendTLSHost == "" && !current.BackendRequireH2 &&
+		(persistence == "" || persistence == "null")
+}
+
+func activationPoolCoreMatches(current *octavia.PolicyActivationPool, proven *pools.Pool) bool {
 	return current.ID == proven.ID && current.ProjectID == proven.ProjectID &&
 		current.AdminState != nil && *current.AdminState == proven.AdminStateUp && current.ProvisioningStatus != "" &&
 		current.ProvisioningStatus == proven.ProvisioningStatus &&
 		current.Protocol == proven.Protocol && current.LBMethod == proven.LBMethod &&
-		(persistence == "" || persistence == "null") && current.TLSEnabled != nil && !*current.TLSEnabled &&
-		current.BackendH2C != nil && !*current.BackendH2C && current.BackendTLSHost == "" && !current.BackendRequireH2 &&
 		current.TLSContainerRef == proven.TLSContainerRef && current.CATLSContainerRef == proven.CATLSContainerRef &&
 		current.CRLContainerRef == proven.CRLContainerRef && current.TLSCiphers == proven.TLSCiphers &&
 		slices.Equal(current.TLSVersions, proven.TLSVersions) && slices.Equal(current.ALPNProtocols, proven.ALPNProtocols) &&

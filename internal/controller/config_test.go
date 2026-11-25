@@ -92,6 +92,12 @@ func TestConfigValidateRejectsUnsupportedOrAmbiguousValues(t *testing.T) {
 		{name: "HTTPRoute ExternalAuth without fixed responses", mutate: func(cfg *Config) {
 			cfg.GatewayAPIChannel, cfg.RouteExternalAuth = features.FeatureChannelExperimental, true
 		}},
+		{name: "HTTPRoute gRPC ExternalAuth without Experimental CRDs", mutate: func(cfg *Config) {
+			cfg.RouteExternalAuthGRPC, cfg.FixedHTTPResponses = true, true
+		}},
+		{name: "HTTPRoute gRPC ExternalAuth without fixed responses", mutate: func(cfg *Config) {
+			cfg.GatewayAPIChannel, cfg.RouteExternalAuthGRPC = features.FeatureChannelExperimental, true
+		}},
 		{name: "XBackend client identity in Standard", mutate: func(cfg *Config) {
 			cfg.XBackendClientCertificate, cfg.BackendTLSPolicy = true, true
 		}},

@@ -72,12 +72,21 @@ func (p *Provider) protectHTTPURLPolicyTraffic(ctx context.Context, desired desi
 	if len(states) == 0 {
 		return plan
 	}
-	verified := make(map[string]error)
+	type requirements struct {
+		capabilities string
+		bodySize     int32
+	}
+	verified := make(map[requirements]error)
 	unavailable := make(map[string]bool)
 	blocked := make(map[string]bool)
 	unverifiedClosed := make(map[string]bool)
 	requiresWithdrawal := make(map[string]bool)
 	installedOn := make(map[string]string)
+	var grpcWithdrawal *graphMutation
+	var grpcTransition *grpcAuthTransitionPlan
+	grpcWaiting := make(map[string]bool)
+	grpcWaitingPorts := make(map[int]bool)
+	var grpcPreparation *graphMutation
 	for _, listener := range frontends {
 		state, relevant := states[listener.ProtocolPort]
 		if !relevant {
@@ -90,10 +99,10 @@ func (p *Provider) protectHTTPURLPolicyTraffic(ctx context.Context, desired desi
 		available := disposition == cloud.GraphEnsure && enabled && actual.loadBalancer != nil
 		if available && state.desired {
 			required := append([]string{predicate.capability}, slices.Sorted(maps.Keys(state.additionalCapabilities))...)
-			key := strings.Join(required, ",")
+			key := requirements{capabilities: strings.Join(required, ","), bodySize: state.maxAuthBodyBytes}
 			err, found := verified[key]
 			if !found {
-				err = p.verifyGatewayHTTPURLCapabilities(ctx, desired, actual, required)
+				err = p.verifyGatewayHTTPURLRequirements(ctx, desired, actual, required, state.maxAuthBodyBytes)
 				verified[key] = err
 			}
 			var missing *octavia.MissingGatewayCapability
@@ -113,9 +122,31 @@ func (p *Provider) protectHTTPURLPolicyTraffic(ctx context.Context, desired desi
 		retryClosure := listener.ProvisioningStatus == "ERROR" &&
 			(predicate.capability == octavia.GatewayCapabilityRequestURLRewrite || predicate.capability == octavia.GatewayCapabilityTargetRequestFilters ||
 				predicate.capability == octavia.GatewayCapabilityRequestCORS || predicate.capability == octavia.GatewayCapabilityTargetResponseHeaders ||
-				predicate.capability == octavia.GatewayCapabilityPolicyExternalAuth)
+				isRouteAuthorizerCapability(predicate.capability))
 		if available && !state.unsettled && !retryClosure {
 			continue
+		}
+		if available && predicate.capability == octavia.GatewayCapabilityPolicyExternalAuthGRPC && !isHTTPListenerWithdrawal(plan) {
+			if batch, ok := p.planGRPCAuthTransition(ctx, desired, actual, listener, state); ok {
+				if batch.request.ExpectedGraphRevision == "" {
+					grpcWaiting[listener.ID] = true
+					grpcWaitingPorts[listener.ProtocolPort] = true
+					if grpcPreparation == nil {
+						grpcPreparation = batch.prepare
+					}
+				} else if grpcTransition == nil {
+					grpcTransition = batch
+				}
+				continue
+			}
+			if !state.unsettledDesired {
+				if step, ok := p.planGRPCAuthorizerWithdrawal(desired, actual, listener, state); ok {
+					if grpcWithdrawal == nil {
+						grpcWithdrawal = &step
+					}
+					continue
+				}
+			}
 		}
 		reason := "Waiting for verified Octavia " + predicate.label + " policies on this listener"
 		if !available && state.desired {
@@ -133,7 +164,23 @@ func (p *Provider) protectHTTPURLPolicyTraffic(ctx context.Context, desired desi
 			return []graphMutation{closeGuardedHTTPListener(listener, reason)}
 		}
 	}
+	if grpcWithdrawal != nil {
+		return []graphMutation{*grpcWithdrawal}
+	}
+	if grpcTransition != nil {
+		return []graphMutation{{kind: graphGRPCAuthTransition, listenerID: grpcTransition.listener.ID,
+			withdrawHTTPPolicy: grpcTransition.withdraws, grpcAuthTransition: grpcTransition}}
+	}
+	if grpcPreparation != nil {
+		return []graphMutation{*grpcPreparation}
+	}
+	if len(grpcWaiting) != 0 && actual.routeAuthPoolMutation != nil {
+		return []graphMutation{*actual.routeAuthPoolMutation}
+	}
 	return slices.DeleteFunc(plan, func(step graphMutation) bool {
+		if len(grpcWaiting) != 0 && !independentOfWaitingGRPCAuth(desired, step, grpcWaiting, grpcWaitingPorts) {
+			return true
+		}
 		listenerID := step.listenerID
 		if listenerID == "" && !actual.scoped && actual.listener != nil {
 			listenerID = actual.listener.ID
@@ -161,7 +208,7 @@ func (p *Provider) protectHTTPURLPolicyTraffic(ctx context.Context, desired desi
 			clearCORS := step.route.requestCORSUpdate != nil && step.route.requestCORSUpdate.Value == nil
 			targetWithdrawal := step.route.kind == routeMutationSetPolicyTarget && step.route.withdrawHTTPPolicy
 			part := graphRoutePart(desired, step)
-			localAuthRejection := predicate.capability == octavia.GatewayCapabilityPolicyExternalAuth && part.rejectsWithoutForwarding()
+			localAuthRejection := isRouteAuthorizerCapability(predicate.capability) && part.rejectsWithoutForwarding()
 			if requiresWithdrawal[listenerID] && !httpURLPolicyCleanup(step.route.kind) && !clearRewrite && !clearCORS && !targetWithdrawal && !localAuthRejection {
 				return true
 			}
@@ -188,6 +235,10 @@ func httpURLPolicyCleanup(kind routeMutationKind) bool {
 }
 
 func (p *Provider) verifyGatewayHTTPURLCapabilities(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, required []string) error {
+	return p.verifyGatewayHTTPURLRequirements(ctx, desired, actual, required, 0)
+}
+
+func (p *Provider) verifyGatewayHTTPURLRequirements(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, required []string, bodySize int32) error {
 	// Discovery may stop responding during an outage. Preserve time in the
 	// parent context to validate and submit a restrictive listener update.
 	budget := 3 * time.Second
@@ -196,5 +247,5 @@ func (p *Provider) verifyGatewayHTTPURLCapabilities(ctx context.Context, desired
 	}
 	discovery, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
-	return p.verifyGatewayHTTPCapabilities(discovery, desired, actual, required)
+	return p.verifyGatewayHTTPRequirements(discovery, desired, actual, required, bodySize)
 }

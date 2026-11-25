@@ -227,5 +227,6 @@ func requestTransformListenerNeedsRecovery(desired desiredGatewayGraph, actual o
 		requestPolicyListenerNeedsRecovery(desired, actual, listener, backendRequestFiltersPolicy) ||
 		requestPolicyListenerNeedsRecovery(desired, actual, listener, backendResponseHeadersPolicy) ||
 		requestPolicyListenerNeedsRecovery(desired, actual, listener, requestCORSPolicy) ||
-		requestPolicyListenerNeedsRecovery(desired, actual, listener, routeExternalAuthPolicy)
+		requestPolicyListenerNeedsRecovery(desired, actual, listener, routeExternalAuthPolicy) ||
+		requestPolicyListenerNeedsRecovery(desired, actual, listener, routeExternalAuthGRPCPolicy)
 }

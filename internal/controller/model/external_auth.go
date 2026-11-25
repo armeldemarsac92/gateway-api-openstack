@@ -20,7 +20,6 @@ import (
 	"slices"
 	"strings"
 
-	"golang.org/x/net/http/httpguts"
 	"k8s.io/utils/ptr"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
@@ -31,36 +30,59 @@ import (
 type HTTPExternalAuth struct {
 	Config     cloud.ListenerExternalAuth
 	BackendRef gatewayv1.BackendObjectReference
+	Weighted   bool
 }
 
-// NormalizeHTTPExternalAuth validates the bodyless HTTP profile shared by route and listener filters.
+// NormalizeHTTPExternalAuth validates the bodyless HTTP listener filter.
 func NormalizeHTTPExternalAuth(filter *gatewayv1.HTTPExternalAuthFilter) (*HTTPExternalAuth, *Diagnostic) {
+	auth, diagnostic := normalizeExternalAuth(filter, false)
+	if auth != nil && auth.Config.ForwardBodyMaxSize > 0 {
+		return nil, unsupported("Listener ExternalAuth request body forwarding is unsupported", ScopeRule)
+	}
+	return auth, diagnostic
+}
+
+func normalizeExternalAuth(filter *gatewayv1.HTTPExternalAuthFilter, grpc bool) (*HTTPExternalAuth, *Diagnostic) {
 	invalid := func(message string) (*HTTPExternalAuth, *Diagnostic) {
 		return nil, &Diagnostic{Condition: string(gatewayv1.RouteConditionAccepted), Reason: "Invalid", Message: message, Scope: ScopeRule}
 	}
 	if filter == nil {
 		return invalid("ExternalAuth requires an externalAuth configuration")
 	}
-	if filter.ExternalAuthProtocol != gatewayv1.HTTPRouteExternalAuthHTTPProtocol {
+	if !grpc && filter.ExternalAuthProtocol != gatewayv1.HTTPRouteExternalAuthHTTPProtocol {
 		return nil, unsupported("ExternalAuth supports HTTP authorization", ScopeRule)
 	}
-	if filter.GRPCAuthConfig != nil || filter.ForwardBody != nil && filter.ForwardBody.MaxSize < 0 {
-		return invalid("Invalid HTTP ExternalAuth options")
+	if filter.ForwardBody != nil && filter.ForwardBody.MaxSize < 0 {
+		return invalid("Invalid ExternalAuth body size")
 	}
-	if filter.ForwardBody != nil && filter.ForwardBody.MaxSize > 0 {
-		return nil, unsupported("ExternalAuth request body forwarding is unsupported", ScopeRule)
+	if grpc && (filter.HTTPAuthConfig != nil || filter.GRPCAuthConfig == nil) || !grpc && filter.GRPCAuthConfig != nil {
+		return invalid("Invalid ExternalAuth protocol options")
 	}
 	var auth cloud.ListenerExternalAuth
+	if filter.ForwardBody != nil {
+		auth.ForwardBodyMaxSize = filter.ForwardBody.MaxSize
+	}
+	if grpc {
+		if auth.ForwardBodyMaxSize > cloud.MaxGRPCExternalAuthBodySize {
+			return nil, unsupported("ExternalAuth body size exceeds the gRPC CheckRequest limit", ScopeRule)
+		}
+		auth.Protocol = cloud.ExternalAuthProtocolGRPC
+		headers := filter.GRPCAuthConfig.AllowedRequestHeaders
+		if !cloud.ValidExternalAuthHeaders(headers, true) {
+			return invalid("ExternalAuth header list contains an invalid name")
+		}
+		auth.AllowedRequestHeaders = normalizeAuthHeaders(headers, false)
+	}
 	if options := filter.HTTPAuthConfig; options != nil {
 		if !cloud.ValidExternalAuthPathPrefix(options.Path) {
 			return invalid("ExternalAuth HTTP path prefix is invalid")
 		}
-		if !validAuthHeaders(options.AllowedRequestHeaders) || !validAuthHeaders(options.AllowedResponseHeaders) {
+		if !cloud.ValidExternalAuthHeaders(options.AllowedRequestHeaders, true) || !cloud.ValidExternalAuthHeaders(options.AllowedResponseHeaders, true) {
 			return invalid("ExternalAuth header list contains an invalid name")
 		}
 		auth.PathPrefix = options.Path
-		auth.AllowedRequestHeaders = normalizeAuthHeaders(options.AllowedRequestHeaders)
-		auth.AllowedResponseHeaders = normalizeAuthHeaders(options.AllowedResponseHeaders)
+		auth.AllowedRequestHeaders = normalizeAuthHeaders(options.AllowedRequestHeaders, true)
+		auth.AllowedResponseHeaders = normalizeAuthHeaders(options.AllowedResponseHeaders, true)
 	}
 	if key, supported := BackendServiceReference("", filter.BackendRef); !supported || key.Name == "" {
 		return nil, backendDiagnostic(gatewayv1.RouteReasonInvalidKind, "ExternalAuth backendRef must refer to a core Service")
@@ -96,16 +118,21 @@ func isExternalAuth(filter gatewayv1.HTTPRouteFilter) bool {
 }
 
 // NormalizeHTTPRouteExternalAuth checks the supported shape of a rule containing ExternalAuth.
-func NormalizeHTTPRouteExternalAuth(rule gatewayv1.HTTPRouteRule, enabled, weighted bool) (*HTTPExternalAuth, *Diagnostic) {
+func NormalizeHTTPRouteExternalAuth(rule gatewayv1.HTTPRouteRule, httpEnabled, grpcEnabled, weighted bool) (*HTTPExternalAuth, *Diagnostic) {
 	incompatible := func(message string) (*HTTPExternalAuth, *Diagnostic) {
 		return nil, &Diagnostic{Condition: string(gatewayv1.RouteConditionAccepted), Reason: string(gatewayv1.RouteReasonIncompatibleFilters), Message: message, Scope: ScopeRule}
-	}
-	if !enabled {
-		return nil, unsupported("HTTPRoute ExternalAuth requires --octavia-http-route-external-auth", ScopeRule)
 	}
 	if len(rule.Filters) != 1 || !isExternalAuth(rule.Filters[0]) ||
 		slices.ContainsFunc(rule.BackendRefs, func(backend gatewayv1.HTTPBackendRef) bool { return len(backend.Filters) != 0 }) {
 		return incompatible("ExternalAuth must be the only filter on a rule and cannot be used in backendRefs")
+	}
+	filter := rule.Filters[0].ExternalAuth
+	grpc := filter != nil && filter.ExternalAuthProtocol == gatewayv1.HTTPRouteExternalAuthGRPCProtocol
+	if grpc && !grpcEnabled {
+		return nil, unsupported("HTTPRoute gRPC ExternalAuth requires --octavia-http-route-external-auth-grpc", ScopeRule)
+	}
+	if !grpc && !httpEnabled {
+		return nil, unsupported("HTTPRoute HTTP ExternalAuth requires --octavia-http-route-external-auth", ScopeRule)
 	}
 	if filter := rule.Filters[0]; filter.RequestHeaderModifier != nil || filter.ResponseHeaderModifier != nil ||
 		filter.RequestMirror != nil || filter.RequestRedirect != nil || filter.URLRewrite != nil ||
@@ -138,28 +165,25 @@ func NormalizeHTTPRouteExternalAuth(rule gatewayv1.HTTPRouteRule, enabled, weigh
 	if !positive {
 		return nil, unsupported("ExternalAuth requires a positive forwarding backend weight", ScopeRule)
 	}
-	return NormalizeHTTPExternalAuth(rule.Filters[0].ExternalAuth)
+	auth, diagnostic := normalizeExternalAuth(filter, grpc)
+	if auth != nil {
+		auth.Weighted = len(rule.BackendRefs) > 1
+	}
+	return auth, diagnostic
 }
 
-func normalizeAuthHeaders(headers []string) []string {
+func normalizeAuthHeaders(headers []string, http bool) []string {
 	if len(headers) == 0 {
 		return nil
 	}
 	names := make([]string, len(headers))
 	for i, name := range headers {
 		names[i] = strings.ToLower(name)
-		if names[i] == ":authority" {
-			// Octavia accepts HTTP field names. Retain a targeted list
-			// containing only the protected authority as a targeted list.
+		if http && names[i] == ":authority" {
+			// The HTTP authorization request always carries Host.
 			names[i] = "host"
 		}
 	}
 	slices.Sort(names)
 	return slices.Compact(names)
-}
-
-func validAuthHeaders(headers []string) bool {
-	return len(headers) <= 64 && !slices.ContainsFunc(headers, func(name string) bool {
-		return name != ":authority" && (len(name) > 256 || !httpguts.ValidHeaderFieldName(name))
-	})
 }

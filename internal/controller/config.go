@@ -59,6 +59,7 @@ type Config struct {
 	HTTPRequestPolicy     bool
 	HTTPRequestMirror     bool
 	RouteExternalAuth     bool
+	RouteExternalAuthGRPC bool
 	// HTTPCORS enables rule-scoped CORS on the selected Octavia provider.
 	HTTPCORS bool
 	// GatewayListenerFilters enables Experimental pre-routing filters on capable Amphora providers.
@@ -152,6 +153,11 @@ func (c Config) RouteExternalAuthEnabled() bool {
 	return c.RouteExternalAuth && c.GatewayAPIChannel == features.FeatureChannelExperimental && c.FixedHTTPResponses
 }
 
+// RouteExternalAuthGRPCEnabled reports whether HTTPRoute Envoy authorization is enabled.
+func (c Config) RouteExternalAuthGRPCEnabled() bool {
+	return c.RouteExternalAuthGRPC && c.GatewayAPIChannel == features.FeatureChannelExperimental && c.FixedHTTPResponses
+}
+
 func (c Config) GatewayListenerFiltersEnabled() bool {
 	return c.GatewayListenerFilters && c.GatewayAPIChannel == features.FeatureChannelExperimental
 }
@@ -218,6 +224,9 @@ func (c Config) TLSRoutesEnabled() bool {
 
 // Validate rejects configuration that could make ownership ambiguous.
 func (c Config) Validate() error {
+	if c.RouteExternalAuthGRPC && !c.RouteExternalAuthGRPCEnabled() {
+		return fmt.Errorf("--octavia-http-route-external-auth-grpc requires --gateway-api-channel=experimental and --octavia-fixed-http-responses")
+	}
 	if c.RouteExternalAuth && !c.RouteExternalAuthEnabled() {
 		return fmt.Errorf("--octavia-http-route-external-auth requires --gateway-api-channel=experimental and --octavia-fixed-http-responses")
 	}
