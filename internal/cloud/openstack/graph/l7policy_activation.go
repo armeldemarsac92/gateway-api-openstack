@@ -60,6 +60,7 @@ func (p *Provider) preparePolicyActivationBatch(ctx context.Context, desired des
 
 	batch := &l7PolicyActivationBatch{listenerID: listener.ID}
 	selected := make(map[string]bool)
+	requiresExactHeaders := false
 	// A batch starts at the first planned mutation and stays within the
 	// activation prefix. Activations on other listeners have independent order.
 	for _, candidate := range plan {
@@ -78,13 +79,15 @@ func (p *Provider) preparePolicyActivationBatch(ctx context.Context, desired des
 			}
 			observed = *part
 		}
-		if desired.spec.Routes[candidate.routeIndex].Disposition != cloud.GraphEnsure || observed.pool == nil ||
+		if candidate.route.requiresExactHeaders && !p.httpHeaderExact ||
+			desired.spec.Routes[candidate.routeIndex].Disposition != cloud.GraphEnsure || observed.pool == nil ||
 			observed.pool.ProjectID != p.projectID || validateBoundPoolParent(*observed.pool, actual.loadBalancer.ID, cloud.ListenerProtocolHTTP) != nil ||
 			!plainActivationPool(observed) ||
 			!canBatchPolicyActivation(route, observed, candidate.route.id, listener.ID) || selected[candidate.route.id] {
 			break
 		}
 		selected[candidate.route.id] = true
+		requiresExactHeaders = requiresExactHeaders || candidate.route.requiresExactHeaders
 		batch.routeIndices = append(batch.routeIndices, candidate.routeIndex)
 		if len(selected) == octavia.MaxPolicyActivationBatch {
 			break
@@ -145,10 +148,19 @@ func (p *Provider) preparePolicyActivationBatch(ctx context.Context, desired des
 		budget = min(budget, time.Until(deadline)/3)
 	}
 	discovery, cancel := context.WithTimeout(ctx, budget)
-	err := p.octavia.VerifyGatewayCapabilities(discovery, actual.loadBalancer.Provider, octavia.GatewayCapabilityL7PolicyBatchActivation)
+	required := []string{octavia.GatewayCapabilityL7PolicyBatchActivation}
+	if requiresExactHeaders {
+		// Verify the traffic predicate first when both capabilities disappear.
+		required = []string{octavia.GatewayCapabilityHTTPHeaderExact, octavia.GatewayCapabilityL7PolicyBatchActivation}
+	}
+	err := p.octavia.VerifyGatewayCapabilities(discovery, actual.loadBalancer.Provider, required...)
 	cancel()
 	var missing *octavia.MissingGatewayCapability
 	if errors.As(err, &missing) || gophercloud.ResponseCodeIs(err, http.StatusNotFound) {
+		if requiresExactHeaders && (missing == nil || missing.Capability == octavia.GatewayCapabilityHTTPHeaderExact) {
+			// Reobserve the listener before enabling even a path-only sibling.
+			return nil, errPolicyActivationSnapshotBusy
+		}
 		return nil, nil
 	}
 	if err != nil {
@@ -218,8 +230,15 @@ func canBatchPolicyActivation(route desiredRoute, observed observedRouteGraph, p
 				continue
 			}
 			rules := rulesFor(wanted, route.hostnameRuleValue)
-			return len(rules) == 2 && rules[0].ruleType == l7policies.TypePath && rules[1].ruleType == l7policies.TypeHostName &&
-				!rules[0].invert && !rules[1].invert && initialL7RulesReady(policy, rules)
+			if len(rules) == 0 || rules[0].ruleType != l7policies.TypePath || rules[0].invert {
+				return false
+			}
+			for _, rule := range rules[1:] {
+				if rule.invert || rule.ruleType != l7policies.TypeHostName && rule.ruleType != httpHeaderExactRuleType {
+					return false
+				}
+			}
+			return initialL7RulesReady(policy, rules)
 		}
 		return false
 	}
