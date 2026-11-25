@@ -596,13 +596,28 @@ type routeModelInputFixture struct {
 
 func newRouteModelInputFixture(t *testing.T) *routeModelInputFixture {
 	t.Helper()
+	return newRouteModelInputFixtureWithConfig(t, testConfig())
+}
+
+func newRouteModelInputFixtureWithConfig(t *testing.T, config Config) *routeModelInputFixture {
+	t.Helper()
 	class, gateway, route, service, endpoints := endpointRouteFixture(t)
 	endpoints.UID = "slice-uid"
-	r := &Reconciler{Config: testConfig(), Coordinator: &graph.Coordinator{}}
+	r := &Reconciler{Config: config, Coordinator: &graph.Coordinator{}}
 	if err := r.applyRouteBinding(route, gateway); err != nil {
 		t.Fatal(err)
 	}
-	kubeClient := indexedFakeClientBuilder(testScheme(t), r.Config).WithStatusSubresource(route, &gatewayv1.GRPCRoute{}, &gatewayv1.BackendTLSPolicy{}).WithObjects(class, gateway, route, service, endpoints).Build()
+	scheme := testScheme(t)
+	if config.XBackendEnabled() {
+		if err := gatewayx.Install(scheme); err != nil {
+			t.Fatal(err)
+		}
+	}
+	builder := indexedFakeClientBuilder(scheme, r.Config).WithStatusSubresource(route, &gatewayv1.GRPCRoute{}, &gatewayv1.BackendTLSPolicy{}).WithObjects(class, gateway, route, service, endpoints)
+	if config.XBackendEnabled() {
+		builder.WithStatusSubresource(&gatewayx.XBackend{})
+	}
+	kubeClient := builder.Build()
 	for _, object := range []client.Object{gateway, route, service, endpoints} {
 		if err := kubeClient.Get(t.Context(), client.ObjectKeyFromObject(object), object); err != nil {
 			t.Fatal(err)

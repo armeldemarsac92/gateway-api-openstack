@@ -17,6 +17,7 @@ limitations under the License.
 package model
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"net/netip"
 	"slices"
@@ -39,11 +40,12 @@ const XBackendKind = "XBackend"
 
 // XBackendProfile describes the transport and topology permitted for this Gateway.
 type XBackendProfile struct {
-	MemberMode        cloud.MemberMode
-	H2C               bool
-	ServerTLS         bool
-	ExternalHostname  bool
-	ServiceDNSDomains []string
+	MemberMode         cloud.MemberMode
+	H2C                bool
+	ServerTLS          bool
+	ExternalHostname   bool
+	SessionPersistence bool
+	ServiceDNSDomains  []string
 }
 
 // XBackendObservation contains the backend configuration and eligible endpoints
@@ -130,6 +132,14 @@ func resolveXBackend(route *gatewayv1.HTTPRoute, group BackendGroup, key types.N
 		return group
 	}
 	group.XBackendRoutedExternal = spec.Type == gatewayx.BackendTypeExternalHostname
+	if spec.SessionPersistence != nil {
+		var resolved bool
+		group.XBackendCookieName, resolved = xBackendSessionCookieName(*spec.SessionPersistence, backend.UID)
+		if !resolved {
+			group.Diagnostic = backendDiagnostic(gatewayv1.RouteReasonUnsupportedValue, "XBackend session cookie needs an observed XBackend UID")
+			return group
+		}
+	}
 	if group.XBackendTLSRequired {
 		group.XBackendTLS = backend.TLS.Validation
 		if group.XBackendTLS == nil {
@@ -172,8 +182,6 @@ func ValidateXBackend(spec gatewayx.BackendSpec, profile XBackendProfile) *Diagn
 		return backendDiagnostic(unsupported, "XBackend requires Endpoint member mode with Unmanaged backend security")
 	case spec.Port.Number < 1 || spec.Port.Number > 65535:
 		return backendDiagnostic(unsupported, "XBackend must specify a port between 1 and 65535")
-	case spec.SessionPersistence != nil:
-		return backendDiagnostic(unsupported, "XBackend sessionPersistence is unsupported")
 	}
 	switch spec.Type {
 	case gatewayx.BackendTypeEndpointSelector:
@@ -199,6 +207,11 @@ func ValidateXBackend(spec gatewayx.BackendSpec, profile XBackendProfile) *Diagn
 		return backendDiagnostic(unsupported, "XBackend type is unsupported")
 	}
 	protocol := ptr.Deref(spec.Protocol, "")
+	if persistence := spec.SessionPersistence; persistence != nil {
+		if diagnostic := validateXBackendSessionPersistence(spec.Type, protocol, *persistence, profile); diagnostic != nil {
+			return diagnostic
+		}
+	}
 	if tls := spec.TLS; tls != nil {
 		switch tls.Mode {
 		case gatewayx.BackendTLSModeNone:
@@ -228,6 +241,43 @@ func ValidateXBackend(spec gatewayx.BackendSpec, profile XBackendProfile) *Diagn
 		}
 	}
 	return backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, fmt.Sprintf("XBackend protocol %q is unsupported by the configured HTTP backend profile", protocol))
+}
+
+func validateXBackendSessionPersistence(kind gatewayx.BackendType, protocol gatewayx.BackendProtocol, persistence gatewayv1.SessionPersistence, profile XBackendProfile) *Diagnostic {
+	const unsupported = gatewayv1.RouteReasonUnsupportedValue
+	switch {
+	case !profile.SessionPersistence:
+		return backendDiagnostic(unsupported, "XBackend sessionPersistence requires the controller's Experimental Octavia session persistence opt-in")
+	case kind != gatewayx.BackendTypeEndpointSelector:
+		return backendDiagnostic(unsupported, "XBackend sessionPersistence requires EndpointSelector")
+	case protocol != "" && protocol != gatewayx.BackendProtocolHTTP && protocol != gatewayx.BackendProtocolHTTP11:
+		return backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "XBackend sessionPersistence requires HTTP or HTTP11")
+	case ptr.Deref(persistence.Type, gatewayv1.CookieBasedSessionPersistence) != gatewayv1.CookieBasedSessionPersistence || persistence.Header != nil:
+		return backendDiagnostic(unsupported, "XBackend sessionPersistence supports Cookie persistence")
+	case persistence.AbsoluteTimeout != nil:
+		return backendDiagnostic(unsupported, "XBackend sessionPersistence does not support absoluteTimeout")
+	}
+	if cookie := persistence.Cookie; cookie != nil {
+		switch {
+		case ptr.Deref(cookie.Path, "/") != "/":
+			return backendDiagnostic(unsupported, "XBackend sessionPersistence requires cookie path /")
+		case ptr.Deref(cookie.LifetimeType, gatewayv1.SessionCookieLifetimeType) != gatewayv1.SessionCookieLifetimeType:
+			return backendDiagnostic(unsupported, "XBackend sessionPersistence requires cookie lifetimeType Session")
+		case cookie.Name != nil && !cloud.ValidHTTPSessionCookieName(string(*cookie.Name)):
+			return backendDiagnostic(unsupported, "XBackend sessionPersistence cookie name must be a safe Octavia token without a reserved cookie prefix")
+		}
+	}
+	return nil
+}
+
+func xBackendSessionCookieName(persistence gatewayv1.SessionPersistence, uid types.UID) (string, bool) {
+	if cookie := persistence.Cookie; cookie != nil && cookie.Name != nil {
+		return string(*cookie.Name), true
+	}
+	if uid == "" {
+		return "", false
+	}
+	return fmt.Sprintf("xbackend-%x", sha256.Sum256([]byte(uid))), true
 }
 
 func validExternalHostname(hostname string, serviceDomains []string) bool {

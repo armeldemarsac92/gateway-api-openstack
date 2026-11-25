@@ -63,7 +63,8 @@ func (r *xBackendStatusReconciler) Reconcile(ctx context.Context, request ctrl.R
 	}
 	base := backend.DeepCopy()
 	result := ctrl.Result{}
-	if len(ancestors) > 0 && r.routes.Config.BackendTLSPolicy && model.XBackendRequiresTLS(backend.Spec) {
+	if len(ancestors) > 0 && (r.routes.Config.BackendTLSPolicy && model.XBackendRequiresTLS(backend.Spec) ||
+		r.routes.Config.XBackendSessionPersistenceEnabled() && backend.Spec.SessionPersistence != nil) {
 		result.RequeueAfter = controller.OpenStackResyncAfter(r.routes.Config.OpenStackResyncInterval, backend.UID)
 	}
 	backend.Status.Ancestors = mergeXBackendAncestors(backend, r.routes.Config.ControllerName, ancestors)
@@ -103,6 +104,7 @@ func (r *xBackendStatusReconciler) observeAncestors(ctx context.Context, key typ
 		}
 	}
 	ancestors := make(map[types.NamespacedName]metav1.Condition, len(byGateway))
+	cookieCapability := r.routes.xBackendCookieCapability(ctx)
 	tlsObserver := graph.NewBackendTLSObserver(r.routes.APIReader, r.routes.Config.ClusterTrustBundles)
 	for gatewayKey, gateway := range byGateway {
 		attached, err := r.hasAttachedConsumer(ctx, gateway, key)
@@ -131,6 +133,9 @@ func (r *xBackendStatusReconciler) observeAncestors(ctx context.Context, key typ
 				requirements := xBackendTLSRequirements(validation.Validation)
 				condition = r.routes.backendTLSAvailability(ctx, requirements).apply(condition, true, requirements.requireSAN)
 			}
+		}
+		if condition.Status == metav1.ConditionTrue && backend.Spec.SessionPersistence != nil {
+			condition.Status, condition.Reason, condition.Message = cookieCapability.apply(condition.Status, condition.Reason, condition.Message)
 		}
 		ancestors[gatewayKey] = condition
 	}

@@ -359,10 +359,11 @@ func (r *Reconciler) collectRouteForwardingInputs(ctx context.Context, reader cl
 
 func (r *Reconciler) xBackendProfile(gateway *gatewayv1.Gateway) (model.XBackendProfile, error) {
 	profile := model.XBackendProfile{
-		H2C:               r.Config.BackendH2C,
-		ServerTLS:         r.Config.BackendTLSPolicy,
-		ExternalHostname:  r.Config.RoutedXBackendEnabled(gateway.Spec.GatewayClassName),
-		ServiceDNSDomains: r.Config.XBackendServiceDNSDomains,
+		H2C:                r.Config.BackendH2C,
+		ServerTLS:          r.Config.BackendTLSPolicy,
+		ExternalHostname:   r.Config.RoutedXBackendEnabled(gateway.Spec.GatewayClassName),
+		SessionPersistence: r.Config.XBackendSessionPersistenceEnabled(),
+		ServiceDNSDomains:  r.Config.XBackendServiceDNSDomains,
 	}
 	if !controller.HasGatewayTopologyBinding(r.Config, gateway) {
 		return profile, nil

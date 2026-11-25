@@ -474,6 +474,7 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 		}
 	}
 	grpc := model.HTTPProfileRouteKind(route) == model.GRPCRouteKind
+	cookieCapability := r.xBackendCookieCapability(ctx)
 	input := model.Input{Routes: []gatewayv1.HTTPRoute{*route}, BackendH2C: r.Config.BackendH2C}
 	if grpc {
 		for _, grants := range grantsByNamespace {
@@ -505,8 +506,10 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 			}
 			if diagnostic := model.CheckXBackendTarget(key, spec, profile); diagnostic != nil {
 				*status = status.withBackendDiagnostic(*diagnostic)
-			} else if pending && spec.Type == gatewayx.BackendTypeExternalHostname && status.resolved == metav1.ConditionTrue {
+			} else if pending && (spec.Type == gatewayx.BackendTypeExternalHostname || spec.SessionPersistence != nil) && status.resolved == metav1.ConditionTrue {
 				status.resolved, status.resolvedReason, status.resolvedMessage = metav1.ConditionUnknown, "Pending", "Gateway member mode is pending"
+			} else if spec.SessionPersistence != nil && status.resolved != metav1.ConditionFalse {
+				status.resolved, status.resolvedReason, status.resolvedMessage = cookieCapability.apply(status.resolved, status.resolvedReason, status.resolvedMessage)
 			}
 			continue
 		}
