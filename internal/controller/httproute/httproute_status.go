@@ -452,6 +452,9 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 		}
 		return nil
 	}
+	if model.HTTPProfileRouteKind(route) == model.GRPCRouteKind {
+		return r.resolveGRPCRouteReferences(ctx, route, gateway, status)
+	}
 	grantsByNamespace, rejection, err := r.observeRouteBackendPermissions(ctx, route)
 	if err != nil {
 		return err
@@ -473,23 +476,16 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 			}
 		}
 	}
-	if r.Config.HTTPRequestMirror && model.HTTPProfileRouteKind(route) == model.HTTPRouteKind {
+	if r.Config.HTTPRequestMirror {
 		if err := r.resolveRequestMirrorReferences(ctx, route, rules, grantsByNamespace, status); err != nil {
 			return err
 		}
 	}
-	grpc := model.HTTPProfileRouteKind(route) == model.GRPCRouteKind
 	persistenceCapability := r.xBackendPersistenceCapability(ctx)
 	h2cDiagnostic := sync.OnceValue(func() model.Diagnostic { return r.xBackendH2CDiagnostic(ctx) })
-	input := model.Input{Routes: []gatewayv1.HTTPRoute{*route}, BackendH2C: r.Config.BackendH2C}
 	tlsObserver := graph.NewBackendTLSObserver(r.routePatchReader(), r.Config.ClusterTrustBundles)
-	if grpc {
-		for _, grants := range grantsByNamespace {
-			input.ReferenceGrants = append(input.ReferenceGrants, grants...)
-		}
-	}
 	for _, backend := range backends {
-		if key, xbackend := model.XBackendReference(route.Namespace, backend); xbackend && r.Config.XBackendEnabled() && model.HTTPProfileRouteKind(route) == model.HTTPRouteKind {
+		if key, xbackend := model.XBackendReference(route.Namespace, backend); xbackend && r.Config.XBackendEnabled() {
 			if backend.Port != nil {
 				*status = status.withBackendDiagnostic(model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: "backendRef.port must be omitted for XBackend"})
 				continue
@@ -552,26 +548,56 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 		if err != nil {
 			return fmt.Errorf("get backend Service: %w", err)
 		}
-		if grpc {
-			input.Services = append(input.Services, service)
-		} else if _, diagnostic := model.ResolveServicePort(&service, backend.Port, r.Config.BackendH2C); diagnostic != nil {
+		if _, diagnostic := model.ResolveServicePort(&service, backend.Port, r.Config.BackendH2C); diagnostic != nil {
 			*status = status.withBackendDiagnostic(*diagnostic)
 		}
 	}
-	if grpc && r.Config.BackendTLSPolicy {
-		if err := graph.CollectBackendTLSInputs(ctx, r.routePatchReader(), &input, nil, r.Config.ClusterTrustBundles); err != nil {
+	return nil
+}
+
+func (r *Reconciler) resolveGRPCRouteReferences(ctx context.Context, route *gatewayv1.HTTPRoute, gateway *gatewayv1.Gateway, status *routeReconcileStatus) error {
+	if r.APIReader == nil {
+		return controller.ErrAPIReaderRequired
+	}
+	input := model.Input{Routes: []gatewayv1.HTTPRoute{*route}, BackendH2C: r.Config.BackendH2C}
+	if err := graph.CollectBackendServiceInputs(ctx, r.APIReader, &input); err != nil {
+		return err
+	}
+	inputs := routeModelInputs{}
+	if r.Config.BackendTLSPolicy {
+		ancestor := &backendtls.GatewayAncestor{
+			Key:            types.NamespacedName{Namespace: gateway.Namespace, Name: gateway.Name},
+			ControllerName: r.Config.ControllerName,
+		}
+		if err := graph.CollectBackendTLSInputs(ctx, r.APIReader, &input, ancestor, r.Config.ClusterTrustBundles); err != nil {
 			return err
 		}
+		inputs.backendTLSAvailability = r.discoverBackendTLSProfiles(ctx, input.Routes, input)
 	}
-	if grpc {
-		for _, rule := range route.Spec.Rules {
-			for _, backend := range model.ResolveBackends(route, rule, input) {
-				if backend.Diagnostic != nil {
-					*status = status.withBackendDiagnostic(*backend.Diagnostic)
-				}
-			}
+	var diagnostic model.Diagnostic
+	resolveMirrors := func(filters []gatewayv1.HTTPRouteFilter, canForward bool) {
+		// Rule structure was validated before any reference reads.
+		mirrors, _ := model.NormalizeRequestMirrors(filters, r.Config.HTTPRequestMirror, true)
+		model.ResolveRequestMirrorBackends(route, mirrors, input)
+		for _, mirror := range mirrors {
+			issue := inputs.requestMirrorDiagnostic(mirror.Backend, true, canForward)
+			diagnostic = preferredBackendDiagnostic(diagnostic, issue)
 		}
 	}
+	for _, rule := range route.Spec.Rules {
+		resolveMirrors(rule.Filters, true)
+		for i, backend := range model.ResolveBackends(route, rule, input) {
+			if backend.Diagnostic != nil {
+				diagnostic = preferredBackendDiagnostic(diagnostic, *backend.Diagnostic)
+			}
+			tls := inputs.backendTLSValidation(backend, true)
+			resolveMirrors(rule.BackendRefs[i].Filters, backend.Diagnostic == nil && backend.Weight > 0 && (tls == nil || !tls.Denied))
+		}
+	}
+	status.resolved = metav1.ConditionTrue
+	status.resolvedReason = string(gatewayv1.RouteReasonResolvedRefs)
+	status.resolvedMessage = "All backend references are resolved"
+	*status = status.withBackendDiagnostic(diagnostic)
 	return nil
 }
 

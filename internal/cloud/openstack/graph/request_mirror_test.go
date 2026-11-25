@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"slices"
+	"sync/atomic"
 	"testing"
 
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
@@ -169,6 +170,127 @@ func TestRequestMirrorRegionalDiscoveryUsesEffectiveProvider(t *testing.T) {
 	desired = build()
 	provider.gateRequestMirrors(t.Context(), &desired, actual)
 	require.Equal(t, requestMirrorUnverified, desired.routes[0].mirrorAvailability)
+}
+
+func TestGRPCRequestMirrorRequiresRegionalCapabilityForCopiesOnly(t *testing.T) {
+	var capabilities atomic.Value
+	capabilities.Store([]string{octavia.GatewayCapabilityHTTPRequestMirror, octavia.GatewayCapabilityGRPCContentType})
+	provider := completeGraphProvider(t, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		require.Equal(t, "/lbaas/providers/amphora-regional/gateway_capabilities", req.URL.Path)
+		safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": capabilities.Load()})
+	}), &gatewayTransitionRequests{})
+	provider.httpRequestMirror = true
+	lb := safetyObservedLoadBalancer()
+	lb.Provider = "amphora-regional"
+	actual := observedGatewayGraph{loadBalancer: lb}
+	copyPolicy := desiredPolicy{requestMirrors: []desiredHTTPMirror{{backendKey: "copy"}}}
+	grpcSpec := cloud.RouteSpec{GRPC: true}
+	desired := desiredGatewayGraph{
+		protocol: cloud.ListenerProtocolHTTP,
+		spec:     cloud.GatewayGraphSpec{Gateway: cloud.GatewayGraphNode{Disposition: cloud.GraphEnsure}},
+		routes: []desiredRoute{
+			{httpParts: []desiredRoute{{backendKey: "primary", policies: []desiredPolicy{copyPolicy}}}},
+			{spec: grpcSpec, httpParts: []desiredRoute{{spec: grpcSpec, backendKey: "primary", policies: []desiredPolicy{copyPolicy}}}},
+			{spec: grpcSpec},
+		},
+	}
+	provider.gateRequestMirrors(t.Context(), &desired, actual)
+	require.Equal(t, requestMirrorAvailable, desired.routes[0].mirrorAvailability)
+	require.Equal(t, requestMirrorMissing, desired.routes[1].mirrorAvailability)
+	require.Equal(t, octavia.GatewayCapabilityGRPCRequestMirror, desired.routes[1].mirrorUnavailableCapability)
+	require.Equal(t, requestMirrorAvailable, desired.routes[2].mirrorAvailability)
+
+	mirrorWrite := graphMutation{kind: graphRouteMutation, backendKey: "primary", route: routeMutation{
+		kind: routeMutationSetRequestMirrors, requestMirrorsUpdate: &octavia.RequestMirrorsUpdate{
+			Value: []octavia.HTTPRequestMirror{{PoolID: "shadow", Numerator: 1, Denominator: 1, Phase: cloud.HTTPMirrorAfterRewrite}},
+		},
+	}}
+	_, err := provider.prepareGraphMutation(t.Context(), desired, actual, mirrorWrite)
+	require.NoError(t, err)
+	mirrorWrite.routeIndex = 1
+	_, err = provider.prepareGraphMutation(t.Context(), desired, actual, mirrorWrite)
+	var blocked *unavailableRouteCapability
+	require.ErrorAs(t, err, &blocked)
+	require.Equal(t, octavia.GatewayCapabilityGRPCRequestMirror, blocked.capability)
+
+	capabilities.Store([]string{octavia.GatewayCapabilityHTTPRequestMirror, octavia.GatewayCapabilityGRPCRequestMirror})
+	_, err = provider.prepareGraphMutation(t.Context(), desired, actual, mirrorWrite)
+	require.ErrorAs(t, err, &blocked)
+	require.Equal(t, octavia.GatewayCapabilityGRPCContentType, blocked.capability)
+	capabilities.Store(requestMirrorCapabilities(true))
+	_, err = provider.prepareGraphMutation(t.Context(), desired, actual, mirrorWrite)
+	require.NoError(t, err)
+
+	// Capability withdrawal must permit deleting the installed copies.
+	capabilities.Store([]string{})
+	mirrorWrite.route.withdrawHTTPPolicy = true
+	mirrorWrite.route.requestMirrorsUpdate = &octavia.RequestMirrorsUpdate{}
+	_, err = provider.prepareGraphMutation(t.Context(), desired, actual, mirrorWrite)
+	require.NoError(t, err)
+}
+
+func TestGRPCRequestMirrorWithdrawsOnLossOfStrictH2Readback(t *testing.T) {
+	const shadowID = "shadow-pool"
+	tls := &cloud.BackendTLSValidation{Hostname: "shadow.example"}
+	identity := safetyTestIdentity(t).Value()
+	provider := &Provider{projectID: identity.OpenStackProjectID, backendH2C: true, httpRequestMirror: true}
+	fixture, _ := convergedRoutePlanFixture()
+	spec := cloud.RouteSpec{
+		Identity: identity, GRPC: true, MemberMode: cloud.MemberModeEndpoint, MemberSubnetID: "subnet",
+		HealthMonitor:       fixture.healthMonitor,
+		GatewayRequirements: cloud.GatewayRequirements{Provider: "amphora", VIPSubnetID: "vip-subnet", ListenerPort: 80},
+		HTTPBackends: []cloud.HTTPBackend{
+			{Namespace: "apps", Name: "primary", Port: 80, BackendH2C: true, Matches: []cloud.HTTPPathMatch{{
+				PathType: cloud.PathMatchExact, PathValue: "/example.Echo/Echo",
+				RequestMirrors: []cloud.HTTPMirrorTarget{{BackendIndex: 1, Numerator: 2, Denominator: 3, Phase: cloud.HTTPMirrorBeforeTransforms}},
+			}}},
+			{Namespace: "apps", Name: "shadow", Port: 443, BackendTLS: tls},
+		},
+	}
+	route, err := provider.buildDesiredRoute(spec)
+	require.NoError(t, err)
+	require.Len(t, route.httpParts, 2)
+	i := slices.IndexFunc(route.httpParts, func(part desiredRoute) bool { return len(part.policies) != 0 })
+	require.NotEqual(t, -1, i)
+	primary, shadow := route.httpParts[i], route.httpParts[1-i]
+	primaryPolicy := primary.policies[0]
+	require.Equal(t, l7policies.TypeHeader, primaryPolicy.grpcContentTypeRule)
+	require.Equal(t, []desiredHTTPMirror{{backendKey: shadow.backendKey, numerator: 2, denominator: 3,
+		phase: cloud.HTTPMirrorBeforeTransforms}}, primaryPolicy.requestMirrors)
+	desired := desiredGatewayGraph{
+		spec:   cloud.GatewayGraphSpec{Routes: []cloud.RouteGraphNode{{Disposition: cloud.GraphEnsure}}},
+		routes: []desiredRoute{route},
+	}
+	live := observedRoutePolicy{
+		role: primaryPolicy.role, requestMirrorsTagged: true, requestMirrorsReported: true,
+		policy:         l7policies.L7Policy{ID: "primary-policy", AdminStateUp: true, ProvisioningStatus: "ACTIVE", RedirectPoolID: "primary-pool"},
+		requestMirrors: []octavia.HTTPRequestMirror{primaryPolicy.requestMirrors[0].forPool(shadowID)},
+	}
+	shadowReadback := observedRouteGraph{
+		pool: &pools.Pool{ID: shadowID, TLSEnabled: true, Tags: []string{backendTLSRevisionTag(tls)}},
+		backendTLS: octavia.PoolBackendTLS{
+			Hostname: tls.Hostname, HostnameObserved: true, CAObserved: true, ClientRefObserved: true,
+			RequireH2: true, RequireH2Observed: true, EnabledObserved: true, AdminObserved: true,
+		},
+	}
+	actual := observedGatewayGraph{routes: []observedRouteGraph{{httpParts: map[string]*observedRouteGraph{
+		primary.backendKey: {policies: []observedRoutePolicy{live}}, shadow.backendKey: &shadowReadback,
+	}}}}
+	_, needed := nextRequestMirrorWithdrawal(desired, actual)
+	require.False(t, needed)
+
+	shadowReadback.backendTLS.RequireH2 = false
+	step, needed := nextRequestMirrorWithdrawal(desired, actual)
+	require.True(t, needed)
+	require.True(t, step.withdrawHTTPPolicy)
+	require.Equal(t, routeMutationSetRequestMirrors, step.route.kind)
+	require.Equal(t, live.policy.ID, step.route.id)
+	require.NotNil(t, step.route.requestMirrorsUpdate)
+	require.Empty(t, step.route.requestMirrorsUpdate.Value)
+
+	spec.HTTPBackends[1].BackendTLS = nil
+	_, err = provider.buildDesiredRoute(spec)
+	require.ErrorContains(t, err, "using h2c or authenticated HTTP/2")
 }
 
 func TestRequestMirrorConvergesIndependentlyOfRequestHeaders(t *testing.T) {
