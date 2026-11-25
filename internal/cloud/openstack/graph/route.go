@@ -128,6 +128,7 @@ type desiredRoute struct {
 	backendTLS                  backendTLSPlan
 	backendRetryBudgetAvailable bool
 	tcpRejectionUnavailable     bool
+	udpDropUnverified           bool
 	udpDropUnavailable          bool
 
 	xBackendClientCertificateReference string

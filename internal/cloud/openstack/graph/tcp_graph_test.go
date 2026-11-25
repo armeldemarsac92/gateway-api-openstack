@@ -62,6 +62,8 @@ type tcpGraphFixture struct {
 	tcpRejectionWrites      []map[string]json.RawMessage
 	udpDropAPI              bool
 	udpDropAdvertised       bool
+	udpDiscoveryUnavailable bool
+	udpDropRenderBusy       bool
 }
 
 func newTCPGraphFixture(t *testing.T) *tcpGraphFixture {
@@ -125,6 +127,10 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if (f.tcpRejectionAPI || f.udpDropAPI) && req.Method == http.MethodGet && resource == "/v2/lbaas/providers/amphora/gateway_capabilities" {
+		if f.udpDiscoveryUnavailable {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		capabilities := []string{}
 		if f.tcpRejectionAdvertised {
 			capabilities = append(capabilities, "tcp_connection_rejection_v1")
@@ -346,6 +352,10 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 			case tcpPools:
 				poolID = entry["id"]
 				if f.udpDropAPI {
+					if f.udpDropRenderBusy {
+						w.WriteHeader(http.StatusConflict)
+						return
+					}
 					for _, listener := range f.children(tcpListeners) {
 						if listener["default_pool_id"] == poolID {
 							listener["default_pool_id"], listener["provisioning_status"] = nil, "PENDING_UPDATE"

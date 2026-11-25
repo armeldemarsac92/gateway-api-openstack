@@ -490,10 +490,12 @@ func (r *Reconciler) backendUnavailableShare(ctx context.Context, route *transpo
 	}
 	if available != nil {
 		ok, err := available(ctx)
-		if err != nil && noEndpoints == nil {
+		if err != nil && !udpDrop && noEndpoints == nil {
 			return nil, nil, nil, err
 		}
-		if ok {
+		// Keep sealing the current authorized UDP intent on an uncertain
+		// discovery read. The provider decides whether to hold or quarantine.
+		if ok || udpDrop && err != nil {
 			if udpDrop {
 				share := cloud.UDPPacketDrop{Numerator: rejectWeight, Denominator: total}
 				if rejectWeight == 0 || share.DropsAll() {

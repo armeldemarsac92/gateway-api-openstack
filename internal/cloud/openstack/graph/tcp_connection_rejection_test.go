@@ -68,7 +68,12 @@ func (f *tcpGraphFixture) serveTransportBatch(w http.ResponseWriter, request *ht
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	if f.inventory[tcpLB]["provisioning_status"] == "PENDING_UPDATE" {
+	if f.udpDropAPI && f.udpDropRenderBusy {
+		f.writes = append(f.writes, "PUT "+request.URL.Path)
+		w.WriteHeader(http.StatusConflict)
+		return
+	}
+	if !f.udpDropAPI && f.inventory[tcpLB]["provisioning_status"] == "PENDING_UPDATE" {
 		previous := f.tcpRejectionWrites[len(f.tcpRejectionWrites)-1]
 		f.writes = append(f.writes, "PUT "+request.URL.Path)
 		if string(fields["members"]) != string(previous["members"]) || string(fields[field]) != string(previous[field]) {

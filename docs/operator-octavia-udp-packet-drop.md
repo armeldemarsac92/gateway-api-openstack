@@ -8,6 +8,8 @@ For backend weights 3 and 1, removing the ReferenceGrant for the second Service 
 
 Check the route's `Accepted`, `ResolvedRefs` and `<controller-domain>/Programmed` conditions independently. A revoked reference yields `ResolvedRefs=False` while `Programmed=True` can confirm the valid members and packet discard share. Endpoint loss can leave `ResolvedRefs=True`. The route reports programmed only after the active pool reports the exact fraction and member set. To qualify a deployment, send fresh UDP flows before revoking a grant, after provisioning the new fraction and after restoring the grant. Count traffic at both Services and verify a separate listener during each phase.
 
+If Octavia is still provisioning a batch, the controller can replace it with the most recent authorized members or remove the affected pool. It retries when Amphora is applying a change. A temporary capability discovery failure leaves a healthy pool serving while its status is pending. If that pool would still serve a revoked destination, the controller withdraws it.
+
 ## Disable the feature
 
 Remove the flag while the patched API and worker are available. The controller deletes the owned guarded pool and its default edge. A route with all active destinations available gets a stock pool with its class monitor. A route with an unavailable positive-weight backend stays withdrawn until its destinations are usable. A lost regional capability follows the same fallback. Verify the affected listener defaults and confirm that the guarded pools are gone before downgrading Octavia.

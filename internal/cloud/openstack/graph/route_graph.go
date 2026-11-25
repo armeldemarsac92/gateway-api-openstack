@@ -1041,6 +1041,9 @@ func buildRouteEnsurePlanWithActivations(desired desiredRoute, actual observedRo
 	if desired.tcpRejectionUnavailable {
 		return nil, routeStateFromObservation(actual), errTCPRejectionUnavailable
 	}
+	if desired.udpDropUnverified {
+		return nil, routeStateFromObservation(actual), errUDPPacketDropUnverified
+	}
 	if desired.udpDropUnavailable || desired.spec.UDPPacketDrop == nil && actual.udpDropPool() {
 		return nil, routeStateFromObservation(actual), errUDPPacketDropUnavailable
 	}

@@ -92,7 +92,8 @@ func TestMultiUDPDeferredObservationRequiresServingRouteEdges(t *testing.T) {
 	}
 }
 
-func TestUDPPacketDropAtomicallyReplacesAServingPoolAndRollsBack(t *testing.T) {
+func newUDPPacketDropFixture(t *testing.T) *tcpGraphFixture {
+	t.Helper()
 	f := newTransportGraphFixture(t, cloud.ListenerProtocolUDP)
 	f.udpDropAPI, f.udpDropAdvertised = true, true
 	f.spec.Gateway.Spec.ScopedListeners = []cloud.ScopedListener{
@@ -108,8 +109,17 @@ func TestUDPPacketDropAtomicallyReplacesAServingPoolAndRollsBack(t *testing.T) {
 	second.Spec.ScopedListenerPorts = []int{9311}
 	second.Spec.Members = []cloud.Member{{Address: "10.1.2.5", Port: 8080, Weight: 1}}
 	f.spec.Routes = append(f.spec.Routes, second)
+	return f
+}
+
+func newUDPPacketDropProvider(f *tcpGraphFixture) *Provider {
+	return newTestProvider(f.t, hibiscusServiceClients(http.HandlerFunc(f.serveHTTP)), ProviderConfig{UDPPacketDrop: true})
+}
+
+func TestUDPPacketDropAtomicallyReplacesAServingPoolAndRollsBack(t *testing.T) {
+	f := newUDPPacketDropFixture(t)
 	route := &f.spec.Routes[0].Spec
-	provider := newTestProvider(t, hibiscusServiceClients(http.HandlerFunc(f.serveHTTP)), ProviderConfig{UDPPacketDrop: true})
+	provider := newUDPPacketDropProvider(f)
 	f.settleTransportGraph(provider)
 	anchor, sibling := f.inventory[tcpListener], f.inventory[tcpListener+"-9311"]
 	checkSibling := func() {
@@ -202,6 +212,7 @@ func TestUDPPacketDropAtomicallyReplacesAServingPoolAndRollsBack(t *testing.T) {
 	}
 
 	f.udpDropAdvertised = false
+	f.inventory[tcpLB]["provisioning_status"], pool["provisioning_status"] = "PENDING_UPDATE", "PENDING_UPDATE"
 	delete(pool, "udp_packet_drop") // a downgraded endpoint can omit the extension
 	before := len(f.writes)
 	if result := f.reconcile(provider); result.Routes[0].Result.Outcome.State == cloud.OutcomeReady ||
@@ -209,10 +220,184 @@ func TestUDPPacketDropAtomicallyReplacesAServingPoolAndRollsBack(t *testing.T) {
 		t.Fatalf("lost capability must withdraw only the managed default: %+v, writes %v", result, f.writes[before:])
 	}
 	route.UDPPacketDrop, route.HealthMonitor = nil, stockMonitor
+	f.inventory[tcpLB]["provisioning_status"] = "ACTIVE"
 	f.settleTransportGraph(f.provider())
 	checkSibling()
 	if anchor["default_pool_id"] != "pool" || f.inventory[tcpPool]["udp_packet_drop"] != nil ||
 		slices.Contains(pilotTags(f.inventory[tcpPool]["tags"]), udpDropPoolTag) || f.inventory[tcpMonitor] == nil {
 		t.Fatalf("stock fallback did not restore the ordinary pool and monitor: %+v", f.inventory[tcpPool])
+	}
+}
+
+func TestUDPPacketDropSupersedesALostOrFailedBatch(t *testing.T) {
+	f := newUDPPacketDropFixture(t)
+	provider := newUDPPacketDropProvider(f)
+	route := &f.spec.Routes[0].Spec
+	granted := slices.Clone(route.Members)
+	route.HealthMonitor = cloud.HealthMonitorConfig{}
+	route.UDPPacketDrop = &cloud.UDPPacketDrop{Denominator: 1}
+	for range 12 {
+		if f.inventory[tcpPool]["udp_packet_drop"] != nil {
+			break
+		}
+		if f.inventory[tcpListener]["provisioning_status"] == "PENDING_UPDATE" {
+			f.inventory[tcpListener]["provisioning_status"] = "ACTIVE"
+		}
+		f.reconcile(provider)
+	}
+	pool, lb := f.inventory[tcpPool], f.inventory[tcpLB]
+	if pool["udp_packet_drop"] == nil {
+		t.Fatal("initial guarded batch was not staged")
+	}
+	lb["provisioning_status"], pool["provisioning_status"] = "PENDING_UPDATE", "PENDING_UPDATE"
+	f.inventory[tcpMembers+"/member-batch-1"]["provisioning_status"] = "PENDING_UPDATE"
+	route.Members = []cloud.Member{{Address: granted[0].Address, Port: granted[0].Port, Weight: 1}}
+	route.UDPPacketDrop = &cloud.UDPPacketDrop{Numerator: 1, Denominator: 4}
+	apply := func(wanted cloud.UDPPacketDrop, members int) {
+		t.Helper()
+		before := len(f.writes)
+		result := f.reconcile(provider)
+		if !slices.Equal(f.writes[before:], []string{"PUT " + tcpMembers}) ||
+			!result.Outcome.MutationSubmitted || result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing {
+			t.Fatalf("expected a replacement batch, result %+v writes %v", result, f.writes[before:])
+		}
+		body := f.tcpRejectionWrites[len(f.tcpRejectionWrites)-1]
+		var got cloud.UDPPacketDrop
+		if err := json.Unmarshal(body["udp_packet_drop"], &got); err != nil || got != wanted || len(f.children(tcpMembers)) != members {
+			t.Fatalf("replacement used obsolete intent %v, members %v, error %v", got, f.children(tcpMembers), err)
+		}
+	}
+	f.udpDropRenderBusy = true
+	before := len(f.tcpRejectionWrites)
+	result := f.reconcile(provider)
+	if result.Outcome.MutationSubmitted || result.Routes[0].Result.Outcome.State == cloud.OutcomeReady || len(f.tcpRejectionWrites) != before {
+		t.Fatalf("render conflict provided forwarding proof or staged a second batch: %+v", result)
+	}
+	f.udpDropRenderBusy = false
+	fence := errors.New("grant changed again")
+	f.spec.ValidateMutation = func(context.Context) error { return fence }
+	blocked := len(f.writes)
+	if _, err := provider.ReconcileGatewayGraph(t.Context(), f.spec); !errors.Is(err, fence) || len(f.writes) != blocked {
+		t.Fatalf("pending replacement bypassed the authorization fence: %v", err)
+	}
+	f.spec.ValidateMutation = nil
+	apply(*route.UDPPacketDrop, 1) // revoke while the first RPC is lost
+
+	route.UDPPacketDrop, route.Members = &cloud.UDPPacketDrop{Denominator: 1}, granted
+	apply(*route.UDPPacketDrop, 2) // restore while the revocation RPC is lost
+
+	lb["provisioning_status"], pool["provisioning_status"] = "ACTIVE", "ERROR"
+	f.inventory[tcpMembers+"/member-batch-1"]["provisioning_status"] = "PENDING_DELETE"
+	f.inventory[tcpMember]["provisioning_status"] = "PENDING_UPDATE"
+	apply(*route.UDPPacketDrop, 2) // an abandoned delete must not block failed-pool recovery
+
+	lb["provisioning_status"], pool["provisioning_status"] = "PENDING_UPDATE", "PENDING_UPDATE"
+	f.spec.Routes[0].Disposition = cloud.GraphDelete
+	f.spec.Routes[0].Spec = cloud.RouteSpec{Identity: route.Identity, GatewayRequirements: cloud.GatewayRequirements{ListenerProtocol: cloud.ListenerProtocolUDP}}
+	f.spec.Routes[1].Disposition = cloud.GraphPreserve
+	f.udpCleanupGateway(cloud.GraphPreserve)
+	f.udpDropAdvertised = false
+	before = len(f.writes)
+	f.udpDropRenderBusy = true
+	f.reconcile(provider)
+	f.udpDropRenderBusy = false
+	f.reconcile(provider)
+	if !slices.Equal(f.writes[before:], []string{"DELETE " + tcpPool, "DELETE " + tcpPool}) ||
+		f.inventory[tcpPool] != nil || f.inventory[tcpListener]["default_pool_id"] != nil {
+		t.Fatalf("cleanup must retry the targeted delete without replaying a superseded batch: writes %v", f.writes[before:])
+	}
+}
+
+func TestUDPPacketDropHoldsOnDiscoveryFailureUnlessADestinationWasRevoked(t *testing.T) {
+	f := newUDPPacketDropFixture(t)
+	route := &f.spec.Routes[0].Spec
+	provider := newUDPPacketDropProvider(f)
+	f.settleTransportGraph(provider)
+	route.HealthMonitor = cloud.HealthMonitorConfig{}
+	route.UDPPacketDrop = &cloud.UDPPacketDrop{Denominator: 1}
+	pool := f.inventory[tcpPool]
+	pool["udp_packet_drop"] = map[string]any{"numerator": 0, "denominator": 1}
+	delete(f.inventory, tcpMonitor)
+	before := len(f.writes)
+	f.udpDiscoveryUnavailable = true
+	result := f.reconcile(provider)
+	if len(f.writes) != before || result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing ||
+		result.Routes[0].Result.ObservationDeferred || f.inventory[tcpListener]["default_pool_id"] != "pool" {
+		t.Fatalf("transient discovery failure changed the serving pool: %+v, writes %v", result, f.writes[before:])
+	}
+	route.Members = route.Members[:1]
+	route.UDPPacketDrop = &cloud.UDPPacketDrop{Numerator: 1, Denominator: 4}
+	result = f.reconcile(provider)
+	if !slices.Equal(f.writes[before:], []string{"DELETE " + tcpPool}) ||
+		result.Routes[0].Result.Outcome.State == cloud.OutcomeReady || f.inventory[tcpListener+"-9311"]["default_pool_id"] != "pool-secondary" {
+		t.Fatalf("a discovery failure delayed quarantine of a revoked target: %+v, writes %v", result, f.writes[before:])
+	}
+}
+
+func TestUDPPacketDropValidatesOnlyItsListenerSecurity(t *testing.T) {
+	f := newUDPPacketDropFixture(t)
+	f.settleTransportGraph(newUDPPacketDropProvider(f))
+	gateway := &f.spec.Gateway.Spec
+	const group = "96d7a899-4f5d-4cf5-9842-5cc66ad91575"
+	gateway.VIPSecurityGroupIDs = []string{group}
+	f.inventory[tcpLB]["vip_sg_ids"] = gateway.VIPSecurityGroupIDs
+	for i := range f.spec.Routes {
+		f.spec.Routes[i].Spec.GatewayRequirements.VIPSecurityGroupIDs = gateway.VIPSecurityGroupIDs
+	}
+	route := &f.spec.Routes[0].Spec
+	route.HealthMonitor = cloud.HealthMonitorConfig{}
+	route.UDPPacketDrop = &cloud.UDPPacketDrop{Denominator: 1}
+	handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch req.URL.Path {
+		case "/", "/v2/":
+			safetyWriteJSON(t, w, map[string]any{"versions": []any{map[string]string{"id": "v2.29", "status": "CURRENT"}}})
+		case "/v2/lbaas/providers":
+			safetyWriteJSON(t, w, map[string]any{"providers": []any{map[string]string{"name": "amphora"}}})
+		case "/v2.0/subnets/" + gateway.VIPSubnetID:
+			safetyWriteJSON(t, w, map[string]any{"subnet": map[string]any{
+				"id": gateway.VIPSubnetID, "network_id": "private", "project_id": hibiscusProject, "cidr": "192.0.2.0/24", "ip_version": 4,
+			}})
+		case "/v2.0/security-groups/" + group:
+			safetyWriteJSON(t, w, map[string]any{"security_group": map[string]any{
+				"id": group, "project_id": hibiscusProject, "security_group_rules": []any{map[string]any{
+					"direction": "ingress", "ethertype": "IPv4", "protocol": "udp", "port_range_min": gateway.ListenerPort, "port_range_max": gateway.ListenerPort,
+				}},
+			}})
+		default:
+			f.serveHTTP(w, req)
+		}
+	})
+	clients := hibiscusServiceClients(handler)
+	clients.LoadBalancer.Microversion = "2.29"
+	provider := newTestProvider(t, clients, ProviderConfig{UDPPacketDrop: true})
+	before := len(f.writes)
+	for range 4 {
+		f.inventory[tcpListener]["provisioning_status"] = "ACTIVE"
+		f.reconcile(provider)
+	}
+	want := []string{"DELETE " + tcpPool, "POST " + tcpPools, "PUT " + tcpListener, "PUT " + tcpMembers}
+	if !slices.Equal(f.writes[before:], want) || f.inventory[tcpListener+"-9311"]["default_pool_id"] != "pool-secondary" {
+		t.Fatalf("sibling ingress denied the authorized listener's transition: wrote %v, want %v", f.writes[before:], want)
+	}
+}
+
+func TestUDPPacketDropDeletesAPendingLegacyRouteWithOnlyItsRouteBinding(t *testing.T) {
+	f := newUDPPacketDropFixture(t)
+	f.spec.Gateway.Spec.ScopedListeners = nil
+	f.spec.Routes = f.spec.Routes[:1]
+	f.spec.Routes[0].Spec.ScopedListenerPorts = nil
+	f.settleTransportGraph(newUDPPacketDropProvider(f))
+	f.inventory[tcpLB]["provisioning_status"] = "PENDING_UPDATE"
+	f.inventory[tcpPool]["provisioning_status"] = "PENDING_UPDATE"
+	f.inventory[tcpPool]["udp_packet_drop"] = map[string]any{"numerator": 0, "denominator": 1}
+	f.spec.Gateway = cloud.GatewayGraphNode{Disposition: cloud.GraphPreserve}
+	route := &f.spec.Routes[0]
+	route.Disposition = cloud.GraphDelete
+	route.Spec = cloud.RouteSpec{Identity: route.Spec.Identity, GatewayRequirements: cloud.GatewayRequirements{ListenerProtocol: cloud.ListenerProtocolUDP}}
+	before := len(f.writes)
+	f.reconcile(f.provider())
+	if !slices.Equal(f.writes[before:], []string{"DELETE " + tcpPool}) ||
+		f.inventory[tcpPool] != nil || f.inventory[tcpListener]["default_pool_id"] != nil {
+		t.Fatalf("legacy UDP binding did not authorize pending guarded pool deletion: %v", f.writes[before:])
 	}
 }

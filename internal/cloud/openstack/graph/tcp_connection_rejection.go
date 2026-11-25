@@ -191,8 +191,16 @@ func (p *Provider) withdrawAfterRejectedTransportBatch(ctx context.Context, desi
 		return false, nil
 	}
 	actual, err := p.observeGatewayGraph(ctx, desired)
-	if err != nil || actual.loadBalancer != nil && actual.loadBalancer.ProvisioningStatus != "ACTIVE" {
+	if err != nil {
 		return false, err
+	}
+	pendingUDP := hasAmphoraUDPGraph(actual) && actual.loadBalancer.ProvisioningStatus == "PENDING_UPDATE"
+	if pendingUDP {
+		if err := p.observePendingUDPRoutes(ctx, desired, &actual); err != nil {
+			return false, err
+		}
+	} else if actual.loadBalancer != nil && actual.loadBalancer.ProvisioningStatus != "ACTIVE" {
+		return false, nil
 	}
 	if actual.loadBalancer == nil || index < len(actual.routes) && actual.routes[index].pool == nil {
 		// An independently observed disappearance can be handled by normal
@@ -203,6 +211,12 @@ func (p *Provider) withdrawAfterRejectedTransportBatch(ctx context.Context, desi
 		return false, nil
 	}
 	route := actual.routes[index]
+	if pendingUDP {
+		if route.pool.ProvisioningStatus != "PENDING_UPDATE" || !route.udpDrop.Present {
+			return false, nil
+		}
+		return true, p.deleteUDPPacketDropPool(ctx, desired, actual, index, result)
+	}
 	if route.pool.ProvisioningStatus != "ERROR" && route.backendProvisioningIssue(true, true) != "" {
 		return false, nil
 	}

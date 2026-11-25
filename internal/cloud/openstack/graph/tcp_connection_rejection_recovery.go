@@ -184,9 +184,9 @@ func (p *Provider) submitTransportBatch(ctx context.Context, desired desiredGate
 // Octavia compares a private operation token and the normalized request body
 // under its load balancer lock. Only replay a candidate with exact public
 // staged readback. A busy response supplies no forwarding proof.
-func (p *Provider) replayPendingTransportBatch(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph) (cloud.GatewayGraphResult, bool, error) {
-	if !(canReconcileTCPRejection(desired, actual) || canReconcileUDPPacketDrop(desired, actual) && hasUDPDropTarget(desired)) ||
-		actual.loadBalancer.ProvisioningStatus != "PENDING_UPDATE" {
+func (p *Provider) replayPendingTCPRejection(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph) (cloud.GatewayGraphResult, bool, error) {
+	managed := canReconcileTCPRejection(desired, actual)
+	if !managed || actual.loadBalancer.ProvisioningStatus != "PENDING_UPDATE" {
 		return cloud.GatewayGraphResult{}, false, nil
 	}
 	var err error
@@ -201,12 +201,7 @@ func (p *Provider) replayPendingTransportBatch(ctx context.Context, desired desi
 		route := desired.routes[index]
 		// A pending clear lacks a positive fraction. The native full batch
 		// stages every retained row, including unchanged members.
-		udp := desired.protocol == cloud.ListenerProtocolUDP
-		if udp && (route.spec.UDPPacketDrop == nil || route.udpDropUnavailable ||
-			!observed.udpDrop.Present || len(servingPoolListeners(actual, observed.pool.ID)) != 1) {
-			continue
-		}
-		if !udp && (!observed.tcpRejection.Present || observed.tcpRejection.Value == nil && route.spec.TCPConnectionRejection == nil &&
+		if !observed.tcpRejection.Present || observed.tcpRejection.Value == nil && route.spec.TCPConnectionRejection == nil &&
 			(len(observed.members) == 0 || slices.ContainsFunc(observed.members, func(member pools.Member) bool {
 				switch member.ProvisioningStatus {
 				case "PENDING_CREATE", "PENDING_UPDATE", "PENDING_DELETE":
@@ -214,7 +209,7 @@ func (p *Provider) replayPendingTransportBatch(ctx context.Context, desired desi
 				default:
 					return true
 				}
-			}))) {
+			})) {
 			continue
 		}
 		if supersededDefaultPoolListener(route, servingPoolListeners(actual, observed.pool.ID), actual.scoped) != "" {
@@ -227,12 +222,8 @@ func (p *Provider) replayPendingTransportBatch(ctx context.Context, desired desi
 		if err != nil || changed {
 			continue
 		}
-		updatedAt := observed.tcpRejection.UpdatedAt
-		if udp {
-			updatedAt = observed.udpDrop.UpdatedAt
-		}
-		delay := p.transportReplayDelay(observed.pool.ID, updatedAt, time.Now())
-		actual.outcome = cloud.ProgressingOutcome("Waiting for Octavia transport batch activation", max(delay, transportReplayInterval, p.pollInterval))
+		delay := p.transportReplayDelay(observed.pool.ID, observed.tcpRejection.UpdatedAt, time.Now())
+		actual.outcome = cloud.ProgressingOutcome("Waiting for Octavia TCP batch activation", max(delay, transportReplayInterval, p.pollInterval))
 		result := p.pendingTransportBatchResult(ctx, desired, actual, index)
 		if delay != 0 {
 			return result, true, nil

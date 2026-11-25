@@ -111,8 +111,14 @@ func TestUDPPacketDropFencesGrantWithdrawalAndRestoresTraffic(t *testing.T) {
 		t.Fatal(err)
 	}
 	check(reconcile(), cloud.UDPPacketDrop{Numerator: 1, Denominator: 4}, partial, metav1.ConditionTrue, "ResolvedRefs")
-	r.UDPPacketDropAvailable = func(context.Context) (bool, error) { return false, nil }
+	r.UDPPacketDropAvailable = func(context.Context) (bool, error) { return false, errors.New("discovery unavailable") }
 	plan, err := r.planRoute(t.Context(), viewRoute(route), id, true)
+	if err != nil || plan.desired == nil || plan.detach || plan.desired.UDPPacketDrop == nil ||
+		*plan.desired.UDPPacketDrop != (cloud.UDPPacketDrop{Numerator: 1, Denominator: 4}) || !slices.Equal(plan.desired.Members, partial) {
+		t.Fatalf("a transient discovery error discarded the current authorized intent: %+v, %v", plan, err)
+	}
+	r.UDPPacketDropAvailable = func(context.Context) (bool, error) { return false, nil }
+	plan, err = r.planRoute(t.Context(), viewRoute(route), id, true)
 	if err != nil || plan.desired != nil || !plan.detach {
 		t.Fatalf("unavailable drop capability did not fail closed: %+v, %v", plan, err)
 	}

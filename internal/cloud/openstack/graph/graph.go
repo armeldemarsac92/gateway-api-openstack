@@ -335,7 +335,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	if result, handled, err := p.reconcileServingTCPRejection(ctx, desired, actual); handled {
 		return result, err
 	}
-	if result, handled, err := p.replayPendingTransportBatch(ctx, desired, actual); handled {
+	if result, handled, err := p.replayPendingTCPRejection(ctx, desired, actual); handled {
 		return result, err
 	}
 	p.gateRequestMirrors(ctx, &desired, actual)
@@ -461,7 +461,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		plan = plan[:1]
 	}
 	if spec.Gateway.Disposition == cloud.GraphEnsure && (len(plan) == 0 || plan[0].kind != graphClearListenerDefaultPool && !plan[0].withdrawHTTPPolicy && !plan[0].isRestrictiveSNI()) {
-		if err := p.validateGraphTrafficSecurity(ctx, desired); err != nil {
+		if err := p.validatePlannedTrafficSecurity(ctx, desired, plan); err != nil {
 			result.Routes = observedRouteDeleteCompletions(desired, actual)
 			return result, err
 		}
@@ -706,6 +706,20 @@ func canWithdrawHTTPWithoutAddress(step graphMutation, desired desiredGatewayGra
 		}
 	}
 	return false
+}
+
+func (p *Provider) validatePlannedTrafficSecurity(ctx context.Context, desired desiredGatewayGraph, plan []graphMutation) error {
+	if len(plan) != 0 && plan[0].kind == graphRouteMutation && plan[0].route.kind == routeMutationCreatePool {
+		route := desired.routes[plan[0].routeIndex]
+		if route.spec.UDPPacketDrop != nil {
+			port := route.spec.GatewayRequirements.ListenerPort
+			if len(route.spec.ScopedListenerPorts) == 1 {
+				port = route.spec.ScopedListenerPorts[0]
+			}
+			return p.validateUDPPacketDropSecurity(ctx, desired, route, port)
+		}
+	}
+	return p.validateGraphTrafficSecurity(ctx, desired)
 }
 
 func (p *Provider) validateGraphTrafficSecurity(ctx context.Context, desired desiredGatewayGraph) error {
@@ -1427,7 +1441,8 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 	if withdrawAddress {
 		return actual, nil
 	}
-	if observation.phase == loadBalancerPhasePending && desired.spec.Gateway.Disposition != cloud.GraphEnsure {
+	udpUpdatePending := lb.ProvisioningStatus == "PENDING_UPDATE" && pendingUDPGraph(desired, actual.protocol)
+	if observation.phase == loadBalancerPhasePending && desired.spec.Gateway.Disposition != cloud.GraphEnsure && !udpUpdatePending {
 		return actual, nil
 	}
 	// Frontend authorization withdrawals use only LB and listener readbacks.
@@ -1490,9 +1505,9 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 	}
 	actual.floatingIP, err = p.findGatewayFloatingIP(ctx, desired.identity, lb.VipPortID, lb.VipAddress)
 	if err != nil {
-		canWithdraw := isSNIProtocol(desired.protocol) || desired.protocol == cloud.ListenerProtocolHTTP || desired.protocol == cloud.ListenerProtocolTCP || desired.protocol == cloud.ListenerProtocolUDP
-		observePending := (isSNIProtocol(desired.protocol) || desired.protocol == cloud.ListenerProtocolTCP) && lb.ProvisioningStatus == "PENDING_UPDATE"
-		if !canWithdraw || desired.spec.Gateway.Disposition != cloud.GraphEnsure ||
+		canWithdraw := udpUpdatePending || isSNIProtocol(desired.protocol) || desired.protocol == cloud.ListenerProtocolHTTP || desired.protocol == cloud.ListenerProtocolTCP || desired.protocol == cloud.ListenerProtocolUDP
+		observePending := udpUpdatePending || (isSNIProtocol(desired.protocol) || desired.protocol == cloud.ListenerProtocolTCP) && lb.ProvisioningStatus == "PENDING_UPDATE"
+		if !canWithdraw || desired.spec.Gateway.Disposition != cloud.GraphEnsure && !udpUpdatePending ||
 			observation.phase != loadBalancerPhaseActive && !observePending || ctx.Err() != nil || errors.Is(err, cloud.ErrOwnershipConflict) {
 			return actual, err
 		}
@@ -1553,10 +1568,7 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 		}
 		return p.observeScopedListenerGraph(ctx, desired, actual, owners, inventory.Items, observation.phase == loadBalancerPhasePending)
 	}
-	if desired.spec.Gateway.Disposition == cloud.GraphDelete {
-		if observation.phase == loadBalancerPhasePending {
-			return actual, nil
-		}
+	if desired.spec.Gateway.Disposition == cloud.GraphDelete && observation.phase != loadBalancerPhasePending {
 		actual.deletion, err = p.buildGatewayDeletionPlanFromListeners(ctx, desired.identity, lb, owners, desired.protocol, inventory)
 		actual.deletionFrontendActive = err == nil && slices.ContainsFunc(inventory.Items, func(listener listeners.Listener) bool {
 			return listener.AdminStateUp

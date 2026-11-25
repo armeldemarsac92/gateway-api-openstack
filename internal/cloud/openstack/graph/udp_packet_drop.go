@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"time"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gophercloud/gophercloud/v2"
@@ -35,6 +36,7 @@ const udpDropPoolTag = "gateway-api-openstack.udp-packet-drop=v1"
 
 var (
 	errUDPPacketDropUnavailable = errors.New("waiting for regional Octavia UDP packet drop support")
+	errUDPPacketDropUnverified  = errors.New("waiting to verify regional Octavia UDP packet drop support")
 	errUDPPacketDropReadback    = errors.New("waiting for a dedicated Octavia UDP packet drop pool and complete readback")
 )
 
@@ -60,27 +62,56 @@ func (p *Provider) observeUDPPacketDropCapability(ctx context.Context, desired *
 	if !hasUDPDropTarget(*desired) {
 		return
 	}
-	available := false
+	var available bool
+	var err error
 	if actual.loadBalancer == nil || actual.loadBalancer.Provider == "amphora" && udpIPFamily(actual.state.VIPAddress) == 4 {
-		available, _ = p.UDPPacketDropAvailable(ctx)
+		available, err = p.UDPPacketDropAvailable(ctx)
 	}
 	for index := range desired.routes {
 		route := &desired.routes[index]
-		route.udpDropUnavailable = route.spec.UDPPacketDrop != nil && !available
+		if route.spec.UDPPacketDrop != nil {
+			route.udpDropUnverified = err != nil
+			route.udpDropUnavailable = err == nil && !available
+		}
 	}
 }
 
-func canReconcileUDPPacketDrop(desired desiredGatewayGraph, actual observedGatewayGraph) bool {
-	return actual.protocol == cloud.ListenerProtocolUDP && desired.spec.Gateway.Disposition != cloud.GraphDelete &&
-		actual.loadBalancer != nil && actual.loadBalancer.Provider == "amphora"
+func hasAmphoraUDPGraph(actual observedGatewayGraph) bool {
+	return actual.protocol == cloud.ListenerProtocolUDP && actual.loadBalancer != nil && actual.loadBalancer.Provider == "amphora"
 }
 
-// Update a serving pool atomically. A new guarded pool must first serve as
-// an empty default, because Octavia derives the packet selector from its listener.
+// Legacy singleton route deletion may carry the protocol only on the
+// detaching route. The live listener still has to prove it is UDP.
+func pendingUDPGraph(desired desiredGatewayGraph, protocol string) bool {
+	return protocol == cloud.ListenerProtocolUDP || protocol == "" && desired.spec.Gateway.Disposition == cloud.GraphPreserve &&
+		slices.ContainsFunc(desired.spec.Routes, func(node cloud.RouteGraphNode) bool {
+			return node.Disposition == cloud.GraphDelete && node.Spec.GatewayRequirements.ListenerProtocol == cloud.ListenerProtocolUDP
+		})
+}
+
+func (p *Provider) observePendingUDPRoutes(ctx context.Context, desired desiredGatewayGraph, actual *observedGatewayGraph) error {
+	routes, err := p.observeRouteGraphsWithListeners(ctx, desired.routeOwners(), actual.loadBalancer,
+		actual.listener, actual.protocol, actual.scopedListeners)
+	actual.routes = routes
+	return err
+}
+
+// Octavia can replace a lost UDP batch or remove its pool when the same pool
+// owns the pending operation. The provider checks this under its render lock.
 func (p *Provider) reconcileUDPPacketDrop(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph) (cloud.GatewayGraphResult, bool, error) {
-	if !canReconcileUDPPacketDrop(desired, actual) || actual.loadBalancer.ProvisioningStatus != "ACTIVE" {
+	if !hasAmphoraUDPGraph(actual) {
 		return cloud.GatewayGraphResult{}, false, nil
 	}
+	pending := actual.loadBalancer.ProvisioningStatus == "PENDING_UPDATE"
+	if !pending && (actual.loadBalancer.ProvisioningStatus != "ACTIVE" || desired.spec.Gateway.Disposition == cloud.GraphDelete) {
+		return cloud.GatewayGraphResult{}, false, nil
+	}
+	if len(actual.routes) == 0 && (pending || actual.scoped && actual.outcome.State == cloud.OutcomeProgressing) {
+		if err := p.observePendingUDPRoutes(ctx, desired, &actual); err != nil {
+			return cloud.GatewayGraphResult{}, false, nil
+		}
+	}
+	waitingIndex := -1
 	for index, observed := range actual.routes {
 		if observed.pool == nil {
 			continue
@@ -91,69 +122,139 @@ func (p *Provider) reconcileUDPPacketDrop(ctx context.Context, desired desiredGa
 		if desired.spec.Gateway.Disposition == cloud.GraphPreserve && node.Disposition != cloud.GraphDelete {
 			continue
 		}
-		if !managed && !wantDrop || observed.backendProvisioningIssue(true, true) != "" {
+		poolStatus := observed.pool.ProvisioningStatus
+		pendingBatch := pending && managed && poolStatus == "PENDING_UPDATE"
+		pendingDelete := pending && managed && poolStatus == "PENDING_DELETE"
+		if !managed && !wantDrop || pending && !pendingBatch && !pendingDelete {
 			continue
 		}
+		owned := servingPoolListeners(actual, observed.pool.ID)
 		if err := validateTransportRouteBinding(route, actual); err != nil {
 			return cloud.GatewayGraphResult{}, true, &cloud.GraphError{Identity: route.spec.Identity, Err: err}
 		}
-		owned := servingPoolListeners(actual, observed.pool.ID)
-		if slices.ContainsFunc(owned, func(listener listeners.Listener) bool {
-			return listener.ProvisioningStatus != "ACTIVE" && listener.ProvisioningStatus != "ERROR"
-		}) {
+		failed := poolStatus == "ERROR" ||
+			slices.ContainsFunc(owned, func(listener listeners.Listener) bool { return listener.ProvisioningStatus == "ERROR" }) ||
+			slices.ContainsFunc(observed.members, func(member pools.Member) bool { return member.ProvisioningStatus == "ERROR" })
+		if !pending && !failed && (observed.backendProvisioningIssue(true, true) != "" ||
+			slices.ContainsFunc(owned, func(listener listeners.Listener) bool { return listener.ProvisioningStatus != "ACTIVE" })) {
 			continue
 		}
-		// Withdrawing a managed default requires DELETE pool. A listener
-		// update with an empty default is refused by the UDP extension.
+
+		switch {
+		case pendingDelete || !wantDrop || route.udpDropUnavailable || supersededDefaultPoolListener(route, owned, actual.scoped) != "",
+			route.udpDropUnverified && staleUDPDestinations(route, observed):
+			return p.withdrawUDPPacketDrop(ctx, desired, actual, index, "Withdrawing the Octavia UDP packet drop pool")
+		case route.udpDropUnverified:
+			waitingIndex = index
+			continue
+		}
 		invalidPool := !managed || observed.monitor != nil || observed.pool.Persistence != (pools.SessionPersistence{}) ||
 			!observed.pool.AdminStateUp || observed.pool.LBMethod != string(pools.LBMethodRoundRobin)
-		switch {
-		case !wantDrop || route.udpDropUnavailable || invalidPool || len(owned) > 1 ||
-			supersededDefaultPoolListener(route, owned, actual.scoped) != "" || observed.udpDrop.Invalid ||
-			len(owned) == 0 && (observed.udpDrop.Present || len(observed.members) != 0):
-			actual.outcome = p.progressingOutcome("Withdrawing the Octavia UDP packet drop pool")
-			result := p.pendingTransportBatchResult(ctx, desired, actual, index)
-			err := p.deleteUDPPacketDropPool(ctx, desired, actual, index, &result)
-			return result, true, err
-		case len(owned) == 0:
-			listener := udpDropListener(route, actual)
-			if actual.addressReadError != nil || listener.ID == "" || listener.DefaultPoolID != "" ||
-				listener.ProvisioningStatus != "ACTIVE" || observed.pool.ProvisioningStatus != "ACTIVE" ||
-				len(observed.pool.Listeners) != 0 || len(observed.pool.Members) != 0 || observed.pool.Members == nil {
-				continue
-			}
-			if err := p.validateGraphTrafficSecurity(ctx, desired); err != nil {
-				return cloud.GatewayGraphResult{}, true, err
-			}
-			step := graphMutation{kind: graphSetListenerDefaultPool, listenerID: listener.ID, poolID: observed.pool.ID, message: "Attaching an empty Octavia UDP packet drop pool"}
-			actual.outcome = p.progressingOutcome(step.message)
-			result := p.pendingTransportBatchResult(ctx, desired, actual, index)
-			err := p.executeUDPPacketDropMutation(ctx, desired, actual, index, step, &result)
-			return result, true, err
+		if invalidPool || len(owned) > 1 || observed.udpDrop.Invalid ||
+			len(owned) == 0 && (observed.udpDrop.Present || len(observed.members) != 0) {
+			return p.withdrawUDPPacketDrop(ctx, desired, actual, index, "Replacing an incompatible Octavia UDP packet drop pool")
 		}
-		batch, _, changed, readErr := desiredTransportBatch(route, observed, false)
-		failed := observed.backendProvisioningIssue(false, true) != "" || owned[0].ProvisioningStatus == "ERROR"
-		if readErr != nil || failed || actual.addressReadError != nil && changed {
-			actual.outcome = p.progressingOutcome("Withdrawing an unverified Octavia UDP default")
-			result := p.pendingTransportBatchResult(ctx, desired, actual, index)
-			err := p.deleteUDPPacketDropPool(ctx, desired, actual, index, &result)
-			return result, true, err
-		}
-		if !changed {
+		if len(owned) == 0 {
+			if result, handled, err := p.attachEmptyUDPPacketDropPool(ctx, desired, actual, index); handled {
+				return result, true, err
+			}
 			continue
 		}
-		if err := p.topology.ValidateGatewaySecurity(ctx, desired.spec.Gateway.Spec, []cloud.RouteSpec{route.spec}); err != nil {
-			actual.outcome = p.progressingOutcome("Withdrawing the Octavia UDP default after security validation failed")
-			result := p.pendingTransportBatchResult(ctx, desired, actual, index)
-			deleteErr := p.deleteUDPPacketDropPool(ctx, desired, actual, index, &result)
-			return result, true, errors.Join(err, deleteErr)
+		batch, _, changed, readErr := desiredTransportBatch(route, observed, pendingBatch || failed)
+		if readErr != nil || actual.addressReadError != nil && (changed || failed) {
+			return p.withdrawUDPPacketDrop(ctx, desired, actual, index, "Withdrawing an unverified Octavia UDP default")
 		}
-		actual.outcome = p.progressingOutcome(batch.message())
+		if !pendingBatch && !changed && !failed {
+			continue
+		}
+		if err := p.validateUDPPacketDropSecurity(ctx, desired, route, owned[0].ProtocolPort); err != nil {
+			result, handled, deleteErr := p.withdrawUDPPacketDrop(ctx, desired, actual, index, "Withdrawing the Octavia UDP default after security validation failed")
+			return result, handled, errors.Join(err, deleteErr)
+		}
+		if pendingBatch && !changed {
+			delay := p.transportReplayDelay(observed.pool.ID, observed.udpDrop.UpdatedAt, time.Now())
+			actual.outcome = cloud.ProgressingOutcome("Waiting for Octavia UDP batch activation", max(delay, transportReplayInterval, p.pollInterval))
+			if delay != 0 {
+				return p.waitForUDPPacketDrop(ctx, desired, actual, index)
+			}
+		} else {
+			actual.outcome = p.progressingOutcome(batch.message())
+		}
 		result := p.pendingTransportBatchResult(ctx, desired, actual, index)
 		err := p.submitTransportBatch(ctx, desired, actual, index, batch, &result)
 		return result, true, err
 	}
+	if waitingIndex >= 0 {
+		actual.outcome = p.progressingOutcome(errUDPPacketDropUnverified.Error())
+		return p.waitForUDPPacketDrop(ctx, desired, actual, waitingIndex)
+	}
 	return cloud.GatewayGraphResult{}, false, nil
+}
+
+func staleUDPDestinations(route desiredRoute, observed observedRouteGraph) bool {
+	wanted := route.spec.UDPPacketDrop
+	current := observed.udpDrop.Value
+	if !current.Valid() {
+		current = cloud.UDPPacketDrop{Denominator: 1}
+	}
+	if len(observed.members) != 0 && int64(wanted.Numerator)*int64(current.Denominator) > int64(current.Numerator)*int64(wanted.Denominator) {
+		return true
+	}
+	ready := make(map[string]struct{}, len(route.members))
+	for _, member := range route.members {
+		if !member.Draining {
+			ready[memberKey(member.Address, member.Port)] = struct{}{}
+		}
+	}
+	return slices.ContainsFunc(observed.members, func(member pools.Member) bool {
+		_, wanted := ready[memberKey(member.Address, member.ProtocolPort)]
+		_, unreported := observed.memberBatchUnreported[member.ID]
+		return !wanted && (unreported || member.AdminStateUp && member.Weight > 0)
+	})
+}
+
+func (p *Provider) waitForUDPPacketDrop(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, index int) (cloud.GatewayGraphResult, bool, error) {
+	result := p.pendingTransportBatchResult(ctx, desired, actual, index)
+	if validate := desired.spec.ValidateMutation; validate != nil {
+		if err := validate(ctx); err != nil {
+			return cloud.GatewayGraphResult{}, true, err
+		}
+	}
+	return result, true, nil
+}
+
+func (p *Provider) withdrawUDPPacketDrop(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, index int, message string) (cloud.GatewayGraphResult, bool, error) {
+	actual.outcome = p.progressingOutcome(message)
+	result := p.pendingTransportBatchResult(ctx, desired, actual, index)
+	err := p.deleteUDPPacketDropPool(ctx, desired, actual, index, &result)
+	return result, true, err
+}
+
+// An empty default must be attached before the first batch. Only validate
+// the selected listener and route because this operation cannot open a peer.
+func (p *Provider) attachEmptyUDPPacketDropPool(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, index int) (cloud.GatewayGraphResult, bool, error) {
+	route := desired.routes[index]
+	pool := actual.routes[index].pool
+	listener := udpDropListener(route, actual)
+	if actual.addressReadError != nil || listener.ID == "" || listener.DefaultPoolID != "" ||
+		listener.ProvisioningStatus != "ACTIVE" || pool.ProvisioningStatus != "ACTIVE" ||
+		len(pool.Listeners) != 0 || len(pool.Members) != 0 || pool.Members == nil {
+		return cloud.GatewayGraphResult{}, false, nil
+	}
+	if err := p.validateUDPPacketDropSecurity(ctx, desired, route, listener.ProtocolPort); err != nil {
+		return cloud.GatewayGraphResult{}, true, err
+	}
+	step := graphMutation{kind: graphSetListenerDefaultPool, listenerID: listener.ID, poolID: pool.ID, message: "Attaching an empty Octavia UDP packet drop pool"}
+	actual.outcome = p.progressingOutcome(step.message)
+	result := p.pendingTransportBatchResult(ctx, desired, actual, index)
+	err := p.executeUDPPacketDropMutation(ctx, desired, actual, index, step, &result)
+	return result, true, err
+}
+
+func (p *Provider) validateUDPPacketDropSecurity(ctx context.Context, desired desiredGatewayGraph, route desiredRoute, port int) error {
+	gateway := desired.spec.Gateway.Spec
+	gateway.ListenerPort, gateway.ScopedListeners = port, nil
+	return p.topology.ValidateGatewaySecurity(ctx, gateway, []cloud.RouteSpec{route.spec})
 }
 
 func udpDropListener(route desiredRoute, actual observedGatewayGraph) listeners.Listener {

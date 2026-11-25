@@ -352,7 +352,7 @@ func validateRouteGatewayIDs(recorded, observed cloud.GatewayState) error {
 func transportPoolPending(err error) bool {
 	return errors.Is(err, errWeightedTCPBackupUnknown) || errors.Is(err, errTCPRejectionUnavailable) ||
 		errors.Is(err, errTCPRejectionReadback) || errors.Is(err, errUDPPacketDropReadback) ||
-		errors.Is(err, errUDPPacketDropUnavailable)
+		errors.Is(err, errUDPPacketDropUnavailable) || errors.Is(err, errUDPPacketDropUnverified)
 }
 
 func hasActiveUDPBackend(route desiredRoute, observed observedRouteGraph, vipAddress string) bool {
