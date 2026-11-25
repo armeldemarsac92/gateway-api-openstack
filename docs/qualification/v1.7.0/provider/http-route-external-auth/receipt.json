@@ -1,0 +1,669 @@
+{
+  "scope": "signed",
+  "controller": "ea1ab8ed06793313b5c87a4f9b8952a908f677e4",
+  "octavia": "e7008bd8e851d891e8c37f37ce2063b85e8ac2c5",
+  "octaviaLib": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+  "capability": "l7policy_http_external_auth_v1",
+  "boundary": "Local Kubernetes envtest API and etcd, running manager, Octavia WSGI API and SQLAlchemy DB, Amphora renderer and native HAProxy, isolated HTTP peers. Keystone, Neutron, RPC completion and Amphora agent transport use local fixture adapters. No regional deployment was exercised.",
+  "regionalDeploymentVerified": false,
+  "upstreamConformanceVerified": false,
+  "runs": {
+    "standard": {
+      "passed": true,
+      "scope": "signed",
+      "channel": "standard",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "controller": {
+        "sourceRevision": "ea1ab8ed06793313b5c87a4f9b8952a908f677e4",
+        "managerSHA256": "f41da9ecf2cad8492359408772325ed85d4485171b5ee419a390f70099bd885d",
+        "manifestDigest": "sha256:3a75c1b1e5fd3298a2932c65af57510af6d1bb5c34436f77269c238ea181e69f",
+        "ociArchiveSHA256": "584a1120ac9e428d3edbaae6153421485ca618e420219c371de4189ce8da63ba"
+      },
+      "octavia": {
+        "revision": "e7008bd8e851d891e8c37f37ce2063b85e8ac2c5",
+        "version": "19.0.1.dev94",
+        "sha256": "b3f78669637d643968313794d51b4867c12d5bb18e66fcfd6b2e2596a4afb487",
+        "filesVerified": 673
+      },
+      "octaviaLib": {
+        "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+        "version": "3.12.1.dev22",
+        "sha256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1",
+        "sha256": "57ce7ace05aa5a094ac71726dcce65e89971d521c3528de1c6c198a3918132e8",
+        "nativeExternalAuth": true
+      },
+      "boundary": "Local Kubernetes envtest API and etcd, running manager, Octavia WSGI API and SQLAlchemy DB, Amphora renderer and native HAProxy, isolated HTTP peers. Keystone, Neutron, RPC completion and Amphora agent transport use local fixture adapters. No regional deployment was exercised.",
+      "phases": {
+        "standard_unfiltered": {
+          "grant": "NotUsed",
+          "kubernetes": {
+            "routeGeneration": 1,
+            "route": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            },
+            "gateway": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed"
+            },
+            "listener": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            },
+            "attachedRoutes": 1
+          },
+          "publicOctavia": {
+            "listenerProtocol": "HTTP",
+            "listenerAuthorization": false,
+            "policies": {
+              "/private": {
+                "action": "REDIRECT_TO_POOL",
+                "policy": "25e3f75bed867e2c",
+                "matchingHostRules": [
+                  "REGEX"
+                ],
+                "originPool": "46046bf0ee020efe",
+                "fixedResponse": null,
+                "externalAuth": null,
+                "listAndDetailAgree": true
+              },
+              "/public": {
+                "action": "REDIRECT_TO_POOL",
+                "policy": "910f13fe7edc78c5",
+                "matchingHostRules": [
+                  "REGEX"
+                ],
+                "originPool": "46046bf0ee020efe",
+                "fixedResponse": null,
+                "externalAuth": null,
+                "listAndDetailAgree": true
+              }
+            },
+            "activePolicyCount": 2,
+            "poolCount": 1,
+            "HAProxyConfigSHA256": "1b9300b2490d54b6176a8db0fe1787dc57d8dc70638a110ea689df91fb1e1a02",
+            "HAProxyReloads": 3,
+            "originPoolMembersMatched": true
+          },
+          "publicReadiness": {
+            "status": 200,
+            "originResponse": true,
+            "identityReturned": false
+          },
+          "traffic": {
+            "privateUnfiltered": {
+              "status": 200,
+              "originResponse": true,
+              "identityReturned": false,
+              "authorizerRequests": 0,
+              "originRequests": 1,
+              "events": [
+                {
+                  "peer": "origin",
+                  "path": "/private",
+                  "bodyBytes": 25,
+                  "status": 200,
+                  "hostMatched": true,
+                  "requestHeaderMatched": true,
+                  "identityForwarded": false
+                }
+              ]
+            },
+            "publicUnfiltered": {
+              "status": 200,
+              "originResponse": true,
+              "identityReturned": false,
+              "authorizerRequests": 0,
+              "originRequests": 1,
+              "events": [
+                {
+                  "peer": "origin",
+                  "path": "/public",
+                  "bodyBytes": 25,
+                  "status": 200,
+                  "hostMatched": true,
+                  "requestHeaderMatched": true,
+                  "identityForwarded": false
+                }
+              ]
+            }
+          }
+        }
+      },
+      "kubernetesVersion": "v1.36.2",
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "schema": {
+        "servesExternalAuth": false,
+        "sha256": "e81367d0d592831956921a7fb9151e98e88276d277b639812cc5e7937d38069c"
+      },
+      "octaviaAPIVersion": "v2.30",
+      "routeExternalAuthAdvertised": true,
+      "controllerFlags": [
+        "--leader-elect=false",
+        "--metrics-bind-address=0",
+        "--health-probe-bind-address=0",
+        "--gateway-api-channel=standard",
+        "--octavia-microversion=2.30",
+        "--openstack-resync-interval=2s",
+        "--openstack-poll-interval=50ms",
+        "--openstack-api-qps=120",
+        "--openstack-api-burst=160",
+        "--openstack-operation-timeout=30s"
+      ],
+      "runningControllerSHA256": "f41da9ecf2cad8492359408772325ed85d4485171b5ee419a390f70099bd885d",
+      "OctaviaREST": {
+        "GET healthmonitors 200": 13,
+        "GET l7policies 200": 18,
+        "GET listeners 200": 18,
+        "GET loadbalancers 200": 34,
+        "GET members 200": 14,
+        "GET pools 200": 17,
+        "GET providers 200": 4,
+        "GET rules 200": 19,
+        "GET versions 200": 5,
+        "POST healthmonitors 201": 1,
+        "POST l7policies 201": 2,
+        "POST listeners 201": 1,
+        "POST loadbalancers 201": 1,
+        "POST members 201": 1,
+        "POST pools 201": 1,
+        "POST rules 201": 4,
+        "PUT l7policies 200": 2
+      }
+    },
+    "experimental": {
+      "passed": true,
+      "scope": "signed",
+      "channel": "experimental",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "controller": {
+        "sourceRevision": "ea1ab8ed06793313b5c87a4f9b8952a908f677e4",
+        "managerSHA256": "f41da9ecf2cad8492359408772325ed85d4485171b5ee419a390f70099bd885d",
+        "manifestDigest": "sha256:3a75c1b1e5fd3298a2932c65af57510af6d1bb5c34436f77269c238ea181e69f",
+        "ociArchiveSHA256": "584a1120ac9e428d3edbaae6153421485ca618e420219c371de4189ce8da63ba"
+      },
+      "octavia": {
+        "revision": "e7008bd8e851d891e8c37f37ce2063b85e8ac2c5",
+        "version": "19.0.1.dev94",
+        "sha256": "b3f78669637d643968313794d51b4867c12d5bb18e66fcfd6b2e2596a4afb487",
+        "filesVerified": 673
+      },
+      "octaviaLib": {
+        "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+        "version": "3.12.1.dev22",
+        "sha256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1",
+        "sha256": "57ce7ace05aa5a094ac71726dcce65e89971d521c3528de1c6c198a3918132e8",
+        "nativeExternalAuth": true
+      },
+      "boundary": "Local Kubernetes envtest API and etcd, running manager, Octavia WSGI API and SQLAlchemy DB, Amphora renderer and native HAProxy, isolated HTTP peers. Keystone, Neutron, RPC completion and Amphora agent transport use local fixture adapters. No regional deployment was exercised.",
+      "phases": {
+        "grant_present": {
+          "grant": "Present",
+          "kubernetes": {
+            "routeGeneration": 1,
+            "route": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            },
+            "gateway": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed",
+              "AddressesAssigned": "True/AddressesAssigned"
+            },
+            "listener": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            },
+            "attachedRoutes": 1
+          },
+          "publicOctavia": {
+            "listenerProtocol": "HTTP",
+            "listenerAuthorization": false,
+            "policies": {
+              "/private": {
+                "action": "REDIRECT_TO_POOL",
+                "policy": "b247f5818be5fb8c",
+                "matchingHostRules": [
+                  "REGEX"
+                ],
+                "originPool": "a5aa6e029577d658",
+                "fixedResponse": null,
+                "externalAuth": {
+                  "pool": "b51a25214d0edfa0",
+                  "pathPrefix": "/authorize",
+                  "allowedRequestHeaders": [
+                    "x-request-marker"
+                  ],
+                  "allowedResponseHeaders": [
+                    "x-local-identity"
+                  ]
+                },
+                "listAndDetailAgree": true
+              },
+              "/public": {
+                "action": "REDIRECT_TO_POOL",
+                "policy": "bd3306e670cb566f",
+                "matchingHostRules": [
+                  "REGEX"
+                ],
+                "originPool": "a5aa6e029577d658",
+                "fixedResponse": null,
+                "externalAuth": null,
+                "listAndDetailAgree": true
+              }
+            },
+            "activePolicyCount": 2,
+            "poolCount": 2,
+            "HAProxyConfigSHA256": "d41681426b29588240f605b884cf50b6ad788594df367c4776dec74bf402a010",
+            "HAProxyReloads": 3,
+            "originPoolMembersMatched": true,
+            "authPoolMembersMatched": true,
+            "authPoolLinkedInCollection": true,
+            "authPoolLinkedInDetail": true
+          },
+          "publicReadiness": {
+            "status": 200,
+            "originResponse": true,
+            "identityReturned": false
+          },
+          "traffic": {
+            "privateAccepted": {
+              "status": 200,
+              "originResponse": true,
+              "identityReturned": false,
+              "authorizerRequests": 1,
+              "originRequests": 1,
+              "events": [
+                {
+                  "peer": "authorizer",
+                  "path": "/authorize/private",
+                  "bodyBytes": 0,
+                  "status": 200,
+                  "hostMatched": true,
+                  "requestHeaderMatched": true,
+                  "identityForwarded": false
+                },
+                {
+                  "peer": "origin",
+                  "path": "/private",
+                  "bodyBytes": 25,
+                  "status": 200,
+                  "hostMatched": true,
+                  "requestHeaderMatched": true,
+                  "identityForwarded": true
+                }
+              ]
+            },
+            "privateRefused": {
+              "status": 401,
+              "originResponse": false,
+              "identityReturned": false,
+              "authorizerRequests": 1,
+              "originRequests": 0,
+              "events": [
+                {
+                  "peer": "authorizer",
+                  "path": "/authorize/private",
+                  "bodyBytes": 0,
+                  "status": 401,
+                  "hostMatched": true,
+                  "requestHeaderMatched": true,
+                  "identityForwarded": false
+                }
+              ]
+            },
+            "publicSibling": {
+              "status": 200,
+              "originResponse": true,
+              "identityReturned": false,
+              "authorizerRequests": 0,
+              "originRequests": 1,
+              "events": [
+                {
+                  "peer": "origin",
+                  "path": "/public",
+                  "bodyBytes": 25,
+                  "status": 200,
+                  "hostMatched": true,
+                  "requestHeaderMatched": true,
+                  "identityForwarded": false
+                }
+              ]
+            }
+          }
+        },
+        "grant_revoked": {
+          "grant": "Deleted",
+          "kubernetes": {
+            "routeGeneration": 1,
+            "route": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "False/RefNotPermitted",
+              "gateway-api-openstack.github.io/Programmed": "False/Pending"
+            },
+            "gateway": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed",
+              "AddressesAssigned": "True/AddressesAssigned"
+            },
+            "listener": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            },
+            "attachedRoutes": 1
+          },
+          "publicOctavia": {
+            "listenerProtocol": "HTTP",
+            "listenerAuthorization": false,
+            "policies": {
+              "/public": {
+                "action": "REDIRECT_TO_POOL",
+                "policy": "bd3306e670cb566f",
+                "matchingHostRules": [
+                  "REGEX"
+                ],
+                "originPool": "a5aa6e029577d658",
+                "fixedResponse": null,
+                "externalAuth": null,
+                "listAndDetailAgree": true
+              },
+              "/private": {
+                "action": "FIXED_RESPONSE",
+                "policy": "69e3f756cc856bbe",
+                "matchingHostRules": [
+                  "REGEX"
+                ],
+                "originPool": null,
+                "fixedResponse": {
+                  "status_code": 500
+                },
+                "externalAuth": null,
+                "listAndDetailAgree": true
+              }
+            },
+            "activePolicyCount": 2,
+            "poolCount": 1,
+            "HAProxyConfigSHA256": "a7b07fbd4a79802b945787b7bccab4fd9923aa39b6ce274895e0ac0f64a5a4ef",
+            "HAProxyReloads": 5,
+            "originPoolMembersMatched": true
+          },
+          "publicReadiness": {
+            "status": 200,
+            "originResponse": true,
+            "identityReturned": false
+          },
+          "traffic": {
+            "privateWithGrantRevoked": {
+              "status": 500,
+              "originResponse": false,
+              "identityReturned": false,
+              "authorizerRequests": 0,
+              "originRequests": 0,
+              "events": []
+            },
+            "publicSibling": {
+              "status": 200,
+              "originResponse": true,
+              "identityReturned": false,
+              "authorizerRequests": 0,
+              "originRequests": 1,
+              "events": [
+                {
+                  "peer": "origin",
+                  "path": "/public",
+                  "bodyBytes": 25,
+                  "status": 200,
+                  "hostMatched": true,
+                  "requestHeaderMatched": true,
+                  "identityForwarded": false
+                }
+              ]
+            }
+          }
+        },
+        "grant_restored": {
+          "grant": "Recreated",
+          "kubernetes": {
+            "routeGeneration": 1,
+            "route": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+            },
+            "gateway": {
+              "Accepted": "True/Accepted",
+              "Programmed": "True/Programmed",
+              "AddressesAssigned": "True/AddressesAssigned"
+            },
+            "listener": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs",
+              "Conflicted": "False/NoConflicts",
+              "Programmed": "True/Programmed"
+            },
+            "attachedRoutes": 1
+          },
+          "publicOctavia": {
+            "listenerProtocol": "HTTP",
+            "listenerAuthorization": false,
+            "policies": {
+              "/public": {
+                "action": "REDIRECT_TO_POOL",
+                "policy": "bd3306e670cb566f",
+                "matchingHostRules": [
+                  "REGEX"
+                ],
+                "originPool": "a5aa6e029577d658",
+                "fixedResponse": null,
+                "externalAuth": null,
+                "listAndDetailAgree": true
+              },
+              "/private": {
+                "action": "REDIRECT_TO_POOL",
+                "policy": "2f9f0a79414d8754",
+                "matchingHostRules": [
+                  "REGEX"
+                ],
+                "originPool": "a5aa6e029577d658",
+                "fixedResponse": null,
+                "externalAuth": {
+                  "pool": "0826fd3f8501c2f9",
+                  "pathPrefix": "/authorize",
+                  "allowedRequestHeaders": [
+                    "x-request-marker"
+                  ],
+                  "allowedResponseHeaders": [
+                    "x-local-identity"
+                  ]
+                },
+                "listAndDetailAgree": true
+              }
+            },
+            "activePolicyCount": 2,
+            "poolCount": 2,
+            "HAProxyConfigSHA256": "53d3d75f69fb9a8eab73da4512e39032524ea79b7f0e94793bf0d6f32f0ccb9f",
+            "HAProxyReloads": 7,
+            "originPoolMembersMatched": true,
+            "authPoolMembersMatched": true,
+            "authPoolLinkedInCollection": true,
+            "authPoolLinkedInDetail": true
+          },
+          "publicReadiness": {
+            "status": 200,
+            "originResponse": true,
+            "identityReturned": false
+          },
+          "traffic": {
+            "privateAccepted": {
+              "status": 200,
+              "originResponse": true,
+              "identityReturned": false,
+              "authorizerRequests": 1,
+              "originRequests": 1,
+              "events": [
+                {
+                  "peer": "authorizer",
+                  "path": "/authorize/private",
+                  "bodyBytes": 0,
+                  "status": 200,
+                  "hostMatched": true,
+                  "requestHeaderMatched": true,
+                  "identityForwarded": false
+                },
+                {
+                  "peer": "origin",
+                  "path": "/private",
+                  "bodyBytes": 25,
+                  "status": 200,
+                  "hostMatched": true,
+                  "requestHeaderMatched": true,
+                  "identityForwarded": true
+                }
+              ]
+            },
+            "privateRefused": {
+              "status": 401,
+              "originResponse": false,
+              "identityReturned": false,
+              "authorizerRequests": 1,
+              "originRequests": 0,
+              "events": [
+                {
+                  "peer": "authorizer",
+                  "path": "/authorize/private",
+                  "bodyBytes": 0,
+                  "status": 401,
+                  "hostMatched": true,
+                  "requestHeaderMatched": true,
+                  "identityForwarded": false
+                }
+              ]
+            },
+            "publicSibling": {
+              "status": 200,
+              "originResponse": true,
+              "identityReturned": false,
+              "authorizerRequests": 0,
+              "originRequests": 1,
+              "events": [
+                {
+                  "peer": "origin",
+                  "path": "/public",
+                  "bodyBytes": 25,
+                  "status": 200,
+                  "hostMatched": true,
+                  "requestHeaderMatched": true,
+                  "identityForwarded": false
+                }
+              ]
+            }
+          }
+        }
+      },
+      "kubernetesVersion": "v1.36.2",
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "schema": {
+        "servesExternalAuth": true,
+        "sha256": "546462fb2d792a243be2858584b265581dedacf674ae97bfce7d6e40dd1d4e1d"
+      },
+      "octaviaAPIVersion": "v2.30",
+      "routeExternalAuthAdvertised": true,
+      "controllerFlags": [
+        "--leader-elect=false",
+        "--metrics-bind-address=0",
+        "--health-probe-bind-address=0",
+        "--gateway-api-channel=experimental",
+        "--octavia-microversion=2.30",
+        "--openstack-resync-interval=2s",
+        "--openstack-poll-interval=50ms",
+        "--openstack-api-qps=120",
+        "--openstack-api-burst=160",
+        "--openstack-operation-timeout=30s",
+        "--octavia-fixed-http-responses",
+        "--octavia-http-route-external-auth"
+      ],
+      "runningControllerSHA256": "f41da9ecf2cad8492359408772325ed85d4485171b5ee419a390f70099bd885d",
+      "OctaviaREST": {
+        "DELETE l7policies 204": 2,
+        "DELETE members 204": 1,
+        "DELETE pools 204": 1,
+        "DELETE rules 204": 4,
+        "GET healthmonitors 200": 43,
+        "GET l7policies 200": 57,
+        "GET listeners 200": 70,
+        "GET loadbalancers 200": 118,
+        "GET members 200": 89,
+        "GET pools 200": 54,
+        "GET providers 200": 105,
+        "GET rules 200": 97,
+        "GET versions 200": 5,
+        "POST healthmonitors 201": 1,
+        "POST l7policies 201": 4,
+        "POST listeners 201": 1,
+        "POST loadbalancers 201": 1,
+        "POST members 201": 3,
+        "POST pools 201": 3,
+        "POST rules 201": 8,
+        "PUT l7policies 200": 6,
+        "PUT listeners 200": 6
+      }
+    }
+  },
+  "rawReceiptSHA256": {
+    "standard": "cfe8a5b5b42c20b63c4dd63fdfb6a16d5b7934184592d90d39521d305a0f0608",
+    "experimental": "be32b73c0e72128e689be4aa87310479c601067dc27c057918d5dfbeb5cf74d2"
+  },
+  "controllerTree": "7bc626ef99ce62fa3efcc9c25f248fa7b8688067",
+  "image": "ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:3a75c1b1e5fd3298a2932c65af57510af6d1bb5c34436f77269c238ea181e69f",
+  "managerSHA256": "f41da9ecf2cad8492359408772325ed85d4485171b5ee419a390f70099bd885d",
+  "installedProviderQualification": {
+    "stable": {
+      "octavia": {
+        "revision": "e7008bd8e851d891e8c37f37ce2063b85e8ac2c5",
+        "tree": "35b6ca4f317283be021ec6e9bf758866f5a95153",
+        "version": "19.0.1.dev94",
+        "wheelSHA256": "b3f78669637d643968313794d51b4867c12d5bb18e66fcfd6b2e2596a4afb487"
+      },
+      "octaviaLib": {
+        "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
+        "tree": "503a73ff7e5e70fd4cd60dbb97c3c71e28f42060",
+        "version": "3.12.1.dev22",
+        "wheelSHA256": "6f8f46452ee9450cefd6c050f1ecbf896de956083bc1517594a88b44d5c72882"
+      },
+      "installedTestCount": 7,
+      "identicalBuilds": 2
+    },
+    "master": {
+      "octavia": {
+        "revision": "d1047d563340d346ba1cb76150da720fec660d18",
+        "tree": "19c73c2cd18f87745b6bc33a5c03401419d2e3ce",
+        "version": "19.1.0.dev213",
+        "wheelSHA256": "1270f56ae3271fd3cb56a9425e989d1719b5bd3888492fc79bcc9936beb2410d"
+      },
+      "octaviaLib": {
+        "revision": "a38ac46bac39f07e2b19bd4a12687bbca1b6f6cd",
+        "tree": "580190e57bc4b4876e68ba619e79e5c83d27fa1a",
+        "version": "3.13.0.dev46",
+        "wheelSHA256": "b35798a4c980672a963fad5e0ce0b97a9f79250ed22e910d286bc2385668c8cd"
+      },
+      "installedTestCount": 7,
+      "identicalBuilds": 2
+    }
+  }
+}
