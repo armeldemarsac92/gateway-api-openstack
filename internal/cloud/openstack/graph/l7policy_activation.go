@@ -187,7 +187,7 @@ func (p *Provider) preparePolicyActivationBatch(ctx context.Context, desired des
 		policy := item.Policy.Policy
 		proven, ok := inventory[policy.ID]
 		if !ok || policy.Position != int32(i+1) || policy.ProjectID != p.projectID ||
-			!activationPolicyMatchesInventory(item, proven) {
+			!policySnapshotMatchesInventory(item, proven) {
 			return nil, stale
 		}
 		delete(inventory, policy.ID)
@@ -245,10 +245,10 @@ func canBatchPolicyActivation(route desiredRoute, observed observedRouteGraph, p
 	return false
 }
 
-func activationPolicyMatchesInventory(snapshot octavia.PolicyActivationSnapshot, observed observedRoutePolicy) bool {
+func policySnapshotMatchesInventory(snapshot octavia.PolicySnapshot, observed observedRoutePolicy) bool {
 	current, proven := snapshot.Policy, observed.policy
 	policy := current.Policy
-	if policy.ListenerID != proven.ListenerID || policy.ProjectID != proven.ProjectID ||
+	if policy.ID != proven.ID || policy.ListenerID != proven.ListenerID || policy.ProjectID != proven.ProjectID ||
 		policy.Position != proven.Position || policy.Action == "" || policy.Action != proven.Action ||
 		current.PoolReference == nil || policy.RedirectPoolID != proven.RedirectPoolID ||
 		policy.RedirectURL != proven.RedirectURL || policy.RedirectPrefix != proven.RedirectPrefix ||
@@ -275,7 +275,7 @@ func activationPolicyMatchesInventory(snapshot octavia.PolicyActivationSnapshot,
 		}
 		delete(rules, row.ID)
 	}
-	return true
+	return len(rules) == 0
 }
 
 func sameActivationTags(left, right []string) bool {

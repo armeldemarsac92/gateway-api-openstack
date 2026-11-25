@@ -100,9 +100,10 @@ type ProviderConfig struct {
 	XBackendSessionPersistence bool
 	RouteSessionPersistence    bool
 
-	HTTPSListenerIsolation  bool
-	InitialL7Rules          bool
-	L7PolicyBatchActivation bool
+	HTTPSListenerIsolation     bool
+	InitialL7Rules             bool
+	L7PolicyBatchActivation    bool
+	L7PolicyConditionalRemoval bool
 }
 
 // Provider owns the OpenStack resource graph for managed Gateway API objects.
@@ -145,9 +146,10 @@ type Provider struct {
 	xBackendSessionPersistence bool
 	routeSessionPersistence    bool
 
-	httpsListenerIsolation  bool
-	initialL7Rules          bool
-	l7PolicyBatchActivation bool
+	httpsListenerIsolation     bool
+	initialL7Rules             bool
+	l7PolicyBatchActivation    bool
+	l7PolicyConditionalRemoval bool
 }
 
 // NewProvider creates an OpenStack provider. The clients are expected to have
@@ -196,9 +198,10 @@ func NewProvider(serviceClients ServiceClients, cfg ProviderConfig) *Provider {
 		xBackendSessionPersistence: cfg.XBackendSessionPersistence,
 		routeSessionPersistence:    cfg.RouteSessionPersistence,
 
-		httpsListenerIsolation:  cfg.HTTPSListenerIsolation,
-		initialL7Rules:          cfg.InitialL7Rules,
-		l7PolicyBatchActivation: cfg.L7PolicyBatchActivation,
+		httpsListenerIsolation:     cfg.HTTPSListenerIsolation,
+		initialL7Rules:             cfg.InitialL7Rules,
+		l7PolicyBatchActivation:    cfg.L7PolicyBatchActivation,
+		l7PolicyConditionalRemoval: cfg.L7PolicyConditionalRemoval,
 	}
 }
 

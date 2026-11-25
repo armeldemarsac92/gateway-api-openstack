@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-The controller can activate prepared path matches on a shared HTTP listener and check their rule predicates. [Build record](image.json) · [Standard qualification](provider/initial-http-predicates/receipt.json)
+A retiring HTTP policy and its two rules were removed in one worker transaction while the other route continued serving. [Build record](image.json) · [Both channel results](provider/conditional-l7-removal/receipt.json)
+
+The controller can activate prepared path matches on a shared HTTP listener and check their rule predicates. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-598db990b3ba3ef2851f4e9cb319e12beb432eb2/image.json) · [Standard qualification](provider/initial-http-predicates/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-598db990b3ba3ef2851f4e9cb319e12beb432eb2)
 
 Weighted Experimental route rules retained per-Service endpoint affinity through a ReferenceGrant change. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-d0cbbc961e58ced3e5c4df01ab33fd9b6d4c7d6a/image.json) · [HTTP and gRPC receipts](provider/weighted-route-session-affinity/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-d0cbbc961e58ced3e5c4df01ab33fd9b6d4c7d6a)
 
