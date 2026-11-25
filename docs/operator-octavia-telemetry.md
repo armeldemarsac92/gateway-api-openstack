@@ -47,6 +47,29 @@ spec:
 
 Inspect the policy’s `status.ancestors` entry for the target Gateway. It reports acceptance and whether the collector reference is permitted and resolved. The Octavia listener exposes its own `otlp_tracing_status`. `PENDING_UPDATE` means Amphora has yet to finish programming the exporter. `ACTIVE` records successful configuration publication and TLS preparation. To check delivery, look for the request’s trace ID in the collector. A collector TLS preparation failure sets the exporter to `ERROR` while the application listener continues serving. [Provider API](https://github.com/armeldemarsac92/octavia/blob/5edd5b1402fd22de33a13fc84d6cc0ab9f38b593/api-ref/source/parameters.yaml#L2074)
 
-This mode uses HTTP/1.1 to the collector and full sampling. It supports a service name, span name and W3C trace context. A collector with an applicable `BackendTLSPolicy` also requires the controller’s backend TLS option and the corresponding regional support. Custom exporter headers, partial sampling, explicit parent-based sampling rules and custom span attributes remain open. [Backend TLS setup](operator-octavia-backend-tls-policy.md)
+The collector uses HTTP/1.1. The default sampling rate is 100%. It supports a service name, span name and W3C trace context. A collector with an applicable `BackendTLSPolicy` also requires the controller’s backend TLS option and the corresponding regional support. Custom exporter headers and custom span attributes remain open. [Backend TLS setup](operator-octavia-backend-tls-policy.md)
+
+## Set base and parent sampling rates
+
+Upgrade the Octavia database, API, workers and eligible Amphora agents, including the matching tracing Lua script. Enable `listener_otlp_sampling_v1` alongside `listener_otlp_tracing_v1` in the region. Run the controller release listed in the build record with `--octavia-telemetry-policy` to apply sampling to an Experimental Gateway. [Controller build](qualification/v1.7.0/image-build.md) · [Octavia packages and image requirements](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-otlp-sampling-dc6b95f72e4a)
+
+To sample one in four new traces and half of the requests with a sampled upstream parent, add the following under `spec.tracing` on your policy.
+
+```yaml
+samplingRate:
+  numerator: 1
+  denominator: 4
+parentBasedSampling:
+  mode: Enabled
+  samplingRate:
+    numerator: 1
+    denominator: 2
+```
+
+With parent-based sampling enabled, a valid unsampled parent produces no exported span. A sampled parent uses the parent rate, which defaults to 100%. Requests without a valid parent use the base rate. With parent-based sampling disabled, all requests use the base rate. A zero numerator disables sampling for that group. Fractions express a probability, so the count can vary from one batch to the next. [Gateway API sampling fields](https://github.com/kubernetes-sigs/gateway-api/blob/v1.7.0/apisx/v1alpha1/xtelemetrypolicy_types.go)
+
+After removing the policy or its collector grant, a previously managed listener reports `otlp_tracing: null`. A status of `PENDING_UPDATE` or `ERROR` keeps the old collector reserved. A status of `ACTIVE` confirms the active HAProxy configuration on all current Amphora peers. The controller can then retire the collector. [Octavia listener contract](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-otlp-sampling-dc6b95f72e4a)
+
+On Experimental, the collector received 68 spans for 128 requests at a base rate of one half. With a sampled parent and a parent rate of one half, it received 62 spans for 128 requests. Across the Experimental scenarios, all 304 requests returned HTTP 200 and the collector received 145 spans matching their downstream trace context. The random trace ID flag survived propagation. After the collector grant was removed, Octavia acknowledged the cleared exporter and the controller retired its pool. All 6 application probes during withdrawal returned HTTP 200. The first measured request after grant restoration produced a matching span. On Standard, both requests returned HTTP 200 with the original trace context and the policy CRD was absent. The first Experimental run stopped when the simulated Amphora reload transport rejected the new publication identifier. The successful retry used the same signed binaries and acknowledged the identifier after HAProxy activated the configuration. These observations use local kind, HAProxy and an OpenTelemetry Collector with simulated cloud infrastructure. [Conditions, propagated flags and collected spans](qualification/v1.7.0/provider/xtelemetry-sampling-evidence/receipt.json)
 
 The local qualification exercises an HTTP collector on kind. Its report records the application response, Gateway and policy status, listener publication state and matching collector span before, during and after withdrawal of the cross-namespace grant. [Local evidence](qualification/v1.7.0/provider/gateway-telemetry-evidence/receipt.json)
