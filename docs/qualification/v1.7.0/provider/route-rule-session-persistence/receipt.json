@@ -1,0 +1,939 @@
+{
+  "sourceRevision": "59871699725eddd20a4def4096f9f03c926c85a7",
+  "image": {
+    "manifestDigest": "sha256:c7066f88296a32d0bd4c459c8fb827cce2bdcfda92c141d9e94dae3faa2f98b7",
+    "configDigest": "sha256:6b6bb69a84f2e29d0b1663d08de1ac24bff2af8e751e71c11a235d6dbedfef98",
+    "ociArchiveSHA256": "55f4b6c4931aa7789183f02b5ced556fa41d9b58f61b59c00968340b879285f8",
+    "managerSHA256": "b7f890ff20ed19392d7c611d84ea9e8a73f351ead866e6ef7863d4a57bc8182d",
+    "platform": "linux/amd64",
+    "sourceRevision": "59871699725eddd20a4def4096f9f03c926c85a7"
+  },
+  "channels": {
+    "standard": {
+      "scope": "Named affinity headers over HTTP and gRPC metadata, named session cookie over HTTP, Endpoint member mode, one core Service backendRef per rule. Service recreation is observed after controller restart. Traffic is sampled after convergence. No HA/failover, retry, timeout, multi-backend, TLS, NodePort, changing health, kind, real OpenStack region or production claim.",
+      "boundary": "Private envtest Kubernetes API and etcd, installed Octavia WSGI and SQL, Amphora driver and local agent reload over a Flask request context, real HAProxy, HTTP/1.1 and grpcio/h2c origins with two fixture-managed EndpointSlice endpoints. Keystone, Neutron, most RPC completions, agent network transport, systemd and VIP advertisement use local fixtures.",
+      "kubernetesVersion": "v1.36.2",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "gatewayAPIBundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "schema": {
+        "HTTPRoute": {
+          "inlineField": false,
+          "v1SchemaSHA256": "e81367d0d592831956921a7fb9151e98e88276d277b639812cc5e7937d38069c"
+        },
+        "GRPCRoute": {
+          "inlineField": false,
+          "v1SchemaSHA256": "13979026df5e01d60a2f77d2b4c68911a61874b41fe084f0398e9b185fa4c6e3"
+        }
+      },
+      "octavia": {
+        "revision": "bb8bf986b57ad0acef3f29676e4ae436fbdd30f7",
+        "version": "19.0.1.dev92",
+        "sha256": "9dd6335d82c76656d54a2dc792f260030b7e4342118f38fd9e009181894b74c0",
+        "filesVerified": 670
+      },
+      "octaviaLib": {
+        "revision": "eb4c646b59758334629feb99d517f938c8af3712",
+        "version": "3.12.1.dev21",
+        "sha256": "a184a491c44d654317c6d1ae3225e3bed73f1eb8632132291ce01953e28dfa5d",
+        "filesVerified": 24
+      },
+      "octaviaAPIVersion": "v2.30",
+      "haproxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1",
+        "sha256": "57ce7ace05aa5a094ac71726dcce65e89971d521c3528de1c6c198a3918132e8"
+      },
+      "grpcio": "1.83.0",
+      "verifiedAmphoraCapabilities": [
+        "backend_h2c_v1",
+        "fixed_http_responses_v1",
+        "grpc_content_type_v1",
+        "http_cookie_name_v1",
+        "http_header_persistence_v1"
+      ],
+      "initialServiceUIDSHA256": "68340898c28b5813382271ae561a958a289c9c2f55e2bb98ad6b254e4e8024c1",
+      "phases": {
+        "initial": {
+          "label": "initial",
+          "status": {
+            "HTTPRoute": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "listenerConditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts",
+                "Programmed": "True/Programmed"
+              },
+              "storedInlineSettings": [
+                null,
+                null
+              ]
+            },
+            "GRPCRoute": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+              },
+              "listenerConditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts",
+                "Programmed": "True/Programmed"
+              },
+              "storedInlineSettings": [
+                null,
+                null
+              ]
+            }
+          },
+          "provider": {
+            "activeHAProxyConfigSHA256": "1d7e23f74fd64f3b9c58e42233c6c3e53341590192a603a4402d5289b8dfec0d",
+            "HAProxyReloads": 6,
+            "poolIDsSHA256": [
+              "48cb7119f572592159bf4632b15b610374e25273520f112e4e15cbd1cdbb771d",
+              "8c2dc96e2cb17e2a8ca48ef5f17a6334b4d0510e190cc7482a42d726a4aaf029"
+            ],
+            "paths": {
+              "http/selected": {
+                "poolSHA256": "48cb7119f572592159bf4632b15b610374e25273520f112e4e15cbd1cdbb771d",
+                "poolNameSHA256": "429054a66315241c0dab10239620d2cb3ac16e58e983b7426f931b8cd03622fe",
+                "persistence": null,
+                "headerPersistenceError": false,
+                "endpointPairs": [
+                  [
+                    "198.51.100.5",
+                    28080
+                  ],
+                  [
+                    "198.51.100.6",
+                    28080
+                  ]
+                ],
+                "protocol": "HTTP",
+                "backendH2C": false,
+                "algorithm": "ROUND_ROBIN",
+                "nativeServerCount": 2,
+                "nativeHeader": false,
+                "nativeCookie": false,
+                "nativeSelected": true
+              },
+              "http/sibling": {
+                "poolSHA256": "48cb7119f572592159bf4632b15b610374e25273520f112e4e15cbd1cdbb771d",
+                "poolNameSHA256": "429054a66315241c0dab10239620d2cb3ac16e58e983b7426f931b8cd03622fe",
+                "persistence": null,
+                "headerPersistenceError": false,
+                "endpointPairs": [
+                  [
+                    "198.51.100.5",
+                    28080
+                  ],
+                  [
+                    "198.51.100.6",
+                    28080
+                  ]
+                ],
+                "protocol": "HTTP",
+                "backendH2C": false,
+                "algorithm": "ROUND_ROBIN",
+                "nativeServerCount": 2,
+                "nativeHeader": false,
+                "nativeCookie": false,
+                "nativeSelected": true
+              },
+              "grpc/selected": {
+                "poolSHA256": "8c2dc96e2cb17e2a8ca48ef5f17a6334b4d0510e190cc7482a42d726a4aaf029",
+                "poolNameSHA256": "834afc7194546e2995167663e10cadcdb3dcda17b3409a8eddd447f6fba50078",
+                "persistence": null,
+                "headerPersistenceError": false,
+                "endpointPairs": [
+                  [
+                    "198.51.100.5",
+                    28081
+                  ],
+                  [
+                    "198.51.100.6",
+                    28081
+                  ]
+                ],
+                "protocol": "HTTP",
+                "backendH2C": true,
+                "algorithm": "ROUND_ROBIN",
+                "nativeServerCount": 2,
+                "nativeHeader": false,
+                "nativeCookie": false,
+                "nativeSelected": true
+              },
+              "grpc/sibling": {
+                "poolSHA256": "8c2dc96e2cb17e2a8ca48ef5f17a6334b4d0510e190cc7482a42d726a4aaf029",
+                "poolNameSHA256": "834afc7194546e2995167663e10cadcdb3dcda17b3409a8eddd447f6fba50078",
+                "persistence": null,
+                "headerPersistenceError": false,
+                "endpointPairs": [
+                  [
+                    "198.51.100.5",
+                    28081
+                  ],
+                  [
+                    "198.51.100.6",
+                    28081
+                  ]
+                ],
+                "protocol": "HTTP",
+                "backendH2C": true,
+                "algorithm": "ROUND_ROBIN",
+                "nativeServerCount": 2,
+                "nativeHeader": false,
+                "nativeCookie": false,
+                "nativeSelected": true
+              }
+            }
+          },
+          "traffic": {
+            "http/selected": {
+              "peers": [
+                "peer-a",
+                "peer-b",
+                "peer-a",
+                "peer-b"
+              ],
+              "noAffinityResponse": true
+            },
+            "http/sibling": {
+              "peers": [
+                "peer-a",
+                "peer-b",
+                "peer-a",
+                "peer-b"
+              ],
+              "noAffinityResponse": true
+            },
+            "grpc/selected": {
+              "peers": [
+                "peer-a",
+                "peer-b",
+                "peer-a",
+                "peer-b"
+              ],
+              "noAffinityResponse": true
+            },
+            "grpc/sibling": {
+              "peers": [
+                "peer-a",
+                "peer-b",
+                "peer-a",
+                "peer-b"
+              ],
+              "noAffinityResponse": true
+            }
+          }
+        }
+      },
+      "rawReceiptSHA256": "e1ae324392ace1b274ea69d4b1b1694813289f556acbddd9ca5e6d16b88c2ed3"
+    },
+    "experimental": {
+      "scope": "Named affinity headers over HTTP and gRPC metadata, named session cookie over HTTP, Endpoint member mode, one core Service backendRef per rule. Service recreation is observed after controller restart. Traffic is sampled after convergence. No HA/failover, retry, timeout, multi-backend, TLS, NodePort, changing health, kind, real OpenStack region or production claim.",
+      "boundary": "Private envtest Kubernetes API and etcd, installed Octavia WSGI and SQL, Amphora driver and local agent reload over a Flask request context, real HAProxy, HTTP/1.1 and grpcio/h2c origins with two fixture-managed EndpointSlice endpoints. Keystone, Neutron, most RPC completions, agent network transport, systemd and VIP advertisement use local fixtures.",
+      "kubernetesVersion": "v1.36.2",
+      "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+      "gatewayAPIBundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "schema": {
+        "HTTPRoute": {
+          "inlineField": true,
+          "v1SchemaSHA256": "546462fb2d792a243be2858584b265581dedacf674ae97bfce7d6e40dd1d4e1d"
+        },
+        "GRPCRoute": {
+          "inlineField": true,
+          "v1SchemaSHA256": "eac8eb2e2149022ff3b187d9658ad7a9fead312093cb9501ded1a2f8ba886fc2"
+        }
+      },
+      "octavia": {
+        "revision": "bb8bf986b57ad0acef3f29676e4ae436fbdd30f7",
+        "version": "19.0.1.dev92",
+        "sha256": "9dd6335d82c76656d54a2dc792f260030b7e4342118f38fd9e009181894b74c0",
+        "filesVerified": 670
+      },
+      "octaviaLib": {
+        "revision": "eb4c646b59758334629feb99d517f938c8af3712",
+        "version": "3.12.1.dev21",
+        "sha256": "a184a491c44d654317c6d1ae3225e3bed73f1eb8632132291ce01953e28dfa5d",
+        "filesVerified": 24
+      },
+      "octaviaAPIVersion": "v2.30",
+      "haproxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1-route-retry-backoff-v1-grpc-mirror-v1",
+        "sha256": "57ce7ace05aa5a094ac71726dcce65e89971d521c3528de1c6c198a3918132e8"
+      },
+      "grpcio": "1.83.0",
+      "verifiedAmphoraCapabilities": [
+        "backend_h2c_v1",
+        "fixed_http_responses_v1",
+        "grpc_content_type_v1",
+        "http_cookie_name_v1",
+        "http_header_persistence_v1"
+      ],
+      "initialServiceUIDSHA256": "ce73dec28fc93029e5d11990d4d00488eeed4ed39059820221c8b161fdeac8a7",
+      "phases": {
+        "initial": {
+          "label": "initial",
+          "status": {
+            "HTTPRoute": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+                "gateway-api-openstack.github.io/ServiceSessionConfiguration": "True/Observed"
+              },
+              "listenerConditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts",
+                "Programmed": "True/Programmed"
+              },
+              "storedInlineSettings": [
+                {
+                  "header": {
+                    "name": "x-http-affinity"
+                  },
+                  "type": "Header"
+                },
+                {
+                  "cookie": {
+                    "lifetimeType": "Session",
+                    "name": "sibling-affinity",
+                    "path": "/"
+                  },
+                  "type": "Cookie"
+                }
+              ]
+            },
+            "GRPCRoute": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+                "gateway-api-openstack.github.io/ServiceSessionConfiguration": "True/Observed"
+              },
+              "listenerConditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts",
+                "Programmed": "True/Programmed"
+              },
+              "storedInlineSettings": [
+                {
+                  "header": {
+                    "name": "x-grpc-affinity"
+                  },
+                  "type": "Header"
+                },
+                null
+              ]
+            }
+          },
+          "provider": {
+            "activeHAProxyConfigSHA256": "7812ba7c6b85fe9bf0c9618df39d7a8b4afda34c165264caf7e11baca0abcb47",
+            "HAProxyReloads": 6,
+            "poolIDsSHA256": [
+              "2f64d8afc97bce596ffe4011992c5bb0c11ea08a81f8fa111a9598f8c2c08cad",
+              "6751dadea98af0a01ba53b18a05b1a9fe8a82ad2b1f38a88dbcb63517070866f",
+              "9c2eedb8e4de63975fe0c47022e6b025a555c09199b47bd2341270af86b4a793",
+              "e7d00b35e2b3dbe491d18538fb0461c673ac76caf3c4f8169706422653704bba"
+            ],
+            "paths": {
+              "http/selected": {
+                "poolSHA256": "9c2eedb8e4de63975fe0c47022e6b025a555c09199b47bd2341270af86b4a793",
+                "poolNameSHA256": "5188d75cf7b2054db9ee98e9d041d070d189271e25532c7d38019c5449ed99dd",
+                "persistence": {
+                  "type": "HTTP_HEADER",
+                  "header_name": "x-http-affinity"
+                },
+                "headerPersistenceError": false,
+                "endpointPairs": [
+                  [
+                    "198.51.100.5",
+                    28080
+                  ],
+                  [
+                    "198.51.100.6",
+                    28080
+                  ]
+                ],
+                "protocol": "HTTP",
+                "backendH2C": false,
+                "algorithm": "ROUND_ROBIN",
+                "nativeServerCount": 2,
+                "nativeHeader": true,
+                "nativeCookie": false,
+                "nativeSelected": true
+              },
+              "http/sibling": {
+                "poolSHA256": "e7d00b35e2b3dbe491d18538fb0461c673ac76caf3c4f8169706422653704bba",
+                "poolNameSHA256": "42106bd970c4b4926f6a6a4d310ed171cb356409d5885bb8aaba1fcdfe1494a5",
+                "persistence": {
+                  "type": "HTTP_COOKIE",
+                  "cookie_name": "sibling-affinity"
+                },
+                "headerPersistenceError": false,
+                "endpointPairs": [
+                  [
+                    "198.51.100.5",
+                    28080
+                  ],
+                  [
+                    "198.51.100.6",
+                    28080
+                  ]
+                ],
+                "protocol": "HTTP",
+                "backendH2C": false,
+                "algorithm": "ROUND_ROBIN",
+                "nativeServerCount": 2,
+                "nativeHeader": false,
+                "nativeCookie": true,
+                "nativeSelected": true
+              },
+              "grpc/selected": {
+                "poolSHA256": "2f64d8afc97bce596ffe4011992c5bb0c11ea08a81f8fa111a9598f8c2c08cad",
+                "poolNameSHA256": "20aae9c08b140b7e71907e3fba46e05172eba8fdf3787821534c16df7e000110",
+                "persistence": {
+                  "type": "HTTP_HEADER",
+                  "header_name": "x-grpc-affinity"
+                },
+                "headerPersistenceError": false,
+                "endpointPairs": [
+                  [
+                    "198.51.100.5",
+                    28081
+                  ],
+                  [
+                    "198.51.100.6",
+                    28081
+                  ]
+                ],
+                "protocol": "HTTP",
+                "backendH2C": true,
+                "algorithm": "ROUND_ROBIN",
+                "nativeServerCount": 2,
+                "nativeHeader": true,
+                "nativeCookie": false,
+                "nativeSelected": true
+              },
+              "grpc/sibling": {
+                "poolSHA256": "6751dadea98af0a01ba53b18a05b1a9fe8a82ad2b1f38a88dbcb63517070866f",
+                "poolNameSHA256": "834afc7194546e2995167663e10cadcdb3dcda17b3409a8eddd447f6fba50078",
+                "persistence": null,
+                "headerPersistenceError": false,
+                "endpointPairs": [
+                  [
+                    "198.51.100.5",
+                    28081
+                  ],
+                  [
+                    "198.51.100.6",
+                    28081
+                  ]
+                ],
+                "protocol": "HTTP",
+                "backendH2C": true,
+                "algorithm": "ROUND_ROBIN",
+                "nativeServerCount": 2,
+                "nativeHeader": false,
+                "nativeCookie": false,
+                "nativeSelected": true
+              }
+            }
+          },
+          "traffic": {
+            "http/selected": {
+              "firstPeer": "peer-a",
+              "tokenSHA256": "b24f4eab6bb589d71ebd538be7bcb62be84a35137b40d9c17827fd9826a7d781",
+              "replayPeers": [
+                "peer-a",
+                "peer-a",
+                "peer-a"
+              ],
+              "sameHeaderOnReplay": true
+            },
+            "http/sibling": {
+              "firstPeer": "peer-a",
+              "cookieSHA256": "d9144cae541eb8e5038445cea38e75184db937b3cb004f5c7ded7cb3cee68386",
+              "replayPeers": [
+                "peer-a",
+                "peer-a",
+                "peer-a"
+              ]
+            },
+            "grpc/selected": {
+              "firstPeer": "peer-a",
+              "tokenSHA256": "1dca713cc24dd06294d220740b8f4bcaa146fd416377588cae7a412b9ee5a278",
+              "replayPeers": [
+                "peer-a",
+                "peer-a",
+                "peer-a"
+              ],
+              "sameHeaderOnReplay": true
+            },
+            "grpc/sibling": {
+              "peers": [
+                "peer-a",
+                "peer-b",
+                "peer-a",
+                "peer-b"
+              ],
+              "noAffinityResponse": true
+            }
+          }
+        },
+        "service-recreated": {
+          "recreation": {
+            "newUIDSHA256": "b3a729af660b1c5b9a98d5b4e709b55a55544625d23bc87b0d45aa95b9c84de9",
+            "samePortsAndEndpoints": true,
+            "oldPoolPresentBeforeRestart": true
+          },
+          "label": "service-recreated",
+          "status": {
+            "HTTPRoute": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+                "gateway-api-openstack.github.io/ServiceSessionConfiguration": "True/Observed"
+              },
+              "listenerConditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts",
+                "Programmed": "True/Programmed"
+              },
+              "storedInlineSettings": [
+                {
+                  "header": {
+                    "name": "x-http-affinity"
+                  },
+                  "type": "Header"
+                },
+                {
+                  "cookie": {
+                    "lifetimeType": "Session",
+                    "name": "sibling-affinity",
+                    "path": "/"
+                  },
+                  "type": "Cookie"
+                }
+              ]
+            },
+            "GRPCRoute": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+                "gateway-api-openstack.github.io/ServiceSessionConfiguration": "True/Observed"
+              },
+              "listenerConditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts",
+                "Programmed": "True/Programmed"
+              },
+              "storedInlineSettings": [
+                {
+                  "header": {
+                    "name": "x-grpc-affinity"
+                  },
+                  "type": "Header"
+                },
+                null
+              ]
+            }
+          },
+          "provider": {
+            "activeHAProxyConfigSHA256": "ad63c85269fc1ecd8722f324e9894ea484fd2846edeb1d237ebd92c8199f6040",
+            "HAProxyReloads": 46,
+            "poolIDsSHA256": [
+              "42a8ae3d49d61b07a270c88a95a577807d1a0680706f9a868b06892eb759c070",
+              "6751dadea98af0a01ba53b18a05b1a9fe8a82ad2b1f38a88dbcb63517070866f",
+              "70e3c16a3f42fa6f378bc9927abf6c202ecd7a351949ee645b3e3b1cb1de18c1",
+              "953911a640466df05b2e82fd8e48dd50a71f551f89fd334d46e8f46a9e878142"
+            ],
+            "paths": {
+              "http/selected": {
+                "poolSHA256": "70e3c16a3f42fa6f378bc9927abf6c202ecd7a351949ee645b3e3b1cb1de18c1",
+                "poolNameSHA256": "ec4a0fb6d17616a17278ce2609b55101a4bce85a7e2ef1455d7ef70ad274c72a",
+                "persistence": {
+                  "type": "HTTP_HEADER",
+                  "header_name": "x-http-affinity"
+                },
+                "headerPersistenceError": false,
+                "endpointPairs": [
+                  [
+                    "198.51.100.5",
+                    28080
+                  ],
+                  [
+                    "198.51.100.6",
+                    28080
+                  ]
+                ],
+                "protocol": "HTTP",
+                "backendH2C": false,
+                "algorithm": "ROUND_ROBIN",
+                "nativeServerCount": 2,
+                "nativeHeader": true,
+                "nativeCookie": false,
+                "nativeSelected": true
+              },
+              "http/sibling": {
+                "poolSHA256": "42a8ae3d49d61b07a270c88a95a577807d1a0680706f9a868b06892eb759c070",
+                "poolNameSHA256": "8820a8ec408bc301ba0e3e86450b8ce6310da1f8f31f9090802bb115d91679e2",
+                "persistence": {
+                  "type": "HTTP_COOKIE",
+                  "cookie_name": "sibling-affinity"
+                },
+                "headerPersistenceError": false,
+                "endpointPairs": [
+                  [
+                    "198.51.100.5",
+                    28080
+                  ],
+                  [
+                    "198.51.100.6",
+                    28080
+                  ]
+                ],
+                "protocol": "HTTP",
+                "backendH2C": false,
+                "algorithm": "ROUND_ROBIN",
+                "nativeServerCount": 2,
+                "nativeHeader": false,
+                "nativeCookie": true,
+                "nativeSelected": true
+              },
+              "grpc/sibling": {
+                "poolSHA256": "6751dadea98af0a01ba53b18a05b1a9fe8a82ad2b1f38a88dbcb63517070866f",
+                "poolNameSHA256": "834afc7194546e2995167663e10cadcdb3dcda17b3409a8eddd447f6fba50078",
+                "persistence": null,
+                "headerPersistenceError": false,
+                "endpointPairs": [
+                  [
+                    "198.51.100.5",
+                    28081
+                  ],
+                  [
+                    "198.51.100.6",
+                    28081
+                  ]
+                ],
+                "protocol": "HTTP",
+                "backendH2C": true,
+                "algorithm": "ROUND_ROBIN",
+                "nativeServerCount": 2,
+                "nativeHeader": false,
+                "nativeCookie": false,
+                "nativeSelected": true
+              },
+              "grpc/selected": {
+                "poolSHA256": "953911a640466df05b2e82fd8e48dd50a71f551f89fd334d46e8f46a9e878142",
+                "poolNameSHA256": "e9b63de630acb8060e301657efbeaffabb8dc7df125b82c73d7d22317d700af7",
+                "persistence": {
+                  "type": "HTTP_HEADER",
+                  "header_name": "x-grpc-affinity"
+                },
+                "headerPersistenceError": false,
+                "endpointPairs": [
+                  [
+                    "198.51.100.5",
+                    28081
+                  ],
+                  [
+                    "198.51.100.6",
+                    28081
+                  ]
+                ],
+                "protocol": "HTTP",
+                "backendH2C": true,
+                "algorithm": "ROUND_ROBIN",
+                "nativeServerCount": 2,
+                "nativeHeader": true,
+                "nativeCookie": false,
+                "nativeSelected": true
+              }
+            }
+          },
+          "traffic": {
+            "http/selected": {
+              "oldTokenSHA256": "b24f4eab6bb589d71ebd538be7bcb62be84a35137b40d9c17827fd9826a7d781",
+              "peers": [
+                "peer-a",
+                "peer-b",
+                "peer-a",
+                "peer-b",
+                "peer-a",
+                "peer-b"
+              ],
+              "allTokensReplaced": true,
+              "replacementTokenSHA256": [
+                "47106d9efca70ee3fa647ffbbc3158089b76396e9628549c74cebfcc196e7f4e",
+                "7b2c2abae2ef0b1c52ce378a0794c9ee6fde4a65e9ea488d7b7b8a75dabf7faf",
+                "cdfb9b73dcf019a3024df79ac0d3569641e74e678e86f0377a80a5fac3c4dd22",
+                "d0c1f7cea9fa32e3f6b30f053145f6e770f33503696d0d786595230b628fd321",
+                "d33f65b0e21182db24e3c81e9959f56f13dc23782dc002da962378ffa4ab88ea",
+                "f4d42d8fb16a213b4765b482c75f8b507245fc88331896b331c0630d2a7b3fd5"
+              ],
+              "firstPeer": "peer-a",
+              "tokenSHA256": "59582e7bff47518f759e83735f365a5a1d496e26f2771281a79c4b70fa458378",
+              "replayPeers": [
+                "peer-a",
+                "peer-a",
+                "peer-a"
+              ],
+              "sameHeaderOnReplay": true
+            },
+            "http/sibling": {
+              "firstPeer": "peer-a",
+              "cookieSHA256": "d9144cae541eb8e5038445cea38e75184db937b3cb004f5c7ded7cb3cee68386",
+              "replayPeers": [
+                "peer-a",
+                "peer-a",
+                "peer-a"
+              ]
+            },
+            "grpc/selected": {
+              "firstPeer": "peer-a",
+              "tokenSHA256": "c35afb9fe162b7c2bf96d8f931621b7852a5bfedad07ddfa5584aae5abfbf44b",
+              "replayPeers": [
+                "peer-a",
+                "peer-a",
+                "peer-a"
+              ],
+              "sameHeaderOnReplay": true
+            },
+            "grpc/sibling": {
+              "peers": [
+                "peer-a",
+                "peer-b",
+                "peer-a",
+                "peer-b"
+              ],
+              "noAffinityResponse": true
+            }
+          }
+        },
+        "http-affinity-withdrawn": {
+          "label": "http-affinity-withdrawn",
+          "status": {
+            "HTTPRoute": {
+              "generation": 2,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+                "gateway-api-openstack.github.io/ServiceSessionConfiguration": "True/Observed"
+              },
+              "listenerConditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts",
+                "Programmed": "True/Programmed"
+              },
+              "storedInlineSettings": [
+                null,
+                {
+                  "cookie": {
+                    "lifetimeType": "Session",
+                    "name": "sibling-affinity",
+                    "path": "/"
+                  },
+                  "type": "Cookie"
+                }
+              ]
+            },
+            "GRPCRoute": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+                "gateway-api-openstack.github.io/ServiceSessionConfiguration": "True/Observed"
+              },
+              "listenerConditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "Conflicted": "False/NoConflicts",
+                "Programmed": "True/Programmed"
+              },
+              "storedInlineSettings": [
+                {
+                  "header": {
+                    "name": "x-grpc-affinity"
+                  },
+                  "type": "Header"
+                },
+                null
+              ]
+            }
+          },
+          "provider": {
+            "activeHAProxyConfigSHA256": "c3b31af9202e9e02de0420b00df385c503849d141d0e3b6266d12954a777a020",
+            "HAProxyReloads": 61,
+            "poolIDsSHA256": [
+              "42a8ae3d49d61b07a270c88a95a577807d1a0680706f9a868b06892eb759c070",
+              "6751dadea98af0a01ba53b18a05b1a9fe8a82ad2b1f38a88dbcb63517070866f",
+              "953911a640466df05b2e82fd8e48dd50a71f551f89fd334d46e8f46a9e878142",
+              "f61a4868d72508d2081f487cb621b8ed2b1cc75317c43ea472a77f4a59e9ea2d"
+            ],
+            "paths": {
+              "http/sibling": {
+                "poolSHA256": "42a8ae3d49d61b07a270c88a95a577807d1a0680706f9a868b06892eb759c070",
+                "poolNameSHA256": "8820a8ec408bc301ba0e3e86450b8ce6310da1f8f31f9090802bb115d91679e2",
+                "persistence": {
+                  "type": "HTTP_COOKIE",
+                  "cookie_name": "sibling-affinity"
+                },
+                "headerPersistenceError": false,
+                "endpointPairs": [
+                  [
+                    "198.51.100.5",
+                    28080
+                  ],
+                  [
+                    "198.51.100.6",
+                    28080
+                  ]
+                ],
+                "protocol": "HTTP",
+                "backendH2C": false,
+                "algorithm": "ROUND_ROBIN",
+                "nativeServerCount": 2,
+                "nativeHeader": false,
+                "nativeCookie": true,
+                "nativeSelected": true
+              },
+              "http/selected": {
+                "poolSHA256": "f61a4868d72508d2081f487cb621b8ed2b1cc75317c43ea472a77f4a59e9ea2d",
+                "poolNameSHA256": "429054a66315241c0dab10239620d2cb3ac16e58e983b7426f931b8cd03622fe",
+                "persistence": null,
+                "headerPersistenceError": false,
+                "endpointPairs": [
+                  [
+                    "198.51.100.5",
+                    28080
+                  ],
+                  [
+                    "198.51.100.6",
+                    28080
+                  ]
+                ],
+                "protocol": "HTTP",
+                "backendH2C": false,
+                "algorithm": "ROUND_ROBIN",
+                "nativeServerCount": 2,
+                "nativeHeader": false,
+                "nativeCookie": false,
+                "nativeSelected": true
+              },
+              "grpc/sibling": {
+                "poolSHA256": "6751dadea98af0a01ba53b18a05b1a9fe8a82ad2b1f38a88dbcb63517070866f",
+                "poolNameSHA256": "834afc7194546e2995167663e10cadcdb3dcda17b3409a8eddd447f6fba50078",
+                "persistence": null,
+                "headerPersistenceError": false,
+                "endpointPairs": [
+                  [
+                    "198.51.100.5",
+                    28081
+                  ],
+                  [
+                    "198.51.100.6",
+                    28081
+                  ]
+                ],
+                "protocol": "HTTP",
+                "backendH2C": true,
+                "algorithm": "ROUND_ROBIN",
+                "nativeServerCount": 2,
+                "nativeHeader": false,
+                "nativeCookie": false,
+                "nativeSelected": true
+              },
+              "grpc/selected": {
+                "poolSHA256": "953911a640466df05b2e82fd8e48dd50a71f551f89fd334d46e8f46a9e878142",
+                "poolNameSHA256": "e9b63de630acb8060e301657efbeaffabb8dc7df125b82c73d7d22317d700af7",
+                "persistence": {
+                  "type": "HTTP_HEADER",
+                  "header_name": "x-grpc-affinity"
+                },
+                "headerPersistenceError": false,
+                "endpointPairs": [
+                  [
+                    "198.51.100.5",
+                    28081
+                  ],
+                  [
+                    "198.51.100.6",
+                    28081
+                  ]
+                ],
+                "protocol": "HTTP",
+                "backendH2C": true,
+                "algorithm": "ROUND_ROBIN",
+                "nativeServerCount": 2,
+                "nativeHeader": true,
+                "nativeCookie": false,
+                "nativeSelected": true
+              }
+            }
+          },
+          "traffic": {
+            "http/selected": {
+              "peers": [
+                "peer-a",
+                "peer-b",
+                "peer-a",
+                "peer-b"
+              ],
+              "noAffinityResponse": true
+            },
+            "http/sibling": {
+              "firstPeer": "peer-a",
+              "cookieSHA256": "d9144cae541eb8e5038445cea38e75184db937b3cb004f5c7ded7cb3cee68386",
+              "replayPeers": [
+                "peer-a",
+                "peer-a",
+                "peer-a"
+              ]
+            },
+            "grpc/selected": {
+              "firstPeer": "peer-a",
+              "tokenSHA256": "f4c2676634da68866d2a285550d15c7d1f52a8c20c2fb1a5fc7b2aad00b66504",
+              "replayPeers": [
+                "peer-a",
+                "peer-a",
+                "peer-a"
+              ],
+              "sameHeaderOnReplay": true
+            },
+            "grpc/sibling": {
+              "peers": [
+                "peer-a",
+                "peer-b",
+                "peer-a",
+                "peer-b"
+              ],
+              "noAffinityResponse": true
+            }
+          }
+        }
+      },
+      "rawReceiptSHA256": "69cdf7d0f3fd38ae9d4b65b67bdb72d0f94eba4fe1aa330a1756057cb3e6ef68"
+    }
+  }
+}

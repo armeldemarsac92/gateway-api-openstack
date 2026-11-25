@@ -1,0 +1,526 @@
+{
+  "channel": "experimental",
+  "gatewayAPI": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "releaseBundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+  "defaultGatewayDiscovery": "disabled-on-fixtures",
+  "controller": {
+    "tree": "60c3cef8b71ffb9be08a859b13d6d82b00142050",
+    "matchesLocalTree": false,
+    "repository": "ghcr.io/armeldemarsac92/gateway-api-openstack",
+    "sourceRevision": "555f5f4e0557b83f55e24eb134f6edde7dc1f9cb",
+    "sourceLabel": "https://github.com/armeldemarsac92/gateway-api-openstack",
+    "manifestDigest": "sha256:0a3c030ec4f71e617a4b2b9f708eb5cb377e6ee6539fdd5a1eb7bade5d7706f6",
+    "configDigest": "sha256:6638474d89628153b9c494e1cb3beb7133156facf251d6068e5bd3f8c4493545",
+    "platform": "linux/amd64",
+    "entrypoint": "/openstack-gateway-controller",
+    "user": "65532:65532",
+    "ociArchiveSHA256": "968d2d67b475bcaf63791d7ac43ddf7dbab8a36ecd3c4b186c1eaaa7fc8e4c04",
+    "managerSHA256": "c8d709955bcc72fdd3f7ce4352546f68ad8bb0fd8966592d9c33ae1b651272d7",
+    "normalAndNoCacheBuildsMatch": true
+  },
+  "runningManagerSHA256": "c8d709955bcc72fdd3f7ce4352546f68ad8bb0fd8966592d9c33ae1b651272d7",
+  "scope": "local Kind Kubernetes, Octavia WSGI/SQLite, HAProxy and guest Keepalived/IPVS",
+  "kindNodeImage": "localhost/hibiscus-kind-node:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67@sha256:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67",
+  "cleanedUp": true,
+  "upstreamUnchanged": true,
+  "phases": [
+    {
+      "phase": "both-explicit-parents",
+      "routes": {
+        "TCP": {
+          "generation": 1,
+          "useDefaultGateways": "None",
+          "parentRefs": [
+            "tcp-keep",
+            "tcp-withdraw"
+          ],
+          "status": [
+            {
+              "name": "tcp-keep",
+              "listener": "wire",
+              "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+                "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+              }
+            },
+            {
+              "name": "tcp-withdraw",
+              "listener": "wire",
+              "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+                "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+              }
+            }
+          ]
+        },
+        "UDP": {
+          "generation": 1,
+          "useDefaultGateways": "None",
+          "parentRefs": [
+            "udp-keep",
+            "udp-withdraw"
+          ],
+          "status": [
+            {
+              "name": "udp-keep",
+              "listener": "wire",
+              "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+                "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+              }
+            },
+            {
+              "name": "udp-withdraw",
+              "listener": "wire",
+              "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+                "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+              }
+            }
+          ]
+        }
+      },
+      "listenerAttachmentCounts": {
+        "tcp-keep": 1,
+        "tcp-withdraw": 1,
+        "udp-keep": 1,
+        "udp-withdraw": 1
+      },
+      "addresses": {
+        "tcp-keep": "192.0.2.30",
+        "tcp-withdraw": "192.0.2.31",
+        "udp-keep": "192.0.2.32",
+        "udp-withdraw": "192.0.2.33"
+      },
+      "provider": {
+        "tcp-keep": {
+          "loadBalancer": "090c7022f42bec20",
+          "vip": "192.0.2.30",
+          "status": "ACTIVE",
+          "listeners": [
+            {
+              "id": "582408177dbc5459",
+              "port": 19001,
+              "protocol": "TCP",
+              "defaultPool": "dc606ca394846706"
+            }
+          ],
+          "pools": [
+            {
+              "id": "dc606ca394846706",
+              "route": "tcproute-wire",
+              "members": 1
+            }
+          ]
+        },
+        "tcp-withdraw": {
+          "loadBalancer": "dc834bfee13dd556",
+          "vip": "192.0.2.31",
+          "status": "ACTIVE",
+          "listeners": [
+            {
+              "id": "3931a7cbd4cfd63a",
+              "port": 19001,
+              "protocol": "TCP",
+              "defaultPool": "b198e1cd626baf46"
+            }
+          ],
+          "pools": [
+            {
+              "id": "b198e1cd626baf46",
+              "route": "tcproute-wire",
+              "members": 1
+            }
+          ]
+        },
+        "udp-keep": {
+          "loadBalancer": "eeb337d4fd7d993f",
+          "vip": "192.0.2.32",
+          "status": "ACTIVE",
+          "listeners": [
+            {
+              "id": "90fdffc7b1b9acbf",
+              "port": 19002,
+              "protocol": "UDP",
+              "defaultPool": "fcbb7bcbeb1217c3"
+            }
+          ],
+          "pools": [
+            {
+              "id": "fcbb7bcbeb1217c3",
+              "route": "udproute-wire",
+              "members": 1
+            }
+          ]
+        },
+        "udp-withdraw": {
+          "loadBalancer": "855f340eda51e323",
+          "vip": "192.0.2.33",
+          "status": "ACTIVE",
+          "listeners": [
+            {
+              "id": "f1144fdeb29ceb49",
+              "port": 19002,
+              "protocol": "UDP",
+              "defaultPool": "52b9a3bd45dca8e1"
+            }
+          ],
+          "pools": [
+            {
+              "id": "52b9a3bd45dca8e1",
+              "route": "udproute-wire",
+              "members": 1
+            }
+          ]
+        }
+      },
+      "sampleCount": 10,
+      "lastThreeWireSamples": [
+        {
+          "tcp-keep": "valid-echo",
+          "tcp-withdraw": "valid-echo",
+          "udp-keep": "valid-echo",
+          "udp-withdraw": "valid-echo"
+        },
+        {
+          "tcp-keep": "valid-echo",
+          "tcp-withdraw": "valid-echo",
+          "udp-keep": "valid-echo",
+          "udp-withdraw": "valid-echo"
+        },
+        {
+          "tcp-keep": "valid-echo",
+          "tcp-withdraw": "valid-echo",
+          "udp-keep": "valid-echo",
+          "udp-withdraw": "valid-echo"
+        }
+      ]
+    },
+    {
+      "phase": "tcp-second-parent-removed",
+      "routes": {
+        "TCP": {
+          "generation": 2,
+          "useDefaultGateways": "None",
+          "parentRefs": [
+            "tcp-keep"
+          ],
+          "status": [
+            {
+              "name": "tcp-keep",
+              "listener": "wire",
+              "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+                "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+              }
+            }
+          ]
+        },
+        "UDP": {
+          "generation": 1,
+          "useDefaultGateways": "None",
+          "parentRefs": [
+            "udp-keep",
+            "udp-withdraw"
+          ],
+          "status": [
+            {
+              "name": "udp-keep",
+              "listener": "wire",
+              "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+                "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+              }
+            },
+            {
+              "name": "udp-withdraw",
+              "listener": "wire",
+              "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+                "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+              }
+            }
+          ]
+        }
+      },
+      "listenerAttachmentCounts": {
+        "tcp-keep": 1,
+        "tcp-withdraw": 0,
+        "udp-keep": 1,
+        "udp-withdraw": 1
+      },
+      "addresses": {
+        "tcp-keep": "192.0.2.30",
+        "tcp-withdraw": "192.0.2.31",
+        "udp-keep": "192.0.2.32",
+        "udp-withdraw": "192.0.2.33"
+      },
+      "provider": {
+        "tcp-keep": {
+          "loadBalancer": "090c7022f42bec20",
+          "vip": "192.0.2.30",
+          "status": "ACTIVE",
+          "listeners": [
+            {
+              "id": "582408177dbc5459",
+              "port": 19001,
+              "protocol": "TCP",
+              "defaultPool": "dc606ca394846706"
+            }
+          ],
+          "pools": [
+            {
+              "id": "dc606ca394846706",
+              "route": "tcproute-wire",
+              "members": 1
+            }
+          ]
+        },
+        "tcp-withdraw": {
+          "loadBalancer": "dc834bfee13dd556",
+          "vip": "192.0.2.31",
+          "status": "ACTIVE",
+          "listeners": [
+            {
+              "id": "3931a7cbd4cfd63a",
+              "port": 19001,
+              "protocol": "TCP",
+              "defaultPool": null
+            }
+          ],
+          "pools": []
+        },
+        "udp-keep": {
+          "loadBalancer": "eeb337d4fd7d993f",
+          "vip": "192.0.2.32",
+          "status": "ACTIVE",
+          "listeners": [
+            {
+              "id": "90fdffc7b1b9acbf",
+              "port": 19002,
+              "protocol": "UDP",
+              "defaultPool": "fcbb7bcbeb1217c3"
+            }
+          ],
+          "pools": [
+            {
+              "id": "fcbb7bcbeb1217c3",
+              "route": "udproute-wire",
+              "members": 1
+            }
+          ]
+        },
+        "udp-withdraw": {
+          "loadBalancer": "855f340eda51e323",
+          "vip": "192.0.2.33",
+          "status": "ACTIVE",
+          "listeners": [
+            {
+              "id": "f1144fdeb29ceb49",
+              "port": 19002,
+              "protocol": "UDP",
+              "defaultPool": "52b9a3bd45dca8e1"
+            }
+          ],
+          "pools": [
+            {
+              "id": "52b9a3bd45dca8e1",
+              "route": "udproute-wire",
+              "members": 1
+            }
+          ]
+        }
+      },
+      "sampleCount": 3,
+      "lastThreeWireSamples": [
+        {
+          "tcp-keep": "valid-echo",
+          "tcp-withdraw": "closed-before-greeting",
+          "udp-keep": "valid-echo",
+          "udp-withdraw": "valid-echo"
+        },
+        {
+          "tcp-keep": "valid-echo",
+          "tcp-withdraw": "closed-before-greeting",
+          "udp-keep": "valid-echo",
+          "udp-withdraw": "valid-echo"
+        },
+        {
+          "tcp-keep": "valid-echo",
+          "tcp-withdraw": "closed-before-greeting",
+          "udp-keep": "valid-echo",
+          "udp-withdraw": "valid-echo"
+        }
+      ]
+    },
+    {
+      "phase": "udp-second-parent-removed",
+      "routes": {
+        "TCP": {
+          "generation": 2,
+          "useDefaultGateways": "None",
+          "parentRefs": [
+            "tcp-keep"
+          ],
+          "status": [
+            {
+              "name": "tcp-keep",
+              "listener": "wire",
+              "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+                "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+              }
+            }
+          ]
+        },
+        "UDP": {
+          "generation": 2,
+          "useDefaultGateways": "None",
+          "parentRefs": [
+            "udp-keep"
+          ],
+          "status": [
+            {
+              "name": "udp-keep",
+              "listener": "wire",
+              "controller": "gateway-api-openstack.github.io/gateway-api-openstack",
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "ResolvedRefs": "True/ResolvedRefs",
+                "gateway-api-openstack.github.io/Programmed": "True/Programmed",
+                "gateway-api-openstack.github.io/ForwardingTarget": "True/Observed"
+              }
+            }
+          ]
+        }
+      },
+      "listenerAttachmentCounts": {
+        "tcp-keep": 1,
+        "tcp-withdraw": 0,
+        "udp-keep": 1,
+        "udp-withdraw": 0
+      },
+      "addresses": {
+        "tcp-keep": "192.0.2.30",
+        "tcp-withdraw": "192.0.2.31",
+        "udp-keep": "192.0.2.32",
+        "udp-withdraw": "192.0.2.33"
+      },
+      "provider": {
+        "tcp-keep": {
+          "loadBalancer": "090c7022f42bec20",
+          "vip": "192.0.2.30",
+          "status": "ACTIVE",
+          "listeners": [
+            {
+              "id": "582408177dbc5459",
+              "port": 19001,
+              "protocol": "TCP",
+              "defaultPool": "dc606ca394846706"
+            }
+          ],
+          "pools": [
+            {
+              "id": "dc606ca394846706",
+              "route": "tcproute-wire",
+              "members": 1
+            }
+          ]
+        },
+        "tcp-withdraw": {
+          "loadBalancer": "dc834bfee13dd556",
+          "vip": "192.0.2.31",
+          "status": "ACTIVE",
+          "listeners": [
+            {
+              "id": "3931a7cbd4cfd63a",
+              "port": 19001,
+              "protocol": "TCP",
+              "defaultPool": null
+            }
+          ],
+          "pools": []
+        },
+        "udp-keep": {
+          "loadBalancer": "eeb337d4fd7d993f",
+          "vip": "192.0.2.32",
+          "status": "ACTIVE",
+          "listeners": [
+            {
+              "id": "90fdffc7b1b9acbf",
+              "port": 19002,
+              "protocol": "UDP",
+              "defaultPool": "fcbb7bcbeb1217c3"
+            }
+          ],
+          "pools": [
+            {
+              "id": "fcbb7bcbeb1217c3",
+              "route": "udproute-wire",
+              "members": 1
+            }
+          ]
+        },
+        "udp-withdraw": {
+          "loadBalancer": "855f340eda51e323",
+          "vip": "192.0.2.33",
+          "status": "ACTIVE",
+          "listeners": [
+            {
+              "id": "f1144fdeb29ceb49",
+              "port": 19002,
+              "protocol": "UDP",
+              "defaultPool": null
+            }
+          ],
+          "pools": []
+        }
+      },
+      "sampleCount": 3,
+      "lastThreeWireSamples": [
+        {
+          "tcp-keep": "valid-echo",
+          "tcp-withdraw": "closed-before-greeting",
+          "udp-keep": "valid-echo",
+          "udp-withdraw": "ConnectionRefusedError"
+        },
+        {
+          "tcp-keep": "valid-echo",
+          "tcp-withdraw": "closed-before-greeting",
+          "udp-keep": "valid-echo",
+          "udp-withdraw": "ConnectionRefusedError"
+        },
+        {
+          "tcp-keep": "valid-echo",
+          "tcp-withdraw": "closed-before-greeting",
+          "udp-keep": "valid-echo",
+          "udp-withdraw": "ConnectionRefusedError"
+        }
+      ]
+    }
+  ]
+}
