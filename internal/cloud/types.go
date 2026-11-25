@@ -233,6 +233,7 @@ type HTTPPathMatch struct {
 	QueryParams              []HTTPQueryParamMatch `json:",omitempty"`
 	RequestHeaderOperations  []HTTPHeaderOperation `json:",omitempty"`
 	URLRewrite               *HTTPURLRewrite       `json:",omitempty"`
+	RequestPolicy            *HTTPRequestPolicy    `json:",omitempty"`
 	CORS                     *HTTPCORS             `json:",omitempty"`
 	ResponseHeaderOperations []HTTPHeaderOperation `json:",omitempty"`
 }

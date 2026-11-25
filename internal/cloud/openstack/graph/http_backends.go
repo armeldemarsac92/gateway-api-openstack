@@ -126,6 +126,7 @@ func (p *Provider) buildHTTPRoutePartsGraphPlan(desired desiredGatewayGraph, act
 		if fragment.Result.Outcome.State != cloud.OutcomeReady {
 			combined.Outcome = fragment.Result.Outcome
 		}
+		combined.ImplementedRules = combined.ImplementedRules || fragment.Result.ImplementedRules
 		if combined.UnsupportedMatch == "" {
 			combined.UnsupportedMatch = fragment.Result.UnsupportedMatch
 		}
@@ -268,9 +269,14 @@ func planFixedResponseDuringMemberWithdrawal(desired desiredRoute, observed obse
 						return tag == openstackidentity.RequestCORSPolicyTag
 					})
 				}
-				return routeMutation{kind: routeMutationSetPolicyTarget, id: policy.policy.ID,
+				step := routeMutation{kind: routeMutationSetPolicyTarget, id: policy.policy.ID,
 					requestHeaderOperations: operations, responseHeaderOperations: responsePatch,
-					requestURLRewriteUpdate: rewritePatch, requestCORSUpdate: corsPatch}, true
+					requestURLRewriteUpdate: rewritePatch, requestCORSUpdate: corsPatch,
+					retry: policy.policy.ProvisioningStatus == "ERROR", withdrawHTTPPolicy: true}
+				if policy.hasHTTPRequestPolicy() {
+					step.clearHTTPRequestPolicy(policy)
+				}
+				return step, true
 			}
 		}
 	}
@@ -354,7 +360,8 @@ func observedForwardPolicyMatches(route desiredRoute, observed observedRouteGrap
 		return false
 	}
 	return slices.ContainsFunc(route.policies, func(wanted desiredPolicy) bool {
-		if wanted.role != policy.role || wanted.httpsListenerHostname != policy.httpsListenerHostname || !observedHTTPPredicateMatches(policy, rulesFor(wanted, route.hostnameRuleValue)) {
+		if wanted.role != policy.role || wanted.httpsListenerHostname != policy.httpsListenerHostname ||
+			!wanted.requestPolicyMatches(policy) || !observedHTTPPredicateMatches(policy, rulesFor(wanted, route.hostnameRuleValue)) {
 			return false
 		}
 		switch {

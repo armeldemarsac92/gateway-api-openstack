@@ -203,9 +203,14 @@ func compileRoute(route *gatewayv1.HTTPRoute, input Input) Route {
 	for i, rule := range route.Spec.Rules {
 		// Rule names identify API sections. The index groups matches by rule and breaks precedence ties.
 		compiled := Rule{Index: i, Backends: ResolveBackends(route, rule, input)}
-		if rule.Timeouts != nil || rule.Retry != nil || rule.SessionPersistence != nil { //nolint:staticcheck // The release still serves this deprecated Experimental field.
-			compiled.Diagnostics = append(compiled.Diagnostics, *unsupported("timeouts, retries, and session persistence are not implemented", ScopeRule))
+		if rule.SessionPersistence != nil { //nolint:staticcheck // The release still serves this deprecated Experimental field.
+			compiled.Diagnostics = append(compiled.Diagnostics, *unsupported("session persistence is not implemented", ScopeRule))
 		}
+		requestPolicy, diagnostic := NormalizeHTTPRequestPolicy(rule, input.HTTPRequestPolicy && HTTPProfileRouteKind(route) == HTTPRouteKind)
+		if diagnostic != nil {
+			compiled.Diagnostics = append(compiled.Diagnostics, *diagnostic)
+		}
+		compiled.RequestPolicy = requestPolicy
 		if len(rule.Filters) == 1 && rule.Filters[0].Type == gatewayv1.HTTPRouteFilterRequestRedirect {
 			redirect, err := NormalizeRequestRedirect(rule, input.HTTPRequestRedirect)
 			if err != nil {

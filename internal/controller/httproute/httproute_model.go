@@ -108,6 +108,9 @@ func (r *Reconciler) admittedHTTPRouteRules(route *gatewayv1.HTTPRoute) ([]gatew
 	var dropped []string
 	var valid []gatewayv1.HTTPRouteRule
 	for index, rule := range route.Spec.Rules {
+		if _, diagnostic := model.NormalizeHTTPRequestPolicy(rule, !grpc && r.Config.HTTPRequestPolicy); diagnostic != nil {
+			return nil, "", newRouteBuildError(routeErrorUnsupported, "%s", diagnostic.Message)
+		}
 		err := r.validateRouteRule(rule, grpc)
 		if err == nil {
 			valid = append(valid, rule)
@@ -167,6 +170,9 @@ func (r *Reconciler) usesHTTPBackendGroups(route *gatewayv1.HTTPRoute) bool {
 		return false
 	}
 	rule := rules[0]
+	if model.HasHTTPRequestPolicy(rule) {
+		return true
+	}
 	if r.Config.XBackendEnabled() && model.HTTPProfileRouteKind(route) == model.HTTPRouteKind {
 		for _, ref := range rule.BackendRefs {
 			if _, supported := model.XBackendReference(route.Namespace, ref.BackendObjectReference); supported {
@@ -188,8 +194,8 @@ func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, grpc bool) 
 	exactHeaders := r.Config.HTTPHeaderExact
 	exactQueryParams := r.Config.HTTPQueryParamExact && r.Config.FixedHTTPResponses && !grpc
 	methodMatch := r.Config.HTTPMethodMatch && !grpc
-	if rule.Timeouts != nil || rule.Retry != nil || rule.SessionPersistence != nil { //nolint:staticcheck // The release still serves this deprecated Experimental field.
-		return newRouteBuildError(routeErrorUnsupported, "timeouts, retries, and session persistence are not supported")
+	if rule.SessionPersistence != nil { //nolint:staticcheck // The release still serves this deprecated Experimental field.
+		return newRouteBuildError(routeErrorUnsupported, "session persistence is not supported")
 	}
 	if len(rule.Filters) != 0 || !fixedResponses && !weightedTargets {
 		if err := compileRouteAction(rule, r.Config.RequestHeaderModifier, r.Config.ResponseHeaderModifier && !grpc, r.Config.HTTPRequestRedirect && !grpc, r.Config.HTTPRequestURLRewrite && !grpc, r.Config.HTTPCORS && !grpc); err != nil {
@@ -584,8 +590,10 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 			paths = &spec.WeightedHTTPRules[target.weighted].Matches
 		}
 		var operations []cloud.HTTPHeaderOperation
+		var requestPolicy *cloud.HTTPRequestPolicy
 		if target.pool != nil || target.fixed == nil && target.redirect == nil {
 			operations = rules[match.RuleIndex].RequestHeaderOperations
+			requestPolicy = rules[match.RuleIndex].RequestPolicy
 		}
 		cors := rules[match.RuleIndex].CORS
 		if target.corsFallback {
@@ -599,6 +607,7 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 			ResponseHeaderOperations: rules[match.RuleIndex].ResponseHeaderOperations,
 			URLRewrite:               rules[match.RuleIndex].URLRewrite,
 			CORS:                     cors,
+			RequestPolicy:            requestPolicy,
 		})
 	}
 	return diagnostics, nil

@@ -37,6 +37,7 @@ import (
 
 type desiredGatewayGraph struct {
 	fixedHTTPResponses  bool
+	httpRequestPolicies httpRequestPolicyAvailability
 	plainHTTPRuleLimits map[int]string
 	spec                cloud.GatewayGraphSpec
 	identity            Identity
@@ -132,7 +133,9 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	var addressIssue string
 	var addressBlocked bool
 	var actual observedGatewayGraph
+	var unavailableRequestPolicies unavailableHTTPRequestPolicies
 	defer func() {
+		p.reportUnavailableHTTPRequestPolicies(unavailableRequestPolicies, &result)
 		if retErr == nil {
 			result.Gateway.ScopedTLSClosedPorts = actual.closedDeniedHTTPSPorts(spec.Gateway.Spec)
 		} else {
@@ -345,9 +348,11 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 			}
 		}
 	}
+	unavailableRequestPolicies = p.gateHTTPRequestPolicies(ctx, &desired, actual)
 	var plan []graphMutation
 	defaultPool := usesDefaultPool(actual.protocol)
 	planBeforeSecurity := isSNIProtocol(actual.protocol) || defaultPool || actual.scoped && actual.protocol == cloud.ListenerProtocolHTTP || hasHTTPRouteParts(desired, actual) ||
+		desired.httpRequestPolicies != httpRequestPolicyAvailable ||
 		len(desired.spec.Gateway.Spec.HTTPListenerHostnames) != 0 || observedPlainHTTPExclusions(actual.routes) || containsObservedRequestURLRewrite(actual.routes) || containsObservedCORS(actual.routes)
 	if planBeforeSecurity {
 		plan, result, err = p.buildGatewayGraphPlan(desired, actual)
@@ -373,6 +378,14 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		if p.grpcContentType {
 			plan, _ = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, grpcContentTypePredicate)
 		}
+	}
+	if desired.httpRequestPolicies == httpRequestPolicyUnverified && len(plan) != 0 {
+		// Preserve the observed configuration while discovery is unavailable.
+		// Permission withdrawals are urgent and do not authorize other writes.
+		if !canWithdrawWithoutHTTPRequestPolicyDiscovery(desired, plan[0]) {
+			return result, nil
+		}
+		plan = plan[:1]
 	}
 	if spec.Gateway.Disposition == cloud.GraphEnsure && (len(plan) == 0 || plan[0].kind != graphClearListenerDefaultPool && !plan[0].withdrawHTTPPolicy && !plan[0].isRestrictiveSNI()) {
 		if err := p.validateGraphTrafficSecurity(ctx, desired); err != nil {
@@ -532,10 +545,12 @@ func (p *Provider) reconcileHTTPWithdrawalWithoutAddress(ctx context.Context, de
 		len(actual.routes) != len(desired.routes) {
 		return cloud.GatewayGraphResult{}, actual.addressReadError
 	}
+	unavailable := p.gateHTTPRequestPolicies(ctx, &desired, actual)
 	plan, result, err := p.buildGatewayGraphPlan(desired, actual)
 	if err != nil {
 		return result, err
 	}
+	p.reportUnavailableHTTPRequestPolicies(unavailable, &result)
 	result.Gateway.Outcome = p.progressingOutcome("Waiting to observe the Gateway Floating IP inventory")
 	plan = p.protectRequestRedirectTraffic(ctx, desired, actual, plan, &result)
 	if !isHTTPListenerWithdrawal(plan) {

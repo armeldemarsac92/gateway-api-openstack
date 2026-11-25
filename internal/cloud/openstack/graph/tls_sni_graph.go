@@ -385,7 +385,8 @@ func (p *Provider) observeSNIGraph(ctx context.Context, desired desiredGatewayGr
 				policy.Action != string(l7policies.ActionRedirectToPool) || row.AdminState == nil || row.ExtendedTargetFields || row.RedirectRequestPresent ||
 				row.RequestHeaderOperationsErr != nil || len(row.RequestHeaderOperations) != 0 ||
 				row.ResponseHeaderOperationsErr != nil || len(row.ResponseHeaderOperations) != 0 || row.RequestURLRewritePresent ||
-				slices.Contains(policy.Tags, openstackidentity.RequestURLRewritePolicyTag) ||
+				slices.Contains(policy.Tags, openstackidentity.RequestURLRewritePolicyTag) || row.HTTPRequestPolicyPresent ||
+				slices.Contains(policy.Tags, openstackidentity.HTTPRequestPolicyTag) ||
 				row.RequestCORSPresent || slices.Contains(policy.Tags, openstackidentity.RequestCORSPolicyTag) || policy.RedirectURL != "" || policy.RedirectPrefix != "" {
 				return actual, fmt.Errorf("%w: invalid TLS SNI policy relationship", cloud.ErrOwnershipConflict)
 			}

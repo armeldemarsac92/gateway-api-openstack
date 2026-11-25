@@ -441,7 +441,13 @@ func (p *routeStatusPlan) updateParentStatuses(config controller.Config, route *
 		}
 	}
 	transitioned := false
+	requiresPolicyReadback := slices.ContainsFunc(route.Spec.Rules, model.HasHTTPRequestPolicy)
 	for index, update := range p.updates {
+		if requiresPolicyReadback && !update.status.implementedRules && update.status.accepted == metav1.ConditionTrue && update.status.programmed != metav1.ConditionTrue {
+			update.status.accepted = metav1.ConditionUnknown
+			update.status.acceptedReason = string(gatewayv1.RouteReasonPending)
+			update.status.acceptedMessage = update.status.programmedMessage
+		}
 		if parentStatusUpdateAppearedEarlier(route.Namespace, p.updates, index) {
 			continue
 		}
@@ -468,13 +474,19 @@ func (p *routeStatusPlan) updateParentStatuses(config controller.Config, route *
 		}
 		controller.SetCondition(&parentStatus.Conditions, controller.Condition(string(gatewayv1.RouteConditionAccepted), update.status.accepted, update.status.acceptedReason, update.status.acceptedMessage, route.Generation))
 		partial := string(gatewayv1.RouteConditionPartiallyInvalid)
-		if (p.droppedRules != "" || p.corsFallback) && update.status.accepted == metav1.ConditionTrue {
+		if (p.droppedRules != "" || p.corsFallback || update.status.partiallyInvalid != "") && update.status.accepted == metav1.ConditionTrue {
 			message := p.droppedRules
-			if p.corsFallback {
+			addDiagnostic := func(diagnostic string) {
 				if message != "" {
 					message += ". "
 				}
-				message += "CORS could not be applied to rules returning a fixed 500 response for an unresolved backend"
+				message += diagnostic
+			}
+			if p.corsFallback {
+				addDiagnostic("CORS could not be applied to rules returning a fixed 500 response for an unresolved backend")
+			}
+			if update.status.partiallyInvalid != "" {
+				addDiagnostic(update.status.partiallyInvalid)
 			}
 			controller.SetCondition(&parentStatus.Conditions, controller.Condition(partial, metav1.ConditionTrue,
 				string(gatewayv1.RouteReasonUnsupportedValue), message, route.Generation))

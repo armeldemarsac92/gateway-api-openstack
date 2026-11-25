@@ -1,0 +1,985 @@
+{
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "controller": "7dd654d66039eea44be7839a381c4e0426d85e9d",
+  "image": {
+    "repository": "ghcr.io/armeldemarsac92/gateway-api-openstack",
+    "sourceRevision": "7dd654d66039eea44be7839a381c4e0426d85e9d",
+    "sourceLabel": "https://github.com/armeldemarsac92/gateway-api-openstack",
+    "manifestDigest": "sha256:e4476ec68494ec4f1687e8fa047e677ccf94912bd8394128bea5cbb7dca52ed3",
+    "configDigest": "sha256:0b42d05dfd23784e83724f73ad997b5f8214075be127e77fcfd24f1d3cfed301",
+    "platform": "linux/amd64",
+    "entrypoint": "/openstack-gateway-controller",
+    "user": "65532:65532",
+    "ociArchiveSHA256": "3b0c195c9a0ffd8c7e6aa439915b88df237f73255b186c9215edb0f5a81ad9eb",
+    "managerSHA256": "e93e00f43eefe096022e35d734999d719c28400d9d17658d070ca04e0a9e60db",
+    "normalAndNoCacheBuildsMatch": true
+  },
+  "releases": {
+    "octavia": "https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-http-request-policy-78c80bfe3019",
+    "octavia-lib": "https://github.com/armeldemarsac92/octavia-lib/releases/tag/hibiscus-http-request-policy-e436d312428e"
+  },
+  "channels": {
+    "standard": {
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "registeredLauncherSHA256": "adb65bbec98d10a0d4f995b22e9cd9545d5824c66e07487ea608c282fa408652",
+      "kindNodeImage": "localhost/hibiscus-kind-node:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67@sha256:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67",
+      "echoOCIArchiveSHA256": "b7675809fd2cc0b9fb9273f1b0c85c422bc3c12361d66b99b83173ddb2d3c9b7",
+      "octavia": {
+        "revision": "78c80bfe3019368b5dc570ad612bca89ce739301",
+        "version": "19.0.1.dev47",
+        "sha256": "85a578e1935b6d48b25865366e5150301486d74cf49bd9a2cbb5ed547ab6cb62",
+        "filesVerified": 651
+      },
+      "octaviaLib": {
+        "revision": "e436d312428e98ec1c5c3222cbe1199b422c487b",
+        "version": "3.12.1.dev15",
+        "sha256": "ecc9c5986457cddd2f376bb2afc7c6f8eb588cc24911bf098892cee0b3fedcf7",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1",
+        "sha256": "521e1d1f27a5aba10239362df737b616a2d10c5d0112e6071521ac98900ee997"
+      },
+      "connectionRefusal": {
+        "endpoints": [
+          {
+            "address": "198.51.100.11",
+            "port": 3000,
+            "pod": "infra-backend-connection-error-broken-7b4795f97d-mj9qf"
+          },
+          {
+            "address": "198.51.100.12",
+            "port": 3000,
+            "pod": "infra-backend-connection-error-healthy-5987dcd7f7-hddzk"
+          }
+        ],
+        "passed": true,
+        "brokenPodServicePort": "ECONNREFUSED",
+        "brokenPodEchoPort": "CONNECTED",
+        "healthyPodServicePort": "CONNECTED",
+        "HAProxyMemberCounters": {
+          "198.51.100.11": {
+            "status": "UP 1/10",
+            "econ": 0,
+            "wretr": 0,
+            "wredis": 10,
+            "stot": 10
+          },
+          "198.51.100.12": {
+            "status": "UP 1/10",
+            "econ": 0,
+            "wretr": 0,
+            "wredis": 0,
+            "stot": 10
+          }
+        }
+      },
+      "providerReadback": {
+        "passed": true,
+        "expectedPaths": [
+          "/backend-timeout",
+          "/disable-backend-timeout",
+          "/disable-request-timeout",
+          "/request-timeout",
+          "/retry-on-connection-errors",
+          "/retry/backend-timeout-500ms",
+          "/retry/code-500-attempts-3",
+          "/retry/code-all-attempts-0",
+          "/retry/code-all-attempts-2",
+          "/retry/request-timeout-500ms"
+        ],
+        "policies": {
+          "/retry/code-500-attempts-3": {
+            "expected": {
+              "retry": {
+                "codes": [
+                  500
+                ],
+                "attempts": 3
+              }
+            },
+            "observed": {
+              "retry": {
+                "attempts": 3,
+                "codes": [
+                  500
+                ]
+              }
+            },
+            "activeConfigurationSHA256": "f8f45d7a655695a94e1a8cfcef15969ec629fec8bcbe4b7ad231dd3eaf4165a3",
+            "active": true,
+            "provider": "amphora",
+            "protocol": "HTTP",
+            "adminStateUp": true,
+            "provisioningStatus": "ACTIVE",
+            "policyInConfiguration": [
+              "http-request octavia-http-policy default default 3 500 if { var(txn.octavia_l7_policy) -m str <fixture-id> }"
+            ],
+            "payloadMatches": true,
+            "loadBalancerId": "997486aa-d987-45af-b141-d0ef9e702e61",
+            "listenerId": "a8d9941d-6868-4798-919a-3d9e1ac24cfe",
+            "poolId": "e32fb65a-9cb3-4692-b1d3-6e97b575295a"
+          },
+          "/retry/code-all-attempts-2": {
+            "expected": {
+              "retry": {
+                "codes": [
+                  500,
+                  502,
+                  503,
+                  504
+                ],
+                "attempts": 2
+              }
+            },
+            "observed": {
+              "retry": {
+                "attempts": 2,
+                "codes": [
+                  500,
+                  502,
+                  503,
+                  504
+                ]
+              }
+            },
+            "activeConfigurationSHA256": "f8f45d7a655695a94e1a8cfcef15969ec629fec8bcbe4b7ad231dd3eaf4165a3",
+            "active": true,
+            "provider": "amphora",
+            "protocol": "HTTP",
+            "adminStateUp": true,
+            "provisioningStatus": "ACTIVE",
+            "policyInConfiguration": [
+              "http-request octavia-http-policy default default 2 500,502,503,504 if { var(txn.octavia_l7_policy) -m str <fixture-id> }"
+            ],
+            "payloadMatches": true,
+            "loadBalancerId": "997486aa-d987-45af-b141-d0ef9e702e61",
+            "listenerId": "a8d9941d-6868-4798-919a-3d9e1ac24cfe",
+            "poolId": "e32fb65a-9cb3-4692-b1d3-6e97b575295a"
+          },
+          "/retry/code-all-attempts-0": {
+            "expected": {
+              "retry": {
+                "codes": [
+                  500,
+                  502,
+                  503,
+                  504
+                ],
+                "attempts": 0
+              }
+            },
+            "observed": {
+              "retry": {
+                "attempts": 0,
+                "codes": [
+                  500,
+                  502,
+                  503,
+                  504
+                ]
+              }
+            },
+            "activeConfigurationSHA256": "f8f45d7a655695a94e1a8cfcef15969ec629fec8bcbe4b7ad231dd3eaf4165a3",
+            "active": true,
+            "provider": "amphora",
+            "protocol": "HTTP",
+            "adminStateUp": true,
+            "provisioningStatus": "ACTIVE",
+            "policyInConfiguration": [
+              "http-request octavia-http-policy default default 0 500,502,503,504 if { var(txn.octavia_l7_policy) -m str <fixture-id> }"
+            ],
+            "payloadMatches": true,
+            "loadBalancerId": "997486aa-d987-45af-b141-d0ef9e702e61",
+            "listenerId": "a8d9941d-6868-4798-919a-3d9e1ac24cfe",
+            "poolId": "e32fb65a-9cb3-4692-b1d3-6e97b575295a"
+          },
+          "/retry/request-timeout-500ms": {
+            "expected": {
+              "request_timeout_ms": 500,
+              "retry": {
+                "codes": [
+                  500
+                ],
+                "attempts": 5
+              }
+            },
+            "observed": {
+              "request_timeout_ms": 500,
+              "retry": {
+                "attempts": 5,
+                "codes": [
+                  500
+                ]
+              }
+            },
+            "activeConfigurationSHA256": "f8f45d7a655695a94e1a8cfcef15969ec629fec8bcbe4b7ad231dd3eaf4165a3",
+            "active": true,
+            "provider": "amphora",
+            "protocol": "HTTP",
+            "adminStateUp": true,
+            "provisioningStatus": "ACTIVE",
+            "policyInConfiguration": [
+              "http-request octavia-http-policy 500 default 5 500 if { var(txn.octavia_l7_policy) -m str <fixture-id> }"
+            ],
+            "payloadMatches": true,
+            "loadBalancerId": "997486aa-d987-45af-b141-d0ef9e702e61",
+            "listenerId": "a8d9941d-6868-4798-919a-3d9e1ac24cfe",
+            "poolId": "d94e7d0d-c203-4054-9e7d-71ae592bc7b6"
+          },
+          "/retry/backend-timeout-500ms": {
+            "expected": {
+              "request_timeout_ms": 15000,
+              "backend_request_timeout_ms": 500,
+              "retry": {
+                "codes": [
+                  500
+                ],
+                "attempts": 3
+              }
+            },
+            "observed": {
+              "request_timeout_ms": 15000,
+              "backend_request_timeout_ms": 500,
+              "retry": {
+                "attempts": 3,
+                "codes": [
+                  500
+                ]
+              }
+            },
+            "activeConfigurationSHA256": "f8f45d7a655695a94e1a8cfcef15969ec629fec8bcbe4b7ad231dd3eaf4165a3",
+            "active": true,
+            "provider": "amphora",
+            "protocol": "HTTP",
+            "adminStateUp": true,
+            "provisioningStatus": "ACTIVE",
+            "policyInConfiguration": [
+              "http-request octavia-http-policy 15000 500 3 500 if { var(txn.octavia_l7_policy) -m str <fixture-id> }"
+            ],
+            "payloadMatches": true,
+            "loadBalancerId": "997486aa-d987-45af-b141-d0ef9e702e61",
+            "listenerId": "a8d9941d-6868-4798-919a-3d9e1ac24cfe",
+            "poolId": "d94e7d0d-c203-4054-9e7d-71ae592bc7b6"
+          },
+          "/disable-backend-timeout": {
+            "expected": {
+              "backend_request_timeout_ms": 0
+            },
+            "observed": {
+              "backend_request_timeout_ms": 0
+            },
+            "activeConfigurationSHA256": "f8f45d7a655695a94e1a8cfcef15969ec629fec8bcbe4b7ad231dd3eaf4165a3",
+            "active": true,
+            "provider": "amphora",
+            "protocol": "HTTP",
+            "adminStateUp": true,
+            "provisioningStatus": "ACTIVE",
+            "policyInConfiguration": [
+              "http-request octavia-http-policy default 0 default none if { var(txn.octavia_l7_policy) -m str <fixture-id> }"
+            ],
+            "payloadMatches": true,
+            "loadBalancerId": "997486aa-d987-45af-b141-d0ef9e702e61",
+            "listenerId": "a8d9941d-6868-4798-919a-3d9e1ac24cfe",
+            "poolId": "5644a0c2-2ad7-41bb-bf26-57d884acacfd"
+          },
+          "/backend-timeout": {
+            "expected": {
+              "backend_request_timeout_ms": 500
+            },
+            "observed": {
+              "backend_request_timeout_ms": 500
+            },
+            "activeConfigurationSHA256": "f8f45d7a655695a94e1a8cfcef15969ec629fec8bcbe4b7ad231dd3eaf4165a3",
+            "active": true,
+            "provider": "amphora",
+            "protocol": "HTTP",
+            "adminStateUp": true,
+            "provisioningStatus": "ACTIVE",
+            "policyInConfiguration": [
+              "http-request octavia-http-policy default 500 default none if { var(txn.octavia_l7_policy) -m str <fixture-id> }"
+            ],
+            "payloadMatches": true,
+            "loadBalancerId": "997486aa-d987-45af-b141-d0ef9e702e61",
+            "listenerId": "a8d9941d-6868-4798-919a-3d9e1ac24cfe",
+            "poolId": "5644a0c2-2ad7-41bb-bf26-57d884acacfd"
+          },
+          "/disable-request-timeout": {
+            "expected": {
+              "request_timeout_ms": 0
+            },
+            "observed": {
+              "request_timeout_ms": 0
+            },
+            "activeConfigurationSHA256": "f8f45d7a655695a94e1a8cfcef15969ec629fec8bcbe4b7ad231dd3eaf4165a3",
+            "active": true,
+            "provider": "amphora",
+            "protocol": "HTTP",
+            "adminStateUp": true,
+            "provisioningStatus": "ACTIVE",
+            "policyInConfiguration": [
+              "http-request octavia-http-policy 0 default default none if { var(txn.octavia_l7_policy) -m str <fixture-id> }"
+            ],
+            "payloadMatches": true,
+            "loadBalancerId": "997486aa-d987-45af-b141-d0ef9e702e61",
+            "listenerId": "a8d9941d-6868-4798-919a-3d9e1ac24cfe",
+            "poolId": "5c2bf240-3dd5-45de-9f57-5347176c5b4a"
+          },
+          "/request-timeout": {
+            "expected": {
+              "request_timeout_ms": 500
+            },
+            "observed": {
+              "request_timeout_ms": 500
+            },
+            "activeConfigurationSHA256": "f8f45d7a655695a94e1a8cfcef15969ec629fec8bcbe4b7ad231dd3eaf4165a3",
+            "active": true,
+            "provider": "amphora",
+            "protocol": "HTTP",
+            "adminStateUp": true,
+            "provisioningStatus": "ACTIVE",
+            "policyInConfiguration": [
+              "http-request octavia-http-policy 500 default default none if { var(txn.octavia_l7_policy) -m str <fixture-id> }"
+            ],
+            "payloadMatches": true,
+            "loadBalancerId": "997486aa-d987-45af-b141-d0ef9e702e61",
+            "listenerId": "a8d9941d-6868-4798-919a-3d9e1ac24cfe",
+            "poolId": "5c2bf240-3dd5-45de-9f57-5347176c5b4a"
+          },
+          "/retry-on-connection-errors": {
+            "expected": {
+              "retry": {
+                "attempts": 100
+              }
+            },
+            "observed": {
+              "retry": {
+                "attempts": 100
+              }
+            },
+            "activeConfigurationSHA256": "f8f45d7a655695a94e1a8cfcef15969ec629fec8bcbe4b7ad231dd3eaf4165a3",
+            "active": true,
+            "provider": "amphora",
+            "protocol": "HTTP",
+            "adminStateUp": true,
+            "provisioningStatus": "ACTIVE",
+            "policyInConfiguration": [
+              "http-request octavia-http-policy default default 100 none if { var(txn.octavia_l7_policy) -m str <fixture-id> }"
+            ],
+            "payloadMatches": true,
+            "loadBalancerId": "997486aa-d987-45af-b141-d0ef9e702e61",
+            "listenerId": "a8d9941d-6868-4798-919a-3d9e1ac24cfe",
+            "poolId": "a60941af-4565-4e7c-b597-cfba87e946be"
+          }
+        }
+      },
+      "nativeL7WorkerDispatch": {
+        "create_l7policy": 12,
+        "create_l7rule": 12,
+        "update_l7policy": 14,
+        "delete_l7rule": 2,
+        "delete_l7policy": 2
+      },
+      "l7WriteVersionHeaders": {
+        "load-balancer 2.8": 38
+      },
+      "cases": {
+        "HTTPRouteRetry": {
+          "bodySHA256": "80876603ee1f33ddb1a58adad6fac69e6c17fcbbfc5b2b80f5b535e566c0c9bd",
+          "manifestSHA256": "ccc74448bf9bf797776bd4788ce53d17ee60b4da0c36f241467bd72b75fa6e08",
+          "subtests": {
+            "8_request_to_'/retry/code-all-attempts-2'_fails_when_required_retries_on_503_exceed_max_attempts": "PASS",
+            "0_request_to_'/retry/code-500-attempts-3'_succeeds_after_2_retries_when_retry_is_configured_for_status_code_500_and_max_attempts_is_3": "PASS",
+            "14_request_to_'/retry/code-all-attempts-0'_does_not_retry_on_504_when_attempts_are_set_to_0": "PASS",
+            "7_request_to_'/retry/code-all-attempts-2'_succeeds_after_1_retry_on_503_when_retry_is_configured_for_all_status_code_and_max_attempts_is_2": "PASS",
+            "13_request_to_'/retry/code-all-attempts-0'_does_not_retry_on_503_when_attempts_are_set_to_0": "PASS",
+            "6_request_to_'/retry/code-all-attempts-2'_fails_when_required_retries_on_502_exceed_max_attempts": "PASS",
+            "12_request_to_'/retry/code-all-attempts-0'_does_not_retry_on_502_when_attempts_are_set_to_0": "PASS",
+            "5_request_to_'/retry/code-all-attempts-2'_succeeds_after_1_retry_on_502_when_retry_is_configured_for_all_status_code_and_max_attempts_is_2": "PASS",
+            "11_request_to_'/retry/code-all-attempts-0'_does_not_retry_on_500_when_attempts_are_set_to_0": "PASS",
+            "4_request_to_'/retry/code-all-attempts-2'_fails_when_required_retries_on_500_exceed_max_attempts": "PASS",
+            "10_request_to_'/retry/code-all-attempts-2'_fails_when_required_retries_on_504_exceed_max_attempts": "PASS",
+            "3_request_to_'/retry/code-all-attempts-2'_succeeds_after_1_retry_on_500_when_retry_is_configured_for_all_status_code_and_max_attempts_is_2": "PASS",
+            "9_request_to_'/retry/code-all-attempts-2'_succeeds_after_1_retry_on_504_when_retry_is_configured_for_all_status_code_and_max_attempts_is_2": "PASS",
+            "2_request_to_'/retry/code-500-attempts-3'_does_not_retry_on_503_when_retry_is_only_configured_for_status_code_500": "PASS",
+            "1_request_to_'/retry/code-500-attempts-3'_fails_when_required_retries_on_500_exceed_max_attempts": "PASS"
+          },
+          "verdict": "PASS",
+          "exit": 0,
+          "startedAt": "2026-11-25T00:33:51+00:00",
+          "finishedAt": "2026-11-25T00:34:01+00:00",
+          "report": "standard-HTTPRouteRetry.yaml",
+          "reportSHA256": "8890a26fdecd7dd00f30644c2788cec5bf4cf64f55173f3e2dd3dce9e45156ad"
+        },
+        "HTTPRouteRetryWithBackendTimeout": {
+          "bodySHA256": "a2f5fc919fde652c33ce196b782019c2e56fec000e05abac567b8dadf15f08f6",
+          "manifestSHA256": "1c96d635631063f45e79661d1013c1ac5b364b4c0c788f2aecd5a8a78d5fb3ee",
+          "subtests": {
+            "0_request_to_'/retry/backend-timeout-500ms'_succeeds_when_retry_attempt_complete_within_the_backend_timeout": "PASS",
+            "1_request_to_'/retry/request-timeout-500ms'_fails_with_504_when_retry_delay_exceed_the_backend_timeout": "PASS"
+          },
+          "verdict": "PASS",
+          "exit": 0,
+          "startedAt": "2026-11-25T00:34:01+00:00",
+          "finishedAt": "2026-11-25T00:34:43+00:00",
+          "sharedRouteOperations": [
+            "Creating",
+            "Deleting"
+          ],
+          "report": "standard-HTTPRouteRetryWithBackendTimeout.yaml",
+          "reportSHA256": "c95e624bb2de5333f62697b3edb1e822d0d808810d4c714dafad44a088435ee0"
+        },
+        "HTTPRouteRetryWithRequestTimeout": {
+          "bodySHA256": "a2f5fc919fde652c33ce196b782019c2e56fec000e05abac567b8dadf15f08f6",
+          "manifestSHA256": "1c96d635631063f45e79661d1013c1ac5b364b4c0c788f2aecd5a8a78d5fb3ee",
+          "subtests": {
+            "0_request_to_'/retry/request-timeout-500ms'_succeeds_when_retries_complete_within_the_request_timeout": "PASS",
+            "1_request_to_'/retry/request-timeout-500ms'_fails_with_504_when_the_sum_of_retry_delays_exceed_the_request_timeout": "PASS"
+          },
+          "verdict": "PASS",
+          "exit": 0,
+          "startedAt": "2026-11-25T00:34:43+00:00",
+          "finishedAt": "2026-11-25T00:34:57+00:00",
+          "sharedRouteOperations": [
+            "Creating"
+          ],
+          "report": "standard-HTTPRouteRetryWithRequestTimeout.yaml",
+          "reportSHA256": "93d7588ddac5c92c58c2e767df11f0e5d5ab92347ab29f698c2fe90356c54923"
+        },
+        "HTTPRouteTimeoutBackendRequest": {
+          "bodySHA256": "3de520d9fd9a03dfb56ad939afced9df034eb930060707a8ba084adb3416659d",
+          "manifestSHA256": "3d96be7b38ac96e7564ee6ee1bc2f402c7f19dc6ae6ed10c1f02c69af2e86e5c",
+          "subtests": {
+            "0_request_to_'/backend-timeout'_should_receive_one_of_[]": "PASS",
+            "1_request_to_'/backend-timeout?delay=1s'_should_receive_one_of_[]": "PASS",
+            "2_request_to_'/disable-backend-timeout?delay=1s'_should_receive_one_of_[]": "PASS"
+          },
+          "verdict": "PASS",
+          "exit": 0,
+          "startedAt": "2026-11-25T00:34:57+00:00",
+          "finishedAt": "2026-11-25T00:35:13+00:00",
+          "report": "standard-HTTPRouteTimeoutBackendRequest.yaml",
+          "reportSHA256": "c3c97bf0cf7f19018a2419ec39b275263d721cbaa41534dd4733d7b884d3b529"
+        },
+        "HTTPRouteTimeoutRequest": {
+          "bodySHA256": "e8bcbf3526a499ca428c48ee2c803cec1268863063684c2f73418e7e680f558f",
+          "manifestSHA256": "dbfe0d0e56c012f37cce4520a275d2953e43594a02c958b51328526f335f4c38",
+          "subtests": {
+            "0_request_to_'/request-timeout'_should_receive_one_of_[]": "PASS",
+            "1_request_to_'/request-timeout?delay=1s'_should_receive_one_of_[]": "PASS",
+            "2_request_to_'/disable-request-timeout?delay=1s'_should_receive_one_of_[]": "PASS"
+          },
+          "verdict": "PASS",
+          "exit": 0,
+          "startedAt": "2026-11-25T00:35:13+00:00",
+          "finishedAt": "2026-11-25T00:35:34+00:00",
+          "report": "standard-HTTPRouteTimeoutRequest.yaml",
+          "reportSHA256": "11ab552c31075183b78902a2abc19c862cb320b0b906a267b1a741940887749f"
+        },
+        "HTTPRouteRetryConnectionError": {
+          "bodySHA256": "6689659b2f6a423f8e990fdf5971beb3dec4b0d3c2e76a585716c7861c36e459",
+          "manifestSHA256": "dc827c1bca6f43decd69a09b9089e23f3fc78e4f9984bfad1550e74cb4c9ed37",
+          "subtests": {},
+          "verdict": "PASS",
+          "exit": 0,
+          "startedAt": "2026-11-25T00:35:34+00:00",
+          "finishedAt": "2026-11-25T00:36:20+00:00",
+          "report": "standard-HTTPRouteRetryConnectionError.yaml",
+          "reportSHA256": "7500a5aa71ecd1be558bbd5cf5253dc564d388603f34ab42f98d83911d5d0837"
+        }
+      }
+    },
+    "experimental": {
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "registeredLauncherSHA256": "adb65bbec98d10a0d4f995b22e9cd9545d5824c66e07487ea608c282fa408652",
+      "kindNodeImage": "localhost/hibiscus-kind-node:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67@sha256:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67",
+      "echoOCIArchiveSHA256": "b7675809fd2cc0b9fb9273f1b0c85c422bc3c12361d66b99b83173ddb2d3c9b7",
+      "octavia": {
+        "revision": "78c80bfe3019368b5dc570ad612bca89ce739301",
+        "version": "19.0.1.dev47",
+        "sha256": "85a578e1935b6d48b25865366e5150301486d74cf49bd9a2cbb5ed547ab6cb62",
+        "filesVerified": 651
+      },
+      "octaviaLib": {
+        "revision": "e436d312428e98ec1c5c3222cbe1199b422c487b",
+        "version": "3.12.1.dev15",
+        "sha256": "ecc9c5986457cddd2f376bb2afc7c6f8eb588cc24911bf098892cee0b3fedcf7",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1",
+        "sha256": "521e1d1f27a5aba10239362df737b616a2d10c5d0112e6071521ac98900ee997"
+      },
+      "connectionRefusal": {
+        "endpoints": [
+          {
+            "address": "198.51.100.11",
+            "port": 3000,
+            "pod": "infra-backend-connection-error-broken-7b4795f97d-fhfdv"
+          },
+          {
+            "address": "198.51.100.12",
+            "port": 3000,
+            "pod": "infra-backend-connection-error-healthy-5987dcd7f7-trm8g"
+          }
+        ],
+        "passed": true,
+        "brokenPodServicePort": "ECONNREFUSED",
+        "brokenPodEchoPort": "CONNECTED",
+        "healthyPodServicePort": "CONNECTED",
+        "HAProxyMemberCounters": {
+          "198.51.100.11": {
+            "status": "UP 1/10",
+            "econ": 0,
+            "wretr": 0,
+            "wredis": 10,
+            "stot": 10
+          },
+          "198.51.100.12": {
+            "status": "UP 1/10",
+            "econ": 0,
+            "wretr": 0,
+            "wredis": 0,
+            "stot": 10
+          }
+        }
+      },
+      "providerReadback": {
+        "passed": true,
+        "expectedPaths": [
+          "/backend-timeout",
+          "/disable-backend-timeout",
+          "/disable-request-timeout",
+          "/request-timeout",
+          "/retry-on-connection-errors",
+          "/retry/backend-timeout-500ms",
+          "/retry/code-500-attempts-3",
+          "/retry/code-all-attempts-0",
+          "/retry/code-all-attempts-2",
+          "/retry/request-timeout-500ms"
+        ],
+        "policies": {
+          "/retry/code-500-attempts-3": {
+            "expected": {
+              "retry": {
+                "codes": [
+                  500
+                ],
+                "attempts": 3
+              }
+            },
+            "observed": {
+              "retry": {
+                "attempts": 3,
+                "codes": [
+                  500
+                ]
+              }
+            },
+            "activeConfigurationSHA256": "4b5a363765f6d2853468003ce15ac8a3cf8ae2ee4572e653de2983aa5fac456e",
+            "active": true,
+            "provider": "amphora",
+            "protocol": "HTTP",
+            "adminStateUp": true,
+            "provisioningStatus": "ACTIVE",
+            "policyInConfiguration": [
+              "http-request octavia-http-policy default default 3 500 if { var(txn.octavia_l7_policy) -m str <fixture-id> }"
+            ],
+            "payloadMatches": true,
+            "loadBalancerId": "aa84cbe0-3fc9-4c00-ad15-01479f5fb7ec",
+            "listenerId": "f8efaecb-584f-4163-95ee-c1e2e0fcb5ba",
+            "poolId": "5f2a5aa6-0bef-4e72-a25d-1ffda9fdd56e"
+          },
+          "/retry/code-all-attempts-2": {
+            "expected": {
+              "retry": {
+                "codes": [
+                  500,
+                  502,
+                  503,
+                  504
+                ],
+                "attempts": 2
+              }
+            },
+            "observed": {
+              "retry": {
+                "attempts": 2,
+                "codes": [
+                  500,
+                  502,
+                  503,
+                  504
+                ]
+              }
+            },
+            "activeConfigurationSHA256": "4b5a363765f6d2853468003ce15ac8a3cf8ae2ee4572e653de2983aa5fac456e",
+            "active": true,
+            "provider": "amphora",
+            "protocol": "HTTP",
+            "adminStateUp": true,
+            "provisioningStatus": "ACTIVE",
+            "policyInConfiguration": [
+              "http-request octavia-http-policy default default 2 500,502,503,504 if { var(txn.octavia_l7_policy) -m str <fixture-id> }"
+            ],
+            "payloadMatches": true,
+            "loadBalancerId": "aa84cbe0-3fc9-4c00-ad15-01479f5fb7ec",
+            "listenerId": "f8efaecb-584f-4163-95ee-c1e2e0fcb5ba",
+            "poolId": "5f2a5aa6-0bef-4e72-a25d-1ffda9fdd56e"
+          },
+          "/retry/code-all-attempts-0": {
+            "expected": {
+              "retry": {
+                "codes": [
+                  500,
+                  502,
+                  503,
+                  504
+                ],
+                "attempts": 0
+              }
+            },
+            "observed": {
+              "retry": {
+                "attempts": 0,
+                "codes": [
+                  500,
+                  502,
+                  503,
+                  504
+                ]
+              }
+            },
+            "activeConfigurationSHA256": "4b5a363765f6d2853468003ce15ac8a3cf8ae2ee4572e653de2983aa5fac456e",
+            "active": true,
+            "provider": "amphora",
+            "protocol": "HTTP",
+            "adminStateUp": true,
+            "provisioningStatus": "ACTIVE",
+            "policyInConfiguration": [
+              "http-request octavia-http-policy default default 0 500,502,503,504 if { var(txn.octavia_l7_policy) -m str <fixture-id> }"
+            ],
+            "payloadMatches": true,
+            "loadBalancerId": "aa84cbe0-3fc9-4c00-ad15-01479f5fb7ec",
+            "listenerId": "f8efaecb-584f-4163-95ee-c1e2e0fcb5ba",
+            "poolId": "5f2a5aa6-0bef-4e72-a25d-1ffda9fdd56e"
+          },
+          "/retry/request-timeout-500ms": {
+            "expected": {
+              "request_timeout_ms": 500,
+              "retry": {
+                "codes": [
+                  500
+                ],
+                "attempts": 5
+              }
+            },
+            "observed": {
+              "request_timeout_ms": 500,
+              "retry": {
+                "attempts": 5,
+                "codes": [
+                  500
+                ]
+              }
+            },
+            "activeConfigurationSHA256": "4b5a363765f6d2853468003ce15ac8a3cf8ae2ee4572e653de2983aa5fac456e",
+            "active": true,
+            "provider": "amphora",
+            "protocol": "HTTP",
+            "adminStateUp": true,
+            "provisioningStatus": "ACTIVE",
+            "policyInConfiguration": [
+              "http-request octavia-http-policy 500 default 5 500 if { var(txn.octavia_l7_policy) -m str <fixture-id> }"
+            ],
+            "payloadMatches": true,
+            "loadBalancerId": "aa84cbe0-3fc9-4c00-ad15-01479f5fb7ec",
+            "listenerId": "f8efaecb-584f-4163-95ee-c1e2e0fcb5ba",
+            "poolId": "72bee34c-ece2-4671-a9d7-dcddf0d696d9"
+          },
+          "/retry/backend-timeout-500ms": {
+            "expected": {
+              "request_timeout_ms": 15000,
+              "backend_request_timeout_ms": 500,
+              "retry": {
+                "codes": [
+                  500
+                ],
+                "attempts": 3
+              }
+            },
+            "observed": {
+              "request_timeout_ms": 15000,
+              "backend_request_timeout_ms": 500,
+              "retry": {
+                "attempts": 3,
+                "codes": [
+                  500
+                ]
+              }
+            },
+            "activeConfigurationSHA256": "4b5a363765f6d2853468003ce15ac8a3cf8ae2ee4572e653de2983aa5fac456e",
+            "active": true,
+            "provider": "amphora",
+            "protocol": "HTTP",
+            "adminStateUp": true,
+            "provisioningStatus": "ACTIVE",
+            "policyInConfiguration": [
+              "http-request octavia-http-policy 15000 500 3 500 if { var(txn.octavia_l7_policy) -m str <fixture-id> }"
+            ],
+            "payloadMatches": true,
+            "loadBalancerId": "aa84cbe0-3fc9-4c00-ad15-01479f5fb7ec",
+            "listenerId": "f8efaecb-584f-4163-95ee-c1e2e0fcb5ba",
+            "poolId": "72bee34c-ece2-4671-a9d7-dcddf0d696d9"
+          },
+          "/disable-backend-timeout": {
+            "expected": {
+              "backend_request_timeout_ms": 0
+            },
+            "observed": {
+              "backend_request_timeout_ms": 0
+            },
+            "activeConfigurationSHA256": "4b5a363765f6d2853468003ce15ac8a3cf8ae2ee4572e653de2983aa5fac456e",
+            "active": true,
+            "provider": "amphora",
+            "protocol": "HTTP",
+            "adminStateUp": true,
+            "provisioningStatus": "ACTIVE",
+            "policyInConfiguration": [
+              "http-request octavia-http-policy default 0 default none if { var(txn.octavia_l7_policy) -m str <fixture-id> }"
+            ],
+            "payloadMatches": true,
+            "loadBalancerId": "aa84cbe0-3fc9-4c00-ad15-01479f5fb7ec",
+            "listenerId": "f8efaecb-584f-4163-95ee-c1e2e0fcb5ba",
+            "poolId": "105e3f98-0fb2-41f1-99cb-187454a2ff5f"
+          },
+          "/backend-timeout": {
+            "expected": {
+              "backend_request_timeout_ms": 500
+            },
+            "observed": {
+              "backend_request_timeout_ms": 500
+            },
+            "activeConfigurationSHA256": "4b5a363765f6d2853468003ce15ac8a3cf8ae2ee4572e653de2983aa5fac456e",
+            "active": true,
+            "provider": "amphora",
+            "protocol": "HTTP",
+            "adminStateUp": true,
+            "provisioningStatus": "ACTIVE",
+            "policyInConfiguration": [
+              "http-request octavia-http-policy default 500 default none if { var(txn.octavia_l7_policy) -m str <fixture-id> }"
+            ],
+            "payloadMatches": true,
+            "loadBalancerId": "aa84cbe0-3fc9-4c00-ad15-01479f5fb7ec",
+            "listenerId": "f8efaecb-584f-4163-95ee-c1e2e0fcb5ba",
+            "poolId": "105e3f98-0fb2-41f1-99cb-187454a2ff5f"
+          },
+          "/disable-request-timeout": {
+            "expected": {
+              "request_timeout_ms": 0
+            },
+            "observed": {
+              "request_timeout_ms": 0
+            },
+            "activeConfigurationSHA256": "4b5a363765f6d2853468003ce15ac8a3cf8ae2ee4572e653de2983aa5fac456e",
+            "active": true,
+            "provider": "amphora",
+            "protocol": "HTTP",
+            "adminStateUp": true,
+            "provisioningStatus": "ACTIVE",
+            "policyInConfiguration": [
+              "http-request octavia-http-policy 0 default default none if { var(txn.octavia_l7_policy) -m str <fixture-id> }"
+            ],
+            "payloadMatches": true,
+            "loadBalancerId": "aa84cbe0-3fc9-4c00-ad15-01479f5fb7ec",
+            "listenerId": "f8efaecb-584f-4163-95ee-c1e2e0fcb5ba",
+            "poolId": "6f473ab1-911e-43da-8909-a90a5a495749"
+          },
+          "/request-timeout": {
+            "expected": {
+              "request_timeout_ms": 500
+            },
+            "observed": {
+              "request_timeout_ms": 500
+            },
+            "activeConfigurationSHA256": "4b5a363765f6d2853468003ce15ac8a3cf8ae2ee4572e653de2983aa5fac456e",
+            "active": true,
+            "provider": "amphora",
+            "protocol": "HTTP",
+            "adminStateUp": true,
+            "provisioningStatus": "ACTIVE",
+            "policyInConfiguration": [
+              "http-request octavia-http-policy 500 default default none if { var(txn.octavia_l7_policy) -m str <fixture-id> }"
+            ],
+            "payloadMatches": true,
+            "loadBalancerId": "aa84cbe0-3fc9-4c00-ad15-01479f5fb7ec",
+            "listenerId": "f8efaecb-584f-4163-95ee-c1e2e0fcb5ba",
+            "poolId": "6f473ab1-911e-43da-8909-a90a5a495749"
+          },
+          "/retry-on-connection-errors": {
+            "expected": {
+              "retry": {
+                "attempts": 100
+              }
+            },
+            "observed": {
+              "retry": {
+                "attempts": 100
+              }
+            },
+            "activeConfigurationSHA256": "4b5a363765f6d2853468003ce15ac8a3cf8ae2ee4572e653de2983aa5fac456e",
+            "active": true,
+            "provider": "amphora",
+            "protocol": "HTTP",
+            "adminStateUp": true,
+            "provisioningStatus": "ACTIVE",
+            "policyInConfiguration": [
+              "http-request octavia-http-policy default default 100 none if { var(txn.octavia_l7_policy) -m str <fixture-id> }"
+            ],
+            "payloadMatches": true,
+            "loadBalancerId": "aa84cbe0-3fc9-4c00-ad15-01479f5fb7ec",
+            "listenerId": "f8efaecb-584f-4163-95ee-c1e2e0fcb5ba",
+            "poolId": "e706574d-380a-4277-9d91-c7a51d129d91"
+          }
+        }
+      },
+      "nativeL7WorkerDispatch": {
+        "create_l7policy": 12,
+        "create_l7rule": 12,
+        "update_l7policy": 14,
+        "delete_l7rule": 2,
+        "delete_l7policy": 2
+      },
+      "l7WriteVersionHeaders": {
+        "load-balancer 2.8": 38
+      },
+      "cases": {
+        "HTTPRouteRetry": {
+          "bodySHA256": "80876603ee1f33ddb1a58adad6fac69e6c17fcbbfc5b2b80f5b535e566c0c9bd",
+          "manifestSHA256": "ccc74448bf9bf797776bd4788ce53d17ee60b4da0c36f241467bd72b75fa6e08",
+          "subtests": {
+            "8_request_to_'/retry/code-all-attempts-2'_fails_when_required_retries_on_503_exceed_max_attempts": "PASS",
+            "0_request_to_'/retry/code-500-attempts-3'_succeeds_after_2_retries_when_retry_is_configured_for_status_code_500_and_max_attempts_is_3": "PASS",
+            "14_request_to_'/retry/code-all-attempts-0'_does_not_retry_on_504_when_attempts_are_set_to_0": "PASS",
+            "13_request_to_'/retry/code-all-attempts-0'_does_not_retry_on_503_when_attempts_are_set_to_0": "PASS",
+            "12_request_to_'/retry/code-all-attempts-0'_does_not_retry_on_502_when_attempts_are_set_to_0": "PASS",
+            "7_request_to_'/retry/code-all-attempts-2'_succeeds_after_1_retry_on_503_when_retry_is_configured_for_all_status_code_and_max_attempts_is_2": "PASS",
+            "11_request_to_'/retry/code-all-attempts-0'_does_not_retry_on_500_when_attempts_are_set_to_0": "PASS",
+            "6_request_to_'/retry/code-all-attempts-2'_fails_when_required_retries_on_502_exceed_max_attempts": "PASS",
+            "10_request_to_'/retry/code-all-attempts-2'_fails_when_required_retries_on_504_exceed_max_attempts": "PASS",
+            "5_request_to_'/retry/code-all-attempts-2'_succeeds_after_1_retry_on_502_when_retry_is_configured_for_all_status_code_and_max_attempts_is_2": "PASS",
+            "9_request_to_'/retry/code-all-attempts-2'_succeeds_after_1_retry_on_504_when_retry_is_configured_for_all_status_code_and_max_attempts_is_2": "PASS",
+            "4_request_to_'/retry/code-all-attempts-2'_fails_when_required_retries_on_500_exceed_max_attempts": "PASS",
+            "3_request_to_'/retry/code-all-attempts-2'_succeeds_after_1_retry_on_500_when_retry_is_configured_for_all_status_code_and_max_attempts_is_2": "PASS",
+            "2_request_to_'/retry/code-500-attempts-3'_does_not_retry_on_503_when_retry_is_only_configured_for_status_code_500": "PASS",
+            "1_request_to_'/retry/code-500-attempts-3'_fails_when_required_retries_on_500_exceed_max_attempts": "PASS"
+          },
+          "verdict": "PASS",
+          "exit": 0,
+          "startedAt": "2026-11-25T00:38:06+00:00",
+          "finishedAt": "2026-11-25T00:38:13+00:00",
+          "report": "experimental-HTTPRouteRetry.yaml",
+          "reportSHA256": "06125a52f1087caed449261f83b1831a8033ccd65b595f4043f5158e9e22e9d4"
+        },
+        "HTTPRouteRetryWithBackendTimeout": {
+          "bodySHA256": "a2f5fc919fde652c33ce196b782019c2e56fec000e05abac567b8dadf15f08f6",
+          "manifestSHA256": "1c96d635631063f45e79661d1013c1ac5b364b4c0c788f2aecd5a8a78d5fb3ee",
+          "subtests": {
+            "0_request_to_'/retry/backend-timeout-500ms'_succeeds_when_retry_attempt_complete_within_the_backend_timeout": "PASS",
+            "1_request_to_'/retry/request-timeout-500ms'_fails_with_504_when_retry_delay_exceed_the_backend_timeout": "PASS"
+          },
+          "verdict": "PASS",
+          "exit": 0,
+          "startedAt": "2026-11-25T00:38:13+00:00",
+          "finishedAt": "2026-11-25T00:38:29+00:00",
+          "sharedRouteOperations": [
+            "Creating",
+            "Deleting"
+          ],
+          "report": "experimental-HTTPRouteRetryWithBackendTimeout.yaml",
+          "reportSHA256": "1fca14e52ebafd129438ce71d11daaccaf8c2d394304b80971401df7dbb555e3"
+        },
+        "HTTPRouteRetryWithRequestTimeout": {
+          "bodySHA256": "a2f5fc919fde652c33ce196b782019c2e56fec000e05abac567b8dadf15f08f6",
+          "manifestSHA256": "1c96d635631063f45e79661d1013c1ac5b364b4c0c788f2aecd5a8a78d5fb3ee",
+          "subtests": {
+            "0_request_to_'/retry/request-timeout-500ms'_succeeds_when_retries_complete_within_the_request_timeout": "PASS",
+            "1_request_to_'/retry/request-timeout-500ms'_fails_with_504_when_the_sum_of_retry_delays_exceed_the_request_timeout": "PASS"
+          },
+          "verdict": "PASS",
+          "exit": 0,
+          "startedAt": "2026-11-25T00:38:29+00:00",
+          "finishedAt": "2026-11-25T00:38:38+00:00",
+          "sharedRouteOperations": [
+            "Creating"
+          ],
+          "report": "experimental-HTTPRouteRetryWithRequestTimeout.yaml",
+          "reportSHA256": "29b6a37d24c282a4c7358a3635fab57c6ea91a992ecdaa1c296113e960cfa513"
+        },
+        "HTTPRouteTimeoutBackendRequest": {
+          "bodySHA256": "3de520d9fd9a03dfb56ad939afced9df034eb930060707a8ba084adb3416659d",
+          "manifestSHA256": "3d96be7b38ac96e7564ee6ee1bc2f402c7f19dc6ae6ed10c1f02c69af2e86e5c",
+          "subtests": {
+            "0_request_to_'/backend-timeout'_should_receive_one_of_[]": "PASS",
+            "1_request_to_'/backend-timeout?delay=1s'_should_receive_one_of_[]": "PASS",
+            "2_request_to_'/disable-backend-timeout?delay=1s'_should_receive_one_of_[]": "PASS"
+          },
+          "verdict": "PASS",
+          "exit": 0,
+          "startedAt": "2026-11-25T00:38:38+00:00",
+          "finishedAt": "2026-11-25T00:38:51+00:00",
+          "report": "experimental-HTTPRouteTimeoutBackendRequest.yaml",
+          "reportSHA256": "d3322f11f726a6674aca7bf773cb002b2d5db3a316945d997fdfeef7e4819a2f"
+        },
+        "HTTPRouteTimeoutRequest": {
+          "bodySHA256": "e8bcbf3526a499ca428c48ee2c803cec1268863063684c2f73418e7e680f558f",
+          "manifestSHA256": "dbfe0d0e56c012f37cce4520a275d2953e43594a02c958b51328526f335f4c38",
+          "subtests": {
+            "0_request_to_'/request-timeout'_should_receive_one_of_[]": "PASS",
+            "1_request_to_'/request-timeout?delay=1s'_should_receive_one_of_[]": "PASS",
+            "2_request_to_'/disable-request-timeout?delay=1s'_should_receive_one_of_[]": "PASS"
+          },
+          "verdict": "PASS",
+          "exit": 0,
+          "startedAt": "2026-11-25T00:38:51+00:00",
+          "finishedAt": "2026-11-25T00:39:08+00:00",
+          "report": "experimental-HTTPRouteTimeoutRequest.yaml",
+          "reportSHA256": "6ace0369c55f84ef6716502e7e2f2c0bc17d144d4ae3bd03a7f8156cb470a18a"
+        },
+        "HTTPRouteRetryConnectionError": {
+          "bodySHA256": "6689659b2f6a423f8e990fdf5971beb3dec4b0d3c2e76a585716c7861c36e459",
+          "manifestSHA256": "dc827c1bca6f43decd69a09b9089e23f3fc78e4f9984bfad1550e74cb4c9ed37",
+          "subtests": {},
+          "verdict": "PASS",
+          "exit": 0,
+          "startedAt": "2026-11-25T00:39:08+00:00",
+          "finishedAt": "2026-11-25T00:39:25+00:00",
+          "report": "experimental-HTTPRouteRetryConnectionError.yaml",
+          "reportSHA256": "75fb515839c8f7d731e39ba3f24f835a9db40fb5f62146e2774acc6910eaeed8"
+        }
+      }
+    }
+  },
+  "additionalNativeChecks": {
+    "HAProxyBinarySHA256": "521e1d1f27a5aba10239362df737b616a2d10c5d0112e6071521ac98900ee997",
+    "localBackendAction": true,
+    "retryAfterAttemptExpiryWithoutSelectedStatus": {
+      "result": 200,
+      "backendCalls": 2
+    },
+    "http2BackendRefusedStream": {
+      "oneRetry": {
+        "status": 200,
+        "streamsOffered": 2,
+        "handled": 1
+      },
+      "disabled": {
+        "status": 502,
+        "streamsOffered": 1,
+        "handled": 0
+      }
+    },
+    "trafficLogSHA256": "4f1b598f554915e42e93719ec694e50497a1f179cd4327ac3c32fc655ebca14c",
+    "h2LogSHA256": "297cdd9c1c4bafcc67aa6f38f0ceac2ee1a6272f238738379819039cbf6fe891"
+  }
+}

@@ -38,6 +38,14 @@ This mode supports CORS on HTTP and terminated HTTPS forwarding policies. CORS a
 
 The controller closes the affected physical listener if discovery or policy readback cannot verify the active CORS settings. It opens the listener once the required regional capabilities, policies and rules are verified. Remove the HTTPRoute filter and confirm that Octavia no longer reports `request_cors` on the owned policies before retiring the provider extension.
 
+## Enable HTTP request deadlines and retries
+
+Upgrade the Octavia API, database, workers and Amphora fleet to builds that support `http_request_policy_v1`. After regional enrollment, confirm the capability in the effective provider's `GET /v2/lbaas/providers/{provider}/gateway_capabilities` response. Add `--octavia-http-request-policy` through `config/octavia-http-request-policy` or compose its component with the existing weighted target or HTTPS overlays. The option defaults to off.
+
+An HTTPRoute forwarding rule can configure `timeouts.request`, `timeouts.backendRequest` and `retry`. A duration of `0s` disables its deadline. An omitted timeout retains the provider default. A present retry policy defaults to one additional attempt for eligible connection failures. It supports response codes 500, 502, 503 and 504. `attempts: 0` disables retries and an explicit `backoff` produces `Accepted=False` with reason `UnsupportedValue`.
+
+Check the active Octavia policy's `http_request_policy` field and the HTTPRoute's current `Accepted` and `Programmed` conditions after writes. If the region stops advertising the capability, the controller withdraws the managed forwarding action for each affected rule. Unaffected rules stay eligible for programming. The settings apply only to the matching forwarding action. Retries after a response status or a backend deadline depend on HAProxy's request replay buffer. A request that exceeds the buffer may end without a retry. A body that fits can also be ineligible for replay if HAProxy starts sending it before receiving the full body. A deadline after the final response has started can terminate the stream.
+
 ## Enable request-derived redirects
 
 On the regional load-balancer endpoint, check that the configured Amphora provider advertises `http_request_redirect_v1` in `gateway_capabilities`. Add `--octavia-http-request-redirect` to the controller arguments in the operator overlay. This option can be used independently of weighted backends and fixed HTTP responses.
@@ -81,3 +89,5 @@ Check the same HTTPRoute UID, generation, declared weights and parent throughout
 If the region stops advertising an action during a target withdrawal, the controller closes the affected listener through the standard Octavia API. This preserves route precedence and interrupts traffic on that port. When the capability returns, the controller applies the outstanding target changes before reopening the listener. An operator can follow the listener's administrative state and the Gateway's programmed condition during recovery.
 
 Keep the patched workers, API and operator flags while withdrawing routes and Gateways that use the extension. Wait for their owned policies and listener defaults to clear and confirm cleanup against the public Octavia inventory before rolling back the workload manifest. The operator can then withdraw admission for the driver. Coordinate any database or package rollback separately under the cloud's upgrade procedure.
+
+[Upstream deadline and retry results on both channels](qualification/v1.7.0/provider/http-request-policy.md)

@@ -42,6 +42,8 @@ type routeReconcileStatus struct {
 	accepted          metav1.ConditionStatus
 	acceptedReason    string
 	acceptedMessage   string
+	partiallyInvalid  string
+	implementedRules  bool
 	resolved          metav1.ConditionStatus
 	resolvedReason    string
 	resolvedMessage   string

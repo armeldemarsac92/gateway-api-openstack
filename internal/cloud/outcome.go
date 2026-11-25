@@ -139,6 +139,10 @@ type RouteResult struct {
 	UnsupportedBackendProtocol string
 	// UnsupportedMatch reports an incompatible match without discarding other programmed rules.
 	UnsupportedMatch string
+	// PartiallyInvalid explains why some rules were excluded from this graph.
+	PartiallyInvalid string
+	// ImplementedRules confirms an active retained rule during partial convergence.
+	ImplementedRules bool
 }
 
 // RouteReadyResult returns a converged HTTPRoute result.
