@@ -36,11 +36,11 @@ const (
 )
 
 type backendTLSRequirements struct {
-	requireH2      bool
-	requireSAN     bool
-	xBackend       bool
-	systemCA       bool
-	grpcAuthorizer bool
+	requireH2  bool
+	requireSAN bool
+	xBackend   bool
+	systemCA   bool
+	authorizer bool
 }
 
 func (r *Reconciler) backendTLSAvailability(ctx context.Context, requirements backendTLSRequirements) backendTLSAvailability {
