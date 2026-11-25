@@ -128,6 +128,7 @@ func GatewayBindingMetadataEqual(config Config, left, right *gatewayv1.Gateway) 
 		config.GatewayClusterIDAnnotation(),
 		config.GatewayProjectIDAnnotation(),
 		config.GatewaySNISelectorsAnnotation(),
+		config.GatewayTelemetryAnnotation(),
 	} {
 		if left.Annotations[key] != right.Annotations[key] {
 			return false

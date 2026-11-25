@@ -174,14 +174,41 @@ func (r *backendTLSPolicyStatusReconciler) observeAncestors(ctx context.Context,
 			}
 			// A policy must be enforceable by every profile consuming it
 			// before the single ancestor can report Accepted.
-			if prior, exists := ancestors[key]; exists {
-				conditions.accepted = leastSatisfiedBackendTLSCondition(prior.accepted, conditions.accepted)
-				conditions.resolvedRefs = leastSatisfiedBackendTLSCondition(prior.resolvedRefs, conditions.resolvedRefs)
+			mergeBackendTLSConsumer(ancestors, key, conditions)
+		}
+	}
+	if r.routes.Config.TelemetryPolicyEnabled() {
+		observer := gatewaycontroller.Reconciler{APIReader: r.routes.APIReader, Config: r.routes.Config}
+		consumers, err := observer.ObserveTelemetryBackendTLSPolicy(ctx, policy)
+		if err != nil {
+			return nil, err
+		}
+		capability := backendTLSUnknown
+		if len(consumers) != 0 && r.routes.TelemetryBackendTLSAvailable != nil {
+			supported, err := r.routes.TelemetryBackendTLSAvailable(ctx, requireSAN)
+			if err == nil {
+				capability = backendTLSUnsupported
+				if supported {
+					capability = backendTLSAvailable
+				}
 			}
-			ancestors[key] = conditions
+		}
+		for key, consumer := range consumers {
+			mergeBackendTLSConsumer(ancestors, key, backendTLSPolicyConditions{
+				accepted:     capability.apply(consumer.Accepted, true, requireSAN),
+				resolvedRefs: consumer.ResolvedRefs,
+			})
 		}
 	}
 	return ancestors, nil
+}
+
+func mergeBackendTLSConsumer(ancestors map[types.NamespacedName]backendTLSPolicyConditions, key types.NamespacedName, conditions backendTLSPolicyConditions) {
+	if prior, exists := ancestors[key]; exists {
+		conditions.accepted = leastSatisfiedBackendTLSCondition(prior.accepted, conditions.accepted)
+		conditions.resolvedRefs = leastSatisfiedBackendTLSCondition(prior.resolvedRefs, conditions.resolvedRefs)
+	}
+	ancestors[key] = conditions
 }
 
 func leastSatisfiedBackendTLSCondition(first, second metav1.Condition) metav1.Condition {

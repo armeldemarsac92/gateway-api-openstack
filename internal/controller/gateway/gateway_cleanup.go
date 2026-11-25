@@ -129,6 +129,7 @@ func (r *Reconciler) cleanupGateway(ctx context.Context, scope *gatewayScope) (c
 	controllerutil.RemoveFinalizer(scope.gateway, r.Config.GatewayFinalizer())
 	delete(scope.gateway.Annotations, r.Config.GatewayListenerPortAnnotation())
 	delete(scope.gateway.Annotations, r.Config.GatewaySNISelectorsAnnotation())
+	delete(scope.gateway.Annotations, r.Config.GatewayTelemetryAnnotation())
 	delete(scope.gateway.Annotations, r.Config.GatewayListenerProtocolAnnotation())
 	delete(scope.gateway.Annotations, r.Config.GatewayListenerModeAnnotation(gatewayv1.UDPProtocolType))
 	delete(scope.gateway.Annotations, r.Config.GatewayListenerModeAnnotation(gatewayv1.TCPProtocolType))

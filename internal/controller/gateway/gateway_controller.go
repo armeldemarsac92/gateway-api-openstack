@@ -95,8 +95,11 @@ func (r *Reconciler) Reconcile(
 			}
 		}()
 	}
-	if err != nil || !responsible {
+	if err != nil {
 		return ctrl.Result{}, err
+	}
+	if !responsible {
+		return ctrl.Result{}, r.reportTelemetryWithoutBinding(ctx, req.NamespacedName)
 	}
 	defer func() {
 		if !scope.skipPatch && scope.managed && scope.gateway.DeletionTimestamp.IsZero() {
@@ -115,7 +118,18 @@ func (r *Reconciler) Reconcile(
 		}
 	}()
 
-	if !scope.gateway.DeletionTimestamp.IsZero() {
+	deleting := !scope.gateway.DeletionTimestamp.IsZero()
+	withdrawTelemetry := deleting || r.decideGatewayPhase(scope).phase != gatewayPhaseEnsure
+	telemetryInterval, telemetryErr := r.reconcileGatewayTelemetry(ctx, scope, withdrawTelemetry)
+	if withdrawTelemetry && (telemetryErr != nil || telemetryInterval > 0) {
+		return ctrl.Result{RequeueAfter: telemetryInterval}, telemetryErr
+	}
+	defer func() {
+		boundTelemetryResult(&result, telemetryInterval)
+		retErr = errors.Join(retErr, telemetryErr)
+	}()
+
+	if deleting {
 		// Owner references also allow Kubernetes to collect discovery objects
 		// when the Gateway is removed. A discovery error must not hold up Octavia cleanup.
 		defer func() {

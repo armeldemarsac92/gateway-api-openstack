@@ -44,6 +44,8 @@ const (
 	WithdrawTLS Action = "WithdrawTLS"
 	// WithdrawBackendClientCertificate closes owned pools with stale identities.
 	WithdrawBackendClientCertificate Action = "WithdrawBackendClientCertificate"
+	// ReconcileTelemetry updates only the listener exporter and its collector backend.
+	ReconcileTelemetry Action = "ReconcileTelemetry"
 )
 
 // Request carries the identity and Kubernetes revision that triggered a write.
@@ -52,6 +54,8 @@ type Request struct {
 	Identity cloud.Identity
 	Action   Action
 	Gateway  *gatewayv1.Gateway
+	// WithdrawTelemetry forbids attaching or changing an exporter during Gateway teardown.
+	WithdrawTelemetry bool
 	// Route holds a native HTTPRoute or an in-memory GRPCRoute projection.
 	Route    *gatewayv1.HTTPRoute
 	TCPRoute *gatewayv1.TCPRoute
@@ -83,7 +87,8 @@ type GatewayInput struct {
 	Node     cloud.GatewayGraphNode
 	Validate func(context.Context) error
 	// ReportRoutes publishes verified status for the Gateway-owned TLSRoute set.
-	ReportRoutes func(context.Context, cloud.GatewayGraphResult, error) error
+	ReportRoutes    func(context.Context, cloud.GatewayGraphResult, error) error
+	ReportTelemetry func(context.Context, cloud.GatewayGraphResult, error) error
 	// ObserveTLS rebuilds withdrawal authority even if ordinary graph input is incomplete.
 	ObserveTLS func(context.Context) (GatewayInput, error)
 	// ObserveListenerFilterWithdrawal rebuilds confirmed denial authority
@@ -182,6 +187,21 @@ func (w *Writer) ReconcileGraph(ctx context.Context, request Request) (cloud.Gat
 	}
 	if request.Action == WithdrawBackendClientCertificate {
 		return w.withdrawBackendClientCertificate(ctx, request.Identity, gateway)
+	}
+	if request.Action == ReconcileTelemetry {
+		if gateway.Node.Disposition != cloud.GraphReconcileTelemetry || gateway.Validate == nil {
+			return cloud.GatewayGraphResult{}, errors.New("gateway telemetry requires a live authority fence")
+		}
+		if err := gateway.Validate(ctx); err != nil {
+			return cloud.GatewayGraphResult{}, err
+		}
+		result, err := w.Provider.ReconcileGatewayGraph(ctx, cloud.GatewayGraphSpec{
+			Identity: request.Identity, Gateway: gateway.Node, ValidateMutation: gateway.Validate,
+		})
+		if gateway.ReportTelemetry != nil {
+			err = errors.Join(err, gateway.ReportTelemetry(ctx, result, err))
+		}
+		return result, err
 	}
 	started = time.Now()
 	var routes RouteInputs

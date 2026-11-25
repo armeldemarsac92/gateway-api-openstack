@@ -304,6 +304,11 @@ func (p *Provider) observeRouteGraphsWithListeners(ctx context.Context, owners [
 }
 
 func (p *Provider) observeRouteGraphsFromPools(ctx context.Context, owners []routeGraphOwner, lb *octavia.LoadBalancer, listener *listeners.Listener, protocol string, scopedListeners []listeners.Listener, poolInventory octavia.PoolInventory, recoverGateway *Identity, scopedPolicies map[string]httpsPolicyInventory) ([]observedRouteGraph, error) {
+	var err error
+	lb, poolInventory.Items, err = omitTelemetryPoolsFromRoutes(lb, poolInventory.Items)
+	if err != nil {
+		return nil, err
+	}
 	poolItems := poolInventory.Items
 	inventory := routeGraphInventory{
 		owners: slices.Clone(owners), graphs: make([]observedRouteGraph, len(owners)),

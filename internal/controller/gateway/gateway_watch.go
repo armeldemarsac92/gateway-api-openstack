@@ -35,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 
 	configv1alpha1 "github.com/gateway-api-openstack/gateway-api-openstack/api/v1alpha1"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
@@ -125,6 +126,15 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 			gatewayController.Watches(dependency, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForListenerFilterDependency))
 		}
 		gatewayController.Watches(&corev1.Node{}, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForListenerFilterDependency),
+			builder.WithPredicates(controller.NodePredicate("")))
+	}
+	if r.Config.TelemetryPolicyEnabled() {
+		gatewayController.Watches(&gatewayx.XTelemetryPolicy{}, handler.EnqueueRequestsFromMapFunc(gatewayRequestsForTelemetryPolicy),
+			builder.WithPredicates(controller.GenerationOrDeletionChangedPredicate()))
+		for _, dependency := range []client.Object{&corev1.Service{}, &discoveryv1.EndpointSlice{}, &gatewayv1.ReferenceGrant{}, &gatewayv1.BackendTLSPolicy{}} {
+			gatewayController.Watches(dependency, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForTelemetryDependency))
+		}
+		gatewayController.Watches(&corev1.Node{}, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForTelemetryDependency),
 			builder.WithPredicates(controller.NodePredicate("")))
 	}
 	if r.Config.TLSRoutesEnabled() {
