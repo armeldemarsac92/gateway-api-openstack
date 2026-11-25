@@ -50,7 +50,7 @@ The XMesh controller identity is `gateway-api-openstack.github.io/istio-ambient`
 
 `Programmed=True` and the 16 sorted `supportedFeatures` require current-generation acceptance of `GatewayClass/istio-waypoint` under `istio.io/mesh-controller`. The controller also checks the pinned modules and current rollouts of `istio-system/istiod`, `istio-cni-node` and `ztunnel`, with the expected ambient, waypoint, Gateway API and IPv4 settings. It rechecks these workloads every ten seconds and withdraws the capabilities with `Programmed=Unknown` if a required observation is missing. The two pinned pilot images advertise the same set. The consumer pilot extension supports the limited cross-namespace response header behavior described above.
 
-`Programmed` reports the observed cluster prerequisites. Verify enrollment, Service-parent Route conditions and traffic separately for each Service.
+`Programmed` reports the observed cluster prerequisites. Verify enrollment, Service-parent Route conditions and traffic separately for each Service. [Observed XMesh conditions during istiod shutdown and recovery](../../docs/qualification/v1.7.0/provider/experimental-policies.md#xmesh-readiness-on-istio-ambient)
 
 On Standard, use the existing controller installation and workload enrollment instructions. To turn reporting off on Experimental, remove the component or switch the base back to `config/experimental`. After the controller rollout finishes, you can delete the XMesh if it belongs to this installation. Istio continues to manage its waypoints and Service-parent Route status separately.
 
