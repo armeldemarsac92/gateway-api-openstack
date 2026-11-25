@@ -77,6 +77,7 @@ type routeBindingSnapshot struct {
 type routeValidationSnapshot struct {
 	route                   *gatewayv1.HTTPRoute
 	gateway                 *gatewayv1.Gateway
+	gatewayClass            *gatewayv1.GatewayClass
 	parents                 []managedRouteParent
 	selection               routeSelection
 	binding                 routeBindingSnapshot
@@ -267,10 +268,11 @@ func (r *Reconciler) observeRouteValidationInputs(
 		return routeValidationSnapshot{}, errHTTPRouteChanged
 	}
 	return routeValidationSnapshot{
-		route:       &route,
-		gateway:     &gateway,
-		parents:     parents,
-		disposition: routeValidationReady,
+		route:        &route,
+		gateway:      &gateway,
+		gatewayClass: &gatewayClass,
+		parents:      parents,
+		disposition:  routeValidationReady,
 	}, nil
 }
 

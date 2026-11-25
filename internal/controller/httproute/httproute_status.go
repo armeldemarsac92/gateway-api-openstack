@@ -435,9 +435,8 @@ func rejectedRouteStatus(reason, message string) routeReconcileStatus {
 	}
 }
 
-// resolveRouteReferences evaluates object references without applying the
-// Gateway's member mode or requiring ready endpoints.
-func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv1.HTTPRoute, status *routeReconcileStatus) error {
+// resolveRouteReferences evaluates object references without requiring ready endpoints.
+func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv1.HTTPRoute, gateway *gatewayv1.Gateway, status *routeReconcileStatus) error {
 	backends, err := r.validateRouteStructure(route)
 	if err != nil {
 		var rejection *routeBuildError
@@ -495,8 +494,19 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 			if object != nil {
 				spec = &object.Spec
 			}
-			if diagnostic := model.CheckXBackendTarget(key, spec, cloud.MemberModeEndpoint, r.Config.BackendH2C); diagnostic != nil {
+			profile, err := r.xBackendProfile(gateway)
+			if err != nil {
+				return err
+			}
+			pending := profile.MemberMode == ""
+			if pending {
+				// Check the spec and class now while topology is pending.
+				profile.MemberMode = cloud.MemberModeEndpoint
+			}
+			if diagnostic := model.CheckXBackendTarget(key, spec, profile); diagnostic != nil {
 				*status = status.withBackendDiagnostic(*diagnostic)
+			} else if pending && spec.Type == gatewayx.BackendTypeExternalHostname && status.resolved == metav1.ConditionTrue {
+				status.resolved, status.resolvedReason, status.resolvedMessage = metav1.ConditionUnknown, "Pending", "Gateway member mode is pending"
 			}
 			continue
 		}

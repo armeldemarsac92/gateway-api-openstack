@@ -109,6 +109,7 @@ type desiredRoute struct {
 	mirrorAvailability          requestMirrorAvailability
 	backendKey                  string
 	unavailable                 bool
+	routedExternal              bool
 	redirect                    bool
 	redirectMatches             []cloud.HTTPPathMatch
 	redirectIssue               error
@@ -147,7 +148,7 @@ func (p *Provider) buildDesiredRoute(spec cloud.RouteSpec) (desiredRoute, error)
 	if spec.GRPC {
 		return desiredRoute{}, cloud.NewProviderError(cloud.ErrorCategoryTerminalValidation, errors.New("gRPC routing requires HTTP backend groups"))
 	}
-	route, err := p.buildDesiredRoutePart(spec, "", false)
+	route, err := p.buildDesiredRoutePart(spec, "", false, false)
 	for index := range route.policies {
 		route.policies[index].precedence = spec.Precedence
 	}
@@ -188,7 +189,7 @@ func scopeHTTPScalar(route desiredRoute) desiredRoute {
 	return route
 }
 
-func (p *Provider) buildDesiredRoutePart(spec cloud.RouteSpec, backendKey string, unavailable bool) (desiredRoute, error) {
+func (p *Provider) buildDesiredRoutePart(spec cloud.RouteSpec, backendKey string, unavailable, routedExternal bool) (desiredRoute, error) {
 	identity, err := p.identity(spec.Identity)
 	if err != nil {
 		return desiredRoute{}, err
@@ -235,7 +236,9 @@ func (p *Provider) buildDesiredRoutePart(spec cloud.RouteSpec, backendKey string
 	if len(spec.Members) == 0 && spec.MemberMode != cloud.MemberModeEndpoint && !unavailable {
 		return invalid(errors.New("at least one ready backend member is required"))
 	}
-	if strings.TrimSpace(spec.MemberSubnetID) == "" {
+	if routedExternal {
+		spec.MemberSubnetID = ""
+	} else if strings.TrimSpace(spec.MemberSubnetID) == "" {
 		return invalid(errors.New("member subnet ID must not be empty"))
 	}
 	var policies []desiredPolicy
@@ -343,6 +346,7 @@ func (p *Provider) buildDesiredRoutePart(spec cloud.RouteSpec, backendKey string
 		hostnameRuleValue: hostnameRuleValue,
 		backendKey:        backendKey,
 		unavailable:       unavailable,
+		routedExternal:    routedExternal,
 	}, nil
 }
 
@@ -378,6 +382,10 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 			len(backend.Matches) == 0 && !targetsUsed[index] && !mirrorsUsed[index] || unavailable && !deniedTLS && len(backend.Members) != 0 {
 			return invalid(errors.New("each HTTP backend requires a supported reference and a match or weighted reference, and an unavailable backend must have no members"))
 		}
+		if backend.RoutedExternal && (backend.Kind != cloud.HTTPBackendKindXBackend || spec.GRPC || spec.MemberMode != cloud.MemberModeEndpoint ||
+			len(spec.BackendSecurityGroupIDs) != 0 || backend.BackendH2C || backend.BackendTLS != nil || backend.BackendRetryBudget != nil || backend.InvalidReference) {
+			return invalid(errors.New("routed external members require an unmanaged HTTP XBackend pool"))
+		}
 		key := scopeHTTPKey(spec, openstackidentity.HTTPBackendPoolKey(backend))
 		if backendKeys[key] {
 			return invalid(errors.New("duplicate HTTP backend within one route"))
@@ -388,7 +396,7 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 		partSpec.BackendH2C, partSpec.BackendTLS = backend.BackendH2C, backend.BackendTLS
 		partSpec.BackendRetryBudget = backend.BackendRetryBudget
 		partSpec.BackendRetryBudgetPending = backend.BackendRetryBudgetPending
-		part, err := p.buildDesiredRoutePart(partSpec, key, unavailable)
+		part, err := p.buildDesiredRoutePart(partSpec, key, unavailable, backend.RoutedExternal)
 		if err != nil {
 			return desiredRoute{}, err
 		}
@@ -432,7 +440,7 @@ func (p *Provider) buildDesiredFixedHTTPParts(spec cloud.RouteSpec) ([]desiredRo
 			return invalid(errors.New("fixed HTTP rules require a unique rule index and at least one match"))
 		}
 		seen[rule.RuleIndex] = true
-		part, err := p.buildDesiredRoutePart(partSpec, scopeHTTPKey(spec, openstackidentity.HTTPFixedRuleKey(rule.RuleIndex)), true)
+		part, err := p.buildDesiredRoutePart(partSpec, scopeHTTPKey(spec, openstackidentity.HTTPFixedRuleKey(rule.RuleIndex)), true, false)
 		if err != nil {
 			return nil, err
 		}

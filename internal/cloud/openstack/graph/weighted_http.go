@@ -68,7 +68,7 @@ func (p *Provider) buildDesiredWeightedHTTPParts(spec cloud.RouteSpec) ([]desire
 			return invalid(errors.New("weighted HTTP rules require a unique rule index, a match and 1 to 16 targets"))
 		}
 		seen[rule.RuleIndex] = true
-		part, err := p.buildDesiredRoutePart(partSpec, scopeHTTPKey(spec, openstackidentity.HTTPWeightedRuleKey(rule.RuleIndex)), true)
+		part, err := p.buildDesiredRoutePart(partSpec, scopeHTTPKey(spec, openstackidentity.HTTPWeightedRuleKey(rule.RuleIndex)), true, false)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -123,7 +123,7 @@ func (p *Provider) buildDesiredWeightedHTTPParts(spec cloud.RouteSpec) ([]desire
 		parts = append(parts, part)
 	}
 	if spec.GRPC {
-		failure, err := p.buildDesiredRoutePart(partSpec, grpcFailurePoolKey, true)
+		failure, err := p.buildDesiredRoutePart(partSpec, grpcFailurePoolKey, true, false)
 		if err != nil {
 			return nil, nil, err
 		}

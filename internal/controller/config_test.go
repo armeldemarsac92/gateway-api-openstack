@@ -17,12 +17,30 @@ limitations under the License.
 package controller
 
 import (
+	"net/netip"
 	"testing"
 	"time"
 
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	"sigs.k8s.io/gateway-api/pkg/features"
 )
+
+func TestExperimentalExternalHostnameConfigCanDisableAllClasses(t *testing.T) {
+	cfg := Config{
+		ControllerName: "example.net/gateway-api-openstack", ClusterID: "cluster-a", OpenStackResyncInterval: time.Minute,
+		GatewayAPIChannel:               features.FeatureChannelExperimental,
+		XBackendExternalHostnameClasses: []string{"edge"},
+		XBackendExternalHostnameCIDRs:   []netip.Prefix{netip.MustParsePrefix("198.51.100.0/24")},
+		XBackendServiceDNSDomains:       []string{"svc.example.test"},
+	}
+	if err := cfg.Validate(); err != nil || !cfg.RoutedXBackendEnabled("edge") {
+		t.Fatalf("valid opt-in must permit edge, got %v", err)
+	}
+	cfg.XBackendExternalHostnameClasses = nil
+	if err := cfg.Validate(); err != nil || cfg.RoutedXBackendEnabled("edge") {
+		t.Fatalf("removing the last class must turn the feature off without rejecting the config, got %v", err)
+	}
+}
 
 func TestConfigFinalizersUseControllerDomain(t *testing.T) {
 	cfg := Config{
