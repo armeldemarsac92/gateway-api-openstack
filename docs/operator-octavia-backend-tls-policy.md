@@ -65,6 +65,8 @@ In a region that lacks SAN support, the affected pool stays closed and the polic
 
 ## Protect an Experimental XBackend
 
+The local kind ServerOnly qualification served HTTP 200 with the configured SNI and negotiated ALPN `http/1.1`. Removing the selected Pod backend's CA ConfigMap produced three HTTP 503 responses and zero additional application requests. Restoring the CA resumed traffic. For an ExternalHostname, changing DNS to an origin presenting a different DNS identity produced three HTTP 503 responses. The same-named ordinary Service remained available in all phases. [Pool settings, conditions and traffic](qualification/v1.7.0/provider/xbackend-server-tls-evidence/receipt.json)
+
 Install the Experimental Gateway API bundle and enable the regional capability and controller flag described above. Use an Endpoint member topology with Unmanaged backend security. For `EndpointSelector`, add the following to an XBackend with a Pod selector and a literal `spec.port.number`. The HTTPRoute references the XBackend by group, kind and name in its own namespace, omitting `backendRef.port`.
 
 ```yaml
