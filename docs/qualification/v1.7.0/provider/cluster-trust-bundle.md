@@ -4,9 +4,9 @@ A named Kubernetes `ClusterTrustBundle` supplied trust for a Gateway HTTPS liste
 and a `BackendTLSPolicy` targeting the TLS Service used by an HTTPRoute. All six
 steps passed on both Gateway API v1.7.0 CRD channels. The upstream registry classifies
 `ClusterTrustBundle` as Experimental Extended and has no registered case for it.
-This supplemental result leaves the recorded totals at 167 of 170 registered
-cases per channel and 55 of 64 named features with all their registered cases
-passing on both channels. [Local receipt and digests](cluster-trust-bundle-evidence/receipt.json) ·
+The local receipt records the controller revision, the observed status
+and the traffic at each step. The feature matrix tracks the registered cases
+separately. [Local receipt and digests](cluster-trust-bundle-evidence/receipt.json) ·
 [Named contracts](../matrix/named-contracts.md)
 
 | Bundle state | Standard | Experimental |

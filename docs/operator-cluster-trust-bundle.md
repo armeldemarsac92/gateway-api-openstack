@@ -50,11 +50,15 @@ confirms deletion or invalid content. The corresponding listener or policy repor
 `Accepted=False / NoValidCACertificate` and
 `ResolvedRefs=False / InvalidCACertificateRef`. A valid bundle exceeding
 128 KiB after normalization resolves with `CACertificateBundleTooLarge` and
-keeps the affected listener or backend closed. Stale or partial discovery and
-transient read failures keep the last confirmed configuration and cause a
-retry. A confirmed frontend revocation can still close its HTTPS port while
-an unrelated backend trust read is pending. Complete discovery that confirms
-the native API is unserved makes the reference invalid.
+keeps the affected listener or backend closed. When the effective policy's
+bundle cannot be read, the controller keeps its last confirmed trust and
+retries. A conflicting policy reports `ResolvedRefs=Unknown` for an unreadable
+bundle. If the effective policy uses a ConfigMap, its CA updates still apply.
+While a bundle read is pending, the controller can independently confirm a
+frontend certificate revocation and close its HTTPS port, or confirm a
+backend client certificate revocation and withdraw it from the affected pools.
+Complete discovery that confirms the native API is unserved makes the
+reference invalid.
 
 ## Local qualification
 
