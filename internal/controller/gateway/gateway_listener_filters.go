@@ -46,8 +46,9 @@ import (
 )
 
 const (
-	invalidListenerFilter    = gatewayv1.ListenerConditionReason("InvalidListenerFilter")
-	invalidListenerFilterRef = gatewayv1.ListenerConditionReason("InvalidListenerFilterRef")
+	maxListenerRequestFilters = 16
+	invalidListenerFilter     = gatewayv1.ListenerConditionReason("InvalidListenerFilter")
+	invalidListenerFilterRef  = gatewayv1.ListenerConditionReason("InvalidListenerFilterRef")
 )
 
 var listenerAuthPath = regexp.MustCompile("^(?:[-A-Za-z0-9/._~!$&'()*+,;=:@]|%[0-9a-fA-F]{2})+$")
@@ -124,7 +125,7 @@ func (r *Reconciler) observeListenerFilters(ctx context.Context, gateway *gatewa
 }
 
 func (r *Reconciler) resolveListenerFilterRequests(ctx context.Context, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, topology classconfig.Resolved) ([]cloud.ListenerExternalAuth, *httpsListenerIssue, error) {
-	if len(listener.Filters.Requests) > 16 {
+	if len(listener.Filters.Requests) > maxListenerRequestFilters {
 		return nil, &httpsListenerIssue{gatewayv1.ListenerConditionAccepted, invalidListenerFilter, "filters.requests must contain at most 16 entries"}, nil
 	}
 	requests := make([]cloud.ListenerExternalAuth, 0, len(listener.Filters.Requests))
@@ -146,13 +147,27 @@ func (r *Reconciler) resolveListenerFilterRequests(ctx context.Context, gateway 
 	return requests, nil, nil
 }
 
-func (r *Reconciler) resolveListenerFilter(ctx context.Context, gateway *gatewayv1.Gateway, filter gatewayv1.ListenerFilter, topology classconfig.Resolved) (cloud.ListenerExternalAuth, *httpsListenerIssue, error) {
-	var auth cloud.ListenerExternalAuth
-	invalid := func(reason gatewayv1.ListenerConditionReason, message string) (cloud.ListenerExternalAuth, *httpsListenerIssue, error) {
-		return auth, &httpsListenerIssue{gatewayv1.ListenerConditionAccepted, reason, message}, nil
+// GatewayOwnsListenerRequestFilters identifies filters handled by the opted-in
+// HTTP listener profile. Gateway reconciliation checks grants and backend readiness.
+func GatewayOwnsListenerRequestFilters(config controller.Config, namespace string, listener *gatewayv1.Listener) bool {
+	if !config.GatewayListenerFiltersEnabled() || listenerFamily(listener) != gatewayv1.HTTPProtocolType ||
+		listener.Protocol == gatewayv1.HTTPSProtocolType && !config.OperatorHTTPS || !listenerHasRequestFilters(listener) ||
+		len(listener.Filters.Requests) > maxListenerRequestFilters {
+		return false
 	}
-	unresolved := func(message string) (cloud.ListenerExternalAuth, *httpsListenerIssue, error) {
-		return auth, &httpsListenerIssue{gatewayv1.ListenerConditionResolvedRefs, invalidListenerFilterRef, message}, nil
+	return !slices.ContainsFunc(listener.Filters.Requests, func(filter gatewayv1.ListenerFilter) bool {
+		_, _, issue := normalizeListenerFilter(namespace, filter)
+		return issue != nil
+	})
+}
+
+func normalizeListenerFilter(namespace string, filter gatewayv1.ListenerFilter) (cloud.ListenerExternalAuth, types.NamespacedName, *httpsListenerIssue) {
+	var auth cloud.ListenerExternalAuth
+	invalid := func(reason gatewayv1.ListenerConditionReason, message string) (cloud.ListenerExternalAuth, types.NamespacedName, *httpsListenerIssue) {
+		return auth, types.NamespacedName{}, &httpsListenerIssue{gatewayv1.ListenerConditionAccepted, reason, message}
+	}
+	unresolved := func(message string) (cloud.ListenerExternalAuth, types.NamespacedName, *httpsListenerIssue) {
+		return auth, types.NamespacedName{}, &httpsListenerIssue{gatewayv1.ListenerConditionResolvedRefs, invalidListenerFilterRef, message}
 	}
 	switch filter.Type {
 	case gatewayv1.ListenerFilterExtensionRef:
@@ -188,10 +203,22 @@ func (r *Reconciler) resolveListenerFilter(ctx context.Context, gateway *gateway
 		auth.AllowedRequestHeaders = normalizeAuthHeaders(options.AllowedRequestHeaders)
 		auth.AllowedResponseHeaders = normalizeAuthHeaders(options.AllowedResponseHeaders)
 	}
-	key, supported := model.BackendServiceReference(gateway.Namespace, filterAuth.BackendRef)
+	key, supported := model.BackendServiceReference(namespace, filterAuth.BackendRef)
 	if !supported || key.Name == "" {
 		return unresolved("ExternalAuth backendRef must refer to a core Service")
 	}
+	return auth, key, nil
+}
+
+func (r *Reconciler) resolveListenerFilter(ctx context.Context, gateway *gatewayv1.Gateway, filter gatewayv1.ListenerFilter, topology classconfig.Resolved) (cloud.ListenerExternalAuth, *httpsListenerIssue, error) {
+	auth, key, issue := normalizeListenerFilter(gateway.Namespace, filter)
+	if issue != nil {
+		return auth, issue, nil
+	}
+	unresolved := func(message string) (cloud.ListenerExternalAuth, *httpsListenerIssue, error) {
+		return auth, &httpsListenerIssue{gatewayv1.ListenerConditionResolvedRefs, invalidListenerFilterRef, message}, nil
+	}
+	filterAuth := filter.ExternalAuth
 	if key.Namespace != gateway.Namespace {
 		grants, err := graph.ListBackendReferenceGrants(ctx, r.APIReader, key.Namespace)
 		if err != nil {
@@ -228,7 +255,8 @@ func (r *Reconciler) resolveListenerFilter(ctx context.Context, gateway *gateway
 	if slices.ContainsFunc(policies.Items, func(policy gatewayv1.BackendTLSPolicy) bool {
 		return policy.DeletionTimestamp.IsZero() && backendtls.AppliesToServicePort(&policy, &service, port)
 	}) {
-		return invalid(gatewayv1.ListenerReasonUnsupportedValue, "ExternalAuth backend TLS is unsupported")
+		return auth, &httpsListenerIssue{gatewayv1.ListenerConditionAccepted, gatewayv1.ListenerReasonUnsupportedValue,
+			"ExternalAuth backend TLS is unsupported"}, nil
 	}
 	members, diagnostic, err := routebackend.TransportMembers(ctx, r.APIReader, &service, filterAuth.BackendRef.Port, corev1.ProtocolTCP, topology, nil, false)
 	if err != nil {

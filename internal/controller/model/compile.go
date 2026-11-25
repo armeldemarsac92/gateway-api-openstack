@@ -33,7 +33,7 @@ func Compile(input Input) (Gateway, error) {
 	if input.Gateway == nil {
 		return Gateway{}, errors.New("gateway input is required")
 	}
-	result := Gateway{Source: source(input.Gateway), Listeners: compileListeners(input.Gateway.Spec.Listeners, input.OperatorHTTPS)}
+	result := Gateway{Source: source(input.Gateway), Listeners: compileListeners(input.Gateway.Spec.Listeners, input.OperatorHTTPS, input.GatewayListenerRequestFilters)}
 	if UnsupportedGatewayWideTLS(input.Gateway.Spec.TLS) {
 		result.Diagnostics = append(result.Diagnostics, Diagnostic{
 			Condition: string(gatewayv1.GatewayConditionAccepted), Reason: string(gatewayv1.GatewayReasonInvalidParameters),
@@ -43,7 +43,7 @@ func Compile(input Input) (Gateway, error) {
 	gatewayListeners := result.Listeners
 	setListeners := make(map[types.NamespacedName][]Listener, len(input.ListenerSetSections))
 	for key, sections := range input.ListenerSetSections {
-		compiled := compileListeners(sections, input.OperatorHTTPS)
+		compiled := compileListeners(sections, input.OperatorHTTPS, nil)
 		for i := range compiled {
 			compiled[i].ListenerSet = key
 		}
@@ -117,7 +117,7 @@ func FrontendClientValidation(tls *gatewayv1.GatewayTLSConfig, port gatewayv1.Po
 	return tls.Frontend.Default.Validation
 }
 
-func compileListeners(sections []gatewayv1.Listener, operatorHTTPS bool) []Listener {
+func compileListeners(sections []gatewayv1.Listener, operatorHTTPS bool, handledFilters map[gatewayv1.SectionName]bool) []Listener {
 	result := make([]Listener, 0, len(sections))
 	for _, listener := range sections {
 		compiled := Listener{Name: listener.Name, Port: listener.Port, Protocol: listener.Protocol}
@@ -125,7 +125,7 @@ func compileListeners(sections []gatewayv1.Listener, operatorHTTPS bool) []Liste
 			compiled.Hostname = string(*listener.Hostname)
 		}
 		switch {
-		case listener.Filters != nil && len(listener.Filters.Requests) > 0:
+		case listener.Filters != nil && len(listener.Filters.Requests) > 0 && !handledFilters[listener.Name]:
 			compiled.Diagnostics = append(compiled.Diagnostics, Diagnostic{
 				Condition: string(gatewayv1.ListenerConditionAccepted), Reason: string(gatewayv1.ListenerReasonUnsupportedValue),
 				Message: "pre-routing request filters are not implemented by the HTTP compiler",

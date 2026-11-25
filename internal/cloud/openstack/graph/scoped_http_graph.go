@@ -179,6 +179,13 @@ func addPolicyPoolListeners(links map[string][]pools.ListenerID, policy observed
 	for _, target := range policy.weightedTargets {
 		add(target.PoolID)
 	}
+	// Octavia links a mirror pool to its listener when the policy can
+	// actually send it a copy, including mirrors on weighted targets.
+	for _, mirror := range policy.allRequestMirrors() {
+		if mirror.Numerator > 0 {
+			add(mirror.PoolID)
+		}
+	}
 }
 
 func scopedHTTPListeners(desired desiredGatewayGraph) map[int]cloud.ScopedListener {
