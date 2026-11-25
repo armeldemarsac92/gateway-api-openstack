@@ -383,6 +383,86 @@ func TestGatewayRouteFailurePreservesStatusAndRedactsDetails(t *testing.T) {
 	}
 }
 
+func TestGatewayTransportRouteFailureRefreshesAttachments(t *testing.T) {
+	for _, scenario := range []struct {
+		name     string
+		protocol gatewayv1.ProtocolType
+		renamed  bool
+	}{
+		{name: "TCP", protocol: gatewayv1.TCPProtocolType},
+		{name: "UDP", protocol: gatewayv1.UDPProtocolType},
+		{name: "renamed UDP listener", protocol: gatewayv1.UDPProtocolType, renamed: true},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			ctx := t.Context()
+			cfg := testConfig()
+			gateway := programmedTestGateway(cfg)
+			listener := &gateway.Spec.Listeners[0]
+			listener.Protocol = scenario.protocol
+			listener.Name = gatewayv1.SectionName(strings.ToLower(string(scenario.protocol)))
+			gateway.Annotations[cfg.GatewayListenerProtocolAnnotation()] = string(scenario.protocol)
+			gateway.Status.Listeners = []gatewayv1.ListenerStatus{{
+				Name: listener.Name, AttachedRoutes: 1, SupportedKinds: listenerSupportedRouteKinds(cfg, *listener),
+				Conditions: []metav1.Condition{Condition(string(gatewayv1.ListenerConditionProgrammed), metav1.ConditionTrue,
+					string(gatewayv1.ListenerReasonProgrammed), "Octavia listener is active", gateway.Generation)},
+			}}
+			if scenario.renamed {
+				listener.Name = "renamed"
+				gateway.Generation++
+			}
+			ref := gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name), SectionName: &listener.Name}
+			spec := gatewayv1.CommonRouteSpec{ParentRefs: []gatewayv1.ParentReference{ref}}
+			newRoute := func(name, reason string) client.Object {
+				metadata := metav1.ObjectMeta{Namespace: gateway.Namespace, Name: name, Generation: 1}
+				status := gatewayv1.RouteStatus{Parents: []gatewayv1.RouteParentStatus{{
+					ParentRef: ref, ControllerName: cfg.ControllerName,
+					Conditions: []metav1.Condition{
+						Condition(string(gatewayv1.RouteConditionAccepted), metav1.ConditionTrue, string(gatewayv1.RouteReasonAccepted), "Route is accepted", 1),
+						Condition(cfg.Domain()+"/Programmed", metav1.ConditionFalse, reason, "Route is not programmed", 1),
+					},
+				}}}
+				if scenario.protocol == gatewayv1.TCPProtocolType {
+					return &gatewayv1.TCPRoute{ObjectMeta: metadata, Spec: gatewayv1.TCPRouteSpec{CommonRouteSpec: spec}, Status: gatewayv1.TCPRouteStatus{RouteStatus: status}}
+				}
+				return &gatewayv1.UDPRoute{ObjectMeta: metadata, Spec: gatewayv1.UDPRouteSpec{CommonRouteSpec: spec}, Status: gatewayv1.UDPRouteStatus{RouteStatus: status}}
+			}
+			class := &gatewayv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "openstack"}, Spec: gatewayv1.GatewayClassSpec{ControllerName: cfg.ControllerName}}
+			older := newRoute("older", controller.ProviderReasonInvalidConfiguration)
+			older.SetUID("older-route")
+			newer := newRoute("newer", "NotSelected")
+			kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(gateway).WithObjects(class, gateway, older, newer).Build()
+			graphErr := &cloud.GraphError{Identity: cloud.Identity{RouteUID: string(older.GetUID())}, Err: cloud.ErrTerminalValidation}
+			reconciler := newTestReconciler(Reconciler{Client: kube, APIReader: kube, Config: cfg, Writer: fixedGatewayGraph{err: graphErr}}, nil)
+			request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(gateway)}
+			var current gatewayv1.Gateway
+			require.NoError(t, kube.Get(ctx, request.NamespacedName, &current))
+			want := current.Status.DeepCopy()
+			want.Listeners[0].AttachedRoutes = 2
+
+			_, err := reconciler.Reconcile(ctx, request)
+			require.NoError(t, err)
+
+			require.NoError(t, kube.Get(ctx, request.NamespacedName, &current))
+			if scenario.renamed {
+				require.Equal(t, want.Conditions, current.Status.Conditions)
+				require.Len(t, current.Status.Listeners, 1)
+				status := current.Status.Listeners[0]
+				require.Equal(t, listener.Name, status.Name)
+				require.EqualValues(t, 2, status.AttachedRoutes)
+				require.Equal(t, want.Listeners[0].SupportedKinds, status.SupportedKinds)
+				require.True(t, meta.IsStatusConditionTrue(status.Conditions, string(gatewayv1.ListenerConditionAccepted)))
+				programmed := meta.FindStatusCondition(status.Conditions, string(gatewayv1.ListenerConditionProgrammed))
+				require.NotNil(t, programmed)
+				require.Equal(t, metav1.ConditionFalse, programmed.Status)
+				require.Equal(t, string(gatewayv1.ListenerReasonPending), programmed.Reason)
+				require.Equal(t, gateway.Generation, programmed.ObservedGeneration)
+				return
+			}
+			require.Equal(t, *want, current.Status)
+		})
+	}
+}
+
 func TestGatewayReplacementReportsImmutableAddress(t *testing.T) {
 	cfg := testConfig()
 	gateway := programmedTestGateway(cfg)

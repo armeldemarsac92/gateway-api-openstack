@@ -466,6 +466,10 @@ func (r *Reconciler) reconcileGatewayGraph(
 					message, message, true, graphResult.Gateway.ScopedListenerReadyPorts); statusErr != nil {
 					return ctrl.Result{}, statusErr
 				}
+			} else if isL4Listener(decision.listener.Protocol) {
+				if statusErr := r.refreshTransportListenerStatuses(ctx, scope.gateway); statusErr != nil {
+					return ctrl.Result{}, statusErr
+				}
 			}
 			if classified {
 				if !policy.ReturnError {
