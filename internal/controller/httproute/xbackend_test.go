@@ -692,6 +692,71 @@ func TestXBackendServerOnlyExternalHostnameUsesItsOwnValidation(t *testing.T) {
 	require.Equal(t, external.Members, targets[1].Members)
 	require.Equal(t, string(ca.UID), targets[1].BackendTLS.CAConfigMapUID)
 	require.Equal(t, 2, lookups)
+	t.Run("XBackend client identity withdrawal and rotation", func(t *testing.T) {
+		original := backend.Spec.DeepCopy()
+		backend.Spec.TLS.Mode = gatewayx.BackendTLSModeClientAndServer
+		backend.Spec.TLS.ClientCertificateRef = &gatewayv1.SecretObjectReference{Name: "client-identity"}
+		require.NoError(t, f.client.Update(t.Context(), backend))
+		defer func() {
+			backend.Spec = *original
+			r.Config.XBackendClientCertificate, r.XBackendClientCertificates = false, nil
+			require.NoError(t, f.client.Update(t.Context(), backend))
+		}()
+		denied := f.observe(t).Nodes[0].Spec.HTTPBackends
+		require.True(t, denied[1].BackendTLS.Denied)
+		require.Empty(t, denied[1].Members)
+		checkStatus(metav1.ConditionFalse, string(gatewayv1.RouteReasonUnsupportedValue))
+
+		r.Config.XBackendClientCertificate = true
+		const first = "https://barbican.example/v1/secrets/xbackend-first"
+		const rotated = "https://barbican.example/v1/secrets/xbackend-rotated"
+		clientIdentity := first
+		r.XBackendClientCertificates = xBackendCertificateResolverFunc(func(_ context.Context, class gatewayv1.ObjectName, observed *gatewayx.XBackend) (string, gatewayv1.RouteConditionReason, string) {
+			require.Equal(t, f.gateway.Spec.GatewayClassName, class)
+			require.Equal(t, backend.Spec.TLS.ClientCertificateRef, observed.Spec.TLS.ClientCertificateRef)
+			if clientIdentity == "" {
+				return "", gatewayv1.RouteReasonRefNotPermitted, "The XBackend certificate grant was revoked"
+			}
+			return clientIdentity, "", ""
+		})
+		firstObservation := f.observe(t)
+		enrolled := firstObservation.Nodes[0].Spec.HTTPBackends
+		require.Equal(t, service, enrolled[0])
+		require.Equal(t, external.Members, enrolled[1].Members)
+		require.Equal(t, first, enrolled[1].XBackendClientCertificateReference)
+		checkStatus(metav1.ConditionTrue, string(gatewayv1.RouteReasonResolvedRefs))
+
+		clientIdentity = ""
+		require.ErrorIs(t, firstObservation.Validate(t.Context()), errHTTPRouteChanged)
+		withdrawn := f.observe(t).Nodes[0].Spec.HTTPBackends
+		require.Equal(t, service, withdrawn[0])
+		require.True(t, withdrawn[1].BackendTLS.Denied)
+		require.Empty(t, withdrawn[1].Members)
+		require.Empty(t, withdrawn[1].XBackendClientCertificateReference)
+		checkStatus(metav1.ConditionFalse, string(gatewayv1.RouteReasonRefNotPermitted))
+
+		clientIdentity = rotated
+		require.ErrorIs(t, firstObservation.Validate(t.Context()), errHTTPRouteChanged)
+		restored := f.observe(t).Nodes[0].Spec.HTTPBackends
+		require.Equal(t, service, restored[0])
+		require.Equal(t, rotated, restored[1].XBackendClientCertificateReference)
+		require.Equal(t, external.Members, restored[1].Members)
+
+		f.create(t, &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Namespace: backend.Namespace, Name: "mutual-tls-origin", Labels: map[string]string{"app": "mutual-tls"}},
+			Status:     corev1.PodStatus{PodIP: "192.0.2.39", Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}},
+		})
+		backend.Spec.Type, backend.Spec.ExternalHostname = gatewayx.BackendTypeEndpointSelector, nil
+		backend.Spec.EndpointSelector = &gatewayx.EndpointSelectorBackend{LabelSelector: gatewayx.LabelSelector{
+			MatchLabels: map[gatewayv1.LabelKey]gatewayv1.LabelValue{"app": "mutual-tls"},
+		}}
+		require.NoError(t, f.client.Update(t.Context(), backend))
+		selected := f.observe(t).Nodes[0].Spec.HTTPBackends
+		require.Equal(t, service, selected[0])
+		require.False(t, selected[1].RoutedExternal)
+		require.Equal(t, rotated, selected[1].XBackendClientCertificateReference)
+		require.Equal(t, []cloud.Member{{Address: "192.0.2.39", Port: int(backend.Spec.Port.Number)}}, selected[1].Members)
+	})
 
 	// The native bundle reader is initialized but has not yet discovered
 	// the API. Inline trust remains pending until discovery can complete.
@@ -702,6 +767,12 @@ func TestXBackendServerOnlyExternalHostnameUsesItsOwnValidation(t *testing.T) {
 	}}
 	require.NoError(t, f.client.Update(t.Context(), backend))
 	checkStatus(metav1.ConditionUnknown, string(gatewayv1.RouteReasonPending))
+}
+
+type xBackendCertificateResolverFunc func(context.Context, gatewayv1.ObjectName, *gatewayx.XBackend) (string, gatewayv1.RouteConditionReason, string)
+
+func (f xBackendCertificateResolverFunc) ResolveXBackendClientCertificate(ctx context.Context, class gatewayv1.ObjectName, backend *gatewayx.XBackend) (string, gatewayv1.RouteConditionReason, string) {
+	return f(ctx, class, backend)
 }
 
 func TestXBackendAncestorLimitKeepsForeignStatusDuringDetach(t *testing.T) {

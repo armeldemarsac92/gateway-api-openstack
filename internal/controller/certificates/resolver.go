@@ -18,21 +18,28 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 )
 
-const BackendClientPurpose = "backend-client"
+const (
+	BackendClientPurpose     = "backend-client"
+	XBackendClientPurpose    = "xbackend-client"
+	backendClientUnavailable = "BackendClientCertificateUnavailable"
+	backendClientNotCurrent  = "BackendClientCertificateNotCurrent"
+)
 
 // Resolver reads a protected enrollment snapshot and uses the uncached Reader
 // to check current ReferenceGrants and Secret metadata.
 type Resolver struct {
-	Path              string
-	BackendClientPath string
-	ClusterID         string
-	ProjectID         string
-	Region            string
-	Endpoint          string
-	DiscoverEndpoint  func() (string, error)
-	Reader            client.Reader
+	Path               string
+	BackendClientPath  string
+	XBackendClientPath string
+	ClusterID          string
+	ProjectID          string
+	Region             string
+	Endpoint           string
+	DiscoverEndpoint   func() (string, error)
+	Reader             client.Reader
 }
 
 // Resolve returns a Barbican reference only for the live revision of an enrolled
@@ -71,23 +78,47 @@ func (r *Resolver) ListenerSetReferenceStatus(ctx context.Context, gateway *gate
 // ResolveBackendClientCertificate uses the operator's backend identity enrollment
 // and checks the grant before reading Secret metadata or discovering Barbican.
 func (r *Resolver) ResolveBackendClientCertificate(ctx context.Context, gateway *gatewayv1.Gateway) (string, gatewayv1.GatewayConditionReason, string) {
-	const invalid = gatewayv1.GatewayReasonInvalidClientCertificateRef
 	if gateway == nil || gateway.Spec.TLS == nil || gateway.Spec.TLS.Backend == nil || gateway.Spec.TLS.Backend.ClientCertificateRef == nil {
-		return "", invalid, "The Gateway has no backend client certificate reference"
+		return "", gatewayv1.GatewayReasonInvalidClientCertificateRef, "The Gateway has no backend client certificate reference"
 	}
-	ref := *gateway.Spec.TLS.Backend.ClientCertificateRef
-	target, valid := secretKey(gateway.Namespace, ref)
+	return r.resolveBackendClientCertificate(ctx, gateway.Spec.GatewayClassName, gatewayv1.GroupName, "Gateway", gateway.Namespace,
+		BackendClientPurpose, *gateway.Spec.TLS.Backend.ClientCertificateRef)
+}
+
+// ResolveXBackendClientCertificate checks the XBackend's own enrollment and ReferenceGrant.
+func (r *Resolver) ResolveXBackendClientCertificate(ctx context.Context, class gatewayv1.ObjectName, backend *gatewayx.XBackend) (string, gatewayv1.RouteConditionReason, string) {
+	if backend == nil || backend.Spec.TLS == nil || backend.Spec.TLS.Mode != gatewayx.BackendTLSModeClientAndServer || backend.Spec.TLS.ClientCertificateRef == nil {
+		return "", gatewayv1.RouteConditionReason(gatewayv1.GatewayReasonInvalidClientCertificateRef), "The XBackend has no mutual TLS client certificate reference"
+	}
+	reference, reason, message := r.resolveBackendClientCertificate(ctx, class, gatewayx.GroupName, "XBackend", backend.Namespace,
+		XBackendClientPurpose, *backend.Spec.TLS.ClientCertificateRef)
+	if reason == backendClientUnavailable {
+		return "", gatewayv1.RouteReasonPending, message
+	}
+	return reference, gatewayv1.RouteConditionReason(reason), message
+}
+
+func (r *Resolver) resolveBackendClientCertificate(ctx context.Context, class gatewayv1.ObjectName, sourceGroup gatewayv1.Group, sourceKind gatewayv1.Kind, sourceNamespace string, purpose string, ref gatewayv1.SecretObjectReference) (string, gatewayv1.GatewayConditionReason, string) {
+	const invalid = gatewayv1.GatewayReasonInvalidClientCertificateRef
+	target, valid := secretKey(sourceNamespace, ref)
 	if !valid {
 		return "", invalid, "The backend client certificate reference must have a valid Secret name and namespace"
 	}
-	if r == nil || r.Reader == nil || r.BackendClientPath == "" {
-		return "", "BackendClientCertificateUnavailable", "The operator backend client certificate resolver is unavailable"
+	if r == nil || r.Reader == nil {
+		return "", backendClientUnavailable, "The operator backend client certificate resolver is unavailable"
+	}
+	path := r.BackendClientPath
+	if purpose == XBackendClientPurpose {
+		path = r.XBackendClientPath
+	}
+	if path == "" {
+		return "", backendClientUnavailable, "The operator backend client certificate resolver is unavailable"
 	}
 	group, kind := ptr.Deref(ref.Group, ""), ptr.Deref(ref.Kind, "Secret")
-	if allowed, observed := r.referenceAllowed(ctx, "Gateway", gateway.Namespace, target, group, kind); !observed {
-		return "", "BackendClientCertificateUnavailable", "The ReferenceGrants for the backend client certificate could not be read"
+	if allowed, observed := r.referenceAllowed(ctx, sourceGroup, sourceKind, sourceNamespace, target, group, kind); !observed {
+		return "", backendClientUnavailable, "The ReferenceGrants for the backend client certificate could not be read"
 	} else if !allowed {
-		return "", gatewayv1.GatewayReasonRefNotPermitted, "No ReferenceGrant permits this Gateway to use the backend client certificate reference"
+		return "", gatewayv1.GatewayReasonRefNotPermitted, "No ReferenceGrant permits this " + string(sourceKind) + " to use the backend client certificate reference"
 	}
 	if group != "" {
 		return "", invalid, "The backend client certificate reference must use the core API group"
@@ -95,7 +126,7 @@ func (r *Resolver) ResolveBackendClientCertificate(ctx context.Context, gateway 
 	if kind != "Secret" {
 		return "", invalid, "The backend client certificate reference must use kind Secret"
 	}
-	row, found := findBinding(r.BackendClientPath, BackendClientPurpose, r.scope(gateway), target)
+	row, found := findBinding(path, purpose, r.scope(class), target)
 	metadata, err := r.secretMetadata(ctx, target)
 	if apierrors.IsNotFound(err) || err == nil && !metadata.DeletionTimestamp.IsZero() {
 		return "", invalid, "The backend client certificate Secret does not exist or is being deleted"
@@ -104,17 +135,17 @@ func (r *Resolver) ResolveBackendClientCertificate(ctx context.Context, gateway 
 		return "", invalid, "The backend client certificate Secret has no verified operator enrollment for a kubernetes.io/tls Secret with matching tls.crt and tls.key"
 	}
 	if err != nil {
-		return "", "BackendClientCertificateUnavailable", "The enrolled backend client certificate Secret metadata could not be read"
+		return "", backendClientUnavailable, "The enrolled backend client certificate Secret metadata could not be read"
 	}
 	if !matchesRevision(metadata, target, row) {
 		return "", invalid, "The live backend client certificate Secret UID or resourceVersion differs from its operator enrollment"
 	}
 	if !row.validAt(time.Now()) {
-		return "", "BackendClientCertificateNotCurrent", "The enrolled backend client certificate is outside its validity period"
+		return "", backendClientNotCurrent, "The enrolled backend client certificate is outside its validity period"
 	}
 	reference, reason := r.barbicanRef(row)
 	if reason != "" {
-		return "", "BackendClientCertificateUnavailable", "The regional Barbican endpoint for the backend client certificate is unavailable"
+		return "", backendClientUnavailable, "The regional Barbican endpoint for the backend client certificate is unavailable"
 	}
 	return reference, "", ""
 }
@@ -171,11 +202,11 @@ func (r *Resolver) authorizedSecret(ctx context.Context, gateway *gatewayv1.Gate
 	if r == nil || r.Reader == nil || r.Path == "" {
 		return binding{}, invalid
 	}
-	scope := r.scope(gateway)
+	scope := r.scope(gateway.Spec.GatewayClassName)
 	if !scope.valid() {
 		return binding{}, invalid
 	}
-	if allowed, observed := r.referenceAllowed(ctx, sourceKind, sourceNamespace, target, "", "Secret"); !observed {
+	if allowed, observed := r.referenceAllowed(ctx, gatewayv1.GroupName, sourceKind, sourceNamespace, target, "", "Secret"); !observed {
 		return binding{}, invalid
 	} else if !allowed {
 		return binding{}, gatewayv1.ListenerReasonRefNotPermitted
@@ -192,11 +223,11 @@ func (r *Resolver) authorizedSecret(ctx context.Context, gateway *gatewayv1.Gate
 	return row, ""
 }
 
-func (r *Resolver) scope(gateway *gatewayv1.Gateway) bindingScope {
-	return bindingScope{Cluster: r.ClusterID, GatewayClass: string(gateway.Spec.GatewayClassName), Project: r.ProjectID, Region: r.Region}
+func (r *Resolver) scope(class gatewayv1.ObjectName) bindingScope {
+	return bindingScope{Cluster: r.ClusterID, GatewayClass: string(class), Project: r.ProjectID, Region: r.Region}
 }
 
-func (r *Resolver) referenceAllowed(ctx context.Context, sourceKind gatewayv1.Kind, sourceNamespace string, target client.ObjectKey, group gatewayv1.Group, kind gatewayv1.Kind) (allowed, observed bool) {
+func (r *Resolver) referenceAllowed(ctx context.Context, sourceGroup gatewayv1.Group, sourceKind gatewayv1.Kind, sourceNamespace string, target client.ObjectKey, group gatewayv1.Group, kind gatewayv1.Kind) (allowed, observed bool) {
 	if target.Namespace == sourceNamespace {
 		return true, true
 	}
@@ -204,7 +235,7 @@ func (r *Resolver) referenceAllowed(ctx context.Context, sourceKind gatewayv1.Ki
 	if err := r.Reader.List(ctx, &grants, client.InNamespace(target.Namespace)); err != nil || grants.Continue != "" {
 		return false, false
 	}
-	return permitsReference(grants.Items, sourceKind, sourceNamespace, target, group, kind), true
+	return permitsReference(grants.Items, sourceGroup, sourceKind, sourceNamespace, target, group, kind), true
 }
 
 func (r *Resolver) secretMetadata(ctx context.Context, target client.ObjectKey) (*metav1.PartialObjectMetadata, error) {
@@ -245,13 +276,13 @@ func secretKey(sourceNamespace string, ref gatewayv1.SecretObjectReference) (cli
 	return target, validName(target) && len(validation.IsDNS1123Label(sourceNamespace)) == 0
 }
 
-func permitsReference(grants []gatewayv1.ReferenceGrant, sourceKind gatewayv1.Kind, namespace string, target client.ObjectKey, group gatewayv1.Group, kind gatewayv1.Kind) bool {
+func permitsReference(grants []gatewayv1.ReferenceGrant, sourceGroup gatewayv1.Group, sourceKind gatewayv1.Kind, namespace string, target client.ObjectKey, group gatewayv1.Group, kind gatewayv1.Kind) bool {
 	for _, grant := range grants {
 		if grant.Namespace != target.Namespace || !grant.DeletionTimestamp.IsZero() {
 			continue
 		}
 		from := slices.ContainsFunc(grant.Spec.From, func(ref gatewayv1.ReferenceGrantFrom) bool {
-			return ref.Group == gatewayv1.GroupName && ref.Kind == sourceKind && string(ref.Namespace) == namespace
+			return ref.Group == sourceGroup && ref.Kind == sourceKind && string(ref.Namespace) == namespace
 		})
 		to := slices.ContainsFunc(grant.Spec.To, func(ref gatewayv1.ReferenceGrantTo) bool {
 			return ref.Group == group && ref.Kind == kind && (ref.Name == nil || string(*ref.Name) == target.Name)

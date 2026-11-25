@@ -307,6 +307,8 @@ const (
 type HTTPBackend struct {
 	BackendRetryBudget        *BackendRetryBudget `json:",omitempty"`
 	BackendRetryBudgetPending bool                `json:",omitempty"`
+	// XBackendClientCertificateReference is an authorized Barbican identity for this XBackend alone.
+	XBackendClientCertificateReference string `json:"-"`
 	// SessionCookieName enables an HTTP session cookie on an XBackend's pool.
 	SessionCookieName string `json:",omitempty"`
 	// InvalidReference distinguishes an unresolved reference from a valid backend without endpoints.

@@ -90,7 +90,37 @@ Put one PEM CA certificate in `ca.crt` in the XBackend namespace. You can also u
 
 Check the XBackend's current-generation `Accepted` condition under the Gateway in `status.ancestors` and the HTTPRoute's `ResolvedRefs` condition. A missing or invalid CA reports a reference error. A microversion below 2.24 reports `UnsupportedProvider` for ServerOnly. An unconfirmed trust or provider dependency reports `Pending`. An authenticated pool in Octavia `ERROR` is disabled through a pool update before member removal. The controller waits for an `ACTIVE` readback, drains the pool, then verifies the current trust settings and pool ALPN before restoring members. Test both an accepted backend certificate and a rejected identity through the Gateway. The local trial recorded the configured API version, pool ALPN writes and HTTP responses. [Local results](qualification/v1.7.0/provider/xbackend-server-tls-evidence/receipt.json)
 
-`None` is the default TLS mode. `ClientAndServer`, the `System` trust store and HTTP/2 with `ServerOnly` are unsupported.
+`None` is the default TLS mode. Authenticated XBackends support HTTP and HTTP/1.1 with an explicit CA reference. System trust and authenticated HTTP/2 remain open.
+
+### Present an XBackend client certificate
+
+Use `ClientAndServer` on an Experimental HTTPRoute's `EndpointSelector` or operator-authorized `ExternalHostname` XBackend. Enable the same endpoint topology, backend TLS capability and pool ALPN microversion as for `ServerOnly`. Keep the existing server validation, including the `validation.hostname` used as SNI, and add the XBackend's own `clientCertificateRef`.
+
+```yaml
+spec:
+  protocol: HTTP11
+  tls:
+    mode: ClientAndServer
+    clientCertificateRef:
+      name: catalog-client
+      namespace: certificates
+    validation:
+      hostname: catalog.internal.example
+      caCertificateRefs:
+        - group: ""
+          kind: ConfigMap
+          name: catalog-ca
+```
+
+Set `--xbackend-client-certificate-map=/etc/gateway-operator/xbackend-clients/map.json` or `GATEWAY_OPENSTACK_XBACKEND_CLIENT_CERTIFICATE_MAP` and mount the separate operator-controlled directory read-only. Use the enrollment helper with a dedicated working map. Verify the Secret contains the TLS client certificate and matching key. Store the same chain and key in a new immutable, unencrypted Barbican PKCS#12 Secret and grant Octavia read access. Publish the helper's version 1 snapshot with top-level `"purpose": "xbackend-client"`, the exact cluster, GatewayClass, project and region, and one verified row for the Secret UID and resourceVersion. Give the controller `get` only for the approved Kubernetes Secret names via `resourceNames`. It observes Secret metadata and does not need Secret `list` or `watch`. [Enrollment helper](../hack/operator-certificates/README.md)
+
+An omitted `clientCertificateRef.namespace` selects the XBackend namespace. A cross-namespace reference requires a `ReferenceGrant` in the Secret's namespace. Its `from` entry uses group `gateway.networking.x-k8s.io`, kind `XBackend` and the XBackend namespace. Its `to` entry uses group `""`, kind `Secret` and the client Secret name. The Gateway's `backend-client` enrollment authorizes Service pools. This XBackend enrollment authorizes only `ClientAndServer` pools that explicitly reference the Secret.
+
+Watch the XBackend's `Accepted` condition for the managed ancestor and the HTTPRoute's `ResolvedRefs`. `RefNotPermitted` indicates a missing grant. `InvalidClientCertificateRef` indicates a bad reference, missing enrollment or mismatched Secret revision. Unavailable authorization observations report `Pending`. These reasons extend the XBackend's v1.7.0 `Accepted` contract. HTTPRoute `Programmed` reflects the observed Octavia configuration, which can include an intentionally unavailable backend. In a configured installation the controller revisits referencing HTTPRoutes and mutual-TLS XBackend status at most every five seconds between settled reconciles, subject to map projection, queue and provider latency.
+
+For rotation, publish the newly enrolled revision and keep the previous Barbican object readable until Octavia reports its reference gone from all consumers. To revoke access, remove the grant or the enrollment. The controller closes and drains the affected pool before changing or clearing its client identity. It observes the authorized identity, verified CA and SNI, and ALPN `http/1.1` before restoring members. Removing `clientCertificateRef` while switching to `ServerOnly` resumes server-only TLS after clearing the old client identity. Gateway-wide identity withdrawal leaves XBackend pool identities alone.
+
+Controller tests cover identity resolution, revocation and rotation. Live `ClientAndServer` qualification remains open. Exercise a backend that requires the enrolled client certificate, check the actual server identity and negotiated ALPN, and repeat after grant withdrawal and certificate rotation.
 
 ## Verify and rotate trust
 

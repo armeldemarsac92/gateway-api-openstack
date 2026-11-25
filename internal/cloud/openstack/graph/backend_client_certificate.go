@@ -145,6 +145,9 @@ func (p *Provider) withdrawBackendClientCertificate(ctx context.Context, spec cl
 }
 
 func staleBackendClientCertificate(pool pools.Pool, tls octavia.PoolBackendTLS, authorized cloud.BackendClientCertificate) bool {
+	if slices.Contains(pool.Tags, xBackendTLSClientTag) {
+		return false
+	}
 	if !tls.ClientRefObserved {
 		return slices.Contains(pool.Tags, backendTLSClientTag)
 	}

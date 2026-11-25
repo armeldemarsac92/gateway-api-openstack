@@ -112,6 +112,8 @@ type Config struct {
 	XBackendServiceDNSDomains []string
 	// XBackendSessionPersistence enables per-XBackend HTTP session cookies.
 	XBackendSessionPersistence bool
+	// XBackendClientCertificate enables the operator's separate XBackend client identity map.
+	XBackendClientCertificate bool
 	// ControllerVersion is recorded as trace metadata on cloud resources.
 	ControllerVersion string
 	// OpenStackProjectID is the authenticated project used in ownership checks.
@@ -196,6 +198,9 @@ func (c Config) TLSRoutesEnabled() bool {
 func (c Config) Validate() error {
 	if c.XBackendSessionPersistence && !c.XBackendEnabled() {
 		return fmt.Errorf("--octavia-xbackend-session-persistence requires --gateway-api-channel=experimental")
+	}
+	if c.XBackendClientCertificate && (!c.XBackendEnabled() || !c.BackendTLSPolicy) {
+		return fmt.Errorf("--xbackend-client-certificate-map requires --gateway-api-channel=experimental and --octavia-backend-tls-policy")
 	}
 	if c.ClusterGatewayAddresses && !c.GatewayAddressRoutabilityClusterEnabled() {
 		return fmt.Errorf("--gateway-address-routability-cluster requires --gateway-api-channel=experimental and --gateway-infrastructure-metadata")

@@ -34,6 +34,7 @@ import (
 const backendTLSManagedTag = "gateway-api-openstack.backend-tls=v1"
 const backendTLSRevisionTagPrefix = "gateway-api-openstack.backend-tls-ca="
 const backendTLSClientTag = "gateway-api-openstack.backend-tls-client=v1"
+const xBackendTLSClientTag = "gateway-api-openstack.xbackend-tls-client=v1"
 const xBackendServerALPN = "http/1.1"
 
 // backendTLSSANTag also identifies pools that previously used explicit SANs.
@@ -126,7 +127,7 @@ func xBackendPoolWithoutTLS(pool pools.Pool, tls octavia.PoolBackendTLS) bool {
 	return tls.AdminObserved && tls.EnabledObserved && tls.CAObserved && tls.ClientRefObserved &&
 		!hasBackendTLSSettings(pool, tls) && len(pool.ALPNProtocols) == 0 &&
 		!slices.ContainsFunc(pool.Tags, func(tag string) bool {
-			return tag == backendTLSClientTag || tag == backendTLSSANTag || strings.HasPrefix(tag, backendTLSRevisionTagPrefix)
+			return tag == backendTLSClientTag || tag == xBackendTLSClientTag || tag == backendTLSSANTag || strings.HasPrefix(tag, backendTLSRevisionTagPrefix)
 		})
 }
 
@@ -211,8 +212,10 @@ func backendTLSParts(desired *desiredGatewayGraph, routes []observedRouteGraph) 
 				actualPart.pool != nil && hasObservedBackendTLS(*actualPart.pool, actualPart.backendTLS) {
 				clientCertificate := desired.spec.Gateway.BackendClientCertificate
 				if part != nil && part.xBackend {
-					// XBackend ServerOnly does not present a Gateway-wide
-					// client identity used by BackendTLSPolicy on Services.
+					clientCertificate = cloud.BackendClientCertificate{Reference: part.xBackendClientCertificateReference}
+				} else if actualPart.pool != nil && slices.Contains(actualPart.pool.Tags, xBackendTLSClientTag) {
+					// Retiring XBackend pools cannot keep an identity through
+					// a Gateway-wide enrollment for another backend.
 					clientCertificate = cloud.BackendClientCertificate{}
 				}
 				parts = append(parts, backendTLSPart{index: index, key: key, desired: part, observed: actualPart,
@@ -250,7 +253,8 @@ func (part backendTLSPart) preflight() backendTLSPlan {
 		return backendTLSPlan{}
 	}
 	managed := slices.Contains(pool.Tags, backendTLSManagedTag)
-	staleClient := part.clientCertificate.Denied || pool.TLSContainerRef != part.clientCertificate.Reference
+	staleClient := part.clientCertificate.Denied || pool.TLSContainerRef != part.clientCertificate.Reference ||
+		!part.observed.backendTLS.ClientRefObserved && slices.Contains(pool.Tags, xBackendTLSClientTag)
 	clearClient := managed && staleClient
 	if part.retiring {
 		if managed && (staleClient || !part.observed.backendTLS.ClientRefObserved && slices.Contains(pool.Tags, backendTLSClientTag)) {
@@ -289,7 +293,7 @@ func firstBackendTLSWithdrawal(parts []backendTLSPart, plan func(backendTLSPart)
 		tlsPlan := plan(part)
 		var step *routeMutation
 		if part.desired != nil && part.desired.xBackend && !part.retiring {
-			step = tlsPlan.xBackendWithdrawal(part.observed)
+			step = tlsPlan.xBackendWithdrawal(part.observed, part.clientCertificate.Reference != "")
 		} else {
 			step = tlsPlan.withdrawal(protect, requiresClosedPool, part.observed)
 		}
@@ -307,10 +311,15 @@ func firstBackendTLSWithdrawal(parts []backendTLSPart, plan func(backendTLSPart)
 	return first
 }
 
-func (plan backendTLSPlan) xBackendWithdrawal(observed observedRouteGraph) *routeMutation {
+func (plan backendTLSPlan) xBackendWithdrawal(observed observedRouteGraph, wantsClientCertificate bool) *routeMutation {
 	pool := observed.pool
 	if pool == nil || plan.allowsMembers() {
 		return nil
+	}
+	if wantsClientCertificate || pool.TLSContainerRef != "" || slices.Contains(pool.Tags, xBackendTLSClientTag) {
+		// Close before draining any member or health probe that could present
+		// an identity. The authenticated renderer keeps the match reserved.
+		return plan.withdrawal(true, true, observed)
 	}
 	switch pool.ProvisioningStatus {
 	case "ACTIVE":
@@ -363,6 +372,10 @@ func (p *Provider) observeBackendTLS(ctx context.Context, desired desiredRoute, 
 		return backendTLSPlan{phase: backendTLSRelease}
 	}
 	if tls.Denied {
+		if desired.xBackend && pool != nil && slices.Contains(pool.Tags, xBackendTLSClientTag) &&
+			(!observed.backendTLS.ClientRefObserved || !observed.backendTLS.AdminObserved) {
+			return blocked("Waiting to verify XBackend client certificate withdrawal")
+		}
 		return backendTLSPlan{phase: backendTLSDenied}
 	}
 	if clientCertificate.Denied {
@@ -372,7 +385,7 @@ func (p *Provider) observeBackendTLS(ctx context.Context, desired desiredRoute, 
 		return blocked("Backend TLS requires a valid CA and DNS hostname on an HTTP backend")
 	}
 	if desired.xBackend && !p.poolALPN {
-		return blocked("XBackend ServerOnly requires Octavia API microversion 2.24 or newer")
+		return blocked("Authenticated XBackends require Octavia API microversion 2.24 or newer")
 	}
 	if !capable(desired.spec.GRPC, len(tls.SubjectAltNames) != 0) {
 		if len(tls.SubjectAltNames) != 0 {
@@ -442,7 +455,7 @@ func differentBackendTLSRevision(tags []string, expected string) bool {
 
 func backendTLSTags(tags []string, managed bool, revision string, clientCertificate, trackSAN bool) []string {
 	tags = slices.DeleteFunc(slices.Clone(tags), func(tag string) bool {
-		return tag == backendTLSManagedTag || tag == backendTLSClientTag || strings.HasPrefix(tag, backendTLSRevisionTagPrefix)
+		return tag == backendTLSManagedTag || tag == backendTLSClientTag || tag == xBackendTLSClientTag || strings.HasPrefix(tag, backendTLSRevisionTagPrefix)
 	})
 	if managed {
 		tags = append(tags, backendTLSManagedTag)
@@ -455,6 +468,15 @@ func backendTLSTags(tags []string, managed bool, revision string, clientCertific
 	}
 	if trackSAN && !slices.Contains(tags, backendTLSSANTag) {
 		tags = append(tags, backendTLSSANTag)
+	}
+	return tags
+}
+
+func (plan backendTLSPlan) poolTags(desired desiredRoute, tags []string) []string {
+	clientCertificate := plan.settings.ClientCertificateReference != ""
+	tags = backendTLSTags(tags, true, backendTLSRevisionTag(desired.spec.BackendTLS), clientCertificate && !desired.xBackend, plan.settings.SubjectAltNames != nil)
+	if clientCertificate && desired.xBackend {
+		tags = append(tags, xBackendTLSClientTag)
 	}
 	return tags
 }
@@ -528,7 +550,7 @@ func (plan backendTLSPlan) poolMutation(desired desiredRoute, observed observedR
 		step := routeMutation{kind: routeMutationCreatePool, poolTags: &managedTags}
 		if plan.phase == backendTLSConfigure {
 			step.backendTLS = &plan.settings
-			step.poolTags = new(backendTLSTags(nil, true, backendTLSRevisionTag(desired.spec.BackendTLS), plan.settings.ClientCertificateReference != "", len(plan.settings.SubjectAltNames) != 0))
+			step.poolTags = new(plan.poolTags(desired, nil))
 		}
 		return &step
 	}
@@ -591,9 +613,9 @@ func (plan backendTLSPlan) poolMutation(desired desiredRoute, observed observedR
 		clientCertificate := plan.settings.ClientCertificateReference != ""
 		trackSAN := plan.settings.SubjectAltNames != nil
 		if step.poolTags != nil || !slices.Contains(pool.Tags, revision) || differentBackendTLSRevision(pool.Tags, revision) ||
-			slices.Contains(pool.Tags, backendTLSClientTag) != clientCertificate || trackSAN && !slices.Contains(pool.Tags, backendTLSSANTag) {
-			tags := backendTLSTags(pool.Tags, true, revision, clientCertificate, trackSAN)
-			step.poolTags = &tags
+			slices.Contains(pool.Tags, backendTLSClientTag) != (clientCertificate && !desired.xBackend) ||
+			slices.Contains(pool.Tags, xBackendTLSClientTag) != (clientCertificate && desired.xBackend) || trackSAN && !slices.Contains(pool.Tags, backendTLSSANTag) {
+			step.poolTags = new(plan.poolTags(desired, pool.Tags))
 		}
 	}
 	switch {

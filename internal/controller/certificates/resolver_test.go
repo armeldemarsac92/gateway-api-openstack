@@ -20,6 +20,7 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 )
 
 const (
@@ -115,6 +116,68 @@ func TestBackendClientCertificateUsesItsOwnEnrollmentAndGrant(t *testing.T) {
 	}
 	reader.grants = nil
 	check("", gatewayv1.GatewayReasonRefNotPermitted)
+}
+
+func TestXBackendClientCertificateUsesExperimentalGrantAndEnrollmentRevision(t *testing.T) {
+	resolver, gateway, _, reader := resolverFixture(t)
+	resolver.BackendClientPath = filepath.Join(t.TempDir(), "gateway-client.json")
+	resolver.XBackendClientPath = filepath.Join(t.TempDir(), "xbackend-client.json")
+	writePurpose := func(path, purpose, row string) {
+		t.Helper()
+		writeSnapshot(t, path, strings.Replace(mapJSON(row), `"version":1`, `"version":1,"purpose":"`+purpose+`"`, 1))
+	}
+	ref := &gatewayv1.SecretObjectReference{Name: "web", Namespace: ptr.To(gatewayv1.Namespace("certs"))}
+	backend := &gatewayx.XBackend{ObjectMeta: metav1.ObjectMeta{Namespace: "apps"}, Spec: gatewayx.BackendSpec{
+		TLS: &gatewayx.BackendTLS{Mode: gatewayx.BackendTLSModeClientAndServer, ClientCertificateRef: ref},
+	}}
+	writePurpose(resolver.BackendClientPath, BackendClientPurpose, rowJSON("uid-a", "rv/alpha", firstID))
+	writePurpose(resolver.XBackendClientPath, BackendClientPurpose, rowJSON("uid-a", "rv/alpha", firstID))
+	reader.grants = []gatewayv1.ReferenceGrant{{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "certs"},
+		Spec: gatewayv1.ReferenceGrantSpec{
+			From: []gatewayv1.ReferenceGrantFrom{{Group: gatewayv1.GroupName, Kind: "XBackend", Namespace: "apps"}},
+			To:   []gatewayv1.ReferenceGrantTo{{Kind: "Secret", Name: ptr.To(gatewayv1.ObjectName("web"))}},
+		},
+	}}
+	check := func(id string, reason gatewayv1.RouteConditionReason, reads ...string) {
+		t.Helper()
+		reader.reads = nil
+		got, gotReason, message := resolver.ResolveXBackendClientCertificate(t.Context(), gateway.Spec.GatewayClassName, backend)
+		want := ""
+		if id != "" {
+			want = "https://barbican.example:443/v1/secrets/" + id
+		}
+		if got != want || gotReason != reason || (reason != "") != (message != "") || !reflect.DeepEqual(reads, reader.reads) {
+			t.Fatalf("XBackend identity check mismatched: reason %q, message %q, reads %v", gotReason, message, reader.reads)
+		}
+	}
+	const invalid = gatewayv1.RouteConditionReason(gatewayv1.GatewayReasonInvalidClientCertificateRef)
+	check("", gatewayv1.RouteReasonRefNotPermitted, "grants certs")
+	from := &reader.grants[0].Spec.From[0]
+	from.Group, from.Kind = gatewayx.GroupName, "Gateway"
+	check("", gatewayv1.RouteReasonRefNotPermitted, "grants certs")
+	from.Kind, from.Namespace = "XBackend", "other"
+	check("", gatewayv1.RouteReasonRefNotPermitted, "grants certs")
+	from.Namespace = "apps"
+	check("", invalid, "grants certs", "metadata certs/web")
+	writePurpose(resolver.XBackendClientPath, XBackendClientPurpose, rowJSON("uid-a", "rv/alpha", secondID))
+	check(secondID, "", "grants certs", "metadata certs/web")
+	reader.grantError = errors.New("temporary grant inventory failure")
+	check("", gatewayv1.RouteReasonPending, "grants certs")
+	reader.grantError = nil
+	reader.grants[0].Spec.To[0].Name = ptr.To(gatewayv1.ObjectName("other-secret"))
+	check("", gatewayv1.RouteReasonRefNotPermitted, "grants certs")
+	reader.grants[0].Spec.To[0].Name = ptr.To(gatewayv1.ObjectName("web"))
+	reader.metadata.ResourceVersion = "rv/beta"
+	check("", invalid, "grants certs", "metadata certs/web")
+	writePurpose(resolver.XBackendClientPath, XBackendClientPurpose, rowJSON("uid-a", "rv/beta", firstID))
+	check(firstID, "", "grants certs", "metadata certs/web")
+	backend.Namespace, ref.Namespace = "certs", nil
+	check(firstID, "", "metadata certs/web")
+	gateway.Spec.GatewayClassName = "wrong-class"
+	check("", invalid, "metadata certs/web")
+	backend.Spec.TLS.Mode = gatewayx.BackendTLSModeServerOnly
+	check("", invalid)
 }
 
 func TestListenerSetCertificateUsesOwnerBeforeReadingSecret(t *testing.T) {

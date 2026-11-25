@@ -50,6 +50,8 @@ type routeModelInputs struct {
 	backendTLSAncestor     *backendtls.GatewayAncestor
 	clusterTrustBundles    *backendtls.ClusterTrustBundles
 	admission              routeGraphAdmission
+
+	xBackendClientCertificates graph.XBackendClientCertificateResolver
 }
 
 type routeGraphAdmission struct {
@@ -314,7 +316,7 @@ func (r *Reconciler) collectRouteForwardingInputs(ctx context.Context, reader cl
 			return nil, err
 		}
 		input.XBackendProfile = profile
-		if err := graph.CollectXBackendInputs(ctx, reader, &input, tlsObserver); err != nil {
+		if err := graph.CollectXBackendInputs(ctx, reader, &input, tlsObserver, r.XBackendClientCertificates); err != nil {
 			return nil, err
 		}
 	}
@@ -354,6 +356,7 @@ func (r *Reconciler) collectRouteForwardingInputs(ctx context.Context, reader cl
 	return &routeModelInputs{
 		gateway: gateway, input: input, logical: logical,
 		backendTLSAncestor: ancestor, clusterTrustBundles: r.Config.ClusterTrustBundles,
+		xBackendClientCertificates: r.XBackendClientCertificates,
 	}, nil
 }
 
@@ -361,6 +364,7 @@ func (r *Reconciler) xBackendProfile(gateway *gatewayv1.Gateway) (model.XBackend
 	profile := model.XBackendProfile{
 		H2C:                r.Config.BackendH2C,
 		ServerTLS:          r.Config.BackendTLSPolicy,
+		ClientTLS:          r.Config.XBackendClientCertificate,
 		ExternalHostname:   r.Config.RoutedXBackendEnabled(gateway.Spec.GatewayClassName),
 		SessionPersistence: r.Config.XBackendSessionPersistenceEnabled(),
 		ServiceDNSDomains:  r.Config.XBackendServiceDNSDomains,
@@ -381,7 +385,7 @@ func (inputs *routeModelInputs) validateBackends(ctx context.Context, reader cli
 	current.EnableXBackend = inputs.input.EnableXBackend
 	current.XBackendProfile = inputs.input.XBackendProfile
 	tlsObserver := graph.NewBackendTLSObserver(reader, inputs.clusterTrustBundles)
-	if err := graph.CollectXBackendInputs(ctx, reader, &current, tlsObserver); err != nil {
+	if err := graph.CollectXBackendInputs(ctx, reader, &current, tlsObserver, inputs.xBackendClientCertificates); err != nil {
 		return err
 	}
 	for _, route := range inputs.input.Routes {

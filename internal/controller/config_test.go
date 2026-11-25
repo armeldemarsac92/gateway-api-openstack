@@ -86,6 +86,12 @@ func TestConfigValidateRejectsUnsupportedOrAmbiguousValues(t *testing.T) {
 		}},
 		{name: "HTTP query parameters without fixed responses", mutate: func(cfg *Config) { cfg.HTTPQueryParamExact = true }},
 		{name: "HTTP method without fixed responses", mutate: func(cfg *Config) { cfg.HTTPMethodMatch = true }},
+		{name: "XBackend client identity in Standard", mutate: func(cfg *Config) {
+			cfg.XBackendClientCertificate, cfg.BackendTLSPolicy = true, true
+		}},
+		{name: "XBackend client identity without server authentication", mutate: func(cfg *Config) {
+			cfg.GatewayAPIChannel, cfg.XBackendClientCertificate = features.FeatureChannelExperimental, true
+		}},
 		{name: "SNI suffix without passthrough", mutate: func(cfg *Config) { cfg.TLSSNISuffix = true }},
 		{name: "invalid controller name", mutate: func(cfg *Config) { cfg.ControllerName = "NOT_A_DOMAIN/controller" }},
 		{name: "unknown Gateway API channel", mutate: func(cfg *Config) { cfg.GatewayAPIChannel = "nightly" }},
@@ -101,5 +107,15 @@ func TestConfigValidateRejectsUnsupportedOrAmbiguousValues(t *testing.T) {
 				t.Fatal("Validate() unexpectedly succeeded")
 			}
 		})
+	}
+}
+
+func TestConfigAllowsXBackendClientIdentityIndependentlyOfGatewayIdentity(t *testing.T) {
+	cfg := Config{
+		ControllerName: "example.net/gateway-api-openstack", ClusterID: "cluster-a", OpenStackResyncInterval: time.Minute,
+		GatewayAPIChannel: features.FeatureChannelExperimental, BackendTLSPolicy: true, XBackendClientCertificate: true,
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
 	}
 }

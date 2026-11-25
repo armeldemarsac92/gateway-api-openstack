@@ -288,9 +288,13 @@ func TestBackendTLSScalarQuarantinesBeforePublishingAndReopening(t *testing.T) {
 		thirdParty := maps.Clone(pool)
 		thirdParty["id"] = "third-party-pool"
 		thirdParty["tags"] = safetyRouteTags(t, id, rolePool)
+		xBackend := maps.Clone(pool)
+		xBackend["id"] = "xbackend-pool"
+		xBackendLane := openstackidentity.HTTPBackendPoolKey(cloud.HTTPBackend{Kind: cloud.HTTPBackendKindXBackend, Namespace: "default", Name: "weighted"})
+		xBackend["tags"] = append(safetyRouteTags(t, id, httpResourceRole(rolePool, xBackendLane, "")), backendTLSManagedTag, xBackendTLSClientTag)
 		previousLB, previousPools := lb["pools"], reads["/lbaas/pools"]
-		lb["pools"] = []map[string]string{{"id": "pool-1"}, {"id": "third-party-pool"}}
-		reads["/lbaas/pools"] = map[string]any{"pools": []any{pool, thirdParty}}
+		lb["pools"] = []map[string]string{{"id": "pool-1"}, {"id": "third-party-pool"}, {"id": "xbackend-pool"}}
+		reads["/lbaas/pools"] = map[string]any{"pools": []any{pool, thirdParty, xBackend}}
 		defer func() {
 			pool["tags"], member["tags"], monitor["tags"] = oldPoolTags, oldMemberTags, oldMonitorTags
 			lb["pools"], reads["/lbaas/pools"] = previousLB, previousPools
@@ -315,6 +319,8 @@ func TestBackendTLSScalarQuarantinesBeforePublishingAndReopening(t *testing.T) {
 		require.Empty(t, writes)
 		require.Equal(t, true, thirdParty["admin_state_up"])
 		require.Equal(t, newClient, thirdParty["tls_container_ref"])
+		require.Equal(t, true, xBackend["admin_state_up"])
+		require.Equal(t, newClient, xBackend["tls_container_ref"])
 	})
 	require.Equal(t, false, pool["admin_state_up"])
 	require.Nil(t, pool["tls_container_ref"])
@@ -1120,6 +1126,86 @@ func TestXBackendServerOnlyClosesItsPoolBeforeConfiguringAndWithdrawingTrust(t *
 	require.Equal(t, external.backendKey, step.backendKey)
 	require.Equal(t, routeMutationClearPoolMembers, step.route.kind)
 	require.Nil(t, step.route.poolAdmin)
+}
+
+func TestXBackendMutualTLSRotatesAndClearsOnlyAfterClosing(t *testing.T) {
+	id := safetyTestIdentity(t)
+	route := completeGraphSpec(id).Routes[0].Spec
+	tls := newGraphBackendTLS(t)
+	route.BackendTLS = tls
+	const first = "https://barbican.example/v1/secrets/xbackend-first"
+	const rotated = "https://barbican.example/v1/secrets/xbackend-rotated"
+	desired := desiredRoute{spec: route, xBackend: true, xBackendClientCertificateReference: rotated}
+	var writes []string
+	serviceClients := scalarBackendTLSClients(t, id.Value().OpenStackProjectID, http.NotFoundHandler(), &writes)
+	store := backendca.New(id.Value().ClusterID, serviceClients)
+	ca, err := store.Ensure(t.Context(), route.Identity.GatewayUID, tls.CAConfigMapUID, tls.CAPEM)
+	require.NoError(t, err)
+	p := &Provider{backendCA: store, poolALPN: true}
+	configured := backendTLSPlan{phase: backendTLSConfigure, settings: octavia.BackendTLSSettings{
+		Hostname: tls.Hostname, CAReference: ca.Reference(), ClientCertificateReference: first,
+	}}
+	create := configured.poolMutation(desired, observedRouteGraph{})
+	require.Equal(t, routeMutationCreatePool, create.kind)
+	require.Contains(t, *create.poolTags, xBackendTLSClientTag)
+	require.NotContains(t, *create.poolTags, backendTLSClientTag)
+	pool := &pools.Pool{ID: "xbackend", ProvisioningStatus: "ACTIVE", TLSEnabled: true, AdminStateUp: true,
+		CATLSContainerRef: ca.Reference(), TLSContainerRef: first, ALPNProtocols: []string{xBackendServerALPN}, Tags: *create.poolTags}
+	observed := observedRouteGraph{pool: pool, members: []pools.Member{{ID: "current"}}, backendTLS: octavia.PoolBackendTLS{
+		Hostname: tls.Hostname, HostnameObserved: true, CAObserved: true, ClientRefObserved: true,
+		AdminObserved: true, EnabledObserved: true, ALPNObserved: true,
+	}}
+	graph := desiredGatewayGraph{spec: completeGraphSpec(id), routes: []desiredRoute{desired}}
+	graph.spec.Gateway.BackendClientCertificate.Reference = "https://barbican.example/v1/secrets/gateway-client"
+	parts := func() []backendTLSPart { return backendTLSParts(&graph, []observedRouteGraph{observed}) }
+	withdraw := func() *routeMutation {
+		t.Helper()
+		step := firstBackendTLSWithdrawal(parts(), backendTLSPart.preflight)
+		if step == nil {
+			return nil
+		}
+		return &step.route
+	}
+	plan := func() backendTLSPlan {
+		t.Helper()
+		part := parts()[0]
+		return p.observeBackendTLS(t.Context(), *part.desired, part.observed, func(bool, bool) bool { return true }, true, part.clientCertificate)
+	}
+	require.Equal(t, new(false), withdraw().poolAdmin)
+	pool.AdminStateUp = false
+	require.Equal(t, routeMutationClearPoolMembers, withdraw().kind)
+	observed.members = nil
+	require.Nil(t, withdraw())
+	change := plan().poolMutation(desired, observed)
+	require.Equal(t, rotated, change.backendTLS.ClientCertificateReference)
+	require.Equal(t, []string{xBackendServerALPN}, *change.poolALPNProtocols)
+	require.Nil(t, change.poolAdmin)
+	pool.TLSContainerRef = rotated
+	observed.backendTLS.ClientRefObserved = false
+	require.Equal(t, backendTLSBlocked, plan().phase)
+	observed.backendTLS.ClientRefObserved = true
+	observed.backendTLS.ALPNObserved = false
+	require.Equal(t, backendTLSBlocked, plan().phase)
+	observed.backendTLS.ALPNObserved = true
+	verified := plan()
+	require.Equal(t, backendTLSVerified, verified.phase)
+	require.Equal(t, new(true), verified.poolMutation(desired, observed).poolAdmin)
+
+	pool.AdminStateUp = true
+	observed.members = []pools.Member{{ID: "current"}}
+	graph.routes[0].spec.BackendTLS = &cloud.BackendTLSValidation{Denied: true}
+	graph.routes[0].xBackendClientCertificateReference = ""
+	require.Equal(t, new(false), withdraw().poolAdmin)
+	pool.AdminStateUp = false
+	require.Equal(t, routeMutationClearPoolMembers, withdraw().kind)
+	observed.members = nil
+	require.True(t, withdraw().clearTLSClientRef)
+	pool.TLSContainerRef = ""
+	observed.backendTLS.ClientRefObserved = false
+	require.Nil(t, withdraw())
+	require.Equal(t, backendTLSBlocked, plan().phase)
+	observed.backendTLS.ClientRefObserved = true
+	require.Equal(t, backendTLSDenied, plan().phase)
 }
 
 func TestXBackendServerOnlyRequiresConfiguredPoolALPN(t *testing.T) {

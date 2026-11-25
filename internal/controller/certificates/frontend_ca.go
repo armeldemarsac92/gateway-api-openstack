@@ -53,7 +53,7 @@ func ResolveFrontendCA(ctx context.Context, reader client.Reader, gateway *gatew
 		return nil, gatewayv1.ListenerReasonInvalidCACertificateRef, description + " could not be read", nil
 	}
 	resolver := Resolver{Reader: reader}
-	if allowed, observed := resolver.referenceAllowed(ctx, "Gateway", gateway.Namespace, target, "", "ConfigMap"); !observed {
+	if allowed, observed := resolver.referenceAllowed(ctx, gatewayv1.GroupName, "Gateway", gateway.Namespace, target, "", "ConfigMap"); !observed {
 		return nil, gatewayv1.ListenerReasonRefNotPermitted, description + " has no verifiable ReferenceGrant", nil
 	} else if !allowed {
 		return nil, gatewayv1.ListenerReasonRefNotPermitted, description + " is not permitted by a ReferenceGrant", nil
