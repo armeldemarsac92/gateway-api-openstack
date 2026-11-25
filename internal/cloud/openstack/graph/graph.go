@@ -38,6 +38,7 @@ import (
 type desiredGatewayGraph struct {
 	fixedHTTPResponses     bool
 	httpRequestPolicies    httpRequestPolicyAvailability
+	longHTTPHostnamePorts  map[int]bool
 	plainHTTPRuleLimits    map[int]string
 	spec                   cloud.GatewayGraphSpec
 	identity               Identity
@@ -447,7 +448,8 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	defaultPool := usesDefaultPool(actual.protocol)
 	planBeforeSecurity := isSNIProtocol(actual.protocol) || defaultPool || actual.scoped && actual.protocol == cloud.ListenerProtocolHTTP || hasHTTPRouteParts(desired, actual) ||
 		desired.httpRequestPolicies != httpRequestPolicyAvailable ||
-		len(desired.spec.Gateway.Spec.HTTPListenerHostnames) != 0 || observedPlainHTTPExclusions(actual.routes) || containsObservedRequestURLRewrite(actual.routes) || containsObservedCORS(actual.routes)
+		len(desired.spec.Gateway.Spec.HTTPListenerHostnames) != 0 || observedPlainHTTPExclusions(actual.routes) || containsObservedRequestURLRewrite(actual.routes) || containsObservedCORS(actual.routes) ||
+		len(desired.longHTTPHostnamePorts) != 0 || observedScalarLongHTTPHostname(actual)
 	if planBeforeSecurity {
 		plan, result, err = p.buildGatewayGraphPlan(desired, actual)
 		if err != nil {
@@ -490,6 +492,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 			plan, _ = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, grpcContentTypePredicate)
 		}
 	}
+	plan = p.protectLongHTTPHostnames(ctx, desired, actual, plan, &result)
 	if desired.httpRequestPolicies == httpRequestPolicyUnverified && len(plan) != 0 {
 		// Preserve the observed configuration while discovery is unavailable.
 		// Permission withdrawals are urgent and do not authorize other writes.
@@ -786,6 +789,7 @@ func (p *Provider) reconcileHTTPWithdrawalWithoutAddress(ctx context.Context, de
 			}
 		}
 	}
+	plan = p.protectLongHTTPHostnames(ctx, desired, actual, plan, &result)
 	if len(plan) != 1 || !canWithdrawHTTPWithoutAddress(plan[0], desired, actual) {
 		if confirmedClosed {
 			// The Octavia readback is enough to report the closed listener
@@ -1174,6 +1178,7 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 			return spec.Gateway.Spec.ScopedListeners[i].Port < spec.Gateway.Spec.ScopedListeners[j].Port
 		})
 	}
+	longHTTPHostnamePorts := make(map[int]bool)
 	for port, hosts := range spec.Gateway.Spec.HTTPListenerHostnames {
 		_, httpsPort := unauthorizedHTTPSPorts[port]
 		if protocol != cloud.ListenerProtocolHTTP || spec.Gateway.Disposition != cloud.GraphEnsure ||
@@ -1186,8 +1191,12 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 				return invalid("isolated plaintext HTTP listener hostnames must be sorted and distinct")
 			}
 			if host != "*" {
-				if _, err := amphora.HostnameRuleValue(host); err != nil {
+				value, err := amphora.HostnameRuleValue(host, p.longHTTPHostnames || spec.Gateway.Spec.RetainLongHTTPListenerHostnames)
+				if err != nil {
 					return invalid(err.Error())
+				}
+				if !p.longHTTPHostnames && amphora.IsLongHostnameRuleValue(value) {
+					longHTTPHostnamePorts[port] = true
 				}
 			}
 		}
@@ -1215,7 +1224,8 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 	// Transport reconciliation can hold a route whose old pools must stay
 	// protected. Keep the request's authority snapshot immutable.
 	spec.Routes = slices.Clone(spec.Routes)
-	desired := desiredGatewayGraph{spec: spec, identity: identity, protocol: protocol, fixedHTTPResponses: p.fixedHTTPResponses}
+	desired := desiredGatewayGraph{spec: spec, identity: identity, protocol: protocol,
+		fixedHTTPResponses: p.fixedHTTPResponses, longHTTPHostnamePorts: longHTTPHostnamePorts}
 	identities := make(map[string]struct{}, len(spec.Routes))
 	lastRank := -1
 	portWinners := make(map[int]bool, len(ports))
@@ -1362,7 +1372,7 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 					return desiredGatewayGraph{}, &cloud.GraphError{Identity: id, Err: err}
 				}
 				if protocol == cloud.ListenerProtocolHTTP {
-					if err := collectHTTPPortPolicies(&desired, portRoute, httpPort, physicalPort, isolatedHosts[httpPort],
+					if err := p.collectHTTPPortPolicies(&desired, portRoute, httpPort, physicalPort, isolatedHosts[httpPort],
 						unauthorizedHTTPSPorts[httpPort], addRank, policiesByPort); err != nil {
 						return desiredGatewayGraph{}, err
 					}
@@ -1399,7 +1409,7 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 	return desired, nil
 }
 
-func collectHTTPPortPolicies(desired *desiredGatewayGraph, portRoute desiredRoute, httpPort, physicalPort int, hosts []string,
+func (p *Provider) collectHTTPPortPolicies(desired *desiredGatewayGraph, portRoute desiredRoute, httpPort, physicalPort int, hosts []string,
 	certificateUnavailable bool, addRank func(int, string, int) error, policiesByPort map[int][]*desiredPolicy,
 ) error {
 	id := portRoute.spec.Identity
@@ -1434,7 +1444,8 @@ func collectHTTPPortPolicies(desired *desiredGatewayGraph, portRoute desiredRout
 			if err := validateScope(policy.httpsListenerHostname); err != nil {
 				return err
 			}
-			if err := addPlainHTTPExclusions(plainHosts, policy, portRoute.hostnameRuleValue); err != nil {
+			if err := addPlainHTTPExclusions(plainHosts, policy, portRoute.hostnameRuleValue,
+				p.longHTTPHostnames || desired.spec.Gateway.Spec.RetainLongHTTPListenerHostnames); err != nil {
 				if !errors.Is(err, errPlainHTTPRuleLimit) {
 					return &cloud.GraphError{Identity: id, Err: err}
 				}
@@ -1442,6 +1453,9 @@ func collectHTTPPortPolicies(desired *desiredGatewayGraph, portRoute desiredRout
 					desired.plainHTTPRuleLimits = make(map[int]string)
 				}
 				desired.plainHTTPRuleLimits[physicalPort] = err.Error()
+			}
+			if p.longHTTPHostnames && !desired.longHTTPHostnamePorts[physicalPort] && usesLongHTTPHostname(*policy, portRoute.hostnameRuleValue) {
+				desired.longHTTPHostnamePorts[physicalPort] = true
 			}
 			if policy.redirect == nil && policy.position == 1 {
 				if err := addRank(httpPort, listenerScope(policy.httpListenerHostname, policy.httpsListenerHostname), policy.precedence); err != nil {

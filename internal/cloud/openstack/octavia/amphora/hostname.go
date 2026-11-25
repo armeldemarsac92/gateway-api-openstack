@@ -26,9 +26,10 @@ import (
 )
 
 const (
-	maxL7RuleValueLength = 255
-	maxDNSHostnameLength = 253
-	dnsLabel             = `[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?`
+	maxL7RuleValueLength     = 255
+	maxLongHostnameRuleValue = 512
+	maxDNSHostnameLength     = 253
+	dnsLabel                 = `[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?`
 )
 
 var exactDNSHostname = regexp.MustCompile(`^` + dnsLabel + `(\.` + dnsLabel + `)*$`)
@@ -70,7 +71,7 @@ func SNISuffixCovers(pattern, hostname string) bool {
 // HostnameRuleValue encodes one effective hostname for an Amphora HOST_NAME
 // REGEX rule. The stock renderer applies case-insensitive matching to the
 // Host value. Match an optional numeric port without changing the header.
-func HostnameRuleValue(hostname string) (string, error) {
+func HostnameRuleValue(hostname string, allowLong bool) (string, error) {
 	if err := ValidateHostname(hostname); err != nil {
 		return "", err
 	}
@@ -84,8 +85,17 @@ func HostnameRuleValue(hostname string) (string, error) {
 	value := prefix + regexp.QuoteMeta(suffix) + `(:[0-9]+)?$`
 	// The public Octavia L7 rule API limits the encoded value. Both the
 	// DNS name and its regex encoding are ASCII.
-	if len(value) > maxL7RuleValueLength {
-		return "", fmt.Errorf("hostname requires an Octavia L7 rule value of %d characters, exceeding the %d character limit", len(value), maxL7RuleValueLength)
+	limit := maxL7RuleValueLength
+	if allowLong {
+		limit = maxLongHostnameRuleValue
+	}
+	if len(value) > limit {
+		return "", fmt.Errorf("hostname requires an Octavia L7 rule value of %d characters, exceeding the %d character limit", len(value), limit)
 	}
 	return value, nil
+}
+
+// IsLongHostnameRuleValue reports whether a HOST_NAME REGEX exceeds the stock API limit.
+func IsLongHostnameRuleValue(value string) bool {
+	return len(value) > maxL7RuleValueLength
 }

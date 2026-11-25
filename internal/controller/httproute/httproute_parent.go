@@ -272,7 +272,7 @@ func (r *Reconciler) selectRouteAttachments(route *gatewayv1.HTTPRoute, parent m
 		if !model.AllowsRouteNamespace(listener, parent.namespace(), route.Namespace, namespaces) {
 			continue
 		}
-		if err := validateRouteHostnames(listener.Hostname, route.Spec.Hostnames); err != nil {
+		if err := r.validateRouteHostnames(listener.Hostname, route.Spec.Hostnames); err != nil {
 			rejection = err
 			continue
 		}
@@ -514,7 +514,7 @@ func grpcProfileDisabled() error {
 	return newRouteBuildError(routeErrorUnsupported, "GRPCRoute requires Octavia backend h2c and fixed responses")
 }
 
-func validateRouteHostnames(listener *gatewayv1.Hostname, hostnames []gatewayv1.Hostname) error {
+func (r *Reconciler) validateRouteHostnames(listener *gatewayv1.Hostname, hostnames []gatewayv1.Hostname) error {
 	if listener != nil {
 		if err := amphora.ValidateHostname(string(*listener)); err != nil {
 			return newRouteBuildError(routeErrorUnsupported, "invalid listener hostname: %s", err)
@@ -534,7 +534,7 @@ func validateRouteHostnames(listener *gatewayv1.Hostname, hostnames []gatewayv1.
 		if hostname == "" {
 			continue
 		}
-		if _, err := amphora.HostnameRuleValue(hostname); err != nil {
+		if _, err := amphora.HostnameRuleValue(hostname, r.Config.LongHTTPHostnames); err != nil {
 			return newRouteBuildError(routeErrorUnsupported, "%s", err)
 		}
 	}

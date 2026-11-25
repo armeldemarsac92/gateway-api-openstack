@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-An Experimental HTTPRoute can pin a client to one authenticated Service endpoint. [Build record](image.json) · [Cookie and TLS traffic](provider/rule-affinity-backend-tls/README.md)
+An enrolled Amphora region can route a 253-character HTTP hostname. [Build record](image.json) · [Gateway traffic](provider/long-http-hostnames/README.md)
+
+An Experimental HTTPRoute can pin a client to one authenticated Service endpoint. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-3b7ad5dccd7d48abaded6e4f95737e37bc3306a8/image.json) · [Cookie and TLS traffic](provider/rule-affinity-backend-tls/README.md)
 
 The linux/amd64 image built from a signed controller commit ran the Standard admission control and the Experimental listener trials. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-439913e5181f49fb86ee300a175e25fe16249928/image.json) · [Local trials](provider/gateway-listener-authorizer-transports/README.md)
 

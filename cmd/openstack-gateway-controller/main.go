@@ -119,7 +119,7 @@ func run(ctx context.Context) error {
 	var httpsListenerIsolation, initialL7Rules, l7PolicyBatchActivation bool
 	var l7PolicyConditionalRemoval bool
 	var frontendClientValidation, clusterTrustBundles bool
-	var httpRequestRedirect bool
+	var httpRequestRedirect, longHTTPHostnames bool
 	var httpRequestURLRewrite bool
 	var httpRequestPolicy, backendRetryBudget, telemetryPolicy bool
 	var tcpConnectionRejection, udpPacketDrop bool
@@ -141,6 +141,7 @@ func run(ctx context.Context) error {
 	flag.StringVar(&istioAmbientXMeshName, "istio-ambient-xmesh-name", ambientmesh.DefaultName, "name of the installation XMesh created when ambient XMesh reporting is enabled")
 	flag.BoolVar(&gatewayInfrastructureMetadata, "gateway-infrastructure-metadata", false, "publish discovered Octavia VIPs through headless Services with Gateway infrastructure metadata")
 	flag.BoolVar(&gatewayAddressRoutabilityCluster, "gateway-address-routability-cluster", false, "serve Cluster Gateway addresses through Kubernetes Service ClusterIPs")
+	flag.BoolVar(&longHTTPHostnames, "octavia-long-http-hostnames", false, "use the advertised Octavia capability for long HTTP hostname matches")
 	flag.BoolVar(&exactHTTPHeaders, "octavia-http-header-exact", false, "use the advertised Octavia exact HTTP header matching capability")
 	flag.BoolVar(&httpRequestRedirect, "octavia-http-request-redirect", false, "use the advertised Octavia capability for request-hostname preservation and redirect path modifiers")
 	flag.BoolVar(&exactHTTPQueryParams, "octavia-http-query-param-exact", false, "use the advertised Octavia exact HTTP query parameter matching capability (requires --octavia-fixed-http-responses)")
@@ -247,6 +248,7 @@ func run(ctx context.Context) error {
 		ControllerName:                gatewayv1.GatewayController(controllerName),
 		ControllerVersion:             version,
 		GatewayAPIChannel:             gatewayAPIChannel,
+		LongHTTPHostnames:             longHTTPHostnames,
 		HTTPHeaderExact:               exactHTTPHeaders,
 		HTTPQueryParamExact:           exactHTTPQueryParams,
 		HTTPRequestURLRewrite:         httpRequestURLRewrite,
@@ -330,6 +332,7 @@ func run(ctx context.Context) error {
 	providerConfig := openstack.ProviderConfig{
 		BackendCA:              backendca.New(clusterID, serviceClients),
 		BackendTLSPolicy:       backendTLSPolicy,
+		LongHTTPHostnames:      longHTTPHostnames,
 		HTTPHeaderExact:        exactHTTPHeaders,
 		HTTPQueryParamExact:    exactHTTPQueryParams,
 		HTTPRequestURLRewrite:  httpRequestURLRewrite,

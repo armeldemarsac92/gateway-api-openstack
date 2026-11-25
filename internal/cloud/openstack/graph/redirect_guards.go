@@ -181,7 +181,7 @@ func minimalRedirectPaths(paths []redirectPath) []redirectPath {
 	return keep
 }
 
-func redirectCells(match cloud.HTTPPathMatch, forwards []cloud.HTTPPathMatch) ([]redirectCell, error) {
+func (p *Provider) redirectCells(match cloud.HTTPPathMatch, forwards []cloud.HTTPPathMatch) ([]redirectCell, error) {
 	source := pathOf(match)
 	root := &redirectDomain{host: match.Hostname}
 	domains := map[string]*redirectDomain{root.host: root}
@@ -292,7 +292,7 @@ func redirectCells(match cloud.HTTPPathMatch, forwards []cloud.HTTPPathMatch) ([
 		}
 		cell := redirectCell{hostname: d.host}
 		for _, host := range d.children {
-			regex, err := amphora.HostnameRuleValue(host)
+			regex, err := amphora.HostnameRuleValue(host, p.longHTTPHostnames)
 			if err != nil {
 				return nil, err
 			}
@@ -340,7 +340,7 @@ func redirectCells(match cloud.HTTPPathMatch, forwards []cloud.HTTPPathMatch) ([
 }
 
 func redirectPathGuards(path redirectPath) ([]redirectGuard, error) {
-	policies, _, err := httpPathPolicies(cloud.HTTPPathMatch{PathType: path.kind, PathValue: path.value}, true)
+	policies, _, err := httpPathPolicies(cloud.HTTPPathMatch{PathType: path.kind, PathValue: path.value}, true, false)
 	if err != nil {
 		return nil, err
 	}

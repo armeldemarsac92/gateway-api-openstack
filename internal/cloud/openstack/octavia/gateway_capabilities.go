@@ -26,6 +26,7 @@ import (
 )
 
 const (
+	GatewayCapabilityHTTPLongHostname          = "http_long_hostname_v1"
 	GatewayCapabilityHTTPHeaderExact           = "http_header_exact_v1"
 	GatewayCapabilityHTTPQueryParamExact       = "http_query_param_exact_v1"
 	GatewayCapabilityHTTPRequestPolicy         = "http_request_policy_v1"

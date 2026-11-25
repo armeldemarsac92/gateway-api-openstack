@@ -55,7 +55,7 @@ func eligibleRedirectCells(t *testing.T, cells []redirectCell, host, path string
 	count := 0
 	for _, cell := range cells {
 		if cell.hostname != "" {
-			hostRule, err := amphora.HostnameRuleValue(cell.hostname)
+			hostRule, err := amphora.HostnameRuleValue(cell.hostname, false)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -87,7 +87,7 @@ func TestRedirectExcludesOnlyHigherPriorityForwardMatches(t *testing.T) {
 		{Hostname: "other.example", PathType: cloud.PathMatchExact, PathValue: "/unrelated", Precedence: 4},
 		{PathType: cloud.PathMatchExact, PathValue: "/shop/later", Precedence: 6},
 	}
-	cells, err := redirectCells(redirect, forwards)
+	cells, err := (&Provider{}).redirectCells(redirect, forwards)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,9 +104,23 @@ func TestRedirectExcludesOnlyHigherPriorityForwardMatches(t *testing.T) {
 			t.Errorf("redirect cells for %s%s = %d, want %d", tt.host, tt.path, n, tt.redirected)
 		}
 	}
-	allShadowed, err := redirectCells(cloud.HTTPPathMatch{Hostname: "api.tenant.example", PathType: cloud.PathMatchExact, PathValue: "/shop/live/x", Precedence: 5}, forwards)
+	allShadowed, err := (&Provider{}).redirectCells(cloud.HTTPPathMatch{Hostname: "api.tenant.example", PathType: cloud.PathMatchExact, PathValue: "/shop/live/x", Precedence: 5}, forwards)
 	if err != nil || len(allShadowed) != 0 {
 		t.Errorf("shadowed exact match produced %d cells, error %v", len(allShadowed), err)
+	}
+}
+
+func TestRedirectExcludesLongForwardHostname(t *testing.T) {
+	hostname := strings.Repeat("a.", 126) + "b"
+	redirect := cloud.HTTPPathMatch{PathType: cloud.PathMatchPrefix, PathValue: "/", Precedence: 1}
+	forward := cloud.HTTPPathMatch{Hostname: hostname, PathType: cloud.PathMatchPrefix, PathValue: "/"}
+	cells, err := (&Provider{longHTTPHostnames: true}).redirectCells(redirect, []cloud.HTTPPathMatch{forward})
+	if err != nil || len(cells) != 1 || len(cells[0].guards) != 1 {
+		t.Fatalf("expected one inverted hostname exclusion, got %+v: %v", cells, err)
+	}
+	if eligibleRedirectCells(t, cells, strings.ToUpper(hostname)+":8080", "/") != 0 ||
+		eligibleRedirectCells(t, cells, "unrelated.example", "/") != 1 {
+		t.Fatal("the higher-priority hostname was not excluded from the redirect")
 	}
 }
 
@@ -115,7 +129,7 @@ func TestManyForwardExceptionsFitStockRuleLimit(t *testing.T) {
 	for i := 0; i < 70; i++ {
 		forwards = append(forwards, cloud.HTTPPathMatch{PathType: cloud.PathMatchExact, PathValue: fmt.Sprintf("/item/%d", i), Precedence: i})
 	}
-	cells, err := redirectCells(cloud.HTTPPathMatch{PathType: cloud.PathMatchPrefix, PathValue: "/", Precedence: 70}, forwards)
+	cells, err := (&Provider{}).redirectCells(cloud.HTTPPathMatch{PathType: cloud.PathMatchPrefix, PathValue: "/", Precedence: 70}, forwards)
 	if err != nil || len(cells) != 1 {
 		t.Fatalf("got %d cells, error %v", len(cells), err)
 	}
@@ -157,7 +171,7 @@ func TestRedirectLongRepeatedPathExceptions(t *testing.T) {
 	for i := 0; i < 55; i++ {
 		forwards = append(forwards, cloud.HTTPPathMatch{PathType: cloud.PathMatchExact, PathValue: fmt.Sprintf("/%03d%s", i, strings.Repeat("x", 246)), Precedence: i})
 	}
-	cells, err := redirectCells(cloud.HTTPPathMatch{PathType: cloud.PathMatchPrefix, PathValue: "/", Precedence: 55}, forwards)
+	cells, err := (&Provider{}).redirectCells(cloud.HTTPPathMatch{PathType: cloud.PathMatchPrefix, PathValue: "/", Precedence: 55}, forwards)
 	if err != nil || len(cells) != 1 {
 		t.Fatalf("compact long literals: %d cells, error %v", len(cells), err)
 	}
@@ -181,7 +195,7 @@ func TestRedirectReportsControllerEncodingLimit(t *testing.T) {
 		}
 		forwards = append(forwards, cloud.HTTPPathMatch{PathType: cloud.PathMatchExact, PathValue: path.String(), Precedence: i})
 	}
-	cells, err := redirectCells(cloud.HTTPPathMatch{PathType: cloud.PathMatchPrefix, PathValue: "/", Precedence: 55}, forwards)
+	cells, err := (&Provider{}).redirectCells(cloud.HTTPPathMatch{PathType: cloud.PathMatchPrefix, PathValue: "/", Precedence: 55}, forwards)
 	if err == nil || len(cells) > 0 || !strings.Contains(err.Error(), "controller encoding") {
 		t.Fatalf("got %d cells, error %v", len(cells), err)
 	}
@@ -192,11 +206,11 @@ func TestRedirectRequiresProvablePrecedenceWithExactHTTPHeaders(t *testing.T) {
 	header := cloud.HTTPHeaderMatch{Name: "color", Value: "blue sky"}
 	forward := cloud.HTTPPathMatch{PathType: cloud.PathMatchExact, PathValue: "/shop/item",
 		Precedence: 1, Headers: []cloud.HTTPHeaderMatch{header}}
-	if cells, err := redirectCells(redirect, []cloud.HTTPPathMatch{forward}); err == nil || len(cells) != 0 {
+	if cells, err := (&Provider{}).redirectCells(redirect, []cloud.HTTPPathMatch{forward}); err == nil || len(cells) != 0 {
 		t.Fatalf("overlapping forward header would let the redirect take precedence: %v, %v", cells, err)
 	}
 	redirect.Headers = []cloud.HTTPHeaderMatch{header}
-	cells, err := redirectCells(redirect, []cloud.HTTPPathMatch{forward})
+	cells, err := (&Provider{}).redirectCells(redirect, []cloud.HTTPPathMatch{forward})
 	if err != nil || len(cells) != 1 || len(cells[0].guards) != 1 {
 		t.Fatalf("redirect with the same header needs a path guard: %v, %v", cells, err)
 	}
@@ -205,15 +219,15 @@ func TestRedirectRequiresProvablePrecedenceWithExactHTTPHeaders(t *testing.T) {
 func TestRedirectMethodPrecedenceRespectsDisjointAndSharedMethods(t *testing.T) {
 	redirect := cloud.HTTPPathMatch{PathType: cloud.PathMatchPrefix, PathValue: "/shop", Precedence: 2}
 	forward := cloud.HTTPPathMatch{PathType: cloud.PathMatchExact, PathValue: "/shop/item", Precedence: 1, Method: "POST"}
-	if cells, err := redirectCells(redirect, []cloud.HTTPPathMatch{forward}); !errors.Is(err, errHTTPMethodRedirectPrecedence) || len(cells) != 0 {
+	if cells, err := (&Provider{}).redirectCells(redirect, []cloud.HTTPPathMatch{forward}); !errors.Is(err, errHTTPMethodRedirectPrecedence) || len(cells) != 0 {
 		t.Fatalf("an unrestricted redirect must preserve the overlapping forward: %v, %v", cells, err)
 	}
 	redirect.Method = "GET"
-	if cells, err := redirectCells(redirect, []cloud.HTTPPathMatch{forward}); err != nil || len(cells) != 1 || len(cells[0].guards) != 0 {
+	if cells, err := (&Provider{}).redirectCells(redirect, []cloud.HTTPPathMatch{forward}); err != nil || len(cells) != 1 || len(cells[0].guards) != 0 {
 		t.Fatalf("disjoint methods need no path guard: %v, %v", cells, err)
 	}
 	redirect.Method = "POST"
-	if cells, err := redirectCells(redirect, []cloud.HTTPPathMatch{forward}); err != nil || len(cells) != 1 || len(cells[0].guards) != 1 {
+	if cells, err := (&Provider{}).redirectCells(redirect, []cloud.HTTPPathMatch{forward}); err != nil || len(cells) != 1 || len(cells[0].guards) != 1 {
 		t.Fatalf("a shared method needs a path guard: %v, %v", cells, err)
 	}
 }
@@ -231,7 +245,7 @@ func TestRedirectGuardsRespectExactQueryParameterOverlap(t *testing.T) {
 	} {
 		forward := cloud.HTTPPathMatch{PathType: cloud.PathMatchExact, PathValue: "/shop/health",
 			QueryParams: []cloud.HTTPQueryParamMatch{test.param}}
-		cells, err := redirectCells(redirect, []cloud.HTTPPathMatch{forward})
+		cells, err := (&Provider{}).redirectCells(redirect, []cloud.HTTPPathMatch{forward})
 		if err != nil || len(cells) != test.policies {
 			t.Fatalf("query param %v: redirect cells = %v, error = %v", test.param, cells, err)
 		}
@@ -254,7 +268,7 @@ func TestRedirectQueryExceptionsReturnAnExplicitErrorAtExpansionLimit(t *testing
 		}
 		forwards = append(forwards, forward)
 	}
-	if cells, err := redirectCells(redirect, forwards); len(cells) != 0 || !errors.Is(err, errExactQueryParamRedirectPrecedence) {
+	if cells, err := (&Provider{}).redirectCells(redirect, forwards); len(cells) != 0 || !errors.Is(err, errExactQueryParamRedirectPrecedence) {
 		t.Fatalf("oversized complement returned %d policies, error %v", len(cells), err)
 	}
 }

@@ -135,7 +135,7 @@ func SupportedListenersForConfig(config controller.Config, gateway *gatewayv1.Ga
 	case len(gateway.Spec.Listeners) == 1 && isL4Listener(gateway.Spec.Listeners[0].Protocol):
 		listeners = append(listeners, &gateway.Spec.Listeners[0])
 	default:
-		http, err := HTTPListeners(gateway)
+		http, err := HTTPListeners(config, gateway)
 		if err != nil {
 			return nil, err
 		}
@@ -338,9 +338,20 @@ func validateAddresses(addresses []gatewayv1.GatewaySpecAddress) *gatewayValidat
 	return nil
 }
 
+// retainsLongHTTPListenerHostnames keeps an already bound HTTP family's
+// topology intact during opt-out. Its graph fences unrepresentable ports.
+func retainsLongHTTPListenerHostnames(config controller.Config, gateway *gatewayv1.Gateway) bool {
+	if config.LongHTTPHostnames || !controllerutil.ContainsFinalizer(gateway, config.GatewayFinalizer()) ||
+		controller.ValidateGatewayBinding(config, gateway) != nil {
+		return false
+	}
+	bound := gateway.Annotations[config.GatewayListenerProtocolAnnotation()]
+	return bound == "" || bound == string(gatewayv1.HTTPProtocolType)
+}
+
 // HTTPListeners selects the HTTP sections of the stock profile. Multiple
 // sections on each port must have pairwise distinct, encodable hostnames.
-func HTTPListeners(gateway *gatewayv1.Gateway) ([]*gatewayv1.Listener, error) {
+func HTTPListeners(config controller.Config, gateway *gatewayv1.Gateway) ([]*gatewayv1.Listener, error) {
 	var http []*gatewayv1.Listener
 	ports := make(map[gatewayv1.PortNumber]int, len(gateway.Spec.Listeners))
 	duplicatePort := false
@@ -364,6 +375,7 @@ func HTTPListeners(gateway *gatewayv1.Gateway) ([]*gatewayv1.Listener, error) {
 	if len(http) != len(gateway.Spec.Listeners) {
 		return nil, fmt.Errorf("multiple HTTP sections require a Gateway with only plain HTTP listeners")
 	}
+	allowLongHostnames := config.LongHTTPHostnames || retainsLongHTTPListenerHostnames(config, gateway)
 	hostnames := make(map[gatewayv1.PortNumber]map[string]bool)
 	names := make(map[gatewayv1.SectionName]bool, len(http))
 	for _, listener := range http {
@@ -385,7 +397,7 @@ func HTTPListeners(gateway *gatewayv1.Gateway) ([]*gatewayv1.Listener, error) {
 			return nil, fmt.Errorf("same-port HTTP sections require distinct hostnames")
 		}
 		if host != "" {
-			if _, err := amphora.HostnameRuleValue(host); err != nil {
+			if _, err := amphora.HostnameRuleValue(host, allowLongHostnames); err != nil {
 				return nil, fmt.Errorf("unsupported shared HTTP listener hostname: %w", err)
 			}
 		}
@@ -395,8 +407,8 @@ func HTTPListeners(gateway *gatewayv1.Gateway) ([]*gatewayv1.Listener, error) {
 }
 
 // HasMultipleHTTPListenerPorts identifies Gateways that need per-port bindings.
-func HasMultipleHTTPListenerPorts(gateway *gatewayv1.Gateway) bool {
-	http, err := HTTPListeners(gateway)
+func HasMultipleHTTPListenerPorts(config controller.Config, gateway *gatewayv1.Gateway) bool {
+	http, err := HTTPListeners(config, gateway)
 	return err == nil && slices.ContainsFunc(http, func(listener *gatewayv1.Listener) bool { return listener.Port != http[0].Port })
 }
 

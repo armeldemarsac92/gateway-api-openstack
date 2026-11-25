@@ -81,6 +81,31 @@ func TestNodePortRouteUsesLogicalMatchAndSharedEndpointObservation(t *testing.T)
 	}
 }
 
+func TestHTTPRouteWithMaximumLengthHostname(t *testing.T) {
+	cfg := testConfig()
+	_, gateway := providerRouteParentObjects(cfg)
+	route := mapperTestHTTPRoute(gateway.Namespace, "api", gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name)}, "backend")
+	route.UID = "route-uid"
+	label := strings.Repeat("a", 63)
+	hostname := strings.Join([]string{label, label, label, strings.Repeat("b", 61)}, ".")
+	route.Spec.Hostnames = []gatewayv1.Hostname{gatewayv1.Hostname(hostname)}
+	service, endpoints, node := validNodePortBackend(gateway.Namespace, "backend")
+	reader := indexedFakeClientBuilder(testScheme(t), cfg).WithObjects(service, endpoints, node).Build()
+	r := &Reconciler{Config: cfg}
+
+	_, err := r.buildRouteModelWithReader(t.Context(), reader, route, gateway)
+	var rejected *routeBuildError
+	if !errors.As(err, &rejected) || rejected.kind != routeErrorUnsupported {
+		t.Fatalf("stock configuration should reject the encoded hostname: %v", err)
+	}
+
+	r.Config.LongHTTPHostnames = true
+	desired, err := r.buildRouteModelWithReader(t.Context(), reader, route, gateway)
+	if err != nil || desired.Hostname != hostname {
+		t.Fatalf("expected the cloud model to preserve the 253-character hostname, got %q: %v", desired.Hostname, err)
+	}
+}
+
 func TestLogicalModelCannotEnableUnmappedNodePortBehavior(t *testing.T) {
 	for _, test := range []struct {
 		name   string
