@@ -18,6 +18,8 @@ On local kind and Amphora, the signed controller passed all 17 GATEWAY-GRPC Core
 
 On the same signed controller, all 20 GATEWAY-TCP Core cases passed on each channel. The client reached the upstream TCP echo pods through native HAProxy. [TCP Core reports and scope](provider/tcp-core.md) · [Earlier local runs](provider/tcp-upstream.md)
 
+The signed controller `9388be4580dd` also recorded 21/21 GATEWAY-TLS Core and 21/21 GATEWAY-UDP Core on each channel in local kind and Amphora fixtures. Each Core report shows zero failures and zero skips. [TLS and UDP reports, UDP supplement and fixture exits](provider/tls-udp-core.md)
+
 Both mesh Core profiles also ran on ordinary local Kubernetes Services without an enrolled dataplane. The upstream reports record the assertions that failed and the traffic that reached the echo pods. [Local mesh reports](provider/stock-mesh.md)
 
 The complete local selections used all channel-applicable profile features. Each Gateway run reached the common HTTPS setup. The mesh profile reports and seven supplemental cases are available for both Standard and Experimental. [Local profile reports](complete-local-profiles.md) · [Registered mesh supplement](provider/mesh-registered-supplement.md)
