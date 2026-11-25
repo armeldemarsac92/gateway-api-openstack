@@ -1,0 +1,1281 @@
+{
+  "passed": true,
+  "campaignExit": {
+    "standardSource": 1,
+    "experimentalSource": 0
+  },
+  "scope": "Local HTTP Gateway XTelemetryPolicy with a cross-namespace collector Service and a peer control Gateway",
+  "real": [
+    "kind API/RBAC and app Pods",
+    "OCI-extracted controller manager",
+    "Octavia WSGI REST and database",
+    "native Octavia listener TaskFlow and Amphora HAProxy renderer",
+    "running HAProxy",
+    "native OpenTelemetry Collector Pod"
+  ],
+  "fixture": [
+    "Keystone and Neutron",
+    "provisioning completion and Amphora inventory",
+    "Amphora upload and reload transport",
+    "agent acknowledged the reload only after the real HAProxy accepted the generated configuration",
+    "network tunnel between the Amphora namespace and kind Pod endpoints",
+    "private Lua install and preloaded collector binary"
+  ],
+  "limits": [
+    "regional rollout",
+    "packaged Amphora image",
+    "HA and live traffic",
+    "TLS",
+    "full Gateway API conformance"
+  ],
+  "fractionObservation": "128 requests per half-rate cohort. Both decisions must occur and every exported span must match the propagated context.",
+  "inputs": {
+    "controller": {
+      "tree": "d2f8e576080c278e21f5e7d5ce4ddc674b4ad8a8",
+      "sourceRevision": "470b62417e9e7e1536f642538f22084fc7fdb34c",
+      "manifestDigest": "sha256:85413b1fa9981266902f1728ca986cbb8464e6efaaf09a20c5e197e036a72283",
+      "configDigest": "sha256:433b47f45ed5aeb7d1ae15d429d7fd398ac7ea578ab8c8a4cb05553507a52054",
+      "managerSHA256": "191b537cb6fae9bace5c7e4ce4cb75e30b76201278251256d8da99a382044a6e",
+      "ociArchiveSHA256": "b9bdaf08241360ab00ea62af8b3ef3ab94b41fd12ab1e569d90254ed1a8ee273"
+    },
+    "octavia": {
+      "source": "dc6b95f72e4a3847097239fdf2ba169ae9eec880",
+      "tree": "0baf9aaa4028834e99327e1006eea9fcd23c68b6",
+      "wheelSHA256": "0a95341d7f0f55d88e36dd8eca51b55841f16ad45c05d9e2617ce0061225492f"
+    },
+    "octaviaLib": {
+      "source": "542a56dcbec8713f168230a98ed2d11333f59b7f",
+      "tree": "adeb0ea1cd355a9a5a5412f5beebcedc95058613",
+      "wheelSHA256": "2514ccf71a882bf41aa945681243cd13bd47cd0b040cb63dfb77669e0093cd3d"
+    },
+    "haproxy": {
+      "sha256": "20d64a505a669a1066d5cb06b78e407d3c2ec15029923d3165e0c1db8cc41287",
+      "luaSHA256": "3470df03d6718c97dae583626534d7514ef64385dda707f8fbd53a6deaec812f",
+      "luaSource": "elements/haproxy-octavia/octavia-telemetry.lua",
+      "samplingLuaInstall": "/var/lib/octavia/octavia-telemetry-sampling-v1.lua"
+    },
+    "collector": {
+      "version": "otelcol version 0.165.0",
+      "sha256": "14e254a6a0880d9b6f94487658e49fc9f3b0e14c62e82253be78da08e8c1ddd8"
+    }
+  },
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "kindNodeImage": "localhost/hibiscus-kind-node:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67@sha256:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67",
+  "scenarioSHA256": "2b5fcabf7b07ae2a8f2e8c3a5710c1ccf0ba0f5ad8a8e235ee8cd6b615b8f7d0",
+  "channels": {
+    "standard": {
+      "passed": true,
+      "vmCaseExit": 0,
+      "runnerExit": 0,
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "experimentalPolicyCRDPresent": false,
+      "haproxyVersion": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1",
+      "installedOctavia": {
+        "version": "19.0.1.dev74",
+        "sha256": "0a95341d7f0f55d88e36dd8eca51b55841f16ad45c05d9e2617ce0061225492f",
+        "filesVerified": 665
+      },
+      "installedOctaviaLib": {
+        "version": "3.12.1.dev19",
+        "sha256": "2514ccf71a882bf41aa945681243cd13bd47cd0b040cb63dfb77669e0093cd3d",
+        "filesVerified": 24
+      },
+      "nativeWorkerDispatch": {
+        "create_l7policy": 2,
+        "create_l7rule": 4,
+        "update_l7policy": 2
+      },
+      "receiptSHA256": "9a3dc0f6f6d0237dd9a36729406e1fba641852a58ae3844bf8304ab712080ddc",
+      "nativeFixtureSHA256": "214fe3b97b233092ed626f50e9cdb1d4dbcf9d80559db75a4081da6fc750a985",
+      "provider": {
+        "regionalCapabilitiesBeforeOptIn": {
+          "listener_otlp_tracing_v1": false,
+          "listener_otlp_sampling_v1": false
+        },
+        "regionalCapabilitiesAfterConfiguration": {
+          "listener_otlp_tracing_v1": false,
+          "listener_otlp_sampling_v1": false
+        },
+        "agentCapabilities": {
+          "listener_otlp_tracing_v1": true,
+          "listener_otlp_sampling_v1": true
+        }
+      },
+      "phases": {
+        "standard-forwarding": {
+          "passed": true,
+          "traffic": {
+            "independent": {
+              "frontend": "independent",
+              "incomingParentFlag": "01",
+              "requests": 1,
+              "http200": 1,
+              "expectedApplication": 1,
+              "unchangedTraceparent": 1,
+              "propagatedSampled": 0,
+              "propagatedUnsampled": 0,
+              "propagatedTraceFlags": {}
+            },
+            "sampled-parent": {
+              "frontend": "selected",
+              "incomingParentFlag": "01",
+              "requests": 1,
+              "http200": 1,
+              "expectedApplication": 1,
+              "unchangedTraceparent": 1,
+              "propagatedSampled": 0,
+              "propagatedUnsampled": 0,
+              "propagatedTraceFlags": {}
+            }
+          },
+          "programmedGateways": {
+            "selected": "True/Programmed",
+            "independent": "True/Programmed"
+          },
+          "octaviaListeners": {
+            "selected": {
+              "listenerPort": 80,
+              "listenerStatus": "ACTIVE",
+              "haproxyRunning": true,
+              "configurationSHA256": "8fdabbc641c69d46abc0019ff7663679032a9dfc6043c050972d05e69bd325a8",
+              "capabilityConfigured": false,
+              "exporterStatus": null,
+              "otlpTracingNull": false
+            },
+            "independent": {
+              "listenerPort": 80,
+              "listenerStatus": "ACTIVE",
+              "haproxyRunning": true,
+              "configurationSHA256": "fb01174946fb9d9ef15ce9ec1e997a3b42e0241967745f7f2f27d55fbc5840f9",
+              "capabilityConfigured": false,
+              "exporterStatus": null,
+              "otlpTracingNull": false
+            }
+          }
+        }
+      },
+      "http200": 2
+    },
+    "experimental": {
+      "passed": true,
+      "vmCaseExit": 0,
+      "runnerExit": 0,
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "experimentalPolicyCRDPresent": true,
+      "haproxyVersion": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1-http-policy-v1-http-mirror-v1-listener-auth-v1-backend-retry-budget-v1-listener-otlp-v1",
+      "installedOctavia": {
+        "version": "19.0.1.dev74",
+        "sha256": "0a95341d7f0f55d88e36dd8eca51b55841f16ad45c05d9e2617ce0061225492f",
+        "filesVerified": 665
+      },
+      "installedOctaviaLib": {
+        "version": "3.12.1.dev19",
+        "sha256": "2514ccf71a882bf41aa945681243cd13bd47cd0b040cb63dfb77669e0093cd3d",
+        "filesVerified": 24
+      },
+      "collectorPreflight": {
+        "endpointSliceManagedByKubernetes": true,
+        "nativeCollectorDecodedSyntheticProbe": true
+      },
+      "nativeWorkerDispatch": {
+        "update_listener": 11,
+        "create_l7policy": 2,
+        "create_l7rule": 4,
+        "update_l7policy": 2
+      },
+      "receiptSHA256": "e7f2db18e7256a45c54755989b7f364153df6c43191224fc1bb52d2f1962ed45",
+      "nativeFixtureSHA256": "77668ce5545fcce1c658b62336123c151f3e1f06400b5cb7266cbe7c96390afd",
+      "provider": {
+        "regionalCapabilitiesBeforeOptIn": {
+          "listener_otlp_tracing_v1": false,
+          "listener_otlp_sampling_v1": false
+        },
+        "regionalCapabilitiesWithOnlySamplingOptIn": {
+          "listener_otlp_tracing_v1": false,
+          "listener_otlp_sampling_v1": false
+        },
+        "regionalCapabilitiesAfterConfiguration": {
+          "listener_otlp_tracing_v1": true,
+          "listener_otlp_sampling_v1": true
+        },
+        "agentCapabilities": {
+          "listener_otlp_tracing_v1": true,
+          "listener_otlp_sampling_v1": true
+        }
+      },
+      "phases": {
+        "grant-present": {
+          "passed": true,
+          "policyAncestorConditions": {
+            "selected": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs"
+            }
+          },
+          "policySampling": {
+            "generation": 1,
+            "base": null,
+            "parentBased": null
+          },
+          "collectorObservationWindowSeconds": 4,
+          "traffic": {
+            "independent": {
+              "frontend": "independent",
+              "incomingParentFlag": "01",
+              "requests": 1,
+              "http200": 1,
+              "expectedApplication": 1,
+              "unchangedTraceparent": 1,
+              "propagatedSampled": 0,
+              "propagatedUnsampled": 0,
+              "propagatedTraceFlags": {},
+              "collectorTraceFlags": {},
+              "collectorSpans": 0,
+              "matchedCollectorSpans": 0
+            },
+            "sampled-parent": {
+              "frontend": "selected",
+              "incomingParentFlag": "01",
+              "requests": 1,
+              "http200": 1,
+              "expectedApplication": 1,
+              "unchangedTraceparent": 0,
+              "propagatedSampled": 1,
+              "propagatedUnsampled": 0,
+              "propagatedTraceFlags": {
+                "01": 1
+              },
+              "collectorTraceFlags": {
+                "01": 1
+              },
+              "collectorSpans": 1,
+              "matchedCollectorSpans": 1
+            }
+          },
+          "programmedGateways": {
+            "selected": "True/Programmed",
+            "independent": "True/Programmed"
+          },
+          "octaviaListeners": {
+            "selected": {
+              "listenerPort": 80,
+              "listenerStatus": "ACTIVE",
+              "haproxyRunning": true,
+              "configurationSHA256": "1b77e1be1875442c27e890d5ab0a01711cd3da1f44a722d040927e62a7f3355c",
+              "capabilityConfigured": true,
+              "exporterStatus": "ACTIVE",
+              "otlpTracingNull": false,
+              "activeLuaScript": "sampling-v1",
+              "renderedSamplingArguments": [],
+              "collectorServiceEndpointMatch": true,
+              "collectorPoolProtocol": "HTTP",
+              "collectorPoolStatus": "ACTIVE"
+            },
+            "independent": {
+              "listenerPort": 80,
+              "listenerStatus": "ACTIVE",
+              "haproxyRunning": true,
+              "configurationSHA256": "2b6e4f3e6bf2224032b404e4a20709389a250c0501fcdc73d627aee20c96cfcb",
+              "capabilityConfigured": false,
+              "exporterStatus": null,
+              "otlpTracingNull": true
+            }
+          }
+        },
+        "base-zero": {
+          "passed": true,
+          "policyAncestorConditions": {
+            "selected": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs"
+            }
+          },
+          "policySampling": {
+            "generation": 2,
+            "base": {
+              "denominator": 1,
+              "numerator": 0
+            },
+            "parentBased": null
+          },
+          "collectorObservationWindowSeconds": 4,
+          "traffic": {
+            "independent": {
+              "frontend": "independent",
+              "incomingParentFlag": "01",
+              "requests": 1,
+              "http200": 1,
+              "expectedApplication": 1,
+              "unchangedTraceparent": 1,
+              "propagatedSampled": 0,
+              "propagatedUnsampled": 0,
+              "propagatedTraceFlags": {},
+              "collectorTraceFlags": {},
+              "collectorSpans": 0,
+              "matchedCollectorSpans": 0
+            },
+            "no-parent": {
+              "frontend": "selected",
+              "incomingParentFlag": null,
+              "requests": 3,
+              "http200": 3,
+              "expectedApplication": 3,
+              "unchangedTraceparent": 0,
+              "propagatedSampled": 0,
+              "propagatedUnsampled": 3,
+              "propagatedTraceFlags": {
+                "02": 3
+              },
+              "collectorTraceFlags": {},
+              "collectorSpans": 0,
+              "matchedCollectorSpans": 0
+            },
+            "sampled-parent": {
+              "frontend": "selected",
+              "incomingParentFlag": "01",
+              "requests": 1,
+              "http200": 1,
+              "expectedApplication": 1,
+              "unchangedTraceparent": 0,
+              "propagatedSampled": 0,
+              "propagatedUnsampled": 1,
+              "propagatedTraceFlags": {
+                "00": 1
+              },
+              "collectorTraceFlags": {},
+              "collectorSpans": 0,
+              "matchedCollectorSpans": 0
+            }
+          },
+          "programmedGateways": {
+            "selected": "True/Programmed",
+            "independent": "True/Programmed"
+          },
+          "octaviaListeners": {
+            "selected": {
+              "listenerPort": 80,
+              "listenerStatus": "ACTIVE",
+              "haproxyRunning": true,
+              "configurationSHA256": "5f005118f74464f8731d9df67e74c80f302f74731b33a62b5c827a9a0a3d62ed",
+              "capabilityConfigured": true,
+              "exporterStatus": "ACTIVE",
+              "otlpTracingNull": false,
+              "sampling": {
+                "base": {
+                  "numerator": 0,
+                  "denominator": 1
+                }
+              },
+              "activeLuaScript": "sampling-v1",
+              "renderedSamplingArguments": [
+                0,
+                1
+              ],
+              "collectorServiceEndpointMatch": true,
+              "collectorPoolProtocol": "HTTP",
+              "collectorPoolStatus": "ACTIVE"
+            },
+            "independent": {
+              "listenerPort": 80,
+              "listenerStatus": "ACTIVE",
+              "haproxyRunning": true,
+              "configurationSHA256": "2b6e4f3e6bf2224032b404e4a20709389a250c0501fcdc73d627aee20c96cfcb",
+              "capabilityConfigured": false,
+              "exporterStatus": null,
+              "otlpTracingNull": true
+            }
+          }
+        },
+        "base-full": {
+          "passed": true,
+          "policyAncestorConditions": {
+            "selected": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs"
+            }
+          },
+          "policySampling": {
+            "generation": 3,
+            "base": {
+              "denominator": 1,
+              "numerator": 1
+            },
+            "parentBased": null
+          },
+          "collectorObservationWindowSeconds": 4,
+          "traffic": {
+            "independent": {
+              "frontend": "independent",
+              "incomingParentFlag": "01",
+              "requests": 1,
+              "http200": 1,
+              "expectedApplication": 1,
+              "unchangedTraceparent": 1,
+              "propagatedSampled": 0,
+              "propagatedUnsampled": 0,
+              "propagatedTraceFlags": {},
+              "collectorTraceFlags": {},
+              "collectorSpans": 0,
+              "matchedCollectorSpans": 0
+            },
+            "no-parent": {
+              "frontend": "selected",
+              "incomingParentFlag": null,
+              "requests": 3,
+              "http200": 3,
+              "expectedApplication": 3,
+              "unchangedTraceparent": 0,
+              "propagatedSampled": 3,
+              "propagatedUnsampled": 0,
+              "propagatedTraceFlags": {
+                "03": 3
+              },
+              "collectorTraceFlags": {
+                "03": 3
+              },
+              "collectorSpans": 3,
+              "matchedCollectorSpans": 3
+            },
+            "unsampled-parent": {
+              "frontend": "selected",
+              "incomingParentFlag": "00",
+              "requests": 1,
+              "http200": 1,
+              "expectedApplication": 1,
+              "unchangedTraceparent": 0,
+              "propagatedSampled": 1,
+              "propagatedUnsampled": 0,
+              "propagatedTraceFlags": {
+                "01": 1
+              },
+              "collectorTraceFlags": {
+                "01": 1
+              },
+              "collectorSpans": 1,
+              "matchedCollectorSpans": 1
+            }
+          },
+          "programmedGateways": {
+            "selected": "True/Programmed",
+            "independent": "True/Programmed"
+          },
+          "octaviaListeners": {
+            "selected": {
+              "listenerPort": 80,
+              "listenerStatus": "ACTIVE",
+              "haproxyRunning": true,
+              "configurationSHA256": "90bf2ed1c1c2822febdb9ff3be76852cf1454c5f3058186f3a79c7563128b089",
+              "capabilityConfigured": true,
+              "exporterStatus": "ACTIVE",
+              "otlpTracingNull": false,
+              "activeLuaScript": "sampling-v1",
+              "renderedSamplingArguments": [],
+              "collectorServiceEndpointMatch": true,
+              "collectorPoolProtocol": "HTTP",
+              "collectorPoolStatus": "ACTIVE"
+            },
+            "independent": {
+              "listenerPort": 80,
+              "listenerStatus": "ACTIVE",
+              "haproxyRunning": true,
+              "configurationSHA256": "2b6e4f3e6bf2224032b404e4a20709389a250c0501fcdc73d627aee20c96cfcb",
+              "capabilityConfigured": false,
+              "exporterStatus": null,
+              "otlpTracingNull": true
+            }
+          }
+        },
+        "base-half": {
+          "passed": true,
+          "policyAncestorConditions": {
+            "selected": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs"
+            }
+          },
+          "policySampling": {
+            "generation": 4,
+            "base": {
+              "denominator": 2,
+              "numerator": 1
+            },
+            "parentBased": null
+          },
+          "collectorObservationWindowSeconds": 4,
+          "traffic": {
+            "independent": {
+              "frontend": "independent",
+              "incomingParentFlag": "01",
+              "requests": 1,
+              "http200": 1,
+              "expectedApplication": 1,
+              "unchangedTraceparent": 1,
+              "propagatedSampled": 0,
+              "propagatedUnsampled": 0,
+              "propagatedTraceFlags": {},
+              "collectorTraceFlags": {},
+              "collectorSpans": 0,
+              "matchedCollectorSpans": 0
+            },
+            "no-parent": {
+              "frontend": "selected",
+              "incomingParentFlag": null,
+              "requests": 128,
+              "http200": 128,
+              "expectedApplication": 128,
+              "unchangedTraceparent": 0,
+              "propagatedSampled": 68,
+              "propagatedUnsampled": 60,
+              "propagatedTraceFlags": {
+                "03": 68,
+                "02": 60
+              },
+              "collectorTraceFlags": {
+                "03": 68
+              },
+              "collectorSpans": 68,
+              "matchedCollectorSpans": 68
+            }
+          },
+          "programmedGateways": {
+            "selected": "True/Programmed",
+            "independent": "True/Programmed"
+          },
+          "octaviaListeners": {
+            "selected": {
+              "listenerPort": 80,
+              "listenerStatus": "ACTIVE",
+              "haproxyRunning": true,
+              "configurationSHA256": "1e7f828d98b0f1d4f14036b98aa4f7e908faf5c9476c5ea771091b0a8b09fe68",
+              "capabilityConfigured": true,
+              "exporterStatus": "ACTIVE",
+              "otlpTracingNull": false,
+              "sampling": {
+                "base": {
+                  "numerator": 1,
+                  "denominator": 2
+                }
+              },
+              "activeLuaScript": "sampling-v1",
+              "renderedSamplingArguments": [
+                1,
+                2
+              ],
+              "collectorServiceEndpointMatch": true,
+              "collectorPoolProtocol": "HTTP",
+              "collectorPoolStatus": "ACTIVE"
+            },
+            "independent": {
+              "listenerPort": 80,
+              "listenerStatus": "ACTIVE",
+              "haproxyRunning": true,
+              "configurationSHA256": "2b6e4f3e6bf2224032b404e4a20709389a250c0501fcdc73d627aee20c96cfcb",
+              "capabilityConfigured": false,
+              "exporterStatus": null,
+              "otlpTracingNull": true
+            }
+          }
+        },
+        "parent-full-base-zero": {
+          "passed": true,
+          "policyAncestorConditions": {
+            "selected": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs"
+            }
+          },
+          "policySampling": {
+            "generation": 5,
+            "base": {
+              "denominator": 1,
+              "numerator": 0
+            },
+            "parentBased": {
+              "mode": "Enabled",
+              "samplingRate": {
+                "denominator": 1,
+                "numerator": 1
+              }
+            }
+          },
+          "collectorObservationWindowSeconds": 4,
+          "traffic": {
+            "independent": {
+              "frontend": "independent",
+              "incomingParentFlag": "01",
+              "requests": 1,
+              "http200": 1,
+              "expectedApplication": 1,
+              "unchangedTraceparent": 1,
+              "propagatedSampled": 0,
+              "propagatedUnsampled": 0,
+              "propagatedTraceFlags": {},
+              "collectorTraceFlags": {},
+              "collectorSpans": 0,
+              "matchedCollectorSpans": 0
+            },
+            "no-parent": {
+              "frontend": "selected",
+              "incomingParentFlag": null,
+              "requests": 3,
+              "http200": 3,
+              "expectedApplication": 3,
+              "unchangedTraceparent": 0,
+              "propagatedSampled": 0,
+              "propagatedUnsampled": 3,
+              "propagatedTraceFlags": {
+                "02": 3
+              },
+              "collectorTraceFlags": {},
+              "collectorSpans": 0,
+              "matchedCollectorSpans": 0
+            },
+            "sampled-parent": {
+              "frontend": "selected",
+              "incomingParentFlag": "03",
+              "requests": 3,
+              "http200": 3,
+              "expectedApplication": 3,
+              "unchangedTraceparent": 0,
+              "propagatedSampled": 3,
+              "propagatedUnsampled": 0,
+              "propagatedTraceFlags": {
+                "03": 3
+              },
+              "collectorTraceFlags": {
+                "03": 3
+              },
+              "collectorSpans": 3,
+              "matchedCollectorSpans": 3
+            },
+            "unsampled-parent": {
+              "frontend": "selected",
+              "incomingParentFlag": "02",
+              "requests": 3,
+              "http200": 3,
+              "expectedApplication": 3,
+              "unchangedTraceparent": 0,
+              "propagatedSampled": 0,
+              "propagatedUnsampled": 3,
+              "propagatedTraceFlags": {
+                "02": 3
+              },
+              "collectorTraceFlags": {},
+              "collectorSpans": 0,
+              "matchedCollectorSpans": 0
+            }
+          },
+          "programmedGateways": {
+            "selected": "True/Programmed",
+            "independent": "True/Programmed"
+          },
+          "octaviaListeners": {
+            "selected": {
+              "listenerPort": 80,
+              "listenerStatus": "ACTIVE",
+              "haproxyRunning": true,
+              "configurationSHA256": "03712af071bfacdbea2e2dbe0c543db69a498e03140f870433d0fe3db506c6e7",
+              "capabilityConfigured": true,
+              "exporterStatus": "ACTIVE",
+              "otlpTracingNull": false,
+              "sampling": {
+                "base": {
+                  "numerator": 0,
+                  "denominator": 1
+                },
+                "parent": {
+                  "numerator": 1,
+                  "denominator": 1
+                }
+              },
+              "activeLuaScript": "sampling-v1",
+              "renderedSamplingArguments": [
+                0,
+                1,
+                1,
+                1
+              ],
+              "collectorServiceEndpointMatch": true,
+              "collectorPoolProtocol": "HTTP",
+              "collectorPoolStatus": "ACTIVE"
+            },
+            "independent": {
+              "listenerPort": 80,
+              "listenerStatus": "ACTIVE",
+              "haproxyRunning": true,
+              "configurationSHA256": "2b6e4f3e6bf2224032b404e4a20709389a250c0501fcdc73d627aee20c96cfcb",
+              "capabilityConfigured": false,
+              "exporterStatus": null,
+              "otlpTracingNull": true
+            }
+          }
+        },
+        "parent-zero-base-full": {
+          "passed": true,
+          "policyAncestorConditions": {
+            "selected": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs"
+            }
+          },
+          "policySampling": {
+            "generation": 6,
+            "base": {
+              "denominator": 1,
+              "numerator": 1
+            },
+            "parentBased": {
+              "mode": "Enabled",
+              "samplingRate": {
+                "denominator": 1,
+                "numerator": 0
+              }
+            }
+          },
+          "collectorObservationWindowSeconds": 4,
+          "traffic": {
+            "independent": {
+              "frontend": "independent",
+              "incomingParentFlag": "01",
+              "requests": 1,
+              "http200": 1,
+              "expectedApplication": 1,
+              "unchangedTraceparent": 1,
+              "propagatedSampled": 0,
+              "propagatedUnsampled": 0,
+              "propagatedTraceFlags": {},
+              "collectorTraceFlags": {},
+              "collectorSpans": 0,
+              "matchedCollectorSpans": 0
+            },
+            "no-parent": {
+              "frontend": "selected",
+              "incomingParentFlag": null,
+              "requests": 3,
+              "http200": 3,
+              "expectedApplication": 3,
+              "unchangedTraceparent": 0,
+              "propagatedSampled": 3,
+              "propagatedUnsampled": 0,
+              "propagatedTraceFlags": {
+                "03": 3
+              },
+              "collectorTraceFlags": {
+                "03": 3
+              },
+              "collectorSpans": 3,
+              "matchedCollectorSpans": 3
+            },
+            "sampled-parent": {
+              "frontend": "selected",
+              "incomingParentFlag": "03",
+              "requests": 3,
+              "http200": 3,
+              "expectedApplication": 3,
+              "unchangedTraceparent": 0,
+              "propagatedSampled": 0,
+              "propagatedUnsampled": 3,
+              "propagatedTraceFlags": {
+                "02": 3
+              },
+              "collectorTraceFlags": {},
+              "collectorSpans": 0,
+              "matchedCollectorSpans": 0
+            },
+            "unsampled-parent": {
+              "frontend": "selected",
+              "incomingParentFlag": "02",
+              "requests": 3,
+              "http200": 3,
+              "expectedApplication": 3,
+              "unchangedTraceparent": 0,
+              "propagatedSampled": 0,
+              "propagatedUnsampled": 3,
+              "propagatedTraceFlags": {
+                "02": 3
+              },
+              "collectorTraceFlags": {},
+              "collectorSpans": 0,
+              "matchedCollectorSpans": 0
+            }
+          },
+          "programmedGateways": {
+            "selected": "True/Programmed",
+            "independent": "True/Programmed"
+          },
+          "octaviaListeners": {
+            "selected": {
+              "listenerPort": 80,
+              "listenerStatus": "ACTIVE",
+              "haproxyRunning": true,
+              "configurationSHA256": "045f3ec8450373d5f36d06e50275566592a7af658a3529e40379fbe14012fe6e",
+              "capabilityConfigured": true,
+              "exporterStatus": "ACTIVE",
+              "otlpTracingNull": false,
+              "sampling": {
+                "base": {
+                  "numerator": 1,
+                  "denominator": 1
+                },
+                "parent": {
+                  "numerator": 0,
+                  "denominator": 1
+                }
+              },
+              "activeLuaScript": "sampling-v1",
+              "renderedSamplingArguments": [
+                1,
+                1,
+                0,
+                1
+              ],
+              "collectorServiceEndpointMatch": true,
+              "collectorPoolProtocol": "HTTP",
+              "collectorPoolStatus": "ACTIVE"
+            },
+            "independent": {
+              "listenerPort": 80,
+              "listenerStatus": "ACTIVE",
+              "haproxyRunning": true,
+              "configurationSHA256": "2b6e4f3e6bf2224032b404e4a20709389a250c0501fcdc73d627aee20c96cfcb",
+              "capabilityConfigured": false,
+              "exporterStatus": null,
+              "otlpTracingNull": true
+            }
+          }
+        },
+        "parent-half-base-full": {
+          "passed": true,
+          "policyAncestorConditions": {
+            "selected": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs"
+            }
+          },
+          "policySampling": {
+            "generation": 7,
+            "base": {
+              "denominator": 1,
+              "numerator": 1
+            },
+            "parentBased": {
+              "mode": "Enabled",
+              "samplingRate": {
+                "denominator": 2,
+                "numerator": 1
+              }
+            }
+          },
+          "collectorObservationWindowSeconds": 4,
+          "traffic": {
+            "independent": {
+              "frontend": "independent",
+              "incomingParentFlag": "01",
+              "requests": 1,
+              "http200": 1,
+              "expectedApplication": 1,
+              "unchangedTraceparent": 1,
+              "propagatedSampled": 0,
+              "propagatedUnsampled": 0,
+              "propagatedTraceFlags": {},
+              "collectorTraceFlags": {},
+              "collectorSpans": 0,
+              "matchedCollectorSpans": 0
+            },
+            "no-parent": {
+              "frontend": "selected",
+              "incomingParentFlag": null,
+              "requests": 3,
+              "http200": 3,
+              "expectedApplication": 3,
+              "unchangedTraceparent": 0,
+              "propagatedSampled": 3,
+              "propagatedUnsampled": 0,
+              "propagatedTraceFlags": {
+                "03": 3
+              },
+              "collectorTraceFlags": {
+                "03": 3
+              },
+              "collectorSpans": 3,
+              "matchedCollectorSpans": 3
+            },
+            "sampled-parent": {
+              "frontend": "selected",
+              "incomingParentFlag": "03",
+              "requests": 128,
+              "http200": 128,
+              "expectedApplication": 128,
+              "unchangedTraceparent": 0,
+              "propagatedSampled": 62,
+              "propagatedUnsampled": 66,
+              "propagatedTraceFlags": {
+                "03": 62,
+                "02": 66
+              },
+              "collectorTraceFlags": {
+                "03": 62
+              },
+              "collectorSpans": 62,
+              "matchedCollectorSpans": 62
+            },
+            "unsampled-parent": {
+              "frontend": "selected",
+              "incomingParentFlag": "02",
+              "requests": 3,
+              "http200": 3,
+              "expectedApplication": 3,
+              "unchangedTraceparent": 0,
+              "propagatedSampled": 0,
+              "propagatedUnsampled": 3,
+              "propagatedTraceFlags": {
+                "02": 3
+              },
+              "collectorTraceFlags": {},
+              "collectorSpans": 0,
+              "matchedCollectorSpans": 0
+            }
+          },
+          "programmedGateways": {
+            "selected": "True/Programmed",
+            "independent": "True/Programmed"
+          },
+          "octaviaListeners": {
+            "selected": {
+              "listenerPort": 80,
+              "listenerStatus": "ACTIVE",
+              "haproxyRunning": true,
+              "configurationSHA256": "b32d5e690c77263642894f7c7627a5732b5ed006256cd3eadae98108ce7ad821",
+              "capabilityConfigured": true,
+              "exporterStatus": "ACTIVE",
+              "otlpTracingNull": false,
+              "sampling": {
+                "base": {
+                  "numerator": 1,
+                  "denominator": 1
+                },
+                "parent": {
+                  "numerator": 1,
+                  "denominator": 2
+                }
+              },
+              "activeLuaScript": "sampling-v1",
+              "renderedSamplingArguments": [
+                1,
+                1,
+                1,
+                2
+              ],
+              "collectorServiceEndpointMatch": true,
+              "collectorPoolProtocol": "HTTP",
+              "collectorPoolStatus": "ACTIVE"
+            },
+            "independent": {
+              "listenerPort": 80,
+              "listenerStatus": "ACTIVE",
+              "haproxyRunning": true,
+              "configurationSHA256": "2b6e4f3e6bf2224032b404e4a20709389a250c0501fcdc73d627aee20c96cfcb",
+              "capabilityConfigured": false,
+              "exporterStatus": null,
+              "otlpTracingNull": true
+            }
+          }
+        },
+        "parent-full-base-full": {
+          "passed": true,
+          "policyAncestorConditions": {
+            "selected": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs"
+            }
+          },
+          "policySampling": {
+            "generation": 8,
+            "base": {
+              "denominator": 1,
+              "numerator": 1
+            },
+            "parentBased": {
+              "mode": "Enabled",
+              "samplingRate": {
+                "denominator": 1,
+                "numerator": 1
+              }
+            }
+          },
+          "collectorObservationWindowSeconds": 4,
+          "traffic": {
+            "independent": {
+              "frontend": "independent",
+              "incomingParentFlag": "01",
+              "requests": 1,
+              "http200": 1,
+              "expectedApplication": 1,
+              "unchangedTraceparent": 1,
+              "propagatedSampled": 0,
+              "propagatedUnsampled": 0,
+              "propagatedTraceFlags": {},
+              "collectorTraceFlags": {},
+              "collectorSpans": 0,
+              "matchedCollectorSpans": 0
+            },
+            "unsampled-parent": {
+              "frontend": "selected",
+              "incomingParentFlag": "02",
+              "requests": 3,
+              "http200": 3,
+              "expectedApplication": 3,
+              "unchangedTraceparent": 0,
+              "propagatedSampled": 0,
+              "propagatedUnsampled": 3,
+              "propagatedTraceFlags": {
+                "02": 3
+              },
+              "collectorTraceFlags": {},
+              "collectorSpans": 0,
+              "matchedCollectorSpans": 0
+            }
+          },
+          "programmedGateways": {
+            "selected": "True/Programmed",
+            "independent": "True/Programmed"
+          },
+          "octaviaListeners": {
+            "selected": {
+              "listenerPort": 80,
+              "listenerStatus": "ACTIVE",
+              "haproxyRunning": true,
+              "configurationSHA256": "6768463dd9458c256adb923d8a5ae12af3ef81b31fe623909dee2fef92b9730d",
+              "capabilityConfigured": true,
+              "exporterStatus": "ACTIVE",
+              "otlpTracingNull": false,
+              "sampling": {
+                "base": {
+                  "numerator": 1,
+                  "denominator": 1
+                },
+                "parent": {
+                  "numerator": 1,
+                  "denominator": 1
+                }
+              },
+              "activeLuaScript": "sampling-v1",
+              "renderedSamplingArguments": [
+                1,
+                1,
+                1,
+                1
+              ],
+              "collectorServiceEndpointMatch": true,
+              "collectorPoolProtocol": "HTTP",
+              "collectorPoolStatus": "ACTIVE"
+            },
+            "independent": {
+              "listenerPort": 80,
+              "listenerStatus": "ACTIVE",
+              "haproxyRunning": true,
+              "configurationSHA256": "2b6e4f3e6bf2224032b404e4a20709389a250c0501fcdc73d627aee20c96cfcb",
+              "capabilityConfigured": false,
+              "exporterStatus": null,
+              "otlpTracingNull": true
+            }
+          }
+        },
+        "grant-withdrawn": {
+          "passed": true,
+          "policyAncestorConditions": {
+            "selected": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "False/RefNotPermitted"
+            }
+          },
+          "policySampling": {
+            "generation": 8,
+            "base": {
+              "denominator": 1,
+              "numerator": 1
+            },
+            "parentBased": {
+              "mode": "Enabled",
+              "samplingRate": {
+                "denominator": 1,
+                "numerator": 1
+              }
+            }
+          },
+          "collectorObservationWindowSeconds": 4,
+          "withdrawal": {
+            "continuityProbes": 6,
+            "continuityHTTP200": 6,
+            "retiredCollectorPoolAbsent": true
+          },
+          "traffic": {
+            "independent": {
+              "frontend": "independent",
+              "incomingParentFlag": "01",
+              "requests": 1,
+              "http200": 1,
+              "expectedApplication": 1,
+              "unchangedTraceparent": 1,
+              "propagatedSampled": 0,
+              "propagatedUnsampled": 0,
+              "propagatedTraceFlags": {},
+              "collectorTraceFlags": {},
+              "collectorSpans": 0,
+              "matchedCollectorSpans": 0
+            },
+            "sampled-parent": {
+              "frontend": "selected",
+              "incomingParentFlag": "01",
+              "requests": 1,
+              "http200": 1,
+              "expectedApplication": 1,
+              "unchangedTraceparent": 1,
+              "propagatedSampled": 0,
+              "propagatedUnsampled": 0,
+              "propagatedTraceFlags": {},
+              "collectorTraceFlags": {},
+              "collectorSpans": 0,
+              "matchedCollectorSpans": 0
+            }
+          },
+          "programmedGateways": {
+            "selected": "True/Programmed",
+            "independent": "True/Programmed"
+          },
+          "octaviaListeners": {
+            "selected": {
+              "listenerPort": 80,
+              "listenerStatus": "ACTIVE",
+              "haproxyRunning": true,
+              "configurationSHA256": "d37de3d390a5f0cbd657d728580c41a630abc95efb1b14813c95f54bd2186df2",
+              "capabilityConfigured": false,
+              "exporterStatus": "ACTIVE",
+              "otlpTracingNull": true
+            },
+            "independent": {
+              "listenerPort": 80,
+              "listenerStatus": "ACTIVE",
+              "haproxyRunning": true,
+              "configurationSHA256": "2b6e4f3e6bf2224032b404e4a20709389a250c0501fcdc73d627aee20c96cfcb",
+              "capabilityConfigured": false,
+              "exporterStatus": null,
+              "otlpTracingNull": true
+            }
+          }
+        },
+        "grant-restored": {
+          "passed": true,
+          "policyAncestorConditions": {
+            "selected": {
+              "Accepted": "True/Accepted",
+              "ResolvedRefs": "True/ResolvedRefs"
+            }
+          },
+          "policySampling": {
+            "generation": 8,
+            "base": {
+              "denominator": 1,
+              "numerator": 1
+            },
+            "parentBased": {
+              "mode": "Enabled",
+              "samplingRate": {
+                "denominator": 1,
+                "numerator": 1
+              }
+            }
+          },
+          "collectorObservationWindowSeconds": 4,
+          "traffic": {
+            "independent": {
+              "frontend": "independent",
+              "incomingParentFlag": "01",
+              "requests": 1,
+              "http200": 1,
+              "expectedApplication": 1,
+              "unchangedTraceparent": 1,
+              "propagatedSampled": 0,
+              "propagatedUnsampled": 0,
+              "propagatedTraceFlags": {},
+              "collectorTraceFlags": {},
+              "collectorSpans": 0,
+              "matchedCollectorSpans": 0
+            },
+            "sampled-parent": {
+              "frontend": "selected",
+              "incomingParentFlag": "01",
+              "requests": 1,
+              "http200": 1,
+              "expectedApplication": 1,
+              "unchangedTraceparent": 0,
+              "propagatedSampled": 1,
+              "propagatedUnsampled": 0,
+              "propagatedTraceFlags": {
+                "01": 1
+              },
+              "collectorTraceFlags": {
+                "01": 1
+              },
+              "collectorSpans": 1,
+              "matchedCollectorSpans": 1
+            }
+          },
+          "programmedGateways": {
+            "selected": "True/Programmed",
+            "independent": "True/Programmed"
+          },
+          "octaviaListeners": {
+            "selected": {
+              "listenerPort": 80,
+              "listenerStatus": "ACTIVE",
+              "haproxyRunning": true,
+              "configurationSHA256": "7323401ee179e361d53eb9f673ed194f425548b9007ae5c2c35e0167dea44a15",
+              "capabilityConfigured": true,
+              "exporterStatus": "ACTIVE",
+              "otlpTracingNull": false,
+              "sampling": {
+                "base": {
+                  "numerator": 1,
+                  "denominator": 1
+                },
+                "parent": {
+                  "numerator": 1,
+                  "denominator": 1
+                }
+              },
+              "activeLuaScript": "sampling-v1",
+              "renderedSamplingArguments": [
+                1,
+                1,
+                1,
+                1
+              ],
+              "collectorServiceEndpointMatch": true,
+              "collectorPoolProtocol": "HTTP",
+              "collectorPoolStatus": "ACTIVE"
+            },
+            "independent": {
+              "listenerPort": 80,
+              "listenerStatus": "ACTIVE",
+              "haproxyRunning": true,
+              "configurationSHA256": "2b6e4f3e6bf2224032b404e4a20709389a250c0501fcdc73d627aee20c96cfcb",
+              "capabilityConfigured": false,
+              "exporterStatus": null,
+              "otlpTracingNull": true
+            }
+          }
+        }
+      },
+      "http200": 304
+    }
+  },
+  "firstExperimentalAttempt": {
+    "exit": 1,
+    "phase": "grant-present",
+    "receiptSHA256": "752ff2999463bcbbad5b52c734d9df730764d08c9318685aea3e079487705fb8",
+    "nativeFixtureSHA256": "214fe3b97b233092ed626f50e9cdb1d4dbcf9d80559db75a4081da6fc750a985",
+    "failure": "The fixture used the previous Amphora reload interface and rejected the telemetry publication identifier.",
+    "correction": "The fixture now returns HTTP 202 with the matching publication identifier after activating HAProxy."
+  }
+}
