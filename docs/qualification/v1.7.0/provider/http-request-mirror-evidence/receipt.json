@@ -1,0 +1,384 @@
+{
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "controller": "37ca410a34a179dfbbb561f8f7b5744825f4787a",
+  "image": {
+    "sourceRevision": "37ca410a34a179dfbbb561f8f7b5744825f4787a",
+    "platform": "linux/amd64",
+    "manifestDigest": "sha256:74d5e005b2420c1e75f52763077d083f2b197988013230afa66fa0b6112e9e84",
+    "managerSHA256": "d0eae02134b841cd0f23cf0e14c03837c69ca687ef6712f2bcadbad115dc3626",
+    "ociArchiveSHA256": "38bf6af1546911313519a022d22380b76c25e73a4e9ea3b916a7c9e49148c8a5",
+    "normalAndNoCacheBuildsMatch": true
+  },
+  "releases": {
+    "octavia": "https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-http-request-mirror-bafaa0851bf9",
+    "octavia-lib": "https://github.com/armeldemarsac92/octavia-lib/releases/tag/hibiscus-http-request-mirror-f6a1b8cab341"
+  },
+  "channels": {
+    "standard": {
+      "registeredCases": {
+        "HTTPRouteRequestMirror": {
+          "startedAt": "2026-11-25T01:36:02+00:00",
+          "finishedAt": "2026-11-25T01:36:10+00:00",
+          "verdict": "PASS",
+          "exit": 0,
+          "subtests": {
+            "0_request_to_'/mirror'_should_go_to_infra-backend-v1": "PASS",
+            "1_request_to_'/mirror-and-modify-headers'_with_headers_should_go_to_infra-backend-v1": "PASS"
+          },
+          "bodySHA256": "b514e510d6db952483b91a8a1770cb299e23313978bba54d86f6f74a61cb335f",
+          "manifestSHA256": "5c38a16d1290e9a0d7d7e572873694fdc5b8a1f35f0db9591e9f687c13f8c300",
+          "report": "standard-HTTPRouteRequestMirror.yaml",
+          "reportSHA256": "43d8c925e9b4ae3c10a079cbfd38df801cebada1c194b1b8fcf53ee5ba4cbfdd"
+        },
+        "HTTPRouteRequestMultipleMirrors": {
+          "startedAt": "2026-11-25T01:36:10+00:00",
+          "finishedAt": "2026-11-25T01:36:28+00:00",
+          "verdict": "PASS",
+          "exit": 0,
+          "subtests": {
+            "0_request_to_'/multi-mirror'_should_go_to_infra-backend-v1": "PASS",
+            "1_request_to_'/multi-mirror-and-modify-request-headers'_with_headers_should_go_to_infra-backend-v1": "PASS"
+          },
+          "bodySHA256": "8cc86e6ffac0447350547636ef242802489d99be694a4cf90bff2a65e80814fe",
+          "manifestSHA256": "6de3077fcae078f38cd43891b291cd27e2c4dd9f18bb66a54c51064a67518132",
+          "report": "standard-HTTPRouteRequestMultipleMirrors.yaml",
+          "reportSHA256": "b4e28cc652c6bd1db8842d03de6f8314a64153f492ad28eea91670842031d9d8"
+        },
+        "HTTPRouteRequestPercentageMirror": {
+          "startedAt": "2026-11-25T01:36:28+00:00",
+          "finishedAt": "2026-11-25T01:36:52+00:00",
+          "verdict": "PASS",
+          "exit": 0,
+          "subtests": {
+            "0_request_to_'/percent-mirror'_should_go_to_infra-backend-v1": "PASS",
+            "1_request_to_'/percent-mirror-fraction'_should_go_to_infra-backend-v1": "PASS",
+            "2_request_to_'/percent-mirror-and-modify-headers'_with_headers_should_go_to_infra-backend-v1": "PASS"
+          },
+          "bodySHA256": "dc443072539944b27e88ce2e67f9155d0e3a387047ed6788f826aa8c168391f1",
+          "manifestSHA256": "4dc5c838a0178e6e37d3b9bf12a387593794f7a9803a20cadffaef715f92e0a9",
+          "report": "standard-HTTPRouteRequestPercentageMirror.yaml",
+          "reportSHA256": "54d26212e70372b8a7d32ef4e3282a7c23848343a7eae392624e0b3b583b4660"
+        }
+      },
+      "activeRules": {
+        "/mirror": {
+          "primaryService": "infra-backend-v1",
+          "mirrorPools": [
+            {
+              "service": "infra-backend-v2",
+              "numerator": 1,
+              "denominator": 1
+            }
+          ],
+          "configurationSHA256": "3adb8606a2edde8a753559285bfe86f595c173164fee3c89e688c5d832d1c5c7"
+        },
+        "/mirror-and-modify-headers": {
+          "primaryService": "infra-backend-v1",
+          "mirrorPools": [
+            {
+              "service": "infra-backend-v2",
+              "numerator": 1,
+              "denominator": 1
+            }
+          ],
+          "configurationSHA256": "3adb8606a2edde8a753559285bfe86f595c173164fee3c89e688c5d832d1c5c7"
+        },
+        "/multi-mirror": {
+          "primaryService": "infra-backend-v1",
+          "mirrorPools": [
+            {
+              "service": "infra-backend-v2",
+              "numerator": 1,
+              "denominator": 1
+            },
+            {
+              "service": "infra-backend-v3",
+              "numerator": 1,
+              "denominator": 1
+            }
+          ],
+          "configurationSHA256": "3adb8606a2edde8a753559285bfe86f595c173164fee3c89e688c5d832d1c5c7"
+        },
+        "/multi-mirror-and-modify-request-headers": {
+          "primaryService": "infra-backend-v1",
+          "mirrorPools": [
+            {
+              "service": "infra-backend-v2",
+              "numerator": 1,
+              "denominator": 1
+            },
+            {
+              "service": "infra-backend-v3",
+              "numerator": 1,
+              "denominator": 1
+            }
+          ],
+          "configurationSHA256": "3adb8606a2edde8a753559285bfe86f595c173164fee3c89e688c5d832d1c5c7"
+        },
+        "/percent-mirror": {
+          "primaryService": "infra-backend-v1",
+          "mirrorPools": [
+            {
+              "service": "infra-backend-v2",
+              "numerator": 20,
+              "denominator": 100
+            }
+          ],
+          "configurationSHA256": "3adb8606a2edde8a753559285bfe86f595c173164fee3c89e688c5d832d1c5c7"
+        },
+        "/percent-mirror-and-modify-headers": {
+          "primaryService": "infra-backend-v1",
+          "mirrorPools": [
+            {
+              "service": "infra-backend-v2",
+              "numerator": 35,
+              "denominator": 100
+            }
+          ],
+          "configurationSHA256": "3adb8606a2edde8a753559285bfe86f595c173164fee3c89e688c5d832d1c5c7"
+        },
+        "/percent-mirror-fraction": {
+          "primaryService": "infra-backend-v1",
+          "mirrorPools": [
+            {
+              "service": "infra-backend-v2",
+              "numerator": 25,
+              "denominator": 50
+            }
+          ],
+          "configurationSHA256": "3adb8606a2edde8a753559285bfe86f595c173164fee3c89e688c5d832d1c5c7"
+        }
+      },
+      "sampledCopies": [
+        {
+          "service": "infra-backend-v2",
+          "requests": 500,
+          "expectedCopies": 100,
+          "lowerBound": 73.167184,
+          "upperBound": 126.832816,
+          "observedCopies": 108
+        },
+        {
+          "service": "infra-backend-v2",
+          "requests": 500,
+          "expectedCopies": 250,
+          "lowerBound": 216.45898,
+          "upperBound": 283.54102,
+          "observedCopies": 233
+        },
+        {
+          "service": "infra-backend-v2",
+          "requests": 500,
+          "expectedCopies": 175,
+          "lowerBound": 143.003906,
+          "upperBound": 206.996094,
+          "observedCopies": 169
+        }
+      ],
+      "nativeL7WorkerDispatch": {
+        "create_l7policy": 7,
+        "create_l7rule": 7,
+        "update_l7policy": 16
+      },
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "kindNodeImage": "localhost/hibiscus-kind-node:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67@sha256:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67",
+      "echoOCIArchiveSHA256": "b7675809fd2cc0b9fb9273f1b0c85c422bc3c12361d66b99b83173ddb2d3c9b7",
+      "registeredLauncherSHA256": "adb65bbec98d10a0d4f995b22e9cd9545d5824c66e07487ea608c282fa408652",
+      "controllerManagerSHA256": "d0eae02134b841cd0f23cf0e14c03837c69ca687ef6712f2bcadbad115dc3626",
+      "HAProxySHA256": "c2339fc0ff7f0d46f928a6c19633b7a3d18595451b6de4dca8d0a53e289b7c6e",
+      "octavia": {
+        "source": "bafaa0851bf9592476d396a03035dd317dd51c1d",
+        "wheelSHA256": "d7041fbed656a5a6bfdb6916e70330953edc83dc51fa841cefb3b161298737c3"
+      },
+      "octaviaLib": {
+        "source": "f6a1b8cab34164e5708bb37b57f9475dd6b6a6b9",
+        "wheelSHA256": "4d365319205b3b65294746de5df116103b0905748fc02d1a2efc36a3328aab49"
+      },
+      "regionalEnrollmentObserved": true,
+      "activeNativeRulesVerified": true
+    },
+    "experimental": {
+      "registeredCases": {
+        "HTTPRouteRequestMirror": {
+          "startedAt": "2026-11-25T01:38:28+00:00",
+          "finishedAt": "2026-11-25T01:38:37+00:00",
+          "verdict": "PASS",
+          "exit": 0,
+          "subtests": {
+            "0_request_to_'/mirror'_should_go_to_infra-backend-v1": "PASS",
+            "1_request_to_'/mirror-and-modify-headers'_with_headers_should_go_to_infra-backend-v1": "PASS"
+          },
+          "bodySHA256": "b514e510d6db952483b91a8a1770cb299e23313978bba54d86f6f74a61cb335f",
+          "manifestSHA256": "5c38a16d1290e9a0d7d7e572873694fdc5b8a1f35f0db9591e9f687c13f8c300",
+          "report": "experimental-HTTPRouteRequestMirror.yaml",
+          "reportSHA256": "1e4a113c3790c5ea2c91d3c9a251acd9d427cf5a87c8d8882eecd50b19c11baa"
+        },
+        "HTTPRouteRequestMultipleMirrors": {
+          "startedAt": "2026-11-25T01:38:37+00:00",
+          "finishedAt": "2026-11-25T01:38:56+00:00",
+          "verdict": "PASS",
+          "exit": 0,
+          "subtests": {
+            "1_request_to_'/multi-mirror-and-modify-request-headers'_with_headers_should_go_to_infra-backend-v1": "PASS",
+            "0_request_to_'/multi-mirror'_should_go_to_infra-backend-v1": "PASS"
+          },
+          "bodySHA256": "8cc86e6ffac0447350547636ef242802489d99be694a4cf90bff2a65e80814fe",
+          "manifestSHA256": "6de3077fcae078f38cd43891b291cd27e2c4dd9f18bb66a54c51064a67518132",
+          "report": "experimental-HTTPRouteRequestMultipleMirrors.yaml",
+          "reportSHA256": "b93d34966f8eaaf0167c3b61dca08449909c1a6bbd1bb7e8d4abd09a5c968287"
+        },
+        "HTTPRouteRequestPercentageMirror": {
+          "startedAt": "2026-11-25T01:38:56+00:00",
+          "finishedAt": "2026-11-25T01:39:23+00:00",
+          "verdict": "PASS",
+          "exit": 0,
+          "subtests": {
+            "0_request_to_'/percent-mirror'_should_go_to_infra-backend-v1": "PASS",
+            "1_request_to_'/percent-mirror-fraction'_should_go_to_infra-backend-v1": "PASS",
+            "2_request_to_'/percent-mirror-and-modify-headers'_with_headers_should_go_to_infra-backend-v1": "PASS"
+          },
+          "bodySHA256": "dc443072539944b27e88ce2e67f9155d0e3a387047ed6788f826aa8c168391f1",
+          "manifestSHA256": "4dc5c838a0178e6e37d3b9bf12a387593794f7a9803a20cadffaef715f92e0a9",
+          "report": "experimental-HTTPRouteRequestPercentageMirror.yaml",
+          "reportSHA256": "011a9ee3456dc3e7fdc8de7e8097b4acf6fbcf13374e348289a71525ed5c38e6"
+        }
+      },
+      "activeRules": {
+        "/mirror": {
+          "primaryService": "infra-backend-v1",
+          "mirrorPools": [
+            {
+              "service": "infra-backend-v2",
+              "numerator": 1,
+              "denominator": 1
+            }
+          ],
+          "configurationSHA256": "5c2d7b143c6bcb6bc6d036a93daeb075b0bd8144bf968b676f65bb35dc6d2784"
+        },
+        "/mirror-and-modify-headers": {
+          "primaryService": "infra-backend-v1",
+          "mirrorPools": [
+            {
+              "service": "infra-backend-v2",
+              "numerator": 1,
+              "denominator": 1
+            }
+          ],
+          "configurationSHA256": "5c2d7b143c6bcb6bc6d036a93daeb075b0bd8144bf968b676f65bb35dc6d2784"
+        },
+        "/multi-mirror": {
+          "primaryService": "infra-backend-v1",
+          "mirrorPools": [
+            {
+              "service": "infra-backend-v2",
+              "numerator": 1,
+              "denominator": 1
+            },
+            {
+              "service": "infra-backend-v3",
+              "numerator": 1,
+              "denominator": 1
+            }
+          ],
+          "configurationSHA256": "5c2d7b143c6bcb6bc6d036a93daeb075b0bd8144bf968b676f65bb35dc6d2784"
+        },
+        "/multi-mirror-and-modify-request-headers": {
+          "primaryService": "infra-backend-v1",
+          "mirrorPools": [
+            {
+              "service": "infra-backend-v2",
+              "numerator": 1,
+              "denominator": 1
+            },
+            {
+              "service": "infra-backend-v3",
+              "numerator": 1,
+              "denominator": 1
+            }
+          ],
+          "configurationSHA256": "5c2d7b143c6bcb6bc6d036a93daeb075b0bd8144bf968b676f65bb35dc6d2784"
+        },
+        "/percent-mirror": {
+          "primaryService": "infra-backend-v1",
+          "mirrorPools": [
+            {
+              "service": "infra-backend-v2",
+              "numerator": 20,
+              "denominator": 100
+            }
+          ],
+          "configurationSHA256": "5c2d7b143c6bcb6bc6d036a93daeb075b0bd8144bf968b676f65bb35dc6d2784"
+        },
+        "/percent-mirror-and-modify-headers": {
+          "primaryService": "infra-backend-v1",
+          "mirrorPools": [
+            {
+              "service": "infra-backend-v2",
+              "numerator": 35,
+              "denominator": 100
+            }
+          ],
+          "configurationSHA256": "5c2d7b143c6bcb6bc6d036a93daeb075b0bd8144bf968b676f65bb35dc6d2784"
+        },
+        "/percent-mirror-fraction": {
+          "primaryService": "infra-backend-v1",
+          "mirrorPools": [
+            {
+              "service": "infra-backend-v2",
+              "numerator": 25,
+              "denominator": 50
+            }
+          ],
+          "configurationSHA256": "5c2d7b143c6bcb6bc6d036a93daeb075b0bd8144bf968b676f65bb35dc6d2784"
+        }
+      },
+      "sampledCopies": [
+        {
+          "service": "infra-backend-v2",
+          "requests": 500,
+          "expectedCopies": 100,
+          "lowerBound": 73.167184,
+          "upperBound": 126.832816,
+          "observedCopies": 93
+        },
+        {
+          "service": "infra-backend-v2",
+          "requests": 500,
+          "expectedCopies": 250,
+          "lowerBound": 216.45898,
+          "upperBound": 283.54102,
+          "observedCopies": 242
+        },
+        {
+          "service": "infra-backend-v2",
+          "requests": 500,
+          "expectedCopies": 175,
+          "lowerBound": 143.003906,
+          "upperBound": 206.996094,
+          "observedCopies": 164
+        }
+      ],
+      "nativeL7WorkerDispatch": {
+        "create_l7policy": 7,
+        "create_l7rule": 7,
+        "update_l7policy": 16
+      },
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "kindNodeImage": "localhost/hibiscus-kind-node:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67@sha256:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67",
+      "echoOCIArchiveSHA256": "b7675809fd2cc0b9fb9273f1b0c85c422bc3c12361d66b99b83173ddb2d3c9b7",
+      "registeredLauncherSHA256": "adb65bbec98d10a0d4f995b22e9cd9545d5824c66e07487ea608c282fa408652",
+      "controllerManagerSHA256": "d0eae02134b841cd0f23cf0e14c03837c69ca687ef6712f2bcadbad115dc3626",
+      "HAProxySHA256": "c2339fc0ff7f0d46f928a6c19633b7a3d18595451b6de4dca8d0a53e289b7c6e",
+      "octavia": {
+        "source": "bafaa0851bf9592476d396a03035dd317dd51c1d",
+        "wheelSHA256": "d7041fbed656a5a6bfdb6916e70330953edc83dc51fa841cefb3b161298737c3"
+      },
+      "octaviaLib": {
+        "source": "f6a1b8cab34164e5708bb37b57f9475dd6b6a6b9",
+        "wheelSHA256": "4d365319205b3b65294746de5df116103b0905748fc02d1a2efc36a3328aab49"
+      },
+      "regionalEnrollmentObserved": true,
+      "activeNativeRulesVerified": true
+    }
+  }
+}
