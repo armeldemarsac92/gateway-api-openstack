@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-Experimental route rules with one Service reused an endpoint with an HTTP cookie or an HTTP or gRPC header. [Build record](image.json) · [Local session and lifecycle results](provider/route-rule-session-persistence/receipt.json)
+Weighted Experimental route rules retained per-Service endpoint affinity through a ReferenceGrant change. [Build record](image.json) · [HTTP and gRPC receipts](provider/weighted-route-session-affinity/receipt.json)
+
+Experimental route rules with one Service reused an endpoint with an HTTP cookie or an HTTP or gRPC header. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-59871699725eddd20a4def4096f9f03c926c85a7/image.json) · [Local session and lifecycle results](provider/route-rule-session-persistence/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-59871699725eddd20a4def4096f9f03c926c85a7)
 
 On both Gateway API channels, the signed controller reported certificate permissions separately for two HTTPS sections on a shared port. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-04bb56309d8a199a43e132d76e3ac4c26580692f/image.json) · [Per-listener status](provider/shared-https-secret-grant-evidence/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-04bb56309d8a199a43e132d76e3ac4c26580692f)
 

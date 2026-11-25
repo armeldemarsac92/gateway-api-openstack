@@ -92,6 +92,8 @@ On an update or removal of the policy, the controller can temporarily drain the 
 
 ## Configure session persistence on a route rule
 
+The Experimental qualification drew a Service on each HTTP request or gRPC call and then reused its endpoint when the client supplied that Service’s session. With a 3:1 rule, removing the second Service’s ReferenceGrant yielded 70 HTTP 500 responses out of 256 with both cookies. The prohibited Service received zero requests. Restoring the grant returned 72 of 256 requests to the second Service with both cookies. The first Service kept its original pool and members throughout. [HTTP and gRPC traffic and provider readback](qualification/v1.7.0/provider/weighted-route-session-affinity/receipt.json)
+
 A local Experimental run used two rules targeting the same Service. Replaying its cookie or HTTP or gRPC affinity header reached the same endpoint. Recreating the Service and restarting the controller replaced the selected pool and its header tokens. Removing the HTTP Header setting preserved the sibling cookie and its pool. [Pool readback and replayed requests](qualification/v1.7.0/provider/route-rule-session-persistence/receipt.json)
 
 Install the v1.7.0 Experimental bundle, compose `config/components/experimental` into the controller overlay, and start the controller with `--gateway-api-channel=experimental` and `--experimental-route-session-persistence`. This opt-in is independent of `--octavia-xbackend-session-persistence`, which enables persistence on an XBackend object or a Service policy. The Standard bundle omits the inline field.
