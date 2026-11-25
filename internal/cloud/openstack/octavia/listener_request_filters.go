@@ -27,6 +27,7 @@ import (
 
 const GatewayCapabilityListenerRequestFilters = "listener_request_filters_v1"
 const GatewayCapabilityListenerExternalAuthForwardBody = "listener_http_external_auth_forward_body_v1"
+const GatewayCapabilityListenerHTTPSExternalAuthForwardBody = "listener_https_external_auth_forward_body_v1"
 
 type ListenerRequestFilterSection struct {
 	Hostname string                  `json:"hostname"`
@@ -47,25 +48,34 @@ type ListenerHTTPExternalAuth struct {
 	AllowedResponseHeaders []string `json:"allowed_response_headers,omitempty"`
 }
 
-// ListenerRequestFilterBodyLimit verifies the base listener capability and
-// returns zero when the provider has no usable listener body profile.
-func (s *Service) ListenerRequestFilterBodyLimit(ctx context.Context, provider string) (int32, error) {
+type ListenerRequestFilterBodyLimits struct {
+	HTTP  int32
+	HTTPS int32
+}
+
+// ListenerRequestFilterBodyLimits verifies the base listener capability and
+// leaves each unsupported transport's body limit at zero.
+func (s *Service) ListenerRequestFilterBodyLimits(ctx context.Context, provider string) (ListenerRequestFilterBodyLimits, error) {
+	var limits ListenerRequestFilterBodyLimits
 	response, err := s.providerGatewayCapabilities(ctx, provider)
 	if err != nil {
-		return 0, err
+		return limits, err
 	}
 	if !slices.Contains(response.Capabilities, GatewayCapabilityListenerRequestFilters) {
-		return 0, &MissingGatewayCapability{Provider: provider, Capability: GatewayCapabilityListenerRequestFilters}
-	}
-	if !slices.Contains(response.Capabilities, GatewayCapabilityListenerExternalAuthForwardBody) {
-		return 0, nil
+		return limits, &MissingGatewayCapability{Provider: provider, Capability: GatewayCapabilityListenerRequestFilters}
 	}
 	limit, err := response.authBodyLimit()
 	if err != nil {
-		// The optional body profile is unusable. Keep bodyless listeners working.
-		return 0, nil
+		// The optional body profiles are unusable. Keep bodyless listeners working.
+		return limits, nil
 	}
-	return limit, nil
+	if slices.Contains(response.Capabilities, GatewayCapabilityListenerExternalAuthForwardBody) {
+		limits.HTTP = limit
+	}
+	if slices.Contains(response.Capabilities, GatewayCapabilityListenerHTTPSExternalAuthForwardBody) {
+		limits.HTTPS = limit
+	}
+	return limits, nil
 }
 
 type ListenerRequestFilterObservation struct {

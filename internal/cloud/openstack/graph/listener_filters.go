@@ -446,9 +446,10 @@ func (p *Provider) planListenerFilters(ctx context.Context, desired desiredGatew
 	actual.unavailableListenerFilters = make(map[int]bool)
 	actual.unavailableListenerBodySections = make(map[int][]string)
 	actual.pendingListenerFilterCapability = make(map[int]bool)
+	ports := scopedHTTPListeners(desired)
 	capable := true
 	if len(configured) != 0 {
-		limit, err := p.octavia.ListenerRequestFilterBodyLimit(ctx, actual.loadBalancer.Provider)
+		limits, err := p.octavia.ListenerRequestFilterBodyLimits(ctx, actual.loadBalancer.Provider)
 		capable = err == nil
 		var missing *octavia.MissingGatewayCapability
 		for port := range configured {
@@ -459,7 +460,7 @@ func (p *Provider) planListenerFilters(ctx context.Context, desired desiredGatew
 			}
 		}
 		if capable {
-			configured = actual.guardUnavailableListenerBodies(configured, limit)
+			configured = actual.guardUnavailableListenerBodies(configured, ports, limits)
 		}
 	}
 	desiredPools, referencedPools := make(map[string]bool), make(map[string]bool)
@@ -492,6 +493,11 @@ func (p *Provider) planListenerFilters(ctx context.Context, desired desiredGatew
 		port := frontend.ProtocolPort
 		current, present := actual.requestFilters[frontend.ID]
 		sections := configured[port]
+		if listener, found := ports[port]; found && frontend.Protocol != scopedHTTPProtocol(listener) {
+			// Withdraw bindings from the retiring frontend before replacing
+			// it with the listener that can accept the new protocol's filters.
+			sections = nil
+		}
 		if len(sections) == 0 && (!present || current.Readable && len(current.Sections) == 0) {
 			continue
 		}
@@ -558,9 +564,13 @@ func (p *Provider) planListenerFilters(ctx context.Context, desired desiredGatew
 	}
 }
 
-func (actual *observedGatewayGraph) guardUnavailableListenerBodies(configured map[int][]cloud.ListenerRequestFilterSection, limit int32) map[int][]cloud.ListenerRequestFilterSection {
+func (actual *observedGatewayGraph) guardUnavailableListenerBodies(configured map[int][]cloud.ListenerRequestFilterSection, ports map[int]cloud.ScopedListener, limits octavia.ListenerRequestFilterBodyLimits) map[int][]cloud.ListenerRequestFilterSection {
 	guarded := make(map[int][]cloud.ListenerRequestFilterSection, len(configured))
 	for port, sections := range configured {
+		limit := limits.HTTP
+		if ports[port].TLS != nil {
+			limit = limits.HTTPS
+		}
 		guarded[port] = slices.Clone(sections)
 		for index, section := range sections {
 			if slices.ContainsFunc(section.Requests, func(auth cloud.ListenerExternalAuth) bool {

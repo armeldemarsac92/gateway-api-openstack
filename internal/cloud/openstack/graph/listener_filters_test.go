@@ -128,6 +128,87 @@ func TestListenerFiltersCloseBeforeReprogrammingAndUseOrderedPools(t *testing.T)
 	require.Empty(t, actual.unavailableListenerFilters)
 }
 
+func TestHTTPSListenerBodyRequiresItsOwnCapability(t *testing.T) {
+	const port = 443
+	offers := []string{octavia.GatewayCapabilityListenerRequestFilters, octavia.GatewayCapabilityListenerHTTPSExternalAuthForwardBody}
+	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/lbaas/providers/amphora/gateway_capabilities", r.URL.Path)
+		safetyWriteJSON(t, w, map[string]any{
+			"gateway_capabilities":                  offers,
+			"l7policy_external_auth_max_body_bytes": 4096,
+		})
+	}))
+	provider := newTestProvider(t, ServiceClients{LoadBalancer: client, ProjectID: "project-a"}, ProviderConfig{})
+	spec := completeGraphSpec(safetyTestIdentity(t))
+	spec.Routes = nil
+	spec.Gateway.Spec.ScopedListeners = []cloud.ScopedListener{
+		{Name: "plain", Port: 80},
+		{Name: "tls", Port: port, TLS: &cloud.ListenerTLS{
+			CertificateRef: "cert", VirtualHosts: []string{"protected.example", "public.example"},
+		}},
+	}
+	auth := cloud.ListenerExternalAuth{ServiceUID: "authorizer", ServicePort: 8080, ForwardBodyMaxSize: 4096}
+	protected := cloud.ListenerRequestFilterSection{Hostname: "protected.example", Requests: []cloud.ListenerExternalAuth{auth}}
+	spec.Gateway.Spec.RequestFilterSections = map[int][]cloud.ListenerRequestFilterSection{
+		80:   {protected},
+		port: {protected, {Hostname: "public.example"}},
+	}
+	desired, err := provider.buildDesiredGatewayGraph(spec)
+	require.NoError(t, err)
+	lb := safetyObservedLoadBalancer()
+	lb.ProvisioningStatus, lb.Provider = "ACTIVE", "amphora"
+	actual := observedGatewayGraph{loadBalancer: lb, scoped: true, adminObserved: map[string]bool{"tls": true},
+		scopedListeners: []listeners.Listener{{ID: "tls", Protocol: cloud.ListenerProtocolTerminatedHTTPS,
+			ProtocolPort: port, ProvisioningStatus: "ACTIVE"}},
+	}
+	owned := map[string]observedAuthPool{listenerAuthPoolName(port, auth): {
+		admin: true, pool: pools.Pool{ID: "auth-pool", AdminStateUp: true, ProvisioningStatus: "ACTIVE"},
+	}}
+
+	provider.planListenerFilters(t.Context(), desired, &actual, owned)
+	require.NotNil(t, actual.listenerFilterMutation)
+	require.Equal(t, graphListenerFiltersMutation, actual.listenerFilterMutation.kind)
+	installed := actual.listenerFilterMutation.listenerFilters.sections
+	require.Equal(t, []octavia.ListenerRequestFilterSection{
+		{Hostname: "protected.example", Requests: []octavia.ListenerRequestFilter{
+			{Type: "ExternalAuth", HTTP: octavia.ListenerHTTPExternalAuth{PoolID: "auth-pool", ForwardBodyMaxSize: 4096}},
+		}},
+		{Hostname: "public.example"},
+	}, installed)
+	require.Equal(t, map[int][]string{80: {"protected.example"}}, actual.unavailableListenerBodySections)
+
+	// An older region still offers cleartext forwarding. It must withdraw
+	// the TLS binding without dropping the adjacent hostname from readback.
+	offers[1] = octavia.GatewayCapabilityListenerExternalAuthForwardBody
+	actual.listenerFilterMutation = nil
+	actual.scopedListeners[0].AdminStateUp = true
+	actual.requestFilters = map[string]octavia.ListenerRequestFilterObservation{"tls": {Readable: true, Sections: installed}}
+	provider.planListenerFilters(t.Context(), desired, &actual, owned)
+	require.NotNil(t, actual.listenerFilterMutation)
+	require.Equal(t, graphDisableListener, actual.listenerFilterMutation.kind)
+	require.Equal(t, map[int][]string{port: {"protected.example"}}, actual.unavailableListenerBodySections)
+
+	actual.listenerFilterMutation = nil
+	actual.scopedListeners[0].AdminStateUp = false
+	provider.planListenerFilters(t.Context(), desired, &actual, owned)
+	require.NotNil(t, actual.listenerFilterMutation)
+	require.Equal(t, graphListenerFiltersMutation, actual.listenerFilterMutation.kind)
+	require.Equal(t, []octavia.ListenerRequestFilterSection{
+		{Hostname: "protected.example", Reject: true},
+		{Hostname: "public.example"},
+	}, actual.listenerFilterMutation.listenerFilters.sections)
+
+	// When replacing a cleartext frontend, clear its existing binding
+	// before applying the HTTPS filters to the new frontend.
+	offers[1] = octavia.GatewayCapabilityListenerHTTPSExternalAuthForwardBody
+	actual.scopedListeners[0].Protocol = cloud.ListenerProtocolHTTP
+	actual.listenerFilterMutation = nil
+	provider.planListenerFilters(t.Context(), desired, &actual, owned)
+	require.NotNil(t, actual.listenerFilterMutation)
+	require.Equal(t, graphListenerFiltersMutation, actual.listenerFilterMutation.kind)
+	require.Empty(t, actual.listenerFilterMutation.listenerFilters.sections)
+}
+
 func TestListenerBodyWithdrawalValidatesOnlyEffectiveAuthorizers(t *testing.T) {
 	id := safetyTestIdentity(t)
 	spec := completeGraphSpec(id)

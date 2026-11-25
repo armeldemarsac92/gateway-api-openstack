@@ -173,7 +173,7 @@ func (r *Reconciler) resolveListenerFilterRequests(ctx context.Context, gateway 
 	}
 	requests := make([]cloud.ListenerExternalAuth, 0, len(listener.Filters.Requests))
 	for index, filter := range listener.Filters.Requests {
-		auth, issue, err := r.resolveListenerFilter(ctx, gateway, listener.Protocol, filter, topology)
+		auth, issue, err := r.resolveListenerFilter(ctx, gateway, filter, topology)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil, nil, ctx.Err()
@@ -199,12 +199,12 @@ func GatewayOwnsListenerRequestFilters(config controller.Config, listener *gatew
 		return false
 	}
 	return !slices.ContainsFunc(listener.Filters.Requests, func(filter gatewayv1.ListenerFilter) bool {
-		_, issue := normalizeListenerFilter(listener.Protocol, filter)
+		_, issue := normalizeListenerFilter(filter)
 		return issue != nil
 	})
 }
 
-func normalizeListenerFilter(protocol gatewayv1.ProtocolType, filter gatewayv1.ListenerFilter) (*model.HTTPExternalAuth, *httpsListenerIssue) {
+func normalizeListenerFilter(filter gatewayv1.ListenerFilter) (*model.HTTPExternalAuth, *httpsListenerIssue) {
 	invalid := func(message string) (*model.HTTPExternalAuth, *httpsListenerIssue) {
 		return nil, &httpsListenerIssue{gatewayv1.ListenerConditionAccepted, invalidListenerFilter, message}
 	}
@@ -225,10 +225,6 @@ func normalizeListenerFilter(protocol gatewayv1.ProtocolType, filter gatewayv1.L
 	}
 	auth, diagnostic := model.NormalizeHTTPExternalAuth(filter.ExternalAuth)
 	if diagnostic == nil {
-		if auth.Config.ForwardBodyMaxSize > 0 && protocol != gatewayv1.HTTPProtocolType {
-			return nil, &httpsListenerIssue{gatewayv1.ListenerConditionAccepted, gatewayv1.ListenerReasonUnsupportedValue,
-				"ExternalAuth request body forwarding requires an HTTP listener"}
-		}
 		return auth, nil
 	}
 	switch diagnostic.Condition {
@@ -242,8 +238,8 @@ func normalizeListenerFilter(protocol gatewayv1.ProtocolType, filter gatewayv1.L
 	return nil, &httpsListenerIssue{gatewayv1.ListenerConditionAccepted, gatewayv1.ListenerReasonUnsupportedValue, diagnostic.Message}
 }
 
-func (r *Reconciler) resolveListenerFilter(ctx context.Context, gateway *gatewayv1.Gateway, protocol gatewayv1.ProtocolType, filter gatewayv1.ListenerFilter, topology classconfig.Resolved) (cloud.ListenerExternalAuth, *httpsListenerIssue, error) {
-	auth, issue := normalizeListenerFilter(protocol, filter)
+func (r *Reconciler) resolveListenerFilter(ctx context.Context, gateway *gatewayv1.Gateway, filter gatewayv1.ListenerFilter, topology classconfig.Resolved) (cloud.ListenerExternalAuth, *httpsListenerIssue, error) {
+	auth, issue := normalizeListenerFilter(filter)
 	if issue != nil {
 		return cloud.ListenerExternalAuth{}, issue, nil
 	}
