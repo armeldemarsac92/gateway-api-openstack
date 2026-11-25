@@ -92,11 +92,13 @@ On an update or removal of the policy, the controller can temporarily drain the 
 
 ## Configure session persistence on a route rule
 
+The Experimental qualification drew a Service on each HTTP request or gRPC call and then reused its endpoint when the client supplied that Service’s session. With a 3:1 rule, removing the second Service’s ReferenceGrant yielded 70 HTTP 500 responses out of 256 with both cookies. The prohibited Service received zero requests. Restoring the grant returned 72 of 256 requests to the second Service with both cookies. The first Service kept its original pool and members throughout. [HTTP and gRPC traffic and provider readback](qualification/v1.7.0/provider/weighted-route-session-affinity/receipt.json)
+
 A local Experimental run used two rules targeting the same Service. Replaying its cookie or HTTP or gRPC affinity header reached the same endpoint. Recreating the Service and restarting the controller replaced the selected pool and its header tokens. Removing the HTTP Header setting preserved the sibling cookie and its pool. [Pool readback and replayed requests](qualification/v1.7.0/provider/route-rule-session-persistence/receipt.json)
 
 Install the v1.7.0 Experimental bundle, compose `config/components/experimental` into the controller overlay, and start the controller with `--gateway-api-channel=experimental` and `--experimental-route-session-persistence`. This opt-in is independent of `--octavia-xbackend-session-persistence`, which enables persistence on an XBackend object or a Service policy. The Standard bundle omits the inline field.
 
-Set `sessionPersistence` under `spec.rules[]` of an HTTPRoute or GRPCRoute. The rule must forward to one core Service backendRef. Use an Endpoint member GatewayClass and an HTTP or h2c backend. For h2c, use `appProtocol: kubernetes.io/h2c`, `--octavia-backend-h2c`, and the regional `backend_h2c_v1` capability. GRPCRoute also requires `--octavia-fixed-http-responses` and the existing gRPC ingress setup. Multiple backendRefs, authenticated backend TLS and NodePort member mode are outside this profile.
+Set `sessionPersistence` under `spec.rules[]` of a forwarding HTTPRoute or GRPCRoute rule. Use core Service backendRefs and an Endpoint member GatewayClass with cleartext HTTP or h2c backends. For h2c, use `appProtocol: kubernetes.io/h2c`, `--octavia-backend-h2c`, and the regional `backend_h2c_v1` capability. GRPCRoute also requires `--octavia-fixed-http-responses` and the existing gRPC ingress setup. For multiple backendRefs, enable `--octavia-fixed-http-responses` and `--octavia-weighted-http-targets` and verify the regional `fixed_http_responses_v1` and `weighted_http_targets_v1` capabilities. [Octavia HTTP actions setup](operator-octavia-http-actions.md)
 
 ```yaml
 rules:
@@ -104,12 +106,18 @@ rules:
     backendRefs:
       - name: checkout
         port: 8080
+        weight: 70
+      - name: checkout-next
+        port: 8080
+        weight: 30
     sessionPersistence:
       type: Cookie
 ```
 
-Cookie and Header use the regional capabilities in the table above. Cookies default to a session lifetime and path `/`. An omitted cookie name is generated from the route, rule and Service port. Give explicit cookie names distinct values across pools on the same host. For Header mode, set `type: Header` and a field such as `header.name: x-checkout-session`. A gRPC client must replay affinity as metadata on subsequent calls. Choose a custom ASCII metadata key outside the reserved protocol fields and without the binary `-bin` suffix.
+Octavia selects the Service for each request according to the weights, then uses the session to select an endpoint in that Service. An omitted weight defaults to 1. A weight of 0 receives no traffic. If a ReferenceGrant is revoked while its reference remains in the rule, that share returns HTTP 500 or gRPC `UNAVAILABLE`. Removing the reference from the rule leaves only the remaining weights.
 
-Octavia uses a dedicated pool for each rule with inline persistence. Name the rule to keep its pool across rule reordering. Unnamed rules use their position. Recreating the Service with the same name and port replaces the pool and its header tokens. An inline setting overrides a Service policy for that rule, as allowed by the upstream GEP. Other rules keep their usual Service policy. Removing the inline field returns the rule to its ordinary pool and withdraws the former affinity pool. [Gateway API GEP-1619](https://github.com/kubernetes-sigs/gateway-api/blob/v1.7.0/geps/gep-1619/index.md#deprecated-route-inline-and-backendtrafficpolicy-session-persistence)
+Cookie and Header use the regional capabilities in the table above. Cookies default to a session lifetime and path `/`. Omit the cookie name for a weighted rule to let clients retain cookies for multiple Services. The controller generates a distinct name for each rule and Service port. When pools share an explicit cookie name and path, a new cookie can replace the previous value. Header mode also uses the same name across the pools of a rule, for example `header.name: x-checkout-session`. The selected pool can issue a new value if the client presents a token from another pool. A gRPC client replays affinity as metadata on subsequent calls. Choose a custom ASCII metadata key outside the reserved protocol fields and without the binary `-bin` suffix.
+
+Octavia uses a dedicated pool for each Service port in a rule with inline persistence. Adding another Service keeps the existing Service's pool. Name the rule to keep its pools across rule reordering. Unnamed rules use their position. Recreating a Service with the same name and port replaces its pool and header tokens. An inline setting overrides the Service policy for that rule. Other rules keep their usual Service policy. Removing the inline field returns the rule to its ordinary pools and withdraws the former affinity pools. [Gateway API GEP-1619](https://github.com/kubernetes-sigs/gateway-api/blob/v1.7.0/geps/gep-1619/index.md#deprecated-route-inline-and-backendtrafficpolicy-session-persistence)
 
 Check the route's current `ResolvedRefs` and `Programmed` conditions and the Octavia pool's `session_persistence` field. If an inline rule is incompatible and a sibling can be programmed, `PartiallyInvalid` identifies the excluded rule. A missing provider capability reports `UnsupportedValue`. A failed capability discovery reports `Pending`. The controller withdraws members from the affected affinity pool before clearing unverified settings. Check traffic with multiple ready endpoints and an independent request to a sibling rule. Remove the inline field and let the controller converge before rolling back the flag or regional capability.
