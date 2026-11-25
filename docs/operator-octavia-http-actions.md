@@ -48,6 +48,8 @@ Check the active Octavia policy's `http_request_policy` field and the HTTPRoute'
 
 The Experimental Service policy adds a shared retry allowance to eligible HTTP backend attempts. [Configure Service retry budgets](operator-octavia-backend-retry-budget.md)
 
+An Experimental Gateway policy can export request spans to an OTLP collector Service. [Configure Gateway tracing](operator-octavia-telemetry.md)
+
 ## Enable request-derived redirects
 
 On the regional load-balancer endpoint, check that the configured Amphora provider advertises `http_request_redirect_v1` in `gateway_capabilities`. Add `--octavia-http-request-redirect` to the controller arguments in the operator overlay. This option can be used independently of weighted backends and fixed HTTP responses.
