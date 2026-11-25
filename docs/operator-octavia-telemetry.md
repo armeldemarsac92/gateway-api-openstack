@@ -49,6 +49,35 @@ Inspect the policy’s `status.ancestors` entry for the target Gateway. It repor
 
 The collector uses HTTP/1.1. The default sampling rate is 100%. It supports a service name, span name and W3C trace context. A collector with an applicable `BackendTLSPolicy` also requires the controller’s backend TLS option and the corresponding regional support. Custom exporter headers remain open. [Backend TLS setup](operator-octavia-backend-tls-policy.md)
 
+## Authenticate the collector with Amphora system trust
+
+Enable `--octavia-backend-tls-policy` alongside tracing. Use Octavia workers that can attest isolated OTLP collector pools. The region must advertise `listener_otlp_tracing_v1`, `backend_tls_hostname_v1` and `backend_tls_system_ca_v1`. When specifying `validation.subjectAltNames`, also enable `enabled_backend_tls_subject_alt_names_providers = amphora` and verify that the region advertises `backend_tls_subject_alt_names_v1`. Set the System CA provider options, bundle path and SHA-256 on the API and workers, and install the corresponding bundle on all eligible Amphora peers. [System CA setup](operator-octavia-backend-tls-policy.md#configure-the-amphora-system-ca-bundle)
+
+Apply a `BackendTLSPolicy` in the collector Service namespace. The example assumes the Service port is named `otlp-http`. Set `hostname` to the DNS name Amphora sends in TLS SNI and verifies against the certificate unless you supply explicit DNS or URI SAN identities. A Service port declared with `appProtocol: https` also requires an applicable backend TLS policy before the controller can export to it.
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata:
+  name: otelcol-tls
+  namespace: observability
+spec:
+  targetRefs:
+    - group: ""
+      kind: Service
+      name: otelcol
+      sectionName: otlp-http
+  validation:
+    hostname: otelcol.example.com
+    wellKnownCACertificates: System
+```
+
+The collector receives OTLP over HTTPS with HTTP/1.1. Octavia verifies the chain against the attested Amphora bundle. The Kubernetes controller uses Barbican CA secrets for policies with `caCertificateRefs`. A configured Gateway client certificate still applies to the collector and must be authorized for mTLS.
+
+The controller creates an isolated collector pool and waits for its `backend_tls_system_ca_sha256` before adding members or attaching it to a listener. A regional digest change invalidates prior pool attestations. If a worker cannot prepare the pinned bundle during a render, Octavia closes the exporter backend and the controller withdraws the exporter when its proof is absent. Removing the collector's `ReferenceGrant` also withdraws the exporter. Check `otlp_tracing: null` with `otlp_tracing_status: ACTIVE` for acknowledged withdrawal. Application listeners continue serving during these operations. During an upgrade, an older worker may advertise regional System CA support for application pools while leaving the isolated collector digest empty. Tracing stays pending until the compatible worker attests the pool. Verify span delivery at the collector after all relevant listeners acknowledge the configuration.
+
+On local Experimental kind, the controller read the System CA digest on the empty collector pool before adding its first member. HAProxy loaded the same bundle, sent SNI and verified the collector hostname. The Collector decoded one span matching the application trace. Removing the cross-namespace ReferenceGrant cleared the exporter and retired the pool. Both HTTP routes returned 200 in all 20 settled probes, with zero matching collector spans over 6.618 seconds. The Collector accepted a direct HTTPS health span. Recreating the grant produced a newly attested pool and one matching span on the first measured application request. Standard returned 2 HTTP 200 responses with the incoming trace context intact and omitted the XTelemetryPolicy CRD. The run used wire HTTP and OTLP/HTTPS with a simulated Amphora agent transport and cloud provisioning. [Local qualification](qualification/v1.7.0/provider/collector-system-tls-evidence/receipt.json) · [Octavia packages](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-otlp-collector-system-trust-31e1fcaeb920) · [octavia-lib package](https://github.com/armeldemarsac92/octavia-lib/releases/tag/hibiscus-http-header-persistence-eb4c646b5975)
+
 ## Add attributes to request spans
 
 Enable `[api_settings] enabled_listener_otlp_span_attributes_providers = amphora` after upgrading the API, workers and Amphora agents with the corresponding tracing Lua script. Check that the region advertises `listener_otlp_tracing_v1` and `listener_otlp_span_attributes_v1`. Add attributes under `spec.tracing` on an Experimental policy.
