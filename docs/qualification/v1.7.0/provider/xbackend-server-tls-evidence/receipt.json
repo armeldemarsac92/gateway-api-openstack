@@ -3,17 +3,17 @@
   "scope": "Local kind, service-account manager extracted from OCI, Octavia REST, Amphora rendering and HAProxy. Local fixtures provided cloud inventory, provisioning and Amphora transport.",
   "registeredUpstreamCase": false,
   "controller": {
-    "source": "a147f293890a4fe4f2e5b8a232862187c4b96c9b",
+    "source": "b823f09447a11e1c728f73bb9ab9081826ceb534",
     "parents": [
-      "74505faa78682abadda290dbfa6024bdd565ed78"
+      "688b8353f06046af6c496763bbc8e964edad5145"
     ],
-    "tree": "4108fe185f9d9ca37a6ff8cf643f6a4d6ef8c52d",
+    "tree": "28e8acf0f93b753c405d6945b5e09e185c40bf1e",
     "signatureVerified": true,
-    "manifestDigest": "sha256:972ac6ed25ef32f641d8e6574547529cf0734804e2cfa0c043033abdee364284",
-    "managerSHA256": "fc161c2ad83e971069d22f06f15c193c20a26d08c8da5b1ba14e33884d33bfe1",
+    "manifestDigest": "sha256:ef6e273cfa10684ff7a386f40489158b3e2c54947b3b124c13eb9cfc66595c5b",
+    "managerSHA256": "6c82e667b98a4371222dce56e484ff27411cb646bc4be269cec62dd656acf4ec",
     "platform": "linux/amd64",
     "normalAndNoCacheBuildsMatch": true,
-    "ociArchiveSHA256": "b7deaf6cfe013452f42efa0c45bf7f6f811b564420cf9ff88a803a969f7e0399"
+    "ociArchiveSHA256": "72cba66676d8c6ad2ebb8ef8feca8f71d631db26eeac20572ed2cfd9c52b8717"
   },
   "providers": {
     "octavia": {
@@ -31,7 +31,7 @@
   },
   "channels": {
     "standard": {
-      "rawReceiptSHA256": "6d62eed7af7ab10540810d7919e4d0322098ac6d8653e10d2caac6888552ce12",
+      "rawReceiptSHA256": "0d32aa55d019b837e761417414629122c33e60325157c8eb1c583a3dfa4a8fcd",
       "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
       "xBackendCRD": {
         "installed": false,
@@ -47,7 +47,7 @@
         "origin": "sibling",
         "route": {
           "generation": 1,
-          "object": "71204d7a73b1a1a239a5c07e3845a7d9cd321f8c041da13aca1d5fb6a8974557",
+          "object": "3a5521d98b6251c60815a45fa3af98a77311e8dd1e59629f6ed16a01a0fcb870",
           "specSHA256": "176a1022ae5b03128b7107c308e75da064c382543d786beb8adf7313334b4b1f"
         },
         "conditions": {
@@ -55,11 +55,14 @@
           "ResolvedRefs": "True/ResolvedRefs",
           "gateway-api-openstack.github.io/Programmed": "False/Pending"
         },
-        "poolIdentitySHA256": "09cb624b5d103d397a8130ba3d3ada4ebe3ee2c2aec17362ff619b6700321653"
-      }
+        "poolIdentitySHA256": "0e97274b082f911d4356e723bba09e657d81997c309eb16cef7eb7537822f743"
+      },
+      "managerOctaviaMicroversion": "2.8",
+      "alpnPoolWrites": [],
+      "renderedMicroversion": "2.8"
     },
     "experimental": {
-      "rawReceiptSHA256": "f3e610b057dd64a744006f91898e1fa749728d4505878735b117e1c894a8d3e4",
+      "rawReceiptSHA256": "d2e53c0e9c232c211f404e0f679412e53750cf506895e4f3e55b8f2c04e75a00",
       "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
       "xBackendCRD": {
         "installed": true,
@@ -78,7 +81,7 @@
         "origin": "sibling",
         "route": {
           "generation": 1,
-          "object": "0d5d56edc5feb8a4832da7120165f18ab7d0f0bcd79e236f57d9e01575967150",
+          "object": "4e97d7852e0d655735e5ccc816237b80afcfdc7b1de71c17f3ebd179e45fabb8",
           "specSHA256": "176a1022ae5b03128b7107c308e75da064c382543d786beb8adf7313334b4b1f"
         },
         "conditions": {
@@ -86,8 +89,36 @@
           "ResolvedRefs": "True/ResolvedRefs",
           "gateway-api-openstack.github.io/Programmed": "False/Pending"
         },
-        "poolIdentitySHA256": "8c814a303474fc22f0e4b6bd7bbdbd79dfb05f0e5416a8d27b5604f854ddd6ac"
+        "poolIdentitySHA256": "d993d2d9f7d7f5d5f0879033ba06fae13e154264ecf8db88fab87d0e48093027"
       },
+      "managerOctaviaMicroversion": "2.24",
+      "alpnPoolWrites": [
+        {
+          "method": "POST",
+          "http": 201,
+          "microversion": "2.24",
+          "alpn": [
+            "http/1.1"
+          ]
+        },
+        {
+          "method": "PUT",
+          "http": 200,
+          "microversion": "2.24",
+          "alpn": [
+            "http/1.1"
+          ]
+        },
+        {
+          "method": "POST",
+          "http": 201,
+          "microversion": "2.24",
+          "alpn": [
+            "http/1.1"
+          ]
+        }
+      ],
+      "renderedMicroversion": "2.24",
       "caRecreated": {
         "sameCertificate": true,
         "configMapRecreated": true
@@ -100,18 +131,18 @@
         "selector-authenticated": {
           "route": {
             "generation": 1,
-            "object": "5708c163dfc47060c6b10472d7f0cc69bd3141c12ea0b8005e0c1d4b01ad8e86",
+            "object": "d1fa5cebf4bdb7dcd6affbd863e86732c2ad5af5934a025abba6a3b6f6269522",
             "specSHA256": "f5cb063f62d19ed1e498dce4116e35376d3d62f053834d5e5b7a3609e12fce63"
           },
           "backend": {
             "generation": 1,
-            "object": "f4cf1630bbae9165440cd395788e14963d56281432c662a3c1e782806cbe93fe",
+            "object": "d68773d93b1fd3b8e0da898da7a7079c13d4e33266b6c6018fd2350ed3ad129d",
             "specSHA256": "ff4fea52e5e764e136d8e4e88c2bfadb131ec1722752b07f63f89c261b7d95c6"
           },
           "HTTPRouteConditions": {
             "Accepted": "True/Accepted",
             "ResolvedRefs": "True/ResolvedRefs",
-            "gateway-api-openstack.github.io/Programmed": "False/Pending"
+            "gateway-api-openstack.github.io/Programmed": "True/Programmed"
           },
           "XBackendConditions": {
             "Accepted": "True/Accepted"
@@ -131,7 +162,7 @@
             "origin": "sibling",
             "route": {
               "generation": 1,
-              "object": "0d5d56edc5feb8a4832da7120165f18ab7d0f0bcd79e236f57d9e01575967150",
+              "object": "4e97d7852e0d655735e5ccc816237b80afcfdc7b1de71c17f3ebd179e45fabb8",
               "specSHA256": "176a1022ae5b03128b7107c308e75da064c382543d786beb8adf7313334b4b1f"
             },
             "conditions": {
@@ -139,10 +170,10 @@
               "ResolvedRefs": "True/ResolvedRefs",
               "gateway-api-openstack.github.io/Programmed": "True/Programmed"
             },
-            "poolIdentitySHA256": "8c814a303474fc22f0e4b6bd7bbdbd79dfb05f0e5416a8d27b5604f854ddd6ac"
+            "poolIdentitySHA256": "d993d2d9f7d7f5d5f0879033ba06fae13e154264ecf8db88fab87d0e48093027"
           },
           "publicPool": {
-            "pool": "424832849a02c8ed2138683cd2cd4e938ed6cc6f7f825b10aaf5edf2a2937ec5",
+            "pool": "135f5f8a91621719e143501a2805d3eb939037ca71e882d7a473bb668c25f1b6",
             "provisioning": "ACTIVE",
             "poolEnabled": true,
             "poolProtocol": "HTTP",
@@ -151,12 +182,12 @@
             "alpn": [
               "http/1.1"
             ],
-            "caReferenceSHA256": "692455638cc4b476db916f6faa8d043507bcac43bfa183d190f65625f5a8bb05",
+            "caReferenceSHA256": "2e76863a6bc55ede882ba638e2ecde0f0649e73a1ba70a92584ee9dc792a14d2",
             "clientCertificate": false
           },
           "readyMembers": 1,
           "HAProxy": {
-            "nativeConfigSHA256": "1f687c15a90533193fa1066797050fa1eff979e84e76ba617cc65e354c2ee9f4",
+            "nativeConfigSHA256": "5f5eae214f4e595188dfe44d74be979684340519a5f0c10a5ed38dc1cb8d6784",
             "nativePolicySelectsPool": true,
             "nativeStrictHostname": [
               "endpoint.backend.test"
@@ -190,12 +221,12 @@
         "selector-ca-withdrawn": {
           "route": {
             "generation": 1,
-            "object": "5708c163dfc47060c6b10472d7f0cc69bd3141c12ea0b8005e0c1d4b01ad8e86",
+            "object": "d1fa5cebf4bdb7dcd6affbd863e86732c2ad5af5934a025abba6a3b6f6269522",
             "specSHA256": "f5cb063f62d19ed1e498dce4116e35376d3d62f053834d5e5b7a3609e12fce63"
           },
           "backend": {
             "generation": 1,
-            "object": "f4cf1630bbae9165440cd395788e14963d56281432c662a3c1e782806cbe93fe",
+            "object": "d68773d93b1fd3b8e0da898da7a7079c13d4e33266b6c6018fd2350ed3ad129d",
             "specSHA256": "ff4fea52e5e764e136d8e4e88c2bfadb131ec1722752b07f63f89c261b7d95c6"
           },
           "HTTPRouteConditions": {
@@ -221,7 +252,7 @@
             "origin": "sibling",
             "route": {
               "generation": 1,
-              "object": "0d5d56edc5feb8a4832da7120165f18ab7d0f0bcd79e236f57d9e01575967150",
+              "object": "4e97d7852e0d655735e5ccc816237b80afcfdc7b1de71c17f3ebd179e45fabb8",
               "specSHA256": "176a1022ae5b03128b7107c308e75da064c382543d786beb8adf7313334b4b1f"
             },
             "conditions": {
@@ -229,10 +260,10 @@
               "ResolvedRefs": "True/ResolvedRefs",
               "gateway-api-openstack.github.io/Programmed": "True/Programmed"
             },
-            "poolIdentitySHA256": "8c814a303474fc22f0e4b6bd7bbdbd79dfb05f0e5416a8d27b5604f854ddd6ac"
+            "poolIdentitySHA256": "d993d2d9f7d7f5d5f0879033ba06fae13e154264ecf8db88fab87d0e48093027"
           },
           "publicPool": {
-            "pool": "424832849a02c8ed2138683cd2cd4e938ed6cc6f7f825b10aaf5edf2a2937ec5",
+            "pool": "135f5f8a91621719e143501a2805d3eb939037ca71e882d7a473bb668c25f1b6",
             "provisioning": "ACTIVE",
             "poolEnabled": true,
             "poolProtocol": "HTTP",
@@ -241,12 +272,12 @@
             "alpn": [
               "http/1.1"
             ],
-            "caReferenceSHA256": "692455638cc4b476db916f6faa8d043507bcac43bfa183d190f65625f5a8bb05",
+            "caReferenceSHA256": "2e76863a6bc55ede882ba638e2ecde0f0649e73a1ba70a92584ee9dc792a14d2",
             "clientCertificate": false
           },
           "readyMembers": 0,
           "HAProxy": {
-            "nativeConfigSHA256": "4c1418713544017dbb58d0a1db04426b087676d6cc483bccd8abe2b89a38e9ef",
+            "nativeConfigSHA256": "2768dac9e1e9260e10d56e82348374ab49f4f6fa322640aa6ec9f1f7f32b83da",
             "nativePolicySelectsPool": true,
             "nativeStrictHostname": [],
             "nativeVerifyRequired": false,
@@ -256,12 +287,12 @@
         "selector-ca-restored": {
           "route": {
             "generation": 1,
-            "object": "5708c163dfc47060c6b10472d7f0cc69bd3141c12ea0b8005e0c1d4b01ad8e86",
+            "object": "d1fa5cebf4bdb7dcd6affbd863e86732c2ad5af5934a025abba6a3b6f6269522",
             "specSHA256": "f5cb063f62d19ed1e498dce4116e35376d3d62f053834d5e5b7a3609e12fce63"
           },
           "backend": {
             "generation": 1,
-            "object": "f4cf1630bbae9165440cd395788e14963d56281432c662a3c1e782806cbe93fe",
+            "object": "d68773d93b1fd3b8e0da898da7a7079c13d4e33266b6c6018fd2350ed3ad129d",
             "specSHA256": "ff4fea52e5e764e136d8e4e88c2bfadb131ec1722752b07f63f89c261b7d95c6"
           },
           "HTTPRouteConditions": {
@@ -287,7 +318,7 @@
             "origin": "sibling",
             "route": {
               "generation": 1,
-              "object": "0d5d56edc5feb8a4832da7120165f18ab7d0f0bcd79e236f57d9e01575967150",
+              "object": "4e97d7852e0d655735e5ccc816237b80afcfdc7b1de71c17f3ebd179e45fabb8",
               "specSHA256": "176a1022ae5b03128b7107c308e75da064c382543d786beb8adf7313334b4b1f"
             },
             "conditions": {
@@ -295,10 +326,10 @@
               "ResolvedRefs": "True/ResolvedRefs",
               "gateway-api-openstack.github.io/Programmed": "True/Programmed"
             },
-            "poolIdentitySHA256": "8c814a303474fc22f0e4b6bd7bbdbd79dfb05f0e5416a8d27b5604f854ddd6ac"
+            "poolIdentitySHA256": "d993d2d9f7d7f5d5f0879033ba06fae13e154264ecf8db88fab87d0e48093027"
           },
           "publicPool": {
-            "pool": "424832849a02c8ed2138683cd2cd4e938ed6cc6f7f825b10aaf5edf2a2937ec5",
+            "pool": "135f5f8a91621719e143501a2805d3eb939037ca71e882d7a473bb668c25f1b6",
             "provisioning": "ACTIVE",
             "poolEnabled": true,
             "poolProtocol": "HTTP",
@@ -307,12 +338,12 @@
             "alpn": [
               "http/1.1"
             ],
-            "caReferenceSHA256": "2ef2cce268ec75813e22c07e04086a027af69e15cfe054484b3edb86a0787c37",
+            "caReferenceSHA256": "2f4b2f63a812dd39bfc3d5c0bb7402eb87f9ce66fa56ef1d7f9d833442247295",
             "clientCertificate": false
           },
           "readyMembers": 1,
           "HAProxy": {
-            "nativeConfigSHA256": "597093f65aedded86d36c05fb67314f37a282cd19eaee6f5446628a61f71308f",
+            "nativeConfigSHA256": "00936c714f9b66d47d421bd9bbf27b04989c208b7bc8cc8384a8a10042ec70bb",
             "nativePolicySelectsPool": true,
             "nativeStrictHostname": [
               "endpoint.backend.test"
@@ -346,12 +377,12 @@
         "external-authenticated": {
           "route": {
             "generation": 1,
-            "object": "643d0d14c6a03711582ff442b42f877e69c4da93856bdf64b88b1b15fc836877",
+            "object": "26fb71b0f221857790aae4723e8f06bfbbb296bfe93784be3e6eb579327e3c37",
             "specSHA256": "035ba21798722f2e0849364c74087f5876af7d7bf590a1e6ea240396193ea7c3"
           },
           "backend": {
             "generation": 1,
-            "object": "1e6a0a6e87cbb9d8b12802a58155e5539cfe3ec7c8dbb7d0fae5195495f22fda",
+            "object": "db6a0401d13487d0e1f0e186cc67eb4e089ed8f7914b064d96d53228984f05c2",
             "specSHA256": "2f01033d5404b202a25cd74f4c2d0bd0387b00026ba3527e6a32a4700f3d1a16"
           },
           "HTTPRouteConditions": {
@@ -377,7 +408,7 @@
             "origin": "sibling",
             "route": {
               "generation": 1,
-              "object": "0d5d56edc5feb8a4832da7120165f18ab7d0f0bcd79e236f57d9e01575967150",
+              "object": "4e97d7852e0d655735e5ccc816237b80afcfdc7b1de71c17f3ebd179e45fabb8",
               "specSHA256": "176a1022ae5b03128b7107c308e75da064c382543d786beb8adf7313334b4b1f"
             },
             "conditions": {
@@ -385,10 +416,10 @@
               "ResolvedRefs": "True/ResolvedRefs",
               "gateway-api-openstack.github.io/Programmed": "True/Programmed"
             },
-            "poolIdentitySHA256": "8c814a303474fc22f0e4b6bd7bbdbd79dfb05f0e5416a8d27b5604f854ddd6ac"
+            "poolIdentitySHA256": "d993d2d9f7d7f5d5f0879033ba06fae13e154264ecf8db88fab87d0e48093027"
           },
           "publicPool": {
-            "pool": "3fb1987f5ff0d328346b7a3e394f15f375b0500dec3716df72c0b9ab586951b9",
+            "pool": "b7449d6c6d349f29a67f388481464dac0b41c752d7ae1fe43a2f0f8004344a3d",
             "provisioning": "ACTIVE",
             "poolEnabled": true,
             "poolProtocol": "HTTP",
@@ -397,12 +428,12 @@
             "alpn": [
               "http/1.1"
             ],
-            "caReferenceSHA256": "e84c92abae486146f0d35bce2a18c0fd6d687f9a30ee92005e34b037b76a1981",
+            "caReferenceSHA256": "8c5bbd3bd189324408ddec515ae1f05386de1c58d6904e9e953e6ac85d8f2d8a",
             "clientCertificate": false
           },
           "readyMembers": 1,
           "HAProxy": {
-            "nativeConfigSHA256": "439a9c6fcc3a96d984530db8df3777007a5cee0d03bd23e15bc2612c7160f814",
+            "nativeConfigSHA256": "1e58239d0b0b0bc9be881df83ce79846942a3ae745863adbe0a4dd93533d269e",
             "nativePolicySelectsPool": true,
             "nativeStrictHostname": [
               "authenticated.backend.test"
@@ -436,12 +467,12 @@
         "external-wrong-identity": {
           "route": {
             "generation": 1,
-            "object": "643d0d14c6a03711582ff442b42f877e69c4da93856bdf64b88b1b15fc836877",
+            "object": "26fb71b0f221857790aae4723e8f06bfbbb296bfe93784be3e6eb579327e3c37",
             "specSHA256": "035ba21798722f2e0849364c74087f5876af7d7bf590a1e6ea240396193ea7c3"
           },
           "backend": {
             "generation": 1,
-            "object": "1e6a0a6e87cbb9d8b12802a58155e5539cfe3ec7c8dbb7d0fae5195495f22fda",
+            "object": "db6a0401d13487d0e1f0e186cc67eb4e089ed8f7914b064d96d53228984f05c2",
             "specSHA256": "2f01033d5404b202a25cd74f4c2d0bd0387b00026ba3527e6a32a4700f3d1a16"
           },
           "HTTPRouteConditions": {
@@ -467,7 +498,7 @@
             "origin": "sibling",
             "route": {
               "generation": 1,
-              "object": "0d5d56edc5feb8a4832da7120165f18ab7d0f0bcd79e236f57d9e01575967150",
+              "object": "4e97d7852e0d655735e5ccc816237b80afcfdc7b1de71c17f3ebd179e45fabb8",
               "specSHA256": "176a1022ae5b03128b7107c308e75da064c382543d786beb8adf7313334b4b1f"
             },
             "conditions": {
@@ -475,10 +506,10 @@
               "ResolvedRefs": "True/ResolvedRefs",
               "gateway-api-openstack.github.io/Programmed": "True/Programmed"
             },
-            "poolIdentitySHA256": "8c814a303474fc22f0e4b6bd7bbdbd79dfb05f0e5416a8d27b5604f854ddd6ac"
+            "poolIdentitySHA256": "d993d2d9f7d7f5d5f0879033ba06fae13e154264ecf8db88fab87d0e48093027"
           },
           "publicPool": {
-            "pool": "3fb1987f5ff0d328346b7a3e394f15f375b0500dec3716df72c0b9ab586951b9",
+            "pool": "b7449d6c6d349f29a67f388481464dac0b41c752d7ae1fe43a2f0f8004344a3d",
             "provisioning": "ACTIVE",
             "poolEnabled": true,
             "poolProtocol": "HTTP",
@@ -487,12 +518,12 @@
             "alpn": [
               "http/1.1"
             ],
-            "caReferenceSHA256": "e84c92abae486146f0d35bce2a18c0fd6d687f9a30ee92005e34b037b76a1981",
+            "caReferenceSHA256": "8c5bbd3bd189324408ddec515ae1f05386de1c58d6904e9e953e6ac85d8f2d8a",
             "clientCertificate": false
           },
           "readyMembers": 1,
           "HAProxy": {
-            "nativeConfigSHA256": "3fac797ac20b043f721340e54647ac9226780d7106a3863904e9b71f449abbb7",
+            "nativeConfigSHA256": "e9546c3c8a61f80e566d71de34a8183bc30b6920cdd2ef42809bc2f9bc132051",
             "nativePolicySelectsPool": true,
             "nativeStrictHostname": [
               "authenticated.backend.test"
@@ -506,12 +537,12 @@
         "external-correct-identity-restored": {
           "route": {
             "generation": 1,
-            "object": "643d0d14c6a03711582ff442b42f877e69c4da93856bdf64b88b1b15fc836877",
+            "object": "26fb71b0f221857790aae4723e8f06bfbbb296bfe93784be3e6eb579327e3c37",
             "specSHA256": "035ba21798722f2e0849364c74087f5876af7d7bf590a1e6ea240396193ea7c3"
           },
           "backend": {
             "generation": 1,
-            "object": "1e6a0a6e87cbb9d8b12802a58155e5539cfe3ec7c8dbb7d0fae5195495f22fda",
+            "object": "db6a0401d13487d0e1f0e186cc67eb4e089ed8f7914b064d96d53228984f05c2",
             "specSHA256": "2f01033d5404b202a25cd74f4c2d0bd0387b00026ba3527e6a32a4700f3d1a16"
           },
           "HTTPRouteConditions": {
@@ -537,7 +568,7 @@
             "origin": "sibling",
             "route": {
               "generation": 1,
-              "object": "0d5d56edc5feb8a4832da7120165f18ab7d0f0bcd79e236f57d9e01575967150",
+              "object": "4e97d7852e0d655735e5ccc816237b80afcfdc7b1de71c17f3ebd179e45fabb8",
               "specSHA256": "176a1022ae5b03128b7107c308e75da064c382543d786beb8adf7313334b4b1f"
             },
             "conditions": {
@@ -545,10 +576,10 @@
               "ResolvedRefs": "True/ResolvedRefs",
               "gateway-api-openstack.github.io/Programmed": "True/Programmed"
             },
-            "poolIdentitySHA256": "8c814a303474fc22f0e4b6bd7bbdbd79dfb05f0e5416a8d27b5604f854ddd6ac"
+            "poolIdentitySHA256": "d993d2d9f7d7f5d5f0879033ba06fae13e154264ecf8db88fab87d0e48093027"
           },
           "publicPool": {
-            "pool": "3fb1987f5ff0d328346b7a3e394f15f375b0500dec3716df72c0b9ab586951b9",
+            "pool": "b7449d6c6d349f29a67f388481464dac0b41c752d7ae1fe43a2f0f8004344a3d",
             "provisioning": "ACTIVE",
             "poolEnabled": true,
             "poolProtocol": "HTTP",
@@ -557,12 +588,12 @@
             "alpn": [
               "http/1.1"
             ],
-            "caReferenceSHA256": "e84c92abae486146f0d35bce2a18c0fd6d687f9a30ee92005e34b037b76a1981",
+            "caReferenceSHA256": "8c5bbd3bd189324408ddec515ae1f05386de1c58d6904e9e953e6ac85d8f2d8a",
             "clientCertificate": false
           },
           "readyMembers": 1,
           "HAProxy": {
-            "nativeConfigSHA256": "f76f2bb5695f839b68b6e4ba53ad15e638a74e7d0acb597b97a72c2837f7a47e",
+            "nativeConfigSHA256": "abd3b4bd526f94c00363930b30741923df8957cec9e5a697c0f0ea9723de2c68",
             "nativePolicySelectsPool": true,
             "nativeStrictHostname": [
               "authenticated.backend.test"
