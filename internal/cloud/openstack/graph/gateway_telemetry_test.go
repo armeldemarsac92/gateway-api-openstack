@@ -120,6 +120,22 @@ func TestTelemetryGatewayReconcileUpdatesOnlyTraceExportsAndOwnedCollector(t *te
 		case "PUT /lbaas/listeners/http", "PUT /lbaas/listeners/https":
 			var body struct{ Listener map[string]json.RawMessage }
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			listener := frontends[r.URL.Path[len("/lbaas/listeners/"):]]
+			if lb["provisioning_status"] == "ERROR" {
+				require.Len(t, body.Listener, 1, "Octavia only accepts a tracing clear while the balancer is in ERROR")
+				require.JSONEq(t, "null", string(body.Listener["otlp_tracing"]))
+				listener["otlp_tracing"] = body.Listener["otlp_tracing"]
+				listener["otlp_tracing_status"] = exporterState
+				w.WriteHeader(http.StatusAccepted)
+				safetyWriteJSON(t, w, map[string]any{"listener": listener})
+				return
+			}
+			if len(body.Listener) == 1 {
+				require.Contains(t, body.Listener, "tags")
+				listener["tags"] = body.Listener["tags"]
+				safetyWriteJSON(t, w, map[string]any{"listener": listener})
+				return
+			}
 			require.Len(t, body.Listener, 2)
 			require.Contains(t, body.Listener, "otlp_tracing")
 			if spec.Gateway.Telemetry == nil || !capable || spec.Gateway.Telemetry.Sampling != nil && !samplingCapable {
@@ -129,7 +145,6 @@ func TestTelemetryGatewayReconcileUpdatesOnlyTraceExportsAndOwnedCollector(t *te
 			} else {
 				require.JSONEq(t, `{"collector_pool_id":"975c99aa-e26a-4818-8391-b704f0712d1f","service_name":"apps/edge","span_name":"gateway.request"}`, string(body.Listener["otlp_tracing"]))
 			}
-			listener := frontends[r.URL.Path[len("/lbaas/listeners/"):]]
 			listener["otlp_tracing"] = body.Listener["otlp_tracing"]
 			listener["tags"] = body.Listener["tags"]
 			listener["otlp_tracing_status"] = exporterState
@@ -211,6 +226,7 @@ func TestTelemetryGatewayReconcileUpdatesOnlyTraceExportsAndOwnedCollector(t *te
 	frontends["http"]["otlp_tracing"] = map[string]any{"collector_pool_id": poolID,
 		"service_name": "apps/edge", "span_name": "gateway.request", "sampling": map[string]any{"base": map[string]int{"denominator": 100}}}
 	capable = false
+	exporterState = "PENDING_UPDATE"
 	calls = nil
 	require.True(t, run().Outcome.MutationSubmitted)
 	require.Equal(t, []string{"PUT /lbaas/listeners/http"}, calls)
@@ -221,9 +237,40 @@ func TestTelemetryGatewayReconcileUpdatesOnlyTraceExportsAndOwnedCollector(t *te
 	frontends["tcp"]["protocol"] = "TCP"
 	frontends["tcp"]["default_pool_id"] = nil
 	delete(frontends["tcp"], "otlp_tracing")
+	calls = nil
+	withdrawalTags := frontends["http"]["tags"]
+	delete(frontends["http"], "otlp_tracing_status")
+	frontends["http"]["provisioning_status"] = "ERROR"
+	exporterState = "ERROR"
+	require.True(t, run().Outcome.MutationSubmitted)
+	require.Equal(t, []string{"PUT /lbaas/listeners/http"}, calls, "a failed legacy withdrawal retries null before retiring the collector")
+	var tags []string
+	require.NoError(t, json.Unmarshal(frontends["http"]["tags"].(json.RawMessage), &tags))
+	require.Contains(t, tags, telemetryExportPoolTag+poolID)
+	require.JSONEq(t, "null", string(frontends["http"]["otlp_tracing"].(json.RawMessage)))
+	calls = nil
+	frontends["http"]["provisioning_status"] = "ACTIVE"
+	require.Equal(t, cloud.OutcomeProgressing, run().Outcome.State, "the exporter's ERROR overrides an ACTIVE listener")
+	frontends["http"]["otlp_tracing_status"] = nil
+	require.Equal(t, cloud.OutcomeProgressing, run().Outcome.State, "a malformed status cannot acknowledge a clear")
 	frontends["http"]["otlp_tracing_status"] = "PENDING_UPDATE"
 	require.Equal(t, cloud.OutcomeProgressing, run().Outcome.State, "a pending null is insufficient to delete the pool")
+	require.Empty(t, calls)
+	frontends["http"]["otlp_tracing_status"] = "ERROR"
+	frontends["http"]["tags"] = []string{telemetryListenerTag, telemetryExportPoolTag + poolID, telemetryExportPoolTag + poolID}
+	require.Equal(t, cloud.OutcomeProgressing, run().Outcome.State, "a failed withdrawal with ambiguous ownership keeps the collector intact")
+	require.Empty(t, calls)
+	frontends["http"]["tags"] = withdrawalTags
+	lb["provisioning_status"] = "ERROR"
+	require.True(t, run().Outcome.MutationSubmitted, "a failed balancer may retry its already requested exporter withdrawal")
+	require.Equal(t, []string{"PUT /lbaas/listeners/http"}, calls)
+	lb["provisioning_status"] = "ACTIVE"
+	calls = nil
 	frontends["http"]["otlp_tracing_status"] = "ACTIVE"
+	frontends["http"]["provisioning_status"] = "ERROR"
+	require.True(t, run().Outcome.MutationSubmitted, "exporter acknowledgment permits removal of its ownership markers")
+	require.NoError(t, json.Unmarshal(frontends["http"]["tags"].(json.RawMessage), &tags))
+	require.Equal(t, safetyGatewayTags(t, id, roleListener), tags)
 	for range 2 {
 		require.True(t, run().Outcome.MutationSubmitted)
 	}

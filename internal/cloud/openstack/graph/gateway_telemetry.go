@@ -167,9 +167,9 @@ func (p *Provider) reconcileGatewayTelemetry(ctx context.Context, spec cloud.Gat
 		}
 		return ready, nil
 	}
-	balance, err := p.observeLoadBalancerOnce(ctx, discovered.ID)
-	if err != nil {
-		return ready, err
+	balance, balanceErr := p.observeLoadBalancerOnce(ctx, discovered.ID)
+	if balanceErr != nil && balance.phase != loadBalancerPhaseError {
+		return ready, balanceErr
 	}
 	if balance.phase == loadBalancerPhaseAbsent {
 		return p.telemetryPending("Waiting to observe the Gateway load balancer"), nil
@@ -179,7 +179,7 @@ func (p *Provider) reconcileGatewayTelemetry(ctx context.Context, spec cloud.Gat
 		!identity.MatchesGateway(lb.Tags, roleLoadBalancer) || p.validateLoadBalancerProject(lb.ID, lb.ProjectID) != nil {
 		return ready, fmt.Errorf("%w: listener tracing could not prove the Gateway load balancer", cloud.ErrOwnershipConflict)
 	}
-	if balance.phase != loadBalancerPhaseActive {
+	if balance.phase == loadBalancerPhasePending {
 		return telemetryResult(balance.outcome), nil
 	}
 	inventory, err := p.octavia.ListTelemetryListenerInventory(ctx, listeners.ListOpts{LoadbalancerID: lb.ID, ProjectID: p.projectID})
@@ -198,6 +198,14 @@ func (p *Provider) reconcileGatewayTelemetry(ctx context.Context, spec cloud.Gat
 		current, present := graph.tracing[listener.ID]
 		if current.Value != nil {
 			graph.refs[current.Value.CollectorPoolID] = true
+		} else if current.Status == "ERROR" || current.Status == "" && listener.ProvisioningStatus == "ERROR" && slices.Contains(listener.Tags, telemetryListenerTag) {
+			// The running proxy can still use the previous collector. Even if
+			// we cannot retry this listener, keep that collector intact.
+			if id, valid := recordedTelemetryPool(listener.Tags); valid && id != "" {
+				graph.refs[id] = true
+			} else {
+				graph.unverified = true
+			}
 		}
 		unknownStatus := current.Status != "" && current.Status != "ACTIVE" && current.Status != "ERROR"
 		graph.unverified = graph.unverified || present && (!current.Readable || current.StatusMalformed || unknownStatus)
@@ -217,29 +225,34 @@ func (p *Provider) reconcileGatewayTelemetry(ctx context.Context, spec cloud.Gat
 	}
 	slices.SortFunc(graph.listeners, func(a, b listeners.Listener) int { return cmp.Compare(a.ID, b.ID) })
 	owned, poolErr := p.observeTelemetryPools(ctx, &graph)
-	return p.planGatewayTelemetry(ctx, graph, wanted, owned, poolErr)
+	return p.planGatewayTelemetry(ctx, graph, wanted, owned, poolErr, balanceErr)
+}
+
+func recordedTelemetryPool(tags []string) (string, bool) {
+	var recorded string
+	for _, tag := range tags {
+		if poolID, found := strings.CutPrefix(tag, telemetryExportPoolTag); found {
+			if recorded != "" || poolID == "" {
+				return "", false
+			}
+			recorded = poolID
+		}
+	}
+	return recorded, true
 }
 
 func (graph telemetryGraph) ownsExport(frontend listeners.Listener, config *octavia.ListenerOTLPTracing) bool {
-	if config == nil || !slices.Contains(frontend.Tags, telemetryListenerTag) {
+	recorded, valid := recordedTelemetryPool(frontend.Tags)
+	if !valid || !slices.Contains(frontend.Tags, telemetryListenerTag) {
 		return false
 	}
 	// Previous controllers supplied the general marker and an owned pool.
 	// New writes also name the pool in the listener tags, allowing withdrawal
 	// when the pool inventory is unavailable. A proven foreign pool wins.
-	var recorded string
-	for _, tag := range frontend.Tags {
-		if poolID, found := strings.CutPrefix(tag, telemetryExportPoolTag); found {
-			if recorded != "" || poolID == "" {
-				return false
-			}
-			recorded = poolID
-		}
-	}
 	if recorded == "" {
-		return graph.poolProof[config.CollectorPoolID]
+		return config == nil || graph.poolProof[config.CollectorPoolID]
 	}
-	return recorded == config.CollectorPoolID &&
+	return (config == nil || recorded == config.CollectorPoolID) &&
 		(graph.poolProof[recorded] || !graph.listedPools[recorded])
 }
 
@@ -275,6 +288,8 @@ func (p *Provider) updateListenerTelemetry(ctx context.Context, graph telemetryG
 		}
 		if recorded != nil {
 			tags = append(tags, telemetryExportPoolTag+recorded.CollectorPoolID)
+		} else if poolID, valid := recordedTelemetryPool(frontend.Tags); valid && poolID != "" {
+			tags = append(tags, telemetryExportPoolTag+poolID)
 		}
 		if retry {
 			tags = append(tags, telemetryRetryTag+strconv.FormatInt(time.Now().Add(telemetryRetryInterval).Unix(), 10))
@@ -298,17 +313,63 @@ func telemetryRetryRemaining(tags []string, now time.Time) time.Duration {
 
 func (p *Provider) telemetryWithdrawal(ctx context.Context, graph telemetryGraph, retain func(listeners.Listener, *octavia.ListenerOTLPTracing) bool) (cloud.GatewayGraphResult, bool, error) {
 	waiting := false
-	for _, frontend := range graph.listeners {
-		current := graph.tracing[frontend.ID]
-		if current.Value == nil || !graph.ownsExport(frontend, current.Value) ||
-			retain != nil && retain(frontend, current.Value) {
+	var acknowledged *listeners.Listener
+	for i := range graph.listeners {
+		frontend := &graph.listeners[i]
+		current, present := graph.tracing[frontend.ID]
+		if graph.loadBalancer.ProvisioningStatus == "ERROR" && current.Value == nil && current.Status != "ERROR" {
 			continue
 		}
-		if frontend.ProvisioningStatus != "ACTIVE" && frontend.ProvisioningStatus != "ERROR" {
+		cleared := current.Value == nil
+		if !graph.ownsExport(*frontend, current.Value) || !cleared && retain != nil && retain(*frontend, current.Value) {
+			continue
+		}
+		writable := frontend.ProvisioningStatus == "ACTIVE" || frontend.ProvisioningStatus == "ERROR"
+		if !writable || cleared && present && (!current.Readable || current.StatusMalformed) {
 			waiting = true
 			continue
 		}
-		result, err := p.updateListenerTelemetry(ctx, graph, frontend, nil, false)
+		if cleared {
+			status := current.Status
+			if status == "" {
+				// Earlier providers report only the listener status after a clear.
+				status = frontend.ProvisioningStatus
+			}
+			switch status {
+			case "ACTIVE":
+				acknowledged = frontend
+				continue
+			case "ERROR":
+				if telemetryRetryRemaining(frontend.Tags, time.Now()) > 0 {
+					waiting = true
+					continue
+				}
+			default:
+				waiting = true
+				continue
+			}
+		}
+		if graph.loadBalancer.ProvisioningStatus == "ERROR" {
+			// Octavia permits only the explicit clear in this state. Its worker
+			// keeps both the ownership tags and the collector reservation.
+			result, err := p.applyTelemetryMutation(ctx, graph, "Retrying withdrawal on a failed Octavia load balancer", func() error {
+				return p.octavia.SetListenerOTLPTracing(ctx, frontend.ID, nil, nil)
+			})
+			result.Outcome.RequeueAfter = telemetryRetryInterval
+			result.Gateway.Outcome.RequeueAfter = telemetryRetryInterval
+			return result, true, err
+		}
+		result, err := p.updateListenerTelemetry(ctx, graph, *frontend, nil, cleared)
+		return result, true, err
+	}
+	if acknowledged != nil {
+		result, err := p.applyTelemetryMutation(ctx, graph, "Releasing the acknowledged listener exporter", func() error {
+			tags := slices.DeleteFunc(slices.Clone(acknowledged.Tags), func(tag string) bool {
+				return tag == telemetryListenerTag || strings.HasPrefix(tag, telemetryExportPoolTag) || strings.HasPrefix(tag, telemetryRetryTag)
+			})
+			_, err := p.octavia.UpdateListener(ctx, acknowledged.ID, listeners.UpdateOpts{Tags: &tags})
+			return err
+		})
 		return result, true, err
 	}
 	if waiting {
@@ -317,7 +378,7 @@ func (p *Provider) telemetryWithdrawal(ctx context.Context, graph telemetryGraph
 	return cloud.GatewayGraphResult{}, false, nil
 }
 
-func (p *Provider) planGatewayTelemetry(ctx context.Context, graph telemetryGraph, wanted *cloud.GatewayTelemetry, owned map[string]telemetryPool, poolErr error) (result cloud.GatewayGraphResult, retErr error) {
+func (p *Provider) planGatewayTelemetry(ctx context.Context, graph telemetryGraph, wanted *cloud.GatewayTelemetry, owned map[string]telemetryPool, poolErr, balanceErr error) (result cloud.GatewayGraphResult, retErr error) {
 	var unsupported string
 	var dependencyErr error
 	unavailable := false
@@ -328,10 +389,21 @@ func (p *Provider) planGatewayTelemetry(ctx context.Context, graph telemetryGrap
 	if wanted != nil || graph.spec.Gateway.TelemetryPolicyPresent {
 		unsupported, unavailable, dependencyErr = p.verifyTelemetryCapabilities(ctx, graph.loadBalancer.Provider, graph.spec.Gateway, wanted)
 	}
-	if wanted == nil || unsupported != "" || dependencyErr != nil || poolErr != nil {
-		if result, changed, err := p.telemetryWithdrawal(ctx, graph, nil); changed {
-			return result, err
+	eligible := wanted != nil && unsupported == "" && dependencyErr == nil && poolErr == nil
+	var retain func(listeners.Listener, *octavia.ListenerOTLPTracing) bool
+	if eligible {
+		possible := owned[telemetryPoolName(wanted, graph.spec.Gateway.BackendClientCertificate.Reference)].pool.ID
+		retain = func(listener listeners.Listener, current *octavia.ListenerOTLPTracing) bool {
+			return graph.tracing[listener.ID].Readable && telemetryListenerWanted(listener, wanted) && current.CollectorPoolID == possible
 		}
+	}
+	if result, changed, err := p.telemetryWithdrawal(ctx, graph, retain); changed {
+		return result, err
+	}
+	if balanceErr != nil {
+		return cloud.GatewayGraphResult{}, balanceErr
+	}
+	if !eligible {
 		if poolErr != nil {
 			return cloud.GatewayGraphResult{}, poolErr
 		}
@@ -343,12 +415,6 @@ func (p *Provider) planGatewayTelemetry(ctx context.Context, graph telemetryGrap
 			return result, err
 		}
 		return telemetryResult(cloud.ReadyOutcome()), dependencyErr
-	}
-	possible := owned[telemetryPoolName(wanted, graph.spec.Gateway.BackendClientCertificate.Reference)].pool.ID
-	if result, changed, err := p.telemetryWithdrawal(ctx, graph, func(listener listeners.Listener, current *octavia.ListenerOTLPTracing) bool {
-		return graph.tracing[listener.ID].Readable && telemetryListenerWanted(listener, wanted) && current.CollectorPoolID == possible
-	}); changed {
-		return result, err
 	}
 	owned, err := p.observeTelemetryPoolChildren(ctx, graph, owned)
 	if err != nil {

@@ -31,6 +31,7 @@ const (
 	loadBalancerPhaseActive loadBalancerPhase = iota
 	loadBalancerPhasePending
 	loadBalancerPhaseAbsent
+	loadBalancerPhaseError
 )
 
 type loadBalancerObservation struct {
@@ -58,7 +59,7 @@ func (p *Provider) observeLoadBalancerOnce(ctx context.Context, loadBalancerID s
 			outcome:      p.progressingOutcome(message),
 		}, nil
 	case loadBalancer.ProvisioningStatus == "ERROR":
-		return loadBalancerObservation{}, cloud.NewProviderError(
+		return loadBalancerObservation{loadBalancer: loadBalancer, phase: loadBalancerPhaseError}, cloud.NewProviderError(
 			cloud.ErrorCategoryResourceFailure,
 			fmt.Errorf("octavia load balancer provisioning status is ERROR"),
 		)

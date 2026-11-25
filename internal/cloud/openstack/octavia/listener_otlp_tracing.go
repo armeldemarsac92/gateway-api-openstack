@@ -51,7 +51,7 @@ func decodeListenerOTLPTracing(raw, status json.RawMessage) ListenerOTLPTracingO
 	var observed ListenerOTLPTracingObservation
 	// A malformed or omitted status never proves application on Amphora.
 	if len(status) != 0 {
-		observed.StatusMalformed = json.Unmarshal(status, &observed.Status) != nil
+		observed.StatusMalformed = json.Unmarshal(status, &observed.Status) != nil || observed.Status == ""
 	}
 	if len(raw) == 0 {
 		return observed
@@ -105,7 +105,11 @@ type listenerOTLPTracingUpdate struct {
 }
 
 func (update listenerOTLPTracingUpdate) ToListenerUpdateMap() (map[string]any, error) {
-	return map[string]any{"listener": map[string]any{"otlp_tracing": update.value, "tags": update.tags}}, nil
+	fields := map[string]any{"otlp_tracing": update.value}
+	if update.tags != nil {
+		fields["tags"] = update.tags
+	}
+	return map[string]any{"listener": fields}, nil
 }
 
 func (s *Service) SetListenerOTLPTracing(ctx context.Context, listenerID string, value *ListenerOTLPTracing, tags []string) error {
