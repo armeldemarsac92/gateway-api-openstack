@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
@@ -103,8 +104,8 @@ func TestListenerFiltersCloseBeforeReprogrammingAndUseOrderedPools(t *testing.T)
 	require.Len(t, sections, 2)
 	require.Len(t, sections[0].Requests, 1)
 	require.Equal(t, []octavia.ListenerRequestFilter{
-		{Type: "ExternalAuth", HTTP: octavia.ListenerHTTPExternalAuth{PoolID: "pool-2", PathPrefix: "/second", ForwardBodyMaxSize: 4096}},
-		{Type: "ExternalAuth", HTTP: octavia.ListenerHTTPExternalAuth{PoolID: "pool-1", PathPrefix: "/first"}},
+		{Type: "ExternalAuth", HTTP: &octavia.ListenerHTTPExternalAuth{PoolID: "pool-2", PathPrefix: "/second", ForwardBodyMaxSize: 4096}},
+		{Type: "ExternalAuth", HTTP: &octavia.ListenerHTTPExternalAuth{PoolID: "pool-1", PathPrefix: "/first"}},
 	}, sections[1].Requests)
 
 	actual.listenerFilterMutation = nil
@@ -171,7 +172,7 @@ func TestHTTPSListenerBodyRequiresItsOwnCapability(t *testing.T) {
 	installed := actual.listenerFilterMutation.listenerFilters.sections
 	require.Equal(t, []octavia.ListenerRequestFilterSection{
 		{Hostname: "protected.example", Requests: []octavia.ListenerRequestFilter{
-			{Type: "ExternalAuth", HTTP: octavia.ListenerHTTPExternalAuth{PoolID: "auth-pool", ForwardBodyMaxSize: 4096}},
+			{Type: "ExternalAuth", HTTP: &octavia.ListenerHTTPExternalAuth{PoolID: "auth-pool", ForwardBodyMaxSize: 4096}},
 		}},
 		{Hostname: "public.example"},
 	}, installed)
@@ -229,7 +230,7 @@ func TestListenerBodyWithdrawalValidatesOnlyEffectiveAuthorizers(t *testing.T) {
 	lb["pools"] = []map[string]string{{"id": "protected"}, {"id": "public"}}
 	publicSection := octavia.ListenerRequestFilterSection{
 		Hostname: "public.example.test", Requests: []octavia.ListenerRequestFilter{
-			{Type: "ExternalAuth", HTTP: octavia.ListenerHTTPExternalAuth{PoolID: "public"}},
+			{Type: "ExternalAuth", HTTP: &octavia.ListenerHTTPExternalAuth{PoolID: "public"}},
 		},
 	}
 	listener := map[string]any{
@@ -239,7 +240,7 @@ func TestListenerBodyWithdrawalValidatesOnlyEffectiveAuthorizers(t *testing.T) {
 		"tags": append(safetyGatewayTags(t, id, roleListener), scopedPortTag("HTTP", 80)),
 		"request_filter_sections": []octavia.ListenerRequestFilterSection{
 			{Hostname: "protected.example.test", Requests: []octavia.ListenerRequestFilter{
-				{Type: "ExternalAuth", HTTP: octavia.ListenerHTTPExternalAuth{PoolID: "protected", ForwardBodyMaxSize: 4096}},
+				{Type: "ExternalAuth", HTTP: &octavia.ListenerHTTPExternalAuth{PoolID: "protected", ForwardBodyMaxSize: 4096}},
 			}}, publicSection,
 		},
 	}
@@ -346,11 +347,11 @@ func TestListenerFilterWithdrawalOnlyClosesAndReplacesDeniedSection(t *testing.T
 	}
 	filtered, sibling := newListener("filtered", 80), newListener("sibling", 81)
 	ordinary := octavia.ListenerRequestFilterSection{Hostname: "*", Requests: []octavia.ListenerRequestFilter{
-		{Type: "ExternalAuth", HTTP: octavia.ListenerHTTPExternalAuth{PoolID: "retained-authorizer", PathPrefix: "/check"}},
+		{Type: "ExternalAuth", HTTP: &octavia.ListenerHTTPExternalAuth{PoolID: "retained-authorizer", PathPrefix: "/check"}},
 	}}
 	filtered["request_filter_sections"] = []octavia.ListenerRequestFilterSection{
 		ordinary, {Hostname: "protected.example.test", Requests: []octavia.ListenerRequestFilter{
-			{Type: "ExternalAuth", HTTP: octavia.ListenerHTTPExternalAuth{PoolID: "revoked-authorizer", ForwardBodyMaxSize: 4096}},
+			{Type: "ExternalAuth", HTTP: &octavia.ListenerHTTPExternalAuth{PoolID: "revoked-authorizer", ForwardBodyMaxSize: 4096}},
 		}},
 	}
 	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -437,7 +438,7 @@ func TestListenerFiltersPreservedDuringRouteDetach(t *testing.T) {
 		loadBalancer: loadBalancer, adminObserved: map[string]bool{"filtered": true},
 		scopedListeners: []listeners.Listener{{ID: "filtered", ProtocolPort: 443, ProvisioningStatus: "ACTIVE", AdminStateUp: true}},
 		requestFilters: map[string]octavia.ListenerRequestFilterObservation{"filtered": {Readable: true, Sections: []octavia.ListenerRequestFilterSection{{
-			Hostname: "protected.example.test", Requests: []octavia.ListenerRequestFilter{{Type: "ExternalAuth", HTTP: octavia.ListenerHTTPExternalAuth{PoolID: "authorization-pool"}}},
+			Hostname: "protected.example.test", Requests: []octavia.ListenerRequestFilter{{Type: "ExternalAuth", HTTP: &octavia.ListenerHTTPExternalAuth{PoolID: "authorization-pool"}}},
 		}}}},
 	}
 	require.NoError(t, provider.observeListenerFilterGraph(t.Context(), desired, &actual))
@@ -469,7 +470,7 @@ func TestListenerFiltersCanClearAfterCapabilityWithdrawal(t *testing.T) {
 			{ID: "sibling", Protocol: "HTTP", ProtocolPort: 81, ProvisioningStatus: "ACTIVE", AdminStateUp: true},
 		},
 		requestFilters: map[string]octavia.ListenerRequestFilterObservation{"filtered": {Readable: true, Sections: []octavia.ListenerRequestFilterSection{{
-			Hostname: "*", Requests: []octavia.ListenerRequestFilter{{Type: "ExternalAuth", HTTP: octavia.ListenerHTTPExternalAuth{PoolID: "authorization-pool", ForwardBodyMaxSize: 4096}}},
+			Hostname: "*", Requests: []octavia.ListenerRequestFilter{{Type: "ExternalAuth", HTTP: &octavia.ListenerHTTPExternalAuth{PoolID: "authorization-pool", ForwardBodyMaxSize: 4096}}},
 		}}}},
 	}
 	owned := map[string]observedAuthPool{"former-authorizer": {pool: pools.Pool{ID: "authorization-pool", ProvisioningStatus: "ACTIVE"}}}
@@ -517,7 +518,7 @@ func TestListenerFiltersRepairOwnedPoolsWithSectionLocalRejection(t *testing.T) 
 				scopedListeners: []listeners.Listener{{ID: "filtered", Protocol: "HTTP", ProtocolPort: 80, ProvisioningStatus: "ACTIVE"}},
 				requestFilters: map[string]octavia.ListenerRequestFilterObservation{"filtered": {Readable: true, Sections: []octavia.ListenerRequestFilterSection{
 					{Hostname: "*"},
-					{Hostname: "protected.example.test", Requests: []octavia.ListenerRequestFilter{{Type: "ExternalAuth", HTTP: octavia.ListenerHTTPExternalAuth{PoolID: "authorization-pool"}}}},
+					{Hostname: "protected.example.test", Requests: []octavia.ListenerRequestFilter{{Type: "ExternalAuth", HTTP: &octavia.ListenerHTTPExternalAuth{PoolID: "authorization-pool"}}}},
 				}}},
 			}
 			owned := map[string]observedAuthPool{listenerAuthPoolName(80, auth): {
@@ -552,4 +553,90 @@ func TestListenerFiltersRepairOwnedPoolsWithSectionLocalRejection(t *testing.T) 
 			}
 		})
 	}
+}
+
+func TestListenerAuthorizerCapabilitiesAndAttestationFenceSections(t *testing.T) {
+	const port = 443
+	offers := []string{octavia.GatewayCapabilityListenerRequestFilters, octavia.GatewayCapabilityListenerHTTPSExternalAuthForwardBody,
+		octavia.GatewayCapabilityListenerExternalAuthTLS, octavia.GatewayCapabilityListenerExternalAuthGRPC, octavia.GatewayCapabilityBackendH2C,
+		octavia.GatewayCapabilityBackendTLSHostname, octavia.GatewayCapabilityBackendTLSSystemCA}
+	service := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/lbaas/providers/amphora/gateway_capabilities", r.URL.Path)
+		safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": offers, "l7policy_external_auth_max_body_bytes": 4096})
+	}))
+	provider := newTestProvider(t, ServiceClients{LoadBalancer: service, ProjectID: "project-a"}, ProviderConfig{BackendTLSPolicy: true})
+	spec := completeGraphSpec(safetyTestIdentity(t))
+	spec.Routes = nil
+	spec.Gateway.Spec.ScopedListeners = []cloud.ScopedListener{{Name: "tls", Port: port, TLS: &cloud.ListenerTLS{
+		CertificateRef: "cert", VirtualHosts: []string{"protected.example.test", "public.example.test"},
+	}}}
+	auth := cloud.ListenerExternalAuth{ServiceUID: "authorizer", ServicePort: 8080, MemberSubnetID: "subnet",
+		Members: []cloud.Member{{Address: "192.0.2.6", Port: 8080}}}
+	grpcAuth := auth
+	grpcAuth.Protocol, grpcAuth.ForwardBodyMaxSize = cloud.ExternalAuthProtocolGRPC, 4096
+	grpcAuth.AllowedRequestHeaders = []string{"x-request-id"}
+	httpAuth := auth
+	httpAuth.PathPrefix = "/check"
+	httpAuth.BackendTLS = &cloud.BackendTLSValidation{Hostname: "auth.example.test", Trust: cloud.BackendTLSTrustSystem}
+	spec.Gateway.Spec.RequestFilterSections = map[int][]cloud.ListenerRequestFilterSection{
+		port: {{Hostname: "protected.example.test", Requests: []cloud.ListenerExternalAuth{grpcAuth, httpAuth}}, {Hostname: "public.example.test"}},
+	}
+	desired, err := provider.buildDesiredGatewayGraph(spec)
+	require.NoError(t, err)
+	lb := safetyObservedLoadBalancer()
+	lb.Provider, lb.ProvisioningStatus, lb.AdminStateUp = "amphora", "ACTIVE", true
+	actual := observedGatewayGraph{
+		loadBalancer: lb, adminObserved: map[string]bool{"filtered": true},
+		scopedListeners: []listeners.Listener{{ID: "filtered", Protocol: "TERMINATED_HTTPS", ProtocolPort: port, ProvisioningStatus: "ACTIVE", AdminStateUp: true}},
+	}
+	members := []pools.Member{{ID: "member", Address: "192.0.2.6", ProtocolPort: 8080, SubnetID: "subnet",
+		ProvisioningStatus: "ACTIVE", AdminStateUp: true}}
+	grpcName := authorizerPoolName(port, grpcAuth, "", true)
+	httpName := authorizerPoolName(port, httpAuth, "", true)
+	require.NotEqual(t, routeAuthorizerPoolName(port, grpcAuth, ""), grpcName)
+	require.NotEqual(t, routeAuthorizerPoolName(port, httpAuth, ""), httpName)
+	grpcPool := observedAuthPool{admin: true, h2c: true, members: members, pool: pools.Pool{ID: "grpc", Protocol: "HTTP",
+		ProvisioningStatus: "ACTIVE", AdminStateUp: true, Tags: []string{grpcAuthPoolTag}},
+		tls: octavia.PoolBackendTLS{EnabledObserved: true, H2CObserved: true}}
+	httpPool := observedAuthPool{admin: true, members: members, pool: pools.Pool{ID: "http-tls", Protocol: "HTTP", TLSEnabled: true,
+		ProvisioningStatus: "ACTIVE", AdminStateUp: true, ALPNProtocols: []string{"http/1.1"},
+		Tags: []string{httpAuthTLSPoolTag, backendTLSManagedTag, backendTLSSystemCATag, backendTLSRevisionTag(httpAuth.BackendTLS)}},
+		tls: octavia.PoolBackendTLS{Hostname: httpAuth.BackendTLS.Hostname, HostnameObserved: true, CAObserved: true, ClientRefObserved: true,
+			AdminObserved: true, EnabledObserved: true, H2CObserved: true, RequireH2Observed: true, ALPNObserved: true,
+			SystemCA: true, SystemCAObserved: true, SystemCADigestObserved: true, SystemCASHA256: strings.Repeat("a", 64)}}
+	owned := map[string]observedAuthPool{grpcName: grpcPool, httpName: httpPool}
+	programmed := []octavia.ListenerRequestFilterSection{
+		{Hostname: "protected.example.test", Requests: []octavia.ListenerRequestFilter{
+			{Type: "ExternalAuth", GRPC: &octavia.ListenerGRPCExternalAuth{PoolID: "grpc", ForwardBodyMaxSize: 4096, AllowedRequestHeaders: []string{"x-request-id"}}},
+			{Type: "ExternalAuth", HTTP: &octavia.ListenerHTTPExternalAuth{PoolID: "http-tls", PathPrefix: "/check"}},
+		}},
+		{Hostname: "public.example.test"},
+	}
+	actual.requestFilters = map[string]octavia.ListenerRequestFilterObservation{"filtered": {Readable: true, Sections: programmed}}
+	provider.planListenerFilters(t.Context(), desired, &actual, owned)
+	require.Nil(t, actual.listenerFilterMutation)
+
+	rejectAfterClose := func() {
+		t.Helper()
+		actual.listenerFilterMutation = nil
+		actual.scopedListeners[0].AdminStateUp = true
+		provider.planListenerFilters(t.Context(), desired, &actual, owned)
+		require.Equal(t, graphDisableListener, actual.listenerFilterMutation.kind)
+		actual.listenerFilterMutation = nil
+		actual.scopedListeners[0].AdminStateUp = false
+		provider.planListenerFilters(t.Context(), desired, &actual, owned)
+		require.Equal(t, graphListenerFiltersMutation, actual.listenerFilterMutation.kind)
+		require.Equal(t, []octavia.ListenerRequestFilterSection{{Hostname: "protected.example.test", Reject: true}, {Hostname: "public.example.test"}},
+			actual.listenerFilterMutation.listenerFilters.sections)
+	}
+	attested := httpPool
+	httpPool.tls.SystemCADigestObserved = false
+	owned[httpName] = httpPool
+	rejectAfterClose()
+	require.Equal(t, []string{"protected.example.test"}, actual.recoveringListenerFilterSections[port])
+	owned[httpName] = attested
+
+	offers[3] = octavia.GatewayCapabilityPolicyExternalAuthGRPC
+	rejectAfterClose()
+	require.Equal(t, []string{"protected.example.test"}, actual.unavailableListenerTransportSections[port])
 }

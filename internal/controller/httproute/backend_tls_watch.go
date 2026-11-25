@@ -193,6 +193,9 @@ func (r *Reconciler) setupBackendTLSPolicyStatusController(manager ctrl.Manager)
 			if r.Config.TCPTLSTermination {
 				requests = append(requests, r.enqueuePoliciesForTLSRouteDependency(ctx, object)...)
 			}
+			if r.Config.GatewayListenerFiltersEnabled() {
+				requests = append(requests, r.enqueuePoliciesForListenerAuthDependency(ctx, object)...)
+			}
 			if r.Config.TelemetryPolicyEnabled() {
 				requests = append(requests, r.enqueuePoliciesForTelemetryDependency(ctx, object)...)
 			}
@@ -242,6 +245,39 @@ func (r *Reconciler) enqueuePoliciesForSharedService(ctx context.Context, object
 func (r *Reconciler) enqueuePoliciesForCA(ctx context.Context, object client.Object) []reconcile.Request {
 	keys := map[types.NamespacedName]struct{}{}
 	r.addPolicyRequests(ctx, keys, controller.IndexBackendTLSPolicyByCA, client.ObjectKeyFromObject(object))
+	return controller.SortedRequests(keys)
+}
+
+func (r *Reconciler) enqueuePoliciesForListenerAuthDependency(ctx context.Context, object client.Object) []reconcile.Request {
+	keys := make(map[types.NamespacedName]struct{})
+	add := func(gateway *gatewayv1.Gateway, serviceNamespace string) {
+		for service := range gatewaycontroller.ListenerExternalAuthReferences(gateway) {
+			if serviceNamespace == "" || service.Namespace == serviceNamespace {
+				r.addPolicyRequests(ctx, keys, controller.IndexBackendTLSPolicyByService, service)
+			}
+		}
+	}
+	if gateway, ok := object.(*gatewayv1.Gateway); ok {
+		add(gateway, "")
+		return controller.SortedRequests(keys)
+	}
+	var gateways gatewayv1.GatewayList
+	switch dependency := object.(type) {
+	case *gatewayv1.ReferenceGrant:
+		if err := r.List(ctx, &gateways); err != nil {
+			return nil
+		}
+		for i := range gateways.Items {
+			add(&gateways.Items[i], dependency.Namespace)
+		}
+	case *gatewayv1.GatewayClass:
+		if err := r.List(ctx, &gateways, client.MatchingFields{controller.IndexGatewayByClass: dependency.Name}); err != nil {
+			return nil
+		}
+		for i := range gateways.Items {
+			add(&gateways.Items[i], "")
+		}
+	}
 	return controller.SortedRequests(keys)
 }
 

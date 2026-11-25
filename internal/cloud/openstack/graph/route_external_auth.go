@@ -94,16 +94,21 @@ func routeAuthorizerTransportCapabilities(auth cloud.ListenerExternalAuth) []str
 		required[0] = octavia.GatewayCapabilityPolicyExternalAuthGRPC
 	}
 	tls := auth.BackendTLS
-	if tls == nil {
-		if requireH2 {
-			required = append(required, octavia.GatewayCapabilityBackendH2C)
-		}
-		return required
-	}
-	if !requireH2 {
+	if tls != nil && !requireH2 {
 		required = append(required, octavia.GatewayCapabilityPolicyExternalAuthTLS)
 	}
-	required = append(required, backendTLSCapabilities(requireH2, len(tls.SubjectAltNames) != 0)...)
+	return append(required, authorizerBackendCapabilities(auth)...)
+}
+
+func authorizerBackendCapabilities(auth cloud.ListenerExternalAuth) []string {
+	tls := auth.BackendTLS
+	if tls == nil {
+		if auth.Protocol == cloud.ExternalAuthProtocolGRPC {
+			return []string{octavia.GatewayCapabilityBackendH2C}
+		}
+		return nil
+	}
+	required := backendTLSCapabilities(tls.RequireH2, len(tls.SubjectAltNames) != 0)
 	if tls.Trust == cloud.BackendTLSTrustSystem {
 		required = append(required, octavia.GatewayCapabilityBackendTLSSystemCA)
 	}
@@ -111,6 +116,10 @@ func routeAuthorizerTransportCapabilities(auth cloud.ListenerExternalAuth) []str
 }
 
 func routeAuthorizerPoolName(port int, auth cloud.ListenerExternalAuth, certificate string) string {
+	return authorizerPoolName(port, auth, certificate, false)
+}
+
+func authorizerPoolName(port int, auth cloud.ListenerExternalAuth, certificate string, listener bool) string {
 	prefix := grpcAuthPoolNamePrefix
 	if auth.Protocol != cloud.ExternalAuthProtocolGRPC {
 		if auth.BackendTLS == nil {
@@ -119,6 +128,9 @@ func routeAuthorizerPoolName(port int, auth cloud.ListenerExternalAuth, certific
 		prefix = httpAuthTLSPoolNamePrefix
 	}
 	key := fmt.Appendf(nil, "%d:%s:%d", port, auth.ServiceUID, auth.ServicePort)
+	if listener {
+		key = append(key, "|listener"...)
+	}
 	if tls := auth.BackendTLS; tls != nil {
 		key = fmt.Appendf(key, "|%s|%s|%v", tls.Hostname, backendTLSRevisionTag(tls), tls.SubjectAltNames)
 		if certificate != "" {
@@ -243,14 +255,20 @@ func (p *Provider) planRouteAuthPools(ctx context.Context, desired desiredGatewa
 
 func (p *Provider) planProtectedAuthorizerPool(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, auth *cloud.ListenerExternalAuth,
 	name string, pool observedAuthPool, canRemove bool) (bool, *graphMutation) {
+	if !p.routeAuthorizerTransportEnabled(*auth) || p.verifyGatewayHTTPURLCapabilities(ctx, desired, actual, routeAuthorizerTransportCapabilities(*auth)) != nil {
+		return false, nil
+	}
+	return p.planVerifiedAuthorizerPool(ctx, desired, auth, name, pool, canRemove)
+}
+
+func (p *Provider) planVerifiedAuthorizerPool(ctx context.Context, desired desiredGatewayGraph, auth *cloud.ListenerExternalAuth,
+	name string, pool observedAuthPool, canRemove bool) (bool, *graphMutation) {
 	tls := auth.BackendTLS
 	httpTLS := tls != nil && !tls.RequireH2
 	client := desired.spec.Gateway.BackendClientCertificate
-	if !p.routeAuthorizerTransportEnabled(*auth) || tls != nil && client.Denied ||
-		p.verifyGatewayHTTPURLCapabilities(ctx, desired, actual, routeAuthorizerTransportCapabilities(*auth)) != nil {
+	if tls != nil && client.Denied {
 		return false, nil
 	}
-
 	change := listenerFilterMutation{protectedAuth: auth}
 	if tls != nil && (tls.Trust == cloud.BackendTLSTrustReference || client.Reference != "") && !desired.spec.Gateway.BackendCAOwned {
 		if desired.spec.Gateway.ClaimBackendCA == nil {

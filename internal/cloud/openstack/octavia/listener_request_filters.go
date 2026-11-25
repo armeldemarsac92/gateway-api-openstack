@@ -22,10 +22,13 @@ import (
 	"encoding/json"
 	"slices"
 
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
 )
 
 const GatewayCapabilityListenerRequestFilters = "listener_request_filters_v1"
+const GatewayCapabilityListenerExternalAuthGRPC = "listener_grpc_external_auth_v1"
+const GatewayCapabilityListenerExternalAuthTLS = "listener_http_external_auth_tls_v1"
 const GatewayCapabilityListenerExternalAuthForwardBody = "listener_http_external_auth_forward_body_v1"
 const GatewayCapabilityListenerHTTPSExternalAuthForwardBody = "listener_https_external_auth_forward_body_v1"
 
@@ -36,8 +39,9 @@ type ListenerRequestFilterSection struct {
 }
 
 type ListenerRequestFilter struct {
-	Type string                   `json:"type"`
-	HTTP ListenerHTTPExternalAuth `json:"http"`
+	Type string                    `json:"type"`
+	HTTP *ListenerHTTPExternalAuth `json:"http,omitempty"`
+	GRPC *ListenerGRPCExternalAuth `json:"grpc,omitempty"`
 }
 
 type ListenerHTTPExternalAuth struct {
@@ -48,9 +52,40 @@ type ListenerHTTPExternalAuth struct {
 	AllowedResponseHeaders []string `json:"allowed_response_headers,omitempty"`
 }
 
+type ListenerGRPCExternalAuth struct {
+	PoolID                string   `json:"pool_id"`
+	ForwardBodyMaxSize    int32    `json:"forward_body_max_size,omitempty"`
+	AllowedRequestHeaders []string `json:"allowed_request_headers,omitempty"`
+}
+
+func (filter ListenerRequestFilter) AuthorizationPool() (id, protocol string) {
+	if filter.GRPC != nil {
+		return filter.GRPC.PoolID, cloud.ExternalAuthProtocolGRPC
+	}
+	if filter.HTTP != nil {
+		return filter.HTTP.PoolID, ""
+	}
+	return "", ""
+}
+
+func (filter ListenerRequestFilter) valid() bool {
+	if filter.Type != "ExternalAuth" || (filter.HTTP == nil) == (filter.GRPC == nil) {
+		return false
+	}
+	if filter.GRPC != nil {
+		auth := filter.GRPC
+		return auth.PoolID != "" && auth.ForwardBodyMaxSize >= 0 && auth.ForwardBodyMaxSize <= cloud.MaxGRPCExternalAuthBodySize &&
+			cloud.ValidExternalAuthHeaders(auth.AllowedRequestHeaders, true)
+	}
+	auth := filter.HTTP
+	return auth.PoolID != "" && auth.ForwardBodyMaxSize >= 0 && cloud.ValidExternalAuthPathPrefix(auth.PathPrefix) &&
+		cloud.ValidExternalAuthHeaders(auth.AllowedRequestHeaders, true) && cloud.ValidExternalAuthHeaders(auth.AllowedResponseHeaders, true)
+}
+
 type ListenerRequestFilterBodyLimits struct {
-	HTTP  int32
-	HTTPS int32
+	Capabilities []string
+	HTTP         int32
+	HTTPS        int32
 }
 
 // ListenerRequestFilterBodyLimits verifies the base listener capability and
@@ -64,6 +99,7 @@ func (s *Service) ListenerRequestFilterBodyLimits(ctx context.Context, provider 
 	if !slices.Contains(response.Capabilities, GatewayCapabilityListenerRequestFilters) {
 		return limits, &MissingGatewayCapability{Provider: provider, Capability: GatewayCapabilityListenerRequestFilters}
 	}
+	limits.Capabilities = response.Capabilities
 	limit, err := response.authBodyLimit()
 	if err != nil {
 		// The optional body profiles are unusable. Keep bodyless listeners working.
@@ -88,7 +124,18 @@ func decodeListenerRequestFilters(raw json.RawMessage) ListenerRequestFilterObse
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	err := decoder.Decode(&sections)
-	return ListenerRequestFilterObservation{Sections: sections, Readable: err == nil && sections != nil}
+	if err != nil || sections == nil {
+		return ListenerRequestFilterObservation{}
+	}
+	hosts := make(map[string]bool, len(sections))
+	for _, section := range sections {
+		if section.Hostname == "" || hosts[section.Hostname] || section.Reject && len(section.Requests) != 0 ||
+			len(section.Requests) > 16 || slices.ContainsFunc(section.Requests, func(filter ListenerRequestFilter) bool { return !filter.valid() }) {
+			return ListenerRequestFilterObservation{}
+		}
+		hosts[section.Hostname] = true
+	}
+	return ListenerRequestFilterObservation{Sections: sections, Readable: true}
 }
 
 type listenerRequestFilterUpdate []ListenerRequestFilterSection

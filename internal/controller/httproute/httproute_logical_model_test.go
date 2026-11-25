@@ -368,9 +368,21 @@ func TestHTTPRouteCompilesGatewayManagedListenerFilters(t *testing.T) {
 		}
 	}
 	unsupported := gateway.DeepCopy()
+	grpcAuth := gateway.DeepCopy()
+	grpcFilter := grpcAuth.Spec.Listeners[0].Filters.Requests[0].ExternalAuth
+	grpcFilter.ExternalAuthProtocol = gatewayv1.HTTPRouteExternalAuthGRPCProtocol
+	if err := build(cfg, grpcAuth, chosen.Name); err == nil {
+		t.Fatal("the chosen section accepted gRPC without the grpc configuration")
+	}
+	grpcFilter.GRPCAuthConfig = &gatewayv1.GRPCAuthConfig{}
+	if err := build(cfg, grpcAuth, chosen.Name); err != nil {
+		t.Fatalf("the chosen section should accept a gRPC authorization filter: %v", err)
+	}
 	unsupported.Spec.Listeners[0].Filters.Requests[0].ExternalAuth.ExternalAuthProtocol = gatewayv1.HTTPRouteExternalAuthGRPCProtocol
+	unsupported.Spec.Listeners[0].Filters.Requests[0].ExternalAuth.GRPCAuthConfig = &gatewayv1.GRPCAuthConfig{}
+	unsupported.Spec.Listeners[0].Filters.Requests[0].ExternalAuth.HTTPAuthConfig = &gatewayv1.HTTPAuthConfig{Path: "/bad"}
 	if err := build(cfg, unsupported, chosen.Name); err == nil {
-		t.Fatal("the chosen section accepted an unsupported gRPC authorization filter")
+		t.Fatal("the chosen section accepted conflicting gRPC and HTTP authorization options")
 	}
 	if err := build(cfg, unsupported, sister.Name); err != nil {
 		t.Fatalf("the unsupported filter affected the sister section: %v", err)

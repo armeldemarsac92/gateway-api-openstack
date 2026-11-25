@@ -127,6 +127,11 @@ func (p *Provider) BackendH2CAvailable(ctx context.Context) (bool, error) {
 	return p.graph.BackendH2CAvailable(ctx)
 }
 
+// ListenerExternalAuthTLSAvailable checks regional listener authorization transport.
+func (p *Provider) ListenerExternalAuthTLSAvailable(ctx context.Context, auth cloud.ListenerExternalAuth) (bool, error) {
+	return p.graph.ListenerExternalAuthTLSAvailable(ctx, auth)
+}
+
 // RouteExternalAuthAvailable checks regional support for HTTPRoute authorization.
 func (p *Provider) RouteExternalAuthAvailable(ctx context.Context, auth cloud.ListenerExternalAuth, weighted bool) (bool, error) {
 	return p.graph.RouteExternalAuthAvailable(ctx, auth, weighted)
