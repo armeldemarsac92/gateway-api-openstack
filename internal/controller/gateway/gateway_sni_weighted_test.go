@@ -19,6 +19,7 @@ package gateway
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -150,7 +151,7 @@ func TestWeightedSNIRouteGrantWithdrawalAndRestore(t *testing.T) {
 	partial := revoked[0].targets[0]
 	require.Equal(t, &cloud.TCPConnectionRejection{RejectWeight: 1, TotalWeight: 4}, partial.TCPConnectionRejection)
 	require.Equal(t, []cloud.TLSBackendService{{UID: "stable", Port: 8443}}, partial.BackendServices)
-	require.Equal(t, target.BackendServiceMembers[:1], partial.BackendServiceMembers)
+	require.Equal(t, []cloud.TLSSNIBackendPool{target.BackendServiceMembers[0], {Weight: 1}}, partial.BackendServiceMembers)
 	require.Equal(t, []cloud.Member{
 		{Address: "192.0.2.101", Port: 9443, Weight: 1},
 		{Address: "192.0.2.102", Port: 9443, Weight: 1},
@@ -161,7 +162,8 @@ func TestWeightedSNIRouteGrantWithdrawalAndRestore(t *testing.T) {
 
 	r.Config.TCPConnectionRejection = false
 	closed := observe()
-	require.Empty(t, closed[0].targets)
+	require.Len(t, closed[0].targets, 1)
+	require.Equal(t, partial.BackendServiceMembers, closed[0].targets[0].BackendPools)
 	require.Equal(t, original[1].targets, closed[1].targets)
 	report(closed, deferred, gatewayv1.RouteReasonRefNotPermitted, false)
 
@@ -172,6 +174,34 @@ func TestWeightedSNIRouteGrantWithdrawalAndRestore(t *testing.T) {
 	restored := observe()
 	require.Equal(t, original.targets(), restored.targets())
 	report(restored, ready, gatewayv1.RouteReasonResolvedRefs, true)
+
+	// 257 / 2 : 128 / 1 reduces to 257:256 per endpoint, beyond
+	// Octavia's member range despite the healthy backend having two endpoints.
+	var current gatewayv1.TLSRoute
+	require.NoError(t, kube.Get(t.Context(), client.ObjectKeyFromObject(route), &current))
+	current.Spec.Rules[0].BackendRefs[0].Weight = ptr.To(int32(257))
+	current.Spec.Rules[0].BackendRefs[1].Weight = ptr.To(int32(128))
+	current.Generation++
+	require.NoError(t, kube.Update(t.Context(), &current))
+	large := observe()
+	require.Len(t, large[0].targets, 1)
+	wantPools := slices.Clone(target.BackendServiceMembers)
+	wantPools[0].Weight, wantPools[1].Weight = 257, 128
+	require.Equal(t, wantPools, large[0].targets[0].BackendPools)
+	require.Empty(t, large[0].targets[0].Members)
+	require.Equal(t, original[1].targets, large[1].targets)
+
+	require.NoError(t, kube.Delete(t.Context(), grant))
+	grantRevoked = true
+	r.Config.TCPConnectionRejection = false
+	largeRevoked := observe()
+	require.Len(t, largeRevoked[0].targets, 1)
+	require.Equal(t, []cloud.TLSSNIBackendPool{wantPools[0], {Weight: 128}}, largeRevoked[0].targets[0].BackendPools)
+	report(largeRevoked, ready, gatewayv1.RouteReasonRefNotPermitted, true)
+	grantRevoked = false
+	grant.ResourceVersion = ""
+	require.NoError(t, kube.Create(t.Context(), grant))
+	require.Equal(t, large.targets(), observe().targets())
 }
 
 func TestWeightedSNIRouteAvailability(t *testing.T) {

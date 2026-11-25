@@ -484,7 +484,7 @@ func (opts PolicyCreateOpts) ToL7PolicyCreateMap() (map[string]any, error) {
 	switch {
 	case opts.WeightedTCPPolicyTargets != nil:
 		if !validWeightedTCPPolicyTargets(opts.WeightedTCPPolicyTargets) ||
-			opts.AdminStateUp == nil || *opts.AdminStateUp || opts.TCPTLSPassthrough != nil && *opts.TCPTLSPassthrough ||
+			opts.AdminStateUp == nil || *opts.AdminStateUp ||
 			opts.FixedServerError || opts.WeightedTargets != nil || opts.RedirectRequest != nil ||
 			opts.RedirectPoolID != "" || opts.RedirectURL != "" || opts.RedirectPrefix != "" ||
 			opts.HTTPSListenerHostname != "" || len(opts.RequestHeaderOperations) != 0 || len(opts.ResponseHeaderOperations) != 0 ||

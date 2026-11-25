@@ -63,6 +63,8 @@ const (
 	GatewayCapabilityL7PolicyBatchActivation   = "l7policy_batch_activation_v1"
 )
 
+const GatewayCapabilityTLSSNIPassthroughWeightedPools = "tls_sni_passthrough_weighted_pools_v1"
+
 // MissingGatewayCapability reports an explicit negative capability discovery.
 type MissingGatewayCapability struct {
 	Provider   string
@@ -77,23 +79,32 @@ func (e *MissingGatewayCapability) Error() string {
 // region-specific load-balancer endpoint. Only an explicit capability list
 // authorizes use of the requested extensions.
 func (s *Service) VerifyGatewayCapabilities(ctx context.Context, provider string, required ...string) error {
+	capabilities, err := s.GatewayCapabilities(ctx, provider)
+	if err != nil {
+		return err
+	}
+	for _, capability := range required {
+		if !slices.Contains(capabilities, capability) {
+			return &MissingGatewayCapability{Provider: provider, Capability: capability}
+		}
+	}
+	return nil
+}
+
+// GatewayCapabilities reads the selected region's capability list.
+func (s *Service) GatewayCapabilities(ctx context.Context, provider string) ([]string, error) {
 	if strings.TrimSpace(provider) == "" {
-		return fmt.Errorf("missing effective load balancer provider in Octavia response")
+		return nil, fmt.Errorf("missing effective load balancer provider in Octavia response")
 	}
 	var response struct {
 		Capabilities []string `json:"gateway_capabilities"`
 	}
 	endpoint := s.client.ServiceURL("lbaas", "providers", url.PathEscape(provider), "gateway_capabilities")
 	if _, err := s.client.Get(ctx, endpoint, &response, nil); err != nil {
-		return fmt.Errorf("discover Gateway capabilities for Octavia provider %q: %w", provider, err)
+		return nil, fmt.Errorf("discover Gateway capabilities for Octavia provider %q: %w", provider, err)
 	}
 	if response.Capabilities == nil {
-		return fmt.Errorf("discover Gateway capabilities for Octavia provider %q: response does not contain a capability list", provider)
+		return nil, fmt.Errorf("discover Gateway capabilities for Octavia provider %q: response does not contain a capability list", provider)
 	}
-	for _, capability := range required {
-		if !slices.Contains(response.Capabilities, capability) {
-			return &MissingGatewayCapability{Provider: provider, Capability: capability}
-		}
-	}
-	return nil
+	return response.Capabilities, nil
 }
