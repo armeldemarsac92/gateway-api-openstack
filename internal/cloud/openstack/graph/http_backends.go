@@ -50,6 +50,16 @@ func httpPlanningParts(desired desiredGatewayGraph, actual observedGatewayGraph)
 		if index < len(actual.routes) {
 			observed = actual.routes[index]
 		}
+		if node.Disposition == cloud.GraphEnsure && slices.ContainsFunc(route.httpParts, func(part desiredRoute) bool {
+			return part.xBackendH2CPending
+		}) {
+			route.httpParts = slices.Clone(route.httpParts)
+			for index, backend := range route.httpParts {
+				if backend.xBackendH2CPending {
+					route.httpParts[index] = backend.keepObservedH2CMembers(observed.httpParts[backend.backendKey])
+				}
+			}
+		}
 		heldPools, uncertainTargets := observedWeightedPoolHolds(observed)
 		mirrorDestinations := requestMirrorPoolKeys(route)
 		var authorizations map[string]map[string]int
@@ -124,6 +134,32 @@ func httpPlanningParts(desired desiredGatewayGraph, actual observedGatewayGraph)
 		}
 	}
 	return partDesired, partActual, owners
+}
+
+// keepObservedH2CMembers allows withdrawals during capability discovery
+// failures while keeping independently verified h2c members eligible.
+func (route desiredRoute) keepObservedH2CMembers(observed *observedRouteGraph) desiredRoute {
+	eligible := route.members
+	route.members = nil
+	if observed != nil && observed.pool != nil && observed.pool.ProvisioningStatus == "ACTIVE" &&
+		observed.backendTLS.AdminObserved && observed.pool.AdminStateUp &&
+		observed.backendTLS.EnabledObserved && !observed.pool.TLSEnabled &&
+		observed.backendTLS.H2CObserved && observed.backendH2C {
+		admitted := make(map[string]bool, len(observed.members))
+		for _, member := range observed.members {
+			_, adminUnreported := observed.memberAdminUnreported[member.ID]
+			if !adminUnreported && member.AdminStateUp && member.ProvisioningStatus == "ACTIVE" && member.SubnetID == route.spec.MemberSubnetID {
+				admitted[memberKey(member.Address, member.ProtocolPort)] = true
+			}
+		}
+		for _, member := range eligible {
+			if admitted[memberKey(member.Address, member.Port)] {
+				route.members = append(route.members, member)
+			}
+		}
+	}
+	route.unavailable = len(route.members) == 0
+	return route
 }
 
 func (p *Provider) buildHTTPRoutePartsGraphPlan(desired desiredGatewayGraph, actual observedGatewayGraph) ([]graphMutation, cloud.GatewayGraphResult, error) {

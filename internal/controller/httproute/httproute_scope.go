@@ -49,19 +49,20 @@ const (
 )
 
 type routeStatusPlan struct {
-	kind                   routeStatusPlanKind
-	updates                []parentStatusUpdate
-	droppedRules           string
-	corsFallback           bool
-	policy                 controller.ProviderFailurePolicy
-	referencesEvaluated    bool
-	validateOwnership      bool
-	selection              routeSelection
-	profileObserved        bool
-	rejectedSections       []model.ListenerSection
-	gateway                *gatewayv1.Gateway
-	cleanupIdentity        cloud.Identity
-	xBackendCookieRevision *string
+	kind                      routeStatusPlanKind
+	updates                   []parentStatusUpdate
+	droppedRules              string
+	corsFallback              bool
+	policy                    controller.ProviderFailurePolicy
+	referencesEvaluated       bool
+	validateOwnership         bool
+	selection                 routeSelection
+	profileObserved           bool
+	rejectedSections          []model.ListenerSection
+	gateway                   *gatewayv1.Gateway
+	cleanupIdentity           cloud.Identity
+	xBackendCookieRevision    *string
+	xBackendTransportRevision *string
 }
 
 type routeProviderWarning struct {
@@ -199,12 +200,13 @@ func (r *Reconciler) patchHTTPRouteStatus(
 				return err
 			}
 		}
-		if plan.xBackendCookieRevision != nil {
-			revision, err := r.liveXBackendCookieRevision(ctx, current)
+		if plan.xBackendTransportRevision != nil {
+			observations, err := r.liveXBackendRevisions(ctx, current)
 			if err != nil {
 				return err
 			}
-			if revision != *plan.xBackendCookieRevision {
+			if xBackendTransportRevision(current, observations) != *plan.xBackendTransportRevision ||
+				plan.xBackendCookieRevision != nil && xBackendCookieRevision(current, observations) != *plan.xBackendCookieRevision {
 				return errHTTPRouteChanged
 			}
 		}
@@ -507,16 +509,8 @@ func (p *routeStatusPlan) updateParentStatuses(config controller.Config, route *
 		}
 		controller.SetCondition(&parentStatus.Conditions, controller.Condition(string(gatewayv1.RouteConditionResolvedRefs), update.status.resolved, update.status.resolvedReason, update.status.resolvedMessage, resolvedGeneration))
 		controller.SetCondition(&parentStatus.Conditions, controller.Condition(config.Domain()+"/Programmed", update.status.programmed, update.status.programmedReason, update.status.programmedMessage, programmedGeneration))
-		cookieConditionType := config.Domain() + xBackendCookieRevisionCondition
-		switch {
-		case update.status.programmed != metav1.ConditionTrue:
-			meta.RemoveStatusCondition(&parentStatus.Conditions, cookieConditionType)
-		case p.xBackendCookieRevision != nil && *p.xBackendCookieRevision != "":
-			controller.SetCondition(&parentStatus.Conditions, controller.Condition(cookieConditionType, metav1.ConditionTrue,
-				"Observed", *p.xBackendCookieRevision, route.Generation))
-		case p.xBackendCookieRevision != nil:
-			meta.RemoveStatusCondition(&parentStatus.Conditions, cookieConditionType)
-		}
+		setXBackendRevision(&parentStatus, config.Domain()+xBackendCookieRevisionCondition, p.xBackendCookieRevision, update.status.programmed, route.Generation)
+		setXBackendRevision(&parentStatus, config.Domain()+xBackendTransportRevisionCondition, p.xBackendTransportRevision, update.status.programmed, route.Generation)
 		if existing >= 0 {
 			parents[existing] = parentStatus
 		} else {
@@ -525,6 +519,17 @@ func (p *routeStatusPlan) updateParentStatuses(config controller.Config, route *
 	}
 	route.Status.Parents = parents
 	return transitioned
+}
+
+func setXBackendRevision(parent *gatewayv1.RouteParentStatus, conditionType string, revision *string, programmed metav1.ConditionStatus, generation int64) {
+	switch {
+	case programmed != metav1.ConditionTrue:
+		meta.RemoveStatusCondition(&parent.Conditions, conditionType)
+	case revision != nil && *revision != "":
+		controller.SetCondition(&parent.Conditions, controller.Condition(conditionType, metav1.ConditionTrue, "Observed", *revision, generation))
+	case revision != nil:
+		meta.RemoveStatusCondition(&parent.Conditions, conditionType)
+	}
 }
 
 func parentStatusUpdateAppearedEarlier(

@@ -76,6 +76,8 @@ type Request struct {
 	HTTPRouteUsesXBackendClientTLS *bool
 	// HTTPRouteXBackendCookieRevision ties a status checkpoint to the writer's observation.
 	HTTPRouteXBackendCookieRevision *string
+	// HTTPRouteXBackendTransportRevision ties per-parent programming to the observed transports.
+	HTTPRouteXBackendTransportRevision *string
 	// HTTPRouteRetryBudgetAncestorFull binds its status to the live capacity check.
 	HTTPRouteRetryBudgetAncestorFull *bool
 	// HTTPRouteRejectedSections ties per-parent status to the graph's profile election.

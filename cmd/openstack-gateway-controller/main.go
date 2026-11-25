@@ -402,6 +402,7 @@ func run(ctx context.Context) error {
 		GRPCBackendTLSAvailable:        openStackProvider.GRPCBackendTLSAvailable,
 		BackendTLSSANAvailable:         openStackProvider.BackendTLSSANAvailable,
 		XBackendTLSAvailable:           openStackProvider.XBackendTLSAvailable,
+		BackendH2CAvailable:            openStackProvider.BackendH2CAvailable,
 		Client:                         manager.GetClient(),
 		Coordinator:                    graphCoordinator,
 		APIReader:                      manager.GetAPIReader(),

@@ -130,13 +130,44 @@ func xBackendCookieRevision(route *gatewayv1.HTTPRoute, observations []model.XBa
 	return fmt.Sprintf("%x", digest.Sum(nil))
 }
 
-func (r *Reconciler) currentXBackendCookieRevision(route *gatewayv1.HTTPRoute, parentRef gatewayv1.ParentReference, revision string) bool {
+const xBackendTransportRevisionCondition = "/XBackendTransportConfiguration"
+
+func xBackendTransportRevision(route *gatewayv1.HTTPRoute, observations []model.XBackendObservation) string {
+	digest := sha256.New()
+	seen := make(map[types.NamespacedName]bool)
+	for _, key := range model.LocalXBackendReferences(route) {
+		if seen[key] {
+			continue
+		}
+		index := slices.IndexFunc(observations, func(observation model.XBackendObservation) bool { return observation.Key == key })
+		if index < 0 || observations[index].ReadIssue != nil {
+			continue
+		}
+		seen[key] = true
+		backend := observations[index]
+		var protocol gatewayx.BackendProtocol
+		if backend.Spec.Protocol != nil {
+			protocol = *backend.Spec.Protocol
+		}
+		var tlsMode gatewayx.BackendTLSMode
+		if backend.Spec.TLS != nil {
+			tlsMode = backend.Spec.TLS.Mode
+		}
+		_, _ = fmt.Fprintf(digest, "%q %q %q %d %q %q %q\n", key.Namespace, key.Name, backend.UID, backend.Generation, backend.Spec.Type, protocol, tlsMode)
+	}
+	if len(seen) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%x", digest.Sum(nil))
+}
+
+func (r *Reconciler) currentXBackendRevision(route *gatewayv1.HTTPRoute, parentRef gatewayv1.ParentReference, conditionType, revision string) bool {
 	for _, parent := range route.Status.Parents {
 		if parent.ControllerName != r.Config.ControllerName ||
 			!controller.ParentRefsEqual(parent.ParentRef, route.Namespace, parentRef, route.Namespace) {
 			continue
 		}
-		proof := meta.FindStatusCondition(parent.Conditions, r.Config.Domain()+xBackendCookieRevisionCondition)
+		proof := meta.FindStatusCondition(parent.Conditions, r.Config.Domain()+conditionType)
 		if proof != nil {
 			return proof.Status == metav1.ConditionTrue && proof.ObservedGeneration == route.Generation && proof.Message == revision
 		}
@@ -145,7 +176,7 @@ func (r *Reconciler) currentXBackendCookieRevision(route *gatewayv1.HTTPRoute, p
 	return revision == ""
 }
 
-func (r *Reconciler) liveXBackendCookieRevision(ctx context.Context, route *gatewayv1.HTTPRoute) (string, error) {
+func (r *Reconciler) liveXBackendRevisions(ctx context.Context, route *gatewayv1.HTTPRoute) ([]model.XBackendObservation, error) {
 	var observations []model.XBackendObservation
 	seen := make(map[types.NamespacedName]bool)
 	for _, key := range model.LocalXBackendReferences(route) {
@@ -158,7 +189,7 @@ func (r *Reconciler) liveXBackendCookieRevision(ctx context.Context, route *gate
 			if apierrors.IsNotFound(err) {
 				continue
 			}
-			return "", fmt.Errorf("read XBackend %s for cookie status: %w", key, err)
+			return nil, fmt.Errorf("read XBackend %s for parent status: %w", key, err)
 		}
 		if backend.DeletionTimestamp.IsZero() {
 			observations = append(observations, model.XBackendObservation{
@@ -166,5 +197,5 @@ func (r *Reconciler) liveXBackendCookieRevision(ctx context.Context, route *gate
 			})
 		}
 	}
-	return xBackendCookieRevision(route, observations), nil
+	return observations, nil
 }

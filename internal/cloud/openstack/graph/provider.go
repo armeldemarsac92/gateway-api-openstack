@@ -218,11 +218,19 @@ func (p *Provider) BackendTLSSANAvailable(ctx context.Context, requireH2 bool) (
 }
 
 // XBackendTLSAvailable also requires the configured pool ALPN API.
-func (p *Provider) XBackendTLSAvailable(ctx context.Context, requireSAN bool) (bool, error) {
+func (p *Provider) XBackendTLSAvailable(ctx context.Context, requireH2, requireSAN bool) (bool, error) {
 	if !p.poolALPN {
 		return false, nil
 	}
-	return p.backendTLSAvailable(ctx, false, requireSAN)
+	return p.backendTLSAvailable(ctx, requireH2, requireSAN)
+}
+
+// BackendH2CAvailable reports whether Amphora can use cleartext HTTP/2 for a backend.
+func (p *Provider) BackendH2CAvailable(ctx context.Context) (bool, error) {
+	if !p.backendH2C {
+		return false, nil
+	}
+	return p.amphoraCapabilityAvailable(ctx, octavia.GatewayCapabilityBackendH2C)
 }
 
 func (p *Provider) backendTLSAvailable(ctx context.Context, requireH2, requireSAN bool) (bool, error) {

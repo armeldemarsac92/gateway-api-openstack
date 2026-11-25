@@ -35,7 +35,10 @@ const backendTLSManagedTag = "gateway-api-openstack.backend-tls=v1"
 const backendTLSRevisionTagPrefix = "gateway-api-openstack.backend-tls-ca="
 const backendTLSClientTag = "gateway-api-openstack.backend-tls-client=v1"
 const xBackendTLSClientTag = "gateway-api-openstack.xbackend-tls-client=v1"
-const xBackendServerALPN = "http/1.1"
+const (
+	xBackendServerALPN = "http/1.1"
+	xBackendHTTP2ALPN  = "h2"
+)
 
 // backendTLSSANTag also identifies pools that previously used explicit SANs.
 const backendTLSSANTag = "gateway-api-openstack.backend-tls-san=v1"
@@ -81,16 +84,32 @@ func hasObservedBackendTLS(pool pools.Pool, tls octavia.PoolBackendTLS) bool {
 	return slices.Contains(pool.Tags, backendTLSManagedTag) || tls.Hostname != "" || tls.RequireH2 || hasUnclearedBackendTLSSubjectAltNames(pool, tls)
 }
 
+func (r desiredRoute) requiresBackendTLSH2() bool {
+	return r.spec.GRPC || r.xBackend && r.spec.BackendTLS != nil && r.spec.BackendTLS.RequireH2
+}
+
+func (r desiredRoute) xBackendALPN() string {
+	if r.requiresBackendTLSH2() {
+		return xBackendHTTP2ALPN
+	}
+	return xBackendServerALPN
+}
+
 func backendTLSReadbackComplete(desired desiredRoute, observed observedRouteGraph) bool {
-	return observed.backendTLS.Complete() && (!desired.spec.GRPC || observed.backendTLS.RequireH2Observed) &&
+	// An existing h2 XBackend also needs the flag readback when changing
+	// protocols, so an omitted field cannot conceal an uncleared requirement.
+	needsH2Readback := desired.requiresBackendTLSH2() ||
+		desired.xBackend && slices.Contains(observed.pool.ALPNProtocols, xBackendHTTP2ALPN)
+	return observed.backendTLS.Complete() && (!needsH2Readback || observed.backendTLS.RequireH2Observed) &&
 		(!desired.xBackend || !observed.pool.TLSEnabled || observed.backendTLS.ALPNObserved)
 }
 
 func backendTLSProtocolMatches(desired desiredRoute, observed observedRouteGraph) bool {
 	if desired.xBackend {
-		return !observed.backendTLS.RequireH2 && slices.Equal(observed.pool.ALPNProtocols, []string{xBackendServerALPN})
+		return observed.backendTLS.RequireH2 == desired.requiresBackendTLSH2() &&
+			slices.Equal(observed.pool.ALPNProtocols, []string{desired.xBackendALPN()})
 	}
-	return !desired.spec.GRPC || observed.backendTLS.RequireH2
+	return !desired.requiresBackendTLSH2() || observed.backendTLS.RequireH2
 }
 
 func backendTLSCapabilities(requireH2, requireSAN bool) []string {
@@ -327,9 +346,10 @@ func (plan backendTLSPlan) xBackendWithdrawal(observed observedRouteGraph, wants
 	if pool == nil || plan.allowsMembers() {
 		return nil
 	}
-	if wantsClientCertificate || pool.TLSContainerRef != "" || slices.Contains(pool.Tags, xBackendTLSClientTag) {
-		// Close before draining any member or health probe that could present
-		// an identity. The authenticated renderer keeps the match reserved.
+	if wantsClientCertificate || pool.TLSContainerRef != "" || slices.Contains(pool.Tags, xBackendTLSClientTag) ||
+		observed.backendTLS.RequireH2 || slices.Contains(pool.Tags, backendTLSManagedTag) && slices.Contains(pool.ALPNProtocols, xBackendHTTP2ALPN) {
+		// Close before draining a client identity or reloading an enrolled
+		// HTTP/2 pool. The authenticated renderer keeps the match reserved.
 		return plan.withdrawal(true, true, observed)
 	}
 	switch pool.ProvisioningStatus {
@@ -399,11 +419,11 @@ func (p *Provider) observeBackendTLS(ctx context.Context, desired desiredRoute, 
 	if desired.xBackend && !p.poolALPN {
 		return blocked("Authenticated XBackends require Octavia API microversion 2.24 or newer")
 	}
-	if !capable(desired.spec.GRPC, len(tls.SubjectAltNames) != 0) {
+	if !capable(desired.requiresBackendTLSH2(), len(tls.SubjectAltNames) != 0) {
 		if len(tls.SubjectAltNames) != 0 {
 			return blocked("Waiting for Octavia to advertise explicit backend TLS subjectAltNames for the selected protocol")
 		}
-		if desired.spec.GRPC {
+		if desired.requiresBackendTLSH2() {
 			return blocked("Waiting for Octavia to advertise authenticated backend TLS with required HTTP/2 ALPN")
 		}
 		return blocked("Waiting for Octavia to advertise authenticated backend TLS")
@@ -434,7 +454,7 @@ func (p *Provider) observeBackendTLS(ctx context.Context, desired desiredRoute, 
 	case pool != nil && hasUnclearedBackendTLSSubjectAltNames(*pool, observed.backendTLS):
 		settings.SubjectAltNames = []cloud.BackendTLSSubjectAltName{}
 	}
-	if desired.spec.GRPC {
+	if desired.requiresBackendTLSH2() {
 		settings.RequireH2 = boolPointer(true)
 	} else if desired.xBackend && observed.backendTLS.RequireH2 {
 		settings.RequireH2 = boolPointer(false)
@@ -542,7 +562,7 @@ func (plan backendTLSPlan) poolMutation(desired desiredRoute, observed observedR
 			return &routeMutation{kind: routeMutationCreatePool}
 		case pool.ProvisioningStatus == "ACTIVE" && observed.backendTLS.AdminObserved &&
 			!pool.AdminStateUp && len(observed.members) == 0 &&
-			(xBackendPoolWithoutTLS(*pool, observed.backendTLS) || !observed.backendTLS.HostnameObserved):
+			xBackendPoolWithoutTLS(*pool, observed.backendTLS):
 			// Regional Amphora renders disabled authenticated pools as closed
 			// targets. A stock API needs the empty target enabled.
 			return &routeMutation{kind: routeMutationSetBackendTLS, id: pool.ID, poolAdmin: boolPointer(true)}
@@ -637,14 +657,14 @@ func (plan backendTLSPlan) poolMutation(desired desiredRoute, observed observedR
 		}
 		step.backendTLS = &plan.settings
 		if desired.xBackend {
-			step.poolALPNProtocols = new([]string{xBackendServerALPN})
+			step.poolALPNProtocols = new([]string{desired.xBackendALPN()})
 		}
 		if observed.backendH2C {
 			step.backendH2C = boolPointer(false)
 		}
 	case plan.phase == backendTLSVerified && !pool.AdminStateUp:
 		step.poolAdmin = boolPointer(true)
-		if desired.spec.GRPC || len(plan.settings.SubjectAltNames) != 0 {
+		if desired.requiresBackendTLSH2() || len(plan.settings.SubjectAltNames) != 0 {
 			// Reassert the verified settings when reopening an extended TLS pool.
 			step.backendTLS = &plan.settings
 		}

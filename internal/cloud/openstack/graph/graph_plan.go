@@ -378,6 +378,8 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 			routeResult.Outcome = p.progressingOutcome(routePlan[0].message())
 		} else if route.backendTLS.issue != "" {
 			routeResult.Outcome = p.progressingOutcome(route.backendTLS.issue)
+		} else if node.Disposition == cloud.GraphEnsure && route.xBackendH2CPending {
+			routeResult.Outcome = p.progressingOutcome("Waiting to verify regional h2c support")
 		}
 		if errors.Is(route.redirectIssue, errExactHeaderRedirectPrecedence) || errors.Is(route.redirectIssue, errHTTPMethodRedirectPrecedence) ||
 			errors.Is(route.redirectIssue, errExactQueryParamRedirectPrecedence) {

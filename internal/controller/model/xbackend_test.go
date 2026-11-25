@@ -141,14 +141,31 @@ func TestXBackendExternalHostnameProfile(t *testing.T) {
 	}
 	spec.TLS.Validation.Hostname = "identity.example.test"
 	spec.Protocol = ptr.To(gatewayx.BackendProtocolHTTP2)
+	if got := ValidateXBackend(spec, profile); got != nil {
+		t.Errorf("ServerOnly must accept HTTP2: %+v", got)
+	}
+	spec.Protocol = ptr.To(gatewayx.BackendProtocolH2C)
 	if got := ValidateXBackend(spec, profile); got == nil || got.Reason != string(gatewayv1.RouteReasonUnsupportedProtocol) {
-		t.Errorf("ServerOnly must reject HTTP/2: %+v", got)
+		t.Errorf("ServerOnly must reject H2C: %+v", got)
 	}
 	spec.Protocol = ptr.To(gatewayx.BackendProtocolHTTP11)
 	if got := ValidateXBackend(spec, profile); got != nil {
 		t.Errorf("ServerOnly should accept an explicit TLS hostname and HTTP/1.1: %+v", got)
 	}
-	spec.TLS = nil
+	spec.TLS = &gatewayx.BackendTLS{Mode: gatewayx.BackendTLSModeNone}
+	spec.Protocol = ptr.To(gatewayx.BackendProtocolHTTP2)
+	if got := ValidateXBackend(spec, profile); got == nil || got.Reason != string(gatewayv1.RouteReasonUnsupportedProtocol) {
+		t.Errorf("None must reject HTTP2: %+v", got)
+	}
+	spec.Protocol = ptr.To(gatewayx.BackendProtocolH2C)
+	if got := ValidateXBackend(spec, profile); got == nil || got.Reason != string(gatewayv1.RouteReasonUnsupportedProtocol) {
+		t.Errorf("H2C requires operator opt-in: %+v", got)
+	}
+	profile.H2C = true
+	if got := ValidateXBackend(spec, profile); got != nil {
+		t.Errorf("ExternalHostname must accept H2C with TLS mode None: %+v", got)
+	}
+	spec.TLS, spec.Protocol = nil, nil
 	ref.Port = ptr.To(gatewayv1.PortNumber(8089))
 	if group := resolveBackend(route, ref, input); group.State != BackendInvalid || group.Diagnostic.Reason != string(gatewayv1.RouteReasonUnsupportedValue) {
 		t.Fatalf("duplicating the XBackend port must be rejected: %+v", group)

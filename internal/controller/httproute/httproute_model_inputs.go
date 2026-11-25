@@ -53,6 +53,7 @@ type routeModelInputs struct {
 	admission              routeGraphAdmission
 
 	xBackendClientCertificates graph.XBackendClientCertificateResolver
+	xBackendH2CIssue           model.Diagnostic
 }
 
 func (inputs *routeModelInputs) routeUsesXBackendClientTLS(route *gatewayv1.HTTPRoute) bool {
@@ -281,6 +282,12 @@ func (r *Reconciler) collectRouteModelInputsForSets(ctx context.Context, reader 
 	}
 	if inputs.backendTLSAncestor != nil {
 		inputs.backendTLSAvailability = r.discoverBackendTLSProfiles(ctx, routes, inputs.input)
+	}
+	for _, backend := range inputs.input.XBackends {
+		if model.XBackendUsesH2C(backend.Spec) && model.CheckXBackendObservation(backend.Key, &backend, inputs.input.XBackendProfile) == nil {
+			inputs.xBackendH2CIssue = r.xBackendH2CDiagnostic(ctx)
+			break
+		}
 	}
 	if r.retryBudgetPolicyServed && r.Config.BackendRetryBudgetEnabled() {
 		inputs.retryBudgetAncestor = &backendtls.GatewayAncestor{Key: client.ObjectKeyFromObject(gateway), ControllerName: r.Config.ControllerName}
