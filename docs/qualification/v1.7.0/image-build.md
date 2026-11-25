@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-The linux/amd64 image built from a signed controller commit ran the Standard admission control and the Experimental listener trials. [Build record](image.json) · [Local trials](provider/gateway-listener-authorizer-transports/README.md)
+An Experimental HTTPRoute can pin a client to one authenticated Service endpoint. [Build record](image.json) · [Cookie and TLS traffic](provider/rule-affinity-backend-tls/README.md)
+
+The linux/amd64 image built from a signed controller commit ran the Standard admission control and the Experimental listener trials. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-439913e5181f49fb86ee300a175e25fe16249928/image.json) · [Local trials](provider/gateway-listener-authorizer-transports/README.md)
 
 An Experimental HTTPRoute rule can use verified TLS to its HTTP authorizer. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-a93b18166c27837a5c3cfdb7aac34ec9522b86be/image.json) · [Local trial](provider/gateway-http-route-http-authorizer-tls/README.md)
 
