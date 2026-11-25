@@ -147,6 +147,17 @@ type TLSSNIRoute struct {
 	BackendSecurityGroupIDs []string
 	Members                 []Member
 	BackendTLS              *BackendTLSValidation `json:",omitempty"`
+	// BackendServices identifies the contributing Services and ports of a
+	// weighted rule. Single-backend targets keep their original identity.
+	BackendServices []TLSBackendService `json:",omitempty"`
+	// TCPConnectionRejection reserves the unavailable share of new connections.
+	TCPConnectionRejection *TCPConnectionRejection `json:",omitempty"`
+}
+
+// TLSBackendService identifies a Service port that contributes to an SNI pool.
+type TLSBackendService struct {
+	UID  string
+	Port int
 }
 
 // RouteGraphNode describes one exact route component. Spec.Identity is always

@@ -20,9 +20,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
@@ -731,6 +735,7 @@ func TestSNIPolicyWithdrawalDuringNeutronFailureAndDisabledCleanup(t *testing.T)
 		"/lbaas/l7policies/policy-a/rules": {"rules": []any{rule}},
 	}
 	var writes []string
+	var expectReplay map[string]any
 	neutronFailed := true
 	clients := ServiceClients{
 		ProjectID: "project-a",
@@ -754,6 +759,14 @@ func TestSNIPolicyWithdrawalDuringNeutronFailureAndDisabledCleanup(t *testing.T)
 				return
 			}
 			writes = append(writes, r.Method+" "+r.URL.Path)
+			if expectReplay != nil && r.Method == http.MethodPut && r.URL.Path == "/lbaas/pools/pool/members" {
+				var body map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil || !reflect.DeepEqual(body, expectReplay) {
+					t.Errorf("replay does not match the original batch: %#v, %v", body, err)
+				}
+				w.WriteHeader(http.StatusAccepted)
+				return
+			}
 			if r.Method != http.MethodPut || r.URL.Path != "/lbaas/l7policies/policy-a" {
 				t.Errorf("unexpected Octavia request: %s", writes[len(writes)-1])
 				http.Error(w, "unexpected", http.StatusBadRequest)
@@ -809,6 +822,68 @@ func TestSNIPolicyWithdrawalDuringNeutronFailureAndDisabledCleanup(t *testing.T)
 			t.Fatalf("serving state still needs address inventory: err=%v writes=%v", err, writes)
 		}
 		spec.Gateway.TLSSNIRoutes = nil
+	})
+	t.Run("restart replays the staged batch during cleanup", func(t *testing.T) {
+		writes = nil
+		originalPool, originalMember := maps.Clone(pool), maps.Clone(member)
+		originalListenerPolicies, originalStatus := listener["l7policies"], lb["provisioning_status"]
+		t.Cleanup(func() {
+			maps.Copy(pool, originalPool)
+			delete(pool, "tcp_connection_rejection")
+			delete(pool, "updated_at")
+			maps.Copy(member, originalMember)
+			delete(member, "backup")
+			lb["provisioning_status"], listener["l7policies"] = originalStatus, originalListenerPolicies
+			reads["/lbaas/l7policies"]["l7policies"] = []any{policy}
+			expectReplay, writes = nil, nil
+		})
+		lb["provisioning_status"], pool["provisioning_status"], member["provisioning_status"] = "PENDING_UPDATE", "PENDING_UPDATE", "PENDING_CREATE"
+		pool["listeners"], listener["l7policies"], reads["/lbaas/l7policies"]["l7policies"] = []any{}, []any{}, []any{}
+		pool["tags"] = append(tags(roleSNIPool), sniWeightedPoolTag)
+		pool["updated_at"] = time.Now().Add(-time.Minute).Format(time.RFC3339)
+		fraction := map[string]any{"reject_weight": float64(1), "total_weight": float64(3)}
+		pool["tcp_connection_rejection"] = fraction
+		originalTags := append(tags(roleSNIMember), "controller-batch-version-observed")
+		slices.Sort(originalTags)
+		observedTags := slices.Clone(originalTags)
+		slices.Reverse(observedTags)
+		member["backup"], member["tags"], member["weight"] = false, observedTags, 3
+		wireTags := make([]any, len(originalTags))
+		for i, tag := range originalTags {
+			wireTags[i] = tag
+		}
+		expectReplay = map[string]any{"tcp_connection_rejection": fraction, "members": []any{map[string]any{
+			"address": "192.0.2.30", "protocol_port": float64(443), "admin_state_up": true, "backup": false, "weight": float64(3), "tags": wireTags,
+		}}}
+		cleanup := spec
+		cleanup.Gateway.Disposition = cloud.GraphDelete
+		cleanup.Identity.ControllerVersion, cleanup.Gateway.Spec.Identity.ControllerVersion = "new-version", "new-version"
+		fenced := false
+		cleanup.ValidateMutation = func(context.Context) error { fenced = true; return nil }
+		provider := newTestProvider(t, clients, ProviderConfig{})
+		result, err := provider.ReconcileGatewayGraph(t.Context(), cleanup)
+		if err != nil || !fenced || !result.Outcome.MutationSubmitted || !slices.Equal(writes, []string{"PUT /lbaas/pools/pool/members"}) {
+			t.Fatalf("cleanup must replay the detached original batch first: fenced=%t writes=%v outcome=%#v err=%v", fenced, writes, result.Outcome, err)
+		}
+	})
+	t.Run("unattributable member allows policy withdrawal only", func(t *testing.T) {
+		writes, neutronFailed = nil, false
+		originalTags := member["tags"]
+		member["tags"] = []string{"foreign-member"}
+		t.Cleanup(func() {
+			member["tags"], policy["admin_state_up"], pool["listeners"] = originalTags, true, ids("listener")
+			writes = nil
+		})
+		cleanup := spec
+		cleanup.Gateway.Disposition = cloud.GraphDelete
+		provider := newTestProvider(t, clients, ProviderConfig{})
+		if result, err := provider.ReconcileGatewayGraph(t.Context(), cleanup); err != nil || result.Outcome.State != cloud.OutcomeProgressing || len(writes) != 1 {
+			t.Fatalf("the owned policy can be withdrawn: result=%#v writes=%v err=%v", result.Outcome, writes, err)
+		}
+		policy["admin_state_up"], pool["listeners"] = false, []any{}
+		if _, err := provider.ReconcileGatewayGraph(t.Context(), cleanup); !errors.Is(err, cloud.ErrOwnershipConflict) || len(writes) != 1 {
+			t.Fatalf("cleanup must preserve unattributable members and their pool: writes=%v err=%v", writes, err)
+		}
 	})
 	t.Run("disabled controller still cleans verified suffix rules", func(t *testing.T) {
 		writes, neutronFailed = nil, false

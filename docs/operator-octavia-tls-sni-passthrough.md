@@ -9,7 +9,7 @@ A dedicated Gateway can serve two TLS applications on the same port. Amphora rea
 3. Set `enabled_tls_sni_providers = amphora` in the `[api_settings]` section of the region's Octavia API configuration. With the controller's project credentials and regional load-balancer endpoint, check that `GET /v2/lbaas/providers/amphora/gateway_capabilities` returns `tls_sni_passthrough_v1` in `gateway_capabilities`.
 4. For standalone, pin the matching controller image by digest in an operator kustomization based on `config/octavia-tls-sni-passthrough`. For Magnum, render and inspect the artifact below and pin its SHA-256 and the matching controller image in the conductor configuration. Select the Endpoint class for the workload. [Magnum operator setup](qualification/v1.7.0/magnum-operator.md#build-and-configure)
 
-   Pin `ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:523db1c10771c4c520c2d1b8cd9e2c616b2987bf9d3cc470a7e6108c3901e0a4`. [Controller release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-633e0efb0ca141adfd693f5474ed08a8b0777f3c) · [Exact-name qualification](qualification/v1.7.0/provider/tls-hostname-intersection.md) · [Wildcard qualification](qualification/v1.7.0/provider/tls-sni-suffix.md)
+   The original single-backend qualification used `ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:523db1c10771c4c520c2d1b8cd9e2c616b2987bf9d3cc470a7e6108c3901e0a4`. For a rule that distributes connections among Services, use the controller build in the qualification ledger. [Controller builds](qualification/v1.7.0/image-build.md) · [Exact-name qualification](qualification/v1.7.0/provider/tls-hostname-intersection.md) · [Wildcard qualification](qualification/v1.7.0/provider/tls-sni-suffix.md)
 
 ```sh
 kubectl kustomize config/octavia-tls-sni-passthrough
@@ -30,11 +30,19 @@ kubectl -n tls-demo get gateway edge -o yaml
 kubectl -n tls-demo get tlsroute alpha beta -o yaml
 ```
 
-A Gateway in this mode has one `TLS` listener in `Passthrough` mode, without certificate references or TLS options. Its hostname may be omitted, an exact DNS name, or a leading wildcard such as `*.example.test`. Each TLSRoute has one Gateway parent and one rule selecting one IPv4 Endpoint Service at weight 1.
+A Gateway in this mode has one `TLS` listener in `Passthrough` mode, without certificate references or TLS options. Its hostname may be omitted, an exact DNS name, or a leading wildcard such as `*.example.test`. Each TLSRoute has one Gateway parent and one rule. The rule can select up to 16 IPv4 Endpoint Services.
 
 The controller forwards the exact names shared by the listener and the route. For example, a listener with `*.example.test` and a route with `alpha.example.test`, `alias.example.test` and `elsewhere.example.org` sends the first two names to that Service. Its backend certificate must cover both. An exact listener can also narrow a wildcard route to that listener's name. When the names are disjoint, the route reports `Accepted=False/NoMatchingListenerHostname`. To serve an intersection such as `*.shop.example.test`, enable wildcard routing in the region and on the controller.
 
-When two routes claim an effective name, the more specific original route hostname takes precedence. Equally specific claims use creation time, then namespace and name. The chosen route must have an authorized backend before that name can serve traffic. A revoked grant closes its names even when a lower-priority route also claims them. Each accepted route counts once in `attachedRoutes`.
+When two routes claim an effective name, the more specific original route hostname takes precedence. Equally specific claims use creation time, then namespace and name. The chosen route must have an authorized backend before that name can serve traffic. If the winning route loses its only authorized backend, its names stay closed even when a lower-priority route also claims them. Each accepted route counts once in `attachedRoutes`.
+
+## Distribute connections among Services
+
+Set `spec.rules[0].backendRefs[].weight` to split new connections. For example, weights 3 and 1 give the Services three quarters and one quarter of the connections. Each Service divides its share among its ready endpoints. Each backend used in passthrough mode must present a certificate for the name the client requested. A zero weight excludes a backend from traffic while its reference still contributes to `ResolvedRefs`. The resulting per-endpoint ratio must fit Octavia's member weights of 1 through 256.
+
+To preserve the split when a Service loses its grant or its last ready endpoint, enable `enabled_tcp_connection_rejection_providers = amphora` in Octavia's `[api_settings]` and `--octavia-tcp-connection-rejection` on the controller. The region must advertise `tcp_connection_rejection_v1` in addition to the SNI capability. With that support, losing the backend of weight 1 rejects roughly one quarter of new connections. The other Service continues serving its share. Restoring the grant or the endpoints restores the split. Without proportional rejection, the controller withdraws forwarding for the affected name. [Regional Octavia build](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-xbackend-cookie-permanent-0a0c55cbc7c3) · [Connection rejection](operator-octavia-tcp-connection-rejection.md)
+
+On a terminating listener, multiple Services can receive plaintext TCP from Amphora. Backend re-encryption with a `BackendTLSPolicy` currently requires a rule with a single backend reference. [Local results on both channels](qualification/v1.7.0/provider/tlsroute-weighted-backends.md)
 
 ## Serve a wildcard TLS name
 

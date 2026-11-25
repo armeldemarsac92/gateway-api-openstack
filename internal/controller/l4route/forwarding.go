@@ -33,13 +33,14 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/routebackend"
 )
 
 func (r *Reconciler) forwardingTargetType() string { return r.Config.Domain() + "/ForwardingTarget" }
 
 // forwardingTarget hashes the desired destinations with the identities and
 // routing semantics of the Services that contribute to the pool.
-func forwardingTarget(backends []serviceBackend, groups []weightedServiceMembers, weighted bool, spec cloud.RouteSpec) (string, error) {
+func forwardingTarget(backends []serviceBackend, groups []routebackend.WeightedServiceMembers, weighted bool, spec cloud.RouteSpec) (string, error) {
 	ports := spec.ScopedListenerPorts
 	spec.ScopedListenerPorts = nil
 	target, err := forwardingBackendTarget(backends, groups, weighted, spec)
@@ -53,7 +54,7 @@ func forwardingTarget(backends []serviceBackend, groups []weightedServiceMembers
 	return target + "/" + scope, nil
 }
 
-func forwardingBackendTarget(backends []serviceBackend, groups []weightedServiceMembers, weighted bool, spec cloud.RouteSpec) (string, error) {
+func forwardingBackendTarget(backends []serviceBackend, groups []routebackend.WeightedServiceMembers, weighted bool, spec cloud.RouteSpec) (string, error) {
 	for _, backend := range backends {
 		if backend.service.UID == "" {
 			return "", fmt.Errorf("cannot identify the forwarding target for Service %s", backend.ref.key)
@@ -76,7 +77,7 @@ func forwardingBackendTarget(backends []serviceBackend, groups []weightedService
 			services = append(services, weightedService{
 				Service: backend.ref.key, ServiceUID: backend.service.UID, ServiceType: backend.service.Spec.Type,
 				TrafficPolicy: backend.service.Spec.ExternalTrafficPolicy, Port: backend.port,
-				Weight: backend.ref.weight, Members: groups[i].members,
+				Weight: backend.ref.weight, Members: groups[i].Members,
 			})
 		}
 		return hashForwardingTarget("v2", struct {
