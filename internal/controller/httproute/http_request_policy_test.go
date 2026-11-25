@@ -45,7 +45,7 @@ func TestHTTPRequestPolicyAdmissionAndLowering(t *testing.T) {
 		retry   *gatewayv1.HTTPRouteRetry
 		message string
 	}{
-		{&gatewayv1.HTTPRouteRetry{Backoff: ptr.To(gatewayv1.Duration("1s"))}, "retry.backoff"},
+		{&gatewayv1.HTTPRouteRetry{Backoff: ptr.To(gatewayv1.Duration("-1s"))}, "retry.backoff"},
 		{&gatewayv1.HTTPRouteRetry{Codes: []gatewayv1.HTTPRouteRetryStatusCode{501}}, "retry code 501"},
 		{&gatewayv1.HTTPRouteRetry{Attempts: ptr.To(2147483648)}, "retry.attempts"},
 	} {
@@ -54,7 +54,7 @@ func TestHTTPRequestPolicyAdmissionAndLowering(t *testing.T) {
 		require.ErrorContains(t, err, test.message)
 		require.Equal(t, string(gatewayv1.RouteReasonUnsupportedValue), statusForRouteBuildError(err).acceptedReason)
 	}
-	rule.Retry = &gatewayv1.HTTPRouteRetry{}
+	rule.Retry = &gatewayv1.HTTPRouteRetry{Backoff: ptr.To(gatewayv1.Duration("1s25ms"))}
 	spec, err := f.reconciler.buildRouteModelWithReader(t.Context(), f.reader, f.route, f.gateway)
 	require.NoError(t, err)
 	require.Len(t, spec.HTTPBackends, 1)
@@ -62,6 +62,7 @@ func TestHTTPRequestPolicyAdmissionAndLowering(t *testing.T) {
 	policy := spec.HTTPBackends[0].Matches[0].RequestPolicy
 	require.Zero(t, *policy.RequestTimeoutMS)
 	require.Equal(t, 1, *policy.Retry.Attempts)
+	require.EqualValues(t, 1025, *policy.Retry.BackoffMS)
 
 	rule.Timeouts, rule.Retry = nil, nil
 	spec, err = f.reconciler.buildRouteModelWithReader(t.Context(), f.reader, f.route, f.gateway)
@@ -89,13 +90,13 @@ func TestHTTPRequestPolicyAdmissionWaitsForActiveReadback(t *testing.T) {
 	require.Equal(t, metav1.ConditionTrue, sync(pendingRouteStatus("Gateway is pending")).Status)
 }
 
-func TestHTTPRequestPolicyRegionalWithdrawalPreservesAcceptedRule(t *testing.T) {
+func TestHTTPRetryBackoffRegionalWithdrawalPreservesAcceptedRule(t *testing.T) {
 	f := newRouteModelInputFixture(t)
 	r := f.reconciler
 	id := controller.RouteIdentity(r.Config, f.gateway, f.route)
 	key := client.ObjectKeyFromObject(f.route)
 	f.route.Generation = 7
-	f.route.Spec.Rules[0].Retry = &gatewayv1.HTTPRouteRetry{}
+	f.route.Spec.Rules[0].Retry = &gatewayv1.HTTPRouteRetry{Backoff: ptr.To(gatewayv1.Duration("0ms"))}
 	f.route.Spec.Rules = append(f.route.Spec.Rules, gatewayv1.HTTPRouteRule{
 		Matches: []gatewayv1.HTTPRouteMatch{{Path: &gatewayv1.HTTPPathMatch{
 			Type: ptr.To(gatewayv1.PathMatchExact), Value: ptr.To("/ordinary"),
@@ -105,7 +106,7 @@ func TestHTTPRequestPolicyRegionalWithdrawalPreservesAcceptedRule(t *testing.T) 
 	r.Config.HTTPRequestPolicy = true
 	require.NoError(t, f.client.Update(t.Context(), f.route))
 
-	message := "Octavia does not advertise http_request_policy_v1"
+	message := "Octavia does not advertise http_retry_backoff_v1"
 	for _, test := range []struct {
 		name        string
 		result      cloud.RouteResult

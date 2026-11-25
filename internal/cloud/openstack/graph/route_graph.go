@@ -56,6 +56,7 @@ type observedRoutePolicy struct {
 	requestPolicyPresent     bool
 	requestPolicyReported    bool
 	requestPolicyTagged      bool
+	retryBackoffTagged       bool
 	urlRewritePresent        bool
 	urlRewriteReported       bool
 	urlRewriteTagged         bool
@@ -701,6 +702,7 @@ func (p *Provider) observeListenerPolicies(ctx context.Context, inventory *route
 		observed.requestPolicyPresent = observation.HTTPRequestPolicyPresent
 		observed.requestPolicyReported = observation.HTTPRequestPolicyReported
 		observed.requestPolicyTagged = slices.Contains(item.Tags, openstackidentity.HTTPRequestPolicyTag)
+		observed.retryBackoffTagged = slices.Contains(item.Tags, openstackidentity.HTTPRetryBackoffTag)
 		if observed.hasHTTPRequestPolicy() && (protocol != cloud.ListenerProtocolHTTP ||
 			listener.Protocol != cloud.ListenerProtocolHTTP && listener.Protocol != terminatedHTTPS ||
 			role.redirect || fixedResponse || !weighted && item.Action != string(l7policies.ActionRedirectToPool)) {
@@ -1437,7 +1439,8 @@ func buildRoutePolicyPlan(
 		}
 		if wantedPolicy.requestURLRewrite == nil && observedPolicy.urlRewriteTagged && !observedPolicy.urlRewriteReported ||
 			wantedPolicy.requestCORS == nil && observedPolicy.corsTagged && !observedPolicy.corsReported ||
-			wantedPolicy.requestPolicy == nil && !desired.fixedResponse && observedPolicy.requestPolicyTagged && !observedPolicy.requestPolicyReported {
+			wantedPolicy.requestPolicy == nil && !desired.fixedResponse && observedPolicy.requestPolicyTagged && !observedPolicy.requestPolicyReported ||
+			!wantedPolicy.requestPolicy.HasRetryBackoff() && !desired.fixedResponse && observedPolicy.retryBackoffReadbackMissing() {
 			// A stock API may hide the field. Remove the owned policy while
 			// closed before rebuilding it without the extension.
 			if !observedPolicyDisabled(observedPolicy) {
@@ -1459,6 +1462,23 @@ func buildRoutePolicyPlan(
 			// The readback cannot distinguish unchanged CORS from a stock API
 			// hiding the field. The listener guard holds until it can.
 			continue
+		}
+		if wantedPolicy.requestPolicy.HasRetryBackoff() && !wantedPolicy.requestPolicyMatches(observedPolicy) {
+			// A matching rule may have been serving with ordinary retries
+			// before backoff was added, or the API may have lost the field.
+			// Stage the exact value behind a confirmed administrative closure.
+			// Replacing a verified generation must wait for capability discovery.
+			if !observedPolicyDisabled(observedPolicy) {
+				disablePlan = append(disablePlan, routeMutation{kind: routeMutationDisablePolicy, id: policy.ID,
+					retry:              policy.ProvisioningStatus == "ERROR" || !observedPolicy.adminObserved,
+					withdrawHTTPPolicy: !observedPolicy.hasConfirmedActiveRetryBackoff()})
+				continue
+			}
+			if observedPolicy.retryBackoffReadbackMissing() {
+				// An older response can omit this nested field while still
+				// reporting the rest of the policy. Wait for provable readback.
+				continue
+			}
 		}
 		if wantedPolicy.requestPolicy != nil && (!observedPolicy.adminObserved ||
 			observedPolicy.requestPolicyTagged && !observedPolicy.requestPolicyReported) {
@@ -1951,7 +1971,7 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 		}
 		if step.policy.requestPolicy != nil {
 			create.HTTPRequestPolicy = step.policy.requestPolicy
-			create.Tags = append(create.Tags, openstackidentity.HTTPRequestPolicyTag)
+			create.Tags = httpRequestPolicyTags(create.Tags, create.HTTPRequestPolicy)
 		}
 		created, createErr := p.octavia.CreatePolicy(ctx, create)
 		err = createErr

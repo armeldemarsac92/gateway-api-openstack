@@ -30,27 +30,50 @@ import (
 var errHTTPRequestPolicyUnverified = errors.New("waiting for active Octavia HTTP request policy readback")
 
 func (observed observedRoutePolicy) hasHTTPRequestPolicy() bool {
-	return observed.requestPolicyTagged || observed.requestPolicyPresent
+	return observed.requestPolicyTagged || observed.requestPolicyPresent || observed.hasHTTPRetryBackoff()
+}
+
+func (observed observedRoutePolicy) hasHTTPRetryBackoff() bool {
+	return observed.retryBackoffTagged || observed.requestPolicy.HasRetryBackoff()
+}
+
+func (observed observedRoutePolicy) retryBackoffReadbackMissing() bool {
+	return observed.retryBackoffTagged && !observed.requestPolicy.HasRetryBackoff()
+}
+
+// A readable active generation can stay in service while discovery for an edit is pending.
+func (observed observedRoutePolicy) hasConfirmedActiveRetryBackoff() bool {
+	return observed.policy.AdminStateUp && observed.requestPolicyTagged && observed.requestPolicy.HasRetryBackoff() &&
+		observedForwardPolicySettled(observed) && !observed.initialRulesPartial
 }
 
 func (wanted desiredPolicy) requestPolicyMatches(observed observedRoutePolicy) bool {
 	if wanted.requestPolicy == nil {
 		return !observed.hasHTTPRequestPolicy()
 	}
-	return observed.adminObserved && observed.requestPolicyTagged && wanted.requestPolicy.Equal(observed.requestPolicy)
+	return observed.adminObserved && observed.requestPolicyTagged &&
+		(!observed.retryBackoffTagged || wanted.requestPolicy.HasRetryBackoff()) && wanted.requestPolicy.Equal(observed.requestPolicy)
+}
+
+func httpRequestPolicyTags(tags []string, policy *cloud.HTTPRequestPolicy) []string {
+	tags = slices.DeleteFunc(slices.Clone(tags), func(tag string) bool {
+		return tag == openstackidentity.HTTPRequestPolicyTag || tag == openstackidentity.HTTPRetryBackoffTag
+	})
+	if policy != nil {
+		tags = append(tags, openstackidentity.HTTPRequestPolicyTag)
+		if policy.HasRetryBackoff() {
+			tags = append(tags, openstackidentity.HTTPRetryBackoffTag)
+		}
+	}
+	return tags
 }
 
 func httpRequestPolicyPatch(wanted desiredPolicy, observed observedRoutePolicy) routeMutation {
-	tags := slices.DeleteFunc(slices.Clone(observed.policy.Tags), func(tag string) bool {
-		return tag == openstackidentity.HTTPRequestPolicyTag
-	})
-	if wanted.requestPolicy != nil {
-		tags = append(tags, openstackidentity.HTTPRequestPolicyTag)
-	}
 	return routeMutation{
 		kind: routeMutationSetHTTPRequestPolicy, id: observed.policy.ID,
 		requestPolicyUpdate: &octavia.HTTPRequestPolicyUpdate{Value: wanted.requestPolicy},
-		policyTags:          tags, withdrawHTTPPolicy: wanted.requestPolicy == nil,
+		policyTags:          httpRequestPolicyTags(observed.policy.Tags, wanted.requestPolicy),
+		withdrawHTTPPolicy:  wanted.requestPolicy == nil,
 	}
 }
 
@@ -66,9 +89,7 @@ func (step *routeMutation) clearHTTPRequestPolicy(observed observedRoutePolicy) 
 			step.policyTags = slices.Clone(observed.policy.Tags)
 		}
 	}
-	step.policyTags = slices.DeleteFunc(step.policyTags, func(tag string) bool {
-		return tag == openstackidentity.HTTPRequestPolicyTag
-	})
+	step.policyTags = httpRequestPolicyTags(step.policyTags, nil)
 }
 
 type httpRequestPolicyAvailability uint8
@@ -77,10 +98,16 @@ const (
 	httpRequestPolicyAvailable httpRequestPolicyAvailability = iota
 	httpRequestPolicyUnverified
 	httpRequestPolicyUnavailable
+	httpRetryBackoffUnavailable
 )
+
+func (availability httpRequestPolicyAvailability) unavailable() bool {
+	return availability == httpRequestPolicyUnavailable || availability == httpRetryBackoffUnavailable
+}
 
 type unavailableHTTPRequestPolicies struct {
 	remainingRules map[int]bool
+	capability     string
 	err            error
 }
 
@@ -92,19 +119,23 @@ func (p *Provider) gateHTTPRequestPolicies(ctx context.Context, desired *desired
 		return unavailable
 	}
 
-	affected := make(map[int]bool)
-	for index, route := range desired.routes {
+	var hasRequestPolicy, hasBackoff bool
+	for _, route := range desired.routes {
 		for _, policies := range route.policySets() {
-			if slices.ContainsFunc(policies, func(policy desiredPolicy) bool { return policy.requestPolicy != nil }) {
-				affected[index] = true
-				break
+			for _, policy := range policies {
+				hasRequestPolicy = hasRequestPolicy || policy.requestPolicy != nil
+				hasBackoff = hasBackoff || policy.requestPolicy.HasRetryBackoff()
 			}
 		}
 	}
-	if len(affected) == 0 {
+	if !hasRequestPolicy {
 		return unavailable
 	}
-	unavailable.err = p.verifyGatewayHTTPURLCapabilities(ctx, *desired, actual, []string{octavia.GatewayCapabilityHTTPRequestPolicy})
+	required := []string{octavia.GatewayCapabilityHTTPRequestPolicy}
+	if hasBackoff {
+		required = append(required, octavia.GatewayCapabilityHTTPRetryBackoff)
+	}
+	unavailable.err = p.verifyGatewayHTTPURLCapabilities(ctx, *desired, actual, required)
 	if unavailable.err == nil {
 		return unavailable
 	}
@@ -113,25 +144,42 @@ func (p *Provider) gateHTTPRequestPolicies(ctx context.Context, desired *desired
 		desired.httpRequestPolicies = httpRequestPolicyUnverified
 		return unavailable
 	}
+	unavailable.capability = octavia.GatewayCapabilityHTTPRequestPolicy
+	if missing != nil {
+		unavailable.capability = missing.Capability
+	}
 	desired.httpRequestPolicies = httpRequestPolicyUnavailable
-	unavailable.remainingRules = affected
+	if unavailable.capability == octavia.GatewayCapabilityHTTPRetryBackoff {
+		desired.httpRequestPolicies = httpRetryBackoffUnavailable
+	}
+	unavailable.remainingRules = make(map[int]bool)
 	policiesByPort := make(map[int][]*desiredPolicy)
-	keep := func(part *desiredRoute) {
+	keep := func(part *desiredRoute) bool {
+		affected := false
 		part.policies = slices.DeleteFunc(part.policies, func(policy desiredPolicy) bool {
-			return policy.requestPolicy != nil
+			if policy.requestPolicy == nil || desired.httpRequestPolicies == httpRetryBackoffUnavailable && !policy.requestPolicy.HasRetryBackoff() {
+				return false
+			}
+			if part.requestPolicyWithdrawals == nil {
+				part.requestPolicyWithdrawals = make(map[string]bool)
+			}
+			part.requestPolicyWithdrawals[policy.role] = true
+			affected = true
+			return true
 		})
 		port := httpURLPolicyRoutePort(*desired, *part)
 		for i := range part.policies {
 			policiesByPort[port] = append(policiesByPort[port], &part.policies[i])
 		}
+		return affected
 	}
 	for i := range desired.routes {
 		route := &desired.routes[i]
-		keep(route)
+		affected := keep(route)
 		for j := range route.httpParts {
-			keep(&route.httpParts[j])
+			affected = keep(&route.httpParts[j]) || affected
 		}
-		if affected[i] {
+		if affected {
 			unavailable.remainingRules[i] = slices.ContainsFunc(route.policySets(), func(policies []desiredPolicy) bool {
 				return len(policies) != 0
 			})
@@ -175,8 +223,25 @@ func nextHTTPRequestPolicyWithdrawal(desired desiredGatewayGraph, actual observe
 	}
 	var candidates []candidate
 	for index, route := range actual.routes {
+		wanted := desired.routes[index]
+		var backoffPolicies map[string]desiredPolicy
+		for _, policy := range wanted.policies {
+			if policy.requestPolicy.HasRetryBackoff() {
+				if backoffPolicies == nil {
+					backoffPolicies = make(map[string]desiredPolicy)
+				}
+				backoffPolicies[policy.role] = policy
+			}
+		}
 		for _, policy := range route.policies {
-			if policy.hasHTTPRequestPolicy() && !observedPolicyDisabled(policy) {
+			if observedPolicyDisabled(policy) {
+				continue
+			}
+			hasUnavailablePolicy := wanted.requestPolicyWithdrawals[policy.role] ||
+				desired.httpRequestPolicies == httpRequestPolicyUnavailable && policy.hasHTTPRequestPolicy() ||
+				desired.httpRequestPolicies == httpRetryBackoffUnavailable && policy.hasHTTPRetryBackoff()
+			backoffRule, wantsBackoff := backoffPolicies[policy.role]
+			if hasUnavailablePolicy || wantsBackoff && !backoffRule.requestPolicyMatches(policy) && !policy.hasConfirmedActiveRetryBackoff() {
 				candidates = append(candidates, candidate{policy: policy, index: index})
 			}
 		}
@@ -249,7 +314,7 @@ func (p *Provider) reportUnavailableHTTPRequestPolicies(unavailable unavailableH
 			continue
 		}
 		route := &result.Routes[index].Result
-		message := "Octavia does not advertise " + octavia.GatewayCapabilityHTTPRequestPolicy
+		message := "Octavia does not advertise " + unavailable.capability
 		if remaining {
 			route.PartiallyInvalid = message
 		} else {
