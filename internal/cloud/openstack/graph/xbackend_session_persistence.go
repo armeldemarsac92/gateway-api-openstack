@@ -58,10 +58,13 @@ var (
 // XBackendCookieAvailable checks regional support for the Amphora provider
 // selected for HTTPRoutes. Mutations also check the effective provider.
 func (p *Provider) XBackendCookieAvailable(ctx context.Context, requirements cloud.HTTPSessionCookieRequirements) (bool, error) {
-	return p.discoverXBackendCookie(ctx, "amphora", requirements)
+	if !p.xBackendSessionPersistence {
+		return false, nil
+	}
+	return p.discoverPoolSessionCookie(ctx, "amphora", requirements)
 }
 
-func (p *Provider) discoverXBackendCookie(ctx context.Context, provider string, requirements cloud.HTTPSessionCookieRequirements) (bool, error) {
+func (p *Provider) discoverPoolSessionCookie(ctx context.Context, provider string, requirements cloud.HTTPSessionCookieRequirements) (bool, error) {
 	required := []string{octavia.GatewayCapabilityHTTPCookieName}
 	if requirements&(cloud.HTTPSessionCookieTimed|cloud.HTTPSessionCookiePermanent) != 0 {
 		required = append(required, octavia.GatewayCapabilityHTTPCookieAbsoluteTimeout)
@@ -72,13 +75,10 @@ func (p *Provider) discoverXBackendCookie(ctx context.Context, provider string, 
 	if requirements&cloud.HTTPSessionCookiePath != 0 {
 		required = append(required, octavia.GatewayCapabilityHTTPCookiePath)
 	}
-	return p.discoverXBackendPersistence(ctx, provider, required...)
+	return p.discoverPoolSessionPersistence(ctx, provider, required...)
 }
 
-func (p *Provider) discoverXBackendPersistence(ctx context.Context, provider string, required ...string) (bool, error) {
-	if !p.xBackendSessionPersistence {
-		return false, nil
-	}
+func (p *Provider) discoverPoolSessionPersistence(ctx context.Context, provider string, required ...string) (bool, error) {
 	discovery, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	err := p.octavia.VerifyGatewayCapabilities(discovery, provider, required...)
@@ -121,7 +121,7 @@ func (p *Provider) prepareXBackendPersistence(ctx context.Context, desired *desi
 		if seen, ok := capabilities[requirements]; ok {
 			return seen
 		}
-		available, err := p.discoverXBackendCookie(ctx, actual.loadBalancer.Provider, requirements)
+		available, err := p.discoverPoolSessionCookie(ctx, actual.loadBalancer.Provider, requirements)
 		var observation xBackendCookieCapability
 		switch {
 		case err != nil:
@@ -135,7 +135,7 @@ func (p *Provider) prepareXBackendPersistence(ctx context.Context, desired *desi
 		return observation
 	}
 	headerCapability := sync.OnceValue(func() xBackendCookieCapability {
-		available, err := p.discoverXBackendHeader(ctx, actual.loadBalancer.Provider)
+		available, err := p.discoverPoolSessionHeader(ctx, actual.loadBalancer.Provider)
 		switch {
 		case err != nil:
 			return xBackendCookieUnverified
@@ -148,16 +148,26 @@ func (p *Provider) prepareXBackendPersistence(ctx context.Context, desired *desi
 	permanentPools := make(map[string][]*desiredRoute)
 	var withdrawal *graphMutation
 	prepare := func(routeIndex int, part *desiredRoute, current *observedRouteGraph, positivelyWeighted bool) {
+		enabled := p.xBackendSessionPersistence
+		if part.inlineSessionPersistence {
+			enabled = p.routeSessionPersistence
+		}
 		part.headerReadbackPending = false
 		if part.sessionHeader != nil {
-			part.sessionHeaderCapability = headerCapability()
+			part.sessionHeaderCapability = xBackendCookieUnavailable
+			if enabled {
+				part.sessionHeaderCapability = headerCapability()
+			}
 			part.headerReadbackPending = current == nil || !part.activeHeaderMatches(*current)
 		} else if current != nil && part.managesSessionPersistence(*current) {
 			part.headerReadbackPending = enrolledHeader(*current)
 		}
 		part.cookieReadbackPending, part.cookiePathReadbackPending = false, false
 		if part.sessionCookieName != "" {
-			part.sessionCookieCapability = capability(part.sessionCookieDeadline.Requirements().WithPath(part.sessionCookiePath))
+			part.sessionCookieCapability = xBackendCookieUnavailable
+			if enabled {
+				part.sessionCookieCapability = capability(part.sessionCookieDeadline.Requirements().WithPath(part.sessionCookiePath))
+			}
 		}
 		switch {
 		case part.sessionCookiePath != nil:
@@ -212,8 +222,8 @@ func (p *Provider) prepareXBackendPersistence(ctx context.Context, desired *desi
 				if targets[key] || old.pool == nil || !enrolledHeader(*old) && !poolHasManagedSessionPersistence(*old) {
 					continue
 				}
-				// A rejected weighted target is absent from the desired graph.
-				// Withdraw its old persistence before ordinary policy cleanup.
+				// A withdrawn rule pool or a rejected weighted target can be absent
+				// from the desired graph. Clear its affinity before policy cleanup.
 				if step, _ := planXBackendPersistence(desiredRoute{xBackend: true}, *old); step != nil {
 					withdrawal = &graphMutation{kind: graphRouteMutation, routeIndex: i, backendKey: key,
 						route: *step, withdrawHTTPPolicy: true, message: step.message()}
@@ -222,7 +232,7 @@ func (p *Provider) prepareXBackendPersistence(ctx context.Context, desired *desi
 			}
 		}
 	}
-	// Each positive use of a Permanent cookie shares the backend object's scope.
+	// Each positive use of a Permanent cookie shares its attachment's scope.
 	// Do not report it or admit new members until every pool confirms it.
 	for _, peers := range permanentPools {
 		if slices.ContainsFunc(peers, func(part *desiredRoute) bool { return part.cookieReadbackPending }) {

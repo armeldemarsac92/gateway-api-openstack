@@ -354,17 +354,21 @@ func ServiceSessionPersistence(persistence gatewayv1.SessionPersistence, uid typ
 	if diagnostic := validateSessionPersistence(persistence, "Service"); diagnostic != nil {
 		return nil, diagnostic
 	}
+	if !IsHeaderSessionPersistence(persistence) && uid == "" {
+		return nil, backendDiagnostic(gatewayv1.RouteReasonUnsupportedValue, "Service session cookie needs an observed Service UID")
+	}
+	scope := fmt.Sprintf("%x", sha256.Sum256([]byte("service/"+string(uid))))
+	return poolSessionPersistence(persistence, "service", scope), nil
+}
+
+func poolSessionPersistence(persistence gatewayv1.SessionPersistence, prefix, scope string) *cloud.ServiceSessionPersistence {
 	timeout, _ := durationMilliseconds(persistence.AbsoluteTimeout)
 	if IsHeaderSessionPersistence(persistence) {
 		return &cloud.ServiceSessionPersistence{Header: &cloud.HTTPSessionHeaderPersistence{
 			Name: strings.ToLower(string(persistence.Header.Name)), TimeoutMS: timeout,
-		}}, nil
+		}}
 	}
-	if uid == "" {
-		return nil, backendDiagnostic(gatewayv1.RouteReasonUnsupportedValue, "Service session cookie needs an observed Service UID")
-	}
-	scope := fmt.Sprintf("%x", sha256.Sum256([]byte("service/"+string(uid))))
-	name := "service-" + scope
+	name := prefix + "-" + scope
 	if persistence.Cookie != nil && persistence.Cookie.Name != nil {
 		name = string(*persistence.Cookie.Name)
 	}
@@ -374,7 +378,7 @@ func ServiceSessionPersistence(persistence gatewayv1.SessionPersistence, uid typ
 			TimeoutMS: *timeout, Scope: scope, Permanent: XBackendCookieRequirements(persistence)&cloud.HTTPSessionCookiePermanent != 0,
 		}
 	}
-	return settings, nil
+	return settings
 }
 
 func IsHeaderSessionPersistence(persistence gatewayv1.SessionPersistence) bool {

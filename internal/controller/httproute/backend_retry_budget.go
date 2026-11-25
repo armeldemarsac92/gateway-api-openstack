@@ -204,6 +204,16 @@ func activeRetryBudgetBackends(matches []routeLoweredMatch, rules []model.Rule, 
 	return activeServiceBackends(matches, rules, transportUsable, true)
 }
 
+func activeServicePersistenceBackends(matches []routeLoweredMatch, rules []model.Rule, transportUsable func(model.BackendGroup) bool) iter.Seq[model.BackendGroup] {
+	return func(yield func(model.BackendGroup) bool) {
+		for backend := range activeServiceBackends(matches, rules, transportUsable, false) {
+			if backend.RouteSessionPersistence == nil && !yield(backend) {
+				return
+			}
+		}
+	}
+}
+
 func activeServiceBackends(matches []routeLoweredMatch, rules []model.Rule, transportUsable func(model.BackendGroup) bool, includeMirrors bool) iter.Seq[model.BackendGroup] {
 	return func(yield func(model.BackendGroup) bool) {
 		emit := func(backend model.BackendGroup) bool {

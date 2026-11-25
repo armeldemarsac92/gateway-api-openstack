@@ -52,6 +52,7 @@ type routeGraphResult struct {
 	xBackendTransportRevision  *string
 	backendDiagnostic          model.Diagnostic
 	corsFallback               bool
+	droppedInlineRules         string
 	backendTLSAncestorSlot     backendtls.AncestorSlot
 	retryBudgetAncestorFull    bool
 	cloud.RouteResult
@@ -98,6 +99,7 @@ func (r *Reconciler) ensureRouteGraph(
 		Action:   graph.Ensure, Gateway: expectedGateway, Route: expectedRoute,
 		HTTPRouteBackendDiagnostic:           &prepared.backendDiagnostic,
 		HTTPRouteCORSFallback:                &prepared.corsFallback,
+		HTTPRouteDroppedInlineRules:          &prepared.droppedInlineRules,
 		HTTPRouteRejectedSections:            &prepared.rejectedSections,
 		HTTPRouteRetryBudgetAncestorFull:     &prepared.retryBudgetAncestorFull,
 		HTTPRouteUsesXBackendClientTLS:       &prepared.usesXBackendClientTLS,
@@ -122,6 +124,12 @@ func (r *Reconciler) ensureRouteGraph(
 		}
 	}
 	component, err := routeComponentResult(result, expectedIdentity)
+	if prepared.droppedInlineRules != "" {
+		if component.PartiallyInvalid != "" {
+			component.PartiallyInvalid += ". "
+		}
+		component.PartiallyInvalid += prepared.droppedInlineRules
+	}
 	prepared.RouteResult = component
 	return prepared, err
 }
@@ -167,12 +175,13 @@ func (r *Reconciler) prepareRouteGraphBinding(ctx context.Context, route *gatewa
 		backendObserved:         snapshot.backends != nil,
 		backendDiagnostic:       snapshot.backendDiagnostic,
 		corsFallback:            snapshot.corsFallback,
+		droppedInlineRules:      snapshot.droppedInlineRules,
 		backendTLSAncestorSlot:  snapshot.backendTLSAncestorSlot,
 		retryBudgetAncestorFull: snapshot.retryBudgetAncestorFull,
 	}
 	if snapshot.backends != nil {
 		prepared.usesXBackendClientTLS = snapshot.backends.routeUsesXBackendClientTLS(route)
-		if r.retryBudgetPolicyServed && r.Config.XBackendSessionPersistenceEnabled() {
+		if r.Config.RouteSessionPersistenceEnabled() || r.retryBudgetPolicyServed && r.Config.XBackendSessionPersistenceEnabled() {
 			revision := servicePersistenceRevision(snapshot.desired)
 			prepared.servicePersistenceRevision = &revision
 		}

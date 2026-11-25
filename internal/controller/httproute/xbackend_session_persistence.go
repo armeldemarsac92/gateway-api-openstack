@@ -119,26 +119,29 @@ const servicePersistenceRevisionCondition = "/ServiceSessionConfiguration"
 
 // A policy can change while the owning Route keeps the same generation. This
 // digest ties optional reuse of a previous provider observation to the same
-// projected Service affinity configuration, including its removal.
+// projected Service pool affinity configuration, including its removal.
 func servicePersistenceRevision(spec cloud.RouteSpec) string {
 	digest := sha256.New()
 	observed := false
-	record := func(port, backendPort int, namespace, name string, settings *cloud.ServiceSessionPersistence, pending bool) {
+	record := func(port, backendPort int, namespace, name, rule, uid string, settings *cloud.ServiceSessionPersistence, pending bool) {
 		if settings == nil && !pending {
 			return
 		}
 		observed = true
 		config, _ := json.Marshal(settings)
 		_, _ = fmt.Fprintf(digest, "%d %q %q %d %t %s\n", port, namespace, name, backendPort, pending, config)
+		if rule != "" {
+			_, _ = fmt.Fprintf(digest, "rule %q %q\n", rule, uid)
+		}
 	}
 	for _, part := range append([]cloud.RouteSpec{spec}, spec.AdditionalHTTPPorts...) {
 		port := part.GatewayRequirements.ListenerPort
 		if len(part.ScopedListenerPorts) != 0 {
 			port = part.ScopedListenerPorts[0]
 		}
-		record(port, 0, "", "", part.ServiceSessionPersistence, part.ServiceSessionPersistencePending)
+		record(port, 0, "", "", "", "", part.ServiceSessionPersistence, part.ServiceSessionPersistencePending)
 		for _, backend := range part.HTTPBackends {
-			record(port, backend.Port, backend.Namespace, backend.Name, backend.ServiceSessionPersistence, backend.ServiceSessionPersistencePending)
+			record(port, backend.Port, backend.Namespace, backend.Name, backend.SessionPersistenceRule, backend.SessionPersistenceServiceUID, backend.ServiceSessionPersistence, backend.ServiceSessionPersistencePending)
 		}
 	}
 	if !observed {

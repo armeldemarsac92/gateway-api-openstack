@@ -116,6 +116,7 @@ type desiredRoute struct {
 	xBackendH2CPending          bool
 	xBackend                    bool
 	xBackendPlaintext           bool
+	inlineSessionPersistence    bool
 	sessionHeader               *cloud.HTTPSessionHeaderPersistence
 	sessionHeaderCapability     xBackendCookieCapability
 	headerReadbackPending       bool
@@ -468,6 +469,10 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 			return invalid(errors.New("HTTP session persistence absolute timeout requires a cookie name, valid timeout and XBackend scope"))
 		}
 		key := scopeHTTPKey(spec, openstackidentity.HTTPBackendPoolKey(backend))
+		if backend.SessionPersistenceRule != "" && (xBackend || backend.ServiceSessionPersistencePending ||
+			mirrorsUsed[index] || backend.BackendTLS != nil && !deniedTLS) {
+			return invalid(errors.New("rule session persistence requires a primary cleartext HTTP or h2c Service endpoint pool"))
+		}
 		if backendKeys[key] {
 			return invalid(errors.New("duplicate HTTP backend within one route"))
 		}
@@ -488,6 +493,7 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 			return desiredRoute{}, err
 		}
 		part.fixedResponse = fixedResponse
+		part.inlineSessionPersistence = backend.SessionPersistenceRule != ""
 		part.xBackend = xBackend
 		part.xBackendH2CPending = backend.BackendH2CPending
 		part.xBackendPlaintext = xBackend && !backend.InvalidReference && backend.BackendTLS == nil

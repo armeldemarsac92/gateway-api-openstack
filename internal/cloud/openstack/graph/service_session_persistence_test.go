@@ -23,11 +23,92 @@ import (
 	"testing"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	openstackidentity "github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/identity"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/pools"
 	"github.com/stretchr/testify/require"
 	"k8s.io/utils/ptr"
 )
+
+func TestRouteSessionPersistencePoolWithdrawal(t *testing.T) {
+	capabilities := []string{octavia.GatewayCapabilityHTTPCookieName}
+	lbClient := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "GET /lbaas/providers/amphora/gateway_capabilities", r.Method+" "+r.URL.Path)
+		safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": capabilities})
+	}))
+	provider := NewProvider(ServiceClients{LoadBalancer: lbClient, ProjectID: "project-a"}, ProviderConfig{RouteSessionPersistence: true})
+	spec := completeGraphSpec(safetyTestIdentity(t))
+	route := &spec.Routes[0].Spec
+	route.Hostname, route.PathType, route.PathValue, route.Members = "", "", "", nil
+	route.MemberMode = cloud.MemberModeEndpoint
+	members := []cloud.Member{{Address: "192.0.2.20", Port: 8080}, {Address: "192.0.2.21", Port: 8080}}
+	persisted := cloud.HTTPBackend{
+		Namespace: "apps", Name: "checkout", Port: 8080, Members: members, SessionPersistenceRule: "name/checkout",
+		SessionPersistenceServiceUID: "checkout-uid",
+		ServiceSessionPersistence:    &cloud.ServiceSessionPersistence{CookieName: "checkout_session"},
+		Matches:                      []cloud.HTTPPathMatch{{PathType: cloud.PathMatchExact, PathValue: "/checkout"}},
+	}
+	ordinary := cloud.HTTPBackend{
+		Namespace: "apps", Name: "checkout", Port: 8080, Members: members,
+		Matches: []cloud.HTTPPathMatch{{PathType: cloud.PathMatchExact, PathValue: "/ordinary", Precedence: 1}},
+	}
+	route.HTTPBackends = []cloud.HTTPBackend{persisted, ordinary}
+	build := func() desiredGatewayGraph {
+		graph, err := provider.buildDesiredGatewayGraph(spec)
+		require.NoError(t, err)
+		return graph
+	}
+	desired := build()
+	partKey, plainKey := openstackidentity.HTTPBackendPoolKey(persisted), openstackidentity.HTTPBackendPoolKey(ordinary)
+	require.NotEqual(t, partKey, plainKey)
+	lb := safetyObservedLoadBalancer()
+	lb.Provider, lb.ProvisioningStatus = "amphora", "ACTIVE"
+	affinity := &observedRouteGraph{pool: &pools.Pool{
+		ID: "affinity", Protocol: "HTTP", ProvisioningStatus: "ACTIVE", AdminStateUp: true, Tags: []string{xBackendCookieTag},
+		Persistence: pools.SessionPersistence{Type: httpCookiePersistence, CookieName: "checkout_session"},
+	}, backendTLS: octavia.PoolBackendTLS{AdminObserved: true}, members: []pools.Member{{ID: "first", AdminStateUp: true, ProvisioningStatus: "ACTIVE"}}}
+	actual := observedGatewayGraph{loadBalancer: lb, protocol: cloud.ListenerProtocolHTTP, routes: []observedRouteGraph{{
+		httpParts: map[string]*observedRouteGraph{partKey: affinity},
+	}}}
+	require.Nil(t, provider.prepareXBackendPersistence(t.Context(), &desired, actual))
+	require.Equal(t, cloud.SessionPersistenceAvailable, desired.routes[0].sessionPersistenceIssue())
+	available, err := provider.XBackendCookieAvailable(t.Context(), cloud.HTTPSessionCookieNamed)
+	require.NoError(t, err)
+	require.False(t, available)
+	for _, part := range desired.routes[0].httpParts {
+		if part.backendKey == plainKey {
+			require.Empty(t, part.sessionCookieName)
+			require.Equal(t, members, part.members)
+		}
+	}
+
+	capabilities = []string{}
+	desired = build()
+	withdraw := provider.prepareXBackendPersistence(t.Context(), &desired, actual)
+	require.NotNil(t, withdraw)
+	require.Equal(t, partKey, withdraw.backendKey)
+	require.Equal(t, routeMutationClearPoolMembers, withdraw.route.kind)
+	require.Equal(t, cloud.SessionPersistenceUnsupported, desired.routes[0].sessionPersistenceIssue())
+
+	ordinary.Matches = append(ordinary.Matches, persisted.Matches...)
+	route.HTTPBackends = []cloud.HTTPBackend{ordinary}
+	desired = build()
+	withdraw = provider.prepareXBackendPersistence(t.Context(), &desired, actual)
+	require.NotNil(t, withdraw)
+	require.Equal(t, partKey, withdraw.backendKey)
+	affinity.members = nil
+	withdraw = provider.prepareXBackendPersistence(t.Context(), &desired, actual)
+	require.NotNil(t, withdraw)
+	require.Equal(t, partKey, withdraw.backendKey)
+	require.Equal(t, &pools.SessionPersistence{}, withdraw.route.poolPersistence)
+	parts, _, _ := httpPlanningParts(desired, actual)
+	require.Len(t, parts.routes, 2)
+	require.Equal(t, plainKey, parts.routes[0].backendKey)
+	require.Len(t, parts.routes[0].policies, 2)
+	require.Equal(t, cloud.GraphEnsure, parts.spec.Routes[0].Disposition)
+	require.Equal(t, partKey, parts.routes[1].backendKey)
+	require.Equal(t, cloud.GraphDelete, parts.spec.Routes[1].Disposition)
+}
 
 func TestServiceSessionPersistenceSharesGRPCPoolWithRetryBudget(t *testing.T) {
 	var updates []map[string]json.RawMessage

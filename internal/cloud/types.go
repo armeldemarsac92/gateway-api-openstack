@@ -332,6 +332,10 @@ type HTTPBackend struct {
 	SessionCookieName                string                     `json:",omitempty"`
 	ServiceSessionPersistence        *ServiceSessionPersistence `json:",omitempty"`
 	ServiceSessionPersistencePending bool                       `json:",omitempty"`
+	// SessionPersistenceRule identifies an inline rule within the owning Route.
+	SessionPersistenceRule string `json:",omitempty"`
+	// SessionPersistenceServiceUID binds an inline pool to the observed Service.
+	SessionPersistenceServiceUID string `json:",omitempty"`
 	// SessionCookiePath holds a custom Path value, including an explicitly empty path.
 	SessionCookiePath     *string                       `json:",omitempty"`
 	SessionCookieDeadline *HTTPSessionCookieDeadline    `json:",omitempty"`

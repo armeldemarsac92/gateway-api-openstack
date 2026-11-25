@@ -38,7 +38,11 @@ func HTTPBackendPoolKey(backend cloud.HTTPBackend) string {
 	if backend.Kind == cloud.HTTPBackendKindXBackend {
 		return httpTupleKey(string(backend.Kind), backend.Namespace, backend.Name)
 	}
-	return HTTPBackendKey(backend.Namespace, backend.Name, backend.Port)
+	service := HTTPBackendKey(backend.Namespace, backend.Name, backend.Port)
+	if backend.SessionPersistenceRule != "" {
+		return httpTupleKey("session-persistence-rule/"+backend.SessionPersistenceRule, service, backend.SessionPersistenceServiceUID)
+	}
+	return service
 }
 
 // HTTPFixedRuleKey identifies a rule that serves a local fixed response.

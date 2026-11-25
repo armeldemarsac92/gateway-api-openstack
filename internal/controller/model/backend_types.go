@@ -72,6 +72,8 @@ type BackendGroup struct {
 	Diagnostic      *Diagnostic
 	BackendTLS      backendtls.Selection
 
+	RouteSessionPersistence *RouteSessionPersistence
+
 	XBackendRoutedExternal bool
 	XBackendCookieName     string
 	XBackendCookiePath     *string
