@@ -39,6 +39,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia/amphora"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/classconfig"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
@@ -138,7 +139,7 @@ func (observation sniRouteObservation) sameInputs(other sniRouteObservation) boo
 	})
 }
 
-func (r *Reconciler) observeSNIRoutes(ctx context.Context, snapshot *gatewayMutationSnapshot) (sniRouteObservation, error) {
+func (r *Reconciler) readLiveSNIRoutes(ctx context.Context) ([]gatewayv1.TLSRoute, error) {
 	var routes gatewayv1.TLSRouteList
 	if err := r.APIReader.List(ctx, &routes); err != nil {
 		return nil, err
@@ -149,9 +150,57 @@ func (r *Reconciler) observeSNIRoutes(ctx context.Context, snapshot *gatewayMuta
 	slices.SortFunc(routes.Items, func(a, b gatewayv1.TLSRoute) int {
 		return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
 	})
+	return routes.Items, nil
+}
+
+func (r *Reconciler) observeSNIRoutes(ctx context.Context, snapshot *gatewayMutationSnapshot) (sniRouteObservation, error) {
+	routes, err := r.readLiveSNIRoutes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	observation, err := r.admitSNIRoutes(ctx, snapshot, routes)
+	if err != nil {
+		return nil, err
+	}
+	var tls *graph.BackendTLSObserver
+	if snapshot.listener != nil && terminatesTLS(snapshot.listener) && r.Config.BackendTLSPolicy {
+		tls = graph.NewBackendTLSObserver(r.APIReader)
+	}
+	owners := observation.hostnameOwners()
+	for i := range observation {
+		entry := &observation[i]
+		if entry.acceptedReason != gatewayv1.RouteReasonAccepted {
+			continue
+		}
+		entry.hostnames = slices.DeleteFunc(entry.hostnames, func(hostname string) bool { return owners[hostname].index != i })
+		if err := r.resolveSNIBackend(ctx, snapshot, entry, tls); err != nil {
+			return nil, err
+		}
+		if allowsSNISuffix(r.Config, snapshot.listener) && len(entry.targets) == 0 {
+			for _, hostname := range entry.hostnames {
+				needsDenial := terminatesTLS(snapshot.listener)
+				for broader := range owners {
+					if needsDenial || amphora.SNISuffixCovers(broader, hostname) {
+						needsDenial = true
+						break
+					}
+				}
+				if needsDenial {
+					entry.denied = append(entry.denied, cloud.TLSSNIRoute{
+						Identity: controller.RouteIdentity(r.Config, snapshot.gateway, entry.route),
+						Hostname: hostname, Deny: true,
+					})
+				}
+			}
+		}
+	}
+	return observation, nil
+}
+
+func (r *Reconciler) admitSNIRoutes(ctx context.Context, snapshot *gatewayMutationSnapshot, routes []gatewayv1.TLSRoute) (sniRouteObservation, error) {
 	var observation sniRouteObservation
-	for i := range routes.Items {
-		route := &routes.Items[i]
+	for i := range routes {
+		route := &routes[i]
 		if !route.DeletionTimestamp.IsZero() {
 			continue
 		}
@@ -171,29 +220,6 @@ func (r *Reconciler) observeSNIRoutes(ctx context.Context, snapshot *gatewayMuta
 			}
 		}
 		observation = append(observation, entry)
-	}
-	owners := observation.hostnameOwners()
-	for i := range observation {
-		entry := &observation[i]
-		if entry.acceptedReason == gatewayv1.RouteReasonAccepted {
-			entry.hostnames = slices.DeleteFunc(entry.hostnames, func(hostname string) bool { return owners[hostname].index != i })
-			if err := r.resolveSNIBackend(ctx, snapshot, entry); err != nil {
-				return nil, err
-			}
-			if allowsSNISuffix(r.Config, snapshot.listener) && len(entry.targets) == 0 {
-				for _, hostname := range entry.hostnames {
-					for broader := range owners {
-						if amphora.SNISuffixCovers(broader, hostname) {
-							entry.denied = append(entry.denied, cloud.TLSSNIRoute{
-								Identity: controller.RouteIdentity(r.Config, snapshot.gateway, entry.route),
-								Hostname: hostname, Deny: true,
-							})
-							break
-						}
-					}
-				}
-			}
-		}
 	}
 	return observation, nil
 }
@@ -295,36 +321,36 @@ func intersectSNIHostnames(listener *gatewayv1.Listener, route *gatewayv1.TLSRou
 	return hostnames, nil
 }
 
-func (r *Reconciler) resolveSNIBackend(ctx context.Context, snapshot *gatewayMutationSnapshot, entry *sniRouteStatus) error {
+func (r *Reconciler) observeSNIService(ctx context.Context, entry *sniRouteStatus) (*corev1.Service, *corev1.ServicePort, error) {
 	route := entry.route
 	ref := route.Spec.Rules[0].BackendRefs[0]
 	key, supported := model.BackendServiceReference(route.Namespace, ref.BackendObjectReference)
 	if !supported {
 		entry.resolvedReason, entry.resolvedMessage = gatewayv1.RouteReasonInvalidKind, "The backendRef must refer to a core Service"
-		return nil
+		return nil, nil, nil
 	}
 	if key.Namespace != route.Namespace {
 		grants, err := graph.ListBackendReferenceGrants(ctx, r.APIReader, key.Namespace)
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
 		grants = slices.DeleteFunc(grants, func(grant gatewayv1.ReferenceGrant) bool { return !grant.DeletionTimestamp.IsZero() })
 		if !model.BackendReferenceAllowedFor(tlsRouteKind, route.Namespace, key, grants) {
 			entry.resolvedReason, entry.resolvedMessage = gatewayv1.RouteReasonRefNotPermitted, "No ReferenceGrant authorizes this TLSRoute to use the Service"
-			return nil
+			return nil, nil, nil
 		}
 	}
 	var service corev1.Service
 	if err := r.APIReader.Get(ctx, key, &service); err != nil {
 		if apierrors.IsNotFound(err) {
 			entry.resolvedReason, entry.resolvedMessage = gatewayv1.RouteReasonBackendNotFound, "The backend Service was not found"
-			return nil
+			return nil, nil, nil
 		}
-		return err
+		return nil, nil, err
 	}
 	if !service.DeletionTimestamp.IsZero() || service.UID == "" {
 		entry.resolvedReason, entry.resolvedMessage = gatewayv1.RouteReasonBackendNotFound, "The backend Service has no live identity"
-		return nil
+		return nil, nil, nil
 	}
 	port, diagnostic := model.ResolveTransportServicePort(&service, ref.Port, corev1.ProtocolTCP)
 	if diagnostic == nil {
@@ -332,16 +358,71 @@ func (r *Reconciler) resolveSNIBackend(ctx context.Context, snapshot *gatewayMut
 	}
 	if diagnostic != nil {
 		entry.resolvedReason, entry.resolvedMessage = gatewayv1.RouteConditionReason(diagnostic.Reason), diagnostic.Message
+		return nil, nil, nil
+	}
+	return &service, port, nil
+}
+
+func (r *Reconciler) resolveSNIBackend(ctx context.Context, snapshot *gatewayMutationSnapshot, entry *sniRouteStatus, tls *graph.BackendTLSObserver) error {
+	route := entry.route
+	service, port, err := r.observeSNIService(ctx, entry)
+	if err != nil {
+		if !terminatesTLS(snapshot.listener) {
+			return err
+		}
+		return sniBackendReadPending(ctx, entry, "Waiting for a live Service and ReferenceGrant inventory")
+	}
+	if service == nil {
 		return nil
+	}
+	var validation *cloud.BackendTLSValidation
+	if tls != nil && len(entry.hostnames) != 0 {
+		ancestor := &backendtls.GatewayAncestor{
+			Key: client.ObjectKeyFromObject(snapshot.gateway), ControllerName: r.Config.ControllerName,
+		}
+		selection, err := tls.Observe(ctx, service, port, ancestor)
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			entry.resolvedReason, entry.resolvedMessage = gatewayv1.RouteReasonPending, "Waiting for a live BackendTLSPolicy inventory"
+			return nil
+		}
+		if winner := selection.Winner; winner != nil {
+			switch {
+			case winner.Validation == nil:
+				entry.resolvedReason, entry.resolvedMessage = gatewayv1.RouteConditionReason("InvalidBackendTLSPolicy"), winner.Accepted.Message
+				return nil
+			case len(winner.Validation.SubjectAltNames) != 0:
+				entry.resolvedReason, entry.resolvedMessage = gatewayv1.RouteReasonUnsupportedProtocol, "TCP backend TLS supports hostname validation"
+				return nil
+			case BackendClientCertificateRef(snapshot.gateway) != nil:
+				entry.resolvedReason, entry.resolvedMessage = gatewayv1.RouteReasonUnsupportedProtocol, tcpBackendClientCertificateMessage
+				return nil
+			case winner.AncestorSlot != backendtls.AncestorSlotHeld:
+				entry.resolvedReason, entry.resolvedMessage = gatewayv1.RouteReasonPending, "Waiting for a BackendTLSPolicy Gateway ancestor slot"
+				if winner.AncestorSlot == backendtls.AncestorSlotFull {
+					entry.resolvedReason, entry.resolvedMessage = backendtls.AncestorLimitReason, backendtls.AncestorLimitMessage
+				}
+				return nil
+			}
+			validation = winner.Validation.CloudValidation()
+		}
 	}
 	var endpoints discoveryv1.EndpointSliceList
 	if err := r.APIReader.List(ctx, &endpoints, client.InNamespace(service.Namespace), client.MatchingLabels{discoveryv1.LabelServiceName: service.Name}); err != nil {
-		return err
+		if !terminatesTLS(snapshot.listener) {
+			return err
+		}
+		return sniBackendReadPending(ctx, entry, "Waiting for a complete backend EndpointSlice inventory")
 	}
 	if endpoints.Continue != "" {
-		return fmt.Errorf("incomplete TLSRoute EndpointSlice inventory")
+		if !terminatesTLS(snapshot.listener) {
+			return fmt.Errorf("incomplete TLSRoute EndpointSlice inventory")
+		}
+		return sniBackendReadPending(ctx, entry, "Waiting for a complete backend EndpointSlice inventory")
 	}
-	members, diagnostic := routebackend.EndpointMembers(&service, model.ResolveServiceEndpoints(&service, port, endpoints.Items))
+	members, diagnostic := routebackend.EndpointMembers(service, model.ResolveServiceEndpoints(service, port, endpoints.Items))
 	if diagnostic != nil {
 		entry.resolvedReason, entry.resolvedMessage = gatewayv1.RouteConditionReason(diagnostic.Reason), diagnostic.Message
 		return nil
@@ -355,12 +436,25 @@ func (r *Reconciler) resolveSNIBackend(ctx context.Context, snapshot *gatewayMut
 	target := cloud.TLSSNIRoute{
 		Identity:   controller.RouteIdentity(r.Config, snapshot.gateway, route),
 		ServiceUID: string(service.UID), BackendSubnetID: topology.MemberSubnetID,
-		BackendSecurityGroupIDs: topology.BackendSecurityGroupIDs, Members: members,
+		BackendSecurityGroupIDs: topology.BackendSecurityGroupIDs, Members: members, BackendTLS: validation,
+	}
+	if terminatesTLS(snapshot.listener) {
+		target.ServicePort = int(port.Port)
 	}
 	for _, hostname := range entry.hostnames {
 		target.Hostname = hostname
 		entry.targets = append(entry.targets, target)
 	}
+	return nil
+}
+
+// A failed dependency read withholds this route's forwarding without
+// preventing withdrawals proven for another route.
+func sniBackendReadPending(ctx context.Context, entry *sniRouteStatus, message string) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	entry.resolvedReason, entry.resolvedMessage = gatewayv1.RouteReasonPending, message
 	return nil
 }
 
@@ -392,6 +486,7 @@ func (r *Reconciler) reportSNIRoutes(ctx context.Context, snapshot *gatewayMutat
 			}
 			resolvedReason, resolvedMessage := entry.resolvedReason, entry.resolvedMessage
 			switch resolvedReason {
+			case gatewayv1.RouteReasonPending:
 			case "":
 				resolvedReason, resolvedMessage = gatewayv1.RouteReasonPending, "The TLSRoute is not attached"
 			case gatewayv1.RouteReasonResolvedRefs:
@@ -413,6 +508,8 @@ func (r *Reconciler) reportSNIRoutes(ctx context.Context, snapshot *gatewayMutat
 				programmedReason, programmedMessage = string(resolvedReason), resolvedMessage
 			case len(entry.hostnames) == 0:
 				programmedReason, programmedMessage = "Conflicted", "Higher-priority TLSRoutes match every SNI hostname of this route"
+			case resolvedReason == gatewayv1.RouteReasonPending:
+				programmedMessage = resolvedMessage
 			case len(entry.targets) == 0:
 				programmedMessage = "The backend Service has no ready IPv4 endpoints"
 			case outcome.Outcome.State == cloud.OutcomeReady || retain:
@@ -513,6 +610,8 @@ func (r *Reconciler) gatewayRequestsForSNIDependency(ctx context.Context, depend
 						continue
 					}
 					switch object := dependency.(type) {
+					case *gatewayv1.BackendTLSPolicy:
+						affected = affected || slices.Contains(backendtls.ServiceKeys(object), key)
 					case *corev1.Service:
 						affected = affected || key.Name == object.Name
 					case *discoveryv1.EndpointSlice:
@@ -527,6 +626,23 @@ func (r *Reconciler) gatewayRequestsForSNIDependency(ctx context.Context, depend
 			for _, request := range r.gatewayRequestsForRoute(ctx, route) {
 				keys[request.NamespacedName] = struct{}{}
 			}
+		}
+	}
+	return controller.SortedRequests(keys)
+}
+
+func (r *Reconciler) gatewayRequestsForSNIBackendCA(ctx context.Context, object client.Object) []reconcile.Request {
+	var policies gatewayv1.BackendTLSPolicyList
+	key := client.ObjectKeyFromObject(object)
+	if err := r.List(ctx, &policies, client.InNamespace(key.Namespace), client.MatchingFields{
+		controller.IndexBackendTLSPolicyByCA: controller.ObjectKeyString(key),
+	}); err != nil {
+		return nil
+	}
+	keys := make(map[client.ObjectKey]struct{})
+	for i := range policies.Items {
+		for _, request := range r.gatewayRequestsForSNIDependency(ctx, &policies.Items[i]) {
+			keys[request.NamespacedName] = struct{}{}
 		}
 	}
 	return controller.SortedRequests(keys)

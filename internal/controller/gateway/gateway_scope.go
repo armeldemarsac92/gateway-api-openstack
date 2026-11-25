@@ -42,6 +42,7 @@ type gatewayScope struct {
 	original                 *gatewayv1.Gateway
 	gatewayClass             *gatewayv1.GatewayClass
 	managed                  bool
+	hasDelegatedHTTPS        bool
 	skipPatch                bool
 	warnings                 []gatewayProviderWarning
 	patchCause               error

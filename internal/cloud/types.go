@@ -91,10 +91,38 @@ type ScopedListener struct {
 // ListenerTLS requests a terminated HTTPS frontend. An empty CertificateRef
 // withdraws the frontend until an authorized reference becomes available.
 type ListenerTLS struct {
-	CertificateRef string
+	CertificateRef   string
+	ClientValidation *FrontendClientValidation
 	// VirtualHosts is the complete set of isolated HTTPS listener hostnames on
 	// this port. "*" denotes the hostname-unset section. Nil selects dedicated TLS.
 	VirtualHosts []string `json:",omitempty"`
+}
+
+// FrontendClientValidation identifies the trust anchor and validation mode on
+// an HTTPS port. The PEM is excluded from graph serialization.
+type FrontendClientValidation struct {
+	ConfigMapUID     string
+	Digest           string
+	PEM              []byte `json:"-"`
+	InsecureFallback bool   `json:",omitempty"`
+}
+
+// Equal compares the immutable identity and digest of the trust anchor.
+func (v *FrontendClientValidation) Equal(other *FrontendClientValidation) bool {
+	if v == nil || other == nil {
+		return v == other
+	}
+	return v.ConfigMapUID == other.ConfigMapUID && v.Digest == other.Digest &&
+		v.InsecureFallback == other.InsecureFallback
+}
+
+// Equal compares frontend authorization across independent observations.
+func (t *ListenerTLS) Equal(other *ListenerTLS) bool {
+	if t == nil || other == nil {
+		return t == other
+	}
+	return t.CertificateRef == other.CertificateRef && t.ClientValidation.Equal(other.ClientValidation) &&
+		slices.Equal(t.VirtualHosts, other.VirtualHosts)
 }
 
 // GatewayState is the provider-neutral result published to Gateway status and
@@ -215,15 +243,29 @@ type HTTPBackendKind string
 const HTTPBackendKindXBackend HTTPBackendKind = "gateway.networking.x-k8s.io/XBackend"
 
 // BackendTLSValidation requires authenticated TLS to a Service port. The
-// hostname is used as both SNI and the certificate identity. Denied keeps
+// hostname is used as SNI and authenticates the certificate if no SANs are
+// configured. Denied keeps
 // the backend's HTTP matches and weight while withholding all forwarding.
 type BackendTLSValidation struct {
-	Hostname       string
-	CAConfigMapUID string
-	CADigest       string
-	CAPEM          []byte `json:"-"`
-	Denied         bool
+	Hostname        string
+	SubjectAltNames []BackendTLSSubjectAltName `json:",omitempty"`
+	CAConfigMapUID  string
+	CADigest        string
+	CAPEM           []byte `json:"-"`
+	Denied          bool
 }
+
+// BackendTLSSubjectAltName is one typed certificate identity in Octavia's API.
+type BackendTLSSubjectAltName struct {
+	Type     string `json:"type"`
+	Hostname string `json:"hostname,omitempty"`
+	URI      string `json:"uri,omitempty"`
+}
+
+const (
+	BackendTLSSANHostname = "Hostname"
+	BackendTLSSANURI      = "URI"
+)
 
 // HTTPBackend groups the paths served by one backend within one HTTPRoute.
 // The zero kind denotes a core Service port.

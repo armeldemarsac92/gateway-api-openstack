@@ -73,6 +73,8 @@ type Config struct {
 	BackendClientCertificate bool
 	// OperatorHTTPS enables termination using operator-provisioned certificates.
 	OperatorHTTPS bool
+	// FrontendClientValidation enables native strict client certificate validation.
+	FrontendClientValidation bool
 	// HTTPSListenerIsolation enables shared ports for isolated HTTPS sections.
 	HTTPSListenerIsolation bool
 	// TLSSNIPassthrough enables the advertised native TCP SNI policy extension.
@@ -122,6 +124,9 @@ func (c Config) Validate() error {
 	}
 	if c.BackendClientCertificate && !c.BackendTLSPolicy {
 		return fmt.Errorf("--backend-client-certificate-map requires --octavia-backend-tls-policy")
+	}
+	if c.FrontendClientValidation && !c.OperatorHTTPS {
+		return fmt.Errorf("--octavia-frontend-client-validation requires --tls-certificate-map")
 	}
 	if c.TCPTLSTermination && !c.OperatorHTTPS {
 		return fmt.Errorf("--octavia-tcp-tls-termination requires --tls-certificate-map")

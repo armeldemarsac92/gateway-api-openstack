@@ -161,16 +161,17 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 	input.Node.BackendCAOwned = controllerutil.ContainsFinalizer(snapshot.gateway, r.Config.BackendCAFinalizer())
 	backendIdentity, _, _ := r.observeBackendClientCertificate(ctx, snapshot.gateway)
 	input.Node.BackendClientCertificate = backendIdentity
-	sets, err := ObserveListenerSets(ctx, r.APIReader, r.Config, snapshot.gateway)
+	sets, err := r.ObserveListenerSets(ctx, r.APIReader, snapshot.gateway)
 	if err != nil {
 		return input, err
 	}
 	for _, set := range sets.sets {
 		for _, entry := range set.entries {
-			if entry.rejection != "" {
+			port := int(entry.listener.Port)
+			_, delegatedHTTPS := sets.https[port]
+			if entry.rejection != "" && (entry.listener.Protocol != gatewayv1.HTTPSProtocolType || !delegatedHTTPS) {
 				continue
 			}
-			port := int(entry.listener.Port)
 			if !slices.ContainsFunc(input.Node.Spec.ScopedListeners, func(listener cloud.ScopedListener) bool { return listener.Port == port }) {
 				input.Node.Spec.ScopedListeners = append(input.Node.Spec.ScopedListeners, cloud.ScopedListener{
 					Port: port, Name: resourceDisplayName(strconv.Itoa(port), snapshot.gateway.Namespace, snapshot.gateway.Name, string(entry.listener.Name)),
@@ -178,7 +179,7 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 			}
 		}
 	}
-	if r.Config.BackendTLSPolicy && !input.Node.BackendCAOwned {
+	if (r.Config.BackendTLSPolicy || r.Config.FrontendClientValidation) && !input.Node.BackendCAOwned {
 		input.Node.ClaimBackendCA = func(ctx context.Context) error {
 			desired := snapshot.gateway.DeepCopy()
 			controllerutil.AddFinalizer(desired, r.Config.BackendCAFinalizer())
@@ -189,7 +190,7 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 		if err := r.sealGatewayMutationSnapshot(ctx, snapshot); err != nil {
 			return err
 		}
-		current, err := ObserveListenerSets(ctx, r.APIReader, r.Config, snapshot.gateway)
+		current, err := r.ObserveListenerSets(ctx, r.APIReader, snapshot.gateway)
 		if err != nil {
 			return err
 		}
@@ -209,6 +210,7 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 	}
 	if snapshot.listener.Protocol == gatewayv1.TLSProtocolType {
 		if terminatesTLS(snapshot.listener) {
+			input.Node.SNIPoliciesObserved = r.Config.BackendTLSPolicy
 			input.Node.TCPTLSCertificateRef = r.resolveCertificate(ctx, snapshot.gateway, snapshot.listener).tls.CertificateRef
 		}
 		observed, err := r.observeSNIRoutes(ctx, snapshot)
@@ -249,11 +251,11 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 			return r.reportSNIRoutes(ctx, snapshot, observed, result, providerErr)
 		}
 	}
-	if usesHTTPSProfile(r.Config, snapshot.gateway) {
+	if usesHTTPSProfile(r.Config, snapshot.gateway) || len(sets.https) != 0 {
 		if err := r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
 			return input, err
 		}
-		r.addTLSGraphInput(ctx, snapshot, &input)
+		r.addTLSGraphInput(ctx, snapshot, sets, &input)
 	}
 	return input, nil
 }

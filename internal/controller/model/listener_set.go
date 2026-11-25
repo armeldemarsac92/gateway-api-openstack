@@ -83,7 +83,7 @@ func GatewayDisallowsListenerSets(gateway *gatewayv1.Gateway) bool {
 // sections even while authorization is denied.
 func ListenerSetRefObservesRouteNamespace(set *gatewayv1.ListenerSet, ref gatewayv1.ParentReference) bool {
 	return slices.ContainsFunc(set.Spec.Listeners, func(entry gatewayv1.ListenerEntry) bool {
-		return entry.Protocol == gatewayv1.HTTPProtocolType &&
+		return (entry.Protocol == gatewayv1.HTTPProtocolType || entry.Protocol == gatewayv1.HTTPSProtocolType) &&
 			(ref.SectionName == nil || *ref.SectionName == entry.Name) &&
 			(ref.Port == nil || *ref.Port == entry.Port) &&
 			ObservesRouteNamespace(&gatewayv1.Listener{AllowedRoutes: entry.AllowedRoutes})

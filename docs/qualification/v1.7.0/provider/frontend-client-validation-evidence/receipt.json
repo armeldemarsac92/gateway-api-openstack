@@ -1,0 +1,241 @@
+{
+  "controllerTrafficSource": "9f6c7d7c800617bd61c46c3fd8779ae5b99d4155",
+  "controllerStatusSource": "3a886bd352cd4b59626205bea0632b1e9dc80485",
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "image": {
+    "repository": "ghcr.io/armeldemarsac92/gateway-api-openstack",
+    "sourceRevision": "9f6c7d7c800617bd61c46c3fd8779ae5b99d4155",
+    "sourceLabel": "https://github.com/armeldemarsac92/gateway-api-openstack",
+    "manifestDigest": "sha256:91ac618cca5a0759879906ed78e36495e96cfa89dc75f4851cca158f63f3138d",
+    "configDigest": "sha256:948c0c872346320887f04f11713a47accb09ce6bce8518e879fae7a71a20e745",
+    "platform": "linux/amd64",
+    "entrypoint": "/openstack-gateway-controller",
+    "user": "65532:65532",
+    "ociArchiveSHA256": "72e032968060470985812f00fac772801ac5f2258a316d74c208771e0099f652",
+    "managerSHA256": "68c23eb3d5a60ea5095a69fe199b9cec62c4b4002e9a764f9887b9c370efcf94",
+    "normalAndNoCacheBuildsMatch": true
+  },
+  "channels": {
+    "standard": {
+      "upstreamTrafficCases": {
+        "GatewayFrontendClientCertificateValidation": {
+          "subtests": [
+            "Validate_default_configuration",
+            "Validate_per_port_configuration"
+          ],
+          "exit": 0,
+          "report": "standard-gateway-with-clientcertificate-validation-report.yaml",
+          "reportSHA256": "99d2a1a73647f6da5f901c987d9aee983b3adf1fcf4df173e60c46d9af8f1651",
+          "dataPlane": {
+            "gateway": "client-validation-default",
+            "listeners": {
+              "443": {
+                "protocol": "TERMINATED_HTTPS",
+                "adminStateUp": true,
+                "provisioningStatus": "ACTIVE",
+                "clientAuthentication": "MANDATORY",
+                "hasCAReference": true
+              },
+              "8443": {
+                "protocol": "TERMINATED_HTTPS",
+                "adminStateUp": true,
+                "provisioningStatus": "ACTIVE",
+                "clientAuthentication": "MANDATORY",
+                "hasCAReference": true
+              }
+            },
+            "activeBinds": {
+              "443": {
+                "TLS": true,
+                "verifyRequired": true,
+                "hasCAFile": true
+              },
+              "8443": {
+                "TLS": true,
+                "verifyRequired": true,
+                "hasCAFile": true
+              }
+            },
+            "distinctClientCARefs": 2,
+            "renderedConfigSHA256": "e4c4cbba0126ba91f98bc67144729fb2c9352cbb05ae21279f30ff08af988b1c"
+          }
+        },
+        "GatewayFrontendInvalidDefaultClientCertificateValidation": {
+          "subtests": [
+            "Validate_tls_configuration_does_not_impact_HTTP_listener",
+            "Validate_that_invalid_default_configuration_is_impacting_HTTPS_listener"
+          ],
+          "exit": 0,
+          "report": "standard-gateway-invalid-default-frontend-client-certificate-validation-report.yaml",
+          "reportSHA256": "04c967ff33c6eb8ef7db61ef485a4d95dbc45a273bf2f1b6c26ae12477473ea6",
+          "dataPlane": {
+            "gateway": "invalid-default-client-validation-config",
+            "listeners": {
+              "80": {
+                "protocol": "HTTP",
+                "adminStateUp": true,
+                "provisioningStatus": "ACTIVE",
+                "clientAuthentication": "NONE",
+                "hasCAReference": false
+              }
+            },
+            "activeBinds": {
+              "80": {
+                "TLS": false,
+                "verifyRequired": false,
+                "hasCAFile": false
+              }
+            },
+            "distinctClientCARefs": 0,
+            "renderedConfigSHA256": "70045c67152d5822827c696b97c0aee47dabe061deecfc073e83a835b8d314de"
+          }
+        }
+      },
+      "upstreamStatusCases": {
+        "GatewayInvalidFrontendClientCertificateValidation": [
+          "default_valid_configuration",
+          "unresolved_reference",
+          "invalid_kind",
+          "reference_grant_missing"
+        ],
+        "ListenerSetReferenceGrant": [
+          "delegated_frontend_client_validation",
+          "ListenerSetReferenceGrant"
+        ]
+      },
+      "statusSuiteFailedOrSkipped": [],
+      "octavia": {
+        "revision": "53db584246b12351085e7c4c18fb0ebda2a11b65",
+        "version": "19.0.1.dev41",
+        "sha256": "264593363e9002fea342f798dde24f4fb086f89929b1643f7bb3874ea11af08b",
+        "filesVerified": 647
+      },
+      "octaviaLib": {
+        "revision": "7df306215a9e6db04674b75fc8fc86aacea38cfd",
+        "version": "3.12.1.dev12",
+        "sha256": "4cb40b8a277216481a43c8e97088b33afc4a970cd72b11d6b72918c1a339ca93",
+        "filesVerified": 24
+      },
+      "haProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1",
+        "sha256": "fa8468efa26f95ed83a36afeb97b79730de285450b7a8fae94f7cf5e6d2d0824"
+      },
+      "runnerSHA256": "4e8b5b902599797b2f69715ba99ba07066dcc10d787470a7fb89aa20626f2978",
+      "afterGrantWithdrawal": {
+        "443": {
+          "status": 200,
+          "backend": "infra-backend-v1",
+          "tlsProtocol": "TLSv1.3"
+        },
+        "8443": "TCP connection refused",
+        "listener8443ResolvedRefs": "False/RefNotPermitted"
+      }
+    },
+    "experimental": {
+      "upstreamTrafficCases": {
+        "GatewayFrontendClientCertificateValidation": {
+          "subtests": [
+            "Validate_default_configuration",
+            "Validate_per_port_configuration"
+          ],
+          "exit": 0,
+          "report": "experimental-gateway-with-clientcertificate-validation-report.yaml",
+          "reportSHA256": "448a5d550766c4a2cbaf9967ac02d2f67363e28bdc7ffccdeb3e002e3724fbb5",
+          "dataPlane": {
+            "gateway": "client-validation-default",
+            "listeners": {
+              "443": {
+                "protocol": "TERMINATED_HTTPS",
+                "adminStateUp": true,
+                "provisioningStatus": "ACTIVE",
+                "clientAuthentication": "MANDATORY",
+                "hasCAReference": true
+              },
+              "8443": {
+                "protocol": "TERMINATED_HTTPS",
+                "adminStateUp": true,
+                "provisioningStatus": "ACTIVE",
+                "clientAuthentication": "MANDATORY",
+                "hasCAReference": true
+              }
+            },
+            "activeBinds": {
+              "443": {
+                "TLS": true,
+                "verifyRequired": true,
+                "hasCAFile": true
+              },
+              "8443": {
+                "TLS": true,
+                "verifyRequired": true,
+                "hasCAFile": true
+              }
+            },
+            "distinctClientCARefs": 2,
+            "renderedConfigSHA256": "656db146828d37d780015d91c583f3cfa3970ef3b6bd04732a3c77cd4dff071a"
+          }
+        },
+        "GatewayFrontendInvalidDefaultClientCertificateValidation": {
+          "subtests": [
+            "Validate_tls_configuration_does_not_impact_HTTP_listener",
+            "Validate_that_invalid_default_configuration_is_impacting_HTTPS_listener"
+          ],
+          "exit": 0,
+          "report": "experimental-gateway-invalid-default-frontend-client-certificate-validation-report.yaml",
+          "reportSHA256": "de2c108c1024bfdada60c30e955b4fe894f1f3b9d9a1b1bce18c27f4fa2fdede",
+          "dataPlane": {
+            "gateway": "invalid-default-client-validation-config",
+            "listeners": {
+              "80": {
+                "protocol": "HTTP",
+                "adminStateUp": true,
+                "provisioningStatus": "ACTIVE",
+                "clientAuthentication": "NONE",
+                "hasCAReference": false
+              }
+            },
+            "activeBinds": {
+              "80": {
+                "TLS": false,
+                "verifyRequired": false,
+                "hasCAFile": false
+              }
+            },
+            "distinctClientCARefs": 0,
+            "renderedConfigSHA256": "ed30bdfa88f277abca96de1db4f2dd6ad921ed97d86b8b92411a3290586ed0b3"
+          }
+        }
+      },
+      "upstreamStatusCases": {
+        "GatewayInvalidFrontendClientCertificateValidation": [
+          "default_valid_configuration",
+          "unresolved_reference",
+          "invalid_kind",
+          "reference_grant_missing"
+        ],
+        "ListenerSetReferenceGrant": [
+          "delegated_frontend_client_validation",
+          "ListenerSetReferenceGrant"
+        ]
+      },
+      "statusSuiteFailedOrSkipped": [],
+      "octavia": {
+        "revision": "53db584246b12351085e7c4c18fb0ebda2a11b65",
+        "version": "19.0.1.dev41",
+        "sha256": "264593363e9002fea342f798dde24f4fb086f89929b1643f7bb3874ea11af08b",
+        "filesVerified": 647
+      },
+      "octaviaLib": {
+        "revision": "7df306215a9e6db04674b75fc8fc86aacea38cfd",
+        "version": "3.12.1.dev12",
+        "sha256": "4cb40b8a277216481a43c8e97088b33afc4a970cd72b11d6b72918c1a339ca93",
+        "filesVerified": 24
+      },
+      "haProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1",
+        "sha256": "fa8468efa26f95ed83a36afeb97b79730de285450b7a8fae94f7cf5e6d2d0824"
+      },
+      "runnerSHA256": "4e8b5b902599797b2f69715ba99ba07066dcc10d787470a7fb89aa20626f2978"
+    }
+  }
+}

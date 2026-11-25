@@ -42,8 +42,7 @@ func CollectBackendTLSInputs(ctx context.Context, reader client.Reader, input *m
 			services[client.ObjectKeyFromObject(service)] = service
 		}
 	}
-	policies := map[string][]gatewayv1.BackendTLSPolicy{}
-	cas := map[types.NamespacedName]*corev1.ConfigMap{}
+	observer := NewBackendTLSObserver(reader)
 	for i := range input.Routes {
 		route := &input.Routes[i]
 		kind := model.HTTPProfileRouteKind(route)
@@ -68,18 +67,9 @@ func CollectBackendTLSInputs(ctx context.Context, reader client.Reader, input *m
 				selection, observed := input.BackendTLSPolicies[target]
 				if !observed {
 					var err error
-					selection, err = observeBackendTLS(ctx, reader, service, port, policies, cas)
+					selection, err = observer.Observe(ctx, service, port, ancestor)
 					if err != nil {
 						return err
-					}
-				}
-				if ancestor != nil && selection.Winner != nil {
-					for i := range policies[key.Namespace] {
-						policy := &policies[key.Namespace][i]
-						if policy.Name == selection.Winner.Key.Name {
-							selection.Winner.AncestorSlot = ancestor.Slot(policy)
-							break
-						}
 					}
 				}
 				input.BackendTLSPolicies[target] = selection
@@ -89,19 +79,31 @@ func CollectBackendTLSInputs(ctx context.Context, reader client.Reader, input *m
 	return nil
 }
 
-func observeBackendTLS(ctx context.Context, reader client.Reader, service *corev1.Service, port *corev1.ServicePort, policies map[string][]gatewayv1.BackendTLSPolicy, cas map[types.NamespacedName]*corev1.ConfigMap) (backendtls.Selection, error) {
+// BackendTLSObserver shares a live policy and CA inventory across resolved Service ports.
+type BackendTLSObserver struct {
+	reader   client.Reader
+	policies map[string][]gatewayv1.BackendTLSPolicy
+	cas      map[types.NamespacedName]*corev1.ConfigMap
+}
+
+func NewBackendTLSObserver(reader client.Reader) *BackendTLSObserver {
+	return &BackendTLSObserver{reader: reader, policies: map[string][]gatewayv1.BackendTLSPolicy{}, cas: map[types.NamespacedName]*corev1.ConfigMap{}}
+}
+
+// Observe requires the caller to authorize the Service reference first.
+func (o *BackendTLSObserver) Observe(ctx context.Context, service *corev1.Service, port *corev1.ServicePort, ancestor *backendtls.GatewayAncestor) (backendtls.Selection, error) {
 	namespace := service.Namespace
-	items, observed := policies[namespace]
+	items, observed := o.policies[namespace]
 	if !observed {
 		var list gatewayv1.BackendTLSPolicyList
-		if err := reader.List(ctx, &list, client.InNamespace(namespace)); err != nil {
+		if err := o.reader.List(ctx, &list, client.InNamespace(namespace)); err != nil {
 			return backendtls.Selection{}, fmt.Errorf("list BackendTLSPolicies in namespace %s: %w", namespace, err)
 		}
 		if list.Continue != "" {
 			return backendtls.Selection{}, fmt.Errorf("incomplete BackendTLSPolicy list in namespace %s", namespace)
 		}
 		items = list.Items
-		policies[namespace] = items
+		o.policies[namespace] = items
 	}
 	for i := range items {
 		policy := &items[i]
@@ -112,31 +114,30 @@ func observeBackendTLS(ctx context.Context, reader client.Reader, service *corev
 		if !supported {
 			continue
 		}
-		if _, observed := cas[key]; observed {
+		if _, observed := o.cas[key]; observed {
 			continue
 		}
 		var configMap corev1.ConfigMap
-		if err := reader.Get(ctx, key, &configMap); err != nil {
+		if err := o.reader.Get(ctx, key, &configMap); err != nil {
 			if ctx.Err() != nil {
 				return backendtls.Selection{}, ctx.Err()
 			}
 			// A known policy still governs this port when its CA cannot be
 			// read. The mutation fence repeats the read, and later watches
 			// and resyncs can restore this backend independently of its peers.
-			cas[key] = nil
+			o.cas[key] = nil
 		} else {
-			cas[key] = &configMap
+			o.cas[key] = &configMap
 		}
 	}
-	return backendtls.Evaluate(service, port, items, cas), nil
-}
-
-// HasValidBackendTLSWinner reports whether any backend can use authenticated TLS.
-func HasValidBackendTLSWinner(selections map[model.ServicePortKey]backendtls.Selection) bool {
-	for _, selection := range selections {
-		if selection.Winner != nil && selection.Winner.Validation != nil && selection.Winner.AncestorSlot == backendtls.AncestorSlotHeld {
-			return true
+	selection := backendtls.Evaluate(service, port, items, o.cas)
+	if ancestor != nil && selection.Winner != nil {
+		for i := range items {
+			if items[i].Name == selection.Winner.Key.Name {
+				selection.Winner.AncestorSlot = ancestor.Slot(&items[i])
+				break
+			}
 		}
 	}
-	return false
+	return selection, nil
 }

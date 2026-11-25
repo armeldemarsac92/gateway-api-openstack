@@ -38,6 +38,67 @@ var errInitialL7RulesUnverified = errors.New("waiting for verified Octavia L7 po
 
 const initialL7RulesReadbackMessage = "Waiting for the Octavia L7 policy and its exact rules"
 
+// A ready authenticated backend can install and activate its own exact match
+// while unrelated backends on the same listener are still being provisioned.
+// Only a settled, correctly positioned inventory and distinct exact paths
+// permit this. Creation still appends in priority order and activation still
+// requires the normal policy, rule, and backend observations.
+func independentPreparedTLSPolicy(desired desiredGatewayGraph, actual observedGatewayGraph, step graphMutation, listenerID string, port int, policyCount int32) bool {
+	route := desired.routes[step.routeIndex]
+	if route.backendTLS.phase != backendTLSVerified || route.spec.BackendTLS == nil ||
+		len(route.spec.BackendTLS.SubjectAltNames) == 0 || route.unavailable {
+		return false
+	}
+	backend := actual.routes[step.routeIndex]
+	if backend.pool == nil || !backend.pool.AdminStateUp || backend.backendProvisioningIssue(false, true) != "" {
+		return false
+	}
+	position := step.route.policy.position
+	index := slices.IndexFunc(route.policies, func(policy desiredPolicy) bool { return policy.position == position })
+	if index == -1 {
+		return false
+	}
+	wanted := route.policies[index]
+	if !positiveExactPath(wanted) || len(rulesFor(wanted, route.hostnameRuleValue)) < 2 {
+		return false
+	}
+	if step.route.kind == routeMutationEnablePolicy && !slices.ContainsFunc(backend.policies, func(policy observedRoutePolicy) bool {
+		return policy.policy.ID == step.route.id && policy.initialRules
+	}) {
+		return false
+	}
+	for i, sibling := range desired.routes {
+		onListener := desired.spec.Routes[i].Disposition == cloud.GraphEnsure && scopedHTTPRoutePort(sibling) == port
+		if onListener {
+			for j, policy := range sibling.policies {
+				if i == step.routeIndex && j == index {
+					continue
+				}
+				if !positiveExactPath(policy) || policy.path == wanted.path {
+					return false
+				}
+			}
+		}
+		observed := actual.routes[i]
+		for _, policy := range observed.policies {
+			if policy.policy.ListenerID != listenerID {
+				continue
+			}
+			if !onListener || policy.policy.Position <= 0 || policy.policy.Position > policyCount ||
+				!slices.ContainsFunc(sibling.policies, func(expected desiredPolicy) bool {
+					return expected.position == policy.policy.Position && expected.role == policy.role
+				}) || !observedForwardPolicyMatches(sibling, observed, policy) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func positiveExactPath(policy desiredPolicy) bool {
+	return policy.redirect == nil && policy.compareType == l7policies.CompareTypeEqual && policy.path != "" && !policy.pathInvert
+}
+
 func (p *Provider) preparePolicyCreation(ctx context.Context, actual observedGatewayGraph, desired desiredGatewayGraph, step graphMutation) (graphMutation, error) {
 	if step.kind != graphRouteMutation || step.route.kind != routeMutationCreatePolicy {
 		return step, nil

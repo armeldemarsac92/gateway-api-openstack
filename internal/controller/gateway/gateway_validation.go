@@ -96,7 +96,7 @@ func SupportedListenersForConfig(config controller.Config, gateway *gatewayv1.Ga
 	}
 	if model.UnsupportedGatewayWideTLS(gateway.Spec.TLS) {
 		return nil, &gatewayValidationError{
-			message:       "Gateway-wide spec.tls supports only backend configuration",
+			message:       "Gateway-wide spec.tls requires frontend or backend configuration",
 			gatewayReason: gatewayv1.GatewayReasonInvalidParameters,
 		}
 	}

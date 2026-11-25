@@ -100,6 +100,14 @@ type GatewayResult struct {
 	HTTPPolicyTransition bool
 	// ScopedListenerReadyPorts contains the individually programmed listener ports.
 	ScopedListenerReadyPorts []int
+	// ScopedListenerServingPorts contains verified physical ports on which
+	// only some HTTPS sections may be serving. This evidence is for discovery.
+	ScopedListenerServingPorts []int
+	// ScopedTLSClosedPorts contains denied HTTPS ports with settled absence
+	// or a verified disabled listener. Accepting a withdrawal write is insufficient.
+	ScopedTLSClosedPorts []int
+	// FrontendFallbackUnavailablePorts require a capability that Octavia did not advertise.
+	FrontendFallbackUnavailablePorts []int
 	// ScopedListenerDeferredPorts still match their active frontends while
 	// route observations are deferred. Only previously programmed sections
 	// at the same generation can retain status. A nil list means the provider

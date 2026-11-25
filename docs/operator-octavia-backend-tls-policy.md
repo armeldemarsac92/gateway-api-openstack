@@ -1,6 +1,6 @@
 # Authenticate HTTPRoute and GRPCRoute backends with BackendTLSPolicy
 
-An application can require the Gateway to encrypt its connection to a Service and verify the server's DNS identity. HTTPRoute can attach to an HTTP listener or a listener that terminates HTTPS. The gRPC profile uses an HTTP listener. On the upstream connection, Amphora sends the policy hostname as SNI and verifies the certificate against the CA in the Service namespace.
+An application can require the Gateway to encrypt its connection to a Service and verify the server's certificate identity. HTTPRoute can attach to an HTTP listener or a listener that terminates HTTPS. The gRPC profile uses an HTTP listener. On the upstream connection, Amphora sends the policy hostname as SNI and verifies the certificate against the CA in the Service namespace.
 
 ## Enable the regional capability
 
@@ -10,6 +10,8 @@ An application can require the Gateway to encrypt its connection to a Service an
 4. For a standalone installation render `config/octavia-backend-tls-policy`. For the Magnum workload addon render `integrations/magnum-capi-helm/workload-octavia-backend-tls-policy`. Each overlay sets `--octavia-backend-tls-policy` and Octavia microversion 2.8, and grants access to `BackendTLSPolicy`, its status and ConfigMaps. The controller watches ConfigMap metadata and reads the referenced CA after verifying the authorized Service port. If the installation also uses the Experimental release bundle, include the existing Experimental component. [Magnum operator procedure](qualification/v1.7.0/magnum-operator.md)
 
 For GRPCRoute, enable the existing gRPC profile and install the provider and Amphora builds that enforce negotiated HTTP/2. Set `enabled_backend_tls_h2_alpn_providers = amphora` alongside the hostname setting, then verify that the regional capability response includes `backend_tls_h2_alpn_v1` and `backend_tls_hostname_v1`. The controller requests `backend_tls_require_h2: true` and checks it alongside the configured hostname and CA on the owned pool before enabling it or enrolling members. Amphora closes backend TLS connections that do not negotiate `h2`. Missing capability, missing readback or invalid trust keeps the affected backend unavailable. The Service port may omit `appProtocol` or declare `https`. A port declaring `kubernetes.io/h2c` cannot use this policy.
+
+For explicit DNS or URI identities, install the Octavia API, worker, database migration, octavia-lib and Amphora builds that support backend SAN validation. Set `enabled_backend_tls_subject_alt_names_providers = amphora` alongside the hostname setting. Using the same regional endpoint, verify that the capability response includes `backend_tls_subject_alt_names_v1`. The existing controller flag `--octavia-backend-tls-policy` handles SAN policies in regions that advertise this capability. For gRPC, the region must also advertise the existing HTTP/2 ALPN capability.
 
 ## Protect a Service port
 
@@ -43,13 +45,31 @@ spec:
 
 HTTPRoute and GRPCRoute continue to refer to the Service port by number. A cross-namespace backend also requires the usual ReferenceGrant in the Service namespace. Omitting `sectionName` applies the policy to the Service as a whole. A matching port-specific policy takes precedence. Competing policies for the same target and section are ordered by creation timestamp and name. [Service grant lifecycle](qualification/v1.7.0/service-grants.md)
 
+### Require explicit certificate identities
+
+Add up to five `subjectAltNames` to `spec.validation` to authenticate the leaf certificate by DNS or URI. The following entries allow either the DNS name or the exact URI. The certificate must still chain to the configured CA.
+
+```yaml
+    subjectAltNames:
+      - type: Hostname
+        hostname: catalog.svc.example
+      - type: URI
+        uri: spiffe://identity.example/workloads/catalog
+```
+
+The controller still sends `validation.hostname` as SNI. To allow that hostname as a certificate identity, include it as a DNS entry. Without a non-empty list, Amphora verifies the DNS SAN matching `validation.hostname`. URI case and percent escapes must match the leaf certificate bytes. Use an absolute URI of at most 253 ASCII characters. URI authorities must use a dotted host or a bracketed IPv6 address.
+
+In a region that lacks SAN support, the affected pool stays closed and the policy ancestor reports `Accepted=False` with reason `UnsupportedProvider`. Failed capability discovery reports `Accepted=Unknown` with reason `Pending`. A malformed list reports `Accepted=False` with reason `Invalid`. Other backends in the route keep their configured behavior and weights.
+
 ## Verify and rotate trust
 
 Read `status.ancestors` on the policy for the managed Gateway and current generation. `Accepted=True` and `ResolvedRefs=True` describe the accepted policy and resolved CA. Send traffic through the Gateway to verify the backend certificate. A server presenting the wrong DNS identity or a certificate from an untrusted CA must receive no HTTP request. The matching client request receives a 5xx response.
 
 A policy can record 16 ancestors across all controllers. The Gateway waits for its own row before forwarding to the protected Service. If all rows belong to other ancestors, check the Route's controller-specific `Programmed` condition and the Gateway's `BackendTLSPoliciesReady` condition. Existing ancestors continue serving. When a row becomes available, the controller records the waiting Gateway and reconciles its backend.
 
-Changing the public CA certificate in `ca.crt` creates a new immutable Barbican revision for this Gateway. The controller withdraws traffic from the affected pool while it changes trust and checks the effective hostname and CA before putting members back in service. A certificate rotation that changes the issuing CA needs coordination with the backend operator. Check a successful request after the rotation and a refusal with the previous trust configuration. An invalid policy or a missing CA keeps the protected backend unavailable. Its Service can still be a resolved reference on the route.
+Changing the public CA certificate in `ca.crt` creates a new immutable Barbican revision for this Gateway. The controller withdraws traffic from the affected pool while it changes trust and checks the effective hostname, CA and any explicit SANs before putting members back in service. A certificate rotation that changes the issuing CA needs coordination with the backend operator. Check a successful request after the rotation and a refusal with the previous trust configuration. An invalid policy or a missing CA keeps the protected backend unavailable. Its Service can still be a resolved reference on the route.
+
+To return a protected backend to hostname authentication, remove `subjectAltNames` from the policy. The controller disables and drains the pool, clears the SAN list on Octavia, and requires an explicit empty list in a separate read before reopening the pool. It also verifies the hostname and CA before restoring traffic. Octavia must keep reporting the empty list for that pool, including after a controller restart or policy deletion. This works after a regional SAN opt-out as long as the upgraded API remains available and the region still advertises the capabilities required by the remaining policy. Upgrade the backend certificate to match the hostname before making the change if it currently relies on a different identity.
 
 During rollback, keep the upgraded workers, strict Amphora runtime and Barbican identity available until protected routes and their cloud resources have been withdrawn. The controller records CA ownership in a Gateway finalizer before publication. After opt-out it keeps enrolled pools closed and can still retire this Gateway's CAs on deletion. The controller checks regional project pool and listener CA references before retiring an unused revision. A CA still used elsewhere is retained.
 
@@ -81,8 +101,8 @@ The Gateway reports the current-generation `ResolvedRefs` condition. A missing o
 
 Octavia uses the native `tls_container_ref` pool field from microversion 2.8. The existing regional hostname and, for gRPC, negotiated `h2` capabilities still apply. Stock Octavia can present a client certificate, but this profile requires the strict DNS and gRPC validation described above. Verify a fresh request through the Gateway to a server that requires the expected client certificate. Check that Octavia reports the enrolled reference on the active pool. [Octavia pool API](https://docs.openstack.org/api-ref/load-balancer/v2/#show-pool-details)
 
-During rotation or revocation, the controller disables the affected pool and removes its members before replacing or clearing the reference. It reads back the new identity, CA, hostname and required transport before restoring traffic. Revoking the grant or enrollment leaves the affected pool closed. Removing `clientCertificateRef` from the Gateway allows BackendTLSPolicy server authentication to resume after Octavia confirms the client reference was cleared. Turning off the operator option while the Gateway requests an identity keeps its protected pools closed. Keep the previous Barbican object readable until the closed or replaced pool no longer references it and all other consumers have been checked. Confirm withdrawal with Octavia provisioning status and fresh backend connections.
+During rotation or revocation, the controller disables the affected pool and removes its members before replacing or clearing the reference. It reads back the new identity, CA, hostname, explicit SANs when configured, and required transport before restoring traffic. Revoking the grant or enrollment leaves the affected pool closed. Removing `clientCertificateRef` from the Gateway allows BackendTLSPolicy server authentication to resume after Octavia confirms the client reference was cleared. Turning off the operator option while the Gateway requests an identity keeps its protected pools closed. Keep the previous Barbican object readable until the closed or replaced pool no longer references it and all other consumers have been checked. Confirm withdrawal with Octavia provisioning status and fresh backend connections.
 
 If the controller cannot list BackendTLSPolicy resources, it can still close owned pools that carry a stale client certificate, then remove their owned members and clear the reference. A new Gateway requesting a client certificate is rejected if the controller is configured without BackendTLSPolicy observation. A previously bound Gateway can still withdraw enrolled identities.
 
-This profile currently accepts one local Service target, one local ConfigMap CA reference with one PEM CA certificate, and a fixed DNS hostname for HTTP/1 and gRPC backends. Explicit DNS or URI `subjectAltNames`, system trust roots and TCP backend re-encryption require additional implementation and qualification. Deployed Hibiscus qualification remains open.
+This profile accepts one local Service target, one local ConfigMap CA reference with one PEM CA certificate, and a fixed DNS hostname for HTTP and gRPC backends. Terminating TLSRoutes can also authenticate a TCP backend when the region advertises `tcp_tls_backend_auth_v1`. System trust roots still need implementation and qualification. [TCP backend configuration and traffic](qualification/v1.7.0/provider/tlsroute-termination.md#authenticate-the-tcp-backend) Deployed Hibiscus qualification remains open.

@@ -626,7 +626,8 @@ func (r *Reconciler) attachedRoutes(ctx context.Context, gateway *gatewayv1.Gate
 					continue
 				}
 			}
-			if r.Config.BackendTLSPolicy && httpKind != "" && len(matching) != 0 {
+			if r.Config.BackendTLSPolicy && len(matching) != 0 &&
+				(httpKind != "" || terminatesTLS(matching[0])) {
 				programmed := meta.FindStatusCondition(parentStatus.Conditions, r.Config.Domain()+"/Programmed")
 				attached.backendTLSAncestorFull = attached.backendTLSAncestorFull || programmed != nil &&
 					programmed.ObservedGeneration == route.GetGeneration() && programmed.Status == metav1.ConditionFalse &&
@@ -764,6 +765,47 @@ func (r *Reconciler) applyHTTPSListenerStatus(
 			metav1.ConditionFalse, string(programmedReason), message, gateway.Generation))
 	}
 	preserveTransitionTimes(gateway.Status.Conditions, previous.Conditions)
+}
+
+func setFrontendFallbackStatus(gateway *gatewayv1.Gateway) {
+	insecureMode := func(config gatewayv1.TLSConfig) bool {
+		return config.Validation != nil && config.Validation.Mode == gatewayv1.AllowInsecureFallback
+	}
+	conditionType := string(gatewayv1.GatewayConditionInsecureFrontendValidationMode)
+	if tls := gateway.Spec.TLS; tls != nil && tls.Frontend != nil &&
+		(insecureMode(tls.Frontend.Default) || slices.ContainsFunc(tls.Frontend.PerPort, func(port gatewayv1.TLSPortConfig) bool {
+			return insecureMode(port.TLS)
+		})) {
+		controller.SetCondition(&gateway.Status.Conditions, controller.Condition(conditionType, metav1.ConditionTrue,
+			string(gatewayv1.GatewayReasonConfigurationChanged), "The Gateway is configured to allow HTTPS connections without a valid client certificate", gateway.Generation))
+		return
+	}
+	meta.RemoveStatusCondition(&gateway.Status.Conditions, conditionType)
+}
+
+// A rejected CA or unsupported mode is a configuration result. Separately report
+// whether Octavia has confirmed the affected listener is closed.
+func (r *Reconciler) reportFrontendCAWithdrawal(gateway *gatewayv1.Gateway, issues map[gatewayv1.SectionName]httpsListenerStatusIssue, closedPorts []int) {
+	for i := range gateway.Status.Listeners {
+		status := &gateway.Status.Listeners[i]
+		issue, invalid := issues[status.Name]
+		if !invalid || issue.primary.reason != gatewayv1.ListenerReasonNoValidCACertificate && issue.primary.reason != gatewayv1.ListenerReasonUnsupportedValue {
+			continue
+		}
+		index := slices.IndexFunc(gateway.Spec.Listeners, func(listener gatewayv1.Listener) bool { return listener.Name == status.Name })
+		if index < 0 {
+			continue
+		}
+		listener := gateway.Spec.Listeners[index]
+		if listener.Protocol != gatewayv1.HTTPSProtocolType || model.FrontendClientValidation(gateway.Spec.TLS, listener.Port) == nil {
+			continue
+		}
+		programmed := meta.FindStatusCondition(status.Conditions, string(gatewayv1.ListenerConditionProgrammed))
+		if programmed != nil && !slices.Contains(closedPorts, int(listener.Port)) {
+			programmed.Reason = string(gatewayv1.ListenerReasonPending)
+			programmed.Message = "Waiting for Octavia to confirm the HTTPS listener is closed"
+		}
+	}
 }
 
 // The HTTPS overlay refines provider status. Keep transition times from the

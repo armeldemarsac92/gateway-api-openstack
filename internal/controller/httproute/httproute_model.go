@@ -328,7 +328,7 @@ func (r *Reconciler) buildRouteModelWithReader(
 	if err != nil {
 		return cloud.RouteSpec{}, err
 	}
-	spec, _, err := r.buildRouteModelFromInputs(ctx, reader, route, gateway, listeners, inputs)
+	spec, _, err := r.buildRouteModelFromInputs(ctx, reader, route, gateway, selection, inputs)
 	return spec, err
 }
 
@@ -342,11 +342,11 @@ func (r *Reconciler) buildRouteModelFromInputs(
 	reader client.Reader,
 	route *gatewayv1.HTTPRoute,
 	gateway *gatewayv1.Gateway,
-	listeners []*gatewayv1.Listener,
+	selection routeSelection,
 	inputs *routeModelInputs,
 ) (cloud.RouteSpec, routeModelDiagnostics, error) {
 	ordinaryHTTP := model.HTTPProfileRouteKind(route) == model.HTTPRouteKind
-	matches, rules, err := supportedRouteModel(inputs.routeFragment(route), listeners,
+	matches, rules, err := supportedRouteModel(inputs.routeFragment(route), selection.sections(),
 		r.Config.FixedHTTPResponses || r.Config.WeightedHTTPTargets, r.Config.WeightedHTTPTargets,
 		r.Config.HTTPHeaderExact, r.Config.HTTPMethodMatch && ordinaryHTTP, r.Config.HTTPQueryParamExact && r.Config.FixedHTTPResponses && ordinaryHTTP)
 	if err != nil {
@@ -364,7 +364,7 @@ func (r *Reconciler) buildRouteModelFromInputs(
 	portMatches := make(map[gatewayv1.PortNumber][]routeLoweredMatch)
 	portListeners := make(map[gatewayv1.PortNumber]*gatewayv1.Listener)
 	var ports []gatewayv1.PortNumber
-	for _, listener := range listeners {
+	for _, listener := range selection.listeners() {
 		if portListeners[listener.Port] == nil {
 			ports = append(ports, listener.Port)
 			portListeners[listener.Port] = listener
@@ -445,7 +445,7 @@ func (r *Reconciler) buildRoutePortModel(
 		spec.HTTPListenerHostname = match.httpListenerHostname
 		spec.HTTPSListenerHostname = match.httpsListenerHostname
 		spec.Hostname, spec.PathType, spec.PathValue, spec.Precedence = match.Hostname, cloud.PathMatchType(match.Match.PathType), match.Match.PathValue, match.Precedence
-		spec.BackendTLS = inputs.backendTLSAvailability[spec.GRPC].validation(backend)
+		spec.BackendTLS = inputs.backendTLSValidation(backend, spec.GRPC)
 		if spec.BackendTLS != nil && spec.BackendTLS.Denied {
 			return spec, routeModelDiagnostics{}, nil
 		}
@@ -626,7 +626,7 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 	}
 	result, observed := groups[key]
 	var members []cloud.Member
-	tls := inputs.backendTLSAvailability[spec.GRPC].validation(backend)
+	tls := inputs.backendTLSValidation(backend, spec.GRPC)
 	if !observed {
 		switch {
 		case backend.Diagnostic != nil && spec.GRPC:
@@ -717,7 +717,7 @@ type routeLoweredMatch struct {
 
 // supportedRouteModel verifies that the compiled attachments match the sections
 // selected by admission before lowering any backend or policy.
-func supportedRouteModel(logical model.Gateway, selected []*gatewayv1.Listener, fixedResponses, weightedTargets, exactHeaders, methodMatch, exactQueryParams bool) ([]routeLoweredMatch, []model.Rule, error) {
+func supportedRouteModel(logical model.Gateway, selected map[model.ListenerSection]*gatewayv1.Listener, fixedResponses, weightedTargets, exactHeaders, methodMatch, exactQueryParams bool) ([]routeLoweredMatch, []model.Rule, error) {
 	unsupported := func() ([]routeLoweredMatch, []model.Rule, error) {
 		return nil, nil, newRouteBuildError(routeErrorUnsupported, "logical Gateway configuration is outside the supported HTTP profile")
 	}
@@ -727,10 +727,6 @@ func supportedRouteModel(logical model.Gateway, selected []*gatewayv1.Listener, 
 	route := logical.Routes[0]
 	if len(route.Diagnostics) != 0 {
 		return unsupported()
-	}
-	sections := make(map[sectionIdentity]*gatewayv1.Listener, len(selected))
-	for _, listener := range selected {
-		sections[listenerSectionIdentity(*listener)] = listener
 	}
 	accepted := make(map[model.ListenerSection]bool)
 	for _, parent := range route.Parents {
@@ -744,7 +740,7 @@ func supportedRouteModel(logical model.Gateway, selected []*gatewayv1.Listener, 
 			}
 		}
 	}
-	if len(accepted) == 0 || len(accepted) != len(sections) {
+	if len(accepted) == 0 || len(accepted) != len(selected) {
 		return unsupported()
 	}
 	for _, rule := range route.Rules {
@@ -761,29 +757,35 @@ func supportedRouteModel(logical model.Gateway, selected []*gatewayv1.Listener, 
 		}
 	}
 	var matches []routeLoweredMatch
+	matchedSections := 0
 	for _, listener := range logical.Listeners {
-		section := sectionIdentity{name: listener.Name, port: listener.Port, protocol: listener.Protocol, hostname: listener.Hostname}
-		expected := sections[section]
+		section := model.ListenerSection{ListenerSet: listener.ListenerSet, Name: listener.Name}
+		expected := selected[section]
 		if expected == nil {
 			if len(listener.Rules) != 0 {
 				return unsupported()
 			}
 			continue
 		}
-		if !accepted[model.ListenerSection{ListenerSet: listener.ListenerSet, Name: listener.Name}] ||
+		expectedIdentity := listenerSectionIdentity(section, *expected)
+		if !accepted[section] || expectedIdentity.port != listener.Port || expectedIdentity.protocol != listener.Protocol || expectedIdentity.hostname != listener.Hostname ||
 			len(listener.Diagnostics) != 0 || len(listener.Rules) == 0 {
 			return unsupported()
 		}
-		delete(sections, section)
+		matchedSections++
 		for _, match := range listener.Rules {
 			if !exactHeaders && len(match.Match.Headers) != 0 || !methodMatch && match.Match.Method != "" ||
 				!exactQueryParams && len(match.Match.QueryParams) != 0 {
 				return unsupported()
 			}
-			matches = append(matches, routeLoweredMatch{RouteMatch: match, port: listener.Port, sectionHostname: gatewaycontroller.HTTPVirtualHostname(expected)})
+			lowered := routeLoweredMatch{RouteMatch: match, port: listener.Port, sectionHostname: gatewaycontroller.HTTPVirtualHostname(expected)}
+			if section.ListenerSet.Name != "" && listener.Protocol == gatewayv1.HTTPSProtocolType {
+				lowered.httpsListenerHostname = lowered.sectionHostname
+			}
+			matches = append(matches, lowered)
 		}
 	}
-	if len(sections) != 0 {
+	if matchedSections != len(selected) {
 		return unsupported()
 	}
 	return matches, route.Rules, nil

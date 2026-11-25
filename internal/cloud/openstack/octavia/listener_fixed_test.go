@@ -67,10 +67,10 @@ func TestIsolatedHTTPSListenerIncludesVirtualHosts(t *testing.T) {
 	service := NewService(&gophercloud.ServiceClient{ProviderClient: &gophercloud.ProviderClient{
 		HTTPClient: http.Client{Transport: loadBalancerTestTransport{handler}}}, Endpoint: "http://octavia.test/"})
 	disabled := false
-	_, err := service.CreateIsolatedHTTPSListener(t.Context(), listeners.CreateOpts{
+	_, err := service.CreateHTTPSListener(t.Context(), listeners.CreateOpts{
 		LoadbalancerID: "lb", Protocol: listeners.ProtocolTerminatedHTTPS, ProtocolPort: 443,
 		DefaultTlsContainerRef: "certificate", AdminStateUp: &disabled,
-	}, hosts, true)
+	}, hosts, true, false)
 	if err != nil {
 		t.Fatal(err)
 	}

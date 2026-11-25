@@ -34,6 +34,9 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 )
 
+const tcpBackendClientCertificateReason = "BackendClientCertificateUnsupported"
+const tcpBackendClientCertificateMessage = "Authenticated TCP backends do not support a Gateway backend client certificate"
+
 // BackendClientCertificateResolver authorizes one live operator-enrolled Secret revision.
 type BackendClientCertificateResolver interface {
 	ResolveBackendClientCertificate(context.Context, *gatewayv1.Gateway) (string, gatewayv1.GatewayConditionReason, string)
@@ -148,6 +151,9 @@ func (r *Reconciler) observeBackendClientCertificateWithdrawal(ctx context.Conte
 func (r *Reconciler) observeBackendClientCertificate(ctx context.Context, gateway *gatewayv1.Gateway) (cloud.BackendClientCertificate, gatewayv1.GatewayConditionReason, string) {
 	if BackendClientCertificateRef(gateway) == nil {
 		return cloud.BackendClientCertificate{}, "", ""
+	}
+	if len(gateway.Spec.Listeners) == 1 && terminatesTLS(&gateway.Spec.Listeners[0]) {
+		return cloud.BackendClientCertificate{Denied: true}, tcpBackendClientCertificateReason, tcpBackendClientCertificateMessage
 	}
 	if !r.Config.BackendTLSPolicy || !r.Config.BackendClientCertificate {
 		return cloud.BackendClientCertificate{Denied: true}, "BackendClientCertificateDisabled", "The operator has disabled Gateway backend client certificates"

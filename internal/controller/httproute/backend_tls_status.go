@@ -33,6 +33,7 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
+	gatewaycontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
@@ -110,9 +111,6 @@ func (r *backendTLSPolicyStatusReconciler) observeAncestors(ctx context.Context,
 			}
 		}
 	}
-	if len(gateways) == 0 {
-		return nil, nil
-	}
 	peers := make(map[types.NamespacedName][]gatewayv1.HTTPRoute, len(gateways))
 	setParents := make(map[types.NamespacedName]types.NamespacedName)
 	for _, route := range routes {
@@ -129,7 +127,8 @@ func (r *backendTLSPolicyStatusReconciler) observeAncestors(ctx context.Context,
 		}
 	}
 	ancestors := make(map[types.NamespacedName]backendTLSPolicyConditions, len(gateways))
-	availability := make(map[bool]backendTLSAvailability, 2)
+	availability := make(map[backendTLSRequirements]backendTLSAvailability, 2)
+	requireSAN := len(policy.Spec.Validation.SubjectAltNames) != 0
 	for key, gateway := range gateways {
 		consumer, err := r.observeGatewayConsumer(ctx, policy, gateway, targets, peers[key])
 		if err != nil {
@@ -138,16 +137,58 @@ func (r *backendTLSPolicyStatusReconciler) observeAncestors(ctx context.Context,
 		if consumer.selection == nil {
 			continue
 		}
-		if _, checked := availability[consumer.requiresHTTP2]; !checked &&
+		requirements := backendTLSRequirements{requireH2: consumer.requiresHTTP2, requireSAN: requireSAN}
+		if _, checked := availability[requirements]; !checked &&
 			consumer.selection.Accepted.Status == metav1.ConditionTrue && consumer.supportedProtocol {
-			availability[consumer.requiresHTTP2] = r.routes.backendTLSAvailability(ctx, consumer.requiresHTTP2)
+			availability[requirements] = r.routes.backendTLSAvailability(ctx, requirements)
 		}
 		ancestors[key] = backendTLSPolicyConditions{
-			accepted:     availability[consumer.requiresHTTP2].apply(consumer.selection.Accepted, consumer.supportedProtocol),
+			accepted:     availability[requirements].apply(consumer.selection.Accepted, consumer.supportedProtocol, requireSAN),
 			resolvedRefs: consumer.selection.ResolvedRefs,
 		}
 	}
+	if r.routes.Config.TCPTLSTermination {
+		gatewayObserver := gatewaycontroller.Reconciler{APIReader: r.routes.APIReader, Config: r.routes.Config}
+		consumers, err := gatewayObserver.ObserveTLSRouteBackendTLSPolicy(ctx, policy)
+		if err != nil {
+			return nil, err
+		}
+		capability := backendTLSUnknown
+		if !requireSAN && r.routes.TCPBackendTLSAvailable != nil {
+			for _, consumer := range consumers {
+				if consumer.Accepted.Status == metav1.ConditionTrue {
+					supported, err := r.routes.TCPBackendTLSAvailable(ctx)
+					if err == nil {
+						capability = backendTLSUnsupported
+						if supported {
+							capability = backendTLSAvailable
+						}
+					}
+					break
+				}
+			}
+		}
+		for key, consumer := range consumers {
+			conditions := backendTLSPolicyConditions{
+				accepted: capability.apply(consumer.Accepted, !requireSAN, requireSAN), resolvedRefs: consumer.ResolvedRefs,
+			}
+			// A policy must be enforceable by every profile consuming it
+			// before the single ancestor can report Accepted.
+			if prior, exists := ancestors[key]; exists {
+				conditions.accepted = leastSatisfiedBackendTLSCondition(prior.accepted, conditions.accepted)
+				conditions.resolvedRefs = leastSatisfiedBackendTLSCondition(prior.resolvedRefs, conditions.resolvedRefs)
+			}
+			ancestors[key] = conditions
+		}
+	}
 	return ancestors, nil
+}
+
+func leastSatisfiedBackendTLSCondition(first, second metav1.Condition) metav1.Condition {
+	if first.Status == metav1.ConditionFalse || second.Status == metav1.ConditionTrue {
+		return first
+	}
+	return second
 }
 
 type backendTLSConsumer struct {

@@ -272,14 +272,14 @@ func readRouteNamespaces(ctx context.Context, reader client.Reader, candidates [
 }
 
 // observeRouteSelection reads the dependencies of one Gateway's parent group.
-func (r *Reconciler) observeRouteSelection(ctx context.Context, reader client.Reader, route *gatewayv1.HTTPRoute, parents []managedRouteParent) (routeSelection, []corev1.Namespace, map[types.NamespacedName][]gatewayv1.Listener, error) {
-	var sets map[types.NamespacedName][]gatewayv1.Listener
-	if slices.ContainsFunc(parents, func(parent managedRouteParent) bool { return parent.listenerSet != nil }) {
-		projection, err := gatewaycontroller.ObserveListenerSets(ctx, reader, r.Config, parents[0].gateway)
+func (r *Reconciler) observeRouteSelection(ctx context.Context, reader client.Reader, route *gatewayv1.HTTPRoute, parents []managedRouteParent) (routeSelection, []corev1.Namespace, gatewaycontroller.ListenerSetProjection, error) {
+	var sets gatewaycontroller.ListenerSetProjection
+	if len(parents) != 0 {
+		var err error
+		sets, err = r.observeListenerSets(ctx, reader, parents[0].gateway)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, sets, err
 		}
-		sets = projection.Sections()
 	}
 	selection, namespaces, err := r.selectRouteParentsWithNamespaces(ctx, reader, route, parents, sets, make(map[string][]corev1.Namespace))
 	return selection, namespaces, sets, err
@@ -362,12 +362,13 @@ func (s routeSelection) withoutProfileConflicts(rejected []model.ListenerSection
 
 func (s routeSelection) listeners() []*gatewayv1.Listener {
 	var listeners []*gatewayv1.Listener
+	seen := make(map[model.ListenerSection]bool)
 	for _, parent := range s {
 		if parent.rejection == nil {
 			for _, listener := range parent.listeners {
-				if !slices.ContainsFunc(listeners, func(previous *gatewayv1.Listener) bool {
-					return listenerSectionIdentity(*previous) == listenerSectionIdentity(*listener)
-				}) {
+				key := parent.section(listener.Name)
+				if !seen[key] {
+					seen[key] = true
 					listeners = append(listeners, listener)
 				}
 			}
@@ -376,23 +377,43 @@ func (s routeSelection) listeners() []*gatewayv1.Listener {
 	return listeners
 }
 
-func (r *Reconciler) selectRouteParents(ctx context.Context, route *gatewayv1.HTTPRoute, parents []managedRouteParent, sets map[types.NamespacedName][]gatewayv1.Listener) (routeSelection, []corev1.Namespace, error) {
+func (s routeSelection) sections() map[model.ListenerSection]*gatewayv1.Listener {
+	sections := make(map[model.ListenerSection]*gatewayv1.Listener)
+	for _, parent := range s {
+		if parent.rejection == nil {
+			for _, listener := range parent.listeners {
+				sections[parent.section(listener.Name)] = listener
+			}
+		}
+	}
+	return sections
+}
+
+func (r *Reconciler) observeListenerSets(ctx context.Context, reader client.Reader, gateway *gatewayv1.Gateway) (gatewaycontroller.ListenerSetProjection, error) {
+	if r.ListenerSetObserver != nil {
+		return r.ListenerSetObserver(ctx, reader, gateway)
+	}
+	return gatewaycontroller.ObserveListenerSets(ctx, reader, r.Config, gateway)
+}
+
+func (r *Reconciler) selectRouteParents(ctx context.Context, route *gatewayv1.HTTPRoute, parents []managedRouteParent, sets gatewaycontroller.ListenerSetProjection) (routeSelection, []corev1.Namespace, error) {
 	return r.selectRouteParentsWithNamespaces(ctx, r.APIReader, route, parents, sets, make(map[string][]corev1.Namespace))
 }
 
-func (r *Reconciler) selectRouteParentsWithNamespaces(ctx context.Context, reader client.Reader, route *gatewayv1.HTTPRoute, parents []managedRouteParent, sets map[types.NamespacedName][]gatewayv1.Listener, cache map[string][]corev1.Namespace) (routeSelection, []corev1.Namespace, error) {
+func (r *Reconciler) selectRouteParentsWithNamespaces(ctx context.Context, reader client.Reader, route *gatewayv1.HTTPRoute, parents []managedRouteParent, sets gatewaycontroller.ListenerSetProjection, cache map[string][]corev1.Namespace) (routeSelection, []corev1.Namespace, error) {
 	var selection routeSelection
 	if len(parents) == 0 {
 		return nil, nil, nil
 	}
 	gateway := parents[0].gateway
 	http, _ := gatewaycontroller.HTTPRouteListeners(r.Config, gateway)
+	http = slices.DeleteFunc(http, sets.RejectsGatewayHTTPSSection)
 	namespaces, namespaceObserved := cache[route.Namespace]
 	for _, parent := range parents {
 		available := http
 		if parent.listenerSet != nil {
 			available = nil
-			for _, section := range sets[client.ObjectKeyFromObject(parent.listenerSet)] {
+			for _, section := range sets.SectionsFor(client.ObjectKeyFromObject(parent.listenerSet)) {
 				available = append(available, &section)
 			}
 		}
@@ -426,14 +447,14 @@ func (r *Reconciler) selectRouteParentsWithNamespaces(ctx context.Context, reade
 }
 
 type sectionIdentity struct {
-	name     gatewayv1.SectionName
+	section  model.ListenerSection
 	port     gatewayv1.PortNumber
 	protocol gatewayv1.ProtocolType
 	hostname string
 }
 
-func listenerSectionIdentity(listener gatewayv1.Listener) sectionIdentity {
-	result := sectionIdentity{name: listener.Name, port: listener.Port, protocol: listener.Protocol}
+func listenerSectionIdentity(section model.ListenerSection, listener gatewayv1.Listener) sectionIdentity {
+	result := sectionIdentity{section: section, port: listener.Port, protocol: listener.Protocol}
 	if listener.Hostname != nil {
 		result.hostname = string(*listener.Hostname)
 	}

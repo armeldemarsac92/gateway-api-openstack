@@ -97,9 +97,16 @@ func TestDiscoveryRetainsVerifiedHTTPDuringTLSWithdrawal(t *testing.T) {
 	pending := cloud.GatewayProgressingResult("Withdrawing HTTPS", time.Second)
 	pending.State = initial.State
 	pending.ScopedListenerDeferredPorts = []int{80}
-	require.NoError(t, r.reconcileGatewayDiscovery(t.Context(), gateway, primary, pending))
+	pending.ScopedListenerServingPorts = []int{443}
 	var slice discoveryv1.EndpointSlice
 	key := discoverySliceKey(discoveryServiceKey(gateway), discoveryv1.AddressTypeIPv4)
+	require.NoError(t, r.reconcileGatewayDiscovery(t.Context(), gateway, primary, pending))
+	require.NoError(t, kube.Get(t.Context(), key, &slice))
+	require.Len(t, slice.Ports, 2, "the verified shared bind remains discoverable without a Programmed Gateway section on 443")
+	require.Equal(t, int32(443), *slice.Ports[1].Port)
+
+	pending.ScopedListenerServingPorts = nil
+	require.NoError(t, r.reconcileGatewayDiscovery(t.Context(), gateway, primary, pending))
 	require.NoError(t, kube.Get(t.Context(), key, &slice), "unchanged HTTP listener is still enabled and previously programmed at this generation")
 	require.Len(t, slice.Ports, 1)
 	require.Equal(t, int32(80), *slice.Ports[0].Port)

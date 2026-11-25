@@ -21,10 +21,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"slices"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
+	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/loadbalancers"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/extensions/layer3/floatingips"
@@ -46,6 +48,14 @@ func (p *Provider) buildGatewayGraphPlan(desired desiredGatewayGraph, actual obs
 	}
 	if err == nil {
 		plan = p.protectPlainHTTPIsolation(desired, actual, plan, &result)
+		if len(plan) == 0 && actual.scoped && actual.protocol == cloud.ListenerProtocolHTTP {
+			// Already closed frontends cannot forward. Repair their fallback
+			// after actionable changes so unreadable state cannot starve a peer.
+			if step := actual.nextFrontendFallbackClear(desired); step != nil {
+				plan = []graphMutation{*step}
+				result.Outcome = p.progressingOutcome(step.message)
+			}
+		}
 	}
 	return plan, result, err
 }
@@ -96,6 +106,7 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 		result.Gateway.HTTPPolicyTransition = true
 	}
 	groupedHTTP := handovers != nil
+	var staleMemberWithdrawal bool
 	var deleteDisables, deleteDisableRetries, deletions, memberDisables, memberDisableRetries []graphMutation
 	var staging, fixedStaging, fixedTargetWithdrawals []graphMutation
 	var weightedWithdrawals, targetRetries, closedListenerTargets []graphMutation
@@ -356,6 +367,13 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 				canRestoreTraffic = false
 			}
 		}
+		if groupedHTTP && p.initialL7Rules && !staleMemberWithdrawal && ensureHold == "" {
+			// Keep the normal backend order while a stale member needs to
+			// be removed, even if a pool update must precede its deletion.
+			staleMemberWithdrawal = slices.ContainsFunc(routePlan, func(step routeMutation) bool {
+				return step.kind == routeMutationDeleteMember
+			})
+		}
 		for stepIndex, step := range routePlan {
 			if groupedHTTP && step.kind == routeMutationEnablePolicy {
 				for _, policy := range observed.policies {
@@ -462,20 +480,39 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 	// its rank. Each new call refreshes the list after Octavia shifts positions.
 	// Filling this prefix first keeps inserts and moves within the current list.
 	if groupedHTTP {
+		var preparedTLS []graphMutation
 		ensures = slices.DeleteFunc(ensures, func(step graphMutation) bool {
 			port := scopedHTTPRoutePort(desired.routes[step.routeIndex])
 			if handovers.ports[port] && isHTTPPolicyMutation(step.route.kind) {
 				return true
 			}
 			switch step.route.kind {
-			case routeMutationEnablePolicy:
-				return holdPolicyEnable[port] || holdPolicyOrder[port]
-			case routeMutationMovePolicy, routeMutationCreatePolicy:
+			case routeMutationCreatePolicy, routeMutationEnablePolicy:
+				if holdPolicyOrder[port] {
+					return true
+				}
+				listenerID := step.listenerID
+				if !scopedHTTP && gatewayReady && actual.listener.ProvisioningStatus == "ACTIVE" {
+					listenerID = actual.listener.ID
+				}
+				frontendReady := scopedHTTP && slices.Contains(result.Gateway.ScopedListenerReadyPorts, port) ||
+					!scopedHTTP && gatewayReady
+				if p.initialL7Rules && !staleMemberWithdrawal && frontendReady && listenerID != "" &&
+					independentPreparedTLSPolicy(desired, actual, step, listenerID, port, policyCount[port]) {
+					preparedTLS = append(preparedTLS, step)
+					return true
+				}
+				return step.route.kind == routeMutationEnablePolicy && holdPolicyEnable[port]
+			case routeMutationMovePolicy:
 				return holdPolicyOrder[port]
 			default:
 				return false
 			}
 		})
+		slices.SortStableFunc(preparedTLS, func(a, b graphMutation) int {
+			return cmp.Compare(a.route.policy.position, b.route.policy.position)
+		})
+		plan = append(plan, preparedTLS...)
 		orderHTTPBackendMutations(ensures)
 	}
 	plan = append(plan, ensures...)
@@ -493,6 +530,11 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 		plan = append(plan, restore...)
 	}
 	plan = append(plan, zeroWeightPoolEnsures...)
+	if len(plan) == 0 && scopedHTTP && desired.spec.Gateway.Disposition == cloud.GraphEnsure {
+		if step := actual.nextFrontendCAMutation(desired); step != nil {
+			plan = append(plan, *step)
+		}
+	}
 	if len(plan) != 0 {
 		result.Outcome = p.progressingOutcome(plan[0].message)
 	} else if result.Gateway.Outcome.State == cloud.OutcomeProgressing && desired.spec.Gateway.Disposition == cloud.GraphEnsure {
@@ -1018,13 +1060,25 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 			Name: name, Description: desired.identity.Description(roleListener), AdminStateUp: boolPointer(enabled),
 			DefaultTlsContainerRef: certificateRef, Tags: tags,
 		}
+		var frontendFallback bool
+		if step.scopedListener.TLS != nil && step.scopedListener.TLS.ClientValidation != nil {
+			opts.ClientAuthentication = listeners.ClientAuthenticationMandatory
+			opts.ClientCATLSContainerRef = actual.frontendCA[port].ref
+			frontendFallback = step.scopedListener.TLS.ClientValidation.InsecureFallback
+			if frontendFallback {
+				opts.Tags = append(opts.Tags, frontendFallbackTag)
+			}
+		}
 		if desired.protocol == cloud.ListenerProtocolTLSTerminate {
 			_, err = p.octavia.CreateTCPTLSListener(ctx, opts)
 			step.redactTLSError = true
-		} else if hosts := httpsVirtualHosts(step.scopedListener); len(hosts) != 0 {
-			opts.Tags = append(opts.Tags, httpsIsolationTag)
-			_, err = p.octavia.CreateIsolatedHTTPSListener(ctx, opts, hosts, desired.fixedHTTPResponses)
-		} else if desired.fixedHTTPResponses && (protocol == cloud.ListenerProtocolHTTP || protocol == terminatedHTTPS) {
+		} else if protocol == terminatedHTTPS {
+			hosts := httpsVirtualHosts(step.scopedListener)
+			if len(hosts) != 0 {
+				opts.Tags = append(opts.Tags, httpsIsolationTag)
+			}
+			_, err = p.octavia.CreateHTTPSListener(ctx, opts, hosts, desired.fixedHTTPResponses, frontendFallback)
+		} else if desired.fixedHTTPResponses && protocol == cloud.ListenerProtocolHTTP {
 			_, err = p.octavia.CreateListenerWithNotFound(ctx, opts)
 		} else {
 			_, err = p.octavia.CreateListener(ctx, opts)
@@ -1036,7 +1090,38 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 		if step.scopedListener.TLS != nil {
 			ref = step.scopedListener.TLS.CertificateRef
 		}
-		_, err = p.octavia.UpdateListener(ctx, listenerID, listeners.UpdateOpts{DefaultTlsContainerRef: &ref})
+		opts := listeners.UpdateOpts{DefaultTlsContainerRef: &ref}
+		if step.updateClientAuth {
+			validation := step.scopedListener.TLS.ClientValidation
+			fallback := validation != nil && validation.InsecureFallback
+			if fallback {
+				i := slices.IndexFunc(actual.scopedListeners, func(l listeners.Listener) bool { return l.ID == listenerID })
+				if i < 0 {
+					return fmt.Errorf("cannot prove ownership of Octavia HTTPS listener")
+				}
+				tags := actual.scopedListeners[i].Tags
+				if !slices.Contains(tags, frontendFallbackTag) {
+					tags = append(slices.Clone(tags), frontendFallbackTag)
+					opts.Tags = &tags
+				}
+			}
+			err = p.octavia.SetListenerClientAuthentication(ctx, listenerID, opts, actual.frontendCA[step.scopedListener.Port].ref, fallback)
+		} else {
+			_, err = p.octavia.UpdateListener(ctx, listenerID, opts)
+		}
+	case graphDisableFrontendClientAuthFallback:
+		err = p.octavia.DisableListenerClientAuthFallback(ctx, listenerID)
+	case graphPublishFrontendCA:
+		node := desired.spec.Gateway
+		if !node.BackendCAOwned {
+			if node.ClaimBackendCA == nil {
+				return errors.New("gateway CA ownership checkpoint is unavailable")
+			}
+			return node.ClaimBackendCA(ctx)
+		}
+		ca := step.scopedListener.TLS.ClientValidation
+		_, err = p.backendCA.Ensure(ctx, desired.spec.Identity.GatewayUID, ca.ConfigMapUID, ca.PEM)
+		return err
 	case graphUpdateListenerVirtualHosts:
 		err = p.octavia.SetListenerHTTPSVirtualHosts(ctx, listenerID, httpsVirtualHosts(step.scopedListener))
 	case graphClearListenerDefaultPool, graphSetListenerDefaultPool:
@@ -1057,11 +1142,24 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 		route.spec.Gateway.ListenerID = listenerID
 		return p.executeRouteMutation(ctx, route, step.route)
 	case graphSNIMutation:
-		err = p.executeSNIMutation(ctx, actual, step.sni)
+		err = p.executeSNIMutation(ctx, desired, actual, step.sni)
 	case graphEnableListener, graphDisableListener:
 		enabled := step.kind == graphEnableListener
 		step.redactTLSError = step.redactTLSError || desired.protocol == cloud.ListenerProtocolTLSTerminate
+		if step.withdrawClientCA && slices.ContainsFunc(actual.scopedListeners, func(listener listeners.Listener) bool {
+			return listener.ID == listenerID && listener.ProvisioningStatus == "ERROR" &&
+				actual.adminObserved[listener.ID] && !listener.AdminStateUp
+		}) {
+			// An accepted shutdown with an ERROR readback did not prove that
+			// Amphora removed the port. Do not retry the same failed update.
+			return p.deleteUnclosableFrontend(ctx, desired, actual, listenerID)
+		}
 		_, err = p.octavia.UpdateListener(ctx, listenerID, listeners.UpdateOpts{AdminStateUp: boolPointer(enabled)})
+		if step.withdrawClientCA && gophercloud.ResponseCodeIs(err, http.StatusBadRequest) {
+			// Octavia validates the attached CA even for an admin-down PUT.
+			// A listener DELETE can proceed without the old CA.
+			return p.deleteUnclosableFrontend(ctx, desired, actual, listenerID)
+		}
 	case graphEnableLoadBalancer, graphDisableLoadBalancer:
 		return p.setLoadBalancerAdminState(ctx, actual.state.LoadBalancerID, step.kind == graphEnableLoadBalancer)
 	case graphDeleteChild:

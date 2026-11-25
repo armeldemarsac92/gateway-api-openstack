@@ -25,13 +25,14 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/backendca"
 )
 
-// retireUnusedBackendCA runs with the Gateway writer lock and a converged Octavia graph.
+// retireUnusedBackendCA runs under the Gateway writer lock with no more graph writes.
+// A settled, denied HTTPS port can remain unprogrammed while other CAs retire.
 // The selected CA can exist before the first pool is attached. Keep that revision as
 // well as every PEM still used by a pool or client-authenticating listener.
 func (p *Provider) retireUnusedBackendCA(ctx context.Context, spec cloud.GatewayGraphSpec, actual observedGatewayGraph, result cloud.GatewayGraphResult) (cloud.GatewayGraphResult, error) {
 	deleting := spec.Gateway.Disposition == cloud.GraphDelete
-	if !spec.Gateway.BackendCAOwned || result.Outcome.State != cloud.OutcomeReady ||
-		(!deleting && spec.Gateway.Disposition != cloud.GraphEnsure) {
+	if !spec.Gateway.BackendCAOwned || (!deleting && spec.Gateway.Disposition != cloud.GraphEnsure) ||
+		result.Outcome.State != cloud.OutcomeReady && (deleting || !settledDeniedHTTPS(spec, actual, result.Gateway)) {
 		return result, nil
 	}
 	if !deleting && slices.ContainsFunc(spec.Routes, func(node cloud.RouteGraphNode) bool {
@@ -81,7 +82,7 @@ func (p *Provider) retireUnusedBackendCA(ctx context.Context, spec cloud.Gateway
 		}
 		pendingUse = pendingUse || inUse
 		if removing {
-			result.Outcome = p.progressingOutcome("Waiting to observe retirement of the unused backend CA")
+			result.Outcome = p.progressingOutcome("Waiting to observe retirement of the unused Gateway CA")
 			if deleting {
 				result.Gateway.Outcome = result.Outcome
 			}
@@ -100,6 +101,11 @@ func retainedBackendCAs(spec cloud.GatewayGraphSpec, actual observedGatewayGraph
 		return nil
 	}
 	keep := make(map[string]bool)
+	for _, ca := range actual.frontendCA {
+		if ca.ref != "" {
+			keep[ca.ref] = true
+		}
+	}
 	attached := make(map[string]bool)
 	for _, route := range actual.routes {
 		if route.pool != nil && route.pool.CATLSContainerRef != "" {
@@ -111,6 +117,11 @@ func retainedBackendCAs(spec cloud.GatewayGraphSpec, actual observedGatewayGraph
 			}
 		}
 	}
+	for _, fragment := range actual.sni {
+		if fragment.pool.CATLSContainerRef != "" {
+			attached[fragment.pool.CATLSContainerRef] = true
+		}
+	}
 	selectRevision := func(tls *cloud.BackendTLSValidation) {
 		if tls == nil || tls.Denied {
 			return
@@ -119,6 +130,9 @@ func retainedBackendCAs(spec cloud.GatewayGraphSpec, actual observedGatewayGraph
 		if ref := revision.Reference(); ref != "" {
 			keep[ref] = true
 		}
+	}
+	for _, route := range spec.Gateway.TLSSNIRoutes {
+		selectRevision(route.BackendTLS)
 	}
 	for _, node := range spec.Routes {
 		if node.Disposition == cloud.GraphEnsure {
@@ -131,4 +145,22 @@ func retainedBackendCAs(spec cloud.GatewayGraphSpec, actual observedGatewayGraph
 		}
 	}
 	return keep
+}
+
+func settledDeniedHTTPS(spec cloud.GatewayGraphSpec, actual observedGatewayGraph, result cloud.GatewayResult) bool {
+	if !actual.scoped || actual.protocol != cloud.ListenerProtocolHTTP || actual.loadBalancer == nil ||
+		actual.outcome.State != cloud.OutcomeReady {
+		return false
+	}
+	closed := actual.closedDeniedHTTPSPorts(spec.Gateway.Spec)
+	if len(closed) == 0 {
+		return false
+	}
+	for _, listener := range spec.Gateway.Spec.ScopedListeners {
+		if hasAuthorizedListener(listener) && !slices.Contains(result.ScopedListenerReadyPorts, listener.Port) ||
+			!hasAuthorizedListener(listener) && !slices.Contains(closed, listener.Port) {
+			return false
+		}
+	}
+	return true
 }

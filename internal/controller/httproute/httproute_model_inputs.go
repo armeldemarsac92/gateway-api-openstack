@@ -45,13 +45,13 @@ type routeModelInputs struct {
 	gateway                *gatewayv1.Gateway
 	input                  model.Input
 	logical                model.Gateway
-	backendTLSAvailability map[bool]backendTLSAvailability
+	backendTLSAvailability map[backendTLSRequirements]backendTLSAvailability
 	backendTLSAncestor     *backendtls.GatewayAncestor
 	admission              routeGraphAdmission
 }
 
 type routeGraphAdmission struct {
-	listenerSets     map[types.NamespacedName][]gatewayv1.Listener
+	listenerSets     gatewaycontroller.ListenerSetProjection
 	bindings         []routeGraphBinding
 	eligible         map[routeObjectKey]routeGraphCandidate
 	rejectedSections map[routeObjectKey][]model.ListenerSection
@@ -94,12 +94,12 @@ func (r *Reconciler) liveRouteGraphAdmission(ctx context.Context, gateway *gatew
 
 func (r *Reconciler) observeRouteGraphAdmission(ctx context.Context, gateway *gatewayv1.Gateway, routes []gatewayv1.HTTPRoute, requested *gatewayv1.HTTPRoute) (routeGraphAdmission, error) {
 	identity := controller.GatewayIdentity(r.Config, gateway)
-	sets, err := gatewaycontroller.ObserveListenerSets(ctx, r.APIReader, r.Config, gateway)
+	sets, err := r.observeListenerSets(ctx, r.APIReader, gateway)
 	if err != nil {
 		return routeGraphAdmission{}, err
 	}
 	admission := routeGraphAdmission{
-		listenerSets: sets.Sections(),
+		listenerSets: sets,
 		bindings:     r.routeGraphBindings(routes, identity),
 		eligible:     make(map[routeObjectKey]routeGraphCandidate),
 	}
@@ -149,12 +149,16 @@ func (r *Reconciler) observeRouteGraphAdmission(ctx context.Context, gateway *ga
 		route := candidate.route
 		key := routeKey(route)
 		var sections []sectionIdentity
-		for _, listener := range candidate.selection.withoutProfileConflicts(admission.rejectedSections[key]).listeners() {
-			sections = append(sections, listenerSectionIdentity(*listener))
+		for section, listener := range candidate.selection.withoutProfileConflicts(admission.rejectedSections[key]).sections() {
+			sections = append(sections, listenerSectionIdentity(section, *listener))
 		}
 		if len(sections) == 0 {
 			continue
 		}
+		slices.SortFunc(sections, func(a, b sectionIdentity) int {
+			return cmp.Or(cmp.Compare(a.section.ListenerSet.Namespace, b.section.ListenerSet.Namespace),
+				cmp.Compare(a.section.ListenerSet.Name, b.section.ListenerSet.Name), cmp.Compare(a.section.Name, b.section.Name))
+		})
 		admission.eligible[key] = routeGraphCandidate{routeUID: route.UID, sections: sections, namespaceUID: candidate.namespace}
 		if controller.RouteClaimsGateway(r.Config, route, identity) || requested != nil && route.UID == requested.UID && routeKey(route) == routeKey(requested) {
 			admission.active = append(admission.active, *route)
@@ -233,7 +237,7 @@ func (r *Reconciler) validateGraphRouteModel(ctx context.Context, inputs *routeM
 	if err != nil {
 		return err
 	}
-	if !equality.Semantic.DeepEqual(inputs.admission.listenerSets, current.listenerSets) || !maps.EqualFunc(inputs.admission.eligible, current.eligible, func(a, b routeGraphCandidate) bool {
+	if !equality.Semantic.DeepEqual(inputs.admission.listenerSets.Sections(), current.listenerSets.Sections()) || !maps.EqualFunc(inputs.admission.eligible, current.eligible, func(a, b routeGraphCandidate) bool {
 		return a.routeUID == b.routeUID && a.namespaceUID == b.namespaceUID && slices.Equal(a.sections, b.sections)
 	}) ||
 		!maps.EqualFunc(inputs.admission.rejectedSections, current.rejectedSections, slices.Equal[[]model.ListenerSection]) ||
@@ -250,10 +254,10 @@ func (r *Reconciler) validateGraphRouteModel(ctx context.Context, inputs *routeM
 }
 
 func (r *Reconciler) collectRouteModelInputs(ctx context.Context, reader client.Reader, gateway *gatewayv1.Gateway, routes []gatewayv1.HTTPRoute, namespaces []corev1.Namespace) (*routeModelInputs, error) {
-	return r.collectRouteModelInputsForSets(ctx, reader, gateway, routes, namespaces, nil)
+	return r.collectRouteModelInputsForSets(ctx, reader, gateway, routes, namespaces, gatewaycontroller.ListenerSetProjection{})
 }
 
-func (r *Reconciler) collectRouteModelInputsForSets(ctx context.Context, reader client.Reader, gateway *gatewayv1.Gateway, routes []gatewayv1.HTTPRoute, namespaces []corev1.Namespace, sets map[types.NamespacedName][]gatewayv1.Listener) (*routeModelInputs, error) {
+func (r *Reconciler) collectRouteModelInputsForSets(ctx context.Context, reader client.Reader, gateway *gatewayv1.Gateway, routes []gatewayv1.HTTPRoute, namespaces []corev1.Namespace, sets gatewaycontroller.ListenerSetProjection) (*routeModelInputs, error) {
 	if !r.Config.BackendTLSPolicy && gatewaycontroller.BackendClientCertificateRef(gateway) != nil {
 		return nil, errors.New("backend client certificates on a Gateway require BackendTLSPolicy observation")
 	}
@@ -267,7 +271,8 @@ func (r *Reconciler) collectRouteModelInputsForSets(ctx context.Context, reader 
 	if err != nil {
 		return nil, err
 	}
-	input.ListenerSetSections = sets
+	input.ListenerSetSections = sets.Sections()
+	input.OperatorHTTPS = r.Config.OperatorHTTPS
 	input.RequestHeaderModifier = r.Config.RequestHeaderModifier
 	input.ResponseHeaderModifier = r.Config.ResponseHeaderModifier
 	input.HTTPRequestRedirect = r.Config.HTTPRequestRedirect
@@ -294,26 +299,19 @@ func (r *Reconciler) collectRouteModelInputsForSets(ctx context.Context, reader 
 		input.Gateway = gateway.DeepCopy()
 		input.Gateway.Spec.Listeners = make([]gatewayv1.Listener, 0, len(listeners))
 		for _, listener := range listeners {
-			input.Gateway.Spec.Listeners = append(input.Gateway.Spec.Listeners, *listener)
+			if !sets.RejectsGatewayHTTPSSection(listener) {
+				input.Gateway.Spec.Listeners = append(input.Gateway.Spec.Listeners, *listener)
+			}
 		}
-		input.OperatorHTTPS = true
 	}
-	var availability map[bool]backendTLSAvailability
+	var availability map[backendTLSRequirements]backendTLSAvailability
 	var ancestor *backendtls.GatewayAncestor
 	if r.Config.BackendTLSPolicy {
 		ancestor = &backendtls.GatewayAncestor{Key: client.ObjectKeyFromObject(gateway), ControllerName: r.Config.ControllerName}
 		if err := graph.CollectBackendTLSInputs(ctx, reader, &input, ancestor); err != nil {
 			return nil, err
 		}
-		if graph.HasValidBackendTLSWinner(input.BackendTLSPolicies) {
-			availability = make(map[bool]backendTLSAvailability, 2)
-			for i := range routes {
-				requireH2 := model.HTTPProfileRouteKind(&routes[i]) == model.GRPCRouteKind
-				if _, checked := availability[requireH2]; !checked {
-					availability[requireH2] = r.backendTLSAvailability(ctx, requireH2)
-				}
-			}
-		}
+		availability = r.discoverBackendTLSProfiles(ctx, routes, input.BackendTLSPolicies)
 	}
 	logical, err := model.Compile(input)
 	if err != nil {

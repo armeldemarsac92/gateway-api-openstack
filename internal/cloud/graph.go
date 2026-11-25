@@ -46,6 +46,9 @@ type GatewayGraphSpec struct {
 	// ValidateMutation rechecks the request-local authority after cloud reads
 	// and planning, immediately before the provider sends a mutation.
 	ValidateMutation func(context.Context) error `json:"-"`
+	// HTTPSPolicyAuthority supplies complete current route bindings for
+	// a scoped HTTP cleanup or TLS withdrawal.
+	HTTPSPolicyAuthority *GatewayGraphSpec `json:"-"`
 }
 
 // GatewayGraphNode describes the Gateway component. Spec is required for Ensure.
@@ -53,14 +56,23 @@ type GatewayGraphNode struct {
 	Disposition  GraphDisposition
 	Spec         GatewaySpec
 	TLSSNIRoutes []TLSSNIRoute
+	// SNIPoliciesObserved permits replacement of a protected pool after an
+	// authorized inventory confirms that its hostname no longer needs TLS.
+	SNIPoliciesObserved bool `json:",omitempty"`
 	// TCPTLSCertificateRef is the currently authorized certificate for the raw
 	// TCP termination profile. An empty reference requires the listener closed.
 	TCPTLSCertificateRef string `json:",omitempty"`
+	// TLSWithdrawalPorts restricts a known authorization change to these
+	// physical HTTPS ports. A nil list checks all TLS frontends.
+	TLSWithdrawalPorts []int `json:",omitempty"`
+	// TLSWithdrawalPreviousHosts is present only when a fresh snapshot confirms
+	// that a targeted port's authorization changed without changing its TLS material.
+	TLSWithdrawalPreviousHosts map[int][]string `json:",omitempty"`
 	// BackendClientCertificate applies only to HTTP-family pools selected by BackendTLSPolicy.
 	BackendClientCertificate BackendClientCertificate
-	// BackendCAOwned persists across controller restarts and operator opt-out.
+	// BackendCAOwned checkpoints ownership of both frontend and backend trust anchors.
 	BackendCAOwned bool `json:",omitempty"`
-	// ClaimBackendCA checkpoints ownership before creating a Barbican revision.
+	// ClaimBackendCA checkpoints ownership before creating a Gateway CA revision.
 	ClaimBackendCA func(context.Context) error `json:"-"`
 }
 
@@ -82,13 +94,17 @@ type BackendClientCertificate struct {
 // TLSSNIRoute is one effective hostname and its authorized TCP destinations.
 type TLSSNIRoute struct {
 	// Deny selects an empty pool so the hostname cannot fall through to a broader suffix.
-	Deny                    bool `json:",omitempty"`
-	Identity                Identity
-	Hostname                string
-	ServiceUID              string
+	Deny       bool `json:",omitempty"`
+	Identity   Identity
+	Hostname   string
+	ServiceUID string
+	// ServicePort identifies the Service section independently of the selected
+	// SNI hostname, endpoints and their target port.
+	ServicePort             int `json:",omitempty"`
 	BackendSubnetID         string
 	BackendSecurityGroupIDs []string
 	Members                 []Member
+	BackendTLS              *BackendTLSValidation `json:",omitempty"`
 }
 
 // RouteGraphNode describes one exact route component. Spec.Identity is always

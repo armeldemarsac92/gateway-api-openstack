@@ -1,0 +1,2349 @@
+{
+  "gatewayAPI": "v1.7.0",
+  "controller": "6aaf2c448232d92f0e746674d60dd542e238e611",
+  "tree": "1049acd696a4bd3c7a045f140458aec75a772330",
+  "image": {
+    "repository": "ghcr.io/armeldemarsac92/gateway-api-openstack",
+    "sourceRevision": "6aaf2c448232d92f0e746674d60dd542e238e611",
+    "sourceLabel": "https://github.com/armeldemarsac92/gateway-api-openstack",
+    "manifestDigest": "sha256:cb8e43594cfd5837c7c1461c393880883f9bcece195aad4840eaadc8d8bee7bf",
+    "configDigest": "sha256:5c6ec900f44468242d90b99cd17f7a81713404a63443fb55f3881128cf39d333",
+    "platform": "linux/amd64",
+    "entrypoint": "/openstack-gateway-controller",
+    "user": "65532:65532",
+    "ociArchiveSHA256": "4e62b72ef19902f2910ecd6c4d3c524ae3d23526fb000119f207484824f9bf33",
+    "managerSHA256": "6bf3f61286826f34de9fcacfa624bdff1c5ba4f1aeddb849bd4ce893628906f2",
+    "normalAndNoCacheBuildsMatch": true
+  },
+  "channels": {
+    "standard": {
+      "shared443": {
+        "Gateway": {
+          "survivingName": {
+            "newConnections": 59,
+            "host": "sibling.example.test",
+            "backend": "infra-backend-v2",
+            "samplesByPhase": {
+              "withdrawal": 21,
+              "restoration": 38
+            },
+            "endpointSliceReadySamples": 59,
+            "failures": []
+          },
+          "withdrawn": {
+            "status": {
+              "gateway": {
+                "generation": 1,
+                "conditions": {
+                  "Accepted": "True/ListenersNotValid",
+                  "Programmed": "False/ListenersNotValid",
+                  "ResolvedRefs": "False/ListenersNotResolved"
+                },
+                "listeners": [
+                  {
+                    "section": "parent",
+                    "conditions": {
+                      "Accepted": "True/Accepted",
+                      "ResolvedRefs": "False/RefNotPermitted",
+                      "Conflicted": "False/NoConflicts",
+                      "Programmed": "False/Invalid"
+                    },
+                    "attachedRoutes": 1
+                  }
+                ]
+              },
+              "listenerSet": {
+                "generation": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "Programmed": "True/Programmed"
+                },
+                "listeners": [
+                  {
+                    "section": "delegated",
+                    "conditions": {
+                      "Accepted": "True/Accepted",
+                      "ResolvedRefs": "True/ResolvedRefs",
+                      "Conflicted": "False/NoConflicts",
+                      "Programmed": "True/Programmed"
+                    },
+                    "attachedRoutes": 1
+                  }
+                ]
+              },
+              "gatewayRoute": {
+                "generation": 1,
+                "conditions": {},
+                "parents": [
+                  {
+                    "section": "parent",
+                    "conditions": {
+                      "Accepted": "False/UnsupportedValue",
+                      "ResolvedRefs": "Unknown/Pending",
+                      "gateway-api-openstack.github.io/Programmed": "False/Invalid"
+                    },
+                    "attachedRoutes": null
+                  }
+                ]
+              },
+              "delegatedRoute": {
+                "generation": 1,
+                "conditions": {},
+                "parents": [
+                  {
+                    "section": "delegated",
+                    "conditions": {
+                      "Accepted": "True/Accepted",
+                      "ResolvedRefs": "True/ResolvedRefs",
+                      "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                    },
+                    "attachedRoutes": null
+                  }
+                ]
+              }
+            },
+            "native": {
+              "gateway": "delegated-shared-https",
+              "listeners": {
+                "443": {
+                  "protocol": "TERMINATED_HTTPS",
+                  "adminStateUp": true,
+                  "provisioningStatus": "ACTIVE",
+                  "clientAuthentication": "NONE",
+                  "hasCAReference": false
+                }
+              },
+              "activeBinds": {
+                "443": {
+                  "TLS": true,
+                  "verifyRequired": false,
+                  "hasCAFile": false
+                }
+              },
+              "distinctClientCARefs": 0,
+              "renderedConfigSHA256": "04210a66f9d786ed8ed62e90cfbf2aac7576ac8a3e055e88d305351fda13e969"
+            },
+            "discovery": {
+              "service": "gateway-delegated-shared-https",
+              "vip": "192.0.2.30",
+              "port": 443,
+              "ready": true
+            },
+            "wire": {
+              "edge.example.test": {
+                "stage": "complete",
+                "tlsProtocol": "TLSv1.3",
+                "serverCertificateSHA256": "bae0c51aca15609fb5022bbe6b05494f6bdfe39dce037f5d41d3ba0d3a79d551",
+                "http": 404
+              },
+              "sibling.example.test": {
+                "stage": "complete",
+                "tlsProtocol": "TLSv1.3",
+                "serverCertificateSHA256": "bae0c51aca15609fb5022bbe6b05494f6bdfe39dce037f5d41d3ba0d3a79d551",
+                "http": 200,
+                "backend": "infra-backend-v2-5dc55c68cc-n2tz9"
+              },
+              "revokedSNIWithSurvivingAuthority": {
+                "stage": "complete",
+                "tlsProtocol": "TLSv1.3",
+                "serverCertificateSHA256": "bae0c51aca15609fb5022bbe6b05494f6bdfe39dce037f5d41d3ba0d3a79d551",
+                "http": 421
+              }
+            },
+            "elapsedSeconds": 5.109
+          },
+          "restored": {
+            "status": {
+              "gateway": {
+                "generation": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "Programmed": "True/Programmed"
+                },
+                "listeners": [
+                  {
+                    "section": "parent",
+                    "conditions": {
+                      "Accepted": "True/Accepted",
+                      "ResolvedRefs": "True/ResolvedRefs",
+                      "Conflicted": "False/NoConflicts",
+                      "Programmed": "True/Programmed"
+                    },
+                    "attachedRoutes": 1
+                  }
+                ]
+              },
+              "listenerSet": {
+                "generation": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "Programmed": "True/Programmed"
+                },
+                "listeners": [
+                  {
+                    "section": "delegated",
+                    "conditions": {
+                      "Accepted": "True/Accepted",
+                      "ResolvedRefs": "True/ResolvedRefs",
+                      "Conflicted": "False/NoConflicts",
+                      "Programmed": "True/Programmed"
+                    },
+                    "attachedRoutes": 1
+                  }
+                ]
+              },
+              "gatewayRoute": {
+                "generation": 1,
+                "conditions": {},
+                "parents": [
+                  {
+                    "section": "parent",
+                    "conditions": {
+                      "Accepted": "True/Accepted",
+                      "ResolvedRefs": "True/ResolvedRefs",
+                      "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                    },
+                    "attachedRoutes": null
+                  }
+                ]
+              },
+              "delegatedRoute": {
+                "generation": 1,
+                "conditions": {},
+                "parents": [
+                  {
+                    "section": "delegated",
+                    "conditions": {
+                      "Accepted": "True/Accepted",
+                      "ResolvedRefs": "True/ResolvedRefs",
+                      "gateway-api-openstack.github.io/Programmed": "False/Pending"
+                    },
+                    "attachedRoutes": null
+                  }
+                ]
+              }
+            },
+            "native": {
+              "gateway": "delegated-shared-https",
+              "listeners": {
+                "443": {
+                  "protocol": "TERMINATED_HTTPS",
+                  "adminStateUp": true,
+                  "provisioningStatus": "ACTIVE",
+                  "clientAuthentication": "NONE",
+                  "hasCAReference": false
+                }
+              },
+              "activeBinds": {
+                "443": {
+                  "TLS": true,
+                  "verifyRequired": false,
+                  "hasCAFile": false
+                }
+              },
+              "distinctClientCARefs": 0,
+              "renderedConfigSHA256": "8f10e93fb3c8d7c74adbbdddab46cb8cba0c55b6739a809d0a6f1b0745e13158"
+            },
+            "discovery": {
+              "service": "gateway-delegated-shared-https",
+              "vip": "192.0.2.30",
+              "port": 443,
+              "ready": true
+            },
+            "wire": {
+              "edge.example.test": {
+                "stage": "complete",
+                "tlsProtocol": "TLSv1.3",
+                "serverCertificateSHA256": "bae0c51aca15609fb5022bbe6b05494f6bdfe39dce037f5d41d3ba0d3a79d551",
+                "http": 200,
+                "backend": "infra-backend-v1-667754889f-4m82h"
+              },
+              "sibling.example.test": {
+                "stage": "complete",
+                "tlsProtocol": "TLSv1.3",
+                "serverCertificateSHA256": "bae0c51aca15609fb5022bbe6b05494f6bdfe39dce037f5d41d3ba0d3a79d551",
+                "http": 200,
+                "backend": "infra-backend-v2-5dc55c68cc-94h87"
+              }
+            },
+            "elapsedSeconds": 9.946
+          }
+        },
+        "ListenerSet": {
+          "survivingName": {
+            "newConnections": 110,
+            "host": "edge.example.test",
+            "backend": "infra-backend-v1",
+            "samplesByPhase": {
+              "withdrawal": 23,
+              "restoration": 87
+            },
+            "endpointSliceReadySamples": 110,
+            "failures": []
+          },
+          "withdrawn": {
+            "status": {
+              "gateway": {
+                "generation": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "Programmed": "True/Programmed"
+                },
+                "listeners": [
+                  {
+                    "section": "parent",
+                    "conditions": {
+                      "Accepted": "True/Accepted",
+                      "ResolvedRefs": "True/ResolvedRefs",
+                      "Conflicted": "False/NoConflicts",
+                      "Programmed": "True/Programmed"
+                    },
+                    "attachedRoutes": 1
+                  }
+                ]
+              },
+              "listenerSet": {
+                "generation": 1,
+                "conditions": {
+                  "Accepted": "False/ListenersNotValid",
+                  "Programmed": "False/ListenersNotValid"
+                },
+                "listeners": [
+                  {
+                    "section": "delegated",
+                    "conditions": {
+                      "Accepted": "False/RefNotPermitted",
+                      "ResolvedRefs": "False/RefNotPermitted",
+                      "Conflicted": "False/NoConflicts",
+                      "Programmed": "False/RefNotPermitted"
+                    },
+                    "attachedRoutes": 0
+                  }
+                ]
+              },
+              "gatewayRoute": {
+                "generation": 1,
+                "conditions": {},
+                "parents": [
+                  {
+                    "section": "parent",
+                    "conditions": {
+                      "Accepted": "True/Accepted",
+                      "ResolvedRefs": "True/ResolvedRefs",
+                      "gateway-api-openstack.github.io/Programmed": "False/Pending"
+                    },
+                    "attachedRoutes": null
+                  }
+                ]
+              },
+              "delegatedRoute": {
+                "generation": 1,
+                "conditions": {},
+                "parents": [
+                  {
+                    "section": "delegated",
+                    "conditions": {
+                      "Accepted": "False/NotAllowedByListeners",
+                      "ResolvedRefs": "Unknown/Pending",
+                      "gateway-api-openstack.github.io/Programmed": "False/Invalid"
+                    },
+                    "attachedRoutes": null
+                  }
+                ]
+              }
+            },
+            "native": {
+              "gateway": "delegated-shared-https",
+              "listeners": {
+                "443": {
+                  "protocol": "TERMINATED_HTTPS",
+                  "adminStateUp": true,
+                  "provisioningStatus": "ACTIVE",
+                  "clientAuthentication": "NONE",
+                  "hasCAReference": false
+                }
+              },
+              "activeBinds": {
+                "443": {
+                  "TLS": true,
+                  "verifyRequired": false,
+                  "hasCAFile": false
+                }
+              },
+              "distinctClientCARefs": 0,
+              "renderedConfigSHA256": "a5c254f1f7b4c74009c9816ad12372138894b138a235323edb710fe5b8ab2d65"
+            },
+            "discovery": {
+              "service": "gateway-delegated-shared-https",
+              "vip": "192.0.2.30",
+              "port": 443,
+              "ready": true
+            },
+            "wire": {
+              "edge.example.test": {
+                "stage": "complete",
+                "tlsProtocol": "TLSv1.3",
+                "serverCertificateSHA256": "bae0c51aca15609fb5022bbe6b05494f6bdfe39dce037f5d41d3ba0d3a79d551",
+                "http": 200,
+                "backend": "infra-backend-v1-667754889f-58gxv"
+              },
+              "sibling.example.test": {
+                "stage": "complete",
+                "tlsProtocol": "TLSv1.3",
+                "serverCertificateSHA256": "bae0c51aca15609fb5022bbe6b05494f6bdfe39dce037f5d41d3ba0d3a79d551",
+                "http": 404
+              },
+              "revokedSNIWithSurvivingAuthority": {
+                "stage": "complete",
+                "tlsProtocol": "TLSv1.3",
+                "serverCertificateSHA256": "bae0c51aca15609fb5022bbe6b05494f6bdfe39dce037f5d41d3ba0d3a79d551",
+                "http": 421
+              }
+            },
+            "elapsedSeconds": 6.45
+          },
+          "restored": {
+            "status": {
+              "gateway": {
+                "generation": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "Programmed": "True/Programmed"
+                },
+                "listeners": [
+                  {
+                    "section": "parent",
+                    "conditions": {
+                      "Accepted": "True/Accepted",
+                      "ResolvedRefs": "True/ResolvedRefs",
+                      "Conflicted": "False/NoConflicts",
+                      "Programmed": "True/Programmed"
+                    },
+                    "attachedRoutes": 1
+                  }
+                ]
+              },
+              "listenerSet": {
+                "generation": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "Programmed": "True/Programmed"
+                },
+                "listeners": [
+                  {
+                    "section": "delegated",
+                    "conditions": {
+                      "Accepted": "True/Accepted",
+                      "ResolvedRefs": "True/ResolvedRefs",
+                      "Conflicted": "False/NoConflicts",
+                      "Programmed": "True/Programmed"
+                    },
+                    "attachedRoutes": 1
+                  }
+                ]
+              },
+              "gatewayRoute": {
+                "generation": 1,
+                "conditions": {},
+                "parents": [
+                  {
+                    "section": "parent",
+                    "conditions": {
+                      "Accepted": "True/Accepted",
+                      "ResolvedRefs": "True/ResolvedRefs",
+                      "gateway-api-openstack.github.io/Programmed": "False/Pending"
+                    },
+                    "attachedRoutes": null
+                  }
+                ]
+              },
+              "delegatedRoute": {
+                "generation": 1,
+                "conditions": {},
+                "parents": [
+                  {
+                    "section": "delegated",
+                    "conditions": {
+                      "Accepted": "True/Accepted",
+                      "ResolvedRefs": "True/ResolvedRefs",
+                      "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                    },
+                    "attachedRoutes": null
+                  }
+                ]
+              }
+            },
+            "native": {
+              "gateway": "delegated-shared-https",
+              "listeners": {
+                "443": {
+                  "protocol": "TERMINATED_HTTPS",
+                  "adminStateUp": true,
+                  "provisioningStatus": "ACTIVE",
+                  "clientAuthentication": "NONE",
+                  "hasCAReference": false
+                }
+              },
+              "activeBinds": {
+                "443": {
+                  "TLS": true,
+                  "verifyRequired": false,
+                  "hasCAFile": false
+                }
+              },
+              "distinctClientCARefs": 0,
+              "renderedConfigSHA256": "1d32fc03035fb2634ec870067cec8d79d3701660ba922c828652c46efd32bcb2"
+            },
+            "discovery": {
+              "service": "gateway-delegated-shared-https",
+              "vip": "192.0.2.30",
+              "port": 443,
+              "ready": true
+            },
+            "wire": {
+              "edge.example.test": {
+                "stage": "complete",
+                "tlsProtocol": "TLSv1.3",
+                "serverCertificateSHA256": "bae0c51aca15609fb5022bbe6b05494f6bdfe39dce037f5d41d3ba0d3a79d551",
+                "http": 200,
+                "backend": "infra-backend-v1-667754889f-58gxv"
+              },
+              "sibling.example.test": {
+                "stage": "complete",
+                "tlsProtocol": "TLSv1.3",
+                "serverCertificateSHA256": "bae0c51aca15609fb5022bbe6b05494f6bdfe39dce037f5d41d3ba0d3a79d551",
+                "http": 200,
+                "backend": "infra-backend-v2-5dc55c68cc-n2tz9"
+              }
+            },
+            "elapsedSeconds": 22.981
+          }
+        }
+      },
+      "delegatedMTLS": {
+        "valid-trust": {
+          "wire": {
+            "plain": {
+              "stage": "complete",
+              "http": 200,
+              "backend": "infra-backend-v1-667754889f-rvhmv"
+            },
+            "trustedClient": {
+              "stage": "complete",
+              "tlsProtocol": "TLSv1.3",
+              "serverCertificateSHA256": "4a5e9dcdcb4a60467f99006152219fa0086fa73c39dea494bb8a7cbdfdf35f52",
+              "http": 200,
+              "backend": "infra-backend-v2-5dc55c68cc-mfd8j"
+            },
+            "foreignClient": {
+              "stage": "http",
+              "tlsProtocol": "TLSv1.3",
+              "serverCertificateSHA256": "4a5e9dcdcb4a60467f99006152219fa0086fa73c39dea494bb8a7cbdfdf35f52",
+              "error": "SSLError",
+              "alert": "TLSV1_ALERT_DECRYPT_ERROR"
+            },
+            "noClient": {
+              "stage": "http",
+              "tlsProtocol": "TLSv1.3",
+              "serverCertificateSHA256": "4a5e9dcdcb4a60467f99006152219fa0086fa73c39dea494bb8a7cbdfdf35f52",
+              "error": "SSLError",
+              "alert": "TLSV13_ALERT_CERTIFICATE_REQUIRED"
+            }
+          },
+          "status": {
+            "gateway": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "Programmed": "False/NoResources"
+              },
+              "listeners": [
+                {
+                  "section": "plain",
+                  "conditions": {
+                    "Accepted": "True/Accepted",
+                    "ResolvedRefs": "True/ResolvedRefs",
+                    "Conflicted": "False/NoConflicts",
+                    "Programmed": "True/Programmed"
+                  },
+                  "attachedRoutes": 1
+                }
+              ]
+            },
+            "listenerSet": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "Programmed": "True/Programmed"
+              },
+              "listeners": [
+                {
+                  "section": "delegated",
+                  "conditions": {
+                    "Accepted": "True/Accepted",
+                    "ResolvedRefs": "True/ResolvedRefs",
+                    "Conflicted": "False/NoConflicts",
+                    "Programmed": "True/Programmed"
+                  },
+                  "attachedRoutes": 1
+                }
+              ]
+            },
+            "gatewayRoute": {
+              "generation": 1,
+              "conditions": {},
+              "parents": [
+                {
+                  "section": "plain",
+                  "conditions": {
+                    "Accepted": "True/Accepted",
+                    "ResolvedRefs": "True/ResolvedRefs",
+                    "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                  },
+                  "attachedRoutes": null
+                }
+              ]
+            },
+            "delegatedRoute": {
+              "generation": 1,
+              "conditions": {},
+              "parents": [
+                {
+                  "section": "delegated",
+                  "conditions": {
+                    "Accepted": "True/Accepted",
+                    "ResolvedRefs": "True/ResolvedRefs",
+                    "gateway-api-openstack.github.io/Programmed": "False/Pending"
+                  },
+                  "attachedRoutes": null
+                }
+              ]
+            }
+          },
+          "native": {
+            "gateway": "delegated-only-mtls",
+            "listeners": {
+              "80": {
+                "protocol": "HTTP",
+                "adminStateUp": true,
+                "provisioningStatus": "ACTIVE",
+                "clientAuthentication": "NONE",
+                "hasCAReference": false
+              },
+              "443": {
+                "protocol": "TERMINATED_HTTPS",
+                "adminStateUp": true,
+                "provisioningStatus": "ACTIVE",
+                "clientAuthentication": "MANDATORY",
+                "hasCAReference": true
+              }
+            },
+            "activeBinds": {
+              "80": {
+                "TLS": false,
+                "verifyRequired": false,
+                "hasCAFile": false
+              },
+              "443": {
+                "TLS": true,
+                "verifyRequired": true,
+                "hasCAFile": true
+              }
+            },
+            "distinctClientCARefs": 1,
+            "renderedConfigSHA256": "8d89c58abb1314bce654fa3b78f590ed641a3a0c9a7ecf34a2098446727b6677"
+          },
+          "elapsedSeconds": 61.419
+        },
+        "invalid-ca-payload": {
+          "wire": {
+            "plain": {
+              "stage": "complete",
+              "http": 200,
+              "backend": "infra-backend-v1-667754889f-rvhmv"
+            },
+            "trustedClient": {
+              "stage": "tcp",
+              "error": "ConnectionRefusedError",
+              "errno": 111
+            }
+          },
+          "status": {
+            "gateway": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "Programmed": "False/NoResources"
+              },
+              "listeners": [
+                {
+                  "section": "plain",
+                  "conditions": {
+                    "Accepted": "True/Accepted",
+                    "ResolvedRefs": "True/ResolvedRefs",
+                    "Conflicted": "False/NoConflicts",
+                    "Programmed": "True/Programmed"
+                  },
+                  "attachedRoutes": 1
+                }
+              ]
+            },
+            "listenerSet": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "False/ListenersNotValid",
+                "Programmed": "False/ListenersNotValid"
+              },
+              "listeners": [
+                {
+                  "section": "delegated",
+                  "conditions": {
+                    "Accepted": "False/NoValidCACertificate",
+                    "ResolvedRefs": "False/InvalidCACertificateRef",
+                    "Conflicted": "False/NoConflicts",
+                    "Programmed": "False/NoValidCACertificate"
+                  },
+                  "attachedRoutes": 0
+                }
+              ]
+            },
+            "gatewayRoute": {
+              "generation": 1,
+              "conditions": {},
+              "parents": [
+                {
+                  "section": "plain",
+                  "conditions": {
+                    "Accepted": "True/Accepted",
+                    "ResolvedRefs": "True/ResolvedRefs",
+                    "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                  },
+                  "attachedRoutes": null
+                }
+              ]
+            },
+            "delegatedRoute": {
+              "generation": 1,
+              "conditions": {},
+              "parents": [
+                {
+                  "section": "delegated",
+                  "conditions": {
+                    "Accepted": "False/NotAllowedByListeners",
+                    "ResolvedRefs": "Unknown/Pending",
+                    "gateway-api-openstack.github.io/Programmed": "False/Invalid"
+                  },
+                  "attachedRoutes": null
+                }
+              ]
+            }
+          },
+          "native": {
+            "gateway": "delegated-only-mtls",
+            "listeners": {
+              "80": {
+                "protocol": "HTTP",
+                "adminStateUp": true,
+                "provisioningStatus": "ACTIVE",
+                "clientAuthentication": "NONE",
+                "hasCAReference": false
+              },
+              "443": {
+                "protocol": "TERMINATED_HTTPS",
+                "adminStateUp": false,
+                "provisioningStatus": "ACTIVE",
+                "clientAuthentication": "MANDATORY",
+                "hasCAReference": true
+              }
+            },
+            "activeBinds": {
+              "80": {
+                "TLS": false,
+                "verifyRequired": false,
+                "hasCAFile": false
+              }
+            },
+            "distinctClientCARefs": 1,
+            "renderedConfigSHA256": "452954a4d6429bde7f0c706fbde4cd78b4cb18c6e5774f0d3af971bc38883249"
+          },
+          "elapsedSeconds": 3.316
+        },
+        "ca-payload-restored": {
+          "wire": {
+            "plain": {
+              "stage": "complete",
+              "http": 200,
+              "backend": "infra-backend-v1-667754889f-rvhmv"
+            },
+            "trustedClient": {
+              "stage": "complete",
+              "tlsProtocol": "TLSv1.3",
+              "serverCertificateSHA256": "4a5e9dcdcb4a60467f99006152219fa0086fa73c39dea494bb8a7cbdfdf35f52",
+              "http": 200,
+              "backend": "infra-backend-v2-5dc55c68cc-mfd8j"
+            },
+            "foreignClient": {
+              "stage": "http",
+              "tlsProtocol": "TLSv1.3",
+              "serverCertificateSHA256": "4a5e9dcdcb4a60467f99006152219fa0086fa73c39dea494bb8a7cbdfdf35f52",
+              "error": "SSLError",
+              "alert": "TLSV1_ALERT_DECRYPT_ERROR"
+            },
+            "noClient": {
+              "stage": "http",
+              "tlsProtocol": "TLSv1.3",
+              "serverCertificateSHA256": "4a5e9dcdcb4a60467f99006152219fa0086fa73c39dea494bb8a7cbdfdf35f52",
+              "error": "SSLError",
+              "alert": "TLSV13_ALERT_CERTIFICATE_REQUIRED"
+            }
+          },
+          "status": {
+            "gateway": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "Programmed": "True/Programmed"
+              },
+              "listeners": [
+                {
+                  "section": "plain",
+                  "conditions": {
+                    "Accepted": "True/Accepted",
+                    "ResolvedRefs": "True/ResolvedRefs",
+                    "Conflicted": "False/NoConflicts",
+                    "Programmed": "True/Programmed"
+                  },
+                  "attachedRoutes": 1
+                }
+              ]
+            },
+            "listenerSet": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "Programmed": "True/Programmed"
+              },
+              "listeners": [
+                {
+                  "section": "delegated",
+                  "conditions": {
+                    "Accepted": "True/Accepted",
+                    "ResolvedRefs": "True/ResolvedRefs",
+                    "Conflicted": "False/NoConflicts",
+                    "Programmed": "True/Programmed"
+                  },
+                  "attachedRoutes": 1
+                }
+              ]
+            },
+            "gatewayRoute": {
+              "generation": 1,
+              "conditions": {},
+              "parents": [
+                {
+                  "section": "plain",
+                  "conditions": {
+                    "Accepted": "True/Accepted",
+                    "ResolvedRefs": "True/ResolvedRefs",
+                    "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                  },
+                  "attachedRoutes": null
+                }
+              ]
+            },
+            "delegatedRoute": {
+              "generation": 1,
+              "conditions": {},
+              "parents": [
+                {
+                  "section": "delegated",
+                  "conditions": {
+                    "Accepted": "True/Accepted",
+                    "ResolvedRefs": "True/ResolvedRefs",
+                    "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                  },
+                  "attachedRoutes": null
+                }
+              ]
+            }
+          },
+          "native": {
+            "gateway": "delegated-only-mtls",
+            "listeners": {
+              "80": {
+                "protocol": "HTTP",
+                "adminStateUp": true,
+                "provisioningStatus": "ACTIVE",
+                "clientAuthentication": "NONE",
+                "hasCAReference": false
+              },
+              "443": {
+                "protocol": "TERMINATED_HTTPS",
+                "adminStateUp": true,
+                "provisioningStatus": "ACTIVE",
+                "clientAuthentication": "MANDATORY",
+                "hasCAReference": true
+              }
+            },
+            "activeBinds": {
+              "80": {
+                "TLS": false,
+                "verifyRequired": false,
+                "hasCAFile": false
+              },
+              "443": {
+                "TLS": true,
+                "verifyRequired": true,
+                "hasCAFile": true
+              }
+            },
+            "distinctClientCARefs": 1,
+            "renderedConfigSHA256": "8d89c58abb1314bce654fa3b78f590ed641a3a0c9a7ecf34a2098446727b6677"
+          },
+          "elapsedSeconds": 6.414
+        },
+        "ca-grant-revoked": {
+          "wire": {
+            "plain": {
+              "stage": "complete",
+              "http": 200,
+              "backend": "infra-backend-v1-667754889f-dlrq9"
+            },
+            "trustedClient": {
+              "stage": "tcp",
+              "error": "ConnectionRefusedError",
+              "errno": 111
+            }
+          },
+          "status": {
+            "gateway": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "Programmed": "False/NoResources"
+              },
+              "listeners": [
+                {
+                  "section": "plain",
+                  "conditions": {
+                    "Accepted": "True/Accepted",
+                    "ResolvedRefs": "True/ResolvedRefs",
+                    "Conflicted": "False/NoConflicts",
+                    "Programmed": "True/Programmed"
+                  },
+                  "attachedRoutes": 1
+                }
+              ]
+            },
+            "listenerSet": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "False/ListenersNotValid",
+                "Programmed": "False/ListenersNotValid"
+              },
+              "listeners": [
+                {
+                  "section": "delegated",
+                  "conditions": {
+                    "Accepted": "False/NoValidCACertificate",
+                    "ResolvedRefs": "False/RefNotPermitted",
+                    "Conflicted": "False/NoConflicts",
+                    "Programmed": "False/NoValidCACertificate"
+                  },
+                  "attachedRoutes": 0
+                }
+              ]
+            },
+            "gatewayRoute": {
+              "generation": 1,
+              "conditions": {},
+              "parents": [
+                {
+                  "section": "plain",
+                  "conditions": {
+                    "Accepted": "True/Accepted",
+                    "ResolvedRefs": "True/ResolvedRefs",
+                    "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                  },
+                  "attachedRoutes": null
+                }
+              ]
+            },
+            "delegatedRoute": {
+              "generation": 1,
+              "conditions": {},
+              "parents": [
+                {
+                  "section": "delegated",
+                  "conditions": {
+                    "Accepted": "False/NotAllowedByListeners",
+                    "ResolvedRefs": "Unknown/Pending",
+                    "gateway-api-openstack.github.io/Programmed": "False/Invalid"
+                  },
+                  "attachedRoutes": null
+                }
+              ]
+            }
+          },
+          "native": {
+            "gateway": "delegated-only-mtls",
+            "listeners": {
+              "80": {
+                "protocol": "HTTP",
+                "adminStateUp": true,
+                "provisioningStatus": "ACTIVE",
+                "clientAuthentication": "NONE",
+                "hasCAReference": false
+              },
+              "443": {
+                "protocol": "TERMINATED_HTTPS",
+                "adminStateUp": false,
+                "provisioningStatus": "ACTIVE",
+                "clientAuthentication": "MANDATORY",
+                "hasCAReference": true
+              }
+            },
+            "activeBinds": {
+              "80": {
+                "TLS": false,
+                "verifyRequired": false,
+                "hasCAFile": false
+              }
+            },
+            "distinctClientCARefs": 1,
+            "renderedConfigSHA256": "452954a4d6429bde7f0c706fbde4cd78b4cb18c6e5774f0d3af971bc38883249"
+          },
+          "elapsedSeconds": 3.067
+        },
+        "ca-grant-restored": {
+          "wire": {
+            "plain": {
+              "stage": "complete",
+              "http": 200,
+              "backend": "infra-backend-v1-667754889f-dlrq9"
+            },
+            "trustedClient": {
+              "stage": "complete",
+              "tlsProtocol": "TLSv1.3",
+              "serverCertificateSHA256": "4a5e9dcdcb4a60467f99006152219fa0086fa73c39dea494bb8a7cbdfdf35f52",
+              "http": 200,
+              "backend": "infra-backend-v2-5dc55c68cc-pl5qb"
+            },
+            "foreignClient": {
+              "stage": "http",
+              "tlsProtocol": "TLSv1.3",
+              "serverCertificateSHA256": "4a5e9dcdcb4a60467f99006152219fa0086fa73c39dea494bb8a7cbdfdf35f52",
+              "error": "SSLError",
+              "alert": "TLSV1_ALERT_DECRYPT_ERROR"
+            },
+            "noClient": {
+              "stage": "http",
+              "tlsProtocol": "TLSv1.3",
+              "serverCertificateSHA256": "4a5e9dcdcb4a60467f99006152219fa0086fa73c39dea494bb8a7cbdfdf35f52",
+              "error": "SSLError",
+              "alert": "TLSV13_ALERT_CERTIFICATE_REQUIRED"
+            }
+          },
+          "status": {
+            "gateway": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "Programmed": "False/NoResources"
+              },
+              "listeners": [
+                {
+                  "section": "plain",
+                  "conditions": {
+                    "Accepted": "True/Accepted",
+                    "ResolvedRefs": "True/ResolvedRefs",
+                    "Conflicted": "False/NoConflicts",
+                    "Programmed": "True/Programmed"
+                  },
+                  "attachedRoutes": 1
+                }
+              ]
+            },
+            "listenerSet": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "Programmed": "True/Programmed"
+              },
+              "listeners": [
+                {
+                  "section": "delegated",
+                  "conditions": {
+                    "Accepted": "True/Accepted",
+                    "ResolvedRefs": "True/ResolvedRefs",
+                    "Conflicted": "False/NoConflicts",
+                    "Programmed": "True/Programmed"
+                  },
+                  "attachedRoutes": 1
+                }
+              ]
+            },
+            "gatewayRoute": {
+              "generation": 1,
+              "conditions": {},
+              "parents": [
+                {
+                  "section": "plain",
+                  "conditions": {
+                    "Accepted": "True/Accepted",
+                    "ResolvedRefs": "True/ResolvedRefs",
+                    "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                  },
+                  "attachedRoutes": null
+                }
+              ]
+            },
+            "delegatedRoute": {
+              "generation": 1,
+              "conditions": {},
+              "parents": [
+                {
+                  "section": "delegated",
+                  "conditions": {
+                    "Accepted": "True/Accepted",
+                    "ResolvedRefs": "True/ResolvedRefs",
+                    "gateway-api-openstack.github.io/Programmed": "False/Pending"
+                  },
+                  "attachedRoutes": null
+                }
+              ]
+            }
+          },
+          "native": {
+            "gateway": "delegated-only-mtls",
+            "listeners": {
+              "80": {
+                "protocol": "HTTP",
+                "adminStateUp": true,
+                "provisioningStatus": "ACTIVE",
+                "clientAuthentication": "NONE",
+                "hasCAReference": false
+              },
+              "443": {
+                "protocol": "TERMINATED_HTTPS",
+                "adminStateUp": true,
+                "provisioningStatus": "ACTIVE",
+                "clientAuthentication": "MANDATORY",
+                "hasCAReference": true
+              }
+            },
+            "activeBinds": {
+              "80": {
+                "TLS": false,
+                "verifyRequired": false,
+                "hasCAFile": false
+              },
+              "443": {
+                "TLS": true,
+                "verifyRequired": true,
+                "hasCAFile": true
+              }
+            },
+            "distinctClientCARefs": 1,
+            "renderedConfigSHA256": "8d89c58abb1314bce654fa3b78f590ed641a3a0c9a7ecf34a2098446727b6677"
+          },
+          "elapsedSeconds": 3.643
+        }
+      },
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "baseManifestSHA256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+      "octavia": {
+        "revision": "0b360f0f3bdea3d86a5acdba1009e50428f77c6f",
+        "version": "19.0.1.dev44",
+        "sha256": "cf594e4c2fc0fc2d747e8791ac7bf2243851acc1817d4764967b1f78be2fce26",
+        "filesVerified": 649
+      },
+      "octaviaLib": {
+        "revision": "71d3d7d1956e0d566228d1669a0fe5200696ccf4",
+        "version": "3.12.1.dev13",
+        "sha256": "9c3908b1371d872083757fd59446189f31fc179f8b2326f94d2a50f49037df45",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1",
+        "sha256": "55bf3823b5fc2c34d21cac551ff23635cfc555c0223e4470e5696a98dcb4fd4e"
+      },
+      "echoRuntime": {
+        "nodeImage": "localhost/hibiscus-kind-node:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67",
+        "platformManifestDigest": "sha256:fed223b186fbd83d50a4578d168c9e7d89341d8c1af616ebe0f62d53ab7451dc"
+      },
+      "sharedScenarioReceiptSHA256": "a86e0abd0af085e03ba822b5752294c4123f2fcb8aeae62eef75e763073f3417",
+      "mTLSScenarioReceiptSHA256": "f0ae83aa6acfb23aa9095311b885294b6a4872a0fad3750b15a68fe93b1282b5"
+    },
+    "experimental": {
+      "shared443": {
+        "Gateway": {
+          "survivingName": {
+            "newConnections": 155,
+            "host": "sibling.example.test",
+            "backend": "infra-backend-v2",
+            "samplesByPhase": {
+              "withdrawal": 19,
+              "restoration": 136
+            },
+            "endpointSliceReadySamples": 155,
+            "failures": []
+          },
+          "withdrawn": {
+            "status": {
+              "gateway": {
+                "generation": 1,
+                "conditions": {
+                  "Accepted": "True/ListenersNotValid",
+                  "Programmed": "False/ListenersNotValid",
+                  "AddressesAssigned": "True/AddressesAssigned",
+                  "ResolvedRefs": "False/ListenersNotResolved"
+                },
+                "listeners": [
+                  {
+                    "section": "parent",
+                    "conditions": {
+                      "Accepted": "True/Accepted",
+                      "ResolvedRefs": "False/RefNotPermitted",
+                      "Conflicted": "False/NoConflicts",
+                      "Programmed": "False/Invalid"
+                    },
+                    "attachedRoutes": 0
+                  }
+                ]
+              },
+              "listenerSet": {
+                "generation": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "Programmed": "True/Programmed"
+                },
+                "listeners": [
+                  {
+                    "section": "delegated",
+                    "conditions": {
+                      "Accepted": "True/Accepted",
+                      "ResolvedRefs": "True/ResolvedRefs",
+                      "Conflicted": "False/NoConflicts",
+                      "Programmed": "True/Programmed"
+                    },
+                    "attachedRoutes": 1
+                  }
+                ]
+              },
+              "gatewayRoute": {
+                "generation": 1,
+                "conditions": {},
+                "parents": [
+                  {
+                    "section": "parent",
+                    "conditions": {
+                      "Accepted": "False/UnsupportedValue",
+                      "ResolvedRefs": "Unknown/Pending",
+                      "gateway-api-openstack.github.io/Programmed": "False/Invalid"
+                    },
+                    "attachedRoutes": null
+                  }
+                ]
+              },
+              "delegatedRoute": {
+                "generation": 1,
+                "conditions": {},
+                "parents": [
+                  {
+                    "section": "delegated",
+                    "conditions": {
+                      "Accepted": "True/Accepted",
+                      "ResolvedRefs": "True/ResolvedRefs",
+                      "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                    },
+                    "attachedRoutes": null
+                  }
+                ]
+              }
+            },
+            "native": {
+              "gateway": "delegated-shared-https",
+              "listeners": {
+                "443": {
+                  "protocol": "TERMINATED_HTTPS",
+                  "adminStateUp": true,
+                  "provisioningStatus": "ACTIVE",
+                  "clientAuthentication": "NONE",
+                  "hasCAReference": false
+                }
+              },
+              "activeBinds": {
+                "443": {
+                  "TLS": true,
+                  "verifyRequired": false,
+                  "hasCAFile": false
+                }
+              },
+              "distinctClientCARefs": 0,
+              "renderedConfigSHA256": "55fc77ffd8933c8c7f3069eabfac2c409be88f57b3df4b4e9729e57e329dddad"
+            },
+            "discovery": {
+              "service": "gateway-delegated-shared-https",
+              "vip": "192.0.2.32",
+              "port": 443,
+              "ready": true
+            },
+            "wire": {
+              "edge.example.test": {
+                "stage": "complete",
+                "tlsProtocol": "TLSv1.3",
+                "serverCertificateSHA256": "1f92ab9587fdad4baaada29a1a6777fd224b4e51cf00bc5bc8b2679cbebbcfdf",
+                "http": 404
+              },
+              "sibling.example.test": {
+                "stage": "complete",
+                "tlsProtocol": "TLSv1.3",
+                "serverCertificateSHA256": "1f92ab9587fdad4baaada29a1a6777fd224b4e51cf00bc5bc8b2679cbebbcfdf",
+                "http": 200,
+                "backend": "infra-backend-v2-5dc55c68cc-kwb5b"
+              },
+              "revokedSNIWithSurvivingAuthority": {
+                "stage": "complete",
+                "tlsProtocol": "TLSv1.3",
+                "serverCertificateSHA256": "1f92ab9587fdad4baaada29a1a6777fd224b4e51cf00bc5bc8b2679cbebbcfdf",
+                "http": 421
+              }
+            },
+            "elapsedSeconds": 4.73
+          },
+          "restored": {
+            "status": {
+              "gateway": {
+                "generation": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "Programmed": "True/Programmed",
+                  "AddressesAssigned": "True/AddressesAssigned"
+                },
+                "listeners": [
+                  {
+                    "section": "parent",
+                    "conditions": {
+                      "Accepted": "True/Accepted",
+                      "ResolvedRefs": "True/ResolvedRefs",
+                      "Conflicted": "False/NoConflicts",
+                      "Programmed": "True/Programmed"
+                    },
+                    "attachedRoutes": 1
+                  }
+                ]
+              },
+              "listenerSet": {
+                "generation": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "Programmed": "True/Programmed"
+                },
+                "listeners": [
+                  {
+                    "section": "delegated",
+                    "conditions": {
+                      "Accepted": "True/Accepted",
+                      "ResolvedRefs": "True/ResolvedRefs",
+                      "Conflicted": "False/NoConflicts",
+                      "Programmed": "True/Programmed"
+                    },
+                    "attachedRoutes": 1
+                  }
+                ]
+              },
+              "gatewayRoute": {
+                "generation": 1,
+                "conditions": {},
+                "parents": [
+                  {
+                    "section": "parent",
+                    "conditions": {
+                      "Accepted": "True/Accepted",
+                      "ResolvedRefs": "True/ResolvedRefs",
+                      "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                    },
+                    "attachedRoutes": null
+                  }
+                ]
+              },
+              "delegatedRoute": {
+                "generation": 1,
+                "conditions": {},
+                "parents": [
+                  {
+                    "section": "delegated",
+                    "conditions": {
+                      "Accepted": "True/Accepted",
+                      "ResolvedRefs": "True/ResolvedRefs",
+                      "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                    },
+                    "attachedRoutes": null
+                  }
+                ]
+              }
+            },
+            "native": {
+              "gateway": "delegated-shared-https",
+              "listeners": {
+                "443": {
+                  "protocol": "TERMINATED_HTTPS",
+                  "adminStateUp": true,
+                  "provisioningStatus": "ACTIVE",
+                  "clientAuthentication": "NONE",
+                  "hasCAReference": false
+                }
+              },
+              "activeBinds": {
+                "443": {
+                  "TLS": true,
+                  "verifyRequired": false,
+                  "hasCAFile": false
+                }
+              },
+              "distinctClientCARefs": 0,
+              "renderedConfigSHA256": "e4e7ad217bc2af08deb35fa8714bede276906c178a3bf3776c1fcfdab361c067"
+            },
+            "discovery": {
+              "service": "gateway-delegated-shared-https",
+              "vip": "192.0.2.32",
+              "port": 443,
+              "ready": true
+            },
+            "wire": {
+              "edge.example.test": {
+                "stage": "complete",
+                "tlsProtocol": "TLSv1.3",
+                "serverCertificateSHA256": "1f92ab9587fdad4baaada29a1a6777fd224b4e51cf00bc5bc8b2679cbebbcfdf",
+                "http": 200,
+                "backend": "infra-backend-v1-667754889f-z78dr"
+              },
+              "sibling.example.test": {
+                "stage": "complete",
+                "tlsProtocol": "TLSv1.3",
+                "serverCertificateSHA256": "1f92ab9587fdad4baaada29a1a6777fd224b4e51cf00bc5bc8b2679cbebbcfdf",
+                "http": 200,
+                "backend": "infra-backend-v2-5dc55c68cc-kwb5b"
+              }
+            },
+            "elapsedSeconds": 57.658
+          }
+        },
+        "ListenerSet": {
+          "survivingName": {
+            "newConnections": 81,
+            "host": "edge.example.test",
+            "backend": "infra-backend-v1",
+            "samplesByPhase": {
+              "withdrawal": 38,
+              "restoration": 43
+            },
+            "endpointSliceReadySamples": 81,
+            "failures": []
+          },
+          "withdrawn": {
+            "status": {
+              "gateway": {
+                "generation": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "Programmed": "True/Programmed",
+                  "AddressesAssigned": "True/AddressesAssigned"
+                },
+                "listeners": [
+                  {
+                    "section": "parent",
+                    "conditions": {
+                      "Accepted": "True/Accepted",
+                      "ResolvedRefs": "True/ResolvedRefs",
+                      "Conflicted": "False/NoConflicts",
+                      "Programmed": "True/Programmed"
+                    },
+                    "attachedRoutes": 1
+                  }
+                ]
+              },
+              "listenerSet": {
+                "generation": 1,
+                "conditions": {
+                  "Accepted": "False/ListenersNotValid",
+                  "Programmed": "False/ListenersNotValid"
+                },
+                "listeners": [
+                  {
+                    "section": "delegated",
+                    "conditions": {
+                      "Accepted": "False/RefNotPermitted",
+                      "ResolvedRefs": "False/RefNotPermitted",
+                      "Conflicted": "False/NoConflicts",
+                      "Programmed": "False/RefNotPermitted"
+                    },
+                    "attachedRoutes": 0
+                  }
+                ]
+              },
+              "gatewayRoute": {
+                "generation": 1,
+                "conditions": {},
+                "parents": [
+                  {
+                    "section": "parent",
+                    "conditions": {
+                      "Accepted": "True/Accepted",
+                      "ResolvedRefs": "True/ResolvedRefs",
+                      "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                    },
+                    "attachedRoutes": null
+                  }
+                ]
+              },
+              "delegatedRoute": {
+                "generation": 1,
+                "conditions": {},
+                "parents": [
+                  {
+                    "section": "delegated",
+                    "conditions": {
+                      "Accepted": "False/NotAllowedByListeners",
+                      "ResolvedRefs": "Unknown/Pending",
+                      "gateway-api-openstack.github.io/Programmed": "False/Invalid"
+                    },
+                    "attachedRoutes": null
+                  }
+                ]
+              }
+            },
+            "native": {
+              "gateway": "delegated-shared-https",
+              "listeners": {
+                "443": {
+                  "protocol": "TERMINATED_HTTPS",
+                  "adminStateUp": true,
+                  "provisioningStatus": "ACTIVE",
+                  "clientAuthentication": "NONE",
+                  "hasCAReference": false
+                }
+              },
+              "activeBinds": {
+                "443": {
+                  "TLS": true,
+                  "verifyRequired": false,
+                  "hasCAFile": false
+                }
+              },
+              "distinctClientCARefs": 0,
+              "renderedConfigSHA256": "1d0d3eecc0f6c9e0f8ef5b7fdb21b3271dea182603559cc66764a76dc2ccdbf3"
+            },
+            "discovery": {
+              "service": "gateway-delegated-shared-https",
+              "vip": "192.0.2.32",
+              "port": 443,
+              "ready": true
+            },
+            "wire": {
+              "edge.example.test": {
+                "stage": "complete",
+                "tlsProtocol": "TLSv1.3",
+                "serverCertificateSHA256": "1f92ab9587fdad4baaada29a1a6777fd224b4e51cf00bc5bc8b2679cbebbcfdf",
+                "http": 200,
+                "backend": "infra-backend-v1-667754889f-z78dr"
+              },
+              "sibling.example.test": {
+                "stage": "complete",
+                "tlsProtocol": "TLSv1.3",
+                "serverCertificateSHA256": "1f92ab9587fdad4baaada29a1a6777fd224b4e51cf00bc5bc8b2679cbebbcfdf",
+                "http": 404
+              },
+              "revokedSNIWithSurvivingAuthority": {
+                "stage": "complete",
+                "tlsProtocol": "TLSv1.3",
+                "serverCertificateSHA256": "1f92ab9587fdad4baaada29a1a6777fd224b4e51cf00bc5bc8b2679cbebbcfdf",
+                "http": 421
+              }
+            },
+            "elapsedSeconds": 18.244
+          },
+          "restored": {
+            "status": {
+              "gateway": {
+                "generation": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "Programmed": "True/Programmed",
+                  "AddressesAssigned": "True/AddressesAssigned"
+                },
+                "listeners": [
+                  {
+                    "section": "parent",
+                    "conditions": {
+                      "Accepted": "True/Accepted",
+                      "ResolvedRefs": "True/ResolvedRefs",
+                      "Conflicted": "False/NoConflicts",
+                      "Programmed": "True/Programmed"
+                    },
+                    "attachedRoutes": 1
+                  }
+                ]
+              },
+              "listenerSet": {
+                "generation": 1,
+                "conditions": {
+                  "Accepted": "True/Accepted",
+                  "Programmed": "True/Programmed"
+                },
+                "listeners": [
+                  {
+                    "section": "delegated",
+                    "conditions": {
+                      "Accepted": "True/Accepted",
+                      "ResolvedRefs": "True/ResolvedRefs",
+                      "Conflicted": "False/NoConflicts",
+                      "Programmed": "True/Programmed"
+                    },
+                    "attachedRoutes": 1
+                  }
+                ]
+              },
+              "gatewayRoute": {
+                "generation": 1,
+                "conditions": {},
+                "parents": [
+                  {
+                    "section": "parent",
+                    "conditions": {
+                      "Accepted": "True/Accepted",
+                      "ResolvedRefs": "True/ResolvedRefs",
+                      "gateway-api-openstack.github.io/Programmed": "False/Pending"
+                    },
+                    "attachedRoutes": null
+                  }
+                ]
+              },
+              "delegatedRoute": {
+                "generation": 1,
+                "conditions": {},
+                "parents": [
+                  {
+                    "section": "delegated",
+                    "conditions": {
+                      "Accepted": "True/Accepted",
+                      "ResolvedRefs": "True/ResolvedRefs",
+                      "gateway-api-openstack.github.io/Programmed": "False/Pending"
+                    },
+                    "attachedRoutes": null
+                  }
+                ]
+              }
+            },
+            "native": {
+              "gateway": "delegated-shared-https",
+              "listeners": {
+                "443": {
+                  "protocol": "TERMINATED_HTTPS",
+                  "adminStateUp": true,
+                  "provisioningStatus": "ACTIVE",
+                  "clientAuthentication": "NONE",
+                  "hasCAReference": false
+                }
+              },
+              "activeBinds": {
+                "443": {
+                  "TLS": true,
+                  "verifyRequired": false,
+                  "hasCAFile": false
+                }
+              },
+              "distinctClientCARefs": 0,
+              "renderedConfigSHA256": "d9ddcabef94f3d42982679955ecba575dc460d8043c83aea5290ca9a2d9a2e21"
+            },
+            "discovery": {
+              "service": "gateway-delegated-shared-https",
+              "vip": "192.0.2.32",
+              "port": 443,
+              "ready": true
+            },
+            "wire": {
+              "edge.example.test": {
+                "stage": "complete",
+                "tlsProtocol": "TLSv1.3",
+                "serverCertificateSHA256": "1f92ab9587fdad4baaada29a1a6777fd224b4e51cf00bc5bc8b2679cbebbcfdf",
+                "http": 200,
+                "backend": "infra-backend-v1-667754889f-5ggqm"
+              },
+              "sibling.example.test": {
+                "stage": "complete",
+                "tlsProtocol": "TLSv1.3",
+                "serverCertificateSHA256": "1f92ab9587fdad4baaada29a1a6777fd224b4e51cf00bc5bc8b2679cbebbcfdf",
+                "http": 200,
+                "backend": "infra-backend-v2-5dc55c68cc-hbcjz"
+              }
+            },
+            "elapsedSeconds": 11.936
+          }
+        }
+      },
+      "delegatedMTLS": {
+        "valid-trust": {
+          "wire": {
+            "plain": {
+              "stage": "complete",
+              "http": 200,
+              "backend": "infra-backend-v1-667754889f-5ggqm"
+            },
+            "trustedClient": {
+              "stage": "complete",
+              "tlsProtocol": "TLSv1.3",
+              "serverCertificateSHA256": "6fc3920a855bc9ae0a8c70ef8428d2e98a22ea6435e98c377422fee1a59bf6b8",
+              "http": 200,
+              "backend": "infra-backend-v2-5dc55c68cc-kwb5b"
+            },
+            "foreignClient": {
+              "stage": "http",
+              "tlsProtocol": "TLSv1.3",
+              "serverCertificateSHA256": "6fc3920a855bc9ae0a8c70ef8428d2e98a22ea6435e98c377422fee1a59bf6b8",
+              "error": "SSLError",
+              "alert": "TLSV1_ALERT_DECRYPT_ERROR"
+            },
+            "noClient": {
+              "stage": "http",
+              "tlsProtocol": "TLSv1.3",
+              "serverCertificateSHA256": "6fc3920a855bc9ae0a8c70ef8428d2e98a22ea6435e98c377422fee1a59bf6b8",
+              "error": "SSLError",
+              "alert": "TLSV13_ALERT_CERTIFICATE_REQUIRED"
+            }
+          },
+          "status": {
+            "gateway": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "Programmed": "True/Programmed",
+                "AddressesAssigned": "True/AddressesAssigned"
+              },
+              "listeners": [
+                {
+                  "section": "plain",
+                  "conditions": {
+                    "Accepted": "True/Accepted",
+                    "ResolvedRefs": "True/ResolvedRefs",
+                    "Conflicted": "False/NoConflicts",
+                    "Programmed": "True/Programmed"
+                  },
+                  "attachedRoutes": 1
+                }
+              ]
+            },
+            "listenerSet": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "Programmed": "True/Programmed"
+              },
+              "listeners": [
+                {
+                  "section": "delegated",
+                  "conditions": {
+                    "Accepted": "True/Accepted",
+                    "ResolvedRefs": "True/ResolvedRefs",
+                    "Conflicted": "False/NoConflicts",
+                    "Programmed": "True/Programmed"
+                  },
+                  "attachedRoutes": 1
+                }
+              ]
+            },
+            "gatewayRoute": {
+              "generation": 1,
+              "conditions": {},
+              "parents": [
+                {
+                  "section": "plain",
+                  "conditions": {
+                    "Accepted": "True/Accepted",
+                    "ResolvedRefs": "True/ResolvedRefs",
+                    "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                  },
+                  "attachedRoutes": null
+                }
+              ]
+            },
+            "delegatedRoute": {
+              "generation": 1,
+              "conditions": {},
+              "parents": [
+                {
+                  "section": "delegated",
+                  "conditions": {
+                    "Accepted": "True/Accepted",
+                    "ResolvedRefs": "True/ResolvedRefs",
+                    "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                  },
+                  "attachedRoutes": null
+                }
+              ]
+            }
+          },
+          "native": {
+            "gateway": "delegated-only-mtls",
+            "listeners": {
+              "80": {
+                "protocol": "HTTP",
+                "adminStateUp": true,
+                "provisioningStatus": "ACTIVE",
+                "clientAuthentication": "NONE",
+                "hasCAReference": false
+              },
+              "443": {
+                "protocol": "TERMINATED_HTTPS",
+                "adminStateUp": true,
+                "provisioningStatus": "ACTIVE",
+                "clientAuthentication": "MANDATORY",
+                "hasCAReference": true
+              }
+            },
+            "activeBinds": {
+              "80": {
+                "TLS": false,
+                "verifyRequired": false,
+                "hasCAFile": false
+              },
+              "443": {
+                "TLS": true,
+                "verifyRequired": true,
+                "hasCAFile": true
+              }
+            },
+            "distinctClientCARefs": 1,
+            "renderedConfigSHA256": "7b9d7333f927847a1ccb8d77bbb027acdeefaacc1b2dcfbd6cef69b50b2cd35e"
+          },
+          "elapsedSeconds": 40.563
+        },
+        "invalid-ca-payload": {
+          "wire": {
+            "plain": {
+              "stage": "complete",
+              "http": 200,
+              "backend": "infra-backend-v1-667754889f-5ggqm"
+            },
+            "trustedClient": {
+              "stage": "tcp",
+              "error": "ConnectionRefusedError",
+              "errno": 111
+            }
+          },
+          "status": {
+            "gateway": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "Programmed": "False/NoResources",
+                "AddressesAssigned": "True/AddressesAssigned"
+              },
+              "listeners": [
+                {
+                  "section": "plain",
+                  "conditions": {
+                    "Accepted": "True/Accepted",
+                    "ResolvedRefs": "True/ResolvedRefs",
+                    "Conflicted": "False/NoConflicts",
+                    "Programmed": "True/Programmed"
+                  },
+                  "attachedRoutes": 1
+                }
+              ]
+            },
+            "listenerSet": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "False/ListenersNotValid",
+                "Programmed": "False/ListenersNotValid"
+              },
+              "listeners": [
+                {
+                  "section": "delegated",
+                  "conditions": {
+                    "Accepted": "False/NoValidCACertificate",
+                    "ResolvedRefs": "False/InvalidCACertificateRef",
+                    "Conflicted": "False/NoConflicts",
+                    "Programmed": "False/NoValidCACertificate"
+                  },
+                  "attachedRoutes": 0
+                }
+              ]
+            },
+            "gatewayRoute": {
+              "generation": 1,
+              "conditions": {},
+              "parents": [
+                {
+                  "section": "plain",
+                  "conditions": {
+                    "Accepted": "True/Accepted",
+                    "ResolvedRefs": "True/ResolvedRefs",
+                    "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                  },
+                  "attachedRoutes": null
+                }
+              ]
+            },
+            "delegatedRoute": {
+              "generation": 1,
+              "conditions": {},
+              "parents": [
+                {
+                  "section": "delegated",
+                  "conditions": {
+                    "Accepted": "False/NotAllowedByListeners",
+                    "ResolvedRefs": "Unknown/Pending",
+                    "gateway-api-openstack.github.io/Programmed": "False/Invalid"
+                  },
+                  "attachedRoutes": null
+                }
+              ]
+            }
+          },
+          "native": {
+            "gateway": "delegated-only-mtls",
+            "listeners": {
+              "80": {
+                "protocol": "HTTP",
+                "adminStateUp": true,
+                "provisioningStatus": "ACTIVE",
+                "clientAuthentication": "NONE",
+                "hasCAReference": false
+              },
+              "443": {
+                "protocol": "TERMINATED_HTTPS",
+                "adminStateUp": false,
+                "provisioningStatus": "ACTIVE",
+                "clientAuthentication": "MANDATORY",
+                "hasCAReference": true
+              }
+            },
+            "activeBinds": {
+              "80": {
+                "TLS": false,
+                "verifyRequired": false,
+                "hasCAFile": false
+              }
+            },
+            "distinctClientCARefs": 1,
+            "renderedConfigSHA256": "46b61afea770585c7ba5bf4eedca03b72bb3e3d2b1b30d71da39c9979595f2f0"
+          },
+          "elapsedSeconds": 3.547
+        },
+        "ca-payload-restored": {
+          "wire": {
+            "plain": {
+              "stage": "complete",
+              "http": 200,
+              "backend": "infra-backend-v1-667754889f-z78dr"
+            },
+            "trustedClient": {
+              "stage": "complete",
+              "tlsProtocol": "TLSv1.3",
+              "serverCertificateSHA256": "6fc3920a855bc9ae0a8c70ef8428d2e98a22ea6435e98c377422fee1a59bf6b8",
+              "http": 200,
+              "backend": "infra-backend-v2-5dc55c68cc-hbcjz"
+            },
+            "foreignClient": {
+              "stage": "http",
+              "tlsProtocol": "TLSv1.3",
+              "serverCertificateSHA256": "6fc3920a855bc9ae0a8c70ef8428d2e98a22ea6435e98c377422fee1a59bf6b8",
+              "error": "SSLError",
+              "alert": "TLSV1_ALERT_DECRYPT_ERROR"
+            },
+            "noClient": {
+              "stage": "http",
+              "tlsProtocol": "TLSv1.3",
+              "serverCertificateSHA256": "6fc3920a855bc9ae0a8c70ef8428d2e98a22ea6435e98c377422fee1a59bf6b8",
+              "error": "SSLError",
+              "alert": "TLSV13_ALERT_CERTIFICATE_REQUIRED"
+            }
+          },
+          "status": {
+            "gateway": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "Programmed": "True/Programmed",
+                "AddressesAssigned": "True/AddressesAssigned"
+              },
+              "listeners": [
+                {
+                  "section": "plain",
+                  "conditions": {
+                    "Accepted": "True/Accepted",
+                    "ResolvedRefs": "True/ResolvedRefs",
+                    "Conflicted": "False/NoConflicts",
+                    "Programmed": "True/Programmed"
+                  },
+                  "attachedRoutes": 1
+                }
+              ]
+            },
+            "listenerSet": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "Programmed": "True/Programmed"
+              },
+              "listeners": [
+                {
+                  "section": "delegated",
+                  "conditions": {
+                    "Accepted": "True/Accepted",
+                    "ResolvedRefs": "True/ResolvedRefs",
+                    "Conflicted": "False/NoConflicts",
+                    "Programmed": "True/Programmed"
+                  },
+                  "attachedRoutes": 1
+                }
+              ]
+            },
+            "gatewayRoute": {
+              "generation": 1,
+              "conditions": {},
+              "parents": [
+                {
+                  "section": "plain",
+                  "conditions": {
+                    "Accepted": "True/Accepted",
+                    "ResolvedRefs": "True/ResolvedRefs",
+                    "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                  },
+                  "attachedRoutes": null
+                }
+              ]
+            },
+            "delegatedRoute": {
+              "generation": 1,
+              "conditions": {},
+              "parents": [
+                {
+                  "section": "delegated",
+                  "conditions": {
+                    "Accepted": "True/Accepted",
+                    "ResolvedRefs": "True/ResolvedRefs",
+                    "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                  },
+                  "attachedRoutes": null
+                }
+              ]
+            }
+          },
+          "native": {
+            "gateway": "delegated-only-mtls",
+            "listeners": {
+              "80": {
+                "protocol": "HTTP",
+                "adminStateUp": true,
+                "provisioningStatus": "ACTIVE",
+                "clientAuthentication": "NONE",
+                "hasCAReference": false
+              },
+              "443": {
+                "protocol": "TERMINATED_HTTPS",
+                "adminStateUp": true,
+                "provisioningStatus": "ACTIVE",
+                "clientAuthentication": "MANDATORY",
+                "hasCAReference": true
+              }
+            },
+            "activeBinds": {
+              "80": {
+                "TLS": false,
+                "verifyRequired": false,
+                "hasCAFile": false
+              },
+              "443": {
+                "TLS": true,
+                "verifyRequired": true,
+                "hasCAFile": true
+              }
+            },
+            "distinctClientCARefs": 1,
+            "renderedConfigSHA256": "7b9d7333f927847a1ccb8d77bbb027acdeefaacc1b2dcfbd6cef69b50b2cd35e"
+          },
+          "elapsedSeconds": 5.052
+        },
+        "ca-grant-revoked": {
+          "wire": {
+            "plain": {
+              "stage": "complete",
+              "http": 200,
+              "backend": "infra-backend-v1-667754889f-z78dr"
+            },
+            "trustedClient": {
+              "stage": "tcp",
+              "error": "ConnectionRefusedError",
+              "errno": 111
+            }
+          },
+          "status": {
+            "gateway": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "Programmed": "False/NoResources",
+                "AddressesAssigned": "True/AddressesAssigned"
+              },
+              "listeners": [
+                {
+                  "section": "plain",
+                  "conditions": {
+                    "Accepted": "True/Accepted",
+                    "ResolvedRefs": "True/ResolvedRefs",
+                    "Conflicted": "False/NoConflicts",
+                    "Programmed": "True/Programmed"
+                  },
+                  "attachedRoutes": 1
+                }
+              ]
+            },
+            "listenerSet": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "False/ListenersNotValid",
+                "Programmed": "False/ListenersNotValid"
+              },
+              "listeners": [
+                {
+                  "section": "delegated",
+                  "conditions": {
+                    "Accepted": "False/NoValidCACertificate",
+                    "ResolvedRefs": "False/RefNotPermitted",
+                    "Conflicted": "False/NoConflicts",
+                    "Programmed": "False/NoValidCACertificate"
+                  },
+                  "attachedRoutes": 0
+                }
+              ]
+            },
+            "gatewayRoute": {
+              "generation": 1,
+              "conditions": {},
+              "parents": [
+                {
+                  "section": "plain",
+                  "conditions": {
+                    "Accepted": "True/Accepted",
+                    "ResolvedRefs": "True/ResolvedRefs",
+                    "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                  },
+                  "attachedRoutes": null
+                }
+              ]
+            },
+            "delegatedRoute": {
+              "generation": 1,
+              "conditions": {},
+              "parents": [
+                {
+                  "section": "delegated",
+                  "conditions": {
+                    "Accepted": "False/NotAllowedByListeners",
+                    "ResolvedRefs": "Unknown/Pending",
+                    "gateway-api-openstack.github.io/Programmed": "False/Invalid"
+                  },
+                  "attachedRoutes": null
+                }
+              ]
+            }
+          },
+          "native": {
+            "gateway": "delegated-only-mtls",
+            "listeners": {
+              "80": {
+                "protocol": "HTTP",
+                "adminStateUp": true,
+                "provisioningStatus": "ACTIVE",
+                "clientAuthentication": "NONE",
+                "hasCAReference": false
+              },
+              "443": {
+                "protocol": "TERMINATED_HTTPS",
+                "adminStateUp": false,
+                "provisioningStatus": "ACTIVE",
+                "clientAuthentication": "MANDATORY",
+                "hasCAReference": true
+              }
+            },
+            "activeBinds": {
+              "80": {
+                "TLS": false,
+                "verifyRequired": false,
+                "hasCAFile": false
+              }
+            },
+            "distinctClientCARefs": 1,
+            "renderedConfigSHA256": "46b61afea770585c7ba5bf4eedca03b72bb3e3d2b1b30d71da39c9979595f2f0"
+          },
+          "elapsedSeconds": 3.016
+        },
+        "ca-grant-restored": {
+          "wire": {
+            "plain": {
+              "stage": "complete",
+              "http": 200,
+              "backend": "infra-backend-v1-667754889f-z78dr"
+            },
+            "trustedClient": {
+              "stage": "complete",
+              "tlsProtocol": "TLSv1.3",
+              "serverCertificateSHA256": "6fc3920a855bc9ae0a8c70ef8428d2e98a22ea6435e98c377422fee1a59bf6b8",
+              "http": 200,
+              "backend": "infra-backend-v2-5dc55c68cc-hbcjz"
+            },
+            "foreignClient": {
+              "stage": "http",
+              "tlsProtocol": "TLSv1.3",
+              "serverCertificateSHA256": "6fc3920a855bc9ae0a8c70ef8428d2e98a22ea6435e98c377422fee1a59bf6b8",
+              "error": "SSLError",
+              "alert": "TLSV1_ALERT_DECRYPT_ERROR"
+            },
+            "noClient": {
+              "stage": "http",
+              "tlsProtocol": "TLSv1.3",
+              "serverCertificateSHA256": "6fc3920a855bc9ae0a8c70ef8428d2e98a22ea6435e98c377422fee1a59bf6b8",
+              "error": "SSLError",
+              "alert": "TLSV13_ALERT_CERTIFICATE_REQUIRED"
+            }
+          },
+          "status": {
+            "gateway": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "Programmed": "True/Programmed",
+                "AddressesAssigned": "True/AddressesAssigned"
+              },
+              "listeners": [
+                {
+                  "section": "plain",
+                  "conditions": {
+                    "Accepted": "True/Accepted",
+                    "ResolvedRefs": "True/ResolvedRefs",
+                    "Conflicted": "False/NoConflicts",
+                    "Programmed": "True/Programmed"
+                  },
+                  "attachedRoutes": 1
+                }
+              ]
+            },
+            "listenerSet": {
+              "generation": 1,
+              "conditions": {
+                "Accepted": "True/Accepted",
+                "Programmed": "True/Programmed"
+              },
+              "listeners": [
+                {
+                  "section": "delegated",
+                  "conditions": {
+                    "Accepted": "True/Accepted",
+                    "ResolvedRefs": "True/ResolvedRefs",
+                    "Conflicted": "False/NoConflicts",
+                    "Programmed": "True/Programmed"
+                  },
+                  "attachedRoutes": 1
+                }
+              ]
+            },
+            "gatewayRoute": {
+              "generation": 1,
+              "conditions": {},
+              "parents": [
+                {
+                  "section": "plain",
+                  "conditions": {
+                    "Accepted": "True/Accepted",
+                    "ResolvedRefs": "True/ResolvedRefs",
+                    "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                  },
+                  "attachedRoutes": null
+                }
+              ]
+            },
+            "delegatedRoute": {
+              "generation": 1,
+              "conditions": {},
+              "parents": [
+                {
+                  "section": "delegated",
+                  "conditions": {
+                    "Accepted": "True/Accepted",
+                    "ResolvedRefs": "True/ResolvedRefs",
+                    "gateway-api-openstack.github.io/Programmed": "True/Programmed"
+                  },
+                  "attachedRoutes": null
+                }
+              ]
+            }
+          },
+          "native": {
+            "gateway": "delegated-only-mtls",
+            "listeners": {
+              "80": {
+                "protocol": "HTTP",
+                "adminStateUp": true,
+                "provisioningStatus": "ACTIVE",
+                "clientAuthentication": "NONE",
+                "hasCAReference": false
+              },
+              "443": {
+                "protocol": "TERMINATED_HTTPS",
+                "adminStateUp": true,
+                "provisioningStatus": "ACTIVE",
+                "clientAuthentication": "MANDATORY",
+                "hasCAReference": true
+              }
+            },
+            "activeBinds": {
+              "80": {
+                "TLS": false,
+                "verifyRequired": false,
+                "hasCAFile": false
+              },
+              "443": {
+                "TLS": true,
+                "verifyRequired": true,
+                "hasCAFile": true
+              }
+            },
+            "distinctClientCARefs": 1,
+            "renderedConfigSHA256": "7b9d7333f927847a1ccb8d77bbb027acdeefaacc1b2dcfbd6cef69b50b2cd35e"
+          },
+          "elapsedSeconds": 6.198
+        }
+      },
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "baseManifestSHA256": "9f9ef20a1c81851e08380cfb87b7b611dc16390e1e4fe3be0b0a788115465352",
+      "octavia": {
+        "revision": "0b360f0f3bdea3d86a5acdba1009e50428f77c6f",
+        "version": "19.0.1.dev44",
+        "sha256": "cf594e4c2fc0fc2d747e8791ac7bf2243851acc1817d4764967b1f78be2fce26",
+        "filesVerified": 649
+      },
+      "octaviaLib": {
+        "revision": "71d3d7d1956e0d566228d1669a0fe5200696ccf4",
+        "version": "3.12.1.dev13",
+        "sha256": "9c3908b1371d872083757fd59446189f31fc179f8b2326f94d2a50f49037df45",
+        "filesVerified": 24
+      },
+      "HAProxy": {
+        "version": "3.0.19-ade9c1262-octavia-strict-dns-v1-h2-alpn-v1-backend-sans-v1",
+        "sha256": "55bf3823b5fc2c34d21cac551ff23635cfc555c0223e4470e5696a98dcb4fd4e"
+      },
+      "echoRuntime": {
+        "nodeImage": "localhost/hibiscus-kind-node:597367624b4748b74b98e4fe2d661cd78063d02ecdaca702fd90572375b83e67",
+        "platformManifestDigest": "sha256:fed223b186fbd83d50a4578d168c9e7d89341d8c1af616ebe0f62d53ab7451dc"
+      },
+      "sharedScenarioReceiptSHA256": "d382cb4aa4b606ce70e4bb9572948b154f9b571a94e6fbbcfa7e1eed23720845",
+      "mTLSScenarioReceiptSHA256": "d382cb4aa4b606ce70e4bb9572948b154f9b571a94e6fbbcfa7e1eed23720845"
+    }
+  },
+  "scope": "Local kind, upstream echo Pods, native Octavia REST and Barbican REST, Amphora configuration rendering and HAProxy. The fixture supplies identity, VIP allocation, job scheduling and transport.",
+  "attempts": "The first VM failed during cluster initialization and echo discovery. A later Standard run served both hostnames but reached the initial status deadline with Programmed=False/Pending. The Standard shared-port measurement uses its own Gateway and fresh Pods. The Standard delegated mTLS and both Experimental scenarios used the shared fixture."
+}
