@@ -92,7 +92,9 @@ type Reconciler struct {
 	// BackendTLSSANAvailable checks explicit SANs and the selected transport.
 	BackendTLSSANAvailable func(context.Context, bool) (bool, error)
 	// XBackendTLSAvailable checks backend authentication support including pool ALPN.
-	XBackendTLSAvailable func(context.Context, bool) (bool, error)
+	XBackendTLSAvailable func(context.Context, bool, bool) (bool, error)
+	// BackendH2CAvailable checks regional support for an XBackend using h2c.
+	BackendH2CAvailable func(context.Context) (bool, error)
 	// XBackendClientCertificates resolves identities from the operator's XBackend enrollment.
 	XBackendClientCertificates graph.XBackendClientCertificateResolver
 	// TCPBackendTLSAvailable checks authenticated TLS for terminating TLSRoutes.
@@ -427,16 +429,22 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 				Reason: string(gatewayv1.RouteReasonUnsupportedProtocol), Message: graphResult.UnsupportedBackendProtocol,
 			}
 		}
-		cookieRevisionCurrent := true
-		if graphResult.ObservationDeferred && graphResult.xBackendCookieRevision != nil {
-			revision, err := r.liveXBackendCookieRevision(ctx, httpRoute)
-			cookieRevisionCurrent = err == nil && revision == *graphResult.xBackendCookieRevision &&
-				r.currentXBackendCookieRevision(httpRoute, parent.ref, revision)
-			if !cookieRevisionCurrent {
-				graphResult.BackendSessionPersistenceIssue = max(graphResult.BackendSessionPersistenceIssue, cloud.SessionPersistencePathReadbackUnverified)
+		xBackendRevisionCurrent := true
+		if graphResult.ObservationDeferred && graphResult.xBackendTransportRevision != nil {
+			observations, err := r.liveXBackendRevisions(ctx, httpRoute)
+			transport := xBackendTransportRevision(httpRoute, observations)
+			xBackendRevisionCurrent = err == nil && transport == *graphResult.xBackendTransportRevision &&
+				r.currentXBackendRevision(httpRoute, parent.ref, xBackendTransportRevisionCondition, transport)
+			if graphResult.xBackendCookieRevision != nil {
+				cookie := xBackendCookieRevision(httpRoute, observations)
+				if err != nil || cookie != *graphResult.xBackendCookieRevision ||
+					!r.currentXBackendRevision(httpRoute, parent.ref, xBackendCookieRevisionCondition, cookie) {
+					xBackendRevisionCurrent = false
+					graphResult.BackendSessionPersistenceIssue = max(graphResult.BackendSessionPersistenceIssue, cloud.SessionPersistencePathReadbackUnverified)
+				}
 			}
 		}
-		if graphResult.usesXBackendClientTLS || !graphResult.ObservationDeferred || !cookieRevisionCurrent ||
+		if graphResult.usesXBackendClientTLS || !graphResult.ObservationDeferred || !xBackendRevisionCurrent ||
 			graphResult.backendTLSAncestorSlot != backendtls.AncestorSlotHeld ||
 			graphResult.BackendSessionPersistenceIssue >= cloud.SessionPersistenceUnverified ||
 			r.currentRouteProgrammedCondition(httpRoute, parent.ref) == nil ||
@@ -459,6 +467,7 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 	}
 	scope.setStatuses([]parentStatusUpdate{{parent: parent.ref, status: status}})
 	scope.statusPlan.xBackendCookieRevision = graphResult.xBackendCookieRevision
+	scope.statusPlan.xBackendTransportRevision = graphResult.xBackendTransportRevision
 	log.FromContext(ctx).V(1).Info("Programmed HTTPRoute", "gateway", client.ObjectKeyFromObject(parent.gateway))
 	return ctrl.Result{RequeueAfter: resyncAfter}, nil
 }

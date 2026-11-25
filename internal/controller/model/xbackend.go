@@ -77,6 +77,14 @@ func XBackendRequiresTLS(spec gatewayx.BackendSpec) bool {
 	return spec.TLS != nil && spec.TLS.Mode != gatewayx.BackendTLSModeNone
 }
 
+func XBackendUsesH2C(spec gatewayx.BackendSpec) bool {
+	return ptr.Deref(spec.Protocol, "") == gatewayx.BackendProtocolH2C
+}
+
+func XBackendRequiresH2(spec gatewayx.BackendSpec) bool {
+	return ptr.Deref(spec.Protocol, "") == gatewayx.BackendProtocolHTTP2
+}
+
 func XBackendReference(namespace string, reference gatewayv1.BackendObjectReference) (types.NamespacedName, bool) {
 	if ptr.Deref(reference.Group, "") != gatewayx.GroupName || ptr.Deref(reference.Kind, "") != XBackendKind {
 		return types.NamespacedName{}, false
@@ -150,7 +158,8 @@ func resolveXBackend(route *gatewayv1.HTTPRoute, group BackendGroup, key types.N
 		}
 	}
 	group.State = BackendResolved
-	group.XBackendUsesH2C = ptr.Deref(spec.Protocol, "") == gatewayx.BackendProtocolH2C
+	group.XBackendUsesH2C = XBackendUsesH2C(*spec)
+	group.XBackendRequiresH2 = XBackendRequiresH2(*spec)
 	group.Endpoints = backend.Endpoints
 	return group
 }
@@ -254,8 +263,13 @@ func ValidateXBackend(spec gatewayx.BackendSpec, profile XBackendProfile) *Diagn
 			if tls.Validation == nil || !backendtls.IsPreciseHostname(string(tls.Validation.Hostname)) {
 				return backendDiagnostic(unsupported, "Authenticated XBackends require validation.hostname to be a precise DNS hostname")
 			}
-			if protocol != "" && protocol != gatewayx.BackendProtocolHTTP && protocol != gatewayx.BackendProtocolHTTP11 {
-				return backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "Authenticated XBackends support HTTP and HTTP11")
+			switch protocol {
+			case "", gatewayx.BackendProtocolHTTP, gatewayx.BackendProtocolHTTP11, gatewayx.BackendProtocolHTTP2:
+				return nil
+			case gatewayx.BackendProtocolH2C:
+				return backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "XBackend H2C requires TLS mode None")
+			default:
+				return backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "Authenticated XBackends support HTTP, HTTP11 and HTTP2")
 			}
 		default:
 			return backendDiagnostic(unsupported, fmt.Sprintf("XBackend TLS mode %q is unsupported", tls.Mode))
@@ -265,9 +279,11 @@ func ValidateXBackend(spec gatewayx.BackendSpec, profile XBackendProfile) *Diagn
 	case "", gatewayx.BackendProtocolHTTP, gatewayx.BackendProtocolHTTP11:
 		return nil
 	case gatewayx.BackendProtocolH2C:
-		if spec.Type == gatewayx.BackendTypeEndpointSelector && profile.H2C {
+		if profile.H2C {
 			return nil
 		}
+	case gatewayx.BackendProtocolHTTP2:
+		return backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "XBackend HTTP2 requires authenticated TLS. Use H2C for cleartext HTTP/2")
 	}
 	return backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, fmt.Sprintf("XBackend protocol %q is unsupported by the configured HTTP backend profile", protocol))
 }

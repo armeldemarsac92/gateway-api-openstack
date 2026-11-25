@@ -275,7 +275,7 @@ type HTTPBackendKind string
 
 const HTTPBackendKindXBackend HTTPBackendKind = "gateway.networking.x-k8s.io/XBackend"
 
-// BackendTLSValidation requires authenticated TLS to a Service port. The
+// BackendTLSValidation requires authenticated TLS to a backend. The
 // hostname is used as SNI and authenticates the certificate if no SANs are
 // configured. Denied keeps
 // the backend's HTTP matches and weight while withholding all forwarding.
@@ -286,6 +286,8 @@ type BackendTLSValidation struct {
 	CADigest        string
 	CAPEM           []byte `json:"-"`
 	Denied          bool
+	// RequireH2 requires negotiated HTTP/2 on an authenticated HTTP XBackend.
+	RequireH2 bool `json:",omitempty"`
 }
 
 // BackendTLSSubjectAltName is one typed certificate identity in Octavia's API.
@@ -315,16 +317,18 @@ type HTTPBackend struct {
 	SessionCookiePath     *string                    `json:",omitempty"`
 	SessionCookieDeadline *HTTPSessionCookieDeadline `json:",omitempty"`
 	// InvalidReference distinguishes an unresolved reference from a valid backend without endpoints.
-	InvalidReference bool                  `json:",omitempty"`
-	BackendH2C       bool                  `json:",omitempty"`
-	BackendTLS       *BackendTLSValidation `json:",omitempty"`
-	Kind             HTTPBackendKind       `json:",omitempty"`
-	Namespace        string
-	Name             string
-	Port             int
-	Members          []Member
-	Unavailable      bool
-	Matches          []HTTPPathMatch
+	InvalidReference bool `json:",omitempty"`
+	BackendH2C       bool `json:",omitempty"`
+	// BackendH2CPending limits this XBackend to already verified h2c members.
+	BackendH2CPending bool                  `json:",omitempty"`
+	BackendTLS        *BackendTLSValidation `json:",omitempty"`
+	Kind              HTTPBackendKind       `json:",omitempty"`
+	Namespace         string
+	Name              string
+	Port              int
+	Members           []Member
+	Unavailable       bool
+	Matches           []HTTPPathMatch
 	// RoutedExternal uses IPv4 destinations reached by Amphora's existing routes.
 	// Octavia receives these members without a Neutron subnet binding.
 	RoutedExternal bool `json:",omitempty"`

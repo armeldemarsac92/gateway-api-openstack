@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-The linux/amd64 controller programmed the retry interval for an HTTPRoute on Standard and Experimental. [Build record](image.json) · [Backoff measurements](provider/http-retry-backoff.md) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-8cd580f6914d5919544c6c3a7c6b1233cf46061c)
+The linux/amd64 controller served HTTP/2 to XBackend origins over cleartext, server TLS and mutual TLS. [Build record](image.json) · [Pod requests and DNS rotation](provider/xbackend-http2.md) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-3b8862d8057433b9abc60eef71468c1bc556137c)
+
+The linux/amd64 controller programmed the retry interval for an HTTPRoute on Standard and Experimental. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-8cd580f6914d5919544c6c3a7c6b1233cf46061c/image.json) · [Backoff measurements](provider/http-retry-backoff.md) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-8cd580f6914d5919544c6c3a7c6b1233cf46061c)
 
 The linux/amd64 controller issued path-scoped cookies for Experimental XBackends. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-52eae75209ad7bf2b2cbc1fbecf203f23f0e463a/image.json) · [Cookie Path observations](provider/xbackend-cookie-path.md) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-52eae75209ad7bf2b2cbc1fbecf203f23f0e463a)
 

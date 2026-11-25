@@ -21,6 +21,7 @@ import (
 	"context"
 	"maps"
 	"slices"
+	"sync"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -66,6 +67,7 @@ func (r *xBackendStatusReconciler) Reconcile(ctx context.Context, request ctrl.R
 	base := backend.DeepCopy()
 	result := ctrl.Result{}
 	if len(ancestors) > 0 && (r.routes.Config.BackendTLSPolicy && model.XBackendRequiresTLS(backend.Spec) ||
+		r.routes.Config.BackendH2C && model.XBackendUsesH2C(backend.Spec) ||
 		r.routes.Config.XBackendSessionPersistenceEnabled() && backend.Spec.SessionPersistence != nil) {
 		result.RequeueAfter = controller.OpenStackResyncAfter(r.routes.Config.OpenStackResyncInterval, backend.UID)
 		if r.routes.Config.XBackendClientCertificate && backend.Spec.TLS != nil && backend.Spec.TLS.Mode == gatewayx.BackendTLSModeClientAndServer {
@@ -110,6 +112,7 @@ func (r *xBackendStatusReconciler) observeAncestors(ctx context.Context, key typ
 	}
 	ancestors := make(map[types.NamespacedName]metav1.Condition, len(byGateway))
 	cookieCapability := r.routes.xBackendCookieCapability(ctx)
+	h2cDiagnostic := sync.OnceValue(func() model.Diagnostic { return r.routes.xBackendH2CDiagnostic(ctx) })
 	tlsObserver := graph.NewBackendTLSObserver(r.routes.APIReader, r.routes.Config.ClusterTrustBundles)
 	for gatewayKey, gateway := range byGateway {
 		attached, err := r.hasAttachedConsumer(ctx, gateway, key)
@@ -142,11 +145,19 @@ func (r *xBackendStatusReconciler) observeAncestors(ctx context.Context, key typ
 					condition.Status = metav1.ConditionUnknown
 				}
 			default:
-				requirements := xBackendTLSRequirements(validation.Validation)
+				requirements := xBackendTLSRequirements(validation.Validation, model.XBackendRequiresH2(backend.Spec))
 				availability := r.routes.backendTLSAvailability(ctx, requirements)
 				if availability != backendTLSAvailable || condition.Status == metav1.ConditionTrue {
 					condition.Status = metav1.ConditionTrue
-					condition = availability.applyXBackend(condition, requirements.requireSAN)
+					condition = availability.applyXBackend(condition, requirements)
+				}
+			}
+		}
+		if condition.Status == metav1.ConditionTrue && model.XBackendUsesH2C(backend.Spec) {
+			if diagnostic := h2cDiagnostic(); diagnostic.Reason != "" {
+				condition.Status, condition.Reason, condition.Message = metav1.ConditionFalse, diagnostic.Reason, diagnostic.Message
+				if diagnostic.Reason == string(gatewayv1.RouteReasonPending) {
+					condition.Status = metav1.ConditionUnknown
 				}
 			}
 		}
@@ -176,6 +187,23 @@ func (r *xBackendStatusReconciler) hasAttachedConsumer(ctx context.Context, gate
 		}
 	}
 	return false, nil
+}
+
+func (r *Reconciler) xBackendH2CDiagnostic(ctx context.Context) model.Diagnostic {
+	if r.BackendH2CAvailable != nil {
+		available, err := r.BackendH2CAvailable(ctx)
+		if err == nil {
+			if available {
+				return model.Diagnostic{}
+			}
+			return model.Diagnostic{
+				Reason: string(gatewayv1.RouteReasonUnsupportedProtocol), Message: "The regional provider does not support cleartext HTTP/2 for XBackends",
+			}
+		}
+	}
+	return model.Diagnostic{
+		Reason: string(gatewayv1.RouteReasonPending), Message: "Regional provider support for cleartext HTTP/2 could not be verified",
+	}
 }
 
 func xBackendAcceptedCondition(backend *gatewayx.XBackend, profile model.XBackendProfile) metav1.Condition {

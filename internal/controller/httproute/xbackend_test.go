@@ -103,6 +103,114 @@ func addExternalHostnameRule(t *testing.T, f *routeModelInputFixture, route *gat
 	return backend
 }
 
+func TestXBackendExternalHostnameH2CRequiresProviderSupport(t *testing.T) {
+	f := newExternalHostnameFixture(t)
+	r := f.reconciler
+	r.Config.BackendH2C = true
+	backend := addExternalHostnameRule(t, f, f.route, "h2c-origin")
+	backend.Spec.Protocol = ptr.To(gatewayx.BackendProtocolH2C)
+	backend.Spec.TLS = &gatewayx.BackendTLS{Mode: gatewayx.BackendTLSModeNone}
+	require.NoError(t, f.client.Update(t.Context(), backend))
+	require.NoError(t, f.client.Update(t.Context(), f.route))
+
+	lookups := 0
+	r.ExternalHostnames.lookup = func(_ context.Context, _, _ string) ([]netip.Addr, error) {
+		lookups++
+		return []netip.Addr{netip.MustParseAddr("198.51.100.15"), netip.MustParseAddr("192.0.2.200")}, nil
+	}
+	var sibling cloud.HTTPBackend
+	for _, tc := range []struct {
+		name      string
+		available bool
+		err       error
+		status    metav1.ConditionStatus
+		reason    string
+		lookups   int
+	}{
+		{"available", true, nil, metav1.ConditionTrue, "", 1},
+		{"discovery failed", false, errors.New("Octavia capability read failed"), metav1.ConditionUnknown, string(gatewayv1.RouteReasonPending), 1},
+		{"unsupported", false, nil, metav1.ConditionFalse, string(gatewayv1.RouteReasonUnsupportedProtocol), 1},
+		{"restored", true, nil, metav1.ConditionTrue, "", 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r.BackendH2CAvailable = func(context.Context) (bool, error) { return tc.available, tc.err }
+			targets := f.observe(t).Nodes[0].Spec.HTTPBackends
+			require.Len(t, targets, 2)
+			if sibling.Name == "" {
+				sibling = targets[0]
+			}
+			require.Equal(t, sibling, targets[0])
+			origin := targets[1]
+			require.Equal(t, tc.available || tc.err != nil, origin.BackendH2C)
+			require.Equal(t, tc.err != nil, origin.BackendH2CPending)
+			require.Nil(t, origin.BackendTLS)
+			require.Equal(t, tc.available || tc.err != nil, origin.RoutedExternal)
+			if tc.available || tc.err != nil {
+				require.Equal(t, []cloud.Member{{Address: "198.51.100.15", Port: int(backend.Spec.Port.Number)}}, origin.Members)
+			} else {
+				require.Empty(t, origin.Members)
+			}
+			require.Equal(t, tc.lookups, lookups)
+
+			routeStatus := pendingRouteStatus("Waiting for test listener")
+			require.NoError(t, r.resolveRouteReferences(t.Context(), f.route, f.gateway, &routeStatus))
+			require.Equal(t, tc.status, routeStatus.resolved)
+			ancestors, err := (&xBackendStatusReconciler{routes: r}).observeAncestors(t.Context(), client.ObjectKeyFromObject(backend), backend)
+			require.NoError(t, err)
+			require.Len(t, ancestors, 1)
+			ancestor := ancestors[client.ObjectKeyFromObject(f.gateway)]
+			require.Equal(t, tc.status, ancestor.Status)
+			require.Equal(t, backend.Generation, ancestor.ObservedGeneration)
+			if tc.reason != "" {
+				require.Equal(t, tc.reason, routeStatus.resolvedReason)
+				require.Equal(t, tc.reason, ancestor.Reason)
+			}
+		})
+	}
+}
+
+func TestXBackendTransportChangeInvalidatesDeferredParentStatus(t *testing.T) {
+	f := newExternalHostnameFixture(t)
+	f.reconciler.Config.BackendH2C = true
+	f.reconciler.BackendH2CAvailable = func(context.Context) (bool, error) { return true, nil }
+	f.reconciler.ExternalHostnames.lookup = func(context.Context, string, string) ([]netip.Addr, error) {
+		return []netip.Addr{netip.MustParseAddr("198.51.100.15")}, nil
+	}
+	backend := addExternalHostnameRule(t, f, f.route, "transport-origin")
+	require.NoError(t, f.client.Update(t.Context(), f.route))
+	provider := &recordingProvider{}
+	r := newTestReconciler(*f.reconciler, provider)
+	key, generation := client.ObjectKeyFromObject(f.route), f.route.Generation
+	check := func(programmed bool) {
+		t.Helper()
+		_, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: key})
+		require.NoError(t, err)
+		require.NoError(t, f.client.Get(t.Context(), key, f.route))
+		require.Equal(t, generation, f.route.Generation)
+		require.Len(t, f.route.Status.Parents, 1)
+		conditions := f.route.Status.Parents[0].Conditions
+		require.Equal(t, programmed, meta.IsStatusConditionTrue(conditions, r.Config.Domain()+"/Programmed"))
+		proof := meta.FindStatusCondition(conditions, r.Config.Domain()+xBackendTransportRevisionCondition)
+		if programmed {
+			require.NotNil(t, proof)
+		} else {
+			require.Nil(t, proof)
+		}
+	}
+	check(true)
+	deferred := cloud.RouteProgressingResult("Octavia load balancer is PENDING_UPDATE", time.Second)
+	deferred.ObservationDeferred = true
+	provider.routeResult = &deferred
+	check(true)
+	backend.Spec.Protocol = ptr.To(gatewayx.BackendProtocolH2C)
+	require.NoError(t, f.client.Update(t.Context(), backend))
+	check(false)
+	provider.routeResult = nil
+	check(true)
+	provider.routeResult = &deferred
+	check(true)
+}
+
 func TestXBackendExternalHostnameRefreshKeepsServiceAndRouteStatus(t *testing.T) {
 	f := newExternalHostnameFixture(t)
 	cfg := &f.reconciler.Config
@@ -697,9 +805,11 @@ func TestXBackendServerOnlyExternalHostnameUsesItsOwnValidation(t *testing.T) {
 	r.BackendTLSAvailable = func(context.Context) (bool, error) { return true, nil }
 	sanAvailable := true
 	var sanErr error
-	r.XBackendTLSAvailable = func(_ context.Context, requireSAN bool) (bool, error) {
+	requireHTTP2, h2Available := false, false
+	r.XBackendTLSAvailable = func(_ context.Context, requireH2, requireSAN bool) (bool, error) {
 		require.True(t, requireSAN)
-		return sanAvailable, sanErr
+		require.Equal(t, requireHTTP2, requireH2)
+		return sanAvailable && (!requireH2 || h2Available), sanErr
 	}
 	backend := addExternalHostnameRule(t, f, f.route, f.service.Name)
 	const identityName = "identity.remote.example.test"
@@ -810,6 +920,27 @@ func TestXBackendServerOnlyExternalHostnameUsesItsOwnValidation(t *testing.T) {
 	require.Equal(t, external.Members, targets[1].Members)
 	require.Equal(t, string(ca.UID), targets[1].BackendTLS.CAConfigMapUID)
 	require.Equal(t, 2, lookups)
+
+	// Changing only the XBackend selects the h2 capability and forces a new
+	// observation even when the HTTPRoute and pool identity are unchanged.
+	requireHTTP2 = true
+	backend.Spec.Protocol = ptr.To(gatewayx.BackendProtocolHTTP2)
+	require.NoError(t, f.client.Update(t.Context(), backend))
+	require.ErrorIs(t, before.Validate(t.Context()), errHTTPRouteChanged)
+	targets = f.observe(t).Nodes[0].Spec.HTTPBackends
+	require.Equal(t, service, targets[0])
+	require.True(t, targets[1].BackendTLS.Denied)
+	require.Empty(t, targets[1].Members)
+	checkStatus(metav1.ConditionFalse, "UnsupportedProvider")
+
+	h2Available = true
+	targets = f.observe(t).Nodes[0].Spec.HTTPBackends
+	require.Equal(t, identity.HTTPBackendPoolKey(external), identity.HTTPBackendPoolKey(targets[1]))
+	require.True(t, targets[1].BackendTLS.RequireH2)
+	require.Equal(t, identityName, targets[1].BackendTLS.Hostname)
+	require.Equal(t, external.Members, targets[1].Members)
+	checkStatus(metav1.ConditionTrue, string(gatewayv1.RouteReasonResolvedRefs))
+
 	t.Run("XBackend client identity withdrawal and rotation", func(t *testing.T) {
 		original := backend.Spec.DeepCopy()
 		backend.Spec.TLS.Mode = gatewayx.BackendTLSModeClientAndServer
@@ -842,6 +973,7 @@ func TestXBackendServerOnlyExternalHostnameUsesItsOwnValidation(t *testing.T) {
 		require.Equal(t, service, enrolled[0])
 		require.Equal(t, external.Members, enrolled[1].Members)
 		require.Equal(t, first, enrolled[1].XBackendClientCertificateReference)
+		require.True(t, enrolled[1].BackendTLS.RequireH2)
 		checkStatus(metav1.ConditionTrue, string(gatewayv1.RouteReasonResolvedRefs))
 		deferred := cloud.RouteProgressingResult("Octavia load balancer is PENDING_UPDATE", time.Second)
 		deferred.ObservationDeferred = true
@@ -948,6 +1080,7 @@ func TestXBackendServerOnlyExternalHostnameUsesItsOwnValidation(t *testing.T) {
 		require.Equal(t, service, selected[0])
 		require.False(t, selected[1].RoutedExternal)
 		require.Equal(t, rotated, selected[1].XBackendClientCertificateReference)
+		require.True(t, selected[1].BackendTLS.RequireH2)
 		require.Equal(t, []cloud.Member{{Address: "192.0.2.39", Port: int(backend.Spec.Port.Number)}}, selected[1].Members)
 	})
 

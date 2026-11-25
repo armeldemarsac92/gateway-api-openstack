@@ -1803,7 +1803,7 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 		if step.backendTLS != nil {
 			opts.TLSEnabled, opts.CATLSContainerRef = true, step.backendTLS.CAReference
 			if desired.xBackend {
-				opts.ALPNProtocols = []string{xBackendServerALPN}
+				opts.ALPNProtocols = []string{desired.xBackendALPN()}
 			}
 			opts.TLSContainerRef = step.backendTLS.ClientCertificateReference
 			hostname = step.backendTLS.Hostname

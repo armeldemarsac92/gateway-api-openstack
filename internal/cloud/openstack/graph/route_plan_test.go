@@ -396,12 +396,12 @@ func TestXBackendExternalHostnameOmitsSubnetOnlyForItsPool(t *testing.T) {
 	spec.HTTPBackends = []cloud.HTTPBackend{
 		{Namespace: "apps", Name: "backend", Port: 8080, Members: []cloud.Member{{Address: "192.0.2.20", Port: 8080}},
 			Matches: []cloud.HTTPPathMatch{{PathType: cloud.PathMatchExact, PathValue: "/service"}}},
-		{Kind: cloud.HTTPBackendKindXBackend, Namespace: "apps", Name: "backend", Port: 8089, RoutedExternal: true,
+		{Kind: cloud.HTTPBackendKindXBackend, Namespace: "apps", Name: "backend", Port: 8089, RoutedExternal: true, BackendH2C: true,
 			Members: []cloud.Member{{Address: "198.51.100.20", Port: 8089}},
 			Matches: []cloud.HTTPPathMatch{{PathType: cloud.PathMatchExact, PathValue: "/external", Precedence: 1}}},
 	}
 	requests := 0
-	p := &Provider{projectID: "project-a", octavia: octavia.NewService(safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	p := &Provider{projectID: "project-a", backendH2C: true, octavia: octavia.NewService(safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		requests++
 		if req.Method != http.MethodPost {
 			t.Errorf("expected member POST, got %s %s", req.Method, req.URL.Path)
@@ -435,6 +435,9 @@ func TestXBackendExternalHostnameOmitsSubnetOnlyForItsPool(t *testing.T) {
 		pool := "service"
 		if part.routedExternal {
 			pool = "external"
+			if !part.spec.BackendH2C || part.monitorType() != monitors.TypeHTTP {
+				t.Fatalf("expected an h2c pool with HTTP probes, got %+v", part.spec)
+			}
 		}
 		step := routeMutation{kind: routeMutationCreateMember, parentID: pool, member: part.members[0]}
 		if err := p.executeRouteMutation(t.Context(), part, step); err != nil {
@@ -448,6 +451,44 @@ func TestXBackendExternalHostnameOmitsSubnetOnlyForItsPool(t *testing.T) {
 	spec.BackendSecurityGroupIDs = []string{"worker-group"}
 	if _, err := p.buildDesiredRoute(spec); err == nil {
 		t.Fatal("a routed external pool must never bypass worker security validation")
+	}
+}
+
+func TestXBackendH2CDiscoveryKeepsOnlyVerifiedEligibleMembers(t *testing.T) {
+	backend, observed := convergedRoutePlanFixture()
+	backend.xBackend, backend.xBackendH2CPending, backend.spec.BackendH2C = true, true, true
+	backend.spec.MemberMode = cloud.MemberModeEndpoint
+	backend.backendKey = "xbackend"
+	backend.members = append(backend.members, cloud.Member{Address: "10.0.0.20", Port: 30080})
+	observed.pool.ProvisioningStatus = "ACTIVE"
+	observed.backendH2C = true
+	observed.backendTLS = octavia.PoolBackendTLS{AdminObserved: true, EnabledObserved: true, H2CObserved: true}
+	observed.members[0].ProvisioningStatus, observed.members[0].Weight = "ACTIVE", 1
+	stale := observed.members[0]
+	stale.ID, stale.Address = "stale", "10.0.0.30"
+	observed.members = append(observed.members, stale)
+	desired := desiredGatewayGraph{
+		spec:   cloud.GatewayGraphSpec{Routes: []cloud.RouteGraphNode{{Disposition: cloud.GraphEnsure}}},
+		routes: []desiredRoute{{httpParts: []desiredRoute{backend}}},
+	}
+	actual := observedGatewayGraph{routes: []observedRouteGraph{{httpParts: map[string]*observedRouteGraph{backend.backendKey: &observed}}}}
+	fragments, _, _ := httpPlanningParts(desired, actual)
+	pending := fragments.routes[0]
+	if !pending.spec.BackendH2C || len(pending.members) != 1 || pending.members[0] != backend.members[0] {
+		t.Fatalf("pending availability must retain only the verified eligible member: %+v", pending.members)
+	}
+	steps, _, err := buildRouteEnsurePlan(pending, observed)
+	if err != nil || len(steps) != 1 || steps[0].kind != routeMutationDeleteMember || steps[0].id != "stale" {
+		t.Fatalf("pending discovery must withdraw only the stale member: plan = %#v, error = %v", steps, err)
+	}
+
+	observed.members = observed.members[:1]
+	backend.xBackendH2CPending = false
+	desired.routes[0].httpParts[0] = backend
+	fragments, _, _ = httpPlanningParts(desired, actual)
+	steps, _, err = buildRouteEnsurePlan(fragments.routes[0], observed)
+	if err != nil || len(steps) != 1 || steps[0].kind != routeMutationCreateMember || steps[0].member != backend.members[1] {
+		t.Fatalf("restored discovery must admit the new member: plan = %#v, error = %v", steps, err)
 	}
 }
 

@@ -103,8 +103,13 @@ func (p *Provider) BackendTLSSANAvailable(ctx context.Context, requireH2 bool) (
 }
 
 // XBackendTLSAvailable discovers authenticated XBackend support, including the pool ALPN API.
-func (p *Provider) XBackendTLSAvailable(ctx context.Context, requireSAN bool) (bool, error) {
-	return p.graph.XBackendTLSAvailable(ctx, requireSAN)
+func (p *Provider) XBackendTLSAvailable(ctx context.Context, requireH2, requireSAN bool) (bool, error) {
+	return p.graph.XBackendTLSAvailable(ctx, requireH2, requireSAN)
+}
+
+// BackendH2CAvailable reports regional Amphora support for cleartext HTTP/2.
+func (p *Provider) BackendH2CAvailable(ctx context.Context) (bool, error) {
+	return p.graph.BackendH2CAvailable(ctx)
 }
 
 // GRPCBackendTLSAvailable discovers hostname validation and mandatory h2 negotiation.
