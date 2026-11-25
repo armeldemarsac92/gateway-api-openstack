@@ -3,16 +3,15 @@
   "scope": "Local kind cluster, manager extracted from OCI, Octavia REST, Amphora configuration and HAProxy; fixtures provide cloud inventory, provisioning and Amphora agent transport.",
   "registeredUpstreamCase": false,
   "controller": {
-    "source": "66186c20899a41ea5b950a73db78e12dbca7e8d5",
+    "source": "26413e35c7b9578e960675139edf57471b888a36",
     "parents": [
-      "b823f09447a11e1c728f73bb9ab9081826ceb534",
-      "07823d1c2e9970ad084f0bcb1a0102ccd25c8a08"
+      "7d446e21dbbc4e778f1ec677a557fb4db7573bb0"
     ],
-    "tree": "89f60a50fee6d0d6f676107c639f100684e8567e",
+    "tree": "a48126ec48ca612f6d90cfe108496d3b658189a9",
     "signatureVerified": true,
-    "manifestDigest": "sha256:0b9b876db1a2c2bb3bfa36bc2d134634b1614f743c560bc6ca35e7601d9ece86",
-    "managerSHA256": "df4f3f1b962c3cc5c80e8deaa9f193446939a1c764205da0f1b603d0553b2e55",
-    "ociArchiveSHA256": "42c93254df8a108fc5a0584571ee0ff0484d1cf1e6e850276efc95c09026fd04",
+    "manifestDigest": "sha256:d99e3110f686e1f5535703bb81867c4315ce97f482e1a83af01c93e753fb7a13",
+    "managerSHA256": "3690c0de1313dd03d280057d3c2ee4eaff5963ae1eb01582f9cc46a84ee309d0",
+    "ociArchiveSHA256": "d68168b97c995fdbac1c2782bdc8608dc7b0ea664f083b7a95306b4267ab4d84",
     "platform": "linux/amd64",
     "normalAndNoCacheBuildsMatch": true
   },
@@ -32,8 +31,8 @@
   },
   "channels": {
     "standard": {
-      "rawReceiptSHA256": "b85a6ae17747893608dc705e0d3c000c52a757e2004c2258a01113c2da84373c",
-      "rawWireSHA256": "4fbebfa84ff7b18a351a95b774625ab39fd38808322c07b1597742d1f1a3713d",
+      "rawReceiptSHA256": "0d70ed21ddcc156da2b29fe9d721dce2d161774bf58afe7bcf1235cb836e913e",
+      "rawWireSHA256": "c43b517fba9158eaee086e9663d29112ae73c9d746b5fa4ea35aa147ab824e4b",
       "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
       "xBackendCRD": {
         "installed": false,
@@ -43,12 +42,12 @@
       "ordinaryService": {
         "resource": {
           "generation": 1,
-          "object": "c816511969b0e3a1576ab46027cbb42ae608a52a978abf32279732d137cf6165",
+          "object": "f1a22b93a1e998b48567afd903add1097d794387843261309158d3648c6625fd",
           "specSHA256": "78bdcb0aa2986cb515033bcbcf4826160c1d1a95cb8e6dca50b8e0a193de55d2"
         },
-        "pool": "1772972436fd4e0b96fae3465166b52d5d762b6a571efd5a1c7936cae2b903b7",
+        "pool": "d53dd61362cf23d0c7f2d15f2e09cf898ff1bc43dc2dbea6e87bc87e700ab036",
         "members": [
-          "3f16c6240b5414f02c438ec94975b133a7f8db730dfddc9a301aac036540a0a5"
+          "131eb6b0a525734db5f7957321e737835a80859e291acca02b5e4754815d1ef1"
         ],
         "conditions": {
           "Accepted": "True/Accepted",
@@ -62,6 +61,7 @@
         ],
         "setCookieCount": 0
       },
+      "recordedAtUTC": "2026-11-25T05:03:48+00:00",
       "ordinaryServiceResponsesIncludingProvisioning": {
         "503": 9,
         "200": 6
@@ -71,8 +71,8 @@
       "renderedMicroversion": "2.8"
     },
     "experimental": {
-      "rawReceiptSHA256": "3f0f90efba0212ed45e050c6563d79d5a22fe612107db8f0942834914cdea374",
-      "rawWireSHA256": "d8e077badfaf1b801123633275a709c5ef1f6d99894e887c92b2c99a199f1b72",
+      "rawReceiptSHA256": "5abea1d0827430c9922191d5797bb65d12c5ca0d6e3d6ae12bb0d113eecbc065",
+      "rawWireSHA256": "84c8e197e27ebaf0727168f5740e6c6a9c42020e53dabb9b390a1cff81f10f96",
       "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
       "xBackendCRD": {
         "installed": true,
@@ -85,12 +85,12 @@
       "ordinaryService": {
         "resource": {
           "generation": 1,
-          "object": "a695cbb778479d0b13721561010e74e6fe9756d152f21a095fd9b14119f3a008",
+          "object": "d5f17a5e2aec17bb87c30463458c7e31f82cb82e091d7138a83ca02bdec3f689",
           "specSHA256": "78bdcb0aa2986cb515033bcbcf4826160c1d1a95cb8e6dca50b8e0a193de55d2"
         },
-        "pool": "416449069f08262ae7d88d7ffb0045529317017e598a839ddfe5c67dfb7c9690",
+        "pool": "988186602b4de04cca860043cc83918511f27f165b845e3507849155ab0d8099",
         "members": [
-          "1cb2cb1fef54ef284a9bac28ca923711c50a18ed6596bc6fa9e80ade7204e611"
+          "24851ffbab0d964c451ddac463b74cb09e1f45ec53e53a1f6f462c6e150de93a"
         ],
         "conditions": {
           "Accepted": "True/Accepted",
@@ -104,6 +104,7 @@
         ],
         "setCookieCount": 0
       },
+      "recordedAtUTC": "2026-11-25T05:05:25+00:00",
       "ordinaryServiceResponsesIncludingProvisioning": {
         "503": 9,
         "200": 15
@@ -124,7 +125,7 @@
         "two-ready-endpoints": {
           "resource": {
             "generation": 1,
-            "object": "dc2cd8bcc332a9e9ff483c8b83e4af7f1b1416d7a567f42e519534136fd30219",
+            "object": "c78777084a38db4783a3e584c438f4d97d522c736ec4a5bdcebb3a001270a658",
             "specSHA256": "4ff7e43b3079c223cf18b82b0e78712959d4a51931f63a1980f3e72f27837c77"
           },
           "conditions": {
@@ -134,7 +135,7 @@
             "first": {
               "resource": {
                 "generation": 1,
-                "object": "edb6c64a6882f99a608e3e903523b8101faad85d42460480dfd7e0eac61863a5",
+                "object": "f9417fee97d38a941aee014ed7528b2beda402c7ec523f9b96a72e24413a97a4",
                 "specSHA256": "5d2f7c498080c9d9bcfc0af55f8e3bded39f1604d5de8e4e372584b61c02b170"
               },
               "conditions": {
@@ -142,11 +143,11 @@
                 "ResolvedRefs": "True/ResolvedRefs",
                 "gateway-api-openstack.github.io/Programmed": "True/Programmed"
               },
-              "pool": "3164252d58cfc94080c74786286832353077cbba8d2baad425d22f4e490f2c53",
-              "policy": "57db4428251e8334d6cf91f8b40422b82e3e842f2f15e1d8974cd9712313e1e1",
-              "rule": "d28fb74cd622bdf513f21e2e452fd68dbb6c35d6dfb3642fd986346c1ca99e5b",
-              "listener": "bde0de49995e1d875b2219fd21f5e2df37f46b56a39e7306d39e3d108adf02b0",
-              "loadBalancer": "91d3c1db5ab9ca003d34b7078ffcfcc813b3c3915e76e3f817ab9a48eb39cfe7",
+              "pool": "ba512fff82406ef9c6120f6489b4dad5378e2dd29dcf96ce68809995312ff64a",
+              "policy": "f96f2eb9c0570cf22c8234a34c30d667b72471c9c97ddb1e24e677e2d8f17f1a",
+              "rule": "06c94aa581ec460dc8992bfeb3ccf7cdf3e3bc9a135d2120f94470b1ba554602",
+              "listener": "7dabb451afd51d4b9fb57b2d530d74734c23ecbc9dcc1f8204b5f7deddbc513d",
+              "loadBalancer": "c1e67a9931a3480fba763396afacc9d7db0f3c131791395e39508e63454258ab",
               "match": {
                 "value": "/first/session",
                 "compare": "EQUAL_TO"
@@ -162,19 +163,19 @@
               "nativeVerifyRequired": false,
               "nativeStrictHostname": [],
               "nativeALPN": [],
-              "nativeConfigSHA256": "eb990263fde5990692bef434e170acc4cc927fc1d369e67eb4b562be50ff28c6",
+              "nativeConfigSHA256": "19ecbb3f8d7c6c3f45c6f06ca6fa1cb761bb1202b0fc2eecc0b4b42b9adae3ac",
               "nativeCookieDirectives": [
                 "fixture_session insert indirect nocache"
               ],
               "eligibleMembers": [
-                "a9f871d5d2637a7c939d4e1e2de967eff535393b6974b50519ad0a675b31b676",
-                "ceca6593ca21c122f86eeaa9ac25d927c2e204e54ad4700127fa6585ca354445"
+                "9a2d6ee38af51545d73a285d9495accbd901e0d9dc0570f42e8a369bedff6f3f",
+                "1b5485c02bafe2e04103396f4309254c14fda97fd45982f162a859b442b29618"
               ]
             },
             "second": {
               "resource": {
                 "generation": 1,
-                "object": "68b7ac12d57c928c1d71a5669a62b03064bf53235dece1eb03e349ea5ab403b4",
+                "object": "2998500cc18b351610937d61d46728aa5cd2f945bdf37b2126362490e62a11a7",
                 "specSHA256": "32e40705ebbe461bef0e827dc9ff17d3d2ab6777bf19367e63f1c46190e86a3d"
               },
               "conditions": {
@@ -182,11 +183,11 @@
                 "ResolvedRefs": "True/ResolvedRefs",
                 "gateway-api-openstack.github.io/Programmed": "True/Programmed"
               },
-              "pool": "8647b9721303925b5c89af183969cacf67621e4732f622380bc2ecb4f3135867",
-              "policy": "26dfca34428147ff6b9bcc72fc55650aa75be27a30bfe7ccc0de00e58991db60",
-              "rule": "9e7b20e336b2c8ae9dc33fee453034d4ecd35639067eb15a63e538e1cbdfda87",
-              "listener": "bde0de49995e1d875b2219fd21f5e2df37f46b56a39e7306d39e3d108adf02b0",
-              "loadBalancer": "91d3c1db5ab9ca003d34b7078ffcfcc813b3c3915e76e3f817ab9a48eb39cfe7",
+              "pool": "fb61744024635ad6f00f93a00c7e47f7f153120778121322a8dc2c09e0c0cb18",
+              "policy": "8e082a4d1ce574bffd8e4862154c0d84867f9226ca0150f89e5c4ba87d12f3c3",
+              "rule": "4df8dd34cb6a2eac4059780869cf256a7c29c10ad76c7d0ef2e8089c83a5b21d",
+              "listener": "7dabb451afd51d4b9fb57b2d530d74734c23ecbc9dcc1f8204b5f7deddbc513d",
+              "loadBalancer": "c1e67a9931a3480fba763396afacc9d7db0f3c131791395e39508e63454258ab",
               "match": {
                 "value": "/second/session",
                 "compare": "EQUAL_TO"
@@ -202,25 +203,25 @@
               "nativeVerifyRequired": false,
               "nativeStrictHostname": [],
               "nativeALPN": [],
-              "nativeConfigSHA256": "eb990263fde5990692bef434e170acc4cc927fc1d369e67eb4b562be50ff28c6",
+              "nativeConfigSHA256": "19ecbb3f8d7c6c3f45c6f06ca6fa1cb761bb1202b0fc2eecc0b4b42b9adae3ac",
               "nativeCookieDirectives": [
                 "fixture_session insert indirect nocache"
               ],
               "eligibleMembers": [
-                "ed651554a41520e4108801da6dd2e52b3e47d1414b45cadc2d8472e52bf43239",
-                "04b8ff929096ecddbdcfcb0708a0691661d13acc078a6fa8dfba011ad0c08b13"
+                "f9d64a7144a9d09874efaa585451d4414444a7cb33d195af16441823cb5e6643",
+                "66a84f4410d7b31050507b8e4659b099733b1ff8648766e4f759b73e0e9d9929"
               ]
             }
           },
           "sibling": {
             "resource": {
               "generation": 1,
-              "object": "a695cbb778479d0b13721561010e74e6fe9756d152f21a095fd9b14119f3a008",
+              "object": "d5f17a5e2aec17bb87c30463458c7e31f82cb82e091d7138a83ca02bdec3f689",
               "specSHA256": "78bdcb0aa2986cb515033bcbcf4826160c1d1a95cb8e6dca50b8e0a193de55d2"
             },
-            "pool": "416449069f08262ae7d88d7ffb0045529317017e598a839ddfe5c67dfb7c9690",
+            "pool": "988186602b4de04cca860043cc83918511f27f165b845e3507849155ab0d8099",
             "members": [
-              "1cb2cb1fef54ef284a9bac28ca923711c50a18ed6596bc6fa9e80ade7204e611"
+              "24851ffbab0d964c451ddac463b74cb09e1f45ec53e53a1f6f462c6e150de93a"
             ],
             "conditions": {
               "Accepted": "True/Accepted",
@@ -327,7 +328,7 @@
         "selected-endpoint-withdrawal": {
           "resource": {
             "generation": 1,
-            "object": "dc2cd8bcc332a9e9ff483c8b83e4af7f1b1416d7a567f42e519534136fd30219",
+            "object": "c78777084a38db4783a3e584c438f4d97d522c736ec4a5bdcebb3a001270a658",
             "specSHA256": "4ff7e43b3079c223cf18b82b0e78712959d4a51931f63a1980f3e72f27837c77"
           },
           "conditions": {
@@ -337,7 +338,7 @@
             "first": {
               "resource": {
                 "generation": 1,
-                "object": "edb6c64a6882f99a608e3e903523b8101faad85d42460480dfd7e0eac61863a5",
+                "object": "f9417fee97d38a941aee014ed7528b2beda402c7ec523f9b96a72e24413a97a4",
                 "specSHA256": "5d2f7c498080c9d9bcfc0af55f8e3bded39f1604d5de8e4e372584b61c02b170"
               },
               "conditions": {
@@ -345,11 +346,11 @@
                 "ResolvedRefs": "True/ResolvedRefs",
                 "gateway-api-openstack.github.io/Programmed": "True/Programmed"
               },
-              "pool": "3164252d58cfc94080c74786286832353077cbba8d2baad425d22f4e490f2c53",
-              "policy": "57db4428251e8334d6cf91f8b40422b82e3e842f2f15e1d8974cd9712313e1e1",
-              "rule": "d28fb74cd622bdf513f21e2e452fd68dbb6c35d6dfb3642fd986346c1ca99e5b",
-              "listener": "bde0de49995e1d875b2219fd21f5e2df37f46b56a39e7306d39e3d108adf02b0",
-              "loadBalancer": "91d3c1db5ab9ca003d34b7078ffcfcc813b3c3915e76e3f817ab9a48eb39cfe7",
+              "pool": "ba512fff82406ef9c6120f6489b4dad5378e2dd29dcf96ce68809995312ff64a",
+              "policy": "f96f2eb9c0570cf22c8234a34c30d667b72471c9c97ddb1e24e677e2d8f17f1a",
+              "rule": "06c94aa581ec460dc8992bfeb3ccf7cdf3e3bc9a135d2120f94470b1ba554602",
+              "listener": "7dabb451afd51d4b9fb57b2d530d74734c23ecbc9dcc1f8204b5f7deddbc513d",
+              "loadBalancer": "c1e67a9931a3480fba763396afacc9d7db0f3c131791395e39508e63454258ab",
               "match": {
                 "value": "/first/session",
                 "compare": "EQUAL_TO"
@@ -365,18 +366,18 @@
               "nativeVerifyRequired": false,
               "nativeStrictHostname": [],
               "nativeALPN": [],
-              "nativeConfigSHA256": "de26a359d87ac11a287a0745de154d68ef0aa9fa5b7979573ec16e66120439d2",
+              "nativeConfigSHA256": "f8e4d97113565f291d05bdd786cac521f2c5af96cacfaf7a8da5800fda0b2697",
               "nativeCookieDirectives": [
                 "fixture_session insert indirect nocache"
               ],
               "eligibleMembers": [
-                "ceca6593ca21c122f86eeaa9ac25d927c2e204e54ad4700127fa6585ca354445"
+                "1b5485c02bafe2e04103396f4309254c14fda97fd45982f162a859b442b29618"
               ]
             },
             "second": {
               "resource": {
                 "generation": 1,
-                "object": "68b7ac12d57c928c1d71a5669a62b03064bf53235dece1eb03e349ea5ab403b4",
+                "object": "2998500cc18b351610937d61d46728aa5cd2f945bdf37b2126362490e62a11a7",
                 "specSHA256": "32e40705ebbe461bef0e827dc9ff17d3d2ab6777bf19367e63f1c46190e86a3d"
               },
               "conditions": {
@@ -384,11 +385,11 @@
                 "ResolvedRefs": "True/ResolvedRefs",
                 "gateway-api-openstack.github.io/Programmed": "True/Programmed"
               },
-              "pool": "8647b9721303925b5c89af183969cacf67621e4732f622380bc2ecb4f3135867",
-              "policy": "26dfca34428147ff6b9bcc72fc55650aa75be27a30bfe7ccc0de00e58991db60",
-              "rule": "9e7b20e336b2c8ae9dc33fee453034d4ecd35639067eb15a63e538e1cbdfda87",
-              "listener": "bde0de49995e1d875b2219fd21f5e2df37f46b56a39e7306d39e3d108adf02b0",
-              "loadBalancer": "91d3c1db5ab9ca003d34b7078ffcfcc813b3c3915e76e3f817ab9a48eb39cfe7",
+              "pool": "fb61744024635ad6f00f93a00c7e47f7f153120778121322a8dc2c09e0c0cb18",
+              "policy": "8e082a4d1ce574bffd8e4862154c0d84867f9226ca0150f89e5c4ba87d12f3c3",
+              "rule": "4df8dd34cb6a2eac4059780869cf256a7c29c10ad76c7d0ef2e8089c83a5b21d",
+              "listener": "7dabb451afd51d4b9fb57b2d530d74734c23ecbc9dcc1f8204b5f7deddbc513d",
+              "loadBalancer": "c1e67a9931a3480fba763396afacc9d7db0f3c131791395e39508e63454258ab",
               "match": {
                 "value": "/second/session",
                 "compare": "EQUAL_TO"
@@ -404,24 +405,24 @@
               "nativeVerifyRequired": false,
               "nativeStrictHostname": [],
               "nativeALPN": [],
-              "nativeConfigSHA256": "de26a359d87ac11a287a0745de154d68ef0aa9fa5b7979573ec16e66120439d2",
+              "nativeConfigSHA256": "f8e4d97113565f291d05bdd786cac521f2c5af96cacfaf7a8da5800fda0b2697",
               "nativeCookieDirectives": [
                 "fixture_session insert indirect nocache"
               ],
               "eligibleMembers": [
-                "04b8ff929096ecddbdcfcb0708a0691661d13acc078a6fa8dfba011ad0c08b13"
+                "66a84f4410d7b31050507b8e4659b099733b1ff8648766e4f759b73e0e9d9929"
               ]
             }
           },
           "sibling": {
             "resource": {
               "generation": 1,
-              "object": "a695cbb778479d0b13721561010e74e6fe9756d152f21a095fd9b14119f3a008",
+              "object": "d5f17a5e2aec17bb87c30463458c7e31f82cb82e091d7138a83ca02bdec3f689",
               "specSHA256": "78bdcb0aa2986cb515033bcbcf4826160c1d1a95cb8e6dca50b8e0a193de55d2"
             },
-            "pool": "416449069f08262ae7d88d7ffb0045529317017e598a839ddfe5c67dfb7c9690",
+            "pool": "988186602b4de04cca860043cc83918511f27f165b845e3507849155ab0d8099",
             "members": [
-              "1cb2cb1fef54ef284a9bac28ca923711c50a18ed6596bc6fa9e80ade7204e611"
+              "24851ffbab0d964c451ddac463b74cb09e1f45ec53e53a1f6f462c6e150de93a"
             ],
             "conditions": {
               "Accepted": "True/Accepted",
@@ -530,7 +531,7 @@
         "server-only-http11-cookie": {
           "resource": {
             "generation": 1,
-            "object": "066b3b8652b41050014dffe7cfff52e9eed588bd226bff447a67762db24c6f99",
+            "object": "645669de2b969212d43a84d4d3847dc8af9c308c840dea836d6195e4a614fe69",
             "specSHA256": "5c31f1f4aa7c03d12068cd513e43ac0dc7deae20e7c3954c83aaf2b9ae03a22b"
           },
           "conditions": {
@@ -540,7 +541,7 @@
             "secure": {
               "resource": {
                 "generation": 1,
-                "object": "9475e761ceac988b90a9370cd3291b83ca2a784e82a490afba71e4dcffa2e695",
+                "object": "3f71f48c7a933f5e7130aca3cb022ba0c1d3654062d864de870b028b9bf99c2f",
                 "specSHA256": "963ae8e29e84d948c1bac7bdf20f13898403acb22e7b98ff1992db3d2a5eac7f"
               },
               "conditions": {
@@ -548,18 +549,18 @@
                 "ResolvedRefs": "True/ResolvedRefs",
                 "gateway-api-openstack.github.io/Programmed": "True/Programmed"
               },
-              "pool": "be2848331e02a3d87c6842fc5d1d80d70cf8dd23c09568b9c4801a6a73de9988",
-              "policy": "a302f96b208a94164a7ded5e50a5dd6b3144bd2b477276f138bd10ba94851e1f",
-              "rule": "7761c1aa1a904ef38c9bf2354cfcb78271962bece2cd52991fa6f618935250f8",
-              "listener": "bde0de49995e1d875b2219fd21f5e2df37f46b56a39e7306d39e3d108adf02b0",
-              "loadBalancer": "91d3c1db5ab9ca003d34b7078ffcfcc813b3c3915e76e3f817ab9a48eb39cfe7",
+              "pool": "2d9aa38666e772a0ddf1282d7b048741000cdc46e57f4b2319567264c9f5e983",
+              "policy": "04aa5a3451d1105efe05fc4c2bfe834b5a15c3d0e08deb6ba873ee6b6924ee72",
+              "rule": "18a1c04d78a3ff3dbe868291efaaf00f36f2bf0fedfbd3fa424f05f9b3f4dd60",
+              "listener": "7dabb451afd51d4b9fb57b2d530d74734c23ecbc9dcc1f8204b5f7deddbc513d",
+              "loadBalancer": "c1e67a9931a3480fba763396afacc9d7db0f3c131791395e39508e63454258ab",
               "match": {
                 "value": "/secure/session",
                 "compare": "EQUAL_TO"
               },
               "sessionPersistence": {
                 "type": "HTTP_COOKIE",
-                "cookie_name": "xbackend-066b3b8652b41050014dffe7cfff52e9eed588bd226bff447a67762db24c6f99",
+                "cookie_name": "xbackend-645669de2b969212d43a84d4d3847dc8af9c308c840dea836d6195e4a614fe69",
                 "persistence_timeout": null,
                 "persistence_granularity": null
               },
@@ -572,24 +573,24 @@
               "nativeALPN": [
                 "http/1.1"
               ],
-              "nativeConfigSHA256": "3edb4fd0f353be444082dca22a45a6edab5ffb69514ebfc115ad4fe86fe0adb0",
+              "nativeConfigSHA256": "9347a50cd591d506a81afadc5dc5b44b114f08584b2050cae17d2d012881ee2d",
               "nativeCookieDirectives": [
-                "xbackend-066b3b8652b41050014dffe7cfff52e9eed588bd226bff447a67762db24c6f99 insert indirect nocache"
+                "xbackend-645669de2b969212d43a84d4d3847dc8af9c308c840dea836d6195e4a614fe69 insert indirect nocache"
               ],
               "eligibleMembers": [
-                "abcd7e8ce0ff0269cd54b030ed779c4d5b49183548838b1de6642a100baccaad"
+                "3ee13075edfe96cf6c46305fad38c8baa0d4966e47101fd77dfdedd04cf49e5b"
               ]
             }
           },
           "sibling": {
             "resource": {
               "generation": 1,
-              "object": "a695cbb778479d0b13721561010e74e6fe9756d152f21a095fd9b14119f3a008",
+              "object": "d5f17a5e2aec17bb87c30463458c7e31f82cb82e091d7138a83ca02bdec3f689",
               "specSHA256": "78bdcb0aa2986cb515033bcbcf4826160c1d1a95cb8e6dca50b8e0a193de55d2"
             },
-            "pool": "416449069f08262ae7d88d7ffb0045529317017e598a839ddfe5c67dfb7c9690",
+            "pool": "988186602b4de04cca860043cc83918511f27f165b845e3507849155ab0d8099",
             "members": [
-              "1cb2cb1fef54ef284a9bac28ca923711c50a18ed6596bc6fa9e80ade7204e611"
+              "24851ffbab0d964c451ddac463b74cb09e1f45ec53e53a1f6f462c6e150de93a"
             ],
             "conditions": {
               "Accepted": "True/Accepted",
@@ -618,7 +619,7 @@
               },
               "issued": [
                 {
-                  "name": "xbackend-066b3b8652b41050014dffe7cfff52e9eed588bd226bff447a67762db24c6f99",
+                  "name": "xbackend-645669de2b969212d43a84d4d3847dc8af9c308c840dea836d6195e4a614fe69",
                   "value": "value-3",
                   "path": "/",
                   "session": true
@@ -631,7 +632,7 @@
               "origin": "pod-b",
               "sent": {
                 "fixture_session": "value-2",
-                "xbackend-066b3b8652b41050014dffe7cfff52e9eed588bd226bff447a67762db24c6f99": "value-3"
+                "xbackend-645669de2b969212d43a84d4d3847dc8af9c308c840dea836d6195e4a614fe69": "value-3"
               },
               "issued": []
             },
@@ -646,7 +647,7 @@
               },
               "sent": {
                 "fixture_session": "value-2",
-                "xbackend-066b3b8652b41050014dffe7cfff52e9eed588bd226bff447a67762db24c6f99": "value-3"
+                "xbackend-645669de2b969212d43a84d4d3847dc8af9c308c840dea836d6195e4a614fe69": "value-3"
               },
               "issued": []
             },
@@ -656,7 +657,7 @@
               "origin": "pod-b",
               "sent": {
                 "fixture_session": "value-2",
-                "xbackend-066b3b8652b41050014dffe7cfff52e9eed588bd226bff447a67762db24c6f99": "value-3"
+                "xbackend-645669de2b969212d43a84d4d3847dc8af9c308c840dea836d6195e4a614fe69": "value-3"
               },
               "issued": []
             },
@@ -671,7 +672,7 @@
               },
               "sent": {
                 "fixture_session": "value-2",
-                "xbackend-066b3b8652b41050014dffe7cfff52e9eed588bd226bff447a67762db24c6f99": "value-3"
+                "xbackend-645669de2b969212d43a84d4d3847dc8af9c308c840dea836d6195e4a614fe69": "value-3"
               },
               "issued": []
             },
@@ -681,7 +682,7 @@
               "origin": "pod-b",
               "sent": {
                 "fixture_session": "value-2",
-                "xbackend-066b3b8652b41050014dffe7cfff52e9eed588bd226bff447a67762db24c6f99": "value-3"
+                "xbackend-645669de2b969212d43a84d4d3847dc8af9c308c840dea836d6195e4a614fe69": "value-3"
               },
               "issued": []
             },
@@ -696,12 +697,12 @@
               },
               "sent": {
                 "fixture_session": "value-2",
-                "xbackend-066b3b8652b41050014dffe7cfff52e9eed588bd226bff447a67762db24c6f99": "value-3"
+                "xbackend-645669de2b969212d43a84d4d3847dc8af9c308c840dea836d6195e4a614fe69": "value-3"
               },
               "issued": []
             }
           ],
-          "caCertificateSHA256": "96d421035c466bcf949ac155d79c7db1573d6c92eae7299fc36c3b50af984ca1",
+          "caCertificateSHA256": "200257c44550ea8831a4b01141d179b0351baa737a11c3e7eec231c41dd58d72",
           "authenticatedOrigin": {
             "origin": "secure",
             "sni": "endpoint.backend.test",
@@ -713,13 +714,13 @@
       "podReadiness": {
         "initial": {
           "pod-a": {
-            "object": "b1a417c1379e599e062602dfd4e1141a3e680653bad8616057076396c05f229c",
+            "object": "b2125bfb39825a4d30ddd6c4835f6e497026dc7ad8a6716556505fbcfd4af041",
             "ready": "True",
             "containersReady": "True",
             "gate": "True"
           },
           "pod-b": {
-            "object": "78c05535c55e9016717482e5a90728e24a7e3732a5b07fa69de0dcee8f33cb84",
+            "object": "aea289597fce19e1025266e529f07f21424ab40b39dbc05d771846c6a3958c4c",
             "ready": "True",
             "containersReady": "True",
             "gate": "True"
@@ -727,13 +728,13 @@
         },
         "afterWithdrawal": {
           "pod-a": {
-            "object": "b1a417c1379e599e062602dfd4e1141a3e680653bad8616057076396c05f229c",
+            "object": "b2125bfb39825a4d30ddd6c4835f6e497026dc7ad8a6716556505fbcfd4af041",
             "ready": "False",
             "containersReady": "True",
             "gate": "False"
           },
           "pod-b": {
-            "object": "78c05535c55e9016717482e5a90728e24a7e3732a5b07fa69de0dcee8f33cb84",
+            "object": "aea289597fce19e1025266e529f07f21424ab40b39dbc05d771846c6a3958c4c",
             "ready": "True",
             "containersReady": "True",
             "gate": "True"
