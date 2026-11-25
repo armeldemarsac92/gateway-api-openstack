@@ -294,7 +294,11 @@ func (leaf *observedSNIFragment) matchesNativeBackendTransport(target desiredSNI
 		return false
 	}
 	if tls := target.route.BackendTLS; tls != nil {
-		return target.backendTLS.settings.CAReference != "" && leaf.backendTLS.Complete() &&
+		trustMatches := target.backendTLS.settings.CAReference != "" && !hasUnclearedSystemCA(*leaf.pool, leaf.backendTLS)
+		if tls.Trust == cloud.BackendTLSTrustSystem {
+			trustMatches = leaf.backendTLS.SystemCAApplied() && configuredSystemCA(*leaf.pool, leaf.backendTLS)
+		}
+		return trustMatches && leaf.backendTLS.Complete() &&
 			leaf.pool.TLSEnabled && leaf.backendTLS.Hostname == tls.Hostname &&
 			leaf.pool.CATLSContainerRef == target.backendTLS.settings.CAReference &&
 			leaf.pool.TLSContainerRef == "" && leaf.pool.CRLContainerRef == "" &&
@@ -315,6 +319,12 @@ func (fragment *observedSNIFragment) backendPoolsConverged(target desiredSNIFrag
 	}
 	for slot, leaf := range fragment.backendPools {
 		want := target.backendPool(slot)
+		if want.backendTLS.stagesSystemCA() {
+			if !leaf.emptyActivePool() {
+				return false
+			}
+			continue
+		}
 		if want.route.ServiceUID == "" || want.backendTLS.denies() ||
 			want.route.BackendTLS != nil && want.backendTLS.phase != backendTLSVerified || leaf.membersUnverified {
 			if !leaf.closedBackendPool() {
@@ -336,7 +346,7 @@ func (fragment *observedSNIFragment) backendPoolsReady(target desiredSNIFragment
 		}) && !fragment.hasUnverifiedMembers()
 }
 
-func (p *Provider) prepareSNIBackendPools(ctx context.Context, desired *desiredGatewayGraph, actual observedGatewayGraph, tlsCapable, tlsCapabilityPending bool) error {
+func (p *Provider) prepareSNIBackendPools(ctx context.Context, desired *desiredGatewayGraph, actual observedGatewayGraph, tlsCapable bool, trustCapability func(*cloud.BackendTLSValidation) (supported, pending bool)) error {
 	var guards []desiredSNIFragment
 	for i := range desired.sni {
 		target := &desired.sni[i]
@@ -362,31 +372,42 @@ func (p *Provider) prepareSNIBackendPools(ctx context.Context, desired *desiredG
 			var observed observedRouteGraph
 			if fragment != nil {
 				if leaf := fragment.backendPools[slot]; leaf != nil {
-					observed.pool, observed.backendTLS = leaf.pool, leaf.backendTLS
+					observed.pool, observed.backendTLS, observed.members = leaf.pool, leaf.backendTLS, leaf.members
 				}
 			}
-			retainVerifiedTLS := tlsCapabilityPending && desired.sniBackendPoolDiscoveryPending
-			if retainVerifiedTLS {
-				// This readback can only keep an existing pool authorized
-				// during discovery. No weighted admission is possible.
-				for key, current := range actual.sni {
-					if key != target.key && !current.canReplaceBackendPools(key, *target) || !current.hasActiveSelector(target.route.Hostname) {
-						continue
-					}
-					for _, leaf := range current.backendPools {
-						if leaf.backendPoolSettingsValid(leafTarget, sniBackendPoolAlgorithm(len(leaf.members))) && leaf.pool.AdminStateUp {
-							observed.pool, observed.backendTLS = leaf.pool, leaf.backendTLS
-							break
-						}
-					}
-				}
-				retainVerifiedTLS = observed.pool != nil
-			}
+			trustCapable, trustPending := trustCapability(backend.BackendTLS)
 			clientIdentity := desired.spec.Gateway.BackendClientCertificate
 			clientIdentity.Denied = clientIdentity.Denied || clientIdentity.Reference != ""
 			route := desiredRoute{spec: cloud.RouteSpec{Identity: target.route.Identity, BackendTLS: backend.BackendTLS}}
-			target.backendPoolPlans[slot] = p.observeBackendTLS(ctx, route, observed, func(bool, bool) bool { return tlsCapable || retainVerifiedTLS },
-				desired.spec.Gateway.BackendCAOwned, clientIdentity)
+			observe := func(state observedRouteGraph, supported bool) backendTLSPlan {
+				return p.observeBackendTLS(ctx, route, state, func(bool, bool) bool { return supported },
+					desired.spec.Gateway.BackendCAOwned, clientIdentity)
+			}
+			plan := observe(observed, trustCapable)
+			if trustPending {
+				// A current peer readback can preserve an authorized destination
+				// during a discovery outage. It cannot enroll another endpoint.
+				for key, current := range actual.sni {
+					if current.targetsUnverified || key != target.key && !current.canReplaceBackendPools(key, *target) || !current.hasActiveSelector(target.route.Hostname) {
+						continue
+					}
+					for _, leaf := range current.backendPools {
+						if !leaf.pool.AdminStateUp || leaf.membersUnverified || len(leaf.members) == 0 || !leaf.matchesSNIMembers(leafTarget.route) {
+							continue
+						}
+						leafTarget.backendTLS = observe(observedRouteGraph{pool: leaf.pool, backendTLS: leaf.backendTLS, members: leaf.members}, true)
+						if leafTarget.backendTLS.phase == backendTLSVerified && leaf.matchesNativeBackendTransport(leafTarget, sniBackendPoolAlgorithm(len(leaf.members))) {
+							plan = leafTarget.backendTLS
+							plan.retainServingOnly = true
+							break
+						}
+					}
+					if plan.retainServingOnly {
+						break
+					}
+				}
+			}
+			target.backendPoolPlans[slot] = plan
 		}
 		verified := fragment != nil && fragment.hasActiveSelector(target.route.Hostname) && fragment.matches(*target) && fragment.backendPoolsConverged(*target)
 		predecessor := false
@@ -485,9 +506,16 @@ func withdrawSNIBackendPools(desired desiredGatewayGraph, actual observedGateway
 				return sniDisablePoolStep(leaf), true
 			}
 			want := target.backendPool(slot)
+			if want.backendTLS.stagesSystemCA() && len(leaf.members) == 0 && !leaf.membersUnverified {
+				continue
+			}
+			// A System pool must stay enabled while its first authorized members
+			// are added. Disabling it would invalidate the digest we just read.
+			allowPartial := want.backendTLS.retainServingOnly ||
+				want.backendTLS.phase == backendTLSVerified && want.route.BackendTLS != nil && want.route.BackendTLS.Trust == cloud.BackendTLSTrustSystem
 			if want.backendTLS.denies() || want.route.ServiceUID == "" || leaf.membersUnverified ||
 				want.route.BackendTLS != nil && (want.backendTLS.phase != backendTLSVerified || !leaf.matchesNativeBackendTransport(want, sniBackendPoolAlgorithm(len(want.route.Members)))) ||
-				fragment.policy != nil && fragment.policy.AdminStateUp && len(leaf.members) != len(want.route.Members) {
+				!allowPartial && fragment.policy != nil && fragment.policy.AdminStateUp && len(leaf.members) != len(want.route.Members) {
 				return sniDisablePoolStep(leaf), true
 			}
 		}
@@ -688,9 +716,14 @@ func nextSNIBackendPoolsMutation(target desiredSNIFragment, fragment *observedSN
 	if target.weightedBlocked || fragment != nil && !fragment.matchesBackendPools(target) {
 		return graphMutation{}, false
 	}
+	if (fragment == nil || !fragment.hasActiveSelector(target.route.Hostname)) &&
+		slices.ContainsFunc(target.backendPoolPlans, func(plan backendTLSPlan) bool { return plan.retainServingOnly }) {
+		return graphMutation{}, false
+	}
 	step := func(mutation sniMutation) (graphMutation, bool) {
-		return graphMutation{kind: graphSNIMutation, sni: mutation, redactTLSError: mutation.target.route.BackendTLS != nil,
-			message: "Converging the weighted TLS SNI backend pools"}, true
+		return graphMutation{kind: graphSNIMutation, sni: mutation, sniWithdrawal: mutation.kind == sniClearMembers,
+			redactTLSError: mutation.target.route.BackendTLS != nil,
+			message:        "Converging the weighted TLS SNI backend pools"}, true
 	}
 	targets := make([]octavia.WeightedTCPPolicyTarget, 0, len(target.route.BackendPools))
 	var caMutation *sniMutation
@@ -709,7 +742,7 @@ func nextSNIBackendPoolsMutation(target desiredSNIFragment, fragment *observedSN
 		}
 		targets = append(targets, octavia.WeightedTCPPolicyTarget{PoolID: leaf.pool.ID, Weight: backend.Weight})
 		mutation.parentID = leaf.pool.ID
-		if leaf.membersUnverified || want.backendTLS.denies() || backend.ServiceUID == "" {
+		if leaf.membersUnverified || want.backendTLS.denies() || want.backendTLS.retainServingOnly || backend.ServiceUID == "" {
 			continue
 		}
 		switch want.backendTLS.phase {
@@ -723,6 +756,16 @@ func nextSNIBackendPoolsMutation(target desiredSNIFragment, fragment *observedSN
 			continue
 		case backendTLSConfigure:
 			mutation.kind = sniConfigureBackendTLSPool
+			return step(mutation)
+		case backendTLSAwaitSystemCA:
+			switch {
+			case len(leaf.members) != 0:
+				mutation.kind = sniClearMembers
+			case !leaf.pool.AdminStateUp:
+				mutation.kind = sniEnableBackendTLSPool
+			default:
+				continue
+			}
 			return step(mutation)
 		}
 		type memberAddress struct {

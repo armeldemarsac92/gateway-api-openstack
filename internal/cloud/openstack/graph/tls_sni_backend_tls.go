@@ -25,6 +25,7 @@ import (
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	openstackidentity "github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/identity"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
 )
 
 type sniBackendTLSIdentity struct {
@@ -37,7 +38,7 @@ func sameSNIBackendTLS(a, b *cloud.BackendTLSValidation) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
-	return a.Hostname == b.Hostname && a.CAConfigMapUID == b.CAConfigMapUID && a.CADigest == b.CADigest
+	return a.Hostname == b.Hostname && a.Trust == b.Trust && a.CAConfigMapUID == b.CAConfigMapUID && a.CADigest == b.CADigest
 }
 
 func sniBackendServiceTag(route cloud.TLSSNIRoute) string {
@@ -195,7 +196,7 @@ func (fragment *observedSNIFragment) matchesBackendTransport(target desiredSNIFr
 	if target.route.BackendTLS == nil {
 		return fragment.pool.AdminStateUp && !fragment.protectedBackendTLS()
 	}
-	return target.backendTLS.phase == backendTLSVerified &&
+	return (target.backendTLS.phase == backendTLSVerified || target.backendTLS.stagesSystemCA()) &&
 		slices.Contains(fragment.pool.Tags, backendTLSManagedTag) &&
 		slices.Contains(fragment.pool.Tags, backendTLSRevisionTag(target.route.BackendTLS)) &&
 		slices.Contains(fragment.pool.Tags, sniBackendServiceTag(target.route)) &&
@@ -218,7 +219,7 @@ func (p *Provider) prepareSNIRouteBackendTLS(ctx context.Context, desired *desir
 		return err
 	}
 	if !cloud.IsTCPTLSListenerProtocol(desired.protocol) {
-		return p.prepareSNIBackendPools(ctx, desired, actual, false, false)
+		return p.prepareSNIBackendPools(ctx, desired, actual, false, func(*cloud.BackendTLSValidation) (bool, bool) { return false, false })
 	}
 	hasStrictPool := slices.ContainsFunc(desired.sni, func(target desiredSNIFragment) bool {
 		return target.route.BackendTLS != nil || slices.ContainsFunc(target.route.BackendPools, func(backend cloud.TLSSNIBackendPool) bool {
@@ -233,16 +234,31 @@ func (p *Provider) prepareSNIRouteBackendTLS(ctx context.Context, desired *desir
 		provider = actual.loadBalancer.Provider
 	}
 	var capable, capabilityPending bool
-	if hasStrictPool && p.backendTLSPolicy && p.backendCA != nil {
+	if hasStrictPool && p.backendTLSPolicy {
 		err := p.octavia.VerifyGatewayCapabilities(ctx, provider, tcpBackendTLSCapabilities()...)
 		capable, capabilityPending = err == nil, sniCapabilityDiscoveryPending(err)
+	}
+	var systemChecked bool
+	var systemErr error
+	trustCapability := func(tls *cloud.BackendTLSValidation) (supported, pending bool) {
+		if tls.Trust != cloud.BackendTLSTrustSystem {
+			return capable && p.backendCA != nil, capabilityPending && p.backendCA != nil
+		}
+		if !capable {
+			return false, capabilityPending
+		}
+		if !systemChecked {
+			systemErr = p.octavia.VerifyGatewayCapabilities(ctx, provider, octavia.GatewayCapabilityBackendTLSSystemCA)
+			systemChecked = true
+		}
+		return systemErr == nil, sniCapabilityDiscoveryPending(systemErr)
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	desired.sniHeldClosed = make(map[sniFragmentKey]bool)
 	desired.sniBlockedRoutes = make(map[string]bool)
-	if err := p.prepareSNIBackendPools(ctx, desired, actual, capable, capabilityPending); err != nil {
+	if err := p.prepareSNIBackendPools(ctx, desired, actual, capable, trustCapability); err != nil {
 		return err
 	}
 	var targets []desiredSNIFragment
@@ -256,12 +272,13 @@ func (p *Provider) prepareSNIRouteBackendTLS(ctx context.Context, desired *desir
 		if tls != nil {
 			var observed observedRouteGraph
 			if fragment := actual.sni[target.key]; fragment != nil {
-				observed.pool, observed.backendTLS = fragment.pool, fragment.backendTLS
+				observed.pool, observed.backendTLS, observed.members = fragment.pool, fragment.backendTLS, fragment.members
 			}
 			route := desiredRoute{spec: cloud.RouteSpec{Identity: target.route.Identity, BackendTLS: tls}}
 			clientIdentity := desired.spec.Gateway.BackendClientCertificate
 			clientIdentity.Denied = clientIdentity.Denied || clientIdentity.Reference != ""
-			target.backendTLS = p.observeBackendTLS(ctx, route, observed, func(bool, bool) bool { return capable },
+			authorized, _ := trustCapability(tls)
+			target.backendTLS = p.observeBackendTLS(ctx, route, observed, func(bool, bool) bool { return authorized },
 				desired.spec.Gateway.BackendCAOwned, clientIdentity)
 			blocked = target.backendTLS.denies()
 		} else if !target.route.Deny && (!capable || !desired.spec.Gateway.SNIPoliciesObserved) {

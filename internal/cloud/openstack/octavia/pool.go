@@ -19,9 +19,12 @@ package octavia
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/gophercloud/gophercloud/v2"
@@ -72,6 +75,11 @@ type PoolCookiePath struct {
 // PoolBackendTLS records which transport fields the API actually reported.
 // Explicit null is a reported absence of a hostname or certificate reference.
 type PoolBackendTLS struct {
+	SystemCA                bool
+	SystemCAObserved        bool
+	SystemCASHA256          string
+	SystemCADigestObserved  bool
+	SystemCAInvalid         bool
 	Hostname                string
 	SubjectAltNames         []cloud.BackendTLSSubjectAltName
 	SubjectAltNamesObserved bool
@@ -85,6 +93,10 @@ type PoolBackendTLS struct {
 	EnabledObserved         bool
 	H2CObserved             bool
 	AdminObserved           bool
+}
+
+func (tls PoolBackendTLS) SystemCAApplied() bool {
+	return tls.SystemCAObserved && tls.SystemCA && tls.SystemCADigestObserved && !tls.SystemCAInvalid && tls.SystemCASHA256 != ""
 }
 
 func (tls PoolBackendTLS) Complete() bool {
@@ -115,6 +127,8 @@ func (s *Service) ListPoolInventory(ctx context.Context, opts pools.ListOpts) (P
 				UpdatedAt              json.RawMessage `json:"updated_at"`
 				BackendH2C             *bool           `json:"backend_h2c"`
 				Hostname               json.RawMessage `json:"backend_tls_hostname"`
+				SystemCA               json.RawMessage `json:"backend_tls_system_ca"`
+				SystemCASHA256         json.RawMessage `json:"backend_tls_system_ca_sha256"`
 				SubjectAltNames        json.RawMessage `json:"backend_tls_subject_alt_names"`
 				CA                     json.RawMessage `json:"ca_tls_container_ref"`
 				ClientRef              json.RawMessage `json:"tls_container_ref"`
@@ -138,6 +152,7 @@ func (s *Service) ListPoolInventory(ctx context.Context, opts pools.ListOpts) (P
 				RequireH2Observed: pool.RequireH2 != nil, EnabledObserved: pool.Enabled != nil, AdminObserved: pool.Admin != nil,
 				H2CObserved: pool.BackendH2C != nil}
 			tls.RequireH2 = pool.RequireH2 != nil && *pool.RequireH2
+			tls.observeSystemCA(pool.SystemCA, pool.SystemCASHA256)
 			// Unavailable ALPN readback must hold only the target pool.
 			tls.ALPNObserved = len(pool.ALPNProtocols) != 0 && json.Unmarshal(pool.ALPNProtocols, &pool.Pool.ALPNProtocols) == nil
 			if tls.HostnameObserved && json.Unmarshal(pool.Hostname, &tls.Hostname) != nil ||
@@ -236,6 +251,30 @@ func decodePoolCookieDeadline(rawTimeout, rawScope, rawPermanent json.RawMessage
 	return PoolCookieDeadline{Value: &deadline}
 }
 
+func (tls *PoolBackendTLS) observeSystemCA(mode, digest json.RawMessage) {
+	if len(mode) != 0 {
+		switch string(mode) {
+		case "true":
+			tls.SystemCA, tls.SystemCAObserved = true, true
+		case "false":
+			tls.SystemCAObserved = true
+		default:
+			tls.SystemCAInvalid = true
+		}
+	}
+	if len(digest) != 0 {
+		tls.SystemCADigestObserved = true
+		if string(digest) == "null" {
+			return
+		}
+		err := json.Unmarshal(digest, &tls.SystemCASHA256)
+		hash, hexErr := hex.DecodeString(tls.SystemCASHA256)
+		if err != nil || hexErr != nil || len(hash) != sha256.Size || tls.SystemCASHA256 != strings.ToLower(tls.SystemCASHA256) {
+			tls.SystemCAInvalid = true
+		}
+	}
+}
+
 func decodeBackendTLSSubjectAltNames(raw json.RawMessage) ([]cloud.BackendTLSSubjectAltName, error) {
 	invalid := fmt.Errorf("invalid backend TLS subjectAltNames readback")
 	var rawNames []json.RawMessage
@@ -330,6 +369,7 @@ type CreatePoolOpts struct {
 	BackendTLSHostname        string
 	BackendTLSSubjectAltNames []cloud.BackendTLSSubjectAltName
 	BackendTLSRequireH2       bool
+	BackendTLSSystemCA        bool
 }
 
 func (opts CreatePoolOpts) ToPoolCreateMap() (map[string]any, error) {
@@ -355,6 +395,9 @@ func (opts CreatePoolOpts) ToPoolCreateMap() (map[string]any, error) {
 	}
 	if len(opts.BackendTLSSubjectAltNames) != 0 {
 		pool["backend_tls_subject_alt_names"] = opts.BackendTLSSubjectAltNames
+	}
+	if opts.BackendTLSSystemCA {
+		pool["backend_tls_system_ca"] = true
 	}
 	if opts.BackendTLSRequireH2 {
 		pool["backend_tls_require_h2"] = true
@@ -382,6 +425,7 @@ type BackendTLSSettings struct {
 	Hostname                   string
 	CAReference                string
 	ClientCertificateReference string
+	SystemCA                   *bool
 	// A nil slice leaves the field absent in the PUT. An empty non-nil
 	// slice clears explicit SAN authentication on the disabled pool.
 	SubjectAltNames []cloud.BackendTLSSubjectAltName
@@ -412,7 +456,13 @@ func (opts UpdatePoolOpts) ToPoolUpdateMap() (map[string]any, error) {
 		pool["tls_enabled"] = tls.Hostname != ""
 		pool["backend_tls_hostname"], pool["ca_tls_container_ref"] = nil, nil
 		if tls.Hostname != "" {
-			pool["backend_tls_hostname"], pool["ca_tls_container_ref"] = tls.Hostname, tls.CAReference
+			pool["backend_tls_hostname"] = tls.Hostname
+			if tls.CAReference != "" {
+				pool["ca_tls_container_ref"] = tls.CAReference
+			}
+		}
+		if tls.SystemCA != nil {
+			pool["backend_tls_system_ca"] = *tls.SystemCA
 		}
 		pool["tls_container_ref"], pool["crl_container_ref"] = nil, nil
 		if tls.ClientCertificateReference != "" {

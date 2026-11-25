@@ -394,6 +394,8 @@ func run(ctx context.Context) error {
 	routeReconciler := &httproute.Reconciler{
 		ListenerSetObserver:            gatewayReconciler.ObserveListenerSets,
 		BackendTLSAvailable:            openStackProvider.BackendTLSAvailable,
+		BackendTLSSystemCAAvailable:    openStackProvider.BackendTLSSystemCAAvailable,
+		TCPBackendTLSSystemCAAvailable: openStackProvider.TCPBackendTLSSystemCAAvailable,
 		TelemetryBackendTLSAvailable:   openStackProvider.TelemetryBackendTLSAvailable,
 		BackendRetryBudgetAvailable:    openStackProvider.BackendRetryBudgetAvailable,
 		XBackendCookieAvailable:        openStackProvider.XBackendCookieAvailable,

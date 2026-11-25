@@ -116,6 +116,11 @@ func httpPlanningParts(desired desiredGatewayGraph, actual observedGatewayGraph)
 				backend = resolveWeightedHTTPPart(backend, route, observed, servingWeightedListenerID(actual, backend))
 			} else if weight, referenced := demand[backend.backendKey]; referenced && weight == 0 && len(backend.policies) == 0 {
 				backend.zeroWeightOnly = true
+				if backend.backendTLS.stagesSystemCA() {
+					// Octavia will only render and attest this pool once a
+					// positive selector references it.
+					backend.backendTLS.issue = ""
+				}
 			}
 			appendPart(backend, fragment, false)
 		}

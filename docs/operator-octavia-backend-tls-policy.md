@@ -63,6 +63,29 @@ The controller still sends `validation.hostname` as SNI. To allow that hostname 
 
 In a region that lacks SAN support, the affected pool stays closed and the policy ancestor reports `Accepted=False` with reason `UnsupportedProvider`. Failed capability discovery reports `Accepted=Unknown` with reason `Pending`. A malformed list reports `Accepted=False` with reason `Invalid`. Other backends in the route keep their configured behavior and weights.
 
+## Use the Amphora system trust store
+
+A Service owner can set `validation.wellKnownCACertificates` to `System` together with `validation.hostname`. The selected trust roots come from the operator’s Amphora image.
+
+Install the matching Octavia API, worker, Amphora agent and octavia-lib packages and run the database upgrade. Enable `--octavia-backend-tls-policy` on the controller. In Octavia’s `[api_settings]`, enroll `amphora` in `enabled_backend_tls_hostname_providers` and `enabled_backend_tls_system_ca_providers`. Configure the absolute PEM path in `[haproxy_amphora] backend_tls_system_ca_path` and its SHA-256 in `backend_tls_system_ca_sha256`. Every serving Amphora needs that bundle. Verify that the region advertises `backend_tls_system_ca_v1`. [Octavia packages](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-backend-tls-system-ca-372effbead21) · [octavia-lib packages](https://github.com/armeldemarsac92/octavia-lib/releases/tag/hibiscus-backend-tls-system-ca-71f0c094860a)
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata:
+  name: catalog
+spec:
+  targetRefs:
+  - group: ""
+    kind: Service
+    name: catalog
+  validation:
+    hostname: catalog.internal.example
+    wellKnownCACertificates: System
+```
+
+The controller waits for the applied digest on an active, empty pool before admitting its first endpoint. Octavia ties that digest to the current set of serving Amphorae and their confirmed reload. An origin with an untrusted issuer or a certificate for a different name fails the TLS handshake. [Local trust and identity checks](qualification/v1.7.0/provider/backend-tls-system-ca.md)
+
 ## Protect an Experimental XBackend
 
 The local kind ServerOnly qualification served HTTP 200 with the configured SNI and negotiated ALPN `http/1.1`. Removing the selected Pod backend's CA ConfigMap produced three HTTP 503 responses and zero additional application requests. Restoring the CA resumed traffic. For an ExternalHostname, changing DNS to an origin presenting a different DNS identity produced three HTTP 503 responses. The same-named ordinary Service remained available in all phases. [Pool settings, conditions and traffic](qualification/v1.7.0/provider/xbackend-server-tls-evidence/receipt.json)
@@ -90,7 +113,7 @@ With `ServerOnly`, using `HTTP`, `HTTP11` or omitting `protocol` offers HTTP/1.1
 
 Check the XBackend's current-generation `Accepted` condition under the Gateway in `status.ancestors` and the HTTPRoute's `ResolvedRefs` condition. A missing or invalid CA reports a reference error. A microversion below 2.24 reports `UnsupportedProvider` for ServerOnly. An unconfirmed trust or provider dependency reports `Pending`. An authenticated pool in Octavia `ERROR` is disabled through a pool update before member removal. The controller waits for an `ACTIVE` readback, drains the pool, then verifies the current trust settings and pool ALPN before restoring members. Test both an accepted backend certificate and a rejected identity through the Gateway. The local trial recorded the configured API version, pool ALPN writes and HTTP responses. [Local results](qualification/v1.7.0/provider/xbackend-server-tls-evidence/receipt.json)
 
-`None` is the default TLS mode. Authenticated XBackends require explicit CA material. System trust roots remain open.
+`None` is the default TLS mode. Authenticated XBackends can select an explicit CA or the enrolled Amphora system store. [Configure system trust](#use-the-amphora-system-trust-store)
 
 ### Present an XBackend client certificate
 
@@ -172,4 +195,4 @@ During rotation or revocation, the controller disables the affected pool and rem
 
 If the controller cannot list BackendTLSPolicy resources, it can still close owned pools that carry a stale client certificate, then remove their owned members and clear the reference. A new Gateway requesting a client certificate is rejected if the controller is configured without BackendTLSPolicy observation. A previously bound Gateway can still withdraw enrolled identities.
 
-This profile accepts one local Service target, one local ConfigMap CA reference with one PEM CA certificate, and a fixed DNS hostname for HTTP and gRPC backends. Terminating TLSRoutes can also authenticate a TCP backend when the region advertises `tcp_tls_backend_auth_v1`. System trust roots still need implementation and qualification. [TCP backend configuration and traffic](qualification/v1.7.0/provider/tlsroute-termination.md#authenticate-the-tcp-backend) Deployed Hibiscus qualification remains open.
+This profile accepts one local Service target, one local ConfigMap CA reference with one PEM CA certificate, and a fixed DNS hostname for HTTP and gRPC backends. Terminating TLSRoutes can also authenticate a TCP backend when the region advertises `tcp_tls_backend_auth_v1`. An enrolled region can also use its system store. [System CA configuration](#use-the-amphora-system-trust-store) [TCP backend configuration and traffic](qualification/v1.7.0/provider/tlsroute-termination.md#authenticate-the-tcp-backend) Deployed Hibiscus qualification remains open.
