@@ -42,17 +42,18 @@ const (
 )
 
 type routeGraphResult struct {
-	bindingState              routeBindingState
-	selection                 routeSelection
-	rejectedSections          []model.ListenerSection
-	backendObserved           bool
-	usesXBackendClientTLS     bool
-	persistenceRevision       *string
-	xBackendTransportRevision *string
-	backendDiagnostic         model.Diagnostic
-	corsFallback              bool
-	backendTLSAncestorSlot    backendtls.AncestorSlot
-	retryBudgetAncestorFull   bool
+	bindingState               routeBindingState
+	selection                  routeSelection
+	rejectedSections           []model.ListenerSection
+	backendObserved            bool
+	usesXBackendClientTLS      bool
+	persistenceRevision        *string
+	servicePersistenceRevision *string
+	xBackendTransportRevision  *string
+	backendDiagnostic          model.Diagnostic
+	corsFallback               bool
+	backendTLSAncestorSlot     backendtls.AncestorSlot
+	retryBudgetAncestorFull    bool
 	cloud.RouteResult
 }
 
@@ -101,6 +102,7 @@ func (r *Reconciler) ensureRouteGraph(
 		HTTPRouteRetryBudgetAncestorFull:     &prepared.retryBudgetAncestorFull,
 		HTTPRouteUsesXBackendClientTLS:       &prepared.usesXBackendClientTLS,
 		HTTPRouteXBackendPersistenceRevision: prepared.persistenceRevision,
+		HTTPRouteServicePersistenceRevision:  prepared.servicePersistenceRevision,
 		HTTPRouteXBackendTransportRevision:   prepared.xBackendTransportRevision,
 	}
 	if r.Config.BackendTLSPolicy {
@@ -170,6 +172,10 @@ func (r *Reconciler) prepareRouteGraphBinding(ctx context.Context, route *gatewa
 	}
 	if snapshot.backends != nil {
 		prepared.usesXBackendClientTLS = snapshot.backends.routeUsesXBackendClientTLS(route)
+		if r.retryBudgetPolicyServed && r.Config.XBackendSessionPersistenceEnabled() {
+			revision := servicePersistenceRevision(snapshot.desired)
+			prepared.servicePersistenceRevision = &revision
+		}
 		if r.Config.XBackendEnabled() && model.HTTPProfileRouteKind(route) == model.HTTPRouteKind && len(model.LocalXBackendReferences(route)) != 0 {
 			revision := xBackendTransportRevision(route, snapshot.backends.input.XBackends)
 			prepared.xBackendTransportRevision = &revision

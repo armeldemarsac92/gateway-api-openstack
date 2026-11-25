@@ -528,7 +528,7 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 			if pending && (h2c || observation.TLS.Validation != nil || observation.Spec.Type == gatewayx.BackendTypeExternalHostname || observation.Spec.SessionPersistence != nil) {
 				*status = status.withBackendDiagnostic(model.Diagnostic{Reason: string(gatewayv1.RouteReasonPending), Message: "Gateway member mode is pending"})
 			} else if observation.Spec.SessionPersistence != nil && status.resolved != metav1.ConditionFalse {
-				*status = status.withXBackendPersistenceIssue(persistenceCapability(*observation.Spec.SessionPersistence))
+				*status = status.withBackendPersistenceIssue(persistenceCapability(*observation.Spec.SessionPersistence), false)
 			}
 			continue
 		}

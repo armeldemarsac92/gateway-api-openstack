@@ -33,6 +33,7 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia/amphora"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/classconfig"
 	gatewaycontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
@@ -410,6 +411,7 @@ func (r *Reconciler) buildRouteModelFromInputs(
 		}
 		diagnostics.backend = preferredBackendDiagnostic(diagnostics.backend, portDiagnostics.backend)
 		diagnostics.corsFallback = diagnostics.corsFallback || portDiagnostics.corsFallback
+		diagnostics.retryBudgetAncestorFull = diagnostics.retryBudgetAncestorFull || portDiagnostics.retryBudgetAncestorFull
 		if i == 0 {
 			desired = spec
 		} else {
@@ -472,7 +474,14 @@ func (r *Reconciler) buildRoutePortModel(
 		spec.Members = members
 		spec.BackendH2C = spec.BackendTLS == nil && backend.UsesH2C()
 		spec.BackendRetryBudget, spec.BackendRetryBudgetPending = inputs.backendRetryBudget(backend)
-		return spec, routeModelDiagnostics{}, nil
+		var diagnostics routeModelDiagnostics
+		if backend.Weight > 0 && (spec.BackendTLS == nil || !spec.BackendTLS.Denied) {
+			settings, slot := inputs.serviceSessionPersistence(backend, spec.GRPC)
+			spec.ServiceSessionPersistence = settings
+			spec.ServiceSessionPersistencePending = slot == backendtls.AncestorSlotPending
+			diagnostics.retryBudgetAncestorFull = slot == backendtls.AncestorSlotFull
+		}
+		return spec, diagnostics, nil
 	}
 	diagnostic, err := r.lowerHTTPBackends(ctx, reader, listener, &spec, inputs, matches, rules, topology.NodeAddressType)
 	if err != nil {
@@ -649,6 +658,7 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 		})
 	}
 	inputs.attachHTTPBackendRetryBudgets(spec, matches, rules, groups)
+	diagnostics.retryBudgetAncestorFull = inputs.attachHTTPServicePersistence(spec, matches, rules, groups)
 	return diagnostics, nil
 }
 
@@ -665,6 +675,25 @@ func (inputs *routeModelInputs) attachHTTPBackendRetryBudgets(spec *cloud.RouteS
 		desired := &spec.HTTPBackends[*resolved.index]
 		desired.BackendRetryBudget, desired.BackendRetryBudgetPending = inputs.backendRetryBudget(backend)
 	}
+}
+
+func (inputs *routeModelInputs) attachHTTPServicePersistence(spec *cloud.RouteSpec, matches []routeLoweredMatch, rules []model.Rule, groups map[backendKey]httpBackendResolution) bool {
+	if len(inputs.servicePersistence) == 0 {
+		return false
+	}
+	full := false
+	for backend := range activeServiceBackends(matches, rules, inputs.retryBudgetTransportUsable(spec.GRPC), false) {
+		resolved := groups[backendKey{object: backend.Service, port: int(ptr.Deref(backend.Reference.Port, 0))}]
+		if resolved.index == nil || resolved.diagnostic.Reason != "" {
+			continue
+		}
+		desired := &spec.HTTPBackends[*resolved.index]
+		settings, slot := inputs.serviceSessionPersistence(backend, spec.GRPC)
+		desired.ServiceSessionPersistence = settings
+		desired.ServiceSessionPersistencePending = slot == backendtls.AncestorSlotPending
+		full = full || slot == backendtls.AncestorSlotFull
+	}
+	return full
 }
 
 // A rejected destination contributes its own diagnostic but no forwarding

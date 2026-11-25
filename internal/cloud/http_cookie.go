@@ -24,7 +24,7 @@ import (
 var httpSessionCookieToken = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,255}$`)
 var httpSessionCookieScope = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
-// HTTPSessionCookieDeadline scopes the absolute lifetime to a single XBackend.
+// HTTPSessionCookieDeadline scopes the absolute lifetime to a single backend object.
 // A nil deadline leaves the provider's existing session cookie behavior in place.
 type HTTPSessionCookieDeadline struct {
 	TimeoutMS int64  `json:"cookie_absolute_timeout_ms"`

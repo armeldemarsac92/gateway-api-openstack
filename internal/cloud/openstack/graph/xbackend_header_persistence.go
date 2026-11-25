@@ -30,7 +30,7 @@ import (
 
 const xBackendHeaderTag = "gateway-api-openstack.xbackend-session-header=v1"
 
-var errXBackendHeaderPersistence = errors.New("waiting for Octavia XBackend HTTP header persistence to converge")
+var errXBackendHeaderPersistence = errors.New("waiting for Octavia HTTP header persistence to converge")
 
 // XBackendHeaderAvailable discovers support on the regional Amphora endpoint.
 func (p *Provider) XBackendHeaderAvailable(ctx context.Context) (bool, error) {
@@ -82,7 +82,7 @@ func enrolledHeader(observed observedRouteGraph) bool {
 }
 
 func planXBackendPersistence(desired desiredRoute, observed observedRouteGraph) (*routeMutation, error) {
-	if !desired.xBackend {
+	if !desired.managesSessionPersistence(observed) {
 		return nil, nil
 	}
 	if desired.sessionHeader != nil && observed.pool != nil && slices.ContainsFunc(observed.pool.Tags, isXBackendCookieTag) {

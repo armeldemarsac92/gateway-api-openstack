@@ -450,14 +450,27 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 				}
 			}
 		}
-		if graphResult.usesXBackendClientTLS || !graphResult.ObservationDeferred || !xBackendRevisionCurrent ||
+		serviceRevision := graphResult.servicePersistenceRevision
+		serviceRevisionCurrent := true
+		if graphResult.ObservationDeferred && serviceRevision != nil {
+			serviceRevisionCurrent = r.currentXBackendRevision(httpRoute, parent.ref, servicePersistenceRevisionCondition, *serviceRevision)
+			if serviceRevisionCurrent {
+				current, err := r.buildRouteValidationSnapshot(ctx, httpRoute, parent.gateway, routeSnapshotForEnsure)
+				serviceRevisionCurrent = err == nil && current.disposition == routeValidationReady &&
+					servicePersistenceRevision(current.desired) == *serviceRevision
+			}
+			if !serviceRevisionCurrent {
+				graphResult.BackendSessionPersistenceIssue = max(graphResult.BackendSessionPersistenceIssue, cloud.SessionPersistenceRevisionUnverified)
+			}
+		}
+		if graphResult.usesXBackendClientTLS || !graphResult.ObservationDeferred || !xBackendRevisionCurrent || !serviceRevisionCurrent || graphResult.retryBudgetAncestorFull ||
 			graphResult.backendTLSAncestorSlot != backendtls.AncestorSlotHeld ||
 			graphResult.BackendSessionPersistenceIssue >= cloud.SessionPersistenceUnverified ||
 			r.currentRouteProgrammedCondition(httpRoute, parent.ref) == nil ||
 			!r.currentBackendResolution(httpRoute, parent.ref, graphResult.backendDiagnostic) {
 			message := controller.ProviderProgressMessage(graphResult.Outcome, "Octavia resources for the HTTPRoute are still progressing")
 			status := pendingRouteStatus(message).withBackendDiagnostic(graphResult.backendDiagnostic).withBackendTLSAncestor(graphResult.backendTLSAncestorSlot).
-				withRetryBudgetAncestorLimit(graphResult.retryBudgetAncestorFull).withXBackendPersistenceIssue(graphResult.BackendSessionPersistenceIssue)
+				withRetryBudgetAncestorLimit(graphResult.retryBudgetAncestorFull).withBackendPersistenceIssue(graphResult.BackendSessionPersistenceIssue, !serviceRevisionCurrent || serviceRevision != nil && *serviceRevision != "")
 			status.partiallyInvalid = graphResult.PartiallyInvalid
 			status.implementedRules = graphResult.ImplementedRules
 			scope.setStatuses([]parentStatusUpdate{{parent: parent.ref, status: status}})
@@ -473,6 +486,7 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 	}
 	scope.setStatuses([]parentStatusUpdate{{parent: parent.ref, status: status}})
 	scope.statusPlan.persistenceRevision = graphResult.persistenceRevision
+	scope.statusPlan.servicePersistenceRevision = graphResult.servicePersistenceRevision
 	scope.statusPlan.xBackendTransportRevision = graphResult.xBackendTransportRevision
 	log.FromContext(ctx).V(1).Info("Programmed HTTPRoute", "gateway", client.ObjectKeyFromObject(parent.gateway))
 	return ctrl.Result{RequeueAfter: resyncAfter}, nil

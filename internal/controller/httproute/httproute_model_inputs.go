@@ -32,6 +32,7 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	gatewaycontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
@@ -42,15 +43,18 @@ import (
 // routeModelInputs keeps selection and lowering on the same request-local
 // observation. The graph source supplies the complete current route inventory.
 type routeModelInputs struct {
-	retryBudgetAncestor    *backendtls.GatewayAncestor
-	retryBudgets           map[types.NamespacedName]routeRetryBudget
-	gateway                *gatewayv1.Gateway
-	input                  model.Input
-	logical                model.Gateway
-	backendTLSAvailability map[backendTLSRequirements]backendTLSAvailability
-	backendTLSAncestor     *backendtls.GatewayAncestor
-	clusterTrustBundles    *backendtls.ClusterTrustBundles
-	admission              routeGraphAdmission
+	retryBudgetAncestor       *backendtls.GatewayAncestor
+	retryBudgets              map[types.NamespacedName]routeRetryBudget
+	servicePersistence        map[types.NamespacedName]routeServicePersistence
+	retryBudgetEnabled        bool
+	servicePersistenceEnabled bool
+	gateway                   *gatewayv1.Gateway
+	input                     model.Input
+	logical                   model.Gateway
+	backendTLSAvailability    map[backendTLSRequirements]backendTLSAvailability
+	backendTLSAncestor        *backendtls.GatewayAncestor
+	clusterTrustBundles       *backendtls.ClusterTrustBundles
+	admission                 routeGraphAdmission
 
 	xBackendClientCertificates graph.XBackendClientCertificateResolver
 	xBackendH2CIssue           model.Diagnostic
@@ -289,9 +293,11 @@ func (r *Reconciler) collectRouteModelInputsForSets(ctx context.Context, reader 
 			break
 		}
 	}
-	if r.retryBudgetPolicyServed && r.Config.BackendRetryBudgetEnabled() {
+	inputs.retryBudgetEnabled = r.Config.BackendRetryBudgetEnabled()
+	inputs.servicePersistenceEnabled = r.Config.XBackendSessionPersistenceEnabled() && inputs.input.XBackendProfile.MemberMode == cloud.MemberModeEndpoint
+	if r.retryBudgetPolicyServed && (inputs.retryBudgetEnabled || inputs.servicePersistenceEnabled) {
 		inputs.retryBudgetAncestor = &backendtls.GatewayAncestor{Key: client.ObjectKeyFromObject(gateway), ControllerName: r.Config.ControllerName}
-		inputs.retryBudgets, err = collectBackendRetryBudgets(ctx, reader, inputs.input.Services, *inputs.retryBudgetAncestor)
+		inputs.retryBudgets, inputs.servicePersistence, err = collectBackendTrafficPolicies(ctx, reader, inputs.input.Services, *inputs.retryBudgetAncestor, inputs.retryBudgetEnabled, inputs.servicePersistenceEnabled)
 		if err != nil {
 			return nil, err
 		}
@@ -423,11 +429,13 @@ func (inputs *routeModelInputs) validateBackends(ctx context.Context, reader cli
 		}
 	}
 	if inputs.retryBudgetAncestor != nil {
-		budgets, err := collectBackendRetryBudgets(ctx, reader, current.Services, *inputs.retryBudgetAncestor)
+		budgets, persistence, err := collectBackendTrafficPolicies(ctx, reader, current.Services, *inputs.retryBudgetAncestor, inputs.retryBudgetEnabled, inputs.servicePersistenceEnabled)
 		if err != nil {
 			return err
 		}
-		if !maps.Equal(inputs.retryBudgets, budgets) {
+		if !maps.Equal(inputs.retryBudgets, budgets) || !maps.EqualFunc(inputs.servicePersistence, persistence, func(a, b routeServicePersistence) bool {
+			return a.serviceUID == b.serviceUID && a.slot == b.slot && equality.Semantic.DeepEqual(a.settings, b.settings)
+		}) {
 			return errHTTPRouteChanged
 		}
 	}
