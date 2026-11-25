@@ -19,6 +19,7 @@ package graph
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -108,6 +109,292 @@ func TestRouteSessionPersistencePoolWithdrawal(t *testing.T) {
 	require.Equal(t, cloud.GraphEnsure, parts.spec.Routes[0].Disposition)
 	require.Equal(t, partKey, parts.routes[1].backendKey)
 	require.Equal(t, cloud.GraphDelete, parts.spec.Routes[1].Disposition)
+}
+
+func TestRouteSessionPersistenceRequiresTLSAndAffinityReadback(t *testing.T) {
+	for _, tc := range []struct {
+		name, capability string
+		grpc             bool
+		persistence      cloud.ServiceSessionPersistence
+	}{
+		{name: "HTTP Cookie", capability: octavia.GatewayCapabilityHTTPCookieName,
+			persistence: cloud.ServiceSessionPersistence{CookieName: "checkout_session"}},
+		{name: "gRPC Header", capability: octavia.GatewayCapabilityHTTPHeaderPersistence, grpc: true,
+			persistence: cloud.ServiceSessionPersistence{Header: &cloud.HTTPSessionHeaderPersistence{Name: "x-session"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tlsCapabilities := []string{octavia.GatewayCapabilityBackendTLSHostname, octavia.GatewayCapabilityBackendTLSSystemCA}
+			advertised := []string{tc.capability}
+			var created struct{ Pool map[string]any }
+			lbClient := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method + " " + r.URL.Path {
+				case "GET /lbaas/providers/amphora/gateway_capabilities":
+					safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": advertised})
+				case "POST /lbaas/pools":
+					require.NoError(t, json.NewDecoder(r.Body).Decode(&created))
+					w.WriteHeader(http.StatusCreated)
+					safetyWriteJSON(t, w, map[string]any{"pool": map[string]any{"id": "protected"}})
+				default:
+					t.Errorf("unexpected Octavia operation %s %s", r.Method, r.URL.Path)
+				}
+			}))
+			provider := NewProvider(ServiceClients{LoadBalancer: lbClient, ProjectID: "project-a"},
+				ProviderConfig{BackendTLSPolicy: true, RouteSessionPersistence: true})
+			spec := completeGraphSpec(safetyTestIdentity(t))
+			route := &spec.Routes[0].Spec
+			route.Hostname, route.PathType, route.PathValue, route.Members = "", "", "", nil
+			route.MemberMode, route.GRPC, route.BackendTLSObserved = cloud.MemberModeEndpoint, tc.grpc, true
+			tls := &cloud.BackendTLSValidation{Trust: cloud.BackendTLSTrustSystem, Hostname: "backend.example.test"}
+			backend := cloud.HTTPBackend{
+				Namespace: "apps", Name: "checkout", Port: 443, BackendTLS: tls,
+				SessionPersistenceRule: "name/checkout", SessionPersistenceServiceUID: "checkout-uid",
+				ServiceSessionPersistence: &tc.persistence, Members: []cloud.Member{{Address: "192.0.2.20", Port: 8443}},
+				Matches: []cloud.HTTPPathMatch{{PathType: cloud.PathMatchExact, PathValue: "/checkout"}},
+			}
+			route.HTTPBackends = []cloud.HTTPBackend{backend}
+			desired, err := provider.buildDesiredGatewayGraph(spec)
+			require.NoError(t, err)
+			key := openstackidentity.HTTPBackendPoolKey(backend)
+			part := &desired.routes[0].httpParts[0]
+			lb := safetyObservedLoadBalancer()
+			lb.Provider, lb.ProvisioningStatus = "amphora", "ACTIVE"
+			current := &observedRouteGraph{}
+			actual := observedGatewayGraph{loadBalancer: lb, protocol: cloud.ListenerProtocolHTTP, routes: []observedRouteGraph{{
+				httpParts: map[string]*observedRouteGraph{key: current},
+			}}}
+			prepare := func() *graphMutation {
+				t.Helper()
+				return provider.prepareBackendTLS(t.Context(), &desired, actual)
+			}
+			plan := func() routeMutation {
+				t.Helper()
+				steps, _, err := buildRouteEnsurePlan(*part, *current)
+				require.NoError(t, err)
+				require.NotEmpty(t, steps)
+				return steps[0]
+			}
+			// Selecting BackendTLSPolicy closes the previous cleartext pool
+			// before transport changes. A sibling can keep its own pool.
+			current.pool = &pools.Pool{ID: "protected", Protocol: "HTTP", ProvisioningStatus: "ACTIVE", AdminStateUp: true}
+			current.backendTLS.AdminObserved = true
+			current.members = []pools.Member{{ID: "old-clear", AdminStateUp: true, ProvisioningStatus: "ACTIVE"}}
+			withdraw := prepare()
+			require.NotNil(t, withdraw)
+			require.Equal(t, key, withdraw.backendKey)
+			require.Equal(t, routeMutationSetBackendTLS, withdraw.route.kind)
+			require.Equal(t, ptr.To(false), withdraw.route.poolAdmin)
+			*current = observedRouteGraph{}
+
+			// Stock Octavia drops a match when its pool is disabled. Keep a
+			// new, verified empty fallback enabled until TLS can be staged.
+			require.Nil(t, prepare())
+			require.Equal(t, backendTLSBlocked, part.backendTLS.phase)
+			require.Nil(t, provider.prepareXBackendPersistence(t.Context(), &desired, actual))
+			fallback := plan()
+			require.Equal(t, routeMutationCreatePool, fallback.kind)
+			require.Equal(t, []string{backendTLSRefusalTag}, *fallback.poolTags)
+			require.NoError(t, provider.executeRouteMutation(t.Context(), *part, fallback))
+			require.Equal(t, true, created.Pool["admin_state_up"])
+			require.Contains(t, created.Pool["tags"], backendTLSRefusalTag)
+			require.NotContains(t, created.Pool, "backend_tls_hostname")
+			require.NotContains(t, created.Pool, "session_persistence")
+			current.pool = &pools.Pool{ID: "protected", Protocol: "HTTP", ProvisioningStatus: "ACTIVE", AdminStateUp: true, Tags: *fallback.poolTags}
+			current.backendTLS = octavia.PoolBackendTLS{AdminObserved: true, EnabledObserved: true, CAObserved: true, ClientRefObserved: true}
+			require.Nil(t, prepare())
+			policy := plan()
+			require.Equal(t, routeMutationCreatePolicy, policy.kind)
+			require.Equal(t, current.pool.ID, policy.parentID)
+
+			// Removing affinity and policy together changes the pool key.
+			// Only a fresh inventory permits retiring the empty stock pool.
+			plain := backend
+			plain.SessionPersistenceRule, plain.SessionPersistenceServiceUID = "", ""
+			plain.BackendTLS, plain.ServiceSessionPersistence = nil, nil
+			replacement := spec
+			replacement.Routes = slices.Clone(spec.Routes)
+			replacement.Routes[0].Spec.HTTPBackends = []cloud.HTTPBackend{plain}
+			for _, observed := range []bool{false, true} {
+				replacement.Routes[0].Disposition = cloud.GraphEnsure
+				replacement.Routes[0].Spec.BackendTLSObserved = observed
+				next, err := provider.buildDesiredGatewayGraph(replacement)
+				require.NoError(t, err)
+				require.Nil(t, provider.prepareBackendTLS(t.Context(), &next, actual))
+				parts, _, _ := httpPlanningParts(next, actual)
+				old := slices.IndexFunc(parts.routes, func(part desiredRoute) bool { return part.backendKey == key })
+				require.NotEqual(t, -1, old)
+				if observed {
+					require.Equal(t, cloud.GraphDelete, parts.spec.Routes[old].Disposition)
+				} else {
+					require.Equal(t, cloud.GraphPreserve, parts.spec.Routes[old].Disposition)
+				}
+			}
+
+			// On restart the policy informer can be disabled. The same rule
+			// still selects the stock refusal pool and cannot add a member.
+			part.spec.BackendTLS, part.spec.BackendTLSObserved = nil, false
+			provider.backendTLSPolicy = false
+			require.Nil(t, prepare())
+			require.Equal(t, backendTLSBlocked, part.backendTLS.phase)
+			require.Equal(t, routeMutationCreatePolicy, plan().kind)
+			part.spec.BackendTLSObserved, provider.backendTLSPolicy = true, true
+			require.Nil(t, prepare())
+			require.Equal(t, backendTLSRelease, part.backendTLS.phase)
+			release := plan()
+			require.Equal(t, routeMutationSetBackendTLS, release.kind)
+			require.NotContains(t, *release.poolTags, backendTLSRefusalTag)
+			current.pool.Tags = *release.poolTags
+			part.backendTLS = backendTLSPlan{} // the next reconciliation rebuilds desired
+			require.Nil(t, prepare())
+			require.Equal(t, backendTLSUnmanaged, part.backendTLS.phase)
+			part.spec.BackendTLS = tls
+
+			current.pool.Tags = []string{backendTLSManagedTag}
+			withdraw = prepare()
+			require.NotNil(t, withdraw)
+			require.Equal(t, routeMutationSetBackendTLS, withdraw.route.kind)
+			require.Equal(t, ptr.To(false), withdraw.route.poolAdmin)
+			*current = observedRouteGraph{}
+
+			advertised = append(tlsCapabilities, tc.capability)
+			if tc.grpc {
+				require.Nil(t, prepare())
+				require.Equal(t, backendTLSBlocked, part.backendTLS.phase)
+				advertised = append(advertised, octavia.GatewayCapabilityBackendTLSH2ALPN)
+			}
+			require.Nil(t, prepare())
+			require.Equal(t, backendTLSConfigure, part.backendTLS.phase)
+			require.Nil(t, provider.prepareXBackendPersistence(t.Context(), &desired, actual))
+			create := plan()
+			require.Equal(t, routeMutationCreatePool, create.kind)
+			require.NoError(t, provider.executeRouteMutation(t.Context(), *part, create))
+			require.Equal(t, false, created.Pool["admin_state_up"])
+			require.Equal(t, true, created.Pool["tls_enabled"])
+			require.Equal(t, true, created.Pool["backend_tls_system_ca"])
+			require.Equal(t, tls.Hostname, created.Pool["backend_tls_hostname"])
+			require.NotContains(t, created.Pool, "backend_h2c")
+			require.NotContains(t, created.Pool, "session_persistence")
+			if tc.grpc {
+				require.Equal(t, true, created.Pool["backend_tls_require_h2"])
+			} else {
+				require.NotContains(t, created.Pool, "backend_tls_require_h2")
+			}
+
+			// TLS and affinity are acknowledged separately while the pool is closed.
+			current.pool = &pools.Pool{ID: "protected", Protocol: "HTTP", ProvisioningStatus: "ACTIVE",
+				TLSEnabled: true, LBMethod: string(pools.LBMethodRoundRobin), Tags: *create.poolTags}
+			current.backendTLS = octavia.PoolBackendTLS{Hostname: tls.Hostname, HostnameObserved: true, CAObserved: true, ClientRefObserved: true,
+				EnabledObserved: true, AdminObserved: true, RequireH2: tc.grpc, RequireH2Observed: true,
+				SystemCA: true, SystemCAObserved: true, SystemCADigestObserved: true}
+			require.Nil(t, prepare())
+			require.True(t, part.backendTLS.stagesSystemCA())
+			require.Nil(t, provider.prepareXBackendPersistence(t.Context(), &desired, actual))
+			affinity := plan()
+			require.Equal(t, routeMutationSetXBackendPersistence, affinity.kind)
+			require.Nil(t, affinity.poolAdmin)
+			current.pool.Tags = *affinity.poolTags
+			if tc.grpc {
+				require.Equal(t, tc.persistence.Header, affinity.poolHeaderPersistence)
+				current.pool.Persistence = pools.SessionPersistence{Type: cloud.HTTPHeaderPersistenceType}
+				require.Equal(t, routeMutationSetXBackendPersistence, plan().kind)
+				current.headerPersistence = octavia.PoolHeaderPersistence{Value: tc.persistence.Header, Observed: true}
+			} else {
+				require.Equal(t, &pools.SessionPersistence{Type: httpCookiePersistence, CookieName: tc.persistence.CookieName}, affinity.poolPersistence)
+				require.Equal(t, routeMutationSetXBackendPersistence, plan().kind)
+				current.pool.Persistence = *affinity.poolPersistence
+			}
+			open := plan()
+			require.Equal(t, routeMutationSetBackendTLS, open.kind)
+			require.Equal(t, ptr.To(true), open.poolAdmin)
+			activation := graphMutation{kind: graphRouteMutation, backendKey: key, route: open}
+			_, err = provider.prepareGraphMutation(t.Context(), desired, actual, activation)
+			require.NoError(t, err)
+
+			advertised = tlsCapabilities
+			if tc.grpc {
+				advertised = append(advertised, octavia.GatewayCapabilityBackendTLSH2ALPN)
+			}
+			_, err = provider.prepareGraphMutation(t.Context(), desired, actual, activation)
+			var missing *unavailableRouteCapability
+			require.ErrorAs(t, err, &missing)
+			require.Equal(t, tc.capability, missing.capability)
+			withdraw = provider.prepareXBackendPersistence(t.Context(), &desired, actual)
+			require.NotNil(t, withdraw)
+			require.Equal(t, routeMutationSetXBackendPersistence, withdraw.route.kind)
+			require.Equal(t, &pools.SessionPersistence{}, withdraw.route.poolPersistence)
+
+			// A previously serving pool must close before removing its affinity.
+			current.pool.AdminStateUp = true
+			current.backendTLS.SystemCASHA256 = strings.Repeat("a", 64)
+			current.members = []pools.Member{{ID: "serving", AdminStateUp: true, ProvisioningStatus: "ACTIVE"}}
+			require.Nil(t, prepare())
+			withdraw = provider.prepareXBackendPersistence(t.Context(), &desired, actual)
+			require.NotNil(t, withdraw)
+			require.Equal(t, key, withdraw.backendKey)
+			require.Equal(t, routeMutationSetBackendTLS, withdraw.route.kind)
+			require.Equal(t, ptr.To(false), withdraw.route.poolAdmin)
+			current.pool.AdminStateUp = false
+			withdraw = provider.prepareXBackendPersistence(t.Context(), &desired, actual)
+			require.NotNil(t, withdraw)
+			require.Equal(t, routeMutationClearPoolMembers, withdraw.route.kind)
+			current.members = nil
+			current.pool.Persistence = pools.SessionPersistence{}
+			current.headerPersistence = octavia.PoolHeaderPersistence{Observed: true}
+			next := plan()
+			require.Equal(t, routeMutationCreatePolicy, next.kind)
+			require.Equal(t, current.pool.ID, next.parentID)
+			require.Nil(t, next.poolAdmin)
+		})
+	}
+}
+
+func TestInlineTLSWithdrawalPreservesServingOrdinaryPoolDuringBundleOutage(t *testing.T) {
+	spec := completeGraphSpec(safetyTestIdentity(t))
+	route := &spec.Routes[0].Spec
+	route.Hostname, route.PathType, route.PathValue, route.Members = "", "", "", nil
+	route.MemberMode, route.BackendTLSObserved = cloud.MemberModeEndpoint, true
+	ordinary := cloud.HTTPBackend{Namespace: "apps", Name: "checkout", Port: 80,
+		BackendTLS: &cloud.BackendTLSValidation{Denied: true}, Unavailable: true,
+		Matches: []cloud.HTTPPathMatch{{PathType: cloud.PathMatchExact, PathValue: "/ordinary"}}}
+	inline := ordinary
+	inline.SessionPersistenceRule, inline.SessionPersistenceServiceUID = "name/inline", "checkout-service"
+	inline.Matches = []cloud.HTTPPathMatch{{PathType: cloud.PathMatchExact, PathValue: "/inline", Precedence: 1}}
+	route.HTTPBackends = []cloud.HTTPBackend{ordinary, inline}
+	provider := NewProvider(ServiceClients{ProjectID: "project-a"}, ProviderConfig{BackendTLSPolicy: true, RouteSessionPersistence: true})
+	desired, err := provider.buildDesiredGatewayGraph(spec)
+	require.NoError(t, err)
+	ordinaryKey, inlineKey := openstackidentity.HTTPBackendPoolKey(ordinary), openstackidentity.HTTPBackendPoolKey(inline)
+	lb := safetyObservedLoadBalancer()
+	lb.ProvisioningStatus = "ACTIVE"
+	clear := &observedRouteGraph{pool: &pools.Pool{ID: "inline", AdminStateUp: true, ProvisioningStatus: "ACTIVE"},
+		backendTLS: octavia.PoolBackendTLS{AdminObserved: true}, members: []pools.Member{{ID: "clear-member"}}}
+	verified := &observedRouteGraph{pool: &pools.Pool{ID: "ordinary", AdminStateUp: true, TLSEnabled: true, CATLSContainerRef: "ca",
+		Tags: []string{backendTLSManagedTag}, ProvisioningStatus: "ACTIVE"},
+		backendTLS: octavia.PoolBackendTLS{AdminObserved: true, Hostname: "checkout.example.test"}, members: []pools.Member{{ID: "tls-member"}}}
+	actual := observedGatewayGraph{loadBalancer: lb, protocol: cloud.ListenerProtocolHTTP, routes: []observedRouteGraph{{
+		httpParts: map[string]*observedRouteGraph{ordinaryKey: verified, inlineKey: clear},
+	}}}
+	step := inlineBackendTLSWithdrawal(&desired, actual)
+	require.NotNil(t, step)
+	require.Equal(t, inlineKey, step.backendKey)
+	require.Equal(t, ptr.To(false), step.route.poolAdmin)
+	// A rename creates a different desired key while the old pool can
+	// still serve the original predicate on this HTTPRoute.
+	route.HTTPBackends[1].SessionPersistenceRule = "name/renamed"
+	desired, err = provider.buildDesiredGatewayGraph(spec)
+	require.NoError(t, err)
+	require.NotEqual(t, inlineKey, openstackidentity.HTTPBackendPoolKey(route.HTTPBackends[1]))
+	step = inlineBackendTLSWithdrawal(&desired, actual)
+	require.NotNil(t, step)
+	require.Equal(t, inlineKey, step.backendKey)
+	require.Equal(t, clear.pool.ID, step.route.id)
+	require.Equal(t, ptr.To(false), step.route.poolAdmin)
+	clear.pool.AdminStateUp, clear.pool.Tags = false, *step.route.poolTags
+	step = inlineBackendTLSWithdrawal(&desired, actual)
+	require.NotNil(t, step)
+	require.Equal(t, inlineKey, step.backendKey)
+	require.Equal(t, routeMutationClearPoolMembers, step.route.kind)
+	clear.members = nil
+	require.Nil(t, inlineBackendTLSWithdrawal(&desired, actual))
 }
 
 func TestServiceSessionPersistenceSharesGRPCPoolWithRetryBudget(t *testing.T) {

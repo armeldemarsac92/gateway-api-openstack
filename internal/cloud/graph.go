@@ -48,6 +48,9 @@ type GatewayGraphSpec struct {
 	Identity Identity
 	Gateway  GatewayGraphNode
 	Routes   []RouteGraphNode
+	// An ordinary Service is waiting for its last confirmed bundle. Only
+	// withdraw already-serving inline pools that now require authenticated TLS.
+	BackendTrustWithdrawalOnly bool `json:"-"`
 	// ValidateMutation rechecks the request-local authority after cloud reads
 	// and planning, immediately before the provider sends a mutation.
 	ValidateMutation func(context.Context) error `json:"-"`

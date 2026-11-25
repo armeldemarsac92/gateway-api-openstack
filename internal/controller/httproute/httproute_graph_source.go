@@ -65,6 +65,9 @@ func (r *Reconciler) ObserveRouteGraph(ctx context.Context, request graph.Reques
 		}
 	}
 	input := graph.RouteInputs{Nodes: make([]cloud.RouteGraphNode, 0, len(routes))}
+	if backends != nil {
+		input.BackendTrustWithdrawalOnly = backends.input.BackendTrustWithdrawalOnly
+	}
 	var bindings []routeGraphBinding
 	if backends == nil {
 		bindings = r.routeGraphBindings(routes, request.Identity)

@@ -198,7 +198,12 @@ func TestBackendTLSPolicyProtectsOneWeightedShare(t *testing.T) {
 
 func TestGRPCBackendTLSPolicyResolvesAndProtectsBackend(t *testing.T) {
 	f, _, grpc := newRouteElectionFixture(t)
-	f.reconciler.Config.BackendTLSPolicy = true
+	enableRetryBudgetTest(t, f)
+	f.reconciler.Config.BackendRetryBudget = false
+	f.reconciler.Config.BackendTLSPolicy, f.reconciler.Config.RouteSessionPersistence = true, true
+	grpc.Spec.Rules[0].SessionPersistence = &gatewayv1.SessionPersistence{ //nolint:staticcheck // The v1.7 Experimental field.
+		Type: ptr.To(gatewayv1.HeaderBasedSessionPersistence), Header: &gatewayv1.HeaderConfig{Name: "x-session"},
+	}
 	requiredH2, sanCapable := true, false
 	f.reconciler.BackendTLSSANAvailable = func(_ context.Context, requireH2 bool) (bool, error) {
 		return sanCapable && requireH2, nil
@@ -307,10 +312,23 @@ func TestGRPCBackendTLSPolicyResolvesAndProtectsBackend(t *testing.T) {
 	require.False(t, resolved.BackendH2C)
 	require.Equal(t, "backend.example.test", resolved.BackendTLS.Hostname)
 	require.Equal(t, string(ca.UID), resolved.BackendTLS.CAConfigMapUID)
+	require.Equal(t, "x-session", resolved.ServiceSessionPersistence.Header.Name)
 	require.Equal(t, []cloud.Member{{Address: "192.0.2.20", Port: 8443}}, resolved.Members)
 	require.NoError(t, f.client.Get(t.Context(), routeKey, grpc))
 	require.Len(t, grpc.Status.Parents, 1)
 	require.True(t, meta.IsStatusConditionTrue(grpc.Status.Parents[0].Conditions, string(gatewayv1.RouteConditionResolvedRefs)))
+
+	require.NoError(t, f.client.Get(t.Context(), client.ObjectKeyFromObject(service), service))
+	service.Spec.Ports[0].AppProtocol = ptr.To("kubernetes.io/h2c")
+	require.NoError(t, f.client.Update(t.Context(), service))
+	conditions = reconcilePolicy()
+	require.Equal(t, "UnsupportedProtocol", meta.FindStatusCondition(conditions, string(gatewayv1.PolicyConditionAccepted)).Reason)
+	incompatible := reconcileRoute()
+	require.True(t, incompatible.BackendTLS.Denied)
+	require.False(t, incompatible.BackendH2C)
+	require.Empty(t, incompatible.Members)
+	service.Spec.Ports[0].AppProtocol = nil
+	require.NoError(t, f.client.Update(t.Context(), service))
 
 	requiredH2 = false
 	conditions = reconcilePolicy()

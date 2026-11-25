@@ -327,7 +327,7 @@ func TestBackendTLSUnreadableCAStillProtectsOnlyItsService(t *testing.T) {
 	reader.failures = map[string]error{"ConfigMap app/root": apierrors.NewForbidden(corev1.Resource("configmaps"), "root", errors.New("read denied"))}
 	route := backendInputRoute("r", "app", backendInputReference("protected", "", 80, 3), backendInputReference("healthy", "", 80, 1))
 	input := model.Input{Gateway: backendInputGateway(), Services: []corev1.Service{*protected, *healthy}, Routes: []gatewayv1.HTTPRoute{route}}
-	if err := CollectBackendTLSInputs(t.Context(), reader, &input, nil, nil); err != nil {
+	if err := CollectBackendTLSInputs(t.Context(), reader, &input, nil, nil, false); err != nil {
 		t.Fatal(err)
 	}
 	denied := input.BackendTLSPolicies[model.ServicePortKey{Service: client.ObjectKeyFromObject(protected), Port: 80}].Winner
@@ -388,6 +388,21 @@ func TestClusterTrustBundleOutageOnlyDelaysEffectivePolicy(t *testing.T) {
 	_, err = NewBackendTLSObserver(reader, bundles).Observe(t.Context(), service, port, nil)
 	if !errors.Is(err, backendtls.ErrClusterTrustBundleUnavailable) {
 		t.Fatalf("the effective bundle policy must wait for discovery: %v", err)
+	}
+	peer := backendInputService("peer", "app")
+	route := backendInputRoute("r", "app", backendInputReference("store", "", 80, 1), backendInputReference("peer", "", 80, 1))
+	route.Spec.Rules[0].SessionPersistence = &gatewayv1.SessionPersistence{} //nolint:staticcheck // Served in v1.7 Experimental.
+	input := model.Input{Gateway: backendInputGateway(), Services: []corev1.Service{*service, *peer}, Routes: []gatewayv1.HTTPRoute{route}}
+	if err := CollectBackendTLSInputs(t.Context(), reader, &input, nil, bundles, true); err != nil {
+		t.Fatal(err)
+	}
+	pending := input.BackendTLSPolicies[model.ServicePortKey{Service: client.ObjectKeyFromObject(service), Port: 80}].Winner
+	if pending == nil || pending.Validation != nil || pending.Accepted.Status != metav1.ConditionUnknown ||
+		pending.ResolvedRefs.Status != metav1.ConditionUnknown || pending.ResolvedRefs.Reason != "Pending" {
+		t.Fatalf("the partial snapshot must retain the selected, pending TLS requirement: %+v", pending)
+	}
+	if selection, ok := input.BackendTLSPolicies[model.ServicePortKey{Service: client.ObjectKeyFromObject(peer), Port: 80}]; !ok || selection.Winner != nil {
+		t.Fatal("the partial snapshot must also retain the ordinary sibling")
 	}
 }
 

@@ -55,6 +55,7 @@ type routeModelInputs struct {
 	backendClientCertificate  func(context.Context, *gatewayv1.Gateway) cloud.BackendClientCertificate
 	backendTLSAvailability    map[backendTLSRequirements]backendTLSAvailability
 	backendTLSAncestor        *backendtls.GatewayAncestor
+	inlineEndpointRules       bool
 	clusterTrustBundles       *backendtls.ClusterTrustBundles
 	admission                 routeGraphAdmission
 
@@ -393,9 +394,11 @@ func (r *Reconciler) collectRouteForwardingInputs(ctx context.Context, reader cl
 		}
 	}
 	var ancestor *backendtls.GatewayAncestor
+	var inlineEndpoints bool
 	if r.Config.BackendTLSPolicy {
 		ancestor = &backendtls.GatewayAncestor{Key: client.ObjectKeyFromObject(gateway), ControllerName: r.Config.ControllerName}
-		if err := tlsObserver.CollectServiceInputs(ctx, &input, ancestor); err != nil {
+		inlineEndpoints = r.supportsInlineEndpointRules(gateway)
+		if err := tlsObserver.CollectServiceInputs(ctx, &input, ancestor, inlineEndpoints); err != nil {
 			return nil, err
 		}
 	}
@@ -405,10 +408,18 @@ func (r *Reconciler) collectRouteForwardingInputs(ctx context.Context, reader cl
 	}
 	return &routeModelInputs{
 		gateway: gateway, input: input, logical: logical,
-		backendTLSAncestor: ancestor, clusterTrustBundles: r.Config.ClusterTrustBundles,
+		backendTLSAncestor: ancestor, inlineEndpointRules: inlineEndpoints, clusterTrustBundles: r.Config.ClusterTrustBundles,
 		xBackendClientCertificates: r.XBackendClientCertificates,
 		backendClientCertificate:   r.BackendClientCertificateForGateway,
 	}, nil
+}
+
+func (r *Reconciler) supportsInlineEndpointRules(gateway *gatewayv1.Gateway) bool {
+	if !r.Config.RouteSessionPersistenceEnabled() || !controller.HasGatewayTopologyBinding(r.Config, gateway) {
+		return false
+	}
+	topology, err := controller.StoredGatewayTopology(r.Config, gateway)
+	return err == nil && topology.Topology.MemberMode == cloud.MemberModeEndpoint
 }
 
 func (r *Reconciler) xBackendProfile(gateway *gatewayv1.Gateway) (model.XBackendProfile, error) {
@@ -451,7 +462,7 @@ func (inputs *routeModelInputs) validateBackends(ctx context.Context, reader cli
 		}
 	}
 	if inputs.input.BackendTLSPolicies != nil {
-		if err := tlsObserver.CollectServiceInputs(ctx, &current, inputs.backendTLSAncestor); err != nil {
+		if err := tlsObserver.CollectServiceInputs(ctx, &current, inputs.backendTLSAncestor, inputs.inlineEndpointRules); err != nil {
 			return err
 		}
 	}
@@ -466,7 +477,8 @@ func (inputs *routeModelInputs) validateBackends(ctx context.Context, reader cli
 			return errHTTPRouteChanged
 		}
 	}
-	if !equality.Semantic.DeepEqual(inputs.input.BackendTLSPolicies, current.BackendTLSPolicies) ||
+	if inputs.input.BackendTrustWithdrawalOnly != current.BackendTrustWithdrawalOnly ||
+		!equality.Semantic.DeepEqual(inputs.input.BackendTLSPolicies, current.BackendTLSPolicies) ||
 		!equality.Semantic.DeepEqual(inputs.input.Services, current.Services) ||
 		!equality.Semantic.DeepEqual(inputs.input.EndpointSlices, current.EndpointSlices) ||
 		!equality.Semantic.DeepEqual(inputs.input.XBackends, current.XBackends) {

@@ -881,7 +881,7 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 	}
 	var required []string
 	var mirrorCapabilities []string
-	var reopensAuthenticatedH2Cookie bool
+	var reopeningPersistenceCapability string
 	var authBodySize int32
 	fixed := desired.fixedHTTPResponses
 	switch step.kind {
@@ -905,12 +905,17 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 		required = append(required, routeAuthorizerTransportCapabilities(*auth)...)
 	case graphRouteMutation:
 		part := graphRoutePart(desired, step)
-		reopensAuthenticatedH2Cookie = part.authenticatedH2Cookie() && !part.backendTLS.denies() &&
-			step.route.kind == routeMutationSetBackendTLS && step.route.poolAdmin != nil && *step.route.poolAdmin
-		if reopensAuthenticatedH2Cookie {
-			// Octavia reauthorizes TLS on reopen. Recheck the cookie
-			// capabilities as the PUT leaves persistence unchanged.
-			required = append(required, poolSessionCookieCapabilities(part.sessionCookieDeadline.Requirements().WithPath(part.sessionCookiePath))...)
+		if !part.backendTLS.denies() && step.route.kind == routeMutationSetBackendTLS && step.route.poolAdmin != nil && *step.route.poolAdmin {
+			// Octavia reauthorizes TLS on reopen. The PUT leaves persistence
+			// unchanged, so recheck its capabilities as well.
+			switch {
+			case part.authenticatedH2Cookie() || part.protectedInlinePersistence() && part.sessionCookieName != "":
+				reopeningPersistenceCapability = octavia.GatewayCapabilityHTTPCookieName
+				required = append(required, poolSessionCookieCapabilities(part.sessionCookieDeadline.Requirements().WithPath(part.sessionCookiePath))...)
+			case part.protectedInlinePersistence() && part.sessionHeader != nil:
+				reopeningPersistenceCapability = octavia.GatewayCapabilityHTTPHeaderPersistence
+				required = append(required, reopeningPersistenceCapability)
+			}
 		}
 		if step.route.policy.externalAuth != nil && (step.route.kind == routeMutationCreatePolicy || step.route.kind == routeMutationEnablePolicy) {
 			if step.route.policy.resolvedExternalAuth == nil {
@@ -999,9 +1004,9 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 		verify = p.verifyGatewayHTTPURLRequirements
 	}
 	err := verify(ctx, desired, actual, required, authBodySize)
-	if err != nil && reopensAuthenticatedH2Cookie {
+	if err != nil && reopeningPersistenceCapability != "" {
 		var missing *octavia.MissingGatewayCapability
-		capability := octavia.GatewayCapabilityHTTPCookieName
+		capability := reopeningPersistenceCapability
 		if errors.As(err, &missing) {
 			capability = missing.Capability
 		}

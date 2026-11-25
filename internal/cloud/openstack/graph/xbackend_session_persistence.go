@@ -113,6 +113,10 @@ func (route desiredRoute) managesSessionPersistence(current observedRouteGraph) 
 	return route.xBackend || route.spec.ServiceSessionPersistence != nil || poolHasManagedSessionPersistence(current)
 }
 
+func (route desiredRoute) protectedInlinePersistence() bool {
+	return route.inlineSessionPersistence && route.spec.BackendTLS != nil
+}
+
 // Prepare persistence against the effective provider and retain the policy
 // predicate while withdrawing members from a pool with unverified settings.
 func (p *Provider) prepareXBackendPersistence(ctx context.Context, desired *desiredGatewayGraph, actual observedGatewayGraph) *graphMutation {
@@ -199,6 +203,7 @@ func (p *Provider) prepareXBackendPersistence(ctx context.Context, desired *desi
 		}
 		if step, _ := planXBackendPersistence(*part, *current); step != nil &&
 			(step.kind == routeMutationClearPoolMembers ||
+				step.kind == routeMutationSetBackendTLS ||
 				step.poolPersistence != nil && *step.poolPersistence == (pools.SessionPersistence{}) &&
 					(!step.retry || current.pool.AdminStateUp && len(current.members) != 0)) {
 			withdrawal = &graphMutation{kind: graphRouteMutation, routeIndex: routeIndex, backendKey: part.backendKey,
@@ -345,7 +350,7 @@ func planXBackendCookie(desired desiredRoute, observed observedRouteGraph) (*rou
 	if len(observed.members) != 0 {
 		// A disabled stock HTTP pool can drop the direct L7 match in
 		// Amphora. An empty pool keeps ownership of its exact predicate.
-		return &routeMutation{kind: routeMutationClearPoolMembers, id: pool.ID, persistenceDrain: true}, nil
+		return desired.withdrawSessionPersistenceMembers(observed), nil
 	}
 	if !observed.backendTLS.AdminObserved {
 		return nil, errXBackendCookieUnverified
@@ -393,6 +398,15 @@ func planXBackendCookie(desired desiredRoute, observed observedRouteGraph) (*rou
 		return nil, issue
 	}
 	return &step, nil
+}
+
+func (route desiredRoute) withdrawSessionPersistenceMembers(observed observedRouteGraph) *routeMutation {
+	if route.protectedInlinePersistence() && observed.pool.AdminStateUp {
+		// A capability downgrade or affinity edit must close the authenticated
+		// pool before reloading its members or changing persistence.
+		return (backendTLSPlan{phase: backendTLSBlocked}).withdrawal(true, true, observed)
+	}
+	return &routeMutation{kind: routeMutationClearPoolMembers, id: observed.pool.ID, persistenceDrain: true}
 }
 
 func xBackendCookieIssue(route desiredRoute) error {

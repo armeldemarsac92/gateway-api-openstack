@@ -211,6 +211,16 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		return result, err
 	}
 	actual, err = p.observeGatewayGraph(ctx, desired)
+	if spec.BackendTrustWithdrawalOnly {
+		if err != nil {
+			return result, err
+		}
+		if step := inlineBackendTLSWithdrawal(&desired, actual); step != nil {
+			return p.applyBackendWithdrawal(ctx, desired, actual, *step)
+		}
+		actual.outcome = p.progressingOutcome("Waiting to read the effective backend ClusterTrustBundle")
+		return p.pendingGraphResult(ctx, desired, actual), nil
+	}
 	if spec.Gateway.Disposition == cloud.GraphWithdrawListenerFilters {
 		if err != nil {
 			return result, err
@@ -369,21 +379,8 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	if backendWithdrawal == nil {
 		backendWithdrawal = p.prepareXBackendPersistence(ctx, &desired, actual)
 	}
-	if step := backendWithdrawal; step != nil {
-		if validate := spec.ValidateMutation; validate != nil {
-			if err := validate(ctx); err != nil {
-				return cloud.GatewayGraphResult{}, err
-			}
-		}
-		actual.outcome = p.progressingOutcome(step.message)
-		result := p.pendingGraphResult(ctx, desired, actual)
-		result.Routes[step.routeIndex].Result.ObservationDeferred = false
-		if err := p.executeGraphMutation(ctx, desired, actual, *step); err != nil {
-			return result, &cloud.GraphError{Identity: desired.routes[step.routeIndex].spec.Identity, Err: err}
-		}
-		result.Outcome.MutationSubmitted = true
-		result.Routes[step.routeIndex].Result.Outcome.MutationSubmitted = true
-		return result, nil
+	if backendWithdrawal != nil {
+		return p.applyBackendWithdrawal(ctx, desired, actual, *backendWithdrawal)
 	}
 	if err := p.prepareSNIRouteBackendTLS(ctx, &desired, actual); err != nil {
 		return result, err
@@ -656,6 +653,23 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		return result, err
 	}
 	p.recordGraphMutationOutcome(&result, step)
+	return result, nil
+}
+
+func (p *Provider) applyBackendWithdrawal(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, step graphMutation) (cloud.GatewayGraphResult, error) {
+	if validate := desired.spec.ValidateMutation; validate != nil {
+		if err := validate(ctx); err != nil {
+			return cloud.GatewayGraphResult{}, err
+		}
+	}
+	actual.outcome = p.progressingOutcome(step.message)
+	result := p.pendingGraphResult(ctx, desired, actual)
+	result.Routes[step.routeIndex].Result.ObservationDeferred = false
+	if err := p.executeGraphMutation(ctx, desired, actual, step); err != nil {
+		return result, &cloud.GraphError{Identity: desired.routes[step.routeIndex].spec.Identity, Err: err}
+	}
+	result.Outcome.MutationSubmitted = true
+	result.Routes[step.routeIndex].Result.Outcome.MutationSubmitted = true
 	return result, nil
 }
 

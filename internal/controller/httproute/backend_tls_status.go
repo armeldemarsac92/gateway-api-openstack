@@ -341,11 +341,12 @@ func (r *backendTLSPolicyStatusReconciler) observeGatewayConsumer(ctx context.Co
 	}
 	consumers := map[types.NamespacedName]map[source]struct{}{}
 	grantsRequired := false
-	for i := range peers {
-		route := &peers[i]
+	for _, peer := range peers {
+		route := &peer
 		if _, eligible := admission.eligible[routeKey(route)]; !eligible {
 			continue
 		}
+		route.Spec.Rules, _ = r.routes.projectedHTTPFilterRules(route)
 		services := r.routes.backendTLSPolicyServices(route)
 		usesTarget := false
 		for _, key := range targets {
@@ -392,7 +393,7 @@ func (r *backendTLSPolicyStatusReconciler) observeGatewayConsumer(ctx context.Co
 		services[key] = &service
 	}
 	tlsObserver := graph.NewBackendTLSObserver(r.routes.APIReader, r.routes.Config.ClusterTrustBundles)
-	if err := tlsObserver.CollectServiceInputs(ctx, &input, nil); err != nil {
+	if err := tlsObserver.CollectServiceInputs(ctx, &input, nil, r.routes.supportsInlineEndpointRules(gateway)); err != nil {
 		return backendTLSConsumer{}, err
 	}
 	result := backendTLSConsumer{profiles: map[backendTLSConsumerProfile]bool{}}

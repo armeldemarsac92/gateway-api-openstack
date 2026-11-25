@@ -47,6 +47,14 @@ HTTPRoute and GRPCRoute continue to refer to the Service port by number. A cross
 
 A policy can also reference a named cluster-scoped trust bundle with the controller opt-in. [Use a ClusterTrustBundle](operator-cluster-trust-bundle.md)
 
+### Keep rule session persistence on a protected Service
+
+On the Experimental channel, enable `--experimental-route-session-persistence` to use `HTTPRoute.rules[].sessionPersistence` or `GRPCRoute.rules[].sessionPersistence` on a primary Service backendRef with Endpoint members. Enable the regional Cookie or Header capabilities required by the rule alongside the backend TLS capabilities. GRPCRoute also requires the regional backend TLS capability for mandatory `h2` and accepts custom ASCII metadata names for Header persistence. The usual Service `appProtocol` checks still apply.
+
+Octavia uses a pool scoped to the rule and Service UID. The controller verifies the selected trust, the backend transport and the configured affinity before admitting endpoints. An invalid or unreadable CA keeps the protected destination unavailable. Loss of a required regional capability withdraws traffic from the affected pool. Other rules keep their own pools, and weighted rules retain the affected backend's configured share for the failure response.
+
+An empty pool created for a refused rule retains its TLS protection across controller restarts. Stock Octavia keeps the rule pointed at that enabled, empty pool until the controller verifies the required transport or confirms that the policy no longer applies. An ordinary rule whose ClusterTrustBundle is temporarily unreadable retains its last verified trust, including when it uses the same Service port.
+
 ### Require explicit certificate identities
 
 Add up to five `subjectAltNames` to `spec.validation` to authenticate the leaf certificate by DNS or URI. The following entries allow either the DNS name or the exact URI. The certificate must still chain to the configured CA.

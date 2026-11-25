@@ -18,6 +18,7 @@ package httproute
 
 import (
 	"context"
+	"net/http"
 	"testing"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 	discoveryv1 "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -376,7 +378,7 @@ func TestWeightedRouteSessionPersistencePreservesSiblingWhenTotalWeightIsZero(t 
 	require.ErrorContains(t, err, "HTTPRoute filter Unknown is not supported")
 }
 
-func TestRouteSessionPersistencePreservesSiblingWhenBackendRequiresTLS(t *testing.T) {
+func TestRouteSessionPersistenceComposesWithBackendTLSAndPreservesSibling(t *testing.T) {
 	f := newRouteModelInputFixture(t)
 	enableRetryBudgetTest(t, f)
 	f.reconciler.Config.RouteSessionPersistence = true
@@ -407,34 +409,120 @@ func TestRouteSessionPersistencePreservesSiblingWhenBackendRequiresTLS(t *testin
 	siblingPool := provider.routeSpecs[0].HTTPBackends[1]
 	require.NotEmpty(t, siblingPool.Members)
 
-	f.create(t, &gatewayv1.BackendTLSPolicy{
+	policy := &gatewayv1.BackendTLSPolicy{
 		ObjectMeta: metav1.ObjectMeta{Namespace: f.service.Namespace, Name: "require-tls", UID: "tls-policy", Generation: 1},
 		Spec: gatewayv1.BackendTLSPolicySpec{
 			TargetRefs: []gatewayv1.LocalPolicyTargetReferenceWithSectionName{{
 				LocalPolicyTargetReference: gatewayv1.LocalPolicyTargetReference{Kind: "Service", Name: gatewayv1.ObjectName(f.service.Name)},
+				SectionName:                ptr.To(gatewayv1.SectionName(f.service.Spec.Ports[0].Name)),
 			}},
 			Validation: gatewayv1.BackendTLSPolicyValidation{
-				Hostname: "backend.example.test", WellKnownCACertificates: ptr.To(gatewayv1.WellKnownCACertificatesSystem),
+				Hostname: "backend.example.test",
+				CACertificateRefs: []gatewayv1.LocalObjectReference{{
+					Group: "certificates.k8s.io", Kind: "ClusterTrustBundle", Name: "roots",
+				}},
 			},
 		},
-	})
-	_, err = r.Reconcile(t.Context(), ctrl.Request{NamespacedName: key})
+	}
+	f.create(t, policy)
+	f.service.Spec.Ports[0].AppProtocol = ptr.To("https")
+	require.NoError(t, f.client.Update(t.Context(), f.service))
+	status := &backendTLSPolicyStatusReconciler{routes: f.reconciler}
+	reconcile := func() cloud.HTTPBackend {
+		t.Helper()
+		_, err := status.Reconcile(t.Context(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(policy)})
+		require.NoError(t, err)
+		provider.routeSpecs = nil
+		_, err = r.Reconcile(t.Context(), ctrl.Request{NamespacedName: key})
+		require.NoError(t, err)
+		require.Len(t, provider.routeSpecs, 1)
+		backends := provider.routeSpecs[0].HTTPBackends
+		require.Len(t, backends, 2)
+		require.Equal(t, siblingPool, backends[1])
+		return backends[0]
+	}
+	clear := provider.routeSpecs[0].HTTPBackends[0]
+	// The first policy must withdraw the serving cleartext pool even
+	// before discovery of the selected trust bundle succeeds.
+	bundles, err := backendtls.NewClusterTrustBundles(&rest.Config{Host: "https://kubernetes.example.test"}, http.DefaultClient)
 	require.NoError(t, err)
+	f.reconciler.Config.ClusterTrustBundles, r.Config.ClusterTrustBundles = bundles, bundles
+	pending := reconcile()
+	require.Equal(t, openstackidentity.HTTPBackendPoolKey(clear), openstackidentity.HTTPBackendPoolKey(pending))
+	require.Equal(t, clear.Matches, pending.Matches)
+	require.True(t, pending.BackendTLS.Denied)
+	require.Empty(t, pending.Members)
+	require.NoError(t, f.observe(t).Validate(t.Context()))
+	require.NoError(t, f.client.Get(t.Context(), client.ObjectKeyFromObject(policy), policy))
+	require.Len(t, policy.Status.Ancestors, 1)
+	for _, name := range []string{string(gatewayv1.PolicyConditionAccepted), string(gatewayv1.BackendTLSPolicyConditionResolvedRefs)} {
+		condition := meta.FindStatusCondition(policy.Status.Ancestors[0].Conditions, name)
+		require.NotNil(t, condition)
+		require.Equal(t, metav1.ConditionUnknown, condition.Status)
+		require.Equal(t, "Pending", condition.Reason)
+	}
+
+	// A pending bundle for an ordinary sibling preserves its last trust.
+	// The writer still has authority to quarantine the inline cleartext pool.
+	ordinaryPolicy := policy.DeepCopy()
+	ordinaryPolicy.Name, ordinaryPolicy.UID, ordinaryPolicy.ResourceVersion = "ordinary-tls", "ordinary-policy", ""
+	ordinaryPolicy.Spec.TargetRefs[0].Name = gatewayv1.ObjectName(sibling.Name)
+	f.create(t, ordinaryPolicy)
+	mixed := f.observe(t)
+	require.True(t, mixed.BackendTrustWithdrawalOnly)
+	require.NoError(t, mixed.Validate(t.Context()))
+	_, err = status.Reconcile(t.Context(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(ordinaryPolicy)})
+	require.ErrorIs(t, err, backendtls.ErrClusterTrustBundleUnavailable)
+	require.NoError(t, f.client.Delete(t.Context(), ordinaryPolicy))
+	require.ErrorIs(t, mixed.Validate(t.Context()), errHTTPRouteChanged)
+	require.False(t, f.observe(t).BackendTrustWithdrawalOnly)
+
+	// An ordinary rule may use the very same Service port; its pool still
+	// has a different identity and must retain its last verified trust.
+	require.NoError(t, f.client.Get(t.Context(), key, f.route))
+	f.route.Spec.Rules[1].BackendRefs[0].Name = gatewayv1.ObjectName(f.service.Name)
+	require.NoError(t, f.client.Update(t.Context(), f.route))
+	shared := f.observe(t)
+	require.True(t, shared.BackendTrustWithdrawalOnly)
+	backends := shared.Nodes[0].Spec.HTTPBackends
+	require.Len(t, backends, 2)
+	require.NotEqual(t, openstackidentity.HTTPBackendPoolKey(backends[0]), openstackidentity.HTTPBackendPoolKey(backends[1]))
+	f.route.Spec.Rules[1].BackendRefs[0].Name = gatewayv1.ObjectName(sibling.Name)
+	require.NoError(t, f.client.Update(t.Context(), f.route))
+
+	policy.Spec.Validation.CACertificateRefs = nil
+	policy.Spec.Validation.WellKnownCACertificates = ptr.To(gatewayv1.WellKnownCACertificatesSystem)
+	policy.Generation++
+	require.NoError(t, f.client.Update(t.Context(), policy))
+	protected := reconcile()
 	require.Empty(t, provider.deletedRoutes)
-	require.Len(t, provider.routeSpecs, 2)
-	backends := provider.routeSpecs[1].HTTPBackends
-	require.Len(t, backends, 1)
-	require.Equal(t, siblingPool.Members, backends[0].Members)
-	require.Equal(t, openstackidentity.HTTPBackendPoolKey(siblingPool), openstackidentity.HTTPBackendPoolKey(backends[0]))
+	require.Equal(t, openstackidentity.HTTPBackendPoolKey(clear), openstackidentity.HTTPBackendPoolKey(protected))
+	require.Equal(t, clear.ServiceSessionPersistence, protected.ServiceSessionPersistence)
+	require.Equal(t, clear.Members, protected.Members)
+	require.Equal(t, "backend.example.test", protected.BackendTLS.Hostname)
+	require.False(t, protected.BackendH2C)
 	require.NoError(t, f.client.Get(t.Context(), key, f.route))
 	require.Len(t, f.route.Status.Parents, 1)
 	conditions := f.route.Status.Parents[0].Conditions
 	require.True(t, meta.IsStatusConditionTrue(conditions, string(gatewayv1.RouteConditionAccepted)))
-	partial := meta.FindStatusCondition(conditions, string(gatewayv1.RouteConditionPartiallyInvalid))
-	require.NotNil(t, partial)
-	require.Equal(t, metav1.ConditionTrue, partial.Status)
-	require.Contains(t, partial.Message, "inline (rule sessionPersistence requires")
+	require.False(t, meta.IsStatusConditionTrue(conditions, string(gatewayv1.RouteConditionPartiallyInvalid)))
 	require.True(t, meta.IsStatusConditionTrue(conditions, r.Config.Domain()+"/Programmed"))
+
+	require.NoError(t, f.client.Get(t.Context(), client.ObjectKeyFromObject(policy), policy))
+	policy.Spec.Validation.WellKnownCACertificates = nil
+	policy.Spec.Validation.CACertificateRefs = []gatewayv1.LocalObjectReference{{Kind: "ConfigMap", Name: "missing-ca"}}
+	policy.Generation++
+	require.NoError(t, f.client.Update(t.Context(), policy))
+	denied := reconcile()
+	require.Equal(t, openstackidentity.HTTPBackendPoolKey(protected), openstackidentity.HTTPBackendPoolKey(denied))
+	require.Equal(t, protected.Matches, denied.Matches)
+	require.True(t, denied.BackendTLS.Denied)
+	require.False(t, denied.BackendH2C)
+	require.Empty(t, denied.Members)
+	require.Nil(t, denied.ServiceSessionPersistence)
+	require.NoError(t, f.client.Get(t.Context(), client.ObjectKeyFromObject(policy), policy))
+	require.Len(t, policy.Status.Ancestors, 1)
+	require.True(t, meta.IsStatusConditionFalse(policy.Status.Ancestors[0].Conditions, string(gatewayv1.BackendTLSPolicyConditionResolvedRefs)))
 }
 
 func TestRouteSessionPersistenceHeaderScopeFollowsServiceUID(t *testing.T) {

@@ -18,12 +18,14 @@ package graph
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
@@ -34,13 +36,13 @@ import (
 // CollectBackendTLSInputs observes policies for authorized Service ports. The
 // caller uses an uncached reader both for planning and just before mutation.
 // A namespaced policy list finds concurrent winners that indexed lookups could miss.
-func CollectBackendTLSInputs(ctx context.Context, reader client.Reader, input *model.Input, ancestor *backendtls.GatewayAncestor, bundles *backendtls.ClusterTrustBundles) error {
-	return NewBackendTLSObserver(reader, bundles).CollectServiceInputs(ctx, input, ancestor)
+func CollectBackendTLSInputs(ctx context.Context, reader client.Reader, input *model.Input, ancestor *backendtls.GatewayAncestor, bundles *backendtls.ClusterTrustBundles, inlineEndpoints bool) error {
+	return NewBackendTLSObserver(reader, bundles).CollectServiceInputs(ctx, input, ancestor, inlineEndpoints)
 }
 
 // CollectServiceInputs reuses the observer's CA inventory for authorized Service
 // ports when the same snapshot also contains XBackends.
-func (o *BackendTLSObserver) CollectServiceInputs(ctx context.Context, input *model.Input, ancestor *backendtls.GatewayAncestor) error {
+func (o *BackendTLSObserver) CollectServiceInputs(ctx context.Context, input *model.Input, ancestor *backendtls.GatewayAncestor, inlineEndpoints bool) error {
 	input.BackendTLSPolicies = make(map[model.ServicePortKey]backendtls.Selection)
 	services := make(map[types.NamespacedName]*corev1.Service, len(input.Services))
 	for i := range input.Services {
@@ -49,36 +51,65 @@ func (o *BackendTLSObserver) CollectServiceInputs(ctx context.Context, input *mo
 			services[client.ObjectKeyFromObject(service)] = service
 		}
 	}
+	type use struct {
+		service          *corev1.Service
+		port             *corev1.ServicePort
+		inline, ordinary bool
+	}
+	uses := map[model.ServicePortKey]use{}
 	for i := range input.Routes {
 		route := &input.Routes[i]
 		kind := model.HTTPProfileRouteKind(route)
+		add := func(ref gatewayv1.BackendObjectReference, inline bool) {
+			key, serviceRef := model.BackendServiceReference(route.Namespace, ref)
+			if !serviceRef || !model.BackendReferenceAllowedFor(kind, route.Namespace, key, input.ReferenceGrants) {
+				return
+			}
+			service := services[key]
+			if service == nil || service.Spec.Type == corev1.ServiceTypeLoadBalancer || service.Spec.Type == corev1.ServiceTypeExternalName {
+				return
+			}
+			port, diagnostic := model.ResolveTCPServicePort(service, ref.Port)
+			if diagnostic != nil {
+				return
+			}
+			target := model.ServicePortKey{Service: key, Port: port.Port}
+			current := uses[target]
+			current.service, current.port = service, port
+			current.inline, current.ordinary = current.inline || inline, current.ordinary || !inline
+			uses[target] = current
+		}
 		for _, rule := range route.Spec.Rules {
-			for _, backend := range model.HTTPServiceBackendReferences(rule, kind == model.GRPCRouteKind) {
-				key, serviceRef := model.BackendServiceReference(route.Namespace, backend)
-				if !serviceRef || !model.BackendReferenceAllowedFor(kind, route.Namespace, key, input.ReferenceGrants) {
-					continue
+			inline := inlineEndpoints && model.RouteRulePersistence(rule) != nil
+			for _, ref := range rule.BackendRefs {
+				positive := ptr.Deref(ref.Weight, 1) != 0
+				if positive || kind == model.GRPCRouteKind {
+					add(ref.BackendObjectReference, inline && positive)
 				}
-				service := services[key]
-				if service == nil || service.Spec.Type == corev1.ServiceTypeLoadBalancer || service.Spec.Type == corev1.ServiceTypeExternalName {
-					continue
-				}
-				port, diagnostic := model.ResolveTCPServicePort(service, backend.Port)
-				if diagnostic != nil {
-					continue
-				}
-				target := model.ServicePortKey{Service: key, Port: port.Port}
-				selection, observed := input.BackendTLSPolicies[target]
-				if !observed {
-					var err error
-					selection, err = o.Observe(ctx, service, port, ancestor)
-					if err != nil {
-						return err
-					}
-				}
-				input.BackendTLSPolicies[target] = selection
+			}
+			for _, ref := range model.RequestMirrorReferences(rule) {
+				add(ref, false)
 			}
 		}
 	}
+	var trustErr error
+	var protectedInline bool
+	for target, use := range uses {
+		selection, err := o.observeService(ctx, use.service, use.port, ancestor, use.inline)
+		if err != nil && !errors.Is(err, backendtls.ErrClusterTrustBundleUnavailable) {
+			return err
+		}
+		input.BackendTLSPolicies[target] = selection
+		protectedInline = protectedInline || use.inline && selection.Winner != nil
+		// Two rules can use the same Service port and have distinct pools.
+		if use.ordinary && err != nil {
+			trustErr = err
+		}
+	}
+	if trustErr != nil && !protectedInline {
+		return trustErr
+	}
+	input.BackendTrustWithdrawalOnly = trustErr != nil
 	return nil
 }
 
@@ -142,6 +173,17 @@ func (o *BackendTLSObserver) ObserveWithPendingCA(ctx context.Context, service *
 }
 
 func (o *BackendTLSObserver) observe(ctx context.Context, service *corev1.Service, port *corev1.ServicePort, ancestor *backendtls.GatewayAncestor, allowPendingCA bool) (backendtls.Selection, error) {
+	selection, err := o.observeService(ctx, service, port, ancestor, allowPendingCA)
+	if allowPendingCA && errors.Is(err, backendtls.ErrClusterTrustBundleUnavailable) {
+		return selection, nil
+	}
+	if err != nil {
+		return backendtls.Selection{}, err
+	}
+	return selection, nil
+}
+
+func (o *BackendTLSObserver) observeService(ctx context.Context, service *corev1.Service, port *corev1.ServicePort, ancestor *backendtls.GatewayAncestor, allowPendingCA bool) (backendtls.Selection, error) {
 	items, err := o.policiesInNamespace(ctx, service.Namespace)
 	if err != nil {
 		return backendtls.Selection{}, err
@@ -171,13 +213,11 @@ func (o *BackendTLSObserver) observe(ctx context.Context, service *corev1.Servic
 		if policy.Name != selection.Winner.Key.Name {
 			continue
 		}
-		if key, ok := backendtls.CAKey(policy, o.bundles != nil); ok && key.Namespace == "" && !allowPendingCA {
-			if err := o.cas.ClusterTrustBundles[key.Name].Unavailable; err != nil {
-				return backendtls.Selection{}, err
-			}
-		}
 		if ancestor != nil {
 			selection.Winner.AncestorSlot = ancestor.Slot(policy)
+		}
+		if key, ok := backendtls.CAKey(policy, o.bundles != nil); ok && key.Namespace == "" {
+			return selection, o.cas.ClusterTrustBundles[key.Name].Unavailable
 		}
 		break
 	}

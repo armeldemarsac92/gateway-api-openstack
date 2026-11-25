@@ -1182,6 +1182,9 @@ func buildRouteEnsurePlanWithActivations(desired desiredRoute, actual observedRo
 		return nil, routeStateFromObservation(actual), err
 	case actual.pool == nil:
 		fallback := routeMutation{kind: routeMutationCreatePool, persistenceFallback: true}
+		if desired.protectedInlinePersistence() {
+			fallback.poolTags = new([]string{backendTLSRefusalTag})
+		}
 		return []routeMutation{fallback}, cloud.RouteState{}, nil
 	}
 	// Reconcile the exact policy against an independently observed empty
@@ -1190,7 +1193,14 @@ func buildRouteEnsurePlanWithActivations(desired desiredRoute, actual observedRo
 	var steps []routeMutation
 	var state cloud.RouteState
 	var fallbackErr error
-	if !actual.pool.AdminStateUp && (hasBackendTLSSettings(*actual.pool, actual.backendTLS) || hasObservedBackendTLS(*actual.pool, actual.backendTLS)) {
+	if desired.protectedInlinePersistence() {
+		// Keep the exact match on the empty observed pool, without allowing
+		// a policy fallback to change its authenticated transport or state.
+		state = routeStateFromObservation(actual)
+		if actual.pool.AdminStateUp || hasObservedBackendTLS(*actual.pool, actual.backendTLS) {
+			steps, state, fallbackErr = buildRouteEnsurePolicyPlan(desired, actual.policies, state.PoolID, state, nil, batchActivations)
+		}
+	} else if !actual.pool.AdminStateUp && (hasBackendTLSSettings(*actual.pool, actual.backendTLS) || hasObservedBackendTLS(*actual.pool, actual.backendTLS)) {
 		state = routeStateFromObservation(actual)
 		if desired.authenticatedH2Cookie() && actual.pool.Protocol == cloud.ListenerProtocolHTTP &&
 			(slices.Contains(actual.pool.Tags, backendTLSManagedTag) || actual.backendTLS.Hostname != "") {
@@ -1950,8 +1960,9 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 		var subjectAltNames []cloud.BackendTLSSubjectAltName
 		requireH2 := step.backendTLS != nil && step.backendTLS.RequireH2 != nil && *step.backendTLS.RequireH2
 		systemCA := step.backendTLS != nil && step.backendTLS.SystemCA != nil && *step.backendTLS.SystemCA
-		if step.poolTags != nil && (desired.xBackend || desired.spec.GRPC || systemCA || step.backendTLS != nil &&
-			(step.backendTLS.ClientCertificateReference != "" || len(step.backendTLS.SubjectAltNames) != 0)) {
+		if step.poolTags != nil && (desired.xBackend || desired.spec.GRPC && !desired.protectedInlinePersistence() ||
+			systemCA || step.backendTLS != nil && (desired.protectedInlinePersistence() ||
+			step.backendTLS.ClientCertificateReference != "" || len(step.backendTLS.SubjectAltNames) != 0)) {
 			// Authenticated XBackends and extended Service TLS start closed.
 			// Enabling traffic requires independent, ownership-checked readback.
 			opts.AdminStateUp = boolPointer(false)

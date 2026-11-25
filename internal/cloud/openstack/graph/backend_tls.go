@@ -32,6 +32,9 @@ import (
 )
 
 const backendTLSManagedTag = "gateway-api-openstack.backend-tls=v1"
+
+// A refusal is an empty stock pool created before authenticated transport was available.
+const backendTLSRefusalTag = "gateway-api-openstack.backend-tls-refusal=v1"
 const backendTLSSystemCATag = "gateway-api-openstack.backend-tls-system-ca=v1"
 const backendTLSRevisionTagPrefix = "gateway-api-openstack.backend-tls-ca="
 const backendTLSClientTag = "gateway-api-openstack.backend-tls-client=v1"
@@ -88,7 +91,7 @@ func (plan backendTLSPlan) stagesSystemCA() bool {
 }
 
 func hasObservedBackendTLS(pool pools.Pool, tls octavia.PoolBackendTLS) bool {
-	return slices.Contains(pool.Tags, backendTLSManagedTag) || tls.Hostname != "" || tls.RequireH2 || hasUnclearedSystemCA(pool, tls) || hasUnclearedBackendTLSSubjectAltNames(pool, tls)
+	return slices.Contains(pool.Tags, backendTLSManagedTag) || slices.Contains(pool.Tags, backendTLSRefusalTag) || tls.Hostname != "" || tls.RequireH2 || hasUnclearedSystemCA(pool, tls) || hasUnclearedBackendTLSSubjectAltNames(pool, tls)
 }
 
 func (r desiredRoute) requiresBackendTLSH2() bool {
@@ -158,7 +161,7 @@ func hasBackendTLSSettings(pool pools.Pool, tls octavia.PoolBackendTLS) bool {
 		pool.TLSContainerRef != "" || pool.CRLContainerRef != "" || hasUnclearedSystemCA(pool, tls) || hasUnclearedBackendTLSSubjectAltNames(pool, tls)
 }
 
-func xBackendPoolWithoutTLS(pool pools.Pool, tls octavia.PoolBackendTLS) bool {
+func poolWithoutBackendTLS(pool pools.Pool, tls octavia.PoolBackendTLS) bool {
 	return tls.AdminObserved && tls.EnabledObserved && tls.CAObserved && tls.ClientRefObserved &&
 		!hasBackendTLSSettings(pool, tls) && len(pool.ALPNProtocols) == 0 &&
 		!slices.ContainsFunc(pool.Tags, func(tag string) bool {
@@ -185,6 +188,34 @@ func (p *Provider) prepareBackendTLS(ctx context.Context, desired *desiredGatewa
 		return nil
 	}
 	return p.planBackendTLS(ctx, desired, actual)
+}
+
+// During an ordinary consumer's trust outage the graph stays frozen, except
+// for owned inline pools whose current transport could still send plaintext.
+func inlineBackendTLSWithdrawal(desired *desiredGatewayGraph, actual observedGatewayGraph) *graphMutation {
+	if actual.loadBalancer == nil || actual.loadBalancer.ProvisioningStatus != "ACTIVE" ||
+		actual.protocol != cloud.ListenerProtocolHTTP || desired.spec.Gateway.Disposition != cloud.GraphEnsure ||
+		len(actual.routes) != len(desired.routes) {
+		return nil
+	}
+	parts := backendTLSParts(desired, actual.routes)
+	parts = slices.DeleteFunc(parts, func(part backendTLSPart) bool {
+		if part.retiring || part.observed.pool == nil {
+			return true
+		}
+		if part.desired != nil {
+			return !part.desired.protectedInlinePersistence()
+		}
+		// An obsolete owned pool may still serve the previous rule key.
+		// Only the route replacing it with a protected inline pool can withdraw it.
+		return !slices.ContainsFunc(desired.routes[part.index].httpParts, desiredRoute.protectedInlinePersistence)
+	})
+	return firstBackendTLSWithdrawal(parts, func(part backendTLSPart) backendTLSPlan {
+		if part.desired != nil && part.desired.keepsInlineRefusal(part.observed) {
+			return backendTLSPlan{phase: backendTLSDenied}
+		}
+		return part.preflight()
+	})
 }
 
 // planBackendTLS classifies owned pools using readback alone, so it can also
@@ -225,8 +256,9 @@ func (p *Provider) planBackendTLS(ctx context.Context, desired *desiredGatewayGr
 		if part.desired == nil {
 			// Keep the old pool and its durable marker until a live policy
 			// inventory authorizes the replacement representation.
+			stockRefusal := p.backendTLSPolicy && markedEmptyInlineRefusal(part.observed)
 			if pool := part.observed.pool; pool != nil && hasObservedBackendTLS(*pool, part.observed.backendTLS) &&
-				(!desired.routes[part.index].spec.BackendTLSObserved || !capable(false, false, false) ||
+				(!desired.routes[part.index].spec.BackendTLSObserved || !stockRefusal && !capable(false, false, false) ||
 					pool.CATLSContainerRef != "" && p.backendCA == nil) {
 				desired.spec.Routes[part.index].Disposition = cloud.GraphPreserve
 				desired.routes[part.index].backendTLS = backendTLSPlan{phase: backendTLSBlocked, issue: "Waiting for a current backend TLS policy inventory before replacing the route pools"}
@@ -315,6 +347,11 @@ func (part backendTLSPart) preflight() backendTLSPlan {
 		}
 		return backendTLSPlan{}
 	}
+	if part.desired != nil && part.desired.keepsInlineRefusal(part.observed) {
+		// The empty refusal pool can keep its match until regional discovery
+		// confirms that TLS can be staged.
+		return backendTLSPlan{}
+	}
 	if part.clientCertificate.Denied && part.desired != nil && part.desired.spec.BackendTLS != nil {
 		return backendTLSPlan{phase: backendTLSBlocked, clearClientCertificate: clearClient}
 	}
@@ -344,14 +381,32 @@ func firstBackendTLSWithdrawal(parts []backendTLSPart, plan func(backendTLSPart)
 	var first *graphMutation
 	for _, part := range parts {
 		if pool := part.observed.pool; pool != nil && pool.TLSContainerRef != "" && !slices.Contains(pool.Tags, backendTLSManagedTag) &&
-			(part.desired == nil || part.desired.spec.BackendTLS == nil) {
+			!slices.Contains(pool.Tags, backendTLSRefusalTag) && (part.desired == nil || part.desired.spec.BackendTLS == nil) {
 			continue
 		}
-		protect := part.desired == nil || part.desired.spec.BackendTLS != nil
-		requiresClosedPool := part.desired != nil && protect && (part.desired.spec.GRPC ||
+		protect := part.desired == nil || part.desired.spec.BackendTLS != nil ||
+			part.observed.pool != nil && slices.Contains(part.observed.pool.Tags, backendTLSRefusalTag)
+		requiresClosedPool := part.desired != nil && protect && (part.desired.spec.GRPC || part.desired.inlineSessionPersistence ||
 			part.desired.spec.BackendTLS != nil && (len(part.desired.spec.BackendTLS.SubjectAltNames) != 0 ||
 				part.desired.spec.BackendTLS.Trust == cloud.BackendTLSTrustSystem))
 		tlsPlan := plan(part)
+		if part.desired == nil && markedEmptyInlineRefusal(part.observed) {
+			// A representation change can leave just the owned stock pool.
+			// Keep its match until the current inventory permits replacement.
+			continue
+		}
+		if part.desired != nil && part.desired.keepsInlineRefusal(part.observed) &&
+			(tlsPlan.denies() || tlsPlan.phase == backendTLSRelease) {
+			// An independently verified empty refusal pool keeps its L7
+			// match selected on stock Octavia. It has no endpoints to close.
+			if tlsPlan.denies() && !slices.Contains(part.observed.pool.Tags, backendTLSRefusalTag) {
+				pool := part.observed.pool
+				step := routeMutation{kind: routeMutationSetBackendTLS, id: pool.ID,
+					poolTags: new(append(slices.Clone(pool.Tags), backendTLSRefusalTag))}
+				return &graphMutation{kind: graphRouteMutation, routeIndex: part.index, backendKey: part.key, route: step, message: step.message()}
+			}
+			continue
+		}
 		var step *routeMutation
 		if part.desired != nil && part.desired.xBackend && !part.retiring {
 			if part.desired.xBackendPlaintext && xBackendTLSCleared(part.observed) {
@@ -375,6 +430,21 @@ func firstBackendTLSWithdrawal(parts []backendTLSPart, plan func(backendTLSPart)
 		}
 	}
 	return first
+}
+
+func (r desiredRoute) keepsInlineRefusal(observed observedRouteGraph) bool {
+	return r.inlineSessionPersistence && emptyInlinePersistenceFallback(observed) &&
+		(r.spec.BackendTLS != nil || slices.Contains(observed.pool.Tags, backendTLSRefusalTag))
+}
+
+func markedEmptyInlineRefusal(observed observedRouteGraph) bool {
+	return emptyInlinePersistenceFallback(observed) && slices.Contains(observed.pool.Tags, backendTLSRefusalTag)
+}
+
+func emptyInlinePersistenceFallback(observed observedRouteGraph) bool {
+	pool := observed.pool
+	return pool != nil && pool.ProvisioningStatus == "ACTIVE" && pool.AdminStateUp && len(observed.members) == 0 &&
+		!slices.Contains(pool.Tags, backendTLSManagedTag) && poolWithoutBackendTLS(*pool, observed.backendTLS)
 }
 
 func (plan backendTLSPlan) xBackendWithdrawal(observed observedRouteGraph, wantsClientCertificate bool) *routeMutation {
@@ -425,7 +495,13 @@ func (p *Provider) observeBackendTLS(ctx context.Context, desired desiredRoute, 
 		if pool == nil || !hasObservedBackendTLS(*pool, observed.backendTLS) {
 			return backendTLSPlan{}
 		}
-		if desired.xBackendPlaintext && slices.Contains(pool.Tags, backendTLSManagedTag) && xBackendPoolWithoutTLS(*pool, observed.backendTLS) {
+		if desired.inlineSessionPersistence && desired.spec.BackendTLSObserved && p.backendTLSPolicy &&
+			markedEmptyInlineRefusal(observed) {
+			// No TLS settings were installed. A complete policy inventory can
+			// release this stock pool without any regional TLS extension.
+			return backendTLSPlan{phase: backendTLSRelease}
+		}
+		if desired.xBackendPlaintext && slices.Contains(pool.Tags, backendTLSManagedTag) && poolWithoutBackendTLS(*pool, observed.backendTLS) {
 			// A live mode None can release a temporary quarantine even on
 			// stock Octavia. Actual TLS enrollment still needs the TLS gate.
 			return backendTLSPlan{phase: backendTLSRelease}
@@ -567,7 +643,7 @@ func differentBackendTLSRevision(tags []string, expected string) bool {
 
 func backendTLSTags(tags []string, managed bool, revision string, clientCertificate, trackSAN bool) []string {
 	tags = slices.DeleteFunc(slices.Clone(tags), func(tag string) bool {
-		return tag == backendTLSManagedTag || tag == backendTLSClientTag || tag == xBackendTLSClientTag ||
+		return tag == backendTLSManagedTag || tag == backendTLSRefusalTag || tag == backendTLSClientTag || tag == xBackendTLSClientTag ||
 			!managed && tag == backendTLSSystemCATag || strings.HasPrefix(tag, backendTLSRevisionTagPrefix)
 	})
 	if managed {
@@ -640,6 +716,14 @@ func (plan backendTLSPlan) poolMutation(desired desiredRoute, observed observedR
 		return &routeMutation{kind: routeMutationClaimBackendCA}
 	}
 	pool := observed.pool
+	if desired.protectedInlinePersistence() && plan.denies() {
+		if pool == nil {
+			return &routeMutation{kind: routeMutationCreatePool, poolTags: new([]string{backendTLSRefusalTag}), persistenceFallback: true}
+		}
+		if emptyInlinePersistenceFallback(observed) {
+			return nil
+		}
+	}
 	if desired.xBackend && plan.denies() {
 		switch {
 		case desired.fixedResponse:
@@ -649,7 +733,7 @@ func (plan backendTLSPlan) poolMutation(desired desiredRoute, observed observedR
 			return &routeMutation{kind: routeMutationCreatePool, persistenceFallback: desired.authenticatedH2Cookie()}
 		case pool.ProvisioningStatus == "ACTIVE" && observed.backendTLS.AdminObserved &&
 			!pool.AdminStateUp && len(observed.members) == 0 &&
-			xBackendPoolWithoutTLS(*pool, observed.backendTLS):
+			poolWithoutBackendTLS(*pool, observed.backendTLS):
 			// Regional Amphora renders disabled authenticated pools as closed
 			// targets. A stock API needs the empty target enabled.
 			return &routeMutation{kind: routeMutationSetBackendTLS, id: pool.ID, poolAdmin: boolPointer(true)}
@@ -666,7 +750,7 @@ func (plan backendTLSPlan) poolMutation(desired desiredRoute, observed observedR
 		return &routeMutation{kind: routeMutationPublishBackendCA}
 	}
 	if pool == nil {
-		step := routeMutation{kind: routeMutationCreatePool, poolTags: &managedTags}
+		step := routeMutation{kind: routeMutationCreatePool, poolTags: &managedTags, persistenceFallback: desired.protectedInlinePersistence()}
 		if plan.phase == backendTLSConfigure {
 			step.backendTLS = &plan.settings
 			step.poolTags = new(plan.poolTags(desired, nil))
