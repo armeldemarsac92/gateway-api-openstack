@@ -112,7 +112,8 @@ func (p *Provider) protectHTTPURLPolicyTraffic(ctx context.Context, desired desi
 		}
 		retryClosure := listener.ProvisioningStatus == "ERROR" &&
 			(predicate.capability == octavia.GatewayCapabilityRequestURLRewrite || predicate.capability == octavia.GatewayCapabilityTargetRequestFilters ||
-				predicate.capability == octavia.GatewayCapabilityRequestCORS || predicate.capability == octavia.GatewayCapabilityTargetResponseHeaders)
+				predicate.capability == octavia.GatewayCapabilityRequestCORS || predicate.capability == octavia.GatewayCapabilityTargetResponseHeaders ||
+				predicate.capability == octavia.GatewayCapabilityPolicyExternalAuth)
 		if available && !state.unsettled && !retryClosure {
 			continue
 		}
@@ -159,10 +160,12 @@ func (p *Provider) protectHTTPURLPolicyTraffic(ctx context.Context, desired desi
 			clearRewrite := patch != nil && patch.Value == nil
 			clearCORS := step.route.requestCORSUpdate != nil && step.route.requestCORSUpdate.Value == nil
 			targetWithdrawal := step.route.kind == routeMutationSetPolicyTarget && step.route.withdrawHTTPPolicy
-			if requiresWithdrawal[listenerID] && !httpURLPolicyCleanup(step.route.kind) && !clearRewrite && !clearCORS && !targetWithdrawal {
+			part := graphRoutePart(desired, step)
+			localAuthRejection := predicate.capability == octavia.GatewayCapabilityPolicyExternalAuth && part.rejectsWithoutForwarding()
+			if requiresWithdrawal[listenerID] && !httpURLPolicyCleanup(step.route.kind) && !clearRewrite && !clearCORS && !targetWithdrawal && !localAuthRejection {
 				return true
 			}
-			return unavailable[listenerID] && writeRequiresCapability(graphRoutePart(desired, step), step.route)
+			return unavailable[listenerID] && writeRequiresCapability(part, step.route)
 		}
 		return false
 	})

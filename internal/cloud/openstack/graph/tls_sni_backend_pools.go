@@ -136,6 +136,7 @@ func (target desiredSNIFragment) backendPool(slot int) desiredSNIFragment {
 func hasHTTPOnlySNIOptions(row octavia.L7PolicyObservation) bool {
 	tags := row.Policy.Tags
 	return row.RedirectRequestPresent || row.RequestHeaderOperationsErr != nil || len(row.RequestHeaderOperations) != 0 ||
+		row.ExternalAuthPresent || slices.Contains(tags, routeExternalAuthTag) ||
 		row.ResponseHeaderOperationsErr != nil || len(row.ResponseHeaderOperations) != 0 ||
 		row.RequestURLRewritePresent || slices.Contains(tags, openstackidentity.RequestURLRewritePolicyTag) ||
 		row.HTTPRequestPolicyPresent || slices.Contains(tags, openstackidentity.HTTPRequestPolicyTag) ||

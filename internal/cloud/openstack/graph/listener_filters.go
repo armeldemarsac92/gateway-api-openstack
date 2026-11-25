@@ -57,7 +57,19 @@ type listenerFilterMutation struct {
 
 func (p *Provider) observeListenerAuthPools(ctx context.Context, desired desiredGatewayGraph, actual *observedGatewayGraph, inventory octavia.PoolInventory) (map[string]observedAuthPool, error) {
 	owned := make(map[string]observedAuthPool)
-	ids := make(map[string]bool)
+	poolsByID := make(map[string]pools.Pool)
+	var routeRefs map[string]map[string]bool
+	if len(desired.routeAuthorizers()) != 0 || slices.ContainsFunc(inventory.Items, func(pool pools.Pool) bool {
+		return isListenerAuthPool(pool) && (p.routeExternalAuth || slices.ContainsFunc(pool.Listeners, func(parent pools.ListenerID) bool {
+			return !listenerAuthPoolIDs(actual.requestFilters[parent.ID].Sections)[pool.ID]
+		}))
+	}) {
+		var err error
+		routeRefs, err = p.observeRouteAuthReferences(ctx, desired, actual)
+		if err != nil {
+			return nil, err
+		}
+	}
 	for _, pool := range inventory.Items {
 		if !isListenerAuthPool(pool) {
 			continue
@@ -68,13 +80,13 @@ func (p *Provider) observeListenerAuthPools(ctx context.Context, desired desired
 		if err := validateDefaultPoolParent(pool, actual.loadBalancer.ID, cloud.ListenerProtocolHTTP); err != nil {
 			return nil, err
 		}
-		if pool.ProjectID != p.projectID || ids[pool.ID] || !strings.HasPrefix(pool.Name, "gateway-api-listener-auth-") ||
+		if pool.ProjectID != p.projectID || poolsByID[pool.ID].ID != "" || !strings.HasPrefix(pool.Name, "gateway-api-listener-auth-") ||
 			owned[pool.Name].pool.ID != "" || pool.MonitorID != "" || hasObservedBackendTLS(pool, inventory.BackendTLS[pool.ID]) ||
 			inventory.BackendH2C[pool.ID] {
 			return nil, fmt.Errorf("%w: invalid listener authorization pool inventory", cloud.ErrOwnershipConflict)
 		}
 		for _, parent := range pool.Listeners {
-			if !listenerAuthPoolIDs(actual.requestFilters[parent.ID].Sections)[pool.ID] {
+			if !listenerAuthPoolIDs(actual.requestFilters[parent.ID].Sections)[pool.ID] && !routeRefs[pool.ID][parent.ID] {
 				return nil, fmt.Errorf("%w: listener authorization pool has an unproven listener reference", cloud.ErrOwnershipConflict)
 			}
 		}
@@ -83,7 +95,18 @@ func (p *Provider) observeListenerAuthPools(ctx context.Context, desired desired
 			return nil, err
 		}
 		owned[pool.Name] = observedAuthPool{pool: pool, members: members, admin: inventory.BackendTLS[pool.ID].AdminObserved}
-		ids[pool.ID] = true
+		poolsByID[pool.ID] = pool
+	}
+	for id, parents := range routeRefs {
+		pool, found := poolsByID[id]
+		if !found {
+			return nil, fmt.Errorf("%w: HTTPRoute authorization references an unproven pool", cloud.ErrOwnershipConflict)
+		}
+		for listenerID := range parents {
+			if !slices.Contains(pool.Listeners, pools.ListenerID{ID: listenerID}) {
+				return nil, fmt.Errorf("%w: HTTPRoute authorization pool omits its listener", cloud.ErrOwnershipConflict)
+			}
+		}
 	}
 	return owned, nil
 }
@@ -388,7 +411,8 @@ func (p *Provider) planListenerFilters(ctx context.Context, desired desiredGatew
 	if disposition == cloud.GraphDelete {
 		configured = nil
 	}
-	if len(owned) == 0 && !actual.hasListenerFilterConfig(desired) {
+	routeAuth := desired.routeAuthorizers()
+	if len(owned) == 0 && len(routeAuth) == 0 && !actual.hasListenerFilterConfig(desired) {
 		return
 	}
 	actual.unverifiedListenerFilters = make(map[int]bool)
@@ -409,6 +433,9 @@ func (p *Provider) planListenerFilters(ctx context.Context, desired desiredGatew
 		}
 	}
 	desiredPools, referencedPools := make(map[string]bool), make(map[string]bool)
+	for name := range routeAuth {
+		desiredPools[name] = true
+	}
 	for port, sections := range configured {
 		for _, section := range sections {
 			for _, auth := range section.Requests {
@@ -429,6 +456,7 @@ func (p *Provider) planListenerFilters(ctx context.Context, desired desiredGatew
 		}
 	}
 
+	actual.planRouteAuthPools(routeAuth, owned, referencedPools, allReferencesObserved)
 	var next, repair *graphMutation
 	for _, frontend := range actual.scopedListeners {
 		port := frontend.ProtocolPort

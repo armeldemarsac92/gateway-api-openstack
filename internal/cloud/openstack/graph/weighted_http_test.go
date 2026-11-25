@@ -469,27 +469,37 @@ func TestWeightedHTTPRuleReorderKeepsAuthorizedPredicateServing(t *testing.T) {
 
 func TestObserveWeightedHTTPPolicyRequiresOwnedPoolEdges(t *testing.T) {
 	for _, tc := range []struct {
-		name  string
-		owner poolRouteOwner
-		want  bool
+		name          string
+		owner         poolRouteOwner
+		weightedOff   bool
+		installedAuth bool
+		want          bool
 	}{
 		{name: "owned pool", owner: poolRouteOwner{route: 0, backend: "service"}, want: true},
 		{name: "other route", owner: poolRouteOwner{route: 1, backend: "service"}},
 		{name: "scalar pool", owner: poolRouteOwner{route: 0}},
+		{name: "installed authorization after opt-out", owner: poolRouteOwner{route: 0, backend: "service"}, weightedOff: true, installedAuth: true, want: true},
+		{name: "ordinary policy after opt-out", owner: poolRouteOwner{route: 0, backend: "service"}, weightedOff: true},
+		{name: "other route after opt-out", owner: poolRouteOwner{route: 1, backend: "service"}, weightedOff: true, installedAuth: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			identity := safetyTestIdentity(t)
 			key := openstackidentity.HTTPWeightedRuleKey(2)
 			match := openstackidentity.HTTPMatchKey("", cloud.PathMatchExact, "/api", "")
+			tags := safetyRouteTags(t, identity, openstackidentity.HTTPWeightedPolicyRole(rolePolicyExact, key, match))
 			policy := map[string]any{
 				"id": "policy-1", "project_id": "project-a", "listener_id": "listener-1", "action": "WEIGHTED_TARGETS",
 				"redirect_pool_id": nil, "targets": []octavia.WeightedHTTPTarget{{Weight: 3, PoolID: "pool-1"}, fixedWeightedHTTPTarget(1)},
 				"admin_state_up": true, "position": 1, "provisioning_status": "ACTIVE",
 				"rules": []map[string]string{{"id": "rule-1"}},
-				"tags":  safetyRouteTags(t, identity, openstackidentity.HTTPWeightedPolicyRole(rolePolicyExact, key, match)),
+				"tags":  tags,
+			}
+			if tc.installedAuth {
+				policy["tags"] = append(tags, routeExternalAuthTag)
+				policy["external_auth"] = map[string]string{"pool_id": "b5f68fe4-1d6d-4bba-8be6-cdd310ae6896"}
 			}
 			rule := map[string]any{"id": "rule-1", "project_id": "project-a", "tags": safetyRouteTags(t, identity, openstackidentity.HTTPWeightedPolicyRole(roleRulePath, key, match))}
-			provider := &Provider{projectID: "project-a", fixedHTTPResponses: true, weightedHTTPTargets: true,
+			provider := &Provider{projectID: "project-a", fixedHTTPResponses: true, weightedHTTPTargets: !tc.weightedOff,
 				octavia: octavia.NewService(safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 					switch req.URL.Path {
 					case "/lbaas/l7policies":
@@ -502,7 +512,7 @@ func TestObserveWeightedHTTPPolicyRequiresOwnedPoolEdges(t *testing.T) {
 					}
 				})))}
 			inventory := routeGraphInventory{owners: []routeGraphOwner{{identity: identity}}, graphs: make([]observedRouteGraph, 1)}
-			listener := &listeners.Listener{ID: "listener-1", L7Policies: []l7policies.L7Policy{{ID: "policy-1"}}}
+			listener := &listeners.Listener{ID: "listener-1", Protocol: cloud.ListenerProtocolHTTP, L7Policies: []l7policies.L7Policy{{ID: "policy-1"}}}
 			err := provider.observeListenerPolicies(t.Context(), &inventory, listener, cloud.ListenerProtocolHTTP,
 				map[string]poolRouteOwner{"pool-1": tc.owner}, true)
 			if !tc.want {

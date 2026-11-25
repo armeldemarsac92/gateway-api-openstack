@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 
@@ -455,11 +456,13 @@ func (p *Provider) recoverHTTPBackendGatewayDeletion(ctx context.Context, identi
 			return gatewayDeletionPlan{}, fmt.Errorf("%w: HTTP backend recovery requires an owned HTTP listener without a default pool", cloud.ErrOwnershipConflict)
 		}
 	}
-	poolInventory, err := p.listGatewayPoolInventory(ctx, lb)
-	if err != nil {
+	actual := observedGatewayGraph{loadBalancer: lb, listener: listener, requestFilters: inventory.RequestFilters}
+	desired := desiredGatewayGraph{identity: identity, protocol: cloud.ListenerProtocolHTTP}
+	if err := p.observeListenerFilterPools(ctx, desired, &actual); err != nil {
 		return gatewayDeletionPlan{}, err
 	}
-	routes, err := p.observeRouteGraphsFromPools(ctx, owners, lb, listener, cloud.ListenerProtocolHTTP, nil, poolInventory, &identity, nil)
+	routes, err := p.observeRouteGraphsFromPools(ctx, owners, actual.httpPools.loadBalancer, listener, cloud.ListenerProtocolHTTP, nil,
+		actual.httpPools.routes, &identity, actual.httpsIsolationPolicies)
 	if err != nil {
 		return gatewayDeletionPlan{}, err
 	}
@@ -473,6 +476,16 @@ func (p *Provider) recoverHTTPBackendGatewayDeletion(ctx context.Context, identi
 		}
 	}
 	deletion, outcome := p.httpGatewayDeletionPlan(routes, listenerList)
+	for _, name := range slices.Sorted(maps.Keys(actual.httpPools.auth)) {
+		pool := actual.httpPools.auth[name]
+		if len(pool.pool.Listeners) == 0 {
+			if step := listenerAuthPoolRemoval(pool); step != nil {
+				deletion.pools = append(deletion.pools, step.deletion)
+			} else if len(deletion.pools) == 0 && len(deletion.routes) == 0 {
+				deletion.defaultPoolPending = "Waiting for an HTTP authorization pool before Gateway cleanup"
+			}
+		}
+	}
 	if outcome.State == cloud.OutcomeProgressing {
 		deletion.defaultPoolPending = outcome.Message
 	}

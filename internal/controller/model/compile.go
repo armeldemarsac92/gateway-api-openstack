@@ -209,9 +209,19 @@ func compileRoute(route *gatewayv1.HTTPRoute, input Input) Route {
 	supportedRules := 0
 	for i, rule := range route.Spec.Rules {
 		// Rule names identify API sections. The index groups matches by rule and breaks precedence ties.
-		compiled := Rule{Index: i, Backends: ResolveBackends(route, rule, input)}
+		compiled := Rule{Index: i}
 		kind := HTTPProfileRouteKind(route)
 		ordinaryHTTP := kind == HTTPRouteKind
+		if ordinaryHTTP && input.CheckRouteExternalAuth && HasHTTPRouteExternalAuth(rule) {
+			compiled.ExternalAuth, compiled.ExternalAuthDiagnostic = NormalizeHTTPRouteExternalAuth(rule, input.RouteExternalAuth, input.WeightedHTTPTargets)
+			rule.Filters = nil
+			if compiled.ExternalAuthDiagnostic != nil {
+				// Preserve the rule's matches for local rejection.
+				rule.BackendRefs, rule.Timeouts, rule.Retry = nil, nil, nil
+				rule.SessionPersistence = nil //nolint:staticcheck // Still served in the v1.7 Experimental bundle.
+			}
+		}
+		compiled.Backends = ResolveBackends(route, rule, input)
 		mirrors, diagnostic := NormalizeRequestMirrors(rule.Filters, input.HTTPRequestMirror, len(rule.BackendRefs) > 0)
 		if diagnostic != nil {
 			compiled.Diagnostics = append(compiled.Diagnostics, *diagnostic)

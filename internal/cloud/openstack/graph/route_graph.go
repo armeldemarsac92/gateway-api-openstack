@@ -49,6 +49,10 @@ type observedRoutePolicy struct {
 	requestRedirectPresent   bool
 	requestURLRewrite        *octavia.RequestURLRewrite
 	requestPolicy            *cloud.HTTPRequestPolicy
+	externalAuth             *octavia.ListenerHTTPExternalAuth
+	externalAuthPresent      bool
+	externalAuthReported     bool
+	externalAuthTagged       bool
 	requestMirrors           []octavia.HTTPRequestMirror
 	requestMirrorsTagged     bool
 	requestMirrorsReported   bool
@@ -115,6 +119,7 @@ type routeGraphOwner struct {
 	requiresPolicyAbsenceProof bool
 	requiresHTTPHostIsolation  bool
 	requestCORSPorts           []int
+	routeExternalAuthPorts     []int
 	backendResponseHeaderPorts []int
 }
 
@@ -538,6 +543,13 @@ func (p *Provider) observeListenerPolicies(ctx context.Context, inventory *route
 			return row.Policy.ProjectID == p.projectID && row.Policy.ListenerID == listener.ID &&
 				(row.RequestCORSPresent || slices.Contains(row.Policy.Tags, openstackidentity.RequestCORSPolicyTag))
 		}))
+	authRelevant := protocol == cloud.ListenerProtocolHTTP &&
+		(slices.ContainsFunc(inventory.owners, func(owner routeGraphOwner) bool {
+			return slices.Contains(owner.routeExternalAuthPorts, listener.ProtocolPort)
+		}) || slices.ContainsFunc(items, func(row octavia.L7PolicyObservation) bool {
+			return row.Policy.ProjectID == p.projectID && row.Policy.ListenerID == listener.ID &&
+				(row.ExternalAuthPresent || slices.Contains(row.Policy.Tags, routeExternalAuthTag))
+		}))
 	backendResponseHeadersRelevant := protocol == cloud.ListenerProtocolHTTP &&
 		(slices.ContainsFunc(inventory.owners, func(owner routeGraphOwner) bool {
 			return slices.Contains(owner.backendResponseHeaderPorts, listener.ProtocolPort)
@@ -546,6 +558,9 @@ func (p *Provider) observeListenerPolicies(ctx context.Context, inventory *route
 				reportsBackendResponseHeaders(row)
 		}))
 	inventoryError := func(err error) error {
+		if authRelevant && !errors.Is(err, cloud.ErrOwnershipConflict) {
+			return incompleteRouteAuthInventory(listener.ID, "", err)
+		}
 		if backendResponseHeadersRelevant && !errors.Is(err, cloud.ErrOwnershipConflict) {
 			return incompleteBackendResponseHeaderInventory(listener.ID, "", err)
 		}
@@ -571,6 +586,7 @@ func (p *Provider) observeListenerPolicies(ctx context.Context, inventory *route
 		return ok && (role.redirect || item.RequestURLRewritePresent || slices.Contains(item.Policy.Tags, openstackidentity.RequestURLRewritePolicyTag) ||
 			item.HTTPRequestPolicyPresent || slices.Contains(item.Policy.Tags, openstackidentity.HTTPRequestPolicyTag) ||
 			item.RequestCORSPresent || slices.Contains(item.Policy.Tags, openstackidentity.RequestCORSPolicyTag) ||
+			item.ExternalAuthPresent || slices.Contains(item.Policy.Tags, routeExternalAuthTag) ||
 			reportsBackendResponseHeaders(item))
 	}) {
 		strict = true
@@ -626,6 +642,19 @@ func (p *Provider) observeListenerPolicies(ctx context.Context, inventory *route
 		target := observation.Target
 		corsTag := slices.Contains(item.Tags, openstackidentity.RequestCORSPolicyTag)
 		hasCORS := corsTag || observation.RequestCORSPresent
+		hasRouteAuth := observation.ExternalAuthPresent || slices.Contains(item.Tags, routeExternalAuthTag)
+		if hasRouteAuth {
+			if protocol != cloud.ListenerProtocolHTTP || listener.Protocol != cloud.ListenerProtocolHTTP && listener.Protocol != terminatedHTTPS ||
+				role.redirect || requestRedirect || item.ProjectID != p.projectID || item.ListenerID != listener.ID ||
+				!slices.Contains(item.Tags, routeExternalAuthTag) {
+				return &cloud.GraphError{Identity: owner.identity.Value(), Err: fmt.Errorf("%w: unproven HTTPRoute authorization policy", cloud.ErrOwnershipConflict)}
+			}
+			if !observation.ExternalAuthReported || observation.ExternalAuthPresent && observation.ExternalAuth == nil ||
+				observation.AdminState == nil || item.Position <= 0 ||
+				item.Action != string(l7policies.ActionRedirectToPool) && item.Action != string(octavia.ActionWeightedTargets) {
+				return &cloud.GraphError{Identity: owner.identity.Value(), Err: incompleteRouteAuthInventory(listener.ID, item.ID, nil)}
+			}
+		}
 		if strictPolicy && (item.ProjectID != p.projectID || item.ListenerID != listener.ID) {
 			return &cloud.GraphError{Identity: owner.identity.Value(), Err: fmt.Errorf("%w: L7 policy %s has an unproven project or listener", cloud.ErrOwnershipConflict, item.ID)}
 		}
@@ -695,7 +724,7 @@ func (p *Provider) observeListenerPolicies(ctx context.Context, inventory *route
 					fmt.Errorf("HTTP redirect policy %s has incomplete action or administrative state", item.ID))}
 			}
 		case role.weighted || weighted:
-			if !p.weightedHTTPTargets && !hasBackendFilters && !hasBackendResponseHeaders && !hasCORS && !hasMirrors || !role.weighted || !weighted || target == nil || target.FixedResponse != nil || !initialRules && target.AdminStateUp == nil ||
+			if !p.weightedHTTPTargets && !hasBackendFilters && !hasBackendResponseHeaders && !hasCORS && !hasMirrors && !hasRouteAuth || !role.weighted || !weighted || target == nil || target.FixedResponse != nil || !initialRules && target.AdminStateUp == nil ||
 				string(target.RedirectPool) != "null" || item.RedirectPoolID != "" || item.RedirectURL != "" || item.RedirectPrefix != "" || item.RedirectHttpCode != 0 ||
 				!ownedWeightedHTTPPolicyTargets(target.WeightedTargets, poolOwners, routeIndex) {
 				return &cloud.GraphError{Identity: owner.identity.Value(), Err: fmt.Errorf("%w: L7 policy %s has an unproven weighted HTTP target", cloud.ErrOwnershipConflict, item.ID)}
@@ -769,6 +798,8 @@ func (p *Provider) observeListenerPolicies(ctx context.Context, inventory *route
 			observed.requestURLRewrite = observation.RequestURLRewrite
 		}
 		observed.requestPolicyPresent = observation.HTTPRequestPolicyPresent
+		observed.externalAuth, observed.externalAuthReported, observed.externalAuthPresent = observation.ExternalAuth, observation.ExternalAuthReported, observation.ExternalAuthPresent
+		observed.externalAuthTagged = slices.Contains(item.Tags, routeExternalAuthTag)
 		observed.requestPolicyReported = observation.HTTPRequestPolicyReported
 		observed.requestPolicyTagged = slices.Contains(item.Tags, openstackidentity.HTTPRequestPolicyTag)
 		observed.retryBackoffTagged = slices.Contains(item.Tags, openstackidentity.HTTPRetryBackoffTag)
@@ -1394,7 +1425,7 @@ func buildRouteEnsureBackendPlan(desired desiredRoute, actual observedRouteGraph
 		for _, policy := range actual.policies {
 			if policy.role == wantedPolicy.role && !policy.policy.AdminStateUp &&
 				(wantedPolicy.requestCORS == nil || requestCORSPolicy.settled(wantedPolicy, policy)) &&
-				wantedPolicy.requestPolicyMatches(policy) && wantedPolicy.requestMirrorsMatch(policy) {
+				wantedPolicy.requestPolicyMatches(policy) && wantedPolicy.requestMirrorsMatch(policy) && wantedPolicy.externalAuthMatches(policy) {
 				if policy.initialRules && !initialL7RulesReady(policy, rulesFor(wantedPolicy, desired.hostnameRuleValue)) {
 					if len(plan) != 0 {
 						return plan, state, nil
@@ -1406,6 +1437,7 @@ func buildRouteEnsureBackendPlan(desired desiredRoute, actual observedRouteGraph
 				}
 				plan = append(plan, routeMutation{kind: routeMutationEnablePolicy, id: policy.policy.ID,
 					policy: desiredPolicy{httpsListenerHostname: wantedPolicy.httpsListenerHostname,
+						externalAuth: wantedPolicy.externalAuth, resolvedExternalAuth: wantedPolicy.resolvedExternalAuth,
 						resolvedRequestMirrors: wantedPolicy.resolvedRequestMirrors, weightedPlan: wantedPolicy.weightedPlan,
 						targetFilters:       wantedPolicy.targetFilters,
 						grpcContentTypeRule: wantedPolicy.grpcContentTypeRule, requestURLRewrite: wantedPolicy.requestURLRewrite, requestCORS: wantedPolicy.requestCORS,
@@ -1480,6 +1512,29 @@ func buildRoutePolicyPlan(
 	}
 	for _, wantedPolicy := range desired.policies {
 		observedPolicy, exists := actualPolicies[wantedPolicy.role]
+		if exists && !wantedPolicy.externalAuthMatches(observedPolicy) {
+			// Stage a changed authorization decision on a disabled policy. A
+			// replacement carries the complete target and auth filter in one POST.
+			if !observedPolicyDisabled(observedPolicy) {
+				disablePlan = append(disablePlan, routeMutation{kind: routeMutationDisablePolicy, id: observedPolicy.policy.ID,
+					retry: true, withdrawHTTPPolicy: true})
+				continue
+			}
+			if !observedPolicy.externalAuthReadable() ||
+				wantedPolicy.externalAuth != nil && wantedPolicy.resolvedExternalAuth == nil && observedPolicy.externalAuth == nil {
+				continue
+			}
+			// An ERROR pool can only be replaced after its last policy
+			// reference is gone. This owned policy is already closed.
+			for _, change := range buildRouteDeletionPlan(observedRouteGraph{policies: []observedRoutePolicy{observedPolicy}}) {
+				change.withdrawHTTPPolicy = true
+				plan = append(plan, change)
+			}
+			continue
+		}
+		if !exists && wantedPolicy.externalAuth != nil && wantedPolicy.resolvedExternalAuth == nil {
+			continue
+		}
 		if wantedPolicy.targetsPending() {
 			if exists {
 				state.L7PolicyIDs = append(state.L7PolicyIDs, observedPolicy.policy.ID)
@@ -2054,6 +2109,13 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 			create.WeightedTargets = *step.weightedTargets
 		}
 		create.RequestMirrors = step.policy.resolvedRequestMirrors
+		if step.policy.externalAuth != nil {
+			if step.policy.resolvedExternalAuth == nil {
+				return errors.New("waiting for the HTTPRoute authorization pool")
+			}
+			create.ExternalAuth = step.policy.resolvedExternalAuth
+			create.Tags = append(create.Tags, routeExternalAuthTag)
+		}
 		if len(create.RequestMirrors) != 0 || step.weightedTargets != nil && weightedTargetHasMirrors(*step.weightedTargets) {
 			if create.RequestMirrors == nil {
 				create.RequestMirrors = []octavia.HTTPRequestMirror{}

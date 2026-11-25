@@ -896,6 +896,12 @@ func (p *Provider) prepareGraphMutation(ctx context.Context, desired desiredGate
 	case graphCreateListener, graphSetListenerNotFound, graphEnableListener, graphEnableLoadBalancer:
 	case graphRouteMutation:
 		part := graphRoutePart(desired, step)
+		if step.route.policy.externalAuth != nil && (step.route.kind == routeMutationCreatePolicy || step.route.kind == routeMutationEnablePolicy) {
+			if step.route.policy.resolvedExternalAuth == nil {
+				return step, cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady, errors.New("waiting for the HTTPRoute authorization pool"))
+			}
+			required = append(required, octavia.GatewayCapabilityPolicyExternalAuth)
+		}
 		fixed = fixed && routeNeedsHTTPCapability(part, step.route)
 		if requestMirrorWriteRequiresCapability(step.route) {
 			mirrorCapabilities = requestMirrorCapabilities(part.spec.GRPC)

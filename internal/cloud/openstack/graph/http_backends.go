@@ -105,6 +105,12 @@ func httpPlanningParts(desired desiredGatewayGraph, actual observedGatewayGraph)
 			backend.policies = slices.Clone(backend.policies)
 			for i := range backend.policies {
 				policy := &backend.policies[i]
+				if auth := policy.externalAuth; auth != nil {
+					port := httpURLPolicyRoutePort(desired, backend)
+					if id := actual.routeAuthPools[listenerAuthPoolName(port, *auth)]; id != "" {
+						policy.resolvedExternalAuth = policyAuthorizer(id, *auth)
+					}
+				}
 				current := observedMirrorPolicy(&fragment, policy.role)
 				policy.resolvedRequestMirrors = resolveHTTPMirrors(route, observed, policy.requestMirrors, current.requestMirrors)
 				if backend.fixedResponse && len(policy.resolvedRequestMirrors) == 0 {

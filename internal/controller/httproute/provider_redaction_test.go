@@ -33,7 +33,7 @@ func TestUnknownProviderFailuresAreRedacted(t *testing.T) {
 	cause := errors.New("response=private-body token=secret-token")
 	for name, handle := range map[string]func() (ctrl.Result, error){
 		"ensure": func() (ctrl.Result, error) {
-			return reconciler.handleRouteProviderFailure(nil, gatewayv1.ParentReference{}, false, model.Diagnostic{}, cause, "EnsureHTTPRoute")
+			return reconciler.handleRouteProviderFailure(nil, gatewayv1.ParentReference{}, false, model.Diagnostic{}, "", cause, "EnsureHTTPRoute")
 		},
 		"delete": func() (ctrl.Result, error) {
 			return reconciler.handleRouteFinalizationFailure(context.Background(), nil, cloud.Identity{}, cause)

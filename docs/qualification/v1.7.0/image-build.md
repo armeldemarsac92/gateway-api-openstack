@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-Cookie affinity on an Experimental h2c EndpointSelector XBackend kept requests on one HTTP/2 endpoint until persistence was removed. [Build record](image.json) · [Both channels](provider/xbackend-cookie-h2c/receipt.json)
+An Experimental HTTPRoute authorized one rule and continued serving the public sibling while the protected rule's grant was removed and restored. [Build record](image.json) · [Both channels](provider/http-route-external-auth/README.md)
+
+Cookie affinity on an Experimental h2c EndpointSelector XBackend kept requests on one HTTP/2 endpoint until persistence was removed. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-80010b8ad4502b335351582273cff8200d8f5de7/image.json) · [Both channels](provider/xbackend-cookie-h2c/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-80010b8ad4502b335351582273cff8200d8f5de7)
 
 An Experimental HTTPRoute and a TCPRoute each used two default Gateways. The Standard control exercised an explicit Gateway parent. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-9388be4580dd0fac002e160c3433d65cf1665a86/image.json) · [Both channels](provider/default-gateways/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-9388be4580dd0fac002e160c3433d65cf1665a86)
 

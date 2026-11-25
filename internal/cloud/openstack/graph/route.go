@@ -70,6 +70,8 @@ type desiredPolicy struct {
 	responseHeaderOperations []cloud.HTTPHeaderOperation
 	requestURLRewrite        *octavia.RequestURLRewrite
 	requestPolicy            *cloud.HTTPRequestPolicy
+	externalAuth             *cloud.ListenerExternalAuth
+	resolvedExternalAuth     *octavia.ListenerHTTPExternalAuth
 	requestMirrors           []desiredHTTPMirror
 	resolvedRequestMirrors   []octavia.HTTPRequestMirror
 	requestCORS              *cloud.HTTPCORS
@@ -610,6 +612,19 @@ func (p *Provider) buildHTTPMatchPolicies(r *desiredRoute, matches []cloud.HTTPP
 		if err != nil {
 			return err
 		}
+		if match.ExternalAuth != nil {
+			if !p.routeExternalAuth || !p.fixedHTTPResponses || r.spec.GRPC || r.redirect ||
+				len(match.RequestHeaderOperations) != 0 || len(match.ResponseHeaderOperations) != 0 ||
+				match.CORS != nil || match.URLRewrite != nil || match.RequestPolicy != nil || len(match.RequestMirrors) != 0 ||
+				slices.ContainsFunc(targetFilters, func(target octavia.WeightedHTTPTarget) bool {
+					return target.HasRequestFilters() || len(target.ResponseHeaderOperations) != 0 || len(target.RequestMirrors) != 0
+				}) {
+				return errors.New("HTTPRoute ExternalAuth requires opt-in, fixed responses and a forwarding HTTP rule without additional transformations")
+			}
+			if err := validateRouteAuthorizer(*match.ExternalAuth); err != nil {
+				return err
+			}
+		}
 		if r.spec.GRPC {
 			if err := cloud.ValidateGRPCRequestMetadata(operations); err != nil {
 				return err
@@ -661,6 +676,9 @@ func (p *Provider) buildHTTPMatchPolicies(r *desiredRoute, matches []cloud.HTTPP
 			return err
 		}
 		for _, policy := range policies {
+			if !r.fixedResponse {
+				policy.externalAuth = match.ExternalAuth
+			}
 			policy.requestMirrors = mirrors
 			policy.requestPolicy = requestPolicy
 			policy.requestCORS = match.CORS

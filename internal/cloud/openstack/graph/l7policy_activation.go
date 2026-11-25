@@ -217,7 +217,7 @@ func canBatchPolicyActivation(route desiredRoute, observed observedRouteGraph, p
 			continue
 		}
 		if !policy.initialRules || policy.policy.ListenerID != listenerID || policy.activationOptions != "" ||
-			policy.urlRewriteTagged || policy.corsTagged || policy.backendRequestFiltersTagged ||
+			policy.hasExternalAuth() || policy.urlRewriteTagged || policy.corsTagged || policy.backendRequestFiltersTagged ||
 			policy.policy.Action != string(l7policies.ActionRedirectToPool) || policy.policy.RedirectPoolID != observed.pool.ID ||
 			policy.policy.RedirectURL != "" || policy.policy.RedirectPrefix != "" || policy.policy.RedirectHttpCode != 0 {
 			return false
