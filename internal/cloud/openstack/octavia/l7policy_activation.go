@@ -155,7 +155,7 @@ func (s *Service) ObserveGRPCAuthRecovery(ctx context.Context, listenerID string
 		return GRPCAuthRecovery{}, fmt.Errorf("observe Octavia gRPC authorization recovery: %w", err)
 	}
 	if recovery.OperationID == "" {
-		return GRPCAuthRecovery{}, errors.New("Octavia gRPC authorization recovery omitted the operation ID")
+		return GRPCAuthRecovery{}, errors.New("missing operation ID in Octavia gRPC authorization recovery response")
 	}
 	return recovery, nil
 }

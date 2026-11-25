@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	gatewaycontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
@@ -246,13 +247,14 @@ func (r *backendTLSPolicyStatusReconciler) tcpBackendTLSAvailability(ctx context
 }
 
 func (r *backendTLSPolicyStatusReconciler) grpcAuthorizerTLSAvailability(ctx context.Context, validation *backendtls.Validation) backendTLSAvailability {
-	probe := r.routes.RouteExternalAuthGRPCAvailable
+	probe := r.routes.RouteExternalAuthAvailable
 	if probe == nil || validation == nil {
 		return backendTLSUnknown
 	}
 	tls := validation.CloudValidation()
 	tls.RequireH2 = true
-	return discoverBackendTLSAvailability(ctx, func(ctx context.Context) (bool, error) { return probe(ctx, tls, false) })
+	auth := cloud.ListenerExternalAuth{Protocol: cloud.ExternalAuthProtocolGRPC, BackendTLS: tls}
+	return discoverBackendTLSAvailability(ctx, func(ctx context.Context) (bool, error) { return probe(ctx, auth, false) })
 }
 
 func mergeBackendTLSConsumer(ancestors map[types.NamespacedName]backendTLSPolicyConditions, key types.NamespacedName, conditions backendTLSPolicyConditions) {

@@ -103,10 +103,8 @@ type Reconciler struct {
 	BackendH2CAvailable func(context.Context) (bool, error)
 	// BackendClientCertificateForGateway resolves the Gateway identity required by TLS authorizers.
 	BackendClientCertificateForGateway func(context.Context, *gatewayv1.Gateway) cloud.BackendClientCertificate
-	// RouteExternalAuthAvailable checks regional HTTP L7 policy authorization support.
-	RouteExternalAuthAvailable func(context.Context, bool) (bool, error)
-	// RouteExternalAuthGRPCAvailable checks regional gRPC authorization and its selected transport.
-	RouteExternalAuthGRPCAvailable func(context.Context, *cloud.BackendTLSValidation, bool) (bool, error)
+	// RouteExternalAuthAvailable checks the capabilities needed by the selected rule.
+	RouteExternalAuthAvailable func(context.Context, cloud.ListenerExternalAuth, bool) (bool, error)
 	// XBackendClientCertificates resolves identities from the operator's XBackend enrollment.
 	XBackendClientCertificates graph.XBackendClientCertificateResolver
 	// TCPBackendTLSAvailable checks authenticated TLS for terminating TLSRoutes.

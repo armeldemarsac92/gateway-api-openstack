@@ -148,7 +148,7 @@ func TestHTTPRouteExternalAuthRejectsUnsupportedCompositionAndRegion(t *testing.
 			assertRouteRequests(t, f.reconciler.enqueueRoutesForBackendTLSPolicy(t.Context(), policy), f.route)
 		}, "backend TLS is unsupported"},
 		{"unenrolled region", func(_ *testing.T, f *routeModelInputFixture) {
-			f.reconciler.RouteExternalAuthAvailable = func(context.Context, bool) (bool, error) { return false, nil }
+			f.reconciler.RouteExternalAuthAvailable = func(context.Context, cloud.ListenerExternalAuth, bool) (bool, error) { return false, nil }
 		}, "does not advertise"},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
@@ -245,6 +245,40 @@ func TestHTTPRouteExternalAuthPreservesWeightedOrigins(t *testing.T) {
 	require.Equal(t, "authorize-uid", rule.Matches[0].ExternalAuth.ServiceUID)
 }
 
+func TestHTTPRouteChecksBodyForwardingCapabilityPerRule(t *testing.T) {
+	f, _, _ := externalAuthFixture(t)
+	withBody := f.route.Spec.Rules[1].DeepCopy()
+	withBody.Matches[0].Path.Value = ptr.To("/upload")
+	withBody.Filters[0].ExternalAuth.ForwardBody = &gatewayv1.ForwardBodyConfig{MaxSize: 65536}
+	smallBody := withBody.DeepCopy()
+	smallBody.Matches[0].Path.Value = ptr.To("/small-upload")
+	smallBody.Filters[0].ExternalAuth.ForwardBody.MaxSize = 1024
+	f.route.Spec.Rules = append(f.route.Spec.Rules, *withBody, *smallBody)
+	require.NoError(t, f.client.Update(t.Context(), f.route))
+
+	regionalLimit := int32(1024)
+	f.reconciler.RouteExternalAuthAvailable = func(_ context.Context, auth cloud.ListenerExternalAuth, _ bool) (bool, error) {
+		return auth.ForwardBodyMaxSize <= regionalLimit, nil
+	}
+	observed := f.observe(t).Nodes[0].Spec
+	require.Len(t, observed.FixedHTTPRules, 1)
+	require.Equal(t, "/upload", observed.FixedHTTPRules[0].Matches[0].PathValue)
+	require.True(t, slices.ContainsFunc(observed.HTTPBackends[0].Matches, func(match cloud.HTTPPathMatch) bool {
+		return match.PathValue == "/private" && match.ExternalAuth != nil && match.ExternalAuth.ForwardBodyMaxSize == 0
+	}))
+
+	require.True(t, slices.ContainsFunc(observed.HTTPBackends[0].Matches, func(match cloud.HTTPPathMatch) bool {
+		return match.PathValue == "/small-upload" && match.ExternalAuth != nil && match.ExternalAuth.ForwardBodyMaxSize == 1024
+	}))
+
+	regionalLimit = 65536
+	observed = f.observe(t).Nodes[0].Spec
+	require.Empty(t, observed.FixedHTTPRules)
+	require.True(t, slices.ContainsFunc(observed.HTTPBackends[0].Matches, func(match cloud.HTTPPathMatch) bool {
+		return match.PathValue == "/upload" && match.ExternalAuth != nil && match.ExternalAuth.ForwardBodyMaxSize == 65536
+	}))
+}
+
 func TestHTTPRouteGRPCExternalAuthIsOptInAndKeepsOtherRulesServing(t *testing.T) {
 	f, grant, _ := externalAuthFixture(t)
 	grpc := f.route.Spec.Rules[1].DeepCopy()
@@ -274,9 +308,9 @@ func TestHTTPRouteGRPCExternalAuthIsOptInAndKeepsOtherRulesServing(t *testing.T)
 	assertLocalRejection("/grpc-auth")
 
 	f.reconciler.Config.RouteExternalAuthGRPC = true
-	f.reconciler.RouteExternalAuthGRPCAvailable = func(_ context.Context, tls *cloud.BackendTLSValidation, _ bool) (bool, error) {
-		require.Nil(t, tls)
-		return false, nil
+	f.reconciler.RouteExternalAuthAvailable = func(_ context.Context, config cloud.ListenerExternalAuth, _ bool) (bool, error) {
+		require.Nil(t, config.BackendTLS)
+		return config.Protocol != cloud.ExternalAuthProtocolGRPC, nil
 	}
 	assertLocalRejection("/grpc-auth")
 	key := client.ObjectKeyFromObject(f.route)
@@ -287,11 +321,17 @@ func TestHTTPRouteGRPCExternalAuthIsOptInAndKeepsOtherRulesServing(t *testing.T)
 	require.True(t, meta.IsStatusConditionTrue(conditions, string(gatewayv1.RouteConditionAccepted)))
 	require.True(t, meta.IsStatusConditionTrue(conditions, string(gatewayv1.RouteConditionPartiallyInvalid)))
 
-	f.reconciler.RouteExternalAuthGRPCAvailable = func(context.Context, *cloud.BackendTLSValidation, bool) (bool, error) { return true, nil }
+	f.reconciler.RouteExternalAuthAvailable = func(_ context.Context, config cloud.ListenerExternalAuth, _ bool) (bool, error) {
+		return config.ForwardBodyMaxSize == 0, nil
+	}
 	f.route.Spec.Rules[2].Filters[0].ExternalAuth.ForwardBody.MaxSize = 1024
 	require.NoError(t, f.client.Update(t.Context(), f.route))
 	assertLocalRejection("/grpc-auth")
-	f.route.Spec.Rules[2].Filters[0].ExternalAuth.ForwardBody.MaxSize = 0
+	f.reconciler.RouteExternalAuthAvailable = func(context.Context, cloud.ListenerExternalAuth, bool) (bool, error) { return true, nil }
+	f.route.Spec.Rules[2].Filters[0].ExternalAuth.ForwardBody.MaxSize = cloud.MaxGRPCExternalAuthBodySize + 1
+	require.NoError(t, f.client.Update(t.Context(), f.route))
+	assertLocalRejection("/grpc-auth")
+	f.route.Spec.Rules[2].Filters[0].ExternalAuth.ForwardBody.MaxSize = 1024
 	require.NoError(t, f.client.Update(t.Context(), f.route))
 	snapshot := f.observe(t)
 	spec := snapshot.Nodes[0].Spec
@@ -301,6 +341,7 @@ func TestHTTPRouteGRPCExternalAuthIsOptInAndKeepsOtherRulesServing(t *testing.T)
 	require.GreaterOrEqual(t, i, 0)
 	protected := matches[i]
 	require.Equal(t, cloud.ExternalAuthProtocolGRPC, protected.ExternalAuth.Protocol)
+	require.Equal(t, int32(1024), protected.ExternalAuth.ForwardBodyMaxSize)
 	require.Equal(t, []string{"authorization", "x-user"}, protected.ExternalAuth.AllowedRequestHeaders)
 	public := slices.IndexFunc(matches, func(match cloud.HTTPPathMatch) bool { return match.PathValue == "/" })
 	require.GreaterOrEqual(t, public, 0)
@@ -314,7 +355,7 @@ func TestHTTPRouteGRPCExternalAuthIsOptInAndKeepsOtherRulesServing(t *testing.T)
 func TestHTTPRouteGRPCExternalAuthWeightedLossPreservesSiblingRules(t *testing.T) {
 	f, _, _ := externalAuthFixture(t)
 	f.reconciler.Config.RouteExternalAuthGRPC, f.reconciler.Config.WeightedHTTPTargets = true, true
-	f.reconciler.RouteExternalAuthGRPCAvailable = func(_ context.Context, _ *cloud.BackendTLSValidation, weighted bool) (bool, error) {
+	f.reconciler.RouteExternalAuthAvailable = func(_ context.Context, _ cloud.ListenerExternalAuth, weighted bool) (bool, error) {
 		return !weighted, nil
 	}
 	single := &f.route.Spec.Rules[1]
@@ -346,7 +387,8 @@ func TestHTTPRouteGRPCExternalAuthWeightedLossPreservesSiblingRules(t *testing.T
 func TestHTTPRouteGRPCExternalAuthUsesBackendTLSPolicyAndFencesChanges(t *testing.T) {
 	f, _, _ := externalAuthFixture(t)
 	f.reconciler.Config.RouteExternalAuthGRPC, f.reconciler.Config.BackendTLSPolicy = true, true
-	f.reconciler.RouteExternalAuthGRPCAvailable = func(_ context.Context, tls *cloud.BackendTLSValidation, _ bool) (bool, error) {
+	f.reconciler.RouteExternalAuthAvailable = func(_ context.Context, config cloud.ListenerExternalAuth, _ bool) (bool, error) {
+		tls := config.BackendTLS
 		require.NotNil(t, tls)
 		require.Equal(t, cloud.BackendTLSTrustSystem, tls.Trust)
 		require.Equal(t, "authorize.example.test", tls.Hostname)
@@ -415,7 +457,7 @@ func externalAuthFixture(t *testing.T) (*routeModelInputFixture, *gatewayv1.Refe
 	config.GatewayAPIChannel = features.FeatureChannelExperimental
 	config.RouteExternalAuth, config.FixedHTTPResponses = true, true
 	f := newRouteModelInputFixtureWithConfig(t, config)
-	f.reconciler.RouteExternalAuthAvailable = func(context.Context, bool) (bool, error) { return true, nil }
+	f.reconciler.RouteExternalAuthAvailable = func(context.Context, cloud.ListenerExternalAuth, bool) (bool, error) { return true, nil }
 	auth := f.service.DeepCopy()
 	auth.Namespace, auth.Name, auth.UID, auth.ResourceVersion = "auth", "authorize", "authorize-uid", ""
 	endpoints := f.endpoints.DeepCopy()

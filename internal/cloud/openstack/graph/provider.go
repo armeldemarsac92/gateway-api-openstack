@@ -247,20 +247,13 @@ func (p *Provider) BackendH2CAvailable(ctx context.Context) (bool, error) {
 
 // RouteExternalAuthAvailable reports whether the regional policy API can
 // authorize a request on its selected HTTP route before forwarding it.
-func (p *Provider) RouteExternalAuthAvailable(ctx context.Context, weighted bool) (bool, error) {
-	if !p.routeExternalAuth || !p.fixedHTTPResponses {
-		return false, nil
-	}
-	return p.amphoraCapabilityAvailable(ctx, routeAuthorizerCapabilities(cloud.ListenerExternalAuth{}, weighted)...)
-}
-
-// RouteExternalAuthGRPCAvailable verifies the selected authorizer transport.
-func (p *Provider) RouteExternalAuthGRPCAvailable(ctx context.Context, tls *cloud.BackendTLSValidation, weighted bool) (bool, error) {
-	if !p.routeExternalAuthGRPC || !p.fixedHTTPResponses ||
+func (p *Provider) RouteExternalAuthAvailable(ctx context.Context, auth cloud.ListenerExternalAuth, weighted bool) (bool, error) {
+	tls := auth.BackendTLS
+	if !p.routeAuthorizerEnabled(auth) || !p.fixedHTTPResponses ||
 		tls != nil && (!p.backendTLSPolicy || !p.poolALPN || tls.Trust == cloud.BackendTLSTrustReference && p.backendCA == nil) {
 		return false, nil
 	}
-	return p.amphoraCapabilityAvailable(ctx, routeAuthorizerCapabilities(cloud.ListenerExternalAuth{Protocol: cloud.ExternalAuthProtocolGRPC, BackendTLS: tls}, weighted)...)
+	return amphoraDiscoveryResult(p.octavia.VerifyGatewayCapabilitiesForBody(ctx, "amphora", auth.ForwardBodyMaxSize, routeAuthorizerCapabilities(auth, weighted)...))
 }
 
 func (p *Provider) backendTLSAvailable(ctx context.Context, requireH2, requireSAN bool) (bool, error) {
@@ -362,7 +355,10 @@ func (p *Provider) UDPPacketDropAvailable(ctx context.Context) (bool, error) {
 }
 
 func (p *Provider) amphoraCapabilityAvailable(ctx context.Context, capabilities ...string) (bool, error) {
-	err := p.octavia.VerifyGatewayCapabilities(ctx, "amphora", capabilities...)
+	return amphoraDiscoveryResult(p.octavia.VerifyGatewayCapabilities(ctx, "amphora", capabilities...))
+}
+
+func amphoraDiscoveryResult(err error) (bool, error) {
 	var missing *octavia.MissingGatewayCapability
 	if errors.As(err, &missing) {
 		return false, nil
@@ -371,11 +367,15 @@ func (p *Provider) amphoraCapabilityAvailable(ctx context.Context, capabilities 
 }
 
 func (p *Provider) verifyGatewayHTTPCapabilities(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, required []string) error {
+	return p.verifyGatewayHTTPRequirements(ctx, desired, actual, required, 0)
+}
+
+func (p *Provider) verifyGatewayHTTPRequirements(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, required []string, bodySize int32) error {
 	provider := desired.spec.Gateway.Spec.Provider
 	if actual.loadBalancer != nil {
 		provider = actual.loadBalancer.Provider
 	}
-	if err := p.octavia.VerifyGatewayCapabilities(ctx, provider, required...); err != nil {
+	if err := p.octavia.VerifyGatewayCapabilitiesForBody(ctx, provider, bodySize, required...); err != nil {
 		return cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady, fmt.Errorf("verify Octavia Gateway HTTP capabilities in region %q: %w", p.region, err))
 	}
 	return nil

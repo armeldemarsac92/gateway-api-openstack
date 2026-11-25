@@ -79,6 +79,9 @@ func routeAuthorizerCapabilities(auth cloud.ListenerExternalAuth, weighted bool)
 	if auth.Protocol == cloud.ExternalAuthProtocolGRPC {
 		required = grpcAuthorizerCapabilities(auth.BackendTLS)
 	}
+	if auth.ForwardBodyMaxSize > 0 {
+		required = append(required, octavia.GatewayCapabilityPolicyExternalAuthForwardBody)
+	}
 	if weighted {
 		required = append(required, octavia.GatewayCapabilityWeightedHTTPTargets)
 	}
@@ -120,6 +123,9 @@ func routeAuthorizerPoolTag(protocol string) string {
 }
 
 func validateRouteAuthorizer(auth cloud.ListenerExternalAuth) error {
+	if auth.ForwardBodyMaxSize < 0 || auth.Protocol == cloud.ExternalAuthProtocolGRPC && auth.ForwardBodyMaxSize > cloud.MaxGRPCExternalAuthBodySize {
+		return errors.New("HTTPRoute authorization request body limit is outside the supported protocol range")
+	}
 	if auth.Protocol == cloud.ExternalAuthProtocolGRPC && (auth.PathPrefix != "" || len(auth.AllowedResponseHeaders) != 0) ||
 		auth.BackendTLS != nil && (auth.Protocol != cloud.ExternalAuthProtocolGRPC || !auth.BackendTLS.RequireH2 || auth.BackendTLS.Denied || !validBackendTLS(auth.BackendTLS)) {
 		return errors.New("invalid HTTPRoute authorization protocol or transport")
@@ -142,7 +148,7 @@ func validateRouteAuthorizer(auth cloud.ListenerExternalAuth) error {
 }
 
 func policyAuthorizer(poolID string, auth cloud.ListenerExternalAuth) *octavia.PolicyExternalAuth {
-	return &octavia.PolicyExternalAuth{Protocol: auth.Protocol, PoolID: poolID, PathPrefix: auth.PathPrefix,
+	return &octavia.PolicyExternalAuth{Protocol: auth.Protocol, PoolID: poolID, PathPrefix: auth.PathPrefix, ForwardBodyMaxSize: auth.ForwardBodyMaxSize,
 		AllowedRequestHeaders: auth.AllowedRequestHeaders, AllowedResponseHeaders: auth.AllowedResponseHeaders}
 }
 
@@ -165,7 +171,8 @@ func (wanted desiredPolicy) externalAuthMatches(observed observedRoutePolicy) bo
 	}
 	a, b := wanted.resolvedExternalAuth, observed.externalAuth
 	return a != nil && b != nil && observed.externalAuthTagged && observed.externalAuthReported && observed.externalAuthPresent &&
-		a.Protocol == b.Protocol && a.PoolID == b.PoolID && a.PathPrefix == b.PathPrefix && slices.Equal(a.AllowedRequestHeaders, b.AllowedRequestHeaders) &&
+		a.Protocol == b.Protocol && a.PoolID == b.PoolID && a.PathPrefix == b.PathPrefix && a.ForwardBodyMaxSize == b.ForwardBodyMaxSize &&
+		slices.Equal(a.AllowedRequestHeaders, b.AllowedRequestHeaders) &&
 		slices.Equal(a.AllowedResponseHeaders, b.AllowedResponseHeaders)
 }
 

@@ -80,3 +80,21 @@ func TestGRPCPolicyExternalAuthWireAndReadback(t *testing.T) {
 	_, err = opts.ToL7PolicyCreateMap()
 	require.Error(t, err)
 }
+
+func TestPolicyExternalAuthForwardBodyReadback(t *testing.T) {
+	grpc := PolicyExternalAuth{Protocol: "GRPC", PoolID: "12345678-1234-4000-8000-123456789abc", ForwardBodyMaxSize: 2146435071}
+	require.True(t, grpc.validPolicyAuth())
+	grpc.ForwardBodyMaxSize++
+	require.False(t, grpc.validPolicyAuth())
+	for _, record := range []string{
+		`{"pool_id":"12345678-1234-4000-8000-123456789abc","forward_body_max_size":1024}`,
+		`{"protocol":"GRPC","pool_id":"12345678-1234-4000-8000-123456789abc","forward_body_max_size":1024}`,
+	} {
+		observed := readPolicyExternalAuth(json.RawMessage(record))
+		require.NotNil(t, observed)
+		write, err := json.Marshal(observed)
+		require.NoError(t, err)
+		require.JSONEq(t, record, string(write))
+	}
+	require.Nil(t, readPolicyExternalAuth(json.RawMessage(`{"pool_id":"12345678-1234-4000-8000-123456789abc","forward_body_max_size":-1}`)))
+}

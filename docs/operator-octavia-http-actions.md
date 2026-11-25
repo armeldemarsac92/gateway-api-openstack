@@ -123,7 +123,7 @@ Enable the `octavia-http-request-mirror` controller component after the regional
 Enable `--octavia-http-route-external-auth` with `--gateway-api-channel=experimental` and
 `--octavia-fixed-http-responses`. The regional Amphora provider must advertise
 `l7policy_http_external_auth_v1` to program the filter. This flag uses a
-cleartext HTTP authorization Service and requires body forwarding to be disabled.
+cleartext HTTP authorization Service.
 An authorization response of HTTP 200 allows the request to reach the origin.
 The rule can specify an authorization path prefix and request and response header allowlists.
 
@@ -136,7 +136,27 @@ Octavia API microversion 2.24 or later with regional hostname validation and
 mandatory h2 ALPN. The rule uses the policy's trust and hostname, and the
 Gateway backend client certificate when configured. An empty gRPC
 request header allowlist sends all request headers. A populated list sends only
-its entries. Omit `forwardBody` or set `maxSize` to zero.
+its entries.
+
+Set `externalAuth.forwardBody.maxSize` on a rule when the authorization
+Service needs the original request body. A positive value requires the
+regional capability `l7policy_external_auth_forward_body_v1` in addition
+to the authorization transport. The region reports its per-request limit in
+`l7policy_external_auth_max_body_bytes`. The HTTP limit is at most
+2,147,483,647 bytes. The gRPC limit is at most 2,146,435,071 bytes so that
+the serialized Envoy request can also carry its metadata. The controller
+rejects a rule that asks for more than its transport or region supports.
+[Protocol Buffers message size limit](https://protobuf.dev/programming-guides/proto-limits/#total-size-of-the-message)
+
+Amphora returns HTTP 413 before calling the authorizer or the origin when the request exceeds it.
+At or below the limit the HTTP authorizer receives the original bytes with
+their Content-Length. A gRPC authorizer receives them in the Envoy
+`HttpRequest.raw_body` field with the byte count in `size`. Configure the
+authorizer's gRPC receive limit to accommodate the serialized CheckRequest,
+including its headers. Amphora returns 503 when concurrent uploads exhaust
+the shared body buffer configured by the operator. With an omitted or zero
+limit the authorizer receives
+a bodyless check and an allowed request keeps its original body at the origin.
 
 Use ExternalAuth as the only filter on the rule, with unfiltered Service
 backendRefs. More than one origin backend also requires

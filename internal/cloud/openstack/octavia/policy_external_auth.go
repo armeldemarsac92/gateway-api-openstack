@@ -29,6 +29,7 @@ import (
 
 const GatewayCapabilityPolicyExternalAuth = "l7policy_http_external_auth_v1"
 const GatewayCapabilityPolicyExternalAuthGRPC = "l7policy_grpc_external_auth_v1"
+const GatewayCapabilityPolicyExternalAuthForwardBody = "l7policy_external_auth_forward_body_v1"
 const policyExternalAuthField = "external_auth"
 
 // PolicyExternalAuth is the authorization filter attached to an L7 policy.
@@ -36,6 +37,7 @@ type PolicyExternalAuth struct {
 	Protocol               string   `json:"protocol,omitempty"`
 	PoolID                 string   `json:"pool_id"`
 	PathPrefix             string   `json:"path_prefix,omitempty"`
+	ForwardBodyMaxSize     int32    `json:"forward_body_max_size,omitempty"`
 	AllowedRequestHeaders  []string `json:"allowed_request_headers,omitempty"`
 	AllowedResponseHeaders []string `json:"allowed_response_headers,omitempty"`
 }
@@ -64,13 +66,13 @@ func (update PolicyExternalAuthUpdate) write(body map[string]any) error {
 
 func (auth PolicyExternalAuth) validPolicyAuth() bool {
 	id, err := uuid.Parse(auth.PoolID)
-	if err != nil || id.String() != auth.PoolID || !cloud.ValidExternalAuthPathPrefix(auth.PathPrefix) {
+	if err != nil || id.String() != auth.PoolID || auth.ForwardBodyMaxSize < 0 || !cloud.ValidExternalAuthPathPrefix(auth.PathPrefix) {
 		return false
 	}
 	switch auth.Protocol {
 	case "":
 	case cloud.ExternalAuthProtocolGRPC:
-		if auth.PathPrefix != "" || len(auth.AllowedResponseHeaders) != 0 {
+		if auth.ForwardBodyMaxSize > cloud.MaxGRPCExternalAuthBodySize || auth.PathPrefix != "" || len(auth.AllowedResponseHeaders) != 0 {
 			return false
 		}
 	default:
