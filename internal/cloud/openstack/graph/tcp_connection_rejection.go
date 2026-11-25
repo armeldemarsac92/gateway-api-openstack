@@ -61,42 +61,57 @@ func tcpRejectionBatchRequired(desired desiredRoute, observed observedRouteGraph
 		(desired.spec.TCPConnectionRejection != nil || observed.tcpRejection.Value != nil || observed.tcpRejection.Invalid)
 }
 
-func planTCPMembersAndRejection(desired desiredRoute, observed observedRouteGraph) (*routeMutation, []string, error) {
-	step, ids, changed, err := tcpMembersAndRejection(desired, observed, false)
+func planTransportBatch(desired desiredRoute, observed observedRouteGraph) (*routeMutation, []string, error) {
+	step, ids, changed, err := desiredTransportBatch(desired, observed, false)
 	if !changed || err != nil {
 		return nil, ids, err
 	}
 	return &step, ids, nil
 }
 
-// A pending batch can still hold old rows marked for deletion. Their
-// destinations do not form part of the persisted replacement payload.
-func tcpMembersAndRejection(desired desiredRoute, observed observedRouteGraph, pending bool) (routeMutation, []string, bool, error) {
-	if !observed.tcpRejection.Present || observed.tcpRejection.Invalid || len(observed.memberBatchUnreported) != 0 {
-		return routeMutation{}, nil, false, errTCPRejectionReadback
+func desiredTransportBatch(desired desiredRoute, observed observedRouteGraph, pending bool) (routeMutation, []string, bool, error) {
+	step := routeMutation{kind: routeMutationReplaceTransportMembers, id: observed.pool.ID}
+	var changed bool
+	readbackError := errTCPRejectionReadback
+	if drop := desired.spec.UDPPacketDrop; drop != nil {
+		readbackError = errUDPPacketDropReadback
+		if !observed.udpDropPool() || len(observed.pool.Listeners) != 1 || observed.udpDrop.Invalid ||
+			!observed.udpDrop.Present && (pending || len(observed.members) != 0) {
+			return step, nil, false, readbackError
+		}
+		step.udpDrop = drop
+		changed = !observed.udpDrop.Present || observed.udpDrop.Value != *drop
+	} else {
+		if !observed.tcpRejection.Present || observed.tcpRejection.Invalid {
+			return step, nil, false, readbackError
+		}
+		current, wanted := observed.tcpRejection.Value, desired.spec.TCPConnectionRejection
+		changed = (current == nil) != (wanted == nil) || current != nil && wanted != nil && *current != *wanted
+	}
+	if len(observed.memberBatchUnreported) != 0 {
+		return step, nil, false, readbackError
 	}
 	if err := crossCheckCompleteChildInventory("pool", observed.pool.ID, "member", observed.pool.Members, observed.members, func(member pools.Member) string { return member.ID }); err != nil {
-		return routeMutation{}, nil, false, errors.Join(errTCPRejectionReadback, err)
+		return step, nil, false, errors.Join(readbackError, err)
 	}
 	byAddress := make(map[string]pools.Member, len(observed.members))
 	for _, member := range observed.members {
+		// Pending deletes belong to the previous set.
 		if pending && member.ProvisioningStatus == "PENDING_DELETE" {
 			continue
 		}
 		byAddress[memberKey(member.Address, member.ProtocolPort)] = member
 	}
-	current, wanted := observed.tcpRejection.Value, desired.spec.TCPConnectionRejection
-	changed := (current == nil) != (wanted == nil) || current != nil && wanted != nil && *current != *wanted ||
-		len(byAddress) != len(desired.members)
-	members := make([]pools.BatchUpdateMemberOpts, 0, len(desired.members))
+	changed = changed || len(byAddress) != len(desired.members)
+	step.batchMembers = make([]pools.BatchUpdateMemberOpts, 0, len(desired.members))
 	var memberIDs []string
 	for _, member := range desired.members {
 		existing, matched := byAddress[memberKey(member.Address, member.Port)]
-		opts, err := tcpRejectionBatchMember(desired, member, existing)
+		opts, err := transportBatchMember(desired, member, existing)
 		if err != nil {
-			return routeMutation{}, nil, false, err
+			return step, nil, false, err
 		}
-		members = append(members, opts)
+		step.batchMembers = append(step.batchMembers, opts)
 		if matched {
 			memberIDs = append(memberIDs, existing.ID)
 		}
@@ -105,10 +120,10 @@ func tcpMembersAndRejection(desired desiredRoute, observed observedRouteGraph, p
 		changed = changed || !matched || existing.SubnetID != *opts.SubnetID || !existing.AdminStateUp ||
 			existing.Weight != *opts.Weight || existing.Backup != *opts.Backup || !slices.Equal(tags, opts.Tags)
 	}
-	return routeMutation{kind: routeMutationReplaceTCPMembers, id: observed.pool.ID, tcpMembers: members}, memberIDs, changed, nil
+	return step, memberIDs, changed, nil
 }
 
-func tcpRejectionBatchMember(desired desiredRoute, member cloud.Member, existing pools.Member) (pools.BatchUpdateMemberOpts, error) {
+func transportBatchMember(desired desiredRoute, member cloud.Member, existing pools.Member) (pools.BatchUpdateMemberOpts, error) {
 	opts := pools.BatchUpdateMemberOpts{
 		Address: member.Address, ProtocolPort: member.Port, SubnetID: &desired.spec.MemberSubnetID,
 		AdminStateUp: new(true), Backup: new(false), Weight: desired.memberWeight(member),
@@ -136,7 +151,7 @@ func tcpRejectionBatchMember(desired desiredRoute, member cloud.Member, existing
 		if opts.Weight == nil {
 			opts.Weight = &existing.Weight
 		}
-		if member.Weight == 0 || member.Draining {
+		if desired.protocol() == cloud.ListenerProtocolTCP && (member.Weight == 0 || member.Draining) {
 			opts.Backup = &existing.Backup
 		}
 	}
@@ -154,8 +169,11 @@ func tcpRejectionBatchMember(desired desiredRoute, member cloud.Member, existing
 	return opts, nil
 }
 
-func tcpRejectionProvisioningPending(route desiredRoute, observed observedRouteGraph) string {
-	if route.protocol() == cloud.ListenerProtocolTCP && observed.tcpRejection.Present {
+func transportBatchProvisioningPending(route desiredRoute, observed observedRouteGraph) string {
+	if route.udpDropUnverified && observed.pool != nil {
+		return errUDPPacketDropUnverified.Error()
+	}
+	if route.protocol() == cloud.ListenerProtocolTCP && observed.tcpRejection.Present || observed.udpDropPool() {
 		return observed.backendProvisioningIssue(true, true)
 	}
 	return ""
@@ -163,21 +181,29 @@ func tcpRejectionProvisioningPending(route desiredRoute, observed observedRouteG
 
 func defaultPoolCanServe(route desiredRoute) bool {
 	fraction := route.spec.TCPConnectionRejection
-	return fraction != nil && fraction.RejectWeight == fraction.TotalWeight ||
+	return route.dropsAllUDP() || fraction != nil && fraction.RejectWeight == fraction.TotalWeight ||
 		slices.ContainsFunc(route.members, func(member cloud.Member) bool { return !member.Draining })
 }
 
 // An explicit rejection of the batch leaves the old member set serving.
 // Reprove the owned default before withdrawing it. An ambiguous response
 // follows ordinary re-observation because Octavia may have accepted the write.
-func (p *Provider) withdrawAfterRejectedTCPBatch(ctx context.Context, desired desiredGatewayGraph, index int, result *cloud.GatewayGraphResult, failure error) (bool, error) {
+func (p *Provider) withdrawAfterRejectedTransportBatch(ctx context.Context, desired desiredGatewayGraph, index int, result *cloud.GatewayGraphResult, failure error) (bool, error) {
 	if !slices.ContainsFunc([]int{http.StatusBadRequest, http.StatusForbidden, http.StatusNotFound, http.StatusMethodNotAllowed,
 		http.StatusRequestEntityTooLarge, http.StatusUnprocessableEntity, http.StatusNotImplemented}, func(code int) bool { return gophercloud.ResponseCodeIs(failure, code) }) {
 		return false, nil
 	}
 	actual, err := p.observeGatewayGraph(ctx, desired)
-	if err != nil || actual.loadBalancer != nil && actual.loadBalancer.ProvisioningStatus != "ACTIVE" {
+	if err != nil {
 		return false, err
+	}
+	pendingUDP := hasAmphoraUDPGraph(actual) && actual.loadBalancer.ProvisioningStatus == "PENDING_UPDATE"
+	if pendingUDP {
+		if err := p.observePendingUDPRoutes(ctx, desired, &actual); err != nil {
+			return false, err
+		}
+	} else if actual.loadBalancer != nil && actual.loadBalancer.ProvisioningStatus != "ACTIVE" {
+		return false, nil
 	}
 	if actual.loadBalancer == nil || index < len(actual.routes) && actual.routes[index].pool == nil {
 		// An independently observed disappearance can be handled by normal
@@ -188,20 +214,29 @@ func (p *Provider) withdrawAfterRejectedTCPBatch(ctx context.Context, desired de
 		return false, nil
 	}
 	route := actual.routes[index]
+	if pendingUDP {
+		if route.pool.ProvisioningStatus != "PENDING_UPDATE" || !route.udpDrop.Present {
+			return false, nil
+		}
+		return true, p.deleteUDPPacketDropPool(ctx, desired, actual, index, result)
+	}
 	if route.pool.ProvisioningStatus != "ERROR" && route.backendProvisioningIssue(true, true) != "" {
 		return false, nil
 	}
-	frontends := tcpRejectionPoolListeners(actual, route.pool.ID)
+	frontends := servingPoolListeners(actual, route.pool.ID)
 	listener := slices.IndexFunc(frontends, func(listener listeners.Listener) bool {
 		return listener.ProvisioningStatus == "ACTIVE" || listener.ProvisioningStatus == "ERROR"
 	})
 	if listener == -1 {
 		return false, nil
 	}
+	if actual.protocol == cloud.ListenerProtocolUDP {
+		return true, p.deleteUDPPacketDropPool(ctx, desired, actual, index, result)
+	}
 	return true, p.withdrawTCPRejectionDefault(ctx, desired, actual, index, frontends[listener].ID, result)
 }
 
-func tcpRejectionPoolListeners(actual observedGatewayGraph, poolID string) []listeners.Listener {
+func servingPoolListeners(actual observedGatewayGraph, poolID string) []listeners.Listener {
 	if actual.listener != nil && actual.listener.DefaultPoolID == poolID {
 		return []listeners.Listener{*actual.listener}
 	}

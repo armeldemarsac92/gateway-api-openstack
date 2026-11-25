@@ -173,11 +173,17 @@ func (p *Provider) buildDefaultPoolGatewayDeletionPlan(ctx context.Context, owne
 	// With an ERROR listener, an empty readback does not prove that Amphora
 	// applied the detach. Gateway deletion can remove the owned listener first.
 	if listener != nil && listener.ProvisioningStatus == "ERROR" {
+		if owner := defaultPoolOwner(listener, routes); owner != -1 && routes[owner].udpDropPool() {
+			plan.defaultUDPPacketDropPool = listener.DefaultPoolID
+		}
 		return plan, nil
 	}
 	for _, route := range routes {
 		if route.pool == nil {
 			continue
+		}
+		if route.udpDropPool() && listener != nil && listener.DefaultPoolID == route.pool.ID {
+			plan.defaultUDPPacketDropPool = route.pool.ID
 		}
 		if issue := route.backendProvisioningIssue(true, true); issue != "" && (listener == nil || listener.DefaultPoolID == "") {
 			plan.defaultPoolPending = issue
@@ -189,6 +195,9 @@ func (p *Provider) buildDefaultPoolGatewayDeletionPlan(ctx context.Context, owne
 
 func appendDefaultPoolDeletionSteps(steps gatewayPoolDeletionPlan, route observedRouteGraph) gatewayPoolDeletionPlan {
 	poolID := route.pool.ID
+	if route.udpDropPool() {
+		return append(steps, gatewayDeletionStep{resource: gatewayDeletionPool, resourceID: poolID})
+	}
 	if route.monitor != nil {
 		steps = append(steps, gatewayDeletionStep{resource: gatewayDeletionMonitor, resourceID: route.monitor.ID, parentID: poolID})
 	}
@@ -255,13 +264,13 @@ func (p *Provider) buildDefaultPoolGraphPlan(desired desiredGatewayGraph, actual
 			if err := validateRouteGatewayIDs(route.spec.Gateway, actual.state); err != nil {
 				return nil, result, &cloud.GraphError{Identity: route.spec.Identity, Err: err}
 			}
-			if pending := tcpRejectionProvisioningPending(route, observed); pending != "" {
+			if pending := transportBatchProvisioningPending(route, observed); pending != "" {
 				routeResult.Outcome = p.progressingOutcome(pending)
 				break
 			}
 			canServe := defaultPoolCanServe(route)
 			if actual.protocol == cloud.ListenerProtocolUDP && index == defaultOwner {
-				if !canServe || !hasActiveUDPBackend(route, observed, actual.state.VIPAddress) {
+				if !canServe || !route.dropsAllUDP() && !hasActiveUDPBackend(route, observed, actual.state.VIPAddress) {
 					// Revoke the proven forwarding pointer even if another
 					// backend difference prevents planning further changes.
 					detach = true
@@ -270,7 +279,7 @@ func (p *Provider) buildDefaultPoolGraphPlan(desired desiredGatewayGraph, actual
 				}
 			}
 			steps, state, err := buildRouteEnsurePlan(route, observed)
-			if errors.Is(err, errWeightedTCPBackupUnknown) || errors.Is(err, errTCPRejectionUnavailable) || errors.Is(err, errTCPRejectionReadback) {
+			if transportPoolPending(err) {
 				detach = detach || index == defaultOwner
 				routeResult.Outcome = p.progressingOutcome(err.Error())
 				break
@@ -338,6 +347,12 @@ func validateRouteGatewayIDs(recorded, observed cloud.GatewayState) error {
 		return fmt.Errorf("%w: route Gateway IDs differ from the observed graph", cloud.ErrOwnershipConflict)
 	}
 	return nil
+}
+
+func transportPoolPending(err error) bool {
+	return errors.Is(err, errWeightedTCPBackupUnknown) || errors.Is(err, errTCPRejectionUnavailable) ||
+		errors.Is(err, errTCPRejectionReadback) || errors.Is(err, errUDPPacketDropReadback) ||
+		errors.Is(err, errUDPPacketDropUnavailable) || errors.Is(err, errUDPPacketDropUnverified)
 }
 
 func hasActiveUDPBackend(route desiredRoute, observed observedRouteGraph, vipAddress string) bool {

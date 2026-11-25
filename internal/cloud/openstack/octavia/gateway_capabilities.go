@@ -41,6 +41,7 @@ const (
 	GatewayCapabilityFrontendAuthFallback      = "frontend_client_auth_insecure_fallback_v1"
 	GatewayCapabilityBackendRetryBudget        = "backend_retry_budget_v1"
 	GatewayCapabilityTCPConnectionRejection    = "tcp_connection_rejection_v1"
+	GatewayCapabilityUDPPacketDrop             = "udp_packet_drop_v1"
 	GatewayCapabilityHTTPCookieName            = "http_cookie_name_v1"
 	GatewayCapabilityBackendH2C                = "backend_h2c_v1"
 	GatewayCapabilityGRPCContentType           = "grpc_content_type_v1"

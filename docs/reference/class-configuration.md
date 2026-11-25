@@ -70,7 +70,7 @@ Gateway `spec.infrastructure.parametersRef` is not supported.
 | `healthMonitor.maxRetriesDown` | `3` | Failed checks required to mark a member down, from 1 through 10. |
 
 HTTP listeners use an HTTP monitor that sends `GET` to `healthMonitor.path` and accepts status codes `200-399`. TCP and UDP listeners use Octavia's `TCP` and `UDP-CONNECT` monitors respectively. Octavia records the configured delay, timeout and both retry counts. For UDP, Hibiscus enforces an operator-configurable minimum delay that defaults to 3 seconds. The stock Amphora LVS template renders the failure threshold as `retry` and omits the separate recovery threshold. The HTTP path applies only to HTTP monitors. [Stock configuration and packet check](../qualification/v1.7.0/provider/stock-udp.md)
-There is no option to disable the health monitor or supply an existing Floating IP.
+Class configuration always supplies a monitor configuration. The controller omits the monitor for UDP pools enrolled in the [proportional packet discard extension](../operator-octavia-udp-packet-drop.md). The controller allocates new Floating IPs when requested.
 
 Each subnet, external network, or security group reference must contain exactly one selector:
 

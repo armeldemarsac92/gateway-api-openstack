@@ -379,9 +379,22 @@ func (r TCPConnectionRejection) Valid() bool {
 	return r.TotalWeight > 0 && r.TotalWeight <= 16_000_000 && r.RejectWeight >= 0 && r.RejectWeight <= r.TotalWeight
 }
 
+// UDPPacketDrop reserves a fraction of UDP traffic for discard.
+type UDPPacketDrop struct {
+	Numerator   int `json:"numerator"`
+	Denominator int `json:"denominator"`
+}
+
+func (r UDPPacketDrop) Valid() bool {
+	return r.Denominator > 0 && r.Denominator <= 16_000_000 && r.Numerator >= 0 && r.Numerator <= r.Denominator
+}
+
+func (r UDPPacketDrop) DropsAll() bool { return r.Numerator == r.Denominator }
+
 // RouteSpec describes the traffic configuration owned by one route.
 type RouteSpec struct {
 	TCPConnectionRejection *TCPConnectionRejection `json:",omitempty"`
+	UDPPacketDrop          *UDPPacketDrop          `json:",omitempty"`
 	BackendRetryBudget     *BackendRetryBudget     `json:",omitempty"`
 	// BackendRetryBudgetPending waits for a reservable Gateway ancestor.
 	BackendRetryBudgetPending bool `json:",omitempty"`

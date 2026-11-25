@@ -58,11 +58,12 @@ type gatewayPoolDeletionPlan []gatewayDeletionStep
 // gatewayDeletionPlan separates the load balancer graph into dependency
 // subplans. No step may run until all three subplans have been validated.
 type gatewayDeletionPlan struct {
-	listeners           gatewayListenerDeletionPlan
-	routes              gatewayRouteDeletionPlan
-	pools               gatewayPoolDeletionPlan
-	defaultPoolListener *listeners.Listener
-	defaultPoolPending  string
+	listeners                gatewayListenerDeletionPlan
+	routes                   gatewayRouteDeletionPlan
+	pools                    gatewayPoolDeletionPlan
+	defaultPoolListener      *listeners.Listener
+	defaultPoolPending       string
+	defaultUDPPacketDropPool string
 }
 
 // orderedSteps flattens the validated subplans in reverse dependency order.

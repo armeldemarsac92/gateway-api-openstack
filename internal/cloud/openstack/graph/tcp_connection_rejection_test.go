@@ -33,14 +33,18 @@ func (f *tcpGraphFixture) rejectionProvider(optIn bool) *Provider {
 	return newTestProvider(f.t, hibiscusServiceClients(http.HandlerFunc(f.serveHTTP)), ProviderConfig{TCPConnectionRejection: optIn})
 }
 
-func (f *tcpGraphFixture) serveTCPRejectionBatch(w http.ResponseWriter, request *http.Request) {
+func (f *tcpGraphFixture) serveTransportBatch(w http.ResponseWriter, request *http.Request) {
+	field, advertised := "tcp_connection_rejection", f.tcpRejectionAdvertised
+	if f.udpDropAPI {
+		field, advertised = "udp_packet_drop", f.udpDropAdvertised
+	}
 	var fields map[string]json.RawMessage
 	var members []map[string]any
 	var rejection map[string]any
 	if json.NewDecoder(request.Body).Decode(&fields) != nil || len(fields) != 2 ||
 		json.Unmarshal(fields["members"], &members) != nil || members == nil ||
-		json.Unmarshal(fields["tcp_connection_rejection"], &rejection) != nil {
-		f.t.Errorf("invalid atomic TCP request: %s", request.URL.Path)
+		json.Unmarshal(fields[field], &rejection) != nil {
+		f.t.Errorf("invalid transport batch request: %s", request.URL.Path)
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
@@ -56,14 +60,23 @@ func (f *tcpGraphFixture) serveTCPRejectionBatch(w http.ResponseWriter, request 
 		w.WriteHeader(f.tcpRejectionRejectCode)
 		return
 	}
-	if rejection != nil && !f.tcpRejectionAdvertised {
+	if rejection != nil && !advertised {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	if f.inventory[tcpLB]["provisioning_status"] == "PENDING_UPDATE" {
+	if f.udpDropAPI && (rejection == nil || len(f.inventory[strings.TrimSuffix(request.URL.Path, "/members")]["listeners"].([]map[string]any)) != 1) {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	if f.udpDropAPI && f.udpDropRenderBusy {
+		f.writes = append(f.writes, "PUT "+request.URL.Path)
+		w.WriteHeader(http.StatusConflict)
+		return
+	}
+	if !f.udpDropAPI && f.inventory[tcpLB]["provisioning_status"] == "PENDING_UPDATE" {
 		previous := f.tcpRejectionWrites[len(f.tcpRejectionWrites)-1]
 		f.writes = append(f.writes, "PUT "+request.URL.Path)
-		if string(fields["members"]) != string(previous["members"]) || string(fields["tcp_connection_rejection"]) != string(previous["tcp_connection_rejection"]) {
+		if string(fields["members"]) != string(previous["members"]) || string(fields[field]) != string(previous[field]) {
 			w.WriteHeader(http.StatusConflict)
 		} else {
 			f.tcpRejectionWrites = append(f.tcpRejectionWrites, fields)
@@ -76,9 +89,9 @@ func (f *tcpGraphFixture) serveTCPRejectionBatch(w http.ResponseWriter, request 
 	collection := request.URL.Path
 	pool := f.inventory[strings.TrimSuffix(collection, "/members")]
 	if rejection == nil {
-		pool["tcp_connection_rejection"] = nil
+		pool[field] = nil
 	} else {
-		pool["tcp_connection_rejection"] = rejection
+		pool[field] = rejection
 	}
 	existing := f.children(collection)
 	for _, old := range existing {
@@ -306,7 +319,7 @@ func TestTCPConnectionRejectionReplaysOnlyAnExactAgedPendingBatch(t *testing.T) 
 			if !slices.Equal(f.writes[before:], []string{"PUT " + tcpMembers}) ||
 				len(f.tcpRejectionWrites) != acceptedBefore+1 ||
 				result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing ||
-				result.Routes[0].Result.ObservationDeferred || result.Outcome.RequeueAfter < tcpReplayInterval {
+				result.Routes[0].Result.ObservationDeferred || result.Outcome.RequeueAfter < transportReplayInterval {
 				t.Fatalf("aged batch was not replayed exactly or certified too early: %+v, writes %v", result, f.writes[before:])
 			}
 			f.reconcile(provider)

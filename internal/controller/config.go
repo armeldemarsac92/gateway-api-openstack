@@ -84,6 +84,8 @@ type Config struct {
 	BackendRetryBudget bool
 	// TCPConnectionRejection opts into proportional active rejection on plain TCPRoute.
 	TCPConnectionRejection bool
+	// UDPPacketDrop opts eligible UDPRoute pools into proportional packet discard.
+	UDPPacketDrop bool
 	// TelemetryPolicy enables Experimental Gateway tracing on a capable Octavia provider.
 	TelemetryPolicy bool
 	// BackendClientCertificate enables the operator's separate backend client certificate map.

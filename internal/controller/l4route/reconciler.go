@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"slices"
 	"strconv"
 	"time"
@@ -51,6 +52,7 @@ type Reconciler struct {
 	Coordinator                     *graph.Coordinator
 	Protocol                        gatewayv1.ProtocolType // TCP (including the zero value) or UDP.
 	TCPConnectionRejectionAvailable func(context.Context) (bool, error)
+	UDPPacketDropAvailable          func(context.Context) (bool, error)
 }
 
 type routePlan struct {
@@ -122,6 +124,17 @@ func (r *Reconciler) tcpConnectionRejectionEnabled() bool {
 	return r.protocol() == gatewayv1.TCPProtocolType && r.Config.TCPConnectionRejection
 }
 
+// A pool with UDP packet discard can serve exactly one IPv4 Endpoint listener.
+func (r *Reconciler) udpPacketDropEnabled(gateway *gatewayv1.Gateway, topology classconfig.Resolved, ports []int) bool {
+	if r.protocol() != gatewayv1.UDPProtocolType || !r.Config.UDPPacketDrop ||
+		topology.Topology.MemberMode != cloud.MemberModeEndpoint || len(ports) != 1 || len(gateway.Status.Addresses) != 1 {
+		return false
+	}
+	address := gateway.Status.Addresses[0]
+	ip, err := netip.ParseAddr(address.Value)
+	return err == nil && ip.Is4() && !ip.IsUnspecified() && (address.Type == nil || *address.Type == gatewayv1.IPAddressType)
+}
+
 func (r *Reconciler) planRoute(ctx context.Context, route *transportRoute, binding cloud.Identity, bound bool) (routePlan, error) {
 	plan := routePlan{}
 	plan.programmed = routeCondition(route, "Programmed", metav1.ConditionFalse, "Pending", fmt.Sprintf("%s forwarding has not been programmed", r.protocol()))
@@ -162,11 +175,15 @@ func (r *Reconciler) planRoute(ctx context.Context, route *transportRoute, bindi
 			return plan, nil
 		}
 	}
-	refs, authRejections, err := r.authorizedBackends(ctx, route, true)
+	collectTCP := r.tcpConnectionRejectionEnabled()
+	// Collect known UDP denials before election so a failed election read
+	// cannot leave a revoked target serving. Full eligibility follows election.
+	collectUDP := r.protocol() == gatewayv1.UDPProtocolType && r.Config.UDPPacketDrop
+	refs, authRejections, err := r.authorizedBackends(ctx, route, true, collectTCP || collectUDP)
 	if err != nil {
 		return routePlan{}, err
 	}
-	collect := r.tcpConnectionRejectionEnabled() && authRejections.rejectWeight > 0
+	collect := (collectTCP || collectUDP) && authRejections.rejectWeight > 0
 	if authRejections.active != nil && !collect {
 		plan.rejectBackend(route, authRejections.active)
 		plan.detach = bound
@@ -197,10 +214,11 @@ func (r *Reconciler) planRoute(ctx context.Context, route *transportRoute, bindi
 	// their destinations. Before a topology is bound, keep the Endpoint checks
 	// used for multiple references.
 	var inactiveMode, activeMode cloud.MemberMode
+	var collectUDPShare bool
 	if len(route.backendRefs) > 1 {
 		inactiveMode = cloud.MemberModeEndpoint
 	}
-	if (inactiveMode != "" || r.tcpConnectionRejectionEnabled()) && controller.HasGatewayTopologyBinding(r.Config, parent.gateway) {
+	if (inactiveMode != "" || collectTCP || collectUDP) && controller.HasGatewayTopologyBinding(r.Config, parent.gateway) {
 		topology, err := controller.StoredGatewayTopology(r.Config, parent.gateway)
 		if err != nil {
 			if collect {
@@ -212,11 +230,18 @@ func (r *Reconciler) planRoute(ctx context.Context, route *transportRoute, bindi
 		if inactiveMode != "" {
 			inactiveMode = topology.Topology.MemberMode
 		}
-		if r.tcpConnectionRejectionEnabled() {
+		collectUDPShare = r.udpPacketDropEnabled(parent.gateway, topology, plan.listenerPorts)
+		if collectTCP || collectUDPShare {
 			activeMode = topology.Topology.MemberMode
 		}
 	}
-	backends, serviceRejections, err := r.backendServices(ctx, refs, inactiveMode, activeMode)
+	collectShare := collectTCP || collectUDPShare
+	if authRejections.active != nil && !collectShare {
+		plan.rejectBackend(route, authRejections.active)
+		plan.detach = bound
+		return plan, nil
+	}
+	backends, serviceRejections, err := r.backendServices(ctx, refs, inactiveMode, activeMode, collectShare)
 	if err != nil {
 		return routePlan{}, err
 	}
@@ -230,7 +255,7 @@ func (r *Reconciler) planRoute(ctx context.Context, route *transportRoute, bindi
 		}
 		plan.requeue = 5 * time.Second
 	}
-	if activeRejection != nil && !r.tcpConnectionRejectionEnabled() {
+	if activeRejection != nil && !collectShare {
 		plan.rejectBackend(route, activeRejection)
 		plan.detach = bound
 		return plan, nil
@@ -250,7 +275,7 @@ func (r *Reconciler) planRoute(ctx context.Context, route *transportRoute, bindi
 	}
 	err = r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader)
 	if err != nil && !errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) {
-		if activeRejection != nil && r.tcpConnectionRejectionEnabled() {
+		if activeRejection != nil && collectShare {
 			plan.holdUnreadBackends(route, activeRejection, bound, err)
 			return plan, nil
 		}
@@ -265,7 +290,7 @@ func (r *Reconciler) planRoute(ctx context.Context, route *transportRoute, bindi
 	}
 	topology, ready, err := r.gatewayTopology(parent.gateway, parent.listeners[0])
 	if err != nil {
-		if activeRejection != nil && r.tcpConnectionRejectionEnabled() {
+		if activeRejection != nil && collectShare {
 			plan.holdUnreadBackends(route, activeRejection, bound, err)
 			return plan, nil
 		}
@@ -281,7 +306,7 @@ func (r *Reconciler) planRoute(ctx context.Context, route *transportRoute, bindi
 	}
 	desired, target, diagnostic, err := r.buildRouteSpec(ctx, route, parent.gateway, parent.listeners[0], backends, rejectWeight, topology, plan.listenerPorts...)
 	if err != nil {
-		if !r.tcpConnectionRejectionEnabled() {
+		if !collectShare {
 			return routePlan{}, err
 		}
 		plan.holdUnreadBackends(route, activeRejection, bound, err)
@@ -297,7 +322,7 @@ func (r *Reconciler) planRoute(ctx context.Context, route *transportRoute, bindi
 			plan.rejectBackend(route, diagnostic)
 		}
 		plan.detach = bound
-		if r.tcpConnectionRejectionEnabled() {
+		if collectShare {
 			plan.requeue = 5 * time.Second
 		}
 		return plan, nil
@@ -378,17 +403,18 @@ func (r *Reconciler) routeSpec(ctx context.Context, route *transportRoute, gatew
 
 func (r *Reconciler) buildRouteSpec(ctx context.Context, route *transportRoute, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, backends []serviceBackend, rejectWeight int, topology classconfig.Resolved, listenerPorts ...int) (cloud.RouteSpec, string, *model.Diagnostic, error) {
 	weighted := len(route.backendRefs) > 1
+	udpDrop := r.udpPacketDropEnabled(gateway, topology, listenerPorts)
 	matchVIPFamily := weighted || r.protocol() == gatewayv1.UDPProtocolType
 	groups := make([]weightedServiceMembers, 0, len(backends))
 	serving := make([]serviceBackend, 0, len(backends))
 	var noEndpoints *model.Diagnostic
 	for _, backend := range backends {
 		members, diagnostic, err := routebackend.TransportMembers(ctx, r.APIReader, backend.service, backend.ref.port, corev1.Protocol(r.protocol()), topology, gateway.Status.Addresses, matchVIPFamily)
-		if err == nil && r.tcpConnectionRejectionEnabled() && (diagnostic != nil && diagnostic.NoReadyEndpoints ||
+		if err == nil && (r.tcpConnectionRejectionEnabled() || udpDrop) && (diagnostic != nil && diagnostic.NoReadyEndpoints ||
 			diagnostic == nil && !slices.ContainsFunc(members, func(member cloud.Member) bool { return !member.Draining })) {
 			rejectWeight += int(backend.ref.weight)
 			if noEndpoints == nil {
-				noEndpoints = &model.Diagnostic{Reason: string(gatewayv1.RouteReasonPending), Message: "Waiting for eligible endpoints in a positive-weight TCP backend"}
+				noEndpoints = &model.Diagnostic{Reason: string(gatewayv1.RouteReasonPending), Message: fmt.Sprintf("Waiting for eligible endpoints in a positive-weight %s backend", r.protocol())}
 			}
 			continue
 		}
@@ -398,30 +424,11 @@ func (r *Reconciler) buildRouteSpec(ctx context.Context, route *transportRoute, 
 		serving = append(serving, backend)
 		groups = append(groups, weightedServiceMembers{weight: backend.ref.weight, members: members})
 	}
-	var rejection *cloud.TCPConnectionRejection
-	if rejectWeight > 0 {
-		var total int
-		for _, ref := range route.backendRefs {
-			total += int(ptr.Deref(ref.Weight, 1))
-		}
-		fraction := cloud.TCPConnectionRejection{RejectWeight: rejectWeight, TotalWeight: total}
-		if !fraction.Valid() {
-			return cloud.RouteSpec{}, "", &model.Diagnostic{Condition: "Programmed", Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: "Invalid TCP backend weight share"}, nil
-		}
-		available := false
-		if r.TCPConnectionRejectionAvailable != nil {
-			var err error
-			available, err = r.TCPConnectionRejectionAvailable(ctx)
-			if err != nil && noEndpoints == nil {
-				return cloud.RouteSpec{}, "", nil, err
-			}
-		}
-		if !available {
-			diagnostic := cmp.Or(noEndpoints, &model.Diagnostic{Condition: "Programmed", Reason: "Pending", Message: "Waiting for regional Octavia TCP connection rejection support"})
-			return cloud.RouteSpec{}, "", diagnostic, nil
-		}
-		rejection = &fraction
+	rejection, drop, diagnostic, err := r.backendUnavailableShare(ctx, route, rejectWeight, udpDrop, noEndpoints)
+	if diagnostic != nil || err != nil {
+		return cloud.RouteSpec{}, "", diagnostic, err
 	}
+
 	var members []cloud.Member
 	if weighted {
 		var err error
@@ -446,7 +453,11 @@ func (r *Reconciler) buildRouteSpec(ctx context.Context, route *transportRoute, 
 		MemberMode: topology.Topology.MemberMode, MemberSubnetID: topology.Topology.MemberSubnetID,
 		BackendSecurityGroupIDs: topology.Topology.BackendSecurityGroupIDs,
 		HealthMonitor:           topology.HealthMonitor, Members: members,
-		TCPConnectionRejection: rejection,
+		TCPConnectionRejection: rejection, UDPPacketDrop: drop,
+	}
+	if drop != nil {
+		// Octavia's guarded UDP pool uses EndpointSlice readiness only.
+		spec.HealthMonitor = cloud.HealthMonitorConfig{}
 	}
 	if controller.GatewayListenerScope(r.Config, gateway) == r.protocol() {
 		// The frozen port identifies the former unscoped listener. The route's
@@ -456,6 +467,51 @@ func (r *Reconciler) buildRouteSpec(ctx context.Context, route *transportRoute, 
 	}
 	target, err := forwardingTarget(serving, groups, weighted || len(serving) == 0, spec)
 	return spec, target, nil, err
+}
+
+func (r *Reconciler) backendUnavailableShare(ctx context.Context, route *transportRoute, rejectWeight int, udpDrop bool, noEndpoints *model.Diagnostic) (*cloud.TCPConnectionRejection, *cloud.UDPPacketDrop, *model.Diagnostic, error) {
+	if rejectWeight == 0 && !udpDrop {
+		return nil, nil, nil, nil
+	}
+	var total int
+	for _, ref := range route.backendRefs {
+		total += int(ptr.Deref(ref.Weight, 1))
+	}
+	tcpShare := cloud.TCPConnectionRejection{RejectWeight: rejectWeight, TotalWeight: total}
+	if !tcpShare.Valid() {
+		diagnostic := &model.Diagnostic{Condition: "Programmed", Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: fmt.Sprintf("Invalid %s backend weight share", r.protocol())}
+		return nil, nil, diagnostic, nil
+	}
+	available := r.TCPConnectionRejectionAvailable
+	message := "Waiting for regional Octavia TCP connection rejection support"
+	if udpDrop {
+		available = r.UDPPacketDropAvailable
+		message = "Waiting for regional Octavia UDP packet drop support"
+	}
+	if available != nil {
+		ok, err := available(ctx)
+		if err != nil && !udpDrop && noEndpoints == nil {
+			return nil, nil, nil, err
+		}
+		// Keep sealing the current authorized UDP intent on an uncertain
+		// discovery read. The provider decides whether to hold or quarantine.
+		if ok || udpDrop && err != nil {
+			if udpDrop {
+				share := cloud.UDPPacketDrop{Numerator: rejectWeight, Denominator: total}
+				if rejectWeight == 0 || share.DropsAll() {
+					share.Denominator = 1
+					share.Numerator = min(rejectWeight, 1)
+				}
+				return nil, &share, nil, nil
+			}
+			return &tcpShare, nil, nil, nil
+		}
+	}
+	if rejectWeight == 0 {
+		return nil, nil, nil, nil
+	}
+	diagnostic := cmp.Or(noEndpoints, &model.Diagnostic{Condition: "Programmed", Reason: "Pending", Message: message})
+	return nil, nil, diagnostic, nil
 }
 
 func (r *Reconciler) ensure(ctx context.Context, route *transportRoute, plan *routePlan) (ctrl.Result, error) {

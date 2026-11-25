@@ -86,11 +86,10 @@ func backendRejection(reason gatewayv1.RouteConditionReason, message string) *mo
 	return &model.Diagnostic{Condition: string(gatewayv1.RouteConditionResolvedRefs), Reason: string(reason), Message: message}
 }
 
-func (r *Reconciler) authorizedBackends(ctx context.Context, route *transportRoute, includeZeroWeight bool) ([]serviceReference, backendRejections, error) {
+func (r *Reconciler) authorizedBackends(ctx context.Context, route *transportRoute, includeZeroWeight, collect bool) ([]serviceReference, backendRejections, error) {
 	if len(route.backendRefs) == 0 {
 		return nil, backendRejections{active: backendRejection(gatewayv1.RouteReasonUnsupportedValue, fmt.Sprintf("%s forwarding requires one rule with Service backendRefs", r.protocol()))}, nil
 	}
-	collect := r.tcpConnectionRejectionEnabled()
 	type backendKey struct {
 		service client.ObjectKey
 		port    gatewayv1.PortNumber
@@ -157,8 +156,7 @@ func (r *Reconciler) authorizedBackends(ctx context.Context, route *transportRou
 }
 
 // backendServices validates authorized references and returns the Services that carry traffic.
-func (r *Reconciler) backendServices(ctx context.Context, refs []serviceReference, inactiveMode, activeMode cloud.MemberMode) ([]serviceBackend, backendRejections, error) {
-	collect := r.tcpConnectionRejectionEnabled()
+func (r *Reconciler) backendServices(ctx context.Context, refs []serviceReference, inactiveMode, activeMode cloud.MemberMode, collect bool) ([]serviceBackend, backendRejections, error) {
 	services := make(map[client.ObjectKey]*corev1.Service, len(refs))
 	readErrors := make(map[client.ObjectKey]error)
 	backends := make([]serviceBackend, 0, len(refs))

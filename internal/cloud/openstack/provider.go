@@ -67,6 +67,11 @@ func (p *Provider) TCPConnectionRejectionAvailable(ctx context.Context) (bool, e
 	return p.graph.TCPConnectionRejectionAvailable(ctx)
 }
 
+// UDPPacketDropAvailable discovers regional Amphora support.
+func (p *Provider) UDPPacketDropAvailable(ctx context.Context) (bool, error) {
+	return p.graph.UDPPacketDropAvailable(ctx)
+}
+
 // XBackendCookieAvailable discovers regional Amphora named HTTP cookie support.
 func (p *Provider) XBackendCookieAvailable(ctx context.Context) (bool, error) {
 	return p.graph.XBackendCookieAvailable(ctx)

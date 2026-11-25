@@ -289,17 +289,18 @@ func (r *Reconciler) observeRouteBackend(ctx context.Context, route *transportRo
 	}
 	// Zero-weight references affect status only. Their authorization and
 	// revisions cannot change the serving destinations of the sealed graph.
-	refs, auth, err := r.authorizedBackends(ctx, route, false)
+	collect := r.tcpConnectionRejectionEnabled() || r.udpPacketDropEnabled(gateway, topology, ports)
+	refs, auth, err := r.authorizedBackends(ctx, route, false, collect)
 	revisions.grants = auth.grants
-	if err != nil || auth.active != nil && auth.rejectWeight == 0 || auth.active != nil && !r.tcpConnectionRejectionEnabled() {
+	if err != nil || auth.active != nil && auth.rejectWeight == 0 || auth.active != nil && !collect {
 		return nil, "", revisions, err
 	}
 	var mode cloud.MemberMode
-	if r.tcpConnectionRejectionEnabled() {
+	if collect {
 		mode = topology.Topology.MemberMode
 	}
-	services, invalid, err := r.backendServices(ctx, refs, "", mode)
-	if err != nil || invalid.active != nil && !r.tcpConnectionRejectionEnabled() {
+	services, invalid, err := r.backendServices(ctx, refs, "", mode, collect)
+	if err != nil || invalid.active != nil && !collect {
 		return nil, "", revisions, err
 	}
 	revisions.services = invalid.services

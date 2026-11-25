@@ -60,6 +60,10 @@ type tcpGraphFixture struct {
 	tcpRejectionRemovePool  bool
 	tcpRejectionNetworkDown bool
 	tcpRejectionWrites      []map[string]json.RawMessage
+	udpDropAPI              bool
+	udpDropAdvertised       bool
+	udpDiscoveryUnavailable bool
+	udpDropRenderBusy       bool
 }
 
 func newTCPGraphFixture(t *testing.T) *tcpGraphFixture {
@@ -122,16 +126,23 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 		safetyWriteJSON(f.t, w, map[string]any{"floatingips": []any{}})
 		return
 	}
-	if f.tcpRejectionAPI && req.Method == http.MethodGet && resource == "/v2/lbaas/providers/amphora/gateway_capabilities" {
+	if (f.tcpRejectionAPI || f.udpDropAPI) && req.Method == http.MethodGet && resource == "/v2/lbaas/providers/amphora/gateway_capabilities" {
+		if f.udpDiscoveryUnavailable {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		capabilities := []string{}
 		if f.tcpRejectionAdvertised {
 			capabilities = append(capabilities, "tcp_connection_rejection_v1")
 		}
+		if f.udpDropAdvertised {
+			capabilities = append(capabilities, "udp_packet_drop_v1")
+		}
 		safetyWriteJSON(f.t, w, map[string]any{"gateway_capabilities": capabilities})
 		return
 	}
-	if f.tcpRejectionAPI && req.Method == http.MethodPut && resource == memberCollection {
-		f.serveTCPRejectionBatch(w, req)
+	if (f.tcpRejectionAPI || f.udpDropAPI) && req.Method == http.MethodPut && resource == memberCollection {
+		f.serveTransportBatch(w, req)
 		return
 	}
 	if resource == "/v2/lbaas/l7policies" && req.Method == http.MethodGet && f.inventory[tcpListener]["protocol"] == "HTTP" {
@@ -158,7 +169,7 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 				}
 				items := []map[string]any{}
 				for _, child := range f.children(listPath) {
-					if f.tcpRejectionAPI && listPath == tcpPools {
+					if (f.tcpRejectionAPI || f.udpDropAPI) && listPath == tcpPools {
 						refs := []map[string]any{}
 						for _, member := range f.children(tcpPools + "/" + child["id"].(string) + "/members") {
 							refs = append(refs, map[string]any{"id": member["id"]})
@@ -309,6 +320,11 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 				return
 			}
 			target, ok := payload["default_pool_id"]
+			if f.udpDropAPI && listPath == tcpListeners && entry["default_pool_id"] != nil &&
+				f.inventory[tcpPools+"/"+entry["default_pool_id"].(string)]["udp_packet_drop"] != nil {
+				w.WriteHeader(http.StatusConflict)
+				return
+			}
 			if listPath != tcpListeners || !ok || len(payload) != 1 || target != nil && !f.poolReady(target.(string)) {
 				reject()
 				return
@@ -335,6 +351,26 @@ func (f *tcpGraphFixture) serveHTTP(w http.ResponseWriter, req *http.Request) {
 			switch listPath {
 			case tcpPools:
 				poolID = entry["id"]
+				if f.udpDropAPI {
+					if f.udpDropRenderBusy {
+						w.WriteHeader(http.StatusConflict)
+						return
+					}
+					for _, listener := range f.children(tcpListeners) {
+						if listener["default_pool_id"] == poolID {
+							listener["default_pool_id"], listener["provisioning_status"] = nil, "PENDING_UPDATE"
+						}
+					}
+					collection := entryPath + "/members"
+					for _, member := range f.children(collection) {
+						delete(f.inventory, collection+"/"+member["id"].(string))
+					}
+					for _, monitor := range f.children(tcpMonitors) {
+						if monitor["pool_id"] == poolID {
+							delete(f.inventory, tcpMonitors+"/"+monitor["id"].(string))
+						}
+					}
+				}
 			case memberCollection:
 				poolID = strings.TrimSuffix(strings.TrimPrefix(memberCollection, tcpPools+"/"), "/members")
 			}
@@ -363,6 +399,9 @@ func (f *tcpGraphFixture) poolReady(id string) bool {
 	canServe := f.inventory[poolPath+"/members/member"]["provisioning_status"] == "ACTIVE"
 	if fraction, ok := f.inventory[poolPath]["tcp_connection_rejection"].(map[string]any); ok {
 		canServe = canServe || fraction["reject_weight"] == fraction["total_weight"]
+	}
+	if f.udpDropAPI && slices.Contains(pilotTags(f.inventory[poolPath]["tags"]), udpDropPoolTag) && !monitorRequired {
+		canServe = canServe || len(f.children(poolPath+"/members")) == 0
 	}
 	return f.inventory[poolPath]["provisioning_status"] == "ACTIVE" &&
 		canServe &&
