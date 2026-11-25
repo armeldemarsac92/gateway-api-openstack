@@ -14,12 +14,15 @@ The source archive includes the observer patch, the original-log checksum and th
 
 ## XMesh readiness on Istio ambient
 
-With the Experimental v1.7.0 bundle and the opt-in XMesh component, the manager created `hibiscus-istio-ambient` on Kubernetes v1.36.4. The local cluster ran the official Istio 1.31.0 pilot, CNI and ztunnel. All five Istio Pods and both manager replicas were ready at the first sample. OpenStack identity and discovery came from a local fixture. [Operator configuration](../../../../integrations/istio-ambient/README.md)
+The controller ran from its reproducible release image on Kubernetes v1.36.4 with the Gateway API v1.7.0 Experimental bundle. Istio 1.31.0 supplied the pilot, CNI and ztunnel. Two manager replicas reported the installation’s XMesh. A separate Pod provided the local OpenStack API. [Operator configuration](../../../../integrations/istio-ambient/README.md)
 
-| istiod replicas | Accepted | Programmed | Reported features | XMesh resource version |
-|---|---|---|---:|---:|
-| 1, ready | True / Accepted | True / Programmed | 16 | 1081 |
-| 0 | True / Accepted | Unknown / Pending | 0 | 1172 |
-| 1, ready again | True / Accepted | True / Programmed | 16 | 1227 |
+| Observed configuration | Accepted | Programmed | Reported features |
+|---|---|---|---:|
+| Istio ready with the Helm CNI settings | True / Accepted | True / Programmed | 16 |
+| istiod scaled to zero | True / Accepted | Unknown / Pending | 0 |
+| istiod restored | True / Accepted | True / Programmed | 16 |
+| CNI Pods read ambient mode from a ConfigMap | True / Accepted | Unknown / Pending | 0 |
+| ConfigMap corrected, same CNI Pods | True / Accepted | Unknown / Pending | 0 |
+| CNI Pods updated with literal ambient settings | True / Accepted | True / Programmed | 16 |
 
-The XMesh kept the same UID and generation. Recovery restored the same 16 feature names. The upstream mesh cases for HTTP path rewriting and gRPC request-header modification passed on this installation. These two cases exercise waypoint traffic. XMesh status has no registered v1.7.0 case. The local receipt identifies the signed controller source, the executable and the test image observed in the running Pods. [Conditions, feature names, images and case names](xmesh-status.json)
+The XMesh kept its UID and generation across all six observations. Editing the ConfigMap preserved the CNI Pod UIDs and the DaemonSet generation. The controller restored the original 16 features after both CNI Pods rolled out with the explicit settings. The upstream HTTP path rewrite and gRPC request-header modification cases both passed on the waypoint. The Gateway API v1.7.0 registry has no dedicated XMesh status case. [Conditions, CNI settings and image digests](xmesh-status.json)
