@@ -20,6 +20,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"maps"
 	"slices"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
@@ -54,6 +55,14 @@ func (fragment *observedSNIFragment) protectsService(key sniFragmentKey, target 
 	if !fragment.protectedBackendTLS() {
 		return false
 	}
+	if fragment.backendPools != nil {
+		for _, leaf := range fragment.backendPools {
+			if leaf.protectsService(key, target) {
+				return true
+			}
+		}
+		return false
+	}
 	if target.route.ServicePort != 0 && slices.Contains(fragment.pool.Tags, sniBackendServiceTag(target.route)) {
 		return true
 	}
@@ -68,36 +77,118 @@ func (fragment *observedSNIFragment) protectsService(key sniFragmentKey, target 
 	})
 }
 
-// Keep one obsolete pool as durable proof of each protected destination
-// until Octavia reports its authenticated replacement and its new selector.
-func sniBackendTLSWitnesses(wanted map[sniFragmentKey]desiredSNIFragment, observed map[sniFragmentKey]*observedSNIFragment, retire []sniFragmentKey) map[sniFragmentKey]bool {
-	witnesses := make(map[sniFragmentKey]bool)
+// Keep one obsolete authenticated pool per Service port until Octavia
+// reports its authorized successor. The pool is also the durable witness
+// during a transition to plaintext after Kubernetes removes a policy.
+func sniBackendTLSWitnesses(wanted map[sniFragmentKey]desiredSNIFragment, observed map[sniFragmentKey]*observedSNIFragment, retire []sniFragmentKey) map[string]bool {
+	witnesses := make(map[string]bool)
 	for _, target := range wanted {
-		if target.route.BackendTLS == nil {
+		if target.route.Deny || target.route.Passthrough {
 			continue
 		}
-		if successor := observed[target.key]; successor != nil && successor.rule != nil && successor.matches(target) {
-			continue
+		retain := func(destination desiredSNIFragment) {
+			for _, key := range retire {
+				if key == target.key {
+					continue
+				}
+				fragment := observed[key]
+				if fragment.backendPools == nil {
+					if fragment.protectsService(key, destination) {
+						witnesses[fragment.pool.ID] = true
+						return
+					}
+					continue
+				}
+				for _, slot := range slices.Sorted(maps.Keys(fragment.backendPools)) {
+					leaf := fragment.backendPools[slot]
+					if leaf.protectsService(key, destination) {
+						witnesses[leaf.pool.ID] = true
+						return
+					}
+				}
+			}
 		}
-		for _, key := range retire {
-			if _, stillWanted := wanted[key]; !stillWanted && observed[key].protectsService(key, target) {
-				witnesses[key] = true
-				break
+		successor := observed[target.key]
+		if target.usesBackendPools() {
+			for slot, backend := range target.route.BackendPools {
+				if backend.ServiceUID == "" {
+					continue
+				}
+				destination := target.backendPool(slot)
+				if successor != nil && !target.weightedBlocked && successor.hasActiveSelector(target.route.Hostname) &&
+					successor.matches(target) && successor.backendPools[slot] != nil &&
+					successor.backendPools[slot].backendPoolServing(destination) {
+					continue
+				}
+				retain(destination)
+			}
+		} else if successor == nil || !successor.ready(target) &&
+			(target.route.BackendTLS == nil || successor.rule == nil || !successor.matches(target)) {
+			if len(target.route.BackendServices) == 0 {
+				retain(target)
+			}
+			for _, service := range target.route.BackendServices {
+				destination := target
+				destination.route.ServiceUID, destination.route.ServicePort = service.UID, service.Port
+				destination.route.BackendServices = nil
+				retain(destination)
 			}
 		}
 	}
 	return witnesses
 }
 
+func sniDeleteObsoleteResource(fragment *observedSNIFragment, witnesses map[string]bool) (graphMutation, bool) {
+	step := sniDeletionStep(fragment)
+	if step.deletion.resource != gatewayDeletionPool {
+		return step, true
+	}
+	if fragment.backendPools != nil {
+		for _, slot := range slices.Sorted(maps.Keys(fragment.backendPools)) {
+			poolID := fragment.backendPools[slot].pool.ID
+			if !witnesses[poolID] {
+				step.deletion.resourceID = poolID
+				return step, true
+			}
+		}
+		return graphMutation{}, false
+	}
+	return step, !witnesses[step.deletion.resourceID]
+}
+
 func (fragment *observedSNIFragment) protectedBackendTLS() bool {
+	if fragment.backendPools != nil {
+		for _, leaf := range fragment.backendPools {
+			if leaf.protectedBackendTLS() {
+				return true
+			}
+		}
+		return false
+	}
 	return hasObservedBackendTLS(*fragment.pool, fragment.backendTLS) || hasBackendTLSSettings(*fragment.pool, fragment.backendTLS)
 }
 
 func (fragment *observedSNIFragment) closedBackendPool() bool {
+	if fragment.backendPools != nil {
+		// A verified terminating weighted selector rejects rather than
+		// falling through when every destination is down.
+		return !fragment.targetsUnverified && len(fragment.backendTargets) > 0 && fragment.firstOpenPool() == nil
+	}
 	return fragment.pool.ProvisioningStatus == "ACTIVE" && fragment.backendTLS.AdminObserved && !fragment.pool.AdminStateUp
 }
 
 func (fragment *observedSNIFragment) hasForwardingMembers() bool {
+	if fragment.backendPools != nil {
+		if fragment.targetsUnverified {
+			return fragment.policy != nil && fragment.policy.AdminStateUp
+		}
+		for _, leaf := range fragment.backendPools {
+			if leaf.hasForwardingMembers() || leaf.membersUnverified && !leaf.closedBackendPool() {
+				return true
+			}
+		}
+		return false
+	}
 	return len(fragment.members) != 0 && !fragment.closedBackendPool()
 }
 
@@ -124,7 +215,11 @@ func (p *Provider) prepareSNIRouteBackendTLS(ctx context.Context, desired *desir
 	if !cloud.IsTCPTLSListenerProtocol(desired.protocol) || desired.spec.Gateway.Disposition != cloud.GraphEnsure {
 		return nil
 	}
-	hasStrictPool := slices.ContainsFunc(desired.sni, func(target desiredSNIFragment) bool { return target.route.BackendTLS != nil })
+	hasStrictPool := slices.ContainsFunc(desired.sni, func(target desiredSNIFragment) bool {
+		return target.route.BackendTLS != nil || slices.ContainsFunc(target.route.BackendPools, func(backend cloud.TLSSNIBackendPool) bool {
+			return backend.BackendTLS != nil
+		})
+	})
 	for _, fragment := range actual.sni {
 		hasStrictPool = hasStrictPool || fragment.protectedBackendTLS()
 	}
@@ -138,8 +233,15 @@ func (p *Provider) prepareSNIRouteBackendTLS(ctx context.Context, desired *desir
 	}
 	desired.sniHeldClosed = make(map[sniFragmentKey]bool)
 	desired.sniBlockedRoutes = make(map[string]bool)
+	if err := p.prepareSNIBackendPools(ctx, desired, actual, capable); err != nil {
+		return err
+	}
 	var targets []desiredSNIFragment
 	for _, target := range desired.sni {
+		if target.usesBackendPools() || target.weightedGuard {
+			targets = append(targets, target)
+			continue
+		}
 		tls := target.route.BackendTLS
 		blocked := target.route.Deny
 		if tls != nil {

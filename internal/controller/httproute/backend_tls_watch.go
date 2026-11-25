@@ -272,7 +272,7 @@ func (r *Reconciler) enqueuePoliciesForTLSRouteDependency(ctx context.Context, d
 	keys := map[types.NamespacedName]struct{}{}
 	services := map[types.NamespacedName]struct{}{}
 	addRoute := func(route *gatewayv1.TLSRoute) {
-		if key, ok := gatewaycontroller.TLSRouteBackendService(route); ok {
+		for key := range gatewaycontroller.TLSRouteBackendServiceRefs(route) {
 			services[key] = struct{}{}
 		}
 	}
@@ -297,8 +297,10 @@ func (r *Reconciler) enqueuePoliciesForTLSRouteDependency(ctx context.Context, d
 				addRoute(route)
 			}
 		case *gatewayv1.ReferenceGrant:
-			if key, ok := gatewaycontroller.TLSRouteBackendService(route); ok && key.Namespace == affected.Namespace && route.Namespace != key.Namespace {
-				services[key] = struct{}{}
+			for key := range gatewaycontroller.TLSRouteBackendServiceRefs(route) {
+				if key.Namespace == affected.Namespace && route.Namespace != key.Namespace {
+					services[key] = struct{}{}
+				}
 			}
 		case *corev1.Namespace:
 			if route.Namespace == affected.Name {

@@ -27,6 +27,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -117,25 +118,10 @@ func (r *Reconciler) resolveSNIBackend(ctx context.Context, snapshot *gatewayMut
 		if err != nil {
 			return sniBackendReadPending(ctx, entry, "Waiting for a live BackendTLSPolicy inventory")
 		}
-		if winner := selection.Winner; winner != nil {
-			switch {
-			case winner.Validation == nil:
-				entry.resolvedReason, entry.resolvedMessage = gatewayv1.RouteConditionReason("InvalidBackendTLSPolicy"), winner.Accepted.Message
-				return nil
-			case len(winner.Validation.SubjectAltNames) != 0:
-				entry.resolvedReason, entry.resolvedMessage = gatewayv1.RouteReasonUnsupportedProtocol, "TCP backend TLS supports hostname validation"
-				return nil
-			case BackendClientCertificateRef(snapshot.gateway) != nil:
-				entry.resolvedReason, entry.resolvedMessage = gatewayv1.RouteReasonUnsupportedProtocol, tcpBackendClientCertificateMessage
-				return nil
-			case winner.AncestorSlot != backendtls.AncestorSlotHeld:
-				entry.resolvedReason, entry.resolvedMessage = gatewayv1.RouteReasonPending, "Waiting for a BackendTLSPolicy Gateway ancestor slot"
-				if winner.AncestorSlot == backendtls.AncestorSlotFull {
-					entry.resolvedReason, entry.resolvedMessage = backendtls.AncestorLimitReason, backendtls.AncestorLimitMessage
-				}
-				return nil
-			}
-			validation = winner.Validation.CloudValidation()
+		validation, diagnostic = sniBackendTLSValidation(snapshot.gateway, selection.Winner)
+		if diagnostic != nil {
+			entry.resolvedReason, entry.resolvedMessage = gatewayv1.RouteConditionReason(diagnostic.Reason), diagnostic.Message
+			return nil
 		}
 	}
 	members, diagnostic, err := r.readSNIMembers(ctx, service, port)
@@ -164,108 +150,198 @@ func (r *Reconciler) resolveSNIBackend(ctx context.Context, snapshot *gatewayMut
 	return nil
 }
 
+func sniBackendTLSValidation(gateway *gatewayv1.Gateway, winner *backendtls.PolicyResult) (*cloud.BackendTLSValidation, *model.Diagnostic) {
+	switch {
+	case winner == nil:
+		return nil, nil
+	case winner.Accepted.Status == metav1.ConditionUnknown:
+		return nil, &model.Diagnostic{Reason: string(gatewayv1.RouteReasonPending), Message: winner.Accepted.Message}
+	case winner.Validation == nil:
+		return nil, &model.Diagnostic{Reason: "InvalidBackendTLSPolicy", Message: winner.Accepted.Message}
+	case len(winner.Validation.SubjectAltNames) != 0:
+		return nil, &model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedProtocol), Message: "TCP backend TLS supports hostname validation"}
+	case BackendClientCertificateRef(gateway) != nil:
+		return nil, &model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedProtocol), Message: tcpBackendClientCertificateMessage}
+	case winner.AncestorSlot == backendtls.AncestorSlotFull:
+		return nil, &model.Diagnostic{Reason: string(backendtls.AncestorLimitReason), Message: backendtls.AncestorLimitMessage}
+	case winner.AncestorSlot != backendtls.AncestorSlotHeld:
+		return nil, &model.Diagnostic{Reason: string(gatewayv1.RouteReasonPending), Message: "Waiting for a BackendTLSPolicy Gateway ancestor slot"}
+	}
+	return winner.Validation.CloudValidation(), nil
+}
+
+const sniWeightedBackendTLSUnsupported = "BackendTLSPolicy cannot authenticate a TLSRoute with multiple backendRefs"
+
 func (r *Reconciler) resolveWeightedSNIBackends(ctx context.Context, snapshot *gatewayMutationSnapshot, entry *sniRouteStatus, tls *graph.BackendTLSObserver, mixed bool) error {
-	const backendTLSUnsupported = "BackendTLSPolicy cannot authenticate a TLSRoute with multiple backendRefs"
 	refs := entry.route.Spec.Rules[0].BackendRefs
-	groups := make([]routebackend.WeightedServiceMembers, 0, len(refs))
-	services := make([]cloud.TLSBackendService, 0, len(refs))
+	pools := make([]cloud.TLSSNIBackendPool, 0, len(refs))
 	var total, rejected int
 	var invalid []string
 	var requiresBackendTLS bool
+	var inventoryPending string
+	authenticate := terminatesTLS(entry.listener) && r.Config.BackendTLSPolicy
 	for i, ref := range refs {
-		weight := ptr.Deref(ref.Weight, 1)
-		total += int(weight)
-		service, port, diagnostic, err := r.observeSNIService(ctx, entry.route, ref)
-		if err != nil {
-			return sniBackendReadPending(ctx, entry, "Waiting for a live Service and ReferenceGrant inventory")
+		pool, applies, diagnostic := r.observeWeightedSNIBackend(ctx, snapshot, entry, ref, tls, authenticate)
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
+		requiresBackendTLS = requiresBackendTLS || applies
 		if diagnostic != nil {
-			recordSNIRefDiagnostic(entry, &invalid, i, diagnostic)
-			rejected += int(weight)
-			continue
-		}
-		if weight == 0 || len(entry.hostnames) == 0 {
-			continue
-		}
-		applies, err := tls.HasPolicy(ctx, service, port)
-		if err != nil {
-			return sniBackendReadPending(ctx, entry, "Waiting for a live BackendTLSPolicy inventory")
-		}
-		if applies {
-			requiresBackendTLS = true
-			recordSNIRefDiagnostic(entry, &invalid, i, &model.Diagnostic{
-				Reason: string(gatewayv1.RouteReasonUnsupportedProtocol), Message: backendTLSUnsupported,
-			})
-			continue
-		}
-		members, diagnostic, err := r.readSNIMembers(ctx, service, port)
-		if err != nil {
-			return sniBackendReadPending(ctx, entry, "Waiting for a complete backend EndpointSlice inventory")
-		}
-		if diagnostic != nil {
+			if !applies && diagnostic.Reason == string(gatewayv1.RouteReasonPending) && inventoryPending == "" {
+				inventoryPending = diagnostic.Message
+			}
 			recordSNIRefDiagnostic(entry, &invalid, i, diagnostic)
 		}
-		if len(members) == 0 {
-			rejected += int(weight)
-			continue
+		if pool.Weight > 0 {
+			total += pool.Weight
+			if len(pool.Members) == 0 {
+				rejected += pool.Weight
+			}
+			pools = append(pools, pool)
 		}
-		groups = append(groups, routebackend.WeightedServiceMembers{Weight: weight, Members: members})
-		services = append(services, cloud.TLSBackendService{UID: string(service.UID), Port: int(port.Port)})
 	}
 	if len(invalid) == 0 {
 		entry.resolvedReason, entry.resolvedMessage = gatewayv1.RouteReasonResolvedRefs, "The backend Service references are resolved"
 	} else {
 		entry.resolvedMessage = strings.Join(invalid, ". ")
 	}
+	authenticated := authenticate && requiresBackendTLS
 	switch {
-	case requiresBackendTLS:
-		entry.programmingDiagnostic = &model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedProtocol), Message: backendTLSUnsupported}
+	case !authenticated && inventoryPending != "":
+		return sniBackendReadPending(ctx, entry, inventoryPending)
+	case !authenticate && requiresBackendTLS:
+		entry.programmingDiagnostic = &model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedProtocol), Message: sniWeightedBackendTLSUnsupported}
 		return nil
 	case len(entry.hostnames) == 0:
 		return nil
 	case total == 0:
 		entry.programmingDiagnostic = &model.Diagnostic{Reason: "Pending", Message: "The TLSRoute has no positive-weight backend"}
 		return nil
-	case len(groups) == 0:
+	case rejected == total:
 		return nil
 	}
 
-	var rejection *cloud.TCPConnectionRejection
-	if rejected > 0 {
-		if !r.Config.TCPConnectionRejection {
-			entry.programmingDiagnostic = &model.Diagnostic{Reason: "Pending", Message: "Proportional TLSRoute rejection requires the TCP connection rejection controller option"}
-			return nil
-		}
+	if rejected > 0 && !r.Config.TCPConnectionRejection {
+		entry.programmingDiagnostic = &model.Diagnostic{Reason: "Pending", Message: "Proportional TLSRoute rejection requires the TCP connection rejection controller option"}
+		return nil
+	}
+	topology := snapshot.topology.Topology
+	target := cloud.TLSSNIRoute{
+		Identity: controller.RouteIdentity(r.Config, snapshot.gateway, entry.route), Passthrough: mixed && !terminatesTLS(entry.listener),
+		BackendSubnetID: topology.MemberSubnetID, BackendSecurityGroupIDs: topology.BackendSecurityGroupIDs,
+	}
+	switch {
+	case authenticated && len(pools) == 1:
+		// Zero-weight references affect resolution status only. The sole
+		// positive share uses the native authenticated Service pool.
+		pool := pools[0]
+		target.ServiceUID, target.ServicePort, target.Members, target.BackendTLS = pool.ServiceUID, pool.ServicePort, pool.Members, pool.BackendTLS
+	case authenticated:
+		target.BackendPools = pools
+	default:
 		share := cloud.TCPConnectionRejection{RejectWeight: rejected, TotalWeight: total}
-		if !share.Valid() {
-			entry.programmingDiagnostic = &model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: "Invalid TLSRoute backend weight share"}
+		if diagnostic := flattenWeightedSNIPools(&target, pools, share); diagnostic != nil {
+			entry.programmingDiagnostic = diagnostic
 			return nil
 		}
-		rejection = &share
+	}
+	appendSNIForwardingTargets(entry, target)
+	return nil
+}
+
+// Each positive reference starts as a denial. Only a fully resolved Service,
+// its effective transport, and ready endpoints can populate that share.
+func (r *Reconciler) observeWeightedSNIBackend(ctx context.Context, snapshot *gatewayMutationSnapshot, entry *sniRouteStatus, ref gatewayv1.BackendRef, tls *graph.BackendTLSObserver, authenticate bool) (cloud.TLSSNIBackendPool, bool, *model.Diagnostic) {
+	pool := cloud.TLSSNIBackendPool{Weight: int(ptr.Deref(ref.Weight, 1))}
+	service, port, diagnostic, err := r.observeSNIService(ctx, entry.route, ref)
+	if err != nil {
+		return pool, false, &model.Diagnostic{Reason: "Pending", Message: "Waiting for a live Service and ReferenceGrant inventory"}
+	}
+	if diagnostic != nil || pool.Weight == 0 || len(entry.hostnames) == 0 {
+		return pool, false, diagnostic
+	}
+	var applies bool
+	var validation *cloud.BackendTLSValidation
+	if authenticate {
+		ancestor := &backendtls.GatewayAncestor{Key: client.ObjectKeyFromObject(snapshot.gateway), ControllerName: r.Config.ControllerName}
+		selection, err := tls.ObserveWeightedService(ctx, service, port, ancestor)
+		if err != nil {
+			return pool, false, &model.Diagnostic{Reason: "Pending", Message: "Waiting for a live BackendTLSPolicy inventory"}
+		}
+		applies = selection.Winner != nil
+		validation, diagnostic = sniBackendTLSValidation(snapshot.gateway, selection.Winner)
+		if diagnostic != nil {
+			return pool, true, diagnostic
+		}
+	} else {
+		applies, err := tls.HasPolicy(ctx, service, port)
+		if err != nil {
+			return pool, false, &model.Diagnostic{Reason: "Pending", Message: "Waiting for a live BackendTLSPolicy inventory"}
+		}
+		if applies {
+			return pool, true, &model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedProtocol), Message: sniWeightedBackendTLSUnsupported}
+		}
+	}
+	members, diagnostic, err := r.readSNIMembers(ctx, service, port)
+	if err != nil {
+		return pool, applies, &model.Diagnostic{Reason: "Pending", Message: "Waiting for a complete backend EndpointSlice inventory"}
+	}
+	if diagnostic == nil && len(members) > 0 {
+		pool.ServiceUID, pool.ServicePort, pool.Members, pool.BackendTLS = string(service.UID), int(port.Port), members, validation
+	}
+	return pool, applies, diagnostic
+}
+
+func flattenWeightedSNIPools(target *cloud.TLSSNIRoute, pools []cloud.TLSSNIBackendPool, share cloud.TCPConnectionRejection) *model.Diagnostic {
+	if share.RejectWeight > 0 {
+		if !share.Valid() {
+			return &model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: "Invalid TLSRoute backend weight share"}
+		}
+		target.TCPConnectionRejection = &share
+	}
+	groups := make([]routebackend.WeightedServiceMembers, 0, len(pools))
+	services := make([]cloud.TLSBackendService, 0, len(pools))
+	for _, pool := range pools {
+		if len(pool.Members) > 0 {
+			groups = append(groups, routebackend.WeightedServiceMembers{Weight: int32(pool.Weight), Members: pool.Members})
+			services = append(services, cloud.TLSBackendService{UID: pool.ServiceUID, Port: pool.ServicePort})
+			target.BackendServiceMembers = append(target.BackendServiceMembers, pool)
+		}
 	}
 	members, err := routebackend.WeightedMembers(cloud.ListenerProtocolTCP, groups)
 	if err != nil {
-		entry.programmingDiagnostic = &model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: err.Error()}
-		return nil
+		return &model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: err.Error()}
 	}
 	slices.SortFunc(services, func(a, b cloud.TLSBackendService) int {
 		return cmp.Or(cmp.Compare(a.UID, b.UID), cmp.Compare(a.Port, b.Port))
 	})
-	topology := snapshot.topology.Topology
-	appendSNIForwardingTargets(entry, cloud.TLSSNIRoute{
-		Identity: controller.RouteIdentity(r.Config, snapshot.gateway, entry.route), Passthrough: mixed && !terminatesTLS(entry.listener),
-		BackendServices: slices.Compact(services), Members: members, TCPConnectionRejection: rejection,
-		BackendSubnetID: topology.MemberSubnetID, BackendSecurityGroupIDs: topology.BackendSecurityGroupIDs,
-	})
+	target.BackendServices, target.Members = slices.Compact(services), members
 	return nil
 }
 
 func recordSNIRefDiagnostic(entry *sniRouteStatus, messages *[]string, index int, diagnostic *model.Diagnostic) {
 	reason := gatewayv1.RouteConditionReason(diagnostic.Reason)
-	if entry.resolvedReason == "" || reason == gatewayv1.RouteReasonRefNotPermitted {
+	if sniRefReasonPriority(reason) > sniRefReasonPriority(entry.resolvedReason) {
 		entry.resolvedReason = reason
 	}
 	*messages = append(*messages, fmt.Sprintf("backendRef %d (%s)", index+1, diagnostic.Message))
+}
+
+func sniRefReasonPriority(reason gatewayv1.RouteConditionReason) int {
+	switch reason {
+	case "":
+		return 0
+	case gatewayv1.RouteReasonResolvedRefs:
+		return 1
+	case gatewayv1.RouteReasonPending:
+		return 2
+	case backendtls.AncestorLimitReason:
+		return 4
+	case gatewayv1.RouteReasonRefNotPermitted:
+		return 5
+	default:
+		return 3
+	}
 }
 
 func (r *Reconciler) readSNIMembers(ctx context.Context, service *corev1.Service, port *corev1.ServicePort) ([]cloud.Member, *model.Diagnostic, error) {

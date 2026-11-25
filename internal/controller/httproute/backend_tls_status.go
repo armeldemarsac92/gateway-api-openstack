@@ -153,24 +153,23 @@ func (r *backendTLSPolicyStatusReconciler) observeAncestors(ctx context.Context,
 		if err != nil {
 			return nil, err
 		}
-		capability := backendTLSUnknown
-		if !requireSAN && r.routes.TCPBackendTLSAvailable != nil {
-			for _, consumer := range consumers {
-				if consumer.Accepted.Status == metav1.ConditionTrue {
-					supported, err := r.routes.TCPBackendTLSAvailable(ctx)
-					if err == nil {
-						capability = backendTLSUnsupported
-						if supported {
-							capability = backendTLSAvailable
-						}
-					}
-					break
-				}
-			}
-		}
+		capabilities := map[bool]backendTLSAvailability{}
 		for key, consumer := range consumers {
+			capability, checked := capabilities[consumer.Weighted]
+			if !checked && !requireSAN && consumer.Accepted.Status == metav1.ConditionTrue {
+				capability = r.tcpBackendTLSAvailability(ctx, consumer.Weighted)
+				capabilities[consumer.Weighted] = capability
+			}
 			conditions := backendTLSPolicyConditions{
 				accepted: capability.apply(consumer.Accepted, !requireSAN, requireSAN), resolvedRefs: consumer.ResolvedRefs,
+			}
+			if consumer.Weighted && consumer.Accepted.Status == metav1.ConditionTrue {
+				switch conditions.accepted.Reason {
+				case "UnsupportedProvider":
+					conditions.accepted.Message = "The regional provider does not support weighted authenticated TLSRoute upstreams"
+				case "Pending":
+					conditions.accepted.Message = "Regional provider support for weighted authenticated TLSRoute upstreams could not be verified"
+				}
 			}
 			// A policy must be enforceable by every profile consuming it
 			// before the single ancestor can report Accepted.
@@ -203,19 +202,31 @@ func (r *backendTLSPolicyStatusReconciler) observeAncestors(ctx context.Context,
 	return ancestors, nil
 }
 
-func mergeBackendTLSConsumer(ancestors map[types.NamespacedName]backendTLSPolicyConditions, key types.NamespacedName, conditions backendTLSPolicyConditions) {
-	if prior, exists := ancestors[key]; exists {
-		conditions.accepted = leastSatisfiedBackendTLSCondition(prior.accepted, conditions.accepted)
-		conditions.resolvedRefs = leastSatisfiedBackendTLSCondition(prior.resolvedRefs, conditions.resolvedRefs)
+func (r *backendTLSPolicyStatusReconciler) tcpBackendTLSAvailability(ctx context.Context, weighted bool) backendTLSAvailability {
+	discover := r.routes.TCPBackendTLSAvailable
+	if weighted {
+		discover = r.routes.TCPWeightedBackendTLSAvailable
 	}
-	ancestors[key] = conditions
+	if discover == nil {
+		return backendTLSUnknown
+	}
+	supported, err := discover(ctx)
+	switch {
+	case err != nil:
+		return backendTLSUnknown
+	case !supported:
+		return backendTLSUnsupported
+	default:
+		return backendTLSAvailable
+	}
 }
 
-func leastSatisfiedBackendTLSCondition(first, second metav1.Condition) metav1.Condition {
-	if first.Status == metav1.ConditionFalse || second.Status == metav1.ConditionTrue {
-		return first
+func mergeBackendTLSConsumer(ancestors map[types.NamespacedName]backendTLSPolicyConditions, key types.NamespacedName, conditions backendTLSPolicyConditions) {
+	if prior, exists := ancestors[key]; exists {
+		conditions.accepted = backendtls.LeastSatisfiedCondition(prior.accepted, conditions.accepted)
+		conditions.resolvedRefs = backendtls.LeastSatisfiedCondition(prior.resolvedRefs, conditions.resolvedRefs)
 	}
-	return second
+	ancestors[key] = conditions
 }
 
 type backendTLSConsumer struct {

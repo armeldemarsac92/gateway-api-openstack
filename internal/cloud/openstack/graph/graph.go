@@ -36,17 +36,18 @@ import (
 )
 
 type desiredGatewayGraph struct {
-	fixedHTTPResponses  bool
-	httpRequestPolicies httpRequestPolicyAvailability
-	plainHTTPRuleLimits map[int]string
-	spec                cloud.GatewayGraphSpec
-	identity            Identity
-	routes              []desiredRoute
-	protocol            string
-	sni                 []desiredSNIFragment
-	sniHeldClosed       map[sniFragmentKey]bool
-	sniPaused           map[sniFragmentKey]bool
-	sniBlockedRoutes    map[string]bool
+	fixedHTTPResponses     bool
+	httpRequestPolicies    httpRequestPolicyAvailability
+	plainHTTPRuleLimits    map[int]string
+	spec                   cloud.GatewayGraphSpec
+	identity               Identity
+	routes                 []desiredRoute
+	protocol               string
+	sni                    []desiredSNIFragment
+	sniHeldClosed          map[sniFragmentKey]bool
+	sniPaused              map[sniFragmentKey]bool
+	sniBlockedRoutes       map[string]bool
+	sniBackendPoolsCapable bool
 }
 
 type observedGatewayGraph struct {
@@ -87,6 +88,7 @@ type observedGatewayGraph struct {
 	outcome                  cloud.Outcome
 	protocol                 string
 	sni                      map[sniFragmentKey]*observedSNIFragment
+	sniBackendPoolsObserved  bool
 	rawTLSVerified           bool
 	rawTLSCapabilityVerified bool
 }
@@ -555,7 +557,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 			}
 			return result, &cloud.GraphError{Identity: desired.routes[step.routeIndex].spec.Identity, Err: err}
 		}
-		if step.kind == graphSNIMutation && (step.isRestrictiveSNI() || step.sni.target.weighted()) ||
+		if step.kind == graphSNIMutation && (step.isRestrictiveSNI() || step.sni.target.weighted() || step.sni.target.usesBackendPools()) ||
 			step.sniWithdrawal && hasWeightedSNI(desired, actual) {
 			// An unsuccessful write cannot establish forwarding.
 			// Unaffected siblings can retain an existing checkpoint.
@@ -733,11 +735,24 @@ func (p *Provider) validateGraphTrafficSecurity(ctx context.Context, desired des
 	spec := desired.spec.Gateway.Spec
 	if isSNIProtocol(desired.protocol) {
 		spec.ListenerProtocol = cloud.ListenerProtocolTCP
-		owners := sniRouteOwners(slices.DeleteFunc(slices.Clone(desired.sni), func(target desiredSNIFragment) bool { return target.weightedBlocked }))
-		routes := make([]cloud.RouteSpec, 0, len(owners))
-		for _, owner := range owners {
-			target := owner.route
-			routes = append(routes, cloud.RouteSpec{Identity: target.Identity, Members: target.Members,
+		var routes []cloud.RouteSpec
+		type sniMode struct {
+			uid         string
+			passthrough bool
+		}
+		seen := make(map[sniMode]bool)
+		for _, fragment := range desired.sni {
+			target := fragment.route
+			mode := sniMode{uid: target.Identity.RouteUID, passthrough: target.Passthrough}
+			if target.Deny || fragment.weightedBlocked || seen[mode] {
+				continue
+			}
+			seen[mode] = true
+			members := slices.Clone(target.Members)
+			for _, backend := range target.BackendPools {
+				members = append(members, backend.Members...)
+			}
+			routes = append(routes, cloud.RouteSpec{Identity: target.Identity, Members: members,
 				MemberSubnetID: target.BackendSubnetID, BackendSecurityGroupIDs: target.BackendSecurityGroupIDs,
 				GatewayRequirements: cloud.GatewayRequirements{ListenerProtocol: cloud.ListenerProtocolTCP}})
 		}
@@ -957,11 +972,11 @@ func (p *Provider) buildDesiredGatewayGraph(spec cloud.GatewayGraphSpec) (desire
 		}) {
 			return invalid("TLS SNI suffix support is disabled")
 		}
-		if !rawTLS && slices.ContainsFunc(spec.Gateway.TLSSNIRoutes, func(route cloud.TLSSNIRoute) bool { return route.BackendTLS != nil }) {
+		if !rawTLS && slices.ContainsFunc(spec.Gateway.TLSSNIRoutes, func(route cloud.TLSSNIRoute) bool { return route.BackendTLS != nil || len(route.BackendPools) != 0 }) {
 			return invalid("Backend TLS requires a TCP TLS termination profile")
 		}
 		if slices.ContainsFunc(spec.Gateway.TLSSNIRoutes, func(route cloud.TLSSNIRoute) bool {
-			return route.Passthrough && (!mixed || route.BackendTLS != nil)
+			return route.Passthrough && (!mixed || route.BackendTLS != nil || len(route.BackendPools) != 0)
 		}) {
 			return invalid("An explicit passthrough target requires mixed TLS and cannot originate backend TLS")
 		}
@@ -1561,9 +1576,14 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 	}
 	if isSNIProtocol(desired.protocol) {
 		observed, err := p.observeSNIGraph(ctx, desired, actual, inventory)
-		if err != nil && desired.protocol == cloud.ListenerProtocolTLSMixed && actual.listener != nil &&
-			actual.rawTLSVerified && desired.spec.Gateway.Disposition == cloud.GraphEnsure {
-			p.closeUnverifiedMixedSNI(&observed)
+		if err != nil && observed.listener != nil && observed.rawTLSVerified && desired.spec.Gateway.Disposition == cloud.GraphEnsure {
+			switch {
+			case observed.sniBackendPoolsObserved ||
+				slices.ContainsFunc(desired.sni, desiredSNIFragment.usesBackendPools):
+				p.closeUnverifiedSNIFrontend(&observed, "Waiting for verified weighted TLS SNI ownership and targets")
+			case desired.protocol == cloud.ListenerProtocolTLSMixed && actual.listener != nil:
+				p.closeUnverifiedMixedSNI(&observed)
+			}
 		}
 		return observed, err
 	}

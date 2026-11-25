@@ -376,16 +376,19 @@ func TestBackendTLSAncestorCapacityPreservesRowsAndAllocatesOneReplacement(t *te
 }
 
 func TestBackendTLSPolicyStatusCombinesHTTPAndTLSRouteAncestors(t *testing.T) {
-	f := newRouteModelInputFixture(t)
-	f.reconciler.Config.BackendTLSPolicy, f.reconciler.Config.TCPTLSTermination = true, true
+	cfg := testConfig()
+	cfg.BackendTLSPolicy, cfg.TCPTLSTermination = true, true
+	f := newRouteModelInputFixtureWithConfig(t, cfg)
 	f.reconciler.BackendTLSAvailable = func(context.Context) (bool, error) { return true, nil }
 	tcpSupported := false
 	f.reconciler.TCPBackendTLSAvailable = func(context.Context) (bool, error) { return tcpSupported, nil }
+	weightedSupported := false
+	f.reconciler.TCPWeightedBackendTLSAvailable = func(context.Context) (bool, error) { return weightedSupported, nil }
 	tlsGateway := &gatewayv1.Gateway{
 		ObjectMeta: metav1.ObjectMeta{Namespace: f.gateway.Namespace, Name: "tls", UID: "tls-gateway"},
 		Spec: gatewayv1.GatewaySpec{GatewayClassName: f.gateway.Spec.GatewayClassName, Listeners: []gatewayv1.Listener{{
 			Name: "terminate", Port: 8443, Protocol: gatewayv1.TLSProtocolType,
-			Hostname: ptr.To(gatewayv1.Hostname("tls.example.com")),
+			Hostname: ptr.To(gatewayv1.Hostname("*.example.com")),
 			TLS:      &gatewayv1.ListenerTLSConfig{Mode: ptr.To(gatewayv1.TLSModeTerminate), CertificateRefs: []gatewayv1.SecretObjectReference{{Name: "frontend"}}},
 		}}},
 	}
@@ -460,6 +463,57 @@ func TestBackendTLSPolicyStatusCombinesHTTPAndTLSRouteAncestors(t *testing.T) {
 	require.NoError(t, f.client.Update(t.Context(), tlsGateway))
 	conditions = reconcile()
 	require.True(t, meta.IsStatusConditionTrue(conditions[tlsName], string(gatewayv1.PolicyConditionAccepted)))
+
+	// The weighted consumer sorts before the single-reference consumer. Both
+	// need the policy at the same Gateway, so the weighted requirement must win.
+	weightedRoute := tlsRoute.DeepCopy()
+	weightedRoute.Name, weightedRoute.UID, weightedRoute.ResourceVersion = "a-weighted", "weighted-route-uid", ""
+	weightedRoute.Spec.Hostnames = []gatewayv1.Hostname{"weighted.example.com"}
+	canary := f.service.DeepCopy()
+	canary.Name, canary.UID, canary.ResourceVersion = "canary", "canary-service-uid", ""
+	canaryRef := weightedRoute.Spec.Rules[0].BackendRefs[0]
+	canaryRef.Name = gatewayv1.ObjectName(canary.Name)
+	weightedRoute.Spec.Rules[0].BackendRefs = append(weightedRoute.Spec.Rules[0].BackendRefs, canaryRef)
+	canaryPolicy := policy.DeepCopy()
+	canaryPolicy.Name, canaryPolicy.UID, canaryPolicy.ResourceVersion = "canary", "canary-policy-uid", ""
+	canaryPolicy.Status = gatewayv1.PolicyStatus{}
+	canaryPolicy.Spec.TargetRefs[0].Name = gatewayv1.ObjectName(canary.Name)
+	f.create(t, weightedRoute, canary, canaryPolicy)
+	canaryKey := client.ObjectKeyFromObject(canaryPolicy)
+	require.ElementsMatch(t, []ctrl.Request{{NamespacedName: key}, {NamespacedName: canaryKey}},
+		f.reconciler.enqueuePoliciesForTLSRouteDependency(t.Context(), weightedRoute))
+
+	conditions = reconcile()
+	rejected = meta.FindStatusCondition(conditions[tlsName], string(gatewayv1.PolicyConditionAccepted))
+	require.NotNil(t, rejected)
+	require.Equal(t, metav1.ConditionFalse, rejected.Status)
+	require.Equal(t, "UnsupportedProvider", rejected.Reason)
+	require.True(t, meta.IsStatusConditionTrue(conditions[httpName], string(gatewayv1.PolicyConditionAccepted)))
+	weightedSupported = true
+	require.True(t, meta.IsStatusConditionTrue(reconcile()[tlsName], string(gatewayv1.PolicyConditionAccepted)))
+
+	reconcileCanary := func() []gatewayv1.PolicyAncestorStatus {
+		t.Helper()
+		status := backendTLSPolicyStatusReconciler{routes: f.reconciler}
+		_, err := status.Reconcile(t.Context(), ctrl.Request{NamespacedName: canaryKey})
+		require.NoError(t, err)
+		require.NoError(t, f.client.Get(t.Context(), canaryKey, canaryPolicy))
+		return canaryPolicy.Status.Ancestors
+	}
+	canaryAncestors := reconcileCanary()
+	require.Len(t, canaryAncestors, 1)
+	require.Equal(t, tlsName, canaryAncestors[0].AncestorRef.Name)
+	require.True(t, meta.IsStatusConditionTrue(canaryAncestors[0].Conditions, string(gatewayv1.PolicyConditionAccepted)))
+	weightedRoute.Spec.Rules[0].BackendRefs[1].Weight = ptr.To(int32(0))
+	require.NoError(t, f.client.Update(t.Context(), weightedRoute))
+	require.Empty(t, reconcileCanary())
+	weightedSupported = false
+	require.True(t, meta.IsStatusConditionTrue(reconcile()[tlsName], string(gatewayv1.PolicyConditionAccepted)))
+	weightedRoute.Spec.Rules[0].BackendRefs[1].Weight = nil
+	weightedRoute.Spec.Hostnames = []gatewayv1.Hostname{"outside.example.net"}
+	require.NoError(t, f.client.Update(t.Context(), weightedRoute))
+	require.Empty(t, reconcileCanary())
+	require.True(t, meta.IsStatusConditionTrue(reconcile()[tlsName], string(gatewayv1.PolicyConditionAccepted)))
 
 	require.NoError(t, f.client.Delete(t.Context(), tlsRoute))
 	conditions = reconcile()

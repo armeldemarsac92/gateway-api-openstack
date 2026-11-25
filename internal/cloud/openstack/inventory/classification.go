@@ -412,6 +412,12 @@ func auditCandidateRole(resourceType string, tags []string) (string, bool, error
 		if !unique || !openstackidentity.ValidSNITarget(target) {
 			return "", false, fmt.Errorf("TLSRoute resource has a missing or invalid target identity")
 		}
+		weighted := slices.Contains(tags, openstackidentity.SNIWeightedPoolsTag)
+		_, slot := openstackidentity.SNIPoolSlot(tags)
+		needsSlot := weighted && (resourceType == auditTypePool || resourceType == auditTypeMember)
+		if needsSlot != slot || !needsSlot && openstackidentity.HasSNIPoolSlot(tags) {
+			return "", false, fmt.Errorf("TLSRoute resource has an invalid pool slot identity")
+		}
 		return role, true, nil
 	}
 	baseRole := role
@@ -655,10 +661,16 @@ func validateAuditPolicyPool(candidates auditCandidateSet, policy *auditCandidat
 }
 
 func classifyAuditExtendedPolicy(candidates auditCandidateSet, policy *auditCandidate, finding audit.ResourceFinding) audit.ResourceFinding {
-	if !openstackidentity.IsHTTPWeightedPolicyRole(finding.Role) || policy.policyAction != string(octavia.ActionWeightedTargets) ||
-		!validAuditWeightedTarget(policy) {
+	weightedTCP := finding.Role == openstackidentity.RoleSNIPolicy && slices.Contains(policy.tags, openstackidentity.SNIWeightedPoolsTag)
+	target := policy.policyTarget
+	recognizedTarget := weightedTCP && policy.policyInventoryOK && target != nil && target.AdminStateUp != nil &&
+		len(policy.weightedTCPPolicyTargets) > 0 && target.FixedResponse == nil && policy.redirectPoolNull && !policy.policyRedirects
+	if !weightedTCP {
+		recognizedTarget = openstackidentity.IsHTTPWeightedPolicyRole(finding.Role) && validAuditWeightedTarget(policy)
+	}
+	if policy.policyAction != string(octavia.ActionWeightedTargets) || !recognizedTarget {
 		finding = auditFinding(finding, audit.DispositionUnresolved, auditReasonUnprovenPolicyTarget,
-			"L7 policy does not report the supported weighted HTTP target shape")
+			"L7 policy does not report the supported weighted target shape")
 	}
 	listener := auditParentCandidate(candidates, auditTypeL7Policy, finding.ParentID)
 	listenerLB := ""
@@ -688,7 +700,13 @@ func classifyAuditExtendedPolicy(candidates auditCandidateSet, policy *auditCand
 		}
 		poolRole, _ := openstackidentity.ResourceRole(pool.tags)
 		base, _, _, fragment := openstackidentity.ParseHTTPFragmentRole(poolRole)
-		if !auditTagValuesEqual(policy.tags, pool.tags, keys) || index < len(policy.weightedPoolIDs) && (base != rolePool || !fragment) {
+		backendPool := base == rolePool && fragment
+		if weightedTCP {
+			slot, hasSlot := openstackidentity.SNIPoolSlot(pool.tags)
+			backendPool = poolRole == openstackidentity.RoleSNIPool && hasSlot && slot == index &&
+				auditTagValuesEqual(policy.tags, pool.tags, []string{"sni-target"})
+		}
+		if !auditTagValuesEqual(policy.tags, pool.tags, keys) || index < len(policy.weightedPoolIDs) && !backendPool {
 			return auditFinding(finding, audit.DispositionOwnershipConflict, auditReasonParentMismatch,
 				"L7 policy target is not a backend pool for the same Route and Gateway")
 		}
@@ -739,7 +757,14 @@ func auditRouteFragmentParentMatches(child, parent *auditCandidate, matchPath bo
 	childSNI := childRole == sniRoleByType[child.resourceType]
 	parentSNI := parentRole == sniRoleByType[parent.resourceType]
 	if childSNI || parentSNI {
-		return childSNI && parentSNI && auditTagValuesEqual(child.tags, parent.tags, []string{"sni-target"})
+		if !childSNI || !parentSNI || !auditTagValuesEqual(child.tags, parent.tags, []string{"sni-target"}) ||
+			slices.Contains(child.tags, openstackidentity.SNIWeightedPoolsTag) != slices.Contains(parent.tags, openstackidentity.SNIWeightedPoolsTag) {
+			return false
+		}
+		if child.resourceType == auditTypeMember && slices.Contains(child.tags, openstackidentity.SNIWeightedPoolsTag) {
+			return auditTagValuesEqual(child.tags, parent.tags, []string{"sni-slot"})
+		}
+		return true
 	}
 	_, childRedirectMatch, childCell, _, childRedirect := openstackidentity.ParseHTTPRedirectRole(childRole)
 	_, parentRedirectMatch, parentCell, _, parentRedirect := openstackidentity.ParseHTTPRedirectRole(parentRole)
@@ -921,6 +946,9 @@ func auditCardinalityKey(candidate *auditCandidate, finding audit.ResourceFindin
 	}
 	if finding.Role != "" && finding.Role == sniRoleByType[candidate.resourceType] {
 		stableKeys = append(stableKeys, "uid", "route-uid", "sni-target")
+		if candidate.resourceType == auditTypePool && slices.Contains(candidate.tags, openstackidentity.SNIWeightedPoolsTag) {
+			stableKeys = append(stableKeys, "sni-slot")
+		}
 	}
 	parts := []string{candidate.resourceType}
 	for _, key := range stableKeys {

@@ -97,6 +97,8 @@ type Reconciler struct {
 	XBackendClientCertificates graph.XBackendClientCertificateResolver
 	// TCPBackendTLSAvailable checks authenticated TLS for terminating TLSRoutes.
 	TCPBackendTLSAvailable func(context.Context) (bool, error)
+	// TCPWeightedBackendTLSAvailable checks authenticated TLS with weighted upstreams.
+	TCPWeightedBackendTLSAvailable func(context.Context) (bool, error)
 	// Recorder publishes Kubernetes Events.
 	Recorder events.EventRecorder
 	// Config contains immutable controller configuration.

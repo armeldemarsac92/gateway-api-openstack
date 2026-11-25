@@ -150,6 +150,13 @@ type TLSSNIRoute struct {
 	// BackendServices identifies the contributing Services and ports of a
 	// weighted rule. Single-backend targets keep their original identity.
 	BackendServices []TLSBackendService `json:",omitempty"`
+	// BackendServiceMembers retains the resolver's per-Service ownership of
+	// endpoints before flattening. It is used only to keep authorized pools
+	// serving during replacement and does not change the flat pool identity.
+	BackendServiceMembers []TLSSNIBackendPool `json:"-"`
+	// BackendPools keeps each Service's transport and relative connection share
+	// on terminating listeners when one or more Services need backend TLS.
+	BackendPools []TLSSNIBackendPool `json:",omitempty"`
 	// TCPConnectionRejection reserves the unavailable share of new connections.
 	TCPConnectionRejection *TCPConnectionRejection `json:",omitempty"`
 }
@@ -158,6 +165,16 @@ type TLSSNIRoute struct {
 type TLSBackendService struct {
 	UID  string
 	Port int
+}
+
+// TLSSNIBackendPool represents one positive-weight backend reference.
+// A reference with only a weight reserves its share for connection rejection.
+type TLSSNIBackendPool struct {
+	Weight      int
+	ServiceUID  string
+	ServicePort int
+	Members     []Member
+	BackendTLS  *BackendTLSValidation `json:",omitempty"`
 }
 
 // RouteGraphNode describes one exact route component. Spec.Identity is always

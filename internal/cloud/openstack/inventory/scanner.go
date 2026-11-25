@@ -246,39 +246,40 @@ func encode(value string) string {
 }
 
 type auditCandidate struct {
-	service                string
-	resourceType           string
-	id                     string
-	projectID              string
-	tenantID               string
-	provider               string
-	provisioningStatus     string
-	tags                   []string
-	description            string
-	portID                 string
-	redirectPoolID         string
-	policyAction           string
-	redirectPoolReported   bool
-	redirectPoolNull       bool
-	policyAdminStateUp     bool
-	policyRedirects        bool
-	requestRedirect        *octavia.RequestRedirect
-	requestRedirectPresent bool
-	requestRedirectValid   bool
-	requestPolicyPresent   bool
-	requestPolicyValid     bool
-	urlRewrite             *octavia.RequestURLRewrite
-	urlRewritePresent      bool
-	urlRewriteValid        bool
-	corsPresent            bool
-	corsValid              bool
-	policyUsesExtension    bool
-	policyTarget           *octavia.L7PolicyTarget
-	policyInventoryOK      bool
-	weightedPoolIDs        []string
-	reportedParents        map[string]struct{}
-	observedParents        map[string]struct{}
-	observationChanged     bool
+	service                  string
+	resourceType             string
+	id                       string
+	projectID                string
+	tenantID                 string
+	provider                 string
+	provisioningStatus       string
+	tags                     []string
+	description              string
+	portID                   string
+	redirectPoolID           string
+	policyAction             string
+	redirectPoolReported     bool
+	redirectPoolNull         bool
+	policyAdminStateUp       bool
+	policyRedirects          bool
+	requestRedirect          *octavia.RequestRedirect
+	requestRedirectPresent   bool
+	requestRedirectValid     bool
+	requestPolicyPresent     bool
+	requestPolicyValid       bool
+	urlRewrite               *octavia.RequestURLRewrite
+	urlRewritePresent        bool
+	urlRewriteValid          bool
+	corsPresent              bool
+	corsValid                bool
+	policyUsesExtension      bool
+	policyTarget             *octavia.L7PolicyTarget
+	policyInventoryOK        bool
+	weightedPoolIDs          []string
+	weightedTCPPolicyTargets []octavia.WeightedTCPPolicyTarget
+	reportedParents          map[string]struct{}
+	observedParents          map[string]struct{}
+	observationChanged       bool
 }
 
 type auditCandidateSet map[string]*auditCandidate
@@ -480,6 +481,7 @@ func (p *Scanner) collectAuditPolicies(
 		candidate.corsValid = observation.HasValidRequestCORS()
 		candidate.policyTarget, candidate.policyInventoryOK = observation.Target, complete
 		candidate.weightedPoolIDs = observation.PoolIDs
+		candidate.weightedTCPPolicyTargets = observation.WeightedTCPPolicyTargets
 		candidate.redirectPoolReported = len(observation.PoolReference) != 0
 		candidate.redirectPoolNull = string(observation.PoolReference) == "null"
 		candidates.add(candidate)
@@ -507,7 +509,7 @@ func (candidate auditCandidate) extendedPolicy() bool {
 		return true
 	}
 	role, _ := openstackidentity.ResourceRole(candidate.tags)
-	return openstackidentity.IsHTTPWeightedPolicyRole(role)
+	return openstackidentity.IsHTTPWeightedPolicyRole(role) || slices.Contains(candidate.tags, openstackidentity.SNIWeightedPoolsTag)
 }
 
 func (p *Scanner) collectAuditMembers(ctx context.Context, candidates auditCandidateSet, poolIDs map[string]struct{}) error {
