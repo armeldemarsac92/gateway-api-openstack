@@ -90,6 +90,10 @@ HTTP 204 acknowledges submission. Follow the provisioning status of the listener
 
 ## Remove a retiring route policy and its rules together
 
+The conditional worker uses database row locking with `FOR UPDATE SKIP LOCKED`. Enable this option on a database that supports that operation. [Signed Octavia packages](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-l7policy-conditional-removal-041a2becdc07)
+
+On both local Gateway API channels the retiring HTTPRoute returned 404 after the policy was disabled. Its finalizer remained until the controller read both the listener and policy inventories. The neighboring route continued serving its origin through withdrawal. [Controller, Octavia and HAProxy observations](qualification/v1.7.0/provider/conditional-l7-removal/receipt.json)
+
 Upgrade the regional Octavia API and Amphora workers to builds that support conditional L7 policy removal. Set `enabled_l7policy_conditional_removal_providers = amphora` in Octavia's `[api_settings]`. Once the effective provider advertises `l7policy_conditional_removal_v1` on the controller's regional load-balancer endpoint, add `--octavia-l7policy-conditional-removal` to the controller arguments. The option defaults to off and is independent of grouped creation and activation.
 
 For a retiring route binding on an HTTP or terminated HTTPS listener, the controller first observes the policy disabled and settled. It compares the full policy and rule snapshot with the owned inventory and rechecks the Kubernetes binding before submitting that revision. Octavia accepts the request with HTTP 202 and applies the removal and quota release together. The controller confirms policy absence through the normal inventory on a later reconcile before completing cleanup. A conflict or an interrupted request is followed by fresh inventory reads.
