@@ -22,6 +22,7 @@ import (
 	"strings"
 	"sync"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -121,43 +122,61 @@ func pendingExternalAuth(message string) model.Diagnostic {
 
 func (inputs *routeModelInputs) resolveExternalAuth(ctx context.Context, reader client.Reader, tlsObserver *graph.BackendTLSObserver,
 	namespace string, filter model.HTTPExternalAuth, topology classconfig.Resolved) (cloud.ListenerExternalAuth, *model.Diagnostic, error) {
-	auth := filter.Config
-	if auth.Protocol != cloud.ExternalAuthProtocolGRPC {
-		return routebackend.ResolveHTTPExternalAuth(ctx, reader, model.HTTPRouteKind, namespace, filter, topology)
-	}
-	service, port, diagnostic, err := routebackend.ObserveHTTPExternalAuthService(ctx, reader, model.HTTPRouteKind, namespace, filter)
+	auth, service, port, diagnostic, err := resolveRouteExternalAuthTransport(ctx, reader, tlsObserver, inputs.backendTLSAncestor, namespace, filter)
 	if diagnostic != nil || err != nil {
 		return auth, diagnostic, err
 	}
-	if inputs.backendTLSAncestor == nil {
+	return routebackend.ResolveExternalAuthMembers(ctx, reader, service, port, auth, topology)
+}
+
+func resolveRouteExternalAuthTransport(ctx context.Context, reader client.Reader, tlsObserver *graph.BackendTLSObserver,
+	ancestor *backendtls.GatewayAncestor, namespace string, filter model.HTTPExternalAuth) (cloud.ListenerExternalAuth, *corev1.Service, *corev1.ServicePort, *model.Diagnostic, error) {
+	auth := filter.Config
+	service, port, diagnostic, err := routebackend.ObserveExternalAuthService(ctx, reader, model.HTTPRouteKind, namespace, filter)
+	if diagnostic != nil || err != nil {
+		return auth, nil, nil, diagnostic, err
+	}
+	if ancestor == nil {
 		required, err := tlsObserver.HasPolicy(ctx, service, port)
 		if err != nil {
-			return auth, nil, err
+			return auth, nil, nil, nil, err
 		}
 		if required {
-			return auth, &model.Diagnostic{Condition: string(gatewayv1.RouteConditionAccepted), Reason: string(gatewayv1.RouteReasonUnsupportedValue),
-				Message: "gRPC ExternalAuth backend TLS requires --octavia-backend-tls-policy", Scope: model.ScopeRule}, nil
+			return auth, nil, nil, &model.Diagnostic{Condition: string(gatewayv1.RouteConditionAccepted), Reason: string(gatewayv1.RouteReasonUnsupportedValue),
+				Message: "ExternalAuth backend TLS requires --octavia-backend-tls-policy", Scope: model.ScopeRule}, nil
 		}
 	} else {
-		selection, err := tlsObserver.Observe(ctx, service, port, inputs.backendTLSAncestor)
+		selection, err := tlsObserver.Observe(ctx, service, port, ancestor)
 		if err != nil {
-			return auth, nil, err
+			return auth, nil, nil, nil, err
 		}
 		if winner := selection.Winner; winner != nil {
 			if winner.Validation == nil || winner.AncestorSlot != backendtls.AncestorSlotHeld {
-				diagnostic := pendingExternalAuth("Waiting for an authorized gRPC ExternalAuth BackendTLSPolicy")
-				return auth, &diagnostic, nil
+				diagnostic := pendingExternalAuth("Waiting for an authorized ExternalAuth BackendTLSPolicy")
+				return auth, nil, nil, &diagnostic, nil
 			}
 			auth.BackendTLS = winner.Validation.CloudValidation()
-			auth.BackendTLS.RequireH2 = true
+			auth.BackendTLS.RequireH2 = auth.Protocol == cloud.ExternalAuthProtocolGRPC
 		}
 	}
-	if auth.BackendTLS == nil && strings.EqualFold(ptr.Deref(port.AppProtocol, ""), "https") ||
-		auth.BackendTLS != nil && model.ServicePortUsesH2C(port) {
-		return auth, &model.Diagnostic{Condition: string(gatewayv1.RouteConditionResolvedRefs), Reason: string(gatewayv1.RouteReasonUnsupportedProtocol),
-			Message: "The gRPC ExternalAuth Service appProtocol conflicts with its required transport", Scope: model.ScopeRule}, nil
+	return auth, service, port, externalAuthTransportDiagnostic(service, port, filter, auth.BackendTLS != nil), nil
+}
+
+func externalAuthTransportDiagnostic(service *corev1.Service, port *corev1.ServicePort, filter model.HTTPExternalAuth, secured bool) *model.Diagnostic {
+	var issue *model.Diagnostic
+	if filter.Config.Protocol == cloud.ExternalAuthProtocolGRPC {
+		if !secured && strings.EqualFold(ptr.Deref(port.AppProtocol, ""), "https") || secured && model.ServicePortUsesH2C(port) {
+			issue = &model.Diagnostic{Reason: string(gatewayv1.RouteReasonUnsupportedProtocol),
+				Message: "The gRPC ExternalAuth Service appProtocol conflicts with its required transport"}
+		}
+	} else {
+		_, issue = model.ResolveServicePortForBackendTLS(service, filter.BackendRef.Port, false, secured)
 	}
-	return routebackend.ResolveExternalAuthMembers(ctx, reader, service, port, auth, topology)
+	if issue != nil {
+		return &model.Diagnostic{Condition: string(gatewayv1.RouteConditionResolvedRefs),
+			Reason: issue.Reason, Message: issue.Message, Scope: model.ScopeRule}
+	}
+	return nil
 }
 
 func (r *Reconciler) checkExternalAuthCapabilities(ctx context.Context, observations map[*model.HTTPExternalAuth]routeExternalAuthObservation) {
@@ -192,6 +211,9 @@ func (r *Reconciler) checkExternalAuthCapabilities(ctx context.Context, observat
 					case key.protocol == cloud.ExternalAuthProtocolGRPC:
 						diagnostic = model.Diagnostic{Condition: string(gatewayv1.RouteConditionAccepted), Reason: string(gatewayv1.RouteReasonUnsupportedValue),
 							Message: "The regional Octavia provider does not advertise the required gRPC ExternalAuth capabilities", Scope: model.ScopeRule}
+					case key.tls:
+						diagnostic = model.Diagnostic{Condition: string(gatewayv1.RouteConditionAccepted), Reason: string(gatewayv1.RouteReasonUnsupportedValue),
+							Message: "The regional Octavia provider does not advertise the required HTTP ExternalAuth backend TLS capabilities", Scope: model.ScopeRule}
 					default:
 						diagnostic = model.Diagnostic{Condition: string(gatewayv1.RouteConditionAccepted), Reason: string(gatewayv1.RouteReasonUnsupportedValue),
 							Message: "The regional Octavia provider does not advertise HTTPRoute ExternalAuth", Scope: model.ScopeRule}

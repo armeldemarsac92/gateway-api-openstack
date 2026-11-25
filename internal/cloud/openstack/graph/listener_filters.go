@@ -49,16 +49,16 @@ type observedAuthPool struct {
 }
 
 type listenerFilterMutation struct {
-	sections     []octavia.ListenerRequestFilterSection
-	createPool   string
-	createMember *cloud.Member
-	memberSubnet string
-	poolID       string
-	enablePool   bool
-	grpcAuth     *cloud.ListenerExternalAuth
-	claimCA      bool
-	publishCA    bool
-	caReference  string
+	sections      []octavia.ListenerRequestFilterSection
+	createPool    string
+	createMember  *cloud.Member
+	memberSubnet  string
+	poolID        string
+	enablePool    bool
+	protectedAuth *cloud.ListenerExternalAuth
+	claimCA       bool
+	publishCA     bool
+	caReference   string
 }
 
 func (p *Provider) observeListenerAuthPools(ctx context.Context, desired desiredGatewayGraph, actual *observedGatewayGraph, inventory octavia.PoolInventory) (map[string]observedAuthPool, error) {
@@ -66,7 +66,7 @@ func (p *Provider) observeListenerAuthPools(ctx context.Context, desired desired
 	poolsByID := make(map[string]pools.Pool)
 	var routeRefs map[string]map[string]string
 	if len(desired.routeAuthorizers()) != 0 || slices.ContainsFunc(inventory.Items, func(pool pools.Pool) bool {
-		return isGRPCAuthPool(pool) || isListenerAuthPool(pool) && (p.routeExternalAuth || slices.ContainsFunc(pool.Listeners, func(parent pools.ListenerID) bool {
+		return isProtectedAuthPool(pool) || isListenerAuthPool(pool) && (p.routeExternalAuth || slices.ContainsFunc(pool.Listeners, func(parent pools.ListenerID) bool {
 			return !listenerAuthPoolIDs(actual.requestFilters[parent.ID].Sections)[pool.ID]
 		}))
 	}) {
@@ -83,15 +83,13 @@ func (p *Provider) observeListenerAuthPools(ctx context.Context, desired desired
 		if err := p.validatePoolParent(pool, actual.loadBalancer.ID, rolePool, desired.identity); err != nil {
 			return nil, err
 		}
-		tag, prefix := listenerAuthPoolTag, "gateway-api-listener-auth-"
+		tag, prefix := authorizationPoolRole(pool)
 		readback, h2c := inventory.BackendTLS[pool.ID], inventory.BackendH2C[pool.ID]
-		if isGRPCAuthPool(pool) {
-			tag, prefix = grpcAuthPoolTag, grpcAuthPoolNamePrefix
-			if isListenerAuthPool(pool) {
-				return nil, fmt.Errorf("%w: authorization pool has conflicting roles", cloud.ErrOwnershipConflict)
-			}
-		} else if pool.TLSEnabled || hasObservedBackendTLS(pool, readback) || h2c {
-			return nil, fmt.Errorf("%w: HTTP authorization pool uses an unexpected transport", cloud.ErrOwnershipConflict)
+		if tag == "" {
+			return nil, fmt.Errorf("%w: authorization pool has conflicting roles", cloud.ErrOwnershipConflict)
+		}
+		if tag == listenerAuthPoolTag && (hasBackendTLSSettings(pool, readback) || hasObservedBackendTLS(pool, readback) || h2c) {
+			return nil, fmt.Errorf("%w: cleartext HTTP authorization pool uses an unexpected transport", cloud.ErrOwnershipConflict)
 		}
 		if err := validateBoundPoolParent(pool, actual.loadBalancer.ID, cloud.ListenerProtocolHTTP); err != nil {
 			return nil, err
@@ -102,7 +100,8 @@ func (p *Provider) observeListenerAuthPools(ctx context.Context, desired desired
 		}
 		for _, parent := range pool.Listeners {
 			listenerReference := listenerAuthPoolIDs(actual.requestFilters[parent.ID].Sections)[pool.ID]
-			if listenerReference && tag != listenerAuthPoolTag || !listenerReference && routeRefs[pool.ID][parent.ID] != tag {
+			protocol, routeReference := routeRefs[pool.ID][parent.ID]
+			if listenerReference && tag != listenerAuthPoolTag || !listenerReference && (!routeReference || !authorizationPoolProtocolMatches(pool, protocol)) {
 				return nil, fmt.Errorf("%w: authorization pool has an unproven listener reference", cloud.ErrOwnershipConflict)
 			}
 		}
@@ -118,8 +117,8 @@ func (p *Provider) observeListenerAuthPools(ctx context.Context, desired desired
 		if !found {
 			return nil, fmt.Errorf("%w: HTTPRoute authorization references an unproven pool", cloud.ErrOwnershipConflict)
 		}
-		for listenerID, tag := range parents {
-			if !slices.Contains(pool.Tags, tag) || !slices.Contains(pool.Listeners, pools.ListenerID{ID: listenerID}) {
+		for listenerID, protocol := range parents {
+			if !authorizationPoolProtocolMatches(pool, protocol) || !slices.Contains(pool.Listeners, pools.ListenerID{ID: listenerID}) {
 				return nil, fmt.Errorf("%w: HTTPRoute authorization pool omits its listener", cloud.ErrOwnershipConflict)
 			}
 		}
@@ -317,8 +316,43 @@ func (p *Provider) observeListenerFilterGraph(ctx context.Context, desired desir
 	return nil
 }
 
+func authorizationPoolRole(pool pools.Pool) (tag, prefix string) {
+	if slices.Contains(pool.Tags, telemetryPoolTag) {
+		return "", ""
+	}
+	for _, role := range []struct{ tag, prefix string }{
+		{listenerAuthPoolTag, "gateway-api-listener-auth-"},
+		{httpAuthTLSPoolTag, httpAuthTLSPoolNamePrefix},
+		{grpcAuthPoolTag, grpcAuthPoolNamePrefix},
+	} {
+		if slices.Contains(pool.Tags, role.tag) {
+			if tag != "" {
+				return "", ""
+			}
+			tag, prefix = role.tag, role.prefix
+		}
+	}
+	return tag, prefix
+}
+
+func authorizationPoolProtocolMatches(pool pools.Pool, protocol string) bool {
+	tag, _ := authorizationPoolRole(pool)
+	switch protocol {
+	case "":
+		return tag == listenerAuthPoolTag || tag == httpAuthTLSPoolTag
+	case cloud.ExternalAuthProtocolGRPC:
+		return tag == grpcAuthPoolTag
+	default:
+		return false
+	}
+}
+
 func isAuthorizationPool(pool pools.Pool) bool {
-	return isListenerAuthPool(pool) || isGRPCAuthPool(pool)
+	return isListenerAuthPool(pool) || isProtectedAuthPool(pool)
+}
+
+func isProtectedAuthPool(pool pools.Pool) bool {
+	return isGRPCAuthPool(pool) || slices.Contains(pool.Tags, httpAuthTLSPoolTag)
 }
 
 func isGRPCAuthPool(pool pools.Pool) bool {
@@ -593,14 +627,14 @@ func (actual observedGatewayGraph) listenerFilterCanUseAuthorizers(port int, sec
 func (p *Provider) executeListenerFilterMutation(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, step graphMutation) error {
 	change := step.listenerFilters
 	tag := listenerAuthPoolTag
-	if change.grpcAuth != nil {
-		tag = grpcAuthPoolTag
+	if change.protectedAuth != nil {
+		tag = routeAuthorizerPoolTag(*change.protectedAuth)
 	}
 	switch {
 	case change.claimCA:
 		return desired.spec.Gateway.ClaimBackendCA(ctx)
 	case change.publishCA:
-		return p.publishBackendCA(ctx, cloud.RouteSpec{Identity: desired.spec.Identity, BackendTLS: change.grpcAuth.BackendTLS})
+		return p.publishBackendCA(ctx, cloud.RouteSpec{Identity: desired.spec.Identity, BackendTLS: change.protectedAuth.BackendTLS})
 	case change.createPool != "":
 		tags, err := desired.identity.GatewayTags(rolePool)
 		if err != nil {
@@ -609,8 +643,8 @@ func (p *Provider) executeListenerFilterMutation(ctx context.Context, desired de
 		opts := pools.CreateOpts{LoadbalancerID: actual.loadBalancer.ID, Name: change.createPool, Protocol: pools.ProtocolHTTP,
 			LBMethod: pools.LBMethodRoundRobin, AdminStateUp: boolPointer(true), Tags: append(tags, tag)}
 		var request pools.CreateOptsBuilder = opts
-		if auth := change.grpcAuth; auth != nil {
-			request = grpcAuthorizerPoolCreate(opts, auth.BackendTLS, change.caReference, desired.spec.Gateway.BackendClientCertificate.Reference)
+		if auth := change.protectedAuth; auth != nil {
+			request = protectedAuthorizerPoolCreate(opts, auth.BackendTLS, change.caReference, desired.spec.Gateway.BackendClientCertificate.Reference)
 		}
 		_, err = p.octavia.CreatePool(ctx, request)
 		return err

@@ -21,12 +21,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	openstackidentity "github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/identity"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/l7policies"
+	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/pools"
 	"github.com/stretchr/testify/require"
 )
@@ -246,7 +248,7 @@ func TestGRPCAuthorizerWithdrawalOnSharedListener(t *testing.T) {
 			client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == http.MethodGet {
 					require.Equal(t, "/lbaas/providers/amphora/gateway_capabilities", r.URL.Path)
-					safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": grpcAuthorizerCapabilities(nil)})
+					safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": routeAuthorizerTransportCapabilities(cloud.ListenerExternalAuth{Protocol: cloud.ExternalAuthProtocolGRPC})})
 					return
 				}
 				writes = append(writes, r.Method+" "+r.URL.Path)
@@ -336,7 +338,7 @@ func TestGRPCAuthorizerStagesAndVerifiesIndependentTransportPools(t *testing.T) 
 	tlsName := routeAuthorizerPoolName(80, tlsAuth, "")
 	require.NotEqual(t, clearName, tlsName)
 
-	capabilities := grpcAuthorizerCapabilities(nil)
+	capabilities := routeAuthorizerTransportCapabilities(cloud.ListenerExternalAuth{Protocol: cloud.ExternalAuthProtocolGRPC})
 	var poolCreate map[string]any
 	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -358,7 +360,7 @@ func TestGRPCAuthorizerStagesAndVerifiesIndependentTransportPools(t *testing.T) 
 	actual := observedGatewayGraph{loadBalancer: safetyObservedLoadBalancer()}
 	actual.loadBalancer.Provider = "amphora"
 	desired := desiredGatewayGraph{identity: safetyTestIdentity(t)}
-	ready, step := provider.planGRPCAuthorizerPool(t.Context(), desired, actual, &auth, clearName, observedAuthPool{}, false)
+	ready, step := provider.planProtectedAuthorizerPool(t.Context(), desired, actual, &auth, clearName, observedAuthPool{}, false)
 	require.False(t, ready)
 	require.NotNil(t, step)
 	require.NoError(t, provider.executeListenerFilterMutation(t.Context(), desired, actual, *step))
@@ -368,23 +370,23 @@ func TestGRPCAuthorizerStagesAndVerifiesIndependentTransportPools(t *testing.T) 
 
 	pool := observedAuthPool{pool: pools.Pool{ID: "authorizer-pool", Protocol: "HTTP", AdminStateUp: true, ProvisioningStatus: "ACTIVE"},
 		admin: true, h2c: true, tls: octavia.PoolBackendTLS{H2CObserved: true, EnabledObserved: true}}
-	ready, step = provider.planGRPCAuthorizerPool(t.Context(), desired, actual, &auth, clearName, pool, false)
+	ready, step = provider.planProtectedAuthorizerPool(t.Context(), desired, actual, &auth, clearName, pool, false)
 	require.False(t, ready)
 	require.NotNil(t, step)
-	require.Same(t, &auth, step.listenerFilters.grpcAuth)
+	require.Same(t, &auth, step.listenerFilters.protectedAuth)
 	require.Equal(t, auth.Members[0], *step.listenerFilters.createMember)
 	pool.members = []pools.Member{{Address: auth.Members[0].Address, ProtocolPort: auth.Members[0].Port, SubnetID: auth.MemberSubnetID,
 		ProvisioningStatus: "ACTIVE", AdminStateUp: true}}
-	ready, step = provider.planGRPCAuthorizerPool(t.Context(), desired, actual, &auth, clearName, pool, false)
+	ready, step = provider.planProtectedAuthorizerPool(t.Context(), desired, actual, &auth, clearName, pool, false)
 	require.True(t, ready)
 	require.Nil(t, step)
 	pool.tls.H2CObserved = false
-	ready, step = provider.planGRPCAuthorizerPool(t.Context(), desired, actual, &auth, clearName, pool, false)
+	ready, step = provider.planProtectedAuthorizerPool(t.Context(), desired, actual, &auth, clearName, pool, false)
 	require.False(t, ready)
 	require.Nil(t, step)
 
-	capabilities = grpcAuthorizerCapabilities(tlsAuth.BackendTLS)
-	ready, step = provider.planGRPCAuthorizerPool(t.Context(), desired, actual, &tlsAuth, tlsName, observedAuthPool{}, false)
+	capabilities = routeAuthorizerTransportCapabilities(tlsAuth)
+	ready, step = provider.planProtectedAuthorizerPool(t.Context(), desired, actual, &tlsAuth, tlsName, observedAuthPool{}, false)
 	require.False(t, ready)
 	require.NotNil(t, step)
 	require.NoError(t, provider.executeListenerFilterMutation(t.Context(), desired, actual, *step))
@@ -400,15 +402,15 @@ func TestGRPCAuthorizerStagesAndVerifiesIndependentTransportPools(t *testing.T) 
 	pool.tls = octavia.PoolBackendTLS{Hostname: tlsAuth.BackendTLS.Hostname, HostnameObserved: true,
 		CAObserved: true, ClientRefObserved: true, AdminObserved: true, EnabledObserved: true,
 		RequireH2: true, RequireH2Observed: true, ALPNObserved: true, SystemCA: true, SystemCAObserved: true}
-	ready, step = provider.planGRPCAuthorizerPool(t.Context(), desired, actual, &tlsAuth, tlsName, pool, false)
+	ready, step = provider.planProtectedAuthorizerPool(t.Context(), desired, actual, &tlsAuth, tlsName, pool, false)
 	require.False(t, ready)
 	require.Nil(t, step)
 	pool.tls.SystemCADigestObserved, pool.tls.SystemCASHA256 = true, "verified"
-	ready, step = provider.planGRPCAuthorizerPool(t.Context(), desired, actual, &tlsAuth, tlsName, pool, false)
+	ready, step = provider.planProtectedAuthorizerPool(t.Context(), desired, actual, &tlsAuth, tlsName, pool, false)
 	require.True(t, ready)
 	require.Nil(t, step)
 	pool.tls.RequireH2 = false
-	ready, step = provider.planGRPCAuthorizerPool(t.Context(), desired, actual, &tlsAuth, tlsName, pool, false)
+	ready, step = provider.planProtectedAuthorizerPool(t.Context(), desired, actual, &tlsAuth, tlsName, pool, false)
 	require.False(t, ready)
 	require.Nil(t, step)
 
@@ -422,14 +424,14 @@ func TestGRPCAuthorizerStagesAndVerifiesIndependentTransportPools(t *testing.T) 
 	desired.spec.Gateway.BackendClientCertificate.Reference = firstCert
 	var claimed bool
 	desired.spec.Gateway.ClaimBackendCA = func(context.Context) error { claimed = true; return nil }
-	ready, step = provider.planGRPCAuthorizerPool(t.Context(), desired, actual, &tlsAuth, mtlsName, observedAuthPool{}, false)
+	ready, step = provider.planProtectedAuthorizerPool(t.Context(), desired, actual, &tlsAuth, mtlsName, observedAuthPool{}, false)
 	require.False(t, ready)
 	require.NotNil(t, step)
 	require.True(t, step.listenerFilters.claimCA)
 	require.NoError(t, provider.executeListenerFilterMutation(t.Context(), desired, actual, *step))
 	require.True(t, claimed)
 	desired.spec.Gateway.BackendCAOwned = true
-	ready, step = provider.planGRPCAuthorizerPool(t.Context(), desired, actual, &tlsAuth, mtlsName, observedAuthPool{}, false)
+	ready, step = provider.planProtectedAuthorizerPool(t.Context(), desired, actual, &tlsAuth, mtlsName, observedAuthPool{}, false)
 	require.False(t, ready)
 	require.NotNil(t, step)
 	require.NoError(t, provider.executeListenerFilterMutation(t.Context(), desired, actual, *step))
@@ -439,22 +441,225 @@ func TestGRPCAuthorizerStagesAndVerifiesIndependentTransportPools(t *testing.T) 
 	pool.pool.TLSContainerRef = firstCert
 	pool.pool.Tags = append(pool.pool.Tags, backendTLSClientTag)
 	pool.tls.RequireH2 = true
-	ready, step = provider.planGRPCAuthorizerPool(t.Context(), desired, actual, &tlsAuth, mtlsName, pool, false)
+	ready, step = provider.planProtectedAuthorizerPool(t.Context(), desired, actual, &tlsAuth, mtlsName, pool, false)
 	require.True(t, ready)
 	require.Nil(t, step)
 	desired.spec.Gateway.BackendClientCertificate = cloud.BackendClientCertificate{Reference: secondCert}
-	ready, step = provider.planGRPCAuthorizerPool(t.Context(), desired, actual, &tlsAuth, mtlsName, pool, false)
+	ready, step = provider.planProtectedAuthorizerPool(t.Context(), desired, actual, &tlsAuth, mtlsName, pool, false)
 	require.False(t, ready)
 	require.Nil(t, step)
 
 	capabilities = []string{octavia.GatewayCapabilityPolicyExternalAuthGRPC, octavia.GatewayCapabilityFixedHTTPResponses}
-	ready, step = provider.planGRPCAuthorizerPool(t.Context(), desired, actual, &tlsAuth, tlsName, observedAuthPool{}, false)
+	ready, step = provider.planProtectedAuthorizerPool(t.Context(), desired, actual, &tlsAuth, tlsName, observedAuthPool{}, false)
 	require.False(t, ready)
 	require.Nil(t, step)
 }
 
+func TestHTTPAuthorizerUsesIsolatedTLSHTTP11Pool(t *testing.T) {
+	auth := cloud.ListenerExternalAuth{ServiceUID: "authorize-uid", ServicePort: 8443, MemberSubnetID: "subnet",
+		PathPrefix: "/check", Members: []cloud.Member{{Address: "192.0.2.25", Port: 8443}}, BackendTLS: &cloud.BackendTLSValidation{
+			Trust: cloud.BackendTLSTrustSystem, Hostname: "authorize.example.test",
+			SubjectAltNames: []cloud.BackendTLSSubjectAltName{{Type: cloud.BackendTLSSANHostname, Hostname: "authorize.example.test"}},
+		}}
+	require.NoError(t, validateRouteAuthorizer(auth))
+	plainName := listenerAuthPoolName(80, auth)
+	name := routeAuthorizerPoolName(80, auth, "")
+	require.NotEqual(t, plainName, name)
+	grpc := auth
+	grpc.Protocol = cloud.ExternalAuthProtocolGRPC
+	require.NotEqual(t, routeAuthorizerPoolName(80, grpc, ""), name)
+
+	advertised := []string{
+		octavia.GatewayCapabilityPolicyExternalAuth,
+		octavia.GatewayCapabilityFixedHTTPResponses,
+		octavia.GatewayCapabilityBackendTLSHostname,
+		octavia.GatewayCapabilityBackendTLSSubjectAltNames,
+		octavia.GatewayCapabilityBackendTLSSystemCA,
+	}
+	var poolCreate map[string]any
+	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/lbaas/providers/amphora/gateway_capabilities":
+			safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": advertised})
+		case r.Method == http.MethodPost && r.URL.Path == "/lbaas/pools":
+			var body struct{ Pool map[string]any }
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			poolCreate = body.Pool
+			w.WriteHeader(http.StatusCreated)
+			safetyWriteJSON(t, w, map[string]any{"pool": map[string]any{"id": "http-tls-pool"}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL)
+		}
+	}))
+	provider := newTestProvider(t, ServiceClients{LoadBalancer: client, ProjectID: "project-a"},
+		ProviderConfig{RouteExternalAuth: true, FixedHTTPResponses: true, BackendTLSPolicy: true})
+	actual := observedGatewayGraph{loadBalancer: safetyObservedLoadBalancer()}
+	actual.loadBalancer.Provider = "amphora"
+	desired := desiredGatewayGraph{identity: safetyTestIdentity(t)}
+	ready, step := provider.planProtectedAuthorizerPool(t.Context(), desired, actual, &auth, name, observedAuthPool{}, false)
+	require.False(t, ready)
+	require.Nil(t, step)
+	capable, err := provider.RouteExternalAuthAvailable(t.Context(), auth, false)
+	require.NoError(t, err)
+	require.False(t, capable)
+
+	advertised = append(advertised, octavia.GatewayCapabilityPolicyExternalAuthTLS)
+	capable, err = provider.RouteExternalAuthAvailable(t.Context(), auth, false)
+	require.NoError(t, err)
+	require.True(t, capable)
+	auth.ForwardBodyMaxSize = 512
+	capable, err = provider.RouteExternalAuthAvailable(t.Context(), auth, false)
+	require.NoError(t, err)
+	require.False(t, capable)
+	auth.ForwardBodyMaxSize = 0
+
+	ready, step = provider.planProtectedAuthorizerPool(t.Context(), desired, actual, &auth, name, observedAuthPool{}, false)
+	require.False(t, ready)
+	require.NotNil(t, step)
+	require.NoError(t, provider.executeListenerFilterMutation(t.Context(), desired, actual, *step))
+	require.Equal(t, "HTTP", poolCreate["protocol"])
+	require.Equal(t, true, poolCreate["tls_enabled"])
+	require.Equal(t, true, poolCreate["backend_tls_system_ca"])
+	require.Equal(t, auth.BackendTLS.Hostname, poolCreate["backend_tls_hostname"])
+	require.Contains(t, poolCreate["tags"], httpAuthTLSPoolTag)
+	require.NotContains(t, poolCreate["tags"], grpcAuthPoolTag)
+	require.NotContains(t, poolCreate["tags"], listenerAuthPoolTag)
+	require.NotContains(t, poolCreate, "backend_h2c")
+	require.NotContains(t, poolCreate, "backend_tls_require_h2")
+	require.NotContains(t, poolCreate, "alpn_protocols")
+	require.Empty(t, policyAuthorizer("http-tls-pool", auth).Protocol)
+
+	pool := observedAuthPool{pool: pools.Pool{ID: "http-tls-pool", Protocol: "HTTP", AdminStateUp: true, ProvisioningStatus: "ACTIVE",
+		TLSEnabled: true, ALPNProtocols: []string{"h2", "http/1.1", "http/1.0"}, Listeners: []pools.ListenerID{{ID: "listener-1"}},
+		Tags: []string{httpAuthTLSPoolTag, backendTLSManagedTag, backendTLSSystemCATag, backendTLSRevisionTag(auth.BackendTLS)}},
+		admin: true, members: []pools.Member{{Address: auth.Members[0].Address, ProtocolPort: auth.Members[0].Port,
+			SubnetID: auth.MemberSubnetID, ProvisioningStatus: "ACTIVE", AdminStateUp: true}},
+		tls: octavia.PoolBackendTLS{Hostname: auth.BackendTLS.Hostname, HostnameObserved: true, CAObserved: true, ClientRefObserved: true,
+			AdminObserved: true, EnabledObserved: true, H2CObserved: true, RequireH2Observed: true, ALPNObserved: true,
+			SystemCA: true, SystemCAObserved: true, SubjectAltNames: auth.BackendTLS.SubjectAltNames, SubjectAltNamesObserved: true}}
+	ready, step = provider.planProtectedAuthorizerPool(t.Context(), desired, actual, &auth, name, pool, false)
+	require.False(t, ready)
+	require.Nil(t, step)
+	pool.tls.SystemCADigestObserved, pool.tls.SystemCASHA256 = true, strings.Repeat("a", 64)
+	desired.spec.Gateway.Spec.ListenerPort = 80
+	desired.spec.Routes = []cloud.RouteGraphNode{{Disposition: cloud.GraphEnsure}}
+	desired.routes = []desiredRoute{{httpParts: []desiredRoute{{backendKey: "origin",
+		policies: []desiredPolicy{{role: rolePolicyExact, position: 1, externalAuth: &auth}}}}}}
+	provider.planRouteAuthPools(t.Context(), desired, &actual, map[string]*cloud.ListenerExternalAuth{name: &auth},
+		map[string]observedAuthPool{name: pool}, nil, true)
+	require.Nil(t, actual.routeAuthPoolMutation)
+	parts, _, _ := httpPlanningParts(desired, actual)
+	require.Len(t, parts.routes, 1)
+	require.Equal(t, policyAuthorizer(pool.pool.ID, auth), parts.routes[0].policies[0].resolvedExternalAuth)
+	pool.pool.ALPNProtocols = []string{"h2"}
+	ready, step = provider.planProtectedAuthorizerPool(t.Context(), desired, actual, &auth, name, pool, false)
+	require.False(t, ready)
+	require.Nil(t, step)
+}
+
+func TestHTTPAuthorizerRestagesSystemCAAfterClientIdentityReturns(t *testing.T) {
+	const ref = "https://barbican.example/v1/secrets/authorizer-client"
+	auth := cloud.ListenerExternalAuth{ServiceUID: "authorize-uid", ServicePort: 8443, MemberSubnetID: "subnet",
+		Members: []cloud.Member{{Address: "192.0.2.25", Port: 8443}}, BackendTLS: &cloud.BackendTLSValidation{
+			Trust: cloud.BackendTLSTrustSystem, Hostname: "authorize.example.test",
+		}}
+	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/lbaas/providers/amphora/gateway_capabilities", r.URL.Path)
+		safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": routeAuthorizerTransportCapabilities(auth)})
+	}))
+	provider := newTestProvider(t, ServiceClients{LoadBalancer: client, ProjectID: "project-a"},
+		ProviderConfig{RouteExternalAuth: true, FixedHTTPResponses: true, BackendTLSPolicy: true})
+	actual := observedGatewayGraph{loadBalancer: safetyObservedLoadBalancer()}
+	actual.loadBalancer.Provider = "amphora"
+	desired := desiredGatewayGraph{}
+	desired.spec.Gateway.BackendCAOwned = true
+	desired.spec.Gateway.BackendClientCertificate = cloud.BackendClientCertificate{Reference: ref, Denied: true}
+	pool := observedAuthPool{pool: pools.Pool{ID: "http-tls-pool", Protocol: "HTTP", ProvisioningStatus: "ACTIVE", Listeners: []pools.ListenerID{},
+		TLSEnabled: true, TLSContainerRef: ref, ALPNProtocols: []string{"h2", "http/1.1", "http/1.0"},
+		Tags: []string{httpAuthTLSPoolTag, backendTLSManagedTag, backendTLSClientTag, backendTLSSystemCATag, backendTLSRevisionTag(auth.BackendTLS)}},
+		admin: true, tls: octavia.PoolBackendTLS{Hostname: auth.BackendTLS.Hostname, HostnameObserved: true,
+			CAObserved: true, ClientRefObserved: true, AdminObserved: true, EnabledObserved: true, H2CObserved: true,
+			RequireH2Observed: true, ALPNObserved: true, SystemCA: true, SystemCAObserved: true, SystemCADigestObserved: true}}
+	name := routeAuthorizerPoolName(80, auth, ref)
+	plan := func(referenced map[string]bool) *graphMutation {
+		t.Helper()
+		actual.routeAuthPoolMutation = nil
+		provider.planRouteAuthPools(t.Context(), desired, &actual, map[string]*cloud.ListenerExternalAuth{name: &auth},
+			map[string]observedAuthPool{name: pool}, referenced, true)
+		return actual.routeAuthPoolMutation
+	}
+	require.Nil(t, plan(nil))
+	require.Empty(t, actual.routeAuthPools)
+
+	desired.spec.Gateway.BackendClientCertificate.Denied = false
+	pool.members = []pools.Member{{ID: "former-member", ProvisioningStatus: "ACTIVE"}}
+	require.Nil(t, plan(map[string]bool{pool.pool.ID: true}))
+	pool.pool.Listeners = nil
+	require.Nil(t, plan(nil))
+	pool.pool.Listeners = []pools.ListenerID{}
+	step := plan(nil)
+	require.NotNil(t, step)
+	require.Equal(t, gatewayDeletionStep{resource: gatewayDeletionMember, resourceID: "former-member", parentID: pool.pool.ID}, step.deletion)
+
+	pool.members = nil
+	step = plan(nil)
+	require.NotNil(t, step)
+	require.True(t, step.listenerFilters.enablePool)
+	require.Equal(t, pool.pool.ID, step.listenerFilters.poolID)
+	require.Empty(t, actual.routeAuthPools)
+
+	pool.pool.AdminStateUp = true
+	require.Nil(t, plan(nil))
+	require.Empty(t, actual.routeAuthPools)
+	pool.tls.SystemCASHA256 = strings.Repeat("a", 64)
+	step = plan(nil)
+	require.NotNil(t, step)
+	require.Equal(t, auth.Members[0], *step.listenerFilters.createMember)
+	require.Empty(t, actual.routeAuthPools)
+	pool.members = []pools.Member{{Address: auth.Members[0].Address, ProtocolPort: auth.Members[0].Port, SubnetID: auth.MemberSubnetID,
+		ProvisioningStatus: "ACTIVE", AdminStateUp: true}}
+	require.Nil(t, plan(nil))
+	require.Equal(t, pool.pool.ID, actual.routeAuthPools[name])
+}
+
+func TestHTTPAuthorizerTLSPoolBelongsOnlyToRoutePolicies(t *testing.T) {
+	const poolID, listenerID = "http-tls-pool", "listener-1"
+	identity := safetyTestIdentity(t)
+	poolTags, err := identity.GatewayTags(rolePool)
+	require.NoError(t, err)
+	lb := safetyObservedLoadBalancer()
+	pool := pools.Pool{ID: poolID, ProjectID: "project-a", Name: httpAuthTLSPoolNamePrefix + "fixture",
+		Protocol: "HTTP", TLSEnabled: true, Tags: append(poolTags, httpAuthTLSPoolTag),
+		Loadbalancers: []pools.LoadBalancerID{{ID: lb.ID}}, Listeners: []pools.ListenerID{{ID: listenerID}}, Members: []pools.Member{}}
+	l7Policy := l7policies.L7Policy{ID: "protected", ListenerID: listenerID, ProjectID: pool.ProjectID,
+		Tags: append(safetyRouteTags(t, identity, rolePolicyExact), routeExternalAuthTag)}
+	row := octavia.L7PolicyObservation{Policy: l7Policy, ExternalAuth: &octavia.PolicyExternalAuth{PoolID: poolID},
+		ExternalAuthReported: true, ExternalAuthPresent: true}
+	actual := observedGatewayGraph{loadBalancer: lb, listener: &listeners.Listener{ID: listenerID, L7Policies: []l7policies.L7Policy{l7Policy}},
+		httpsIsolationPolicies: map[string]httpsPolicyInventory{listenerID: {items: []octavia.L7PolicyObservation{row}, complete: true}}}
+	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/lbaas/pools/"+poolID+"/members", r.URL.Path)
+		safetyWriteJSON(t, w, map[string]any{"members": []any{}})
+	}))
+	provider := newTestProvider(t, ServiceClients{LoadBalancer: client, ProjectID: pool.ProjectID}, ProviderConfig{})
+	desired := desiredGatewayGraph{identity: identity}
+	inventory := octavia.PoolInventory{Items: []pools.Pool{pool}}
+	owned, err := provider.observeListenerAuthPools(t.Context(), desired, &actual, inventory)
+	require.NoError(t, err)
+	require.Equal(t, poolID, owned[pool.Name].pool.ID)
+
+	row.ExternalAuth.Protocol = cloud.ExternalAuthProtocolGRPC
+	_, err = provider.observeListenerAuthPools(t.Context(), desired, &actual, inventory)
+	require.ErrorIs(t, err, cloud.ErrOwnershipConflict)
+
+	row.ExternalAuth.Protocol = ""
+	inventory.Items[0].Tags = append(inventory.Items[0].Tags, listenerAuthPoolTag)
+	_, err = provider.observeListenerAuthPools(t.Context(), desired, &actual, inventory)
+	require.ErrorIs(t, err, cloud.ErrOwnershipConflict)
+}
+
 func TestRouteAuthorizerRegionalBodyLimit(t *testing.T) {
-	offer := map[string]any{"gateway_capabilities": append(grpcAuthorizerCapabilities(nil), octavia.GatewayCapabilityPolicyExternalAuthForwardBody)}
+	offer := map[string]any{"gateway_capabilities": append(routeAuthorizerTransportCapabilities(cloud.ListenerExternalAuth{Protocol: cloud.ExternalAuthProtocolGRPC}), octavia.GatewayCapabilityPolicyExternalAuthForwardBody)}
 	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/lbaas/providers/amphora/gateway_capabilities", r.URL.Path)
 		safetyWriteJSON(t, w, offer)
@@ -492,7 +697,7 @@ func TestRouteAuthorizerRegionalBodyLimit(t *testing.T) {
 func TestRouteAuthorizerWeightedCapabilityAppliesOnlyToWeightedPolicyWrites(t *testing.T) {
 	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/lbaas/providers/amphora/gateway_capabilities", r.URL.Path)
-		safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": grpcAuthorizerCapabilities(nil)})
+		safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": routeAuthorizerTransportCapabilities(cloud.ListenerExternalAuth{Protocol: cloud.ExternalAuthProtocolGRPC})})
 	}))
 	provider := newTestProvider(t, ServiceClients{LoadBalancer: client, ProjectID: "project-a"},
 		ProviderConfig{RouteExternalAuthGRPC: true, FixedHTTPResponses: true, WeightedHTTPTargets: true})
