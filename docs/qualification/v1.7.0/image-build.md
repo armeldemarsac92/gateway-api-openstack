@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-Local Experimental kind verified OTLP export header rotation and withdrawal on the signed linux/amd64 controller image. Standard forwarded the witness and application requests. [Build record](image.json) · [Collector traffic](provider/otlp-collector-headers-evidence/receipt.json)
+On Standard and Experimental kind, the signed linux/amd64 controller applied gRPC request metadata on the rule and on the selected weighted backend. [Build record](image.json) · [Grant transitions and RPC results](provider/grpc-request-metadata-evidence/receipt.json)
+
+Local Experimental kind verified OTLP export header rotation and withdrawal on the signed linux/amd64 controller image. Standard forwarded the witness and application requests. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-b2d3e2179102a6a5015663427c019b9ba55a5579/image.json) · [Collector traffic](provider/otlp-collector-headers-evidence/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-b2d3e2179102a6a5015663427c019b9ba55a5579)
 
 On local Standard and Experimental Gateways, the linux/amd64 controller applied gRPC response metadata to the selected method and restored the origin metadata when the filter was removed. The client received the individual binary metadata values on both channels. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-ed52f782d3c6c5b32e720dda7b2ab26c69f39c30/image.json) · [RPC results](provider/grpc-response-metadata-evidence/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-ed52f782d3c6c5b32e720dda7b2ab26c69f39c30)
 
