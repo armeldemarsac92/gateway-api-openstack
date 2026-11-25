@@ -66,7 +66,8 @@ func (p *Provider) buildDesiredGatewayRoute(spec cloud.RouteSpec, forwards []clo
 		if redirect.Request != nil && !p.httpRequestRedirect {
 			return invalid(errors.New("request-derived redirects require --octavia-http-request-redirect"))
 		}
-		if err := validateRedirectDestination(redirect); err != nil {
+		fixedDestination, err := validateRedirectDestination(redirect)
+		if err != nil {
 			return invalid(err)
 		}
 		indexes[redirect.RuleIndex] = true
@@ -107,7 +108,14 @@ func (p *Provider) buildDesiredGatewayRoute(spec cloud.RouteSpec, forwards []clo
 			part := desiredRoute{identity: route.identity, spec: route.spec, backendKey: redirectPartKey(key), redirect: true}
 			part.spec.HTTPSListenerHostname = match.HTTPSListenerHostname
 			cells, err := redirectCells(match, forwards)
-			if err != nil {
+			if p.httpRequestRedirect && (errors.Is(err, errHTTPMethodRedirectPrecedence) || errors.Is(err, errExactHeaderRedirectPrecedence)) {
+				// Amphora evaluates REDIRECT_REQUEST in the same position-ordered
+				// backend list as forwarding, including method and header matches.
+				if request == nil {
+					request = fixedDestination
+				}
+				cells = []redirectCell{{hostname: match.Hostname}}
+			} else if err != nil {
 				part.redirectIssue = err
 				route.httpParts[selected.index] = part
 				continue
@@ -125,32 +133,36 @@ func (p *Provider) buildDesiredGatewayRoute(spec cloud.RouteSpec, forwards []clo
 	return route, nil
 }
 
-func validateRedirectDestination(redirect cloud.HTTPRedirect) error {
+func validateRedirectDestination(redirect cloud.HTTPRedirect) (*octavia.RequestRedirect, error) {
 	if redirect.StatusCode < 301 || redirect.StatusCode > 308 || !octavia.SupportedRedirectCode(int32(redirect.StatusCode)) {
-		return errors.New("HTTP redirect code is outside the supported Octavia status codes")
+		return nil, errors.New("HTTP redirect code is outside the supported Octavia status codes")
 	}
 	if redirect.Request != nil {
 		if redirect.Prefix != "" {
-			return errors.New("HTTP redirect must specify a fixed prefix or a request-derived destination")
+			return nil, errors.New("HTTP redirect must specify a fixed prefix or a request-derived destination")
 		}
-		return nil
+		return nil, nil
 	}
 	destination, err := url.Parse(redirect.Prefix)
 	if err != nil || len(redirect.Prefix) > 255 || destination.Scheme != "http" && destination.Scheme != "https" || destination.Host == "" ||
 		destination.User != nil || destination.Path != "" || redirect.Prefix != destination.Scheme+"://"+destination.Host ||
 		strings.HasSuffix(destination.Host, ":") || strings.Contains(destination.Hostname(), "*") {
-		return errors.New("HTTP redirect prefix must be a fixed HTTP or HTTPS authority")
+		return nil, errors.New("HTTP redirect prefix must be a fixed HTTP or HTTPS authority")
 	}
 	if err := amphora.ValidateHostname(destination.Hostname()); err != nil {
-		return errors.New("HTTP redirect prefix requires a valid destination hostname")
+		return nil, errors.New("HTTP redirect prefix requires a valid destination hostname")
 	}
-	if port := destination.Port(); port != "" {
-		number, err := strconv.Atoi(port)
-		if err != nil || number < 1 || number > 65535 {
-			return errors.New("HTTP redirect port is outside 1-65535")
+	port := 80
+	if destination.Scheme == "https" {
+		port = 443
+	}
+	if explicit := destination.Port(); explicit != "" {
+		port, err = strconv.Atoi(explicit)
+		if err != nil || port < 1 || port > 65535 {
+			return nil, errors.New("HTTP redirect port is outside 1-65535")
 		}
 	}
-	return nil
+	return &octavia.RequestRedirect{Scheme: destination.Scheme, Hostname: destination.Hostname(), Port: port}, nil
 }
 
 func compileRequestRedirect(redirect *cloud.HTTPRedirectRequest, match cloud.HTTPPathMatch) (*octavia.RequestRedirect, error) {
@@ -175,6 +187,10 @@ func (p *Provider) appendRedirectPolicies(part *desiredRoute, redirect cloud.HTT
 	if err != nil {
 		return err
 	}
+	prefix := redirect.Prefix
+	if request != nil {
+		prefix = ""
+	}
 	guardKeys := make([]string, 0, len(guards))
 	for _, guard := range guards {
 		guardKeys = append(guardKeys, redirectGuardKey(guard))
@@ -187,7 +203,7 @@ func (p *Provider) appendRedirectPolicies(part *desiredRoute, redirect cloud.HTT
 		policy.httpListenerHostname, policy.hostname = positive.HTTPListenerHostname, positive.Hostname
 		policy.role = openstackidentity.HTTPRedirectRole(policy.role, matchKey, policy.matchKey, "")
 		policy.redirect = &desiredRedirectPolicy{
-			matchKey: matchKey, prefix: redirect.Prefix, request: request, statusCode: int32(redirect.StatusCode), guards: guards,
+			matchKey: matchKey, prefix: prefix, request: request, statusCode: int32(redirect.StatusCode), guards: guards,
 		}
 		if _, err := part.identity.RouteTags(policy.role); err != nil {
 			return err

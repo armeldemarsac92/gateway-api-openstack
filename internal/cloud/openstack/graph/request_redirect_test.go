@@ -221,7 +221,7 @@ func TestRequestRedirectCapabilityClosesOnlyTheDependentListener(t *testing.T) {
 	}
 }
 
-func TestRequestRedirectShadowingAndUnsupportedGuard(t *testing.T) {
+func TestRequestRedirectShadowingAndOrderedForwarding(t *testing.T) {
 	spec := redirectGraphSpec(t)
 	route := &spec.Routes[0].Spec
 	redirect := &route.HTTPRedirects[0]
@@ -233,7 +233,7 @@ func TestRequestRedirectShadowingAndUnsupportedGuard(t *testing.T) {
 	spec.Routes = append(spec.Routes, forward)
 
 	provider := &Provider{projectID: "project-a", httpRequestRedirect: true, httpMethodMatch: true, fixedHTTPResponses: true}
-	check := func(want error) {
+	check := func(want error, target *octavia.RequestRedirect) {
 		t.Helper()
 		desired, err := provider.buildDesiredGatewayGraph(spec)
 		if err != nil {
@@ -242,8 +242,14 @@ func TestRequestRedirectShadowingAndUnsupportedGuard(t *testing.T) {
 		for _, route := range desired.routes {
 			for _, part := range route.httpParts {
 				if part.redirect {
-					if len(part.policies) != 0 || part.redirectIssue != want {
-						t.Fatalf("unexpected redirect policies or issue: %v, %v", part.policies, part.redirectIssue)
+					if !errors.Is(part.redirectIssue, want) || (len(part.policies) == 0) != (target == nil) {
+						t.Fatalf("redirect has %d policies and issue %v, want destination %v and issue %v", len(part.policies), part.redirectIssue, target, want)
+					}
+					for _, policy := range part.policies {
+						destination := policy.redirect
+						if destination.request == nil || *destination.request != *target || destination.prefix != "" || len(destination.guards) != 0 || policy.position <= 1 {
+							t.Fatalf("unexpected ordered redirect at position %d: %+v", policy.position, destination)
+						}
 					}
 					return
 				}
@@ -251,12 +257,25 @@ func TestRequestRedirectShadowingAndUnsupportedGuard(t *testing.T) {
 		}
 		t.Fatal("redirect match disappeared")
 	}
-	check(nil)
+	check(nil, nil)
 	f := &spec.Routes[1].Spec
 	f.HTTPBackends = []cloud.HTTPBackend{{Namespace: "apps", Name: "api", Port: 80, Members: f.Members,
 		Matches: []cloud.HTTPPathMatch{{Hostname: f.Hostname, PathType: f.PathType, PathValue: f.PathValue, Precedence: f.Precedence, Method: "GET"}}}}
 	f.Hostname, f.PathType, f.PathValue, f.Members = "", "", "", nil
-	check(errHTTPMethodRedirectPrecedence)
+	check(nil, &octavia.RequestRedirect{Scheme: "http", Port: 80})
+
+	redirect.Prefix, redirect.Request = "https://moved.example.test:8443", nil
+	fixed := &octavia.RequestRedirect{Scheme: "https", Hostname: "moved.example.test", Port: 8443}
+	check(nil, fixed)
+	provider.httpRequestRedirect = false
+	check(errHTTPMethodRedirectPrecedence, nil)
+
+	match := &f.HTTPBackends[0].Matches[0]
+	match.Method, match.Headers = "", []cloud.HTTPHeaderMatch{{Name: "version", Value: "one"}}
+	provider.httpHeaderExact = true
+	check(errExactHeaderRedirectPrecedence, nil)
+	provider.httpRequestRedirect = true
+	check(nil, fixed)
 }
 
 func TestRequestRedirectDeleteRoutePreservesGatewayAndClosesItsPort(t *testing.T) {

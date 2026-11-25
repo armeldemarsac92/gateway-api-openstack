@@ -14,7 +14,7 @@ Pin the qualified controller image to `ghcr.io/armeldemarsac92/gateway-api-opens
 
 Amphora's HAProxy HTTP parser supports field names up to 255 bytes. The controller reports `Accepted=False` with reason `UnsupportedValue` for a 256-byte name. Exact configured values support up to 4096 characters without surrounding spaces or tabs.
 
-Amphora runs redirects before forwarding. When a higher-priority forwarding rule intersects a redirect and adds an exact header condition that the redirect does not require, the controller leaves out that redirect alternative and reports `Accepted=False` with reason `UnsupportedValue` on its HTTPRoute. Forwarding rules stay in place. To use both actions, give them disjoint hosts or paths, or make the redirect require the same header conditions where the path guard can preserve precedence.
+To combine a redirect with a higher-priority forwarding rule that adds an exact header condition, enable `--octavia-http-request-redirect` in a region advertising `http_request_redirect_v1`. A request with the matching field value reaches the forwarding backend. Other values can still receive the redirect. With this option disabled, an overlap that needs ordered evaluation gives the redirect route `Accepted=False` with reason `UnsupportedValue`. [Regional configuration](operator-octavia-http-actions.md#enable-request-derived-redirects)
 
 ## Withdraw the profile
 
