@@ -29,9 +29,10 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -55,12 +56,9 @@ func TestAmbientMeshEnvtest(t *testing.T) {
 	if assets == "" || crds == "" || (channel != features.FeatureChannelStandard && channel != features.FeatureChannelExperimental) {
 		t.Fatal("set KUBEBUILDER_ASSETS, GATEWAY_API_CRD_PATH and GATEWAY_API_CHANNEL as in make test-envtest")
 	}
-	scheme := runtime.NewScheme()
-	for _, install := range []func(*runtime.Scheme) error{appsv1.AddToScheme, corev1.AddToScheme, gatewayv1.Install, gatewayx.Install} {
-		if err := install(scheme); err != nil {
-			t.Fatal(err)
-		}
-	}
+	experimental := channel == features.FeatureChannelExperimental
+	config := controller.Config{GatewayAPIChannel: channel}
+	scheme := newControllerScheme(config, experimental)
 	environment := &envtest.Environment{
 		Scheme:                scheme,
 		UseExistingCluster:    ptr.To(false),
@@ -78,8 +76,7 @@ func TestAmbientMeshEnvtest(t *testing.T) {
 		}
 	})
 
-	experimental := channel == features.FeatureChannelExperimental
-	if err := requireGatewayAPIs(restConfig, controller.Config{GatewayAPIChannel: channel}, experimental); err != nil {
+	if err := requireGatewayAPIs(restConfig, config, experimental); err != nil {
 		t.Fatal(err)
 	}
 	kube, err := client.New(restConfig, client.Options{Scheme: scheme})
@@ -87,8 +84,8 @@ func TestAmbientMeshEnvtest(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !experimental {
-		err := kube.List(t.Context(), &gatewayx.XMeshList{})
-		if !meta.IsNoMatchError(err) {
+		err := kube.Get(t.Context(), client.ObjectKey{Name: "xmeshes.gateway.networking.x-k8s.io"}, &apiextensionsv1.CustomResourceDefinition{})
+		if !apierrors.IsNotFound(err) {
 			t.Fatalf("Standard API unexpectedly serves XMesh: %v", err)
 		}
 		return
@@ -175,7 +172,7 @@ func TestAmbientMeshEnvtest(t *testing.T) {
 		}
 	})
 
-	awaitStatus := func(mesh *gatewayx.XMesh, accepted metav1.ConditionStatus, acceptedReason string, programmed metav1.ConditionStatus, featureCount int) {
+	awaitStatus := func(mesh *gatewayx.XMesh, accepted metav1.ConditionStatus, acceptedReason string, programmed metav1.ConditionStatus, featureCount int, detail ...string) {
 		t.Helper()
 		err := wait.PollUntilContextTimeout(t.Context(), 100*time.Millisecond, 15*time.Second, true, func(ctx context.Context) (bool, error) {
 			if err := kube.Get(ctx, client.ObjectKeyFromObject(mesh), mesh); err != nil {
@@ -185,7 +182,8 @@ func TestAmbientMeshEnvtest(t *testing.T) {
 			p := meta.FindStatusCondition(mesh.Status.Conditions, "Programmed")
 			return a != nil && p != nil && a.ObservedGeneration == mesh.Generation && p.ObservedGeneration == mesh.Generation &&
 				a.Status == accepted && a.Reason == acceptedReason && strings.Contains(a.Message, instance) &&
-				p.Status == programmed && len(mesh.Status.SupportedFeatures) == featureCount, nil
+				p.Status == programmed && len(mesh.Status.SupportedFeatures) == featureCount &&
+				(len(detail) == 0 || strings.Contains(p.Message, detail[0])), nil
 		})
 		if err != nil {
 			t.Fatalf("XMesh %s generation %d status %+v: %v", mesh.Name, mesh.Generation, mesh.Status, err)
@@ -197,8 +195,8 @@ func TestAmbientMeshEnvtest(t *testing.T) {
 		}
 	}
 	const stockFeatureCount = 16
-	awaitStatus(primary, metav1.ConditionTrue, "Accepted", metav1.ConditionFalse, 0)
-	awaitStatus(custom, metav1.ConditionTrue, "Accepted", metav1.ConditionFalse, 0)
+	awaitStatus(primary, metav1.ConditionTrue, "Accepted", metav1.ConditionUnknown, 0)
+	awaitStatus(custom, metav1.ConditionTrue, "Accepted", metav1.ConditionUnknown, 0)
 
 	class := &gatewayv1.GatewayClass{
 		ObjectMeta: metav1.ObjectMeta{Name: "istio-waypoint"},
@@ -223,8 +221,11 @@ func TestAmbientMeshEnvtest(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "istiod"}},
 				Spec: corev1.PodSpec{Containers: []corev1.Container{{
 					Name:  "discovery",
-					Image: ambientPilotImage(t, "istiod.yaml"),
-					Env:   []corev1.EnvVar{{Name: "PILOT_ENABLE_AMBIENT", Value: "true"}},
+					Image: ambientComponentImage(t, "istiod.yaml"),
+					Env: []corev1.EnvVar{
+						{Name: "PILOT_ENABLE_AMBIENT", Value: "true"},
+						{Name: "PILOT_ENABLE_GATEWAY_API_GATEWAYCLASS_CONTROLLER", Value: "false"},
+					},
 				}}},
 			},
 		},
@@ -243,7 +244,51 @@ func TestAmbientMeshEnvtest(t *testing.T) {
 	}
 	markRolledOut()
 
+	create(&corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "istio-cni-config", Namespace: "istio-system"},
+		Data:       map[string]string{"AMBIENT_ENABLED": "true", "AMBIENT_IPV6": "false"},
+	})
+	createDaemonSet := func(name string, container corev1.Container) *appsv1.DaemonSet {
+		t.Helper()
+		labels := map[string]string{"app": name}
+		ds := &appsv1.DaemonSet{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "istio-system"},
+			Spec: appsv1.DaemonSetSpec{
+				Selector: &metav1.LabelSelector{MatchLabels: labels},
+				Template: corev1.PodTemplateSpec{
+					ObjectMeta: metav1.ObjectMeta{Labels: labels},
+					Spec:       corev1.PodSpec{Containers: []corev1.Container{container}},
+				},
+			},
+		}
+		create(ds)
+		return ds
+	}
+	markDaemonSetRolledOut := func(ds *appsv1.DaemonSet) {
+		t.Helper()
+		ds.Status = appsv1.DaemonSetStatus{
+			ObservedGeneration:     ds.Generation,
+			CurrentNumberScheduled: 1, DesiredNumberScheduled: 1, UpdatedNumberScheduled: 1,
+			NumberReady: 1, NumberAvailable: 1,
+		}
+		updateStatus(ds)
+	}
+	cni := createDaemonSet("istio-cni-node", corev1.Container{
+		Name:  "install-cni",
+		Image: ambientComponentImage(t, "cni.yaml"),
+		EnvFrom: []corev1.EnvFromSource{{
+			ConfigMapRef: &corev1.ConfigMapEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: "istio-cni-config"}},
+		}},
+	})
+	ztunnel := createDaemonSet("ztunnel", corev1.Container{
+		Name:  "istio-proxy",
+		Image: ambientComponentImage(t, "ztunnel.yaml"),
+		Env:   []corev1.EnvVar{{Name: "IPV6_ENABLED", Value: "false"}},
+	})
+	markDaemonSetRolledOut(ztunnel)
 	acceptClass()
+	awaitStatus(primary, metav1.ConditionTrue, "Accepted", metav1.ConditionUnknown, 0, "istio-cni-node rollout")
+	markDaemonSetRolledOut(cni)
 	awaitStatus(primary, metav1.ConditionTrue, "Accepted", metav1.ConditionTrue, stockFeatureCount)
 	awaitStatus(custom, metav1.ConditionTrue, "Accepted", metav1.ConditionTrue, stockFeatureCount)
 	hasConsumer := func() bool {
@@ -262,31 +307,54 @@ func TestAmbientMeshEnvtest(t *testing.T) {
 
 	class.Spec.Description = ptr.To("Current class generation is not yet accepted")
 	update(class)
-	awaitStatus(primary, metav1.ConditionTrue, "Accepted", metav1.ConditionFalse, 0)
+	awaitStatus(primary, metav1.ConditionTrue, "Accepted", metav1.ConditionUnknown, 0)
 	acceptClass()
 	awaitStatus(primary, metav1.ConditionTrue, "Accepted", metav1.ConditionTrue, stockFeatureCount)
 
-	pilot.Spec.Template.Spec.Containers[0].Image = ambientPilotImage(t, "consumer-routes.yaml")
+	pilot.Spec.Template.Spec.Containers[0].Image = ambientComponentImage(t, "consumer-routes.yaml")
 	update(pilot)
-	awaitStatus(primary, metav1.ConditionTrue, "Accepted", metav1.ConditionFalse, 0)
+	awaitStatus(primary, metav1.ConditionTrue, "Accepted", metav1.ConditionUnknown, 0)
 	markRolledOut()
-	awaitStatus(primary, metav1.ConditionTrue, "Accepted", metav1.ConditionTrue, stockFeatureCount+1)
-	if !hasConsumer() {
-		t.Fatal("qualified consumer pilot did not advertise MeshConsumerRoute")
+	awaitStatus(primary, metav1.ConditionTrue, "Accepted", metav1.ConditionTrue, stockFeatureCount)
+	if hasConsumer() {
+		t.Fatal("limited consumer header pilot advertised MeshConsumerRoute")
+	}
+
+	classVersion := class.ResourceVersion
+	discovery := &pilot.Spec.Template.Spec.Containers[0]
+	discovery.Env = append(discovery.Env, corev1.EnvVar{Name: "PILOT_ENABLE_AMBIENT_WAYPOINTS", Value: "false"})
+	update(pilot)
+	markRolledOut()
+	awaitStatus(primary, metav1.ConditionTrue, "Accepted", metav1.ConditionUnknown, 0, "ambient and Gateway API settings")
+
+	discovery = &pilot.Spec.Template.Spec.Containers[0]
+	discovery.Env = discovery.Env[:len(discovery.Env)-1]
+	update(pilot)
+	markRolledOut()
+	awaitStatus(primary, metav1.ConditionTrue, "Accepted", metav1.ConditionTrue, stockFeatureCount)
+
+	ztunnel.Spec.Template.Annotations = map[string]string{"example.com/restarted": "true"}
+	update(ztunnel)
+	awaitStatus(primary, metav1.ConditionTrue, "Accepted", metav1.ConditionUnknown, 0, "ztunnel rollout")
+	markDaemonSetRolledOut(ztunnel)
+	awaitStatus(primary, metav1.ConditionTrue, "Accepted", metav1.ConditionTrue, stockFeatureCount)
+	get(class)
+	if class.ResourceVersion != classVersion {
+		t.Fatal("withdrawing features changed the Istio GatewayClass")
 	}
 
 	if err := kube.Delete(t.Context(), class); err != nil {
 		t.Fatal(err)
 	}
-	awaitStatus(primary, metav1.ConditionTrue, "Accepted", metav1.ConditionFalse, 0)
-	awaitStatus(custom, metav1.ConditionTrue, "Accepted", metav1.ConditionFalse, 0)
+	awaitStatus(primary, metav1.ConditionTrue, "Accepted", metav1.ConditionUnknown, 0)
+	awaitStatus(custom, metav1.ConditionTrue, "Accepted", metav1.ConditionUnknown, 0)
 	get(foreign)
 	if foreign.ResourceVersion != foreignRV {
 		t.Fatalf("reconciling changed the foreign XMesh: %s -> %s", foreignRV, foreign.ResourceVersion)
 	}
 }
 
-func ambientPilotImage(t *testing.T, valuesFile string) string {
+func ambientComponentImage(t *testing.T, valuesFile string) string {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join("..", "..", "integrations", "istio-ambient", valuesFile))
 	if err != nil {
@@ -294,7 +362,7 @@ func ambientPilotImage(t *testing.T, valuesFile string) string {
 	}
 	var values struct{ Image string }
 	if err := yaml.Unmarshal(data, &values); err != nil || values.Image == "" {
-		t.Fatalf("read pinned pilot image from %s: %v", valuesFile, err)
+		t.Fatalf("read pinned Istio image from %s: %v", valuesFile, err)
 	}
 	return values.Image
 }

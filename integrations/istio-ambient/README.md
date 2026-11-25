@@ -29,7 +29,16 @@ To return to the standard pilot, remove the consumer routes and verify the produ
 
 ## Report mesh capabilities on Experimental
 
-On a cluster with the Gateway API v1.7.0 Experimental bundle, use `config/istio-ambient-xmesh` as the base of the controller installation overlay. Keep your existing controller image, cluster ID and OpenStack settings. An installation already based on Experimental, including the Magnum workload addon, can add the `config/components/istio-ambient-xmesh` component to its overlay. The component enables `--istio-ambient-xmesh` and adds the API permissions for reporting.
+On a cluster with the Gateway API v1.7.0 Experimental bundle, use `config/istio-ambient-xmesh` as the base of the controller installation overlay. Pin an image built from a controller revision that includes `--istio-ambient-xmesh`. Use the existing cluster ID and OpenStack settings. An installation already based on Experimental can add the `config/components/istio-ambient-xmesh` component to its overlay. The component passes the flag and adds the API permissions for reporting.
+
+For Magnum, render the dedicated workload overlay from the repository root. Record the exact rendered file's SHA-256 in `gateway_api_manifest_sha256` and the compatible controller image digest in `gateway_api_controller_image`. [Magnum addon configuration](../../docs/qualification/v1.7.0/magnum-operator.md#build-and-configure)
+
+```sh
+rtk kubectl kustomize integrations/magnum-capi-helm/workload-istio-ambient-xmesh > gateway-controller.yaml
+rtk sha256sum gateway-controller.yaml
+```
+
+With kubectl v1.33.13 and Kustomize v5.6.0, the supplied overlay renders to SHA-256 `1877b45c05199680fabb0f1d19273167af44aaadc2735d0efd4dbab5f0c115e3`. Recompute it for locally modified artifacts.
 
 The controller looks for `XMesh/hibiscus-istio-ambient` at startup and creates it if the name is free. To choose another name, add `--istio-ambient-xmesh-name=<name>` to the controller Deployment arguments. An existing XMesh keeps its spec. A resource using another identity is left to its controller, including at the configured name.
 
@@ -39,7 +48,9 @@ rtk kubectl --kubeconfig "$kubeconfig" --context "$context" get xmesh hibiscus-i
 
 The XMesh controller identity is `gateway-api-openstack.github.io/istio-ambient`. Every XMesh selecting it is reconciled. `Accepted=True` at the XMesh's generation means the reporting configuration was accepted. This integration has no XMesh parameters, so setting `spec.parametersRef` produces `Accepted=False` with reason `InvalidParameters`.
 
-`Programmed=True` and `supportedFeatures` require `GatewayClass/istio-waypoint` to report current-generation acceptance under `istio.io/mesh-controller` and `istio-system/istiod` to have completed the rollout of a pinned pilot image from this module with ambient mode enabled. `MeshConsumerRoute` is published only for the pinned image selected by `--consumer-routes`, within the scope described above. The controller rechecks the pilot Deployment every ten seconds. These conditions cover the observed control plane. Verify enrollment, Service-parent Route conditions and traffic separately for each Service.
+`Programmed=True` and the 16 sorted `supportedFeatures` require current-generation acceptance of `GatewayClass/istio-waypoint` under `istio.io/mesh-controller`. The controller also checks the pinned modules and current rollouts of `istio-system/istiod`, `istio-cni-node` and `ztunnel`, with the expected ambient, waypoint, Gateway API and IPv4 settings. It rechecks these workloads every ten seconds and withdraws the capabilities with `Programmed=Unknown` if a required observation is missing. The two pinned pilot images advertise the same set. The consumer pilot extension supports the limited cross-namespace response header behavior described above.
+
+`Programmed` reports the observed cluster prerequisites. Verify enrollment, Service-parent Route conditions and traffic separately for each Service.
 
 On Standard, use the existing controller installation and workload enrollment instructions. To turn reporting off on Experimental, remove the component or switch the base back to `config/experimental`. After the controller rollout finishes, you can delete the XMesh if it belongs to this installation. Istio continues to manage its waypoints and Service-parent Route status separately.
 

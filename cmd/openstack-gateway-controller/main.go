@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -235,15 +236,7 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("invalid controller configuration: %w", err)
 	}
 
-	scheme := runtime.NewScheme()
-	utilruntime.Must(corev1.AddToScheme(scheme))
-	utilruntime.Must(discoveryv1.AddToScheme(scheme))
-	utilruntime.Must(apiextensionsv1.AddToScheme(scheme))
-	utilruntime.Must(gatewayv1.Install(scheme))
-	utilruntime.Must(configv1alpha1.AddToScheme(scheme))
-	if controllerConfig.XBackendEnabled() {
-		utilruntime.Must(gatewayx.Install(scheme))
-	}
+	scheme := newControllerScheme(controllerConfig, istioAmbientXMesh)
 
 	restConfig := ctrl.GetConfigOrDie()
 	if err := requireGatewayAPIs(restConfig, controllerConfig, istioAmbientXMesh); err != nil {
@@ -413,6 +406,22 @@ func configureOpenStackRequestMetrics(config *openstack.ClientConfig, registerer
 	}
 	config.RequestObserver = requestMetrics
 	return nil
+}
+
+func newControllerScheme(cfg controller.Config, istioAmbientXMesh bool) *runtime.Scheme {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(corev1.AddToScheme(scheme))
+	utilruntime.Must(discoveryv1.AddToScheme(scheme))
+	utilruntime.Must(apiextensionsv1.AddToScheme(scheme))
+	utilruntime.Must(gatewayv1.Install(scheme))
+	utilruntime.Must(configv1alpha1.AddToScheme(scheme))
+	if cfg.XBackendEnabled() {
+		utilruntime.Must(gatewayx.Install(scheme))
+	}
+	if istioAmbientXMesh {
+		utilruntime.Must(appsv1.AddToScheme(scheme))
+	}
+	return scheme
 }
 
 func requireGatewayAPIs(restConfig *rest.Config, cfg controller.Config, istioAmbientXMesh bool) error {
