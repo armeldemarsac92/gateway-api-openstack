@@ -120,6 +120,8 @@ The opt-in Amphora extension has local evidence for HTTP 404, HTTP 500, weighted
 
 An Experimental HTTPRoute rule used verified TLS and HTTP/1.1 to reach its HTTP authorizer. The protected rule returned HTTP 500 with zero peer calls after the grant or CA was removed. The public sibling returned HTTP 200 after each change. Regional qualification remains open. [Local trial](provider/gateway-http-route-http-authorizer-tls/README.md) · [Octavia release](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-http-route-http-authorizer-tls-be4a61a490b0)
 
+An Experimental Gateway listener called Envoy v3 over h2c before HTTPRoute matching and switched to an HTTP authorizer over verified TLS. Withdrawal returned HTTP 403 locally and recreation restored authorization. The sibling served its origin after each change. The trial shows the sampled outcomes during each transition. A separate trial exercised Envoy v3 over TLS with a replacement CA. [Local trials](provider/gateway-listener-authorizer-transports/README.md) · [Earlier body forwarding](provider/gateway-listener-external-auth-forward-body/README.md)
+
 The workload rotation rehearsal used two real controller Pods and a synthetic TLS service catalog. Replacing the projected Secret and restarting the Deployment gave both new Pods working credentials and a new CA. A separate check received HTTP 401 with the retired credential. [Runtime and cleanup](magnum-projected-rotation.md)
 
 ## First live run

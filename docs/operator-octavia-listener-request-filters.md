@@ -4,7 +4,7 @@ Use an Experimental Gateway listener request filter to call an HTTP or Envoy v3 
 
 ## Enable the Amphora capability
 
-1. Install matching Octavia and octavia-lib builds, apply Octavia migration `cadb700cba48`, and roll out the API, workers and Amphora image. The linked baseline supports bodyless checks. Body forwarding needs an upgraded Octavia build that advertises the HTTP or HTTPS capability listed below. [Bodyless Octavia release](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-listener-request-filters-ef3b2204f472) · [octavia-lib release](https://github.com/armeldemarsac92/octavia-lib/releases/tag/hibiscus-listener-request-filters-0ca1468da861)
+1. Install matching Octavia and octavia-lib builds, apply Octavia migration `cadb700cba48`, and roll out the API, workers and Amphora image. The linked baseline supports bodyless checks. Body forwarding needs an upgraded Octavia build that advertises the HTTP or HTTPS capability listed below. [Bodyless Octavia release](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-listener-request-filters-ef3b2204f472) · [octavia-lib release](https://github.com/armeldemarsac92/octavia-lib/releases/tag/hibiscus-listener-request-filters-0ca1468da861) [Listener transport Octavia release](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-listener-authorizer-transports-592e32f88b0a)
 2. Set `enabled_listener_request_filter_providers = amphora` in Octavia's `[api_settings]`. Use the controller's regional endpoint and credentials to read `GET /v2/lbaas/providers/amphora/gateway_capabilities`. Verify that `gateway_capabilities` includes `listener_request_filters_v1`.
 3. Install the Gateway API v1.7.0 Experimental CRDs. In the controller deployment, set `--gateway-api-channel=experimental` and add `--octavia-listener-request-filters`. The controller needs read access to Services, EndpointSlices, ReferenceGrants and BackendTLSPolicies. Configure the GatewayClass member mode and network so that the Amphora can reach the authorization Service.
 
@@ -98,6 +98,8 @@ the physical listener. It restores the port after the updated hostname
 configuration is confirmed, so unrelated sections can serve. If the base
 listener filter capability disappears, the controller keeps the affected
 physical port closed until it can confirm safe configuration again.
+
+The local trials exercised Envoy v3 authorization over h2c and verified TLS, and HTTP over verified TLS on shared HTTPS. With another CA the gRPC TLS check failed closed with HTTP 503 and no Check or origin calls. The reports show the sibling outcomes during each change. [Local transport results](qualification/v1.7.0/provider/gateway-listener-authorizer-transports/README.md) · [gRPC TLS receipt](qualification/v1.7.0/provider/gateway-listener-authorizer-transports/grpc-tls.json)
 
 ## Forward the request body
 
