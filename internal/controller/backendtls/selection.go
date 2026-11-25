@@ -75,6 +75,14 @@ type PolicyResult struct {
 	Validation   *Validation
 }
 
+// LeastSatisfiedCondition merges a condition across several policy consumers.
+func LeastSatisfiedCondition(first, second metav1.Condition) metav1.Condition {
+	if first.Status == metav1.ConditionFalse || second.Status == metav1.ConditionTrue {
+		return first
+	}
+	return second
+}
+
 type targetMatch int
 
 const (
@@ -91,8 +99,9 @@ type candidate struct {
 
 // CAInputs contains the trust observed for applicable policy references.
 type CAInputs struct {
-	ConfigMaps          map[types.NamespacedName]*corev1.ConfigMap
-	ClusterTrustBundles map[string]CAObservation
+	ConfigMaps           map[types.NamespacedName]*corev1.ConfigMap
+	UnreadableConfigMaps map[types.NamespacedName]bool
+	ClusterTrustBundles  map[string]CAObservation
 }
 
 // Evaluate selects the policy for a Service and the port already resolved from

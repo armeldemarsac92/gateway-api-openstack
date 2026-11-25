@@ -53,6 +53,7 @@ const (
 	GatewayCapabilityHTTPSListenerIsolation    = "https_listener_isolation_v1"
 	GatewayCapabilityTLSSNIPassthrough         = "tls_sni_passthrough_v1"
 	GatewayCapabilityTLSSNISuffix              = "tls_sni_suffix_v1"
+	GatewayCapabilityTLSSNIWeightedPools       = "tls_sni_weighted_pools_v1"
 	GatewayCapabilityTCPTLSTermination         = "tcp_tls_termination_v1"
 	GatewayCapabilityTCPTLSMixedMode           = "tcp_tls_mixed_mode_v1"
 	GatewayCapabilityTCPBackendTLSAuth         = "tcp_tls_backend_auth_v1"

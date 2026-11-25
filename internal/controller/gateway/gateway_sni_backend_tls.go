@@ -19,6 +19,7 @@ package gateway
 import (
 	"context"
 	"errors"
+	"iter"
 	"slices"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -33,22 +34,35 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
-// TLSRouteBackendService identifies a TLSRoute's single active reference for BackendTLSPolicy.
-func TLSRouteBackendService(route *gatewayv1.TLSRoute) (types.NamespacedName, bool) {
-	if len(route.Spec.Rules) != 1 || len(route.Spec.Rules[0].BackendRefs) != 1 {
-		return types.NamespacedName{}, false
+// TLSRouteBackendServiceRefs enumerates positive Service refs for policy
+// discovery. The live observer still checks listener admission and authorization.
+func TLSRouteBackendServiceRefs(route *gatewayv1.TLSRoute) iter.Seq2[types.NamespacedName, gatewayv1.BackendRef] {
+	return func(yield func(types.NamespacedName, gatewayv1.BackendRef) bool) {
+		if len(route.Spec.Rules) != 1 {
+			return
+		}
+		for _, ref := range route.Spec.Rules[0].BackendRefs {
+			if ptr.Deref(ref.Weight, 1) <= 0 {
+				continue
+			}
+			if key, supported := model.BackendServiceReference(route.Namespace, ref.BackendObjectReference); supported && !yield(key, ref) {
+				return
+			}
+		}
 	}
-	ref := route.Spec.Rules[0].BackendRefs[0]
-	if ptr.Deref(ref.Weight, 1) <= 0 {
-		return types.NamespacedName{}, false
-	}
-	return model.BackendServiceReference(route.Namespace, ref.BackendObjectReference)
+}
+
+// TLSRouteBackendTLSPolicyConsumer captures the conditions and transport needed
+// by the selected TLSRoutes for one Gateway.
+type TLSRouteBackendTLSPolicyConsumer struct {
+	backendtls.PolicyResult
+	Weighted bool
 }
 
 // ObserveTLSRouteBackendTLSPolicy evaluates the TLSRoute consumers of this policy.
 // The shared BackendTLSPolicy status controller merges these ancestors with the
 // HTTP and gRPC consumers. No route or Gateway status is used as authorization.
-func (r *Reconciler) ObserveTLSRouteBackendTLSPolicy(ctx context.Context, policy *gatewayv1.BackendTLSPolicy) (map[types.NamespacedName]backendtls.PolicyResult, error) {
+func (r *Reconciler) ObserveTLSRouteBackendTLSPolicy(ctx context.Context, policy *gatewayv1.BackendTLSPolicy) (map[types.NamespacedName]TLSRouteBackendTLSPolicyConsumer, error) {
 	targets := backendtls.ServiceKeys(policy)
 	if !r.Config.TCPTLSTermination || !r.Config.BackendTLSPolicy || len(targets) == 0 {
 		return nil, nil
@@ -69,8 +83,11 @@ func (r *Reconciler) ObserveTLSRouteBackendTLSPolicy(ctx context.Context, policy
 		}
 		parent := types.NamespacedName{Namespace: string(ptr.Deref(ref.Namespace, gatewayv1.Namespace(route.Namespace))), Name: string(ref.Name)}
 		peers[parent] = append(peers[parent], route)
-		if key, ok := TLSRouteBackendService(&route); ok && slices.Contains(targets, key) {
-			candidates[parent] = true
+		for key := range TLSRouteBackendServiceRefs(&route) {
+			if slices.Contains(targets, key) {
+				candidates[parent] = true
+				break
+			}
 		}
 	}
 	if len(candidates) == 0 {
@@ -83,7 +100,7 @@ func (r *Reconciler) ObserveTLSRouteBackendTLSPolicy(ctx context.Context, policy
 		return nil, err
 	}
 	observer := graph.NewBackendTLSObserver(r.APIReader, r.Config.ClusterTrustBundles)
-	ancestors := make(map[types.NamespacedName]backendtls.PolicyResult, len(candidates))
+	ancestors := make(map[types.NamespacedName]TLSRouteBackendTLSPolicyConsumer, len(candidates))
 	for key := range candidates {
 		parent := &gatewayv1.Gateway{}
 		if err := r.APIReader.Get(ctx, key, parent); err != nil {
@@ -124,31 +141,73 @@ func (r *Reconciler) ObserveTLSRouteBackendTLSPolicy(ctx context.Context, policy
 			if !terminatesTLS(entry.listener) || !slices.ContainsFunc(entry.hostnames, func(host string) bool { return owners[host].index == i }) {
 				continue
 			}
-			backend, ok := TLSRouteBackendService(entry.route)
-			if !ok || !slices.Contains(targets, backend) {
-				continue
-			}
-			service, port, diagnostic, err := r.observeSNIService(ctx, entry.route, entry.route.Spec.Rules[0].BackendRefs[0])
+			result, err := r.observeSNIBackendTLSPolicy(ctx, parent, entry.route, policy, targets, observer)
 			if err != nil {
 				return nil, err
 			}
-			if diagnostic != nil {
-				continue
-			}
-			selection, err := observer.Observe(ctx, service, port, nil)
-			if err != nil {
-				return nil, err
-			}
-			for _, result := range selection.Policies {
-				if result.UID == policy.UID && result.Generation == policy.Generation {
-					if result.Accepted.Status == metav1.ConditionTrue && BackendClientCertificateRef(parent) != nil {
-						result.Accepted.Status, result.Accepted.Reason, result.Accepted.Message =
-							metav1.ConditionFalse, tcpBackendClientCertificateReason, tcpBackendClientCertificateMessage
-					}
-					ancestors[key] = result
-				}
+			if result.UID != "" {
+				consumer := ancestors[key]
+				consumer.PolicyResult = mergeSNIBackendTLSConsumer(consumer.PolicyResult, result)
+				consumer.Weighted = consumer.Weighted || sniHasMultipleActiveBackends(entry.route.Spec.Rules[0].BackendRefs)
+				ancestors[key] = consumer
 			}
 		}
 	}
 	return ancestors, nil
+}
+
+func sniHasMultipleActiveBackends(refs []gatewayv1.BackendRef) bool {
+	found := false
+	for _, ref := range refs {
+		if ptr.Deref(ref.Weight, 1) > 0 {
+			if found {
+				return true
+			}
+			found = true
+		}
+	}
+	return false
+}
+
+func (r *Reconciler) observeSNIBackendTLSPolicy(ctx context.Context, parent *gatewayv1.Gateway, route *gatewayv1.TLSRoute, policy *gatewayv1.BackendTLSPolicy, targets []types.NamespacedName, observer *graph.BackendTLSObserver) (backendtls.PolicyResult, error) {
+	var observed backendtls.PolicyResult
+	observe := observer.Observe
+	if len(route.Spec.Rules[0].BackendRefs) > 1 {
+		observe = observer.ObserveWeightedService
+	}
+	for key, ref := range TLSRouteBackendServiceRefs(route) {
+		if !slices.Contains(targets, key) {
+			continue
+		}
+		service, port, diagnostic, err := r.observeSNIService(ctx, route, ref)
+		if err != nil {
+			return observed, err
+		}
+		if diagnostic != nil {
+			continue
+		}
+		selection, err := observe(ctx, service, port, nil)
+		if err != nil {
+			return observed, err
+		}
+		for _, result := range selection.Policies {
+			if result.UID != policy.UID || result.Generation != policy.Generation {
+				continue
+			}
+			if result.Accepted.Status == metav1.ConditionTrue && BackendClientCertificateRef(parent) != nil {
+				result.Accepted.Status, result.Accepted.Reason, result.Accepted.Message =
+					metav1.ConditionFalse, tcpBackendClientCertificateReason, tcpBackendClientCertificateMessage
+			}
+			observed = mergeSNIBackendTLSConsumer(observed, result)
+		}
+	}
+	return observed, nil
+}
+
+func mergeSNIBackendTLSConsumer(prior, current backendtls.PolicyResult) backendtls.PolicyResult {
+	if prior.UID != "" {
+		current.Accepted = backendtls.LeastSatisfiedCondition(prior.Accepted, current.Accepted)
+		current.ResolvedRefs = backendtls.LeastSatisfiedCondition(prior.ResolvedRefs, current.ResolvedRefs)
+	}
+	return current
 }

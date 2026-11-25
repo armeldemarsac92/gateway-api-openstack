@@ -504,8 +504,7 @@ func (observation sniRouteObservation) parentResults() sniRouteObservation {
 		if current.programmingDiagnostic == nil {
 			current.programmingDiagnostic = entry.programmingDiagnostic
 		}
-		if current.resolvedReason == "" ||
-			current.resolvedReason == gatewayv1.RouteReasonResolvedRefs && entry.resolvedReason != "" {
+		if sniRefReasonPriority(entry.resolvedReason) > sniRefReasonPriority(current.resolvedReason) {
 			current.resolvedReason, current.resolvedMessage = entry.resolvedReason, entry.resolvedMessage
 		}
 	}

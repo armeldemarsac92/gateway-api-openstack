@@ -240,6 +240,14 @@ func (p *Provider) TCPBackendTLSAvailable(ctx context.Context) (bool, error) {
 	return p.amphoraCapabilityAvailable(ctx, tcpBackendTLSCapabilities()...)
 }
 
+// TCPWeightedBackendTLSAvailable checks independent authenticated pools on terminating TCP listeners.
+func (p *Provider) TCPWeightedBackendTLSAvailable(ctx context.Context) (bool, error) {
+	if !p.backendTLSPolicy || !p.tcpTLSTermination || p.backendCA == nil {
+		return false, nil
+	}
+	return p.amphoraCapabilityAvailable(ctx, append(tcpBackendTLSCapabilities(), octavia.GatewayCapabilityTLSSNIWeightedPools)...)
+}
+
 func tcpBackendTLSCapabilities() []string {
 	return []string{octavia.GatewayCapabilityTCPTLSTermination, octavia.GatewayCapabilityBackendTLSHostname, octavia.GatewayCapabilityTCPBackendTLSAuth}
 }

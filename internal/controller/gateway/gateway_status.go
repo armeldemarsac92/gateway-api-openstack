@@ -642,10 +642,12 @@ func (r *Reconciler) attachedRoutes(ctx context.Context, gateway *gatewayv1.Gate
 			}
 			if r.Config.BackendTLSPolicy && len(matching) != 0 &&
 				(httpKind != "" || slices.ContainsFunc(matching, terminatesTLS)) {
-				programmed := meta.FindStatusCondition(parentStatus.Conditions, r.Config.Domain()+"/Programmed")
-				attached.backendTLSAncestorFull = attached.backendTLSAncestorFull || programmed != nil &&
-					programmed.ObservedGeneration == route.GetGeneration() && programmed.Status == metav1.ConditionFalse &&
-					programmed.Reason == backendtls.AncestorLimitReason
+				programmedType := r.Config.Domain() + "/Programmed"
+				attached.backendTLSAncestorFull = attached.backendTLSAncestorFull || slices.ContainsFunc(parentStatus.Conditions, func(condition metav1.Condition) bool {
+					return condition.ObservedGeneration == route.GetGeneration() && condition.Status == metav1.ConditionFalse &&
+						condition.Reason == backendtls.AncestorLimitReason &&
+						(condition.Type == programmedType || httpKind == "" && condition.Type == string(gatewayv1.RouteConditionResolvedRefs))
+				})
 			}
 			for _, listener := range matching {
 				if !counted[listener.Name] {
