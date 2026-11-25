@@ -405,19 +405,17 @@ func (p *Provider) buildScopedListenerGraphPlan(desired desiredGatewayGraph, act
 		routeResult := cloud.RouteReadyResult(routeStateFromObservation(observed))
 		switch node.Disposition {
 		case cloud.GraphPreserve:
-			if len(node.RetainScopedListenerPorts) == 0 || observed.pool == nil {
+			if len(node.RetainListenerPorts) == 0 || observed.pool == nil {
 				break
 			}
-			changes, _, err := buildRouteEnsurePlan(route, observed)
-			if transportPoolPending(err) {
-				break
-			}
+			ready, err := retainedTransportBackendReady(route, observed, actual)
 			if err != nil {
 				return nil, result, &cloud.GraphError{Identity: route.spec.Identity, Err: err}
 			}
-			if scopedRouteBackendReady(route, observed, actual.state.VIPAddress, changes, observed.backendProvisioningIssue(false, true)) {
-				for _, port := range node.RetainScopedListenerPorts {
-					keepEdge[port] = found[port].DefaultPoolID == observed.pool.ID
+			if ready && actual.loadBalancer.AdminStateUp {
+				for _, port := range node.RetainListenerPorts {
+					listener := found[port]
+					keepEdge[port] = listener.DefaultPoolID == observed.pool.ID && listener.AdminStateUp && listener.ProvisioningStatus == "ACTIVE"
 				}
 			}
 		case cloud.GraphDelete:
@@ -509,7 +507,7 @@ func (p *Provider) buildScopedListenerGraphPlan(desired desiredGatewayGraph, act
 			node := desired.spec.Routes[owner]
 			withdraw := node.Disposition == cloud.GraphDelete ||
 				node.Disposition == cloud.GraphEnsure && !keepEdge[listener.ProtocolPort] ||
-				node.RetainScopedListenerPorts != nil && !keepEdge[listener.ProtocolPort]
+				node.RetainListenerPorts != nil && !keepEdge[listener.ProtocolPort]
 			if obsolete || withdraw {
 				step := clearListenerDefaultPool(actual.protocol)
 				step.listenerID = listener.ID

@@ -43,6 +43,7 @@ import (
 	"sigs.k8s.io/gateway-api/pkg/features"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
@@ -505,6 +506,9 @@ func TestBackendTLSPolicyStatusCombinesHTTPAndTLSRouteAncestors(t *testing.T) {
 			},
 		},
 	}
+	topology := testBoundTopology()
+	topology.Topology.MemberMode = cloud.MemberModeEndpoint
+	require.NoError(t, controller.BindGatewayTopology(cfg, tlsGateway, topology))
 	f.create(t, tlsGateway, tlsRoute, ca, policy)
 	key := client.ObjectKeyFromObject(policy)
 	require.NoError(t, f.client.Get(t.Context(), key, policy))

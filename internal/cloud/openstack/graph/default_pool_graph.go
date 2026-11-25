@@ -247,9 +247,25 @@ func (p *Provider) buildDefaultPoolGraphPlan(desired desiredGatewayGraph, actual
 			observed = actual.routes[index]
 		}
 		routeResult := cloud.RouteReadyResult(routeStateFromObservation(observed))
-		switch desired.spec.Routes[index].Disposition {
+		node := desired.spec.Routes[index]
+		switch node.Disposition {
 		case cloud.GraphPreserve:
-			detach = detach || index == defaultOwner && desired.spec.Gateway.Disposition == cloud.GraphEnsure
+			if index != defaultOwner || desired.spec.Gateway.Disposition != cloud.GraphEnsure {
+				break
+			}
+			if !slices.Contains(node.RetainListenerPorts, actual.listener.ProtocolPort) ||
+				actual.listener.ProvisioningStatus != "ACTIVE" || !actual.listener.AdminStateUp || !actual.loadBalancer.AdminStateUp {
+				detach = true
+				break
+			}
+			ready, err := retainedTransportBackendReady(route, observed, actual)
+			if err != nil {
+				return nil, result, &cloud.GraphError{Identity: route.spec.Identity, Err: err}
+			}
+			detach = !ready
+			// An existing edge permits no Gateway traffic restoration while its
+			// route checkpoint is pending.
+			restoration = nil
 		case cloud.GraphDelete:
 			if index == defaultOwner {
 				detach = true
@@ -339,6 +355,21 @@ func (p *Provider) buildDefaultPoolGraphPlan(desired desiredGatewayGraph, actual
 		result.Outcome = p.progressingOutcome(plan[0].message)
 	}
 	return plan, result, nil
+}
+
+func retainedTransportBackendReady(route desiredRoute, observed observedRouteGraph, actual observedGatewayGraph) (bool, error) {
+	if observed.pool == nil {
+		return false, nil
+	}
+	if err := validateTransportRouteBinding(route, actual); err != nil {
+		return false, err
+	}
+	changes, _, err := buildRouteEnsurePlan(route, observed)
+	if transportPoolPending(err) {
+		return false, nil
+	}
+	return err == nil && scopedRouteBackendReady(route, observed, actual.state.VIPAddress, changes,
+		observed.backendProvisioningIssue(false, true)), err
 }
 
 func validateRouteGatewayIDs(recorded, observed cloud.GatewayState) error {

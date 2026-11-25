@@ -29,6 +29,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -39,6 +40,197 @@ import (
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 )
+
+func TestTransportExplicitGatewayParents(t *testing.T) {
+	for _, channel := range []string{"standard", "experimental"} {
+		t.Run(channel, func(t *testing.T) {
+			for _, protocol := range []gatewayv1.ProtocolType{gatewayv1.TCPProtocolType, gatewayv1.UDPProtocolType} {
+				t.Run(string(protocol), func(t *testing.T) { testTransportExplicitGatewayParents(t, channel, protocol) })
+			}
+		})
+	}
+}
+
+func testTransportExplicitGatewayParents(t *testing.T, channel string, protocol gatewayv1.ProtocolType) {
+	t.Helper()
+	ctx := t.Context()
+	east, class, tcp := routeFixture()
+	east.Status.Addresses = []gatewayv1.GatewayStatusAddress{{Value: "192.0.2.30"}}
+	east.Status.Conditions = []metav1.Condition{{Type: "Programmed", Status: metav1.ConditionTrue, ObservedGeneration: east.Generation}}
+	east.Spec.Listeners[0].Protocol = protocol
+	west := east.DeepCopy()
+	west.Name, west.UID, west.Status.Addresses[0].Value = "west", "west-uid", "192.0.2.31"
+	east.Spec.Listeners = append(east.Spec.Listeners, gatewayv1.Listener{Name: "second", Port: 9311, Protocol: protocol})
+	primary := gatewayv1.ParentReference{Name: gatewayv1.ObjectName(east.Name), Port: ptr.To(gatewayv1.PortNumber(8080))}
+	secondary := gatewayv1.ParentReference{Name: primary.Name, Port: ptr.To(gatewayv1.PortNumber(9311))}
+	other := gatewayv1.ParentReference{Name: gatewayv1.ObjectName(west.Name)}
+	foreign := gatewayv1.RouteParentStatus{
+		ControllerName: "foreign.example/controller",
+		ParentRef:      gatewayv1.ParentReference{Name: "foreign"},
+		Conditions: []metav1.Condition{{
+			Type: "Accepted", Status: metav1.ConditionTrue, ObservedGeneration: 3,
+			LastTransitionTime: metav1.NewTime(time.Unix(1234, 0)), Reason: "Accepted", Message: "Accepted by another controller",
+		}},
+	}
+	ref, service, endpoints := transportBackendFixture(corev1.Protocol(protocol), tcp.Namespace, "backend", 1, "10.1.2.3")
+	tcp.Spec.ParentRefs = []gatewayv1.ParentReference{primary}
+	tcp.Spec.Rules[0].BackendRefs = []gatewayv1.BackendRef{ref}
+	tcp.Status.Parents = []gatewayv1.RouteParentStatus{foreign}
+	var route client.Object = tcp
+	if protocol == gatewayv1.UDPProtocolType {
+		route = &gatewayv1.UDPRoute{
+			ObjectMeta: tcp.ObjectMeta,
+			Spec: gatewayv1.UDPRouteSpec{
+				CommonRouteSpec: tcp.Spec.CommonRouteSpec,
+				Rules:           []gatewayv1.UDPRouteRule{{BackendRefs: []gatewayv1.BackendRef{ref}}},
+			},
+			Status: gatewayv1.UDPRouteStatus{RouteStatus: tcp.Status.RouteStatus},
+		}
+	}
+	older := viewRoute(route).copyObject()
+	older.SetName("older")
+	older.SetUID("older-uid")
+	older.SetCreationTimestamp(metav1.NewTime(tcp.CreationTimestamp.Add(-time.Minute)))
+	olderSpec, _ := controller.RouteSpecAndParentStatuses(older)
+	olderSpec.ParentRefs = []gatewayv1.ParentReference{
+		secondary, {Name: other.Name, Port: ptr.To(gatewayv1.PortNumber(9999))},
+	}
+	r := testReconcilerForChannel(t, channel, east, west, class, route, older, service, endpoints)
+	r.Protocol, r.Coordinator = protocol, &graph.Coordinator{}
+	for _, gateway := range []*gatewayv1.Gateway{east, west} {
+		bindGatewayFixture(t, r, gateway, cloud.MemberModeEndpoint)
+	}
+	controller.SetGatewayListenerScope(r.Config, east, protocol)
+	if err := r.Update(ctx, east); err != nil {
+		t.Fatal(err)
+	}
+	serving := map[string]string{}
+	deleted := []string{}
+	r.Writer = applyRouteGraphFunc(func(ctx context.Context, request graph.Request) (cloud.GatewayGraphResult, error) {
+		input, err := r.ObserveRouteGraph(ctx, request, request.Gateway)
+		if err != nil {
+			return cloud.GatewayGraphResult{}, err
+		}
+		uid := request.Identity.GatewayUID
+		if len(input.Nodes) != 1 || input.Nodes[0].Spec.Identity != request.Identity {
+			t.Fatalf("Gateway %s received unexpected route nodes: %+v", uid, input.Nodes)
+		}
+		node := input.Nodes[0]
+		switch request.Action {
+		case graph.Ensure:
+			var scopedPorts []int
+			if uid == string(east.UID) {
+				scopedPorts = []int{8080}
+			}
+			if node.Disposition != cloud.GraphEnsure || !slices.Equal(node.Spec.ScopedListenerPorts, scopedPorts) ||
+				node.Spec.GatewayRequirements.ListenerPort != 8080 ||
+				len(node.Spec.Members) != 1 || node.Spec.Members[0].Address != "10.1.2.3" {
+				t.Fatalf("Gateway %s received unexpected forwarding: %+v", uid, node)
+			}
+			serving[uid] = request.Gateway.Status.Addresses[0].Value
+		case graph.DeleteRoute:
+			if node.Disposition != cloud.GraphDelete {
+				t.Fatalf("Gateway %s received unexpected deletion: %+v", uid, node)
+			}
+			deleted = append(deleted, uid)
+			delete(serving, uid)
+		default:
+			t.Fatalf("unexpected graph action %v", request.Action)
+		}
+		return cloud.GatewayGraphResult{
+			Outcome: cloud.ReadyOutcome(),
+			Routes:  []cloud.RouteGraphResult{{Identity: request.Identity, Result: cloud.RouteResult{Outcome: cloud.ReadyOutcome()}}},
+		}, input.Validate(ctx)
+	})
+	key := client.ObjectKeyFromObject(route)
+	reconcile := func() {
+		t.Helper()
+		for range 2 {
+			if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: key}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := r.Get(ctx, key, route); err != nil {
+			t.Fatal(err)
+		}
+	}
+	checkRetainedPort := func(gateway *gatewayv1.Gateway) {
+		t.Helper()
+		request := graph.Request{Action: graph.Ensure, Identity: controller.GatewayIdentity(r.Config, gateway), Gateway: gateway}
+		input, err := r.ObserveRouteGraph(ctx, request, gateway)
+		if err != nil || len(input.Nodes) != 1 || input.Nodes[0].Disposition != cloud.GraphPreserve ||
+			!slices.Equal(input.Nodes[0].RetainListenerPorts, []int{8080}) {
+			t.Fatalf("Gateway %s would withdraw retained forwarding: %+v, %v", gateway.Name, input.Nodes, err)
+		}
+		if err := input.Validate(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	updateParents := func(parents ...gatewayv1.ParentReference) {
+		t.Helper()
+		spec, _ := controller.RouteSpecAndParentStatuses(route)
+		spec.ParentRefs = parents
+		route.SetGeneration(route.GetGeneration() + 1)
+		if err := r.Update(ctx, route); err != nil {
+			t.Fatal(err)
+		}
+	}
+	checkParent := func(ref gatewayv1.ParentReference, kind string, status metav1.ConditionStatus, reason string) {
+		t.Helper()
+		if condition := r.currentParentCondition(viewRoute(route), ref, kind); condition == nil || condition.Status != status || condition.Reason != reason {
+			t.Fatalf("parent %v %s = %+v, want %s/%s", ref, kind, condition, status, reason)
+		}
+	}
+	checkBindings := func(uids ...types.UID) {
+		t.Helper()
+		bindings, err := r.routeBindings(viewRoute(route))
+		if err != nil || len(bindings) != len(uids) {
+			t.Fatalf("expected bindings %v, got %+v, %v", uids, bindings, err)
+		}
+		for _, uid := range uids {
+			var anchor int
+			if uid == east.UID {
+				anchor = 8080
+			}
+			if !slices.ContainsFunc(bindings, func(binding controller.RouteGatewayBinding) bool {
+				return binding.Identity.GatewayUID == string(uid) && binding.Anchor == anchor && binding.Lifecycle == controller.RouteAttached
+			}) {
+				t.Fatalf("missing attached binding for %s: %+v", uid, bindings)
+			}
+		}
+	}
+
+	programmed := r.Config.Domain() + "/Programmed"
+	reconcile()
+	checkBindings(east.UID)
+	checkParent(primary, programmed, metav1.ConditionTrue, "Programmed")
+	updateParents(primary, secondary, other)
+	checkRetainedPort(east)
+	reconcile()
+	checkBindings(east.UID, west.UID)
+	for _, ref := range []gatewayv1.ParentReference{primary, secondary, other} {
+		checkParent(ref, "Accepted", metav1.ConditionTrue, "Accepted")
+	}
+	checkParent(primary, programmed, metav1.ConditionTrue, "Programmed")
+	checkParent(secondary, programmed, metav1.ConditionFalse, "NotSelected")
+	checkParent(other, programmed, metav1.ConditionTrue, "Programmed")
+	if len(serving) != 2 || serving[string(east.UID)] != east.Status.Addresses[0].Value || serving[string(west.UID)] != west.Status.Addresses[0].Value {
+		t.Fatalf("expected forwarding on both Gateway VIPs, got %v", serving)
+	}
+
+	updateParents(other)
+	checkRetainedPort(west)
+	reconcile()
+	checkBindings(west.UID)
+	checkParent(other, programmed, metav1.ConditionTrue, "Programmed")
+	parents := viewRoute(route).status.Parents
+	if len(parents) != 2 || !reflect.DeepEqual(parents[0], foreign) {
+		t.Fatalf("expected west and preserved foreign status after withdrawing east, got %+v", parents)
+	}
+	if !slices.Equal(deleted, []string{string(east.UID)}) || len(serving) != 1 || serving[string(west.UID)] != west.Status.Addresses[0].Value {
+		t.Fatalf("removing east changed west: deleted=%v, serving=%v", deleted, serving)
+	}
+}
 
 func TestTransportForwardingWithFullParentStatus(t *testing.T) {
 	t.Run("experimental default", func(t *testing.T) { testTransportForwardingWithFullParentStatus(t, "experimental") })

@@ -463,7 +463,7 @@ func (r *Reconciler) reconcileGatewayGraph(
 				message := controller.ProviderProgressMessage(graphResult.Gateway.Outcome, "Waiting for HTTP policy changes")
 				if statusErr := r.setGatewayListenerStatuses(ctx, scope.gateway, decision.listener,
 					metav1.ConditionFalse, gatewayv1.GatewayReasonNoResources, gatewayv1.ListenerReasonPending,
-					message, message, true, graphResult.Gateway.ScopedListenerReadyPorts); statusErr != nil {
+					message, message, true, gatewayListenerStatusOptions{readyPorts: graphResult.Gateway.ScopedListenerReadyPorts}); statusErr != nil {
 					return ctrl.Result{}, statusErr
 				}
 			} else if isL4Listener(decision.listener.Protocol) {
@@ -534,7 +534,7 @@ func (r *Reconciler) reconcileGatewayGraph(
 	if progress.State == cloud.OutcomeProgressing {
 		message := controller.ProviderProgressMessage(progress, "Octavia resources for the Gateway are still progressing")
 		if err := r.setGatewayListenerStatuses(ctx, scope.gateway, decision.listener,
-			metav1.ConditionFalse, gatewayv1.GatewayReasonNoResources, gatewayv1.ListenerReasonPending, message, message, true, gatewayResult.ScopedListenerReadyPorts); err != nil {
+			metav1.ConditionFalse, gatewayv1.GatewayReasonNoResources, gatewayv1.ListenerReasonPending, message, message, true, gatewayListenerStatusOptions{readyPorts: gatewayResult.ScopedListenerReadyPorts}); err != nil {
 			return ctrl.Result{}, err
 		}
 		if !r.Config.GatewayAddressRoutabilityEnabled() {

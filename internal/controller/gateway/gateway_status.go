@@ -270,6 +270,11 @@ func (r *Reconciler) handleGatewayProviderFailure(
 		programmedGeneration,
 	)
 	scopedReadyPorts := scopedGatewayFailurePorts(r.Config, gateway, policy.Category, observation)
+	options := gatewayListenerStatusOptions{readyPorts: scopedReadyPorts}
+	var missing *octavia.MissingGatewayCapability
+	if errors.As(providerErr, &missing) && missing.Capability == octavia.GatewayCapabilityTCPTLSMixedMode {
+		options.rejectedMixedTLSPort = listener.Port
+	}
 	if err := r.setGatewayListenerStatuses(
 		ctx,
 		gateway,
@@ -280,16 +285,18 @@ func (r *Reconciler) handleGatewayProviderFailure(
 		policy.Message,
 		policy.Message,
 		policy.AdvancesObservedGeneration,
-		scopedReadyPorts,
+		options,
 	); err != nil {
 		return ctrl.Result{}, errors.Join(controller.SafeProviderReconcileError(policy, providerErr), err)
 	}
-	var missing *octavia.MissingGatewayCapability
-	if errors.As(providerErr, &missing) && missing.Capability == octavia.GatewayCapabilityTCPTLSMixedMode {
+	if options.rejectedMixedTLSPort != 0 {
 		const message = "Octavia does not advertise same-port mixed TLS in this region"
 		controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionAccepted), metav1.ConditionFalse,
 			string(gatewayv1.GatewayReasonListenersNotValid), message, gateway.Generation))
 		for i := range gateway.Status.Listeners {
+			if !options.rejectsRouteAttachments(&gateway.Spec.Listeners[i]) {
+				continue
+			}
 			conditions := &gateway.Status.Listeners[i].Conditions
 			controller.SetCondition(conditions, controller.Condition(string(gatewayv1.ListenerConditionAccepted), metav1.ConditionFalse,
 				string(gatewayv1.ListenerReasonProtocolConflict), message, gateway.Generation))
@@ -421,7 +428,7 @@ func (r *Reconciler) setGatewayProvisioningStatus(
 	message string,
 	advanceProgrammedGeneration bool,
 ) error {
-	return r.setGatewayListenerStatuses(ctx, gateway, listener, programmed, gatewayReason, listenerReason, message, message, advanceProgrammedGeneration, nil)
+	return r.setGatewayListenerStatuses(ctx, gateway, listener, programmed, gatewayReason, listenerReason, message, message, advanceProgrammedGeneration, gatewayListenerStatusOptions{})
 }
 
 func (r *Reconciler) setGatewayProgrammed(ctx context.Context, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, address string) error {
@@ -430,7 +437,7 @@ func (r *Reconciler) setGatewayProgrammed(ctx context.Context, gateway *gatewayv
 		message = "Octavia load balancer and listeners are active"
 	}
 	if err := r.setGatewayListenerStatuses(ctx, gateway, listener, metav1.ConditionTrue, gatewayv1.GatewayReasonProgrammed,
-		gatewayv1.ListenerReasonProgrammed, message, "Octavia listener is active", true, nil); err != nil {
+		gatewayv1.ListenerReasonProgrammed, message, "Octavia listener is active", true, gatewayListenerStatusOptions{}); err != nil {
 		return err
 	}
 	if !r.Config.GatewayAddressRoutabilityEnabled() {
@@ -462,7 +469,7 @@ func (r *Reconciler) setGatewayAddressUnusable(
 				reason = gatewayv1.GatewayReasonNoResources
 			}
 			return r.setGatewayListenerStatuses(ctx, gateway, listener, metav1.ConditionFalse, reason,
-				gatewayv1.ListenerReasonPending, result.AddressIssue, "Waiting for Octavia listener readiness", true, readyPorts)
+				gatewayv1.ListenerReasonPending, result.AddressIssue, "Waiting for Octavia listener readiness", true, gatewayListenerStatusOptions{readyPorts: readyPorts})
 		}
 	}
 	rejection := validateAddresses(gateway.Spec.Addresses)
@@ -481,7 +488,7 @@ func (r *Reconciler) setGatewayAddressUnusable(
 		}
 	}
 	if err := r.setGatewayListenerStatuses(ctx, gateway, listener, metav1.ConditionFalse, programmedReason,
-		gatewayv1.ListenerReasonPending, result.AddressIssue, "Waiting for Octavia listener readiness", true, readyPorts); err != nil {
+		gatewayv1.ListenerReasonPending, result.AddressIssue, "Waiting for Octavia listener readiness", true, gatewayListenerStatusOptions{readyPorts: readyPorts}); err != nil {
 		return err
 	}
 	if rejectedCondition != nil {
@@ -513,6 +520,15 @@ func setGatewayAddress(gateway *gatewayv1.Gateway, address string) {
 	gateway.Status.Addresses = []gatewayv1.GatewayStatusAddress{{Type: &addressType, Value: address}}
 }
 
+type gatewayListenerStatusOptions struct {
+	readyPorts           []int
+	rejectedMixedTLSPort gatewayv1.PortNumber
+}
+
+func (options gatewayListenerStatusOptions) rejectsRouteAttachments(listener *gatewayv1.Listener) bool {
+	return options.rejectedMixedTLSPort != 0 && listener.Protocol == gatewayv1.TLSProtocolType && listener.Port == options.rejectedMixedTLSPort
+}
+
 func (r *Reconciler) setGatewayListenerStatuses(
 	ctx context.Context,
 	gateway *gatewayv1.Gateway,
@@ -522,15 +538,24 @@ func (r *Reconciler) setGatewayListenerStatuses(
 	listenerReason gatewayv1.ListenerConditionReason,
 	gatewayMessage, listenerMessage string,
 	advanceProgrammedGeneration bool,
-	readyPorts []int,
+	options gatewayListenerStatusOptions,
 ) error {
 	listeners, err := SupportedListenersForConfig(r.Config, gateway)
 	if err != nil {
 		listeners = []*gatewayv1.Listener{primary}
 	}
-	attached, err := r.attachedRoutes(ctx, gateway, listeners)
-	if err != nil {
-		return err
+	attachmentListeners := listeners
+	if options.rejectedMixedTLSPort != 0 {
+		// Route reporting rejects every admitted route on this mixed bind,
+		// including parents whose rejection could not fit in route status.
+		attachmentListeners = slices.DeleteFunc(slices.Clone(listeners), options.rejectsRouteAttachments)
+	}
+	var attached attachedGatewayRoutes
+	if len(attachmentListeners) != 0 {
+		attached, err = r.attachedRoutes(ctx, gateway, attachmentListeners)
+		if err != nil {
+			return err
+		}
 	}
 	statuses := make([]gatewayv1.ListenerStatus, 0, len(listeners))
 	for _, listener := range listeners {
@@ -543,7 +568,7 @@ func (r *Reconciler) setGatewayListenerStatuses(
 		setAcceptedListenerConditions(&status.Conditions, gateway.Generation)
 		generation := controller.ConditionObservedGeneration(status.Conditions, string(gatewayv1.ListenerConditionProgrammed), gateway.Generation, advanceProgrammedGeneration)
 		portProgrammed, portReason, portMessage := programmed, listenerReason, listenerMessage
-		if slices.Contains(readyPorts, int(listener.Port)) {
+		if slices.Contains(options.readyPorts, int(listener.Port)) {
 			portProgrammed, portReason, portMessage = metav1.ConditionTrue, gatewayv1.ListenerReasonProgrammed, "Octavia listener is active"
 		}
 		controller.SetCondition(&status.Conditions, controller.Condition(string(gatewayv1.ListenerConditionProgrammed), portProgrammed, string(portReason), portMessage, generation))
@@ -609,6 +634,7 @@ func (r *Reconciler) attachedRoutes(ctx context.Context, gateway *gatewayv1.Gate
 	gatewayKey := controller.ObjectKeyString(client.ObjectKeyFromObject(gateway))
 	attached := attachedGatewayRoutes{counts: make(map[gatewayv1.SectionName]int32, len(listeners))}
 	namespaces := make(map[string][]corev1.Namespace)
+	unreportedSNI := make(map[unreportedSNIAttachment]struct{})
 	countRoute := func(object runtime.Object) error {
 		route := object.(client.Object)
 		if !route.GetDeletionTimestamp().IsZero() {
@@ -640,8 +666,8 @@ func (r *Reconciler) attachedRoutes(ctx context.Context, gateway *gatewayv1.Gate
 		}
 		candidates := parents
 		var unreportedHTTP *gatewayv1.HTTPRoute
-		singleTransportParent := (routeKind == "TCPRoute" || routeKind == "UDPRoute") && len(spec.ParentRefs) == 1
-		if (r.Config.DefaultGatewaysEnabled() || singleTransportParent) && len(parents) >= controller.RouteParentStatusLimit {
+		transportRoute := routeKind == "TCPRoute" || routeKind == "UDPRoute" || routeKind == tlsRouteKind
+		if (r.Config.DefaultGatewaysEnabled() || transportRoute) && len(parents) >= controller.RouteParentStatusLimit {
 			candidates = slices.Clip(parents)
 			for _, ref := range refs {
 				if !parentRefTargetsGateway(routeNamespace, ref, gateway) || slices.ContainsFunc(parents, func(parent gatewayv1.RouteParentStatus) bool {
@@ -694,6 +720,9 @@ func (r *Reconciler) attachedRoutes(ctx context.Context, gateway *gatewayv1.Gate
 						}
 						if entry.acceptedReason != gatewayv1.RouteReasonAccepted {
 							continue
+						}
+						if r.Config.BackendTLSPolicy && terminatesTLS(listener) {
+							unreportedSNI[unreportedSNIAttachment{route: client.ObjectKeyFromObject(route), section: listener.Name}] = struct{}{}
 						}
 						matching = append(matching, listener)
 						continue
@@ -758,14 +787,18 @@ func (r *Reconciler) attachedRoutes(ctx context.Context, gateway *gatewayv1.Gate
 	index := controller.IndexL4RouteByStatusGateway
 	switch listeners[0].Protocol {
 	case gatewayv1.TLSProtocolType:
-		var routes gatewayv1.TLSRouteList
-		if err := r.APIReader.List(ctx, &routes); err != nil {
+		routes, err := r.readLiveSNIRoutes(ctx)
+		if err != nil {
 			return attachedGatewayRoutes{}, err
 		}
-		if routes.Continue != "" {
-			return attachedGatewayRoutes{}, fmt.Errorf("incomplete TLSRoute inventory")
+		for i := range routes {
+			if err := countRoute(&routes[i]); err != nil {
+				return attachedGatewayRoutes{}, err
+			}
 		}
-		err := meta.EachListItem(&routes, countRoute)
+		if !attached.backendTLSAncestorFull && len(unreportedSNI) != 0 {
+			attached.backendTLSAncestorFull, err = r.observeUnreportedSNIAncestorLimit(ctx, gateway, listeners, routes, unreportedSNI)
+		}
 		return attached, err
 	case gatewayv1.TCPProtocolType:
 		routes = &gatewayv1.TCPRouteList{}
