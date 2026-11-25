@@ -72,6 +72,8 @@ Before rolling back the controller or Amphora image to a version without span at
 
 If an older controller is already running with an attribute profile still present, restore the compatible controller to complete withdrawal. An Octavia operator can also clear `otlp_tracing` on the affected listeners and verify the acknowledgement on each one. Keep the collector reserved until every serving listener has acknowledged its update.
 
+[Octavia packages](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-listener-otlp-span-attributes-7a105668b87e) · [octavia-lib package](https://github.com/armeldemarsac92/octavia-lib/releases/tag/hibiscus-http-header-persistence-eb4c646b5975) · [Local traffic and OTLP attributes](qualification/v1.7.0/provider/xtelemetry-span-attributes-evidence/receipt.json)
+
 ## Set base and parent sampling rates
 
 Upgrade the Octavia database, API, workers and eligible Amphora agents, including the matching tracing Lua script. Enable `listener_otlp_sampling_v1` alongside `listener_otlp_tracing_v1` in the region. Run the controller release listed in the build record with `--octavia-telemetry-policy` to apply sampling to an Experimental Gateway. [Controller build](qualification/v1.7.0/image-build.md) · [Octavia packages and image requirements](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-otlp-sampling-dc6b95f72e4a)

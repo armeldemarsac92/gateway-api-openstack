@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-The linux/amd64 controller reconciled header affinity for an Experimental XBackend with h2c Pods. [Build record](image.json) · [Local traffic](provider/xbackend-session-header-evidence/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-a11c1656f731cb8589903a587421b3feef9a502a)
+The reproducible linux/amd64 controller exported typed attributes on a local Experimental XTelemetryPolicy. Removing the attribute list restored default spans. Standard served the application probe. [Build record](image.json) · [OTLP observations](provider/xtelemetry-span-attributes-evidence/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-b57e1db74f0a975bb870013016f22d9158a60950)
+
+The linux/amd64 controller reconciled header affinity for an Experimental XBackend with h2c Pods. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-a11c1656f731cb8589903a587421b3feef9a502a/image.json) · [Local traffic](provider/xbackend-session-header-evidence/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-a11c1656f731cb8589903a587421b3feef9a502a)
 
 The linux/amd64 controller authenticated Service endpoints with the regional Amphora CA store. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-920b54673d075dc34f71b09d40d4d8a55ae65668/image.json) · [Trust and identity checks](provider/backend-tls-system-ca.md) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-920b54673d075dc34f71b09d40d4d8a55ae65668)
 
