@@ -56,6 +56,9 @@ func NormalizeHTTPForwardingRuleFilters(rule gatewayv1.HTTPRouteRule, kind gatew
 	if diagnostic == nil && cors != nil {
 		diagnostic = ValidateCORSHeaderComposition(request, response)
 	}
+	if diagnostic != nil && slices.ContainsFunc(rule.Filters, func(filter gatewayv1.HTTPRouteFilter) bool { return !knownFilter(filter.Type) }) {
+		diagnostic.Scope = ScopeRoute
+	}
 	return request, response, rewrite, cors, diagnostic
 }
 

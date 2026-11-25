@@ -96,6 +96,92 @@ func TestRouteSessionPersistenceIsolationAndServicePolicy(t *testing.T) {
 	}
 }
 
+func TestWeightedRouteSessionPersistencePreservesPoolsAndRevokedShare(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	enableRetryBudgetTest(t, f)
+	cfg := &f.reconciler.Config
+	cfg.FixedHTTPResponses, cfg.WeightedHTTPTargets, cfg.RouteSessionPersistence = true, true, true
+	cfg.RequestHeaderModifier, cfg.BackendRequestFilters, cfg.XBackendSessionPersistence = true, true, true
+	cfg.BackendRetryBudget = false
+	policy := newServiceHeaderPolicy(f)
+	retryPolicyStatusForGateway(f, policy)
+	remote, endpoints := f.service.DeepCopy(), f.endpoints.DeepCopy()
+	remote.Namespace, remote.UID, remote.ResourceVersion = "shared", "remote-service", ""
+	endpoints.Namespace, endpoints.UID, endpoints.ResourceVersion = remote.Namespace, "remote-endpoints", ""
+	grant := serviceReferenceGrant(remote.Namespace, f.route.Namespace, remote.Name)
+	f.create(t, remote, endpoints, grant, policy)
+
+	inline := f.route.Spec.Rules[0].DeepCopy()
+	inline.Name = ptr.To(gatewayv1.SectionName("inline"))
+	inline.Matches = pathBackendRule("/inline", gatewayv1.PathMatchExact, gatewayv1.ObjectName(f.service.Name)).Matches
+	inline.SessionPersistence = &gatewayv1.SessionPersistence{} //nolint:staticcheck // The v1.7 Experimental field.
+	f.route.Spec.Rules = append([]gatewayv1.HTTPRouteRule{*inline}, f.route.Spec.Rules...)
+	require.NoError(t, f.client.Update(t.Context(), f.route))
+	initial := f.observe(t).Nodes[0].Spec
+	require.Len(t, initial.HTTPBackends, 2)
+	localPool, ordinaryPool := initial.HTTPBackends[0], initial.HTTPBackends[1]
+	require.NotNil(t, localPool.ServiceSessionPersistence)
+	require.Equal(t, "x-service-affinity", ordinaryPool.ServiceSessionPersistence.Header.Name)
+
+	rule := &f.route.Spec.Rules[0]
+	local, shared := rule.BackendRefs[0].DeepCopy(), rule.BackendRefs[0].DeepCopy()
+	shared.Namespace = ptr.To(gatewayv1.Namespace(remote.Namespace))
+	rule.BackendRefs[0].Weight = ptr.To(int32(0))
+	local.Weight, shared.Weight = ptr.To(int32(70)), ptr.To(int32(30))
+	local.Filters = []gatewayv1.HTTPRouteFilter{{Type: gatewayv1.HTTPRouteFilterRequestHeaderModifier,
+		RequestHeaderModifier: &gatewayv1.HTTPHeaderFilter{Set: []gatewayv1.HTTPHeader{{Name: "x-backend", Value: "local"}}}}}
+	shared.Filters = local.DeepCopy().Filters
+	shared.Filters[0].RequestHeaderModifier.Set[0].Value = "shared"
+	rule.BackendRefs = append(rule.BackendRefs, *local, *shared)
+	require.NoError(t, f.client.Update(t.Context(), f.route))
+	before := f.observe(t)
+	weighted := before.Nodes[0].Spec
+	require.Len(t, weighted.HTTPBackends, 3)
+	require.Len(t, weighted.WeightedHTTPRules, 1)
+	targets := weighted.WeightedHTTPRules[0].Targets
+	require.Len(t, targets, 3)
+	require.Equal(t, cloud.HTTPWeightedTarget{BackendIndex: ptr.To(0), Weight: 0}, targets[0])
+	require.Equal(t, ptr.To(0), targets[1].BackendIndex)
+	require.Equal(t, 70, targets[1].Weight)
+	require.Equal(t, "local", targets[1].RequestHeaderOperations[0].Value)
+	require.Equal(t, ptr.To(1), targets[2].BackendIndex)
+	require.Equal(t, 30, targets[2].Weight)
+	require.Equal(t, "shared", targets[2].RequestHeaderOperations[0].Value)
+	require.Equal(t, openstackidentity.HTTPBackendPoolKey(localPool), openstackidentity.HTTPBackendPoolKey(weighted.HTTPBackends[0]))
+	require.Equal(t, localPool.Members, weighted.HTTPBackends[0].Members)
+	require.Equal(t, localPool.ServiceSessionPersistence, weighted.HTTPBackends[0].ServiceSessionPersistence)
+	require.NotEmpty(t, weighted.HTTPBackends[1].Members)
+	require.Equal(t, "name/inline", weighted.HTTPBackends[1].SessionPersistenceRule)
+	require.NotEqual(t, localPool.ServiceSessionPersistence.CookieName, weighted.HTTPBackends[1].ServiceSessionPersistence.CookieName)
+	require.Equal(t, ordinaryPool, weighted.HTTPBackends[2])
+
+	require.NoError(t, f.client.Delete(t.Context(), grant))
+	require.ErrorIs(t, before.Validate(t.Context()), errHTTPRouteChanged)
+	provider := &recordingProvider{}
+	r := newTestReconciler(*f.reconciler, provider)
+	key := client.ObjectKeyFromObject(f.route)
+	_, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: key})
+	require.NoError(t, err)
+	require.Empty(t, provider.deletedRoutes)
+	require.Len(t, provider.routeSpecs, 1)
+	denied := provider.routeSpecs[0]
+	require.Equal(t, []cloud.HTTPBackend{weighted.HTTPBackends[0], ordinaryPool}, denied.HTTPBackends)
+	require.Equal(t, []cloud.HTTPWeightedTarget{targets[0], targets[1], {Weight: 30}}, denied.WeightedHTTPRules[0].Targets)
+	require.NoError(t, f.client.Get(t.Context(), key, f.route))
+	resolved := meta.FindStatusCondition(f.route.Status.Parents[0].Conditions, string(gatewayv1.RouteConditionResolvedRefs))
+	require.NotNil(t, resolved)
+	require.Equal(t, metav1.ConditionFalse, resolved.Status)
+	require.Equal(t, string(gatewayv1.RouteReasonRefNotPermitted), resolved.Reason)
+
+	f.create(t, serviceReferenceGrant(remote.Namespace, f.route.Namespace, remote.Name))
+	require.Equal(t, weighted, f.observe(t).Nodes[0].Spec)
+	f.route.Spec.Rules[0].BackendRefs = f.route.Spec.Rules[0].BackendRefs[:2]
+	require.NoError(t, f.client.Update(t.Context(), f.route))
+	removed := f.observe(t).Nodes[0].Spec
+	require.Equal(t, denied.HTTPBackends, removed.HTTPBackends)
+	require.Equal(t, targets[:2], removed.WeightedHTTPRules[0].Targets)
+}
+
 func TestGRPCRouteSessionPersistenceAdmission(t *testing.T) {
 	f := newRouteModelInputFixture(t)
 	enableRetryBudgetTest(t, f)
@@ -128,10 +214,35 @@ func TestGRPCRouteSessionPersistenceAdmission(t *testing.T) {
 	require.Equal(t, "name/rpc", backend.SessionPersistenceRule)
 	require.Equal(t, "x-rpc-affinity", backend.ServiceSessionPersistence.Header.Name)
 
-	rule.BackendRefs = append(rule.BackendRefs, *rule.BackendRefs[0].DeepCopy())
-	rule.BackendRefs[0].Weight, rule.BackendRefs[1].Weight = ptr.To(int32(3)), ptr.To(int32(1))
-	_, err = build()
-	require.ErrorContains(t, err, "exactly one backendRef")
+	second, endpoints := f.service.DeepCopy(), f.endpoints.DeepCopy()
+	second.Name, second.UID, second.ResourceVersion = "second", "second-service", ""
+	endpoints.Name, endpoints.UID, endpoints.ResourceVersion = "second-endpoints", "second-endpoints", ""
+	endpoints.Labels[discoveryv1.LabelServiceName] = second.Name
+	f.create(t, second, endpoints)
+	secondRef := rule.BackendRefs[0].DeepCopy()
+	secondRef.Name = gatewayv1.ObjectName(second.Name)
+	rule.BackendRefs = append(rule.BackendRefs, *secondRef)
+	rule.BackendRefs[0].Weight, rule.BackendRefs[1].Weight = ptr.To(int32(70)), ptr.To(int32(30))
+	desired, err = build()
+	require.NoError(t, err)
+	require.Len(t, desired.HTTPBackends, 2)
+	require.Equal(t, openstackidentity.HTTPBackendPoolKey(backend), openstackidentity.HTTPBackendPoolKey(desired.HTTPBackends[0]))
+	for _, backend := range desired.HTTPBackends {
+		require.True(t, backend.BackendH2C)
+		require.NotEmpty(t, backend.Members)
+		require.Equal(t, "x-rpc-affinity", backend.ServiceSessionPersistence.Header.Name)
+	}
+	require.Len(t, desired.WeightedHTTPRules, 1)
+	require.Equal(t, []cloud.HTTPWeightedTarget{{BackendIndex: ptr.To(0), Weight: 70}, {BackendIndex: ptr.To(1), Weight: 30}},
+		desired.WeightedHTTPRules[0].Targets)
+
+	second.Spec.Ports[0].AppProtocol = nil
+	require.NoError(t, f.client.Update(t.Context(), second))
+	desired, err = build()
+	require.NoError(t, err)
+	require.Len(t, desired.HTTPBackends, 1)
+	require.Equal(t, []cloud.HTTPWeightedTarget{{BackendIndex: ptr.To(0), Weight: 70}, {Weight: 30}},
+		desired.WeightedHTTPRules[0].Targets)
 
 	rule.BackendRefs = rule.BackendRefs[:1]
 	rule.BackendRefs[0].Weight = ptr.To(int32(0))
@@ -141,10 +252,10 @@ func TestGRPCRouteSessionPersistenceAdmission(t *testing.T) {
 	require.Len(t, desired.WeightedHTTPRules, 1)
 	require.Nil(t, desired.WeightedHTTPRules[0].Targets[0].BackendIndex)
 
-	// The same refusal is partial when another method can be served.
-	rule.BackendRefs[0].Weight = ptr.To(int32(3))
-	rule.BackendRefs = append(rule.BackendRefs, *rule.BackendRefs[0].DeepCopy())
-	rule.BackendRefs[1].Weight = ptr.To(int32(1))
+	// With no weighted opt-in, retain the sibling method.
+	cfg.WeightedHTTPTargets = false
+	rule.BackendRefs[0].Weight = ptr.To(int32(70))
+	rule.BackendRefs = append(rule.BackendRefs, *secondRef)
 	sibling := grpcRule(gatewayv1.ObjectName(f.service.Name), gatewayv1.GRPCRouteMatch{
 		Method: &gatewayv1.GRPCMethodMatch{Service: ptr.To("example.Echo"), Method: ptr.To("Echo")},
 	})
@@ -156,17 +267,46 @@ func TestGRPCRouteSessionPersistenceAdmission(t *testing.T) {
 	require.Empty(t, desired.HTTPBackends[0].SessionPersistenceRule)
 	require.Equal(t, "/example.Echo/Echo", desired.HTTPBackends[0].Matches[0].PathValue)
 	require.Empty(t, desired.WeightedHTTPRules)
+
+	// An unsupported predicate on the weighted rule is also a partial refusal.
+	cfg.WeightedHTTPTargets, cfg.HTTPHeaderExact = true, false
+	route.Spec.Rules[0].Matches = []gatewayv1.GRPCRouteMatch{{Headers: []gatewayv1.GRPCHeaderMatch{{Name: "version", Value: "2"}}}}
+	provider := &recordingProvider{}
+	r := newTestReconciler(*f.reconciler, provider).forRouteKind(model.GRPCRouteKind)
+	projection := model.ProjectGRPCRoute(route)
+	require.NoError(t, r.applyRouteBinding(projection, f.gateway))
+	route.Annotations, route.Finalizers = projection.Annotations, projection.Finalizers
+	require.NoError(t, f.client.Delete(t.Context(), f.route))
+	f.create(t, route)
+	key := client.ObjectKeyFromObject(route)
+	_, err = r.Reconcile(t.Context(), ctrl.Request{NamespacedName: key})
+	require.NoError(t, err)
+	require.NoError(t, f.client.Get(t.Context(), key, route))
+	require.Len(t, route.Status.Parents, 1)
+	conditions := route.Status.Parents[0].Conditions
+	require.True(t, meta.IsStatusConditionTrue(conditions, string(gatewayv1.RouteConditionAccepted)))
+	require.True(t, meta.IsStatusConditionTrue(conditions, r.Config.Domain()+"/Programmed"))
+	partial := meta.FindStatusCondition(conditions, string(gatewayv1.RouteConditionPartiallyInvalid))
+	require.NotNil(t, partial)
+	require.Equal(t, metav1.ConditionTrue, partial.Status)
+	require.Contains(t, partial.Message, "rpc (exact HTTP header matching requires --octavia-http-header-exact)")
+	require.Len(t, provider.routeSpecs, 1)
+	require.Len(t, provider.routeSpecs[0].HTTPBackends, 1)
+	require.Equal(t, "/example.Echo/Echo", provider.routeSpecs[0].HTTPBackends[0].Matches[0].PathValue)
 }
 
 func TestHTTPRouteSessionPersistenceRefusesOnlyInvalidRule(t *testing.T) {
 	f := newRouteModelInputFixture(t)
 	enableRetryBudgetTest(t, f)
-	f.reconciler.Config.RouteSessionPersistence = true
+	f.reconciler.Config.WeightedHTTPTargets, f.reconciler.Config.RouteSessionPersistence = true, true
 	first, second := f.route.Spec.Rules[0].DeepCopy(), f.route.Spec.Rules[0].DeepCopy()
 	first.Name = ptr.To(gatewayv1.SectionName("invalid"))
 	first.SessionPersistence = &gatewayv1.SessionPersistence{} //nolint:staticcheck // The v1.7 Experimental field.
 	first.BackendRefs = append(first.BackendRefs, *first.BackendRefs[0].DeepCopy())
-	first.BackendRefs[1].Name = "another-service"
+	first.BackendRefs[1].Name = "another-backend"
+	first.BackendRefs[1].Group = ptr.To(gatewayv1.Group(gatewayx.GroupName))
+	first.BackendRefs[1].Kind = ptr.To(gatewayv1.Kind("XBackend"))
+	first.BackendRefs[1].Port = nil
 	first.BackendRefs[0].Weight, first.BackendRefs[1].Weight = ptr.To(int32(3)), ptr.To(int32(1))
 	second.SessionPersistence = &gatewayv1.SessionPersistence{} //nolint:staticcheck // The v1.7 Experimental field.
 	f.route.Spec.Rules = []gatewayv1.HTTPRouteRule{*first, *second}
@@ -188,7 +328,52 @@ func TestHTTPRouteSessionPersistenceRefusesOnlyInvalidRule(t *testing.T) {
 	partial := meta.FindStatusCondition(conditions, string(gatewayv1.RouteConditionPartiallyInvalid))
 	require.NotNil(t, partial)
 	require.Equal(t, metav1.ConditionTrue, partial.Status)
-	require.Contains(t, partial.Message, "invalid (rule sessionPersistence requires a forwarding rule with exactly one backendRef)")
+	require.Contains(t, partial.Message, "invalid (rule sessionPersistence requires core Service backendRefs)")
+}
+
+func TestWeightedRouteSessionPersistencePreservesSiblingWhenTotalWeightIsZero(t *testing.T) {
+	f := newRouteModelInputFixture(t)
+	enableRetryBudgetTest(t, f)
+	cfg := &f.reconciler.Config
+	cfg.FixedHTTPResponses, cfg.WeightedHTTPTargets, cfg.RouteSessionPersistence = true, true, true
+	inline := f.route.Spec.Rules[0].DeepCopy()
+	inline.Name = ptr.To(gatewayv1.SectionName("canary"))
+	inline.Matches = pathBackendRule("/canary", gatewayv1.PathMatchExact, gatewayv1.ObjectName(f.service.Name)).Matches
+	inline.SessionPersistence = &gatewayv1.SessionPersistence{} //nolint:staticcheck // The v1.7 Experimental field.
+	inline.BackendRefs[0].Weight = ptr.To(int32(0))
+	second := inline.BackendRefs[0].DeepCopy()
+	second.Name = "canary-v2"
+	inline.BackendRefs = append(inline.BackendRefs, *second)
+	f.route.Spec.Rules = append([]gatewayv1.HTTPRouteRule{*inline}, f.route.Spec.Rules...)
+	require.NoError(t, f.client.Update(t.Context(), f.route))
+
+	provider := &recordingProvider{}
+	r := newTestReconciler(*f.reconciler, provider)
+	key := client.ObjectKeyFromObject(f.route)
+	_, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: key})
+	require.NoError(t, err)
+	require.NoError(t, f.client.Get(t.Context(), key, f.route))
+	require.Len(t, f.route.Status.Parents, 1)
+	conditions := f.route.Status.Parents[0].Conditions
+	require.True(t, meta.IsStatusConditionTrue(conditions, string(gatewayv1.RouteConditionAccepted)))
+	require.True(t, meta.IsStatusConditionTrue(conditions, r.Config.Domain()+"/Programmed"))
+	partial := meta.FindStatusCondition(conditions, string(gatewayv1.RouteConditionPartiallyInvalid))
+	require.NotNil(t, partial)
+	require.Equal(t, metav1.ConditionTrue, partial.Status)
+	require.Contains(t, partial.Message, "canary (Octavia weighted rules require a positive total weight)")
+	require.Len(t, provider.routeSpecs, 1)
+	require.Len(t, provider.routeSpecs[0].HTTPBackends, 1)
+	require.Empty(t, provider.routeSpecs[0].WeightedHTTPRules)
+
+	single := f.route.DeepCopy()
+	single.Spec.Rules = single.Spec.Rules[:1]
+	_, err = r.validateRouteStructure(single)
+	require.ErrorContains(t, err, "positive total weight")
+
+	// Unknown filters keep their route-wide refusal even with a valid sibling.
+	f.route.Spec.Rules[0].Filters = []gatewayv1.HTTPRouteFilter{{Type: "Unknown"}}
+	_, err = r.validateRouteStructure(f.route)
+	require.ErrorContains(t, err, "HTTPRoute filter Unknown is not supported")
 }
 
 func TestRouteSessionPersistencePreservesSiblingWhenBackendRequiresTLS(t *testing.T) {

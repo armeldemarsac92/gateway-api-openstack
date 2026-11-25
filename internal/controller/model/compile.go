@@ -219,8 +219,12 @@ func compileRoute(route *gatewayv1.HTTPRoute, input Input) Route {
 				if original := input.OriginalRulePositions[route.UID]; len(original) > i {
 					position = original[i]
 				}
-				backend := &compiled.Backends[0]
-				backend.RouteSessionPersistence = routeSessionPersistence(route.UID, rule.Name, position, *backend, *persistence)
+				for j := range compiled.Backends {
+					backend := &compiled.Backends[j]
+					if backend.Service.Name != "" {
+						backend.RouteSessionPersistence = routeSessionPersistence(route.UID, rule.Name, position, *backend, *persistence)
+					}
+				}
 			}
 		}
 		requestPolicy, diagnostic := NormalizeHTTPRequestPolicy(rule, input.HTTPRequestPolicy && HTTPProfileRouteKind(route) == HTTPRouteKind)
@@ -241,9 +245,6 @@ func compileRoute(route *gatewayv1.HTTPRoute, input Input) Route {
 			request, response, rewrite, cors, diagnostic := NormalizeHTTPForwardingRuleFilters(forwarding, kind, input.RequestHeaderModifier,
 				input.ResponseHeaderModifier, input.HTTPRequestURLRewrite && ordinaryHTTP, input.HTTPCORS && ordinaryHTTP)
 			if diagnostic != nil {
-				if slices.ContainsFunc(rule.Filters, func(filter gatewayv1.HTTPRouteFilter) bool { return !knownFilter(filter.Type) }) {
-					diagnostic.Scope = ScopeRoute
-				}
 				compiled.Diagnostics = append(compiled.Diagnostics, *diagnostic)
 			} else {
 				compiled.RequestHeaderOperations, compiled.ResponseHeaderOperations, compiled.URLRewrite, compiled.CORS = request, response, rewrite, cors
