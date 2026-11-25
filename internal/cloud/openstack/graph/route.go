@@ -108,6 +108,7 @@ type desiredRoute struct {
 	hostnameRuleValue           string
 	httpParts                   []desiredRoute
 	mirrorAvailability          requestMirrorAvailability
+	requestPolicyWithdrawals    map[string]bool
 	backendKey                  string
 	unavailable                 bool
 	routedExternal              bool

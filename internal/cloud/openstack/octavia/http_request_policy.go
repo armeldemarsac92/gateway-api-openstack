@@ -44,7 +44,7 @@ func readHTTPRequestPolicy(raw json.RawMessage) *cloud.HTTPRequestPolicy {
 				return nil
 			}
 			for key, value := range retry {
-				if key != "attempts" && key != "codes" || string(value) == "null" {
+				if key != "attempts" && key != "codes" && key != "backoff_ms" || string(value) == "null" {
 					return nil
 				}
 			}

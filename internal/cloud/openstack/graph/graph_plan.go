@@ -397,7 +397,8 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 				canRestoreTraffic = false
 			}
 		}
-		if desired.httpRequestPolicies == httpRequestPolicyUnavailable && node.Disposition == cloud.GraphEnsure && !relocating && frontendReady {
+		hasRetryBackoff := slices.ContainsFunc(route.policies, func(policy desiredPolicy) bool { return policy.requestPolicy.HasRetryBackoff() })
+		if (desired.httpRequestPolicies.unavailable() || hasRetryBackoff) && node.Disposition == cloud.GraphEnsure && !relocating && frontendReady {
 			policyListenerID := listenerID
 			if !scopedHTTP && actual.listener != nil {
 				policyListenerID = actual.listener.ID
@@ -495,7 +496,7 @@ func (p *Provider) buildGatewayGraphPartPlan(desired desiredGatewayGraph, actual
 		}
 	}
 	result.Routes = routeResults
-	if desired.httpRequestPolicies == httpRequestPolicyUnavailable {
+	if desired.protocol == cloud.ListenerProtocolHTTP {
 		if step, ok := nextHTTPRequestPolicyWithdrawal(desired, actual); ok {
 			result.Outcome = p.progressingOutcome(step.message)
 			result.Routes[step.routeIndex].Result.Outcome = result.Outcome

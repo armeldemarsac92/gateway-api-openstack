@@ -28,6 +28,7 @@ const (
 	GatewayCapabilityHTTPHeaderExact           = "http_header_exact_v1"
 	GatewayCapabilityHTTPQueryParamExact       = "http_query_param_exact_v1"
 	GatewayCapabilityHTTPRequestPolicy         = "http_request_policy_v1"
+	GatewayCapabilityHTTPRetryBackoff          = "http_retry_backoff_v1"
 	GatewayCapabilityHTTPRequestMirror         = "http_request_mirror_v1"
 	GatewayCapabilityRequestURLRewrite         = "request_url_rewrite_v1"
 	GatewayCapabilityRequestCORS               = "request_cors_v1"

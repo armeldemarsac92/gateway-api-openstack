@@ -69,6 +69,48 @@ func TestHTTPRequestPolicyConvergesBeforeRouteReady(t *testing.T) {
 	require.Equal(t, routeMutationDisablePolicy, firstRouteMutation(plan).kind)
 }
 
+func TestHTTPRetryBackoffWaitsForExactReadbackBeforeActivation(t *testing.T) {
+	desired, actual := convergedRoutePlanFixture()
+	wanted, observed := &desired.policies[0], &actual.policies[0]
+	wanted.requestPolicy = &cloud.HTTPRequestPolicy{Retry: &cloud.HTTPRetry{BackoffMS: ptr.To(int64(0))}}
+	observed.adminObserved, observed.policy.ProvisioningStatus = true, "ACTIVE"
+	observed.rules[0].flagsObserved, observed.rules[0].rule.ProvisioningStatus = true, "ACTIVE"
+	observed.requestPolicyTagged, observed.requestPolicyReported, observed.requestPolicyPresent = true, true, true
+	observed.requestPolicy = &cloud.HTTPRequestPolicy{Retry: &cloud.HTTPRetry{}}
+
+	plan, _, err := buildRouteEnsurePlan(desired, actual)
+	require.NoError(t, err)
+	require.Equal(t, routeMutationDisablePolicy, firstRouteMutation(plan).kind)
+
+	observed.policy.AdminStateUp = false
+	plan, _, err = buildRouteEnsurePlan(desired, actual)
+	require.NoError(t, err)
+	require.Len(t, plan, 1)
+	require.Equal(t, routeMutationSetHTTPRequestPolicy, plan[0].kind)
+	require.Equal(t, wanted.requestPolicy, plan[0].requestPolicyUpdate.Value)
+	require.Contains(t, plan[0].policyTags, openstackidentity.HTTPRetryBackoffTag)
+
+	observed.retryBackoffTagged = true
+	plan, _, err = buildRouteEnsurePlan(desired, actual)
+	require.ErrorIs(t, err, errHTTPRequestPolicyUnverified)
+	require.Empty(t, plan)
+
+	observed.requestPolicy.Retry.BackoffMS = ptr.To(int64(50))
+	plan, _, err = buildRouteEnsurePlan(desired, actual)
+	require.NoError(t, err)
+	require.Equal(t, routeMutationSetHTTPRequestPolicy, firstRouteMutation(plan).kind)
+
+	observed.requestPolicy = wanted.requestPolicy
+	plan, _, err = buildRouteEnsurePlan(desired, actual)
+	require.NoError(t, err)
+	require.Equal(t, routeMutationEnablePolicy, firstRouteMutation(plan).kind)
+
+	observed.policy.AdminStateUp = true
+	plan, _, err = buildRouteEnsurePlan(desired, actual)
+	require.NoError(t, err)
+	require.Empty(t, plan)
+}
+
 func TestHTTPRequestPolicyRegionalGatePreservesOtherPolicies(t *testing.T) {
 	capabilities := []string{octavia.GatewayCapabilityHTTPRequestPolicy}
 	status := http.StatusOK
@@ -117,6 +159,146 @@ func TestHTTPRequestPolicyRegionalGatePreservesOtherPolicies(t *testing.T) {
 	require.Equal(t, map[int]bool{0: true}, got.remainingRules)
 	require.Equal(t, []desiredPolicy{{role: "unchanged-rule", position: 1}}, desired.routes[0].httpParts[0].policies)
 	require.Equal(t, []desiredPolicy{{role: "neighbor", position: 2}}, desired.routes[1].policies)
+}
+
+func TestHTTPRetryBackoffEditPreservesActiveReadbackDuringDiscoveryFailure(t *testing.T) {
+	status := http.StatusServiceUnavailable
+	provider := completeGraphProvider(t, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		require.Equal(t, "/lbaas/providers/amphora-regional/gateway_capabilities", req.URL.Path)
+		if status != http.StatusOK {
+			w.WriteHeader(status)
+			return
+		}
+		safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": []string{
+			octavia.GatewayCapabilityHTTPRequestPolicy, octavia.GatewayCapabilityHTTPRetryBackoff,
+		}})
+	}), &gatewayTransitionRequests{})
+	provider.httpRequestPolicy = true
+
+	route, observed := convergedRoutePlanFixture()
+	observed.pool.ProvisioningStatus = "ACTIVE"
+	observed.members[0].ProvisioningStatus = "ACTIVE"
+	observed.monitor.ProvisioningStatus = "ACTIVE"
+	backoff := func(milliseconds int64) *cloud.HTTPRequestPolicy {
+		return &cloud.HTTPRequestPolicy{Retry: &cloud.HTTPRetry{BackoffMS: &milliseconds}}
+	}
+	route.policies[0].requestPolicy = backoff(200)
+	policy := &observed.policies[0]
+	policy.adminObserved, policy.targetObserved = true, true
+	policy.policy.ListenerID, policy.policy.ProvisioningStatus = "listener-1", "ACTIVE"
+	policy.rules[0].flagsObserved, policy.rules[0].rule.ProvisioningStatus = true, "ACTIVE"
+	policy.requestPolicyTagged, policy.retryBackoffTagged = true, true
+	policy.requestPolicyPresent, policy.requestPolicyReported = true, true
+	policy.requestPolicy = backoff(100)
+
+	desired, actual := fixedHTTPPlanFixture(route, observed)
+	desired.protocol = cloud.ListenerProtocolHTTP
+	actual.listener.ProvisioningStatus, actual.loadBalancer.Provider = "ACTIVE", "amphora-regional"
+	planForDiscovery := func() ([]graphMutation, cloud.GatewayGraphResult) {
+		t.Helper()
+		wanted := desired
+		discovery := provider.gateHTTPRequestPolicies(t.Context(), &wanted, actual)
+		if status == http.StatusOK {
+			require.NoError(t, discovery.err)
+		} else {
+			require.Error(t, discovery.err)
+			require.Equal(t, httpRequestPolicyUnverified, wanted.httpRequestPolicies)
+		}
+		plan, result, err := provider.buildGatewayGraphPlan(wanted, actual)
+		require.NoError(t, err)
+		if wanted.httpRequestPolicies == httpRequestPolicyUnverified && len(plan) != 0 &&
+			!canWithdrawWithoutHTTPRequestPolicyDiscovery(wanted, plan[0]) {
+			plan = nil
+		}
+		return plan, result
+	}
+
+	plan, result := planForDiscovery()
+	require.Empty(t, plan)
+	require.Equal(t, cloud.OutcomeProgressing, result.Routes[0].Result.Outcome.State)
+
+	// When the readback itself disappears, closing the action is urgent
+	// even during the same capability discovery outage.
+	policy.requestPolicy = nil
+	plan, _ = planForDiscovery()
+	require.Len(t, plan, 1)
+	require.Equal(t, routeMutationDisablePolicy, plan[0].route.kind)
+	require.True(t, plan[0].withdrawHTTPPolicy)
+
+	policy.requestPolicy = backoff(100)
+	status = http.StatusOK
+	plan, _ = planForDiscovery()
+	require.NotEmpty(t, plan)
+	require.Equal(t, routeMutationDisablePolicy, plan[0].route.kind)
+
+	policy.policy.AdminStateUp = false
+	plan, _ = planForDiscovery()
+	require.NotEmpty(t, plan)
+	require.Equal(t, routeMutationSetHTTPRequestPolicy, plan[0].route.kind)
+	require.True(t, backoff(200).Equal(plan[0].route.requestPolicyUpdate.Value))
+
+	policy.requestPolicy = backoff(200)
+	plan, _ = planForDiscovery()
+	require.NotEmpty(t, plan)
+	require.Equal(t, routeMutationEnablePolicy, plan[0].route.kind)
+}
+
+func TestHTTPRetryBackoffCapabilityWithdrawalKeepsOrdinaryRetries(t *testing.T) {
+	provider := completeGraphProvider(t, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		require.Equal(t, "/lbaas/providers/amphora-regional/gateway_capabilities", req.URL.Path)
+		safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": []string{octavia.GatewayCapabilityHTTPRequestPolicy}})
+	}), &gatewayTransitionRequests{})
+	provider.httpRequestPolicy = true
+
+	route, observed := convergedRoutePlanFixture()
+	observed.pool.ProvisioningStatus = "ACTIVE"
+	observed.members[0].ProvisioningStatus = "ACTIVE"
+	observed.monitor.ProvisioningStatus = "ACTIVE"
+	ordinary := &route.policies[0]
+	ordinary.requestPolicy = &cloud.HTTPRequestPolicy{RequestTimeoutMS: ptr.To(int64(500)),
+		Retry: &cloud.HTTPRetry{Codes: []int{503}}}
+	ordinaryObserved := &observed.policies[0]
+	ordinaryObserved.adminObserved, ordinaryObserved.targetObserved = true, true
+	ordinaryObserved.policy.ListenerID, ordinaryObserved.policy.ProvisioningStatus = "listener-1", "ACTIVE"
+	ordinaryObserved.rules[0].flagsObserved, ordinaryObserved.rules[0].rule.ProvisioningStatus = true, "ACTIVE"
+	ordinaryObserved.requestPolicyTagged, ordinaryObserved.requestPolicyPresent, ordinaryObserved.requestPolicyReported = true, true, true
+	ordinaryObserved.requestPolicy = ordinary.requestPolicy
+
+	backoff := *ordinary
+	backoff.role, backoff.path, backoff.position = "backoff", "/backoff", 2
+	backoff.requestPolicy = &cloud.HTTPRequestPolicy{Retry: &cloud.HTTPRetry{BackoffMS: ptr.To(int64(0))}}
+	route.policies = append(route.policies, backoff)
+	backoffObserved := *ordinaryObserved
+	backoffObserved.role, backoffObserved.policy.ID, backoffObserved.policy.Position = backoff.role, "policy-backoff", 2
+	// An older API may still report ordinary retry fields and hide only backoff.
+	backoffObserved.retryBackoffTagged = true
+	observed.policies = append(observed.policies, backoffObserved)
+
+	desired, actual := fixedHTTPPlanFixture(route, observed)
+	desired.protocol = cloud.ListenerProtocolHTTP
+	actual.listener.ProvisioningStatus, actual.loadBalancer.Provider = "ACTIVE", "amphora-regional"
+	got := provider.gateHTTPRequestPolicies(t.Context(), &desired, actual)
+	require.ErrorAs(t, got.err, new(*octavia.MissingGatewayCapability))
+	require.Equal(t, octavia.GatewayCapabilityHTTPRetryBackoff, got.capability)
+	require.Equal(t, map[int]bool{0: true}, got.remainingRules)
+	require.Equal(t, []desiredPolicy{*ordinary}, desired.routes[0].policies)
+
+	plan, result, err := provider.buildGatewayGraphPlan(desired, actual)
+	require.NoError(t, err)
+	require.Len(t, plan, 1)
+	require.Equal(t, routeMutationDisablePolicy, plan[0].route.kind)
+	require.Equal(t, backoffObserved.policy.ID, plan[0].route.id)
+	require.True(t, result.Routes[0].Result.ImplementedRules)
+	provider.reportUnavailableHTTPRequestPolicies(got, &result)
+	require.Equal(t, "Octavia does not advertise http_retry_backoff_v1", result.Routes[0].Result.PartiallyInvalid)
+
+	// The role itself identifies an old ordinary action if capability is
+	// lost before the explicit value was ever installed.
+	actual.routes[0].policies[1].retryBackoffTagged = false
+	plan, _, err = provider.buildGatewayGraphPlan(desired, actual)
+	require.NoError(t, err)
+	require.Len(t, plan, 1)
+	require.Equal(t, backoffObserved.policy.ID, plan[0].route.id)
 }
 
 func TestRegionalHTTPRequestPolicyWithdrawalDrainsListenerInPositionOrder(t *testing.T) {

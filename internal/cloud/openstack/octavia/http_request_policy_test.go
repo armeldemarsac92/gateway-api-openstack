@@ -29,7 +29,7 @@ import (
 )
 
 func TestHTTPRequestPolicyWire(t *testing.T) {
-	policy := &cloud.HTTPRequestPolicy{RequestTimeoutMS: ptr.To(int64(0)), Retry: &cloud.HTTPRetry{Attempts: ptr.To(0)}}
+	policy := &cloud.HTTPRequestPolicy{RequestTimeoutMS: ptr.To(int64(0)), Retry: &cloud.HTTPRetry{Attempts: ptr.To(0), BackoffMS: ptr.To(int64(0))}}
 	opts := PolicyCreateOpts{CreateOpts: l7policies.CreateOpts{ListenerID: "listener", Action: l7policies.ActionRedirectToPool, RedirectPoolID: "pool"},
 		HTTPRequestPolicy: policy}
 	requireWire := func(fields map[string]any, want string) {
@@ -44,11 +44,11 @@ func TestHTTPRequestPolicyWire(t *testing.T) {
 	}
 	body, err := opts.ToL7PolicyCreateMap()
 	require.NoError(t, err)
-	requireWire(body, `{"request_timeout_ms":0,"retry":{"attempts":0}}`)
+	requireWire(body, `{"request_timeout_ms":0,"retry":{"attempts":0,"backoff_ms":0}}`)
 	opts.WeightedTargets = []WeightedHTTPTarget{{Weight: 1, PoolID: "pool"}}
 	body, err = opts.ToL7PolicyCreateMap()
 	require.NoError(t, err)
-	requireWire(body, `{"request_timeout_ms":0,"retry":{"attempts":0}}`)
+	requireWire(body, `{"request_timeout_ms":0,"retry":{"attempts":0,"backoff_ms":0}}`)
 	opts.WeightedTargets, opts.FixedServerError = nil, true
 	_, err = opts.ToL7PolicyCreateMap()
 	require.Error(t, err)
@@ -59,7 +59,7 @@ func TestHTTPRequestPolicyWire(t *testing.T) {
 	}{
 		{nil, ""},
 		{&HTTPRequestPolicyUpdate{}, "null"},
-		{&HTTPRequestPolicyUpdate{Value: policy}, `{"request_timeout_ms":0,"retry":{"attempts":0}}`},
+		{&HTTPRequestPolicyUpdate{Value: policy}, `{"request_timeout_ms":0,"retry":{"attempts":0,"backoff_ms":0}}`},
 	} {
 		update := policyWithFilters{update: l7policies.UpdateOpts{}, filters: PolicyFilters{RequestPolicy: test.update}}
 		body, err = update.ToL7PolicyUpdateMap()
@@ -95,6 +95,34 @@ func TestHTTPRequestPolicyReadback(t *testing.T) {
 			}))
 			require.Contains(t, got.ActivationOptions, httpRequestPolicyField)
 		}
+	}
+}
+
+func TestHTTPRetryBackoffReadback(t *testing.T) {
+	const row = `{"id":"policy","action":"REDIRECT_TO_POOL","redirect_pool_id":"pool","admin_state_up":true,`
+	for _, tc := range []struct {
+		value string
+		want  *int64
+	}{
+		{"0", ptr.To(int64(0))},
+		{"9223372036854775807", ptr.To(int64(9223372036854775807))},
+		{"9223372036854775808", nil},
+		{"-1", nil},
+		{"0.5", nil},
+		{`"100"`, nil},
+		{"null", nil},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			got, err := readPolicyObservation([]byte(row + `"http_request_policy":{"retry":{"backoff_ms":` + tc.value + `}}}`))
+			require.NoError(t, err)
+			require.True(t, got.HTTPRequestPolicyPresent)
+			require.Equal(t, tc.want != nil, got.HasValidHTTPRequestPolicy())
+			if tc.want != nil {
+				require.Equal(t, tc.want, got.HTTPRequestPolicy.Retry.BackoffMS)
+				require.Contains(t, got.ActivationOptions, tc.value)
+				require.False(t, got.HTTPRequestPolicy.Equal(&cloud.HTTPRequestPolicy{Retry: &cloud.HTTPRetry{}}))
+			}
+		})
 	}
 }
 

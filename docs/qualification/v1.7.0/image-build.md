@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-The linux/amd64 controller issued path-scoped cookies for Experimental XBackends. [Build record](image.json) · [Cookie Path observations](provider/xbackend-cookie-path.md) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-52eae75209ad7bf2b2cbc1fbecf203f23f0e463a)
+The linux/amd64 controller programmed the retry interval for an HTTPRoute on Standard and Experimental. [Build record](image.json) · [Backoff measurements](provider/http-retry-backoff.md) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-8cd580f6914d5919544c6c3a7c6b1233cf46061c)
+
+The linux/amd64 controller issued path-scoped cookies for Experimental XBackends. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-52eae75209ad7bf2b2cbc1fbecf203f23f0e463a/image.json) · [Cookie Path observations](provider/xbackend-cookie-path.md) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-52eae75209ad7bf2b2cbc1fbecf203f23f0e463a)
 
 The linux/amd64 controller authenticated two weighted TLSRoute Services with distinct trust roots on both local channels. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-0e4998b0a4ed1edb0000cf723e2480a5c80a74c7/image.json) · [Measured connections](provider/tlsroute-weighted-authentication.md) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-0e4998b0a4ed1edb0000cf723e2480a5c80a74c7)
 

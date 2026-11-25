@@ -488,7 +488,8 @@ func weightedTargetWithdrawals(desired desiredRoute, observed observedRouteGraph
 		wantedIndex := -1
 		if policy.hasHTTPRequestPolicy() {
 			wantedIndex = slices.IndexFunc(desired.policies, func(wanted desiredPolicy) bool { return wanted.role == policy.role })
-			if wantedIndex < 0 || desired.policies[wantedIndex].requestPolicy == nil && !policy.requestPolicyReported {
+			if wantedIndex < 0 || desired.policies[wantedIndex].requestPolicy == nil && !policy.requestPolicyReported ||
+				!desired.policies[wantedIndex].requestPolicy.HasRetryBackoff() && policy.retryBackoffReadbackMissing() {
 				// Other writes can be refused after regional withdrawal.
 				// Retire only this owned action.
 				steps = append(steps, obsoleteWeightedFilterPolicyStep(policy))
@@ -550,7 +551,7 @@ func weightedTargetWithdrawals(desired desiredRoute, observed observedRouteGraph
 			withdrawn = policy.weightedTargets
 		}
 		if withdrawn != nil {
-			if policy.hasHTTPRequestPolicy() && !policy.requestPolicyReported ||
+			if policy.hasHTTPRequestPolicy() && !policy.requestPolicyReported || policy.retryBackoffReadbackMissing() ||
 				policy.backendRequestFiltersTagged && !hasWeightedTargetRequestFilters(policy.weightedTargets) {
 				// A grant changed, but the API cannot prove what else would
 				// be written by replaying the remaining target slots.
