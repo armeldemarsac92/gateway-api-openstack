@@ -63,10 +63,10 @@ func TestPoolInventoryRequiresExplicitTLSReadback(t *testing.T) {
 		_, _ = w.Write([]byte(`{"pools":[
 			{"id":"missing-boolean","backend_tls_hostname":null,"ca_tls_container_ref":null,"tls_container_ref":null,"admin_state_up":true},
 			{"id":"missing-nullable","backend_tls_hostname":null,"ca_tls_container_ref":null,"tls_enabled":false,"admin_state_up":true},
-			{"id":"protected","backend_tls_hostname":"backend.example.test","ca_tls_container_ref":"http://barbican.test/example","tls_container_ref":"http://barbican.test/client","tls_enabled":true,"admin_state_up":false,
+			{"id":"protected","backend_tls_hostname":"backend.example.test","ca_tls_container_ref":"http://barbican.test/example","tls_container_ref":"http://barbican.test/client","tls_enabled":true,"admin_state_up":false,"alpn_protocols":["http/1.1"],
 				"backend_tls_subject_alt_names":[{"type":"Hostname","hostname":"*.backend.example.test"},{"uri":"spiffe://id.example.test/workload%2fa","type":"URI"}]},
-			{"id":"cleared","backend_tls_subject_alt_names":[]},
-			{"id":"null","backend_tls_subject_alt_names":null},
+			{"id":"cleared","backend_tls_subject_alt_names":[],"alpn_protocols":null},
+			{"id":"null","backend_tls_subject_alt_names":null,"alpn_protocols":"http/1.1"},
 			{"id":"wrong-case","backend_tls_subject_alt_names":[{"Type":"URI","uri":"spiffe://id.example.test/workload%2fa"}]},
 			{"id":"extra","backend_tls_subject_alt_names":[{"type":"URI","uri":"spiffe://id.example.test/workload%2fa","hostname":""}]},
 			{"id":"empty-identity","backend_tls_subject_alt_names":[{"type":"URI","uri":""}]},
@@ -88,6 +88,10 @@ func TestPoolInventoryRequiresExplicitTLSReadback(t *testing.T) {
 	if protected := inventory.Items[3]; !protected.TLSEnabled || protected.AdminStateUp || protected.CATLSContainerRef == "" || protected.TLSContainerRef != "http://barbican.test/client" ||
 		!inventory.BackendTLS["protected"].Complete() || inventory.BackendTLS["protected"].Hostname != "backend.example.test" {
 		t.Fatal("the protected pool settings were not preserved")
+	}
+	if alpn := inventory.Items[3].ALPNProtocols; !inventory.BackendTLS["protected"].ALPNObserved || len(alpn) != 1 || alpn[0] != "http/1.1" ||
+		!inventory.BackendTLS["cleared"].ALPNObserved || inventory.BackendTLS["plain"].ALPNObserved || inventory.BackendTLS["null"].ALPNObserved {
+		t.Fatal("pool ALPN readback must report explicit settings while isolating omissions and malformed values")
 	}
 	if legacy, cleared := inventory.BackendTLS["plain"], inventory.BackendTLS["cleared"]; legacy.SubjectAltNamesObserved ||
 		!cleared.SubjectAltNamesObserved || cleared.SubjectAltNamesInvalid || len(cleared.SubjectAltNames) != 0 {

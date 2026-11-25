@@ -425,8 +425,8 @@ func TestXBackendServerOnlyExternalHostnameUsesItsOwnValidation(t *testing.T) {
 	r.BackendTLSAvailable = func(context.Context) (bool, error) { return true, nil }
 	sanAvailable := true
 	var sanErr error
-	r.BackendTLSSANAvailable = func(_ context.Context, requireH2 bool) (bool, error) {
-		require.False(t, requireH2)
+	r.XBackendTLSAvailable = func(_ context.Context, requireSAN bool) (bool, error) {
+		require.True(t, requireSAN)
 		return sanAvailable, sanErr
 	}
 	backend := addExternalHostnameRule(t, f, f.route, f.service.Name)
@@ -500,6 +500,9 @@ func TestXBackendServerOnlyExternalHostnameUsesItsOwnValidation(t *testing.T) {
 		require.NoError(t, r.resolveRouteReferences(t.Context(), f.route, f.gateway, &waiting))
 		require.Equal(t, want, waiting.resolved)
 		require.Equal(t, reason, waiting.resolvedReason)
+		if reason == "UnsupportedProvider" {
+			require.Contains(t, waiting.resolvedMessage, "2.24")
+		}
 
 		active := newTestReconciler(*r, &recordingProvider{})
 		request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(f.route)}

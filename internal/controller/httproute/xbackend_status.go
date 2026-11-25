@@ -132,7 +132,7 @@ func (r *xBackendStatusReconciler) observeAncestors(ctx context.Context, key typ
 				availability := r.routes.backendTLSAvailability(ctx, requirements)
 				if availability != backendTLSAvailable || condition.Status == metav1.ConditionTrue {
 					condition.Status = metav1.ConditionTrue
-					condition = availability.apply(condition, true, requirements.requireSAN)
+					condition = availability.applyXBackend(condition, requirements.requireSAN)
 				}
 			}
 		}

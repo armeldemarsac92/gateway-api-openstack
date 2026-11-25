@@ -38,11 +38,19 @@ const (
 type backendTLSRequirements struct {
 	requireH2  bool
 	requireSAN bool
+	xBackend   bool
 }
 
 func (r *Reconciler) backendTLSAvailability(ctx context.Context, requirements backendTLSRequirements) backendTLSAvailability {
 	discover := r.BackendTLSAvailable
 	switch {
+	case requirements.xBackend:
+		if r.XBackendTLSAvailable == nil {
+			return backendTLSUnknown
+		}
+		discover = func(ctx context.Context) (bool, error) {
+			return r.XBackendTLSAvailable(ctx, requirements.requireSAN)
+		}
 	case requirements.requireSAN:
 		if r.BackendTLSSANAvailable == nil {
 			return backendTLSUnknown
@@ -122,7 +130,7 @@ func (inputs *routeModelInputs) backendTLSValidation(backend model.BackendGroup,
 }
 
 func xBackendTLSRequirements(validation *backendtls.Validation) backendTLSRequirements {
-	return backendTLSRequirements{requireSAN: len(validation.SubjectAltNames) != 0}
+	return backendTLSRequirements{xBackend: true, requireSAN: len(validation.SubjectAltNames) != 0}
 }
 
 func (inputs *routeModelInputs) xBackendTLSDiagnostic(backend model.BackendGroup) model.Diagnostic {
@@ -134,8 +142,19 @@ func (inputs *routeModelInputs) xBackendTLSDiagnostic(backend model.BackendGroup
 }
 
 func xBackendTLSProviderDiagnostic(availability backendTLSAvailability, requirements backendTLSRequirements) model.Diagnostic {
-	condition := availability.apply(metav1.Condition{Status: metav1.ConditionTrue}, true, requirements.requireSAN)
+	condition := availability.applyXBackend(metav1.Condition{Status: metav1.ConditionTrue}, requirements.requireSAN)
 	return model.Diagnostic{Reason: condition.Reason, Message: condition.Message}
+}
+
+func (a backendTLSAvailability) applyXBackend(condition metav1.Condition, requireSAN bool) metav1.Condition {
+	condition = a.apply(condition, true, requireSAN)
+	if condition.Reason == "UnsupportedProvider" {
+		condition.Message = "XBackend ServerOnly requires Octavia API microversion 2.24 or newer and regional backend TLS support"
+		if requireSAN {
+			condition.Message += " for explicit subjectAltNames"
+		}
+	}
+	return condition
 }
 
 func routeBackendTLSAncestorSlot(route *gatewayv1.HTTPRoute, inputs *routeModelInputs) backendtls.AncestorSlot {

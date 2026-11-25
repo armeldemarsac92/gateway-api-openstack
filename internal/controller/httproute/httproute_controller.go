@@ -89,6 +89,8 @@ type Reconciler struct {
 	GRPCBackendTLSAvailable func(context.Context) (bool, error)
 	// BackendTLSSANAvailable checks explicit SANs and the selected transport.
 	BackendTLSSANAvailable func(context.Context, bool) (bool, error)
+	// XBackendTLSAvailable checks the ServerOnly profile, including pool ALPN.
+	XBackendTLSAvailable func(context.Context, bool) (bool, error)
 	// TCPBackendTLSAvailable checks authenticated TLS for terminating TLSRoutes.
 	TCPBackendTLSAvailable func(context.Context) (bool, error)
 	// Recorder publishes Kubernetes Events.
