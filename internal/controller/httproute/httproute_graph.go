@@ -41,13 +41,14 @@ const (
 )
 
 type routeGraphResult struct {
-	bindingState           routeBindingState
-	selection              routeSelection
-	rejectedSections       []model.ListenerSection
-	backendObserved        bool
-	backendDiagnostic      model.Diagnostic
-	corsFallback           bool
-	backendTLSAncestorSlot backendtls.AncestorSlot
+	bindingState            routeBindingState
+	selection               routeSelection
+	rejectedSections        []model.ListenerSection
+	backendObserved         bool
+	backendDiagnostic       model.Diagnostic
+	corsFallback            bool
+	backendTLSAncestorSlot  backendtls.AncestorSlot
+	retryBudgetAncestorFull bool
 	cloud.RouteResult
 }
 
@@ -82,9 +83,10 @@ func (r *Reconciler) ensureRouteGraph(
 	request := graph.Request{
 		Identity: expectedIdentity,
 		Action:   graph.Ensure, Gateway: expectedGateway, Route: expectedRoute,
-		HTTPRouteBackendDiagnostic: &prepared.backendDiagnostic,
-		HTTPRouteCORSFallback:      &prepared.corsFallback,
-		HTTPRouteRejectedSections:  &prepared.rejectedSections,
+		HTTPRouteBackendDiagnostic:       &prepared.backendDiagnostic,
+		HTTPRouteCORSFallback:            &prepared.corsFallback,
+		HTTPRouteRejectedSections:        &prepared.rejectedSections,
+		HTTPRouteRetryBudgetAncestorFull: &prepared.retryBudgetAncestorFull,
 	}
 	if r.Config.BackendTLSPolicy {
 		request.HTTPRouteBackendTLSAncestorSlot = &prepared.backendTLSAncestorSlot
@@ -143,12 +145,13 @@ func (r *Reconciler) prepareRouteGraphBinding(ctx context.Context, route *gatewa
 	defer release()
 	snapshot, err := r.buildRouteValidationSnapshot(ctx, route, gateway, routeSnapshotForEnsure)
 	prepared := routeGraphResult{
-		selection:              snapshot.selection,
-		rejectedSections:       snapshot.rejectedSections,
-		backendObserved:        snapshot.backends != nil,
-		backendDiagnostic:      snapshot.backendDiagnostic,
-		corsFallback:           snapshot.corsFallback,
-		backendTLSAncestorSlot: snapshot.backendTLSAncestorSlot,
+		selection:               snapshot.selection,
+		rejectedSections:        snapshot.rejectedSections,
+		backendObserved:         snapshot.backends != nil,
+		backendDiagnostic:       snapshot.backendDiagnostic,
+		corsFallback:            snapshot.corsFallback,
+		backendTLSAncestorSlot:  snapshot.backendTLSAncestorSlot,
+		retryBudgetAncestorFull: snapshot.retryBudgetAncestorFull,
 	}
 	if err != nil {
 		return prepared, err

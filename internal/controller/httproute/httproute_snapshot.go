@@ -75,19 +75,20 @@ type routeBindingSnapshot struct {
 // that authorizes a route graph mutation. It is local to one mutation attempt
 // and must not be retained after releasing the Gateway graph lock.
 type routeValidationSnapshot struct {
-	route                  *gatewayv1.HTTPRoute
-	gateway                *gatewayv1.Gateway
-	parents                []managedRouteParent
-	selection              routeSelection
-	binding                routeBindingSnapshot
-	desired                cloud.RouteSpec
-	backends               *routeModelInputs
-	rejectedSections       []model.ListenerSection
-	backendDiagnostic      model.Diagnostic
-	corsFallback           bool
-	backendTLSAncestorSlot backendtls.AncestorSlot
-	gatewayReadyForBinding bool
-	disposition            routeValidationDisposition
+	route                   *gatewayv1.HTTPRoute
+	gateway                 *gatewayv1.Gateway
+	parents                 []managedRouteParent
+	selection               routeSelection
+	binding                 routeBindingSnapshot
+	desired                 cloud.RouteSpec
+	backends                *routeModelInputs
+	rejectedSections        []model.ListenerSection
+	backendDiagnostic       model.Diagnostic
+	corsFallback            bool
+	backendTLSAncestorSlot  backendtls.AncestorSlot
+	retryBudgetAncestorFull bool
+	gatewayReadyForBinding  bool
+	disposition             routeValidationDisposition
 }
 
 type routeCleanupDisposition int
@@ -198,6 +199,7 @@ func (r *Reconciler) buildRouteValidationSnapshotFromInputs(
 	snapshot.backends = inputs
 	snapshot.backendDiagnostic = diagnostics.backend
 	snapshot.corsFallback = diagnostics.corsFallback
+	snapshot.retryBudgetAncestorFull = diagnostics.retryBudgetAncestorFull
 	snapshot.backendTLSAncestorSlot = routeBackendTLSAncestorSlot(snapshot.route, inputs)
 
 	if purpose == routeSnapshotForEnsure {

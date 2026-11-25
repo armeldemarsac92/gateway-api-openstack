@@ -66,6 +66,8 @@ type Request struct {
 	HTTPRouteCORSFallback *bool
 	// HTTPRouteBackendTLSAncestorSlot binds route status to the writer's slot observation.
 	HTTPRouteBackendTLSAncestorSlot *backendtls.AncestorSlot
+	// HTTPRouteRetryBudgetAncestorFull binds its status to the live capacity check.
+	HTTPRouteRetryBudgetAncestorFull *bool
 	// HTTPRouteRejectedSections ties per-parent status to the graph's profile election.
 	HTTPRouteRejectedSections *[]model.ListenerSection
 }

@@ -46,6 +46,8 @@ An HTTPRoute forwarding rule can configure `timeouts.request`, `timeouts.backend
 
 Check the active Octavia policy's `http_request_policy` field and the HTTPRoute's current `Accepted` and `Programmed` conditions after writes. If the region stops advertising the capability, the controller withdraws the managed forwarding action for each affected rule. Unaffected rules stay eligible for programming. The settings apply only to the matching forwarding action. Retries after a response status or a backend deadline depend on HAProxy's request replay buffer. A request that exceeds the buffer may end without a retry. A body that fits can also be ineligible for replay if HAProxy starts sending it before receiving the full body. A deadline after the final response has started can terminate the stream.
 
+The Experimental Service policy adds a shared retry allowance to eligible HTTP backend attempts. [Configure Service retry budgets](operator-octavia-backend-retry-budget.md)
+
 ## Enable request-derived redirects
 
 On the regional load-balancer endpoint, check that the configured Amphora provider advertises `http_request_redirect_v1` in `gateway_capabilities`. Add `--octavia-http-request-redirect` to the controller arguments in the operator overlay. This option can be used independently of weighted backends and fixed HTTP responses.
