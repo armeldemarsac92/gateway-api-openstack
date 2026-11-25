@@ -80,6 +80,8 @@ For an HTTP or terminated HTTPS policy, the controller can create the disabled p
 
 ## Activate prepared HTTP policies together
 
+The signed manager submitted a group to the Octavia API. The installed worker applied it, HAProxy activated the resulting configuration, and the manager read the policies back as enabled and active. [Local Standard results](qualification/v1.7.0/provider/initial-http-predicates/receipt.json)
+
 The controller can enable two to 64 forwarding policies on one HTTP listener in a single Amphora refresh. Each policy must have been created with its initial matching rules and have a ready HTTP backend and a positive path match. A hostname and exact header matches are optional. For exact headers, enable `--octavia-http-header-exact` and check that the region advertises `http_header_exact_v1`. The controller checks the listener's policy order, the predicates, the pools and their members, and the current Kubernetes references before it submits the group. A concurrent change causes a fresh read.
 
 Apply Octavia migration `cc7a1218b24e`, upgrade the regional API and workers, and set `enabled_l7policy_batch_activation_providers = amphora` in `[api_settings]`. Workers must use the same database writer for the per-load-balancer render lock. When `GET /v2/lbaas/providers/amphora/gateway_capabilities` lists `l7policy_batch_activation_v1`, add `--octavia-l7policy-batch-activation` to the controller arguments.
