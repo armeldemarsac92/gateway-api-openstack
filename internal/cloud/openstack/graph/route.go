@@ -652,7 +652,9 @@ func (p *Provider) buildHTTPMatchPolicies(r *desiredRoute, matches []cloud.HTTPP
 			policy.requestURLRewrite = rewrite
 			if r.spec.GRPC {
 				policy.grpcContentTypeRule = l7policies.TypeHeader
-				if p.grpcContentType {
+				// The native predicate also identifies policies whose binary
+				// response metadata must be sent as repeated fields.
+				if p.grpcContentType || hasGRPCBinaryMetadataList(responseOperations) {
 					policy.grpcContentTypeRule = grpcContentTypeRuleType
 				}
 			}

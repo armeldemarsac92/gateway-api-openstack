@@ -462,11 +462,25 @@ Kustomize deployments can add the standalone `config/components/octavia-request-
 
 With a compatible provider advertising `response_header_operations_v1`, add
 `--octavia-response-header-modifier` or use
-`config/octavia-response-header-modifier` to enable rule-level HTTPRoute
-`ResponseHeaderModifier`. The filter sets, adds or removes response headers
+`config/octavia-response-header-modifier` to enable rule-level
+`ResponseHeaderModifier` on HTTPRoute and GRPCRoute. The filter sets, adds or removes response headers
 on the winning rule, including rules whose backends share a pool. To combine
 a request and a response filter on one rule, enable both flags or add both
 Kustomize components. Their declaration order is interchangeable.
+
+On an enrolled gRPC listener, a rule can change the initial response metadata
+for its selected RPC. The gRPC transport owns `content-type` and the `grpc-`
+namespace. Custom metadata uses printable ASCII or base64 values for names
+ending in `-bin`. A comma-separated list of binary values requires the regional
+`grpc_binary_response_metadata_v1` capability. Amphora advertises it when both
+response header operations and native gRPC Content-Type matching are enabled.
+The controller uses a native `GRPC_CONTENT_TYPE` predicate for rules with a
+binary list. Each value becomes its own response field. `SET` and `ADD` can
+produce up to 48 fields in total per rule after expansion. `REMOVE` adds no
+fields. The origin supplies the RPC status. Separate trailing
+headers pass through as sent. On an immediate error with a trailers-only
+response, gRPC carries all fields in one header block and the client receives
+that block's modified custom metadata as trailers.
 
 The modifier works with configured forwarding, weighted and fixed HTTP
 actions. A rule combining this filter with `RequestRedirect`, a filter on a

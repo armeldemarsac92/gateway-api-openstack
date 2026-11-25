@@ -1059,16 +1059,63 @@ func TestHTTPMethodProfileRootPrefixKeepsAPathIndependentRule(t *testing.T) {
 	}
 }
 
+func TestGRPCBinaryMetadataSelectsNativeContentTypeOnlyForLists(t *testing.T) {
+	provider := NewProvider(ServiceClients{}, ProviderConfig{ResponseHeaderModifier: true})
+	for _, scenario := range []struct {
+		name  string
+		grpc  bool
+		value string
+		want  l7policies.RuleType
+	}{
+		{name: "gRPC list", grpc: true, value: "YQ==, Yg", want: grpcContentTypeRuleType},
+		{name: "gRPC single value", grpc: true, value: "YQ==", want: l7policies.TypeHeader},
+		{name: "HTTP list literal", value: "YQ==, Yg"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			part := desiredRoute{spec: cloud.RouteSpec{GRPC: scenario.grpc}, identity: safetyTestIdentity(t)}
+			match := cloud.HTTPPathMatch{PathType: cloud.PathMatchExact, PathValue: "/example.Echo/Echo",
+				ResponseHeaderOperations: []cloud.HTTPHeaderOperation{{Operation: cloud.HTTPHeaderSet, Name: "Wire-Bin", Value: scenario.value}}}
+			if err := provider.buildHTTPMatchPolicies(&part, []cloud.HTTPPathMatch{match}, nil); err != nil {
+				t.Fatal(err)
+			}
+			if len(part.policies) != 1 || part.policies[0].grpcContentTypeRule != scenario.want {
+				t.Fatalf("match should use Content-Type rule %q, got %+v", scenario.want, part.policies)
+			}
+		})
+	}
+}
+
 func TestResponseHeaderPolicyActivationAndWithdrawalAcrossRestart(t *testing.T) {
+	t.Run("HTTP headers", func(t *testing.T) { testResponseHeaderPolicyActivationAndWithdrawal(t, false) })
+	t.Run("gRPC binary list", func(t *testing.T) { testResponseHeaderPolicyActivationAndWithdrawal(t, true) })
+}
+
+func testResponseHeaderPolicyActivationAndWithdrawal(t *testing.T, grpcBinary bool) {
+	t.Helper()
 	part, observation := convergedRoutePlanFixture()
 	part.backendKey = "backend"
 	part.spec.ScopedListenerPorts = []int{80}
 	wanted := []cloud.HTTPHeaderOperation{{Operation: cloud.HTTPHeaderSet, Name: "x-color", Value: "blue"}}
-	part.policies[0].responseHeaderOperations = wanted
 	policy := &observation.policies[0]
 	policy.policy.ListenerID, policy.policy.ProvisioningStatus = "affected", "ACTIVE"
 	policy.policy.AdminStateUp, policy.adminObserved = false, true
 	policy.rules[0].rule.ProvisioningStatus, policy.rules[0].flagsObserved = "ACTIVE", true
+	predicate := responseHeaderModifierPolicy
+	if grpcBinary {
+		predicate = grpcBinaryResponseMetadataPolicy
+		wanted = []cloud.HTTPHeaderOperation{
+			{Operation: cloud.HTTPHeaderSet, Name: "wire-bin", Value: "YQ==, Yg"},
+			{Operation: cloud.HTTPHeaderAdd, Name: "more-bin", Value: "Yw, ZA=="},
+		}
+		part.policies[0].grpcContentTypeRule = grpcContentTypeRuleType
+		policy.rules = append(policy.rules, observedRouteRule{
+			role: openstackidentity.RoleRuleGRPCContentType, base: openstackidentity.RoleRuleGRPCContentType,
+			flagsObserved: true,
+			rule: l7policies.Rule{ID: "media-rule", RuleType: string(grpcContentTypeRuleType),
+				CompareType: string(l7policies.CompareTypeEqual), Value: "application/grpc", ProvisioningStatus: "ACTIVE", AdminStateUp: true},
+		})
+	}
+	part.policies[0].responseHeaderOperations = wanted
 
 	spec := completeGraphSpec(safetyTestIdentity(t))
 	desired := desiredGatewayGraph{spec: spec, protocol: cloud.ListenerProtocolHTTP, routes: []desiredRoute{{httpParts: []desiredRoute{part}}}}
@@ -1087,8 +1134,11 @@ func TestResponseHeaderPolicyActivationAndWithdrawalAcrossRestart(t *testing.T) 
 		case r.Method == http.MethodGet && r.URL.Path == "/lbaas/providers/amphora-region-alias/gateway_capabilities":
 			probes++
 			capabilities := []string{}
+			if grpcBinary {
+				capabilities = append(capabilities, octavia.GatewayCapabilityResponseHeaderOperations, octavia.GatewayCapabilityGRPCContentType)
+			}
 			if advertise {
-				capabilities = append(capabilities, octavia.GatewayCapabilityResponseHeaderOperations)
+				capabilities = append(capabilities, predicate.capability)
 			}
 			safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": capabilities})
 		case r.Method == http.MethodPut && r.URL.Path == "/lbaas/l7policies/policy-1":
@@ -1119,13 +1169,28 @@ func TestResponseHeaderPolicyActivationAndWithdrawalAcrossRestart(t *testing.T) 
 	noReadback := next(routeMutationSetPolicyHeaders)
 	_, err := provider.prepareGraphMutation(t.Context(), desired, actual, noReadback)
 	var unavailable *unavailableRouteCapability
-	if !errors.As(err, &unavailable) || unavailable.capability != octavia.GatewayCapabilityResponseHeaderOperations || writes != 0 {
+	if !errors.As(err, &unavailable) || unavailable.capability != predicate.capability || writes != 0 {
 		t.Fatalf("plan wrote without response capability: %v, %d", err, writes)
 	}
 	policy.responseHeaderOperations = wanted
 	enable := next(routeMutationEnablePolicy)
 	if _, err := provider.prepareGraphMutation(t.Context(), desired, actual, enable); !errors.As(err, &unavailable) {
 		t.Fatalf("activation must verify capability after policy readback: %v", err)
+	}
+	if grpcBinary {
+		// An older provider still accepts a single binary value on a gRPC
+		// policy and the same comma-containing literal on an HTTP policy.
+		simple := noReadback
+		simple.route.responseHeaderOperations = []cloud.HTTPHeaderOperation{wanted[0]}
+		simple.route.responseHeaderOperations[0].Value = "YQ=="
+		if _, err := provider.prepareGraphMutation(t.Context(), desired, actual, simple); err != nil {
+			t.Fatalf("older provider rejected a single binary value: %v", err)
+		}
+		ordinary := noReadback
+		ordinary.route.policy.grpcContentTypeRule = ""
+		if _, err := provider.prepareGraphMutation(t.Context(), desired, actual, ordinary); err != nil {
+			t.Fatalf("older provider rejected an ordinary HTTP operation: %v", err)
+		}
 	}
 	advertise = true
 	if _, err := provider.prepareGraphMutation(t.Context(), desired, actual, enable); err != nil {
@@ -1137,7 +1202,7 @@ func TestResponseHeaderPolicyActivationAndWithdrawalAcrossRestart(t *testing.T) 
 	advertise = false
 	provider = NewProvider(ServiceClients{LoadBalancer: client}, ProviderConfig{ResponseHeaderModifier: true})
 	result := cloud.GatewayGraphResult{Routes: []cloud.RouteGraphResult{{}}}
-	steps, _ := provider.protectHTTPPredicateTraffic(t.Context(), desired, actual, nil, &result, responseHeaderModifierPolicy)
+	steps, _ := provider.protectHTTPPredicateTraffic(t.Context(), desired, actual, nil, &result, predicate)
 	if len(steps) != 1 || steps[0].kind != graphDisableListener || steps[0].listenerID != "affected" ||
 		result.Routes[0].Result.Outcome.State != cloud.OutcomeProgressing {
 		t.Fatalf("a restarted controller did not withdraw the affected listener: %+v, %+v", steps, result)
@@ -1146,7 +1211,7 @@ func TestResponseHeaderPolicyActivationAndWithdrawalAcrossRestart(t *testing.T) 
 	part.policies[0].responseHeaderOperations = nil
 	provider = NewProvider(ServiceClients{LoadBalancer: client}, ProviderConfig{})
 	clear := next(routeMutationSetPolicyHeaders)
-	steps, _ = provider.protectHTTPPredicateTraffic(t.Context(), desired, actual, []graphMutation{clear}, &result, responseHeaderModifierPolicy)
+	steps, _ = provider.protectHTTPPredicateTraffic(t.Context(), desired, actual, []graphMutation{clear}, &result, predicate)
 	if len(steps) != 1 {
 		t.Fatalf("clear was lost while capability was unavailable: %+v", steps)
 	}
@@ -1154,7 +1219,11 @@ func TestResponseHeaderPolicyActivationAndWithdrawalAcrossRestart(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := provider.executeRouteMutation(t.Context(), part, prepared.route); err != nil || writes != 1 || probes != 5 {
+	wantProbes := 5
+	if grpcBinary {
+		wantProbes += 2
+	}
+	if err := provider.executeRouteMutation(t.Context(), part, prepared.route); err != nil || writes != 1 || probes != wantProbes {
 		t.Fatalf("withdrawal failed without capability and opt-in: writes=%d probes=%d error=%v", writes, probes, err)
 	}
 	policy.responseHeaderOperations = []cloud.HTTPHeaderOperation{}

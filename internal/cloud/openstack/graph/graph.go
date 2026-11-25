@@ -457,7 +457,10 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		plan, _ = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, exactHTTPQueryParamPredicate)
 		plan, _ = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, httpMethodPredicate)
 		plan, _ = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, responseHeaderModifierPolicy)
-		if p.grpcContentType {
+		if !isHTTPListenerWithdrawal(plan) {
+			plan, _ = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, grpcBinaryResponseMetadataPolicy)
+		}
+		if p.grpcContentType && !isHTTPListenerWithdrawal(plan) {
 			plan, _ = p.protectHTTPPredicateTraffic(ctx, desired, actual, plan, &result, grpcContentTypePredicate)
 		}
 	}
@@ -658,15 +661,22 @@ func (p *Provider) reconcileHTTPWithdrawalWithoutAddress(ctx context.Context, de
 	if !isHTTPListenerWithdrawal(plan) {
 		plan = p.protectCORSTraffic(ctx, desired, actual, plan, &result)
 	}
-	var grpcWithdrawal []graphMutation
 	var confirmedClosed bool
-	if p.grpcContentType && !isHTTPListenerWithdrawal(plan) {
+	if !isHTTPListenerWithdrawal(plan) {
 		// An empty plan allows only confirmed capability withdrawal to
 		// request a listener closure while the address read is failing.
-		grpcWithdrawal, confirmedClosed = p.protectHTTPPredicateTraffic(ctx, desired, actual, nil, &result, grpcContentTypePredicate)
-	}
-	if len(grpcWithdrawal) != 0 {
-		plan = grpcWithdrawal
+		predicates := []protectedHTTPPredicate{grpcBinaryResponseMetadataPolicy}
+		if p.grpcContentType {
+			predicates = append(predicates, grpcContentTypePredicate)
+		}
+		for _, predicate := range predicates {
+			withdrawal, closed := p.protectHTTPPredicateTraffic(ctx, desired, actual, nil, &result, predicate)
+			confirmedClosed = confirmedClosed || closed
+			if len(withdrawal) != 0 {
+				plan = withdrawal
+				break
+			}
+		}
 	}
 	if len(plan) != 1 || !canWithdrawHTTPWithoutAddress(plan[0], desired, actual) {
 		if confirmedClosed {

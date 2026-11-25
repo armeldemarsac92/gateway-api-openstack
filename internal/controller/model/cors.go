@@ -27,7 +27,7 @@ import (
 
 // NormalizeHTTPForwardingRuleFilters validates and preserves each rule's
 // policy-level CORS settings alongside its existing forwarding filters.
-func NormalizeHTTPForwardingRuleFilters(rule gatewayv1.HTTPRouteRule, requestEnabled, responseEnabled, rewriteEnabled, corsEnabled bool) (
+func NormalizeHTTPForwardingRuleFilters(rule gatewayv1.HTTPRouteRule, kind gatewayv1.Kind, requestEnabled, responseEnabled, rewriteEnabled, corsEnabled bool) (
 	[]cloud.HTTPHeaderOperation, []cloud.HTTPHeaderOperation, *cloud.HTTPURLRewrite, *cloud.HTTPCORS, *Diagnostic,
 ) {
 	var cors *cloud.HTTPCORS
@@ -46,6 +46,9 @@ func NormalizeHTTPForwardingRuleFilters(rule gatewayv1.HTTPRouteRule, requestEna
 		rule.Filters = slices.Delete(slices.Clone(rule.Filters), index, index+1)
 	}
 	request, response, rewrite, diagnostic := NormalizeHTTPRuleFilters(rule, requestEnabled, responseEnabled, rewriteEnabled)
+	if diagnostic == nil && kind == GRPCRouteKind {
+		diagnostic = validateGRPCResponseMetadata(response)
+	}
 	if diagnostic == nil && cors != nil {
 		diagnostic = ValidateCORSHeaderComposition(request, response)
 	}
