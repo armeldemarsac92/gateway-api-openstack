@@ -511,6 +511,20 @@ func TestXBackendCookieNameAndCurrentGenerationStatus(t *testing.T) {
 			require.Equal(t, phase.reason, resolved.Reason)
 		}
 	}
+
+	// A sibling Octavia update can skip the pool and capability inventory.
+	// Keep the proved status for this generation until a check can run.
+	deferred := cloud.RouteProgressingResult("Octavia load balancer is PENDING_UPDATE", time.Second)
+	deferred.ObservationDeferred = true
+	deferred.BackendSessionPersistenceIssue = cloud.SessionPersistenceNotObserved
+	r := newTestReconciler(*f.reconciler, &recordingProvider{routeResult: &deferred})
+	key := client.ObjectKeyFromObject(f.route)
+	_, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: key})
+	require.NoError(t, err)
+	require.NoError(t, f.client.Get(t.Context(), key, f.route))
+	conditions := f.route.Status.Parents[0].Conditions
+	require.True(t, meta.IsStatusConditionTrue(conditions, string(gatewayv1.RouteConditionResolvedRefs)))
+	require.True(t, meta.IsStatusConditionTrue(conditions, r.Config.Domain()+"/Programmed"))
 }
 
 func TestXBackendCookieRejectsUnsupportedContract(t *testing.T) {

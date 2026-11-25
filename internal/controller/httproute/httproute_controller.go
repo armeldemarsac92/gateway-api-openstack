@@ -418,7 +418,7 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 			}
 		}
 		if !graphResult.ObservationDeferred || graphResult.backendTLSAncestorSlot != backendtls.AncestorSlotHeld ||
-			graphResult.BackendSessionPersistenceIssue != cloud.SessionPersistenceAvailable ||
+			graphResult.BackendSessionPersistenceIssue >= cloud.SessionPersistenceUnverified ||
 			r.currentRouteProgrammedCondition(httpRoute, parent.ref) == nil ||
 			!r.currentBackendResolution(httpRoute, parent.ref, graphResult.backendDiagnostic) {
 			message := controller.ProviderProgressMessage(graphResult.Outcome, "Octavia resources for the HTTPRoute are still progressing")

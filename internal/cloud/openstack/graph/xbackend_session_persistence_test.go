@@ -140,7 +140,7 @@ func TestXBackendCookieOctaviaPoolLifecycle(t *testing.T) {
 	active = observe()
 	capabilityResponse = http.StatusServiceUnavailable
 	require.Nil(t, p.prepareXBackendCookies(t.Context(), &desired, actual))
-	_, _, err = buildRouteEnsurePlan(*wanted, active)
+	_, err = planXBackendCookie(*wanted, active)
 	require.ErrorIs(t, err, errXBackendCookieUnverified)
 	require.Len(t, writes, 3)
 	capabilityResponse = http.StatusOK
@@ -151,7 +151,7 @@ func TestXBackendCookieOctaviaPoolLifecycle(t *testing.T) {
 	require.Equal(t, "null", string(writes[3]["session_persistence"]))
 	active = observe()
 	require.Empty(t, active.pool.Persistence)
-	_, _, err = buildRouteEnsurePlan(*wanted, active)
+	_, err = planXBackendCookie(*wanted, active)
 	require.ErrorIs(t, err, errXBackendCookieUnavailable)
 
 	wanted.sessionCookieName = ""
@@ -177,11 +177,129 @@ func TestXBackendCookieWeightedPolicyFollowsPoolReadback(t *testing.T) {
 	require.False(t, resolved.policies[0].targetsPending())
 	require.Equal(t, []octavia.WeightedHTTPTarget{{Weight: 3, PoolID: "pool-1"}, {Weight: 1, PoolID: "pool-remote"}},
 		resolved.policies[0].weightedPlan.targets)
-	part.sessionCookieCapability = xBackendCookieUnavailable
-	resolved = resolveWeightedHTTPPart(weighted, desired.routes[0], actual.routes[0], "")
-	require.False(t, resolved.policies[0].targetsPending())
-	require.Equal(t, []octavia.WeightedHTTPTarget{{Weight: 3, PoolID: "pool-1"}, fixedWeightedHTTPTarget(1)},
-		resolved.policies[0].weightedPlan.targets)
+	delete(actual.routes[0].httpParts, part.backendKey)
+	for _, capability := range []xBackendCookieCapability{xBackendCookieUnavailable, xBackendCookieUnverified} {
+		part.sessionCookieCapability = capability
+		resolved = resolveWeightedHTTPPart(weighted, desired.routes[0], actual.routes[0], "")
+		require.False(t, resolved.policies[0].targetsPending())
+		require.Equal(t, []octavia.WeightedHTTPTarget{{Weight: 3, PoolID: "pool-1"}, fixedWeightedHTTPTarget(1)},
+			resolved.policies[0].weightedPlan.targets)
+	}
+}
+
+func TestXBackendCookieStockFallbackProgramsTheExactPolicyWithoutMembers(t *testing.T) {
+	wanted, observed := convergedRoutePlanFixture()
+	wanted.identity = safetyTestIdentity(t)
+	wanted.spec.Identity = wanted.identity.Value()
+	wanted.xBackend, wanted.sessionCookieName = true, "reports_session"
+	wanted.spec.Gateway.LoadBalancerID = "lb"
+	var poolRequest map[string]json.RawMessage
+	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "POST /lbaas/pools", r.Method+" "+r.URL.Path)
+		var request struct {
+			Pool map[string]json.RawMessage `json:"pool"`
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+		poolRequest = request.Pool
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"pool":{"id":"pool-1"}}`))
+	}))
+	p := NewProvider(ServiceClients{LoadBalancer: client}, ProviderConfig{})
+	for _, capability := range []xBackendCookieCapability{xBackendCookieUnavailable, xBackendCookieUnverified} {
+		wanted.sessionCookieCapability = capability
+		// In the real TLS case the positive TLS plan remains blocked behind
+		// cookie discovery. The placeholder uses only the stock pool API.
+		wanted.backendTLS = backendTLSPlan{phase: backendTLSClaim}
+		steps, _, err := buildRouteEnsurePlan(wanted, observedRouteGraph{})
+		require.NoError(t, err)
+		require.Len(t, steps, 1)
+		require.Equal(t, routeMutationCreatePool, steps[0].kind)
+		require.NoError(t, p.executeRouteMutation(t.Context(), wanted, steps[0]))
+		require.Equal(t, "true", string(poolRequest["admin_state_up"]))
+		require.NotContains(t, poolRequest, "session_persistence")
+		require.NotContains(t, poolRequest, "backend_tls_hostname")
+
+		empty := observed
+		empty.members, empty.monitor, empty.policies = nil, nil, nil
+		empty.pool.ProvisioningStatus, empty.backendTLS.AdminObserved = "ACTIVE", true
+		steps, _, err = buildRouteEnsurePlan(wanted, empty)
+		require.NoError(t, err)
+		require.NotEmpty(t, steps)
+		require.Equal(t, routeMutationCreatePolicy, steps[0].kind)
+		require.Equal(t, "/api", steps[0].policy.path)
+		require.Equal(t, "pool-1", steps[0].parentID)
+
+		empty.policies = observed.policies
+		empty.policies[0].policy.AdminStateUp = false
+		steps, _, err = buildRouteEnsurePlan(wanted, empty)
+		require.NoError(t, err)
+		require.Len(t, steps, 1)
+		require.Equal(t, routeMutationEnablePolicy, steps[0].kind)
+		empty.policies[0].policy.AdminStateUp = true
+		steps, _, err = buildRouteEnsurePlan(wanted, empty)
+		require.Error(t, err)
+		require.Empty(t, steps)
+	}
+}
+
+func TestXBackendCookieErrorPoolRecoversAfterHealthyWorkAndWithdrawal(t *testing.T) {
+	desired, actual := weightedPlanFixture()
+	actual.loadBalancer.ProvisioningStatus = "ACTIVE"
+	parts := desired.routes[0].httpParts
+	healthy, wanted, rule := &parts[0], &parts[1], &parts[2]
+	wanted.xBackend, wanted.sessionCookieName, wanted.sessionCookieCapability = true, "new_session", xBackendCookieAvailable
+	graphs := actual.routes[0].httpParts
+	failed := graphs[wanted.backendKey]
+	failed.pool.ProvisioningStatus, failed.backendTLS.AdminObserved = "ERROR", true
+	failed.pool.Persistence = pools.SessionPersistence{Type: httpCookiePersistence, CookieName: "old_session"}
+	recover, err := planXBackendCookie(*wanted, *failed)
+	require.NoError(t, err)
+	require.NotNil(t, recover)
+	require.True(t, recover.retry)
+	require.Equal(t, new(true), recover.poolAdmin)
+	require.Nil(t, recover.poolPersistence)
+
+	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "PUT /lbaas/pools/pool-remote", r.Method+" "+r.URL.Path)
+		var request struct {
+			Pool map[string]bool `json:"pool"`
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+		require.Equal(t, map[string]bool{"admin_state_up": true}, request.Pool)
+		safetyWriteJSON(t, w, map[string]any{"pool": map[string]any{"id": failed.pool.ID}})
+	}))
+	p := NewProvider(ServiceClients{LoadBalancer: client}, ProviderConfig{})
+	require.NoError(t, p.executeRouteMutation(t.Context(), *wanted, *recover))
+	healthyPool := graphs[healthy.backendKey]
+	healthyPool.members = nil
+	steps := weightedPlan(t, desired, actual)
+	require.NotEmpty(t, steps)
+	require.Equal(t, routeMutationCreateMember, steps[0].route.kind)
+
+	wanted.sessionCookieCapability = xBackendCookieUnavailable
+	policy := &graphs[rule.backendKey].policies[0]
+	steps = weightedPlan(t, desired, actual)
+	require.NotEmpty(t, steps)
+	require.Equal(t, routeMutationSetPolicyTarget, steps[0].route.kind)
+	require.Equal(t, []octavia.WeightedHTTPTarget{policy.weightedTargets[0], fixedWeightedHTTPTarget(1)}, *steps[0].route.weightedTargets)
+
+	failed.pool.ProvisioningStatus = "ACTIVE"
+	drain, err := planXBackendCookie(*wanted, *failed)
+	require.NoError(t, err)
+	require.Equal(t, routeMutationClearPoolMembers, drain.kind)
+	require.True(t, drain.xBackendCookieDrain)
+}
+
+func TestXBackendCookieBusyParentSkipsCapabilityObservation(t *testing.T) {
+	desired, actual := weightedPlanFixture()
+	part := &desired.routes[0].httpParts[1]
+	part.xBackend, part.sessionCookieName = true, "reports_session"
+	actual.routes, actual.scoped = nil, false
+	actual.outcome = cloud.ProgressingOutcome("Octavia load balancer is PENDING_UPDATE", 1)
+	p := &Provider{}
+	result := p.pendingGraphResult(t.Context(), desired, actual)
+	require.True(t, result.Routes[0].Result.ObservationDeferred)
+	require.Equal(t, cloud.SessionPersistenceNotObserved, result.Routes[0].Result.BackendSessionPersistenceIssue)
 }
 
 func TestXBackendCookieAndServerOnlyBothGatePoolOpening(t *testing.T) {

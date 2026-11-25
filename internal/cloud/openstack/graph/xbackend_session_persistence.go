@@ -37,7 +37,8 @@ const (
 type xBackendCookieCapability uint8
 
 const (
-	xBackendCookieUnknown xBackendCookieCapability = iota
+	xBackendCookieNotObserved xBackendCookieCapability = iota
+	xBackendCookieUnverified
 	xBackendCookieUnavailable
 	xBackendCookieAvailable
 )
@@ -78,7 +79,7 @@ func (p *Provider) prepareXBackendCookies(ctx context.Context, desired *desiredG
 		available, err := p.discoverXBackendCookie(ctx, actual.loadBalancer.Provider)
 		switch {
 		case err != nil:
-			return xBackendCookieUnknown
+			return xBackendCookieUnverified
 		case available:
 			return xBackendCookieAvailable
 		default:
@@ -150,12 +151,22 @@ func planXBackendCookie(desired desiredRoute, observed observedRouteGraph) (*rou
 	case pool.ProvisioningStatus != "ACTIVE" && pool.ProvisioningStatus != "ERROR":
 		return nil, errXBackendCookieUnverified
 	}
+	if pool.ProvisioningStatus == "ERROR" {
+		if observed.backendTLS.AdminObserved {
+			// Octavia locks member writes on ERROR pools but permits a
+			// pool PUT. Keep the current admin state and predicate. Retry the
+			// drain after independently observing an ACTIVE pool.
+			return &routeMutation{kind: routeMutationSetXBackendCookie, id: pool.ID,
+				poolAdmin: boolPointer(pool.AdminStateUp), retry: true}, nil
+		}
+		return nil, errXBackendCookieUnverified
+	}
 	if len(observed.members) != 0 {
 		// A disabled stock HTTP pool can drop the direct L7 match in
 		// Amphora. An empty pool keeps ownership of its exact predicate.
-		return &routeMutation{kind: routeMutationClearPoolMembers, id: pool.ID}, nil
+		return &routeMutation{kind: routeMutationClearPoolMembers, id: pool.ID, xBackendCookieDrain: true}, nil
 	}
-	if pool.ProvisioningStatus != "ACTIVE" || !observed.backendTLS.AdminObserved {
+	if !observed.backendTLS.AdminObserved {
 		return nil, errXBackendCookieUnverified
 	}
 	step := routeMutation{kind: routeMutationSetXBackendCookie, id: pool.ID}
@@ -183,7 +194,7 @@ func xBackendCookieIssue(route desiredRoute) error {
 	switch route.cookieSupportIssue() {
 	case cloud.SessionPersistenceUnsupported:
 		return errXBackendCookieUnavailable
-	case cloud.SessionPersistenceUnverified:
+	case cloud.SessionPersistenceNotObserved, cloud.SessionPersistenceUnverified:
 		return errXBackendCookieUnverified
 	}
 	return nil
@@ -195,12 +206,26 @@ func (route desiredRoute) cookieSupportIssue() cloud.SessionPersistenceIssue {
 		switch route.sessionCookieCapability {
 		case xBackendCookieUnavailable:
 			issue = cloud.SessionPersistenceUnsupported
-		case xBackendCookieUnknown:
+		case xBackendCookieUnverified:
 			issue = cloud.SessionPersistenceUnverified
+		case xBackendCookieNotObserved:
+			issue = cloud.SessionPersistenceNotObserved
 		}
 	}
 	for _, part := range route.httpParts {
 		issue = max(issue, part.cookieSupportIssue())
 	}
 	return issue
+}
+
+// cookieFallback supports ordinary direct L7 policy reconciliation with a
+// stock enabled empty pool while discovery cannot authorize persistence.
+// Weighted rules already have their own same-weight failure response.
+func (route desiredRoute) cookieFallback(observed observedRouteGraph) bool {
+	if len(route.policies) == 0 || route.fixedResponse ||
+		route.sessionCookieCapability != xBackendCookieUnavailable && route.sessionCookieCapability != xBackendCookieUnverified {
+		return false
+	}
+	return observed.pool == nil || observed.pool.ProvisioningStatus == "ACTIVE" &&
+		observed.backendTLS.AdminObserved && len(observed.members) == 0
 }

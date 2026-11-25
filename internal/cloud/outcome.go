@@ -157,6 +157,8 @@ type SessionPersistenceIssue uint8
 
 const (
 	SessionPersistenceAvailable SessionPersistenceIssue = iota
+	// SessionPersistenceNotObserved denotes a deferred inventory, with no discovery attempt.
+	SessionPersistenceNotObserved
 	SessionPersistenceUnverified
 	SessionPersistenceUnsupported
 )
