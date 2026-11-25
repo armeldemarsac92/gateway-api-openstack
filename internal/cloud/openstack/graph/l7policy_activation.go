@@ -95,6 +95,11 @@ func (p *Provider) preparePolicyActivationBatch(ctx context.Context, desired des
 	partsByPool := make(map[string]observedRouteGraph)
 	for _, route := range actual.routes {
 		for _, part := range route.parts() {
+			if slices.ContainsFunc(part.policies, func(policy observedRoutePolicy) bool {
+				return policy.policy.ListenerID == listener.ID && policy.hasRequestMirrors()
+			}) {
+				return nil, nil
+			}
 			if part.pool != nil {
 				partsByPool[part.pool.ID] = part
 			}
