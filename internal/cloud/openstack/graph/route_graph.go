@@ -90,6 +90,7 @@ type observedRouteGraph struct {
 	backendTLS             octavia.PoolBackendTLS
 	backendRetryBudget     octavia.PoolBackendRetryBudget
 	tcpRejection           octavia.PoolTCPConnectionRejection
+	udpDrop                octavia.PoolUDPPacketDrop
 	members                []pools.Member
 	memberBackupUnreported map[string]struct{}
 	memberAdminUnreported  map[string]struct{}
@@ -402,6 +403,7 @@ func (p *Provider) observeRouteGraphsFromPools(ctx context.Context, owners []rou
 		graph.backendTLS = poolInventory.BackendTLS[pool.ID]
 		graph.backendRetryBudget = poolInventory.BackendRetryBudget[pool.ID]
 		graph.tcpRejection = poolInventory.TCPConnectionRejection[pool.ID]
+		graph.udpDrop = poolInventory.UDPPacketDrop[pool.ID]
 		poolOwners[pool.ID] = poolRouteOwner{route: routeIndex, backend: role.backend}
 		if err := p.observeRoutePoolChildrenWithRole(ctx, owner, graph, role.backend); err != nil {
 			return nil, &cloud.GraphError{Identity: identity.Value(), Err: err}
@@ -411,6 +413,11 @@ func (p *Provider) observeRouteGraphsFromPools(ctx context.Context, owners []rou
 				return nil, &cloud.GraphError{Identity: identity.Value(), Err: err}
 			}
 		} else if usesDefaultPool(poolProtocol) {
+			if graph.udpDropPool() {
+				if err := p.validateUDPPoolCascade(*graph); err != nil {
+					return nil, &cloud.GraphError{Identity: identity.Value(), Err: err}
+				}
+			}
 			if err := graph.validateDefaultPoolChildren(); err != nil {
 				return nil, &cloud.GraphError{Identity: identity.Value(), Err: err}
 			}
@@ -736,8 +743,8 @@ func (p *Provider) observeRoutePoolChildrenWithRole(ctx context.Context, owner r
 	strictChildren := backend != "" || owner.expectsBackendTLS || hasObservedBackendTLS(*graph.pool, graph.backendTLS)
 	opts := pools.ListMembersOpts{ProjectID: p.projectID}
 	switch {
-	case graph.pool.Protocol == cloud.ListenerProtocolTCP && graph.tcpRejection.Present:
-		graph.members, graph.memberBackupUnreported, graph.memberBatchUnreported, err = p.octavia.ListMembersForTCPRejection(ctx, graph.pool.ID, opts)
+	case graph.pool.Protocol == cloud.ListenerProtocolTCP && graph.tcpRejection.Present || graph.udpDropPool():
+		graph.members, graph.memberBackupUnreported, graph.memberBatchUnreported, err = p.octavia.ListMembersForTransportBatch(ctx, graph.pool.ID, opts)
 	case graph.pool.Protocol == cloud.ListenerProtocolTCP:
 		graph.members, graph.memberBackupUnreported, err = p.octavia.ListMembersWithBackup(ctx, graph.pool.ID, opts)
 	case p.l7PolicyBatchActivation && graph.pool.Protocol == cloud.ListenerProtocolHTTP:
@@ -867,7 +874,7 @@ const (
 	routeMutationClaimBackendCA
 	routeMutationPublishBackendCA
 	routeMutationClearPoolMembers
-	routeMutationReplaceTCPMembers
+	routeMutationReplaceTransportMembers
 	routeMutationSetBackendTLS
 	routeMutationDeleteMember
 	routeMutationDisableMember
@@ -901,7 +908,8 @@ type routeMutation struct {
 	parentID                 string
 	member                   cloud.Member
 	memberTags               *[]string
-	tcpMembers               []pools.BatchUpdateMemberOpts
+	batchMembers             []pools.BatchUpdateMemberOpts
+	udpDrop                  *cloud.UDPPacketDrop
 	policy                   desiredPolicy
 	initialRules             []l7policies.CreateRuleOpts
 	rule                     desiredRule
@@ -956,7 +964,10 @@ func (s routeMutation) message() string {
 			return "Withdrawing Octavia XBackend members before changing session persistence"
 		}
 		return "Withdrawing Octavia backend members until TLS authorization is verified"
-	case routeMutationReplaceTCPMembers:
+	case routeMutationReplaceTransportMembers:
+		if s.udpDrop != nil {
+			return "Updating Octavia UDP members and packet drop together"
+		}
 		return "Updating Octavia TCP members and connection rejection together"
 	case routeMutationSetBackendTLS:
 		return "Updating authenticated TLS on the Octavia pool"
@@ -1029,6 +1040,12 @@ func buildRouteEnsurePlan(desired desiredRoute, actual observedRouteGraph) ([]ro
 func buildRouteEnsurePlanWithActivations(desired desiredRoute, actual observedRouteGraph, batchActivations bool) ([]routeMutation, cloud.RouteState, error) {
 	if desired.tcpRejectionUnavailable {
 		return nil, routeStateFromObservation(actual), errTCPRejectionUnavailable
+	}
+	if desired.udpDropUnverified {
+		return nil, routeStateFromObservation(actual), errUDPPacketDropUnverified
+	}
+	if desired.udpDropUnavailable || desired.spec.UDPPacketDrop == nil && actual.udpDropPool() {
+		return nil, routeStateFromObservation(actual), errUDPPacketDropUnavailable
 	}
 	step, err := planXBackendCookie(desired, actual)
 	switch {
@@ -1159,8 +1176,8 @@ func buildRouteEnsureBackendPlan(desired desiredRoute, actual observedRouteGraph
 			})
 		}
 
-		if tcpRejectionBatchRequired(desired, actual) {
-			batch, memberIDs, err := planTCPMembersAndRejection(desired, actual)
+		if tcpRejectionBatchRequired(desired, actual) || desired.spec.UDPPacketDrop != nil {
+			batch, memberIDs, err := planTransportBatch(desired, actual)
 			if err != nil {
 				return nil, state, err
 			}
@@ -1632,6 +1649,9 @@ func (policy observedRoutePolicy) closureUnverified() bool {
 }
 
 func buildRouteDeletionPlan(actual observedRouteGraph) []routeMutation {
+	if actual.udpDropPool() {
+		return []routeMutation{{kind: routeMutationDeletePool, id: actual.pool.ID}}
+	}
 	plan := make([]routeMutation, 0)
 	for _, policy := range actual.policies {
 		if !policy.pending() && (policy.policy.AdminStateUp || policy.policy.ProvisioningStatus == "ERROR" || policy.closureUnverified()) {
@@ -1698,6 +1718,9 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 		if tagErr != nil {
 			return tagErr
 		}
+		if desired.spec.UDPPacketDrop != nil {
+			tags = append(tags, udpDropPoolTag)
+		}
 		opts := pools.CreateOpts{
 			LBMethod:       pools.LBMethodRoundRobin,
 			Protocol:       pools.Protocol(desired.protocol()),
@@ -1763,8 +1786,12 @@ func (p *Provider) executeRouteMutation(ctx context.Context, desired desiredRout
 		return p.publishBackendCA(ctx, desired.spec)
 	case routeMutationClearPoolMembers:
 		err = p.octavia.ClearMembers(ctx, step.id)
-	case routeMutationReplaceTCPMembers:
-		err = p.octavia.ReplaceTCPMembersAndRejection(ctx, step.id, step.tcpMembers, desired.spec.TCPConnectionRejection)
+	case routeMutationReplaceTransportMembers:
+		if step.udpDrop != nil {
+			err = p.octavia.ReplaceUDPMembersAndDrop(ctx, step.id, step.batchMembers, *step.udpDrop)
+		} else {
+			err = p.octavia.ReplaceTCPMembersAndRejection(ctx, step.id, step.batchMembers, desired.spec.TCPConnectionRejection)
+		}
 	case routeMutationSetBackendTLS:
 		opts := pools.UpdateOpts{AdminStateUp: step.poolAdmin, Tags: step.poolTags, ALPNProtocols: step.poolALPNProtocols}
 		_, err = p.octavia.UpdatePool(ctx, step.id, octavia.UpdatePoolOpts{UpdateOpts: opts, BackendH2C: step.backendH2C, BackendTLS: step.backendTLS,

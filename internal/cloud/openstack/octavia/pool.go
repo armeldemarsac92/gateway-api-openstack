@@ -52,6 +52,7 @@ type PoolInventory struct {
 	BackendTLS             map[string]PoolBackendTLS
 	BackendRetryBudget     map[string]PoolBackendRetryBudget
 	TCPConnectionRejection map[string]PoolTCPConnectionRejection
+	UDPPacketDrop          map[string]PoolUDPPacketDrop
 }
 
 // PoolBackendTLS records which transport fields the API actually reported.
@@ -80,7 +81,8 @@ func (tls PoolBackendTLS) Complete() bool {
 // reads backend transport alongside the stock fields.
 func (s *Service) ListPoolInventory(ctx context.Context, opts pools.ListOpts) (PoolInventory, error) {
 	inventory := PoolInventory{BackendH2C: make(map[string]bool), BackendTLS: make(map[string]PoolBackendTLS),
-		BackendRetryBudget: make(map[string]PoolBackendRetryBudget), TCPConnectionRejection: make(map[string]PoolTCPConnectionRejection)}
+		BackendRetryBudget: make(map[string]PoolBackendRetryBudget), TCPConnectionRejection: make(map[string]PoolTCPConnectionRejection),
+		UDPPacketDrop: make(map[string]PoolUDPPacketDrop)}
 	query, err := opts.ToPoolListQuery()
 	if err != nil {
 		return inventory, fmt.Errorf("list pools: %w", err)
@@ -93,6 +95,7 @@ func (s *Service) ListPoolInventory(ctx context.Context, opts pools.ListOpts) (P
 				pools.Pool
 				BackendRetryBudget     json.RawMessage `json:"backend_retry_budget"`
 				TCPConnectionRejection json.RawMessage `json:"tcp_connection_rejection"`
+				UDPPacketDrop          json.RawMessage `json:"udp_packet_drop"`
 				UpdatedAt              json.RawMessage `json:"updated_at"`
 				BackendH2C             *bool           `json:"backend_h2c"`
 				Hostname               json.RawMessage `json:"backend_tls_hostname"`
@@ -139,15 +142,18 @@ func (s *Service) ListPoolInventory(ctx context.Context, opts pools.ListOpts) (P
 			inventory.BackendTLS[pool.ID] = tls
 			inventory.BackendRetryBudget[pool.ID] = decodeBackendRetryBudget(pool.BackendRetryBudget)
 			rejection := decodeTCPConnectionRejection(pool.TCPConnectionRejection)
-			if rejection.Present {
+			drop := decodeUDPPacketDrop(pool.UDPPacketDrop)
+			if rejection.Present || drop.Present {
 				var timestamp gophercloud.JSONRFC3339NoZ
 				if json.Unmarshal(pool.UpdatedAt, &timestamp) == nil {
 					rejection.UpdatedAt = time.Time(timestamp)
 				} else {
 					_ = json.Unmarshal(pool.UpdatedAt, &rejection.UpdatedAt)
 				}
+				drop.UpdatedAt = rejection.UpdatedAt
 			}
 			inventory.TCPConnectionRejection[pool.ID] = rejection
+			inventory.UDPPacketDrop[pool.ID] = drop
 			items = append(items, pool.Pool)
 			if pool.BackendH2C != nil && *pool.BackendH2C {
 				inventory.BackendH2C[pool.ID] = true
@@ -388,8 +394,8 @@ func (s *Service) ListMembersWithBackup(ctx context.Context, poolID string, opts
 	return s.listCompleteMembers(ctx, poolID, opts, "backup", nil)
 }
 
-// ListMembersForTCPRejection observes the member selection fields atomically updated with rejection.
-func (s *Service) ListMembersForTCPRejection(ctx context.Context, poolID string, opts pools.ListMembersOpts) ([]pools.Member, map[string]struct{}, map[string]struct{}, error) {
+// ListMembersForTransportBatch observes the member selection fields needed to verify a replacement.
+func (s *Service) ListMembersForTransportBatch(ctx context.Context, poolID string, opts pools.ListMembersOpts) ([]pools.Member, map[string]struct{}, map[string]struct{}, error) {
 	missing := make(map[string]struct{})
 	items, missingBackup, err := s.listCompleteMembers(ctx, poolID, opts, "backup", missing)
 	return items, missingBackup, missing, err

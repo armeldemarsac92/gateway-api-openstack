@@ -128,6 +128,8 @@ type desiredRoute struct {
 	backendTLS                  backendTLSPlan
 	backendRetryBudgetAvailable bool
 	tcpRejectionUnavailable     bool
+	udpDropUnverified           bool
+	udpDropUnavailable          bool
 
 	xBackendClientCertificateReference string
 }
@@ -251,6 +253,14 @@ func (p *Provider) buildDesiredRoutePart(spec cloud.RouteSpec, backendKey string
 			return invalid(errors.New("TCP connection rejection requires a positive TCP share and its complete real-member set"))
 		}
 	}
+	if drop := spec.UDPPacketDrop; drop != nil {
+		canForward := slices.ContainsFunc(spec.Members, func(member cloud.Member) bool { return !member.Draining })
+		if protocol != cloud.ListenerProtocolUDP || !drop.Valid() || spec.MemberMode != cloud.MemberModeEndpoint ||
+			spec.HealthMonitor != (cloud.HealthMonitorConfig{}) || len(spec.ScopedListenerPorts) > 1 ||
+			drop.DropsAll() && len(spec.Members) != 0 || !drop.DropsAll() && !canForward {
+			return invalid(errors.New("UDP packet drop requires a dedicated UDP Endpoint listener, no monitor and a complete real-member set"))
+		}
+	}
 	if len(spec.Members) == 0 && spec.MemberMode != cloud.MemberModeEndpoint && !unavailable && fraction == nil {
 		return invalid(errors.New("at least one ready backend member is required"))
 	}
@@ -372,7 +382,7 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 		return desiredRoute{}, cloud.NewProviderError(cloud.ErrorCategoryTerminalValidation, err)
 	}
 	if cloud.NormalizeListenerProtocol(spec.GatewayRequirements.ListenerProtocol) != cloud.ListenerProtocolHTTP ||
-		spec.TCPConnectionRejection != nil ||
+		spec.TCPConnectionRejection != nil || spec.UDPPacketDrop != nil ||
 		spec.Hostname != "" || spec.PathType != "" || spec.PathValue != "" || len(spec.Members) != 0 || spec.BackendH2C || spec.BackendTLS != nil {
 		return invalid(errors.New("HTTP backend groups require HTTP routing without scalar matches or members"))
 	}

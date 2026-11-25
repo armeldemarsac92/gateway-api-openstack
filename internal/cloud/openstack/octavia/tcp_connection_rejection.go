@@ -45,34 +45,43 @@ func decodeTCPConnectionRejection(raw json.RawMessage) PoolTCPConnectionRejectio
 	if string(raw) == "null" {
 		return result
 	}
-	result.Invalid = true
+	weights := decodeBatchFraction(raw, "reject_weight", "total_weight")
+	value := cloud.TCPConnectionRejection{RejectWeight: weights["reject_weight"], TotalWeight: weights["total_weight"]}
+	result.Invalid = len(weights) != 2 || !value.Valid()
+	if !result.Invalid {
+		result.Value = &value
+	}
+	return result
+}
+
+func decodeBatchFraction(raw json.RawMessage, numerator, denominator string) map[string]int {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	if start, err := decoder.Token(); err != nil || start != json.Delim('{') {
-		return result
+		return nil
 	}
 	weights := make(map[string]int, 2)
 	for decoder.More() {
 		key, err := decoder.Token()
-		if err != nil || key != "reject_weight" && key != "total_weight" {
-			return result
+		if err != nil || key != numerator && key != denominator {
+			return nil
 		}
 		var weight *int
 		field := key.(string)
 		if _, duplicate := weights[field]; duplicate || decoder.Decode(&weight) != nil || weight == nil {
-			return result
+			return nil
 		}
 		weights[field] = *weight
 	}
-	value := cloud.TCPConnectionRejection{RejectWeight: weights["reject_weight"], TotalWeight: weights["total_weight"]}
-	if len(weights) == 2 && value.Valid() {
-		result.Value, result.Invalid = &value, false
-	}
-	return result
+	return weights
 }
 
 // ReplaceTCPMembersAndRejection updates a complete set of real members and one
 // rejection fraction. A nil fraction explicitly clears the stored value.
 func (s *Service) ReplaceTCPMembersAndRejection(ctx context.Context, poolID string, members []pools.BatchUpdateMemberOpts, rejection *cloud.TCPConnectionRejection) error {
+	return s.replaceMemberBatch(ctx, poolID, members, tcpConnectionRejectionField, rejection)
+}
+
+func (s *Service) replaceMemberBatch(ctx context.Context, poolID string, members []pools.BatchUpdateMemberOpts, extension string, fraction any) error {
 	items := make([]map[string]any, 0, len(members))
 	for _, member := range members {
 		item, err := member.ToBatchMemberUpdateMap()
@@ -81,7 +90,7 @@ func (s *Service) ReplaceTCPMembersAndRejection(ctx context.Context, poolID stri
 		}
 		items = append(items, item)
 	}
-	body := map[string]any{"members": items, tcpConnectionRejectionField: rejection}
+	body := map[string]any{"members": items, extension: fraction}
 	_, err := s.client.Put(ctx, s.client.ServiceURL("lbaas", "pools", poolID, "members"), body, nil, &gophercloud.RequestOpts{OkCodes: []int{202}})
 	return err
 }
