@@ -78,6 +78,8 @@ type GatewayGraphNode struct {
 	TLSWithdrawalPreviousHosts map[int][]string `json:",omitempty"`
 	// BackendClientCertificate applies only to HTTP-family pools selected by BackendTLSPolicy.
 	BackendClientCertificate BackendClientCertificate
+	// XBackendClientWithdrawals limits certificate checks to these bound XBackend references.
+	XBackendClientWithdrawals []XBackendClientWithdrawal `json:",omitempty"`
 	// BackendCAOwned checkpoints ownership of both frontend and backend trust anchors.
 	BackendCAOwned bool `json:",omitempty"`
 	// ClaimBackendCA checkpoints ownership before creating a Gateway CA revision.
@@ -118,6 +120,15 @@ func (node GatewayGraphNode) AddressWithdrawalOnly() bool {
 type BackendClientCertificate struct {
 	Reference string
 	Denied    bool
+}
+
+// XBackendClientWithdrawal identifies one HTTPRoute's local XBackend reference.
+type XBackendClientWithdrawal struct {
+	Route       Identity
+	BackendName string
+	// AuthorizedReference is the only client certificate the pool may retain.
+	// An empty value withdraws any client identity for this target.
+	AuthorizedReference string
 }
 
 // TLSSNIRoute is one effective hostname and its authorized TCP destinations.

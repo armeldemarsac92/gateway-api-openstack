@@ -100,7 +100,7 @@ func (r *Reconciler) withdrawBoundBackendClientCertificate(ctx context.Context, 
 	return ctrl.Result{}, nil
 }
 
-func (r *Reconciler) observeBackendClientCertificateWithdrawal(ctx context.Context, expected *gatewayv1.Gateway, identity cloud.Identity) (graph.GatewayInput, error) {
+func (r *Reconciler) observeBackendClientCertificateWithdrawal(ctx context.Context, expected *gatewayv1.Gateway, identity cloud.Identity, xBackendOnly bool) (graph.GatewayInput, error) {
 	identity.RouteNamespace, identity.RouteName, identity.RouteUID = "", "", ""
 	observe := func(ctx context.Context) (cloud.BackendClientCertificate, error) {
 		var live gatewayv1.Gateway
@@ -124,6 +124,9 @@ func (r *Reconciler) observeBackendClientCertificateWithdrawal(ctx context.Conte
 		if class.Spec.ControllerName != r.Config.ControllerName {
 			return cloud.BackendClientCertificate{}, errGatewayChanged
 		}
+		if xBackendOnly {
+			return cloud.BackendClientCertificate{}, nil
+		}
 		certificate, _, _ := r.observeBackendClientCertificate(ctx, &live)
 		return certificate, nil
 	}
@@ -131,10 +134,14 @@ func (r *Reconciler) observeBackendClientCertificateWithdrawal(ctx context.Conte
 	if err != nil {
 		return graph.GatewayInput{}, err
 	}
+	spec := cloud.GatewaySpec{Identity: identity, ListenerProtocol: cloud.ListenerProtocolHTTP}
+	if xBackendOnly && controller.GatewayListenerScope(r.Config, expected) == gatewayv1.HTTPProtocolType {
+		spec.ScopedListeners = []cloud.ScopedListener{}
+	}
 	return graph.GatewayInput{
 		Node: cloud.GatewayGraphNode{
 			Disposition:              cloud.GraphWithdrawBackendClientCertificate,
-			Spec:                     cloud.GatewaySpec{Identity: identity, ListenerProtocol: cloud.ListenerProtocolHTTP},
+			Spec:                     spec,
 			BackendCAOwned:           true,
 			BackendClientCertificate: certificate,
 		},

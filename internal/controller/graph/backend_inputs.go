@@ -121,7 +121,7 @@ func CollectBackendInputsWithNamespaces(ctx context.Context, reader client.Reade
 
 // CollectXBackendInputs reads local XBackend references and the matching Pods
 // needed to lower them. A foreign reference never reaches the API reader.
-func CollectXBackendInputs(ctx context.Context, reader client.Reader, input *model.Input, tlsObserver *BackendTLSObserver) error {
+func CollectXBackendInputs(ctx context.Context, reader client.Reader, input *model.Input, tlsObserver *BackendTLSObserver, certificates XBackendClientCertificateResolver) error {
 	if !input.EnableXBackend {
 		return nil
 	}
@@ -141,7 +141,7 @@ func CollectXBackendInputs(ctx context.Context, reader client.Reader, input *mod
 	for _, key := range slices.SortedFunc(maps.Keys(keys), func(a, b types.NamespacedName) int {
 		return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
 	}) {
-		observation, err := tlsObserver.ObserveXBackendReference(ctx, key, input.XBackendProfile)
+		observation, err := tlsObserver.ObserveXBackendReference(ctx, key, input.XBackendProfile, input.Gateway.Spec.GatewayClassName, certificates)
 		if err != nil {
 			return err
 		}
@@ -173,9 +173,14 @@ func CollectXBackendInputs(ctx context.Context, reader client.Reader, input *mod
 	return nil
 }
 
-// ObserveXBackendReference reads an authorized XBackend and its CA without
+// XBackendClientCertificateResolver authorizes the operator-enrolled client identity.
+type XBackendClientCertificateResolver interface {
+	ResolveXBackendClientCertificate(context.Context, gatewayv1.ObjectName, *gatewayx.XBackend) (string, gatewayv1.RouteConditionReason, string)
+}
+
+// ObserveXBackendReference reads an authorized XBackend and its TLS inputs without
 // depending on backend members or a provisioned listener.
-func (o *BackendTLSObserver) ObserveXBackendReference(ctx context.Context, key types.NamespacedName, profile model.XBackendProfile) (*model.XBackendObservation, error) {
+func (o *BackendTLSObserver) ObserveXBackendReference(ctx context.Context, key types.NamespacedName, profile model.XBackendProfile, class gatewayv1.ObjectName, certificates XBackendClientCertificateResolver) (*model.XBackendObservation, error) {
 	backend, err := readXBackend(ctx, o.reader, key)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -192,9 +197,34 @@ func (o *BackendTLSObserver) ObserveXBackendReference(ctx context.Context, key t
 	}
 	observation := &model.XBackendObservation{Key: key, UID: backend.UID, Generation: backend.Generation, Spec: backend.Spec}
 	if model.ValidateXBackend(backend.Spec, profile) == nil && model.XBackendRequiresTLS(backend.Spec) {
-		observation.TLS, err = o.ObserveValidation(ctx, key.Namespace, *backend.Spec.TLS.Validation)
+		err = o.ObserveXBackendTLS(ctx, observation, backend, class, certificates)
 	}
 	return observation, err
+}
+
+// ObserveXBackendTLS reads trust and identity for a validated XBackend TLS spec.
+func (o *BackendTLSObserver) ObserveXBackendTLS(ctx context.Context, observation *model.XBackendObservation, backend *gatewayx.XBackend, class gatewayv1.ObjectName, certificates XBackendClientCertificateResolver) error {
+	tls, err := o.ObserveValidation(ctx, backend.Namespace, *backend.Spec.TLS.Validation)
+	if err != nil {
+		return err
+	}
+	observation.TLS = tls
+	if tls.Validation == nil || backend.Spec.TLS.Mode != gatewayx.BackendTLSModeClientAndServer {
+		return nil
+	}
+	if certificates == nil {
+		observation.ClientCertificateIssue = &model.Diagnostic{Reason: string(gatewayv1.RouteReasonPending), Message: "The operator XBackend client certificate resolver is unavailable"}
+		return nil
+	}
+	reference, reason, message := certificates.ResolveXBackendClientCertificate(ctx, class, backend)
+	if reason != "" {
+		observation.ClientCertificateIssue = &model.Diagnostic{Reason: string(reason), Message: message}
+	} else if reference == "" {
+		observation.ClientCertificateIssue = &model.Diagnostic{Reason: string(gatewayv1.RouteReasonPending), Message: "Waiting to resolve the XBackend client certificate"}
+	} else {
+		observation.ClientCertificateReference = reference
+	}
+	return ctx.Err()
 }
 
 // readXBackend distinguishes a missing or terminating backend from a failed read.

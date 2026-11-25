@@ -21,6 +21,7 @@ import (
 	"context"
 	"maps"
 	"slices"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -39,6 +40,7 @@ import (
 )
 
 const maxXBackendAncestors = 32
+const xBackendClientCertificateResyncInterval = 5 * time.Second
 
 // xBackendStatusReconciler only publishes status. HTTPRoute reconciles the
 // backend's cloud resources through the existing Gateway graph writer.
@@ -66,6 +68,9 @@ func (r *xBackendStatusReconciler) Reconcile(ctx context.Context, request ctrl.R
 	if len(ancestors) > 0 && (r.routes.Config.BackendTLSPolicy && model.XBackendRequiresTLS(backend.Spec) ||
 		r.routes.Config.XBackendSessionPersistenceEnabled() && backend.Spec.SessionPersistence != nil) {
 		result.RequeueAfter = controller.OpenStackResyncAfter(r.routes.Config.OpenStackResyncInterval, backend.UID)
+		if r.routes.Config.XBackendClientCertificate && backend.Spec.TLS != nil && backend.Spec.TLS.Mode == gatewayx.BackendTLSModeClientAndServer {
+			result.RequeueAfter = min(result.RequeueAfter, xBackendClientCertificateResyncInterval)
+		}
 	}
 	backend.Status.Ancestors = mergeXBackendAncestors(backend, r.routes.Config.ControllerName, ancestors)
 	if equality.Semantic.DeepEqual(base.Status, backend.Status) {
@@ -120,15 +125,22 @@ func (r *xBackendStatusReconciler) observeAncestors(ctx context.Context, key typ
 		}
 		condition := xBackendAcceptedCondition(backend, profile)
 		if condition.Status != metav1.ConditionFalse && model.XBackendRequiresTLS(backend.Spec) {
-			validation, err := tlsObserver.ObserveValidation(ctx, backend.Namespace, *backend.Spec.TLS.Validation)
-			if err != nil {
+			var observation model.XBackendObservation
+			if err := tlsObserver.ObserveXBackendTLS(ctx, &observation, backend, gateway.Spec.GatewayClassName, r.routes.XBackendClientCertificates); err != nil {
 				return nil, err
 			}
+			validation := observation.TLS
 			switch {
 			case validation.Pending:
 				condition.Status, condition.Reason, condition.Message = metav1.ConditionUnknown, string(validation.Reason), validation.Message
 			case validation.Validation == nil:
 				condition.Status, condition.Reason, condition.Message = metav1.ConditionFalse, string(validation.Reason), validation.Message
+			case observation.ClientCertificateIssue != nil:
+				issue := observation.ClientCertificateIssue
+				condition.Status, condition.Reason, condition.Message = metav1.ConditionFalse, issue.Reason, issue.Message
+				if issue.Reason == string(gatewayv1.RouteReasonPending) {
+					condition.Status = metav1.ConditionUnknown
+				}
 			default:
 				requirements := xBackendTLSRequirements(validation.Validation)
 				availability := r.routes.backendTLSAvailability(ctx, requirements)

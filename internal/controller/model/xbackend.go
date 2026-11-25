@@ -43,6 +43,7 @@ type XBackendProfile struct {
 	MemberMode         cloud.MemberMode
 	H2C                bool
 	ServerTLS          bool
+	ClientTLS          bool
 	ExternalHostname   bool
 	SessionPersistence bool
 	ServiceDNSDomains  []string
@@ -58,12 +59,15 @@ type XBackendObservation struct {
 	Endpoints  []Endpoint
 	TLS        backendtls.ValidationResult
 	ReadIssue  *Diagnostic
+
+	ClientCertificateReference string `json:"-"`
+	ClientCertificateIssue     *Diagnostic
 }
 
-// XBackendTLSCAKey identifies the trust input of an XBackend using ServerOnly.
+// XBackendTLSCAKey identifies the trust input of an authenticated XBackend.
 func XBackendTLSCAKey(backend *gatewayx.XBackend, bundlesEnabled bool) (types.NamespacedName, bool) {
 	tls := backend.Spec.TLS
-	if tls == nil || tls.Mode != gatewayx.BackendTLSModeServerOnly || tls.Validation == nil {
+	if tls == nil || tls.Validation == nil || tls.Mode != gatewayx.BackendTLSModeServerOnly && tls.Mode != gatewayx.BackendTLSModeClientAndServer {
 		return types.NamespacedName{}, false
 	}
 	return backendtls.ValidationCAKey(backend.Namespace, *tls.Validation, bundlesEnabled)
@@ -128,6 +132,7 @@ func resolveXBackend(route *gatewayv1.HTTPRoute, group BackendGroup, key types.N
 	spec := &backend.Spec
 	group.XBackendRoutedExternal = spec.Type == gatewayx.BackendTypeExternalHostname
 	group.XBackendTLS = backend.TLS.Validation
+	group.XBackendClientCertificateReference = backend.ClientCertificateReference
 	if spec.SessionPersistence != nil {
 		var resolved bool
 		group.XBackendCookieName, resolved = xBackendSessionCookieName(*spec.SessionPersistence, backend.UID)
@@ -169,6 +174,14 @@ func CheckXBackendObservation(key types.NamespacedName, backend *XBackendObserva
 	}
 	if XBackendRequiresTLS(backend.Spec) && backend.TLS.Validation == nil {
 		return xBackendTLSReferenceDiagnostic(backend.TLS)
+	}
+	if backend.Spec.TLS != nil && backend.Spec.TLS.Mode == gatewayx.BackendTLSModeClientAndServer {
+		if backend.ClientCertificateIssue != nil {
+			return backend.ClientCertificateIssue
+		}
+		if backend.ClientCertificateReference == "" {
+			return backendDiagnostic(gatewayv1.RouteReasonPending, "Waiting to resolve the XBackend client certificate")
+		}
 	}
 	return nil
 }
@@ -217,15 +230,21 @@ func ValidateXBackend(spec gatewayx.BackendSpec, profile XBackendProfile) *Diagn
 			if tls.Validation != nil || tls.ClientCertificateRef != nil {
 				return backendDiagnostic(unsupported, "XBackend TLS mode None does not accept validation or a client certificate")
 			}
-		case gatewayx.BackendTLSModeServerOnly:
+		case gatewayx.BackendTLSModeServerOnly, gatewayx.BackendTLSModeClientAndServer:
 			if !profile.ServerTLS {
-				return backendDiagnostic(unsupported, "XBackend TLS mode ServerOnly requires the controller's backend TLS opt-in")
+				return backendDiagnostic(unsupported, "Authenticated XBackends require the controller's backend TLS opt-in")
 			}
-			if tls.Validation == nil || !backendtls.IsPreciseHostname(string(tls.Validation.Hostname)) || tls.ClientCertificateRef != nil {
-				return backendDiagnostic(unsupported, "XBackend TLS mode ServerOnly requires validation.hostname to be a precise DNS hostname and no client certificate reference")
+			if tls.Mode == gatewayx.BackendTLSModeClientAndServer && !profile.ClientTLS {
+				return backendDiagnostic(unsupported, "XBackend TLS mode ClientAndServer requires the operator's XBackend client certificate map")
+			}
+			if (tls.Mode == gatewayx.BackendTLSModeClientAndServer) != (tls.ClientCertificateRef != nil) {
+				return backendDiagnostic(unsupported, "XBackend TLS requires a client certificate reference only in ClientAndServer mode")
+			}
+			if tls.Validation == nil || !backendtls.IsPreciseHostname(string(tls.Validation.Hostname)) {
+				return backendDiagnostic(unsupported, "Authenticated XBackends require validation.hostname to be a precise DNS hostname")
 			}
 			if protocol != "" && protocol != gatewayx.BackendProtocolHTTP && protocol != gatewayx.BackendProtocolHTTP11 {
-				return backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "XBackend TLS mode ServerOnly supports HTTP and HTTP11")
+				return backendDiagnostic(gatewayv1.RouteReasonUnsupportedProtocol, "Authenticated XBackends support HTTP and HTTP11")
 			}
 		default:
 			return backendDiagnostic(unsupported, fmt.Sprintf("XBackend TLS mode %q is unsupported", tls.Mode))

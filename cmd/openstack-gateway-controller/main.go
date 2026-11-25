@@ -94,6 +94,7 @@ func run(ctx context.Context) error {
 		gatewayAPIChannel  string
 		certificateMap     string
 		backendClientMap   string
+		xBackendClientMap  string
 		backendTLSPolicy   bool
 		grpcContentType    bool
 		fixedHTTPResponses bool
@@ -185,6 +186,7 @@ func run(ctx context.Context) error {
 	flag.BoolVar(&requestHeaderModifier, "octavia-request-header-modifier", false, "use the advertised Octavia L7 request header operations capability")
 	flag.StringVar(&certificateMap, "tls-certificate-map", envOr("GATEWAY_OPENSTACK_TLS_CERTIFICATE_MAP", ""), "operator-managed TLS revision map for terminating listeners")
 	flag.StringVar(&backendClientMap, "backend-client-certificate-map", envOr("GATEWAY_OPENSTACK_BACKEND_CLIENT_CERTIFICATE_MAP", ""), "operator-managed TLS revision map for Gateway client certificates to TLS backends (requires --octavia-backend-tls-policy)")
+	flag.StringVar(&xBackendClientMap, "xbackend-client-certificate-map", envOr("GATEWAY_OPENSTACK_XBACKEND_CLIENT_CERTIFICATE_MAP", ""), "operator-managed TLS revision map for Experimental XBackend client certificates (requires --octavia-backend-tls-policy)")
 	flag.StringVar(&clusterID, "cluster-id", envOr("GATEWAY_OPENSTACK_CLUSTER_ID", ""), "stable unique identifier for this Kubernetes cluster (required)")
 	flag.StringVar(&region, "openstack-region", envOr("OS_REGION_NAME", ""), "OpenStack region; defaults to clouds.yaml or OS_REGION_NAME")
 	flag.StringVar(&microversion, "octavia-microversion", "2.5", "Octavia API microversion (2.5 or later is required for resource tags)")
@@ -269,6 +271,7 @@ func run(ctx context.Context) error {
 		XBackendExternalHostnameClasses: xBackendExternalHostnameClasses,
 		XBackendExternalHostnameCIDRs:   xBackendExternalHostnameCIDRs,
 		XBackendServiceDNSDomains:       xBackendServiceDNSDomains,
+		XBackendClientCertificate:       xBackendClientMap != "",
 
 		BackendClientCertificate: backendClientMap != "",
 		FrontendClientValidation: frontendClientValidation,
@@ -363,9 +366,10 @@ func run(ctx context.Context) error {
 		Recorder:         eventRecorder,
 		Config:           controllerConfig,
 	}
-	if controllerConfig.OperatorHTTPS || controllerConfig.BackendClientCertificate {
-		resolver := &certificates.Resolver{
-			Path: certificateMap, BackendClientPath: backendClientMap, Reader: manager.GetAPIReader(),
+	var resolver *certificates.Resolver
+	if controllerConfig.OperatorHTTPS || controllerConfig.BackendClientCertificate || controllerConfig.XBackendClientCertificate {
+		resolver = &certificates.Resolver{
+			Path: certificateMap, BackendClientPath: backendClientMap, XBackendClientPath: xBackendClientMap, Reader: manager.GetAPIReader(),
 			ClusterID: controllerConfig.ClusterID, ProjectID: serviceClients.ProjectID, Region: serviceClients.Region,
 			DiscoverEndpoint: func() (string, error) {
 				// Catalog availability can change while other Gateway listeners continue serving.
@@ -399,6 +403,9 @@ func run(ctx context.Context) error {
 		APIReader:                    manager.GetAPIReader(),
 		Recorder:                     eventRecorder,
 		Config:                       controllerConfig,
+	}
+	if controllerConfig.XBackendClientCertificate {
+		routeReconciler.XBackendClientCertificates = resolver
 	}
 	tcpReconciler := &l4route.Reconciler{
 		Protocol: gatewayv1.TCPProtocolType,

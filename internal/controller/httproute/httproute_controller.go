@@ -91,8 +91,10 @@ type Reconciler struct {
 	GRPCBackendTLSAvailable func(context.Context) (bool, error)
 	// BackendTLSSANAvailable checks explicit SANs and the selected transport.
 	BackendTLSSANAvailable func(context.Context, bool) (bool, error)
-	// XBackendTLSAvailable checks the ServerOnly profile, including pool ALPN.
+	// XBackendTLSAvailable checks backend authentication support including pool ALPN.
 	XBackendTLSAvailable func(context.Context, bool) (bool, error)
+	// XBackendClientCertificates resolves identities from the operator's XBackend enrollment.
+	XBackendClientCertificates graph.XBackendClientCertificateResolver
 	// TCPBackendTLSAvailable checks authenticated TLS for terminating TLSRoutes.
 	TCPBackendTLSAvailable func(context.Context) (bool, error)
 	// Recorder publishes Kubernetes Events.
@@ -403,6 +405,10 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 		return ctrl.Result{}, fmt.Errorf("invalid HTTPRoute binding state %d", graphResult.bindingState)
 	}
 	resyncAfter := controller.OpenStackResyncAfter(r.Config.OpenStackResyncInterval, httpRoute.UID)
+	pollXBackendClientIdentity := r.Config.XBackendClientCertificate && len(model.LocalXBackendReferences(httpRoute)) != 0
+	if pollXBackendClientIdentity {
+		resyncAfter = min(resyncAfter, xBackendClientCertificateResyncInterval)
+	}
 	if graphResult.UnsupportedMatch != "" {
 		status := programmedRouteStatus()
 		status.accepted, status.acceptedReason, status.acceptedMessage = metav1.ConditionFalse, string(gatewayv1.RouteReasonUnsupportedValue), graphResult.UnsupportedMatch
@@ -419,7 +425,7 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 				Reason: string(gatewayv1.RouteReasonUnsupportedProtocol), Message: graphResult.UnsupportedBackendProtocol,
 			}
 		}
-		if !graphResult.ObservationDeferred || graphResult.backendTLSAncestorSlot != backendtls.AncestorSlotHeld ||
+		if graphResult.usesXBackendClientTLS || !graphResult.ObservationDeferred || graphResult.backendTLSAncestorSlot != backendtls.AncestorSlotHeld ||
 			graphResult.BackendSessionPersistenceIssue >= cloud.SessionPersistenceUnverified ||
 			r.currentRouteProgrammedCondition(httpRoute, parent.ref) == nil ||
 			!r.currentBackendResolution(httpRoute, parent.ref, graphResult.backendDiagnostic) {

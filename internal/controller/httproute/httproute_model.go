@@ -730,7 +730,11 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 	}
 	result, observed := groups[key]
 	var members []cloud.Member
+	var clientCertificate string
 	tls := inputs.backendTLSValidation(backend, spec.GRPC)
+	if tls != nil && !tls.Denied {
+		clientCertificate = backend.XBackendClientCertificateReference
+	}
 	if !observed {
 		switch {
 		case backend.XBackendTLSRequired && tls.Denied:
@@ -775,6 +779,7 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 			SessionCookieName: backend.XBackendCookieName,
 			Members:           members, Unavailable: len(members) == 0, InvalidReference: invalidReference,
 			BackendH2C: !invalid && tls == nil && backend.UsesH2C(), BackendTLS: tls,
+			XBackendClientCertificateReference: clientCertificate,
 		})
 	}
 	groups[key] = result

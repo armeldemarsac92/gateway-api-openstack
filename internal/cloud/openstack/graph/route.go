@@ -128,6 +128,8 @@ type desiredRoute struct {
 	backendTLS                  backendTLSPlan
 	backendRetryBudgetAvailable bool
 	tcpRejectionUnavailable     bool
+
+	xBackendClientCertificateReference string
 }
 
 func (r desiredRoute) protocol() string {
@@ -407,6 +409,9 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 			(spec.GRPC || spec.MemberMode != cloud.MemberModeEndpoint || len(spec.BackendSecurityGroupIDs) != 0 || backend.BackendH2C) {
 			return invalid(errors.New("authenticated XBackends require an unmanaged HTTP endpoint pool"))
 		}
+		if backend.XBackendClientCertificateReference != "" && (!xBackend || backend.BackendTLS == nil || deniedTLS || backend.InvalidReference || mirrorsUsed[index]) {
+			return invalid(errors.New("an XBackend client certificate requires an authenticated XBackend forwarding pool"))
+		}
 		if backend.SessionCookieName != "" && (!xBackend || spec.GRPC || spec.MemberMode != cloud.MemberModeEndpoint ||
 			len(spec.BackendSecurityGroupIDs) != 0 || backend.RoutedExternal || backend.BackendH2C ||
 			mirrorsUsed[index] || !cloud.ValidHTTPSessionCookieName(backend.SessionCookieName)) {
@@ -429,6 +434,7 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 		part.fixedResponse = fixedResponse
 		part.xBackend = xBackend
 		part.xBackendPlaintext = xBackend && !backend.InvalidReference && backend.BackendTLS == nil
+		part.xBackendClientCertificateReference = backend.XBackendClientCertificateReference
 		part.sessionCookieName = backend.SessionCookieName
 		for _, role := range []string{rolePool, roleMember, roleMonitor} {
 			if _, err := part.identity.RouteTags(part.httpRole(role, "")); err != nil {

@@ -69,9 +69,9 @@ func validName(target client.ObjectKey) bool {
 		len(validation.IsDNS1123Subdomain(target.Name)) == 0
 }
 
-func findBinding(path, purpose string, scope bindingScope, target client.ObjectKey) (binding, bool) {
+func findBinding(path, purpose string, scope bindingScope, target client.ObjectKey) (binding, bool, error) {
 	if !scope.valid() {
-		return binding{}, false
+		return binding{}, false, nil
 	}
 	var snapshot struct {
 		Version   int          `json:"version"`
@@ -80,31 +80,37 @@ func findBinding(path, purpose string, scope bindingScope, target client.ObjectK
 		Revisions []binding    `json:"revisions"`
 	}
 	info, err := os.Stat(path)
-	if err != nil || !info.Mode().IsRegular() || info.Size() > maxSnapshotBytes {
-		return binding{}, false
+	if err != nil {
+		return binding{}, false, err
+	}
+	if !info.Mode().IsRegular() || info.Size() > maxSnapshotBytes {
+		return binding{}, false, nil
 	}
 	file, err := os.Open(path)
 	if err != nil {
-		return binding{}, false
+		return binding{}, false, err
 	}
 	defer func() { _ = file.Close() }()
 	payload, err := io.ReadAll(io.LimitReader(file, maxSnapshotBytes+1))
-	if err != nil || len(payload) > maxSnapshotBytes ||
+	if err != nil {
+		return binding{}, false, err
+	}
+	if len(payload) > maxSnapshotBytes ||
 		json.Unmarshal(payload, &snapshot, json.RejectUnknownMembers(true)) != nil ||
 		snapshot.Version != 1 || snapshot.Purpose != purpose || snapshot.Scope != scope || snapshot.Revisions == nil {
-		return binding{}, false
+		return binding{}, false, nil
 	}
 	var selected binding
 	seen := make(map[client.ObjectKey]struct{}, len(snapshot.Revisions))
 	for _, row := range snapshot.Revisions {
 		key := client.ObjectKey{Namespace: row.Namespace, Name: row.Name}
 		if _, duplicate := seen[key]; duplicate || !validName(key) || !row.valid() {
-			return binding{}, false
+			return binding{}, false, nil
 		}
 		seen[key] = struct{}{}
 		if key == target {
 			selected = row
 		}
 	}
-	return selected, selected.Name != ""
+	return selected, selected.Name != "", nil
 }
