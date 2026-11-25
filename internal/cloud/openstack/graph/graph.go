@@ -57,6 +57,7 @@ type observedGatewayGraph struct {
 	requestFilters                   map[string]octavia.ListenerRequestFilterObservation
 	unverifiedListenerFilters        map[int]bool
 	unavailableListenerFilters       map[int]bool
+	unavailableListenerBodySections  map[int][]string
 	pendingListenerFilterCapability  map[int]bool
 	recoveringListenerFilterSections map[int][]string
 	listenerFilterMutation           *graphMutation
@@ -162,6 +163,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 			result.Gateway.ListenerFilterUnavailablePorts = append(result.Gateway.ListenerFilterUnavailablePorts, port)
 		}
 		slices.Sort(result.Gateway.ListenerFilterUnavailablePorts)
+		result.Gateway.ListenerFilterBodyUnavailableSections = actual.unavailableListenerBodySections
 		for port := range actual.pendingListenerFilterCapability {
 			result.Gateway.ListenerFilterCapabilityPendingPorts = append(result.Gateway.ListenerFilterCapabilityPendingPorts, port)
 		}
@@ -302,7 +304,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	}
 	if step := actual.listenerFilterMutation; step != nil && (err == nil || step.kind == graphDisableListener) {
 		if step.kind != graphDisableListener && err == nil && spec.Gateway.Disposition == cloud.GraphEnsure {
-			if securityErr := p.validateGraphTrafficSecurity(ctx, desired); securityErr != nil {
+			if securityErr := p.validateGraphTrafficSecurity(ctx, desired, actual); securityErr != nil {
 				return result, securityErr
 			}
 		}
@@ -498,7 +500,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 		plan = plan[:1]
 	}
 	if spec.Gateway.Disposition == cloud.GraphEnsure && (len(plan) == 0 || plan[0].kind != graphClearListenerDefaultPool && !plan[0].withdrawHTTPPolicy && !plan[0].isRestrictiveSNI()) {
-		if err := p.validatePlannedTrafficSecurity(ctx, desired, plan); err != nil {
+		if err := p.validatePlannedTrafficSecurity(ctx, desired, actual, plan); err != nil {
 			result.Routes = observedRouteDeleteCompletions(desired, actual)
 			return result, err
 		}
@@ -818,7 +820,7 @@ func canWithdrawHTTPWithoutAddress(step graphMutation, desired desiredGatewayGra
 	return false
 }
 
-func (p *Provider) validatePlannedTrafficSecurity(ctx context.Context, desired desiredGatewayGraph, plan []graphMutation) error {
+func (p *Provider) validatePlannedTrafficSecurity(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph, plan []graphMutation) error {
 	if len(plan) != 0 && plan[0].kind == graphRouteMutation && plan[0].route.kind == routeMutationCreatePool {
 		route := desired.routes[plan[0].routeIndex]
 		if route.spec.UDPPacketDrop != nil {
@@ -829,10 +831,10 @@ func (p *Provider) validatePlannedTrafficSecurity(ctx context.Context, desired d
 			return p.validateUDPPacketDropSecurity(ctx, desired, route, port)
 		}
 	}
-	return p.validateGraphTrafficSecurity(ctx, desired)
+	return p.validateGraphTrafficSecurity(ctx, desired, actual)
 }
 
-func (p *Provider) validateGraphTrafficSecurity(ctx context.Context, desired desiredGatewayGraph) error {
+func (p *Provider) validateGraphTrafficSecurity(ctx context.Context, desired desiredGatewayGraph, actual observedGatewayGraph) error {
 	spec := desired.spec.Gateway.Spec
 	if isSNIProtocol(desired.protocol) {
 		spec.ListenerProtocol = cloud.ListenerProtocolTCP
@@ -877,10 +879,13 @@ func (p *Provider) validateGraphTrafficSecurity(ctx context.Context, desired des
 	}
 	routes := make([]cloud.RouteSpec, 0, len(desired.routes))
 	for port, sections := range spec.RequestFilterSections {
-		if deniedPorts[port] {
+		if deniedPorts[port] || actual.unavailableListenerFilters[port] {
 			continue
 		}
 		for _, section := range sections {
+			if !actual.listenerFilterCanUseAuthorizers(port, section) {
+				continue
+			}
 			for _, auth := range section.Requests {
 				routes = append(routes, cloud.RouteSpec{Identity: spec.Identity, Members: auth.Members, MemberSubnetID: auth.MemberSubnetID,
 					BackendSecurityGroupIDs: auth.BackendSecurityGroups, ScopedListenerPorts: []int{port}})

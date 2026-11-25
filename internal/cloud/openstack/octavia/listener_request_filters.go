@@ -20,11 +20,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"slices"
 
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/listeners"
 )
 
 const GatewayCapabilityListenerRequestFilters = "listener_request_filters_v1"
+const GatewayCapabilityListenerExternalAuthForwardBody = "listener_http_external_auth_forward_body_v1"
+const GatewayCapabilityListenerHTTPSExternalAuthForwardBody = "listener_https_external_auth_forward_body_v1"
 
 type ListenerRequestFilterSection struct {
 	Hostname string                  `json:"hostname"`
@@ -40,8 +43,39 @@ type ListenerRequestFilter struct {
 type ListenerHTTPExternalAuth struct {
 	PoolID                 string   `json:"pool_id"`
 	PathPrefix             string   `json:"path_prefix,omitempty"`
+	ForwardBodyMaxSize     int32    `json:"forward_body_max_size,omitempty"`
 	AllowedRequestHeaders  []string `json:"allowed_request_headers,omitempty"`
 	AllowedResponseHeaders []string `json:"allowed_response_headers,omitempty"`
+}
+
+type ListenerRequestFilterBodyLimits struct {
+	HTTP  int32
+	HTTPS int32
+}
+
+// ListenerRequestFilterBodyLimits verifies the base listener capability and
+// leaves each unsupported transport's body limit at zero.
+func (s *Service) ListenerRequestFilterBodyLimits(ctx context.Context, provider string) (ListenerRequestFilterBodyLimits, error) {
+	var limits ListenerRequestFilterBodyLimits
+	response, err := s.providerGatewayCapabilities(ctx, provider)
+	if err != nil {
+		return limits, err
+	}
+	if !slices.Contains(response.Capabilities, GatewayCapabilityListenerRequestFilters) {
+		return limits, &MissingGatewayCapability{Provider: provider, Capability: GatewayCapabilityListenerRequestFilters}
+	}
+	limit, err := response.authBodyLimit()
+	if err != nil {
+		// The optional body profiles are unusable. Keep bodyless listeners working.
+		return limits, nil
+	}
+	if slices.Contains(response.Capabilities, GatewayCapabilityListenerExternalAuthForwardBody) {
+		limits.HTTP = limit
+	}
+	if slices.Contains(response.Capabilities, GatewayCapabilityListenerHTTPSExternalAuthForwardBody) {
+		limits.HTTPS = limit
+	}
+	return limits, nil
 }
 
 type ListenerRequestFilterObservation struct {

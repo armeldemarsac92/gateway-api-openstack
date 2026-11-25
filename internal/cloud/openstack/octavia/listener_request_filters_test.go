@@ -28,13 +28,16 @@ func TestListenerRequestFiltersWireOrderAndClearing(t *testing.T) {
 		Hostname: "example.test",
 		Requests: []ListenerRequestFilter{
 			{Type: "ExternalAuth", HTTP: ListenerHTTPExternalAuth{PoolID: "two", AllowedResponseHeaders: []string{"x-identity"}}},
-			{Type: "ExternalAuth", HTTP: ListenerHTTPExternalAuth{PoolID: "one", PathPrefix: "/check"}},
+			{Type: "ExternalAuth", HTTP: ListenerHTTPExternalAuth{PoolID: "one", PathPrefix: "/check", ForwardBodyMaxSize: 4096}},
 		},
 	}}).ToListenerUpdateMap()
 	require.NoError(t, err)
 	wire, err := json.Marshal(body)
 	require.NoError(t, err)
-	require.JSONEq(t, `{"listener":{"request_filter_sections":[{"hostname":"example.test","requests":[{"type":"ExternalAuth","http":{"pool_id":"two","allowed_response_headers":["x-identity"]}},{"type":"ExternalAuth","http":{"pool_id":"one","path_prefix":"/check"}}]}]}}`, string(wire))
+	require.JSONEq(t, `{"listener":{"request_filter_sections":[{"hostname":"example.test","requests":[{"type":"ExternalAuth","http":{"pool_id":"two","allowed_response_headers":["x-identity"]}},{"type":"ExternalAuth","http":{"pool_id":"one","path_prefix":"/check","forward_body_max_size":4096}}]}]}}`, string(wire))
+	observation := decodeListenerRequestFilters(json.RawMessage(`[{"hostname":"example.test","requests":[{"type":"ExternalAuth","http":{"pool_id":"one","forward_body_max_size":4096}}]}]`))
+	require.True(t, observation.Readable)
+	require.EqualValues(t, 4096, observation.Sections[0].Requests[0].HTTP.ForwardBodyMaxSize)
 	var clear listenerRequestFilterUpdate
 	body, err = clear.ToListenerUpdateMap()
 	require.NoError(t, err)

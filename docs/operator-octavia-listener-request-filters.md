@@ -4,7 +4,7 @@ Use an Experimental Gateway listener request filter to call an HTTP authorizatio
 
 ## Enable the Amphora capability
 
-1. Install the matching Octavia and octavia-lib builds, apply Octavia migration `cadb700cba48`, and roll out the updated API, workers and Amphora image. [Octavia release](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-listener-request-filters-ef3b2204f472) · [octavia-lib release](https://github.com/armeldemarsac92/octavia-lib/releases/tag/hibiscus-listener-request-filters-0ca1468da861)
+1. Install matching Octavia and octavia-lib builds, apply Octavia migration `cadb700cba48`, and roll out the API, workers and Amphora image. The linked baseline supports bodyless checks. Body forwarding needs an upgraded Octavia build that advertises the HTTP or HTTPS capability listed below. [Bodyless Octavia release](https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-listener-request-filters-ef3b2204f472) · [octavia-lib release](https://github.com/armeldemarsac92/octavia-lib/releases/tag/hibiscus-listener-request-filters-0ca1468da861)
 2. Set `enabled_listener_request_filter_providers = amphora` in Octavia's `[api_settings]`. Use the controller's regional endpoint and credentials to read `GET /v2/lbaas/providers/amphora/gateway_capabilities`. Verify that `gateway_capabilities` includes `listener_request_filters_v1`.
 3. Install the Gateway API v1.7.0 Experimental CRDs. In the controller deployment, set `--gateway-api-channel=experimental` and add `--octavia-listener-request-filters`. The controller needs read access to Services, EndpointSlices, ReferenceGrants and BackendTLSPolicies. Configure the GatewayClass member mode and network so that the Amphora can reach the authorization Service.
 
@@ -52,6 +52,44 @@ spec:
 ```
 
 The local traffic qualification covers HTTP Gateway listeners, bodyless HTTP authorization to a core Service and HTTPRoute forwarding. It uses an IPv4 Endpoint member, one HTTP auth stage and two exact hostnames on a shared port.
+
+## Forward the request body
+
+On an Experimental `HTTP` or TLS-terminating `HTTPS` listener, set
+`externalAuth.forwardBody.maxSize` to the largest request body that the HTTP
+authorizer should receive, in bytes. For example, `forwardBody: {maxSize: 32768}`
+allows up to 32 KiB. Omit the setting or use zero for a bodyless check. HTTPS
+also requires the controller's operator HTTPS profile.
+
+After qualifying the Amphora fleet, enable the appropriate option in Octavia's
+`[api_settings]` and check regional discovery.
+
+| Listener | Octavia option | Required body capability |
+| --- | --- | --- |
+| HTTP | `enabled_listener_external_auth_forward_body_providers = amphora` | `listener_http_external_auth_forward_body_v1` |
+| HTTPS | `enabled_https_listener_external_auth_forward_body_providers = amphora` | `listener_https_external_auth_forward_body_v1` |
+
+Both modes require `listener_request_filters_v1` and a
+`l7policy_external_auth_max_body_bytes` value at least as large as the configured
+limit. Octavia shares the per-process buffer budget and published maximum across
+listener and route policies. An HTTPS region needs the HTTPS capability even if
+it already advertises the HTTP capability. The controller uses the existing
+Experimental listener filter flag. TLS terminates at the frontend and the
+authorization Service still receives an HTTP check.
+
+An oversized request receives HTTP 413 before the affected check. If matching
+listener and HTTPRoute filters both forward the body, the listener checks run
+before route selection. Each check receives the complete body and successful
+requests reach the origin once. If the region cannot honor a listener's
+configured maximum, the controller programs a rejection for that hostname
+and reports `Accepted=False/UnsupportedValue` for its listener section.
+
+On HTTPS, the TLS connection's SNI selects the listener filter chain. On a
+shared port, the HTTP authority must also select the same section before
+any check runs. A port enrolled in shared-listener isolation keeps that check when just one
+section remains. A dedicated port outside shared-listener isolation preserves
+the HTTP authority for the authorizer and the route. The native HAProxy fixture covers uploads over
+HTTP/1.1 and negotiated HTTP/2 on a shared TLS port. [Gateway and native HAProxy results](qualification/v1.7.0/provider/gateway-listener-external-auth-forward-body/README.md)
 
 ## Check a grant change
 

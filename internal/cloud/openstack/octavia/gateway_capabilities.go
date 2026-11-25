@@ -104,11 +104,9 @@ func (s *Service) VerifyGatewayCapabilitiesForBody(ctx context.Context, provider
 		}
 	}
 	if bodySize > 0 {
-		var limit int32
-		if len(response.MaxAuthBodyBytes) != 0 {
-			if err := json.Unmarshal(response.MaxAuthBodyBytes, &limit); err != nil || limit < 0 {
-				return fmt.Errorf("invalid maximum authorization body size reported by Octavia provider %q", provider)
-			}
+		limit, err := response.authBodyLimit()
+		if err != nil {
+			return fmt.Errorf("invalid maximum authorization body size reported by Octavia provider %q: %w", provider, err)
 		}
 		if bodySize > limit {
 			return fmt.Errorf("authorization requires %d bytes, region advertises %d: %w", bodySize, limit,
@@ -121,6 +119,19 @@ func (s *Service) VerifyGatewayCapabilitiesForBody(ctx context.Context, provider
 type providerGatewayCapabilities struct {
 	Capabilities     []string        `json:"gateway_capabilities"`
 	MaxAuthBodyBytes json.RawMessage `json:"l7policy_external_auth_max_body_bytes"`
+}
+
+func (response providerGatewayCapabilities) authBodyLimit() (int32, error) {
+	var limit int32
+	if len(response.MaxAuthBodyBytes) != 0 {
+		if err := json.Unmarshal(response.MaxAuthBodyBytes, &limit); err != nil {
+			return 0, err
+		}
+		if limit < 0 {
+			return 0, fmt.Errorf("maximum authorization body size must be nonnegative")
+		}
+	}
+	return limit, nil
 }
 
 // GatewayCapabilities reads the selected region's capability list.
