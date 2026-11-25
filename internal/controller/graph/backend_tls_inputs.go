@@ -145,9 +145,10 @@ func (o *BackendTLSObserver) Observe(ctx context.Context, service *corev1.Servic
 		if key.Namespace == "" {
 			if _, observed := o.cas.ClusterTrustBundles[key.Name]; !observed {
 				bundle, err := o.bundles.Read(ctx, key.Name)
-				if err != nil {
+				if err := ctx.Err(); err != nil {
 					return backendtls.Selection{}, err
 				}
+				bundle.Unavailable = err
 				o.cas.ClusterTrustBundles[key.Name] = bundle
 			}
 			continue
@@ -169,13 +170,23 @@ func (o *BackendTLSObserver) Observe(ctx context.Context, service *corev1.Servic
 		}
 	}
 	selection := backendtls.Evaluate(service, port, items, o.cas)
-	if ancestor != nil && selection.Winner != nil {
-		for i := range items {
-			if items[i].Name == selection.Winner.Key.Name {
-				selection.Winner.AncestorSlot = ancestor.Slot(&items[i])
-				break
+	if selection.Winner == nil {
+		return selection, nil
+	}
+	for i := range items {
+		policy := &items[i]
+		if policy.Name != selection.Winner.Key.Name {
+			continue
+		}
+		if key, ok := backendtls.CAKey(policy, o.bundles != nil); ok && key.Namespace == "" {
+			if err := o.cas.ClusterTrustBundles[key.Name].Unavailable; err != nil {
+				return backendtls.Selection{}, err
 			}
 		}
+		if ancestor != nil {
+			selection.Winner.AncestorSlot = ancestor.Slot(policy)
+		}
+		break
 	}
 	return selection, nil
 }

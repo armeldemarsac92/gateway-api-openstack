@@ -29,6 +29,7 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -106,6 +107,14 @@ func validate(result *PolicyResult, spec gatewayv1.BackendTLSPolicySpec, inputs 
 		message := fmt.Sprintf("CA reference %q has unsupported group %q and kind %q", ref.Name, ref.Group, ref.Kind)
 		result.reject(gatewayv1.BackendTLSPolicyReasonNoValidCACertificate, message)
 		result.rejectRef(gatewayv1.BackendTLSPolicyReasonInvalidKind, message)
+		return
+	}
+	if observation.Unavailable != nil {
+		for _, condition := range []*metav1.Condition{&result.Accepted, &result.ResolvedRefs} {
+			condition.Status = metav1.ConditionUnknown
+			condition.Reason = "Pending"
+			condition.Message = "Waiting to read the referenced ClusterTrustBundle"
+		}
 		return
 	}
 	if observation.Invalid != nil {

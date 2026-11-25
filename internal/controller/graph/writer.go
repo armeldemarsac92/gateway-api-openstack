@@ -262,8 +262,8 @@ func (w *Writer) observeHTTPSCleanupAuthority(ctx context.Context, request Reque
 }
 
 func (w *Writer) finishFailedEnsure(ctx context.Context, request Request, gateway GatewayInput, result cloud.GatewayGraphResult, graphErr error) (cloud.GatewayGraphResult, error) {
-	if errors.Is(graphErr, backendtls.ErrClusterTrustBundleUnavailable) {
-		return w.finishTLS(ctx, request.Identity, gateway, result, graphErr)
+	if gateway.Object == nil {
+		gateway.Object = request.Gateway
 	}
 	var backendErr error
 	if request.Action == Ensure && gateway.Node.BackendCAOwned &&
@@ -275,9 +275,6 @@ func (w *Writer) finishFailedEnsure(ctx context.Context, request Request, gatewa
 			_, err = w.withdrawBackendClientCertificate(ctx, request.Identity, input)
 		}
 		backendErr = err
-	}
-	if gateway.Object == nil {
-		gateway.Object = request.Gateway
 	}
 	result, err := w.finishTLS(ctx, request.Identity, gateway, result, graphErr)
 	if backendErr != nil {

@@ -18,8 +18,11 @@ package graph
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/pem"
 	"errors"
 	"fmt"
+	"net/http"
 	"reflect"
 	"slices"
 	"testing"
@@ -30,11 +33,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/util/cert"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
@@ -330,6 +336,58 @@ func TestBackendTLSUnreadableCAStillProtectsOnlyItsService(t *testing.T) {
 	}
 	if peer, ok := input.BackendTLSPolicies[model.ServicePortKey{Service: client.ObjectKeyFromObject(healthy), Port: 80}]; !ok || peer.Winner != nil {
 		t.Fatal("unrelated Service was omitted or inherited the CA failure")
+	}
+}
+
+func TestClusterTrustBundleOutageOnlyDelaysEffectivePolicy(t *testing.T) {
+	service := backendInputService("store", "app")
+	port := &service.Spec.Ports[0]
+	configPolicy := &gatewayv1.BackendTLSPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "a-config", Namespace: service.Namespace},
+		Spec: gatewayv1.BackendTLSPolicySpec{
+			TargetRefs: []gatewayv1.LocalPolicyTargetReferenceWithSectionName{{
+				LocalPolicyTargetReference: gatewayv1.LocalPolicyTargetReference{Kind: "Service", Name: "store"},
+			}},
+			Validation: gatewayv1.BackendTLSPolicyValidation{
+				Hostname: "store.example.test", CACertificateRefs: []gatewayv1.LocalObjectReference{{Kind: "ConfigMap", Name: "root"}},
+			},
+		},
+	}
+	bundlePolicy := configPolicy.DeepCopy()
+	bundlePolicy.Name = "b-bundle"
+	bundlePolicy.Spec.Validation.CACertificateRefs[0] = gatewayv1.LocalObjectReference{Group: "certificates.k8s.io", Kind: "ClusterTrustBundle", Name: "roots"}
+	bundles, err := backendtls.NewClusterTrustBundles(&rest.Config{Host: "https://kubernetes.example.test"}, http.DefaultClient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, key, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ca, err := cert.NewSelfSignedCACert(cert.Config{CommonName: "root"}, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "root", Namespace: service.Namespace, UID: "config-root"},
+		Data:       map[string]string{"ca.crt": string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: ca.Raw}))},
+	}
+	reader := newBackendInputReader(t, configPolicy, bundlePolicy, roots)
+	selection, err := NewBackendTLSObserver(reader, bundles).Observe(t.Context(), service, port, nil)
+	if err != nil || selection.Winner == nil || selection.Winner.Key.Name != configPolicy.Name ||
+		selection.Winner.Validation == nil || selection.Winner.Validation.CA.UID != roots.UID {
+		t.Fatalf("effective ConfigMap trust was not selected: %v", err)
+	}
+	if len(selection.Policies) != 2 || selection.Policies[1].Accepted.Reason != string(gatewayv1.PolicyReasonConflicted) ||
+		selection.Policies[1].ResolvedRefs.Status != metav1.ConditionUnknown {
+		t.Fatal("the losing policy must report both its conflict and the unknown bundle reference")
+	}
+	if err := reader.client.Delete(t.Context(), configPolicy); err != nil {
+		t.Fatal(err)
+	}
+	_, err = NewBackendTLSObserver(reader, bundles).Observe(t.Context(), service, port, nil)
+	if !errors.Is(err, backendtls.ErrClusterTrustBundleUnavailable) {
+		t.Fatalf("the effective bundle policy must wait for discovery: %v", err)
 	}
 }
 

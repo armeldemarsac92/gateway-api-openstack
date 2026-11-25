@@ -55,11 +55,12 @@ func ValidClusterTrustBundleName(name string) bool {
 	return name != "" && len(content.IsPathSegmentName(name)) == 0
 }
 
-// CAObservation records either verified trust or a definitive reference error.
-// API/discovery failures instead return separately so callers preserve traffic.
+// CAObservation records verified trust, a definitive reference error, or a
+// temporary read failure retained while choosing the effective policy.
 type CAObservation struct {
-	CA      CA
-	Invalid error
+	CA          CA
+	Invalid     error
+	Unavailable error
 }
 
 func (b *ClusterTrustBundles) Read(ctx context.Context, name string) (CAObservation, error) {

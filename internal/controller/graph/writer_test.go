@@ -293,42 +293,49 @@ func TestWriterRebuildsHTTPSBindingsAfterStaleRouteObservation(t *testing.T) {
 }
 
 func TestBackendClientCertificateWithdrawalSurvivesFailedPolicyInventory(t *testing.T) {
-	w := writerFixture()
-	request := writerRequest()
-	var actions []Action
-	policyErr := errors.New("could not list BackendTLSPolicies")
-	checks := 0
-	w.Gateway = gatewaySourceFunc(func(_ context.Context, req Request) (GatewayInput, error) {
-		actions = append(actions, req.Action)
-		node := cloud.GatewayGraphNode{Disposition: cloud.GraphEnsure, BackendCAOwned: true,
-			Spec: cloud.GatewaySpec{Identity: req.Identity}}
-		// A singleton HTTP Gateway uses the old empty protocol binding.
-		if req.Action == WithdrawBackendClientCertificate {
-			node.Disposition = cloud.GraphWithdrawBackendClientCertificate
-			node.BackendClientCertificate.Denied = true
-		}
-		return GatewayInput{Node: node, Validate: func(context.Context) error {
-			checks++
-			return nil
-		}}, nil
-	})
-	w.Routes = routeSourceFunc(func(context.Context, Request, *gatewayv1.Gateway) (RouteInputs, error) {
-		return RouteInputs{}, policyErr
-	})
-	submitted := false
-	w.Provider = graphProviderFunc(func(ctx context.Context, spec cloud.GatewayGraphSpec) (cloud.GatewayGraphResult, error) {
-		if spec.Gateway.Disposition != cloud.GraphWithdrawBackendClientCertificate || !spec.Gateway.BackendClientCertificate.Denied || len(spec.Routes) != 0 {
-			t.Fatalf("unexpected fallback authority: %+v", spec)
-		}
-		if err := spec.ValidateMutation(ctx); err != nil {
-			t.Fatal(err)
-		}
-		submitted = true
-		return cloud.GatewayGraphResult{Outcome: cloud.ReadyOutcome()}, nil
-	})
-	if _, err := w.ReconcileGraph(t.Context(), request); !errors.Is(err, policyErr) || !submitted || checks != 1 ||
-		!slices.Equal(actions, []Action{Ensure, WithdrawBackendClientCertificate}) {
-		t.Fatalf("fallback did not withdraw under a fresh fence: actions %v, submitted %t, checks %d, error %v", actions, submitted, checks, err)
+	for _, policyErr := range []error{errors.New("could not list BackendTLSPolicies"), backendtls.ErrClusterTrustBundleUnavailable} {
+		t.Run(policyErr.Error(), func(t *testing.T) {
+			w := writerFixture()
+			request := writerRequest()
+			request.Gateway = backendInputGateway()
+			var actions []Action
+			checks := 0
+			w.Gateway = gatewaySourceFunc(func(_ context.Context, req Request) (GatewayInput, error) {
+				actions = append(actions, req.Action)
+				node := cloud.GatewayGraphNode{Disposition: cloud.GraphEnsure, BackendCAOwned: true,
+					Spec: cloud.GatewaySpec{Identity: req.Identity}}
+				// A singleton HTTP Gateway uses the old empty protocol binding.
+				if req.Action == WithdrawBackendClientCertificate {
+					if req.Gateway != request.Gateway {
+						t.Fatal("missing expected Gateway on withdrawal")
+					}
+					node.Disposition = cloud.GraphWithdrawBackendClientCertificate
+					node.BackendClientCertificate.Denied = true
+				}
+				return GatewayInput{Node: node, Validate: func(context.Context) error {
+					checks++
+					return nil
+				}}, nil
+			})
+			w.Routes = routeSourceFunc(func(context.Context, Request, *gatewayv1.Gateway) (RouteInputs, error) {
+				return RouteInputs{}, policyErr
+			})
+			submitted := false
+			w.Provider = graphProviderFunc(func(ctx context.Context, spec cloud.GatewayGraphSpec) (cloud.GatewayGraphResult, error) {
+				if spec.Gateway.Disposition != cloud.GraphWithdrawBackendClientCertificate || !spec.Gateway.BackendClientCertificate.Denied || len(spec.Routes) != 0 {
+					t.Fatalf("unexpected fallback authority: %+v", spec)
+				}
+				if err := spec.ValidateMutation(ctx); err != nil {
+					t.Fatal(err)
+				}
+				submitted = true
+				return cloud.GatewayGraphResult{Outcome: cloud.ReadyOutcome()}, nil
+			})
+			if _, err := w.ReconcileGraph(t.Context(), request); !errors.Is(err, policyErr) || !submitted || checks != 1 ||
+				!slices.Equal(actions, []Action{Ensure, WithdrawBackendClientCertificate}) {
+				t.Fatalf("fallback did not withdraw under a fresh fence: actions %v, submitted %t, checks %d, error %v", actions, submitted, checks, err)
+			}
+		})
 	}
 }
 
@@ -340,7 +347,6 @@ func TestClusterTrustBundleAPIErrorPreservesProgrammedGraph(t *testing.T) {
 			t.Fatalf("unexpected fallback after an unconfirmed trust read: %s", req.Action)
 		}
 		input, err := observe.ObserveGatewayGraph(ctx, req)
-		input.Node.BackendCAOwned = true
 		input.ObserveTLS = func(context.Context) (GatewayInput, error) {
 			t.Fatal("unconfirmed trust triggered fallback TLS withdrawal")
 			return GatewayInput{}, nil
@@ -376,7 +382,7 @@ func TestClusterTrustBundleBackendReadFailureAllowsConfirmedHTTPSWithdrawal(t *t
 			},
 		}
 		return GatewayInput{
-			Node: cloud.GatewayGraphNode{Disposition: cloud.GraphEnsure, Spec: spec, BackendCAOwned: true},
+			Node: cloud.GatewayGraphNode{Disposition: cloud.GraphEnsure, Spec: spec},
 			ObserveTLS: func(context.Context) (GatewayInput, error) {
 				return GatewayInput{
 					Node:     cloud.GatewayGraphNode{Disposition: cloud.GraphWithdrawTLS, Spec: spec},
