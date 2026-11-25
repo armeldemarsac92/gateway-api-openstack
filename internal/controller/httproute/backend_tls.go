@@ -49,7 +49,7 @@ func (r *Reconciler) backendTLSAvailability(ctx context.Context, requirements ba
 			return backendTLSUnknown
 		}
 		discover = func(ctx context.Context) (bool, error) {
-			return r.XBackendTLSAvailable(ctx, requirements.requireSAN)
+			return r.XBackendTLSAvailable(ctx, requirements.requireH2, requirements.requireSAN)
 		}
 	case requirements.requireSAN:
 		if r.BackendTLSSANAvailable == nil {
@@ -99,7 +99,7 @@ func (r *Reconciler) discoverBackendTLSProfiles(ctx context.Context, routes []ga
 	}
 	for _, backend := range input.XBackends {
 		if validation := backend.TLS.Validation; validation != nil && backend.ReadIssue == nil {
-			check(xBackendTLSRequirements(validation))
+			check(xBackendTLSRequirements(validation, model.XBackendRequiresH2(backend.Spec)))
 		}
 	}
 	return availability
@@ -112,8 +112,10 @@ func supportsBackendTLS(backend model.BackendGroup) bool {
 func (inputs *routeModelInputs) backendTLSValidation(backend model.BackendGroup, requireH2 bool) *cloud.BackendTLSValidation {
 	if backend.XBackendTLSRequired {
 		if validation := backend.XBackendTLS; validation != nil && supportsBackendTLS(backend) && !requireH2 &&
-			inputs.backendTLSAvailability[xBackendTLSRequirements(validation)] == backendTLSAvailable {
-			return validation.CloudValidation()
+			inputs.backendTLSAvailability[xBackendTLSRequirements(validation, backend.XBackendRequiresH2)] == backendTLSAvailable {
+			tls := validation.CloudValidation()
+			tls.RequireH2 = backend.XBackendRequiresH2
+			return tls
 		}
 		return &cloud.BackendTLSValidation{Denied: true}
 	}
@@ -129,30 +131,33 @@ func (inputs *routeModelInputs) backendTLSValidation(backend model.BackendGroup,
 	return winner.Validation.CloudValidation()
 }
 
-func xBackendTLSRequirements(validation *backendtls.Validation) backendTLSRequirements {
-	return backendTLSRequirements{xBackend: true, requireSAN: len(validation.SubjectAltNames) != 0}
+func xBackendTLSRequirements(validation *backendtls.Validation, requireH2 bool) backendTLSRequirements {
+	return backendTLSRequirements{xBackend: true, requireH2: requireH2, requireSAN: len(validation.SubjectAltNames) != 0}
 }
 
 func (inputs *routeModelInputs) xBackendTLSDiagnostic(backend model.BackendGroup) model.Diagnostic {
 	if backend.Diagnostic != nil {
 		return *backend.Diagnostic
 	}
-	requirements := xBackendTLSRequirements(backend.XBackendTLS)
+	requirements := xBackendTLSRequirements(backend.XBackendTLS, backend.XBackendRequiresH2)
 	return xBackendTLSProviderDiagnostic(inputs.backendTLSAvailability[requirements], requirements)
 }
 
 func xBackendTLSProviderDiagnostic(availability backendTLSAvailability, requirements backendTLSRequirements) model.Diagnostic {
-	condition := availability.applyXBackend(metav1.Condition{Status: metav1.ConditionTrue}, requirements.requireSAN)
+	condition := availability.applyXBackend(metav1.Condition{Status: metav1.ConditionTrue}, requirements)
 	return model.Diagnostic{Reason: condition.Reason, Message: condition.Message}
 }
 
-func (a backendTLSAvailability) applyXBackend(condition metav1.Condition, requireSAN bool) metav1.Condition {
-	condition = a.apply(condition, true, requireSAN)
+func (a backendTLSAvailability) applyXBackend(condition metav1.Condition, requirements backendTLSRequirements) metav1.Condition {
+	condition = a.apply(condition, true, requirements.requireSAN)
 	if condition.Reason == "UnsupportedProvider" {
 		condition.Message = "Authenticated XBackends require Octavia API microversion 2.24 or newer and regional backend TLS support"
-		if requireSAN {
+		if requirements.requireSAN {
 			condition.Message += " for explicit subjectAltNames"
 		}
+	}
+	if requirements.requireH2 && condition.Status != metav1.ConditionTrue {
+		condition.Message += " and mandatory h2 ALPN"
 	}
 	return condition
 }

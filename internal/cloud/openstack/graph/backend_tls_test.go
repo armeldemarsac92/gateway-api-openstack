@@ -1044,7 +1044,7 @@ func TestBackendTLSWeightedDenialPreservesHealthyShare(t *testing.T) {
 	}
 }
 
-func TestXBackendServerOnlyClosesItsPoolBeforeConfiguringAndWithdrawingTrust(t *testing.T) {
+func TestXBackendServerOnlyHTTP2ConfiguresAndWithdrawsItsPool(t *testing.T) {
 	spec := completeGraphSpec(safetyTestIdentity(t))
 	route := &spec.Routes[0].Spec
 	spec.Gateway.BackendClientCertificate.Reference = "https://barbican.example/v1/secrets/service-client"
@@ -1053,10 +1053,12 @@ func TestXBackendServerOnlyClosesItsPoolBeforeConfiguringAndWithdrawingTrust(t *
 	route.BackendTLSObserved = true
 	route.Hostname, route.PathType, route.PathValue, route.Members = "", "", "", nil
 	tls := newGraphBackendTLS(t)
+	h2TLS := *tls
+	h2TLS.RequireH2 = true
 	route.HTTPBackends = []cloud.HTTPBackend{
 		{Namespace: "apps", Name: "backend", Port: 8443, BackendTLS: tls,
 			Matches: []cloud.HTTPPathMatch{{PathType: cloud.PathMatchExact, PathValue: "/service"}}},
-		{Kind: cloud.HTTPBackendKindXBackend, Namespace: "apps", Name: "backend", Port: 8443, BackendTLS: tls, RoutedExternal: true,
+		{Kind: cloud.HTTPBackendKindXBackend, Namespace: "apps", Name: "backend", Port: 8443, BackendTLS: &h2TLS, RoutedExternal: true,
 			Matches: []cloud.HTTPPathMatch{{PathType: cloud.PathMatchExact, PathValue: "/external", Precedence: 1}}},
 	}
 	p := &Provider{projectID: spec.Gateway.Spec.Identity.OpenStackProjectID}
@@ -1068,6 +1070,9 @@ func TestXBackendServerOnlyClosesItsPoolBeforeConfiguringAndWithdrawingTrust(t *
 	require.NotEqual(t, -1, externalIndex)
 	external := &desired.httpParts[externalIndex]
 	require.NotEqual(t, serviceKey, externalKey)
+	require.True(t, external.requiresBackendTLSH2())
+	require.False(t, external.spec.GRPC)
+	require.Equal(t, "HTTP", external.monitorType())
 	observed := observedRouteGraph{httpParts: map[string]*observedRouteGraph{external.backendKey: {
 		pool:    &pools.Pool{ID: "external", ProvisioningStatus: "ACTIVE", AdminStateUp: true},
 		members: []pools.Member{{ID: "previous", Address: "198.51.100.20", ProtocolPort: 8443}},
@@ -1120,9 +1125,18 @@ func TestXBackendServerOnlyClosesItsPoolBeforeConfiguringAndWithdrawingTrust(t *
 		}
 		_, _ = w.Write([]byte(`{"pool":{}}`))
 	})))
-	plan := backendTLSPlan{phase: backendTLSConfigure, settings: octavia.BackendTLSSettings{
-		Hostname: tls.Hostname, CAReference: "https://barbican.example/v1/secrets/backend-ca",
-	}}
+	var writes []string
+	store := backendca.New(route.Identity.ClusterID, scalarBackendTLSClients(t, p.projectID, http.NotFoundHandler(), &writes))
+	_, err = store.Ensure(t.Context(), route.Identity.GatewayUID, tls.CAConfigMapUID, tls.CAPEM)
+	require.NoError(t, err)
+	p.backendCA, p.poolALPN = store, true
+	plan := p.observeBackendTLS(t.Context(), *external, observedRouteGraph{}, func(requireH2, requireSAN bool) bool {
+		require.True(t, requireH2)
+		require.False(t, requireSAN)
+		return true
+	}, true, cloud.BackendClientCertificate{})
+	require.Equal(t, backendTLSConfigure, plan.phase)
+	require.Equal(t, new(true), plan.settings.RequireH2)
 	stage := plan.poolMutation(*external, *actual)
 	require.NotNil(t, stage)
 	require.Equal(t, new(false), stage.poolAdmin)
@@ -1132,7 +1146,8 @@ func TestXBackendServerOnlyClosesItsPoolBeforeConfiguringAndWithdrawingTrust(t *
 	require.NoError(t, p.executeRouteMutation(t.Context(), *external, *create))
 	require.Equal(t, false, request.Pool["admin_state_up"])
 	require.Equal(t, true, request.Pool["tls_enabled"])
-	require.Equal(t, []any{"http/1.1"}, request.Pool["alpn_protocols"])
+	require.Equal(t, []any{"h2"}, request.Pool["alpn_protocols"])
+	require.Equal(t, true, request.Pool["backend_tls_require_h2"])
 	require.Equal(t, tls.Hostname, request.Pool["backend_tls_hostname"])
 	require.Equal(t, plan.settings.CAReference, request.Pool["ca_tls_container_ref"])
 	require.NotContains(t, request.Pool, "tls_container_ref")
@@ -1174,17 +1189,48 @@ func TestXBackendServerOnlyClosesItsPoolBeforeConfiguringAndWithdrawingTrust(t *
 	require.NotNil(t, configure)
 	require.Nil(t, configure.poolAdmin)
 	require.Equal(t, plan.settings, *configure.backendTLS)
-	require.Equal(t, []string{xBackendServerALPN}, *configure.poolALPNProtocols)
+	require.Equal(t, []string{"h2"}, *configure.poolALPNProtocols)
 
 	actual.pool.AdminStateUp, actual.pool.TLSEnabled = true, true
 	actual.pool.CATLSContainerRef = plan.settings.CAReference
+	actual.pool.ALPNProtocols = []string{"h2"}
+	actual.backendTLS = octavia.PoolBackendTLS{
+		Hostname: tls.Hostname, HostnameObserved: true, CAObserved: true, ClientRefObserved: true,
+		AdminObserved: true, EnabledObserved: true, ALPNObserved: true,
+	}
+	require.False(t, backendTLSReadbackComplete(*external, *actual))
+	plain := *external
+	plain.spec.BackendTLS = tls
+	require.False(t, backendTLSReadbackComplete(plain, *actual))
+	actual.backendTLS.RequireH2Observed = true
+	require.True(t, backendTLSReadbackComplete(*external, *actual))
+	require.False(t, backendTLSProtocolMatches(*external, *actual))
+	actual.backendTLS.RequireH2 = true
+	require.True(t, backendTLSProtocolMatches(*external, *actual))
+	downgrade := p.observeBackendTLS(t.Context(), plain, *actual, func(requireH2, requireSAN bool) bool {
+		require.False(t, requireH2)
+		require.False(t, requireSAN)
+		return true
+	}, true, cloud.BackendClientCertificate{})
+	require.Equal(t, backendTLSConfigure, downgrade.phase)
+	require.Equal(t, new(false), downgrade.settings.RequireH2)
+	actual.pool.ALPNProtocols = []string{"h2", "http/1.1"}
+	require.False(t, backendTLSProtocolMatches(*external, *actual))
+	actual.pool.ALPNProtocols = []string{"h2"}
+	require.Nil(t, quarantine())
 	actual.members = []pools.Member{{ID: "configured", Address: "198.51.100.20", ProtocolPort: 8443}}
 	graph.routes[0].httpParts[externalIndex].spec.BackendTLS = &cloud.BackendTLSValidation{Denied: true}
 	step = quarantine()
 	require.NotNil(t, step)
 	require.Equal(t, external.backendKey, step.backendKey)
+	require.Equal(t, routeMutationSetBackendTLS, step.route.kind)
+	require.Equal(t, new(false), step.route.poolAdmin)
+	require.Nil(t, step.route.backendTLS)
+	actual.pool.AdminStateUp = false
+	step = quarantine()
+	require.NotNil(t, step)
+	require.Equal(t, external.backendKey, step.backendKey)
 	require.Equal(t, routeMutationClearPoolMembers, step.route.kind)
-	require.Nil(t, step.route.poolAdmin)
 }
 
 func TestXBackendMutualTLSRotatesAndClearsOnlyAfterClosing(t *testing.T) {
@@ -1318,22 +1364,31 @@ func TestXBackendServerOnlyRequiresConfiguredPoolALPN(t *testing.T) {
 	for _, version := range []string{"2.8", "2.23", "2.24"} {
 		t.Run(version, func(t *testing.T) {
 			discoveries := 0
+			capabilities := []string{octavia.GatewayCapabilityBackendTLSHostname}
 			client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				require.Equal(t, "/lbaas/providers/amphora/gateway_capabilities", r.URL.Path)
 				require.Equal(t, "load-balancer "+version, r.Header.Get("OpenStack-API-Version"))
 				discoveries++
-				safetyWriteJSON(t, w, map[string][]string{"gateway_capabilities": {octavia.GatewayCapabilityBackendTLSHostname}})
+				safetyWriteJSON(t, w, map[string][]string{"gateway_capabilities": capabilities})
 			}))
 			client.Type, client.Microversion = "load-balancer", version
 			p := newTestProvider(t, ServiceClients{LoadBalancer: client}, ProviderConfig{BackendTLSPolicy: true, BackendCA: &backendca.Store{}})
 
 			wantALPN := version == "2.24"
-			available, err := p.XBackendTLSAvailable(t.Context(), false)
+			available, err := p.XBackendTLSAvailable(t.Context(), false, false)
 			require.NoError(t, err)
 			require.Equal(t, wantALPN, available)
 			if !wantALPN {
 				require.Zero(t, discoveries)
 			}
+			available, err = p.XBackendTLSAvailable(t.Context(), true, false)
+			require.NoError(t, err)
+			require.False(t, available)
+			capabilities = append(capabilities, octavia.GatewayCapabilityBackendTLSH2ALPN)
+			available, err = p.XBackendTLSAvailable(t.Context(), true, false)
+			require.NoError(t, err)
+			require.Equal(t, wantALPN, available)
+
 			available, err = p.BackendTLSAvailable(t.Context())
 			require.NoError(t, err)
 			require.True(t, available, "Service policies do not require pool ALPN")
@@ -1424,6 +1479,14 @@ func TestXBackendDeniedUsesAnEnabledEmptyPoolAndRestoresPlaintext(t *testing.T) 
 	fixedPart.backendTLS = backend.backendTLS
 	require.True(t, fixedPart.fixedResponse)
 	require.Nil(t, fixedPart.backendTLS.poolMutation(fixedPart, observedRouteGraph{}))
+
+	// An older API can omit backend_tls_hostname. An observed h2 profile
+	// still prevents reopening the quarantined pool.
+	quarantined := observedRouteGraph{
+		pool:       &pools.Pool{ID: "h2", ProvisioningStatus: "ACTIVE", ALPNProtocols: []string{"h2"}, Tags: []string{backendTLSManagedTag}},
+		backendTLS: octavia.PoolBackendTLS{AdminObserved: true, EnabledObserved: true, CAObserved: true, ClientRefObserved: true},
+	}
+	require.Nil(t, backend.backendTLS.poolMutation(backend, quarantined))
 
 	// Older quarantine writes may have disabled and marked an ordinary pool.
 	// Its stock readback must prove that it never installed TLS before a

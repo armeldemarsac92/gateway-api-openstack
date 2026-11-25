@@ -732,6 +732,7 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 	var members []cloud.Member
 	var clientCertificate string
 	tls := inputs.backendTLSValidation(backend, spec.GRPC)
+	h2cPending := backend.XBackendUsesH2C && inputs.xBackendH2CIssue.Reason == string(gatewayv1.RouteReasonPending)
 	if tls != nil && !tls.Denied {
 		clientCertificate = backend.XBackendClientCertificateReference
 	}
@@ -739,6 +740,8 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 		switch {
 		case backend.XBackendTLSRequired && tls.Denied:
 			result.diagnostic = inputs.xBackendTLSDiagnostic(backend)
+		case backend.XBackendUsesH2C && !h2cPending && inputs.xBackendH2CIssue.Reason != "":
+			result.diagnostic = inputs.xBackendH2CIssue
 		case backend.Diagnostic != nil && spec.GRPC:
 			result.diagnostic = *backend.Diagnostic
 		case tls == nil || !tls.Denied:
@@ -780,11 +783,14 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 			SessionCookiePath:     backend.XBackendCookiePath,
 			SessionCookieDeadline: backend.XBackendCookieDeadline,
 			Members:               members, Unavailable: len(members) == 0, InvalidReference: invalidReference,
-			BackendH2C: !invalid && tls == nil && backend.UsesH2C(), BackendTLS: tls,
+			BackendH2C: !invalid && tls == nil && backend.UsesH2C(), BackendH2CPending: h2cPending, BackendTLS: tls,
 			XBackendClientCertificateReference: clientCertificate,
 		})
 	}
 	groups[key] = result
+	if h2cPending {
+		return result.index, inputs.xBackendH2CIssue, nil
+	}
 	return result.index, result.diagnostic, nil
 }
 

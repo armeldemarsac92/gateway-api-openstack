@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sync"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -479,6 +480,7 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 	}
 	grpc := model.HTTPProfileRouteKind(route) == model.GRPCRouteKind
 	cookieCapability := r.xBackendCookieCapability(ctx)
+	h2cDiagnostic := sync.OnceValue(func() model.Diagnostic { return r.xBackendH2CDiagnostic(ctx) })
 	input := model.Input{Routes: []gatewayv1.HTTPRoute{*route}, BackendH2C: r.Config.BackendH2C}
 	tlsObserver := graph.NewBackendTLSObserver(r.routePatchReader(), r.Config.ClusterTrustBundles)
 	if grpc {
@@ -510,13 +512,20 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 				continue
 			}
 			if validation := observation.TLS.Validation; validation != nil {
-				requirements := xBackendTLSRequirements(validation)
+				requirements := xBackendTLSRequirements(validation, model.XBackendRequiresH2(observation.Spec))
 				if diagnostic := xBackendTLSProviderDiagnostic(r.backendTLSAvailability(ctx, requirements), requirements); diagnostic.Reason != "" {
 					*status = status.withBackendDiagnostic(diagnostic)
 					continue
 				}
 			}
-			if pending && (observation.TLS.Validation != nil || observation.Spec.Type == gatewayx.BackendTypeExternalHostname || observation.Spec.SessionPersistence != nil) {
+			h2c := model.XBackendUsesH2C(observation.Spec)
+			if h2c {
+				if diagnostic := h2cDiagnostic(); diagnostic.Reason != "" {
+					*status = status.withBackendDiagnostic(diagnostic)
+					continue
+				}
+			}
+			if pending && (h2c || observation.TLS.Validation != nil || observation.Spec.Type == gatewayx.BackendTypeExternalHostname || observation.Spec.SessionPersistence != nil) {
 				*status = status.withBackendDiagnostic(model.Diagnostic{Reason: string(gatewayv1.RouteReasonPending), Message: "Gateway member mode is pending"})
 			} else if observation.Spec.SessionPersistence != nil && status.resolved != metav1.ConditionFalse {
 				status.resolved, status.resolvedReason, status.resolvedMessage = cookieCapability.apply(status.resolved, status.resolvedReason, status.resolvedMessage,

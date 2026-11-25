@@ -112,6 +112,7 @@ type desiredRoute struct {
 	backendKey                  string
 	unavailable                 bool
 	routedExternal              bool
+	xBackendH2CPending          bool
 	xBackend                    bool
 	xBackendPlaintext           bool
 	sessionCookieName           string
@@ -416,8 +417,11 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 			len(backend.Matches) == 0 && !targetsUsed[index] && !mirrorsUsed[index] || unavailable && !deniedTLS && len(backend.Members) != 0 {
 			return invalid(errors.New("each HTTP backend requires a supported reference and a match or weighted reference, and an unavailable backend must have no members"))
 		}
+		if backend.BackendH2CPending && (!xBackend || !backend.BackendH2C || spec.GRPC || backend.BackendTLS != nil) {
+			return invalid(errors.New("pending h2c requires a cleartext HTTP XBackend pool"))
+		}
 		if backend.RoutedExternal && (!xBackend || spec.GRPC || spec.MemberMode != cloud.MemberModeEndpoint ||
-			len(spec.BackendSecurityGroupIDs) != 0 || backend.BackendH2C || backend.BackendRetryBudget != nil || backend.InvalidReference) {
+			len(spec.BackendSecurityGroupIDs) != 0 || backend.BackendRetryBudget != nil || backend.InvalidReference) {
 			return invalid(errors.New("routed external members require an unmanaged HTTP XBackend pool"))
 		}
 		if xBackend && backend.BackendTLS != nil && !deniedTLS &&
@@ -428,6 +432,7 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 			return invalid(errors.New("an XBackend client certificate requires an authenticated XBackend forwarding pool"))
 		}
 		if backend.SessionCookieName != "" && (!xBackend || spec.GRPC || spec.MemberMode != cloud.MemberModeEndpoint ||
+			backend.BackendTLS != nil && backend.BackendTLS.RequireH2 ||
 			len(spec.BackendSecurityGroupIDs) != 0 || backend.RoutedExternal || backend.BackendH2C ||
 			mirrorsUsed[index] || !cloud.ValidHTTPSessionCookieName(backend.SessionCookieName)) {
 			return invalid(errors.New("HTTP session persistence requires a valid cookie name and an unmanaged HTTP XBackend EndpointSelector forwarding pool"))
@@ -454,6 +459,7 @@ func (p *Provider) buildDesiredHTTPBackends(spec cloud.RouteSpec) (desiredRoute,
 		}
 		part.fixedResponse = fixedResponse
 		part.xBackend = xBackend
+		part.xBackendH2CPending = backend.BackendH2CPending
 		part.xBackendPlaintext = xBackend && !backend.InvalidReference && backend.BackendTLS == nil
 		part.xBackendClientCertificateReference = backend.XBackendClientCertificateReference
 		part.sessionCookieName = backend.SessionCookieName
