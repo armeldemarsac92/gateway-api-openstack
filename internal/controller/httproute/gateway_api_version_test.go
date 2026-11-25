@@ -1515,7 +1515,7 @@ func unsupportedVersionGatewayClass(cfg Config) *gatewayv1.GatewayClass {
 }
 
 func unsupportedGatewayAPICRDs() []client.Object {
-	definitions := supportedGatewayAPICRDs()
+	definitions := supportedGatewayAPICRDs(Config{})
 	for _, definition := range definitions {
 		if definition.GetName() == "httproutes.gateway.networking.k8s.io" {
 			definition.SetAnnotations(map[string]string{gatewayconsts.BundleVersionAnnotation: "v1.5.0"})

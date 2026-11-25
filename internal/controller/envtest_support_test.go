@@ -193,6 +193,7 @@ func newEnvtestGatewayReconciler(kubeClient client.Client, reader client.Reader,
 	coordinator := &graph.Coordinator{}
 	gateway := &gatewaycontroller.Reconciler{Client: kubeClient, APIReader: reader, TopologyResolver: provider, Coordinator: coordinator, Config: config}
 	route := &httproutecontroller.Reconciler{Client: kubeClient, APIReader: reader, Coordinator: coordinator, Config: config, ListenerSetObserver: gateway.ObserveListenerSets}
+	gateway.AdmitsHTTPRouteListener = route.AdmitsListener
 	writer := &graph.Writer{Coordinator: coordinator, Gateway: gateway, Routes: route, Provider: provider}
 	gateway.Writer = writer
 	route.Writer = writer

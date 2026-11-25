@@ -17,7 +17,13 @@ limitations under the License.
 package controller
 
 import (
+	"cmp"
+	"context"
 	"fmt"
+	"slices"
+
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -35,6 +41,38 @@ func ListenerSetServed(mapper meta.RESTMapper) (bool, error) {
 		return false, fmt.Errorf("discover ListenerSet v1: %w", err)
 	}
 	return true, nil
+}
+
+// DefaultGatewayParents returns additional default parents in a stable order.
+// The caller checks controller ownership and normal listener admission. Complete
+// discovery matters when withdrawing a previously selected Gateway.
+func DefaultGatewayParents(ctx context.Context, reader client.Reader, namespace string, spec gatewayv1.CommonRouteSpec) ([]gatewayv1.ParentReference, error) {
+	if spec.UseDefaultGateways != gatewayv1.GatewayDefaultScopeAll {
+		return nil, nil
+	}
+	var parents []gatewayv1.ParentReference
+	for token := ""; ; {
+		var page gatewayv1.GatewayList
+		if err := reader.List(ctx, &page, client.Continue(token)); err != nil {
+			return nil, fmt.Errorf("list default Gateways: %w", err)
+		}
+		for i := range page.Items {
+			if parent, ok := model.DefaultGatewayParent(spec, namespace, &page.Items[i]); ok {
+				parents = append(parents, parent)
+			}
+		}
+		if page.Continue == "" {
+			break
+		}
+		if page.Continue == token {
+			return nil, fmt.Errorf("default Gateway list returned a repeated continuation token")
+		}
+		token = page.Continue
+	}
+	slices.SortFunc(parents, func(a, b gatewayv1.ParentReference) int {
+		return cmp.Or(cmp.Compare(*a.Namespace, *b.Namespace), cmp.Compare(a.Name, b.Name))
+	})
+	return parents, nil
 }
 
 // IsGatewayParentRef reports whether a ParentReference targets a Gateway.

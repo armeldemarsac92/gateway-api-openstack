@@ -19,6 +19,7 @@ package httproute
 import (
 	"context"
 	"errors"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
@@ -40,23 +41,15 @@ import (
 )
 
 func (r *Reconciler) enqueueHTTPRoutePeers(ctx context.Context, object client.Object) []reconcile.Request {
-	parents, _, ok := controller.RouteParents(object)
-	if !ok {
+	spec, _ := controller.RouteSpecAndParentStatuses(object)
+	if spec == nil {
 		return nil
 	}
 	keys := map[types.NamespacedName]struct{}{}
-	route := &gatewayv1.HTTPRoute{Spec: gatewayv1.HTTPRouteSpec{CommonRouteSpec: gatewayv1.CommonRouteSpec{ParentRefs: parents}}}
+	var route gatewayv1.HTTPRoute
 	route.Namespace = object.GetNamespace()
-	for _, gatewayKey := range controller.ParentGatewayKeys(route) {
-		routes, err := r.listRoutes(ctx, client.MatchingFields{controller.IndexHTTPRouteByParentGateway: gatewayKey})
-		if err != nil {
-			log.FromContext(ctx).Error(err, "Could not list HTTPRoutes for parent Gateway", "gateway", gatewayKey)
-			continue
-		}
-		for index := range routes {
-			keys[client.ObjectKeyFromObject(&routes[index])] = struct{}{}
-		}
-	}
+	route.Spec.CommonRouteSpec = *spec
+	r.addHTTPRoutePeers(ctx, []gatewayv1.HTTPRoute{route}, keys)
 	return controller.SortedRequests(keys)
 }
 
@@ -95,6 +88,9 @@ func (r *Reconciler) addHTTPRoutesForGateway(ctx context.Context, gateway *gatew
 			keys[client.ObjectKeyFromObject(&routes[index])] = struct{}{}
 		}
 	}
+	if r.Config.DefaultGatewaysEnabled() && gateway.Spec.DefaultScope == gatewayv1.GatewayDefaultScopeAll {
+		r.addDefaultHTTPRoutes(ctx, keys)
+	}
 	if r.kind() != model.HTTPRouteKind || model.GatewayDisallowsListenerSets(gateway) && gateway.Status.AttachedListenerSets == nil {
 		return
 	}
@@ -125,28 +121,67 @@ func (r *Reconciler) enqueueHTTPRoutesForServiceKey(ctx context.Context, service
 // A backend change can alter which bound fragments the shared listener can program.
 func (r *Reconciler) enqueueHTTPRouteConsumers(ctx context.Context, routes []gatewayv1.HTTPRoute) []reconcile.Request {
 	keys := map[types.NamespacedName]struct{}{}
-	observedParents := map[string]struct{}{}
 	for index := range routes {
-		route := &routes[index]
-		keys[client.ObjectKeyFromObject(route)] = struct{}{}
-		for _, gatewayKey := range controller.ParentGatewayKeys(route) {
-			if _, observed := observedParents[gatewayKey]; observed {
-				continue
-			}
-			// Routes sharing a parent need one indexed read per event,
-			// including when that read fails. Later events observe it again.
-			observedParents[gatewayKey] = struct{}{}
-			peers, err := r.listRoutes(ctx, client.MatchingFields{controller.IndexHTTPRouteByParentGateway: gatewayKey})
-			if err != nil {
-				log.FromContext(ctx).Error(err, "Could not list HTTPRoutes sharing a Gateway", "gateway", gatewayKey)
-				continue
-			}
-			for peerIndex := range peers {
-				keys[client.ObjectKeyFromObject(&peers[peerIndex])] = struct{}{}
+		keys[client.ObjectKeyFromObject(&routes[index])] = struct{}{}
+	}
+	r.addHTTPRoutePeers(ctx, routes, keys)
+	return controller.SortedRequests(keys)
+}
+
+func (r *Reconciler) addHTTPRoutePeers(ctx context.Context, routes []gatewayv1.HTTPRoute, keys map[types.NamespacedName]struct{}) {
+	gatewayKeys := map[string]struct{}{}
+	usesDefaults := false
+	for index := range routes {
+		for _, gatewayKey := range controller.ParentGatewayKeys(&routes[index]) {
+			gatewayKeys[gatewayKey] = struct{}{}
+		}
+		usesDefaults = usesDefaults || routes[index].Spec.UseDefaultGateways == gatewayv1.GatewayDefaultScopeAll
+	}
+	defaultEnabled := r.Config.DefaultGatewaysEnabled()
+	needDefaultPeers := false
+	if defaultEnabled && usesDefaults {
+		var gateways gatewayv1.GatewayList
+		if err := r.List(ctx, &gateways, client.MatchingFields{controller.IndexGatewayByDefaultScope: string(gatewayv1.GatewayDefaultScopeAll)}); err != nil {
+			log.FromContext(ctx).Error(err, "Could not list default Gateways for route peers")
+		}
+		for index := range gateways.Items {
+			gatewayKeys[controller.ObjectKeyString(client.ObjectKeyFromObject(&gateways.Items[index]))] = struct{}{}
+		}
+		needDefaultPeers = len(gateways.Items) != 0
+	}
+	for gatewayKey := range gatewayKeys {
+		peers, err := r.listRoutes(ctx, client.MatchingFields{controller.IndexHTTPRouteByParentGateway: gatewayKey})
+		if err != nil {
+			log.FromContext(ctx).Error(err, "Could not list HTTPRoutes sharing a Gateway", "gateway", gatewayKey)
+		}
+		for index := range peers {
+			keys[client.ObjectKeyFromObject(&peers[index])] = struct{}{}
+		}
+		if defaultEnabled && !needDefaultPeers {
+			// An explicit Route can change the election on a default Gateway.
+			namespace, name, _ := strings.Cut(gatewayKey, "/")
+			var gateway gatewayv1.Gateway
+			if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, &gateway); err == nil {
+				needDefaultPeers = gateway.Spec.DefaultScope == gatewayv1.GatewayDefaultScopeAll
+			} else if !apierrors.IsNotFound(err) {
+				log.FromContext(ctx).Error(err, "Could not get parent Gateway for route peers", "gateway", gatewayKey)
 			}
 		}
 	}
-	return controller.SortedRequests(keys)
+	if needDefaultPeers {
+		r.addDefaultHTTPRoutes(ctx, keys)
+	}
+}
+
+func (r *Reconciler) addDefaultHTTPRoutes(ctx context.Context, keys map[types.NamespacedName]struct{}) {
+	routes, err := r.listRoutes(ctx, client.MatchingFields{controller.IndexRouteByDefaultGateways: string(gatewayv1.GatewayDefaultScopeAll)})
+	if err != nil {
+		log.FromContext(ctx).Error(err, "Could not list routes for default Gateways", "kind", r.kind())
+		return
+	}
+	for index := range routes {
+		keys[client.ObjectKeyFromObject(&routes[index])] = struct{}{}
+	}
 }
 
 func (r *Reconciler) enqueueHTTPRoutesForService(ctx context.Context, object client.Object) []reconcile.Request {

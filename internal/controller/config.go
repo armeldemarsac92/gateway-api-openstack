@@ -136,6 +136,12 @@ func (c Config) GatewayAddressRoutabilityEnabled() bool {
 	return c.GatewayAPIChannel == features.FeatureChannelExperimental
 }
 
+// DefaultGatewaysEnabled reports whether the two explicit default-attachment
+// scopes are available in the selected Gateway API channel.
+func (c Config) DefaultGatewaysEnabled() bool {
+	return c.GatewayAPIChannel == features.FeatureChannelExperimental
+}
+
 func (c Config) GatewayAddressRoutabilityClusterEnabled() bool {
 	return c.ClusterGatewayAddresses && c.GatewayAddressRoutabilityEnabled() && c.GatewayInfrastructureMetadata
 }

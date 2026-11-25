@@ -23,6 +23,7 @@ import (
 	"slices"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/events"
@@ -44,6 +45,8 @@ type Reconciler struct {
 	// Certificates resolves operator-approved certificate references from live metadata.
 	Certificates              CertificateResolver
 	BackendClientCertificates BackendClientCertificateResolver
+	// AdmitsHTTPRouteListener checks a parent omitted from a full Route status.
+	AdmitsHTTPRouteListener func(*gatewayv1.HTTPRoute, *gatewayv1.Gateway, gatewayv1.ParentReference, *gatewayv1.Listener, []corev1.Namespace) bool
 	// HTTPSListenerIsolationAvailable checks authenticated regional support.
 	HTTPSListenerIsolationAvailable func(context.Context) (bool, error)
 	// Client reads and patches cached Kubernetes objects.

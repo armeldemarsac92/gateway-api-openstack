@@ -34,6 +34,7 @@ import (
 // typed spec for revision checks and pass the concrete object to the client.
 type transportRoute struct {
 	client.Object
+	commonSpec  gatewayv1.CommonRouteSpec
 	parentRefs  []gatewayv1.ParentReference
 	backendRefs []gatewayv1.BackendRef // Populated only for a single rule.
 	status      *gatewayv1.RouteStatus
@@ -46,6 +47,7 @@ func viewRoute(object client.Object) *transportRoute {
 	switch object := object.(type) {
 	case *gatewayv1.TCPRoute:
 		route.protocol = gatewayv1.TCPProtocolType
+		route.commonSpec = object.Spec.CommonRouteSpec
 		route.parentRefs = object.Spec.ParentRefs
 		if len(object.Spec.Rules) == 1 {
 			route.backendRefs = object.Spec.Rules[0].BackendRefs
@@ -54,6 +56,7 @@ func viewRoute(object client.Object) *transportRoute {
 		route.spec = object.Spec
 	case *gatewayv1.UDPRoute:
 		route.protocol = gatewayv1.UDPProtocolType
+		route.commonSpec = object.Spec.CommonRouteSpec
 		route.parentRefs = object.Spec.ParentRefs
 		if len(object.Spec.Rules) == 1 {
 			route.backendRefs = object.Spec.Rules[0].BackendRefs

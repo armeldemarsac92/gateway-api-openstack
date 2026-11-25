@@ -1,6 +1,8 @@
 # Reproduce the Hibiscus development image
 
-A retiring HTTP policy and its two rules were removed in one worker transaction while the other route continued serving. [Build record](image.json) · [Both channel results](provider/conditional-l7-removal/receipt.json)
+An Experimental HTTPRoute and a TCPRoute each used two default Gateways. The Standard control exercised an explicit Gateway parent. [Build record](image.json) · [Both channels](provider/default-gateways/receipt.json)
+
+A retiring HTTP policy and its two rules were removed in one worker transaction while the other route continued serving. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-aff86b828a53163d34dd5cab90334768b5f43408/image.json) · [Both channel results](provider/conditional-l7-removal/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-aff86b828a53163d34dd5cab90334768b5f43408)
 
 The controller can activate prepared path matches on a shared HTTP listener and check their rule predicates. [Previous build record](https://github.com/armeldemarsac92/gateway-api-openstack/releases/download/hibiscus-dev-598db990b3ba3ef2851f4e9cb319e12beb432eb2/image.json) · [Standard qualification](provider/initial-http-predicates/receipt.json) · [Release](https://github.com/armeldemarsac92/gateway-api-openstack/releases/tag/hibiscus-dev-598db990b3ba3ef2851f4e9cb319e12beb432eb2)
 

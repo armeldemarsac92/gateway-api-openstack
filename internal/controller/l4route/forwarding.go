@@ -123,8 +123,84 @@ func (r *Reconciler) checkpointTarget(ctx context.Context, expected *transportRo
 	}
 	// Replace the previous proof before either route- or Gateway-triggered
 	// writes can change the destinations of the bound pool.
+	bindings, err := r.routeBindings(current)
+	if err != nil {
+		return err
+	}
+	binding := boundGateway(bindings, identity)
+	if binding.Identity != identity || binding.Lifecycle != controller.RouteAttached {
+		return controller.ErrGraphInputChanged
+	}
+	if r.needsDurableTarget(current) || binding.Forwarding.Value != "" {
+		binding.Forwarding = controller.RouteGatewayTarget{Value: target, Generation: current.GetGeneration()}
+		if err := r.writeForwardingTarget(ctx, current, bindings, binding); err != nil {
+			return err
+		}
+		*expected = *current
+	}
 	plan.targetStatus = routeCondition(current, r.forwardingTargetType(), metav1.ConditionFalse, "Pending", target)
-	return r.patchStatuses(ctx, current, plan)
+	if err := r.patchParentStatuses(ctx, current, plan); err != nil {
+		return err
+	}
+	*expected = *current
+	return nil
+}
+
+func (r *Reconciler) needsDurableTarget(route *transportRoute) bool {
+	return r.Config.DefaultGatewaysEnabled() || len(route.status.Parents) >= controller.RouteParentStatusLimit
+}
+
+func (r *Reconciler) recordObservedTarget(ctx context.Context, expected *transportRoute, identity cloud.Identity, target controller.RouteGatewayTarget) error {
+	release, err := graph.Acquire(ctx, r.Coordinator, identity.GatewayUID)
+	if err != nil {
+		return err
+	}
+	defer release()
+	current, err := r.liveRoute(ctx, expected)
+	if err != nil {
+		return err
+	}
+	bindings, err := r.routeBindings(current)
+	if err != nil {
+		return err
+	}
+	binding := boundGateway(bindings, identity)
+	if binding.Identity != identity || binding.Lifecycle != controller.RouteAttached || binding.Forwarding != target {
+		return controller.ErrGraphInputChanged
+	}
+	binding.Forwarding.Observed = true
+	if err := r.writeForwardingTarget(ctx, current, bindings, binding); err != nil {
+		return err
+	}
+	*expected = *current
+	return nil
+}
+
+func (r *Reconciler) writeForwardingTarget(ctx context.Context, route *transportRoute, bindings []controller.RouteGatewayBinding, binding controller.RouteGatewayBinding) error {
+	base := route.copyObject()
+	if err := controller.ApplyRouteGatewayBinding(r.Config, route.Object, bindings, binding); err != nil {
+		return err
+	}
+	return r.Patch(ctx, route.Object, controller.OptimisticMergeFrom(base))
+}
+
+func (r *Reconciler) targetCheckpointed(route *transportRoute, plan *routePlan, checkpoint controller.RouteGatewayTarget) bool {
+	if checkpoint.Value != "" {
+		return checkpoint.Generation == route.GetGeneration() && checkpoint.Value == plan.target
+	}
+	return r.currentTarget(route, plan.parent.ref, plan.target) != nil
+}
+
+func (r *Reconciler) retainObservedProgrammed(route *transportRoute, plan *routePlan, checkpoint controller.RouteGatewayTarget) bool {
+	if checkpoint.Value != "" {
+		if !checkpoint.Observed || !r.targetCheckpointed(route, plan, checkpoint) {
+			return false
+		}
+		plan.programmed = r.programmedCondition(route)
+		return true
+	}
+	target := r.currentTarget(route, plan.parent.ref, plan.target)
+	return target != nil && target.Status == metav1.ConditionTrue && r.retainProgrammedCondition(route, plan)
 }
 
 func (r *Reconciler) currentTarget(route *transportRoute, parent gatewayv1.ParentReference, target string) *metav1.Condition {
@@ -139,20 +215,24 @@ func (r *Reconciler) currentTarget(route *transportRoute, parent gatewayv1.Paren
 // edges while retaining its existing checkpoint for the backend pool.
 func (r *Reconciler) hasCurrentBackendTarget(route *transportRoute, parent gatewayv1.ParentReference, target string) bool {
 	condition := r.currentParentCondition(route, parent, r.forwardingTargetType())
-	if condition == nil {
-		return false
-	}
+	return condition != nil && matchesBackendTarget(condition.Message, target)
+}
+
+func matchesBackendTarget(checkpoint, target string) bool {
 	desired, _, scoped := strings.Cut(target, "/")
 	if !scoped {
-		return condition.Message == target
+		return checkpoint == target
 	}
-	current, _, _ := strings.Cut(condition.Message, "/")
+	current, _, _ := strings.Cut(checkpoint, "/")
 	return current == desired
 }
 
 // A previous target can prove an unchanged backend across a ParentRef edit.
 // Its hash covers the Gateway UID, route UID, Services and desired members.
-func (r *Reconciler) hasPreviousObservedBackendTarget(route *transportRoute, target string) bool {
+func (r *Reconciler) hasPreviousObservedBackendTarget(route *transportRoute, target string, checkpoint controller.RouteGatewayTarget) bool {
+	if checkpoint.Value != "" {
+		return checkpoint.Observed && checkpoint.Generation < route.GetGeneration() && matchesBackendTarget(checkpoint.Value, target)
+	}
 	backend, _, _ := strings.Cut(target, "/")
 	for _, parent := range route.status.Parents {
 		if parent.ControllerName != r.Config.ControllerName {
@@ -171,9 +251,10 @@ func (r *Reconciler) hasPreviousObservedBackendTarget(route *transportRoute, tar
 	return false
 }
 
-func (r *Reconciler) planVersionSkew(ctx context.Context, route *transportRoute, plan *routePlan, backends []serviceBackend, rejectWeight int, bound bool) error {
+func (r *Reconciler) planVersionSkew(ctx context.Context, route *transportRoute, plan *routePlan, backends []serviceBackend, rejectWeight int, binding controller.RouteGatewayBinding) error {
+	bound := binding.Identity.GatewayUID != ""
 	if bound {
-		confirmed, err := r.hasConfirmedForwarding(ctx, route, plan, backends, rejectWeight)
+		confirmed, err := r.hasConfirmedForwarding(ctx, route, plan, backends, rejectWeight, binding.Forwarding)
 		if err != nil && rejectWeight == 0 {
 			return err
 		}
@@ -186,12 +267,20 @@ func (r *Reconciler) planVersionSkew(ctx context.Context, route *transportRoute,
 	return nil
 }
 
-func (r *Reconciler) hasConfirmedForwarding(ctx context.Context, route *transportRoute, plan *routePlan, backends []serviceBackend, rejectWeight int) (bool, error) {
-	parent := plan.parents[0]
-	confirmed := r.currentParentCondition(route, parent.ref, r.forwardingTargetType())
-	if confirmed == nil || confirmed.Status != metav1.ConditionTrue || !r.retainProgrammedCondition(route, plan) ||
-		plan.programmed.Status != metav1.ConditionTrue {
-		return false, nil
+func (r *Reconciler) hasConfirmedForwarding(ctx context.Context, route *transportRoute, plan *routePlan, backends []serviceBackend, rejectWeight int, checkpoint controller.RouteGatewayTarget) (bool, error) {
+	parent := plan.parent
+	expectedTarget := checkpoint.Value
+	if expectedTarget != "" {
+		if checkpoint.Generation != route.GetGeneration() || !checkpoint.Observed {
+			return false, nil
+		}
+	} else {
+		confirmed := r.currentParentCondition(route, parent.ref, r.forwardingTargetType())
+		if confirmed == nil || confirmed.Status != metav1.ConditionTrue || !r.retainProgrammedCondition(route, plan) ||
+			plan.programmed.Status != metav1.ConditionTrue {
+			return false, nil
+		}
+		expectedTarget = confirmed.Message
 	}
 	topology, ready, err := r.gatewayTopology(parent.gateway, parent.listeners[0])
 	if err != nil || !ready {
@@ -201,5 +290,11 @@ func (r *Reconciler) hasConfirmedForwarding(ctx context.Context, route *transpor
 	if err != nil || diagnostic != nil {
 		return false, err
 	}
-	return confirmed.Message == target, nil
+	if expectedTarget != target {
+		return false, nil
+	}
+	if checkpoint.Value != "" {
+		plan.programmed = r.programmedCondition(route)
+	}
+	return true, nil
 }

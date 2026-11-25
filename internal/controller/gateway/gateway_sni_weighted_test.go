@@ -445,13 +445,13 @@ func TestWeightedTerminatingSNIRouteResolvesEachBackendTLSIdentity(t *testing.T)
 	require.NoError(t, kube.Update(t.Context(), route))
 	withZero, err := r.observeSNIRoutes(t.Context(), snapshot)
 	require.NoError(t, err)
-	require.Equal(t, gatewayv1.RouteReasonResolvedRefs, withZero.parentResults()[0].resolvedReason)
+	require.Equal(t, gatewayv1.RouteReasonResolvedRefs, withZero.forParent(route.Spec.ParentRefs[0]).resolvedReason)
 	require.Equal(t, native.targets(), withZero.targets())
 
 	require.NoError(t, kube.Delete(t.Context(), grant))
 	grantRevoked = true
 	withoutZeroGrant, err := r.observeSNIRoutes(t.Context(), snapshot)
 	require.NoError(t, err)
-	require.Equal(t, gatewayv1.RouteReasonRefNotPermitted, withoutZeroGrant.parentResults()[0].resolvedReason)
+	require.Equal(t, gatewayv1.RouteReasonRefNotPermitted, withoutZeroGrant.forParent(route.Spec.ParentRefs[0]).resolvedReason)
 	require.Equal(t, native.targets(), withoutZeroGrant.targets())
 }

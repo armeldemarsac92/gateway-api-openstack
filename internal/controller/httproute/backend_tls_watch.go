@@ -276,6 +276,17 @@ func (r *Reconciler) enqueuePoliciesForTLSRouteDependency(ctx context.Context, d
 			services[key] = struct{}{}
 		}
 	}
+	var defaultGateways gatewayv1.GatewayList
+	eventRoute, routeEvent := dependency.(*gatewayv1.TLSRoute)
+	namespace, namespaceEvent := dependency.(*corev1.Namespace)
+	if (routeEvent || namespaceEvent) && r.Config.DefaultGatewaysEnabled() &&
+		(routeEvent && eventRoute.Spec.UseDefaultGateways == gatewayv1.GatewayDefaultScopeAll || slices.ContainsFunc(routes.Items, func(route gatewayv1.TLSRoute) bool {
+			return route.Spec.UseDefaultGateways == gatewayv1.GatewayDefaultScopeAll
+		})) {
+		if err := r.List(ctx, &defaultGateways, client.MatchingFields{controller.IndexGatewayByDefaultScope: string(gatewayv1.GatewayDefaultScopeAll)}); err != nil {
+			log.FromContext(ctx).Error(err, "Could not list default Gateways for TLSRoute policy peers")
+		}
+	}
 	parentKeys := func(route *gatewayv1.TLSRoute) []types.NamespacedName {
 		var keys []types.NamespacedName
 		for _, ref := range route.Spec.ParentRefs {
@@ -283,17 +294,42 @@ func (r *Reconciler) enqueuePoliciesForTLSRouteDependency(ctx context.Context, d
 				keys = append(keys, types.NamespacedName{Namespace: string(ptr.Deref(ref.Namespace, gatewayv1.Namespace(route.Namespace))), Name: string(ref.Name)})
 			}
 		}
+		for i := range defaultGateways.Items {
+			gateway := &defaultGateways.Items[i]
+			if _, ok := model.DefaultGatewayParent(route.Spec.CommonRouteSpec, route.Namespace, gateway); ok {
+				keys = append(keys, client.ObjectKeyFromObject(gateway))
+			}
+		}
 		return keys
+	}
+	// A listener namespace selector can change the winning SNI route. Include
+	// policies used by contenders in other namespaces on every affected Gateway.
+	updatedParents := map[types.NamespacedName]bool{}
+	addParents := func(route *gatewayv1.TLSRoute) {
+		for _, key := range parentKeys(route) {
+			updatedParents[key] = true
+		}
+	}
+	if routeEvent {
+		addParents(eventRoute)
+	} else if namespaceEvent {
+		for i := range routes.Items {
+			if routes.Items[i].Namespace == namespace.Name {
+				addParents(&routes.Items[i])
+			}
+		}
 	}
 	for i := range routes.Items {
 		route := &routes.Items[i]
 		switch affected := dependency.(type) {
-		case *gatewayv1.TLSRoute:
-			if slices.ContainsFunc(parentKeys(route), func(key types.NamespacedName) bool { return slices.Contains(parentKeys(affected), key) }) {
+		case *gatewayv1.TLSRoute, *corev1.Namespace:
+			if namespaceEvent && route.Namespace == namespace.Name || slices.ContainsFunc(parentKeys(route), func(key types.NamespacedName) bool { return updatedParents[key] }) {
 				addRoute(route)
 			}
 		case *gatewayv1.Gateway:
-			if slices.Contains(parentKeys(route), client.ObjectKeyFromObject(affected)) {
+			usesDefault := r.Config.DefaultGatewaysEnabled() && route.Spec.UseDefaultGateways == gatewayv1.GatewayDefaultScopeAll &&
+				affected.Spec.DefaultScope == gatewayv1.GatewayDefaultScopeAll
+			if usesDefault || slices.Contains(parentKeys(route), client.ObjectKeyFromObject(affected)) {
 				addRoute(route)
 			}
 		case *gatewayv1.ReferenceGrant:
@@ -301,10 +337,6 @@ func (r *Reconciler) enqueuePoliciesForTLSRouteDependency(ctx context.Context, d
 				if key.Namespace == affected.Namespace && route.Namespace != key.Namespace {
 					services[key] = struct{}{}
 				}
-			}
-		case *corev1.Namespace:
-			if route.Namespace == affected.Name {
-				addRoute(route)
 			}
 		case *gatewayv1.GatewayClass:
 			addRoute(route)

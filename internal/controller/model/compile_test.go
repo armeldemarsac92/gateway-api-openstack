@@ -174,6 +174,41 @@ func TestCompileHostnamePrecedesPathAndRouteAge(t *testing.T) {
 	}
 }
 
+func TestDefaultGatewayAttachmentUsesNormalListenerRules(t *testing.T) {
+	gateway := logicalGateway()
+	gateway.Spec.DefaultScope = gatewayv1.GatewayDefaultScopeAll
+	route := logicalRoute("defaulted", "/")
+	route.Spec.ParentRefs = nil
+	route.Spec.UseDefaultGateways = gatewayv1.GatewayDefaultScopeAll
+	input := Input{Gateway: gateway, Routes: []gatewayv1.HTTPRoute{route}, DefaultGateways: true}
+	result := compileLogical(t, input)
+	if len(result.Routes) != 1 || len(result.Routes[0].Parents) != 1 || result.Routes[0].Parents[0].State != AttachmentAccepted ||
+		result.Routes[0].Parents[0].Reference.Name != "shop" || result.Listeners[0].AttachedRoutes != 1 {
+		t.Fatalf("default parent and listener = %+v", result)
+	}
+	if len(input.Routes[0].Spec.ParentRefs) != 0 {
+		t.Fatal("the compiler modified spec.parentRefs on the defaulted route")
+	}
+	input.Routes[0].Namespace = "other"
+	result = compileLogical(t, input)
+	if result.Listeners[0].AttachedRoutes != 0 || len(result.Listeners[0].Rules) != 0 {
+		t.Fatal("the default Gateway accepted a cross-namespace route on a Same listener")
+	}
+	input.Routes[0].Namespace = "apps"
+	gateway.Spec.DefaultScope = gatewayv1.GatewayDefaultScopeNone
+	if result := compileLogical(t, input); len(result.Routes) != 0 {
+		t.Fatalf("Gateway kept an implicit route after withdrawing its default scope: %+v", result.Routes)
+	}
+	input.Routes[0].Spec.ParentRefs = []gatewayv1.ParentReference{{Name: "shop"}}
+	if result := compileLogical(t, input); len(result.Routes) != 1 || result.Listeners[0].AttachedRoutes != 1 {
+		t.Fatalf("useDefaultGateways prevented an explicit attachment: %+v", result.Routes)
+	}
+	gateway.Spec.DefaultScope = gatewayv1.GatewayDefaultScopeAll
+	if result := compileLogical(t, input); len(result.Routes) != 1 || len(result.Routes[0].Parents) != 1 {
+		t.Fatalf("the same explicit and default Gateway was counted twice: %+v", result.Routes)
+	}
+}
+
 func TestCompileScopesParentsAndRetainsProvenance(t *testing.T) {
 	route := logicalRoute("multi-parent", "/")
 	route.Spec.ParentRefs = []gatewayv1.ParentReference{{Name: "another"}, {Name: "shop", SectionName: ptr.To(gatewayv1.SectionName("http"))}}

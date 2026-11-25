@@ -30,12 +30,10 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/model"
 )
 
 const sniParentNoMatchingListenerMessage = "The parentRef does not select a listener"
-
-// Gateway API limits RouteStatus.Parents to 32 entries across all controllers.
-const maxSNIRouteParentStatuses = 32
 
 func (r *Reconciler) reconcileSNIParentStatuses(ctx context.Context, key client.ObjectKey, versionBlocked *gatewayv1.Gateway) error {
 	if r.APIReader == nil {
@@ -61,18 +59,34 @@ func (r *Reconciler) reconcileSNIParentStatuses(ctx context.Context, key client.
 		target := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: key.Namespace, Name: key.Name}}
 		routes.Items = slices.DeleteFunc(routes.Items, func(route gatewayv1.TLSRoute) bool {
 			return !slices.ContainsFunc(route.Spec.ParentRefs, func(ref gatewayv1.ParentReference) bool {
-				return sniParentTargetsGateway(route.Namespace, ref, target)
+				return parentRefTargetsGateway(route.Namespace, ref, target)
 			}) && !slices.ContainsFunc(route.Status.Parents, func(status gatewayv1.RouteParentStatus) bool {
 				return r.ownsSNIParent(&route, target, status)
 			})
 		})
 	}
-	if len(routes.Items) == 0 {
+	discoverDefaults := r.Config.TLSRoutesEnabled() && r.Config.DefaultGatewaysEnabled()
+	if len(routes.Items) == 0 && !discoverDefaults {
 		return nil
 	}
 	gateway, managed, err := r.readSNIParentGateway(ctx, key)
 	if err != nil {
 		return err
+	}
+	if managed && discoverDefaults && gateway.Spec.DefaultScope == gatewayv1.GatewayDefaultScopeAll {
+		var defaults gatewayv1.TLSRouteList
+		if err := r.List(ctx, &defaults, client.MatchingFields{controller.IndexRouteByDefaultGateways: string(gatewayv1.GatewayDefaultScopeAll)}); err != nil {
+			return fmt.Errorf("list TLSRoutes using default Gateways: %w", err)
+		}
+		seen := make(map[client.ObjectKey]bool, len(routes.Items))
+		for i := range routes.Items {
+			seen[client.ObjectKeyFromObject(&routes.Items[i])] = true
+		}
+		for i := range defaults.Items {
+			if !seen[client.ObjectKeyFromObject(&defaults.Items[i])] {
+				routes.Items = append(routes.Items, defaults.Items[i])
+			}
+		}
 	}
 	rawTLSVersionUnsupported := versionBlocked != nil && gateway.UID == versionBlocked.UID &&
 		gateway.Generation == versionBlocked.Generation && controller.GatewayBindingMetadataEqual(r.Config, gateway, versionBlocked)
@@ -174,7 +188,7 @@ func (r *Reconciler) setRejectedSNIParent(status *gatewayv1.RouteParentStatus, r
 }
 
 func (r *Reconciler) ownsSNIParent(route *gatewayv1.TLSRoute, gateway *gatewayv1.Gateway, status gatewayv1.RouteParentStatus) bool {
-	return status.ControllerName == r.Config.ControllerName && sniParentTargetsGateway(route.Namespace, status.ParentRef, gateway)
+	return status.ControllerName == r.Config.ControllerName && parentRefTargetsGateway(route.Namespace, status.ParentRef, gateway)
 }
 
 func (r *Reconciler) removeOwnedSNIParents(route *gatewayv1.TLSRoute, gateway *gatewayv1.Gateway) {
@@ -186,22 +200,23 @@ func (r *Reconciler) removeOwnedSNIParents(route *gatewayv1.TLSRoute, gateway *g
 // updateSNIRouteParents preserves the order of existing status entries so
 // independently reconciling Gateways do not move their parents back and forth.
 func (r *Reconciler) updateSNIRouteParents(route *gatewayv1.TLSRoute, gateway *gatewayv1.Gateway, update func(*gatewayv1.RouteParentStatus) bool) {
+	refs := model.EffectiveParentRefs(route.Spec.CommonRouteSpec, route.Namespace, gateway, r.Config.DefaultGatewaysEnabled())
 	matches := func(ref gatewayv1.ParentReference, status gatewayv1.RouteParentStatus) bool {
 		return controller.ParentRefsEqual(ref, route.Namespace, status.ParentRef, route.Namespace)
 	}
 	route.Status.Parents = slices.DeleteFunc(route.Status.Parents, func(status gatewayv1.RouteParentStatus) bool {
-		return r.ownsSNIParent(route, gateway, status) && !slices.ContainsFunc(route.Spec.ParentRefs, func(ref gatewayv1.ParentReference) bool {
+		return r.ownsSNIParent(route, gateway, status) && !slices.ContainsFunc(refs, func(ref gatewayv1.ParentReference) bool {
 			return matches(ref, status)
 		})
 	})
-	for _, ref := range route.Spec.ParentRefs {
-		if !sniParentTargetsGateway(route.Namespace, ref, gateway) {
+	for _, ref := range refs {
+		if !parentRefTargetsGateway(route.Namespace, ref, gateway) {
 			continue
 		}
 		index := slices.IndexFunc(route.Status.Parents, func(status gatewayv1.RouteParentStatus) bool {
 			return r.ownsSNIParent(route, gateway, status) && matches(ref, status)
 		})
-		if index < 0 && len(route.Status.Parents) >= maxSNIRouteParentStatuses {
+		if index < 0 && len(route.Status.Parents) >= controller.RouteParentStatusLimit {
 			continue
 		}
 		status := gatewayv1.RouteParentStatus{ParentRef: ref, ControllerName: r.Config.ControllerName}

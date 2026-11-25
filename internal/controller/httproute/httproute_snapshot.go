@@ -147,7 +147,7 @@ func (r *Reconciler) buildRouteValidationSnapshotFromInputs(
 		return routeValidationSnapshot{}, routeSnapshotRejection(purpose, err)
 	}
 	if inputs == nil {
-		routes, err := r.liveGraphRoutes(ctx, controller.GatewayIdentity(r.Config, snapshot.gateway))
+		routes, err := r.liveGraphRoutes(ctx, controller.GatewayIdentity(r.Config, snapshot.gateway), snapshot.gateway)
 		if err != nil {
 			return routeValidationSnapshot{}, err
 		}
@@ -452,7 +452,7 @@ func (r *Reconciler) sealRouteMutationSnapshot(
 	if err := r.sealRouteOwnershipSnapshot(ctx, snapshot, bindingRequirement); err != nil {
 		return err
 	}
-	routes, err := r.liveGraphRoutes(ctx, controller.GatewayIdentity(r.Config, snapshot.gateway))
+	routes, err := r.liveGraphRoutes(ctx, controller.GatewayIdentity(r.Config, snapshot.gateway), snapshot.gateway)
 	if err != nil {
 		return err
 	}

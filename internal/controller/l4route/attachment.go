@@ -48,35 +48,42 @@ func gatewayKey(route *transportRoute, parent gatewayv1.ParentReference) client.
 	return client.ObjectKey{Namespace: namespace, Name: string(parent.Name)}
 }
 
-func (r *Reconciler) managedParents(ctx context.Context, route *transportRoute) ([]routeParent, error) {
+func (r *Reconciler) managedParents(ctx context.Context, route *transportRoute, key client.ObjectKey) ([]routeParent, string, error) {
+	gateway := &gatewayv1.Gateway{}
+	if err := r.APIReader.Get(ctx, key, gateway); err != nil {
+		return nil, "", client.IgnoreNotFound(err)
+	}
+	uid := string(gateway.UID)
+	refs := r.gatewayRefs(route, gateway)
+	if len(refs) == 0 {
+		return nil, uid, nil
+	}
+	class, err := r.gatewayClass(ctx, gateway)
+	if err != nil || class == nil {
+		return nil, uid, err
+	}
 	var parents []routeParent
 	namespaces := make(routeNamespaceCache)
-	for _, ref := range route.parentRefs {
-		if !controller.IsGatewayParentRef(ref) {
-			continue
-		}
-		gateway := &gatewayv1.Gateway{}
-		if err := r.APIReader.Get(ctx, gatewayKey(route, ref), gateway); err != nil {
-			if apierrors.IsNotFound(err) {
-				continue
-			}
-			return nil, err
-		}
-		class, err := r.gatewayClass(ctx, gateway)
-		if err != nil {
-			return nil, err
-		}
-		if class == nil {
-			continue
-		}
+	for _, ref := range refs {
 		parent := routeParent{ref: ref, gateway: gateway, class: class}
 		parent.listeners, parent.rejected, err = r.attachment(ctx, route, gateway, ref, namespaces)
 		if err != nil {
-			return nil, err
+			return nil, uid, err
 		}
 		parents = append(parents, parent)
 	}
-	return parents, nil
+	return parents, uid, nil
+}
+
+func (r *Reconciler) gatewayRefs(route *transportRoute, gateway *gatewayv1.Gateway) []gatewayv1.ParentReference {
+	var selected []gatewayv1.ParentReference
+	key := client.ObjectKeyFromObject(gateway)
+	for _, ref := range model.EffectiveParentRefs(route.commonSpec, route.GetNamespace(), gateway, r.Config.DefaultGatewaysEnabled()) {
+		if controller.IsGatewayParentRef(ref) && gatewayKey(route, ref) == key {
+			selected = append(selected, ref)
+		}
+	}
+	return selected
 }
 
 func (r *Reconciler) gatewayClass(ctx context.Context, gateway *gatewayv1.Gateway) (*gatewayv1.GatewayClass, error) {
@@ -162,15 +169,13 @@ func (r *Reconciler) listenerAllows(ctx context.Context, listener *gatewayv1.Lis
 	return model.AllowsRouteNamespace(listener, gatewayNamespace, routeNamespace, namespaces[routeNamespace]), nil
 }
 
-func listenerCandidates(gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, routes []*transportRoute) []*transportRoute {
+func (r *Reconciler) listenerCandidates(gateway *gatewayv1.Gateway, listener *gatewayv1.Listener, routes []*transportRoute) []*transportRoute {
 	var candidates []*transportRoute
-	key := client.ObjectKeyFromObject(gateway)
 	for _, route := range routes {
-		if !route.GetDeletionTimestamp().IsZero() || len(route.parentRefs) != 1 {
+		if !route.GetDeletionTimestamp().IsZero() || !r.Config.DefaultGatewaysEnabled() && len(route.parentRefs) != 1 {
 			continue
 		}
-		ref := route.parentRefs[0]
-		if controller.IsGatewayParentRef(ref) && gatewayKey(route, ref) == key && parentSelects(ref, listener) {
+		if slices.ContainsFunc(r.gatewayRefs(route, gateway), func(ref gatewayv1.ParentReference) bool { return parentSelects(ref, listener) }) {
 			candidates = append(candidates, route)
 		}
 	}

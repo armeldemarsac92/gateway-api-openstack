@@ -22,6 +22,8 @@ import (
 	"strings"
 
 	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -98,6 +100,14 @@ func (r *Reconciler) patchGateway(ctx context.Context, scope *gatewayScope) erro
 		return nil
 	}
 	desired := scope.gateway.DeepCopy()
+	if scope.managed && desired.DeletionTimestamp.IsZero() {
+		if r.Config.DefaultGatewaysEnabled() && desired.Spec.DefaultScope == gatewayv1.GatewayDefaultScopeAll {
+			controller.SetCondition(&desired.Status.Conditions, controller.Condition("DefaultGateway", metav1.ConditionTrue,
+				string(gatewayv1.GatewayReasonAccepted), "Gateway accepts Routes requesting the All default scope", desired.Generation))
+		} else {
+			meta.RemoveStatusCondition(&desired.Status.Conditions, "DefaultGateway")
+		}
+	}
 	if scope.managed && model.GatewayDisallowsListenerSets(desired) && ptr.Deref(desired.Status.AttachedListenerSets, 0) != 0 {
 		desired.Status.AttachedListenerSets = ptr.To(int32(0))
 	}

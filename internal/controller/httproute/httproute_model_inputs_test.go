@@ -346,7 +346,7 @@ func TestRouteGraphSharesBackendObservationAcrossCandidates(t *testing.T) {
 	candidate.Spec.Rules[0].BackendRefs[0].Namespace = ptr.To(gatewayv1.Namespace("unbound-backend"))
 	f.create(t, unsupported, candidate)
 
-	routes, err := f.reconciler.liveGraphRoutes(t.Context(), controller.GatewayIdentity(testConfig(), f.gateway))
+	routes, err := f.reconciler.liveGraphRoutes(t.Context(), controller.GatewayIdentity(testConfig(), f.gateway), f.gateway)
 	if err != nil {
 		t.Fatal(err)
 	}

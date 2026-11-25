@@ -316,6 +316,13 @@ func TestControllerEnvtest(t *testing.T) {
 	t.Run("shared Gateway follows tenant namespace labels", func(t *testing.T) {
 		testSharedHTTPGateway(t, apiClient, statusConfig)
 	})
+	if config.DefaultGatewaysEnabled() {
+		for _, protocol := range []gatewayv1.ProtocolType{gatewayv1.HTTPProtocolType, gatewayv1.TCPProtocolType} {
+			t.Run("default Gateways attach and withdraw independently/"+string(protocol), func(t *testing.T) {
+				testDefaultGatewayAttachments(t, apiClient, statusConfig, protocol)
+			})
+		}
+	}
 	t.Run("TCP listener selects one authorized backend", func(t *testing.T) {
 		testTCPGatewaySelection(t, apiClient, statusConfig, statusProvider)
 	})

@@ -38,9 +38,6 @@ import (
 
 type routeStatusPlanKind int
 
-// Gateway API limits RouteStatus.Parents to 32 entries across all controllers.
-const maxRouteParentStatuses = 32
-
 const (
 	routeStatusPlanReplace routeStatusPlanKind = iota
 	routeStatusPlanProviderFailure
@@ -298,13 +295,22 @@ func (r *Reconciler) deletingFailureParentUpdates(
 
 	var updates []parentStatusUpdate
 	for _, status := range route.Status.Parents {
-		if status.ControllerName != r.Config.ControllerName || !slices.ContainsFunc(route.Spec.ParentRefs, func(ref gatewayv1.ParentReference) bool {
-			return controller.ParentRefsEqual(ref, route.Namespace, status.ParentRef, route.Namespace)
-		}) {
+		if status.ControllerName != r.Config.ControllerName {
 			continue
 		}
 		ref := status.ParentRef
-		if !routeTargetsGateway(route, ref, gatewayKey.Namespace, gatewayKey.Name) {
+		targetsGateway := routeTargetsGateway(route, ref, gatewayKey.Namespace, gatewayKey.Name)
+		declared := slices.ContainsFunc(route.Spec.ParentRefs, func(candidate gatewayv1.ParentReference) bool {
+			return controller.ParentRefsEqual(candidate, route.Namespace, ref, route.Namespace)
+		})
+		// For an implicit parent, the recorded binding identifies a previously
+		// reported Gateway even if it has since been removed from the cluster.
+		implicit := r.Config.DefaultGatewaysEnabled() && route.Spec.UseDefaultGateways == gatewayv1.GatewayDefaultScopeAll &&
+			targetsGateway && ref.SectionName == nil && ref.Port == nil
+		if !declared && !implicit {
+			continue
+		}
+		if !targetsGateway {
 			setKey := model.ListenerSetRefKey(ref, route.Namespace)
 			if model.HTTPProfileRouteKind(route) != model.HTTPRouteKind || setKey.Name == "" {
 				continue
@@ -467,7 +473,7 @@ func (p *routeStatusPlan) updateParentStatuses(config controller.Config, route *
 			continue
 		}
 		existing := slices.IndexFunc(parents, func(parent gatewayv1.RouteParentStatus) bool { return matches(parent, update.parent) })
-		if existing < 0 && len(parents) >= maxRouteParentStatuses {
+		if existing < 0 && len(parents) >= controller.RouteParentStatusLimit {
 			continue
 		}
 		parentStatus := gatewayv1.RouteParentStatus{ParentRef: update.parent, ControllerName: config.ControllerName}
@@ -558,16 +564,6 @@ func applyDeletingRouteProviderFailure(
 	parent gatewayv1.ParentReference,
 	policy controller.ProviderFailurePolicy,
 ) bool {
-	parentInSpec := false
-	for _, candidate := range route.Spec.ParentRefs {
-		if controller.ParentRefsEqual(candidate, route.Namespace, parent, route.Namespace) {
-			parentInSpec = true
-			break
-		}
-	}
-	if !parentInSpec {
-		return false
-	}
 	for index := range route.Status.Parents {
 		candidate := &route.Status.Parents[index]
 		if candidate.ControllerName != config.ControllerName ||
