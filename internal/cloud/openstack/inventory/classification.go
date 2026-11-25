@@ -184,6 +184,16 @@ func classifyAuditCandidate(
 					"Request URL rewrite policy does not report a complete rewrite")
 			}
 		}
+		if candidate.requestPolicyPresent || slices.Contains(candidate.tags, openstackidentity.HTTPRequestPolicyTag) {
+			if redirect || candidate.policyAction != string(l7policies.ActionRedirectToPool) && candidate.policyAction != string(octavia.ActionWeightedTargets) {
+				return auditFinding(finding, audit.DispositionOwnershipConflict, auditReasonParentMismatch,
+					"HTTP request policy requires an owned forwarding action")
+			}
+			if !candidate.policyInventoryOK || !candidate.requestPolicyValid {
+				return auditFinding(finding, audit.DispositionUnresolved, auditReasonUnprovenPolicyTarget,
+					"HTTP request policy does not report complete settings")
+			}
+		}
 		if candidate.corsPresent || slices.Contains(candidate.tags, openstackidentity.RequestCORSPolicyTag) {
 			if redirect || candidate.policyAction != string(l7policies.ActionRedirectToPool) && candidate.policyAction != string(octavia.ActionWeightedTargets) {
 				return auditFinding(finding, audit.DispositionOwnershipConflict, auditReasonParentMismatch,

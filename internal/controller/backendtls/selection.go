@@ -36,7 +36,7 @@ type Selection struct {
 	Policies []PolicyResult
 }
 
-// Clone detaches the policy conditions and CA bytes used in a compiled backend.
+// Clone detaches the policy conditions and TLS inputs used in a compiled backend.
 func (s Selection) Clone() Selection {
 	copy := Selection{Policies: slices.Clone(s.Policies)}
 	for i := range copy.Policies {
@@ -56,6 +56,7 @@ func (r PolicyResult) clone() PolicyResult {
 	if r.Validation != nil {
 		validation := *r.Validation
 		validation.CA.PEM = slices.Clone(validation.CA.PEM)
+		validation.SubjectAltNames = slices.Clone(validation.SubjectAltNames)
 		r.Validation = &validation
 	}
 	return r
@@ -88,11 +89,17 @@ type candidate struct {
 	match  targetMatch
 }
 
+// CAInputs contains the trust observed for applicable policy references.
+type CAInputs struct {
+	ConfigMaps          map[types.NamespacedName]*corev1.ConfigMap
+	ClusterTrustBundles map[string]CAObservation
+}
+
 // Evaluate selects the policy for a Service and the port already resolved from
-// that Service. It uses snapshots of policies and ConfigMaps, and does not
+// that Service. It uses snapshots of policies and CA references, and does not
 // perform Kubernetes reads or update status. Named-port and whole-Service
 // winners can both be accepted, with the named-port winner effective for that port.
-func Evaluate(service *corev1.Service, port *corev1.ServicePort, policies []gatewayv1.BackendTLSPolicy, configMaps map[types.NamespacedName]*corev1.ConfigMap) Selection {
+func Evaluate(service *corev1.Service, port *corev1.ServicePort, policies []gatewayv1.BackendTLSPolicy, inputs CAInputs) Selection {
 	if service == nil || port == nil {
 		return Selection{}
 	}
@@ -138,7 +145,7 @@ func Evaluate(service *corev1.Service, port *corev1.ServicePort, policies []gate
 			result.reject(gatewayv1.PolicyReasonTargetNotFound, message)
 			result.rejectRef(gatewayv1.PolicyReasonTargetNotFound, message)
 		default:
-			validate(&result, policy.Spec, configMaps)
+			validate(&result, policy.Spec, inputs)
 			if first, exists := winners[match]; exists {
 				message := fmt.Sprintf("BackendTLSPolicy %s has precedence for the same target and section", selection.Policies[first].Key)
 				result.reject(gatewayv1.PolicyReasonConflicted, message)

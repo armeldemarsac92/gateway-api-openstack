@@ -45,8 +45,9 @@ type routeModelInputs struct {
 	gateway                *gatewayv1.Gateway
 	input                  model.Input
 	logical                model.Gateway
-	backendTLSAvailability map[bool]backendTLSAvailability
+	backendTLSAvailability map[backendTLSRequirements]backendTLSAvailability
 	backendTLSAncestor     *backendtls.GatewayAncestor
+	clusterTrustBundles    *backendtls.ClusterTrustBundles
 	admission              routeGraphAdmission
 }
 
@@ -277,6 +278,8 @@ func (r *Reconciler) collectRouteModelInputsForSets(ctx context.Context, reader 
 	input.ResponseHeaderModifier = r.Config.ResponseHeaderModifier
 	input.HTTPRequestRedirect = r.Config.HTTPRequestRedirect
 	input.HTTPRequestURLRewrite = r.Config.HTTPRequestURLRewrite
+	input.HTTPRequestPolicy = r.Config.HTTPRequestPolicy
+	input.HTTPRequestMirror = r.Config.HTTPRequestMirror
 	input.HTTPCORS = r.Config.HTTPCORS
 	input.BackendRequestFilters = r.Config.BackendRequestFilters && r.Config.WeightedHTTPTargets
 	input.BackendH2C = r.Config.BackendH2C
@@ -304,28 +307,32 @@ func (r *Reconciler) collectRouteModelInputsForSets(ctx context.Context, reader 
 			}
 		}
 	}
-	var availability map[bool]backendTLSAvailability
+	if r.Config.GatewayListenerFiltersEnabled() {
+		input.GatewayListenerRequestFilters = make(map[gatewayv1.SectionName]bool)
+		for i := range input.Gateway.Spec.Listeners {
+			listener := &input.Gateway.Spec.Listeners[i]
+			if gatewaycontroller.GatewayOwnsListenerRequestFilters(r.Config, input.Gateway.Namespace, listener) {
+				input.GatewayListenerRequestFilters[listener.Name] = true
+			}
+		}
+	}
+	var availability map[backendTLSRequirements]backendTLSAvailability
 	var ancestor *backendtls.GatewayAncestor
 	if r.Config.BackendTLSPolicy {
 		ancestor = &backendtls.GatewayAncestor{Key: client.ObjectKeyFromObject(gateway), ControllerName: r.Config.ControllerName}
-		if err := graph.CollectBackendTLSInputs(ctx, reader, &input, ancestor); err != nil {
+		if err := graph.CollectBackendTLSInputs(ctx, reader, &input, ancestor, r.Config.ClusterTrustBundles); err != nil {
 			return nil, err
 		}
-		if graph.HasValidBackendTLSWinner(input.BackendTLSPolicies) {
-			availability = make(map[bool]backendTLSAvailability, 2)
-			for i := range routes {
-				requireH2 := model.HTTPProfileRouteKind(&routes[i]) == model.GRPCRouteKind
-				if _, checked := availability[requireH2]; !checked {
-					availability[requireH2] = r.backendTLSAvailability(ctx, requireH2)
-				}
-			}
-		}
+		availability = r.discoverBackendTLSProfiles(ctx, routes, input.BackendTLSPolicies)
 	}
 	logical, err := model.Compile(input)
 	if err != nil {
 		return nil, fmt.Errorf("compile Gateway backend model: %w", err)
 	}
-	return &routeModelInputs{gateway: gateway, input: input, logical: logical, backendTLSAvailability: availability, backendTLSAncestor: ancestor}, nil
+	return &routeModelInputs{
+		gateway: gateway, input: input, logical: logical, backendTLSAvailability: availability,
+		backendTLSAncestor: ancestor, clusterTrustBundles: r.Config.ClusterTrustBundles,
+	}, nil
 }
 
 func (r *Reconciler) xBackendMemberMode(gateway *gatewayv1.Gateway) (cloud.MemberMode, error) {
@@ -349,8 +356,8 @@ func (inputs *routeModelInputs) validateBackends(ctx context.Context, reader cli
 	}
 	for _, route := range inputs.input.Routes {
 		for _, rule := range route.Spec.Rules {
-			for _, ref := range rule.BackendRefs {
-				key, supported := model.BackendServiceReference(route.Namespace, ref.BackendObjectReference)
+			for _, ref := range model.HTTPServiceBackendReferences(rule, true) {
+				key, supported := model.BackendServiceReference(route.Namespace, ref)
 				if supported && model.BackendReferenceAllowedFor(model.HTTPProfileRouteKind(&route), route.Namespace, key, inputs.input.ReferenceGrants) !=
 					model.BackendReferenceAllowedFor(model.HTTPProfileRouteKind(&route), route.Namespace, key, current.ReferenceGrants) {
 					return errHTTPRouteChanged
@@ -359,7 +366,7 @@ func (inputs *routeModelInputs) validateBackends(ctx context.Context, reader cli
 		}
 	}
 	if inputs.input.BackendTLSPolicies != nil {
-		if err := graph.CollectBackendTLSInputs(ctx, reader, &current, inputs.backendTLSAncestor); err != nil {
+		if err := graph.CollectBackendTLSInputs(ctx, reader, &current, inputs.backendTLSAncestor, inputs.clusterTrustBundles); err != nil {
 			return err
 		}
 	}

@@ -34,6 +34,7 @@ import (
 	"sigs.k8s.io/gateway-api/pkg/features"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 )
@@ -209,6 +210,40 @@ func TestGatewayReportsGRPCBackendTLSAncestorLimitUntilRouteRecovers(t *testing.
 
 	route.Status.Parents[0].Conditions[1].Status = metav1.ConditionTrue
 	route.Status.Parents[0].Conditions[1].Reason = "Programmed"
+	require.NoError(t, kube.Status().Update(t.Context(), route))
+	require.Nil(t, status())
+}
+
+func TestGatewayReportsTerminatingTLSRouteBackendTLSAncestorLimit(t *testing.T) {
+	cfg := testConfig()
+	cfg.TCPTLSTermination, cfg.BackendTLSPolicy = true, true
+	gateway := programmedTestGateway(cfg)
+	listener := testSNIListener()
+	listener.TLS.Mode = ptr.To(gatewayv1.TLSModeTerminate)
+	gateway.Spec.Listeners = []gatewayv1.Listener{listener}
+	route := testSNIRoute(gateway, "tls", gateway.Namespace, "tls.example.com")
+	route.Status.Parents = []gatewayv1.RouteParentStatus{{
+		ParentRef: route.Spec.ParentRefs[0], ControllerName: cfg.ControllerName,
+		Conditions: []metav1.Condition{
+			controller.Condition(string(gatewayv1.RouteConditionAccepted), metav1.ConditionTrue, "Accepted", "Attached", route.Generation),
+			controller.Condition(cfg.Domain()+"/Programmed", metav1.ConditionFalse, backendtls.AncestorLimitReason, backendtls.AncestorLimitMessage, route.Generation),
+		},
+	}}
+	kube := indexedFakeClientBuilder(testScheme(t), cfg).WithStatusSubresource(route).WithObjects(route).Build()
+	r := &Reconciler{APIReader: kube, Config: cfg}
+	status := func() *metav1.Condition {
+		t.Helper()
+		require.NoError(t, r.setGatewayListenerStatuses(t.Context(), gateway, &listener, metav1.ConditionTrue,
+			gatewayv1.GatewayReasonProgrammed, gatewayv1.ListenerReasonProgrammed, "Ready", "Ready", true, nil))
+		require.EqualValues(t, 1, gateway.Status.Listeners[0].AttachedRoutes)
+		return meta.FindStatusCondition(gateway.Status.Conditions, cfg.Domain()+"/BackendTLSPoliciesReady")
+	}
+	full := status()
+	require.NotNil(t, full)
+	require.Equal(t, metav1.ConditionFalse, full.Status)
+	require.Equal(t, backendtls.AncestorLimitReason, full.Reason)
+	require.NoError(t, kube.Get(t.Context(), client.ObjectKeyFromObject(route), route))
+	route.Status.Parents[0].Conditions[1].Status = metav1.ConditionTrue
 	require.NoError(t, kube.Status().Update(t.Context(), route))
 	require.Nil(t, status())
 }

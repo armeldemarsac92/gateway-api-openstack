@@ -36,28 +36,38 @@ import (
 
 func TestRequireGatewayAPIs(t *testing.T) {
 	for _, tc := range []struct {
-		name, missing string
-		experimental  bool
-		backendTLS    bool
+		name, missing  string
+		experimental   bool
+		ambientXMesh   bool
+		tlsPassthrough bool
+		tlsTerminate   bool
+		backendTLS     bool
 	}{
 		{name: "standard"},
 		{name: "missing referencegrants", missing: "referencegrants"},
 		{name: "missing udproutes", missing: "udproutes"},
 		{name: "backend TLS policy enabled", backendTLS: true},
 		{name: "backend TLS policy CRD missing", backendTLS: true, missing: "backendtlspolicies"},
+		{name: "passthrough watches backend TLS policies", tlsPassthrough: true},
+		{name: "passthrough needs backend TLS policy inventory", tlsPassthrough: true, missing: "backendtlspolicies"},
+		{name: "termination needs backend TLS policy inventory", tlsTerminate: true, missing: "backendtlspolicies"},
 		{name: "experimental", experimental: true},
 		{name: "missing xbackends", missing: "xbackends", experimental: true},
+		{name: "experimental XMesh", experimental: true, ambientXMesh: true},
+		{name: "missing opt-in xmeshes", missing: "xmeshes", experimental: true, ambientXMesh: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			resources := metav1.APIResourceList{GroupVersion: gatewayv1.GroupVersion.String()}
-			for _, resource := range []string{"gatewayclasses", "gateways", "httproutes", "tcproutes", "udproutes", "referencegrants", "backendtlspolicies"} {
+			for _, resource := range []string{"gatewayclasses", "gateways", "httproutes", "tcproutes", "udproutes", "referencegrants", "backendtlspolicies", "tlsroutes"} {
 				if resource != tc.missing {
 					resources.APIResources = append(resources.APIResources, metav1.APIResource{Name: resource})
 				}
 			}
 			experimental := metav1.APIResourceList{GroupVersion: gatewayx.GroupVersion.String()}
-			if tc.missing != "xbackends" {
-				experimental.APIResources = []metav1.APIResource{{Name: "xbackends"}}
+			for _, resource := range []string{"xbackends", "xmeshes"} {
+				if resource != tc.missing && (resource != "xmeshes" || tc.ambientXMesh) {
+					experimental.APIResources = append(experimental.APIResources, metav1.APIResource{Name: resource})
+				}
 			}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 				var response metav1.APIResourceList
@@ -77,11 +87,11 @@ func TestRequireGatewayAPIs(t *testing.T) {
 				}
 			}))
 			t.Cleanup(server.Close)
-			configuration := controller.Config{BackendTLSPolicy: tc.backendTLS}
+			configuration := controller.Config{BackendTLSPolicy: tc.backendTLS, TLSSNIPassthrough: tc.tlsPassthrough, TCPTLSTermination: tc.tlsTerminate}
 			if tc.experimental {
 				configuration.GatewayAPIChannel = "experimental"
 			}
-			err := requireGatewayAPIs(&rest.Config{Host: server.URL}, configuration)
+			err := requireGatewayAPIs(&rest.Config{Host: server.URL}, configuration, tc.ambientXMesh)
 			if tc.missing == "" && err != nil {
 				t.Fatalf("requireGatewayAPIs() rejected available resources: %v", err)
 			}

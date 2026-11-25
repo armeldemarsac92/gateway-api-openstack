@@ -59,6 +59,7 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 		}
 		port, _ := strconv.Atoi(snapshot.boundListenerPort)
 		spec := cloud.GatewaySpec{ListenerProtocol: string(snapshot.boundListenerProtocol), ListenerPort: port}
+		var reservations []clusterAddressReservation
 		// A listener replacement must not release an existing VIP when the
 		// same request changes the fixed address. Deletion has no such guard.
 		if snapshot.listenerPort != "" {
@@ -69,6 +70,17 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 					return graph.GatewayInput{}, err
 				}
 				spec.ExternalNetworkID = topology.Topology.ExternalNetworkID
+				if r.Config.GatewayAddressRoutabilityClusterEnabled() && spec.RequestedVIPAddresses != nil {
+					listeners, err := SupportedListenersForConfig(r.Config, request.Gateway)
+					if err != nil {
+						return graph.GatewayInput{}, err
+					}
+					spec.VIPSubnetID = topology.Topology.VIPSubnetID
+					reservations, err = r.admitClusterAddressRequest(ctx, request.Gateway, listeners[0], &spec)
+					if err != nil {
+						return graph.GatewayInput{}, err
+					}
+				}
 			}
 		}
 		if snapshot.scopedListeners {
@@ -77,9 +89,10 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 		input := graph.GatewayInput{
 			Object: request.Gateway.DeepCopy(),
 			Node: cloud.GatewayGraphNode{
-				Disposition:    cloud.GraphDelete,
-				Spec:           spec,
-				BackendCAOwned: controllerutil.ContainsFinalizer(request.Gateway, r.Config.BackendCAFinalizer()),
+				Disposition:      cloud.GraphDelete,
+				Spec:             spec,
+				RetainSNIAddress: snapshot.retainSNIAddress,
+				BackendCAOwned:   controllerutil.ContainsFinalizer(request.Gateway, r.Config.BackendCAFinalizer()),
 			},
 			Validate: func(ctx context.Context) error {
 				latest, err := r.observeGatewayCleanupSnapshot(ctx, request.Gateway)
@@ -89,10 +102,13 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 				if *latest != *snapshot {
 					return errGatewayChanged
 				}
+				if len(reservations) != 0 {
+					return r.validateClusterAddressReservations(ctx, request.Gateway, reservations)
+				}
 				return nil
 			},
 		}
-		if snapshot.boundListenerProtocol == gatewayv1.TLSProtocolType || snapshot.boundListenerProtocol == cloud.ListenerProtocolTLSTerminate {
+		if snapshot.boundListenerProtocol == gatewayv1.TLSProtocolType || cloud.IsTCPTLSListenerProtocol(string(snapshot.boundListenerProtocol)) {
 			input.ReportRoutes = func(ctx context.Context, result cloud.GatewayGraphResult, providerErr error) error {
 				if providerErr != nil || result.Outcome.State != cloud.OutcomeReady || result.Gateway.AddressIssue != "" {
 					return nil
@@ -118,7 +134,7 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 		input.ObserveTLS = func(ctx context.Context) (graph.GatewayInput, error) {
 			return r.tlsWithdrawalInput(ctx, binding, request.Identity)
 		}
-	} else if r.boundListenerProtocol(binding) == cloud.ListenerProtocolTLSTerminate {
+	} else if cloud.IsTCPTLSListenerProtocol(string(r.boundListenerProtocol(binding))) {
 		input.ObserveTLS = func(ctx context.Context) (graph.GatewayInput, error) {
 			return r.rawTLSWithdrawalInput(ctx, binding, request.Identity)
 		}
@@ -128,6 +144,21 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 	}
 	input.Object = snapshot.gateway
 	input.Node = cloud.GatewayGraphNode{Disposition: cloud.GraphEnsure, Spec: r.gatewaySpec(snapshot.gateway, snapshot.listeners, snapshot.topology)}
+	reservations, err := r.admitClusterAddressRequest(ctx, snapshot.gateway, snapshot.listener, &input.Node.Spec)
+	if err != nil {
+		return input, err
+	}
+	if len(reservations) == 0 {
+		reservations, err = r.observeClusterAddressLoss(ctx, snapshot.gateway, &input.Node.Spec)
+		if err != nil {
+			return input, err
+		}
+	}
+	if input.Node.AddressWithdrawalOnly() {
+		input.ObserveTLS = nil
+		input.Validate = func(ctx context.Context) error { return r.sealGatewayMutationSnapshot(ctx, snapshot) }
+		return input, nil
+	}
 	input.Node.BackendCAOwned = controllerutil.ContainsFinalizer(snapshot.gateway, r.Config.BackendCAFinalizer())
 	backendIdentity, _, _ := r.observeBackendClientCertificate(ctx, snapshot.gateway)
 	input.Node.BackendClientCertificate = backendIdentity
@@ -149,6 +180,20 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 			}
 		}
 	}
+	filters, err := r.observeListenerFilters(ctx, snapshot.gateway, snapshot.listeners, sets, snapshot.topology)
+	if err != nil {
+		return input, err
+	}
+	input.Node.Spec.RequestFilterSections = filters.ports
+	if input.Node.Spec.ListenerProtocol == cloud.ListenerProtocolHTTP && input.Node.Spec.ScopedListeners != nil && len(filters.ports) != 0 {
+		spec := cloud.GatewaySpec{
+			Identity: input.Node.Spec.Identity, ListenerProtocol: cloud.ListenerProtocolHTTP,
+			ListenerPort: input.Node.Spec.ListenerPort, ScopedListeners: []cloud.ScopedListener{},
+		}
+		input.ObserveListenerFilterWithdrawal = func(ctx context.Context) (graph.GatewayInput, error) {
+			return r.listenerFilterWithdrawalInput(ctx, snapshot, spec)
+		}
+	}
 	if (r.Config.BackendTLSPolicy || r.Config.FrontendClientValidation) && !input.Node.BackendCAOwned {
 		input.Node.ClaimBackendCA = func(ctx context.Context) error {
 			desired := snapshot.gateway.DeepCopy()
@@ -167,23 +212,33 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 		if !sets.sameInputs(current) {
 			return errGatewayChanged
 		}
+		if err := r.validateListenerFilterInputs(ctx, snapshot, current, filters); err != nil {
+			return err
+		}
 		if !backendIdentity.Denied {
 			latest, _, _ := r.observeBackendClientCertificate(ctx, snapshot.gateway)
 			if latest != backendIdentity {
 				return errGatewayChanged
 			}
 		}
+		if len(reservations) != 0 {
+			return r.validateClusterAddressReservations(ctx, snapshot.gateway, reservations)
+		}
 		return nil
 	}
 	if snapshot.listener.Protocol == gatewayv1.TLSProtocolType {
 		if terminatesTLS(snapshot.listener) {
-			input.Node.TCPTLSCertificateRef = r.resolveCertificate(ctx, snapshot.gateway, snapshot.listener).tls.CertificateRef
+			input.Node.SNIPoliciesObserved = r.Config.BackendTLSPolicy
+			input.Node.TCPTLSCertificateRef, _ = r.rawTLSCertificate(ctx, snapshot.gateway, snapshot.listeners)
 		}
 		observed, err := r.observeSNIRoutes(ctx, snapshot)
 		if err != nil {
 			return input, err
 		}
 		input.Node.TLSSNIRoutes = observed.targets()
+		if input.Node.Spec.ListenerProtocol == cloud.ListenerProtocolTLSMixed {
+			input.Node.TLSSNIRoutes = appendMixedSNIListenerGuards(input.Node.Spec.Identity, snapshot.listeners, input.Node.TLSSNIRoutes)
+		}
 		validate := func(ctx context.Context) error {
 			latest, err := r.observeSNIRoutes(ctx, snapshot)
 			if err != nil {
@@ -192,7 +247,13 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 			if !observed.sameInputs(latest) {
 				return errGatewayChanged
 			}
-			return r.sealGatewayMutationSnapshot(ctx, snapshot)
+			if err := r.sealGatewayMutationSnapshot(ctx, snapshot); err != nil {
+				return err
+			}
+			if len(reservations) != 0 {
+				return r.validateClusterAddressReservations(ctx, snapshot.gateway, reservations)
+			}
+			return nil
 		}
 		input.Validate = validate
 		input.ReportRoutes = func(ctx context.Context, result cloud.GatewayGraphResult, providerErr error) error {
@@ -215,7 +276,9 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 		if err := r.Config.ValidateInstalledGatewayAPIVersion(ctx, r.APIReader); err != nil {
 			return input, err
 		}
-		r.addTLSGraphInput(ctx, snapshot, sets, &input)
+		if err := r.addTLSGraphInput(ctx, snapshot, sets, &input); err != nil {
+			return input, err
+		}
 	}
 	return input, nil
 }

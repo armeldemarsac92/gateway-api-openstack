@@ -51,6 +51,7 @@ func httpPlanningParts(desired desiredGatewayGraph, actual observedGatewayGraph)
 			observed = actual.routes[index]
 		}
 		heldPools, uncertainTargets := observedWeightedPoolHolds(observed)
+		mirrorDestinations := requestMirrorPoolKeys(route)
 		var authorizations map[string]map[string]int
 		demand := weightedBackendDemand(route)
 		if node.Disposition == cloud.GraphEnsure {
@@ -61,6 +62,11 @@ func httpPlanningParts(desired desiredGatewayGraph, actual observedGatewayGraph)
 			partNode := node
 			if obsolete && partNode.Disposition == cloud.GraphEnsure {
 				partNode.Disposition = cloud.GraphDelete
+			}
+			// An undiscoverable mirror capability must not allocate its
+			// dedicated pools. Pools also used for primary traffic continue.
+			if partNode.Disposition == cloud.GraphEnsure && part.mirrorOnly && route.mirrorAvailability != requestMirrorAvailable {
+				partNode.Disposition = cloud.GraphPreserve
 			}
 			part.httpParts, fragment.httpParts = nil, nil
 			part.weightedAuthorizations = authorizations
@@ -83,6 +89,17 @@ func httpPlanningParts(desired desiredGatewayGraph, actual observedGatewayGraph)
 			var fragment observedRouteGraph
 			if part := observed.httpParts[backend.backendKey]; part != nil {
 				fragment = *part
+			}
+			backend.mirrorOnly = mirrorDestinations[backend.backendKey] && len(backend.policies) == 0 &&
+				len(fragment.policies) == 0 && !isPrimaryHTTPPool(route, backend.backendKey, observed, fragment.pool)
+			backend.policies = slices.Clone(backend.policies)
+			for i := range backend.policies {
+				policy := &backend.policies[i]
+				current := observedMirrorPolicy(&fragment, policy.role)
+				policy.resolvedRequestMirrors = resolveHTTPMirrors(route, observed, policy.requestMirrors, current.requestMirrors)
+				if backend.fixedResponse && len(policy.resolvedRequestMirrors) == 0 {
+					policy.requestHeaderOperations, policy.requestURLRewrite = nil, nil
+				}
 			}
 			if backend.weightedTargets != nil {
 				backend.grpcFailurePoolID = failurePoolID
@@ -126,6 +143,7 @@ func (p *Provider) buildHTTPRoutePartsGraphPlan(desired desiredGatewayGraph, act
 		if fragment.Result.Outcome.State != cloud.OutcomeReady {
 			combined.Outcome = fragment.Result.Outcome
 		}
+		combined.ImplementedRules = combined.ImplementedRules || fragment.Result.ImplementedRules
 		if combined.UnsupportedMatch == "" {
 			combined.UnsupportedMatch = fragment.Result.UnsupportedMatch
 		}
@@ -263,14 +281,24 @@ func planFixedResponseDuringMemberWithdrawal(desired desiredRoute, observed obse
 				responsePatch := policyHeaderPatch(wanted.responseHeaderOperations, policy.responseHeaderOperations,
 					policy.policy.ProvisioningStatus == "ERROR")
 				rewritePatch, corsPatch := policyURLRewritePatch(nil, policy), policyCORSPatch(nil, policy)
+				if len(policy.requestMirrors) != 0 {
+					// The in-place action change retains the installed rule
+					// mirrors and the transformations they use.
+					operations, rewritePatch = nil, nil
+				}
 				if rewritePatch != nil && corsPatch != nil {
 					corsPatch.Tags = slices.DeleteFunc(slices.Clone(rewritePatch.Tags), func(tag string) bool {
 						return tag == openstackidentity.RequestCORSPolicyTag
 					})
 				}
-				return routeMutation{kind: routeMutationSetPolicyTarget, id: policy.policy.ID,
+				step := routeMutation{kind: routeMutationSetPolicyTarget, id: policy.policy.ID,
 					requestHeaderOperations: operations, responseHeaderOperations: responsePatch,
-					requestURLRewriteUpdate: rewritePatch, requestCORSUpdate: corsPatch}, true
+					requestURLRewriteUpdate: rewritePatch, requestCORSUpdate: corsPatch,
+					retry: policy.policy.ProvisioningStatus == "ERROR", withdrawHTTPPolicy: true}
+				if policy.hasHTTPRequestPolicy() {
+					step.clearHTTPRequestPolicy(policy)
+				}
+				return step, true
 			}
 		}
 	}
@@ -354,7 +382,8 @@ func observedForwardPolicyMatches(route desiredRoute, observed observedRouteGrap
 		return false
 	}
 	return slices.ContainsFunc(route.policies, func(wanted desiredPolicy) bool {
-		if wanted.role != policy.role || wanted.httpsListenerHostname != policy.httpsListenerHostname || !observedHTTPPredicateMatches(policy, rulesFor(wanted, route.hostnameRuleValue)) {
+		if wanted.role != policy.role || wanted.httpsListenerHostname != policy.httpsListenerHostname ||
+			!wanted.requestPolicyMatches(policy) || !wanted.requestMirrorsMatch(policy) || !observedHTTPPredicateMatches(policy, rulesFor(wanted, route.hostnameRuleValue)) {
 			return false
 		}
 		switch {

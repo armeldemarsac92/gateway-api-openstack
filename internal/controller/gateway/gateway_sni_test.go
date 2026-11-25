@@ -18,7 +18,9 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"slices"
 	"testing"
 	"time"
@@ -29,14 +31,17 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/classconfig"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
+	"github.com/stretchr/testify/require"
 
 	"k8s.io/utils/ptr"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -823,4 +828,401 @@ func TestTLSListenerModeStatus(t *testing.T) {
 			t.Fatalf("conflicting listener %s advertises route kinds %v", listener.Name, listener.SupportedKinds)
 		}
 	}
+}
+
+func TestTLSRouteBackendTLSPolicyUsesAuthorizedServiceSection(t *testing.T) {
+	cfg := testConfig()
+	cfg.TCPTLSTermination, cfg.BackendTLSPolicy, cfg.TLSSNIPassthrough = true, true, true
+	gateway := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "edge", Name: "gateway", UID: "gateway-uid"}}
+	listener := testSNIListener()
+	listener.TLS.Mode = ptr.To(gatewayv1.TLSModeTerminate)
+	snapshot := &gatewayMutationSnapshot{gateway: gateway, listener: &listener, topology: classconfig.Resolved{Topology: cloud.Topology{MemberMode: cloud.MemberModeEndpoint}}}
+	strict := testSNIRoute(gateway, "a-strict", "backend", "tls.example.com")
+	plain := testSNIRoute(gateway, "b-plain", "backend", "plain.example.com")
+	plain.Spec.Rules[0].BackendRefs[0].Port = ptr.To(gatewayv1.PortNumber(8444))
+	service, endpoints := testSNIBackend("backend", "service", "192.0.2.101")
+	service.Spec.Ports = append(service.Spec.Ports, corev1.ServicePort{Name: "plain", Port: 8444, Protocol: corev1.ProtocolTCP})
+	endpoints.Ports = append(endpoints.Ports, discoveryv1.EndpointPort{Name: ptr.To("plain"), Protocol: ptr.To(corev1.ProtocolTCP), Port: ptr.To(int32(8080))})
+	ca := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: service.Namespace, Name: "backend-ca", UID: "backend-ca-uid"},
+		Data: map[string]string{"ca.crt": frontendTestCA(t)}}
+	policy := &gatewayv1.BackendTLSPolicy{
+		ObjectMeta: metav1.ObjectMeta{Namespace: service.Namespace, Name: "require-tls", UID: "policy-uid", Generation: 1},
+		Spec: gatewayv1.BackendTLSPolicySpec{
+			TargetRefs: []gatewayv1.LocalPolicyTargetReferenceWithSectionName{{
+				LocalPolicyTargetReference: gatewayv1.LocalPolicyTargetReference{Kind: "Service", Name: gatewayv1.ObjectName(service.Name)},
+				SectionName:                ptr.To(gatewayv1.SectionName("tls")),
+			}},
+			Validation: gatewayv1.BackendTLSPolicyValidation{
+				Hostname: "abc.example.com", CACertificateRefs: []gatewayv1.LocalObjectReference{{Kind: "ConfigMap", Name: gatewayv1.ObjectName(ca.Name)}},
+			},
+		},
+	}
+	grant := &gatewayv1.ReferenceGrant{
+		ObjectMeta: metav1.ObjectMeta{Namespace: service.Namespace, Name: "service"},
+		Spec: gatewayv1.ReferenceGrantSpec{
+			From: []gatewayv1.ReferenceGrantFrom{{Group: gatewayv1.GroupName, Kind: "TLSRoute", Namespace: gatewayv1.Namespace(gateway.Namespace)}},
+			To:   []gatewayv1.ReferenceGrantTo{{Kind: "Service", Name: ptr.To(gatewayv1.ObjectName(service.Name))}},
+		},
+	}
+	kube := fake.NewClientBuilder().WithScheme(testScheme(t)).WithStatusSubresource(policy).WithObjects(strict, plain, service, endpoints, ca, policy, grant).Build()
+	r := &Reconciler{APIReader: kube, Config: cfg}
+	observe := func() sniRouteObservation {
+		t.Helper()
+		routes, err := r.observeSNIRoutes(t.Context(), snapshot)
+		require.NoError(t, err)
+		require.Len(t, routes, 2)
+		return routes
+	}
+
+	withoutSlot := observe()
+	require.Equal(t, gatewayv1.RouteReasonPending, withoutSlot[0].resolvedReason)
+	require.Empty(t, withoutSlot[0].targets)
+	require.NoError(t, kube.Get(t.Context(), client.ObjectKeyFromObject(policy), policy))
+	policy.Status.Ancestors = []gatewayv1.PolicyAncestorStatus{{
+		AncestorRef:    gatewayv1.ParentReference{Name: gatewayv1.ObjectName(gateway.Name), Namespace: ptr.To(gatewayv1.Namespace(gateway.Namespace))},
+		ControllerName: cfg.ControllerName,
+	}}
+	require.NoError(t, kube.Status().Update(t.Context(), policy))
+	withTLS := observe()
+	require.Equal(t, gatewayv1.RouteReasonResolvedRefs, withTLS[0].resolvedReason)
+	require.Len(t, withTLS[0].targets, 1)
+	require.Equal(t, "abc.example.com", withTLS[0].targets[0].BackendTLS.Hostname)
+	require.Equal(t, string(ca.UID), withTLS[0].targets[0].BackendTLS.CAConfigMapUID)
+	require.Equal(t, []cloud.Member{{Address: "192.0.2.101", Port: 9443}}, withTLS[0].targets[0].Members)
+	require.Nil(t, withTLS[1].targets[0].BackendTLS)
+
+	bundles, err := backendtls.NewClusterTrustBundles(&rest.Config{Host: "http://127.0.0.1:1"}, http.DefaultClient)
+	require.NoError(t, err)
+	r.Config.ClusterTrustBundles = bundles
+	configMapRef := policy.Spec.Validation.CACertificateRefs[0]
+	policy.Spec.Validation.CACertificateRefs[0] = gatewayv1.LocalObjectReference{
+		Group: "certificates.k8s.io", Kind: "ClusterTrustBundle", Name: "backend-ca",
+	}
+	require.NoError(t, kube.Update(t.Context(), policy))
+	_, err = r.observeSNIRoutes(t.Context(), snapshot)
+	require.ErrorIs(t, err, backendtls.ErrClusterTrustBundleUnavailable, "uncertain trust cannot produce a denial graph")
+	policy.Spec.Validation.CACertificateRefs[0] = configMapRef
+	require.NoError(t, kube.Update(t.Context(), policy))
+	r.Config.ClusterTrustBundles = nil
+
+	optedOut := cfg
+	optedOut.BackendTLSPolicy = false
+	r = &Reconciler{APIReader: kube, Config: optedOut}
+	withoutBackendTLS := observe()
+	require.Empty(t, withoutBackendTLS[0].targets, "the active policy must never become a plaintext backend after opt-out")
+	require.Equal(t, gatewayv1.RouteReasonUnsupportedProtocol, withoutBackendTLS[0].resolvedReason)
+	require.Equal(t, withTLS[1].targets, withoutBackendTLS[1].targets)
+	r = &Reconciler{APIReader: kube, Config: cfg}
+	require.Equal(t, withTLS[0].targets, observe()[0].targets, "re-enabling authentication restores the protected target")
+
+	gateway.Spec.TLS = &gatewayv1.GatewayTLSConfig{Backend: &gatewayv1.GatewayBackendTLS{
+		ClientCertificateRef: &gatewayv1.SecretObjectReference{Name: "client"},
+	}}
+	gateway.Spec.Listeners = []gatewayv1.Listener{listener}
+	unsupportedIdentity := observe()
+	require.Empty(t, unsupportedIdentity[0].targets)
+	require.Equal(t, gatewayv1.RouteReasonUnsupportedProtocol, unsupportedIdentity[0].resolvedReason)
+	require.Equal(t, withTLS[1].targets, unsupportedIdentity[1].targets)
+	r.setBackendClientCertificateStatus(t.Context(), gateway)
+	require.Equal(t, tcpBackendClientCertificateReason,
+		meta.FindStatusCondition(gateway.Status.Conditions, string(gatewayv1.GatewayConditionResolvedRefs)).Reason)
+	gateway.Spec.TLS = nil
+	require.Equal(t, withTLS[0].targets, observe()[0].targets)
+
+	require.NoError(t, kube.Delete(t.Context(), ca))
+	withoutCA := observe()
+	require.Empty(t, withoutCA[0].targets)
+	require.Equal(t, withTLS[1].targets, withoutCA[1].targets)
+	listener.TLS.Mode = ptr.To(gatewayv1.TLSModePassthrough)
+	passthrough := observe()
+	require.Empty(t, passthrough[0].targets)
+	require.Equal(t, gatewayv1.RouteReasonUnsupportedProtocol, passthrough[0].resolvedReason)
+	require.Len(t, passthrough[1].targets, 1)
+	require.Equal(t, withTLS[1].targets[0].Members, passthrough[1].targets[0].Members)
+	require.Nil(t, passthrough[1].targets[0].BackendTLS)
+
+	listener.TLS.Mode = ptr.To(gatewayv1.TLSModeTerminate)
+	require.NoError(t, kube.Delete(t.Context(), grant))
+	ungranted := observe()
+	require.Empty(t, ungranted[0].targets)
+	require.Empty(t, ungranted[1].targets)
+	require.Equal(t, gatewayv1.RouteReasonRefNotPermitted, ungranted[0].resolvedReason)
+}
+
+func TestTerminatingTLSRouteEndpointReadFailureDoesNotHidePeerRevocation(t *testing.T) {
+	cfg := testConfig()
+	cfg.TCPTLSTermination, cfg.BackendTLSPolicy = true, true
+	gateway := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "edge", Name: "gateway", UID: "gateway-uid"}}
+	listener := testSNIListener()
+	listener.TLS.Mode = ptr.To(gatewayv1.TLSModeTerminate)
+	snapshot := &gatewayMutationSnapshot{gateway: gateway, listener: &listener, topology: classconfig.Resolved{Topology: cloud.Topology{MemberMode: cloud.MemberModeEndpoint}}}
+	a := testSNIRoute(gateway, "a", "auth", "a.example.com")
+	b := testSNIRoute(gateway, "b", "edge", "b.example.com")
+	serviceA, endpointsA := testSNIBackend("auth", "service-a", "192.0.2.101")
+	serviceB, endpointsB := testSNIBackend("edge", "service-b", "192.0.2.102")
+	// The ReferenceGrant for A is gone. The destination Slice read for B fails independently.
+	kube := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(a, b, serviceA, serviceB, endpointsA, endpointsB).
+		WithInterceptorFuncs(interceptor.Funcs{List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+			if _, slices := list.(*discoveryv1.EndpointSliceList); slices && (&client.ListOptions{}).ApplyOptions(opts).Namespace == "edge" {
+				return errors.New("injected EndpointSlice read failure")
+			}
+			return c.List(ctx, list, opts...)
+		}}).Build()
+	r := &Reconciler{APIReader: kube, Config: cfg}
+	observation, err := r.observeSNIRoutes(t.Context(), snapshot)
+	require.NoError(t, err)
+	require.Len(t, observation, 2)
+	require.Equal(t, gatewayv1.RouteReasonRefNotPermitted, observation[0].resolvedReason)
+	require.Equal(t, gatewayv1.RouteReasonPending, observation[1].resolvedReason)
+	require.Len(t, observation.targets(), 2)
+	for _, target := range observation.targets() {
+		require.True(t, target.Deny)
+		require.Empty(t, target.Members)
+	}
+}
+
+func TestMixedTLSRouteParentUsesMatchingListenerModeAndServicePort(t *testing.T) {
+	config := testConfig()
+	config.TLSSNIPassthrough, config.TCPTLSTermination, config.TCPTLSMixedMode = true, true, true
+	gateway := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{Namespace: "infra", Name: "mixed", UID: "gateway-uid"}}
+	gateway.Spec.Listeners = []gatewayv1.Listener{
+		{Name: "passthrough", Port: 8883, Protocol: gatewayv1.TLSProtocolType, Hostname: ptr.To(gatewayv1.Hostname("abc.example.com")),
+			TLS: &gatewayv1.ListenerTLSConfig{Mode: ptr.To(gatewayv1.TLSModePassthrough)}},
+		{Name: "terminate", Port: 8883, Protocol: gatewayv1.TLSProtocolType, Hostname: ptr.To(gatewayv1.Hostname("tls.example.com")),
+			TLS: &gatewayv1.ListenerTLSConfig{Mode: ptr.To(gatewayv1.TLSModeTerminate)}},
+	}
+	terminate := testSNIRoute(gateway, "terminate", gateway.Namespace, "tls.example.com")
+	terminate.Spec.ParentRefs[0].SectionName = nil
+	terminate.Spec.Rules[0].BackendRefs[0].Port = ptr.To(gatewayv1.PortNumber(3000))
+	passthrough := testSNIRoute(gateway, "passthrough", gateway.Namespace, "abc.example.com")
+	passthrough.Spec.ParentRefs[0].SectionName = nil
+	service, endpoints := testSNIBackend(gateway.Namespace, "tcp-backend", "192.0.2.101")
+	service.Spec.Ports = append(service.Spec.Ports, corev1.ServicePort{Name: "clear", Port: 3000, Protocol: corev1.ProtocolTCP})
+	endpoints.Ports = append(endpoints.Ports, discoveryv1.EndpointPort{Name: ptr.To("clear"), Protocol: ptr.To(corev1.ProtocolTCP), Port: ptr.To(int32(3000))})
+
+	listeners, err := SupportedListenersForConfig(config, gateway)
+	require.NoError(t, err)
+	require.Len(t, listeners, 2)
+	kube := fake.NewClientBuilder().WithScheme(testScheme(t)).WithStatusSubresource(terminate, passthrough).
+		WithObjects(terminate, passthrough, service, endpoints).Build()
+	r := &Reconciler{Client: kube, APIReader: kube, Config: config}
+	snapshot := &gatewayMutationSnapshot{gateway: gateway, listener: listeners[0], listeners: listeners}
+	require.Equal(t, gatewayv1.ProtocolType(cloud.ListenerProtocolTLSMixed), listenerBindingProtocol(config, gateway, listeners[0]))
+
+	observation, err := r.observeSNIRoutes(t.Context(), snapshot)
+	require.NoError(t, err)
+	targets := observation.targets()
+	require.Len(t, targets, 2)
+	for _, target := range targets {
+		switch target.Identity.RouteName {
+		case "terminate":
+			require.False(t, target.Passthrough)
+			require.Equal(t, "tls.example.com", target.Hostname)
+			require.Equal(t, 3000, target.ServicePort)
+			require.Equal(t, 3000, target.Members[0].Port)
+		case "passthrough":
+			require.True(t, target.Passthrough)
+			require.Equal(t, "abc.example.com", target.Hostname)
+			require.Equal(t, 8443, target.ServicePort)
+			require.Equal(t, 9443, target.Members[0].Port)
+		default:
+			t.Fatalf("unexpected TLSRoute target: %#v", target)
+		}
+	}
+	require.NoError(t, r.reportSNIRoutes(t.Context(), snapshot, observation, cloud.GatewayGraphResult{}, nil))
+	count, err := r.attachedRoutes(t.Context(), gateway, listeners)
+	require.NoError(t, err)
+	require.Equal(t, map[gatewayv1.SectionName]int32{"terminate": 1, "passthrough": 1}, count.counts)
+
+	// An applicable policy must keep the terminating backend closed even
+	// when the optional backend authentication implementation is disabled.
+	policy := &gatewayv1.BackendTLSPolicy{
+		ObjectMeta: metav1.ObjectMeta{Namespace: service.Namespace, Name: "auth-clear", UID: "policy-uid"},
+		Spec: gatewayv1.BackendTLSPolicySpec{
+			TargetRefs: []gatewayv1.LocalPolicyTargetReferenceWithSectionName{{
+				LocalPolicyTargetReference: gatewayv1.LocalPolicyTargetReference{Kind: "Service", Name: gatewayv1.ObjectName(service.Name)},
+				SectionName:                ptr.To(gatewayv1.SectionName("clear")),
+			}},
+		},
+	}
+	require.NoError(t, kube.Create(t.Context(), policy))
+	observation, err = r.observeSNIRoutes(t.Context(), snapshot)
+	require.NoError(t, err)
+	targets = observation.targets()
+	require.Len(t, targets, 2)
+	for _, target := range targets {
+		if target.Hostname == "tls.example.com" {
+			require.True(t, target.Deny, "backend authentication must never degrade to plaintext")
+		} else {
+			require.False(t, target.Deny, "the unrelated Service port keeps forwarding")
+			require.True(t, target.Passthrough)
+		}
+	}
+
+}
+
+func TestMixedTLSReplacementUsesCurrentPassthroughAuthorization(t *testing.T) {
+	config := testConfig()
+	config.TCPTLSTermination, config.TLSSNIPassthrough, config.TLSSNISuffix, config.TCPTLSMixedMode = true, true, true, true
+	const exactHost, wildcardHost = "tls.example.com", "*.example.com"
+	gateway := &gatewayv1.Gateway{ObjectMeta: metav1.ObjectMeta{
+		Namespace: "infra", Name: "mixed", UID: "gateway-uid",
+		Annotations: map[string]string{
+			config.GatewayListenerProtocolAnnotation(): cloud.ListenerProtocolTLSMixed,
+			config.GatewayListenerPortAnnotation():     "8883",
+			config.GatewayClusterIDAnnotation():        config.ClusterID,
+			config.GatewayProjectIDAnnotation():        config.OpenStackProjectID,
+			config.GatewaySNISelectorsAnnotation():     `{"8883":["tls.example.com","*.example.com"]}`,
+		},
+	}}
+	gateway.Spec.GatewayClassName = "openstack"
+	gatewayClass := &gatewayv1.GatewayClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "openstack", Generation: 1},
+		Spec:       gatewayv1.GatewayClassSpec{ControllerName: config.ControllerName},
+		Status: gatewayv1.GatewayClassStatus{Conditions: []metav1.Condition{
+			Condition(string(gatewayv1.GatewayClassConditionStatusSupportedVersion), metav1.ConditionTrue,
+				string(gatewayv1.GatewayClassReasonSupportedVersion), "Gateway API version is supported", 1),
+		}},
+	}
+	topology := testBoundTopology()
+	topology.Topology.MemberMode = cloud.MemberModeEndpoint
+	require.NoError(t, controller.BindGatewayTopology(config, gateway, topology))
+	gateway.Spec.Listeners = []gatewayv1.Listener{
+		{Name: "sni", Port: 8883, Protocol: gatewayv1.TLSProtocolType, Hostname: ptr.To(gatewayv1.Hostname(wildcardHost)),
+			TLS: &gatewayv1.ListenerTLSConfig{Mode: ptr.To(gatewayv1.TLSModePassthrough)}},
+		{Name: "terminate", Port: 8883, Protocol: gatewayv1.TLSProtocolType, Hostname: ptr.To(gatewayv1.Hostname(exactHost)),
+			TLS: &gatewayv1.ListenerTLSConfig{Mode: ptr.To(gatewayv1.TLSModeTerminate)}},
+	}
+	retired := testSNIRoute(gateway, "terminating", gateway.Namespace, exactHost)
+	retired.Spec.ParentRefs[0].SectionName = ptr.To(gatewayv1.SectionName("terminate"))
+	explicit := testSNIRoute(gateway, "exact-passthrough", "backends", exactHost)
+	wildcard := testSNIRoute(gateway, "wildcard-passthrough", gateway.Namespace, wildcardHost)
+	exactService, exactEndpoints := testSNIBackend("backends", "exact-backend", "192.0.2.101")
+	wildcardService, wildcardEndpoints := testSNIBackend(gateway.Namespace, "wildcard-backend", "192.0.2.102")
+	grant := &gatewayv1.ReferenceGrant{
+		ObjectMeta: metav1.ObjectMeta{Name: "exact-backend", Namespace: exactService.Namespace},
+		Spec: gatewayv1.ReferenceGrantSpec{
+			From: []gatewayv1.ReferenceGrantFrom{{Group: gatewayv1.GroupName, Kind: "TLSRoute", Namespace: gatewayv1.Namespace(gateway.Namespace)}},
+			To:   []gatewayv1.ReferenceGrantTo{{Kind: "Service", Name: ptr.To(gatewayv1.ObjectName(exactService.Name))}},
+		},
+	}
+	objects := []client.Object{gateway, gatewayClass, retired, explicit, wildcard, exactService, exactEndpoints, wildcardService, wildcardEndpoints, grant}
+	kube := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(append(objects, supportedGatewayAPICRDs(config)...)...).Build()
+	require.NoError(t, kube.Get(t.Context(), client.ObjectKeyFromObject(gateway), gateway))
+
+	targetsFor := func(config controller.Config) map[string]cloud.TLSSNIRoute {
+		t.Helper()
+		r := &Reconciler{Config: config, APIReader: kube}
+		listeners, err := SupportedListenersForConfig(config, gateway)
+		require.NoError(t, err)
+		observed, err := r.observeSNIRoutes(t.Context(), &gatewayMutationSnapshot{gateway: gateway, listener: listeners[0], listeners: listeners})
+		require.NoError(t, err)
+		targets := make(map[string]cloud.TLSSNIRoute)
+		for _, target := range observed.targets() {
+			require.NotContains(t, targets, target.Hostname)
+			targets[target.Hostname] = target
+		}
+		return targets
+	}
+
+	targets := targetsFor(config)
+	require.Equal(t, retired.Name, targets[exactHost].Identity.RouteName)
+	require.True(t, targets[wildcardHost].Passthrough)
+
+	// The next process has only the passthrough profile. The previously
+	// shadowed exact route now belongs to the live wildcard listener.
+	passthroughConfig := config
+	passthroughConfig.TCPTLSMixedMode, passthroughConfig.TCPTLSTermination = false, false
+	cleanup := func(config controller.Config) *gatewayCleanupSnapshot {
+		t.Helper()
+		r := &Reconciler{Config: config, APIReader: kube}
+		snapshot, err := r.observeGatewayCleanupSnapshot(t.Context(), gateway)
+		require.NoError(t, err)
+		require.Equal(t, gatewayCleanupRebuild, snapshot.disposition)
+		require.True(t, snapshot.retainSNIAddress)
+		return snapshot
+	}
+	terminationConfig := config
+	terminationConfig.TCPTLSMixedMode, terminationConfig.TLSSNIPassthrough, terminationConfig.TLSSNISuffix = false, false, false
+	require.Empty(t, cleanup(terminationConfig).listenerProtocol, "termination opt-out can precede the listener change")
+	bothListeners := slices.Clone(gateway.Spec.Listeners)
+	gateway.Spec.Listeners = bothListeners[1:]
+	require.NoError(t, kube.Update(t.Context(), gateway))
+	require.Equal(t, gatewayv1.ProtocolType(cloud.ListenerProtocolTLSTerminate), cleanup(config).listenerProtocol)
+	require.Equal(t, gatewayv1.ProtocolType(cloud.ListenerProtocolTLSTerminate), cleanup(terminationConfig).listenerProtocol)
+	gateway.Spec.Listeners = bothListeners
+	gateway.Annotations[config.GatewayListenerProtocolAnnotation()] = cloud.ListenerProtocolTLSTerminate
+	require.NoError(t, kube.Update(t.Context(), gateway))
+	require.Equal(t, gatewayv1.ProtocolType(cloud.ListenerProtocolTLSMixed), cleanup(config).listenerProtocol)
+	gateway.Annotations[config.GatewayListenerProtocolAnnotation()] = cloud.ListenerProtocolTLSMixed
+	require.NoError(t, kube.Update(t.Context(), gateway))
+
+	require.Empty(t, cleanup(passthroughConfig).listenerProtocol, "passthrough opt-out can precede the listener change")
+	gateway.Spec.Listeners = gateway.Spec.Listeners[:1]
+	require.NoError(t, kube.Update(t.Context(), gateway))
+	require.Equal(t, gatewayv1.TLSProtocolType, cleanup(config).listenerProtocol, "the spec can change before controller opt-out")
+	require.Equal(t, gatewayv1.TLSProtocolType, cleanup(passthroughConfig).listenerProtocol)
+
+	config = passthroughConfig
+	targets = targetsFor(config)
+	require.Equal(t, explicit.Name, targets[exactHost].Identity.RouteName)
+	require.Equal(t, string(exactService.UID), targets[exactHost].ServiceUID)
+	require.False(t, targets[exactHost].Deny)
+	require.False(t, targets[exactHost].Passthrough, "the stock listener does not need a mixed policy mode")
+
+	policy := &gatewayv1.BackendTLSPolicy{
+		ObjectMeta: metav1.ObjectMeta{Namespace: exactService.Namespace, Name: "require-authentication"},
+		Spec: gatewayv1.BackendTLSPolicySpec{
+			TargetRefs: []gatewayv1.LocalPolicyTargetReferenceWithSectionName{{
+				LocalPolicyTargetReference: gatewayv1.LocalPolicyTargetReference{Kind: "Service", Name: gatewayv1.ObjectName(exactService.Name)},
+			}},
+		},
+	}
+	require.NoError(t, kube.Create(t.Context(), policy))
+	targets = targetsFor(config)
+	require.True(t, targets[exactHost].Deny, "an active policy makes this Service ineligible for passthrough")
+	require.Equal(t, string(wildcardService.UID), targets[wildcardHost].ServiceUID)
+	require.NoError(t, kube.Delete(t.Context(), policy))
+	require.False(t, targetsFor(config)[exactHost].Deny)
+
+	require.NoError(t, kube.Delete(t.Context(), grant))
+	targets = targetsFor(config)
+	require.True(t, targets[exactHost].Deny, "a still-referenced grant has been revoked")
+	require.False(t, targets[wildcardHost].Deny)
+
+	require.NoError(t, kube.Delete(t.Context(), explicit))
+	targets = targetsFor(config)
+	require.NotContains(t, targets, exactHost, "history alone does not reserve the retired name")
+	require.Equal(t, string(wildcardService.UID), targets[wildcardHost].ServiceUID)
+}
+
+func TestMixedTLSRequiresOneAuthorizedCertificateAcrossTerminatingSections(t *testing.T) {
+	gateway := &gatewayv1.Gateway{}
+	first := &gatewayv1.Listener{Name: "first", Protocol: gatewayv1.TLSProtocolType, TLS: &gatewayv1.ListenerTLSConfig{}}
+	second := first.DeepCopy()
+	second.Name = "second"
+	listeners := []*gatewayv1.Listener{first, second}
+	secondCertificate := "second-cert"
+	revoked := false
+	r := &Reconciler{Certificates: resolveHTTPSFunc(func(_ context.Context, _ *gatewayv1.Gateway, listener *gatewayv1.Listener) (string, gatewayv1.ListenerConditionReason) {
+		if listener.Name == second.Name {
+			if revoked {
+				return "", gatewayv1.ListenerReasonRefNotPermitted
+			}
+			return secondCertificate, ""
+		}
+		return "same-cert", ""
+	})}
+	ref, issues := r.rawTLSCertificate(t.Context(), gateway, listeners)
+	require.Empty(t, ref)
+	require.Equal(t, gatewayv1.ListenerReasonUnsupportedValue, issues[first.Name].reason)
+	require.Equal(t, gatewayv1.ListenerReasonUnsupportedValue, issues[second.Name].reason)
+	secondCertificate = "same-cert"
+	ref, issues = r.rawTLSCertificate(t.Context(), gateway, listeners)
+	require.Equal(t, secondCertificate, ref)
+	require.Empty(t, issues)
+	revoked = true
+	ref, issues = r.rawTLSCertificate(t.Context(), gateway, listeners)
+	require.Empty(t, ref)
+	require.Equal(t, gatewayv1.ListenerReasonRefNotPermitted, issues[second.Name].reason)
 }

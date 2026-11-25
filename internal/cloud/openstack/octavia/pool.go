@@ -17,14 +17,18 @@ limitations under the License.
 package octavia
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 
+	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/loadbalancer/v2/pools"
 	"github.com/gophercloud/gophercloud/v2/pagination"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia/amphora"
 )
 
 // ListPools lists and extracts pools matching opts for read-only inventory.
@@ -50,15 +54,18 @@ type PoolInventory struct {
 // PoolBackendTLS records which transport fields the API actually reported.
 // Explicit null is a reported absence of a hostname or certificate reference.
 type PoolBackendTLS struct {
-	Hostname          string
-	HostnameObserved  bool
-	CAObserved        bool
-	ClientRefObserved bool
-	RequireH2         bool
-	RequireH2Observed bool
-	EnabledObserved   bool
-	H2CObserved       bool
-	AdminObserved     bool
+	Hostname                string
+	SubjectAltNames         []cloud.BackendTLSSubjectAltName
+	SubjectAltNamesObserved bool
+	SubjectAltNamesInvalid  bool
+	HostnameObserved        bool
+	CAObserved              bool
+	ClientRefObserved       bool
+	RequireH2               bool
+	RequireH2Observed       bool
+	EnabledObserved         bool
+	H2CObserved             bool
+	AdminObserved           bool
 }
 
 func (tls PoolBackendTLS) Complete() bool {
@@ -69,28 +76,34 @@ func (tls PoolBackendTLS) Complete() bool {
 // reads backend transport alongside the stock fields.
 func (s *Service) ListPoolInventory(ctx context.Context, opts pools.ListOpts) (PoolInventory, error) {
 	inventory := PoolInventory{BackendH2C: make(map[string]bool), BackendTLS: make(map[string]PoolBackendTLS)}
-	items, err := listCompleteCollection(ctx, pools.List(s.client, opts), func(result pagination.PageResult) pagination.Page {
-		return pools.PoolPage{LinkedPageBase: pagination.LinkedPageBase{PageResult: result}}
-	}, "pools", func(page pagination.Page) ([]pools.Pool, error) {
+	query, err := opts.ToPoolListQuery()
+	if err != nil {
+		return inventory, fmt.Errorf("list pools: %w", err)
+	}
+	var items []pools.Pool
+	for pageURL := s.client.ServiceURL("lbaas", "pools") + query; pageURL != ""; {
 		var response struct {
+			Links []gophercloud.Link `json:"pools_links"`
 			Pools []struct {
 				pools.Pool
-				BackendH2C *bool           `json:"backend_h2c"`
-				Hostname   json.RawMessage `json:"backend_tls_hostname"`
-				CA         json.RawMessage `json:"ca_tls_container_ref"`
-				ClientRef  json.RawMessage `json:"tls_container_ref"`
-				RequireH2  *bool           `json:"backend_tls_require_h2"`
-				Enabled    *bool           `json:"tls_enabled"`
-				Admin      *bool           `json:"admin_state_up"`
+				BackendH2C      *bool           `json:"backend_h2c"`
+				Hostname        json.RawMessage `json:"backend_tls_hostname"`
+				SubjectAltNames json.RawMessage `json:"backend_tls_subject_alt_names"`
+				CA              json.RawMessage `json:"ca_tls_container_ref"`
+				ClientRef       json.RawMessage `json:"tls_container_ref"`
+				RequireH2       *bool           `json:"backend_tls_require_h2"`
+				Enabled         *bool           `json:"tls_enabled"`
+				Admin           *bool           `json:"admin_state_up"`
 			} `json:"pools"`
 		}
-		if err := page.(pools.PoolPage).ExtractInto(&response); err != nil {
-			return nil, err
+		// Decode directly from the response. The SDK pager first decodes
+		// every object into a map, discarding duplicate SAN keys.
+		if _, err := s.client.Get(ctx, pageURL, &response, &gophercloud.RequestOpts{OkCodes: []int{200, 204, 300}}); err != nil {
+			return inventory, fmt.Errorf("list pools: %w", err)
 		}
 		if response.Pools == nil {
-			return nil, nil
+			return inventory, fmt.Errorf("list pools: %w", missingCollection("pools"))
 		}
-		items := make([]pools.Pool, 0, len(response.Pools))
 		for _, pool := range response.Pools {
 			tls := PoolBackendTLS{HostnameObserved: len(pool.Hostname) != 0, CAObserved: len(pool.CA) != 0,
 				ClientRefObserved: len(pool.ClientRef) != 0,
@@ -100,7 +113,15 @@ func (s *Service) ListPoolInventory(ctx context.Context, opts pools.ListOpts) (P
 			if tls.HostnameObserved && json.Unmarshal(pool.Hostname, &tls.Hostname) != nil ||
 				tls.CAObserved && json.Unmarshal(pool.CA, &pool.CATLSContainerRef) != nil ||
 				tls.ClientRefObserved && json.Unmarshal(pool.ClientRef, &pool.TLSContainerRef) != nil {
-				return nil, cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady, fmt.Errorf("invalid TLS field in Octavia pool inventory"))
+				return inventory, cloud.NewProviderError(cloud.ErrorCategoryDependencyNotReady, fmt.Errorf("invalid TLS field in Octavia pool inventory"))
+			}
+			// A malformed SAN readback must keep this pool closed. Continue
+			// reading the inventory so the reconciler can disable it.
+			if len(pool.SubjectAltNames) != 0 {
+				tls.SubjectAltNamesObserved = true
+				var err error
+				tls.SubjectAltNames, err = decodeBackendTLSSubjectAltNames(pool.SubjectAltNames)
+				tls.SubjectAltNamesInvalid = err != nil
 			}
 			pool.TLSEnabled = pool.Enabled != nil && *pool.Enabled
 			pool.AdminStateUp = pool.Admin != nil && *pool.Admin
@@ -110,10 +131,52 @@ func (s *Service) ListPoolInventory(ctx context.Context, opts pools.ListOpts) (P
 				inventory.BackendH2C[pool.ID] = true
 			}
 		}
-		return items, nil
-	})
+		pageURL, err = gophercloud.ExtractNextURL(response.Links)
+		if err != nil {
+			return inventory, fmt.Errorf("list pools: %w", err)
+		}
+	}
 	inventory.Items = items
-	return inventory, err
+	return inventory, nil
+}
+
+func decodeBackendTLSSubjectAltNames(raw json.RawMessage) ([]cloud.BackendTLSSubjectAltName, error) {
+	invalid := fmt.Errorf("invalid backend TLS subjectAltNames readback")
+	var rawNames []json.RawMessage
+	if err := json.Unmarshal(raw, &rawNames); err != nil || rawNames == nil {
+		return nil, invalid
+	}
+	names := make([]cloud.BackendTLSSubjectAltName, 0, len(rawNames))
+	for _, rawName := range rawNames {
+		decoder := json.NewDecoder(bytes.NewReader(rawName))
+		if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
+			return nil, invalid
+		}
+		fields := make(map[string]string, 2)
+		for decoder.More() {
+			token, err := decoder.Token()
+			key, ok := token.(string)
+			if err != nil || !ok || fields[key] != "" || len(fields) == 2 {
+				return nil, invalid
+			}
+			var value string
+			if err := decoder.Decode(&value); err != nil || value == "" {
+				return nil, invalid
+			}
+			fields[key] = value
+		}
+		name := cloud.BackendTLSSubjectAltName{Type: fields["type"]}
+		switch {
+		case len(fields) == 2 && name.Type == cloud.BackendTLSSANHostname && fields["hostname"] != "":
+			name.Hostname = fields["hostname"]
+		case len(fields) == 2 && name.Type == cloud.BackendTLSSANURI && fields["uri"] != "":
+			name.URI = fields["uri"]
+		default:
+			return nil, invalid
+		}
+		names = append(names, name)
+	}
+	return amphora.NormalizeBackendTLSSubjectAltNames(names)
 }
 
 func listCompleteCollection[T any](ctx context.Context, pager pagination.Pager, create func(pagination.PageResult) pagination.Page, field string, extract func(pagination.Page) ([]T, error)) ([]T, error) {
@@ -164,9 +227,10 @@ func missingCollection(field string) error {
 // CreatePoolOpts adds optional backend transport to a stock pool create request.
 type CreatePoolOpts struct {
 	pools.CreateOpts
-	BackendH2C          bool
-	BackendTLSHostname  string
-	BackendTLSRequireH2 bool
+	BackendH2C                bool
+	BackendTLSHostname        string
+	BackendTLSSubjectAltNames []cloud.BackendTLSSubjectAltName
+	BackendTLSRequireH2       bool
 }
 
 func (opts CreatePoolOpts) ToPoolCreateMap() (map[string]any, error) {
@@ -180,6 +244,9 @@ func (opts CreatePoolOpts) ToPoolCreateMap() (map[string]any, error) {
 	}
 	if opts.BackendTLSHostname != "" {
 		pool["backend_tls_hostname"] = opts.BackendTLSHostname
+	}
+	if len(opts.BackendTLSSubjectAltNames) != 0 {
+		pool["backend_tls_subject_alt_names"] = opts.BackendTLSSubjectAltNames
 	}
 	if opts.BackendTLSRequireH2 {
 		pool["backend_tls_require_h2"] = true
@@ -202,7 +269,10 @@ type BackendTLSSettings struct {
 	Hostname                   string
 	CAReference                string
 	ClientCertificateReference string
-	RequireH2                  *bool
+	// A nil slice leaves the field absent in the PUT. An empty non-nil
+	// slice clears explicit SAN authentication on the disabled pool.
+	SubjectAltNames []cloud.BackendTLSSubjectAltName
+	RequireH2       *bool
 }
 
 func (opts UpdatePoolOpts) ToPoolUpdateMap() (map[string]any, error) {
@@ -223,6 +293,9 @@ func (opts UpdatePoolOpts) ToPoolUpdateMap() (map[string]any, error) {
 		pool["tls_container_ref"], pool["crl_container_ref"] = nil, nil
 		if tls.ClientCertificateReference != "" {
 			pool["tls_container_ref"] = tls.ClientCertificateReference
+		}
+		if tls.SubjectAltNames != nil {
+			pool["backend_tls_subject_alt_names"] = slices.Clone(tls.SubjectAltNames)
 		}
 		if tls.RequireH2 != nil {
 			pool["backend_tls_require_h2"] = *tls.RequireH2

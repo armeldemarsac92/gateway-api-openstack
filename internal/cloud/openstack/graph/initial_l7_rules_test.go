@@ -414,6 +414,112 @@ func TestInitialL7RulesHoldOnlyTheAffectedPort(t *testing.T) {
 	}
 }
 
+func TestPreparedSANPolicyAdvancesBeforeUnrelatedBackend(t *testing.T) {
+	route, observed := convergedRoutePlanFixture()
+	sibling, _ := convergedRoutePlanFixture()
+	route.hostnameRuleValue = "^app.example.test$"
+	sibling.policies[0].position, sibling.policies[0].path = 2, "/other"
+	tls := newGraphBackendTLS(t)
+	tls.SubjectAltNames = []cloud.BackendTLSSubjectAltName{{Type: cloud.BackendTLSSANHostname, Hostname: tls.Hostname}}
+	route.spec.BackendTLS = tls
+	route.backendTLS = backendTLSPlan{phase: backendTLSVerified, settings: octavia.BackendTLSSettings{
+		Hostname: tls.Hostname, SubjectAltNames: tls.SubjectAltNames,
+	}}
+	observed.pool.TLSEnabled = true
+	observed.pool.Tags = []string{backendTLSManagedTag, backendTLSSANTag, backendTLSRevisionTag(tls)}
+	observed.pool.ProvisioningStatus, observed.members[0].ProvisioningStatus, observed.monitor.ProvisioningStatus = "ACTIVE", "ACTIVE", "ACTIVE"
+	policy := observed.policies[0]
+	policy.initialRules, policy.adminObserved = true, true
+	policy.policy.ListenerID, policy.policy.AdminStateUp, policy.policy.ProvisioningStatus = "listener", false, "ACTIVE"
+	policy.rules[0].flagsObserved, policy.rules[0].rule.ProvisioningStatus = true, "ACTIVE"
+	policy.rules = append(policy.rules, observedRouteRule{role: roleRuleHost, flagsObserved: true, rule: l7policies.Rule{
+		ID: "host", RuleType: string(l7policies.TypeHostName), CompareType: string(l7policies.CompareTypeRegex),
+		Value: route.hostnameRuleValue, AdminStateUp: true, ProvisioningStatus: "ACTIVE",
+	}})
+	observed.policies = nil
+	desired := desiredGatewayGraph{protocol: cloud.ListenerProtocolHTTP, routes: []desiredRoute{sibling, route}, spec: cloud.GatewayGraphSpec{
+		Gateway: cloud.GatewayGraphNode{Disposition: cloud.GraphEnsure, Spec: cloud.GatewaySpec{ListenerPort: 80}},
+		Routes:  []cloud.RouteGraphNode{{Disposition: cloud.GraphEnsure}, {Disposition: cloud.GraphEnsure}},
+	}}
+	actual := observedGatewayGraph{protocol: cloud.ListenerProtocolHTTP, loadBalancer: safetyObservedLoadBalancer(),
+		state: cloud.GatewayState{VIPAddress: "192.0.2.1", ListenerID: "listener"},
+		listener: &listeners.Listener{
+			ID: "listener", Protocol: cloud.ListenerProtocolHTTP, ProtocolPort: 80, AdminStateUp: true, ProvisioningStatus: "ACTIVE"},
+		adminObserved: map[string]bool{"listener": true},
+		routes:        []observedRouteGraph{{}, observed},
+	}
+	actual.loadBalancer.AdminStateUp = true
+	actual.loadBalancer.ProvisioningStatus = "ACTIVE"
+	provider := &Provider{initialL7Rules: true}
+	check := func(wantKind routeMutationKind, wantRoute int) {
+		t.Helper()
+		plan, _, err := provider.buildGatewayGraphPartPlan(desired, actual, &httpPolicyHandovers{})
+		if err != nil || len(plan) == 0 || plan[0].route.kind != wantKind || plan[0].routeIndex != wantRoute {
+			t.Fatalf("plan = %v, error = %v, want %v on route %d", plan, err, wantKind, wantRoute)
+		}
+	}
+	check(routeMutationCreatePolicy, 1)
+	actual.routes[1].policies = []observedRoutePolicy{policy}
+	check(routeMutationEnablePolicy, 1)
+
+	t.Run("unreported backend provisioning holds activation", func(t *testing.T) {
+		grouped := desired
+		siblingPart := sibling
+		siblingPart.backendKey = "independent"
+		grouped.routes = []desiredRoute{{spec: sibling.spec, httpParts: []desiredRoute{siblingPart}}, route}
+
+		partial := actual
+		partial.routes = slices.Clone(actual.routes)
+		backend := &partial.routes[1]
+		backend.members = slices.Clone(backend.members)
+		monitor := *backend.monitor
+		backend.monitor = &monitor
+		for _, status := range []*string{&backend.members[0].ProvisioningStatus, &monitor.ProvisioningStatus} {
+			*status = ""
+			plan, _, err := provider.buildGatewayGraphPlan(grouped, partial)
+			if err != nil || len(plan) == 0 || plan[0].route.kind != routeMutationCreatePool {
+				t.Errorf("plan = %v, error = %v, want unrelated pool creation ahead of unverified SAN activation", plan, err)
+			}
+			*status = "ACTIVE"
+		}
+	})
+
+	t.Run("serving backend withdraws a stale endpoint before SAN creation", func(t *testing.T) {
+		ordinary, live := convergedRoutePlanFixture()
+		ordinary.policies[0].path = "/live"
+		ordinary.members[0].Address = "10.0.0.11"
+		live.pool.ID = "live-pool"
+		live.pool.ProvisioningStatus, live.monitor.ProvisioningStatus, live.members[0].ProvisioningStatus = "ACTIVE", "ACTIVE", "ACTIVE"
+		livePolicy := &live.policies[0]
+		livePolicy.policy.ListenerID, livePolicy.policy.RedirectPoolID = "listener", live.pool.ID
+		livePolicy.policy.ProvisioningStatus, livePolicy.adminObserved = "ACTIVE", true
+		livePolicy.rules[0].rule.Value, livePolicy.rules[0].rule.ProvisioningStatus, livePolicy.rules[0].flagsObserved = "/live", "ACTIVE", true
+		part := route
+		part.backendKey = "san"
+		part.policies = slices.Clone(route.policies)
+		part.policies[0].position = 2
+		grouped := desired
+		grouped.routes = []desiredRoute{ordinary, {spec: route.spec, httpParts: []desiredRoute{part}}}
+		partial := actual
+		partial.routes = []observedRouteGraph{live, {httpParts: map[string]*observedRouteGraph{"san": &observed}}}
+		plan, _, err := provider.buildGatewayGraphPlan(grouped, partial)
+		if err != nil || len(plan) == 0 || plan[0].route.kind != routeMutationDeleteMember || plan[0].route.id != live.members[0].ID {
+			t.Fatalf("plan = %v, error = %v, want the stale endpoint deleted before the SAN policy is created", plan, err)
+		}
+	})
+
+	// A competing match retains the shared listener's policy-order barrier.
+	desired.routes[0].policies[0].path = route.policies[0].path
+	check(routeMutationCreatePool, 0)
+
+	tls.Denied = true
+	withdrawal := provider.prepareBackendTLS(t.Context(), &desired, actual)
+	if withdrawal == nil || withdrawal.routeIndex != 1 || !withdrawal.withdrawHTTPPolicy ||
+		withdrawal.route.kind != routeMutationSetBackendTLS || withdrawal.route.poolAdmin == nil || *withdrawal.route.poolAdmin {
+		t.Fatalf("revoked authorization must close the pool ahead of ordinary policy mutations: %v", withdrawal)
+	}
+}
+
 func TestInitialL7RulesLeaveLegacySiblingCleanupEligible(t *testing.T) {
 	identity := safetyTestIdentity(t)
 	markedTags := append(safetyRouteTags(t, identity, rolePolicyExact), initialL7RulesTag)

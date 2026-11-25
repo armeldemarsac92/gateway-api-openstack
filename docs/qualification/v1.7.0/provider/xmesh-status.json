@@ -1,0 +1,237 @@
+{
+  "resource": "XMesh",
+  "channel": "Experimental",
+  "gatewayAPI": "v1.7.0",
+  "kubernetes": "v1.36.4",
+  "istio": "1.31.0",
+  "scope": "Disposable kind cluster and pinned Istio ambient pilot, CNI and ztunnel. A separate Pod supplied the local OpenStack API.",
+  "sourceRevision": "dce499989db17001c5a089d01d1714f962a6ce4a",
+  "sourceTree": "dbb3f8e0ae1face1b0a252c1f0cd3c7468d8ce3c",
+  "manager": {
+    "executableSHA256": "sha256:aabb0c87262669bf9133f55c29de8de6afaf11b27c50bc9977d4b2a7b1c8199a",
+    "releaseManifest": "sha256:fb08bd0d0053745f1f8ad31bbc28a3c29e553dbbd18719eb3610a5aee11d107b",
+    "releaseArchiveSHA256": "5503cd8ea6acd6fdf056b4abb7d5ac784ba548503d052d3d7e4c89b4b7f093b5",
+    "readyReplicas": 2,
+    "normalAndNoCacheBuildsMatch": true
+  },
+  "istioImages": {
+    "istiod": "docker.io/istio/pilot@sha256:17b581d9d75a1ab319d2816230626f06d65b48e3e798f98e3092a031843b3fe0",
+    "istio-cni-node": "docker.io/istio/install-cni@sha256:fe7081ed2605166fef573a7987f183e91fd45c2a302f90998c879ca20112426e",
+    "ztunnel": "docker.io/istio/ztunnel@sha256:efa1115b58acd969bf876dfcee27751714e3ae317b2518e1a1d61f3ef037587e"
+  },
+  "sameXMeshUID": true,
+  "cni": {
+    "helmInstallation": {
+      "daemonSetGeneration": 1,
+      "observedGeneration": 1,
+      "updatedAndAvailablePods": 2,
+      "literals": {
+        "AMBIENT_ENABLED": "true",
+        "AMBIENT_IPV6": "false"
+      },
+      "configMapValue": "true"
+    },
+    "envFromBeforeConfigMapEdit": {
+      "daemonSetGeneration": 2,
+      "observedGeneration": 2,
+      "updatedAndAvailablePods": 2,
+      "literals": {},
+      "configMapValue": "false"
+    },
+    "envFromAfterConfigMapEdit": {
+      "daemonSetGeneration": 2,
+      "observedGeneration": 2,
+      "updatedAndAvailablePods": 2,
+      "literals": {},
+      "configMapValue": "true"
+    },
+    "restoredLiteralRollout": {
+      "daemonSetGeneration": 3,
+      "observedGeneration": 3,
+      "updatedAndAvailablePods": 2,
+      "literals": {
+        "AMBIENT_ENABLED": "true",
+        "AMBIENT_IPV6": "false"
+      },
+      "configMapValue": "true"
+    },
+    "sameCNIPodsAcrossConfigMapEdit": true,
+    "unchangedManagerPods": true,
+    "configMapOnlyObservation": {
+      "observations": 7,
+      "durationSeconds": 20.0
+    }
+  },
+  "states": {
+    "initial": {
+      "generation": 1,
+      "resourceVersion": "1558",
+      "conditions": [
+        {
+          "type": "Accepted",
+          "status": "True",
+          "reason": "Accepted",
+          "observedGeneration": 1
+        },
+        {
+          "type": "Programmed",
+          "status": "True",
+          "reason": "Programmed",
+          "observedGeneration": 1
+        }
+      ],
+      "supportedFeatures": [
+        "GRPCRoute",
+        "HTTPRoute",
+        "HTTPRoute303RedirectStatusCode",
+        "HTTPRoute307RedirectStatusCode",
+        "HTTPRoute308RedirectStatusCode",
+        "HTTPRouteParentRefPort",
+        "HTTPRouteResponseHeaderModification",
+        "Mesh",
+        "MeshClusterIPMatching",
+        "MeshHTTPRouteBackendRequestHeaderModification",
+        "MeshHTTPRouteNamedRouteRule",
+        "MeshHTTPRouteQueryParamMatching",
+        "MeshHTTPRouteRedirectPath",
+        "MeshHTTPRouteRedirectPort",
+        "MeshHTTPRouteRewritePath",
+        "MeshHTTPRouteSchemeRedirect"
+      ]
+    },
+    "paused": {
+      "generation": 1,
+      "resourceVersion": "1696",
+      "conditions": [
+        {
+          "type": "Accepted",
+          "status": "True",
+          "reason": "Accepted",
+          "observedGeneration": 1
+        },
+        {
+          "type": "Programmed",
+          "status": "Unknown",
+          "reason": "Pending",
+          "observedGeneration": 1
+        }
+      ],
+      "supportedFeatures": []
+    },
+    "restored": {
+      "generation": 1,
+      "resourceVersion": "1804",
+      "conditions": [
+        {
+          "type": "Accepted",
+          "status": "True",
+          "reason": "Accepted",
+          "observedGeneration": 1
+        },
+        {
+          "type": "Programmed",
+          "status": "True",
+          "reason": "Programmed",
+          "observedGeneration": 1
+        }
+      ],
+      "supportedFeatures": [
+        "GRPCRoute",
+        "HTTPRoute",
+        "HTTPRoute303RedirectStatusCode",
+        "HTTPRoute307RedirectStatusCode",
+        "HTTPRoute308RedirectStatusCode",
+        "HTTPRouteParentRefPort",
+        "HTTPRouteResponseHeaderModification",
+        "Mesh",
+        "MeshClusterIPMatching",
+        "MeshHTTPRouteBackendRequestHeaderModification",
+        "MeshHTTPRouteNamedRouteRule",
+        "MeshHTTPRouteQueryParamMatching",
+        "MeshHTTPRouteRedirectPath",
+        "MeshHTTPRouteRedirectPort",
+        "MeshHTTPRouteRewritePath",
+        "MeshHTTPRouteSchemeRedirect"
+      ]
+    },
+    "cni-envfrom": {
+      "generation": 1,
+      "resourceVersion": "1849",
+      "conditions": [
+        {
+          "type": "Accepted",
+          "status": "True",
+          "reason": "Accepted",
+          "observedGeneration": 1
+        },
+        {
+          "type": "Programmed",
+          "status": "Unknown",
+          "reason": "Pending",
+          "observedGeneration": 1
+        }
+      ],
+      "supportedFeatures": []
+    },
+    "cni-config-edited": {
+      "generation": 1,
+      "resourceVersion": "1941",
+      "conditions": [
+        {
+          "type": "Accepted",
+          "status": "True",
+          "reason": "Accepted",
+          "observedGeneration": 1
+        },
+        {
+          "type": "Programmed",
+          "status": "Unknown",
+          "reason": "Pending",
+          "observedGeneration": 1
+        }
+      ],
+      "supportedFeatures": []
+    },
+    "cni-recovered": {
+      "generation": 1,
+      "resourceVersion": "2120",
+      "conditions": [
+        {
+          "type": "Accepted",
+          "status": "True",
+          "reason": "Accepted",
+          "observedGeneration": 1
+        },
+        {
+          "type": "Programmed",
+          "status": "True",
+          "reason": "Programmed",
+          "observedGeneration": 1
+        }
+      ],
+      "supportedFeatures": [
+        "GRPCRoute",
+        "HTTPRoute",
+        "HTTPRoute303RedirectStatusCode",
+        "HTTPRoute307RedirectStatusCode",
+        "HTTPRoute308RedirectStatusCode",
+        "HTTPRouteParentRefPort",
+        "HTTPRouteResponseHeaderModification",
+        "Mesh",
+        "MeshClusterIPMatching",
+        "MeshHTTPRouteBackendRequestHeaderModification",
+        "MeshHTTPRouteNamedRouteRule",
+        "MeshHTTPRouteQueryParamMatching",
+        "MeshHTTPRouteRedirectPath",
+        "MeshHTTPRouteRedirectPort",
+        "MeshHTTPRouteRewritePath",
+        "MeshHTTPRouteSchemeRedirect"
+      ]
+    }
+  },
+  "meshTrafficCases": [
+    "MeshGRPCRouteRequestHeaderModifier",
+    "MeshHTTPRouteRewritePath"
+  ],
+  "registeredXMeshCases": 0
+}

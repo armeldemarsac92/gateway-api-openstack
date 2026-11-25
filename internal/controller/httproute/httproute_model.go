@@ -108,6 +108,9 @@ func (r *Reconciler) admittedHTTPRouteRules(route *gatewayv1.HTTPRoute) ([]gatew
 	var dropped []string
 	var valid []gatewayv1.HTTPRouteRule
 	for index, rule := range route.Spec.Rules {
+		if _, diagnostic := model.NormalizeHTTPRequestPolicy(rule, !grpc && r.Config.HTTPRequestPolicy); diagnostic != nil {
+			return nil, "", newRouteBuildError(routeErrorUnsupported, "%s", diagnostic.Message)
+		}
 		err := r.validateRouteRule(rule, grpc)
 		if err == nil {
 			valid = append(valid, rule)
@@ -144,7 +147,7 @@ func hasProjectableHTTPFilters(route *gatewayv1.HTTPRoute) bool {
 		return slices.ContainsFunc(rule.BackendRefs, func(backend gatewayv1.HTTPBackendRef) bool {
 			return len(backend.Filters) != 0
 		}) || slices.ContainsFunc(rule.Filters, func(filter gatewayv1.HTTPRouteFilter) bool {
-			return filter.Type == gatewayv1.HTTPRouteFilterURLRewrite || filter.Type == gatewayv1.HTTPRouteFilterCORS
+			return filter.Type == gatewayv1.HTTPRouteFilterURLRewrite || filter.Type == gatewayv1.HTTPRouteFilterCORS || model.IsRequestMirror(filter)
 		})
 	})
 }
@@ -167,6 +170,9 @@ func (r *Reconciler) usesHTTPBackendGroups(route *gatewayv1.HTTPRoute) bool {
 		return false
 	}
 	rule := rules[0]
+	if model.HasHTTPRequestPolicy(rule) || model.HasRequestMirrors(rule) {
+		return true
+	}
 	if r.Config.XBackendEnabled() && model.HTTPProfileRouteKind(route) == model.HTTPRouteKind {
 		for _, ref := range rule.BackendRefs {
 			if _, supported := model.XBackendReference(route.Namespace, ref.BackendObjectReference); supported {
@@ -182,14 +188,19 @@ func (r *Reconciler) usesHTTPBackendGroups(route *gatewayv1.HTTPRoute) bool {
 }
 
 func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, grpc bool) error {
+	_, diagnostic := model.NormalizeRequestMirrors(rule.Filters, r.Config.HTTPRequestMirror && !grpc, len(rule.BackendRefs) > 0)
+	if diagnostic != nil {
+		return routeActionError(diagnostic)
+	}
+	rule.Filters = model.WithoutRequestMirrorFilters(rule.Filters)
 	fixedResponses := r.Config.FixedHTTPResponses || grpc
 	weightedTargets := r.Config.WeightedHTTPTargets && (!grpc || len(rule.BackendRefs) > 1 ||
 		len(rule.BackendRefs) == 1 && ptr.Deref(rule.BackendRefs[0].Weight, 1) == 0)
 	exactHeaders := r.Config.HTTPHeaderExact
 	exactQueryParams := r.Config.HTTPQueryParamExact && r.Config.FixedHTTPResponses && !grpc
 	methodMatch := r.Config.HTTPMethodMatch && !grpc
-	if rule.Timeouts != nil || rule.Retry != nil || rule.SessionPersistence != nil { //nolint:staticcheck // The release still serves this deprecated Experimental field.
-		return newRouteBuildError(routeErrorUnsupported, "timeouts, retries, and session persistence are not supported")
+	if rule.SessionPersistence != nil { //nolint:staticcheck // The release still serves this deprecated Experimental field.
+		return newRouteBuildError(routeErrorUnsupported, "session persistence is not supported")
 	}
 	if len(rule.Filters) != 0 || !fixedResponses && !weightedTargets {
 		if err := compileRouteAction(rule, r.Config.RequestHeaderModifier, r.Config.ResponseHeaderModifier && !grpc, r.Config.HTTPRequestRedirect && !grpc, r.Config.HTTPRequestURLRewrite && !grpc, r.Config.HTTPCORS && !grpc); err != nil {
@@ -210,6 +221,10 @@ func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, grpc bool) 
 	if weightedTargets {
 		request, _, rewrite, cors, _ := model.NormalizeHTTPForwardingRuleFilters(rule, r.Config.RequestHeaderModifier, r.Config.ResponseHeaderModifier, r.Config.HTTPRequestURLRewrite, r.Config.HTTPCORS && !grpc)
 		for _, backend := range rule.BackendRefs {
+			if _, diagnostic := model.NormalizeRequestMirrors(backend.Filters, r.Config.HTTPRequestMirror && !grpc, true); diagnostic != nil {
+				return routeActionError(diagnostic)
+			}
+			backend.Filters = model.WithoutRequestMirrorFilters(backend.Filters)
 			operations, _, diagnostic := model.NormalizeHTTPBackendRequestFilters(rule, backend, r.Config.BackendRequestFilters && !grpc, request, rewrite)
 			if diagnostic != nil && diagnostic.Condition != string(gatewayv1.RouteConditionResolvedRefs) {
 				return routeActionError(diagnostic)
@@ -229,6 +244,9 @@ func (r *Reconciler) validateRouteRule(rule gatewayv1.HTTPRouteRule, grpc bool) 
 		return newRouteBuildError(routeErrorUnsupported, "exactly one backendRef is supported")
 	}
 	backend := rule.BackendRefs[0]
+	if slices.ContainsFunc(backend.Filters, model.IsRequestMirror) {
+		return newRouteBuildError(routeErrorUnsupported, "backendRef RequestMirror requires --octavia-http-request-mirror and --octavia-weighted-http-targets")
+	}
 	if len(backend.Filters) != 0 {
 		_, _, diagnostic := model.NormalizeHTTPBackendRequestFilters(rule, backend, false, nil, nil)
 		if diagnostic != nil && (diagnostic.Scope == model.ScopeRoute ||
@@ -445,7 +463,7 @@ func (r *Reconciler) buildRoutePortModel(
 		spec.HTTPListenerHostname = match.httpListenerHostname
 		spec.HTTPSListenerHostname = match.httpsListenerHostname
 		spec.Hostname, spec.PathType, spec.PathValue, spec.Precedence = match.Hostname, cloud.PathMatchType(match.Match.PathType), match.Match.PathValue, match.Precedence
-		spec.BackendTLS = inputs.backendTLSAvailability[spec.GRPC].validation(backend)
+		spec.BackendTLS = inputs.backendTLSValidation(backend, spec.GRPC)
 		if spec.BackendTLS != nil && spec.BackendTLS.Denied {
 			return spec, routeModelDiagnostics{}, nil
 		}
@@ -508,6 +526,7 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 		redirect     *int
 		fixed        *int
 		corsFallback bool
+		mirrors      []cloud.HTTPMirrorTarget
 	}
 	groups := make(map[backendKey]httpBackendResolution, len(rules))
 	targets := make([]ruleTarget, len(rules))
@@ -523,6 +542,12 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 			spec.FixedHTTPRules = append(spec.FixedHTTPRules, cloud.HTTPFixedRule{RuleIndex: rule.Index})
 			continue
 		}
+		mirrors, diagnostic, err := r.lowerRequestMirrors(ctx, reader, spec, inputs, rule.RequestMirrors, nodeAddressType, groups)
+		if err != nil {
+			return routeModelDiagnostics{}, err
+		}
+		diagnostics.backend = preferredBackendDiagnostic(diagnostics.backend, diagnostic)
+		targets[rule.Index].mirrors = mirrors
 		zeroOnly := spec.GRPC && !slices.ContainsFunc(rule.Backends, func(backend model.BackendGroup) bool { return backend.Weight > 0 })
 		if !spec.GRPC && len(rule.Backends) == 1 && rule.Backends[0].FilterDiagnostic != nil && !r.Config.WeightedHTTPTargets {
 			diagnostics.backend = preferredBackendDiagnostic(diagnostics.backend, *rule.Backends[0].FilterDiagnostic)
@@ -532,7 +557,8 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 		}
 		direct := !zeroOnly && (rule.CORS == nil || !r.Config.WeightedHTTPTargets) && len(rule.Backends) == 1 &&
 			hasHTTPBackendKey(rule.Backends[0]) && rule.Backends[0].FilterDiagnostic == nil &&
-			len(rule.Backends[0].RequestHeaderOperations) == 0 && rule.Backends[0].URLRewrite == nil
+			len(rule.Backends[0].RequestHeaderOperations) == 0 && rule.Backends[0].URLRewrite == nil &&
+			len(rule.Backends[0].RequestMirrors) == 0
 		weighted := cloud.HTTPWeightedRule{RuleIndex: rule.Index}
 		for _, backend := range rule.Backends {
 			if zeroOnly {
@@ -543,7 +569,11 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 				weighted.Targets = append(weighted.Targets, cloud.HTTPWeightedTarget{})
 				continue
 			}
-			index, diagnostic, err := r.lowerHTTPBackend(ctx, reader, spec, inputs, backend, nodeAddressType, direct, groups)
+			use := httpBackendWeighted
+			if direct {
+				use = httpBackendDirect
+			}
+			index, diagnostic, err := r.lowerHTTPBackend(ctx, reader, spec, inputs, backend, nodeAddressType, use, groups)
 			if err != nil {
 				return routeModelDiagnostics{}, err
 			}
@@ -562,6 +592,17 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 					target.RequestHeaderOperations = backend.RequestHeaderOperations
 					target.URLRewrite = backend.URLRewrite
 				}
+				mirrorBackendGroups := groups
+				if index == nil || backend.Weight == 0 || spec.HTTPBackends[*index].BackendTLS != nil && spec.HTTPBackends[*index].BackendTLS.Denied {
+					// This primary slot cannot be selected for forwarding.
+					mirrorBackendGroups = nil
+				}
+				mirrors, diagnostic, err := r.lowerRequestMirrors(ctx, reader, spec, inputs, backend.RequestMirrors, nodeAddressType, mirrorBackendGroups)
+				if err != nil {
+					return routeModelDiagnostics{}, err
+				}
+				diagnostics.backend = preferredBackendDiagnostic(diagnostics.backend, diagnostic)
+				target.RequestMirrors = mirrors
 				weighted.Targets = append(weighted.Targets, target)
 			}
 		}
@@ -584,7 +625,12 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 			paths = &spec.WeightedHTTPRules[target.weighted].Matches
 		}
 		var operations []cloud.HTTPHeaderOperation
+		var requestPolicy *cloud.HTTPRequestPolicy
 		if target.pool != nil || target.fixed == nil && target.redirect == nil {
+			operations = rules[match.RuleIndex].RequestHeaderOperations
+			requestPolicy = rules[match.RuleIndex].RequestPolicy
+		}
+		if len(target.mirrors) != 0 {
 			operations = rules[match.RuleIndex].RequestHeaderOperations
 		}
 		cors := rules[match.RuleIndex].CORS
@@ -599,16 +645,59 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 			ResponseHeaderOperations: rules[match.RuleIndex].ResponseHeaderOperations,
 			URLRewrite:               rules[match.RuleIndex].URLRewrite,
 			CORS:                     cors,
+			RequestPolicy:            requestPolicy,
+			RequestMirrors:           target.mirrors,
 		})
 	}
 	return diagnostics, nil
+}
+
+// A rejected destination contributes its own diagnostic but no forwarding
+// target. The primary and the other mirrors continue to use their normal pools.
+func (r *Reconciler) lowerRequestMirrors(ctx context.Context, reader client.Reader, spec *cloud.RouteSpec, inputs *routeModelInputs, mirrors []model.RequestMirror, nodeAddressType corev1.NodeAddressType, groups map[backendKey]httpBackendResolution) ([]cloud.HTTPMirrorTarget, model.Diagnostic, error) {
+	var targets []cloud.HTTPMirrorTarget
+	var diagnostic model.Diagnostic
+	for _, mirror := range mirrors {
+		backend := mirror.Backend
+		if backend.Diagnostic != nil {
+			diagnostic = preferredBackendDiagnostic(diagnostic, *backend.Diagnostic)
+			continue
+		}
+		if groups == nil {
+			continue
+		}
+		if tls := inputs.backendTLSValidation(backend, false); tls != nil && tls.Denied {
+			diagnostic = preferredBackendDiagnostic(diagnostic, model.Diagnostic{
+				Reason: string(gatewayv1.RouteReasonUnsupportedValue), Message: "RequestMirror backend TLS validation is unavailable",
+			})
+			continue
+		}
+		index, issue, err := r.lowerHTTPBackend(ctx, reader, spec, inputs, backend, nodeAddressType, httpBackendMirror, groups)
+		if err != nil {
+			return nil, model.Diagnostic{}, err
+		}
+		diagnostic = preferredBackendDiagnostic(diagnostic, issue)
+		if index != nil {
+			targets = append(targets, cloud.HTTPMirrorTarget{BackendIndex: *index, Numerator: mirror.Numerator,
+				Denominator: mirror.Denominator, Phase: mirror.Phase})
+		}
+	}
+	return targets, diagnostic, nil
 }
 
 func hasHTTPBackendKey(backend model.BackendGroup) bool {
 	return backend.XBackend.Name != "" || backend.Service.Name != "" && validBackendPort(backend.Reference.Port)
 }
 
-func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader, spec *cloud.RouteSpec, inputs *routeModelInputs, backend model.BackendGroup, nodeAddressType corev1.NodeAddressType, direct bool, groups map[backendKey]httpBackendResolution) (*int, model.Diagnostic, error) {
+type httpBackendUse uint8
+
+const (
+	httpBackendDirect httpBackendUse = iota
+	httpBackendWeighted
+	httpBackendMirror
+)
+
+func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader, spec *cloud.RouteSpec, inputs *routeModelInputs, backend model.BackendGroup, nodeAddressType corev1.NodeAddressType, use httpBackendUse, groups map[backendKey]httpBackendResolution) (*int, model.Diagnostic, error) {
 	if backend.FilterDiagnostic != nil {
 		return nil, *backend.FilterDiagnostic, nil
 	}
@@ -626,7 +715,7 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 	}
 	result, observed := groups[key]
 	var members []cloud.Member
-	tls := inputs.backendTLSAvailability[spec.GRPC].validation(backend)
+	tls := inputs.backendTLSValidation(backend, spec.GRPC)
 	if !observed {
 		switch {
 		case backend.Diagnostic != nil && spec.GRPC:
@@ -643,9 +732,12 @@ func (r *Reconciler) lowerHTTPBackend(ctx context.Context, reader client.Reader,
 		return nil, result.diagnostic, nil
 	}
 	invalid := result.diagnostic.Reason != ""
+	if invalid && use == httpBackendMirror {
+		return nil, result.diagnostic, nil
+	}
 	// Keep a denied policy's pool identity so the graph can quarantine it
 	// before rewriting the weighted rule to send its share to the failure pool.
-	if !direct && invalid && tls == nil {
+	if use == httpBackendWeighted && invalid && tls == nil {
 		groups[key] = result
 		return nil, result.diagnostic, nil
 	}

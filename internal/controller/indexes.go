@@ -54,7 +54,7 @@ const (
 	IndexXBackendByPodLabel = "spec.podLabel"
 	// IndexBackendTLSPolicyByService indexes local core Service targets.
 	IndexBackendTLSPolicyByService = "spec.targetService"
-	// IndexBackendTLSPolicyByCA indexes supported local CA ConfigMap references.
+	// IndexBackendTLSPolicyByCA indexes supported CA references by scoped object key.
 	IndexBackendTLSPolicyByCA = "spec.caConfigMap"
 	// IndexHTTPRouteByBackendNamespace indexes cross-namespace Service references.
 	IndexHTTPRouteByBackendNamespace = "spec.backendNamespace"
@@ -277,7 +277,7 @@ func controllerFieldIndexes(config Config) []controllerFieldIndex {
 				return keys
 			}},
 			controllerFieldIndex{object: &gatewayv1.BackendTLSPolicy{}, field: IndexBackendTLSPolicyByCA, extract: func(object client.Object) []string {
-				if key, supported := backendtls.ConfigMapKey(object.(*gatewayv1.BackendTLSPolicy)); supported {
+				if key, supported := backendtls.CAKey(object.(*gatewayv1.BackendTLSPolicy), config.ClusterTrustBundles != nil); supported {
 					return []string{ObjectKeyString(key)}
 				}
 				return nil
@@ -405,8 +405,8 @@ func statusGatewayKeys(config Config, routeNamespace string, parents []gatewayv1
 func backendServiceKeys(route *gatewayv1.HTTPRoute) []string {
 	keys := make(map[string]struct{})
 	for _, rule := range route.Spec.Rules {
-		for _, backend := range rule.BackendRefs {
-			key, supported := model.BackendServiceReference(route.Namespace, backend.BackendObjectReference)
+		for _, backend := range model.HTTPServiceBackendReferences(rule, true) {
+			key, supported := model.BackendServiceReference(route.Namespace, backend)
 			if supported && key.Namespace != "" && key.Name != "" {
 				keys[ObjectKeyString(key)] = struct{}{}
 			}
@@ -422,8 +422,8 @@ func backendNamespaceKeys(object client.Object) []string {
 	}
 	keys := make(map[string]struct{})
 	for _, rule := range route.Spec.Rules {
-		for _, backend := range rule.BackendRefs {
-			key, supported := model.BackendServiceReference(route.Namespace, backend.BackendObjectReference)
+		for _, backend := range model.HTTPServiceBackendReferences(rule, true) {
+			key, supported := model.BackendServiceReference(route.Namespace, backend)
 			if supported && key.Namespace != "" && key.Name != "" && key.Namespace != route.Namespace {
 				keys[key.Namespace] = struct{}{}
 			}
@@ -439,10 +439,8 @@ func isCoreServiceBackend(backend gatewayv1.BackendObjectReference) bool {
 
 func hasCoreServiceBackend(route *gatewayv1.HTTPRoute) bool {
 	for _, rule := range route.Spec.Rules {
-		for _, backend := range rule.BackendRefs {
-			if isCoreServiceBackend(backend.BackendObjectReference) {
-				return true
-			}
+		if slices.ContainsFunc(model.HTTPServiceBackendReferences(rule, true), isCoreServiceBackend) {
+			return true
 		}
 	}
 	return false

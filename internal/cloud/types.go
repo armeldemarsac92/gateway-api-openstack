@@ -59,6 +59,8 @@ type GatewaySpec struct {
 	// HTTPListenerHostnames lists all sections on plaintext ports that need hostname isolation.
 	// "*" denotes the section with no hostname.
 	HTTPListenerHostnames map[int][]string `json:",omitempty"`
+	// RequestFilterSections describes ordered pre-routing filters by physical port.
+	RequestFilterSections map[int][]ListenerRequestFilterSection `json:",omitempty"`
 	VIPSecurityGroupIDs   []string
 
 	// RequestedVIPAddress is an optional fixed private IPv4 address on VIPSubnetID.
@@ -70,6 +72,33 @@ type GatewaySpec struct {
 	// AddressRejection records an invalid address request on a bound Gateway.
 	// Existing listeners and routes remain eligible for reconciliation.
 	AddressRejection string
+	// ClusterAddressLoss is set when Cluster requests cannot reserve an
+	// address. Only a valid provider address or a retained active address
+	// can then justify keeping the frontend enabled.
+	ClusterAddressLoss *ClusterAddressLoss
+}
+
+type ListenerRequestFilterSection struct {
+	Hostname string
+	Reject   bool
+	Requests []ListenerExternalAuth
+}
+
+// ListenerExternalAuth references a backend authorized from the Gateway.
+type ListenerExternalAuth struct {
+	ServiceUID             string
+	ServicePort            int
+	MemberSubnetID         string
+	BackendSecurityGroups  []string
+	Members                []Member
+	PathPrefix             string
+	AllowedRequestHeaders  []string
+	AllowedResponseHeaders []string
+}
+
+type ClusterAddressLoss struct {
+	RetainedClusterVIPs       []string
+	RetainedProviderAddresses []string
 }
 
 // ScopedListener is one named Octavia listener on a shared Gateway load balancer.
@@ -89,12 +118,16 @@ type ListenerTLS struct {
 	VirtualHosts []string `json:",omitempty"`
 }
 
-// FrontendClientValidation identifies the normalized trust anchor on a strict
-// HTTPS port. The PEM is passed to Barbican and excluded from graph serialization.
+// MaxCAPEMBytes bounds the normalized CA payload stored in Barbican.
+const MaxCAPEMBytes = 128 * 1024
+
+// FrontendClientValidation identifies the trust anchor and validation mode on
+// an HTTPS port. The PEM is excluded from graph serialization.
 type FrontendClientValidation struct {
-	ConfigMapUID string
-	Digest       string
-	PEM          []byte `json:"-"`
+	ConfigMapUID     string // UID of the ConfigMap or ClusterTrustBundle
+	Digest           string
+	PEM              []byte `json:"-"`
+	InsecureFallback bool   `json:",omitempty"`
 }
 
 // Equal compares the immutable identity and digest of the trust anchor.
@@ -102,7 +135,8 @@ func (v *FrontendClientValidation) Equal(other *FrontendClientValidation) bool {
 	if v == nil || other == nil {
 		return v == other
 	}
-	return v.ConfigMapUID == other.ConfigMapUID && v.Digest == other.Digest
+	return v.ConfigMapUID == other.ConfigMapUID && v.Digest == other.Digest &&
+		v.InsecureFallback == other.InsecureFallback
 }
 
 // Equal compares frontend authorization across independent observations.
@@ -155,7 +189,14 @@ const (
 	ListenerProtocolTLSSNI = "TLS"
 	// ListenerProtocolTLSTerminate identifies the immutable TCP termination profile.
 	ListenerProtocolTLSTerminate = "TLS_TERMINATE"
+	// ListenerProtocolTLSMixed binds a shared TCP frontend with a mode per SNI policy.
+	ListenerProtocolTLSMixed = "TLS_MIXED"
 )
+
+// IsTCPTLSListenerProtocol identifies TCP frontend profiles with authorized certificates.
+func IsTCPTLSListenerProtocol(protocol string) bool {
+	return protocol == ListenerProtocolTLSTerminate || protocol == ListenerProtocolTLSMixed
+}
 
 // NormalizeListenerProtocol interprets bindings written before listener
 // protocols were recorded as HTTP.
@@ -215,6 +256,8 @@ type HTTPPathMatch struct {
 	QueryParams              []HTTPQueryParamMatch `json:",omitempty"`
 	RequestHeaderOperations  []HTTPHeaderOperation `json:",omitempty"`
 	URLRewrite               *HTTPURLRewrite       `json:",omitempty"`
+	RequestPolicy            *HTTPRequestPolicy    `json:",omitempty"`
+	RequestMirrors           []HTTPMirrorTarget    `json:",omitempty"`
 	CORS                     *HTTPCORS             `json:",omitempty"`
 	ResponseHeaderOperations []HTTPHeaderOperation `json:",omitempty"`
 }
@@ -232,15 +275,29 @@ type HTTPBackendKind string
 const HTTPBackendKindXBackend HTTPBackendKind = "gateway.networking.x-k8s.io/XBackend"
 
 // BackendTLSValidation requires authenticated TLS to a Service port. The
-// hostname is used as both SNI and the certificate identity. Denied keeps
+// hostname is used as SNI and authenticates the certificate if no SANs are
+// configured. Denied keeps
 // the backend's HTTP matches and weight while withholding all forwarding.
 type BackendTLSValidation struct {
-	Hostname       string
-	CAConfigMapUID string
-	CADigest       string
-	CAPEM          []byte `json:"-"`
-	Denied         bool
+	Hostname        string
+	SubjectAltNames []BackendTLSSubjectAltName `json:",omitempty"`
+	CAConfigMapUID  string                     // UID of the ConfigMap or ClusterTrustBundle
+	CADigest        string
+	CAPEM           []byte `json:"-"`
+	Denied          bool
 }
+
+// BackendTLSSubjectAltName is one typed certificate identity in Octavia's API.
+type BackendTLSSubjectAltName struct {
+	Type     string `json:"type"`
+	Hostname string `json:"hostname,omitempty"`
+	URI      string `json:"uri,omitempty"`
+}
+
+const (
+	BackendTLSSANHostname = "Hostname"
+	BackendTLSSANURI      = "URI"
+)
 
 // HTTPBackend groups the paths served by one backend within one HTTPRoute.
 // The zero kind denotes a core Service port.
@@ -292,6 +349,7 @@ type HTTPWeightedTarget struct {
 	Weight                  int
 	RequestHeaderOperations []HTTPHeaderOperation `json:",omitempty"`
 	URLRewrite              *HTTPURLRewrite       `json:",omitempty"`
+	RequestMirrors          []HTTPMirrorTarget    `json:",omitempty"`
 }
 
 // HTTPWeightedRule preserves backendRef order and owns the policies for its matches.

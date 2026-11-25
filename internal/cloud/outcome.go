@@ -106,6 +106,14 @@ type GatewayResult struct {
 	// ScopedTLSClosedPorts contains denied HTTPS ports with settled absence
 	// or a verified disabled listener. Accepting a withdrawal write is insufficient.
 	ScopedTLSClosedPorts []int
+	// FrontendFallbackUnavailablePorts require a capability that Octavia did not advertise.
+	FrontendFallbackUnavailablePorts []int
+	// ListenerFilterUnavailablePorts require a capability that Octavia did not advertise.
+	ListenerFilterUnavailablePorts []int
+	// ListenerFilterCapabilityPendingPorts are waiting for a usable discovery response.
+	ListenerFilterCapabilityPendingPorts []int
+	// ListenerFilterRecoveringSections are guarded locally while their backends converge.
+	ListenerFilterRecoveringSections map[int][]string
 	// ScopedListenerDeferredPorts still match their active frontends while
 	// route observations are deferred. Only previously programmed sections
 	// at the same generation can retain status. A nil list means the provider
@@ -137,6 +145,10 @@ type RouteResult struct {
 	UnsupportedBackendProtocol string
 	// UnsupportedMatch reports an incompatible match without discarding other programmed rules.
 	UnsupportedMatch string
+	// PartiallyInvalid explains why some rules were excluded from this graph.
+	PartiallyInvalid string
+	// ImplementedRules confirms an active retained rule during partial convergence.
+	ImplementedRules bool
 }
 
 // RouteReadyResult returns a converged HTTPRoute result.

@@ -44,7 +44,7 @@ func (r *Reconciler) gatewaySpec(gateway *gatewayv1.Gateway, listeners []*gatewa
 	listener := listeners[0]
 	var protocol string
 	if isL4Listener(listener.Protocol) || listener.Protocol == gatewayv1.TLSProtocolType {
-		protocol = string(listenerBindingProtocol(listener))
+		protocol = string(listenerBindingProtocol(r.Config, gateway, listener))
 	}
 	spec := cloud.GatewaySpec{
 		Identity:            controller.GatewayIdentity(r.Config, gateway),

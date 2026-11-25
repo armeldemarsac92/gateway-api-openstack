@@ -1,0 +1,161 @@
+{
+  "case": "BackendTLSPolicyTLSRouteTerminate",
+  "gatewayAPI": "v1.7.0",
+  "gatewayAPIRevision": "e26d183dbbc1bb782b78addbd26faba03955c152",
+  "controller": "904a70d2edd78cf374f8b20acf3770b75b74e789",
+  "image": {
+    "repository": "ghcr.io/armeldemarsac92/gateway-api-openstack",
+    "sourceRevision": "904a70d2edd78cf374f8b20acf3770b75b74e789",
+    "sourceLabel": "https://github.com/armeldemarsac92/gateway-api-openstack",
+    "manifestDigest": "sha256:a5aff64c0dbee39f2072c50b91d55283ff24e89e4d1158fd8c083608a6256a1e",
+    "configDigest": "sha256:2d3a3ff5f676fbe6706aa3584b0096c4c0124954eae7ad1ffd3c7cf861ef5268",
+    "platform": "linux/amd64",
+    "entrypoint": "/openstack-gateway-controller",
+    "user": "65532:65532",
+    "ociArchiveSHA256": "1ea123f8c92ba6309d87621b921ade1529966d5d06347108db24f29629fa15e4",
+    "managerSHA256": "b954ddd1a460f1463f7f8d120f59920a2b79d8f7914694fb1bcc998b8613e84b",
+    "normalAndNoCacheBuildsMatch": true
+  },
+  "channels": {
+    "standard": {
+      "registeredTestSHA256": "326a7414688cf742bdb243f2101a706f3e0bc4fe5f772b4a20fc46ae29e81224",
+      "registeredManifestSHA256": "443427f13c9e4586c7e3cf9a55dc10a022818d00e4037412162e95e17f4a84c4",
+      "reportSHA256": "d04e9a1d2447bd7d9bde89262df2d488a4cbfe6fdc1829a90856befc8acbf4a7",
+      "bundleSHA256": "4e2602c4cbe1afbc394d86f4ac6522e1a5263b01133bba1e40a6d1a549e753a1",
+      "octavia": {
+        "filesVerified": 649,
+        "revision": "41dbfea197532d7b3c97a7917ab97c644778a47f",
+        "sha256": "1b5edabb36ccd79c209e3c54bc48b29187cca268f9a0f5c5e36dc5cbf911af60",
+        "version": "19.0.1.dev45"
+      },
+      "octaviaLib": {
+        "filesVerified": 24,
+        "revision": "71d3d7d1956e0d566228d1669a0fe5200696ccf4",
+        "sha256": "9c3908b1371d872083757fd59446189f31fc179f8b2326f94d2a50f49037df45",
+        "version": "3.12.1.dev13"
+      },
+      "haproxySHA256": "55bf3823b5fc2c34d21cac551ff23635cfc555c0223e4470e5696a98dcb4fd4e",
+      "caseAndTrafficSubtest": [
+        "--- PASS: TestRegisteredRawTLSCase/BackendTLSPolicyTLSRouteTerminate (20.89s)",
+        "--- PASS: TestRegisteredRawTLSCase/BackendTLSPolicyTLSRouteTerminate/TLS_request_matching_terminated_TLSRoute_with_BackendTLSPolicy_should_reach_backend_with_re-encrypted_TLS (0.02s)"
+      ],
+      "frontend": {
+        "hostname": "tls.example.com",
+        "TLS": "TLSv1.3",
+        "certificateSHA256": "03f49e914c52fe37d852caa9a5d80af59c2b45f7dc1e36911b7015612ffbbf9b"
+      },
+      "tcpEcho": {
+        "reply": "PONG",
+        "backend": "tcp-backend-6fbfc875c7-k68kt",
+        "namespace": "gateway-conformance-infra",
+        "tls": true,
+        "hostname": "abc.example.com"
+      },
+      "listener": {
+        "enrolledCertificate": true,
+        "port": 8443,
+        "protocol": "TCP",
+        "tlsTermination": true
+      },
+      "pool": {
+        "active": true,
+        "hostname": "abc.example.com",
+        "protocol": "TCP",
+        "regionalBarbicanCA": true,
+        "tlsEnabled": true
+      },
+      "policy": {
+        "conditions": {
+          "Accepted": [
+            "True",
+            "Accepted",
+            1
+          ],
+          "ResolvedRefs": [
+            "True",
+            "ResolvedRefs",
+            1
+          ]
+        },
+        "gateway": "gateway-btls-tlsroute-terminate"
+      }
+    },
+    "experimental": {
+      "registeredTestSHA256": "326a7414688cf742bdb243f2101a706f3e0bc4fe5f772b4a20fc46ae29e81224",
+      "registeredManifestSHA256": "443427f13c9e4586c7e3cf9a55dc10a022818d00e4037412162e95e17f4a84c4",
+      "reportSHA256": "1958a43d16e20f474d9e3b84e8c2cbd78d9caf619c855ac23a777fd735def396",
+      "bundleSHA256": "e6d2d3407717f54b579b22ad4d164b6863895b3524f21250b0da0c1ff9a05d53",
+      "octavia": {
+        "filesVerified": 649,
+        "revision": "41dbfea197532d7b3c97a7917ab97c644778a47f",
+        "sha256": "1b5edabb36ccd79c209e3c54bc48b29187cca268f9a0f5c5e36dc5cbf911af60",
+        "version": "19.0.1.dev45"
+      },
+      "octaviaLib": {
+        "filesVerified": 24,
+        "revision": "71d3d7d1956e0d566228d1669a0fe5200696ccf4",
+        "sha256": "9c3908b1371d872083757fd59446189f31fc179f8b2326f94d2a50f49037df45",
+        "version": "3.12.1.dev13"
+      },
+      "haproxySHA256": "55bf3823b5fc2c34d21cac551ff23635cfc555c0223e4470e5696a98dcb4fd4e",
+      "caseAndTrafficSubtest": [
+        "--- PASS: TestRegisteredRawTLSCase/BackendTLSPolicyTLSRouteTerminate (62.70s)",
+        "--- PASS: TestRegisteredRawTLSCase/BackendTLSPolicyTLSRouteTerminate/TLS_request_matching_terminated_TLSRoute_with_BackendTLSPolicy_should_reach_backend_with_re-encrypted_TLS (0.33s)"
+      ],
+      "frontend": {
+        "hostname": "tls.example.com",
+        "TLS": "TLSv1.3",
+        "certificateSHA256": "632ff1f28e9a6c7fa1321b5d5f71754ca32c9355b2e7154a83b9f555d32a938e"
+      },
+      "tcpEcho": {
+        "reply": "PONG",
+        "backend": "tcp-backend-6fbfc875c7-llw5h",
+        "namespace": "gateway-conformance-infra",
+        "tls": true,
+        "hostname": "abc.example.com"
+      },
+      "listener": {
+        "enrolledCertificate": true,
+        "port": 8443,
+        "protocol": "TCP",
+        "tlsTermination": true
+      },
+      "pool": {
+        "active": true,
+        "hostname": "abc.example.com",
+        "protocol": "TCP",
+        "regionalBarbicanCA": true,
+        "tlsEnabled": true
+      },
+      "policy": {
+        "conditions": {
+          "Accepted": [
+            "True",
+            "Accepted",
+            1
+          ],
+          "ResolvedRefs": [
+            "True",
+            "ResolvedRefs",
+            1
+          ]
+        },
+        "gateway": "gateway-btls-tlsroute-terminate"
+      }
+    }
+  },
+  "real": [
+    "Kubernetes API, TCP echo Pods and EndpointSlices in Kind",
+    "Octavia REST and SQLAlchemy",
+    "Barbican REST",
+    "Amphora configuration rendering",
+    "HAProxy TLS client and backend sessions"
+  ],
+  "simulated": [
+    "Keystone catalog and identity",
+    "Neutron allocations",
+    "Octavia worker dispatch, status transport and Amphora agent transport",
+    "network relays between the host and the guest"
+  ],
+  "providerRelease": "https://github.com/armeldemarsac92/octavia/releases/tag/hibiscus-tcp-backend-tls-41dbfea19753"
+}

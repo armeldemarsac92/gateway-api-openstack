@@ -37,6 +37,8 @@ type PolicyFilters struct {
 	Request, Response []cloud.HTTPHeaderOperation
 	URLRewrite        *RequestURLRewriteUpdate
 	CORS              *RequestCORSUpdate
+	RequestPolicy     *HTTPRequestPolicyUpdate
+	RequestMirrors    *RequestMirrorsUpdate
 	Tags              []string
 }
 
@@ -50,6 +52,16 @@ func (filters PolicyFilters) write(body map[string]any) error {
 	}
 	if filters.CORS != nil {
 		if err := filters.CORS.write(body); err != nil {
+			return err
+		}
+	}
+	if filters.RequestPolicy != nil {
+		if err := filters.RequestPolicy.write(body); err != nil {
+			return err
+		}
+	}
+	if filters.RequestMirrors != nil {
+		if err := filters.RequestMirrors.write(body); err != nil {
 			return err
 		}
 	}

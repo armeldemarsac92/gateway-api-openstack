@@ -59,6 +59,7 @@ func TestBackendTLSScalarQuarantinesBeforePublishingAndReopening(t *testing.T) {
 	tls := newGraphBackendTLS(t)
 	spec.Routes[0].Spec.BackendTLS = tls
 	const poolURL = "/lbaas/pools/pool-1"
+	const sanField = "backend_tls_subject_alt_names"
 	memberIDs := []map[string]string{{"id": "member-1"}}
 	pool := map[string]any{
 		"id": "pool-1", "protocol": "HTTP", "lb_algorithm": "ROUND_ROBIN", "project_id": project,
@@ -172,10 +173,17 @@ func TestBackendTLSScalarQuarantinesBeforePublishingAndReopening(t *testing.T) {
 				if body.Pool["backend_tls_hostname"] == nil && (pool["admin_state_up"] != false || body.Pool["ca_tls_container_ref"] != nil) {
 					t.Fatal("releasing TLS requires an already disabled pool and null CA reference")
 				}
+				if _, changed := body.Pool[sanField]; changed {
+					require.Equal(t, false, pool["admin_state_up"])
+				}
 				for field, value := range body.Pool {
 					pool[field] = value
 				}
-				writes = append(writes, "configure")
+				if body.Pool["admin_state_up"] == true {
+					writes = append(writes, "enable")
+				} else {
+					writes = append(writes, "configure")
+				}
 			} else {
 				for field, value := range body.Pool {
 					pool[field] = value
@@ -194,6 +202,13 @@ func TestBackendTLSScalarQuarantinesBeforePublishingAndReopening(t *testing.T) {
 			if want := spec.Routes[0].Spec.BackendTLS; want != nil && (pool["backend_tls_hostname"] != want.Hostname || pool["tls_enabled"] != true ||
 				pool["ca_tls_container_ref"] == nil || pool["admin_state_up"] != true) {
 				t.Fatal("member exposed without the active authenticated pool")
+			}
+			if tls := spec.Routes[0].Spec.BackendTLS; tls != nil && len(tls.SubjectAltNames) != 0 {
+				want, err := json.Marshal(tls.SubjectAltNames)
+				require.NoError(t, err)
+				observed, err := json.Marshal(pool[sanField])
+				require.NoError(t, err)
+				require.JSONEq(t, string(want), string(observed))
 			}
 			if client := spec.Gateway.BackendClientCertificate; client.Denied || client.Reference != "" && pool["tls_container_ref"] != client.Reference {
 				t.Fatal("member exposed without the authorized backend client identity")
@@ -331,6 +346,55 @@ func TestBackendTLSScalarQuarantinesBeforePublishingAndReopening(t *testing.T) {
 	pool["provisioning_status"] = "ACTIVE"
 	reconcile("drain", "enable", "member")
 
+	t.Run("SAN changes require closed pool and verified readback", func(t *testing.T) {
+		capabilities = append(capabilities, octavia.GatewayCapabilityBackendTLSSubjectAltNames)
+		tls.SubjectAltNames = []cloud.BackendTLSSubjectAltName{
+			{Type: cloud.BackendTLSSANHostname, Hostname: "service.example.test"},
+			{Type: cloud.BackendTLSSANURI, URI: "spiffe://id.example.test/workload%2fa"},
+		}
+		reconcile("disable", "drain", "configure")
+		require.Contains(t, pool["tags"], backendTLSSANTag)
+		require.Equal(t, tls.Hostname, pool["backend_tls_hostname"])
+
+		// Omission, null and an incorrect list are insufficient to reopen.
+		actual := pool[sanField]
+		for _, invalidReadback := range []any{nil, []any{map[string]string{"type": "Hostname", "hostname": tls.Hostname}}} {
+			pool[sanField] = invalidReadback
+			reconcile("configure")
+			require.Equal(t, false, pool["admin_state_up"])
+			require.Empty(t, memberIDs)
+		}
+		delete(pool, sanField)
+		reconcile("configure")
+		require.Equal(t, actual, pool[sanField])
+		reconcile("enable", "member")
+
+		tls.SubjectAltNames[1].URI = "spiffe://id.example.test/workload%2Fa"
+		reconcile("disable", "drain", "configure", "enable", "member")
+
+		// A regional SAN opt-out withdraws traffic without changing trust.
+		capabilities = []string{octavia.GatewayCapabilityBackendTLSHostname}
+		reconcile("disable", "drain")
+		require.Equal(t, false, pool["admin_state_up"])
+		require.Contains(t, pool["tags"], backendTLSSANTag)
+		require.Contains(t, pool, sanField)
+		tls.SubjectAltNames = nil
+		reconcile("configure")
+		require.Equal(t, []any{}, pool[sanField])
+		require.Contains(t, pool["tags"], backendTLSSANTag)
+
+		// After restart, a response omitting the field cannot confirm the clear.
+		provider = newTestProvider(t, serviceClients, ProviderConfig{BackendCA: store, BackendTLSPolicy: true})
+		delete(pool, sanField)
+		reconcile("configure")
+		require.Equal(t, false, pool["admin_state_up"])
+		require.Empty(t, memberIDs)
+		require.Equal(t, []any{}, pool[sanField])
+		reconcile("enable", "member")
+		require.Contains(t, pool["tags"], backendTLSSANTag)
+		require.Equal(t, tls.Hostname, pool["backend_tls_hostname"])
+	})
+
 	t.Run("CA revoked while another listener has incomplete filter inventory", func(t *testing.T) {
 		// Add a healthy backend on 80 and an unreadable filter policy on 8080
 		// to the already programmed TLS route.
@@ -365,6 +429,7 @@ func TestBackendTLSScalarQuarantinesBeforePublishingAndReopening(t *testing.T) {
 		peerPool := maps.Clone(pool)
 		peerPool["id"], peerPool["tags"], peerPool["healthmonitor_id"], peerPool["members"] = "peer-pool", safetyRouteTags(t, peerID, rolePool), "peer-monitor", refs("peer-member")
 		peerPool["tls_enabled"], peerPool["backend_tls_hostname"], peerPool["ca_tls_container_ref"] = false, nil, nil
+		delete(peerPool, sanField)
 		peerMember, peerMonitor := maps.Clone(member), maps.Clone(monitor)
 		peerMember["id"], peerMember["tags"] = "peer-member", safetyRouteTags(t, peerID, roleMember)
 		peerMonitor["id"], peerMonitor["pools"], peerMonitor["tags"] = "peer-monitor", refs("peer-pool"), safetyRouteTags(t, peerID, roleMonitor)
@@ -650,15 +715,39 @@ func TestGRPCBackendTLSRequiresRegionalEnforcementAndVerifiedPool(t *testing.T) 
 	require.Equal(t, true, sent["admin_state_up"])
 	require.Equal(t, true, sent["backend_tls_require_h2"])
 
+	// Add an explicit SAN without changing the client identity or h2.
+	const sanField = "backend_tls_subject_alt_names"
+	require.NotContains(t, sent, sanField)
+	require.Equal(t, clientRef, sent["tls_container_ref"])
+	capabilities = append(capabilities, octavia.GatewayCapabilityBackendTLSSubjectAltNames)
+	spec.BackendTLS.SubjectAltNames = []cloud.BackendTLSSubjectAltName{{Type: cloud.BackendTLSSANURI, URI: "spiffe://id.example.test/grpc"}}
+	refresh()
+	disable := prepare()
+	require.NotNil(t, disable)
+	mutate(&disable.route)
+	refresh()
+	require.Nil(t, prepare())
+	mutate(poolStep())
+	require.NotEmpty(t, sent[sanField])
+	require.Equal(t, true, sent["backend_tls_require_h2"])
+	require.Equal(t, clientRef, sent["tls_container_ref"])
+	refresh()
+	require.Nil(t, prepare())
+	mutate(poolStep())
+	require.Equal(t, true, sent["admin_state_up"])
+	require.NotEmpty(t, sent[sanField])
+	require.Equal(t, true, sent["backend_tls_require_h2"])
+	require.Equal(t, clientRef, sent["tls_container_ref"])
+
 	// A previously verified pool must be closed before draining its members
-	// after regional capability loss.
+	// after regional SAN capability loss.
 	members = []any{map[string]any{
 		"id": "member-1", "project_id": project, "provisioning_status": "ACTIVE", "admin_state_up": true,
 		"address": "10.0.0.10", "protocol_port": 8443, "tags": safetyRouteTags(t, id, roleMember),
 	}}
 	pool["members"] = []map[string]string{{"id": "member-1"}}
 	refresh()
-	capabilities = []string{octavia.GatewayCapabilityBackendTLSHostname, "backend_tls_h2_alpn_v2"}
+	capabilities = []string{octavia.GatewayCapabilityBackendTLSHostname, octavia.GatewayCapabilityBackendTLSH2ALPN, "backend_tls_subject_alt_names_v2"}
 	step := prepare()
 	require.NotNil(t, step)
 	mutate(&step.route)
@@ -673,14 +762,54 @@ func TestGRPCBackendTLSRequiresRegionalEnforcementAndVerifiedPool(t *testing.T) 
 	require.Equal(t, backendTLSBlocked, route.backendTLS.phase)
 	require.Nil(t, poolStep())
 
-	// Explicit policy removal is separate from losing the h2 capability.
+	// A mixed graph still verifies the ordinary HTTP pool when gRPC SANs are unavailable.
+	httpRoute, httpPool := *route, actual.routes[0]
+	httpTLS := *httpRoute.spec.BackendTLS
+	httpTLS.SubjectAltNames = nil
+	httpRoute.spec.GRPC, httpRoute.spec.BackendTLS = false, &httpTLS
+	poolCopy := *httpPool.pool
+	poolCopy.AdminStateUp = true
+	poolCopy.Tags = slices.DeleteFunc(slices.Clone(poolCopy.Tags), func(tag string) bool { return tag == backendTLSSANTag })
+	httpPool.pool, httpPool.backendTLS.SubjectAltNames = &poolCopy, nil
+	httpPool.backendTLS.RequireH2, httpPool.backendTLS.RequireH2Observed = false, false
+	mixedDesired, mixedActual := desired, actual
+	mixedDesired.spec.Routes = []cloud.RouteGraphNode{desired.spec.Routes[0], {Disposition: cloud.GraphEnsure}}
+	mixedDesired.routes = []desiredRoute{*route, httpRoute}
+	mixedActual.routes = []observedRouteGraph{actual.routes[0], httpPool}
+	require.Nil(t, provider.prepareBackendTLS(t.Context(), &mixedDesired, mixedActual))
+	require.Equal(t, backendTLSBlocked, mixedDesired.routes[0].backendTLS.phase)
+	require.Equal(t, backendTLSVerified, mixedDesired.routes[1].backendTLS.phase)
+
+	// Explicit policy removal works even when the SAN capability is unavailable.
 	route.spec.BackendTLS = nil
 	require.Nil(t, prepare())
 	require.Equal(t, backendTLSRelease, route.backendTLS.phase)
 	mutate(poolStep())
 	require.Equal(t, false, sent["backend_tls_require_h2"])
+	require.Equal(t, []any{}, sent[sanField])
 	require.Nil(t, sent["backend_tls_hostname"])
 	require.Equal(t, false, sent["tls_enabled"])
+	require.Contains(t, pool["tags"], backendTLSSANTag)
+
+	// A partial GET after policy deletion still cannot authorize reopening.
+	delete(pool, sanField)
+	refresh()
+	require.Nil(t, prepare())
+	require.Equal(t, backendTLSRelease, route.backendTLS.phase)
+	mutate(poolStep())
+	require.Equal(t, []any{}, sent[sanField])
+	require.NotContains(t, sent, "admin_state_up")
+	require.Equal(t, false, pool["admin_state_up"])
+
+	refresh()
+	require.Nil(t, prepare())
+	mutate(poolStep())
+	require.Equal(t, map[string]any{"admin_state_up": true}, sent)
+	refresh()
+	require.Nil(t, prepare())
+	mutate(poolStep())
+	require.Contains(t, pool["tags"], backendTLSSANTag)
+	require.NotContains(t, pool["tags"], backendTLSManagedTag)
 }
 
 func newGraphBackendTLS(t *testing.T) *cloud.BackendTLSValidation {

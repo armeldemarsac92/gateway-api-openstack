@@ -31,6 +31,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 )
 
 func TestEvaluateSectionPrecedence(t *testing.T) {
@@ -45,7 +47,7 @@ func TestEvaluateSectionPrecedence(t *testing.T) {
 	absentPort := testPolicy("missing-port", "443")
 	policies := []gatewayv1.BackendTLSPolicy{lexicalLoser, youngerWhole, named, whole, absentPort}
 
-	first := Evaluate(service, &service.Spec.Ports[0], policies, maps)
+	first := Evaluate(service, &service.Spec.Ports[0], policies, CAInputs{ConfigMaps: maps})
 	require.NotNil(t, first.Winner)
 	require.NotNil(t, first.Winner.Validation)
 	require.Equal(t, named.Name, first.Winner.Key.Name)
@@ -55,7 +57,7 @@ func TestEvaluateSectionPrecedence(t *testing.T) {
 	requireCondition(t, findPolicy(t, first, lexicalLoser.Name).Accepted, metav1.ConditionFalse, gatewayv1.PolicyReasonConflicted)
 	requireCondition(t, findPolicy(t, first, absentPort.Name).ResolvedRefs, metav1.ConditionFalse, gatewayv1.PolicyReasonTargetNotFound)
 
-	second := Evaluate(service, &service.Spec.Ports[1], policies, maps)
+	second := Evaluate(service, &service.Spec.Ports[1], policies, CAInputs{ConfigMaps: maps})
 	require.NotNil(t, second.Winner)
 	require.Equal(t, whole.Name, second.Winner.Key.Name)
 	require.Len(t, second.Policies, 3)
@@ -71,7 +73,9 @@ func TestEvaluateWinnerLifecycle(t *testing.T) {
 	younger.CreationTimestamp = metav1.NewTime(time.Unix(2, 0))
 	policies := []gatewayv1.BackendTLSPolicy{younger, oldest, whole}
 
-	evaluate := func() Selection { return Evaluate(service, &service.Spec.Ports[0], policies, maps) }
+	evaluate := func() Selection {
+		return Evaluate(service, &service.Spec.Ports[0], policies, CAInputs{ConfigMaps: maps})
+	}
 	result := evaluate()
 	require.NotNil(t, result.Winner)
 	require.Nil(t, result.Winner.Validation)
@@ -102,14 +106,14 @@ func TestEvaluateTargetBoundaries(t *testing.T) {
 	otherKind.Spec.TargetRefs[0].Group = "example.com"
 	otherPort := testPolicy("other-port", "https-2")
 	policies := []gatewayv1.BackendTLSPolicy{foreign, otherKind, otherPort}
-	require.Empty(t, Evaluate(service, port, policies, maps))
+	require.Empty(t, Evaluate(service, port, policies, CAInputs{ConfigMaps: maps}))
 
 	multiple := testPolicy("multiple-targets", "https-1")
 	otherTarget := multiple.Spec.TargetRefs[0]
 	otherTarget.Name = "other-service"
 	multiple.Spec.TargetRefs = append(multiple.Spec.TargetRefs, otherTarget)
 	policies = append(policies, multiple)
-	result := Evaluate(service, port, policies, maps)
+	result := Evaluate(service, port, policies, CAInputs{ConfigMaps: maps})
 	require.NotNil(t, result.Winner)
 	require.Nil(t, result.Winner.Validation)
 	requireCondition(t, result.Winner.Accepted, metav1.ConditionFalse, gatewayv1.PolicyReasonInvalid)
@@ -117,7 +121,7 @@ func TestEvaluateTargetBoundaries(t *testing.T) {
 
 	single := testPolicy("single", "https-1")
 	policies = append(policies, single)
-	result = Evaluate(service, port, policies, maps)
+	result = Evaluate(service, port, policies, CAInputs{ConfigMaps: maps})
 	require.NotNil(t, result.Winner)
 	require.NotNil(t, result.Winner.Validation)
 	require.Equal(t, single.Name, result.Winner.Key.Name)
@@ -130,7 +134,7 @@ func TestEvaluateCAAndPolicyUpdates(t *testing.T) {
 	policies := []gatewayv1.BackendTLSPolicy{testPolicy("policy", "")}
 	evaluate := func() *PolicyResult {
 		t.Helper()
-		result := Evaluate(service, &service.Spec.Ports[0], policies, maps)
+		result := Evaluate(service, &service.Spec.Ports[0], policies, CAInputs{ConfigMaps: maps})
 		require.NotNil(t, result.Winner)
 		require.NotNil(t, result.Winner.Validation)
 		return result.Winner
@@ -148,7 +152,7 @@ func TestEvaluateCAAndPolicyUpdates(t *testing.T) {
 	require.Equal(t, original.Validation.CA.Digest, evaluate().Validation.CA.Digest)
 
 	maps[key].BinaryData["ca.crt"] = nil
-	invalid := Evaluate(service, &service.Spec.Ports[0], policies, maps)
+	invalid := Evaluate(service, &service.Spec.Ports[0], policies, CAInputs{ConfigMaps: maps})
 	requireRejectedCA(t, invalid.Winner, gatewayv1.BackendTLSPolicyReasonInvalidCACertificateRef)
 
 	maps[key].BinaryData["ca.crt"] = []byte(testCertificate(t, true))
@@ -202,7 +206,7 @@ func TestEvaluateInvalidCA(t *testing.T) {
 			policy := testPolicy("policy", "")
 			maps := testConfigMaps(ca)
 			tt.update(&policy.Spec.Validation.CACertificateRefs[0], maps)
-			result := Evaluate(service, port, []gatewayv1.BackendTLSPolicy{policy}, maps)
+			result := Evaluate(service, port, []gatewayv1.BackendTLSPolicy{policy}, CAInputs{ConfigMaps: maps})
 			requireRejectedCA(t, result.Winner, tt.reason)
 		})
 	}
@@ -212,7 +216,7 @@ func TestEvaluateInvalidCA(t *testing.T) {
 		{"certificate bundle", ca + ca},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			result := Evaluate(service, port, []gatewayv1.BackendTLSPolicy{testPolicy("policy", "")}, testConfigMaps(tt.content))
+			result := Evaluate(service, port, []gatewayv1.BackendTLSPolicy{testPolicy("policy", "")}, CAInputs{ConfigMaps: testConfigMaps(tt.content)})
 			requireRejectedCA(t, result.Winner, gatewayv1.BackendTLSPolicyReasonInvalidCACertificateRef)
 		})
 	}
@@ -221,8 +225,6 @@ func TestEvaluateInvalidCA(t *testing.T) {
 func TestEvaluateUnsupportedTLSValidation(t *testing.T) {
 	service := testService()
 	maps := testConfigMaps(testCertificate(t, true))
-	hostnameSAN := []gatewayv1.SubjectAltName{{Type: gatewayv1.HostnameSubjectAltNameType, Hostname: "backend.example.com"}}
-	uriSAN := []gatewayv1.SubjectAltName{{Type: gatewayv1.URISubjectAltNameType, URI: "spiffe://example.org/backend"}}
 	for _, tt := range []struct {
 		name       string
 		change     func(*gatewayv1.BackendTLSPolicyValidation)
@@ -232,15 +234,25 @@ func TestEvaluateUnsupportedTLSValidation(t *testing.T) {
 			v.CACertificateRefs = nil
 			v.WellKnownCACertificates = ptr.To(gatewayv1.WellKnownCACertificatesSystem)
 		}, "Well-known"},
-		{"explicit DNS SAN", func(v *gatewayv1.BackendTLSPolicyValidation) { v.SubjectAltNames = hostnameSAN }, "BackendTLSPolicySANValidation"},
-		{"explicit URI SAN", func(v *gatewayv1.BackendTLSPolicyValidation) { v.SubjectAltNames = uriSAN }, "BackendTLSPolicySANValidation"},
+		{"IP SAN", func(v *gatewayv1.BackendTLSPolicyValidation) {
+			v.SubjectAltNames = []gatewayv1.SubjectAltName{{Type: gatewayv1.HostnameSubjectAltNameType, Hostname: "192.0.2.1"}}
+		}, "subjectAltNames"},
+		{"malformed URI SAN", func(v *gatewayv1.BackendTLSPolicyValidation) {
+			v.SubjectAltNames = []gatewayv1.SubjectAltName{{Type: gatewayv1.URISubjectAltNameType, URI: "spiffe://id.example.test/workload%2g"}}
+		}, "subjectAltNames"},
+		{"multiple SAN values in one entry", func(v *gatewayv1.BackendTLSPolicyValidation) {
+			v.SubjectAltNames = []gatewayv1.SubjectAltName{{Type: gatewayv1.HostnameSubjectAltNameType, Hostname: "backend.example.com", URI: "urn:example:backend"}}
+		}, "subjectAltNames"},
+		{"too many SANs", func(v *gatewayv1.BackendTLSPolicyValidation) {
+			v.SubjectAltNames = make([]gatewayv1.SubjectAltName, 6)
+		}, "at most five"},
 		{"wildcard SNI", func(v *gatewayv1.BackendTLSPolicyValidation) { v.Hostname = "*.example.com" }, "precise DNS hostname"},
 		{"IP SNI", func(v *gatewayv1.BackendTLSPolicyValidation) { v.Hostname = "192.0.2.1" }, "precise DNS hostname"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			policy := testPolicy("policy", "")
 			tt.change(&policy.Spec.Validation)
-			result := Evaluate(service, &service.Spec.Ports[0], []gatewayv1.BackendTLSPolicy{policy}, maps)
+			result := Evaluate(service, &service.Spec.Ports[0], []gatewayv1.BackendTLSPolicy{policy}, CAInputs{ConfigMaps: maps})
 			require.NotNil(t, result.Winner)
 			require.Nil(t, result.Winner.Validation)
 			requireCondition(t, result.Winner.Accepted, metav1.ConditionFalse, gatewayv1.PolicyReasonInvalid)
@@ -248,6 +260,29 @@ func TestEvaluateUnsupportedTLSValidation(t *testing.T) {
 			requireCondition(t, result.Winner.ResolvedRefs, metav1.ConditionTrue, gatewayv1.BackendTLSPolicyReasonResolvedRefs)
 		})
 	}
+}
+
+func TestEvaluateBackendTLSSubjectAltNames(t *testing.T) {
+	service := testService()
+	policy := testPolicy("policy", "")
+	policy.Spec.Validation.Hostname = "sni.example.test"
+	policy.Spec.Validation.SubjectAltNames = []gatewayv1.SubjectAltName{
+		{Type: gatewayv1.URISubjectAltNameType, URI: "spiffe://ID.example.test/workload%2fa"},
+		{Type: gatewayv1.HostnameSubjectAltNameType, Hostname: "*.backend.example.test"},
+	}
+	result := Evaluate(service, &service.Spec.Ports[0], []gatewayv1.BackendTLSPolicy{policy}, CAInputs{ConfigMaps: testConfigMaps(testCertificate(t, true))})
+	require.NotNil(t, result.Winner)
+	requireCondition(t, result.Winner.Accepted, metav1.ConditionTrue, gatewayv1.PolicyReasonAccepted)
+	require.NotNil(t, result.Winner.Validation)
+	require.Equal(t, "sni.example.test", result.Winner.Validation.Hostname)
+	require.Equal(t, []cloud.BackendTLSSubjectAltName{
+		{Type: cloud.BackendTLSSANHostname, Hostname: "*.backend.example.test"},
+		{Type: cloud.BackendTLSSANURI, URI: "spiffe://ID.example.test/workload%2fa"},
+	}, result.Winner.Validation.SubjectAltNames)
+
+	clone := result.Clone()
+	clone.Winner.Validation.SubjectAltNames[0].Hostname = "changed.example.test"
+	require.Equal(t, "*.backend.example.test", result.Winner.Validation.SubjectAltNames[0].Hostname)
 }
 
 func requireRejectedCA(t *testing.T, result *PolicyResult, reason gatewayv1.PolicyConditionReason) {

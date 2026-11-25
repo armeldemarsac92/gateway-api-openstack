@@ -80,6 +80,10 @@ type Reconciler struct {
 	BackendTLSAvailable func(context.Context) (bool, error)
 	// GRPCBackendTLSAvailable also checks enforcement of negotiated h2.
 	GRPCBackendTLSAvailable func(context.Context) (bool, error)
+	// BackendTLSSANAvailable checks explicit SANs and the selected transport.
+	BackendTLSSANAvailable func(context.Context, bool) (bool, error)
+	// TCPBackendTLSAvailable checks authenticated TLS for terminating TLSRoutes.
+	TCPBackendTLSAvailable func(context.Context) (bool, error)
 	// Recorder publishes Kubernetes Events.
 	Recorder events.EventRecorder
 	// Config contains immutable controller configuration.
@@ -365,7 +369,7 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 			status := statusForRouteBuildError(err)
 			return r.setRouteStatusesAndDetach(ctx, scope, []parentStatusUpdate{{parent: parent.ref, status: status}})
 		}
-		if errors.Is(err, errHTTPRouteChanged) {
+		if errors.Is(err, errHTTPRouteChanged) || errors.Is(err, backendtls.ErrClusterTrustBundleUnavailable) {
 			return ctrl.Result{}, err
 		}
 		return r.handleRouteProviderFailure(scope, parent.ref, true, graphResult.backendDiagnostic, err, "EnsureHTTPRoute")
@@ -408,11 +412,18 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 			!r.currentBackendResolution(httpRoute, parent.ref, graphResult.backendDiagnostic) {
 			message := controller.ProviderProgressMessage(graphResult.Outcome, "Octavia resources for the HTTPRoute are still progressing")
 			status := pendingRouteStatus(message).withBackendDiagnostic(graphResult.backendDiagnostic).withBackendTLSAncestor(graphResult.backendTLSAncestorSlot)
+			status.partiallyInvalid = graphResult.PartiallyInvalid
+			status.implementedRules = graphResult.ImplementedRules
 			scope.setStatuses([]parentStatusUpdate{{parent: parent.ref, status: status}})
 		}
 		return ctrl.Result{RequeueAfter: controller.ProviderProgressRequeueAfter(graphResult.Outcome, httpRoute.UID)}, nil
 	}
 	status := programmedRouteStatus().withBackendDiagnostic(graphResult.backendDiagnostic).withBackendTLSAncestor(graphResult.backendTLSAncestorSlot)
+	status.partiallyInvalid = graphResult.PartiallyInvalid
+	status.implementedRules = graphResult.ImplementedRules
+	if status.programmed == metav1.ConditionTrue && status.partiallyInvalid != "" {
+		status.programmedMessage = "Octavia configuration for the supported rules is active"
+	}
 	scope.setStatuses([]parentStatusUpdate{{parent: parent.ref, status: status}})
 	log.FromContext(ctx).V(1).Info("Programmed HTTPRoute", "gateway", client.ObjectKeyFromObject(parent.gateway))
 	return ctrl.Result{RequeueAfter: controller.OpenStackResyncAfter(r.Config.OpenStackResyncInterval, httpRoute.UID)}, nil

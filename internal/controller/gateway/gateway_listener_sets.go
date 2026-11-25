@@ -249,7 +249,7 @@ func sharesPlainHTTPPort(listener *gatewayv1.Listener) bool {
 	return err == nil
 }
 
-func (r *Reconciler) reportListenerSets(ctx context.Context, gateway *gatewayv1.Gateway, projection ListenerSetProjection, result cloud.GatewayGraphResult) error {
+func (r *Reconciler) reportListenerSets(ctx context.Context, gateway *gatewayv1.Gateway, projection ListenerSetProjection, result cloud.GatewayGraphResult, affectedPorts ...int) error {
 	var liveGateway gatewayv1.Gateway
 	if err := r.APIReader.Get(ctx, client.ObjectKeyFromObject(gateway), &liveGateway); err != nil {
 		return err
@@ -273,6 +273,11 @@ func (r *Reconciler) reportListenerSets(ctx context.Context, gateway *gatewayv1.
 		return errGatewayChanged
 	}
 	for _, set := range current.sets {
+		if len(affectedPorts) != 0 && !slices.ContainsFunc(set.entries, func(entry listenerSetEntry) bool {
+			return slices.Contains(affectedPorts, int(entry.listener.Port))
+		}) {
+			continue
+		}
 		desired := set.object.DeepCopy()
 		desired.Status.Listeners = nil
 		accepted, programmed := metav1.ConditionFalse, metav1.ConditionFalse
@@ -281,12 +286,19 @@ func (r *Reconciler) reportListenerSets(ctx context.Context, gateway *gatewayv1.
 			acceptedReason, programmedReason = gatewayv1.ListenerSetReasonListenersNotValid, gatewayv1.ListenerSetReasonListenersNotValid
 			ready := true
 			for _, entry := range set.entries {
-				status, err := r.listenerSetEntryStatus(ctx, set.object, entry, result)
+				if entry.rejection == "" && entry.listener.Protocol == gatewayv1.HTTPSProtocolType &&
+					slices.Contains(result.Gateway.FrontendFallbackUnavailablePorts, int(entry.listener.Port)) {
+					entry.rejection = gatewayv1.ListenerReasonUnsupportedValue
+				}
+				status, found, err := r.observedListenerSetEntryStatus(ctx, set.object, entry, result, affectedPorts)
 				if err != nil {
 					return err
 				}
+				if !found {
+					continue
+				}
 				desired.Status.Listeners = append(desired.Status.Listeners, status)
-				if entry.rejection != "" {
+				if !meta.IsStatusConditionTrue(status.Conditions, string(gatewayv1.ListenerEntryConditionAccepted)) {
 					continue
 				}
 				accepted, acceptedReason = metav1.ConditionTrue, gatewayv1.ListenerSetReasonAccepted
@@ -312,6 +324,21 @@ func (r *Reconciler) reportListenerSets(ctx context.Context, gateway *gatewayv1.
 	}
 	gateway.Status.AttachedListenerSets = ptr.To(current.count())
 	return nil
+}
+
+// Preserve existing section status on ports outside a verified withdrawal
+// when the ordinary route graph could not be observed.
+func (r *Reconciler) observedListenerSetEntryStatus(ctx context.Context, set *gatewayv1.ListenerSet, entry listenerSetEntry, result cloud.GatewayGraphResult, affectedPorts []int) (gatewayv1.ListenerEntryStatus, bool, error) {
+	if len(affectedPorts) == 0 || slices.Contains(affectedPorts, int(entry.listener.Port)) {
+		status, err := r.listenerSetEntryStatus(ctx, set, entry, result)
+		return status, true, err
+	}
+	for _, prior := range set.Status.Listeners {
+		if prior.Name == entry.listener.Name {
+			return prior, true, nil
+		}
+	}
+	return gatewayv1.ListenerEntryStatus{}, false, nil
 }
 
 func (r *Reconciler) listenerSetEntryStatus(ctx context.Context, set *gatewayv1.ListenerSet, entry listenerSetEntry, result cloud.GatewayGraphResult) (gatewayv1.ListenerEntryStatus, error) {

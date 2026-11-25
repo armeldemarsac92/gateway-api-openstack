@@ -35,6 +35,9 @@ const (
 	// GraphWithdrawBackendClientCertificate restricts owned HTTP pools carrying
 	// stale client identities without requiring a complete route graph.
 	GraphWithdrawBackendClientCertificate GraphDisposition = "WithdrawBackendClientCertificate"
+	// GraphWithdrawListenerFilters applies confirmed section rejections on
+	// existing HTTP-family frontends without changing any backend resources.
+	GraphWithdrawListenerFilters GraphDisposition = "WithdrawListenerFilters"
 )
 
 // GatewayGraphSpec contains the complete authority and desired graph for one
@@ -56,9 +59,15 @@ type GatewayGraphNode struct {
 	Disposition  GraphDisposition
 	Spec         GatewaySpec
 	TLSSNIRoutes []TLSSNIRoute
+	// SNIPoliciesObserved permits replacement of a protected pool after an
+	// authorized inventory confirms that its hostname no longer needs TLS.
+	SNIPoliciesObserved bool `json:",omitempty"`
 	// TCPTLSCertificateRef is the currently authorized certificate for the raw
 	// TCP termination profile. An empty reference requires the listener closed.
 	TCPTLSCertificateRef string `json:",omitempty"`
+	// RetainSNIAddress keeps the load balancer and its addresses while the
+	// TLS listener is removed for a same-port change between SNI profiles.
+	RetainSNIAddress bool `json:",omitempty"`
 	// TLSWithdrawalPorts restricts a known authorization change to these
 	// physical HTTPS ports. A nil list checks all TLS frontends.
 	TLSWithdrawalPorts []int `json:",omitempty"`
@@ -73,6 +82,14 @@ type GatewayGraphNode struct {
 	ClaimBackendCA func(context.Context) error `json:"-"`
 }
 
+// AddressWithdrawalOnly indicates that there is no remaining address to
+// evaluate. The provider only needs to observe and disable the owned frontend.
+func (node GatewayGraphNode) AddressWithdrawalOnly() bool {
+	loss := node.Spec.ClusterAddressLoss
+	return node.Disposition == GraphEnsure && loss != nil && len(node.Spec.RequestedVIPAddresses) == 0 &&
+		len(loss.RetainedClusterVIPs) == 0 && len(loss.RetainedProviderAddresses) == 0
+}
+
 // BackendClientCertificate is the current Gateway client identity, or a denial
 // when the Gateway requests an identity that cannot be authorized.
 type BackendClientCertificate struct {
@@ -83,13 +100,18 @@ type BackendClientCertificate struct {
 // TLSSNIRoute is one effective hostname and its authorized TCP destinations.
 type TLSSNIRoute struct {
 	// Deny selects an empty pool so the hostname cannot fall through to a broader suffix.
-	Deny                    bool `json:",omitempty"`
-	Identity                Identity
-	Hostname                string
-	ServiceUID              string
+	Deny        bool `json:",omitempty"`
+	Passthrough bool `json:",omitempty"`
+	Identity    Identity
+	Hostname    string
+	ServiceUID  string
+	// ServicePort identifies the Service section independently of the selected
+	// SNI hostname, endpoints and their target port.
+	ServicePort             int `json:",omitempty"`
 	BackendSubnetID         string
 	BackendSecurityGroupIDs []string
 	Members                 []Member
+	BackendTLS              *BackendTLSValidation `json:",omitempty"`
 }
 
 // RouteGraphNode describes one exact route component. Spec.Identity is always

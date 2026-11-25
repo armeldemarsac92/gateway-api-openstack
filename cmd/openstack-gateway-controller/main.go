@@ -26,12 +26,14 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -42,12 +44,15 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	gatewayx "sigs.k8s.io/gateway-api/apisx/v1alpha1"
 	gatewayconsts "sigs.k8s.io/gateway-api/pkg/consts"
+	"sigs.k8s.io/gateway-api/pkg/features"
 
 	configv1alpha1 "github.com/gateway-api-openstack/gateway-api-openstack/api/v1alpha1"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/backendca"
 	openstackobservability "github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/observability"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/ambientmesh"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/certificates"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gateway"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gatewayclass"
@@ -106,19 +111,26 @@ func run(ctx context.Context) error {
 		apiQPS             float64
 		apiBurst           int
 	)
+	var istioAmbientXMesh bool
+	var istioAmbientXMeshName string
 	var httpsListenerIsolation, initialL7Rules, l7PolicyBatchActivation bool
-	var frontendClientValidation bool
+	var frontendClientValidation, clusterTrustBundles bool
 	var httpRequestRedirect bool
 	var httpRequestURLRewrite bool
-	var httpCORS bool
-	var gatewayInfrastructureMetadata bool
+	var httpRequestPolicy bool
+	var httpRequestMirror bool
+	var httpCORS, listenerFilters bool
+	var gatewayInfrastructureMetadata, gatewayAddressRoutabilityCluster bool
 	var httpBackendRequestFilters bool
-	var exactHTTPHeaders, exactHTTPQueryParams, httpMethodMatch, requestHeaderModifier, responseHeaderModifier, backendH2C, tlsSNIPassthrough, tlsSNISuffix, tcpTLSTermination bool
+	var exactHTTPHeaders, exactHTTPQueryParams, httpMethodMatch, requestHeaderModifier, responseHeaderModifier, backendH2C, tlsSNIPassthrough, tlsSNISuffix, tcpTLSTermination, tcpTLSMixedMode bool
 	zapOptions := zap.Options{Development: false}
 	zapOptions.BindFlags(flag.CommandLine)
 	flag.StringVar(&controllerName, "controller-name", envOr("GATEWAY_OPENSTACK_CONTROLLER_NAME", configv1alpha1.GroupName+"/gateway-api-openstack"), "Gateway API controllerName for this installation")
 	flag.StringVar(&gatewayAPIChannel, "gateway-api-channel", envOr("GATEWAY_OPENSTACK_GATEWAY_API_CHANNEL", "standard"), "Gateway API release channel: standard or experimental")
+	flag.BoolVar(&istioAmbientXMesh, "istio-ambient-xmesh", false, "publish an Experimental XMesh for the opt-in Hibiscus Istio ambient integration")
+	flag.StringVar(&istioAmbientXMeshName, "istio-ambient-xmesh-name", ambientmesh.DefaultName, "name of the installation XMesh created when ambient XMesh reporting is enabled")
 	flag.BoolVar(&gatewayInfrastructureMetadata, "gateway-infrastructure-metadata", false, "publish discovered Octavia VIPs through headless Services with Gateway infrastructure metadata")
+	flag.BoolVar(&gatewayAddressRoutabilityCluster, "gateway-address-routability-cluster", false, "serve Cluster Gateway addresses through Kubernetes Service ClusterIPs")
 	flag.BoolVar(&exactHTTPHeaders, "octavia-http-header-exact", false, "use the advertised Octavia exact HTTP header matching capability")
 	flag.BoolVar(&httpRequestRedirect, "octavia-http-request-redirect", false, "use the advertised Octavia capability for request-hostname preservation and redirect path modifiers")
 	flag.BoolVar(&exactHTTPQueryParams, "octavia-http-query-param-exact", false, "use the advertised Octavia exact HTTP query parameter matching capability (requires --octavia-fixed-http-responses)")
@@ -127,14 +139,19 @@ func run(ctx context.Context) error {
 	flag.BoolVar(&weightedTargets, "octavia-weighted-http-targets", false, "use the advertised Octavia weighted HTTP target capability (requires --octavia-fixed-http-responses)")
 	flag.BoolVar(&tlsSNIPassthrough, "octavia-tls-sni-passthrough", false, "use the advertised Octavia TCP SNI passthrough capability for TLSRoutes")
 	flag.BoolVar(&tcpTLSTermination, "octavia-tcp-tls-termination", false, "use the advertised Octavia TCP termination capability for TLSRoutes with operator-enrolled certificates")
+	flag.BoolVar(&tcpTLSMixedMode, "octavia-tcp-tls-mixed-mode", false, "use advertised Octavia mixed termination and passthrough on the same TLS listener port")
 	flag.BoolVar(&tlsSNISuffix, "octavia-tls-sni-suffix", false, "use the advertised Octavia wildcard SNI capability (requires --octavia-tls-sni-passthrough)")
 	flag.BoolVar(&backendTLSPolicy, "octavia-backend-tls-policy", false, "authenticate BackendTLSPolicy upstreams with the regional Octavia hostname capability and a Barbican CA (requires --octavia-microversion=2.8 or newer and regional h2 enforcement for GRPCRoute)")
 	flag.BoolVar(&l7PolicyBatchActivation, "octavia-l7policy-batch-activation", false, "enable prepared HTTP forwarding policies together when the regional Octavia provider advertises support")
-	flag.BoolVar(&frontendClientValidation, "octavia-frontend-client-validation", false, "require a trusted client certificate on configured HTTPS ports (requires --tls-certificate-map and Octavia microversion 2.8 or newer)")
+	flag.BoolVar(&clusterTrustBundles, "gateway-api-cluster-trust-bundle", false, "allow named Kubernetes ClusterTrustBundle references in HTTPS frontend validation and Service BackendTLSPolicy")
+	flag.BoolVar(&frontendClientValidation, "octavia-frontend-client-validation", false, "validate client certificates on configured HTTPS ports (requires --tls-certificate-map and Octavia microversion 2.8 or newer)")
 	flag.BoolVar(&initialL7Rules, "octavia-l7policy-initial-rules", false, "create disabled HTTP(S) policies with their initial rules when the regional Octavia provider advertises support")
 	flag.BoolVar(&httpsListenerIsolation, "octavia-https-listener-isolation", false, "isolate terminated HTTPS sections on a shared port using the regional Octavia capability (requires --tls-certificate-map)")
 	flag.BoolVar(&httpBackendRequestFilters, "octavia-http-backend-request-filters", false, "use the advertised Octavia capability for HTTP backendRef request filters (requires --octavia-weighted-http-targets)")
+	flag.BoolVar(&httpRequestPolicy, "octavia-http-request-policy", false, "use the advertised Octavia L7 HTTP request timeout and retry capability")
+	flag.BoolVar(&httpRequestMirror, "octavia-http-request-mirror", false, "use the advertised Octavia L7 HTTP request mirroring capability")
 	flag.BoolVar(&httpRequestURLRewrite, "octavia-request-url-rewrite", false, "use the advertised Octavia L7 request URL rewrite capability")
+	flag.BoolVar(&listenerFilters, "octavia-listener-request-filters", false, "serve Experimental Gateway listener request filters via the Octavia listener_request_filters_v1 capability")
 	flag.BoolVar(&httpCORS, "octavia-request-cors", false, "serve rule-level HTTPRoute CORS via the Octavia request_cors_v1 capability")
 	flag.BoolVar(&responseHeaderModifier, "octavia-response-header-modifier", false, "use the advertised Octavia L7 response header operations capability")
 	flag.BoolVar(&grpcContentType, "octavia-grpc-content-type", false, "use the advertised Octavia native gRPC Content-Type rule for GRPCRoutes")
@@ -157,6 +174,14 @@ func run(ctx context.Context) error {
 	flag.Float64Var(&apiQPS, "openstack-api-qps", apiQPSDefault, "maximum average OpenStack API requests per second for this process")
 	flag.IntVar(&apiBurst, "openstack-api-burst", apiBurstDefault, "maximum burst of OpenStack API requests for this process")
 	flag.Parse()
+	if istioAmbientXMesh {
+		if gatewayAPIChannel != features.FeatureChannelExperimental {
+			return fmt.Errorf("--istio-ambient-xmesh requires --gateway-api-channel=experimental")
+		}
+		if len(validation.IsDNS1123Subdomain(istioAmbientXMeshName)) != 0 {
+			return fmt.Errorf("--istio-ambient-xmesh-name must be a valid Kubernetes object name")
+		}
+	}
 	if weightedTargets && !fixedHTTPResponses {
 		return fmt.Errorf("--octavia-weighted-http-targets requires --octavia-fixed-http-responses")
 	}
@@ -182,13 +207,17 @@ func run(ctx context.Context) error {
 
 	controllerConfig := controller.Config{
 		GatewayInfrastructureMetadata: gatewayInfrastructureMetadata,
+		ClusterGatewayAddresses:       gatewayAddressRoutabilityCluster,
 		ControllerName:                gatewayv1.GatewayController(controllerName),
 		ControllerVersion:             version,
 		GatewayAPIChannel:             gatewayAPIChannel,
 		HTTPHeaderExact:               exactHTTPHeaders,
 		HTTPQueryParamExact:           exactHTTPQueryParams,
 		HTTPRequestURLRewrite:         httpRequestURLRewrite,
+		HTTPRequestPolicy:             httpRequestPolicy,
+		HTTPRequestMirror:             httpRequestMirror,
 		HTTPCORS:                      httpCORS,
+		GatewayListenerFilters:        listenerFilters,
 		BackendRequestFilters:         httpBackendRequestFilters,
 		HTTPRequestRedirect:           httpRequestRedirect,
 		HTTPMethodMatch:               httpMethodMatch,
@@ -203,6 +232,7 @@ func run(ctx context.Context) error {
 		TLSSNIPassthrough:             tlsSNIPassthrough,
 		TLSSNISuffix:                  tlsSNISuffix,
 		TCPTLSTermination:             tcpTLSTermination,
+		TCPTLSMixedMode:               tcpTLSMixedMode,
 		ClusterID:                     clusterID,
 		OpenStackResyncInterval:       resyncInterval,
 
@@ -213,18 +243,10 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("invalid controller configuration: %w", err)
 	}
 
-	scheme := runtime.NewScheme()
-	utilruntime.Must(corev1.AddToScheme(scheme))
-	utilruntime.Must(discoveryv1.AddToScheme(scheme))
-	utilruntime.Must(apiextensionsv1.AddToScheme(scheme))
-	utilruntime.Must(gatewayv1.Install(scheme))
-	utilruntime.Must(configv1alpha1.AddToScheme(scheme))
-	if controllerConfig.XBackendEnabled() {
-		utilruntime.Must(gatewayx.Install(scheme))
-	}
+	scheme := newControllerScheme(controllerConfig, istioAmbientXMesh)
 
 	restConfig := ctrl.GetConfigOrDie()
-	if err := requireGatewayAPIs(restConfig, controllerConfig); err != nil {
+	if err := requireGatewayAPIs(restConfig, controllerConfig, istioAmbientXMesh); err != nil {
 		return err
 	}
 	manager, err := ctrl.NewManager(restConfig, ctrl.Options{
@@ -237,6 +259,16 @@ func run(ctx context.Context) error {
 	})
 	if err != nil {
 		return fmt.Errorf("create controller manager: %w", err)
+	}
+	if clusterTrustBundles && (frontendClientValidation || backendTLSPolicy) {
+		bundles, err := backendtls.NewClusterTrustBundles(restConfig, manager.GetHTTPClient())
+		if err != nil {
+			return fmt.Errorf("create ClusterTrustBundle clients: %w", err)
+		}
+		if err := manager.Add(bundles); err != nil {
+			return fmt.Errorf("register ClusterTrustBundle observer: %w", err)
+		}
+		controllerConfig.ClusterTrustBundles = bundles
 	}
 	if err := configureOpenStackRequestMetrics(&openStackClientConfig, controllermetrics.Registry); err != nil {
 		return err
@@ -252,6 +284,8 @@ func run(ctx context.Context) error {
 		HTTPHeaderExact:        exactHTTPHeaders,
 		HTTPQueryParamExact:    exactHTTPQueryParams,
 		HTTPRequestURLRewrite:  httpRequestURLRewrite,
+		HTTPRequestPolicy:      httpRequestPolicy,
+		HTTPRequestMirror:      httpRequestMirror,
 		HTTPCORS:               httpCORS,
 		BackendRequestFilters:  httpBackendRequestFilters,
 		HTTPRequestRedirect:    httpRequestRedirect,
@@ -265,6 +299,7 @@ func run(ctx context.Context) error {
 		TLSSNIPassthrough:      tlsSNIPassthrough,
 		TLSSNISuffix:           tlsSNISuffix,
 		TCPTLSTermination:      tcpTLSTermination,
+		TCPTLSMixedMode:        tcpTLSMixedMode,
 		OperationTimeout:       operationTimeout,
 		PollInterval:           pollInterval,
 
@@ -314,7 +349,9 @@ func run(ctx context.Context) error {
 	routeReconciler := &httproute.Reconciler{
 		ListenerSetObserver:     gatewayReconciler.ObserveListenerSets,
 		BackendTLSAvailable:     openStackProvider.BackendTLSAvailable,
+		TCPBackendTLSAvailable:  openStackProvider.TCPBackendTLSAvailable,
 		GRPCBackendTLSAvailable: openStackProvider.GRPCBackendTLSAvailable,
+		BackendTLSSANAvailable:  openStackProvider.BackendTLSSANAvailable,
 		Client:                  manager.GetClient(),
 		Coordinator:             graphCoordinator,
 		APIReader:               manager.GetAPIReader(),
@@ -353,6 +390,12 @@ func run(ctx context.Context) error {
 	if err := udpReconciler.SetupWithManager(manager); err != nil {
 		return fmt.Errorf("set up UDPRoute controller: %w", err)
 	}
+	if istioAmbientXMesh {
+		instance := ambientmesh.Instance(version, os.Getenv("GATEWAY_OPENSTACK_POD_NAMESPACE"))
+		if err := ambientmesh.SetupWithManager(ctx, manager, istioAmbientXMeshName, instance); err != nil {
+			return fmt.Errorf("set up Istio ambient XMesh controller: %w", err)
+		}
+	}
 	if err := manager.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		return fmt.Errorf("add health check: %w", err)
 	}
@@ -383,7 +426,23 @@ func configureOpenStackRequestMetrics(config *openstack.ClientConfig, registerer
 	return nil
 }
 
-func requireGatewayAPIs(restConfig *rest.Config, cfg controller.Config) error {
+func newControllerScheme(cfg controller.Config, istioAmbientXMesh bool) *runtime.Scheme {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(corev1.AddToScheme(scheme))
+	utilruntime.Must(discoveryv1.AddToScheme(scheme))
+	utilruntime.Must(apiextensionsv1.AddToScheme(scheme))
+	utilruntime.Must(gatewayv1.Install(scheme))
+	utilruntime.Must(configv1alpha1.AddToScheme(scheme))
+	if cfg.XBackendEnabled() {
+		utilruntime.Must(gatewayx.Install(scheme))
+	}
+	if istioAmbientXMesh {
+		utilruntime.Must(appsv1.AddToScheme(scheme))
+	}
+	return scheme
+}
+
+func requireGatewayAPIs(restConfig *rest.Config, cfg controller.Config, istioAmbientXMesh bool) error {
 	discoveryClient, err := discovery.NewDiscoveryClientForConfig(restConfig)
 	if err != nil {
 		return fmt.Errorf("create Kubernetes discovery client: %w", err)
@@ -397,7 +456,7 @@ func requireGatewayAPIs(restConfig *rest.Config, cfg controller.Config) error {
 		availableResources = append(availableResources, resource.Name)
 	}
 	requiredResources := []string{"gatewayclasses", "gateways", "httproutes", "tcproutes", "udproutes", "referencegrants"}
-	if cfg.BackendTLSPolicy {
+	if cfg.BackendTLSPolicy || cfg.TLSRoutesEnabled() {
 		requiredResources = append(requiredResources, "backendtlspolicies")
 	}
 	if cfg.TLSRoutesEnabled() {
@@ -408,13 +467,22 @@ func requireGatewayAPIs(restConfig *rest.Config, cfg controller.Config) error {
 			return fmt.Errorf("required Gateway API resource %s is missing from %s; install the selected Gateway API %s bundle", required, gatewayv1.GroupVersion, gatewayconsts.BundleVersion)
 		}
 	}
+	var experimentalResources []string
 	if cfg.XBackendEnabled() {
+		experimentalResources = append(experimentalResources, "xbackends")
+	}
+	if istioAmbientXMesh {
+		experimentalResources = append(experimentalResources, "xmeshes")
+	}
+	if len(experimentalResources) != 0 {
 		resources, err := discoveryClient.ServerResourcesForGroupVersion(gatewayx.GroupVersion.String())
 		if err != nil {
-			return fmt.Errorf("required Experimental XBackend API is unavailable; install the Gateway API %s Experimental bundle: %w", gatewayconsts.BundleVersion, err)
+			return fmt.Errorf("required Gateway API Experimental APIs are unavailable; install the Gateway API %s Experimental bundle: %w", gatewayconsts.BundleVersion, err)
 		}
-		if !slices.ContainsFunc(resources.APIResources, func(resource metav1.APIResource) bool { return resource.Name == "xbackends" }) {
-			return fmt.Errorf("required Experimental API resource xbackends is missing from %s; install the Gateway API %s Experimental bundle", gatewayx.GroupVersion, gatewayconsts.BundleVersion)
+		for _, required := range experimentalResources {
+			if !slices.ContainsFunc(resources.APIResources, func(resource metav1.APIResource) bool { return resource.Name == required }) {
+				return fmt.Errorf("required Experimental API resource %s is missing from %s; install the Gateway API %s Experimental bundle", required, gatewayx.GroupVersion, gatewayconsts.BundleVersion)
+			}
 		}
 	}
 	return nil

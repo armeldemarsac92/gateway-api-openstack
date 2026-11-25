@@ -32,6 +32,7 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud/openstack/octavia"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
@@ -74,7 +75,7 @@ func (r *Reconciler) setGatewayFailure(gateway *gatewayv1.Gateway, validationErr
 	gateway.Status.Listeners = make([]gatewayv1.ListenerStatus, 0, len(gateway.Spec.Listeners))
 	for _, listener := range gateway.Spec.Listeners {
 		status := r.unprogrammedListenerStatus(listener, existingListeners, gateway.Generation, unsupportedMultipleL4, listenerSpecific, message)
-		if r.Config.TCPTLSTermination && mixedTLSModes(gateway.Spec.Listeners, listener) {
+		if r.Config.TCPTLSTermination && !r.Config.TCPTLSMixedMode && mixedTLSModes(gateway.Spec.Listeners, listener) {
 			status.SupportedKinds = nil
 			message := "Terminate and Passthrough require separate TLS listener ports"
 			controller.SetCondition(&status.Conditions, controller.Condition(string(gatewayv1.ListenerConditionAccepted), metav1.ConditionFalse, string(gatewayv1.ListenerReasonProtocolConflict), message, gateway.Generation))
@@ -279,6 +280,19 @@ func (r *Reconciler) handleGatewayProviderFailure(
 	); err != nil {
 		return ctrl.Result{}, errors.Join(controller.SafeProviderReconcileError(policy, providerErr), err)
 	}
+	var missing *octavia.MissingGatewayCapability
+	if errors.As(providerErr, &missing) && missing.Capability == octavia.GatewayCapabilityTCPTLSMixedMode {
+		const message = "Octavia does not advertise same-port mixed TLS in this region"
+		controller.SetCondition(&gateway.Status.Conditions, controller.Condition(string(gatewayv1.GatewayConditionAccepted), metav1.ConditionFalse,
+			string(gatewayv1.GatewayReasonListenersNotValid), message, gateway.Generation))
+		for i := range gateway.Status.Listeners {
+			conditions := &gateway.Status.Listeners[i].Conditions
+			controller.SetCondition(conditions, controller.Condition(string(gatewayv1.ListenerConditionAccepted), metav1.ConditionFalse,
+				string(gatewayv1.ListenerReasonProtocolConflict), message, gateway.Generation))
+			controller.SetCondition(conditions, controller.Condition(string(gatewayv1.ListenerConditionConflicted), metav1.ConditionTrue,
+				string(gatewayv1.ListenerReasonProtocolConflict), message, gateway.Generation))
+		}
+	}
 	if !r.Config.GatewayAddressRoutabilityEnabled() {
 		if observation.AddressAbsent {
 			gateway.Status.Addresses = nil
@@ -427,19 +441,20 @@ func (r *Reconciler) setGatewayAddressUnusable(
 	listener *gatewayv1.Listener,
 	result cloud.GatewayResult,
 	progress cloud.Outcome,
+	cluster clusterAddressAssignments,
 ) error {
 	readyPorts := result.ScopedListenerReadyPorts
 	if controller.GatewayListenerScope(r.Config, gateway) == "" && progress.State == cloud.OutcomeReady {
 		readyPorts = []int{int(listener.Port)}
 	}
 	if r.Config.GatewayAddressRoutabilityEnabled() {
-		retained := r.observeAddressAssignment(gateway, result)
+		serving := r.observeAddressAssignment(gateway, result, cluster) || len(cluster.addresses) != 0
 		if !r.usesLegacyAddressAdmission(gateway) {
-			if retained && progress.State == cloud.OutcomeReady {
+			if serving && progress.State == cloud.OutcomeReady {
 				return r.setGatewayProgrammed(ctx, gateway, listener, "")
 			}
 			reason := gatewayv1.GatewayReasonAddressNotAssigned
-			if retained {
+			if serving {
 				reason = gatewayv1.GatewayReasonNoResources
 			}
 			return r.setGatewayListenerStatuses(ctx, gateway, listener, metav1.ConditionFalse, reason,
@@ -625,7 +640,8 @@ func (r *Reconciler) attachedRoutes(ctx context.Context, gateway *gatewayv1.Gate
 					continue
 				}
 			}
-			if r.Config.BackendTLSPolicy && httpKind != "" && len(matching) != 0 {
+			if r.Config.BackendTLSPolicy && len(matching) != 0 &&
+				(httpKind != "" || slices.ContainsFunc(matching, terminatesTLS)) {
 				programmed := meta.FindStatusCondition(parentStatus.Conditions, r.Config.Domain()+"/Programmed")
 				attached.backendTLSAncestorFull = attached.backendTLSAncestorFull || programmed != nil &&
 					programmed.ObservedGeneration == route.GetGeneration() && programmed.Status == metav1.ConditionFalse &&
@@ -765,7 +781,23 @@ func (r *Reconciler) applyHTTPSListenerStatus(
 	preserveTransitionTimes(gateway.Status.Conditions, previous.Conditions)
 }
 
-// A rejected CA is a Kubernetes authorization result. Separately report
+func setFrontendFallbackStatus(gateway *gatewayv1.Gateway) {
+	insecureMode := func(config gatewayv1.TLSConfig) bool {
+		return config.Validation != nil && config.Validation.Mode == gatewayv1.AllowInsecureFallback
+	}
+	conditionType := string(gatewayv1.GatewayConditionInsecureFrontendValidationMode)
+	if tls := gateway.Spec.TLS; tls != nil && tls.Frontend != nil &&
+		(insecureMode(tls.Frontend.Default) || slices.ContainsFunc(tls.Frontend.PerPort, func(port gatewayv1.TLSPortConfig) bool {
+			return insecureMode(port.TLS)
+		})) {
+		controller.SetCondition(&gateway.Status.Conditions, controller.Condition(conditionType, metav1.ConditionTrue,
+			string(gatewayv1.GatewayReasonConfigurationChanged), "The Gateway is configured to allow HTTPS connections without a valid client certificate", gateway.Generation))
+		return
+	}
+	meta.RemoveStatusCondition(&gateway.Status.Conditions, conditionType)
+}
+
+// A rejected CA or unsupported mode is a configuration result. Separately report
 // whether Octavia has confirmed the affected listener is closed.
 func (r *Reconciler) reportFrontendCAWithdrawal(gateway *gatewayv1.Gateway, issues map[gatewayv1.SectionName]httpsListenerStatusIssue, closedPorts []int) {
 	for i := range gateway.Status.Listeners {

@@ -18,7 +18,7 @@ kubectl kustomize integrations/magnum-capi-helm/workload-tls-sni-passthrough \
 sha256sum gateway-controller.yaml
 ```
 
-Both overlays add `--octavia-tls-sni-passthrough`. The base manifests leave the flag off. Both bases and overlays grant the controller `get`, `list` and `watch` on TLSRoute and `get`, `update` and `patch` on its status subresource. Wait for the matching controller rollout and verify its arguments before admitting TLS Gateways.
+Both overlays add `--octavia-tls-sni-passthrough`. The base manifests leave the flag off. Both bases and overlays grant the controller `get`, `list` and `watch` on TLSRoute and `get`, `update` and `patch` on its status subresource. The overlays also grant read access to BackendTLSPolicy so the controller can reject a Service port that requires backend TLS origination. Wait for the matching controller rollout and verify its arguments before admitting TLS Gateways.
 
 ## Route two names on one port
 

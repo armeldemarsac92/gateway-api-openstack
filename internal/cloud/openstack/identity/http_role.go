@@ -373,3 +373,10 @@ const BackendRequestFiltersPolicyTag = "gw-api-backend-request-filters"
 
 // RequestCORSPolicyTag identifies policies using CORS across Octavia downgrades.
 const RequestCORSPolicyTag = "gw-api-request-cors"
+
+// HTTPRequestPolicyTag records the forwarding extension even when a downlevel
+// Octavia endpoint omits its field from policy readback.
+const HTTPRequestPolicyTag = "gw-api-http-request-policy"
+
+// HTTPRequestMirrorTag identifies policies requiring mirror readback.
+const HTTPRequestMirrorTag = "gw-api-http-request-mirror"

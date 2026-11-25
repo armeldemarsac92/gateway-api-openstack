@@ -17,6 +17,7 @@ limitations under the License.
 package graph
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -164,6 +165,73 @@ func TestGatewayEditedPrivateVIPPreservesActiveGraph(t *testing.T) {
 	}
 	if writes := requests.mutationPaths(); len(writes) != 0 {
 		t.Fatalf("editing and restoring the fixed address mutated the existing graph: %v", writes)
+	}
+}
+
+func TestGatewayWithdrawsUnassignedClusterFrontendAndRestoresItAfterAdmission(t *testing.T) {
+	identity := safetyTestIdentity(t)
+	requests := &gatewayTransitionRequests{}
+	const path = "/lbaas/loadbalancers/load-balancer-1"
+	base := convergedRouteGraphHandler(t, requests, identity, true, true)
+	adminUp := true
+	handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path != path {
+			base.ServeHTTP(w, req)
+			return
+		}
+		requests.record(req)
+		if req.Method == http.MethodPut {
+			var body struct {
+				LoadBalancer loadbalancers.UpdateOpts `json:"loadbalancer"`
+			}
+			if err := json.NewDecoder(req.Body).Decode(&body); err != nil || body.LoadBalancer.AdminStateUp == nil {
+				t.Fatalf("decode Octavia update: %+v, %v", body, err)
+			}
+			adminUp = *body.LoadBalancer.AdminStateUp
+		} else if req.Method != http.MethodGet {
+			t.Fatalf("unexpected Octavia request %s %s", req.Method, req.URL)
+		}
+		lb := gatewayTransitionLoadBalancer(safetyGatewayTags(t, identity, roleLoadBalancer), "ACTIVE")
+		lb["admin_state_up"] = adminUp
+		safetyWriteJSON(t, w, map[string]any{"loadbalancer": lb})
+	})
+	provider := completeGraphProvider(t, handler, requests)
+	spec := completeGraphSpec(identity)
+	spec.Gateway.Spec.ClusterAddressLoss = &cloud.ClusterAddressLoss{}
+	spec.Gateway.Spec.RequestedVIPAddresses = []string{"192.0.2.10"}
+	result, err := provider.ReconcileGatewayGraph(t.Context(), spec)
+	if err != nil || !adminUp || result.Gateway.Outcome.State != cloud.OutcomeReady || result.Gateway.AddressIssue != "" {
+		t.Fatalf("existing fixed address = %+v, %v, admin_state_up=%t", result, err, adminUp)
+	}
+	spec.Gateway.Spec.RequestedVIPAddresses = []string{}
+	spec.Gateway.Spec.ClusterAddressLoss.RetainedClusterVIPs = []string{"192.0.2.10"}
+	result, err = provider.ReconcileGatewayGraph(t.Context(), spec)
+	if err != nil || !adminUp || result.Gateway.Outcome.State != cloud.OutcomeReady || !result.Gateway.AddressActive {
+		t.Fatalf("retained ClusterIP = %+v, %v, admin_state_up=%t", result, err, adminUp)
+	}
+	spec.Gateway.Spec.ClusterAddressLoss.RetainedClusterVIPs = nil
+	fenceErr := errors.New("Gateway changed before the update")
+	spec.ValidateMutation = func(context.Context) error { return fenceErr }
+	if _, err := provider.ReconcileGatewayGraph(t.Context(), spec); !errors.Is(err, fenceErr) || !adminUp {
+		t.Fatalf("reconcile with a stale fence = %v, admin_state_up=%t", err, adminUp)
+	}
+	spec.ValidateMutation = nil
+	result, err = provider.ReconcileGatewayGraph(t.Context(), spec)
+	if err != nil || adminUp || !result.Outcome.MutationSubmitted || result.Gateway.AddressBlocked || result.Gateway.AddressIssue == "" {
+		t.Fatalf("withdrawal = %+v, %v, admin_state_up=%t", result, err, adminUp)
+	}
+	result, err = provider.ReconcileGatewayGraph(t.Context(), spec)
+	if err != nil || adminUp || !result.Gateway.AddressBlocked || !result.Gateway.AddressActivityObserved {
+		t.Fatalf("withdrawal readback = %+v, %v, admin_state_up=%t", result, err, adminUp)
+	}
+	spec.Gateway.Spec.RequestedVIPAddresses = []string{""}
+	spec.Gateway.Spec.ClusterAddressLoss = nil
+	result, err = provider.ReconcileGatewayGraph(t.Context(), spec)
+	if err != nil || !adminUp {
+		t.Fatalf("restoration after admission = %+v, %v, admin_state_up=%t", result, err, adminUp)
+	}
+	if writes := requests.mutationPaths(); !reflect.DeepEqual(writes, []string{path, path}) {
+		t.Fatalf("mutations = %v, want one disable and one enable of the same load balancer", writes)
 	}
 }
 

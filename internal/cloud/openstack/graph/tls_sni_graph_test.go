@@ -261,7 +261,7 @@ func TestSNISuffixStagesReplacementBeforeRetiringProtectedSelector(t *testing.T)
 	oldNarrow.policy.Position = 2
 	if got := next(); got.kind != graphSNIMutation || got.sni.kind != sniClearMembers || !got.sniWithdrawal {
 		t.Fatalf("must withdraw the revoked members before allocation: %#v", got)
-	} else if err := provider.executeSNIMutation(t.Context(), actual, got.sni); err != nil {
+	} else if err := provider.executeSNIMutation(t.Context(), desired, actual, got.sni); err != nil {
 		t.Fatal(err)
 	}
 	oldNarrow.members = nil
@@ -269,7 +269,7 @@ func TestSNISuffixStagesReplacementBeforeRetiringProtectedSelector(t *testing.T)
 	if quota.sni.kind != sniCreatePool {
 		t.Fatalf("expected to stage a replacement for the now-empty selector: %#v", quota)
 	}
-	if err := provider.executeSNIMutation(t.Context(), actual, quota.sni); err == nil {
+	if err := provider.executeSNIMutation(t.Context(), desired, actual, quota.sni); err == nil {
 		t.Fatal("the fake Octavia project must reject the new pool")
 	}
 	if oldNarrow.forwardingHostname() != narrow.Hostname || len(oldNarrow.members) != 0 {
@@ -376,7 +376,7 @@ func TestSNISuffixWithdrawsFormerOwnerBeforeStagingSuccessor(t *testing.T) {
 	if quota.kind != graphSNIMutation || quota.sni.kind != sniCreatePool || quota.sni.target.key != successorTarget.key {
 		t.Fatalf("allocate the successor after observing the withdrawal: %#v", quota)
 	}
-	if err := provider.executeSNIMutation(t.Context(), actual, quota.sni); err == nil {
+	if err := provider.executeSNIMutation(t.Context(), desired, actual, quota.sni); err == nil {
 		t.Fatal("expected Octavia to reject the pool allocation")
 	}
 	if retry := next(cloud.OutcomeProgressing); retry.sni.kind != sniCreatePool || retry.sni.target.key != successorTarget.key ||
@@ -913,19 +913,32 @@ func TestSNIPendingLoadBalancerWithoutFragmentReadbackCannotDefer(t *testing.T) 
 }
 
 func TestTCPTLSTerminationPublicFrontendLifecycle(t *testing.T) {
+	t.Run("termination", func(t *testing.T) {
+		testTCPTLSFrontendLifecycle(t, cloud.ListenerProtocolTLSTerminate, "tcp_tls_termination_v1")
+	})
+	t.Run("mixed", func(t *testing.T) {
+		testTCPTLSFrontendLifecycle(t, cloud.ListenerProtocolTLSMixed, "tcp_tls_mixed_mode_v1")
+	})
+}
+
+func testTCPTLSFrontendLifecycle(t *testing.T, protocol, requiredCapability string) {
 	identity := safetyTestIdentity(t)
 	spec := completeGraphSpec(identity)
 	spec.Routes = nil
-	spec.Gateway.Spec.ListenerProtocol = cloud.ListenerProtocolTLSTerminate
+	spec.Gateway.Spec.ListenerProtocol = protocol
+	mixed := protocol == cloud.ListenerProtocolTLSMixed
+	profileTag := sniListenerProfileTag(protocol)
 	const first, replacement = "https://barbican.example/v1/secrets/first", "https://barbican.example/v1/secrets/replacement"
 	spec.Gateway.TCPTLSCertificateRef = first
 	ids := func(id string) []map[string]string { return []map[string]string{{"id": id}} }
 	lb := map[string]any{"id": "lb", "project_id": "project-a", "provider": "amphora",
 		"provisioning_status": "ACTIVE", "admin_state_up": true, "listeners": []any{}, "pools": []any{},
 		"vip_subnet_id": spec.Gateway.Spec.VIPSubnetID, "vip_port_id": "vip-port", "vip_address": "192.0.2.10",
-		"tags": append(safetyGatewayTags(t, identity, roleLoadBalancer), tcpTLSProfileTag)}
+		"tags": append(safetyGatewayTags(t, identity, roleLoadBalancer), profileTag)}
 	var listener map[string]any
+	poolRows, policyRows, ruleRows := []any{}, []any{}, []any{}
 	capability, addressFailure := false, false
+	replacementProfile := ""
 	var writes []string
 	clients := ServiceClients{
 		ProjectID: "project-a",
@@ -937,7 +950,15 @@ func TestTCPTLSTerminationPublicFrontendLifecycle(t *testing.T) {
 				w.WriteHeader(http.StatusServiceUnavailable)
 				return
 			}
-			safetyWriteJSON(t, w, map[string]any{"floatingips": []any{}})
+			items := []any{}
+			if replacementProfile != "" {
+				items = append(items, map[string]any{
+					"id": "fip", "project_id": "project-a", "description": identity.GatewayDescription(roleFloatingIP),
+					"port_id": "vip-port", "fixed_ip_address": "192.0.2.10", "floating_ip_address": "203.0.113.10",
+					"floating_network_id": spec.Gateway.Spec.ExternalNetworkID,
+				})
+			}
+			safetyWriteJSON(t, w, map[string]any{"floatingips": items})
 		})),
 		LoadBalancer: safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.Method + " " + r.URL.Path {
@@ -948,7 +969,10 @@ func TestTCPTLSTerminationPublicFrontendLifecycle(t *testing.T) {
 			case "GET /lbaas/providers/amphora/gateway_capabilities":
 				capabilities := []string{"tls_sni_passthrough_v1", "tls_sni_suffix_v1"}
 				if capability {
-					capabilities = append(capabilities, "tcp_tls_termination_v1")
+					capabilities = append(capabilities, requiredCapability)
+					if replacementProfile != "" && mixed {
+						capabilities = append(capabilities, "tcp_tls_termination_v1")
+					}
 				}
 				safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": capabilities})
 			case "GET /lbaas/listeners":
@@ -958,9 +982,13 @@ func TestTCPTLSTerminationPublicFrontendLifecycle(t *testing.T) {
 				}
 				safetyWriteJSON(t, w, map[string]any{"listeners": items})
 			case "GET /lbaas/pools":
-				safetyWriteJSON(t, w, map[string]any{"pools": []any{}})
+				safetyWriteJSON(t, w, map[string]any{"pools": poolRows})
 			case "GET /lbaas/l7policies":
-				safetyWriteJSON(t, w, map[string]any{"l7policies": []any{}})
+				safetyWriteJSON(t, w, map[string]any{"l7policies": policyRows})
+			case "GET /lbaas/l7policies/policy/rules":
+				safetyWriteJSON(t, w, map[string]any{"rules": ruleRows})
+			case "GET /lbaas/pools/pool/members":
+				safetyWriteJSON(t, w, map[string]any{"members": []any{}})
 			case "POST /lbaas/pools":
 				var body struct {
 					Pool map[string]any `json:"pool"`
@@ -972,7 +1000,14 @@ func TestTCPTLSTerminationPublicFrontendLifecycle(t *testing.T) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusCreated)
 				safetyWriteJSON(t, w, map[string]any{"pool": map[string]any{"id": "pool"}})
-			case "POST /lbaas/listeners", "PUT /lbaas/listeners/listener":
+			case "DELETE /lbaas/listeners/listener", "DELETE /lbaas/listeners/replacement-listener":
+				if replacementProfile == "" || listener["admin_state_up"] != false {
+					t.Fatal("old TLS listener must be closed before replacement")
+				}
+				listener, lb["listeners"] = nil, []any{}
+				writes = append(writes, "delete-listener")
+				w.WriteHeader(http.StatusNoContent)
+			case "POST /lbaas/listeners", "PUT /lbaas/listeners/listener", "PUT /lbaas/listeners/replacement-listener":
 				var body struct {
 					Listener map[string]any `json:"listener"`
 				}
@@ -981,20 +1016,37 @@ func TestTCPTLSTerminationPublicFrontendLifecycle(t *testing.T) {
 				}
 				change := body.Listener
 				if r.Method == http.MethodPost {
-					if change["tcp_tls_termination"] != true || change["protocol"] != "TCP" ||
-						change["admin_state_up"] != false || change["default_tls_container_ref"] != first || change["default_pool_id"] != nil {
-						t.Errorf("unexpected TCP TLS listener create: %#v", change)
+					profile := protocol
+					if replacementProfile != "" {
+						profile = replacementProfile
+					}
+					var wantTermination, wantMixed, wantCertificate any
+					if cloud.IsTCPTLSListenerProtocol(profile) {
+						wantTermination, wantCertificate = true, first
+					}
+					if profile == cloud.ListenerProtocolTLSMixed {
+						wantMixed = true
+					}
+					if change["tcp_tls_termination"] != wantTermination || change["tcp_tls_mixed_mode"] != wantMixed ||
+						change["default_tls_container_ref"] != wantCertificate || change["admin_state_up"] != false ||
+						change["protocol"] != "TCP" || change["loadbalancer_id"] != "lb" || change["default_pool_id"] != nil {
+						t.Errorf("unexpected %s listener create: %#v", profile, change)
 					}
 					listener = change
 					listener["id"], listener["project_id"], listener["provisioning_status"] = "listener", "project-a", "ACTIVE"
 					listener["loadbalancers"], listener["l7policies"], listener["default_pool_id"] = ids("lb"), []any{}, nil
+					if replacementProfile != "" {
+						listener["id"] = "replacement-listener"
+					}
 					listener["sni_container_refs"] = []string{}
-					lb["listeners"] = ids("listener")
+					lb["listeners"] = ids(listener["id"].(string))
 					writes = append(writes, "create")
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusCreated)
 				} else {
-					if len(change) != 1 {
+					rotation := change["default_tls_container_ref"] != nil
+					updatesCertificateSet := mixed && rotation && len(change) == 2 && change["sni_container_refs"] != nil
+					if len(change) != 1 && !updatesCertificateSet {
 						t.Errorf("unexpected TCP TLS listener mutation: %#v", change)
 					}
 					switch {
@@ -1018,7 +1070,7 @@ func TestTCPTLSTerminationPublicFrontendLifecycle(t *testing.T) {
 			}
 		})),
 	}
-	provider := newTestProvider(t, clients, ProviderConfig{TCPTLSTermination: true})
+	provider := newTestProvider(t, clients, ProviderConfig{TCPTLSTermination: true, TCPTLSMixedMode: mixed})
 	check := func(p *Provider, spec cloud.GatewayGraphSpec, want cloud.OutcomeState, mutation string, wantErr error) {
 		t.Helper()
 		writes = nil
@@ -1047,6 +1099,35 @@ func TestTCPTLSTerminationPublicFrontendLifecycle(t *testing.T) {
 		Members: []cloud.Member{{Address: "192.0.2.101", Port: 3000}},
 	}}
 	check(provider, routed, cloud.OutcomeProgressing, "pool", nil)
+	if mixed {
+		targets, err := buildSNITargets(identity.Value(), routed.Gateway.TLSSNIRoutes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		poolTags, _ := targets[0].tags(roleSNIPool)
+		policyTags, _ := targets[0].tags(roleSNIPolicy)
+		poolRows = []any{map[string]any{"id": "pool", "project_id": "project-a", "protocol": "TCP", "admin_state_up": true,
+			"provisioning_status": "ACTIVE", "loadbalancers": ids("lb"), "listeners": []any{}, "members": []any{},
+			"healthmonitor_id": nil, "tls_enabled": false, "tags": poolTags}}
+		policyRows = []any{map[string]any{"id": "policy", "project_id": "project-a", "listener_id": "listener",
+			"redirect_pool_id": "pool", "action": "REDIRECT_TO_POOL", "admin_state_up": true,
+			"provisioning_status": "ACTIVE", "rules": []any{}, "tags": policyTags}}
+		lb["pools"], listener["l7policies"] = ids("pool"), ids("policy")
+		// A missing policy mode never authorizes forwarding. Close only
+		// the owned mixed frontend and wait for coherent policy readback.
+		check(provider, routed, cloud.OutcomeProgressing, "disable", nil)
+		check(provider, routed, cloud.OutcomeProgressing, "", nil)
+		ruleTags, _ := targets[0].tags(roleSNIRule)
+		ruleRows = []any{map[string]any{"id": "rule", "project_id": "project-a", "type": "TLS_SNI",
+			"compare_type": "EQUAL_TO", "value": "tls.example.com", "admin_state_up": true, "invert": false,
+			"provisioning_status": "ACTIVE", "tags": ruleTags}}
+		policy := policyRows[0].(map[string]any)
+		policy["rules"], policy["tcp_tls_passthrough"] = ids("rule"), false
+		poolRows[0].(map[string]any)["listeners"] = ids("listener")
+		lb["pools"], listener["l7policies"] = []any{}, []any{}
+		poolRows, policyRows = []any{}, []any{}
+		check(provider, spec, "", "enable", nil)
+	}
 
 	// The whole frontend closes before certificate rotation, even during an
 	// unrelated Neutron failure. It cannot reopen before coherent readback.
@@ -1066,6 +1147,13 @@ func TestTCPTLSTerminationPublicFrontendLifecycle(t *testing.T) {
 	check(provider, spec, "", "", nil)
 	listener["tcp_tls_termination"] = true
 	check(provider, spec, "", "enable", nil)
+	if mixed {
+		delete(listener, "tcp_tls_mixed_mode")
+		check(provider, spec, "", "disable", nil)
+		check(provider, spec, "", "", nil)
+		listener["tcp_tls_mixed_mode"] = true
+		check(provider, spec, "", "enable", nil)
+	}
 	delete(listener, "sni_container_refs")
 	check(provider, spec, "", "disable", nil)
 	listener["sni_container_refs"] = []string{}
@@ -1086,7 +1174,7 @@ func TestTCPTLSTerminationPublicFrontendLifecycle(t *testing.T) {
 		t.Fatalf("identity-only read accepted a different listener profile: found=%t err=%v", found, err)
 	}
 	check(optedOut, spec, "", "", cloud.ErrOwnershipConflict)
-	listener["tags"] = append(safetyGatewayTags(t, identity, roleListener), tcpTLSProfileTag)
+	listener["tags"] = append(safetyGatewayTags(t, identity, roleListener), profileTag)
 	check(optedOut, spec, "", "disable", nil)
 	listener["provisioning_status"] = "ERROR"
 	check(optedOut, spec, cloud.OutcomeProgressing, "disable", nil)
@@ -1094,4 +1182,206 @@ func TestTCPTLSTerminationPublicFrontendLifecycle(t *testing.T) {
 	check(optedOut, spec, cloud.OutcomeProgressing, "", nil)
 	listener["provisioning_status"] = "ACTIVE"
 	check(optedOut, spec, cloud.OutcomeReady, "", nil)
+
+	if mixed {
+		spec.Gateway.Spec.ExternalNetworkID = "external-network"
+		passthrough := newTestProvider(t, clients, ProviderConfig{TLSSNIPassthrough: true})
+		terminating := newTestProvider(t, clients, ProviderConfig{TCPTLSTermination: true})
+		current := optedOut
+		for _, profile := range []struct {
+			name     string
+			provider *Provider
+		}{
+			{cloud.ListenerProtocolTLSSNI, passthrough},
+			{cloud.ListenerProtocolTLSMixed, provider},
+			{cloud.ListenerProtocolTLSTerminate, terminating},
+			{cloud.ListenerProtocolTLSMixed, provider},
+		} {
+			replacementProfile = profile.name
+			cleanup := spec
+			cleanup.Gateway.Disposition = cloud.GraphDelete
+			cleanup.Gateway.RetainSNIAddress = true
+			if listener["admin_state_up"] == true {
+				check(current, cleanup, cloud.OutcomeProgressing, "disable", nil)
+			}
+			check(current, cleanup, cloud.OutcomeProgressing, "delete-listener", nil)
+			check(current, cleanup, cloud.OutcomeReady, "", nil)
+
+			spec.Gateway.Disposition = cloud.GraphEnsure
+			spec.Gateway.Spec.ListenerProtocol = profile.name
+			spec.Gateway.TCPTLSCertificateRef = ""
+			if cloud.IsTCPTLSListenerProtocol(profile.name) {
+				spec.Gateway.TCPTLSCertificateRef = first
+			}
+			check(profile.provider, spec, cloud.OutcomeProgressing, "create", nil)
+			check(profile.provider, spec, cloud.OutcomeProgressing, "enable", nil)
+			result, err := profile.provider.ReconcileGatewayGraph(t.Context(), spec)
+			state := result.Gateway.State
+			if err != nil || result.Outcome.State != cloud.OutcomeReady || state.LoadBalancerID != "lb" || state.ListenerID != "replacement-listener" ||
+				state.VIPPortID != "vip-port" || state.VIPAddress != "192.0.2.10" || state.FloatingIPID != "fip" || state.FloatingIPAddress != "203.0.113.10" {
+				t.Fatalf("%s replacement did not retain the Gateway addresses: %#v, %v", profile.name, result, err)
+			}
+			observed, found, err := profile.provider.GetGateway(t.Context(), spec.Identity)
+			if err != nil || !found || observed.State.ListenerID != "replacement-listener" {
+				t.Fatalf("%s replacement listener could not be observed: %#v, %t, %v", profile.name, observed, found, err)
+			}
+			current = profile.provider
+		}
+	}
+}
+
+func TestMixedSNIPoliciesAndWithdrawal(t *testing.T) {
+	identity := safetyTestIdentity(t)
+	terminate := cloud.TLSSNIRoute{Identity: identity.Value(), Hostname: "tls.example.com", ServiceUID: "tcp-backend", ServicePort: 3000,
+		Members: []cloud.Member{{Address: "192.0.2.10", Port: 3000}}}
+	passthrough := cloud.TLSSNIRoute{Identity: identity.Value(), Hostname: "*.example.com", Passthrough: true, ServiceUID: "tcp-backend", ServicePort: 8443,
+		Members: []cloud.Member{{Address: "192.0.2.10", Port: 8443}}}
+	passthrough.Identity.RouteUID, passthrough.Identity.RouteName = "pass-uid", "pass"
+	spec := completeGraphSpec(identity)
+	spec.Routes = nil
+	spec.Gateway.Spec.ListenerProtocol, spec.Gateway.Spec.ExternalNetworkID = cloud.ListenerProtocolTLSMixed, ""
+	spec.Gateway.TLSSNIRoutes = []cloud.TLSSNIRoute{passthrough, terminate}
+	spec.Gateway.TCPTLSCertificateRef = "https://barbican.example/v1/secrets/server"
+
+	policyModes := map[string]bool{}
+	closedPool := ""
+	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "POST /lbaas/l7policies":
+			var body struct {
+				Policy map[string]any `json:"l7policy"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			mode, present := body.Policy["tcp_tls_passthrough"].(bool)
+			poolID, _ := body.Policy["redirect_pool_id"].(string)
+			if !present || poolID == "" || body.Policy["action"] != "REDIRECT_TO_POOL" || body.Policy["admin_state_up"] != false {
+				t.Fatalf("unsafe mixed TLS policy creation: %#v", body.Policy)
+			}
+			policyModes[poolID] = mode
+			w.WriteHeader(http.StatusCreated)
+			safetyWriteJSON(t, w, map[string]any{"l7policy": map[string]string{"id": "policy"}})
+		case "PUT /lbaas/pools/pool-exact":
+			var body struct {
+				Pool map[string]any `json:"pool"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Pool["admin_state_up"] != false {
+				t.Fatalf("retired exact selector must retain a closed pool, got %#v, %v", body.Pool, err)
+			}
+			closedPool = r.URL.Path
+			safetyWriteJSON(t, w, map[string]any{"pool": map[string]string{"id": "pool-exact"}})
+		default:
+			t.Fatalf("unexpected Octavia request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	provider := newTestProvider(t, ServiceClients{LoadBalancer: client, ProjectID: "project-a"}, ProviderConfig{TCPTLSTermination: true, TCPTLSMixedMode: true})
+	desired, err := provider.buildDesiredGatewayGraph(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exact, broad := desired.sni[0], desired.sni[1]
+	if exact.route.Hostname != terminate.Hostname || broad.route.Hostname != passthrough.Hostname {
+		t.Fatalf("exact terminating selector must precede passthrough suffix: %#v", desired.sni)
+	}
+	actual := observedGatewayGraph{protocol: cloud.ListenerProtocolTLSMixed, loadBalancer: safetyObservedLoadBalancer(),
+		state:                    cloud.GatewayState{ListenerID: "listener", VIPAddress: "192.0.2.10"},
+		listener:                 &listeners.Listener{ID: "listener", ProvisioningStatus: "ACTIVE", AdminStateUp: true},
+		rawTLSCapabilityVerified: true, rawTLSVerified: true,
+		sni: map[sniFragmentKey]*observedSNIFragment{
+			exact.key: activeSNIFragment(exact, "exact"),
+			broad.key: activeSNIFragment(broad, "broad"),
+		},
+	}
+	actual.loadBalancer.ProvisioningStatus, actual.loadBalancer.AdminStateUp = "ACTIVE", true
+	for _, target := range desired.sni {
+		fragment := actual.sni[target.key]
+		fragment.passthrough = new(target.route.Passthrough)
+		fragment.backendTLS.AdminObserved = true
+		if err := provider.executeSNIMutation(t.Context(), desired, actual, sniMutation{
+			kind: sniCreatePolicy, target: target, parentID: fragment.pool.ID,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(policyModes) != 2 || policyModes["pool-exact"] || !policyModes["pool-broad"] {
+		t.Fatalf("Octavia received wrong policy modes: %#v", policyModes)
+	}
+
+	// Removing the terminating hostname must close its destinations while
+	// keeping its selector in front of the remaining passthrough wildcard.
+	desired.sni = []desiredSNIFragment{broad}
+	steps, _, err := provider.buildSNIGraphPlan(desired, actual)
+	if err != nil || len(steps) != 1 || steps[0].kind != graphSNIMutation || steps[0].sni.kind != sniDisableBackendTLSPool {
+		t.Fatalf("expected one restrictive pool mutation, got %#v, %v", steps, err)
+	}
+	if err := provider.executeGraphMutation(t.Context(), desired, actual, steps[0]); err != nil || closedPool != "/lbaas/pools/pool-exact" {
+		t.Fatalf("withdrawal did not close only the former target: %s, %v", closedPool, err)
+	}
+	actual.sni[exact.key].pool.AdminStateUp = false
+	steps, result, err := provider.buildSNIGraphPlan(desired, actual)
+	if err != nil || len(steps) != 0 || len(result.Routes) != 1 || result.Routes[0].Result.Outcome.State != cloud.OutcomeReady {
+		t.Fatalf("the closed exact selector must shield the ready wildcard: %#v, %#v, %v", steps, result, err)
+	}
+}
+
+func TestMixedSNISuffixWithdrawalPreservesExactReadback(t *testing.T) {
+	identity := safetyTestIdentity(t)
+	spec := completeGraphSpec(identity)
+	spec.Routes = nil
+	spec.Gateway.Spec.ListenerProtocol, spec.Gateway.Spec.ExternalNetworkID = cloud.ListenerProtocolTLSMixed, ""
+	exact := cloud.TLSSNIRoute{Identity: identity.Value(), Hostname: "tls.example.com", ServiceUID: "tcp-backend", ServicePort: 3000,
+		Members: []cloud.Member{{Address: "192.0.2.10", Port: 3000}}}
+	wildcard := cloud.TLSSNIRoute{Identity: identity.Value(), Hostname: "*.example.com", Passthrough: true, ServiceUID: "tcp-backend", ServicePort: 8443,
+		Members: []cloud.Member{{Address: "192.0.2.10", Port: 8443}}}
+	wildcard.Identity.RouteUID, wildcard.Identity.RouteName = "suffix-uid", "suffix"
+	targets, err := buildSNITargets(identity.Value(), []cloud.TLSSNIRoute{wildcard, exact})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actual := observedGatewayGraph{protocol: cloud.ListenerProtocolTLSMixed, loadBalancer: safetyObservedLoadBalancer(),
+		state:                    cloud.GatewayState{ListenerID: "listener", VIPAddress: "192.0.2.10"},
+		listener:                 &listeners.Listener{ID: "listener", ProvisioningStatus: "ACTIVE", AdminStateUp: true},
+		rawTLSCapabilityVerified: true, rawTLSVerified: true,
+		sni: map[sniFragmentKey]*observedSNIFragment{
+			targets[0].key: activeSNIFragment(targets[0], "exact"),
+			targets[1].key: activeSNIFragment(targets[1], "wildcard"),
+		},
+	}
+	actual.loadBalancer.ProvisioningStatus, actual.loadBalancer.AdminStateUp, actual.loadBalancer.Provider = "ACTIVE", true, "amphora"
+	observedWildcard := actual.sni[targets[1].key]
+	observedWildcard.passthrough = new(true)
+	discoveries := 0
+	client := safetyServiceClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/lbaas/providers/amphora/gateway_capabilities" {
+			t.Fatalf("unexpected Octavia call: %s %s", r.Method, r.URL.Path)
+		}
+		discoveries++
+		safetyWriteJSON(t, w, map[string]any{"gateway_capabilities": []string{"tcp_tls_mixed_mode_v1"}})
+	}))
+	provider := newTestProvider(t, ServiceClients{LoadBalancer: client, ProjectID: "project-a"}, ProviderConfig{TCPTLSTermination: true, TCPTLSMixedMode: true, TLSSNISuffix: true})
+	// The wildcard has already disappeared from desired state. Active
+	// readback still requires explicit suffix capability during withdrawal.
+	desired := desiredGatewayGraph{spec: spec, protocol: cloud.ListenerProtocolTLSMixed, sni: targets[:1]}
+	provider.isolateUnavailableSNISuffix(t.Context(), &desired, actual)
+	steps, result, err := provider.buildSNIGraphPlan(desired, actual)
+	if discoveries != 1 || err != nil || len(steps) != 1 || steps[0].deletion.resource != gatewayDisableL7Policy ||
+		steps[0].deletion.resourceID != observedWildcard.policy.ID {
+		t.Fatalf("only the wildcard policy should be disabled: %#v, %v", steps, err)
+	}
+	if len(result.Routes) != 1 || result.Routes[0].Identity != exact.Identity || result.Routes[0].Result.Outcome.State != cloud.OutcomeReady {
+		t.Fatalf("the exact policy should remain independently ready: %#v", result.Routes)
+	}
+	observedWildcard.policy.AdminStateUp = false
+	steps, _, err = provider.buildSNIGraphPlan(desired, actual)
+	if err != nil || len(steps) != 0 {
+		t.Fatalf("no frontend downtime is required after the wildcard closes: %#v, %v", steps, err)
+	}
+	provider.tlsSNISuffix = false
+	wildcardKey := targets[1].key
+	desired = desiredGatewayGraph{spec: spec, protocol: cloud.ListenerProtocolTLSMixed, sni: targets}
+	provider.isolateUnavailableSNISuffix(t.Context(), &desired, actual)
+	if discoveries != 1 || len(desired.sni) != 1 || !desired.sniPaused[wildcardKey] {
+		t.Fatalf("a disabled suffix option must pause the wildcard without capability discovery: %#v", desired.sni)
+	}
 }

@@ -112,25 +112,11 @@ func SupportedListenersForConfig(config controller.Config, gateway *gatewayv1.Ga
 	var listeners []*gatewayv1.Listener
 	switch {
 	case config.TLSRoutesEnabled() && hasTLSListener(gateway):
-		if len(gateway.Spec.Listeners) != 1 {
-			return nil, fmt.Errorf("TLSRoute requires a dedicated Gateway with one listener")
-		}
-		listener := &gateway.Spec.Listeners[0]
-		if listener.Port < 1 || listener.Port > 65535 || !tlsListenerModeEnabled(config, listener) || len(listener.TLS.Options) != 0 {
-			return nil, fmt.Errorf("TLSRoute requires an enabled TLS mode, a valid port and no TLS options")
-		}
-		if !terminatesTLS(listener) && len(listener.TLS.CertificateRefs) != 0 {
-			return nil, fmt.Errorf("TLS passthrough mode does not support certificate references")
-		}
-		if listener.Hostname != nil {
-			if err := amphora.ValidateHostname(string(*listener.Hostname)); err != nil {
-				return nil, fmt.Errorf("invalid listener hostname: %w", err)
-			}
-		}
-		if err := validateRouteNamespacePolicy(listener); err != nil {
+		var err error
+		listeners, err = supportedTLSListeners(config, gateway)
+		if err != nil {
 			return nil, err
 		}
-		listeners = append(listeners, listener)
 	case len(gateway.Spec.Listeners) == 1 && gateway.Spec.Listeners[0].Protocol == gatewayv1.TLSProtocolType:
 		return nil, fmt.Errorf("TLSRoute requires explicit controller opt-in")
 	case usesHTTPSProfile(config, gateway):
@@ -171,7 +157,7 @@ func SupportedListenersForConfig(config controller.Config, gateway *gatewayv1.Ga
 				return nil, err
 			}
 		}
-		if listener.Filters != nil && len(listener.Filters.Requests) != 0 {
+		if listenerHasRequestFilters(listener) && (!config.GatewayListenerFiltersEnabled() || listener.Protocol != gatewayv1.HTTPProtocolType) {
 			return nil, fmt.Errorf("listener request filters cannot be enforced by the stock Amphora %s profile", listener.Protocol)
 		}
 		kind := listenerRouteKind(listener.Protocol)
@@ -184,6 +170,55 @@ func SupportedListenersForConfig(config controller.Config, gateway *gatewayv1.Ga
 			return nil, fmt.Errorf("only %s is supported in listener allowedRoutes.kinds", kind)
 		}
 	}
+	return listeners, nil
+}
+
+// supportedTLSListeners keeps the native TLS SNI graph dedicated to one port.
+func supportedTLSListeners(config controller.Config, gateway *gatewayv1.Gateway) ([]*gatewayv1.Listener, error) {
+	first := &gateway.Spec.Listeners[0]
+	mixed := mixedTLSBinding(config, gateway, first.Port)
+	if len(gateway.Spec.Listeners) != 1 && !mixed {
+		return nil, fmt.Errorf("TLSRoute requires a dedicated Gateway with one listener or an enabled same-port mixed TLS listener")
+	}
+	var listeners []*gatewayv1.Listener
+	hosts := make(map[string]bool)
+	for i := range gateway.Spec.Listeners {
+		listener := &gateway.Spec.Listeners[i]
+		if listener.Protocol != gatewayv1.TLSProtocolType || listener.Port < 1 || listener.Port > 65535 ||
+			listener.Port != first.Port || !tlsListenerModeEnabled(config, listener) || len(listener.TLS.Options) != 0 {
+			return nil, fmt.Errorf("TLSRoute requires enabled TLS modes on one valid port and no TLS options")
+		}
+		if !terminatesTLS(listener) && len(listener.TLS.CertificateRefs) != 0 {
+			return nil, fmt.Errorf("TLS passthrough mode does not support certificate references")
+		}
+		if listener.Hostname != nil {
+			hostname := string(*listener.Hostname)
+			if err := amphora.ValidateHostname(hostname); err != nil {
+				return nil, fmt.Errorf("invalid listener hostname: %w", err)
+			}
+			if mixed && hosts[hostname] {
+				return nil, fmt.Errorf("same-port TLS listeners require distinct hostnames")
+			}
+			hosts[hostname] = true
+		} else if mixed {
+			return nil, fmt.Errorf("same-port TLS listeners require explicitly named hostnames")
+		}
+		if err := validateRouteNamespacePolicy(listener); err != nil {
+			return nil, err
+		}
+		listeners = append(listeners, listener)
+	}
+	// The existing TLS certificate and lifecycle checkpoints use the primary
+	// terminating listener on a mixed port.
+	slices.SortFunc(listeners, func(a, b *gatewayv1.Listener) int {
+		if terminatesTLS(a) == terminatesTLS(b) {
+			return cmp.Compare(a.Name, b.Name)
+		}
+		if terminatesTLS(a) {
+			return -1
+		}
+		return 1
+	})
 	return listeners, nil
 }
 

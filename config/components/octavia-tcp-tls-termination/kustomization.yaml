@@ -14,3 +14,15 @@ patches:
       - op: add
         path: /spec/template/spec/containers/0/args/-
         value: --octavia-tcp-tls-termination
+  - target:
+      group: rbac.authorization.k8s.io
+      version: v1
+      kind: ClusterRole
+      labelSelector: app.kubernetes.io/name=openstack-gateway-controller
+    patch: |-
+      - op: add
+        path: /rules/-
+        value:
+          apiGroups: ["gateway.networking.k8s.io"]
+          resources: ["backendtlspolicies"]
+          verbs: ["get", "list", "watch"]

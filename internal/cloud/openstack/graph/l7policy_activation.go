@@ -52,6 +52,12 @@ func (p *Provider) preparePolicyActivationBatch(ctx context.Context, desired des
 		return nil, nil
 	}
 
+	// The batch snapshot verifies L7 destinations, not pre-routing
+	// filters. The ordinary activation path still verifies ownership.
+	if filters, present := actual.requestFilters[listener.ID]; present && (!filters.Readable || len(filters.Sections) != 0) {
+		return nil, nil
+	}
+
 	batch := &l7PolicyActivationBatch{listenerID: listener.ID}
 	selected := make(map[string]bool)
 	// A batch starts at the first planned mutation and stays within the
@@ -95,6 +101,11 @@ func (p *Provider) preparePolicyActivationBatch(ctx context.Context, desired des
 	partsByPool := make(map[string]observedRouteGraph)
 	for _, route := range actual.routes {
 		for _, part := range route.parts() {
+			if slices.ContainsFunc(part.policies, func(policy observedRoutePolicy) bool {
+				return policy.policy.ListenerID == listener.ID && policy.hasRequestMirrors()
+			}) {
+				return nil, nil
+			}
 			if part.pool != nil {
 				partsByPool[part.pool.ID] = part
 			}

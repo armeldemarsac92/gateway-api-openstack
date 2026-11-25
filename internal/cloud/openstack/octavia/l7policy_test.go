@@ -419,3 +419,29 @@ func TestWeightedTargetRequestFiltersWireAndInventory(t *testing.T) {
 		}
 	}
 }
+
+func TestMixedTCPPolicyListPreservesExplicitModes(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/lbaas/l7policies" {
+			t.Fatalf("unexpected policy request: %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"l7policies":[
+			{"id":"terminate","tcp_tls_passthrough":false},
+			{"id":"passthrough","tcp_tls_passthrough":true},
+			{"id":"unverified"}
+		]}`))
+	})
+	service := NewService(&gophercloud.ServiceClient{
+		ProviderClient: &gophercloud.ProviderClient{HTTPClient: http.Client{Transport: loadBalancerTestTransport{handler}}},
+		Endpoint:       "http://octavia.test/",
+	})
+	policies, complete, err := service.ListPolicyObservations(t.Context(), l7policies.ListOpts{ListenerID: "mixed"})
+	if err != nil || !complete || len(policies) != 3 {
+		t.Fatalf("unexpected Octavia mixed policy inventory: %#v, complete=%t, %v", policies, complete, err)
+	}
+	terminate, passthrough := policies[0].TCPTLSPassthrough, policies[1].TCPTLSPassthrough
+	if terminate == nil || *terminate || passthrough == nil || !*passthrough || policies[2].TCPTLSPassthrough != nil {
+		t.Fatalf("explicit false, true and missing policy modes must remain distinct: %#v", policies)
+	}
+}

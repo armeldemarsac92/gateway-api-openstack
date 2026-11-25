@@ -33,7 +33,7 @@ func Compile(input Input) (Gateway, error) {
 	if input.Gateway == nil {
 		return Gateway{}, errors.New("gateway input is required")
 	}
-	result := Gateway{Source: source(input.Gateway), Listeners: compileListeners(input.Gateway.Spec.Listeners, input.OperatorHTTPS)}
+	result := Gateway{Source: source(input.Gateway), Listeners: compileListeners(input.Gateway.Spec.Listeners, input.OperatorHTTPS, input.GatewayListenerRequestFilters)}
 	if UnsupportedGatewayWideTLS(input.Gateway.Spec.TLS) {
 		result.Diagnostics = append(result.Diagnostics, Diagnostic{
 			Condition: string(gatewayv1.GatewayConditionAccepted), Reason: string(gatewayv1.GatewayReasonInvalidParameters),
@@ -43,7 +43,7 @@ func Compile(input Input) (Gateway, error) {
 	gatewayListeners := result.Listeners
 	setListeners := make(map[types.NamespacedName][]Listener, len(input.ListenerSetSections))
 	for key, sections := range input.ListenerSetSections {
-		compiled := compileListeners(sections, input.OperatorHTTPS)
+		compiled := compileListeners(sections, input.OperatorHTTPS, nil)
 		for i := range compiled {
 			compiled[i].ListenerSet = key
 		}
@@ -117,7 +117,7 @@ func FrontendClientValidation(tls *gatewayv1.GatewayTLSConfig, port gatewayv1.Po
 	return tls.Frontend.Default.Validation
 }
 
-func compileListeners(sections []gatewayv1.Listener, operatorHTTPS bool) []Listener {
+func compileListeners(sections []gatewayv1.Listener, operatorHTTPS bool, handledFilters map[gatewayv1.SectionName]bool) []Listener {
 	result := make([]Listener, 0, len(sections))
 	for _, listener := range sections {
 		compiled := Listener{Name: listener.Name, Port: listener.Port, Protocol: listener.Protocol}
@@ -125,7 +125,7 @@ func compileListeners(sections []gatewayv1.Listener, operatorHTTPS bool) []Liste
 			compiled.Hostname = string(*listener.Hostname)
 		}
 		switch {
-		case listener.Filters != nil && len(listener.Filters.Requests) > 0:
+		case listener.Filters != nil && len(listener.Filters.Requests) > 0 && !handledFilters[listener.Name]:
 			compiled.Diagnostics = append(compiled.Diagnostics, Diagnostic{
 				Condition: string(gatewayv1.ListenerConditionAccepted), Reason: string(gatewayv1.ListenerReasonUnsupportedValue),
 				Message: "pre-routing request filters are not implemented by the HTTP compiler",
@@ -203,9 +203,22 @@ func compileRoute(route *gatewayv1.HTTPRoute, input Input) Route {
 	for i, rule := range route.Spec.Rules {
 		// Rule names identify API sections. The index groups matches by rule and breaks precedence ties.
 		compiled := Rule{Index: i, Backends: ResolveBackends(route, rule, input)}
-		if rule.Timeouts != nil || rule.Retry != nil || rule.SessionPersistence != nil { //nolint:staticcheck // The release still serves this deprecated Experimental field.
-			compiled.Diagnostics = append(compiled.Diagnostics, *unsupported("timeouts, retries, and session persistence are not implemented", ScopeRule))
+		ordinaryHTTP := HTTPProfileRouteKind(route) == HTTPRouteKind
+		mirrorEnabled := input.HTTPRequestMirror && ordinaryHTTP
+		mirrors, diagnostic := NormalizeRequestMirrors(rule.Filters, mirrorEnabled, len(rule.BackendRefs) > 0)
+		if diagnostic != nil {
+			compiled.Diagnostics = append(compiled.Diagnostics, *diagnostic)
 		}
+		ResolveRequestMirrorBackends(route, mirrors, input)
+		compiled.RequestMirrors = mirrors
+		if rule.SessionPersistence != nil { //nolint:staticcheck // The release still serves this deprecated Experimental field.
+			compiled.Diagnostics = append(compiled.Diagnostics, *unsupported("session persistence is not implemented", ScopeRule))
+		}
+		requestPolicy, diagnostic := NormalizeHTTPRequestPolicy(rule, input.HTTPRequestPolicy && HTTPProfileRouteKind(route) == HTTPRouteKind)
+		if diagnostic != nil {
+			compiled.Diagnostics = append(compiled.Diagnostics, *diagnostic)
+		}
+		compiled.RequestPolicy = requestPolicy
 		if len(rule.Filters) == 1 && rule.Filters[0].Type == gatewayv1.HTTPRouteFilterRequestRedirect {
 			redirect, err := NormalizeRequestRedirect(rule, input.HTTPRequestRedirect)
 			if err != nil {
@@ -214,8 +227,9 @@ func compileRoute(route *gatewayv1.HTTPRoute, input Input) Route {
 				compiled.Redirect = &redirect
 			}
 		} else {
-			ordinaryHTTP := HTTPProfileRouteKind(route) == HTTPRouteKind
-			request, response, rewrite, cors, diagnostic := NormalizeHTTPForwardingRuleFilters(rule, input.RequestHeaderModifier,
+			forwarding := rule
+			forwarding.Filters = WithoutRequestMirrorFilters(rule.Filters)
+			request, response, rewrite, cors, diagnostic := NormalizeHTTPForwardingRuleFilters(forwarding, input.RequestHeaderModifier,
 				input.ResponseHeaderModifier && ordinaryHTTP, input.HTTPRequestURLRewrite && ordinaryHTTP, input.HTTPCORS && ordinaryHTTP)
 			if diagnostic != nil {
 				if slices.ContainsFunc(rule.Filters, func(filter gatewayv1.HTTPRouteFilter) bool { return !knownFilter(filter.Type) }) {
@@ -227,6 +241,13 @@ func compileRoute(route *gatewayv1.HTTPRoute, input Input) Route {
 			}
 		}
 		for i, backend := range rule.BackendRefs {
+			mirrors, diagnostic := NormalizeRequestMirrors(backend.Filters, mirrorEnabled, true)
+			if diagnostic != nil {
+				compiled.Diagnostics = append(compiled.Diagnostics, *diagnostic)
+			}
+			ResolveRequestMirrorBackends(route, mirrors, input)
+			compiled.Backends[i].RequestMirrors = mirrors
+			backend.Filters = WithoutRequestMirrorFilters(backend.Filters)
 			request, rewrite, diagnostic := NormalizeHTTPBackendRequestFilters(rule, backend,
 				input.BackendRequestFilters && HTTPProfileRouteKind(route) == HTTPRouteKind,
 				compiled.RequestHeaderOperations, compiled.URLRewrite)
