@@ -351,8 +351,9 @@ func (r *Reconciler) buildRouteModelWithReader(
 }
 
 type routeModelDiagnostics struct {
-	backend      model.Diagnostic
-	corsFallback bool
+	backend                 model.Diagnostic
+	corsFallback            bool
+	retryBudgetAncestorFull bool
 }
 
 func (r *Reconciler) buildRouteModelFromInputs(
@@ -363,10 +364,7 @@ func (r *Reconciler) buildRouteModelFromInputs(
 	selection routeSelection,
 	inputs *routeModelInputs,
 ) (cloud.RouteSpec, routeModelDiagnostics, error) {
-	ordinaryHTTP := model.HTTPProfileRouteKind(route) == model.HTTPRouteKind
-	matches, rules, err := supportedRouteModel(inputs.routeFragment(route), selection.sections(),
-		r.Config.FixedHTTPResponses || r.Config.WeightedHTTPTargets, r.Config.WeightedHTTPTargets,
-		r.Config.HTTPHeaderExact, r.Config.HTTPMethodMatch && ordinaryHTTP, r.Config.HTTPQueryParamExact && r.Config.FixedHTTPResponses && ordinaryHTTP)
+	matches, rules, err := r.lowerableRouteRules(route, inputs, selection.sections())
 	if err != nil {
 		return cloud.RouteSpec{}, routeModelDiagnostics{}, err
 	}
@@ -404,7 +402,7 @@ func (r *Reconciler) buildRouteModelFromInputs(
 		ports[0], ports[index] = ports[index], ports[0]
 	}
 	var desired cloud.RouteSpec
-	var diagnostics routeModelDiagnostics
+	diagnostics := routeModelDiagnostics{retryBudgetAncestorFull: inputs.retryBudgetAncestorFull(matches, rules, model.HTTPProfileRouteKind(route) == model.GRPCRouteKind)}
 	for i, port := range ports {
 		spec, portDiagnostics, err := r.buildRoutePortModel(ctx, reader, route, gateway, *portListeners[port], inputs, topology, portMatches[port], rules)
 		if err != nil {
@@ -473,6 +471,7 @@ func (r *Reconciler) buildRoutePortModel(
 		}
 		spec.Members = members
 		spec.BackendH2C = spec.BackendTLS == nil && backend.UsesH2C()
+		spec.BackendRetryBudget, spec.BackendRetryBudgetPending = inputs.backendRetryBudget(backend)
 		return spec, routeModelDiagnostics{}, nil
 	}
 	diagnostic, err := r.lowerHTTPBackends(ctx, reader, listener, &spec, inputs, matches, rules, topology.NodeAddressType)
@@ -649,7 +648,23 @@ func (r *Reconciler) lowerHTTPBackends(ctx context.Context, reader client.Reader
 			RequestMirrors:           target.mirrors,
 		})
 	}
+	inputs.attachHTTPBackendRetryBudgets(spec, matches, rules, groups)
 	return diagnostics, nil
+}
+
+func (inputs *routeModelInputs) attachHTTPBackendRetryBudgets(spec *cloud.RouteSpec, matches []routeLoweredMatch, rules []model.Rule, groups map[backendKey]httpBackendResolution) {
+	if len(inputs.retryBudgets) == 0 {
+		return
+	}
+	for backend := range activeRetryBudgetBackends(matches, rules, inputs.retryBudgetTransportUsable(spec.GRPC)) {
+		key := backendKey{object: backend.Service, port: int(ptr.Deref(backend.Reference.Port, 0))}
+		resolved := groups[key]
+		if resolved.index == nil || resolved.diagnostic.Reason != "" {
+			continue
+		}
+		desired := &spec.HTTPBackends[*resolved.index]
+		desired.BackendRetryBudget, desired.BackendRetryBudgetPending = inputs.backendRetryBudget(backend)
+	}
 }
 
 // A rejected destination contributes its own diagnostic but no forwarding
@@ -809,6 +824,13 @@ type routeLoweredMatch struct {
 
 // supportedRouteModel verifies that the compiled attachments match the sections
 // selected by admission before lowering any backend or policy.
+func (r *Reconciler) lowerableRouteRules(route *gatewayv1.HTTPRoute, inputs *routeModelInputs, selected map[model.ListenerSection]*gatewayv1.Listener) ([]routeLoweredMatch, []model.Rule, error) {
+	ordinaryHTTP := model.HTTPProfileRouteKind(route) == model.HTTPRouteKind
+	return supportedRouteModel(inputs.routeFragment(route), selected, r.Config.FixedHTTPResponses || r.Config.WeightedHTTPTargets,
+		r.Config.WeightedHTTPTargets, r.Config.HTTPHeaderExact, r.Config.HTTPMethodMatch && ordinaryHTTP,
+		r.Config.HTTPQueryParamExact && r.Config.FixedHTTPResponses && ordinaryHTTP)
+}
+
 func supportedRouteModel(logical model.Gateway, selected map[model.ListenerSection]*gatewayv1.Listener, fixedResponses, weightedTargets, exactHeaders, methodMatch, exactQueryParams bool) ([]routeLoweredMatch, []model.Rule, error) {
 	unsupported := func() ([]routeLoweredMatch, []model.Rule, error) {
 		return nil, nil, newRouteBuildError(routeErrorUnsupported, "logical Gateway configuration is outside the supported HTTP profile")

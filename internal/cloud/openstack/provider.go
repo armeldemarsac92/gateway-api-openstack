@@ -57,6 +57,11 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	return p.graph.ReconcileGatewayGraph(ctx, spec)
 }
 
+// BackendRetryBudgetAvailable discovers regional Amphora Service budget support.
+func (p *Provider) BackendRetryBudgetAvailable(ctx context.Context) (bool, error) {
+	return p.graph.BackendRetryBudgetAvailable(ctx)
+}
+
 // BackendTLSAvailable discovers the fixed backend hostname capability in the configured region.
 func (p *Provider) BackendTLSAvailable(ctx context.Context) (bool, error) {
 	return p.graph.BackendTLSAvailable(ctx)

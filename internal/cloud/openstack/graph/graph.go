@@ -399,6 +399,7 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 			}
 		}
 	}
+	p.observeBackendRetryBudgetCapability(ctx, &desired, actual)
 	unavailableRequestPolicies = p.gateHTTPRequestPolicies(ctx, &desired, actual)
 	var plan []graphMutation
 	defaultPool := usesDefaultPool(actual.protocol)

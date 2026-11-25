@@ -44,12 +44,17 @@ type GatewayAncestor struct {
 }
 
 func (a GatewayAncestor) Slot(policy *gatewayv1.BackendTLSPolicy) AncestorSlot {
-	for _, entry := range policy.Status.Ancestors {
-		if entry.ControllerName == a.ControllerName && GatewayAncestorKey(entry.AncestorRef, policy.Namespace) == a.Key {
+	return a.SlotFor(policy.Namespace, policy.Status.Ancestors)
+}
+
+// SlotFor checks the shared PolicyStatus capacity for an exact Gateway entry.
+func (a GatewayAncestor) SlotFor(namespace string, ancestors []gatewayv1.PolicyAncestorStatus) AncestorSlot {
+	for _, entry := range ancestors {
+		if entry.ControllerName == a.ControllerName && GatewayAncestorKey(entry.AncestorRef, namespace) == a.Key {
 			return AncestorSlotHeld
 		}
 	}
-	if len(policy.Status.Ancestors) >= MaxAncestors {
+	if len(ancestors) >= MaxAncestors {
 		return AncestorSlotFull
 	}
 	return AncestorSlotPending
