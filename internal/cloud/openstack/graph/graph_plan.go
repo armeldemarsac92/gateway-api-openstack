@@ -1070,6 +1070,8 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 			return fmt.Errorf("delete Floating IP: %w", err)
 		}
 		return nil
+	case graphListenerFiltersMutation:
+		return p.executeListenerFilterMutation(ctx, desired, actual, step)
 	case graphCreateListener:
 		tags, tagErr := desired.identity.GatewayTags(roleListener)
 		if tagErr != nil {
@@ -1090,7 +1092,7 @@ func (p *Provider) executeGraphMutation(ctx context.Context, desired desiredGate
 			}
 			tags = append(tags, scopedPortTag(protocol, port))
 		}
-		if desired.plainHTTPRuleLimits[port] != "" || slices.ContainsFunc(desired.routes, func(route desiredRoute) bool {
+		if len(spec.RequestFilterSections[port]) != 0 || desired.plainHTTPRuleLimits[port] != "" || slices.ContainsFunc(desired.routes, func(route desiredRoute) bool {
 			return slices.ContainsFunc(route.httpParts, func(part desiredRoute) bool {
 				return httpURLPolicyRoutePort(desired, part) == port && slices.ContainsFunc(part.policies, func(policy desiredPolicy) bool {
 					return requestRedirectPolicy.required(policy) || requestURLRewritePolicy.required(policy) || requestCORSPolicy.required(policy)

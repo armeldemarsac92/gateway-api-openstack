@@ -180,6 +180,11 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 			}
 		}
 	}
+	filters, err := r.observeListenerFilters(ctx, snapshot.gateway, snapshot.listeners, sets, snapshot.topology)
+	if err != nil {
+		return input, err
+	}
+	input.Node.Spec.RequestFilterSections = filters.ports
 	if (r.Config.BackendTLSPolicy || r.Config.FrontendClientValidation) && !input.Node.BackendCAOwned {
 		input.Node.ClaimBackendCA = func(ctx context.Context) error {
 			desired := snapshot.gateway.DeepCopy()
@@ -197,6 +202,9 @@ func (r *Reconciler) ObserveGatewayGraph(ctx context.Context, request graph.Requ
 		}
 		if !sets.sameInputs(current) {
 			return errGatewayChanged
+		}
+		if err := r.validateListenerFilterInputs(ctx, snapshot, current, filters); err != nil {
+			return err
 		}
 		if !backendIdentity.Denied {
 			latest, _, _ := r.observeBackendClientCertificate(ctx, snapshot.gateway)

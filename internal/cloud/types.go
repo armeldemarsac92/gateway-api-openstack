@@ -59,6 +59,8 @@ type GatewaySpec struct {
 	// HTTPListenerHostnames lists all sections on plaintext ports that need hostname isolation.
 	// "*" denotes the section with no hostname.
 	HTTPListenerHostnames map[int][]string `json:",omitempty"`
+	// RequestFilterSections describes ordered pre-routing filters by physical port.
+	RequestFilterSections map[int][]ListenerRequestFilterSection `json:",omitempty"`
 	VIPSecurityGroupIDs   []string
 
 	// RequestedVIPAddress is an optional fixed private IPv4 address on VIPSubnetID.
@@ -74,6 +76,24 @@ type GatewaySpec struct {
 	// address. Only a valid provider address or a retained active address
 	// can then justify keeping the frontend enabled.
 	ClusterAddressLoss *ClusterAddressLoss
+}
+
+type ListenerRequestFilterSection struct {
+	Hostname string
+	Reject   bool
+	Requests []ListenerExternalAuth
+}
+
+// ListenerExternalAuth references a backend authorized from the Gateway.
+type ListenerExternalAuth struct {
+	ServiceUID             string
+	ServicePort            int
+	MemberSubnetID         string
+	BackendSecurityGroups  []string
+	Members                []Member
+	PathPrefix             string
+	AllowedRequestHeaders  []string
+	AllowedResponseHeaders []string
 }
 
 type ClusterAddressLoss struct {

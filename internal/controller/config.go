@@ -55,6 +55,8 @@ type Config struct {
 	HTTPRequestMirror     bool
 	// HTTPCORS enables rule-scoped CORS on the selected Octavia provider.
 	HTTPCORS bool
+	// GatewayListenerFilters enables Experimental pre-routing filters on capable Amphora providers.
+	GatewayListenerFilters bool
 	// BackendRequestFilters enables filters on individual weighted HTTP backendRefs.
 	BackendRequestFilters bool
 	// HTTPMethodMatch enables exact HTTPRoute method matching on capable Amphora providers.
@@ -109,6 +111,10 @@ func (c Config) GatewayAddressRoutabilityEnabled() bool {
 
 func (c Config) GatewayAddressRoutabilityClusterEnabled() bool {
 	return c.ClusterGatewayAddresses && c.GatewayAddressRoutabilityEnabled() && c.GatewayInfrastructureMetadata
+}
+
+func (c Config) GatewayListenerFiltersEnabled() bool {
+	return c.GatewayListenerFilters && c.GatewayAPIChannel == features.FeatureChannelExperimental
 }
 
 // XBackendEnabled reports whether this installation uses the Experimental bundle.

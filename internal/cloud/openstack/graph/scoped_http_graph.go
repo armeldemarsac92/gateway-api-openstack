@@ -37,13 +37,12 @@ func (p *Provider) observeScopedHTTPGraph(ctx context.Context, desired desiredGa
 	if desired.spec.Gateway.Disposition == cloud.GraphDelete {
 		routeRecovery = &desired.identity
 	}
+	if err := p.observeListenerFilterGraph(ctx, desired, &actual); err != nil {
+		return actual, err
+	}
 	var err error
 	if actual.routes == nil {
-		poolInventory, err := p.listGatewayPoolInventory(ctx, actual.loadBalancer)
-		if err != nil {
-			return actual, err
-		}
-		actual.routes, err = p.observeRouteGraphsFromPools(ctx, owners, actual.loadBalancer, nil, actual.protocol, actual.scopedListeners, poolInventory, routeRecovery, actual.httpsIsolationPolicies)
+		actual.routes, err = p.observeRouteGraphsFromPools(ctx, owners, actual.httpPools.loadBalancer, nil, actual.protocol, actual.scopedListeners, actual.httpPools.routes, routeRecovery, actual.httpsIsolationPolicies)
 		if err != nil {
 			return actual, err
 		}
@@ -75,7 +74,7 @@ func (p *Provider) observeScopedHTTPGraph(ctx context.Context, desired desiredGa
 		}
 		spec, present := configured[listener.ProtocolPort]
 		retiring := !present || scopedHTTPProtocol(spec) != listener.Protocol
-		actual.outcome, err = p.defaultPoolListenerOutcome(&listener, retiring || listener.Protocol == terminatedHTTPS || requestTransformListenerNeedsRecovery(desired, actual, listener))
+		actual.outcome, err = p.defaultPoolListenerOutcome(&listener, retiring || listener.Protocol == terminatedHTTPS || requestTransformListenerNeedsRecovery(desired, actual, listener) || actual.unverifiedListenerFilters[listener.ProtocolPort])
 		if err != nil {
 			return actual, err
 		}
@@ -370,7 +369,7 @@ func scopedHTTPGatewayResult(desired desiredGatewayGraph, actual observedGateway
 		spec, found := configured[listener.ProtocolPort]
 		matches := found && !actual.httpsIsolationUnverified[listener.ID] &&
 			actual.scopedHTTPListenerMatches(listener, spec) && actual.httpFallbackReady(listener, desired.fixedHTTPResponses)
-		if !matches || !actual.isolatedPoliciesReady(desired, listener) {
+		if !matches || !actual.isolatedPoliciesReady(desired, listener) || actual.unverifiedListenerFilters[listener.ProtocolPort] {
 			unverified[listener.ProtocolPort] = true
 		}
 
@@ -406,7 +405,7 @@ func scopedHTTPGatewayResult(desired desiredGatewayGraph, actual observedGateway
 			port := listener.ProtocolPort
 			spec := configured[port]
 			if slices.Contains(result.ScopedListenerReadyPorts, port) || slices.Contains(result.ScopedListenerServingPorts, port) ||
-				actual.httpsIsolationUnverified[listener.ID] || !listener.AdminStateUp || listener.ProvisioningStatus != "ACTIVE" ||
+				actual.httpsIsolationUnverified[listener.ID] || actual.unverifiedListenerFilters[port] || !listener.AdminStateUp || listener.ProvisioningStatus != "ACTIVE" ||
 				!actual.scopedHTTPListenerMatches(listener, spec) || !actual.httpFallbackReady(listener, desired.fixedHTTPResponses) ||
 				len(httpsVirtualHosts(spec)) == 0 || !independentHTTPSHosts(httpsVirtualHosts(spec)) {
 				continue
@@ -494,7 +493,7 @@ func scopedHTTPListenerPlan(desired desiredGatewayGraph, actual observedGatewayG
 	}
 	if actual.loadBalancer != nil {
 		for _, listener := range desired.spec.Gateway.Spec.ScopedListeners {
-			if !occupied[listener.Port] && hasAuthorizedListener(listener) && actual.frontendCA[listener.Port].canCreate(listener) &&
+			if !occupied[listener.Port] && !actual.unavailableListenerFilters[listener.Port] && !actual.pendingListenerFilterCapability[listener.Port] && hasAuthorizedListener(listener) && actual.frontendCA[listener.Port].canCreate(listener) &&
 				(len(httpsVirtualHosts(listener)) == 0 || actual.httpsIsolationAvailable) {
 				changes = append(changes, graphMutation{kind: graphCreateListener, scopedListener: listener,
 					redactTLSError: listener.TLS != nil, message: "Creating Octavia HTTP-family listener"})
@@ -518,7 +517,7 @@ func buildScopedHTTPTrafficRestorationPlan(desired desiredGatewayGraph, actual o
 			}
 			return nil, nil
 		}
-		if !hasAuthorizedListener(spec) {
+		if !hasAuthorizedListener(spec) || actual.unverifiedListenerFilters[spec.Port] || actual.unavailableListenerFilters[spec.Port] {
 			// An independently denied port does not hold authorized siblings.
 			continue
 		}

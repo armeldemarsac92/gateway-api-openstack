@@ -177,12 +177,11 @@ func (p *Provider) observeHTTPSIsolation(ctx context.Context, desired desiredGat
 		}
 	}
 	proveRoutes := sync.OnceValue(func() map[string]httpsLivePolicy {
-		pools, err := p.listGatewayPoolInventory(ctx, actual.loadBalancer)
-		if err != nil {
+		if err := p.observeListenerFilterPools(ctx, desired, actual); err != nil {
 			return nil
 		}
-		routes, err := p.observeRouteGraphsFromPools(ctx, policySource.routeOwners(), actual.loadBalancer, nil,
-			cloud.ListenerProtocolHTTP, actual.scopedListeners, pools, nil, actual.httpsIsolationPolicies)
+		routes, err := p.observeRouteGraphsFromPools(ctx, policySource.routeOwners(), actual.httpPools.loadBalancer, nil,
+			cloud.ListenerProtocolHTTP, actual.scopedListeners, actual.httpPools.routes, nil, actual.httpsIsolationPolicies)
 		if err != nil {
 			return nil
 		}

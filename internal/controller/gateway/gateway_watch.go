@@ -120,6 +120,13 @@ func (r *Reconciler) SetupWithManager(manager ctrl.Manager) error {
 		gatewayController.Watches(route, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForRoute),
 			builder.WithPredicates(controller.RouteForGatewayPredicate(r.Config)))
 	}
+	if r.Config.GatewayListenerFiltersEnabled() {
+		for _, dependency := range []client.Object{&corev1.Service{}, &discoveryv1.EndpointSlice{}, &gatewayv1.ReferenceGrant{}, &gatewayv1.BackendTLSPolicy{}} {
+			gatewayController.Watches(dependency, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForListenerFilterDependency))
+		}
+		gatewayController.Watches(&corev1.Node{}, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForListenerFilterDependency),
+			builder.WithPredicates(controller.NodePredicate("")))
+	}
 	if r.Config.TLSRoutesEnabled() {
 		gatewayController.Watches(&gatewayv1.TLSRoute{}, handler.EnqueueRequestsFromMapFunc(r.gatewayRequestsForRoute),
 			builder.WithPredicates(controller.RouteForGatewayPredicate(r.Config)))

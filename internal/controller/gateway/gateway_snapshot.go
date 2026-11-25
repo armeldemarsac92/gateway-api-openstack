@@ -234,7 +234,7 @@ func (r *Reconciler) decideGatewayPhase(scope *gatewayScope) gatewayPhaseDecisio
 		}
 		return gatewayPhaseDecision{phase: gatewayPhaseIgnore}
 	}
-	if scope.gatewayClass != nil && !controller.GatewayClassSupportsInstalledVersion(scope.gatewayClass) && !hasListenerRequestFilters(gateway) {
+	if scope.gatewayClass != nil && !controller.GatewayClassSupportsInstalledVersion(scope.gatewayClass) && (!hasListenerRequestFilters(gateway) || r.Config.GatewayListenerFiltersEnabled()) {
 		return gatewayPhaseDecision{phase: gatewayPhaseUnsupportedVersion}
 	}
 	if err := controller.ValidateGatewayBinding(r.Config, gateway); err != nil {
@@ -385,7 +385,7 @@ func (r *Reconciler) observeGatewayCleanupSnapshot(
 	}
 	// A bound listener cannot continue serving without its requested filters. The
 	// live identity and resource-version checks above still apply during bundle skew.
-	if hasListenerRequestFilters(&gateway) {
+	if hasListenerRequestFilters(&gateway) && !r.Config.GatewayListenerFiltersEnabled() {
 		snapshot.disposition = gatewayCleanupRebuild
 		return snapshot, nil
 	}

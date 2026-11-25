@@ -34,6 +34,7 @@ func (s *Service) ListListeners(ctx context.Context, opts listeners.ListOpts) ([
 // ListenerInventory retains field presence needed to prove a listener has
 // been disabled and detached. Both zero values otherwise accept missing JSON.
 type ListenerInventory struct {
+	RequestFilters           map[string]ListenerRequestFilterObservation
 	DefaultHTTPResponseCodes map[string]int
 	HTTPSVirtualHosts        map[string][]string
 	TCPTLSTermination        map[string]bool
@@ -69,6 +70,7 @@ func (s *Service) ListListenerInventory(ctx context.Context, opts listeners.List
 			TCPTLSTermination   json.RawMessage `json:"tcp_tls_termination"`
 			TCPTLSMixedMode     json.RawMessage `json:"tcp_tls_mixed_mode"`
 			SNICertificates     *[]string       `json:"sni_container_refs"`
+			RequestFilters      json.RawMessage `json:"request_filter_sections"`
 			VirtualHosts        json.RawMessage `json:"https_virtual_hosts"`
 			DefaultHTTPResponse *struct {
 				StatusCode int `json:"status_code"`
@@ -123,6 +125,12 @@ func (s *Service) ListListenerInventory(ctx context.Context, opts listeners.List
 			// Only a literal true verifies mixed mode. Preserve listener
 			// identity and admin state so a malformed row can still close.
 			inventory.TCPTLSMixedMode[item.ID] = string(observed.TCPTLSMixedMode) == "true"
+		}
+		if observed.RequestFilters != nil {
+			if inventory.RequestFilters == nil {
+				inventory.RequestFilters = make(map[string]ListenerRequestFilterObservation)
+			}
+			inventory.RequestFilters[item.ID] = decodeListenerRequestFilters(observed.RequestFilters)
 		}
 		if observed.VirtualHosts != nil {
 			if inventory.HTTPSVirtualHosts == nil {

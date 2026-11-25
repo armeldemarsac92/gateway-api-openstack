@@ -108,6 +108,12 @@ type GatewayResult struct {
 	ScopedTLSClosedPorts []int
 	// FrontendFallbackUnavailablePorts require a capability that Octavia did not advertise.
 	FrontendFallbackUnavailablePorts []int
+	// ListenerFilterUnavailablePorts require a capability that Octavia did not advertise.
+	ListenerFilterUnavailablePorts []int
+	// ListenerFilterCapabilityPendingPorts are waiting for a usable discovery response.
+	ListenerFilterCapabilityPendingPorts []int
+	// ListenerFilterRecoveringSections are guarded locally while their backends converge.
+	ListenerFilterRecoveringSections map[int][]string
 	// ScopedListenerDeferredPorts still match their active frontends while
 	// route observations are deferred. Only previously programmed sections
 	// at the same generation can retain status. A nil list means the provider

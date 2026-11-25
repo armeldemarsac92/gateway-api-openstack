@@ -298,6 +298,18 @@ func (r *Reconciler) reconcileGatewayGraph(
 		return ctrl.Result{Requeue: true}, nil
 	}
 	graphResult, err := r.ensureGateway(ctx, scope.gateway)
+	if r.Config.GatewayListenerFiltersEnabled() && hasHTTPFamilyListenerFilters(scope.gateway) &&
+		!errors.Is(err, errGatewayChanged) && !errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) {
+		topology, topologyErr := controller.StoredGatewayTopology(r.Config, scope.gateway)
+		listeners, listenerErr := SupportedListenersForConfig(r.Config, scope.gateway)
+		if topologyErr == nil && listenerErr == nil {
+			filters, filterErr := r.observeListenerFilters(ctx, scope.gateway, listeners, sets, topology)
+			if filterErr != nil {
+				return ctrl.Result{}, filterErr
+			}
+			defer r.applyListenerFilterStatus(scope.gateway, scope.original.Status, filters, graphResult.Gateway)
+		}
+	}
 	if errors.Is(err, controller.ErrUnsupportedGatewayAPIVersion) {
 		result, versionErr := r.setGatewayUnsupportedVersion(ctx, scope)
 		return result, errors.Join(versionErr, r.withdrawGatewayPublications(ctx, scope.gateway, true))

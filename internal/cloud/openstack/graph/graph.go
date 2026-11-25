@@ -50,6 +50,14 @@ type desiredGatewayGraph struct {
 }
 
 type observedGatewayGraph struct {
+	requestFilters                   map[string]octavia.ListenerRequestFilterObservation
+	unverifiedListenerFilters        map[int]bool
+	unavailableListenerFilters       map[int]bool
+	pendingListenerFilterCapability  map[int]bool
+	recoveringListenerFilterSections map[int][]string
+	listenerFilterMutation           *graphMutation
+	httpPools                        *listenerFilterPoolInventory
+
 	defaultHTTPResponseCodes map[string]int
 	httpsVirtualHosts        map[string][]string
 	frontendCA               map[int]frontendCAObservation
@@ -106,9 +114,12 @@ const (
 	graphDeleteChild
 	graphDeleteLoadBalancer
 	graphSNIMutation
+	graphListenerFiltersMutation
 )
 
 type graphMutation struct {
+	listenerFilters listenerFilterMutation
+
 	kind               graphMutationKind
 	routeIndex         int
 	backendKey         string
@@ -136,6 +147,15 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 	var unavailableRequestPolicies unavailableHTTPRequestPolicies
 	defer func() {
 		p.reportUnavailableHTTPRequestPolicies(unavailableRequestPolicies, &result)
+		for port := range actual.unavailableListenerFilters {
+			result.Gateway.ListenerFilterUnavailablePorts = append(result.Gateway.ListenerFilterUnavailablePorts, port)
+		}
+		slices.Sort(result.Gateway.ListenerFilterUnavailablePorts)
+		for port := range actual.pendingListenerFilterCapability {
+			result.Gateway.ListenerFilterCapabilityPendingPorts = append(result.Gateway.ListenerFilterCapabilityPendingPorts, port)
+		}
+		slices.Sort(result.Gateway.ListenerFilterCapabilityPendingPorts)
+		result.Gateway.ListenerFilterRecoveringSections = actual.recoveringListenerFilterSections
 		if retErr == nil {
 			result.Gateway.ScopedTLSClosedPorts = actual.closedDeniedHTTPSPorts(spec.Gateway.Spec)
 		} else {
@@ -256,6 +276,25 @@ func (p *Provider) ReconcileGatewayGraph(ctx context.Context, spec cloud.Gateway
 			}
 		}
 		return result, errors.Join(err, mutationErr)
+	}
+	if step := actual.listenerFilterMutation; step != nil && (err == nil || step.kind == graphDisableListener) {
+		if step.kind != graphDisableListener && err == nil && spec.Gateway.Disposition == cloud.GraphEnsure {
+			if securityErr := p.validateGraphTrafficSecurity(ctx, desired); securityErr != nil {
+				return result, securityErr
+			}
+		}
+		if spec.ValidateMutation != nil {
+			if err := spec.ValidateMutation(ctx); err != nil {
+				return cloud.GatewayGraphResult{}, err
+			}
+		}
+		actual.outcome = p.progressingOutcome(step.message)
+		result = p.pendingGraphResult(ctx, desired, actual)
+		if err := p.executeGraphMutation(ctx, desired, actual, *step); err != nil {
+			return result, err
+		}
+		result.Outcome.MutationSubmitted = true
+		return result, nil
 	}
 	if err != nil {
 		pending := p.progressingOutcome("Waiting for the Gateway infrastructure")
@@ -660,6 +699,17 @@ func (p *Provider) validateGraphTrafficSecurity(ctx context.Context, desired des
 		}
 	}
 	routes := make([]cloud.RouteSpec, 0, len(desired.routes))
+	for port, sections := range spec.RequestFilterSections {
+		if deniedPorts[port] {
+			continue
+		}
+		for _, section := range sections {
+			for _, auth := range section.Requests {
+				routes = append(routes, cloud.RouteSpec{Identity: spec.Identity, Members: auth.Members, MemberSubnetID: auth.MemberSubnetID,
+					BackendSecurityGroupIDs: auth.BackendSecurityGroups, ScopedListenerPorts: []int{port}})
+			}
+		}
+	}
 	for index, route := range desired.routes {
 		if desired.spec.Routes[index].Disposition != cloud.GraphEnsure {
 			continue
@@ -1350,6 +1400,15 @@ func (p *Provider) observeGatewayGraph(ctx context.Context, desired desiredGatew
 			}
 		}
 		if actual.scoped && actual.protocol == cloud.ListenerProtocolHTTP {
+			if desired.spec.Gateway.Disposition == cloud.GraphEnsure && actual.hasListenerFilterConfig(desired) &&
+				observation.phase == loadBalancerPhaseActive {
+				if err := p.observeListenerFilterGraph(ctx, desired, &actual); err != nil {
+					return actual, err
+				}
+				if step := actual.listenerFilterMutation; step != nil && step.kind == graphDisableListener {
+					return actual, nil
+				}
+			}
 			p.observeFrontendCAs(ctx, desired, &actual)
 			p.observeHTTPSIsolation(ctx, desired, &actual, inventory.DefaultPoolsObserved)
 			if observation.phase == loadBalancerPhaseActive {
@@ -1542,6 +1601,7 @@ func (p *Provider) observeGatewayListenerInventory(ctx context.Context, desired 
 		return !actual.adminObserved[listener.ID] || listener.AdminStateUp
 	})
 	actual.httpsVirtualHosts = inventory.HTTPSVirtualHosts
+	actual.requestFilters = inventory.RequestFilters
 	actual.clientAuthFallback = inventory.ClientAuthFallback
 	var bindingErr error
 	if markedProtocol != "" {
@@ -1660,6 +1720,12 @@ func (p *Provider) pendingGraphResult(ctx context.Context, desired desiredGatewa
 	}
 	if actual.withdrawTLS != nil || actual.httpsIsolationMutation != nil {
 		result.Gateway.ScopedListenerDeferredPorts = unchangedHTTPSWithdrawalSiblings(desired, actual)
+	}
+	if step := actual.listenerFilterMutation; step != nil && step.kind == graphDisableListener {
+		result.Gateway.ScopedListenerDeferredPorts = unchangedHTTPListenerSiblings(desired, actual, step.listenerID)
+		result.Gateway.ScopedListenerDeferredPorts = slices.DeleteFunc(result.Gateway.ScopedListenerDeferredPorts, func(port int) bool {
+			return actual.unverifiedListenerFilters[port]
+		})
 	}
 	var deferred map[int]bool
 	if actual.scoped && desired.spec.Gateway.Disposition == cloud.GraphEnsure {
