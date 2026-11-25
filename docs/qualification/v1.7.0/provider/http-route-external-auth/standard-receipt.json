@@ -10,9 +10,9 @@
     "ociArchiveSHA256": "584a1120ac9e428d3edbaae6153421485ca618e420219c371de4189ce8da63ba"
   },
   "octavia": {
-    "revision": "e7008bd8e851d891e8c37f37ce2063b85e8ac2c5",
-    "version": "19.0.1.dev94",
-    "sha256": "b3f78669637d643968313794d51b4867c12d5bb18e66fcfd6b2e2596a4afb487",
+    "revision": "91aaa653081db2441d2c79389e49c3b2cfb65291",
+    "version": "19.0.1.dev95",
+    "sha256": "802d4af497cfb186741d385c412e306fb6addeb7d286e8066457e3133ba81b73",
     "filesVerified": 673
   },
   "octaviaLib": {
@@ -55,22 +55,22 @@
         "policies": {
           "/private": {
             "action": "REDIRECT_TO_POOL",
-            "policy": "25e3f75bed867e2c",
+            "policy": "7a351a7f5fe454c1",
             "matchingHostRules": [
               "REGEX"
             ],
-            "originPool": "46046bf0ee020efe",
+            "originPool": "296c208aa385634d",
             "fixedResponse": null,
             "externalAuth": null,
             "listAndDetailAgree": true
           },
           "/public": {
             "action": "REDIRECT_TO_POOL",
-            "policy": "910f13fe7edc78c5",
+            "policy": "e66de070b88f7400",
             "matchingHostRules": [
               "REGEX"
             ],
-            "originPool": "46046bf0ee020efe",
+            "originPool": "296c208aa385634d",
             "fixedResponse": null,
             "externalAuth": null,
             "listAndDetailAgree": true
@@ -78,7 +78,7 @@
         },
         "activePolicyCount": 2,
         "poolCount": 1,
-        "HAProxyConfigSHA256": "1b9300b2490d54b6176a8db0fe1787dc57d8dc70638a110ea689df91fb1e1a02",
+        "HAProxyConfigSHA256": "325b706492fc522cb4de27240e0eb6bf7c3c54957751c9994d4add471cfabe60",
         "HAProxyReloads": 3,
         "originPoolMembersMatched": true
       },

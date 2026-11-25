@@ -10,9 +10,9 @@
     "ociArchiveSHA256": "584a1120ac9e428d3edbaae6153421485ca618e420219c371de4189ce8da63ba"
   },
   "octavia": {
-    "revision": "e7008bd8e851d891e8c37f37ce2063b85e8ac2c5",
-    "version": "19.0.1.dev94",
-    "sha256": "b3f78669637d643968313794d51b4867c12d5bb18e66fcfd6b2e2596a4afb487",
+    "revision": "91aaa653081db2441d2c79389e49c3b2cfb65291",
+    "version": "19.0.1.dev95",
+    "sha256": "802d4af497cfb186741d385c412e306fb6addeb7d286e8066457e3133ba81b73",
     "filesVerified": 673
   },
   "octaviaLib": {
@@ -56,14 +56,14 @@
         "policies": {
           "/private": {
             "action": "REDIRECT_TO_POOL",
-            "policy": "b247f5818be5fb8c",
+            "policy": "e74bff785d0de6a4",
             "matchingHostRules": [
               "REGEX"
             ],
-            "originPool": "a5aa6e029577d658",
+            "originPool": "d95e4ccc9ba1e2a3",
             "fixedResponse": null,
             "externalAuth": {
-              "pool": "b51a25214d0edfa0",
+              "pool": "ec5663f3d80b68aa",
               "pathPrefix": "/authorize",
               "allowedRequestHeaders": [
                 "x-request-marker"
@@ -76,11 +76,11 @@
           },
           "/public": {
             "action": "REDIRECT_TO_POOL",
-            "policy": "bd3306e670cb566f",
+            "policy": "79311d9bdb77e66a",
             "matchingHostRules": [
               "REGEX"
             ],
-            "originPool": "a5aa6e029577d658",
+            "originPool": "d95e4ccc9ba1e2a3",
             "fixedResponse": null,
             "externalAuth": null,
             "listAndDetailAgree": true
@@ -88,7 +88,7 @@
         },
         "activePolicyCount": 2,
         "poolCount": 2,
-        "HAProxyConfigSHA256": "d41681426b29588240f605b884cf50b6ad788594df367c4776dec74bf402a010",
+        "HAProxyConfigSHA256": "6e396571a0bfa77650cd04f7a2146c3f990c7f9f1f344c672218a7cdabc659da",
         "HAProxyReloads": 3,
         "originPoolMembersMatched": true,
         "authPoolMembersMatched": true,
@@ -194,18 +194,18 @@
         "policies": {
           "/public": {
             "action": "REDIRECT_TO_POOL",
-            "policy": "bd3306e670cb566f",
+            "policy": "79311d9bdb77e66a",
             "matchingHostRules": [
               "REGEX"
             ],
-            "originPool": "a5aa6e029577d658",
+            "originPool": "d95e4ccc9ba1e2a3",
             "fixedResponse": null,
             "externalAuth": null,
             "listAndDetailAgree": true
           },
           "/private": {
             "action": "FIXED_RESPONSE",
-            "policy": "69e3f756cc856bbe",
+            "policy": "9bb7ab0ec12b5409",
             "matchingHostRules": [
               "REGEX"
             ],
@@ -219,7 +219,7 @@
         },
         "activePolicyCount": 2,
         "poolCount": 1,
-        "HAProxyConfigSHA256": "a7b07fbd4a79802b945787b7bccab4fd9923aa39b6ce274895e0ac0f64a5a4ef",
+        "HAProxyConfigSHA256": "fbb52063fd4368c8d3c6a7dc53cb69ff43d701b9827caf94827c272774688cd8",
         "HAProxyReloads": 5,
         "originPoolMembersMatched": true
       },
@@ -285,25 +285,25 @@
         "policies": {
           "/public": {
             "action": "REDIRECT_TO_POOL",
-            "policy": "bd3306e670cb566f",
+            "policy": "79311d9bdb77e66a",
             "matchingHostRules": [
               "REGEX"
             ],
-            "originPool": "a5aa6e029577d658",
+            "originPool": "d95e4ccc9ba1e2a3",
             "fixedResponse": null,
             "externalAuth": null,
             "listAndDetailAgree": true
           },
           "/private": {
             "action": "REDIRECT_TO_POOL",
-            "policy": "2f9f0a79414d8754",
+            "policy": "1382fcb5d3d4eee3",
             "matchingHostRules": [
               "REGEX"
             ],
-            "originPool": "a5aa6e029577d658",
+            "originPool": "d95e4ccc9ba1e2a3",
             "fixedResponse": null,
             "externalAuth": {
-              "pool": "0826fd3f8501c2f9",
+              "pool": "93f83a3f5a4d3f36",
               "pathPrefix": "/authorize",
               "allowedRequestHeaders": [
                 "x-request-marker"
@@ -317,7 +317,7 @@
         },
         "activePolicyCount": 2,
         "poolCount": 2,
-        "HAProxyConfigSHA256": "53d3d75f69fb9a8eab73da4512e39032524ea79b7f0e94793bf0d6f32f0ccb9f",
+        "HAProxyConfigSHA256": "b80d57ee9021070142a9c61fdd3ca337087e32b477f513b9221321e9aa95f5ab",
         "HAProxyReloads": 7,
         "originPoolMembersMatched": true,
         "authPoolMembersMatched": true,
@@ -427,10 +427,10 @@
     "GET healthmonitors 200": 43,
     "GET l7policies 200": 57,
     "GET listeners 200": 70,
-    "GET loadbalancers 200": 118,
+    "GET loadbalancers 200": 117,
     "GET members 200": 89,
     "GET pools 200": 54,
-    "GET providers 200": 105,
+    "GET providers 200": 103,
     "GET rules 200": 97,
     "GET versions 200": 5,
     "POST healthmonitors 201": 1,

@@ -21,6 +21,8 @@ The authorizer received the selected request header and prefixed path without th
 
 On Standard, the HTTPRoute CRD omitted ExternalAuth. Both unfiltered rules returned HTTP 200. Each made one origin request and zero authorizer requests. Counts cover the recorded probes.
 
+On the stable and master branches, the installed API tests also listed an ordinary policy before and after provider enrollment. The response omitted `external_auth` before enrollment and returned an explicit null after enrollment, matching a single-policy GET. [Octavia change](https://github.com/armeldemarsac92/octavia/pull/50)
+
 The runs used Kubernetes envtest and etcd, the running manager, installed stable provider wheels, Octavia WSGI and SQLAlchemy, the Amphora renderer and native HAProxy. Cloud infrastructure and agent transport used local adapters. This record covers one HTTP listener and one origin Service. Terminated HTTPS traffic, weighted origins, deployed Hibiscus and upstream conformance were outside these runs.
 
 [Source, image and both runs](receipt.json) · [Standard receipt](standard-receipt.json) · [Experimental receipt](experimental-receipt.json)

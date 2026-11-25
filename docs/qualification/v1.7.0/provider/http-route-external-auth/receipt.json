@@ -1,7 +1,7 @@
 {
   "scope": "signed",
   "controller": "ea1ab8ed06793313b5c87a4f9b8952a908f677e4",
-  "octavia": "e7008bd8e851d891e8c37f37ce2063b85e8ac2c5",
+  "octavia": "91aaa653081db2441d2c79389e49c3b2cfb65291",
   "octaviaLib": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
   "capability": "l7policy_http_external_auth_v1",
   "boundary": "Local Kubernetes envtest API and etcd, running manager, Octavia WSGI API and SQLAlchemy DB, Amphora renderer and native HAProxy, isolated HTTP peers. Keystone, Neutron, RPC completion and Amphora agent transport use local fixture adapters. No regional deployment was exercised.",
@@ -20,9 +20,9 @@
         "ociArchiveSHA256": "584a1120ac9e428d3edbaae6153421485ca618e420219c371de4189ce8da63ba"
       },
       "octavia": {
-        "revision": "e7008bd8e851d891e8c37f37ce2063b85e8ac2c5",
-        "version": "19.0.1.dev94",
-        "sha256": "b3f78669637d643968313794d51b4867c12d5bb18e66fcfd6b2e2596a4afb487",
+        "revision": "91aaa653081db2441d2c79389e49c3b2cfb65291",
+        "version": "19.0.1.dev95",
+        "sha256": "802d4af497cfb186741d385c412e306fb6addeb7d286e8066457e3133ba81b73",
         "filesVerified": 673
       },
       "octaviaLib": {
@@ -65,22 +65,22 @@
             "policies": {
               "/private": {
                 "action": "REDIRECT_TO_POOL",
-                "policy": "25e3f75bed867e2c",
+                "policy": "7a351a7f5fe454c1",
                 "matchingHostRules": [
                   "REGEX"
                 ],
-                "originPool": "46046bf0ee020efe",
+                "originPool": "296c208aa385634d",
                 "fixedResponse": null,
                 "externalAuth": null,
                 "listAndDetailAgree": true
               },
               "/public": {
                 "action": "REDIRECT_TO_POOL",
-                "policy": "910f13fe7edc78c5",
+                "policy": "e66de070b88f7400",
                 "matchingHostRules": [
                   "REGEX"
                 ],
-                "originPool": "46046bf0ee020efe",
+                "originPool": "296c208aa385634d",
                 "fixedResponse": null,
                 "externalAuth": null,
                 "listAndDetailAgree": true
@@ -88,7 +88,7 @@
             },
             "activePolicyCount": 2,
             "poolCount": 1,
-            "HAProxyConfigSHA256": "1b9300b2490d54b6176a8db0fe1787dc57d8dc70638a110ea689df91fb1e1a02",
+            "HAProxyConfigSHA256": "325b706492fc522cb4de27240e0eb6bf7c3c54957751c9994d4add471cfabe60",
             "HAProxyReloads": 3,
             "originPoolMembersMatched": true
           },
@@ -190,9 +190,9 @@
         "ociArchiveSHA256": "584a1120ac9e428d3edbaae6153421485ca618e420219c371de4189ce8da63ba"
       },
       "octavia": {
-        "revision": "e7008bd8e851d891e8c37f37ce2063b85e8ac2c5",
-        "version": "19.0.1.dev94",
-        "sha256": "b3f78669637d643968313794d51b4867c12d5bb18e66fcfd6b2e2596a4afb487",
+        "revision": "91aaa653081db2441d2c79389e49c3b2cfb65291",
+        "version": "19.0.1.dev95",
+        "sha256": "802d4af497cfb186741d385c412e306fb6addeb7d286e8066457e3133ba81b73",
         "filesVerified": 673
       },
       "octaviaLib": {
@@ -236,14 +236,14 @@
             "policies": {
               "/private": {
                 "action": "REDIRECT_TO_POOL",
-                "policy": "b247f5818be5fb8c",
+                "policy": "e74bff785d0de6a4",
                 "matchingHostRules": [
                   "REGEX"
                 ],
-                "originPool": "a5aa6e029577d658",
+                "originPool": "d95e4ccc9ba1e2a3",
                 "fixedResponse": null,
                 "externalAuth": {
-                  "pool": "b51a25214d0edfa0",
+                  "pool": "ec5663f3d80b68aa",
                   "pathPrefix": "/authorize",
                   "allowedRequestHeaders": [
                     "x-request-marker"
@@ -256,11 +256,11 @@
               },
               "/public": {
                 "action": "REDIRECT_TO_POOL",
-                "policy": "bd3306e670cb566f",
+                "policy": "79311d9bdb77e66a",
                 "matchingHostRules": [
                   "REGEX"
                 ],
-                "originPool": "a5aa6e029577d658",
+                "originPool": "d95e4ccc9ba1e2a3",
                 "fixedResponse": null,
                 "externalAuth": null,
                 "listAndDetailAgree": true
@@ -268,7 +268,7 @@
             },
             "activePolicyCount": 2,
             "poolCount": 2,
-            "HAProxyConfigSHA256": "d41681426b29588240f605b884cf50b6ad788594df367c4776dec74bf402a010",
+            "HAProxyConfigSHA256": "6e396571a0bfa77650cd04f7a2146c3f990c7f9f1f344c672218a7cdabc659da",
             "HAProxyReloads": 3,
             "originPoolMembersMatched": true,
             "authPoolMembersMatched": true,
@@ -374,18 +374,18 @@
             "policies": {
               "/public": {
                 "action": "REDIRECT_TO_POOL",
-                "policy": "bd3306e670cb566f",
+                "policy": "79311d9bdb77e66a",
                 "matchingHostRules": [
                   "REGEX"
                 ],
-                "originPool": "a5aa6e029577d658",
+                "originPool": "d95e4ccc9ba1e2a3",
                 "fixedResponse": null,
                 "externalAuth": null,
                 "listAndDetailAgree": true
               },
               "/private": {
                 "action": "FIXED_RESPONSE",
-                "policy": "69e3f756cc856bbe",
+                "policy": "9bb7ab0ec12b5409",
                 "matchingHostRules": [
                   "REGEX"
                 ],
@@ -399,7 +399,7 @@
             },
             "activePolicyCount": 2,
             "poolCount": 1,
-            "HAProxyConfigSHA256": "a7b07fbd4a79802b945787b7bccab4fd9923aa39b6ce274895e0ac0f64a5a4ef",
+            "HAProxyConfigSHA256": "fbb52063fd4368c8d3c6a7dc53cb69ff43d701b9827caf94827c272774688cd8",
             "HAProxyReloads": 5,
             "originPoolMembersMatched": true
           },
@@ -465,25 +465,25 @@
             "policies": {
               "/public": {
                 "action": "REDIRECT_TO_POOL",
-                "policy": "bd3306e670cb566f",
+                "policy": "79311d9bdb77e66a",
                 "matchingHostRules": [
                   "REGEX"
                 ],
-                "originPool": "a5aa6e029577d658",
+                "originPool": "d95e4ccc9ba1e2a3",
                 "fixedResponse": null,
                 "externalAuth": null,
                 "listAndDetailAgree": true
               },
               "/private": {
                 "action": "REDIRECT_TO_POOL",
-                "policy": "2f9f0a79414d8754",
+                "policy": "1382fcb5d3d4eee3",
                 "matchingHostRules": [
                   "REGEX"
                 ],
-                "originPool": "a5aa6e029577d658",
+                "originPool": "d95e4ccc9ba1e2a3",
                 "fixedResponse": null,
                 "externalAuth": {
-                  "pool": "0826fd3f8501c2f9",
+                  "pool": "93f83a3f5a4d3f36",
                   "pathPrefix": "/authorize",
                   "allowedRequestHeaders": [
                     "x-request-marker"
@@ -497,7 +497,7 @@
             },
             "activePolicyCount": 2,
             "poolCount": 2,
-            "HAProxyConfigSHA256": "53d3d75f69fb9a8eab73da4512e39032524ea79b7f0e94793bf0d6f32f0ccb9f",
+            "HAProxyConfigSHA256": "b80d57ee9021070142a9c61fdd3ca337087e32b477f513b9221321e9aa95f5ab",
             "HAProxyReloads": 7,
             "originPoolMembersMatched": true,
             "authPoolMembersMatched": true,
@@ -607,10 +607,10 @@
         "GET healthmonitors 200": 43,
         "GET l7policies 200": 57,
         "GET listeners 200": 70,
-        "GET loadbalancers 200": 118,
+        "GET loadbalancers 200": 117,
         "GET members 200": 89,
         "GET pools 200": 54,
-        "GET providers 200": 105,
+        "GET providers 200": 103,
         "GET rules 200": 97,
         "GET versions 200": 5,
         "POST healthmonitors 201": 1,
@@ -626,8 +626,8 @@
     }
   },
   "rawReceiptSHA256": {
-    "standard": "cfe8a5b5b42c20b63c4dd63fdfb6a16d5b7934184592d90d39521d305a0f0608",
-    "experimental": "be32b73c0e72128e689be4aa87310479c601067dc27c057918d5dfbeb5cf74d2"
+    "standard": "58cf2ca849df87916eb41b15fd351fec2671f7d76e29592e631ef17b713d1476",
+    "experimental": "9cf0ec1a0803bf662c02af667000ccd869b509dbca4c7bcd4b22a985dea5deb9"
   },
   "controllerTree": "7bc626ef99ce62fa3efcc9c25f248fa7b8688067",
   "image": "ghcr.io/armeldemarsac92/gateway-api-openstack@sha256:3a75c1b1e5fd3298a2932c65af57510af6d1bb5c34436f77269c238ea181e69f",
@@ -635,10 +635,10 @@
   "installedProviderQualification": {
     "stable": {
       "octavia": {
-        "revision": "e7008bd8e851d891e8c37f37ce2063b85e8ac2c5",
-        "tree": "35b6ca4f317283be021ec6e9bf758866f5a95153",
-        "version": "19.0.1.dev94",
-        "wheelSHA256": "b3f78669637d643968313794d51b4867c12d5bb18e66fcfd6b2e2596a4afb487"
+        "revision": "91aaa653081db2441d2c79389e49c3b2cfb65291",
+        "tree": "e2e530ba5736ab58870236f8ff90a75dfc53aefa",
+        "version": "19.0.1.dev95",
+        "wheelSHA256": "802d4af497cfb186741d385c412e306fb6addeb7d286e8066457e3133ba81b73"
       },
       "octaviaLib": {
         "revision": "ca1dfc1cc9bdef480c6a2a23cc3c5a1e10e06d33",
@@ -651,10 +651,10 @@
     },
     "master": {
       "octavia": {
-        "revision": "d1047d563340d346ba1cb76150da720fec660d18",
-        "tree": "19c73c2cd18f87745b6bc33a5c03401419d2e3ce",
-        "version": "19.1.0.dev213",
-        "wheelSHA256": "1270f56ae3271fd3cb56a9425e989d1719b5bd3888492fc79bcc9936beb2410d"
+        "revision": "5fa294d4d0b9a30975e5db3070171fe68b79afd2",
+        "tree": "e5e9bbf67b0901135031fcb82ae936f083e06878",
+        "version": "19.1.0.dev214",
+        "wheelSHA256": "37abb7f734b40ff1825280fb11aaec676ff05b5ac66a10d18c206df3843dd0f3"
       },
       "octaviaLib": {
         "revision": "a38ac46bac39f07e2b19bd4a12687bbca1b6f6cd",
