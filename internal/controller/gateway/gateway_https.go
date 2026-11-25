@@ -212,6 +212,7 @@ func RequiresHTTPListenerScope(config controller.Config, gateway *gatewayv1.Gate
 }
 
 type tlsResolution struct {
+	err          error
 	tls          cloud.ListenerTLS
 	issue        *httpsListenerIssue
 	resolvedRefs *metav1.Condition
@@ -324,7 +325,10 @@ func (r *Reconciler) resolveFrontendClientValidation(ctx context.Context, gatewa
 		message := "Octavia does not support frontend client certificate validation mode " + string(validation.Mode)
 		return tlsResolution{issue: &httpsListenerIssue{gatewayv1.ListenerConditionAccepted, gatewayv1.ListenerReasonUnsupportedValue, message}}
 	}
-	clientValidation, reason, message := certificates.ResolveFrontendCA(ctx, r.APIReader, gateway, validation.CACertificateRefs)
+	clientValidation, reason, message, err := certificates.ResolveFrontendCA(ctx, r.APIReader, gateway, validation.CACertificateRefs, r.Config.ClusterTrustBundles)
+	if err != nil {
+		return tlsResolution{err: err}
+	}
 	if reason != "" {
 		resolved := controller.Condition(string(gatewayv1.ListenerConditionResolvedRefs), metav1.ConditionFalse, string(reason), message, gateway.Generation)
 		return tlsResolution{
@@ -347,7 +351,7 @@ func (r *Reconciler) resolveGatewayServingCertificate(ctx context.Context, gatew
 			return tlsResolution{issue: issue}
 		}
 	}
-	if validation.issue != nil {
+	if validation.err != nil || validation.issue != nil {
 		return validation
 	}
 	clientValidation := validation.tls.ClientValidation
@@ -407,7 +411,7 @@ func certificateReferenceIssue(reason gatewayv1.ListenerConditionReason) *httpsL
 	return &httpsListenerIssue{gatewayv1.ListenerConditionResolvedRefs, reason, message}
 }
 
-func (r *Reconciler) addTLSGraphInput(ctx context.Context, snapshot *gatewayMutationSnapshot, sets ListenerSetProjection, input *graph.GatewayInput) {
+func (r *Reconciler) addTLSGraphInput(ctx context.Context, snapshot *gatewayMutationSnapshot, sets ListenerSetProjection, input *graph.GatewayInput) error {
 	sections := httpsSections(snapshot.listeners)
 	for i := range input.Node.Spec.ScopedListeners {
 		listener := &input.Node.Spec.ScopedListeners[i]
@@ -415,9 +419,13 @@ func (r *Reconciler) addTLSGraphInput(ctx context.Context, snapshot *gatewayMuta
 			listener.TLS = &tls
 		} else if peers := sections[listener.Port]; len(peers) != 0 {
 			resolution := r.resolveHTTPSPort(ctx, snapshot.gateway, peers)
+			if resolution.err != nil {
+				return resolution.err
+			}
 			listener.TLS = &resolution.tls
 		}
 	}
+	return nil
 }
 
 func (r *Reconciler) tlsWithdrawalInput(ctx context.Context, expected *gatewayv1.Gateway, identity cloud.Identity) (graph.GatewayInput, error) {
@@ -504,7 +512,11 @@ func (r *Reconciler) liveTLSListeners(ctx context.Context, expected *gatewayv1.G
 		}
 		tls, delegated := sets.https[port]
 		if !delegated && profileErr == nil {
-			tls = r.resolveHTTPSPort(ctx, &live, sections[port]).tls
+			resolution := r.resolveHTTPSPort(ctx, &live, sections[port])
+			if resolution.err != nil {
+				return nil, resolution.err
+			}
+			tls = resolution.tls
 		}
 		listeners = append(listeners, cloud.ScopedListener{
 			Name: resourceDisplayName(strconv.Itoa(port), live.Namespace, live.Name, string(listener.Name)),
@@ -573,13 +585,16 @@ type httpsListenerStatusIssue struct {
 	resolvedRefs *metav1.Condition
 }
 
-func (r *Reconciler) listenerTLSIssues(ctx context.Context, gateway *gatewayv1.Gateway, sets ListenerSetProjection, fallbackUnavailable []int) map[gatewayv1.SectionName]httpsListenerStatusIssue {
+func (r *Reconciler) listenerTLSIssues(ctx context.Context, gateway *gatewayv1.Gateway, sets ListenerSetProjection, fallbackUnavailable []int) (map[gatewayv1.SectionName]httpsListenerStatusIssue, error) {
 	issues := make(map[gatewayv1.SectionName]httpsListenerStatusIssue)
 	resolutions := make(map[int]tlsResolution)
 	for port, sections := range httpsSections(httpsProfileListeners(r.Config, gateway)) {
 		resolution, projected := sets.gatewayTLS[port]
 		if !projected {
 			resolution = r.resolveHTTPSPort(ctx, gateway, sections)
+		}
+		if resolution.err != nil {
+			return nil, resolution.err
 		}
 		resolutions[port] = resolution
 	}
@@ -607,7 +622,7 @@ func (r *Reconciler) listenerTLSIssues(ctx context.Context, gateway *gatewayv1.G
 			issues[listener.Name] = httpsListenerStatusIssue{primary: *issue, resolvedRefs: resolvedRefs}
 		}
 	}
-	return issues
+	return issues, nil
 }
 
 func (r *Reconciler) conflictedHTTPSReferenceCondition(ctx context.Context, gateway *gatewayv1.Gateway, listener *gatewayv1.Listener) *metav1.Condition {

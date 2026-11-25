@@ -47,6 +47,7 @@ type routeModelInputs struct {
 	logical                model.Gateway
 	backendTLSAvailability map[backendTLSRequirements]backendTLSAvailability
 	backendTLSAncestor     *backendtls.GatewayAncestor
+	clusterTrustBundles    *backendtls.ClusterTrustBundles
 	admission              routeGraphAdmission
 }
 
@@ -310,7 +311,7 @@ func (r *Reconciler) collectRouteModelInputsForSets(ctx context.Context, reader 
 	var ancestor *backendtls.GatewayAncestor
 	if r.Config.BackendTLSPolicy {
 		ancestor = &backendtls.GatewayAncestor{Key: client.ObjectKeyFromObject(gateway), ControllerName: r.Config.ControllerName}
-		if err := graph.CollectBackendTLSInputs(ctx, reader, &input, ancestor); err != nil {
+		if err := graph.CollectBackendTLSInputs(ctx, reader, &input, ancestor, r.Config.ClusterTrustBundles); err != nil {
 			return nil, err
 		}
 		availability = r.discoverBackendTLSProfiles(ctx, routes, input.BackendTLSPolicies)
@@ -319,7 +320,10 @@ func (r *Reconciler) collectRouteModelInputsForSets(ctx context.Context, reader 
 	if err != nil {
 		return nil, fmt.Errorf("compile Gateway backend model: %w", err)
 	}
-	return &routeModelInputs{gateway: gateway, input: input, logical: logical, backendTLSAvailability: availability, backendTLSAncestor: ancestor}, nil
+	return &routeModelInputs{
+		gateway: gateway, input: input, logical: logical, backendTLSAvailability: availability,
+		backendTLSAncestor: ancestor, clusterTrustBundles: r.Config.ClusterTrustBundles,
+	}, nil
 }
 
 func (r *Reconciler) xBackendMemberMode(gateway *gatewayv1.Gateway) (cloud.MemberMode, error) {
@@ -353,7 +357,7 @@ func (inputs *routeModelInputs) validateBackends(ctx context.Context, reader cli
 		}
 	}
 	if inputs.input.BackendTLSPolicies != nil {
-		if err := graph.CollectBackendTLSInputs(ctx, reader, &current, inputs.backendTLSAncestor); err != nil {
+		if err := graph.CollectBackendTLSInputs(ctx, reader, &current, inputs.backendTLSAncestor, inputs.clusterTrustBundles); err != nil {
 			return err
 		}
 	}

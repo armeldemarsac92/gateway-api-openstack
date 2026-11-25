@@ -369,7 +369,7 @@ func (r *Reconciler) reconcileSelectedRouteGraph(
 			status := statusForRouteBuildError(err)
 			return r.setRouteStatusesAndDetach(ctx, scope, []parentStatusUpdate{{parent: parent.ref, status: status}})
 		}
-		if errors.Is(err, errHTTPRouteChanged) {
+		if errors.Is(err, errHTTPRouteChanged) || errors.Is(err, backendtls.ErrClusterTrustBundleUnavailable) {
 			return ctrl.Result{}, err
 		}
 		return r.handleRouteProviderFailure(scope, parent.ref, true, graphResult.backendDiagnostic, err, "EnsureHTTPRoute")

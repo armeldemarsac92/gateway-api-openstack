@@ -54,7 +54,7 @@ const (
 	IndexXBackendByPodLabel = "spec.podLabel"
 	// IndexBackendTLSPolicyByService indexes local core Service targets.
 	IndexBackendTLSPolicyByService = "spec.targetService"
-	// IndexBackendTLSPolicyByCA indexes supported local CA ConfigMap references.
+	// IndexBackendTLSPolicyByCA indexes supported CA references by scoped object key.
 	IndexBackendTLSPolicyByCA = "spec.caConfigMap"
 	// IndexHTTPRouteByBackendNamespace indexes cross-namespace Service references.
 	IndexHTTPRouteByBackendNamespace = "spec.backendNamespace"
@@ -277,7 +277,7 @@ func controllerFieldIndexes(config Config) []controllerFieldIndex {
 				return keys
 			}},
 			controllerFieldIndex{object: &gatewayv1.BackendTLSPolicy{}, field: IndexBackendTLSPolicyByCA, extract: func(object client.Object) []string {
-				if key, supported := backendtls.ConfigMapKey(object.(*gatewayv1.BackendTLSPolicy)); supported {
+				if key, supported := backendtls.CAKey(object.(*gatewayv1.BackendTLSPolicy), config.ClusterTrustBundles != nil); supported {
 					return []string{ObjectKeyString(key)}
 				}
 				return nil

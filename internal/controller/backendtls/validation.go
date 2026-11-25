@@ -29,6 +29,7 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -52,7 +53,7 @@ func (v *Validation) CloudValidation() *cloud.BackendTLSValidation {
 	}
 }
 
-// CA identifies the ConfigMap and the exact normalized trust payload.
+// CA identifies the CA source and the exact normalized trust payload.
 type CA struct {
 	Key    types.NamespacedName
 	UID    types.UID
@@ -62,7 +63,7 @@ type CA struct {
 
 const caKey = "ca.crt"
 
-func validate(result *PolicyResult, spec gatewayv1.BackendTLSPolicySpec, configMaps map[types.NamespacedName]*corev1.ConfigMap) {
+func validate(result *PolicyResult, spec gatewayv1.BackendTLSPolicySpec, inputs CAInputs) {
 	policy := spec.Validation
 	switch {
 	case policy.WellKnownCACertificates != nil:
@@ -86,18 +87,43 @@ func validate(result *PolicyResult, spec gatewayv1.BackendTLSPolicySpec, configM
 	}
 
 	ref := policy.CACertificateRefs[0]
-	if ref.Group != "" || ref.Kind != "ConfigMap" {
+	var observation CAObservation
+	switch {
+	case ref.Group == "" && ref.Kind == "ConfigMap":
+		key := types.NamespacedName{Namespace: result.Key.Namespace, Name: string(ref.Name)}
+		observation.CA, observation.Invalid = LoadConfigMapCA(key, inputs.ConfigMaps[key])
+		if observation.Invalid != nil {
+			observation.Invalid = fmt.Errorf("CA ConfigMap %s: %w", key, observation.Invalid)
+		}
+	case IsClusterTrustBundle(ref.Group, ref.Kind) && inputs.ClusterTrustBundles != nil:
+		observation = inputs.ClusterTrustBundles[string(ref.Name)]
+		if !ValidClusterTrustBundleName(string(ref.Name)) {
+			observation.Invalid = errors.New("name is invalid")
+		}
+		if observation.Invalid != nil {
+			observation.Invalid = fmt.Errorf("CA ClusterTrustBundle %q: %w", ref.Name, observation.Invalid)
+		}
+	default:
 		message := fmt.Sprintf("CA reference %q has unsupported group %q and kind %q", ref.Name, ref.Group, ref.Kind)
 		result.reject(gatewayv1.BackendTLSPolicyReasonNoValidCACertificate, message)
 		result.rejectRef(gatewayv1.BackendTLSPolicyReasonInvalidKind, message)
 		return
 	}
-	key := types.NamespacedName{Namespace: result.Key.Namespace, Name: string(ref.Name)}
-	ca, err := LoadConfigMapCA(key, configMaps[key])
-	if err != nil {
-		message := fmt.Sprintf("CA ConfigMap %s: %v", key, err)
-		result.reject(gatewayv1.BackendTLSPolicyReasonNoValidCACertificate, message)
-		result.rejectRef(gatewayv1.BackendTLSPolicyReasonInvalidCACertificateRef, message)
+	if observation.Unavailable != nil {
+		for _, condition := range []*metav1.Condition{&result.Accepted, &result.ResolvedRefs} {
+			condition.Status = metav1.ConditionUnknown
+			condition.Reason = "Pending"
+			condition.Message = "Waiting to read the referenced ClusterTrustBundle"
+		}
+		return
+	}
+	if observation.Invalid != nil {
+		result.reject(gatewayv1.BackendTLSPolicyReasonNoValidCACertificate, observation.Invalid.Error())
+		reason := gatewayv1.BackendTLSPolicyReasonInvalidCACertificateRef
+		if errors.Is(observation.Invalid, ErrCABundleTooLarge) {
+			reason = gatewayv1.PolicyConditionReason(CABundleTooLargeReason)
+		}
+		result.rejectRef(reason, observation.Invalid.Error())
 		return
 	}
 
@@ -119,7 +145,7 @@ func validate(result *PolicyResult, spec gatewayv1.BackendTLSPolicySpec, configM
 			result.reject(gatewayv1.PolicyReasonInvalid, err.Error())
 			return
 		}
-		result.Validation = &Validation{Hostname: hostname, CA: ca, SubjectAltNames: names}
+		result.Validation = &Validation{Hostname: hostname, CA: observation.CA, SubjectAltNames: names}
 	}
 }
 
@@ -174,10 +200,21 @@ func normalizeCA(data []byte) ([]byte, error) {
 		len(bytes.TrimSpace(rest)) > 0 {
 		return nil, errors.New("ca.crt must contain a single PEM certificate")
 	}
+	cert, err := parseCACertificate(block)
+	if err != nil {
+		return nil, fmt.Errorf("ca.crt %w", err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert}), nil
+}
+
+func parseCACertificate(block *pem.Block) ([]byte, error) {
+	if block.Type != "CERTIFICATE" || len(block.Headers) != 0 {
+		return nil, errors.New("must contain only PEM certificates without headers")
+	}
 	cert, err := x509.ParseCertificate(block.Bytes)
 	if err != nil || !cert.BasicConstraintsValid || !cert.IsCA ||
 		(cert.KeyUsage != 0 && cert.KeyUsage&x509.KeyUsageCertSign == 0) {
-		return nil, errors.New("ca.crt must contain an X.509 CA certificate")
+		return nil, errors.New("must contain an X.509 CA certificate")
 	}
-	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}), nil
+	return cert.Raw, nil
 }

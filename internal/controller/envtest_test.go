@@ -38,6 +38,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/util/yaml"
+	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -51,6 +52,7 @@ import (
 	configv1alpha1 "github.com/gateway-api-openstack/gateway-api-openstack/api/v1alpha1"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/cloud"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller"
+	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/backendtls"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/gatewayclass"
 	"github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/graph"
 	httproutecontroller "github.com/gateway-api-openstack/gateway-api-openstack/internal/controller/httproute"
@@ -79,6 +81,12 @@ func TestControllerEnvtest(t *testing.T) {
 		ControlPlaneStopTimeout:  time.Minute,
 		AttachControlPlaneOutput: false,
 	}
+	enableBundles := os.Getenv("ENVTEST_CLUSTER_TRUST_BUNDLE") == "1"
+	if enableBundles {
+		testEnvironment.ControlPlane.GetAPIServer().Configure().
+			Set("feature-gates", "ClusterTrustBundle=true").
+			Set("runtime-config", "certificates.k8s.io/v1beta1/clustertrustbundles=true")
+	}
 	restConfig, err := testEnvironment.Start()
 	if err != nil {
 		t.Fatalf("start envtest control plane: %v", err)
@@ -104,6 +112,11 @@ func TestControllerEnvtest(t *testing.T) {
 		})
 		if err != nil {
 			t.Fatalf("create envtest manager: %v", err)
+		}
+		if cfg.ClusterTrustBundles != nil {
+			if err := manager.Add(cfg.ClusterTrustBundles); err != nil {
+				t.Fatalf("register envtest ClusterTrustBundle observer: %v", err)
+			}
 		}
 		if err := controller.SetupIndexes(t.Context(), manager.GetFieldIndexer(), cfg); err != nil {
 			t.Fatalf("set up controller indexes: %v", err)
@@ -195,6 +208,51 @@ func TestControllerEnvtest(t *testing.T) {
 			t.Fatalf("a controller configured for the other channel accepted this installation: %v", err)
 		}
 	})
+	newBundles := func(t *testing.T, config *rest.Config) *backendtls.ClusterTrustBundles {
+		t.Helper()
+		httpClient, err := rest.HTTPClientFor(config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bundles, err := backendtls.NewClusterTrustBundles(config, httpClient)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return bundles
+	}
+	if enableBundles {
+		t.Run("ClusterTrustBundle lifecycle", func(t *testing.T) {
+			bundleConfig := statusConfig
+			bundleConfig.ControllerName = "trustbundle.example.com/gateway-api-openstack"
+			bundleConfig.OpenStackResyncInterval = 5 * time.Minute
+			bundleConfig.ClusterTrustBundles = newBundles(t, restConfig)
+			provider := &recordingProvider{}
+			startManager(t, bundleConfig, provider)
+			testClusterTrustBundleLifecycle(t, apiClient, bundleConfig, provider, serverCertificateMap)
+		})
+		t.Run("ClusterTrustBundle watch denied", func(t *testing.T) {
+			restricted := rest.CopyConfig(restConfig)
+			restricted.Impersonate = rest.ImpersonationConfig{
+				UserName: "trustbundle-watch-denied", Groups: []string{"system:authenticated"},
+			}
+			bundleConfig := statusConfig
+			bundleConfig.ControllerName = "trustbundle-watch-denied.example.com/gateway-api-openstack"
+			bundleConfig.ClusterTrustBundles = newBundles(t, restricted)
+			startManager(t, bundleConfig, &recordingProvider{})
+			testClusterTrustBundleWatchDenied(t, apiClient, bundleConfig, restricted)
+		})
+	} else {
+		t.Run("ClusterTrustBundle API unserved", func(t *testing.T) {
+			bundleConfig := statusConfig
+			bundleConfig.ControllerName = "trustbundle-unserved.example.com/gateway-api-openstack"
+			bundleConfig.ClusterTrustBundles = newBundles(t, restConfig)
+			startManager(t, bundleConfig, &recordingProvider{})
+			waitForEnvtest(t, func(ctx context.Context) (bool, error) {
+				observation, err := bundleConfig.ClusterTrustBundles.Read(ctx, "ca")
+				return err == nil && observation.Invalid != nil, nil
+			})
+		})
+	}
 	cacheClient := manager.GetClient()
 	t.Run("upstream Gateway status cases", func(t *testing.T) {
 		testUpstreamGatewayStatus(t, apiClient, statusConfig, statusProvider, serverCertificateMap)

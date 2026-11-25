@@ -519,7 +519,7 @@ func (r *Reconciler) resolveRouteReferences(ctx context.Context, route *gatewayv
 		}
 	}
 	if grpc && r.Config.BackendTLSPolicy {
-		if err := graph.CollectBackendTLSInputs(ctx, r.routePatchReader(), &input, nil); err != nil {
+		if err := graph.CollectBackendTLSInputs(ctx, r.routePatchReader(), &input, nil, r.Config.ClusterTrustBundles); err != nil {
 			return err
 		}
 	}
